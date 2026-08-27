@@ -1,0 +1,8 @@
+name: transport
+description: 线路层：JSON 行编解码 + 模块侧连接。只依赖协议字典，不依赖核心。
+environment:
+  sdk: ^3.5.0
+
+dependencies:
+  protocol:
+    path: ../protocol

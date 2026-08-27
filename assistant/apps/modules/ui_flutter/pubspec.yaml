@@ -1,0 +1,19 @@
+name: ui_flutter
+description: Flutter UI 模块：列表 + 画布。布局数据归本模块私有，组件 id 是模块契约。
+environment:
+  sdk: ^3.5.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+  protocol:
+    path: ../../../packages/protocol
+  transport:
+    path: ../../../packages/transport
+  ui_vocab:
+    path: ../../../packages/ui_vocab
+  ui_canvas:
+    path: ../../../packages/ui_canvas
+
+flutter:
+  uses-material-design: true

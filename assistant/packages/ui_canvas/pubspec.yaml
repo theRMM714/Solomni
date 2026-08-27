@@ -1,0 +1,8 @@
+name: ui_canvas
+description: UI 模块的画布模型（纯 Dart，无 Flutter）：调色板、画布、布局规则与持久化。
+environment:
+  sdk: ^3.5.0
+
+dependencies:
+  ui_vocab:
+    path: ../ui_vocab

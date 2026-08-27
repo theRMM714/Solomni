@@ -1,0 +1,4 @@
+name: protocol
+description: 消息封套与能力词汇表。纯字典，无行为，无上帝。
+environment:
+  sdk: ^3.5.0

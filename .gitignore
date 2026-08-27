@@ -1,0 +1,32 @@
+# ==================================================================
+# Solomni —— 只提交源码与文档；工具链/SDK/缓存/会话记录一律不入库
+#
+# git 是 Windows 侧与 WSL 侧之间唯一的桥：
+#    clone 这个仓库只会拿到 assistant/ 源码 + 文档；
+#    Flutter/Dart SDK、Pub 缓存、会话日志两边各自本地管理，绝不进 git 历史。
+# ==================================================================
+
+# ---- 工具链 / SDK（体积巨大，两侧各自用系统级安装重建）----
+/flutter/
+/dart-sdk/
+/flutter_windows_*.zip
+/.pub-cache/
+/.dart-home/
+/.tmp/
+
+# ---- 会话 / 私密记录 ----
+/session.jsonl
+
+# ---- Dart / Flutter 构建产物（assistant 内各 package）----
+**/.dart_tool/
+**/build/
+**/.flutter-plugins
+**/.flutter-plugins-dependencies
+**/.packages
+
+# ---- IDE / 编辑器 ----
+.idea/
+*.iml
+.vscode/
+
+# ---- 一次性 Windows 下载脚本（已删除，改为仓库内 setup 脚本统一处理）----
