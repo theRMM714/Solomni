@@ -1,0 +1,11 @@
+name: llm_gateway
+description: LLM 网关模块：OpenAI 兼容真调用。密钥经 prefer-shared 从 secrets 取。
+environment:
+  sdk: ^3.5.0
+
+dependencies:
+  protocol:
+    path: ../../../packages/protocol
+  transport:
+    path: ../../../packages/transport
+  http: ^1.2.0

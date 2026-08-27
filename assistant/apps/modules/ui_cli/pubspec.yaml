@@ -1,0 +1,12 @@
+name: ui_cli
+description: CLI UI 模块：去核心看一眼 -> 拉取贡献 -> 渲染调色板/画布 -> 事件路由回模块。
+environment:
+  sdk: ^3.5.0
+
+dependencies:
+  protocol:
+    path: ../../../packages/protocol
+  transport:
+    path: ../../../packages/transport
+  ui_vocab:
+    path: ../../../packages/ui_vocab

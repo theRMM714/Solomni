@@ -1,0 +1,12 @@
+name: conversation
+description: 会话模块：自治程序。standalone 全内建；coordinated 连核心。
+environment:
+  sdk: ^3.5.0
+
+dependencies:
+  protocol:
+    path: ../../../packages/protocol
+  transport:
+    path: ../../../packages/transport
+  ui_vocab:
+    path: ../../../packages/ui_vocab

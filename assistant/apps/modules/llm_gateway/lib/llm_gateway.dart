@@ -1,0 +1,98 @@
+/// llm_gateway 模块：愿意把对话能力当共同物的普通模块。
+/// 真 OpenAI 兼容流式调用（SSE）；密钥经 prefer-shared 从 secrets 取。
+library;
+
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+import 'package:http/http.dart' as http;
+import 'package:protocol/protocol.dart';
+import 'package:protocol/outbound.dart';
+
+/// 单机出边：一切调用都抛 NoProvider，消费方自然走内建
+final class BuiltinOnlyOutbound implements Outbound {
+  @override
+  Future<Object?> rpc(String method, Object? params) async {
+    throw NoProviderException(method);
+  }
+
+  @override
+  Stream<Object?> rpcStream(String method, Object? params) async* {
+    throw NoProviderException(method);
+  }
+
+  @override
+  Future<Object?> call(String moduleId, String method, Object? params) async {
+    throw NoProviderException(method);
+  }
+}
+
+Future<String> _apiKey(Outbound out) async {
+  try {
+    return (await out.rpc(Caps.secretsGet, 'llm')) as String;
+  } on NoProviderException {
+    return 'builtin-key-000'; // 内建兜底
+  }
+}
+
+/// OpenAI 兼容流式调用：SSE data 行 -> delta token，[DONE] 结束。
+/// baseUrl/model 可配（参数或环境变量 LLM_BASE_URL/LLM_MODEL）。
+Stream<String> gatewayChatStream(Outbound out, List<dynamic> messages,
+    {String? baseUrl, String? model}) async* {
+  final url = (baseUrl ??
+          Platform.environment['LLM_BASE_URL'] ??
+          'https://api.deepseek.com') +
+      '/chat/completions';
+  final m = model ?? Platform.environment['LLM_MODEL'] ?? 'deepseek-chat';
+  final key = await _apiKey(out);
+  final req = http.Request('POST', Uri.parse(url))
+    ..headers['Authorization'] = 'Bearer ' + key
+    ..headers['Content-Type'] = 'application/json'
+    ..body = jsonEncode({'model': m, 'messages': messages, 'stream': true});
+  final resp = await http.Client().send(req);
+  if (resp.statusCode != 200) {
+    final body = await resp.stream.bytesToString();
+    throw StateError('LLM HTTP ' + resp.statusCode.toString() + ': ' + body);
+  }
+  await for (final line in resp.stream
+      .transform(utf8.decoder)
+      .transform(const LineSplitter())) {
+    if (!line.startsWith('data:')) continue;
+    final data = line.substring(5).trim();
+    if (data == '[DONE]') return;
+    final j = jsonDecode(data) as Map;
+    final choices = j['choices'] as List?;
+    if (choices == null || choices.isEmpty) continue;
+    final delta = (choices.first as Map)['delta'] as Map?;
+    final content = delta?['content'];
+    if (content is String && content.isNotEmpty) yield content;
+  }
+}
+
+final class LlmGatewayProgram implements ModuleProgram {
+  final String baseUrl;
+  final String model;
+
+  LlmGatewayProgram({String? baseUrl, String? model})
+      : baseUrl = baseUrl ?? Platform.environment['LLM_BASE_URL'] ?? 'https://api.deepseek.com',
+        model = model ?? Platform.environment['LLM_MODEL'] ?? 'deepseek-chat';
+
+  @override
+  Declaration get declaration => const Declaration(
+        'llm_gateway',
+        provides: [Provide(Caps.llmChat)],
+        needs: [Need(Caps.secretsGet, NeedVia.preferShared)],
+      );
+
+  @override
+  ModuleHandler bind(Outbound outbound) {
+    return (env) async {
+      if (env.method == Caps.llmChat) {
+        final messages = (env.params as Map)['messages'] as List;
+        return Streamed(
+            gatewayChatStream(outbound, messages, baseUrl: baseUrl, model: model));
+      }
+      throw UnsupportedError('llm_gateway 不认识 ' + env.method);
+    };
+  }
+}

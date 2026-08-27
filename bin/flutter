@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# bin/flutter —— WSL/Linux/Mac 包装：内部设好缓存后调用仓库内的 Flutter SDK
+set -euo pipefail
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd "$DIR/.." && pwd)"
+export PUB_CACHE="$ROOT/.pub-cache"
+export TMP="$ROOT/.tmp"; export TEMP="$TMP"
+if [ -x "$ROOT/flutter/flutter/bin/flutter" ]; then
+  exec "$ROOT/flutter/flutter/bin/flutter" "$@"
+else
+  echo "Flutter SDK 未安装，先运行: node bin/setup.mjs --flutter" >&2
+  exit 1
+fi

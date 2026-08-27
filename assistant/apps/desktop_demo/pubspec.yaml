@@ -1,0 +1,20 @@
+name: desktop_demo
+description: 桌面产品：目录发现 + TCP 拓扑。装配者=策略所在。
+environment:
+  sdk: ^3.5.0
+
+dependencies:
+  core:
+    path: ../../packages/core
+  protocol:
+    path: ../../packages/protocol
+  transport:
+    path: ../../packages/transport
+  conversation:
+    path: ../modules/conversation
+  llm_gateway:
+    path: ../modules/llm_gateway
+  secrets:
+    path: ../modules/secrets
+  ui_cli:
+    path: ../modules/ui_cli

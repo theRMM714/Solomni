@@ -1,0 +1,13 @@
+name: core
+description: 内容无关的交易所：注册、撮合、路由。能力名对它是不透明字符串。
+environment:
+  sdk: ^3.5.0
+
+dependencies:
+  protocol:
+    path: ../protocol
+  transport:
+    path: ../transport
+
+dev_dependencies:
+  test: ^1.25.0

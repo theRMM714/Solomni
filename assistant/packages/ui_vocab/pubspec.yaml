@@ -1,0 +1,4 @@
+name: ui_vocab
+description: UI 词汇表：组件类型、scope、贡献 schema。纯字典，无行为，无像素。
+environment:
+  sdk: ^3.5.0
