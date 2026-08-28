@@ -7,8 +7,9 @@
 ## 一分钟理解项目
 
 - 这是一个去中心化为常态的 AI 助手：每个功能是一个**自治程序（模块）**，通过一个内容无关的**核心（交易所）**协作
-- 核心只做注册/撮合/路由，不懂任何业务，没有上帝；换掉任何模块、换掉核心，互不牵连
+- 核心只做校验、配对、投递，不懂任何业务，没有上帝；换掉任何模块、换掉核心，互不牵连
 - 模块没有核心也能跑（standalone）；有核心时值得共享的才被共享（coordinated）
+- 配对随声明实时变化：接入顺序无关紧要；提供方离线你自动降级，回归自动恢复
 - 你的任务：在 `apps/modules/` 下写一个模块文件夹。文件夹 = 安装卸载单元
 
 ## 模块结构（必须遵守）
@@ -43,6 +44,8 @@ final class XxxProgram implements ModuleProgram {
         provides: [Provide('xxx.hello')],        // 我愿意把这些能力当共同物
         needs: [                                 // 我需要什么，三选一策略：
           Need('llm.chat', NeedVia.preferShared), // 有共享用共享，没有回退内建
+          // Need('llm.chat', NeedVia.preferShared, provider: 'llm_gateway'),
+                                                 // 多提供方在线时声明你的首选（消费方策略选择）
           // Need('xxx.store', NeedVia.builtinOnly), // 模块私有，永不共享
           // Need('stt.transcribe', NeedVia.sharedOnly), // 造不出来，缺则功能降级
         ],
@@ -62,23 +65,32 @@ final class XxxProgram implements ModuleProgram {
 2. **边界上只有消息**。跨模块传的参数与返回值必须是 Map/List/String/num/bool/null，永不共享对象引用
 3. **状态私有**。你的数据（会话、配置、缓存）存你模块内部；没有共享数据库；状态所有权排他 = 模块间无冲突的根源
 4. **组件 id 是契约**。UI 贡献里的组件 id 对 UI 是只读身份；你改 id = 破坏契约
-5. **内建有意的薄**。prefer-shared 需求的内建兜底实现做到"单机够用、测试够用"即止，富实现只放共享侧一处
+5. **内建有意的薄**。prefer-shared 需求的内建兜底做到"单机够用、测试够用"即止，富实现只放共享侧一处
 6. **事件路由回声明模块**。UI 只发 `ui.event {component, event, payload}` 给你，组件语义由你的模块自己解释，业务永远不出模块边界
-7. **fail-fast**。你不认识的 method/组件事件直接抛 UnsupportedError；声明无法满足（sharedOnly 无提供方）由核心在启动期失败，你不静默吞错
-8. **协作单路径**。模块间不直连、不点对点；一切经核心（rpc 按声明接线 / call 按模块 id 定向）
+7. **fail-fast 与降级的边界**。你不认识的 method/组件事件直接抛 UnsupportedError；
+   非法声明（重复 id、成环）由核心校验拒收；缺提供方不由任何一方失败--
+   调用时抛 NoProviderException，你按声明策略降级（preferShared 回内建、
+   sharedOnly 功能降级），不静默吞错
+8. **协作单路径**。模块间不直连、不点对点；一切经核心（rpc 按配对路由 / call 按模块 id 定向）
 
 ## 出边 API（你发消息的方式）
 
 ```dart
-outbound.rpc('llm.chat', {'messages': [...]})       // 业务调用：按声明接线路由
-outbound.rpcStream('llm.chat', {'messages': [...]}) // 流式：token 经 event 封逐块到达
-outbound.call('conversation', 'ui.event', {...})    // 定向调用：按模块 id 直达（发现/事件路由）
-outbound.rpc('core.modules', null)                // 元能力：注册表只读列举（事实，非决策）
+outbound.rpc('llm.chat', {'messages': [...]})       // 业务调用：按当前配对路由
+   //   0 提供方 -> NoProviderException（preferShared 的内建兜底 = catch 它走本地实现）
+   //   1 提供方 -> 直达
+   //   N 提供方 -> 显式接线 > 你声明的首选（Need.provider）；两者皆无 ->
+   //               CandidatesException（附候选清单）：你 catch 后用 call() 定向选择，
+   //              或在声明里加 provider 后重连
+outbound.rpcStream('llm.chat', {'messages': [...]}) // 流式：同 rpc 路由；token 经 event 封逐块到达
+outbound.call('conversation', 'ui.event', {...})    // 定向调用：按模块 id 直达（发现/事件路由/多提供方选择）
+outbound.rpc('core.modules', null)                   // 元能力：注册表只读列举（事实，非决策）
+outbound.wiring                                     // Stream：本模块各需求 -> 当前提供方集合的快照
+                                                     // 成员变化时核心推送新快照（勿轮询；UI 据此实时刷新）
 ```
 
-- `rpc` 无共享提供方时抛 `NoProviderException`——prefer-shared 的内建兜底就是 catch 它后走本地实现
+- 配对随声明到达/离开实时重算：提供方离线你自动降级，回归自动恢复，接入顺序无关
 - `call` 靠模块 id 全局唯一保证无歧义
-- `rpcStream` 流式调用：token 经同 id 的 event 封逐块到达；提供方不流式时回退单块
 
 ## 流式（提供 token 类输出的模块）
 
@@ -151,10 +163,13 @@ static const contribution = UiContribution(
 1. **standalone 必须能跑**：`dart bin/standalone.dart` 无核心、无网络依赖（或明确跳过网络部分）
 2. **协作链路验证**：在 `apps/desktop_demo/bin/main.dart` 的 registry 加一行工厂 + pubspec 加一个 path 依赖，跑通全链路（这是装配者的地盘，只做最小编辑，别重构别人代码）
 3. 消费外部服务时，本地起假服务器验证（参考 `apps/modules/llm_gateway/bin/fake_server.dart`），不依赖真实密钥
+4. 协作语义用 mock Outbound 测试：配对快照（wiring）、候选错误（CandidatesException）、
+   降级（NoProviderException）都可注入模拟，不必起核心
 
 ## 环境备注（跨平台，clone 即用）
 
-- Dart / Flutter SDK 与缓存统一放仓库根（`.gitignore` 排除）；用仓库内 `bin/setup.mjs` 一键安装：
+- Dart / Flutter SDK 与缓存统一放仓库根的平台后缀目录（dart-sdk-linux/、flutter-windows/…，
+  .gitignore 排除）；用仓库内 `bin/setup.mjs` 一键安装：
   - `node bin/setup.mjs` 装 Dart SDK 并 `pub get`；加 `--flutter` 再装 Flutter SDK
 - 开发请用仓库内包装命令 `bin/dart` / `bin/flutter`（自动配置缓存），无需手动改环境变量或路径
 - 详见仓库根 `SETUP.md`
@@ -170,13 +185,15 @@ static const contribution = UiContribution(
 | `packages/transport` | 线路层 | 只读 |
 | `packages/core` | 核心交易所 | 只读 |
 | `packages/ui_vocab` | UI 词汇表 | 只读；新增公共组件类型需协调 |
+| `packages/ui_canvas` | 画布模型（布局结构/放置规则） | 只读；布局规则变更需协调 |
 | `apps/modules/<别人的模块>` | 该模块的 agent | 只读 |
 | `apps/desktop_demo` | 产品装配 | 仅最小编辑：registry 一行 + pubspec 一行 |
 
-**多 agent 并行开发约定**：一人一个模块文件夹；共享包改动（新公共能力名、新组件类型）是对齐事项而不是顺手事项——先在会话里提出，达成一致再动字典。字典可以长，上帝不能长。
+**多 agent 并行开发约定**：一人一个模块文件夹；共享包改动（新公共能力名、新组件类型）是对齐事项而不是顺手事项--先在会话里提出，达成一致再动字典。字典可以长，上帝不能长。
 
 ## 完整参考实现
 
 - 带多轮业务 + UI 贡献 + 事件路由：`apps/modules/conversation/`
 - 带外部 HTTP 依赖 + 密钥需求 + 假服务器验证：`apps/modules/llm_gateway/`
 - UI 渲染器（发现/拉取/画布/命令路由）：`apps/modules/ui_cli/`
+- Flutter 渲染器（拖放画布/布局持久化/事件路由/mock 测试）：`apps/modules/ui_flutter/`

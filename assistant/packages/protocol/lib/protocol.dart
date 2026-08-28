@@ -56,7 +56,9 @@ enum NeedVia {
 class Need {
   final String cap;
   final NeedVia via;
-  const Need(this.cap, this.via);
+  /// 多提供方在线时的首选（消费方策略选择；核心只机械执行，不代为决策）
+  final String? provider;
+  const Need(this.cap, this.via, {this.provider});
 }
 
 class Provide {
@@ -74,7 +76,12 @@ class Declaration {
         'id': id,
         'provides': [for (final p in provides) p.cap],
         'needs': [
-          for (final n in needs) {'cap': n.cap, 'via': n.via.name}
+          for (final n in needs)
+            {
+              'cap': n.cap,
+              'via': n.via.name,
+              if (n.provider != null) 'provider': n.provider,
+            }
         ],
       };
 
@@ -87,7 +94,8 @@ class Declaration {
         needs: [
           for (final n in (j['needs'] as List))
             Need((n as Map)['cap'] as String,
-                NeedVia.values.byName(n['via'] as String))
+                NeedVia.values.byName(n['via'] as String),
+                provider: n['provider'] as String?)
         ],
       );
 }
@@ -99,6 +107,9 @@ class Declaration {
 /// 核心元能力词汇（机制，非业务：注册表只读列举，返回事实不做决策）
 abstract final class CoreCaps {
   static const modules = 'core.modules';
+
+  /// 配对快照推送：成员变化重算后，核心推给每个在线模块自己的配对（事实，非决策）
+  static const wiring = 'core.wiring';
 }
 
 /// 流式结果的包装：模块处理器返回它，核心把 chunks 逐条作为

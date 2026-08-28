@@ -5,6 +5,7 @@ library;
 import 'package:flutter/material.dart';
 import 'package:protocol/outbound.dart';
 import 'package:ui_canvas/ui_canvas.dart';
+import 'package:ui_vocab/ui_vocab.dart';
 import 'component_views.dart';
 
 class CanvasArea extends StatelessWidget {

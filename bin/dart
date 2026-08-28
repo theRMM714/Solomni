@@ -1,13 +1,18 @@
 #!/usr/bin/env bash
-# bin/dart —— WSL/Linux/Mac 包装：内部设好缓存后调用仓库内的 Dart SDK
+# bin/dart -- WSL/Linux/Mac 包装：平台后缀 SDK 目录 + 仓库内缓存
 set -euo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$DIR/.." && pwd)"
-export PUB_CACHE="$ROOT/.pub-cache"
-export TMP="$ROOT/.tmp"; export TEMP="$TMP"
-if [ -x "$ROOT/dart-sdk/dart-sdk/bin/dart" ]; then
-  exec "$ROOT/dart-sdk/dart-sdk/bin/dart" "$@"
-else
-  echo "Dart SDK 未安装，先运行: node bin/setup.mjs" >&2
-  exit 1
+case "$(uname -s)" in
+  Darwin*) OS=macos ;;
+  *)       OS=linux ;;
+esac
+export PUB_CACHE="$ROOT/.pub-cache-$OS"
+export TMP="$ROOT/.tmp-$OS"; export TEMP="$TMP"
+# HOME 指向仓库内：分析器缓存/工具配置写入沙箱可写范围
+export HOME="$ROOT/.dart-home-$OS"
+if [ -x "$ROOT/dart-sdk-$OS/dart-sdk/bin/dart" ]; then
+  exec "$ROOT/dart-sdk-$OS/dart-sdk/bin/dart" "$@"
 fi
+echo "Dart SDK 未安装，先运行: node bin/setup.mjs" >&2
+exit 1

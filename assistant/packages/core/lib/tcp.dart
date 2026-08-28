@@ -60,13 +60,33 @@ class BrokerDaemon {
     final d = BrokerDaemon();
     d._server = await ServerSocket.bind(address, port);
     d._server.listen(d._onConn, onError: (Object e) {});
+    // 配对推送：成员变化重算后，把各自的快照送到每个在线模块（事实，非决策）
+    d._ex.wiringChanges.listen((e) => d._pushWiring(e.moduleId, e.snapshot));
     return d;
+  }
+
+  /// 配对快照送达在线模块；推送目标已坏时静默（其断开路径会清理）
+  void _pushWiring(String moduleId, Map<String, List<String>> snapshot) {
+    final s = _sockets[moduleId];
+    if (s == null) return;
+    try {
+      sendEnvelope(
+          s,
+          Envelope(
+              from: 'core',
+              to: moduleId,
+              kind: EnvelopeKind.event,
+              method: CoreCaps.wiring,
+              params: snapshot));
+    } on Object {
+      // 目标连接已坏：跳过
+    }
   }
 
   InternetAddress get address => _server.address;
   int get port => _server.port;
 
-  /// 所有模块 hello 完成后调用：fail-fast 撮合
+  /// 装配期校验（显式接线指向未知则失败）；配对本身随成员变化自动维护
   Future<void> start({Map<String, Map<String, String>>? explicit}) async {
     _ex.start(explicit: explicit ?? const {});
   }
@@ -81,7 +101,7 @@ class BrokerDaemon {
           _ex.connect(Declaration.fromJson(env.params as Map<String, Object?>),
               (e) => _moduleRpc(s, moduleId, e));
         } catch (e) {
-          // 拒绝该连接（如重复 id），核心继续服务其它模块：降级不崩溃
+          // 校验拒收（重复 id / 成环等），核心继续服务其它模块：降级不崩溃
           sendEnvelope(
               s,
               Envelope(
@@ -105,6 +125,8 @@ class BrokerDaemon {
                 id: 'ack',
                 method: 'module.hello',
                 params: {'ack': true}));
+        // 初始配对快照：重配对发生在 connect 内（彼时本连接尚未登记），此处补送
+        _pushWiring(moduleId, _ex.snapshotOf(moduleId));
         continue;
       }
       if (env.kind == EnvelopeKind.rpc) {
@@ -142,9 +164,27 @@ class BrokerDaemon {
           }
           continue;
         }
-        // 消费方按声明接线路由；内建兜底则回 NoProvider 由其回退
-        final provider = _ex.providerOfOrNull(env.from, env.method);
-        if (provider == null || provider.isEmpty) {
+        // 路由（投递的机械规则）：显式 > 声明首选 > 唯一；缺提供方回 NoProvider
+        // 由消费方降级；多提供方且无表态回候选清单（选择权交回调用方）
+        try {
+          final provider = _ex.routeOrNull(env.from, env.method);
+          if (provider == null) {
+            sendEnvelope(
+                s,
+                Envelope(
+                    from: 'core',
+                    to: env.from,
+                    kind: EnvelopeKind.err,
+                    id: env.id,
+                    method: env.method,
+                    params: {'code': 'NoProvider', 'method': env.method}));
+            continue;
+          }
+          final result = await _ex.rpcTo(env.from, provider, env.method,
+              env.params,
+              requestId: env.id);
+          await _replyRpc(s, env, result);
+        } on CandidatesException catch (e) {
           sendEnvelope(
               s,
               Envelope(
@@ -153,14 +193,11 @@ class BrokerDaemon {
                   kind: EnvelopeKind.err,
                   id: env.id,
                   method: env.method,
-                  params: {'code': 'NoProvider', 'method': env.method}));
-          continue;
-        }
-        try {
-          final result = await _ex.rpcTo(env.from, provider, env.method,
-              env.params,
-              requestId: env.id);
-          await _replyRpc(s, env, result);
+                  params: {
+                    'code': 'Candidates',
+                    'method': env.method,
+                    'candidates': e.candidates,
+                  }));
         } catch (e) {
           sendEnvelope(
               s,
@@ -194,7 +231,7 @@ class BrokerDaemon {
       if (env.kind == EnvelopeKind.ok || env.kind == EnvelopeKind.err) {
         final done = _pending.remove(env.id);
         if (done == null) continue;
-        final meta = _pendingMeta.remove(env.id);
+        _pendingMeta.remove(env.id);
         _pendingTarget.remove(env.id);
         if (env.kind == EnvelopeKind.ok) {
           done.complete(env.params);
@@ -211,9 +248,10 @@ class BrokerDaemon {
       // 连接异常：走 finally 清理
     } finally {
       if (moduleId.isNotEmpty) {
-        // 模块离线：注销声明，目标为它的在途 rpc 立即报错（进程重连可重新注册）
-        _ex.disconnect(moduleId);
+        // 模块离线：先摘连接再注销（重配对推送只达在线者）；
+        // 目标为它的在途 rpc 立即报错（进程重连可重新注册）
         _sockets.remove(moduleId);
+        _ex.disconnect(moduleId);
         final dead = <String>[];
         _pendingTarget.forEach((id, target) {
           if (target == moduleId) dead.add(id);

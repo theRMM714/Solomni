@@ -25,6 +25,9 @@ final class BuiltinOnlyOutbound implements Outbound {
   Future<Object?> call(String moduleId, String method, Object? params) async {
     throw NoProviderException(method);
   }
+
+  @override
+  Stream<WiringSnapshot> get wiring => const Stream.empty();
 }
 
 Future<String> _apiKey(Outbound out) async {
