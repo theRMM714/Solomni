@@ -1,4 +1,4 @@
-/// 桌面产品（demo）：目录发现模块 -> TCP 拓扑 -> 撮合 -> 经 ui_cli 模块交互。
+/// 桌面产品（demo）：目录发现模块 -> TCP 拓扑 -> 动态配对 -> 经 ui_cli 模块交互。
 /// 装配者（本文件）是唯一的策略所在：发现谁、排除谁。
 /// --without=llm_gateway 演示卸载：conversation 自动回退内建。
 library;
@@ -69,7 +69,11 @@ Future<void> main(List<String> args) async {
     await ModuleClient.connect(daemon.address, daemon.port, make());
   }
 
-  // 4. 撮合：fail-fast
+  // 4. 消费驱动连入：声明到达即配对（动态配对下接入顺序无关）
+  final driver =
+      await ModuleClient.connect(daemon.address, daemon.port, DriverProgram());
+
+  // 5. 装配期校验：显式接线指向未知则失败；配对随成员变化自动维护
   await daemon.start();
 
   if (serve) {
@@ -81,10 +85,7 @@ Future<void> main(List<String> args) async {
     await Completer<void>().future; // 常驻
   }
 
-  final driver =
-      await ModuleClient.connect(daemon.address, daemon.port, DriverProgram());
-
-  // 5. UI 模块看一眼 -> 调色板 + 画布；然后经命令路由事件
+  // 6. UI 模块看一眼 -> 调色板 + 画布；然后经命令路由事件
   final palette = await driver.rpc('ui.render', null);
   print(palette as String);
   print('[命令] send 你好');

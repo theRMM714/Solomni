@@ -1,13 +1,32 @@
 #!/usr/bin/env bash
-# bin/flutter —— WSL/Linux/Mac 包装：内部设好缓存后调用仓库内的 Flutter SDK
+# bin/flutter -- WSL/Linux/Mac 包装：平台后缀 SDK 目录 + 仓库内缓存 + git 探测
+# git 探测：PATH 无 git 时，识别用户级安装（~/.local/opt 或仓库内 .tools/git，
+# 均为 Arch git 包解压布局 usr/bin/git + usr/lib/git-core）
 set -euo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$DIR/.." && pwd)"
-export PUB_CACHE="$ROOT/.pub-cache"
-export TMP="$ROOT/.tmp"; export TEMP="$TMP"
-if [ -x "$ROOT/flutter/flutter/bin/flutter" ]; then
-  exec "$ROOT/flutter/flutter/bin/flutter" "$@"
-else
-  echo "Flutter SDK 未安装，先运行: node bin/setup.mjs --flutter" >&2
-  exit 1
+case "$(uname -s)" in
+  Darwin*) OS=macos ;;
+  *)       OS=linux ;;
+esac
+export PUB_CACHE="$ROOT/.pub-cache-$OS"
+export TMP="$ROOT/.tmp-$OS"; export TEMP="$TMP"
+# .tools/bin 先入 PATH：精简系统缺 which 等基础命令时由 shim 兜底（flutter 工具依赖）
+export PATH="$ROOT/.tools/bin:$PATH"
+REAL_HOME="$HOME"
+if ! command -v git >/dev/null 2>&1; then
+  for G in "$REAL_HOME/.local/opt" "$ROOT/.tools/git"; do
+    if [ -x "$G/usr/bin/git" ]; then
+      export PATH="$G/usr/bin:$PATH"
+      export GIT_EXEC_PATH="$G/usr/lib/git-core"
+      break
+    fi
+  done
 fi
+# HOME 指向仓库内：flutter 工具配置（~/.config 等）写入沙箱可写范围
+export HOME="$ROOT/.dart-home-$OS"
+if [ -x "$ROOT/flutter-$OS/flutter/bin/flutter" ]; then
+  exec "$ROOT/flutter-$OS/flutter/bin/flutter" "$@"
+fi
+echo "Flutter SDK 未安装，先运行: node bin/setup.mjs --flutter" >&2
+exit 1

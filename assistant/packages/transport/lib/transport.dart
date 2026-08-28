@@ -15,16 +15,38 @@ Stream<Envelope> envelopeLines(Socket s) => s
 
 void sendEnvelope(Socket s, Envelope e) => s.writeln(jsonEncode(e.toJson()));
 
-/// 线路错误还原为异常对象：NoProvider 让消费方回退内建
+/// 线路错误还原为异常对象：NoProvider 让消费方降级，Candidates 交回选择权
 Object wireError(Object? params) {
   final m = params as Map;
-  if (m['code'] == 'NoProvider') return NoProviderException(m['method'] as String);
+  if (m['code'] == 'NoProvider') {
+    return NoProviderException(m['method'] as String);
+  }
+  if (m['code'] == 'Candidates') {
+    return CandidatesException(m['method'] as String,
+        [for (final c in (m['candidates'] as List)) c as String]);
+  }
   return StateError((m['message'] ?? m).toString());
 }
 
-Map<String, Object?> errorBody(Object e) => e is NoProviderException
-    ? {'code': 'NoProvider', 'method': e.method}
-    : {'code': 'Error', 'message': e.toString()};
+Map<String, Object?> errorBody(Object e) {
+  if (e is NoProviderException) {
+    return {'code': 'NoProvider', 'method': e.method};
+  }
+  if (e is CandidatesException) {
+    return {
+      'code': 'Candidates',
+      'method': e.method,
+      'candidates': e.candidates,
+    };
+  }
+  return {'code': 'Error', 'message': e.toString()};
+}
+
+/// 配对快照解码：{需求能力: [提供方...]}（core.wiring 推送的负载）
+WiringSnapshot decodeWiringSnapshot(Object? params) => {
+      for (final e in (params as Map<String, Object?>).entries)
+        e.key: [for (final p in (e.value as List)) p as String],
+    };
 
 /// 一次流式调用的收流端
 class _StreamReply {
@@ -38,9 +60,13 @@ class ModuleClient {
   final String moduleId;
   final _pending = <String, Completer<Object?>>{};
   final _pendingStreams = <String, _StreamReply>{};
+  final _wiring = StreamController<WiringSnapshot>.broadcast();
   var _seq = 0;
 
   ModuleClient._(this.socket, this.moduleId);
+
+  /// 配对快照流：成员变化时核心推送（勿轮询；无订阅时自动丢弃）
+  Stream<WiringSnapshot> get wiring => _wiring.stream;
 
   static Future<ModuleClient> connect(
       InternetAddress host, int port, ModuleProgram program) async {
@@ -68,6 +94,11 @@ class ModuleClient {
         if (!helloAck.isCompleted) {
           helloAck.completeError(wireError(env.params));
         }
+        return;
+      }
+      if (env.kind == EnvelopeKind.event && env.method == CoreCaps.wiring) {
+        // 配对快照推送：成员变化的事实（勿轮询）
+        c._wiring.add(decodeWiringSnapshot(env.params));
         return;
       }
       if (env.kind == EnvelopeKind.rpc) {
@@ -189,6 +220,9 @@ final class _ClientOutbound implements Outbound {
   @override
   Future<Object?> call(String moduleId, String method, Object? params) =>
       _send(moduleId, method, params);
+
+  @override
+  Stream<WiringSnapshot> get wiring => _c.wiring;
 
   Future<Object?> _send(String to, String method, Object? params) {
     final id = 'c' + (_c._seq++).toString();

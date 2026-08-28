@@ -1,5 +1,5 @@
 /// 核心包：内容无关的交易所。
-/// 只提供机制（注册/撮合/路由），不制定策略（什么该被共享）。
+/// 只提供机制（校验、配对、投递），不制定策略（什么该被共享）。
 library;
 
 import 'package:protocol/protocol.dart';
@@ -8,7 +8,7 @@ export 'exchange.dart';
 export 'tcp.dart';
 export 'loader.dart';
 
-/// 撮合失败：启动期 fail-fast，绝不静默决策
+/// 校验失败（重复 id、成环、接线指向未知）：装配期/接入期 fail-fast，绝不静默决策
 class WiringException implements Exception {
   final String message;
   WiringException(this.message);
@@ -16,9 +16,8 @@ class WiringException implements Exception {
   String toString() => 'WiringException: ' + message;
 }
 
-/// 装配结果：moduleId -> 能力地址 -> 提供方 moduleId
-/// 内建兜底用空提供方 "" 表示
-typedef Wiring = Map<String, Map<String, String>>;
+/// 配对结果：moduleId -> 能力地址 -> 当前全体提供方（事实集合，无单选）
+typedef Wiring = Map<String, Map<String, List<String>>>;
 
 class Broker {
   final _declarations = <String, Declaration>{};
@@ -37,57 +36,38 @@ class Broker {
   /// 注册表只读列举（core.modules 元能力的事实来源）
   List<Declaration> get declarations => List.unmodifiable(_declarations.values);
 
-  /// 撮合：机械规则，无价值判断。
-  /// 1. explicit 接线优先（部署者的权力，不是核心的）
-  /// 2. 多候选且未显式接线 -> 失败并列出候选
-  /// 3. sharedOnly 无候选 -> 失败（该模块声明无法满足）
-  /// 4. preferShared 无候选 -> 内建兜底 ""
-  /// 5. 提供方依赖成环 -> 失败
-  /// [explicit] 形如 {"conversation": {"llm.chat": "llm_openai"}}
-  Wiring resolve({Map<String, Map<String, String>> explicit = const {}}) {
+  /// 配对：机械登记，无价值判断。
+  /// need-cap -> 当前全体提供方（诚实集合：到达即加入，离线即移出；
+  /// 多提供方是消费方的选择空间，不是错误；缺提供方是降级，不是失败）。
+  /// builtinOnly 是模块私有，不参与配对。
+  /// 成环 -> 校验拒收（唯一拒绝场景之一）。
+  Wiring resolve() {
     _checkCycles();
-    final wiring = <String, Map<String, String>>{};
+    final wiring = <String, Map<String, List<String>>>{};
     for (final d in _declarations.values) {
-      final w = <String, String>{};
+      final w = <String, List<String>>{};
       for (final need in d.needs) {
-        final candidates = _providersOf(need.cap).toList();
-        final pinned = explicit[d.id]?[need.cap];
-        if (pinned != null) {
-          _assertKnown(pinned, need.cap);
-          w[need.cap] = pinned;
-          continue;
-        }
-        if (candidates.isEmpty) {
-          if (need.via == NeedVia.sharedOnly) {
-            throw WiringException(
-                d.id + ' 的 ' + need.cap + ' (sharedOnly) 无提供方：按声明应功能降级，装配者需显式处理');
-          }
-          w[need.cap] = ''; // 内建兜底：中心化是能力不是前提
-          continue;
-        }
-        if (candidates.length > 1) {
-          throw WiringException(
-              d.id + ' 的 ' + need.cap + ' 有多候选 ' + candidates.toString() + '：请显式接线（核心绝不静默选择）');
-        }
-        w[need.cap] = candidates.single;
+        if (need.via == NeedVia.builtinOnly) continue;
+        w[need.cap] = _providersOf(need.cap).toList();
       }
       wiring[d.id] = w;
     }
     return wiring;
   }
 
+  /// 声明查询：模块在某能力上的首选（消费方策略选择，路由时机械执行）
+  Need? needOf(String moduleId, String cap) {
+    for (final n in _declarations[moduleId]?.needs ?? const <Need>[]) {
+      if (n.cap == cap) return n;
+    }
+    return null;
+  }
+
   Iterable<String> _providersOf(String cap) => _declarations.values
       .where((d) => d.provides.any((p) => p.cap == cap))
       .map((d) => d.id);
 
-  void _assertKnown(String moduleId, String cap) {
-    final d = _declarations[moduleId];
-    if (d == null || !d.provides.any((p) => p.cap == cap)) {
-      throw WiringException('显式接线指向未知提供方：' + moduleId + ' 不提供 ' + cap);
-    }
-  }
-
-  /// 环检测：A 的提供方依赖 B，B 的提供方依赖 A -> 启动失败
+  /// 环检测：A 的提供方依赖 B，B 的提供方依赖 A -> 校验拒收（可预测的无限递归）
   void _checkCycles() {
     final edges = <String, Set<String>>{};
     for (final d in _declarations.values) {

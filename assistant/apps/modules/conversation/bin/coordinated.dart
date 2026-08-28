@@ -10,7 +10,7 @@ Future<void> main(List<String> args) async {
   for (final a in args) {
     if (a.startsWith('--port=')) port = int.parse(a.substring(7));
   }
-  final client = await ModuleClient.connect(
+  await ModuleClient.connect(
       InternetAddress.loopbackIPv4, port, ConversationProgram());
   print('[conversation] 已连接核心 :' + port.toString() + '，等待调用');
 }

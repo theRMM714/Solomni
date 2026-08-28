@@ -63,5 +63,5 @@ void main() {
   check('新建画布可放 public', eng.canPlace(nc, chatInput) && !eng.canPlace(nc, keyInput));
 
   print('');
-  print('全部通过: ' + _passed.toString() + ' / 13');
+  print('全部通过: ' + _passed.toString() + ' 项');
 }
