@@ -71,10 +71,15 @@ class Assembled {
   final Set<String> excluded;
   Assembled(this.daemon, this.driver, this.folders, this.excluded);
 
-  /// 可拉起的外部模块：未编译进本产品、且未被 --without 排除
+  /// 可拉起的外部模块：未编译进本产品、未被 --without 排除、
+  /// 且声明支持当前平台（dev 脚本存在性即平台支持声明，模块自决）
   List<ModuleFolder> get spawnable => [
         for (final f in folders)
-          if (!registry.containsKey(f.id) && !excluded.contains(f.id)) f
+          if (!registry.containsKey(f.id) &&
+              !excluded.contains(f.id) &&
+              File(f.path + (Platform.isWindows ? r'\dev.bat' : '/dev'))
+                  .existsSync())
+            f
       ];
 }
 
@@ -83,13 +88,6 @@ String defaultModulesDir() {
   final self =
       Isolate.resolvePackageUriSync(Uri.parse('package:solomni/assembler.dart'));
   return self!.resolve('../../modules').toFilePath();
-}
-
-/// 仓库根：开发态外部模块的包装命令在 bin/ 下（打包态将换成预编译产物）
-String repoRoot() {
-  final self =
-      Isolate.resolvePackageUriSync(Uri.parse('package:solomni/assembler.dart'));
-  return self!.resolve('../../../..').toFilePath();
 }
 
 /// 装配：目录发现 -> 逐模块连接（hello 经协议到达）-> 替身连入 ->

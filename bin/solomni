@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# bin/solomni -- 产品启动器薄壳（Linux/WSL/macOS）；实现在 solomni.mjs
+set -euo pipefail
+exec node "$(dirname "$0")/solomni.mjs" "$@"

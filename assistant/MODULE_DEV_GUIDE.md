@@ -20,7 +20,20 @@ apps/modules/<module_id>/
   lib/<module_id>.dart    # 模块逻辑 + ModuleProgram
   bin/standalone.dart     # 单机入口：无核心、全内建，必须能独立运行
   bin/coordinated.dart    # 协作入口：守护进程，连核心（--port=9100）
+  dev / dev.bat           # 开发态启动契约（见下）：模块自己的"怎么跑"
 ```
+
+`dev`（bash，Unix 侧）与 `dev.bat`（Windows 侧）是模块自备的启动脚本，职责全在模块：
+
+- **依赖自愈**：检查自己的 `.dart_tool/package_config.json`，异侧/缺失则先 pub get
+  （SDK 依赖是工具链写死的绝对路径、平台相关；纯 path 依赖两侧通用不会命中）
+- **自选设备/工具链**：找仓库 wrapper、挑 `-d linux|windows|macos`，都是模块自己的事
+- **起 coordinated.dart**：把产品注入的 `--port=N` 透传给它
+
+产品的装配器只机械调用契约脚本（Windows 经 `cmd /c dev.bat`），不懂任何模块内部。
+**平台支持声明 = 脚本存在性**：没有 `dev.bat` 的模块在 Windows 上不进可拉起清单
+（`-gui` 点名它会得到"不支持当前平台"）；只做纯 Dart 模块时两个脚本都要带（内容
+= dart wrapper 起 coordinated + 同样的自愈逻辑）。参考实现：`apps/modules/ui_flutter`。
 
 依赖白名单（只能依赖这三个，且通常只需要前两个）：
 
@@ -175,7 +188,8 @@ static const contribution = UiContribution(
 - 详见仓库根 `SETUP.md`
 
 - 沙箱限制：HTTPS 下载走 node fetch；子进程管道被禁（不能 spawn 捕获输出的进程）；多进程守护无法在本沙箱演示，但单进程 TCP 拓扑可全链路验证
-- 模块被产品装配（apps/solomni 的 scanModules）发现的条件：文件夹内有 `bin/coordinated.dart`
+- 模块被产品装配（apps/solomni 的 scanModules）发现的条件：文件夹内有 `bin/coordinated.dart`；
+  能否被 `-gui` 拉起另看 `dev`/`dev.bat` 是否声明了当前平台
 
 ## 治理：不要碰的东西
 
