@@ -28,7 +28,9 @@ apps/modules/<module_id>/
 - **依赖自愈**：检查自己的 `.dart_tool/package_config.json`，异侧/缺失则先 pub get
   （SDK 依赖是工具链写死的绝对路径、平台相关；纯 path 依赖两侧通用不会命中）
 - **自选设备/工具链**：找仓库 wrapper、挑 `-d linux|windows|macos`，都是模块自己的事
-- **起 coordinated.dart**：把产品注入的 `--port=N` 透传给它
+- **起 coordinated.dart**：把产品注入的 `--port=N` 转发给它。Flutter 模块注意：
+  本 SDK 版本的 `flutter run` 会丢弃 `--` 分隔符后的参数，须逐个转成
+  `--dart-entrypoint-args=<arg>` 才能到达 `main(List<String> args)`（参考 ui_flutter）
 
 产品的装配器只机械调用契约脚本（Windows 经 `cmd /c dev.bat`），不懂任何模块内部。
 **平台支持声明 = 脚本存在性**：没有 `dev.bat` 的模块在 Windows 上不进可拉起清单

@@ -4,7 +4,7 @@
 #   1) 依赖自愈：.dart_tool 里 SDK 依赖是工具链写死的绝对路径（平台相关），
 #      检测异侧/缺失配置则先 pub get（纯 path 依赖的包两侧通用，不会命中）
 #   2) 自选设备：按当前系统给 flutter run -d
-#   3) 起守护入口 bin/coordinated.dart，端口由产品注入（--port=N 透传）
+#   3) 起守护入口 bin/coordinated.dart，端口由产品注入（--port=N 转发）
 set -euo pipefail
 
 SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -24,4 +24,11 @@ if [ ! -f "$CFG" ] || grep -q '"rootUri": "file:///[A-Za-z]:/' "$CFG"; then
   "$FLUTTER" pub get
 fi
 
-exec "$FLUTTER" run -t bin/coordinated.dart -d "$DEVICE" -- "$@"
+# 参数转发：本 SDK 版本的 flutter run 会丢弃 -- 分隔符后的参数，
+# 须逐个转成 --dart-entrypoint-args=<arg> 才能到达 main(List<String> args)
+ENTRY_ARGS=()
+for a in "$@"; do
+  ENTRY_ARGS+=("--dart-entrypoint-args=$a")
+done
+
+exec "$FLUTTER" run -t bin/coordinated.dart -d "$DEVICE" "${ENTRY_ARGS[@]}"
