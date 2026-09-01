@@ -20,5 +20,15 @@ if "%NEED_GET%"=="1" (
   if errorlevel 1 exit /b 1
 )
 
-call "%FLUTTER%" run -t bin\coordinated.dart -d windows -- %*
+rem arg forwarding: this SDK version of flutter run DROPS args after "--";
+rem each incoming arg must become --dart-entrypoint-args=<arg> to reach
+rem main(List<String> args)
+set "ENTRY_ARGS="
+:argloop
+if "%~1"=="" goto :runargs
+set ENTRY_ARGS=%ENTRY_ARGS% "--dart-entrypoint-args=%~1"
+shift
+goto :argloop
+:runargs
+call "%FLUTTER%" run -t bin\coordinated.dart -d windows %ENTRY_ARGS%
 exit /b %ERRORLEVEL%
