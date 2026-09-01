@@ -56,6 +56,8 @@ SDK 与缓存按平台分目录，Windows 与 WSL 共用同一个仓库时互不
     cd assistant/apps/solomni
     ../../../bin/dart tool/smoke.dart
     ../../../bin/dart bin/main.dart
+    # 或者用启动器（等价，免去 cd）：
+    ./bin/solomni
 
     # Flutter UI 模块
     cd assistant/apps/modules/ui_flutter
@@ -65,6 +67,15 @@ SDK 与缓存按平台分目录，Windows 与 WSL 共用同一个仓库时互不
 说明：wrapper 会先设置 PUB_CACHE/TMP/HOME 再调用本地 SDK，因此你永远不需要手动改
 环境变量或路径；换平台同理，行为完全一致。
 
+## 启动器
+
+    Windows:      bin\solomni.bat [参数]
+    WSL / Linux:  ./bin/solomni [参数]
+
+等价于 `cd assistant/apps/solomni && dart bin/main.dart`，只是免去手敲长路径；
+参数与退出码原样透传。启动器不含任何业务——模块的依赖与环境由各模块自己的
+`dev`/`dev.bat` 契约脚本打理（见 assistant/MODULE_DEV_GUIDE.md）。
+
 ## 绝对路径纪律（跨平台可移植性）
 
 仓库保持零 hosted 依赖（llm_gateway 用 dart:io HttpClient 直调，core 用 tool/ 自定义
@@ -72,11 +83,9 @@ SDK 与缓存按平台分目录，Windows 与 WSL 共用同一个仓库时互不
 路径**——Windows 与 WSL 共用一个仓库目录时，这些包两侧通用，切侧零成本。
 
 唯一例外 ui_flutter：`sdk: flutter` 依赖由 Flutter 工具链解析成本地 SDK 绝对路径
-（工具链写死 .dart_tool 位置，无法相对化）。两侧共用目录且都要跑 Flutter 工具时，
-切到另一侧跑 GUI 前先执行一次：
-
-    cd assistant/apps/modules/ui_flutter
-    ../../../../bin/flutter pub get    # Windows 侧用 ..\..\..\..\bin\flutter.bat
+（工具链写死 .dart_tool 位置，无法相对化）。其 `dev`/`dev.bat` 启动脚本会在拉起前
+**自检异侧配置并自动 pub get**，两侧切换对 `-gui` 启动无感；只有手动跑
+`flutter analyze`/`flutter test` 时切侧才需要先 `flutter pub get` 一次。
 
 ## 版本 / 镜像覆盖
 默认用国内 flutter-io 镜像，版本锁定为与当前开发一致的：

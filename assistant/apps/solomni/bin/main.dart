@@ -8,41 +8,18 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:solomni/assembler.dart';
 
-/// 拉起外部模块进程：守护入口 bin/coordinated.dart，端口由产品注入。
-/// Flutter 模块经仓库内包装命令（开发态；PATH 的 flutter 兜底）；
-/// 纯 Dart 模块走当前 VM。Windows 的 .bat 必须经 cmd.exe 执行。
+/// 拉起外部模块进程：只认模块自备的 dev 启动契约脚本，端口注入。
+/// 怎么跑（依赖自愈/设备/工具链）是模块自己的事，产品一概不知。
+/// Windows 的 .bat 必须经 cmd.exe 执行。
 Future<Process> _spawnModule(ModuleFolder f, int port) async {
-  final pubspec = File(f.path + '/pubspec.yaml');
-  final isFlutter = pubspec.existsSync() &&
-      pubspec.readAsLinesSync().any((l) => l.startsWith('flutter:'));
-  if (isFlutter) {
-    final device = Platform.isLinux
-        ? 'linux'
-        : Platform.isWindows
-            ? 'windows'
-            : 'macos';
-    final args = [
-      'run', '-t', 'bin/coordinated.dart', '-d', device, '--', '--port=' + port.toString(),
-    ];
-    final sep = Platform.isWindows ? r'\' : '/';
-    final wrapper = repoRoot() + sep + 'bin' + sep +
-        (Platform.isWindows ? 'flutter.bat' : 'flutter');
-    if (File(wrapper).existsSync()) {
-      // 仓库包装命令：与产品同一套 SDK/缓存环境
-      if (Platform.isWindows) {
-        return Process.start('cmd.exe', ['/c', wrapper, ...args],
-            workingDirectory: f.path,
-            mode: ProcessStartMode.inheritStdio);
-      }
-      return Process.start(wrapper, args,
-          workingDirectory: f.path, mode: ProcessStartMode.inheritStdio);
-    }
-    return Process.start('flutter', args,
-        workingDirectory: f.path, mode: ProcessStartMode.inheritStdio);
+  final args = ['--port=' + port.toString()];
+  if (Platform.isWindows) {
+    return Process.start('cmd.exe', ['/c', f.path + r'\dev.bat', ...args],
+        workingDirectory: f.path,
+        mode: ProcessStartMode.inheritStdio);
   }
-  return Process.start(Platform.resolvedExecutable, [
-    'bin/coordinated.dart', '--port=' + port.toString(),
-  ], workingDirectory: f.path, mode: ProcessStartMode.inheritStdio);
+  return Process.start(f.path + '/dev', args,
+      workingDirectory: f.path, mode: ProcessStartMode.inheritStdio);
 }
 
 /// 终止外部模块进程：Windows 下 cmd 的子进程不随父死，须杀进程树
@@ -106,13 +83,20 @@ Future<void> main(List<String> args) async {
       } else {
         stderr.writeln('[失败] 未找到外部模块: ' + guiId + '（候选: ' +
             candidates.map((f) => f.id).join(', ') + '）');
+        // 点名的模块存在但不支持当前平台（dev 脚本存在性即声明）时，说清楚
+        for (final f in asm.folders) {
+          if (f.id == guiId) {
+            stderr.writeln('[失败] ' + guiId + ' 存在，但不支持当前平台' +
+                '（缺 ' + (Platform.isWindows ? 'dev.bat' : 'dev') + '）');
+          }
+        }
       }
       exit(2);
     }
     try {
       procs.add(await _spawnModule(chosen, daemon.port));
     } catch (e) {
-      // 拉起失败（如 flutter 不在 PATH）：fail-fast 并指明原因
+      // 拉起失败（如 dev 脚本缺执行权限）：fail-fast 并指明原因
       stderr.writeln('[失败] 拉起 ' + chosen.id + ' 失败: ' + e.toString());
       exit(2);
     }
