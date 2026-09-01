@@ -39,7 +39,11 @@ Map<String, Object?> errorBody(Object e) {
       'candidates': e.candidates,
     };
   }
-  return {'code': 'Error', 'message': e.toString()};
+  // StateError 取 message：toString 自带前缀，逐跳转发会层层叠加
+  return {
+    'code': 'Error',
+    'message': e is StateError ? e.message : e.toString()
+  };
 }
 
 /// 配对快照解码：{需求能力: [提供方...]}（core.wiring 推送的负载）

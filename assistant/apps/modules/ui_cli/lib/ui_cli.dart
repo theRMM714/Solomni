@@ -99,10 +99,15 @@ final class UiCliProgram implements ModuleProgram {
     for (final c in found) {
       for (final cmd in c.contribution.commands) {
         if (cmd.name != name) continue;
-        final payload = <String, Object?>{
-          for (var i = 0; i < cmd.args.length && i < args.length; i++)
-            cmd.args[i]: args[i],
-        };
+        // 终端词法归本模块：单参数命令剩余整行是一个值，多参数命令按空格对位
+        final payload = <String, Object?>{};
+        if (cmd.args.length == 1) {
+          if (args.isNotEmpty) payload[cmd.args[0]] = args.join(' ');
+        } else {
+          for (var i = 0; i < cmd.args.length && i < args.length; i++) {
+            payload[cmd.args[i]] = args[i];
+          }
+        }
         final reply = await out.call(c.moduleId, UiCaps.event, {
           'component': cmd.component,
           'event': cmd.event,

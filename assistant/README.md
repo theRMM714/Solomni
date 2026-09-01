@@ -4,6 +4,7 @@
 
 - 理念（抽象概念与不变量）：[PHILOSOPHY.md](PHILOSOPHY.md)
 - **模块开发指南（给 AI 开发者，多开会话直接分发此文）：[MODULE_DEV_GUIDE.md](MODULE_DEV_GUIDE.md)**
+- 产品与用户旅程（产品形态、启动/退出语义、分层职责）：[PRODUCT.md](PRODUCT.md)
 
 ## 结构
 
@@ -13,14 +14,14 @@ packages/
   transport/           线路层：JSON 行编解码 + 模块侧连接与配对推送（模块只依赖它，不依赖核心）
   ui_vocab/            UI 词汇表：组件类型/scope/贡献 schema（意图，无像素）
   ui_canvas/           画布模型：布局数据结构与放置规则（UI 模块共享词汇）
-  core/                交易所：校验、配对、投递、TCP 守护、目录发现、注册表列举
+  core/                交易所：校验、配对、投递、TCP 守护、注册表列举
 apps/
   modules/             模块区：一个文件夹 = 一个可装卸的自治程序
     <模块>/
       lib/             模块逻辑（内建端口实现 + 共享适配 + UI 贡献）
       bin/standalone.dart    单机入口：无核心，全内建
       bin/coordinated.dart   协作入口：守护进程，连核心（--port=9100）
-  desktop_demo/        桌面产品：扫描 apps/modules -> TCP 拓扑 -> 配对 -> 全链路
+  solomni/             产品：装配者 + 终端 REPL（发现/registry/-gui 拉起；规范见 PRODUCT.md）
 ```
 
 ## 装卸语义
@@ -49,10 +50,10 @@ cd packages/core && dart test                        # 同一套用例（test �
 cd packages/core && dart tool/dynamic_test.dart     # 动态配对端到端（真 TCP：顺序无关/离线降级/回归恢复/推送）
 cd packages/ui_canvas && dart tool/canvas_test.dart  # 画布模型规则（scope/持久化/增删改）
 cd apps/modules/<任一> && dart bin/standalone.dart   # 单机模式
-# 协作 + UI 调色板/画布/命令全链路（先起假 LLM 服务器，默认走真实 API 会阻塞）：
-cd apps/modules/llm_gateway && dart bin/fake_server.dart &        # 端口 9123
-cd apps/desktop_demo && LLM_BASE_URL=http://127.0.0.1:9123/v1 dart bin/main.dart
-cd apps/desktop_demo && dart bin/main.dart --without=llm_gateway  # 卸载 -> 回退内建（无需假服务器）
+# 产品验收（自举假 LLM 服务器：无密钥拒绝/配钥后聊天/流式/多轮历史）：
+cd apps/solomni && dart tool/smoke.dart
+cd apps/solomni && dart tool/smoke.dart --without=llm_gateway  # 卸载 -> 回退内建（降级链路）
+cd apps/solomni && dart bin/main.dart                          # 产品入口：终端 REPL（help 查看命令，exit 退出）
 cd apps/modules/ui_flutter && flutter test           # Flutter UI 模块 mock 全链路（发现/布局/楼层/事件路由/配对推送）
 ```
 

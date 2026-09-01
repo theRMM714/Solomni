@@ -107,7 +107,34 @@ Future<void> main() async {
   check('多提供方 -> CandidatesException 直达调用方（附清单）',
       cand.contains('llm_gateway') && cand.contains('llm_b') && cand.length == 2);
 
+  // 7. 提供方处理器抛错：错误经线路回传到消费方（在途 rpc 不得挂死）
+  //    （回归用例：曾因 wireError 被误当"抛出"使用而在途 completer 永不完成）
+  final consumer2 = _App('asker', needs: [Need('boom.cap', NeedVia.preferShared)]);
+  await ModuleClient.connect(daemon.address, daemon.port, consumer2);
+  await ModuleClient.connect(daemon.address, daemon.port, _BoomErrProgram());
+  var gotErr = false;
+  var errMsg = '';
+  try {
+    await consumer2.out!.rpc('boom.cap', null);
+  } on StateError catch (e) {
+    gotErr = true;
+    errMsg = e.toString();
+  }
+  check('提供方处理器抛错 -> 错误回传消费方（不挂死）',
+      gotErr && errMsg.contains('模块内部错误'));
+
   print('');
   print('全部通过: ' + _passed.toString() + ' 项');
   exit(0);
+}
+
+/// 抛错的提供方：模拟模块内业务异常经线路回传
+final class _BoomErrProgram implements ModuleProgram {
+  @override
+  Declaration get declaration =>
+      const Declaration('boom_err', provides: [Provide('boom.cap')]);
+
+  @override
+  ModuleHandler bind(Outbound outbound) =>
+      (env) async => throw StateError('模块内部错误');
 }

@@ -19,3 +19,4 @@
 - 项目概括：/assistant/README.md
 - 项目理念：/assistant/PHILOSOPHY.md
 - 模块开发必读：/assistant/MODULE_DEV_GUIDE.md
+- 产品与用户旅程：/assistant/PRODUCT.md

@@ -30,11 +30,11 @@ final class BuiltinOnlyOutbound implements Outbound {
   Stream<WiringSnapshot> get wiring => const Stream.empty();
 }
 
-Future<String> _apiKey(Outbound out) async {
+Future<String?> _apiKey(Outbound out) async {
   try {
-    return (await out.rpc(Caps.secretsGet, 'llm')) as String;
+    return await out.rpc(Caps.secretsGet, 'llm') as String?;
   } on NoProviderException {
-    return 'builtin-key-000'; // 内建兜底
+    return null; // secrets 不在场：同样视为未配置（模块自决拒绝）
   }
 }
 
@@ -48,6 +48,10 @@ Stream<String> gatewayChatStream(Outbound out, List<dynamic> messages,
       '/chat/completions';
   final m = model ?? Platform.environment['LLM_MODEL'] ?? 'deepseek-chat';
   final key = await _apiKey(out);
+  // 无密钥直接拒绝（拿不到密钥就不发起调用）：聊天链路自决，产品入口不参与
+  if (key == null || key.isEmpty) {
+    throw StateError('未配置密钥 llm，无法调用 LLM');
+  }
   final req = http.Request('POST', Uri.parse(url))
     ..headers['Authorization'] = 'Bearer ' + key
     ..headers['Content-Type'] = 'application/json'

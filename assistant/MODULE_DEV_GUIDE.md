@@ -161,7 +161,7 @@ static const contribution = UiContribution(
 ## 测试要求（缺一不可）
 
 1. **standalone 必须能跑**：`dart bin/standalone.dart` 无核心、无网络依赖（或明确跳过网络部分）
-2. **协作链路验证**：在 `apps/desktop_demo/bin/main.dart` 的 registry 加一行工厂 + pubspec 加一个 path 依赖，跑通全链路（这是装配者的地盘，只做最小编辑，别重构别人代码）
+2. **协作链路验证**：在 `apps/solomni/lib/assembler.dart` 的 registry 加一行工厂 + pubspec 加一个 path 依赖，跑 `dart tool/smoke.dart` 验全链路（这是装配者的地盘，只做最小编辑，别重构别人代码）
 3. 消费外部服务时，本地起假服务器验证（参考 `apps/modules/llm_gateway/bin/fake_server.dart`），不依赖真实密钥
 4. 协作语义用 mock Outbound 测试：配对快照（wiring）、候选错误（CandidatesException）、
    降级（NoProviderException）都可注入模拟，不必起核心
@@ -175,7 +175,7 @@ static const contribution = UiContribution(
 - 详见仓库根 `SETUP.md`
 
 - 沙箱限制：HTTPS 下载走 node fetch；子进程管道被禁（不能 spawn 捕获输出的进程）；多进程守护无法在本沙箱演示，但单进程 TCP 拓扑可全链路验证
-- 模块被 `scanModules` 发现的条件：文件夹内有 `bin/coordinated.dart`
+- 模块被产品装配（apps/solomni 的 scanModules）发现的条件：文件夹内有 `bin/coordinated.dart`
 
 ## 治理：不要碰的东西
 
@@ -187,7 +187,7 @@ static const contribution = UiContribution(
 | `packages/ui_vocab` | UI 词汇表 | 只读；新增公共组件类型需协调 |
 | `packages/ui_canvas` | 画布模型（布局结构/放置规则） | 只读；布局规则变更需协调 |
 | `apps/modules/<别人的模块>` | 该模块的 agent | 只读 |
-| `apps/desktop_demo` | 产品装配 | 仅最小编辑：registry 一行 + pubspec 一行 |
+| `apps/solomni` | 产品装配 | 仅最小编辑：registry 一行 + pubspec 一行 |
 
 **多 agent 并行开发约定**：一人一个模块文件夹；共享包改动（新公共能力名、新组件类型）是对齐事项而不是顺手事项--先在会话里提出，达成一致再动字典。字典可以长，上帝不能长。
 
