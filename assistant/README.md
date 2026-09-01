@@ -37,7 +37,7 @@ apps/
 - UI 也是普通模块（ui_cli 是 CLI 渲染器；Flutter UI 模块同样消费贡献）
 - 有 UI 的模块提供 ui.contribution（意图清单：组件 id/kind/scope/bind）+ ui.event（事件路由回声明模块）
 - 发现：ui 模块 rpc core.modules（注册表只读列举，事实非决策）-> 定向 call 各模块拉贡献；
-  成员变化经配对推送到达，调色板/画布可实时刷新
+  成员变化经配对推送到达，模块列表/画布实时刷新（离线组件冻结禁用，重连恢复）
 - 模块 id 全局唯一（重复注册被校验拒收）-> 定向调用无歧义，聚合问题不存在
 - 组件 scope：public 任意画布可用 / private 仅本模块画布；布局数据归 UI 模块私有
 - 流式：处理器返回 Streamed(chunks)，消费方 rpcStream 逐块接收；ok 收全量，非流式消费方无感知
@@ -54,7 +54,7 @@ cd apps/modules/<任一> && dart bin/standalone.dart   # 单机模式
 cd apps/solomni && dart tool/smoke.dart
 cd apps/solomni && dart tool/smoke.dart --without=llm_gateway  # 卸载 -> 回退内建（降级链路）
 cd apps/solomni && dart bin/main.dart                          # 产品入口：终端 REPL（help 查看命令，exit 退出）
-cd apps/modules/ui_flutter && flutter test           # Flutter UI 模块 mock 全链路（发现/布局/楼层/事件路由/配对推送）
+cd apps/modules/ui_flutter && flutter test           # Flutter UI 模块 mock 全链路（发现/画布创建/选择器/离线冻结/事件路由/配对推送）
 ```
 
 ## 环境备注

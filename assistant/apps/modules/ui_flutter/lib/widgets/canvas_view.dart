@@ -1,4 +1,5 @@
-/// 画布区：tab 切换画布；画布接收拖放、支持拖动位置与缩放。
+/// 画布区：tab 常驻（新建画布入口可达）；组件经"+"选择器进入（规则过滤）；
+/// 离线模块的组件冻结禁用（贡献缓存渲染），重连自动恢复。
 /// 组件 id 不可改（契约）；位置/尺寸/样式归本模块。
 library;
 
@@ -8,10 +9,18 @@ import 'package:ui_canvas/ui_canvas.dart';
 import 'package:ui_vocab/ui_vocab.dart';
 import 'component_views.dart';
 
+/// 组件查询结果：comp 为 null 且 offline=false 表示从未见过（占位降级）
+class _Lookup {
+  final UiComponent? comp;
+  final bool offline;
+  const _Lookup(this.comp, this.offline);
+}
+
 class CanvasArea extends StatelessWidget {
   final LayoutEngine engine;
   final LayoutDoc layout;
   final List<Contributed> found;
+  final Map<String, UiContribution> cache; // 贡献缓存：离线冻结渲染
   final int tab;
   final int tick;
   final Outbound? outbound;
@@ -24,6 +33,7 @@ class CanvasArea extends StatelessWidget {
     required this.engine,
     required this.layout,
     required this.found,
+    required this.cache,
     required this.tab,
     required this.tick,
     required this.outbound,
@@ -34,10 +44,10 @@ class CanvasArea extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (layout.canvases.isEmpty) {
-      return const Center(child: Text('无画布'));
-    }
-    final current = layout.canvases[tab.clamp(0, layout.canvases.length - 1)];
+    final hasCanvases = layout.canvases.isNotEmpty;
+    final current = hasCanvases
+        ? layout.canvases[tab.clamp(0, layout.canvases.length - 1)]
+        : null;
     return Column(children: [
       SizedBox(
         height: 44,
@@ -49,6 +59,15 @@ class CanvasArea extends StatelessWidget {
                 label: Text(layout.canvases[i].title),
                 selected: i == tab,
                 onSelected: (_) => onSelectTab(i),
+              ),
+            ),
+          if (current != null)
+            Padding(
+              padding: const EdgeInsets.all(6),
+              child: ActionChip(
+                avatar: const Icon(Icons.add_box_outlined, size: 16),
+                label: const Text('添加组件'),
+                onPressed: () => _pickComponent(context, current),
               ),
             ),
           Padding(
@@ -63,16 +82,67 @@ class CanvasArea extends StatelessWidget {
       ),
       const Divider(height: 1),
       Expanded(
-        child: CanvasView(
-          engine: engine,
-          canvas: current,
-          found: found,
-          tick: tick,
-          outbound: outbound,
-          onChanged: onChanged,
-        ),
+        child: current == null
+            ? const Center(
+                child: Text('无画布：从左侧模块列表创建模块画布，或新建自定义画布'))
+            : CanvasView(
+                engine: engine,
+                canvas: current,
+                found: found,
+                cache: cache,
+                tick: tick,
+                outbound: outbound,
+                onChanged: onChanged,
+              ),
       ),
     ]);
+  }
+
+  /// "+"选择器：内容 = canPlace 规则过滤后的全部组件（边界由构造保证）
+  Future<void> _pickComponent(BuildContext context, CanvasDoc canvas) async {
+    final entries = <PaletteEntry>[
+      for (final c in found)
+        for (final comp in c.contribution.components)
+          if (engine.canPlace(canvas,
+              PaletteEntry(c.moduleId, comp)))
+            PaletteEntry(c.moduleId, comp),
+    ];
+    if (!context.mounted) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      builder: (ctx) => ListView(children: [
+        Padding(
+          padding: const EdgeInsets.all(12),
+          child: Text('添加到「' + canvas.title + '」',
+              style: const TextStyle(fontWeight: FontWeight.bold)),
+        ),
+        if (entries.isEmpty)
+          const Padding(
+            padding: EdgeInsets.all(16),
+            child: Text('没有可放置的组件'),
+          ),
+        for (final e in entries)
+          ListTile(
+            dense: true,
+            leading: Icon(
+                e.isPrivate ? Icons.lock_outline : Icons.widgets_outlined,
+                size: 20),
+            title: Text(e.moduleId + '.' + e.component.id),
+            subtitle: Text(
+              e.component.label + ' · ' + e.component.kind,
+              style: const TextStyle(fontSize: 11),
+            ),
+            onTap: () {
+              Navigator.pop(ctx);
+              // 选中落默认位置（级联偏移避开叠放）
+              final n = canvas.placements.length;
+              engine.place(canvas, e,
+                  x: 24.0 + (n % 4) * 60, y: 24.0 + (n % 4) * 50);
+              onChanged();
+            },
+          ),
+      ]),
+    );
   }
 
   Future<void> _promptNew(BuildContext context) async {
@@ -80,7 +150,7 @@ class CanvasArea extends StatelessWidget {
     await showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('新建画布'),
+        title: const Text('新建自定义画布'),
         content: TextField(controller: ctl, autofocus: true),
         actions: [
           TextButton(
@@ -104,6 +174,7 @@ class CanvasView extends StatefulWidget {
   final LayoutEngine engine;
   final CanvasDoc canvas;
   final List<Contributed> found;
+  final Map<String, UiContribution> cache;
   final int tick;
   final Outbound? outbound;
   final VoidCallback onChanged;
@@ -113,6 +184,7 @@ class CanvasView extends StatefulWidget {
     required this.engine,
     required this.canvas,
     required this.found,
+    required this.cache,
     required this.tick,
     required this.outbound,
     required this.onChanged,
@@ -123,54 +195,46 @@ class CanvasView extends StatefulWidget {
 }
 
 class _CanvasViewState extends State<CanvasView> {
-  final _stackKey = GlobalKey();
-
-  UiComponent? _componentOf(String moduleId, String componentId) {
+  /// 在线声明优先；离线用贡献缓存（冻结渲染）；两者皆无则占位
+  _Lookup _lookup(String moduleId, String componentId) {
     for (final c in widget.found) {
       if (c.moduleId != moduleId) continue;
       for (final comp in c.contribution.components) {
-        if (comp.id == componentId) return comp;
+        if (comp.id == componentId) return _Lookup(comp, false);
+      }
+      return const _Lookup(null, false); // 在线但组件不存在（契约变化）
+    }
+    final cached = widget.cache[moduleId];
+    if (cached != null) {
+      for (final comp in cached.components) {
+        if (comp.id == componentId) return _Lookup(comp, true);
       }
     }
-    return null;
+    return const _Lookup(null, false);
   }
 
   @override
   Widget build(BuildContext context) {
-    final engine = widget.engine;
     final canvas = widget.canvas;
-    return DragTarget<PaletteEntry>(
-      onWillAcceptWithDetails: (d) =>
-          engine.canPlace(canvas, d.data),
-      onAcceptWithDetails: (d) {
-        final box = _stackKey.currentContext?.findRenderObject() as RenderBox?;
-        final local = box?.globalToLocal(d.offset);
-        setState(() {
-          engine.place(canvas, d.data,
-              x: (local?.dx ?? 24) - 60, y: (local?.dy ?? 24) - 20);
-        });
-        widget.onChanged();
-      },
-      builder: (context, candidates, rejected) => Container(
-        color: candidates.isNotEmpty
-            ? Theme.of(context).colorScheme.primaryContainer
-            : Theme.of(context).colorScheme.surfaceContainerLowest,
-        child: Stack(key: _stackKey, children: [
-          for (final p in canvas.placements)
-            Positioned(
-              left: p.x,
-              top: p.y,
-              width: p.w,
-              height: p.h,
-              child: _placementCard(p),
-            ),
-        ]),
-      ),
+    return Container(
+      color: Theme.of(context).colorScheme.surfaceContainerLowest,
+      child: Stack(children: [
+        for (final p in canvas.placements)
+          Positioned(
+            left: p.x,
+            top: p.y,
+            width: p.w,
+            height: p.h,
+            child: _placementCard(p),
+          ),
+      ]),
     );
   }
 
   Widget _placementCard(Placement p) {
-    final comp = _componentOf(p.moduleId, p.componentId);
+    final look = _lookup(p.moduleId, p.componentId);
+    final comp = look.comp;
+    final offline = look.offline;
     return GestureDetector(
       onPanUpdate: (d) =>
           setState(() => widget.engine.move(p, d.delta.dx, d.delta.dy)),
@@ -189,8 +253,11 @@ class _CanvasViewState extends State<CanvasView> {
               Expanded(
                 child: Text(
                   p.moduleId + '.' + p.componentId +
+                      (offline ? ' · 离线' : '') +
                       (comp == null ? '（未知组件）' : ''),
-                  style: const TextStyle(fontSize: 11),
+                  style: TextStyle(
+                      fontSize: 11,
+                      color: offline ? Theme.of(context).disabledColor : null),
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
@@ -217,12 +284,20 @@ class _CanvasViewState extends State<CanvasView> {
               padding: const EdgeInsets.all(6),
               child: comp == null
                   ? const Center(child: Text('未知组件（已降级渲染）'))
-                  : ComponentView(
-                      moduleId: p.moduleId,
-                      component: comp,
-                      outbound: widget.outbound,
-                      tick: widget.tick,
-                      onAction: widget.onChanged,
+                  : Opacity(
+                      // 冻结禁用：样式保持、交互禁用，重连自动恢复
+                      opacity: offline ? 0.55 : 1.0,
+                      child: AbsorbPointer(
+                        absorbing: offline,
+                        child: ComponentView(
+                          moduleId: p.moduleId,
+                          component: comp,
+                          outbound: widget.outbound,
+                          tick: widget.tick,
+                          onAction: widget.onChanged,
+                          disabled: offline,
+                        ),
+                      ),
                     ),
             ),
           ),
