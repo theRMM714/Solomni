@@ -14,6 +14,9 @@ class LayoutStore {
                 '.')
             .replaceAll('\\', '/') + '/assistant_ui_flutter/layout.json');
 
+  /// 导出默认路径：与布局存储同目录（导入导出是用户数据可携带性）
+  String get defaultExportPath => _file.parent.path + '/layout-export.json';
+
   Future<LayoutDoc?> load() async {
     if (!await _file.exists()) return null;
     try {

@@ -12,6 +12,7 @@ class ComponentView extends StatelessWidget {
   final Outbound? outbound;
   final int tick;
   final VoidCallback onAction;
+  final bool disabled; // 离线冻结：不刷新数据、禁用交互，保持最后状态
 
   const ComponentView({
     super.key,
@@ -20,6 +21,7 @@ class ComponentView extends StatelessWidget {
     required this.outbound,
     required this.tick,
     required this.onAction,
+    this.disabled = false,
   });
 
   @override
@@ -27,15 +29,27 @@ class ComponentView extends StatelessWidget {
     switch (component.kind) {
       case UiKind.textStream:
         return _FloorView(
-            moduleId: moduleId, bind: component.bind, outbound: outbound, tick: tick);
+            moduleId: moduleId,
+            bind: component.bind,
+            outbound: outbound,
+            tick: tick,
+            disabled: disabled);
       case UiKind.textInput:
       case UiKind.formField:
         return _InputView(
-            moduleId: moduleId, componentId: component.id, outbound: outbound, onAction: onAction);
+            moduleId: moduleId,
+            componentId: component.id,
+            outbound: outbound,
+            onAction: onAction,
+            disabled: disabled);
       case UiKind.list:
       case UiKind.textOutput:
         return _BoundTextView(
-            moduleId: moduleId, bind: component.bind, outbound: outbound, tick: tick);
+            moduleId: moduleId,
+            bind: component.bind,
+            outbound: outbound,
+            tick: tick,
+            disabled: disabled);
       default:
         return Center(child: Text('未知组件类型 ' + component.kind));
     }
@@ -48,9 +62,14 @@ class _FloorView extends StatefulWidget {
   final String? bind;
   final Outbound? outbound;
   final int tick;
+  final bool disabled;
 
   const _FloorView(
-      {required this.moduleId, required this.bind, required this.outbound, required this.tick});
+      {required this.moduleId,
+      required this.bind,
+      required this.outbound,
+      required this.tick,
+      this.disabled = false});
 
   @override
   State<_FloorView> createState() => _FloorViewState();
@@ -69,7 +88,7 @@ class _FloorViewState extends State<_FloorView> {
   @override
   void didUpdateWidget(_FloorView old) {
     super.didUpdateWidget(old);
-    if (old.tick != widget.tick) _refresh();
+    if (old.tick != widget.tick && !widget.disabled) _refresh();
   }
 
   Future<void> _refresh() async {
@@ -130,9 +149,14 @@ class _InputView extends StatefulWidget {
   final String componentId;
   final Outbound? outbound;
   final VoidCallback onAction;
+  final bool disabled;
 
   const _InputView(
-      {required this.moduleId, required this.componentId, required this.outbound, required this.onAction});
+      {required this.moduleId,
+      required this.componentId,
+      required this.outbound,
+      required this.onAction,
+      this.disabled = false});
 
   @override
   State<_InputView> createState() => _InputViewState();
@@ -183,7 +207,7 @@ class _InputViewState extends State<_InputView> {
       Expanded(
         child: TextField(
           controller: _ctl,
-          enabled: !_busy,
+          enabled: !_busy && !widget.disabled,
           decoration: const InputDecoration(isDense: true, hintText: '输入…'),
           onSubmitted: (_) => _submit(),
         ),
@@ -205,9 +229,14 @@ class _BoundTextView extends StatefulWidget {
   final String? bind;
   final Outbound? outbound;
   final int tick;
+  final bool disabled;
 
   const _BoundTextView(
-      {required this.moduleId, required this.bind, required this.outbound, required this.tick});
+      {required this.moduleId,
+      required this.bind,
+      required this.outbound,
+      required this.tick,
+      this.disabled = false});
 
   @override
   State<_BoundTextView> createState() => _BoundTextViewState();
@@ -226,7 +255,7 @@ class _BoundTextViewState extends State<_BoundTextView> {
   @override
   void didUpdateWidget(_BoundTextView old) {
     super.didUpdateWidget(old);
-    if (old.tick != widget.tick) _refresh();
+    if (old.tick != widget.tick && !widget.disabled) _refresh();
   }
 
   Future<void> _refresh() async {

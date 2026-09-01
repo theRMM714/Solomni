@@ -93,43 +93,10 @@ class LayoutDoc {
   }
 }
 
-/// 布局引擎：从贡献生成初始画布 + 放置规则 + 增删改
+/// 布局引擎：放置规则 + 增删改（画布由用户创建，无自动初始布局——空白起步）
 class LayoutEngine {
   var _seq = 0;
   String _newId() => 'canvas-' + (_seq++).toString();
-
-  /// 初始布局：public 组件进默认画布；各模块 private 组件进其私有画布
-  LayoutDoc initial(List<Contributed> found) {
-    final doc = LayoutDoc();
-    final def = CanvasDoc(_newId(), '默认画布');
-    var col = 0;
-    for (final c in found) {
-      for (final comp in c.contribution.components) {
-        if (comp.scope == UiScope.public) {
-          def.placements.add(Placement(c.moduleId, comp.id,
-              x: 24.0 + (col % 2) * 300, y: 24.0 + (col ~/ 2) * 200));
-          col++;
-        }
-      }
-    }
-    if (def.placements.isNotEmpty) doc.canvases.add(def);
-    for (final c in found) {
-      final privates = c.contribution.components
-          .where((k) => k.scope == UiScope.private)
-          .toList();
-      if (privates.isEmpty) continue;
-      final own = CanvasDoc(_newId(), c.moduleId + ' 私有画布',
-          ownerModuleId: c.moduleId);
-      var i = 0;
-      for (final comp in privates) {
-        own.placements.add(Placement(c.moduleId, comp.id,
-            x: 24.0 + (i % 2) * 300, y: 24.0 + (i ~/ 2) * 200));
-        i++;
-      }
-      doc.canvases.add(own);
-    }
-    return doc;
-  }
 
   /// 放置规则：private 仅其所属模块的画布；public 任意画布
   bool canPlace(CanvasDoc canvas, PaletteEntry entry) =>
@@ -146,6 +113,19 @@ class LayoutEngine {
     final c = CanvasDoc(_newId(), title, ownerModuleId: ownerModuleId);
     doc.canvases.add(c);
     return c;
+  }
+
+  /// 导入布局：整体替换（画布 id 重新生成，保持引擎序号一致，避免后续新建撞 id）
+  LayoutDoc importFrom(Map<String, Object?> j) {
+    final src = LayoutDoc.fromJson(j);
+    final doc = LayoutDoc();
+    for (final c in src.canvases) {
+      final fresh = newCanvas(doc, c.title, ownerModuleId: c.ownerModuleId);
+      for (final p in c.placements) {
+        fresh.placements.add(Placement.fromJson(p.toJson()));
+      }
+    }
+    return doc;
   }
 
   void move(Placement p, double dx, double dy) {

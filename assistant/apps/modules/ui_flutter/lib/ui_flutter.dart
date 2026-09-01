@@ -1,5 +1,5 @@
 /// ui_flutter 模块程序：UI 也是普通模块（渲染器）。
-/// 声明为空：本模块不提供共同物，只消费贡献与路由事件。
+/// 命令执行消费 ui.command（由 ui_cli 等模块提供，无提供方则降级禁用）。
 library;
 
 import 'package:protocol/protocol.dart';
@@ -10,7 +10,9 @@ final class UiFlutterProgram implements ModuleProgram {
   Outbound? outbound;
 
   @override
-  Declaration get declaration => const Declaration('ui_flutter');
+  Declaration get declaration => const Declaration('ui_flutter', needs: [
+        Need('ui.command', NeedVia.preferShared),
+      ]);
 
   @override
   ModuleHandler bind(Outbound outbound) {
