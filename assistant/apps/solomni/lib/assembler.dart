@@ -85,6 +85,13 @@ String defaultModulesDir() {
   return self!.resolve('../../modules').toFilePath();
 }
 
+/// 仓库根：开发态外部模块的包装命令在 bin/ 下（打包态将换成预编译产物）
+String repoRoot() {
+  final self =
+      Isolate.resolvePackageUriSync(Uri.parse('package:solomni/assembler.dart'));
+  return self!.resolve('../../../..').toFilePath();
+}
+
 /// 装配：目录发现 -> 逐模块连接（hello 经协议到达）-> 替身连入 ->
 /// 装配期校验（显式接线指向未知则失败；配对随成员变化自动维护）。
 Future<Assembled> assemble({

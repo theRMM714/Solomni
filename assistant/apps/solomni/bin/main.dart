@@ -9,7 +9,8 @@ import 'dart:io';
 import 'package:solomni/assembler.dart';
 
 /// 拉起外部模块进程：守护入口 bin/coordinated.dart，端口由产品注入。
-/// Flutter 模块走 flutter run（需 PATH 与本机设备），纯 Dart 模块走当前 VM。
+/// Flutter 模块经仓库内包装命令（开发态；PATH 的 flutter 兜底）；
+/// 纯 Dart 模块走当前 VM。Windows 的 .bat 必须经 cmd.exe 执行。
 Future<Process> _spawnModule(ModuleFolder f, int port) async {
   final pubspec = File(f.path + '/pubspec.yaml');
   final isFlutter = pubspec.existsSync() &&
@@ -20,13 +21,37 @@ Future<Process> _spawnModule(ModuleFolder f, int port) async {
         : Platform.isWindows
             ? 'windows'
             : 'macos';
-    return Process.start('flutter', [
+    final args = [
       'run', '-t', 'bin/coordinated.dart', '-d', device, '--', '--port=' + port.toString(),
-    ], workingDirectory: f.path, mode: ProcessStartMode.inheritStdio);
+    ];
+    final sep = Platform.isWindows ? r'\' : '/';
+    final wrapper = repoRoot() + sep + 'bin' + sep +
+        (Platform.isWindows ? 'flutter.bat' : 'flutter');
+    if (File(wrapper).existsSync()) {
+      // 仓库包装命令：与产品同一套 SDK/缓存环境
+      if (Platform.isWindows) {
+        return Process.start('cmd.exe', ['/c', wrapper, ...args],
+            workingDirectory: f.path,
+            mode: ProcessStartMode.inheritStdio);
+      }
+      return Process.start(wrapper, args,
+          workingDirectory: f.path, mode: ProcessStartMode.inheritStdio);
+    }
+    return Process.start('flutter', args,
+        workingDirectory: f.path, mode: ProcessStartMode.inheritStdio);
   }
   return Process.start(Platform.resolvedExecutable, [
     'bin/coordinated.dart', '--port=' + port.toString(),
   ], workingDirectory: f.path, mode: ProcessStartMode.inheritStdio);
+}
+
+/// 终止外部模块进程：Windows 下 cmd 的子进程不随父死，须杀进程树
+Future<void> _killProcess(Process p) async {
+  if (Platform.isWindows) {
+    await Process.run('taskkill', ['/PID', p.pid.toString(), '/T', '/F']);
+  } else {
+    p.kill();
+  }
 }
 
 Future<void> main(List<String> args) async {
@@ -97,7 +122,7 @@ Future<void> main(List<String> args) async {
   // Ctrl+C：产品进程消亡，外部模块进程随之终止
   unawaited(ProcessSignal.sigint.watch().first.then((_) async {
     for (final p in procs) {
-      p.kill();
+      await _killProcess(p);
     }
     exit(130);
   }));
@@ -140,7 +165,7 @@ Future<void> _repl(Assembled asm, List<Process> procs) async {
     }
   }
   for (final p in procs) {
-    p.kill();
+    await _killProcess(p);
   }
   exit(0);
 }
