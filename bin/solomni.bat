@@ -1,4 +1,4 @@
 @echo off
-rem bin\solomni.bat -- 产品启动器薄壳（Windows）；实现在 solomni.mjs
+rem bin\solomni.bat -- product launcher thin shell (Windows); logic in solomni.mjs
 node "%~dp0solomni.mjs" %*
 exit /b %ERRORLEVEL%
