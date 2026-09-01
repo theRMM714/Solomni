@@ -7,7 +7,8 @@ import 'package:protocol/outbound.dart';
 import 'package:ui_vocab/ui_vocab.dart';
 
 class SecretsModule {
-  final _store = <String, String>{'llm': 'builtin-key-000'};
+  /// 未写入的密钥不存在（无默认值：无密钥的后果由消费方自决，见 PRODUCT.md）
+  final _store = <String, String>{};
 
   Future<Object?> get(String name) async => _store[name];
   Future<Object?> put(String name, String value) async {

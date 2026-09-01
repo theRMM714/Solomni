@@ -52,8 +52,9 @@ SDK 与缓存按平台分目录，Windows 与 WSL 共用同一个仓库时互不
     cd assistant/packages/ui_canvas
     ../../../bin/dart tool/canvas_test.dart
 
-    # 跑桌面协作演示（CLI 渲染器）
-    cd assistant/apps/desktop_demo
+    # 跑产品验收与终端 REPL（CLI 交互）
+    cd assistant/apps/solomni
+    ../../../bin/dart tool/smoke.dart
     ../../../bin/dart bin/main.dart
 
     # Flutter UI 模块

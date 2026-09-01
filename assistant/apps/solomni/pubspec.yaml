@@ -1,5 +1,5 @@
-name: desktop_demo
-description: 桌面产品：目录发现 + TCP 拓扑。装配者=策略所在。
+name: solomni
+description: 产品：装配者 + 终端交互。启动/发现/排除/外部拉起/退出是本产品的唯一策略。
 environment:
   sdk: ^3.5.0
 

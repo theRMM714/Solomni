@@ -6,7 +6,6 @@ import 'package:protocol/protocol.dart';
 
 export 'exchange.dart';
 export 'tcp.dart';
-export 'loader.dart';
 
 /// 校验失败（重复 id、成环、接线指向未知）：装配期/接入期 fail-fast，绝不静默决策
 class WiringException implements Exception {

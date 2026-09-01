@@ -236,8 +236,9 @@ class BrokerDaemon {
         if (env.kind == EnvelopeKind.ok) {
           done.complete(env.params);
         } else {
+          // wireError 还原错误对象；错误体本身畸形时以还原失败为准
           try {
-            wireError(env.params);
+            done.completeError(wireError(env.params));
           } catch (e) {
             done.completeError(e);
           }
