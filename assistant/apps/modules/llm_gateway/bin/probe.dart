@@ -2,17 +2,21 @@
 library;
 
 import 'dart:io';
-import 'package:http/http.dart' as http;
 
 Future<void> main(List<String> args) async {
   final url = args.isNotEmpty ? args[0] : 'https://api.deepseek.com/chat/completions';
+  final client = HttpClient();
   try {
-    final resp = await http.post(Uri.parse(url),
-        headers: {'Authorization': 'Bearer probe-no-key'},
-        body: '{"model":"deepseek-chat","messages":[]}');
+    final req = await client.postUrl(Uri.parse(url));
+    req.headers.set('Authorization', 'Bearer probe-no-key');
+    req.headers.set('Content-Type', 'application/json');
+    req.write('{"model":"deepseek-chat","messages":[]}');
+    final resp = await req.close();
+    await resp.drain<void>();
     print('连通 OK，HTTP ' + resp.statusCode.toString() + '（401=认证拒绝，符合预期）');
   } catch (e) {
     print('连通失败: ' + e.toString());
   }
+  client.close(force: true);
   exit(0);
 }
