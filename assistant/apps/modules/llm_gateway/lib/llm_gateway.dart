@@ -5,7 +5,6 @@ library;
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'package:http/http.dart' as http;
 import 'package:protocol/protocol.dart';
 import 'package:protocol/outbound.dart';
 
@@ -52,27 +51,37 @@ Stream<String> gatewayChatStream(Outbound out, List<dynamic> messages,
   if (key == null || key.isEmpty) {
     throw StateError('未配置密钥 llm，无法调用 LLM');
   }
-  final req = http.Request('POST', Uri.parse(url))
-    ..headers['Authorization'] = 'Bearer ' + key
-    ..headers['Content-Type'] = 'application/json'
-    ..body = jsonEncode({'model': m, 'messages': messages, 'stream': true});
-  final resp = await http.Client().send(req);
-  if (resp.statusCode != 200) {
-    final body = await resp.stream.bytesToString();
-    throw StateError('LLM HTTP ' + resp.statusCode.toString() + ': ' + body);
-  }
-  await for (final line in resp.stream
-      .transform(utf8.decoder)
-      .transform(const LineSplitter())) {
-    if (!line.startsWith('data:')) continue;
-    final data = line.substring(5).trim();
-    if (data == '[DONE]') return;
-    final j = jsonDecode(data) as Map;
-    final choices = j['choices'] as List?;
-    if (choices == null || choices.isEmpty) continue;
-    final delta = (choices.first as Map)['delta'] as Map?;
-    final content = delta?['content'];
-    if (content is String && content.isNotEmpty) yield content;
+  // dart:io HttpClient：SDK 自带，仓库保持零 hosted 依赖（package_config 全相对路径）
+  final client = HttpClient();
+  try {
+    final req = await client.postUrl(Uri.parse(url));
+    req.headers.set('Authorization', 'Bearer ' + key);
+    req.headers.set('Content-Type', 'application/json');
+    // 显式 UTF-8 字节 + 定长：write(String) 会按槽默认 latin1 编码，中文炸
+    final body = utf8.encode(jsonEncode(
+        {'model': m, 'messages': messages, 'stream': true}));
+    req.contentLength = body.length;
+    req.add(body);
+    final resp = await req.close();
+    if (resp.statusCode != 200) {
+      final body = await resp.transform(utf8.decoder).join();
+      throw StateError('LLM HTTP ' + resp.statusCode.toString() + ': ' + body);
+    }
+    await for (final line in resp
+        .transform(utf8.decoder)
+        .transform(const LineSplitter())) {
+      if (!line.startsWith('data:')) continue;
+      final data = line.substring(5).trim();
+      if (data == '[DONE]') return;
+      final j = jsonDecode(data) as Map;
+      final choices = j['choices'] as List?;
+      if (choices == null || choices.isEmpty) continue;
+      final delta = (choices.first as Map)['delta'] as Map?;
+      final content = delta?['content'];
+      if (content is String && content.isNotEmpty) yield content;
+    }
+  } finally {
+    client.close(force: true); // 消费方中途取消也保证回收
   }
 }
 

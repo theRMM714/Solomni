@@ -8,6 +8,3 @@ dependencies:
     path: ../protocol
   transport:
     path: ../transport
-
-dev_dependencies:
-  test: ^1.25.0

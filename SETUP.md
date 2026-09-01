@@ -65,6 +65,19 @@ SDK 与缓存按平台分目录，Windows 与 WSL 共用同一个仓库时互不
 说明：wrapper 会先设置 PUB_CACHE/TMP/HOME 再调用本地 SDK，因此你永远不需要手动改
 环境变量或路径；换平台同理，行为完全一致。
 
+## 绝对路径纪律（跨平台可移植性）
+
+仓库保持零 hosted 依赖（llm_gateway 用 dart:io HttpClient 直调，core 用 tool/ 自定义
+测试规约），因此除 ui_flutter 外**所有包的 .dart_tool/package_config.json 都是纯相对
+路径**——Windows 与 WSL 共用一个仓库目录时，这些包两侧通用，切侧零成本。
+
+唯一例外 ui_flutter：`sdk: flutter` 依赖由 Flutter 工具链解析成本地 SDK 绝对路径
+（工具链写死 .dart_tool 位置，无法相对化）。两侧共用目录且都要跑 Flutter 工具时，
+切到另一侧跑 GUI 前先执行一次：
+
+    cd assistant/apps/modules/ui_flutter
+    ../../../../bin/flutter pub get    # Windows 侧用 ..\..\..\..\bin\flutter.bat
+
 ## 版本 / 镜像覆盖
 默认用国内 flutter-io 镜像，版本锁定为与当前开发一致的：
 - Dart SDK:    3.12.2
