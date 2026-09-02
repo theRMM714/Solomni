@@ -196,6 +196,13 @@ packages:
       relative: true
     source: path
     version: "0.0.0"
+  user_data:
+    dependency: "direct main"
+    description:
+      path: "../../../packages/user_data"
+      relative: true
+    source: path
+    version: "0.0.0"
   vector_math:
     dependency: transitive
     description:

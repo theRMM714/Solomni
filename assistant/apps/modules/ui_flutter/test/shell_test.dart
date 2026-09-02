@@ -6,6 +6,7 @@ library;
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:protocol/outbound.dart';
@@ -17,6 +18,7 @@ import 'package:ui_vocab/ui_vocab.dart';
 
 /// 内存布局存储：测试替换默认文件存储（DIP 注入点）
 class _MemStore extends LayoutStore {
+  _MemStore() : super(file: File('mem_layout.json'));
   LayoutDoc? saved;
 
   @override

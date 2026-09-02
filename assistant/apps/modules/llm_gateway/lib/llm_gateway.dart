@@ -47,7 +47,7 @@ Stream<String> gatewayChatStream(Outbound out, List<dynamic> messages,
       '/chat/completions';
   final m = model ?? Platform.environment['LLM_MODEL'] ?? 'deepseek-chat';
   final key = await _apiKey(out);
-  // 无密钥直接拒绝（拿不到密钥就不发起调用）：聊天链路自决，产品入口不参与
+  // 无密钥直接拒绝（拿不到密钥就不发起调用）：聊天链路自决，宿主不参与
   if (key == null || key.isEmpty) {
     throw StateError('未配置密钥 llm，无法调用 LLM');
   }
@@ -96,6 +96,7 @@ final class LlmGatewayProgram implements ModuleProgram {
   @override
   Declaration get declaration => const Declaration(
         'llm_gateway',
+        kind: ModuleKind.service,
         provides: [Provide(Caps.llmChat)],
         needs: [Need(Caps.secretsGet, NeedVia.preferShared)],
       );

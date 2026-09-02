@@ -3,9 +3,12 @@
 /// llm.chat 用 prefer-shared（无共享时内建直连兜底）。
 library;
 
+import 'dart:convert';
+import 'dart:io';
 import 'package:protocol/protocol.dart';
 import 'package:protocol/outbound.dart';
 import 'package:ui_vocab/ui_vocab.dart';
+import 'package:user_data/user_data.dart';
 
 // ---- 需求端口：内建与共享插同一个口 ----
 
@@ -46,11 +49,36 @@ final class CoordinatedLlm implements LlmPort {
 class ConversationModule {
   final LlmPort _llm;
   final _messages = <Map<String, Object?>>[];
+  final File _file;
+  bool _loaded = false;
 
-  ConversationModule(this._llm);
+  ConversationModule(this._llm, {File? store})
+      : _file = store ?? UserData.file('conversation', 'history.json');
+
+  /// 历史持久化：数据归模块，落在 userdata/（模块自己文件夹内）
+  Future<void> _ensureLoaded() async {
+    if (_loaded) return;
+    _loaded = true;
+    if (await _file.exists()) {
+      try {
+        final j = jsonDecode(await _file.readAsString()) as List;
+        for (final m in j) {
+          _messages.add(Map<String, Object?>.from(m as Map));
+        }
+      } catch (_) {
+        // 历史损坏则从空开始，不崩溃
+      }
+    }
+  }
+
+  Future<void> _save() async {
+    await _file.parent.create(recursive: true);
+    await _file.writeAsString(jsonEncode(_messages));
+  }
 
   /// 多轮：历史 + 本条 -> LLM -> token 直通消费方，完整回复落史
   Stream<String> send(String text) async* {
+    await _ensureLoaded();
     _messages.add({'role': 'user', 'content': text});
     final buf = StringBuffer();
     await for (final t in _llm.chat(List.unmodifiable(_messages))) {
@@ -58,9 +86,13 @@ class ConversationModule {
       yield t;
     }
     _messages.add({'role': 'assistant', 'content': buf.toString()});
+    await _save();
   }
 
-  List<Map<String, Object?>> get history => List.unmodifiable(_messages);
+  Future<List<Map<String, Object?>>> history() async {
+    await _ensureLoaded();
+    return List.unmodifiable(_messages);
+  }
 }
 
 // ---- 模块程序：自治程序对外的全部 ----
@@ -69,6 +101,7 @@ final class ConversationProgram implements ModuleProgram {
   @override
   Declaration get declaration => const Declaration(
         'conversation',
+        kind: ModuleKind.service,
         provides: [
           Provide(Caps.chatSend),
           Provide(Caps.chatHistory),
@@ -108,7 +141,7 @@ final class ConversationProgram implements ModuleProgram {
         return Streamed(conv.send(text));
       }
       if (env.method == Caps.chatHistory) {
-        return conv.history;
+        return await conv.history();
       }
       if (env.method == UiCaps.contribution) {
         return contribution.toJson();

@@ -86,6 +86,9 @@ class BrokerDaemon {
   InternetAddress get address => _server.address;
   int get port => _server.port;
 
+  /// 注册表只读列举：宿主（装配）据此校验模块类型/在场事实，不改变核心机制
+  List<Declaration> get declarations => _ex.declarations;
+
   /// 装配期校验（显式接线指向未知则失败）；配对本身随成员变化自动维护
   Future<void> start({Map<String, Map<String, String>>? explicit}) async {
     _ex.start(explicit: explicit ?? const {});

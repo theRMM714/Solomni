@@ -58,7 +58,7 @@
 
 ## 布局数据（用户数据）
 
-- 自动持久化（LayoutStore，现状保留）
+- 自动持久化（LayoutStore -> 模块内 `userdata/layout.json`，经 user_data 包锚定）
 - **导入 / 导出**：LayoutDoc 序列化为 JSON 文件；导入即整体替换当前布局
   （画布 id 重新生成，避免与已存布局冲突）
 

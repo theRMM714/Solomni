@@ -1,5 +1,6 @@
-/// ui_flutter 模块程序：UI 也是普通模块（渲染器）。
-/// 命令执行消费 ui.command（由 ui_cli 等模块提供，无提供方则降级禁用）。
+/// ui_flutter 模块程序：UI 也是普通模块（GUI 渲染器，交互面）。
+/// 只渲染各模块 ui.contribution 并把手势经 ui.event 定向路由回声明模块；
+/// 命令执行不在此处（命令是文本交互面的词汇，GUI 纯图形）。
 library;
 
 import 'package:protocol/protocol.dart';
@@ -10,9 +11,10 @@ final class UiFlutterProgram implements ModuleProgram {
   Outbound? outbound;
 
   @override
-  Declaration get declaration => const Declaration('ui_flutter', needs: [
-        Need('ui.command', NeedVia.preferShared),
-      ]);
+  Declaration get declaration => const Declaration(
+        'ui_flutter',
+        kind: ModuleKind.surface,
+      );
 
   @override
   ModuleHandler bind(Outbound outbound) {

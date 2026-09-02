@@ -75,7 +75,7 @@ void main() async {
   check('多提供方无表态 -> Candidates（附候选清单）',
       _same(cand, ['llm_a', 'llm_b']));
 
-  // 4. 显式接线：装配者的权力（只影响路由，不改事实集合）
+  // 4. 显式接线：部署者的权力（只影响路由，不改事实集合）
   ex3.start(explicit: {
     'conversation': {Caps.llmChat: 'llm_b'}
   });

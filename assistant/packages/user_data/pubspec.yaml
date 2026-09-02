@@ -1,0 +1,4 @@
+name: user_data
+description: 模块私有数据目录约定：<模块根>/userdata，锚定模块包自身（与运行 cwd 无关）。
+environment:
+  sdk: ^3.5.0
