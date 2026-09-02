@@ -1,4 +1,5 @@
-/// 画布区：tab 常驻（新建画布入口可达）；组件经"+"选择器进入（规则过滤）；
+/// 画布区：顶部画布栏是主导航——点击切换、×删除（确认）、[新建画布]弹窗二选一
+/// （模块画布/自定义画布）；组件经"+"选择器进入（规则过滤）；
 /// 离线模块的组件冻结禁用（贡献缓存渲染），重连自动恢复。
 /// 组件 id 不可改（契约）；位置/尺寸/样式归本模块。
 library;
@@ -8,6 +9,7 @@ import 'package:protocol/outbound.dart';
 import 'package:ui_canvas/ui_canvas.dart';
 import 'package:ui_vocab/ui_vocab.dart';
 import 'component_views.dart';
+import 'new_canvas_dialog.dart';
 
 /// 组件查询结果：comp 为 null 且 offline=false 表示从未见过（占位降级）
 class _Lookup {
@@ -25,7 +27,9 @@ class CanvasArea extends StatelessWidget {
   final int tick;
   final Outbound? outbound;
   final ValueChanged<int> onSelectTab;
-  final void Function(String title) onNewCanvas;
+  final ValueChanged<String> onModuleCanvas; // 新建模块画布（弹窗选择后）
+  final void Function(String title) onCustomCanvas; // 新建自定义画布
+  final ValueChanged<int> onDeleteCanvas; // 删除画布（含确认，归 shell）
   final VoidCallback onChanged;
 
   const CanvasArea({
@@ -38,7 +42,9 @@ class CanvasArea extends StatelessWidget {
     required this.tick,
     required this.outbound,
     required this.onSelectTab,
-    required this.onNewCanvas,
+    required this.onModuleCanvas,
+    required this.onCustomCanvas,
+    required this.onDeleteCanvas,
     required this.onChanged,
   });
 
@@ -55,12 +61,27 @@ class CanvasArea extends StatelessWidget {
           for (var i = 0; i < layout.canvases.length; i++)
             Padding(
               padding: const EdgeInsets.all(6),
-              child: ChoiceChip(
+              child: InputChip(
+                avatar: Icon(
+                    layout.canvases[i].ownerModuleId != null
+                        ? Icons.extension
+                        : Icons.dashboard_outlined,
+                    size: 14),
                 label: Text(layout.canvases[i].title),
                 selected: i == tab,
-                onSelected: (_) => onSelectTab(i),
+                onPressed: () => onSelectTab(i),
+                onDeleted: () => onDeleteCanvas(i),
+                deleteIcon: const Icon(Icons.close, size: 16),
               ),
             ),
+          Padding(
+            padding: const EdgeInsets.all(6),
+            child: ActionChip(
+              avatar: const Icon(Icons.add, size: 16),
+              label: const Text('新建画布'),
+              onPressed: () => _openNewDialog(context),
+            ),
+          ),
           if (current != null)
             Padding(
               padding: const EdgeInsets.all(6),
@@ -70,21 +91,12 @@ class CanvasArea extends StatelessWidget {
                 onPressed: () => _pickComponent(context, current),
               ),
             ),
-          Padding(
-            padding: const EdgeInsets.all(6),
-            child: ActionChip(
-              avatar: const Icon(Icons.add, size: 16),
-              label: const Text('新建画布'),
-              onPressed: () => _promptNew(context),
-            ),
-          ),
         ]),
       ),
       const Divider(height: 1),
       Expanded(
         child: current == null
-            ? const Center(
-                child: Text('无画布：从左侧模块列表创建模块画布，或新建自定义画布'))
+            ? _emptyState(context)
             : CanvasView(
                 engine: engine,
                 canvas: current,
@@ -96,6 +108,30 @@ class CanvasArea extends StatelessWidget {
               ),
       ),
     ]);
+  }
+
+  /// 空状态：唯一动作就是创建第一张画布（弹窗二选一）
+  Widget _emptyState(BuildContext context) => Center(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Icon(Icons.dashboard_outlined,
+              size: 44, color: Theme.of(context).disabledColor),
+          const SizedBox(height: 8),
+          const Text('还没有画布'),
+          const SizedBox(height: 12),
+          FilledButton.icon(
+            icon: const Icon(Icons.add),
+            label: const Text('新建画布'),
+            onPressed: () => _openNewDialog(context),
+          ),
+        ]),
+      );
+
+  void _openNewDialog(BuildContext context) {
+    showNewCanvasDialog(context,
+        found: found,
+        layout: layout,
+        onModuleCanvas: onModuleCanvas,
+        onCustomCanvas: onCustomCanvas);
   }
 
   /// "+"选择器：内容 = canPlace 规则过滤后的全部组件（边界由构造保证）
@@ -142,30 +178,6 @@ class CanvasArea extends StatelessWidget {
             },
           ),
       ]),
-    );
-  }
-
-  Future<void> _promptNew(BuildContext context) async {
-    final ctl = TextEditingController();
-    await showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('新建自定义画布'),
-        content: TextField(controller: ctl, autofocus: true),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('取消'),
-          ),
-          FilledButton(
-            onPressed: () {
-              if (ctl.text.trim().isNotEmpty) onNewCanvas(ctl.text.trim());
-              Navigator.pop(ctx);
-            },
-            child: const Text('创建'),
-          ),
-        ],
-      ),
     );
   }
 }
