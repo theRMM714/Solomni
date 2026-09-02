@@ -1,6 +1,7 @@
-/// ui_flutter 模块测试：mock Outbound（无核心）驱动发现/画布创建/选择器/事件路由全链路。
+/// ui_flutter 模块测试：mock Outbound（无核心）驱动发现/画布创建/删除/选择器/事件路由全链路。
 /// LayoutStore 注入内存实现，不落盘、不依赖网络与核心。
-/// 覆盖 DESIGN.md：空白起步、模块画布创建、"+"规则过滤、离线冻结、命令执行、导入导出。
+/// 覆盖 DESIGN.md：空白起步、新建画布弹窗（模块画布/自定义画布）、"+"规则过滤、
+/// 画布删除、离线冻结、命令不出现在 GUI、导入导出。
 library;
 
 import 'dart:async';
@@ -25,8 +26,7 @@ class _MemStore extends LayoutStore {
   Future<void> save(LayoutDoc doc) async => saved = doc;
 }
 
-/// mock 出边：rpc 应答 core.modules 与 ui.command；
-/// 定向 call 按 "模块id.方法" 查 responses 应答并记录全部调用
+/// mock 出边：rpc 应答 core.modules；定向 call 按 "模块id.方法" 查 responses 应答并记录全部调用
 class _MockOutbound implements Outbound {
   final List<String> moduleIds;
   final Map<String, Object?> responses;
@@ -44,10 +44,6 @@ class _MockOutbound implements Outbound {
                 provides: [Provide(UiCaps.contribution), Provide(UiCaps.event)]).toJson(),
         ],
       };
-    }
-    if (method == 'ui.command') {
-      calls.add(('core', method, params));
-      return 'ok';
     }
     throw NoProviderException(method);
   }
@@ -67,7 +63,8 @@ class _MockOutbound implements Outbound {
   Stream<WiringSnapshot> get wiring => wiringController.stream;
 }
 
-/// 模拟 conversation + secrets 两模块的贡献（与真实模块声明一致）
+/// 模拟 conversation + secrets 两模块的贡献（与真实模块声明一致）：
+/// conversation 全公共组件；secrets 全私有组件（模块画布候选）
 _MockOutbound _demoOutbound() => _MockOutbound(
       moduleIds: ['conversation', 'secrets'],
       responses: {
@@ -77,10 +74,6 @@ _MockOutbound _demoOutbound() => _MockOutbound(
                 label: '对话楼层', bind: Caps.chatHistory),
             UiComponent('chat_input', UiKind.textInput, label: '输入', bind: Caps.chatSend),
           ],
-          commands: [
-            UiCommand('send', args: ['text'],
-                description: '发送一条消息', component: 'chat_input', event: 'submit'),
-          ],
         ).toJson(),
         'secrets.ui.contribution': const UiContribution(
           components: [
@@ -88,10 +81,6 @@ _MockOutbound _demoOutbound() => _MockOutbound(
                 scope: UiScope.private, label: 'API Key', bind: Caps.secretsPut),
             UiComponent('key_list', UiKind.list,
                 scope: UiScope.private, label: '已存密钥', bind: Caps.secretsGet),
-          ],
-          commands: [
-            UiCommand('set-key', args: ['name', 'value'],
-                description: '写入密钥', component: 'key_input', event: 'submit'),
           ],
         ).toJson(),
         'conversation.${Caps.chatHistory}': [
@@ -101,68 +90,80 @@ _MockOutbound _demoOutbound() => _MockOutbound(
       },
     );
 
-/// 建一张自定义画布并经"+"选择器放置组件（模拟用户操作路径）
-Future<void> _addViaPicker(
-    WidgetTester tester, String canvasTitle, String entryTitle) async {
-  await tester.tap(find.text('新建画布'));
+/// 新建画布按钮定位：空状态用 CTA（FilledButton.icon 是子类型，须 bySubtype），
+/// 有画布后用画布栏 chip（同一弹窗）
+Finder _newCanvasButton(WidgetTester tester) {
+  final cta = find.ancestor(
+      of: find.text('新建画布'), matching: find.bySubtype<FilledButton>());
+  return cta.evaluate().isNotEmpty
+      ? cta
+      : find.widgetWithText(ActionChip, '新建画布');
+}
+
+/// 经弹窗建一张自定义画布
+Future<void> _newCustom(WidgetTester tester, String title) async {
+  await tester.tap(_newCanvasButton(tester));
   await tester.pumpAndSettle();
-  await tester.enterText(find.byType(TextField), canvasTitle);
+  await tester.enterText(find.byType(TextField), title);
   await tester.tap(find.text('创建'));
   await tester.pumpAndSettle();
-  await tester.tap(find.text('添加组件'));
+}
+
+/// 经弹窗建一张模块画布（.last：弹窗覆盖层在树尾，避开同名画布 chip）
+Future<void> _newModule(WidgetTester tester, String moduleId) async {
+  await tester.tap(_newCanvasButton(tester));
   await tester.pumpAndSettle();
-  await tester.tap(find.text(entryTitle));
+  await tester.tap(find.text(moduleId).last);
   await tester.pumpAndSettle();
 }
 
 void main() {
-  testWidgets('standalone：无核心 -> 无模块提示 + 徽标', (tester) async {
+  testWidgets('standalone：无核心 -> 空状态 + 徽标 + 弹窗仅自定义', (tester) async {
     await tester.pumpWidget(UiShell(store: _MemStore()));
     await tester.pumpAndSettle();
-    expect(find.text('无模块声明 UI'), findsOneWidget);
+    expect(find.text('还没有画布'), findsOneWidget);
     expect(find.text('未连接核心（standalone）'), findsOneWidget);
+    await tester.tap(find.ancestor(of: find.text("新建画布"), matching: find.bySubtype<FilledButton>()));
+    await tester.pumpAndSettle();
+    expect(find.text('暂无含私有组件的模块'), findsOneWidget);
+    expect(find.text('自定义画布'), findsOneWidget);
+    expect(find.text('secrets'), findsNothing); // 无模块候选
+    await tester.tap(find.text('取消'));
   });
 
-  testWidgets('发现：左面板列模块与命令，不列组件', (tester) async {
+  testWidgets('新建弹窗：模块画布只列含私有组件的模块；命令不出现在 GUI', (tester) async {
     await tester.pumpWidget(UiShell(outbound: _demoOutbound(), store: _MemStore()));
     await tester.pumpAndSettle();
-    expect(find.text('conversation'), findsOneWidget);
+    await tester.tap(find.ancestor(of: find.text("新建画布"), matching: find.bySubtype<FilledButton>()));
+    await tester.pumpAndSettle();
+    expect(find.text('secrets'), findsOneWidget); // 含私有组件 -> 候选
+    expect(find.text('conversation'), findsNothing); // 全公共 -> 不列
+    // 命令是文本交互面（REPL）的词汇，GUI 不渲染（设计回归守卫）
+    expect(find.text('set-key'), findsNothing);
+    expect(find.text('send'), findsNothing);
+    await tester.tap(find.text('取消'));
+  });
+
+  testWidgets('模块画布创建：空白起步 + 每模块一张（已创建禁用）', (tester) async {
+    await tester.pumpWidget(UiShell(outbound: _demoOutbound(), store: _MemStore()));
+    await tester.pumpAndSettle();
+    await _newModule(tester, 'secrets');
+    // 画布栏出现模块画布 chip；模块列表已不存在（左栏已删）
     expect(find.text('secrets'), findsOneWidget);
-    expect(find.text('send'), findsOneWidget);
-    expect(find.text('set-key'), findsOneWidget);
-    // 组件不再是全局列表（入口在画布"+"）
-    expect(find.text('chat_floor'), findsNothing);
-    expect(find.text('key_input'), findsNothing);
-  });
-
-  testWidgets('空白起步：无保存布局 -> 无画布，但创建入口可达', (tester) async {
-    await tester.pumpWidget(UiShell(outbound: _demoOutbound(), store: _MemStore()));
+    // 空白起步：组件不自动预置，经"+"进入
+    expect(find.text('secrets.key_input'), findsNothing);
+    // 每模块一张：重开弹窗，候选禁用
+    await tester.tap(find.widgetWithText(ActionChip, '新建画布'));
     await tester.pumpAndSettle();
-    expect(find.text('无画布：从左侧模块列表创建模块画布，或新建自定义画布'),
-        findsOneWidget);
-    expect(find.text('新建画布'), findsOneWidget);
-  });
-
-  testWidgets('模块画布创建：每模块一张，创建后入口消失', (tester) async {
-    await tester.pumpWidget(UiShell(outbound: _demoOutbound(), store: _MemStore()));
-    await tester.pumpAndSettle();
-    // secrets 有私有控件 -> 有创建入口；conversation 全公共 -> 没有
-    expect(find.text('创建画布'), findsOneWidget);
-    await tester.tap(find.text('创建画布'));
-    await tester.pumpAndSettle();
-    expect(find.text('secrets'), findsWidgets); // 模块名 + 画布 tab
-    // 每模块一张：入口不再出现
-    expect(find.text('创建画布'), findsNothing);
+    expect(find.text('已创建'), findsOneWidget);
+    await tester.tap(find.text('取消'));
   });
 
   testWidgets('“+”选择器：自定义画布只列公共组件', (tester) async {
     await tester.pumpWidget(UiShell(outbound: _demoOutbound(), store: _MemStore()));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('新建画布'));
-    await tester.pumpAndSettle();
-    await tester.enterText(find.byType(TextField), '我的画布');
-    await tester.tap(find.text('创建'));
-    await tester.pumpAndSettle();
+    await _newCustom(tester, '我的画布');
+    expect(find.text('我的画布'), findsOneWidget);
     await tester.tap(find.text('添加组件'));
     await tester.pumpAndSettle();
     // 公共组件可选
@@ -182,8 +183,7 @@ void main() {
   testWidgets('“+”选择器：模块画布含本模块私有组件', (tester) async {
     await tester.pumpWidget(UiShell(outbound: _demoOutbound(), store: _MemStore()));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('创建画布')); // secrets 模块画布
-    await tester.pumpAndSettle();
+    await _newModule(tester, 'secrets');
     await tester.tap(find.text('添加组件'));
     await tester.pumpAndSettle();
     expect(find.text('secrets.key_input'), findsOneWidget);
@@ -201,7 +201,11 @@ void main() {
     final mock = _demoOutbound();
     await tester.pumpWidget(UiShell(outbound: mock, store: _MemStore()));
     await tester.pumpAndSettle();
-    await _addViaPicker(tester, '对话画布', 'conversation.chat_input');
+    await _newCustom(tester, '对话画布');
+    await tester.tap(find.text('添加组件'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('conversation.chat_input'));
+    await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField), '早上好');
     await tester.tap(find.byIcon(Icons.send));
     await tester.pumpAndSettle();
@@ -216,32 +220,12 @@ void main() {
     expect(find.text('早上好'), findsNothing);
   });
 
-  testWidgets('命令可点击执行：弹参数 -> ui.command 路由', (tester) async {
-    final mock = _demoOutbound();
-    await tester.pumpWidget(UiShell(outbound: mock, store: _MemStore()));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('send')); // 左面板命令
-    await tester.pumpAndSettle();
-    await tester.enterText(find.byType(TextField), '你好世界');
-    await tester.tap(find.text('确定'));
-    await tester.pumpAndSettle();
-    final cmds =
-        mock.calls.where((c) => c.$2 == 'ui.command').toList();
-    expect(cmds, hasLength(1));
-    expect(cmds.single.$3, {
-      'name': 'send',
-      'args': ['你好世界'],
-    });
-    expect(find.text('send -> ok'), findsOneWidget); // 结果回显
-  });
-
   testWidgets('离线冻结：模块下线组件保留禁用，重连恢复', (tester) async {
     final mock = _demoOutbound();
     await tester.pumpWidget(UiShell(outbound: mock, store: _MemStore()));
     await tester.pumpAndSettle();
     // 建 secrets 画布并放一个私有组件
-    await tester.tap(find.text('创建画布'));
-    await tester.pumpAndSettle();
+    await _newModule(tester, 'secrets');
     await tester.tap(find.text('添加组件'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('secrets.key_input'));
@@ -266,20 +250,78 @@ void main() {
     expect(find.text('secrets.key_input'), findsOneWidget);
   });
 
-  testWidgets('配对推送：成员变化 -> 模块列表实时刷新（勿轮询）', (tester) async {
+  testWidgets('配对推送：含私有组件的新模块上线 -> 弹窗候选实时刷新（勿轮询）', (tester) async {
     final mock = _demoOutbound();
     await tester.pumpWidget(UiShell(outbound: mock, store: _MemStore()));
     await tester.pumpAndSettle();
-    expect(find.text('notes'), findsNothing);
+    // notes 上线但只有公共组件 -> 不进模块画布候选
     mock.moduleIds.add('notes');
     mock.responses['notes.ui.contribution'] = const UiContribution(
       components: [
-        UiComponent('note_pad', UiKind.textOutput, label: '便签', bind: 'notes.read'),
+        UiComponent('note_pad', UiKind.textOutput, label: '便签'),
       ],
     ).toJson();
     mock.wiringController.add(const {});
     await tester.pumpAndSettle();
+    await tester.tap(find.ancestor(of: find.text("新建画布"), matching: find.bySubtype<FilledButton>()));
+    await tester.pumpAndSettle();
+    expect(find.text('notes'), findsNothing);
+    await tester.tap(find.text('取消'));
+    // notes 补充私有组件 -> 候选出现
+    mock.responses['notes.ui.contribution'] = const UiContribution(
+      components: [
+        UiComponent('note_pad', UiKind.textOutput, label: '便签'),
+        UiComponent('secret_note', UiKind.formField,
+            scope: UiScope.private, label: '私密便签'),
+      ],
+    ).toJson();
+    mock.wiringController.add(const {});
+    await tester.pumpAndSettle();
+    await tester.tap(find.ancestor(of: find.text("新建画布"), matching: find.bySubtype<FilledButton>()));
+    await tester.pumpAndSettle();
     expect(find.text('notes'), findsOneWidget);
+    await tester.tap(find.text('取消'));
+  });
+
+  testWidgets('画布删除：确认后移除；删模块画布后弹窗重新可选', (tester) async {
+    await tester.pumpWidget(UiShell(outbound: _demoOutbound(), store: _MemStore()));
+    await tester.pumpAndSettle();
+    await _newCustom(tester, 'A');
+    await _newModule(tester, 'secrets');
+    // 两张画布各带删除图标
+    expect(find.byIcon(Icons.close), findsNWidgets(2));
+    // 删除当前（secrets）
+    await tester.tap(find.byIcon(Icons.close).at(1));
+    await tester.pumpAndSettle();
+    expect(find.text('删除画布「secrets」？'), findsOneWidget);
+    await tester.tap(find.text('删除'));
+    await tester.pumpAndSettle();
+    expect(find.text('secrets'), findsNothing); // 画布已删
+    expect(find.text('A'), findsOneWidget); // 其余保留
+    // 模块画布可重建：弹窗候选恢复可选
+    await tester.tap(find.widgetWithText(ActionChip, '新建画布'));
+    await tester.pumpAndSettle();
+    expect(find.text('已创建'), findsNothing);
+    await tester.tap(find.text('secrets').last);
+    await tester.pumpAndSettle();
+    expect(find.text('secrets'), findsOneWidget);
+  });
+
+  testWidgets('画布切换：点击画布栏 chip 切换当前画布', (tester) async {
+    await tester.pumpWidget(UiShell(outbound: _demoOutbound(), store: _MemStore()));
+    await tester.pumpAndSettle();
+    await _newCustom(tester, '甲');
+    await _newCustom(tester, '乙');
+    // 新建的乙处于选中态：其“添加组件”作用于乙
+    await tester.tap(find.text('添加组件'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('conversation.chat_floor'));
+    await tester.pumpAndSettle();
+    expect(find.text('conversation.chat_floor'), findsOneWidget);
+    // 切回甲：无放置
+    await tester.tap(find.text('甲'));
+    await tester.pumpAndSettle();
+    expect(find.text('conversation.chat_floor'), findsNothing);
   });
 
   test('导入导出：JSON 往返 + 画布 id 重生成', () {

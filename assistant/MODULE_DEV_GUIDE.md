@@ -212,4 +212,4 @@ static const contribution = UiContribution(
 - 带多轮业务 + UI 贡献 + 事件路由：`apps/modules/conversation/`
 - 带外部 HTTP 依赖 + 密钥需求 + 假服务器验证：`apps/modules/llm_gateway/`
 - UI 渲染器（发现/拉取/画布/命令路由）：`apps/modules/ui_cli/`
-- Flutter 渲染器（画布中心：模块列表/用户创建画布/规则过滤"+"选择器/离线冻结/导入导出/mock 测试，设计见 `apps/modules/ui_flutter/DESIGN.md`）：`apps/modules/ui_flutter/`
+- Flutter 渲染器（画布中心：画布栏导航/新建画布二选一弹窗/规则过滤"+"选择器/画布删除/离线冻结/导入导出/mock 测试，设计见 `apps/modules/ui_flutter/DESIGN.md`）：`apps/modules/ui_flutter/`

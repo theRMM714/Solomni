@@ -115,6 +115,10 @@ class LayoutEngine {
     return c;
   }
 
+  /// 删除画布（连同其全部放置）；选中谁由调用方决定
+  bool removeCanvas(LayoutDoc doc, CanvasDoc canvas) =>
+      doc.canvases.remove(canvas);
+
   /// 导入布局：整体替换（画布 id 重新生成，保持引擎序号一致，避免后续新建撞 id）
   LayoutDoc importFrom(Map<String, Object?> j) {
     final src = LayoutDoc.fromJson(j);

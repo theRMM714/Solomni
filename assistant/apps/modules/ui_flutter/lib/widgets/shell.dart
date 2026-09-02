@@ -1,5 +1,5 @@
-/// 主壳：左模块列表 + 右画布区。呈现主权归本模块。
-/// 空白起步：画布全由用户创建；离线模块冻结禁用（贡献缓存）。
+/// 主壳：顶部画布栏 + 画布区（全宽）。呈现主权归本模块。
+/// 空白起步：画布全由用户创建（弹窗二选一）；离线模块冻结禁用（贡献缓存）。
 library;
 
 import 'dart:async';
@@ -12,7 +12,6 @@ import 'package:ui_vocab/ui_vocab.dart';
 import '../discovery.dart';
 import '../layout_store.dart';
 import 'canvas_view.dart';
-import 'palette_view.dart';
 
 class UiShell extends StatefulWidget {
   final Outbound? outbound; // null = standalone（未连核心）
@@ -25,6 +24,7 @@ class UiShell extends StatefulWidget {
 
 class _UiShellState extends State<UiShell> {
   final _engine = LayoutEngine();
+  final _nav = GlobalKey<NavigatorState>(); // 弹窗/Toast 上下文入口（树内）
   late final LayoutStore _store = widget.store ?? LayoutStore();
   List<Contributed> _found = const [];
   final _cache = <String, UiContribution>{}; // 贡献缓存：离线冻结渲染用
@@ -38,7 +38,7 @@ class _UiShellState extends State<UiShell> {
   void initState() {
     super.initState();
     _boot();
-    // 配对推送：成员变化即刷新模块列表（勿轮询）。
+    // 配对推送：成员变化即刷新贡献（勿轮询）。
     // 布局保留（组件 id 是契约），新组件经画布"+"进入。
     _wiringSub = widget.outbound?.wiring.listen((_) {
       _refreshChain = _refreshChain.then((_) => _refresh());
@@ -87,7 +87,7 @@ class _UiShellState extends State<UiShell> {
     _store.save(_layout);
   }
 
-  // ---- 画布创建 ----
+  // ---- 画布创建与删除 ----
 
   void _newModuleCanvas(String moduleId) {
     setState(() {
@@ -101,6 +101,33 @@ class _UiShellState extends State<UiShell> {
     setState(() {
       _engine.newCanvas(_layout, title);
       _tab = _layout.canvases.length - 1; // 切到新画布
+    });
+    _store.save(_layout);
+  }
+
+  /// 删除画布：确认后连同放置移除；删模块画布后弹窗里该模块重新可选
+  Future<void> _deleteCanvas(int index) async {
+    final c = _layout.canvases[index];
+    final ok = await showDialog<bool>(
+      context: _nav.currentContext!,
+      builder: (ctx) => AlertDialog(
+        title: Text('删除画布「' + c.title + '」？'),
+        content: const Text('其上的组件放置将一并移除。'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('取消')),
+          FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('删除')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    setState(() {
+      _engine.removeCanvas(_layout, c);
+      if (index < _tab) _tab--; // 保持当前画布不漂移
+      _tab = _layout.canvases.isEmpty ? 0 : _tab.clamp(0, _layout.canvases.length - 1);
     });
     _store.save(_layout);
   }
@@ -142,7 +169,7 @@ class _UiShellState extends State<UiShell> {
   Future<String?> _promptPath(String title, String initial) async {
     final ctl = TextEditingController(text: initial);
     final ok = await showDialog<bool>(
-      context: context,
+      context: _nav.currentContext!,
       builder: (ctx) => AlertDialog(
         title: Text(title + '（文件路径）'),
         content: TextField(controller: ctl, autofocus: true),
@@ -162,14 +189,15 @@ class _UiShellState extends State<UiShell> {
   }
 
   void _toast(String msg) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context)
+    if (!mounted || _nav.currentContext == null) return;
+    ScaffoldMessenger.of(_nav.currentContext!)
         .showSnackBar(SnackBar(content: Text(msg)));
   }
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      navigatorKey: _nav, // 弹窗/Toast 都从树内上下文发起（State.context 在 MaterialApp 之上）
       title: 'assistant',
       home: Scaffold(
         appBar: AppBar(
@@ -190,32 +218,20 @@ class _UiShellState extends State<UiShell> {
             ),
           ],
         ),
-        body: Row(children: [
-          SizedBox(
-            width: 280,
-            child: PaletteView(
-              found: _found,
-              layout: _layout,
-              outbound: widget.outbound,
-              onCreateModuleCanvas: _newModuleCanvas,
-            ),
-          ),
-          const VerticalDivider(width: 1),
-          Expanded(
-            child: CanvasArea(
-              engine: _engine,
-              layout: _layout,
-              found: _found,
-              cache: _cache,
-              tab: _tab,
-              tick: _tick,
-              outbound: widget.outbound,
-              onSelectTab: (i) => setState(() => _tab = i),
-              onNewCanvas: _newCustomCanvas,
-              onChanged: _afterAction,
-            ),
-          ),
-        ]),
+        body: CanvasArea(
+          engine: _engine,
+          layout: _layout,
+          found: _found,
+          cache: _cache,
+          tab: _tab,
+          tick: _tick,
+          outbound: widget.outbound,
+          onSelectTab: (i) => setState(() => _tab = i),
+          onModuleCanvas: _newModuleCanvas,
+          onCustomCanvas: _newCustomCanvas,
+          onDeleteCanvas: _deleteCanvas,
+          onChanged: _afterAction,
+        ),
       ),
     );
   }

@@ -57,6 +57,9 @@ void main() {
   // 6. 导入：整体替换 + 画布 id 重生成 + 后续新建不撞 id
   final json = doc.toJson();
   final eng2 = LayoutEngine();
+  // 抬高导入引擎序号（否则两边都从 0 起，id 碰巧相同，断言失效）
+  final holder = LayoutDoc();
+  eng2.removeCanvas(holder, eng2.newCanvas(holder, '占位'));
   final restored = eng2.importFrom(Map<String, Object?>.from(json));
   check('导入：画布数量一致', restored.canvases.length == 2);
   check('导入：owner 保留', restored.canvases[1].ownerModuleId == 'secrets');
@@ -66,6 +69,13 @@ void main() {
   final after = eng2.newCanvas(restored, '再来一张');
   check('导入后新建不撞 id',
       restored.canvases.map((c) => c.id).toSet().contains(after.id));
+
+  // 7. 删除：画布连同放置移除，其余画布不受影响
+  check('删除：返回真', eng.removeCanvas(doc, owned));
+  check('删除：画布数量减一', doc.canvases.length == 1);
+  check('删除：其余画布保留', doc.canvases.single == custom);
+  check('删除：不存在的画布返回假',
+      !eng.removeCanvas(doc, CanvasDoc('canvas-x', '不存在')));
 
   print('');
   print('全部通过: ' + _passed.toString() + ' 项');
