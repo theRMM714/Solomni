@@ -37,7 +37,7 @@ apps/modules/<module_id>/
 （`-gui` 点名它会得到"不支持当前平台"）；只做纯 Dart 模块时两个脚本都要带（内容
 = dart wrapper 起 coordinated + 同样的自愈逻辑）。参考实现：`apps/modules/ui_flutter`。
 
-依赖白名单（只能依赖这三个，且通常只需要前两个）：
+依赖白名单（只能依赖这些，且通常只需要前两个）：
 
 ```yaml
 dependencies:
@@ -47,7 +47,14 @@ dependencies:
     path: ../../../packages/transport    # Outbound / ModuleClient（线路层）
   ui_vocab:                               # 仅当模块有 UI
     path: ../../../packages/ui_vocab
+  user_data:                              # 仅当模块要落盘私有数据
+    path: ../../../packages/user_data
 ```
+
+私有数据（密钥/历史/布局等）归模块，落在自己文件夹内 `userdata/`，用
+`UserData.file('<module_id>', 'x.json')` 取文件（锚定包自身，与 cwd 无关）。
+该目录已被 git 忽略；密钥明文 + Unix 侧 0600。设环境变量 `SOLOMNI_USERDATA`
+可整体搬迁（验收/隔离用）。参考：`apps/modules/secrets`。
 
 ## 声明：模块对世界的全部认知
 
@@ -56,6 +63,7 @@ final class XxxProgram implements ModuleProgram {
   @override
   Declaration get declaration => const Declaration(
         'xxx',                                   // 模块 id = 文件夹名，全局唯一
+        kind: ModuleKind.service,                // 自声明角色：service / surface
         provides: [Provide('xxx.hello')],        // 我愿意把这些能力当共同物
         needs: [                                 // 我需要什么，三选一策略：
           Need('llm.chat', NeedVia.preferShared), // 有共享用共享，没有回退内建
@@ -72,6 +80,7 @@ final class XxxProgram implements ModuleProgram {
 ```
 
 - 能力地址命名：**私有能力用自己的 id 前缀**（`xxx.hello`）；跨模块公共能力（如 `llm.chat`）已有词汇表 `packages/protocol/lib/protocol.dart` 的 `Caps`，**新增公共词汇需要走治理**（见文末），不要私自发明同义能力名
+- **模块类型 `kind` 自声明**：`service` 无头（宿主启动即拉起）；`surface` 交互面（宿主菜单按需唤起）。surface 必须有 `dev`/`dev.bat` 启动契约，service 用默认 dart 拉起（cwd=自己的文件夹）。核心只校验枚举合法性，不替你决定你是谁
 - `bind(outbound)` 返回消息处理器：收到封套，返回**纯 JSON 数据**
 
 ## 边界（红线，逐条可判）
@@ -176,7 +185,8 @@ static const contribution = UiContribution(
 ## 测试要求（缺一不可）
 
 1. **standalone 必须能跑**：`dart bin/standalone.dart` 无核心、无网络依赖（或明确跳过网络部分）
-2. **协作链路验证**：在 `apps/solomni/lib/assembler.dart` 的 registry 加一行工厂 + pubspec 加一个 path 依赖，跑 `dart tool/smoke.dart` 验全链路（这是装配者的地盘，只做最小编辑，别重构别人代码）
+2. **协作链路验证**：模块放进 `apps/modules/`（有 `bin/coordinated.dart` 即被宿主发现）后，
+   跑 `apps/solomni` 下 `dart tool/smoke.dart` 验全链路。无需再改任何注册表——没有注册表了
 3. 消费外部服务时，本地起假服务器验证（参考 `apps/modules/llm_gateway/bin/fake_server.dart`），不依赖真实密钥
 4. 协作语义用 mock Outbound 测试：配对快照（wiring）、候选错误（CandidatesException）、
    降级（NoProviderException）都可注入模拟，不必起核心
@@ -190,8 +200,9 @@ static const contribution = UiContribution(
 - 详见仓库根 `SETUP.md`
 
 - 沙箱限制：HTTPS 下载走 node fetch；子进程管道被禁（不能 spawn 捕获输出的进程）；多进程守护无法在本沙箱演示，但单进程 TCP 拓扑可全链路验证
-- 模块被产品装配（apps/solomni 的 scanModules）发现的条件：文件夹内有 `bin/coordinated.dart`；
-  能否被 `-gui` 拉起另看 `dev`/`dev.bat` 是否声明了当前平台
+- 模块被核心宿主（apps/solomni 的 scanModules）发现的条件：文件夹内有 `bin/coordinated.dart`；
+  是 service 还是 surface 由 `Declaration.kind` 自声明；surface 的唤起另看 `dev`/`dev.bat`
+  是否声明了当前平台（service 无契约，默认 dart 拉起）
 
 ## 治理：不要碰的东西
 
@@ -203,7 +214,7 @@ static const contribution = UiContribution(
 | `packages/ui_vocab` | UI 词汇表 | 只读；新增公共组件类型需协调 |
 | `packages/ui_canvas` | 画布模型（布局结构/放置规则） | 只读；布局规则变更需协调 |
 | `apps/modules/<别人的模块>` | 该模块的 agent | 只读 |
-| `apps/solomni` | 产品装配 | 仅最小编辑：registry 一行 + pubspec 一行 |
+| `apps/solomni` | 核心宿主（扫描/拉起/菜单/退出） | 只读 |
 
 **多 agent 并行开发约定**：一人一个模块文件夹；共享包改动（新公共能力名、新组件类型）是对齐事项而不是顺手事项--先在会话里提出，达成一致再动字典。字典可以长，上帝不能长。
 

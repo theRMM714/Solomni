@@ -25,9 +25,15 @@
 /.tmp-windows/
 /.tmp-macos/
 /.tools/
+/.home/
 
 # ---- 会话 / 私密记录 ----
 /session.jsonl
+
+# ---- 模块私有数据（密钥/历史/布局等，不可再生）----
+# 数据归模块，落在各模块自己文件夹内的 userdata/。永不入库。
+# 警告：切勿 git clean -fdx 清掉 userdata——里面是真实用户数据，不随源码走。
+**/userdata/
 
 # ---- Dart / Flutter 构建产物（assistant 内各 package）----
 **/.dart_tool/

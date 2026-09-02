@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# ui_cli 的 surface 启动脚本（Unix 侧）。产品宿主经它唤起终端交互面。
+# 模块自决：无特殊依赖，直接跑协作入口的 --repl 形态；端口由宿主注入。
+set -euo pipefail
+
+SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
+ROOT="$SELF_DIR/../../../../"
+
+exec "$ROOT/bin/dart" bin/coordinated.dart --repl "$@"

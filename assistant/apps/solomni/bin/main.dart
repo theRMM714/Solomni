@@ -1,33 +1,141 @@
-/// 产品入口（规范见 PRODUCT.md）。
-/// 默认终端 REPL；-gui 额外拉起一个外部 UI 模块进程作为并行交互面；
-/// 终端退出=产品消亡，GUI 关窗=模块离线（产品继续）。
+/// 核心宿主入口：拉核心 + 拉起 service + 极简菜单（唤起 surface）。
+/// 产品入口（bin/solomni）只剩薄壳；终端交互面是 ui_cli 模块，不是产品。
+/// 菜单只允许唤起界面类模块；exit 是产品生命周期（杀全部子进程）。
 library;
 
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'package:protocol/protocol.dart';
 import 'package:solomni/assembler.dart';
 
-/// 拉起外部模块进程：只认模块自备的 dev 启动契约脚本，端口注入。
-/// 怎么跑（依赖自愈/设备/工具链）是模块自己的事，产品一概不知。
-/// Windows 的 .bat 必须经 cmd.exe 执行。
-Future<Process> _spawnModule(ModuleFolder f, int port) async {
-  final args = ['--port=' + port.toString()];
-  if (Platform.isWindows) {
-    return Process.start('cmd.exe', ['/c', f.path + r'\dev.bat', ...args],
-        workingDirectory: f.path,
-        mode: ProcessStartMode.inheritStdio);
+void _printSurfaces(Assembled asm) {
+  final s = asm.surfaces;
+  if (s.isEmpty) {
+    stdout.writeln('（没有可唤起的界面模块）');
+  } else {
+    stdout.writeln('可唤起界面：');
+    for (final f in s) {
+      stdout.writeln('  ' + f.id);
+    }
   }
-  return Process.start(f.path + '/dev', args,
-      workingDirectory: f.path, mode: ProcessStartMode.inheritStdio);
 }
 
-/// 终止外部模块进程：Windows 下 cmd 的子进程不随父死，须杀进程树
-Future<void> _killProcess(Process p) async {
-  if (Platform.isWindows) {
-    await Process.run('taskkill', ['/PID', p.pid.toString(), '/T', '/F']);
+/// 唤起一个 surface：spawn -> 校验自声明 kind == surface -> 附着终端等它退出。
+/// 返回 false 表示未能唤起（未知 id / 自声明不是界面）。
+Future<bool> _launchSurface(
+    Assembled asm, List<Process> procs, String? id) async {
+  final candidates = asm.surfaces;
+  ModuleFolder? chosen;
+  if (id == null) {
+    if (candidates.length == 1) chosen = candidates.single;
   } else {
-    p.kill();
+    for (final f in candidates) {
+      if (f.id == id) chosen = f;
+    }
+  }
+  if (chosen == null) {
+    if (id == null) {
+      stderr.writeln('[失败] 没有可唤起的界面模块');
+    } else {
+      stderr.writeln('[失败] 未找到界面模块: ' + id +
+          '（候选: ' + candidates.map((f) => f.id).join(', ') + '）');
+    }
+    return false;
+  }
+  final proc = await spawnSurface(chosen, asm.daemon.port);
+  procs.add(proc);
+  print('[唤起] ' + chosen.id + ' -> :' + asm.daemon.port.toString());
+  // 自声明校验：等它的 hello 到达，kind 必须是 surface（模块自报身份，宿主照实校验）
+  final decl = await asm.waitDeclaration(chosen.id,
+      timeout: const Duration(seconds: 5));
+  if (decl != null && decl.kind != ModuleKind.surface) {
+    stderr.writeln(
+        '[拒绝] ' + chosen.id + ' 自声明为 ' + decl.kind.name + '，不是界面模块');
+    await killProcess(proc);
+    return false;
+  }
+  // 附着：等它退出（关窗 / 终端 exit），宿主回到菜单
+  await proc.exitCode;
+  return true;
+}
+
+/// 单次订阅 stdin 的行读取器：surface 运行期间可 pause（把终端让给 surface）。
+/// stdin 是单订阅流，只能 listen 一次，故这里只建一个订阅 + 手动队列。
+class _LineReader {
+  final _queue = <String>[];
+  final _waiters = <Completer<String?>>[];
+  bool _eof = false;
+  late final StreamSubscription<String> _sub;
+
+  _LineReader() {
+    _sub = stdin
+        .transform(utf8.decoder)
+        .transform(const LineSplitter())
+        .listen((l) => _deliver(l.trim()),
+            onDone: () {
+              _eof = true;
+              _flush();
+            },
+            onError: (Object e) => _deliverError(e));
+  }
+
+  void _deliver(String l) {
+    if (_waiters.isNotEmpty) {
+      _waiters.removeAt(0).complete(l);
+    } else {
+      _queue.add(l);
+    }
+  }
+
+  void _deliverError(Object e) {
+    if (_waiters.isNotEmpty) _waiters.removeAt(0).completeError(e);
+  }
+
+  void _flush() {
+    for (final w in _waiters) {
+      w.complete(null);
+    }
+    _waiters.clear();
+  }
+
+  Future<String?> next() {
+    if (_queue.isNotEmpty) return Future.value(_queue.removeAt(0));
+    if (_eof) return Future.value(null);
+    final c = Completer<String?>();
+    _waiters.add(c);
+    return c.future;
+  }
+
+  void pause() => _sub.pause();
+  void resume() => _sub.resume();
+  void cancel() => _sub.cancel();
+}
+
+Future<void> _menu(Assembled asm, List<Process> procs) async {
+  final reader = _LineReader();
+  stdout.writeln('（核心宿主菜单；输入界面 id 唤起，exit 退出产品）');
+  try {
+    while (true) {
+      final line = await reader.next();
+      if (line == null) break; // EOF
+      if (line.isEmpty) continue;
+      if (line == 'exit' || line == 'quit') break;
+      if (line == 'help' || line == 'ls' || line == 'list') {
+        _printSurfaces(asm);
+        continue;
+      }
+      if (!asm.surfaces.any((f) => f.id == line)) {
+        stdout.writeln('[未知] 没有界面模块 "' + line + '"，输入 help 看列表');
+        continue;
+      }
+      reader.pause(); // 把终端让给 surface
+      await _launchSurface(asm, procs, line);
+      reader.resume();
+      _printSurfaces(asm);
+    }
+  } finally {
+    reader.cancel();
   }
 }
 
@@ -39,117 +147,49 @@ Future<void> main(List<String> args) async {
   final serve = args.contains('--serve');
   final verbose = args.contains('--verbose');
   var port = 0;
-  String? guiId;
-  var guiRequested = false;
+  String? surfaceId;
+  var surfaceRequested = false;
   for (final a in args) {
     if (a == '-gui' || a == '--gui') {
-      guiRequested = true;
+      surfaceRequested = true;
     } else if (a.startsWith('-gui=')) {
-      guiRequested = true;
-      guiId = a.substring(5);
+      surfaceRequested = true;
+      surfaceId = a.substring(5);
     } else if (a.startsWith('--gui=')) {
-      guiRequested = true;
-      guiId = a.substring(6);
+      surfaceRequested = true;
+      surfaceId = a.substring(6);
     } else if (a.startsWith('--port=')) {
       port = int.parse(a.substring(7));
     }
   }
 
   final asm = await assemble(excluded: excluded, port: port, verbose: verbose);
-  final daemon = asm.daemon;
-  final procs = <Process>[];
+  await asm.waitServices();
+  final procs = <Process>[...asm.services];
 
-  // -gui：额外拉起外部 UI 模块（装配层也无静默选择）
-  if (guiRequested) {
-    final candidates = asm.spawnable;
-    if (candidates.isEmpty) {
-      stderr.writeln('[失败] 没有可拉起的外部模块（modules/ 下无未编译模块）');
-      exit(2);
-    }
-    ModuleFolder? chosen;
-    if (guiId == null) {
-      if (candidates.length == 1) chosen = candidates.single;
-    } else {
-      for (final f in candidates) {
-        if (f.id == guiId) chosen = f;
-      }
-    }
-    if (chosen == null) {
-      if (guiId == null) {
-        stderr.writeln('[失败] 多个外部模块，请指定：');
-        for (final f in candidates) {
-          stderr.writeln('  -gui ' + f.id);
-        }
-      } else {
-        stderr.writeln('[失败] 未找到外部模块: ' + guiId + '（候选: ' +
-            candidates.map((f) => f.id).join(', ') + '）');
-        // 点名的模块存在但不支持当前平台（dev 脚本存在性即声明）时，说清楚
-        for (final f in asm.folders) {
-          if (f.id == guiId) {
-            stderr.writeln('[失败] ' + guiId + ' 存在，但不支持当前平台' +
-                '（缺 ' + (Platform.isWindows ? 'dev.bat' : 'dev') + '）');
-          }
-        }
-      }
-      exit(2);
-    }
-    try {
-      procs.add(await _spawnModule(chosen, daemon.port));
-    } catch (e) {
-      // 拉起失败（如 dev 脚本缺执行权限）：fail-fast 并指明原因
-      stderr.writeln('[失败] 拉起 ' + chosen.id + ' 失败: ' + e.toString());
-      exit(2);
-    }
-    print('[拉起] ' + chosen.id + ' -> :' + daemon.port.toString());
-  }
-
-  // Ctrl+C：产品进程消亡，外部模块进程随之终止
+  // Ctrl+C：宿主消亡，所有子模块进程随之终止
   unawaited(ProcessSignal.sigint.watch().first.then((_) async {
     for (final p in procs) {
-      await _killProcess(p);
+      await killProcess(p);
     }
     exit(130);
   }));
 
   if (serve) {
-    print('[serve] 核心常驻 :' + daemon.port.toString() + '（Ctrl+C 退出；无 REPL）');
+    print('[serve] 核心常驻 :' + asm.daemon.port.toString() +
+        '（Ctrl+C 退出；无交互面）');
     await Completer<void>().future; // 常驻
   }
 
-  await _repl(asm, procs);
-}
-
-/// 终端 REPL：产品宿主的交互面（兜底交互面，恒在）。
-/// help 走 ui.render（模块能力）；exit 是产品生命周期；其余整行交 ui.command 路由。
-Future<void> _repl(Assembled asm, List<Process> procs) async {
-  final driver = asm.driver;
-  stdout.writeln('（终端对话模式；help 查看组件与命令，exit 退出）');
-  final lines = stdin
-      .transform(utf8.decoder)
-      .transform(const LineSplitter())
-      .map((l) => l.trim());
-  await for (final line in lines) {
-    if (line.isEmpty) continue;
-    if (line == 'exit' || line == 'quit') break;
-    try {
-      if (line == 'help') {
-        stdout.writeln(await driver.rpc('ui.render', null));
-        continue;
-      }
-      final sp = line.indexOf(' ');
-      final name = sp < 0 ? line : line.substring(0, sp);
-      final rest = sp < 0
-          ? <String>[]
-          : line.substring(sp + 1).trim().split(RegExp(r'\s+'));
-      stdout.writeln(
-          await driver.rpc('ui.command', {'name': name, 'args': rest}));
-    } catch (e) {
-      // 模块层的拒绝与错误照实显示：降级展示，不崩溃（退出只归 exit/Ctrl+C）
-      stdout.writeln('[错误] ' + e.toString());
-    }
+  _printSurfaces(asm);
+  if (surfaceRequested) {
+    await _launchSurface(asm, procs, surfaceId);
+    _printSurfaces(asm);
   }
+  await _menu(asm, procs);
+
   for (final p in procs) {
-    await _killProcess(p);
+    await killProcess(p);
   }
   exit(0);
 }

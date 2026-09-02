@@ -45,7 +45,7 @@ class Exchange {
     _rewire();
   }
 
-  /// 装配者接线（部署者的权力）+ 装配期校验；接线只影响路由，不改变事实集合
+  /// 部署者接线（显式接线是部署权力）+ 装配期校验；接线只影响路由，不改变事实集合
   void start({Map<String, Map<String, String>> explicit = const {}}) {
     _validateExplicit(explicit);
     _explicit = explicit;

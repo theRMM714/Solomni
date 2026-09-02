@@ -14,6 +14,8 @@ dependencies:
     path: ../../../packages/ui_vocab
   ui_canvas:
     path: ../../../packages/ui_canvas
+  user_data:
+    path: ../../../packages/user_data
 
 dev_dependencies:
   flutter_test:

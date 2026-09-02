@@ -15,14 +15,19 @@ class Contributed {
 }
 
 final class UiCliProgram implements ModuleProgram {
+  /// bind 时捕获出边，供终端 REPL 循环使用（surface 模式）
+  Outbound? outbound;
+
   @override
   Declaration get declaration => const Declaration(
         'ui_cli',
+        kind: ModuleKind.surface,
         provides: [Provide('ui.render'), Provide('ui.command')],
       );
 
   @override
   ModuleHandler bind(Outbound outbound) {
+    this.outbound = outbound;
     return (env) async {
       if (env.method == 'ui.render') {
         return render(outbound);

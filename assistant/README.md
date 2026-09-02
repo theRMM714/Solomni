@@ -14,21 +14,24 @@ packages/
   transport/           线路层：JSON 行编解码 + 模块侧连接与配对推送（模块只依赖它，不依赖核心）
   ui_vocab/            UI 词汇表：组件类型/scope/贡献 schema（意图，无像素）
   ui_canvas/           画布模型：布局数据结构与放置规则（UI 模块共享词汇）
+  user_data/           模块私有数据目录约定（<模块根>/userdata，锚定包自身）
   core/                交易所：校验、配对、投递、TCP 守护、注册表列举
 apps/
-  modules/             模块区：一个文件夹 = 一个可装卸的自治程序
+  modules/             模块区：一个文件夹 = 一个可装卸的自治进程
     <模块>/
       lib/             模块逻辑（内建端口实现 + 共享适配 + UI 贡献）
       bin/standalone.dart    单机入口：无核心，全内建
       bin/coordinated.dart   协作入口：守护进程，连核心（--port=9100）
-  solomni/             产品：装配者 + 终端 REPL（发现/registry/-gui 拉起；规范见 PRODUCT.md）
+      dev / dev.bat         surface 启动契约（service 无，默认 dart 拉起）
+      userdata/             模块私有数据（密钥/历史/布局，git 忽略）
+  solomni/             核心宿主：嵌 broker + 扫描/拉起 + 极简菜单唤起 surface + 退出（规范见 PRODUCT.md）
 ```
 
 ## 装卸语义
 
-- 安装 = 放一个文件夹进 `apps/modules/`（进程内组合需同时加进产品 registry）
-- 卸载 = 移除文件夹，或产品装配时排除（`--without=<id>`，演示见下）
-- 目录扫描只回答"有哪些模块文件夹"；能力声明经 hello 协议到达，核心不读文件
+- 安装 = 放一个文件夹进 `apps/modules/`（有 `bin/coordinated.dart` 即被发现；类型由 `Declaration.kind` 自声明）
+- 卸载 = 移除文件夹，或宿主启动时排除（`--without=<id>`，演示见下）
+- 目录扫描只回答"有哪些模块文件夹"；能力声明经 hello 协议到达，纯 broker 不读文件
 - **运行时是动态的**：声明到达即重配对，离线即降级（消费方自动回内建或功能降级），
   回归即恢复；配对变化推送给受影响消费方，接入顺序无关紧要
 
@@ -53,7 +56,7 @@ cd apps/modules/<任一> && dart bin/standalone.dart   # 单机模式
 # 产品验收（自举假 LLM 服务器：无密钥拒绝/配钥后聊天/流式/多轮历史）：
 cd apps/solomni && dart tool/smoke.dart
 cd apps/solomni && dart tool/smoke.dart --without=llm_gateway  # 卸载 -> 回退内建（降级链路）
-cd apps/solomni && dart bin/main.dart                          # 产品入口：终端 REPL（help 查看命令，exit 退出）
+cd apps/solomni && dart bin/main.dart                          # 核心宿主：菜单唤起 surface（输入界面 id，exit 退出）
 cd apps/modules/ui_flutter && flutter test           # Flutter UI 模块 mock 全链路（发现/画布创建/选择器/离线冻结/事件路由/配对推送）
 ```
 

@@ -66,14 +66,23 @@ class Provide {
   const Provide(this.cap);
 }
 
+/// 模块类型：模块自声明自己的角色，核心只校验枚举合法性，不代为决策。
+/// service 无头（启动即拉起）；surface 交互面（按需唤起）。
+enum ModuleKind { service, surface }
+
 class Declaration {
   final String id;
+  final ModuleKind kind;
   final List<Provide> provides;
   final List<Need> needs;
-  const Declaration(this.id, {this.provides = const [], this.needs = const []});
+  const Declaration(this.id,
+      {this.kind = ModuleKind.service,
+      this.provides = const [],
+      this.needs = const []});
 
   Map<String, Object?> toJson() => {
         'id': id,
+        'kind': kind.name,
         'provides': [for (final p in provides) p.cap],
         'needs': [
           for (final n in needs)
@@ -88,6 +97,9 @@ class Declaration {
   /// 声明从线路还原（hello 消息的 params）
   factory Declaration.fromJson(Map<String, Object?> j) => Declaration(
         j['id'] as String,
+        kind: j['kind'] == null
+            ? ModuleKind.service
+            : ModuleKind.values.byName(j['kind'] as String),
         provides: [
           for (final p in (j['provides'] as List)) Provide(p as String)
         ],

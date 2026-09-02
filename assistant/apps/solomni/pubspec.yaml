@@ -1,5 +1,5 @@
 name: solomni
-description: 产品：装配者 + 终端交互。启动/发现/排除/外部拉起/退出是本产品的唯一策略。
+description: 核心宿主：嵌 broker + 扫描/拉起 service + 极简菜单唤起 surface + 退出。
 environment:
   sdk: ^3.5.0
 
@@ -10,11 +10,3 @@ dependencies:
     path: ../../packages/protocol
   transport:
     path: ../../packages/transport
-  conversation:
-    path: ../modules/conversation
-  llm_gateway:
-    path: ../modules/llm_gateway
-  secrets:
-    path: ../modules/secrets
-  ui_cli:
-    path: ../modules/ui_cli

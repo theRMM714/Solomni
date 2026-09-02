@@ -2,17 +2,55 @@
 /// 谁都可以再写一个实现替换它（比如硬件密钥版），核心与其他模块零改动。
 library;
 
+import 'dart:convert';
+import 'dart:io';
 import 'package:protocol/protocol.dart';
 import 'package:protocol/outbound.dart';
 import 'package:ui_vocab/ui_vocab.dart';
+import 'package:user_data/user_data.dart';
 
 class SecretsModule {
   /// 未写入的密钥不存在（无默认值：无密钥的后果由消费方自决，见 PRODUCT.md）
   final _store = <String, String>{};
+  final File _file;
+  bool _loaded = false;
 
-  Future<Object?> get(String name) async => _store[name];
+  SecretsModule({File? store})
+      : _file = store ?? UserData.file('secrets', 'keys.json');
+
+  Future<void> _ensureLoaded() async {
+    if (_loaded) return;
+    _loaded = true;
+    if (await _file.exists()) {
+      try {
+        final j = jsonDecode(await _file.readAsString()) as Map<String, Object?>;
+        for (final e in j.entries) {
+          _store[e.key] = e.value as String;
+        }
+      } catch (_) {
+        // 密钥文件损坏则从空开始，不崩溃
+      }
+    }
+  }
+
+  Future<void> _save() async {
+    await _file.parent.create(recursive: true);
+    await _file.writeAsString(jsonEncode(_store), flush: true);
+    if (!Platform.isWindows) {
+      // 密钥明文 + 收紧权限：Unix 侧 0600（只有属主可读写）
+      await Process.run('chmod', ['600', _file.path]);
+    }
+  }
+
+  Future<Object?> get(String name) async {
+    await _ensureLoaded();
+    return _store[name];
+  }
+
   Future<Object?> put(String name, String value) async {
+    await _ensureLoaded();
     _store[name] = value;
+    await _save();
     return null;
   }
 }
@@ -23,6 +61,7 @@ final class SecretsProgram implements ModuleProgram {
   @override
   Declaration get declaration => const Declaration(
         'secrets',
+        kind: ModuleKind.service,
         provides: [Provide(Caps.secretsGet), Provide(Caps.secretsPut), Provide(UiCaps.contribution), Provide(UiCaps.event)],
       );
 

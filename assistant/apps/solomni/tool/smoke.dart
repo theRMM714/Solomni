@@ -1,5 +1,5 @@
-/// 脚本化验收：与产品入口共用同一个 assemble()，全链路断言后退出。
-/// 自举假 LLM 服务器（装配在进程内读环境变量，故带环境重启自身）。
+/// 脚本化验收：与宿主共用同一个 assemble()，全链路断言后退出。
+/// 自举假 LLM 服务器 + 临时 userdata（不碰真实密钥/历史），带环境重启自身。
 /// 用法（在 apps/solomni 下）：
 ///   dart tool/smoke.dart                       全链路
 ///   dart tool/smoke.dart --without=llm_gateway 卸载降级链路
@@ -7,8 +7,9 @@ library;
 
 import 'dart:convert';
 import 'dart:io';
-import 'dart:isolate';
 import 'package:protocol/protocol.dart';
+import 'package:protocol/outbound.dart';
+import 'package:transport/transport.dart';
 import 'package:solomni/assembler.dart';
 
 const fakePort = 9123;
@@ -21,13 +22,34 @@ void check(String name, bool ok) {
   if (!ok) failures++;
 }
 
+/// 验收驱动：也是普通模块，只消费 ui.render/ui.command/chatSend/chatHistory
+final class _Driver implements ModuleProgram {
+  @override
+  Declaration get declaration => const Declaration('driver', needs: [
+        Need('ui.render', NeedVia.preferShared),
+        Need('ui.command', NeedVia.preferShared),
+        Need(Caps.chatSend, NeedVia.preferShared),
+        Need(Caps.chatHistory, NeedVia.preferShared),
+      ]);
+
+  @override
+  ModuleHandler bind(Outbound outbound) =>
+      (env) async => throw UnsupportedError('driver 不提供服务');
+}
+
 Future<void> main(List<String> args) async {
   final ourLlm = 'http://127.0.0.1:' + fakePort.toString() + '/v1';
+  // 临时 userdata：验收不碰真实密钥/历史；由子进程读回并收尾删除
+  final tmp = Directory.systemTemp.createTempSync('solomni_smoke_').path;
   if (Platform.environment['LLM_BASE_URL'] != ourLlm) {
-    // 自举：子进程带确定性的 LLM_BASE_URL 重跑自身
+    // 自举：子进程带确定性的 LLM_BASE_URL 与临时 userdata 重跑自身
     final child = await Process.start(Platform.resolvedExecutable,
         [Platform.script.toFilePath(), ...args],
-        environment: {'LLM_BASE_URL': ourLlm},
+        environment: {
+          ...Platform.environment,
+          'LLM_BASE_URL': ourLlm,
+          'SOLOMNI_USERDATA': tmp,
+        },
         mode: ProcessStartMode.inheritStdio);
     exit(await child.exitCode);
   }
@@ -38,12 +60,11 @@ Future<void> main(List<String> args) async {
       .toSet();
   final noLlm = excluded.contains('llm_gateway');
 
-  // 假 LLM 服务器：llm_gateway 自己的开发工具
-  final gw = Isolate.resolvePackageUriSync(
-      Uri.parse('package:llm_gateway/llm_gateway.dart'))!;
+  // 假 LLM 服务器：llm_gateway 自己的开发工具（纯 dart:io，无 package 依赖）
+  final gwBin = defaultModulesDir() + '/llm_gateway/bin';
   final server = await Process.start(Platform.resolvedExecutable,
       ['fake_server.dart', '--port=' + fakePort.toString()],
-      workingDirectory: gw.resolve('../bin').toFilePath());
+      workingDirectory: gwBin);
   final banner = await server.stdout
       .transform(utf8.decoder)
       .transform(const LineSplitter())
@@ -54,7 +75,18 @@ Future<void> main(List<String> args) async {
   }
 
   final asm = await assemble(excluded: excluded);
-  final driver = asm.driver;
+  await asm.waitServices();
+  final procs = <Process>[...asm.services];
+
+  // 拉起 ui_cli 无头守护（提供 ui.render / ui.command 的 service 形态，供验收驱动）
+  final uiCli = asm.folders.where((f) => f.id == 'ui_cli').firstOrNull;
+  if (uiCli != null) {
+    procs.add(await spawnService(uiCli, asm.daemon.port));
+    await asm.waitDeclaration('ui_cli');
+  }
+
+  final driver =
+      await ModuleClient.connect(asm.daemon.address, asm.daemon.port, _Driver());
 
   // 1. 交互面：调色板与命令来自模块贡献
   final palette = (await driver.rpc('ui.render', null)).toString();
@@ -66,7 +98,7 @@ Future<void> main(List<String> args) async {
         .rpc('ui.command', {'name': 'send', 'args': ['你好']})).toString();
     check('卸载 llm_gateway 回退内建', r.contains('内建直连'));
   } else {
-    // 2b. 无密钥：聊天链路自决拒绝（产品入口不参与）
+    // 2b. 无密钥：聊天链路自决拒绝（宿主不参与）
     Object? err;
     try {
       await driver.rpc('ui.command', {'name': 'send', 'args': ['你好']});
@@ -108,7 +140,15 @@ Future<void> main(List<String> args) async {
   final h2 = (await driver.rpc(Caps.chatHistory, null)) as List;
   check('多轮历史增长', h2.length > h1.length);
 
+  // 收尾：杀服务进程与假服务器，清临时 userdata
+  for (final p in procs) {
+    await killProcess(p);
+  }
   server.kill();
+  try {
+    Directory(tmp).deleteSync(recursive: true);
+  } catch (_) {}
+
   print(failures == 0
       ? '全部通过: ' + checks.toString() + ' 项'
       : '失败 ' + failures.toString() + ' / ' + checks.toString());
