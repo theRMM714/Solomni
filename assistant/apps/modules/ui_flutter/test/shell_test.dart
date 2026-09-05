@@ -200,7 +200,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('secrets.key_input'), findsOneWidget);
     expect(find.text('secrets.key_list'), findsOneWidget);
-    expect(find.text('conversation.chat_floor'), findsNothing); // 模块画布不收公共组件
+    expect(find.text('conversation.chat_floor'), findsOneWidget); // 公共任意画布可放
     await tester.tap(find.text('secrets.key_input'));
     await tester.pumpAndSettle();
     expect(find.text('secrets.key_input'), findsOneWidget); // 已放置
