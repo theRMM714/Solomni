@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# solomni -- 根目录门户：转发到 bin/solomni（产品启动器）。
+# 默认（无参数）显示界面菜单，不自动启动任何 UI。
+exec "$(dirname "$0")/bin/solomni" "$@"

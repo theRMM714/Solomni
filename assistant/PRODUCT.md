@@ -63,12 +63,16 @@ $
 
 | 形式 | 行为 |
 |---|---|
-| `solomni` | 默认：拉核心宿主 + 拉起 service + 显示菜单（列 surface） |
-| `solomni -gui [<模块id>]` | 先唤起一个 surface（有 id 直接唤起；无 id 唯一候选才拉起），关掉后回到菜单 |
+| `solomni` | 默认：拉核心宿主 + 拉起 service + 显示菜单（列 surface），**不自动启动任何 UI** |
+| `solomni -gui <模块id>` | 先唤起指定 surface（`-gui ui_flutter` 与 `-gui=ui_flutter` 等价），关掉后回到菜单 |
+| `solomni -gui` | 无 id：唯一候选直接唤起；多候选不替用户选，提示后回菜单 |
 | `solomni --serve` | 无头常驻（拉起 service，无交互面；Ctrl+C 退出） |
 | `--without=<模块id>` | 本次不拉起该模块（既有装卸语义） |
 | `--verbose` | 详细诊断（默认状态行从简，不与聊天流抢屏） |
 | `--port=` | 开发者覆盖；默认端口自动分配，用户与模块进程不感知 |
+
+根目录另有**门户** `solomni.bat` / `solomni`：转发给 `bin/solomni`(.bat)，
+仓库根直接 `.\solomni` 即可（`start` 是 cmd 保留字，故门户用产品命名）。
 
 surface 的唤起规则（宿主无静默选择）：
 

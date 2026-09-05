@@ -74,8 +74,8 @@ SDK、缓存与本平台解析出的配置快照，统一收纳到仓库根的 `
 
 ## 启动器
 
-    Windows:      bin\solomni.bat [参数]
-    WSL / Linux:  ./bin/solomni [参数]
+    仓库根门户：  solomni.bat [参数]   (Windows)     ./solomni [参数]   (WSL/Linux)
+    等价转发：    bin\solomni.bat      (Windows)     ./bin/solomni      (WSL/Linux)
 
 等价于 `cd assistant/apps/solomni && dart bin/main.dart`，只是免去手敲长路径；
 参数与退出码原样透传。启动器不含任何业务——模块的依赖与环境由各模块自己的
