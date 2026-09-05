@@ -1,4 +1,6 @@
-/// 线路层：模块侧。模块只依赖这里与协议，永不 import 核心。
+/// 线路层：JSON 行编解码 + 模块侧连接。
+/// 编解码助手（sendEnvelope / envelopeLines / wireError / errorBody）为线两侧共用；
+/// 模块只依赖这里与协议，永不 import 核心。
 library;
 
 import 'dart:async';

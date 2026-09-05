@@ -145,7 +145,7 @@ class _FloorViewState extends State<_FloorView> {
 
 /// 输入框：submit 事件路由回声明模块（业务不出模块边界）。
 /// 声明了 fields 的组件渲染多字段表单（提交键 = 字段 id）；
-/// 未声明则维持单字段旧形态（提交键 'text'）。
+/// 未声明则单字段（提交键 'text'）。
 class _InputView extends StatefulWidget {
   final String moduleId;
   final UiComponent component;

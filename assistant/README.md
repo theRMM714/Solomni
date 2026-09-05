@@ -11,7 +11,7 @@
 ```
 packages/
   protocol/            字典：封套、声明、能力词汇、核心元能力（无行为）
-  transport/           线路层：JSON 行编解码 + 模块侧连接与配对推送（模块只依赖它，不依赖核心）
+  transport/           线路层：JSON 行编解码 + 模块侧连接与配对推送（模块只依赖它，不依赖核心；编解码助手两侧共用）
   ui_vocab/            UI 词汇表：组件类型/scope/贡献 schema（意图，无像素）
   ui_canvas/           画布模型：布局数据结构与放置规则（UI 模块共享词汇）
   user_data/           模块私有数据目录约定（<模块根>/userdata，锚定包自身）

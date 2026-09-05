@@ -2,8 +2,6 @@
 // bin/setup.mjs -- Solomni 依赖安装脚本（Node 18+，跨平台，clone 后运行一次）
 //
 // 做什么：
-//   0. 一次性迁移：旧版平台后缀散目录（dart-sdk-<os>/、.pub-cache-<os>/…）
-//      -> platform/<os>/ 归一目录。
 //   1. 若缺当前平台 SDK，则按 OS 下载并解压：
 //      Dart SDK    -> platform/<os>/dart-sdk/
 //      Flutter SDK -> platform/<os>/flutter/    （--flutter 时）
@@ -18,7 +16,7 @@
 // 环境变量覆盖：DART_VERSION、FLUTTER_VERSION、DART_BASE、FLUTTER_BASE
 // 参数：--flutter（一并装 Flutter）、--force（存在也强制重装）、--help
 
-import { mkdirSync, createWriteStream, existsSync, readdirSync, readFileSync, renameSync } from 'node:fs';
+import { mkdirSync, createWriteStream, existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join, dirname, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
@@ -94,35 +92,6 @@ function extract(archive, destDir, kind) {
   }
 }
 
-// ---------- 一次性迁移：旧散目录 -> platform/<os>/（同盘改名，秒级） ----------
-function migrateLegacy() {
-  const move = function (from, to) {
-    if (!existsSync(from)) return;
-    if (existsSync(to)) { log('注意：' + relative(ROOT, from) + ' 与 ' + relative(ROOT, to) + ' 并存，跳过（请手动处理）'); return; }
-    mkdirSync(dirname(to), { recursive: true });
-    renameSync(from, to);
-    log('迁移 ' + relative(ROOT, from) + ' -> ' + relative(ROOT, to));
-  };
-  // 旧平台后缀散目录（SDK 移内层，缓存整目录）
-  move(join(ROOT, 'dart-sdk-' + PLATFORM, 'dart-sdk'), join(PLAT, 'dart-sdk'));
-  move(join(ROOT, 'flutter-' + PLATFORM, 'flutter'),   join(PLAT, 'flutter'));
-  move(join(ROOT, '.pub-cache-' + PLATFORM),           join(PLAT, 'pub-cache'));
-  move(join(ROOT, '.dart-home-' + PLATFORM),           join(PLAT, 'dart-home'));
-  move(join(ROOT, '.tmp-' + PLATFORM),                 join(PLAT, 'tmp'));
-  // 更早的无后缀布局（内容探测平台；缓存类归当前跑 setup 的一方）
-  if (existsSync(join(ROOT, 'dart-sdk'))) {
-    const win = existsSync(join(ROOT, 'dart-sdk', 'dart-sdk', 'bin', 'dart.exe'));
-    move(join(ROOT, 'dart-sdk', 'dart-sdk'), join(ROOT, 'platform', win ? 'windows' : PLATFORM, 'dart-sdk'));
-  }
-  if (existsSync(join(ROOT, 'flutter'))) {
-    const win = existsSync(join(ROOT, 'flutter', 'flutter', 'bin', 'cache', 'dart-sdk', 'bin', 'dart.exe'));
-    move(join(ROOT, 'flutter', 'flutter'), join(ROOT, 'platform', win ? 'windows' : PLATFORM, 'flutter'));
-  }
-  move(join(ROOT, '.pub-cache'), join(PLAT, 'pub-cache'));
-  move(join(ROOT, '.dart-home'), join(PLAT, 'dart-home'));
-  move(join(ROOT, '.tmp'),       join(PLAT, 'tmp'));
-}
-
 async function ensureDart() {
   if (!FORCE && existsSync(DART_BIN)) { log('Dart SDK 已就绪：' + relative(ROOT, DART_BIN)); return; }
   const tmp = join(TMP, 'dartsdk.zip');
@@ -192,7 +161,6 @@ async function main() {
     console.log('  环境变量：DART_VERSION / FLUTTER_VERSION / DART_BASE / FLUT_BASE');
     return;
   }
-  migrateLegacy();
   mkdirSync(PUB_CACHE, { recursive: true });
   mkdirSync(DART_HOME, { recursive: true });
   mkdirSync(TMP, { recursive: true });

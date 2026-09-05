@@ -22,9 +22,6 @@ SDK、缓存与本平台解析出的配置快照，统一收纳到仓库根的 `
       tmp/                # 工具临时文件
       dart_tool/<模块>/   # 该模块本平台的 package_config 快照 + lock 凭证
 
-旧散目录（dart-sdk-<os>/、flutter-<os>/、.pub-cache-<os>/… 及更早的无后缀目录）
-会被 setup 自动迁移到 platform/<os>/，无需手动处理。
-
 ## 一键安装（clone 后跑一次，可重复跑）
 在仓库根目录执行：
 
