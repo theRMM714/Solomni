@@ -65,12 +65,17 @@ class ModuleClient {
   final _pending = <String, Completer<Object?>>{};
   final _pendingStreams = <String, _StreamReply>{};
   final _wiring = StreamController<WiringSnapshot>.broadcast();
+  WiringSnapshot? _lastWiring; // 最近一次快照：订阅晚于首推也不丢（消竞态）
   var _seq = 0;
 
   ModuleClient._(this.socket, this.moduleId);
 
-  /// 配对快照流：成员变化时核心推送（勿轮询；无订阅时自动丢弃）
-  Stream<WiringSnapshot> get wiring => _wiring.stream;
+  /// 配对快照流：先补发最近快照（若订阅前已到达），之后跟随成员变化
+  Stream<WiringSnapshot> get wiring async* {
+    final last = _lastWiring;
+    if (last != null) yield last;
+    yield* _wiring.stream;
+  }
 
   static Future<ModuleClient> connect(
       InternetAddress host, int port, ModuleProgram program) async {
@@ -101,8 +106,10 @@ class ModuleClient {
         return;
       }
       if (env.kind == EnvelopeKind.event && env.method == CoreCaps.wiring) {
-        // 配对快照推送：成员变化的事实（勿轮询）
-        c._wiring.add(decodeWiringSnapshot(env.params));
+        // 配对快照推送：成员变化的事实（勿轮询）；留底供迟到订阅者补发
+        final snap = decodeWiringSnapshot(env.params);
+        c._lastWiring = snap;
+        c._wiring.add(snap);
         return;
       }
       if (env.kind == EnvelopeKind.rpc) {

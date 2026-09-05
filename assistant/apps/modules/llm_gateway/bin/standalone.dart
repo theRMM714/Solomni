@@ -5,6 +5,7 @@ import 'package:llm_gateway/llm_gateway.dart';
 
 Future<void> main() async {
   final p = LlmGatewayProgram();
-  print('[llm_gateway] baseUrl=' + p.baseUrl + ' model=' + p.model);
+  final ep = p.endpoint();
+  print('[llm_gateway] baseUrl=' + ep.url + ' model=' + ep.model);
   print('单机模式无核心；真 AI 对话经协作拓扑（核心 + secrets 提供密钥）进行。');
 }

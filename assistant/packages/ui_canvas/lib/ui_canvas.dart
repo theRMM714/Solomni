@@ -1,6 +1,6 @@
 /// 画布模型：UI 模块私有的布局数据与规则。
 /// 布局归 UI 模块（呈现主权）；组件 id 是模块契约，此处只引用不改名。
-/// scope 规则：public 组件任意画布可放；private 仅其所属模块的画布。
+/// scope 规则：public 仅自定义画布；private 仅其所属模块的画布。
 library;
 
 import 'package:ui_vocab/ui_vocab.dart';
@@ -98,9 +98,12 @@ class LayoutEngine {
   var _seq = 0;
   String _newId() => 'canvas-' + (_seq++).toString();
 
-  /// 放置规则：private 仅其所属模块的画布；public 任意画布
-  bool canPlace(CanvasDoc canvas, PaletteEntry entry) =>
-      entry.isPrivate ? canvas.ownerModuleId == entry.moduleId : true;
+  /// 放置规则：自定义画布只放公共组件；模块画布只放本模块私有组件。
+  /// 两类画布各自纯粹：配置台（模块画布）不被公共组件混入。
+  bool canPlace(CanvasDoc canvas, PaletteEntry entry) {
+    if (canvas.ownerModuleId == null) return !entry.isPrivate;
+    return entry.isPrivate && canvas.ownerModuleId == entry.moduleId;
+  }
 
   /// 想用哪个组件就拖进去：校验规则后放置
   bool place(CanvasDoc canvas, PaletteEntry entry, {double x = 24, double y = 24}) {

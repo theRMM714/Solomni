@@ -8,5 +8,7 @@ dependencies:
     path: ../../../packages/protocol
   transport:
     path: ../../../packages/transport
+  ui_vocab:
+    path: ../../../packages/ui_vocab
   user_data:
     path: ../../../packages/user_data

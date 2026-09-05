@@ -29,11 +29,11 @@ void main() {
   check('自定义画布 owner 为空', custom.ownerModuleId == null);
   check('模块画布 owner 为模块 id', owned.ownerModuleId == 'secrets');
 
-  // 3. 放置规则：private 仅所属模块画布；public 任意画布
+  // 3. 放置规则：自定义画布只放公共组件；模块画布只放本模块私有组件
   check('private 组件不能放进自定义画布', !eng.canPlace(custom, keyInput));
   check('private 组件能放进所属模块画布', eng.canPlace(owned, keyInput));
-  check('public 组件任意画布可放',
-      eng.canPlace(custom, chatInput) && eng.canPlace(owned, chatInput));
+  check('public 组件能放进自定义画布', eng.canPlace(custom, chatInput));
+  check('public 组件不进模块画布', !eng.canPlace(owned, chatInput));
   check('place 拒绝违规放置', !eng.place(custom, keyInput));
   check('place 接受合规放置', eng.place(owned, keyInput, x: 300, y: 300));
   check('place 接受公共放置', eng.place(custom, chatInput));
