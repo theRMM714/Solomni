@@ -1,5 +1,6 @@
 /// llm_gateway 模块：愿意把对话能力当共同物的普通模块。
-/// 真 OpenAI 兼容流式调用（SSE）；密钥经 prefer-shared 从 secrets 取。
+/// 真 OpenAI 兼容流式调用（SSE）；供应商（地址/模型）归本模块自己配置，
+/// 钥匙经 prefer-shared 从 secrets 取（钥匙圈不管门）。
 library;
 
 import 'dart:async';
@@ -7,6 +8,23 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:protocol/protocol.dart';
 import 'package:protocol/outbound.dart';
+import 'package:user_data/user_data.dart';
+
+/// 本模块的供应商配置：userdata/config.json = {"baseUrl": "...", "model": "..."}。
+/// 优先级：构造参数 > 环境变量（临时覆盖）> 配置文件 > 内建默认。
+Map<String, String> _fileConfig() {
+  try {
+    final f = UserData.file('llm_gateway', 'config.json');
+    if (!f.existsSync()) return const {};
+    final j = jsonDecode(f.readAsStringSync()) as Map<String, Object?>;
+    return {
+      if (j['baseUrl'] is String) 'baseUrl': j['baseUrl'] as String,
+      if (j['model'] is String) 'model': j['model'] as String,
+    };
+  } catch (_) {
+    return const {}; // 配置损坏则忽略，走环境变量/默认
+  }
+}
 
 /// 单机出边：一切调用都抛 NoProvider，消费方自然走内建
 final class BuiltinOnlyOutbound implements Outbound {
@@ -90,8 +108,14 @@ final class LlmGatewayProgram implements ModuleProgram {
   final String model;
 
   LlmGatewayProgram({String? baseUrl, String? model})
-      : baseUrl = baseUrl ?? Platform.environment['LLM_BASE_URL'] ?? 'https://api.deepseek.com',
-        model = model ?? Platform.environment['LLM_MODEL'] ?? 'deepseek-chat';
+      : baseUrl = baseUrl ??
+            Platform.environment['LLM_BASE_URL'] ??
+            _fileConfig()['baseUrl'] ??
+            'https://api.deepseek.com',
+        model = model ??
+            Platform.environment['LLM_MODEL'] ??
+            _fileConfig()['model'] ??
+            'deepseek-chat';
 
   @override
   Declaration get declaration => const Declaration(

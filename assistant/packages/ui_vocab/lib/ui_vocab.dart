@@ -22,14 +22,38 @@ abstract final class UiCaps {
   static const event = 'ui.event';
 }
 
+/// 表单字段：多字段表单的意图描述（提交 payload 的键 = 字段 id）
+class UiField {
+  final String id; // 提交 payload 里的键
+  final String label; // 提示文案（空则用 UI 默认占位）
+  final bool secret; // 掩码显示（钥匙类输入）
+  const UiField(this.id, {this.label = '', this.secret = false});
+
+  Map<String, Object?> toJson() => {
+        'id': id,
+        'label': label,
+        if (secret) 'secret': true,
+      };
+
+  factory UiField.fromJson(Map<String, Object?> j) => UiField(
+        j['id'] as String,
+        label: j['label'] as String? ?? '',
+        secret: j['secret'] as bool? ?? false,
+      );
+}
+
 class UiComponent {
   final String id; // 契约身份：UI 不得改名
   final String kind;
   final UiScope scope;
   final String label;
   final String? bind; // 数据/动作绑定的能力地址（文档性；事件一律路由回模块）
+  final List<UiField> fields; // 多字段表单（空 = 单字段，提交键 'text'）
   const UiComponent(this.id, this.kind,
-      {this.scope = UiScope.public, this.label = '', this.bind});
+      {this.scope = UiScope.public,
+      this.label = '',
+      this.bind,
+      this.fields = const []});
 
   Map<String, Object?> toJson() => {
         'id': id,
@@ -37,6 +61,8 @@ class UiComponent {
         'scope': scope.name,
         'label': label,
         if (bind != null) 'bind': bind,
+        if (fields.isNotEmpty)
+          'fields': [for (final f in fields) f.toJson()],
       };
 
   factory UiComponent.fromJson(Map<String, Object?> j) => UiComponent(
@@ -45,6 +71,10 @@ class UiComponent {
         scope: UiScope.values.byName(j['scope'] as String? ?? 'public'),
         label: j['label'] as String? ?? '',
         bind: j['bind'] as String?,
+        fields: [
+          for (final f in (j['fields'] as List? ?? const []))
+            UiField.fromJson(Map<String, Object?>.from(f as Map))
+        ],
       );
 }
 

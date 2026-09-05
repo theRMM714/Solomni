@@ -22,7 +22,7 @@ void check(String name, bool ok) {
   if (!ok) failures++;
 }
 
-/// 验收驱动：也是普通模块，只消费 ui.render/ui.command/chatSend/chatHistory
+/// 验收驱动：也是普通模块，只消费 ui.render/ui.command/chatSend/chatHistory/secretsList
 final class _Driver implements ModuleProgram {
   @override
   Declaration get declaration => const Declaration('driver', needs: [
@@ -30,6 +30,7 @@ final class _Driver implements ModuleProgram {
         Need('ui.command', NeedVia.preferShared),
         Need(Caps.chatSend, NeedVia.preferShared),
         Need(Caps.chatHistory, NeedVia.preferShared),
+        Need(Caps.secretsList, NeedVia.preferShared),
       ]);
 
   @override
@@ -139,6 +140,16 @@ Future<void> main(List<String> args) async {
   await driver.rpc('ui.command', {'name': 'send', 'args': ['再聊一句']});
   final h2 = (await driver.rpc(Caps.chatHistory, null)) as List;
   check('多轮历史增长', h2.length > h1.length);
+
+  // 7. 钥匙圈列举：只报名字/备注，绝不出钥匙值（全链路才配过钥）
+  if (!noLlm) {
+    final listed = (await driver.rpc(Caps.secretsList, null)) as List;
+    final s = listed.toString();
+    check(
+        '钥匙圈只报名字备注不出值',
+        listed.any((e) => (e as Map)['name'] == 'llm') &&
+            !s.contains('test-key'));
+  }
 
   // 收尾：杀服务进程与假服务器，清临时 userdata
   for (final p in procs) {

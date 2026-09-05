@@ -38,7 +38,7 @@ class ComponentView extends StatelessWidget {
       case UiKind.formField:
         return _InputView(
             moduleId: moduleId,
-            componentId: component.id,
+            component: component,
             outbound: outbound,
             onAction: onAction,
             disabled: disabled);
@@ -143,17 +143,19 @@ class _FloorViewState extends State<_FloorView> {
   }
 }
 
-/// 输入框：submit 事件路由回声明模块（业务不出模块边界）
+/// 输入框：submit 事件路由回声明模块（业务不出模块边界）。
+/// 声明了 fields 的组件渲染多字段表单（提交键 = 字段 id）；
+/// 未声明则维持单字段旧形态（提交键 'text'）。
 class _InputView extends StatefulWidget {
   final String moduleId;
-  final String componentId;
+  final UiComponent component;
   final Outbound? outbound;
   final VoidCallback onAction;
   final bool disabled;
 
   const _InputView(
       {required this.moduleId,
-      required this.componentId,
+      required this.component,
       required this.outbound,
       required this.onAction,
       this.disabled = false});
@@ -163,18 +165,27 @@ class _InputView extends StatefulWidget {
 }
 
 class _InputViewState extends State<_InputView> {
-  final _ctl = TextEditingController();
+  late final List<UiField> _fields = widget.component.fields.isEmpty
+      ? const [UiField('text')]
+      : widget.component.fields;
+  late final Map<String, TextEditingController> _ctls = {
+    for (final f in _fields) f.id: TextEditingController(),
+  };
   bool _busy = false;
 
   @override
   void dispose() {
-    _ctl.dispose();
+    for (final c in _ctls.values) {
+      c.dispose();
+    }
     super.dispose();
   }
 
   Future<void> _submit() async {
-    final text = _ctl.text.trim();
-    if (text.isEmpty || _busy) return;
+    final payload = {
+      for (final f in _fields) f.id: _ctls[f.id]!.text.trim(),
+    };
+    if (_busy || payload.values.every((t) => t.isEmpty)) return;
     if (widget.outbound == null) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -185,11 +196,13 @@ class _InputViewState extends State<_InputView> {
     setState(() => _busy = true);
     try {
       await widget.outbound!.call(widget.moduleId, UiCaps.event, {
-        'component': widget.componentId,
+        'component': widget.component.id,
         'event': 'submit',
-        'payload': {'text': text},
+        'payload': payload,
       });
-      _ctl.clear();
+      for (final c in _ctls.values) {
+        c.clear();
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context)
@@ -198,28 +211,41 @@ class _InputViewState extends State<_InputView> {
     } finally {
       if (mounted) setState(() => _busy = false);
     }
-    widget.onAction(); // 刷新画布上的数据组件（楼层）
+    widget.onAction(); // 刷新画布上的数据组件（楼层/列表）
   }
 
   @override
   Widget build(BuildContext context) {
-    return Row(children: [
-      Expanded(
-        child: TextField(
-          controller: _ctl,
-          enabled: !_busy && !widget.disabled,
-          decoration: const InputDecoration(isDense: true, hintText: '输入…'),
-          onSubmitted: (_) => _submit(),
-        ),
-      ),
-      IconButton(
-        onPressed: _busy ? null : _submit,
-        icon: _busy
-            ? const SizedBox(
-                width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
-            : const Icon(Icons.send),
-      ),
-    ]);
+    Widget fieldBox(UiField f, {bool last = false}) => Padding(
+          padding: EdgeInsets.only(bottom: last ? 0 : 6),
+          child: TextField(
+            controller: _ctls[f.id],
+            enabled: !_busy && !widget.disabled,
+            obscureText: f.secret,
+            decoration: InputDecoration(
+              isDense: true,
+              hintText: f.label.isEmpty ? '输入…' : f.label,
+            ),
+            onSubmitted: (_) => _submit(),
+          ),
+        );
+    final send = IconButton(
+      onPressed: _busy ? null : _submit,
+      icon: _busy
+          ? const SizedBox(
+              width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
+          : const Icon(Icons.send),
+    );
+    // 单字段：输入+键同行；多字段：末行并排放键，避免竖向溢出
+    return _fields.length == 1
+        ? Row(children: [Expanded(child: fieldBox(_fields.first)), send])
+        : Column(children: [
+            for (var i = 0; i < _fields.length - 1; i++) fieldBox(_fields[i]),
+            Row(children: [
+              Expanded(child: fieldBox(_fields.last, last: true)),
+              send,
+            ]),
+          ]);
   }
 }
 
@@ -265,11 +291,22 @@ class _BoundTextViewState extends State<_BoundTextView> {
       if (!mounted) return;
       setState(() {
         _error = null;
-        _text = r is List ? r.map((e) => e.toString()).join(', ') : (r ?? '').toString();
+        _text = r is List ? r.map(_fmtItem).join('\n') : (r ?? '').toString();
       });
     } catch (e) {
       if (mounted) setState(() => _error = e.toString());
     }
+  }
+
+  /// 条目格式化：{name, remark} 形态渲染为「名字（备注）」，其余按字符串
+  String _fmtItem(dynamic e) {
+    if (e is Map && e['name'] != null) {
+      final remark = (e['remark'] ?? '').toString();
+      return remark.isEmpty
+          ? e['name'].toString()
+          : '${e['name']}（$remark）';
+    }
+    return e.toString();
   }
 
   @override

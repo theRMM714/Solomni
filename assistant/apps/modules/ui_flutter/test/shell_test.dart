@@ -80,14 +80,24 @@ _MockOutbound _demoOutbound() => _MockOutbound(
         'secrets.ui.contribution': const UiContribution(
           components: [
             UiComponent('key_input', UiKind.formField,
-                scope: UiScope.private, label: 'API Key', bind: Caps.secretsPut),
+                scope: UiScope.private,
+                label: '密钥',
+                bind: Caps.secretsPut,
+                fields: [
+                  UiField('name', label: '名字'),
+                  UiField('value', label: '钥匙', secret: true),
+                  UiField('remark', label: '备注'),
+                ]),
             UiComponent('key_list', UiKind.list,
-                scope: UiScope.private, label: '已存密钥', bind: Caps.secretsGet),
+                scope: UiScope.private, label: '已存密钥', bind: Caps.secretsList),
           ],
         ).toJson(),
         'conversation.${Caps.chatHistory}': [
           {'role': 'user', 'content': '你好'},
           {'role': 'assistant', 'content': '在的'},
+        ],
+        'secrets.${Caps.secretsList}': [
+          {'name': 'llm', 'remark': 'DeepSeek 主力'},
         ],
       },
     );
