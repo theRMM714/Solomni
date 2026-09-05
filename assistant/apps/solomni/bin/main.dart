@@ -35,8 +35,11 @@ Future<bool> _launchSurface(
     }
   }
   if (chosen == null) {
-    if (id == null) {
+    if (id == null && candidates.isEmpty) {
       stderr.writeln('[失败] 没有可唤起的界面模块');
+    } else if (id == null) {
+      stderr.writeln('[提示] 多个候选，请指定：-gui <id>（' +
+          candidates.map((f) => f.id).join(', ') + '）');
     } else {
       stderr.writeln('[失败] 未找到界面模块: ' + id +
           '（候选: ' + candidates.map((f) => f.id).join(', ') + '）');
@@ -149,9 +152,15 @@ Future<void> main(List<String> args) async {
   var port = 0;
   String? surfaceId;
   var surfaceRequested = false;
-  for (final a in args) {
+  for (var i = 0; i < args.length; i++) {
+    final a = args[i];
     if (a == '-gui' || a == '--gui') {
       surfaceRequested = true;
+      // 分离形式：-gui <id>（下一个非选项参数作为界面 id）
+      if (i + 1 < args.length && !args[i + 1].startsWith('-')) {
+        surfaceId = args[i + 1];
+        i++;
+      }
     } else if (a.startsWith('-gui=')) {
       surfaceRequested = true;
       surfaceId = a.substring(5);
@@ -160,11 +169,19 @@ Future<void> main(List<String> args) async {
       surfaceId = a.substring(6);
     } else if (a.startsWith('--port=')) {
       port = int.parse(a.substring(7));
+    } else if (a.startsWith('--without=') || a == '--serve' || a == '--verbose') {
+      // 已消费（excluded / serve / verbose）
+    } else {
+      stderr.writeln('[未知参数] ' + a + '（忽略）');
     }
   }
 
   final asm = await assemble(excluded: excluded, port: port, verbose: verbose);
   await asm.waitServices();
+  // 就绪由宿主同步播报（子进程不再异步打印，避免打断菜单处的输入行）
+  if (asm.serviceFolders.isNotEmpty) {
+    print('[就绪] service ' + asm.serviceFolders.map((f) => f.id).join(', '));
+  }
   final procs = <Process>[...asm.services];
 
   // Ctrl+C：宿主消亡，所有子模块进程随之终止

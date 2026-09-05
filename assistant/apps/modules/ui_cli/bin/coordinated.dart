@@ -23,11 +23,12 @@ Future<void> main(List<String> args) async {
       repl = true;
     }
   }
+  // 就绪由宿主同步播报，这里只在连接前报一次启动事实（避免异步输出打断宿主菜单）
+  if (!repl) print('[ui_cli] 连接核心 :' + port.toString() + '…');
   final program = UiCliProgram();
   await ModuleClient.connect(InternetAddress.loopbackIPv4, port, program);
 
   if (!repl) {
-    print('[ui_cli] 已连接核心 :' + port.toString() + '，等待调用');
     // 无头守护常驻：连接断开（核心退出）才会结束
     await Completer<void>().future;
     return;
