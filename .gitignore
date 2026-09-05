@@ -6,24 +6,10 @@
 #    Flutter/Dart SDK、Pub 缓存、会话日志两边各自本地管理，绝不进 git 历史。
 # ==================================================================
 
-# ---- 工具链 / SDK（体积巨大；平台后缀目录，Windows/WSL 共仓库互不覆盖）----
-# 注意：gitignore 不支持 {a,b,c} 花括号展开，必须逐个枚举
-/flutter-linux/
-/flutter-windows/
-/flutter-macos/
-/dart-sdk-linux/
-/dart-sdk-windows/
-/dart-sdk-macos/
-/flutter_windows_*.zip
-/.pub-cache-linux/
-/.pub-cache-windows/
-/.pub-cache-macos/
-/.dart-home-linux/
-/.dart-home-windows/
-/.dart-home-macos/
-/.tmp-linux/
-/.tmp-windows/
-/.tmp-macos/
+# ---- 工具链 / SDK / 缓存 / 配置快照（体积巨大；归 platform/<os> 平台目录）----
+# 每平台一套：dart-sdk、flutter、pub-cache、dart-home、tmp、dart_tool/<模块>/ 快照。
+# Windows 与 WSL 共用仓库互不覆盖；两平台交替使用由 bin/flutter 秒级换入快照。
+/platform/
 /.tools/
 /.home/
 

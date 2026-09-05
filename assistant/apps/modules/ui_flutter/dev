@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
-# ui_flutter 的开发态启动脚本（Unix 侧）。产品装配器经它拉起本模块。
+# ui_flutter 的开发态启动脚本（Unix 侧）。产品宿主经它拉起本模块。
 # 职责（模块自决，产品不参与）：
-#   1) 依赖自愈：.dart_tool 里 SDK 依赖是工具链写死的绝对路径（平台相关），
-#      检测异侧/缺失配置则先 pub get（纯 path 依赖的包两侧通用，不会命中）
-#   2) 自选设备：按当前系统给 flutter run -d
-#   3) 起守护入口 bin/coordinated.dart，端口由产品注入（--port=N 转发）
+#   1) 自选设备：按当前系统给 flutter run -d
+#   2) 起守护入口 bin/coordinated.dart，端口由产品注入（--port=N 转发）
+# 依赖自愈已上收 bin/flutter（平台配置快照秒级换入），此处不再重复。
 set -euo pipefail
 
 SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -16,13 +15,6 @@ case "$(uname -s)" in
   Darwin) DEVICE=macos ;;
   *)      DEVICE=linux ;;
 esac
-
-# 依赖自愈：异侧 = 出现盘符绝对路径（file:///X:/…）；缺失同理
-CFG="$SELF_DIR/.dart_tool/package_config.json"
-if [ ! -f "$CFG" ] || grep -q '"rootUri": "file:///[A-Za-z]:/' "$CFG"; then
-  echo "[ui_flutter] 依赖配置异侧/缺失，重新解析…"
-  "$FLUTTER" pub get
-fi
 
 # 参数转发：本 SDK 版本的 flutter run 会丢弃 -- 分隔符后的参数，
 # 须逐个转成 --dart-entrypoint-args=<arg> 才能到达 main(List<String> args)

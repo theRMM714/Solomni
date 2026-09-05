@@ -193,8 +193,8 @@ static const contribution = UiContribution(
 
 ## 环境备注（跨平台，clone 即用）
 
-- Dart / Flutter SDK 与缓存统一放仓库根的平台后缀目录（dart-sdk-linux/、flutter-windows/…，
-  .gitignore 排除）；用仓库内 `bin/setup.mjs` 一键安装：
+- Dart / Flutter SDK 与缓存统一放仓库根的 platform/<os>/ 平台目录（platform/linux/、
+  platform/windows/…，.gitignore 排除）；用仓库内 `bin/setup.mjs` 一键安装：
   - `node bin/setup.mjs` 装 Dart SDK 并 `pub get`；加 `--flutter` 再装 Flutter SDK
 - 开发请用仓库内包装命令 `bin/dart` / `bin/flutter`（自动配置缓存），无需手动改环境变量或路径
 - 详见仓库根 `SETUP.md`
