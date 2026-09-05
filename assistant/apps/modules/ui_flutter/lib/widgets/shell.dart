@@ -7,6 +7,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:protocol/outbound.dart';
+import 'package:protocol/protocol.dart';
 import 'package:ui_canvas/ui_canvas.dart';
 import 'package:ui_vocab/ui_vocab.dart';
 import '../discovery.dart';
@@ -102,11 +103,18 @@ class _UiShellState extends State<UiShell> {
     }
   }
 
-  /// 错误可见化：控制台（宿主可见）+ 界面横幅（用户可见），绝不静默
+  /// 错误可见化：控制台 + 界面横幅，绝不静默；
+  /// 另经 logs.append 能力写进宿主日志（preferShared：无提供方则降级为仅控制台）
   void _fail(Object e) {
     // ignore: avoid_print
     print('[ui_flutter] 发现/载入失败: ' + e.toString());
     if (mounted) setState(() => _error = e.toString());
+    final out = widget.outbound;
+    if (out != null) {
+      out.rpc(HostCaps.logsAppend,
+              {'from': 'ui_flutter', 'text': '发现/载入失败: ' + e.toString()})
+          .catchError((_) => null); // NoProvider 等：降级为仅控制台
+    }
   }
 
   void _afterAction() {

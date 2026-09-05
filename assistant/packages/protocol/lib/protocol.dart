@@ -124,6 +124,13 @@ abstract final class CoreCaps {
   static const wiring = 'core.wiring';
 }
 
+/// 宿主元能力词汇（宿主自己声明提供，模块按需消费）
+abstract final class HostCaps {
+  /// 追加一行运行日志：{'text': '...'}；发送方 id 由封套自带。
+  /// 模块按 Need(preferShared) 声明——有 logs 就用，没有降级为仅控制台。
+  static const logsAppend = 'logs.append';
+}
+
 /// 流式结果的包装：模块处理器返回它，核心把 chunks 逐条作为
 /// 同 id 的 event 封发给消费方，最后以 ok（全量文本）收尾。
 /// 非流式消费方只见 ok，无感知。
