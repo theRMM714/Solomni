@@ -21,6 +21,12 @@ void _printSurfaces(Assembled asm) {
   }
 }
 
+/// 当前在线模块（核心注册表事实）：surface 退出重进后据此判断 service 是否还在
+void _printOnline(Assembled asm) {
+  stdout.writeln('[在线] ' +
+      asm.daemon.declarations.map((d) => d.id).join(', '));
+}
+
 /// 唤起一个 surface：spawn -> 校验自声明 kind == surface -> 附着终端等它退出。
 /// 返回 false 表示未能唤起（未知 id / 自声明不是界面）。
 Future<bool> _launchSurface(
@@ -135,6 +141,7 @@ Future<void> _menu(Assembled asm, List<Process> procs) async {
       reader.pause(); // 把终端让给 surface
       await _launchSurface(asm, procs, line);
       reader.resume();
+      _printOnline(asm); // surface 退出后：在线模块事实（诊断 service 是否离线）
       _printSurfaces(asm);
     }
   } finally {
@@ -184,6 +191,15 @@ Future<void> main(List<String> args) async {
   }
   final procs = <Process>[...asm.services];
 
+  // service 进程退出必须大声可见（离线=降级，但悄悄死掉没法诊断）
+  for (var i = 0; i < asm.services.length; i++) {
+    final id = asm.serviceFolders[i].id;
+    unawaited(asm.services[i].exitCode.then((code) {
+      stdout.writeln('[离线] service ' + id + ' 已退出（exit ' +
+          code.toString() + '）——消费方自动降级；重启产品可恢复');
+    }));
+  }
+
   // Ctrl+C：宿主消亡，所有子模块进程随之终止
   unawaited(ProcessSignal.sigint.watch().first.then((_) async {
     for (final p in procs) {
@@ -201,6 +217,7 @@ Future<void> main(List<String> args) async {
   _printSurfaces(asm);
   if (surfaceRequested) {
     await _launchSurface(asm, procs, surfaceId);
+    _printOnline(asm);
     _printSurfaces(asm);
   }
   await _menu(asm, procs);
