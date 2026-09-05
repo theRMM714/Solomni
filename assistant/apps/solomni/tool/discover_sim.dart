@@ -10,8 +10,11 @@ import 'package:transport/transport.dart';
 final class _Sim implements ModuleProgram {
   Outbound? outbound; // 与 GUI 相同：bind 时捕获出边（定向 call 在这里）
   @override
-  Declaration get declaration =>
-      const Declaration('guisim', kind: ModuleKind.surface);
+  Declaration get declaration => const Declaration(
+        'guisim',
+        kind: ModuleKind.surface,
+        needs: [Need(HostCaps.logsAppend, NeedVia.preferShared)],
+      );
 
   @override
   ModuleHandler bind(Outbound outbound) {
@@ -29,6 +32,14 @@ Future<void> main(List<String> args) async {
   await ModuleClient.connect(InternetAddress.loopbackIPv4, port, program);
   final out = program.outbound!;
   print('[sim] 已连接');
+  // logs.append：有 logs 能力则写宿主日志（preferShared 消费）
+  try {
+    await out.rpc(HostCaps.logsAppend,
+        {'from': 'guisim', 'text': 'sim 验证写入'});
+    print('[sim] logs.append 写入 ok');
+  } catch (e) {
+    print('[sim] logs.append 降级（无提供方）: ' + e.toString());
+  }
   try {
     final res = await out.rpc(CoreCaps.modules, null);
     final mods = (res as Map)['modules'] as List;

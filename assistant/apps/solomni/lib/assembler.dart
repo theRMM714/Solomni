@@ -7,6 +7,7 @@ import 'dart:io';
 import 'dart:isolate';
 import 'package:core/core.dart';
 import 'package:protocol/protocol.dart';
+import 'package:solomni/host_log.dart';
 
 /// 一个可装卸单元：modules/ 下一个文件夹（id = 文件夹名）
 class ModuleFolder {
@@ -114,6 +115,7 @@ class Assembled {
     for (final f in serviceFolders) {
       if (!ids.contains(f.id)) {
         stderr.writeln('[警告] service ' + f.id + ' 未在时限内连接');
+        HostLog.write('警告：service ' + f.id + ' 未在时限内连接');
       }
     }
   }
@@ -129,12 +131,14 @@ Future<Assembled> assemble({
 }) async {
   final folders = scanModules(modulesDir ?? defaultModulesDir());
   print('[发现] ' + folders.map((f) => f.id).join(', '));
+  HostLog.write('发现模块: ' + folders.map((f) => f.id).join(', '));
   final daemon = await BrokerDaemon.bind(InternetAddress.loopbackIPv4, port);
   final serviceFolders = <ModuleFolder>[];
   final services = <Process>[];
   for (final f in folders) {
     if (excluded.contains(f.id)) {
       print('[卸载] ' + f.id + ' 被排除（文件夹保留，可随时恢复）');
+      HostLog.write('卸载 ' + f.id + '（--without）');
       continue;
     }
     if (hasLaunchContract(f)) {
@@ -144,6 +148,8 @@ Future<Assembled> assemble({
     }
     serviceFolders.add(f);
     services.add(await spawnService(f, daemon.port));
+    HostLog.write('拉起 service ' + f.id +
+        '（pid ' + services.last.pid.toString() + '）');
     if (verbose) print('[拉起] service ' + f.id);
   }
   await daemon.start();

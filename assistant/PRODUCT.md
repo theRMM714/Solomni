@@ -74,6 +74,11 @@ $
 根目录另有**门户** `solomni.bat` / `solomni`：转发给 `bin/solomni`(.bat)，
 仓库根直接 `.\solomni` 即可（`start` 是 cmd 保留字，故门户用产品命名）。
 
+**运行日志**：每次启动器拉起产品，仓库根 `logs/` 下按时间戳生成一份
+（`yyyyMMdd-HHmmss.log`，git 忽略）。日志是宿主声明的能力
+`logs.append`：模块经 `Need(preferShared)` 消费——有 logs 就写，
+没有降级为仅控制台；宿主自身的装配/唤起/离线事件同记其中。
+
 surface 的唤起规则（宿主无静默选择）：
 
 - 菜单只列有 `dev`/`dev.bat` 启动契约的模块（`surface`），只允许唤起它们

@@ -8,6 +8,8 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:protocol/protocol.dart';
 import 'package:solomni/assembler.dart';
+import 'package:solomni/host_log.dart';
+import 'package:transport/transport.dart';
 
 void _printSurfaces(Assembled asm) {
   final s = asm.surfaces;
@@ -23,8 +25,9 @@ void _printSurfaces(Assembled asm) {
 
 /// 当前在线模块（核心注册表事实）：surface 退出重进后据此判断 service 是否还在
 void _printOnline(Assembled asm) {
-  stdout.writeln('[在线] ' +
-      asm.daemon.declarations.map((d) => d.id).join(', '));
+  final line = asm.daemon.declarations.map((d) => d.id).join(', ');
+  stdout.writeln('[在线] ' + line);
+  HostLog.write('在线模块: ' + line);
 }
 
 /// 唤起一个 surface：spawn -> 校验自声明 kind == surface -> 附着终端等它退出。
@@ -43,29 +46,36 @@ Future<bool> _launchSurface(
   if (chosen == null) {
     if (id == null && candidates.isEmpty) {
       stderr.writeln('[失败] 没有可唤起的界面模块');
+      HostLog.write('唤起失败：没有可唤起的界面模块');
     } else if (id == null) {
       stderr.writeln('[提示] 多个候选，请指定：-gui <id>（' +
           candidates.map((f) => f.id).join(', ') + '）');
+      HostLog.write('唤起提示：多候选未指定 id');
     } else {
       stderr.writeln('[失败] 未找到界面模块: ' + id +
           '（候选: ' + candidates.map((f) => f.id).join(', ') + '）');
+      HostLog.write('唤起失败：未找到界面模块 ' + id);
     }
     return false;
   }
   final proc = await spawnSurface(chosen, asm.daemon.port);
   procs.add(proc);
   print('[唤起] ' + chosen.id + ' -> :' + asm.daemon.port.toString());
+  HostLog.write('唤起 surface ' + chosen.id +
+      ' -> :' + asm.daemon.port.toString());
   // 自声明校验：等它的 hello 到达，kind 必须是 surface（模块自报身份，宿主照实校验）
   final decl = await asm.waitDeclaration(chosen.id,
       timeout: const Duration(seconds: 5));
   if (decl != null && decl.kind != ModuleKind.surface) {
     stderr.writeln(
         '[拒绝] ' + chosen.id + ' 自声明为 ' + decl.kind.name + '，不是界面模块');
+    HostLog.write('拒绝 ' + chosen.id + '：自声明 kind=' + decl.kind.name);
     await killProcess(proc);
     return false;
   }
   // 附着：等它退出（关窗 / 终端 exit），宿主回到菜单
-  await proc.exitCode;
+  final code = await proc.exitCode;
+  HostLog.write('surface ' + chosen.id + ' 退出（exit ' + code.toString() + '）');
   return true;
 }
 
@@ -150,6 +160,8 @@ Future<void> _menu(Assembled asm, List<Process> procs) async {
 }
 
 Future<void> main(List<String> args) async {
+  HostLog.init();
+  HostLog.write('启动参数: ' + args.join(' '));
   final excluded = args
       .where((a) => a.startsWith('--without='))
       .map((a) => a.substring(10))
@@ -180,14 +192,22 @@ Future<void> main(List<String> args) async {
       // 已消费（excluded / serve / verbose）
     } else {
       stderr.writeln('[未知参数] ' + a + '（忽略）');
+      HostLog.write('未知参数（忽略）: ' + a);
     }
   }
 
   final asm = await assemble(excluded: excluded, port: port, verbose: verbose);
+  HostLog.write('核心 :' + asm.daemon.port.toString() + ' 就绪');
+  // logs 能力上线：宿主以普通模块身份注册，任何 Need(logs.append) 的模块即可使用
+  await ModuleClient.connect(
+      asm.daemon.address, asm.daemon.port, HostLogProgram());
+  HostLog.write('logs 能力已注册');
   await asm.waitServices();
   // 就绪由宿主同步播报（子进程不再异步打印，避免打断菜单处的输入行）
   if (asm.serviceFolders.isNotEmpty) {
     print('[就绪] service ' + asm.serviceFolders.map((f) => f.id).join(', '));
+    HostLog.write('service 就绪: ' +
+        asm.serviceFolders.map((f) => f.id).join(', '));
   }
   final procs = <Process>[...asm.services];
 
@@ -197,6 +217,7 @@ Future<void> main(List<String> args) async {
     unawaited(asm.services[i].exitCode.then((code) {
       stdout.writeln('[离线] service ' + id + ' 已退出（exit ' +
           code.toString() + '）——消费方自动降级；重启产品可恢复');
+      HostLog.write('service ' + id + ' 已退出（exit ' + code.toString() + '）');
     }));
   }
 

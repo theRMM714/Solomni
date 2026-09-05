@@ -12,6 +12,7 @@
 /platform/
 /.tools/
 /.home/
+/logs/
 
 # ---- 会话 / 私密记录 ----
 /session.jsonl
