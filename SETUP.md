@@ -10,15 +10,20 @@
     sudo apt install -y clang cmake ninja-build pkg-config libgtk-3-dev    # Debian/Ubuntu
     sudo pacman -S --needed clang cmake ninja pkg-config gtk3             # Arch
 
-## 平台后缀目录（多平台共仓库互不覆盖）
+## 平台目录 platform/<os>（多平台共仓库互不覆盖）
 
-SDK 与缓存按平台分目录，Windows 与 WSL 共用同一个仓库时互不覆盖、切换零成本：
+SDK、缓存与本平台解析出的配置快照，统一收纳到仓库根的 `platform/<os>/`：
 
-    dart-sdk-windows/   dart-sdk-linux/   dart-sdk-macos/     # Dart SDK
-    flutter-windows/    flutter-linux/    flutter-macos/      # Flutter SDK
-    .pub-cache-<平台>/  .dart-home-<平台>/ .tmp-<平台>/        # 各平台缓存
+    platform/windows/   platform/linux/   platform/macos/
+      dart-sdk/           # Dart SDK
+      flutter/            # Flutter SDK
+      pub-cache/          # Pub 缓存
+      dart-home/          # 工具 HOME（分析器缓存/工具配置）
+      tmp/                # 工具临时文件
+      dart_tool/<模块>/   # 该模块本平台的 package_config 快照 + lock 凭证
 
-旧版无后缀目录（dart-sdk/、flutter/、.pub-cache/…）会被 setup 自动迁移，无需手动处理。
+旧散目录（dart-sdk-<os>/、flutter-<os>/、.pub-cache-<os>/… 及更早的无后缀目录）
+会被 setup 自动迁移到 platform/<os>/，无需手动处理。
 
 ## 一键安装（clone 后跑一次，可重复跑）
 在仓库根目录执行：
@@ -28,9 +33,9 @@ SDK 与缓存按平台分目录，Windows 与 WSL 共用同一个仓库时互不
 
 它会做：
 1. 若当前平台缺 SDK，则按当前操作系统 / 架构下载并解压：
-   - Dart SDK    -> dart-sdk-<platform>/dart-sdk/     （zip 内自带一层 dart-sdk/）
-   - Flutter SDK -> flutter-<platform>/flutter/       （--flutter 时）
-2. 建好该平台缓存目录：.pub-cache-<platform> / .dart-home-<platform> / .tmp-<platform>
+   - Dart SDK    -> platform/<os>/dart-sdk/     （zip 内自带一层 dart-sdk/）
+   - Flutter SDK -> platform/<os>/flutter/       （--flutter 时）
+2. 建好该平台缓存目录：platform/<os>/ 下的 pub-cache / dart-home / tmp
 3. 对 assistant/ 下每个含 pubspec.yaml 的包运行 dart pub get
    （--flutter 时对 Flutter 依赖包改用 flutter pub get）
 
@@ -83,9 +88,14 @@ SDK 与缓存按平台分目录，Windows 与 WSL 共用同一个仓库时互不
 路径**——Windows 与 WSL 共用一个仓库目录时，这些包两侧通用，切侧零成本。
 
 唯一例外 ui_flutter：`sdk: flutter` 依赖由 Flutter 工具链解析成本地 SDK 绝对路径
-（工具链写死 .dart_tool 位置，无法相对化）。其 `dev`/`dev.bat` 启动脚本会在拉起前
-**自检异侧配置并自动 pub get**，两侧切换对 `-gui` 启动无感；只有手动跑
-`flutter analyze`/`flutter test` 时切侧才需要先 `flutter pub get` 一次。
+（工具链写死 .dart_tool 位置，无法相对化），hosted/SDK 条目会随平台漂移。对此
+bin/flutter（两侧同构）内置**平台配置自愈**：在包目录里跑任何 flutter 命令前——
+
+- 该平台快照（platform/<os>/dart_tool/<模块>/）存在且 pubspec.lock 未变 →
+  **秒级换入**（一次文件复制，不再 pub get）
+- 快照缺失或 lock 变了（依赖真的变了）→ 真解析，并写回快照 + lock 凭证
+
+两侧交替使用零成本；`dev`/`dev.bat` 启动脚本不再各自带自愈逻辑。
 
 ## 版本 / 镜像覆盖
 默认用国内 flutter-io 镜像，版本锁定为与当前开发一致的：
@@ -104,7 +114,7 @@ SDK 与缓存按平台分目录，Windows 与 WSL 共用同一个仓库时互不
 ## 为什么这样设计（与 git 的关系）
 - git 只同步源码（assistant/ + 文档 + bin/）。
 - 工具链 / SDK / 缓存 / 会话日志（session.jsonl）都 gitignore，各平台本地生成。
-- Windows 与 WSL 可共用同一仓库目录（平台后缀目录互不覆盖），
+- Windows 与 WSL 可共用同一仓库目录（platform/<os> 平台目录互不覆盖），
   也可以各自 clone、各自跑一次 setup，行为完全一致；代码只通过 git 桥同步。
 - .dart_tool/、build/ 是构建产物，各机器 pub get 时本地重建，不提交。
 

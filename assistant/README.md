@@ -62,6 +62,6 @@ cd apps/modules/ui_flutter && flutter test           # Flutter UI 模块 mock �
 
 ## 环境备注
 
-- 工具链/缓存按平台后缀目录放仓库根（dart-sdk-linux/、flutter-windows/、.pub-cache-\<平台\>/…），
-  一键安装与目录说明见仓库根 [SETUP.md](../SETUP.md)
+- 工具链/缓存按平台收纳在仓库根 platform/<os>/（platform/linux/、platform/windows/、
+  platform/macos/，含各模块配置快照），一键安装与目录说明见仓库根 [SETUP.md](../SETUP.md)
 - 开发一律用仓库内包装命令 bin/dart / bin/flutter（自动配好 PUB_CACHE/TMP/HOME，跨平台一致）

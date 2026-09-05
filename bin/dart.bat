@@ -1,12 +1,13 @@
 @echo off
-rem bin\dart.bat -- Windows wrapper: platform-suffixed SDK dirs + repo cache
+rem bin\dart.bat -- Windows wrapper: platform dir + repo cache
 setlocal
 set "ROOT=%~dp0.."
-set "PUB_CACHE=%ROOT%\.pub-cache-windows"
-set "TMP=%ROOT%\.tmp-windows"
+set "PUB_CACHE=%ROOT%\platform\windows\pub-cache"
+set "TMP=%ROOT%\platform\windows\tmp"
 set "TEMP=%TMP%"
-if exist "%ROOT%\dart-sdk-windows\dart-sdk\bin\dart.exe" (
-  "%ROOT%\dart-sdk-windows\dart-sdk\bin\dart.exe" %*
+set "DART=%ROOT%\platform\windows\dart-sdk\bin\dart.exe"
+if exist "%DART%" (
+  "%DART%" %*
   exit /b %ERRORLEVEL%
 )
 echo Dart SDK not installed. Run: node bin\setup.mjs 1>&2

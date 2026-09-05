@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# bin/flutter -- WSL/Linux/Mac 包装：平台后缀 SDK 目录 + 仓库内缓存 + git 探测
+# bin/flutter -- WSL/Linux/Mac 包装：platform/<os> 平台目录 + 仓库内缓存 + git 探测
 # git 探测：PATH 无 git 时，识别用户级安装（~/.local/opt 或仓库内 .tools/git，
 # 均为 Arch git 包解压布局 usr/bin/git + usr/lib/git-core）
 set -euo pipefail
@@ -9,8 +9,9 @@ case "$(uname -s)" in
   Darwin*) OS=macos ;;
   *)       OS=linux ;;
 esac
-export PUB_CACHE="$ROOT/.pub-cache-$OS"
-export TMP="$ROOT/.tmp-$OS"; export TEMP="$TMP"
+P="$ROOT/platform/$OS"
+export PUB_CACHE="$P/pub-cache"
+export TMP="$P/tmp"; export TEMP="$TMP"
 # .tools/bin 先入 PATH：精简系统缺 which 等基础命令时由 shim 兜底（flutter 工具依赖）
 export PATH="$ROOT/.tools/bin:$PATH"
 REAL_HOME="$HOME"
@@ -23,10 +24,38 @@ if ! command -v git >/dev/null 2>&1; then
     fi
   done
 fi
-# HOME 指向仓库内：flutter 工具配置（~/.config 等）写入沙箱可写范围
-export HOME="$ROOT/.dart-home-$OS"
-if [ -x "$ROOT/flutter-$OS/flutter/bin/flutter" ]; then
-  exec "$ROOT/flutter-$OS/flutter/bin/flutter" "$@"
+# HOME 指向平台目录内：flutter 工具配置（~/.config 等）写入可写范围
+export HOME="$P/dart-home"
+FLUTTER="$P/flutter/bin/flutter"
+
+# ---- 平台配置自愈（flutter 包专用；纯 Dart 包路径全相对，永不触发） ----
+# 工具链只认 <包>/.dart_tool/package_config.json 这一个位置，内容归启动器管：
+# 有本平台快照且依赖未变 -> 秒级换入；否则真解析并写回快照 + lock 凭证。
+if [ -f "$PWD/pubspec.yaml" ]; then
+  PKG="$(basename "$PWD")"
+  CFG="$PWD/.dart_tool/package_config.json"
+  SNAPDIR="$P/dart_tool/$PKG"
+  SNAP="$SNAPDIR/package_config.json"
+  STAMP="$SNAPDIR/pubspec.lock"
+  FOREIGN=0
+  [ -f "$CFG" ] || FOREIGN=1
+  # 异侧判定：unix 上出现盘符绝对路径（本 SDK 版本对 SDK/hosted 依赖写死绝对路径）
+  if [ "$FOREIGN" = 0 ] && grep -q '"file:///[A-Za-z]:/' "$CFG"; then FOREIGN=1; fi
+  if [ "$FOREIGN" = 1 ]; then
+    if [ -f "$SNAP" ] && cmp -s "$PWD/pubspec.lock" "$STAMP"; then
+      mkdir -p "$PWD/.dart_tool"
+      cp "$SNAP" "$CFG"
+    else
+      (cd "$PWD" && "$FLUTTER" pub get)
+      mkdir -p "$SNAPDIR"
+      cp "$CFG" "$SNAP"
+      cp "$PWD/pubspec.lock" "$STAMP"
+    fi
+  fi
+fi
+
+if [ -x "$FLUTTER" ]; then
+  exec "$FLUTTER" "$@"
 fi
 echo "Flutter SDK 未安装，先运行: node bin/setup.mjs --flutter" >&2
 exit 1

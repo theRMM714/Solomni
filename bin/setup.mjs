@@ -2,15 +2,17 @@
 // bin/setup.mjs -- Solomni 依赖安装脚本（Node 18+，跨平台，clone 后运行一次）
 //
 // 做什么：
-//   0. 一次性迁移：旧版无后缀目录（dart-sdk/、flutter/、.pub-cache/…）-> 平台后缀目录。
+//   0. 一次性迁移：旧版平台后缀散目录（dart-sdk-<os>/、.pub-cache-<os>/…）
+//      -> platform/<os>/ 归一目录。
 //   1. 若缺当前平台 SDK，则按 OS 下载并解压：
-//      Dart SDK    -> dart-sdk-<platform>/dart-sdk/
-//      Flutter SDK -> flutter-<platform>/flutter/    （--flutter 时）
-//   2. 建好平台缓存目录 .pub-cache-<platform> / .dart-home-<platform> / .tmp-<platform>
+//      Dart SDK    -> platform/<os>/dart-sdk/
+//      Flutter SDK -> platform/<os>/flutter/    （--flutter 时）
+//   2. 建好平台目录 platform/<os>/ 下的 pub-cache / dart-home / tmp
 //   3. 对 assistant/ 下每个含 pubspec.yaml 的包运行 pub get（dart 包用 dart，flutter 包用 flutter）
 //
-// 平台后缀 = windows / linux / macos：
-//   Windows 与 WSL 共用同一仓库时，SDK 与缓存互不覆盖、切换零成本。
+// 平台目录 platform/<os>（os = windows / linux / macos）：
+//   Windows 与 WSL 共用同一仓库时，SDK、缓存与各自解析出的 package_config
+//   快照互不覆盖；两平台交替使用由 bin/flutter 秒级换入，无需重复 pub get。
 // 之后开发用 bin/dart、bin/flutter 包装命令，内部自动配好缓存，无需改环境。
 //
 // 环境变量覆盖：DART_VERSION、FLUTTER_VERSION、DART_BASE、FLUTTER_BASE
@@ -34,15 +36,16 @@ const WITH_FLUTTER = process.argv.includes('--flutter');
 const FORCE        = process.argv.includes('--force');
 const HELP         = process.argv.includes('--help');
 
-// ---------- 平台后缀目录（多平台共用仓库互不覆盖） ----------
+// ---------- 平台目录（多平台共用仓库互不覆盖；快照也归这里） ----------
 const PLATFORM = process.platform === 'win32' ? 'windows' : process.platform === 'darwin' ? 'macos' : 'linux';
-const DART_ROOT = join(ROOT, 'dart-sdk-' + PLATFORM);
-const FLUT_ROOT = join(ROOT, 'flutter-' + PLATFORM);
-const DART_BIN  = join(DART_ROOT, 'dart-sdk', 'bin', PLATFORM === 'windows' ? 'dart.exe' : 'dart');
-const FLUT_BIN  = join(FLUT_ROOT, 'flutter', 'bin', PLATFORM === 'windows' ? 'flutter.bat' : 'flutter');
-const PUB_CACHE = join(ROOT, '.pub-cache-' + PLATFORM);
-const DART_HOME = join(ROOT, '.dart-home-' + PLATFORM);
-const TMP       = join(ROOT, '.tmp-' + PLATFORM);
+const PLAT     = join(ROOT, 'platform', PLATFORM);
+const DART_ROOT = PLAT; // SDK 压缩包解压后自带 dart-sdk/ 一层
+const FLUT_ROOT = PLAT; // SDK 压缩包解压后自带 flutter/ 一层
+const DART_BIN  = join(PLAT, 'dart-sdk', 'bin', PLATFORM === 'windows' ? 'dart.exe' : 'dart');
+const FLUT_BIN  = join(PLAT, 'flutter', 'bin', PLATFORM === 'windows' ? 'flutter.bat' : 'flutter');
+const PUB_CACHE = join(PLAT, 'pub-cache');
+const DART_HOME = join(PLAT, 'dart-home');
+const TMP       = join(PLAT, 'tmp');
 
 const arch = function () { return process.arch === 'arm64' ? 'arm64' : 'x64'; };
 const dartUrl = function () { return DART_BASE + DART_VER + '/sdk/dartsdk-' + PLATFORM + '-' + arch() + '-release.zip'; };
@@ -91,29 +94,33 @@ function extract(archive, destDir, kind) {
   }
 }
 
-// ---------- 旧版无后缀目录一次性迁移（内容探测平台；缓存类归当前平台） ----------
+// ---------- 一次性迁移：旧散目录 -> platform/<os>/（同盘改名，秒级） ----------
 function migrateLegacy() {
-  const tryMove = function (oldName, suffix) {
-    const from = join(ROOT, oldName);
-    const to = join(ROOT, oldName + '-' + suffix);
+  const move = function (from, to) {
     if (!existsSync(from)) return;
-    if (existsSync(to)) { log('注意：' + oldName + '/ 与 ' + oldName + '-' + suffix + '/ 并存，跳过旧目录（请手动处理）'); return; }
+    if (existsSync(to)) { log('注意：' + relative(ROOT, from) + ' 与 ' + relative(ROOT, to) + ' 并存，跳过（请手动处理）'); return; }
+    mkdirSync(dirname(to), { recursive: true });
     renameSync(from, to);
-    log('迁移旧目录 ' + oldName + '/ -> ' + oldName + '-' + suffix + '/');
+    log('迁移 ' + relative(ROOT, from) + ' -> ' + relative(ROOT, to));
   };
-  // SDK 按内容探测：bin 下出现 dart.exe 即为 Windows 版，否则归当前平台
+  // 旧平台后缀散目录（SDK 移内层，缓存整目录）
+  move(join(ROOT, 'dart-sdk-' + PLATFORM, 'dart-sdk'), join(PLAT, 'dart-sdk'));
+  move(join(ROOT, 'flutter-' + PLATFORM, 'flutter'),   join(PLAT, 'flutter'));
+  move(join(ROOT, '.pub-cache-' + PLATFORM),           join(PLAT, 'pub-cache'));
+  move(join(ROOT, '.dart-home-' + PLATFORM),           join(PLAT, 'dart-home'));
+  move(join(ROOT, '.tmp-' + PLATFORM),                 join(PLAT, 'tmp'));
+  // 更早的无后缀布局（内容探测平台；缓存类归当前跑 setup 的一方）
   if (existsSync(join(ROOT, 'dart-sdk'))) {
     const win = existsSync(join(ROOT, 'dart-sdk', 'dart-sdk', 'bin', 'dart.exe'));
-    tryMove('dart-sdk', win ? 'windows' : PLATFORM);
+    move(join(ROOT, 'dart-sdk', 'dart-sdk'), join(ROOT, 'platform', win ? 'windows' : PLATFORM, 'dart-sdk'));
   }
   if (existsSync(join(ROOT, 'flutter'))) {
     const win = existsSync(join(ROOT, 'flutter', 'flutter', 'bin', 'cache', 'dart-sdk', 'bin', 'dart.exe'));
-    tryMove('flutter', win ? 'windows' : PLATFORM);
+    move(join(ROOT, 'flutter', 'flutter'), join(ROOT, 'platform', win ? 'windows' : PLATFORM, 'flutter'));
   }
-  // 缓存类目录内容跨平台兼容，归当前跑 setup 的一方（另一侧下次自动重建）
-  tryMove('.pub-cache', PLATFORM);
-  tryMove('.dart-home', PLATFORM);
-  tryMove('.tmp', PLATFORM);
+  move(join(ROOT, '.pub-cache'), join(PLAT, 'pub-cache'));
+  move(join(ROOT, '.dart-home'), join(PLAT, 'dart-home'));
+  move(join(ROOT, '.tmp'),       join(PLAT, 'tmp'));
 }
 
 async function ensureDart() {
@@ -180,8 +187,8 @@ function pubEnv() {
 async function main() {
   if (HELP) {
     console.log('用法：node bin/setup.mjs [--flutter] [--force]');
-    console.log('  安装当前平台的 Dart SDK(+可选 Flutter) 到平台后缀目录并执行 pub get。');
-    console.log('  目录：dart-sdk-<platform>/ flutter-<platform>/ .pub-cache-<platform>/ 等');
+    console.log('  安装当前平台的 Dart SDK(+可选 Flutter) 到 platform/<os>/ 并执行 pub get。');
+    console.log('  目录：platform/<os>/dart-sdk  platform/<os>/flutter  platform/<os>/pub-cache 等');
     console.log('  环境变量：DART_VERSION / FLUTTER_VERSION / DART_BASE / FLUT_BASE');
     return;
   }
