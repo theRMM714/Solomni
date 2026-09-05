@@ -17,8 +17,9 @@ case "$(uname -s)" in
 esac
 
 # 参数转发：本 SDK 版本的 flutter run 会丢弃 -- 分隔符后的参数，
-# 须逐个转成 --dart-entrypoint-args=<arg> 才能到达 main(List<String> args)
-ENTRY_ARGS=()
+# 须逐个转成 --dart-entrypoint-args=<arg> 才能到达 main(List<String> args)。
+# 另注入模块根目录：Flutter 运行时无法反推包根，私有数据路径须显式传入。
+ENTRY_ARGS=("--dart-entrypoint-args=--module-dir=$SELF_DIR")
 for a in "$@"; do
   ENTRY_ARGS+=("--dart-entrypoint-args=$a")
 done

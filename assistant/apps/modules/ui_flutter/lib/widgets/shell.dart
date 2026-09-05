@@ -33,6 +33,7 @@ class _UiShellState extends State<UiShell> {
   int _tick = 0; // 每次动作后递增：驱动数据组件（楼层等）刷新
   StreamSubscription<WiringSnapshot>? _wiringSub; // 配对推送订阅
   Future<void> _refreshChain = Future.value(); // 串行化刷新，防竞态
+  String? _error; // 发现/载入失败横幅（绝不静默）
 
   @override
   void initState() {
@@ -54,14 +55,20 @@ class _UiShellState extends State<UiShell> {
   Future<void> _refresh() async {
     final out = widget.outbound;
     if (out == null || !mounted) return;
-    final found = await discover(out);
-    if (!mounted) return;
-    setState(() {
-      _found = found;
-      for (final c in found) {
-        _cache[c.moduleId] = c.contribution;
-      }
-    });
+    try {
+      final found = await discover(out);
+      if (!mounted) return;
+      setState(() {
+        _found = found;
+        _error = null; // 发现成功即清除横幅
+        for (final c in found) {
+          _cache[c.moduleId] = c.contribution;
+        }
+      });
+    } catch (e) {
+      // 发现失败必须可见：静默吞掉 = 界面永远空（诊断输出进宿主控制台）
+      _fail(e);
+    }
   }
 
   Future<void> _boot() async {
@@ -69,17 +76,37 @@ class _UiShellState extends State<UiShell> {
       setState(() => _layout = LayoutDoc());
       return;
     }
-    final found = await discover(widget.outbound!);
-    for (final c in found) {
-      _cache[c.moduleId] = c.contribution;
+    // 先落发现结果再读布局：存储失败只影响持久化，不吞掉模块与组件
+    try {
+      final found = await discover(widget.outbound!);
+      if (!mounted) return;
+      setState(() {
+        _found = found;
+        for (final c in found) {
+          _cache[c.moduleId] = c.contribution;
+        }
+      });
+    } catch (e) {
+      if (mounted) setState(() => _layout = LayoutDoc());
+      _fail(e);
+      return;
     }
     // 空白起步：无保存布局则从零开始，画布由用户创建
-    final saved = await _store.load();
-    setState(() {
-      _found = found;
-      _layout = saved ?? LayoutDoc();
-      _tab = 0;
-    });
+    try {
+      final saved = await _store.load();
+      if (!mounted) return;
+      setState(() => _layout = saved ?? LayoutDoc());
+    } catch (e) {
+      if (mounted) setState(() => _layout = LayoutDoc());
+      _fail(e);
+    }
+  }
+
+  /// 错误可见化：控制台（宿主可见）+ 界面横幅（用户可见），绝不静默
+  void _fail(Object e) {
+    // ignore: avoid_print
+    print('[ui_flutter] 发现/载入失败: ' + e.toString());
+    if (mounted) setState(() => _error = e.toString());
   }
 
   void _afterAction() {
@@ -218,20 +245,41 @@ class _UiShellState extends State<UiShell> {
             ),
           ],
         ),
-        body: CanvasArea(
-          engine: _engine,
-          layout: _layout,
-          found: _found,
-          cache: _cache,
-          tab: _tab,
-          tick: _tick,
-          outbound: widget.outbound,
-          onSelectTab: (i) => setState(() => _tab = i),
-          onModuleCanvas: _newModuleCanvas,
-          onCustomCanvas: _newCustomCanvas,
-          onDeleteCanvas: _deleteCanvas,
-          onChanged: _afterAction,
-        ),
+        body: Column(children: [
+          if (_error != null)
+            Material(
+              color: Theme.of(context).colorScheme.errorContainer,
+              child: ListTile(
+                dense: true,
+                leading: Icon(Icons.warning_amber_rounded,
+                    color: Theme.of(context).colorScheme.error),
+                title: Text('发现/载入失败（详见宿主控制台）',
+                    style: TextStyle(
+                        fontSize: 12,
+                        color: Theme.of(context).colorScheme.error)),
+                subtitle: Text(_error!,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 11)),
+              ),
+            ),
+          Expanded(
+            child: CanvasArea(
+              engine: _engine,
+              layout: _layout,
+              found: _found,
+              cache: _cache,
+              tab: _tab,
+              tick: _tick,
+              outbound: widget.outbound,
+              onSelectTab: (i) => setState(() => _tab = i),
+              onModuleCanvas: _newModuleCanvas,
+              onCustomCanvas: _newCustomCanvas,
+              onDeleteCanvas: _deleteCanvas,
+              onChanged: _afterAction,
+            ),
+          ),
+        ]),
       ),
     );
   }
