@@ -35,14 +35,9 @@ class SecretsModule {
       try {
         final j = jsonDecode(await _file.readAsString()) as Map<String, Object?>;
         for (final e in j.entries) {
-          // 兼容旧格式（裸字符串 = 无备注的钥匙）
-          if (e.value is Map) {
-            final m = Map<String, Object?>.from(e.value as Map);
-            _store[e.key] = SecretEntry(
-                (m['value'] ?? '').toString(), (m['remark'] ?? '').toString());
-          } else {
-            _store[e.key] = SecretEntry(e.value.toString(), '');
-          }
+          final m = Map<String, Object?>.from(e.value as Map);
+          _store[e.key] = SecretEntry(
+              (m['value'] ?? '').toString(), (m['remark'] ?? '').toString());
         }
       } catch (_) {
         // 密钥文件损坏则从空开始，不崩溃
@@ -143,12 +138,11 @@ final class SecretsProgram implements ModuleProgram {
         final p = env.params as Map;
         if (p['component'] == 'key_input' && p['event'] == 'submit') {
           final payload = (p['payload'] as Map?) ?? const {};
-          // 表单带 name/value/remark；CLI 命令带 name/value；单字段旧形态默认写 llm
+          // 表单带 name/value/remark；CLI 命令带 name/value；缺名默认写 llm
           final name = (payload['name'] as String? ?? '').trim().isEmpty
               ? 'llm'
               : (payload['name'] as String).trim();
-          final value =
-              payload['value'] as String? ?? payload['text'] as String? ?? '';
+          final value = payload['value'] as String? ?? '';
           if (value.isEmpty) return 'empty';
           return _inner
               .put(name, value, remark: payload['remark'] as String?)

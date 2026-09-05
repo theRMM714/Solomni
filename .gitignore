@@ -33,5 +33,3 @@
 .idea/
 *.iml
 .vscode/
-
-# ---- 一次性 Windows 下载脚本（已删除，改为仓库内 setup 脚本统一处理）----
