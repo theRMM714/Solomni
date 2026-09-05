@@ -15,6 +15,13 @@ packages:
       relative: true
     source: path
     version: "0.0.0"
+  ui_vocab:
+    dependency: "direct main"
+    description:
+      path: "../../../packages/ui_vocab"
+      relative: true
+    source: path
+    version: "0.0.0"
   user_data:
     dependency: "direct main"
     description:
