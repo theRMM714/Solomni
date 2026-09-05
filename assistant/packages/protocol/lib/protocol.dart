@@ -133,9 +133,10 @@ class Streamed {
 }
 
 abstract final class Caps {
-  // secrets 模块提供
+  // secrets 模块提供（钥匙圈：名字+钥匙+备注，只管钥匙不问去哪扇门）
   static const secretsGet = 'secrets.get';
   static const secretsPut = 'secrets.put';
+  static const secretsList = 'secrets.list'; // 只回 [{name, remark}]，不出钥匙值
 
   // llm 网关模块提供
   static const llmChat = 'llm.chat';
