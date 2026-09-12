@@ -1,4 +1,10 @@
 @echo off
-rem Windows 一键启动：默认 CLI；带 -webUI 进 Web 转录中心。
+rem Solomni launcher (Windows). Default CLI; add -webUI for the Web UI.
+where node >nul 2>nul
+if errorlevel 1 (
+  echo [start] Node.js not found. Install from https://nodejs.org
+  pause
+  exit /b 1
+)
 node "%~dp0start.js" %*
 pause
