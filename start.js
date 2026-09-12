@@ -4,6 +4,9 @@
  * Default CLI; -webUI starts the Web UI. No business logic here.
  * Cross-platform: node start.js [-webUI] [--release] [--root <dir>] [--web-port <port>]
  * Rust missing? Ask, then install via rustup (GNU toolchain on Windows: no MSVC needed).
+ * Windows GNU gap (rust-lang/rust#140704): windows-sys needs dlltool.exe which rust-mingw
+ * does not ship. Preflight probes FIXED paths only (no disk scan) before building; if
+ * missing, ask consent, then install portable winlibs MinGW into .tools/mingw64.
  */
 "use strict";
 const { spawnSync } = require("child_process");
@@ -18,25 +21,43 @@ const RELEASE = process.argv.includes("--release");
 const PROFILE = RELEASE ? "release" : "debug";
 const BIN = path.join(ROOT, "target", PROFILE, EXE);
 const BUNDLED_CARGO = path.join(ROOT, "platform", "linux", "cargo", "bin", IS_WIN ? "cargo.exe" : "cargo");
+const TOOLS = path.join(ROOT, ".tools");
+const WINLIBS_BIN = path.join(TOOLS, "mingw64", "bin");
 
 const log = (m) => console.log("[start] " + m);
 const die = (m) => { console.error("[start] " + m); process.exit(1); };
+let EXTRA_PATH = []; // dlltool location found by preflight; consumed by cargoEnv.
 
-function rustcSysrootBinDirs(cargo) {
-  // windows-gnu: dlltool.exe lives in the toolchain lib/rustlib/x86_64-pc-windows-gnu/bin/self-contained
-  // (or gdb.debug subdir); windows-sys import-lib generation needs it on PATH.
+function locateDlltool(cargo) {
+  // Fixed-path probes only - never a disk scan. Sources, in order:
+  // 1. toolchain self-contained dirs (older toolchains shipped dlltool there)
+  // 2. conventional MSYS2 install dirs
+  // 3. project-local winlibs install (.tools/mingw64)
+  // 4. any directory that "where dlltool" already reports
+  // Returns the first directory that actually contains dlltool.exe, or null.
   const dirs = [];
-  const v = spawnSync(cargo, ["rustc", "--print", "sysroot"], { encoding: "utf8" });
+  const add = (p) => { if (p && dirs.indexOf(p) < 0) dirs.push(p); };
+  const rustc = path.join(path.dirname(cargo), IS_WIN ? "rustc.exe" : "rustc");
+  const v = spawnSync(rustc, ["--print", "sysroot"], { encoding: "utf8" });
   const sysroot = (v.stdout || "").trim();
   if (sysroot && fs.existsSync(sysroot)) {
     const gnu = path.join(sysroot, "lib", "rustlib", "x86_64-pc-windows-gnu", "bin");
-    if (fs.existsSync(gnu)) dirs.push(gnu);
-    const sc = path.join(gnu, "self-contained");
-    if (fs.existsSync(sc)) dirs.push(sc);
-    const gdb = path.join(gnu, "gdb.debug");
-    if (fs.existsSync(gdb)) dirs.push(gdb);
+    add(path.join(gnu, "self-contained"));
+    add(path.join(gnu, "gdb.debug"));
+    add(gnu);
   }
-  return dirs;
+  add("C:/msys64/mingw64/bin");
+  add("C:/msys2/mingw64/bin");
+  add(WINLIBS_BIN);
+  const w = spawnSync("where", ["dlltool"], { encoding: "utf8" });
+  for (const line of (w.stdout || "").split(/\r?\n/)) {
+    const t = line.trim();
+    if (t && fs.existsSync(t)) add(path.dirname(t));
+  }
+  for (const d of dirs) {
+    if (fs.existsSync(path.join(d, "dlltool.exe"))) return d;
+  }
+  return null;
 }
 
 function cargoEnv(cargo) {
@@ -46,7 +67,7 @@ function cargoEnv(cargo) {
     env.RUSTUP_HOME = path.join(ROOT, "platform", "linux", "rustup");
     env.CARGO_HOME = path.join(ROOT, "platform", "linux", "cargo");
   }
-  env.PATH = [path.dirname(cargo), ...rustcSysrootBinDirs(cargo), env.PATH || ""].filter(Boolean).join(path.delimiter);
+  env.PATH = [path.dirname(cargo)].concat(EXTRA_PATH, env.PATH || "").filter(Boolean).join(path.delimiter);
   return env;
 }
 
@@ -69,6 +90,38 @@ function ask(question) {
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
     rl.question(question, (a) => { rl.close(); resolve(a); });
   });
+}
+
+function runPS(cmd) {
+  return spawnSync("powershell", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", cmd], { stdio: "inherit" });
+}
+
+async function installWinlibs() {
+  // Portable MinGW-w64 (binutils provides dlltool.exe). Project-local: .tools/mingw64.
+  // No admin, no system PATH change; delete the directory to remove.
+  log("resolving latest winlibs release (github api)...");
+  const q = [
+    "$ErrorActionPreference = 'Stop'",
+    "$r = Invoke-RestMethod 'https://api.github.com/repos/brechtsanders/winlibs_mingw/releases/latest'",
+    "$a = $r.assets | Where-Object { $_.name -match 'x86_64' -and $_.name -match 'seh' -and $_.name -match '[.]zip$' -and $_.name -notmatch 'llvm' } | Select-Object -First 1",
+    "if (-not $a) { $a = $r.assets | Where-Object { $_.name -match 'x86_64' -and $_.name -match '[.]zip$' } | Select-Object -First 1 }",
+    "Write-Output $a.browser_download_url"
+  ].join("; ");
+  const got = spawnSync("powershell", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", q], { encoding: "utf8" });
+  const url = (got.stdout || "").trim();
+  if (!/^https:/.test(url)) die("cannot resolve winlibs download url (network?). Use the manual options below.");
+  log("downloading " + url);
+  log("(about 200 MB; on a slow network prefer the manual MSYS2 option)");
+  fs.mkdirSync(TOOLS, { recursive: true });
+  const zip = path.join(TOOLS, "winlibs.zip");
+  runPS("Invoke-WebRequest -UseBasicParsing '" + url + "' -OutFile '" + zip + "'");
+  if (!fs.existsSync(zip)) die("download failed.");
+  log("extracting (takes a minute)...");
+  const tar = spawnSync("tar", ["-xf", zip, "-C", TOOLS], { stdio: "ignore" });
+  if (tar.status !== 0) runPS("Expand-Archive -Force '" + zip + "' -DestinationPath '" + TOOLS + "'");
+  fs.rmSync(zip, { force: true });
+  if (!fs.existsSync(path.join(WINLIBS_BIN, "dlltool.exe"))) die("extracted, but dlltool.exe is not in .tools/mingw64/bin - inspect the .tools directory.");
+  log("portable MinGW ready: " + WINLIBS_BIN);
 }
 
 async function installRust() {
@@ -99,21 +152,6 @@ async function installRust() {
   return cargo;
 }
 
-function ensureReady(cargo) {
-  log("platform " + process.platform + " " + process.arch);
-  const v = spawnSync(cargo, ["--version"], { cwd: ROOT, env: cargoEnv(cargo), encoding: "utf8" });
-  if (v.error || v.status !== 0) die("cargo not runnable: " + (v.error && v.error.message));
-  log(v.stdout.trim());
-  if (!fs.existsSync(BIN)) {
-    log("binary not found, building (first run is slow)...");
-    const args = RELEASE ? ["build", "--release"] : ["build"];
-    const b = spawnSync(cargo, args, { cwd: ROOT, env: cargoEnv(cargo), stdio: "inherit" });
-    if (b.status !== 0) die("build failed");
-  } else {
-    log("using binary: " + path.relative(ROOT, BIN));
-  }
-}
-
 function run(cargo) {
   const pass = process.argv.slice(2).filter((a) => a !== "--release");
   const argv = [BIN, "."].concat(pass);
@@ -128,6 +166,40 @@ function run(cargo) {
 (async () => {
   let cargo = findCargo();
   if (!cargo) cargo = await installRust();
-  ensureReady(cargo);
+  log("platform " + process.platform + " " + process.arch);
+
+  if (IS_WIN) {
+    // Preflight BEFORE building: windows-sys fails at compile time without dlltool.
+    const dd = locateDlltool(cargo);
+    if (dd) {
+      EXTRA_PATH.push(dd);
+      log("dlltool found and configured: " + dd);
+    } else {
+      console.error("[start] dlltool.exe NOT found at any fixed location (rust-lang/rust#140704:");
+      console.error("[start] windows-sys raw-dylib needs dlltool; rust-mingw on this toolchain lacks it).");
+      const ans = await ask("Install portable MinGW now? winlibs ~200MB into project .tools, no admin, no system changes [y/N] ");
+      if (ans.trim().toLowerCase() === "y") {
+        await installWinlibs();
+        EXTRA_PATH.push(WINLIBS_BIN);
+      } else {
+        console.error("[start] manual alternatives:");
+        console.error("  1) MSYS2: winget install MSYS2.MSYS2 ; pacman -S mingw-w64-x86_64-binutils ; add C:/msys64/mingw64/bin to PATH");
+        console.error("  2) MSVC: install VS 2022 Build Tools (VC workload) ; rustup default stable-x86_64-pc-windows-msvc");
+        die("aborted.");
+      }
+    }
+  }
+
+  const v = spawnSync(cargo, ["--version"], { cwd: ROOT, env: cargoEnv(cargo), encoding: "utf8" });
+  if (v.error || v.status !== 0) die("cargo not runnable: " + (v.error && v.error.message));
+  log(v.stdout.trim());
+  if (!fs.existsSync(BIN)) {
+    log("binary not found, building (first run is slow)...");
+    const args = RELEASE ? ["build", "--release"] : ["build"];
+    const b = spawnSync(cargo, args, { cwd: ROOT, env: cargoEnv(cargo), stdio: "inherit" });
+    if (b.status !== 0) die("build failed");
+  } else {
+    log("using binary: " + path.relative(ROOT, BIN));
+  }
   run(cargo);
 })();
