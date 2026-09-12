@@ -34,7 +34,7 @@ const P_CARGO = path.join(ROOT, "platform", "windows", "cargo");
 const REL_BASE = "https://github.com/theRMM714/Solomni/releases/download/dependencies/";
 // SHA256 of winlibs.zip. Empty = print hash on first successful download so you can
 // pin it here; once pinned, a mismatch kills the run (protects mirror downloads).
-const WINLIBS_SHA256 = "";
+const WINLIBS_SHA256 = "c1f52294597c0b73786b2a78eb5d176d89226d2f21875eab75e783a8b1cefcc4";
 
 const log = (m) => console.log("[start] " + m);
 const die = (m) => { console.error("[start] " + m); process.exit(1); };
