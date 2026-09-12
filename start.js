@@ -24,6 +24,12 @@ const BIN = path.join(ROOT, "target", PROFILE, EXE);
 const BUNDLED_CARGO = path.join(ROOT, "platform", "linux", "cargo", "bin", IS_WIN ? "cargo.exe" : "cargo");
 const TOOLS = path.join(ROOT, ".tools");
 const WINLIBS_BIN = path.join(TOOLS, "mingw64", "bin");
+// Project-local rustup homes (same layout as the bundled linux toolchain):
+const P_RUSTUP = path.join(ROOT, "platform", "windows", "rustup");
+const P_CARGO = path.join(ROOT, "platform", "windows", "cargo");
+// Release asset base for third-party redistributions (winlibs zip).
+// Placeholder repo: fill in once the release is published.
+const REL_BASE = "https://github.com/OWNER/solomni/releases/latest/download";
 
 const log = (m) => console.log("[start] " + m);
 const die = (m) => { console.error("[start] " + m); process.exit(1); };
@@ -79,18 +85,26 @@ function dlltoolWorks(dir) {
 }
 
 function cargoEnv(cargo) {
-  // bundled toolchain needs explicit HOME; system cargo used as-is.
+  // project-local toolchains get explicit HOMEs; system cargo used as-is.
   const env = Object.assign({}, process.env);
-  if (path.resolve(cargo) === path.resolve(BUNDLED_CARGO)) {
+  const c = path.resolve(cargo);
+  if (c === path.resolve(BUNDLED_CARGO)) {
     env.RUSTUP_HOME = path.join(ROOT, "platform", "linux", "rustup");
     env.CARGO_HOME = path.join(ROOT, "platform", "linux", "cargo");
+  } else if (c === path.resolve(path.join(P_CARGO, "bin", IS_WIN ? "cargo.exe" : "cargo"))) {
+    env.RUSTUP_HOME = P_RUSTUP;
+    env.CARGO_HOME = P_CARGO;
   }
   env.PATH = [path.dirname(cargo)].concat(EXTRA_PATH, env.PATH || "").filter(Boolean).join(path.delimiter);
   return env;
 }
 
 function findCargo() {
-  // bundled toolchain first, then PATH; also probe ~/.cargo/bin (PATH not refreshed).
+  // Order: project-local (windows) -> bundled linux -> PATH -> ~/.cargo/bin.
+  if (IS_WIN) {
+    const pc = path.join(P_CARGO, "bin", "cargo.exe");
+    if (fs.existsSync(pc)) return pc;
+  }
   if (fs.existsSync(BUNDLED_CARGO)) return BUNDLED_CARGO;
   const exe = IS_WIN ? "cargo.exe" : "cargo";
   for (const d of (process.env.PATH || "").split(path.delimiter)) {
@@ -129,6 +143,24 @@ function download(url, dest) {
   return fs.existsSync(dest) && fs.statSync(dest).size > 1048576;
 }
 
+function pickFastest(urls) {
+  // Race HEAD requests (curl, 3s cap). First 2xx wins; ties go to listed order
+  // (our release mirror first). All fail -> return the last (upstream) URL and
+  // let the real download attempt surface the error.
+  return new Promise((resolve) => {
+    let left = urls.length;
+    const curl = path.join(process.env.SystemRoot || "C:/Windows", "System32", "curl.exe");
+    const hasCurl = IS_WIN ? fs.existsSync(curl) : true;
+    const done = (u) => { if (u) resolve(u); else if (--left === 0) resolve(urls[urls.length - 1]); };
+    for (const u of urls) {
+      if (!hasCurl) { done(null); continue; }
+      const cmd = IS_WIN ? curl : "curl";
+      const r = spawnSync(cmd, ["-sI", "-o", "/dev/null", "-w", "%{http_code}", "--connect-timeout", "3", "--max-time", "3", u], { encoding: "utf8" });
+      done(/^2/.test((r.stdout || "").trim()) ? u : null);
+    }
+  });
+}
+
 function zipLooksValid(zipPath) {
   // Structural check: list entries with the system tar (Win10 1803+ ships one).
   // A truncated/corrupt/wrong-content archive fails listing or lacks dlltool.
@@ -143,17 +175,8 @@ function zipLooksValid(zipPath) {
 async function installWinlibs() {
   // Portable MinGW-w64 (binutils provides dlltool.exe). Project-local: .tools/mingw64.
   // No admin, no system PATH change; delete the directory to remove.
-  log("resolving latest winlibs release (github api)...");
-  const q = [
-    "$ErrorActionPreference = 'Stop'",
-    "$r = Invoke-RestMethod 'https://api.github.com/repos/brechtsanders/winlibs_mingw/releases/latest'",
-    "$a = $r.assets | Where-Object { $_.name -match 'x86_64' -and $_.name -match 'seh' -and $_.name -match '[.]zip$' -and $_.name -notmatch 'llvm' } | Select-Object -First 1",
-    "if (-not $a) { $a = $r.assets | Where-Object { $_.name -match 'x86_64' -and $_.name -match '[.]zip$' } | Select-Object -First 1 }",
-    "Write-Output $a.browser_download_url"
-  ].join("; ");
-  const got = spawnSync("powershell", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", q], { encoding: "utf8" });
-  let url = (got.stdout || "").trim();
-  if (!/^https:/.test(url)) die("cannot resolve winlibs download url (network?). Use the manual options below.");
+  // Source: our GitHub Release mirror of the unmodified upstream zip (GPL: plain
+  // redistribution with attribution is permitted), falling back to the upstream URL.
   fs.mkdirSync(TOOLS, { recursive: true });
   const zip = path.join(TOOLS, "winlibs.zip");
   if (fs.existsSync(zip)) {
@@ -165,14 +188,18 @@ async function installWinlibs() {
     }
   }
   if (!fs.existsSync(zip)) {
+    const candidates = [REL_BASE + "/winlibs.zip"];
     const mirror = process.env.SOLOMNI_GH_MIRROR || "";
-    if (mirror) { log("using GitHub mirror prefix: " + mirror); url = mirror + url; }
+    if (mirror) candidates.push(mirror + "/brechtsanders/winlibs_mingw/releases/latest/download/winlibs.zip");
+    candidates.push("https://github.com/brechtsanders/winlibs_mingw/releases/latest/download/winlibs.zip");
+    const url = await pickFastest(candidates);
     log("downloading " + url);
     log("(curl with progress; ~200 MB. Slow? set SOLOMNI_GH_MIRROR, or download the zip");
     log(" manually in a browser and save it as .tools/winlibs.zip - the launcher will use it)");
     if (!download(url, zip) || !zipLooksValid(zip)) {
       try { fs.rmSync(zip, { force: true }); } catch (e) { /* nothing to clean */ }
-      die("download failed or archive corrupt. Manual: download the file above in a browser, save as .tools/winlibs.zip, re-run.");
+      die("download failed or archive corrupt. Manual: download a winlibs x86_64 seh zip from");
+      console.error("  https://github.com/brechtsanders/winlibs_mingw/releases and save as .tools/winlibs.zip");
     }
   }
   log("extracting (takes a minute)...");
@@ -189,16 +216,19 @@ async function installRust() {
   if (ans.trim().toLowerCase() !== "y") {
     die("aborted. Install Rust manually: https://rustup.rs then re-run.");
   }
-  log("installing rustup (downloads a few hundred MB, once)...");
+  log("installing Rust (project-local, a few hundred MB, once; nothing written outside the project)...");
   if (IS_WIN) {
     // GNU toolchain: self-contained linker, no Visual Studio Build Tools needed.
-    const dl = spawnSync("powershell", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command",
-      "Invoke-WebRequest -UseBasicParsing https://win.rustup.rs/x86_64 -OutFile $env:TEMP\\rustup-init.exe"],
-      { stdio: "inherit" });
-    if (dl.status !== 0) die("rustup download failed. Check network / proxy.");
-    const init = spawnSync(path.join(process.env.TEMP || "", "rustup-init.exe"),
-      ["-y", "--default-toolchain", "stable-x86_64-pc-windows-gnu"],
-      { stdio: "inherit" });
+    // Project-local: RUSTUP_HOME/CARGO_HOME under platform/windows, --no-modify-path
+    // so the user's system PATH stays untouched.
+    fs.mkdirSync(path.join(ROOT, "platform", "windows"), { recursive: true });
+    const initExe = path.join(TOOLS, "rustup-init.exe");
+    if (!download("https://win.rustup.rs/x86_64", initExe)) {
+      die("rustup-init download failed. Check network / proxy.");
+    }
+    const init = spawnSync(initExe,
+      ["-y", "--default-toolchain", "stable-x86_64-pc-windows-gnu", "--no-modify-path"],
+      { stdio: "inherit", env: Object.assign({}, process.env, { RUSTUP_HOME: P_RUSTUP, CARGO_HOME: P_CARGO }) });
     if (init.status !== 0) die("rustup install failed.");
   } else {
     const r = spawnSync("sh", ["-c", "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y"],
