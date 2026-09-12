@@ -10,7 +10,7 @@
  * winlibs MinGW (complete binutils) into .tools/mingw64.
  */
 "use strict";
-const { spawnSync } = require("child_process");
+const { spawnSync, spawn } = require("child_process");
 const readline = require("readline");
 const path = require("path");
 const fs = require("fs");
@@ -130,14 +130,14 @@ function runPS(cmd) {
 
 function download(url, dest) {
   // curl.exe ships with Windows (10 1803+); far faster than Invoke-WebRequest and
-  // renders a progress bar. PowerShell fallback for ancient systems.
+  // renders a progress bar. -C - resumes a previous partial download instead of
+  // restarting from zero. PowerShell fallback for ancient systems.
   const curl = path.join(process.env.SystemRoot || "C:/Windows", "System32", "curl.exe");
   if (fs.existsSync(curl)) {
-    const r = spawnSync(curl, ["-L", "--fail", "--retry", "3", "--connect-timeout", "30", "-o", dest, url],
+    const r = spawnSync(curl, ["-L", "--fail", "--retry", "3", "-C", "-", "--connect-timeout", "30", "-o", dest, url],
       { stdio: "inherit" });
     if (r.status === 0 && fs.existsSync(dest) && fs.statSync(dest).size > 1048576) return true;
-    try { fs.rmSync(dest, { force: true }); } catch (e) { /* drop partial file */ }
-    log("curl download failed (exit " + r.status + "); trying PowerShell fallback...");
+    log("curl download failed (exit " + r.status + "); keeping partial file for resume; trying PowerShell fallback...");
   }
   runPS("Invoke-WebRequest -UseBasicParsing '" + url + "' -OutFile '" + dest + "'");
   return fs.existsSync(dest) && fs.statSync(dest).size > 1048576;
@@ -158,39 +158,63 @@ function upstreamWinlibsUrl() {
   return /^https:/.test(url) ? url : null;
 }
 
-function pickFastest(urls) {
-  // Probe each candidate with a 1-byte ranged GET (curl -L: GitHub assets 302 to a
-  // CDN host, so HEAD-without-redirect always looks dead). First REACHABLE candidate
-  // in listed order wins - order encodes preference (own Release > mirror > upstream),
-  // raw latency ranking would just shuffle onto the slowest working host. All fail ->
-  // return the first (so the real download attempt surfaces the exact error).
+function probeSpeed(url) {
+  // Sustained-throughput probe: ranged GET of 1MB, curl reports its own average
+  // speed (bytes/s) via speed_download. max-time caps slow sources - the partial
+  // average is still the honest sustained rate. 0 = unreachable.
   return new Promise((resolve) => {
-    let i = 0;
     const curl = path.join(process.env.SystemRoot || "C:/Windows", "System32", "curl.exe");
-    const hasCurl = IS_WIN ? fs.existsSync(curl) : true;
-    const next = () => {
-      if (i >= urls.length || !hasCurl) { resolve(urls[0]); return; }
-      const u = urls[i++];
-      const cmd = IS_WIN ? curl : "curl";
-      const r = spawnSync(cmd,
-        ["-sL", "-r", "0-0", "-o", "/dev/null", "-w", "%{http_code}", "--connect-timeout", "4", "--max-time", "8", u],
-        { encoding: "utf8" });
-      if (/^2/.test((r.stdout || "").trim())) { resolve(u); return; }
-      log("source unreachable (" + (r.stdout || "").trim() + "): " + u);
-      next();
-    };
-    next();
+    const cmd = IS_WIN ? curl : "curl";
+    if (!fs.existsSync(cmd)) { resolve(0); return; }
+    const p = spawn(cmd,
+      ["-sL", "-r", "0-1048575", "-o", require("os").devNull, "-w", "%{http_code} %{speed_download}",
+       "--connect-timeout", "4", "--max-time", "6", url],
+      { encoding: "utf8" });
+    let out = "";
+    p.stdout.on("data", (d) => { out += d; });
+    p.on("error", () => resolve(0));
+    p.on("close", () => {
+      const m = out.trim().match(/^(\d{3}) (\d+(?:\.\d+)?)$/);
+      if (m && /^2/.test(m[1])) resolve(parseFloat(m[2]) || 0);
+      else resolve(0);
+    });
   });
 }
 
+async function pickFastest(urls) {
+  // Speed test every candidate (sequential: parallel streams would share bandwidth
+  // and skew each other's numbers on a thin pipe). Fastest wins; listed order is
+  // only the tiebreak. Costs a few MB one-time vs a 261MB download.
+  const curl = path.join(process.env.SystemRoot || "C:/Windows", "System32", "curl.exe");
+  if (IS_WIN && !fs.existsSync(curl)) return urls[0];
+  log("speed-testing " + urls.length + " source(s), 1MB probe each...");
+  const speeds = [];
+  for (const u of urls) {
+    const s = await probeSpeed(u);
+    speeds.push(s);
+    log("  " + Math.round(s / 1024) + " KB/s  " + u);
+  }
+  let best = 0;
+  for (let i = 1; i < urls.length; i++) {
+    if (speeds[i] > speeds[best]) best = i;
+  }
+  if (speeds[best] <= 0) {
+    log("no source answered the probe; trying preferred order anyway.");
+    return urls[0];
+  }
+  log("fastest: " + urls[best]);
+  return urls[best];
+}
+
 function zipLooksValid(zipPath) {
-  // Structural check: list entries with the system tar (Win10 1803+ ships one).
-  // A truncated/corrupt/wrong-content archive fails listing or lacks dlltool.
+  // Three-state check: true = complete archive with dlltool inside; "partial" =
+  // looks like an unfinished download, keep it for resume; false = corrupt content,
+  // delete. Structural listing via the system tar (Win10 1803+ ships one).
   const st = fs.statSync(zipPath);
-  if (st.size < 10485760) return false; // real winlibs zip is far bigger; fast reject
+  if (st.size < 10485760) return "partial"; // real winlibs zip is far bigger; resumable fragment
   const t = spawnSync("tar", ["-tf", zipPath], { encoding: "utf8" });
   if (t.error && t.error.code === "ENOENT") return true; // no tar available: size-only, do not delete a possibly-good file
-  if (t.status !== 0) return false;
+  if (t.status !== 0) return false; // big but unreadable: wrong content, not a resume point
   return /bin[\\/]dlltool\.exe/i.test(t.stdout || "");
 }
 
@@ -202,10 +226,13 @@ async function installWinlibs() {
   fs.mkdirSync(TOOLS, { recursive: true });
   const zip = path.join(TOOLS, "winlibs.zip");
   if (fs.existsSync(zip)) {
-    if (zipLooksValid(zip)) {
+    const v = zipLooksValid(zip);
+    if (v === true) {
       log("using existing " + zip + " (" + Math.round(fs.statSync(zip).size / 1048576) + " MB)");
+    } else if (v === "partial") {
+      log("found partial " + zip + " (" + Math.round(fs.statSync(zip).size / 1048576) + " MB) - will resume.");
     } else {
-      log("existing " + zip + " is corrupt (truncated download?) - deleting and re-downloading.");
+      log("existing " + zip + " is corrupt (wrong content) - deleting and re-downloading.");
       try { fs.rmSync(zip, { force: true }); } catch (e) { /* re-attempt below anyway */ }
     }
   }
@@ -220,10 +247,10 @@ async function installWinlibs() {
     log("downloading " + url);
     log("(curl with progress; ~200 MB. Slow? set SOLOMNI_GH_MIRROR, or download the zip");
     log(" manually in a browser and save it as .tools/winlibs.zip - the launcher will use it)");
-    if (!download(url, zip) || !zipLooksValid(zip)) {
-      try { fs.rmSync(zip, { force: true }); } catch (e) { /* nothing to clean */ }
-      die("download failed or archive corrupt. Manual: download a winlibs x86_64 seh zip from");
-      console.error("  https://github.com/brechtsanders/winlibs_mingw/releases and save as .tools/winlibs.zip");
+    const ok = download(url, zip) ? zipLooksValid(zip) : false;
+    if (ok === false) {
+      log("download still incomplete or corrupt - re-run to resume, or download manually:");
+      die("  get a winlibs x86_64 seh zip from https://github.com/brechtsanders/winlibs_mingw/releases");
     }
   }
   log("extracting (takes a minute)...");
