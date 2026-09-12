@@ -25,7 +25,7 @@ pub enum SessionEvent {
 }
 
 /// 验收条目的呈现视图。
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct CheckView {
     pub item: String,
     pub status: String,

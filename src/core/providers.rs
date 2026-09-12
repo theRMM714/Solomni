@@ -44,6 +44,19 @@ impl Registry {
         None
     }
 
+    /// 结构化呈现视图：永不携带密钥（Web/CLI 共用）。
+    pub fn view(&self) -> Vec<ProviderView> {
+        self.providers
+            .iter()
+            .map(|(id, p)| ProviderView {
+                id: id.clone(),
+                base_url: p.base_url.clone(),
+                models: p.models.clone(),
+                is_default: self.default.as_deref() == Some(id.as_str()),
+            })
+            .collect()
+    }
+
     /// 展示用行：永不包含密钥。
     pub fn display_lines(&self) -> Vec<String> {
         let mut lines = Vec::new();
@@ -54,4 +67,12 @@ impl Registry {
         }
         lines
     }
+}
+/// 供应商的结构化呈现视图（不含密钥）。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ProviderView {
+    pub id: String,
+    pub base_url: String,
+    pub models: Vec<String>,
+    pub is_default: bool,
 }

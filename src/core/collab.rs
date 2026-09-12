@@ -6,9 +6,10 @@ use crate::core::engine::{Discussion, Execution, Member, TurnOut, MAX_REWORK, MA
 use crate::core::envelope;
 use crate::core::events::{CheckView, Pending, SessionEvent};
 use crate::core::module::Module;
-use crate::core::ports::{Chat, ChatGateway, ModuleSource, Msg};
+use crate::core::ports::{ChatGateway, ModuleSource, Msg};
 use crate::core::prompt::Prompts;
 use crate::core::providers::Registry;
+use std::sync::Arc;
 
 pub struct CollabSession {
     /// 是否委托代拟（ids == "?"）。
@@ -26,17 +27,19 @@ pub struct CollabSession {
     disc: Option<Discussion>,
     /// 已发出的转录行数（增量事件用）。
     emitted: usize,
-    core_chat: Box<dyn Chat>,
+    core_chat: crate::core::ports::BoxedChat,
     core_is_demo: bool,
     prompts: Prompts,
+    gateway: Arc<dyn ChatGateway + Send + Sync>,
+    source: Arc<dyn ModuleSource + Send + Sync>,
     done: bool,
 }
 
 impl CollabSession {
     /// 装配会话：gateway 定通道（含核心通道与回落告知）；source 提供清单；registry 供解析。
     pub fn start(
-        gateway: &dyn ChatGateway,
-        source: &dyn ModuleSource,
+        gateway: Arc<dyn ChatGateway + Send + Sync>,
+        source: Arc<dyn ModuleSource + Send + Sync>,
         registry: &Registry,
         prompts: Prompts,
         ids: &str,
@@ -67,33 +70,33 @@ impl CollabSession {
             core_chat,
             core_is_demo,
             prompts,
+            gateway,
+            source,
             done: false,
         })
     }
 
     /// 提交需求（总是第一步）。
-    pub fn set_task(&mut self, source: &dyn ModuleSource, task: &str) -> Vec<SessionEvent> {
-        let mut events = Vec::new();
+    pub fn set_task(&mut self, task: &str, sink: &mut dyn FnMut(SessionEvent)) {
         if task.trim().is_empty() {
-            events.push(SessionEvent::Notice("[取消] 需求为空".into()));
-            events.push(SessionEvent::Ended);
+            sink(SessionEvent::Notice("[取消] 需求为空".into()));
+            sink(SessionEvent::Ended);
             self.done = true;
-            return events;
+            return;
         }
         self.task = task.to_string();
         if self.delegated {
-            self.draft_slate(source, &mut events);
+            self.draft_slate(sink);
         } else {
             let names: Vec<String> = self.picked.iter().map(|m| m.manifest.id.clone()).collect();
-            events.push(SessionEvent::Notice(format!("[建组] {}", names.join(" + "))));
+            sink(SessionEvent::Notice(format!("[建组] {}", names.join(" + "))));
             self.pending = Some(Pending::ConfirmBegin);
         }
-        events
     }
 
     /// 委托代拟：核心按模块简述与需求拟名单（附理由），交用户确认（选择权在用户）。
-    fn draft_slate(&mut self, source: &dyn ModuleSource, events: &mut Vec<SessionEvent>) {
-        let roster = source.scan();
+    fn draft_slate(&mut self, sink: &mut dyn FnMut(SessionEvent)) {
+        let roster = self.source.scan();
         let listing = roster
             .modules
             .iter()
@@ -109,8 +112,8 @@ impl CollabSession {
         let parsed = envelope::extract_json_object(&raw)
             .and_then(|obj| serde_json::from_str::<Slate>(&obj).ok());
         let Some(slate) = parsed else {
-            events.push(SessionEvent::Notice("[错误] 代拟失败（模型无响应格式）。请直接点名模块。".into()));
-            events.push(SessionEvent::Ended);
+            sink(SessionEvent::Notice("[错误] 代拟失败（模型无响应格式）。请直接点名模块。".into()));
+            sink(SessionEvent::Ended);
             self.done = true;
             return;
         };
@@ -120,16 +123,16 @@ impl CollabSession {
             if roster.modules.iter().any(|m| m.manifest.id == p.id) {
                 picks.push((p.id, p.why));
             } else {
-                events.push(SessionEvent::Notice(format!("[代拟] {} 不存在，拒收", p.id)));
+                sink(SessionEvent::Notice(format!("[代拟] {} 不存在，拒收", p.id)));
             }
         }
         if picks.is_empty() {
-            events.push(SessionEvent::Notice("[错误] 代拟名单无有效模块".into()));
-            events.push(SessionEvent::Ended);
+            sink(SessionEvent::Notice("[错误] 代拟名单无有效模块".into()));
+            sink(SessionEvent::Ended);
             self.done = true;
             return;
         }
-        events.push(SessionEvent::Transcript(vec![format!(
+        sink(SessionEvent::Transcript(vec![format!(
             "[代拟] {}",
             picks.iter().map(|(id, why)| format!("{}（{}）", id, why)).collect::<Vec<_>>().join("；")
         )]));
@@ -138,38 +141,32 @@ impl CollabSession {
     }
 
     /// 回应代拟名单确认（仅 ConfirmSlate 挂起时有效）。
-    pub fn confirm_slate(&mut self, source: &dyn ModuleSource, ok: bool) -> Vec<SessionEvent> {
-        let mut events = vec![SessionEvent::Transcript(vec![format!("[用户:名单] {}", if ok { "确认" } else { "取消" })])];
+    pub fn confirm_slate(&mut self, ok: bool, sink: &mut dyn FnMut(SessionEvent)) {
+        sink(SessionEvent::Transcript(vec![format!("[用户:名单] {}", if ok { "确认" } else { "取消" })]));
         if !ok {
-            events.push(SessionEvent::Notice("[取消] 已按用户意愿取消".into()));
-            events.push(SessionEvent::Ended);
+            sink(SessionEvent::Notice("[取消] 已按用户意愿取消".into()));
+            sink(SessionEvent::Ended);
             self.done = true;
-            return events;
+            return;
         }
-        let roster = source.scan();
+        let roster = self.source.scan();
         self.picked = self
             .slate_picks
             .iter()
             .filter_map(|(id, _)| roster.modules.iter().find(|m| &m.manifest.id == id).cloned())
             .collect();
         let names: Vec<String> = self.picked.iter().map(|m| m.manifest.id.clone()).collect();
-        events.push(SessionEvent::Notice(format!("[建组] {}", names.join(" + "))));
+        sink(SessionEvent::Notice(format!("[建组] {}", names.join(" + "))));
         self.pending = Some(Pending::ConfirmBegin);
-        events
     }
 
     /// 确认开始讨论（allow = yes,allow 自裁授权）；开聊并一路泵到暂停或交付。
-    pub fn begin(
-        &mut self,
-        gateway: &dyn ChatGateway,
-        allow: bool,
-        system_of: &dyn Fn(&Module) -> String,
-    ) -> Vec<SessionEvent> {
-        let mut events = Vec::new();
+    pub fn begin(&mut self, allow: bool, sink: &mut dyn FnMut(SessionEvent)) {
         if self.done || self.disc.is_some() {
-            return events;
+            return;
         }
         self.allow = allow;
+        let prompts = self.prompts.clone();
         let mut members = Vec::new();
         for m in &self.picked {
             // 供应商解析（策略在 core）：模块选择 > 清单默认 > 全局默认；None = 回落演示。
@@ -177,104 +174,100 @@ impl CollabSession {
                 .registry
                 .resolve(m.selected_provider.as_deref(), m.manifest.model.provider.as_deref())
                 .map(|(_, p)| p);
-            let (chat, note) = gateway.member_channel(provider, &m.manifest.id);
+            let (chat, note) = self.gateway.member_channel(provider, &m.manifest.id);
             if let Some(n) = note {
-                events.push(SessionEvent::Notice(n));
+                sink(SessionEvent::Notice(n));
             }
-            members.push(Member::new(&m.manifest.id, system_of(m), chat));
+            members.push(Member::new(&m.manifest.id, m.system_block(&prompts), chat));
         }
         if self.core_is_demo {
-            events.push(SessionEvent::Notice("[提示] 核心未配置供应商：整理/验收使用内置假模型（演示）".into()));
+            sink(SessionEvent::Notice("[提示] 核心未配置供应商：整理/验收使用内置假模型（演示）".into()));
         }
-        let mut disc = Discussion::new(members, self.allow, self.prompts.clone());
+        let mut disc = Discussion::new(members, self.allow, prompts);
         disc.open(&self.task);
         self.disc = Some(disc);
-        if let Some(d) = self.disc.as_ref() {
-            push_delta(d, &mut self.emitted, &mut events);
-        }
-        let mut rest = self.pump();
-        events.append(&mut rest);
-        events
+        self.pump_with(sink);
     }
 
     /// 回答 ask（仅 Ask 挂起时有效）；回答转达后继续泵。
-    pub fn answer(&mut self, text: &str) -> Vec<SessionEvent> {
-        let mut events = Vec::new();
+    pub fn answer(&mut self, text: &str, sink: &mut dyn FnMut(SessionEvent)) {
         if matches!(self.pending, Some(Pending::Ask { .. })) {
             self.pending = None;
             if let Some(disc) = self.disc.as_mut() {
                 disc.pending_user_answers.push(text.to_string());
             }
-            let mut rest = self.pump();
-            events.append(&mut rest);
+            self.pump_with(sink);
         }
-        events
     }
 
     /// 泵：推进讨论直至暂停（ask）或收敛并走完整理/执行/验收/交付。
-    pub fn pump(&mut self) -> Vec<SessionEvent> {
-        let mut out = Vec::new();
+    /// 泵：推进讨论直至暂停（ask）或收敛并走完整理/执行/验收/交付；事件逐条经 sink 外送。
+    pub fn pump_with(&mut self, sink: &mut dyn FnMut(SessionEvent)) {
         if self.done || self.disc.is_none() {
-            return out;
+            return;
         }
         let prompts = self.prompts.clone();
         // 讨论阶段：步进直到暂停或收敛。
         loop {
             let outcome = self.disc.as_mut().expect("disc 已确认存在").step();
             if let Some(d) = self.disc.as_ref() {
-                push_delta(d, &mut self.emitted, &mut out);
+                push_delta(d, &mut self.emitted, sink);
             }
             match outcome {
                 TurnOut::Round => {}
                 TurnOut::AskUser { member, question } => {
                     self.pending = Some(Pending::Ask { member, question });
-                    return out;
+                    return;
                 }
                 TurnOut::Done => {
                     let round = self.disc.as_ref().expect("disc 存在").round;
                     let over_cap = round > MAX_ROUNDS;
                     if over_cap {
-                        out.push(SessionEvent::Notice("[上限] 讨论轮次超限，交用户裁决。".into()));
+                        sink(SessionEvent::Notice("[上限] 讨论轮次超限，交用户裁决。".into()));
                     }
-                    out.push(SessionEvent::DiscussionDone { round, over_cap });
+                    sink(SessionEvent::DiscussionDone { round, over_cap });
                     break;
                 }
             }
         }
         // 整理（核心通道）。
         let plan = self.disc.as_ref().expect("disc 存在").synthesize(self.core_chat.as_mut());
-        out.push(SessionEvent::Plan(plan.clone()));
+        sink(SessionEvent::Plan(plan.clone()));
         // 执行 → 验收 → 返工（上限内）→ 交付。
         let members = self.disc.as_mut().expect("disc 存在").members.as_mut_slice();
         let mut exec = Execution::run(members, &plan, &prompts);
         for (id, text) in &exec.reports {
-            out.push(SessionEvent::Report { id: id.clone(), text: text.clone(), rework: 0 });
+            sink(SessionEvent::Report { id: id.clone(), text: text.clone(), rework: 0 });
         }
         exec.review(self.core_chat.as_mut(), &plan, &prompts);
-        out.push(review_event(&exec));
+        sink(review_event(&exec));
         while !exec.all_pass() && exec.rework < MAX_REWORK {
-            out.push(SessionEvent::Notice(format!("[返工] 第 {} 次（上限 {}）", exec.rework + 1, MAX_REWORK)));
+            sink(SessionEvent::Notice(format!("[返工] 第 {} 次（上限 {}）", exec.rework + 1, MAX_REWORK)));
             let review_text = fail_text(&exec);
             let members = self.disc.as_mut().expect("disc 存在").members.as_mut_slice();
             exec.rerun(members, &plan, &review_text, &prompts);
             for (id, text) in &exec.reports {
-                out.push(SessionEvent::Report { id: id.clone(), text: text.clone(), rework: exec.rework });
+                sink(SessionEvent::Report { id: id.clone(), text: text.clone(), rework: exec.rework });
             }
             exec.review(self.core_chat.as_mut(), &plan, &prompts);
-            out.push(review_event(&exec));
+            sink(review_event(&exec));
         }
         let ok = exec.all_pass();
-        out.push(SessionEvent::Delivery { ok, over_rework: !ok });
-        out.push(SessionEvent::Ended);
+        sink(SessionEvent::Delivery { ok, over_rework: !ok });
+        sink(SessionEvent::Ended);
         self.done = true;
-        out
+    }
+
+    /// 会话是否已终结。
+    pub fn is_done(&self) -> bool {
+        self.done
     }
 }
 
 /// 发出自上次以来的新转录行（增量）。
-fn push_delta(disc: &Discussion, emitted: &mut usize, events: &mut Vec<SessionEvent>) {
+fn push_delta(disc: &Discussion, emitted: &mut usize, sink: &mut dyn FnMut(SessionEvent)) {
     if disc.transcript.len() > *emitted {
-        events.push(SessionEvent::Transcript(disc.transcript[*emitted..].to_vec()));
+        sink(SessionEvent::Transcript(disc.transcript[*emitted..].to_vec()));
         *emitted = disc.transcript.len();
     }
 }

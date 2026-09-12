@@ -10,6 +10,8 @@ use crate::core::providers::Provider;
 pub struct HttpChat {
     pub provider: Provider,
     pub model: String,
+    pub provider_id: String,
+    pub log: std::sync::Arc<dyn crate::core::ports::Log + Send + Sync>,
 }
 
 impl Chat for HttpChat {
@@ -26,6 +28,7 @@ impl Chat for HttpChat {
             Ok(t) => t,
             Err(e) => {
                 // 不猜测：失败原文照出，信封解析层会按 say 降级收录（转录即内容）。
+                self.log.error("http_chat::complete", &format!("供应商 {} 调用失败：{}", self.provider_id, e));
                 format!("模型调用失败：{}", e)
             }
         }
@@ -67,11 +70,16 @@ fn ureq_do(url: &str, key: &str, body: &str) -> Result<String, String> {
         .ok_or_else(|| "响应缺少 choices[0].message.content".to_string())
 }
 
-fn real_or_demo(provider: Option<&Provider>) -> (BoxedChat, bool) {
+fn real_or_demo(provider: Option<&Provider>, log: &std::sync::Arc<dyn crate::core::ports::Log + Send + Sync>) -> (BoxedChat, bool) {
     match provider {
         Some(p) => {
             let model = p.models.first().cloned().unwrap_or_else(|| "default".to_string());
-            (Box::new(HttpChat { provider: p.clone(), model }), false)
+            (Box::new(HttpChat {
+                provider: p.clone(),
+                model,
+                provider_id: p.base_url.clone(),
+                log: std::sync::Arc::clone(log),
+            }), false)
         }
         None => {
             let (chat, demo) = DemoGateway.core_channel(None);
@@ -81,21 +89,45 @@ fn real_or_demo(provider: Option<&Provider>) -> (BoxedChat, bool) {
 }
 
 /// 真实网关：机制only。回落演示是如实告知的兜底，不是选择策略。
-pub struct HttpGateway;
+pub struct HttpGateway {
+    log: std::sync::Arc<dyn crate::core::ports::Log + Send + Sync>,
+}
+
+impl HttpGateway {
+    /// 组合根注入日志端口（异常路径落盘）。
+    pub fn with_log(log: std::sync::Arc<dyn crate::core::ports::Log + Send + Sync>) -> HttpGateway {
+        HttpGateway { log }
+    }
+}
 
 impl ChatGateway for HttpGateway {
     fn member_channel(&self, provider: Option<&Provider>, module_id: &str) -> (BoxedChat, Option<String>) {
         match provider {
             Some(p) => {
                 let model = p.models.first().cloned().unwrap_or_else(|| "default".to_string());
-                (Box::new(HttpChat { provider: p.clone(), model }), None)
+                self.log.info("gateway::member_channel", &format!("模块 {} → 供应商 {}（模型 {}）", module_id, p.base_url, model));
+                (Box::new(HttpChat {
+                    provider: p.clone(),
+                    model,
+                    provider_id: p.base_url.clone(),
+                    log: std::sync::Arc::clone(&self.log),
+                }), None)
             }
             // 回落告知（含模块 id）复用演示网关的话术。
-            None => DemoGateway.member_channel(None, module_id),
+            None => {
+                self.log.warn("gateway::member_channel", &format!("模块 {} 无可用供应商，回落演示通道", module_id));
+                DemoGateway.member_channel(None, module_id)
+            }
         }
     }
 
     fn core_channel(&self, provider: Option<&Provider>) -> (BoxedChat, bool) {
-        real_or_demo(provider)
+        let (chat, demo) = real_or_demo(provider, &self.log);
+        if demo {
+            self.log.warn("gateway::core_channel", "核心通道未配置供应商，使用演示通道");
+        } else {
+            self.log.info("gateway::core_channel", "核心通道建立（真实供应商）");
+        }
+        (chat, demo)
     }
 }

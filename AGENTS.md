@@ -23,6 +23,11 @@
 - 「用哪个供应商」等选择策略在 core（解析链）；「怎么建通道」等机制在 adapters；两者不互换
 - 端口只画在 IO 与可替换点上：纯逻辑（信封解析、引擎）刻意不抽象，不做万物的 trait
 
+## 运行日志（Log 端口）
+- core 定义 Log 端口（ports.rs）：info/warn/error 三级；关键节点（通道降级、HTTP 失败、会话动作失败、装配失败）必须埋点
+- 适配层实现（adapters/log.rs）：每次运行在根目录 logs/ 下按时间戳建一个 .log 文件；logs/ 不入库
+- 组合根创建唯一 FileLog 注入 Core 与呈现层；测试用 NoopLog
+
 ## 提示词册（prompts.yaml）
 - 所有发给 LLM 的提示词一律写入 prompts.yaml，禁止硬编码进代码；改文案只改册子
 - 占位符用 {{key}}；渲染器在 core/prompt.rs（纯逻辑），文件加载经 PromptSource 端口在适配层
