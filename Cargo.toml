@@ -1,0 +1,15 @@
+# Solomni 核心编排者：产品里唯一的程序。
+# 依赖刻意保持最小：serde 解析三种文本锚点，rand 供假模型测试。
+[package]
+name = "solomni"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_yaml = "0.9"
+serde_json = "1"
+
+[[bin]]
+name = "solomni"
+path = "src/main.rs"

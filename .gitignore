@@ -5,6 +5,9 @@
 # ---- Rust 构建产物 ----
 /target/
 
+# ---- 本地工具链（rustup 安装收纳地，跨平台互不覆盖）----
+/platform/
+
 # ---- 运行记录 ----
 /logs/
 /session.jsonl

@@ -91,6 +91,15 @@ To build a cross-platform AI assistant where decentralization is the norm:
 
 ---
 
+## 运行骨架 · Run the Skeleton
+
+```bash
+cargo run            # 转录中心菜单：direct <id> / collab <id,id> / omni
+cargo test           # mock 测试：信封/登记处/扫描/协作全链路（假模型）
+```
+
+未配置供应商时自动使用内置假模型演示流程——如实告知，不静默。
+
 ## 文档 · Documents
 
 - 产品与运行流程（三种模式、协作五阶段）：[PRODUCT.md](PRODUCT.md)
