@@ -1,9 +1,10 @@
 //! 协作引擎：建组 → 讨论 → 整理 → 执行 → 验收（纯状态机，不做输入输出）。
 //! 状态机只认信封动词；发言内容永远是数据，不是指令。
-//! 上层经 core.rs 的会话状态机驱动；成员拥有自己的会话通道（Chat 端口对象）。
+//! 所有发给模型的文案经 core/prompt.rs 渲染自提示词册；成员拥有自己的会话通道。
 
-use crate::envelope::{self, Verb};
-use crate::model::{BoxedChat, Msg};
+use crate::core::envelope::{self, Verb};
+use crate::core::ports::{BoxedChat, Chat, Msg};
+use crate::core::prompt::Prompts;
 use serde::Deserialize;
 use std::collections::BTreeMap;
 
@@ -44,19 +45,21 @@ pub struct Discussion {
     pub closed: bool,
     /// yes,allow：授权小组自裁细节——ask 不中止轮转，留档待办。
     pub allow_autonomy: bool,
+    /// 提示词册（讨论文案来源）。
+    prompts: Prompts,
 }
 
 impl Discussion {
-    pub fn new(members: Vec<Member>, allow_autonomy: bool) -> Discussion {
-        Discussion { members, transcript: Vec::new(), round: 0, pending_user_answers: Vec::new(), closed: false, allow_autonomy }
+    pub fn new(members: Vec<Member>, allow_autonomy: bool, prompts: Prompts) -> Discussion {
+        Discussion { members, transcript: Vec::new(), round: 0, pending_user_answers: Vec::new(), closed: false, allow_autonomy, prompts }
     }
 
-    /// 首轮提示词：聊天约定 + 各模块职责 + 用户需求。
-    /// 聊天约定是文本不是信封的一部分，可自由演化。
-    pub fn open(&mut self, task: &str, chat_protocol: &str) {
-        let mut opener = String::from(chat_protocol);
-        opener.push_str("\n\n== 用户需求 ==\n");
-        opener.push_str(task);
+    /// 首轮：聊天约定 + 用户需求（文案经提示词册渲染）。
+    pub fn open(&mut self, task: &str) {
+        let opener = self.prompts.render(
+            &self.prompts.core.discuss.opener,
+            &[("protocol", self.prompts.core.chat_protocol.clone()), ("task", task.to_string())],
+        );
         for i in 0..self.members.len() {
             let (system, id) = {
                 let m = &self.members[i];
@@ -95,10 +98,11 @@ impl Discussion {
             if !self.members[i].present {
                 continue;
             }
-            let msgs = vec![
-                Msg::system(system),
-                Msg::user(format!("== 讨论至今 ==\n{}\n\n请继续。", snapshot.join("\n"))),
-            ];
+            let step_prompt = self.prompts.render(
+                &self.prompts.core.discuss.step,
+                &[("transcript", snapshot.join("\n"))],
+            );
+            let msgs = vec![Msg::system(system), Msg::user(step_prompt)];
             let raw = self.members[i].chat.complete(&msgs);
             let reply = envelope::parse(&raw);
             let verb = reply.verb;
@@ -111,8 +115,7 @@ impl Discussion {
                 Verb::Agree => m.agreed = true,
                 Verb::Ask => {
                     if self.allow_autonomy {
-                        self.transcript
-                            .push("[core] 已授权小组自裁：该问题留档，不逐轮请示。".to_string());
+                        self.transcript.push(self.prompts.core.discuss.autonomy_note.clone());
                         continue;
                     }
                     return TurnOut::AskUser { member: id, question: text };
@@ -148,10 +151,11 @@ impl Discussion {
 
     /// 全员同意后：核心整理——总结讨论，为每个留下的成员写执行任务提示词。
     pub fn synthesize(&self, core_chat: &mut dyn Chat) -> String {
-        let msgs = vec![
-            Msg::system("你是核心编排者。总结讨论，为每个留下的成员写一份执行任务提示词，输出任务清单。"),
-            Msg::user(self.transcript.join("\n")),
-        ];
+        let user = self.prompts.render(
+            &self.prompts.core.synthesize.user,
+            &[("transcript", self.transcript.join("\n"))],
+        );
+        let msgs = vec![Msg::system(self.prompts.core.synthesize.system.clone()), Msg::user(user)];
         core_chat.complete(&msgs)
     }
 }
@@ -179,36 +183,39 @@ pub struct Execution {
 }
 
 impl Execution {
-    pub fn run(members: &mut [Member], tasks: &str) -> Execution {
-        let mut reports = BTreeMap::new();
+    pub fn new() -> Execution {
+        Execution { reports: BTreeMap::new(), checklist_raw: String::new(), items: Vec::new(), rework: 0 }
+    }
+
+    /// 执行：各在组成员按任务回报（文案经提示词册渲染）。
+    pub fn run(members: &mut [Member], tasks: &str, prompts: &Prompts) -> Execution {
+        let mut exec = Execution::new();
         for m in members.iter_mut() {
             if !m.present {
                 continue;
             }
-            let msgs = vec![
-                Msg::system(m.system.clone()),
-                Msg::user(format!(
-                    "== 你的任务 ==\n{}\n\n完成后必须以 JSON 回报：{{\"summary\":\"做了什么\",\"changes\":\"动了什么\",\"open\":\"遗留问题，没有则空\"}}",
-                    tasks
-                )),
-            ];
+            let user = prompts.render(&prompts.core.execute.user, &[("tasks", tasks.to_string())]);
+            let msgs = vec![Msg::system(m.system.clone()), Msg::user(user)];
             let raw = m.chat.complete(&msgs);
             let reply = envelope::parse(&raw);
-            reports.insert(m.id.clone(), reply.text);
+            exec.reports.insert(m.id.clone(), reply.text);
         }
-        Execution { reports, checklist_raw: String::new(), items: Vec::new(), rework: 0 }
+        exec
     }
 
     /// 验收：核心对照方案逐项核对，输出结构化 pass/fail 清单。
-    pub fn review(&mut self, core_chat: &mut dyn Chat, plan: &str) {
-        let mut body = String::from("== 方案 ==\n");
-        body.push_str(plan);
-        body.push_str("\n== 回报 ==\n");
-        for (id, r) in &self.reports {
-            body.push_str(&format!("[{}] {}\n", id, r));
-        }
-        body.push_str("\n逐项核对，只输出 JSON 数组：每项 {\"item\":\"方案条目\",\"status\":\"pass|fail\",\"evidence\":\"对应回报\",\"reason\":\"fail 时给差距与归属\"}。");
-        let msgs = vec![Msg::system("你是核心验收者。只核对，不替模块干活。"), Msg::user(body)];
+    pub fn review(&mut self, core_chat: &mut dyn Chat, plan: &str, prompts: &Prompts) {
+        let reports = self
+            .reports
+            .iter()
+            .map(|(id, r)| format!("[{}] {}\n", id, r))
+            .collect::<Vec<_>>()
+            .join("");
+        let user = prompts.render(
+            &prompts.core.review.user,
+            &[("plan", plan.to_string()), ("reports", reports)],
+        );
+        let msgs = vec![Msg::system(prompts.core.review.system.clone()), Msg::user(user)];
         let raw = core_chat.complete(&msgs);
         self.items = envelope::extract_json_array(&raw)
             .and_then(|arr| serde_json::from_str::<Vec<CheckItem>>(&arr).ok())
@@ -217,21 +224,21 @@ impl Execution {
     }
 
     /// 返工：把验收差距发回各在组成员，重取回报（次数由调用方受 MAX_REWORK 约束）。
-    pub fn rerun(&mut self, members: &mut [Member], tasks: &str, review_text: &str) {
+    pub fn rerun(&mut self, members: &mut [Member], tasks: &str, review_text: &str, prompts: &Prompts) {
         self.rework += 1;
         for m in members.iter_mut() {
             if !m.present {
                 continue;
             }
-            let msgs = vec![
-                Msg::system(m.system.clone()),
-                Msg::user(format!(
-                    "== 你的任务 ==\n{}\n\n== 上次验收未通过 ==\n{}\n\n== 你的上次回报 ==\n{}\n\n请返工并以同一 JSON 格式再次回报。",
-                    tasks,
-                    review_text,
-                    self.reports.get(&m.id).cloned().unwrap_or_default()
-                )),
-            ];
+            let user = prompts.render(
+                &prompts.core.rerun.user,
+                &[
+                    ("tasks", tasks.to_string()),
+                    ("review", review_text.to_string()),
+                    ("report", self.reports.get(&m.id).cloned().unwrap_or_default()),
+                ],
+            );
+            let msgs = vec![Msg::system(m.system.clone()), Msg::user(user)];
             let raw = m.chat.complete(&msgs);
             let reply = envelope::parse(&raw);
             self.reports.insert(m.id.clone(), reply.text);
@@ -243,5 +250,3 @@ impl Execution {
         !self.items.is_empty() && self.items.iter().all(|i| i.status.eq_ignore_ascii_case("pass"))
     }
 }
-
-use crate::model::Chat;
