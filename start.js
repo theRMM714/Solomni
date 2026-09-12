@@ -7,7 +7,9 @@
  * Windows GNU gap (rust-lang/rust#140704): windows-sys needs a WORKING dlltool.exe
  * (one that can spawn its assembler). Preflight probes FIXED paths only (no disk scan)
  * AND trial-runs dlltool; if missing or broken, ask consent, then install portable
- * winlibs MinGW (complete binutils) into .tools/mingw64.
+ * winlibs MinGW (complete binutils) into .tools/mingw64. Download speed-tests our
+ * Release against upstream (optional SOLOMNI_GH_MIRROR prefix proxy), verifies the
+ * archive, and resumes interrupted downloads.
  */
 "use strict";
 const { spawnSync, spawn } = require("child_process");
@@ -147,17 +149,13 @@ function download(url, dest) {
 }
 
 function mirrorVariants(ghUrl) {
-  // Mirror URL shapes differ, so translate per mirror: TUNA rewrites the path
-  // (github-release/<owner>/<repo>/<tag>/<file>); fastgit is a plain host swap.
-  // Unreachable or unmirrored sources just fail the speed test and are skipped,
-  // so listing extra variants is always safe.
-  const m = ghUrl.match(/^https:\/\/github\.com\/([^\/]+)\/([^\/]+)\/releases\/download\/([^\/]+)\/(.+)$/);
+  // Optional extra mirror via SOLOMNI_GH_MIRROR (prefix-proxy shape, e.g.
+  // https://ghfast.top/github.com/owner/repo/...). TUNA/fastgit were tried and
+  // dropped with evidence: TUNA github-release only mirrors projects that applied
+  // for inclusion (404 for everything else), fastgit is shut down.
+  const m = process.env.SOLOMNI_GH_MIRROR || "";
   if (!m) return [];
-  const owner = m[1], repo = m[2], tag = m[3], file = m[4];
-  return [
-    "https://mirrors.tuna.tsinghua.edu.cn/github-release/" + owner + "/" + repo + "/" + tag + "/" + file,
-    "https://hub.fastgit.org/" + owner + "/" + repo + "/releases/download/" + tag + "/" + file
-  ];
+  return [m.replace(/\/+$/, "") + "/" + ghUrl.replace("https://github.com/", "")];
 }
 
 function sha256(file) {
@@ -246,14 +244,14 @@ async function pickFastest(urls) {
     codes.push(r.code);
     log("  " + Math.round(r.speed / 1024) + " KB/s  [http " + r.code + "]  " + u);
   }
-  let best = 0;
-  for (let i = 1; i < urls.length; i++) {
-    if (speeds[i] > speeds[best]) best = i;
+  let best = -1;
+  for (let i = 0; i < urls.length; i++) {
+    if (/^2/.test(codes[i]) && speeds[i] > 0 && (best < 0 || speeds[i] > speeds[best])) best = i;
   }
-  if (speeds[best] <= 0) {
-    console.error("[start] all sources failed the probe. Codes above mean:");
-    console.error("  000 = network blocked/reset (try a VPN, or download the zip manually)");
-    console.error("  404 = wrong path (check Release tag/asset name) - other sources may still work");
+  if (best < 0) {
+    console.error("[start] no source passed the probe (2xx with data). Codes above mean:");
+    console.error("  000 = network blocked/reset (set HTTPS_PROXY, or download the zip manually)");
+    console.error("  404 = not on this host (wrong tag/asset name, or mirror does not carry it)");
     console.error("  403 = rate limited (wait a bit and re-run)");
     die("no reachable source. Manual: browser-download a winlibs x86_64 seh zip, save as .tools/winlibs.zip, re-run.");
   }
@@ -303,8 +301,8 @@ async function installWinlibs() {
     for (const c of candidates) if (seen.indexOf(c) < 0) seen.push(c);
     const url = await pickFastest(seen);
     log("downloading " + url);
-    log("(curl with progress; ~200 MB. Slow? set SOLOMNI_GH_MIRROR, or download the zip");
-    log(" manually in a browser and save it as .tools/winlibs.zip - the launcher will use it)");
+    log("(curl with progress; ~200 MB. Too slow? set SOLOMNI_GH_MIRROR=https://ghfast.top");
+    log(" or HTTPS_PROXY=http://127.0.0.1:port, or browser-save the zip as .tools/winlibs.zip)");
     const ok = download(url, zip) ? zipLooksValid(zip) : false;
     if (ok === false) {
       log("download still incomplete or corrupt - re-run to resume, or download manually:");
