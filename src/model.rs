@@ -1,6 +1,7 @@
 //! 模型层：会话抽象 + 真实 HTTP 通道 + 假模型（mock 测试）。
 //! DIP：编排流程只依赖 Chat 会话对象，不依赖任何具体供应商。
 
+#[cfg(test)]
 use crate::envelope;
 use crate::providers::Provider;
 
@@ -16,6 +17,7 @@ pub struct Msg {
 impl Msg {
     pub fn system(content: impl Into<String>) -> Msg { Msg { role: "system".into(), content: content.into() } }
     pub fn user(content: impl Into<String>) -> Msg { Msg { role: "user".into(), content: content.into() } }
+    pub fn assistant(content: impl Into<String>) -> Msg { Msg { role: "assistant".into(), content: content.into() } }
 }
 
 /// 一次补全的原始文本输出。
@@ -27,14 +29,11 @@ pub trait Chat {
 }
 
 /// 真实通道：OpenAI 兼容 /chat/completions。密钥只在出站调用里使用，永不落提示词/日志。
-/// 待接入：HTTP 传输（ureq/reqwest）后替换 main.rs 的假模型演示（联动 providers.rs 的 resolve）。
-#[allow(dead_code)]
 pub struct HttpChat<'a> {
     pub provider: &'a Provider,
     pub model: String,
 }
 
-#[allow(dead_code)]
 impl<'a> Chat for HttpChat<'a> {
     fn complete(&mut self, messages: &[Msg]) -> Raw {
         // 请求体：messages 数组；响应取 choices[0].message.content。
@@ -60,12 +59,39 @@ impl<'a> Chat for HttpChat<'a> {
     }
 }
 
-// 待接入：真实 HTTP 实现（骨架期占位，错误信息不得携带密钥）。
-#[allow(dead_code)]
-fn ureq_do(_url: &str, _key: &str, _body: &str) -> Result<String, String> {
-    // 真实 HTTP 依赖在骨架期保持最小：serde_json 手拼已足够说明契约。
-    // TODO(实现期)：接入 reqwest 或 ureq；错误信息必须可读、不携带密钥。
-    Err("HTTP 通道在骨架期未接通（占位）".to_string())
+// 真实 HTTP：OpenAI 兼容 /chat/completions；错误信息只含状态与摘要，永不携带密钥。
+fn ureq_do(url: &str, key: &str, body: &str) -> Result<String, String> {
+    let agent = ureq::AgentBuilder::new()
+        .timeout_connect(std::time::Duration::from_secs(10))
+        .timeout(std::time::Duration::from_secs(120))
+        .build();
+    let resp = agent
+        .post(url)
+    .set("Authorization", &format!("Bearer {}", key))
+    .set("Content-Type", "application/json")
+    .send_string(body)
+    .map_err(|e| {
+        // 红线：错误信息永不携带密钥（ureq 的 Bad Header 等错误会回显请求头）。
+        let redact = |s: String| s.replace(key, "***");
+        match e {
+            ureq::Error::Status(code, resp) => {
+                let snippet = resp.into_string().unwrap_or_default();
+                let snippet: String = snippet.chars().take(200).collect();
+                redact(format!("供应商返回 {}：{}", code, snippet))
+            }
+            other => redact(format!("网络错误：{}", other)),
+        }
+    })?;
+    let text = resp.into_string().map_err(|e| e.to_string())?;
+    let v: serde_json::Value = serde_json::from_str(&text)
+        .map_err(|e| format!("响应不是 JSON：{}", e))?;
+    v.get("choices")
+        .and_then(|c| c.get(0))
+        .and_then(|c| c.get("message"))
+        .and_then(|m| m.get("content"))
+        .and_then(|c| c.as_str())
+        .map(|s| s.to_string())
+        .ok_or_else(|| "响应缺少 choices[0].message.content".to_string())
 }
 
 #[allow(dead_code)]
@@ -88,6 +114,7 @@ impl FakeChat {
     pub fn say(text: &str) -> String {
         format!("{{\"type\":\"say\",\"text\":\"{}\"}}", text)
     }
+    #[cfg(test)]
     pub fn verb_json(verb: &str, text: &str) -> String {
         format!("{{\"type\":\"{}\",\"text\":\"{}\"}}", verb, text)
     }
@@ -117,6 +144,7 @@ fn envelope_reply(v: VerbKind, text: &str) -> String {
     format!("{{\"type\":\"{}\",\"text\":\"{}\"}}", verb, text)
 }
 
+#[cfg(test)]
 /// 从原始输出提取 text（供假模型检查收到的上下文）。
 pub fn last_text(raw: &str) -> String {
     envelope::parse(raw).text

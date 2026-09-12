@@ -43,10 +43,19 @@ pub fn parse(raw: &str) -> Reply {
     Reply { verb: Verb::Say, text: raw.trim().to_string(), degraded: true }
 }
 
+/// 提取首个平衡的 JSON 数组（验收清单用），同一扫描器，换括号。
+pub fn extract_json_array(s: &str) -> Option<String> {
+    extract_balanced(s, '[', ']')
+}
+
 /// 提取首个平衡的 JSON 对象（模型常在 JSON 外包裹说明文字）。
-fn extract_json_object(s: &str) -> Option<String> {
+pub fn extract_json_object(s: &str) -> Option<String> {
+    extract_balanced(s, '{', '}')
+}
+
+fn extract_balanced(s: &str, open: char, close: char) -> Option<String> {
     let bytes = s.as_bytes();
-    let start = s.find('{')?;
+    let start = s.find(open)?;
     let mut depth = 0usize;
     let mut in_str = false;
     let mut esc = false;
@@ -59,8 +68,8 @@ fn extract_json_object(s: &str) -> Option<String> {
         }
         match b {
             b'"' => in_str = true,
-            b'{' => depth += 1,
-            b'}' => {
+            c if c == open as u8 => depth += 1,
+            c if c == close as u8 => {
                 depth -= 1;
                 if depth == 0 {
                     return Some(s[start..=i].to_string());

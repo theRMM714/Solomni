@@ -120,7 +120,7 @@ fn three_member_discussion() -> (Discussion<'static>, Vec<FakeChat>, FakeChat) {
         };
         members.push(Member { id, system: format!("{} 的职责", id), chat, present: true, agreed: false });
     }
-    let disc = Discussion { members, transcript: Vec::new(), round: 0, pending_user_answers: Vec::new(), closed: false };
+    let disc = Discussion { members, transcript: Vec::new(), round: 0, pending_user_answers: Vec::new(), closed: false, allow_autonomy: false };
     (disc, Vec::new(), FakeChat::new(vec![]))
 }
 
@@ -154,7 +154,7 @@ fn ask_pauses_and_user_answer_enters_transcript() {
         .enumerate()
         .map(|(i, chat)| Member { id: ids[i], system: format!("{} 的职责", ids[i]), chat, present: true, agreed: false })
         .collect();
-    let mut disc = Discussion { members, transcript: Vec::new(), round: 0, pending_user_answers: Vec::new(), closed: false };
+    let mut disc = Discussion { members, transcript: Vec::new(), round: 0, pending_user_answers: Vec::new(), closed: false, allow_autonomy: false };
     disc.open("任务", "约定");
     match disc.step() {
         TurnOut::AskUser { member, question } => {
@@ -188,7 +188,7 @@ fn leave_removes_member_from_consensus() {
         .enumerate()
         .map(|(i, chat)| Member { id: ids[i], system: format!("{} 的职责", ids[i]), chat, present: true, agreed: false })
         .collect();
-    let mut disc = Discussion { members, transcript: Vec::new(), round: 0, pending_user_answers: Vec::new(), closed: false };
+    let mut disc = Discussion { members, transcript: Vec::new(), round: 0, pending_user_answers: Vec::new(), closed: false, allow_autonomy: false };
     disc.open("任务", "约定");
     match disc.step() {
         TurnOut::Done => {}
@@ -199,13 +199,62 @@ fn leave_removes_member_from_consensus() {
 
 #[test]
 fn execution_and_review_pass() {
-    let (mut disc, _keep, mut core) = three_member_discussion();
+    let (mut disc, _keep, _core) = three_member_discussion();
     disc.open("任务", "约定");
     let _ = disc.step();
+    // 核心假模型：整理输出任务文本 → 验收输出结构化 pass 清单。
+    let mut core = FakeChat::new(vec![
+        FakeChat::say("== 任务清单 =="),
+        "say|[\n  {\"item\":\"回报与方案一致\",\"status\":\"pass\",\"evidence\":\"成员回报一致\"}\n]".to_string(),
+    ]);
     let plan = disc.synthesize(&mut core);
     let mut exec = Execution::run(&mut disc.members, &plan);
     exec.review(&mut core, &plan);
     assert!(exec.all_pass());
+    assert_eq!(exec.rework, 0);
+}
+
+#[test]
+fn review_parse_failure_is_conservative() {
+    let (_disc, _keep, _core) = three_member_discussion();
+    // 核心假模型：验收环节输出一个 say 对象（非清单）→ 解析失败 → 保守判否。
+    let mut core = FakeChat::new(vec![FakeChat::say("不是清单")]);
+    let mut exec = Execution { reports: Default::default(), checklist_raw: String::new(), items: Vec::new(), rework: 0 };
+    exec.review(&mut core, "方案");
+    assert!(!exec.all_pass());
+    assert!(exec.items.is_empty());
+}
+
+#[test]
+fn autonomy_ask_does_not_pause() {
+    // c 在 step 轮 ask：allow_autonomy = true 时不中止，留档后继续收敛。
+    let chats: Vec<FakeChat> = vec![
+        FakeChat::new(vec![FakeChat::say("a：我先说。"), FakeChat::verb_json("agree", "同意")]),
+        FakeChat::new(vec![FakeChat::say("b：我补充。"), FakeChat::verb_json("agree", "同意")]),
+        FakeChat::new(vec![FakeChat::say("c：我先看看。"), FakeChat::verb_json("ask", "选哪个库？"), FakeChat::verb_json("agree", "同意")]),
+    ];
+    let boxed: Vec<Box<dyn Chat>> = chats.into_iter().map(|c| Box::new(c) as Box<dyn Chat>).collect();
+    let leaked: Vec<&'static mut dyn Chat> = boxed.into_iter().map(|b| Box::leak(b) as &'static mut dyn Chat).collect();
+    let ids = ["a", "b", "c"];
+    let mut members: Vec<Member> = leaked
+        .into_iter()
+        .enumerate()
+        .map(|(i, chat)| Member { id: ids[i], system: format!("{} 的职责", ids[i]), chat, present: true, agreed: false })
+        .collect();
+    let mut disc = Discussion { members, transcript: Vec::new(), round: 0, pending_user_answers: Vec::new(), closed: false, allow_autonomy: true };
+    disc.open("任务", "约定");
+    // 自裁模式下 ask 留档不中止；下一轮 c 投同意后收敛。
+    let mut guard = 0;
+    loop {
+        match disc.step() {
+            TurnOut::Done => break,
+            _ => {
+                guard += 1;
+                assert!(guard <= 3, "自裁模式下未按预期收敛");
+            }
+        }
+    }
+    assert!(disc.transcript.iter().any(|l| l.contains("[core] 已授权小组自裁")));
 }
 
 #[test]
@@ -223,7 +272,7 @@ fn round_cap_is_enforced() {
         .enumerate()
         .map(|(i, chat)| Member { id: ids[i], system: format!("{} 的职责", ids[i]), chat, present: true, agreed: false })
         .collect();
-    let mut disc = Discussion { members, transcript: Vec::new(), round: 0, pending_user_answers: Vec::new(), closed: false };
+    let mut disc = Discussion { members, transcript: Vec::new(), round: 0, pending_user_answers: Vec::new(), closed: false, allow_autonomy: false };
     disc.open("任务", "约定");
     let mut guard = 0;
     loop {
