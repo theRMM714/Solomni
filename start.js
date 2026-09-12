@@ -22,6 +22,23 @@ const BUNDLED_CARGO = path.join(ROOT, "platform", "linux", "cargo", "bin", IS_WI
 const log = (m) => console.log("[start] " + m);
 const die = (m) => { console.error("[start] " + m); process.exit(1); };
 
+function rustcSysrootBinDirs(cargo) {
+  // windows-gnu: dlltool.exe lives in the toolchain lib/rustlib/x86_64-pc-windows-gnu/bin/self-contained
+  // (or gdb.debug subdir); windows-sys import-lib generation needs it on PATH.
+  const dirs = [];
+  const v = spawnSync(cargo, ["rustc", "--print", "sysroot"], { encoding: "utf8" });
+  const sysroot = (v.stdout || "").trim();
+  if (sysroot && fs.existsSync(sysroot)) {
+    const gnu = path.join(sysroot, "lib", "rustlib", "x86_64-pc-windows-gnu", "bin");
+    if (fs.existsSync(gnu)) dirs.push(gnu);
+    const sc = path.join(gnu, "bin", "self-contained");
+    if (fs.existsSync(sc)) dirs.push(sc);
+    const gdb = path.join(gnu, "gdb.debug");
+    if (fs.existsSync(gdb)) dirs.push(gdb);
+  }
+  return dirs;
+}
+
 function cargoEnv(cargo) {
   // bundled toolchain needs explicit HOME; system cargo used as-is.
   const env = Object.assign({}, process.env);
@@ -29,7 +46,7 @@ function cargoEnv(cargo) {
     env.RUSTUP_HOME = path.join(ROOT, "platform", "linux", "rustup");
     env.CARGO_HOME = path.join(ROOT, "platform", "linux", "cargo");
   }
-  env.PATH = path.dirname(cargo) + path.delimiter + (env.PATH || "");
+  env.PATH = [path.dirname(cargo), ...rustcSysrootBinDirs(cargo), env.PATH || ""].filter(Boolean).join(path.delimiter);
   return env;
 }
 
