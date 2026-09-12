@@ -6,7 +6,7 @@
 
 const $ = (s) => document.querySelector(s);
 const state = {
-  modules: [], providers: [],
+  modules: [], providers: [], rejected: [],
   sessions: new Map(),   // sid -> { sid, mode, title, lines: [{cls, who, text}], pending, busy, done, active }
   activeSid: null,
 };
@@ -28,6 +28,7 @@ async function refreshState() {
   const s = await api('GET', '/api/state');
   state.modules = s.modules || [];
   state.providers = s.providers || [];
+  state.rejected = s.rejected || [];
   renderSidebar();
 }
 
@@ -51,7 +52,7 @@ function renderSidebar() {
     el.querySelector('[data-act="omni"]').onclick = () => createSession('omni', m.id);
     list.appendChild(el);
   }
-  $('#rejected').textContent = (s.rejected || []).join('\n');
+  $('#rejected').textContent = state.rejected.join('\n');
   const pl = $('#provider-list');
   pl.innerHTML = '';
   for (const p of state.providers) {

@@ -23,12 +23,13 @@ const EXE = IS_WIN ? "solomni.exe" : "solomni";
 const RELEASE = process.argv.includes("--release");
 const PROFILE = RELEASE ? "release" : "debug";
 const BIN = path.join(ROOT, "target", PROFILE, EXE);
-const BUNDLED_CARGO = path.join(ROOT, "platform", "linux", "cargo", "bin", IS_WIN ? "cargo.exe" : "cargo");
 const TOOLS = path.join(ROOT, ".tools");
 const WINLIBS_BIN = path.join(TOOLS, "mingw64", "bin");
-// Project-local rustup homes (same layout as the bundled linux toolchain):
-const P_RUSTUP = path.join(ROOT, "platform", "windows", "rustup");
-const P_CARGO = path.join(ROOT, "platform", "windows", "cargo");
+// Every runtime lives under platform/<os>/ inside the project (convergence rule):
+// rustup homes, cargo home and the binary itself are all addressed from here.
+const PLATFORM_DIR = path.join(ROOT, "platform", IS_WIN ? "windows" : "linux");
+const P_RUSTUP = path.join(PLATFORM_DIR, "rustup");
+const P_CARGO = path.join(PLATFORM_DIR, "cargo");
 // Release asset base for third-party redistributions (winlibs zip).
 // Placeholder repo: fill in once the release is published.
 const REL_BASE = "https://github.com/theRMM714/Solomni/releases/download/dependencies/";
@@ -68,41 +69,14 @@ function setEnvPath(env, value) {
   env[key] = value;
 }
 
-function locateDlltool(cargo) {
-  // Fixed-path candidates only - never a disk scan. Priority order:
-  // 1. project-local winlibs (.tools/mingw64) - ours, complete binutils
-  // 2. conventional MSYS2 install dirs
-  // 3. toolchain dirs (rust-mingw ships dlltool without its assembler)
-  // 4. any directory that "where dlltool" already reports
-  // Each candidate must be a COMPLETE binutils tree (binutilsReady: dlltool + as).
-  // Returns { dir, broken }: dir is the first usable directory (or null), broken
-  // lists directories that have dlltool.exe but no assembler.
-  const dirs = [];
-  const add = (p) => { if (p && dirs.indexOf(p) < 0) dirs.push(p); };
-  add(WINLIBS_BIN);
-  add("C:/msys64/mingw64/bin");
-  add("C:/msys2/mingw64/bin");
-  const rustc = path.join(path.dirname(cargo), IS_WIN ? "rustc.exe" : "rustc");
-  const v = spawnSync(rustc, ["--print", "sysroot"], { encoding: "utf8" });
-  const sysroot = (v.stdout || "").trim();
-  if (sysroot && fs.existsSync(sysroot)) {
-    const gnu = path.join(sysroot, "lib", "rustlib", "x86_64-pc-windows-gnu", "bin");
-    add(path.join(gnu, "self-contained"));
-    add(path.join(gnu, "gdb.debug"));
-    add(gnu);
-  }
-  const w = spawnSync("where", ["dlltool"], { encoding: "utf8" });
-  for (const line of (w.stdout || "").split(/\r?\n/)) {
-    const t = line.trim();
-    if (t && fs.existsSync(t)) add(path.dirname(t));
-  }
-  const broken = [];
-  for (const d of dirs) {
-    if (!fs.existsSync(path.join(d, "dlltool.exe"))) continue;
-    if (binutilsReady(d)) return { dir: d, broken };
-    broken.push(d);
-  }
-  return { dir: null, broken };
+function locateDlltool() {
+  // Project-internal only (environment convergence): the complete binutils tree we
+  // install at .tools/mingw64/bin is the single accepted source. No system dirs, no
+  // PATH lookups - what the project ships is what the project builds with.
+  // Returns { dir, broken }: broken lists a partial tree (dlltool without assembler).
+  if (binutilsReady(WINLIBS_BIN)) return { dir: WINLIBS_BIN, broken: [] };
+  if (fs.existsSync(path.join(WINLIBS_BIN, "dlltool.exe"))) return { dir: null, broken: [WINLIBS_BIN] };
+  return { dir: null, broken: [] };
 }
 
 function binutilsReady(dir) {
@@ -116,35 +90,23 @@ function binutilsReady(dir) {
 }
 
 function cargoEnv(cargo) {
-  // project-local toolchains get explicit HOMEs; system cargo used as-is.
+  // The toolchain always lives inside the project (platform/<os>), so rustup/cargo
+  // are pointed at those homes explicitly; nothing outside the project is touched.
   const env = Object.assign({}, process.env);
-  const c = path.resolve(cargo);
-  if (c === path.resolve(BUNDLED_CARGO)) {
-    env.RUSTUP_HOME = path.join(ROOT, "platform", "linux", "rustup");
-    env.CARGO_HOME = path.join(ROOT, "platform", "linux", "cargo");
-  } else if (c === path.resolve(path.join(P_CARGO, "bin", IS_WIN ? "cargo.exe" : "cargo"))) {
-    env.RUSTUP_HOME = P_RUSTUP;
-    env.CARGO_HOME = P_CARGO;
-  }
+  env.RUSTUP_HOME = P_RUSTUP;
+  env.CARGO_HOME = P_CARGO;
   setEnvPath(env, [path.dirname(cargo)].concat(EXTRA_PATH, envPath(env)).filter(Boolean).join(path.delimiter));
   return env;
 }
 
 function findCargo() {
-  // Order: project-local (windows) -> bundled linux -> PATH -> ~/.cargo/bin.
-  if (IS_WIN) {
-    const pc = path.join(P_CARGO, "bin", "cargo.exe");
+  // Project-internal only (environment convergence): platform/<os>/cargo is the one
+  // accepted location. System installs (PATH, ~/.cargo/bin) are deliberately ignored
+  // - a missing toolchain triggers a consented install into the project instead.
+  {
+    const pc = path.join(P_CARGO, "bin", IS_WIN ? "cargo.exe" : "cargo");
     if (fs.existsSync(pc)) return pc;
   }
-  if (fs.existsSync(BUNDLED_CARGO)) return BUNDLED_CARGO;
-  const exe = IS_WIN ? "cargo.exe" : "cargo";
-  for (const d of (process.env.PATH || "").split(path.delimiter)) {
-    const c = path.join(d, exe);
-    if (fs.existsSync(c)) return c;
-  }
-  const home = process.env.USERPROFILE || process.env.HOME || "";
-  const ru = path.join(home, ".cargo", "bin", exe);
-  if (fs.existsSync(ru)) return ru;
   return null;
 }
 
@@ -349,17 +311,17 @@ async function installWinlibs() {
 }
 
 async function installRust() {
-  log("Rust toolchain not found (required to build Solomni).");
-  const ans = await ask("Download and install Rust now via rustup? [y/N] ");
+  log("Rust toolchain not found inside the project (system-wide installs are ignored by design).");
+  const ans = await ask("Install Rust into the project now via rustup (about 500 MB, once)? [y/N] ");
   if (ans.trim().toLowerCase() !== "y") {
-    die("aborted. Install Rust manually: https://rustup.rs then re-run.");
+    die("aborted. Re-run and answer y to install Rust inside the project.");
   }
   log("installing Rust (project-local, a few hundred MB, once; nothing written outside the project)...");
   if (IS_WIN) {
     // GNU toolchain: self-contained linker, no Visual Studio Build Tools needed.
     // Project-local: RUSTUP_HOME/CARGO_HOME under platform/windows, --no-modify-path
     // so the user's system PATH stays untouched.
-    fs.mkdirSync(path.join(ROOT, "platform", "windows"), { recursive: true });
+    fs.mkdirSync(PLATFORM_DIR, { recursive: true });
     const initExe = path.join(TOOLS, "rustup-init.exe");
     if (!download("https://win.rustup.rs/x86_64", initExe)) {
       die("rustup-init download failed. Check network / proxy.");
@@ -369,8 +331,10 @@ async function installRust() {
       { stdio: "inherit", env: Object.assign({}, process.env, { RUSTUP_HOME: P_RUSTUP, CARGO_HOME: P_CARGO }) });
     if (init.status !== 0) die("rustup install failed.");
   } else {
-    const r = spawnSync("sh", ["-c", "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y"],
-      { stdio: "inherit" });
+    fs.mkdirSync(PLATFORM_DIR, { recursive: true });
+    const r = spawnSync("sh",
+      ["-c", "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path"],
+      { stdio: "inherit", env: Object.assign({}, process.env, { RUSTUP_HOME: P_RUSTUP, CARGO_HOME: P_CARGO }) });
     if (r.status !== 0) die("rustup install failed. Check network / curl availability.");
   }
   const cargo = findCargo();
@@ -399,7 +363,7 @@ function run(cargo) {
     // Preflight BEFORE building: windows-sys fails at compile time without a WORKING
     // dlltool (it must be able to spawn "as.exe"; the toolchain's self-contained copy
     // often lacks one - CreateProcess failure at import-lib generation, see #140704).
-    const probe = locateDlltool(cargo);
+    const probe = locateDlltool();
     if (probe.dir) {
       EXTRA_PATH.push(probe.dir);
       log("dlltool working: " + probe.dir);
@@ -414,11 +378,9 @@ function run(cargo) {
         await installWinlibs();
         EXTRA_PATH.push(WINLIBS_BIN);
       } else {
-        console.error("[start] manual alternatives:");
-        console.error("  1) MSYS2: winget install MSYS2.MSYS2 ; pacman -S mingw-w64-x86_64-binutils ; add C:/msys64/mingw64/bin to PATH");
-        console.error("  2) MSVC: install VS 2022 Build Tools (VC workload) ; rustup default stable-x86_64-pc-windows-msvc");
-        console.error("  3) Browser: download winlibs zip manually, save as .tools/winlibs.zip, re-run");
-        console.error("     (set SOLOMNI_GH_MIRROR to a GitHub mirror prefix to speed up auto-download)");
+        console.error("[start] manual route (keeps everything inside the project):");
+        console.error("  browser-download a winlibs zip, save it as .tools/winlibs.zip, re-run");
+        console.error("  speed-up flags for auto-download: SOLOMNI_GH_MIRROR=<prefix> or HTTPS_PROXY=<url>");
       }
     }
   }
