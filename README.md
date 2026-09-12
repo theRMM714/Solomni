@@ -14,8 +14,8 @@ Solomni is a cross-platform AI assistant organized around a single principle —
 **模块 · Module** —— 一个文件夹 = 一段职责提示词 + 一组预备工具 + 一块私有工作区。模块不是进程：不常驻、不待命，只在被交付任务时工作一次，留下回报与数据。
 *A folder is a charter prompt, a set of tools, and a private workspace. A module is not a process: it does not idle or listen — it works once when handed a task, then leaves behind its report and its data.*
 
-**核心 · Core** —— 产品里唯一的程序：受托编排者。集结、转达、整理、验收，全部是用户当下委托的机械动作；委托之外，它对模块的全部认知只有每个模块自述的简述。
-*The only program in the product: an entrusted orchestrator. Assembling, relaying, synthesizing, and reviewing are mechanical acts delegated by the user in the moment; beyond that delegation, all it knows of a module is the brief the module wrote about itself.*
+**核心 · Core** —— 产品里唯一的程序：受托编排者。集结、转达、整理、验收，全部是用户当下委托的机械动作；委托之外，它对模块的全部认知只有每个模块自述的简述。它还受托保管供应商登记处（密钥归产品，模块与工具只持引用）。
+*The only program in the product: an entrusted orchestrator. Assembling, relaying, synthesizing, and reviewing are mechanical acts delegated by the user in the moment; beyond that delegation, all it knows of a module is the brief the module wrote about itself. It is also entrusted with the provider registry — keys belong to the product, while modules and tools hold only references.*
 
 **选择权 · The Choice** —— 用哪些模块，永远由用户决定：点名，或委托核心代拟名单并确认。
 *Which modules to bring together is always the user's call: name them, or let the core draft a slate for confirmation.*
