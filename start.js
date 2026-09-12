@@ -4,9 +4,10 @@
  * Default CLI; -webUI starts the Web UI. No business logic here.
  * Cross-platform: node start.js [-webUI] [--release] [--root <dir>] [--web-port <port>]
  * Rust missing? Ask, then install via rustup (GNU toolchain on Windows: no MSVC needed).
- * Windows GNU gap (rust-lang/rust#140704): windows-sys needs dlltool.exe which rust-mingw
- * does not ship. Preflight probes FIXED paths only (no disk scan) before building; if
- * missing, ask consent, then install portable winlibs MinGW into .tools/mingw64.
+ * Windows GNU gap (rust-lang/rust#140704): windows-sys needs a WORKING dlltool.exe
+ * (one that can spawn its assembler). Preflight probes FIXED paths only (no disk scan)
+ * AND trial-runs dlltool; if missing or broken, ask consent, then install portable
+ * winlibs MinGW (complete binutils) into .tools/mingw64.
  */
 "use strict";
 const { spawnSync } = require("child_process");
@@ -58,6 +59,23 @@ function locateDlltool(cargo) {
     if (fs.existsSync(path.join(d, "dlltool.exe"))) return d;
   }
   return null;
+}
+
+function dlltoolWorks(dir) {
+  // Decisive probe: actually generate a tiny import library. Catches the
+  // "dlltool present but its assembler is missing" case (CreateProcess error).
+  const os = require("os");
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "solo-dt-"));
+  const def = path.join(tmp, "probe.def");
+  const lib = path.join(tmp, "probe.lib");
+  fs.writeFileSync(def, "LIBRARY kernel32.dll\nEXPORTS\n  GetLastError\n");
+  const env = Object.assign({}, process.env);
+  env.PATH = [dir, env.PATH || ""].filter(Boolean).join(path.delimiter);
+  const r = spawnSync(path.join(dir, "dlltool.exe"),
+    ["-d", def, "-D", "kernel32.dll", "-l", lib, "-m", "i386:x86-64", "-f", "--64", "--no-leading-underscore"],
+    { encoding: "utf8", env, cwd: tmp });
+  try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) { /* best effort */ }
+  return r.status === 0 && fs.existsSync(lib);
 }
 
 function cargoEnv(cargo) {
@@ -169,12 +187,15 @@ function run(cargo) {
   log("platform " + process.platform + " " + process.arch);
 
   if (IS_WIN) {
-    // Preflight BEFORE building: windows-sys fails at compile time without dlltool.
+    // Preflight BEFORE building: windows-sys fails at compile time without a WORKING
+    // dlltool (it must be able to spawn "as.exe"; the toolchain's self-contained copy
+    // often lacks one - CreateProcess failure at import-lib generation, see #140704).
     const dd = locateDlltool(cargo);
-    if (dd) {
+    if (dd && dlltoolWorks(dd)) {
       EXTRA_PATH.push(dd);
-      log("dlltool found and configured: " + dd);
+      log("dlltool working: " + dd);
     } else {
+      if (dd) log("dlltool found but not usable (cannot run its assembler); falling back to portable MinGW.");
       console.error("[start] dlltool.exe NOT found at any fixed location (rust-lang/rust#140704:");
       console.error("[start] windows-sys raw-dylib needs dlltool; rust-mingw on this toolchain lacks it).");
       const ans = await ask("Install portable MinGW now? winlibs ~200MB into project .tools, no admin, no system changes [y/N] ");
