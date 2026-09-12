@@ -1,0 +1,123 @@
+//! 模型层：会话抽象 + 真实 HTTP 通道 + 假模型（mock 测试）。
+//! DIP：编排流程只依赖 Chat 会话对象，不依赖任何具体供应商。
+
+use crate::envelope;
+use crate::providers::Provider;
+
+/// 一条消息：role = system / user / assistant。
+// role/content 由会话拼装使用；complete() 消费整段消息列表。
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub struct Msg {
+    pub role: String,
+    pub content: String,
+}
+
+impl Msg {
+    pub fn system(content: impl Into<String>) -> Msg { Msg { role: "system".into(), content: content.into() } }
+    pub fn user(content: impl Into<String>) -> Msg { Msg { role: "user".into(), content: content.into() } }
+}
+
+/// 一次补全的原始文本输出。
+pub type Raw = String;
+
+/// Chat 会话：核心与一个智能体（或自身整理环节）的对话通道。
+pub trait Chat {
+    fn complete(&mut self, messages: &[Msg]) -> Raw;
+}
+
+/// 真实通道：OpenAI 兼容 /chat/completions。密钥只在出站调用里使用，永不落提示词/日志。
+/// 待接入：HTTP 传输（ureq/reqwest）后替换 main.rs 的假模型演示（联动 providers.rs 的 resolve）。
+#[allow(dead_code)]
+pub struct HttpChat<'a> {
+    pub provider: &'a Provider,
+    pub model: String,
+}
+
+#[allow(dead_code)]
+impl<'a> Chat for HttpChat<'a> {
+    fn complete(&mut self, messages: &[Msg]) -> Raw {
+        // 请求体：messages 数组；响应取 choices[0].message.content。
+        // 用极小 JSON 拼装（依赖最小化）；消息内容统一做转义。
+        let mut body = String::from("{\"model\":");
+        body.push_str(&json_str(&self.model));
+        body.push_str(",\"messages\":[");
+        for (i, m) in messages.iter().enumerate() {
+            if i > 0 { body.push(','); }
+            body.push_str("{\"role\":");
+            body.push_str(&json_str(&m.role));
+            body.push_str(",\"content\":");
+            body.push_str(&json_str(&m.content));
+            body.push('}');
+        }
+        body.push_str("]}");
+        let out = ureq_do(
+            &format!("{}/chat/completions", self.provider.base_url.trim_end_matches('/')),
+            &self.provider.api_key,
+            &body,
+        );
+        out.unwrap_or_else(|e| format!("{{\"type\":\"ask\",\"text\":\"模型调用失败：{}\"}}", e))
+    }
+}
+
+// 待接入：真实 HTTP 实现（骨架期占位，错误信息不得携带密钥）。
+#[allow(dead_code)]
+fn ureq_do(_url: &str, _key: &str, _body: &str) -> Result<String, String> {
+    // 真实 HTTP 依赖在骨架期保持最小：serde_json 手拼已足够说明契约。
+    // TODO(实现期)：接入 reqwest 或 ureq；错误信息必须可读、不携带密钥。
+    Err("HTTP 通道在骨架期未接通（占位）".to_string())
+}
+
+#[allow(dead_code)]
+fn json_str(s: &str) -> String {
+    serde_json::to_string(s).unwrap_or_else(|_| "\"?\"".into())
+}
+
+/// 假模型：确定性脚本应答，用于全链路 mock 测试（不依赖网络与真实密钥）。
+/// 每个应答对应一个信封动词，按调用顺序弹出。
+pub struct FakeChat {
+    pub script: Vec<String>,
+    pub calls: Vec<Vec<Msg>>,
+}
+
+impl FakeChat {
+    pub fn new(script: Vec<String>) -> FakeChat {
+        FakeChat { script, calls: Vec::new() }
+    }
+    /// 构造一个 say 信封文本。
+    pub fn say(text: &str) -> String {
+        format!("{{\"type\":\"say\",\"text\":\"{}\"}}", text)
+    }
+    pub fn verb_json(verb: &str, text: &str) -> String {
+        format!("{{\"type\":\"{}\",\"text\":\"{}\"}}", verb, text)
+    }
+}
+
+impl Chat for FakeChat {
+    fn complete(&mut self, messages: &[Msg]) -> Raw {
+        self.calls.push(messages.to_vec());
+        if self.script.is_empty() {
+            return envelope_reply(VerbKind::Agree, "（脚本已尽，默认同意）");
+        }
+        let next = self.script.remove(0);
+        match next.split_once('|') {
+            Some((v, t)) => envelope_reply(
+                match v { "ask" => VerbKind::Ask, "leave" => VerbKind::Leave, "agree" => VerbKind::Agree, _ => VerbKind::Say },
+                t,
+            ),
+            None => next,
+        }
+    }
+}
+
+enum VerbKind { Say, Ask, Leave, Agree }
+
+fn envelope_reply(v: VerbKind, text: &str) -> String {
+    let verb = match v { VerbKind::Say => "say", VerbKind::Ask => "ask", VerbKind::Leave => "leave", VerbKind::Agree => "agree" };
+    format!("{{\"type\":\"{}\",\"text\":\"{}\"}}", verb, text)
+}
+
+/// 从原始输出提取 text（供假模型检查收到的上下文）。
+pub fn last_text(raw: &str) -> String {
+    envelope::parse(raw).text
+}
