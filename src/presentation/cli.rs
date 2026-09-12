@@ -2,9 +2,16 @@
 //! 只做解析与渲染，不做业务决策；Web 前端与它并列、共用同一门面与事件词汇。
 
 use crate::core::{CollabStep, Core, Pending, SessionEvent, SessionId};
+use crate::presentation::web::DEFAULT_PORT;
 use std::io::Write;
 
-pub fn run(mut core: Core) {
+/// 离开转录中心时的去向：退出，或转入 Web 转录中心（端口）。
+pub enum CliExit {
+    Exit,
+    Web(u16),
+}
+
+pub fn run(mut core: Core) -> (Core, CliExit) {
     println!("Solomni 核心编排者（转录中心）");
     print_roster(&core);
 
@@ -20,7 +27,7 @@ pub fn run(mut core: Core) {
         let mut parts = line.splitn(2, ' ');
         let cmd = parts.next().unwrap_or("").to_string();
         let arg = parts.next().unwrap_or("").trim().to_string();
-        match cmd.as_str() {
+        match cmd.to_ascii_lowercase().as_str() {
             "direct" if !arg.is_empty() => direct_flow(&mut core, &arg),
             "collab" if !arg.is_empty() => match core.start_collab(&arg) {
                 Ok(sid) => collab_flow(&mut core, sid),
@@ -32,11 +39,18 @@ pub fn run(mut core: Core) {
             },
             "provider" => provider_flow(&mut core, &arg),
             "rescan" => print_roster(&core),
+            // 转入 Web 转录中心：接受 webui / -webUI（启动参数也这么写），可选端口。
+            "webui" | "-webui" | "web" | "-web" => {
+                let port = arg.parse::<u16>().unwrap_or(DEFAULT_PORT);
+                return (core, CliExit::Web(port));
+            }
             "exit" => break,
-            _ => continue,
+            "" => continue,
+            _ => println!("[提示] 未知命令 {}（Web 界面用 webui；退出用 exit）", cmd),
         }
     }
     println!("再见。");
+    (core, CliExit::Exit)
 }
 
 fn print_roster(core: &Core) {
@@ -59,7 +73,7 @@ fn print_menu(core: &Core) {
     for m in &core.scan().modules {
         println!("  {:<14} {}", m.manifest.id, first_line(&m.manifest.brief));
     }
-    println!("命令：direct <id> | collab <id>[,<id>…] | collab ?（代拟） | omni [id…] | provider list|add|key|rm|default | rescan | exit");
+    println!("命令：direct <id> | collab <id>[,<id>…] | collab ?（代拟） | omni [id…] | provider list|add|key|rm|default | rescan | webui | exit");
 }
 
 // ---------- 事件渲染：CLI 与 Web 前端同源 ----------

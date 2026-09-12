@@ -114,7 +114,7 @@ To build a cross-platform AI assistant where decentralization is the norm:
 ## 运行骨架 · Run the Skeleton
 
 ```bash
-cargo run            # 转录中心菜单：direct <id> / collab <id,id> / omni
+cargo run            # 转录中心菜单：direct <id> / collab <id,id> / omni / webui（切 Web）
 cargo test           # mock 测试：信封/登记处/扫描/协作全链路（假模型）
 ```
 

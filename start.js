@@ -41,14 +41,20 @@ const die = (m) => { console.error("[start] " + m); process.exit(1); };
 let EXTRA_PATH = []; // dlltool location found by preflight; consumed by cargoEnv.
 
 function locateDlltool(cargo) {
-  // Fixed-path probes only - never a disk scan. Sources, in order:
-  // 1. toolchain self-contained dirs (older toolchains shipped dlltool there)
+  // Fixed-path candidates only - never a disk scan. Priority order:
+  // 1. project-local winlibs (.tools/mingw64) - ours, complete binutils
   // 2. conventional MSYS2 install dirs
-  // 3. project-local winlibs install (.tools/mingw64)
+  // 3. toolchain dirs (rust-mingw ships dlltool without its assembler)
   // 4. any directory that "where dlltool" already reports
-  // Returns the first directory that actually contains dlltool.exe, or null.
+  // Each candidate is TRIAL-RUN (dlltoolWorks): existence alone is not enough -
+  // the toolchain copy exists but cannot build an import library. Returns
+  // { dir, broken } where dir is the first USABLE directory (or null) and broken
+  // lists directories that have dlltool.exe but failed the trial run.
   const dirs = [];
   const add = (p) => { if (p && dirs.indexOf(p) < 0) dirs.push(p); };
+  add(WINLIBS_BIN);
+  add("C:/msys64/mingw64/bin");
+  add("C:/msys2/mingw64/bin");
   const rustc = path.join(path.dirname(cargo), IS_WIN ? "rustc.exe" : "rustc");
   const v = spawnSync(rustc, ["--print", "sysroot"], { encoding: "utf8" });
   const sysroot = (v.stdout || "").trim();
@@ -58,18 +64,18 @@ function locateDlltool(cargo) {
     add(path.join(gnu, "gdb.debug"));
     add(gnu);
   }
-  add("C:/msys64/mingw64/bin");
-  add("C:/msys2/mingw64/bin");
-  add(WINLIBS_BIN);
   const w = spawnSync("where", ["dlltool"], { encoding: "utf8" });
   for (const line of (w.stdout || "").split(/\r?\n/)) {
     const t = line.trim();
     if (t && fs.existsSync(t)) add(path.dirname(t));
   }
+  const broken = [];
   for (const d of dirs) {
-    if (fs.existsSync(path.join(d, "dlltool.exe"))) return d;
+    if (!fs.existsSync(path.join(d, "dlltool.exe"))) continue;
+    if (dlltoolWorks(d)) return { dir: d, broken };
+    broken.push(d);
   }
-  return null;
+  return { dir: null, broken };
 }
 
 function dlltoolWorks(dir) {
@@ -276,6 +282,10 @@ async function installWinlibs() {
   // No admin, no system PATH change; delete the directory to remove.
   // Source: our GitHub Release mirror of the unmodified upstream zip (GPL: plain
   // redistribution with attribution is permitted), falling back to the upstream URL.
+  if (fs.existsSync(path.join(WINLIBS_BIN, "dlltool.exe")) && dlltoolWorks(WINLIBS_BIN)) {
+    log("portable MinGW already installed and working: " + WINLIBS_BIN);
+    return;
+  }
   fs.mkdirSync(TOOLS, { recursive: true });
   const zip = path.join(TOOLS, "winlibs.zip");
   if (fs.existsSync(zip)) {
@@ -354,7 +364,7 @@ function run(cargo) {
   const argv = [BIN, "."].concat(pass);
   log(process.argv.includes("-webUI")
     ? "starting Web UI (default 127.0.0.1:3081, open http://127.0.0.1:3081)"
-    : "starting CLI (use -webUI for the Web UI)");
+    : "starting CLI (type webui at the prompt for the Web UI, or start with -webUI)");
   const r = spawnSync(argv[0], argv.slice(1), { cwd: ROOT, stdio: "inherit", env: cargoEnv(cargo) });
   if (r.error) die("run failed: " + r.error.message);
   process.exitCode = r.status || 0;
@@ -369,12 +379,12 @@ function run(cargo) {
     // Preflight BEFORE building: windows-sys fails at compile time without a WORKING
     // dlltool (it must be able to spawn "as.exe"; the toolchain's self-contained copy
     // often lacks one - CreateProcess failure at import-lib generation, see #140704).
-    const dd = locateDlltool(cargo);
-    if (dd && dlltoolWorks(dd)) {
-      EXTRA_PATH.push(dd);
-      log("dlltool working: " + dd);
+    const probe = locateDlltool(cargo);
+    if (probe.dir) {
+      EXTRA_PATH.push(probe.dir);
+      log("dlltool working: " + probe.dir);
     } else {
-      if (dd) log("dlltool found but not usable (cannot run its assembler); falling back to portable MinGW.");
+      if (probe.broken.length) log("dlltool present but unusable (no assembler): " + probe.broken.join(", "));
       else {
         console.error("[start] dlltool.exe NOT found at any fixed location (rust-lang/rust#140704:");
         console.error("[start] windows-sys raw-dylib needs dlltool; rust-mingw on this toolchain lacks it).");
