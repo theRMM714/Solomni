@@ -91,6 +91,21 @@ To build a cross-platform AI assistant where decentralization is the norm:
 
 ---
 
+## 核心分层 · Core Layers
+
+```
+呈现层  main.rs（终端转录中心；未来 Web 前端同源）
+           │  只调门面、只渲染事件
+核心层  kernel.rs（Core 门面：三模式会话状态机 / 登记处操作端口 / 通道网关）
+           │  依赖倒置：编排只认 Chat 端口
+引擎层  orchestrator.rs（协作五阶段纯状态机）
+适配层  providers.rs（登记处）/ model.rs（Chat 端口的 HTTP 与假模型实现）
+装配层  module.rs（模块扫描）＋ envelope.rs（发言信封）
+```
+
+核心永不打印、永不读输入；前端只见 `Core` 门面、`SessionEvent` 事件流与 `pending` 介入请求。
+密钥只进登记处，前端只见供应商 id。
+
 ## 运行骨架 · Run the Skeleton
 
 ```bash
