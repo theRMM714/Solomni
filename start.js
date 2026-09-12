@@ -129,6 +129,17 @@ function download(url, dest) {
   return fs.existsSync(dest) && fs.statSync(dest).size > 1048576;
 }
 
+function zipLooksValid(zipPath) {
+  // Structural check: list entries with the system tar (Win10 1803+ ships one).
+  // A truncated/corrupt/wrong-content archive fails listing or lacks dlltool.
+  const st = fs.statSync(zipPath);
+  if (st.size < 10485760) return false; // real winlibs zip is far bigger; fast reject
+  const t = spawnSync("tar", ["-tf", zipPath], { encoding: "utf8" });
+  if (t.error && t.error.code === "ENOENT") return true; // no tar available: size-only, do not delete a possibly-good file
+  if (t.status !== 0) return false;
+  return /bin[\\/]dlltool\.exe/i.test(t.stdout || "");
+}
+
 async function installWinlibs() {
   // Portable MinGW-w64 (binutils provides dlltool.exe). Project-local: .tools/mingw64.
   // No admin, no system PATH change; delete the directory to remove.
@@ -145,16 +156,23 @@ async function installWinlibs() {
   if (!/^https:/.test(url)) die("cannot resolve winlibs download url (network?). Use the manual options below.");
   fs.mkdirSync(TOOLS, { recursive: true });
   const zip = path.join(TOOLS, "winlibs.zip");
-  if (fs.existsSync(zip) && fs.statSync(zip).size > 10485760) {
-    log("using existing " + zip + " (" + Math.round(fs.statSync(zip).size / 1048576) + " MB)");
-  } else {
+  if (fs.existsSync(zip)) {
+    if (zipLooksValid(zip)) {
+      log("using existing " + zip + " (" + Math.round(fs.statSync(zip).size / 1048576) + " MB)");
+    } else {
+      log("existing " + zip + " is corrupt (truncated download?) - deleting and re-downloading.");
+      try { fs.rmSync(zip, { force: true }); } catch (e) { /* re-attempt below anyway */ }
+    }
+  }
+  if (!fs.existsSync(zip)) {
     const mirror = process.env.SOLOMNI_GH_MIRROR || "";
     if (mirror) { log("using GitHub mirror prefix: " + mirror); url = mirror + url; }
     log("downloading " + url);
     log("(curl with progress; ~200 MB. Slow? set SOLOMNI_GH_MIRROR, or download the zip");
     log(" manually in a browser and save it as .tools/winlibs.zip - the launcher will use it)");
-    if (!download(url, zip)) {
-      die("download failed. Manual: download the file above in a browser, save as .tools/winlibs.zip, re-run.");
+    if (!download(url, zip) || !zipLooksValid(zip)) {
+      try { fs.rmSync(zip, { force: true }); } catch (e) { /* nothing to clean */ }
+      die("download failed or archive corrupt. Manual: download the file above in a browser, save as .tools/winlibs.zip, re-run.");
     }
   }
   log("extracting (takes a minute)...");
