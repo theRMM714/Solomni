@@ -4,12 +4,12 @@
  * Default CLI; -webUI starts the Web UI. No business logic here.
  * Cross-platform: node start.js [-webUI] [--release] [--root <dir>] [--web-port <port>]
  * Rust missing? Ask, then install via rustup (GNU toolchain on Windows: no MSVC needed).
- * Windows GNU gap (rust-lang/rust#140704): windows-sys needs a WORKING dlltool.exe
- * (one that can spawn its assembler). Preflight probes FIXED paths only (no disk scan)
- * AND trial-runs dlltool; if missing or broken, ask consent, then install portable
- * winlibs MinGW (complete binutils) into .tools/mingw64. Download speed-tests our
- * Release against upstream (optional SOLOMNI_GH_MIRROR prefix proxy), verifies the
- * archive, and resumes interrupted downloads.
+ * Windows GNU gap (rust-lang/rust#140704): windows-sys needs a WORKING dlltool.exe,
+ * which means a complete binutils tree (dlltool.exe AND as.exe - the assembler it
+ * shells out to). Preflight probes FIXED paths only (no disk scan); if no complete
+ * tree exists, ask consent, then install portable winlibs MinGW into .tools/mingw64.
+ * Download speed-tests our Release against upstream (optional SOLOMNI_GH_MIRROR
+ * prefix proxy), verifies the archive, and resumes interrupted downloads.
  */
 "use strict";
 const { spawnSync, spawn } = require("child_process");
@@ -40,16 +40,29 @@ const log = (m) => console.log("[start] " + m);
 const die = (m) => { console.error("[start] " + m); process.exit(1); };
 let EXTRA_PATH = []; // dlltool location found by preflight; consumed by cargoEnv.
 
+function envPath(env) {
+  // Windows env keys are case-insensitive but Node keeps them verbatim: the system
+  // key is usually "Path". Writing env.PATH alongside it creates a DUPLICATE key,
+  // and children then look up tools (as.exe) against a mangled PATH. Always read
+  // and write through the existing key.
+  const key = Object.keys(env).find((k) => k.toUpperCase() === "PATH");
+  return key ? env[key] : "";
+}
+
+function setEnvPath(env, value) {
+  const key = Object.keys(env).find((k) => k.toUpperCase() === "PATH") || "PATH";
+  env[key] = value;
+}
+
 function locateDlltool(cargo) {
   // Fixed-path candidates only - never a disk scan. Priority order:
   // 1. project-local winlibs (.tools/mingw64) - ours, complete binutils
   // 2. conventional MSYS2 install dirs
   // 3. toolchain dirs (rust-mingw ships dlltool without its assembler)
   // 4. any directory that "where dlltool" already reports
-  // Each candidate is TRIAL-RUN (dlltoolWorks): existence alone is not enough -
-  // the toolchain copy exists but cannot build an import library. Returns
-  // { dir, broken } where dir is the first USABLE directory (or null) and broken
-  // lists directories that have dlltool.exe but failed the trial run.
+  // Each candidate must be a COMPLETE binutils tree (binutilsReady: dlltool + as).
+  // Returns { dir, broken }: dir is the first usable directory (or null), broken
+  // lists directories that have dlltool.exe but no assembler.
   const dirs = [];
   const add = (p) => { if (p && dirs.indexOf(p) < 0) dirs.push(p); };
   add(WINLIBS_BIN);
@@ -72,27 +85,20 @@ function locateDlltool(cargo) {
   const broken = [];
   for (const d of dirs) {
     if (!fs.existsSync(path.join(d, "dlltool.exe"))) continue;
-    if (dlltoolWorks(d)) return { dir: d, broken };
+    if (binutilsReady(d)) return { dir: d, broken };
     broken.push(d);
   }
   return { dir: null, broken };
 }
 
-function dlltoolWorks(dir) {
-  // Decisive probe: actually generate a tiny import library. Catches the
-  // "dlltool present but its assembler is missing" case (CreateProcess error).
-  const os = require("os");
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "solo-dt-"));
-  const def = path.join(tmp, "probe.def");
-  const lib = path.join(tmp, "probe.lib");
-  fs.writeFileSync(def, "LIBRARY kernel32.dll\nEXPORTS\n  GetLastError\n");
-  const env = Object.assign({}, process.env);
-  env.PATH = [dir, env.PATH || ""].filter(Boolean).join(path.delimiter);
-  const r = spawnSync(path.join(dir, "dlltool.exe"),
-    ["-d", def, "-D", "kernel32.dll", "-l", lib, "-m", "i386:x86-64", "-f", "--64", "--no-leading-underscore"],
-    { encoding: "utf8", env, cwd: tmp });
-  try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) { /* best effort */ }
-  return r.status === 0 && fs.existsSync(lib);
+function binutilsReady(dir) {
+  // dlltool shells out to the GNU assembler when building an import library, so a
+  // usable directory needs BOTH dlltool.exe and as.exe. Static check by design:
+  // trial-running dlltool proved unreliable (it reported a working winlibs install
+  // as broken on Windows), and this pair is exactly what distinguishes the
+  // rust-mingw copy (dlltool only) from a complete binutils tree.
+  if (!dir) return false;
+  return fs.existsSync(path.join(dir, "dlltool.exe")) && fs.existsSync(path.join(dir, "as.exe"));
 }
 
 function cargoEnv(cargo) {
@@ -106,7 +112,7 @@ function cargoEnv(cargo) {
     env.RUSTUP_HOME = P_RUSTUP;
     env.CARGO_HOME = P_CARGO;
   }
-  env.PATH = [path.dirname(cargo)].concat(EXTRA_PATH, env.PATH || "").filter(Boolean).join(path.delimiter);
+  setEnvPath(env, [path.dirname(cargo)].concat(EXTRA_PATH, envPath(env)).filter(Boolean).join(path.delimiter));
   return env;
 }
 
@@ -282,7 +288,7 @@ async function installWinlibs() {
   // No admin, no system PATH change; delete the directory to remove.
   // Source: our GitHub Release mirror of the unmodified upstream zip (GPL: plain
   // redistribution with attribution is permitted), falling back to the upstream URL.
-  if (fs.existsSync(path.join(WINLIBS_BIN, "dlltool.exe")) && dlltoolWorks(WINLIBS_BIN)) {
+  if (binutilsReady(WINLIBS_BIN)) {
     log("portable MinGW already installed and working: " + WINLIBS_BIN);
     return;
   }
@@ -406,13 +412,12 @@ function run(cargo) {
   const v = spawnSync(cargo, ["--version"], { cwd: ROOT, env: cargoEnv(cargo), encoding: "utf8" });
   if (v.error || v.status !== 0) die("cargo not runnable: " + (v.error && v.error.message));
   log(v.stdout.trim());
-  if (!fs.existsSync(BIN)) {
-    log("binary not found, building (first run is slow)...");
-    const args = RELEASE ? ["build", "--release"] : ["build"];
-    const b = spawnSync(cargo, args, { cwd: ROOT, env: cargoEnv(cargo), stdio: "inherit" });
-    if (b.status !== 0) die("build failed");
-  } else {
-    log("using binary: " + path.relative(ROOT, BIN));
-  }
+  // Always invoke cargo: it decides what is stale in ~a second. Skipping the build
+  // when a binary already existed made the launcher run outdated binaries after
+  // source changes.
+  log(fs.existsSync(BIN) ? "checking build..." : "binary not found, building (first run is slow)...");
+  const args = RELEASE ? ["build", "--release"] : ["build"];
+  const b = spawnSync(cargo, args, { cwd: ROOT, env: cargoEnv(cargo), stdio: "inherit" });
+  if (b.status !== 0) die("build failed");
   run(cargo);
 })();
