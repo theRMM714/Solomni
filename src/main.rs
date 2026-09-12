@@ -40,7 +40,7 @@ fn main() {
     println!("Solomni 核心编排者（转录中心）");
 
     // 供应商登记处：核心私有区（.home/），密钥唯一合法居所。
-    let registry_path = root.join(".home/providers.yaml");
+    let registry_path = root.join(".home").join("providers.yaml");
     let mut registry = providers::Registry::load(&registry_path);
 
     // 清单即事实：每次启动、每次建组都重新扫描。
