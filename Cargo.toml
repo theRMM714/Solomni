@@ -9,6 +9,8 @@ edition = "2021"
 serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.9"
 serde_json = "1"
+tiny_http = "0.12"
+
 [target.'cfg(windows)'.dependencies]
 # Windows：TLS 走系统 schannel（native-tls），避开 ring 的 C 编译器依赖（GNU 工具链无 gcc 时构建失败）。
 ureq = { version = "2", default-features = false, features = ["native-tls", "gzip"] }
@@ -16,7 +18,6 @@ ureq = { version = "2", default-features = false, features = ["native-tls", "gzi
 [target.'cfg(not(windows))'.dependencies]
 # 非 Windows：维持 rustls（内置工具链带 gcc，ring 可编译）。
 ureq = { version = "2", default-features = false, features = ["tls", "gzip"] }
-tiny_http = "0.12"
 
 [[bin]]
 name = "solomni"
