@@ -40,6 +40,20 @@ const log = (m) => console.log("[start] " + m);
 const die = (m) => { console.error("[start] " + m); process.exit(1); };
 let EXTRA_PATH = []; // dlltool location found by preflight; consumed by cargoEnv.
 
+function binLocked(p) {
+  // Windows refuses to open a running executable for writing (sharing violation),
+  // so this probes whether another Solomni instance still holds the binary.
+  // POSIX has no such lock, so it simply reports false there.
+  if (!fs.existsSync(p)) return false;
+  try {
+    const fd = fs.openSync(p, "r+");
+    fs.closeSync(fd);
+    return false;
+  } catch (e) {
+    return true;
+  }
+}
+
 function envPath(env) {
   // Windows env keys are case-insensitive but Node keeps them verbatim: the system
   // key is usually "Path". Writing env.PATH alongside it creates a DUPLICATE key,
@@ -415,9 +429,18 @@ function run(cargo) {
   // Always invoke cargo: it decides what is stale in ~a second. Skipping the build
   // when a binary already existed made the launcher run outdated binaries after
   // source changes.
+  if (binLocked(BIN)) {
+    log("binary is held by a running Solomni instance - cannot rebuild, starting it as-is.");
+    log("close the other window/session to pick up source changes.");
+    run(cargo);
+    return;
+  }
   log(fs.existsSync(BIN) ? "checking build..." : "binary not found, building (first run is slow)...");
   const args = RELEASE ? ["build", "--release"] : ["build"];
   const b = spawnSync(cargo, args, { cwd: ROOT, env: cargoEnv(cargo), stdio: "inherit" });
-  if (b.status !== 0) die("build failed");
+  if (b.status !== 0) die("build failed (is solomni running in another window? close it and retry)");
+
+  // Rebuild may have replaced the file the lock probe checked; re-verify before use.
+  if (!fs.existsSync(BIN)) die("build reported success but no binary at " + path.relative(ROOT, BIN));
   run(cargo);
 })();
