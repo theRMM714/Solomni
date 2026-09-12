@@ -32,6 +32,32 @@ impl Registry {
             .unwrap_or_default()
     }
 
+    /// 保存回核心私有区；Unix 侧强制 0600（密钥明文，只有属主可读）。
+    pub fn save(&self, path: &Path) -> Result<(), String> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        let text = serde_yaml::to_string(self).map_err(|e| e.to_string())?;
+        std::fs::write(path, text).map_err(|e| e.to_string())?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+                .map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    }
+
+    /// 展示用行：永不包含密钥。
+    pub fn display_lines(&self) -> Vec<String> {
+        let mut lines = Vec::new();
+        for (id, p) in &self.providers {
+            let mark = if self.default.as_deref() == Some(id.as_str()) { "（默认）" } else { "" };
+            lines.push(format!("{}{}  {}  模型：{}", id, mark, p.base_url, if p.models.is_empty() { "—".to_string() } else { p.models.join(",") }));
+        }
+        lines
+    }
+
     /// 路由一个模块的供应商 id：模块当前选择 > 清单默认 > 产品全局默认。
     /// 返回 None = 没有任何可用通道（如实告知，不静默造）。
 // 待接入：供应商路由：协作/直连模式按此选通道（联动 module.rs 的 model.config.yaml 读取）

@@ -3,12 +3,12 @@
 
 use crate::envelope::{self, Verb};
 use crate::model::{Chat, Msg};
+use serde::Deserialize;
 use std::collections::BTreeMap;
 
 /// 讨论轮次上限（超限交用户裁决——上限必生效）。
 pub const MAX_ROUNDS: usize = 6;
-// 待接入：验收 fail 后的定向返工循环（联动 Execution::review）。
-#[allow(dead_code)]
+/// 返工次数上限（超限交用户裁决）。
 pub const MAX_REWORK: usize = 2;
 
 pub struct Member<'a> {
@@ -35,6 +35,8 @@ pub struct Discussion<'a> {
     /// 用户对 ask 的回答在此队列：先入先转达。
     pub pending_user_answers: Vec<String>,
     pub closed: bool,
+    /// yes,allow：授权小组自裁细节——ask 不中止轮转，留档待办。
+    pub allow_autonomy: bool,
 }
 
 impl<'a> Discussion<'a> {
@@ -67,20 +69,19 @@ impl<'a> Discussion<'a> {
             self.pending_user_answers.remove(0);
             self.transcript.push(format!("[用户] {}", ans));
         }
-        // 先清空旧同意票再重新投票（同意是针对方案的，转录变化后以最新表态为准）。
+        // 同意是针对方案的：转录变化后以本轮最新表态为准。
         for m in self.members.iter_mut() {
             if m.present {
                 m.agreed = false;
             }
         }
         let snapshot = self.transcript.clone();
-        let mut anyone_left = false;
         for i in 0..self.members.len() {
-            let (system, id, present, agreed_before) = {
+            let (system, id) = {
                 let m = &self.members[i];
-                (m.system.clone(), m.id.to_string(), m.present, m.agreed)
+                (m.system.clone(), m.id.to_string())
             };
-            if !present {
+            if !self.members[i].present {
                 continue;
             }
             let msgs = vec![
@@ -98,17 +99,16 @@ impl<'a> Discussion<'a> {
                 Verb::Leave => m.present = false,
                 Verb::Agree => m.agreed = true,
                 Verb::Ask => {
+                    if self.allow_autonomy {
+                        self.transcript
+                            .push("[core] 已授权小组自裁：该问题留档，不逐轮请示。".to_string());
+                        continue;
+                    }
                     return TurnOut::AskUser { member: id, question: text };
                 }
                 Verb::Say => {}
             }
-            if m.agreed || !m.present {
-                continue;
-            }
-            let _ = agreed_before;
-            anyone_left = true;
         }
-        let _ = anyone_left;
         self.round += 1;
         if self.members.iter().filter(|m| m.present).all(|m| m.agreed) {
             self.closed = true;
@@ -135,7 +135,7 @@ impl<'a> Discussion<'a> {
         self.transcript.push(line);
     }
 
-    /// 全员同意后：核心整理（本骨架版把整理也交给一个会话——真实版由核心提示词完成）。
+    /// 全员同意后：核心整理——总结讨论，为每个留下的成员写执行任务提示词。
     pub fn synthesize(&self, core_chat: &mut dyn Chat) -> String {
         let msgs = vec![
             Msg::system("你是核心编排者。总结讨论，为每个留下的成员写一份执行任务提示词，输出任务清单。"),
@@ -145,12 +145,25 @@ impl<'a> Discussion<'a> {
     }
 }
 
-/// 执行与验收：成员按任务干活并回报；核心对照回报产出 pass/fail 清单。
+/// 验收清单条目：核心输出的结构化核对结果。
+#[derive(Debug, Clone, Deserialize)]
+pub struct CheckItem {
+    pub item: String,
+    pub status: String,
+    #[serde(default)]
+    pub evidence: Option<String>,
+    #[serde(default)]
+    pub reason: Option<String>,
+}
+
+/// 执行与验收：成员按任务干活并回报；核心对照回报产出结构化清单。
 pub struct Execution {
     pub reports: BTreeMap<String, String>,
-    pub checklist: String,
-    // 待接入：返工计数（联动 MAX_REWORK 上限裁决）。
-    #[allow(dead_code)]
+    /// 验收原始输出（解析失败时如实呈现）。
+    pub checklist_raw: String,
+    /// 结构化清单；空 = 解析失败（all_pass 保守判否）。
+    pub items: Vec<CheckItem>,
+    /// 已返工次数。
     pub rework: usize,
 }
 
@@ -172,10 +185,10 @@ impl Execution {
             let reply = envelope::parse(&raw);
             reports.insert(m.id.to_string(), reply.text);
         }
-        Execution { reports, checklist: String::new(), rework: 0 }
+        Execution { reports, checklist_raw: String::new(), items: Vec::new(), rework: 0 }
     }
 
-    /// 验收：核心对照方案逐项核对（本骨架版由核心会话完成，输出清单文本）。
+    /// 验收：核心对照方案逐项核对，输出结构化 pass/fail 清单。
     pub fn review(&mut self, core_chat: &mut dyn Chat, plan: &str) {
         let mut body = String::from("== 方案 ==\n");
         body.push_str(plan);
@@ -183,13 +196,39 @@ impl Execution {
         for (id, r) in &self.reports {
             body.push_str(&format!("[{}] {}\n", id, r));
         }
-        body.push_str("\n逐项核对，输出 pass/fail 清单：每项 {item, status, evidence/reason}。");
+        body.push_str("\n逐项核对，只输出 JSON 数组：每项 {\"item\":\"方案条目\",\"status\":\"pass|fail\",\"evidence\":\"对应回报\",\"reason\":\"fail 时给差距与归属\"}。");
         let msgs = vec![Msg::system("你是核心验收者。只核对，不替模块干活。"), Msg::user(body)];
-        self.checklist = core_chat.complete(&msgs);
+        let raw = core_chat.complete(&msgs);
+        self.items = envelope::extract_json_array(&raw)
+            .and_then(|arr| serde_json::from_str::<Vec<CheckItem>>(&arr).ok())
+            .unwrap_or_default();
+        self.checklist_raw = raw;
+    }
+
+    /// 返工：把验收差距发回各在组成员，重取回报（次数由调用方受 MAX_REWORK 约束）。
+    pub fn rerun(&mut self, members: &mut [Member], tasks: &str, review_text: &str) {
+        self.rework += 1;
+        for m in members.iter_mut() {
+            if !m.present {
+                continue;
+            }
+            let msgs = vec![
+                Msg::system(m.system.clone()),
+                Msg::user(format!(
+                    "== 你的任务 ==\n{}\n\n== 上次验收未通过 ==\n{}\n\n== 你的上次回报 ==\n{}\n\n请返工并以同一 JSON 格式再次回报。",
+                    tasks,
+                    review_text,
+                    self.reports.get(m.id).cloned().unwrap_or_default()
+                )),
+            ];
+            let raw = m.chat.complete(&msgs);
+            let reply = envelope::parse(&raw);
+            self.reports.insert(m.id.to_string(), reply.text);
+        }
     }
 
     pub fn all_pass(&self) -> bool {
-        // 骨架版判据：验收文本包含 "fail" 即视为有未通过项（真实版用结构化清单）。
-        !self.checklist.contains("fail")
+        // 清单为空（解析失败）= 保守判否；有清单则逐项全过才通过。
+        !self.items.is_empty() && self.items.iter().all(|i| i.status.eq_ignore_ascii_case("pass"))
     }
 }
