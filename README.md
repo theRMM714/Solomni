@@ -94,17 +94,22 @@ To build a cross-platform AI assistant where decentralization is the norm:
 ## 核心分层 · Core Layers
 
 ```
-呈现层  main.rs（终端转录中心；未来 Web 前端同源）
+组合根  main.rs（装配：创建适配器 → 注入 Core；除装配外无业务）
+           │
+呈现层  presentation/（cli.rs 终端转录中心；未来 Web 前端同源）
            │  只调门面、只渲染事件
-核心层  kernel.rs（Core 门面：三模式会话状态机 / 登记处操作端口 / 通道网关）
-           │  依赖倒置：编排只认 Chat 端口
-引擎层  orchestrator.rs（协作五阶段纯状态机）
-适配层  providers.rs（登记处）/ model.rs（Chat 端口的 HTTP 与假模型实现）
-装配层  module.rs（模块扫描）＋ envelope.rs（发言信封）
+核心层  core/（ports 端口定义 · 会话状态机 · 协作引擎 · 提示词渲染 · 登记处数据）
+           │  依赖倒置：core 定义抽象，不知道任何适配器存在
+适配层  adapters/（HTTP 通道 / 假模型 / yaml 登记处 / 模块目录扫描 / 提示词册加载）
 ```
 
-核心永不打印、永不读输入；前端只见 `Core` 门面、`SessionEvent` 事件流与 `pending` 介入请求。
+依赖箭头只允许 presentation → core ← adapters；「用哪个供应商」等选择策略在 core（解析链），
+「怎么建通道」等机制在 adapters。core 永不打印、永不读输入、不碰文件系统与网络；
+前端只见 `Core` 门面、`SessionEvent` 事件流与 `pending` 介入请求。
 密钥只进登记处，前端只见供应商 id。
+
+所有发给模型的提示词集中在 `prompts.yaml`（提示词册，`{{key}}` 占位）——提示词是最不稳定的文本，
+改文案只改册子，不改代码；渲染器是 core 纯逻辑，文件加载走适配层端口。
 
 ## 运行骨架 · Run the Skeleton
 

@@ -1,0 +1,75 @@
+# 核心提示词册：所有发给模型的提示词唯一来源。
+# 规则：{{占位符}} 由核心渲染层填充；缺键/缺变量在装配期或调用期报错（如实，不静默）。
+# 范围：只收 LLM 输入文案；界面通知（[建组]/[上限] 等）是呈现层文案，不在此册。
+
+core:
+  chat_protocol: "讨论约定：直接说事；需要用户决定时用 ask；不再参与用 leave；同意方案用 agree。"
+
+  discuss:
+    opener: |-
+      {{protocol}}
+
+      == 用户需求 ==
+      {{task}}
+    step: |-
+      == 讨论至今 ==
+      {{transcript}}
+
+      请继续。
+    autonomy_note: "[core] 已授权小组自裁：该问题留档，不逐轮请示。"
+
+  synthesize:
+    system: "你是核心编排者。总结讨论，为每个留下的成员写一份执行任务提示词，输出任务清单。"
+    user: "{{transcript}}"
+
+  execute:
+    user: |-
+      == 你的任务 ==
+      {{tasks}}
+
+      完成后必须以 JSON 回报：{"summary":"做了什么","changes":"动了什么","open":"遗留问题，没有则空"}
+
+  review:
+    system: "你是核心验收者。只核对，不替模块干活。"
+    user: |-
+      == 方案 ==
+      {{plan}}
+
+      == 回报 ==
+      {{reports}}
+
+      逐项核对，只输出 JSON 数组：每项 {"item":"方案条目","status":"pass|fail","evidence":"对应回报","reason":"fail 时给差距与归属"}。
+
+  rerun:
+    user: |-
+      == 你的任务 ==
+      {{tasks}}
+
+      == 上次验收未通过 ==
+      {{review}}
+
+      == 你的上次回报 ==
+      {{report}}
+
+      请返工并以同一 JSON 格式再次回报。
+
+  slate:
+    system: '你是核心编排者。根据需求从模块简述中代拟建组名单。只输出 JSON：{"picks":[{"id":"模块id","why":"一句入选理由"}]}。不选择不存在的模块。'
+    user: |-
+      == 模块简述 ==
+      {{modules}}
+
+      == 需求 ==
+      {{task}}
+
+  omni:
+    system: |-
+      你是全能助手，能力由以下模块职责拼装：
+      {{modules}}
+
+  module_system: "{{system}}"
+  module_system_tools: |-
+    {{system}}
+
+    本模块可用工具：
+    {{tools}}
