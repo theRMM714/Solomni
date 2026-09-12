@@ -30,6 +30,12 @@ const P_CARGO = path.join(ROOT, "platform", "windows", "cargo");
 // Release asset base for third-party redistributions (winlibs zip).
 // Placeholder repo: fill in once the release is published.
 const REL_BASE = "https://github.com/theRMM714/Solomni/releases/download/dependencies/";
+// Default mirror prefixes (community GitHub accelerators). Each is speed-tested like
+// every other candidate and only wins if actually fastest. Add via SOLOMNI_GH_MIRROR too.
+const DEFAULT_MIRRORS = ["https://ghfast.top", "https://gh-proxy.com"];
+// SHA256 of winlibs.zip. Empty = print hash on first successful download so you can
+// pin it here; once pinned, a mismatch kills the run (protects mirror downloads).
+const WINLIBS_SHA256 = "";
 
 const log = (m) => console.log("[start] " + m);
 const die = (m) => { console.error("[start] " + m); process.exit(1); };
@@ -143,6 +149,31 @@ function download(url, dest) {
   return fs.existsSync(dest) && fs.statSync(dest).size > 1048576;
 }
 
+function sha256(file) {
+  const r = spawnSync("certutil", ["-hashfile", file, "SHA256"], { encoding: "utf8" });
+  const m = ((r.stdout || "").match(/^[a-f0-9]{64}$/im) || [])[0];
+  return (m || "").toLowerCase();
+}
+
+function checkWinlibsHash(zip) {
+  // Third-party mirror paths must not silently serve altered content. Pin the
+  // upstream hash in WINLIBS_SHA256 once, then every download is verified.
+  if (!WINLIBS_SHA256) {
+    const h = sha256(zip);
+    if (h) {
+      log("sha256 " + h);
+      log("(pin this in start.js WINLIBS_SHA256 to verify future downloads)");
+    }
+    return;
+  }
+  const h = sha256(zip);
+  if (h !== WINLIBS_SHA256.toLowerCase()) {
+    try { fs.rmSync(zip, { force: true }); } catch (e) { /* remove bad archive */ }
+    die("sha256 mismatch (" + (h || "hash unavailable") + " != " + WINLIBS_SHA256 + ") - file deleted. Re-run to download again.");
+  }
+  log("sha256 verified");
+}
+
 function upstreamWinlibsUrl() {
   // Upstream asset names carry versions (winlibs-x86_64-posix-seh-gcc-...zip), so
   // latest/download/winlibs.zip is a guaranteed 404. Resolve the real name via the API.
@@ -167,8 +198,8 @@ function probeSpeed(url) {
     const cmd = IS_WIN ? curl : "curl";
     if (!fs.existsSync(cmd)) { resolve(0); return; }
     const p = spawn(cmd,
-      ["-sL", "-r", "0-1048575", "-o", require("os").devNull, "-w", "%{http_code} %{speed_download}",
-       "--connect-timeout", "4", "--max-time", "6", url],
+      ["-sL", "-r", "0-2097151", "-o", require("os").devNull, "-w", "%{http_code} %{speed_download}",
+       "--connect-timeout", "4", "--max-time", "8", url],
       { encoding: "utf8" });
     let out = "";
     p.stdout.on("data", (d) => { out += d; });
@@ -187,7 +218,7 @@ async function pickFastest(urls) {
   // only the tiebreak. Costs a few MB one-time vs a 261MB download.
   const curl = path.join(process.env.SystemRoot || "C:/Windows", "System32", "curl.exe");
   if (IS_WIN && !fs.existsSync(curl)) return urls[0];
-  log("speed-testing " + urls.length + " source(s), 1MB probe each...");
+  log("speed-testing " + urls.length + " source(s), 2MB probe each...");
   const speeds = [];
   for (const u of urls) {
     const s = await probeSpeed(u);
@@ -239,8 +270,11 @@ async function installWinlibs() {
   if (!fs.existsSync(zip)) {
     const rel = REL_BASE.replace(/\/+$/, ""); // tolerate trailing slash in REL_BASE / mirror vars
     const candidates = [rel + "/winlibs.zip"];
-    const mirror = process.env.SOLOMNI_GH_MIRROR || "";
-    if (mirror) candidates.push(mirror.replace(/\/+$/, "") + "/brechtsanders/winlibs_mingw/releases/latest/download/winlibs.zip");
+    for (const m of DEFAULT_MIRRORS) {
+      candidates.push(m.replace(/\/+$/, "") + "/" + rel.replace("https://github.com/", "") + "/winlibs.zip");
+    }
+    const extraMirror = (process.env.SOLOMNI_GH_MIRROR || "").replace(/\/+$/, "");
+    if (extraMirror) candidates.push(extraMirror + "/brechtsanders/winlibs_mingw/releases/latest/download/winlibs.zip");
     const upstream = await upstreamWinlibsUrl();
     if (upstream) candidates.push(upstream);
     const url = await pickFastest(candidates);
@@ -252,6 +286,7 @@ async function installWinlibs() {
       log("download still incomplete or corrupt - re-run to resume, or download manually:");
       die("  get a winlibs x86_64 seh zip from https://github.com/brechtsanders/winlibs_mingw/releases");
     }
+    checkWinlibsHash(zip);
   }
   log("extracting (takes a minute)...");
   const tar = spawnSync("tar", ["-xf", zip, "-C", TOOLS], { stdio: "ignore" });
