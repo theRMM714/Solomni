@@ -114,6 +114,21 @@ function runPS(cmd) {
   return spawnSync("powershell", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", cmd], { stdio: "inherit" });
 }
 
+function download(url, dest) {
+  // curl.exe ships with Windows (10 1803+); far faster than Invoke-WebRequest and
+  // renders a progress bar. PowerShell fallback for ancient systems.
+  const curl = path.join(process.env.SystemRoot || "C:/Windows", "System32", "curl.exe");
+  if (fs.existsSync(curl)) {
+    const r = spawnSync(curl, ["-L", "--fail", "--retry", "3", "--connect-timeout", "30", "-o", dest, url],
+      { stdio: "inherit" });
+    if (r.status === 0 && fs.existsSync(dest) && fs.statSync(dest).size > 1048576) return true;
+    try { fs.rmSync(dest, { force: true }); } catch (e) { /* drop partial file */ }
+    log("curl download failed (exit " + r.status + "); trying PowerShell fallback...");
+  }
+  runPS("Invoke-WebRequest -UseBasicParsing '" + url + "' -OutFile '" + dest + "'");
+  return fs.existsSync(dest) && fs.statSync(dest).size > 1048576;
+}
+
 async function installWinlibs() {
   // Portable MinGW-w64 (binutils provides dlltool.exe). Project-local: .tools/mingw64.
   // No admin, no system PATH change; delete the directory to remove.
@@ -126,14 +141,22 @@ async function installWinlibs() {
     "Write-Output $a.browser_download_url"
   ].join("; ");
   const got = spawnSync("powershell", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", q], { encoding: "utf8" });
-  const url = (got.stdout || "").trim();
+  let url = (got.stdout || "").trim();
   if (!/^https:/.test(url)) die("cannot resolve winlibs download url (network?). Use the manual options below.");
-  log("downloading " + url);
-  log("(about 200 MB; on a slow network prefer the manual MSYS2 option)");
   fs.mkdirSync(TOOLS, { recursive: true });
   const zip = path.join(TOOLS, "winlibs.zip");
-  runPS("Invoke-WebRequest -UseBasicParsing '" + url + "' -OutFile '" + zip + "'");
-  if (!fs.existsSync(zip)) die("download failed.");
+  if (fs.existsSync(zip) && fs.statSync(zip).size > 10485760) {
+    log("using existing " + zip + " (" + Math.round(fs.statSync(zip).size / 1048576) + " MB)");
+  } else {
+    const mirror = process.env.SOLOMNI_GH_MIRROR || "";
+    if (mirror) { log("using GitHub mirror prefix: " + mirror); url = mirror + url; }
+    log("downloading " + url);
+    log("(curl with progress; ~200 MB. Slow? set SOLOMNI_GH_MIRROR, or download the zip");
+    log(" manually in a browser and save it as .tools/winlibs.zip - the launcher will use it)");
+    if (!download(url, zip)) {
+      die("download failed. Manual: download the file above in a browser, save as .tools/winlibs.zip, re-run.");
+    }
+  }
   log("extracting (takes a minute)...");
   const tar = spawnSync("tar", ["-xf", zip, "-C", TOOLS], { stdio: "ignore" });
   if (tar.status !== 0) runPS("Expand-Archive -Force '" + zip + "' -DestinationPath '" + TOOLS + "'");
@@ -206,7 +229,8 @@ function run(cargo) {
         console.error("[start] manual alternatives:");
         console.error("  1) MSYS2: winget install MSYS2.MSYS2 ; pacman -S mingw-w64-x86_64-binutils ; add C:/msys64/mingw64/bin to PATH");
         console.error("  2) MSVC: install VS 2022 Build Tools (VC workload) ; rustup default stable-x86_64-pc-windows-msvc");
-        die("aborted.");
+        console.error("  3) Browser: download winlibs zip manually, save as .tools/winlibs.zip, re-run");
+        console.error("     (set SOLOMNI_GH_MIRROR to a GitHub mirror prefix to speed up auto-download)");
       }
     }
   }
