@@ -5,7 +5,7 @@ use serde::Deserialize;
 use std::path::{Path, PathBuf};
 
 /// module.yaml —— 打包契约。模块对世界的全部自我介绍。
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct ModuleManifest {
     pub id: String,
     pub brief: String,
@@ -18,8 +18,9 @@ pub struct ModuleManifest {
     pub model: ModelPrefs,
 }
 
-// 待接入：直连/协作建会话时按 prefer/provider 选模型（联动 providers.rs）。
-#[derive(Debug, Default, Deserialize)]
+// 模型偏好：直连/协作建会话时按 prefer/provider 选模型（联动 providers.rs）。
+// 预留字段：prefer 供多模型供应商下按用途选模型（实现期接入）。
+#[derive(Debug, Clone, Default, Deserialize)]
 #[allow(dead_code)]
 pub struct ModelPrefs {
     #[serde(default)]
@@ -29,7 +30,8 @@ pub struct ModelPrefs {
 }
 
 /// 一个已发现的模块 = 文件夹 + 清单。
-#[derive(Debug)]
+// 预留字段：root 供工具执行器定位模块工作区（工具接入期使用）。
+#[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub struct Module {
     pub manifest: ModuleManifest,

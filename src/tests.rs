@@ -1,7 +1,9 @@
 //! mock 测试：不依赖网络与真实密钥。假模型脚本化应答，全链路可重复。
+//! 覆盖三层：信封/登记处（适配层）、模块扫描（装配层）、协作引擎与核心会话（核心层）。
 
 use crate::envelope;
-use crate::model::{Chat, FakeChat, Msg};
+use crate::kernel::{Core, Pending, SessionEvent};
+use crate::model::{Chat, FakeChat};
 use crate::module;
 use crate::orchestrator::{Discussion, Execution, Member, TurnOut, MAX_ROUNDS};
 
@@ -43,14 +45,8 @@ fn envelope_extracts_json_from_prose() {
 fn providers_resolve_priority_chain() {
     use crate::providers::{Provider, Registry};
     let mut reg = Registry::default();
-    reg.providers.insert(
-        "a".into(),
-        Provider { kind: "llm".into(), base_url: "http://a".into(), api_key: "k-a".into(), models: vec![] },
-    );
-    reg.providers.insert(
-        "b".into(),
-        Provider { kind: "llm".into(), base_url: "http://b".into(), api_key: "k-b".into(), models: vec![] },
-    );
+    reg.providers.insert("a".into(), Provider { kind: "llm".into(), base_url: "http://a".into(), api_key: "k-a".into(), models: vec![] });
+    reg.providers.insert("b".into(), Provider { kind: "llm".into(), base_url: "http://b".into(), api_key: "k-b".into(), models: vec![] });
     reg.default = Some("b".into());
     // 模块当前选择 > 清单默认 > 全局默认。
     let (id, _) = reg.resolve(Some("a"), Some("b")).unwrap();
@@ -75,16 +71,10 @@ fn scan_accepts_valid_and_rejects_bad_with_reasons() {
     let _ = std::fs::remove_dir_all(&dir);
     let good = dir.join("research");
     std::fs::create_dir_all(&good).unwrap();
-    std::fs::write(
-        good.join("module.yaml"),
-        "id: research\nbrief: 调研与选型\nsystem: 你负责调研\ntools: []\n",
-    )
-    .unwrap();
-    // id 与文件夹名不一致 → 拒收。
+    std::fs::write(good.join("module.yaml"), "id: research\nbrief: 调研与选型\nsystem: 你负责调研\ntools: []\n").unwrap();
     let mismatch = dir.join("notes");
     std::fs::create_dir_all(&mismatch).unwrap();
     std::fs::write(mismatch.join("module.yaml"), "id: other\nbrief: x\nsystem: y\n").unwrap();
-    // 缺 yaml → 拒收。
     let empty = dir.join("ghost");
     std::fs::create_dir_all(&empty).unwrap();
 
@@ -97,64 +87,49 @@ fn scan_accepts_valid_and_rejects_bad_with_reasons() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-// ---- 协作五阶段：假模型全链路 ----
+// ---- 协作引擎：成员自有通道，假模型脚本驱动 ----
 
-fn three_member_discussion() -> (Discussion<'static>, Vec<FakeChat>, FakeChat) {
-    // 注：测试内用泄漏避免自引用生命周期；测试进程短暂，可接受。
-    let chats: Vec<FakeChat> = vec![
-        FakeChat::new(vec![FakeChat::say("a：我先说。"), FakeChat::verb_json("agree", "同意")]),
-        FakeChat::new(vec![FakeChat::say("b：我补充。"), FakeChat::verb_json("agree", "同意")]),
-        FakeChat::new(vec![FakeChat::say("c：我没意见。"), FakeChat::verb_json("agree", "同意")]),
-    ];
-    let boxed: Vec<Box<dyn Chat>> = chats.into_iter().map(|c| Box::new(c) as Box<dyn Chat>).collect();
-    let leaked: Vec<&'static mut dyn Chat> = boxed
+fn scripted_discussion(scripts: Vec<Vec<String>>, allow: bool) -> Discussion {
+    let ids = ["a", "b", "c"];
+    let members: Vec<Member> = scripts
         .into_iter()
-        .map(|b| Box::leak(b) as &'static mut dyn Chat)
+        .enumerate()
+        .map(|(i, s)| Member::new(ids[i], format!("{} 的职责", ids[i]), Box::new(FakeChat::new(s))))
         .collect();
-    let mut members: Vec<Member> = Vec::new();
-    for (i, chat) in leaked.into_iter().enumerate() {
-        let id = match i {
-            0 => "a",
-            1 => "b",
-            _ => "c",
-        };
-        members.push(Member { id, system: format!("{} 的职责", id), chat, present: true, agreed: false });
-    }
-    let disc = Discussion { members, transcript: Vec::new(), round: 0, pending_user_answers: Vec::new(), closed: false, allow_autonomy: false };
-    (disc, Vec::new(), FakeChat::new(vec![]))
+    Discussion::new(members, allow)
 }
 
 #[test]
 fn discussion_full_flow_open_step_done() {
-    let (mut disc, _keep, mut core) = three_member_discussion();
+    let mut disc = scripted_discussion(
+        vec![
+            vec![FakeChat::say("a：我先说。"), FakeChat::verb_json("agree", "同意")],
+            vec![FakeChat::say("b：我补充。"), FakeChat::verb_json("agree", "同意")],
+            vec![FakeChat::say("c：我没意见。"), FakeChat::verb_json("agree", "同意")],
+        ],
+        false,
+    );
     disc.open("调研并选型", "讨论约定：说事、ask、leave、agree。");
     assert_eq!(disc.transcript.len(), 3);
-    // 一轮之后全员同意 → Done。
     match disc.step() {
         TurnOut::Done => {}
         _ => panic!("应在一轮后收敛"),
     }
+    let mut core = FakeChat::new(vec![FakeChat::say("== 任务清单 ==")]);
     let plan = disc.synthesize(&mut core);
     assert!(!plan.is_empty());
 }
 
 #[test]
 fn ask_pauses_and_user_answer_enters_transcript() {
-    // c 在 step 轮 ask：轮转中止，等用户回答；回答并入后 c 再同意。
-    let chats: Vec<FakeChat> = vec![
-        FakeChat::new(vec![FakeChat::say("a：我先说。"), FakeChat::verb_json("agree", "同意")]),
-        FakeChat::new(vec![FakeChat::say("b：我补充。"), FakeChat::verb_json("agree", "同意")]),
-        FakeChat::new(vec![FakeChat::say("c：我先看看。"), FakeChat::verb_json("ask", "选哪个库？"), FakeChat::verb_json("agree", "同意")]),
-    ];
-    let boxed: Vec<Box<dyn Chat>> = chats.into_iter().map(|c| Box::new(c) as Box<dyn Chat>).collect();
-    let leaked: Vec<&'static mut dyn Chat> = boxed.into_iter().map(|b| Box::leak(b) as &'static mut dyn Chat).collect();
-    let ids = ["a", "b", "c"];
-    let mut members: Vec<Member> = leaked
-        .into_iter()
-        .enumerate()
-        .map(|(i, chat)| Member { id: ids[i], system: format!("{} 的职责", ids[i]), chat, present: true, agreed: false })
-        .collect();
-    let mut disc = Discussion { members, transcript: Vec::new(), round: 0, pending_user_answers: Vec::new(), closed: false, allow_autonomy: false };
+    let mut disc = scripted_discussion(
+        vec![
+            vec![FakeChat::say("a：我先说。"), FakeChat::verb_json("agree", "同意")],
+            vec![FakeChat::say("b：我补充。"), FakeChat::verb_json("agree", "同意")],
+            vec![FakeChat::say("c：我先看看。"), FakeChat::verb_json("ask", "选哪个库？"), FakeChat::verb_json("agree", "同意")],
+        ],
+        false,
+    );
     disc.open("任务", "约定");
     match disc.step() {
         TurnOut::AskUser { member, question } => {
@@ -163,7 +138,6 @@ fn ask_pauses_and_user_answer_enters_transcript() {
         }
         _ => panic!("应中止于请教"),
     }
-    // 用户回答并入转录，下一轮 c 同意 → 全员同意。
     disc.pending_user_answers.push("用 sqlite".into());
     match disc.step() {
         TurnOut::Done => {}
@@ -174,21 +148,14 @@ fn ask_pauses_and_user_answer_enters_transcript() {
 
 #[test]
 fn leave_removes_member_from_consensus() {
-    // b 退场后只剩 a、c 投票。
-    let chats: Vec<FakeChat> = vec![
-        FakeChat::new(vec![FakeChat::say("a：我先说。"), FakeChat::verb_json("agree", "同意")]),
-        FakeChat::new(vec![FakeChat::verb_json("leave", "帮不上忙"), FakeChat::verb_json("agree", "不该被问到")]),
-        FakeChat::new(vec![FakeChat::say("c：没意见。"), FakeChat::verb_json("agree", "同意")]),
-    ];
-    let boxed: Vec<Box<dyn Chat>> = chats.into_iter().map(|c| Box::new(c) as Box<dyn Chat>).collect();
-    let leaked: Vec<&'static mut dyn Chat> = boxed.into_iter().map(|b| Box::leak(b) as &'static mut dyn Chat).collect();
-    let ids = ["a", "b", "c"];
-    let mut members: Vec<Member> = leaked
-        .into_iter()
-        .enumerate()
-        .map(|(i, chat)| Member { id: ids[i], system: format!("{} 的职责", ids[i]), chat, present: true, agreed: false })
-        .collect();
-    let mut disc = Discussion { members, transcript: Vec::new(), round: 0, pending_user_answers: Vec::new(), closed: false, allow_autonomy: false };
+    let mut disc = scripted_discussion(
+        vec![
+            vec![FakeChat::say("a：我先说。"), FakeChat::verb_json("agree", "同意")],
+            vec![FakeChat::verb_json("leave", "帮不上忙"), FakeChat::verb_json("agree", "不该被问到")],
+            vec![FakeChat::say("c：没意见。"), FakeChat::verb_json("agree", "同意")],
+        ],
+        false,
+    );
     disc.open("任务", "约定");
     match disc.step() {
         TurnOut::Done => {}
@@ -198,52 +165,16 @@ fn leave_removes_member_from_consensus() {
 }
 
 #[test]
-fn execution_and_review_pass() {
-    let (mut disc, _keep, _core) = three_member_discussion();
-    disc.open("任务", "约定");
-    let _ = disc.step();
-    // 核心假模型：整理输出任务文本 → 验收输出结构化 pass 清单。
-    let mut core = FakeChat::new(vec![
-        FakeChat::say("== 任务清单 =="),
-        "say|[\n  {\"item\":\"回报与方案一致\",\"status\":\"pass\",\"evidence\":\"成员回报一致\"}\n]".to_string(),
-    ]);
-    let plan = disc.synthesize(&mut core);
-    let mut exec = Execution::run(&mut disc.members, &plan);
-    exec.review(&mut core, &plan);
-    assert!(exec.all_pass());
-    assert_eq!(exec.rework, 0);
-}
-
-#[test]
-fn review_parse_failure_is_conservative() {
-    let (_disc, _keep, _core) = three_member_discussion();
-    // 核心假模型：验收环节输出一个 say 对象（非清单）→ 解析失败 → 保守判否。
-    let mut core = FakeChat::new(vec![FakeChat::say("不是清单")]);
-    let mut exec = Execution { reports: Default::default(), checklist_raw: String::new(), items: Vec::new(), rework: 0 };
-    exec.review(&mut core, "方案");
-    assert!(!exec.all_pass());
-    assert!(exec.items.is_empty());
-}
-
-#[test]
 fn autonomy_ask_does_not_pause() {
-    // c 在 step 轮 ask：allow_autonomy = true 时不中止，留档后继续收敛。
-    let chats: Vec<FakeChat> = vec![
-        FakeChat::new(vec![FakeChat::say("a：我先说。"), FakeChat::verb_json("agree", "同意")]),
-        FakeChat::new(vec![FakeChat::say("b：我补充。"), FakeChat::verb_json("agree", "同意")]),
-        FakeChat::new(vec![FakeChat::say("c：我先看看。"), FakeChat::verb_json("ask", "选哪个库？"), FakeChat::verb_json("agree", "同意")]),
-    ];
-    let boxed: Vec<Box<dyn Chat>> = chats.into_iter().map(|c| Box::new(c) as Box<dyn Chat>).collect();
-    let leaked: Vec<&'static mut dyn Chat> = boxed.into_iter().map(|b| Box::leak(b) as &'static mut dyn Chat).collect();
-    let ids = ["a", "b", "c"];
-    let mut members: Vec<Member> = leaked
-        .into_iter()
-        .enumerate()
-        .map(|(i, chat)| Member { id: ids[i], system: format!("{} 的职责", ids[i]), chat, present: true, agreed: false })
-        .collect();
-    let mut disc = Discussion { members, transcript: Vec::new(), round: 0, pending_user_answers: Vec::new(), closed: false, allow_autonomy: true };
+    let mut disc = scripted_discussion(
+        vec![
+            vec![FakeChat::say("a：我先说。"), FakeChat::verb_json("agree", "同意")],
+            vec![FakeChat::say("b：我补充。"), FakeChat::verb_json("agree", "同意")],
+            vec![FakeChat::say("c：我先看看。"), FakeChat::verb_json("ask", "选哪个库？"), FakeChat::verb_json("agree", "同意")],
+        ],
+        true,
+    );
     disc.open("任务", "约定");
-    // 自裁模式下 ask 留档不中止；下一轮 c 投同意后收敛。
     let mut guard = 0;
     loop {
         match disc.step() {
@@ -259,20 +190,13 @@ fn autonomy_ask_does_not_pause() {
 
 #[test]
 fn round_cap_is_enforced() {
-    // 全员永远 say，不 agree：应在轮次上限后终止。
-    let chats: Vec<FakeChat> = vec![
-        FakeChat::new((0..MAX_ROUNDS * 2 + 4).map(|i| FakeChat::say(&format!("a {}", i))).collect()),
-        FakeChat::new((0..MAX_ROUNDS * 2 + 4).map(|i| FakeChat::say(&format!("b {}", i))).collect()),
-    ];
-    let boxed: Vec<Box<dyn Chat>> = chats.into_iter().map(|c| Box::new(c) as Box<dyn Chat>).collect();
-    let leaked: Vec<&'static mut dyn Chat> = boxed.into_iter().map(|b| Box::leak(b) as &'static mut dyn Chat).collect();
-    let ids = ["a", "b"];
-    let mut members: Vec<Member> = leaked
-        .into_iter()
-        .enumerate()
-        .map(|(i, chat)| Member { id: ids[i], system: format!("{} 的职责", ids[i]), chat, present: true, agreed: false })
-        .collect();
-    let mut disc = Discussion { members, transcript: Vec::new(), round: 0, pending_user_answers: Vec::new(), closed: false, allow_autonomy: false };
+    let mut disc = scripted_discussion(
+        vec![
+            vec!["say|a".to_string(); MAX_ROUNDS * 2 + 4],
+            vec!["say|b".to_string(); MAX_ROUNDS * 2 + 4],
+        ],
+        false,
+    );
     disc.open("任务", "约定");
     let mut guard = 0;
     loop {
@@ -285,4 +209,120 @@ fn round_cap_is_enforced() {
         }
     }
     assert!(disc.round > MAX_ROUNDS);
+}
+
+#[test]
+fn execution_review_and_rework_cap() {
+    let mut disc = scripted_discussion(
+        vec![
+            vec![FakeChat::say("a：我先说。"), FakeChat::verb_json("agree", "同意")],
+            vec![FakeChat::say("b：我补充。"), FakeChat::verb_json("agree", "同意")],
+        ],
+        false,
+    );
+    disc.open("任务", "约定");
+    let _ = disc.step();
+    let mut core = FakeChat::new(vec![
+        FakeChat::say("== 任务清单 =="),
+        "say|[{\"item\":\"回报与方案一致\",\"status\":\"pass\",\"evidence\":\"一致\"}]".to_string(),
+    ]);
+    let plan = disc.synthesize(&mut core);
+    let mut exec = Execution::run(disc.members.as_mut_slice(), &plan);
+    exec.review(&mut core, &plan);
+    assert!(exec.all_pass());
+    assert_eq!(exec.rework, 0);
+}
+
+#[test]
+fn review_parse_failure_is_conservative() {
+    let mut core = FakeChat::new(vec![FakeChat::say("不是清单")]);
+    let mut exec = Execution { reports: Default::default(), checklist_raw: String::new(), items: Vec::new(), rework: 0 };
+    exec.review(&mut core, "方案");
+    assert!(!exec.all_pass());
+    assert!(exec.items.is_empty());
+}
+
+// ---- 核心层：会话状态机 / 通道回落 / 登记处端口 ----
+
+/// 临时产品根：modules/research + 空登记处（无供应商 → 全部走假模型回落）。
+fn temp_root(tag: &str) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!("solomni-core-{}-{}", tag, std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let m = dir.join("modules").join("research");
+    std::fs::create_dir_all(&m).unwrap();
+    std::fs::write(m.join("module.yaml"), "id: research\nbrief: 调研与选型\nsystem: 你负责调研\ntools: []\n").unwrap();
+    dir
+}
+
+fn has_notice(events: &[SessionEvent], kw: &str) -> bool {
+    events.iter().any(|e| matches!(e, SessionEvent::Notice(n) if n.contains(kw)))
+}
+
+#[test]
+fn core_direct_falls_back_with_honest_notice() {
+    let root = temp_root("direct");
+    let core = Core::open(root.clone());
+    let mut s = core.start_direct("research").unwrap();
+    // 无供应商：回落假模型并如实告知。
+    let events = s.open();
+    assert!(has_notice(&events, "假模型"));
+    match s.say("你好") {
+        SessionEvent::Transcript(lines) => assert!(lines[0].contains("[research]")),
+        _ => panic!("直连应吐转录事件"),
+    }
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn core_collab_demo_runs_full_five_stages() {
+    let root = temp_root("collab");
+    let core = Core::open(root.clone());
+    let mut s = core.start_collab("research").unwrap();
+    let ev = s.set_task(&core, "调研数据库");
+    assert!(has_notice(&ev, "[建组]"));
+    assert!(matches!(s.pending, Some(Pending::ConfirmBegin)));
+
+    let ev = s.begin(&core, false);
+    // 成员回落假模型（告知）→ 讨论 → 整理 → 执行 → 验收（保守判否）→ 返工至超限 → 裁决。
+    assert!(has_notice(&ev, "假模型"));
+    assert!(ev.iter().any(|e| matches!(e, SessionEvent::DiscussionDone { .. })));
+    assert!(ev.iter().any(|e| matches!(e, SessionEvent::Plan(_))));
+    assert!(ev.iter().any(|e| matches!(e, SessionEvent::Report { .. })));
+    assert!(ev.iter().any(|e| matches!(e, SessionEvent::Review { .. })));
+    assert!(ev.iter().any(|e| matches!(e, SessionEvent::Delivery { ok: false, over_rework: true })));
+    assert!(matches!(ev.last(), Some(SessionEvent::Ended)));
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn core_collab_delegated_fails_gracefully_without_channel() {
+    let root = temp_root("delegate");
+    let core = Core::open(root.clone());
+    let mut s = core.start_collab("?").unwrap();
+    let ev = s.set_task(&core, "调研数据库");
+    // 代拟需要核心通道；假模型不会输出名单 JSON → 优雅失败并结束（不静默造名单）。
+    assert!(has_notice(&ev, "代拟失败"));
+    assert!(matches!(ev.last(), Some(SessionEvent::Ended)));
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn core_provider_lifecycle_and_key_never_leaks_to_view() {
+    let root = temp_root("provider");
+    let mut core = Core::open(root.clone());
+    core.provider_upsert("p1", "http://x", "secret-key-1", &["m1".to_string()]).unwrap();
+    core.provider_upsert("p2", "http://y", "secret-key-2", &[]).unwrap();
+    // 列表视图永不包含密钥。
+    for line in core.provider_list() {
+        assert!(!line.contains("secret-key"), "列表泄露密钥：{}", line);
+    }
+    // 首入者自动默认；改默认；移除。
+    assert_eq!(core.provider_default(), Some("p1".into()));
+    assert!(core.provider_set_default("p2").unwrap());
+    assert_eq!(core.provider_default(), Some("p2".into()));
+    assert!(core.provider_remove("p1").unwrap());
+    assert!(!core.provider_remove("p1").unwrap());
+    // 持久化落在产品根相对锚点。
+    assert!(root.join(".home").join("providers.yaml").exists());
+    let _ = std::fs::remove_dir_all(&root);
 }

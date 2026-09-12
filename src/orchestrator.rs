@@ -1,8 +1,9 @@
-//! 多模块协作：建组 → 讨论 → 整理 → 执行 → 验收。
+//! 协作引擎：建组 → 讨论 → 整理 → 执行 → 验收（纯状态机，不做输入输出）。
 //! 状态机只认信封动词；发言内容永远是数据，不是指令。
+//! 上层经 core.rs 的会话状态机驱动；成员拥有自己的会话通道（Chat 端口对象）。
 
 use crate::envelope::{self, Verb};
-use crate::model::{Chat, Msg};
+use crate::model::{BoxedChat, Msg};
 use serde::Deserialize;
 use std::collections::BTreeMap;
 
@@ -11,25 +12,31 @@ pub const MAX_ROUNDS: usize = 6;
 /// 返工次数上限（超限交用户裁决）。
 pub const MAX_REWORK: usize = 2;
 
-pub struct Member<'a> {
-    pub id: &'a str,
+pub struct Member {
+    pub id: String,
     pub system: String,
-    pub chat: &'a mut dyn Chat,
+    pub chat: BoxedChat,
     pub present: bool,
     pub agreed: bool,
+}
+
+impl Member {
+    pub fn new(id: &str, system: String, chat: BoxedChat) -> Member {
+        Member { id: id.to_string(), system, chat, present: true, agreed: false }
+    }
 }
 
 pub enum TurnOut {
     /// 一轮正常走完，转达给用户过目。
     Round,
-    /// 有模块请教用户：核心中止轮转，等用户回答。
+    /// 有模块请教用户：轮转中止，等用户回答。
     AskUser { member: String, question: String },
     /// 留在组的成员全部同意 → 讨论终止。
     Done,
 }
 
-pub struct Discussion<'a> {
-    pub members: Vec<Member<'a>>,
+pub struct Discussion {
+    pub members: Vec<Member>,
     pub transcript: Vec<String>,
     pub round: usize,
     /// 用户对 ask 的回答在此队列：先入先转达。
@@ -39,7 +46,11 @@ pub struct Discussion<'a> {
     pub allow_autonomy: bool,
 }
 
-impl<'a> Discussion<'a> {
+impl Discussion {
+    pub fn new(members: Vec<Member>, allow_autonomy: bool) -> Discussion {
+        Discussion { members, transcript: Vec::new(), round: 0, pending_user_answers: Vec::new(), closed: false, allow_autonomy }
+    }
+
     /// 首轮提示词：聊天约定 + 各模块职责 + 用户需求。
     /// 聊天约定是文本不是信封的一部分，可自由演化。
     pub fn open(&mut self, task: &str, chat_protocol: &str) {
@@ -49,7 +60,7 @@ impl<'a> Discussion<'a> {
         for i in 0..self.members.len() {
             let (system, id) = {
                 let m = &self.members[i];
-                (m.system.clone(), m.id.to_string())
+                (m.system.clone(), m.id.clone())
             };
             let msgs = vec![Msg::system(system), Msg::user(opener.clone())];
             let raw = self.members[i].chat.complete(&msgs);
@@ -79,7 +90,7 @@ impl<'a> Discussion<'a> {
         for i in 0..self.members.len() {
             let (system, id) = {
                 let m = &self.members[i];
-                (m.system.clone(), m.id.to_string())
+                (m.system.clone(), m.id.clone())
             };
             if !self.members[i].present {
                 continue;
@@ -183,7 +194,7 @@ impl Execution {
             ];
             let raw = m.chat.complete(&msgs);
             let reply = envelope::parse(&raw);
-            reports.insert(m.id.to_string(), reply.text);
+            reports.insert(m.id.clone(), reply.text);
         }
         Execution { reports, checklist_raw: String::new(), items: Vec::new(), rework: 0 }
     }
@@ -218,12 +229,12 @@ impl Execution {
                     "== 你的任务 ==\n{}\n\n== 上次验收未通过 ==\n{}\n\n== 你的上次回报 ==\n{}\n\n请返工并以同一 JSON 格式再次回报。",
                     tasks,
                     review_text,
-                    self.reports.get(m.id).cloned().unwrap_or_default()
+                    self.reports.get(&m.id).cloned().unwrap_or_default()
                 )),
             ];
             let raw = m.chat.complete(&msgs);
             let reply = envelope::parse(&raw);
-            self.reports.insert(m.id.to_string(), reply.text);
+            self.reports.insert(m.id.clone(), reply.text);
         }
     }
 
@@ -232,3 +243,5 @@ impl Execution {
         !self.items.is_empty() && self.items.iter().all(|i| i.status.eq_ignore_ascii_case("pass"))
     }
 }
+
+use crate::model::Chat;

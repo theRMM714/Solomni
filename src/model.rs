@@ -3,12 +3,10 @@
 
 #[cfg(test)]
 use crate::envelope;
-use crate::providers::Provider;
 
 /// 一条消息：role = system / user / assistant。
-// role/content 由会话拼装使用；complete() 消费整段消息列表。
+/// role/content 由会话拼装使用；complete() 消费整段消息列表。
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub struct Msg {
     pub role: String,
     pub content: String,
@@ -23,18 +21,23 @@ impl Msg {
 /// 一次补全的原始文本输出。
 pub type Raw = String;
 
-/// Chat 会话：核心与一个智能体（或自身整理环节）的对话通道。
+/// 拥有所有权的会话通道（装箱端口对象）。
+pub type BoxedChat = Box<dyn Chat>;
+
+/// Chat 会话端口：核心与一个智能体（或自身整理环节）的对话通道。
+/// 上层（编排/会话/呈现）只认此端口；具体实现见 HttpChat / FakeChat。
 pub trait Chat {
     fn complete(&mut self, messages: &[Msg]) -> Raw;
 }
 
-/// 真实通道：OpenAI 兼容 /chat/completions。密钥只在出站调用里使用，永不落提示词/日志。
-pub struct HttpChat<'a> {
-    pub provider: &'a Provider,
+/// 真实通道：OpenAI 兼容 /chat/completions。
+/// 拥有供应商副本（含密钥）；密钥只在出站调用里使用，永不落提示词/日志。
+pub struct HttpChat {
+    pub provider: crate::providers::Provider,
     pub model: String,
 }
 
-impl<'a> Chat for HttpChat<'a> {
+impl Chat for HttpChat {
     fn complete(&mut self, messages: &[Msg]) -> Raw {
         // 请求体：messages 数组；响应取 choices[0].message.content。
         // 用极小 JSON 拼装（依赖最小化）；消息内容统一做转义。
@@ -50,12 +53,9 @@ impl<'a> Chat for HttpChat<'a> {
             body.push('}');
         }
         body.push_str("]}");
-        let out = ureq_do(
-            &format!("{}/chat/completions", self.provider.base_url.trim_end_matches('/')),
-            &self.provider.api_key,
-            &body,
-        );
-        out.unwrap_or_else(|e| format!("{{\"type\":\"ask\",\"text\":\"模型调用失败：{}\"}}", e))
+        let url = format!("{}/chat/completions", self.provider.base_url.trim_end_matches('/'));
+        ureq_do(&url, &self.provider.api_key, &body)
+            .unwrap_or_else(|e| format!("{{\"type\":\"ask\",\"text\":\"模型调用失败：{}\"}}", e))
     }
 }
 
@@ -67,21 +67,21 @@ fn ureq_do(url: &str, key: &str, body: &str) -> Result<String, String> {
         .build();
     let resp = agent
         .post(url)
-    .set("Authorization", &format!("Bearer {}", key))
-    .set("Content-Type", "application/json")
-    .send_string(body)
-    .map_err(|e| {
-        // 红线：错误信息永不携带密钥（ureq 的 Bad Header 等错误会回显请求头）。
-        let redact = |s: String| s.replace(key, "***");
-        match e {
-            ureq::Error::Status(code, resp) => {
-                let snippet = resp.into_string().unwrap_or_default();
-                let snippet: String = snippet.chars().take(200).collect();
-                redact(format!("供应商返回 {}：{}", code, snippet))
+        .set("Authorization", &format!("Bearer {}", key))
+        .set("Content-Type", "application/json")
+        .send_string(body)
+        .map_err(|e| {
+            // 红线：错误信息永不携带密钥（ureq 的 Bad Header 等错误会回显请求头）。
+            let redact = |s: String| s.replace(key, "***");
+            match e {
+                ureq::Error::Status(code, resp) => {
+                    let snippet = resp.into_string().unwrap_or_default();
+                    let snippet: String = snippet.chars().take(200).collect();
+                    redact(format!("供应商返回 {}：{}", code, snippet))
+                }
+                other => redact(format!("网络错误：{}", other)),
             }
-            other => redact(format!("网络错误：{}", other)),
-        }
-    })?;
+        })?;
     let text = resp.into_string().map_err(|e| e.to_string())?;
     let v: serde_json::Value = serde_json::from_str(&text)
         .map_err(|e| format!("响应不是 JSON：{}", e))?;
@@ -94,13 +94,12 @@ fn ureq_do(url: &str, key: &str, body: &str) -> Result<String, String> {
         .ok_or_else(|| "响应缺少 choices[0].message.content".to_string())
 }
 
-#[allow(dead_code)]
 fn json_str(s: &str) -> String {
     serde_json::to_string(s).unwrap_or_else(|_| "\"?\"".into())
 }
 
-/// 假模型：确定性脚本应答，用于全链路 mock 测试（不依赖网络与真实密钥）。
-/// 每个应答对应一个信封动词，按调用顺序弹出。
+/// 假模型：确定性脚本应答，用于全链路 mock 测试与无供应商演示（不依赖网络与真实密钥）。
+/// 每个应答对应一个信封动词，按调用顺序弹出；脚本为空时默认同意。
 pub struct FakeChat {
     pub script: Vec<String>,
     pub calls: Vec<Vec<Msg>>,
