@@ -120,6 +120,18 @@ cargo test           # mock 测试：信封/登记处/扫描/协作全链路（�
 
 未配置供应商时自动使用内置假模型演示流程——如实告知，不静默。
 
+### 启动层序 · Launcher
+
+```
+node start.js [-webUI]     # Windows 用 start.bat，macOS/Linux 用 ./start.sh
+```
+
+启动层序自动完成工具链就绪与构建，全部安装在项目目录内（`platform/`、`.tools/`），不写系统盘、不改系统 PATH：
+
+- **Rust 缺失** → 征得同意后用 rustup 装进 `platform/<平台>/`（`--no-modify-path`）
+- **Windows 构建需 dlltool**（rust#140704）→ 固定路径探测 + 试运行校验；缺失时征得同意后从 Release 镜像下载便携 MinGW（winlibs）到 `.tools/mingw64`
+- **下载测速** → 候选源（本仓库 Release → `SOLOMNI_GH_MIRROR` → 官方源）HEAD 测速取最快；zip 结构校验，半截下载启动时检出即删即重下
+
 ## 文档 · Documents
 
 - 产品与运行流程（三种模式、协作五阶段）：[PRODUCT.md](PRODUCT.md)
