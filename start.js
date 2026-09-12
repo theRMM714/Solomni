@@ -143,21 +143,43 @@ function download(url, dest) {
   return fs.existsSync(dest) && fs.statSync(dest).size > 1048576;
 }
 
+function upstreamWinlibsUrl() {
+  // Upstream asset names carry versions (winlibs-x86_64-posix-seh-gcc-...zip), so
+  // latest/download/winlibs.zip is a guaranteed 404. Resolve the real name via the API.
+  const q = [
+    "$ErrorActionPreference = 'Stop'",
+    "$r = Invoke-RestMethod 'https://api.github.com/repos/brechtsanders/winlibs_mingw/releases/latest'",
+    "$a = $r.assets | Where-Object { $_.name -match 'x86_64' -and $_.name -match 'seh' -and $_.name -match '[.]zip$' -and $_.name -notmatch 'llvm' } | Select-Object -First 1",
+    "if (-not $a) { $a = $r.assets | Where-Object { $_.name -match 'x86_64' -and $_.name -match '[.]zip$' } | Select-Object -First 1 }",
+    "Write-Output $a.browser_download_url"
+  ].join("; ");
+  const got = spawnSync("powershell", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", q], { encoding: "utf8" });
+  const url = (got.stdout || "").trim();
+  return /^https:/.test(url) ? url : null;
+}
+
 function pickFastest(urls) {
-  // Race HEAD requests (curl, 3s cap). First 2xx wins; ties go to listed order
-  // (our release mirror first). All fail -> return the last (upstream) URL and
-  // let the real download attempt surface the error.
+  // Probe each candidate with a 1-byte ranged GET (curl -L: GitHub assets 302 to a
+  // CDN host, so HEAD-without-redirect always looks dead). First REACHABLE candidate
+  // in listed order wins - order encodes preference (own Release > mirror > upstream),
+  // raw latency ranking would just shuffle onto the slowest working host. All fail ->
+  // return the first (so the real download attempt surfaces the exact error).
   return new Promise((resolve) => {
-    let left = urls.length;
+    let i = 0;
     const curl = path.join(process.env.SystemRoot || "C:/Windows", "System32", "curl.exe");
     const hasCurl = IS_WIN ? fs.existsSync(curl) : true;
-    const done = (u) => { if (u) resolve(u); else if (--left === 0) resolve(urls[urls.length - 1]); };
-    for (const u of urls) {
-      if (!hasCurl) { done(null); continue; }
+    const next = () => {
+      if (i >= urls.length || !hasCurl) { resolve(urls[0]); return; }
+      const u = urls[i++];
       const cmd = IS_WIN ? curl : "curl";
-      const r = spawnSync(cmd, ["-sI", "-o", "/dev/null", "-w", "%{http_code}", "--connect-timeout", "3", "--max-time", "3", u], { encoding: "utf8" });
-      done(/^2/.test((r.stdout || "").trim()) ? u : null);
-    }
+      const r = spawnSync(cmd,
+        ["-sL", "-r", "0-0", "-o", "/dev/null", "-w", "%{http_code}", "--connect-timeout", "4", "--max-time", "8", u],
+        { encoding: "utf8" });
+      if (/^2/.test((r.stdout || "").trim())) { resolve(u); return; }
+      log("source unreachable (" + (r.stdout || "").trim() + "): " + u);
+      next();
+    };
+    next();
   });
 }
 
@@ -192,7 +214,8 @@ async function installWinlibs() {
     const candidates = [rel + "/winlibs.zip"];
     const mirror = process.env.SOLOMNI_GH_MIRROR || "";
     if (mirror) candidates.push(mirror.replace(/\/+$/, "") + "/brechtsanders/winlibs_mingw/releases/latest/download/winlibs.zip");
-    candidates.push("https://github.com/brechtsanders/winlibs_mingw/releases/latest/download/winlibs.zip");
+    const upstream = await upstreamWinlibsUrl();
+    if (upstream) candidates.push(upstream);
     const url = await pickFastest(candidates);
     log("downloading " + url);
     log("(curl with progress; ~200 MB. Slow? set SOLOMNI_GH_MIRROR, or download the zip");
@@ -268,8 +291,10 @@ function run(cargo) {
       log("dlltool working: " + dd);
     } else {
       if (dd) log("dlltool found but not usable (cannot run its assembler); falling back to portable MinGW.");
-      console.error("[start] dlltool.exe NOT found at any fixed location (rust-lang/rust#140704:");
-      console.error("[start] windows-sys raw-dylib needs dlltool; rust-mingw on this toolchain lacks it).");
+      else {
+        console.error("[start] dlltool.exe NOT found at any fixed location (rust-lang/rust#140704:");
+        console.error("[start] windows-sys raw-dylib needs dlltool; rust-mingw on this toolchain lacks it).");
+      }
       const ans = await ask("Install portable MinGW now? winlibs ~200MB into project .tools, no admin, no system changes [y/N] ");
       if (ans.trim().toLowerCase() === "y") {
         await installWinlibs();
