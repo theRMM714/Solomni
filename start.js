@@ -29,7 +29,7 @@ const P_RUSTUP = path.join(ROOT, "platform", "windows", "rustup");
 const P_CARGO = path.join(ROOT, "platform", "windows", "cargo");
 // Release asset base for third-party redistributions (winlibs zip).
 // Placeholder repo: fill in once the release is published.
-const REL_BASE = "https://github.com/OWNER/solomni/releases/latest/download";
+const REL_BASE = "https://github.com/theRMM714/Solomni/releases/download/dependencies/";
 
 const log = (m) => console.log("[start] " + m);
 const die = (m) => { console.error("[start] " + m); process.exit(1); };
@@ -188,9 +188,10 @@ async function installWinlibs() {
     }
   }
   if (!fs.existsSync(zip)) {
-    const candidates = [REL_BASE + "/winlibs.zip"];
+    const rel = REL_BASE.replace(/\/+$/, ""); // tolerate trailing slash in REL_BASE / mirror vars
+    const candidates = [rel + "/winlibs.zip"];
     const mirror = process.env.SOLOMNI_GH_MIRROR || "";
-    if (mirror) candidates.push(mirror + "/brechtsanders/winlibs_mingw/releases/latest/download/winlibs.zip");
+    if (mirror) candidates.push(mirror.replace(/\/+$/, "") + "/brechtsanders/winlibs_mingw/releases/latest/download/winlibs.zip");
     candidates.push("https://github.com/brechtsanders/winlibs_mingw/releases/latest/download/winlibs.zip");
     const url = await pickFastest(candidates);
     log("downloading " + url);
