@@ -3,6 +3,7 @@
 //! 本层不做装配决策；new 出来的实例由 main 组合根注入 Core。
 
 pub mod fs_modules;
+pub mod log;
 pub mod http_chat;
 pub mod fake_chat;
 pub mod yaml_prompts;
@@ -12,3 +13,4 @@ pub use fs_modules::FsModules;
 pub use http_chat::HttpGateway;
 pub use yaml_prompts::YamlPrompts;
 pub use yaml_registry::YamlRegistryStore;
+pub use log::FileLog;

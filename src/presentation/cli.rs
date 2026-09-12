@@ -1,10 +1,7 @@
 //! 终端转录中心：解析命令 → 调核心门面 → 渲染事件流。
-//! 只做解析与渲染，不做业务决策；未来 Web 前端与它并列、共用同一门面与事件词汇。
+//! 只做解析与渲染，不做业务决策；Web 前端与它并列、共用同一门面与事件词汇。
 
-use crate::core::collab::CollabSession;
-use crate::core::driven;
-use crate::core::session::{DirectSession, OmniSession};
-use crate::core::{Core, Pending, SessionEvent};
+use crate::core::{CollabStep, Core, Pending, SessionEvent, SessionId};
 use std::io::Write;
 
 pub fn run(mut core: Core) {
@@ -24,13 +21,13 @@ pub fn run(mut core: Core) {
         let cmd = parts.next().unwrap_or("").to_string();
         let arg = parts.next().unwrap_or("").trim().to_string();
         match cmd.as_str() {
-            "direct" if !arg.is_empty() => direct_flow(&core, &arg),
+            "direct" if !arg.is_empty() => direct_flow(&mut core, &arg),
             "collab" if !arg.is_empty() => match core.start_collab(&arg) {
-                Ok(s) => collab_flow(&core, s),
+                Ok(sid) => collab_flow(&mut core, sid),
                 Err(e) => println!("[错误] {}", e),
             },
             "omni" => match core.start_omni(&arg) {
-                Ok(s) => omni_flow(s),
+                Ok((sid, open)) => omni_flow(&mut core, sid, open),
                 Err(e) => println!("[错误] {}", e),
             },
             "provider" => provider_flow(&mut core, &arg),
@@ -65,7 +62,7 @@ fn print_menu(core: &Core) {
     println!("命令：direct <id> | collab <id>[,<id>…] | collab ?（代拟） | omni [id…] | provider list|add|key|rm|default | rescan | exit");
 }
 
-// ---------- 事件渲染：CLI 与未来 Web 前端同源 ----------
+// ---------- 事件渲染：CLI 与 Web 前端同源 ----------
 
 fn render(events: &[SessionEvent]) {
     for e in events {
@@ -111,64 +108,92 @@ fn render(events: &[SessionEvent]) {
 
 // ---------- 模式一：直连 ----------
 
-fn direct_flow(core: &Core, id: &str) {
-    let mut s: DirectSession = match core.start_direct(id) {
-        Ok(s) => s,
+fn direct_flow(core: &mut Core, id: &str) {
+    let (sid, open) = match core.start_direct(id) {
+        Ok(x) => x,
         Err(e) => {
             println!("[错误] {}", e);
             return;
         }
     };
-    for e in s.open() {
-        render(std::slice::from_ref(&e));
-    }
+    render(&open);
     println!("（直连 {} —— 输入消息，空行结束会话）", id);
     loop {
         let say = prompt("你>");
         if say.is_empty() {
             break;
         }
-        render(std::slice::from_ref(&s.say(&say)));
+        match core.direct_say(sid, &say) {
+            Ok(events) => render(&events),
+            Err(e) => {
+                println!("[错误] {}", e);
+                break;
+            }
+        }
     }
 }
 
 // ---------- 模式三：全能 ----------
 
-fn omni_flow(mut s: OmniSession) {
-    for e in s.open() {
-        render(std::slice::from_ref(&e));
-    }
+fn omni_flow(core: &mut Core, sid: SessionId, open: Vec<SessionEvent>) {
+    render(&open);
     println!("[全能] 会话开始（空行结束）。");
     loop {
         let say = prompt("你>");
         if say.is_empty() {
             break;
         }
-        render(std::slice::from_ref(&s.say(&say)));
+        match core.omni_say(sid, &say) {
+            Ok(events) => render(&events),
+            Err(e) => {
+                println!("[错误] {}", e);
+                break;
+            }
+        }
     }
 }
 
-// ---------- 模式二：协作（经门面驱动，端口对象不出 Core） ----------
+// ---------- 模式二：协作（按核心 pending 驱动） ----------
 
-fn collab_flow(core: &Core, mut s: CollabSession) {
+fn collab_flow(core: &mut Core, sid: SessionId) {
     let task = prompt("需求>");
-    render(&driven::set_task(core, &mut s, &task));
+    match core.collab_continue(sid, CollabStep::SetTask, &task) {
+        Ok(events) => render(&events),
+        Err(e) => {
+            println!("[错误] {}", e);
+            return;
+        }
+    }
 
     // 名单确认（代拟路径）。
-    if matches!(s.pending, Some(Pending::ConfirmSlate)) {
-        let ok = prompt("确认名单？（yes 开始 / 其他取消）").eq_ignore_ascii_case("yes");
-        render(&driven::confirm_slate(core, &mut s, ok));
+    if matches!(core.collab_pending(sid), Ok(Some(Pending::ConfirmSlate))) {
+        let ok = prompt("确认名单？（yes 开始 / 其他取消）");
+        match core.collab_continue(sid, CollabStep::ConfirmSlate, &ok) {
+            Ok(events) => render(&events),
+            Err(e) => println!("[错误] {}", e),
+        }
     }
     // 开始确认。
-    if matches!(s.pending, Some(Pending::ConfirmBegin)) {
+    if matches!(core.collab_pending(sid), Ok(Some(Pending::ConfirmBegin))) {
         let ans = prompt("开始讨论？（yes / yes,allow：授权小组自裁细节）");
-        render(&driven::begin(core, &mut s, ans.contains("allow")));
+        match core.collab_continue(sid, CollabStep::Begin, &ans) {
+            Ok(events) => render(&events),
+            Err(e) => println!("[错误] {}", e),
+        }
     }
     // ask 循环（每次回答后可能接新的请教）。
-    while let Some(Pending::Ask { member, question }) = s.pending.clone() {
-        println!("[请教] {}：{}", member, question);
-        let ans = prompt("你的回答（回车 = 无补充，继续）>");
-        render(&s.answer(&ans));
+    while matches!(core.collab_pending(sid), Ok(Some(Pending::Ask { .. }))) {
+        if let Ok(Some(Pending::Ask { member, question })) = core.collab_pending(sid) {
+            println!("[请教] {}：{}", member, question);
+            let ans = prompt("你的回答（回车 = 无补充，继续）>");
+            match core.collab_continue(sid, CollabStep::Answer, &ans) {
+                Ok(events) => render(&events),
+                Err(e) => {
+                    println!("[错误] {}", e);
+                    break;
+                }
+            }
+        }
     }
 }
 

@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#16181d">
+<title>Solomni · 转录中心</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div id="app">
+  <!-- 顶栏：品牌 + 状态 + 侧栏开关（移动端） -->
+  <header class="topbar">
+    <button id="btn-drawer" class="icon-btn only-mobile" aria-label="打开侧栏">☰</button>
+    <div class="brand">Solomni <span class="brand-sub">转录中心</span></div>
+    <div id="conn-state" class="conn-state" title="服务器连接状态"><span class="dot dot-ok"></span><span id="conn-text">已连接</span></div>
+  </header>
+
+  <div class="layout">
+    <!-- 侧栏：模块公地 + 供应商登记处 -->
+    <aside id="sidebar" class="sidebar">
+      <section class="panel">
+        <h2>模块公地</h2>
+        <div id="module-list" class="module-list"></div>
+        <div id="rejected" class="rejected"></div>
+      </section>
+      <section class="panel">
+        <h2>供应商登记处</h2>
+        <div id="provider-list" class="provider-list"></div>
+        <form id="provider-form" class="provider-form">
+          <input id="pv-id" placeholder="id" autocomplete="off">
+          <input id="pv-url" placeholder="base_url" autocomplete="off">
+          <input id="pv-key" type="password" placeholder="api_key（只入登记处）" autocomplete="off">
+          <input id="pv-models" placeholder="模型，逗号分隔" autocomplete="off">
+          <button type="submit" class="btn btn-block">登记 / 更新</button>
+        </form>
+      </section>
+      <p class="sidebar-note">密钥只进登记处，任何界面不显示、不转发。</p>
+    </aside>
+    <div id="drawer-mask" class="drawer-mask"></div>
+
+    <!-- 主区：会话标签 + 转录流 + 输入区 -->
+    <main class="main">
+      <nav id="tabs" class="tabs" aria-label="会话标签"></nav>
+      <div id="stream" class="stream" aria-live="polite"></div>
+      <div id="gate" class="gate"></div>
+      <div class="composer">
+        <textarea id="input" rows="1" placeholder="输入消息…（Enter 发送，Shift+Enter 换行）"></textarea>
+        <button id="btn-send" class="btn btn-primary">发送</button>
+      </div>
+    </main>
+  </div>
+</div>
+<script src="/app.js"></script>
+</body>
+</html>

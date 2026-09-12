@@ -1,5 +1,6 @@
 //! 核心测试：全内存装配（InMemoryStore + VecSource + ScriptGateway），不碰文件系统。
 //! 测试里的组合根 = 内存适配器；core 的可测性正是端口化的直接收益。
+//! Web 阶段适配：适配器以 Arc 注入；会话经中心 id 收发；SharedScript 对齐真实通道时序。
 
 use crate::adapters::fake_chat::FakeChat;
 use crate::core::engine::{Discussion, Member, TurnOut, MAX_ROUNDS};
@@ -7,29 +8,29 @@ use crate::core::module::{Module, ModuleManifest};
 use crate::core::ports::{BoxedChat, Chat, ChatGateway, ModuleSource, Msg, PromptSource, ProviderStore};
 use crate::core::prompt::{render, Prompts};
 use crate::core::providers::{Provider, Registry};
-use crate::core::session::{DirectSession, OmniSession};
-use crate::core::{driven, Core};
+use crate::core::{CollabStep, Core, Pending, SessionEvent};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 
 // ---------- 内存适配器（测试组合根） ----------
 
 struct InMemoryStore {
-    reg: std::cell::RefCell<Registry>,
+    reg: Mutex<Registry>,
 }
 
 impl InMemoryStore {
     fn new() -> InMemoryStore {
-        InMemoryStore { reg: std::cell::RefCell::new(Registry::default()) }
+        InMemoryStore { reg: Mutex::new(Registry::default()) }
     }
 }
 
 impl ProviderStore for InMemoryStore {
     fn load(&self) -> Result<Registry, String> {
-        Ok(self.reg.borrow().clone())
+        Ok(self.reg.lock().expect("锁").clone())
     }
     fn save(&self, r: &Registry) -> Result<(), String> {
-        *self.reg.borrow_mut() = r.clone();
+        *self.reg.lock().expect("锁") = r.clone();
         Ok(())
     }
 }
@@ -61,15 +62,15 @@ fn scripted(s: Vec<String>) -> BoxedChat {
 }
 
 /// 共享脚本队列：多条核心响应按 complete 次序弹出（末条重复兜底）。
-/// 与真实通道时序一致：建通道时不消费，调用时才消费。
-#[derive(Clone)]
+/// 与真实通道时序一致：建通道时不消费，调用时才消费。Arc 分身共享（网关与测试两侧）。
+/// 共享脚本队列（Mutex 版：需跨线程 Send+Sync）。
 struct SharedScript {
-    q: std::rc::Rc<std::cell::RefCell<Vec<String>>>,
+    q: Arc<Mutex<Vec<String>>>,
 }
 
 impl Chat for SharedScript {
     fn complete(&mut self, _messages: &[Msg]) -> String {
-        let mut q = self.q.borrow_mut();
+        let mut q = self.q.lock().expect("脚本队列锁");
         if q.len() > 1 {
             q.remove(0)
         } else {
@@ -78,10 +79,10 @@ impl Chat for SharedScript {
     }
 }
 
-/// 脚本网关：按模块 id 回放各自脚本；核心通道走独立脚本队列。
+/// 脚本网关：按模块 id 回放各自脚本；核心通道走共享队列。
 struct ScriptGateway {
     member: BTreeMap<String, Vec<String>>,
-    core: std::rc::Rc<std::cell::RefCell<Vec<String>>>,
+    core: Arc<Mutex<Vec<String>>>,
 }
 
 impl ChatGateway for ScriptGateway {
@@ -92,10 +93,7 @@ impl ChatGateway for ScriptGateway {
         (scripted(script), None)
     }
     fn core_channel(&self, _p: Option<&Provider>) -> (BoxedChat, bool) {
-        (
-            Box::new(SharedScript { q: std::rc::Rc::clone(&self.core) }),
-            false,
-        )
+        (Box::new(SharedScript { q: Arc::clone(&self.core) }), false)
     }
 }
 
@@ -112,16 +110,17 @@ fn test_prompts() -> Prompts {
 
 fn core_with(modules: Vec<Module>, gateway: ScriptGateway) -> Core {
     Core::new(
-        Box::new(InMemoryStore::new()),
-        Box::new(VecSource(modules)),
-        Box::new(gateway),
+        Arc::new(InMemoryStore::new()),
+        Arc::new(VecSource(modules)),
+        Arc::new(gateway),
         Box::new(TestPrompts),
+        Arc::new(crate::core::ports::NoopLog),
     )
     .expect("内存装配不应失败")
 }
 
 fn gw(member: BTreeMap<String, Vec<String>>, core: Vec<String>) -> ScriptGateway {
-    ScriptGateway { member, core: std::rc::Rc::new(std::cell::RefCell::new(core)) }
+    ScriptGateway { member, core: Arc::new(Mutex::new(core)) }
 }
 
 // ---------- 信封 ----------
@@ -190,6 +189,9 @@ fn provider_lifecycle_and_key_never_leaks_to_view() {
     assert_eq!(core.provider_default().as_deref(), Some("p1"));
     for line in core.provider_list() {
         assert!(!line.contains("sk-密钥XYZ"), "视图出现密钥：{}", line);
+    }
+    for v in core.provider_views() {
+        assert!(!format!("{:?}", v).contains("sk-密钥XYZ"));
     }
     assert!(core.provider_remove("p1").unwrap());
     assert!(core.provider_default().is_none());
@@ -320,31 +322,31 @@ fn review_parse_failure_is_conservative_fail() {
     assert!(!exec.all_pass(), "解析失败必须保守判否");
 }
 
-// ---------- Core 门面（内存组合根） ----------
+// ---------- Core 门面：会话中心（内存组合根） ----------
 
 #[test]
 fn core_direct_seeds_system_prompt() {
     let mut member = BTreeMap::new();
     member.insert("a".to_string(), vec!["{\"type\":\"say\",\"text\":\"你好\"}".to_string()]);
-    let core = core_with(vec![module_of("a")], gw(member, vec!["[]".into()]));
-    let mut s: DirectSession = core.start_direct("a").unwrap();
+    let mut core = core_with(vec![module_of("a")], gw(member, vec!["[]".into()]));
+    let (sid, _open) = core.start_direct("a").unwrap();
     // 回归：直连历史首条必须是职责提示词（system），曾经丢失过。
-    let h = s.history();
+    let h = core.direct_history(sid).unwrap();
     assert_eq!(h[0].role, "system");
     assert!(h[0].content.contains("你负责a"));
-    let reply = s.say("在吗");
-    match reply {
-        crate::core::SessionEvent::Transcript(lines) => assert!(lines[0].contains("[a]")),
+    let events = core.direct_say(sid, "在吗").unwrap();
+    match &events[0] {
+        SessionEvent::Transcript(lines) => assert!(lines[0].contains("[a]")),
         _ => panic!("应为转录事件"),
     }
 }
 
 #[test]
 fn core_omni_merges_system_blocks() {
-    let core = core_with(vec![module_of("a"), module_of("b")], gw(BTreeMap::new(), vec!["[]".into()]));
-    let s: OmniSession = core.start_omni("").unwrap();
+    let mut core = core_with(vec![module_of("a"), module_of("b")], gw(BTreeMap::new(), vec!["[]".into()]));
+    let (sid, _open) = core.start_omni("").unwrap();
     // 回归：全能首条 system 必须并入全部模块职责，且经册子渲染。
-    let h = s.history();
+    let h = core.omni_history(sid).unwrap();
     assert_eq!(h[0].role, "system");
     assert!(h[0].content.contains("你负责a") && h[0].content.contains("你负责b"));
 }
@@ -356,17 +358,18 @@ fn core_collab_demo_runs_full_five_stages() {
         "{\"type\":\"say\",\"text\":\"我先说\"}".to_string(),
         "{\"type\":\"agree\",\"text\":\"同意方案\"}".to_string(),
     ]);
-    // 核心通道脚本：整理方案 → 验收清单（pass）。
-    let core = core_with(vec![module_of("a")], gw(member, vec![
+    let mut core = core_with(vec![module_of("a")], gw(member, vec![
         "{\"type\":\"say\",\"text\":\"方案：A 做 X\"}".to_string(),
         "[{\"item\":\"做 X\",\"status\":\"pass\",\"evidence\":\"已做\"}]".to_string(),
     ]));
-    let mut s = core.start_collab("a").unwrap();
-    let _ = driven::set_task(&core, &mut s, "做个东西");
-    assert!(matches!(s.pending, Some(crate::core::Pending::ConfirmBegin)));
-    let events = driven::begin(&core, &mut s, false);
-    assert!(events.iter().any(|e| matches!(e, crate::core::SessionEvent::Plan(_))));
-    assert!(events.iter().any(|e| matches!(e, crate::core::SessionEvent::Delivery { ok: true, .. })));
+    let sid = core.start_collab("a").unwrap();
+    let _events = core.collab_continue(sid, CollabStep::SetTask, "做个东西").unwrap();
+    assert!(matches!(core.collab_pending(sid), Ok(Some(Pending::ConfirmBegin))));
+    let events = core.collab_continue(sid, CollabStep::Begin, "yes").unwrap();
+    assert!(events.iter().any(|e| matches!(e, SessionEvent::Plan(_))));
+    assert!(events.iter().any(|e| matches!(e, SessionEvent::Delivery { ok: true, .. })));
+    // 终结会话已被中心回收（再查询挂起状态应报无此会话）。
+    assert!(core.collab_pending(sid).is_err());
 }
 
 #[test]
@@ -376,32 +379,32 @@ fn core_collab_delegated_slate_flow() {
         "{\"type\":\"say\",\"text\":\"我先说\"}".to_string(),
         "{\"type\":\"agree\",\"text\":\"同意\"}".to_string(),
     ]);
-    let core = core_with(vec![module_of("a")], gw(member, vec![
+    let mut core = core_with(vec![module_of("a")], gw(member, vec![
         // 代拟 → 整理 → 验收。
         "{\"picks\":[{\"id\":\"a\",\"why\":\"对口\"}]}".to_string(),
         "{\"type\":\"say\",\"text\":\"方案：A 做 X\"}".to_string(),
         "[{\"item\":\"做 X\",\"status\":\"pass\"}]".to_string(),
     ]));
-    let mut s = core.start_collab("?").unwrap();
-    let ev = driven::set_task(&core, &mut s, "做个东西");
-    assert!(matches!(s.pending, Some(crate::core::Pending::ConfirmSlate)));
-    assert!(ev.iter().any(|e| matches!(e, crate::core::SessionEvent::Transcript(l) if l.iter().any(|x| x.contains("[代拟]")))));
-    let _ = driven::confirm_slate(&core, &mut s, true);
-    assert!(matches!(s.pending, Some(crate::core::Pending::ConfirmBegin)));
-    let events = driven::begin(&core, &mut s, false);
-    assert!(events.iter().any(|e| matches!(e, crate::core::SessionEvent::Delivery { ok: true, .. })));
+    let sid = core.start_collab("?").unwrap();
+    let ev = core.collab_continue(sid, CollabStep::SetTask, "做个东西").unwrap();
+    assert!(matches!(core.collab_pending(sid), Ok(Some(Pending::ConfirmSlate))));
+    assert!(ev.iter().any(|e| matches!(e, SessionEvent::Transcript(l) if l.iter().any(|x| x.contains("[代拟]")))));
+    let _ = core.collab_continue(sid, CollabStep::ConfirmSlate, "yes").unwrap();
+    assert!(matches!(core.collab_pending(sid), Ok(Some(Pending::ConfirmBegin))));
+    let events = core.collab_continue(sid, CollabStep::Begin, "yes").unwrap();
+    assert!(events.iter().any(|e| matches!(e, SessionEvent::Delivery { ok: true, .. })));
 }
 
 #[test]
 fn core_collab_slate_rejects_unknown_id() {
-    let core = core_with(vec![module_of("a")], gw(BTreeMap::new(), vec![
+    let mut core = core_with(vec![module_of("a")], gw(BTreeMap::new(), vec![
         "{\"picks\":[{\"id\":\"ghost\",\"why\":\"不存在\"},{\"id\":\"a\",\"why\":\"对口\"}]}".to_string(),
         "{\"type\":\"say\",\"text\":\"方案\"}".to_string(),
         "[{\"item\":\"x\",\"status\":\"pass\"}]".to_string(),
     ]));
-    let mut s = core.start_collab("?").unwrap();
-    let ev = driven::set_task(&core, &mut s, "任务");
-    assert!(ev.iter().any(|e| matches!(e, crate::core::SessionEvent::Notice(n) if n.contains("ghost 不存在"))));
+    let sid = core.start_collab("?").unwrap();
+    let ev = core.collab_continue(sid, CollabStep::SetTask, "任务").unwrap();
+    assert!(ev.iter().any(|e| matches!(e, SessionEvent::Notice(n) if n.contains("ghost 不存在"))));
 }
 
 // ---------- 平衡提取器 ----------
