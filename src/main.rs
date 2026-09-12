@@ -49,11 +49,14 @@ fn main() {
             break;
         }
         let line = line.trim().to_string();
-        match line.split_once(' ') {
-            Some(("direct", id)) => direct_mode(&roster, id.trim()),
-            Some(("collab", ids)) => collab_mode(&roster, ids, &registry),
-            Some(("omni", _)) => omni_mode(&roster),
-            _ if line == "exit" => break,
+        let mut parts = line.splitn(2, ' ');
+        let cmd = parts.next().unwrap_or("");
+        let arg = parts.next().unwrap_or("").trim();
+        match cmd {
+            "direct" if !arg.is_empty() => direct_mode(&roster, arg),
+            "collab" if !arg.is_empty() => collab_mode(&roster, arg, &registry),
+            "omni" => omni_mode(&roster),
+            "exit" => break,
             _ => continue,
         }
     }
