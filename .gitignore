@@ -1,33 +1,22 @@
 # ==================================================================
-# Solomni —— 只提交源码与文档；工具链/SDK/缓存/会话记录一律不入库
-#
-# git 是 Windows 侧与 WSL 侧之间唯一的桥：
-#    clone 这个仓库只会拿到 assistant/ 源码 + 文档；
-#    Flutter/Dart SDK、Pub 缓存、会话日志两边各自本地管理，绝不进 git 历史。
+# Solomni —— 只提交源码与文档；工具链/构建产物/会话记录一律不入库
 # ==================================================================
 
-# ---- 工具链 / SDK / 缓存 / 配置快照（体积巨大；归 platform/<os> 平台目录）----
-# 每平台一套：dart-sdk、flutter、pub-cache、dart-home、tmp、dart_tool/<模块>/ 快照。
-# Windows 与 WSL 共用仓库互不覆盖；两平台交替使用由 bin/flutter 秒级换入快照。
-/platform/
-/.tools/
-/.home/
-/logs/
+# ---- Rust 构建产物 ----
+/target/
 
-# ---- 会话 / 私密记录 ----
+# ---- 运行记录 ----
+/logs/
 /session.jsonl
 
-# ---- 模块私有数据（密钥/历史/布局等，不可再生）----
+# ---- 模块私有数据（密钥/历史/缓存等，不可再生）----
 # 数据归模块，落在各模块自己文件夹内的 userdata/。永不入库。
 # 警告：切勿 git clean -fdx 清掉 userdata——里面是真实用户数据，不随源码走。
 **/userdata/
 
-# ---- Dart / Flutter 构建产物（assistant 内各 package）----
-**/.dart_tool/
-**/build/
-**/.flutter-plugins
-**/.flutter-plugins-dependencies
-**/.packages
+# ---- 本地工具区（运行时环境，不入库）----
+/.tools/
+/.home/
 
 # ---- IDE / 编辑器 ----
 .idea/
