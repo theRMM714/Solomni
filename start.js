@@ -30,9 +30,6 @@ const P_CARGO = path.join(ROOT, "platform", "windows", "cargo");
 // Release asset base for third-party redistributions (winlibs zip).
 // Placeholder repo: fill in once the release is published.
 const REL_BASE = "https://github.com/theRMM714/Solomni/releases/download/dependencies/";
-// Default mirror prefixes (community GitHub accelerators). Each is speed-tested like
-// every other candidate and only wins if actually fastest. Add via SOLOMNI_GH_MIRROR too.
-const DEFAULT_MIRRORS = ["https://ghfast.top", "https://gh-proxy.com"];
 // SHA256 of winlibs.zip. Empty = print hash on first successful download so you can
 // pin it here; once pinned, a mismatch kills the run (protects mirror downloads).
 const WINLIBS_SHA256 = "";
@@ -147,6 +144,20 @@ function download(url, dest) {
   }
   runPS("Invoke-WebRequest -UseBasicParsing '" + url + "' -OutFile '" + dest + "'");
   return fs.existsSync(dest) && fs.statSync(dest).size > 1048576;
+}
+
+function mirrorVariants(ghUrl) {
+  // Mirror URL shapes differ, so translate per mirror: TUNA rewrites the path
+  // (github-release/<owner>/<repo>/<tag>/<file>); fastgit is a plain host swap.
+  // Unreachable or unmirrored sources just fail the speed test and are skipped,
+  // so listing extra variants is always safe.
+  const m = ghUrl.match(/^https:\/\/github\.com\/([^\/]+)\/([^\/]+)\/releases\/download\/([^\/]+)\/(.+)$/);
+  if (!m) return [];
+  const owner = m[1], repo = m[2], tag = m[3], file = m[4];
+  return [
+    "https://mirrors.tuna.tsinghua.edu.cn/github-release/" + owner + "/" + repo + "/" + tag + "/" + file,
+    "https://hub.fastgit.org/" + owner + "/" + repo + "/releases/download/" + tag + "/" + file
+  ];
 }
 
 function sha256(file) {
@@ -268,16 +279,16 @@ async function installWinlibs() {
     }
   }
   if (!fs.existsSync(zip)) {
-    const rel = REL_BASE.replace(/\/+$/, ""); // tolerate trailing slash in REL_BASE / mirror vars
-    const candidates = [rel + "/winlibs.zip"];
-    for (const m of DEFAULT_MIRRORS) {
-      candidates.push(m.replace(/\/+$/, "") + "/" + rel.replace("https://github.com/", "") + "/winlibs.zip");
-    }
-    const extraMirror = (process.env.SOLOMNI_GH_MIRROR || "").replace(/\/+$/, "");
-    if (extraMirror) candidates.push(extraMirror + "/brechtsanders/winlibs_mingw/releases/latest/download/winlibs.zip");
+    const rel = REL_BASE.replace(/\/+$/, ""); // tolerate trailing slash in REL_BASE
+    const ours = rel + "/winlibs.zip";
+    const candidates = [ours].concat(mirrorVariants(ours));
     const upstream = await upstreamWinlibsUrl();
-    if (upstream) candidates.push(upstream);
-    const url = await pickFastest(candidates);
+    if (upstream) candidates.push(upstream, ...mirrorVariants(upstream));
+    const extraMirror = (process.env.SOLOMNI_GH_MIRROR || "").replace(/\/+$/, "");
+    if (extraMirror) candidates.push(extraMirror + "/" + (upstream || ours).replace("https://github.com/", ""));
+    const seen = [];
+    for (const c of candidates) if (seen.indexOf(c) < 0) seen.push(c);
+    const url = await pickFastest(seen);
     log("downloading " + url);
     log("(curl with progress; ~200 MB. Slow? set SOLOMNI_GH_MIRROR, or download the zip");
     log(" manually in a browser and save it as .tools/winlibs.zip - the launcher will use it)");
