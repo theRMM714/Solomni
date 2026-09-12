@@ -29,6 +29,9 @@ impl ProviderStore for YamlRegistryStore {
             std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
         }
         let text = serde_yaml::to_string(registry).map_err(|e| e.to_string())?;
+        if let Some(parent) = self.path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| format!("建登记处目录失败：{}", e))?;
+        }
         std::fs::write(&self.path, text).map_err(|e| e.to_string())?;
         #[cfg(unix)]
         {

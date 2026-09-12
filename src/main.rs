@@ -14,7 +14,8 @@ use std::sync::{Arc, Mutex};
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
-    let web = args.iter().any(|a| a == "--web");
+    // 启动形态：无参数 = CLI（默认）；-webUI = Web 转录中心。
+    let web = args.iter().any(|a| a == "-webUI");
     let root = args
         .iter()
         .position(|a| a == "--root")
