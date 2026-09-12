@@ -1,9 +1,0 @@
-name: assistant
-
-packages:
-  - packages/**
-  - apps/**
-
-command:
-  bootstrap:
-    runPubGetInParallel: true

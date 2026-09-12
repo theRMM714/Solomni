@@ -3,9 +3,22 @@
 > **我为人人，人人为我；一即是全，全即是一。**
 > *One for all, all for one; one is all, all is one.*
 
-Solomni 是一个以「去中心化为常态」为原则的跨平台 AI 助手。它的独特之处不在某一个具体的 AI 能力，而在于能力被如何组织：每一个功能都是一个**自治模块**，模块之间不靠一个中心化的「上帝」来指挥，而是通过一个内容无关的**交易所**彼此协作。在这里，中心化不是存在的前提，而只是一种可选的能力。
+Solomni 是一个以「去中心化为常态」为原则的跨平台 AI 助手。它的独特之处不在某一个具体的 AI 能力，而在于能力被如何组织：每一个功能都是一个**模块**——一段职责提示词、一组预备工具、一块私有工作区。模块可以用任何工具、任何语言制作，彼此不靠一个中心化的「上帝」指挥，只在被需要时由受托的核心集结协作。在这里，中心化不是存在的前提，而只是一种可选的能力。
 
-Solomni is a cross-platform AI assistant organized around a single principle — **decentralization is the default state**. Its distinction lies not in any particular AI capability, but in how capabilities are organized: every feature is an **autonomous module**, and modules do not take orders from a centralized "god" — they cooperate through a content-agnostic **exchange**. Here, centralization is never a precondition for existence; it is only an optional capability.
+Solomni is a cross-platform AI assistant organized around a single principle — **decentralization is the default state**. Its distinction lies not in any particular AI capability, but in how capabilities are organized: every feature is a **module** — a charter prompt, a set of tools, and a private workspace. Modules can be built with any tools in any language; they take orders from no centralized "god", and assemble through a core entrusted by the user only when collaboration is needed. Here, centralization is never a precondition for existence; it is only an optional capability.
+
+---
+
+## 角色 · Roles
+
+**模块 · Module** —— 一个文件夹 = 一段职责提示词 + 一组预备工具 + 一块私有工作区。模块不是进程：不常驻、不待命，只在被交付任务时工作一次，留下回报与数据。
+*A folder is a charter prompt, a set of tools, and a private workspace. A module is not a process: it does not idle or listen — it works once when handed a task, then leaves behind its report and its data.*
+
+**核心 · Core** —— 产品里唯一的程序：受托编排者。集结、转达、整理、验收，全部是用户当下委托的机械动作；委托之外，它对模块的全部认知只有每个模块自述的简述。
+*The only program in the product: an entrusted orchestrator. Assembling, relaying, synthesizing, and reviewing are mechanical acts delegated by the user in the moment; beyond that delegation, all it knows of a module is the brief the module wrote about itself.*
+
+**选择权 · The Choice** —— 用哪些模块，永远由用户决定：点名，或委托核心代拟名单并确认。
+*Which modules to bring together is always the user's call: name them, or let the core draft a slate for confirmation.*
 
 ---
 
@@ -13,15 +26,15 @@ Solomni is a cross-platform AI assistant organized around a single principle —
 
 构建一个去中心化为常态的跨平台 AI 助手：
 
-- **模块自治** —— 每个模块可独立运行、独立替换
-- **中心化只是能力，不是前提** —— 有中心时值得共享的才被共享，没有中心时各自满足自身需求
-- **无上帝** —— 没有任何模块（包括核心）有资格决定什么该被共享
+- **模块自治** —— 每个模块可独立开发、独立替换，可以用任何工具、任何语言制作
+- **中心化只是能力，不是前提** —— 简单任务与全能模式不依赖协作；协作只在被需要时发生
+- **无上帝** —— 包括核心在内，没有任何角色有权替用户做决定
 
 To build a cross-platform AI assistant where decentralization is the norm:
 
-- **Autonomous modules** — each can run and be replaced independently
-- **Centralization is a capability, not a precondition** — with a center, only what is worth sharing gets shared; without one, each satisfies its own needs
-- **No god** — no module (not even the core) is entitled to decide what should be shared
+- **Autonomous modules** — each developed and replaced independently, built with any tools in any language
+- **Centralization is a capability, not a precondition** — simple and omnibus tasks need no collaboration; collaboration happens only when needed
+- **No god** — no role, the core included, is entitled to decide on the user's behalf
 
 ---
 
@@ -29,45 +42,38 @@ To build a cross-platform AI assistant where decentralization is the norm:
 
 ### 1. 模块自治 · Module Autonomy
 
-每个模块是一个自治程序：拥有独立的入口、独立的状态、独立的生命周期。它对世界的全部认知，只是一份声明——「我提供什么、我需要什么」。上线、下线、重连是常态事实，而不是异常事件。没有核心时，模块以自己的方式满足自己的需求。
-
-Every module is an autonomous program with its own entry point, its own state, and its own lifecycle. Its entire understanding of the world is a single declaration — "what I provide, what I need". Coming online, going offline, and reconnecting are ordinary facts, not exceptional events. Without a core, a module satisfies its own needs in its own way.
+模块是自治的工作区，不是被调度的进程。它自带职责边界与工具，被交付任务时自己决定怎么干。
+*A module is a self-governing workspace, not a scheduled process. It carries its own boundaries and tools, and decides for itself how a task gets done.*
 
 ### 2. 中心化是能力，不是前提 · Optional Centralization
 
-去中心化是默认状态；依赖中心化协调是一种可选能力。类比：同一块网卡，有基站走基站，没基站自组网。没有核心，模块各自实现需求；有核心，值得共享的才被共享。
+单模块直连没有中心，全能拼装没有中心；唯一需要核心出场的多模块协作，权力也是用户当下签发的。
+*Direct single-module chat has no center; omnibus assembly has no center. Even the one mode that needs the core — multi-module collaboration — holds its power only by the user's present delegation.*
 
-Decentralization is the default; relying on centralized coordination is an optional capability. By analogy: a single network card uses a base station when one exists, and forms an ad-hoc network when it doesn't. Without a core, modules fulfill needs on their own; with a core, only what is worth sharing gets shared.
+### 3. 无上帝：决策权全在用户 · No God
 
-### 3. 无上帝：机制与策略分离 · No God — Mechanism, Not Policy
+核心可以拒收非法事实（损坏的模块、非法的清单），但从不做合法范围内的挑选。拒绝一个坏模块是校验，从两个好模块里挑一个是决策——前者是核心的本分，后者是用户的权力。
+*The core may reject illegal facts (a broken module, an invalid manifest) but never chooses among legal ones. Rejecting a bad module is validation; picking between two good ones is decision — the former is the core's duty, the latter the user's power.*
 
-核心只有三个动词，全部是服务，没有一个是权力：**校验、配对、投递**。它拒收非法事实（身份冲突、拓扑成环、接线指向未知），却从不替任何人做选择。决策权永远在边缘：消费方声明首选，部署者显式接线，调用方定向调用。
+### 4. 文本即边界 · Text Is the Boundary
 
-The core has exactly three verbs, all of them services and none of them power: **validate, pair, deliver**. It rejects illegal facts (identity conflicts, cyclic topology, wiring to the unknown), yet never chooses on anyone's behalf. Decision-making always lives at the edge: consumers declare preferences, deployers wire explicitly, callers direct their own calls.
+核心与模块互不依赖对方的代码，共同依赖的只有一份文本契约。契约之内完全自由：讨论格式、任务拆法、中间产物，由 AI 自决。
+*Core and modules depend on none of each other's code — only on a shared text contract. Inside the contract, everything is free: discussion style, task breakdown, and intermediate artifacts are the AIs' own call.*
 
-### 4. 涌现式中心化 · Emergent Centralization
+### 5. 事实驱动清单 · Fact-driven Roster
 
-共享 = 提供方的主权声明 + 消费方的策略选择，双边同意才成立。中心化是涌现的结果，不是设计的前提。一个能力同时有多个提供方在线，不是错误状态，而是**消费方的选择空间**。核心如实呈现候选，绝不代为选择；「曾经唯一」只是巧合，不构成任何特权。
-
-Sharing = a provider's sovereign declaration + a consumer's policy choice; only mutual consent makes it real. Centralization is an emergent result, not a designed premise. Multiple providers for one capability is not an error — it is the consumer's space of choice. The core honestly presents candidates and never chooses; "used to be the only one" is mere coincidence, never a privilege.
-
-### 5. 事实驱动配对 · Fact-driven Pairing
-
-配对永远是当前声明的纯函数：声明到达或离开，配对即重算；同 id 重连，即一次离开加一次到达。提供方离线，消费方自动降级；提供方回归，配对自动恢复。事实应随事实的变化而到达——轮询是用重复劳动换取本可直接送达的事实，是一种浪费。
-
-Pairing is always a pure function of current declarations: when a declaration arrives or departs, pairing recomputes; reconnecting under the same id is one departure plus one arrival. A provider going offline degrades consumers automatically; a provider returning restores pairing automatically. Facts should arrive as facts change — polling is wasted effort spent extracting what could simply be delivered.
+模块清单永远是 `modules/` 目录的纯函数：放入即出现，移出即消失。没有注册仪式，没有心跳，没有状态同步。
+*The module roster is a pure function of the modules/ directory: drop in a folder and it appears; take it out and it is gone. No registration, no heartbeat, no state sync.*
 
 ### 6. 辅助性原则 · Subsidiarity
 
-事务在能胜任的最低层解决；中心只做局部做不了的事。
-
-Matters are resolved at the lowest level capable of handling them; the center does only what a part cannot do alone.
+事务在能胜任的最低层解决：一个模块能独立完成的，不建组；讨论能收敛的，不升级给用户。
+*Matters are resolved at the lowest level capable of handling them: what one module can do alone is not debated; what discussion can settle is not escalated.*
 
 ### 7. 状态所有权排他 · Exclusive State Ownership
 
-数据归模块所有，没有共享数据库——这是模块间「无冲突」的根源。跨模块流动的是消息，不是状态。
-
-Data belongs to its module; there is no shared database — this is the root of conflict-freedom between modules. What flows across module boundaries is messages, never state.
+数据归模块，落在自己的私有工作区，永不共享。跨模块流动的只有进入上下文的文本。
+*Data belongs to its module and lives in its private workspace, never shared. What crosses module boundaries is only text entering a shared transcript.*
 
 ---
 
@@ -75,19 +81,21 @@ Data belongs to its module; there is no shared database — this is the root of 
 
 无论实现如何变化，以下规则不可违反。No matter how the implementation evolves, these rules must never be violated.
 
-1. **协作单路径 · Single collaboration path** —— 模块间协作只经核心，无点对点直连。Modules cooperate only through the core; no peer-to-peer direct links.
+1. **选择权在用户** —— 建组名单要么用户亲手写下，要么由受托的核心代拟并经确认；核心永不静默选人。*The roster is either written by the user or drafted by the entrusted core and confirmed; the core never selects silently.*
+2. **转录即内容** —— 模块的发言永远是数据，不是指令；用户看到的与进入上下文的完全一致。*Every module utterance is content, never command; what the user sees is exactly what enters the context.*
+3. **文本边界** —— 跨界的一切都是文本；机器锚点保持最小，且只是文本。*Only text crosses boundaries; the machine anchors stay minimal and remain mere text.*
+4. **清单即事实** —— 模块清单是目录扫描的纯函数，随文件增删即时重算，禁止任何形式的注册表。*The roster is a pure function of directory scanning, recomputed as files change; registries of any form are forbidden.*
+5. **状态私有** —— 模块数据不出工作区；没有共享数据库。*Module data never leaves its workspace; there is no shared database.*
+6. **可替换** —— 换任意模块、换任意核心实现、换任意模型，互不牵连。*Swap any module, any core implementation, any model; nothing else is affected.*
+7. **降级而非崩溃** —— 模块缺失是菜单少一项，能力缺失是任务被重新讨论；程序永不因此失败。*A missing module is one menu item fewer; a missing capability is a task re-discussed. The program never fails because of them.*
 
-2. **消息边界 · Message boundary** —— 边界上只有消息，永不共享对象引用。Only messages cross the boundary; object references are never shared.
+---
 
-3. **薄内建 · Thin built-ins** —— 模块的内建实现有意保持最小，富实现只放共享侧一处。A module's built-in implementation is deliberately minimal; rich implementations live in exactly one place on the shared side.
+## 文档 · Documents
 
-4. **配对即事实 · Pairing is fact** —— 接线永远是当前声明的纯函数；成员变化即重算并推送给受影响者，禁止轮询。Wiring is always a pure function of current declarations; membership changes recompute and push immediately; polling is forbidden.
-
-5. **无静默选择 · No silent selection** —— 核心只在合法事实间配对、只在非法事实上拒收；多提供方是消费方的选择空间而非错误，缺提供方是降级而非失败。The core pairs only among legal facts and rejects only illegal ones; multiple providers is a space of choice, not an error; a missing provider is degradation, not failure.
-
-6. **可替换 · Replaceable** —— 换任意模块、换任意核心，互不牵连。Swap any module or swap the core itself; nothing else is affected.
-
-7. **降级而非崩溃 · Degrade, don't crash** —— 能力缺失导致功能降级，而不是程序失败。A missing capability causes graceful degradation, never program failure.
+- 产品与运行流程（三种模式、协作五阶段）：[PRODUCT.md](PRODUCT.md)
+- 项目理念（角色、理念、不变量）：[PHILOSOPHY.md](PHILOSOPHY.md)
+- 模块契约（制作一个模块的全部约定）：[MODULE_SPEC.md](MODULE_SPEC.md)
 
 ---
 
@@ -95,5 +103,3 @@ Data belongs to its module; there is no shared database — this is the root of 
 
 > 一即是全，全即是一：每个模块都是一个完整的自己，彼此协作而不彼此支配。
 > *One is all, all is one: every module is a complete self — cooperating, never ruling over one another.*
-
-理念的完整抽象定义见 [assistant/PHILOSOPHY.md](assistant/PHILOSOPHY.md)；产品形态与用户旅程见 [assistant/PRODUCT.md](assistant/PRODUCT.md)。
