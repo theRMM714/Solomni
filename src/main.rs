@@ -50,19 +50,29 @@ fn main() {
         }
     };
 
-    if web {
-        let shared = Arc::new(Mutex::new(core));
-        let port = args
-            .iter()
+    let port_flag = |args: &[String]| {
+        args.iter()
             .position(|a| a == "--web-port")
             .and_then(|i| args.get(i + 1))
             .and_then(|v| v.parse::<u16>().ok())
-            .unwrap_or(3081);
-        if let Err(e) = presentation::web::serve(shared, port, std::sync::Arc::clone(&log)) {
-            eprintln!("[Web 服务异常] {}", e);
-            std::process::exit(1);
-        }
+            .unwrap_or(presentation::web::DEFAULT_PORT)
+    };
+
+    if web {
+        serve_web(core, port_flag(&args), std::sync::Arc::clone(&log));
     } else {
-        presentation::cli::run(core);
+        // CLI 里输入 webui 可直接转入 Web，无需重启进程。
+        let (core, exit) = presentation::cli::run(core);
+        if let presentation::cli::CliExit::Web(port) = exit {
+            serve_web(core, port, std::sync::Arc::clone(&log));
+        }
+    }
+}
+
+fn serve_web(core: core::Core, port: u16, log: std::sync::Arc<dyn core::ports::Log + Send + Sync>) {
+    let shared = Arc::new(Mutex::new(core));
+    if let Err(e) = presentation::web::serve(shared, port, log) {
+        eprintln!("[Web 服务异常] {}", e);
+        std::process::exit(1);
     }
 }

@@ -10,6 +10,9 @@ use tiny_http::{Header, Response, Server};
 
 type SharedCore = Arc<Mutex<Core>>;
 
+/// 默认监听端口（CLI 的 webui 命令与启动参数共用这一个来源）。
+pub const DEFAULT_PORT: u16 = 3081;
+
 /// 启动转录中心服务器（阻塞直至出错）。端口可指定，默认 3081，只绑本机回环。
 pub fn serve(core: SharedCore, port: u16, log: std::sync::Arc<dyn crate::core::ports::Log + Send + Sync>) -> Result<(), String> {
     log.info("web::serve", &format!("转录中心启动，端口 {}", port));
