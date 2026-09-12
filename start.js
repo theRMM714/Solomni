@@ -31,7 +31,7 @@ function rustcSysrootBinDirs(cargo) {
   if (sysroot && fs.existsSync(sysroot)) {
     const gnu = path.join(sysroot, "lib", "rustlib", "x86_64-pc-windows-gnu", "bin");
     if (fs.existsSync(gnu)) dirs.push(gnu);
-    const sc = path.join(gnu, "bin", "self-contained");
+    const sc = path.join(gnu, "self-contained");
     if (fs.existsSync(sc)) dirs.push(sc);
     const gdb = path.join(gnu, "gdb.debug");
     if (fs.existsSync(gdb)) dirs.push(gdb);
