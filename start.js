@@ -200,27 +200,35 @@ function upstreamWinlibsUrl() {
   return /^https:/.test(url) ? url : null;
 }
 
-function probeSpeed(url) {
-  // Sustained-throughput probe: ranged GET of 1MB, curl reports its own average
-  // speed (bytes/s) via speed_download. max-time caps slow sources - the partial
-  // average is still the honest sustained rate. 0 = unreachable.
+function probeOnce(url) {
+  // One ranged GET (2MB). Resolves { code, speed } - code 000 means the network
+  // layer itself failed (DNS/reset/timeout); otherwise the final HTTP status.
   return new Promise((resolve) => {
     const curl = path.join(process.env.SystemRoot || "C:/Windows", "System32", "curl.exe");
     const cmd = IS_WIN ? curl : "curl";
-    if (!fs.existsSync(cmd)) { resolve(0); return; }
+    if (!fs.existsSync(cmd)) { resolve({ code: "000", speed: 0 }); return; }
     const p = spawn(cmd,
       ["-sL", "-r", "0-2097151", "-o", require("os").devNull, "-w", "%{http_code} %{speed_download}",
        "--connect-timeout", "4", "--max-time", "8", url],
       { encoding: "utf8" });
     let out = "";
     p.stdout.on("data", (d) => { out += d; });
-    p.on("error", () => resolve(0));
+    p.on("error", () => resolve({ code: "000", speed: 0 }));
     p.on("close", () => {
       const m = out.trim().match(/^(\d{3}) (\d+(?:\.\d+)?)$/);
-      if (m && /^2/.test(m[1])) resolve(parseFloat(m[2]) || 0);
-      else resolve(0);
+      if (m) resolve({ code: m[1], speed: parseFloat(m[2]) || 0 });
+      else resolve({ code: "000", speed: 0 });
     });
   });
+}
+
+async function probeSpeed(url) {
+  // Two tries: transient resets are common on GFW-adjacent routes; a single
+  // probe would kill reachable sources half the time.
+  const a = await probeOnce(url);
+  if (/^2/.test(a.code)) return a;
+  const b = await probeOnce(url);
+  return /^2/.test(b.code) ? b : a;
 }
 
 async function pickFastest(urls) {
@@ -231,18 +239,23 @@ async function pickFastest(urls) {
   if (IS_WIN && !fs.existsSync(curl)) return urls[0];
   log("speed-testing " + urls.length + " source(s), 2MB probe each...");
   const speeds = [];
+  const codes = [];
   for (const u of urls) {
-    const s = await probeSpeed(u);
-    speeds.push(s);
-    log("  " + Math.round(s / 1024) + " KB/s  " + u);
+    const r = await probeSpeed(u);
+    speeds.push(r.speed);
+    codes.push(r.code);
+    log("  " + Math.round(r.speed / 1024) + " KB/s  [http " + r.code + "]  " + u);
   }
   let best = 0;
   for (let i = 1; i < urls.length; i++) {
     if (speeds[i] > speeds[best]) best = i;
   }
   if (speeds[best] <= 0) {
-    log("no source answered the probe; trying preferred order anyway.");
-    return urls[0];
+    console.error("[start] all sources failed the probe. Codes above mean:");
+    console.error("  000 = network blocked/reset (try a VPN, or download the zip manually)");
+    console.error("  404 = wrong path (check Release tag/asset name) - other sources may still work");
+    console.error("  403 = rate limited (wait a bit and re-run)");
+    die("no reachable source. Manual: browser-download a winlibs x86_64 seh zip, save as .tools/winlibs.zip, re-run.");
   }
   log("fastest: " + urls[best]);
   return urls[best];
