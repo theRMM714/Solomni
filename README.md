@@ -3,9 +3,9 @@
 > **我为人人，人人为我；一即是全，全即是一。**
 > *One for all, all for one; one is all, all is one.*
 
-Solomni 是一个以「去中心化为常态」为原则的跨平台 AI 助手。它的独特之处不在某一个具体的 AI 能力，而在于能力被如何组织：每一个功能都是一个**模块**——一段职责提示词、一组预备工具、一块私有工作区。模块可以用任何工具、任何语言制作，彼此不靠一个中心化的「上帝」指挥，只在被需要时由受托的核心集结协作。在这里，中心化不是存在的前提，而只是一种可选的能力。
+Solomni 是一个以「去中心化为常态」为原则的跨平台 AI 助手。它的独特之处不在某一个具体的 AI 能力，而在于能力被如何组织：每一个功能都是一个**模块**——一段职责提示词、一组预备工具、一块私有工作区。模块可以用任何工具、任何语言制作；需要协作时，受托的核心把多个自治智能体集结成组，分权协商，没有谁能独自拍板。集中与分权由用户按任务选择——单模块直连与全能拼装是高度中心化的形态，多模块协作才是去中心化；而无论哪种形态，能力的基底永远是分权的模块公地。
 
-Solomni is a cross-platform AI assistant organized around a single principle — **decentralization is the default state**. Its distinction lies not in any particular AI capability, but in how capabilities are organized: every feature is a **module** — a charter prompt, a set of tools, and a private workspace. Modules can be built with any tools in any language; they take orders from no centralized "god", and assemble through a core entrusted by the user only when collaboration is needed. Here, centralization is never a precondition for existence; it is only an optional capability.
+Solomni is a cross-platform AI assistant organized around a single principle — **decentralization is the default state**. Its distinction lies not in any particular AI capability, but in how capabilities are organized: every feature is a **module** — a charter prompt, a set of tools, and a private workspace. Modules can be built with any tools in any language; when collaboration is needed, the entrusted core assembles autonomous peers who negotiate as equals, with no one deciding alone. Concentration or distribution is the user's per-task choice — direct and omnibus modes are highly centralized forms, while multi-module collaboration is the decentralized one; under either form, capability lives in a commons of sovereign modules.
 
 ---
 
@@ -27,13 +27,13 @@ Solomni is a cross-platform AI assistant organized around a single principle —
 构建一个去中心化为常态的跨平台 AI 助手：
 
 - **模块自治** —— 每个模块可独立开发、独立替换，可以用任何工具、任何语言制作
-- **中心化只是能力，不是前提** —— 简单任务与全能模式不依赖协作；协作只在被需要时发生
+- **集中是选项，分权是常态** —— 单模块直连与全能模式把能力集中给一个智能体（高度中心化）；多模块协作让多个自治智能体分权协商（去中心化）；而无论哪种形态，能力的基底永远是分权的模块公地
 - **无上帝** —— 包括核心在内，没有任何角色有权替用户做决定
 
 To build a cross-platform AI assistant where decentralization is the norm:
 
 - **Autonomous modules** — each developed and replaced independently, built with any tools in any language
-- **Centralization is a capability, not a precondition** — simple and omnibus tasks need no collaboration; collaboration happens only when needed
+- **Concentration is optional; distribution is the norm** — direct and omnibus modes concentrate capability in one agent (highly centralized), collaboration distributes it across autonomous peers (decentralized), and under either form the substrate stays a commons of sovereign modules
 - **No god** — no role, the core included, is entitled to decide on the user's behalf
 
 ---
@@ -45,10 +45,10 @@ To build a cross-platform AI assistant where decentralization is the norm:
 模块是自治的工作区，不是被调度的进程。它自带职责边界与工具，被交付任务时自己决定怎么干。
 *A module is a self-governing workspace, not a scheduled process. It carries its own boundaries and tools, and decides for itself how a task gets done.*
 
-### 2. 中心化是能力，不是前提 · Optional Centralization
+### 2. 集中是选项，分权是常态 · Optional Centralization
 
-单模块直连没有中心，全能拼装没有中心；唯一需要核心出场的多模块协作，权力也是用户当下签发的。
-*Direct single-module chat has no center; omnibus assembly has no center. Even the one mode that needs the core — multi-module collaboration — holds its power only by the user's present delegation.*
+判据不是"是否经过核心"，而是能力与决策权集中在几个智能体手里：单模块直连与全能模式把能力集中于一个智能体——高度中心化；多模块协作让能力分属多个自治智能体、平等协商——去中心化。而无论哪种形态，基底永远去中心化：能力活在自治的模块公地里，全能模型只是公地的一次投影，从不是它的主人。
+*The test is not whether the core is involved but how many agents hold the capability: direct and omnibus modes concentrate it in one agent — highly centralized; collaboration distributes it across autonomous peers — decentralized. Either way the substrate stays decentralized: capability lives in a commons of sovereign modules, and the omnibus model is a projection of that commons, never its owner.*
 
 ### 3. 无上帝：决策权全在用户 · No God
 
