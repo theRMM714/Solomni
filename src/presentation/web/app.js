@@ -1204,7 +1204,7 @@ function absorb(s, ev) {
           s.lines.push({ cls: 'tool', id: l.id, tool: l.tool, reasoning: l.reasoning || null, who: '', text: '', speaker: l.tool.speaker || '' });
           continue;
         }
-        const parts = parseLine(l.line);
+        const parts = parseLine(l.line, l.degraded);
         for (const p of parts) { p.id = l.id; if (l.reasoning) p.reasoning = l.reasoning; }
         s.lines.push(...parts);
       }
@@ -1272,15 +1272,16 @@ function envelopeLine(text, speaker) {
   return { cls: 'line', who: '', text: text, speaker: speaker || '', rawTool: true };
 }
 
-function parseLine(l) {
+function parseLine(l, degraded) {
   const m = l.match(/^\[([^\]]+):([a-z]+)\]([\s\S]*)$/);
   if (m) {
     const cls = m[2] === 'agree' ? 'ok' : m[2] === 'leave' ? 'sys' : m[2] === 'ask' ? 'plan' : 'line';
-    const degraded = l.includes('（信封缺失');
+    // 降级标记来自服务端的**结构化字段**（行上的 degraded），不靠匹配行文本里的说明文案。
+    const deg = degraded === true;
     const text = m[3].trim();
     // 自由发言（say）的正文若整段就是工具信封，按卡片渲染，而不是当消息
     if (cls === 'line' && looksLikeToolEnvelope(text)) return [envelopeLine(text, m[1])];
-    return [{ cls: degraded ? 'sys' : cls, who: m[1] + ' · ' + m[2] + (degraded ? ' · 信封缺失' : ''), text, speaker: m[1], verb: m[2] }];
+    return [{ cls: deg ? 'sys' : cls, who: m[1] + ' · ' + m[2] + (deg ? ' · 信封缺失' : ''), text, speaker: m[1], verb: m[2], degraded: deg }];
   }
   if (l.startsWith('[用户')) return [{ cls: 'user', who: '用户', text: l.replace(/^\[[^\]]+\]\s*/, '') }];
   if (l.startsWith('[代拟]')) return [{ cls: 'sys', who: '核心代拟', text: l.slice(4) }];

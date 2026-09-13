@@ -1069,7 +1069,7 @@ fn discussion_full_agreement() {
             TurnOut::AskUser { .. } => panic!("不该请教"),
         }
     }
-    assert!(d.transcript.iter().any(|l| l.contains("[m0:agree]")));
+    assert!(d.transcript.iter().any(|l| l.text.contains("[m0:agree]")));
 }
 
 #[test]
@@ -1111,7 +1111,7 @@ fn discussion_autonomy_archives_ask() {
             TurnOut::AskUser { .. } => panic!("自裁模式不该暂停"),
         }
     }
-    assert!(d.transcript.iter().any(|l| l.contains("自裁")));
+    assert!(d.transcript.iter().any(|l| l.text.contains("自裁")));
 }
 
 #[test]
@@ -1126,6 +1126,33 @@ fn discussion_round_cap_enforced() {
         }
     }
     assert!(d.round > MAX_ROUNDS);
+}
+
+#[test]
+fn degraded_discussion_line_carries_a_structured_flag() {
+    let prompts = test_prompts();
+    // 成员给出"不是信封"的原文 → 该行按降级收录：文本里有说明，**结构上另带 degraded**。
+    let members = vec![Member::new("m0", "职责".to_string(), scripted(vec!["我觉得可以".into()]))];
+    let mut disc = Discussion::new(members, true, prompts.clone());
+    disc.open("任务");
+    let line = disc.transcript.iter().find(|l| l.text.starts_with("[m0:say]")).expect("应有 m0 的发言行");
+    assert!(line.degraded, "降级必须带结构化标记（呈现层靠它，不靠匹配文案）");
+    assert!(
+        line.text.contains(&prompts.core.tool_texts.discuss_degraded),
+        "文本里仍保留给人/模型看的说明"
+    );
+
+    // 线格式：只在为真时写出 degraded
+    let yes = SessionEvent::Transcript(vec![crate::core::events::LineView {
+        id: 0,
+        line: "x".into(),
+        degraded: true,
+        ..Default::default()
+    }])
+    .to_json();
+    assert_eq!(yes["lines"][0]["degraded"], serde_json::Value::Bool(true));
+    let no = SessionEvent::Transcript(vec![crate::core::events::LineView { id: 0, line: "x".into(), ..Default::default() }]).to_json();
+    assert!(no["lines"][0].get("degraded").is_none(), "非降级行不写这个字段");
 }
 
 // ---------- 执行/验收 ----------

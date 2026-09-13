@@ -106,7 +106,7 @@ impl CollabSession {
 
     /// 生成一条带 id 的转录行（工具行另走 tool_line，带调用视图）。
     fn view(&mut self, line: String) -> LineView {
-        let v = LineView { id: self.next_line, line, reasoning: None, tool: None };
+        let v = LineView { id: self.next_line, line, ..Default::default() };
         self.next_line += 1;
         v
     }
@@ -417,14 +417,17 @@ impl CollabSession {
     ) -> Result<CollabSession, String> {
         let names: Vec<String> = meta.agents.iter().map(|a| a.name.clone()).collect();
         let st = crate::core::collab_state::derive(events, &names);
-        // 全部已发出的转录行（按 id 顺序）。
-        let mut all_lines: Vec<String> = Vec::new();
+        // 全部已发出的转录行（按 id 顺序），连降级标记一起读回（样式靠它，不靠文案）。
+        let mut all_lines: Vec<crate::core::engine::DiscLine> = Vec::new();
         for ev in events {
             if ev.get("type").and_then(|t| t.as_str()) == Some("transcript") {
                 if let Some(lines) = ev.get("lines").and_then(|l| l.as_array()) {
                     for l in lines {
                         if let Some(s) = l.get("line").and_then(|x| x.as_str()) {
-                            all_lines.push(s.to_string());
+                            all_lines.push(crate::core::engine::DiscLine {
+                                text: s.to_string(),
+                                degraded: l.get("degraded").and_then(|d| d.as_bool()).unwrap_or(false),
+                            });
                         }
                     }
                 }
@@ -459,7 +462,7 @@ impl CollabSession {
             // 讨论转录 = 最后一条 [用户:开始] 之后的行。
             let start = all_lines
                 .iter()
-                .rposition(|l| l.starts_with("[用户:开始]"))
+                .rposition(|l| l.text.starts_with("[用户:开始]"))
                 .map(|i| i + 1)
                 .unwrap_or(all_lines.len());
             let disc_lines = all_lines[start..].to_vec();
@@ -521,8 +524,8 @@ fn emit_tool_lines(exec: &Execution, id: &str, next_line: &mut u64, sink: &mut d
         sink(SessionEvent::Transcript(vec![LineView {
             id: *next_line,
             line,
-            reasoning: None,
             tool: Some(v.clone()),
+            ..Default::default()
         }]));
         *next_line += 1;
     }
@@ -534,7 +537,7 @@ fn push_delta(disc: &Discussion, emitted: &mut usize, next_line: &mut u64, sink:
         let views: Vec<LineView> = disc.transcript[*emitted..]
             .iter()
             .map(|l| {
-                let v = LineView { id: *next_line, line: l.clone(), reasoning: None, tool: None };
+                let v = LineView { id: *next_line, line: l.text.clone(), degraded: l.degraded, ..Default::default() };
                 *next_line += 1;
                 v
             })

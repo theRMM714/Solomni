@@ -65,7 +65,7 @@ impl AgentSession {
 
     /// 生成一条转录行，并记下它完成时的历史长度（回档按 marks 逐行精确回退）。
     fn line(&mut self, line: String, reasoning: Option<String>, tool: Option<ToolCallView>) -> LineView {
-        let v = LineView { id: self.next_line, line, reasoning, tool };
+        let v = LineView { id: self.next_line, line, reasoning, tool, degraded: false };
         self.next_line += 1;
         self.marks.push(self.history.len());
         v
