@@ -49,9 +49,125 @@ pub struct CorePrompts {
     pub review: ReviewPrompts,
     pub rerun: RerunPrompts,
     pub slate: SlatePrompts,
-    pub omni: OmniPrompts,
-    pub module_system: String,
-    pub module_system_tools: String,
+    pub suggest_models: SuggestPrompts,
+    /// 一个 agent 的职责提示词（由它的模块合成为一份能力包）。
+    pub agent: AgentPrompts,
+    /// @ 引用的两句说明文案。
+    pub refs: RefsPrompts,
+    /// 工具与路径相关的**模型侧文案**（回执、失败说明、清单行）；改文案只改册子。
+    pub tool_texts: ToolTexts,
+    /// 内置文件工具说明块；变量：work_name, agent, module_dirs
+    pub sys_tools: String,
+    /// 登记处还没有 agent 时的说明（拟名单的 {{agents}} 取值）。
+    pub no_agents: String,
+    /// agent 没有指定模型时的说明（拟名单清单里用）。
+    pub no_model: String,
+    /// 无成员模块目录时的说明（module_dirs 的取值）。
+    pub no_module_dirs: String,
+    /// 模块未声明外部工具时的说明（module_tools 的取值）。
+    pub no_module_tools: String,
+}
+
+/// 工具与路径的模型侧文案：核心拼回执、失败说明与清单行时从这里取。
+/// 随沙箱/工具环境注入 core 的纯逻辑（与 RefsPrompts 同一套做法），本身不是状态。
+#[derive(Debug, Clone, Deserialize)]
+pub struct ToolTexts {
+    // —— 路径校验（workspace::resolve）——
+    pub path_empty: String,
+    /// 变量：path
+    pub path_need_absolute: String,
+    /// 变量：path
+    pub path_empty_segment: String,
+    /// 变量：path
+    pub path_cur_dir: String,
+    /// 变量：path
+    pub path_parent_dir: String,
+    /// 变量：path
+    pub path_outside_roots: String,
+    /// 变量：why, roots
+    pub roots_wrapper: String,
+    /// 变量：root
+    pub roots_shared: String,
+    /// 变量：root
+    pub roots_private: String,
+    /// 变量：id, root
+    pub roots_module: String,
+    // —— 内置工具回执（systool）——
+    pub missing_path: String,
+    pub missing_content: String,
+    pub missing_keyword: String,
+    /// 变量：error
+    pub bad_args_json: String,
+    /// 变量：name
+    pub unknown_builtin: String,
+    /// 变量：path, bytes, text
+    pub read_header: String,
+    /// 变量：path, chars
+    pub write_header: String,
+    /// 变量：mark, id
+    pub write_module_note: String,
+    /// 变量：path, keyword, mode
+    pub search_header: String,
+    pub search_mode_sensitive: String,
+    pub search_mode_insensitive: String,
+    pub search_no_hits: String,
+    /// 变量：hits, total
+    pub search_summary: String,
+    /// 变量：n, line
+    pub search_hit_line: String,
+    /// 变量：limit
+    pub search_truncated: String,
+    /// 变量：limit
+    pub read_truncated_chars: String,
+    pub read_truncated_bytes: String,
+    pub search_truncated_bytes: String,
+    pub lossy_note: String,
+    // —— 外部工具分派（engine）——
+    /// 变量：tool
+    pub no_module_field: String,
+    /// 变量：module
+    pub unknown_module: String,
+    /// 变量：module, tool
+    pub module_lacks_tool: String,
+    /// 变量：why, tools
+    pub available_wrapper: String,
+    // —— 工具循环与讨论（engine）——
+    /// 变量：label, output
+    pub tool_result_wrapper: String,
+    /// 变量：n
+    pub tool_cap: String,
+    pub malformed_note: String,
+    pub discuss_degraded: String,
+    /// 追加在回复行末尾（该行重建后进上下文）
+    pub stopped_suffix: String,
+    // —— 拟名单/推荐时给模型看的清单行 ——
+    /// 变量：id, brief
+    pub module_listing_line: String,
+    /// 变量：id, tools
+    pub module_tools_line: String,
+    /// 变量：id, root
+    pub module_root_line: String,
+    /// 变量：name, modules, model, note
+    pub agent_listing_line: String,
+    /// 变量：id, name, api_model, note
+    pub model_listing_line: String,
+    /// 工具/模块清单里的分隔符（模型看到的清单行用它拼接）。
+    pub tool_list_separator: String,
+}
+
+impl ToolTexts {
+    /// 渲染一条模型侧文案。缺变量 = 装配错误，直接暴露（禁止静默兜底）。
+    pub fn render(&self, template: &str, vars: Vars) -> String {
+        render(template, vars).expect("工具文案变量由调用方保证（缺变量属于装配错误）")
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct RefsPrompts {
+    /// 引用了别的 agent 的沙箱；变量：agent（两个模板都收到 agent 与 path，多余的变量被忽略）。
+    pub foreign_sandbox: String,
+    /// 协作里共读同一条引用；变量：path, agent。
+    pub collab_sandbox: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -92,13 +208,24 @@ pub struct RerunPrompts {
 #[derive(Debug, Clone, Deserialize)]
 pub struct SlatePrompts {
     pub system: String,
-    /// user 变量：modules, task
+    /// user 变量：agents, modules, models, task
     pub user: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct OmniPrompts {
-    /// system 变量：modules
+pub struct SuggestPrompts {
+    pub system: String,
+    /// user 变量：mode, agents, modules, models, task
+    pub user: String,
+    /// 形态描述（{{mode}} 的取值）：单 agent。
+    pub mode_single: String,
+    /// 形态描述（{{mode}} 的取值）：协作。
+    pub mode_collab: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct AgentPrompts {
+    /// system 变量：agent, modules, sys_tools, module_tools
     pub system: String,
 }
 

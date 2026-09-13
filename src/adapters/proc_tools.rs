@@ -28,6 +28,10 @@ impl ToolRunner for ProcTools {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+        // 文本编码统一 UTF-8：Windows 上 Python 默认按系统代码页（中文机器是 cp936/gbk）解 stdin，
+        // 会把核心写入的 UTF-8 参数解成代理转义字符（\udc9a 之类），工具一写盘就报
+        // UnicodeEncodeError（曾实际发生并导致模型反复重试）。这里给子进程强制 UTF-8。
+        cmd.env("PYTHONIOENCODING", "utf-8").env("PYTHONUTF8", "1");
         let mut child = match cmd.spawn() {
             Ok(c) => c,
             Err(e) => return ToolOutcome { ok: false, output: format!("工具进程启动失败：{}", e) },

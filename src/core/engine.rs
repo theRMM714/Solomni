@@ -4,7 +4,8 @@
 //! 工具循环（联动 envelope::Verb::Tool 与 ports::ToolRunner）：策略（放行表）在核心，机制在适配层。
 
 use crate::core::envelope::{self, ToolInvoke, Verb};
-use crate::core::ports::{BoxedChat, Chat, Msg, ToolOutcome, ToolRunner};
+use crate::core::events::ToolCallView;
+use crate::core::ports::{BoxedChat, Chat, Chunk, Msg, ToolOutcome, ToolRunner};
 use crate::core::prompt::Prompts;
 use serde::Deserialize;
 use std::collections::BTreeMap;
@@ -18,13 +19,86 @@ pub const MAX_REWORK: usize = 2;
 /// 单次问询内的工具调用上限（超限强制收尾——上限必生效）。
 pub const MAX_TOOL_CALLS: usize = 8;
 
-/// 成员的工具执行环境：来自 module.yaml（工作区 + 放行表）+ 注入的执行端口。
-pub struct MemberTools {
-    /// 模块工作区（工具进程的工作目录；userdata 等私有区在其下）。
+/// 一个模块的外部工具环境：模块目录（外部工具进程的 cwd）+ 它声明的工具表。
+/// cwd 必须落在声明它的模块里（命令形如 python tools/x.py，是相对模块根写的）。
+#[derive(Debug, Clone)]
+pub struct ModuleTools {
     pub root: PathBuf,
-    /// 工具名 → 启动命令（模块作者声明；核心只放行此表内的工具）。
     pub commands: BTreeMap<String, String>,
+}
+
+/// 放行表：模块 id → 该模块的（目录, 工具表）。
+/// **包含没有声明任何工具的模块**（命令表为空）——这样报错能区分「没有这个模块」与「这个模块没有这个工具」。
+/// 跨模块同名工具不再冲突：模块内名字唯一由 map 保证，跨模块由信封里的 module 消歧。
+pub fn tool_table(modules: &[crate::core::module::Module]) -> BTreeMap<String, ModuleTools> {
+    modules
+        .iter()
+        .map(|m| {
+            (m.manifest.id.clone(), ModuleTools { root: m.root.clone(), commands: m.manifest.tools.clone() })
+        })
+        .collect()
+}
+
+/// 成员的工具执行环境：来自 module.yaml（按模块分组的放行表）+ 注入的执行端口 + 本成员的沙箱。
+pub struct MemberTools {
+    /// 模块 id → 该模块的（目录, 工具表）；内置 read/write 不走这里。
+    pub modules: BTreeMap<String, ModuleTools>,
     pub runner: Arc<dyn ToolRunner + Send + Sync>,
+    /// 本成员的沙箱：内置文件工具的寻址与越界依据（权限收口在 core）。
+    pub sandbox: crate::core::workspace::Sandbox,
+    /// 内置文件工具的读写端口。
+    pub io: Arc<dyn crate::core::ports::SysIo + Send + Sync>,
+}
+
+/// 可用的外部工具清单：逐条列成「模块.工具」，末尾补上内置工具。
+/// 三种失败（模块不存在 / 模块没这个工具 / 缺 module 且模块不唯一）都用它把可选范围说回去。
+fn available_tools(ctx: &MemberTools) -> String {
+    let mut list: Vec<String> = Vec::new();
+    for (id, mt) in &ctx.modules {
+        for name in mt.commands.keys() {
+            list.push(format!("{}.{}", id, name));
+        }
+    }
+    list.extend(crate::core::systool::names());
+    list.join(&ctx.sandbox.texts.tool_list_separator)
+}
+
+fn deny(ctx: &MemberTools, why: String) -> ToolOutcome {
+    let texts = &ctx.sandbox.texts;
+    ToolOutcome {
+        ok: false,
+        output: texts.render(&texts.available_wrapper, &[("why", why), ("tools", available_tools(ctx))]),
+    }
+}
+
+/// 外部工具派发：先定模块（信封里的 module；省略时只有唯一模块才兜底），再查该模块的工具表。
+/// 返回（实际使用的模块 id, 执行结果）。不猜：多模块 agent 下省略 module 直接如实报错。
+fn dispatch_external(ctx: &MemberTools, inv: &ToolInvoke) -> (String, ToolOutcome) {
+    let module = match inv.module.as_deref() {
+        Some(m) => m.to_string(),
+        None if ctx.modules.len() == 1 => ctx.modules.keys().next().cloned().unwrap_or_default(),
+        None => {
+            let why = ctx
+                .sandbox
+                .texts
+                .render(&ctx.sandbox.texts.no_module_field, &[("tool", inv.name.clone())]);
+            return (String::new(), deny(ctx, why));
+        }
+    };
+    let Some(mt) = ctx.modules.get(&module) else {
+        let why = ctx.sandbox.texts.render(&ctx.sandbox.texts.unknown_module, &[("module", module.clone())]);
+        return (module.clone(), deny(ctx, why));
+    };
+    match mt.commands.get(&inv.name) {
+        Some(command) => (module, ctx.runner.run(&mt.root, command, &inv.args_json)),
+        None => {
+            let why = ctx.sandbox.texts.render(
+                &ctx.sandbox.texts.module_lacks_tool,
+                &[("module", module.clone()), ("tool", inv.name.clone())],
+            );
+            (module.clone(), deny(ctx, why))
+        }
+    }
 }
 
 pub struct Member {
@@ -82,7 +156,7 @@ impl Discussion {
                 (m.system.clone(), m.id.clone())
             };
             let msgs = vec![Msg::system(system), Msg::user(opener.clone())];
-            let raw = self.members[i].chat.complete(&msgs);
+            let raw = self.members[i].chat.complete(&msgs, false, &mut |_| true);
             let reply = envelope::parse(&raw);
             self.absorb(&id, reply.verb, reply.text, reply.degraded);
         }
@@ -95,6 +169,8 @@ impl Discussion {
         if self.closed {
             return TurnOut::Done;
         }
+        // 轮次边界：本轮的发言都在这条之后（回放时据此重算「本轮谁已同意」）。
+        self.transcript.push(format!("[轮次 {}]", self.round + 1));
         // 用户回答优先转达。
         if let Some(ans) = self.pending_user_answers.first().cloned() {
             self.pending_user_answers.remove(0);
@@ -120,7 +196,7 @@ impl Discussion {
                 &[("transcript", snapshot.join("\n"))],
             );
             let msgs = vec![Msg::system(system), Msg::user(step_prompt)];
-            let raw = self.members[i].chat.complete(&msgs);
+            let raw = self.members[i].chat.complete(&msgs, false, &mut |_| true);
             let reply = envelope::parse(&raw);
             let verb = reply.verb;
             let text = reply.text;
@@ -162,7 +238,7 @@ impl Discussion {
         };
         let mut line = format!("[{}:{}] {}", id, tag, text);
         if degraded {
-            line.push_str("　（信封缺失，按发言收录）");
+            line.push_str(&self.prompts.render(&self.prompts.core.tool_texts.discuss_degraded, &[]));
         }
         self.transcript.push(line);
     }
@@ -174,7 +250,7 @@ impl Discussion {
             &[("transcript", self.transcript.join("\n"))],
         );
         let msgs = vec![Msg::system(self.prompts.core.synthesize.system.clone()), Msg::user(user)];
-        core_chat.complete(&msgs)
+        core_chat.complete(&msgs, false, &mut |_| true)
     }
 }
 
@@ -192,8 +268,8 @@ pub struct CheckItem {
 /// 执行与验收：成员按任务干活并回报；核心对照回报产出结构化清单。
 pub struct Execution {
     pub reports: BTreeMap<String, String>,
-    /// 工具轨迹（成员 id → 轨迹行，如实呈现给用户）。
-    pub traces: BTreeMap<String, Vec<String>>,
+    /// 工具调用（成员 id → 该成员本轮的调用视图；会话据此发 tool 转录行）。
+    pub traces: BTreeMap<String, Vec<ToolCallView>>,
     /// 验收原始输出（解析失败时如实呈现）。
     pub checklist_raw: String,
     /// 结构化清单；空 = 解析失败（all_pass 保守判否）。
@@ -229,7 +305,8 @@ impl Execution {
                     ("report", self.reports.get(&m.id).cloned().unwrap_or_default()),
                 ],
             );
-            let (text, _) = self.collect_one(m, user);
+            let (text, views) = self.collect_one(m, user);
+            self.traces.entry(m.id.clone()).or_default().extend(views);
             self.reports.insert(m.id.clone(), text);
         }
     }
@@ -240,17 +317,16 @@ impl Execution {
             if !m.present {
                 continue;
             }
-            let (text, _) = self.collect_one(m, user_prompt.clone());
+            let (text, views) = self.collect_one(m, user_prompt.clone());
+            self.traces.entry(m.id.clone()).or_default().extend(views);
             self.reports.insert(m.id.clone(), text);
         }
     }
 
-    /// 单成员一次问询：拆字段借用（chat 可变 / tools 只读互不冲突），轨迹入册。
-    fn collect_one(&mut self, m: &mut Member, user_prompt: String) -> (String, Vec<String>) {
+    /// 单成员一次问询：拆字段借用（chat 可变 / tools 只读互不冲突），工具调用入册。
+    fn collect_one(&mut self, m: &mut Member, user_prompt: String) -> (String, Vec<ToolCallView>) {
         let Member { id, system, chat, tools, .. } = m;
-        let (text, trace, _) = converse(system, chat.as_mut(), tools.as_ref(), Msg::user(user_prompt));
-        self.traces.entry(id.clone()).or_default().extend(trace);
-        (text, Vec::new())
+        converse(system, chat.as_mut(), tools.as_ref(), id, Msg::user(user_prompt))
     }
 
     /// 验收：核心对照方案逐项核对，输出结构化 pass/fail 清单。
@@ -266,7 +342,7 @@ impl Execution {
             &[("plan", plan.to_string()), ("reports", reports)],
         );
         let msgs = vec![Msg::system(prompts.core.review.system.clone()), Msg::user(user)];
-        let raw = core_chat.complete(&msgs);
+        let raw = core_chat.complete(&msgs, false, &mut |_| true);
         self.items = envelope::extract_json_array(&raw)
             .and_then(|arr| serde_json::from_str::<Vec<CheckItem>>(&arr).ok())
             .unwrap_or_default();
@@ -279,58 +355,168 @@ impl Execution {
     }
 }
 
-/// 成员一次问询（含工具循环）：tool 信封 → 核心放行校验 → 执行端口 → 结果回注，直到最终答复。
-/// 返回（最终答复文本, 轨迹行, 本轮新增消息——直连会话并入历史，执行阶段丢弃）。
-/// 终止保证：超限后告知一次并强制收尾；其后再来 tool 信封按原文作答，不再执行。
+/// 一次工具调用的产出：调用视图 + 它压进历史的消息。
+pub struct ToolRun {
+    pub view: ToolCallView,
+    /// 该工具行压进历史的消息（[工具结果] …）。
+    pub msgs: Vec<Msg>,
+}
+
+/// 工具结果回注给模型的那条消息（文案来自册子：tool_result_wrapper）。
+fn tool_result_msg(texts: &crate::core::prompt::ToolTexts, view: &ToolCallView) -> Msg {
+    Msg::user(texts.render(&texts.tool_result_wrapper, &[("label", view.label()), ("output", view.output.clone())]))
+}
+
+/// 工具调用超限时告知模型的那条消息（文案来自册子：tool_cap）。
+fn tool_cap_msg(texts: &crate::core::prompt::ToolTexts) -> Msg {
+    Msg::user(texts.render(&texts.tool_cap, &[("n", MAX_TOOL_CALLS.to_string())]))
+}
+
+/// 一轮模型调用的产出（一轮 = 一条文本转录行；有工具时紧跟一条工具行）。
+/// 原始输出不进这里：工具轮由 ToolCallView.raw 承载、文本轮进上下文的就是解析后的文本。
+pub struct Round {
+    /// 解析后的可见文本（信封缺失时即原文）；工具轮为空串（它说的就是那封信封）。
+    pub text: String,
+    /// 该轮思维链（没给就是空串）。
+    pub reasoning: String,
+    /// 该轮压进历史的消息：工具轮 = [assistant(raw)]，末轮 = [assistant(text)]。
+    pub text_msgs: Vec<Msg>,
+    pub tool: Option<ToolRun>,
+}
+
+/// 成员一次问询（含工具循环，非流式）：返回（最终答复, 本轮全部工具调用视图）。
+/// 执行阶段不复用历史，所以不返回消息；单 agent 会话走 converse_with 逐轮取消息。
 pub(crate) fn converse(
     system: &str,
     chat: &mut dyn Chat,
     tools: Option<&MemberTools>,
+    speaker: &str,
     first: Msg,
-) -> (String, Vec<String>, Vec<Msg>) {
-    let mut msgs = vec![Msg::system(system.to_string()), first];
-    let mut trace: Vec<String> = Vec::new();
-    let mut forced_final = false;
-    loop {
-        let raw = chat.complete(&msgs);
-        let reply = envelope::parse(&raw);
-        match reply.tool.clone() {
-            Some(inv) if tools.is_some() && !forced_final => {
-                let ctx = tools.expect("上臂已判存在");
-                let outcome = if ctx.commands.contains_key(&inv.name) {
-                    ctx.runner.run(&ctx.root, &ctx.commands[&inv.name], &inv.args_json)
-                } else {
-                    let available = ctx.commands.keys().cloned().collect::<Vec<_>>().join("、");
-                    ToolOutcome { ok: false, output: format!("未声明的工具：{}。可用：{}", inv.name, available) }
-                };
-                trace.push(trace_line(&inv, &outcome));
-                msgs.push(Msg::assistant(raw));
-                msgs.push(Msg::user(format!("[工具结果] {}\n{}", inv.name, outcome.output)));
-                if trace.len() >= MAX_TOOL_CALLS {
-                    forced_final = true;
-                    msgs.push(Msg::user(format!(
-                        "[工具超限] 单次问询工具调用上限 {} 次已到，请直接给出最终答复，不再调用工具。",
-                        MAX_TOOL_CALLS
-                    )));
-                }
-            }
-            // 无工具环境 / 已超限：按原文作答（转录即内容），循环终止。
-            _ => return (reply.text, trace, msgs),
-        }
-    }
+) -> (String, Vec<ToolCallView>) {
+    let mut noop = |_c: Chunk| true;
+    let mut views: Vec<ToolCallView> = Vec::new();
+    let rounds = converse_with(
+        chat,
+        tools,
+        vec![Msg::system(system.to_string()), first],
+        false,
+        speaker,
+        &mut noop,
+        &mut |v: &ToolCallView| views.push(v.clone()),
+    );
+    // 末轮恒为文本轮（工具轮之后必然再问一次；超限后按原文作答也走文本轮）。
+    let text = rounds.last().map(|r| r.text.clone()).unwrap_or_default();
+    (text, views)
 }
 
-/// 轨迹行：工具名 + 参数摘要 → 成败（失败附输出尾部，供用户看懂发生了什么）。
-fn trace_line(inv: &ToolInvoke, o: &ToolOutcome) -> String {
-    let chars: Vec<char> = inv.args_json.chars().collect();
-    let mut preview: String = chars.iter().take(80).collect();
-    if chars.len() > 80 {
-        preview.push('…');
-    }
-    if o.ok {
-        format!("{}({}) → 成功", inv.name, preview)
-    } else {
-        let tail: String = o.output.chars().rev().take(160).collect::<Vec<_>>().into_iter().rev().collect();
-        format!("{}({}) → 失败：{}", inv.name, preview, tail)
+/// 从既有消息列表续跑，**逐轮**返回产出；顺序即 round0 文本 → round0 工具 → round1 文本 → …
+/// stream/on 透传给通道（呈现层在 on 里外送 Delta）；on 返回 false = 用户要求中止。
+/// on_tool 在每个工具跑完后立刻回调（工具行与文本行因此天然有序）。
+/// 终止保证：超限后告知一次并强制收尾；其后再来 tool 信封按原文作答，不再执行。
+pub(crate) fn converse_with(
+    chat: &mut dyn Chat,
+    tools: Option<&MemberTools>,
+    mut msgs: Vec<Msg>,
+    stream: bool,
+    speaker: &str,
+    on: &mut dyn FnMut(Chunk) -> bool,
+    on_tool: &mut dyn FnMut(&ToolCallView),
+) -> Vec<Round> {
+    let mut rounds: Vec<Round> = Vec::new();
+    let mut forced_final = false;
+    loop {
+        // 逐轮累积思维链（原文以通道返回值为准：非流式通道不回 Chunk）。
+        let mut reasoning = String::new();
+        let raw = {
+            let mut sink = |chunk: Chunk| {
+                match &chunk {
+                    Chunk::Start => reasoning.clear(),
+                    Chunk::Text(_) => {}
+                    Chunk::Reasoning(r) => reasoning.push_str(r),
+                }
+                on(chunk)
+            };
+            chat.complete(&msgs, stream, &mut sink)
+        };
+        let reply = envelope::parse(&raw);
+        match reply.tool.clone() {
+            // 信封非法：**不执行任何工具**，但记一条失败的工具行把"信封不合法"回注给模型（下一轮自己改）。
+            // 同样计入上限，所以模型反复输出非法信封最终会被强制收尾，不会死循环。
+            Some(inv) if inv.malformed && tools.is_some() && !forced_final => {
+                let ctx = tools.expect("上臂已判存在");
+                let view = ToolCallView {
+                    speaker: speaker.to_string(),
+                    module: inv.module.clone().unwrap_or_default(),
+                    name: inv.name.clone(),
+                    ok: false,
+                    args: inv.args_json.clone(),
+                    output: ctx.sandbox.texts.malformed_note.clone(),
+                    raw: raw.clone(),
+                };
+                on_tool(&view);
+                let texts = &ctx.sandbox.texts;
+                let raw_msg = Msg::assistant(raw.clone());
+                let result_msg = tool_result_msg(texts, &view);
+                msgs.push(raw_msg.clone());
+                msgs.push(result_msg.clone());
+                rounds.push(Round {
+                    text: reply.text.clone(),
+                    reasoning,
+                    text_msgs: vec![raw_msg],
+                    tool: Some(ToolRun { view, msgs: vec![result_msg] }),
+                });
+                if rounds.len() >= MAX_TOOL_CALLS {
+                    forced_final = true;
+                    msgs.push(tool_cap_msg(texts));
+                }
+            }
+            Some(inv) if tools.is_some() && !forced_final => {
+                let ctx = tools.expect("上臂已判存在");
+                // 内置工具（read/write）优先且不属于任何模块；外部工具按模块定 cwd。
+                let (module, outcome) = if crate::core::systool::is_builtin(&inv.name) {
+                    (String::new(), crate::core::systool::execute(&ctx.sandbox, ctx.io.as_ref(), &inv.name, &inv.args_json))
+                } else {
+                    dispatch_external(ctx, &inv)
+                };
+                let view = ToolCallView {
+                    speaker: speaker.to_string(),
+                    module,
+                    name: inv.name.clone(),
+                    ok: outcome.ok,
+                    args: inv.args_json.clone(),
+                    output: outcome.output.clone(),
+                    raw: raw.clone(),
+                };
+                on_tool(&view);
+                let texts = &ctx.sandbox.texts;
+                let raw_msg = Msg::assistant(raw.clone());
+                let result_msg = tool_result_msg(texts, &view);
+                msgs.push(raw_msg.clone());
+                msgs.push(result_msg.clone());
+                // text = 信封之外的那段正文（可能为空；信封 JSON 已被 parse 剥掉，永不进 text）。
+                // 这一轮的历史只有 assistant(raw)（raw 含正文+信封）：若它先出文本行，
+                // 那条行自己不推历史，统一由紧随的工具行推进（见 session 与 rebuild 的分组规则）。
+                rounds.push(Round {
+                    text: reply.text.clone(),
+                    reasoning,
+                    text_msgs: vec![raw_msg],
+                    tool: Some(ToolRun { view, msgs: vec![result_msg] }),
+                });
+                if rounds.len() >= MAX_TOOL_CALLS {
+                    forced_final = true;
+                    msgs.push(tool_cap_msg(texts));
+                }
+            }
+            // 无工具环境 / 已超限：按原文口径如实收录（信封已被剥掉，显示文本里不会有 JSON），循环终止。
+            _ => {
+                // 只有会出文本行（有正文或思维链）时才往历史里放这条 assistant，
+                // 否则实时历史会比重建历史多一条空消息。
+                let text = reply.text;
+                let has_line = !text.trim().is_empty() || !reasoning.trim().is_empty();
+                let text_msgs = if has_line { vec![Msg::assistant(text.trim().to_string())] } else { Vec::new() };
+                rounds.push(Round { text, reasoning, text_msgs, tool: None });
+                return rounds;
+            }
+        }
     }
 }

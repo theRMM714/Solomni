@@ -1,5 +1,6 @@
 //! 模块打包契约（module.yaml）与扫描结果。
 //! 目录遍历机制在 adapters（ModuleSource 端口）；「清单即事实」的重扫策略由 core 执行。
+//! 模型选择是会话级决定（记录在会话里），模块清单不再承载模型/供应商偏好。
 
 use serde::Deserialize;
 use std::collections::BTreeMap;
@@ -11,53 +12,61 @@ pub struct ModuleManifest {
     pub id: String,
     pub brief: String,
     pub system: String,
-    /// 工具表：工具名 → 启动命令（模块作者声明；核心按此表放行，机制在 ToolRunner 适配层）。
+    /// 外部工具表：工具名 → 启动命令（模块作者声明；核心按此表放行，机制在 ToolRunner 适配层）。
+    /// 内置工具名（read/write）为保留名，模块不得占用。
     #[serde(default)]
     pub tools: BTreeMap<String, String>,
-    #[serde(default)]
-    pub model: ModelPrefs,
-}
-
-/// 模型偏好：按 prefer/provider 选模型（联动 providers 解析链）。
-// 预留字段：prefer 供多模型供应商下按用途选模型（实现期接入）。
-#[derive(Debug, Clone, Default, Deserialize)]
-#[allow(dead_code)]
-pub struct ModelPrefs {
-    #[serde(default)]
-    pub prefer: Option<String>,
-    #[serde(default)]
-    pub provider: Option<String>,
 }
 
 /// 一个已发现的模块 = 文件夹 + 清单。
-// 预留字段：root 供工具执行器定位模块工作区（工具接入期使用）。
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub struct Module {
     pub manifest: ModuleManifest,
     pub root: PathBuf,
-    /// model.config.yaml 的当前选择（运行期选择记录，只有 id，永不密钥）。
-    pub selected_provider: Option<String>,
 }
 
-impl Module {
-    /// 模块 AI 的初始上下文：职责提示词 + 工具清单。
-    pub fn system_block(&self, prompts: &crate::core::prompt::Prompts) -> String {
-        if self.manifest.tools.is_empty() {
-            prompts.render(&prompts.core.module_system, &[("system", self.manifest.system.trim().to_string())])
-        } else {
-            let tools = self
+/// 一个 agent 的职责提示词：把它的模块 system 合成一份能力包，再挂内置工具说明与外部工具清单。
+/// 模块只是能力包（没有"发言"这回事）；发言席是 agent，所以这份 system 按 agent 成文。
+/// sys_tools 由 core::systool 按该 agent 的沙箱渲染后传入。
+pub fn agent_system(prompts: &crate::core::prompt::Prompts, agent: &str, modules: &[Module], sys_tools: &str) -> String {
+    let parts = modules
+        .iter()
+        .map(|m| format!("\n== {} ==\n{}", m.manifest.id, m.manifest.system.trim()))
+        .collect::<Vec<_>>()
+        .join("");
+    prompts.render(
+        &prompts.core.agent.system,
+        &[
+            ("agent", agent.to_string()),
+            ("modules", parts),
+            ("sys_tools", sys_tools.to_string()),
+            ("module_tools", module_tools(prompts, modules)),
+        ],
+    )
+}
+
+/// 该 agent 的外部工具清单：**按模块分组，每行一个模块**（模块 id：工具名、…）。
+/// 模型据此在信封里写 module；都没有声明工具时用册子里的说法（用法不变）。
+pub fn module_tools(prompts: &crate::core::prompt::Prompts, modules: &[Module]) -> String {
+    let texts = &prompts.core.tool_texts;
+    let lines: Vec<String> = modules
+        .iter()
+        .filter(|m| !m.manifest.tools.is_empty())
+        .map(|m| {
+            let names = m
                 .manifest
                 .tools
                 .keys()
-                .map(|t| format!("- {}", t))
+                .cloned()
                 .collect::<Vec<_>>()
-                .join("\n");
-            prompts.render(
-                &prompts.core.module_system_tools,
-                &[("system", self.manifest.system.trim().to_string()), ("tools", tools)],
-            )
-        }
+                .join(&texts.tool_list_separator);
+            texts.render(&texts.module_tools_line, &[("id", m.manifest.id.clone()), ("tools", names)])
+        })
+        .collect();
+    if lines.is_empty() {
+        prompts.core.no_module_tools.clone()
+    } else {
+        lines.join("\n")
     }
 }
 
@@ -67,8 +76,12 @@ pub struct Roster {
     pub rejected: Vec<String>,
 }
 
-/// model.config.yaml —— 运行期供应商选择记录（只有 id，永不密钥）。
-#[derive(Debug, Deserialize)]
-pub struct ProviderRef {
-    pub provider: Option<String>,
+/// 模块公地清单（拟名单时给模型看）：id / 简述。
+pub fn listing(roster: &Roster, texts: &crate::core::prompt::ToolTexts) -> String {
+    roster
+        .modules
+        .iter()
+        .map(|m| texts.render(&texts.module_listing_line, &[("id", m.manifest.id.clone()), ("brief", m.manifest.brief.clone())]))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
