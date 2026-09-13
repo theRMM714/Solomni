@@ -6,11 +6,13 @@ pub mod fs_modules;
 pub mod log;
 pub mod http_chat;
 pub mod fake_chat;
+pub mod proc_tools;
 pub mod yaml_prompts;
 pub mod yaml_registry;
 
 pub use fs_modules::FsModules;
 pub use http_chat::HttpGateway;
+pub use proc_tools::ProcTools;
 pub use yaml_prompts::YamlPrompts;
 pub use yaml_registry::YamlRegistryStore;
 pub use log::FileLog;

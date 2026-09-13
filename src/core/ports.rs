@@ -59,6 +59,18 @@ pub trait PromptSource {
     fn load(&self) -> Result<Prompts, String>;
 }
 
+/// 一次工具执行结果：ok = 退出码成功；output 已截断（截断规则在适配层）。
+pub struct ToolOutcome {
+    pub ok: bool,
+    pub output: String,
+}
+
+/// 工具执行端口：机制（进程拉起/stdin 送参/超时/截断）在适配层。
+/// 策略在核心：哪个模块能调哪个工具、命令映射，由核心按 module.yaml 放行后传入。
+pub trait ToolRunner {
+    fn run(&self, root: &std::path::Path, command: &str, args_json: &str) -> ToolOutcome;
+}
+
 /// 运行日志端口：关键节点（异常/降级/边界）落盘，供事后确定问题，避免过度推理。
 /// core 只调用；文件/时间戳/目录机制在适配层。
 pub trait Log: Send + Sync {

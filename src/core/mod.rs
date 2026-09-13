@@ -13,7 +13,7 @@ pub mod providers;
 pub mod session;
 
 pub use events::{Pending, SessionEvent};
-pub use ports::{ChatGateway, ModuleSource, PromptSource, ProviderStore};
+pub use ports::{ChatGateway, ModuleSource, PromptSource, ProviderStore, ToolRunner};
 
 use crate::core::collab::CollabSession;
 use crate::core::module::Module;
@@ -47,6 +47,7 @@ pub struct Core {
     store: Arc<dyn ProviderStore + Send + Sync>,
     source: Arc<dyn ModuleSource + Send + Sync>,
     gateway: Arc<dyn ChatGateway + Send + Sync>,
+    tools: Arc<dyn ToolRunner + Send + Sync>,
     log: Arc<dyn crate::core::ports::Log + Send + Sync>,
     registry: Registry,
     prompts: Prompts,
@@ -60,6 +61,7 @@ impl Core {
         store: Arc<dyn ProviderStore + Send + Sync>,
         source: Arc<dyn ModuleSource + Send + Sync>,
         gateway: Arc<dyn ChatGateway + Send + Sync>,
+        tools: Arc<dyn ToolRunner + Send + Sync>,
         prompt_source: Box<dyn PromptSource>,
         log: Arc<dyn crate::core::ports::Log + Send + Sync>,
     ) -> Result<Core, String> {
@@ -67,7 +69,7 @@ impl Core {
         let outcome = (|| -> Result<Core, String> {
             let registry = store.load()?;
             let prompts = prompt_source.load()?;
-            Ok(Core { store, source, gateway, log: log_for_core, registry, prompts, sessions: HashMap::new(), next_id: 1 })
+            Ok(Core { store, source, gateway, tools, log: log_for_core, registry, prompts, sessions: HashMap::new(), next_id: 1 })
         })();
         if let Err(e) = &outcome {
             log.error("core::new", &format!("装配失败：{}", e)); // 仅错误时借用，不与闭包 move 冲突
@@ -151,7 +153,16 @@ impl Core {
             .map(|(_, p)| p);
         let (chat, note) = self.gateway.member_channel(provider, id);
         self.log.info("core::start_direct", &format!("直连会话：模块 {}，供应商 {}", id, provider.map(|p| p.base_url.as_str()).unwrap_or("无（演示）")));
-        let s = session::DirectSession::new(id, m.system_block(&self.prompts), chat, note);
+        let tools = if m.manifest.tools.is_empty() {
+            None
+        } else {
+            Some(crate::core::engine::MemberTools {
+                root: m.root.clone(),
+                commands: m.manifest.tools.clone(),
+                runner: Arc::clone(&self.tools),
+            })
+        };
+        let s = session::DirectSession::new(id, m.system_block(&self.prompts), chat, note, tools);
         let opened = s.open();
         let sid = self.put(Session::Direct(s));
         Ok((sid, opened))
@@ -186,6 +197,7 @@ impl Core {
             Arc::clone(&self.source),
             &self.registry,
             self.prompts.clone(),
+            Arc::clone(&self.tools),
             ids,
         );
         match &outcome {
@@ -200,7 +212,7 @@ impl Core {
     /// 直连发言。
     pub fn direct_say(&mut self, sid: SessionId, text: &str) -> Result<Vec<SessionEvent>, String> {
         match self.sessions.get_mut(&sid) {
-            Some(Session::Direct(d)) => Ok(vec![d.say(text)]),
+            Some(Session::Direct(d)) => Ok(d.say(text)),
             Some(_) => Err("该会话不是直连模式".to_string()),
             None => Err("无此会话".to_string()),
         }

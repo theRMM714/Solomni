@@ -2,11 +2,11 @@
 //! 前端经 Core 门面按 pending 驱动（set_task → confirm_slate? → begin → answer…），泵式收事件。
 //! 依赖全部为端口与核心数据（Registry 只是数据快照）；无 IO，无具体适配器。
 
-use crate::core::engine::{Discussion, Execution, Member, TurnOut, MAX_REWORK, MAX_ROUNDS};
+use crate::core::engine::{Discussion, Execution, Member, MemberTools, TurnOut, MAX_REWORK, MAX_ROUNDS};
 use crate::core::envelope;
 use crate::core::events::{CheckView, Pending, SessionEvent};
 use crate::core::module::Module;
-use crate::core::ports::{ChatGateway, ModuleSource, Msg};
+use crate::core::ports::{ChatGateway, ModuleSource, Msg, ToolRunner};
 use crate::core::prompt::Prompts;
 use crate::core::providers::Registry;
 use std::sync::Arc;
@@ -32,6 +32,8 @@ pub struct CollabSession {
     prompts: Prompts,
     gateway: Arc<dyn ChatGateway + Send + Sync>,
     source: Arc<dyn ModuleSource + Send + Sync>,
+    /// 工具执行端口（策略在核心按清单放行，机制在适配层）。
+    tools: Arc<dyn ToolRunner + Send + Sync>,
     done: bool,
 }
 
@@ -42,6 +44,7 @@ impl CollabSession {
         source: Arc<dyn ModuleSource + Send + Sync>,
         registry: &Registry,
         prompts: Prompts,
+        tools: Arc<dyn ToolRunner + Send + Sync>,
         ids: &str,
     ) -> Result<CollabSession, String> {
         let roster = source.scan();
@@ -72,6 +75,7 @@ impl CollabSession {
             prompts,
             gateway,
             source,
+            tools,
             done: false,
         })
     }
@@ -178,7 +182,15 @@ impl CollabSession {
             if let Some(n) = note {
                 sink(SessionEvent::Notice(n));
             }
-            members.push(Member::new(&m.manifest.id, m.system_block(&prompts), chat));
+            let mut member = Member::new(&m.manifest.id, m.system_block(&prompts), chat);
+            if !m.manifest.tools.is_empty() {
+                member.tools = Some(MemberTools {
+                    root: m.root.clone(),
+                    commands: m.manifest.tools.clone(),
+                    runner: Arc::clone(&self.tools),
+                });
+            }
+            members.push(member);
         }
         if self.core_is_demo {
             sink(SessionEvent::Notice("[提示] 核心未配置供应商：整理/验收使用内置假模型（演示）".into()));
@@ -237,6 +249,7 @@ impl CollabSession {
         let members = self.disc.as_mut().expect("disc 存在").members.as_mut_slice();
         let mut exec = Execution::run(members, &plan, &prompts);
         for (id, text) in &exec.reports {
+            emit_traces(&exec, id, sink);
             sink(SessionEvent::Report { id: id.clone(), text: text.clone(), rework: 0 });
         }
         exec.review(self.core_chat.as_mut(), &plan, &prompts);
@@ -247,6 +260,7 @@ impl CollabSession {
             let members = self.disc.as_mut().expect("disc 存在").members.as_mut_slice();
             exec.rerun(members, &plan, &review_text, &prompts);
             for (id, text) in &exec.reports {
+                emit_traces(&exec, id, sink);
                 sink(SessionEvent::Report { id: id.clone(), text: text.clone(), rework: exec.rework });
             }
             exec.review(self.core_chat.as_mut(), &plan, &prompts);
@@ -261,6 +275,13 @@ impl CollabSession {
     /// 会话是否已终结。
     pub fn is_done(&self) -> bool {
         self.done
+    }
+}
+
+/// 某成员的工具轨迹以 Notice 如实呈现（成功/失败/超限一致可见）。
+fn emit_traces(exec: &Execution, id: &str, sink: &mut dyn FnMut(SessionEvent)) {
+    for t in exec.traces.get(id).into_iter().flatten() {
+        sink(SessionEvent::Notice(format!("[{}:工具] {}", id, t)));
     }
 }
 

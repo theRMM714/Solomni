@@ -3,9 +3,9 @@
 //! Web 阶段适配：适配器以 Arc 注入；会话经中心 id 收发；SharedScript 对齐真实通道时序。
 
 use crate::adapters::fake_chat::FakeChat;
-use crate::core::engine::{Discussion, Member, TurnOut, MAX_ROUNDS};
+use crate::core::engine::{Discussion, Member, MemberTools, TurnOut, MAX_ROUNDS, MAX_TOOL_CALLS};
 use crate::core::module::{Module, ModuleManifest};
-use crate::core::ports::{BoxedChat, Chat, ChatGateway, ModuleSource, Msg, PromptSource, ProviderStore};
+use crate::core::ports::{BoxedChat, Chat, ChatGateway, ModuleSource, Msg, PromptSource, ProviderStore, ToolOutcome, ToolRunner};
 use crate::core::prompt::{render, Prompts};
 use crate::core::providers::{Provider, Registry};
 use crate::core::{CollabStep, Core, Pending, SessionEvent};
@@ -49,7 +49,7 @@ fn module_of(id: &str) -> Module {
             id: id.to_string(),
             brief: format!("{} 的简介", id),
             system: format!("你负责{}", id),
-            tools: Vec::new(),
+            tools: BTreeMap::new(),
             model: Default::default(),
         },
         root: PathBuf::from(id),
@@ -109,10 +109,15 @@ fn test_prompts() -> Prompts {
 }
 
 fn core_with(modules: Vec<Module>, gateway: ScriptGateway) -> Core {
+    core_with_runner(modules, gateway, Arc::new(SilentRunner))
+}
+
+fn core_with_runner(modules: Vec<Module>, gateway: ScriptGateway, runner: Arc<impl ToolRunner + Send + Sync + 'static>) -> Core {
     Core::new(
         Arc::new(InMemoryStore::new()),
         Arc::new(VecSource(modules)),
         Arc::new(gateway),
+        runner,
         Box::new(TestPrompts),
         Arc::new(crate::core::ports::NoopLog),
     )
@@ -416,4 +421,170 @@ fn extract_balanced_array() {
     assert!(got.starts_with('[') && got.ends_with(']'));
     let obj = crate::core::envelope::extract_json_object("x {\"k\":\"{\"} y").unwrap();
     assert!(obj.starts_with('{') && obj.ends_with('}'));
+}
+
+// ---------- 工具执行器 ----------
+
+/// 守护 runner：任何调用即失败（守护不该用工具的路径）。
+struct SilentRunner;
+impl ToolRunner for SilentRunner {
+    fn run(&self, _root: &std::path::Path, _command: &str, _args: &str) -> ToolOutcome {
+        panic!("不应调用工具");
+    }
+}
+
+/// 记录型 runner：记录 (root, command, args)，回放固定输出。
+struct RecordingRunner {
+    calls: Mutex<Vec<(PathBuf, String, String)>>,
+    out: String,
+    ok: bool,
+}
+impl ToolRunner for RecordingRunner {
+    fn run(&self, root: &std::path::Path, command: &str, args_json: &str) -> ToolOutcome {
+        self.calls
+            .lock()
+            .expect("锁")
+            .push((root.to_path_buf(), command.to_string(), args_json.to_string()));
+        ToolOutcome { ok: self.ok, output: self.out.clone() }
+    }
+}
+
+const TOOL_CALL: &str = "{\"type\":\"tool\",\"name\":\"grep\",\"args\":{\"keyword\":\"x\"}}";
+
+/// 带工具环境的成员：声明 grep → python tools/grep.py。
+fn member_with_tools(id: &str, script: Vec<String>, runner: Arc<impl ToolRunner + Send + Sync + 'static>) -> Member {
+    let mut commands = BTreeMap::new();
+    commands.insert("grep".to_string(), "python tools/grep.py".to_string());
+    let mut m = Member::new(id, "职责".to_string(), scripted(script));
+    m.tools = Some(MemberTools { root: PathBuf::from("mods/root"), commands, runner });
+    m
+}
+
+#[test]
+fn envelope_tool_parses_name_and_args() {
+    let r = crate::core::envelope::parse(TOOL_CALL);
+    assert_eq!(r.verb, crate::core::envelope::Verb::Tool);
+    let inv = r.tool.expect("应有调用申请");
+    assert_eq!(inv.name, "grep");
+    assert!(inv.args_json.contains("keyword"));
+    // name 缺失 = 不合法 tool 信封 → 不猜测，降级按原文收录。
+    let bad = crate::core::envelope::parse("{\"type\":\"tool\",\"args\":{}}");
+    assert!(bad.tool.is_none());
+    assert!(bad.text.contains("tool"));
+}
+
+#[test]
+fn tool_loop_runs_declared_tool() {
+    let runner = Arc::new(RecordingRunner { calls: Mutex::new(Vec::new()), out: "  3 | 命中行".into(), ok: true });
+    let mut m = member_with_tools(
+        "m0",
+        vec![TOOL_CALL.into(), "{\"type\":\"say\",\"text\":\"完成\"}".into()],
+        Arc::clone(&runner),
+    );
+    let prompts = test_prompts();
+    let exec = crate::core::engine::Execution::run(std::slice::from_mut(&mut m), "任务", &prompts);
+    assert_eq!(exec.reports.get("m0").map(|s| s.as_str()), Some("完成"));
+    let calls = runner.calls.lock().expect("锁");
+    assert_eq!(calls.len(), 1, "声明过的工具应恰好执行一次");
+    assert_eq!(calls[0].0, PathBuf::from("mods/root"), "工具进程工作目录 = 模块工作区");
+    assert_eq!(calls[0].1, "python tools/grep.py", "命令来自模块清单");
+    assert!(calls[0].2.contains("keyword"), "参数以 JSON 原样送达");
+    let trace = exec.traces.get("m0").expect("轨迹应入册");
+    assert!(trace.iter().any(|t| t.contains("grep") && t.contains("成功")));
+}
+
+#[test]
+fn tool_loop_rejects_undeclared_tool() {
+    let runner = Arc::new(RecordingRunner { calls: Mutex::new(Vec::new()), out: String::new(), ok: true });
+    let mut m = member_with_tools(
+        "m0",
+        vec!["{\"type\":\"tool\",\"name\":\"nope\",\"args\":{}}".into(), "{\"type\":\"say\",\"text\":\"完成\"}".into()],
+        Arc::clone(&runner),
+    );
+    let prompts = test_prompts();
+    let exec = crate::core::engine::Execution::run(std::slice::from_mut(&mut m), "任务", &prompts);
+    assert!(runner.calls.lock().expect("锁").is_empty(), "未声明的工具绝不落进程");
+    assert_eq!(exec.reports.get("m0").map(|s| s.as_str()), Some("完成"));
+    let trace = exec.traces.get("m0").expect("轨迹应入册");
+    assert!(trace.iter().any(|t| t.contains("未声明")));
+}
+
+#[test]
+fn shipped_modules_scan_clean() {
+    // 随仓模块（modules/）是产品内容的一部分：清单必须全部合法、id 与目录一致。
+    let roster = crate::adapters::FsModules::new(PathBuf::from("modules")).scan();
+    assert!(!roster.modules.is_empty(), "仓库应自带模块");
+    assert!(roster.rejected.is_empty(), "随仓清单必须全部合法：{:?}", roster.rejected);
+    assert!(roster.modules.iter().any(|m| m.manifest.id == "summarizer"));
+    assert!(roster.modules.iter().any(|m| m.manifest.id == "reviewer"));
+}
+
+#[test]
+fn tool_loop_cap_forces_final_answer() {
+    let runner = Arc::new(RecordingRunner { calls: Mutex::new(Vec::new()), out: "r".into(), ok: true });
+    let mut script: Vec<String> = (0..MAX_TOOL_CALLS).map(|_| TOOL_CALL.to_string()).collect();
+    script.push("{\"type\":\"say\",\"text\":\"最终回报\"}".into());
+    let mut m = member_with_tools("m0", script, Arc::clone(&runner));
+    let prompts = test_prompts();
+    let exec = crate::core::engine::Execution::run(std::slice::from_mut(&mut m), "任务", &prompts);
+    assert_eq!(runner.calls.lock().expect("锁").len(), MAX_TOOL_CALLS, "调用数封顶");
+    assert_eq!(exec.reports.get("m0").map(|s| s.as_str()), Some("最终回报"), "超限后强制收尾");
+}
+
+#[test]
+fn core_direct_tool_flow_injects_result_into_history() {
+    let runner = Arc::new(RecordingRunner { calls: Mutex::new(Vec::new()), out: "  3 | 依据行".into(), ok: true });
+    let mut member = BTreeMap::new();
+    member.insert("a".to_string(), vec![
+        TOOL_CALL.to_string(),
+        "{\"type\":\"say\",\"text\":\"依据第 3 行，结论成立\"}".to_string(),
+    ]);
+    let mut manifest_tools = BTreeMap::new();
+    manifest_tools.insert("grep".to_string(), "python tools/grep.py".to_string());
+    let mut mod_a = module_of("a");
+    mod_a.manifest.tools = manifest_tools;
+    let mut core = core_with_runner(vec![mod_a], gw(member, vec!["[]".into()]), Arc::clone(&runner));
+    let (sid, _open) = core.start_direct("a").unwrap();
+    let events = core.direct_say(sid, "核对一下").unwrap();
+    // 工具轨迹以 Notice 呈现，最终答复入转录。
+    assert!(events.iter().any(|e| matches!(e, SessionEvent::Notice(n) if n.contains("[a:工具]") && n.contains("成功"))));
+    assert!(events.iter().any(|e| matches!(e, SessionEvent::Transcript(lines) if lines[0].contains("结论成立"))));
+    // 历史完整：用户消息 → 工具信封原文 → 工具结果 → 最终答复。
+    let h = core.direct_history(sid).unwrap();
+    assert!(h.iter().any(|m| m.role == "user" && m.content.contains("[工具结果] grep")), "工具结果必须回注上下文");
+    assert!(h.iter().any(|m| m.role == "assistant" && m.content.contains("结论成立")));
+    assert_eq!(runner.calls.lock().expect("锁").len(), 1);
+}
+
+#[test]
+fn core_collab_tool_modules_run_in_execution() {
+    let runner = Arc::new(RecordingRunner { calls: Mutex::new(Vec::new()), out: "  1 | 内容".into(), ok: true });
+    let mut member = BTreeMap::new();
+    // 脚本排布：讨论开场 say → 讨论 step agree（收敛）→ 执行阶段 TOOL_CALL → 最终回报。
+    member.insert("a".to_string(), vec![
+        "{\"type\":\"say\",\"text\":\"建议直接做\"}".to_string(),
+        "{\"type\":\"agree\",\"text\":\"同意\"}".to_string(),
+        TOOL_CALL.to_string(),
+        "{\"type\":\"say\",\"text\":\"执行完毕，见依据\"}".to_string(),
+    ]);
+    let mut mod_a = module_of("a");
+    let mut manifest_tools = BTreeMap::new();
+    manifest_tools.insert("grep".to_string(), "python tools/grep.py".to_string());
+    mod_a.manifest.tools = manifest_tools;
+    // 核心脚本：整理（方案）→ 验收（全过）。
+    let mut core = core_with_runner(
+        vec![mod_a],
+        gw(member, vec![
+            "{\"type\":\"say\",\"text\":\"方案：查证后回报\"}".into(),
+            "[{\"item\":\"查证\",\"status\":\"pass\"}]".into(),
+        ]),
+        Arc::clone(&runner),
+    );
+    let sid = core.start_collab("a").unwrap();
+    let mut events = core.collab_continue(sid, CollabStep::SetTask, "任务").unwrap();
+    events.extend(core.collab_continue(sid, CollabStep::Begin, "").unwrap());
+    // 工具只在执行阶段跑：轨迹呈现 + 恰好一次进程调用。
+    assert!(events.iter().any(|e| matches!(e, SessionEvent::Notice(n) if n.contains("[a:工具]") && n.contains("成功"))), "执行阶段工具轨迹应呈现");
+    assert!(events.iter().any(|e| matches!(e, SessionEvent::Delivery { ok: true, .. })), "验收应通过");
+    assert_eq!(runner.calls.lock().expect("锁").len(), 1);
 }

@@ -34,12 +34,14 @@ fn main() {
     let store = adapters::YamlRegistryStore::new(root.join(".home").join("providers.yaml"));
     let source = adapters::FsModules::new(root.join("modules"));
     let gateway = adapters::HttpGateway::with_log(std::sync::Arc::clone(&log));
+    let tools = adapters::ProcTools::default();
     let prompts = adapters::YamlPrompts::new(root.join("prompts.yaml"));
 
     let core = match core::Core::new(
         Arc::new(store),
         Arc::new(source),
         Arc::new(gateway),
+        Arc::new(tools),
         Box::new(prompts),
         std::sync::Arc::clone(&log),
     ) {

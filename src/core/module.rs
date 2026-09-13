@@ -2,6 +2,7 @@
 //! 目录遍历机制在 adapters（ModuleSource 端口）；「清单即事实」的重扫策略由 core 执行。
 
 use serde::Deserialize;
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 /// module.yaml —— 打包契约。模块对世界的全部自我介绍。
@@ -10,8 +11,9 @@ pub struct ModuleManifest {
     pub id: String,
     pub brief: String,
     pub system: String,
+    /// 工具表：工具名 → 启动命令（模块作者声明；核心按此表放行，机制在 ToolRunner 适配层）。
     #[serde(default)]
-    pub tools: Vec<String>,
+    pub tools: BTreeMap<String, String>,
     #[serde(default)]
     pub model: ModelPrefs,
 }
@@ -47,7 +49,7 @@ impl Module {
             let tools = self
                 .manifest
                 .tools
-                .iter()
+                .keys()
                 .map(|t| format!("- {}", t))
                 .collect::<Vec<_>>()
                 .join("\n");
