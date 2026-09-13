@@ -126,9 +126,17 @@ pub enum TurnOut {
     Done,
 }
 
+/// 讨论转录的一行：文本 + 该行是否"信封缺失、按发言原文收录"。
+/// 降级是结构化信号（呈现层与后续判断都读它），文本里那句说明只给人和模型看。
+#[derive(Debug, Clone)]
+pub struct DiscLine {
+    pub text: String,
+    pub degraded: bool,
+}
+
 pub struct Discussion {
     pub members: Vec<Member>,
-    pub transcript: Vec<String>,
+    pub transcript: Vec<DiscLine>,
     pub round: usize,
     /// 用户对 ask 的回答在此队列：先入先转达。
     pub pending_user_answers: Vec<String>,
@@ -170,11 +178,11 @@ impl Discussion {
             return TurnOut::Done;
         }
         // 轮次边界：本轮的发言都在这条之后（回放时据此重算「本轮谁已同意」）。
-        self.transcript.push(format!("[轮次 {}]", self.round + 1));
+        self.transcript.push(DiscLine { text: format!("[轮次 {}]", self.round + 1), degraded: false });
         // 用户回答优先转达。
         if let Some(ans) = self.pending_user_answers.first().cloned() {
             self.pending_user_answers.remove(0);
-            self.transcript.push(format!("[用户] {}", ans));
+            self.transcript.push(DiscLine { text: format!("[用户] {}", ans), degraded: false });
         }
         // 同意是针对方案的：转录变化后以本轮最新表态为准。
         for m in self.members.iter_mut() {
@@ -193,7 +201,7 @@ impl Discussion {
             }
             let step_prompt = self.prompts.render(
                 &self.prompts.core.discuss.step,
-                &[("transcript", snapshot.join("\n"))],
+                &[("transcript", snapshot.iter().map(|l| l.text.clone()).collect::<Vec<_>>().join("\n"))],
             );
             let msgs = vec![Msg::system(system), Msg::user(step_prompt)];
             let raw = self.members[i].chat.complete(&msgs, false, &mut |_| true);
@@ -208,7 +216,8 @@ impl Discussion {
                 Verb::Agree => m.agreed = true,
                 Verb::Ask => {
                     if self.allow_autonomy {
-                        self.transcript.push(self.prompts.core.discuss.autonomy_note.clone());
+                        let note = self.prompts.core.discuss.autonomy_note.clone();
+                        self.transcript.push(DiscLine { text: note, degraded: false });
                         continue;
                     }
                     return TurnOut::AskUser { member: id, question: text };
@@ -240,14 +249,14 @@ impl Discussion {
         if degraded {
             line.push_str(&self.prompts.render(&self.prompts.core.tool_texts.discuss_degraded, &[]));
         }
-        self.transcript.push(line);
+        self.transcript.push(DiscLine { text: line, degraded });
     }
 
     /// 全员同意后：核心整理——总结讨论，为每个留下的成员写执行任务提示词。
     pub fn synthesize(&self, core_chat: &mut dyn Chat) -> String {
         let user = self.prompts.render(
             &self.prompts.core.synthesize.user,
-            &[("transcript", self.transcript.join("\n"))],
+            &[("transcript", self.transcript.iter().map(|l| l.text.clone()).collect::<Vec<_>>().join("\n"))],
         );
         let msgs = vec![Msg::system(self.prompts.core.synthesize.system.clone()), Msg::user(user)];
         core_chat.complete(&msgs, false, &mut |_| true)

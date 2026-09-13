@@ -75,7 +75,7 @@ impl ToolCallView {
 
 /// 一条转录行：id = 会话内稳定序号（自 0 递增，回放可复现）。
 /// 一行 = 一轮模型调用；工具调用另占一行并带上调用视图。
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct LineView {
     pub id: u64,
     pub line: String,
@@ -85,6 +85,15 @@ pub struct LineView {
     /// 该行是一次工具调用时带上调用视图；普通文本行没有。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool: Option<ToolCallView>,
+    /// 该行是"信封缺失、按发言原文收录"的降级行。
+    /// **结构化信号**：呈现层据此做样式，不靠匹配行文本里的说明文案。
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub degraded: bool,
+}
+
+/// serde 用：false 时不写进线格式。
+fn is_false(b: &bool) -> bool {
+    !*b
 }
 
 /// 验收条目的呈现视图。
