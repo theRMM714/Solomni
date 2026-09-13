@@ -1,5 +1,5 @@
-//! Web 转录中心：tiny_http 服务器 + 流式 SSE 实时推送。
-//! 只做协议适配（HTTP/SSE 与 Core 门面之间的转译）；渲染在浏览器（app.js）。
+//! Web 转录中心：tiny_http 服务器 + 长轮询增量事件推送。
+//! 只做协议适配（HTTP/长轮询与 Core 门面之间的转译）；渲染在浏览器（app.js）。
 //! 安全底线：只绑 127.0.0.1；密钥永不进任何响应（门面已保证前端只见 id）。
 
 use crate::core::{CollabStep, Core, Pending, SessionEvent};
