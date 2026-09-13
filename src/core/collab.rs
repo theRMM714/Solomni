@@ -1,166 +1,213 @@
 //! 协作会话状态机：建组 → 讨论 → 整理 → 执行 → 验收（拉模式）。
 //! 前端经 Core 门面按 pending 驱动（set_task → confirm_slate? → begin → answer…），泵式收事件。
-//! 依赖全部为端口与核心数据（Registry 只是数据快照）；无 IO，无具体适配器。
+//! 发言席只有 agent：名单是 Vec<AgentMeta>（名字 / 模块 / 模型），member id = agent 实例名。
+//! 名单的权威来源是会话 meta.agents（代拟确认后由 Core 写回 meta）；转录只用来恢复讨论进度。
+//! 依赖全部为端口与核心数据；无 IO，无具体适配器。
 
+use crate::core::agents::{self, RosterPick};
 use crate::core::engine::{Discussion, Execution, Member, MemberTools, TurnOut, MAX_REWORK, MAX_ROUNDS};
 use crate::core::envelope;
-use crate::core::events::{CheckView, Pending, SessionEvent};
-use crate::core::module::Module;
-use crate::core::ports::{ChatGateway, ModuleSource, Msg, ToolRunner};
+use crate::core::events::{CheckView, LineView, Pending, SessionEvent};
+use crate::core::history::{AgentMeta, SessionMeta};
+use crate::core::module::{self, Module};
+use crate::core::ports::{ChatGateway, ModuleSource, Msg, SysIo, ToolRunner};
 use crate::core::prompt::Prompts;
-use crate::core::providers::Registry;
+use crate::core::providers::Settings;
+use crate::core::workspace::Sandboxes;
 use std::sync::Arc;
 
 pub struct CollabSession {
-    /// 是否委托代拟（ids == "?"）。
+    /// 是否代拟：显式传入（WorkSpec.delegate / meta.delegate），不从名单是否为空推断。
     delegated: bool,
-    /// 名单（点名路径在 start 时填充；代拟路径在确认后填充）。
-    picked: Vec<Module>,
+    /// 在组名单（agent 实例；代拟确认前为空）。
+    roster: Vec<AgentMeta>,
     task: String,
-    /// 代拟名单（id, 理由）。
-    slate_picks: Vec<(String, String)>,
-    /// 登记处快照：成员/核心通道的供应商解析在此进行（策略在 core）。
-    registry: Registry,
+    /// 代拟拟好的名单（已逐条校验），确认后落到 roster。
+    slate_picks: Vec<AgentMeta>,
+    /// 登记处快照：agent 的模型解析与核心通道在此进行（策略在 core）。
+    settings: Settings,
     /// 当前用户介入请求。
     pub pending: Option<Pending>,
     allow: bool,
+    /// 已记录在案的执行方案（回档/重启后沿用，未整理则为 None）。
+    plan: Option<String>,
     disc: Option<Discussion>,
     /// 已发出的转录行数（增量事件用）。
     emitted: usize,
+    /// 下一条转录行的 id（会话内稳定序号）。
+    next_line: u64,
     core_chat: crate::core::ports::BoxedChat,
     core_is_demo: bool,
     prompts: Prompts,
     gateway: Arc<dyn ChatGateway + Send + Sync>,
     source: Arc<dyn ModuleSource + Send + Sync>,
-    /// 工具执行端口（策略在核心按清单放行，机制在适配层）。
+    /// 外部工具执行端口（策略在核心按模块清单放行，机制在适配层）。
     tools: Arc<dyn ToolRunner + Send + Sync>,
+    /// 内置文件工具读写端口。
+    io: Arc<dyn SysIo + Send + Sync>,
+    /// 本工作的沙箱清单（按 agent 实例名取）。
+    sandboxes: Sandboxes,
     done: bool,
 }
 
 impl CollabSession {
-    /// 装配会话：gateway 定通道（含核心通道与回落告知）；source 提供清单；registry 供解析。
+    /// 装配会话：roster = 本次工作的 agent 名单（代拟时为空，等 draft_slate 填）。
     pub fn start(
         gateway: Arc<dyn ChatGateway + Send + Sync>,
         source: Arc<dyn ModuleSource + Send + Sync>,
-        registry: &Registry,
+        settings: Settings,
         prompts: Prompts,
         tools: Arc<dyn ToolRunner + Send + Sync>,
-        ids: &str,
+        io: Arc<dyn SysIo + Send + Sync>,
+        roster: Vec<AgentMeta>,
+        delegated: bool,
+        sandboxes: Sandboxes,
     ) -> Result<CollabSession, String> {
-        let roster = source.scan();
-        let delegated = ids.trim() == "?";
-        let picked = if delegated {
-            Vec::new()
-        } else {
-            let picked = pick_owned(&roster, ids);
-            if picked.is_empty() {
-                return Err("名单为空或无有效模块".to_string());
-            }
-            picked
-        };
-        let core_provider = registry.resolve(None, None).map(|(_, p)| p);
-        let (core_chat, core_is_demo) = gateway.core_channel(core_provider);
+        let core_channel = settings.core_channel();
+        let (core_chat, core_is_demo) = gateway.core_channel(core_channel.as_ref());
         Ok(CollabSession {
             delegated,
-            picked,
+            roster,
             task: String::new(),
             slate_picks: Vec::new(),
-            registry: registry.clone(),
+            settings,
             pending: None,
             allow: false,
+            plan: None,
             disc: None,
             emitted: 0,
+            next_line: 0,
             core_chat,
             core_is_demo,
             prompts,
             gateway,
             source,
             tools,
+            io,
+            sandboxes,
             done: false,
         })
     }
 
-    /// 提交需求（总是第一步）。
+    /// 在组名单（agent 实例）。
+    pub fn roster(&self) -> &[AgentMeta] {
+        &self.roster
+    }
+
+    /// 代拟拟好的名单（待用户确认；确认后落到 roster）。
+    pub fn slate(&self) -> Vec<AgentMeta> {
+        self.slate_picks.clone()
+    }
+
+    /// 代拟确认后由 Core 补上沙箱清单（名单刚定下来时才有）。
+    pub fn set_sandboxes(&mut self, sandboxes: Sandboxes) {
+        self.sandboxes = sandboxes;
+    }
+
+    /// 生成一条带 id 的转录行（工具行另走 tool_line，带调用视图）。
+    fn view(&mut self, line: String) -> LineView {
+        let v = LineView { id: self.next_line, line, reasoning: None, tool: None };
+        self.next_line += 1;
+        v
+    }
+
+    /// 名单里的 agent 名（顺序即名单）。
+    fn names(&self) -> Vec<String> {
+        self.roster.iter().map(|a| a.name.clone()).collect()
+    }
+
+    /// 拟名单给模型看的三份清单（已存 agent / 模块公地 / 可用模型）。
+    fn briefing(&self, roster: &module::Roster) -> (String, String, String) {
+        (
+            agents::listing(&self.prompts, &self.settings.agents),
+            module::listing(roster, &self.prompts.core.tool_texts),
+            agents::model_listing(&self.settings.models, &self.prompts.core.tool_texts),
+        )
+    }
+
+    /// 提交需求（总是第一步）。需求入转录（用户看到的与进上下文的一致）。
+    /// 协作里用户不属任何 agent 的沙箱：@ 引用按 speaker = None 改写（共读同一段文字）。
     pub fn set_task(&mut self, task: &str, sink: &mut dyn FnMut(SessionEvent)) {
+        let roots = crate::core::refs::RefRoots { work: self.sandboxes.shared.clone(), private: None };
+        let task = crate::core::refs::rewrite(task, None, &roots, &self.prompts.core.refs);
         if task.trim().is_empty() {
             sink(SessionEvent::Notice("[取消] 需求为空".into()));
             sink(SessionEvent::Ended);
             self.done = true;
             return;
         }
-        self.task = task.to_string();
+        self.task = task.clone();
+        let user = self.view(format!("[用户:需求] {}", task));
+        sink(SessionEvent::Transcript(vec![user]));
         if self.delegated {
             self.draft_slate(sink);
         } else {
-            let names: Vec<String> = self.picked.iter().map(|m| m.manifest.id.clone()).collect();
-            sink(SessionEvent::Notice(format!("[建组] {}", names.join(" + "))));
+            sink(SessionEvent::Notice(format!("[建组] {}", self.names().join(" + "))));
             self.pending = Some(Pending::ConfirmBegin);
         }
     }
 
-    /// 委托代拟：核心按模块简述与需求拟名单（附理由），交用户确认（选择权在用户）。
+    /// 委托代拟：核心拟发言名单（优先复用登记处的 agent，否则组装新的并给出模型），交用户确认。
     fn draft_slate(&mut self, sink: &mut dyn FnMut(SessionEvent)) {
         let roster = self.source.scan();
-        let listing = roster
-            .modules
-            .iter()
-            .map(|m| format!("- {}：{}", m.manifest.id, m.manifest.brief))
-            .collect::<Vec<_>>()
-            .join("\n");
+        let (agent_listing, module_listing, model_listing) = self.briefing(&roster);
         let user = self.prompts.render(
             &self.prompts.core.slate.user,
-            &[("modules", listing), ("task", self.task.clone())],
+            &[
+                ("agents", agent_listing),
+                ("modules", module_listing),
+                ("models", model_listing),
+                ("task", self.task.clone()),
+            ],
         );
         let msgs = vec![Msg::system(self.prompts.core.slate.system.clone()), Msg::user(user)];
-        let raw = self.core_chat.complete(&msgs);
-        let parsed = envelope::extract_json_object(&raw)
-            .and_then(|obj| serde_json::from_str::<Slate>(&obj).ok());
+        let raw = self.core_chat.complete(&msgs, false, &mut |_| true);
+        let parsed = envelope::extract_json_object(&raw).and_then(|obj| serde_json::from_str::<SlateReply>(&obj).ok());
         let Some(slate) = parsed else {
-            sink(SessionEvent::Notice("[错误] 代拟失败（模型无响应格式）。请直接点名模块。".into()));
+            sink(SessionEvent::Notice("[错误] 代拟失败（模型无响应格式）。请直接点名 agent。".into()));
             sink(SessionEvent::Ended);
             self.done = true;
             return;
         };
-        // 只校验存在性（非法 id 拒收）；是否采纳由用户确认。
-        let mut picks = Vec::new();
-        for p in slate.picks {
-            if roster.modules.iter().any(|m| m.manifest.id == p.id) {
-                picks.push((p.id, p.why));
-            } else {
-                sink(SessionEvent::Notice(format!("[代拟] {} 不存在，拒收", p.id)));
-            }
+        // 逐条校验（存在性、模型真实、整份名单内模块不重复）；拒收项如实告知。
+        let (picks, rejected) = agents::resolve_picks(slate.picks, &self.settings.agents, &roster, &self.settings.models);
+        for r in rejected {
+            sink(SessionEvent::Notice(format!("[代拟] {}，拒收", r)));
         }
         if picks.is_empty() {
-            sink(SessionEvent::Notice("[错误] 代拟名单无有效模块".into()));
+            sink(SessionEvent::Notice("[错误] 代拟名单无可用 agent".into()));
             sink(SessionEvent::Ended);
             self.done = true;
             return;
         }
-        sink(SessionEvent::Transcript(vec![format!(
+        let line = self.view(format!(
             "[代拟] {}",
-            picks.iter().map(|(id, why)| format!("{}（{}）", id, why)).collect::<Vec<_>>().join("；")
-        )]));
-        self.slate_picks = picks;
+            picks.iter().map(|(a, why)| slate_item(a, why)).collect::<Vec<_>>().join("；")
+        ));
+        sink(SessionEvent::Transcript(vec![line]));
+        self.slate_picks = picks.into_iter().map(|(a, _)| a).collect();
         self.pending = Some(Pending::ConfirmSlate);
     }
 
     /// 回应代拟名单确认（仅 ConfirmSlate 挂起时有效）。
     pub fn confirm_slate(&mut self, ok: bool, sink: &mut dyn FnMut(SessionEvent)) {
-        sink(SessionEvent::Transcript(vec![format!("[用户:名单] {}", if ok { "确认" } else { "取消" })]));
+        let line = self.view(format!("[用户:名单] {}", if ok { "确认" } else { "取消" }));
+        sink(SessionEvent::Transcript(vec![line]));
         if !ok {
             sink(SessionEvent::Notice("[取消] 已按用户意愿取消".into()));
             sink(SessionEvent::Ended);
             self.done = true;
             return;
         }
-        let roster = self.source.scan();
-        self.picked = self
-            .slate_picks
-            .iter()
-            .filter_map(|(id, _)| roster.modules.iter().find(|m| &m.manifest.id == id).cloned())
-            .collect();
-        let names: Vec<String> = self.picked.iter().map(|m| m.manifest.id.clone()).collect();
-        sink(SessionEvent::Notice(format!("[建组] {}", names.join(" + "))));
+        if self.slate_picks.is_empty() {
+            // 名单只活在内存里（落档发生在确认之后）；重启后回来会空手。
+            // 与其拿着空名单开工，不如如实告知并重新拟一份（名单本来就是要用户过目的提案）。
+            sink(SessionEvent::Notice("[提示] 上次拟的名单未落档（重启会丢），重新拟一份，请再确认。".into()));
+            self.draft_slate(sink);
+            return;
+        }
+        self.roster = self.slate_picks.clone();
+        sink(SessionEvent::Notice(format!("[建组] {}", self.names().join(" + "))));
         self.pending = Some(Pending::ConfirmBegin);
     }
 
@@ -170,27 +217,18 @@ impl CollabSession {
             return;
         }
         self.allow = allow;
+        let line = self.view(format!("[用户:开始] {}", if allow { "yes,allow" } else { "yes" }));
+        sink(SessionEvent::Transcript(vec![line]));
         let prompts = self.prompts.clone();
-        let mut members = Vec::new();
-        for m in &self.picked {
-            // 供应商解析（策略在 core）：模块选择 > 清单默认 > 全局默认；None = 回落演示。
-            let provider = self
-                .registry
-                .resolve(m.selected_provider.as_deref(), m.manifest.model.provider.as_deref())
-                .map(|(_, p)| p);
-            let (chat, note) = self.gateway.member_channel(provider, &m.manifest.id);
-            if let Some(n) = note {
-                sink(SessionEvent::Notice(n));
+        let (members, notes) = match self.assemble_members() {
+            Ok(x) => x,
+            Err(e) => {
+                sink(SessionEvent::Notice(format!("[装配失败] {}", e)));
+                return;
             }
-            let mut member = Member::new(&m.manifest.id, m.system_block(&prompts), chat);
-            if !m.manifest.tools.is_empty() {
-                member.tools = Some(MemberTools {
-                    root: m.root.clone(),
-                    commands: m.manifest.tools.clone(),
-                    runner: Arc::clone(&self.tools),
-                });
-            }
-            members.push(member);
+        };
+        for n in notes {
+            sink(SessionEvent::Notice(n));
         }
         if self.core_is_demo {
             sink(SessionEvent::Notice("[提示] 核心未配置供应商：整理/验收使用内置假模型（演示）".into()));
@@ -201,55 +239,65 @@ impl CollabSession {
         self.pump_with(sink);
     }
 
-    /// 回答 ask（仅 Ask 挂起时有效）；回答转达后继续泵。
+    /// 回答 ask（仅 Ask 挂起时有效）；回答转达后继续泵。用户回答同样先改写 @ 引用。
     pub fn answer(&mut self, text: &str, sink: &mut dyn FnMut(SessionEvent)) {
         if matches!(self.pending, Some(Pending::Ask { .. })) {
             self.pending = None;
+            let roots = crate::core::refs::RefRoots { work: self.sandboxes.shared.clone(), private: None };
+            let text = crate::core::refs::rewrite(text, None, &roots, &self.prompts.core.refs);
             if let Some(disc) = self.disc.as_mut() {
-                disc.pending_user_answers.push(text.to_string());
+                disc.pending_user_answers.push(text);
             }
             self.pump_with(sink);
         }
     }
 
-    /// 泵：推进讨论直至暂停（ask）或收敛并走完整理/执行/验收/交付。
     /// 泵：推进讨论直至暂停（ask）或收敛并走完整理/执行/验收/交付；事件逐条经 sink 外送。
     pub fn pump_with(&mut self, sink: &mut dyn FnMut(SessionEvent)) {
         if self.done || self.disc.is_none() {
             return;
         }
         let prompts = self.prompts.clone();
-        // 讨论阶段：步进直到暂停或收敛。
-        loop {
-            let outcome = self.disc.as_mut().expect("disc 已确认存在").step();
-            if let Some(d) = self.disc.as_ref() {
-                push_delta(d, &mut self.emitted, sink);
-            }
-            match outcome {
-                TurnOut::Round => {}
-                TurnOut::AskUser { member, question } => {
-                    self.pending = Some(Pending::Ask { member, question });
-                    return;
+        // 讨论阶段：只在未收敛时步进（回档/重启后可从中途接着走）。
+        if !self.disc.as_ref().expect("disc 已确认存在").closed {
+            loop {
+                let outcome = self.disc.as_mut().expect("disc 已确认存在").step();
+                if let Some(d) = self.disc.as_ref() {
+                    push_delta(d, &mut self.emitted, &mut self.next_line, sink);
                 }
-                TurnOut::Done => {
-                    let round = self.disc.as_ref().expect("disc 存在").round;
-                    let over_cap = round > MAX_ROUNDS;
-                    if over_cap {
-                        sink(SessionEvent::Notice("[上限] 讨论轮次超限，交用户裁决。".into()));
+                match outcome {
+                    TurnOut::Round => {}
+                    TurnOut::AskUser { member, question } => {
+                        self.pending = Some(Pending::Ask { member, question });
+                        return;
                     }
-                    sink(SessionEvent::DiscussionDone { round, over_cap });
-                    break;
+                    TurnOut::Done => {
+                        let round = self.disc.as_ref().expect("disc 存在").round;
+                        let over_cap = round > MAX_ROUNDS;
+                        if over_cap {
+                            sink(SessionEvent::Notice("[上限] 讨论轮次超限，交用户裁决。".into()));
+                        }
+                        sink(SessionEvent::DiscussionDone { round, over_cap });
+                        break;
+                    }
                 }
             }
         }
-        // 整理（核心通道）。
-        let plan = self.disc.as_ref().expect("disc 存在").synthesize(self.core_chat.as_mut());
-        sink(SessionEvent::Plan(plan.clone()));
+        // 整理：只在还没有方案时做（回档/重启后沿用已记的方案，不重复花钱）。
+        let plan = match self.plan.clone() {
+            Some(p) => p,
+            None => {
+                let p = self.disc.as_ref().expect("disc 存在").synthesize(self.core_chat.as_mut());
+                self.plan = Some(p.clone());
+                sink(SessionEvent::Plan(p.clone()));
+                p
+            }
+        };
         // 执行 → 验收 → 返工（上限内）→ 交付。
         let members = self.disc.as_mut().expect("disc 存在").members.as_mut_slice();
         let mut exec = Execution::run(members, &plan, &prompts);
         for (id, text) in &exec.reports {
-            emit_traces(&exec, id, sink);
+            emit_tool_lines(&exec, id, &mut self.next_line, sink);
             sink(SessionEvent::Report { id: id.clone(), text: text.clone(), rework: 0 });
         }
         exec.review(self.core_chat.as_mut(), &plan, &prompts);
@@ -260,7 +308,7 @@ impl CollabSession {
             let members = self.disc.as_mut().expect("disc 存在").members.as_mut_slice();
             exec.rerun(members, &plan, &review_text, &prompts);
             for (id, text) in &exec.reports {
-                emit_traces(&exec, id, sink);
+                emit_tool_lines(&exec, id, &mut self.next_line, sink);
                 sink(SessionEvent::Report { id: id.clone(), text: text.clone(), rework: exec.rework });
             }
             exec.review(self.core_chat.as_mut(), &plan, &prompts);
@@ -272,44 +320,228 @@ impl CollabSession {
         self.done = true;
     }
 
+    /// 从在组名单装配成员通道（带回落告知；策略在 core：该 agent 的模型 > 核心默认）。
+    /// 一个 agent = 一个成员：system 由它全部模块合成，工具 = 各模块外部工具的并集。
+    fn assemble_members(&self) -> Result<(Vec<Member>, Vec<String>), String> {
+        let prompts = self.prompts.clone();
+        let roster = self.source.scan();
+        let mut members = Vec::new();
+        let mut notes = Vec::new();
+        for a in &self.roster {
+            // 该 agent 的模块：清单即事实，缺了就如实报错（不静默跳过）。
+            let modules: Vec<Module> = a
+                .modules
+                .iter()
+                .filter_map(|id| roster.modules.iter().find(|m| &m.manifest.id == id).cloned())
+                .collect();
+            if modules.len() != a.modules.len() {
+                let missing: Vec<String> = a
+                    .modules
+                    .iter()
+                    .filter(|id| !roster.modules.iter().any(|m| &&m.manifest.id == id))
+                    .cloned()
+                    .collect();
+                return Err(format!("agent {} 的模块已不在清单：{}", a.name, missing.join("、")));
+            }
+            let channel = a
+                .model
+                .as_deref()
+                .and_then(|id| self.settings.resolve(id).ok())
+                .or_else(|| self.settings.core_channel());
+            let (chat, note) = self.gateway.member_channel(channel.as_ref(), &a.name);
+            if let Some(n) = note {
+                notes.push(n);
+            }
+            let sandbox = self
+                .sandboxes
+                .for_agent(&a.name)
+                .cloned()
+                .ok_or_else(|| format!("agent {} 没有被分配沙箱（工作区未记录该 agent）", a.name))?;
+            let guide = crate::core::systool::guide(&prompts, &sandbox);
+            let system = module::agent_system(&prompts, &a.name, &modules, &guide);
+            let mut member = Member::new(&a.name, system, chat);
+            member.tools = Some(MemberTools {
+                // 模块 id → 该模块的（目录, 工具表）：多模块 agent 靠信封里的 module 消歧。
+                modules: crate::core::engine::tool_table(&modules),
+                runner: Arc::clone(&self.tools),
+                sandbox,
+                io: Arc::clone(&self.io),
+            });
+            members.push(member);
+        }
+        Ok((members, notes))
+    }
+
+    /// 继续：从断点推进（协作不需要用户发言）。未开始时由用户经裁决门确认，不由继续代劳。
+    pub fn resume(&mut self, sink: &mut dyn FnMut(SessionEvent)) {
+        if self.done {
+            return;
+        }
+        if self.disc.is_some() {
+            self.pump_with(sink);
+            return;
+        }
+        if self.delegated && self.slate_picks.is_empty() && self.roster.is_empty() {
+            self.draft_slate(sink);
+        } else {
+            sink(SessionEvent::Notice("[提示] 等待你在裁决门确认名单 / 开始讨论。".into()));
+        }
+    }
+
+    /// 撤回某 agent 的同意：转录追加一条撤回行（用户可见、也进上下文），并就地复位本轮表态。
+    pub fn withdraw_agree(&mut self, agent: &str, sink: &mut dyn FnMut(SessionEvent)) {
+        let line = self.view(format!("[用户:撤回] {}", agent));
+        sink(SessionEvent::Transcript(vec![line]));
+        if let Some(disc) = self.disc.as_mut() {
+            for m in disc.members.iter_mut() {
+                if m.id == agent {
+                    m.agreed = false;
+                }
+            }
+            disc.closed = false;
+        }
+    }
+
+    /// 从落盘事件重建协作会话：名单取 meta.agents（权威），讨论进度由转录派生。
+    /// 通道是可重建的机制，不是状态：按会话来时记住的 agent 名单重新装配。
+    pub fn restore(
+        gateway: Arc<dyn ChatGateway + Send + Sync>,
+        source: Arc<dyn ModuleSource + Send + Sync>,
+        settings: Settings,
+        prompts: Prompts,
+        tools: Arc<dyn ToolRunner + Send + Sync>,
+        io: Arc<dyn SysIo + Send + Sync>,
+        meta: &SessionMeta,
+        events: &[serde_json::Value],
+        sandboxes: Sandboxes,
+    ) -> Result<CollabSession, String> {
+        let names: Vec<String> = meta.agents.iter().map(|a| a.name.clone()).collect();
+        let st = crate::core::collab_state::derive(events, &names);
+        // 全部已发出的转录行（按 id 顺序）。
+        let mut all_lines: Vec<String> = Vec::new();
+        for ev in events {
+            if ev.get("type").and_then(|t| t.as_str()) == Some("transcript") {
+                if let Some(lines) = ev.get("lines").and_then(|l| l.as_array()) {
+                    for l in lines {
+                        if let Some(s) = l.get("line").and_then(|x| x.as_str()) {
+                            all_lines.push(s.to_string());
+                        }
+                    }
+                }
+            }
+        }
+        let total = all_lines.len() as u64;
+        let core_channel = settings.core_channel();
+        let (core_chat, core_is_demo) = gateway.core_channel(core_channel.as_ref());
+        let mut s = CollabSession {
+            delegated: meta.delegate,
+            roster: meta.agents.clone(),
+            task: st.task.clone().unwrap_or_default(),
+            slate_picks: Vec::new(),
+            settings,
+            pending: None,
+            allow: st.allow,
+            plan: st.plan.clone(),
+            disc: None,
+            emitted: 0,
+            next_line: total,
+            core_chat,
+            core_is_demo,
+            prompts: prompts.clone(),
+            gateway,
+            source,
+            tools,
+            io,
+            sandboxes,
+            done: st.ended,
+        };
+        if st.begun {
+            // 讨论转录 = 最后一条 [用户:开始] 之后的行。
+            let start = all_lines
+                .iter()
+                .rposition(|l| l.starts_with("[用户:开始]"))
+                .map(|i| i + 1)
+                .unwrap_or(all_lines.len());
+            let disc_lines = all_lines[start..].to_vec();
+            let (members, _) = s.assemble_members()?;
+            let mut disc = Discussion::new(members, st.allow, prompts);
+            disc.round = st.round.max(1);
+            disc.closed = st.closed;
+            for m in disc.members.iter_mut() {
+                m.present = st.present.get(&m.id).copied().unwrap_or(true);
+                m.agreed = st.agreed.get(&m.id).copied().unwrap_or(false);
+            }
+            s.emitted = disc_lines.len();
+            disc.transcript = disc_lines;
+            s.disc = Some(disc);
+        }
+        s.pending = derive_pending(&st);
+        Ok(s)
+    }
+
     /// 会话是否已终结。
     pub fn is_done(&self) -> bool {
         self.done
     }
 }
 
-/// 某成员的工具轨迹以 Notice 如实呈现（成功/失败/超限一致可见）。
-fn emit_traces(exec: &Execution, id: &str, sink: &mut dyn FnMut(SessionEvent)) {
-    for t in exec.traces.get(id).into_iter().flatten() {
-        sink(SessionEvent::Notice(format!("[{}:工具] {}", id, t)));
+/// 代拟行里的一项（只给人看）：复用项标出来，组装项带上模块与模型。
+fn slate_item(a: &AgentMeta, why: &str) -> String {
+    if a.transient {
+        format!("{}〈{}〉→ {}（{}）", a.name, a.modules.join(","), a.model.clone().unwrap_or_default(), why)
+    } else {
+        format!("{}（复用；{}）", a.name, why)
     }
 }
 
-/// 发出自上次以来的新转录行（增量）。
-fn push_delta(disc: &Discussion, emitted: &mut usize, sink: &mut dyn FnMut(SessionEvent)) {
+/// 从派生状态推出当前挂起（None = 没有待用户处理的门）。
+fn derive_pending(st: &crate::core::collab_state::CollabState) -> Option<Pending> {
+    if st.ended {
+        return None;
+    }
+    if !st.begun {
+        if st.slate.is_some() && !st.slate_confirmed {
+            return Some(Pending::ConfirmSlate);
+        }
+        if st.task.is_some() {
+            return Some(Pending::ConfirmBegin);
+        }
+        return None;
+    }
+    st.pending_ask
+        .as_ref()
+        .map(|(m, q)| Pending::Ask { member: m.clone(), question: q.clone() })
+}
+
+/// 某 agent 的工具调用各发一条 tool 转录行（行文本沿用「成员:tool 模块.工具 → 成败」口径）。
+fn emit_tool_lines(exec: &Execution, id: &str, next_line: &mut u64, sink: &mut dyn FnMut(SessionEvent)) {
+    for v in exec.traces.get(id).into_iter().flatten() {
+        let status = if v.ok { "成功" } else { "失败" };
+        let line = format!("[{}:tool] {} → {}", id, v.label(), status);
+        sink(SessionEvent::Transcript(vec![LineView {
+            id: *next_line,
+            line,
+            reasoning: None,
+            tool: Some(v.clone()),
+        }]));
+        *next_line += 1;
+    }
+}
+
+/// 发出自上次以来的新转录行（增量），逐行分配会话内稳定 id。
+fn push_delta(disc: &Discussion, emitted: &mut usize, next_line: &mut u64, sink: &mut dyn FnMut(SessionEvent)) {
     if disc.transcript.len() > *emitted {
-        sink(SessionEvent::Transcript(disc.transcript[*emitted..].to_vec()));
+        let views: Vec<LineView> = disc.transcript[*emitted..]
+            .iter()
+            .map(|l| {
+                let v = LineView { id: *next_line, line: l.clone(), reasoning: None, tool: None };
+                *next_line += 1;
+                v
+            })
+            .collect();
         *emitted = disc.transcript.len();
+        sink(SessionEvent::Transcript(views));
     }
-}
-
-fn pick_owned(roster: &crate::core::module::Roster, ids: &str) -> Vec<Module> {
-    ids.split(|c| c == ',' || c == '，')
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .filter_map(|id| roster.modules.iter().find(|m| m.manifest.id == id).cloned())
-        .collect()
-}
-
-#[derive(serde::Deserialize)]
-struct Slate {
-    picks: Vec<Pick>,
-}
-
-#[derive(serde::Deserialize)]
-struct Pick {
-    id: String,
-    why: String,
 }
 
 fn review_event(exec: &Execution) -> SessionEvent {
@@ -331,5 +563,12 @@ fn fail_text(exec: &Execution) -> String {
         .filter(|i| !i.status.eq_ignore_ascii_case("pass"))
         .map(|i| format!("- {}：{}", i.item, i.reason.clone().unwrap_or_default()))
         .collect::<Vec<_>>()
-        .join("\n")
+        .join("
+")
+}
+
+/// 代拟/推荐共用的应答形状：名单项（复用或组装）。
+#[derive(serde::Deserialize)]
+struct SlateReply {
+    picks: Vec<RosterPick>,
 }

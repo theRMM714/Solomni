@@ -8,8 +8,8 @@
 pub enum SessionEvent {
     /// 状态提示（通道回落、建组、返工、上限等）。
     Notice(String),
-    /// 转录新增行。
-    Transcript(Vec<String>),
+    /// 转录新增行（带会话内稳定 id，回档按它定位）。
+    Transcript(Vec<LineView>),
     /// 讨论收敛（over_cap = 轮次超限，需用户裁决）。
     DiscussionDone { round: usize, over_cap: bool },
     /// 整理方案就绪。
@@ -22,6 +22,69 @@ pub enum SessionEvent {
     Delivery { ok: bool, over_rework: bool },
     /// 会话结束。
     Ended,
+    /// 一次工具调用（短暂，不落盘）：与 tool 转录行同源，供活动会话实时刷新。
+    ToolCall(ToolCallView),
+    /// 流式增量（短暂，不落盘）：按到达顺序的分段。
+    /// kind = start / text / reasoning；start 表示新一轮开始（前端清空本轮占位）。
+    Delta { speaker: String, kind: String, text: String },
+}
+
+/// 实时输出通道：流式开关 + 中止开关 + 短暂事件出口（不落盘，仅活动会话实时刷新）。
+pub struct Live<'a> {
+    pub stream: bool,
+    /// 用户点「停止」时置位；会话与适配层据此立即中止生成。
+    pub cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    pub emit: &'a mut dyn FnMut(SessionEvent),
+}
+
+impl Live<'_> {
+    /// 是否已被要求中止。
+    pub fn cancelled(&self) -> bool {
+        self.cancel.load(std::sync::atomic::Ordering::Relaxed)
+    }
+}
+
+/// 一次工具调用的转录视图：module 为空串 = 内置工具（read/write）。
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ToolCallView {
+    /// 发言席（agent 实例名）。
+    pub speaker: String,
+    /// 工具所属模块；空串 = 内置工具。
+    pub module: String,
+    pub name: String,
+    pub ok: bool,
+    /// 模型给的参数 JSON 原文。
+    pub args: String,
+    /// 回注给模型的结果原文（转录即内容）。
+    pub output: String,
+    /// 该轮模型的原始输出（重建上下文用；界面默认不展开）。
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub raw: String,
+}
+
+impl ToolCallView {
+    /// 给人看的标签：有模块就是 模块.工具名，内置工具就是工具名。
+    pub fn label(&self) -> String {
+        if self.module.is_empty() {
+            self.name.clone()
+        } else {
+            format!("{}.{}", self.module, self.name)
+        }
+    }
+}
+
+/// 一条转录行：id = 会话内稳定序号（自 0 递增，回放可复现）。
+/// 一行 = 一轮模型调用；工具调用另占一行并带上调用视图。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct LineView {
+    pub id: u64,
+    pub line: String,
+    /// 思维链（若该轮模型给出）；前端永远默认折叠，点击才展开。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning: Option<String>,
+    /// 该行是一次工具调用时带上调用视图；普通文本行没有。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool: Option<ToolCallView>,
 }
 
 /// 验收条目的呈现视图。
@@ -30,6 +93,41 @@ pub struct CheckView {
     pub item: String,
     pub status: String,
     pub note: String,
+}
+
+impl SessionEvent {
+    /// 线格式：Web 长轮询与会话历史落盘共用同一形态（转录即内容，落盘即回放）。
+    pub fn to_json(&self) -> serde_json::Value {
+        match self {
+            SessionEvent::Notice(n) => serde_json::json!({ "type": "notice", "text": n }),
+            SessionEvent::Transcript(lines) => serde_json::json!({ "type": "transcript", "lines": lines }),
+            SessionEvent::DiscussionDone { round, over_cap } => {
+                serde_json::json!({ "type": "discussion_done", "round": round, "over_cap": over_cap })
+            }
+            SessionEvent::Plan(p) => serde_json::json!({ "type": "plan", "text": p }),
+            SessionEvent::Report { id, text, rework } => {
+                serde_json::json!({ "type": "report", "id": id, "text": text, "rework": rework })
+            }
+            SessionEvent::Review { items, raw } => serde_json::json!({ "type": "review", "items": items, "raw": raw }),
+            SessionEvent::Delivery { ok, over_rework } => {
+                serde_json::json!({ "type": "delivery", "ok": ok, "over_rework": over_rework })
+            }
+            SessionEvent::Ended => serde_json::json!({ "type": "ended" }),
+            SessionEvent::Delta { speaker, kind, text } => {
+                serde_json::json!({ "type": "delta", "speaker": speaker, "kind": kind, "text": text })
+            }
+            SessionEvent::ToolCall(v) => serde_json::json!({
+                "type": "tool_call",
+                "speaker": v.speaker,
+                "module": v.module,
+                "name": v.name,
+                "ok": v.ok,
+                "args": v.args,
+                "output": v.output,
+                "raw": v.raw,
+            }),
+        }
+    }
 }
 
 /// 用户介入请求：会话暂停，等前端回应。

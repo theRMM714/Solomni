@@ -1,78 +1,140 @@
-//! 供应商登记处（内存结构与解析链）。
-//! 持久化机制在 adapters（ProviderStore 端口）；密钥只存在于登记处数据与出站调用。
+//! 供应商与模型登记处（内存形态）与通道解析。
+//! 供应商 = 端点 + 密钥；模型 = 独立实体（展示名 + 实际模型串 + 所属供应商 + 能力说明）。
+//! 两者分开保存（机制在适配层的两个文件）；密钥只存在于登记处与核心发起的出站调用。
+//! 「模型 → 供应商」的绑定只对本产品可见；模块与会话只持模型 id 引用。
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-/// 登记处（providers.yaml 的内存形态）。
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
-pub struct Registry {
-    #[serde(default)]
-    pub providers: BTreeMap<String, Provider>,
-    #[serde(default)]
-    pub default: Option<String>,
-}
-
+/// 一条供应商通道（端点 + 密钥）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Provider {
     pub kind: String,
     pub base_url: String,
     pub api_key: String,
-    #[serde(default)]
-    pub models: Vec<String>,
 }
 
-impl Registry {
-    /// 解析链：模块当前选择 > 清单默认 > 全局默认。
-    /// 用户显式选择（module_choice）不存在 = None——不静默改用别的供应商（不猜测原则，
-    /// 交由网关回落演示通道并如实告知）；未显式选择才顺链回落。
-    pub fn resolve(
-        &self,
-        module_choice: Option<&str>,
-        manifest_default: Option<&str>,
-    ) -> Option<(String, &Provider)> {
-        if let Some(k) = module_choice {
-            return self.providers.get(k).map(|p| (k.to_string(), p));
-        }
-        for key in [manifest_default, self.default.as_deref()] {
-            if let Some(k) = key {
-                if let Some(p) = self.providers.get(k) {
-                    return Some((k.to_string(), p));
-                }
-            }
-        }
-        None
+/// 一条可用模型：展示名 + 实际模型串 + 所属供应商 + 能力说明。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelEntry {
+    pub name: String,
+    pub api_model: String,
+    pub provider: String,
+    #[serde(default)]
+    pub note: String,
+}
+
+/// 基本设置（settings.yaml）：一般 agent 都有的开关。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AppSettings {
+    /// 流式传输：向供应商请求逐片返回。
+    #[serde(default = "default_true")]
+    pub streaming: bool,
+    /// 思维链显示：开启后每条回答下的思维链块才出现（永远默认折叠，点击展开）。
+    #[serde(default = "default_true")]
+    pub show_reasoning: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+impl Default for AppSettings {
+    fn default() -> Self {
+        AppSettings { streaming: true, show_reasoning: true }
+    }
+}
+
+/// 登记处（providers.yaml + models.yaml + settings.yaml + agents.yaml 的内存合体）。
+#[derive(Debug, Default, Clone)]
+pub struct Settings {
+    pub providers: BTreeMap<String, Provider>,
+    pub models: BTreeMap<String, ModelEntry>,
+    /// 核心 AI 默认模型 id。
+    pub core: Option<String>,
+    /// 基本设置。
+    pub app: AppSettings,
+    /// 用户配置的具名 agent。
+    pub agents: crate::core::agents::Agents,
+}
+
+/// 成品通道：core 解析后交适配层建会话；适配层不再做任何选择。
+#[derive(Debug, Clone)]
+pub struct Channel {
+    pub provider: Provider,
+    pub model: String,
+}
+
+impl Settings {
+    /// 模型 id → 成品通道；模型或供应商缺失 = 报错（不猜测回退）。
+    pub fn resolve(&self, model_id: &str) -> Result<Channel, String> {
+        let m = self.models.get(model_id).ok_or_else(|| format!("无此模型：{}", model_id))?;
+        let p = self
+            .providers
+            .get(&m.provider)
+            .ok_or_else(|| format!("模型 {} 引用的供应商不存在：{}", model_id, m.provider))?;
+        Ok(Channel { provider: p.clone(), model: m.api_model.clone() })
     }
 
-    /// 结构化呈现视图：永不携带密钥（Web/CLI 共用）。
-    pub fn view(&self) -> Vec<ProviderView> {
+    /// 核心 AI 默认通道；未设定或解析失败 = None（调用方回落演示并如实告知）。
+    pub fn core_channel(&self) -> Option<Channel> {
+        self.core.as_deref().and_then(|id| self.resolve(id).ok())
+    }
+
+    /// 供应商展示视图（永不携带密钥）。
+    pub fn provider_views(&self) -> Vec<ProviderView> {
         self.providers
             .iter()
-            .map(|(id, p)| ProviderView {
+            .map(|(id, p)| ProviderView { id: id.clone(), base_url: p.base_url.clone() })
+            .collect()
+    }
+
+    /// 模型展示视图（含「是否核心默认」）。
+    pub fn model_views(&self) -> Vec<ModelView> {
+        self.models
+            .iter()
+            .map(|(id, m)| ModelView {
                 id: id.clone(),
-                base_url: p.base_url.clone(),
-                models: p.models.clone(),
-                is_default: self.default.as_deref() == Some(id.as_str()),
+                name: m.name.clone(),
+                api_model: m.api_model.clone(),
+                provider: m.provider.clone(),
+                note: m.note.clone(),
+                is_core: self.core.as_deref() == Some(id.as_str()),
             })
             .collect()
     }
 
-    /// 展示用行：永不包含密钥。
-    pub fn display_lines(&self) -> Vec<String> {
-        let mut lines = Vec::new();
-        for (id, p) in &self.providers {
-            let mark = if self.default.as_deref() == Some(id.as_str()) { "（默认）" } else { "" };
-            let models = if p.models.is_empty() { "—".to_string() } else { p.models.join(",") };
-            lines.push(format!("{}{}  {}  模型：{}", id, mark, p.base_url, models));
-        }
-        lines
+    /// CLI 展示行：供应商（无密钥）。
+    pub fn provider_lines(&self) -> Vec<String> {
+        self.providers.iter().map(|(id, p)| format!("{}  {}", id, p.base_url)).collect()
+    }
+
+    /// CLI 展示行：模型（标出核心默认）。
+    pub fn model_lines(&self) -> Vec<String> {
+        self.models
+            .iter()
+            .map(|(id, m)| {
+                let mark = if self.core.as_deref() == Some(id.as_str()) { "（核心默认）" } else { "" };
+                format!("{}{}  {} → {}  [{}]", id, mark, m.name, m.api_model, m.provider)
+            })
+            .collect()
     }
 }
-/// 供应商的结构化呈现视图（不含密钥）。
+
+/// 供应商展示视图（不含密钥）。
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct ProviderView {
     pub id: String,
     pub base_url: String,
-    pub models: Vec<String>,
-    pub is_default: bool,
+}
+
+/// 模型展示视图。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ModelView {
+    pub id: String,
+    pub name: String,
+    pub api_model: String,
+    pub provider: String,
+    pub note: String,
+    pub is_core: bool,
 }

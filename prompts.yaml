@@ -5,6 +5,10 @@
 core:
   chat_protocol: "讨论约定：直接说事；需要用户决定时用 ask；不再参与用 leave；同意方案用 agree。"
 
+  refs:
+    foreign_sandbox: "（无权读取：{{path}} 在 agent「{{agent}}」的私有沙箱里，不是你自己的。可用的是上面列出的真实路径）"
+    collab_sandbox: "（{{path}} 只有 agent「{{agent}}」能读，其它 agent 无权；要共享请请用户把它放进本工作的共享区）"
+
   discuss:
     opener: |-
       {{protocol}}
@@ -19,7 +23,7 @@ core:
     autonomy_note: "[core] 已授权小组自裁：该问题留档，不逐轮请示。"
 
   synthesize:
-    system: "你是核心编排者。总结讨论，为每个留下的成员写一份执行任务提示词，输出任务清单。"
+    system: "你是核心编排者。总结讨论，为每个留在名单里的 agent 写一份执行任务提示词，输出任务清单。"
     user: "{{transcript}}"
 
   execute:
@@ -30,7 +34,7 @@ core:
       完成后必须以 JSON 回报：{"summary":"做了什么","changes":"动了什么","open":"遗留问题，没有则空"}
 
   review:
-    system: "你是核心验收者。只核对，不替模块干活。"
+    system: "你是核心验收者。只核对，不替 agent 干活。"
     user: |-
       == 方案 ==
       {{plan}}
@@ -54,27 +58,124 @@ core:
       请返工并以同一 JSON 格式再次回报。
 
   slate:
-    system: '你是核心编排者。根据需求从模块简述中代拟建组名单。只输出 JSON：{"picks":[{"id":"模块id","why":"一句入选理由"}]}。不选择不存在的模块。'
+    system: '你是核心编排者。为这次协作组建发言名单：每一项只能是一个 agent（一个独立 AI 实例 = 名字 + 它具备的模块 + 它用的模型）。优先复用已存 agent；确无合适者才组装新的。只输出 JSON：{"picks":[{"agent":"已存agent名","why":"一句入选理由"},{"name":"新名字","modules":["模块id"],"model":"模型id","why":"一句入选理由"}]}。模块与模型都必须从给定清单里选，不得编造 id；同一个模块不得出现在两个 agent 里。'
     user: |-
-      == 模块简述 ==
+      == 已存 agent（优先复用；复用时模块与模型都取它自己的） ==
+      {{agents}}
+
+      == 模块公地 ==
       {{modules}}
+
+      == 可用模型 ==
+      {{models}}
 
       == 需求 ==
       {{task}}
 
-  omni:
-    system: |-
-      你是全能助手，能力由以下模块职责拼装：
+  suggest_models:
+    mode_single: "单 agent（一个 AI，可带 1 到多个模块）"
+    mode_collab: "协作（若干 agent，各自独立、各自沙箱，会开会讨论）"
+    system: '你是核心编排者。根据本次需求为这次工作推荐 agent 名单：每一项只能是一个 agent（一个独立 AI 实例 = 名字 + 它具备的模块 + 它用的模型）。优先复用已存 agent；确无合适者才组装新的。只输出 JSON：{"agents":[{"agent":"已存agent名","why":"一句理由"},{"name":"新名字","modules":["模块id"],"model":"模型id","why":"一句理由"}]}。模块与模型都必须从给定清单里选，不得编造 id；同一个模块不得出现在两个 agent 里；按编排模式给出的 agent 数量与模块数量约束来组织。'
+    user: |-
+      == 编排模式 ==
+      {{mode}}
+
+      == 已存 agent（优先复用；复用时模块与模型都取它自己的） ==
+      {{agents}}
+
+      == 模块公地 ==
       {{modules}}
 
-  module_system: "{{system}}"
-  module_system_tools: |-
-    {{system}}
+      == 可用模型 ==
+      {{models}}
 
-    本模块可用工具：
-    {{tools}}
+      == 本次需求 ==
+      {{task}}
 
-    工具调用约定：需要用工具时，只输出一个 JSON 信封（不要包裹其它文字）：
-    {"type":"tool","name":"工具名","args":{...参数对象...}}
-    核心会执行工具并把结果作为下一条消息发回；收到结果后继续，直到能给出最终答复。
-    单次问询工具调用有上限；超限会被要求直接给出最终答复。
+  agent:
+    system: |-
+      你是 {{agent}}，能力由以下模块职责拼装：
+      {{modules}}
+
+      {{sys_tools}}
+
+      你手上的外部工具：
+      {{module_tools}}
+
+      工具调用约定：需要用工具时，只输出一个 JSON 信封（不要包裹其它文字）：
+      {"type":"tool","module":"模块id","name":"工具名","args":{...参数对象...}}
+      外部工具要带上它所属的模块 id（见上面清单每行开头）；内置工具 read/write/search 不用写 module。
+      核心会执行工具并把结果作为下一条消息发回；收到结果后继续，直到能给出最终答复。
+      单次问询工具调用有上限；超限会被要求直接给出最终答复。
+
+  sys_tools: |-
+    【内置文件工具】核心直接提供，名字固定为 read / write / search，模块不得占用这三个名字。
+    路径一律写**真实绝对路径**：下面列出的就是本工作允许的根目录。
+    路径必须是**绝对路径**，且落在下面列出的根目录之内（越界会被拒绝，并把允许的根列回来）。
+    本次工作的共享区：{{work_root}}
+    你私有的沙箱：{{sandbox_root}}
+    {{module_roots}}
+    调用（JSON 参数放在信封的 args 里）：
+    - read：{"path":"{{work_root}}/note.txt"} → 读取文本（UTF-8；原文件不是 UTF-8 会如实标注）
+    - write：{"path":"{{sandbox_root}}/out.txt","content":"..."} → 写入文本（UTF-8，覆盖同名文件）
+    - search：{"path":"{{work_root}}/note.txt","keyword":"要查的词","ignore_case":true} → 带行号的命中行（ignore_case 省略 = 区分大小写）
+    越界（不在上面这些根目录之内）、相对路径、含 .. 的路径都会被拒绝。
+    本工作的成品一律写共享区或你自己的沙箱。模块目录里的 userdata/ 是模块自己的跨任务私有状态（缓存/记忆/配置），
+    不是本次工作的成品区，不要把任务成果往里写。
+    当前工作：{{work_name}}；agent 名：{{agent}}
+
+  no_agents: "（登记处还没有 agent；这次只能组装新的）"
+  no_model: "（核心默认）"
+  no_module_dirs: "（你没有成员模块目录）"
+  no_module_tools: "（本 agent 的模块都未声明外部工具）"
+  # —— 工具与路径的模型侧文案：核心拼回执/失败说明/清单行时从这里取（改文案只改册子）——
+  tool_texts:
+    # 路径校验（workspace::resolve）
+    path_empty: "路径不能为空"
+    path_need_absolute: "需要绝对路径，收到：{{path}}"
+    path_empty_segment: "路径含空段（连续分隔符）：{{path}}"
+    path_cur_dir: "路径不能含 . 段：{{path}}"
+    path_parent_dir: "路径不能含 .. 段：{{path}}"
+    path_outside_roots: "路径不在允许的根目录内：{{path}}"
+    roots_wrapper: "{{why}}。允许的根目录：\n{{roots}}"
+    roots_shared: "- 本次工作的共享区：{{root}}"
+    roots_private: "- 你私有的沙箱：{{root}}"
+    roots_module: "- 模块 {{id}} 的目录：{{root}}"
+    # 内置工具回执（systool）
+    missing_path: "缺少 path（要操作的真实路径）"
+    missing_content: "缺少 content（要写入的文本）"
+    missing_keyword: "缺少 keyword（要查找的文本）"
+    bad_args_json: "参数不是合法 JSON：{{error}}"
+    unknown_builtin: "未知的内置工具：{{name}}"
+    read_header: "[read] {{path}} （{{bytes}} 字节）\n{{text}}"
+    write_header: "[write] 已写入 {{path}}（{{chars}} 字符，UTF-8）"
+    write_module_note: "{{mark}} 这是模块 {{id}} 的目录（你的能力，不是本工作私有区），改动会保留。"
+    search_header: "[search] {{path}} 关键词「{{keyword}}」{{mode}}"
+    search_mode_sensitive: "（区分大小写）"
+    search_mode_insensitive: "（忽略大小写）"
+    search_no_hits: "（没有命中行）"
+    search_summary: "命中 {{hits}} 行 / 全文 {{total}} 行"
+    search_hit_line: "{{n}} | {{line}}"
+    search_truncated: "[截断] 命中行超过 {{limit}} 行，仅列出前 {{limit}} 行。"
+    read_truncated_chars: "[截断] 内容超过 {{limit}} 字符，以上仅为开头部分。"
+    read_truncated_bytes: "[截断] 文件超过单次读取上限，仅读了开头部分。"
+    search_truncated_bytes: "[截断] 文件超过单次读取上限，只搜了开头部分。"
+    lossy_note: "[编码] 该文件含非法 UTF-8 字节，以上是按替换字符呈现的近似内容；本程序不猜编码。"
+    # 外部工具分派（engine）
+    no_module_field: "工具 {{tool}} 没有指明所属模块（本 agent 有多个模块，核心不替你猜），请在信封里写 module"
+    unknown_module: "本 agent 没有模块 {{module}}"
+    module_lacks_tool: "模块 {{module}} 未声明工具 {{tool}}"
+    available_wrapper: "{{why}}。可用：{{tools}}"
+    # 工具循环与讨论（engine）
+    tool_result_wrapper: "[工具结果] {{label}}\n{{output}}"
+    tool_cap: "[工具超限] 单次问询工具调用上限 {{n}} 次已到，请直接给出最终答复，不再调用工具。"
+    malformed_note: "工具信封不是合法 JSON，核心没有执行任何工具。请重新输出一个合法的信封：检查引号转义与括号配对；内容过长时分次写入，或用更短的写法。"
+    discuss_degraded: "　（信封缺失，按发言收录）"
+    stopped_suffix: "（已停止）"
+    # 拟名单/推荐时给模型看的清单行
+    module_listing_line: "- {{id}}：{{brief}}"
+    module_tools_line: "- {{id}}：{{tools}}"
+    module_root_line: "- {{id}}：{{root}}"
+    agent_listing_line: "- {{name}}：模块 {{modules}}；模型 {{model}}{{note}}"
+    model_listing_line: "- {{id}}：{{name}}（{{api_model}}{{note}}）"
+    tool_list_separator: "、"

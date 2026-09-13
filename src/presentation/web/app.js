@@ -2,13 +2,21 @@
 /* Solomni 转录中心前端（no-build vanilla JS）。
  * 数据流：REST 动作 → 事件回包渲染；长轮询增量事件（多端同看）；断线重连 + 状态点。
  * 原则：转录即内容（原样渲染）；密钥永不出现在任何请求/界面。
+ * 版图：侧栏（新建工作 / 会话历史 / 设置二级菜单，含 agent 管理）；主区（会话 tab + 转录 + 裁决门 + 输入区 + 弹层）。
+ * 编排：agent = 一个 AI + N 份能力（模块）+ 一个模型。形态只有两种：
+ *       single = 1 个 agent（勾 1 个模块即"直连式"，勾多个即"组合式"）；collab = N 个 agent（各自独立沙箱）。
+ * 发言主体只有 agent：转录行的说话人、成员列表、撤回同意、失败归属一律以 **agent 实例名** 为准；
+ *       "模块" 只是 agent 的能力包（只出现在选能力的地方）。
  */
 
 const $ = (s) => document.querySelector(s);
 const state = {
-  modules: [], providers: [], rejected: [],
-  sessions: new Map(),   // sid -> { sid, mode, title, lines: [{cls, who, text}], pending, busy, done, active }
+  modules: [], providers: [], models: [], core: null, rejected: [], agents: [],
+  history: [],           // 会话历史（名字/mode/时间）
+  settings: { streaming: true, show_reasoning: true }, // 基本设置
+  sessions: new Map(),   // sid -> { sid, mode, title, lines, pending, busy, done, awaiting, readonly }
   activeSid: null,
+  settingsOpen: false,
 };
 
 /* ---------- API ---------- */
@@ -19,7 +27,12 @@ async function api(method, url, body) {
     body: body ? JSON.stringify(body) : undefined,
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
+  if (!res.ok) {
+    const err = new Error(data.error || ('HTTP ' + res.status));
+    err.status = res.status;
+    err.data = data;
+    throw err;
+  }
   return data;
 }
 
@@ -28,84 +41,1152 @@ async function refreshState() {
   const s = await api('GET', '/api/state');
   state.modules = s.modules || [];
   state.providers = s.providers || [];
+  state.models = s.models || [];
+  state.core = s.core || null;
   state.rejected = s.rejected || [];
+  state.agents = s.agents || [];
+  state.history = s.history || [];
+  state.settings = s.settings || { streaming: true, show_reasoning: true };
   renderSidebar();
+  renderHistory();
 }
 
-function renderSidebar() {
-  const list = $('#module-list');
-  list.innerHTML = '';
-  for (const m of state.modules) {
-    const el = document.createElement('div');
-    el.className = 'module-item';
-    el.innerHTML =
-      '<div class="mid"></div><div class="mbrief"></div>' +
-      '<div class="module-actions">' +
-      '<button data-act="direct">直连</button>' +
-      '<button data-act="collab">协作</button>' +
-      '<button data-act="omni">全能</button>' +
-      '</div>';
-    el.querySelector('.mid').textContent = m.id;
-    el.querySelector('.mbrief').textContent = m.brief;
-    el.querySelector('[data-act="direct"]').onclick = () => createSession('direct', m.id);
-    el.querySelector('[data-act="collab"]').onclick = () => createSession('collab', m.id);
-    el.querySelector('[data-act="omni"]').onclick = () => createSession('omni', m.id);
-    list.appendChild(el);
-  }
-  $('#rejected').textContent = state.rejected.join('\n');
-  const pl = $('#provider-list');
-  pl.innerHTML = '';
-  for (const p of state.providers) {
-    const el = document.createElement('div');
-    el.className = 'provider-item';
-    el.innerHTML = '<span class="pid"></span>' + (p.is_default ? '<span class="pdef">默认</span>' : '') +
-      '<span class="pinfo"></span>' +
-      '<button data-act="default" title="设为默认">默认</button>' +
-      '<button data-act="remove" title="移除">移除</button>';
-    el.querySelector('.pid').textContent = p.id;
-    el.querySelector('.pinfo').textContent = p.models.join(', ');
-    el.querySelector('[data-act="default"]').onclick = async () => { await api('POST', '/api/providers/' + encodeURIComponent(p.id) + '/default'); refreshState(); };
-    el.querySelector('[data-act="remove"]').onclick = async () => { await api('POST', '/api/providers/' + encodeURIComponent(p.id) + '/remove'); refreshState(); };
-    pl.appendChild(el);
-  }
+/// 思维链块：永远默认折叠，点击（原生 details）才展开。
+/// Markdown 容器：有渲染器就渲染，没有就退回纯文本（安全）。
+function mdNode(text) {
+  const d = document.createElement('div');
+  d.className = 'md';
+  if (typeof markdownToHtml === 'function') d.innerHTML = shortPath(markdownToHtml(text));
+  else d.textContent = text;
+  return d;
 }
 
-$('#provider-form').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const models = $('#pv-models').value.split(/[,，]/).map(x => x.trim()).filter(Boolean);
-  try {
-    await api('POST', '/api/providers', {
-      id: $('#pv-id').value.trim(), base_url: $('#pv-url').value.trim(),
-      api_key: $('#pv-key').value, models,
-    });
-    $('#pv-key').value = '';
-    await refreshState();
-  } catch (err) { alert(err.message); }
-});
+/// 正文：AI/用户发言按 Markdown 渲染，系统提示保持纯文本。
+function appendBody(el, cls, text) {
+  if (cls === 'line' || cls === 'plan' || cls === 'user') el.appendChild(mdNode(text));
+  else el.innerHTML = shortPath(escHtml(text)); // 系统/验收等行：纯文本转义后同样缩写长路径
+}
 
-/* ---------- 会话 ---------- */
-async function createSession(mode, ids) {
-  try {
-    const r = await api('POST', '/api/sessions', { mode, ids });
-    const title = mode === 'direct' ? '直连·' + ids : mode === 'omni' ? '全能' : '协作·' + (ids === '?' ? '代拟' : ids);
-    const s = { sid: r.sid, mode, title, lines: [], pending: null, busy: false, done: false, openEvents: r.events || [] };
-    state.sessions.set(r.sid, s);
-    for (const ev of s.openEvents) absorb(s, ev);
-    s.openEvents = [];
-    setActive(r.sid);
-    // 协作会话创建后立即进入需求提交。
-    if (mode === 'collab') {
-      s.awaiting = 'task';
-      renderGate(s);
+/// 纯文本转义：工具卡片的原始 JSON 一律按字面显示（<pre> 里不解释 HTML）。
+function escHtml(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+  ));
+}
+
+/* 折叠状态：会话级 store（key → bool）。renderStream 每次全量重建 DOM，
+ * 所以折叠状态必须由「稳定键 + 会话级 store」自己保存与恢复——键只依赖"只追加"的顺序，
+ * 刷新多少次都不变。CoT 与工具卡片的三处折叠共用同一个 store。 */
+function foldOpen(sess, key) {
+  if (!sess.fold) sess.fold = {};
+  return !!sess.fold[key];
+}
+
+/// 绑定折叠：按 store 设初值，并在 toggle 时回写。
+function foldBind(sess, key, d) {
+  d.open = foldOpen(sess, key); // 先设初值再挂监听，避免程序化赋值触发一次回写
+  d.addEventListener('toggle', () => {
+    sess.fold = sess.fold || {};
+    sess.fold[key] = d.open;
+  });
+  return d;
+}
+
+/* <pre> 的滚动位置也要自己存/恢复：定稿整帧重建时，不能把用户拖到一半的滚动条弹回去。
+ * 键沿用折叠键 + ':scroll'；恢复必须在节点插入文档之后做（离屏元素的 scrollTop 在浏览器里不生效），
+ * 所以这里只登记，由 flushScroll 在渲染收尾时统一写回。 */
+let pendingScroll = [];
+function scrollKey(key) { return key + ':scroll'; }
+function flushScroll(sess) {
+  for (const it of pendingScroll) {
+    const v = sess.scroll && sess.scroll[scrollKey(it.key)];
+    if (typeof v === 'number' && v > 0) it.pre.scrollTop = v;
+  }
+  pendingScroll = [];
+}
+
+/// 折叠的原始内容块：默认收起，点开才看（参数 / 结果 / 原文）。
+/// literal = true 时逐字保留（「原文」是要给用户照着复制的记录，不做长路径缩写）。
+function toolDetail(label, text, sess, key, literal) {
+  const d = document.createElement('details'); d.className = 'tool-raw';
+  foldBind(sess, key, d);
+  const s = document.createElement('summary'); s.textContent = label;
+  const pre = document.createElement('pre'); pre.className = 'tool-pre';
+  // 先转义再缩写：文字内容不变，只是把长路径显示成短式胶囊（「原文」保持逐字）。
+  const shown = escHtml(text == null || text === '' ? '（空）' : text);
+  pre.innerHTML = literal ? shown : shortPath(shown);
+  const sk = scrollKey(key);
+  pre.addEventListener('scroll', () => { sess.scroll = sess.scroll || {}; sess.scroll[sk] = pre.scrollTop; });
+  pendingScroll.push({ pre: pre, key: key });
+  d.appendChild(s); d.appendChild(pre);
+  return d;
+}
+
+/// 兜底卡片：正文看起来是工具信封（旧会话里核心曾把它当发言落盘）→ 按工具卡片渲染。
+/// 键用 L<行id>:raw，与真实工具调用的 T<序号>:… 分开，不串味。
+function rawToolCard(text, sess, key, speaker) {
+  const body = String(text || '');
+  const mod = (body.match(/"module"\s*:\s*"([^"]*)"/) || [])[1] || '';
+  const name = (body.match(/"name"\s*:\s*"([^"]*)"/) || [])[1] || '工具信封';
+  const el = document.createElement('div');
+  el.className = 'line tool-card bad';
+  el.title = speaker ? speaker + ' 的工具信封（不完整）' : '工具信封（不完整）';
+  const head = document.createElement('div'); head.className = 'tool-head';
+  const nm = document.createElement('span'); nm.className = 'tool-name';
+  nm.textContent = (mod ? mod + '.' : '') + name;
+  const mark = document.createElement('span'); mark.className = 'tool-mark'; mark.textContent = '✗';
+  const note = document.createElement('span'); note.className = 'tool-note'; note.textContent = '信封不完整';
+  head.appendChild(nm); head.appendChild(mark); head.appendChild(note);
+  el.appendChild(head);
+  el.appendChild(toolDetail('原文', body, sess, key + ':raw', true));
+  return el;
+}
+
+/// 工具调用卡片：头部只写「模块.工具名」+ 成败；参数与结果折叠在里面（折叠状态走 fold store）。
+/// 流式 tool_call 与权威 transcript 的 tool 行共用这一个渲染函数，也共用同一个折叠键。
+function toolCard(t, sess, key) {
+  const info = t || {};
+  const el = document.createElement('div');
+  el.className = 'line tool-card ' + (info.ok ? 'ok' : 'bad');
+  el.title = info.speaker ? info.speaker + ' 调用工具' : '工具调用';
+  const head = document.createElement('div'); head.className = 'tool-head';
+  const name = document.createElement('span'); name.className = 'tool-name';
+  name.textContent = (info.module ? info.module + '.' : '') + (info.name || '工具');
+  const mark = document.createElement('span'); mark.className = 'tool-mark'; mark.textContent = info.ok ? '✓' : '✗';
+  head.appendChild(name); head.appendChild(mark);
+  el.appendChild(head);
+  el.appendChild(toolDetail('参数', info.args, sess, key + ':args'));
+  el.appendChild(toolDetail('结果', info.output, sess, key + ':output'));
+  if (typeof info.raw === 'string' && info.raw.trim()) el.appendChild(toolDetail('原文', info.raw, sess, key + ':raw', true));
+  return el;
+}
+
+/* ---------- 长路径缩写 ---------- */
+/* 转录里是真实绝对路径（如 D:/…/session/总结/work/README.md），显示时缩成短式胶囊：
+ * 落在共享区根之下 → work/相对路径；落在某 agent 沙箱根之下 → 沙箱 <agent>/相对路径；
+ * 根还没拿到、或不在任何根之内 → **原样显示**（不做任何猜测性缩短）。完整路径放在 title 里。
+ *
+ * 安全前提（为什么可以对这个 HTML 字符串做替换）：md.js 只把 http/https 渲染成 href 且已转义，
+ * 所以文件路径不可能出现在 HTML 属性里；字符类里排除 & 是为了不被 &quot; 这类实体的分号吞掉。 */
+let shortPathRoots = null; // 当前活动会话的根列表（先长后短，agent 根排在共享区根前）
+
+/// 正则特殊字符转义：根路径里可能有 . + ( 之类。
+function escapeRe(s) {
+  const special = '\\^$.*+?()[]{}|';
+  return String(s).split('').map((c) => (special.indexOf(c) >= 0 ? '\\' + c : c)).join('');
+}
+
+/// 从 /files 的 roots 构造匹配表；没有 roots（后端未提供 / 还没拉到）→ null = 原样显示。
+function buildRootList(roots) {
+  if (!roots) return null;
+  const out = [];
+  const add = (root, kind, name) => {
+    const r = String(root == null ? '' : root).replace(/\/+$/, '');
+    if (r) out.push({ root: r, kind: kind, name: name || '' });
+  };
+  for (const a of (roots.agents || [])) add(a && a.root, 'agent', a && a.name);
+  add(roots.work, 'work');
+  // 先长后短：避免父根遮住子根（agent 根先入列，同长时优先）
+  out.sort((x, y) => y.root.length - x.root.length);
+  return out.length ? out : null;
+}
+
+/// 把正文 HTML 里的长路径替换成短式胶囊（完整路径进 title）。
+function shortPath(html) {
+  const src = String(html == null ? '' : html);
+  const list = shortPathRoots;
+  if (!list || !list.length) return src;
+  const alt = list.map((it) => escapeRe(it.root)).join('|');
+  const re = new RegExp('(?:' + alt + ')/([^\\s<>\\x22\\x27&]*)', 'g');
+  return src.replace(re, (m, rel, offset, whole) => {
+    // 前面还是路径字符 → 只是一个更长路径的中间段，不动它
+    const before = offset > 0 ? whole[offset - 1] : '';
+    if (before && /[A-Za-z0-9_\-./\\]/.test(before)) return m;
+    for (const it of list) {
+      if (m.indexOf(it.root + '/') === 0) {
+        const label = it.kind === 'agent' ? '沙箱 ' + it.name + '/' + rel : 'work/' + rel;
+        return '<span class="ref-pill" title="' + escHtml(m) + '">' + escHtml(label) + '</span>';
+      }
     }
+    return m;
+  });
+}
+
+/// 思维链块：永远默认折叠；展开状态记在会话的 fold store 里，流式重建也不会被收回。
+function reasoningBlock(text, sess, key) {
+  const d = document.createElement('details');
+  d.className = 'cot';
+  foldBind(sess, key, d);
+  const s = document.createElement('summary'); s.textContent = '思维链';
+  const b = document.createElement('div'); b.className = 'cot-body'; b.textContent = text;
+  d.appendChild(s); d.appendChild(b);
+  return d;
+}
+
+function checkbox(labelText, checked) {
+  const wrap = document.createElement('label'); wrap.className = 'chk';
+  const box = document.createElement('input'); box.type = 'checkbox'; box.checked = !!checked;
+  const span = document.createElement('span'); span.textContent = labelText;
+  wrap.appendChild(box); wrap.appendChild(span);
+  return { wrap, box };
+}
+
+/* ---------- 会话历史：只读回放；删除 = 删 session/<名字>/ 目录 ---------- */
+function renderHistory() {
+  const box = $('#history-list');
+  if (!box) return;
+  box.innerHTML = '';
+  const items = state.history || [];
+  if (!items.length) { box.textContent = '（还没有历史会话）'; return; }
+  for (const h of items) {
+    const el = document.createElement('div');
+    el.className = 'history-item';
+    el.innerHTML = '<span class="hname"></span><span class="hmode"></span><button class="hdel" title="删除该会话">✕</button>';
+    el.querySelector('.hname').textContent = h.name;
+    el.querySelector('.hmode').textContent = (h.done ? '' : '·进行中 ') + h.mode;
+    el.onclick = () => openHistory(h.name);
+    el.querySelector('.hdel').onclick = (e) => { e.stopPropagation(); deleteHistory(h.name); };
+    box.appendChild(el);
+  }
+}
+
+async function openHistory(name) {
+  const existing = state.sessions.get(name);
+  if (existing && !existing.readonly) { setActive(name); return; }
+  try {
+    const r = await api('GET', '/api/history/' + encodeURIComponent(name));
+    const s = {
+      sid: name, mode: (r.meta && r.meta.mode) || 'single', title: name,
+      lines: [], live: [], pending: null, busy: false, done: true, awaiting: null, readonly: true, fold: {}, scroll: {},
+    };
+    state.sessions.set(name, s);
+    for (const ev of (r.events || [])) absorb(s, ev);
+    setActive(name);
     renderAll();
   } catch (err) { alert(err.message); }
 }
 
+async function deleteHistory(name) {
+  if (!confirm('删除会话「' + name + '」？该会话的记录将被永久删除。')) return;
+  try {
+    await api('POST', '/api/history/' + encodeURIComponent(name) + '/delete', {});
+    if (state.sessions.has(name)) {
+      state.sessions.delete(name);
+      if (state.activeSid === name) {
+        const it = state.sessions.keys().next();
+        state.activeSid = it.done ? null : it.value;
+      }
+    }
+    await refreshState();
+    renderAll();
+  } catch (err) { alert(err.message); }
+}
+
+/* 侧栏：只保留「被拒收模块」的如实提示（模块清单在「新建工作」向导里用）。 */
+function renderSidebar() {
+  const rejected = $('#rejected');
+  if (rejected) rejected.textContent = (state.rejected || []).join('\n');
+}
+
+function toggleSettings() {
+  state.settingsOpen = !state.settingsOpen;
+  $('#settings-head').className = 'submenu-head' + (state.settingsOpen ? ' open' : '');
+  $('#settings-body').className = 'submenu-body' + (state.settingsOpen ? ' open' : '');
+}
+
+/* ---------- 通用小构件（只用冒烟桩支持的 API） ---------- */
+function btn(label, cls) {
+  const b = document.createElement('button');
+  b.type = 'button'; b.className = cls || 'btn'; b.textContent = label;
+  return b;
+}
+function textInput(placeholder, type) {
+  const i = document.createElement('input');
+  i.className = 'field-input'; i.placeholder = placeholder || ''; i.autocomplete = 'off';
+  if (type) i.type = type;
+  return i;
+}
+function areaInput(placeholder) {
+  const t = document.createElement('textarea');
+  t.className = 'field-input'; t.rows = 3; t.placeholder = placeholder || '';
+  return t;
+}
+function selectInput(options, value) {
+  const s = document.createElement('select');
+  s.className = 'field-input';
+  for (const o of options) {
+    const op = document.createElement('option');
+    op.value = o.value; op.textContent = o.label;
+    s.appendChild(op);
+  }
+  if (value != null) s.value = value;
+  return s;
+}
+function field(labelText, input) {
+  const wrap = document.createElement('div'); wrap.className = 'wf-field';
+  const lab = document.createElement('div'); lab.className = 'wf-label'; lab.textContent = labelText;
+  wrap.appendChild(lab); wrap.appendChild(input);
+  return wrap;
+}
+function emptyHint(text) {
+  const e = document.createElement('div'); e.className = 'reg-empty'; e.textContent = text;
+  return e;
+}
+
+/* ---------- 主区弹层（清空一律 innerHTML=''） ---------- */
+function closeModal() {
+  const root = $('#modal-root');
+  root.innerHTML = '';
+  root.className = 'modal-root';
+}
+function openModal(title, build, wide) {
+  const root = $('#modal-root');
+  root.innerHTML = '';
+  root.className = 'modal-root open';
+  const overlay = document.createElement('div'); overlay.className = 'modal-overlay';
+  const panel = document.createElement('div'); panel.className = 'modal-panel' + (wide ? ' wide' : '');
+  const head = document.createElement('div'); head.className = 'modal-head';
+  const h = document.createElement('div'); h.className = 'modal-title'; h.textContent = title;
+  const close = btn('✕', 'modal-close');
+  close.onclick = closeModal;
+  head.appendChild(h); head.appendChild(close);
+  const body = document.createElement('div'); body.className = 'modal-body';
+  const msg = document.createElement('div'); msg.className = 'modal-msg';
+  panel.appendChild(head); panel.appendChild(body); panel.appendChild(msg);
+  overlay.appendChild(panel);
+  overlay.onclick = (e) => { if (e.target === overlay) closeModal(); };
+  root.appendChild(overlay);
+  const ctx = {
+    body,
+    setMsg: (t, isErr) => { msg.textContent = t || ''; msg.className = isErr ? 'modal-msg err' : 'modal-msg'; },
+    close: closeModal,
+  };
+  build(ctx);
+  return ctx;
+}
+
+/* ---------- 设置①：供应商登记（录入 / 修改 / 删除） ---------- */
+function openProvidersModal() {
+  openModal('供应商登记', (c) => {
+    const listWrap = document.createElement('div'); listWrap.className = 'reg-list';
+    const idIn = textInput('id');
+    const urlIn = textInput('base_url');
+    const keyIn = textInput('api_key（保存后不回显）', 'password');
+    const save = btn('登记 / 更新', 'btn btn-primary btn-block');
+
+    function rebuild() {
+      listWrap.innerHTML = '';
+      if (!state.providers.length) { listWrap.appendChild(emptyHint('（暂无供应商）')); return; }
+      for (const p of state.providers) {
+        const row = document.createElement('div'); row.className = 'reg-item';
+        const main = document.createElement('div'); main.className = 'reg-main';
+        const id = document.createElement('div'); id.className = 'reg-id'; id.textContent = p.id;
+        const sub = document.createElement('div'); sub.className = 'reg-sub'; sub.textContent = p.base_url;
+        main.appendChild(id); main.appendChild(sub);
+        const acts = document.createElement('div'); acts.className = 'reg-acts';
+        const edit = btn('编辑', 'link-btn');
+        edit.onclick = () => {
+          idIn.value = p.id; urlIn.value = p.base_url; keyIn.value = '';
+          c.setMsg('编辑 ' + p.id + '：api_key 需重新填写');
+        };
+        const del = btn('删除', 'link-btn danger');
+        del.onclick = async () => {
+          try {
+            await api('POST', '/api/providers/' + encodeURIComponent(p.id) + '/remove');
+            await refreshState(); rebuild();
+            c.setMsg('已删除 ' + p.id);
+          } catch (e) { c.setMsg(e.message, true); }
+        };
+        acts.appendChild(edit); acts.appendChild(del);
+        row.appendChild(main); row.appendChild(acts);
+        listWrap.appendChild(row);
+      }
+    }
+
+    save.onclick = async () => {
+      const id = idIn.value.trim(), url = urlIn.value.trim(), key = keyIn.value;
+      if (!id || !url || !key) { c.setMsg('id / base_url / api_key 均不能为空', true); return; }
+      try {
+        await api('POST', '/api/providers', { id, base_url: url, api_key: key });
+        keyIn.value = '';
+        await refreshState(); rebuild();
+        c.setMsg('已保存：' + id);
+      } catch (e) { c.setMsg(e.message, true); }
+    };
+
+    rebuild();
+    c.body.appendChild(listWrap);
+    const form = document.createElement('div'); form.className = 'form-col';
+    form.appendChild(field('id', idIn));
+    form.appendChild(field('base_url', urlIn));
+    form.appendChild(field('api_key', keyIn));
+    form.appendChild(save);
+    c.body.appendChild(form);
+  });
+}
+
+/* ---------- 设置②：模型登记（录入 / 修改 / 删除 + 供应商模型发现） ---------- */
+function openModelsModal() {
+  openModal('模型登记', (c) => {
+    const listWrap = document.createElement('div'); listWrap.className = 'reg-list';
+    const discWrap = document.createElement('div'); discWrap.className = 'reg-list';
+    const idIn = textInput('id');
+    const nameIn = textInput('展示名');
+    const apiIn = textInput('api_model（真正发给供应商的串）');
+    const providerSel = selectInput(state.providers.map((p) => ({ value: p.id, label: p.id })), null);
+    const noteIn = textInput('note（能力说明）');
+    const save = btn('登记 / 更新', 'btn btn-primary btn-block');
+
+    function rebuild() {
+      listWrap.innerHTML = '';
+      if (!state.models.length) { listWrap.appendChild(emptyHint('（暂无模型）')); return; }
+      for (const m of state.models) {
+        const row = document.createElement('div'); row.className = 'reg-item';
+        const main = document.createElement('div'); main.className = 'reg-main';
+        const id = document.createElement('div'); id.className = 'reg-id'; id.textContent = m.id;
+        if (m.is_core) {
+          const badge = document.createElement('span'); badge.className = 'reg-core'; badge.textContent = '核心';
+          id.appendChild(badge);
+        }
+        const sub = document.createElement('div'); sub.className = 'reg-sub';
+        sub.textContent = m.name + ' · ' + m.api_model + ' · 供应商 ' + m.provider;
+        const note = document.createElement('div'); note.className = 'reg-note'; note.textContent = m.note || '';
+        main.appendChild(id); main.appendChild(sub); main.appendChild(note);
+        const acts = document.createElement('div'); acts.className = 'reg-acts';
+        const edit = btn('编辑', 'link-btn');
+        edit.onclick = () => {
+          idIn.value = m.id; nameIn.value = m.name; apiIn.value = m.api_model;
+          providerSel.value = m.provider; noteIn.value = m.note || '';
+          c.setMsg('编辑 ' + m.id);
+        };
+        const del = btn('删除', 'link-btn danger');
+        del.onclick = async () => {
+          try {
+            await api('POST', '/api/models/' + encodeURIComponent(m.id) + '/remove');
+            await refreshState(); rebuild();
+            c.setMsg('已删除 ' + m.id);
+          } catch (e) { c.setMsg(e.message, true); }
+        };
+        acts.appendChild(edit); acts.appendChild(del);
+        row.appendChild(main); row.appendChild(acts);
+        listWrap.appendChild(row);
+      }
+    }
+
+    function rebuildDiscover() {
+      discWrap.innerHTML = '';
+      if (!state.providers.length) { discWrap.appendChild(emptyHint('（暂无供应商，先登记供应商）')); return; }
+      for (const p of state.providers) {
+        const row = document.createElement('div'); row.className = 'disc-row';
+        const label = document.createElement('span'); label.className = 'disc-id'; label.textContent = p.id;
+        const go = btn('获取模型列表', 'link-btn');
+        const chips = document.createElement('div'); chips.className = 'chips';
+        go.onclick = async () => {
+          chips.innerHTML = '';
+          c.setMsg('正在拉取 ' + p.id + ' 的模型列表…');
+          try {
+            const r = await api('POST', '/api/providers/' + encodeURIComponent(p.id) + '/discover', {});
+            const list = r.models || [];
+            if (!list.length) { chips.appendChild(emptyHint('（未返回模型）')); }
+            for (const name of list) {
+              const chip = btn(name, 'chip');
+              chip.onclick = () => {
+                apiIn.value = name; providerSel.value = p.id;
+                c.setMsg('已填入 api_model：' + name + '（供应商 ' + p.id + '）');
+              };
+              chips.appendChild(chip);
+            }
+            c.setMsg('获取到 ' + list.length + ' 个模型，点选填入 api_model');
+          } catch (e) { c.setMsg(e.message, true); }
+        };
+        row.appendChild(label); row.appendChild(go); row.appendChild(chips);
+        discWrap.appendChild(row);
+      }
+    }
+
+    save.onclick = async () => {
+      const body = {
+        id: idIn.value.trim(), name: nameIn.value.trim(), api_model: apiIn.value.trim(),
+        provider: providerSel.value, note: noteIn.value.trim(),
+      };
+      if (!body.id || !body.name || !body.api_model || !body.provider) {
+        c.setMsg('id / 名字 / api_model / 供应商 均不能为空', true); return;
+      }
+      try {
+        await api('POST', '/api/models', body);
+        await refreshState(); rebuild();
+        c.setMsg('已保存：' + body.id);
+      } catch (e) { c.setMsg(e.message, true); }
+    };
+
+    rebuild(); rebuildDiscover();
+    c.body.appendChild(listWrap);
+    const form = document.createElement('div'); form.className = 'form-col';
+    form.appendChild(field('id', idIn));
+    form.appendChild(field('展示名', nameIn));
+    form.appendChild(field('api_model', apiIn));
+    form.appendChild(field('供应商', providerSel));
+    form.appendChild(field('note', noteIn));
+    form.appendChild(save);
+    c.body.appendChild(form);
+    const discTitle = document.createElement('div'); discTitle.className = 'wf-label'; discTitle.textContent = '从供应商获取模型（点选填入 api_model）';
+    c.body.appendChild(discTitle);
+    c.body.appendChild(discWrap);
+  });
+}
+
+/* ---------- 设置③：核心 AI 默认模型 ---------- */
+function openCoreModal() {
+  openModal('核心 AI 默认模型', (c) => {
+    const opts = state.models.map((m) => ({ value: m.id, label: m.name + '（' + m.id + '）' }));
+    const sel = selectInput(opts, state.core);
+    const save = btn('保存', 'btn btn-primary btn-block');
+    save.onclick = async () => {
+      const id = sel.value;
+      if (!id) { c.setMsg('请先登记模型', true); return; }
+      try {
+        await api('POST', '/api/models/' + encodeURIComponent(id) + '/core');
+        await refreshState();
+        c.setMsg('核心 AI 默认模型：' + id);
+      } catch (e) { c.setMsg(e.message, true); }
+    };
+    if (!opts.length) c.body.appendChild(emptyHint('（未登记模型，先到「模型登记」添加）'));
+    c.body.appendChild(field('核心 AI 使用的模型', sel));
+    c.body.appendChild(save);
+  });
+}
+
+/* ---------- 设置④：基本设置 ---------- */
+function openSettingsModal() {
+  openModal('基本设置', (c) => {
+    const stream = checkbox('流式传输（供应商逐片返回，边收边显示）', state.settings.streaming);
+    const cot = checkbox('思维链显示（每条回答下的思维链，永远默认折叠、点击展开）', state.settings.show_reasoning);
+    const save = btn('保存', 'btn btn-primary btn-block');
+    save.onclick = async () => {
+      try {
+        await api('POST', '/api/settings', { streaming: stream.box.checked, show_reasoning: cot.box.checked });
+        await refreshState();
+        c.setMsg('已保存');
+      } catch (e) { c.setMsg(e.message, true); }
+    };
+    c.body.appendChild(stream.wrap);
+    c.body.appendChild(cot.wrap);
+    c.body.appendChild(save);
+  });
+}
+
+/* ---------- 通用：多选一弹层（顶替原生 confirm 的三选） ---------- */
+function choiceModal(title, question, actions) {
+  openModal(title, (c) => {
+    const q = document.createElement('div'); q.className = 'wf-label'; q.textContent = question;
+    c.body.appendChild(q);
+    const row = document.createElement('div'); row.className = 'wf-inline';
+    for (const a of actions) {
+      const b = btn(a[0], a[1] || 'btn');
+      b.onclick = () => { closeModal(); a[2](); };
+      row.appendChild(b);
+    }
+    c.body.appendChild(row);
+  });
+}
+
+/* ---------- 设置⑤：agent 管理（列表 / 新建 / 编辑 / 删除） ---------- */
+function openAgentsModal() {
+  openModal('agent 管理', (c) => {
+    const listWrap = document.createElement('div'); listWrap.className = 'reg-list';
+    const modWrap = document.createElement('div'); modWrap.className = 'wf-mods';
+    const nameIn = textInput('agent 名字（会当沙箱目录名，非空、无非法字符、不能重名）');
+    const modelSel = selectInput(state.models.map((m) => ({ value: m.id, label: m.name + '（' + m.id + '）' })), state.core);
+    const noteIn = textInput('说明（这个 agent 干什么）');
+    const save = btn('保存 agent', 'btn btn-primary btn-block');
+    const cancelEdit = btn('取消编辑', 'btn btn-block hidden');
+    let editing = null;   // 正在编辑的原始名字
+    const picked = {};    // module id -> true
+
+    function pickedIds() { return state.modules.map((m) => m.id).filter((id) => picked[id]); }
+    function renderMods() {
+      modWrap.innerHTML = '';
+      if (!state.modules.length) { modWrap.appendChild(emptyHint('（modules/ 下没有模块）')); return; }
+      for (const m of state.modules) {
+        const lab = document.createElement('label'); lab.className = 'wf-check';
+        const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = !!picked[m.id];
+        cb.addEventListener('change', () => { picked[m.id] = cb.checked; });
+        const id = document.createElement('span'); id.textContent = m.id;
+        const brief = document.createElement('span'); brief.className = 'wf-brief'; brief.textContent = m.brief;
+        lab.appendChild(cb); lab.appendChild(id); lab.appendChild(brief);
+        modWrap.appendChild(lab);
+      }
+    }
+    function resetForm() {
+      editing = null; nameIn.value = ''; noteIn.value = '';
+      for (const k in picked) delete picked[k];
+      cancelEdit.className = 'btn btn-block hidden';
+      renderMods();
+    }
+    function renderList() {
+      listWrap.innerHTML = '';
+      if (!state.agents.length) { listWrap.appendChild(emptyHint('（还没有 agent）')); return; }
+      for (const a of state.agents) {
+        const row = document.createElement('div'); row.className = 'reg-item';
+        const main = document.createElement('div'); main.className = 'reg-main';
+        const nm = document.createElement('div'); nm.className = 'reg-id'; nm.textContent = a.name;
+        const sub = document.createElement('div'); sub.className = 'reg-sub';
+        sub.textContent = a.modules.join(' + ') + ' · 模型 ' + (a.model || '（核心默认）');
+        const note = document.createElement('div'); note.className = 'reg-note'; note.textContent = a.note || '';
+        main.appendChild(nm); main.appendChild(sub); main.appendChild(note);
+        const acts = document.createElement('div'); acts.className = 'reg-acts';
+        const edit = btn('编辑', 'link-btn');
+        edit.onclick = () => {
+          editing = a.name; nameIn.value = a.name; noteIn.value = a.note || '';
+          if (a.model) modelSel.value = a.model;
+          for (const k in picked) delete picked[k];
+          for (const id of a.modules) picked[id] = true;
+          cancelEdit.className = 'btn btn-block';
+          renderMods(); c.setMsg('编辑 ' + a.name + '（改名 = 先删旧再建新）');
+        };
+        const del = btn('删除', 'link-btn danger');
+        del.onclick = async () => {
+          try {
+            await api('POST', '/api/agents/' + encodeURIComponent(a.name) + '/remove');
+            await refreshState(); renderList();
+            if (editing === a.name) resetForm();
+            c.setMsg('已删除 ' + a.name);
+          } catch (e) { c.setMsg(e.message, true); }
+        };
+        acts.appendChild(edit); acts.appendChild(del);
+        row.appendChild(main); row.appendChild(acts);
+        listWrap.appendChild(row);
+      }
+    }
+    cancelEdit.onclick = () => { resetForm(); c.setMsg(''); };
+    save.onclick = async () => {
+      const name = nameIn.value.trim();
+      const modules = pickedIds();
+      if (!name) { c.setMsg('agent 名字不能为空', true); return; }
+      if (!modules.length) { c.setMsg('至少勾选一个模块', true); return; }
+      try {
+        if (editing && editing !== name) {
+          await api('POST', '/api/agents/' + encodeURIComponent(editing) + '/remove');
+        }
+        await api('POST', '/api/agents', { name, modules, model: modelSel.value || null, note: noteIn.value.trim() });
+        await refreshState(); renderList(); resetForm();
+        c.setMsg('已保存 agent：' + name);
+      } catch (e) { c.setMsg(e.message, true); }
+    };
+
+    renderList(); renderMods();
+    c.body.appendChild(listWrap);
+    const form = document.createElement('div'); form.className = 'form-col';
+    form.appendChild(field('名字', nameIn));
+    form.appendChild(field('模块（这个 agent 的能力）', modWrap));
+    if (state.models.length) form.appendChild(field('默认模型', modelSel));
+    form.appendChild(field('说明', noteIn));
+    form.appendChild(save); form.appendChild(cancelEdit);
+    c.body.appendChild(form);
+  }, true);
+}
+
+/* ---------- 上传文件到本次工作的 work/ ---------- */
+const uploadPicker = document.createElement('input');
+uploadPicker.type = 'file';
+uploadPicker.addEventListener('change', () => {
+  const f = uploadPicker.files && uploadPicker.files[0];
+  if (!f) return;
+  const s = activeSession();
+  if (!s) { alert('先打开或新建一个工作，再上传文件到它的 work/'); uploadPicker.value = ''; return; }
+  const reader = new FileReader();
+  reader.onload = async () => {
+    const b64 = String(reader.result || '').split(',')[1] || '';
+    try {
+      await api('POST', '/api/sessions/' + encodeURIComponent(s.sid) + '/upload', { name: f.name, data_base64: b64 });
+      filesCache.delete(s.sid); // 文件清单变了，@ 菜单下次重拉
+      alert('已上传到本次工作的 work/：' + f.name);
+    } catch (err) {
+      if (err.status === 409) conflictUpload(s.sid, f.name, b64);
+      else alert(err.message);
+    }
+    uploadPicker.value = '';
+  };
+  reader.readAsDataURL(f);
+});
+
+function pickUploadFile() { uploadPicker.click(); }
+
+/* a.txt -> a-2.txt（用于「改名」建议） */
+function suggestAltName(name) {
+  const dot = name.lastIndexOf('.');
+  if (dot <= 0) return name + '-2';
+  return name.slice(0, dot) + '-2' + name.slice(dot);
+}
+
+async function sendUpload(sid, name, b64, overwrite) {
+  try {
+    const body = { name, data_base64: b64 };
+    if (overwrite) body.overwrite = true;
+    await api('POST', '/api/sessions/' + encodeURIComponent(sid) + '/upload', body);
+    filesCache.delete(sid); // 文件清单变了，@ 菜单下次重拉
+    alert('已上传：' + name);
+  } catch (e) { alert(e.message); }
+}
+
+function conflictUpload(sid, name, b64) {
+  const alt = suggestAltName(name);
+  choiceModal('文件同名', '本次工作的 work/ 里已有「' + name + '」，怎么办？', [
+    ['覆盖', 'btn btn-danger', () => sendUpload(sid, name, b64, true)],
+    ['改名…', 'btn', () => renameUpload(sid, name, b64, alt)],
+    ['取消', 'btn btn-ghost', () => {}],
+  ]);
+}
+
+function renameUpload(sid, name, b64, alt) {
+  openModal('改文件名上传', (c) => {
+    const inp = textInput('新文件名'); inp.value = alt;
+    const go = btn('上传', 'btn btn-primary btn-block');
+    go.onclick = async () => {
+      const v = inp.value.trim();
+      if (!v) { c.setMsg('文件名不能为空', true); return; }
+      try {
+        await api('POST', '/api/sessions/' + encodeURIComponent(sid) + '/upload', { name: v, data_base64: b64 });
+        filesCache.delete(sid); // 文件清单变了，@ 菜单下次重拉
+        closeModal(); alert('已上传：' + v);
+      } catch (e) {
+        if (e.status === 409) { c.setMsg('还是同名，请换一个名字', true); return; }
+        c.setMsg(e.message, true);
+      }
+    };
+    c.body.appendChild(field('文件名', inp));
+    c.body.appendChild(go);
+  });
+}
+/* ---------- 新建工作向导 ---------- */
+function openWizard() {
+  // single 形态：w.modules = 勾选的模块；w.agentPick = 复用的登记处 agent
+  // （null = 用勾选的模块组临时 agent，名字见 w.agentName）。
+  const w = { mode: 'single', modules: [], agentPick: null, agentName: '', agents: [], task: '' };
+  const ed = { open: false, name: '', modules: [], model: null, note: '' };
+
+  openModal('新建工作', (c) => {
+    const nameIn = textInput('工作名称（必填，会话落盘目录名）');
+    const modeSel = selectInput([
+      { value: 'single', label: '单 agent（1 个或多个模块）' },
+      { value: 'collab', label: '协作（多个 agent）' },
+    ], 'single');
+    // 形态预设标签保留：单 agent 里 1 个模块就是"直连式"，多个就是"组合式"。
+    const modeHint = document.createElement('div'); modeHint.className = 'wf-hint';
+    modeHint.textContent = '单 agent：选 1 个模块 = 直连式；选多个 = 组合式。';
+    const partWrap = document.createElement('div'); partWrap.className = 'wf-field';
+    const modelWrap = document.createElement('div'); modelWrap.className = 'wf-models';
+    const editorWrap = document.createElement('div'); editorWrap.className = 'wf-field hidden';
+    const taskIn = areaInput('本次需求（协作必填；也可写上，核心据此推荐）');
+    const recBtn = btn('让核心推荐', 'btn btn-block');
+    const createBtn = btn('创建并开始', 'btn btn-primary btn-block');
+    const cancelBtn = btn('取消', 'btn btn-block');
+    cancelBtn.onclick = closeModal;
+
+    const modelOptions = () => state.models.map((m) => ({ value: m.id, label: m.name + '（' + m.id + '）' }));
+
+    // 勾选的模块（按清单顺序输出，下发稳定）。
+    function pickedModules() {
+      return state.modules.map((m) => m.id).filter((id) => w.modules.indexOf(id) >= 0);
+    }
+
+    // 复用候选 = 登记处全部 agent；额外把"核心推荐复用"的那条摆进来（否则选中项在列表里看不见）。
+    function agentCandidates() {
+      const list = state.agents.slice();
+      if (w.agentPick && !list.some((a) => a.name === w.agentPick.name)) {
+        list.push({ name: w.agentPick.name, modules: w.agentPick.modules.slice(), model: w.agentPick.model, note: '' });
+      }
+      return list;
+    }
+
+    // 选中/取消选中登记处 agent：模块由它决定（有几个勾几个），模型预填它的默认值（仍可改，只对本工作生效）。
+    function pickAgent(name) {
+      if (!name) { w.agentPick = null; renderAll(); return; }
+      const a = agentCandidates().find((x) => x.name === name);
+      if (!a) { w.agentPick = null; renderAll(); return; }
+      w.agentPick = { name: a.name, modules: (a.modules || []).slice(), model: a.model || null };
+      w.modules = w.agentPick.modules.slice();
+      w.model = w.agentPick.model || state.core || w.model;
+      renderAll();
+    }
+
+    function singlePick() {
+      const box = document.createElement('div'); box.className = 'form-col';
+      const opts = [{ value: '', label: '（不选，用下面勾选的模块组一个临时 agent）' }].concat(
+        agentCandidates().map((a) => ({
+          value: a.name,
+          label: a.name + ' · ' + (a.modules || []).join('+') + ' · ' + (a.model || '核心默认'),
+        })));
+      const sel = selectInput(opts, w.agentPick ? w.agentPick.name : '');
+      sel.addEventListener('change', () => pickAgent(sel.value));
+      box.appendChild(field('agent（复用登记处已有的 agent）', sel));
+      if (w.agentPick) {
+        const hint = document.createElement('div'); hint.className = 'wf-hint';
+        hint.textContent = '已由 agent「' + w.agentPick.name + '」决定模块与默认模型；' +
+          '模型改动只对本工作生效，不写回登记处。';
+        box.appendChild(hint);
+      } else {
+        const nm = textInput('agent 名字（默认取勾选的第一个模块）');
+        nm.value = w.agentName || pickedModules()[0] || '';
+        nm.addEventListener('input', () => { w.agentName = nm.value; });
+        box.appendChild(field('本次 agent 的名字', nm));
+      }
+      const lab = document.createElement('div'); lab.className = 'wf-label';
+      lab.textContent = w.agentPick
+        ? '模块（已由 agent 决定，共 ' + w.agentPick.modules.length + ' 个）'
+        : '模块（勾 1 个 = 直连式，勾多个 = 组合式）';
+      box.appendChild(lab);
+      box.appendChild(singleModules());
+      return box;
+    }
+
+    function singleModules() {
+      const box = document.createElement('div'); box.className = 'wf-mods';
+      if (!state.modules.length) { box.appendChild(emptyHint('（modules/ 下没有模块）')); return box; }
+      for (const m of state.modules) {
+        const lab = document.createElement('label'); lab.className = 'wf-check' + (w.agentPick ? ' disabled' : '');
+        const cb = document.createElement('input'); cb.type = 'checkbox';
+        cb.checked = w.modules.indexOf(m.id) >= 0;
+        if (w.agentPick) cb.disabled = true;
+        cb.addEventListener('change', () => {
+          if (w.agentPick) return;
+          if (cb.checked) { if (w.modules.indexOf(m.id) < 0) w.modules.push(m.id); }
+          else w.modules = w.modules.filter((x) => x !== m.id);
+          renderAll();
+        });
+        const id = document.createElement('span'); id.textContent = m.id;
+        const brief = document.createElement('span'); brief.className = 'wf-brief'; brief.textContent = m.brief;
+        lab.appendChild(cb); lab.appendChild(id); lab.appendChild(brief);
+        box.appendChild(lab);
+      }
+      return box;
+    }
+
+    // 协作：agent 实例列表（名字可就地改，同名会让后端加尾号）
+    function agentRows() {
+      const list = document.createElement('div'); list.className = 'agent-list';
+      if (!w.agents.length) { list.appendChild(emptyHint('（还没加入 agent）')); return list; }
+      w.agents.forEach((a, i) => {
+        const row = document.createElement('div'); row.className = 'agent-item';
+        const main = document.createElement('div'); main.className = 'reg-main';
+        const nm = document.createElement('input'); nm.className = 'field-input agent-name';
+        nm.value = a.name; nm.autocomplete = 'off'; nm.placeholder = 'agent 名字';
+        nm.addEventListener('input', () => { a.name = nm.value; });
+        const sub = document.createElement('div'); sub.className = 'reg-sub';
+        // 登记处里的 agent 与临时 agent 如实分开：临时的那条可以就地存下来。
+        const badge = document.createElement('span');
+        badge.className = 'agent-badge' + (a.transient ? ' is-transient' : '');
+        badge.textContent = a.transient ? '临时（可保存为 agent）' : '已在登记处';
+        const mods = document.createElement('span'); mods.className = 'agent-mods'; mods.textContent = a.modules.join(' + ');
+        sub.appendChild(badge); sub.appendChild(mods);
+        main.appendChild(nm); main.appendChild(sub);
+        const acts = document.createElement('div'); acts.className = 'wf-inline';
+        if (a.transient) {
+          const keep = btn('存为 agent', 'link-btn');
+          keep.onclick = async () => {
+            if (!a.name.trim()) { c.setMsg('agent 名字不能为空', true); return; }
+            try {
+              await api('POST', '/api/agents', { name: a.name.trim(), modules: a.modules.slice(), model: a.model, note: '' });
+              await refreshState();
+              a.transient = false; a.reuse = true;
+              renderAll(); c.setMsg('已保存 agent：' + a.name.trim());
+            } catch (e) { c.setMsg(e.message, true); }
+          };
+          acts.appendChild(keep);
+        }
+        const del = btn('移除', 'link-btn danger');
+        del.onclick = () => { w.agents.splice(i, 1); renderAll(); };
+        acts.appendChild(del);
+        row.appendChild(main); row.appendChild(acts);
+        list.appendChild(row);
+      });
+      return list;
+    }
+
+    // 内联新建 agent（不弹二级窗，避免丢掉向导状态）
+    function renderEditor() {
+      editorWrap.className = ed.open ? 'wf-field' : 'wf-field hidden';
+      editorWrap.innerHTML = '';
+      if (!ed.open) return;
+      const nm = textInput('新 agent 名字'); nm.value = ed.name;
+      nm.addEventListener('input', () => { ed.name = nm.value; });
+      const mods = document.createElement('div'); mods.className = 'wf-mods';
+      for (const m of state.modules) {
+        const lab = document.createElement('label'); lab.className = 'wf-check';
+        const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = ed.modules.indexOf(m.id) >= 0;
+        cb.addEventListener('change', () => {
+          if (cb.checked) { if (ed.modules.indexOf(m.id) < 0) ed.modules.push(m.id); }
+          else ed.modules = ed.modules.filter((x) => x !== m.id);
+        });
+        const id = document.createElement('span'); id.textContent = m.id;
+        const brief = document.createElement('span'); brief.className = 'wf-brief'; brief.textContent = m.brief;
+        lab.appendChild(cb); lab.appendChild(id); lab.appendChild(brief);
+        mods.appendChild(lab);
+      }
+      const mopts = modelOptions();
+      const msel = selectInput(mopts, ed.model || state.core);
+      if (mopts.length) ed.model = msel.value;
+      msel.addEventListener('change', () => { ed.model = msel.value; });
+      const note = textInput('说明（可选）'); note.value = ed.note;
+      note.addEventListener('input', () => { ed.note = note.value; });
+      const addT = btn('加入本次（临时）', 'btn');
+      addT.onclick = () => {
+        if (!ed.name.trim()) { c.setMsg('agent 名字不能为空', true); return; }
+        if (!ed.modules.length) { c.setMsg('至少勾选一个模块', true); return; }
+        w.agents.push({ name: ed.name.trim(), transient: true, modules: ed.modules.slice(), model: ed.model, why: null });
+        ed.open = false; renderAll(); c.setMsg('已加入临时 agent：' + ed.name.trim());
+      };
+      const addS = btn('保存为 agent 并加入', 'btn btn-primary');
+      addS.onclick = async () => {
+        if (!ed.name.trim()) { c.setMsg('agent 名字不能为空', true); return; }
+        if (!ed.modules.length) { c.setMsg('至少勾选一个模块', true); return; }
+        try {
+          await api('POST', '/api/agents', { name: ed.name.trim(), modules: ed.modules.slice(), model: ed.model, note: ed.note.trim() });
+          await refreshState();
+          w.agents.push({ name: ed.name.trim(), transient: false, modules: ed.modules.slice(), model: ed.model, why: null });
+          ed.open = false; renderAll(); c.setMsg('已保存并加入 agent：' + ed.name.trim());
+        } catch (e) { c.setMsg(e.message, true); }
+      };
+      const cancelEd = btn('取消', 'btn btn-ghost');
+      cancelEd.onclick = () => { ed.open = false; renderAll(); };
+      editorWrap.appendChild(field('名字', nm));
+      editorWrap.appendChild(field('模块（能力）', mods));
+      if (mopts.length) editorWrap.appendChild(field('默认模型', msel));
+      editorWrap.appendChild(field('说明', note));
+      const row = document.createElement('div'); row.className = 'wf-inline';
+      row.appendChild(addT); row.appendChild(addS); row.appendChild(cancelEd);
+      editorWrap.appendChild(row);
+    }
+
+    function agentPicker() {
+      const box = document.createElement('div'); box.className = 'form-col';
+      box.appendChild(agentRows());
+      const addRow = document.createElement('div'); addRow.className = 'wf-inline';
+      const opts = state.agents.map((a) => ({ value: a.name, label: a.name + '（' + a.modules.join('+') + '）' }));
+      const sel = selectInput(opts, null);
+      const add = btn('加入', 'btn');
+      add.onclick = () => {
+        const a = state.agents.find((x) => x.name === sel.value);
+        if (!a) { c.setMsg('请选择已登记的 agent，或点下面「新建 agent」', true); return; }
+        if (w.agents.some((x) => x.name === a.name)) { c.setMsg('该 agent 已经在本次工作里了', true); return; }
+        w.agents.push({ name: a.name, transient: false, modules: a.modules.slice(), model: a.model || state.core, why: null });
+        renderAll();
+      };
+      if (opts.length) { addRow.appendChild(sel); addRow.appendChild(add); }
+      else addRow.appendChild(emptyHint('（还没有 agent，先去「设置 → agent 管理」新建）'));
+      box.appendChild(addRow);
+      const newBtn = btn('+ 新建 agent', 'btn btn-block');
+      newBtn.onclick = () => {
+        ed.open = true; ed.name = ''; ed.modules = []; ed.model = state.core; ed.note = '';
+        renderAll();
+      };
+      box.appendChild(newBtn);
+      box.appendChild(editorWrap);
+      return box;
+    }
+
+    function renderParts() {
+      partWrap.innerHTML = '';
+      const lab = document.createElement('div'); lab.className = 'wf-label';
+      lab.textContent = w.mode === 'single' ? '单 agent：复用已有 agent，或勾选它的模块'
+        : 'agent（协作：可多个，各自独立沙箱）';
+      partWrap.appendChild(lab);
+      partWrap.appendChild(w.mode === 'single' ? singlePick() : agentPicker());
+    }
+
+    function renderModels() {
+      modelWrap.innerHTML = '';
+      const opts = modelOptions();
+      if (w.mode === 'single') {
+        const who = w.agentPick ? w.agentPick.name : ((w.agentName || '').trim() || pickedModules()[0] || '');
+        if (!who) { modelWrap.appendChild(emptyHint('先复用 agent 或勾选模块，再指定模型')); return; }
+        if (!opts.length) { modelWrap.appendChild(emptyHint('（未登记模型，将用核心默认）')); return; }
+        const row = document.createElement('div'); row.className = 'wf-model-row';
+        const lab = document.createElement('span'); lab.className = 'wf-model-id'; lab.textContent = who;
+        const cur = w.model || state.core || opts[0].value;
+        w.model = cur;
+        const sel = selectInput(opts, cur);
+        sel.addEventListener('change', () => { w.model = sel.value; });
+        row.appendChild(lab); row.appendChild(sel);
+        modelWrap.appendChild(row);
+        return;
+      }
+      if (!w.agents.length) { modelWrap.appendChild(emptyHint('先加入 agent，再指定模型')); return; }
+      if (!opts.length) { modelWrap.appendChild(emptyHint('（未登记模型，将用核心默认）')); return; }
+      for (const a of w.agents) {
+        const row = document.createElement('div'); row.className = 'wf-model-row';
+        const lab = document.createElement('span'); lab.className = 'wf-model-id'; lab.textContent = a.name;
+        const cur = a.model || state.core || opts[0].value;
+        a.model = cur;
+        const sel = selectInput(opts, cur);
+        sel.addEventListener('change', () => { a.model = sel.value; });
+        row.appendChild(lab); row.appendChild(sel);
+        if (a.why) { const why = document.createElement('div'); why.className = 'wf-why'; why.textContent = a.why; row.appendChild(why); }
+        modelWrap.appendChild(row);
+      }
+    }
+
+    function renderAll() { renderParts(); renderModels(); renderEditor(); }
+
+    modeSel.addEventListener('change', () => {
+      w.mode = modeSel.value;
+      ed.open = false;
+      renderAll();
+    });
+
+    recBtn.onclick = async () => {
+      const task = taskIn.value.trim();
+      if (!task) { c.setMsg('先写下本次需求，核心才能据此推荐', true); return; }
+      c.setMsg('核心根据需求推荐中…');
+      try {
+        // 核心返回 agent 草案：{ name, modules, model, why, reuse }。
+        // reuse=true → 这条就是登记处里已有的 agent（transient:false，行上标「已在登记处」）；
+        // reuse=false → 核心帮忙组装的临时 agent（transient:true，行上标「临时（可保存为 agent）」）。
+        const r = await api('POST', '/api/suggest-models', { task, mode: w.mode });
+        const rec = (r.agents || []).filter((a) => (a.modules || []).length);
+        if (!rec.length) { c.setMsg('核心未给出可用建议', true); return; }
+        const asItem = (a) => ({
+          name: a.name || a.modules[0],
+          transient: a.reuse !== true,
+          reuse: a.reuse === true,
+          modules: a.modules.slice(),
+          model: a.model,
+          why: a.why || null,
+        });
+        let note = '核心已给出建议（见下方，agent 名字与模型都可改）';
+        if (w.mode === 'single') {
+          const top = rec[0];
+          const mods = (top.modules || []).slice();
+          if (!mods.length) { c.setMsg('核心推荐的 agent 没有模块', true); return; }
+          if (top.reuse === true) {
+            // 复用登记处已有的 agent：不论几个模块，完整按它的 modules 勾好（不截断）。
+            const who = top.name || mods[0];
+            const reg = state.agents.find((x) => x.name === who);
+            const regMods = reg && reg.modules.length ? reg.modules.slice() : mods;
+            w.agentPick = { name: who, modules: regMods, model: top.model || (reg && reg.model) || null };
+            w.modules = regMods.slice();
+            w.model = w.agentPick.model || state.core || w.model;
+            note = '核心建议复用已有 agent「' + who + '」（' + regMods.length + ' 个模块）；' +
+              '模型只对本工作生效，不写回登记处';
+          } else {
+            w.agentPick = null;
+            w.modules = mods.slice();
+            w.agentName = top.name || mods[0];
+            if (top.model) w.model = top.model;
+            note = '核心建议按临时 agent「' + w.agentName + '」组队（' + mods.length + ' 个模块）';
+          }
+        } else {
+          w.agents = rec.map(asItem);
+        }
+        renderAll();
+        c.setMsg(note);
+      } catch (e) { c.setMsg(e.message, true); }
+    };
+
+    // 真正下发（重名时先经 choiceModal 让用户裁决，绝不用原生 confirm）
+    async function submit(body) {
+      try { await startSession(body); closeModal(); } catch (e) { alert(e.message); }
+    }
+
+    createBtn.onclick = async () => {
+      const name = nameIn.value.trim();
+      if (!name) { c.setMsg('工作名称必填', true); return; }
+      const task = taskIn.value.trim();
+      let agents;
+      if (w.mode === 'single') {
+        if (w.agentPick) {
+          const mods = (w.agentPick.modules || []).slice();
+          if (!mods.length) { c.setMsg('单 agent：所选 agent 没有模块', true); return; }
+          agents = [{
+            name: w.agentPick.name, transient: false, modules: mods,
+            model: w.model || w.agentPick.model || state.core,
+          }];
+        } else {
+          const mods = pickedModules();
+          if (!mods.length) { c.setMsg('单 agent：至少勾选 1 个模块，或在上方复用已有 agent', true); return; }
+          agents = [{
+            name: (w.agentName || '').trim() || mods[0], transient: true, modules: mods,
+            model: w.model || state.core,
+          }];
+        }
+      } else {
+        if (!w.agents.length) { c.setMsg('请先加入至少 1 个 agent', true); return; }
+        if (!task) { c.setMsg('协作模式必须填写本次需求', true); return; }
+        agents = w.agents.map((a) => ({ name: a.name.trim(), transient: !!a.transient, modules: a.modules.slice(), model: a.model }));
+        if (agents.some((a) => !a.name)) { c.setMsg('agent 名字不能为空', true); return; }
+      }
+      const names = agents.map((a) => a.name);
+      const dup = names.filter((n, i) => names.indexOf(n) !== i)[0];
+      const body = { name, mode: w.mode, agents };
+      if (task) body.task = task;
+      if (dup) {
+        choiceModal('agent 重名', '本次工作里有同名 agent「' + dup + '」。', [
+          ['按现名继续（后端自动加尾号 -2…）', 'btn btn-primary', () => submit(body)],
+          ['回去改名', 'btn btn-ghost', () => {}],
+        ]);
+        return;
+      }
+      await submit(body);
+    };
+
+    c.body.appendChild(field('工作名称', nameIn));
+    c.body.appendChild(field('形态', modeSel));
+    c.body.appendChild(modeHint);
+    c.body.appendChild(partWrap);
+    c.body.appendChild(modelWrap);
+    c.body.appendChild(field('本次需求', taskIn));
+    c.body.appendChild(recBtn);
+    c.body.appendChild(createBtn);
+    c.body.appendChild(cancelBtn);
+
+    renderParts(); renderModels();
+  }, true);
+}
+
+/* ---------- 会话 ---------- */
+async function startSession(body) {
+  const r = await api('POST', '/api/sessions', body);
+  const sid = r.sid;
+  const s = {
+    sid, mode: body.mode, title: body.name || sid,
+    lines: [], live: [], pending: null, busy: false, done: false, awaiting: null, fold: {}, scroll: {},
+  };
+  state.sessions.set(sid, s);
+  for (const ev of (r.events || [])) absorb(s, ev);
+  setActive(sid);
+  if (body.mode === 'collab') await refreshPending(s);
+  renderAll();
+  await refreshState(); // 会话历史随建随现
+  return s;
+}
+
 function setActive(sid) {
+  atClose(); // 换会话 = 换一份文件清单，菜单先收起来
   state.activeSid = sid;
-  renderTabs(); renderStream(); renderGate(state.sessions.get(sid));
-  $('#input').focus();
+  // 换会话先清掉上一份根（免得拿别人的根去缩）；缓存里有就同步先缩，避免先长后短的闪烁。
+  shortPathRoots = null;
+  const cached = filesCache.get(sid);
+  if (cached) shortPathRoots = buildRootList(cached.roots);
+  renderTabs(); renderStream(true); renderGate(state.sessions.get(sid));
+  const s = state.sessions.get(sid);
+  if (!s || !s.readonly) $('#input').focus();
+  if (!cached) loadPathRoots(sid); // 没缓存就去拉一次（失败静默），拿到后补一次重渲染
+}
+
+/* 把 roots 应用到当前活动会话；返回是否变化（变了才值得重渲染）。 */
+function applyPathRoots(sid, data) {
+  if (state.activeSid !== sid) return false;
+  const next = buildRootList(data && data.roots);
+  const same = JSON.stringify(next) === JSON.stringify(shortPathRoots);
+  shortPathRoots = next;
+  return !same;
+}
+
+/* 会话激活时就把路径根拉到手（复用 @ 菜单那份缓存）；失败静默，不影响会话本身。 */
+async function loadPathRoots(sid) {
+  const data = await atLoad(sid);
+  if (!data) return;
+  if (applyPathRoots(sid, data)) renderStream(true); // 根到手 → 重渲染一次，长路径立刻变短
 }
 
 function activeSession() { return state.sessions.get(state.activeSid); }
@@ -114,7 +1195,38 @@ function activeSession() { return state.sessions.get(state.activeSid); }
 function absorb(s, ev) {
   switch (ev.type) {
     case 'notice': s.lines.push({ cls: 'sys', who: '', text: ev.text }); break;
-    case 'transcript': for (const l of ev.lines) s.lines.push(...parseLine(l)); break;
+    case 'transcript':
+      // 服务端权威转录：每行带会话内稳定 id（回档按 id 定位）。
+      // 权威行到达：撤掉乐观回显与流式块，改用服务端的行；带 tool 的行渲染成工具卡片。
+      s.lines = s.lines.filter((x) => !x.pending);
+      for (const l of ev.lines) {
+        if (l.tool) {
+          s.lines.push({ cls: 'tool', id: l.id, tool: l.tool, reasoning: l.reasoning || null, who: '', text: '', speaker: l.tool.speaker || '' });
+          continue;
+        }
+        const parts = parseLine(l.line);
+        for (const p of parts) { p.id = l.id; if (l.reasoning) p.reasoning = l.reasoning; }
+        s.lines.push(...parts);
+      }
+      s.live = []; // 权威行整体替换掉流式块
+      break;
+    case 'delta': {
+      // 流式块列表（短暂，不落盘）：一次发言可能有**多轮模型调用**（工具循环），
+      // 所以按到达顺序排块——kind='start' 表示又一轮开始：封存上一块并推入新块，绝不丢弃。
+      if (ev.kind === 'start' || !s.live.length || s.live[s.live.length - 1].kind !== 'msg') {
+        s.live.push({ kind: 'msg', speaker: ev.speaker || '', segments: [] });
+      }
+      if (ev.kind === 'start') return true;
+      const segs = s.live[s.live.length - 1].segments;
+      const last = segs[segs.length - 1];
+      if (last && last.kind === ev.kind) last.text += ev.text;
+      else segs.push({ kind: ev.kind, text: ev.text });
+      return true; // 短暂流式事件：只走增量渲染，不整帧重建
+    }
+    case 'tool_call':
+      // 工具调用发生在轮与轮之间：按到达顺序插进流式块里（module 为空 = 内置 read/write）。
+      s.live.push({ kind: 'tool', tool: ev });
+      return true; // 同上：卡片节点只 append，绝不重建
     case 'discussion_done':
       if (ev.over_cap) s.lines.push({ cls: 'sys', who: '', text: '讨论超轮次上限，进入裁决。' });
       break;
@@ -124,7 +1236,7 @@ function absorb(s, ev) {
       if (!ev.items || ev.items.length === 0) {
         s.lines.push({ cls: 'bad', who: '验收', text: '清单解析失败，原文：\n' + ev.raw });
       } else {
-        const txt = ev.items.map(i => '[' + i.status.toUpperCase() + '] ' + i.item + (i.note ? ' —— ' + i.note : '')).join('\n');
+        const txt = ev.items.map((i) => '[' + i.status.toUpperCase() + '] ' + i.item + (i.note ? ' —— ' + i.note : '')).join('\n');
         s.lines.push({ cls: 'review', who: '验收清单', text: txt });
       }
       break;
@@ -134,18 +1246,55 @@ function absorb(s, ev) {
       break;
     case 'ended': s.done = true; break;
   }
+  return false; // 定稿事件：需要整帧重建
+}
+
+/* 吸收一批事件：全是短暂流式事件 → 增量渲染；出现任何定稿事件 → 整帧重建。
+ * 返回 'live' | 'full' | 'none'。 */
+function absorbEvents(s, events) {
+  let live = false, full = false;
+  for (const ev of (events || [])) {
+    if (absorb(s, ev) === true) live = true;
+    else full = true;
+  }
+  return full ? 'full' : (live ? 'live' : 'none');
 }
 
 /* [id:tag] text → 行对象（呈现即上下文：原样收录，标签做样式） */
+/* 正文看着就是"工具信封"（开头即 {"type":"tool"…）→ 兜底按工具卡片渲染。
+ * 只在**开头**判定（允许前导空白），避免误伤正文中段引用 JSON 的情况。 */
+function looksLikeToolEnvelope(text) {
+  return /^\s*\{\s*"type"\s*:\s*"tool"/.test(String(text == null ? '' : text));
+}
+
+/* 以工具信封开头的文本行 → 卡片行对象（键用 L<行id>:raw，与真实工具调用的 T<序号> 分开）。 */
+function envelopeLine(text, speaker) {
+  return { cls: 'line', who: '', text: text, speaker: speaker || '', rawTool: true };
+}
+
 function parseLine(l) {
   const m = l.match(/^\[([^\]]+):([a-z]+)\]([\s\S]*)$/);
   if (m) {
     const cls = m[2] === 'agree' ? 'ok' : m[2] === 'leave' ? 'sys' : m[2] === 'ask' ? 'plan' : 'line';
     const degraded = l.includes('（信封缺失');
-    return [{ cls: degraded ? 'sys' : cls, who: m[1] + ' · ' + m[2] + (degraded ? ' · 信封缺失' : ''), text: m[3].trim() }];
+    const text = m[3].trim();
+    // 自由发言（say）的正文若整段就是工具信封，按卡片渲染，而不是当消息
+    if (cls === 'line' && looksLikeToolEnvelope(text)) return [envelopeLine(text, m[1])];
+    return [{ cls: degraded ? 'sys' : cls, who: m[1] + ' · ' + m[2] + (degraded ? ' · 信封缺失' : ''), text, speaker: m[1], verb: m[2] }];
   }
   if (l.startsWith('[用户')) return [{ cls: 'user', who: '用户', text: l.replace(/^\[[^\]]+\]\s*/, '') }];
   if (l.startsWith('[代拟]')) return [{ cls: 'sys', who: '核心代拟', text: l.slice(4) }];
+  // 单 agent 的文本行：[说话人] 正文（协作的 [名字:动词] 上面已认）。
+  // 正文**可能为空**：那一轮只思考、或只发了工具信封（思维链在 reasoning 里，正文没有）。
+  // 核心自己的标签（[轮次 2] 这类）方括号里以「轮次」开头，保持系统行原样，不当成说话人。
+  const sp = l.match(/^\[([^\]]+)\]\s*([\s\S]*)$/);
+  if (sp) {
+    const tag = sp[1];
+    const text = sp[2].trim();
+    if (!text && /^轮次/.test(tag)) return [{ cls: 'line', who: '', text: l }];
+    if (looksLikeToolEnvelope(text)) return [envelopeLine(text, tag)];
+    return [{ cls: 'line', who: tag, text }];
+  }
   return [{ cls: 'line', who: '', text: l }];
 }
 
@@ -174,36 +1323,209 @@ function renderTabs() {
   }
 }
 
-function renderStream() {
+/* 转录 DOM：定稿容器 + 流式容器（都挂在 #stream 下）。
+ * 定稿容器只在"整帧重建"时重建；流式容器在 delta / tool_call 路径上只做**增量 append**，
+ * 已有节点绝不重建——<details> 的开关、<pre> 的滚动条、正在拖的滚动位置都不会被打断。 */
+let domOwner = null;   // 两个容器当前属于哪个会话
+let doneBox = null;
+let liveBox = null;
+let typingNode = null;
+
+/// 打字指示器只有一个，靠 class 显隐；不参与流的 append 顺序。
+function syncTyping(s) {
+  if (!typingNode) return;
+  const live = s.live || [];
+  const hasLive = live.some((b) => b.kind === 'tool' || (b.segments && b.segments.length));
+  typingNode.className = s.busy && !hasLive ? 'typing' : 'typing hidden';
+}
+
+function syncSendButton(s) {
+  const sendBtn = $('#btn-send');
+  if (!sendBtn) return;
+  sendBtn.textContent = s.busy ? '停止' : '发送';
+  sendBtn.className = s.busy ? 'btn btn-danger' : 'btn btn-primary';
+}
+
+/// 只有本来就在底部才自动跟随；用户往上滚时保持原位置（流式刷新不抢滚动条）。
+function nearBottom(box) { return box.scrollHeight - box.scrollTop - box.clientHeight < 80; }
+
+/// 回档按钮：删掉这一行和它之后的所有消息。
+function rewindButton(id) {
+  const b = document.createElement('button');
+  b.className = 'line-act danger'; b.textContent = '删除此行和之后所有消息';
+  b.title = '删除此行和之后所有消息';
+  b.onclick = () => rewindTo(id);
+  return b;
+}
+
+/// 建立两个容器 + 打字指示器（整帧重建时调用）。
+function buildStreamBoxes(sid) {
   const box = $('#stream');
   box.innerHTML = '';
-  const s = activeSession();
-  if (!s) {
-    box.innerHTML = '<div class="empty"><div class="logo">☉</div>' +
-      '<div class="tip">从左侧模块公地选择一个模块开始：直连 · 协作 · 全能</div>' +
-      '<div class="hint">PC：双栏布局　移动端：左上角 ☰ 打开侧栏</div></div>';
-    return;
-  }
+  doneBox = document.createElement('div'); doneBox.className = 'stream-done';
+  liveBox = document.createElement('div'); liveBox.className = 'stream-live';
+  typingNode = document.createElement('div'); typingNode.className = 'typing hidden'; typingNode.textContent = 'agent 工作中';
+  box.appendChild(doneBox); box.appendChild(liveBox); box.appendChild(typingNode);
+  domOwner = sid;
+}
+
+/// 定稿行渲染到容器里（每次全量重建这个容器；折叠与 <pre> 滚动状态由 store 恢复）。
+function renderDone(s) {
+  if (!doneBox) return;
+  doneBox.innerHTML = '';
+  // tool 行的稳定序号：在 s.lines 里按出现顺序数（兜底的信封行不算，它用 L<行id>:raw）。
+  let toolSeq = 0;
   for (const l of s.lines) {
+    // 工具行（含"正文就是工具信封"的兜底行）：渲染成卡片，而不是当消息发出来。
+    if (l.tool || l.rawTool) {
+      const card = l.tool ? toolCard(l.tool, s, 'T' + toolSeq) : rawToolCard(l.text, s, 'L' + l.id, l.speaker);
+      if (l.tool) toolSeq += 1;
+      if (typeof l.id === 'number') card.appendChild(rewindButton(l.id));
+      doneBox.appendChild(card);
+      continue;
+    }
     const el = document.createElement('div');
     el.className = 'line ' + l.cls;
     if (l.who) {
       const w = document.createElement('span'); w.className = 'who'; w.textContent = l.who; el.appendChild(w);
     }
-    el.appendChild(document.createTextNode(l.text));
-    box.appendChild(el);
+    // 思维链在回答之上（先想后说）；默认折叠，点开状态会被记住（键 = L<行 id>）。
+    if (l.reasoning && state.settings.show_reasoning) el.appendChild(reasoningBlock(l.reasoning, s, 'L' + l.id));
+    appendBody(el, l.cls, l.text);
+    // 删除：删掉这一行和它之后的所有消息（服务端按行 id 重建，前端整体替换）。
+    if (typeof l.id === 'number') el.appendChild(rewindButton(l.id));
+    // 撤回该同意：转录追加一条撤回行，继续时按剩余转录重新判定。
+    if (l.verb === 'agree' && l.speaker) {
+      const w = document.createElement('button');
+      w.className = 'line-act'; w.textContent = '撤回同意'; w.title = '让该 agent 本轮不再算同意';
+      w.onclick = () => withdrawAgree(l.speaker);
+      el.appendChild(w);
+    }
+    doneBox.appendChild(el);
   }
-  if (s.busy) {
-    const t = document.createElement('div'); t.className = 'typing'; t.textContent = '成员工作中'; box.appendChild(t);
+  flushScroll(s);
+}
+
+/// 流式块：只做增量——块不存在就建节点，内容只在既有节点上更新，绝不重建。
+/// **一个块最多一个思维链折叠 + 一段正文**（与定稿后的行同形）：模型会把"思维链/正文"交替吐出来，
+/// 若按到达片段各建节点，流式期间就会冒出两个「思维链」、正文被切成好几段。
+/// 流式 tool 块的键 = 已有权威 tool 行数 + 它在 live 里的 tool 块序号 → 与定稿后的权威行同键。
+function renderLive(s, full) {
+  if (!liveBox) { renderStream(true); return; }
+  const live = s.live || [];
+  if (full) { for (const b of live) { b._node = null; b._cot = null; b._txt = null; } }
+  const toolLines = s.lines.filter((l) => l.tool).length;
+  let liveTool = 0;
+  for (let bi = 0; bi < live.length; bi++) {
+    const blk = live[bi];
+    if (blk.kind === 'tool') {
+      if (!blk._node) {
+        blk._node = toolCard(blk.tool, s, 'T' + (toolLines + liveTool));
+        liveBox.appendChild(blk._node);
+      }
+      liveTool += 1;
+      continue;
+    }
+    const segs = blk.segments || [];
+    if (!blk._node) {
+      const el = document.createElement('div');
+      el.className = 'line line streaming';
+      const w = document.createElement('span'); w.className = 'who'; w.textContent = blk.speaker;
+      el.appendChild(w);
+      blk._node = el;
+      blk._cot = null;
+      blk._txt = null;
+      liveBox.appendChild(el);
+    }
+    // 先把这一轮的所有片段按 kind 归并（顺序无关紧要：思维链永远在正文之上，与定稿行一致）
+    let cot = '';
+    let txt = '';
+    for (const seg of segs) {
+      const t = String(seg.text == null ? '' : seg.text);
+      if (!t) continue;
+      if (seg.kind === 'reasoning') cot += t;
+      else txt += t;
+    }
+    const showCot = !!state.settings.show_reasoning;
+    if (showCot && cot) {
+      if (!blk._cot) {
+        const node = reasoningBlock(cot, s, 'V' + bi);
+        // 正文节点若先到，思维链要插到它前面（永远"先想后说"）
+        if (blk._txt && blk._txt.node && typeof blk._node.insertBefore === 'function') {
+          blk._node.insertBefore(node, blk._txt.node);
+        } else {
+          blk._node.appendChild(node);
+        }
+        blk._cot = { node: node, text: cot };
+      } else if (blk._cot.text !== cot) {
+        if (blk._cot.node && blk._cot.node.children && blk._cot.node.children[1]) {
+          blk._cot.node.children[1].textContent = cot;
+        }
+        blk._cot.text = cot;
+      }
+    }
+    if (txt) {
+      if (!blk._txt) {
+        const node = mdNode(txt);
+        blk._node.appendChild(node);
+        blk._txt = { node: node, text: txt };
+      } else if (blk._txt.text !== txt) {
+        // 只更新内容，节点不动 → 折叠与滚动都不受打扰
+        if (typeof markdownToHtml === 'function') blk._txt.node.innerHTML = shortPath(markdownToHtml(txt));
+        else blk._txt.node.textContent = txt;
+        blk._txt.text = txt;
+      }
+    }
+    // 这一轮没有**可见**内容（例如只发了一封信封、正文不外泄）→ 整块隐藏：
+    // 别留一张只有说话人名字的空卡片（工具轮尤其明显）。节点位置不变，所以内容后到时会出现在正确位置。
+    const visible = (showCot && !!cot) || !!txt;
+    if (visible) blk._node.classList.remove('empty');
+    else blk._node.classList.add('empty');
   }
-  box.scrollTop = box.scrollHeight;
+  flushScroll(s);
+}
+
+/// 整帧重建：容器与全部行都重建（折叠 / <pre> 滚动由 store 恢复）。
+function renderStream(force) {
+  const box = $('#stream');
+  const prevTop = box.scrollTop;
+  const stick = force === true || nearBottom(box);
+  // 容器随之重建，避免旧节点被当成"已经渲染过"
+  doneBox = null; liveBox = null; typingNode = null; domOwner = null;
+  box.innerHTML = '';
+  const s = activeSession();
+  if (!s) {
+    box.innerHTML = '<div class="empty"><div class="logo">☉</div>' +
+      '<div class="tip">点左上角「+ 新建工作」开始：单 agent（直连式 / 组合式）· 协作</div>' +
+      '<div class="hint">PC：双栏布局　移动端：左上角 ☰ 打开侧栏</div></div>';
+    return;
+  }
+  buildStreamBoxes(s.sid);
+  renderDone(s);
+  renderLive(s, true);
+  syncTyping(s);
+  box.scrollTop = stick ? box.scrollHeight : prevTop;
+  syncSendButton(s);
+}
+
+/// 流式增量帧：只 append 新的流式节点，绝不重建已有节点。
+function renderLiveTick(s) {
+  if (!s) return;
+  if (!liveBox || domOwner !== s.sid) { renderStream(true); return; }
+  const box = $('#stream');
+  const prevTop = box.scrollTop;
+  const stick = nearBottom(box);
+  renderLive(s, false);
+  syncTyping(s);
+  box.scrollTop = stick ? box.scrollHeight : prevTop;
+  syncSendButton(s);
 }
 
 /* 裁决门：确认名单 / 确认开始 / 请教回答 */
 function renderGate(s) {
   const gate = $('#gate');
   gate.innerHTML = '';
-  if (!s || s.busy || s.done) return;
+  if (!s || s.busy || s.done || s.readonly) return;
   if (s.awaiting === 'task') {
     gate.appendChild(gateCard('请提交本次协作需求：', [
       ['提交', async () => { const v = takeInput(); if (v) await act('task', v); }],
@@ -226,6 +1548,28 @@ function renderGate(s) {
       ]));
     }
   }
+  // 协作：随时可改本次需求（回到需求行、追加新需求，核心按最后一条判定）。
+  if (s.mode === 'collab') {
+    gate.appendChild(gateCard('需要修改本次需求？', [
+      ['改需求', async () => {
+        const v = window.prompt('新的本次需求：', '');
+        if (v !== null && v.trim()) await updateTask(v.trim());
+      }],
+    ]));
+  }
+}
+
+/* 改需求：服务端回到需求行并追加新需求，返回完整重放，前端整体重建。 */
+async function updateTask(text) {
+  const s = activeSession();
+  if (!s || s.busy) return;
+  try {
+    const r = await api('POST', '/api/sessions/' + encodeURIComponent(s.sid) + '/update-task', { text });
+    s.lines = []; s.pending = null; s.readonly = false; s.done = false;
+    for (const ev of (r.events || [])) absorb(s, ev);
+    await refreshPending(s);
+    renderAll();
+  } catch (err) { alert(err.message); }
 }
 
 function gateCard(q, btns) {
@@ -235,7 +1579,7 @@ function gateCard(q, btns) {
   const bs = document.createElement('div'); bs.className = 'btns';
   for (const [label, fn] of btns) {
     const b = document.createElement('button'); b.className = 'btn'; b.textContent = label;
-    b.onclick = () => fn().catch(err => alert(err.message));
+    b.onclick = () => fn().catch((err) => alert(err.message));
     bs.appendChild(b);
   }
   el.appendChild(bs);
@@ -246,20 +1590,95 @@ function gateCard(q, btns) {
 function takeInput() {
   const v = $('#input').value.trim();
   $('#input').value = '';
+  atClose();
   autoGrow();
   return v;
 }
 
+/* 动作回包与长轮询可能携带同一批事件：按发件箱序号去重，保证只派发一次。 */
+function applyActionEvents(s, r) {
+  const evs = r.events || [];
+  if (typeof r.seq === 'number') {
+    if (r.seq <= appliedSeq) return; // 长轮询已派发过这一批
+    appliedSeq = r.seq;
+  }
+  for (const ev of evs) absorb(s, ev);
+}
+
 async function act(action, text) {
+  const s = activeSession();
+  if (!s || s.busy || s.readonly) return;
+  s.busy = true;
+  // 乐观回显：自己的发言立刻可见；服务端权威行到达时自动替换（见 absorb）。
+  if (text && (action === 'say' || action === 'task' || action === 'answer')) {
+    s.lines.push({ cls: 'user', who: '用户', text, pending: true });
+  }
+  renderStream();
+  try {
+    const r = await api('POST', '/api/sessions/' + encodeURIComponent(s.sid) + '/' + action, { text });
+    applyActionEvents(s, r);
+    s.awaiting = null;
+    await refreshPending(s);
+    renderAll();
+  } catch (err) {
+    s.lines = s.lines.filter((x) => !x.pending);
+    s.lines.push({ cls: 'bad', who: '错误', text: err.message });
+    renderAll();
+  } finally {
+    s.busy = false;
+    renderAll();
+  }
+}
+
+/* 删除：删掉这一行和它之后的所有消息；服务端返回重放后的完整事件流，前端整体重建。 */
+function rewindTo(id) {
+  const s = activeSession();
+  if (!s || s.busy) return;
+  choiceModal('删除消息', '删除这一行和之后的所有消息？此操作不可撤销。', [
+    ['删除', 'btn btn-danger', async () => {
+      try {
+        const r = await api('POST', '/api/sessions/' + encodeURIComponent(s.sid) + '/rewind', { id });
+        s.lines = [];
+        s.live = [];
+        s.fold = {};   // 行整体重建，折叠状态一并重来（避免旧键被新行复用）
+        s.scroll = {};
+        s.pending = null;
+        s.done = false;
+        s.readonly = false; // 历史回放会话一旦删除即转为活动会话
+        for (const ev of (r.events || [])) absorb(s, ev);
+        renderAll();
+      } catch (err) { alert(err.message); }
+    }],
+    ['取消', 'btn btn-ghost', () => {}],
+  ]);
+}
+
+/* 撤回某 agent 的同意（转录追加撤回行，协作才有意义）；值 = agent 实例名。 */
+function withdrawAgree(agent) {
+  const s = activeSession();
+  if (!s || s.busy) return;
+  choiceModal('撤回同意', '撤回「' + agent + '」的同意？继续时会按剩余转录重新判定。', [
+    ['撤回', 'btn btn-danger', async () => {
+      try {
+        const r = await api('POST', '/api/sessions/' + encodeURIComponent(s.sid) + '/withdraw', { agent });
+        applyActionEvents(s, r);
+        renderAll();
+      } catch (err) { alert(err.message); }
+    }],
+    ['取消', 'btn btn-ghost', () => {}],
+  ]);
+}
+
+/* 继续：由用户点击授权核心往下走。单 agent 若末条是 AI，服务端只回提醒、不发请求。 */
+async function continueFlow() {
   const s = activeSession();
   if (!s || s.busy) return;
   s.busy = true;
-  if (text) s.lines.push({ cls: 'user', who: '用户', text });
   renderStream();
   try {
-    const r = await api('POST', '/api/sessions/' + s.sid + '/' + action, { text });
-    for (const ev of r.events) absorb(s, ev);
-    s.awaiting = null;
+    const r = await api('POST', '/api/sessions/' + encodeURIComponent(s.sid) + '/continue', {});
+    s.readonly = false; // 历史回放会话一旦继续即转为活动会话（跨重启续跑）
+    applyActionEvents(s, r);
     await refreshPending(s);
     renderAll();
   } catch (err) {
@@ -275,33 +1694,237 @@ async function refreshPending(s) {
   // 服务端在 Ended 后回收会话：查询报「无此会话」即视为已终结。
   if (s.done) return;
   try {
-    const r = await api('POST', '/api/sessions/' + s.sid + '/pending', {});
+    const r = await api('POST', '/api/sessions/' + encodeURIComponent(s.sid) + '/pending', {});
     s.pending = r.pending || null;
   } catch (err) {
     if (String(err.message).includes('无此会话')) { s.done = true; s.pending = null; }
   }
 }
 
+/* ---------- 输入框 @ 引用（工作区 / 沙箱里的文件） ---------- */
+/* 数据 = GET /api/sessions/{sid}/files，按会话缓存；上传成功即失效；切换会话即清菜单。
+ * 菜单只列已存在的文件（上传仍走输入区那个 ＋ 按钮）；前端只负责**插入与渲染**，
+ * 不做任何路径改写——@work:… / @sandbox:… 由核心在入转录前改写成 work:/… / sandbox:/…。 */
+const filesCache = new Map();
+const atState = { open: false, loading: false, items: [], all: [], active: 0, start: -1, sid: null };
+
+function atMenuEl() { return $('#at-menu'); }
+
+/* 光标前的 @ 片段：前面必须是行首或空白，且 @ 与光标之间没有空白/另一个 @。 */
+function atToken() {
+  const t = $('#input');
+  const v = String(t.value || '');
+  const pos = typeof t.selectionStart === 'number' ? t.selectionStart : v.length;
+  const before = v.slice(0, pos);
+  const at = before.lastIndexOf('@');
+  if (at < 0) return null;
+  const frag = before.slice(at + 1);
+  if (/[\s@]/.test(frag)) return null;
+  if (at > 0 && !/\s/.test(before[at - 1])) return null;
+  return { start: at, frag: frag };
+}
+
+function atClose() {
+  atState.open = false; atState.loading = false; atState.items = []; atState.all = [];
+  atState.active = 0; atState.start = -1; atState.sid = null;
+  const box = atMenuEl();
+  if (box) { box.className = 'at-menu hidden'; box.innerHTML = ''; }
+}
+
+/* 菜单底部的固定提示行（可发现性）。 */
+function atHint(box) {
+  const h = document.createElement('div'); h.className = 'at-hint';
+  h.textContent = '↑↓ 选择 · Enter 填入 · Esc 关闭';
+  box.appendChild(h);
+}
+
+async function atLoad(sid) {
+  if (filesCache.has(sid)) return filesCache.get(sid);
+  try {
+    const data = await api('GET', '/api/sessions/' + encodeURIComponent(sid) + '/files');
+    filesCache.set(sid, data);
+    return data;
+  } catch (e) {
+    return null; // 会话已结束 / 无此会话：安静地不弹菜单，不打扰用户
+  }
+}
+
+/* 菜单条目：共享区 work/ 在前，其后每个 agent 一个分组。 */
+/* 需要加双引号的一段：含空白，或含下面这些句读标点（裸引用会在标点处终止，路径会被截断）。
+ * 英文句点 . 刻意不在内——后端已把它从终止符去掉，扩展名必须留在路径里。
+ * 只影响**插入的文本**；菜单里显示的仍是原始相对路径（不带引号）。
+ * 沙箱引用两段各自按需加引号：sandbox:"调研 助手"/"a b.md"。 */
+const AT_QUOTE_CHARS = '\\s，。；、！？：,;!?:）)」』】》';
+const AT_QUOTE_RE = new RegExp('[' + AT_QUOTE_CHARS + ']');
+function atQuotePath(p) {
+  return AT_QUOTE_RE.test(p) ? '"' + p + '"' : p;
+}
+
+function atItems(data) {
+  const out = [];
+  for (const f of (data.work || [])) {
+    const p = String(f);
+    out.push({ group: '共享区 work/', label: 'work/' + p, path: p, insert: '@work:' + atQuotePath(p) });
+  }
+  for (const a of (data.agents || [])) {
+    const name = a && a.name ? String(a.name) : '';
+    for (const f of ((a && a.files) || [])) {
+      const p = String(f);
+      out.push({
+        group: '沙箱 ' + name + '/',
+        label: name + '/' + p,
+        path: p,
+        insert: '@sandbox:' + atQuotePath(name) + '/' + atQuotePath(p),
+      });
+    }
+  }
+  return out;
+}
+
+function atRender() {
+  const box = atMenuEl();
+  if (!box) return;
+  box.className = 'at-menu';
+  box.innerHTML = '';
+  if (atState.loading) {
+    const e = document.createElement('div'); e.className = 'at-empty'; e.textContent = '载入中…';
+    box.appendChild(e);
+    atHint(box);
+    return;
+  }
+  if (!atState.items.length) {
+    const e = document.createElement('div'); e.className = 'at-empty'; e.textContent = '（没有匹配的文件）';
+    box.appendChild(e);
+    atHint(box);
+    return;
+  }
+  let group = null;
+  let activeRow = null;
+  atState.items.forEach((it, i) => {
+    if (it.group !== group) {
+      group = it.group;
+      const g = document.createElement('div'); g.className = 'at-group'; g.textContent = group;
+      box.appendChild(g);
+    }
+    const row = document.createElement('div');
+    const on = i === atState.active;
+    row.className = 'at-item' + (on ? ' active' : '');
+    row.textContent = it.label;
+    row.onclick = () => atInsert(it);
+    if (on) activeRow = row;
+    box.appendChild(row);
+  });
+  atHint(box);
+  // 长清单里把活动项滚进视野（桩 DOM 没这个方法就跳过）
+  if (activeRow && typeof activeRow.scrollIntoView === 'function') {
+    try { activeRow.scrollIntoView({ block: 'nearest' }); } catch (e) { /* 忽略 */ }
+  }
+}
+
+/* 过滤：匹配相对路径子串（大小写不敏感）。 */
+function atOpen(frag) {
+  const q = String(frag || '').toLowerCase();
+  atState.items = atState.all.filter((it) => !q || it.path.toLowerCase().indexOf(q) >= 0 || it.label.toLowerCase().indexOf(q) >= 0);
+  if (atState.active >= atState.items.length) atState.active = 0;
+  atState.open = true;
+  atRender();
+}
+
+/* 插入：把 @ 与已输入的前缀一起替换成完整引用，光标落在其后。 */
+function atInsert(it) {
+  const t = $('#input');
+  const v = String(t.value || '');
+  const pos = typeof t.selectionStart === 'number' ? t.selectionStart : v.length;
+  const start = atState.start >= 0 ? atState.start : pos;
+  const text = it.insert + ' ';
+  t.value = v.slice(0, start) + text + v.slice(pos);
+  const caret = start + text.length;
+  if (typeof t.setSelectionRange === 'function') { try { t.setSelectionRange(caret, caret); } catch (e) { /* 桩 DOM 没有就算了 */ } }
+  atClose();
+  autoGrow();
+  if (typeof t.focus === 'function') t.focus();
+}
+
+/* ↑/↓/Enter/Esc 只在菜单打开时被菜单消费；返回 false 就交回发送/换行。
+ * 菜单开着时 Enter **永远不发送**：载入中或没有匹配项就什么都不做（什么都不插入），
+ * 有选中项才填入引用。Shift+Enter 不受影响（交回换行）。 */
+function atKey(e) {
+  if (!atState.open) return false;
+  if (e.key === 'Escape') { atClose(); return true; }
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    if (!atState.loading && atState.items.length) atInsert(atState.items[atState.active]);
+    return true;
+  }
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    const n = atState.items.length;
+    if (!atState.loading && n) {
+      atState.active = e.key === 'ArrowDown' ? (atState.active + 1) % n : (atState.active - 1 + n) % n;
+      atRender();
+    }
+    return true;
+  }
+  return false;
+}
+
+async function atOnInput() {
+  const tok = atToken();
+  const s = activeSession();
+  // busy（生成中）仍拒绝，避免与「停止」抢键盘；readonly（历史只读会话）允许——插入文本无害。
+  if (!tok || !s || s.busy) { atClose(); return; }
+  // 同步先开菜单：/files 还没有回来，↑↓/Enter 也必须已经被菜单接管，
+  // 否则这期间按 Enter 会把消息直接发出去。
+  atState.open = true;
+  atState.loading = true;
+  atState.items = []; atState.all = []; atState.active = 0;
+  atState.sid = s.sid; atState.start = tok.start;
+  atRender();
+  const data = await atLoad(s.sid);
+  if (atState.sid !== s.sid || !atState.open) return; // 拉取期间切了会话 / 菜单已关
+  if (!data) { atClose(); return; }                   // 拉不到：安静收起，之后 Enter 恢复为正常发送
+  const tok2 = atToken(); // 拉取期间内容可能又变了，重新确认
+  if (!tok2) { atClose(); return; }
+  atState.loading = false;
+  atState.start = tok2.start; atState.all = atItems(data);
+  atOpen(tok2.frag);
+  loadPathRoots(s.sid); // 顺手把路径根应用上（同一份缓存，命中即立刻生效）
+}
+
 /* ---------- 发送 ---------- */
 $('#btn-send').onclick = onSend;
+$('#btn-continue').onclick = continueFlow;
 $('#input').addEventListener('keydown', (e) => {
+  if (atKey(e)) return; // 菜单打开时 ↑/↓/Enter/Esc 归菜单
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); onSend(); }
 });
-$('#input').addEventListener('input', autoGrow);
+$('#input').addEventListener('input', () => { autoGrow(); atOnInput(); });
 function autoGrow() {
-  const t = $('#input'); t.style.height = 'auto'; t.style.height = Math.min(t.scrollHeight, 120) + 'px';
+  const t = $('#input'); t.style.height = 'auto'; t.style.height = Math.min(t.scrollHeight, 200) + 'px';
 }
+/* 停止生成：只置位服务端的中止开关；in-flight 的 say/continue 会立刻收尾返回。 */
+async function stopGeneration() {
+  const s = activeSession();
+  if (!s || !s.busy) return;
+  try {
+    await api('POST', '/api/sessions/' + encodeURIComponent(s.sid) + '/stop', {});
+  } catch (e) { /* 停止失败不吵用户；按钮仍是停止，可再点一次 */ }
+}
+
 function onSend() {
   const s = activeSession();
-  if (!s) return;
+  if (!s || s.readonly) return;
+  if (s.busy) { stopGeneration(); return; } // 生成中：同一个键变成「停止」
   if (s.awaiting === 'task') { const v = takeInput(); if (v) act('task', v); return; }
   if (s.pending && s.pending.type === 'ask') { const v = takeInput(); if (v) act('answer', v); return; }
-  if (s.mode === 'direct' || s.mode === 'omni') { const v = takeInput(); if (v) act('say', v); return; }
+  if (s.mode !== 'collab') { const v = takeInput(); if (v) act('say', v); return; } // 单 agent 形态可以自由发言
   // 协作无挂起时忽略发送（避免打断泵）。
 }
 
 /* ---------- 长轮询：增量事件 + 连接状态 ---------- */
 let pollSince = 0;
+/* 已派发到的事件批序号：动作回包与长轮询共用，保证同一批只 absorb 一次。 */
+let appliedSeq = 0;
 let pollActive = false;
 async function pollLoop() {
   if (pollActive) return;
@@ -312,21 +1935,27 @@ async function pollLoop() {
       if (!r.ok) throw new Error('轮询失败 ' + r.status);
       const data = await r.json();
       setConn(true);
-      pollSince = data.head ?? pollSince;
-      for (const line of data.lines) {
+      pollSince = data.head != null ? data.head : pollSince;
+      let mode = 'none';
+      for (const item of data.lines) {
         try {
-          const payload = JSON.parse(line);
-          const s = state.sessions.get(payload.sid);
+          if (item.seq <= appliedSeq) continue; // 动作回包已派发过这一批
+          appliedSeq = item.seq;
+          const s = state.sessions.get(item.sid);
           if (!s) continue;
-          for (const ev of payload.events) absorb(s, ev);
-          s.busy = false;
+          const m = absorbEvents(s, item.events);
+          if (m === 'full') mode = 'full';
+          else if (m === 'live' && mode !== 'full') mode = 'live';
+          // 不在这里改 busy：流式增量到达时会把「停止」按钮误翻回「发送」。
         } catch { /* 单行损坏不拖垮轮询 */ }
       }
-      renderAll();
+      // 纯流式增量：只 append 新节点（折叠、<pre> 滚动、外层滚动都不被打断）。
+      if (mode === 'full') renderAll();
+      else if (mode === 'live') renderLiveTick(activeSession());
       // 有会话动作在等回包时，让动作回包自己刷新 pending；轮询只补漏。
     } catch {
       setConn(false);
-      await new Promise(res => setTimeout(res, 3000));
+      await new Promise((res) => setTimeout(res, 3000));
     }
   }
 }
@@ -339,5 +1968,15 @@ function setConn(ok) {
 $('#btn-drawer').onclick = () => { $('#sidebar').classList.add('open'); $('#drawer-mask').classList.add('show'); };
 $('#drawer-mask').onclick = () => { $('#sidebar').classList.remove('open'); $('#drawer-mask').classList.remove('show'); };
 
+/* ---------- 顶层接线 ---------- */
+$('#btn-new-work').onclick = openWizard;
+$('#settings-head').onclick = toggleSettings;
+$('#btn-providers').onclick = openProvidersModal;
+$('#btn-models').onclick = openModelsModal;
+$('#btn-core').onclick = openCoreModal;
+$('#btn-settings').onclick = openSettingsModal;
+$('#btn-agents').onclick = openAgentsModal;
+$('#btn-upload').onclick = pickUploadFile;
+
 /* ---------- 启动 ---------- */
-refreshState().then(pollLoop).catch(err => alert('初始化失败：' + err.message));
+refreshState().then(pollLoop).catch((err) => alert('初始化失败：' + err.message));

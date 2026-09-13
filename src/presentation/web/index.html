@@ -17,40 +17,49 @@
   </header>
 
   <div class="layout">
-    <!-- 侧栏：模块公地 + 供应商登记处 -->
+    <!-- 侧栏：新建工作 + 会话历史 + 设置二级菜单 -->
     <aside id="sidebar" class="sidebar">
       <section class="panel">
-        <h2>模块公地</h2>
-        <div id="module-list" class="module-list"></div>
-        <div id="rejected" class="rejected"></div>
+        <button id="btn-new-work" class="btn btn-primary btn-block">+ 新建工作</button>
+      </section>
+      <div id="rejected" class="rejected"></div>
+      <section class="panel">
+        <h2>会话历史</h2>
+        <div id="history-list" class="history-list"></div>
       </section>
       <section class="panel">
-        <h2>供应商登记处</h2>
-        <div id="provider-list" class="provider-list"></div>
-        <form id="provider-form" class="provider-form">
-          <input id="pv-id" placeholder="id" autocomplete="off">
-          <input id="pv-url" placeholder="base_url" autocomplete="off">
-          <input id="pv-key" type="password" placeholder="api_key（只入登记处）" autocomplete="off">
-          <input id="pv-models" placeholder="模型，逗号分隔" autocomplete="off">
-          <button type="submit" class="btn btn-block">登记 / 更新</button>
-        </form>
+        <button id="settings-head" class="submenu-head">设置 <span class="caret">▾</span></button>
+        <div id="settings-body" class="submenu-body">
+          <button id="btn-providers" class="submenu-item">供应商登记</button>
+          <button id="btn-models" class="submenu-item">模型登记</button>
+          <button id="btn-core" class="submenu-item">核心 AI 默认模型</button>
+          <button id="btn-settings" class="submenu-item">基本设置</button>
+          <button id="btn-agents" class="submenu-item">agent 管理</button>
+        </div>
       </section>
       <p class="sidebar-note">密钥只进登记处，任何界面不显示、不转发。</p>
     </aside>
     <div id="drawer-mask" class="drawer-mask"></div>
 
-    <!-- 主区：会话标签 + 转录流 + 输入区 -->
+    <!-- 主区：会话标签 + 转录流 + 输入区 + 弹层 -->
     <main class="main">
       <nav id="tabs" class="tabs" aria-label="会话标签"></nav>
       <div id="stream" class="stream" aria-live="polite"></div>
       <div id="gate" class="gate"></div>
       <div class="composer">
-        <textarea id="input" rows="1" placeholder="输入消息…（Enter 发送，Shift+Enter 换行）"></textarea>
-        <button id="btn-send" class="btn btn-primary">发送</button>
+        <div id="at-menu" class="at-menu hidden"></div>
+        <div class="composer-inner">
+          <button id="btn-upload" class="btn btn-add" type="button" title="上传文件到本次工作的 work/">＋</button>
+          <textarea id="input" rows="1" placeholder="输入消息…（Enter 发送，Shift+Enter 换行）"></textarea>
+          <button id="btn-continue" class="btn" title="由核心继续（直连/组合需轮到你发言）">继续</button>
+          <button id="btn-send" class="btn btn-primary">发送</button>
+        </div>
       </div>
+      <div id="modal-root" class="modal-root"></div>
     </main>
   </div>
 </div>
+<script src="/md.js"></script>
 <script src="/app.js"></script>
 </body>
 </html>

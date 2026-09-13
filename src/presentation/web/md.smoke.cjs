@@ -1,0 +1,31 @@
+/* Markdown 渲染器单测（无 DOM 依赖，纯字符串断言）。用法：node src/presentation/web/md.smoke.cjs */
+const fs = require('fs');
+const path = require('path');
+const vm = require('vm');
+const sandbox = {};
+sandbox.globalThis = sandbox;
+sandbox.window = sandbox;
+vm.runInNewContext(fs.readFileSync(path.join(__dirname, 'md.js'), 'utf8'), sandbox, { filename: 'md.js' });
+const md = sandbox.markdownToHtml;
+let bad = 0;
+function assert(cond, name) { if (!cond) { console.log('FAIL ' + name); bad++; } }
+const T = '\u0060';
+assert(md(T + T + T + 'yaml\na: 1\n' + T + T + T).indexOf('<pre class="md-pre"><code class="lang-yaml">a: 1</code></pre>') >= 0, '代码块+yaml');
+assert(md(T + T + T + 'json\n{"a":1}\n' + T + T + T).indexOf('lang-json') >= 0, '代码块+json');
+assert(md('# 标题').indexOf('<h1>标题</h1>') >= 0, '标题');
+assert(md('## 二级').indexOf('<h2>二级</h2>') >= 0, '二级标题');
+assert(md('**粗** 与 *斜*').indexOf('<strong>粗</strong>') >= 0, '粗体');
+assert(md('**粗** 与 *斜*').indexOf('<em>斜</em>') >= 0, '斜体');
+assert(md('带 ' + T + 'x=1' + T + ' 行内代码').indexOf('<code>x=1</code>') >= 0, '行内代码');
+assert(md('- a\n- b').indexOf('<ul><li>a</li><li>b</li></ul>') >= 0, '无序列表');
+assert(md('1. a\n2. b').indexOf('<ol><li>a</li><li>b</li></ol>') >= 0, '有序列表');
+assert(md('> 引用').indexOf('<blockquote>引用</blockquote>') >= 0, '引用');
+assert(md('---').indexOf('<hr>') >= 0, '分隔线');
+assert(md('| a | b |\n|---|---|\n| 1 | 2 |').indexOf('<table class="md-table">') >= 0, '表格');
+assert(md('段落一\n段落二').indexOf('<p>段落一<br>段落二</p>') >= 0, '段落换行');
+const x = md('<script>alert(1)</script>');
+assert(x.indexOf('<script>') < 0 && x.indexOf('&lt;script&gt;') >= 0, 'XSS 转义');
+const y = md('[x](javascript:alert(1))');
+assert(y.indexOf('href="javascript:') < 0, '危险链接不放行');
+console.log(bad === 0 ? 'MD-OK' : 'MD-FAIL(' + bad + ')');
+process.exit(bad === 0 ? 0 : 1);
