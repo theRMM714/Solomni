@@ -3,7 +3,6 @@
 //! 那是改本机状态的动作，所以默认不跑：必须显式开启（node run-tests.js --fence-live 会把它传进来）。
 
 use crate::probe::{env_blocks_container, run_launcher, scratch, spec_json};
-use std::net::TcpListener;
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -85,29 +84,29 @@ fn container_has_no_network() {
         return;
     }
     // 先在本机（容器外）证明那个监听确实连得上，再在容器里证明连不上——否则这条断言没有意义。
-    let listener = TcpListener::bind("127.0.0.1:0").expect("起本地监听");
-    let port = listener.local_addr().expect("取端口").port();
-    std::thread::spawn(move || {
-        for s in listener.incoming() {
-            if s.is_err() {
-                break;
-            }
-        }
-    });
-    let cmd = format!("curl -s -m 2 -o NUL -w ok http://127.0.0.1:{}/", port);
+    // 用外网（IP 直连，避开 DNS）而不是回环：AppContainer 的回环本来就可能可连，拿它当断网证据不成立。
+    let cmd = "curl -s -m 4 -o NUL -w %{http_code} http://1.1.1.1/".to_string();
     let outside = Command::new("cmd").arg("/C").arg(&cmd).output().expect("容器外跑一遍");
-    let outside_ok = String::from_utf8_lossy(&outside.stdout).contains("ok");
+    let outside_code = String::from_utf8_lossy(&outside.stdout).trim().to_string();
+    if outside_code.is_empty() || outside_code == "000" {
+        eprintln!(
+            "[探针] 容器外也连不上外网（{}）：本机没有可比对的网络，跳过断网断言（不静默当作通过）",
+            outside_code
+        );
+        return;
+    }
     let dir = scratch("container-net");
     let (_, out, err) = run_launcher(&spec_for(&dir), &cmd);
     if env_blocks_container(&err) {
         eprintln!("[探针] 本环境不允许容器围栏，跳过断网断言：{}", err.trim());
         return;
     }
+    let inside_code = out.trim().to_string();
     assert!(
-        !out.contains("ok"),
-        "容器不该连得上网络（容器外那条路已证明可用={}）：stdout={} stderr={}",
-        outside_ok,
-        out,
+        inside_code == "000",
+        "容器不给 capability，就不该连得上外网（容器外={}，容器内={}）：stderr={}",
+        outside_code,
+        inside_code,
         err
     );
 }
