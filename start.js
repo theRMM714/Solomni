@@ -343,6 +343,18 @@ async function installRust() {
   return cargo;
 }
 
+function runTests(cargo) {
+  // 测试总入口（见 TESTING.md）：环境已在这里备好，交给 run-tests.js 逐层跑。
+  log("running the test battery (node run-tests.js)");
+  const r = spawnSync(process.execPath, [path.join(ROOT, "run-tests.js")], {
+    cwd: ROOT,
+    stdio: "inherit",
+    env: cargoEnv(cargo),
+  });
+  if (r.error) die("tests failed to start: " + r.error.message);
+  process.exitCode = r.status === null ? 1 : r.status;
+}
+
 function run(cargo) {
   const pass = process.argv.slice(2).filter((a) => a !== "--release");
   const argv = [BIN, "."].concat(pass);
@@ -388,6 +400,10 @@ function run(cargo) {
   const v = spawnSync(cargo, ["--version"], { cwd: ROOT, env: cargoEnv(cargo), encoding: "utf8" });
   if (v.error || v.status !== 0) die("cargo not runnable: " + (v.error && v.error.message));
   log(v.stdout.trim());
+  if (process.argv.includes("-test")) {
+    runTests(cargo);
+    return;
+  }
   // Always invoke cargo: it decides what is stale in ~a second. Skipping the build
   // when a binary already existed made the launcher run outdated binaries after
   // source changes.

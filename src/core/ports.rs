@@ -63,6 +63,21 @@ pub trait ModuleSource {
     fn scan(&self) -> Roster;
 }
 
+/// 围栏授权的释放端口：会话删除时由核心请求一次，把该会话各 agent 的围栏授权撤掉。
+/// 机制在适配层（confine）；本平台没有该机制时实现为空操作。核心只提出请求，不碰任何 ACL。
+pub trait FenceHost: Send + Sync {
+    fn release(&self, spec: &crate::core::fence::FenceSpec) -> Result<(), String>;
+}
+
+/// 运行包库来源端口：扫描依赖文件夹（runtimes/）里的包清单。
+/// 「清单即事实」：每次调用重扫，放入即出现；清单校验、去重与冲突预检在 core（packages::Library::build），
+/// 目录遍历与 yaml 解析在适配层。
+pub trait PackageSource {
+    fn scan(&self) -> crate::core::packages::Library;
+    /// 包库所在目录（配置界面要把"把包放哪儿"如实告诉用户）。
+    fn dir(&self) -> std::path::PathBuf;
+}
+
 /// 工作区端口：一次工作的 work 目录与各 agent 沙箱（目录布局机制在适配层）。
 /// core 只说"哪次工作、哪些 agent"，不碰路径拼接细节。
 pub trait Workspace {
@@ -109,6 +124,8 @@ pub trait ChatGateway {
 /// 流水只追加；回档将来以 rewind 记录追加，不物理删行（会话状态 = 回放截断）。
 pub trait HistoryStore {
     fn create(&self, meta: &SessionMeta) -> Result<(), String>;
+    /// 写回会话元信息（配置界面的编辑：会话身份唯一真相在 meta.yaml）。
+    fn save_meta(&self, meta: &SessionMeta) -> Result<(), String>;
     fn append(&self, name: &str, events: &[serde_json::Value]) -> Result<(), String>;
     fn list(&self) -> Result<Vec<HistoryView>, String>;
     fn load(&self, name: &str) -> Result<(SessionMeta, Vec<serde_json::Value>), String>;
@@ -126,10 +143,10 @@ pub struct ToolOutcome {
     pub output: String,
 }
 
-/// 工具执行端口：机制（进程拉起/stdin 送参/超时/截断）在适配层。
-/// 策略在核心：哪个模块能调哪个工具、命令映射，由核心按 module.yaml 放行后传入。
+/// 工具执行端口：机制（围栏安装/进程拉起/stdin 送参/超时杀树/截断）在适配层。
+/// 策略在核心：哪个模块能调哪个工具、命令映射、可达到哪些根，由核心按 module.yaml 与沙箱派生后传入。
 pub trait ToolRunner {
-    fn run(&self, root: &std::path::Path, command: &str, args_json: &str) -> ToolOutcome;
+    fn run(&self, fence: &crate::core::fence::FenceSpec, command: &str, args_json: &str) -> ToolOutcome;
 }
 
 /// 运行日志端口：关键节点（异常/降级/边界）落盘，供事后确定问题，避免过度推理。

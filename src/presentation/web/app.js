@@ -231,7 +231,9 @@ function checkbox(labelText, checked) {
   return { wrap, box };
 }
 
-/* ---------- 会话历史：只读回放；删除 = 删 session/<名字>/ 目录 ---------- */
+/* ---------- 会话历史：只读回放；每项只有「打开」「编辑」两个动作 + 删除 ----------
+ * 点条目本身不进入会话（避免误开）：进入一律走「打开」按钮。
+ * 正在生成中的会话只禁用「编辑」（理由写在按钮 title 上）：后端也会再拦一次，这里只是先挡住。 */
 function renderHistory() {
   const box = $('#history-list');
   if (!box) return;
@@ -241,13 +243,38 @@ function renderHistory() {
   for (const h of items) {
     const el = document.createElement('div');
     el.className = 'history-item';
-    el.innerHTML = '<span class="hname"></span><span class="hmode"></span><button class="hdel" title="删除该会话">✕</button>';
-    el.querySelector('.hname').textContent = h.name;
-    el.querySelector('.hmode').textContent = (h.done ? '' : '·进行中 ') + h.mode;
-    el.onclick = () => openHistory(h.name);
-    el.querySelector('.hdel').onclick = (e) => { e.stopPropagation(); deleteHistory(h.name); };
+    const name = document.createElement('span'); name.className = 'hname'; name.textContent = h.name;
+    const mode = document.createElement('span'); mode.className = 'hmode';
+    mode.textContent = (h.done ? '' : '·进行中 ') + h.mode;
+    const acts = document.createElement('div'); acts.className = 'history-acts';
+
+    const open = btn('打开', 'hbtn');
+    open.title = '进入会话视图（转録 + 继续 / 停止）';
+    open.onclick = (e) => { e.stopPropagation(); openHistory(h.name); };
+
+    const edit = btn('编辑', 'hbtn');
+    if (generating(h.name)) {
+      edit.disabled = true;
+      edit.title = '该会话正在生成中：先「停止」或等它结束，再改配置';
+    } else {
+      edit.title = '打开配置面板（在进入会话视图之前改名单 / 模块 / 模型 / 档位）';
+      edit.onclick = (e) => { e.stopPropagation(); openConfig(h.name); };
+    }
+    acts.appendChild(open); acts.appendChild(edit);
+
+    const del = btn('✕', 'hdel');
+    del.title = '删除该会话（记录永久删除）';
+    del.onclick = (e) => { e.stopPropagation(); deleteHistory(h.name); };
+
+    el.appendChild(name); el.appendChild(mode); el.appendChild(acts); el.appendChild(del);
     box.appendChild(el);
   }
+}
+
+/// 本标签页里该会话是否正在生成（前端自有的状态；后端对照同一件事再拦一次）。
+function generating(sid) {
+  const s = state.sessions.get(sid);
+  return !!(s && s.busy);
 }
 
 async function openHistory(name) {
@@ -280,6 +307,333 @@ async function deleteHistory(name) {
     await refreshState();
     renderAll();
   } catch (err) { alert(err.message); }
+}
+
+/* ---------- 配置视图（会话列表的「编辑」）：名单 / 模块 / 模型 / 档位 / 运行能力 / 定版 ----------
+ * 读：GET /api/sessions/{sid}/config；写：POST /api/sessions/{sid}/edit。
+ * 「重新扫描」= 重新 GET 一次并重绘：模块清单与依赖文件夹在每次读取时重扫，不需要额外接口。
+ * 冻结口径与后端一致：started=true 时只冻结 agent 名单与形态（名字只读、不能增删 agent），模块与模型仍可改。
+ * 保存失败一律把后端 error 原文显示出来，不在前端兜底改写。 */
+
+/* 配置面板里的小构件：都只用冒烟桩支持的 DOM API，与向导/登记处同一写法。 */
+function cfgDiv(cls, text) {
+  const d = document.createElement('div'); d.className = cls;
+  if (text != null) d.textContent = text;
+  return d;
+}
+function cfgHint(text, kind) {
+  return cfgDiv('cfg-hint' + (kind ? ' ' + kind : ''), text);
+}
+/// 执行档位二选一：原生 radio（同名即互斥）。
+function cfgRadio(labelText, checked, group) {
+  const wrap = document.createElement('label'); wrap.className = 'chk';
+  const box = document.createElement('input');
+  box.type = 'radio'; box.name = group; box.checked = !!checked;
+  const span = document.createElement('span'); span.textContent = labelText;
+  wrap.appendChild(box); wrap.appendChild(span);
+  return { wrap, box };
+}
+
+/// 从会话列表的「编辑」进入：面板自己拉配置、自己重绘（保存 / 重新扫描都走这里）。
+function openConfig(sid) {
+  openModal('配置：' + sid, (c) => {
+    const box = document.createElement('div'); box.className = 'cfg';
+    c.body.appendChild(box);
+    loadConfig(sid, c, box);
+  }, true);
+}
+
+async function loadConfig(sid, c, box) {
+  box.innerHTML = '';
+  box.appendChild(emptyHint('正在读取配置…'));
+  let cfg = null;
+  try {
+    const r = await api('GET', '/api/sessions/' + encodeURIComponent(sid) + '/config');
+    cfg = r.config || null;
+  } catch (e) {
+    box.innerHTML = '';
+    box.appendChild(cfgHint('读不到这个会话的配置：' + e.message, 'err'));
+    return;
+  }
+  box.innerHTML = '';
+  if (!cfg) { box.appendChild(cfgHint('后端没有返回 config', 'err')); return; }
+  buildConfigForm(sid, cfg, c, box);
+}
+
+/// 结构化诊断 → 中文（呈现层文案，不进提示词册）。
+function diagnosisText(d) {
+  if (!d || typeof d !== 'object') return String(d);
+  if (d.Missing) {
+    return '模块 ' + d.Missing.module + ' 需要的运行能力 ' + d.Missing.capability +
+      ' 在包库里没有：把它放进依赖文件夹后点「重新扫描」。';
+  }
+  if (d.Ambiguous) {
+    return '运行能力 ' + d.Ambiguous.capability + ' 有多个版本（' + (d.Ambiguous.versions || []).join('、') +
+      '）：在下面「定版」里选一个版本，虚拟机档才装得起来。';
+  }
+  if (d.UnknownPin) {
+    return '运行能力 ' + d.UnknownPin.capability + ' 定的版本 ' + d.UnknownPin.version +
+      ' 不在包库里：改一个版本，或把该版本的运行包放进依赖文件夹后点「重新扫描」。';
+  }
+  if (d.Conflict) {
+    return '运行包 ' + d.Conflict.a + ' 与 ' + d.Conflict.b + ' 都要写进 ' + d.Conflict.path +
+      '：装配会互相覆盖，换版本或去掉其中一个。';
+  }
+  return JSON.stringify(d);
+}
+
+function buildConfigForm(sid, cfg, c, box) {
+  const frozen = !!cfg.started;
+  const rt = cfg.runtime || {};
+  const dir = cfg.runtimes_dir || '';
+  // 表单草稿：保存从这里读；「重新扫描」整块重建，未保存的改动随之丢弃。
+  const draft = {
+    agents: (cfg.agents || []).map((a) => ({
+      name: a.name || '', modules: (a.modules || []).slice(), model: a.model || '',
+    })),
+    tier: cfg.tier === 'vm' ? 'vm' : 'host',
+    base: cfg.base || '',
+    pins: {},
+    net: !!cfg.net,
+  };
+  const pins0 = cfg.pins || {};
+  for (const k of Object.keys(pins0)) draft.pins[k] = pins0[k];
+
+  // 身份与冻结事实
+  const head = cfgDiv('cfg-sec');
+  head.appendChild(cfgDiv('cfg-sec-title', '会话 ' + (cfg.sid || sid)));
+  head.appendChild(cfgDiv('cfg-line', '形态：' + (cfg.mode === 'collab'
+    ? '协作（N 个 agent，各自独立沙箱）'
+    : '单 agent（恰好 1 个 agent，模块数不限）')));
+  head.appendChild(frozen
+    ? cfgHint('这轮会话已经开过：agent 名单与形态冻结 —— 名字只读、不能增删 agent（要换人请新建会话）。模块与模型仍可改。', 'warn')
+    : cfgHint('这轮会话还没有内容：agent 名单与形态都还改得动。'));
+  box.appendChild(head);
+
+  // agent 名单：名字 / 模块 / 模型
+  const dupHints = [];
+  const syncDup = () => {
+    const owners = {};
+    for (const a of draft.agents) {
+      for (const id of a.modules) {
+        owners[id] = owners[id] || [];
+        owners[id].push(a.name.trim() || '（未命名）');
+      }
+    }
+    dupHints.forEach((h, i) => {
+      const mine = draft.agents[i].modules.filter((id) => owners[id].length > 1);
+      h.textContent = mine.length
+        ? '同一模块只能属于一个 agent：' + mine.join('、') + ' 同时出现在多个 agent 里，保存会被后端拒绝。'
+        : '';
+      h.className = 'cfg-hint' + (mine.length ? ' warn' : '');
+    });
+  };
+  const secA = cfgDiv('cfg-sec');
+  secA.appendChild(cfgDiv('cfg-sec-title', 'agent 名单（' + draft.agents.length + ' 个）'));
+  if (!draft.agents.length) secA.appendChild(emptyHint('（这个会话没有 agent 记录）'));
+  draft.agents.forEach((a, i) => secA.appendChild(cfgAgentBlock(a, i, frozen, dupHints, syncDup)));
+  box.appendChild(secA);
+  syncDup();
+
+  // 执行档位：本机 / 虚拟机（如实说明各自是什么）
+  const secT = cfgDiv('cfg-sec');
+  secT.appendChild(cfgDiv('cfg-sec-title', '执行档位'));
+  const hostR = cfgRadio('本机档 —— 脚本直接在宿主上跑：宿主自备解释器，不装载运行包；隔离就是宿主本身（快，但风险也在宿主上）。', draft.tier === 'host', 'cfg-tier');
+  const vmR = cfgRadio('虚拟机档 —— 一整套 guest，脚本在 guest 里跑：按模块声明的运行能力装载运行包；隔离更强，代价是更重、依赖运行包。', draft.tier === 'vm', 'cfg-tier');
+  const baseIn = textInput('base（可选）：虚拟机的基础根（发行版基底名或目录）');
+  baseIn.value = draft.base;
+  baseIn.addEventListener('input', () => { draft.base = baseIn.value; });
+  const baseWrap = field('虚拟机基础根 base（可选）', baseIn);
+  const baseHint = cfgHint('虚拟机档才用得上；留空 = 用默认基底。本机档忽略它（提交时按 null 送出）。');
+  const syncTier = () => {
+    const vm = draft.tier === 'vm';
+    baseWrap.className = vm ? 'wf-field' : 'wf-field hidden';
+    baseHint.className = 'cfg-hint' + (vm ? '' : ' hidden');
+  };
+  hostR.box.addEventListener('change', () => { if (hostR.box.checked) { draft.tier = 'host'; syncTier(); } });
+  vmR.box.addEventListener('change', () => { if (vmR.box.checked) { draft.tier = 'vm'; syncTier(); } });
+  secT.appendChild(hostR.wrap); secT.appendChild(vmR.wrap);
+  secT.appendChild(baseWrap); secT.appendChild(baseHint);
+  box.appendChild(secT);
+  syncTier();
+
+  // 运行能力：declared / missing / available / diagnoses / rejected / rejected_packages
+  box.appendChild(cfgRuntimeBlock(rt, dir, draft.tier, () => {
+    c.setMsg('正在重新扫描模块清单与依赖文件夹…');
+    loadConfig(sid, c, box);
+  }));
+
+  // 定版：只对「有多个可用版本」的能力给选择
+  const secP = cfgDiv('cfg-sec');
+  secP.appendChild(cfgDiv('cfg-sec-title', '定版（同一能力有多个可用版本时才需要选）'));
+  const avail = rt.available || {};
+  const multiCaps = Object.keys(avail).filter((cap) => (avail[cap] || []).length > 1).sort();
+  const singleCaps = Object.keys(avail).filter((cap) => (avail[cap] || []).length === 1).sort();
+  if (!multiCaps.length) {
+    secP.appendChild(cfgHint(singleCaps.length
+      ? '（' + singleCaps.join('、') + ' 只有一个可用版本，不需要定版）'
+      : '（还没有可用的多版本能力：依赖文件夹里的能力都只有一个版本，或包库里还没有运行包）'));
+  }
+  for (const cap of multiCaps) {
+    const vs = (avail[cap] || []).slice();
+    const cur = draft.pins[cap] || '';
+    const opts = [{ value: '', label: '（不定版：用包库里第一个 ' + (vs[0] || '') + '）' }]
+      .concat(vs.map((v) => ({ value: v, label: v })));
+    if (cur && vs.indexOf(cur) < 0) opts.push({ value: cur, label: cur + '（包库里现在没有这个版本）' });
+    const sel = selectInput(opts, cur);
+    sel.addEventListener('change', () => { draft.pins[cap] = sel.value; });
+    secP.appendChild(field(cap + ' 的版本', sel));
+  }
+  // 单版本 / 看不见的能力：不给选择，但要如实说清现状（不静默丢掉已有的定版）
+  for (const cap of singleCaps) {
+    if (draft.pins[cap]) {
+      secP.appendChild(cfgHint('已定版：' + cap + ' = ' + draft.pins[cap] + '（这个能力只有一个可用版本，不需要选）'));
+    }
+  }
+  for (const cap of Object.keys(draft.pins)) {
+    if (!avail[cap]) {
+      secP.appendChild(cfgHint('已定版：' + cap + ' = ' + draft.pins[cap] + '（包库里现在看不到这个能力，确认版本或重新扫描）', 'warn'));
+    }
+  }
+  box.appendChild(secP);
+
+  // 网络
+  const secN = cfgDiv('cfg-sec');
+  secN.appendChild(cfgDiv('cfg-sec-title', '网络'));
+  const net = checkbox('放行出站网络（默认不放行：虚拟机 guest 无网卡，脚本连不出去；本机档不隔离网络，这个开关只对虚拟机档有意义）', draft.net);
+  net.box.addEventListener('change', () => { draft.net = net.box.checked; });
+  secN.appendChild(net.wrap);
+  box.appendChild(secN);
+
+  // 动作
+  const acts = cfgDiv('cfg-actions');
+  const save = btn('保存', 'btn btn-primary');
+  const cancel = btn('取消', 'btn btn-ghost');
+  cancel.onclick = closeModal;
+  save.onclick = async () => {
+    const pins = {}; // 空串 = 不定版：不提交（提交空串会被当成"定版到空版本"）
+    for (const cap of Object.keys(draft.pins)) {
+      const v = draft.pins[cap];
+      if (v) pins[cap] = v;
+    }
+    const body = {
+      agents: draft.agents.map((a) => ({ name: a.name.trim(), modules: a.modules.slice(), model: a.model || '' })),
+      tier: draft.tier,
+      base: draft.tier === 'vm' ? (draft.base.trim() || null) : null,
+      pins: pins,
+      net: draft.net,
+    };
+    save.disabled = true;
+    c.setMsg('保存中…');
+    try {
+      await api('POST', '/api/sessions/' + encodeURIComponent(sid) + '/edit', body);
+      await refreshState();
+      c.setMsg('已保存：下一次发言按新配置生效');
+      loadConfig(sid, c, box); // 重读一遍：把落盘后的样子如实显示出来
+    } catch (e) {
+      save.disabled = false;
+      c.setMsg('保存失败：' + e.message, true); // 后端 error 原文，不吞
+    }
+  };
+  acts.appendChild(save); acts.appendChild(cancel);
+  box.appendChild(acts);
+}
+
+/// 一个 agent 的编辑块：名字（冻结时只读）/ 模块多选（选项来自 /api/state 的 modules）/ 模型下拉。
+function cfgAgentBlock(a, idx, frozen, dupHints, syncDup) {
+  const row = cfgDiv('cfg-agent');
+  row.appendChild(cfgDiv('cfg-agent-head', 'agent ' + (idx + 1) + '：' + (a.name || '（未命名）')));
+
+  const nameIn = textInput('agent 名字（也会当它的沙箱目录名）');
+  nameIn.value = a.name || '';
+  nameIn.disabled = frozen;
+  nameIn.addEventListener('input', () => { a.name = nameIn.value; });
+  row.appendChild(field(frozen ? '名字（只读）' : '名字', nameIn));
+  if (frozen) row.appendChild(cfgHint('会话已经开过：名单与形态冻结 —— 名字改不了（要换人请新建会话）；模块与模型仍可改。', 'warn'));
+
+  const mods = cfgDiv('wf-mods');
+  if (!state.modules.length) mods.appendChild(emptyHint('（modules/ 下没有模块）'));
+  for (const m of state.modules) {
+    const lab = document.createElement('label'); lab.className = 'wf-check';
+    const cb = document.createElement('input'); cb.type = 'checkbox';
+    cb.checked = a.modules.indexOf(m.id) >= 0;
+    cb.addEventListener('change', () => {
+      if (cb.checked) { if (a.modules.indexOf(m.id) < 0) a.modules.push(m.id); }
+      else a.modules = a.modules.filter((x) => x !== m.id);
+      syncDup();
+    });
+    const id = document.createElement('span'); id.textContent = m.id;
+    const brief = document.createElement('span'); brief.className = 'wf-brief'; brief.textContent = m.brief || '';
+    lab.appendChild(cb); lab.appendChild(id); lab.appendChild(brief);
+    mods.appendChild(lab);
+  }
+  row.appendChild(field('模块（这个 agent 的能力；勾 1 个 = 直连式，勾多个 = 组合式）', mods));
+  const dup = cfgHint('');
+  dupHints.push(dup); // 与 draft.agents 同序：syncDup 按下标回写
+  row.appendChild(dup);
+
+  const cur = a.model || '';
+  const opts = [{ value: '', label: '（核心默认）' }]
+    .concat(state.models.map((m) => ({ value: m.id, label: m.name + '（' + m.id + '）' })));
+  if (cur && !state.models.some((m) => m.id === cur)) opts.push({ value: cur, label: cur + '（登记处已无此模型）' });
+  const sel = selectInput(opts, cur);
+  sel.addEventListener('change', () => { a.model = sel.value; });
+  row.appendChild(field('模型（留空 = 用核心默认）', sel));
+  return row;
+}
+
+/// 运行能力区：声明 / 缺口 / 可用 / 虚拟机档诊断 / 两类拒收，全部如实呈现。
+function cfgRuntimeBlock(rt, dir, savedTier, rescan) {
+  const sec = cfgDiv('cfg-sec');
+  const head = cfgDiv('cfg-sec-head');
+  head.appendChild(cfgDiv('cfg-sec-title', '运行能力（模块声明 / 包库可用 / 缺什么）'));
+  const again = btn('重新扫描', 'btn');
+  again.title = '重新读取这个会话的配置（模块清单与依赖文件夹每次读取都重扫，放入即出现）；未保存的改动会随之丢弃';
+  again.onclick = rescan;
+  head.appendChild(again);
+  sec.appendChild(head);
+
+  sec.appendChild(cfgDiv('cfg-line', '依赖文件夹（运行包放这里）：'));
+  sec.appendChild(cfgDiv('cfg-dir', dir || '（后端没有给出依赖文件夹路径）'));
+  sec.appendChild(cfgHint(savedTier === 'host'
+    ? '已保存的是本机档：脚本用宿主自己的解释器，不装载运行包。下面这些是如实呈现的事实，缺包不会拦会话。'
+    : '已保存的是虚拟机档：按模块声明的运行能力装载运行包；缺包 = 该模块的工具不执行（会话照样进行，如实说明缺什么）。'));
+
+  const declared = rt.declared || {};
+  const dIds = Object.keys(declared);
+  sec.appendChild(cfgDiv('cfg-sub', '模块声明的运行能力'));
+  if (!dIds.length) sec.appendChild(cfgDiv('cfg-line', '（没有模块声明运行能力：都不需要运行包）'));
+  for (const id of dIds) sec.appendChild(cfgDiv('cfg-line', '· 模块 ' + id + ' 需要：' + (declared[id] || []).join('、')));
+
+  const missing = rt.missing || {};
+  const mIds = Object.keys(missing);
+  sec.appendChild(cfgDiv('cfg-sub', '缺口（包库里没有的能力）'));
+  if (!mIds.length) {
+    sec.appendChild(cfgDiv('cfg-line cfg-ok', '没有缺口：模块声明的运行能力在依赖文件夹里都能找到。'));
+  } else {
+    for (const id of mIds) sec.appendChild(cfgDiv('cfg-line cfg-bad', '· 模块 ' + id + ' 缺：' + (missing[id] || []).join('、')));
+    sec.appendChild(cfgHint('把对应的运行包放进 ' + (dir || '依赖文件夹 runtimes/') + '，再点上面的「重新扫描」（放入即出现，不用重启）。', 'warn'));
+  }
+
+  const avail = rt.available || {};
+  const aCaps = Object.keys(avail);
+  sec.appendChild(cfgDiv('cfg-sub', '包库里可用'));
+  if (!aCaps.length) sec.appendChild(cfgDiv('cfg-line', '（依赖文件夹里没有可用的运行包）'));
+  for (const cap of aCaps) sec.appendChild(cfgDiv('cfg-line', '· ' + cap + '：' + (avail[cap] || []).join('、')));
+
+  const diags = rt.diagnoses || [];
+  if (diags.length) {
+    sec.appendChild(cfgDiv('cfg-sub', '虚拟机档诊断（选型不成立的原因）'));
+    for (const d of diags) sec.appendChild(cfgDiv('cfg-line cfg-bad', '· ' + diagnosisText(d)));
+  }
+
+  const rej = rt.rejected || [];
+  const rejPk = rt.rejected_packages || [];
+  sec.appendChild(cfgDiv('cfg-sub', '被拒收的模块 / 运行包（原因原文）'));
+  if (!rej.length && !rejPk.length) sec.appendChild(cfgDiv('cfg-line', '没有被拒收的模块或运行包。'));
+  for (const x of rej) sec.appendChild(cfgDiv('cfg-line cfg-bad', '· 模块：' + x));
+  for (const x of rejPk) sec.appendChild(cfgDiv('cfg-line cfg-bad', '· 运行包：' + x));
+  return sec;
 }
 
 /* 侧栏：只保留「被拒收模块」的如实提示（模块清单在「新建工作」向导里用）。 */

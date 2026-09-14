@@ -3,7 +3,9 @@
 //! 安全底线：只绑 127.0.0.1；密钥永不进任何响应（门面已保证前端只见 id）。
 
 use crate::core::providers::AppSettings;
-use crate::core::{AgentInstance, CollabStep, Core, Live, Pending, SessionEvent, WorkMode, WorkSpec};
+use crate::core::{
+    AgentInstance, CollabStep, Core, Live, Pending, SessionEdit, SessionEvent, WorkMode, WorkSpec,
+};
 use serde_json::json;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -16,8 +18,22 @@ type SharedCore = Arc<Mutex<Core>>;
 /// 默认监听端口（CLI 的 webui 命令与启动参数共用这一个来源）。
 pub const DEFAULT_PORT: u16 = 3081;
 
+/// 本机工具围栏能力（由组合根注入；呈现层如实显示，不假装）。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct FenceInfo {
+    pub fs: bool,
+    pub net: bool,
+    pub tree: bool,
+    pub note: String,
+}
+
 /// 启动转录中心服务器（阻塞直至出错）。端口可指定，默认 3081，只绑本机回环。
-pub fn serve(core: SharedCore, port: u16, log: std::sync::Arc<dyn crate::core::ports::Log + Send + Sync>) -> Result<(), String> {
+pub fn serve(
+    core: SharedCore,
+    port: u16,
+    log: std::sync::Arc<dyn crate::core::ports::Log + Send + Sync>,
+    fence: FenceInfo,
+) -> Result<(), String> {
     log.info("web::serve", &format!("转录中心启动，端口 {}", port));
     let addr = format!("127.0.0.1:{}", port);
     let server = Server::http(addr.as_str()).map_err(|e| e.to_string())?;
@@ -27,11 +43,13 @@ pub fn serve(core: SharedCore, port: u16, log: std::sync::Arc<dyn crate::core::p
     // 中止开关表：/stop 只碰它，不碰核心锁——生成中核心锁被占用，否则停不下来。
     let cancels: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>> = Arc::new(Mutex::new(HashMap::new()));
 
+    let fence = Arc::new(fence);
     let log_req = std::sync::Arc::clone(&log);
     for request in server.incoming_requests() {
         let core = Arc::clone(&core);
         let bus = Arc::clone(&bus);
         let cancels = Arc::clone(&cancels);
+        let fence = Arc::clone(&fence);
         let log = std::sync::Arc::clone(&log_req);
         // 每请求一线程：长连接绝不阻塞其它请求（转录中心是多端并用的）。
         std::thread::spawn(move || {
@@ -42,7 +60,7 @@ pub fn serve(core: SharedCore, port: u16, log: std::sync::Arc<dyn crate::core::p
             let _ = request.as_reader().read_to_string(&mut body);
             log.info("web::request", &format!("{} {}", method, url));
 
-            let resp = route(&core, &bus, &cancels, &log, &method, &url, &body);
+            let resp = route(&core, &bus, &cancels, &fence, &log, &method, &url, &body);
             let mut response = Response::from_string(resp.2).with_status_code(resp.0);
             for (k, v) in resp.1 {
                 if let Ok(h) = Header::from_bytes(k.as_bytes(), v.as_bytes()) {
@@ -130,6 +148,7 @@ fn route(
     core: &SharedCore,
     bus: &Bus,
     cancels: &Cancels,
+    fence: &FenceInfo,
     log: &std::sync::Arc<dyn crate::core::ports::Log + Send + Sync>,
     method: &str,
     url: &str,
@@ -182,7 +201,7 @@ fn route(
         }
         ("GET", "/api/state") => {
             let c = core.lock().expect("core 锁");
-            (200, json_head(), state_json(&c).to_string())
+            (200, json_head(), state_json(&c, fence).to_string())
         }
 
         // ---- 创建/操作会话（工作） ----
@@ -272,6 +291,27 @@ fn route(
                 return match c.update_task(&sid, &text) {
                     Ok(events) => (200, json_head(), json!({ "sid": sid, "events": events }).to_string()),
                     Err(e) => (400, json_head(), json!({ "error": e }).to_string()),
+                };
+            }
+            // 配置界面：提交编辑。正在生成中不许改（先停止或等它结束），避免改到一半的语义。
+            if action == "edit" {
+                if cancels.lock().expect("cancels 锁").contains_key(&sid) {
+                    return (
+                        400,
+                        json_head(),
+                        json!({ "error": "该会话正在生成中：先「停止」或等它结束，再改配置" }).to_string(),
+                    );
+                }
+                let edit = match serde_json::from_value::<SessionEdit>(req.clone()) {
+                    Ok(e) => e,
+                    Err(e) => return (400, json_head(), json!({ "error": format!("编辑内容非法：{}", e) }).to_string()),
+                };
+                return match c.edit_session(&sid, edit) {
+                    Ok(()) => (200, json_head(), json!({ "ok": true }).to_string()),
+                    Err(e) => {
+                        log.warn("web::edit_session", &format!("sid={} 编辑被拒：{}", sid, e));
+                        (400, json_head(), json!({ "error": e }).to_string())
+                    }
                 };
             }
             // 上传：把文件写进本次工作的 work/；同名冲突返回 409，由用户决定覆盖/改名。
@@ -454,6 +494,9 @@ fn route(
             let settings = AppSettings {
                 streaming: req.get("streaming").and_then(|v| v.as_bool()).unwrap_or(current.streaming),
                 show_reasoning: req.get("show_reasoning").and_then(|v| v.as_bool()).unwrap_or(current.show_reasoning),
+                // 执行档位与围栏写权限：界面暂未暴露（后续阶段），改设置只保留现有值。
+                tier: current.tier,
+                fence_write: current.fence_write,
             };
             let mut c = core.lock().expect("core 锁");
             match c.set_app_settings(settings) {
@@ -485,6 +528,15 @@ fn route(
         }
 
         // ---- 会话文件清单 + 真实根（前端 @ 菜单与长路径缩写） ----
+        // 配置视图（会话界面之外）：能改什么、现在是什么、缺什么，一次性如实给出。
+        ("GET", path) if path.starts_with("/api/sessions/") && path.ends_with("/config") => {
+            let sid = url_decode(&path["/api/sessions/".len()..path.len() - "/config".len()]);
+            let c = core.lock().expect("core 锁");
+            match c.session_config(&sid) {
+                Ok(config) => (200, json_head(), json!({ "config": config }).to_string()),
+                Err(e) => (400, json_head(), json!({ "error": e }).to_string()),
+            }
+        }
         ("GET", path) if path.starts_with("/api/sessions/") && path.ends_with("/files") => {
             let sid = url_decode(&path["/api/sessions/".len()..path.len() - "/files".len()]);
             let c = core.lock().expect("core 锁");
@@ -530,7 +582,7 @@ pub fn parse_mode(s: &str) -> Result<WorkMode, String> {
 }
 
 /// 概览状态：模块清单 + 供应商/模型视图 + 核心默认 + 进行中会话（均无密钥）。
-fn state_json(core: &Core) -> serde_json::Value {
+fn state_json(core: &Core, fence: &FenceInfo) -> serde_json::Value {
     let roster = core.scan();
     // 会话形态取落盘 meta（单一真相）：只读一次盘，sessions 与 history 共用。
     let history = core.history_list();
@@ -540,6 +592,8 @@ fn state_json(core: &Core) -> serde_json::Value {
             "brief": m.manifest.brief,
         })).collect::<Vec<_>>(),
         "rejected": roster.rejected,
+        // 本机工具围栏的实际能力（如实显示，不假装）：哪些维度真的被强制了。
+        "fence": fence,
         "providers": core.provider_views(),
         "models": core.model_views(),
         "core": core.core_model(),

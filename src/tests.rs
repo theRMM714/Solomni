@@ -6,13 +6,17 @@ use crate::adapters::fake_chat::FakeChat;
 use crate::core::engine::{Discussion, Member, MemberTools, ModuleTools, TurnOut, MAX_ROUNDS, MAX_TOOL_CALLS};
 use crate::core::module::{Module, ModuleManifest};
 use crate::core::history::{AgentMeta, HistoryView, SessionMeta};
+use crate::core::exec::{self, Diagnosis, ExecSpec, Tier};
+use crate::core::packages::{Library, PackageManifest};
 use crate::core::ports::{
-    BoxedChat, Chat, ChatGateway, Chunk, FileRead, HistoryStore, ModelCatalog, ModuleSource, Msg, PromptSource,
-    SettingsStore, SysIo, ToolOutcome, ToolRunner, Workspace,
+    BoxedChat, Chat, ChatGateway, Chunk, FileRead, HistoryStore, ModelCatalog, ModuleSource, Msg, PackageSource,
+    PromptSource, SettingsStore, SysIo, ToolOutcome, ToolRunner, Workspace,
 };
 use crate::core::prompt::{render, Prompts};
 use crate::core::providers::{Channel, ModelEntry, Provider, Settings};
-use crate::core::{AgentInstance, CollabStep, Core, Live, Pending, SessionEvent, WorkMode, WorkSpec};
+use crate::core::{
+    AgentInstance, CollabStep, ConfigAgent, Core, Live, Pending, SessionEdit, SessionEvent, WorkMode, WorkSpec,
+};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -37,6 +41,12 @@ impl InMemorySettings {
         );
         s.core = Some("m".to_string());
         InMemorySettings { s: Mutex::new(s) }
+    }
+    /// 指定默认执行档位的登记处（断言虚拟机档下的诊断与工具回执）。
+    fn with_tier(tier: Tier) -> InMemorySettings {
+        let s = InMemorySettings::new();
+        s.s.lock().expect("锁").app.tier = tier;
+        s
     }
 }
 
@@ -188,6 +198,10 @@ impl HistoryStore for InMemoryHistory {
         self.metas.lock().expect("锁").insert(meta.name.clone(), meta.clone());
         Ok(())
     }
+    fn save_meta(&self, meta: &SessionMeta) -> Result<(), String> {
+        self.metas.lock().expect("锁").insert(meta.name.clone(), meta.clone());
+        Ok(())
+    }
     fn append(&self, name: &str, events: &[serde_json::Value]) -> Result<(), String> {
         self.events.lock().expect("锁").entry(name.to_string()).or_default().extend_from_slice(events);
         Ok(())
@@ -247,16 +261,77 @@ impl ModuleSource for VecSource {
     }
 }
 
+/// 无声围栏端口：测试里不碰任何 ACL（真实实现在 adapters/confine）。
+struct NoFenceHost;
+impl crate::core::ports::FenceHost for NoFenceHost {
+    fn release(&self, _spec: &crate::core::fence::FenceSpec) -> Result<(), String> {
+        Ok(())
+    }
+}
+
+/// 记录型围栏端口：断言「删除会话时真的请求了撤销」。
+struct RecordingFence {
+    released: Mutex<Vec<String>>,
+}
+impl crate::core::ports::FenceHost for RecordingFence {
+    fn release(&self, spec: &crate::core::fence::FenceSpec) -> Result<(), String> {
+        self.released.lock().expect("锁").push(spec.agent.clone());
+        Ok(())
+    }
+}
+
+/// 内存运行包库（测试组合根）：直接给出包清单，不碰盘。
+struct InMemoryPackages(Vec<PackageManifest>);
+
+impl InMemoryPackages {
+    fn empty() -> InMemoryPackages {
+        InMemoryPackages(Vec::new())
+    }
+    /// 用 yaml 文本造包（顺带覆盖清单解析）。
+    fn with(yamls: &[&str]) -> InMemoryPackages {
+        InMemoryPackages(yamls.iter().map(|y| pkg_yaml(y)).collect())
+    }
+}
+
+impl PackageSource for InMemoryPackages {
+    fn scan(&self) -> Library {
+        Library::build(self.0.clone(), Vec::new())
+    }
+    fn dir(&self) -> PathBuf {
+        abs(&["runtimes"])
+    }
+}
+
+/// 用 yaml 造一份包清单（顺带覆盖清单解析）。
+fn pkg_yaml(y: &str) -> PackageManifest {
+    serde_yaml::from_str(y).expect("包清单必须能解析")
+}
+
+/// 造一个 prefix 类包（独立前缀 opt/rt/&lt;id&gt;-&lt;version&gt;）。
+fn pkg(id: &str, version: &str) -> PackageManifest {
+    pkg_yaml(&format!("id: {}
+version: {}
+prefix: opt/rt/{}-{}", id, version, id, version))
+}
+
 fn module_of(id: &str) -> Module {
     Module {
         manifest: ModuleManifest {
             id: id.to_string(),
             brief: format!("{} 的简介", id),
             system: format!("你负责{}", id),
+            runtimes: Vec::new(),
             tools: BTreeMap::new(),
         },
         root: abs(&[id]),
     }
+}
+
+/// 声明了运行能力的模块（工具的可用性按它判定）。
+fn module_with_runtimes(id: &str, caps: &[&str]) -> Module {
+    let mut m = module_of(id);
+    m.manifest.runtimes = caps.iter().map(|s| s.to_string()).collect();
+    m
 }
 
 /// 测试用静默 Live（不流式、不派发短暂事件）。
@@ -362,6 +437,8 @@ fn core_with_workspace(modules: Vec<Module>, gateway: ScriptGateway, ws: Arc<InM
         Arc::new(InMemoryHistory::new()),
         ws,
         Arc::new(VecSource(modules)),
+        Arc::new(InMemoryPackages::empty()),
+        Arc::new(NoFenceHost),
         Arc::new(gateway),
         Arc::new(FakeCatalog::new(vec!["m".to_string()])),
         Arc::new(SilentRunner),
@@ -395,10 +472,17 @@ fn core_with_catalog(
     runner: Arc<impl ToolRunner + Send + Sync + 'static>,
     catalog: Arc<FakeCatalog>,
 ) -> Core {
-    core_with_all(modules, gateway, runner, catalog, Arc::new(InMemoryHistory::new()), Arc::new(InMemorySysIo::new()))
+    core_with_all(
+        modules,
+        gateway,
+        runner,
+        catalog,
+        Arc::new(InMemoryHistory::new()),
+        Arc::new(InMemorySysIo::new()),
+    )
 }
 
-/// 指定全部端口的装配（历史落盘断言用）。
+/// 指定全部端口的装配（历史落盘断言用）：默认空包库。
 fn core_with_all(
     modules: Vec<Module>,
     gateway: ScriptGateway,
@@ -407,11 +491,26 @@ fn core_with_all(
     history: Arc<InMemoryHistory>,
     io: Arc<InMemorySysIo>,
 ) -> Core {
+    core_with_pkgs(modules, gateway, runner, catalog, history, io, Arc::new(InMemoryPackages::empty()))
+}
+
+/// 指定全部端口 + 运行包库的装配（断言缺包诊断与工具回执）。
+fn core_with_pkgs(
+    modules: Vec<Module>,
+    gateway: ScriptGateway,
+    runner: Arc<impl ToolRunner + Send + Sync + 'static>,
+    catalog: Arc<FakeCatalog>,
+    history: Arc<InMemoryHistory>,
+    io: Arc<InMemorySysIo>,
+    packages: Arc<InMemoryPackages>,
+) -> Core {
     Core::new(
         Arc::new(InMemorySettings::new()),
         history,
         Arc::new(InMemoryWorkspace::new()),
         Arc::new(VecSource(modules)),
+        packages,
+        Arc::new(NoFenceHost),
         Arc::new(gateway),
         catalog,
         runner,
@@ -1256,6 +1355,7 @@ fn mode_vocabulary_is_single_or_collab_only() {
         task: None,
         ts: 1,
         agents: vec![AgentMeta { name: "a".to_string(), transient: true, modules: vec!["a".to_string()], model: None }],
+        exec: ExecSpec::default(),
     })
     .unwrap();
     // 内存里没有这个会话 → 走 rebuild_session，对未知形态如实报错。
@@ -1383,7 +1483,7 @@ fn extract_balanced_array() {
 /// 守护 runner：任何调用即失败（守护不该用工具的路径）。
 struct SilentRunner;
 impl ToolRunner for SilentRunner {
-    fn run(&self, _root: &std::path::Path, _command: &str, _args: &str) -> ToolOutcome {
+    fn run(&self, _fence: &crate::core::fence::FenceSpec, _command: &str, _args: &str) -> ToolOutcome {
         panic!("不应调用工具");
     }
 }
@@ -1395,11 +1495,12 @@ struct RecordingRunner {
     ok: bool,
 }
 impl ToolRunner for RecordingRunner {
-    fn run(&self, root: &std::path::Path, command: &str, args_json: &str) -> ToolOutcome {
+    fn run(&self, fence: &crate::core::fence::FenceSpec, command: &str, args_json: &str) -> ToolOutcome {
+        // 记下工具进程的工作目录（= 该模块的根）与命令、参数。
         self.calls
             .lock()
             .expect("锁")
-            .push((root.to_path_buf(), command.to_string(), args_json.to_string()));
+            .push((fence.cwd.clone(), command.to_string(), args_json.to_string()));
         ToolOutcome { ok: self.ok, output: self.out.clone() }
     }
 }
@@ -1419,6 +1520,8 @@ fn member_with_tools(id: &str, script: Vec<String>, runner: Arc<impl ToolRunner 
         runner,
         sandbox: test_sandbox("m0", &[]),
         io: Arc::new(InMemorySysIo::new()),
+        unavailable: BTreeMap::new(),
+        fence: crate::core::fence::FenceSpec::from_sandbox(&test_sandbox("m0", &[]), false),
     });
     m
 }
@@ -2240,3 +2343,497 @@ fn core_collab_tool_modules_run_in_execution() {
     assert!(events.iter().any(|e| matches!(e, SessionEvent::Delivery { ok: true, .. })), "验收应通过");
     assert_eq!(runner.calls.lock().expect("锁").len(), 1);
 }
+// ---------- 运行包：契约、包库、诊断、执行计划 ----------
+
+#[test]
+fn package_manifest_check_rejects_illegal_forms() {
+    let check = crate::core::packages::check_manifest;
+    assert!(check(&pkg("python", "3.12.4")).is_ok(), "prefix 类默认 kind");
+    assert!(check(&pkg_yaml("id: Python\nversion: 1\nprefix: opt/p")).is_err(), "id 只允许小写");
+    assert!(check(&pkg_yaml("id: py\nversion: 1\nkind: magic\nprefix: opt/p")).is_err(), "kind 只认 prefix / system");
+    assert!(check(&pkg_yaml("id: py\nversion: 1")).is_err(), "prefix 类必须给 prefix");
+    assert!(check(&pkg_yaml("id: py\nversion: 1\nprefix: opt/../etc")).is_err(), "前缀不能含 ..");
+    assert!(check(&pkg_yaml("id: py\nversion: 1\nprefix: opt\\\\rt")).is_err(), "前缀用 / 书写形式");
+    assert!(check(&pkg_yaml("id: cc\nversion: 1\nkind: system")).is_err(), "system 类必须给 provides_paths");
+    assert!(check(&pkg_yaml("id: cc\nversion: 1\nkind: system\nprovides_paths: [usr/include]")).is_ok());
+    assert!(check(&pkg_yaml("id: a\nversion: 1\nprefix: opt/a\nrequires: [a]")).is_err(), "requires 不能依赖自己");
+}
+
+#[test]
+fn module_runtimes_are_validated() {
+    let mut m = module_of("a");
+    m.manifest.runtimes = vec!["python".to_string(), "cc".to_string()];
+    assert!(crate::core::module::check_runtimes(&m.manifest).is_ok());
+    m.manifest.runtimes = vec!["Python".to_string()];
+    assert!(crate::core::module::check_runtimes(&m.manifest).is_err(), "大写不合法");
+    m.manifest.runtimes = vec!["python".to_string(), "python".to_string()];
+    assert!(crate::core::module::check_runtimes(&m.manifest).unwrap_err().contains("重复"), "重复声明要拒收");
+}
+
+#[test]
+fn library_keeps_versions_and_rejects_duplicates() {
+    let lib = Library::build(
+        vec![pkg("python", "3.12.4"), pkg("python", "3.11.9"), pkg("python", "3.12.4"), pkg_yaml("id: bad\nversion: 1")],
+        vec!["x：package.yaml 非法".to_string()],
+    );
+    let versions: Vec<&str> = lib.versions_of("python").iter().map(|p| p.version.as_str()).collect();
+    assert_eq!(versions, vec!["3.11.9", "3.12.4"], "同 (id, version) 只收一份，版本升序");
+    assert!(lib.rejected.iter().any(|r| r.contains("只收先出现的那份")), "{:?}", lib.rejected);
+    assert!(lib.rejected.iter().any(|r| r.contains("prefix")), "非法清单要说明原因：{:?}", lib.rejected);
+    assert!(lib.rejected.iter().any(|r| r.contains("package.yaml 非法")), "适配层拒收原因也要留：{:?}", lib.rejected);
+    let caps = lib.capability_versions();
+    assert_eq!(caps.get("python").map(|v| v.len()), Some(2));
+}
+
+#[test]
+fn package_conflicts_flag_overlapping_paths() {
+    let lib = Library::build(
+        vec![
+            pkg_yaml("id: a\nversion: 1\nkind: system\nprovides_paths: [usr/lib]"),
+            pkg_yaml("id: b\nversion: 1\nkind: system\nprovides_paths: [usr/lib/x86_64]"),
+            pkg("node", "20.11.1"),
+        ],
+        Vec::new(),
+    );
+    let refs: Vec<&PackageManifest> = lib.packages.iter().collect();
+    let got = crate::core::packages::conflicts(&refs);
+    assert_eq!(got.len(), 1, "只有那对写进同一处的包冲突：{:?}", got);
+    assert_eq!(got[0].0, "usr/lib");
+    assert!(got[0].1.contains("a@1") && got[0].2.contains("b@1"), "{:?}", got);
+}
+
+/// 虚拟机档选型：基础根 + 不联网（定版留空 = 让库自己决定；多版本时报歧义）。
+fn vm_spec() -> ExecSpec {
+    ExecSpec { tier: Tier::Vm, base: Some("base-linux".to_string()), pins: BTreeMap::new(), net: false }
+}
+
+#[test]
+fn exec_host_tier_ignores_packages() {
+    let modules = vec![module_with_runtimes("a", &["python"])];
+    let plan = exec::plan(&ExecSpec::default(), &modules, &Library::default())
+        .expect("本机档不装载运行包，不会因缺包失败");
+    assert_eq!(plan.tier, Tier::Host);
+    assert!(plan.packages.is_empty());
+    assert!(plan.base.is_none());
+    assert!(!plan.net, "默认不放行出站网络");
+    let summary = exec::plan_summary(&plan);
+    assert!(summary.contains("本机") && summary.contains("不放行"), "{}", summary);
+}
+
+#[test]
+fn exec_vm_tier_reports_missing_ambiguous_and_unavailable() {
+    let modules = vec![module_with_runtimes("a", &["python"])];
+    let empty = Library::default();
+    let spec = vm_spec();
+    assert_eq!(
+        exec::vm_diagnoses(&modules, &empty, &spec),
+        vec![Diagnosis::Missing { module: "a".to_string(), capability: "python".to_string() }]
+    );
+    let un = exec::unavailable(&spec, &modules, &empty);
+    assert_eq!(un.get("a"), Some(&vec!["python".to_string()]), "虚拟机档缺包 = 该模块工具不可用");
+    assert!(exec::unavailable(&ExecSpec::default(), &modules, &empty).is_empty(), "本机档一律可用");
+    // 缺包不拦会话：计划里没有可装载的包，那一步的降级由 unavailable 收口。
+    let partial = exec::plan(&spec, &modules, &empty).expect("缺包不该拦会话");
+    assert!(partial.packages.is_empty());
+    let said = exec::diagnose_text(&exec::vm_diagnoses(&modules, &empty, &spec));
+    assert!(said.contains("runtimes/"), "缺包的说法要告诉用户把包放哪：{}", said);
+    // 多版本且未定版 = 不替用户选
+    let two = Library::build(vec![pkg("python", "3.12.4"), pkg("python", "3.11.9")], Vec::new());
+    assert!(exec::vm_diagnoses(&modules, &two, &spec).iter().any(|d| matches!(d, Diagnosis::Ambiguous { .. })));
+    // 定版指定的版本不在库里 = 如实报
+    let bad = ExecSpec { pins: BTreeMap::from([("python".to_string(), "9.9".to_string())]), ..vm_spec() };
+    assert!(exec::vm_diagnoses(&modules, &two, &bad).iter().any(|d| matches!(d, Diagnosis::UnknownPin { .. })));
+    // 多版本未定版 = 选型不成立：派生计划如实拒绝（这是用户要解决的选型问题，不是"缺包"）
+    let refused = exec::plan(&spec, &modules, &two).unwrap_err();
+    assert!(exec::diagnose_text(&refused).contains("多个版本"), "{}", exec::diagnose_text(&refused));
+    // 定版之后可以成立
+    let ok = ExecSpec { pins: BTreeMap::from([("python".to_string(), "3.12.4".to_string())]), ..vm_spec() };
+    assert!(exec::vm_diagnoses(&modules, &two, &ok).is_empty());
+    assert_eq!(exec::plan(&ok, &modules, &two).unwrap().packages.len(), 1);
+}
+
+#[test]
+fn exec_vm_plan_pins_versions_and_orders_prefix_before_system() {
+    let lib = Library::build(
+        vec![
+            pkg_yaml("id: cc\nversion: 13.2.0\nkind: system\nprovides_paths: [usr/bin, usr/include]\nrequires: [binutils]"),
+            pkg_yaml("id: binutils\nversion: 2.42\nprefix: opt/rt/binutils2.42"),
+            pkg("python", "3.12.4"),
+        ],
+        Vec::new(),
+    );
+    let modules = vec![module_with_runtimes("a", &["python", "cc"])];
+    let plan = exec::plan(&vm_spec(), &modules, &lib).expect("虚拟机档可成立");
+    let ids: Vec<&str> = plan.packages.iter().map(|p| p.id.as_str()).collect();
+    assert_eq!(ids, vec!["binutils", "python", "cc"], "先独立前缀，后写进系统路径的包；包的 requires 走闭包");
+    assert_eq!(plan.packages[0].version, "2.42", "计划里是定版后的精确版本");
+    assert_eq!(plan.packages[0].prefix, "opt/rt/binutils2.42", "独立前缀随计划走（装配按它挂载）");
+    assert_eq!(plan.packages[2].kind, "system", "写进系统路径的包排在最后");
+    assert_eq!(plan.base.as_deref(), Some("base-linux"));
+    assert!(!plan.net, "默认不放行出站网络");
+}
+
+#[test]
+fn diagnose_text_spells_out_every_reason() {
+    let missing = exec::diagnose_text(&[Diagnosis::Missing { module: "a".to_string(), capability: "python".to_string() }]);
+    assert!(missing.contains("模块 a") && missing.contains("python") && missing.contains("runtimes/"), "{}", missing);
+    let ambiguous = exec::diagnose_text(&[Diagnosis::Ambiguous {
+        capability: "python".to_string(),
+        versions: vec!["3.11.9".to_string(), "3.12.4".to_string()],
+    }]);
+    assert!(ambiguous.contains("多个版本") && ambiguous.contains("3.12.4"), "{}", ambiguous);
+    let bad = exec::diagnose_text(&[Diagnosis::UnknownPin { capability: "python".to_string(), version: "9.9".to_string() }]);
+    assert!(bad.contains("定版 9.9"), "{}", bad);
+    let clash = exec::diagnose_text(&[Diagnosis::Conflict {
+        path: "usr/lib".to_string(),
+        a: "a@1".to_string(),
+        b: "b@1".to_string(),
+    }]);
+    assert!(clash.contains("usr/lib") && clash.contains("a@1") && clash.contains("b@1"), "{}", clash);
+}
+
+#[test]
+fn runtime_report_is_tier_aware() {
+    let cores = |pkgs: Arc<InMemoryPackages>, modules: Vec<Module>| {
+        core_with_pkgs(
+            modules,
+            gw(BTreeMap::new(), vec!["[]".into()]),
+            Arc::new(SilentRunner),
+            Arc::new(FakeCatalog::new(vec!["m".to_string()])),
+            Arc::new(InMemoryHistory::new()),
+            Arc::new(InMemorySysIo::new()),
+            pkgs,
+        )
+    };
+    let core = cores(Arc::new(InMemoryPackages::empty()), vec![module_with_runtimes("a", &["python"])]);
+    let host = core.runtime_report(Tier::Host);
+    assert_eq!(host.tier, "host");
+    assert_eq!(host.declared.get("a"), Some(&vec!["python".to_string()]));
+    assert_eq!(host.missing.get("a"), Some(&vec!["python".to_string()]), "档位无关的事实照实报");
+    assert!(host.available.is_empty());
+    assert!(host.diagnoses.is_empty(), "本机档不做虚拟机档诊断");
+    assert_eq!(core.runtime_report(Tier::Vm).diagnoses.len(), 1);
+    // 包库里有包 = 缺失消失、诊断清空
+    let with_pkg = cores(
+        Arc::new(InMemoryPackages::with(&["id: python\nversion: 3.12.4\nprefix: opt/rt/python3.12"])),
+        vec![module_with_runtimes("a", &["python"])],
+    );
+    let r = with_pkg.runtime_report(Tier::Vm);
+    assert!(r.missing.is_empty(), "{:?}", r.missing);
+    assert_eq!(r.available.get("python"), Some(&vec!["3.12.4".to_string()]));
+    assert!(r.diagnoses.is_empty(), "{:?}", r.diagnoses);
+}
+
+#[test]
+fn module_without_runtime_is_denied_with_reason() {
+    // 虚拟机档 + 空包库：模块声明的运行包没装载 → 工具不落进程，回执如实说缺哪个能力。
+    let mut member = BTreeMap::new();
+    member.insert("a".to_string(), vec![TOOL_CALL.into(), "{\"type\":\"say\",\"text\":\"改用内置工具\"}".into()]);
+    let mut mod_a = module_with_runtimes("a", &["python"]);
+    mod_a.manifest.tools.insert("grep".to_string(), "python tools/grep.py".to_string());
+    let runner = Arc::new(RecordingRunner { calls: Mutex::new(Vec::new()), out: "ok".into(), ok: true });
+    let mut core = Core::new(
+        Arc::new(InMemorySettings::with_tier(Tier::Vm)),
+        Arc::new(InMemoryHistory::new()),
+        Arc::new(InMemoryWorkspace::new()),
+        Arc::new(VecSource(vec![mod_a])),
+        Arc::new(InMemoryPackages::empty()),
+        Arc::new(NoFenceHost),
+        Arc::new(gw(member, vec!["[]".into()])),
+        Arc::new(FakeCatalog::new(vec!["m".to_string()])),
+        Arc::clone(&runner) as Arc<dyn ToolRunner + Send + Sync>,
+        Arc::new(InMemorySysIo::new()),
+        Box::new(TestPrompts),
+        Arc::new(crate::core::ports::NoopLog),
+    )
+    .expect("内存装配不应失败");
+    let sid = core.create_work(work("w", WorkMode::Single, &["a"])).unwrap().sid;
+    let events = with_live(|l| core.single_say(&sid, "干活", l)).unwrap();
+    assert!(runner.calls.lock().expect("锁").is_empty(), "缺运行包时不落进程");
+    let texts = test_prompts().core.tool_texts;
+    let expect = texts.render(
+        &texts.module_unavailable,
+        &[("module", "a".to_string()), ("capability", "python".to_string())],
+    );
+    let feedback = core
+        .single_history(&sid)
+        .unwrap()
+        .iter()
+        .find(|m| m.role == "user" && m.content.contains("[工具结果] a.grep"))
+        .map(|m| m.content.clone())
+        .unwrap_or_default();
+    assert!(feedback.contains(&expect), "回执要用册子文案：{}", feedback);
+    let lines = tool_line_texts(&events);
+    assert!(lines.iter().any(|l| l.contains("grep") && l.contains("失败")), "失败也要发 tool 行：{:?}", lines);
+    // 同一个模块在本机档照旧执行（本机档不装载运行包）。
+    let mut member2 = BTreeMap::new();
+    member2.insert("a".to_string(), vec![TOOL_CALL.into(), "{\"type\":\"say\",\"text\":\"跑完了\"}".into()]);
+    let mut mod_b = module_with_runtimes("a", &["python"]);
+    mod_b.manifest.tools.insert("grep".to_string(), "python tools/grep.py".to_string());
+    let runner2 = Arc::new(RecordingRunner { calls: Mutex::new(Vec::new()), out: "ok".into(), ok: true });
+    let mut core2 = core_with_runner(vec![mod_b], gw(member2, vec!["[]".into()]), Arc::clone(&runner2));
+    let sid2 = core2.create_work(work("w2", WorkMode::Single, &["a"])).unwrap().sid;
+    with_live(|l| core2.single_say(&sid2, "干活", l)).unwrap();
+    assert_eq!(runner2.calls.lock().expect("锁").len(), 1, "本机档不受包库影响");
+}
+
+
+// ---------- 配置视图：读、改、冻结 ----------
+
+/// 造一条 agent 名单记录。
+fn agent_meta(name: &str, modules: &[&str], model: Option<&str>) -> AgentMeta {
+    AgentMeta {
+        name: name.to_string(),
+        transient: false,
+        modules: modules.iter().map(|s| s.to_string()).collect(),
+        model: model.map(|s| s.to_string()),
+    }
+}
+
+/// 直接把一份 meta 放进内存历史（模拟"重启后从盘上读回该会话"）。
+fn seed_session(hist: &Arc<InMemoryHistory>, name: &str, mode: &str, agents: Vec<AgentMeta>, exec: ExecSpec) {
+    hist.create(&SessionMeta {
+        name: name.to_string(),
+        mode: mode.to_string(),
+        delegate: false,
+        modules: agents.iter().flat_map(|a| a.modules.clone()).collect(),
+        task: None,
+        ts: 1,
+        agents,
+        exec,
+    })
+    .unwrap();
+}
+
+/// 一次编辑提交（名字 / 模块 / 模型；档位与定版默认本机档）。
+fn edit_of(agents: Vec<(&str, &[&str], &str)>) -> SessionEdit {
+    SessionEdit {
+        agents: agents
+            .into_iter()
+            .map(|(n, ms, m)| ConfigAgent {
+                name: n.to_string(),
+                modules: ms.iter().map(|s| s.to_string()).collect(),
+                model: m.to_string(),
+            })
+            .collect(),
+        tier: "host".to_string(),
+        base: None,
+        pins: BTreeMap::new(),
+        net: false,
+    }
+}
+
+#[test]
+fn session_config_reports_tier_missing_and_runtimes_dir() {
+    let hist = Arc::new(InMemoryHistory::new());
+    seed_session(&hist, "w", "single", vec![agent_meta("a", &["a"], Some("m"))], ExecSpec { tier: Tier::Vm, ..Default::default() });
+    let core = core_with_pkgs(
+        vec![module_with_runtimes("a", &["python"])],
+        gw(BTreeMap::new(), vec!["[]".into()]),
+        Arc::new(SilentRunner),
+        Arc::new(FakeCatalog::new(vec!["m".to_string()])),
+        Arc::clone(&hist),
+        Arc::new(InMemorySysIo::new()),
+        Arc::new(InMemoryPackages::empty()),
+    );
+    let cfg = core.session_config("w").unwrap();
+    assert_eq!(cfg.sid, "w");
+    assert_eq!(cfg.mode, "single");
+    assert!(!cfg.started, "没有内容的会话 = 还没开过");
+    assert_eq!(cfg.tier, "vm");
+    assert_eq!(cfg.agents[0].model, "m");
+    assert_eq!(cfg.runtime.missing.get("a"), Some(&vec!["python".to_string()]));
+    assert!(cfg.runtimes_dir.ends_with("/runtimes"), "{}", cfg.runtimes_dir);
+    assert!(core.session_config("没有这个会话").is_err());
+}
+
+#[test]
+fn edit_session_writes_meta_appends_config_record_and_rebuilds() {
+    let hist = Arc::new(InMemoryHistory::new());
+    let mut a = module_of("a");
+    a.manifest.tools.insert("grep".to_string(), "python tools/grep.py".to_string());
+    let mut core = core_with_pkgs(
+        vec![a, module_of("b")],
+        gw(BTreeMap::new(), vec!["[]".into()]),
+        Arc::new(SilentRunner),
+        Arc::new(FakeCatalog::new(vec!["m".to_string()])),
+        Arc::clone(&hist),
+        Arc::new(InMemorySysIo::new()),
+        Arc::new(InMemoryPackages::empty()),
+    );
+    let sid = core.create_work(work("w", WorkMode::Single, &["a"])).unwrap().sid;
+    assert!(
+        !core.session_config(&sid).unwrap().started,
+        "单 agent 会话在用户开口之前还没内容：名字仍改得动"
+    );
+    // 改：模块 a → b，模型指定 m，档位换虚拟机档、放行网络。
+    core.edit_session(
+        &sid,
+        SessionEdit {
+            agents: vec![ConfigAgent { name: "a".to_string(), modules: vec!["b".to_string()], model: "m".to_string() }],
+            tier: "vm".to_string(),
+            base: Some("base-linux".to_string()),
+            pins: BTreeMap::new(),
+            net: true,
+        },
+    )
+    .unwrap();
+    let cfg = core.session_config(&sid).unwrap();
+    assert_eq!(cfg.agents[0].modules, vec!["b".to_string()]);
+    assert_eq!(cfg.tier, "vm");
+    assert!(cfg.net, "网络开关随提交生效");
+    let (meta, events) = hist.load(&sid).unwrap();
+    assert_eq!(meta.agents[0].modules, vec!["b".to_string()], "meta.yaml 是名单的唯一真相");
+    assert_eq!(meta.exec.tier, Tier::Vm);
+    assert_eq!(meta.exec.base.as_deref(), Some("base-linux"));
+    assert!(
+        events.iter().any(|e| e.get("type").and_then(|t| t.as_str()) == Some("config")),
+        "每次提交编辑追加一条旁路配置记录：{:?}",
+        events
+    );
+    // 内存里的会话按旧配置装过：丢掉后下次访问按新配置从转录重建（内容不丢）。
+    assert!(!core.session_exists(&sid));
+    // 下一次访问按新配置从转录重建（单 agent 会话还没轮到用户：它只提醒，不硬发请求）。
+    with_live(|l| core.continue_flow(&sid, l)).unwrap();
+    assert!(core.session_exists(&sid), "访问会话即按新配置重建");
+    let history = core.single_history(&sid).unwrap();
+    assert!(!history.is_empty(), "重建后上下文还在");
+}
+
+#[test]
+fn edit_session_freezes_names_only_after_content() {
+    let hist = Arc::new(InMemoryHistory::new());
+    seed_session(&hist, "raw", "single", vec![agent_meta("a", &["a"], None)], ExecSpec::default());
+    let mut core = core_with_pkgs(
+        vec![module_of("a"), module_of("b")],
+        gw(BTreeMap::new(), vec!["[]".into()]),
+        Arc::new(SilentRunner),
+        Arc::new(FakeCatalog::new(vec!["m".to_string()])),
+        Arc::clone(&hist),
+        Arc::new(InMemorySysIo::new()),
+        Arc::new(InMemoryPackages::empty()),
+    );
+    // 没内容：名字与模块都能换。
+    core.edit_session("raw", edit_of(vec![("新名", &["b"], "")])).unwrap();
+    assert_eq!(core.session_config("raw").unwrap().agents[0].name, "新名");
+    // 有内容之后：名字冻结，模块与模型照旧可改。
+    hist.append("raw", &[serde_json::json!({"type":"transcript","lines":[{"id":0,"line":"[用户] 你好"}]})])
+        .unwrap();
+    let err = core.edit_session("raw", edit_of(vec![("再改", &["b"], "")])).unwrap_err();
+    assert!(err.contains("冻结"), "{}", err);
+    core.edit_session("raw", edit_of(vec![("新名", &["a"], "m")])).unwrap();
+    assert_eq!(core.session_config("raw").unwrap().agents[0].modules, vec!["a".to_string()]);
+}
+
+#[test]
+fn edit_session_enforces_the_same_rules_as_creation() {
+    let hist = Arc::new(InMemoryHistory::new());
+    seed_session(&hist, "w", "single", vec![agent_meta("a", &["a"], None)], ExecSpec::default());
+    seed_session(
+        &hist,
+        "c",
+        "collab",
+        vec![agent_meta("a", &["a"], None), agent_meta("b", &["b"], None)],
+        ExecSpec::default(),
+    );
+    let mut core = core_with_pkgs(
+        vec![module_of("a"), module_of("b")],
+        gw(BTreeMap::new(), vec!["[]".into()]),
+        Arc::new(SilentRunner),
+        Arc::new(FakeCatalog::new(vec!["m".to_string()])),
+        Arc::clone(&hist),
+        Arc::new(InMemorySysIo::new()),
+        Arc::new(InMemoryPackages::empty()),
+    );
+    let e = core.edit_session("w", edit_of(vec![("a", &["没有这个模块"], "")])).unwrap_err();
+    assert!(e.contains("无此模块"), "{}", e);
+    let e = core.edit_session("c", edit_of(vec![("x", &["a"], ""), ("y", &["a"], "")])).unwrap_err();
+    assert!(e.contains("只能属于一个 agent"), "{}", e);
+    let mut bad_tier = edit_of(vec![("x", &["a"], "")]);
+    bad_tier.tier = "docker".to_string();
+    assert!(core.edit_session("c", bad_tier).unwrap_err().contains("未知执行档位"));
+    let mut two_agents = edit_of(vec![("x", &["a"], ""), ("y", &["b"], "")]);
+    two_agents.tier = "host".to_string();
+    assert!(core.edit_session("w", two_agents).unwrap_err().contains("只接受一个 agent"));
+
+    // 虚拟机档选型不成立（同一能力多版本未定版）：编辑与「开始」同一把尺子，如实拒绝。
+    let hist2 = Arc::new(InMemoryHistory::new());
+    seed_session(&hist2, "c", "collab", vec![agent_meta("x", &["a"], None)], ExecSpec::default());
+    let mut core2 = core_with_pkgs(
+        vec![module_with_runtimes("a", &["python"])],
+        gw(BTreeMap::new(), vec!["[]".into()]),
+        Arc::new(SilentRunner),
+        Arc::new(FakeCatalog::new(vec!["m".to_string()])),
+        Arc::clone(&hist2),
+        Arc::new(InMemorySysIo::new()),
+        Arc::new(InMemoryPackages::with(&["id: python\nversion: 3.12.4\nprefix: opt/rt/py312", "id: python\nversion: 3.11.9\nprefix: opt/rt/py311"])),
+    );
+    let mut vm_edit = edit_of(vec![("x", &["a"], "")]);
+    vm_edit.tier = "vm".to_string();
+    let e = core2.edit_session("c", vm_edit.clone()).unwrap_err();
+    assert!(e.contains("多个版本"), "{}", e);
+    // 定版之后可以提交（缺包不拦：那只是该模块工具不可用）。
+    vm_edit.pins = BTreeMap::from([("python".to_string(), "3.12.4".to_string())]);
+    core2.edit_session("c", vm_edit).unwrap();
+    assert_eq!(core2.session_config("c").unwrap().pins.get("python").map(String::as_str), Some("3.12.4"));
+}
+
+#[test]
+fn deleting_a_session_asks_the_fence_to_release_its_grants() {
+    let hist = Arc::new(InMemoryHistory::new());
+    let fence = Arc::new(RecordingFence { released: Mutex::new(Vec::new()) });
+    seed_session(&hist, "w", "single", vec![agent_meta("甲", &["a"], None)], ExecSpec::default());
+    let mut core = Core::new(
+        Arc::new(InMemorySettings::new()),
+        Arc::clone(&hist) as Arc<dyn crate::core::ports::HistoryStore + Send + Sync>,
+        Arc::new(InMemoryWorkspace::new()),
+        Arc::new(VecSource(vec![module_of("a")])),
+        Arc::new(InMemoryPackages::empty()),
+        Arc::clone(&fence) as Arc<dyn crate::core::ports::FenceHost + Send + Sync>,
+        Arc::new(gw(BTreeMap::new(), vec!["[]".into()])),
+        Arc::new(FakeCatalog::new(vec!["m".to_string()])),
+        Arc::new(SilentRunner),
+        Arc::new(InMemorySysIo::new()),
+        Box::new(TestPrompts),
+        Arc::new(crate::core::ports::NoopLog),
+    )
+    .expect("内存装配不应失败");
+    assert!(core.history_delete("w").unwrap(), "会话目录该被删掉");
+    assert_eq!(
+        fence.released.lock().expect("锁").as_slice(),
+        &["甲".to_string()],
+        "删除会话要先请适配层撤销该 agent 的围栏授权（痕迹与会话同生共死）"
+    );
+}
+
+#[test]
+fn session_meta_exec_section_roundtrips_and_reads_legacy_meta() {
+    let meta = SessionMeta {
+        name: "w".to_string(),
+        mode: "single".to_string(),
+        delegate: false,
+        modules: vec!["a".to_string()],
+        task: None,
+        ts: 1,
+        agents: Vec::new(),
+        exec: ExecSpec {
+            tier: Tier::Vm,
+            base: Some("base-linux".to_string()),
+            pins: BTreeMap::from([("python".to_string(), "3.12.4".to_string())]),
+            net: false,
+        },
+    };
+    let text = serde_yaml::to_string(&meta).expect("序列化");
+    let back: SessionMeta = serde_yaml::from_str(&text).expect("反序列化");
+    assert_eq!(back.exec.tier, Tier::Vm);
+    assert_eq!(back.exec.base.as_deref(), Some("base-linux"));
+    assert_eq!(back.exec.pins.get("python").map(String::as_str), Some("3.12.4"));
+    assert!(!back.exec.net);
+    // 缺 exec 段的旧会话照旧可读（默认 = 本机档、不联网、不定版）。
+    let legacy: SessionMeta = serde_yaml::from_str("name: old\nmode: single\nmodules: [a]\nts: 1\n").expect("旧 meta.yaml 必须可读");
+    assert_eq!(legacy.exec.tier, Tier::Host);
+    assert!(legacy.exec.base.is_none());
+    assert!(!legacy.exec.net);
+    assert!(legacy.exec.pins.is_empty());
+}
+

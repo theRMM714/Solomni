@@ -53,6 +53,10 @@ fn scan_dir(modules_dir: &Path) -> Roster {
                     rejected.push(format!("{}: id '{}' 与文件夹名不一致", dir_name, m.id));
                     continue;
                 }
+                if let Err(why) = crate::core::module::check_runtimes(&m) {
+                    rejected.push(format!("{}: {}", dir_name, why));
+                    continue;
+                }
                 modules.push(Module { manifest: m, root: path });
             }
             Err(e) => rejected.push(format!(

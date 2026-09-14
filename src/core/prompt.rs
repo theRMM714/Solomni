@@ -129,6 +129,8 @@ pub struct ToolTexts {
     pub unknown_module: String,
     /// 变量：module, tool
     pub module_lacks_tool: String,
+    /// 变量：module, capability
+    pub module_unavailable: String,
     /// 变量：why, tools
     pub available_wrapper: String,
     // —— 工具循环与讨论（engine）——
@@ -140,6 +142,15 @@ pub struct ToolTexts {
     pub discuss_degraded: String,
     /// 追加在回复行末尾（该行重建后进上下文）
     pub stopped_suffix: String,
+    // —— 工具进程的收尾标记（机制侧拼进工具回执；它们随 [工具结果] 进模型上下文）——
+    /// 工具进程 stderr 段的头。
+    pub tool_stderr_header: String,
+    /// 超时被杀（连同它拉起的整棵进程树）。
+    pub tool_timeout: String,
+    /// 围栏没装上（命令未执行）。
+    pub tool_fence_failed: String,
+    /// 变量：chars, limit
+    pub tool_truncated: String,
     // —— 拟名单/推荐时给模型看的清单行 ——
     /// 变量：id, brief
     pub module_listing_line: String,
