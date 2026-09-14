@@ -2,6 +2,7 @@
 # prompts.yaml 是产品的一部分，每次运行从产品根复制；.home 与 session/logs/userdata 都是运行期状态。
 root/prompts.yaml
 root/.home
+root/modules/toolbox/module.yaml
 root/session/
 root/logs/
 root/logs/

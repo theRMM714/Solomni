@@ -80,12 +80,16 @@ pub fn env_blocks_container(err: &str) -> bool {
 }
 
 /// 本机有没有能用的 python（没有就如实跳过需要它的探针）。
+/// 平台差异如实处理：Linux / macOS 常见的是 python3，Windows 常见的是 python。
 pub fn python_command(script: &str) -> Option<String> {
-    let probe = Command::new("python").arg("-c").arg("print(1)").output();
-    match probe {
-        Ok(o) if o.status.success() => Some(format!("python -c \"{}\"", script)),
-        _ => None,
+    for name in ["python", "python3"] {
+        if let Ok(o) = Command::new(name).arg("-c").arg("print(1)").output() {
+            if o.status.success() {
+                return Some(format!("{} -c \"{}\"", name, script));
+            }
+        }
     }
+    None
 }
 
 /// 等一会儿（探针里等子进程写文件用）。
