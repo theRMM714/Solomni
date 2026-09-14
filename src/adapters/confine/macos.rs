@@ -50,18 +50,11 @@ pub fn run_fenced(spec: &FenceSpec, command: &str) -> i32 {
     }
     let mut cmd = shell_command(command);
     cmd.current_dir(&spec.cwd);
-    // 父进程（守门进程）一死，工具进程跟着死——不留孤儿。
-    unsafe {
-        cmd.pre_exec(|| {
-            libc::prctl(
-                libc::PR_SET_PDEATHSIG,
-                libc::SIGKILL as libc::c_ulong,
-                0,
-                0,
-                0,
-            );
-            Ok(())
-        });
+    // 孤儿防护：macOS 没有 Linux 的 PR_SET_PDEATHSIG，改为独立进程组——
+    // 外层在超时/退出时按负 pid 杀整组（与运行期 kill_tree 同一套语义）。
+    {
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0);
     }
     match cmd.status() {
         Ok(s) => s.code().unwrap_or(FENCE_FAILED),
