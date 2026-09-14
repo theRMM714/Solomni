@@ -1,10 +1,14 @@
-# 三平台测试：GitHub 托管 runner 是一次性机器，"会改本机状态"的真机围栏测试只在这里开。
+# 三平台测试：GitHub 托管 runner 是一次性机器，「会改本机状态」的真机围栏测试只在这里开。
 # 本地默认安全模式（见 TESTING.md）：会改本机状态的测试要显式 --fence-live。
+# 失败时把报告与日志留两份：产物（供人下载）与 ci-report 分支（供没有凭据的会话直接读）。
 name: 测试
 
 on:
   push:
   pull_request:
+
+permissions:
+  contents: write # 仅用于把失败报告推到 ci-report 滚动分支
 
 jobs:
   test:
@@ -30,7 +34,7 @@ jobs:
       - name: 跑全部测试（一次性环境：允许真机围栏测试）
         run: node run-tests.js --fence-live
 
-      - name: 失败时把报告与日志带出来
+      - name: 失败时留产物（报告与日志，供人下载）
         if: failure()
         uses: actions/upload-artifact@v4
         with:
@@ -39,3 +43,7 @@ jobs:
             target/test-report.json
             target/test-logs/
           if-no-files-found: ignore
+
+      - name: 失败时发布到 ci-report 分支（供没有凭据的会话读取）
+        if: failure()
+        run: node tests/ci-publish.mjs

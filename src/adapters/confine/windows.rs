@@ -839,6 +839,36 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         assert!(outcome.is_ok(), "授权应当成功：{:?}", outcome.err());
     }
+
+    /// 撤销的真效果：授权 → 撤权 → 目标目录上不再有该容器 SID 的 ACE。
+    /// 与上一条一样只在能改 ACL 的环境里真跑（本机受限沙箱会如实跳过）。
+    #[test]
+    fn revoke_removes_the_container_ace_from_the_given_roots() {
+        if !capability().fs {
+            eprintln!("[围栏] 本机不允许改目录 ACL（{}）：撤销探针跳过", capability().note);
+            return;
+        }
+        let dir = std::env::temp_dir().join(format!("solomni-revoke-probe-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("建探针目录");
+        let spec = FenceSpec {
+            agent: "probe".to_string(),
+            rw: vec![dir.clone()],
+            cwd: dir.clone(),
+            net: false,
+        };
+        let home = dir.join("ledger");
+        let prepared = Mutex::new(std::collections::BTreeSet::new());
+        prepare_fence(&spec, "cmd", &prepared, &home).expect("授权应当成功");
+        let sid = container_sid(&container_name(&spec)).expect("派生容器 SID");
+        assert!(has_ace_for(sid, &dir), "授权后根上应当有容器 SID 的 ACE");
+        free_sid(sid);
+        release_fence_home(&spec, Some(&home)).expect("撤权应当成功");
+        let sid = container_sid(&container_name(&spec)).expect("派生容器 SID");
+        let still = has_ace_for(sid, &dir);
+        free_sid(sid);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(!still, "撤权后根上不该再有该容器 SID 的 ACE");
+    }
 }
 
 pub fn run_fenced(spec: &FenceSpec, command: &str) -> i32 {
