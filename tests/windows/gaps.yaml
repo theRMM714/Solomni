@@ -1,37 +1,13 @@
 # Windows 平台的缺口账（当前状态：条目存在 = 这条测试还没有；补上就删条目）。
-# 这三条都要求「能改本机权限」的环境：本地默认安全模式会跳过，一次性环境（CI）里用 --fence-live 真跑。
-- id: windows.container.not-verified-in-normal-shell
-  level: L3
-  why: >-
-    AppContainer 四条断言（启动 / 越界读 / 越界写 / 断网）只在受限沙箱里被「如实跳过」过；
-    本开发环境的沙箱不允许建 AppContainer profile（0x80070005），机制起不来，探针按纪律跳过了。
-  how: |
-    GitHub Actions 的 windows-latest（一次性机器）里：node run-tests.js --fence-live
-    本地要真跑则需一个能建容器 profile 的普通 shell（并接受它会留下容器 profile）。
-    预期：container_starts_and_passes_stdio_through / container_cannot_read_outside_its_roots /
-          container_cannot_write_outside_its_roots / container_has_no_network 四条全绿，且没有 [探针] 跳过行。
-  accept: 四条全绿且无 env-skip
-  blocked_by: 环境不允许（本开发环境是受限沙箱）
-- id: windows.acl-grant.not-verified
-  level: L1
-  why: >-
-    授权写入的真机验收（src/adapters/confine/windows.rs 内联的 grants_are_written_when_the_environment_allows_it）
-    在沙箱里同样跳过了；这条直接决定「容器里的工具能不能读到会话目录」。
-  how: |
-    一次性环境（CI）里：node run-tests.js --fence-live
-    预期：该测试真跑并断言成功（没有「本机不允许改目录 ACL」的跳过打印）
-  accept: 该测试真跑通过
-  blocked_by: 环境不允许（不允许改 ACL）
 - id: windows.revoke.not-verified
   level: L3
   why: >-
-    授权撤销的「真效果」没有被验过：core 侧的接线有测试钉住（删会话即请求撤销），
-    但 Windows 上按 SID 移除 ACE 是否真的清干净，需要能改 ACL 的环境才能断言。
+    授权撤销的「真效果」还没有在 CI 上验过：core 侧的接线有测试钉住（删会话即请求撤销），
+    机制侧的探针（src/adapters/confine/windows.rs 内联的
+    revoke_removes_the_container_ace_from_the_given_roots：授权 → 撤权 → 断言 ACE 消失）
+    已写好，等下一次三平台 CI 在能改 ACL 的一次性环境里真跑。
   how: |
-    在一次性环境（CI）里：node run-tests.js --fence-live ，
-    然后删掉某个会话（或跑 solomni --fence-clean），再核对：
-      icacls <该会话的模块目录> | Select-String "<该 agent 的容器 SID>"
-    预期：查不到该 SID 的 ACE。容器名 = Solomni.Agent.<fnv1a64(agent + "|" + 私有沙箱路径) 的 16 位十六进制>，
-    可用 DeriveAppContainerSidFromAppContainerName 换算成 SID。
-  accept: 删除会话或 --fence-clean 之后，目标目录上不再有该 SID 的 ACE
-  blocked_by: 环境不允许（不允许改 ACL）
+    GitHub Actions 的 windows-latest 上：node run-tests.js --fence-live
+    预期：该探针真跑通过（没有「本机不允许改目录 ACL」的跳过打印）。
+  accept: CI 的 windows-latest 任务全绿且该探针真跑通过
+  blocked_by: 无（下次 CI 即可判定）

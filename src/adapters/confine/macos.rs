@@ -96,12 +96,36 @@ fn profile_text(spec: &FenceSpec) -> String {
             out.push_str(&format!("(allow file-read* (subpath \"{}\"))\n", escape(p)));
         }
     }
+    let mut rw_paths: Vec<String> = Vec::new();
     for root in &spec.rw {
         let path = root.to_string_lossy().replace('\\', "/");
+        rw_paths.push(path.clone());
         out.push_str(&format!(
             "(allow file-read* file-write* (subpath \"{}\"))\n",
             escape(&path)
         ));
+    }
+    // 祖先目录只放行"读元数据"：路径解析要能按名穿过它们（与 Windows 的 FILE_TRAVERSE 对称），
+    // 但不能读内容——少了这条，被放行目录里的命令行都跑不起来（连路径都解析不了）。
+    let mut metas: Vec<String> = Vec::new();
+    for p in READ_ONLY_BASELINE
+        .iter()
+        .map(|s| s.to_string())
+        .chain(rw_paths.into_iter())
+    {
+        let mut cur = p.as_str();
+        while let Some(i) = cur.rfind('/') {
+            if i == 0 {
+                break;
+            }
+            cur = &cur[..i];
+            metas.push(cur.to_string());
+        }
+    }
+    metas.sort();
+    metas.dedup();
+    for m in &metas {
+        out.push_str(&format!("(allow file-read-metadata (subpath \"{}\"))\n", escape(m)));
     }
     if !spec.net {
         out.push_str("(deny network*)\n");
