@@ -1,0 +1,890 @@
+//! Windows 后端：AppContainer（文件系统与网络围栏）+ Job Object（进程树围栏）。
+//! 机制：按（agent + 私有沙箱）派生一个容器 SID → 把「可达范围」逐条授权给它
+//! （共享区与私有沙箱读写、模块目录读写、解释器安装目录只读+执行、祖先目录只允许按名穿过）
+//! → 用 STARTUPINFOEX 的 SECURITY_CAPABILITIES 启动工具（**不给任何 capability = 默认断网**）。
+//! 授权只落在用户自己拥有的目录上（不需要管理员）；撤销用同一套机制反向做。
+//! 授权与撤销由外层进程做（见 confine::prepare_fence），一次性做好并记在会话内存里；
+//! 守门进程只负责"按同一个名字派生同一个 SID 并把工具放进去"。
+//! 机制不可用时一律如实降级（stderr 说明 + 启动报告 fs/net=false），绝不假装有围栏。
+
+use super::{shell_command, Capability, FENCE_FAILED};
+use crate::core::fence::FenceSpec;
+use std::collections::BTreeSet;
+use std::ffi::c_void;
+use std::os::windows::ffi::OsStrExt;
+use std::path::{Path, PathBuf};
+use windows_sys::Win32::Foundation::{CloseHandle, LocalFree};
+use windows_sys::Win32::Security::Authorization::{
+    ConvertSidToStringSidW, ConvertStringSidToSidW, GetNamedSecurityInfoW, SetEntriesInAclW, SetNamedSecurityInfoW,
+    EXPLICIT_ACCESS_W, GRANT_ACCESS, REVOKE_ACCESS, TRUSTEE_IS_SID, TRUSTEE_IS_UNKNOWN, TRUSTEE_W,
+};
+use windows_sys::Win32::Security::Isolation::{
+    CreateAppContainerProfile, DeleteAppContainerProfile, DeriveAppContainerSidFromAppContainerName,
+};
+use windows_sys::Win32::Security::{
+    EqualSid, GetAce, GetAclInformation, ACL, ACL_SIZE_INFORMATION, CONTAINER_INHERIT_ACE,
+    DACL_SECURITY_INFORMATION, OBJECT_INHERIT_ACE, PSID, SECURITY_CAPABILITIES,
+};
+use windows_sys::Win32::System::JobObjects::{
+    AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation, SetInformationJobObject,
+    JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JOB_OBJECT_LIMIT_ACTIVE_PROCESS, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+};
+use windows_sys::Win32::System::Console::{GetStdHandle, STD_ERROR_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE};
+use windows_sys::Win32::System::Threading::{
+    CreateProcessW, DeleteProcThreadAttributeList, GetCurrentProcess, GetExitCodeProcess,
+    InitializeProcThreadAttributeList, UpdateProcThreadAttribute, WaitForSingleObject, EXTENDED_STARTUPINFO_PRESENT,
+    INFINITE, PROCESS_INFORMATION, PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES, STARTF_USESTDHANDLES, STARTUPINFOEXW,
+};
+
+/// 文件对象（SetNamedSecurityInfoW / GetNamedSecurityInfoW 的对象类型）。
+const SE_FILE_OBJECT: i32 = 1;
+/// 读写删（可达范围里的根）。
+const RIGHTS_RW: u32 = 0x4000_0000 /* GENERIC_READ */ | 0x8000_0000 /* GENERIC_WRITE */ | 0x1000_0000 /* GENERIC_EXECUTE */ | 0x0001_0000 /* DELETE */ | 0x0008_0000 /* WRITE_DAC */;
+/// 只读+执行（解释器安装目录：脚本要跑就得读得到它）。
+const RIGHTS_RO: u32 = 0x4000_0000 | 0x1000_0000;
+/// 只允许按名穿过（祖先目录：不能列目录、不能读文件）。
+const RIGHTS_TRAVERSE: u32 = 0x0010_0000 /* FILE_TRAVERSE */;
+
+/// 一次工具执行最多这么多进程（含 shell 与它拉起的子进程）。
+const MAX_PROCESSES: u32 = 32;
+
+extern "system" {
+    /// 递归给整棵树设 DACL：SDK 头文件在部分版本里标了废弃，但 advapi32 始终导出（本机已实测）。
+    fn TreeSetNamedSecurityInfoW(
+        object_name: *const u16,
+        object_type: u32,
+        security_info: u32,
+        owner: PSID,
+        group: PSID,
+        dacl: *mut ACL,
+        sacl: *mut ACL,
+        action: u32,
+        progress: *mut c_void,
+        invoke: u32,
+        args: *mut c_void,
+    ) -> u32;
+}
+
+/// TREE_SEC_INFO_SET（递归设置）。
+const TREE_SEC_INFO_SET: u32 = 1;
+/// ProgressInvokeNever（不回调进度）。
+const PROGRESS_INVOKE_NEVER: u32 = 1;
+
+pub fn capability() -> Capability {
+    match self_check() {
+        Ok(()) => Capability {
+            fs: true,
+            net: true,
+            tree: true,
+            note: "Windows：AppContainer（文件系统可达范围 + 默认断网）与 Job Object（进程树）都由内核强制".to_string(),
+        },
+        Err(e) => Capability {
+            fs: false,
+            net: false,
+            tree: true,
+            note: format!("Windows：容器围栏装不上（{}）——只有进程树围栏与环境白名单，如实降级", e),
+        },
+    }
+}
+
+/// 自检：派生 SID + 真去改一个目录的 DACL（改不动就说明本机环境不允许，如实报 fs=false）。
+fn self_check() -> Result<(), String> {
+    let sid = container_sid("Solomni.Fence.SelfCheck")?;
+    let scratch = std::env::temp_dir().join(format!("solomni-fence-selfcheck-{}", std::process::id()));
+    std::fs::create_dir_all(&scratch).map_err(|e| format!("建自检目录失败：{}", e))?;
+    let outcome = grant_one(sid, &scratch, RIGHTS_RO, false);
+    let _ = std::fs::remove_dir_all(&scratch);
+    free_sid(sid);
+    outcome.map_err(|e| format!("改不动目录 ACL：{}", e))
+}
+
+/// 容器名：只由（agent + 私有沙箱）决定，于是外层授权与守门进程能各自算出同一个 SID。
+fn container_name(spec: &FenceSpec) -> String {
+    let seed = format!("{}|{}", spec.agent, spec.private_or_cwd().to_string_lossy());
+    // FNV-1a：只为把名字收敛成定长标识（不是安全用途），避免容器名里出现路径与中文。
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in seed.as_bytes() {
+        h ^= *b as u64;
+        h = h.wrapping_mul(0x100_0000_01b3);
+    }
+    format!("Solomni.Agent.{:016x}", h)
+}
+
+/// 环境不允许容器围栏时的标记（探针据此区分"环境不允许"与"代码有问题"，不互相顶包）。
+pub const ENV_BLOCKED_MARK: &str = "容器围栏不可用（本环境不允许";
+
+/// 建（或复用）容器 profile：**必须有 profile** —— 没有 profile 的派生 SID 拿不到
+/// ALL APPLICATION PACKAGES 组，连系统目录里的 cmd.exe 都打不开（实测会报"找不到文件"）。
+/// 已存在 = 成功（同一个名字派生出的 SID 与 profile 一致，所以外层用 Derive 预授权 ACL 也有效）。
+fn ensure_profile(name: &str) -> Result<(), String> {
+    let n: Vec<u16> = std::ffi::OsStr::new(name).encode_wide().chain(std::iter::once(0)).collect();
+    let d: Vec<u16> = std::ffi::OsStr::new("Solomni 工具围栏").encode_wide().chain(std::iter::once(0)).collect();
+    let mut sid: PSID = std::ptr::null_mut();
+    let hr = unsafe {
+        CreateAppContainerProfile(n.as_ptr(), n.as_ptr(), d.as_ptr(), std::ptr::null(), 0, &mut sid)
+    };
+    // S_OK = 0；E_ALREADY_EXISTS（0x800700B7）= 已有同 profile，照用。
+    const E_ALREADY_EXISTS: i32 = 0x8007_00B7u32 as i32;
+    if hr >= 0 || hr == E_ALREADY_EXISTS {
+        if !sid.is_null() {
+            free_sid(sid);
+        }
+        return Ok(());
+    }
+    const E_ACCESSDENIED: i32 = 0x8007_0005u32 as i32;
+    if hr == E_ACCESSDENIED {
+        return Err(format!("0x{:08x}（拒绝访问：本环境不允许建 AppContainer profile）", hr as u32));
+    }
+    Err(format!("0x{:08x}", hr as u32))
+}
+
+/// 派生容器 SID（本机实测：非管理员可用）。
+fn container_sid(name: &str) -> Result<PSID, String> {
+    let wide: Vec<u16> = std::ffi::OsStr::new(name).encode_wide().chain(std::iter::once(0)).collect();
+    let mut sid: PSID = std::ptr::null_mut();
+    let rc = unsafe { DeriveAppContainerSidFromAppContainerName(wide.as_ptr(), &mut sid) };
+    if rc < 0 || sid.is_null() {
+        return Err(format!("DeriveAppContainerSidFromAppContainerName 失败（0x{:08x}）", rc));
+    }
+    Ok(sid)
+}
+
+fn free_sid(sid: PSID) {
+    unsafe {
+        LocalFree(sid as *mut c_void);
+    }
+}
+
+fn wide(path: &Path) -> Vec<u16> {
+    path.as_os_str().encode_wide().chain(std::iter::once(0)).collect()
+}
+
+/// 给一个对象授一条 ACE：目录带 (OI)(CI) 让新建的子项继承；recursive = 连已有子项一起处理。
+fn grant_one(sid: PSID, path: &Path, rights: u32, recursive: bool) -> Result<(), String> {
+    let mut old_dacl: *mut ACL = std::ptr::null_mut();
+    let mut sd: PSID = std::ptr::null_mut();
+    let w = wide(path);
+    let rc = unsafe {
+        GetNamedSecurityInfoW(
+            w.as_ptr(),
+            SE_FILE_OBJECT,
+            DACL_SECURITY_INFORMATION,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            &mut old_dacl,
+            std::ptr::null_mut(),
+            &mut sd,
+        )
+    };
+    if rc != 0 {
+        return Err(format!("读 DACL 失败（{}）：错误码 {}", path.display(), rc));
+    }
+    let ea = EXPLICIT_ACCESS_W {
+        grfAccessPermissions: rights,
+        grfAccessMode: GRANT_ACCESS,
+        grfInheritance: (OBJECT_INHERIT_ACE | CONTAINER_INHERIT_ACE) as u32,
+        Trustee: TRUSTEE_W {
+            pMultipleTrustee: std::ptr::null_mut(),
+            MultipleTrusteeOperation: 0,
+            TrusteeForm: TRUSTEE_IS_SID,
+            TrusteeType: TRUSTEE_IS_UNKNOWN,
+            ptstrName: sid as *mut u16,
+        },
+    };
+    let mut new_dacl: *mut ACL = std::ptr::null_mut();
+    let rc = unsafe { SetEntriesInAclW(1, &ea, old_dacl as *const ACL, &mut new_dacl) };
+    if rc != 0 || new_dacl.is_null() {
+        unsafe {
+            LocalFree(sd as *mut c_void);
+        }
+        return Err(format!("拼 ACL 失败（{}）：错误码 {}", path.display(), rc));
+    }
+    let rc = if recursive {
+        unsafe {
+            TreeSetNamedSecurityInfoW(
+                w.as_ptr(),
+                SE_FILE_OBJECT as u32,
+                DACL_SECURITY_INFORMATION,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                new_dacl,
+                std::ptr::null_mut(),
+                TREE_SEC_INFO_SET,
+                std::ptr::null_mut(),
+                PROGRESS_INVOKE_NEVER,
+                std::ptr::null_mut(),
+            )
+        }
+    } else {
+        unsafe {
+            SetNamedSecurityInfoW(
+                w.as_ptr(),
+                SE_FILE_OBJECT,
+                DACL_SECURITY_INFORMATION,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                new_dacl as *const ACL,
+                std::ptr::null(),
+            )
+        }
+    };
+    unsafe {
+        LocalFree(new_dacl as *mut c_void);
+        LocalFree(sd as *mut c_void);
+    }
+    if rc != 0 {
+        return Err(format!("写 DACL 失败（{}）：错误码 {}", path.display(), rc));
+    }
+    Ok(())
+}
+
+/// 把该 SID 的 ACE 从对象上撤掉（会话删除时清理用）。
+fn revoke_one(sid: PSID, path: &Path, recursive: bool) -> Result<(), String> {
+    let mut old_dacl: *mut ACL = std::ptr::null_mut();
+    let mut sd: PSID = std::ptr::null_mut();
+    let w = wide(path);
+    let rc = unsafe {
+        GetNamedSecurityInfoW(
+            w.as_ptr(),
+            SE_FILE_OBJECT,
+            DACL_SECURITY_INFORMATION,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            &mut old_dacl,
+            std::ptr::null_mut(),
+            &mut sd,
+        )
+    };
+    if rc != 0 {
+        return Err(format!("读 DACL 失败（{}）：错误码 {}", path.display(), rc));
+    }
+    let ea = EXPLICIT_ACCESS_W {
+        grfAccessPermissions: 0,
+        grfAccessMode: REVOKE_ACCESS,
+        grfInheritance: 0,
+        Trustee: TRUSTEE_W {
+            pMultipleTrustee: std::ptr::null_mut(),
+            MultipleTrusteeOperation: 0,
+            TrusteeForm: TRUSTEE_IS_SID,
+            TrusteeType: TRUSTEE_IS_UNKNOWN,
+            ptstrName: sid as *mut u16,
+        },
+    };
+    let mut new_dacl: *mut ACL = std::ptr::null_mut();
+    let rc = unsafe { SetEntriesInAclW(1, &ea, old_dacl as *const ACL, &mut new_dacl) };
+    if rc != 0 {
+        unsafe {
+            LocalFree(sd as *mut c_void);
+        }
+        return Err(format!("拼撤销后的 ACL 失败（{}）：错误码 {}", path.display(), rc));
+    }
+    let rc = if recursive {
+        unsafe {
+            TreeSetNamedSecurityInfoW(
+                w.as_ptr(),
+                SE_FILE_OBJECT as u32,
+                DACL_SECURITY_INFORMATION,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                new_dacl,
+                std::ptr::null_mut(),
+                TREE_SEC_INFO_SET,
+                std::ptr::null_mut(),
+                PROGRESS_INVOKE_NEVER,
+                std::ptr::null_mut(),
+            )
+        }
+    } else {
+        unsafe {
+            SetNamedSecurityInfoW(
+                w.as_ptr(),
+                SE_FILE_OBJECT,
+                DACL_SECURITY_INFORMATION,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                new_dacl as *const ACL,
+                std::ptr::null(),
+            )
+        }
+    };
+    unsafe {
+        if !new_dacl.is_null() {
+            LocalFree(new_dacl as *mut c_void);
+        }
+        LocalFree(sd as *mut c_void);
+    }
+    if rc != 0 {
+        return Err(format!("写撤权后的 DACL 失败（{}）：错误码 {}", path.display(), rc));
+    }
+    Ok(())
+}
+
+/// 祖先目录（不含自己）：容器进程要按名穿过它们才能到达允许的根，所以只授 FILE_TRAVERSE。
+fn ancestors(path: &Path) -> Vec<PathBuf> {
+    let mut out: Vec<PathBuf> = Vec::new();
+    let mut cur = path.parent();
+    while let Some(p) = cur {
+        out.push(p.to_path_buf());
+        cur = p.parent();
+    }
+    out
+}
+
+/// 命令里可能出现的外部程序：按 PATH 解析出真实路径（解析不出的跳过，不猜）。
+/// 它们的安装目录必须给"只读+执行"，否则受限进程连解释器都起不来。
+fn interpreter_dirs(command: &str) -> Vec<PathBuf> {
+    let mut dirs: Vec<PathBuf> = Vec::new();
+    let mut candidates: Vec<String> = Vec::new();
+    for raw in command.split([' ', '\t', '&', '|', ';', '\n']) {
+        let token = raw.trim_matches(|c| c == '"' || c == '\'' || c == '(' || c == ')');
+        if token.is_empty() || token.starts_with('-') || token.starts_with('/') || token.starts_with('%') {
+            continue;
+        }
+        // 绝对路径直接算候选；否则按 PATH 找可执行文件。
+        let p = Path::new(token);
+        if p.is_absolute() {
+            if p.is_file() {
+                dirs.push(p.to_path_buf());
+            }
+            continue;
+        }
+        candidates.push(token.to_string());
+    }
+    let path_var = std::env::var_os("PATH").unwrap_or_default();
+    let exts: Vec<String> = std::env::var("PATHEXT")
+        .unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".to_string())
+        .split(';')
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .collect();
+    for name in candidates {
+        for dir in std::env::split_paths(&path_var) {
+            let mut tries: Vec<PathBuf> = vec![dir.join(&name)];
+            for e in &exts {
+                tries.push(dir.join(format!("{}{}", name, e.to_lowercase())));
+                tries.push(dir.join(format!("{}{}", name, e)));
+            }
+            if let Some(hit) = tries.into_iter().find(|p| p.is_file()) {
+                // 解释器常见布局：<root>/bin/xxx.exe（官方安装与虚拟环境）或 <root>/xxx.exe。
+                // 只授它自己的安装目录：<root>/bin 这种布局上溯一层（标准库在 <root> 里），其余用所在目录。
+                if let Some(parent) = hit.parent() {
+                    let leaf = parent.file_name().map(|s| s.to_string_lossy().to_lowercase()).unwrap_or_default();
+                    let target = if leaf == "bin" || leaf == "scripts" {
+                        parent.parent().map(|p| p.to_path_buf()).unwrap_or_else(|| parent.to_path_buf())
+                    } else {
+                        parent.to_path_buf()
+                    };
+                    dirs.push(target);
+                }
+                break;
+            }
+        }
+    }
+    dirs.sort();
+    dirs.dedup();
+    // 只留真实存在的目录。
+    dirs.into_iter().filter(|d| d.is_dir()).collect()
+}
+
+/// 外层进程调用：把围栏要用的授权一次性做好（按 (SID, 路径, 权限) 去重，不重复改 ACL）。
+/// 授权落点：共享区/私有沙箱/模块目录（读写）、解释器安装目录（只读+执行）、它们的祖先（只穿过）。
+pub fn prepare_fence(
+    spec: &FenceSpec,
+    command: &str,
+    prepared: &std::sync::Mutex<BTreeSet<String>>,
+    home: &Path,
+) -> Result<(), String> {
+    let mut result = Ok(());
+    // 这一轮真正写下去的授权（用于如实打印足迹 + 落台账，供 --fence-clean 精确回收）。
+    let mut written: Vec<(String, PathBuf, u32)> = Vec::new();
+    // 基线（解释器安装目录只读+执行；它们的祖先只穿过）→ 授给 ALL APPLICATION PACKAGES：
+    // 与 agent 无关，所以"根上已有 ACE"就直接跳过，第一次之后不再重走整棵树。
+    let base = baseline_sid()?;
+    let mut baseline: Vec<(PathBuf, u32, bool)> = Vec::new();
+    for dir in interpreter_dirs(command) {
+        baseline.push((dir, RIGHTS_RO, true));
+    }
+    // 祖先链（按名穿过）也归基线：它只与"产品装在哪儿、解释器装在哪儿"有关，与 agent 无关。
+    // 这样每来一个新 agent 都不会再往 D:\ 与产品根上多写一条 ACE（那是无界增长）。
+    let mut walk: Vec<PathBuf> = baseline.iter().map(|(p, _, _)| p.clone()).collect();
+    walk.extend(spec.rw.iter().cloned());
+    walk.push(spec.cwd.clone());
+    for root in walk {
+        if root.as_os_str().is_empty() {
+            continue;
+        }
+        for a in ancestors(&root) {
+            baseline.push((a, RIGHTS_TRAVERSE, false));
+        }
+    }
+    for (path, rights, recursive) in baseline {
+        if has_ace_for(base, &path) {
+            continue;
+        }
+        if let Err(e) = grant_one(base, &path, rights, recursive) {
+            eprintln!("[围栏] 基线授权未完成：{}", e);
+            if result.is_ok() {
+                result = Err(e);
+            }
+        } else {
+            written.push((String::from("S-1-15-2-1"), path, rights));
+        }
+    }
+    free_sid(base);
+
+    // 数据边界（会话目录、模块目录）→ 只授权**叶子本身**，授给该 agent 自己的容器 SID（互相看不见）。
+    // 祖先链由上面的基线负责，所以这一层不随会话数量增长。
+    let sid = container_sid(&container_name(spec))?;
+    let mut todo: Vec<(PathBuf, u32, bool)> = Vec::new();
+    for root in spec.rw.iter().chain(std::iter::once(&spec.cwd)) {
+        if root.as_os_str().is_empty() {
+            continue;
+        }
+        todo.push((root.clone(), RIGHTS_RW, true));
+    }
+    for (path, rights, recursive) in todo {
+        let key = format!("{:?}|{}|{}", sid, path.to_string_lossy(), rights);
+        if prepared.lock().expect("授权表锁").contains(&key) {
+            continue;
+        }
+        match grant_one(sid, &path, rights, recursive) {
+            Ok(()) => {
+                prepared.lock().expect("授权表锁").insert(key);
+                written.push((sid_to_string(sid), path.clone(), rights));
+            }
+            Err(e) => {
+                // 一个落点授不上（例如祖先里的系统目录）不整体失败：如实记下，让自检与探针去判定。
+                eprintln!("[围栏] 授权未完成：{}", e);
+                if result.is_ok() {
+                    result = Err(e);
+                }
+            }
+        }
+    }
+    let container = container_name(spec);
+    free_sid(sid);
+    if !written.is_empty() {
+        // 如实打印足迹：用户看得见到底动了哪些目录、授给了谁。
+        let list: Vec<String> = written.iter().map(|(s, p, _)| format!("{} → {}", s, p.display())).collect();
+        eprintln!("[围栏] 已写权限 {} 处：{}", written.len(), list.join("；"));
+        if let Err(e) = record_grants(home, &container, &written) {
+            eprintln!("[围栏] 授权台账落盘失败（影响 --fence-clean 的精确回收）：{}", e);
+        }
+    }
+    result
+}
+
+/// 授权台账：记下"我们给谁、在哪些路径上写了权限"，`--fence-clean` 按它精确回收。
+/// 位置：产品私有区 `.home/fence-grants.json`（数据不出工作区）。
+#[derive(serde::Serialize, serde::Deserialize, Default)]
+struct GrantRecord {
+    /// 我们创建过的容器 profile 名（清理时按名删除）。
+    #[serde(default)]
+    profiles: BTreeSet<String>,
+    /// (SID, 路径, 权限位) —— 逐条对应写下去的 ACE。
+    #[serde(default)]
+    grants: Vec<(String, String, u32)>,
+}
+
+fn record_path(home: &Path) -> PathBuf {
+    home.join("fence-grants.json")
+}
+
+fn load_record(home: &Path) -> GrantRecord {
+    std::fs::read_to_string(record_path(home))
+        .ok()
+        .and_then(|t| serde_json::from_str::<GrantRecord>(&t).ok())
+        .unwrap_or_default()
+}
+
+fn save_record(home: &Path, rec: &GrantRecord) -> Result<(), String> {
+    std::fs::create_dir_all(home).map_err(|e| format!("建私有区失败：{}", e))?;
+    let text = serde_json::to_string_pretty(rec).map_err(|e| e.to_string())?;
+    std::fs::write(record_path(home), text).map_err(|e| e.to_string())
+}
+
+fn record_grants(home: &Path, container: &str, written: &[(String, PathBuf, u32)]) -> Result<(), String> {
+    let mut rec = load_record(home);
+    rec.profiles.insert(container.to_string());
+    for (sid, path, rights) in written {
+        let entry = (sid.clone(), path.to_string_lossy().into_owned(), *rights);
+        if !rec.grants.contains(&entry) {
+            rec.grants.push(entry);
+        }
+    }
+    save_record(home, &rec)
+}
+
+/// SID → 字符串（写台账用）。
+fn sid_to_string(sid: PSID) -> String {
+    let mut out: *mut u16 = std::ptr::null_mut();
+    if unsafe { ConvertSidToStringSidW(sid, &mut out) } == 0 || out.is_null() {
+        return "(未知 SID)".to_string();
+    }
+    let mut buf: Vec<u16> = Vec::new();
+    unsafe {
+        let mut i = 0isize;
+        loop {
+            let c = *out.offset(i);
+            if c == 0 {
+                break;
+            }
+            buf.push(c);
+            i += 1;
+        }
+        LocalFree(out as *mut c_void);
+    }
+    String::from_utf16_lossy(&buf)
+}
+
+/// 字符串 → SID（清理时按台账里的字符串还原）。
+fn sid_from_string(text: &str) -> Result<PSID, String> {
+    let w: Vec<u16> = std::ffi::OsStr::new(text).encode_wide().chain(std::iter::once(0)).collect();
+    let mut sid: PSID = std::ptr::null_mut();
+    if unsafe { ConvertStringSidToSidW(w.as_ptr(), &mut sid) } == 0 || sid.is_null() {
+        return Err(format!("SID 不合法：{}", text));
+    }
+    Ok(sid)
+}
+
+/// 精确回收：按台账把我们写过的 ACE 逐条撤掉，并删掉我们建过的容器 profile。
+/// 返回给用户看的一句话（清理了几条、删了几个 profile）。
+pub fn clean(home: &Path) -> Result<String, String> {
+    let rec = load_record(home);
+    if rec.grants.is_empty() && rec.profiles.is_empty() {
+        return Ok("没有台账：本程序没在本机写过权限项".to_string());
+    }
+    let mut removed = 0usize;
+    for (sid_text, path, _rights) in &rec.grants {
+        let sid = match sid_from_string(sid_text) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("[围栏] {}", e);
+                continue;
+            }
+        };
+        let p = PathBuf::from(path);
+        if p.exists() {
+            match revoke_one(sid, &p, false) {
+                Ok(()) => removed += 1,
+                Err(e) => eprintln!("[围栏] 撤销未完成：{}", e),
+            }
+        }
+        free_sid(sid);
+    }
+    let mut deleted = 0usize;
+    for name in &rec.profiles {
+        let n: Vec<u16> = std::ffi::OsStr::new(name).encode_wide().chain(std::iter::once(0)).collect();
+        let hr = unsafe { DeleteAppContainerProfile(n.as_ptr()) };
+        if hr >= 0 {
+            deleted += 1;
+        }
+    }
+    let _ = std::fs::remove_file(record_path(home));
+    Ok(format!("已撤销 {} 条授权、删除 {} 个容器 profile", removed, deleted))
+}
+
+/// 撤销一次会话的授权（会话删除时经 FenceHost 端口调用）。
+/// home 为 None 时只撤权限、不动台账（无台的调用方少见；正常路径都给 home）。
+pub fn release_fence_home(spec: &FenceSpec, home: Option<&Path>) -> Result<(), String> {
+    let sid = container_sid(&container_name(spec))?;
+    let mut result = Ok(());
+    let mut paths: Vec<PathBuf> = spec.rw.clone();
+    paths.push(spec.cwd.clone());
+    paths.sort();
+    paths.dedup();
+    // 台账比对用字符串：下面 paths 会被消费掉。
+    let path_texts: Vec<String> = paths.iter().map(|p| p.to_string_lossy().into_owned()).collect();
+    for p in paths {
+        if p.as_os_str().is_empty() {
+            continue;
+        }
+        if let Err(e) = revoke_one(sid, &p, true) {
+            eprintln!("[围栏] 撤销未完成：{}", e);
+            if result.is_ok() {
+                result = Err(e);
+            }
+        }
+    }
+    let sid_text = sid_to_string(sid);
+    free_sid(sid);
+    if let Some(h) = home {
+        // 台账跟着会话一起清：撤掉的条目不留残账（账目等于"本机现在还有我们写的哪些权限"）。
+        let mut rec = load_record(h);
+        rec.grants.retain(|(s, p, _)| s != &sid_text || !path_texts.iter().any(|x| x == p));
+        if let Err(e) = save_record(h, &rec) {
+            eprintln!("[围栏] 台账更新失败：{}", e);
+        }
+    }
+    result
+}
+
+/// 兼容旧调用点：不带台账的撤销。
+pub fn release_fence(spec: &FenceSpec) -> Result<(), String> {
+    release_fence_home(spec, None)
+}
+
+/// 只读运行基线的授权对象：ALL APPLICATION PACKAGES（S-1-15-2-1）。
+/// 我们的容器令牌本来就带这个组，所以「解释器与系统只读区」这类基线只授一次、与 agent 身份无关；
+/// 每 agent 一个的容器 SID 只用来圈**数据边界**（会话目录、模块目录）。
+fn baseline_sid() -> Result<PSID, String> {
+    let s: Vec<u16> = std::ffi::OsStr::new("S-1-15-2-1").encode_wide().chain(std::iter::once(0)).collect();
+    let mut sid: PSID = std::ptr::null_mut();
+    if unsafe { ConvertStringSidToSidW(s.as_ptr(), &mut sid) } == 0 || sid.is_null() {
+        return Err("取不到 ALL APPLICATION PACKAGES 的 SID".to_string());
+    }
+    Ok(sid)
+}
+
+/// 该对象上是不是已经有给这个 SID 的允许 ACE。
+/// 用途：基线授权只以递归方式写过一次，所以**根上已有 ACE 就跳过整棵树**——否则每来一个 agent 都要重走几万文件。
+fn has_ace_for(sid: PSID, path: &Path) -> bool {
+    const ACCESS_ALLOWED_ACE_TYPE: u8 = 0;
+    const ACL_SIZE_INFORMATION_CLASS: i32 = 2;
+    let mut dacl: *mut ACL = std::ptr::null_mut();
+    let mut sd: PSID = std::ptr::null_mut();
+    let w = wide(path);
+    let rc = unsafe {
+        GetNamedSecurityInfoW(
+            w.as_ptr(),
+            SE_FILE_OBJECT,
+            DACL_SECURITY_INFORMATION,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            &mut dacl,
+            std::ptr::null_mut(),
+            &mut sd,
+        )
+    };
+    if rc != 0 || dacl.is_null() {
+        return false;
+    }
+    let mut info: ACL_SIZE_INFORMATION = unsafe { std::mem::zeroed() };
+    let ok = unsafe {
+        GetAclInformation(
+            dacl,
+            &mut info as *mut _ as *mut c_void,
+            std::mem::size_of::<ACL_SIZE_INFORMATION>() as u32,
+            ACL_SIZE_INFORMATION_CLASS,
+        )
+    };
+    let mut found = false;
+    if ok != 0 {
+        for i in 0..info.AceCount {
+            let mut ace: *mut c_void = std::ptr::null_mut();
+            if unsafe { GetAce(dacl, i, &mut ace) } == 0 || ace.is_null() {
+                continue;
+            }
+            let base = ace as *const u8;
+            // ACCESS_ALLOWED_ACE：AceType(1) + AceFlags(1) + AceSize(2) + Mask(4) → SID 从第 8 字节开始。
+            if unsafe { *base } != ACCESS_ALLOWED_ACE_TYPE {
+                continue;
+            }
+            if unsafe { EqualSid(base.add(8) as PSID, sid) } != 0 {
+                found = true;
+                break;
+            }
+        }
+    }
+    unsafe {
+        LocalFree(sd as *mut c_void);
+    }
+    found
+}
+
+/// 系统 shell 的绝对路径（容器里显式给镜像路径比让系统搜索可靠）。
+fn system_shell() -> PathBuf {
+    if let Some(root) = std::env::var_os("SystemRoot") {
+        let p = PathBuf::from(root).join("System32").join("cmd.exe");
+        if p.is_file() {
+            return p;
+        }
+    }
+    PathBuf::from("cmd.exe")
+}
+
+/// 把自己放进一个 Job Object：最后一个句柄关闭（本进程消亡，含被杀）= 整棵树立即终止。
+fn join_kill_on_close_job(max_processes: u32) -> Result<(), String> {
+    unsafe {
+        let job = CreateJobObjectW(std::ptr::null_mut(), std::ptr::null());
+        if job.is_null() {
+            return Err("CreateJobObjectW 失败".to_string());
+        }
+        let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
+        info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | JOB_OBJECT_LIMIT_ACTIVE_PROCESS;
+        info.BasicLimitInformation.ActiveProcessLimit = max_processes;
+        let ok = SetInformationJobObject(
+            job,
+            JobObjectExtendedLimitInformation,
+            &mut info as *mut _ as *mut c_void,
+            std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+        );
+        if ok == 0 {
+            return Err("SetInformationJobObject 失败".to_string());
+        }
+        if AssignProcessToJobObject(job, GetCurrentProcess()) == 0 {
+            return Err("AssignProcessToJobObject 失败".to_string());
+        }
+        // 句柄故意不关：它在守门进程存活期间一直有效（关掉就等于立刻杀自己）。
+        Ok(())
+    }
+}
+
+/// 把工具进程放进容器里跑：不给任何 capability（= 断网），stdio 用外层给的那三个句柄。
+fn run_in_container(sid: PSID, spec: &FenceSpec, command: &str) -> Result<i32, String> {
+    let mut caps = SECURITY_CAPABILITIES {
+        AppContainerSid: sid,
+        Capabilities: std::ptr::null_mut(),
+        CapabilityCount: 0,
+        Reserved: 0,
+    };
+    let mut size: usize = 0;
+    unsafe {
+        InitializeProcThreadAttributeList(std::ptr::null_mut(), 1, 0, &mut size);
+    }
+    let mut buffer: Vec<u8> = vec![0; size];
+    let list = buffer.as_mut_ptr() as *mut c_void;
+    if unsafe { InitializeProcThreadAttributeList(list, 1, 0, &mut size) } == 0 {
+        return Err("InitializeProcThreadAttributeList 失败".to_string());
+    }
+    let ok = unsafe {
+        UpdateProcThreadAttribute(
+            list,
+            0,
+            PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES as usize,
+            &mut caps as *mut _ as *mut c_void,
+            std::mem::size_of::<SECURITY_CAPABILITIES>(),
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+        )
+    };
+    if ok == 0 {
+        unsafe { DeleteProcThreadAttributeList(list) };
+        return Err("UpdateProcThreadAttribute 失败".to_string());
+    }
+    let mut si: STARTUPINFOEXW = unsafe { std::mem::zeroed() };
+    si.StartupInfo.cb = std::mem::size_of::<STARTUPINFOEXW>() as u32;
+    si.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
+    unsafe {
+        si.StartupInfo.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+        si.StartupInfo.hStdOutput = GetStdHandle(STD_OUTPUT_HANDLE);
+        si.StartupInfo.hStdError = GetStdHandle(STD_ERROR_HANDLE);
+    }
+    si.lpAttributeList = list;
+    // 命令交系统 shell 解释（与既有语义一致：命令行来自 module.yaml）。
+    // 镜像路径显式给出：容器里用 lpApplicationName 解析更稳（不给路径时搜索偶发失败）。
+    let shell_exe = system_shell();
+    let shell = format!("\"{}\" /C {}", shell_exe.display(), command);
+    let mut cmdline: Vec<u16> = std::ffi::OsStr::new(&shell).encode_wide().chain(std::iter::once(0)).collect();
+    let app = wide(&shell_exe);
+    let cwd = wide(&spec.cwd);
+    let mut pi: PROCESS_INFORMATION = unsafe { std::mem::zeroed() };
+    let created = unsafe {
+        CreateProcessW(
+            app.as_ptr(),
+            cmdline.as_mut_ptr(),
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            1,
+            EXTENDED_STARTUPINFO_PRESENT,
+            std::ptr::null(),
+            cwd.as_ptr(),
+            &mut si.StartupInfo,
+            &mut pi,
+        )
+    };
+    // 立刻取错误码：DeleteProcThreadAttributeList 会覆盖 GetLastError。
+    let err = std::io::Error::last_os_error();
+    unsafe { DeleteProcThreadAttributeList(list) };
+    if created == 0 {
+        return Err(format!("CreateProcessW 失败（{}）：{}", shell_exe.display(), err));
+    }
+    let mut code: u32 = FENCE_FAILED as u32;
+    unsafe {
+        WaitForSingleObject(pi.hProcess, INFINITE);
+        GetExitCodeProcess(pi.hProcess, &mut code);
+        CloseHandle(pi.hThread);
+        CloseHandle(pi.hProcess);
+    }
+    Ok(code as i32)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    /// 授权这条路的真机验收：真去改一个目录的 DACL。
+    /// 本机环境不允许改 ACL 时（例如被沙箱挡住）如实打印原因并跳过——不静默当作通过。
+    #[test]
+    fn grants_are_written_when_the_environment_allows_it() {
+        if !capability().fs {
+            eprintln!(
+                "[围栏] 本机不允许改目录 ACL（{}）：授权探针跳过——请在普通 shell 里重跑 cargo test 验证",
+                capability().note
+            );
+            return;
+        }
+        let dir = std::env::temp_dir().join(format!("solomni-grant-probe-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("建探针目录");
+        let spec = FenceSpec {
+            agent: "probe".to_string(),
+            rw: vec![dir.clone()],
+            cwd: dir.clone(),
+            net: false,
+        };
+        let prepared = Mutex::new(std::collections::BTreeSet::new());
+        // 台账落在探针自己的临时目录里（不碰真实 .home/）。
+        let outcome = prepare_fence(&spec, "cmd", &prepared, &dir);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(outcome.is_ok(), "授权应当成功：{:?}", outcome.err());
+    }
+}
+
+pub fn run_fenced(spec: &FenceSpec, command: &str) -> i32 {
+    if let Err(e) = join_kill_on_close_job(MAX_PROCESSES) {
+        eprintln!("[围栏] 进程树围栏安装失败：{}", e);
+    }
+    let name = container_name(spec);
+    // 容器身份先立起来（profile 是容器能读到系统目录的前提）。
+    if let Err(e) = ensure_profile(&name) {
+        eprintln!("[围栏] {}{}）：按如实降级继续执行", ENV_BLOCKED_MARK, e);
+        return match shell_command(command).current_dir(&spec.cwd).status() {
+            Ok(s) => s.code().unwrap_or(FENCE_FAILED),
+            Err(e2) => {
+                eprintln!("[围栏] 工具进程启动失败：{}", e2);
+                FENCE_FAILED
+            }
+        };
+    }
+    let sid = match container_sid(&name) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("[围栏] 容器围栏未生效（{}）：按如实降级继续执行", e);
+            return match shell_command(command).current_dir(&spec.cwd).status() {
+                Ok(s) => s.code().unwrap_or(FENCE_FAILED),
+                Err(e) => {
+                    eprintln!("[围栏] 工具进程启动失败：{}", e);
+                    FENCE_FAILED
+                }
+            };
+        }
+    };
+    let outcome = run_in_container(sid, spec, command);
+    free_sid(sid);
+    match outcome {
+        Ok(code) => code,
+        Err(e) => {
+            // 容器起不来也要如实说清，并退回普通方式执行（能力等级已在启动报告里说明）。
+            eprintln!("[围栏] 容器围栏未生效（{}）：按如实降级继续执行", e);
+            match shell_command(command).current_dir(&spec.cwd).status() {
+                Ok(s) => s.code().unwrap_or(FENCE_FAILED),
+                Err(e2) => {
+                    eprintln!("[围栏] 工具进程启动失败：{}", e2);
+                    FENCE_FAILED
+                }
+            }
+        }
+    }
+}
+

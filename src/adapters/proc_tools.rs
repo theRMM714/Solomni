@@ -1,37 +1,91 @@
-//! 工具执行适配器：把核心放行的工具命令拉起为子进程（实现 core 的 ToolRunner 端口）。
-//! 机制边界：命令行来自 module.yaml（模块作者），JSON 参数走 stdin（不进命令行，杜绝注入）；
-//! 截获 stdout/stderr、超时击杀、输出截断。
-//! 沙箱与权限分级是后置工作：当前工具进程权限等同运行产品的用户，如实告知于文档。
+//! 工具执行适配器：把核心放行的工具命令拉进围栏里跑（实现 core 的 ToolRunner 端口）。
+//! 机制边界：外层拉起**守门进程**（本程序的 --fence-run 模式）——围栏（可达范围、断网、进程树围栏、
+//! 环境白名单）由守门进程装进真正的工具进程；命令行来自 module.yaml，JSON 参数走 stdin（不进命令行，杜绝注入）；
+//! 截获 stdout/stderr、超时连根杀掉整棵树、输出截断。
 
+use crate::adapters::confine;
+use crate::core::fence::FenceSpec;
 use crate::core::ports::{ToolOutcome, ToolRunner};
-use std::process::{Command, Stdio};
+use std::path::PathBuf;
+use std::process::Stdio;
 use std::thread;
 use std::time::{Duration, Instant};
 
 pub struct ProcTools {
-    /// 单次工具执行的超时（到时击杀进程，ok = false）。
+    /// 守门进程用的可执行文件（组合根注入当前程序路径）。
+    pub exe: PathBuf,
+    /// 产品私有区（`.home/`）：围栏授权台账落在这里，供 `--fence-clean` 精确回收。
+    pub home: PathBuf,
+    /// 是否允许在本机写权限（由组合根按设置与 `SOLOMNI_FENCE_WRITE` 注入；默认否）。
+    pub write_allowed: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// 「未授权」的提示只出一次，不刷屏。
+    pub disclosed: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// 工具回执里那些收尾标记的文案（来自提示词册：它们随 [工具结果] 进模型上下文，所以不硬编码）。
+    pub texts: crate::core::prompt::ToolTexts,
+    /// 单次工具执行的超时（到时连根杀掉整棵树，ok = false）。
     pub timeout: Duration,
     /// 回传给模型/轨迹的输出上限（字符数）。
     pub max_output_chars: usize,
+    /// Windows：已经授权过的 (SID, 路径, 权限) 台账（避免每次工具调用重复改目录 ACL）。
+    #[cfg(windows)]
+    pub prepared: std::sync::Mutex<std::collections::BTreeSet<String>>,
 }
 
-impl Default for ProcTools {
-    fn default() -> ProcTools {
-        ProcTools { timeout: Duration::from_secs(30), max_output_chars: 16_000 }
+impl ProcTools {
+    /// 组合根注入：当前可执行文件（守门进程就是它自己）、提示词册里的收尾标记、产品私有区与写权限开关。
+    pub fn new(
+        exe: PathBuf,
+        texts: crate::core::prompt::ToolTexts,
+        home: PathBuf,
+        write_allowed: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    ) -> ProcTools {
+        ProcTools {
+            exe,
+            texts,
+            home,
+            write_allowed,
+            disclosed: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            timeout: Duration::from_secs(30),
+            max_output_chars: 16_000,
+            #[cfg(windows)]
+            prepared: std::sync::Mutex::new(std::collections::BTreeSet::new()),
+        }
     }
 }
 
 impl ToolRunner for ProcTools {
-    fn run(&self, root: &std::path::Path, command: &str, args_json: &str) -> ToolOutcome {
-        let mut cmd = shell_command(command);
-        cmd.current_dir(root)
+    fn run(&self, fence: &FenceSpec, command: &str, args_json: &str) -> ToolOutcome {
+        // Windows：容器围栏要先把「可达范围」授权给容器 SID。
+        // **默认不写本机任何权限项**：只有用户显式授权（设置里的 fence_write，或环境变量 SOLOMNI_FENCE_WRITE=1）才做。
+        #[cfg(windows)]
+        {
+            use std::sync::atomic::Ordering;
+            if self.write_allowed.load(Ordering::Relaxed) {
+                if let Err(e) = confine::prepare_fence(fence, command, &self.prepared, &self.home) {
+                    eprintln!("[围栏] 授权未完成（{}）：容器里的工具可能读不到工作目录", e);
+                }
+            } else if !self.disclosed.swap(true, Ordering::Relaxed) {
+                eprintln!(
+                    "[围栏] 容器围栏未启用（没有授权在本机写权限）：外部工具按无围栏执行。要启用：在设置里打开，或在 .home/settings.yaml 写 fence_write: true"
+                );
+            }
+        }
+        let mut cmd = confine::launcher(&self.exe, fence, command);
+        cmd.current_dir(&fence.cwd)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        // 文本编码统一 UTF-8：Windows 上 Python 默认按系统代码页（中文机器是 cp936/gbk）解 stdin，
-        // 会把核心写入的 UTF-8 参数解成代理转义字符（\udc9a 之类），工具一写盘就报
-        // UnicodeEncodeError（曾实际发生并导致模型反复重试）。这里给子进程强制 UTF-8。
-        cmd.env("PYTHONIOENCODING", "utf-8").env("PYTHONUTF8", "1");
+        // 环境白名单：不继承父进程环境（密钥与无关凭据不进工具进程）；HOME/TEMP 落进该 agent 的私有沙箱。
+        cmd.env_clear();
+        for (k, v) in confine::fence_env(fence) {
+            cmd.env(k, v);
+        }
+        // 独立进程组：Unix 上超时/停止能杀整棵树；Windows 侧由守门进程的 Job Object 兜住。
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            cmd.process_group(0);
+        }
         let mut child = match cmd.spawn() {
             Ok(c) => c,
             Err(e) => return ToolOutcome { ok: false, output: format!("工具进程启动失败：{}", e) },
@@ -49,7 +103,7 @@ impl ToolRunner for ProcTools {
         let out_reader = thread::spawn(move || read_to_string(&mut stdout_pipe));
         let err_reader = thread::spawn(move || read_to_string(&mut stderr_pipe));
 
-        // 轮询等待至截止；到时击杀（管道随之关闭，读线程自然结束）。
+        // 轮询等待至截止；到时连根杀掉整棵树（管道随之关闭，读线程自然结束）。
         let deadline = Instant::now() + self.timeout;
         let mut timed_out = false;
         loop {
@@ -58,8 +112,7 @@ impl ToolRunner for ProcTools {
                 Ok(None) => {
                     if Instant::now() >= deadline {
                         timed_out = true;
-                        let _ = child.kill();
-                        let _ = child.wait();
+                        kill_tree(&mut child);
                         break;
                     }
                     thread::sleep(Duration::from_millis(20));
@@ -70,37 +123,27 @@ impl ToolRunner for ProcTools {
         let _ = writer.join();
         let out = out_reader.join().unwrap_or_default();
         let err = err_reader.join().unwrap_or_default();
-        let status_ok = !timed_out && child.try_wait().ok().flatten().map(|s| s.success()).unwrap_or(false);
-
-        let mut output = out;
-        if !err.is_empty() {
-            if !output.is_empty() {
-                output.push('\n');
-            }
-            output.push_str("[stderr]\n");
-            output.push_str(&err);
-        }
-        if timed_out {
-            output.push_str("\n[超时] 工具进程被击杀");
-        }
-        let truncated = truncate_chars(&output, self.max_output_chars);
-        ToolOutcome { ok: status_ok, output: truncated }
+        let code = child.try_wait().ok().flatten().and_then(|s| s.code());
+        self.assemble(out, err, timed_out, code)
     }
 }
 
-/// 命令行交由系统 shell 解释（命令来自模块清单；模型只提供 stdin 数据）。
-#[cfg(windows)]
-fn shell_command(command: &str) -> Command {
-    let mut c = Command::new("cmd");
-    c.arg("/C").arg(command);
-    c
-}
-
-#[cfg(not(windows))]
-fn shell_command(command: &str) -> Command {
-    let mut c = Command::new("sh");
-    c.arg("-c").arg(command);
-    c
+/// 杀掉整棵进程树：工具进程 fork 出来的子孙一并收掉（不留孤儿）。
+fn kill_tree(child: &mut std::process::Child) {
+    #[cfg(unix)]
+    {
+        // 负 pid = 整个进程组（守门进程是组长，组员含 shell 与工具本身）。
+        unsafe {
+            libc::kill(-(child.id() as i32), libc::SIGKILL);
+        }
+        let _ = child.wait();
+    }
+    #[cfg(not(unix))]
+    {
+        // Windows：守门进程一死，它 Job Object 里的整棵树随之消亡（KILL_ON_JOB_CLOSE）。
+        let _ = child.kill();
+        let _ = child.wait();
+    }
 }
 
 fn read_to_string(r: &mut impl std::io::Read) -> String {
@@ -109,12 +152,108 @@ fn read_to_string(r: &mut impl std::io::Read) -> String {
     String::from_utf8_lossy(&buf).into_owned()
 }
 
-/// 按字符截断（不劈开 UTF-8），尾部如实注明。
-fn truncate_chars(s: &str, max: usize) -> String {
-    let count = s.chars().count();
-    if count <= max {
-        return s.to_string();
+impl ProcTools {
+    /// 把工具进程的原始输出与事实拼成回执：成功与否看退出码；
+    /// stderr 段头、超时、围栏没装上、截断这些**标记文案全部来自提示词册**——它们随工具结果进模型上下文。
+    fn assemble(&self, out: String, err: String, timed_out: bool, code: Option<i32>) -> ToolOutcome {
+        let mut ok = !timed_out && code == Some(0);
+        let mut output = out;
+        if !err.is_empty() {
+            if !output.is_empty() {
+                output.push('\n');
+            }
+            output.push_str(&self.texts.tool_stderr_header);
+            output.push('\n');
+            output.push_str(&err);
+        }
+        if timed_out {
+            output.push('\n');
+            output.push_str(&self.texts.tool_timeout);
+        }
+        // 围栏没装上：守门进程用固定退出码报明（命令没被执行），这里如实告诉模型。
+        if code == Some(confine::FENCE_FAILED) {
+            ok = false;
+            output.push('\n');
+            output.push_str(&self.texts.tool_fence_failed);
+        }
+        ToolOutcome { ok, output: self.truncate(&output) }
     }
-    let head: String = s.chars().take(max).collect();
-    format!("{}\n[截断] 输出共 {} 字符，仅保留前 {}", head, count, max)
+
+    /// 按字符截断（不劈开 UTF-8），尾部如实注明（文案来自提示词册）。
+    fn truncate(&self, s: &str) -> String {
+        let count = s.chars().count();
+        if count <= self.max_output_chars {
+            return s.to_string();
+        }
+        let head: String = s.chars().take(self.max_output_chars).collect();
+        let tail = self.texts.render(
+            &self.texts.tool_truncated,
+            &[("chars", count.to_string()), ("limit", self.max_output_chars.to_string())],
+        );
+        format!("{}\n{}", head, tail)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::fence::FenceSpec;
+    use std::path::PathBuf;
+
+    /// 环境白名单：父进程的无关变量（密钥之类）不进子进程；HOME / TEMP 落在该 agent 的私有沙箱里。
+    #[test]
+    fn env_whitelist_drops_foreign_vars_and_moves_home_into_the_sandbox() {
+        std::env::set_var("SOLOMNI_PROBE_SECRET", "leak-me");
+        let private = PathBuf::from("demo").join("agent-a");
+        let spec = FenceSpec {
+            agent: "a".to_string(),
+            rw: vec![PathBuf::from("demo").join("work"), private.clone()],
+            cwd: PathBuf::from("mods").join("m0"),
+            net: false,
+        };
+        let env: Vec<(String, String)> = crate::adapters::confine::fence_env(&spec)
+            .into_iter()
+            .map(|(k, v)| (k.to_string_lossy().into_owned(), v.to_string_lossy().into_owned()))
+            .collect();
+        let get = |key: &str| env.iter().find(|(k, _)| k == key).map(|(_, v)| v.clone());
+        assert!(!env.iter().any(|(_, v)| v.contains("leak-me")), "无关变量不得进子进程");
+        assert!(get("SOLOMNI_PROBE_SECRET").is_none());
+        assert_eq!(get("HOME").as_deref(), Some(private.to_string_lossy().as_ref()), "HOME 落在私有沙箱");
+        assert_eq!(get("TEMP").as_deref(), Some(private.to_string_lossy().as_ref()));
+        assert_eq!(get("PYTHONIOENCODING").as_deref(), Some("utf-8"), "编码统一 UTF-8");
+        std::env::remove_var("SOLOMNI_PROBE_SECRET");
+    }
+
+    /// 回执里的标记文案必须来自提示词册（它们随 [工具结果] 进模型上下文，所以不能在代码里另写一份）。
+    #[test]
+    fn receipt_markers_come_from_the_prompt_book() {
+        let prompts: crate::core::prompt::Prompts =
+            serde_yaml::from_str(include_str!("../../prompts.yaml")).expect("内置提示词册必须合法");
+        let texts = prompts.core.tool_texts;
+        let tools = ProcTools::new(
+            PathBuf::from("solomni"),
+            texts.clone(),
+            PathBuf::from("target").join("test-scratch"),
+            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        );
+
+        let ok = tools.assemble("正常输出".to_string(), String::new(), false, Some(0));
+        assert!(ok.ok);
+        assert_eq!(ok.output, "正常输出", "没有异常就不加任何标记");
+
+        let with_err = tools.assemble("正文".to_string(), "警告".to_string(), false, Some(0));
+        assert!(with_err.output.contains(&texts.tool_stderr_header) && with_err.output.contains("警告"));
+
+        let timed = tools.assemble(String::new(), String::new(), true, None);
+        assert!(!timed.ok);
+        assert!(timed.output.contains(&texts.tool_timeout), "{}", timed.output);
+
+        let fenced = tools.assemble(String::new(), String::new(), false, Some(confine::FENCE_FAILED));
+        assert!(!fenced.ok);
+        assert!(fenced.output.contains(&texts.tool_fence_failed), "{}", fenced.output);
+
+        let long = "字".repeat(20_000);
+        let cut = tools.assemble(long, String::new(), false, Some(0));
+        assert!(cut.output.contains("20000"), "截断要如实报字符数：{}", &cut.output[cut.output.len() - 80..]);
+    }
 }

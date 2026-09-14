@@ -48,6 +48,10 @@ pub struct MemberTools {
     pub sandbox: crate::core::workspace::Sandbox,
     /// 内置文件工具的读写端口。
     pub io: Arc<dyn crate::core::ports::SysIo + Send + Sync>,
+    /// 模块 id → 它缺的运行包能力（本档位下该模块的工具不执行；空表 = 都能执行）。
+    pub unavailable: BTreeMap<String, Vec<String>>,
+    /// 本成员工具进程的围栏（可达范围 + 断网）：策略在 core 派生，机制在 ToolRunner 适配层安装。
+    pub fence: crate::core::fence::FenceSpec,
 }
 
 /// 可用的外部工具清单：逐条列成「模块.工具」，末尾补上内置工具。
@@ -89,8 +93,20 @@ fn dispatch_external(ctx: &MemberTools, inv: &ToolInvoke) -> (String, ToolOutcom
         let why = ctx.sandbox.texts.render(&ctx.sandbox.texts.unknown_module, &[("module", module.clone())]);
         return (module.clone(), deny(ctx, why));
     };
+    // 运行包未就绪（本档位下该模块的工具不执行）：如实报缺哪个能力，让模型换工具或告诉用户。
+    if let Some(caps) = ctx.unavailable.get(&module) {
+        let why = ctx.sandbox.texts.render(
+            &ctx.sandbox.texts.module_unavailable,
+            &[
+                ("module", module.clone()),
+                ("capability", caps.join(&ctx.sandbox.texts.tool_list_separator)),
+            ],
+        );
+        return (module.clone(), deny(ctx, why));
+    }
     match mt.commands.get(&inv.name) {
-        Some(command) => (module, ctx.runner.run(&mt.root, command, &inv.args_json)),
+        // 工具进程的工作目录 = 它所属模块的根目录；围栏按该模块的根收口。
+        Some(command) => (module, ctx.runner.run(&ctx.fence.at(&mt.root), command, &inv.args_json)),
         None => {
             let why = ctx.sandbox.texts.render(
                 &ctx.sandbox.texts.module_lacks_tool,

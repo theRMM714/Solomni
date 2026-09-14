@@ -8,8 +8,11 @@ pub mod collab_state;
 pub mod engine;
 pub mod envelope;
 pub mod events;
+pub mod exec;
+pub mod fence;
 pub mod history;
 pub mod module;
+pub mod packages;
 pub mod ports;
 pub mod prompt;
 pub mod providers;
@@ -20,7 +23,8 @@ pub mod workspace;
 
 pub use events::{Live, Pending, SessionEvent};
 pub use ports::{
-    ChatGateway, HistoryStore, ModelCatalog, ModuleSource, PromptSource, SettingsStore, SysIo, ToolRunner, Workspace,
+    ChatGateway, HistoryStore, ModelCatalog, ModuleSource, PackageSource, PromptSource, SettingsStore, SysIo, ToolRunner,
+    Workspace,
 };
 
 use crate::core::collab::CollabSession;
@@ -101,6 +105,66 @@ pub struct AgentSuggestion {
     pub reuse: bool,
 }
 
+/// 运行能力报告（呈现与日志用）：声明了什么、包库里有什么、缺什么、虚拟机档的诊断。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct RuntimeReport {
+    pub tier: String,
+    /// 模块 id → 它声明的运行能力（升序）。
+    pub declared: BTreeMap<String, Vec<String>>,
+    /// 能力名 → 包库里的可用版本（升序）。
+    pub available: BTreeMap<String, Vec<String>>,
+    /// 模块 id → 包库里没有的能力（档位无关的事实）。
+    pub missing: BTreeMap<String, Vec<String>>,
+    /// 虚拟机档下不能成立的诊断；本机档为空。
+    pub diagnoses: Vec<exec::Diagnosis>,
+    /// 被拒收的模块（原因如实）。
+    pub rejected: Vec<String>,
+    /// 被拒收的运行包（原因如实）。
+    pub rejected_packages: Vec<String>,
+}
+
+/// 配置界面里的一个 agent（名字冻结时仍要显示）。
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ConfigAgent {
+    pub name: String,
+    #[serde(default)]
+    pub modules: Vec<String>,
+    #[serde(default)]
+    pub model: String,
+}
+
+/// 会话配置视图（配置界面用）：身份与冻结标记 + 可改项 + 运行能力事实。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct SessionConfig {
+    pub sid: String,
+    pub mode: String,
+    /// 会话已经开过（流水里有内容）= agent 名单与形态冻结。
+    pub started: bool,
+    pub agents: Vec<ConfigAgent>,
+    pub tier: String,
+    pub base: Option<String>,
+    pub net: bool,
+    pub pins: BTreeMap<String, String>,
+    /// 运行能力报告（模块声明 / 包库可用 / 缺包 / 虚拟机档诊断 / 拒收原因）。
+    pub runtime: RuntimeReport,
+    /// 依赖文件夹（把运行包放进这里；真实路径，给用户看）。
+    pub runtimes_dir: String,
+}
+
+/// 编辑提交（配置界面用）：改模块、模型、档位、定版与网络。
+/// 名字与形态不在这里——会话一旦开过（流水有内容）它们就冻结了。
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct SessionEdit {
+    pub agents: Vec<ConfigAgent>,
+    pub tier: String,
+    #[serde(default)]
+    pub base: Option<String>,
+    #[serde(default)]
+    pub pins: BTreeMap<String, String>,
+    #[serde(default)]
+    pub net: bool,
+}
+
 /// 会话列表视图。
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct SessionView {
@@ -148,6 +212,10 @@ pub struct Core {
     history: Arc<dyn HistoryStore + Send + Sync>,
     workspace: Arc<dyn Workspace + Send + Sync>,
     source: Arc<dyn ModuleSource + Send + Sync>,
+    /// 运行包库来源（依赖文件夹的扫描事实；校验与诊断在 core）。
+    packages: Arc<dyn PackageSource + Send + Sync>,
+    /// 围栏授权释放（会话删除时请求一次；机制在适配层）。
+    fence: Arc<dyn ports::FenceHost + Send + Sync>,
     gateway: Arc<dyn ChatGateway + Send + Sync>,
     catalog: Arc<dyn ModelCatalog + Send + Sync>,
     tools: Arc<dyn ToolRunner + Send + Sync>,
@@ -166,6 +234,8 @@ impl Core {
         history: Arc<dyn HistoryStore + Send + Sync>,
         workspace: Arc<dyn Workspace + Send + Sync>,
         source: Arc<dyn ModuleSource + Send + Sync>,
+        packages: Arc<dyn PackageSource + Send + Sync>,
+        fence: Arc<dyn ports::FenceHost + Send + Sync>,
         gateway: Arc<dyn ChatGateway + Send + Sync>,
         catalog: Arc<dyn ModelCatalog + Send + Sync>,
         tools: Arc<dyn ToolRunner + Send + Sync>,
@@ -177,7 +247,7 @@ impl Core {
         let outcome = (|| -> Result<Core, String> {
             let settings = store.load()?;
             let prompts = prompt_source.load()?;
-            Ok(Core { store, history, workspace, source, gateway, catalog, tools, io, log: log_for_core, settings, prompts, sessions: HashMap::new() })
+            Ok(Core { store, history, workspace, source, packages, fence, gateway, catalog, tools, io, log: log_for_core, settings, prompts, sessions: HashMap::new() })
         })();
         if let Err(e) = &outcome {
             log.error("core::new", &format!("装配失败：{}", e)); // 仅错误时借用，不与闭包 move 冲突
@@ -188,6 +258,160 @@ impl Core {
     /// 清单即事实：每次调用重扫（策略在 core，机制在 ModuleSource）。
     pub fn scan(&self) -> module::Roster {
         self.source.scan()
+    }
+
+    /// 运行能力报告：模块声明的能力、包库里的可用版本、缺失清单与虚拟机档诊断。
+    /// 「清单即事实」：每次调用重扫模块清单与包库；本机档不装载运行包，missing 只作事实呈现。
+    pub fn runtime_report(&self, tier: exec::Tier) -> RuntimeReport {
+        let roster = self.source.scan();
+        let lib = self.packages.scan();
+        let spec = exec::ExecSpec { tier, ..exec::ExecSpec::default() };
+        let diagnoses = if tier == exec::Tier::Vm {
+            exec::vm_diagnoses(&roster.modules, &lib, &spec)
+        } else {
+            Vec::new()
+        };
+        RuntimeReport {
+            tier: tier.as_str().to_string(),
+            declared: exec::declared(&roster.modules),
+            available: lib.capability_versions(),
+            missing: exec::absent(&roster.modules, &lib),
+            diagnoses,
+            rejected: roster.rejected.clone(),
+            rejected_packages: lib.rejected.clone(),
+        }
+    }
+
+    /// 本档位下不能执行工具的模块（模块 id → 缺的能力名）：建会话与重建时收口给工具环境。
+    fn unavailable_modules(&self, spec: &exec::ExecSpec, modules: &[Module]) -> BTreeMap<String, Vec<String>> {
+        exec::unavailable(spec, modules, &self.packages.scan())
+    }
+
+    /// 配置视图：把「能改什么、现在是什么、缺什么」如实给出（每次读取都重扫模块清单与包库）。
+    pub fn session_config(&self, sid: &str) -> Result<SessionConfig, String> {
+        let (meta, events) = self.history_open(sid)?;
+        let tier = meta.exec.tier;
+        Ok(SessionConfig {
+            sid: meta.name.clone(),
+            mode: meta.mode.clone(),
+            started: session_started(&events),
+            agents: meta
+                .agents
+                .iter()
+                .map(|a| ConfigAgent {
+                    name: a.name.clone(),
+                    modules: a.modules.clone(),
+                    model: a.model.clone().unwrap_or_default(),
+                })
+                .collect(),
+            tier: tier.as_str().to_string(),
+            base: meta.exec.base.clone(),
+            net: meta.exec.net,
+            pins: meta.exec.pins.clone(),
+            runtime: self.runtime_report(tier),
+            runtimes_dir: workspace::slash(&self.packages.dir()),
+        })
+    }
+
+    /// 编辑提交：校验 → 写回 meta.yaml（名单与选型的唯一真相）→ 追加一条旁路配置记录 → 丢掉内存会话。
+    /// 生效点：下一次访问按新配置从转录重建会话对象（所以改完不必重开会话）。
+    /// 冻结：流水里有内容（会话已经开过）时，agent 名单与形态不可改——换人请新建会话。
+    pub fn edit_session(&mut self, sid: &str, edit: SessionEdit) -> Result<(), String> {
+        let (meta, events) = self.history_open(sid)?;
+        match meta.mode.as_str() {
+            "single" | "collab" => {}
+            other => return Err(format!("未知会话形态：{}（只认 single / collab）", other)),
+        }
+        if session_started(&events) {
+            let old: Vec<String> = meta.agents.iter().map(|a| a.name.clone()).collect();
+            let new: Vec<String> = edit.agents.iter().map(|a| a.name.clone()).collect();
+            if old != new {
+                return Err("这轮会话已经开过：agent 名单与形态冻结（要换人请新建会话）".to_string());
+            }
+        }
+        // 校验：模块与模型真实存在；同一模块不得同属两个 agent（沙箱与发言归属会歧义）。
+        let roster = self.scan();
+        let mut seen: Vec<String> = Vec::new();
+        let mut metas: Vec<AgentMeta> = Vec::new();
+        for a in &edit.agents {
+            agents::validate_name(&a.name)?;
+            if a.modules.is_empty() {
+                return Err(format!("agent {} 至少要有一个模块", a.name));
+            }
+            for id in &a.modules {
+                if !roster.modules.iter().any(|m| &m.manifest.id == id) {
+                    return Err(format!("无此模块：{}", id));
+                }
+                if seen.iter().any(|x| x == id) {
+                    return Err(format!("模块 {} 被多个 agent 同时使用；同一模块只能属于一个 agent", id));
+                }
+                seen.push(id.clone());
+            }
+            if !a.model.is_empty() {
+                if !self.settings.models.contains_key(&a.model) {
+                    return Err(format!("无此模型：{}", a.model));
+                }
+                self.settings.resolve(&a.model)?;
+            }
+            metas.push(AgentMeta {
+                name: a.name.clone(),
+                transient: !self.settings.agents.contains_key(&a.name),
+                modules: a.modules.clone(),
+                model: if a.model.is_empty() { None } else { Some(a.model.clone()) },
+            });
+        }
+        if metas.is_empty() {
+            return Err("至少要有一个 agent".to_string());
+        }
+        if meta.mode == "single" && metas.len() != 1 {
+            return Err("单 agent 形态只接受一个 agent（模块数不限）".to_string());
+        }
+        // 档位：与「开始」同一把尺子——虚拟机档的选型不成立（多版本未定版 / 定版不存在 / 路径冲突）如实拒绝。
+        let tier = match edit.tier.as_str() {
+            "host" => exec::Tier::Host,
+            "vm" => exec::Tier::Vm,
+            other => return Err(format!("未知执行档位：{}（只认 host / vm）", other)),
+        };
+        let spec = exec::ExecSpec { tier, base: edit.base.clone(), pins: edit.pins.clone(), net: edit.net };
+        let session_modules: Vec<Module> = roster
+            .modules
+            .iter()
+            .filter(|m| seen.iter().any(|id| id == &m.manifest.id))
+            .cloned()
+            .collect();
+        let plan = exec::plan(&spec, &session_modules, &self.packages.scan()).map_err(|diags| exec::diagnose_text(&diags))?;
+        self.log.info("core::edit_session", &format!("sid={}；{}", sid, exec::plan_summary(&plan)));
+
+        let mut new_meta = meta.clone();
+        new_meta.modules = metas.iter().flat_map(|a| a.modules.clone()).collect();
+        new_meta.agents = metas;
+        new_meta.exec = spec;
+        self.history.save_meta(&new_meta)?;
+        self.record_config(sid, &new_meta);
+        // 内存里那份是按旧配置装的：丢掉它，下一次访问按新配置从转录重建（转录即状态，不丢内容）。
+        self.sessions.remove(sid);
+        Ok(())
+    }
+
+    /// 追加一条旁路配置记录：只作呈现与审计（不进模型上下文，回放与状态派生都跳过它）。
+    fn record_config(&self, sid: &str, meta: &SessionMeta) {
+        let ev = serde_json::json!({
+            "type": "config",
+            "ts": now_ts(),
+            "mode": meta.mode,
+            "tier": meta.exec.tier.as_str(),
+            "base": meta.exec.base,
+            "net": meta.exec.net,
+            "pins": meta.exec.pins,
+            "agents": meta.agents.iter().map(|a| serde_json::json!({
+                "name": a.name,
+                "modules": a.modules,
+                "model": a.model,
+            })).collect::<Vec<_>>(),
+        });
+        if let Err(e) = self.history.append(sid, &[ev]) {
+            self.log.warn("core::record_config", &format!("配置记录落盘失败：{}", e));
+        }
     }
 
     // ---- 登记处：供应商（密钥只在此层进出；前端只见 id 与端点） ----
@@ -469,10 +693,26 @@ impl Core {
             task: spec.task.clone(),
             ts: now_ts(),
             agents: metas.clone(),
+            exec: exec::ExecSpec { tier: self.settings.app.tier, ..exec::ExecSpec::default() },
         };
         // 工作区：work + 各 agent 沙箱（失败即失败，不假装已建）。代拟确认名单时再补建。
         self.workspace.prepare(&name, &agent_names)?;
         let sandboxes = self.sandboxes(&meta, &roster)?;
+        // 扫描事实如实埋点：本会话用到的模块里，哪些声明的运行包不在包库（缺包不等于崩溃，工具按档位不可用）。
+        let session_modules: Vec<Module> = roster
+            .modules
+            .iter()
+            .filter(|m| module_ids.iter().any(|id| id == &m.manifest.id))
+            .cloned()
+            .collect();
+        for (id, caps) in exec::absent(&session_modules, &self.packages.scan()) {
+            self.log.warn("core::create_work", &format!("模块 {} 声明的运行包不在包库：{}", id, caps.join("、")));
+        }
+        // 执行选型的完整性检查（「开始」即冻结）：虚拟机档的选型不成立（多版本未定版 / 定版不存在 /
+        // 路径冲突）如实拒绝；只是缺包的照常开始——那是该模块的工具不可用（降级而非崩溃）。装配阶段按同一份计划取包。
+        let plan = exec::plan(&meta.exec, &session_modules, &self.packages.scan())
+            .map_err(|diags| exec::diagnose_text(&diags))?;
+        self.log.info("core::create_work", &exec::plan_summary(&plan));
 
         let (session, mut events) = match spec.mode {
             // 单 agent（模块数不限）。
@@ -485,7 +725,8 @@ impl Core {
                     .filter_map(|id| roster.modules.iter().find(|m| &m.manifest.id == id).cloned())
                     .collect();
                 let channel = self.channel_of(a.model.as_deref());
-                let (s, opened) = self.build_single(a, &chosen, channel, &sb);
+                let unavailable = self.unavailable_modules(&meta.exec, &chosen);
+                let (s, opened) = self.build_single(a, &chosen, channel, &sb, unavailable, meta.exec.net);
                 (Session::Single(s), opened)
             }
             WorkMode::Collab => {
@@ -497,6 +738,8 @@ impl Core {
                     self.prompts.clone(),
                     Arc::clone(&self.tools),
                     Arc::clone(&self.io),
+                    Arc::clone(&self.packages),
+                    meta.exec.clone(),
                     metas.clone(),
                     delegate,
                     sandboxes.clone(),
@@ -599,17 +842,36 @@ impl Core {
     }
 
     /// 工具环境：内置文件工具永远可用；外部工具按模块分组放行（模块 id → 目录 + 工具表）。
-    fn tools_env(&self, modules: &[Module], sb: &workspace::Sandbox) -> engine::MemberTools {
+    /// unavailable：本档位下缺运行包、不能执行工具的模块（机制侧据此拒绝执行，并如实报缺哪个能力）。
+    /// net：会话是否放行出站网络（exec 段；默认否），随围栏交给机制层。
+    fn tools_env(
+        &self,
+        modules: &[Module],
+        sb: &workspace::Sandbox,
+        unavailable: BTreeMap<String, Vec<String>>,
+        net: bool,
+    ) -> engine::MemberTools {
         engine::MemberTools {
             modules: engine::tool_table(modules),
             runner: Arc::clone(&self.tools),
             sandbox: sb.clone(),
             io: Arc::clone(&self.io),
+            unavailable,
+            // 围栏：可达范围 + 断网 + 环境白名单的落点，全部由该 agent 的沙箱派生（机制在 adapters）。
+            fence: crate::core::fence::FenceSpec::from_sandbox(sb, net),
         }
     }
 
     /// 装配单 agent 会话（不插入会话中心；插入与落盘由 create_work 统一做）。
-    fn build_single(&self, a: &AgentMeta, modules: &[Module], channel: Option<Channel>, sb: &workspace::Sandbox) -> (session::AgentSession, Vec<SessionEvent>) {
+    fn build_single(
+        &self,
+        a: &AgentMeta,
+        modules: &[Module],
+        channel: Option<Channel>,
+        sb: &workspace::Sandbox,
+        unavailable: BTreeMap<String, Vec<String>>,
+        net: bool,
+    ) -> (session::AgentSession, Vec<SessionEvent>) {
         let (chat, note) = self.gateway.member_channel(channel.as_ref(), &a.name);
         self.log.info(
             "core::build_single",
@@ -621,7 +883,7 @@ impl Core {
             ),
         );
         let system = module::agent_system(&self.prompts, &a.name, modules, &systool::guide(&self.prompts, sb));
-        let tools = self.tools_env(modules, sb);
+        let tools = self.tools_env(modules, sb, unavailable, net);
         let roots = crate::core::refs::RefRoots { work: sb.shared.clone(), private: Some(sb.private.clone()) };
         let s = session::AgentSession::new(
             &a.name,
@@ -658,7 +920,22 @@ impl Core {
     }
 
     /// 删除会话（= 删目录）。内存中的同名会话一并移除，避免内存与磁盘不一致。
+    /// 删之前先请适配层撤销该会话各 agent 的围栏授权：痕迹与会话同生共死，不随会话数量堆积。
     pub fn history_delete(&mut self, name: &str) -> Result<bool, String> {
+        if let Ok((meta, _)) = self.history.load(name) {
+            let roster = self.source.scan();
+            match self.sandboxes(&meta, &roster) {
+                Ok(sandboxes) => {
+                    for sb in &sandboxes.list {
+                        let spec = fence::FenceSpec::from_sandbox(sb, meta.exec.net);
+                        if let Err(e) = self.fence.release(&spec) {
+                            self.log.warn("core::history_delete", &format!("撤销围栏授权未完成：{}", e));
+                        }
+                    }
+                }
+                Err(e) => self.log.warn("core::history_delete", &format!("取沙箱失败，未撤销授权：{}", e)),
+            }
+        }
         self.sessions.remove(name);
         self.history.delete(name)
     }
@@ -916,6 +1193,7 @@ impl Core {
                 self.prompts.clone(),
                 Arc::clone(&self.tools),
                 Arc::clone(&self.io),
+                Arc::clone(&self.packages),
                 meta,
                 events,
                 sandboxes,
@@ -985,7 +1263,8 @@ impl Core {
                     }
                     marks.push(history.len());
                 }
-                let tools = self.tools_env(&modules, &sb);
+                let unavailable = self.unavailable_modules(&meta.exec, &modules);
+                let tools = self.tools_env(&modules, &sb, unavailable, meta.exec.net);
                 let roots = crate::core::refs::RefRoots { work: sb.shared.clone(), private: Some(sb.private.clone()) };
                 Ok(Session::Single(session::AgentSession::restore(
                     &a.name,
@@ -1114,6 +1393,16 @@ fn find_line_id(events: &[serde_json::Value], prefix: &str) -> Option<u64> {
         }
     }
     found
+}
+
+/// 会话是否「已经开过」（流水里有内容）：agent 名单与形态据此冻结。配置记录与回档记录不算内容。
+fn session_started(events: &[serde_json::Value]) -> bool {
+    events.iter().any(|ev| match ev.get("type").and_then(|t| t.as_str()) {
+        Some("config") | Some("rewind") => false,
+        Some("transcript") => ev.get("lines").and_then(|l| l.as_array()).map(|l| !l.is_empty()).unwrap_or(false),
+        Some(_) => true,
+        None => false,
+    })
 }
 
 /// 工作形态 → 会话元信息里的标识。

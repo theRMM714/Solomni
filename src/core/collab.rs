@@ -10,7 +10,8 @@ use crate::core::envelope;
 use crate::core::events::{CheckView, LineView, Pending, SessionEvent};
 use crate::core::history::{AgentMeta, SessionMeta};
 use crate::core::module::{self, Module};
-use crate::core::ports::{ChatGateway, ModuleSource, Msg, SysIo, ToolRunner};
+use crate::core::exec::{self, ExecSpec};
+use crate::core::ports::{ChatGateway, ModuleSource, Msg, PackageSource, SysIo, ToolRunner};
 use crate::core::prompt::Prompts;
 use crate::core::providers::Settings;
 use crate::core::workspace::Sandboxes;
@@ -45,6 +46,10 @@ pub struct CollabSession {
     tools: Arc<dyn ToolRunner + Send + Sync>,
     /// 内置文件工具读写端口。
     io: Arc<dyn SysIo + Send + Sync>,
+    /// 运行包库来源（工具可用性按它判定）。
+    packages: Arc<dyn PackageSource + Send + Sync>,
+    /// 本会话的执行选型（档位 + 运行包定版）。
+    spec: ExecSpec,
     /// 本工作的沙箱清单（按 agent 实例名取）。
     sandboxes: Sandboxes,
     done: bool,
@@ -59,6 +64,8 @@ impl CollabSession {
         prompts: Prompts,
         tools: Arc<dyn ToolRunner + Send + Sync>,
         io: Arc<dyn SysIo + Send + Sync>,
+        packages: Arc<dyn PackageSource + Send + Sync>,
+        spec: ExecSpec,
         roster: Vec<AgentMeta>,
         delegated: bool,
         sandboxes: Sandboxes,
@@ -84,6 +91,8 @@ impl CollabSession {
             source,
             tools,
             io,
+            packages,
+            spec,
             sandboxes,
             done: false,
         })
@@ -325,6 +334,7 @@ impl CollabSession {
     fn assemble_members(&self) -> Result<(Vec<Member>, Vec<String>), String> {
         let prompts = self.prompts.clone();
         let roster = self.source.scan();
+        let library = self.packages.scan();
         let mut members = Vec::new();
         let mut notes = Vec::new();
         for a in &self.roster {
@@ -360,12 +370,17 @@ impl CollabSession {
             let guide = crate::core::systool::guide(&prompts, &sandbox);
             let system = module::agent_system(&prompts, &a.name, &modules, &guide);
             let mut member = Member::new(&a.name, system, chat);
+            // 围栏：可达范围 + 断网，由该 agent 的沙箱与 exec 段派生（机制在 adapters）。
+            let fence = crate::core::fence::FenceSpec::from_sandbox(&sandbox, self.spec.net);
             member.tools = Some(MemberTools {
                 // 模块 id → 该模块的（目录, 工具表）：多模块 agent 靠信封里的 module 消歧。
                 modules: crate::core::engine::tool_table(&modules),
                 runner: Arc::clone(&self.tools),
                 sandbox,
                 io: Arc::clone(&self.io),
+                // 本档位下不能执行工具的模块（缺运行包）：机制侧据此拒绝执行。
+                unavailable: exec::unavailable(&self.spec, &modules, &library),
+                fence,
             });
             members.push(member);
         }
@@ -411,6 +426,7 @@ impl CollabSession {
         prompts: Prompts,
         tools: Arc<dyn ToolRunner + Send + Sync>,
         io: Arc<dyn SysIo + Send + Sync>,
+        packages: Arc<dyn PackageSource + Send + Sync>,
         meta: &SessionMeta,
         events: &[serde_json::Value],
         sandboxes: Sandboxes,
@@ -455,6 +471,8 @@ impl CollabSession {
             source,
             tools,
             io,
+            packages,
+            spec: meta.exec.clone(),
             sandboxes,
             done: st.ended,
         };

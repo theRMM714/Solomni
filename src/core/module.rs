@@ -12,10 +12,32 @@ pub struct ModuleManifest {
     pub id: String,
     pub brief: String,
     pub system: String,
+    /// 运行能力声明：本模块的工具需要哪些运行包能力（如 python / node / bash / c-c++）。
+    /// 只声明能力名，不写版本——版本由用户在会话的执行档位里定（见 core/exec.rs 与 RUNTIME_SPEC.md）。
+    #[serde(default)]
+    pub runtimes: Vec<String>,
     /// 外部工具表：工具名 → 启动命令（模块作者声明；核心按此表放行，机制在 ToolRunner 适配层）。
     /// 内置工具名（read/write）为保留名，模块不得占用。
     #[serde(default)]
     pub tools: BTreeMap<String, String>,
+}
+
+/// 运行能力声明的校验（纯逻辑；扫描模块时由适配层调用）：非法或重复 = 拒收并说明原因，不纠正。
+pub fn check_runtimes(m: &ModuleManifest) -> Result<(), String> {
+    let mut seen: Vec<&String> = Vec::new();
+    for c in &m.runtimes {
+        if !crate::core::packages::valid_capability(c) {
+            return Err(format!(
+                "runtimes 里的能力名不合法：{}（只允许小写字母、数字、- _ .，且以字母或数字开头）",
+                c
+            ));
+        }
+        if seen.contains(&c) {
+            return Err(format!("runtimes 里重复声明了：{}", c));
+        }
+        seen.push(c);
+    }
+    Ok(())
 }
 
 /// 一个已发现的模块 = 文件夹 + 清单。

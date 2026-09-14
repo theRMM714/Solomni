@@ -33,6 +33,13 @@ pub struct AppSettings {
     /// 思维链显示：开启后每条回答下的思维链块才出现（永远默认折叠，点击展开）。
     #[serde(default = "default_true")]
     pub show_reasoning: bool,
+    /// 默认执行档位：新建会话未单独选定时用它（本机 = 在宿主上跑；虚拟机 = 整台 guest）。
+    #[serde(default)]
+    pub tier: crate::core::exec::Tier,
+    /// 是否允许工具围栏在本机写权限（Windows 上要给会话/模块目录与解释器安装目录加目录 ACL）。
+    /// 默认否：没经过用户显式授权，本程序不动本机任何权限项。
+    #[serde(default)]
+    pub fence_write: bool,
 }
 
 fn default_true() -> bool {
@@ -41,7 +48,7 @@ fn default_true() -> bool {
 
 impl Default for AppSettings {
     fn default() -> Self {
-        AppSettings { streaming: true, show_reasoning: true }
+        AppSettings { streaming: true, show_reasoning: true, tier: crate::core::exec::Tier::Host, fence_write: false }
     }
 }
 

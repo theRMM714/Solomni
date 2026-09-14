@@ -630,11 +630,13 @@ checksum = "ba467056f1b547ed52077911161fc86985becbc60e8e1857c8a144dab0def891"
 name = "solomni"
 version = "0.1.0"
 dependencies = [
+ "libc",
  "serde",
  "serde_json",
  "serde_yaml",
  "tiny_http",
  "ureq",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

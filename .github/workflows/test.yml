@@ -1,0 +1,41 @@
+# 三平台测试：GitHub 托管 runner 是一次性机器，"会改本机状态"的真机围栏测试只在这里开。
+# 本地默认安全模式（见 TESTING.md）：会改本机状态的测试要显式 --fence-live。
+name: 测试
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: 准备 Rust（runner 自带工具链，不装项目外的任何东西）
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustc --version
+          cargo --version
+
+      - name: 跑全部测试（一次性环境：允许真机围栏测试）
+        run: node run-tests.js --fence-live
+
+      - name: 失败时把报告与日志带出来
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-report-${{ matrix.os }}
+          path: |
+            target/test-report.json
+            target/test-logs/
+          if-no-files-found: ignore

@@ -37,11 +37,12 @@ presentation ──▶ core ◀── adapters
 | `SettingsStore` | 登记处持久化（providers / models / settings / agents 四个 yaml） | `YamlSettingsStore` |
 | `ModelCatalog` | 列出一条通道当前可用的模型名 | `HttpModelCatalog` |
 | `ModuleSource` | 模块清单来源（扫描 `modules/`） | `FsModules` |
+| `PackageSource` | 运行包库来源（扫描依赖文件夹 `runtimes/`） | `FsPackages` |
 | `Workspace` | 一次工作的 work 目录、各 agent 沙箱、文件清单与寻址根 | `FsWorkspace` |
 | `SysIo` | 内置文件工具的读写机制（读严格 UTF-8、非法字节如实标注；写一律 UTF-8） | `FsSysIo` |
 | `HistoryStore` | 会话历史：一个会话一个目录（meta + 事件流水） | `FsHistory` |
 | `PromptSource` | 提示词册加载（`prompts.yaml`） | `YamlPrompts` |
-| `ToolRunner` | 外部工具进程（拉起、stdin 送参、超时、截断） | `ProcTools` |
+| `ToolRunner` | 外部工具进程（围栏安装、拉起、stdin 送参、超时杀树、截断） | `ProcTools`（守门进程 = 本程序的 `--fence-run` 模式） |
 | `Log` | 运行日志（三级） | `FileLog`（测试 `NoopLog`） |
 
 新增端口前先问一句：**这是 IO 或可替换点吗**？不是就别加 trait。
@@ -71,7 +72,7 @@ presentation ──▶ core ◀── adapters
 
 ```text
 session/<工作名>/
-  meta.yaml          # 身份与选型：形态、agent 名单、模块、模型、需求
+  meta.yaml          # 身份与选型：形态、agent 名单、模块、模型、需求、执行档位（exec 段）
   transcript.jsonl   # 只追加的事件流水
   work/              # 本次工作共享区（用户投喂与成品）
   <agent实例名>/      # 该 agent 的私有沙箱
@@ -82,11 +83,21 @@ session/<工作名>/
 - **流式增量是短暂事件**：`delta` / `tool_call` 不落盘；历史只记定稿后的行。
 - **行上的判定走结构化字段**：例如「信封缺失、按发言原文收录」的降级行带 `degraded: true`，呈现层据此做样式——**不匹配行文本里的说明文案**（改文案不得影响行为）。列的语义同理（`tool` 视图、稳定 `id`）都挂在字段上。
 - `meta.yaml` 的 `agents` 是名单的**唯一真相**（代拟路径在用户确认名单那一刻写回）。
+- `meta.yaml` 的 `exec` 段是**执行选型**的唯一真相：档位（`tier` = 本机 / 虚拟机）、虚拟机基础根、能力定版（`pins`）、是否放行出站网络；
+  缺这段的旧会话按默认（本机档、不定版、不联网）读回。执行计划本身（`core/exec.rs` 的 `ExecPlan`）**从不落盘**——它含真实路径，只在运行时派生。
+- 会话的**旁路配置记录**（`{"type":"config"}`）只在编辑提交时追加：供呈现与审计，**不进模型上下文**，回放与状态派生都跳过它。
+- `core/fence.rs` 是工具进程围栏的**策略**（可达范围 = 共享区 + 自己的私有沙箱 + 自己的模块目录、断网、工作目录），
+  机制在 `adapters/confine/`：外层拉起的**守门进程**（本程序 `--fence-run` 模式）按平台把围栏装进真正的工具进程
+  ——Linux Landlock、macOS seatbelt、Windows AppContainer（先建容器 profile，再按 agent 派生容器 SID 与目录 ACL 授权，
+  不给 capability 即断网）+ Job Object（进程树）；Windows 的目录授权由外层进程一次性做好（`confine::prepare_fence`）并记在内存台账里。
+  装不上就**如实降级**（启动时自检并报告能力等级，绝不假装有）。命令行是守门进程的内部协议，模块作者与用户都不接触。
+- `core/packages.rs` 是运行包契约与包库事实（校验、去重、系统路径冲突预检、能力索引），
+  `core/exec.rs` 是执行档位与执行计划派生；两者都是纯逻辑，目录遍历在 `PackageSource` 适配层。契约见 [RUNTIME_SPEC.md](RUNTIME_SPEC.md)。
 - 内存与落盘不一致时**以流水为准**（可回放、可重建）。
 
 ## 六、可测性
 
-- 每个模块可单独 mock 测试；测试里的"组合根"就是内存适配器：`InMemorySettings` / `InMemoryHistory` / `InMemoryWorkspace` / `InMemorySysIo`、`VecSource`、`ScriptGateway`、`NoopLog`。
+- 任意环节、任意实现都可单独 mock 测试；测试里的"组合根"就是内存适配器：`InMemorySettings` / `InMemoryHistory` / `InMemoryWorkspace` / `InMemorySysIo`、`VecSource`、`ScriptGateway`、`NoopLog`。
 - core 的可测性来自端口化：断言不需要真实模型、不需要文件系统、不需要网络。
 - 纯逻辑（信封、协作状态派生、提示词渲染、路径寻址）都有独立的纯函数测试。
 
@@ -96,3 +107,5 @@ session/<工作名>/
 - **对外**（提示词、工具参数、回执、API）一律用 `/` 书写形式：Windows 的反斜杠在 JSON 字符串里是**非法转义**（`\A`、`\S` 之类），模型据此拼出的参数会直接解析失败。
 - 编码：读严格 UTF-8、非法字节如实标注（**不猜编码**）；写一律 UTF-8；为工具子进程强制 UTF-8 环境。
 - 不假设平台：不写死盘符、不假设 shell（工具命令由模块作者声明）。
+- 围栏按平台给不同机制（`adapters/confine/` 一个平台一个文件），能力等级如实上报；某平台没有接入的部分**
+  就是没有**——文档与界面都照实说，不用夸张的措辞补齐。

@@ -51,6 +51,8 @@ pub fn run(mut core: Core) -> (Core, CliExit) {
 
 fn print_roster(core: &Core) {
     let roster = core.scan();
+    // 运行能力报告与模块清单同源：按默认执行档位如实报（缺包不是崩溃，工具按档位不可用）。
+    let report = core.runtime_report(core.app_settings().tier);
     println!(
         "[发现] {}",
         if roster.modules.is_empty() {
@@ -62,8 +64,36 @@ fn print_roster(core: &Core) {
     for m in &roster.modules {
         println!("  {:<14} {}", m.manifest.id, first_line(&m.manifest.brief));
     }
-    for r in &roster.rejected {
+    for r in &report.rejected {
         println!("[拒收] {}", r);
+    }
+    for (id, caps) in &report.declared {
+        println!("  {:<14} 运行能力 {}", id, caps.join("、"));
+    }
+    if !report.available.is_empty() {
+        let lib = report
+            .available
+            .iter()
+            .map(|(id, vs)| format!("{} {}", id, vs.join("/")))
+            .collect::<Vec<_>>()
+            .join(" · ");
+        println!("[运行包] 档位 {}；包库：{}", report.tier, lib);
+    }
+    for (id, caps) in &report.missing {
+        println!("[缺运行包] 模块 {} 需要 {}；把包放进依赖文件夹 runtimes/（契约见 RUNTIME_SPEC.md）", id, caps.join("、"));
+    }
+    // 虚拟机档的诊断：缺包之外（多版本未定版 / 定版不存在 / 路径冲突）会挡住「开始」，在这里如实说明。
+    let hard: Vec<crate::core::exec::Diagnosis> = report
+        .diagnoses
+        .iter()
+        .filter(|d| !matches!(d, crate::core::exec::Diagnosis::Missing { .. }))
+        .cloned()
+        .collect();
+    if !hard.is_empty() {
+        println!("[档位诊断] {}（虚拟机档要先解决这些才能开始会话）", crate::core::exec::diagnose_text(&hard));
+    }
+    for r in &report.rejected_packages {
+        println!("[运行包拒收] {}", r);
     }
 }
 

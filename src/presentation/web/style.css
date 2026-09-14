@@ -329,15 +329,27 @@ select.field-input { cursor: pointer; }
 
 .history-list { display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
 .history-list:empty::before { content: "（还没有历史会话）"; color: var(--fg-dim); font-size: 12px; }
+/* 条目本身不是入口（点了不进会话）：进入走「打开」按钮，改动走「编辑」按钮。 */
 .history-item {
-  display: flex; align-items: center; gap: 6px; cursor: pointer;
+  display: flex; align-items: center; gap: 6px; cursor: default;
   background: var(--bg3); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px;
 }
-.history-item:hover { border-color: var(--accent); }
-.history-item .hname { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.history-item .hmode { color: var(--fg-dim); font-size: 11px; margin-left: auto; }
+.history-item:hover { border-color: var(--line); }
+.history-item .hname { flex: 1; min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.history-item .hmode { flex: none; color: var(--fg-dim); font-size: 11px; }
+.history-acts { flex: none; display: flex; gap: 4px; }
+.hbtn {
+  flex: none; font-size: 11px; line-height: 1; padding: 3px 8px;
+  background: var(--bg2); border: 1px solid var(--line); border-radius: 6px;
+  color: var(--fg); cursor: pointer;
+}
+.hbtn:hover { border-color: var(--accent); color: var(--accent); }
+.hbtn:disabled { opacity: .45; cursor: not-allowed; border-color: var(--line); color: var(--fg-dim); }
+.hbtn:disabled:hover { border-color: var(--line); color: var(--fg-dim); }
 .history-item .hdel { background: none; border: none; color: var(--fg-dim); cursor: pointer; font-size: 12px; }
 .history-item .hdel:hover { color: var(--err); }
+/* 会话历史下方的一句话说明（与侧栏其它说明同款小字） */
+.panel-note { font-size: 11px; color: var(--fg-dim); margin-top: 6px; }
 .line-act {
   margin-left: 8px; padding: 0 6px; font-size: 11px; line-height: 18px;
   background: none; border: 1px solid var(--line); border-radius: 4px;
@@ -446,3 +458,37 @@ select.field-input { cursor: pointer; }
 .agent-item .agent-badge.is-transient { border-color: var(--accent); color: var(--accent); }
 .agent-item .agent-mods { font-size: 12px; }
 .agent-item .wf-inline { flex: 0 0 auto; }
+
+/* ---- 配置视图（会话列表的「编辑」）：分区卡片 + 事实行 + 提示行 ---- */
+.cfg { display: flex; flex-direction: column; gap: 14px; }
+.cfg-sec {
+  display: flex; flex-direction: column; gap: 6px;
+  background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 10px 12px;
+}
+.cfg-sec-head { display: flex; align-items: center; gap: 8px; }
+.cfg-sec-head .cfg-sec-title { flex: 1; }
+.cfg-sec-title { font-size: 12px; color: var(--fg-dim); text-transform: uppercase; letter-spacing: 1px; }
+.cfg-sub { font-size: 12px; color: var(--fg-dim); margin-top: 4px; }
+.cfg-line { font-size: 13px; word-break: break-word; }
+.cfg-line.cfg-ok { color: var(--ok); }
+.cfg-line.cfg-bad { color: var(--err); }
+/* 依赖文件夹的真实路径：要能照着去放包，长路径允许换行、不做省略 */
+.cfg-dir {
+  font-family: ui-monospace, Consolas, "Cascadia Mono", monospace; font-size: 12px;
+  background: var(--bg2); border: 1px dashed var(--line); border-radius: 6px;
+  padding: 6px 8px; word-break: break-all; cursor: text;
+}
+.cfg-hint { font-size: 12px; color: var(--fg-dim); word-break: break-word; }
+.cfg-hint.warn { color: var(--warn); }
+.cfg-hint.err { color: var(--err); }
+/* 一个 agent 的编辑块：名字 / 模块多选 / 模型 */
+.cfg-agent {
+  display: flex; flex-direction: column; gap: 8px;
+  background: var(--bg2); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 10px;
+}
+.cfg-agent-head { font-weight: 600; font-size: 13px; }
+.cfg-agent .wf-mods { background: var(--bg3); }
+.cfg-actions { display: flex; gap: 8px; align-items: center; }
+.cfg-actions .btn { flex: none; }

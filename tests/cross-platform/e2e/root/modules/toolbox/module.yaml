@@ -1,0 +1,8 @@
+id: toolbox
+brief: e2e 夹具：声明一个外部工具，用来验证工具进程的工作目录是它自己的模块目录。
+system: >-
+  你负责读文本。工具用法（参数以 JSON 对象经信封 args 传入）：
+  - read_txt：读文本并带行号输出，参数 {"path":"…"}（相对路径以本模块目录为基准）。
+  读用户投喂的材料请优先用内置 read（路径用 agent 提示词里列出的真实根目录）。
+tools:
+  read_txt: python tools/read_txt.py

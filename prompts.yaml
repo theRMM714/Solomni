@@ -165,6 +165,7 @@ core:
     no_module_field: "工具 {{tool}} 没有指明所属模块（本 agent 有多个模块，核心不替你猜），请在信封里写 module"
     unknown_module: "本 agent 没有模块 {{module}}"
     module_lacks_tool: "模块 {{module}} 未声明工具 {{tool}}"
+    module_unavailable: "模块 {{module}} 的运行包 {{capability}} 未装载，本会话不执行它的工具；请如实告知用户，并改用其它可用工具。"
     available_wrapper: "{{why}}。可用：{{tools}}"
     # 工具循环与讨论（engine）
     tool_result_wrapper: "[工具结果] {{label}}\n{{output}}"
@@ -172,6 +173,11 @@ core:
     malformed_note: "工具信封不是合法 JSON，核心没有执行任何工具。请重新输出一个合法的信封：检查引号转义与括号配对；内容过长时分次写入，或用更短的写法。"
     discuss_degraded: "　（信封缺失，按发言收录）"
     stopped_suffix: "（已停止）"
+    # 工具进程的收尾标记：核心把它们拼进工具回执，随 [工具结果] 进模型上下文
+    tool_stderr_header: "[stderr]"
+    tool_timeout: "[超时] 工具进程与它拉起的整棵进程树已被终止"
+    tool_fence_failed: "[围栏] 工具进程没有进入围栏：命令未执行（当前能力等级见启动报告）"
+    tool_truncated: "[截断] 输出共 {{chars}} 字符，仅保留前 {{limit}}"
     # 拟名单/推荐时给模型看的清单行
     module_listing_line: "- {{id}}：{{brief}}"
     module_tools_line: "- {{id}}：{{tools}}"

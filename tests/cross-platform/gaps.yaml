@@ -1,0 +1,5 @@
+# 跨平台层的缺口账（当前状态：条目存在 = 这条测试还没有；补上就删条目）。
+#
+# 当前为空：这一层的「删会话即请求撤销授权」接线已完成，并由 src/tests.rs 的
+# deleting_a_session_asks_the_fence_to_release_its_grants 钉住。
+# 真实撤权机制（Windows 上按 SID 移除 ACE）是否生效，另记在 tests/windows/gaps.yaml。

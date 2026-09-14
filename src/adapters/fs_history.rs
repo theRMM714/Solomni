@@ -28,6 +28,13 @@ impl HistoryStore for FsHistory {
         std::fs::write(d.join("meta.yaml"), text).map_err(|e| format!("写会话元信息失败：{}", e))
     }
 
+    fn save_meta(&self, meta: &SessionMeta) -> Result<(), String> {
+        let d = self.session_dir(&meta.name);
+        std::fs::create_dir_all(&d).map_err(|e| format!("建会话目录失败：{}", e))?;
+        let text = serde_yaml::to_string(meta).map_err(|e| e.to_string())?;
+        std::fs::write(d.join("meta.yaml"), text).map_err(|e| format!("写会话元信息失败：{}", e))
+    }
+
     fn append(&self, name: &str, events: &[serde_json::Value]) -> Result<(), String> {
         let d = self.session_dir(name);
         std::fs::create_dir_all(&d).map_err(|e| e.to_string())?;

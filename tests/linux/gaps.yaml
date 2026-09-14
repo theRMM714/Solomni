@@ -1,0 +1,19 @@
+# linux 平台的缺口账（当前状态：条目存在 = 这条测试还没有；补上就删条目）。
+- id: linux.fence.never-run
+  level: L3
+  why: >-
+    Landlock 围栏与它的探针（tests/linux/probes/fence.rs）只在 Windows 开发机上写过，从未在 linux 上编译运行过——
+    换到目标平台才算验收。
+  how: |
+    在 linux（内核 5.13+）上：
+      cargo test --test linux -- --nocapture
+    预期：fence_denies_outside_paths_and_allows_the_given_roots 通过，且没有"本平台没装上围栏"的跳过打印。
+  accept: cargo test --test linux 全绿
+  blocked_by: 平台不可用（开发机是 Windows）
+- id: linux.whole-suite.never-run
+  level: L1 + L2
+  why: 整个仓库的测试从未在 linux 上跑过（只有 Windows），跨平台层与单元层都可能藏着未被发现的平台假设。
+  how: |
+    在 linux 上：cargo test（全部目标）+ node src/presentation/web/smoke.cjs
+  accept: 报告 TEST-REPORT-OK 且本条被删除
+  blocked_by: 平台不可用（开发机是 Windows）
