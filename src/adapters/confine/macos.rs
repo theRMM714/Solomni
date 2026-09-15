@@ -50,12 +50,9 @@ pub fn run_fenced(spec: &FenceSpec, command: &str) -> i32 {
     }
     let mut cmd = shell_command(command);
     cmd.current_dir(&spec.cwd);
-    // 孤儿防护：macOS 没有 Linux 的 PR_SET_PDEATHSIG，改为独立进程组——
-    // 外层在超时/退出时按负 pid 杀整组（与运行期 kill_tree 同一套语义）。
-    {
-        use std::os::unix::process::CommandExt;
-        cmd.process_group(0);
-    }
+    // 孤儿防护：**不要**给工具另起进程组。守门进程自成一组（由拉起它的一侧设置），
+    // 杀那一组 = 连根杀整棵工具树——这与 Windows 的 Job Object 是同一套语义；
+    // 另起组会让工具逃出那一组，外部杀掉守门进程后它就变成孤儿（探针会抓住这种行为）。
     match cmd.status() {
         Ok(s) => s.code().unwrap_or(FENCE_FAILED),
         Err(e) => {
