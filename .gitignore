@@ -22,6 +22,11 @@
 /.tools/
 /.home/
 
+# ---- 误入库的 npm 默认产物 ----
+# 本项目的 Node 只用于测试入口（node run-tests.js）与前端冒烟，不走 npm 包管理：根目录的 package.json
+# 是 npm init 的默认产物，与项目无关，不入库（出现过一次，这里钉住）。
+/package.json
+
 # ---- IDE / 编辑器 ----
 .idea/
 *.iml

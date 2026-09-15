@@ -105,7 +105,19 @@ pub fn run_fenced(spec: &FenceSpec, command: &str) -> i32 {
     // 杀那一组 = 连根杀整棵工具树——这与 Windows 的 Job Object 是同一套语义；
     // 另起组会让工具逃出那一组，外部杀掉守门进程后它就变成孤儿（探针会抓住这种行为）。
     match cmd.status() {
-        Ok(s) => s.code().unwrap_or(FENCE_FAILED),
+        Ok(s) => match s.code() {
+            Some(c) => c,
+            None => {
+                // 被信号结束（例如内核按围栏规则直接杀）：如实说出信号，便于定位，
+                // 否则外层只看到"命令未执行"，看不出是围栏干的还是程序自己崩的。
+                use std::os::unix::process::ExitStatusExt;
+                match s.signal() {
+                    Some(sig) => eprintln!("[围栏] 工具进程被信号结束：signal {}", sig),
+                    None => eprintln!("[围栏] 工具进程没有正常结束，也拿不到信号号"),
+                }
+                FENCE_FAILED
+            }
+        },
         Err(e) => {
             eprintln!("[围栏] 工具进程启动失败：{}", e);
             FENCE_FAILED
