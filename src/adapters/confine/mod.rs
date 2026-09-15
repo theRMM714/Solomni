@@ -115,6 +115,75 @@ pub fn release_fence(spec: &FenceSpec) -> Result<(), String> {
     }
 }
 
+/// 命令里可能出现的外部程序：按 PATH 解析出真实路径（解析不出的跳过，不猜）。
+/// 它们的**安装目录**必须放行（只读+执行），否则受限进程连解释器都起不来——Windows 的目录 ACL 与 macOS 的 seatbelt 都靠它。
+pub(crate) fn interpreter_dirs(command: &str) -> Vec<std::path::PathBuf> {
+    let mut dirs: Vec<std::path::PathBuf> = Vec::new();
+    let mut candidates: Vec<String> = Vec::new();
+    for raw in command.split([' ', '\t', '&', '|', ';', '\n']) {
+        let token = raw.trim_matches(|c| c == '"' || c == '\'' || c == '(' || c == ')');
+        if token.is_empty() || token.starts_with('-') || token.starts_with('/') || token.starts_with('%') {
+            continue;
+        }
+        let p = std::path::Path::new(token);
+        if p.is_absolute() {
+            if p.is_file() {
+                dirs.push(p.to_path_buf());
+            }
+            continue;
+        }
+        candidates.push(token.to_string());
+    }
+    let path_var = std::env::var_os("PATH").unwrap_or_default();
+    let exts: Vec<String> = std::env::var("PATHEXT")
+        .unwrap_or_else(|_| String::new())
+        .split(';')
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .collect();
+    for name in candidates {
+        for dir in std::env::split_paths(&path_var) {
+            let mut tries: Vec<std::path::PathBuf> = vec![dir.join(&name)];
+            for e in &exts {
+                tries.push(dir.join(format!("{}{}", name, e.to_lowercase())));
+                tries.push(dir.join(format!("{}{}", name, e)));
+            }
+            if let Some(hit) = tries.into_iter().find(|p| p.is_file()) {
+                // 解释器常见布局：<root>/bin/xxx（官方安装与虚拟环境）或 <root>/xxx。
+                // 只授它自己的安装目录：<root>/bin 这种布局上溯一层（标准库在 <root> 里），其余用所在目录。
+                if let Some(parent) = hit.parent() {
+                    let leaf = parent
+                        .file_name()
+                        .map(|s| s.to_string_lossy().to_lowercase())
+                        .unwrap_or_default();
+                    let target = if leaf == "bin" || leaf == "scripts" {
+                        parent.parent().map(|p| p.to_path_buf()).unwrap_or_else(|| parent.to_path_buf())
+                    } else {
+                        parent.to_path_buf()
+                    };
+                    dirs.push(target);
+                }
+                break;
+            }
+        }
+    }
+    dirs.sort();
+    dirs.dedup();
+    dirs.into_iter().filter(|d| d.is_dir()).collect()
+}
+
+/// 祖先目录（不含自己）：受限进程要按名穿过它们才能到达被放行的根
+/// （Windows 授 FILE_TRAVERSE，macOS 放行只读元数据）。
+pub(crate) fn ancestors_of(path: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let mut out: Vec<std::path::PathBuf> = Vec::new();
+    let mut cur = path.parent();
+    while let Some(p) = cur {
+        out.push(p.to_path_buf());
+        cur = p.parent();
+    }
+    out
+}
+
 /// 工具进程的启动命令：命令行由**模块作者**写在 module.yaml 里，交系统 shell 解释（与既有语义一致）。
 #[cfg(windows)]
 pub fn shell_command(command: &str) -> Command {

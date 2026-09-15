@@ -42,7 +42,7 @@ pub fn capability() -> Capability {
 }
 
 pub fn run_fenced(spec: &FenceSpec, command: &str) -> i32 {
-    match install(spec) {
+    match install(spec, command) {
         Ok(()) => {}
         Err(e) => {
             eprintln!("[围栏] 文件系统围栏未生效（{}）：按如实降级继续执行", e);
@@ -65,8 +65,8 @@ pub fn run_fenced(spec: &FenceSpec, command: &str) -> i32 {
     }
 }
 
-fn install(spec: &FenceSpec) -> Result<(), String> {
-    let profile = profile_text(spec);
+fn install(spec: &FenceSpec, command: &str) -> Result<(), String> {
+    let profile = profile_text(spec, command);
     let c = CString::new(profile).map_err(|_| "profile 文本含非法字节".to_string())?;
     let mut errbuf: *mut c_char = std::ptr::null_mut();
     let rc = unsafe { sandbox_init(c.as_ptr(), 0, &mut errbuf) };
@@ -86,15 +86,26 @@ fn install(spec: &FenceSpec) -> Result<(), String> {
 }
 
 /// 生成 seatbelt profile：默认拒绝，再逐条放行（路径按 seatbelt 的字符串转义）。
-fn profile_text(spec: &FenceSpec) -> String {
+/// 只读范围 = 系统只读基线 + **命令里解释器的安装目录**（否则工具在围栏里起不来）；
+/// 另外给所有被放行路径的祖先目录放行"只读元数据"（路径解析要能按名穿过）。
+fn profile_text(spec: &FenceSpec, command: &str) -> String {
     let mut out = String::from(
         "(version 1)\n(deny default)\n(allow process*)\n(allow sysctl-read)\n(allow mach-lookup)\n",
     );
+    let mut ro_paths: Vec<String> = Vec::new();
     for p in READ_ONLY_BASELINE {
         let path = Path::new(p);
         if path.exists() {
-            out.push_str(&format!("(allow file-read* (subpath \"{}\"))\n", escape(p)));
+            ro_paths.push(p.to_string());
         }
+    }
+    for dir in super::interpreter_dirs(command) {
+        ro_paths.push(dir.to_string_lossy().replace('\\', "/"));
+    }
+    ro_paths.sort();
+    ro_paths.dedup();
+    for p in &ro_paths {
+        out.push_str(&format!("(allow file-read* (subpath \"{}\"))\n", escape(p)));
     }
     let mut rw_paths: Vec<String> = Vec::new();
     for root in &spec.rw {
@@ -108,11 +119,7 @@ fn profile_text(spec: &FenceSpec) -> String {
     // 祖先目录只放行"读元数据"：路径解析要能按名穿过它们（与 Windows 的 FILE_TRAVERSE 对称），
     // 但不能读内容——少了这条，被放行目录里的命令行都跑不起来（连路径都解析不了）。
     let mut metas: Vec<String> = Vec::new();
-    for p in READ_ONLY_BASELINE
-        .iter()
-        .map(|s| s.to_string())
-        .chain(rw_paths.into_iter())
-    {
+    for p in ro_paths.iter().cloned().chain(rw_paths.into_iter()) {
         let mut cur = p.as_str();
         while let Some(i) = cur.rfind('/') {
             if i == 0 {

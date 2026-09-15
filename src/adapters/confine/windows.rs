@@ -319,71 +319,14 @@ fn revoke_one(sid: PSID, path: &Path, recursive: bool) -> Result<(), String> {
     Ok(())
 }
 
-/// 祖先目录（不含自己）：容器进程要按名穿过它们才能到达允许的根，所以只授 FILE_TRAVERSE。
+/// 祖先目录（不含自己）：与 macOS 的「祖先只放行元数据」是同一套语义（共用实现在 confine/mod.rs）。
 fn ancestors(path: &Path) -> Vec<PathBuf> {
-    let mut out: Vec<PathBuf> = Vec::new();
-    let mut cur = path.parent();
-    while let Some(p) = cur {
-        out.push(p.to_path_buf());
-        cur = p.parent();
-    }
-    out
+    super::ancestors_of(path)
 }
 
-/// 命令里可能出现的外部程序：按 PATH 解析出真实路径（解析不出的跳过，不猜）。
-/// 它们的安装目录必须给"只读+执行"，否则受限进程连解释器都起不来。
+/// 命令里解释器的安装目录：共用实现在 confine/mod.rs（Windows 的目录 ACL 与 macOS 的 seatbelt 同一套语义）。
 fn interpreter_dirs(command: &str) -> Vec<PathBuf> {
-    let mut dirs: Vec<PathBuf> = Vec::new();
-    let mut candidates: Vec<String> = Vec::new();
-    for raw in command.split([' ', '\t', '&', '|', ';', '\n']) {
-        let token = raw.trim_matches(|c| c == '"' || c == '\'' || c == '(' || c == ')');
-        if token.is_empty() || token.starts_with('-') || token.starts_with('/') || token.starts_with('%') {
-            continue;
-        }
-        // 绝对路径直接算候选；否则按 PATH 找可执行文件。
-        let p = Path::new(token);
-        if p.is_absolute() {
-            if p.is_file() {
-                dirs.push(p.to_path_buf());
-            }
-            continue;
-        }
-        candidates.push(token.to_string());
-    }
-    let path_var = std::env::var_os("PATH").unwrap_or_default();
-    let exts: Vec<String> = std::env::var("PATHEXT")
-        .unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".to_string())
-        .split(';')
-        .filter(|s| !s.is_empty())
-        .map(|s| s.to_string())
-        .collect();
-    for name in candidates {
-        for dir in std::env::split_paths(&path_var) {
-            let mut tries: Vec<PathBuf> = vec![dir.join(&name)];
-            for e in &exts {
-                tries.push(dir.join(format!("{}{}", name, e.to_lowercase())));
-                tries.push(dir.join(format!("{}{}", name, e)));
-            }
-            if let Some(hit) = tries.into_iter().find(|p| p.is_file()) {
-                // 解释器常见布局：<root>/bin/xxx.exe（官方安装与虚拟环境）或 <root>/xxx.exe。
-                // 只授它自己的安装目录：<root>/bin 这种布局上溯一层（标准库在 <root> 里），其余用所在目录。
-                if let Some(parent) = hit.parent() {
-                    let leaf = parent.file_name().map(|s| s.to_string_lossy().to_lowercase()).unwrap_or_default();
-                    let target = if leaf == "bin" || leaf == "scripts" {
-                        parent.parent().map(|p| p.to_path_buf()).unwrap_or_else(|| parent.to_path_buf())
-                    } else {
-                        parent.to_path_buf()
-                    };
-                    dirs.push(target);
-                }
-                break;
-            }
-        }
-    }
-    dirs.sort();
-    dirs.dedup();
-    // 只留真实存在的目录。
-    dirs.into_iter().filter(|d| d.is_dir()).collect()
+    super::interpreter_dirs(command)
 }
 
 /// 外层进程调用：把围栏要用的授权一次性做好（按 (SID, 路径, 权限) 去重，不重复改 ACL）。
