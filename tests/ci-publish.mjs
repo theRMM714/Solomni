@@ -21,13 +21,35 @@ const reportPath = path.join(ROOT, "target", "test-report.json");
 let report = null;
 if (fs.existsSync(reportPath)) report = JSON.parse(fs.readFileSync(reportPath, "utf8"));
 
+// 从一份日志里挑出"能看懂为什么失败"的证据：失败行本身 + 上下文（行号最近的几处），
+// 挑不到失败行才退回"从第一处失败标记起截尾"——免得只捞到一片 PASS。
+function evidence(text) {
+  const lines = text.split("\n");
+  const hits = [];
+  for (let i = 0; i < lines.length && hits.length < 12; i++) {
+    if (/^\s*(FAIL|FAILED)\b|panicked at|test result: FAILED|error\[E\d+\]|E2E-FAILED|assertion/i.test(lines[i])) hits.push(i);
+  }
+  if (!hits.length) {
+    const m = text.search(/test result: FAILED|panicked at|失败详情|E2E-FAILED/);
+    return m >= 0 ? text.slice(Math.max(0, m - 400), m + 3600) : "";
+  }
+  const out = [];
+  let last = -9;
+  for (const i of hits) {
+    if (i - last < 3) continue;
+    out.push(lines.slice(Math.max(0, i - 1), Math.min(lines.length, i + 3)).join("\n"));
+    last = i;
+  }
+  return out.join("\n…\n").slice(0, 4200);
+}
+
 const logDir = path.join(ROOT, "target", "test-logs");
 const failing = [];
 if (fs.existsSync(logDir)) {
   for (const f of fs.readdirSync(logDir)) {
     const t = fs.readFileSync(path.join(logDir, f), "utf8");
-    const m = t.search(/test result: FAILED|panicked at|error\[E\d+\]|失败详情|E2E-FAILED/);
-    if (m >= 0) failing.push({ name: f, text: t.slice(Math.max(0, m - 400), m + 3600) });
+    const ev = evidence(t);
+    if (ev) failing.push({ name: f, text: ev });
   }
 }
 
