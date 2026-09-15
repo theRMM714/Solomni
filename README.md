@@ -1,5 +1,20 @@
 # Solomni
 
+
+## 作者前言 / Author's Preface
+
+### 因为 AI 总结经常过于专业化、文档化，所以我会先说几条重点。 / Because AI summaries are often too specialized and documentation-like, I will first state a few key points.
+
+- 这个项目不是给 agent 附加工具或技能，而是给一个工具或技能赋予一个 agent。只需要制作成 modules。 / This project is not about attaching tools or skills to an agent; rather, it is about giving an agent to a tool or skill. You only need to build it as a module.
+- modules 不用引入核心框架的任何包、任何代码，只需要用 YAML 遵守一份契约。 / Modules do not need to import any packages or any code from the core framework; they only need to follow a contract using YAML.
+- modules 可以是 skill，可以是 MCP，可以是你手上任意语言写的任意脚本、任意工具，也可以只是一份提示词。 / Modules can be skills, MCPs, any script written in any language you have on hand, any tool, or even just a prompt.
+- 所以实际上，你的工具属于你，不属于平台；平台反过来依赖你的工具进行工作，离开了平台，你的工具不会有任何影响。 / So in reality, your tools belong to you, not to the platform. The platform, in turn, depends on your tools to work. Without the platform, your tools will not be affected in any way.
+- 你可以把任意数量的 modules 赋予任意数量的 agent，从而实现 solo 到 omni 之间的任何中间态（从 agent 到 “agent to agent”，再到 god agent），也就是这个项目的名字。 / You can assign any number of modules to any number of agents, thereby achieving any intermediate state between solo and omni (from agent to “agent to agent”, then to god agent), which is also the name of this project.
+
+### 对这个项目的想法有很多，目前重点就是这些，之后请看 AI 整理的文档。 / There are many ideas for this project. These are the current key points. For the rest, please see the document organized by AI.
+
+## 简介
+
 > 我为人人，人人为我；一即是全，全即是一。
 > *One for all, all for one; one is all, all is one.*
 
