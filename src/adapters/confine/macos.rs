@@ -131,6 +131,13 @@ fn install(spec: &FenceSpec, command: &str) -> Result<(), String> {
         return Err("本机 sandbox_init 不产生实际约束（该私有 ABI 在新版 macOS 上已失效）".to_string());
     }
     let profile = profile_text(spec, command);
+    // 规则规模如实报一行：失败时（探针/端到端日志）能据此判断"是不是规则太宽/太窄"。
+    eprintln!(
+        "[围栏] seatbelt 规则 {} 条（默认拒绝；放行只读 {} 处、读写 {} 处）",
+        profile.lines().count().saturating_sub(5),
+        spec.rw.len(),
+        spec.rw.len()
+    );
     let c = CString::new(profile).map_err(|_| "profile 文本含非法字节".to_string())?;
     let mut errbuf: *mut c_char = std::ptr::null_mut();
     let rc = unsafe { sandbox_init(c.as_ptr(), 0, &mut errbuf) };
