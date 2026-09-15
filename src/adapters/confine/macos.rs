@@ -32,13 +32,64 @@ const READ_ONLY_BASELINE: &[&str] = &[
 ];
 
 pub fn capability() -> Capability {
-    Capability {
-        fs: true,
-        net: true,
-        tree: true,
-        note: "macOS：seatbelt（sandbox_init，私有且已弃用的 ABI）强制可达范围并按档位断网"
-            .to_string(),
+    if seatbelt_confines() {
+        Capability {
+            fs: true,
+            net: true,
+            tree: true,
+            note: "macOS：seatbelt（sandbox_init，私有且已弃用的 ABI）强制可达范围并按档位断网"
+                .to_string(),
+        }
+    } else {
+        Capability {
+            fs: false,
+            net: false,
+            tree: true,
+            note: "macOS：本机 sandbox_init 不产生实际约束（该私有 ABI 在新版 macOS 上已失效）——文件系统与断网围栏如实降级，只有进程树围栏"
+                .to_string(),
+        }
     }
+}
+
+/// 自检：最小 profile `(deny default)` 装进子进程后，读金丝雀文件必须失败。
+/// 这是**唯一**能分辨「机制在本机失效」与「我们的 profile 写错」的办法：
+/// 前者如实降级，后者由探针响亮失败（见 tests/macos/probes/fence.rs）。
+fn seatbelt_confines() -> bool {
+    static EFFECTIVE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *EFFECTIVE.get_or_init(seatbelt_confines_probe)
+}
+
+fn seatbelt_confines_probe() -> bool {
+    let canary = std::env::temp_dir().join(format!("solomni-seatbelt-selfcheck-{}", std::process::id()));
+    if std::fs::write(&canary, "canary").is_err() {
+        return false;
+    }
+    let path = CString::new(canary.to_string_lossy().as_bytes()).expect("临时路径不含 NUL");
+    let profile = CString::new("(version 1)(deny default)").expect("字面量不含 NUL");
+    // 子进程退出码：0 = 读到了（没约束）、1 = 被挡住（机制有效）、2 = 装不上（无法判定）
+    let verdict = unsafe {
+        let pid = libc::fork();
+        if pid == 0 {
+            let mut err: *mut c_char = std::ptr::null_mut();
+            let rc = sandbox_init(profile.as_ptr(), 0, &mut err);
+            if rc != 0 {
+                libc::_exit(2);
+            }
+            let read = std::fs::read_to_string(path.to_string_lossy().as_ref())
+                .map(|s| s.contains("canary"))
+                .unwrap_or(false);
+            libc::_exit(if read { 0 } else { 1 });
+        }
+        let mut status: c_int = 0;
+        libc::waitpid(pid, &mut status, 0);
+        if libc::WIFEXITED(status) && libc::WEXITSTATUS(status) == 1 {
+            1
+        } else {
+            0
+        }
+    };
+    let _ = std::fs::remove_file(&canary);
+    verdict == 1
 }
 
 pub fn run_fenced(spec: &FenceSpec, command: &str) -> i32 {
@@ -63,6 +114,10 @@ pub fn run_fenced(spec: &FenceSpec, command: &str) -> i32 {
 }
 
 fn install(spec: &FenceSpec, command: &str) -> Result<(), String> {
+    // 先自检：本机 sandbox_init 是否真的产生约束。不产生就别假装装上了（探针据此如实跳过）。
+    if !seatbelt_confines() {
+        return Err("本机 sandbox_init 不产生实际约束（该私有 ABI 在新版 macOS 上已失效）".to_string());
+    }
     let profile = profile_text(spec, command);
     let c = CString::new(profile).map_err(|_| "profile 文本含非法字节".to_string())?;
     let mut errbuf: *mut c_char = std::ptr::null_mut();
