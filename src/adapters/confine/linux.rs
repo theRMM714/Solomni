@@ -142,7 +142,7 @@ pub fn capability() -> Capability {
 }
 
 pub fn run_fenced(spec: &FenceSpec, command: &str) -> i32 {
-    match install(spec) {
+    match install(spec, command) {
         Ok(()) => {}
         Err(e) => {
             // 如实降级：机制装不上就不装，但不假装装上了（启动时已报告能力等级）。
@@ -173,7 +173,7 @@ pub fn run_fenced(spec: &FenceSpec, command: &str) -> i32 {
     }
 }
 
-fn install(spec: &FenceSpec) -> Result<(), String> {
+fn install(spec: &FenceSpec, command: &str) -> Result<(), String> {
     let abi = abi_version()?;
     let attr = RulesetAttr {
         handled_access_fs: mask_for(abi, RW_ALL | RO_ALL),
@@ -197,6 +197,10 @@ fn install(spec: &FenceSpec) -> Result<(), String> {
         if path.exists() {
             add_rule(fd, path, RO_ALL)?;
         }
+    }
+    // 命令里解释器的安装目录也要只读放行：否则解释器装在 /usr 之外（pyenv、homebrew、自装）时，工具在围栏里起不来。
+    for dir in super::interpreter_dirs(command) {
+        add_rule(fd, &dir, RO_ALL)?;
     }
     // Landlock 的前置条件：不许再提权。
     if unsafe { libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) } != 0 {
