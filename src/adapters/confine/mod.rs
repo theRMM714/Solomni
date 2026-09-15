@@ -125,9 +125,11 @@ pub(crate) fn interpreter_dirs(command: &str) -> Vec<std::path::PathBuf> {
         if token.is_empty() || token.starts_with('-') || token.starts_with('/') || token.starts_with('%') {
             continue;
         }
+        // 绝对路径：只有「可执行文件」才算程序（命令里的数据文件路径不是解释器——
+        // 把它当解释器会连带把那个文件放行，等于给围栏开了个洞）。
         let p = std::path::Path::new(token);
         if p.is_absolute() {
-            if p.is_file() {
+            if p.is_file() && is_executable(p) {
                 dirs.push(p.to_path_buf());
             }
             continue;
@@ -148,7 +150,7 @@ pub(crate) fn interpreter_dirs(command: &str) -> Vec<std::path::PathBuf> {
                 tries.push(dir.join(format!("{}{}", name, e.to_lowercase())));
                 tries.push(dir.join(format!("{}{}", name, e)));
             }
-            if let Some(hit) = tries.into_iter().find(|p| p.is_file()) {
+            if let Some(hit) = tries.into_iter().find(|p| p.is_file() && is_executable(p)) {
                 // 解释器常见布局：<root>/bin/xxx（官方安装与虚拟环境）或 <root>/xxx。
                 // 只授它自己的安装目录：<root>/bin 这种布局上溯一层（标准库在 <root> 里），其余用所在目录。
                 if let Some(parent) = hit.parent() {
@@ -170,6 +172,20 @@ pub(crate) fn interpreter_dirs(command: &str) -> Vec<std::path::PathBuf> {
     dirs.sort();
     dirs.dedup();
     dirs.into_iter().filter(|d| d.is_dir()).collect()
+}
+
+/// 是不是「可执行文件」：Unix 看执行位；Windows 没有这个概念，文件存在即算（PATH 解析已按 PATHEXT 试过扩展名）。
+#[cfg(unix)]
+fn is_executable(path: &std::path::Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::metadata(path)
+        .map(|m| m.permissions().mode() & 0o111 != 0)
+        .unwrap_or(false)
+}
+
+#[cfg(not(unix))]
+fn is_executable(_path: &std::path::Path) -> bool {
+    true
 }
 
 /// 祖先目录（不含自己）：受限进程要按名穿过它们才能到达被放行的根
