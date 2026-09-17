@@ -170,8 +170,12 @@ fn install(spec: &FenceSpec, command: &str) -> Result<(), String> {
 /// 只读范围 = 系统只读基线 + **命令里解释器的安装目录**（否则工具在围栏里起不来）；
 /// 另外给所有被放行路径的祖先目录放行"只读元数据"（路径解析要能按名穿过）。
 fn profile_text(spec: &FenceSpec, command: &str) -> String {
+    // 取舍写在这里：`file-read-metadata` 全局放行（只 stat：存在性/大小/时间戳），
+    // 因为**路径解析本身**就需要它——只给祖先目录放行不够（进程解析 /Users/... 时还要读中间符号链接项），
+    // 少了它连 shell 都起不来（真机上表现为工具进程被信号 6 结束）。
+    // 内容读取（file-read-data）仍然逐条放行，越界读照样拿不到内容。
     let mut out = String::from(
-        "(version 1)\n(deny default)\n(allow process*)\n(allow sysctl-read)\n(allow mach-lookup)\n",
+        "(version 1)\n(deny default)\n(allow process*)\n(allow sysctl-read)\n(allow mach-lookup)\n(allow file-read-metadata)\n",
     );
     let mut ro_paths: Vec<String> = Vec::new();
     for p in READ_ONLY_BASELINE {
