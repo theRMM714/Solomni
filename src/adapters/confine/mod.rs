@@ -180,10 +180,15 @@ fn install_dir(bin: &std::path::Path) -> std::path::PathBuf {
         .map(|s| s.to_string_lossy().to_lowercase())
         .unwrap_or_default();
     if leaf == "bin" || leaf == "scripts" {
-        bin.parent().map(|p| p.to_path_buf()).unwrap_or_else(|| bin.to_path_buf())
-    } else {
-        bin.to_path_buf()
+        if let Some(up) = bin.parent() {
+            // 绝不把「文件系统根」当安装目录：/bin 的父目录就是 /，
+            // 上溯到根等于把整盘放行（macOS 上会直接让围栏形同虚设）。
+            if up.parent().is_some() {
+                return up.to_path_buf();
+            }
+        }
     }
+    bin.to_path_buf()
 }
 
 /// 是不是「可执行文件」：Unix 看执行位；Windows 没有这个概念，文件存在即算（PATH 解析已按 PATHEXT 试过扩展名）。
@@ -250,6 +255,44 @@ pub fn fence_env(spec: &FenceSpec) -> Vec<(OsString, OsString)> {
     out.push((OsString::from("TEMP"), home.clone().into_os_string()));
     out.push((OsString::from("TMP"), home.into_os_string()));
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 安装目录上溯**绝不能停在文件系统根**：/bin 的父目录就是 /，
+    /// 一旦返回 / 就等于把整盘放行（macOS 的 seatbelt 会因此形同虚设，真机上已抓到过一次）。
+    #[test]
+    fn install_dir_never_climbs_to_the_filesystem_root() {
+        let root = if cfg!(windows) { PathBuf::from("C:\\") } else { PathBuf::from("/") };
+        assert_eq!(install_dir(&root.join("bin")), root.join("bin"), "根下的 bin 不再上溯");
+        assert_eq!(install_dir(&root), root, "根就是根");
+        let deep = root.join("home").join("u").join(".venv").join("bin");
+        assert_eq!(install_dir(&deep), root.join("home").join("u").join(".venv"), "普通布局上溯一层");
+        let scripts = root.join("home").join("u").join("env").join("Scripts");
+        assert_eq!(install_dir(&scripts), root.join("home").join("u").join("env"), "Scripts 布局同样上溯");
+        assert_eq!(install_dir(&root.join("usr").join("local").join("bin")), root.join("usr").join("local"), "usr/local/bin 上溯到 usr/local");
+    }
+
+    /// 命令里的解释器要按 PATH 解析出真实路径，并给出它的安装目录；
+    /// 数据文件路径不算解释器（否则会把那个文件放行，等于开洞）。
+    #[test]
+    fn interpreter_dirs_resolves_programs_but_not_data_files() {
+        let cmd = if cfg!(windows) { "cmd /C echo hi" } else { "sh -c 'echo hi'" };
+        let dirs = interpreter_dirs(cmd);
+        assert!(!dirs.is_empty(), "系统 shell 应当能被解析出来：{:?}", dirs);
+        for d in &dirs {
+            assert!(d.is_dir(), "只报真实存在的目录：{:?}", d);
+            assert!(d.parent().is_some(), "绝不报文件系统根：{:?}", d);
+        }
+        // 明确的非程序路径（一个不存在的文件）不该被当成解释器。
+        let missing = if cfg!(windows) { "C:\\nope\\nope.exe" } else { "/nope/nope" };
+        assert!(
+            interpreter_dirs(&format!("cat {}", missing)).iter().all(|d| !d.ends_with("nope")),
+            "数据/缺失路径不该被当成解释器"
+        );
+    }
 }
 
 impl FenceSpec {
