@@ -4,6 +4,11 @@
 
 use crate::probe::{run_launcher, scratch, spec_json};
 
+/// 与 src/adapters/confine/macos.rs 的 PROFILE_REJECTED_MARK 一致（集成测试看不到 crate 内部）。
+/// 自检已确认本机 seatbelt 有效，却仍装不上 = 我们生成的 profile 写错了；
+/// 那种情况**必须响亮失败**，否则「绿」等于围栏根本没验收。
+const PROFILE_REJECTED_MARK: &str = "seatbelt profile 被拒绝";
+
 #[test]
 fn fence_denies_outside_paths_and_allows_the_given_roots() {
     std::env::set_var("SOLOMNI_FENCE_PROFILE", "1");
@@ -15,8 +20,19 @@ fn fence_denies_outside_paths_and_allows_the_given_roots() {
 
     // 允许的根里：写得进。
     let (code, out, err) = run_launcher(&spec, &format!("echo ok > {}", inside.join("x.txt").display()));
+    if err.contains(PROFILE_REJECTED_MARK) {
+        // 非法操作名、语法错、转义错都会走到这里：是 profile 写错，不是环境不允许。
+        panic!(
+            "本机 seatbelt 机制有效，但生成的 profile 被 sandbox_init 拒绝（profile 写错，不是环境不允许）：{}",
+            err.trim()
+        );
+    }
     if err.contains("文件系统围栏未生效") {
-        eprintln!("[探针] 本平台没装上围栏（环境不允许）：{}（不作为通过）", err.trim());
+        // 剩下的只能是「本机该私有 ABI 失效」这类环境结论：如实跳过并留痕（不算通过）。
+        eprintln!(
+            "[探针] 本机 seatbelt 不产生实际约束（环境结论，如实跳过，不作为通过）：{}",
+            err.trim()
+        );
         return;
     }
     if !inside.join("x.txt").exists() {
