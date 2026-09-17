@@ -24,6 +24,8 @@ const READ_ONLY_BASELINE: &[&str] = &[
     "/Library/Apple",
     "/private/etc",
     "/private/var/db/timezone",
+    // 动态加载器的共享缓存（现代 macOS 上在这里）。
+    "/private/var/db/dyld",
     "/dev/null",
     "/dev/zero",
     "/dev/urandom",
@@ -190,14 +192,19 @@ fn profile_text(spec: &FenceSpec, command: &str) -> String {
     ro_paths.sort();
     ro_paths.dedup();
     for p in &ro_paths {
-        out.push_str(&format!("(allow file-read* (subpath \"{}\"))\n", escape(p)));
+        // file-map-executable 是**执行**的必需项：动态加载器要把可执行文件与动态库 mmap 进内存，
+        // 只有 process* 是不够的——缺它时加载器直接 abort（真机上表现为工具进程被信号 6 结束）。
+        out.push_str(&format!(
+            "(allow file-read* file-map-executable (subpath \"{}\"))\n",
+            escape(p)
+        ));
     }
     let mut rw_paths: Vec<String> = Vec::new();
     for root in &spec.rw {
         let path = root.to_string_lossy().replace('\\', "/");
         rw_paths.push(path.clone());
         out.push_str(&format!(
-            "(allow file-read* file-write* (subpath \"{}\"))\n",
+            "(allow file-read* file-write* file-map-executable (subpath \"{}\"))\n",
             escape(&path)
         ));
     }
