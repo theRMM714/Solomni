@@ -1,13 +1,7 @@
 # Windows 平台的缺口账（当前状态：条目存在 = 这条测试还没有；补上就删条目）。
-- id: windows.revoke.not-verified
-  level: L3
-  why: >-
-    授权撤销的「真效果」还没有在 CI 上验过：core 侧的接线有测试钉住（删会话即请求撤销），
-    机制侧的探针（src/adapters/confine/windows.rs 内联的
-    revoke_removes_the_container_ace_from_the_given_roots：授权 → 撤权 → 断言 ACE 消失）
-    已写好，等下一次三平台 CI 在能改 ACL 的一次性环境里真跑。
-  how: |
-    GitHub Actions 的 windows-latest 上：node run-tests.js --fence-live
-    预期：该探针真跑通过（没有「本机不允许改目录 ACL」的跳过打印）。
-  accept: CI 的 windows-latest 任务全绿且该探针真跑通过
-  blocked_by: 无（下次 CI 即可判定）
+#
+# 当前为空：授权与撤权的真效果都已在真机验收——
+# src/adapters/confine/windows.rs 的 grants_are_written_when_the_environment_allows_it
+# 与 revoke_removes_the_container_ace_from_the_given_roots 在 windows-latest 上真跑
+# （写了真 ACE、撤权后 ACE 消失），且没有「本机不允许改目录 ACL」的跳过打印。
+# 环境性跳过会以 [探针] 进报告的 envSkips，因此"跳过"不再可能伪装成"验过"。
