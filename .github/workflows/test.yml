@@ -44,6 +44,15 @@ jobs:
             target/test-logs/
           if-no-files-found: ignore
 
+      - name: 失败时抓 macOS 沙箱拒绝记录（排障用；非 macOS 跳过）
+        if: failure() && runner.os == 'macOS'
+        run: |
+          mkdir -p target/test-logs
+          # 内核把每次沙箱拒绝写进统一日志（"Sandbox: <进程> deny(1) <操作> <路径>"）。
+          # 围栏失败时它就是"缺哪条放行"的原始证据，落进 test-logs 后随 ci-report 一起发布。
+          sudo log show --last 10m --style compact --predicate 'eventMessage CONTAINS "Sandbox"' 2>/dev/null | tail -n 200 > target/test-logs/sandbox-denials.log || true
+          echo "沙箱拒绝记录行数：$(wc -l < target/test-logs/sandbox-denials.log)"
+
       - name: 失败时发布到 ci-report 分支（供没有凭据的会话读取）
         if: failure()
         env:

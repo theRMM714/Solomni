@@ -19,7 +19,15 @@ fn fence_denies_outside_paths_and_allows_the_given_roots() {
         eprintln!("[探针] 本平台没装上围栏（环境不允许）：{}（不作为通过）", err.trim());
         return;
     }
-    assert!(inside.join("x.txt").exists(), "允许的根里应当写得进：{} / {}", out, err);
+    if !inside.join("x.txt").exists() {
+        // 只报「没写进去」太薄：再跑一条不碰文件系统的命令（shell 内建 true）做对照，
+        // 用来分辨「连 shell 都起不来」（进程/加载器层）与「只有写被挡」（路径规则层）。
+        let (tcode, tout, terr) = run_launcher(&spec, "true");
+        panic!(
+            "允许的根里应当写得进：{} / {} / [对照] true → code={:?} out={} err={}",
+            out, err, tcode, tout, terr
+        );
+    }
     assert_eq!(code, Some(0), "{} / {}", out, err);
 
     // 允许的根之外：同一个用户、同一台机器，只有围栏能挡住这一读。

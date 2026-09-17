@@ -7,7 +7,6 @@ use super::{shell_command, Capability, FENCE_FAILED};
 use crate::core::fence::FenceSpec;
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int};
-use std::os::unix::process::CommandExt;
 use std::path::Path;
 
 extern "C" {
@@ -176,8 +175,12 @@ fn profile_text(spec: &FenceSpec, command: &str) -> String {
     // 因为**路径解析本身**就需要它——只给祖先目录放行不够（进程解析 /Users/... 时还要读中间符号链接项），
     // 少了它连 shell 都起不来（真机上表现为工具进程被信号 6 结束）。
     // 内容读取（file-read-data）仍然逐条放行，越界读照样拿不到内容。
+    // 与路径无关的放行：进程/加载器起来所需的全部内核操作。只有 process* + sysctl-read + mach-lookup 时，
+    // 加载器仍会 abort（真机上表现为工具进程被信号 6 结束、子进程一个字节都不输出）；
+    // file-map-executable 必须**全局**放行——dyld 要把可执行文件与动态库 mmap 进内存，逐路径列举覆盖不全，
+    // 凡没列到的映射都直接 abort。它不构成越界读：映射仍要先拿到该路径的 file-read-data，内容读取照旧逐条放行。
     let mut out = String::from(
-        "(version 1)\n(deny default)\n(allow process*)\n(allow sysctl-read)\n(allow mach-lookup)\n(allow file-read-metadata)\n",
+        "(version 1)\n(deny default)\n(allow process*)\n(allow sysctl-read)\n(allow mach*)\n(allow ipc*)\n(allow signal)\n(allow system-socket)\n(allow system-fsctl)\n(allow system-info)\n(allow file-read-metadata)\n(allow file-read* (literal \"/\"))\n(allow file-map-executable)\n",
     );
     let mut ro_paths: Vec<String> = Vec::new();
     for p in READ_ONLY_BASELINE {
@@ -192,19 +195,14 @@ fn profile_text(spec: &FenceSpec, command: &str) -> String {
     ro_paths.sort();
     ro_paths.dedup();
     for p in &ro_paths {
-        // file-map-executable 是**执行**的必需项：动态加载器要把可执行文件与动态库 mmap 进内存，
-        // 只有 process* 是不够的——缺它时加载器直接 abort（真机上表现为工具进程被信号 6 结束）。
-        out.push_str(&format!(
-            "(allow file-read* file-map-executable (subpath \"{}\"))\n",
-            escape(p)
-        ));
+        out.push_str(&format!("(allow file-read* (subpath \"{}\"))\n", escape(p)));
     }
     let mut rw_paths: Vec<String> = Vec::new();
     for root in &spec.rw {
         let path = root.to_string_lossy().replace('\\', "/");
         rw_paths.push(path.clone());
         out.push_str(&format!(
-            "(allow file-read* file-write* file-map-executable (subpath \"{}\"))\n",
+            "(allow file-read* file-write* (subpath \"{}\"))\n",
             escape(&path)
         ));
     }
