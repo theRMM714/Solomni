@@ -138,8 +138,14 @@ fn install(spec: &FenceSpec, command: &str) -> Result<(), String> {
         spec.rw.len(),
         spec.rw.len()
     );
-    // 排障开关：把完整 profile 打出来（探针打开它；正常运行不打，免得污染工具回执）。
+    // 排障开关：把解释器解析结果与完整 profile 打出来（探针打开它；正常运行不打，免得污染工具回执）。
     if std::env::var("SOLOMNI_FENCE_PROFILE").is_ok() {
+        let dirs: Vec<String> = super::interpreter_dirs(command)
+            .iter()
+            .map(|d| d.display().to_string())
+            .collect();
+        eprintln!("[围栏] 命令：{}", command);
+        eprintln!("[围栏] 解析出的解释器目录：{:?}", dirs);
         eprintln!("[围栏] seatbelt profile：\n{}", profile);
     }
     let c = CString::new(profile).map_err(|_| "profile 文本含非法字节".to_string())?;
