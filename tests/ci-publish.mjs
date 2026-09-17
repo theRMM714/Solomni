@@ -1,7 +1,8 @@
-// CI 失败时的自助发布，两条通道都需要零人工介入：
-// ① GitHub Actions 注释（::error::）：匿名可读，不依赖任何额外权限；每个失败日志一条，都带断言原文与在场证据。
+// CI 每次结束时的自助发布（成败都发），两条通道都需要零人工介入：
+// ① GitHub Actions 注释：失败时逐条 ::error::（带断言原文与在场证据），通过时一条 ::notice:: 概览；
+//    匿名可读，不依赖任何额外权限。
 // ② Contents API 写进 ci-report 滚动分支：同一路径每次覆盖（只留最近一次），不需要 git/ssh/管道。
-// 目的：失败详情要让"没有 GitHub 凭据的一方"（例如 AI 会话）能自己读到。
+// 目的：现场（含"这次绿了"的 steps / envSkips / 围栏能力）要让"没有 GitHub 凭据的一方"（例如 AI 会话）能自己读到。
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -53,17 +54,26 @@ if (fs.existsSync(logDir)) {
   }
 }
 
-let summary = "平台=" + osName + " 模式=" + (report && report.fenceLive ? "真机(--fence-live)" : "安全") + "\n";
+// 成败按报告自身判定：测试步骤挂了 run-tests.js 也会先写下 failed>0 的报告；
+// 连报告都没有（更早的步骤就挂了，或没跑到）同样按失败处理。
+const failed = !report || (report.failed || 0) > 0;
+let summary = "平台=" + osName + " 模式=" + (report && report.fenceLive ? "真机(--fence-live)" : "安全") + " 结果=" + (failed ? "失败" : "通过") + "\n";
 if (report) {
   for (const s of report.steps || []) {
     if (s.status !== "pass" && s.status !== "skip-platform") summary += "  " + s.status + "  " + s.step + "  " + (s.detail || "") + "\n";
   }
+  // 围栏的"环境性跳过"必须留在现场：绿了但探针跳过 = 这条围栏没验收，读的人要能一眼看到。
+  if ((report.envSkips || []).length) summary += "环境跳过 " + report.envSkips.length + " 条：" + report.envSkips.join(" / ") + "\n";
   if ((report.gaps || []).length) summary += "缺口：" + report.gaps.join(", ") + "\n";
   if (report.doctor && report.doctor.fence) summary += "围栏能力：fs=" + report.doctor.fence.fs + " net=" + report.doctor.fence.net + " tree=" + report.doctor.fence.tree + "\n";
 }
-if (!failing.length) summary += "（没有匹配到失败日志，见产物）\n";
-annotate("测试失败（" + osName + "）", summary);
-for (const f of failing.slice(0, 3)) annotate("失败详情：" + f.name, f.text);
+if (failed) {
+  if (!failing.length) summary += "（没有匹配到失败日志，见产物）\n";
+  annotate("测试失败（" + osName + "）", summary);
+  for (const f of failing.slice(0, 3)) annotate("失败详情：" + f.name, f.text);
+} else {
+  console.log("::notice title=测试通过（" + osName + "）::" + esc(summary));
+}
 
 // —— ci-report 分支（Contents API：同一路径覆盖，只留最近一次）
 const apiHeaders = { Authorization: "Bearer " + token, "User-Agent": "solomni-ci", Accept: "application/vnd.github+json" };
@@ -99,7 +109,7 @@ async function putFile(pathInRepo, text) {
   let shaExisting = null;
   const g = await fetch(url + "?ref=ci-report", { headers: apiHeaders });
   if (g.status === 200) shaExisting = (await g.json()).sha;
-  const body = { message: "失败报告 run " + runNumber + " (" + osName + ")", content: Buffer.from(text, "utf8").toString("base64"), branch: "ci-report" };
+  const body = { message: (failed ? "失败报告" : "通过报告") + " run " + runNumber + " (" + osName + ")", content: Buffer.from(text, "utf8").toString("base64"), branch: "ci-report" };
   if (shaExisting) body.sha = shaExisting;
   const r = await fetch(url, { method: "PUT", headers: jsonHeaders, body: JSON.stringify(body) });
   if (!r.ok) throw new Error(pathInRepo + " → HTTP " + r.status + " " + (await r.text()).slice(0, 200));
@@ -108,7 +118,10 @@ async function putFile(pathInRepo, text) {
 if (token) {
   try {
     await ensureReportBranch();
-    await putFile("runs/" + osName + "/meta.json", JSON.stringify({ run: runNumber, sha, os: osName, at: new Date().toISOString() }, null, 2));
+    await putFile(
+      "runs/" + osName + "/meta.json",
+      JSON.stringify({ run: runNumber, sha, os: osName, at: new Date().toISOString(), failed: failed }, null, 2),
+    );
     if (report) await putFile("runs/" + osName + "/test-report.json", JSON.stringify(report, null, 2));
     if (fs.existsSync(logDir)) {
       for (const f of fs.readdirSync(logDir)) await putFile("runs/" + osName + "/logs/" + f, fs.readFileSync(path.join(logDir, f), "utf8"));

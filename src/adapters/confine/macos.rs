@@ -1,13 +1,19 @@
 //! macOS 后端：seatbelt（sandbox_init）把「可达到哪些路径」变成内核强制。
 //! sandbox_init 是私有且已弃用的 ABI（如实写在这里，不假装它是公开接口）：
 //! 生成一份 profile 文本——默认拒绝一切，再逐条放行运行基线（只读）与 spec.rw（读写），
-//! spec.net 为假时连网络一起拒。装不上时如实降级（打印说明后照常执行），启动时已报告能力等级。
+//! spec.net 为假时连网络一起拒。装不上时如实降级（打印说明后照常执行），启动时已报告能力等级；
+//! 降级原因分两类并各自带标记：「本机 ABI 失效」是环境结论，「profile 被拒」是 profile 写错（探针硬失败）。
 
 use super::{shell_command, Capability, FENCE_FAILED};
 use crate::core::fence::FenceSpec;
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int};
 use std::path::Path;
+
+/// 稳定标记：本机 seatbelt 机制有效（自检已过），但我们生成的 profile 被 sandbox_init 拒绝。
+/// 与「本机该私有 ABI 失效」是两回事——前者是 profile 写错（非法操作名/语法/转义），
+/// 探针据此响亮失败；后者才是环境结论，探针如实跳过。
+pub const PROFILE_REJECTED_MARK: &str = "seatbelt profile 被拒绝";
 
 extern "C" {
     fn sandbox_init(profile: *const c_char, flags: u64, errorbuf: *mut *mut c_char) -> c_int;
@@ -149,7 +155,8 @@ fn install(spec: &FenceSpec, command: &str) -> Result<(), String> {
         eprintln!("[围栏] 解析出的解释器目录：{:?}", dirs);
         eprintln!("[围栏] seatbelt profile：\n{}", profile);
     }
-    let c = CString::new(profile).map_err(|_| "profile 文本含非法字节".to_string())?;
+    let c = CString::new(profile)
+        .map_err(|_| format!("{}：profile 文本含非法字节", PROFILE_REJECTED_MARK))?;
     let mut errbuf: *mut c_char = std::ptr::null_mut();
     let rc = unsafe { sandbox_init(c.as_ptr(), 0, &mut errbuf) };
     if rc != 0 {
@@ -162,7 +169,7 @@ fn install(spec: &FenceSpec, command: &str) -> Result<(), String> {
             unsafe { sandbox_free_error(errbuf) };
             s
         };
-        return Err(why);
+        return Err(format!("{}：{}", PROFILE_REJECTED_MARK, why));
     }
     Ok(())
 }

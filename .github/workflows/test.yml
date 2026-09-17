@@ -1,6 +1,7 @@
 # 三平台测试：GitHub 托管 runner 是一次性机器，「会改本机状态」的真机围栏测试只在这里开。
 # 本地默认安全模式（见 TESTING.md）：会改本机状态的测试要显式 --fence-live。
-# 失败时把报告与日志留两份：产物（供人下载）与 ci-report 分支（供没有凭据的会话直接读）。
+# 无论成败都把报告与日志留两份：产物（供人下载）与 ci-report 分支（供没有凭据的会话直接读）。
+# 成功 run 的 job 日志要凭据才读得到、且没有产物，所以"绿了"本身必须自带现场（steps/envSkips/围栏能力）。
 name: 测试
 
 on:
@@ -8,7 +9,7 @@ on:
   pull_request:
 
 permissions:
-  contents: write # 仅用于把失败报告推到 ci-report 滚动分支
+  contents: write # 仅用于把报告推到 ci-report 滚动分支（无论成败都推）
 
 jobs:
   test:
@@ -34,8 +35,17 @@ jobs:
       - name: 跑全部测试（一次性环境：允许真机围栏测试）
         run: node run-tests.js --fence-live
 
-      - name: 失败时留产物（报告与日志，供人下载）
-        if: failure()
+      - name: 抓 macOS 沙箱拒绝记录（无论成败都留；非 macOS 跳过）
+        if: always() && runner.os == 'macOS'
+        run: |
+          mkdir -p target/test-logs
+          # 内核把每次沙箱拒绝写进统一日志（"Sandbox: <进程> deny(1) <操作> <路径>"）。
+          # 失败时它是"缺哪条放行"的原始证据；通过时它是"围栏确实生效并拦过越界读"的正面证据。
+          sudo log show --last 10m --style compact --predicate 'eventMessage CONTAINS "Sandbox"' 2>/dev/null | tail -n 200 > target/test-logs/sandbox-denials.log || true
+          echo "沙箱拒绝记录行数：$(wc -l < target/test-logs/sandbox-denials.log)"
+
+      - name: 留产物（报告与日志，供人下载；无论成败）
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: test-report-${{ matrix.os }}
@@ -44,17 +54,8 @@ jobs:
             target/test-logs/
           if-no-files-found: ignore
 
-      - name: 失败时抓 macOS 沙箱拒绝记录（排障用；非 macOS 跳过）
-        if: failure() && runner.os == 'macOS'
-        run: |
-          mkdir -p target/test-logs
-          # 内核把每次沙箱拒绝写进统一日志（"Sandbox: <进程> deny(1) <操作> <路径>"）。
-          # 围栏失败时它就是"缺哪条放行"的原始证据，落进 test-logs 后随 ci-report 一起发布。
-          sudo log show --last 10m --style compact --predicate 'eventMessage CONTAINS "Sandbox"' 2>/dev/null | tail -n 200 > target/test-logs/sandbox-denials.log || true
-          echo "沙箱拒绝记录行数：$(wc -l < target/test-logs/sandbox-denials.log)"
-
-      - name: 失败时发布到 ci-report 分支（供没有凭据的会话读取）
-        if: failure()
+      - name: 发布到 ci-report 分支（供没有凭据的会话读取；无论成败）
+        if: always()
         env:
           # Actions 不会把 token 自动放进环境，必须显式注入；工作流级 permissions 已给 contents: write。
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
