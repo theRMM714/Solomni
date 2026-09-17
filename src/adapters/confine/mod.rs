@@ -253,7 +253,9 @@ pub fn fence_env(spec: &FenceSpec) -> Vec<(OsString, OsString)> {
     out.push((OsString::from("HOME"), home.clone().into_os_string()));
     out.push((OsString::from("USERPROFILE"), home.clone().into_os_string()));
     out.push((OsString::from("TEMP"), home.clone().into_os_string()));
-    out.push((OsString::from("TMP"), home.into_os_string()));
+    out.push((OsString::from("TMP"), home.clone().into_os_string()));
+    // macOS / Linux 认 TMPDIR：不设的话进程会去读系统临时区（那不在可达范围内）。
+    out.push((OsString::from("TMPDIR"), home.into_os_string()));
     out
 }
 
