@@ -1,11 +1,12 @@
 //! Linux 后端：Landlock（内核 5.13+）把「可达到哪些路径」变成内核强制——无需 root、无需额外二进制。
 //! 规则：spec.rw 的每个根读写与目录操作；运行基线（系统只读区）只读可执行；其余一律拒绝。
-//! 机制不可用时（老内核）如实降级：打印说明后照常执行——能力等级在启动时已如实告知，不静默假装有围栏。
+//! 机制不可用时（老内核、或规则被内核拒）如实降级：打印说明后照常执行——能力等级在启动时已如实告知，不静默假装有围栏。
 //! 只做文件系统；网络在 spec.net 为假时靠调用方（虚拟机档）断网，本档不承诺。
 
 use super::{shell_command, Capability, FENCE_FAILED};
 use crate::core::fence::FenceSpec;
 use std::ffi::CString;
+use std::os::raw::c_int;
 use std::os::unix::process::CommandExt;
 use std::path::Path;
 
@@ -67,6 +68,20 @@ const RW_ALL: u64 = FS_EXECUTE
     | FS_TRUNCATE;
 const RO_ALL: u64 = FS_EXECUTE | FS_READ_FILE | FS_READ_DIR;
 
+/// 目录专属位：规则挂在**普通文件/设备**上时，内核对这些位直接回 EINVAL。
+/// （READ_ONLY_BASELINE 里的 /etc/ld.so.cache、/dev/null 等是文件，不能带着 FS_READ_DIR 去 add_rule。）
+const DIR_ONLY: u64 = FS_READ_DIR
+    | FS_REMOVE_DIR
+    | FS_REMOVE_FILE
+    | FS_MAKE_CHAR
+    | FS_MAKE_DIR
+    | FS_MAKE_REG
+    | FS_MAKE_SOCK
+    | FS_MAKE_FIFO
+    | FS_MAKE_BLOCK
+    | FS_MAKE_SYM
+    | FS_REFER;
+
 #[repr(C)]
 struct RulesetAttr {
     handled_access_fs: u64,
@@ -118,26 +133,83 @@ fn mask_for(abi: i32, mut access: u64) -> u64 {
     access
 }
 
+/// 自检：本机 Landlock 装上之后是否真的产生约束（结果缓存，只探一次）。
+/// 只问 ABI 版本不够——landlock_add_rule 会因为规则细节被内核拒（例如掩码带了该类型不支持的位），
+/// 那之后 landlock_restrict_self 根本没被调用，围栏等于不存在。
+fn landlock_confines() -> bool {
+    static EFFECTIVE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *EFFECTIVE.get_or_init(landlock_confines_probe)
+}
+
+/// 装一个「什么都不放行」的最小 ruleset，再去读金丝雀：读不到才算本机真能围。
+/// 子进程退出码：0 = 读到了（没约束）、1 = 被挡住（机制有效）、2 = 装不上（无法判定）。
+fn landlock_confines_probe() -> bool {
+    let canary =
+        std::env::temp_dir().join(format!("solomni-landlock-selfcheck-{}", std::process::id()));
+    if std::fs::write(&canary, "canary").is_err() {
+        return false;
+    }
+    let verdict = unsafe {
+        let pid = libc::fork();
+        if pid == 0 {
+            let abi = match abi_version() {
+                Ok(a) => a,
+                Err(_) => libc::_exit(2),
+            };
+            let attr = RulesetAttr {
+                handled_access_fs: mask_for(abi, RW_ALL | RO_ALL),
+            };
+            let fd = sys_create_ruleset(&attr, std::mem::size_of::<RulesetAttr>(), 0);
+            if fd < 0 {
+                libc::_exit(2);
+            }
+            if libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0 {
+                libc::_exit(2);
+            }
+            if sys_restrict_self(fd, 0) != 0 {
+                libc::_exit(2);
+            }
+            let read = std::fs::read_to_string(&canary)
+                .map(|s| s.contains("canary"))
+                .unwrap_or(false);
+            libc::_exit(if read { 0 } else { 1 });
+        }
+        if pid < 0 {
+            0
+        } else {
+            let mut status: c_int = 0;
+            libc::waitpid(pid, &mut status, 0);
+            if libc::WIFEXITED(status) && libc::WEXITSTATUS(status) == 1 {
+                1
+            } else {
+                0
+            }
+        }
+    };
+    let _ = std::fs::remove_file(&canary);
+    verdict == 1
+}
+
 pub fn capability() -> Capability {
-    match abi_version() {
-        Ok(abi) => Capability {
+    let abi = abi_version();
+    if abi.is_ok() && landlock_confines() {
+        Capability {
             fs: true,
             net: false,
             tree: true,
             note: format!(
                 "Linux：Landlock（ABI {}）强制文件系统可达范围；出站网络不围栏",
-                abi
+                abi.unwrap_or(-1)
             ),
-        },
-        Err(e) => Capability {
+        }
+    } else {
+        Capability {
             fs: false,
             net: false,
             tree: true,
-            note: format!(
-                "Linux：本机内核不支持 Landlock（{}）——工具进程没有文件系统围栏，如实降级",
-                e
-            ),
-        },
+            note: "Linux：本机 Landlock 不产生实际约束（内核不支持，或规则被内核拒绝）——文件系统围栏如实降级，只有进程树围栏"
+                .to_string(),
+        }
     }
 }
 
@@ -174,6 +246,10 @@ pub fn run_fenced(spec: &FenceSpec, command: &str) -> i32 {
 }
 
 fn install(spec: &FenceSpec, command: &str) -> Result<(), String> {
+    // 先自检：本机 Landlock 是否真的产生约束。装上了也可能完全没约束，别假装有围栏。
+    if !landlock_confines() {
+        return Err("本机 Landlock 不产生实际约束（内核不支持，或规则被内核拒绝）".to_string());
+    }
     let abi = abi_version()?;
     let attr = RulesetAttr {
         handled_access_fs: mask_for(abi, RW_ALL | RO_ALL),
@@ -232,8 +308,22 @@ fn add_rule(ruleset_fd: i32, path: &Path, access: u64) -> Result<(), String> {
             std::io::Error::last_os_error()
         ));
     }
+    // 掩码必须跟根的类型对得上：内核对非目录 parent 会拒掉目录专属位，回 EINVAL。
+    // 少了这个分叉，规则链会在第一个「文件型基线路径」（/etc/ld.so.cache）上断掉，
+    // 后面连 landlock_restrict_self 都走不到——围栏一条都不生效。
+    // 用 metadata 判类型（与上面 open(O_PATH) 一样跟随符号链接，/etc/localtime 这类别名因此判得准）。
+    let allowed_access = match std::fs::metadata(path) {
+        Ok(m) if m.is_dir() => access,
+        Ok(_) => access & !DIR_ONLY,
+        Err(e) => {
+            unsafe {
+                libc::close(parent);
+            }
+            return Err(format!("取允许的根的类型失败（{}）：{}", path.display(), e));
+        }
+    };
     let rule = PathBeneathAttr {
-        allowed_access: access,
+        allowed_access,
         parent_fd: parent,
     };
     let rc = sys_add_rule(ruleset_fd, LANDLOCK_RULE_PATH_BENEATH, &rule, 0);
