@@ -22,7 +22,14 @@ function interpreter() {
   const { spawnSync } = require("child_process");
   for (const name of ["python", "python3"]) {
     const r = spawnSync(name, ["-c", "print(1)"], { stdio: "ignore" });
-    if (!r.error && r.status === 0) return name;
+    if (!r.error && r.status === 0) {
+      // 围栏是按「解释器所在目录」放行的，所以这里如实报出：用哪个名字、真身在哪、安装根在哪。
+      // 失败时（例如动态库取不到导致 SIGABRT）这行就是定位依据。
+      const which = spawnSync(process.platform === "win32" ? "where" : "which", [name], { encoding: "utf8" });
+      const real = (which.stdout || "").trim().split("\n")[0] || "(取不到路径)";
+      console.log("[e2e] 夹具解释器：" + name + " → " + real);
+      return name;
+    }
   }
   return "python";
 }
