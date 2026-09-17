@@ -46,4 +46,7 @@ jobs:
 
       - name: 失败时发布到 ci-report 分支（供没有凭据的会话读取）
         if: failure()
+        env:
+          # Actions 不会把 token 自动放进环境，必须显式注入；工作流级 permissions 已给 contents: write。
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: node tests/ci-publish.mjs

@@ -66,20 +66,48 @@ annotate("测试失败（" + osName + "）", summary);
 for (const f of failing.slice(0, 3)) annotate("失败详情：" + f.name, f.text);
 
 // —— ci-report 分支（Contents API：同一路径覆盖，只留最近一次）
+const apiHeaders = { Authorization: "Bearer " + token, "User-Agent": "solomni-ci", Accept: "application/vnd.github+json" };
+const jsonHeaders = Object.assign({ "Content-Type": "application/json" }, apiHeaders);
+
+// 首次运行时 ci-report 还不存在：Contents API 的 PUT 要求目标分支已存在，
+// 所以先按默认分支的 HEAD 建出这个滚动分支，否则第一条失败报告就永远发不出去。
+async function apiJson(url) {
+  const r = await fetch(url, { headers: apiHeaders });
+  if (!r.ok) throw new Error(url.replace("https://api.github.com", "") + " → HTTP " + r.status + " " + (await r.text()).slice(0, 160));
+  return r.json();
+}
+
+async function ensureReportBranch() {
+  const refUrl = "https://api.github.com/repos/" + repo + "/git/ref/heads/ci-report";
+  const ref = await fetch(refUrl, { headers: apiHeaders });
+  if (ref.status === 200) return;
+  // 404 才是"还没有这个分支"；其它状态（401/403）说明凭据或权限不对，如实报出来而不是继续往下撞。
+  if (ref.status !== 404) throw new Error("查 ci-report 分支 → HTTP " + ref.status + " " + (await ref.text()).slice(0, 160));
+  const info = await apiJson("https://api.github.com/repos/" + repo);
+  const baseRef = await apiJson("https://api.github.com/repos/" + repo + "/git/ref/heads/" + info.default_branch);
+  const made = await fetch("https://api.github.com/repos/" + repo + "/git/refs", {
+    method: "POST",
+    headers: jsonHeaders,
+    body: JSON.stringify({ ref: "refs/heads/ci-report", sha: baseRef.object.sha }),
+  });
+  // 422 = 已被并发建好，当作成功。
+  if (!made.ok && made.status !== 422) throw new Error("建 ci-report 分支 → HTTP " + made.status + " " + (await made.text()).slice(0, 160));
+}
+
 async function putFile(pathInRepo, text) {
   const url = "https://api.github.com/repos/" + repo + "/contents/" + pathInRepo;
-  const headers = { Authorization: "Bearer " + token, "User-Agent": "solomni-ci", Accept: "application/vnd.github+json" };
   let shaExisting = null;
-  const g = await fetch(url + "?ref=ci-report", { headers });
+  const g = await fetch(url + "?ref=ci-report", { headers: apiHeaders });
   if (g.status === 200) shaExisting = (await g.json()).sha;
   const body = { message: "失败报告 run " + runNumber + " (" + osName + ")", content: Buffer.from(text, "utf8").toString("base64"), branch: "ci-report" };
   if (shaExisting) body.sha = shaExisting;
-  const r = await fetch(url, { method: "PUT", headers: Object.assign({ "Content-Type": "application/json" }, headers), body: JSON.stringify(body) });
+  const r = await fetch(url, { method: "PUT", headers: jsonHeaders, body: JSON.stringify(body) });
   if (!r.ok) throw new Error(pathInRepo + " → HTTP " + r.status + " " + (await r.text()).slice(0, 200));
 }
 
 if (token) {
   try {
+    await ensureReportBranch();
     await putFile("runs/" + osName + "/meta.json", JSON.stringify({ run: runNumber, sha, os: osName, at: new Date().toISOString() }, null, 2));
     if (report) await putFile("runs/" + osName + "/test-report.json", JSON.stringify(report, null, 2));
     if (fs.existsSync(logDir)) {
