@@ -1,10 +1,12 @@
 //! seatbelt 探针：真机验收本平台的文件系统围栏——允许的根里写得进，根之外读不到。
 //! 驱动方式与运行期完全一致：交给守门进程（本程序 --fence-run）去装围栏。
+//! 排障时打开 SOLOMNI_FENCE_PROFILE=1，让守门进程把完整 profile 打进 stderr。
 
 use crate::probe::{run_launcher, scratch, spec_json};
 
 #[test]
 fn fence_denies_outside_paths_and_allows_the_given_roots() {
+    std::env::set_var("SOLOMNI_FENCE_PROFILE", "1");
     let inside = scratch("fence-inside");
     let outside = scratch("fence-outside");
     let secret = outside.join("secret.txt");
@@ -22,6 +24,11 @@ fn fence_denies_outside_paths_and_allows_the_given_roots() {
 
     // 允许的根之外：同一个用户、同一台机器，只有围栏能挡住这一读。
     let (code, out, err) = run_launcher(&spec, &format!("cat {}", secret.display()));
-    assert!(!out.contains("SECRET-DO-NOT-LEAK"), "越界读必须拿不到：{} / {}", out, err);
+    assert!(
+        !out.contains("SECRET-DO-NOT-LEAK"),
+        "越界读必须拿不到：{} / {}",
+        out,
+        err
+    );
     assert_ne!(code, Some(0), "越界读应以非零退出：{} / {}", out, err);
 }

@@ -152,18 +152,17 @@ pub(crate) fn interpreter_dirs(command: &str) -> Vec<std::path::PathBuf> {
             }
             if let Some(hit) = tries.into_iter().find(|p| p.is_file() && is_executable(p)) {
                 // 解释器常见布局：<root>/bin/xxx（官方安装与虚拟环境）或 <root>/xxx。
-                // 只授它自己的安装目录：<root>/bin 这种布局上溯一层（标准库在 <root> 里），其余用所在目录。
                 if let Some(parent) = hit.parent() {
-                    let leaf = parent
-                        .file_name()
-                        .map(|s| s.to_string_lossy().to_lowercase())
-                        .unwrap_or_default();
-                    let target = if leaf == "bin" || leaf == "scripts" {
-                        parent.parent().map(|p| p.to_path_buf()).unwrap_or_else(|| parent.to_path_buf())
-                    } else {
-                        parent.to_path_buf()
-                    };
-                    dirs.push(target);
+                    dirs.push(install_dir(parent));
+                }
+                // 符号链接要把**真身**的安装目录也放行：macOS 上 python3 常常是链接，动态库在真身旁边——
+                // 只放行链接所在目录会让加载器取不到库（进程直接 SIGABRT）。
+                if let Ok(real) = std::fs::canonicalize(&hit) {
+                    if real != hit {
+                        if let Some(parent) = real.parent() {
+                            dirs.push(install_dir(parent));
+                        }
+                    }
                 }
                 break;
             }
@@ -172,6 +171,19 @@ pub(crate) fn interpreter_dirs(command: &str) -> Vec<std::path::PathBuf> {
     dirs.sort();
     dirs.dedup();
     dirs.into_iter().filter(|d| d.is_dir()).collect()
+}
+
+/// 程序所在目录 → 该程序的「安装目录」：<root>/bin|Scripts 这种布局上溯一层（标准库与动态库在 <root> 里），其余就是所在目录。
+fn install_dir(bin: &std::path::Path) -> std::path::PathBuf {
+    let leaf = bin
+        .file_name()
+        .map(|s| s.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
+    if leaf == "bin" || leaf == "scripts" {
+        bin.parent().map(|p| p.to_path_buf()).unwrap_or_else(|| bin.to_path_buf())
+    } else {
+        bin.to_path_buf()
+    }
 }
 
 /// 是不是「可执行文件」：Unix 看执行位；Windows 没有这个概念，文件存在即算（PATH 解析已按 PATHEXT 试过扩展名）。

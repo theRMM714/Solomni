@@ -138,6 +138,10 @@ fn install(spec: &FenceSpec, command: &str) -> Result<(), String> {
         spec.rw.len(),
         spec.rw.len()
     );
+    // 排障开关：把完整 profile 打出来（探针打开它；正常运行不打，免得污染工具回执）。
+    if std::env::var("SOLOMNI_FENCE_PROFILE").is_ok() {
+        eprintln!("[围栏] seatbelt profile：\n{}", profile);
+    }
     let c = CString::new(profile).map_err(|_| "profile 文本含非法字节".to_string())?;
     let mut errbuf: *mut c_char = std::ptr::null_mut();
     let rc = unsafe { sandbox_init(c.as_ptr(), 0, &mut errbuf) };
@@ -203,7 +207,9 @@ fn profile_text(spec: &FenceSpec, command: &str) -> String {
     metas.sort();
     metas.dedup();
     for m in &metas {
-        out.push_str(&format!("(allow file-read-metadata (subpath \"{}\"))\n", escape(m)));
+        // literal 而不是 subpath：穿过祖先只需要对**祖先本身**取元数据；
+        // 用 subpath 会把整棵子树的元数据都放行，等于把围栏开成筛子。
+        out.push_str(&format!("(allow file-read-metadata (literal \"{}\"))\n", escape(m)));
     }
     if !spec.net {
         out.push_str("(deny network*)\n");
