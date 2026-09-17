@@ -10,6 +10,16 @@ use std::os::raw::c_int;
 use std::os::unix::process::CommandExt;
 use std::path::Path;
 
+/// 稳定标记：本机 Landlock 机制有效（自检已过），但我们的规则/安装步骤装不上。
+/// 与「本机内核不能围栏」是两回事——前者是代码写错（掩码/路径），探针据此响亮失败；
+/// 后者才是环境结论，探针如实跳过。
+pub const RULES_REJECTED_MARK: &str = "landlock 规则被拒绝";
+
+/// 自检之后仍然装不上 = 规则写错，统一带上稳定标记（与 macOS 的 PROFILE_REJECTED_MARK 对称）。
+fn rules_rejected(reason: String) -> String {
+    format!("{}：{}", RULES_REJECTED_MARK, reason)
+}
+
 /// 只读运行基线：解释器与系统运行库所在处（脚本要跑起来必须读得到这些）。
 const READ_ONLY_BASELINE: &[&str] = &[
     "/usr",
@@ -250,46 +260,47 @@ fn install(spec: &FenceSpec, command: &str) -> Result<(), String> {
     if !landlock_confines() {
         return Err("本机 Landlock 不产生实际约束（内核不支持，或规则被内核拒绝）".to_string());
     }
-    let abi = abi_version()?;
+    // 自检之后的任何失败都是「我们的规则/安装步骤有问题」：带标记，探针据此响亮失败。
+    let abi = abi_version().map_err(rules_rejected)?;
     let attr = RulesetAttr {
         handled_access_fs: mask_for(abi, RW_ALL | RO_ALL),
     };
     let fd = sys_create_ruleset(&attr, std::mem::size_of::<RulesetAttr>(), 0);
     if fd < 0 {
-        return Err(format!(
+        return Err(rules_rejected(format!(
             "landlock_create_ruleset 失败：{}",
             std::io::Error::last_os_error()
-        ));
+        )));
     }
     let allowed_rw = mask_for(abi, RW_ALL);
     for root in &spec.rw {
-        add_rule(fd, root, allowed_rw)?;
+        add_rule(fd, root, allowed_rw).map_err(rules_rejected)?;
     }
     if !spec.cwd.as_os_str().is_empty() {
-        add_rule(fd, &spec.cwd, allowed_rw)?;
+        add_rule(fd, &spec.cwd, allowed_rw).map_err(rules_rejected)?;
     }
     for p in READ_ONLY_BASELINE {
         let path = Path::new(p);
         if path.exists() {
-            add_rule(fd, path, RO_ALL)?;
+            add_rule(fd, path, RO_ALL).map_err(rules_rejected)?;
         }
     }
     // 命令里解释器的安装目录也要只读放行：否则解释器装在 /usr 之外（pyenv、homebrew、自装）时，工具在围栏里起不来。
     for dir in super::interpreter_dirs(command) {
-        add_rule(fd, &dir, RO_ALL)?;
+        add_rule(fd, &dir, RO_ALL).map_err(rules_rejected)?;
     }
     // Landlock 的前置条件：不许再提权。
     if unsafe { libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) } != 0 {
-        return Err(format!(
+        return Err(rules_rejected(format!(
             "prctl(PR_SET_NO_NEW_PRIVS) 失败：{}",
             std::io::Error::last_os_error()
-        ));
+        )));
     }
     if sys_restrict_self(fd, 0) != 0 {
-        return Err(format!(
+        return Err(rules_rejected(format!(
             "landlock_restrict_self 失败：{}",
             std::io::Error::last_os_error()
-        ));
+        )));
     }
     unsafe {
         libc::close(fd);

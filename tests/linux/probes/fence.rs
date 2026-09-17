@@ -3,6 +3,11 @@
 
 use crate::probe::{run_launcher, scratch, spec_json};
 
+/// 与 src/adapters/confine/linux.rs 的 RULES_REJECTED_MARK 一致（集成测试看不到 crate 内部）。
+/// 自检已确认本机 Landlock 有效，却仍装不上 = 我们的规则写错了；
+/// 那种情况**必须响亮失败**，否则「绿」等于围栏根本没验收。
+const RULES_REJECTED_MARK: &str = "landlock 规则被拒绝";
+
 #[test]
 fn fence_denies_outside_paths_and_allows_the_given_roots() {
     let inside = scratch("fence-inside");
@@ -13,11 +18,30 @@ fn fence_denies_outside_paths_and_allows_the_given_roots() {
 
     // 允许的根里：写得进。
     let (code, out, err) = run_launcher(&spec, &format!("echo ok > {}", inside.join("x.txt").display()));
+    if err.contains(RULES_REJECTED_MARK) {
+        // 掩码/路径写错都会走到这里：是规则写错，不是环境不允许。
+        panic!(
+            "本机 Landlock 机制有效，但规则装不上（规则写错，不是环境不允许）：{}",
+            err.trim()
+        );
+    }
     if err.contains("文件系统围栏未生效") {
-        eprintln!("[探针] 本平台没装上围栏（环境不允许）：{}（不作为通过）", err.trim());
+        // 剩下的只能是「本机内核不能围栏」这类环境结论：如实跳过并留痕（不算通过）。
+        eprintln!(
+            "[探针] 本机 Landlock 不产生实际约束（环境结论，如实跳过，不作为通过）：{}",
+            err.trim()
+        );
         return;
     }
-    assert!(inside.join("x.txt").exists(), "允许的根里应当写得进：{} / {}", out, err);
+    if !inside.join("x.txt").exists() {
+        // 只报「没写进去」太薄：再跑一条不碰文件系统的命令（shell 内建 true）做对照，
+        // 用来分辨「连 shell 都起不来」（规则太紧）与「只有写被挡」（路径规则层）。
+        let (tcode, tout, terr) = run_launcher(&spec, "true");
+        panic!(
+            "允许的根里应当写得进：{} / {} / [对照] true → code={:?} out={} err={}",
+            out, err, tcode, tout, terr
+        );
+    }
     assert_eq!(code, Some(0), "{} / {}", out, err);
 
     // 允许的根之外：同一个用户、同一台机器，只有围栏能挡住这一读。

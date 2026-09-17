@@ -763,7 +763,7 @@ mod tests {
     fn grants_are_written_when_the_environment_allows_it() {
         if !capability().fs {
             eprintln!(
-                "[围栏] 本机不允许改目录 ACL（{}）：授权探针跳过——请在普通 shell 里重跑 cargo test 验证",
+                "[探针] 本机不允许改目录 ACL（{}）：授权探针跳过（不静默当作通过）——请在普通 shell 里重跑 cargo test 验证",
                 capability().note
             );
             return;
@@ -788,7 +788,10 @@ mod tests {
     #[test]
     fn revoke_removes_the_container_ace_from_the_given_roots() {
         if !capability().fs {
-            eprintln!("[围栏] 本机不允许改目录 ACL（{}）：撤销探针跳过", capability().note);
+            eprintln!(
+                "[探针] 本机不允许改目录 ACL（{}）：撤销探针跳过（不静默当作通过）",
+                capability().note
+            );
             return;
         }
         let dir = std::env::temp_dir().join(format!("solomni-revoke-probe-{}", std::process::id()));
