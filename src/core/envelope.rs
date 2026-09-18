@@ -18,12 +18,23 @@ pub enum Verb {
 
 /// 工具信封不合法时的**判定类别**：类别决定回给模型的修法（文案在提示词册）。
 /// 每类都是可判定的确切事实，不是猜测：说清"哪儿不对"，让模型下一轮能改对。
+/// 扫到结尾时的**确切状态**：还缺哪个收尾字符、是不是断在字符串中间。
+/// 存在的理由：只说"没写完"，模型只能猜（真实会话里它猜成了"内容过长"，于是改去分两次写，白跑两轮）。
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Tail {
+    /// 还缺的收尾字符（由内到外，例如 "}" 或 "]}"）。
+    pub missing: String,
+    /// 断在字符串中间 = 内容没写完（补引号会让核心拿到半截内容，只能让模型重发）。
+    pub in_string: bool,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Malformed {
-    /// 收尾未闭合：信封没写完（输出被截断），JSON 不完整。
-    Unclosed,
+    /// 收尾未闭合：信封没写完；Tail 说清还差什么。
+    Unclosed(Tail),
     /// 字符串里出现未转义的裸控制字符（直接换行/制表符），JSON 非法。
-    RawControl { ch: char, line: usize },
+    /// tail = 同时还有未闭合时一并带上（两处都得改，只说一处会误导）。
+    RawControl { ch: char, line: usize, tail: Option<Tail> },
     /// 括号平衡但 JSON 语法非法（引号不配对、逗号多余等）；附 JSON 解析器报出的位置与原因。
     Syntax(String),
     /// JSON 合法，但信封字段不合法（缺 name、类型不对等）；附字段层面的原因。
@@ -128,7 +139,8 @@ pub fn parse(raw: &str) -> Reply {
     // ②**以 JSON 对象为主体**（第一个非空白字符是 '{'）且该对象含 "type":"tool"：
     //   覆盖"平衡但字段不合法"（如缺 name）的输出。平衡的完整对象被正文引用时落两条之外，
     //   仍按发言收录（这就是反误判的那一半）。
-    if let Some(start) = unclosed_start(raw) {
+    if let Some((start, _)) = unclosed_scan(raw) {
+        // EOF 状态要按**信封那段**算（正文里可能有别的花括号/引号，混进来会让 missing 失真）。
         let frag = &raw[start..];
         if mentions_tool_type(frag) {
             return Reply {
@@ -171,19 +183,21 @@ pub fn parse(raw: &str) -> Reply {
 
 /// 判定一段坏信封属于哪一类（可判定的确切事实，按此给修法）：
 /// ①字符串里的裸控制字符（最常见：内容里直接换了行）→ ②JSON 合法但字段不合法 → ③JSON 语法非法 → ④未闭合。
+/// 控制字符与未闭合可以同时成立（真实会话里就是这样），所以两类都带上 tail，不互相遮蔽。
 fn broken_kind(frag: &str, shape_why: Option<&str>) -> Malformed {
     if let Some((ch, at)) = raw_control_in_string(frag) {
-        return Malformed::RawControl { ch, line: line_of(frag, at) };
+        return Malformed::RawControl {
+            ch,
+            line: line_of(frag, at),
+            tail: unclosed_scan(frag).map(|(_, t)| t),
+        };
     }
     match serde_json::from_str::<serde_json::Value>(frag) {
         Ok(_) => Malformed::Shape(shape_why.unwrap_or_default().to_string()),
-        Err(e) => {
-            if unclosed_start(frag).is_some() {
-                Malformed::Unclosed
-            } else {
-                Malformed::Syntax(e.to_string())
-            }
-        }
+        Err(e) => match unclosed_scan(frag) {
+            Some((_, tail)) => Malformed::Unclosed(tail),
+            None => Malformed::Syntax(e.to_string()),
+        },
     }
 }
 
@@ -216,11 +230,13 @@ fn line_of(s: &str, at: usize) -> usize {
 }
 
 /// 扫一遍输出（沿用 extract_balanced 的"字符串内不计数"规则），
-/// 仅当**扫到结尾仍未闭合**时，返回最后一个「depth 从 0 变 1」的起点（即被截断的坏信封的开头）。
+/// 仅当**扫到结尾仍未闭合**时，返回（最后一个「depth 从 0 变 1」的起点, EOF 状态）。
 /// 平衡的完整对象会回到 depth 0，于是返回 None——这正是"正文里引用完整对象不误判"的依据。
-fn unclosed_start(s: &str) -> Option<usize> {
+/// 花括号与方括号都计数：missing 因此能如实说"还差 ]}"。
+fn unclosed_scan(s: &str) -> Option<(usize, Tail)> {
     let bytes = s.as_bytes();
     let mut depth = 0usize;
+    let mut stack: Vec<u8> = Vec::new();
     let mut in_str = false;
     let mut esc = false;
     let mut last_open: Option<usize> = None;
@@ -237,15 +253,17 @@ fn unclosed_start(s: &str) -> Option<usize> {
         }
         match b {
             b'"' => in_str = true,
-            b'{' => {
+            b'{' | b'[' => {
                 if depth == 0 {
                     last_open = Some(i);
                 }
                 depth += 1;
+                stack.push(if b == b'{' { b'}' } else { b']' });
             }
-            b'}' => {
+            b'}' | b']' => {
                 if depth > 0 {
                     depth -= 1;
+                    stack.pop();
                     if depth == 0 {
                         last_open = None;
                     }
@@ -255,7 +273,9 @@ fn unclosed_start(s: &str) -> Option<usize> {
         }
     }
     if depth > 0 {
-        last_open
+        // 由内到外拼出还缺的收尾字符（模型照着补就行）
+        let missing: String = stack.iter().rev().map(|&b| b as char).collect();
+        Some((last_open.unwrap_or(0), Tail { missing, in_string: in_str }))
     } else {
         None
     }

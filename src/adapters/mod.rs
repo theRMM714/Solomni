@@ -27,7 +27,7 @@ pub use http_chat::HttpGateway;
 pub use log::FileLog;
 pub use model_catalog::HttpModelCatalog;
 pub use proc_tools::ProcTools;
-pub use repair::EscapeControls;
+pub use repair::UnambiguousRepair;
 pub use sys_io::FsSysIo;
 pub use yaml_prompts::YamlPrompts;
 pub use yaml_settings::YamlSettingsStore;

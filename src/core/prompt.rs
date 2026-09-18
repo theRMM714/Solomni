@@ -195,7 +195,12 @@ pub struct ToolTexts {
     // 工具信封不合法：按判定出的类别给各自改法
     /// 变量：what（修好并执行时如实标注在工具回执最前面）
     pub envelope_repaired: String,
-    pub malformed_unclosed: String,
+    /// 变量：missing（还差哪些收尾字符）
+    pub malformed_unclosed_brace: String,
+    pub malformed_unclosed_string: String,
+    /// 变量：missing（与其它类别叠加时的附带说明）
+    pub malformed_missing_tail: String,
+    pub malformed_cut_string: String,
     /// 变量：what, line
     pub malformed_control: String,
     /// 变量：why
@@ -242,18 +247,42 @@ impl ToolTexts {
         render(template, vars).expect("工具文案变量由调用方保证（缺变量属于装配错误）")
     }
 
+    /// 未闭合的修法：内容写完只是少了收尾括号 → 直接说还差什么；断在字符串中间 → 才谈"分次写"。
+    fn unclosed_report(&self, tail: &crate::core::envelope::Tail) -> String {
+        if tail.in_string {
+            self.malformed_unclosed_string.clone()
+        } else {
+            self.render(&self.malformed_unclosed_brace, &[("missing", tail.missing.clone())])
+        }
+    }
+
+    /// 附带说明：信封还差什么（与其它类别叠加时用）。
+    fn tail_note(&self, tail: &crate::core::envelope::Tail) -> String {
+        if tail.in_string {
+            self.malformed_cut_string.clone()
+        } else {
+            self.render(&self.malformed_missing_tail, &[("missing", tail.missing.clone())])
+        }
+    }
+
     /// 工具信封不合法的回执：按**判定出的类别**给出对应修法（类别由 envelope 判定，文案在这里）。
     pub fn malformed_report(&self, kind: &crate::core::envelope::Malformed) -> String {
         match kind {
-            crate::core::envelope::Malformed::Unclosed => self.malformed_unclosed.clone(),
-            crate::core::envelope::Malformed::RawControl { ch, line } => {
+            crate::core::envelope::Malformed::Unclosed(tail) => self.unclosed_report(tail),
+            crate::core::envelope::Malformed::RawControl { ch, line, tail } => {
                 let what = match ch {
                     '\n' => self.control_lf.clone(),
                     '\r' => self.control_cr.clone(),
                     '\t' => self.control_tab.clone(),
                     other => self.render(&self.control_other, &[("code", format!("{:04X}", *other as u32))]),
                 };
-                self.render(&self.malformed_control, &[("what", what), ("line", line.to_string())])
+                let mut out = self.render(&self.malformed_control, &[("what", what), ("line", line.to_string())]);
+                // 同时还没闭合就一并说清（只说一处会让模型改错方向）
+                if let Some(t) = tail {
+                    out.push('\n');
+                    out.push_str(&self.tail_note(t));
+                }
+                out
             }
             crate::core::envelope::Malformed::Syntax(why) => {
                 self.render(&self.malformed_syntax, &[("why", why.clone())])
