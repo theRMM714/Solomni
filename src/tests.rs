@@ -9,8 +9,8 @@ use crate::core::history::{AgentMeta, HistoryView, SessionMeta};
 use crate::core::exec::{self, Diagnosis, ExecSpec, Tier};
 use crate::core::packages::{Library, PackageManifest};
 use crate::core::ports::{
-    BoxedChat, Chat, ChatGateway, Chunk, Completion, FileRead, HistoryStore, ModelCatalog, ModuleSource, Msg,
-    PackageSource,
+    BoxedChat, Chat, ChatGateway, Chunk, CompleteOpts, Completion, FileRead, HistoryStore, ModelCatalog, ModuleSource,
+    Msg, PackageSource,
     PromptSource, SettingsStore, SysIo, ToolOutcome, ToolRunner, Workspace,
 };
 use crate::core::prompt::{render, Prompts};
@@ -532,7 +532,7 @@ pub(crate) struct SharedScript {
 }
 
 impl Chat for SharedScript {
-    fn complete(&mut self, _messages: &[Msg], _stream: bool, _on: &mut dyn FnMut(Chunk) -> bool) -> Completion {
+    fn complete(&mut self, _messages: &[Msg], _opts: CompleteOpts<'_>, _on: &mut dyn FnMut(Chunk) -> bool) -> Completion {
         let mut q = self.q.lock().expect("脚本队列锁");
         let text = if q.len() > 1 { q.remove(0) } else { q.first().cloned().unwrap_or_default() };
         Completion::text(text)
@@ -551,6 +551,9 @@ impl ScriptGateway {
 }
 
 impl ChatGateway for ScriptGateway {
+    fn probe_tools(&self, _c: &Channel) -> Result<crate::core::ports::ProbeOutcome, String> {
+        Err("脚本替身没有真实供应商，测不了工具调用支持".to_string())
+    }
     fn member_channel(&self, _c: Option<&Channel>, id: &str) -> (BoxedChat, Option<String>) {
         let script = self.member.get(id).cloned().unwrap_or_else(|| {
             vec!["{\"type\":\"say\",\"text\":\"（演示）收到。\"}".to_string()]
@@ -2831,9 +2834,9 @@ pub(crate) struct TruncChat {
 }
 
 impl Chat for TruncChat {
-    fn complete(&mut self, _m: &[Msg], _s: bool, _on: &mut dyn FnMut(Chunk) -> bool) -> Completion {
+    fn complete(&mut self, _m: &[Msg], _opts: CompleteOpts<'_>, _on: &mut dyn FnMut(Chunk) -> bool) -> Completion {
         let text = if self.script.len() > 1 { self.script.remove(0) } else { self.script.first().cloned().unwrap_or_default() };
-        Completion { raw: text, finish: "length".to_string() }
+        Completion { raw: text, finish: "length".to_string(), calls: Vec::new() }
     }
 }
 
@@ -2843,6 +2846,9 @@ pub(crate) struct TruncGateway {
 }
 
 impl ChatGateway for TruncGateway {
+    fn probe_tools(&self, _c: &Channel) -> Result<crate::core::ports::ProbeOutcome, String> {
+        Err("脚本替身没有真实供应商，测不了工具调用支持".to_string())
+    }
     fn member_channel(&self, _c: Option<&Channel>, _id: &str) -> (BoxedChat, Option<String>) {
         (Box::new(TruncChat { script: self.script.clone() }), None)
     }
@@ -2857,7 +2863,7 @@ pub(crate) struct AbortChat {
 }
 
 impl Chat for AbortChat {
-    fn complete(&mut self, _m: &[Msg], _s: bool, on: &mut dyn FnMut(Chunk) -> bool) -> Completion {
+    fn complete(&mut self, _m: &[Msg], _opts: CompleteOpts<'_>, on: &mut dyn FnMut(Chunk) -> bool) -> Completion {
         let _ = on(Chunk::Start);
         Completion::text(self.raw.clone())
     }
@@ -2868,6 +2874,9 @@ pub(crate) struct AbortGateway {
 }
 
 impl ChatGateway for AbortGateway {
+    fn probe_tools(&self, _c: &Channel) -> Result<crate::core::ports::ProbeOutcome, String> {
+        Err("脚本替身没有真实供应商，测不了工具调用支持".to_string())
+    }
     fn member_channel(&self, _c: Option<&Channel>, _id: &str) -> (BoxedChat, Option<String>) {
         (Box::new(AbortChat { raw: self.raw.clone() }), None)
     }
@@ -2922,6 +2931,54 @@ fn a_truncated_output_is_reported_as_truncation_not_as_a_bad_envelope() {
         "{:?}",
         rows
     );
+}
+
+/// 固定探测结论的网关：专测"结论怎么落到登记处"这一层策略（事实本身由适配器测）。
+pub(crate) struct ProbeGateway {
+    pub(crate) outcome: crate::core::providers::ProbeOutcome,
+}
+
+impl ChatGateway for ProbeGateway {
+    fn probe_tools(&self, _c: &Channel) -> Result<crate::core::ports::ProbeOutcome, String> {
+        Ok(self.outcome.clone())
+    }
+    fn member_channel(&self, _c: Option<&Channel>, _id: &str) -> (BoxedChat, Option<String>) {
+        (scripted(vec!["{\"type\":\"say\",\"text\":\"收到\"}".to_string()]), None)
+    }
+    fn core_channel(&self, _c: Option<&Channel>) -> (BoxedChat, bool) {
+        (scripted(vec!["[]".to_string()]), true)
+    }
+}
+
+#[test]
+fn a_probe_writes_back_only_conclusive_results() {
+    use crate::core::providers::{ProbeOutcome, ToolMode};
+    let fresh = |outcome: ProbeOutcome| {
+        let mut core = core_with_gateway(vec![], ProbeGateway { outcome });
+        core.provider_upsert("p", "http://x", "k").expect("登记供应商");
+        core.model_upsert("m", "M", "api-m", "p", "").expect("登记模型");
+        core
+    };
+    let mode_of = |core: &Core| core.model_views().iter().find(|v| v.id == "m").map(|v| v.tools);
+
+    // 支持 → 写回 native
+    let mut core = fresh(ProbeOutcome::Supported { detail: "真的调了".to_string() });
+    assert_eq!(mode_of(&core), Some(ToolMode::Envelope), "探测前是缺省 envelope");
+    assert!(matches!(core.probe_model_tools("m"), Ok(ProbeOutcome::Supported { .. })));
+    assert_eq!(mode_of(&core), Some(ToolMode::Native), "支持就写回 native");
+
+    // 明确不支持 → 写回 envelope
+    let mut core = fresh(ProbeOutcome::Unsupported { detail: "供应商说 tools 不认识".to_string() });
+    assert!(matches!(core.probe_model_tools("m"), Ok(ProbeOutcome::Unsupported { .. })));
+    assert_eq!(mode_of(&core), Some(ToolMode::Envelope), "不支持就老实回到信封");
+
+    // 无法判定 → 不改（不替用户拍板），但事实照样报回去
+    let mut core = fresh(ProbeOutcome::Unknown { detail: "没发起调用".to_string() });
+    assert!(matches!(core.probe_model_tools("m"), Ok(ProbeOutcome::Unknown { .. })));
+    assert_eq!(mode_of(&core), Some(ToolMode::Envelope), "没法定论就不动登记处");
+
+    // 无此模型 → 如实报错
+    assert!(core.probe_model_tools("ghost").is_err());
 }
 
 #[test]

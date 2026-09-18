@@ -11,7 +11,7 @@ use crate::core::events::{CheckView, LineView, Pending, SessionEvent};
 use crate::core::history::{AgentMeta, SessionMeta};
 use crate::core::module::{self, Module};
 use crate::core::exec::{self, ExecSpec};
-use crate::core::ports::{ChatGateway, ModuleSource, Msg, PackageSource, SysIo, ToolRunner};
+use crate::core::ports::{ChatGateway, CompleteOpts, ModuleSource, Msg, PackageSource, SysIo, ToolRunner};
 use crate::core::prompt::Prompts;
 use crate::core::providers::Settings;
 use crate::core::workspace::Sandboxes;
@@ -178,7 +178,7 @@ impl CollabSession {
             ],
         );
         let msgs = vec![Msg::system(self.prompts.core.slate.system.clone()), Msg::user(user)];
-        let raw = self.core_chat.complete(&msgs, false, &mut |_| true).raw;
+        let raw = self.core_chat.complete(&msgs, CompleteOpts::plain(false), &mut |_| true).raw;
         let parsed = envelope::extract_json_object(&raw).and_then(|obj| serde_json::from_str::<SlateReply>(&obj).ok());
         let Some(slate) = parsed else {
             sink(SessionEvent::Notice("[错误] 代拟失败（模型无响应格式）。请直接点名 agent。".into()));

@@ -36,8 +36,8 @@ presentation ──▶ core ◀── adapters
 
 | 端口 | 职责 | 适配层实现 |
 | --- | --- | --- |
-| `Chat` | 一次模型会话：收消息列表回 `Completion`（正文 + 供应商的**结束原因**）；`on` 逐片回调，返回 `false` 即要求中止 | `HttpChat`（测试 `FakeChat`） |
-| `ChatGateway` | 建通道（含核心通道与回落告知）；**不选择**模型 | `HttpGateway`（无可用模型时回落 `DemoGateway`） |
+| `Chat` | 一次模型会话：收消息列表（可带**工具声明**）回 `Completion`（正文 + 结束原因 + 原生工具调用）；`on` 逐片回调，返回 `false` 即要求中止 | `HttpChat`（测试 `FakeChat`） |
+| `ChatGateway` | 建通道（含核心通道与回落告知）；**不选择**模型；实测一条通道支不支持原生工具调用 | `HttpGateway`（无可用模型时回落 `DemoGateway`；探测发两条最小请求对比） |
 | `SettingsStore` | 登记处持久化（providers / models / settings / agents 四个 yaml） | `YamlSettingsStore` |
 | `ModelCatalog` | 列出一条通道当前可用的模型名 | `HttpModelCatalog` |
 | `ModuleSource` | 模块清单来源（扫描 `modules/`） | `FsModules` |

@@ -3,7 +3,7 @@
 
 use crate::adapters::fake_chat::{DemoGateway, FakeChat};
 use crate::core::envelope::{parse, Verb};
-use crate::core::ports::{Chat, ChatGateway, Chunk, Msg};
+use crate::core::ports::{Chat, ChatGateway, Chunk, CompleteOpts, Msg};
 use crate::core::providers::{Channel, Provider};
 
 /// 故意指向不可路由地址（TEST-NET-1）：任何真实拨号都会失败或超时——「没有网络依赖」因此可观察。
@@ -20,14 +20,18 @@ fn unreachable_channel() -> Channel {
 /// 跑一次调用，收集 on 收到的事件（顺序与内容都要可断言）。
 fn call(chat: &mut dyn Chat, stream: bool) -> (String, Vec<String>) {
     let mut seen: Vec<String> = Vec::new();
-    let out = chat.complete(&[Msg::user("你好")], stream, &mut |c| {
-        seen.push(match c {
-            Chunk::Start => "start".to_string(),
-            Chunk::Text(t) => format!("text:{}", t),
-            Chunk::Reasoning(r) => format!("reasoning:{}", r),
-        });
-        true
-    });
+    let out = chat.complete(
+        &[Msg::user("你好")],
+        CompleteOpts::plain(stream),
+        &mut |c| {
+            seen.push(match c {
+                Chunk::Start => "start".to_string(),
+                Chunk::Text(t) => format!("text:{}", t),
+                Chunk::Reasoning(r) => format!("reasoning:{}", r),
+            });
+            true
+        },
+    );
     (out.raw, seen)
 }
 
@@ -94,7 +98,7 @@ fn fake_chat_abort_at_start_returns_empty_and_emits_nothing_more() {
     let mut chat = FakeChat::new(vec!["不该出现".to_string()]);
     let mut seen: Vec<String> = Vec::new();
     let out = chat
-        .complete(&[Msg::user("停")], true, &mut |c| {
+        .complete(&[Msg::user("停")], CompleteOpts::plain(true), &mut |c| {
             seen.push(format!("{:?}", c));
             false
         })
@@ -108,7 +112,7 @@ fn fake_chat_abort_at_text_keeps_the_produced_text() {
     let mut chat = FakeChat::new(vec!["半句".to_string()]);
     let mut seen: Vec<String> = Vec::new();
     let out = chat
-        .complete(&[Msg::user("停")], true, &mut |c| {
+        .complete(&[Msg::user("停")], CompleteOpts::plain(true), &mut |c| {
             let is_text = matches!(c, Chunk::Text(_));
             seen.push(format!("{:?}", c));
             !is_text

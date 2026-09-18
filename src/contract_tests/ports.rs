@@ -7,8 +7,8 @@ use crate::core::exec::ExecSpec;
 use crate::core::fence::FenceSpec;
 use crate::core::history::{AgentMeta, SessionMeta};
 use crate::core::ports::{
-    Chat, ChatGateway, FenceHost, HistoryStore, Log, ModelCatalog, ModuleSource, Msg, NoopLog,
-    PackageSource, PromptSource, SettingsStore, SysIo, ToolRunner, Workspace,
+    Chat, ChatGateway, CompleteOpts, FenceHost, HistoryStore, Log, ModelCatalog, ModuleSource, Msg,
+    NoopLog, PackageSource, PromptSource, SettingsStore, SysIo, ToolRunner, Workspace,
 };
 use crate::core::providers::{Provider, Settings};
 use crate::tests::{
@@ -65,7 +65,7 @@ fn chat_double_shared_script_replays_in_order_and_is_explicitly_non_streaming() 
     };
     let mut chunks = 0;
     assert_eq!(
-        c.complete(&[Msg::user("x")], true, &mut |_| {
+        c.complete(&[Msg::user("x")], CompleteOpts::plain(true), &mut |_| {
             chunks += 1;
             true
         })
@@ -74,11 +74,13 @@ fn chat_double_shared_script_replays_in_order_and_is_explicitly_non_streaming() 
     );
     assert_eq!(chunks, 0, "非流式替身不回调：不得假装有流式");
     assert_eq!(
-        c.complete(&[Msg::user("x")], false, &mut |_| true).raw,
+        c.complete(&[Msg::user("x")], CompleteOpts::plain(false), &mut |_| true)
+            .raw,
         "二"
     );
     assert_eq!(
-        c.complete(&[Msg::user("x")], false, &mut |_| true).raw,
+        c.complete(&[Msg::user("x")], CompleteOpts::plain(false), &mut |_| true)
+            .raw,
         "二",
         "末条重复兜底"
     );
@@ -86,7 +88,9 @@ fn chat_double_shared_script_replays_in_order_and_is_explicitly_non_streaming() 
         q: Arc::new(Mutex::new(Vec::new())),
     };
     assert_eq!(
-        empty.complete(&[Msg::user("x")], false, &mut |_| true).raw,
+        empty
+            .complete(&[Msg::user("x")], CompleteOpts::plain(false), &mut |_| true)
+            .raw,
         "",
         "空脚本 = 空串"
     );
@@ -102,19 +106,28 @@ fn chat_gateway_double_scripts_member_and_core_channels_separately() {
     let gw = ScriptGateway::new(member, vec!["[]".to_string()]);
     let (mut c, notice) = gw.member_channel(None, "a");
     assert!(notice.is_none(), "脚本替身不做回落，就不该编造通知");
-    assert!(c.complete(&[], false, &mut |_| true).raw.contains("甲"));
+    assert!(c
+        .complete(&[], CompleteOpts::plain(false), &mut |_| true)
+        .raw
+        .contains("甲"));
     // 未登记的 agent：回落一条演示发言（不是 panic，也不是空串）。
     let (mut c2, _) = gw.member_channel(None, "没登记");
     assert!(
-        !c2.complete(&[], false, &mut |_| true).raw.is_empty(),
+        !c2.complete(&[], CompleteOpts::plain(false), &mut |_| true)
+            .raw
+            .is_empty(),
         "未登记也要能应答"
     );
     // 核心通道与成员通道是两条独立队列，互不污染。
     let (mut core, demo) = gw.core_channel(None);
     assert!(!demo, "脚本替身不是演示通道");
-    assert_eq!(core.complete(&[], false, &mut |_| true).raw, "[]");
+    assert_eq!(
+        core.complete(&[], CompleteOpts::plain(false), &mut |_| true)
+            .raw,
+        "[]"
+    );
     assert!(
-        c2.complete(&[], false, &mut |_| true)
+        c2.complete(&[], CompleteOpts::plain(false), &mut |_| true)
             .raw
             .contains("（演示）"),
         "成员队列不受核心通道影响"

@@ -6,6 +6,9 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
+/// 探测结论就住在登记处这一层（它是"关于通道的事实"，不是某个适配器的细节）。
+pub use crate::core::ports::ProbeOutcome;
+
 /// 一条供应商通道（端点 + 密钥）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Provider {

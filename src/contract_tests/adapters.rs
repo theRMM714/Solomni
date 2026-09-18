@@ -17,8 +17,8 @@ use crate::contract_tests::scratch;
 use crate::core::exec::ExecSpec;
 use crate::core::history::{AgentMeta, SessionMeta};
 use crate::core::ports::{
-    ChatGateway, Chunk, HistoryStore, Log, ModelCatalog, ModuleSource, Msg, NoopLog, PackageSource,
-    PromptSource, SettingsStore, SysIo, Workspace,
+    ChatGateway, Chunk, CompleteOpts, HistoryStore, Log, ModelCatalog, ModuleSource, Msg, NoopLog,
+    PackageSource, ProbeOutcome, PromptSource, SettingsStore, SysIo, Workspace,
 };
 use crate::core::providers::{Channel, Provider, Settings};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -568,7 +568,11 @@ fn http_gateway_talks_to_a_real_endpoint_on_loopback() {
         notice
     );
     let out = chat
-        .complete(&[Msg::user("你好")], false, &mut |_| true)
+        .complete(
+            &[Msg::user("你好")],
+            CompleteOpts::plain(false),
+            &mut |_| true,
+        )
         .raw;
     assert_eq!(out, "来自本机假供应商");
     let hits = mock.requests();
@@ -583,14 +587,18 @@ fn http_chat_streams_chunks_and_stops_when_the_caller_aborts() {
     let (mut chat, _) = gateway().member_channel(Some(&mock.channel("k")), "a");
     let mut seen: Vec<String> = Vec::new();
     let out = chat
-        .complete(&[Msg::user("讲两句")], true, &mut |c| {
-            seen.push(match c {
-                Chunk::Start => "start".to_string(),
-                Chunk::Text(t) => format!("text:{}", t),
-                Chunk::Reasoning(r) => format!("reasoning:{}", r),
-            });
-            true
-        })
+        .complete(
+            &[Msg::user("讲两句")],
+            CompleteOpts::plain(true),
+            &mut |c| {
+                seen.push(match c {
+                    Chunk::Start => "start".to_string(),
+                    Chunk::Text(t) => format!("text:{}", t),
+                    Chunk::Reasoning(r) => format!("reasoning:{}", r),
+                });
+                true
+            },
+        )
         .raw;
     assert_eq!(out, "你好", "流式返回完整正文");
     assert_eq!(
@@ -605,7 +613,7 @@ fn http_chat_streams_chunks_and_stops_when_the_caller_aborts() {
     let (mut chat2, _) = gateway().member_channel(Some(&mock2.channel("k")), "a");
     let mut seen2: Vec<String> = Vec::new();
     let out2 = chat2
-        .complete(&[Msg::user("停")], true, &mut |c| {
+        .complete(&[Msg::user("停")], CompleteOpts::plain(true), &mut |c| {
             let is_text = matches!(c, Chunk::Text(_));
             seen2.push(format!("{:?}", c));
             !is_text
@@ -625,7 +633,9 @@ fn finish_reason_is_carried_back_from_both_paths() {
     .to_string();
     let mock = Mock::start(vec![(200, "application/json", body)]);
     let (mut chat, _) = gateway().member_channel(Some(&mock.channel("k")), "a");
-    let out = chat.complete(&[Msg::user("hi")], false, &mut |_| true);
+    let out = chat.complete(&[Msg::user("hi")], CompleteOpts::plain(false), &mut |_| {
+        true
+    });
     assert_eq!(out.raw, "写完");
     assert_eq!(out.finish, "stop", "结束原因要如实带回");
     assert!(!out.truncated(), "stop 不是截断");
@@ -638,10 +648,167 @@ fn finish_reason_is_carried_back_from_both_paths() {
     );
     let mock2 = Mock::start(vec![(200, "text/event-stream", sse)]);
     let (mut chat2, _) = gateway().member_channel(Some(&mock2.channel("k")), "a");
-    let out2 = chat2.complete(&[Msg::user("hi")], true, &mut |_| true);
+    let out2 = chat2.complete(&[Msg::user("hi")], CompleteOpts::plain(true), &mut |_| true);
     assert_eq!(out2.raw, "半句", "已产出的正文照常返回");
     assert_eq!(out2.finish, "length");
     assert!(out2.truncated(), "各家的截断取值都归到一处判定");
+}
+
+/// 一次原生工具调用的非流式响应（content 为 null：纯工具调用轮的常见形状）。
+fn tool_call_body(name: &str, args: &str) -> String {
+    serde_json::json!({
+        "choices": [{
+            "message": {
+                "content": null,
+                "tool_calls": [{ "id": "call_1", "type": "function", "function": { "name": name, "arguments": args } }]
+            },
+            "finish_reason": "tool_calls"
+        }]
+    })
+    .to_string()
+}
+
+/// 流式里的一段工具调用分片（按 index 归位；id/name 一般只在第一片，arguments 逐片拼）。
+fn sse_tool(index: u64, id: Option<&str>, name: Option<&str>, args: Option<&str>) -> String {
+    let mut f = serde_json::json!({ "index": index });
+    if let Some(id) = id {
+        f["id"] = serde_json::json!(id);
+    }
+    let mut func = serde_json::Map::new();
+    if let Some(n) = name {
+        func.insert("name".to_string(), serde_json::json!(n));
+    }
+    if let Some(a) = args {
+        func.insert("arguments".to_string(), serde_json::json!(a));
+    }
+    f["function"] = serde_json::Value::Object(func);
+    format!(
+        "data: {}\n\n",
+        serde_json::json!({ "choices": [{ "delta": { "tool_calls": [f] } }] })
+    )
+}
+
+#[test]
+fn http_chat_reads_native_tool_calls() {
+    // content 是 null（不是缺字段）：按空串处理，并把 tool_calls 原样带回来
+    let mock = Mock::start(vec![(
+        200,
+        "application/json",
+        tool_call_body("read", "{\"path\":\"/x\"}"),
+    )]);
+    let (mut chat, _) = gateway().member_channel(Some(&mock.channel("k")), "a");
+    let out = chat.complete(
+        &[Msg::user("读一下")],
+        CompleteOpts::plain(false),
+        &mut |_| true,
+    );
+    assert_eq!(out.raw, "", "纯工具调用轮没有正文");
+    assert_eq!(out.finish, "tool_calls");
+    assert_eq!(
+        out.calls,
+        vec![crate::core::ports::ToolCall {
+            id: "call_1".to_string(),
+            name: "read".to_string(),
+            args_json: "{\"path\":\"/x\"}".to_string(),
+        }]
+    );
+}
+
+#[test]
+fn http_chat_assembles_streaming_tool_calls_by_index() {
+    let sse = format!(
+        "{}{}{}{}{}data: [DONE]\n\n",
+        sse_tool(0, Some("call_a"), Some("read"), Some("{\"pa")),
+        sse_tool(0, None, None, Some("th\":\"/x\"}")),
+        sse_tool(1, Some("call_b"), Some("search"), Some("{}")),
+        sse_finish("tool_calls"),
+        "",
+    );
+    let mock = Mock::start(vec![(200, "text/event-stream", sse)]);
+    let (mut chat, _) = gateway().member_channel(Some(&mock.channel("k")), "a");
+    let out = chat.complete(
+        &[Msg::user("两件事")],
+        CompleteOpts::plain(true),
+        &mut |_| true,
+    );
+    assert_eq!(out.finish, "tool_calls");
+    assert_eq!(
+        out.raw, "",
+        "纯工具调用轮没有正文，也不能因此判成「没内容」去换候选"
+    );
+    assert_eq!(
+        out.calls.len(),
+        2,
+        "两次调用按 index 各就各位：{:?}",
+        out.calls
+    );
+    assert_eq!(out.calls[0].id, "call_a");
+    assert_eq!(out.calls[0].name, "read");
+    assert_eq!(
+        out.calls[0].args_json, "{\"path\":\"/x\"}",
+        "分片的 arguments 要按序拼起来"
+    );
+    assert_eq!(out.calls[1].name, "search");
+    assert_eq!(out.calls[1].args_json, "{}");
+}
+
+#[test]
+fn tool_probe_tells_supported_unsupported_and_unknown_apart() {
+    let log: Arc<dyn Log + Send + Sync> = Arc::new(NoopLog);
+    let gateway = || HttpGateway::with_log(Arc::clone(&log), memo_new());
+
+    // ① 支持：不带 tools 能通，带 tools 返回工具调用
+    let mock = Mock::start(vec![
+        (200, "application/json", completion_body("好")),
+        (
+            200,
+            "application/json",
+            tool_call_body("solomni_ping", "{}"),
+        ),
+    ]);
+    match gateway().probe_tools(&mock.channel("k")) {
+        Ok(ProbeOutcome::Supported { detail }) => {
+            assert!(detail.contains("solomni_ping"), "{}", detail)
+        }
+        other => panic!("应判为支持：{:?}", other),
+    }
+
+    // ② 明确不支持：同样的请求，带上 tools 被供应商拒（附供应商原话）
+    let mock = Mock::start(vec![
+        (200, "application/json", completion_body("好")),
+        (
+            400,
+            "application/json",
+            serde_json::json!({ "error": { "message": "Unknown parameter: tools" } }).to_string(),
+        ),
+    ]);
+    match gateway().probe_tools(&mock.channel("k")) {
+        Ok(ProbeOutcome::Unsupported { detail }) => assert!(detail.contains("tools"), "{}", detail),
+        other => panic!("应判为明确不支持：{:?}", other),
+    }
+
+    // ③ 无法判定：带 tools 也通，但这次没发起调用——如实说"没法定论"，不替用户拍板
+    let mock = Mock::start(vec![
+        (200, "application/json", completion_body("好")),
+        (200, "application/json", completion_body("我不调用工具")),
+    ]);
+    match gateway().probe_tools(&mock.channel("k")) {
+        Ok(ProbeOutcome::Unknown { detail }) => {
+            assert!(detail.contains("没有发起调用"), "{}", detail)
+        }
+        other => panic!("应判为无法判定：{:?}", other),
+    }
+
+    // ④ 通道本身就不通：如实报"测不了"，绝不把 401 之类的失败当成"不支持工具调用"
+    let mock = Mock::start(vec![(
+        401,
+        "application/json",
+        "{\"error\":{\"message\":\"bad key\"}}".to_string(),
+    )]);
+    let err = gateway()
+        .probe_tools(&mock.channel("bad"))
+        .expect_err("通道不通就是 Err");
+    assert!(err.contains("通道本身就没打通"), "{}", err);
 }
 
 #[test]
@@ -654,7 +821,11 @@ fn http_errors_come_back_honestly_and_never_carry_the_api_key() {
         (401, "application/json", "{}".to_string()),
     ]);
     let (mut chat, _) = gateway().member_channel(Some(&mock.channel(secret)), "a");
-    let out = chat.complete(&[Msg::user("hi")], false, &mut |_| true).raw;
+    let out = chat
+        .complete(&[Msg::user("hi")], CompleteOpts::plain(false), &mut |_| {
+            true
+        })
+        .raw;
     assert!(out.contains("模型调用失败"), "失败必须如实回执：{}", out);
     assert!(!out.contains(secret), "出站错误里的密钥必须先脱敏：{}", out);
     assert!(
@@ -668,7 +839,11 @@ fn http_errors_come_back_honestly_and_never_carry_the_api_key() {
 fn http_gateway_falls_back_to_demo_only_when_there_is_no_channel() {
     let (mut chat, notice) = gateway().member_channel(None, "reviewer");
     assert!(notice.is_some(), "没有通道时必须如实告知回落：{:?}", notice);
-    let out = chat.complete(&[Msg::user("hi")], false, &mut |_| true).raw;
+    let out = chat
+        .complete(&[Msg::user("hi")], CompleteOpts::plain(false), &mut |_| {
+            true
+        })
+        .raw;
     assert!(out.contains("（演示）"), "{}", out);
     let (_, core_demo) = gateway().core_channel(None);
     assert!(core_demo, "核心通道同样如实标记");

@@ -67,7 +67,7 @@ impl crate::core::ports::Chat for SlowChat {
     fn complete(
         &mut self,
         _m: &[crate::core::ports::Msg],
-        _stream: bool,
+        _opts: crate::core::ports::CompleteOpts<'_>,
         on: &mut dyn FnMut(crate::core::ports::Chunk) -> bool,
     ) -> crate::core::ports::Completion {
         use std::sync::atomic::Ordering;
@@ -91,6 +91,9 @@ pub(crate) struct SlowGateway {
 }
 
 impl crate::core::ports::ChatGateway for SlowGateway {
+    fn probe_tools(&self, _c: &crate::core::providers::Channel) -> Result<crate::core::ports::ProbeOutcome, String> {
+        Err("脚本替身没有真实供应商，测不了工具调用支持".to_string())
+    }
     fn member_channel(
         &self,
         _c: Option<&crate::core::providers::Channel>,

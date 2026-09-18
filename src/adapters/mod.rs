@@ -13,6 +13,7 @@ pub mod http_agent;
 pub mod http_chat;
 pub mod log;
 pub mod model_catalog;
+pub mod http_probe;
 pub mod proc_tools;
 pub mod repair;
 pub mod sys_io;

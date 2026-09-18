@@ -484,6 +484,28 @@ impl Core {
         self.settings.core.clone()
     }
 
+    /// 实测一条通道支不支持原生工具调用，并把**结论写回登记处**（只写确定的结论）：
+    /// 支持 → `tools: native`；明确不支持 → `tools: envelope`；无法判定 → 不改，只把事实报回去。
+    /// 事实由适配层实测（两条最小请求对比），core 只做"要不要落盘"这一层策略。
+    pub fn probe_model_tools(&mut self, id: &str) -> Result<providers::ProbeOutcome, String> {
+        let channel = self.settings.resolve(id)?;
+        let outcome = self.gateway.probe_tools(&channel)?;
+        let want = match &outcome {
+            providers::ProbeOutcome::Supported { .. } => Some(providers::ToolMode::Native),
+            providers::ProbeOutcome::Unsupported { .. } => Some(providers::ToolMode::Envelope),
+            providers::ProbeOutcome::Unknown { .. } => None,
+        };
+        if let Some(mode) = want {
+            if let Some(m) = self.settings.models.get_mut(id) {
+                if m.tools != mode {
+                    m.tools = mode;
+                    self.save_settings("core::probe_model_tools")?;
+                }
+            }
+        }
+        Ok(outcome)
+    }
+
     pub fn model_upsert(&mut self, id: &str, name: &str, api_model: &str, provider: &str, note: &str) -> Result<(), String> {
         if id.is_empty() || name.is_empty() || api_model.is_empty() || provider.is_empty() {
             return Err("id / name / api_model / provider 均不能为空".to_string());
@@ -998,7 +1020,7 @@ impl Core {
         let raw = chat
             .complete(
                 &[Msg::system(self.prompts.core.suggest_models.system.clone()), Msg::user(user)],
-                false,
+                crate::core::ports::CompleteOpts::plain(false),
                 &mut |_| true,
             )
             .raw;

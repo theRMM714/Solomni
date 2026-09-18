@@ -103,7 +103,7 @@ fn main() {
     // 信封修复：只把字符串里的裸控制字符转义（无歧义才修，其余交给模型重发）。
     let repair = adapters::UnambiguousRepair;
 
-    let core = match core::Core::new(
+    let mut core = match core::Core::new(
         Arc::new(store),
         Arc::new(history),
         Arc::new(workspace),
@@ -124,6 +124,35 @@ fn main() {
             std::process::exit(1);
         }
     };
+
+    // 隐藏模式：实测一条通道支不支持原生工具调用，并把确定结论写回 models.yaml（要真实网络）。
+    if let Some(i) = args.iter().position(|a| a == "--probe-tools") {
+        let Some(id) = args.get(i + 1) else {
+            eprintln!("用法：solomni --probe-tools <模型 id>");
+            std::process::exit(2);
+        };
+        match core.probe_model_tools(id) {
+            Ok(core::providers::ProbeOutcome::Supported { detail }) => {
+                println!("[探测] 模型 {}：支持原生工具调用（{}）", id, detail);
+                println!("[探测] 已把 models.yaml 的 tools 写成 native");
+                std::process::exit(0);
+            }
+            Ok(core::providers::ProbeOutcome::Unsupported { detail }) => {
+                println!("[探测] 模型 {}：**不支持**原生工具调用（{}）", id, detail);
+                println!("[探测] 已把 models.yaml 的 tools 写成 envelope（手写信封照旧可用，能力没有任何损失）");
+                std::process::exit(0);
+            }
+            Ok(core::providers::ProbeOutcome::Unknown { detail }) => {
+                println!("[探测] 模型 {}：无法判定（{}）", id, detail);
+                println!("[探测] 登记处**没有改动**：请自行决定填 native 还是 envelope");
+                std::process::exit(0);
+            }
+            Err(e) => {
+                eprintln!("[探测] 失败：{}", e);
+                std::process::exit(1);
+            }
+        }
+    }
 
     // 写权限开关定稿：环境变量优先（测试/CI 用得到），否则看设置。
     {

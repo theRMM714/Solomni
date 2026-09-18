@@ -5,7 +5,7 @@
 
 use crate::core::envelope::{self, ToolInvoke, Verb};
 use crate::core::events::ToolCallView;
-use crate::core::ports::{BoxedChat, Chat, Chunk, Msg, ToolOutcome, ToolRunner};
+use crate::core::ports::{BoxedChat, Chat, Chunk, CompleteOpts, Msg, ToolOutcome, ToolRunner};
 use crate::core::prompt::Prompts;
 use serde::Deserialize;
 use std::collections::BTreeMap;
@@ -227,7 +227,7 @@ impl Discussion {
                 (m.system.clone(), m.id.clone())
             };
             let msgs = vec![Msg::system(system), Msg::user(opener.clone())];
-            let done = self.members[i].chat.complete(&msgs, false, &mut |_| true);
+            let done = self.members[i].chat.complete(&msgs, CompleteOpts::plain(false), &mut |_| true);
             let reply = envelope::parse(&done.raw);
             self.absorb(&id, reply.verb, reply.text, reply.degraded, done.truncated());
         }
@@ -267,7 +267,7 @@ impl Discussion {
                 &[("transcript", snapshot.iter().map(|l| l.text.clone()).collect::<Vec<_>>().join("\n"))],
             );
             let msgs = vec![Msg::system(system), Msg::user(step_prompt)];
-            let done = self.members[i].chat.complete(&msgs, false, &mut |_| true);
+            let done = self.members[i].chat.complete(&msgs, CompleteOpts::plain(false), &mut |_| true);
             let reply = envelope::parse(&done.raw);
             let verb = reply.verb;
             let text = reply.text;
@@ -326,7 +326,7 @@ impl Discussion {
             &[("transcript", self.transcript.iter().map(|l| l.text.clone()).collect::<Vec<_>>().join("\n"))],
         );
         let msgs = vec![Msg::system(self.prompts.core.synthesize.system.clone()), Msg::user(user)];
-        core_chat.complete(&msgs, false, &mut |_| true).raw
+        core_chat.complete(&msgs, CompleteOpts::plain(false), &mut |_| true).raw
     }
 }
 
@@ -418,7 +418,7 @@ impl Execution {
             &[("plan", plan.to_string()), ("reports", reports)],
         );
         let msgs = vec![Msg::system(prompts.core.review.system.clone()), Msg::user(user)];
-        let raw = core_chat.complete(&msgs, false, &mut |_| true).raw;
+        let raw = core_chat.complete(&msgs, CompleteOpts::plain(false), &mut |_| true).raw;
         self.items = envelope::extract_json_array(&raw)
             .and_then(|arr| serde_json::from_str::<Vec<CheckItem>>(&arr).ok())
             .unwrap_or_default();
@@ -527,7 +527,7 @@ pub(crate) fn converse_with(
                 }
                 keep
             };
-            chat.complete(&msgs, stream, &mut sink)
+            chat.complete(&msgs, CompleteOpts::plain(stream), &mut sink)
         };
         // 结束原因如实带回：被长度截断要落日志——事后才判定得出"是截断还是模型自己写错"。
         let finish = done.finish.clone();
