@@ -58,7 +58,7 @@ cargo run                 # 工具链就绪后最直接的跑法：cargo run -- 
 
 - **首次运行不需要手工准备环境**：启动层序会把工具链收敛在项目内（`platform/`、`.tools/`），缺 Rust 会先征求同意再装进去，并每次都交给 cargo 判断增量构建。
 - **没有配置供应商也能跑**：会使用内置假模型演示流程，并如实告知（不静默）。
-- **自测**：`node run-tests.js` 跑全部测试并给出四态汇总（通过 / 失败 / 环境跳过 / 缺口），**默认零副作用**；会改本机状态的测试（写权限项、建容器 profile）要显式 `--fence-live`，只在一次性环境（CI / VM）里开。`\.\test.bat`（PowerShell 带 `.\`）或 `./test.sh` 是薄包装。
+- **自测**：`node run-tests.js` 跑当前已接入的运行时测试并给出汇总（通过 / 失败 / 环境跳过 / 缺口），**默认零副作用**；会改本机状态的测试（写权限项、建容器 profile）要显式 `--fence-live`，只在一次性环境（CI / VM）里开。代码质量门禁、Fake/端口契约和代码冗余检查的目标设计也属于测试验收，但目前仍有部分全局缺口，见 `tests/gaps.yaml`。快速质量检查可单独运行：`cargo fmt --check`、`cargo check --all-targets`、`cargo clippy --all-targets --all-features -- -D warnings`、`cargo tree --duplicates`。`\.\test.bat`（PowerShell 带 `.`\`）或 `./test.sh` 是薄包装。
   分层、目录、缺口账与报告格式见 [TESTING.md](TESTING.md)。
 
 ## 它不是什么 · What It Is Not

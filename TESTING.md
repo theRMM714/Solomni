@@ -1,135 +1,485 @@
 # 测试架构（TESTING）
 
-> 本文是**测试的唯一权威**：分层与禁令、目录与命名、缺口账的纪律、入口与报告格式、覆盖矩阵、给 AI 的工作方法。
-> 开发规则见 [ARCHITECTURE.md](ARCHITECTURE.md)，模块契约见 [MODULE_SPEC.md](MODULE_SPEC.md)，仓库协作规则见 [AGENTS.md](AGENTS.md)。
+> 本文是测试的唯一权威：定义测试层级、测试替身、端口契约、质量门禁、缺口账、执行入口与验收判据。
+> 架构约束见 [ARCHITECTURE.md](ARCHITECTURE.md)，模块交付要求见 [MODULE_SPEC.md](MODULE_SPEC.md)，仓库协作约束见 [AGENTS.md](AGENTS.md)。
+>
+> 本文同时记录**目标测试设计**与**当前实现状态**。目标设计不是已完成能力；凡标记为“缺口”的内容，不得在报告中写成通过。
 
-## 立场
+## 一、测试的目的与硬原则
 
-- **测试是事实账，不是通过率**：跑不了就说跑不了，没测就记成缺口。
-- **环境不允许 ≠ 通过**：跳过必须打印原因并计入报告（`env-skip`），绝不静默算过。
-- **缺口必须成账**：每个平台一份 `gaps.yaml`；一个平台"验收通过" = 该平台的测试目标全绿 **且** 该平台的 `gaps.yaml` 清空。
-- **判据**：任意环节、任意实现都必须能单独 mock 测试（见 [AGENTS.md](AGENTS.md) 代码规范）。
+测试要回答的是“当前实现是否满足可观察的行为契约”，不是“测试数量是否很多”或“代码覆盖率是否好看”。
 
-## 〇、安全边界（硬规矩）
+- 测试记录事实：通过、失败、环境跳过、缺口必须分开。
+- 环境不允许执行不等于通过；必须记录 `env-skip` 与原因。
+- 尚未实现测试不等于通过；必须进入缺口账。
+- 失败必须有可定位证据：断言、输入、观察结果和必要的日志尾部。
+- 测试必须可重复、可隔离、可清理，不依赖执行顺序。
+- 默认测试不得修改真实用户数据、真实 `.home/`、真实 `session/`、真实权限或外部服务。
+- 真实网络、真实密钥、开发者个人配置不能成为默认测试依赖。
+- 跨平台测试必须优先使用路径组件、隔离根和平台能力探针，不把某个平台的行为猜测成所有平台的行为。
+- 测试替身也属于代码：Fake、Mock、Stub、Spy 和 Fixture 必须有自己的最小验证。
+- 质量门禁和业务测试是两类不同事实；质量门禁失败不能被业务测试通过抵消。
+- 不为了测试制造无意义的 trait、包装层、公共状态或重复测试；可测性必须服从架构边界。
 
-- **测试不得改本机状态**：会写权限项、建容器 profile 的测试（Windows 容器探针、端到端里的真实围栏写入）**默认跳过**并打印原因；只有显式 `--fence-live` 才真跑，且建议只在**一次性环境**（CI runner / VM / WSL）里开。
-- **`node run-tests.js`（默认）零副作用**：L1、跨平台集成、前端冒烟照常跑；端到端在「不写本机权限」的模式下跑（工具走无围栏路径，断言不变）。
-- **产品侧也要同意**：本程序只在用户显式授权（`.home/settings.yaml` 的 `fence_write: true`，或环境变量 `SOLOMNI_FENCE_WRITE=1`）后才写权限项；未授权时如实告知「容器围栏未启用」，按无围栏执行。写了什么会在 stderr 逐条列出（`[围栏] 已写权限 N 处：…`）。
-- **可精确回收**：`solomni --fence-clean` 按授权台账（`.home/fence-grants.json`）逐条撤销并删掉我们建过的容器 profile；删会话时也会按同一台账撤掉该会话的授权。
+## 二、当前实现与目标设计
 
-## 一、四层
+当前仓库已经具备：
 
-| 层 | 测什么 | 放哪 | 硬规矩 |
-| --- | --- | --- | --- |
-| **L1 单元** | 纯逻辑、单个实现的行为（用内存适配器 mock 掉 IO） | 内联在模块里：`#[cfg(test)] mod tests` | 不碰盘、不碰网、不起进程；平台中立 |
-| **L2 跨平台集成** | 真进程、真文件系统、本地环回 HTTP；与平台无关的行为 | `tests/cross-platform/` | 可起真进程，但**不依赖任何特权或特定平台的机制** |
-| **L3 平台探针** | 该平台的真机机制（围栏、进程树、目录授权、断网、解释器可达性） | `tests/<平台>/probes/` | 机制可用就必须**真断言**；环境不允许才允许跳过，且必须打印原因 |
-| **L4 端到端** | 假模型 + 本地假供应商，跑完整流程（单 agent 对话 / 协作五阶段 / 会话编辑 / 工作区与工具） | `tests/cross-platform/e2e/` | 不出网、不要真密钥、可反复跑；用隔离根，绝不碰真实 `.home/` 与 `session/` |
+- `src/tests.rs` 中的全内存核心测试装配；
+- `tests/cross-platform/` 跨平台集成与端到端测试；
+- `tests/windows/`、`tests/linux/`、`tests/macos/` 平台探针；
+- `src/presentation/web/*.smoke.cjs` 前端冒烟测试；
+- `tests/<platform>/gaps.yaml` 平台缺口账；
+- `node run-tests.js` 测试汇总入口；
+- `src/adapters/fake_chat.rs` 中的 `FakeChat` 与 `DemoGateway`；
+- `src/tests.rs` 中的 `InMemory*`、`FakeCatalog`、`ScriptGateway`、`NoopLog` 等测试装配。
 
-## 二、位置由可见性决定（不是风格）
+当前仍存在的明确缺口：
 
-本项目是 bin crate：`tests/` 里的集成测试**看不到 crate 内部项**（私有函数与内部状态）。于是：
+- T0 质量检查尚未完整接入 `node run-tests.js`；
+- `FakeChat`、`DemoGateway` 尚没有独立、完整的 Fake 契约测试清单；
+- 所有 core 端口尚未形成可审计的“替身 / 失败注入 / 取消 / 清理 / 真实适配器”完整矩阵；
+- 代码冗余、重复测试、重复 Fixture、重复依赖尚没有独立的质量门禁；
+- 当前 `run-tests.js` 的步骤状态主要是 `pass`、`fail`、`skip-platform`、`gap`，质量专用状态仍属于目标设计；
+- 当前平台缺口账为空，不代表 T0、Fake 契约或端口矩阵缺口已经完成；全局缺口见 `tests/gaps.yaml`。
 
-- **要看 crate 内部 → 内联在模块里**（`#[cfg(test)] mod tests`）：这些测试天然是 L1。
-- **只走公开面（二进制命令行 / HTTP / JSON 协议）→ 放 `tests/<平台>/`**：新写的测试默认走这条路，能黑盒就黑盒。
-- 一个测试既想黑盒又需要 crate 内部的东西时，说明该机制缺少对外的观察面——那是设计问题：先补观察面（例如 `solomni --doctor` 这类机器可读输出），而不是把测试塞回 `src/`。
+## 三、测试分类（T0-T5）
 
-## 三、目录与 cargo 目标
+### T0：静态质量、结构和冗余检查
+
+T0 不验证业务运行结果，而验证代码和测试系统自身是否保持健康。
+
+目标检查项：
+
+```text
+cargo fmt --check
+cargo check --all-targets
+cargo clippy --all-targets --all-features -- -D warnings
+cargo tree --duplicates
+```
+
+同时需要检查：
+
+- `Cargo.toml` 是否登记所有应运行的集成测试目标；
+- 新增测试文件是否确实被入口执行；
+- 测试标记是否存在、稳定且没有被重复伪造；
+- 报告 JSON 是否符合约定；
+- `gaps.yaml` 是否可解析、字段完整；
+- 测试是否写入项目外绝对路径或真实用户目录；
+- 测试结束后是否遗留子进程、端口、临时目录、权限或句柄；
+- 是否存在重复测试、重复 Fixture、重复测试替身或无理由的跨层重复断言。
+
+`cargo tree --duplicates` 只检查依赖树中的重复版本，不等于源码重复检查。`clippy` 也不能替代业务测试。三者的职责必须分开记录。
+
+当前状态：部分命令可人工执行，但尚未全部纳入 `run-tests.js` 的统一报告，属于全局缺口。
+
+### T1：单元测试
+
+位置：实现模块内部的 `#[cfg(test)] mod tests`，以及现有的 `src/tests.rs`。
+
+验证：
+
+- 纯函数和状态转换；
+- 信封解析、协作状态派生、提示词渲染、路径寻址；
+- 单个实现的边界与错误行为；
+- 使用内存测试替身装配的 core 行为。
+
+硬规矩：
+
+- 不碰真实网络、真实用户文件、特权权限或外部服务；
+- IO、网络、进程、时间、随机数等可替换点必须注入替身；
+- 每个重要失败分支必须有明确断言；
+- 不用“返回非空”“没有 panic”代替对行为的断言；
+- 需要观察交互时，断言记录型 Spy/Fake 的可观察记录，不暴露生产实现内部状态。
+
+### T2：端口与适配器契约测试
+
+T2 是当前设计中需要补强的层次。它验证同一个端口的不同实现是否遵守同一份契约。
+
+每个端口至少需要明确：
+
+1. 输入和输出；
+2. 成功行为；
+3. 错误传播；
+4. 空结果和边界输入；
+5. 取消与超时（如果端口支持）；
+6. 重复调用和幂等性（如果端口有此语义）；
+7. 资源清理；
+8. Fake/Stub/Spy 的注入方式；
+9. 真实适配器的验证方式。
+
+T2 不替代：
+
+- core 纯逻辑单元测试；
+- 真实文件系统、真实进程或真实权限的跨平台集成测试；
+- 平台专属围栏探针。
+
+### T3：跨平台集成测试
+
+位置：`tests/cross-platform/`。
+
+验证所有目标平台都应成立的真实边界：
+
+- 真实进程协议；
+- 隔离文件系统和工作区；
+- 本地环回 HTTP；
+- 配置和历史落盘、恢复与损坏处理；
+- 工具 stdin/stdout、退出码和错误传播；
+- 进程树回收、超时和取消；
+- 日志、报告和路径编码；
+- 前端冒烟（由 `src/presentation/web/smoke.cjs` 自动发现）。
+
+禁止依赖：外网、真实密钥、用户目录、已有后台服务、平台特权或本机偶然配置。
+
+### T4：平台探针
+
+位置：`tests/windows/`、`tests/linux/`、`tests/macos/`。
+
+只验证平台机制本身，例如：
+
+- 文件系统围栏；
+- 断网；
+- 进程树和杀树；
+- ACL、容器 profile、Landlock、seatbelt；
+- 平台解释器或系统能力。
+
+每条探针必须区分：
+
+- 代码失败：`test-fail`；
+- 环境不允许：`env-skip`，必须有事实原因；
+- 尚未实现：`gap`；
+- 机制不存在：记录能力事实，不伪装成通过。
+
+探针不得用“本机无法运行”吞掉实现错误。探针具体缺口继续记录在 `tests/<platform>/gaps.yaml`。
+
+### T5：端到端测试
+
+位置：`tests/cross-platform/e2e/`。
+
+使用本地假供应商、隔离根和可重复夹具，验证完整用户旅程：
+
+- 单 agent 对话；
+- 多 agent 协作与回报；
+- 代拟、回档和会话编辑；
+- 文件读写、搜索和工作区隔离；
+- 工具正常、失败、超时、拒绝和异常退出；
+- 模型通道失败、回落和非法响应；
+- 历史恢复、损坏和重复启动；
+- 删除会话后的权限回收和资源清理。
+
+T5 验证的是跨模块行为，不把所有内部函数重复断言一遍。
+
+## 四、测试替身规范
+
+### 4.1 Stub
+
+Stub 只提供预设输入或结果，不负责验证交互。例如固定的设置、能力报告或时间来源。测试需要验证调用次数或顺序时，不能只用 Stub。
+
+### 4.2 Fake
+
+Fake 是可运行但简化的端口实现。它应当让 core 在没有真实网络、文件系统或外部服务时运行真实业务流程。
+
+Fake 必须：
+
+- 实现明确的 core 端口；
+- 支持成功、失败、空结果和边界输入；
+- 在端口有此语义时支持延迟、取消、超时或断开；
+- 记录被测代码需要观察的调用现场；
+- 通过最小端口契约测试；
+- 不得只有“永远成功”的 happy path；
+- 不得偷偷改变生产端口的错误、顺序或资源语义。
+
+当前项目中的 Fake 或 Fake 候选：
+
+| 实现 | 当前角色 | 当前状态 |
+| --- | --- | --- |
+| `src/adapters/fake_chat.rs:FakeChat` | 脚本模型，同时记录 `calls`，兼具 Fake + Spy | 已被业务测试使用；独立契约测试缺口 |
+| `src/adapters/fake_chat.rs:DemoGateway` | 演示/回落网关 | 已被生产装配使用；独立契约测试缺口 |
+| `src/tests.rs:InMemorySettings`、`InMemoryHistory`、`InMemoryWorkspace`、`InMemorySysIo` | 内存 Fake | 已被核心测试装配使用；需按端口补最小契约覆盖 |
+| `src/tests.rs:FakeCatalog` | 模型目录 Fake + 调用记录 | 已被核心测试使用；契约矩阵尚未完整登记 |
+| `src/tests.rs:ScriptGateway` | 脚本网关 Fake | 已被核心测试使用；失败/取消场景需单独核对 |
+| `src/core/ports.rs:NoopLog` | 无动作 Stub | 已存在；不用于验证日志内容 |
+| `tests/cross-platform/e2e/mock.js` | 本地假供应商服务 | 已用于 T5；应覆盖协议错误、断开、延迟等场景 |
+
+### 4.3 Mock
+
+Mock 表达预先声明的交互期望，适用于“必须调用一次”“必须先调用 A 再调用 B”“失败后禁止继续调用”等契约。
+
+本项目不要求引入第三方 mocking 框架。优先使用手写记录型 Fake/Spy，以减少依赖和跨平台不确定性。只有当交互期望本身是被测行为时，才使用 Mock 语义。
+
+### 4.4 Spy
+
+Spy 记录调用现场供断言。`FakeChat.calls` 是当前明确的 Spy 记录。Spy 不应改变被测依赖的其他行为，也不能因为记录方便而泄漏生产内部状态。
+
+### 4.5 Fixture
+
+Fixture 是可复用的固定输入或预期输出，例如 provider 配置、模型响应、transcript、工作区文件和工具输出。
+
+Fixture 必须：
+
+- 使用相对路径或测试隔离根；
+- 不含真实密钥、账号、机器路径；
+- 命名表达场景；
+- 避免在多个测试中复制粘贴同一大段文本；
+- 在测试失败时能定位到输入来源。
+
+## 五、Fake 专项验收
+
+### `FakeChat`
+
+至少需要覆盖：
+
+- 空脚本；
+- 单条脚本和多条脚本；
+- 多次调用时的消耗与重复语义；
+- 完整消息列表记录；
+- 消息顺序保持；
+- streaming 回调行为；
+- 回调返回 `false` 时的中止行为；
+- 空响应和非法响应交给上层后的处理；
+- 调用次数与业务预期一致。
+
+### `DemoGateway`
+
+至少需要覆盖：
+
+- member channel 能被创建并完成调用；
+- core channel 能被创建并完成调用；
+- 回落通知存在且指向正确模块；
+- 演示模式不发网络请求、不需要密钥；
+- core 与 member 的脚本语义不会相互污染。
+
+### 本地假供应商
+
+至少需要覆盖：
+
+- 正常响应；
+- 非法响应；
+- HTTP 错误；
+- 延迟；
+- 连接断开；
+- 流式响应；
+- 多次运行隔离；
+- 端口、子进程和临时目录清理。
+
+以上条目当前不是“全部已完成”的声明；未完成项进入 `tests/gaps.yaml`。
+
+## 六、端口测试矩阵
+
+端口矩阵是测试设计账，不允许只写“有 mock”而不说明 Fake 的能力。
+
+| 端口 | 当前/计划替身 | 交互记录 | 失败注入 | 取消/超时 | 真实适配器 | 当前状态 |
+| --- | --- | --- | --- | --- | --- | --- |
+| `Chat` | `FakeChat` | `calls` | 待补完整场景 | 待核对 | `HttpChat` | 部分 |
+| `ChatGateway` | `ScriptGateway`、`DemoGateway` | 部分 | 待补完整场景 | 不适用/待核对 | `HttpGateway` | 部分 |
+| `SettingsStore` | `InMemorySettings` | 状态可观察 | 待补 | 不适用 | `YamlSettingsStore` | 部分 |
+| `ModelCatalog` | `FakeCatalog` | `seen` | 待补 | 不适用 | `HttpModelCatalog` | 部分 |
+| `ModuleSource` | `VecSource` | 不适用 | 待补 | 不适用 | `FsModules` | 部分 |
+| `PackageSource` | `InMemoryPackages` | 不适用 | 待补 | 不适用 | `FsPackages` | 部分 |
+| `Workspace` | `InMemoryWorkspace` | 状态可观察 | 待补 | 不适用 | `FsWorkspace` | 部分 |
+| `SysIo` | `InMemorySysIo` | 状态可观察 | 待补 | 不适用 | `FsSysIo` | 部分 |
+| `HistoryStore` | `InMemoryHistory` | 状态可观察 | 待补 | 不适用 | `FsHistory` | 部分 |
+| `PromptSource` | 测试 Fixture/内存来源 | 待核对 | 待补 | 不适用 | `YamlPrompts` | 部分 |
+| `ToolRunner` | 记录型 Fake/现有测试替身 | 待核对 | 待补 | 待补 | `ProcTools` | 部分 |
+| `Log` | `NoopLog`、记录型 Log | 记录型 Log | 不适用 | 不适用 | `FileLog` | 部分 |
+
+“部分”表示已有使用或局部覆盖，不表示该端口已经完成契约验收。
+
+## 七、隔离、清理与副作用
+
+每个测试必须声明其资源边界：
+
+- 文件：使用临时根或测试专属目录；结束后清理；
+- 网络：只绑定本地环回，测试后关闭监听；
+- 进程：记录子进程，超时和失败路径也要杀整棵树；
+- 权限：默认不写真实 ACL、profile 或系统策略；真机探针只能在显式 `--fence-live` 下执行；
+- 配置：不得读取真实 `.home/`，不得覆盖用户设置；
+- 日志和报告：写入 `target/` 下的测试目录，不把产物写进源码目录；
+- 并发：测试不得共享可变全局状态，除非明确验证并发语义；
+- 时间和随机数：需要确定性时注入 Stub 或固定种子。
+
+测试成功、失败、panic、取消和超时都必须走清理路径。不能只在 happy path 清理资源。
+
+## 八、质量、冗余和静态检查
+
+代码冗余检查不是一个“再写几个测试”的业务测试，而是质量门禁。
+
+### 必查项目
+
+- 格式：`cargo fmt --check`；
+- 编译：`cargo check --all-targets`；
+- 警告：`cargo clippy --all-targets --all-features -- -D warnings`；
+- 重复依赖：`cargo tree --duplicates`；
+- 测试目标登记、报告结构、缺口账格式；
+- 重复测试、重复 Fixture、重复 Fake 和跨层无理由重复断言；
+- 未使用代码、死代码、无效分支和不必要包装层。
+
+### 判定规则
+
+- 质量检查失败记录为 `quality-fail`，不能折算成 `pass`；
+- 工具缺失或环境不允许运行记录为 `env-skip`，不能静默跳过；
+- 尚未建立检查记录为 `gap`；
+- 依赖重复不一定是错误，必须有解释或后续治理记录；
+- 重复代码检查不得诱导新增抽象。先判断重复是否属于同一职责，再决定合并、保留或记录原因。
+
+当前 `run-tests.js` 尚未统一执行上述全部 T0 检查，因此 T0 的完整门禁仍是全局缺口。
+
+## 九、执行入口与报告
+
+### 快速开发检查
+
+```text
+cargo test
+cargo fmt --check
+cargo clippy --all-targets --all-features -- -D warnings
+```
+
+快速检查用于本地反馈，不替代完整入口。
+
+### 完整本地入口
+
+```text
+node run-tests.js
+```
+
+当前入口的实际顺序是：
+
+1. 运行 `solomni --doctor`，记录当前平台和围栏能力；
+2. 逐个运行 `cargo test --test cross-platform/windows/linux/macos`；
+3. 运行前端冒烟；
+4. 如果存在编排器，运行 L4 端到端；
+5. 写入 `target/test-report.json` 并打印 `TEST-REPORT-OK` 或 `TEST-REPORT-FAIL`。
+
+当前入口还没有完整接入 T0；文档中列出的目标顺序不应被误读成当前代码已经实现。
+
+### CI 真机入口
+
+```text
+node run-tests.js --fence-live
+```
+
+仅允许在一次性 runner、VM 或明确授权的环境使用。CI 仍应保留 Actions artifact 与 `ci-report` 报告分支中的报告和日志。
+
+### 当前报告状态
+
+当前实现实际会输出：
+
+- `pass`：步骤完成；
+- `fail`：断言或命令失败；
+- `skip-platform`：当前平台不适用的空平台目标；
+- `gap`：入口没有找到应运行的部分；
+- `envSkips`：报告内记录环境性跳过及原因。
+
+目标状态模型扩展为：
+
+- `pass`：完成且通过；
+- `test-fail`：业务断言失败；
+- `quality-fail`：质量门禁失败；
+- `env-skip`：环境不允许，附事实原因；
+- `gap`：尚未实现；
+- `blocked`：设计已明确但被外部条件阻塞。
+
+在代码入口完成升级前，不能把目标状态名称写入当前报告并宣称已支持。
+
+## 十、成功标记
+
+固定标记只增不删，改动含义必须同步更新测试设计：
+
+- `FRONTEND-SMOKE-OK`：前端冒烟完成；
+- `E2E-OK`：端到端场景完成；
+- `TEST-REPORT-OK`：当前入口的运行步骤没有失败；
+- `TEST-REPORT-ACCEPTED`：当前平台缺口账为空。
+
+固定标记不能替代质量门禁，也不能覆盖 `env-skip`、`gap` 或 `quality-fail`。测试入口必须以非零退出码暴露失败。
+
+## 十一、目录、目标与命名
+
+当前测试目录：
 
 ```text
 tests/
   cross-platform/
-    main.rs                     # 目标入口
-    integration/                # L2
-    e2e/                        # L4（假供应商 + 驱动 + 夹具根）
-    gaps.yaml                   # 跨平台层的缺口账
+    main.rs                     # T3 目标入口
+    integration/                # T3
+    e2e/                        # T5：假供应商、驱动和隔离根
+    gaps.yaml                   # T3 缺口账
   windows/
-    main.rs                     # 首行 #![cfg(windows)]：别的平台上整目标为空
-    probes/                     # L3
+    main.rs                     # 平台目标入口
+    probes/                     # T4
     gaps.yaml
   linux/
-    main.rs  probes/  gaps.yaml
+    main.rs
+    probes/
+    gaps.yaml
   macos/
-    main.rs  probes/  gaps.yaml
+    main.rs
+    probes/
+    gaps.yaml
+  gaps.yaml                     # T0/T2/T5 等全局缺口账
 ```
 
-四个目标在 `Cargo.toml` 里显式登记（新增测试文件必须挂到某个目标，否则不会被跑）：
+四个平台目标在 `Cargo.toml` 中显式登记。新增测试目标、Fixture 或脚本必须能从入口追溯到执行位置，否则属于结构质量问题。
 
-```toml
-[[test]]
-name = "cross-platform"
-path = "tests/cross-platform/main.rs"
-name = "windows"
-path = "tests/windows/main.rs"
-name = "linux"
-path = "tests/linux/main.rs"
-name = "macos"
-path = "tests/macos/main.rs"
-```
+命名要求：
 
-平台目标的 `main.rs` 第一行是 `#![cfg(target_os = "…")]`：在别的平台上该目标编译为空，`cargo test --test linux` 在 Windows 上就是"0 个测试"——既不报错，也绝不假装跑过。
+- 测试名称描述行为和条件，不描述实现细节；
+- Fake/Stub/Mock/Spy 名称表达职责；
+- Fixture 名称表达场景；
+- 缺口 id 稳定、唯一、可在报告中引用；
+- 平台专属行为放平台目录，跨平台行为放 `cross-platform`；
+- 测试报告和日志写入 `target/`，不入库。
 
-前端冒烟（`src/presentation/web/*.smoke.cjs`）由 `src/presentation/web/smoke.cjs` 自动发现，属 L2 的一部分。
+## 十二、缺口账
 
-## 四、缺口账（`tests/<平台>/gaps.yaml`）
+### 全局缺口
+
+`tests/gaps.yaml` 记录 T0、T2、T5 和测试基础设施的跨平台缺口。
+
+### 平台缺口
+
+`tests/<platform>/gaps.yaml` 只记录平台机制或平台专属验收缺口。条目存在表示当前未完成，不得留下“已完成”的残条。
+
+### 缺口格式
 
 ```yaml
-- id: linux.landlock.not-run        # 稳定 id：报告与文档都引用它
-  level: L3                         # L1..L4
-  why: 一句话说清"为什么这条必须有"与"现在为什么没有"
-  how: |                           # 照着能做：命令 + 预期
-    cargo test --test linux -- --nocapture
-  accept: 可判定的验收条件（哪条测试通过 / 哪个文件存在）
-  blocked_by: 无 | 平台不可用 | 环境不允许 | 缺少观察面（附说明）
+- id: fake-chat.contract-tests
+  scope: global
+  level: T2
+  why: 说明为什么该行为是必须验证的契约
+  how: |
+    写出可直接执行的命令或实现步骤
+  accept: 可判定的通过条件
+  blocked_by: 无 | 平台不可用 | 环境不允许 | 缺少观察面 | 缺少实现
 ```
 
-纪律：
+每条缺口必须有：稳定 id、范围、层级、必要性、执行方法、验收条件和阻塞原因。补齐后删除条目，不保留完成历史。
 
-- **缺口清单是当前状态**：补上测试就把条目删掉，不留"已完成"的残条。
-- `how` 必须能照着做，`accept` 必须可判定；写不出 `how` 的说明还缺观察面，`blocked_by` 写清。
-- 平台验收 = 该平台目标全绿 + 该平台 `gaps.yaml` 为空；runner 会把两侧都报出来。
+## 十三、给开发者和 AI 的工作方法
 
-## 五、一条入口与报告
+1. 先阅读本文、`ARCHITECTURE.md` 和相关模块契约。
+2. 先判断测试属于 T0-T5 哪一类，不要把质量检查写成业务测试。
+3. 优先用工具取得事实：运行入口、查看报告、检查日志和 `gaps.yaml`。
+4. 纯逻辑先写 T1；端口替身和真实适配器补 T2；真实边界补 T3；平台机制补 T4；完整旅程补 T5。
+5. 新增 Fake 时，同时增加 Fake 的最小契约测试和失败注入说明。
+6. 新增测试时检查是否已有等价 Fixture、Spy 或端口契约，避免复制粘贴。
+7. 失败时修代码或测试；环境不允许时记录 `env-skip`；未实现时建立 `gap`；不要把任何一种写成通过。
+8. 运行完整入口并阅读 `target/test-report.json`，确认报告与日志能解释结果。
+9. 测试完成后检查 `git status` 和 `.gitignore`，确保没有测试产物被跟踪。
+10. 只有当目标行为、质量门禁和当前平台缺口都符合要求，才可宣称本次测试验收完成。
 
-```text
-node run-tests.js        # 主入口：任何环境都能跑（自己指向项目内工具链，逐层点名）；与 shell 无关，推荐
-node start.js -test      # 便利入口：先做工具链前置检查（缺 Rust 会先征求同意），再把环境交给 run-tests.js
-.\test.bat               # 便利入口的薄包装（PowerShell 要带 .\ ；cmd 里可直接 test.bat）
-./test.sh                # 同上（macOS / Linux）
-```
+## 十四、验收清单
 
-受限环境（不允许以管道抓子进程输出的沙箱）里，便利入口会在启动层自己的 `cargo --version` 探针上被拒（EPERM）——那种环境请用主入口 `node run-tests.js`：它把每步输出写进日志文件再解析，不抓管道。
+一次测试相关修改至少要回答：
 
-执行顺序：
+- 测的是什么行为，属于哪个 T 层？
+- 是否有成功、失败、边界和资源清理断言？
+- 是否依赖 Fake、Mock、Stub、Spy 或 Fixture？它们是否被单独验证？
+- 是否需要真实文件、网络、进程、权限或平台探针？
+- 测试是否会修改本机状态？如果会，如何隔离和回收？
+- 测试是否被入口实际执行？
+- 失败、跳过、缺口和质量失败能否在报告中区分？
+- 是否引入了重复测试、重复 Fixture、重复依赖或无意义抽象？
+- 相关 `gaps.yaml` 是否更新为当前状态？
+- 文档、报告和日志是否只使用项目相对路径？
 
-0. 说明：入口自身不抓管道，每步输出写进 `target/test-logs/*.log` 再解析（受限环境里用管道抓子进程输出会被拒），失败时打印该步日志尾部。
-1. **`solomni --doctor`**：机器可读的本机事实（平台、围栏能力 `fs/net/tree` 与原因、能否写目录 ACL、能否建容器 profile、外部解释器是否可用）。**"这台机器能承载哪些测试"只以它为准**，不靠猜。
-2. **L1/L2/L3**：`cargo test` 逐目标点名（缺目标即失败）。
-3. **L4**：假供应商 + 隔离根跑端到端。
-4. **前端冒烟**。
-5. **汇总**：人读表格 + `target/test-report.json` + 固定标记 `TEST-REPORT-OK` / `TEST-REPORT-FAIL` + 退出码。
-
-报告把每个测试目标归入四态之一：`pass` / `fail` / `env-skip`（环境不允许，附原因）/ `gap`（该平台缺这条，附 `gaps.yaml` 的 id）。
-
-## 六、成功标记规范
-
-- 每层一个固定标记，**只增不删**（改了报告立刻失准）：`FRONTEND-SMOKE-OK`、`E2E-OK`、`TEST-REPORT-OK`。
-- 标记由测试自己打印，runner 只做汇总，不替测试下结论。
-- 失败一律非零退出码。
-
-## 七、当前覆盖矩阵
-
-| 层 | cross-platform | windows | linux | macos |
-| --- | --- | --- | --- | --- |
-| L1 单元 | `src/tests.rs` 与各模块内联（核心、适配层、纯逻辑；含「删会话即请求撤销授权」的接线断言） | `confine/windows` 内联：授权探针（要看 crate 内部，只能内联）、能力自检 | —（探针已黑盒化到 L3） | —（同上） |
-| L2 集成 | 守门进程协议、环境白名单、杀整棵树 | — | — | — |
-| L3 平台探针 | — | `probes/container.rs` 四条：启动 / 越界读 / 越界写 / 断网（本机 env-skip） | `probes/fence.rs`：Landlock（尚未在 Linux 跑过，见 gaps） | `probes/fence.rs`：seatbelt（尚未在 macOS 跑过，见 gaps） |
-| L4 端到端 | `e2e/orchestrator.js` 起假供应商 + 隔离根，跑 `e2e/driver.js` 全套断言（单 agent / 协作 / 代拟 / 工具 / 回档） | — | — | — |
-
-## 八、给 AI 的工作方法
-
-1. 跑入口：`node start.js -test`（或 `node run-tests.js`）。
-2. 读汇总与 `target/test-report.json`：分清 `fail`（要修代码或测试）、`env-skip`（本机禁令，不是缺陷）、`gap`（要补的测试）。
-3. 认领一条 `gaps.yaml`：按 `how` 实现，按 `accept` 判定。
-4. 关账：删除该条目；再跑一遍，直到 `TEST-REPORT-OK` 且目标平台的 `gaps.yaml` 为空。
-5. 禁令：不许把"跑不了"写成通过；不许在测试与文档里写机器路径；不许改成功标记的含义；不许让跳过不带原因。
+未能回答的问题不是“以后再说”，而是测试设计或观察面仍不完整，应进入缺口账。

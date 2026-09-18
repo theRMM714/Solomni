@@ -1,0 +1,50 @@
+# 全局测试与质量缺口（当前状态：条目存在 = 尚未完成；补上后删除条目）
+
+- id: quality.runner-not-integrated
+  scope: global
+  level: T0
+  why: 质量门禁必须和业务测试一样进入统一报告，避免只跑 cargo test 就误称整仓验收通过。
+  how: |
+    将 cargo fmt --check、cargo check --all-targets、cargo clippy --all-targets --all-features -- -D warnings、cargo tree --duplicates
+    以及测试目标登记、报告结构、缺口账格式检查接入 node run-tests.js，并为每项输出可定位日志。
+  accept: |
+    node run-tests.js 会逐项报告 T0 状态；任一质量失败返回非零；环境不允许和未实现分别记录。
+  blocked_by: 缺少统一质量步骤与报告字段
+
+- id: fake-chat.contract-tests
+  scope: global
+  level: T2
+  why: FakeChat 是 Chat 端口的可运行替身，必须证明其脚本、调用记录和中止语义不会让业务测试产生假阳性。
+  how: |
+    为 src/adapters/fake_chat.rs 增加针对空脚本、多次调用、calls 记录、stream 回调和回调中止的最小契约测试。
+  accept: |
+    FakeChat 的成功、失败/空结果、记录和中止行为均有明确断言，并且测试不访问网络或真实文件系统。
+  blocked_by: 缺少 FakeChat 独立契约测试
+
+- id: demo-gateway.contract-tests
+  scope: global
+  level: T2
+  why: DemoGateway 既是演示回落实现也是装配边界，错误的回落提示或脚本会掩盖通道配置问题。
+  how: |
+    为 src/adapters/fake_chat.rs 增加 member_channel、core_channel、回落通知和无网络调用的契约测试。
+  accept: |
+    两类通道均可完成一次调用；回落信息存在且指向正确模块；测试证明没有外部网络依赖。
+  blocked_by: 缺少 DemoGateway 独立契约测试
+
+- id: ports.contract-matrix
+  scope: global
+  level: T2
+  why: 当前各端口虽有局部 InMemory/Fake 使用，但没有统一证明成功、失败、取消、重复调用和清理语义。
+  how: |
+    按 TESTING.md 的端口矩阵逐个补齐替身、失败注入、交互记录和真实适配器契约；每完成一个端口删除对应缺口说明。
+  accept: 每个端口都有可追溯的最小契约测试和真实适配器边界测试。
+  blocked_by: 部分端口缺少失败注入或稳定观察面
+
+- id: quality.redundancy-gate
+  scope: global
+  level: T0
+  why: 当前没有独立的重复依赖、重复 Fixture、重复测试和无效包装层检查，代码冗余可能被业务测试通过掩盖。
+  how: |
+    先接入 cargo tree --duplicates 和编译器/Clippy 检查，再增加可重复的测试结构审查，明确重复项的处理或保留理由。
+  accept: 报告中能区分依赖重复、源码/测试结构冗余和业务测试失败；质量失败会使总入口返回非零。
+  blocked_by: 缺少质量检查入口与报告状态
