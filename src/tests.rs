@@ -538,7 +538,7 @@ pub(crate) fn test_prompts() -> Prompts {
     serde_yaml::from_str::<Prompts>(include_str!("../prompts.yaml")).expect("内置提示词册必须合法")
 }
 
-fn core_with(modules: Vec<Module>, gateway: ScriptGateway) -> Core {
+pub(crate) fn core_with(modules: Vec<Module>, gateway: ScriptGateway) -> Core {
     core_with_runner(modules, gateway, Arc::new(SilentRunner))
 }
 
@@ -633,8 +633,27 @@ fn core_with_pkgs(
     .expect("内存装配不应失败")
 }
 
-fn gw(member: BTreeMap<String, Vec<String>>, core: Vec<String>) -> ScriptGateway {
+pub(crate) fn gw(member: BTreeMap<String, Vec<String>>, core: Vec<String>) -> ScriptGateway {
     ScriptGateway { member, core: Arc::new(Mutex::new(core)) }
+}
+
+/// 指定任意网关的装配（入站契约测试用：需要自定义时序的通道）。
+pub(crate) fn core_with_gateway(modules: Vec<Module>, gateway: impl ChatGateway + Send + Sync + 'static) -> Core {
+    Core::new(
+        Arc::new(InMemorySettings::new()),
+        Arc::new(InMemoryHistory::new()),
+        Arc::new(InMemoryWorkspace::new()),
+        Arc::new(VecSource(modules)),
+        Arc::new(InMemoryPackages::empty()),
+        Arc::new(NoFenceHost),
+        Arc::new(gateway),
+        Arc::new(FakeCatalog::new(vec!["m".to_string()])),
+        Arc::new(SilentRunner),
+        Arc::new(InMemorySysIo::new()),
+        Box::new(TestPrompts::ok()),
+        Arc::new(crate::core::ports::NoopLog),
+    )
+    .expect("内存装配不应失败")
 }
 
 // ---------- 信封 ----------
@@ -717,10 +736,10 @@ fn settings_resolves_model_to_channel() {
 fn provider_lifecycle_and_key_never_leaks_to_view() {
     let mut core = core_with(vec![module_of("a")], gw(BTreeMap::new(), vec!["[]".into()]));
     core.provider_upsert("p1", "http://x", "sk-密钥XYZ").unwrap();
-    for line in core.provider_lines() {
-        assert!(!line.contains("sk-密钥XYZ"), "视图出现密钥：{}", line);
-    }
     for v in core.provider_views() {
+        // 展示文案由呈现层拼（core 不再提供 CLI 行），"密钥永不出现"这条红线两处都要成立。
+        let shown = format!("{}  {}", v.id, v.base_url);
+        assert!(!shown.contains("sk-密钥XYZ"), "视图出现密钥：{}", shown);
         assert!(!format!("{:?}", v).contains("sk-密钥XYZ"));
     }
     // 仍被模型引用时拒绝删除供应商（不静默级联）

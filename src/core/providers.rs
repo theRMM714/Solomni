@@ -110,21 +110,6 @@ impl Settings {
             .collect()
     }
 
-    /// CLI 展示行：供应商（无密钥）。
-    pub fn provider_lines(&self) -> Vec<String> {
-        self.providers.iter().map(|(id, p)| format!("{}  {}", id, p.base_url)).collect()
-    }
-
-    /// CLI 展示行：模型（标出核心默认）。
-    pub fn model_lines(&self) -> Vec<String> {
-        self.models
-            .iter()
-            .map(|(id, m)| {
-                let mark = if self.core.as_deref() == Some(id.as_str()) { "（核心默认）" } else { "" };
-                format!("{}{}  {} → {}  [{}]", id, mark, m.name, m.api_model, m.provider)
-            })
-            .collect()
-    }
 }
 
 /// 供应商展示视图（不含密钥）。

@@ -56,7 +56,7 @@ clippy:
   large_enum_variant: 1
   ptr_arg: 1
   single_match: 1
-  too_many_arguments: 6
+  too_many_arguments: 5
   unnecessary_cast: 7
   unnecessary_map_or: 2
   unnecessary_mut_passed: 1

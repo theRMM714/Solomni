@@ -12,7 +12,7 @@ mod contract_tests;
 mod tests;
 
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -145,13 +145,22 @@ fn main() {
             .unwrap_or(presentation::web::DEFAULT_PORT)
     };
 
+    // 核心搬到它自己的执行线程：此后呈现层只持有**入站能力面**——拿不到 Core，也拿不到任何核心锁。
+    let handle = match core::api::CoreHandle::spawn(core) {
+        Ok(h) => h,
+        Err(e) => {
+            eprintln!("[装配失败] {}", e);
+            std::process::exit(1);
+        }
+    };
+    let ops = core::api::Ops::from_handle(&handle);
+
     if web {
-        serve_web(core, port_flag(&args), std::sync::Arc::clone(&log));
+        serve_web(ops, port_flag(&args), std::sync::Arc::clone(&log));
     } else {
-        // CLI 里输入 webui 可直接转入 Web，无需重启进程。
-        let (core, exit) = presentation::cli::run(core);
-        if let presentation::cli::CliExit::Web(port) = exit {
-            serve_web(core, port, std::sync::Arc::clone(&log));
+        // CLI 里输入 webui 可直接转入 Web，无需重启进程（能力面可克隆，两份呈现共用同一个核心）。
+        if let presentation::cli::CliExit::Web(port) = presentation::cli::run(ops.clone()) {
+            serve_web(ops, port, std::sync::Arc::clone(&log));
         }
     }
 }
@@ -280,11 +289,10 @@ fn strip_unc_prefix(p: PathBuf) -> PathBuf {
     p
 }
 
-fn serve_web(core: core::Core, port: u16, log: std::sync::Arc<dyn core::ports::Log + Send + Sync>) {
-    let shared = Arc::new(Mutex::new(core));
+fn serve_web(ops: core::api::Ops, port: u16, log: std::sync::Arc<dyn core::ports::Log + Send + Sync>) {
     let cap = adapters::confine::capability();
     let fence = presentation::web::FenceInfo { fs: cap.fs, net: cap.net, tree: cap.tree, note: cap.note };
-    if let Err(e) = presentation::web::serve(shared, port, log, fence) {
+    if let Err(e) = presentation::web::serve(ops, port, log, fence) {
         eprintln!("[Web 服务异常] {}", e);
         std::process::exit(1);
     }

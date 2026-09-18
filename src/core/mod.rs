@@ -3,6 +3,7 @@
 //! 装配（new 适配器）只发生在 main 组合根。前端只见 Core 门面、会话句柄与 SessionEvent 流。
 
 pub mod agents;
+pub mod api;
 pub mod collab;
 pub mod collab_state;
 pub mod engine;
@@ -255,6 +256,11 @@ impl Core {
         outcome
     }
 
+    /// 日志端口句柄：入站手柄（core::api）与组合根共用同一份事实记录。
+    pub fn log_handle(&self) -> Arc<dyn crate::core::ports::Log + Send + Sync> {
+        Arc::clone(&self.log)
+    }
+
     /// 清单即事实：每次调用重扫（策略在 core，机制在 ModuleSource）。
     pub fn scan(&self) -> module::Roster {
         self.source.scan()
@@ -421,11 +427,6 @@ impl Core {
         self.settings.provider_views()
     }
 
-    /// CLI 展示行：供应商（不含密钥）。
-    pub fn provider_lines(&self) -> Vec<String> {
-        self.settings.provider_lines()
-    }
-
     /// 新建/更新供应商。更新时 api_key 留空 = 保留原密钥（界面从不回显密钥）。
     pub fn provider_upsert(&mut self, id: &str, base_url: &str, api_key: &str) -> Result<(), String> {
         if id.is_empty() || base_url.is_empty() {
@@ -471,11 +472,6 @@ impl Core {
     /// 结构化模型视图（Web 用）。
     pub fn model_views(&self) -> Vec<providers::ModelView> {
         self.settings.model_views()
-    }
-
-    /// CLI 展示行：模型。
-    pub fn model_lines(&self) -> Vec<String> {
-        self.settings.model_lines()
     }
 
     /// 核心 AI 默认模型 id。

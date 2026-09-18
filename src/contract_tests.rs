@@ -6,6 +6,7 @@
 //! （doubles / ports / fakes / adapters 各一文件），替身与契约测试同处一层。
 
 mod adapters;
+mod api;
 mod fakes;
 mod ports;
 
