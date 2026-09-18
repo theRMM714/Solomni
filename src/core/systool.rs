@@ -46,6 +46,24 @@ pub fn names() -> Vec<String> {
     ]
 }
 
+/// patch 在**原生通道**上的声明：参数只有一个 body。
+/// 原生协议要求参数是 JSON 对象，所以补丁正文当字符串值传——转义交给供应商的解码器，
+/// 模型不必自己写转义（这正是原生通道相对手写信封的收益）。
+pub fn patch_decl() -> crate::core::ports::ToolDecl {
+    crate::core::ports::ToolDecl {
+        name: PATCH.to_string(),
+        description: "用一段补丁文本改文件（*** Add File: 路径 / *** Update File: 路径 … *** End File）".to_string(),
+        parameters: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "body": { "type": "string", "description": "补丁正文（原样写，不用转义换行）" }
+            },
+            "required": ["body"],
+            "additionalProperties": false,
+        }),
+    }
+}
+
 /// 自由格式工具：输入不是 JSON 参数，而是**信封之后的那段原样文本**（不必转义）。
 /// 存在的理由：把大段内容塞进 JSON 字符串要转义换行/引号，是真实会话里反复出事的点。
 pub fn is_freeform(name: &str) -> bool {

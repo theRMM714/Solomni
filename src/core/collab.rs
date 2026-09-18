@@ -376,11 +376,18 @@ impl CollabSession {
                 .cloned()
                 .ok_or_else(|| format!("agent {} 没有被分配沙箱（工作区未记录该 agent）", a.name))?;
             let guide = crate::core::systool::guide(&prompts, &sandbox);
-            let system = module::agent_system(&prompts, &a.name, &modules, &guide);
+            // 形态按该 agent 的模型（或核心默认）解析：系统提示与实际协议必须一致
+            let mode = if channel.is_some() {
+                self.settings.tool_mode_for(a.model.as_deref())
+            } else {
+                crate::core::providers::ToolMode::Envelope
+            };
+            let system = module::agent_system(&prompts, &a.name, &modules, &guide, mode);
             let mut member = Member::new(&a.name, system, chat);
             // 围栏：可达范围 + 断网，由该 agent 的沙箱与 exec 段派生（机制在 adapters）。
             let fence = crate::core::fence::FenceSpec::from_sandbox(&sandbox, self.spec.net);
             member.tools = Some(MemberTools {
+                mode,
                 // 模块 id → 该模块的（目录, 工具表）：多模块 agent 靠信封里的 module 消歧。
                 modules: crate::core::engine::tool_table(&modules),
                 observations: crate::core::systool::Observations::default(),

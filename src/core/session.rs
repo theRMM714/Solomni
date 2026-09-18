@@ -58,6 +58,11 @@ impl AgentSession {
         AgentSession { id: id.to_string(), next_line: marks.len() as u64, history, chat, note, tools, refs, roots, tool_texts, marks }
     }
 
+    /// 这条会话**正在用**的工具调用形态（系统提示就是按它拼的）。
+    pub fn tool_mode(&self) -> crate::core::providers::ToolMode {
+        self.tools.as_ref().map(|t| t.mode).unwrap_or_default()
+    }
+
     /// 开场事件（通道回落告知）。
     pub fn open(&self) -> Vec<SessionEvent> {
         self.note.clone().map(|n| vec![SessionEvent::Notice(n)]).unwrap_or_default()

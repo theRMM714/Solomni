@@ -90,7 +90,13 @@ pub struct Module {
 /// 一个 agent 的职责提示词：把它的模块 system 合成一份能力包，再挂内置工具说明与外部工具清单。
 /// 模块只是能力包（没有"发言"这回事）；发言席是 agent，所以这份 system 按 agent 成文。
 /// sys_tools 由 core::systool 按该 agent 的沙箱渲染后传入。
-pub fn agent_system(prompts: &crate::core::prompt::Prompts, agent: &str, modules: &[Module], sys_tools: &str) -> String {
+pub fn agent_system(
+    prompts: &crate::core::prompt::Prompts,
+    agent: &str,
+    modules: &[Module],
+    sys_tools: &str,
+    mode: crate::core::providers::ToolMode,
+) -> String {
     let parts = modules
         .iter()
         .map(|m| format!("\n== {} ==\n{}", m.manifest.id, m.manifest.system.trim()))
@@ -104,6 +110,14 @@ pub fn agent_system(prompts: &crate::core::prompt::Prompts, agent: &str, modules
             ("sys_tools", sys_tools.to_string()),
             ("module_tools", module_tools(prompts, modules)),
             ("module_tool_params", module_tool_params(prompts, modules)),
+            // 两套调用约定**互斥**：一个通道只用一套（同时教会让模型在正文里讲解参数而被误判成调用）
+            (
+                "tool_calling",
+                match mode {
+                    crate::core::providers::ToolMode::Native => prompts.core.tool_calling_native.clone(),
+                    crate::core::providers::ToolMode::Envelope => prompts.core.tool_calling_envelope.clone(),
+                },
+            ),
         ],
     )
 }

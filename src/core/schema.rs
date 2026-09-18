@@ -126,7 +126,6 @@ impl ToolSchema {
     /// JSON Schema 形态（同一声明的第二形态：`additionalProperties: false` 与主流一致）。
     /// 现在只有测试在用——供应商原生工具调用接上后（见 tests/gaps.yaml 的 tools.native-tool-calls）
     /// 由 Chat 端口取它渲染工具声明；在那之前不进产物。
-    #[cfg(test)]
     pub fn to_json_schema(&self) -> serde_json::Value {
         let mut props = serde_json::Map::new();
         let mut required: Vec<serde_json::Value> = Vec::new();
@@ -231,6 +230,15 @@ impl ToolSchema {
         Ok(())
     }
 
+    /// 原生工具调用用的声明形态：名字 + 一句话说明 + JSON Schema 参数。
+    pub fn decl(&self, name: &str) -> crate::core::ports::ToolDecl {
+        crate::core::ports::ToolDecl {
+            name: name.to_string(),
+            description: self.desc.clone(),
+            parameters: self.to_json_schema(),
+        }
+    }
+
     /// 补上缺省值（不改动已有键）。
     pub fn apply_defaults(&self, args: &mut serde_json::Value) {
         let Some(params) = self.declared() else {
@@ -277,7 +285,6 @@ pub fn render_book(book: &ToolBook) -> String {
 }
 
 /// 数值的 JSON 写法：整数就写整数（2000 而不是 2000.0）。
-#[cfg(test)]
 fn json_num(n: f64) -> serde_json::Value {
     if n.fract() == 0.0 && n.abs() < 9.0e15 {
         serde_json::Value::from(n as i64)

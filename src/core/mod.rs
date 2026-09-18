@@ -880,8 +880,10 @@ impl Core {
         sb: &workspace::Sandbox,
         unavailable: BTreeMap<String, Vec<String>>,
         net: bool,
+        mode: providers::ToolMode,
     ) -> engine::MemberTools {
         engine::MemberTools {
+            mode,
             modules: engine::tool_table(modules),
             observations: systool::Observations::default(),
             repair: Arc::clone(&self.repair),
@@ -906,6 +908,12 @@ impl Core {
         net: bool,
     ) -> (session::AgentSession, Vec<SessionEvent>) {
         let (chat, note) = self.gateway.member_channel(channel.as_ref(), &a.name);
+        // 形态按登记处解析；没有真实通道（演示回落）只能是手写信封——演示通道不会原生调用。
+        let mode = if channel.is_some() {
+            self.settings.tool_mode_for(a.model.as_deref())
+        } else {
+            providers::ToolMode::Envelope
+        };
         self.log.info(
             "core::build_single",
             &format!(
@@ -915,8 +923,8 @@ impl Core {
                 channel.as_ref().map(|c| c.model.as_str()).unwrap_or("无（演示）")
             ),
         );
-        let system = module::agent_system(&self.prompts, &a.name, modules, &systool::guide(&self.prompts, sb));
-        let tools = self.tools_env(modules, sb, unavailable, net);
+        let system = module::agent_system(&self.prompts, &a.name, modules, &systool::guide(&self.prompts, sb), mode);
+        let tools = self.tools_env(modules, sb, unavailable, net, mode);
         let roots = crate::core::refs::RefRoots { work: sb.shared.clone(), private: Some(sb.private.clone()) };
         let s = session::AgentSession::new(
             &a.name,
@@ -1061,13 +1069,53 @@ impl Core {
 
     // ---- 会话收发（前端永不接触会话本体） ----
 
+    /// 形态**不钉在会话里**：每次生成前按登记处重新解析。
+    /// 变了 → 走现有的重建路径刷新（系统提示随之换成另一套调用约定）并给用户一句通知；没变 → 什么都不做。
+    /// 这样"用户改了登记处就重新查、没改就不管"，同时系统提示与实际协议始终一致（回放也按同一规则派生）。
+    fn refresh_tool_mode(&mut self, sid: &str) -> Result<Option<String>, String> {
+        let (meta, raw) = self.history.load(sid)?;
+        let after = truncate_events(&raw);
+        let Some(a) = meta.agents.first() else {
+            return Ok(None);
+        };
+        let channel = a
+            .model
+            .as_deref()
+            .and_then(|id| self.settings.resolve(id).ok())
+            .or_else(|| self.settings.core_channel());
+        let want = if channel.is_some() {
+            self.settings.tool_mode_for(a.model.as_deref())
+        } else {
+            providers::ToolMode::Envelope
+        };
+        let cur = match self.sessions.get(sid) {
+            // 还没装进内存的会话：交给 ensure_session 按当前形态建，这里不动
+            Some(Session::Single(s)) => s.tool_mode(),
+            Some(_) => return Ok(None),
+            None => want,
+        };
+        if cur == want {
+            return Ok(None);
+        }
+        let rebuilt = self.rebuild_session(&meta, &after)?;
+        self.sessions.insert(sid.to_string(), rebuilt);
+        Ok(Some(match want {
+            providers::ToolMode::Native => "工具调用形态已按登记处改为**原生工具调用**（本条起生效）".to_string(),
+            providers::ToolMode::Envelope => "工具调用形态已按登记处改为**手写信封**（本条起生效）".to_string(),
+        }))
+    }
+
     /// 单 agent 会话发言。
     pub fn single_say(&mut self, sid: &str, text: &str, live: &mut Live) -> Result<Vec<SessionEvent>, String> {
+        let notice = self.refresh_tool_mode(sid)?;
         let mut events = match self.sessions.get_mut(sid) {
             Some(Session::Single(s)) => s.say(text, live),
             Some(_) => return Err("该会话不是单 agent 模式".to_string()),
             None => return Err("无此会话".to_string()),
         };
+        if let Some(n) = notice {
+            events.insert(0, SessionEvent::Notice(n));
+        }
         if live.cancelled() {
             self.log.warn("core::single_say", "生成被用户中止");
         }
@@ -1250,13 +1298,19 @@ impl Core {
                     .for_agent(&a.name)
                     .cloned()
                     .ok_or_else(|| format!("会话 {} 缺少 agent {} 的沙箱信息", meta.name, a.name))?;
-                let guide = systool::guide(&self.prompts, &sb);
-                let system = module::agent_system(&self.prompts, &a.name, &modules, &guide);
                 let channel = a
                     .model
                     .as_deref()
                     .and_then(|id| self.settings.resolve(id).ok())
                     .or_else(|| self.settings.core_channel());
+                // 重建时同样按登记处派生形态：系统提示与实际协议必须一致（回放才与实时一致）
+                let mode = if channel.is_some() {
+                    self.settings.tool_mode_for(a.model.as_deref())
+                } else {
+                    providers::ToolMode::Envelope
+                };
+                let guide = systool::guide(&self.prompts, &sb);
+                let system = module::agent_system(&self.prompts, &a.name, &modules, &guide, mode);
                 let (chat, note) = self.gateway.member_channel(channel.as_ref(), &a.name);
                 // 先把转录行按顺序摊平：分组判断要看「下一行是不是 tool 行」。
                 let mut rows: Vec<&serde_json::Value> = Vec::new();
@@ -1301,7 +1355,7 @@ impl Core {
                     marks.push(history.len());
                 }
                 let unavailable = self.unavailable_modules(&meta.exec, &modules);
-                let tools = self.tools_env(&modules, &sb, unavailable, meta.exec.net);
+                let tools = self.tools_env(&modules, &sb, unavailable, meta.exec.net, mode);
                 let roots = crate::core::refs::RefRoots { work: sb.shared.clone(), private: Some(sb.private.clone()) };
                 Ok(Session::Single(session::AgentSession::restore(
                     &a.name,

@@ -99,6 +99,15 @@ impl Settings {
         Ok(Channel { provider: p.clone(), model: m.api_model.clone() })
     }
 
+    /// 某 agent 的工具调用形态：它自己的模型优先，其次核心默认；两者都没有 = envelope（兜底，任何供应商都能用）。
+    pub fn tool_mode_for(&self, model: Option<&str>) -> ToolMode {
+        model
+            .or(self.core.as_deref())
+            .and_then(|id| self.models.get(id))
+            .map(|m| m.tools)
+            .unwrap_or_default()
+    }
+
     /// 核心 AI 默认通道；未设定或解析失败 = None（调用方回落演示并如实告知）。
     pub fn core_channel(&self) -> Option<Channel> {
         self.core.as_deref().and_then(|id| self.resolve(id).ok())

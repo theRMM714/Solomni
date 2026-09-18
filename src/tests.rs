@@ -1782,6 +1782,7 @@ fn member_with_tools(id: &str, script: Vec<String>, runner: Arc<impl ToolRunner 
     let mut m = Member::new(id, "职责".to_string(), scripted(script));
     // 该路径走模块声明的外部命令（grep）：空沙箱 + 内存 IO，内置工具不参与。
     m.tools = Some(MemberTools {
+        mode: crate::core::providers::ToolMode::Envelope,
         modules,
         observations: crate::core::systool::Observations::default(),
         repair: Arc::new(NoRepair),
@@ -2486,7 +2487,13 @@ fn module_tool_params_are_declared_in_the_manifest_and_enforced_by_core() {
         decl_with("python tools/grep.py", "keyword: {type: string, required: true}\n"),
     );
     let prompts = test_prompts();
-    let system = crate::core::module::agent_system(&prompts, "m0", std::slice::from_ref(&mod_m0), "工具说明");
+    let system = crate::core::module::agent_system(
+        &prompts,
+        "m0",
+        std::slice::from_ref(&mod_m0),
+        "工具说明",
+        crate::core::providers::ToolMode::Envelope,
+    );
     assert!(system.contains("【模块工具参数】"), "系统提示要有参数段：{}", system);
     assert!(system.contains("- m0.grep") && system.contains("keyword（string，必填）"), "{}", system);
 
@@ -2935,12 +2942,12 @@ fn a_truncated_output_is_reported_as_truncation_not_as_a_bad_envelope() {
 
 /// 固定探测结论的网关：专测"结论怎么落到登记处"这一层策略（事实本身由适配器测）。
 pub(crate) struct ProbeGateway {
-    pub(crate) outcome: crate::core::providers::ProbeOutcome,
+    pub(crate) outcome: Arc<Mutex<crate::core::providers::ProbeOutcome>>,
 }
 
 impl ChatGateway for ProbeGateway {
     fn probe_tools(&self, _c: &Channel) -> Result<crate::core::ports::ProbeOutcome, String> {
-        Ok(self.outcome.clone())
+        Ok(self.outcome.lock().expect("锁").clone())
     }
     fn member_channel(&self, _c: Option<&Channel>, _id: &str) -> (BoxedChat, Option<String>) {
         (scripted(vec!["{\"type\":\"say\",\"text\":\"收到\"}".to_string()]), None)
@@ -2954,7 +2961,7 @@ impl ChatGateway for ProbeGateway {
 fn a_probe_writes_back_only_conclusive_results() {
     use crate::core::providers::{ProbeOutcome, ToolMode};
     let fresh = |outcome: ProbeOutcome| {
-        let mut core = core_with_gateway(vec![], ProbeGateway { outcome });
+        let mut core = core_with_gateway(vec![], ProbeGateway { outcome: Arc::new(Mutex::new(outcome)) });
         core.provider_upsert("p", "http://x", "k").expect("登记供应商");
         core.model_upsert("m", "M", "api-m", "p", "").expect("登记模型");
         core
@@ -2979,6 +2986,231 @@ fn a_probe_writes_back_only_conclusive_results() {
 
     // 无此模型 → 如实报错
     assert!(core.probe_model_tools("ghost").is_err());
+}
+
+/// 原生通道的脚本替身：一步 = 一次"原生工具调用"或一段文本；
+/// 同时记录每次请求带过来的工具声明与消息（用来断言"声明真的发出去了、结果真的回填了"）。
+pub(crate) enum NativeStep {
+    Calls(Vec<crate::core::ports::ToolCall>),
+    Text(String),
+}
+
+/// 每次请求声明的工具（名字 + 参数 Schema）。
+pub(crate) type DeclLog = Arc<Mutex<Vec<Vec<(String, serde_json::Value)>>>>;
+
+/// 每次请求看到的消息。
+pub(crate) type SeenLog = Arc<Mutex<Vec<Vec<Msg>>>>;
+
+pub(crate) struct NativeChat {
+    pub(crate) steps: Vec<NativeStep>,
+    pub(crate) declared: DeclLog,
+    pub(crate) seen: SeenLog,
+}
+
+impl Chat for NativeChat {
+    fn complete(&mut self, messages: &[Msg], opts: CompleteOpts<'_>, _on: &mut dyn FnMut(Chunk) -> bool) -> Completion {
+        self.seen.lock().expect("锁").push(messages.to_vec());
+        let decls: Vec<(String, serde_json::Value)> = opts
+            .tools
+            .map(|ts| ts.iter().map(|d| (d.name.clone(), d.parameters.clone())).collect())
+            .unwrap_or_default();
+        self.declared.lock().expect("锁").push(decls);
+        if self.steps.is_empty() {
+            return Completion::text("{\"type\":\"say\",\"text\":\"脚本用完了\"}");
+        }
+        match self.steps.remove(0) {
+            NativeStep::Calls(calls) => Completion {
+                raw: String::new(),
+                finish: "tool_calls".to_string(),
+                calls,
+            },
+            NativeStep::Text(t) => Completion::text(t),
+        }
+    }
+}
+
+/// 原生形态的成员：沙箱用测试根，模块表为空，工具执行走内存 IO。
+pub(crate) fn native_member(
+    id: &str,
+    io: Arc<InMemorySysIo>,
+    steps: Vec<NativeStep>,
+    declared: DeclLog,
+    seen: SeenLog,
+) -> Member {
+    let chat: BoxedChat = Box::new(NativeChat { steps, declared, seen });
+    let mut m = Member::new(id, "职责".to_string(), chat);
+    let mut modules = BTreeMap::new();
+    modules.insert(
+        "m0".to_string(),
+        ModuleTools {
+            root: abs(&["mods", "root"]),
+            commands: BTreeMap::new(),
+            books: BTreeMap::new(),
+        },
+    );
+    let sb = test_sandbox(id, &[]);
+    m.tools = Some(MemberTools {
+        mode: crate::core::providers::ToolMode::Native,
+        modules,
+        observations: crate::core::systool::Observations::default(),
+        repair: Arc::new(NoRepair),
+        log: Arc::new(crate::core::ports::NoopLog),
+        runner: Arc::new(SilentRunner),
+        sandbox: sb.clone(),
+        io,
+        unavailable: BTreeMap::new(),
+        fence: crate::core::fence::FenceSpec::from_sandbox(&sb, false),
+    });
+    m
+}
+
+#[test]
+fn native_mode_declares_tools_and_runs_multiple_structured_calls() {
+    use crate::core::ports::ToolCall;
+    let io = Arc::new(InMemorySysIo::new());
+    io.seed(&["demo", "work", "note.txt"], "第一行\n第二行\n");
+    let note = s(&["demo", "work", "note.txt"]);
+    let declared = Arc::new(Mutex::new(Vec::new()));
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let mut m = native_member(
+        "a",
+        Arc::clone(&io),
+        vec![
+            // 一次回复里两个互不依赖的调用（原生协议本来就是数组）
+            NativeStep::Calls(vec![
+                ToolCall {
+                    id: "c1".to_string(),
+                    name: "read".to_string(),
+                    args_json: format!("{{\"path\":\"{}\"}}", note),
+                },
+                ToolCall {
+                    id: "c2".to_string(),
+                    name: "search".to_string(),
+                    args_json: format!("{{\"path\":\"{}\",\"keyword\":\"第二\"}}", note),
+                },
+            ]),
+            NativeStep::Text("{\"type\":\"say\",\"text\":\"读完了\"}".to_string()),
+        ],
+        Arc::clone(&declared),
+        Arc::clone(&seen),
+    );
+    let prompts = test_prompts();
+    let exec = crate::core::engine::Execution::run(std::slice::from_mut(&mut m), "任务", &prompts);
+    assert_eq!(exec.reports.get("a").map(|s| s.as_str()), Some("读完了"), "两个调用跑完后回到文本轮");
+
+    // ① 声明真的发出去了：内置五个工具一个不少；patch 的参数契约是 body（不是信封里的 args）
+    let decls = declared.lock().expect("锁");
+    let first = &decls[0];
+    let names: Vec<&str> = first.iter().map(|(n, _)| n.as_str()).collect();
+    for want in ["read", "write", "edit", "patch", "search"] {
+        assert!(names.contains(&want), "没声明 {}：{:?}", want, names);
+    }
+    let patch = first.iter().find(|(n, _)| n == "patch").expect("patch 的声明").1.clone();
+    assert_eq!(patch["required"], serde_json::json!(["body"]), "patch 在原生通道上用 body 承载补丁正文");
+    assert_eq!(patch["additionalProperties"], serde_json::json!(false));
+    // read 的声明来自 prompts.yaml 的声明（含 path 必填）
+    let read = first.iter().find(|(n, _)| n == "read").expect("read 的声明").1.clone();
+    assert_eq!(read["required"], serde_json::json!(["path"]));
+
+    // ② 两个调用各成一条工具行，结果按原顺序回填
+    let trace = exec.traces.get("a").expect("工具调用应入册");
+    assert_eq!(trace.len(), 2, "一次两个调用 = 两条工具行：{:?}", trace.iter().map(|v| &v.name).collect::<Vec<_>>());
+    assert!(trace[0].ok && trace[0].name == "read" && trace[0].output.contains("第一行"), "{:?}", trace[0]);
+    assert!(trace[1].ok && trace[1].name == "search" && trace[1].output.contains("2 | 第二行"), "{:?}", trace[1]);
+
+    // ③ 第二轮请求里：助手消息如实记下"它调了什么"，两条结果都在（模型据此继续）
+    let msgs = seen.lock().expect("锁");
+    let second = &msgs[1];
+    assert!(
+        second.iter().any(|m| m.role == "assistant" && m.content.contains("[原生工具调用] read")),
+        "要把原生调用记成助手消息（回放与下一轮都看得到）：{:?}",
+        second.iter().map(|m| (m.role.clone(), m.content.chars().take(30).collect::<String>())).collect::<Vec<_>>()
+    );
+    assert_eq!(
+        second.iter().filter(|m| m.role == "user" && m.content.contains("[工具结果]")).count(),
+        2,
+        "两个结果都要发回去"
+    );
+}
+
+#[test]
+fn native_mode_refuses_a_hand_written_envelope() {
+    let io = Arc::new(InMemorySysIo::new());
+    let target = s(&["demo", "work", "out.md"]);
+    let envelope = format!(
+        "正文先写着。{{\"type\":\"tool\",\"name\":\"write\",\"args\":{{\"path\":\"{}\",\"content\":\"x\"}}}}",
+        target
+    );
+    let mut m = native_member(
+        "a",
+        Arc::clone(&io),
+        vec![NativeStep::Text(envelope), NativeStep::Text("{\"type\":\"say\",\"text\":\"知道了\"}".to_string())],
+        Arc::new(Mutex::new(Vec::new())),
+        Arc::new(Mutex::new(Vec::new())),
+    );
+    let prompts = test_prompts();
+    let exec = crate::core::engine::Execution::run(std::slice::from_mut(&mut m), "任务", &prompts);
+    let trace = exec.traces.get("a").expect("应记一条失败的工具行");
+    assert_eq!(trace.len(), 1);
+    assert!(!trace[0].ok, "原生模式下信封不执行");
+    assert_eq!(trace[0].output, prompts.core.tool_texts.native_no_envelope, "要如实说清本通道用原生调用");
+    assert_eq!(io.get(&["demo", "work", "out.md"]), None, "绝不落盘");
+}
+
+#[test]
+fn changing_the_declared_mode_takes_effect_on_the_next_generation() {
+    use crate::core::providers::ProbeOutcome;
+    // 一开始登记处说"不支持原生"：会话按手写信封装配（系统提示也就教信封）
+    let outcome = Arc::new(Mutex::new(ProbeOutcome::Unsupported { detail: "先不支持".to_string() }));
+    let mut core = core_with_gateway(vec![module_of("a")], ProbeGateway { outcome: Arc::clone(&outcome) });
+    core.provider_upsert("p", "http://x", "k").expect("登记供应商");
+    core.model_upsert("m", "M", "api-m", "p", "").expect("登记模型");
+    let sid = core
+        .create_work(WorkSpec {
+            name: "w".to_string(),
+            mode: WorkMode::Single,
+            agents: vec![AgentInstance {
+                name: "a".to_string(),
+                transient: true,
+                modules: vec!["a".to_string()],
+                model: Some("m".to_string()),
+            }],
+            task: None,
+            delegate: false,
+        })
+        .expect("建会话")
+        .sid;
+    let notes = |ev: &Vec<SessionEvent>| -> Vec<String> {
+        ev.iter()
+            .filter_map(|e| match e {
+                SessionEvent::Notice(n) => Some(n.clone()),
+                _ => None,
+            })
+            .collect()
+    };
+    // ① 没动登记处：不该有任何形态通知
+    let e1 = with_live(|l| core.single_say(&sid, "你好", l)).expect("发言");
+    assert!(
+        !notes(&e1).iter().any(|n| n.contains("形态已按登记处")),
+        "没改登记处就不该重新查：{:?}",
+        notes(&e1)
+    );
+    // ② 用户改了登记处（探测确认支持）→ 下一次生成前重新解析、就地刷新、如实通知
+    *outcome.lock().expect("锁") = ProbeOutcome::Supported { detail: "支持".to_string() };
+    core.probe_model_tools("m").expect("探测");
+    let e2 = with_live(|l| core.single_say(&sid, "再问", l)).expect("发言");
+    assert!(
+        notes(&e2).iter().any(|n| n.contains("原生工具调用")),
+        "形态变了要如实通知：{:?}",
+        notes(&e2)
+    );
+    // ③ 形态没再变：不重复通知（没动就不管）
+    let e3 = with_live(|l| core.single_say(&sid, "又问", l)).expect("发言");
+    assert!(
+        !notes(&e3).iter().any(|n| n.contains("形态已按登记处")),
+        "形态没变不该重复通知：{:?}",
+        notes(&e3)
+    );
 }
 
 #[test]

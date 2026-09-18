@@ -201,6 +201,7 @@ presentation ──▶ core ◀── adapters
 | | `agent.system` | agent 职责提示词骨架（模块 `system` 合成 + 内置工具说明 + 外部工具清单 + 模块工具参数段） |
 | | `sys_tools` | 内置工具说明块（含本 agent 的真实根目录、模块目录、`{{tool_params}}` 参数签名与 `{{patch_guide}}`） |
 | | `patch_guide` | 自由格式补丁的写法（每块以 `*** End File` 收尾、SEARCH 要整行一致、一次可多块、整体原子） |
+| | `tool_calling_envelope` / `tool_calling_native` | 工具调用约定**两套，互斥**：一个通道只用一套，由通道形态决定注入哪套（同时教会让模型在正文里讲解参数而被误判成调用） |
 | | `builtin_tools` | 内置三件套的**参数契约**：模型侧说明与调用校验的唯一来源（不写进代码） |
 | | `no_agents` / `no_model` / `no_module_dirs` / `no_module_tools` / `no_module_tool_params` | 空态说法 |
 | | `module_tool_params_header` | 模块工具参数段的小标题（模块在 `module.yaml` 里声明了 `params` 时出现） |
@@ -225,6 +226,10 @@ session/<工作名>/
 - **转录即状态**：流水只追加；回档**只追加一条 `{"type":"rewind"}` 记录**，不物理删行；会话内容 = 回放到最后一个截断点。
 - **转录行的稳定 id**：一轮模型调用 = 一条行；工具调用自成一条行；id 在会话内单调、回放可复现（回档按 id 定位）。
 - **流式增量是短暂事件**：`delta` / `tool_call` 不落盘；历史只记定稿后的行。
+- **工具调用形态**（`ToolMode`：`envelope` 手写信封 / `native` 原生调用）是**登记处的事实**（`models.yaml` 的 `tools`，缺省 envelope），
+  **不钉在会话里**：每次生成前按登记处重新解析——变了就按重建路径就地刷新系统提示并给用户一句通知，没变什么都不做。
+  两套形态互斥：native 通道不声明？不，native 声明工具、不解析信封；正文里出现信封时**不执行**，但如实记一条失败工具行。
+  系统提示始终与实际协议一致，回放按同一规则派生（与"改 prompts.yaml 后重建"同源）。
 - **观察账本**（`systool::Observations`）是**进程内状态，不落盘**：记"本次会话完整读过 / 由核心写过哪些文件、当时的内容指纹"，
   只用于一处决策——整份覆盖（`write`）要不要放行。回档时清空（那段读取证据随转录一起被截掉），
   按落盘重建的会话从空账本开始（模型重新读一遍即可，宁可多读一次也不凭记忆覆盖）。

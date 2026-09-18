@@ -54,6 +54,10 @@ pub struct CorePrompts {
     pub agent: AgentPrompts,
     /// @ 引用的两句说明文案。
     pub refs: RefsPrompts,
+    /// 工具调用约定：手写信封（envelope 形态）。
+    pub tool_calling_envelope: String,
+    /// 工具调用约定：原生工具调用（native 形态）；与上一条**互斥**，一个通道只用一套。
+    pub tool_calling_native: String,
     /// 工具与路径相关的**模型侧文案**（回执、失败说明、清单行）；改文案只改册子。
     pub tool_texts: ToolTexts,
     /// 内置文件工具说明块；变量：work_name, agent, work_root, sandbox_root, module_roots, tool_params, patch_guide
@@ -240,6 +244,8 @@ pub struct ToolTexts {
     pub envelope_repaired: String,
     /// 变量：missing（还差哪些收尾字符）
     pub malformed_unclosed_brace: String,
+    /// 原生通道下"正文写了信封"的如实回报
+    pub native_no_envelope: String,
     /// 变量：n, missing（一段回复里起了多段信封）
     pub malformed_multi: String,
     pub malformed_unclosed_string: String,

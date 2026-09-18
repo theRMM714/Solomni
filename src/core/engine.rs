@@ -61,6 +61,9 @@ pub fn tool_table(modules: &[crate::core::module::Module]) -> BTreeMap<String, M
 
 /// 成员的工具执行环境：来自 module.yaml（按模块分组的放行表）+ 注入的执行端口 + 本成员的沙箱。
 pub struct MemberTools {
+    /// 这条通道的工具调用形态：envelope = 手写信封（任何供应商都能用）；native = 供应商结构化槽位。
+    /// **两套互斥**：native 就不解析信封、正文里的信封也不执行（但如实记失败行）。
+    pub mode: crate::core::providers::ToolMode,
     /// 模块 id → 该模块的（目录, 工具表）；内置 read/write 不走这里。
     pub modules: BTreeMap<String, ModuleTools>,
     /// 本次会话的观察账本（哪些文件完整读过 / 由核心写过）：改动前的证据（见 systool::Observations）。
@@ -78,6 +81,81 @@ pub struct MemberTools {
     pub unavailable: BTreeMap<String, Vec<String>>,
     /// 本成员工具进程的围栏（可达范围 + 断网）：策略在 core 派生，机制在 ToolRunner 适配层安装。
     pub fence: crate::core::fence::FenceSpec,
+}
+
+/// 线上名 → (模块 id, 工具名)：原生协议里没有 module 字段，跨模块同名工具靠它消歧。
+pub type WireTools = BTreeMap<String, (Option<String>, String)>;
+
+/// 一次请求要声明的工具表。
+pub type Decls = Vec<crate::core::ports::ToolDecl>;
+
+/// 执行一次工具调用：内置优先；外部工具按模块走（模块为空时由 dispatch_external 如实报错）。
+fn run_one(ctx: &mut MemberTools, module: Option<&str>, name: &str, args_json: &str) -> (String, ToolOutcome) {
+    if crate::core::systool::is_builtin(name) {
+        let out = crate::core::systool::execute(
+            &ctx.sandbox,
+            ctx.io.as_ref(),
+            &mut ctx.observations,
+            name,
+            args_json,
+        );
+        (String::new(), out)
+    } else {
+        let inv = ToolInvoke {
+            malformed: None,
+            module: module.map(|m| m.to_string()),
+            name: name.to_string(),
+            args_json: args_json.to_string(),
+            body: String::new(),
+            lead: String::new(),
+        };
+        dispatch_external(ctx, &inv)
+    }
+}
+
+/// 本成员这次请求要声明的工具（原生通道用）：内置工具 + 模块工具。
+/// 原生协议里**没有 module 字段**，所以跨模块同名工具靠线上名消歧（{模块}_{工具}，撞名再加序号）；
+/// 返回的映射把线上名翻回（模块, 工具）。模块没声明参数的照旧声明（参数结构交回给工具自己解释）。
+fn tool_decls(ctx: &MemberTools) -> (Decls, WireTools) {
+    let mut decls: Decls = Vec::new();
+    let mut wire: WireTools = BTreeMap::new();
+    let mut taken: Vec<String> = Vec::new();
+    for (name, schema) in &ctx.sandbox.builtin_tools {
+        // patch 是自由格式：它的声明单独写（参数是 body 字符串，不是 JSON 信封的 args）
+        if crate::core::systool::is_freeform(name) {
+            continue;
+        }
+        decls.push(schema.decl(name));
+        taken.push(name.clone());
+        wire.insert(name.clone(), (None, name.clone()));
+    }
+    let patch = crate::core::systool::patch_decl();
+    taken.push(patch.name.clone());
+    wire.insert(patch.name.clone(), (None, crate::core::systool::PATCH.to_string()));
+    decls.push(patch);
+    for (id, mt) in &ctx.modules {
+        for tool in mt.commands.keys() {
+            let mut wire_name = format!("{}_{}", id, tool);
+            let mut n = 2;
+            while taken.contains(&wire_name) {
+                wire_name = format!("{}_{}_{}", id, tool, n);
+                n += 1;
+            }
+            taken.push(wire_name.clone());
+            wire.insert(wire_name.clone(), (Some(id.clone()), tool.clone()));
+            let decl = match mt.books.get(tool) {
+                Some(schema) => schema.decl(&wire_name),
+                // 没声明参数：如实说明参数由工具自己解释（不编 schema）
+                None => crate::core::ports::ToolDecl {
+                    name: wire_name.clone(),
+                    description: format!("模块 {} 的外部工具 {}（参数由工具自己解释）", id, tool),
+                    parameters: serde_json::json!({ "type": "object", "additionalProperties": true }),
+                },
+            };
+            decls.push(decl);
+        }
+    }
+    (decls, wire)
 }
 
 /// 可用的外部工具清单：逐条列成「模块.工具」，末尾补上内置工具。
@@ -511,6 +589,19 @@ pub(crate) fn converse_with(
     let mut rounds: Vec<Round> = Vec::new();
     let mut forced_final = false;
     loop {
+        // 形态与工具声明：由本成员的通道形态决定（envelope = 不声明，走手写信封；native = 声明本成员的工具）
+        let (mode, decls, wire) = match tools.as_deref_mut() {
+            Some(ctx) => {
+                let mode = ctx.mode;
+                if mode == crate::core::providers::ToolMode::Native {
+                    let (d, w) = tool_decls(ctx);
+                    (mode, d, w)
+                } else {
+                    (mode, Vec::new(), BTreeMap::new())
+                }
+            }
+            None => (crate::core::providers::ToolMode::Envelope, Vec::new(), BTreeMap::new()),
+        };
         // 逐轮累积思维链（原文以通道返回值为准：非流式通道不回 Chunk）。
         let mut reasoning = String::new();
         let mut aborted = false;
@@ -527,11 +618,16 @@ pub(crate) fn converse_with(
                 }
                 keep
             };
-            chat.complete(&msgs, CompleteOpts::plain(stream), &mut sink)
+            let opts = CompleteOpts {
+                stream,
+                tools: if decls.is_empty() { None } else { Some(&decls) },
+            };
+            chat.complete(&msgs, opts, &mut sink)
         };
         // 结束原因如实带回：被长度截断要落日志——事后才判定得出"是截断还是模型自己写错"。
         let finish = done.finish.clone();
         let truncated = done.truncated();
+        let calls = done.calls.clone();
         let raw = done.raw;
         if truncated {
             if let Some(t) = tools.as_deref_mut() {
@@ -568,6 +664,98 @@ pub(crate) fn converse_with(
                             reply = again;
                             repaired = Some(out.what.join("；"));
                         }
+                    }
+                }
+            }
+        }
+        // ── 原生通道：工具调用来自供应商的结构化槽位（不解析信封）──
+        if mode == crate::core::providers::ToolMode::Native {
+            if let Some(ctx) = tools.as_deref_mut() {
+                // ① 有原生调用：逐个执行，各成一条工具行；助手消息如实记下"它调了什么"（回放与下一轮都看得到）
+                if !forced_final && !calls.is_empty() {
+                    for (i, c) in calls.iter().enumerate() {
+                        let (module, tool) = wire.get(&c.name).cloned().unwrap_or((None, c.name.clone()));
+                        // patch 的正文在 body 参数里（原生协议要求参数是 JSON 对象；转义交给供应商的解码器）
+                        let args = if crate::core::systool::is_freeform(&tool) {
+                            serde_json::from_str::<serde_json::Value>(&c.args_json)
+                                .ok()
+                                .and_then(|v| v.get("body").and_then(|b| b.as_str()).map(|s| s.to_string()))
+                                .unwrap_or_default()
+                        } else {
+                            c.args_json.clone()
+                        };
+                        let recap = Msg::assistant(format!(
+                            "[原生工具调用] {} {}",
+                            c.name,
+                            args.chars().take(200).collect::<String>()
+                        ));
+                        let text_msgs = if i == 0 {
+                            msgs.push(recap.clone());
+                            vec![recap]
+                        } else {
+                            Vec::new()
+                        };
+                        let (label, outcome) = run_one(ctx, module.as_deref(), &tool, &args);
+                        let view = ToolCallView {
+                            speaker: speaker.to_string(),
+                            module: label,
+                            name: tool.clone(),
+                            ok: outcome.ok,
+                            args: args.clone(),
+                            output: outcome.output,
+                            raw: format!("[原生工具调用] {}", c.name),
+                        };
+                        on_tool(&view);
+                        let texts = &ctx.sandbox.texts;
+                        let result_msg = tool_result_msg(texts, &view);
+                        msgs.push(result_msg.clone());
+                        rounds.push(Round {
+                            text: String::new(),
+                            reasoning: std::mem::take(&mut reasoning),
+                            text_msgs,
+                            tool: Some(ToolRun { view, msgs: vec![result_msg] }),
+                            finish: finish.clone(),
+                        });
+                        if rounds.len() >= MAX_TOOL_CALLS {
+                            forced_final = true;
+                        }
+                    }
+                    if forced_final {
+                        let texts = &ctx.sandbox.texts;
+                        msgs.push(tool_cap_msg(texts));
+                    }
+                    continue;
+                }
+                // ② 没有原生调用却写了信封：**不执行**（两套形态互斥），但也不静默丢掉意图
+                if !forced_final {
+                    if let Some(inv) = reply.tool.clone() {
+                        let texts = &ctx.sandbox.texts;
+                        let view = ToolCallView {
+                            speaker: speaker.to_string(),
+                            module: inv.module.clone().unwrap_or_default(),
+                            name: inv.name.clone(),
+                            ok: false,
+                            args: inv.args_json.clone(),
+                            output: texts.native_no_envelope.clone(),
+                            raw: raw.clone(),
+                        };
+                        on_tool(&view);
+                        let raw_msg = Msg::assistant(raw.clone());
+                        let result_msg = tool_result_msg(texts, &view);
+                        msgs.push(raw_msg.clone());
+                        msgs.push(result_msg.clone());
+                        rounds.push(Round {
+                            text: reply.text.clone(),
+                            reasoning,
+                            text_msgs: vec![raw_msg],
+                            tool: Some(ToolRun { view, msgs: vec![result_msg] }),
+                            finish: finish.clone(),
+                        });
+                        if rounds.len() >= MAX_TOOL_CALLS {
+                            forced_final = true;
+                            msgs.push(tool_cap_msg(texts));
+                        }
+                        continue;
                     }
                 }
             }
