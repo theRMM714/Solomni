@@ -17,15 +17,17 @@ presentation ──▶ core ◀── adapters
 
 | 层 | 干什么 | 禁令 |
 | --- | --- | --- |
-| `core/` | 定义抽象（`ports.rs`）+ 编排业务（会话、协作状态机、引擎、信封解析） | 不读文件（`std::fs`）、不发网络（ureq）、不碰 stdin/stdout——一切机制下沉适配层 |
+| `core/` | 定义抽象（`ports.rs`、`api.rs`）+ 编排业务（会话、协作状态机、引擎、信封解析） | 不读文件（`std::fs`）、不发网络（ureq）、不碰 stdin/stdout——一切机制下沉适配层 |
 | `adapters/` | 实现 core 的端口；可引用外部库（ureq / serde_yaml / windows-sys / libc） | 只依赖 core，**永不反向**；不做装配决策 |
-| `presentation/` | 渲染事件、收集输入（CLI 与 Web 并列） | 只依赖 core 门面；**永不接触端口对象** |
+| `presentation/` | 渲染事件、收集输入（CLI 与 Web 并列） | 只依赖 **core 的入站能力面**（`core::api`）；**永不接触端口对象，也拿不到 `Core` 本身** |
 | `main.rs` | 组合根：`new` 出所有适配器并注入 | 除装配外无业务 |
 
 推论：
 
 - 「用哪个供应商/模型」是**策略**，在 core 的解析链里决定；「怎么建通道」是**机制**，在 adapters。两者不互换。
-- 呈现层拿到的是 `Core` 门面 + `SessionEvent` 流；它不知道端口的存在。
+- 出站依赖由 **core 定义端口、adapters 实现**；入站依赖由 **core 定义能力接口（`core::api`）、呈现层依赖**。
+  两侧都是依赖倒置，只是箭头方向不同——**核心不定义"前端接口让别人实现"**。
+- 呈现层拿到的是 `Ops`（四个按角色的能力接口 + 事件台），不是 `Core`，也不是任何锁。
 
 ## 二、端口：只画在 IO 与可替换点上
 
@@ -57,8 +59,9 @@ presentation ──▶ core ◀── adapters
 | 文件 | 职责 |
 | --- | --- |
 | `mod.rs` | 核心层入口与 `Core` 门面：会话中心、登记处编排、运行包报告 |
-| `ports.rs` | 全部端口 trait 与跨层数据结构（依赖倒置的边界） |
-| `events.rs` | 呈现侧契约：`SessionEvent` 与介入请求的词汇 |
+| `ports.rs` | 出站端口 trait 与跨层数据结构（依赖倒置的边界；core 需要什么，由适配器实现） |
+| `api.rs` | **入站契约**：四个按角色的能力接口 + `CoreHandle`（核心自有线程、命令/事件）+ `EventBus` + `JobRegistry` |
+| `events.rs` | 呈现侧契约：`SessionEvent` 与介入请求的词汇（**事实**的线格式定义在这） |
 | `prompt.rs` | 提示词渲染：`{{key}}` 占位替换，缺键/缺变量报错 |
 | `module.rs` | `module.yaml` 契约、扫描结果 `Roster`、`runtimes`/`tools` 校验、agent system 合成 |
 | `packages.rs` | `package.yaml` 契约与包库事实（校验、去重、系统路径冲突预检） |
@@ -102,11 +105,67 @@ presentation ──▶ core ◀── adapters
 | 文件 | 职责 |
 | --- | --- |
 | `mod.rs` | 呈现层出口 |
-| `cli.rs` | 终端转录中心：解析命令 → 调门面 → 渲染事件流 |
-| `web.rs` | Web 转录中心：tiny_http + 长轮询增量推送（只绑 `127.0.0.1`） |
+| `cli.rs` | 终端转录中心：解析命令 → 用能力面 → 渲染事件流 |
+| `web.rs` | Web 转录中心：tiny_http + 长轮询增量推送（只绑 `127.0.0.1`），分发由路由目录驱动 |
+| `intent.rs` | **共享意图层**：CLI 与 Web 的「意图 → 能力调用」规则只此一份（点名、归并、唯一名、动作分发） |
+| `routes.rs` | **HTTP 入站契约的唯一定义**：`ROUTES` 目录 + 匹配器（下文 §四 的表与它机器比对） |
 | `web/` | 浏览器端：`app.js` / `md.js` / `style.css` / `index.html`，以及 `*.smoke.cjs` 冒烟 |
 
-## 四、运行日志（Log 端口）
+## 四、呈现层入站契约（命令/事件 + 路由目录）
+
+**核心常驻自己的执行线程、独占全部状态**：呈现层拿不到 `Core`、也拿不到任何核心锁。两侧只通过两样东西来往：
+
+| 东西 | 定义在 | 形态 |
+| --- | --- | --- |
+| 能力接口 | `core/api.rs` | `SessionOps` / `RegistryOps` / `HistoryOps` / `DiscoveryOps`（全 `&self`，可替换成假实现） |
+| 事件台 | `core/api.rs` | `EventBus`：核心独占生产，任意数量的消费者按序号增量取 |
+
+规则：
+
+- **命令**：呈现层调能力接口 → 核心在自己的线程上执行 → 同步回包（`Advance`：本批事件 + 事件台序号）。
+- **事件**：生成过程中的短暂事件与最终事件都进事件台；Web 长轮询按 `since` 取，客户端按 `seq` 去重。
+- **并发归核心**：`stop` 直接置位核心内部的取消标志，**不进命令队列**，所以生成期间照样立刻生效；
+  呈现层不需要知道「生成时核心状态被占用」这类内部事实。
+- **一次命令 panic 不带垮核心**：接住并继续服务（回包通道断开，调用方得到「无回应」）。
+- **传输的线格式归呈现层**：请求形状、路由、错误码在 `routes.rs`；**事实**的线格式（`SessionEvent`、`*View`）
+  仍在 core。两者不混——混在一起就是「到处内联 JSON 拼装」的成因。
+
+### 4.1 HTTP 路由目录（机器可读）
+
+`presentation/routes.rs` 的 `ROUTES` 是路由的**唯一定义**：`web.rs` 的匹配与分发都由它驱动
+（匹配由目录做、分支按 `id`），所以「代码里有路由但目录里没有」在结构上不可能发生。
+`solomni --print-routes` 输出它的 JSON（含能力、请求/响应形状、状态码与说明）。
+
+下面这张表由契约测试与 `ROUTES` 机器比对——对不上就是测试失败，不是靠人记得改文档：
+
+<!-- ROUTES:BEGIN -->
+| 方法 | 路径 | 能力 | 请求 | 响应 | 状态码 |
+| --- | --- | --- | --- | --- | --- |
+| GET | `/` | 静态资源 | — | `index.html` | 200 |
+| GET | `/style.css` | 静态资源 | — | `style.css` | 200 |
+| GET | `/app.js` | 静态资源 | — | `app.js` | 200 |
+| GET | `/md.js` | 静态资源 | — | `md.js` | 200 |
+| GET | `/api/events` | 事件台（`EventBus`） | 查询 `sid` / `since` | `{lines:[{seq,sid,events}],head}` | 200 |
+| GET | `/api/state` | `DiscoveryOps` + `RegistryOps` + `HistoryOps` | — | `{modules,rejected,fence,providers,models,core,agents,settings,sessions,history}` | 200, 400 |
+| POST | `/api/sessions` | `SessionOps::create_work` | `{name,mode,agents[],task?,delegate?}` | `{sid,agents,events}` | 200, 400 |
+| POST | `/api/sessions/{sid}/{action}` | `SessionOps` + `intent::act` | `{text?,agent?,id?,overwrite?,data_base64?,编辑体}` | `{sid,events,seq}` 等 | 200, 400, 404, 409 |
+| GET | `/api/sessions/{sid}/config` | `SessionOps::config` | — | `{config}` | 200, 400 |
+| GET | `/api/sessions/{sid}/files` | `SessionOps::files` | — | `{work,agents,roots}` | 200, 404 |
+| POST | `/api/providers` | `RegistryOps::upsert_provider` | `{id,base_url,api_key}` | `{ok}` | 200, 400 |
+| POST | `/api/providers/{id}/{action}` | `RegistryOps::remove_provider` / `discover_models` | — | `{ok}` / `{ok,models}` | 200, 400, 404 |
+| POST | `/api/models` | `RegistryOps::upsert_model` | `{id,name,api_model,provider,note?}` | `{ok}` | 200, 400 |
+| POST | `/api/models/{id}/{action}` | `RegistryOps::remove_model` / `set_core_model` | — | `{ok}` | 200, 400, 404 |
+| POST | `/api/agents` | `RegistryOps::upsert_agent` | `{name,modules[],model?,note?}` | `{ok}` | 200, 400 |
+| POST | `/api/agents/{name}/{action}` | `RegistryOps::remove_agent` | — | `{ok}` | 200, 400, 404 |
+| GET | `/api/settings` | `RegistryOps::settings` | — | `{settings}` | 200, 400 |
+| POST | `/api/settings` | `RegistryOps::set_settings` | `{streaming?,show_reasoning?}` | `{ok}` | 200, 400 |
+| GET | `/api/history` | `HistoryOps::list` | — | `{sessions}` | 200, 400 |
+| GET | `/api/history/{name}` | `HistoryOps::open` | — | `{meta,events}` | 200, 404 |
+| POST | `/api/history/{name}/delete` | `HistoryOps::delete` | — | `{ok}` | 200, 400 |
+| POST | `/api/suggest-models` | `DiscoveryOps::suggest_models` | `{task,mode}` | `{ok,agents}` | 200, 400 |
+<!-- ROUTES:END -->
+
+## 五、运行日志（Log 端口）
 
 - core 定义 `Log`（`info`/`warn`/`error`），**只调用**；文件、时间戳、目录机制在 adapters。
 - 关键节点必须埋点：通道降级、HTTP 失败、会话动作失败、装配失败、工具执行异常。
@@ -114,7 +173,7 @@ presentation ──▶ core ◀── adapters
 - 组合根创建唯一的 `FileLog` 并注入 core 与呈现层；测试用 `NoopLog`。
 - 目的：出问题时**看日志定因**，不靠推理猜。
 
-## 五、提示词册（prompts.yaml）
+## 六、提示词册（prompts.yaml）
 
 - **所有发给 LLM 的提示词一律写入 `prompts.yaml`**，禁止硬编码进代码；改文案只改册子。
 - 占位符 `{{key}}`；渲染器在 `core/prompt.rs`（纯逻辑）；文件加载经 `PromptSource` 端口在适配层。
@@ -144,7 +203,7 @@ presentation ──▶ core ◀── adapters
 - **不进册子的两类**（有意留在代码里）：①**会被解析的转录锚点**（`[轮次 N]`、`[用户:需求]`、`[代拟] …`、`[id:tag]` 等，`collab_state` 与回档定位要读它们，改文案等于改状态机）；②**只给用户看的呈现层文案**（各类 `SessionEvent::Notice`、工具轨迹行的成败字样、面向界面/CLI 的 `Err`）。
 - 运行时回执之所以进册子：它们会成为模型下一轮的输入，属于提示词。
 
-## 六、状态与落盘契约
+## 七、状态与落盘契约
 
 **布局**（机制口径）：
 
@@ -174,7 +233,7 @@ session/<工作名>/
 - 登记处四份 yaml 的字段与读写规则见 [REGISTRY_SPEC.md](REGISTRY_SPEC.md)。
 - 内存与落盘不一致时**以流水为准**（可回放、可重建）。
 
-## 七、可测性（架构约束）
+## 八、可测性（架构约束）
 
 测试的层级、替身语义、端口契约矩阵、质量门禁、缺口账与执行入口全部由 [TESTING.md](TESTING.md) 规定；
 本节只列架构对可测性的硬约束，不重复测试规范。
@@ -188,7 +247,7 @@ session/<工作名>/
 - 质量门禁（格式、编译、Clippy、依赖重复、测试结构冗余）与业务测试是两类事实，分别记录，质量失败不能被业务测试通过抵消。
 - 代码冗余检查不改变分层与端口设计，也不以增加 trait、包装层或测试用例为目标；发现重复时先判断是否同一职责，再决定合并、保留或记录原因。
 
-## 八、跨平台机制
+## 九、跨平台机制
 
 - 路径一律用 `PathBuf`/`Path` 组件拼接：**禁止把 `/` 或 `\` 写进字符串再拼**（分隔符交给运行环境）。
 - **对外**（提示词、工具参数、回执、API）一律用 `/` 书写形式：Windows 的反斜杠在 JSON 字符串里是**非法转义**（`\A`、`\S` 之类），模型据此拼出的参数会直接解析失败。

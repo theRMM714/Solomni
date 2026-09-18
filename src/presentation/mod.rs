@@ -2,4 +2,5 @@
 //! 两者的「意图翻译」只有一份：见 intent.rs。
 pub mod cli;
 pub mod intent;
+pub mod routes;
 pub mod web;

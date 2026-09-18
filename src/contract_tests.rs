@@ -10,6 +10,7 @@ mod api;
 mod fakes;
 mod intent;
 mod ports;
+mod routes;
 
 /// 隔离落点：`target/test-scratch/contract/<name>`（target/ 不入库）。每次先清空再建。
 pub(crate) fn scratch(name: &str) -> std::path::PathBuf {

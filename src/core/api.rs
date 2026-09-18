@@ -95,6 +95,12 @@ impl EventBus {
         seq
     }
 
+    /// 测试专用：往事件台放一条空事件批，让长轮询立刻返回（不真等 20 秒）。
+    #[cfg(test)]
+    pub(crate) fn seed_for_test(&self, sid: &str) -> u64 {
+        self.push(sid, &[])
+    }
+
     /// 取 `since` 之后的事件批 + 当前头部（**同一把锁内**：客户端据头部推进游标不会漏事件）。
     pub fn snapshot(&self, sid: Option<&str>, since: u64) -> (Vec<EventLine>, u64) {
         let g = self.inner.lock().unwrap_or_else(|e| e.into_inner());

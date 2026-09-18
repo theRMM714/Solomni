@@ -24,6 +24,11 @@ fn main() {
     if args.iter().any(|a| a == "--doctor") {
         std::process::exit(doctor());
     }
+    // 入站契约（机器可读）：HTTP 路由目录的唯一定义（见 ARCHITECTURE.md「呈现层入站契约」）。
+    if args.iter().any(|a| a == "--print-routes") {
+        println!("{}", presentation::routes::catalog_json());
+        std::process::exit(0);
+    }
     // 启动形态：无参数 = CLI（默认）；-webUI = Web 转录中心。
     let web = args.iter().any(|a| a == "-webUI");
     let raw_root = args

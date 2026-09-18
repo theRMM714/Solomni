@@ -20,6 +20,7 @@ fmt_deviating_files:
   - src/adapters/proc_tools.rs
   - src/adapters/sys_io.rs
   - src/adapters/yaml_settings.rs
+  - src/contract_tests.rs
   - src/core/agents.rs
   - src/core/collab.rs
   - src/core/collab_state.rs
@@ -40,7 +41,6 @@ fmt_deviating_files:
   - src/core/workspace.rs
   - src/main.rs
   - src/presentation/cli.rs
-  - src/presentation/web.rs
   - src/tests.rs
   - tests/cross-platform/integration/fence_launcher.rs
   - tests/helpers/probe.rs
