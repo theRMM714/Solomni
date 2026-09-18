@@ -375,6 +375,7 @@ impl CollabSession {
             member.tools = Some(MemberTools {
                 // 模块 id → 该模块的（目录, 工具表）：多模块 agent 靠信封里的 module 消歧。
                 modules: crate::core::engine::tool_table(&modules),
+                observations: crate::core::systool::Observations::default(),
                 runner: Arc::clone(&self.tools),
                 sandbox,
                 io: Arc::clone(&self.io),

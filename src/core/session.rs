@@ -79,6 +79,10 @@ impl AgentSession {
     /// 回档：只保留前 keep_id 行（= 删掉该行及其后）；历史与 marks 同步截断。
     /// keep_id = 0 → 转录清空，历史只剩 system（marks 也清空）。
     pub fn rewind(&mut self, keep_id: u64) {
+        // 回档把转录截掉了：那段"我完整读过哪些文件"的读取证据随之作废（保守，宁肯让模型重读）。
+        if let Some(t) = self.tools.as_mut() {
+            t.observations.clear();
+        }
         let keep = (keep_id as usize).min(self.marks.len());
         if keep == 0 {
             self.marks.clear();
@@ -180,7 +184,7 @@ impl AgentSession {
             let AgentSession { history, chat, tools, .. } = self;
             crate::core::engine::converse_with(
                 chat.as_mut(),
-                tools.as_ref(),
+                tools.as_mut(),
                 history.clone(),
                 stream,
                 &label,

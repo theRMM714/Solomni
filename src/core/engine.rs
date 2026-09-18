@@ -63,6 +63,8 @@ pub fn tool_table(modules: &[crate::core::module::Module]) -> BTreeMap<String, M
 pub struct MemberTools {
     /// 模块 id → 该模块的（目录, 工具表）；内置 read/write 不走这里。
     pub modules: BTreeMap<String, ModuleTools>,
+    /// 本次会话的观察账本（哪些文件完整读过 / 由核心写过）：改动前的证据（见 systool::Observations）。
+    pub observations: crate::core::systool::Observations,
     pub runner: Arc<dyn ToolRunner + Send + Sync>,
     /// 本成员的沙箱：内置文件工具的寻址与越界依据（权限收口在 core）。
     pub sandbox: crate::core::workspace::Sandbox,
@@ -392,7 +394,7 @@ impl Execution {
     /// 单成员一次问询：拆字段借用（chat 可变 / tools 只读互不冲突），工具调用入册。
     fn collect_one(&mut self, m: &mut Member, user_prompt: String) -> (String, Vec<ToolCallView>) {
         let Member { id, system, chat, tools, .. } = m;
-        converse(system, chat.as_mut(), tools.as_ref(), id, Msg::user(user_prompt))
+        converse(system, chat.as_mut(), tools.as_mut(), id, Msg::user(user_prompt))
     }
 
     /// 验收：核心对照方案逐项核对，输出结构化 pass/fail 清单。
@@ -455,7 +457,7 @@ pub struct Round {
 pub(crate) fn converse(
     system: &str,
     chat: &mut dyn Chat,
-    tools: Option<&MemberTools>,
+    tools: Option<&mut MemberTools>,
     speaker: &str,
     first: Msg,
 ) -> (String, Vec<ToolCallView>) {
@@ -481,13 +483,14 @@ pub(crate) fn converse(
 /// 终止保证：超限后告知一次并强制收尾；其后再来 tool 信封按原文作答，不再执行。
 pub(crate) fn converse_with(
     chat: &mut dyn Chat,
-    tools: Option<&MemberTools>,
+    mut tools: Option<&mut MemberTools>,
     mut msgs: Vec<Msg>,
     stream: bool,
     speaker: &str,
     on: &mut dyn FnMut(Chunk) -> bool,
     on_tool: &mut dyn FnMut(&ToolCallView),
 ) -> Vec<Round> {
+    // 观察账本随会话保存（回档时清空），这里不动它——它的语义是"这一段转录里的读取证据"。
     let mut rounds: Vec<Round> = Vec::new();
     let mut forced_final = false;
     loop {
@@ -509,7 +512,7 @@ pub(crate) fn converse_with(
             // 信封非法：**不执行任何工具**，但记一条失败的工具行把"信封不合法"回注给模型（下一轮自己改）。
             // 同样计入上限，所以模型反复输出非法信封最终会被强制收尾，不会死循环。
             Some(inv) if inv.malformed.is_some() && tools.is_some() && !forced_final => {
-                let ctx = tools.expect("上臂已判存在");
+                let ctx = tools.as_deref_mut().expect("上臂已判存在");
                 // 回执按判定出的类别给修法（未闭合 / 裸控制字符 / 语法错 / 字段不合法）。
                 let why = ctx
                     .sandbox
@@ -542,10 +545,19 @@ pub(crate) fn converse_with(
                 }
             }
             Some(inv) if tools.is_some() && !forced_final => {
-                let ctx = tools.expect("上臂已判存在");
-                // 内置工具（read/write）优先且不属于任何模块；外部工具按模块定 cwd。
+                let ctx = tools.as_deref_mut().expect("上臂已判存在");
+                // 内置工具（read/write/edit/search）优先且不属于任何模块；外部工具按模块定 cwd。
                 let (module, outcome) = if crate::core::systool::is_builtin(&inv.name) {
-                    (String::new(), crate::core::systool::execute(&ctx.sandbox, ctx.io.as_ref(), &inv.name, &inv.args_json))
+                    (
+                        String::new(),
+                        crate::core::systool::execute(
+                            &ctx.sandbox,
+                            ctx.io.as_ref(),
+                            &mut ctx.observations,
+                            &inv.name,
+                            &inv.args_json,
+                        ),
+                    )
                 } else {
                     dispatch_external(ctx, &inv)
                 };

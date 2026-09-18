@@ -123,6 +123,32 @@ pub struct ToolTexts {
     pub read_header: String,
     /// 变量：path, chars
     pub write_header: String,
+    // —— edit：精确替换与"没找到/多处命中"的如实回报（第二层）——
+    /// 变量：path, n, lines
+    pub edit_header: String,
+    pub edit_same: String,
+    /// 变量：total
+    pub edit_no_match: String,
+    /// 变量：line, actual
+    pub edit_no_match_near: String,
+    /// 变量：n, lines
+    pub edit_multi: String,
+    /// 变量：path
+    pub edit_file_cut: String,
+    /// 变量：path
+    pub edit_file_lossy: String,
+    // —— 改动前的"读过"证据：不满足就拒绝并给出改法 ——
+    /// 变量：path
+    pub write_need_read: String,
+    /// 变量：path
+    pub write_stale: String,
+    /// 变量：path, why
+    pub write_partial: String,
+    /// 变量：from, to, total
+    pub read_partial_range: String,
+    pub read_partial_cut: String,
+    pub read_partial_lossy: String,
+    pub read_partial_none: String,
     /// 变量：mark, id
     pub write_module_note: String,
     /// 变量：path, keyword, mode

@@ -153,11 +153,21 @@ impl Workspace for InMemoryWorkspace {
 pub(crate) struct InMemorySysIo {
     files: Mutex<BTreeMap<String, String>>,
     fail: Option<String>,
+    /// 读取标注：模拟"超过单次上限"与"含非法 UTF-8"的文件（工具必须如实标注，而不是照改）。
+    lossy: bool,
+    cut: bool,
 }
 
 impl InMemorySysIo {
     pub(crate) fn new() -> InMemorySysIo {
-        InMemorySysIo { files: Mutex::new(BTreeMap::new()), fail: None }
+        InMemorySysIo { files: Mutex::new(BTreeMap::new()), fail: None, lossy: false, cut: false }
+    }
+
+    /// 注入读取标注（lossy = 含非法 UTF-8；cut = 只读到开头）。
+    pub(crate) fn marked(mut self, lossy: bool, cut: bool) -> InMemorySysIo {
+        self.lossy = lossy;
+        self.cut = cut;
+        self
     }
 
     /// 注入失败：read / write 一律返回该原因（端口契约测试用）。
@@ -180,7 +190,7 @@ impl SysIo for InMemorySysIo {
         }
         let key = path.to_string_lossy().into_owned();
         let text = self.files.lock().expect("锁").get(&key).cloned().ok_or_else(|| format!("读取失败：{} 不存在", key))?;
-        Ok(FileRead { bytes: text.len(), text, lossy: false, cut: false })
+        Ok(FileRead { bytes: text.len(), text, lossy: self.lossy, cut: self.cut })
     }
     fn write(&self, path: &std::path::Path, content: &str) -> Result<(), String> {
         if let Some(m) = &self.fail {
@@ -208,6 +218,18 @@ pub(crate) fn p(parts: &[&str]) -> String {
 /// 路径的**书写形式**（进 JSON / 提示词 / 转录都是它）：一律 / 分隔（Windows 反斜杠在 JSON 里非法）。
 pub(crate) fn s(parts: &[&str]) -> String {
     p(parts).replace(std::path::MAIN_SEPARATOR, "/")
+}
+
+/// 一次内置工具调用（空账本）：只关心工具行为本身的用例用它；
+/// 关心"改动前有没有读过"的用例直接用 systool::execute 并自带 Observations。
+pub(crate) fn run_builtin(
+    sb: &crate::core::workspace::Sandbox,
+    io: &dyn crate::core::ports::SysIo,
+    name: &str,
+    args_json: &str,
+) -> crate::core::ports::ToolOutcome {
+    let mut obs = crate::core::systool::Observations::default();
+    crate::core::systool::execute(sb, io, &mut obs, name, args_json)
 }
 
 /// 测试用模块工具声明：只给启动命令（参数契约在需要的用例里另行声明）。
@@ -1676,11 +1698,19 @@ fn member_with_tools(id: &str, script: Vec<String>, runner: Arc<impl ToolRunner 
     let mut commands = BTreeMap::new();
     commands.insert("grep".to_string(), "python tools/grep.py".to_string());
     let mut modules = BTreeMap::new();
-    modules.insert("m0".to_string(), ModuleTools { root: abs(&["mods", "root"]), commands, books: BTreeMap::new() });
+    modules.insert(
+        "m0".to_string(),
+        ModuleTools {
+            root: abs(&["mods", "root"]),
+            commands,
+            books: BTreeMap::new(),
+        },
+    );
     let mut m = Member::new(id, "职责".to_string(), scripted(script));
     // 该路径走模块声明的外部命令（grep）：空沙箱 + 内存 IO，内置工具不参与。
     m.tools = Some(MemberTools {
         modules,
+        observations: crate::core::systool::Observations::default(),
         runner,
         sandbox: test_sandbox("m0", &[]),
         io: Arc::new(InMemorySysIo::new()),
@@ -2444,13 +2474,13 @@ fn builtin_search_reports_line_numbers_and_respects_case() {
     io.seed(&["demo", "work", "note.txt"], "第一行 Alpha\n第二行 beta\nalpha 小写\n");
     let path = s(&["demo", "work", "note.txt"]);
     // 默认区分大小写
-    let out = crate::core::systool::execute(&sb, &io, "search", &format!("{{\"path\":\"{}\",\"keyword\":\"alpha\"}}", path));
+    let out = run_builtin(&sb, &io, "search", &format!("{{\"path\":\"{}\",\"keyword\":\"alpha\"}}", path));
     assert!(out.ok, "{}", out.output);
     assert!(out.output.contains("3 | alpha 小写"), "{}", out.output);
     assert!(!out.output.contains("第一行 Alpha"), "默认区分大小写：{}", out.output);
     assert!(out.output.contains("命中 1 行 / 全文 3 行"), "{}", out.output);
     // ignore_case = true
-    let out = crate::core::systool::execute(
+    let out = run_builtin(
         &sb,
         &io,
         "search",
@@ -2459,7 +2489,7 @@ fn builtin_search_reports_line_numbers_and_respects_case() {
     assert!(out.output.contains("1 | 第一行 Alpha") && out.output.contains("3 | alpha 小写"), "{}", out.output);
     assert!(out.output.contains("命中 2 行 / 全文 3 行"), "{}", out.output);
     // 越界被拒
-    let bad = crate::core::systool::execute(
+    let bad = run_builtin(
         &sb,
         &io,
         "search",
@@ -2528,16 +2558,141 @@ fn builtin_write_into_module_dir_is_allowed_with_notice() {
     let io = InMemorySysIo::new();
     let sb = test_sandbox("a1", &["data"]);
     let keep = s(&["mods", "data", "keep.txt"]);
-    let out = crate::core::systool::execute(&sb, &io, "write", &format!("{{\"path\":\"{}\",\"content\":\"状态\"}}", keep));
+    let out = run_builtin(&sb, &io, "write", &format!("{{\"path\":\"{}\",\"content\":\"状态\"}}", keep));
     assert!(out.ok, "{}", out.output);
     assert_eq!(io.get(&["mods", "data", "keep.txt"]).as_deref(), Some("状态"));
     assert!(out.output.contains("模块 data"), "写模块目录要如实提示：{}", out.output);
     assert!(out.output.contains(crate::core::systool::MODULE_WRITE_MARK), "要有可供轨迹识别的标记：{}", out.output);
     // 越界写入：拒绝且不落盘。
     let other = s(&["mods", "other", "x.txt"]);
-    let bad = crate::core::systool::execute(&sb, &io, "write", &format!("{{\"path\":\"{}\",\"content\":\"x\"}}", other));
+    let bad = run_builtin(&sb, &io, "write", &format!("{{\"path\":\"{}\",\"content\":\"x\"}}", other));
     assert!(!bad.ok);
     assert_eq!(io.get(&["mods", "other", "x.txt"]), None);
+}
+
+#[test]
+fn builtin_edit_replaces_the_requested_span_and_reports_what_it_did() {
+    let io = InMemorySysIo::new();
+    let sb = test_sandbox("a1", &[]);
+    let note = s(&["demo", "work", "note.txt"]);
+    io.seed(&["demo", "work", "note.txt"], "第一段\n要改的句子\n第三段\n");
+    let mut obs = crate::core::systool::Observations::default();
+    let edit = |obs: &mut crate::core::systool::Observations, args: &str| {
+        let full = format!("{{\"path\":\"{}\",{}}}", note, args);
+        crate::core::systool::execute(&sb, &io, obs, "edit", &full)
+    };
+    // 唯一命中：只改那一处，别处一字不动
+    let ok = edit(&mut obs, "\"old_string\":\"要改的句子\",\"new_string\":\"改好了\"");
+    assert!(ok.ok, "{}", ok.output);
+    assert_eq!(io.get(&["demo", "work", "note.txt"]).as_deref(), Some("第一段\n改好了\n第三段\n"));
+    assert!(ok.output.contains("替换 1 处"), "{}", ok.output);
+    // old == new：什么都不会变，如实拒绝
+    let same = edit(&mut obs, "\"old_string\":\"改好了\",\"new_string\":\"改好了\"");
+    assert!(!same.ok && same.output.contains("什么都不会变"), "{}", same.output);
+    // 找不到：说清没找到，并指出"只差空白"的那一行（模型据此改对缩进）
+    let miss = edit(&mut obs, "\"old_string\":\"   改好了\",\"new_string\":\"x\"");
+    assert!(!miss.ok && miss.output.contains("没找到 old_string"), "{}", miss.output);
+    assert!(miss.output.contains("第 2 行与它只差空白"), "{}", miss.output);
+    // 多处命中：列出位置，且绝不写盘
+    io.seed(&["demo", "work", "note.txt"], "dup\ndup\n");
+    let multi = edit(&mut obs, "\"old_string\":\"dup\",\"new_string\":\"x\"");
+    assert!(!multi.ok && multi.output.contains("命中 2 处") && multi.output.contains("第 1、2 行"), "{}", multi.output);
+    assert_eq!(io.get(&["demo", "work", "note.txt"]).as_deref(), Some("dup\ndup\n"), "拒收时绝不写盘");
+    // replace_all：全改
+    let all = edit(&mut obs, "\"old_string\":\"dup\",\"new_string\":\"x\",\"replace_all\":true");
+    assert!(all.ok && all.output.contains("替换 2 处"), "{}", all.output);
+    assert_eq!(io.get(&["demo", "work", "note.txt"]).as_deref(), Some("x\nx\n"));
+    // new_string 空串 = 把这一段删掉
+    let del = edit(&mut obs, "\"old_string\":\"x\",\"new_string\":\"\",\"replace_all\":true");
+    assert!(del.ok, "{}", del.output);
+    assert_eq!(io.get(&["demo", "work", "note.txt"]).as_deref(), Some("\n\n"));
+}
+
+#[test]
+fn builtin_edit_refuses_files_it_cannot_see_whole() {
+    // 只看到开头 / 看到的是替换字符：改写会把没读到的内容或原始字节一起弄丢 → 一律不写盘。
+    let note = s(&["demo", "work", "note.txt"]);
+    let args = format!("{{\"path\":\"{}\",\"old_string\":\"a\",\"new_string\":\"b\"}}", note);
+    let sb = test_sandbox("a1", &[]);
+    for (io, want) in [
+        (InMemorySysIo::new().marked(false, true), "超过单次读取上限"),
+        (InMemorySysIo::new().marked(true, false), "非法 UTF-8"),
+    ] {
+        io.seed(&["demo", "work", "note.txt"], "abc");
+        let mut obs = crate::core::systool::Observations::default();
+        let out = crate::core::systool::execute(&sb, &io, &mut obs, "edit", &args);
+        assert!(!out.ok && out.output.contains(want), "{}", out.output);
+        assert_eq!(io.get(&["demo", "work", "note.txt"]).as_deref(), Some("abc"), "拒绝时不写盘");
+    }
+}
+
+#[test]
+fn builtin_write_needs_a_complete_prior_read_of_an_existing_file() {
+    let io = InMemorySysIo::new();
+    let sb = test_sandbox("a1", &[]);
+    let note = s(&["demo", "work", "note.txt"]);
+    let run = |obs: &mut crate::core::systool::Observations, tool: &str, args: String| {
+        crate::core::systool::execute(&sb, &io, obs, tool, &args)
+    };
+    let mut obs = crate::core::systool::Observations::default();
+    // 新建文件：不需要"读过"什么
+    let made = run(&mut obs, "write", format!("{{\"path\":\"{}\",\"content\":\"第一版\"}}", note));
+    assert!(made.ok, "{}", made.output);
+    // 核心自己写过的文件：账本里有它的内容指纹 → 可以直接再写
+    let again = run(&mut obs, "write", format!("{{\"path\":\"{}\",\"content\":\"第二版\\n还有一行\"}}", note));
+    assert!(again.ok, "{}", again.output);
+    // 只读到一段 = 证据不足：整份覆盖被拒，并指出改法
+    let mut obs2 = crate::core::systool::Observations::default();
+    let partial = run(&mut obs2, "read", format!("{{\"path\":\"{}\",\"limit\":1}}", note));
+    assert!(partial.ok && partial.output.contains("共 2 行"), "{}", partial.output);
+    let refused = run(&mut obs2, "write", format!("{{\"path\":\"{}\",\"content\":\"覆盖\"}}", note));
+    assert!(!refused.ok && refused.output.contains("只读到一部分"), "{}", refused.output);
+    assert!(refused.output.contains("edit"), "要给出改法：{}", refused.output);
+    assert_eq!(io.get(&["demo", "work", "note.txt"]).as_deref(), Some("第二版\n还有一行"), "拒收时绝不写盘");
+    // 完整读过 → 放行
+    let full = run(&mut obs2, "read", format!("{{\"path\":\"{}\"}}", note));
+    assert!(full.ok && full.output.contains("已到文件末尾"), "{}", full.output);
+    let ok = run(&mut obs2, "write", format!("{{\"path\":\"{}\",\"content\":\"第三版\"}}", note));
+    assert!(ok.ok, "{}", ok.output);
+    // 读过之后文件被别人改过：指纹不符 → 拒绝凭记忆覆盖
+    let mut obs3 = crate::core::systool::Observations::default();
+    run(&mut obs3, "read", format!("{{\"path\":\"{}\"}}", note));
+    io.seed(&["demo", "work", "note.txt"], "别人改过的内容");
+    let stale = run(&mut obs3, "write", format!("{{\"path\":\"{}\",\"content\":\"我的版本\"}}", note));
+    assert!(!stale.ok && stale.output.contains("又被改动过"), "{}", stale.output);
+    assert_eq!(io.get(&["demo", "work", "note.txt"]).as_deref(), Some("别人改过的内容"), "拒不覆盖");
+}
+
+#[test]
+fn rewind_clears_the_read_ledger_so_overwrite_needs_a_fresh_read() {
+    // 回档把转录截掉了：那段"我完整读过 / 我写过"的证据随之作废（保守，宁肯让模型重读）。
+    let io = Arc::new(InMemorySysIo::new());
+    let note = s(&["w", "a", "note.txt"]);
+    let write = format!("{{\"type\":\"tool\",\"name\":\"write\",\"args\":{{\"path\":\"{}\",\"content\":\"v1\"}}}}", note);
+    let mut member = BTreeMap::new();
+    member.insert(
+        "a".to_string(),
+        vec![
+            write.clone(),
+            "{\"type\":\"say\",\"text\":\"写好了\"}".to_string(),
+            write.clone(),
+            "{\"type\":\"say\",\"text\":\"又写了一次\"}".to_string(),
+        ],
+    );
+    let mut core = core_with_io(vec![module_of("a")], gw(member, vec!["[]".into()]), Arc::clone(&io));
+    let sid = core.create_work(work("w", WorkMode::Single, &["a"])).unwrap().sid;
+    // 第一轮：新建，放行
+    let e1 = with_live(|l| core.single_say(&sid, "写", l)).unwrap();
+    let v1 = tool_views(&e1);
+    assert!(v1[0].ok, "新建文件不需要先读过：{}", v1[0].output);
+    // 回档：证据作废
+    core.rewind(&sid, 0).unwrap();
+    // 第二轮：同一个路径已存在，而账本已被清空 → 拒绝并提示先读
+    let e2 = with_live(|l| core.single_say(&sid, "再写", l)).unwrap();
+    let v2 = tool_views(&e2);
+    assert!(!v2[0].ok, "回档后旧的读取证据不再算数：{}", v2[0].output);
+    assert!(v2[0].output.contains("必须在本次会话里先"), "{}", v2[0].output);
+    assert_eq!(io.get(&["w", "a", "note.txt"]).as_deref(), Some("v1"), "拒不覆盖");
 }
 
 #[test]
@@ -2546,19 +2701,19 @@ fn builtin_read_reports_errors_verbatim() {
     let sb = test_sandbox("a1", &[]);
     io.seed(&["demo", "work", "note.txt"], "内容");
     let note = s(&["demo", "work", "note.txt"]);
-    let ok = crate::core::systool::execute(&sb, &io, "read", &format!("{{\"path\":\"{}\"}}", note));
+    let ok = run_builtin(&sb, &io, "read", &format!("{{\"path\":\"{}\"}}", note));
     assert!(ok.ok && ok.output.contains("内容"), "{}", ok.output);
     assert!(ok.output.contains(&note), "回执要写明读的是哪个文件：{}", ok.output);
-    let missing = crate::core::systool::execute(&sb, &io, "read", &format!("{{\"path\":\"{}\"}}", s(&["demo", "work", "nope.txt"])));
+    let missing = run_builtin(&sb, &io, "read", &format!("{{\"path\":\"{}\"}}", s(&["demo", "work", "nope.txt"])));
     assert!(!missing.ok);
     assert!(missing.output.contains("不存在"), "{}", missing.output);
     // 参数不合法 = 如实报错，不猜用户想干什么。
-    assert!(!crate::core::systool::execute(&sb, &io, "read", "{").ok);
-    assert!(!crate::core::systool::execute(&sb, &io, "read", "{}").ok);
+    assert!(!run_builtin(&sb, &io, "read", "{").ok);
+    assert!(!run_builtin(&sb, &io, "read", "{}").ok);
     // 非绝对路径一律拒绝（相对路径、带冒号前缀的伪路径都落在这里）。
-    let rel = crate::core::systool::execute(&sb, &io, "read", "{\"path\":\"nope.txt\"}");
+    let rel = run_builtin(&sb, &io, "read", "{\"path\":\"nope.txt\"}");
     assert!(!rel.ok && rel.output.contains("需要绝对路径"), "{}", rel.output);
-    let fake = crate::core::systool::execute(&sb, &io, "read", "{\"path\":\"work:/nope.txt\"}");
+    let fake = run_builtin(&sb, &io, "read", "{\"path\":\"work:/nope.txt\"}");
     assert!(!fake.ok && fake.output.contains("需要绝对路径"), "{}", fake.output);
 }
 
@@ -2568,7 +2723,7 @@ fn builtin_read_range_numbers_lines_and_points_at_the_next_offset() {
     let sb = test_sandbox("a1", &[]);
     io.seed(&["demo", "work", "note.txt"], "l1\nl2\nl3\nl4\nl5\n");
     let note = s(&["demo", "work", "note.txt"]);
-    let read = |args: &str| crate::core::systool::execute(&sb, &io, "read", &format!("{{\"path\":\"{}\",{}}}", note, args));
+    let read = |args: &str| run_builtin(&sb, &io, "read", &format!("{{\"path\":\"{}\",{}}}", note, args));
     // 整读：行号从 1 数起，末尾如实说共几行
     let all = read("\"offset\":1");
     assert!(all.ok, "{}", all.output);
@@ -2594,7 +2749,7 @@ fn builtin_arg_mistakes_are_named_and_the_signature_comes_back() {
     let sb = test_sandbox("a1", &[]);
     io.seed(&["demo", "work", "note.txt"], "内容\n");
     let note = s(&["demo", "work", "note.txt"]);
-    let run = |tool: &str, args: &str| crate::core::systool::execute(&sb, &io, tool, args);
+    let run = |tool: &str, args: &str| run_builtin(&sb, &io, tool, args);
     // 上界由声明给出（不再是代码里的手写判断）
     let big = run("read", &format!("{{\"path\":\"{}\",\"limit\":3000}}", note));
     assert!(!big.ok && big.output.contains("参数 limit 不能大于 2000"), "{}", big.output);

@@ -851,6 +851,7 @@ impl Core {
     ) -> engine::MemberTools {
         engine::MemberTools {
             modules: engine::tool_table(modules),
+            observations: systool::Observations::default(),
             runner: Arc::clone(&self.tools),
             sandbox: sb.clone(),
             io: Arc::clone(&self.io),
