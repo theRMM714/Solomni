@@ -22,6 +22,30 @@ pub struct HttpChat {
     memo_key: String,
 }
 
+/// 一条消息 → wire 形态。**协议字段按需出现**：手写信封通道的消息没有调用，
+/// 所以它的请求体与从前逐字节相同；只有原生通道的助手/工具消息才带上 tool_calls 与 tool_call_id。
+fn msg_json(m: &Msg) -> serde_json::Value {
+    let mut v = serde_json::json!({ "role": m.role, "content": m.content });
+    if !m.tool_calls.is_empty() {
+        v["tool_calls"] = serde_json::Value::Array(
+            m.tool_calls
+                .iter()
+                .map(|c| {
+                    serde_json::json!({
+                        "id": c.id,
+                        "type": "function",
+                        "function": { "name": c.name, "arguments": c.args_json },
+                    })
+                })
+                .collect(),
+        );
+    }
+    if !m.tool_call_id.is_empty() {
+        v["tool_call_id"] = serde_json::json!(m.tool_call_id);
+    }
+    v
+}
+
 /// 组一次 /chat/completions 的请求体。**真实会话与探针共用同一份形状**——
 /// 探针发出去的必须是线上真会发的东西，否则它测出来的结论代表不了线上行为。
 fn request_body(
@@ -67,10 +91,7 @@ impl HttpChat {
 impl Chat for HttpChat {
     fn complete(&mut self, messages: &[Msg], opts: CompleteOpts<'_>, on: &mut dyn FnMut(Chunk) -> bool) -> Completion {
         let stream = opts.stream;
-        let wire: Vec<serde_json::Value> = messages
-            .iter()
-            .map(|m| serde_json::json!({ "role": m.role, "content": m.content }))
-            .collect();
+        let wire: Vec<serde_json::Value> = messages.iter().map(msg_json).collect();
         let body = request_body(
             &self.channel.model,
             stream,

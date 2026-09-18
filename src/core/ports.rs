@@ -65,17 +65,41 @@ pub trait Chat {
 /// 拥有所有权的会话通道（装箱端口对象；会话可跨线程移动，Web 泵线程所需）。
 pub type BoxedChat = Box<dyn Chat + Send>;
 
-/// 一条消息：role = system / user / assistant。
+/// 一条消息：role = system / user / assistant / tool。
+///
+/// 后两个字段是**原生工具调用**的协议字段（手写信封通道恒为空，也就不进 wire）：
+/// 一次回复可以有**多个**调用，所以调用是数组挂在助手消息上；结果消息靠 tool_call_id 回应它们。
+/// 回放（重启/回档后重建上下文）与实时必须产出同样的消息——唯一的构造函数见 engine::reply_msgs。
 #[derive(Debug, Clone)]
 pub struct Msg {
     pub role: String,
     pub content: String,
+    /// 这条助手消息发起了哪些调用（空 = 不发这个字段）。
+    pub tool_calls: Vec<ToolCall>,
+    /// role = tool 时它回应的是哪个调用 id（其余角色为空）。
+    pub tool_call_id: String,
 }
 
 impl Msg {
-    pub fn system(content: impl Into<String>) -> Msg { Msg { role: "system".into(), content: content.into() } }
-    pub fn user(content: impl Into<String>) -> Msg { Msg { role: "user".into(), content: content.into() } }
-    pub fn assistant(content: impl Into<String>) -> Msg { Msg { role: "assistant".into(), content: content.into() } }
+    pub fn system(content: impl Into<String>) -> Msg { Msg::plain("system", content) }
+    pub fn user(content: impl Into<String>) -> Msg { Msg::plain("user", content) }
+    pub fn assistant(content: impl Into<String>) -> Msg { Msg::plain("assistant", content) }
+    /// 一次回复的助手消息：正文 + 它发起的**全部**调用（一次回复多个调用就靠它）。
+    pub fn assistant_calls(content: impl Into<String>, calls: Vec<ToolCall>) -> Msg {
+        Msg { tool_calls: calls, ..Msg::plain("assistant", content) }
+    }
+    /// 一条工具结果：回应某个调用 id（协议要求与助手消息里的调用成对出现）。
+    pub fn tool(call_id: &str, content: impl Into<String>) -> Msg {
+        Msg { tool_call_id: call_id.to_string(), ..Msg::plain("tool", content) }
+    }
+    fn plain(role: &str, content: impl Into<String>) -> Msg {
+        Msg {
+            role: role.to_string(),
+            content: content.into(),
+            tool_calls: Vec::new(),
+            tool_call_id: String::new(),
+        }
+    }
 }
 
 /// 一次补全的结果：正文 + 供应商给的**结束原因**（原样带回，不翻译）。

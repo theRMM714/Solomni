@@ -3202,19 +3202,33 @@ fn native_mode_declares_tools_and_runs_multiple_structured_calls() {
     assert!(trace[0].ok && trace[0].name == "read" && trace[0].output.contains("第一行"), "{:?}", trace[0]);
     assert!(trace[1].ok && trace[1].name == "search" && trace[1].output.contains("2 | 第二行"), "{:?}", trace[1]);
 
-    // ③ 第二轮请求里：助手消息如实记下"它调了什么"，两条结果都在（模型据此继续）
+    // ③ 第二轮请求里：**一条**助手消息带两个 tool_calls，后面跟两条 role=tool（协议形状）
     let msgs = seen.lock().expect("锁");
     let second = &msgs[1];
-    assert!(
-        second.iter().any(|m| m.role == "assistant" && m.content.contains("[原生工具调用] read")),
-        "要把原生调用记成助手消息（回放与下一轮都看得到）：{:?}",
-        second.iter().map(|m| (m.role.clone(), m.content.chars().take(30).collect::<String>())).collect::<Vec<_>>()
-    );
+    let with_calls: Vec<&Msg> = second.iter().filter(|m| !m.tool_calls.is_empty()).collect();
     assert_eq!(
-        second.iter().filter(|m| m.role == "user" && m.content.contains("[工具结果]")).count(),
-        2,
-        "两个结果都要发回去"
+        with_calls.len(),
+        1,
+        "一次回复只推一条助手消息（多个调用都挂在它上面）：{:?}",
+        second.iter().map(|m| (m.role.clone(), m.tool_calls.len())).collect::<Vec<_>>()
     );
+    let calls = &with_calls[0].tool_calls;
+    assert_eq!(calls.len(), 2, "两个调用都挂在这条助手消息上");
+    assert_eq!(calls[0].id, "c1");
+    assert_eq!(calls[0].name, "read");
+    assert_eq!(calls[0].args_json, format!("{{\"path\":\"{}\"}}", note));
+    assert_eq!(calls[1].id, "c2");
+    assert_eq!(calls[1].name, "search");
+    let results: Vec<&Msg> = second.iter().filter(|m| m.role == "tool").collect();
+    assert_eq!(results.len(), 2, "每条调用一条 role=tool 的结果：{:?}", second);
+    assert_eq!(results[0].tool_call_id, "c1", "结果靠 tool_call_id 回应它的调用");
+    assert_eq!(results[1].tool_call_id, "c2");
+    assert!(
+        results[0].content.contains("[工具结果] read") && results[0].content.contains("第一行"),
+        "{:?}",
+        results[0]
+    );
+    assert!(results[1].content.contains("2 | 第二行"), "{:?}", results[1]);
 }
 
 #[test]

@@ -763,6 +763,53 @@ fn http_chat_assembles_streaming_tool_calls_by_index() {
     assert_eq!(out.calls[1].args_json, "{}");
 }
 
+/// 历史里带原生调用时，请求体必须发成协议形状：assistant(正文 + tool_calls) + 每条结果一条 role=tool。
+/// 这就是回放（重启/回档重建）要走的那套形状，所以它必须真的发得出去，不能只在内存里对。
+#[test]
+fn native_history_goes_out_in_protocol_shape() {
+    let mock = Mock::start(vec![(200, "application/json", completion_body("ok"))]);
+    let (mut chat, _) = gateway().member_channel(Some(&mock.channel("k")), "a");
+    let history = [
+        Msg::user("读一下"),
+        Msg::assistant_calls(
+            "我看看这个文件。",
+            vec![crate::core::ports::ToolCall {
+                id: "call_1".to_string(),
+                name: "read".to_string(),
+                args_json: "{\"path\":\"/x\"}".to_string(),
+            }],
+        ),
+        Msg::tool("call_1", "[工具结果] read\n第一行"),
+    ];
+    let _ = chat.complete(&history, CompleteOpts::plain(false), &mut |_| true);
+    let body = &mock.bodies()[0];
+    assert!(
+        body.contains("\"tool_calls\""),
+        "助手消息要带 tool_calls：{}",
+        body
+    );
+    assert!(
+        body.contains("\"id\":\"call_1\"") && body.contains("\"name\":\"read\""),
+        "调用的 id 与名字原样带上：{}",
+        body
+    );
+    assert!(
+        body.contains("\"arguments\""),
+        "参数走结构化槽位（arguments）而不是正文：{}",
+        body
+    );
+    assert!(
+        body.contains("\"content\":\"我看看这个文件。\""),
+        "助手消息的正文要真的发出去：{}",
+        body
+    );
+    assert!(
+        body.contains("\"role\":\"tool\"") && body.contains("\"tool_call_id\":\"call_1\""),
+        "结果消息用 role=tool + tool_call_id 回应它：{}",
+        body
+    );
+}
+
 #[test]
 fn tool_probe_tells_supported_unsupported_and_unknown_apart() {
     let log: Arc<dyn Log + Send + Sync> = Arc::new(NoopLog);

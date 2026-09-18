@@ -57,9 +57,12 @@ pub struct ToolCallView {
     pub args: String,
     /// 回注给模型的结果原文（转录即内容）。
     pub output: String,
-    /// 该轮模型的原始输出（重建上下文用；界面默认不展开）。
+    /// 该行所属回复的**助手消息正文**（重建上下文用；与实时推出去的那条取同一个串；界面默认不展开）。
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub raw: String,
+    /// 供应商给的调用 id：重建时靠它把结果消息与助手消息里的调用对上（手写信封通道为空）。
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub call_id: String,
 }
 
 impl ToolCallView {
