@@ -491,6 +491,9 @@ impl Core {
         if !self.settings.providers.contains_key(provider) {
             return Err(format!("无此供应商：{}", provider));
         }
+        // 工具调用形态：编辑时**保留原值**（登记表单暂不带这个字段，不能因为没带就重置成缺省），
+        // 新建缺省 envelope（任何供应商都能用的手写信封）。
+        let tools = self.settings.models.get(id).map(|m| m.tools).unwrap_or_default();
         self.settings.models.insert(
             id.to_string(),
             providers::ModelEntry {
@@ -498,6 +501,7 @@ impl Core {
                 api_model: api_model.to_string(),
                 provider: provider.to_string(),
                 note: note.to_string(),
+                tools,
             },
         );
         self.save_settings("core::model_upsert")

@@ -223,6 +223,7 @@ impl RegistryOps for FakeOps {
             api_model: "m".to_string(),
             provider: "p1".to_string(),
             note: String::new(),
+            tools: crate::core::providers::ToolMode::Envelope,
             is_core: true,
         }])
     }

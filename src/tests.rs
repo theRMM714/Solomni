@@ -39,7 +39,13 @@ impl InMemorySettings {
         );
         s.models.insert(
             "m".to_string(),
-            ModelEntry { name: "M".to_string(), api_model: "m".to_string(), provider: "p".to_string(), note: String::new() },
+            ModelEntry {
+                name: "M".to_string(),
+                api_model: "m".to_string(),
+                provider: "p".to_string(),
+                note: String::new(),
+                tools: crate::core::providers::ToolMode::Envelope,
+            },
         );
         s.core = Some("m".to_string());
         InMemorySettings { s: Mutex::new(s), fail: None }
@@ -796,11 +802,37 @@ fn prompt_render_keeps_single_braces() {
 fn settings_resolves_model_to_channel() {
     let mut s = Settings::default();
     s.providers.insert("p".into(), Provider { base_url: "http://x".into(), api_key: "k".into() });
-    s.models.insert("m".into(), ModelEntry { name: "展示名".into(), api_model: "real-model".into(), provider: "p".into(), note: String::new() });
+    s.models.insert(
+        "m".into(),
+        ModelEntry {
+            name: "展示名".into(),
+            api_model: "real-model".into(),
+            provider: "p".into(),
+            note: String::new(),
+            tools: crate::core::providers::ToolMode::Native,
+        },
+    );
     s.core = Some("m".into());
     let ch = s.resolve("m").unwrap();
     assert_eq!(ch.model, "real-model", "发给供应商的是 api_model，不是展示名");
     assert_eq!(ch.provider.base_url, "http://x");
+    // 缺省 = envelope（手写信封：任何供应商都能用）；模型视图也如实带出来
+    s.models.insert(
+        "d".into(),
+        ModelEntry {
+            name: "缺省".into(),
+            api_model: "d".into(),
+            provider: "p".into(),
+            note: String::new(),
+            tools: Default::default(),
+        },
+    );
+    assert!(s.resolve("d").is_ok(), "缺省形态的模型照样能解析出通道");
+    assert_eq!(
+        s.model_views().iter().find(|v| v.id == "m").map(|v| v.tools),
+        Some(crate::core::providers::ToolMode::Native),
+        "模型视图要带上形态（前端显示与探测结果都靠它）"
+    );
     assert!(s.resolve("ghost").is_err(), "未知模型必须报错");
     assert_eq!(s.core_channel().unwrap().model, "real-model");
 }

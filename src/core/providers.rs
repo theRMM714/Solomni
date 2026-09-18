@@ -13,7 +13,18 @@ pub struct Provider {
     pub api_key: String,
 }
 
-/// 一条可用模型：展示名 + 实际模型串 + 所属供应商 + 能力说明。
+/// 该通道的工具调用形态（登记处里的事实；**缺省 envelope** = 任何供应商都能用的手写信封）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum ToolMode {
+    /// 手写信封：模型在正文里写 {"type":"tool",…}，核心解析。任何供应商都支持。
+    #[default]
+    Envelope,
+    /// 原生工具调用：参数走供应商的结构化槽位（需要该通道确实支持 function calling）。
+    Native,
+}
+
+/// 一条可用模型：展示名 + 实际模型串 + 所属供应商 + 能力说明 + 工具调用形态。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelEntry {
     pub name: String,
@@ -21,6 +32,9 @@ pub struct ModelEntry {
     pub provider: String,
     #[serde(default)]
     pub note: String,
+    /// 工具调用形态（缺省 envelope；填 native 前应当用探测确认真实支持，见 REGISTRY_SPEC）。
+    #[serde(default)]
+    pub tools: ToolMode,
 }
 
 /// 基本设置（settings.yaml）：一般 agent 都有的开关。
@@ -105,6 +119,7 @@ impl Settings {
                 api_model: m.api_model.clone(),
                 provider: m.provider.clone(),
                 note: m.note.clone(),
+                tools: m.tools,
                 is_core: self.core.as_deref() == Some(id.as_str()),
             })
             .collect()
@@ -127,5 +142,7 @@ pub struct ModelView {
     pub api_model: String,
     pub provider: String,
     pub note: String,
+    /// 工具调用形态（envelope / native）——前端据此显示，也让用户知道当前走哪套协议。
+    pub tools: ToolMode,
     pub is_core: bool,
 }

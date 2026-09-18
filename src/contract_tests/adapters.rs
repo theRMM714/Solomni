@@ -223,6 +223,7 @@ fn yaml_settings_store_defaults_saves_and_reports_malformed_files() {
             api_model: "m".to_string(),
             provider: "p".to_string(),
             note: String::new(),
+            tools: crate::core::providers::ToolMode::Envelope,
         },
     );
     want.core = Some("m".to_string());
@@ -265,6 +266,32 @@ fn yaml_settings_store_defaults_saves_and_reports_malformed_files() {
     std::fs::write(home.join("models.yaml"), "models: [不是映射").expect("造坏文件");
     let err = store.load().unwrap_err();
     assert!(err.contains("models.yaml 非法"), "{}", err);
+
+    // 工具调用形态是**封闭枚举**：envelope / native 之外的写法一律拒收（不猜、不静默降级）
+    std::fs::write(
+        home.join("models.yaml"),
+        "models:\n  m:\n    name: M\n    api_model: m\n    provider: p\n    tools: auto\n",
+    )
+    .expect("造非法形态");
+    let err = store.load().unwrap_err();
+    assert!(
+        err.contains("models.yaml 非法"),
+        "非法形态要拒收并说明是哪个文件：{}",
+        err
+    );
+
+    // 合法形态能落盘也能读回（envelope 是缺省，native 要显式写）
+    std::fs::write(
+        home.join("models.yaml"),
+        "models:\n  m:\n    name: M\n    api_model: m\n    provider: p\n    tools: native\n",
+    )
+    .expect("造合法形态");
+    let back = store.load().expect("合法形态必须能读回");
+    assert_eq!(
+        back.models.get("m").map(|m| m.tools),
+        Some(crate::core::providers::ToolMode::Native),
+        "注册表里的形态要原样读回"
+    );
     let _ = std::fs::remove_dir_all(&root);
 }
 
