@@ -238,6 +238,7 @@ pub trait PromptSource {
 }
 
 /// 一次工具执行结果：ok = 退出码成功；output 已截断（截断规则在适配层）。
+#[derive(Debug, Clone, PartialEq)]
 pub struct ToolOutcome {
     pub ok: bool,
     pub output: String,

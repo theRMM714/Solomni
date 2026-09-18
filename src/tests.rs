@@ -826,7 +826,7 @@ fn envelope_text_may_be_omitted() {
     // 缺 name 的工具信封仍是 malformed 信号，不被缺省 text 收编成发言。
     let bad = crate::core::envelope::parse("{\"type\":\"tool\",\"args\":{}}");
     assert!(matches!(bad.verb, crate::core::envelope::Verb::Tool));
-    assert!(bad.tool.map(|t| t.malformed.is_some()).unwrap_or(false));
+    assert!(bad.tools.iter().any(|t| t.malformed.is_some()));
 }
 
 // ---------- 提示词渲染层 ----------
@@ -2319,7 +2319,7 @@ fn malformed_envelopes_are_classified_so_the_model_gets_the_right_fix() {
     use crate::core::envelope::{parse, Malformed};
     // ① 字符串里直接换行（真实事故：write 的 content 里裸换行 → 整段 JSON 非法）
     let r = parse("{\"type\":\"tool\",\"name\":\"write\",\"args\":{\"path\":\"a\",\"content\":\"第一行\n第二行\"}}");
-    match r.tool.expect("应给出非法信封信号").malformed.expect("应判定类别") {
+    match r.tools.first().cloned().expect("应给出非法信封信号").malformed.expect("应判定类别") {
         Malformed::RawControl { ch, line, tail } => {
             assert_eq!(ch, '\n', "要报出是哪个控制字符");
             assert_eq!(line, 1, "要报出在哪一行");
@@ -2330,7 +2330,7 @@ fn malformed_envelopes_are_classified_so_the_model_gets_the_right_fix() {
     // ② 收尾未闭合（输出被截断）：要说清还差哪个字符，而不是笼统说"不完整"
     let r = parse("好。{\"type\":\"tool\",\"name\":\"write\",\"args\":{\"path\":\"a\"}");
     assert_eq!(
-        r.tool.expect("信号").malformed,
+        r.tools.first().cloned().expect("信号").malformed,
         Some(Malformed::Unclosed(crate::core::envelope::Tail {
             missing: "}".to_string(),
             in_string: false,
@@ -2339,19 +2339,19 @@ fn malformed_envelopes_are_classified_so_the_model_gets_the_right_fix() {
     );
     // 断在字符串中间：状态要说清"内容没写完"（补引号会拿到半截内容）
     let r = parse("{\"type\":\"tool\",\"name\":\"write\",\"args\":{\"path\":\"a\",\"content\":\"写了一半");
-    match r.tool.expect("信号").malformed.expect("类别") {
+    match r.tools.first().cloned().expect("信号").malformed.expect("类别") {
         Malformed::Unclosed(t) => assert!(t.in_string, "要报出断在字符串里：{:?}", t),
         other => panic!("应判为未闭合：{:?}", other),
     }
     // ③ JSON 合法但字段不合法（缺 name）
     let r = parse("{\"type\":\"tool\",\"args\":{}}");
-    match r.tool.expect("信号").malformed.expect("类别") {
+    match r.tools.first().cloned().expect("信号").malformed.expect("类别") {
         Malformed::Shape(why) => assert!(why.contains("name"), "要说清缺哪个字段：{}", why),
         other => panic!("应判为字段不合法：{:?}", other),
     }
     // ④ 括号平衡但 JSON 语法非法：要带上解析器报的位置
     let r = parse("{\"type\":\"tool\",\"name\":\"write\",\"args\":{\"path\":,\"content\":\"x\"}}");
-    match r.tool.expect("信号").malformed.expect("类别") {
+    match r.tools.first().cloned().expect("信号").malformed.expect("类别") {
         Malformed::Syntax(why) => assert!(why.contains("line") && why.contains("column"), "要带位置：{}", why),
         other => panic!("应判为语法错：{:?}", other),
     }
@@ -2399,25 +2399,25 @@ fn malformed_envelopes_are_classified_so_the_model_gets_the_right_fix() {
 fn envelope_tool_parses_name_and_args() {
     let r = crate::core::envelope::parse(TOOL_CALL);
     assert_eq!(r.verb, crate::core::envelope::Verb::Tool);
-    let inv = r.tool.expect("应有调用申请");
+    let inv = r.tools.first().cloned().expect("应有调用申请");
     assert_eq!(inv.name, "grep");
     assert!(inv.module.is_none(), "没写 module = None（单模块 agent 靠这个兜底）");
     assert!(inv.args_json.contains("keyword"));
     // 带 module 的信封：trim 后非空才是 Some（空串按省略处理）。
     let with_mod = crate::core::envelope::parse("{\"type\":\"tool\",\"module\":\" reviewer \",\"name\":\"read_txt\",\"args\":{}}");
-    assert_eq!(with_mod.tool.expect("应有调用申请").module.as_deref(), Some("reviewer"));
+    assert_eq!(with_mod.tools.first().cloned().expect("应有调用申请").module.as_deref(), Some("reviewer"));
     let blank_mod = crate::core::envelope::parse("{\"type\":\"tool\",\"module\":\"  \",\"name\":\"read_txt\",\"args\":{}}");
-    assert!(blank_mod.tool.expect("应有调用申请").module.is_none());
+    assert!(blank_mod.tools.first().cloned().expect("应有调用申请").module.is_none());
     // name 缺失 = 工具信封但不合法 → **独立的 malformed 信号**（不再按原文发言收录）。
     let bad = crate::core::envelope::parse("{\"type\":\"tool\",\"args\":{}}");
     assert_eq!(bad.verb, crate::core::envelope::Verb::Tool, "看得出是想发工具信封");
     assert!(!bad.degraded, "malformed 与 degraded 是两回事（后者是信封缺失）");
-    let inv = bad.tool.expect("应给出非法信封信号");
+    let inv = bad.tools.first().cloned().expect("应给出非法信封信号");
     assert!(inv.malformed.is_some() && inv.name.is_empty(), "打捞不到名字就留空：{:?}", inv);
     assert!(bad.text.is_empty(), "非法信封的 JSON 也不进 text");
     // 真的"没有信封"仍然是 degraded say（原文收录）。
     let plain = crate::core::envelope::parse("没有信封的发言");
-    assert!(plain.degraded && plain.tool.is_none() && plain.text == "没有信封的发言");
+    assert!(plain.degraded && plain.tools.is_empty() && plain.text == "没有信封的发言");
     // 信封之外的正文才进 text（永不把信封 JSON 当文本）；只剩信封时 text 为空串。
     assert!(crate::core::envelope::parse(TOOL_CALL).text.is_empty(), "只剩信封 → text 空");
     let prose = crate::core::envelope::parse("先看一眼。{\"type\":\"tool\",\"name\":\"grep\",\"args\":{}}后记");
@@ -4250,6 +4250,104 @@ fn session_meta_exec_section_roundtrips_and_reads_legacy_meta() {
     assert!(legacy.exec.base.is_none());
     assert!(!legacy.exec.net);
     assert!(legacy.exec.pins.is_empty());
+}
+
+/// 手写信封通道的**批量调用**：一封 calls 数组里的多个调用各成一条工具行，结果按原序回填，
+/// 且与原生通道一样「重建出来必须与实时逐条一致」（手写信封不涉及 role=tool）。
+#[test]
+fn envelope_multi_call_runs_every_call_and_rebuilds_identically() {
+    let hist = Arc::new(InMemoryHistory::new());
+    let io = Arc::new(InMemorySysIo::new());
+    io.seed(&["w", "a", "a.txt"], "A1\n");
+    io.seed(&["w", "a", "b.txt"], "B1\n");
+    let a = s(&["w", "a", "a.txt"]);
+    let b = s(&["w", "a", "b.txt"]);
+    let raw = format!(
+        "{{\"type\":\"tool\",\"calls\":[{{\"name\":\"read\",\"args\":{{\"path\":\"{}\"}}}},{{\"name\":\"read\",\"args\":{{\"path\":\"{}\"}}}}]}}",
+        a, b
+    );
+    let mut member = BTreeMap::new();
+    member.insert(
+        "a".to_string(),
+        vec![raw.clone(), "{\"type\":\"say\",\"text\":\"读完了\"}".to_string()],
+    );
+    let mut core = core_with_all(
+        vec![module_of("a")],
+        gw(member, vec!["[]".into()]),
+        Arc::new(SilentRunner),
+        Arc::new(FakeCatalog::new(vec!["m".to_string()])),
+        Arc::clone(&hist),
+        Arc::clone(&io),
+    );
+    let sid = core.create_work(work("w", WorkMode::Single, &["a"])).unwrap().sid;
+    let events = with_live(|l| core.single_say(&sid, "读两个文件", l)).unwrap();
+    let views = tool_views(&events);
+    assert_eq!(
+        views.len(),
+        2,
+        "两个调用两条工具行：{:?}",
+        views.iter().map(|v| v.name.clone()).collect::<Vec<_>>()
+    );
+    assert!(views[0].output.contains("A1") && views[1].output.contains("B1"), "结果按原序回填");
+    assert!(views[0].call_id.is_empty(), "手写信封没有原生调用 id");
+    assert_eq!(views[0].reply, views[1].reply, "同一次回复的工具行同号");
+    let live = core.single_history(&sid).unwrap();
+    assert!(live.iter().all(|m| m.role != "tool"), "手写信封通道不发 role=tool");
+    assert_eq!(
+        live.iter().filter(|m| m.role == "user" && m.content.contains("[工具结果]")).count(),
+        2,
+        "两条结果各发一条用户消息：{:?}",
+        live
+    );
+
+    // 「重启」：同一份落盘历史交给新核心，重建上下文必须与实时逐条一致。
+    drop(core);
+    let mut core2 = core_with_all(
+        vec![module_of("a")],
+        gw(BTreeMap::new(), vec!["[]".into()]),
+        Arc::new(SilentRunner),
+        Arc::new(FakeCatalog::new(vec!["m".to_string()])),
+        Arc::clone(&hist),
+        Arc::clone(&io),
+    );
+    core2
+        .rewind(&sid, transcript_rows(&events).len() as u64)
+        .unwrap();
+    let rebuilt = core2.single_history(&sid).unwrap();
+    let key = |h: &[Msg]| {
+        h.iter()
+            .map(|m| (m.role.clone(), m.content.clone(), m.tool_calls.len()))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(key(&rebuilt), key(&live), "重建上下文必须与实时历史逐条一致");
+}
+
+/// 两种信封形态**互斥**：一封里既有 name 又有 calls = 字段不合法 → 记一条失败工具行、一个工具都不执行。
+#[test]
+fn envelope_rejects_mixing_the_single_and_calls_shapes() {
+    let io = Arc::new(InMemorySysIo::new());
+    let out = s(&["w", "a", "out.md"]);
+    let raw = format!(
+        "{{\"type\":\"tool\",\"name\":\"write\",\"args\":{{\"path\":\"{}\",\"content\":\"x\"}},\"calls\":[{{\"name\":\"write\",\"args\":{{\"path\":\"{}\",\"content\":\"y\"}}}}]}}",
+        out, out
+    );
+    let mut member = BTreeMap::new();
+    member.insert(
+        "a".to_string(),
+        vec![raw.clone(), "{\"type\":\"say\",\"text\":\"知道了\"}".to_string()],
+    );
+    let mut core = core_with_io_gateway(
+        vec![module_of("a")],
+        gw(member, vec!["[]".into()]),
+        Arc::clone(&io),
+    );
+    let sid = core.create_work(work("w", WorkMode::Single, &["a"])).unwrap().sid;
+    let events = with_live(|l| core.single_say(&sid, "写", l)).unwrap();
+    let views = tool_views(&events);
+    assert_eq!(views.len(), 1, "只记一条失败工具行");
+    assert!(!views[0].ok, "混用两种形态必须失败");
+    assert!(views[0].output.contains("互斥"), "{}", views[0].output);
+    assert_eq!(io.get(&["w", "a", "out.md"]), None, "一个工具都不执行（绝不落盘）");
 }
 
 // ---------- 原生多调用的回放一致性（实时 vs 重建） ----------

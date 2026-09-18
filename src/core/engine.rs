@@ -140,8 +140,6 @@ struct ToolDecls {
     list: Decls,
     /// 线上名 → (模块 id, 工具名)：原生协议里没有 module 字段，跨模块同名工具靠它消歧。
     wire: WireTools,
-    /// 声明可并发的线上名：同一回复里连续的这些调用合成一批并发跑，其余（含写入类）各自独占。
-    parallel: BTreeSet<String>,
 }
 
 /// 执行一次工具调用：内置优先；外部工具按模块走（模块为空时由 dispatch_external 如实报错）。
@@ -193,6 +191,61 @@ fn run_branch(
     (label, outcome, branch)
 }
 
+/// 这个工具有没有**声明可并发**（策略在册子/清单里，代码里不写名单）：
+/// 内置工具看 `prompts.yaml` 的 `builtin_tools.<名字>.parallel`，模块工具看 `module.yaml` 的 `tools.<名字>.parallel`。
+/// 未声明 = 独占串行；**没写 module 的外部工具也按独占**（那要等 dispatch 才知道是哪个模块，核心不猜）。
+fn is_parallel(ctx: &MemberTools, module: Option<&str>, name: &str) -> bool {
+    match module {
+        Some(id) => ctx.modules.get(id).map(|m| m.parallel.contains(name)).unwrap_or(false),
+        None => {
+            crate::core::systool::is_builtin(name)
+                && ctx.sandbox.builtin_tools.get(name).map(|s| s.parallel).unwrap_or(false)
+        }
+    }
+}
+
+/// 执行一批调用：**连续**声明可并发的合成一批并发跑，其余各自独占；结果按**原始下标**返回。
+/// 原生通道与手写信封通道共用这一处调度——并发策略只有一份，两个通道不会各写一套。
+/// 账本走分支副本 + 按原序合并（与串行执行等价，见 systool::Observations::absorb）。
+fn run_batch(
+    ctx: &mut MemberTools,
+    plan: &[(Option<String>, String, String)],
+) -> Vec<(String, ToolOutcome)> {
+    let mut done: Vec<Option<(String, ToolOutcome)>> = (0..plan.len()).map(|_| None).collect();
+    let mut i = 0;
+    while i < plan.len() {
+        if is_parallel(ctx, plan[i].0.as_deref(), &plan[i].1) {
+            let mut j = i;
+            while j < plan.len() && is_parallel(ctx, plan[j].0.as_deref(), &plan[j].1) {
+                j += 1;
+            }
+            let batch: Vec<(String, ToolOutcome, crate::core::systool::Observations)> =
+                std::thread::scope(|s| {
+                    let handles: Vec<_> = plan[i..j]
+                        .iter()
+                        .map(|(module, tool, args)| {
+                            s.spawn(|| run_branch(ctx, module.as_deref(), tool, args))
+                        })
+                        .collect();
+                    handles
+                        .into_iter()
+                        .map(|h| h.join().unwrap_or_else(|e| std::panic::resume_unwind(e)))
+                        .collect()
+                });
+            for (k, (label, outcome, branch)) in batch.into_iter().enumerate() {
+                ctx.observations.absorb(&branch);
+                done[i + k] = Some((label, outcome));
+            }
+            i = j;
+        } else {
+            let (module, tool, args) = &plan[i];
+            done[i] = Some(run_one(ctx, module.as_deref(), tool, args));
+            i += 1;
+        }
+    }
+    done.into_iter().map(|d| d.expect("每个调用都有执行结果")).collect()
+}
+
 /// 本成员这次请求要声明的工具（原生通道用）：内置工具 + 模块工具。
 /// 原生协议里**没有 module 字段**，所以跨模块同名工具靠线上名消歧（{模块}_{工具}，撞名再加序号）；
 /// 返回的映射把线上名翻回（模块, 工具）。模块没声明参数的照旧声明（参数结构交回给工具自己解释）。
@@ -207,10 +260,6 @@ fn tool_decls(ctx: &MemberTools) -> ToolDecls {
         decls.list.push(schema.decl(name));
         taken.push(name.clone());
         decls.wire.insert(name.clone(), (None, name.clone()));
-        // 可并发与否是**册子里的声明**（builtin_tools.<名字>.parallel），不是代码里的名单。
-        if schema.parallel {
-            decls.parallel.insert(name.clone());
-        }
     }
     let patch = crate::core::systool::patch_decl();
     taken.push(patch.name.clone());
@@ -230,10 +279,6 @@ fn tool_decls(ctx: &MemberTools) -> ToolDecls {
             decls
                 .wire
                 .insert(wire_name.clone(), (Some(id.clone()), tool.clone()));
-            // 模块作者在 module.yaml 的 tools.<名字>.parallel 里声明（缺省 = 独占串行）。
-            if mt.parallel.contains(tool) {
-                decls.parallel.insert(wire_name.clone());
-            }
             let decl = match mt.books.get(tool) {
                 Some(schema) => schema.decl(&wire_name),
                 // 没声明参数：如实说明参数由工具自己解释（不编 schema）
@@ -799,18 +844,19 @@ pub(crate) fn converse_with(
         // 用户中止的生成不修：半截信封是"被停下来"的产物，不是模型的意图——绝不据此执行工具。
         // 自由格式工具（patch）也不修：它的正文在信封之外，转义控制字符会把补丁里的换行弄坏。
         let freeform_tool = reply
-            .tool
-            .as_ref()
-            .map(|t| crate::core::systool::is_freeform(&t.name))
-            .unwrap_or(false);
+            .tools
+            .iter()
+            .any(|t| crate::core::systool::is_freeform(&t.name));
         let mut repaired: Option<String> = None;
         if !forced_final && !aborted && !freeform_tool {
-            if let Some(kind) = reply.tool.as_ref().and_then(|t| t.malformed.clone()) {
+            if let Some(kind) = reply.tools.first().and_then(|t| t.malformed.clone()) {
                 if let Some(ctx) = tools.as_deref_mut() {
                     let out = ctx.repair.repair(&raw, &kind);
                     if let Some(text) = out.repaired.as_deref() {
                         let again = envelope::parse(text);
-                        if again.tool.as_ref().map(|t| t.malformed.is_none()).unwrap_or(false) {
+                        if !again.tools.is_empty()
+                            && again.tools.iter().all(|t| t.malformed.is_none())
+                        {
                             reply = again;
                             repaired = Some(out.what.join("；"));
                         }
@@ -849,51 +895,8 @@ pub(crate) fn converse_with(
                         })
                         .collect();
                     // 调度：**连续**声明可并发的调用合成一批并发跑，其余各自独占（写入类因此是批次之间的屏障）。
-                    // 结果按原始下标归位，随后一律按原序回填——并发只影响执行，不影响上下文里的顺序。
-                    let mut done: Vec<Option<(String, ToolOutcome)>> =
-                        (0..plan.len()).map(|_| None).collect();
-                    let mut i = 0;
-                    while i < plan.len() {
-                        if decls.parallel.contains(&calls[i].name) {
-                            let mut j = i;
-                            while j < plan.len() && decls.parallel.contains(&calls[j].name) {
-                                j += 1;
-                            }
-                            // 分支各持账本副本；整批跑完后按原序合并——与串行执行的结果相同。
-                            let batch: Vec<(
-                                String,
-                                ToolOutcome,
-                                crate::core::systool::Observations,
-                            )> = std::thread::scope(|s| {
-                                let handles: Vec<_> = plan[i..j]
-                                    .iter()
-                                    .map(|(module, tool, args)| {
-                                        s.spawn(|| {
-                                            run_branch(ctx, module.as_deref(), tool, args)
-                                        })
-                                    })
-                                    .collect();
-                                handles
-                                    .into_iter()
-                                    .map(|h| {
-                                        h.join()
-                                            .unwrap_or_else(|e| std::panic::resume_unwind(e))
-                                    })
-                                    .collect()
-                            });
-                            for (k, (label, outcome, branch)) in
-                                batch.into_iter().enumerate()
-                            {
-                                ctx.observations.absorb(&branch);
-                                done[i + k] = Some((label, outcome));
-                            }
-                            i = j;
-                        } else {
-                            let (module, tool, args) = &plan[i];
-                            done[i] = Some(run_one(ctx, module.as_deref(), tool, args));
-                            i += 1;
-                        }
-                    }
+                    // 结果按原始下标返回，随后一律按原序回填——并发只影响执行，不影响上下文里的顺序。
+                    let done = run_batch(ctx, &plan);
                     // 先按原序把工具行建好（执行已经做完），再让**唯一那处**构造函数产出这一回复的消息：
                     // 实时与重建走同一个函数，"重建上下文与实时一致"因此是结构保证的。
                     let texts = &ctx.sandbox.texts;
@@ -902,7 +905,7 @@ pub(crate) fn converse_with(
                         .iter()
                         .enumerate()
                         .map(|(i, c)| {
-                            let (label, outcome) = done[i].take().expect("每个调用都有执行结果");
+                            let (label, outcome) = done[i].clone();
                             ToolCallView {
                                 speaker: speaker.to_string(),
                                 module: label,
@@ -944,7 +947,7 @@ pub(crate) fn converse_with(
                 }
                 // ② 没有原生调用却写了信封：**不执行**（两套形态互斥），但也不静默丢掉意图
                 if !forced_final {
-                    if let Some(inv) = reply.tool.clone() {
+                    if let Some(inv) = reply.tools.first().cloned() {
                         let texts = &ctx.sandbox.texts;
                         let view = ToolCallView {
                             speaker: speaker.to_string(),
@@ -980,10 +983,13 @@ pub(crate) fn converse_with(
                 }
             }
         }
-        match reply.tool.clone() {
-            // 信封非法：**不执行任何工具**，但记一条失败的工具行把"信封不合法"回注给模型（下一轮自己改）。
-            // 同样计入上限，所以模型反复输出非法信封最终会被强制收尾，不会死循环。
-            Some(inv) if inv.malformed.is_some() && tools.is_some() && !forced_final => {
+        // 信封这一线的分派依据：不合法时恰好一条（见 envelope::build_invokes），合法时为空。
+        let malformed = reply.tools.first().and_then(|t| t.malformed.clone());
+        match malformed.clone() {
+            // 信封不合法（缺 name / 混用两种形态 / calls 为空 / 没写完…）：**一个工具都不执行**，
+            // 但记一条失败的工具行把"哪里不合法"回注给模型（下一轮自己改）。同样计入上限，不会死循环。
+            _ if malformed.is_some() && tools.is_some() && !forced_final => {
+                let inv = reply.tools.first().cloned().expect("上臂已判非空");
                 let ctx = tools.as_deref_mut().expect("上臂已判存在");
                 // 回执按判定出的类别给修法（未闭合 / 裸控制字符 / 语法错 / 字段不合法）。
                 let mut why = ctx
@@ -1025,74 +1031,83 @@ pub(crate) fn converse_with(
                     msgs.push(tool_cap_msg(texts));
                 }
             }
-            Some(inv) if tools.is_some() && !forced_final => {
+            // 合法信封：**一次回复里的多个调用一起执行**（同一套声明并发调度），各成一条工具行。
+            _ if tools.is_some() && !forced_final && !reply.tools.is_empty() => {
                 let ctx = tools.as_deref_mut().expect("上臂已判存在");
-                // 内置工具（read/write/edit/search）优先且不属于任何模块；外部工具按模块定 cwd。
-                // 自由格式工具（patch）的输入是**信封之后的那段正文**（不必转义）；其余工具是 JSON 参数。
-                // 它的显示正文只认信封**之前**那段：补丁内容不该被当成 AI 发言渲染出来。
-                let freeform = crate::core::systool::is_freeform(&inv.name);
-                let args = if freeform { inv.body.clone() } else { inv.args_json.clone() };
-                if freeform {
-                    reply.text = inv.lead.clone();
+                let invokes = reply.tools.clone();
+                // 自由格式工具（patch）只能单发：它的输入是**信封之后的那段正文**（不必转义），
+                // 显示正文只认信封**之前**那段——补丁内容不该被当成 AI 发言渲染出来。
+                if invokes.len() == 1 && crate::core::systool::is_freeform(&invokes[0].name) {
+                    reply.text = invokes[0].lead.clone();
                 }
-                let (module, outcome) = if crate::core::systool::is_builtin(&inv.name) {
-                    (
-                        String::new(),
-                        crate::core::systool::execute(
-                            &ctx.sandbox,
-                            ctx.io.as_ref(),
-                            &mut ctx.observations,
-                            &inv.name,
-                            &args,
-                        ),
-                    )
-                } else {
-                    dispatch_external(ctx, &inv)
-                };
+                let plan: Vec<(Option<String>, String, String)> = invokes
+                    .iter()
+                    .map(|t| {
+                        let freeform = crate::core::systool::is_freeform(&t.name);
+                        let args = if freeform { t.body.clone() } else { t.args_json.clone() };
+                        (t.module.clone(), t.name.clone(), args)
+                    })
+                    .collect();
+                // 内置工具（read/write/edit/search）优先且不属于任何模块；外部工具按模块定 cwd。
+                let done = run_batch(ctx, &plan);
                 // 修过信封就如实标注在回执最前面（模型与用户都能看到核心没有瞎猜）
-                let outcome = match repaired.as_deref() {
-                    Some(what) if !what.is_empty() => ToolOutcome {
-                        ok: outcome.ok,
-                        output: format!(
-                            "{}\n{}",
-                            ctx.sandbox
-                                .texts
-                                .render(&ctx.sandbox.texts.envelope_repaired, &[("what", what.to_string())]),
-                            outcome.output
-                        ),
-                    },
-                    _ => outcome,
+                let annotate = |outcome: ToolOutcome| -> ToolOutcome {
+                    match repaired.as_deref() {
+                        Some(what) if !what.is_empty() => ToolOutcome {
+                            ok: outcome.ok,
+                            output: format!(
+                                "{}\n{}",
+                                ctx.sandbox.texts.render(
+                                    &ctx.sandbox.texts.envelope_repaired,
+                                    &[("what", what.to_string())]
+                                ),
+                                outcome.output
+                            ),
+                        },
+                        _ => outcome,
+                    }
                 };
-                let view = ToolCallView {
-                    speaker: speaker.to_string(),
-                    module,
-                    name: inv.name.clone(),
-                    ok: outcome.ok,
-                    args: inv.args_json.clone(),
-                    output: outcome.output.clone(),
-                    raw: raw.clone(),
-                    call_id: String::new(),
-                    reply: reply_id,
-                };
-                on_tool(&view);
                 let texts = &ctx.sandbox.texts;
-                let msgs_of = reply_msgs(mode, &raw, std::slice::from_ref(&view), texts);
+                let views: Vec<ToolCallView> = plan
+                    .iter()
+                    .enumerate()
+                    .map(|(i, (_module, tool, _args))| {
+                        let (label, outcome) = done[i].clone();
+                        let outcome = annotate(outcome);
+                        ToolCallView {
+                            speaker: speaker.to_string(),
+                            module: label,
+                            name: tool.clone(),
+                            ok: outcome.ok,
+                            args: invokes[i].args_json.clone(),
+                            output: outcome.output,
+                            raw: raw.clone(),
+                            call_id: String::new(),
+                            reply: reply_id,
+                        }
+                    })
+                    .collect();
+                let msgs_of = reply_msgs(mode, &raw, &views, texts);
                 for m in &msgs_of {
                     msgs.push(m.clone());
                 }
+                // 按原序回填：每条调用一条工具行（多调用时正文只挂第一条）。
                 // text = 信封之外的那段正文（可能为空；信封 JSON 已被 parse 剥掉，永不进 text）。
-                // 这一轮的历史只有 assistant(raw)（raw 含正文+信封）：若它先出文本行，
-                // 那条行自己不推历史，统一由紧随的工具行推进（见 session 与 rebuild 的分组规则）。
-                rounds.push(Round {
-                    reply: reply_id,
-                    text: reply.text.clone(),
-                    reasoning,
-                    text_msgs: vec![msgs_of[0].clone()],
-                    tool: Some(ToolRun { view, msgs: vec![msgs_of[1].clone()] }),
-                    finish: finish.clone(),
-                });
-                if rounds.len() >= MAX_TOOL_CALLS {
-                    forced_final = true;
+                for (i, view) in views.into_iter().enumerate() {
+                    on_tool(&view);
+                    rounds.push(Round {
+                        reply: reply_id,
+                        text: if i == 0 { reply.text.clone() } else { String::new() },
+                        reasoning: std::mem::take(&mut reasoning),
+                        text_msgs: if i == 0 { vec![msgs_of[0].clone()] } else { Vec::new() },
+                        tool: Some(ToolRun { view, msgs: vec![msgs_of[i + 1].clone()] }),
+                        finish: finish.clone(),
+                    });
+                    if rounds.len() >= MAX_TOOL_CALLS {
+                        forced_final = true;
+                    }
+                }
+                if forced_final {
                     msgs.push(tool_cap_msg(texts));
                 }
             }

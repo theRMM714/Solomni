@@ -25,20 +25,6 @@
     删除本条目与 tests/quality-baseline.yaml。
   blocked_by: 需要先决定全仓格式化与「带理由 allow」这两项取舍
 
-- id: tools.multi-call-and-concurrency
-  scope: global
-  level: T1
-  why: |
-    原生通道的多调用与并发调度已落地；**手写信封通道**一次回复仍只认一个调用：
-    在只有信封可用的供应商那里，多个互不依赖的读取只能串成多轮往返（每轮都是一次完整模型调用）。
-  how: |
-    信封支持 {"type":"tool","calls":[{module?,name,args}, ...]}（与单数形态互斥；GREEN FIELD 不保留双形态兼容分支）；
-    每个调用各记一条工具行；MAX_TOOL_CALLS 按**调用数**计。
-    原生通道的对应能力不在这条里：一次回复多个调用、按 `parallel` 声明并发执行、结果按原序回填都已落地。
-  accept: |
-    手写信封通道也能一次发多个调用（各成一条工具行、结果按原序回填），cargo test 与 node run-tests.js 全绿。
-  blocked_by: 缺少实现
-
 - id: tests.layout-migration
   scope: global
   level: T2

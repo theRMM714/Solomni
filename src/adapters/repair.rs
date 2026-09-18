@@ -171,7 +171,7 @@ mod tests {
         assert!(fixed.starts_with("好的。"), "信封之外的正文不动：{}", fixed);
         // 修好之后必须是**合法工具信封**，而且字段含义不变（这是"无歧义"的判据）
         let again = parse(&fixed);
-        let inv = again.tool.expect("修好后就是工具信封");
+        let inv = again.tools.into_iter().next().expect("修好后就是工具信封");
         assert!(inv.malformed.is_none(), "修好即合法");
         let args: serde_json::Value = serde_json::from_str(&inv.args_json).expect("参数是 JSON");
         assert_eq!(
@@ -201,7 +201,7 @@ mod tests {
         let fixed = out.repaired.expect("只差收尾括号必须能修");
         assert_eq!(fixed, format!("{}}}", raw));
         let again = parse(&fixed);
-        let inv = again.tool.expect("补完就是工具信封");
+        let inv = again.tools.into_iter().next().expect("补完就是工具信封");
         assert!(inv.malformed.is_none());
         assert_eq!(inv.name, "write");
         assert!(
@@ -214,10 +214,7 @@ mod tests {
         let out2 = UnambiguousRepair.repair(mixed, &raw_control(Some(tail("}", false))));
         let fixed2 = out2.repaired.expect("两处都能修");
         assert!(
-            parse(&fixed2)
-                .tool
-                .map(|t| t.malformed.is_none())
-                .unwrap_or(false),
+            parse(&fixed2).tools.iter().all(|t| t.malformed.is_none()),
             "{}",
             fixed2
         );

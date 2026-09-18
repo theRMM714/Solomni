@@ -68,8 +68,9 @@ pub struct Reply {
     pub text: String,
     /// 信封解析是否干净；不干净时 text = 原始输出（照进转录，不丢字）。
     pub degraded: bool,
-    /// verb = Tool 时的调用申请；其余动词恒为 None。
-    pub tool: Option<ToolInvoke>,
+    /// verb = Tool 时申请的调用（**一次回复可以发多个**：单数形态一个、calls 数组多个）；其余动词恒为空。
+    /// 只有一条表示：不另设"单数/复数"两个字段，否则两边会漂移。
+    pub tools: Vec<ToolInvoke>,
 }
 
 #[derive(Deserialize)]
@@ -87,9 +88,65 @@ struct ToolEnvelope {
     kind: String,
     #[serde(default)]
     module: Option<String>,
+    /// 单数形态：一个调用写 name + args。
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    args: serde_json::Value,
+    /// 复数形态：一次发多个调用写 calls 数组（**与单数形态互斥**）。
+    #[serde(default)]
+    calls: Option<Vec<CallEntry>>,
+}
+
+/// calls 数组里的一项（与单数形态同字段，只是没有 type）。
+#[derive(Deserialize)]
+struct CallEntry {
+    #[serde(default)]
+    module: Option<String>,
+    #[serde(default)]
     name: String,
     #[serde(default)]
     args: serde_json::Value,
+}
+
+/// 一封工具信封 → 调用列表。两种形态互斥：混用、都缺、calls 为空、数组项缺 name 都如实报错（不猜）。
+fn build_invokes(t: &ToolEnvelope, raw: &str, obj: &str) -> Result<Vec<ToolInvoke>, String> {
+    if t.name.is_some() && t.calls.is_some() {
+        return Err("一封工具信封里同时写了 name 与 calls：两种形态互斥，只能选一种".to_string());
+    }
+    if let Some(list) = &t.calls {
+        if list.is_empty() {
+            return Err("calls 是空数组：要么省掉它用单数形态，要么至少写一个调用".to_string());
+        }
+        let mut out = Vec::new();
+        for (i, c) in list.iter().enumerate() {
+            if c.name.trim().is_empty() {
+                return Err(format!("calls 第 {} 项没写 name", i + 1));
+            }
+            out.push(ToolInvoke {
+                malformed: None,
+                module: c.module.clone().map(|m| m.trim().to_string()).filter(|m| !m.is_empty()),
+                name: c.name.trim().to_string(),
+                args_json: c.args.to_string(),
+                // 复数形态里没有"信封之后的正文"这回事（自由格式工具只能单发）
+                body: String::new(),
+                lead: String::new(),
+            });
+        }
+        return Ok(out);
+    }
+    let name = t.name.clone().unwrap_or_default();
+    if name.trim().is_empty() {
+        return Err("工具信封没写 name（要调一个工具就写 name，要调多个就写 calls 数组）".to_string());
+    }
+    Ok(vec![ToolInvoke {
+        malformed: None,
+        body: after(raw, obj),
+        lead: before(raw, obj),
+        module: t.module.clone().map(|m| m.trim().to_string()).filter(|m| !m.is_empty()),
+        name: name.trim().to_string(),
+        args_json: t.args.to_string(),
+    }])
 }
 
 /// 信封**之前**的那段正文（只去掉首尾空白）。自由格式工具显示只认它。
@@ -123,23 +180,20 @@ pub fn parse(raw: &str) -> Reply {
     if let Some(obj) = extract_json_object(raw) {
         // tool 信封优先：name 缺失即视为不合法，落回普通信封解析（不猜测）。
         match serde_json::from_str::<ToolEnvelope>(&obj) {
-            Ok(t) if t.kind == "tool" => {
-                return Reply {
-                    verb: Verb::Tool,
-                    // text = 信封之外的那段正文（模型常在同一轮里先写一句再发信封）；只剩信封时为空串。
-                    // 信封 JSON 永不进 text：界面因此不会把 JSON 糊上屏，view.raw 另存完整原文供重建。
-                    text: strip_once(raw, &obj).trim().to_string(),
-                    degraded: false,
-                    tool: Some(ToolInvoke {
-                        malformed: None,
-                        body: after(raw, &obj),
-                        lead: before(raw, &obj),
-                        module: t.module.map(|m| m.trim().to_string()).filter(|m| !m.is_empty()),
-                        name: t.name,
-                        args_json: t.args.to_string(),
-                    }),
-                };
-            }
+            Ok(t) if t.kind == "tool" => match build_invokes(&t, raw, &obj) {
+                Ok(tools) => {
+                    return Reply {
+                        verb: Verb::Tool,
+                        // text = 信封之外的那段正文（模型常在同一轮里先写一句再发信封）；只剩信封时为空串。
+                        // 信封 JSON 永不进 text：界面因此不会把 JSON 糊上屏，view.raw 另存完整原文供重建。
+                        text: strip_once(raw, &obj).trim().to_string(),
+                        degraded: false,
+                        tools,
+                    };
+                }
+                // 字段不合法（缺 name / 混用两种形态 / calls 为空…）：落到 shape 分类，记一条失败工具行。
+                Err(why) => shape_why = Some(why),
+            },
             Ok(_) => {}
             Err(e) => shape_why = Some(e.to_string()),
         }
@@ -153,7 +207,7 @@ pub fn parse(raw: &str) -> Reply {
                     "agree" => Verb::Agree,
                     _ => Verb::Say,
                 };
-                return Reply { verb, text: env.text, degraded: false, tool: None };
+                return Reply { verb, text: env.text, degraded: false, tools: Vec::new() };
             }
         }
     }
@@ -173,7 +227,7 @@ pub fn parse(raw: &str) -> Reply {
                 verb: Verb::Tool,
                 text: raw[..start].trim().to_string(),
                 degraded: false,
-                tool: Some(ToolInvoke {
+                tools: vec![ToolInvoke {
                     malformed: Some(broken_kind(frag, None)),
                     module: Some(salvage(frag, "module")).filter(|m| !m.is_empty()),
                     name: salvage(frag, "name"),
@@ -181,7 +235,7 @@ pub fn parse(raw: &str) -> Reply {
                     // 信封本身就不合法：没有可执行的正文
                     body: String::new(),
                     lead: raw[..start].trim().to_string(),
-                }),
+                }],
             };
         }
     }
@@ -198,18 +252,18 @@ pub fn parse(raw: &str) -> Reply {
                 verb: Verb::Tool,
                 text: text.trim().to_string(),
                 degraded: false,
-                tool: Some(ToolInvoke {
+                tools: vec![ToolInvoke {
                     malformed: Some(broken_kind(probe, shape_why.as_deref())),
                     module: Some(salvage(probe, "module")).filter(|m| !m.is_empty()),
                     name: salvage(probe, "name"),
                     args_json: obj.clone().unwrap_or_else(|| head_chars(raw, 200)),
                     body: String::new(),
                     lead: raw[..raw.find('{').unwrap_or(0)].trim().to_string(),
-                }),
+                }],
             };
         }
     }
-    Reply { verb: Verb::Say, text: raw.trim().to_string(), degraded: true, tool: None }
+    Reply { verb: Verb::Say, text: raw.trim().to_string(), degraded: true, tools: Vec::new() }
 }
 
 /// 判定一段坏信封属于哪一类（可判定的确切事实，按此给修法）：
