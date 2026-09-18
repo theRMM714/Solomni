@@ -7,6 +7,8 @@ mod core;
 mod presentation;
 
 #[cfg(test)]
+mod contract_tests;
+#[cfg(test)]
 mod tests;
 
 use std::path::PathBuf;

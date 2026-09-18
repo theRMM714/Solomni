@@ -33,13 +33,17 @@
 - `tests/gaps.yaml` 与 `tests/<平台>/gaps.yaml` 缺口账；
 - `node run-tests.js` 测试汇总入口（`node start.js -test` 是备好环境后的同一入口）；
 - `src/adapters/fake_chat.rs` 中的 `FakeChat` 与 `DemoGateway`；
-- `src/tests.rs` 中的 `InMemory*`、`FakeCatalog`、`VecSource`、`ScriptGateway`、`RecordingRunner`、`RecordingFence`、`TestPrompts`、`NoopLog` 等测试装配。
+- `src/tests.rs` 中的 `InMemory*`、`FakeCatalog`、`VecSource`、`ScriptGateway`、`RecordingRunner`、`RecordingFence`、`TestPrompts`、`NoopLog` 等测试装配（替身支持失败注入，供 T2 复用）；
+- `src/contract_tests/` 中的端口与适配器契约测试（T2）：`ports.rs`（13 个端口的替身语义）、`fakes.rs`（FakeChat / DemoGateway）、
+  `adapters.rs`（8 个文件系统适配器的真实边界 + 本机环回 HTTP 适配器）；
+- T0 质量门禁已并入同一入口：编译与结构审查是硬失败，格式 / clippy / 编译告警 / 依赖重复按 `tests/quality-baseline.yaml` 比对。
 
 当前平台缺口账（`tests/cross-platform/gaps.yaml`、`tests/<平台>/gaps.yaml`）**为空**：三平台围栏机制与整仓测试
 已由三平台 CI 真跑通过（Windows AppContainer + 目录 ACL 授权与撤权、Linux Landlock、macOS seatbelt）。
 
-仍未完成的缺口全部记在 `tests/gaps.yaml`（T0 质量入口、FakeChat / DemoGateway 独立契约测试、端口契约矩阵、冗余门禁）。
+仍未完成的缺口全部记在 `tests/gaps.yaml`（当前是两条长期目标：T0 全量硬失败、`src/tests/` 目录迁移）。
 条目存在 = 尚未完成；补齐后删除条目，不保留完成历史。
+全局账**不**影响 `TEST-REPORT-ACCEPTED`：那个标记只看平台与跨平台层的缺口账。
 
 ## 三、测试分类（T0-T5）
 
@@ -69,7 +73,16 @@ cargo tree --duplicates
 
 `cargo tree --duplicates` 只检查依赖树中的重复版本，不等于源码重复检查。`clippy` 也不能替代业务测试。三者的职责必须分开记录。
 
-当前状态：上述命令可人工执行，但尚未全部纳入 `node run-tests.js` 的统一报告，属于全局缺口（`tests/gaps.yaml`）。
+当前状态：四项都已并入 `node run-tests.js`，但**强度分两级**：
+
+- **硬失败**：`cargo check --all-targets` 与结构审查（测试目标登记、孤儿测试文件、缺口账格式）——不通过即 `TEST-REPORT-FAIL`；
+- **基线比对**：`cargo fmt --all -- --check`、`cargo clippy --all-targets --all-features -- -D warnings`、
+  `cargo check` 的 rustc 告警数、`cargo tree --duplicates`——与 `tests/quality-baseline.yaml` 比对：
+  **超出基线即 `quality-fail`**；降到基线以下同样报「基线过期」，要求同步下调基线（不许悄悄恶化）。
+  工具缺失（没装 rustfmt / clippy 组件）记 `env-skip` 并写明怎么装。
+
+基线由 `node run-tests.js --print-quality-baseline` 生成，不要手工编辑数字。存量清零、把四项也升级成零容忍硬失败，
+是记在 `tests/gaps.yaml` 的长期目标（`quality.hard-gate-full`）。
 
 ### T1：单元测试
 
@@ -193,8 +206,8 @@ Fake 必须：
 
 | 实现 | 当前角色 | 当前状态 |
 | --- | --- | --- |
-| `src/adapters/fake_chat.rs:FakeChat` | 脚本模型，同时记录 `calls`，兼具 Fake + Spy | 已被业务测试使用；独立契约测试缺口 |
-| `src/adapters/fake_chat.rs:DemoGateway` | 演示/回落网关 | 已被生产装配使用；独立契约测试缺口 |
+| `src/adapters/fake_chat.rs:FakeChat` | 脚本模型，同时记录 `calls`，兼具 Fake + Spy | 契约已就位（成功 / 空 / 流式 / 中止 / 记录） |
+| `src/adapters/fake_chat.rs:DemoGateway` | 演示/回落网关 | 契约已就位（两类通道 / 回落告知 / 无网络无密钥） |
 | `src/tests.rs:InMemorySettings`、`InMemoryHistory`、`InMemoryWorkspace`、`InMemorySysIo` | 内存 Fake | 已被核心测试装配使用；需按端口补最小契约覆盖 |
 | `src/tests.rs:InMemoryPackages` | 包库 Fake | 已被核心测试使用；契约矩阵尚未完整登记 |
 | `src/tests.rs:FakeCatalog` | 模型目录 Fake + 调用记录（`seen`） | 已被核心测试使用；契约矩阵尚未完整登记 |
@@ -277,21 +290,22 @@ Fixture 必须：
 
 | 端口 | 当前/计划替身 | 交互记录 | 失败注入 | 取消/超时 | 真实适配器 | 当前状态 |
 | --- | --- | --- | --- | --- | --- | --- |
-| `Chat` | `FakeChat` | `calls` | 待补完整场景 | 待核对 | `HttpChat` | 部分 |
-| `ChatGateway` | `ScriptGateway`、`DemoGateway` | 部分 | 待补完整场景 | 不适用/待核对 | `HttpGateway` | 部分 |
-| `SettingsStore` | `InMemorySettings` | 状态可观察 | 待补 | 不适用 | `YamlSettingsStore` | 部分 |
-| `ModelCatalog` | `FakeCatalog` | `seen` | 待补 | 不适用 | `HttpModelCatalog` | 部分 |
-| `ModuleSource` | `VecSource` | 不适用 | 待补 | 不适用 | `FsModules` | 部分 |
-| `PackageSource` | `InMemoryPackages` | 不适用 | 待补 | 不适用 | `FsPackages` | 部分 |
-| `Workspace` | `InMemoryWorkspace` | 状态可观察 | 待补 | 不适用 | `FsWorkspace` | 部分 |
-| `SysIo` | `InMemorySysIo` | 状态可观察 | 待补 | 不适用 | `FsSysIo` | 部分 |
-| `HistoryStore` | `InMemoryHistory` | 状态可观察 | 待补 | 不适用 | `FsHistory` | 部分 |
-| `PromptSource` | `TestPrompts` | 不适用 | 待补 | 不适用 | `YamlPrompts` | 部分 |
-| `ToolRunner` | `RecordingRunner`、`SilentRunner` | `calls` | 待补 | 待补 | `ProcTools` | 部分 |
-| `FenceHost` | `RecordingFence`、`NoFenceHost` | `released` | 待补 | 不适用 | `confine::FenceHostAdapter` | 部分 |
-| `Log` | `NoopLog` | 不记录（Stub） | 不适用 | 不适用 | `FileLog` | 部分 |
+| `Chat` | `FakeChat`、`SharedScript` | `FakeChat.calls` | 脚本回放非法信封 | `on` 返回 false 中止（FakeChat / HttpChat） | `HttpChat` | 已验收 |
+| `ChatGateway` | `ScriptGateway`、`DemoGateway` | 通道脚本可观察 | 无通道回落（如实告知） | 不适用 | `HttpGateway` | 已验收 |
+| `SettingsStore` | `InMemorySettings` | 内存状态可观察 | `fail_with` | 不适用 | `YamlSettingsStore` | 已验收 |
+| `ModelCatalog` | `FakeCatalog` | `seen` | `fail_with` | 不适用 | `HttpModelCatalog` | 已验收 |
+| `ModuleSource` | `VecSource` | 不适用 | 不适用（错误进 `rejected`） | 不适用 | `FsModules` | 已验收 |
+| `PackageSource` | `InMemoryPackages` | 不适用 | 不适用（错误进 `rejected`） | 不适用 | `FsPackages` | 已验收 |
+| `Workspace` | `InMemoryWorkspace` | 内存布局可观察 | `fail_with` | 不适用 | `FsWorkspace` | 已验收 |
+| `SysIo` | `InMemorySysIo` | 内存内容可观察 | `fail_with` | 不适用 | `FsSysIo`（含 lossy / cut） | 已验收 |
+| `HistoryStore` | `InMemoryHistory` | 内存流水可观察 | `fail_with` | 不适用 | `FsHistory` | 已验收 |
+| `PromptSource` | `TestPrompts` | 不适用 | `fail_with` | 不适用 | `YamlPrompts` | 已验收 |
+| `ToolRunner` | `RecordingRunner`、`SilentRunner` | `calls`（cwd / 命令 / 参数） | `ok = false` 回执 | 真进程超时杀树（`ProcTools`） | `ProcTools` | 已验收 |
+| `FenceHost` | `RecordingFence`、`NoFenceHost` | `released` | `fail_with` | 不适用 | `confine::FenceHostAdapter`（真机撤权在 `tests/windows/`） | 已验收 |
+| `Log` | `NoopLog` | 不记录（Stub） | 不适用 | 不适用 | `FileLog`（三个级别都落盘） | 已验收 |
 
-"部分"表示已有使用或局部覆盖，不表示该端口已经完成契约验收。
+"已验收"指该端口在 `src/contract_tests/` 与 `src/adapters/*` 的契约测试里有成功、失败、空/边界与交互记录的断言；
+真实适配器边界的覆盖范围以本表的"真实适配器"列为准。新增端口或新增替身必须同时补齐这一行。
 
 ## 七、隔离、清理与副作用
 
@@ -330,7 +344,9 @@ Fixture 必须：
 - 依赖重复不一定是错误，必须有解释或后续治理记录；
 - 重复代码检查不得诱导新增抽象。先判断重复是否属于同一职责，再决定合并、保留或记录原因。
 
-当前 `node run-tests.js` 尚未统一执行上述全部 T0 检查，因此 T0 的完整门禁仍是全局缺口（`tests/gaps.yaml`）。
+当前 `node run-tests.js` 已执行上述全部 T0 检查，但强度分两级（见 §三）：编译与结构审查硬失败；
+格式、clippy、编译告警、依赖重复按 `tests/quality-baseline.yaml` 比对存量。存量清零是全局长期目标（`tests/gaps.yaml`）。
+**基线不是豁免**：超出基线一样是 `quality-fail`，只有"已是存量"才不重复记账。
 
 ## 九、执行入口与报告
 
@@ -344,6 +360,9 @@ cargo clippy --all-targets --all-features -- -D warnings
 
 快速检查用于本地反馈，不替代完整入口。
 
+注意：`cargo test` 预期全绿；`cargo fmt --check` 与 `cargo clippy … -D warnings` **当前不会全绿**——
+存量记在 `tests/quality-baseline.yaml`（42 个文件有格式偏差、25 处 clippy）。存量清零是 `tests/gaps.yaml` 的长期目标。
+
 ### 完整本地入口
 
 ```text
@@ -354,13 +373,19 @@ node run-tests.js
 
 1. `cargo build`（并打印安全模式 / 真机围栏模式说明）；
 2. 运行 `solomni --doctor`，记录当前平台和围栏能力；
-3. 运行 L1 单元测试（`cargo test --bin solomni`）；
-4. 逐个运行 `cargo test --test cross-platform/windows/linux/macos`；
-5. 运行前端冒烟；
-6. 如果存在编排器，运行 L4 端到端；
-7. 写入 `target/test-report.json` 并打印 `TEST-REPORT-OK` 或 `TEST-REPORT-FAIL`。
+3. `T0 编译（--all-targets）`（硬失败）；
+4. `T0 结构审查`（硬失败：目标登记 / 孤儿测试文件 / 缺口账格式）；
+5. `T0 格式（fmt --check）`（基线比对）；
+6. `T0 静态检查（clippy）`（基线比对）；
+7. `T0 编译告警`（基线比对）；
+8. `T0 依赖重复（cargo tree）`（基线比对）；
+9. `L1 单元（--bin solomni）`；
+10. 逐个运行 `cargo test --test cross-platform/windows/linux/macos`；
+11. 前端冒烟；
+12. 存在编排器时运行 L4 端到端；
+13. 写入 `target/test-report.json` 并打印 `TEST-REPORT-OK` 或 `TEST-REPORT-FAIL`。
 
-当前入口还没有完整接入 T0；文档中列出的目标顺序不应被误读成当前代码已经实现。
+T0 与业务测试在同一次运行里出结果，但结论分开记：质量失败不能被业务测试通过抵消，反之亦然。
 
 ### CI 真机入口
 
@@ -375,13 +400,15 @@ node run-tests.js --fence-live
 当前实现实际会输出：
 
 - `pass`：步骤完成；
-- `fail`：断言或命令失败；
+- `fail`：断言或命令失败（硬失败）；
+- `quality-fail`：超出质量基线，或基线已过期；
+- `env-skip`：工具缺失等环境性跳过（步骤级），与 `envSkips`（探针级的 `[探针]` 行）并列；
 - `skip-platform`：当前平台不适用的空平台目标；
-- `gap`：入口没有找到应运行的部分；
-- `envSkips`：报告内记录环境性跳过及原因。
+- `gap`：入口没有找到应运行的部分。
 
-更细的状态区分（`test-fail`、`quality-fail`、`env-skip`、`blocked`）是尚未完成的缺口，记在 `tests/gaps.yaml`；
-在代码入口完成升级前，不能把目标状态名称写入当前报告并宣称已支持。
+报告字段：`steps`（逐步骤状态）、`envSkips`（探针级跳过）、`quality`（`failed` / `steps` / `baselineStale`）、
+`gaps`（平台缺口账）、`globalGaps`（`tests/gaps.yaml` 的长期目标）、`failed`（硬失败数）。
+`test-fail` 与 `blocked` 这两个更细的状态当前没有实现，也不在计划内——`fail` 与 `gap` 已能如实表达。
 
 ## 十、成功标记
 
@@ -390,7 +417,7 @@ node run-tests.js --fence-live
 - `FRONTEND-SMOKE-OK`：前端冒烟完成；
 - `E2E-OK`：端到端场景完成；
 - `TEST-REPORT-OK`：当前入口的运行步骤没有失败；
-- `TEST-REPORT-FAIL`：当前入口有失败步骤（同时以非零退出码暴露）；
+- `TEST-REPORT-FAIL`：当前入口有硬失败步骤**或**质量基线不符（同时以非零退出码暴露）；
 - `TEST-REPORT-ACCEPTED`：当前平台缺口账为空。
 
 固定标记不能替代质量门禁，也不能覆盖 `env-skip`、`gap` 或 `quality-fail`。测试入口必须以非零退出码暴露失败。
@@ -420,9 +447,13 @@ tests/
     main.rs
     probes/
     gaps.yaml
-  gaps.yaml                     # T0/T2/T5 等全局缺口账
+  gaps.yaml                     # 全局长期目标（不影响 TEST-REPORT-ACCEPTED）
+  quality-baseline.yaml         # T0 存量基线（由 --print-quality-baseline 生成）
   ci-publish.mjs                # CI 报告发布脚本（把三平台报告写入 ci-report 分支）
 ```
+
+单元层的契约测试在 `src/contract_tests/`（`ports.rs` / `fakes.rs` / `adapters.rs`），替身在 `src/tests.rs`；
+两者合并进 `src/tests/` 目录是记在 `tests/gaps.yaml` 的长期目标（`tests.layout-migration`）。
 
 四个平台目标在 `Cargo.toml` 中显式登记。新增测试目标、Fixture 或脚本必须能从入口追溯到执行位置，否则属于结构质量问题。
 
@@ -439,7 +470,8 @@ tests/
 
 ### 全局缺口
 
-`tests/gaps.yaml` 记录 T0、T2、T5 和测试基础设施的跨平台缺口。
+`tests/gaps.yaml` 记录 T0、T2、T5 和测试基础设施的跨平台缺口，以及**长期目标**（存量收敛、目录迁移）。
+它不参与 `TEST-REPORT-ACCEPTED` 判定，但每条都会以 `[global-gap]` 进报告与 `report.globalGaps`。
 
 ### 平台缺口
 

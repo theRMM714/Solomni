@@ -1,0 +1,70 @@
+# 质量存量基线（TESTING.md §八「质量、冗余和静态检查」）。
+# 门禁比对基线：**超出即 quality-fail**（不许新增存量）；降到基线以下也报「基线过期」，
+# 要求同步下调基线——这样「逐渐收敛到全量硬失败」才是可判定的。
+# 由 `node run-tests.js --print-quality-baseline` 生成，不要手工编辑数字。
+
+# cargo fmt --all -- --check 仍有偏差的文件（一次性全仓格式化是独立的整改动作）。
+fmt_deviating_files:
+  - src/adapters/confine/linux.rs
+  - src/adapters/confine/macos.rs
+  - src/adapters/confine/mod.rs
+  - src/adapters/confine/windows.rs
+  - src/adapters/fake_chat.rs
+  - src/adapters/fs_history.rs
+  - src/adapters/fs_modules.rs
+  - src/adapters/fs_packages.rs
+  - src/adapters/fs_workspace.rs
+  - src/adapters/http_chat.rs
+  - src/adapters/log.rs
+  - src/adapters/model_catalog.rs
+  - src/adapters/proc_tools.rs
+  - src/adapters/sys_io.rs
+  - src/adapters/yaml_settings.rs
+  - src/core/agents.rs
+  - src/core/collab.rs
+  - src/core/collab_state.rs
+  - src/core/engine.rs
+  - src/core/envelope.rs
+  - src/core/events.rs
+  - src/core/exec.rs
+  - src/core/fence.rs
+  - src/core/mod.rs
+  - src/core/module.rs
+  - src/core/packages.rs
+  - src/core/ports.rs
+  - src/core/prompt.rs
+  - src/core/providers.rs
+  - src/core/refs.rs
+  - src/core/session.rs
+  - src/core/systool.rs
+  - src/core/workspace.rs
+  - src/main.rs
+  - src/presentation/cli.rs
+  - src/presentation/web.rs
+  - src/tests.rs
+  - tests/cross-platform/integration/fence_launcher.rs
+  - tests/helpers/probe.rs
+  - tests/linux/probes/fence.rs
+  - tests/macos/probes/fence.rs
+  - tests/windows/probes/container.rs
+
+# cargo clippy --all-targets --all-features -- -D warnings 的存量 lint 计数。
+clippy:
+  cloned_ref_to_slice_refs: 2
+  collapsible_match: 1
+  items_after_test_module: 2
+  large_enum_variant: 1
+  ptr_arg: 1
+  single_match: 1
+  too_many_arguments: 6
+  unnecessary_cast: 7
+  unnecessary_map_or: 2
+  unnecessary_mut_passed: 1
+  unnecessary_sort_by: 1
+
+# cargo check --all-targets 的 rustc 层告警数（不含 clippy）。
+check_warnings: 0
+
+# cargo tree --duplicates 报出的重复 crate（多是 proc-macro 传递依赖，只能记录事实）。
+duplicates:
+  - syn

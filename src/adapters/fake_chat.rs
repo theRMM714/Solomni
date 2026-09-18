@@ -26,9 +26,22 @@ impl FakeChat {
 }
 
 impl Chat for FakeChat {
-    fn complete(&mut self, messages: &[Msg], _stream: bool, _on: &mut dyn FnMut(Chunk) -> bool) -> Raw {
+    /// 兑现 Chat 端口的流式与中止契约（与 http_chat 同一套语义）：
+    /// stream = false 不回调；stream = true 先发 Chunk::Start，再发一条 Chunk::Text（整条脚本）。
+    /// on 返回 false = 调用方要求中止，立即停止回调并返回已产出的正文（Start 阶段中止则返回空串）。
+    fn complete(&mut self, messages: &[Msg], stream: bool, on: &mut dyn FnMut(Chunk) -> bool) -> Raw {
         self.calls.push(messages.to_vec());
-        self.next()
+        let text = self.next();
+        if !stream {
+            return text;
+        }
+        if !on(Chunk::Start) {
+            return String::new();
+        }
+        if !text.is_empty() {
+            let _ = on(Chunk::Text(text.clone()));
+        }
+        text
     }
 }
 

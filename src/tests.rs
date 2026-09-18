@@ -24,12 +24,13 @@ use std::sync::{Arc, Mutex};
 // ---------- 内存适配器（测试组合根） ----------
 
 /// 内存登记处：预置「供应商 p + 模型 m + 核心默认 m」，让会话都能拿到真实通道。
-struct InMemorySettings {
+pub(crate) struct InMemorySettings {
     s: Mutex<Settings>,
+    fail: Option<String>,
 }
 
 impl InMemorySettings {
-    fn new() -> InMemorySettings {
+    pub(crate) fn new() -> InMemorySettings {
         let mut s = Settings::default();
         s.providers.insert(
             "p".to_string(),
@@ -40,7 +41,13 @@ impl InMemorySettings {
             ModelEntry { name: "M".to_string(), api_model: "m".to_string(), provider: "p".to_string(), note: String::new() },
         );
         s.core = Some("m".to_string());
-        InMemorySettings { s: Mutex::new(s) }
+        InMemorySettings { s: Mutex::new(s), fail: None }
+    }
+
+    /// 注入失败：load / save 一律返回该原因（端口契约测试用）。
+    pub(crate) fn fail_with(mut self, msg: &str) -> InMemorySettings {
+        self.fail = Some(msg.to_string());
+        self
     }
     /// 指定默认执行档位的登记处（断言虚拟机档下的诊断与工具回执）。
     fn with_tier(tier: Tier) -> InMemorySettings {
@@ -52,9 +59,15 @@ impl InMemorySettings {
 
 impl SettingsStore for InMemorySettings {
     fn load(&self) -> Result<Settings, String> {
+        if let Some(m) = &self.fail {
+            return Err(m.clone());
+        }
         Ok(self.s.lock().expect("锁").clone())
     }
     fn save(&self, s: &Settings) -> Result<(), String> {
+        if let Some(m) = &self.fail {
+            return Err(m.clone());
+        }
         *self.s.lock().expect("锁") = s.clone();
         Ok(())
     }
@@ -62,25 +75,38 @@ impl SettingsStore for InMemorySettings {
 
 /// 内存工作区：准备/写入都不碰盘，只记录（测试用）。
 #[derive(Default)]
-struct InMemoryWorkspace {
+pub(crate) struct InMemoryWorkspace {
     files: Mutex<BTreeMap<String, Vec<u8>>>,
+    fail: Option<String>,
 }
 
 impl InMemoryWorkspace {
-    fn new() -> InMemoryWorkspace {
-        InMemoryWorkspace { files: Mutex::new(BTreeMap::new()) }
+    pub(crate) fn new() -> InMemoryWorkspace {
+        InMemoryWorkspace { files: Mutex::new(BTreeMap::new()), fail: None }
+    }
+
+    /// 注入失败：prepare / roots / write_work / list 一律返回该原因（work_has 是布尔查询，不受影响）。
+    pub(crate) fn fail_with(mut self, msg: &str) -> InMemoryWorkspace {
+        self.fail = Some(msg.to_string());
+        self
     }
     /// 直接放一个文件（模拟落盘），键与真实布局同构：<session>/work/<名字> 或 <session>/<agent>/<相对路径>。
-    fn seed(&self, session: &str, area: &str, rel: &str) {
+    pub(crate) fn seed(&self, session: &str, area: &str, rel: &str) {
         self.files.lock().expect("锁").insert(format!("{}/{}/{}", session, area, rel), Vec::new());
     }
 }
 
 impl Workspace for InMemoryWorkspace {
     fn prepare(&self, _session: &str, _agents: &[String]) -> Result<(), String> {
+        if let Some(m) = &self.fail {
+            return Err(m.clone());
+        }
         Ok(())
     }
     fn roots(&self, session: &str, agents: &[String]) -> Result<crate::core::workspace::WorkRoots, String> {
+        if let Some(m) = &self.fail {
+            return Err(m.clone());
+        }
         // 与 FsWorkspace 同构的**绝对**路径（以当前目录为锚；只读 env，不碰盘）。
         let mut map = BTreeMap::new();
         for a in agents {
@@ -89,6 +115,9 @@ impl Workspace for InMemoryWorkspace {
         Ok(crate::core::workspace::WorkRoots { shared: abs(&[session, "work"]), agents: map })
     }
     fn write_work(&self, session: &str, name: &str, bytes: &[u8]) -> Result<(), String> {
+        if let Some(m) = &self.fail {
+            return Err(m.clone());
+        }
         self.files.lock().expect("锁").insert(format!("{}/work/{}", session, name), bytes.to_vec());
         Ok(())
     }
@@ -96,6 +125,9 @@ impl Workspace for InMemoryWorkspace {
         self.files.lock().expect("锁").contains_key(&format!("{}/work/{}", session, name))
     }
     fn list(&self, session: &str, agents: &[String]) -> Result<crate::core::workspace::WorkFiles, String> {
+        if let Some(m) = &self.fail {
+            return Err(m.clone());
+        }
         // 内存实现没有目录树，直接按前缀扫键（相对路径原样返回，/ 分隔）。
         let files = self.files.lock().expect("锁");
         let pick = |prefix: &str| -> Vec<String> {
@@ -118,36 +150,49 @@ impl Workspace for InMemoryWorkspace {
 
 /// 内存文件系统：内置文件工具的读写落在这里（测试可断言内容与越界拒绝）。
 #[derive(Default)]
-struct InMemorySysIo {
+pub(crate) struct InMemorySysIo {
     files: Mutex<BTreeMap<String, String>>,
+    fail: Option<String>,
 }
 
 impl InMemorySysIo {
-    fn new() -> InMemorySysIo {
-        InMemorySysIo { files: Mutex::new(BTreeMap::new()) }
+    pub(crate) fn new() -> InMemorySysIo {
+        InMemorySysIo { files: Mutex::new(BTreeMap::new()), fail: None }
     }
-    fn seed(&self, parts: &[&str], text: &str) {
+
+    /// 注入失败：read / write 一律返回该原因（端口契约测试用）。
+    pub(crate) fn fail_with(mut self, msg: &str) -> InMemorySysIo {
+        self.fail = Some(msg.to_string());
+        self
+    }
+    pub(crate) fn seed(&self, parts: &[&str], text: &str) {
         self.files.lock().expect("锁").insert(p(parts), text.to_string());
     }
-    fn get(&self, parts: &[&str]) -> Option<String> {
+    pub(crate) fn get(&self, parts: &[&str]) -> Option<String> {
         self.files.lock().expect("锁").get(&p(parts)).cloned()
     }
 }
 
 impl SysIo for InMemorySysIo {
     fn read(&self, path: &std::path::Path) -> Result<FileRead, String> {
+        if let Some(m) = &self.fail {
+            return Err(m.clone());
+        }
         let key = path.to_string_lossy().into_owned();
         let text = self.files.lock().expect("锁").get(&key).cloned().ok_or_else(|| format!("读取失败：{} 不存在", key))?;
         Ok(FileRead { bytes: text.len(), text, lossy: false, cut: false })
     }
     fn write(&self, path: &std::path::Path, content: &str) -> Result<(), String> {
+        if let Some(m) = &self.fail {
+            return Err(m.clone());
+        }
         self.files.lock().expect("锁").insert(path.to_string_lossy().into_owned(), content.to_string());
         Ok(())
     }
 }
 
 /// 测试用绝对根：以当前工作目录为锚（只读 env，不碰盘）——真实路径模型下所有根都是绝对路径。
-fn abs(parts: &[&str]) -> PathBuf {
+pub(crate) fn abs(parts: &[&str]) -> PathBuf {
     let mut b = std::env::current_dir().expect("取当前目录");
     for x in parts {
         b.push(x);
@@ -156,17 +201,17 @@ fn abs(parts: &[&str]) -> PathBuf {
 }
 
 /// 绝对路径的字符串期望值（平台分隔符；用于 PathBuf / 内存 IO 的键）。
-fn p(parts: &[&str]) -> String {
+pub(crate) fn p(parts: &[&str]) -> String {
     abs(parts).to_string_lossy().into_owned()
 }
 
 /// 路径的**书写形式**（进 JSON / 提示词 / 转录都是它）：一律 / 分隔（Windows 反斜杠在 JSON 里非法）。
-fn s(parts: &[&str]) -> String {
+pub(crate) fn s(parts: &[&str]) -> String {
     p(parts).replace(std::path::MAIN_SEPARATOR, "/")
 }
 
 /// 测试沙箱：work 共享区 + agent 私有区 + 指定模块目录（都是绝对路径）。
-fn test_sandbox(agent: &str, modules: &[&str]) -> crate::core::workspace::Sandbox {
+pub(crate) fn test_sandbox(agent: &str, modules: &[&str]) -> crate::core::workspace::Sandbox {
     let mut map = BTreeMap::new();
     for id in modules {
         map.insert(id.to_string(), abs(&["mods", id]));
@@ -182,31 +227,50 @@ fn test_sandbox(agent: &str, modules: &[&str]) -> crate::core::workspace::Sandbo
 }
 
 /// 内存会话历史：供测试断言落盘与回放。
-struct InMemoryHistory {
+pub(crate) struct InMemoryHistory {
     metas: Mutex<BTreeMap<String, SessionMeta>>,
     events: Mutex<BTreeMap<String, Vec<serde_json::Value>>>,
+    fail: Option<String>,
 }
 
 impl InMemoryHistory {
-    fn new() -> InMemoryHistory {
-        InMemoryHistory { metas: Mutex::new(BTreeMap::new()), events: Mutex::new(BTreeMap::new()) }
+    pub(crate) fn new() -> InMemoryHistory {
+        InMemoryHistory { metas: Mutex::new(BTreeMap::new()), events: Mutex::new(BTreeMap::new()), fail: None }
+    }
+
+    /// 注入失败：全部 HistoryStore 方法一律返回该原因（端口契约测试用）。
+    pub(crate) fn fail_with(mut self, msg: &str) -> InMemoryHistory {
+        self.fail = Some(msg.to_string());
+        self
+    }
+
+    /// 失败注入的入口判定：Ok = 未注入。
+    fn guard(&self) -> Result<(), String> {
+        match &self.fail {
+            Some(m) => Err(m.clone()),
+            None => Ok(()),
+        }
     }
 }
 
 impl HistoryStore for InMemoryHistory {
     fn create(&self, meta: &SessionMeta) -> Result<(), String> {
+        self.guard()?;
         self.metas.lock().expect("锁").insert(meta.name.clone(), meta.clone());
         Ok(())
     }
     fn save_meta(&self, meta: &SessionMeta) -> Result<(), String> {
+        self.guard()?;
         self.metas.lock().expect("锁").insert(meta.name.clone(), meta.clone());
         Ok(())
     }
     fn append(&self, name: &str, events: &[serde_json::Value]) -> Result<(), String> {
+        self.guard()?;
         self.events.lock().expect("锁").entry(name.to_string()).or_default().extend_from_slice(events);
         Ok(())
     }
     fn list(&self) -> Result<Vec<HistoryView>, String> {
+        self.guard()?;
         let metas = self.metas.lock().expect("锁");
         let events = self.events.lock().expect("锁");
         Ok(metas
@@ -223,11 +287,13 @@ impl HistoryStore for InMemoryHistory {
             .collect())
     }
     fn load(&self, name: &str) -> Result<(SessionMeta, Vec<serde_json::Value>), String> {
+        self.guard()?;
         let meta = self.metas.lock().expect("锁").get(name).cloned().ok_or_else(|| format!("无此会话：{}", name))?;
         let events = self.events.lock().expect("锁").get(name).cloned().unwrap_or_default();
         Ok((meta, events))
     }
     fn delete(&self, name: &str) -> Result<bool, String> {
+        self.guard()?;
         let removed = self.metas.lock().expect("锁").remove(name).is_some();
         self.events.lock().expect("锁").remove(name);
         Ok(removed)
@@ -235,25 +301,35 @@ impl HistoryStore for InMemoryHistory {
 }
 
 /// 内存模型目录：回放固定模型名，并记录收到的 Provider（断言编辑期密钥复用）。
-struct FakeCatalog {
+pub(crate) struct FakeCatalog {
     models: Vec<String>,
-    seen: Mutex<Vec<Provider>>,
+    pub(crate) seen: Mutex<Vec<Provider>>,
+    fail: Option<String>,
 }
 
 impl FakeCatalog {
-    fn new(models: Vec<String>) -> FakeCatalog {
-        FakeCatalog { models, seen: Mutex::new(Vec::new()) }
+    pub(crate) fn new(models: Vec<String>) -> FakeCatalog {
+        FakeCatalog { models, seen: Mutex::new(Vec::new()), fail: None }
+    }
+
+    /// 注入失败：list_models 返回该原因（失败注入不记录调用——错误路径没走到"用哪个通道"）。
+    pub(crate) fn fail_with(mut self, msg: &str) -> FakeCatalog {
+        self.fail = Some(msg.to_string());
+        self
     }
 }
 
 impl ModelCatalog for FakeCatalog {
     fn list_models(&self, provider: &Provider) -> Result<Vec<String>, String> {
+        if let Some(m) = &self.fail {
+            return Err(m.clone());
+        }
         self.seen.lock().expect("锁").push(provider.clone());
         Ok(self.models.clone())
     }
 }
 
-struct VecSource(Vec<Module>);
+pub(crate) struct VecSource(pub(crate) Vec<Module>);
 
 impl ModuleSource for VecSource {
     fn scan(&self) -> crate::core::module::Roster {
@@ -262,7 +338,7 @@ impl ModuleSource for VecSource {
 }
 
 /// 无声围栏端口：测试里不碰任何 ACL（真实实现在 adapters/confine）。
-struct NoFenceHost;
+pub(crate) struct NoFenceHost;
 impl crate::core::ports::FenceHost for NoFenceHost {
     fn release(&self, _spec: &crate::core::fence::FenceSpec) -> Result<(), String> {
         Ok(())
@@ -270,25 +346,39 @@ impl crate::core::ports::FenceHost for NoFenceHost {
 }
 
 /// 记录型围栏端口：断言「删除会话时真的请求了撤销」。
-struct RecordingFence {
-    released: Mutex<Vec<String>>,
+pub(crate) struct RecordingFence {
+    pub(crate) released: Mutex<Vec<String>>,
+    fail: Option<String>,
+}
+impl RecordingFence {
+    pub(crate) fn new() -> RecordingFence {
+        RecordingFence { released: Mutex::new(Vec::new()), fail: None }
+    }
+    /// 注入失败：release 返回该原因（撤销失败必须如实传播，不能被当成已撤销）。
+    pub(crate) fn fail_with(mut self, msg: &str) -> RecordingFence {
+        self.fail = Some(msg.to_string());
+        self
+    }
 }
 impl crate::core::ports::FenceHost for RecordingFence {
     fn release(&self, spec: &crate::core::fence::FenceSpec) -> Result<(), String> {
+        if let Some(m) = &self.fail {
+            return Err(m.clone());
+        }
         self.released.lock().expect("锁").push(spec.agent.clone());
         Ok(())
     }
 }
 
 /// 内存运行包库（测试组合根）：直接给出包清单，不碰盘。
-struct InMemoryPackages(Vec<PackageManifest>);
+pub(crate) struct InMemoryPackages(Vec<PackageManifest>);
 
 impl InMemoryPackages {
-    fn empty() -> InMemoryPackages {
+    pub(crate) fn empty() -> InMemoryPackages {
         InMemoryPackages(Vec::new())
     }
     /// 用 yaml 文本造包（顺带覆盖清单解析）。
-    fn with(yamls: &[&str]) -> InMemoryPackages {
+    pub(crate) fn with(yamls: &[&str]) -> InMemoryPackages {
         InMemoryPackages(yamls.iter().map(|y| pkg_yaml(y)).collect())
     }
 }
@@ -303,18 +393,18 @@ impl PackageSource for InMemoryPackages {
 }
 
 /// 用 yaml 造一份包清单（顺带覆盖清单解析）。
-fn pkg_yaml(y: &str) -> PackageManifest {
+pub(crate) fn pkg_yaml(y: &str) -> PackageManifest {
     serde_yaml::from_str(y).expect("包清单必须能解析")
 }
 
 /// 造一个 prefix 类包（独立前缀 opt/rt/&lt;id&gt;-&lt;version&gt;）。
-fn pkg(id: &str, version: &str) -> PackageManifest {
+pub(crate) fn pkg(id: &str, version: &str) -> PackageManifest {
     pkg_yaml(&format!("id: {}
 version: {}
 prefix: opt/rt/{}-{}", id, version, id, version))
 }
 
-fn module_of(id: &str) -> Module {
+pub(crate) fn module_of(id: &str) -> Module {
     Module {
         manifest: ModuleManifest {
             id: id.to_string(),
@@ -375,15 +465,15 @@ fn collab_work(name: &str, modules: &[&str], delegate: bool, task: &str) -> Work
     w
 }
 
-fn scripted(s: Vec<String>) -> BoxedChat {
+pub(crate) fn scripted(s: Vec<String>) -> BoxedChat {
     Box::new(FakeChat::new(s))
 }
 
 /// 共享脚本队列：多条核心响应按 complete 次序弹出（末条重复兜底）。
 /// 与真实通道时序一致：建通道时不消费，调用时才消费。Arc 分身共享（网关与测试两侧）。
 /// 共享脚本队列（Mutex 版：需跨线程 Send+Sync）。
-struct SharedScript {
-    q: Arc<Mutex<Vec<String>>>,
+pub(crate) struct SharedScript {
+    pub(crate) q: Arc<Mutex<Vec<String>>>,
 }
 
 impl Chat for SharedScript {
@@ -398,9 +488,14 @@ impl Chat for SharedScript {
 }
 
 /// 脚本网关：按 agent 实例名回放各自脚本；核心通道走共享队列。
-struct ScriptGateway {
+pub(crate) struct ScriptGateway {
     member: BTreeMap<String, Vec<String>>,
     core: Arc<Mutex<Vec<String>>>,
+}
+impl ScriptGateway {
+    pub(crate) fn new(member: BTreeMap<String, Vec<String>>, core: Vec<String>) -> ScriptGateway {
+        ScriptGateway { member, core: Arc::new(Mutex::new(core)) }
+    }
 }
 
 impl ChatGateway for ScriptGateway {
@@ -415,14 +510,31 @@ impl ChatGateway for ScriptGateway {
     }
 }
 
-struct TestPrompts;
+/// 提示词册替身：默认回放内置册子；fail_with 注入加载失败。
+pub(crate) struct TestPrompts {
+    fail: Option<String>,
+}
+
+impl TestPrompts {
+    pub(crate) fn ok() -> TestPrompts {
+        TestPrompts { fail: None }
+    }
+    pub(crate) fn fail_with(mut self, msg: &str) -> TestPrompts {
+        self.fail = Some(msg.to_string());
+        self
+    }
+}
+
 impl PromptSource for TestPrompts {
     fn load(&self) -> Result<Prompts, String> {
+        if let Some(m) = &self.fail {
+            return Err(m.clone());
+        }
         Ok(test_prompts())
     }
 }
 
-fn test_prompts() -> Prompts {
+pub(crate) fn test_prompts() -> Prompts {
     serde_yaml::from_str::<Prompts>(include_str!("../prompts.yaml")).expect("内置提示词册必须合法")
 }
 
@@ -443,7 +555,7 @@ fn core_with_workspace(modules: Vec<Module>, gateway: ScriptGateway, ws: Arc<InM
         Arc::new(FakeCatalog::new(vec!["m".to_string()])),
         Arc::new(SilentRunner),
         Arc::new(InMemorySysIo::new()),
-        Box::new(TestPrompts),
+        Box::new(TestPrompts::ok()),
         Arc::new(crate::core::ports::NoopLog),
     )
     .expect("内存装配不应失败")
@@ -515,7 +627,7 @@ fn core_with_pkgs(
         catalog,
         runner,
         io,
-        Box::new(TestPrompts),
+        Box::new(TestPrompts::ok()),
         Arc::new(crate::core::ports::NoopLog),
     )
     .expect("内存装配不应失败")
@@ -1496,7 +1608,7 @@ fn extract_balanced_array() {
 // ---------- 工具执行器 ----------
 
 /// 守护 runner：任何调用即失败（守护不该用工具的路径）。
-struct SilentRunner;
+pub(crate) struct SilentRunner;
 impl ToolRunner for SilentRunner {
     fn run(&self, _fence: &crate::core::fence::FenceSpec, _command: &str, _args: &str) -> ToolOutcome {
         panic!("不应调用工具");
@@ -1504,10 +1616,15 @@ impl ToolRunner for SilentRunner {
 }
 
 /// 记录型 runner：记录 (root, command, args)，回放固定输出。
-struct RecordingRunner {
-    calls: Mutex<Vec<(PathBuf, String, String)>>,
+pub(crate) struct RecordingRunner {
+    pub(crate) calls: Mutex<Vec<(PathBuf, String, String)>>,
     out: String,
     ok: bool,
+}
+impl RecordingRunner {
+    pub(crate) fn new(out: &str, ok: bool) -> RecordingRunner {
+        RecordingRunner { calls: Mutex::new(Vec::new()), out: out.to_string(), ok }
+    }
 }
 impl ToolRunner for RecordingRunner {
     fn run(&self, fence: &crate::core::fence::FenceSpec, command: &str, args_json: &str) -> ToolOutcome {
@@ -2571,7 +2688,7 @@ fn module_without_runtime_is_denied_with_reason() {
         Arc::new(FakeCatalog::new(vec!["m".to_string()])),
         Arc::clone(&runner) as Arc<dyn ToolRunner + Send + Sync>,
         Arc::new(InMemorySysIo::new()),
-        Box::new(TestPrompts),
+        Box::new(TestPrompts::ok()),
         Arc::new(crate::core::ports::NoopLog),
     )
     .expect("内存装配不应失败");
@@ -2809,7 +2926,7 @@ fn edit_session_enforces_the_same_rules_as_creation() {
 #[test]
 fn deleting_a_session_asks_the_fence_to_release_its_grants() {
     let hist = Arc::new(InMemoryHistory::new());
-    let fence = Arc::new(RecordingFence { released: Mutex::new(Vec::new()) });
+    let fence = Arc::new(RecordingFence::new());
     seed_session(&hist, "w", "single", vec![agent_meta("甲", &["a"], None)], ExecSpec::default());
     let mut core = Core::new(
         Arc::new(InMemorySettings::new()),
@@ -2822,7 +2939,7 @@ fn deleting_a_session_asks_the_fence_to_release_its_grants() {
         Arc::new(FakeCatalog::new(vec!["m".to_string()])),
         Arc::new(SilentRunner),
         Arc::new(InMemorySysIo::new()),
-        Box::new(TestPrompts),
+        Box::new(TestPrompts::ok()),
         Arc::new(crate::core::ports::NoopLog),
     )
     .expect("内存装配不应失败");
