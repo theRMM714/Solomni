@@ -30,6 +30,8 @@ use std::sync::Arc;
 struct FakeOps {
     fail: Option<String>,
     running: AtomicBool,
+    /// 探测结论可换（缺省"支持"）：用来验三种结论都**原样**穿过呈现层、不被改写。
+    probe: Option<crate::core::ports::ProbeOutcome>,
 }
 
 impl FakeOps {
@@ -37,6 +39,7 @@ impl FakeOps {
         FakeOps {
             fail: fail.map(|s| s.to_string()),
             running: AtomicBool::new(false),
+            probe: None,
         }
     }
 
@@ -45,6 +48,19 @@ impl FakeOps {
             Some(m) => Err(m.clone()),
             None => Ok(()),
         }
+    }
+}
+
+fn fake_ops_probe(fail: Option<&str>, probe: crate::core::ports::ProbeOutcome) -> Ops {
+    let mut f = FakeOps::new(fail);
+    f.probe = Some(probe);
+    let f = Arc::new(f);
+    Ops {
+        sessions: f.clone(),
+        registry: f.clone(),
+        history: f.clone(),
+        discovery: f.clone(),
+        events: EventBus::new(),
     }
 }
 
@@ -281,6 +297,15 @@ impl RegistryOps for FakeOps {
     fn discover_models(&self, _provider_id: &str) -> Result<Vec<String>, String> {
         self.guard()?;
         Ok(vec!["m1".to_string(), "m2".to_string()])
+    }
+    fn probe_model_tools(&self, _id: &str) -> Result<crate::core::ports::ProbeOutcome, String> {
+        self.guard()?;
+        Ok(self
+            .probe
+            .clone()
+            .unwrap_or(crate::core::ports::ProbeOutcome::Supported {
+                detail: "替身说支持".to_string(),
+            }))
     }
 }
 
@@ -657,6 +682,53 @@ fn session_action_boundaries_are_explicit() {
 
 // ---------- 逐条路由：成功形态 ----------
 
+/// 探测回包：三种结论**原样**穿过呈现层（不改写、不降级），`mode` 取自登记处（探测后的事实）。
+#[test]
+fn model_probe_passes_the_verdict_through_verbatim() {
+    use crate::core::ports::ProbeOutcome;
+    let cases = [
+        (
+            ProbeOutcome::Supported {
+                detail: "真的调了".to_string(),
+            },
+            "supported",
+            "真的调了",
+        ),
+        (
+            ProbeOutcome::Unsupported {
+                detail: "供应商说 tools 不认识".to_string(),
+            },
+            "unsupported",
+            "供应商说 tools 不认识",
+        ),
+        (
+            ProbeOutcome::Unknown {
+                detail: "没发起调用".to_string(),
+            },
+            "unknown",
+            "没发起调用",
+        ),
+    ];
+    for (outcome, want, detail) in cases {
+        let ops = fake_ops_probe(None, outcome);
+        let (code, text) = call(&ops, "POST", "/api/models/m1/probe", "");
+        assert_eq!(code, 200, "{}", text);
+        let v: serde_json::Value = serde_json::from_str(&text).expect("探测回包是 JSON");
+        assert_eq!(v["outcome"], want, "{}", text);
+        assert_eq!(v["detail"], detail, "{}", text);
+        assert_eq!(
+            v["mode"], "envelope",
+            "形态取登记处现有值（替身的模型就是 envelope），不由结论反推：{}",
+            text
+        );
+    }
+    // 能力面失败要如实传播（绝不静默降级成"不支持"）。
+    let ops = fake_ops(Some("假能力面：探测失败"));
+    let (code, text) = call(&ops, "POST", "/api/models/m1/probe", "");
+    assert_eq!(code, 400);
+    assert!(text.contains("假能力面"), "{}", text);
+}
+
 #[test]
 fn success_shapes_are_pinned_per_route() {
     let ops = fake_ops(None);
@@ -738,6 +810,7 @@ fn success_shapes_are_pinned_per_route() {
         ),
         ("POST", "/api/models/m1/remove", "", 200, "\"ok\""),
         ("POST", "/api/models/m1/core", "", 200, "\"ok\""),
+        ("POST", "/api/models/m1/probe", "", 200, "\"outcome\""),
         (
             "POST",
             "/api/agents",

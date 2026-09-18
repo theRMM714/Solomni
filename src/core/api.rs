@@ -230,6 +230,9 @@ pub trait RegistryOps: Send + Sync {
     fn settings(&self) -> Result<AppSettings, String>;
     fn set_settings(&self, app: AppSettings) -> Result<(), String>;
     fn discover_models(&self, provider_id: &str) -> Result<Vec<String>, String>;
+    /// 实测一条通道支不支持原生工具调用（要真实网络；三种结论都如实回报，
+    /// 只把**确定**的结论写回登记处 —— 这条规则在 core，不在呈现层）。
+    fn probe_model_tools(&self, id: &str) -> Result<crate::core::ports::ProbeOutcome, String>;
 }
 
 /// 历史能力：落盘会话的列表 / 打开 / 删除，以及在世会话与历史合并后的总览。
@@ -543,6 +546,10 @@ impl RegistryOps for CoreHandle {
     fn discover_models(&self, provider_id: &str) -> Result<Vec<String>, String> {
         let provider_id = provider_id.to_string();
         self.call(move |core| core.discover_models(&provider_id))
+    }
+    fn probe_model_tools(&self, id: &str) -> Result<crate::core::ports::ProbeOutcome, String> {
+        let id = id.to_string();
+        self.call(move |core| core.probe_model_tools(&id))
     }
 }
 

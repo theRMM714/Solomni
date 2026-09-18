@@ -803,7 +803,8 @@ function openModelsModal() {
           id.appendChild(badge);
         }
         const sub = document.createElement('div'); sub.className = 'reg-sub';
-        sub.textContent = m.name + ' · ' + m.api_model + ' · 供应商 ' + m.provider;
+        sub.textContent = m.name + ' · ' + m.api_model + ' · 供应商 ' + m.provider +
+          ' · 工具调用 ' + (m.tools === 'native' ? '原生' : '手写信封');
         const note = document.createElement('div'); note.className = 'reg-note'; note.textContent = m.note || '';
         main.appendChild(id); main.appendChild(sub); main.appendChild(note);
         const acts = document.createElement('div'); acts.className = 'reg-acts';
@@ -821,7 +822,22 @@ function openModelsModal() {
             c.setMsg('已删除 ' + m.id);
           } catch (e) { c.setMsg(e.message, true); }
         };
-        acts.appendChild(edit); acts.appendChild(del);
+        // 实测这条通道支不支持原生工具调用（要真实网络）：结论由后端如实回报，只写确定的结论。
+        const probe = btn('测工具调用', 'link-btn');
+        probe.onclick = async () => {
+          probe.disabled = true;
+          c.setMsg('正在实测 ' + m.id + ' 的工具调用支持（要发两条最小请求）…');
+          try {
+            const r = await api('POST', '/api/models/' + encodeURIComponent(m.id) + '/probe', {});
+            const what = r.outcome === 'supported' ? '支持原生工具调用'
+              : r.outcome === 'unsupported' ? '**不支持**原生工具调用（供应商拒了带 tools 的请求）'
+              : '无法判定（供应商接受了 tools，但这次没有发起调用）';
+            await refreshState(); rebuild();
+            c.setMsg(what + '｜' + (r.detail || '') + '｜登记处现在是「' +
+              (r.mode === 'native' ? '原生' : '手写信封') + '」，下一次生成起生效');
+          } catch (e) { c.setMsg(e.message, true); }
+        };
+        acts.appendChild(probe); acts.appendChild(edit); acts.appendChild(del);
         row.appendChild(main); row.appendChild(acts);
         listWrap.appendChild(row);
       }

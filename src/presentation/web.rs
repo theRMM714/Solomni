@@ -453,6 +453,11 @@ pub(crate) fn route(
                     .registry
                     .set_core_model(&id)
                     .map(|ok| json!({ "ok": ok })),
+                // 探测要真实网络（两条最小请求），结论由 core 按三种如实回报并只写确定的结论。
+                "probe" => ops
+                    .registry
+                    .probe_model_tools(&id)
+                    .map(|outcome| probe_json(ops, &id, &outcome)),
                 _ => return complaint(404, format!("未知动作：{}", action)),
             };
             match outcome {
@@ -558,6 +563,28 @@ pub(crate) fn route(
         // 目录里有、这里却没有分支 = 程序缺陷（契约测试会逐条点名）。
         _ => complaint(500, "路由目录与处理器不一致（程序缺陷）"),
     }
+}
+
+/// 探测结论 → 响应 JSON。三种结论如实给出（不猜）；`mode` 是探测后登记处里的**实际**形态，
+/// 也就是下一次生成会走的那套协议（无法判定时登记处不变，它就是原样）。
+fn probe_json(
+    ops: &Ops,
+    id: &str,
+    outcome: &crate::core::ports::ProbeOutcome,
+) -> serde_json::Value {
+    use crate::core::ports::ProbeOutcome;
+    let (kind, detail) = match outcome {
+        ProbeOutcome::Supported { detail } => ("supported", detail.clone()),
+        ProbeOutcome::Unsupported { detail } => ("unsupported", detail.clone()),
+        ProbeOutcome::Unknown { detail } => ("unknown", detail.clone()),
+    };
+    let mode = ops
+        .registry
+        .models()
+        .ok()
+        .and_then(|ms| ms.into_iter().find(|m| m.id == id))
+        .map(|m| m.tools);
+    json!({ "ok": true, "outcome": kind, "detail": detail, "mode": mode })
 }
 
 /// 请求里的形态标识 → WorkMode：唯一解析处；未知值如实报错（路由据此回 400）。
