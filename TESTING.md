@@ -198,6 +198,9 @@ T2 不替代：
 - 单 agent 对话；
 - 多 agent 协作与回报；
 - 代拟、回档和会话编辑；
+- **原生工具调用**：先在真二进制上探测（结论写回登记处），再跑一次"一次回复两个调用"，
+  并让假供应商核对**发回去的历史就是协议形状**（一条助手消息带 `tool_calls` + 每条结果一条 `role:"tool"`）；
+  夹具的 `.home/` 每次清空，免得上次跑出来的形态漏进这次；
 - 文件读写、搜索和工作区隔离；
 - 工具正常、失败、超时、拒绝和异常退出；
 - 模型通道失败、回落和非法响应；
@@ -319,7 +322,7 @@ Fixture 必须：
 | 端口 | 当前/计划替身 | 交互记录 | 失败注入 | 取消/超时 | 真实适配器 | 当前状态 |
 | --- | --- | --- | --- | --- | --- | --- |
 | `Chat` | `FakeChat`、`SharedScript`、`TruncChat`、`AbortChat` | `FakeChat.calls` | 脚本回放非法信封 | `on` 返回 false 中止（FakeChat / HttpChat） | `HttpChat`：结束原因（非流式 `stop` / 流式 `length`）、原生 `tool_calls`（非流式 + 流式按 index 拼分片）都在环回假供应商上验 | 已验收 |
-| `ChatGateway` | `ScriptGateway`、`DemoGateway`、`ProbeGateway` | 通道脚本可观察 | 无通道回落（如实告知） | 不适用 | `HttpGateway`：探测的三种结论（支持 / 明确不支持 / 无法判定）与"通道本身不通"都在环回假供应商上验；结论写回登记处只写确凿的 | 已验收 |
+| `ChatGateway` | `ScriptGateway`、`DemoGateway`、`ProbeGateway` | 通道脚本可观察 | 无通道回落（如实告知） | 不适用 | `HttpGateway`：探测的三种结论（支持 / 明确不支持 / 无法判定）与"通道本身不通"都在环回假供应商上验；结论写回登记处只写确凿的；回放形状探测逐项验"收了没有 / 真的读懂没有"（替身没真实供应商时默认如实说测不了） | 已验收 |
 | `SettingsStore` | `InMemorySettings` | 内存状态可观察 | `fail_with` | 不适用 | `YamlSettingsStore` | 已验收 |
 | `ModelCatalog` | `FakeCatalog` | `seen` | `fail_with` | 不适用 | `HttpModelCatalog` | 已验收 |
 | `ModuleSource` | `VecSource` | 不适用 | 不适用（错误进 `rejected`） | 不适用 | `FsModules` | 已验收 |

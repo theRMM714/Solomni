@@ -2,7 +2,14 @@
 // 路径模型：核心会把"真实根目录"渲染进系统提示词，所以这里**从提示词里解析出根**再用（不在夹具里写死机器路径）。
 // 支持流式（j.stream）与非流式。
 const http = require('http');
+/** 供应商这一侧看到的最后一条请求的消息形状：驱动据此断言"发回去的历史是不是协议形状"。 */
+let lastSeen = null;
 http.createServer((req, res) => {
+  if (req.url.includes('/__seen')) {
+    res.setHeader('Content-Type', 'application/json');
+    res.end(JSON.stringify(lastSeen || {}));
+    return;
+  }
   if (req.url.includes('/models')) {
     res.setHeader('Content-Type', 'application/json');
     res.end(JSON.stringify({ data: [{ id: 'm1' }, { id: 'm2' }] }));
@@ -25,8 +32,24 @@ http.createServer((req, res) => {
     // 从系统提示词里取真实根目录（sys_tools 里固定有两行：共享区 / 沙箱）
     const workRoot = (sys.match(/本次工作的共享区：([^\n]+)/) || [])[1];
     const sandboxRoot = (sys.match(/你私有的沙箱：([^\n]+)/) || [])[1];
+    // 已经跑过工具（手写信封走用户消息，原生通道走 role=tool 的结果消息）。
+    const sawToolResult = msgs.some((m) => m.role === 'tool') || user.includes('[工具结果]');
+    // 带工具声明、且声明的是探针工具 = 工具调用支持探测（不带声明的那条走普通分支，所以这里只在有 tools 时成立）。
+    const wantsPing = (j.tools || []).some((t) => t && t.function && t.function.name === 'solomni_ping');
     let content;
-    if (user.includes('== 编排模式 ==')) {
+    /** 原生工具调用：给了它就用结构化槽位回（而不是 content）。 */
+    let calls = null;
+    if (wantsPing) {
+      calls = [{ id: 'call_probe', type: 'function', function: { name: 'solomni_ping', arguments: '{}' } }];
+    } else if (sys.includes('内置文件工具') && user.includes('原生多调用') && !sawToolResult) {
+      // 原生通道：一次回复里给**两个**调用（各写一个文件）——验证协议形状与"一条助手消息 + N 条结果"。
+      const a = (sandboxRoot || 'sandbox-root') + '/native-a.txt';
+      const b = (sandboxRoot || 'sandbox-root') + '/native-b.txt';
+      calls = [
+        { id: 'call_a', type: 'function', function: { name: 'write', arguments: JSON.stringify({ path: a, content: '第一个' }) } },
+        { id: 'call_b', type: 'function', function: { name: 'write', arguments: JSON.stringify({ path: b, content: '第二个' }) } },
+      ];
+    } else if (user.includes('== 编排模式 ==')) {
       content = JSON.stringify({ agents: [{ agent: '双子', why: '它正合适' }] });
     } else if (user.includes('== 已存 agent') && user.includes('== 需求 ==')) {
       content = JSON.stringify({
@@ -45,7 +68,7 @@ http.createServer((req, res) => {
       content = JSON.stringify([{ item: '方案条目', status: 'pass', evidence: '回报' }]);
     } else if (sys.includes('总结讨论')) {
       content = '方案：一次把事情做完';
-    } else if (sys.includes('内置文件工具') && !user.includes('[工具结果]')) {
+    } else if (sys.includes('内置文件工具') && !sawToolResult) {
       if (/read_txt/.test(sys)) {
         // 该 agent 的某个模块声明了外部工具（夹具 toolbox）：用**相对路径**调用，专门验证 cwd = 它自己的模块目录。
         const env = { type: 'tool', module: 'toolbox', name: 'read_txt', args: { path: 'userdata/e2e.txt' } };
@@ -81,14 +104,34 @@ http.createServer((req, res) => {
     } else {
       content = JSON.stringify({ type: 'say', text: '收到' });
     }
+    // 记下这一轮请求的**消息形状**（驱动要断言协议形状真的发出去了）。
+    lastSeen = {
+      assistantWithCalls: msgs.filter((m) => m.role === 'assistant' && Array.isArray(m.tool_calls) && m.tool_calls.length > 0).length,
+      toolMsgs: msgs.filter((m) => m.role === 'tool').length,
+      toolIds: msgs.filter((m) => m.role === 'tool').map((m) => m.tool_call_id),
+    };
     if (j.stream) {
       res.setHeader('Content-Type', 'text/event-stream');
-      res.write('data: ' + JSON.stringify({ choices: [{ delta: { content } }] }) + '\n\n');
+      if (calls) {
+        // 分片按 index 来（与真实供应商同形）：name/id 在第一片，arguments 一片给全。
+        calls.forEach((c, i) => {
+          res.write('data: ' + JSON.stringify({
+            choices: [{ delta: { tool_calls: [{ index: i, id: c.id, type: 'function', function: { name: c.function.name, arguments: c.function.arguments } }] } }],
+          }) + '\n\n');
+        });
+        res.write('data: ' + JSON.stringify({ choices: [{ delta: {}, finish_reason: 'tool_calls' }] }) + '\n\n');
+      } else {
+        res.write('data: ' + JSON.stringify({ choices: [{ delta: { content } }] }) + '\n\n');
+      }
       res.write('data: [DONE]\n\n');
       res.end();
       return;
     }
     res.setHeader('Content-Type', 'application/json');
+    if (calls) {
+      res.end(JSON.stringify({ choices: [{ message: { role: 'assistant', content: '', tool_calls: calls }, finish_reason: 'tool_calls' }] }));
+      return;
+    }
     res.end(JSON.stringify({ choices: [{ message: { role: 'assistant', content } }] }));
   });
 }).listen(8397, '127.0.0.1', () => console.log('MOCK-UP'));

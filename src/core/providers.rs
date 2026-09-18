@@ -9,6 +9,22 @@ use std::collections::BTreeMap;
 /// 探测结论就住在登记处这一层（它是"关于通道的事实"，不是某个适配器的细节）。
 pub use crate::core::ports::ProbeOutcome;
 
+/// 一种"回放形状"的探测结论：**收了没有**（HTTP 层）+ **看懂了没有**（回答里带回了工具结果里的编号）
+/// + 供应商原话或回答片段。事实，不是猜测。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ReplayShape {
+    pub name: String,
+    pub accepted: bool,
+    pub understood: bool,
+    pub detail: String,
+}
+
+/// 回放形状探测报告：形状按探测顺序排列，第一项是基线（现在线上真在用的形状）。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ReplayReport {
+    pub shapes: Vec<ReplayShape>,
+}
+
 /// 一条供应商通道（端点 + 密钥）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Provider {

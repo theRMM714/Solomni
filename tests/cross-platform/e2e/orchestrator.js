@@ -84,6 +84,11 @@ async function main() {
   // 清运行期痕迹（夹具本身不动）。
   fs.rmSync(path.join(FIXTURE, "session"), { recursive: true, force: true });
   fs.rmSync(path.join(FIXTURE, "logs"), { recursive: true, force: true });
+  // 登记处也是运行期状态（驱动每次用 API 重新登记）：必须清空，
+  // 否则上一次跑出来的结论会漏进这一次（例如原生探测把 tools 写回 native，后面的信封场景就全变了）。
+  const home = path.join(FIXTURE, ".home");
+  fs.rmSync(home, { recursive: true, force: true });
+  fs.mkdirSync(home, { recursive: true });
   fs.rmSync(path.join(FIXTURE, "modules", "toolbox", "userdata"), { recursive: true, force: true });
 
   const mock = spawn(process.execPath, [path.join(HERE, "mock.js")], { cwd: HERE, stdio: "inherit" });

@@ -233,6 +233,8 @@ pub trait RegistryOps: Send + Sync {
     /// 实测一条通道支不支持原生工具调用（要真实网络；三种结论都如实回报，
     /// 只把**确定**的结论写回登记处 —— 这条规则在 core，不在呈现层）。
     fn probe_model_tools(&self, id: &str) -> Result<crate::core::ports::ProbeOutcome, String>;
+    /// 实测这种"回放形状"供应商收不收、模型有没有真的读懂（要真实网络；**不改登记处**）。
+    fn probe_replay_shape(&self, id: &str) -> Result<crate::core::providers::ReplayReport, String>;
 }
 
 /// 历史能力：落盘会话的列表 / 打开 / 删除，以及在世会话与历史合并后的总览。
@@ -550,6 +552,10 @@ impl RegistryOps for CoreHandle {
     fn probe_model_tools(&self, id: &str) -> Result<crate::core::ports::ProbeOutcome, String> {
         let id = id.to_string();
         self.call(move |core| core.probe_model_tools(&id))
+    }
+    fn probe_replay_shape(&self, id: &str) -> Result<crate::core::providers::ReplayReport, String> {
+        let id = id.to_string();
+        self.call(move |core| core.probe_replay_shape(&id))
     }
 }
 

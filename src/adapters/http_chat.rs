@@ -410,6 +410,14 @@ impl HttpGateway {
 }
 
 impl ChatGateway for HttpGateway {
+    /// 回放形状探测（要真实网络）：转给适配层的实现，结论是"关于这条通道的事实"。
+    fn probe_replay(
+        &self,
+        channel: &Channel,
+    ) -> Result<crate::core::providers::ReplayReport, String> {
+        crate::adapters::http_probe::probe_replay(channel, &self.log)
+    }
+
     fn probe_tools(&self, channel: &Channel) -> Result<ProbeOutcome, String> {
         crate::adapters::http_probe::probe(channel, &self.log)
     }

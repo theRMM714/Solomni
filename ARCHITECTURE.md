@@ -159,7 +159,7 @@ presentation ──▶ core ◀── adapters
 | POST | `/api/providers` | `RegistryOps::upsert_provider` | `{id,base_url,api_key}` | `{ok}` | 200, 400 |
 | POST | `/api/providers/{id}/{action}` | `RegistryOps::remove_provider` / `discover_models` | — | `{ok}` / `{ok,models}` | 200, 400, 404 |
 | POST | `/api/models` | `RegistryOps::upsert_model` | `{id,name,api_model,provider,note?}` | `{ok}` | 200, 400 |
-| POST | `/api/models/{id}/{action}` | `RegistryOps::remove_model` / `set_core_model` / `probe_model_tools` | — | `{ok}` / `{ok,outcome,detail,mode}` | 200, 400, 404 |
+| POST | `/api/models/{id}/{action}` | `RegistryOps::remove_model` / `set_core_model` / `probe_model_tools` / `probe_replay_shape` | — | `{ok}` / `{ok,outcome,detail,mode}` / `{ok,shapes}` | 200, 400, 404 |
 | POST | `/api/agents` | `RegistryOps::upsert_agent` | `{name,modules[],model?,note?}` | `{ok}` | 200, 400 |
 | POST | `/api/agents/{name}/{action}` | `RegistryOps::remove_agent` | — | `{ok}` | 200, 400, 404 |
 | GET | `/api/settings` | `RegistryOps::settings` | — | `{settings}` | 200, 400 |

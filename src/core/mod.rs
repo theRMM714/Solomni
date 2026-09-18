@@ -506,6 +506,16 @@ impl Core {
         Ok(outcome)
     }
 
+    /// 实测一条通道的**回放形状**（工具调用历史怎么发回去才收）：解析 id → 交给适配层实测。
+    /// 只报事实、**不写登记处**——采不采用由人定（与 probe_model_tools 的写回策略不同）。
+    pub fn probe_replay_shape(
+        &self,
+        id: &str,
+    ) -> Result<providers::ReplayReport, String> {
+        let channel = self.settings.resolve(id)?;
+        self.gateway.probe_replay(&channel)
+    }
+
     pub fn model_upsert(&mut self, id: &str, name: &str, api_model: &str, provider: &str, note: &str) -> Result<(), String> {
         if id.is_empty() || name.is_empty() || api_model.is_empty() || provider.is_empty() {
             return Err("id / name / api_model / provider 均不能为空".to_string());

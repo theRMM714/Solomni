@@ -218,6 +218,14 @@ pub trait ChatGateway {
     /// 实测这条通道支不支持原生工具调用（发两条最小请求对比：不带 tools / 带 tools）。
     /// 演示与脚本替身没有真实供应商可测——如实返回 Unknown，不假装测过。
     fn probe_tools(&self, channel: &Channel) -> Result<ProbeOutcome, String>;
+    /// 实测"工具调用历史怎么发回供应商才收"（回放形状）：逐项报供应商收了没有、模型真的读懂没有。
+    /// 只报事实、不改登记处。默认实现如实说"测不了"——只有真正出网的网关才override。
+    fn probe_replay(
+        &self,
+        _channel: &Channel,
+    ) -> Result<crate::core::providers::ReplayReport, String> {
+        Err("这条通道没有真实供应商，测不了回放形状".to_string())
+    }
 }
 
 /// 会话历史端口：一个会话一个目录（meta + 事件流水）。

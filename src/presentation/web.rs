@@ -458,6 +458,11 @@ pub(crate) fn route(
                     .registry
                     .probe_model_tools(&id)
                     .map(|outcome| probe_json(ops, &id, &outcome)),
+                // 回放形状探测：只报事实、不改登记处（采不采用由人定）。
+                "probe-replay" => ops
+                    .registry
+                    .probe_replay_shape(&id)
+                    .map(|report| json!({ "ok": true, "shapes": report.shapes })),
                 _ => return complaint(404, format!("未知动作：{}", action)),
             };
             match outcome {

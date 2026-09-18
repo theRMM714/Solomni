@@ -837,7 +837,21 @@ function openModelsModal() {
               (r.mode === 'native' ? '原生' : '手写信封') + '」，下一次生成起生效');
           } catch (e) { c.setMsg(e.message, true); }
         };
-        acts.appendChild(probe); acts.appendChild(edit); acts.appendChild(del);
+        // 实测「工具调用历史怎么发回去」的几种写法（要真实网络；只报事实、不改登记处）。
+        const probeReplay = btn('测回放形状', 'link-btn');
+        probeReplay.onclick = async () => {
+          probeReplay.disabled = true;
+          c.setMsg('正在实测 ' + m.id + ' 的回放形状（几种写法各发一次）…');
+          try {
+            const r = await api('POST', '/api/models/' + encodeURIComponent(m.id) + '/probe-replay', {});
+            const lines = (r.shapes || []).map((s) => {
+              const verdict = !s.accepted ? '被拒' : (s.understood ? '收+读懂' : '收未懂');
+              return verdict + '  ' + s.name + '  ' + (s.detail || '');
+            });
+            c.setMsg('回放形状（' + m.id + '）：\n' + lines.join('\n'));
+          } catch (e) { c.setMsg(e.message, true); }
+        };
+        acts.appendChild(probeReplay); acts.appendChild(probe); acts.appendChild(edit); acts.appendChild(del);
         row.appendChild(main); row.appendChild(acts);
         listWrap.appendChild(row);
       }

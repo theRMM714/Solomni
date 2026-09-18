@@ -5,7 +5,7 @@
 
 use crate::adapters::endpoint::{chat_candidates, resolve_candidates, Attempt};
 use crate::core::ports::{Completion, Log, ProbeOutcome, ToolDecl};
-use crate::core::providers::Channel;
+use crate::core::providers::{Channel, ReplayReport, ReplayShape};
 
 /// 探针工具：无参数、只有说明——目的是让模型有东西可调。
 fn ping_decl() -> ToolDecl {
@@ -122,23 +122,6 @@ pub fn replay_shapes(nonce: &str) -> Vec<(&'static str, serde_json::Value)> {
     ]
 }
 
-/// 一种回放形状的探测结论：收了没有（HTTP 层）+ 看懂了没有（回答里带回了本次编号）+ 供应商原话或回答片段。
-#[derive(Debug, Clone)]
-pub struct ShapeResult {
-    pub name: String,
-    /// 供应商接受了这个形状。
-    pub accepted: bool,
-    /// 模型真的读到了那段历史（回答里带回了工具结果里的编号）。
-    pub understood: bool,
-    pub detail: String,
-}
-
-/// 回放形状探测报告：形状按探测顺序排列，第一项是基线。
-#[derive(Debug, Clone)]
-pub struct ReplayProbe {
-    pub shapes: Vec<ShapeResult>,
-}
-
 /// 探测"工具调用历史怎么发回供应商才收"（机制；不写任何登记处）。
 ///
 /// 为什么要它：原生通道下核心必须把上一轮的工具调用发回去（assistant 的 tool_calls + 各条 tool 结果），
@@ -147,7 +130,7 @@ pub struct ReplayProbe {
 pub fn probe_replay(
     channel: &Channel,
     log: &std::sync::Arc<dyn Log + Send + Sync>,
-) -> Result<ReplayProbe, String> {
+) -> Result<ReplayReport, String> {
     probe_replay_with(channel, log, &probe_nonce())
 }
 
@@ -156,7 +139,7 @@ pub(crate) fn probe_replay_with(
     channel: &Channel,
     log: &std::sync::Arc<dyn Log + Send + Sync>,
     nonce: &str,
-) -> Result<ReplayProbe, String> {
+) -> Result<ReplayReport, String> {
     let key = channel.provider.api_key.clone();
     let candidates = chat_candidates(&channel.provider.base_url);
     let decl = ping_decl();
@@ -164,7 +147,7 @@ pub(crate) fn probe_replay_with(
     // 判据取编号里最独特的那一段（前缀 '-' 之后）：实测模型会直接把前缀省掉，
     // 只回后半段——那不是"没读懂"，所以判据不能死抠整串。
     let needle = nonce.rsplit('-').next().unwrap_or(nonce).to_lowercase();
-    let mut shapes: Vec<ShapeResult> = Vec::new();
+    let mut shapes: Vec<ReplayShape> = Vec::new();
     for (name, messages) in replay_shapes(nonce) {
         let got = resolve_candidates(
             &candidates,
@@ -185,7 +168,7 @@ pub(crate) fn probe_replay_with(
             },
         );
         shapes.push(match got {
-            Ok((_, done)) => ShapeResult {
+            Ok((_, done)) => ReplayShape {
                 name: name.to_string(),
                 accepted: true,
                 understood: done.raw.to_lowercase().contains(&needle),
@@ -195,7 +178,7 @@ pub(crate) fn probe_replay_with(
                     done.raw.chars().take(30).collect::<String>()
                 ),
             },
-            Err(e) => ShapeResult {
+            Err(e) => ReplayShape {
                 name: name.to_string(),
                 accepted: false,
                 understood: false,
@@ -212,7 +195,7 @@ pub(crate) fn probe_replay_with(
             ));
         }
     }
-    Ok(ReplayProbe { shapes })
+    Ok(ReplayReport { shapes })
 }
 
 /// 探测一条通道（机制；策略在 core）。

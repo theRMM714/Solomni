@@ -298,6 +298,28 @@ impl RegistryOps for FakeOps {
         self.guard()?;
         Ok(vec!["m1".to_string(), "m2".to_string()])
     }
+    fn probe_replay_shape(
+        &self,
+        _id: &str,
+    ) -> Result<crate::core::providers::ReplayReport, String> {
+        self.guard()?;
+        Ok(crate::core::providers::ReplayReport {
+            shapes: vec![
+                crate::core::providers::ReplayShape {
+                    name: "baseline-text".to_string(),
+                    accepted: true,
+                    understood: true,
+                    detail: "finish_reason=stop".to_string(),
+                },
+                crate::core::providers::ReplayShape {
+                    name: "content-empty".to_string(),
+                    accepted: false,
+                    understood: false,
+                    detail: "供应商原话：content is required".to_string(),
+                },
+            ],
+        })
+    }
     fn probe_model_tools(&self, _id: &str) -> Result<crate::core::ports::ProbeOutcome, String> {
         self.guard()?;
         Ok(self
@@ -725,6 +747,36 @@ fn model_probe_passes_the_verdict_through_verbatim() {
     // 能力面失败要如实传播（绝不静默降级成"不支持"）。
     let ops = fake_ops(Some("假能力面：探测失败"));
     let (code, text) = call(&ops, "POST", "/api/models/m1/probe", "");
+    assert_eq!(code, 400);
+    assert!(text.contains("假能力面"), "{}", text);
+}
+
+/// 回放形状探测回包：逐项如实穿过呈现层（含"收了但没读懂"这一档与供应商原话），且不改登记处。
+#[test]
+fn replay_probe_passes_every_shape_through_verbatim() {
+    let ops = fake_ops(None);
+    let (code, text) = call(&ops, "POST", "/api/models/m1/probe-replay", "");
+    assert_eq!(code, 200, "{}", text);
+    let v: serde_json::Value = serde_json::from_str(&text).expect("回包是 JSON");
+    assert_eq!(v["ok"], true);
+    let shapes = v["shapes"].as_array().expect("shapes 是数组");
+    assert_eq!(shapes.len(), 2, "{}", text);
+    assert_eq!(shapes[0]["name"], "baseline-text");
+    assert_eq!(shapes[0]["accepted"], true);
+    assert_eq!(shapes[0]["understood"], true);
+    assert_eq!(shapes[1]["accepted"], false);
+    assert_eq!(shapes[1]["understood"], false);
+    assert!(
+        shapes[1]["detail"]
+            .as_str()
+            .unwrap_or("")
+            .contains("content is required"),
+        "被拒要带供应商原话：{}",
+        text
+    );
+    // 能力面失败要如实传播，绝不静默当成"形状被拒"。
+    let ops = fake_ops(Some("假能力面：探测失败"));
+    let (code, text) = call(&ops, "POST", "/api/models/m1/probe-replay", "");
     assert_eq!(code, 400);
     assert!(text.contains("假能力面"), "{}", text);
 }
