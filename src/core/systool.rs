@@ -14,6 +14,7 @@ use std::path::{Path, PathBuf};
 pub const READ: &str = "read";
 pub const WRITE: &str = "write";
 pub const EDIT: &str = "edit";
+pub const PATCH: &str = "patch";
 pub const SEARCH: &str = "search";
 
 /// 单次读取回传的字符上限（超出如实截断，并在回执里给出接着读的 offset）。
@@ -31,12 +32,24 @@ pub const MODULE_WRITE_MARK: &str = "[模块目录]";
 /// 内置工具名（保留名）。
 /// 与 prompts.yaml 的 builtin_tools 是同一份名单，测试「builtin_tool_book_is_the_one_source_of_names_and_paths」锁死两者一致。
 pub fn is_builtin(name: &str) -> bool {
-    name == READ || name == WRITE || name == EDIT || name == SEARCH
+    name == READ || name == WRITE || name == EDIT || name == PATCH || name == SEARCH
 }
 
 /// 内置工具名清单（拼错误提示用）。
 pub fn names() -> Vec<String> {
-    vec![READ.to_string(), WRITE.to_string(), EDIT.to_string(), SEARCH.to_string()]
+    vec![
+        READ.to_string(),
+        WRITE.to_string(),
+        EDIT.to_string(),
+        PATCH.to_string(),
+        SEARCH.to_string(),
+    ]
+}
+
+/// 自由格式工具：输入不是 JSON 参数，而是**信封之后的那段原样文本**（不必转义）。
+/// 存在的理由：把大段内容塞进 JSON 字符串要转义换行/引号，是真实会话里反复出事的点。
+pub fn is_freeform(name: &str) -> bool {
+    name == PATCH
 }
 
 /// 内置工具说明块：提示词册 sys_tools 渲染（含本 agent 的真实根目录、模块目录与工具参数）。
@@ -64,6 +77,16 @@ pub fn guide(prompts: &Prompts, sb: &Sandbox) -> String {
             ("sandbox_root", crate::core::workspace::slash(&sb.private)),
             ("module_roots", module_roots),
             ("tool_params", crate::core::schema::render_book(&sb.builtin_tools)),
+            (
+                "patch_guide",
+                prompts.render(
+                    &prompts.core.patch_guide,
+                    &[
+                        ("work_root", crate::core::workspace::slash(&sb.shared)),
+                        ("sandbox_root", crate::core::workspace::slash(&sb.private)),
+                    ],
+                ),
+            ),
         ],
     )
 }
@@ -177,6 +200,16 @@ fn near_match(hay: &str, old: &str) -> Option<(usize, String)> {
 /// 顺序：解析 JSON → 认工具 → 按声明校验参数 → 补缺省 → 寻址（内置工具一律需要一个 path）。
 pub fn execute(sb: &Sandbox, io: &dyn SysIo, obs: &mut Observations, name: &str, args_json: &str) -> ToolOutcome {
     let texts = &sb.texts;
+    // 自由格式工具：输入是一段原样文本（不是 JSON），也不吃参数校验——认工具后就交给它自己解释。
+    if is_freeform(name) {
+        if !sb.builtin_tools.contains_key(name) {
+            return fail(texts.render(&texts.unknown_builtin, &[("name", name.to_string())]));
+        }
+        return match name {
+            PATCH => apply_patch(sb, io, obs, args_json),
+            other => fail(texts.render(&texts.unknown_builtin, &[("name", other.to_string())])),
+        };
+    }
     let mut args: serde_json::Value = match serde_json::from_str(args_json) {
         Ok(v) => v,
         Err(e) => return fail(texts.render(&texts.bad_args_json, &[("error", e.to_string())])),
@@ -284,6 +317,18 @@ fn read(sb: &Sandbox, io: &dyn SysIo, obs: &mut Observations, args: &serde_json:
     ToolOutcome { ok: true, output: out }
 }
 
+/// 整份覆盖已存在文件的证据检查：本次会话里**完整读过**它、且读后没被改过（write 与 patch 的 Add 共用）。
+fn overwrite_check(texts: &ToolTexts, obs: &Observations, spec: &str, path: &Path, current: &str) -> Result<(), String> {
+    match obs.known(path) {
+        Some(seen) if seen == fnv1a(current) => Ok(()),
+        Some(_) => Err(texts.render(&texts.write_stale, &[("path", spec.to_string())])),
+        None => Err(match obs.partial_why(path) {
+            Some(w) => texts.render(&texts.write_partial, &[("path", spec.to_string()), ("why", w)]),
+            None => texts.render(&texts.write_need_read, &[("path", spec.to_string())]),
+        }),
+    }
+}
+
 /// write：整份写入（同名文件被整份覆盖）。
 /// 覆盖已存在的文件必须先有"完整读过、且读后没被改过"的证据——否则拒绝，并让模型改用 edit。
 fn write(sb: &Sandbox, io: &dyn SysIo, obs: &mut Observations, args: &serde_json::Value, spec: &str, path: &Path, place: &Place) -> ToolOutcome {
@@ -293,17 +338,8 @@ fn write(sb: &Sandbox, io: &dyn SysIo, obs: &mut Observations, args: &serde_json
         // 读不到 = 还没有这个文件（新建不需要读过什么）；机制层的真实错误由下面的 write 如实报出。
         Err(_) => {}
         Ok(got) => {
-            let now = fnv1a(&got.text);
-            match obs.known(path) {
-                Some(seen) if seen == now => {}
-                Some(_) => return fail(texts.render(&texts.write_stale, &[("path", spec.to_string())])),
-                None => {
-                    let why = match obs.partial_why(path) {
-                        Some(w) => texts.render(&texts.write_partial, &[("path", spec.to_string()), ("why", w)]),
-                        None => texts.render(&texts.write_need_read, &[("path", spec.to_string())]),
-                    };
-                    return fail(why);
-                }
+            if let Err(why) = overwrite_check(texts, obs, spec, path, &got.text) {
+                return fail(why);
             }
         }
     }
@@ -435,6 +471,191 @@ fn search(sb: &Sandbox, io: &dyn SysIo, args: &serde_json::Value, spec: &str, pa
         out.push_str(&format!("\n{}", texts.search_truncated_bytes));
     }
     ToolOutcome { ok: true, output: out }
+}
+
+/// patch：把一段**自由格式**的补丁应用到一处或多处文件（信封之后原样跟补丁文本，不走 JSON）。
+/// 原子性：先解析 + 寻址 + 读入 + 在内存里算出全部新内容；任何一块不成立就**一个文件都不写**，
+/// 回执点名第几块、为什么。同一个文件被多块改到时，后一块看到前一块的结果。
+fn apply_patch(sb: &Sandbox, io: &dyn SysIo, obs: &mut Observations, body: &str) -> ToolOutcome {
+    use crate::core::patch::Block;
+    let texts = &sb.texts;
+    let blocks = match crate::core::patch::parse(body) {
+        Ok(b) => b,
+        Err(f) => return fail(patch_fault(texts, &f)),
+    };
+    // 首次出现的顺序 = 写盘顺序（同一路径只写一次）
+    let mut order: Vec<PathBuf> = Vec::new();
+    let mut places: BTreeMap<PathBuf, Place> = BTreeMap::new();
+    let mut pending: BTreeMap<PathBuf, String> = BTreeMap::new();
+    let mut lines: Vec<String> = Vec::new();
+    for (i, b) in blocks.iter().enumerate() {
+        let n = i + 1;
+        let spec = b.path().to_string();
+        let (place, path) = match sb.resolve(&spec) {
+            Ok(x) => x,
+            Err(e) => return fail(block_fault(texts, n, e)),
+        };
+        // 同一个文件被前面的块改过：以后面算出来的内容为准（不能回到盘上的旧内容）
+        let source: Option<(String, bool, bool)> = match pending.get(&path) {
+            Some(t) => Some((t.clone(), false, false)),
+            None => match io.read(&path) {
+                Ok(g) => Some((g.text, g.cut, g.lossy)),
+                Err(_) => None,
+            },
+        };
+        match b {
+            Block::Add { content, .. } => match &source {
+                Some((cur, _, _)) => {
+                    if let Err(why) = overwrite_check(texts, obs, &spec, &path, cur) {
+                        return fail(block_fault(texts, n, why));
+                    }
+                    lines.push(texts.render(
+                        &texts.patch_block_overwrite,
+                        &[("path", spec.clone()), ("chars", content.chars().count().to_string())],
+                    ));
+                    pending.insert(path.clone(), align_eol(content, cur));
+                }
+                None => {
+                    lines.push(texts.render(
+                        &texts.patch_block_add,
+                        &[("path", spec.clone()), ("chars", content.chars().count().to_string())],
+                    ));
+                    pending.insert(path.clone(), content.clone());
+                }
+            },
+            Block::Update { edits, .. } => {
+                let Some((cur, cut, lossy)) = source else {
+                    let why = texts.render(&texts.patch_file_missing, &[("path", spec.clone())]);
+                    return fail(block_fault(texts, n, why));
+                };
+                // 只看到开头 / 看到的是替换字符：照这个视图改写会把没看到的东西弄丢 → 不改
+                if cut {
+                    let why = texts.render(&texts.edit_file_cut, &[("path", spec.clone())]);
+                    return fail(block_fault(texts, n, why));
+                }
+                if lossy {
+                    let why = texts.render(&texts.edit_file_lossy, &[("path", spec.clone())]);
+                    return fail(block_fault(texts, n, why));
+                }
+                match crate::core::patch::apply_edits(&cur, edits) {
+                    Ok(new) => {
+                        lines.push(texts.render(
+                            &texts.patch_block_update,
+                            &[("path", spec.clone()), ("n", edits.len().to_string())],
+                        ));
+                        pending.insert(path.clone(), new);
+                    }
+                    Err((k, f)) => {
+                        let why = edit_fault_reason(texts, &f);
+                        return fail(texts.render(
+                            &texts.patch_edit_fault,
+                            &[
+                                ("n", n.to_string()),
+                                ("k", k.to_string()),
+                                ("path", spec.clone()),
+                                ("why", why),
+                            ],
+                        ));
+                    }
+                }
+            }
+        }
+        places.entry(path.clone()).or_insert(place);
+        if !order.contains(&path) {
+            order.push(path.clone());
+        }
+    }
+    // 全部就绪 → 写盘（一个文件只写一次）
+    for (i, path) in order.iter().enumerate() {
+        let content = pending.get(path).expect("刚刚算好");
+        if let Err(e) = io.write(path, content) {
+            return fail(texts.render(
+                &texts.patch_write_failed,
+                &[("n", (i + 1).to_string()), ("error", e)],
+            ));
+        }
+        obs.note_written(path, fnv1a(content));
+    }
+    let mut out = texts.render(
+        &texts.patch_header,
+        &[
+            ("blocks", blocks.len().to_string()),
+            ("files", order.len().to_string()),
+            ("lines", lines.join("\n")),
+        ],
+    );
+    // 写进模块目录属于「动了自己的能力」：放行，但如实提示（与 write 同一句）
+    for path in &order {
+        if let Some(Place::Module(id)) = places.get(path) {
+            out.push_str(&format!(
+                "\n{}",
+                texts.render(
+                    &texts.write_module_note,
+                    &[("mark", MODULE_WRITE_MARK.to_string()), ("id", id.clone())]
+                )
+            ));
+        }
+    }
+    ToolOutcome { ok: true, output: out }
+}
+
+/// 整份覆盖已有文件时，内容按原文件的行尾风格写（免得把 CRLF 文件改成 LF）。
+fn align_eol(content: &str, current: &str) -> String {
+    if current.contains("\r\n") {
+        content.replace('\n', "\r\n")
+    } else {
+        content.to_string()
+    }
+}
+
+/// 某一块不成立的回执（整体不写盘，所以措辞要直说这一点）。
+fn block_fault(texts: &ToolTexts, n: usize, why: String) -> String {
+    texts.render(&texts.patch_block_fault, &[("n", n.to_string()), ("why", why)])
+}
+
+/// patch 解析失败的回执（每一类都说清事实）。
+fn patch_fault(texts: &ToolTexts, f: &crate::core::patch::Fault) -> String {
+    use crate::core::patch::Fault as F;
+    match f {
+        F::NoBlocks => texts.patch_no_blocks.clone(),
+        F::UnknownMarker { line, text } => texts.render(
+            &texts.patch_unknown_marker,
+            &[("line", line.to_string()), ("text", text.clone())],
+        ),
+        F::MissingPath { line, marker } => texts.render(
+            &texts.patch_missing_path,
+            &[("line", line.to_string()), ("marker", marker.clone())],
+        ),
+        F::EmptyAdd { line } => texts.render(&texts.patch_empty_add, &[("line", line.to_string())]),
+        F::EmptyUpdate { line } => texts.render(&texts.patch_empty_update, &[("line", line.to_string())]),
+        F::EmptySearch { line } => texts.render(&texts.patch_empty_search, &[("line", line.to_string())]),
+        F::MissingEnd { line } => texts.render(&texts.patch_missing_end, &[("line", line.to_string())]),
+        F::SearchWithoutReplace { line } => {
+            texts.render(&texts.patch_search_no_replace, &[("line", line.to_string())])
+        }
+        F::ReplaceWithoutSearch { line } => {
+            texts.render(&texts.patch_replace_no_search, &[("line", line.to_string())])
+        }
+    }
+}
+
+/// 一处改动失败的原因句（外面再套"第 N 块第 k 处"）。
+fn edit_fault_reason(texts: &ToolTexts, f: &crate::core::patch::EditFault) -> String {
+    use crate::core::patch::EditFault as E;
+    match f {
+        E::NotFound { total } => texts.render(&texts.patch_not_found, &[("total", total.to_string())]),
+        E::Multiple { lines } => texts.render(
+            &texts.patch_multiple,
+            &[
+                ("n", lines.len().to_string()),
+                ("lines", lines.iter().map(|l| l.to_string()).collect::<Vec<_>>().join("、")),
+            ],
+        ),
+        E::NearMiss { line, actual } => texts.render(
+            &texts.patch_near,
+            &[("line", line.to_string()), ("actual", actual.clone())],
+        ),
+    }
 }
 
 /// 参数不符的回执：说清是哪一条不合（由声明判定），再把工具签名原样发回去。

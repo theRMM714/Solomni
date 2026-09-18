@@ -56,8 +56,10 @@ pub struct CorePrompts {
     pub refs: RefsPrompts,
     /// 工具与路径相关的**模型侧文案**（回执、失败说明、清单行）；改文案只改册子。
     pub tool_texts: ToolTexts,
-    /// 内置文件工具说明块；变量：work_name, agent, work_root, sandbox_root, module_roots, tool_params
+    /// 内置文件工具说明块；变量：work_name, agent, work_root, sandbox_root, module_roots, tool_params, patch_guide
     pub sys_tools: String,
+    /// patch 通道的写法说明（模型侧）；变量：work_root, sandbox_root
+    pub patch_guide: String,
     /// 内置工具的参数契约（prompts.yaml 的 builtin_tools）：模型说明与调用校验的唯一来源。
     pub builtin_tools: crate::core::schema::ToolBook,
     /// 登记处还没有 agent 时的说明（拟名单的 {{agents}} 取值）。
@@ -138,6 +140,47 @@ pub struct ToolTexts {
     /// 变量：path
     pub edit_file_lossy: String,
     // —— 改动前的"读过"证据：不满足就拒绝并给出改法 ——
+    // —— patch：自由格式补丁通道的解析与应用回执 ——
+    /// 变量：blocks, files, lines
+    pub patch_header: String,
+    /// 变量：path, chars
+    pub patch_block_add: String,
+    /// 变量：path, chars
+    pub patch_block_overwrite: String,
+    /// 变量：path, n
+    pub patch_block_update: String,
+    /// 变量：n, why
+    pub patch_block_fault: String,
+    /// 变量：n, k, path, why
+    pub patch_edit_fault: String,
+    /// 变量：n, error
+    pub patch_write_failed: String,
+    /// 变量：total
+    pub patch_not_found: String,
+    /// 变量：n, lines
+    pub patch_multiple: String,
+    /// 变量：line, actual
+    pub patch_near: String,
+    /// 变量：path
+    pub patch_file_missing: String,
+    // patch 的解析失败（每一类各说各的事实）
+    pub patch_no_blocks: String,
+    /// 变量：line, text
+    pub patch_unknown_marker: String,
+    /// 变量：line, marker
+    pub patch_missing_path: String,
+    /// 变量：line
+    pub patch_empty_add: String,
+    /// 变量：line
+    pub patch_empty_update: String,
+    /// 变量：line
+    pub patch_empty_search: String,
+    /// 变量：line
+    pub patch_missing_end: String,
+    /// 变量：line
+    pub patch_search_no_replace: String,
+    /// 变量：line
+    pub patch_replace_no_search: String,
     /// 变量：path
     pub write_need_read: String,
     /// 变量：path

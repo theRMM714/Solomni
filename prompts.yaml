@@ -123,6 +123,8 @@ core:
     - write：{"path":"{{sandbox_root}}/out.txt","content":"..."} → 整份写入（同名文件被**整份覆盖**）
     - edit：{"path":"{{work_root}}/note.txt","old_string":"原文片段","new_string":"新片段"} → 只替换这一处
       （old_string 按字面匹配、默认必须唯一命中；要全改加 "replace_all":true）
+    - patch：{"type":"tool","name":"patch"} + 原样跟补丁文本 → 一次改多处、大段内容**不用转义**（见下）
+    {{patch_guide}}
     - search：{"path":"{{work_root}}/note.txt","keyword":"要查的词","ignore_case":true} → 带行号的命中行
     改动已存在的文件：优先用 edit 只改那一处；用 write 整份覆盖前，必须在本次会话里**完整读过**该文件
     （只读一段不算）——否则会被拒绝，并提示你改用 edit。改文件前先看清楚原文，不要凭记忆重写。
@@ -133,6 +135,28 @@ core:
     本工作的成品一律写共享区或你自己的沙箱。模块目录里的 userdata/ 是模块自己的跨任务私有状态（缓存/记忆/配置），
     不是本次工作的成品区，不要把任务成果往里写。
     当前工作：{{work_name}}；agent 名：{{agent}}
+
+  # —— patch 通道的写法：让"改文件"不必把大段文本塞进 JSON（换行/引号/CJK 都不用转义）——
+  patch_guide: |-
+    【改文件：用 patch，别把大段文本塞进 JSON】
+    信封写成 {"type":"tool","name":"patch"}，**信封之后原样跟补丁文本**（不用转义、不用引号，直接写中文与换行）：
+    *** Update File: {{work_root}}/note.txt
+    *** SEARCH
+    （从文件里原样抄来的连续几行）
+    *** REPLACE
+    （换成的新内容；留空 = 删掉这几行）
+    *** Add File: {{sandbox_root}}/out.md
+    （新文件的整份内容，原样写）
+    *** End File
+    规矩：
+    - **每一块都必须用 *** End File 收尾**；它后面再写什么都会被忽略（可以放心写"我改完了"）。
+    - 一次可以写多块：多块按顺序应用；同一个文件也可以写多块（后一块看到前一块的结果）。
+    - SEARCH 必须与文件里的原文**整行一致**（含缩进）；默认要求唯一命中（多处命中会报错并列出行号）。
+    - 任意一块不成立，核心**一个文件都不写**，只把第几块、为什么如实报回给你——改对了再发一次。
+    - 路径写**真实绝对路径**（与 read / write 同一套；越界会被拒绝并列出允许的根）。
+    - *** 是保留前缀：内容里若必须出现以 *** 开头的行，请改写它（否则会被当成标记）。
+    - 新建文件用 *** Add File:；改已有文件用 *** Update File:（整份覆盖已存在的文件仍要求"先完整读过"）。
+    - 内容**照你写的原样落盘**：想让文件末尾多一个空行，就在 *** End File 之前留一个空行（核心不替你加）。
 
   # —— 内置工具的参数契约：模型侧的参数说明与调用校验都由这一份声明驱动（改参数只改这里）——
   builtin_tools:
@@ -184,6 +208,8 @@ core:
         replace_all:
           type: boolean
           desc: 是否替换全部命中；省略 = 要求唯一命中（多处命中会报错并列出位置）
+    patch:
+      desc: 用一段**自由格式**的补丁文本改文件（信封之后原样跟补丁；大段内容不要塞进 JSON）。语法见 patch_guide。
     search:
       desc: 在文本文件里查关键词，返回带行号的命中行。
       params:
@@ -242,6 +268,27 @@ core:
     search_summary: "命中 {{hits}} 行 / 全文 {{total}} 行"
     search_hit_line: "{{n}} | {{line}}"
     search_truncated: "[截断] 命中行超过 {{limit}} 行，仅列出前 {{limit}} 行。"
+    # patch：自由格式补丁通道（解析失败/应用失败都如实说清，且**整体不写盘**）
+    patch_header: "[patch] 已应用 {{blocks}} 块改动，写了 {{files}} 个文件：\n{{lines}}"
+    patch_block_add: "- 新建 {{path}}（{{chars}} 字符）"
+    patch_block_overwrite: "- 整份覆盖 {{path}}（{{chars}} 字符）"
+    patch_block_update: "- 更新 {{path}}（替换 {{n}} 处）"
+    patch_block_fault: "[patch] 第 {{n}} 块不成立，**没有任何文件被写入**：{{why}}"
+    patch_edit_fault: "[patch] 第 {{n}} 块的第 {{k}} 处改动不成立，**没有任何文件被写入**：{{why}}（{{path}}）"
+    patch_write_failed: "[patch] 写第 {{n}} 个文件失败：{{error}}（它前面的文件已经写入，它后面的没有）"
+    patch_not_found: "SEARCH 的原文按**整行**匹配找不到（该文件共 {{total}} 行）"
+    patch_multiple: "SEARCH 命中了 {{n}} 处（第 {{lines}} 行）：把上下文补足，让它唯一"
+    patch_near: "第 {{line}} 行与它只差空白：{{actual}}"
+    patch_file_missing: "{{path}} 不存在：Update 只能改已有文件，新建请用 *** Add File:"
+    patch_no_blocks: "没认出任何补丁标记（要 *** Add File: 路径 或 *** Update File: 路径）"
+    patch_unknown_marker: "第 {{line}} 行看不懂的标记 *** {{text}}（只认 Add File / Update File / SEARCH / REPLACE / End File）"
+    patch_missing_path: "第 {{line}} 行的 {{marker}} 后面没写路径"
+    patch_empty_add: "第 {{line}} 行的 Add File 后面没有内容"
+    patch_empty_update: "第 {{line}} 行的 Update File 后面没有 SEARCH / REPLACE"
+    patch_empty_search: "第 {{line}} 行的 SEARCH 是空的（要在文件开头插入，就把开头那几行一起写进 SEARCH）"
+    patch_missing_end: "第 {{line}} 行起的这一块没有 *** End File 收尾（它的后面可能还有别的话，核心不猜哪里是结尾）：请给每一块都补上 *** End File。"
+    patch_search_no_replace: "第 {{line}} 行的 SEARCH 后面没有 REPLACE"
+    patch_replace_no_search: "第 {{line}} 行的 REPLACE 前面没有 SEARCH"
     # edit / write 的改动回执与拒绝理由（第二层：改动前的"读过"证据）
     edit_header: "[edit] 已改 {{path}}（替换 {{n}} 处；该文件现 {{lines}} 行）"
     edit_same: "old_string 与 new_string 相同：这次调用什么都不会变，核心没有写盘。"

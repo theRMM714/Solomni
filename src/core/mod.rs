@@ -14,6 +14,7 @@ pub mod fence;
 pub mod history;
 pub mod module;
 pub mod packages;
+pub mod patch;
 pub mod ports;
 pub mod prompt;
 pub mod providers;

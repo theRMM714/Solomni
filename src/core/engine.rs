@@ -551,8 +551,14 @@ pub(crate) fn converse_with(
         // 修好并重新解析成合法工具信封 = 本轮照常执行工具；修不了就走原来的"失败工具行"路径。
         // 封顶后不修（与"封顶后不再执行工具"同一口径）。
         // 用户中止的生成不修：半截信封是"被停下来"的产物，不是模型的意图——绝不据此执行工具。
+        // 自由格式工具（patch）也不修：它的正文在信封之外，转义控制字符会把补丁里的换行弄坏。
+        let freeform_tool = reply
+            .tool
+            .as_ref()
+            .map(|t| crate::core::systool::is_freeform(&t.name))
+            .unwrap_or(false);
         let mut repaired: Option<String> = None;
-        if !forced_final && !aborted {
+        if !forced_final && !aborted && !freeform_tool {
             if let Some(kind) = reply.tool.as_ref().and_then(|t| t.malformed.clone()) {
                 if let Some(ctx) = tools.as_deref_mut() {
                     let out = ctx.repair.repair(&raw, &kind);
@@ -611,6 +617,13 @@ pub(crate) fn converse_with(
             Some(inv) if tools.is_some() && !forced_final => {
                 let ctx = tools.as_deref_mut().expect("上臂已判存在");
                 // 内置工具（read/write/edit/search）优先且不属于任何模块；外部工具按模块定 cwd。
+                // 自由格式工具（patch）的输入是**信封之后的那段正文**（不必转义）；其余工具是 JSON 参数。
+                // 它的显示正文只认信封**之前**那段：补丁内容不该被当成 AI 发言渲染出来。
+                let freeform = crate::core::systool::is_freeform(&inv.name);
+                let args = if freeform { inv.body.clone() } else { inv.args_json.clone() };
+                if freeform {
+                    reply.text = inv.lead.clone();
+                }
                 let (module, outcome) = if crate::core::systool::is_builtin(&inv.name) {
                     (
                         String::new(),
@@ -619,7 +632,7 @@ pub(crate) fn converse_with(
                             ctx.io.as_ref(),
                             &mut ctx.observations,
                             &inv.name,
-                            &inv.args_json,
+                            &args,
                         ),
                     )
                 } else {

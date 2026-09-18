@@ -2893,6 +2893,115 @@ fn a_truncated_output_is_reported_as_truncation_not_as_a_bad_envelope() {
 }
 
 #[test]
+fn patch_channel_writes_files_without_json_escaping() {
+    // 自由格式：信封之后原样跟补丁文本（含中文与换行，完全不转义）；一次两块、落在两个文件。
+    let old = s(&["w", "m0", "note.txt"]);
+    let new = s(&["w", "m0", "out.md"]);
+    let body = format!(
+        "*** Update File: {}\n*** SEARCH\n旧的第一行\n*** REPLACE\n新的第一行\n*** End File\n*** Add File: {}\n第一行\n第二行「带引号也没事」\n*** End File\n先改这两处。",
+        old, new
+    );
+    let raw = format!("{{\"type\":\"tool\",\"name\":\"patch\"}}\n{}", body);
+    let io = Arc::new(InMemorySysIo::new());
+    io.seed(&["w", "m0", "note.txt"], "旧的第一行\n第二行\n");
+    let mut member = BTreeMap::new();
+    member.insert("m0".to_string(), vec![raw, "{\"type\":\"say\",\"text\":\"改好了\"}".to_string()]);
+    let mut core = core_with_io_gateway(vec![module_of("m0")], gw(member, vec!["[]".into()]), Arc::clone(&io));
+    let sid = core.create_work(work("w", WorkMode::Single, &["m0"])).unwrap().sid;
+    let events = with_live(|l| core.single_say(&sid, "改一下", l)).unwrap();
+    let views = tool_views(&events);
+    assert!(views[0].ok, "两块都该成功：{}", views[0].output);
+    assert!(views[0].output.contains("已应用 2 块改动"), "{}", views[0].output);
+    // 补丁正文不上屏：它是工具输入，不是 AI 发言（自由格式工具只显示信封之前那段）
+    let rows = transcript_rows(&events);
+    assert!(
+        rows.iter().all(|r| !r.1.contains("*** Update File")
+            && !r.1.contains("*** Add File")
+            && !r.1.contains("先改这两处")),
+        "补丁正文与之后的散话都不该当成发言：{:?}",
+        rows
+    );
+    assert_eq!(
+        io.get(&["w", "m0", "note.txt"]).as_deref(),
+        Some("新的第一行\n第二行\n"),
+        "只改 SEARCH 指定的那几行"
+    );
+    // 原样落盘：模型写了几行就是几行（末尾没有空行就不补——与 read/write 的"照原文"口径一致）
+    assert_eq!(
+        io.get(&["w", "m0", "out.md"]).as_deref(),
+        Some("第一行\n第二行「带引号也没事」"),
+        "新建文件的整份内容原样落盘（补丁之后那句话没有混进去）"
+    );
+}
+
+#[test]
+fn a_failing_patch_block_writes_nothing_at_all() {
+    // 第 2 块找不到 SEARCH：整体不写盘，回执点名第几块、为什么
+    let first = s(&["w", "m0", "a.txt"]);
+    let second = s(&["w", "m0", "b.txt"]);
+    let body = format!(
+        "*** Add File: {}\n新文件内容\n*** End File\n*** Update File: {}\n*** SEARCH\n这行不存在\n*** REPLACE\nx\n*** End File\n",
+        first, second
+    );
+    let raw = format!("{{\"type\":\"tool\",\"name\":\"patch\"}}\n{}", body);
+    let io = Arc::new(InMemorySysIo::new());
+    io.seed(&["w", "m0", "b.txt"], "只有这一行\n");
+    let mut member = BTreeMap::new();
+    member.insert("m0".to_string(), vec![raw, "{\"type\":\"say\",\"text\":\"知道了\"}".to_string()]);
+    let mut core = core_with_io_gateway(vec![module_of("m0")], gw(member, vec!["[]".into()]), Arc::clone(&io));
+    let sid = core.create_work(work("w", WorkMode::Single, &["m0"])).unwrap().sid;
+    let events = with_live(|l| core.single_say(&sid, "改两处", l)).unwrap();
+    let views = tool_views(&events);
+    assert!(!views[0].ok, "{}", views[0].output);
+    assert!(views[0].output.contains("第 2 块"), "{}", views[0].output);
+    assert!(views[0].output.contains("没有任何文件被写入"), "{}", views[0].output);
+    assert!(views[0].output.contains("找不到"), "{}", views[0].output);
+    assert_eq!(io.get(&["w", "m0", "a.txt"]), None, "第 1 块也不许写盘（原子）");
+    assert_eq!(io.get(&["w", "m0", "b.txt"]).as_deref(), Some("只有这一行\n"), "没改");
+}
+
+#[test]
+fn a_patch_without_end_marker_is_refused_with_the_line() {
+    // 少了 End File：不能猜哪里是结尾（否则补丁后面那句话会被写进文件）
+    let target = s(&["w", "m0", "out.md"]);
+    let raw = format!(
+        "{{\"type\":\"tool\",\"name\":\"patch\"}}\n*** Add File: {}\n内容\n我改完了。\n",
+        target
+    );
+    let io = Arc::new(InMemorySysIo::new());
+    let mut member = BTreeMap::new();
+    member.insert("m0".to_string(), vec![raw, "{\"type\":\"say\",\"text\":\"知道了\"}".to_string()]);
+    let mut core = core_with_io_gateway(vec![module_of("m0")], gw(member, vec!["[]".into()]), Arc::clone(&io));
+    let sid = core.create_work(work("w", WorkMode::Single, &["m0"])).unwrap().sid;
+    let events = with_live(|l| core.single_say(&sid, "加个文件", l)).unwrap();
+    let views = tool_views(&events);
+    assert!(!views[0].ok && views[0].output.contains("*** End File"), "{}", views[0].output);
+    assert_eq!(io.get(&["w", "m0", "out.md"]), None, "绝不落盘");
+}
+
+#[test]
+fn a_freeform_envelope_is_never_repaired() {
+    // 自由格式工具的信封本身不合法时：不做信封修复（修会把正文里的换行当作字符串内容转义掉），
+    // 如实报"信封没写完"，也绝不落盘。
+    let target = s(&["w", "m0", "out.md"]);
+    let raw = format!(
+        "{{\"type\":\"tool\",\"name\":\"patch\"\n*** Add File: {}\n正文第一行\n正文第二行\n*** End File\n",
+        target
+    );
+    let io = Arc::new(InMemorySysIo::new());
+    let mut member = BTreeMap::new();
+    member.insert("m0".to_string(), vec![raw, "{\"type\":\"say\",\"text\":\"知道了\"}".to_string()]);
+    let mut core = core_with_io_gateway(vec![module_of("m0")], gw(member, vec!["[]".into()]), Arc::clone(&io));
+    let sid = core.create_work(work("w", WorkMode::Single, &["m0"])).unwrap().sid;
+    let events = with_live(|l| core.single_say(&sid, "打补丁", l)).unwrap();
+    let views = tool_views(&events);
+    assert!(!views[0].ok, "{}", views[0].output);
+    assert!(views[0].output.contains("还差"), "要报信封本身没写完：{}", views[0].output);
+    assert!(!views[0].output.contains("信封修复"), "自由格式不做信封修复：{}", views[0].output);
+    assert_eq!(io.get(&["w", "m0", "out.md"]), None, "绝不落盘");
+}
+
+#[test]
 fn rewind_clears_the_read_ledger_so_overwrite_needs_a_fresh_read() {
     // 回档把转录截掉了：那段"我完整读过 / 我写过"的证据随之作废（保守，宁肯让模型重读）。
     let io = Arc::new(InMemorySysIo::new());
@@ -3010,8 +3119,12 @@ fn builtin_tool_book_is_the_one_source_of_names_and_paths() {
     let mut reserved = crate::core::systool::names();
     reserved.sort();
     assert_eq!(declared, reserved, "builtin_tools 的声明要与保留名一致");
-    // 内置工具一律按真实绝对路径寻址：每个都必须声明必填 path。
+    // 内置工具一律按真实绝对路径寻址：JSON 工具必须声明必填 path；自由格式工具（patch）不吃参数校验。
     for (name, schema) in book {
+        if crate::core::systool::is_freeform(name) {
+            assert!(schema.params.is_none(), "自由格式工具不声明 JSON 参数：{}", name);
+            continue;
+        }
         let path = schema.params.as_ref().and_then(|p| p.get("path"));
         assert!(path.map(|p| p.required).unwrap_or(false), "{} 必须声明必填 path", name);
     }
@@ -3021,6 +3134,9 @@ fn builtin_tool_book_is_the_one_source_of_names_and_paths() {
     assert!(guide.contains("【工具参数】"), "{}", guide);
     assert!(guide.contains("- offset（integer，缺省 1，不小于 1）"), "{}", guide);
     assert!(guide.contains("- ignore_case（boolean）：是否忽略大小写；省略即区分大小写"), "{}", guide);
+    // patch 的写法说明也进系统提示（自由格式：正文不走 JSON）
+    assert!(guide.contains("【改文件：用 patch"), "{}", guide);
+    assert!(guide.contains("*** End File"), "每块要收尾这件事必须写清楚：{}", guide);
 }
 
 #[test]

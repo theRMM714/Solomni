@@ -196,6 +196,31 @@ async function lines(sid) {
   assert(th.tool && th.tool.module === 'toolbox' && th.tool.name === 'read_txt' && th.tool.ok === true, '模块的外部工具用真实绝对路径读到了用户投喂的文件', JSON.stringify(th.tool || {}).slice(0, 260));
   assert(String((th.tool || {}).output || '').includes('绝对路径能读到'), '工具真的读到了内容（cwd 与路径都对）', String((th.tool || {}).output).slice(0, 200));
 
+  // 自由格式补丁：信封 + 之后原样跟补丁正文（不转义）——这条新路径必须在真实二进制上通
+  const name1p = 'e2e-patch-' + Date.now();
+  const c1p = await api('POST', '/api/sessions', {
+    name: name1p, mode: 'single',
+    agents: [{ name: '补丁手', transient: true, modules: ['research'], model: 'm1' }],
+  });
+  assert(c1p.status === 200, '建「补丁」工作', c1p.text.slice(0, 200));
+  const s1p = await api('POST', '/api/sessions/' + encodeURIComponent(name1p) + '/say', { text: '打补丁' });
+  assert(s1p.status === 200, '补丁发言', s1p.text.slice(0, 200));
+  const lpatch = await lines(name1p);
+  const tpatch = lpatch.filter((x) => x.tool).pop() || {};
+  assert(tpatch.tool && tpatch.tool.name === 'patch' && tpatch.tool.ok === true, '自由格式补丁落成一条成功的工具行', JSON.stringify(tpatch.tool || {}).slice(0, 260));
+  const patched = path.join(dir(name1p), '补丁手', 'mock-patch.txt');
+  assert(fs.existsSync(patched), '补丁真的写下了文件');
+  assert(
+    fs.readFileSync(patched, 'utf8') === '补丁第一行\n补丁第二行「引号、换行、冒号：都不用转义」',
+    '补丁内容原样落盘（引号/换行/中文都没被转义）',
+    JSON.stringify(fs.readFileSync(patched, 'utf8').slice(0, 200)),
+  );
+  assert(
+    lpatch.every((x) => !String(x.line || '').includes('*** Add File') && !String(x.line || '').includes('补丁已经给出')),
+    '补丁正文与它后面的散话都没有上屏（它是工具输入，不是发言）',
+    JSON.stringify(lpatch.map((x) => String(x.line || '').slice(0, 40))),
+  );
+
   // 协作里引用某个 agent 的私沙：如实说明只有那个 agent 能读（speaker = None）
   const name1e = 'e2e-refcollab-' + Date.now();
   const c1e = await api('POST', '/api/sessions', {

@@ -64,6 +64,15 @@ http.createServer((req, res) => {
         } else {
           content = JSON.stringify(env);
         }
+      } else if (user.includes('打补丁')) {
+        // 自由格式补丁：信封之后**原样**跟补丁正文（不转义、不引号）——验证这条路径在真实二进制上通
+        const target = (sandboxRoot || 'sandbox-root') + '/mock-patch.txt';
+        content = '{"type":"tool","name":"patch"}\n'
+          + '*** Add File: ' + target + '\n'
+          + '补丁第一行\n'
+          + '补丁第二行「引号、换行、冒号：都不用转义」\n'
+          + '*** End File\n'
+          + '补丁已经给出。';
       } else {
         // 内置 write：路径用**提示词里给出的真实沙箱根**（不写死机器路径）
         const target = (sandboxRoot || 'sandbox-root') + '/mock-note.txt';

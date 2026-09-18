@@ -95,13 +95,13 @@ session/<工作名>/
   <agent 实例名>/     # 该 agent 的私有沙箱
 ```
 
-- agent 的文件读写用核心自带的**内置工具**（`read` / `write` / `search`）：核心在提示词里把**占位符替换成运行时的真实根目录**，agent 拿到的就是真实绝对路径；越出这些根（相对路径、`..` 跳出）一律拒绝；模块目录只有它所属的 agent 可达（细节见 [MODULE_SPEC.md](MODULE_SPEC.md)）
+- agent 的文件读写用核心自带的**内置工具**（`read` / `write` / `edit` / `patch` / `search`；`patch` 用自由格式补丁，大段内容不必塞进 JSON）：核心在提示词里把**占位符替换成运行时的真实根目录**，agent 拿到的就是真实绝对路径；越出这些根（相对路径、`..` 跳出）一律拒绝；模块目录只有它所属的 agent 可达（细节见 [MODULE_SPEC.md](MODULE_SPEC.md)）
 - **执行档位**（`exec` 段）：**本机档**（默认）= 脚本直接在宿主上跑；**虚拟机档** = 一整套 guest。
   虚拟机档的选型、诊断与装配计划已就位，**guest 本体尚未接入**——未接入前实际仍按本机档执行，产品如实标注，不夸大
   （见"后置工作"与 [RUNTIME_SPEC.md](RUNTIME_SPEC.md)）
 - **运行能力**：模块用自己的 `runtimes` 声明工具需要哪些运行包（`python` / `node` / `bash` / `cc`……），包放在依赖文件夹 `runtimes/` 里，
   放入即出现。缺包 = 该模块的工具不执行并如实说明缺什么，**不是**会话崩溃（契约见 [RUNTIME_SPEC.md](RUNTIME_SPEC.md)）
-- 隔离级别如实：三层各说各的**实际**强度——① 内置 read/write/search 是**工具层**越界拒绝（路径校验）；
+- 隔离级别如实：三层各说各的**实际**强度——① 内置 read/write/edit/patch/search 是**工具层**越界拒绝（路径校验）；
   ② 外部工具进程统一从**守门进程**里跑（本程序自己的 `--fence-run` 模式），环境白名单（密钥不进子进程、HOME/TEMP 落在私有沙箱）、
   超时连根杀掉整棵进程树、Windows 上用 Job Object 围住进程树；③ 文件系统与网络围栏按平台接入：Linux（Landlock）、macOS（seatbelt）、
   Windows（AppContainer：按 agent 派生容器 SID、可达范围凭目录 ACL 授权、不给 capability 即断网）。
@@ -166,7 +166,7 @@ agent 可以退出（此后核心不再向它转达）；可以请教用户（�
 > single research notes      # 把点名 agent 的模块并成一个临时 agent
 > single                     # 登记处全部 agent 的模块并成一个（全选）
 （上下文 = 该 agent 的职责提示词（其模块 system 的合成）+ 用户消息，直接对话干活；
-  内置 read/write/search 随时可用，其模块声明的外部工具也可用；每次调用以工具卡片如实呈现）
+  内置 read/write/edit/patch/search 随时可用，其模块声明的外部工具也可用；每次调用以工具卡片如实呈现）
 ```
 
 工具的身份是 (模块, 工具名)：不同模块可以声明同名工具，调用时在信封的 module 字段里指明，各归各模块——**合成一个 agent 不再有资源冲突这回事**。

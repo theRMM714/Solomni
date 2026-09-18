@@ -54,6 +54,12 @@ pub struct ToolInvoke {
     pub name: String,
     /// 普通调用 = 规范化后的参数 JSON（经执行端口送入工具 stdin）；malformed = 提取到的对象或原文开头。
     pub args_json: String,
+    /// 信封**之后**的那段正文（原样，只去掉行首空白）。
+    /// 自由格式工具（patch）的输入取这里：绝不能把手写信封**之前**的正文混进文件内容。
+    pub body: String,
+    /// 信封**之前**的那段正文（原样，只去掉首尾空白）。
+    /// 自由格式工具显示只认它：补丁正文不该被当成 AI 发言渲染出来。
+    pub lead: String,
 }
 
 #[derive(Debug, Clone)]
@@ -86,6 +92,22 @@ struct ToolEnvelope {
     args: serde_json::Value,
 }
 
+/// 信封**之前**的那段正文（只去掉首尾空白）。自由格式工具显示只认它。
+fn before(raw: &str, obj: &str) -> String {
+    match raw.find(obj) {
+        Some(i) => raw[..i].trim().to_string(),
+        None => String::new(),
+    }
+}
+
+/// 信封**之后**的那段正文（原样；只去掉行首空白）。自由格式工具（patch）的输入从这里取。
+fn after(raw: &str, obj: &str) -> String {
+    match raw.find(obj) {
+        Some(i) => raw[i + obj.len()..].trim_start().to_string(),
+        None => String::new(),
+    }
+}
+
 /// 从原文里去掉被提取出的那段 JSON（只去第一次出现的位置），剩下的就是信封之外的正文。
 fn strip_once(raw: &str, obj: &str) -> String {
     match raw.find(obj) {
@@ -110,6 +132,8 @@ pub fn parse(raw: &str) -> Reply {
                     degraded: false,
                     tool: Some(ToolInvoke {
                         malformed: None,
+                        body: after(raw, &obj),
+                        lead: before(raw, &obj),
                         module: t.module.map(|m| m.trim().to_string()).filter(|m| !m.is_empty()),
                         name: t.name,
                         args_json: t.args.to_string(),
@@ -154,6 +178,9 @@ pub fn parse(raw: &str) -> Reply {
                     module: Some(salvage(frag, "module")).filter(|m| !m.is_empty()),
                     name: salvage(frag, "name"),
                     args_json: head_chars(frag, 200),
+                    // 信封本身就不合法：没有可执行的正文
+                    body: String::new(),
+                    lead: raw[..start].trim().to_string(),
                 }),
             };
         }
@@ -176,6 +203,8 @@ pub fn parse(raw: &str) -> Reply {
                     module: Some(salvage(probe, "module")).filter(|m| !m.is_empty()),
                     name: salvage(probe, "name"),
                     args_json: obj.clone().unwrap_or_else(|| head_chars(raw, 200)),
+                    body: String::new(),
+                    lead: raw[..raw.find('{').unwrap_or(0)].trim().to_string(),
                 }),
             };
         }
