@@ -34,8 +34,14 @@
 - `node run-tests.js` 测试汇总入口（`node start.js -test` 是备好环境后的同一入口）；
 - `src/adapters/fake_chat.rs` 中的 `FakeChat` 与 `DemoGateway`；
 - `src/tests.rs` 中的 `InMemory*`、`FakeCatalog`、`VecSource`、`ScriptGateway`、`RecordingRunner`、`RecordingFence`、`TestPrompts`、`NoopLog` 等测试装配（替身支持失败注入，供 T2 复用）；
-- `src/contract_tests/` 中的端口与适配器契约测试（T2）：`ports.rs`（13 个端口的替身语义）、`fakes.rs`（FakeChat / DemoGateway）、
-  `adapters.rs`（8 个文件系统适配器的真实边界 + 本机环回 HTTP 适配器）；
+- `src/contract_tests/` 中的契约测试（T2）：
+  - `ports.rs`（13 个端口的替身语义）、`fakes.rs`（FakeChat / DemoGateway 的独立契约）；
+  - `adapters.rs`（8 个文件系统适配器的真实边界 + 本机环回 HTTP 适配器）；
+  - `api.rs`（入站契约：命令与事件、生成期间停止立刻生效、错误如实传播、单条命令 panic 不带垮核心）；
+  - `intent.rs`（共享意图层：点名 / 归并 / 唯一名 / 动作分发 / 生成中拒绝改配置）；
+  - `routes.rs`（HTTP 路由目录 ↔ 处理器 ↔ 文档 ↔ 前端调用四者机器比对；假能力面逐条验成功 / 错误 / 空 / 边界）；
+- **入站契约也是契约**：呈现层只依赖 `core::api` 的四个角色接口与事件台（拿不到 `Core`、拿不到任何核心锁），
+  所以它能被假实现整体替换——`routes.rs` 的 `FakeOps` 就是这么逐条测路由的。
 - T0 质量门禁已并入同一入口：编译与结构审查是硬失败，格式 / clippy / 编译告警 / 依赖重复按 `tests/quality-baseline.yaml` 比对。
 
 当前平台缺口账（`tests/cross-platform/gaps.yaml`、`tests/<平台>/gaps.yaml`）**为空**：三平台围栏机制与整仓测试
@@ -452,7 +458,7 @@ tests/
   ci-publish.mjs                # CI 报告发布脚本（把三平台报告写入 ci-report 分支）
 ```
 
-单元层的契约测试在 `src/contract_tests/`（`ports.rs` / `fakes.rs` / `adapters.rs`），替身在 `src/tests.rs`；
+单元层的契约测试在 `src/contract_tests/`（`ports.rs` / `fakes.rs` / `adapters.rs` / `api.rs` / `intent.rs` / `routes.rs`），替身在 `src/tests.rs`；
 两者合并进 `src/tests/` 目录是记在 `tests/gaps.yaml` 的长期目标（`tests.layout-migration`）。
 
 四个平台目标在 `Cargo.toml` 中显式登记。新增测试目标、Fixture 或脚本必须能从入口追溯到执行位置，否则属于结构质量问题。

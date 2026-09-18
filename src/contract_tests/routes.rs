@@ -445,6 +445,26 @@ fn unknown_route_is_reported_as_404() {
 }
 
 #[test]
+fn catalog_json_covers_every_route() {
+    // `solomni --print-routes` 输出的就是这份事实，别让它与 ROUTES 脱节。
+    let list = routes::catalog_json();
+    let arr = list.as_array().expect("目录的 JSON 形态应是数组");
+    assert_eq!(arr.len(), ROUTES.len(), "JSON 与 ROUTES 条数不一致");
+    for (v, r) in arr.iter().zip(ROUTES.iter()) {
+        assert_eq!(v.get("id").and_then(|x| x.as_str()), Some(r.id));
+        assert_eq!(v.get("method").and_then(|x| x.as_str()), Some(r.method));
+        assert_eq!(v.get("pattern").and_then(|x| x.as_str()), Some(r.pattern));
+        assert!(
+            v.get("statuses")
+                .and_then(|x| x.as_array())
+                .is_some_and(|a| !a.is_empty()),
+            "{} 缺状态码",
+            r.id
+        );
+    }
+}
+
+#[test]
 fn catalog_is_free_of_duplicates_and_routes_do_not_overlap() {
     let mut seen = std::collections::HashSet::new();
     for r in ROUTES {

@@ -76,7 +76,7 @@ cargo run                 # 工具链就绪后最直接的跑法：cargo run -- 
 | 文档 | 讲什么 | 给谁看 |
 |---|---|---|
 | [PHILOSOPHY.md](PHILOSOPHY.md) | 理念与不变量（两套，互不混同）：终极目标、角色、核心理念、不可违反的判据 | 想懂"为什么这么设计"的人 |
-| [ARCHITECTURE.md](ARCHITECTURE.md) | 架构与开发规则：分层与依赖方向、端口、模块地图、日志、提示词册、落盘契约 | 改代码的人 |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | 架构与开发规则：分层与依赖方向、端口、模块地图、入站契约与路由目录、日志、提示词册、落盘契约 | 改代码的人 |
 | [PRODUCT.md](PRODUCT.md) | 产品与用户旅程：编排平面、agent、落盘与沙箱、运行流程、转录中心 | 用产品的人 |
 | [MODULE_SPEC.md](MODULE_SPEC.md) | 模块开发契约：打包格式、发言信封、回报与验收、工具与路径模型、测试交付 | 写模块的人 |
 | [RUNTIME_SPEC.md](RUNTIME_SPEC.md) | 运行包契约：`package.yaml` 字段、两种 kind、能力名、校验与拒收、与执行档位的关系 | 做运行包的人 |
