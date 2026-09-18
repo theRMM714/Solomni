@@ -1,42 +1,18 @@
 //! 入站契约（`core::api`）的契约测试：命令/事件模型、能力分面、停止语义、panic 隔离。
 //! 这一层不碰 HTTP；HTTP 侧（路由目录与逐路由契约）另见本目录的 routes。
 
+use crate::contract_tests::{ops_with, single_work, slow_ops};
 use crate::core::api::{CoreHandle, Ops, Output};
 use crate::core::exec::Tier;
 use crate::core::module::Module;
-use crate::core::ports::{BoxedChat, Chat, ChatGateway, Chunk, Msg};
-use crate::core::providers::Channel;
-use crate::core::{AgentInstance, WorkMode, WorkSpec};
-use crate::tests::{core_with_gateway, gw, module_of};
-use std::collections::BTreeMap;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use crate::tests::module_of;
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 /// 用内存装配起一个核心手柄（核心从此有自己的线程、自己的状态）。
 fn spawn(modules: Vec<Module>, core_script: Vec<&str>) -> CoreHandle {
-    let mut member = BTreeMap::new();
-    member.insert(
-        "a".to_string(),
-        vec!["{\"type\":\"say\",\"text\":\"好\"}".to_string()],
-    );
-    let gateway = gw(member, core_script.into_iter().map(String::from).collect());
-    CoreHandle::spawn(core_with_gateway(modules, gateway)).expect("起核心线程")
-}
-
-fn work(name: &str, modules: &[&str]) -> WorkSpec {
-    WorkSpec {
-        name: name.to_string(),
-        mode: WorkMode::Single,
-        agents: vec![AgentInstance {
-            name: modules[0].to_string(),
-            transient: true,
-            modules: modules.iter().map(|s| s.to_string()).collect(),
-            model: None,
-        }],
-        task: None,
-        delegate: false,
-    }
+    ops_with(modules, core_script).0
 }
 
 // ---------- 命令在自己的线程上跑，状态只被它碰 ----------
@@ -78,7 +54,10 @@ fn generation_pushes_facts_to_the_event_bus_with_sequence_numbers() {
     let handle = spawn(vec![module_of("a")], Vec::new());
     let ops = Ops::from_handle(&handle);
     let bus = handle.events();
-    let opened = ops.sessions.create_work(work("w", &["a"])).expect("建会话");
+    let opened = ops
+        .sessions
+        .create_work(single_work("w", &["a"]))
+        .expect("建会话");
     assert!(bus.snapshot(None, 0).0.is_empty(), "建会话本身不入事件台");
 
     let adv = ops
@@ -110,62 +89,13 @@ fn generation_pushes_facts_to_the_event_bus_with_sequence_numbers() {
 
 // ---------- 停止：生成期间也立刻生效（并发归核心） ----------
 
-/// 边流边等停止的通道：把「停止」变成可观察事实——取消后下一次回调即返回 false。
-struct SlowChat {
-    ticks: Arc<AtomicUsize>,
-}
-
-impl Chat for SlowChat {
-    fn complete(&mut self, _m: &[Msg], _stream: bool, on: &mut dyn FnMut(Chunk) -> bool) -> String {
-        if !on(Chunk::Start) {
-            return String::new();
-        }
-        // 上限约 30 秒：只要提前返回，就证明是「停止」生效，而不是它自然跑完。
-        for _ in 0..6_000 {
-            self.ticks.fetch_add(1, Ordering::Relaxed);
-            if !on(Chunk::Text("·".to_string())) {
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(5));
-        }
-        "{\"type\":\"say\",\"text\":\"（慢通道）收到停止\"}".to_string()
-    }
-}
-
-#[derive(Default)]
-struct SlowGateway {
-    ticks: Arc<AtomicUsize>,
-}
-
-impl ChatGateway for SlowGateway {
-    fn member_channel(&self, _c: Option<&Channel>, _id: &str) -> (BoxedChat, Option<String>) {
-        (
-            Box::new(SlowChat {
-                ticks: Arc::clone(&self.ticks),
-            }),
-            None,
-        )
-    }
-    fn core_channel(&self, _c: Option<&Channel>) -> (BoxedChat, bool) {
-        (
-            Box::new(SlowChat {
-                ticks: Arc::clone(&self.ticks),
-            }),
-            false,
-        )
-    }
-}
-
 #[test]
 fn stop_takes_effect_while_generation_is_still_running() {
-    let gateway = SlowGateway::default();
-    let ticks = Arc::clone(&gateway.ticks);
-    let handle =
-        CoreHandle::spawn(core_with_gateway(vec![module_of("a")], gateway)).expect("起核心线程");
-    let ops = Ops::from_handle(&handle);
+    // 慢通道与装配在 contract_tests 里共用（intent 的「生成中不许改」测试用的是同一个）。
+    let (_handle, ops, ticks) = slow_ops(vec![module_of("a")]);
     let sid = ops
         .sessions
-        .create_work(work("w", &["a"]))
+        .create_work(single_work("w", &["a"]))
         .expect("建会话")
         .sid;
 

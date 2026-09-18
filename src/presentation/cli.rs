@@ -1,10 +1,10 @@
 //! 终端转录中心：解析命令 → 用入站能力面 → 渲染事件流。
 //! 只做解析与渲染，不做业务决策；Web 前端与它并列，共用同一能力面与事件词汇。
 
-use crate::core::agents::AgentView;
 use crate::core::api::{Ops, Output};
 use crate::core::providers::{ModelView, ProviderView};
-use crate::core::{AgentInstance, CollabStep, Pending, SessionEvent, WorkMode, WorkSpec};
+use crate::core::{AgentInstance, CollabStep, Pending, SessionEvent, WorkMode};
+use crate::presentation::intent;
 use crate::presentation::web::DEFAULT_PORT;
 use std::io::Write;
 
@@ -151,37 +151,6 @@ fn model_line(m: &ModelView, core: Option<&str>) -> String {
     format!("{}{}  {} → {}  [{}]", m.id, mark, m.name, m.api_model, m.provider)
 }
 
-/// 点名已存 agent：CLI 只认登记处的名字（不再直接点模块）；不存在 / 登记处为空都明确报错。
-fn named_agents(ops: &Ops, arg: &str) -> Result<Vec<AgentView>, String> {
-    let views = ops.registry.agents()?;
-    if views.is_empty() {
-        return Err("登记处还没有 agent：请先到 Web 界面「设置 → agent 管理」建一个（CLI 不再直接点模块）".to_string());
-    }
-    let names: Vec<String> = arg
-        .split(|c: char| c == ',' || c == '，' || c.is_whitespace())
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(|s| s.to_string())
-        .collect();
-    let mut out = Vec::new();
-    for n in names {
-        match views.iter().find(|a| a.name == n) {
-            Some(a) => out.push(a.clone()),
-            None => {
-                return Err(format!(
-                    "无此 agent：{}（现有：{}）",
-                    n,
-                    views.iter().map(|a| a.name.as_str()).collect::<Vec<_>>().join(" · ")
-                ))
-            }
-        }
-    }
-    if out.is_empty() {
-        return Err("没有点名任何 agent".to_string());
-    }
-    Ok(out)
-}
-
 // ---------- 事件渲染：CLI 与 Web 前端同源 ----------
 
 fn render(events: &[SessionEvent]) {
@@ -228,25 +197,10 @@ fn render(events: &[SessionEvent]) {
     }
 }
 
-/// 工作名在当前进程内唯一：重名时追加序号（CLI 便捷；Web 由用户自己取名）。
-fn unique_name(ops: &Ops, base: &str) -> Result<String, String> {
-    if !ops.sessions.exists(base)? {
-        return Ok(base.to_string());
-    }
-    let mut n = 2;
-    loop {
-        let cand = format!("{}-{}", base, n);
-        if !ops.sessions.exists(&cand)? {
-            return Ok(cand);
-        }
-        n += 1;
-    }
-}
-
 // ---------- 形态一：单 agent（模块数不限） ----------
 
 fn single_flow(ops: &Ops, arg: &str) {
-    let views = match ops.registry.agents() {
+    let views = match intent::all_views(ops) {
         Ok(v) => v,
         Err(e) => {
             println!("[错误] {}", e);
@@ -254,60 +208,42 @@ fn single_flow(ops: &Ops, arg: &str) {
         }
     };
     if views.is_empty() {
-        println!("[错误] 登记处还没有 agent：请先到 Web 界面「设置 → agent 管理」建一个（CLI 不再直接点模块）");
+        println!("[错误] {}（CLI 不再直接点模块）", intent::NO_AGENTS);
         return;
     }
     // 点名 1 个 = 直接用该 agent（模块数不限）；点名多个 = 把那几个的模块并成一个；无参 = 把登记处全部并成一个。
-    let merge = |list: &[AgentView]| -> Vec<String> {
-        let mut merged: Vec<String> = Vec::new();
-        for a in list {
-            for id in &a.modules {
-                if !merged.contains(id) {
-                    merged.push(id.clone());
-                }
-            }
-        }
-        merged
-    };
-    let (agent_name, modules, model, transient) = if arg.trim().is_empty() {
-        ("组合".to_string(), merge(&views), None, true)
+    let picked = if arg.trim().is_empty() {
+        intent::as_instances(&views)
     } else {
-        let picked = match named_agents(ops, arg) {
+        match intent::pick_agents(ops, &intent::split_names(arg)) {
             Ok(l) => l,
             Err(e) => {
                 println!("[错误] {}", e);
                 return;
             }
-        };
-        if picked.len() == 1 {
-            let a = &picked[0];
-            (a.name.clone(), a.modules.clone(), a.model.clone(), false)
-        } else {
-            ("组合".to_string(), merge(&picked), None, true)
         }
     };
-    let work_name = match unique_name(ops, "single") {
+    let agent = if picked.len() == 1 {
+        picked.into_iter().next().expect("刚判过长度")
+    } else {
+        intent::merge_into_one(&picked, "组合")
+    };
+    let work_name = match intent::unique_work_name(ops, "single", "single") {
         Ok(n) => n,
         Err(e) => {
             println!("[错误] {}", e);
             return;
         }
     };
-    let spec = WorkSpec {
-        name: work_name,
-        mode: WorkMode::Single,
-        agents: vec![AgentInstance { name: agent_name, transient, modules, model }],
-        task: None,
-        delegate: false,
-    };
-    let (sid, open) = match ops.sessions.create_work(spec) {
-        Ok(o) => (o.sid, o.events),
+    let opened = match intent::open_work(ops, work_name, WorkMode::Single, vec![agent], None, false) {
+        Ok(o) => o,
         Err(e) => {
             println!("[错误] {}", e);
             return;
         }
     };
-    render(&open);
+    render(&opened.events);
+    let sid = opened.sid;
     println!("（单 agent {} —— 输入消息，空行结束会话）", sid);
     loop {
         let say = prompt("你>");
@@ -315,8 +251,8 @@ fn single_flow(ops: &Ops, arg: &str) {
             break;
         }
         // 终端只在最终结果上渲染，不要流式（怎么显示是呈现层的事）。
-        match ops.sessions.say(&sid, &say, Output::Final) {
-            Ok(adv) => render(&adv.events),
+        match intent::act(ops, &sid, intent::Action::Say(&say), Output::Final) {
+            Ok(acted) => render(&intent::into_events(acted)),
             Err(e) => {
                 println!("[错误] {}", e);
                 break;
@@ -335,26 +271,22 @@ fn collab_flow(ops: &Ops, arg: &str) {
     let agents: Vec<AgentInstance> = if delegate {
         Vec::new()
     } else {
-        match named_agents(ops, trimmed) {
-            Ok(l) => l
-                .into_iter()
-                .map(|a| AgentInstance { name: a.name, transient: false, modules: a.modules, model: a.model })
-                .collect(),
+        match intent::pick_agents(ops, &intent::split_names(trimmed)) {
+            Ok(l) => l,
             Err(e) => {
                 println!("[错误] {}", e);
                 return;
             }
         }
     };
-    let work_name = match unique_name(ops, "collab") {
+    let work_name = match intent::unique_work_name(ops, "collab", "collab") {
         Ok(n) => n,
         Err(e) => {
             println!("[错误] {}", e);
             return;
         }
     };
-    let spec = WorkSpec { name: work_name, mode: WorkMode::Collab, agents, task: Some(task), delegate };
-    let sid = match ops.sessions.create_work(spec) {
+    let sid = match intent::open_work(ops, work_name, WorkMode::Collab, agents, Some(task), delegate) {
         Ok(o) => {
             render(&o.events);
             o.sid
@@ -383,16 +315,16 @@ fn collab_flow(ops: &Ops, arg: &str) {
             Err(e) => println!("[提示] 取名单失败：{}", e),
         }
         let ok = prompt("确认名单？（yes 开始 / 其他取消）");
-        match ops.sessions.collab_step(&sid, CollabStep::ConfirmSlate, &ok) {
-            Ok(adv) => render(&adv.events),
+        match intent::act(ops, &sid, intent::Action::Step(CollabStep::ConfirmSlate, &ok), Output::Final) {
+            Ok(acted) => render(&intent::into_events(acted)),
             Err(e) => println!("[错误] {}", e),
         }
     }
     // 开始确认。
     if matches!(ops.sessions.pending(&sid), Ok(Some(Pending::ConfirmBegin))) {
         let ans = prompt("开始讨论？（yes / yes,allow：授权小组自裁细节）");
-        match ops.sessions.collab_step(&sid, CollabStep::Begin, &ans) {
-            Ok(adv) => render(&adv.events),
+        match intent::act(ops, &sid, intent::Action::Step(CollabStep::Begin, &ans), Output::Final) {
+            Ok(acted) => render(&intent::into_events(acted)),
             Err(e) => println!("[错误] {}", e),
         }
     }
@@ -401,8 +333,8 @@ fn collab_flow(ops: &Ops, arg: &str) {
         if let Ok(Some(Pending::Ask { member, question })) = ops.sessions.pending(&sid) {
             println!("[请教] {}：{}", member, question);
             let ans = prompt("你的回答（回车 = 无补充，继续）>");
-            match ops.sessions.collab_step(&sid, CollabStep::Answer, &ans) {
-                Ok(adv) => render(&adv.events),
+            match intent::act(ops, &sid, intent::Action::Step(CollabStep::Answer, &ans), Output::Final) {
+                Ok(acted) => render(&intent::into_events(acted)),
                 Err(e) => {
                     println!("[错误] {}", e);
                     break;

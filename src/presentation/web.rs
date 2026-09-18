@@ -5,6 +5,7 @@
 
 use crate::core::api::{Ops, Output};
 use crate::core::providers::AppSettings;
+use crate::presentation::intent;
 use crate::core::{CollabStep, Pending, SessionEdit, SessionEvent, WorkMode, WorkSpec};
 use serde_json::json;
 use std::sync::Arc;
@@ -278,31 +279,14 @@ fn route(
                 Err(e) => return complaint(400, e),
             };
             let text = str_field(&req, "text");
-            // 回档返回重放后的完整事件流（前端整体重建），与其它动作的增量回包不同。
-            if action == "rewind" {
-                let id = req.get("id").and_then(|v| v.as_u64()).unwrap_or(u64::MAX);
-                return match ops.sessions.rewind(&sid, id) {
-                    Ok(events) => ok_json(json!({ "sid": sid, "events": events })),
-                    Err(e) => complaint(400, e),
-                };
-            }
-            // 改需求同样返回完整重放（前端整体重建）。
-            if action == "update-task" {
-                return match ops.sessions.update_task(&sid, &text) {
-                    Ok(events) => ok_json(json!({ "sid": sid, "events": events })),
-                    Err(e) => complaint(400, e),
-                };
-            }
-            // 配置界面：提交编辑。正在生成中不许改（先停止或等它结束），避免改到一半的语义。
+            let agent = str_field(&req, "agent");
+            // 配置界面：提交编辑（「生成中不许改」的规则在共享意图层收口一次）。
             if action == "edit" {
-                if ops.sessions.is_running(&sid) {
-                    return complaint(400, "该会话正在生成中：先「停止」或等它结束，再改配置");
-                }
                 let edit = match serde_json::from_value::<SessionEdit>(req.clone()) {
                     Ok(e) => e,
                     Err(e) => return complaint(400, format!("编辑内容非法：{}", e)),
                 };
-                return match ops.sessions.edit(&sid, edit) {
+                return match intent::edit_session(ops, &sid, edit) {
                     Ok(()) => ok_json(json!({ "ok": true })),
                     Err(e) => {
                         log.warn("web::edit_session", &format!("sid={} 编辑被拒：{}", sid, e));
@@ -336,20 +320,25 @@ fn route(
                 Ok(s) => if s.streaming { Output::Stream } else { Output::Final },
                 Err(_) => Output::Final,
             };
-            let outcome = match action {
-                "say" => ops.sessions.say(&sid, &text, out),
-                "task" => ops.sessions.collab_step(&sid, CollabStep::SetTask, &text),
-                "slate" => ops.sessions.collab_step(&sid, CollabStep::ConfirmSlate, &text),
-                "begin" => ops.sessions.collab_step(&sid, CollabStep::Begin, &text),
-                "answer" => ops.sessions.collab_step(&sid, CollabStep::Answer, &text),
-                "continue" => ops.sessions.continue_flow(&sid, out),
-                "withdraw" => ops.sessions.withdraw_agree(&sid, &str_field(&req, "agent")),
-                _ => Err(format!("未知动作：{}", action)),
+            // 其余动作走共享意图层：分发只写一份（新增动作只改 intent::Action）。
+            let what = match action {
+                "say" => intent::Action::Say(&text),
+                "continue" => intent::Action::Continue,
+                "task" => intent::Action::Step(CollabStep::SetTask, &text),
+                "slate" => intent::Action::Step(CollabStep::ConfirmSlate, &text),
+                "begin" => intent::Action::Step(CollabStep::Begin, &text),
+                "answer" => intent::Action::Step(CollabStep::Answer, &text),
+                "withdraw" => intent::Action::Withdraw(&agent),
+                "rewind" => intent::Action::Rewind(req.get("id").and_then(|v| v.as_u64()).unwrap_or(u64::MAX)),
+                "update-task" => intent::Action::UpdateTask(&text),
+                _ => return complaint(400, format!("未知动作：{}", action)),
             };
-            match outcome {
+            match intent::act(ops, &sid, what, out) {
                 // 动作回包即时返回本批事件与事件台序号；同批也早已入台供其它端增量取。
                 // 客户端按 seq 去重，避免「动作回包 + 长轮询」把同一批事件派发两次。
-                Ok(adv) => ok_json(json!({ "sid": sid, "events": ev_json(&adv.events), "seq": adv.seq })),
+                Ok(intent::Acted::Advanced(adv)) => ok_json(json!({ "sid": sid, "events": ev_json(&adv.events), "seq": adv.seq })),
+                // 回档 / 改需求返回完整重放（前端整体重建）。
+                Ok(intent::Acted::Replayed(events)) => ok_json(json!({ "sid": sid, "events": events })),
                 Err(e) => {
                     log.error("web::session_action", &format!("会话动作 {} 失败：{}", action, e));
                     complaint(400, e)
