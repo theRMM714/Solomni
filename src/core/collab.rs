@@ -37,6 +37,8 @@ pub struct CollabSession {
     emitted: usize,
     /// 下一条转录行的 id（会话内稳定序号）。
     next_line: u64,
+    /// 回复 id 计数器（转录行按它分组；按落盘重建时从转录里的最大值续号）。
+    reply_seq: u64,
     core_chat: crate::core::ports::BoxedChat,
     core_is_demo: bool,
     prompts: Prompts,
@@ -90,6 +92,7 @@ impl CollabSession {
             disc: None,
             emitted: 0,
             next_line: 0,
+            reply_seq: 0,
             core_chat,
             core_is_demo,
             prompts,
@@ -123,7 +126,8 @@ impl CollabSession {
 
     /// 生成一条带 id 的转录行（工具行另走 tool_line，带调用视图）。
     fn view(&mut self, line: String) -> LineView {
-        let v = LineView { id: self.next_line, line, ..Default::default() };
+        // 协作的讨论行各自成一条回复（协作的模型上下文不是从转录重建的，这个号只用于显示与分组一致）。
+        let v = LineView { id: self.next_line, reply: self.next_line, line, ..Default::default() };
         self.next_line += 1;
         v
     }
@@ -396,6 +400,7 @@ impl CollabSession {
                 runner: Arc::clone(&self.tools),
                 sandbox,
                 io: Arc::clone(&self.io),
+                reply_seq: self.reply_seq,
                 // 本档位下不能执行工具的模块（缺运行包）：机制侧据此拒绝执行。
                 unavailable: exec::unavailable(&self.spec, &modules, &library),
                 fence,
@@ -484,6 +489,7 @@ impl CollabSession {
             disc: None,
             emitted: 0,
             next_line: total,
+            reply_seq: crate::core::engine::max_reply(events),
             core_chat,
             core_is_demo,
             prompts: prompts.clone(),
@@ -563,6 +569,8 @@ fn emit_tool_lines(exec: &Execution, id: &str, next_line: &mut u64, sink: &mut d
         let line = format!("[{}:tool] {} → {}", id, v.label(), status);
         sink(SessionEvent::Transcript(vec![LineView {
             id: *next_line,
+            // 回复号来自引擎（同一次回复的多个调用同号）：这样转录里能看出它们是一组的。
+            reply: v.reply,
             line,
             tool: Some(v.clone()),
             ..Default::default()
@@ -577,7 +585,13 @@ fn push_delta(disc: &Discussion, emitted: &mut usize, next_line: &mut u64, sink:
         let views: Vec<LineView> = disc.transcript[*emitted..]
             .iter()
             .map(|l| {
-                let v = LineView { id: *next_line, line: l.text.clone(), degraded: l.degraded, ..Default::default() };
+                let v = LineView {
+                    id: *next_line,
+                    reply: *next_line,
+                    line: l.text.clone(),
+                    degraded: l.degraded,
+                    ..Default::default()
+                };
                 *next_line += 1;
                 v
             })

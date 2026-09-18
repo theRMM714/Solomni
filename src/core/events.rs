@@ -63,6 +63,9 @@ pub struct ToolCallView {
     /// 供应商给的调用 id：重建时靠它把结果消息与助手消息里的调用对上（手写信封通道为空）。
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub call_id: String,
+    /// 这次调用属于哪一次模型回复（= 该回复第一行的稳定 id）：重建按它分组，回档按它原子截断。
+    #[serde(default)]
+    pub reply: u64,
 }
 
 impl ToolCallView {
@@ -81,6 +84,10 @@ impl ToolCallView {
 #[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct LineView {
     pub id: u64,
+    /// 这一行属于哪次模型回复（同一次回复的所有行同号；值 = 该回复第一行的 id）。
+    /// 重建上下文时靠它把"一条助手消息 + N 条结果"重新拼回去，回档也按它原子截断。
+    #[serde(default)]
+    pub reply: u64,
     pub line: String,
     /// 思维链（若该轮模型给出）；前端永远默认折叠，点击才展开。
     #[serde(skip_serializing_if = "Option::is_none")]

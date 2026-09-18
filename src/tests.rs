@@ -1875,6 +1875,7 @@ fn member_with_tools(id: &str, script: Vec<String>, runner: Arc<impl ToolRunner 
         io: Arc::new(InMemorySysIo::new()),
         unavailable: BTreeMap::new(),
         fence: crate::core::fence::FenceSpec::from_sandbox(&test_sandbox("m0", &[]), false),
+        reply_seq: 0,
     });
     m
 }
@@ -3144,6 +3145,7 @@ pub(crate) fn native_member(
         io,
         unavailable: BTreeMap::new(),
         fence: crate::core::fence::FenceSpec::from_sandbox(&sb, false),
+        reply_seq: 0,
     });
     m
 }
@@ -4248,5 +4250,152 @@ fn session_meta_exec_section_roundtrips_and_reads_legacy_meta() {
     assert!(legacy.exec.base.is_none());
     assert!(!legacy.exec.net);
     assert!(legacy.exec.pins.is_empty());
+}
+
+// ---------- 原生多调用的回放一致性（实时 vs 重建） ----------
+
+/// 原生形态的网关：每次要通道就弹出一份脚本（第一份给实时会话，第二份给重建）。
+pub(crate) struct NativeGateway {
+    scripts: Mutex<Vec<Vec<NativeStep>>>,
+}
+
+impl ChatGateway for NativeGateway {
+    fn probe_tools(&self, _c: &Channel) -> Result<crate::core::ports::ProbeOutcome, String> {
+        Ok(crate::core::ports::ProbeOutcome::Supported { detail: "替身".to_string() })
+    }
+    fn member_channel(&self, _c: Option<&Channel>, _id: &str) -> (BoxedChat, Option<String>) {
+        let steps = self.scripts.lock().expect("锁").pop().unwrap_or_default();
+        (
+            Box::new(NativeChat {
+                steps,
+                declared: Arc::new(Mutex::new(Vec::new())),
+                seen: Arc::new(Mutex::new(Vec::new())),
+            }),
+            None,
+        )
+    }
+    fn core_channel(&self, _c: Option<&Channel>) -> (BoxedChat, bool) {
+        (Box::new(FakeChat::new(vec!["[]".to_string()])), false)
+    }
+}
+
+/// 指定网关 + 指定落盘历史装配一个核心（重建用例要读同一份转录）。
+fn native_core(gateway: NativeGateway, history: Arc<InMemoryHistory>, io: Arc<InMemorySysIo>) -> Core {
+    Core::new(
+        Arc::new(InMemorySettings::new()),
+        history,
+        Arc::new(InMemoryWorkspace::new()),
+        Arc::new(VecSource(vec![module_of("a")])),
+        Arc::new(InMemoryPackages::empty()),
+        Arc::new(NoFenceHost),
+        Arc::new(gateway),
+        Arc::new(FakeCatalog::new(vec!["m".to_string()])),
+        Arc::new(SilentRunner),
+        io,
+        Arc::new(NoRepair),
+        Box::new(TestPrompts::ok()),
+        Arc::new(crate::core::ports::NoopLog),
+    )
+    .expect("内存装配不应失败")
+}
+
+/// 一次回复里的**多个**原生调用：实时历史与重建历史必须逐条一致（含 tool_calls 与 tool_call_id）。
+/// 这就是原先不一致的那条：实时只推第一条调用的回执、第二条起什么都不推，重建却每条都推。
+#[test]
+fn native_multi_call_rebuilds_identically_to_live() {
+    use crate::core::ports::ToolCall;
+    let hist = Arc::new(InMemoryHistory::new());
+    let io = Arc::new(InMemorySysIo::new());
+    io.seed(&["w", "a", "a.txt"], "A1\nA2\n");
+    io.seed(&["w", "a", "b.txt"], "B1\nB2\n");
+    let a = s(&["w", "a", "a.txt"]);
+    let b = s(&["w", "a", "b.txt"]);
+    let scripts = || {
+        vec![
+            NativeStep::Calls(vec![
+                ToolCall { id: "c1".to_string(), name: "read".to_string(), args_json: format!("{{\"path\":\"{}\"}}", a) },
+                ToolCall { id: "c2".to_string(), name: "read".to_string(), args_json: format!("{{\"path\":\"{}\"}}", b) },
+            ]),
+            NativeStep::Text("{\"type\":\"say\",\"text\":\"读完了\"}".to_string()),
+        ]
+    };
+    let mut core = native_core(
+        NativeGateway { scripts: Mutex::new(vec![scripts()]) },
+        Arc::clone(&hist),
+        Arc::clone(&io),
+    );
+    core.probe_model_tools("m").expect("探测（把这条通道判成原生）");
+    let sid = core.create_work(work("w", WorkMode::Single, &["a"])).unwrap().sid;
+    let events = with_live(|l| core.single_say(&sid, "读两个文件", l)).unwrap();
+    let live = core.single_history(&sid).unwrap();
+
+    // 转录行：两条工具行同属一次回复（回复号 = 该回复第一条工具行的 id）。
+    let views = tool_views(&events);
+    assert_eq!(views.len(), 2, "两个调用两条工具行");
+    assert_eq!(views[0].reply, views[1].reply, "同一回复的两条工具行必须同号");
+    assert_eq!(views[0].call_id, "c1", "工具行记下供应商给的调用 id");
+    assert_eq!(views[1].call_id, "c2");
+
+    // 「重启」：同一份落盘历史交给新核心，按转录重建上下文——必须与实时逐条一致。
+    drop(core);
+    let mut core2 = native_core(
+        NativeGateway { scripts: Mutex::new(Vec::new()) },
+        Arc::clone(&hist),
+        Arc::clone(&io),
+    );
+    core2.probe_model_tools("m").expect("探测");
+    let rows = transcript_rows(&events).len() as u64;
+    core2.rewind(&sid, rows).unwrap();
+    let rebuilt = core2.single_history(&sid).unwrap();
+    let key = |h: &[Msg]| {
+        h.iter()
+            .map(|m| (m.role.clone(), m.content.clone(), m.tool_calls.len(), m.tool_call_id.clone()))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(key(&rebuilt), key(&live), "重建上下文必须与实时历史逐条一致（含 tool_calls / tool_call_id）");
+    assert_eq!(
+        live.iter().filter(|m| !m.tool_calls.is_empty()).count(),
+        1,
+        "一次回复只推一条助手消息"
+    );
+}
+
+/// 回档**按回复原子**：截在一次回复中间时整条回复一起丢，绝不留下"孤儿工具结果"。
+#[test]
+fn rewind_never_splits_a_reply() {
+    use crate::core::ports::ToolCall;
+    let hist = Arc::new(InMemoryHistory::new());
+    let io = Arc::new(InMemorySysIo::new());
+    io.seed(&["w", "a", "a.txt"], "A1\n");
+    io.seed(&["w", "a", "b.txt"], "B1\n");
+    let a = s(&["w", "a", "a.txt"]);
+    let b = s(&["w", "a", "b.txt"]);
+    let steps = vec![
+        NativeStep::Calls(vec![
+            ToolCall { id: "c1".to_string(), name: "read".to_string(), args_json: format!("{{\"path\":\"{}\"}}", a) },
+            ToolCall { id: "c2".to_string(), name: "read".to_string(), args_json: format!("{{\"path\":\"{}\"}}", b) },
+        ]),
+        NativeStep::Text("{\"type\":\"say\",\"text\":\"读完了\"}".to_string()),
+    ];
+    let mut core = native_core(NativeGateway { scripts: Mutex::new(vec![steps]) }, Arc::clone(&hist), Arc::clone(&io));
+    core.probe_model_tools("m").expect("探测");
+    let sid = core.create_work(work("w", WorkMode::Single, &["a"])).unwrap().sid;
+    with_live(|l| core.single_say(&sid, "读两个文件", l)).unwrap();
+
+    // 行序：0 用户 / 1 工具 / 2 工具 / 3 答复。回档到第 2 行 = 落在回复内部 → 整条回复一起丢。
+    let replayed = core.rewind(&sid, 2).unwrap();
+    assert_eq!(
+        replay_lines(&replayed),
+        vec!["[用户] 读两个文件".to_string()],
+        "截在回复中间要把该回复的工具行与答复行一起丢掉：{:?}",
+        replay_lines(&replayed)
+    );
+    let history = core.single_history(&sid).unwrap();
+    assert_eq!(history.len(), 2, "历史 = system + 用户：{:?}", history);
+    assert!(
+        history.iter().all(|m| m.tool_call_id.is_empty()),
+        "历史里不许出现没有对应助手消息的孤儿工具结果：{:?}",
+        history
+    );
 }
 

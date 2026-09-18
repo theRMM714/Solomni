@@ -92,6 +92,40 @@ pub struct MemberTools {
     pub unavailable: BTreeMap<String, Vec<String>>,
     /// 本成员工具进程的围栏（可达范围 + 断网）：策略在 core 派生，机制在 ToolRunner 适配层安装。
     pub fence: crate::core::fence::FenceSpec,
+    /// **回复 id 计数器**：一次模型回复一个号，跨重启单调（重建时按转录里的最大值续号）。
+    /// 转录行靠它分组（哪几行属于同一次回复），会话靠它按回复原子回档。
+    pub reply_seq: u64,
+}
+
+impl MemberTools {
+    /// 取下一个回复 id（一次模型回复调用一次）。
+    fn next_reply(&mut self) -> u64 {
+        self.reply_seq += 1;
+        self.reply_seq
+    }
+}
+
+/// 转录流水里用过的最大回复 id：重建时据此续号。
+/// 为什么必须续号：回复 id 是分组依据，重复就会把新回复与旧回复并成一组。
+pub fn max_reply(events: &[serde_json::Value]) -> u64 {
+    let mut max = 0u64;
+    for ev in events {
+        if ev.get("type").and_then(|t| t.as_str()) != Some("transcript") {
+            continue;
+        }
+        let Some(lines) = ev.get("lines").and_then(|l| l.as_array()) else {
+            continue;
+        };
+        for l in lines {
+            if let Some(r) = l.get("reply").and_then(|x| x.as_u64()) {
+                max = max.max(r);
+            }
+            if let Some(r) = l.get("tool").and_then(|t| t.get("reply")).and_then(|x| x.as_u64()) {
+                max = max.max(r);
+            }
+        }
+    }
+    max
 }
 
 /// 线上名 → (模块 id, 工具名)：原生协议里没有 module 字段，跨模块同名工具靠它消歧。
@@ -629,6 +663,8 @@ fn tool_cap_msg(texts: &crate::core::prompt::ToolTexts) -> Msg {
 /// 一轮模型调用的产出（一轮 = 一条文本转录行；有工具时紧跟一条工具行）。
 /// 原始输出不进这里：工具轮由 ToolCallView.raw 承载、文本轮进上下文的就是解析后的文本。
 pub struct Round {
+    /// 这一轮属于哪次模型回复（一次回复可能产出多条工具行）。
+    pub reply: u64,
     /// 解析后的可见文本（信封缺失时即原文）；工具轮为空串（它说的就是那封信封）。
     pub text: String,
     /// 该轮思维链（没给就是空串）。
@@ -688,7 +724,18 @@ pub(crate) fn converse_with(
     // 观察账本随会话保存（回档时清空），这里不动它——它的语义是"这一段转录里的读取证据"。
     let mut rounds: Vec<Round> = Vec::new();
     let mut forced_final = false;
+    // 没有工具环境时的回复号来源（见下面 reply_id）。
+    let mut local_reply = 0u64;
     loop {
+        // 这一回复的稳定 id：一次模型回复一个号，本次问询里的多条工具行共用它。
+        // 没有工具环境时给本代内的局部号即可（那条路径不落转录行、也不分组）。
+        let reply_id = match tools.as_deref_mut() {
+            Some(ctx) => ctx.next_reply(),
+            None => {
+                local_reply += 1;
+                local_reply
+            }
+        };
         // 形态与工具声明面：由本成员的通道形态决定（envelope = 不声明，走手写信封；native = 声明本成员的工具）
         let (mode, decls) = match tools.as_deref_mut() {
             Some(ctx) if ctx.mode == crate::core::providers::ToolMode::Native => {
@@ -866,6 +913,7 @@ pub(crate) fn converse_with(
                                 // 助手消息正文 = 这一回复的原文（正文与调用进的是同一条消息）
                                 raw: reply_text.clone(),
                                 call_id: c.id.clone(),
+                                reply: reply_id,
                             }
                         })
                         .collect();
@@ -876,6 +924,7 @@ pub(crate) fn converse_with(
                     for (i, view) in views.into_iter().enumerate() {
                         on_tool(&view);
                         rounds.push(Round {
+                            reply: reply_id,
                             // 正文只挂在本回复的第一条工具行上（只显示一条，不重复）
                             text: if i == 0 { reply_text.clone() } else { String::new() },
                             reasoning: std::mem::take(&mut reasoning),
@@ -906,6 +955,7 @@ pub(crate) fn converse_with(
                             output: texts.native_no_envelope.clone(),
                             raw: raw.clone(),
                             call_id: String::new(),
+                            reply: reply_id,
                         };
                         on_tool(&view);
                         // 这条没有合法原生 id（模型是手写的信封）：走文本形状，不能发 role=tool。
@@ -914,6 +964,7 @@ pub(crate) fn converse_with(
                             msgs.push(m.clone());
                         }
                         rounds.push(Round {
+                            reply: reply_id,
                             text: reply.text.clone(),
                             reasoning,
                             text_msgs: vec![msgs_of[0].clone()],
@@ -953,6 +1004,7 @@ pub(crate) fn converse_with(
                     output: why,
                     raw: raw.clone(),
                     call_id: String::new(),
+                    reply: reply_id,
                 };
                 on_tool(&view);
                 let texts = &ctx.sandbox.texts;
@@ -961,6 +1013,7 @@ pub(crate) fn converse_with(
                     msgs.push(m.clone());
                 }
                 rounds.push(Round {
+                    reply: reply_id,
                     text: reply.text.clone(),
                     reasoning,
                     text_msgs: vec![msgs_of[0].clone()],
@@ -1019,6 +1072,7 @@ pub(crate) fn converse_with(
                     output: outcome.output.clone(),
                     raw: raw.clone(),
                     call_id: String::new(),
+                    reply: reply_id,
                 };
                 on_tool(&view);
                 let texts = &ctx.sandbox.texts;
@@ -1030,6 +1084,7 @@ pub(crate) fn converse_with(
                 // 这一轮的历史只有 assistant(raw)（raw 含正文+信封）：若它先出文本行，
                 // 那条行自己不推历史，统一由紧随的工具行推进（见 session 与 rebuild 的分组规则）。
                 rounds.push(Round {
+                    reply: reply_id,
                     text: reply.text.clone(),
                     reasoning,
                     text_msgs: vec![msgs_of[0].clone()],
@@ -1048,7 +1103,7 @@ pub(crate) fn converse_with(
                 let text = reply.text;
                 let has_line = !text.trim().is_empty() || !reasoning.trim().is_empty();
                 let text_msgs = if has_line { vec![Msg::assistant(text.trim().to_string())] } else { Vec::new() };
-                rounds.push(Round { text, reasoning, text_msgs, tool: None, finish });
+                rounds.push(Round { reply: reply_id, text, reasoning, text_msgs, tool: None, finish });
                 return rounds;
             }
         }

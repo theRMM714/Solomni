@@ -894,6 +894,8 @@ impl Core {
             unavailable,
             // 围栏：可达范围 + 断网 + 环境白名单的落点，全部由该 agent 的沙箱派生（机制在 adapters）。
             fence: crate::core::fence::FenceSpec::from_sandbox(sb, net),
+            // 从零开始；按落盘转录重建时由调用方按转录里的最大值续号（见 rebuild_session）。
+            reply_seq: 0,
         }
     }
 
@@ -1324,43 +1326,68 @@ impl Core {
                 }
                 let mut history = vec![Msg::system(system)];
                 let mut marks: Vec<usize> = Vec::new();
-                for (i, l) in rows.iter().enumerate() {
+                let mut line_reply: Vec<u64> = Vec::new();
+                let texts = &self.prompts.core.tool_texts;
+                let reply_of = |v: &serde_json::Value| v.get("reply").and_then(|x| x.as_u64()).unwrap_or(0);
+                let mut i = 0usize;
+                while i < rows.len() {
+                    let l = rows[i];
                     let line = l.get("line").and_then(|x| x.as_str()).unwrap_or("");
                     if let Some(t) = line.strip_prefix("[用户] ") {
                         history.push(Msg::user(t.to_string()));
-                    } else if let Some(tool) = l.get("tool") {
-                        // tool 行：重建该轮模型原始输出 + 回注的工具结果（两个都要，否则上下文缺一块）。
-                        let field = |k: &str| tool.get(k).and_then(|x| x.as_str()).unwrap_or("");
-                        history.push(Msg::assistant(field("raw").to_string()));
-                        let module = field("module");
-                        let name = field("name");
-                        let label = if module.is_empty() { name.to_string() } else { format!("{}.{}", module, name) };
-                        let texts = &self.prompts.core.tool_texts;
-                        history.push(Msg::user(texts.render(
-                            &texts.tool_result_wrapper,
-                            &[("label", label), ("output", field("output").to_string())],
-                        )));
+                        // 用户行不属于任何回复：给它自己的行号，回档时才不会与相邻行误并成一组。
+                        line_reply.push(l.get("id").and_then(|x| x.as_u64()).unwrap_or(0));
+                        marks.push(history.len());
+                        i += 1;
+                    } else if l.get("tool").is_some() {
+                        // 【回复分组 · 改动前务必读完】**同一次回复的 tool 行连续同号**（reply 由引擎给、
+                        // 落行时写入）；整组一起翻译成消息，靠的正是这个号——不靠"相邻行猜分组"。
+                        let reply = reply_of(l.get("tool").expect("已判存在"));
+                        let mut group: Vec<&serde_json::Value> = Vec::new();
+                        while i < rows.len() && reply_of(rows[i].get("tool").unwrap_or(&serde_json::Value::Null)) == reply {
+                            group.push(rows[i]);
+                            i += 1;
+                        }
+                        // 这一回复的助手消息正文（空正文的回复不带 raw；组内取一份即可）。
+                        let raw = group
+                            .iter()
+                            .find_map(|t| t.get("tool").and_then(|x| x.get("raw")).and_then(|x| x.as_str()).filter(|s| !s.is_empty()))
+                            .unwrap_or_default();
+                        let views: Vec<crate::core::events::ToolCallView> = group
+                            .iter()
+                            .filter_map(|t| t.get("tool").cloned())
+                            .filter_map(|t| serde_json::from_value(t).ok())
+                            .collect();
+                        for m in crate::core::engine::reply_msgs(mode, raw, &views, texts) {
+                            history.push(m);
+                        }
+                        for _ in 0..group.len() {
+                            line_reply.push(reply);
+                            marks.push(history.len());
+                        }
                     } else {
-                        // 【分组规则 · 改动前务必读完】工具轮可能产出「文本行 + tool 行」两行，
-                        // 但这一轮在历史里只有一条 assistant(raw)（raw 含正文+信封）——由 tool 行统一推进。
-                        // 所以：**若某文本行紧跟一条 tool 行（同一轮），这里不推 assistant**；
-                        // 只有「后面不是 tool 行」的文本行才推 assistant(该行文本)。
-                        // 否则重建出来的上下文会凭空多一条 assistant，与实时历史不一致。
+                        // 文本行：它紧跟 tool 行时属于同一次回复（历史由那组 tool 行统一推进，这里不推）；
+                        // 否则这一行自己就是一条回复，推 assistant(该行文本)。
                         let next_is_tool = rows.get(i + 1).map(|n| n.get("tool").is_some()).unwrap_or(false);
                         if !next_is_tool {
                             let text = line.split_once("] ").map(|(_, t)| t).unwrap_or(line).to_string();
                             history.push(Msg::assistant(text));
                         }
+                        line_reply.push(reply_of(l));
+                        marks.push(history.len());
+                        i += 1;
                     }
-                    marks.push(history.len());
                 }
                 let unavailable = self.unavailable_modules(&meta.exec, &modules);
-                let tools = self.tools_env(&modules, &sb, unavailable, meta.exec.net, mode);
+                let mut tools = self.tools_env(&modules, &sb, unavailable, meta.exec.net, mode);
+                // 回复 id 跨重启单调：从转录里的最大值续号，否则新回复会与旧回复并成一组。
+                tools.reply_seq = crate::core::engine::max_reply(events);
                 let roots = crate::core::refs::RefRoots { work: sb.shared.clone(), private: Some(sb.private.clone()) };
                 Ok(Session::Single(session::AgentSession::restore(
                     &a.name,
                     history,
                     marks,
+                    line_reply,
                     chat,
                     note,
                     Some(tools),
@@ -1443,6 +1470,7 @@ fn truncate_events(events: &[serde_json::Value]) -> Vec<serde_json::Value> {
 /// 只保留「转录行 id < keep」的行（回档 = 删除该行及其后；keep = 0 → 转录清空）。
 /// 一旦某条事件里的行被截掉，其后的事件一并丢弃（事件流是时序的）。
 fn cut_before_line(events: &[serde_json::Value], keep: u64) -> Vec<serde_json::Value> {
+    let keep = align_keep(events, keep);
     let mut out = Vec::new();
     for ev in events {
         if ev.get("type").and_then(|t| t.as_str()) == Some("transcript") {
@@ -1467,6 +1495,42 @@ fn cut_before_line(events: &[serde_json::Value], keep: u64) -> Vec<serde_json::V
         }
     }
     out
+}
+
+/// 把"保留 id < keep"对齐到**回复边界**（见 session::keep_whole_replies）：
+/// keep 落在某次回复内部时退到该回复第一行之前，返回新的 keep（没有这样的行 = u64::MAX，即不截）。
+fn align_keep(events: &[serde_json::Value], keep: u64) -> u64 {
+    let rows: Vec<&serde_json::Value> = events
+        .iter()
+        .filter(|e| e.get("type").and_then(|t| t.as_str()) == Some("transcript"))
+        .filter_map(|e| e.get("lines").and_then(|l| l.as_array()))
+        .flatten()
+        .collect();
+    let idx = rows
+        .iter()
+        .position(|l| {
+            l.get("id")
+                .and_then(|i| i.as_u64())
+                .map(|i| i >= keep)
+                .unwrap_or(false)
+        })
+        .unwrap_or(rows.len());
+    let replies: Vec<u64> = rows.iter().map(|l| line_reply_of(l)).collect();
+    let aligned = crate::core::session::keep_whole_replies(&replies, idx);
+    rows.get(aligned)
+        .and_then(|l| l.get("id").and_then(|i| i.as_u64()))
+        .unwrap_or(u64::MAX)
+}
+
+/// 一行属于哪次回复：工具行的号在调用视图里，其余行在 LineView 上。
+/// 号 = 0 视为"没写"（回复号从 1 起），此时用**该行自己的 id**——绝不把相邻行误并成一组。
+fn line_reply_of(l: &serde_json::Value) -> u64 {
+    let own = l.get("id").and_then(|i| i.as_u64()).unwrap_or(0);
+    let stored = match l.get("tool") {
+        Some(t) => t.get("reply").and_then(|x| x.as_u64()),
+        None => l.get("reply").and_then(|x| x.as_u64()),
+    };
+    stored.filter(|r| *r != 0).unwrap_or(own)
 }
 
 /// 找最后一条以 prefix 开头的转录行的 id。
