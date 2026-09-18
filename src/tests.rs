@@ -33,7 +33,7 @@ impl InMemorySettings {
         let mut s = Settings::default();
         s.providers.insert(
             "p".to_string(),
-            Provider { kind: "llm".to_string(), base_url: "http://test".to_string(), api_key: "k".to_string() },
+            Provider { base_url: "http://test".to_string(), api_key: "k".to_string() },
         );
         s.models.insert(
             "m".to_string(),
@@ -549,6 +549,21 @@ fn envelope_wrapped_json_still_parses() {
     assert!(!r.degraded);
 }
 
+#[test]
+fn envelope_text_may_be_omitted() {
+    let r = crate::core::envelope::parse("{\"type\":\"agree\"}");
+    assert!(matches!(r.verb, crate::core::envelope::Verb::Agree), "缺 text 不影响表态");
+    assert_eq!(r.text, "", "缺 text = 空串");
+    assert!(!r.degraded);
+    let say = crate::core::envelope::parse("{\"type\":\"say\"}");
+    assert!(matches!(say.verb, crate::core::envelope::Verb::Say) && !say.degraded, "缺 text 的发言仍是干净信封");
+    assert!(say.text.is_empty());
+    // 缺 name 的工具信封仍是 malformed 信号，不被缺省 text 收编成发言。
+    let bad = crate::core::envelope::parse("{\"type\":\"tool\",\"args\":{}}");
+    assert!(matches!(bad.verb, crate::core::envelope::Verb::Tool));
+    assert!(bad.tool.map(|t| t.malformed).unwrap_or(false));
+}
+
 // ---------- 提示词渲染层 ----------
 
 #[test]
@@ -576,7 +591,7 @@ fn prompt_render_keeps_single_braces() {
 #[test]
 fn settings_resolves_model_to_channel() {
     let mut s = Settings::default();
-    s.providers.insert("p".into(), Provider { kind: "llm".into(), base_url: "http://x".into(), api_key: "k".into() });
+    s.providers.insert("p".into(), Provider { base_url: "http://x".into(), api_key: "k".into() });
     s.models.insert("m".into(), ModelEntry { name: "展示名".into(), api_model: "real-model".into(), provider: "p".into(), note: String::new() });
     s.core = Some("m".into());
     let ch = s.resolve("m").unwrap();
@@ -2368,6 +2383,19 @@ fn module_runtimes_are_validated() {
     assert!(crate::core::module::check_runtimes(&m.manifest).is_err(), "大写不合法");
     m.manifest.runtimes = vec!["python".to_string(), "python".to_string()];
     assert!(crate::core::module::check_runtimes(&m.manifest).unwrap_err().contains("重复"), "重复声明要拒收");
+}
+
+#[test]
+fn module_tools_may_not_take_builtin_names() {
+    let mut m = module_of("a");
+    m.manifest.tools.insert("read_txt".to_string(), "python tools/read_txt.py".to_string());
+    assert!(crate::core::module::check_tools(&m.manifest).is_ok(), "普通工具名可用");
+    for name in ["read", "write", "search"] {
+        m.manifest.tools.insert(name.to_string(), "python tools/x.py".to_string());
+        let why = crate::core::module::check_tools(&m.manifest).unwrap_err();
+        assert!(why.contains("保留名"), "内置工具名要拒收：{}", why);
+        m.manifest.tools.remove(name);
+    }
 }
 
 #[test]

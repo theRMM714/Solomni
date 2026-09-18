@@ -442,7 +442,7 @@ impl Core {
         };
         self.settings.providers.insert(
             id.to_string(),
-            providers::Provider { kind: "llm".to_string(), base_url: base_url.to_string(), api_key: key },
+            providers::Provider { base_url: base_url.to_string(), api_key: key },
         );
         self.save_settings("core::provider_upsert")
     }

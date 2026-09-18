@@ -9,7 +9,6 @@ use std::collections::BTreeMap;
 /// 一条供应商通道（端点 + 密钥）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Provider {
-    pub kind: String,
     pub base_url: String,
     pub api_key: String,
 }

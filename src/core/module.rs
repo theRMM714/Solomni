@@ -17,7 +17,7 @@ pub struct ModuleManifest {
     #[serde(default)]
     pub runtimes: Vec<String>,
     /// 外部工具表：工具名 → 启动命令（模块作者声明；核心按此表放行，机制在 ToolRunner 适配层）。
-    /// 内置工具名（read/write）为保留名，模块不得占用。
+    /// 内置工具名（read / write / search）为保留名，模块不得占用（见 check_tools）。
     #[serde(default)]
     pub tools: BTreeMap<String, String>,
 }
@@ -36,6 +36,19 @@ pub fn check_runtimes(m: &ModuleManifest) -> Result<(), String> {
             return Err(format!("runtimes 里重复声明了：{}", c));
         }
         seen.push(c);
+    }
+    Ok(())
+}
+
+/// 外部工具表的校验（纯逻辑；扫描模块时由适配层调用）：内置工具名是保留名，占用 = 拒收并说明原因。
+pub fn check_tools(m: &ModuleManifest) -> Result<(), String> {
+    for name in m.tools.keys() {
+        if crate::core::systool::is_builtin(name) {
+            return Err(format!(
+                "tools 里的 {} 是核心内置工具名（保留名），模块不得占用",
+                name
+            ));
+        }
     }
     Ok(())
 }

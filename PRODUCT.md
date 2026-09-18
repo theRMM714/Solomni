@@ -2,7 +2,7 @@
 
 > 本文档回答：Solomni 是什么、有什么功能、怎么运转。
 > 只写**用户看到与经历的**，不展开实现；实现与开发规则见 [ARCHITECTURE.md](ARCHITECTURE.md)，
-> 模块契约见 [MODULE_SPEC.md](MODULE_SPEC.md)，理念见 [PHILOSOPHY.md](PHILOSOPHY.md)。
+> 模块契约见 [MODULE_SPEC.md](MODULE_SPEC.md)，登记处字段见 [REGISTRY_SPEC.md](REGISTRY_SPEC.md)，理念见 [PHILOSOPHY.md](PHILOSOPHY.md)。
 
 ## 产品是什么
 
@@ -39,6 +39,7 @@
 - 密钥只在两处存在：providers.yaml、核心发起的出站调用。永不进入提示词、转录、日志、模块工作区。
 - 「用哪个模型」是用户的权力；未指定时回落核心默认；都缺 = 演示通道并如实告知，绝不静默。
 - 登记处当前只管一类通道：**LLM 供应商**。工具调用的外部服务托管尚未接入（见"后置工作"）。
+- 四份 yaml 的字段与读写规则见 [REGISTRY_SPEC.md](REGISTRY_SPEC.md)；密钥永不回显给界面。
 
 ## 分层与决定权
 
@@ -95,16 +96,18 @@ session/<工作名>/
 ```
 
 - agent 的文件读写用核心自带的**内置工具**（`read` / `write` / `search`）：核心在提示词里把**占位符替换成运行时的真实根目录**，agent 拿到的就是真实绝对路径；越出这些根（相对路径、`..` 跳出）一律拒绝；模块目录只有它所属的 agent 可达（细节见 [MODULE_SPEC.md](MODULE_SPEC.md)）
-- **执行档位**（`exec` 段）：**本机档**（默认）= 脚本直接在宿主上跑；**虚拟机档** = 一整套 guest，脚本在 guest 里跑。
-  两档的隔离强项不同，产品如实标注实际等级，不夸大
+- **执行档位**（`exec` 段）：**本机档**（默认）= 脚本直接在宿主上跑；**虚拟机档** = 一整套 guest。
+  虚拟机档的选型、诊断与装配计划已就位，**guest 本体尚未接入**——未接入前实际仍按本机档执行，产品如实标注，不夸大
+  （见"后置工作"与 [RUNTIME_SPEC.md](RUNTIME_SPEC.md)）
 - **运行能力**：模块用自己的 `runtimes` 声明工具需要哪些运行包（`python` / `node` / `bash` / `cc`……），包放在依赖文件夹 `runtimes/` 里，
   放入即出现。缺包 = 该模块的工具不执行并如实说明缺什么，**不是**会话崩溃（契约见 [RUNTIME_SPEC.md](RUNTIME_SPEC.md)）
 - 隔离级别如实：三层各说各的**实际**强度——① 内置 read/write/search 是**工具层**越界拒绝（路径校验）；
   ② 外部工具进程统一从**守门进程**里跑（本程序自己的 `--fence-run` 模式），环境白名单（密钥不进子进程、HOME/TEMP 落在私有沙箱）、
   超时连根杀掉整棵进程树、Windows 上用 Job Object 围住进程树；③ 文件系统与网络围栏按平台接入：Linux（Landlock）、macOS（seatbelt）、
   Windows（AppContainer：按 agent 派生容器 SID、可达范围凭目录 ACL 授权、不给 capability 即断网）。
-  **启动时会对本机做一次自检并如实报告能力等级**——机制装不上就说装不上（例如受限环境里不允许改目录 ACL 或建容器 profile）；
-  其中 Linux 与 macOS 的围栏代码尚未在各自平台上跑过探针，属于"已实现、待目标平台验收"
+  **启动时会对本机做一次自检并如实报告能力等级**——机制装不上就说装不上（例如受限环境里不允许改目录 ACL 或建容器 profile）。
+  三平台围栏都已在各自平台的真机上跑过探针（Windows AppContainer + 目录 ACL、Linux Landlock、macOS seatbelt），
+  探针在 `tests/windows/`、`tests/linux/`、`tests/macos/`，缺口账现状见 [TESTING.md](TESTING.md)
 - **围栏要用就征得同意**：Windows 上的路径级围栏必须在本机目录上写权限项，所以本程序**默认不写**——只有显式授权（`.home/settings.yaml` 的 `fence_write: true`，或环境变量 `SOLOMNI_FENCE_WRITE=1`）才做；授权后每次写入都在 stderr 逐条列出并记进授权台账；`solomni --fence-clean` 按台账精确撤销并删掉建过的容器 profile（删除会话时也会撤销该会话的授权）
 - 上传同名文件绝不静默覆盖（弹出覆盖 / 改名 / 取消）
 
@@ -249,15 +252,13 @@ agent 可以退出（此后核心不再向它转达）；可以请教用户（�
 
 ## 后置工作
 
-- **测试缺口账**：各平台「还没测的」记在 `tests/<平台>/gaps.yaml`，入口与判定见 [TESTING.md](TESTING.md)
-- **三个平台围栏的真机验收**：Windows（AppContainer + 目录 ACL）、Linux（Landlock）、macOS（seatbelt）的代码都已就位并自带探针，
-  但都缺少"在能承载它们的普通环境里跑一遍"这一步：Windows 在普通 shell 里跑 `node run-tests.js`（或 `.\test.bat`），
-  Linux / macOS 在各自平台上跑同一条入口（探针在 `tests/windows/`、`tests/linux/`、`tests/macos/`，见 [TESTING.md](TESTING.md)）
-- **围栏授权的清理**：删除会话时核心经端口请求撤销该会话各 agent 的授权（接线有测试钉住）；
-  **真实撤权的效果**（Windows 上按 SID 移除 ACE）还没在能改 ACL 的环境里验过，记在 `tests/windows/gaps.yaml`。
-  授权按 agent 隔离（每个 agent 一个容器 SID），跨 agent 互不可见；只读基线（解释器安装目录）与祖先目录的授权
-  由稳定身份一次授予、按「根上已有 ACE」跳过，不再随 agent 与会话数量增长
-- **虚拟机档**：会话级 guest + 运行包按声明装配（`prefix` 类只读共享、`system` 类叠层并预检冲突）+ 自带包（python / node / bash / cc）；
+**测试相关的未完成项不在本文维护**：唯一真相是 `tests/gaps.yaml`（全局）与 `tests/<平台>/gaps.yaml`（平台），
+入口与判定见 [TESTING.md](TESTING.md)。
+
+产品侧仍待接入的能力：
+
+- **虚拟机档 guest 本体**：会话级 guest + 运行包按声明装配（`prefix` 类只读共享、`system` 类叠层并预检冲突）。
+  选型、诊断与装配计划已就位（见 [RUNTIME_SPEC.md](RUNTIME_SPEC.md)）；guest 未接入前，虚拟机档实际按本机档执行。
   前置条件因机器而异（Windows 需启用虚拟机平台 / WSL，Linux 需 `/dev/kvm`，macOS 需 11+），不具备时按本机档如实降级
 - **工具通道托管**：登记处同时管理工具调用的外部服务凭据（模块只持 id）
 - 混合拓扑：部分能力合成一个 agent、其余分权协商（当前是「单 agent」与「N agent」两个端点）

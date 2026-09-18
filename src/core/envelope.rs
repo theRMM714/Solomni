@@ -43,6 +43,8 @@ pub struct Reply {
 struct Envelope {
     #[serde(rename = "type")]
     verb: String,
+    /// 可省略：缺省为空串（leave / agree 常只表态不留言）。
+    #[serde(default)]
     text: String,
 }
 
@@ -87,13 +89,17 @@ pub fn parse(raw: &str) -> Reply {
             }
         }
         if let Ok(env) = serde_json::from_str::<Envelope>(&obj) {
-            let verb = match env.verb.as_str() {
-                "ask" => Verb::Ask,
-                "leave" => Verb::Leave,
-                "agree" => Verb::Agree,
-                _ => Verb::Say,
-            };
-            return Reply { verb, text: env.text, degraded: false, tool: None };
+            // type = tool 却走到这里 = ToolEnvelope 已判不合法（缺 name 等）：这是 malformed 信号，
+            // 不能当普通信封收（否则缺 name 的工具信封会被静默当成发言）。
+            if env.verb != "tool" {
+                let verb = match env.verb.as_str() {
+                    "ask" => Verb::Ask,
+                    "leave" => Verb::Leave,
+                    "agree" => Verb::Agree,
+                    _ => Verb::Say,
+                };
+                return Reply { verb, text: env.text, degraded: false, tool: None };
+            }
         }
     }
     // 像工具信封但 JSON 非法：给独立信号（degraded 是"信封缺失按发言收录"，语义不同）。

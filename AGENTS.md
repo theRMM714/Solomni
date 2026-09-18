@@ -13,7 +13,7 @@
 ## 核心约束：GREEN FIELD
 
 - 项目始终为 GREEN FIELD，没有任何历史包袱。
-- 本项目为跨平台项目，进行任何实现必须优先考虑跨平台兼容性,默认覆盖 Windows/macOS/Linux
+- 本项目为跨平台项目，进行任何实现必须优先考虑跨平台兼容性，默认覆盖 Windows/macOS/Linux
 - 项目不存在版本更替。进行任何修改也始终为唯一版本，不要擅自确定版本号等。
 - 本仓库是唯一存在的开发仓库，永远不用考虑其它开发者的兼容性。
 - 不要为旧版本兼容性、已经不存在的旧实现生产废代码或无意义文档描述。
@@ -43,7 +43,7 @@
 - 整体必须遵循 DIP（依赖倒置）原则。
 - 保持高内聚低耦合，按业务功能进行垂直切分。
 - 业务之间用 api 接口调用，不直接互相引用。
-- 必须任意环节、任意实现都必须通过测试，祥见 [TESTING.md](TESTING.md)。
+- 必须任意环节、任意实现都必须通过测试，详见 [TESTING.md](TESTING.md)。
 - 项目为跨平台项目，任何实现先要想能否支持跨平台。
 - 注释仅描述当前代码功能和联动模块。
 - 不生产无意义文档描述。
@@ -155,9 +155,11 @@
 
 ## 文档指路
 
-- 项目概括：[README.md](README.md)
+- 项目概括与快速开始：[README.md](README.md)
 - 产品与运行流程：[PRODUCT.md](PRODUCT.md)
 - 项目理念：[PHILOSOPHY.md](PHILOSOPHY.md)
-- 架构与开发规则：[ARCHITECTURE.md](ARCHITECTURE.md)（改代码前必读：分层、端口、日志、提示词册）
-- 模块契约：[MODULE_SPEC.md](MODULE_SPEC.md)（开发模块必读）
-- 测试架构与缺口账：[TESTING.md](TESTING.md)
+- 架构与开发规则：[ARCHITECTURE.md](ARCHITECTURE.md)（改代码前必读：分层、端口、模块地图、日志、提示词册、落盘契约）
+- 模块契约：[MODULE_SPEC.md](MODULE_SPEC.md)（开发模块必读：打包格式、发言信封、回报与验收、工具与路径模型、测试交付）
+- 运行包契约：[RUNTIME_SPEC.md](RUNTIME_SPEC.md)（做运行包必读：package.yaml、两种 kind、校验与拒收）
+- 登记处契约：[REGISTRY_SPEC.md](REGISTRY_SPEC.md)（providers / models / agents / settings 四份 yaml 的字段与安全边界）
+- 测试架构与缺口账：[TESTING.md](TESTING.md)（测试唯一权威：T0-T5、替身语义、端口矩阵、质量门禁、缺口账）
