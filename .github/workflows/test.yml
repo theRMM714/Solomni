@@ -69,6 +69,13 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: 下载三个测试 job 的报告产物
+        uses: actions/download-artifact@v4
+        with:
+          pattern: test-report-*
+          path: ci-artifacts
+          merge-multiple: false
+
       - name: 先把 ci-report 重建为空分支
         env:
           REPORT_BRANCH: ci-report
@@ -77,8 +84,8 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          # 先重建并强推空报告分支；此时尚未下载 artifacts，因此不会误删报告现场。
-          # 使用孤儿提交切断默认分支内容；后续只由报告文件重新填充该分支。
+          # artifacts 已完整下载后才清理并强推 ci-report；下载失败不会留下空报告分支。
+          # git rm 只删除已跟踪源码，保留未跟踪的 ci-artifacts；不要使用 git clean。
           git checkout --orphan ci-report-clean
           git rm -rf . >/dev/null 2>&1 || true
           git commit --allow-empty -m "重建 ci-report 报告树（run ${GITHUB_RUN_NUMBER}）"
@@ -86,13 +93,6 @@ jobs:
 
       - name: 恢复源码工作树
         run: git checkout --detach "${GITHUB_SHA}"
-
-      - name: 下载三个测试 job 的报告产物
-        uses: actions/download-artifact@v4
-        with:
-          pattern: test-report-*
-          path: ci-artifacts
-          merge-multiple: false
 
       - name: 逐平台写入干净的报告分支
         env:
