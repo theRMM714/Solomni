@@ -34,6 +34,10 @@ pub struct ToolDecl {
     /// 参数契约（可选）：参数名 → 声明。
     #[serde(default)]
     pub params: Option<BTreeMap<String, crate::core::schema::Param>>,
+    /// 这个工具**可并发执行**（缺省 false = 独占串行）：只读、无副作用的工具才该声明 true，
+    /// 同一回复里的多个可并发调用会真的并发跑（结果仍按调用顺序回填）。
+    #[serde(default)]
+    pub parallel: bool,
 }
 
 impl ToolDecl {
@@ -42,6 +46,7 @@ impl ToolDecl {
         self.params.as_ref().map(|p| crate::core::schema::ToolSchema {
             desc: self.desc.clone(),
             params: Some(p.clone()),
+            parallel: self.parallel,
         })
     }
 }

@@ -18,9 +18,11 @@ use crate::core::providers::{Channel, ModelEntry, Provider, Settings};
 use crate::core::{
     AgentInstance, CollabStep, ConfigAgent, Core, Live, Pending, SessionEdit, SessionEvent, WorkMode, WorkSpec,
 };
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 // ---------- 内存适配器（测试组合根） ----------
 
@@ -163,11 +165,27 @@ pub(crate) struct InMemorySysIo {
     /// 读取标注：模拟"超过单次上限"与"含非法 UTF-8"的文件（工具必须如实标注，而不是照改）。
     lossy: bool,
     cut: bool,
+    /// 并发观测：**同时在读**的调用数与其峰值——并发用例据此断言"真的并发"（串行绝不会重叠）。
+    active: AtomicUsize,
+    peak: AtomicUsize,
+    /// 每次读取的固定耗时（毫秒）：给并发留出可观测的窗口。
+    delay_ms: u64,
+    /// 指定文件的额外耗时：用来构造"后发的先完成"，验结果仍按原始顺序回填。
+    extra: Mutex<BTreeMap<String, u64>>,
 }
 
 impl InMemorySysIo {
     pub(crate) fn new() -> InMemorySysIo {
-        InMemorySysIo { files: Mutex::new(BTreeMap::new()), fail: None, lossy: false, cut: false }
+        InMemorySysIo {
+            files: Mutex::new(BTreeMap::new()),
+            fail: None,
+            lossy: false,
+            cut: false,
+            active: AtomicUsize::new(0),
+            peak: AtomicUsize::new(0),
+            delay_ms: 0,
+            extra: Mutex::new(BTreeMap::new()),
+        }
     }
 
     /// 注入读取标注（lossy = 含非法 UTF-8；cut = 只读到开头）。
@@ -181,6 +199,34 @@ impl InMemorySysIo {
     pub(crate) fn fail_with(mut self, msg: &str) -> InMemorySysIo {
         self.fail = Some(msg.to_string());
         self
+    }
+
+    /// 让每次读取慢一点：并发（峰值 > 1）与串行（峰值恒为 1）因此可观测。
+    pub(crate) fn slow(mut self, ms: u64) -> InMemorySysIo {
+        self.delay_ms = ms;
+        self
+    }
+
+    /// 指定文件每读一次额外慢多少毫秒。
+    pub(crate) fn slow_file(&self, parts: &[&str], ms: u64) {
+        self.extra.lock().expect("锁").insert(p(parts), ms);
+    }
+
+    /// 同时在读的峰值（并发用例的唯一证据）。
+    pub(crate) fn peak_concurrent_reads(&self) -> usize {
+        self.peak.load(Ordering::SeqCst)
+    }
+
+    /// 记一次"进入读取"：整个读取期间计数 +1，并如实记下峰值与耗时。
+    fn enter(&self, key: &str) {
+        let now = self.active.fetch_add(1, Ordering::SeqCst) + 1;
+        self.peak.fetch_max(now, Ordering::SeqCst);
+        let extra = self.extra.lock().expect("锁").get(key).copied().unwrap_or(0);
+        let ms = self.delay_ms + extra;
+        if ms > 0 {
+            std::thread::sleep(Duration::from_millis(ms));
+        }
+        self.active.fetch_sub(1, Ordering::SeqCst);
     }
     pub(crate) fn seed(&self, parts: &[&str], text: &str) {
         self.files.lock().expect("锁").insert(p(parts), text.to_string());
@@ -196,6 +242,7 @@ impl SysIo for InMemorySysIo {
             return Err(m.clone());
         }
         let key = path.to_string_lossy().into_owned();
+        self.enter(&key);
         let text = self.files.lock().expect("锁").get(&key).cloned().ok_or_else(|| format!("读取失败：{} 不存在", key))?;
         Ok(FileRead { bytes: text.len(), text, lossy: self.lossy, cut: self.cut })
     }
@@ -254,7 +301,12 @@ pub(crate) fn run_builtin(
 
 /// 测试用模块工具声明：只给启动命令（参数契约在需要的用例里另行声明）。
 pub(crate) fn decl(command: &str) -> crate::core::module::ToolDecl {
-    crate::core::module::ToolDecl { command: command.to_string(), desc: String::new(), params: None }
+    crate::core::module::ToolDecl {
+        command: command.to_string(),
+        desc: String::new(),
+        params: None,
+        parallel: false,
+    }
 }
 
 /// 测试用模块工具声明：带参数契约（YAML 里的 params 段）。
@@ -1764,6 +1816,36 @@ impl ToolRunner for RecordingRunner {
     }
 }
 
+/// 并发记录型 runner：记录**同时在跑**的调用数峰值（模块工具是否真的并发，只有它能作证）。
+pub(crate) struct ParallelRunner {
+    active: AtomicUsize,
+    peak: AtomicUsize,
+    delay_ms: u64,
+}
+
+impl ParallelRunner {
+    pub(crate) fn new(delay_ms: u64) -> ParallelRunner {
+        ParallelRunner { active: AtomicUsize::new(0), peak: AtomicUsize::new(0), delay_ms }
+    }
+
+    /// 同时在跑的峰值（串行恒为 1）。
+    pub(crate) fn peak_concurrent(&self) -> usize {
+        self.peak.load(Ordering::SeqCst)
+    }
+}
+
+impl ToolRunner for ParallelRunner {
+    fn run(&self, _fence: &crate::core::fence::FenceSpec, command: &str, args_json: &str) -> ToolOutcome {
+        let now = self.active.fetch_add(1, Ordering::SeqCst) + 1;
+        self.peak.fetch_max(now, Ordering::SeqCst);
+        if self.delay_ms > 0 {
+            std::thread::sleep(Duration::from_millis(self.delay_ms));
+        }
+        self.active.fetch_sub(1, Ordering::SeqCst);
+        ToolOutcome { ok: true, output: format!("{} 跑完了 {}", command, args_json) }
+    }
+}
+
 const TOOL_CALL: &str = "{\"type\":\"tool\",\"name\":\"grep\",\"args\":{\"keyword\":\"x\"}}";
 
 /// 带工具环境的成员：模块 m0 声明 grep → python tools/grep.py（cwd = 该模块目录）。
@@ -1777,6 +1859,7 @@ fn member_with_tools(id: &str, script: Vec<String>, runner: Arc<impl ToolRunner 
             root: abs(&["mods", "root"]),
             commands,
             books: BTreeMap::new(),
+            parallel: BTreeSet::new(),
         },
     );
     let mut m = Member::new(id, "职责".to_string(), scripted(script));
@@ -3046,6 +3129,7 @@ pub(crate) fn native_member(
             root: abs(&["mods", "root"]),
             commands: BTreeMap::new(),
             books: BTreeMap::new(),
+            parallel: BTreeSet::new(),
         },
     );
     let sb = test_sandbox(id, &[]);
@@ -3155,6 +3239,152 @@ fn native_mode_refuses_a_hand_written_envelope() {
     assert!(!trace[0].ok, "原生模式下信封不执行");
     assert_eq!(trace[0].output, prompts.core.tool_texts.native_no_envelope, "要如实说清本通道用原生调用");
     assert_eq!(io.get(&["demo", "work", "out.md"]), None, "绝不落盘");
+}
+
+/// 声明可并发的读取**真的并发**，且结果一律按**原始调用顺序**回填。
+/// 第一个文件故意慢：它会**后完成**，但结果仍必须排在前面（上下文里不许乱序）。
+#[test]
+fn declared_parallel_reads_overlap_and_results_keep_the_call_order() {
+    use crate::core::ports::ToolCall;
+    let io = Arc::new(InMemorySysIo::new().slow(40));
+    io.seed(&["demo", "work", "a.txt"], "A1\nA2\n");
+    io.seed(&["demo", "work", "b.txt"], "B1\nB2\n");
+    // 先发的读 a.txt 慢 120ms（后完成），后发的读 b.txt 快——顺序只能靠"按原始下标回填"保住。
+    io.slow_file(&["demo", "work", "a.txt"], 120);
+    let a = s(&["demo", "work", "a.txt"]);
+    let b = s(&["demo", "work", "b.txt"]);
+    let call = |id: &str, path: &str| ToolCall {
+        id: id.to_string(),
+        name: "read".to_string(),
+        args_json: format!("{{\"path\":\"{}\"}}", path),
+    };
+    let mut m = native_member(
+        "a",
+        Arc::clone(&io),
+        vec![
+            NativeStep::Calls(vec![call("c1", &a), call("c2", &b)]),
+            NativeStep::Text("{\"type\":\"say\",\"text\":\"读完了\"}".to_string()),
+        ],
+        Arc::new(Mutex::new(Vec::new())),
+        Arc::new(Mutex::new(Vec::new())),
+    );
+    let prompts = test_prompts();
+    let exec = crate::core::engine::Execution::run(std::slice::from_mut(&mut m), "任务", &prompts);
+    let peak = io.peak_concurrent_reads();
+    assert!(peak >= 2, "册子声明 parallel 的读取要真的并发（峰值 {}）", peak);
+    let trace = exec.traces.get("a").expect("两条工具行");
+    assert_eq!(trace.len(), 2);
+    assert!(
+        trace[0].output.contains("A1") && trace[1].output.contains("B1"),
+        "结果按原始调用顺序回填（慢的那个也排在前面）：{:?}",
+        trace.iter().map(|v| v.output.chars().take(20).collect::<String>()).collect::<Vec<_>>()
+    );
+}
+
+/// 写入类独占执行：它是并发批次之间的**屏障**，并且能看到并发批次**合并后**的账本。
+#[test]
+fn a_writing_call_is_a_barrier_and_sees_the_merged_ledger() {
+    use crate::core::ports::ToolCall;
+    let io = Arc::new(InMemorySysIo::new().slow(30));
+    io.seed(&["demo", "work", "a.txt"], "原文\n");
+    let a = s(&["demo", "work", "a.txt"]);
+    let mut m = native_member(
+        "a",
+        Arc::clone(&io),
+        vec![
+            NativeStep::Calls(vec![
+                ToolCall {
+                    id: "c1".to_string(),
+                    name: "read".to_string(),
+                    args_json: format!("{{\"path\":\"{}\"}}", a),
+                },
+                // 整份覆盖要求"本次会话完整读过"：这条证据只能来自上面并发批次的合并。
+                ToolCall {
+                    id: "c2".to_string(),
+                    name: "write".to_string(),
+                    args_json: format!("{{\"path\":\"{}\",\"content\":\"新内容\\n\"}}", a),
+                },
+            ]),
+            NativeStep::Text("{\"type\":\"say\",\"text\":\"改好了\"}".to_string()),
+        ],
+        Arc::new(Mutex::new(Vec::new())),
+        Arc::new(Mutex::new(Vec::new())),
+    );
+    let prompts = test_prompts();
+    let exec = crate::core::engine::Execution::run(std::slice::from_mut(&mut m), "任务", &prompts);
+    let trace = exec.traces.get("a").expect("两条工具行");
+    assert_eq!(trace.len(), 2);
+    assert!(
+        trace[1].ok,
+        "写入类排在并发批次之后，且能看到合并后的账本：{}",
+        trace[1].output
+    );
+    assert_eq!(io.get(&["demo", "work", "a.txt"]).as_deref(), Some("新内容\n"));
+    assert_eq!(
+        io.peak_concurrent_reads(),
+        1,
+        "写入类是屏障：它绝不与只读批次重叠"
+    );
+}
+
+/// 模块工具的可并发性是**模块作者在 module.yaml 里的声明**：声明了才并发，没声明一律串行。
+#[test]
+fn module_tools_are_concurrent_only_when_declared() {
+    use crate::core::ports::ToolCall;
+    /// 原生形态 + 模块 m0 声明外部工具 grep（线上名 m0_grep）；parallel 决定它是否可并发。
+    fn grep_member(
+        runner: Arc<dyn ToolRunner + Send + Sync>,
+        parallel: bool,
+    ) -> Member {
+        let steps = vec![
+            NativeStep::Calls(vec![
+                ToolCall {
+                    id: "c1".to_string(),
+                    name: "m0_grep".to_string(),
+                    args_json: "{\"keyword\":\"甲\"}".to_string(),
+                },
+                ToolCall {
+                    id: "c2".to_string(),
+                    name: "m0_grep".to_string(),
+                    args_json: "{\"keyword\":\"乙\"}".to_string(),
+                },
+            ]),
+            NativeStep::Text("{\"type\":\"say\",\"text\":\"查完了\"}".to_string()),
+        ];
+        let mut m = native_member(
+            "a",
+            Arc::new(InMemorySysIo::new()),
+            steps,
+            Arc::new(Mutex::new(Vec::new())),
+            Arc::new(Mutex::new(Vec::new())),
+        );
+        let t = m.tools.as_mut().expect("工具环境");
+        let mt = t.modules.get_mut("m0").expect("模块");
+        mt.commands.insert("grep".to_string(), "python tools/grep.py".to_string());
+        if parallel {
+            mt.parallel.insert("grep".to_string());
+        }
+        t.runner = runner;
+        m
+    }
+    let prompts = test_prompts();
+    // ① 声明 parallel：两个调用真的并发
+    let runner = Arc::new(ParallelRunner::new(40));
+    let mut m = grep_member(Arc::clone(&runner) as Arc<dyn ToolRunner + Send + Sync>, true);
+    let exec = crate::core::engine::Execution::run(std::slice::from_mut(&mut m), "任务", &prompts);
+    let peak = runner.peak_concurrent();
+    assert!(peak >= 2, "声明 parallel 的模块工具要真的并发（峰值 {}）", peak);
+    assert_eq!(exec.traces.get("a").map(|t| t.len()), Some(2));
+    // ② 没声明：同样两个调用逐个跑
+    let runner = Arc::new(ParallelRunner::new(5));
+    let mut m = grep_member(Arc::clone(&runner) as Arc<dyn ToolRunner + Send + Sync>, false);
+    let _ = crate::core::engine::Execution::run(std::slice::from_mut(&mut m), "任务", &prompts);
+    assert_eq!(
+        runner.peak_concurrent(),
+        1,
+        "未声明可并发 = 独占串行（峰值 {}）",
+        runner.peak_concurrent()
+    );
 }
 
 #[test]

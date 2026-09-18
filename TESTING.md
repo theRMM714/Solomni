@@ -47,7 +47,7 @@
 当前平台缺口账（`tests/cross-platform/gaps.yaml`、`tests/<平台>/gaps.yaml`）**为空**：三平台围栏机制与整仓测试
 已由三平台 CI 真跑通过（Windows AppContainer + 目录 ACL 授权与撤权、Linux Landlock、macOS seatbelt）。
 
-仍未完成的缺口全部记在 `tests/gaps.yaml`（当前是两条长期目标：T0 全量硬失败、`src/tests/` 目录迁移）。
+仍未完成的缺口全部记在 `tests/gaps.yaml`（长期目标与已知未做项都在那里，本文不复述条目内容）。
 条目存在 = 尚未完成；补齐后删除条目，不保留完成历史。
 全局账**不**影响 `TEST-REPORT-ACCEPTED`：那个标记只看平台与跨平台层的缺口账。
 
@@ -105,6 +105,9 @@ cargo tree --duplicates
 - 工具调用形态：两个通道各自只走一套协议——原生通道声明工具（含 `patch` 的 `body` 参数）、
   一次回复多个调用各成一条工具行、结果按序回填、**正文里的信封不执行**但如实记失败行；
   形态改动在**下一次生成前**重新解析并就地刷新（没改则什么都不做）；
+- 工具并发**按声明**调度（`parallel`：内置工具在册子、模块工具在 `module.yaml`）：连续的可并发调用真的并发
+  （记录型替身断言"同时在跑"的峰值），未声明的一律串行、写入类是批次之间的屏障；
+  工具行与结果**一律按原始调用顺序**回填，观察账本按原序合并（并发批次与串行结果相同）；
 - 内置工具的行为与边界：读取区间与分页、精确替换（唯一命中 / 只差空白）、**自由格式补丁的解析与原子应用**
   （缺 `*** End File`、SEARCH 找不到 / 多处命中、CRLF 保持、任何一块失败即整体不写盘）；
 - 单个实现的边界与错误行为；
@@ -230,6 +233,7 @@ Fake 必须：
 | `src/tests.rs:ScriptGateway`、`SharedScript` | 脚本网关 Fake | 已被核心测试使用；失败/取消场景需单独核对 |
 | `src/tests.rs:TestPrompts` | 提示词册 Fake（返回内存册子） | 已被核心测试使用；契约矩阵尚未完整登记 |
 | `src/tests.rs:RecordingRunner` | 工具执行 Fake + 记录 `calls` | 已被核心测试使用；失败/超时/取消场景需单独核对 |
+| `src/tests.rs:ParallelRunner` | 工具执行 Spy：记录**同时在跑**的峰值 | 已钉住"声明可并发才并发、未声明一律串行" |
 | `src/tests.rs:SilentRunner` | 守护 Stub：任何调用即 panic | 用于"不该用工具"的路径 |
 | `src/tests.rs:NoFenceHost` | 围栏释放空操作 Stub | 已被核心测试使用 |
 | `src/tests.rs:RecordingFence` | 围栏释放记录型 Spy | 已钉住"删会话即请求撤销授权" |
@@ -312,10 +316,10 @@ Fixture 必须：
 | `ModuleSource` | `VecSource` | 不适用 | 不适用（错误进 `rejected`） | 不适用 | `FsModules` | 已验收 |
 | `PackageSource` | `InMemoryPackages` | 不适用 | 不适用（错误进 `rejected`） | 不适用 | `FsPackages` | 已验收 |
 | `Workspace` | `InMemoryWorkspace` | 内存布局可观察 | `fail_with` | 不适用 | `FsWorkspace` | 已验收 |
-| `SysIo` | `InMemorySysIo` | 内存内容可观察 | `fail_with` | 不适用 | `FsSysIo`（含 lossy / cut） | 已验收 |
+| `SysIo` | `InMemorySysIo`（含并发峰值与按文件延时） | 内存内容 + 同时在读的峰值 | `fail_with` | 不适用 | `FsSysIo`（含 lossy / cut） | 已验收 |
 | `HistoryStore` | `InMemoryHistory` | 内存流水可观察 | `fail_with` | 不适用 | `FsHistory` | 已验收 |
 | `PromptSource` | `TestPrompts` | 不适用 | `fail_with` | 不适用 | `YamlPrompts` | 已验收 |
-| `ToolRunner` | `RecordingRunner`、`SilentRunner` | `calls`（cwd / 命令 / 参数） | `ok = false` 回执 | 真进程超时杀树（`ProcTools`） | `ProcTools` | 已验收 |
+| `ToolRunner` | `RecordingRunner`、`SilentRunner`、`ParallelRunner` | `calls`（cwd / 命令 / 参数）、并发峰值 | `ok = false` 回执 | 真进程超时杀树（`ProcTools`） | `ProcTools` | 已验收 |
 | `FenceHost` | `RecordingFence`、`NoFenceHost` | `released` | `fail_with` | 不适用 | `confine::FenceHostAdapter`（真机撤权在 `tests/windows/`） | 已验收 |
 | `Log` | `NoopLog` | 不记录（Stub） | 不适用 | 不适用 | `FileLog`（三个级别都落盘） | 已验收 |
 

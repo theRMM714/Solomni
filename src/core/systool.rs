@@ -147,6 +147,24 @@ impl Observations {
         self.seen.insert(path.to_path_buf(), Seen::Known(hash));
     }
 
+    /// 合并一个**并发分支**的账本（分支里只跑声明可并发的只读工具）。
+    /// 规则与逐个记账一致：完整读到记为所见、部分读到只补空白（读到一半不会让已知变成未知）。
+    /// 调用方**必须按原始调用顺序**合并——那样并发批次与串行执行的结果完全相同。
+    pub fn absorb(&mut self, branch: &Observations) {
+        for (path, seen) in &branch.seen {
+            match seen {
+                Seen::Known(h) => {
+                    self.seen.insert(path.clone(), Seen::Known(*h));
+                }
+                Seen::Partial(why) => {
+                    self.seen
+                        .entry(path.clone())
+                        .or_insert(Seen::Partial(why.clone()));
+                }
+            }
+        }
+    }
+
     fn known(&self, path: &Path) -> Option<u64> {
         match self.seen.get(path) {
             Some(Seen::Known(h)) => Some(*h),

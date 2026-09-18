@@ -25,54 +25,39 @@
     删除本条目与 tests/quality-baseline.yaml。
   blocked_by: 需要先决定全仓格式化与「带理由 allow」这两项取舍
 
-- id: tools.native-tool-calls
-  scope: global
-  level: T1
-  why: |
-    工具调用目前只有一条通道：模型在自由文本里**手写 JSON 信封**（type/module/name/args）。
-    主流实现走供应商原生工具调用（参数由结构化槽位给出，模型不必手抄 JSON），
-    本项目却把转义与括号配对的正确性押在模型身上——真实会话里已经出现
-    "content 里一个裸换行导致整段 JSON 非法、连续三次写入失败"。
-    两侧的补救已落地（信封不合法的四类判定 + 对应修法回执、read 行区间、edit、JSON 修复端口），
-    但通道本身仍未做。
-  how: |
-    阶段 0（已落地）：models.yaml 的 tools: envelope|native（缺省 envelope），非法值拒收、编辑保留原值；
-      登记处契约写明"两种形态互斥"（一个通道走 native 就只认原生调用）。
-    阶段 1（已落地）：Chat 端口带 CompleteOpts{tools} 与 Completion.calls；HttpChat 两条路径都解析
-      tool_calls（含流式按 index 拼分片）；探测端口 + 隐藏模式 --probe-tools（不带声明的先证明通道通不通，
-      带声明的那条才在测支持；支持/明确不支持/无法判定三种结论都如实，只把确凿结论写回登记处）。
-      真实中继实测：4sapi.cn/v1 对 glm-5.3-flash 支持原生调用（finish_reason=tool_calls）。
-    阶段 2（已落地，引擎侧）：按通道形态决定请求是否声明工具、回复按哪套协议解析；
-      一次回复多个调用 → 多条工具行、结果按序回填（串行）；系统提示注入**互斥的两套**调用约定；
-      形态**不钉在会话里**：每次生成前按登记处重新解析，变了就地重建刷新并按用户通知，没变什么都不做；
-      native 模式下正文里的信封不执行、但如实记一条失败工具行；声明 native 而供应商报错 → 如实报错。
-      实现取舍：原生调用的结果回填**沿用既有 `[工具结果]` 消息**（没有引入 assistant(tool_calls)/tool(tool_call_id)
-      的消息形状），因此回放机制完全没动、也不需要给 `Msg` 加协议字段；下一轮由"助手消息里如实记下调了什么"承载。
-    阶段 3（剩）：探测的 GUI 按钮（目前只有 `solomni --probe-tools <模型 id>`）。
-    阶段 4（未做）：工具声明加 parallel + 按声明并发（只读并发、写类独占），结果按原始顺序回填。
-    另：patch 的 FREEFORM 通道已落地（阶段 1 之外的那半件事已完成）。
-  accept: |
-    供应商支持原生工具调用时，参数从结构化槽位直达工具，模型不再手写 JSON；
-    端口矩阵新增一行（原生 tool_calls × 各供应商）且 cargo test 与 node run-tests.js 全绿。
-  blocked_by: 未开始（本轮只做前两层）
-
 - id: tools.multi-call-and-concurrency
   scope: global
   level: T1
   why: |
-    一次问询里模型只能发**一个**工具调用：多个互不依赖的读取要串成多轮往返（每轮都是一次完整模型调用）。
-    主流做法是一次回复里给出多个调用（如 Codex 的 multi_tool_use.parallel 包装工具），
-    并按工具声明决定能否并发执行。本项目所有工具一律串行，read 这类只读工具也不并行。
+    原生通道的多调用与并发调度已落地；**手写信封通道**一次回复仍只认一个调用：
+    在只有信封可用的供应商那里，多个互不依赖的读取只能串成多轮往返（每轮都是一次完整模型调用）。
   how: |
-    1) 信封支持 {"type":"tool","calls":[{module?,name,args}, ...]}（与单数形态互斥；GREEN FIELD 不保留双形态兼容分支）；
-    2) 每个调用各记一条工具行（前端视图不变），MAX_TOOL_CALLS 按**调用数**计；
-    3) 回档/截断以"轮"为原子单位（一轮 = 一次模型回复 + 它触发的全部调用行）；
-    4) 工具声明加"可并发"标记：只读类并发调度、写类独占、未声明默认串行；
-       结果一律按原始顺序回填（防乱序进上下文）。
+    信封支持 {"type":"tool","calls":[{module?,name,args}, ...]}（与单数形态互斥；GREEN FIELD 不保留双形态兼容分支）；
+    每个调用各记一条工具行；MAX_TOOL_CALLS 按**调用数**计。
+    原生通道的对应能力不在这条里：一次回复多个调用、按 `parallel` 声明并发执行、结果按原序回填都已落地。
   accept: |
-    一次回复里的多个调用都执行且各成一条工具行；声明可并发的工具真的并发（用记录型替身断言时序）；
-    cargo test 与 node run-tests.js 全绿。
-  blocked_by: 未开始（本轮只做前两层 + 信封修复端口）
+    手写信封通道也能一次发多个调用（各成一条工具行、结果按原序回填），cargo test 与 node run-tests.js 全绿。
+  blocked_by: 缺少实现
+
+- id: tools.native-multi-call-replay
+  scope: global
+  level: T1
+  why: |
+    原生通道一次回复里的**多条**调用，实时历史与回放出来的历史对不上，而"重建上下文必须与实时历史逐条一致"
+    是本项目的既有不变量（有专门用例锁住，但只覆盖单调用，所以这条一直没被发现）：
+      1) 第 1 条调用：实时推 assistant("[原生工具调用] 名字 参数")（engine.rs 原生分支的 recap），
+         重建按 tool 行的 raw 推 assistant("[原生工具调用] 名字")（mod.rs rebuild_session）——**参数在重建后丢了**；
+      2) 第 2 条起：实时**不推** assistant（text_msgs 只在第 1 条非空），重建每条 tool 行都推一条——**凭空多出消息**。
+    根因："一次回复调了多个工具"这件事，实时与重建没有用同一个真相表达。
+    关联：回档目前按**行**截断，一次回复的多条工具行可以截在中间（"以轮为原子单位"未做）。
+  how: |
+    1) 让两边用同一个真相：每条 tool 行推一条 assistant（内容 = 该调用自己的原始回执），
+       且 raw 与实时推的那条消息取成同一个串（改一处、两边读同一份）；
+    2) 补用例"一次回复多个调用也要逐条一致"（key 相等），锁住这条不变量；
+    3) 顺带定案回档粒度（按行还是按轮）；若按轮，前端回档按钮的粒度一起改。
+  accept: |
+    一次回复多个调用时，重启/回档重建出来的上下文与实时历史逐条一致；cargo test 与 node run-tests.js 全绿。
+  blocked_by: 缺少实现（需先定"原始回执"的表达方式）
 
 - id: tests.layout-migration
   scope: global

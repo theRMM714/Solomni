@@ -80,6 +80,11 @@ pub struct ToolSchema {
     /// 写了但为空 = 这个工具不收任何参数。
     #[serde(default)]
     pub params: Option<BTreeMap<String, Param>>,
+    /// 这个工具**可并发执行**（缺省 false = 独占串行）。
+    /// 只该给"只读、无副作用"的工具写：同一回复里的多个可并发调用会真的并发跑；
+    /// 未声明的（含写入类）独占执行，并作为并发批次之间的屏障。
+    #[serde(default)]
+    pub parallel: bool,
 }
 
 impl ToolSchema {
@@ -123,9 +128,8 @@ impl ToolSchema {
         lines.join("\n")
     }
 
-    /// JSON Schema 形态（同一声明的第二形态：`additionalProperties: false` 与主流一致）。
-    /// 现在只有测试在用——供应商原生工具调用接上后（见 tests/gaps.yaml 的 tools.native-tool-calls）
-    /// 由 Chat 端口取它渲染工具声明；在那之前不进产物。
+    /// JSON Schema 形态（同一声明的第二形态：附加属性一律拒收，与主流一致）。
+    /// 原生工具调用通道由 decl() 取它渲染工具声明；手写信封通道不发它（模型看的是提示词里的参数说明）。
     pub fn to_json_schema(&self) -> serde_json::Value {
         let mut props = serde_json::Map::new();
         let mut required: Vec<serde_json::Value> = Vec::new();

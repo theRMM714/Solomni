@@ -1,14 +1,16 @@
 //! 协作引擎：建组 → 讨论 → 整理 → 执行 → 验收（纯状态机，不做输入输出）。
 //! 状态机只认信封动词；发言内容永远是数据，不是指令。
 //! 所有发给模型的文案经 core/prompt.rs 渲染自提示词册；成员拥有自己的会话通道。
-//! 工具循环（联动 envelope::Verb::Tool 与 ports::ToolRunner）：策略（放行表）在核心，机制在适配层。
+//! 工具循环（联动 envelope::Verb::Tool 与 ports::ToolRunner）：策略（放行表、并发调度）在核心，机制在适配层。
+//! 一次回复里的多个原生调用按**声明**调度：声明可并发的只读类并发跑，其余（含写入类）独占并按原序生效；
+//! 结果与工具行一律按原始顺序回填——并发只影响执行，不影响上下文里的顺序。
 
 use crate::core::envelope::{self, ToolInvoke, Verb};
 use crate::core::events::ToolCallView;
 use crate::core::ports::{BoxedChat, Chat, Chunk, CompleteOpts, Msg, ToolOutcome, ToolRunner};
 use crate::core::prompt::Prompts;
 use serde::Deserialize;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -28,6 +30,8 @@ pub struct ModuleTools {
     pub commands: BTreeMap<String, String>,
     /// 工具名 → 参数契约（只含**声明了** params 的工具；没声明的工具不校验、不进提示词）。
     pub books: BTreeMap<String, crate::core::schema::ToolSchema>,
+    /// 声明了 parallel 的工具名（只读、无副作用；同一回复里的多个可并发调用会真的并发跑）。
+    pub parallel: BTreeSet<String>,
 }
 
 /// 放行表：模块 id → 该模块的（目录, 工具表）。
@@ -52,6 +56,13 @@ pub fn tool_table(modules: &[crate::core::module::Module]) -> BTreeMap<String, M
                         .tools
                         .iter()
                         .filter_map(|(name, decl)| decl.schema().map(|s| (name.clone(), s)))
+                        .collect(),
+                    parallel: m
+                        .manifest
+                        .tools
+                        .iter()
+                        .filter(|(_, decl)| decl.parallel)
+                        .map(|(name, _)| name.clone())
                         .collect(),
                 },
             )
@@ -86,20 +97,54 @@ pub struct MemberTools {
 /// 线上名 → (模块 id, 工具名)：原生协议里没有 module 字段，跨模块同名工具靠它消歧。
 pub type WireTools = BTreeMap<String, (Option<String>, String)>;
 
-/// 一次请求要声明的工具表。
+/// 一次请求要声明的工具表（给供应商的那一份）。
 pub type Decls = Vec<crate::core::ports::ToolDecl>;
 
+/// 本成员这次请求的**工具声明面**（原生通道用）：发给供应商的声明 + 线上名回译表 + 可并发的线上名。
+#[derive(Default)]
+struct ToolDecls {
+    list: Decls,
+    /// 线上名 → (模块 id, 工具名)：原生协议里没有 module 字段，跨模块同名工具靠它消歧。
+    wire: WireTools,
+    /// 声明可并发的线上名：同一回复里连续的这些调用合成一批并发跑，其余（含写入类）各自独占。
+    parallel: BTreeSet<String>,
+}
+
 /// 执行一次工具调用：内置优先；外部工具按模块走（模块为空时由 dispatch_external 如实报错）。
-fn run_one(ctx: &mut MemberTools, module: Option<&str>, name: &str, args_json: &str) -> (String, ToolOutcome) {
-    if crate::core::systool::is_builtin(name) {
-        let out = crate::core::systool::execute(
-            &ctx.sandbox,
-            ctx.io.as_ref(),
-            &mut ctx.observations,
-            name,
-            args_json,
-        );
-        (String::new(), out)
+/// 账本经**分支副本**回到本成员（见 run_branch）——串行与并发只有这一条执行路径。
+fn run_one(
+    ctx: &mut MemberTools,
+    module: Option<&str>,
+    name: &str,
+    args_json: &str,
+) -> (String, ToolOutcome) {
+    let (label, outcome, branch) = run_branch(ctx, module, name, args_json);
+    // 串行：分支的副本就是"这次调用之后"的账本，直接接管（与逐个记账等价）。
+    ctx.observations = branch;
+    (label, outcome)
+}
+
+/// 一次调用的执行体（**不碰本成员的账本**）：分支各持账本副本，由调用方按原始顺序合并/接管。
+/// 为什么这样：并发批次里多个调用同时跑，而账本是可变状态；只读类调用的结果不依赖账本，
+/// 所以"副本 + 按原序提交"与串行执行的结果完全相同（见 systool::Observations::absorb）。
+fn run_branch(
+    ctx: &MemberTools,
+    module: Option<&str>,
+    name: &str,
+    args_json: &str,
+) -> (String, ToolOutcome, crate::core::systool::Observations) {
+    let mut branch = ctx.observations.clone();
+    let (label, outcome) = if crate::core::systool::is_builtin(name) {
+        (
+            String::new(),
+            crate::core::systool::execute(
+                &ctx.sandbox,
+                ctx.io.as_ref(),
+                &mut branch,
+                name,
+                args_json,
+            ),
+        )
     } else {
         let inv = ToolInvoke {
             malformed: None,
@@ -110,29 +155,35 @@ fn run_one(ctx: &mut MemberTools, module: Option<&str>, name: &str, args_json: &
             lead: String::new(),
         };
         dispatch_external(ctx, &inv)
-    }
+    };
+    (label, outcome, branch)
 }
 
 /// 本成员这次请求要声明的工具（原生通道用）：内置工具 + 模块工具。
 /// 原生协议里**没有 module 字段**，所以跨模块同名工具靠线上名消歧（{模块}_{工具}，撞名再加序号）；
 /// 返回的映射把线上名翻回（模块, 工具）。模块没声明参数的照旧声明（参数结构交回给工具自己解释）。
-fn tool_decls(ctx: &MemberTools) -> (Decls, WireTools) {
-    let mut decls: Decls = Vec::new();
-    let mut wire: WireTools = BTreeMap::new();
+fn tool_decls(ctx: &MemberTools) -> ToolDecls {
+    let mut decls = ToolDecls::default();
     let mut taken: Vec<String> = Vec::new();
     for (name, schema) in &ctx.sandbox.builtin_tools {
         // patch 是自由格式：它的声明单独写（参数是 body 字符串，不是 JSON 信封的 args）
         if crate::core::systool::is_freeform(name) {
             continue;
         }
-        decls.push(schema.decl(name));
+        decls.list.push(schema.decl(name));
         taken.push(name.clone());
-        wire.insert(name.clone(), (None, name.clone()));
+        decls.wire.insert(name.clone(), (None, name.clone()));
+        // 可并发与否是**册子里的声明**（builtin_tools.<名字>.parallel），不是代码里的名单。
+        if schema.parallel {
+            decls.parallel.insert(name.clone());
+        }
     }
     let patch = crate::core::systool::patch_decl();
     taken.push(patch.name.clone());
-    wire.insert(patch.name.clone(), (None, crate::core::systool::PATCH.to_string()));
-    decls.push(patch);
+    decls
+        .wire
+        .insert(patch.name.clone(), (None, crate::core::systool::PATCH.to_string()));
+    decls.list.push(patch);
     for (id, mt) in &ctx.modules {
         for tool in mt.commands.keys() {
             let mut wire_name = format!("{}_{}", id, tool);
@@ -142,7 +193,13 @@ fn tool_decls(ctx: &MemberTools) -> (Decls, WireTools) {
                 n += 1;
             }
             taken.push(wire_name.clone());
-            wire.insert(wire_name.clone(), (Some(id.clone()), tool.clone()));
+            decls
+                .wire
+                .insert(wire_name.clone(), (Some(id.clone()), tool.clone()));
+            // 模块作者在 module.yaml 的 tools.<名字>.parallel 里声明（缺省 = 独占串行）。
+            if mt.parallel.contains(tool) {
+                decls.parallel.insert(wire_name.clone());
+            }
             let decl = match mt.books.get(tool) {
                 Some(schema) => schema.decl(&wire_name),
                 // 没声明参数：如实说明参数由工具自己解释（不编 schema）
@@ -152,10 +209,10 @@ fn tool_decls(ctx: &MemberTools) -> (Decls, WireTools) {
                     parameters: serde_json::json!({ "type": "object", "additionalProperties": true }),
                 },
             };
-            decls.push(decl);
+            decls.list.push(decl);
         }
     }
-    (decls, wire)
+    decls
 }
 
 /// 可用的外部工具清单：逐条列成「模块.工具」，末尾补上内置工具。
@@ -589,18 +646,17 @@ pub(crate) fn converse_with(
     let mut rounds: Vec<Round> = Vec::new();
     let mut forced_final = false;
     loop {
-        // 形态与工具声明：由本成员的通道形态决定（envelope = 不声明，走手写信封；native = 声明本成员的工具）
-        let (mode, decls, wire) = match tools.as_deref_mut() {
-            Some(ctx) => {
+        // 形态与工具声明面：由本成员的通道形态决定（envelope = 不声明，走手写信封；native = 声明本成员的工具）
+        let (mode, decls) = match tools.as_deref_mut() {
+            Some(ctx) if ctx.mode == crate::core::providers::ToolMode::Native => {
                 let mode = ctx.mode;
-                if mode == crate::core::providers::ToolMode::Native {
-                    let (d, w) = tool_decls(ctx);
-                    (mode, d, w)
-                } else {
-                    (mode, Vec::new(), BTreeMap::new())
-                }
+                (mode, tool_decls(ctx))
             }
-            None => (crate::core::providers::ToolMode::Envelope, Vec::new(), BTreeMap::new()),
+            Some(ctx) => (ctx.mode, ToolDecls::default()),
+            None => (
+                crate::core::providers::ToolMode::Envelope,
+                ToolDecls::default(),
+            ),
         };
         // 逐轮累积思维链（原文以通道返回值为准：非流式通道不回 Chunk）。
         let mut reasoning = String::new();
@@ -620,7 +676,11 @@ pub(crate) fn converse_with(
             };
             let opts = CompleteOpts {
                 stream,
-                tools: if decls.is_empty() { None } else { Some(&decls) },
+                tools: if decls.list.is_empty() {
+                    None
+                } else {
+                    Some(&decls.list)
+                },
             };
             chat.complete(&msgs, opts, &mut sink)
         };
@@ -673,17 +733,81 @@ pub(crate) fn converse_with(
             if let Some(ctx) = tools.as_deref_mut() {
                 // ① 有原生调用：逐个执行，各成一条工具行；助手消息如实记下"它调了什么"（回放与下一轮都看得到）
                 if !forced_final && !calls.is_empty() {
-                    for (i, c) in calls.iter().enumerate() {
-                        let (module, tool) = wire.get(&c.name).cloned().unwrap_or((None, c.name.clone()));
-                        // patch 的正文在 body 参数里（原生协议要求参数是 JSON 对象；转义交给供应商的解码器）
-                        let args = if crate::core::systool::is_freeform(&tool) {
-                            serde_json::from_str::<serde_json::Value>(&c.args_json)
-                                .ok()
-                                .and_then(|v| v.get("body").and_then(|b| b.as_str()).map(|s| s.to_string()))
-                                .unwrap_or_default()
+                    // 先定好每个调用落在哪个工具、参数是什么（patch 的正文在 body 参数里，
+                    // 原生协议要求参数是 JSON 对象；转义交给供应商的解码器）。
+                    let plan: Vec<(Option<String>, String, String)> = calls
+                        .iter()
+                        .map(|c| {
+                            let (module, tool) = decls
+                                .wire
+                                .get(&c.name)
+                                .cloned()
+                                .unwrap_or((None, c.name.clone()));
+                            let args = if crate::core::systool::is_freeform(&tool) {
+                                serde_json::from_str::<serde_json::Value>(&c.args_json)
+                                    .ok()
+                                    .and_then(|v| {
+                                        v.get("body")
+                                            .and_then(|b| b.as_str())
+                                            .map(|s| s.to_string())
+                                    })
+                                    .unwrap_or_default()
+                            } else {
+                                c.args_json.clone()
+                            };
+                            (module, tool, args)
+                        })
+                        .collect();
+                    // 调度：**连续**声明可并发的调用合成一批并发跑，其余各自独占（写入类因此是批次之间的屏障）。
+                    // 结果按原始下标归位，随后一律按原序回填——并发只影响执行，不影响上下文里的顺序。
+                    let mut done: Vec<Option<(String, ToolOutcome)>> =
+                        (0..plan.len()).map(|_| None).collect();
+                    let mut i = 0;
+                    while i < plan.len() {
+                        if decls.parallel.contains(&calls[i].name) {
+                            let mut j = i;
+                            while j < plan.len() && decls.parallel.contains(&calls[j].name) {
+                                j += 1;
+                            }
+                            // 分支各持账本副本；整批跑完后按原序合并——与串行执行的结果相同。
+                            let batch: Vec<(
+                                String,
+                                ToolOutcome,
+                                crate::core::systool::Observations,
+                            )> = std::thread::scope(|s| {
+                                let handles: Vec<_> = plan[i..j]
+                                    .iter()
+                                    .map(|(module, tool, args)| {
+                                        s.spawn(|| {
+                                            run_branch(ctx, module.as_deref(), tool, args)
+                                        })
+                                    })
+                                    .collect();
+                                handles
+                                    .into_iter()
+                                    .map(|h| {
+                                        h.join()
+                                            .unwrap_or_else(|e| std::panic::resume_unwind(e))
+                                    })
+                                    .collect()
+                            });
+                            for (k, (label, outcome, branch)) in
+                                batch.into_iter().enumerate()
+                            {
+                                ctx.observations.absorb(&branch);
+                                done[i + k] = Some((label, outcome));
+                            }
+                            i = j;
                         } else {
-                            c.args_json.clone()
-                        };
+                            let (module, tool, args) = &plan[i];
+                            done[i] = Some(run_one(ctx, module.as_deref(), tool, args));
+                            i += 1;
+                        }
+                    }
+                    // 按原序回填：助手回执、工具行与结果消息（顺序即原始调用顺序）。
+                    for ((i, c), slot) in calls.iter().enumerate().zip(done) {
+                        let (label, outcome) = slot.expect("每个调用都有执行结果");
+                        let args = plan[i].2.clone();
                         let recap = Msg::assistant(format!(
                             "[原生工具调用] {} {}",
                             c.name,
@@ -695,11 +819,10 @@ pub(crate) fn converse_with(
                         } else {
                             Vec::new()
                         };
-                        let (label, outcome) = run_one(ctx, module.as_deref(), &tool, &args);
                         let view = ToolCallView {
                             speaker: speaker.to_string(),
                             module: label,
-                            name: tool.clone(),
+                            name: plan[i].1.clone(),
                             ok: outcome.ok,
                             args: args.clone(),
                             output: outcome.output,
