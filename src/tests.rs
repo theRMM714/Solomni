@@ -210,6 +210,18 @@ pub(crate) fn s(parts: &[&str]) -> String {
     p(parts).replace(std::path::MAIN_SEPARATOR, "/")
 }
 
+/// 测试用模块工具声明：只给启动命令（参数契约在需要的用例里另行声明）。
+pub(crate) fn decl(command: &str) -> crate::core::module::ToolDecl {
+    crate::core::module::ToolDecl { command: command.to_string(), desc: String::new(), params: None }
+}
+
+/// 测试用模块工具声明：带参数契约（YAML 里的 params 段）。
+pub(crate) fn decl_with(command: &str, params_yaml: &str) -> crate::core::module::ToolDecl {
+    let mut d = decl(command);
+    d.params = Some(serde_yaml::from_str(params_yaml).expect("测试参数声明要能解析"));
+    d
+}
+
 /// 测试沙箱：work 共享区 + agent 私有区 + 指定模块目录（都是绝对路径）。
 pub(crate) fn test_sandbox(agent: &str, modules: &[&str]) -> crate::core::workspace::Sandbox {
     let mut map = BTreeMap::new();
@@ -223,6 +235,7 @@ pub(crate) fn test_sandbox(agent: &str, modules: &[&str]) -> crate::core::worksp
         private: abs(&["demo", agent]),
         modules: map,
         texts: test_prompts().core.tool_texts,
+        builtin_tools: test_prompts().core.builtin_tools,
     }
 }
 
@@ -692,7 +705,7 @@ fn envelope_text_may_be_omitted() {
     // 缺 name 的工具信封仍是 malformed 信号，不被缺省 text 收编成发言。
     let bad = crate::core::envelope::parse("{\"type\":\"tool\",\"args\":{}}");
     assert!(matches!(bad.verb, crate::core::envelope::Verb::Tool));
-    assert!(bad.tool.map(|t| t.malformed).unwrap_or(false));
+    assert!(bad.tool.map(|t| t.malformed.is_some()).unwrap_or(false));
 }
 
 // ---------- 提示词渲染层 ----------
@@ -1088,9 +1101,9 @@ fn suggest_models_reuses_stored_agent_without_suggesting_model() {
 #[test]
 fn same_named_tools_across_modules_are_no_longer_a_conflict() {
     let mut a = module_of("a");
-    a.manifest.tools.insert("dump".to_string(), "python a/dump.py".to_string());
+    a.manifest.tools.insert("dump".to_string(), decl("python a/dump.py"));
     let mut b = module_of("b");
-    b.manifest.tools.insert("dump".to_string(), "python b/dump.py".to_string());
+    b.manifest.tools.insert("dump".to_string(), decl("python b/dump.py"));
     let mut core = core_with(vec![a, b], gw(BTreeMap::new(), vec!["[]".into()]));
     // 跨模块同名工具不再冲突：信封里的 module 消歧（行为见 same_named_tools_in_two_modules_run_in_their_own_root）。
     let one_agent = WorkSpec {
@@ -1663,7 +1676,7 @@ fn member_with_tools(id: &str, script: Vec<String>, runner: Arc<impl ToolRunner 
     let mut commands = BTreeMap::new();
     commands.insert("grep".to_string(), "python tools/grep.py".to_string());
     let mut modules = BTreeMap::new();
-    modules.insert("m0".to_string(), ModuleTools { root: abs(&["mods", "root"]), commands });
+    modules.insert("m0".to_string(), ModuleTools { root: abs(&["mods", "root"]), commands, books: BTreeMap::new() });
     let mut m = Member::new(id, "职责".to_string(), scripted(script));
     // 该路径走模块声明的外部命令（grep）：空沙箱 + 内存 IO，内置工具不参与。
     m.tools = Some(MemberTools {
@@ -1689,10 +1702,10 @@ fn same_named_tools_in_two_modules_run_in_their_own_root() {
     ]);
     let mut a = module_of("a");
     a.root = abs(&["mods", "a"]);
-    a.manifest.tools.insert("read_txt".to_string(), "python tools/read_txt.py".to_string());
+    a.manifest.tools.insert("read_txt".to_string(), decl("python tools/read_txt.py"));
     let mut b = module_of("b");
     b.root = abs(&["mods", "b"]);
-    b.manifest.tools.insert("read_txt".to_string(), "python tools/read_txt.py".to_string());
+    b.manifest.tools.insert("read_txt".to_string(), decl("python tools/read_txt.py"));
     let mut core = core_with_runner(vec![a, b], gw(member, vec!["[]".into()]), Arc::clone(&runner));
     // 跨模块同名不再算冲突：照样能建工作。
     let sid = core.create_work(work("w", WorkMode::Single, &["a", "b"])).unwrap().sid;
@@ -1724,9 +1737,9 @@ fn external_tool_without_module_is_refused_when_agent_has_many_modules() {
         "{\"type\":\"say\",\"text\":\"知道了\"}".to_string(),
     ]);
     let mut a = module_of("a");
-    a.manifest.tools.insert("read_txt".to_string(), "python tools/read_txt.py".to_string());
+    a.manifest.tools.insert("read_txt".to_string(), decl("python tools/read_txt.py"));
     let mut b = module_of("b");
-    b.manifest.tools.insert("read_txt".to_string(), "python tools/read_txt.py".to_string());
+    b.manifest.tools.insert("read_txt".to_string(), decl("python tools/read_txt.py"));
     let mut core = core_with_runner(vec![a, b], gw(member, vec!["[]".into()]), Arc::clone(&runner));
     let sid = core.create_work(work("w", WorkMode::Single, &["a", "b"])).unwrap().sid;
     let events = with_live(|l| core.single_say(&sid, "干活", l)).unwrap();
@@ -1751,7 +1764,7 @@ fn tool_call_event_is_emitted_before_the_next_round() {
     let mut member = BTreeMap::new();
     member.insert("a".to_string(), vec![TOOL_CALL.into(), "{\"type\":\"say\",\"text\":\"完成\"}".into()]);
     let mut mod_a = module_of("a");
-    mod_a.manifest.tools.insert("grep".to_string(), "python tools/grep.py".to_string());
+    mod_a.manifest.tools.insert("grep".to_string(), decl("python tools/grep.py"));
     let runner = Arc::new(RecordingRunner { calls: Mutex::new(Vec::new()), out: "ok".into(), ok: true });
     let mut core = core_with_runner(vec![mod_a], gw(member, vec!["[]".into()]), runner);
     let sid = core.create_work(work("w", WorkMode::Single, &["a"])).unwrap().sid;
@@ -1925,7 +1938,6 @@ fn broken_tool(path: &str) -> String {
 fn malformed_tool_envelope_becomes_a_failed_tool_line() {
     // 真实案例：模型想调 write，但信封 JSON 非法（结尾多个 ]）——
     // 必须记一条 ok=false 的 tool 行，绝不把 JSON 当 AI 消息渲染，也绝不执行工具。
-    let catalogue = test_prompts().core.tool_texts.malformed_note;
     let raw_path = s(&["w", "work", "README.md"]);
     let broken = broken_tool(&raw_path);
     let hist = Arc::new(InMemoryHistory::new());
@@ -1950,13 +1962,17 @@ fn malformed_tool_envelope_becomes_a_failed_tool_line() {
     assert!(!views[0].ok, "非法的调用必须记为失败");
     assert_eq!(views[0].name, "write", "名字要尽力打捞出来（只用于显示）");
     assert_eq!(views[0].module, "", "没写 module → 空串");
-    assert_eq!(views[0].output, catalogue, "回注册子文案");
+    assert!(views[0].output.contains("不是合法 JSON"), "回注册子文案：{}", views[0].output);
     assert_eq!(views[0].raw, broken, "原文留档（重建上下文用）");
     assert_eq!(io.get(&["w", "work", "README.md"]), None, "非法信封绝不执行工具");
     // 历史：assistant(原文) + [工具结果]（含册子文案）→ 模型下一轮能自己改
     let h = core.single_history(&sid).unwrap();
     assert!(h.iter().any(|m| m.role == "assistant" && m.content == broken));
-    assert!(h.iter().any(|m| m.role == "user" && m.content.contains("[工具结果] write") && m.content.contains(&catalogue)), "{:?}", h);
+    assert!(
+        h.iter().any(|m| m.role == "user" && m.content.contains("[工具结果] write") && m.content.contains("不是合法 JSON")),
+        "{:?}",
+        h
+    );
     // 重建一致（重启后从落盘流水重建上下文）
     drop(core);
     let mut core2 = core_with_all(
@@ -2037,7 +2053,6 @@ fn tool_type_mention_in_plain_speech_is_not_misjudged() {
 fn prose_then_unclosed_tool_envelope_is_malformed_and_keeps_prose() {
     // 正文在前、坏信封在后（未闭合）：也要判 malformed，且正文照常显示、JSON 不上屏。
     let raw = "好的。{\"type\":\"tool\",\"name\":\"write\",\"args\":{\"path\":\"a\"}";
-    let catalogue = test_prompts().core.tool_texts.malformed_note;
     let mut member = BTreeMap::new();
     member.insert("a".to_string(), vec![raw.to_string(), "{\"type\":\"say\",\"text\":\"改好了\"}".to_string()]);
     let mut core = core_with(vec![module_of("a")], gw(member, vec!["[]".into()]));
@@ -2050,11 +2065,54 @@ fn prose_then_unclosed_tool_envelope_is_malformed_and_keeps_prose() {
     let views = tool_views(&events);
     assert!(!views[0].ok && views[0].name == "write", "{:?}", views[0]);
     assert!(views[0].args.contains("\"path\":\"a\""), "参数尽力打捞：{:?}", views[0].args);
-    assert_eq!(views[0].output, catalogue);
+    assert!(views[0].output.contains("没有收尾"), "未闭合要给对应的改法：{}", views[0].output);
     // 历史：assistant(原文) + [工具结果]（模型下一轮能自己改）
     let h = core.single_history(&sid).unwrap();
     assert!(h.iter().any(|m| m.role == "assistant" && m.content == raw));
     assert!(h.iter().any(|m| m.role == "user" && m.content.contains("[工具结果] write")), "{:?}", h);
+}
+
+#[test]
+fn malformed_envelopes_are_classified_so_the_model_gets_the_right_fix() {
+    // 类别是可判定的确切事实：模型据此能直接改对，而不是被笼统告知"JSON 不合法"。
+    use crate::core::envelope::{parse, Malformed};
+    // ① 字符串里直接换行（真实事故：write 的 content 里裸换行 → 整段 JSON 非法）
+    let r = parse("{\"type\":\"tool\",\"name\":\"write\",\"args\":{\"path\":\"a\",\"content\":\"第一行\n第二行\"}}");
+    match r.tool.expect("应给出非法信封信号").malformed.expect("应判定类别") {
+        Malformed::RawControl { ch, line } => {
+            assert_eq!(ch, '\n', "要报出是哪个控制字符");
+            assert_eq!(line, 1, "要报出在哪一行");
+        }
+        other => panic!("应判为裸控制字符：{:?}", other),
+    }
+    // ② 收尾未闭合（输出被截断）
+    let r = parse("好。{\"type\":\"tool\",\"name\":\"write\",\"args\":{\"path\":\"a\"}");
+    assert_eq!(r.tool.expect("信号").malformed, Some(Malformed::Unclosed));
+    // ③ JSON 合法但字段不合法（缺 name）
+    let r = parse("{\"type\":\"tool\",\"args\":{}}");
+    match r.tool.expect("信号").malformed.expect("类别") {
+        Malformed::Shape(why) => assert!(why.contains("name"), "要说清缺哪个字段：{}", why),
+        other => panic!("应判为字段不合法：{:?}", other),
+    }
+    // ④ 括号平衡但 JSON 语法非法：要带上解析器报的位置
+    let r = parse("{\"type\":\"tool\",\"name\":\"write\",\"args\":{\"path\":,\"content\":\"x\"}}");
+    match r.tool.expect("信号").malformed.expect("类别") {
+        Malformed::Syntax(why) => assert!(why.contains("line") && why.contains("column"), "要带位置：{}", why),
+        other => panic!("应判为语法错：{:?}", other),
+    }
+    // 四类各有各的修法（不是同一条笼统提示）
+    let texts = test_prompts().core.tool_texts;
+    let control = texts.malformed_report(&Malformed::RawControl { ch: '\n', line: 3 });
+    assert!(control.contains("裸换行") && control.contains("第 3 行"), "{}", control);
+    assert!(control.contains("\\n"), "要教模型把换行写成反斜杠 n：{}", control);
+    let shape = texts.malformed_report(&Malformed::Shape("missing field name".to_string()));
+    assert!(shape.contains("字段不合法") && shape.contains("missing field"), "{}", shape);
+    let tab = texts.malformed_report(&Malformed::RawControl { ch: '\t', line: 1 });
+    assert!(tab.contains("制表符"), "{}", tab);
+    assert!(
+        texts.malformed_unclosed != texts.malformed_syntax && texts.malformed_syntax != texts.malformed_shape,
+        "每一类的文案都要各说各的"
+    );
 }
 
 #[test]
@@ -2075,7 +2133,7 @@ fn envelope_tool_parses_name_and_args() {
     assert_eq!(bad.verb, crate::core::envelope::Verb::Tool, "看得出是想发工具信封");
     assert!(!bad.degraded, "malformed 与 degraded 是两回事（后者是信封缺失）");
     let inv = bad.tool.expect("应给出非法信封信号");
-    assert!(inv.malformed && inv.name.is_empty(), "打捞不到名字就留空：{:?}", inv);
+    assert!(inv.malformed.is_some() && inv.name.is_empty(), "打捞不到名字就留空：{:?}", inv);
     assert!(bad.text.is_empty(), "非法信封的 JSON 也不进 text");
     // 真的"没有信封"仍然是 degraded say（原文收录）。
     let plain = crate::core::envelope::parse("没有信封的发言");
@@ -2114,7 +2172,7 @@ fn envelope_only_round_produces_only_a_tool_line() {
     let mut member = BTreeMap::new();
     member.insert("a".to_string(), vec![TOOL_CALL.into(), "{\"type\":\"say\",\"text\":\"完成\"}".into()]);
     let mut mod_a = module_of("a");
-    mod_a.manifest.tools.insert("grep".to_string(), "python tools/grep.py".to_string());
+    mod_a.manifest.tools.insert("grep".to_string(), decl("python tools/grep.py"));
     let runner = Arc::new(RecordingRunner { calls: Mutex::new(Vec::new()), out: "ok".into(), ok: true });
     let mut core = core_with_runner(vec![mod_a], gw(member, vec!["[]".into()]), runner);
     let sid = core.create_work(work("w", WorkMode::Single, &["a"])).unwrap().sid;
@@ -2187,7 +2245,7 @@ fn forced_final_tool_envelope_shows_no_json() {
     let mut member = BTreeMap::new();
     member.insert("a".to_string(), script);
     let mut mod_a = module_of("a");
-    mod_a.manifest.tools.insert("grep".to_string(), "python tools/grep.py".to_string());
+    mod_a.manifest.tools.insert("grep".to_string(), decl("python tools/grep.py"));
     let mut core = core_with_runner(vec![mod_a], gw(member, vec!["[]".into()]), Arc::clone(&runner));
     let sid = core.create_work(work("w", WorkMode::Single, &["a"])).unwrap().sid;
     let events = with_live(|l| core.single_say(&sid, "跑满", l)).unwrap();
@@ -2222,6 +2280,53 @@ fn tool_loop_runs_declared_tool() {
     assert_eq!(trace[0].module, "m0", "信封省略 module 时按唯一模块兜底");
     assert!(trace[0].ok && trace[0].args.contains("keyword"), "{:?}", trace[0]);
     assert!(trace[0].raw.contains("\"type\":\"tool\""), "原始输出要留档（重建上下文用）");
+}
+
+#[test]
+fn module_tool_params_are_declared_in_the_manifest_and_enforced_by_core() {
+    // 参数契约写在 module.yaml（不埋进代码）：核心按它校验，并把说明写进系统提示。
+    let mut mod_m0 = module_of("m0");
+    mod_m0.manifest.tools.insert(
+        "grep".to_string(),
+        decl_with("python tools/grep.py", "keyword: {type: string, required: true}\n"),
+    );
+    let prompts = test_prompts();
+    let system = crate::core::module::agent_system(&prompts, "m0", std::slice::from_ref(&mod_m0), "工具说明");
+    assert!(system.contains("【模块工具参数】"), "系统提示要有参数段：{}", system);
+    assert!(system.contains("- m0.grep") && system.contains("keyword（string，必填）"), "{}", system);
+
+    let table = crate::core::engine::tool_table(std::slice::from_ref(&mod_m0));
+    let books = table.get("m0").expect("放行表").books.clone();
+    assert_eq!(books.len(), 1, "只给声明了参数的工具建契约");
+
+    // 参数不符：拒收，且说清缺哪个参数、并把工具签名发回（不启动进程）。
+    let runner = Arc::new(RecordingRunner { calls: Mutex::new(Vec::new()), out: "ok".into(), ok: true });
+    let mut m = member_with_tools(
+        "m0",
+        vec!["{\"type\":\"tool\",\"name\":\"grep\",\"args\":{}}".to_string(), "{\"type\":\"say\",\"text\":\"完成\"}".to_string()],
+        Arc::clone(&runner),
+    );
+    m.tools.as_mut().expect("工具环境").modules.get_mut("m0").expect("模块").books = books;
+    let exec = crate::core::engine::Execution::run(std::slice::from_mut(&mut m), "任务", &prompts);
+    assert!(runner.calls.lock().expect("锁").is_empty(), "参数不合法绝不落进程");
+    let trace = exec.traces.get("m0").expect("失败的调用也要入册");
+    assert!(trace[0].output.contains("缺少必填参数 keyword"), "{}", trace[0].output);
+    assert!(trace[0].output.contains("keyword（string，必填）"), "失败要带上参数签名：{}", trace[0].output);
+
+    // 参数合法：照旧执行，args 原样交给工具。
+    let runner2 = Arc::new(RecordingRunner { calls: Mutex::new(Vec::new()), out: "ok".into(), ok: true });
+    let mut m2 = member_with_tools("m0", vec![TOOL_CALL.to_string(), "{\"type\":\"say\",\"text\":\"完成\"}".to_string()], Arc::clone(&runner2));
+    let books2 = table.get("m0").expect("放行表").books.clone();
+    m2.tools.as_mut().expect("工具环境").modules.get_mut("m0").expect("模块").books = books2;
+    crate::core::engine::Execution::run(std::slice::from_mut(&mut m2), "任务", &prompts);
+    let calls = runner2.calls.lock().expect("锁");
+    assert_eq!(calls.len(), 1, "合法调用照常执行");
+    assert!(calls[0].2.contains("keyword"));
+
+    // 没声明参数的工具照旧不校验（不给模块开发者添门槛）。
+    let plain = module_of("m0");
+    let plain_table = crate::core::engine::tool_table(std::slice::from_ref(&plain));
+    assert!(plain_table.get("m0").expect("放行表").books.is_empty(), "没声明参数 = 没有契约");
 }
 
 #[test]
@@ -2271,7 +2376,7 @@ fn core_direct_tool_flow_injects_result_into_history() {
         "{\"type\":\"say\",\"text\":\"依据第 3 行，结论成立\"}".to_string(),
     ]);
     let mut manifest_tools = BTreeMap::new();
-    manifest_tools.insert("grep".to_string(), "python tools/grep.py".to_string());
+    manifest_tools.insert("grep".to_string(), decl("python tools/grep.py"));
     let mut mod_a = module_of("a");
     mod_a.manifest.tools = manifest_tools;
     let mut core = core_with_runner(vec![mod_a], gw(member, vec!["[]".into()]), Arc::clone(&runner));
@@ -2458,6 +2563,83 @@ fn builtin_read_reports_errors_verbatim() {
 }
 
 #[test]
+fn builtin_read_range_numbers_lines_and_points_at_the_next_offset() {
+    let io = InMemorySysIo::new();
+    let sb = test_sandbox("a1", &[]);
+    io.seed(&["demo", "work", "note.txt"], "l1\nl2\nl3\nl4\nl5\n");
+    let note = s(&["demo", "work", "note.txt"]);
+    let read = |args: &str| crate::core::systool::execute(&sb, &io, "read", &format!("{{\"path\":\"{}\",{}}}", note, args));
+    // 整读：行号从 1 数起，末尾如实说共几行
+    let all = read("\"offset\":1");
+    assert!(all.ok, "{}", all.output);
+    assert!(all.output.contains("1: l1") && all.output.contains("5: l5"), "{}", all.output);
+    assert!(all.output.contains("已到文件末尾，共 5 行"), "{}", all.output);
+    // 区间读：只给这一段，并给出接着读的 offset
+    let mid = read("\"offset\":2,\"limit\":2");
+    assert!(mid.output.contains("2: l2") && mid.output.contains("3: l3"), "{}", mid.output);
+    assert!(!mid.output.contains("1: l1") && !mid.output.contains("4: l4"), "不该越出请求的区间：{}", mid.output);
+    assert!(mid.output.contains("已显示第 2-3 行，共 5 行；继续读用 offset=4"), "{}", mid.output);
+    // 末尾区间：到文件末尾
+    let last = read("\"offset\":5,\"limit\":2");
+    assert!(last.output.contains("5: l5") && last.output.contains("已到文件末尾，共 5 行"), "{}", last.output);
+    // 越过末行：不是错误，如实说总行数
+    let past = read("\"offset\":9");
+    assert!(past.ok, "越过末行要如实告知而不是报错：{}", past.output);
+    assert!(past.output.contains("超出末行：该文件共 5 行"), "{}", past.output);
+}
+
+#[test]
+fn builtin_arg_mistakes_are_named_and_the_signature_comes_back() {
+    let io = InMemorySysIo::new();
+    let sb = test_sandbox("a1", &[]);
+    io.seed(&["demo", "work", "note.txt"], "内容\n");
+    let note = s(&["demo", "work", "note.txt"]);
+    let run = |tool: &str, args: &str| crate::core::systool::execute(&sb, &io, tool, args);
+    // 上界由声明给出（不再是代码里的手写判断）
+    let big = run("read", &format!("{{\"path\":\"{}\",\"limit\":3000}}", note));
+    assert!(!big.ok && big.output.contains("参数 limit 不能大于 2000"), "{}", big.output);
+    assert!(big.output.contains("read\n读取文本文件（UTF-8）。"), "失败要把工具签名发回去：{}", big.output);
+    assert!(big.output.contains("- limit（integer，缺省 2000，不小于 1，不大于 2000）"), "{}", big.output);
+    let small = run("read", &format!("{{\"path\":\"{}\",\"offset\":0}}", note));
+    assert!(!small.ok && small.output.contains("参数 offset 不能小于 1"), "{}", small.output);
+    let wrong = run("read", &format!("{{\"path\":{}}}", 1));
+    assert!(!wrong.ok && wrong.output.contains("参数 path 需要 string"), "{}", wrong.output);
+    let unknown = run("read", &format!("{{\"path\":\"{}\",\"encoding\":\"utf8\"}}", note));
+    assert!(!unknown.ok && unknown.output.contains("没有参数 encoding"), "{}", unknown.output);
+    let missing = run("write", &format!("{{\"path\":\"{}\"}}", note));
+    assert!(!missing.ok && missing.output.contains("缺少必填参数 content"), "{}", missing.output);
+    let empty = run("search", &format!("{{\"path\":\"{}\",\"keyword\":\"\"}}", note));
+    assert!(!empty.ok && empty.output.contains("参数 keyword 不能是空字符串"), "{}", empty.output);
+    let not_object = run("read", "\"just a string\"");
+    assert!(!not_object.ok && not_object.output.contains("args 必须是一个参数对象"), "{}", not_object.output);
+    let nope = run("nope", "{}");
+    assert!(!nope.ok && nope.output.contains("未知的内置工具：nope"), "{}", nope.output);
+}
+
+#[test]
+fn builtin_tool_book_is_the_one_source_of_names_and_paths() {
+    // 保留名（代码里的常量）与 prompts.yaml 的声明必须一致，否则模型看到的工具与放行的工具会走偏。
+    let prompts = test_prompts();
+    let book = &prompts.core.builtin_tools;
+    let mut declared: Vec<String> = book.keys().cloned().collect();
+    declared.sort();
+    let mut reserved = crate::core::systool::names();
+    reserved.sort();
+    assert_eq!(declared, reserved, "builtin_tools 的声明要与保留名一致");
+    // 内置工具一律按真实绝对路径寻址：每个都必须声明必填 path。
+    for (name, schema) in book {
+        let path = schema.params.as_ref().and_then(|p| p.get("path"));
+        assert!(path.map(|p| p.required).unwrap_or(false), "{} 必须声明必填 path", name);
+    }
+    // 模型侧说明来自同一份声明
+    let sb = test_sandbox("a1", &[]);
+    let guide = crate::core::systool::guide(&prompts, &sb);
+    assert!(guide.contains("【工具参数】"), "{}", guide);
+    assert!(guide.contains("- offset（integer，缺省 1，不小于 1）"), "{}", guide);
+    assert!(guide.contains("- ignore_case（boolean）：是否忽略大小写；省略即区分大小写"), "{}", guide);
+}
+
+#[test]
 fn core_collab_tool_modules_run_in_execution() {
     let runner = Arc::new(RecordingRunner { calls: Mutex::new(Vec::new()), out: "  1 | 内容".into(), ok: true });
     let mut member = BTreeMap::new();
@@ -2470,7 +2652,7 @@ fn core_collab_tool_modules_run_in_execution() {
     ]);
     let mut mod_a = module_of("a");
     let mut manifest_tools = BTreeMap::new();
-    manifest_tools.insert("grep".to_string(), "python tools/grep.py".to_string());
+    manifest_tools.insert("grep".to_string(), decl("python tools/grep.py"));
     mod_a.manifest.tools = manifest_tools;
     // 核心脚本：整理（方案）→ 验收（全过）。
     let mut core = core_with_runner(
@@ -2524,10 +2706,10 @@ fn module_runtimes_are_validated() {
 #[test]
 fn module_tools_may_not_take_builtin_names() {
     let mut m = module_of("a");
-    m.manifest.tools.insert("read_txt".to_string(), "python tools/read_txt.py".to_string());
+    m.manifest.tools.insert("read_txt".to_string(), decl("python tools/read_txt.py"));
     assert!(crate::core::module::check_tools(&m.manifest).is_ok(), "普通工具名可用");
     for name in ["read", "write", "search"] {
-        m.manifest.tools.insert(name.to_string(), "python tools/x.py".to_string());
+        m.manifest.tools.insert(name.to_string(), decl("python tools/x.py"));
         let why = crate::core::module::check_tools(&m.manifest).unwrap_err();
         assert!(why.contains("保留名"), "内置工具名要拒收：{}", why);
         m.manifest.tools.remove(name);
@@ -2694,7 +2876,7 @@ fn module_without_runtime_is_denied_with_reason() {
     let mut member = BTreeMap::new();
     member.insert("a".to_string(), vec![TOOL_CALL.into(), "{\"type\":\"say\",\"text\":\"改用内置工具\"}".into()]);
     let mut mod_a = module_with_runtimes("a", &["python"]);
-    mod_a.manifest.tools.insert("grep".to_string(), "python tools/grep.py".to_string());
+    mod_a.manifest.tools.insert("grep".to_string(), decl("python tools/grep.py"));
     let runner = Arc::new(RecordingRunner { calls: Mutex::new(Vec::new()), out: "ok".into(), ok: true });
     let mut core = Core::new(
         Arc::new(InMemorySettings::with_tier(Tier::Vm)),
@@ -2733,7 +2915,7 @@ fn module_without_runtime_is_denied_with_reason() {
     let mut member2 = BTreeMap::new();
     member2.insert("a".to_string(), vec![TOOL_CALL.into(), "{\"type\":\"say\",\"text\":\"跑完了\"}".into()]);
     let mut mod_b = module_with_runtimes("a", &["python"]);
-    mod_b.manifest.tools.insert("grep".to_string(), "python tools/grep.py".to_string());
+    mod_b.manifest.tools.insert("grep".to_string(), decl("python tools/grep.py"));
     let runner2 = Arc::new(RecordingRunner { calls: Mutex::new(Vec::new()), out: "ok".into(), ok: true });
     let mut core2 = core_with_runner(vec![mod_b], gw(member2, vec!["[]".into()]), Arc::clone(&runner2));
     let sid2 = core2.create_work(work("w2", WorkMode::Single, &["a"])).unwrap().sid;
@@ -2815,7 +2997,7 @@ fn session_config_reports_tier_missing_and_runtimes_dir() {
 fn edit_session_writes_meta_appends_config_record_and_rebuilds() {
     let hist = Arc::new(InMemoryHistory::new());
     let mut a = module_of("a");
-    a.manifest.tools.insert("grep".to_string(), "python tools/grep.py".to_string());
+    a.manifest.tools.insert("grep".to_string(), decl("python tools/grep.py"));
     let mut core = core_with_pkgs(
         vec![a, module_of("b")],
         gw(BTreeMap::new(), vec!["[]".into()]),

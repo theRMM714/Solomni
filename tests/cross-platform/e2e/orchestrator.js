@@ -46,7 +46,14 @@ function writeToolbox(py) {
     "  - read_txt：读文本并带行号输出，参数 {\"path\":\"…\"}（相对路径以本模块目录为基准）。",
     "  读用户投喂的材料请优先用内置 read（路径用 agent 提示词里列出的真实根目录）。",
     "tools:",
-    "  read_txt: " + py + " tools/read_txt.py",
+    "  read_txt:",
+    "    command: " + py + " tools/read_txt.py",
+    "    desc: 读文本并带行号输出",
+    "    params:",
+    "      path:",
+    "        type: string",
+    "        required: true",
+    "        desc: 要读取的文件路径（相对路径以本模块目录为基准）",
     "",
   ].join("\n");
   fs.writeFileSync(path.join(dir, "module.yaml"), text);

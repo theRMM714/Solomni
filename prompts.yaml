@@ -102,6 +102,8 @@ core:
       你手上的外部工具：
       {{module_tools}}
 
+      {{module_tool_params}}
+
       工具调用约定：需要用工具时，只输出一个 JSON 信封（不要包裹其它文字）：
       {"type":"tool","module":"模块id","name":"工具名","args":{...参数对象...}}
       外部工具要带上它所属的模块 id（见上面清单每行开头）；内置工具 read/write/search 不用写 module。
@@ -116,18 +118,72 @@ core:
     你私有的沙箱：{{sandbox_root}}
     {{module_roots}}
     调用（JSON 参数放在信封的 args 里）：
-    - read：{"path":"{{work_root}}/note.txt"} → 读取文本（UTF-8；原文件不是 UTF-8 会如实标注）
-    - write：{"path":"{{sandbox_root}}/out.txt","content":"..."} → 写入文本（UTF-8，覆盖同名文件）
-    - search：{"path":"{{work_root}}/note.txt","keyword":"要查的词","ignore_case":true} → 带行号的命中行（ignore_case 省略 = 区分大小写）
+    - read：{"path":"{{work_root}}/note.txt"} → 读文本（UTF-8；原文件不是 UTF-8 会如实标注）。
+      文件长时按行区间分次读：{"path":"…","offset":800,"limit":200}（行号从 1 数起；回执末尾会告诉你接着用哪个 offset）
+    - write：{"path":"{{sandbox_root}}/out.txt","content":"..."} → 整份写入（同名文件被**整份覆盖**）
+    - search：{"path":"{{work_root}}/note.txt","keyword":"要查的词","ignore_case":true} → 带行号的命中行
     越界（不在上面这些根目录之内）、相对路径、含 .. 的路径都会被拒绝。
+
+    【工具参数】下面是本次可用的内置工具与它们的参数；参数不符时核心会把这一段原样发回来。
+    {{tool_params}}
     本工作的成品一律写共享区或你自己的沙箱。模块目录里的 userdata/ 是模块自己的跨任务私有状态（缓存/记忆/配置），
     不是本次工作的成品区，不要把任务成果往里写。
     当前工作：{{work_name}}；agent 名：{{agent}}
+
+  # —— 内置工具的参数契约：模型侧的参数说明与调用校验都由这一份声明驱动（改参数只改这里）——
+  builtin_tools:
+    read:
+      desc: 读取文本文件（UTF-8）。
+      params:
+        path:
+          type: string
+          required: true
+          desc: 要读取的真实绝对路径
+        offset:
+          type: integer
+          min: 1
+          default: 1
+          desc: 起始行号（从 1 数起）；省略即从第 1 行开始。超过总行数时核心会告诉你总行数
+        limit:
+          type: integer
+          min: 1
+          max: 2000
+          default: 2000
+          desc: 本次最多返回的行数；省略即尽量多读
+    write:
+      desc: 整份写入文本文件（UTF-8）：文件不存在则新建，已存在则整份覆盖。
+      params:
+        path:
+          type: string
+          required: true
+          desc: 要写入的真实绝对路径
+        content:
+          type: string
+          required: true
+          desc: 要写入的**完整**内容（会整份覆盖，不是追加、不是局部修改）
+    search:
+      desc: 在文本文件里查关键词，返回带行号的命中行。
+      params:
+        path:
+          type: string
+          required: true
+          desc: 要搜索的真实绝对路径
+        keyword:
+          type: string
+          required: true
+          non_empty: true
+          desc: 要查找的文本
+        ignore_case:
+          type: boolean
+          desc: 是否忽略大小写；省略即区分大小写
 
   no_agents: "（登记处还没有 agent；这次只能组装新的）"
   no_model: "（核心默认）"
   no_module_dirs: "（你没有成员模块目录）"
   no_module_tools: "（本 agent 的模块都未声明外部工具）"
+  # —— 模块工具的参数契约（module.yaml 的 tools.<名字>.params；只列声明了的）——
+  module_tool_params_header: "【模块工具参数】下面这些模块工具声明了参数（没列出的不吃参数校验）："
+  no_module_tool_params: "（本 agent 的模块工具都没声明参数，args 由工具自己解释）"
   # —— 工具与路径的模型侧文案：核心拼回执/失败说明/清单行时从这里取（改文案只改册子）——
   tool_texts:
     # 路径校验（workspace::resolve）
@@ -142,10 +198,16 @@ core:
     roots_private: "- 你私有的沙箱：{{root}}"
     roots_module: "- 模块 {{id}} 的目录：{{root}}"
     # 内置工具回执（systool）
-    missing_path: "缺少 path（要操作的真实路径）"
-    missing_content: "缺少 content（要写入的文本）"
-    missing_keyword: "缺少 keyword（要查找的文本）"
     bad_args_json: "参数不是合法 JSON：{{error}}"
+    # 参数不符（由 builtin_tools 的声明判定；why 说事实，signature 是工具签名，模型照着改）
+    arg_fault: "{{why}}。{{signature}}"
+    arg_not_object: "args 必须是一个参数对象"
+    arg_missing: "缺少必填参数 {{name}}"
+    arg_wrong_type: "参数 {{name}} 需要 {{want}}"
+    arg_empty: "参数 {{name}} 不能是空字符串"
+    arg_too_small: "参数 {{name}} 不能小于 {{min}}"
+    arg_too_big: "参数 {{name}} 不能大于 {{max}}"
+    arg_unknown: "没有参数 {{name}}"
     unknown_builtin: "未知的内置工具：{{name}}"
     read_header: "[read] {{path}} （{{bytes}} 字节）\n{{text}}"
     write_header: "[write] 已写入 {{path}}（{{chars}} 字符，UTF-8）"
@@ -157,8 +219,12 @@ core:
     search_summary: "命中 {{hits}} 行 / 全文 {{total}} 行"
     search_hit_line: "{{n}} | {{line}}"
     search_truncated: "[截断] 命中行超过 {{limit}} 行，仅列出前 {{limit}} 行。"
-    read_truncated_chars: "[截断] 内容超过 {{limit}} 字符，以上仅为开头部分。"
-    read_truncated_bytes: "[截断] 文件超过单次读取上限，仅读了开头部分。"
+    read_line: "{{n}}: {{line}}"
+    read_line_capped: "［本行超过 {{limit}} 字符，已截断］"
+    read_more: "（已显示第 {{from}}-{{to}} 行，共 {{total}} 行；继续读用 offset={{next}}）"
+    read_more_cut: "（已显示第 {{from}}-{{to}} 行；文件超过单次读取上限，只读到开头部分，总行数这次无法统计）"
+    read_end: "（已到文件末尾，共 {{total}} 行）"
+    read_past_end: "（超出末行：该文件共 {{total}} 行，offset 从 1 数起）"
     search_truncated_bytes: "[截断] 文件超过单次读取上限，只搜了开头部分。"
     lossy_note: "[编码] 该文件含非法 UTF-8 字节，以上是按替换字符呈现的近似内容；本程序不猜编码。"
     # 外部工具分派（engine）
@@ -170,7 +236,15 @@ core:
     # 工具循环与讨论（engine）
     tool_result_wrapper: "[工具结果] {{label}}\n{{output}}"
     tool_cap: "[工具超限] 单次问询工具调用上限 {{n}} 次已到，请直接给出最终答复，不再调用工具。"
-    malformed_note: "工具信封不是合法 JSON，核心没有执行任何工具。请重新输出一个合法的信封：检查引号转义与括号配对；内容过长时分次写入，或用更短的写法。"
+    # 工具信封不合法（envelope 判定类别）：每类给各自的改法，不让模型猜
+    malformed_unclosed: "工具信封没有收尾（JSON 不完整或被截断），核心没有执行任何工具。请重新输出一个完整的信封：检查括号与引号是否配对；内容过长时分次写入，或用更短的写法。"
+    malformed_control: "工具信封的字符串里出现了未转义的裸{{what}}（第 {{line}} 行），核心没有执行任何工具。字符串里的换行要写成 \\n、制表符写成 \\t、回车写成 \\r（反斜杠加字母），不能直接换行。"
+    malformed_syntax: "工具信封不是合法 JSON：{{why}}。核心没有执行任何工具，请按报出的位置检查该处（引号是否成对、逗号是否多余、字符串里的引号要转义）。"
+    malformed_shape: "工具信封是合法 JSON，但字段不合法：{{why}}。核心没有执行任何工具。信封格式：{\"type\":\"tool\",\"name\":\"工具名\",\"args\":{...参数对象...}}"
+    control_lf: "换行"
+    control_cr: "回车"
+    control_tab: "制表符"
+    control_other: "控制字符 U+{{code}}"
     discuss_degraded: "　（信封缺失，按发言收录）"
     stopped_suffix: "（已停止）"
     # 工具进程的收尾标记：核心把它们拼进工具回执，随 [工具结果] 进模型上下文
@@ -181,6 +255,8 @@ core:
     # 拟名单/推荐时给模型看的清单行
     module_listing_line: "- {{id}}：{{brief}}"
     module_tools_line: "- {{id}}：{{tools}}"
+    # 模块工具的参数段（变量：module, tool, signature）
+    module_tool_params_line: "- {{module}}.{{tool}}\n{{signature}}"
     module_root_line: "- {{id}}：{{root}}"
     agent_listing_line: "- {{name}}：模块 {{modules}}；模型 {{model}}{{note}}"
     model_listing_line: "- {{id}}：{{name}}（{{api_model}}{{note}}）"

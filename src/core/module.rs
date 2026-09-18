@@ -16,10 +16,34 @@ pub struct ModuleManifest {
     /// 只声明能力名，不写版本——版本由用户在会话的执行档位里定（见 core/exec.rs 与 RUNTIME_SPEC.md）。
     #[serde(default)]
     pub runtimes: Vec<String>,
-    /// 外部工具表：工具名 → 启动命令（模块作者声明；核心按此表放行，机制在 ToolRunner 适配层）。
+    /// 外部工具表：工具名 → 该工具的声明（启动命令 + 可选的参数契约）。
     /// 内置工具名（read / write / search）为保留名，模块不得占用（见 check_tools）。
     #[serde(default)]
-    pub tools: BTreeMap<String, String>,
+    pub tools: BTreeMap<String, ToolDecl>,
+}
+
+/// 一个模块工具：模块作者声明「怎么启动它」以及「它吃什么参数」。
+/// 参数契约**可选**：不写就照旧不校验、也不写进提示词；写了就由核心按它校验，并把说明写进系统提示。
+#[derive(Debug, Clone, Deserialize)]
+pub struct ToolDecl {
+    /// 启动命令（相对模块根写，例如 python tools/x.py）；工作目录 = 该模块的根目录。
+    pub command: String,
+    /// 给模型看的一句话说明（可选）。
+    #[serde(default)]
+    pub desc: String,
+    /// 参数契约（可选）：参数名 → 声明。
+    #[serde(default)]
+    pub params: Option<BTreeMap<String, crate::core::schema::Param>>,
+}
+
+impl ToolDecl {
+    /// 参数契约的声明形态（校验与渲染共用）；没声明参数 = None = 不校验。
+    pub fn schema(&self) -> Option<crate::core::schema::ToolSchema> {
+        self.params.as_ref().map(|p| crate::core::schema::ToolSchema {
+            desc: self.desc.clone(),
+            params: Some(p.clone()),
+        })
+    }
 }
 
 /// 运行能力声明的校验（纯逻辑；扫描模块时由适配层调用）：非法或重复 = 拒收并说明原因，不纠正。
@@ -42,12 +66,15 @@ pub fn check_runtimes(m: &ModuleManifest) -> Result<(), String> {
 
 /// 外部工具表的校验（纯逻辑；扫描模块时由适配层调用）：内置工具名是保留名，占用 = 拒收并说明原因。
 pub fn check_tools(m: &ModuleManifest) -> Result<(), String> {
-    for name in m.tools.keys() {
+    for (name, decl) in &m.tools {
         if crate::core::systool::is_builtin(name) {
             return Err(format!(
                 "tools 里的 {} 是核心内置工具名（保留名），模块不得占用",
                 name
             ));
+        }
+        if decl.command.trim().is_empty() {
+            return Err(format!("tools 里的 {} 没写 command（启动命令）", name));
         }
     }
     Ok(())
@@ -76,8 +103,33 @@ pub fn agent_system(prompts: &crate::core::prompt::Prompts, agent: &str, modules
             ("modules", parts),
             ("sys_tools", sys_tools.to_string()),
             ("module_tools", module_tools(prompts, modules)),
+            ("module_tool_params", module_tool_params(prompts, modules)),
         ],
     )
+}
+
+/// 模块工具的参数契约（只列**声明了**参数的）：模型据此写信封里的 args；没声明的照旧不校验。
+pub fn module_tool_params(prompts: &crate::core::prompt::Prompts, modules: &[Module]) -> String {
+    let texts = &prompts.core.tool_texts;
+    let mut sections: Vec<String> = Vec::new();
+    for m in modules {
+        for (name, decl) in &m.manifest.tools {
+            if let Some(schema) = decl.schema() {
+                sections.push(texts.render(
+                    &texts.module_tool_params_line,
+                    &[
+                        ("module", m.manifest.id.clone()),
+                        ("tool", name.clone()),
+                        ("signature", schema.render_for_prompt()),
+                    ],
+                ));
+            }
+        }
+    }
+    if sections.is_empty() {
+        return prompts.core.no_module_tool_params.clone();
+    }
+    format!("{}\n{}", prompts.core.module_tool_params_header, sections.join("\n"))
 }
 
 /// 该 agent 的外部工具清单：**按模块分组，每行一个模块**（模块 id：工具名、…）。

@@ -16,12 +16,26 @@ pub enum Verb {
     Tool,
 }
 
+/// 工具信封不合法时的**判定类别**：类别决定回给模型的修法（文案在提示词册）。
+/// 每类都是可判定的确切事实，不是猜测：说清"哪儿不对"，让模型下一轮能改对。
+#[derive(Debug, Clone, PartialEq)]
+pub enum Malformed {
+    /// 收尾未闭合：信封没写完（输出被截断），JSON 不完整。
+    Unclosed,
+    /// 字符串里出现未转义的裸控制字符（直接换行/制表符），JSON 非法。
+    RawControl { ch: char, line: usize },
+    /// 括号平衡但 JSON 语法非法（引号不配对、逗号多余等）；附 JSON 解析器报出的位置与原因。
+    Syntax(String),
+    /// JSON 合法，但信封字段不合法（缺 name、类型不对等）；附字段层面的原因。
+    Shape(String),
+}
+
 /// 一次工具调用申请：module 指明工具属于哪个模块（多模块 agent 靠它消歧；内置工具与省略时为 None）。
 #[derive(Debug, Clone)]
 pub struct ToolInvoke {
-    /// true = 输出看起来是工具信封但 JSON 非法：**绝不据此执行工具**，只记一条失败的工具行。
+    /// Some = 输出看起来是工具信封但不合法：**绝不据此执行工具**，只记一条失败的工具行。
     /// name / module 此时是"尽力打捞"的结果（可能为空），仅用于显示与日志。
-    pub malformed: bool,
+    pub malformed: Option<Malformed>,
     /// 工具所属模块 id（trim 后非空才 Some）。
     pub module: Option<String>,
     pub name: String,
@@ -69,10 +83,12 @@ fn strip_once(raw: &str, obj: &str) -> String {
 
 /// 解析模型输出为信封。尽力提取 JSON 对象，失败则降级为 say(原文)。
 pub fn parse(raw: &str) -> Reply {
+    // JSON 合法但信封字段不合法时的原因（malformed 分类用）。
+    let mut shape_why: Option<String> = None;
     if let Some(obj) = extract_json_object(raw) {
         // tool 信封优先：name 缺失即视为不合法，落回普通信封解析（不猜测）。
-        if let Ok(t) = serde_json::from_str::<ToolEnvelope>(&obj) {
-            if t.kind == "tool" {
+        match serde_json::from_str::<ToolEnvelope>(&obj) {
+            Ok(t) if t.kind == "tool" => {
                 return Reply {
                     verb: Verb::Tool,
                     // text = 信封之外的那段正文（模型常在同一轮里先写一句再发信封）；只剩信封时为空串。
@@ -80,13 +96,15 @@ pub fn parse(raw: &str) -> Reply {
                     text: strip_once(raw, &obj).trim().to_string(),
                     degraded: false,
                     tool: Some(ToolInvoke {
-                        malformed: false,
+                        malformed: None,
                         module: t.module.map(|m| m.trim().to_string()).filter(|m| !m.is_empty()),
                         name: t.name,
                         args_json: t.args.to_string(),
                     }),
                 };
             }
+            Ok(_) => {}
+            Err(e) => shape_why = Some(e.to_string()),
         }
         if let Ok(env) = serde_json::from_str::<Envelope>(&obj) {
             // type = tool 却走到这里 = ToolEnvelope 已判不合法（缺 name 等）：这是 malformed 信号，
@@ -118,7 +136,7 @@ pub fn parse(raw: &str) -> Reply {
                 text: raw[..start].trim().to_string(),
                 degraded: false,
                 tool: Some(ToolInvoke {
-                    malformed: true,
+                    malformed: Some(broken_kind(frag, None)),
                     module: Some(salvage(frag, "module")).filter(|m| !m.is_empty()),
                     name: salvage(frag, "name"),
                     args_json: head_chars(frag, 200),
@@ -140,7 +158,7 @@ pub fn parse(raw: &str) -> Reply {
                 text: text.trim().to_string(),
                 degraded: false,
                 tool: Some(ToolInvoke {
-                    malformed: true,
+                    malformed: Some(broken_kind(probe, shape_why.as_deref())),
                     module: Some(salvage(probe, "module")).filter(|m| !m.is_empty()),
                     name: salvage(probe, "name"),
                     args_json: obj.clone().unwrap_or_else(|| head_chars(raw, 200)),
@@ -149,6 +167,52 @@ pub fn parse(raw: &str) -> Reply {
         }
     }
     Reply { verb: Verb::Say, text: raw.trim().to_string(), degraded: true, tool: None }
+}
+
+/// 判定一段坏信封属于哪一类（可判定的确切事实，按此给修法）：
+/// ①字符串里的裸控制字符（最常见：内容里直接换了行）→ ②JSON 合法但字段不合法 → ③JSON 语法非法 → ④未闭合。
+fn broken_kind(frag: &str, shape_why: Option<&str>) -> Malformed {
+    if let Some((ch, at)) = raw_control_in_string(frag) {
+        return Malformed::RawControl { ch, line: line_of(frag, at) };
+    }
+    match serde_json::from_str::<serde_json::Value>(frag) {
+        Ok(_) => Malformed::Shape(shape_why.unwrap_or_default().to_string()),
+        Err(e) => {
+            if unclosed_start(frag).is_some() {
+                Malformed::Unclosed
+            } else {
+                Malformed::Syntax(e.to_string())
+            }
+        }
+    }
+}
+
+/// 第一个"在字符串内部"的裸控制字符（char < 0x20）及其字节位置。
+/// JSON 的字符串里不允许任何裸控制字符——换行必须写成 \n，这是最常见的信封事故。
+fn raw_control_in_string(s: &str) -> Option<(char, usize)> {
+    let mut in_str = false;
+    let mut esc = false;
+    for (i, c) in s.char_indices() {
+        if in_str {
+            if esc {
+                esc = false;
+            } else if c == '\\' {
+                esc = true;
+            } else if c == '"' {
+                in_str = false;
+            } else if (c as u32) < 0x20 {
+                return Some((c, i));
+            }
+        } else if c == '"' {
+            in_str = true;
+        }
+    }
+    None
+}
+
+/// 字节位置对应的行号（从 1 数起）。
+fn line_of(s: &str, at: usize) -> usize {
+    s[..at].matches('\n').count() + 1
 }
 
 /// 扫一遍输出（沿用 extract_balanced 的"字符串内不计数"规则），

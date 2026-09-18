@@ -63,17 +63,18 @@ presentation ──▶ core ◀── adapters
 | `api.rs` | **入站契约**：四个按角色的能力接口 + `CoreHandle`（核心自有线程、命令/事件）+ `EventBus` + `JobRegistry` |
 | `events.rs` | 呈现侧契约：`SessionEvent` 与介入请求的词汇（**事实**的线格式定义在这） |
 | `prompt.rs` | 提示词渲染：`{{key}}` 占位替换，缺键/缺变量报错 |
+| `schema.rs` | 工具参数契约（**声明在文本层**）：解析/校验/两种渲染（模型侧说明、JSON Schema） |
 | `module.rs` | `module.yaml` 契约、扫描结果 `Roster`、`runtimes`/`tools` 校验、agent system 合成 |
 | `packages.rs` | `package.yaml` 契约与包库事实（校验、去重、系统路径冲突预检） |
 | `exec.rs` | 执行档位（`ExecSpec`）与执行计划（`ExecPlan`）派生、虚拟机档诊断 |
 | `fence.rs` | 一次工具执行的围栏策略（纯数据：可达根、断网、工作目录） |
 | `workspace.rs` | 工作区与沙箱的纯数据定义、寻址与越界判定 |
-| `systool.rs` | 内置工具 `read` / `write` / `search` 的放行、寻址与回执文案 |
+| `systool.rs` | 内置工具 `read` / `write` / `search` 的放行、寻址、**按声明校验参数**与回执文案 |
 | `refs.rs` | 用户 `@` 引用改写成真实绝对路径 |
 | `providers.rs` | 供应商/模型登记处内存形态与「模型 → 通道」解析 |
 | `agents.rs` | agent 登记处、代拟名单落地与名字校验 |
 | `history.rs` | 会话元信息与历史视图的内存形态 |
-| `envelope.rs` | 发言信封解析（含「像工具信封但 JSON 非法」的独立信号） |
+| `envelope.rs` | 发言信封解析（含「像工具信封但不合法」的独立信号，并判定**未闭合 / 裸控制字符 / 语法错 / 字段不合法**四类） |
 | `collab_state.rs` | 「转录即状态」的协作状态派生（纯函数、可回放） |
 | `collab.rs` | 协作会话状态机与前端拉模式驱动 |
 | `engine.rs` | 讨论/执行/验收的引擎循环与工具循环 |
@@ -194,10 +195,12 @@ presentation ──▶ core ◀── adapters
 | | `rerun.user` | 返工 |
 | | `slate.system` / `slate.user` | 代拟名单 |
 | | `suggest_models.*` | 模型推荐（单 agent / 协作两种说法） |
-| | `agent.system` | agent 职责提示词骨架（模块 `system` 合成 + 内置工具说明 + 外部工具清单） |
-| | `sys_tools` | 内置工具说明块（含本 agent 的真实根目录与模块目录） |
-| | `no_agents` / `no_model` / `no_module_dirs` / `no_module_tools` | 空态说法 |
-| | `tool_texts.*` | **运行时回执**：路径校验、内置三件套回执与截断/编码标注、外部工具分派的三类失败、工具超限、信封非法、给模型看的清单骨架、追加在回复行末尾的 `（已停止）` |
+| | `agent.system` | agent 职责提示词骨架（模块 `system` 合成 + 内置工具说明 + 外部工具清单 + 模块工具参数段） |
+| | `sys_tools` | 内置工具说明块（含本 agent 的真实根目录、模块目录与 `{{tool_params}}` 参数签名） |
+| | `builtin_tools` | 内置三件套的**参数契约**：模型侧说明与调用校验的唯一来源（不写进代码） |
+| | `no_agents` / `no_model` / `no_module_dirs` / `no_module_tools` / `no_module_tool_params` | 空态说法 |
+| | `module_tool_params_header` | 模块工具参数段的小标题（模块在 `module.yaml` 里声明了 `params` 时出现） |
+| | `tool_texts.*` | **运行时回执**：路径校验、参数不符（说事实 + 回发工具签名）、内置三件套回执与行区间/截断/编码标注、外部工具分派的三类失败、工具超限、**信封不合法四类**（未闭合 / 裸控制字符 / 语法错 / 字段不合法）、给模型看的清单骨架、追加在回复行末尾的 `（已停止）` |
 
 - **界面通知**（`[建组]`、`[上限]` 这类）是呈现层文案，**不属于**提示词册。
 - **不进册子的两类**（有意留在代码里）：①**会被解析的转录锚点**（`[轮次 N]`、`[用户:需求]`、`[代拟] …`、`[id:tag]` 等，`collab_state` 与回档定位要读它们，改文案等于改状态机）；②**只给用户看的呈现层文案**（各类 `SessionEvent::Notice`、工具轨迹行的成败字样、面向界面/CLI 的 `Err`）。

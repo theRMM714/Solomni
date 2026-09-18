@@ -289,7 +289,7 @@ fn fs_modules_accepts_valid_folders_and_rejects_each_illegal_form_with_a_reason(
     std::fs::create_dir_all(dir.join("missyaml")).expect("空目录");
     put(
         "reserved",
-        "id: reserved\nbrief: b\nsystem: s\ntools:\n  read: python x.py\n",
+        "id: reserved\nbrief: b\nsystem: s\ntools:\n  read:\n    command: python x.py\n",
     );
     put(
         "badcap",

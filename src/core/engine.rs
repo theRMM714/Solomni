@@ -24,7 +24,10 @@ pub const MAX_TOOL_CALLS: usize = 8;
 #[derive(Debug, Clone)]
 pub struct ModuleTools {
     pub root: PathBuf,
+    /// 工具名 → 启动命令（模块作者在 module.yaml 的 tools.<名字>.command 里声明）。
     pub commands: BTreeMap<String, String>,
+    /// 工具名 → 参数契约（只含**声明了** params 的工具；没声明的工具不校验、不进提示词）。
+    pub books: BTreeMap<String, crate::core::schema::ToolSchema>,
 }
 
 /// 放行表：模块 id → 该模块的（目录, 工具表）。
@@ -34,7 +37,24 @@ pub fn tool_table(modules: &[crate::core::module::Module]) -> BTreeMap<String, M
     modules
         .iter()
         .map(|m| {
-            (m.manifest.id.clone(), ModuleTools { root: m.root.clone(), commands: m.manifest.tools.clone() })
+            (
+                m.manifest.id.clone(),
+                ModuleTools {
+                    root: m.root.clone(),
+                    commands: m
+                        .manifest
+                        .tools
+                        .iter()
+                        .map(|(name, decl)| (name.clone(), decl.command.clone()))
+                        .collect(),
+                    books: m
+                        .manifest
+                        .tools
+                        .iter()
+                        .filter_map(|(name, decl)| decl.schema().map(|s| (name.clone(), s)))
+                        .collect(),
+                },
+            )
         })
         .collect()
 }
@@ -106,7 +126,28 @@ fn dispatch_external(ctx: &MemberTools, inv: &ToolInvoke) -> (String, ToolOutcom
     }
     match mt.commands.get(&inv.name) {
         // 工具进程的工作目录 = 它所属模块的根目录；围栏按该模块的根收口。
-        Some(command) => (module, ctx.runner.run(&ctx.fence.at(&mt.root), command, &inv.args_json)),
+        Some(command) => {
+            // 模块声明了参数契约就按它校验（参数错了不必启动进程）：没声明就照旧把 args 原样交给工具。
+            if let Some(book) = mt.books.get(&inv.name) {
+                let full = format!("{}.{}", module, inv.name);
+                match serde_json::from_str::<serde_json::Value>(&inv.args_json) {
+                    Ok(args) => {
+                        if let Err(fault) = book.check(&args) {
+                            let why = crate::core::systool::arg_fault_text(&ctx.sandbox.texts, &full, book, &fault);
+                            return (module.clone(), deny(ctx, why));
+                        }
+                    }
+                    Err(e) => {
+                        let why = ctx
+                            .sandbox
+                            .texts
+                            .render(&ctx.sandbox.texts.bad_args_json, &[("error", e.to_string())]);
+                        return (module.clone(), deny(ctx, why));
+                    }
+                }
+            }
+            (module, ctx.runner.run(&ctx.fence.at(&mt.root), command, &inv.args_json))
+        }
         None => {
             let why = ctx.sandbox.texts.render(
                 &ctx.sandbox.texts.module_lacks_tool,
@@ -467,15 +508,20 @@ pub(crate) fn converse_with(
         match reply.tool.clone() {
             // 信封非法：**不执行任何工具**，但记一条失败的工具行把"信封不合法"回注给模型（下一轮自己改）。
             // 同样计入上限，所以模型反复输出非法信封最终会被强制收尾，不会死循环。
-            Some(inv) if inv.malformed && tools.is_some() && !forced_final => {
+            Some(inv) if inv.malformed.is_some() && tools.is_some() && !forced_final => {
                 let ctx = tools.expect("上臂已判存在");
+                // 回执按判定出的类别给修法（未闭合 / 裸控制字符 / 语法错 / 字段不合法）。
+                let why = ctx
+                    .sandbox
+                    .texts
+                    .malformed_report(inv.malformed.as_ref().expect("上臂已判存在"));
                 let view = ToolCallView {
                     speaker: speaker.to_string(),
                     module: inv.module.clone().unwrap_or_default(),
                     name: inv.name.clone(),
                     ok: false,
                     args: inv.args_json.clone(),
-                    output: ctx.sandbox.texts.malformed_note.clone(),
+                    output: why,
                     raw: raw.clone(),
                 };
                 on_tool(&view);

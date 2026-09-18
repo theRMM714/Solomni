@@ -56,8 +56,10 @@ pub struct CorePrompts {
     pub refs: RefsPrompts,
     /// 工具与路径相关的**模型侧文案**（回执、失败说明、清单行）；改文案只改册子。
     pub tool_texts: ToolTexts,
-    /// 内置文件工具说明块；变量：work_name, agent, module_dirs
+    /// 内置文件工具说明块；变量：work_name, agent, work_root, sandbox_root, module_roots, tool_params
     pub sys_tools: String,
+    /// 内置工具的参数契约（prompts.yaml 的 builtin_tools）：模型说明与调用校验的唯一来源。
+    pub builtin_tools: crate::core::schema::ToolBook,
     /// 登记处还没有 agent 时的说明（拟名单的 {{agents}} 取值）。
     pub no_agents: String,
     /// agent 没有指定模型时的说明（拟名单清单里用）。
@@ -66,6 +68,10 @@ pub struct CorePrompts {
     pub no_module_dirs: String,
     /// 模块未声明外部工具时的说明（module_tools 的取值）。
     pub no_module_tools: String,
+    /// 模块工具参数段的小标题（module_tool_params 的取值）。
+    pub module_tool_params_header: String,
+    /// 模块没有声明任何工具参数时的说明（module_tool_params 的取值）。
+    pub no_module_tool_params: String,
 }
 
 /// 工具与路径的模型侧文案：核心拼回执、失败说明与清单行时从这里取。
@@ -93,11 +99,24 @@ pub struct ToolTexts {
     /// 变量：id, root
     pub roots_module: String,
     // —— 内置工具回执（systool）——
-    pub missing_path: String,
-    pub missing_content: String,
-    pub missing_keyword: String,
     /// 变量：error
     pub bad_args_json: String,
+    // 参数不符：why 说事实、signature 是工具签名（都由 builtin_tools 的声明产生）
+    /// 变量：why, signature
+    pub arg_fault: String,
+    pub arg_not_object: String,
+    /// 变量：name
+    pub arg_missing: String,
+    /// 变量：name, want
+    pub arg_wrong_type: String,
+    /// 变量：name
+    pub arg_empty: String,
+    /// 变量：name, min
+    pub arg_too_small: String,
+    /// 变量：name, max
+    pub arg_too_big: String,
+    /// 变量：name
+    pub arg_unknown: String,
     /// 变量：name
     pub unknown_builtin: String,
     /// 变量：path, bytes, text
@@ -117,9 +136,18 @@ pub struct ToolTexts {
     pub search_hit_line: String,
     /// 变量：limit
     pub search_truncated: String,
-    /// 变量：limit
-    pub read_truncated_chars: String,
-    pub read_truncated_bytes: String,
+    /// 变量：n, line
+    pub read_line: String,
+    /// 变量：limit（拼在行尾）
+    pub read_line_capped: String,
+    /// 变量：from, to, total, next
+    pub read_more: String,
+    /// 变量：from, to
+    pub read_more_cut: String,
+    /// 变量：total
+    pub read_end: String,
+    /// 变量：total
+    pub read_past_end: String,
     pub search_truncated_bytes: String,
     pub lossy_note: String,
     // —— 外部工具分派（engine）——
@@ -138,7 +166,19 @@ pub struct ToolTexts {
     pub tool_result_wrapper: String,
     /// 变量：n
     pub tool_cap: String,
-    pub malformed_note: String,
+    // 工具信封不合法：按判定出的类别给各自改法
+    pub malformed_unclosed: String,
+    /// 变量：what, line
+    pub malformed_control: String,
+    /// 变量：why
+    pub malformed_syntax: String,
+    /// 变量：why
+    pub malformed_shape: String,
+    pub control_lf: String,
+    pub control_cr: String,
+    pub control_tab: String,
+    /// 变量：code
+    pub control_other: String,
     pub discuss_degraded: String,
     /// 追加在回复行末尾（该行重建后进上下文）
     pub stopped_suffix: String,
@@ -156,6 +196,8 @@ pub struct ToolTexts {
     pub module_listing_line: String,
     /// 变量：id, tools
     pub module_tools_line: String,
+    /// 变量：module, tool, signature
+    pub module_tool_params_line: String,
     /// 变量：id, root
     pub module_root_line: String,
     /// 变量：name, modules, model, note
@@ -170,6 +212,28 @@ impl ToolTexts {
     /// 渲染一条模型侧文案。缺变量 = 装配错误，直接暴露（禁止静默兜底）。
     pub fn render(&self, template: &str, vars: Vars) -> String {
         render(template, vars).expect("工具文案变量由调用方保证（缺变量属于装配错误）")
+    }
+
+    /// 工具信封不合法的回执：按**判定出的类别**给出对应修法（类别由 envelope 判定，文案在这里）。
+    pub fn malformed_report(&self, kind: &crate::core::envelope::Malformed) -> String {
+        match kind {
+            crate::core::envelope::Malformed::Unclosed => self.malformed_unclosed.clone(),
+            crate::core::envelope::Malformed::RawControl { ch, line } => {
+                let what = match ch {
+                    '\n' => self.control_lf.clone(),
+                    '\r' => self.control_cr.clone(),
+                    '\t' => self.control_tab.clone(),
+                    other => self.render(&self.control_other, &[("code", format!("{:04X}", *other as u32))]),
+                };
+                self.render(&self.malformed_control, &[("what", what), ("line", line.to_string())])
+            }
+            crate::core::envelope::Malformed::Syntax(why) => {
+                self.render(&self.malformed_syntax, &[("why", why.clone())])
+            }
+            crate::core::envelope::Malformed::Shape(why) => {
+                self.render(&self.malformed_shape, &[("why", why.clone())])
+            }
+        }
     }
 }
 
@@ -236,7 +300,7 @@ pub struct SuggestPrompts {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct AgentPrompts {
-    /// system 变量：agent, modules, sys_tools, module_tools
+    /// system 变量：agent, modules, sys_tools, module_tools, module_tool_params
     pub system: String,
 }
 

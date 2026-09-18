@@ -18,6 +18,7 @@ pub mod ports;
 pub mod prompt;
 pub mod providers;
 pub mod refs;
+pub mod schema;
 pub mod session;
 pub mod systool;
 pub mod workspace;
@@ -832,6 +833,7 @@ impl Core {
                 private,
                 modules,
                 texts: self.prompts.core.tool_texts.clone(),
+                builtin_tools: self.prompts.core.builtin_tools.clone(),
             });
         }
         Ok(workspace::Sandboxes { shared: roots.shared, list })

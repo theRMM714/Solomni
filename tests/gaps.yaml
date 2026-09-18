@@ -25,6 +25,27 @@
     删除本条目与 tests/quality-baseline.yaml。
   blocked_by: 需要先决定全仓格式化与「带理由 allow」这两项取舍
 
+- id: tools.native-tool-calls
+  scope: global
+  level: T1
+  why: |
+    工具调用目前只有一条通道：模型在自由文本里**手写 JSON 信封**（type/module/name/args）。
+    主流实现走供应商原生工具调用（参数由结构化槽位给出，模型不必手抄 JSON），
+    本项目却把转义与括号配对的正确性押在模型身上——真实会话里已经出现
+    "content 里一个裸换行导致整段 JSON 非法、连续三次写入失败"。
+    两侧的补救已落地（信封不合法的四类判定 + 对应修法回执、read 行区间、edit、JSON 修复端口），
+    但通道本身仍未做。
+  how: |
+    1) Chat 端口增加 tools 通道：用 core/schema.rs 的声明生成各供应商的工具声明
+       （同一声明的第二形态 to_json_schema 已写好并测过，接上后去掉 #[cfg(test)]）；
+    2) 解析回复里的 tool_calls（每项带 id），按调用 id 回填工具结果；
+    3) 与手写信封的关系（GREEN FIELD：倾向只替换"参数怎么来"这一段，text 通道保留）；
+    4) 写文件的 FREEFORM 通道（整份内容不走 JSON 转义）另议。
+  accept: |
+    供应商支持原生工具调用时，参数从结构化槽位直达工具，模型不再手写 JSON；
+    端口矩阵新增一行（原生 tool_calls × 各供应商）且 cargo test 与 node run-tests.js 全绿。
+  blocked_by: 未开始（本轮只做前两层）
+
 - id: tests.layout-migration
   scope: global
   level: T2
