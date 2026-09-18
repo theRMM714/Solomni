@@ -26,6 +26,8 @@ pub struct Tail {
     pub missing: String,
     /// 断在字符串中间 = 内容没写完（补引号会让核心拿到半截内容，只能让模型重发）。
     pub in_string: bool,
+    /// 这一段里起了几段工具信封（≥2 = 模型把两段写在同一回复里了；补末尾括号救不了）。
+    pub envelopes: usize,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -240,6 +242,8 @@ fn unclosed_scan(s: &str) -> Option<(usize, Tail)> {
     let mut in_str = false;
     let mut esc = false;
     let mut last_open: Option<usize> = None;
+    // 数一数这段文本里起了几段工具信封（只在字符串外认；内容里引用格式示例不算）。
+    let mut envelopes = 0usize;
     for (i, &b) in bytes.iter().enumerate() {
         if in_str {
             if esc {
@@ -254,6 +258,9 @@ fn unclosed_scan(s: &str) -> Option<(usize, Tail)> {
         match b {
             b'"' => in_str = true,
             b'{' | b'[' => {
+                if b == b'{' && mentions_tool_type(window(s, i, 96)) {
+                    envelopes += 1;
+                }
                 if depth == 0 {
                     last_open = Some(i);
                 }
@@ -275,10 +282,22 @@ fn unclosed_scan(s: &str) -> Option<(usize, Tail)> {
     if depth > 0 {
         // 由内到外拼出还缺的收尾字符（模型照着补就行）
         let missing: String = stack.iter().rev().map(|&b| b as char).collect();
-        Some((last_open.unwrap_or(0), Tail { missing, in_string: in_str }))
+        Some((
+            last_open.unwrap_or(0),
+            Tail { missing, in_string: in_str, envelopes: envelopes.max(1) },
+        ))
     } else {
         None
     }
+}
+
+/// 取从 at 起最多 n 字节的窗口（不劈开 UTF-8；只用于在 ASCII 模式上做识别）。
+fn window(s: &str, at: usize, n: usize) -> &str {
+    let mut end = (at + n).min(s.len());
+    while end > at && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    &s[at..end]
 }
 
 /// 文本里是否出现 "type" : "tool"（允许冒号前后空白；大小写按原样匹配）。

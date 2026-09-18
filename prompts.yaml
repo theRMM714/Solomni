@@ -277,6 +277,7 @@ core:
     # 工具信封不合法（envelope 判定类别）：每类给各自的改法，不让模型猜
     envelope_repaired: "[信封修复] {{what}}；核心按无歧义的写法修好后执行了本次调用（下次请直接输出合法信封）。"
     malformed_unclosed_brace: "工具信封没写完：**还差 {{missing}}**（字符串里的内容已经闭合，只是信封没收尾；补上就完整了）。完整格式：{\"type\":\"tool\",\"name\":\"工具名\",\"args\":{...}}。"
+    malformed_multi: "这一回复里起了 **{{n}} 段**工具信封（第一段还差 {{missing}}，后面又起了一段）：核心一次只认一段，所以没有执行任何工具。请只发一段，并把它写完整。"
     malformed_unclosed_string: "工具信封**断在字符串中间**：内容没写完，补引号会让核心拿到半截内容，所以核心不猜、也没有执行工具。请重新输出完整信封；内容太长就分次写入。"
     malformed_missing_tail: "另外：信封还差 {{missing}} 才完整（内容字符串已经闭合，补上收尾括号就对了）。"
     malformed_truncated: "注意：这次输出是**被供应商按输出长度截断的**（finish_reason=length），不是你 JSON 写坏了——请把内容分次写，或把这一步拆小。"

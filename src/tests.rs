@@ -2211,7 +2211,11 @@ fn malformed_envelopes_are_classified_so_the_model_gets_the_right_fix() {
     let r = parse("好。{\"type\":\"tool\",\"name\":\"write\",\"args\":{\"path\":\"a\"}");
     assert_eq!(
         r.tool.expect("信号").malformed,
-        Some(Malformed::Unclosed(crate::core::envelope::Tail { missing: "}".to_string(), in_string: false }))
+        Some(Malformed::Unclosed(crate::core::envelope::Tail {
+            missing: "}".to_string(),
+            in_string: false,
+            envelopes: 1,
+        }))
     );
     // 断在字符串中间：状态要说清"内容没写完"（补引号会拿到半截内容）
     let r = parse("{\"type\":\"tool\",\"name\":\"write\",\"args\":{\"path\":\"a\",\"content\":\"写了一半");
@@ -2243,6 +2247,7 @@ fn malformed_envelopes_are_classified_so_the_model_gets_the_right_fix() {
     let brace = texts.malformed_report(&Malformed::Unclosed(crate::core::envelope::Tail {
         missing: "}".to_string(),
         in_string: false,
+        envelopes: 1,
     }));
     assert!(brace.contains("还差 }"), "{}", brace);
     assert!(!brace.contains("分次写入"), "内容写完就别引导它去分次写：{}", brace);
@@ -2250,7 +2255,16 @@ fn malformed_envelopes_are_classified_so_the_model_gets_the_right_fix() {
     let cut = texts.malformed_report(&Malformed::Unclosed(crate::core::envelope::Tail {
         missing: "}\"}".to_string(),
         in_string: true,
+        envelopes: 1,
     }));
+    // 一段回复里起了两段信封：要说清"只发一段"，而不是让它去补末尾括号（真实事故的形状）
+    let multi = texts.malformed_report(&Malformed::Unclosed(crate::core::envelope::Tail {
+        missing: "}}".to_string(),
+        in_string: false,
+        envelopes: 2,
+    }));
+    assert!(multi.contains("2 段") && multi.contains("只发一段"), "{}", multi);
+    assert!(!multi.contains("补上就完整了"), "两段时不能说「补上就完整」：{}", multi);
     assert!(cut.contains("断在字符串中间") && cut.contains("分次写入"), "{}", cut);
     assert!(tab.contains("制表符"), "{}", tab);
     assert!(

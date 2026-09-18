@@ -57,7 +57,8 @@ impl EnvelopeRepair for UnambiguousRepair {
 
 /// 补收尾括号：断在字符串中间、或本来就不缺，都不修。
 fn brace_fix(raw: &str, tail: &Tail) -> Option<String> {
-    if tail.in_string || tail.missing.is_empty() {
+    // 一段回复里起了两段信封：末尾补括号补不到中间那段的收尾，补哪一段都是猜（宁缺毋滥）。
+    if tail.in_string || tail.missing.is_empty() || tail.envelopes > 1 {
         return None;
     }
     Some(format!("{}{}", raw, tail.missing))
@@ -148,6 +149,16 @@ mod tests {
         Tail {
             missing: missing.to_string(),
             in_string,
+            envelopes: 1,
+        }
+    }
+
+    /// 真实事故的形状：一段回复里起了两段信封 → 末尾补括号救不了，一律不修。
+    fn tail_multi(missing: &str) -> Tail {
+        Tail {
+            missing: missing.to_string(),
+            in_string: false,
+            envelopes: 2,
         }
     }
 
@@ -231,6 +242,18 @@ mod tests {
             .repair("{\"a\":1}", &Malformed::Unclosed(Tail::default()))
             .repaired
             .is_none());
+    }
+
+    #[test]
+    fn two_envelopes_in_one_reply_are_never_patched() {
+        // 第一段内容写完、只差一个 }，但后面又起了一段：补末尾括号补不到中间那段（真实事故）。
+        let raw = "{\"type\":\"tool\",\"name\":\"write\",\"args\":{\"path\":\"a\",\"content\":\"正文\"}\n{\"type\":\"tool\",\"name\":\"write\",\"args\":{\"path\":\"a\",\"content\":\"重写\"}";
+        let out = UnambiguousRepair.repair(raw, &Malformed::Unclosed(tail_multi("}}")));
+        assert!(
+            out.repaired.is_none() && out.what.is_empty(),
+            "两段一律不猜：{:?}",
+            out.what
+        );
     }
 
     #[test]

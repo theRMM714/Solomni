@@ -197,6 +197,8 @@ pub struct ToolTexts {
     pub envelope_repaired: String,
     /// 变量：missing（还差哪些收尾字符）
     pub malformed_unclosed_brace: String,
+    /// 变量：n, missing（一段回复里起了多段信封）
+    pub malformed_multi: String,
     pub malformed_unclosed_string: String,
     /// 变量：missing（与其它类别叠加时的附带说明）
     pub malformed_missing_tail: String,
@@ -253,6 +255,14 @@ impl ToolTexts {
 
     /// 未闭合的修法：内容写完只是少了收尾括号 → 直接说还差什么；断在字符串中间 → 才谈"分次写"。
     fn unclosed_report(&self, tail: &crate::core::envelope::Tail) -> String {
+        // 一段回复里起了两段信封：这不是"补个括号"能救的（末尾补括号补不到中间那段），
+        // 而且补哪一段都是猜——如实说清，让模型只发一段。
+        if tail.envelopes > 1 {
+            return self.render(
+                &self.malformed_multi,
+                &[("n", tail.envelopes.to_string()), ("missing", tail.missing.clone())],
+            );
+        }
         if tail.in_string {
             self.malformed_unclosed_string.clone()
         } else {
