@@ -15,10 +15,14 @@ pub struct ProcTools {
     /// 守门进程用的可执行文件（组合根注入当前程序路径）。
     pub exe: PathBuf,
     /// 产品私有区（`.home/`）：围栏授权台账落在这里，供 `--fence-clean` 精确回收。
+    /// 只有 Windows 的容器围栏需要写目录 ACL，所以下面这三项只在本平台存在。
+    #[cfg(windows)]
     pub home: PathBuf,
     /// 是否允许在本机写权限（由组合根按设置与 `SOLOMNI_FENCE_WRITE` 注入；默认否）。
+    #[cfg(windows)]
     pub write_allowed: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// 「未授权」的提示只出一次，不刷屏。
+    #[cfg(windows)]
     pub disclosed: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// 工具回执里那些收尾标记的文案（来自提示词册：它们随 [工具结果] 进模型上下文，所以不硬编码）。
     pub texts: crate::core::prompt::ToolTexts,
@@ -39,12 +43,18 @@ impl ProcTools {
         home: PathBuf,
         write_allowed: std::sync::Arc<std::sync::atomic::AtomicBool>,
     ) -> ProcTools {
+        // 其它平台没有容器围栏这一步：家目录与写权限开关不参与装配，显式忽略以免被误读成漏用。
+        #[cfg(not(windows))]
+        let _ = (&home, &write_allowed);
         ProcTools {
             exe,
-            texts,
+            #[cfg(windows)]
             home,
+            #[cfg(windows)]
             write_allowed,
+            #[cfg(windows)]
             disclosed: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            texts,
             timeout: Duration::from_secs(30),
             max_output_chars: 16_000,
             #[cfg(windows)]

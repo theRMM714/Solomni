@@ -1,7 +1,12 @@
 # 质量存量基线（TESTING.md §八「质量、冗余和静态检查」）。
 # 门禁比对基线：**超出即 quality-fail**（不许新增存量）；降到基线以下也报「基线过期」，
 # 要求同步下调基线——这样「逐渐收敛到全量硬失败」才是可判定的。
-# 由 `node run-tests.js --print-quality-baseline` 生成，不要手工编辑数字。
+#
+# **为什么分平台**：clippy、编译告警、依赖重复都随平台变——只编译当前平台的 #[cfg] 代码
+# （Windows 的容器围栏代码在 unix 上不存在，反之亦然），依赖上 Windows 走 native-tls、unix 走 rustls。
+# 格式偏差与平台无关：路径已做词法归一（tests/<目标>/../helpers/probe.rs 与 tests/helpers/probe.rs 视同一条）。
+#
+# `node run-tests.js --print-quality-baseline` 只重算**当前平台**的分区，其余原样保留；不要手工编辑数字。
 
 # cargo fmt --all -- --check 仍有偏差的文件（一次性全仓格式化是独立的整改动作）。
 fmt_deviating_files:
@@ -48,23 +53,54 @@ fmt_deviating_files:
   - tests/macos/probes/fence.rs
   - tests/windows/probes/container.rs
 
-# cargo clippy --all-targets --all-features -- -D warnings 的存量 lint 计数。
+# cargo clippy --all-targets --all-features -- -D warnings 的存量 lint 计数（按平台）。
 clippy:
-  cloned_ref_to_slice_refs: 2
-  collapsible_match: 1
-  items_after_test_module: 2
-  large_enum_variant: 1
-  ptr_arg: 1
-  single_match: 1
-  too_many_arguments: 5
-  unnecessary_cast: 7
-  unnecessary_map_or: 2
-  unnecessary_mut_passed: 1
-  unnecessary_sort_by: 1
+  windows:
+    cloned_ref_to_slice_refs: 2
+    collapsible_match: 1
+    items_after_test_module: 2
+    large_enum_variant: 1
+    ptr_arg: 1
+    single_match: 1
+    too_many_arguments: 5
+    unnecessary_cast: 7
+    unnecessary_map_or: 2
+    unnecessary_mut_passed: 1
+    unnecessary_sort_by: 1
+  linux:
+    cloned_ref_to_slice_refs: 3
+    collapsible_match: 1
+    items_after_test_module: 1
+    large_enum_variant: 1
+    ptr_arg: 1
+    single_match: 1
+    too_many_arguments: 5
+    unnecessary_map_or: 2
+    unnecessary_sort_by: 1
+  macos:
+    cloned_ref_to_slice_refs: 3
+    collapsible_match: 1
+    items_after_test_module: 1
+    large_enum_variant: 1
+    ptr_arg: 1
+    single_match: 1
+    too_many_arguments: 5
+    unnecessary_map_or: 2
+    unnecessary_sort_by: 1
 
-# cargo check --all-targets 的 rustc 层告警数（不含 clippy）。
-check_warnings: 0
+# cargo check --all-targets 的 rustc 层告警数（按平台；不含 clippy）。
+check_warnings:
+  windows: 0
+  linux: 0
+  macos: 0
 
-# cargo tree --duplicates 报出的重复 crate（多是 proc-macro 传递依赖，只能记录事实）。
+# cargo tree --duplicates 报出的重复 crate（按平台；unix 的 rustls 会多带一个 webpki-roots）。
 duplicates:
-  - syn
+  windows:
+    - syn
+  linux:
+    - syn
+    - webpki-roots
+  macos:
+    - syn
+    - webpki-roots

@@ -114,28 +114,74 @@ function globalGaps() {
 
 // ---------- T0：质量基线（存量记录 + 比对） ----------
 
-const normPath = (s) => s.replace(/\\/g, "/").replace(/^\/\/\?\//, "");
+// 词法归一：统一分隔符、去掉 \\?\ 扩展前缀、收掉 '.' 与 '..' 段。
+// 为什么必须收 '..'：同一个文件可以被多个测试目标用 #[path] 引用，rustfmt 会按"目标根 + 相对路径"
+// 报出来（unix 上是 tests/cross-platform/../helpers/probe.rs），Windows 上则报规范化后的路径。
+// 归一之后三平台得到同一份名单，同一个文件不会被算成两个。
+const normPath = (s) => {
+  const parts = s.replace(/\\/g, "/").replace(/^\/\/\?\//, "").split("/");
+  const out = [];
+  for (const seg of parts) {
+    if (seg === "" || seg === ".") continue;
+    if (seg === "..") {
+      out.pop();
+      continue;
+    }
+    out.push(seg);
+  }
+  return out.join("/");
+};
 const ROOT_NORM = normPath(ROOT) + "/";
 
 /** 读 tests/quality-baseline.yaml（受限 YAML：一级键 → 列表 / 标量映射 / 标量）。 */
+/** 基线形状：与平台无关的 fmt 名单 + **按平台分区**的三项（编译图随平台变）。 */
 function baseline() {
-  const out = { fmt_deviating_files: [], clippy: {}, check_warnings: 0, duplicates: [] };
+  const out = { fmt_deviating_files: [], clippy: {}, check_warnings: {}, duplicates: {} };
   if (!fs.existsSync(BASELINE)) return out;
-  let section = null;
+  let top = null;
+  let sub = null;
   for (const raw of fs.readFileSync(BASELINE, "utf8").split(/\r?\n/)) {
     const line = raw.replace(/\s+$/, "");
     const t = line.trim();
     if (!t || t.startsWith("#")) continue;
-    const head = line.match(/^([a-z_]+):\s*$/);
-    if (head) { section = head[1]; continue; }
-    const scalar = line.match(/^([a-z_]+):\s*(\d+)\s*$/);
-    if (scalar) { out[scalar[1]] = Number(scalar[2]); continue; }
-    const item = line.match(/^\s+-\s+(.+)$/);
-    if (item && Array.isArray(out[section])) { out[section].push(item[1].trim()); continue; }
-    const kv = line.match(/^\s+([A-Za-z0-9_-]+):\s*(\d+)\s*$/);
-    if (kv && out[section] && typeof out[section] === "object") { out[section][kv[1]] = Number(kv[2]); continue; }
+    const indent = line.length - line.replace(/^\s+/, "").length;
+    if (indent === 0) {
+      const head = t.match(/^([a-z_]+):\s*$/);
+      if (!head) continue;
+      top = head[1];
+      sub = null;
+      if (top === "clippy" || top === "check_warnings" || top === "duplicates") out[top] = {};
+      continue;
+    }
+    if (indent === 2) {
+      if (top === "fmt_deviating_files") {
+        const item = t.match(/^-\s+(.+)$/);
+        if (item) out.fmt_deviating_files.push(item[1].trim());
+        continue;
+      }
+      const kv = t.match(/^([a-z0-9_]+):\s*(.*)$/);
+      if (!kv) continue;
+      sub = kv[1];
+      if (top === "clippy") out.clippy[sub] = {};
+      else if (top === "duplicates") out.duplicates[sub] = [];
+      else if (top === "check_warnings") out.check_warnings[sub] = Number(kv[2] || 0);
+      continue;
+    }
+    if (top === "clippy" && sub) {
+      const kv = t.match(/^([a-z0-9_]+):\s*(\d+)$/);
+      if (kv) out.clippy[sub][kv[1]] = Number(kv[2]);
+    } else if (top === "duplicates" && sub) {
+      const item = t.match(/^-\s+(.+)$/);
+      if (item) out.duplicates[sub].push(item[1].trim());
+    }
   }
   return out;
+}
+
+/** 基线里属于当前平台的分区；缺分区 = 明确报错（不许静默通过）。 */
+function platformBase(base, section) {
+  const per = base[section];
+  return per && Object.prototype.hasOwnProperty.call(per, OS_KEY) ? per[OS_KEY] : null;
 }
 
 /** fmt --check：有偏差的文件集合（仓库相对路径、/ 分隔）。 */
@@ -264,42 +310,74 @@ function structuralAudit() {
   return { problems, targets: targets.map((t) => t.name), testFiles: allTestFiles.length };
 }
 
-function baselineYaml(m) {
+/** 按固定顺序输出平台分区，保证文件 diff 稳定。 */
+const PLATFORMS = ["windows", "linux", "macos"];
+
+function baselineYaml(m, old) {
+  // 只重算**当前平台**的分区；其它平台的分区原样保留（在三台机器之外的机器上跑不能把它们抹掉）。
+  const clip = Object.assign({}, (old && old.clippy) || {});
+  clip[OS_KEY] = m.clippy;
+  const warn = Object.assign({}, (old && old.check_warnings) || {});
+  warn[OS_KEY] = m.warnings;
+  const dup = Object.assign({}, (old && old.duplicates) || {});
+  dup[OS_KEY] = m.duplicates;
+
   const L = [];
   L.push("# 质量存量基线（TESTING.md §八「质量、冗余和静态检查」）。");
   L.push("# 门禁比对基线：**超出即 quality-fail**（不许新增存量）；降到基线以下也报「基线过期」，");
   L.push("# 要求同步下调基线——这样「逐渐收敛到全量硬失败」才是可判定的。");
-  L.push("# 由 \`node run-tests.js --print-quality-baseline\` 生成，不要手工编辑数字。");
+  L.push("#");
+  L.push("# **为什么分平台**：clippy、编译告警、依赖重复都随平台变——只编译当前平台的 #[cfg] 代码");
+  L.push("# （Windows 的容器围栏代码在 unix 上不存在，反之亦然），依赖上 Windows 走 native-tls、unix 走 rustls。");
+  L.push("# 格式偏差与平台无关：路径已做词法归一（tests/<目标>/../helpers/probe.rs 与 tests/helpers/probe.rs 视同一条）。");
+  L.push("#");
+  L.push("# \`node run-tests.js --print-quality-baseline\` 只重算**当前平台**的分区，其余原样保留；不要手工编辑数字。");
   L.push("");
   L.push("# cargo fmt --all -- --check 仍有偏差的文件（一次性全仓格式化是独立的整改动作）。");
   L.push("fmt_deviating_files:");
   for (const f of m.fmt) L.push("  - " + f);
   L.push("");
-  L.push("# cargo clippy --all-targets --all-features -- -D warnings 的存量 lint 计数。");
+  L.push("# cargo clippy --all-targets --all-features -- -D warnings 的存量 lint 计数（按平台）。");
   L.push("clippy:");
-  for (const k of Object.keys(m.clippy).sort()) L.push("  " + k + ": " + m.clippy[k]);
+  for (const p of PLATFORMS) {
+    const c = clip[p];
+    if (!c) continue;
+    L.push("  " + p + ":");
+    for (const k of Object.keys(c).sort()) L.push("    " + k + ": " + c[k]);
+  }
   L.push("");
-  L.push("# cargo check --all-targets 的 rustc 层告警数（不含 clippy）。");
-  L.push("check_warnings: " + m.warnings);
+  L.push("# cargo check --all-targets 的 rustc 层告警数（按平台；不含 clippy）。");
+  L.push("check_warnings:");
+  for (const p of PLATFORMS) if (warn[p] !== undefined) L.push("  " + p + ": " + warn[p]);
   L.push("");
-  L.push("# cargo tree --duplicates 报出的重复 crate（多是 proc-macro 传递依赖，只能记录事实）。");
+  L.push("# cargo tree --duplicates 报出的重复 crate（按平台；unix 的 rustls 会多带一个 webpki-roots）。");
   L.push("duplicates:");
-  for (const d of m.duplicates) L.push("  - " + d);
+  for (const p of PLATFORMS) {
+    if (!dup[p]) continue;
+    L.push("  " + p + ":");
+    for (const d of dup[p]) L.push("    - " + d);
+  }
   L.push("");
   return L.join("\n");
 }
 
 function printBaseline() {
+  const old = baseline(); // 其它平台的分区要保住
   const fmt = sh("cargo", ["fmt", "--all", "--", "--check"]);
   const clippy = sh("cargo", ["clippy", "--all-targets", "--all-features", "--color", "never", "--", "-D", "warnings"]);
   const check = sh("cargo", ["check", "--all-targets", "--color", "never"]);
   const tree = sh("cargo", ["tree", "--duplicates", "--color", "never"]);
-  process.stdout.write(baselineYaml({
-    fmt: [...fmtDeviations(fmt.out)].sort(),
-    clippy: clippyLints(clippy.out),
-    warnings: checkWarnings(check.out),
-    duplicates: duplicateCrates(tree.out),
-  }));
+  process.stdout.write(
+    baselineYaml(
+      {
+        fmt: [...fmtDeviations(fmt.out)].sort(),
+        clippy: clippyLints(clippy.out),
+        warnings: checkWarnings(check.out),
+        duplicates: duplicateCrates(tree.out),
+      },
+      old,
+    ),
+  );
 }
 
 function main() {
@@ -374,30 +452,53 @@ function main() {
   } else {
     const r = sh("cargo", ["clippy", "--all-targets", "--all-features", "--color", "never", "--", "-D", "warnings"]);
     const got = clippyLints(r.out);
-    const d = countDiff(got, base.clippy);
-    const ok = !d.extra.length && !d.missing.length;
-    const total = Object.values(got).reduce((a, b) => a + b, 0);
-    announceDone(ok ? "完成" : "基线不符", ok ? "存量 " + total + " 处" : "新增 " + d.extra.length + " 类 / 过期 " + d.missing.length + " 类");
-    steps.push({
-      step: "T0 静态检查（clippy）",
-      status: ok ? "pass" : "quality-fail",
-      detail: ok ? "" : [d.extra.length ? "超基线：" + d.extra.join("、") : "", d.missing.length ? "基线过期（数量已下降，请重新生成基线）：" + d.missing.join("、") : ""].filter(Boolean).join("；"),
-      raw: ok ? null : r.out.slice(-1200),
-    });
+    const mine = platformBase(base, "clippy");
+    if (!mine) {
+      // 缺当前平台的分区 = 门禁无法判定：明确报错，绝不静默通过。
+      announceDone("基线缺分区", OS_KEY);
+      steps.push({
+        step: "T0 静态检查（clippy）",
+        status: "quality-fail",
+        detail: "基线里没有 " + OS_KEY + " 分区：请在该平台上跑 node run-tests.js --print-quality-baseline",
+        raw: null,
+      });
+    } else {
+      const d = countDiff(got, mine);
+      const ok = !d.extra.length && !d.missing.length;
+      const total = Object.values(got).reduce((a, b) => a + b, 0);
+      announceDone(ok ? "完成" : "基线不符", ok ? "存量 " + total + " 处（" + OS_KEY + "）" : "新增 " + d.extra.length + " 类 / 过期 " + d.missing.length + " 类");
+      steps.push({
+        step: "T0 静态检查（clippy）",
+        status: ok ? "pass" : "quality-fail",
+        detail: ok ? "" : [d.extra.length ? "超基线：" + d.extra.join("、") : "", d.missing.length ? "基线过期（数量已下降，请重新生成基线）：" + d.missing.join("、") : ""].filter(Boolean).join("；"),
+        raw: ok ? null : r.out.slice(-1200),
+      });
+    }
   }
 
   announce("T0 编译告警");
   {
     const got = checkWarnings(check.out);
-    const d = countDiff({ warnings: got }, { warnings: base.check_warnings });
-    const ok = !d.extra.length && !d.missing.length;
-    announceDone(ok ? "完成" : "基线不符", ok ? "存量 " + got + " 条" : "新增 " + d.extra.length + " / 过期 " + d.missing.length);
-    steps.push({
-      step: "T0 编译告警",
-      status: ok ? "pass" : "quality-fail",
-      detail: ok ? "" : [d.extra.length ? "新增 rustc 告警：" + d.extra.join("、") : "", d.missing.length ? "基线过期（告警已减少，请重新生成基线）" : ""].filter(Boolean).join("；"),
-      raw: ok ? null : check.out.slice(-1200),
-    });
+    const mine = platformBase(base, "check_warnings");
+    if (mine === null) {
+      announceDone("基线缺分区", OS_KEY);
+      steps.push({
+        step: "T0 编译告警",
+        status: "quality-fail",
+        detail: "基线里没有 " + OS_KEY + " 分区：请在该平台上跑 node run-tests.js --print-quality-baseline",
+        raw: null,
+      });
+    } else {
+      const d = countDiff({ warnings: got }, { warnings: mine });
+      const ok = !d.extra.length && !d.missing.length;
+      announceDone(ok ? "完成" : "基线不符", ok ? "存量 " + got + " 条（" + OS_KEY + "）" : "新增 " + d.extra.length + " / 过期 " + d.missing.length);
+      steps.push({
+        step: "T0 编译告警",
+        status: ok ? "pass" : "quality-fail",
+        detail: ok ? "" : [d.extra.length ? "新增 rustc 告警：" + d.extra.join("、") : "", d.missing.length ? "基线过期（告警已减少，请重新生成基线）" : ""].filter(Boolean).join("；"),
+        raw: ok ? null : check.out.slice(-1200),
+      });
+    }
   }
 
   announce("T0 依赖重复（cargo tree）");
@@ -406,15 +507,26 @@ function main() {
     steps.push({ step: "T0 依赖重复（cargo tree）", status: "env-skip", detail: "cargo tree 不可用" });
   } else {
     const r = sh("cargo", ["tree", "--duplicates", "--color", "never"]);
-    const d = setDiff(duplicateCrates(r.out), base.duplicates);
-    const ok = !d.extra.length && !d.missing.length;
-    announceDone(ok ? "完成" : "基线不符", ok ? "存量 " + base.duplicates.length + " 个" : "新增 " + d.extra.length + " / 过期 " + d.missing.length);
-    steps.push({
-      step: "T0 依赖重复（cargo tree）",
-      status: ok ? "pass" : "quality-fail",
-      detail: ok ? "" : [d.extra.length ? "新增重复依赖：" + d.extra.join("、") : "", d.missing.length ? "基线过期（重复已消失，请重新生成基线）：" + d.missing.join("、") : ""].filter(Boolean).join("；"),
-      raw: ok ? null : r.out.slice(-1200),
-    });
+    const mine = platformBase(base, "duplicates");
+    if (!mine) {
+      announceDone("基线缺分区", OS_KEY);
+      steps.push({
+        step: "T0 依赖重复（cargo tree）",
+        status: "quality-fail",
+        detail: "基线里没有 " + OS_KEY + " 分区：请在该平台上跑 node run-tests.js --print-quality-baseline",
+        raw: null,
+      });
+    } else {
+      const d = setDiff(duplicateCrates(r.out), mine);
+      const ok = !d.extra.length && !d.missing.length;
+      announceDone(ok ? "完成" : "基线不符", ok ? "存量 " + mine.length + " 个（" + OS_KEY + "）" : "新增 " + d.extra.length + " / 过期 " + d.missing.length);
+      steps.push({
+        step: "T0 依赖重复（cargo tree）",
+        status: ok ? "pass" : "quality-fail",
+        detail: ok ? "" : [d.extra.length ? "新增重复依赖：" + d.extra.join("、") : "", d.missing.length ? "基线过期（重复已消失，请重新生成基线）：" + d.missing.join("、") : ""].filter(Boolean).join("；"),
+        raw: ok ? null : r.out.slice(-1200),
+      });
+    }
   }
 
   // L1：crate 内联单元测试

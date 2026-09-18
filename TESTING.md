@@ -354,6 +354,13 @@ Fixture 必须：
 格式、clippy、编译告警、依赖重复按 `tests/quality-baseline.yaml` 比对存量。存量清零是全局长期目标（`tests/gaps.yaml`）。
 **基线不是豁免**：超出基线一样是 `quality-fail`，只有"已是存量"才不重复记账。
 
+**基线按平台分区**，因为这三项本来就随平台变：clippy 只编译当前平台的 `#[cfg]` 代码（Windows 的容器围栏
+在 unix 上不存在，反之亦然）；依赖上 Windows 走 native-tls、unix 走 rustls（多一个 `webpki-roots`）。
+`clippy` / `check_warnings` / `duplicates` 各按 `windows` / `linux` / `macos` 分段；**当前平台缺分区 = `quality-fail`**，
+不许静默通过。格式偏差与平台无关：路径先做**词法归一**（收掉 `.` 与 `..` 段），
+于是同一个文件被多个目标用 `#[path]` 引用时（rustfmt 在 unix 上会报成 `tests/<目标>/../helpers/probe.rs`）
+不会被算成两个。`--print-quality-baseline` **只重算当前平台的分区**，其余原样保留。
+
 ## 九、执行入口与报告
 
 ### 快速开发检查
