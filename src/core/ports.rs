@@ -21,11 +21,11 @@ pub enum Chunk {
     Reasoning(String),
 }
 
-/// 一次模型会话：收消息列表，回原始文本。
+/// 一次模型会话：收消息列表，回正文 + 供应商给的**结束原因**。
 /// stream = 要求供应商流式返回；on 逐片回调（非流式实现不回调）。
 /// on 返回 false = 调用方要求中止，实现方必须立即停止读取并返回已产出的正文。
 pub trait Chat {
-    fn complete(&mut self, messages: &[Msg], stream: bool, on: &mut dyn FnMut(Chunk) -> bool) -> Raw;
+    fn complete(&mut self, messages: &[Msg], stream: bool, on: &mut dyn FnMut(Chunk) -> bool) -> Completion;
 }
 
 /// 拥有所有权的会话通道（装箱端口对象；会话可跨线程移动，Web 泵线程所需）。
@@ -44,8 +44,34 @@ impl Msg {
     pub fn assistant(content: impl Into<String>) -> Msg { Msg { role: "assistant".into(), content: content.into() } }
 }
 
-/// 一次补全的原始文本输出。
-pub type Raw = String;
+/// 一次补全的结果：正文 + 供应商给的**结束原因**（原样带回，不翻译）。
+/// 为什么必须有它：只有把"模型写完自己停了"与"被输出长度截断"分开，核心才能给对修法。
+/// 真实会话里模型手写了一个 3KB 的工具信封、尾巴少一个括号，我们看不出是被截断还是它自己写漏，
+/// 只能笼统让它重发——它照着"内容过长"的假设去分两次写，白跑两轮。
+#[derive(Debug, Clone)]
+pub struct Completion {
+    /// 供应商返回的正文（原样，不做任何修补）。
+    pub raw: String,
+    /// 结束原因原样（供应商没给 = 空串）：stop / length / content_filter / tool_calls …
+    pub finish: String,
+}
+
+impl Completion {
+    /// 没有结束原因的通道（演示通道、测试替身、本地失败兜底）：只有正文。
+    pub fn text(raw: impl Into<String>) -> Completion {
+        Completion { raw: raw.into(), finish: String::new() }
+    }
+
+    /// 这一次是不是被输出长度截断的。
+    pub fn truncated(&self) -> bool {
+        truncated(&self.finish)
+    }
+}
+
+/// 结束原因算不算"被截断"：各家取值都归到这里，判定只写一次。
+pub fn truncated(finish: &str) -> bool {
+    matches!(finish, "length" | "max_tokens" | "max_output_tokens")
+}
 
 /// 登记处持久化端口：供应商与模型分开保存（机制/文件名在适配层）。
 pub trait SettingsStore {

@@ -122,6 +122,8 @@ impl AgentSession {
         for round in rounds {
             let text = round.text.trim().to_string();
             let has_line = !text.is_empty() || !round.reasoning.trim().is_empty();
+            // 供应商说是长度截断：如实写在行尾（与"已停止"同一套做法）
+            let truncated = round.truncated();
             let mut reasoning = if round.reasoning.trim().is_empty() { None } else { Some(round.reasoning.clone()) };
             match round.tool {
                 Some(run) => {
@@ -134,6 +136,9 @@ impl AgentSession {
                         }
                         if stopped {
                             line.push_str(&self.tool_texts.stopped_suffix);
+                        }
+                        if truncated {
+                            line.push_str(&self.tool_texts.truncated_suffix);
                         }
                         out.push(SessionEvent::Transcript(vec![self.line(line, reasoning.take(), None)]));
                     }
@@ -160,6 +165,9 @@ impl AgentSession {
                         }
                         if stopped {
                             line.push_str(&self.tool_texts.stopped_suffix);
+                        }
+                        if truncated {
+                            line.push_str(&self.tool_texts.truncated_suffix);
                         }
                         out.push(SessionEvent::Transcript(vec![self.line(line, reasoning.take(), None)]));
                     }

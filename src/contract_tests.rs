@@ -69,10 +69,10 @@ impl crate::core::ports::Chat for SlowChat {
         _m: &[crate::core::ports::Msg],
         _stream: bool,
         on: &mut dyn FnMut(crate::core::ports::Chunk) -> bool,
-    ) -> String {
+    ) -> crate::core::ports::Completion {
         use std::sync::atomic::Ordering;
         if !on(crate::core::ports::Chunk::Start) {
-            return String::new();
+            return crate::core::ports::Completion::text("");
         }
         for _ in 0..6_000 {
             self.ticks.fetch_add(1, Ordering::Relaxed);
@@ -81,7 +81,7 @@ impl crate::core::ports::Chat for SlowChat {
             }
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
-        "{\"type\":\"say\",\"text\":\"（慢通道）收到停止\"}".to_string()
+        crate::core::ports::Completion::text("{\"type\":\"say\",\"text\":\"（慢通道）收到停止\"}")
     }
 }
 

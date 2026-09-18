@@ -28,7 +28,7 @@ fn call(chat: &mut dyn Chat, stream: bool) -> (String, Vec<String>) {
         });
         true
     });
-    (out, seen)
+    (out.raw, seen)
 }
 
 // ---------- FakeChat：成功 / 空结果 / 记录 ----------
@@ -93,10 +93,12 @@ fn fake_chat_streaming_emits_start_then_one_text_chunk() {
 fn fake_chat_abort_at_start_returns_empty_and_emits_nothing_more() {
     let mut chat = FakeChat::new(vec!["不该出现".to_string()]);
     let mut seen: Vec<String> = Vec::new();
-    let out = chat.complete(&[Msg::user("停")], true, &mut |c| {
-        seen.push(format!("{:?}", c));
-        false
-    });
+    let out = chat
+        .complete(&[Msg::user("停")], true, &mut |c| {
+            seen.push(format!("{:?}", c));
+            false
+        })
+        .raw;
     assert_eq!(out, "", "Start 阶段中止 = 还没产出正文");
     assert_eq!(seen.len(), 1, "中止后不得再回调：{:?}", seen);
 }
@@ -105,11 +107,13 @@ fn fake_chat_abort_at_start_returns_empty_and_emits_nothing_more() {
 fn fake_chat_abort_at_text_keeps_the_produced_text() {
     let mut chat = FakeChat::new(vec!["半句".to_string()]);
     let mut seen: Vec<String> = Vec::new();
-    let out = chat.complete(&[Msg::user("停")], true, &mut |c| {
-        let is_text = matches!(c, Chunk::Text(_));
-        seen.push(format!("{:?}", c));
-        !is_text
-    });
+    let out = chat
+        .complete(&[Msg::user("停")], true, &mut |c| {
+            let is_text = matches!(c, Chunk::Text(_));
+            seen.push(format!("{:?}", c));
+            !is_text
+        })
+        .raw;
     assert_eq!(
         out, "半句",
         "已经吐出的正文照常返回（与 http_chat 同一套中止语义）"

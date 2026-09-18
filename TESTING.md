@@ -300,7 +300,7 @@ Fixture 必须：
 
 | 端口 | 当前/计划替身 | 交互记录 | 失败注入 | 取消/超时 | 真实适配器 | 当前状态 |
 | --- | --- | --- | --- | --- | --- | --- |
-| `Chat` | `FakeChat`、`SharedScript` | `FakeChat.calls` | 脚本回放非法信封 | `on` 返回 false 中止（FakeChat / HttpChat） | `HttpChat` | 已验收 |
+| `Chat` | `FakeChat`、`SharedScript`、`TruncChat` | `FakeChat.calls` | 脚本回放非法信封 | `on` 返回 false 中止（FakeChat / HttpChat） | 结束原因如实带回（非流式 `stop` / 流式 `length`，两条路径都测） | `HttpChat` | 已验收 |
 | `ChatGateway` | `ScriptGateway`、`DemoGateway` | 通道脚本可观察 | 无通道回落（如实告知） | 不适用 | `HttpGateway` | 已验收 |
 | `SettingsStore` | `InMemorySettings` | 内存状态可观察 | `fail_with` | 不适用 | `YamlSettingsStore` | 已验收 |
 | `ModelCatalog` | `FakeCatalog` | `seen` | `fail_with` | 不适用 | `HttpModelCatalog` | 已验收 |

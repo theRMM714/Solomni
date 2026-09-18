@@ -9,7 +9,8 @@ use crate::core::history::{AgentMeta, HistoryView, SessionMeta};
 use crate::core::exec::{self, Diagnosis, ExecSpec, Tier};
 use crate::core::packages::{Library, PackageManifest};
 use crate::core::ports::{
-    BoxedChat, Chat, ChatGateway, Chunk, FileRead, HistoryStore, ModelCatalog, ModuleSource, Msg, PackageSource,
+    BoxedChat, Chat, ChatGateway, Chunk, Completion, FileRead, HistoryStore, ModelCatalog, ModuleSource, Msg,
+    PackageSource,
     PromptSource, SettingsStore, SysIo, ToolOutcome, ToolRunner, Workspace,
 };
 use crate::core::prompt::{render, Prompts};
@@ -525,13 +526,10 @@ pub(crate) struct SharedScript {
 }
 
 impl Chat for SharedScript {
-    fn complete(&mut self, _messages: &[Msg], _stream: bool, _on: &mut dyn FnMut(Chunk) -> bool) -> String {
+    fn complete(&mut self, _messages: &[Msg], _stream: bool, _on: &mut dyn FnMut(Chunk) -> bool) -> Completion {
         let mut q = self.q.lock().expect("脚本队列锁");
-        if q.len() > 1 {
-            q.remove(0)
-        } else {
-            q.first().cloned().unwrap_or_default()
-        }
+        let text = if q.len() > 1 { q.remove(0) } else { q.first().cloned().unwrap_or_default() };
+        Completion::text(text)
     }
 }
 
@@ -685,6 +683,30 @@ fn core_with_pkgs(
 
 pub(crate) fn gw(member: BTreeMap<String, Vec<String>>, core: Vec<String>) -> ScriptGateway {
     ScriptGateway { member, core: Arc::new(Mutex::new(core)) }
+}
+
+/// 指定任意网关 + 指定内存文件系统的装配（既换通道又要断言落盘的用例用它）。
+pub(crate) fn core_with_io_gateway(
+    modules: Vec<Module>,
+    gateway: impl ChatGateway + Send + Sync + 'static,
+    io: Arc<InMemorySysIo>,
+) -> Core {
+    Core::new(
+        Arc::new(InMemorySettings::new()),
+        Arc::new(InMemoryHistory::new()),
+        Arc::new(InMemoryWorkspace::new()),
+        Arc::new(VecSource(modules)),
+        Arc::new(InMemoryPackages::empty()),
+        Arc::new(NoFenceHost),
+        Arc::new(gateway),
+        Arc::new(FakeCatalog::new(vec!["m".to_string()])),
+        Arc::new(SilentRunner),
+        io,
+        Arc::new(NoRepair),
+        Box::new(TestPrompts::ok()),
+        Arc::new(crate::core::ports::NoopLog),
+    )
+    .expect("内存装配不应失败")
 }
 
 /// 指定任意网关的装配（入站契约测试用：需要自定义时序的通道）。
@@ -1728,6 +1750,7 @@ fn member_with_tools(id: &str, script: Vec<String>, runner: Arc<impl ToolRunner 
         modules,
         observations: crate::core::systool::Observations::default(),
         repair: Arc::new(NoRepair),
+        log: Arc::new(crate::core::ports::NoopLog),
         runner,
         sandbox: test_sandbox("m0", &[]),
         io: Arc::new(InMemorySysIo::new()),
@@ -2754,6 +2777,105 @@ fn builtin_write_needs_a_complete_prior_read_of_an_existing_file() {
     let stale = run(&mut obs3, "write", format!("{{\"path\":\"{}\",\"content\":\"我的版本\"}}", note));
     assert!(!stale.ok && stale.output.contains("又被改动过"), "{}", stale.output);
     assert_eq!(io.get(&["demo", "work", "note.txt"]).as_deref(), Some("别人改过的内容"), "拒不覆盖");
+}
+
+/// 被供应商按长度截断的通道替身：正文照发，但 finish_reason = length。
+pub(crate) struct TruncChat {
+    pub(crate) script: Vec<String>,
+}
+
+impl Chat for TruncChat {
+    fn complete(&mut self, _m: &[Msg], _s: bool, _on: &mut dyn FnMut(Chunk) -> bool) -> Completion {
+        let text = if self.script.len() > 1 { self.script.remove(0) } else { self.script.first().cloned().unwrap_or_default() };
+        Completion { raw: text, finish: "length".to_string() }
+    }
+}
+
+/// 一律回"被截断"的网关（验核心能不能把截断与写错分开）。
+pub(crate) struct TruncGateway {
+    pub(crate) script: Vec<String>,
+}
+
+impl ChatGateway for TruncGateway {
+    fn member_channel(&self, _c: Option<&Channel>, _id: &str) -> (BoxedChat, Option<String>) {
+        (Box::new(TruncChat { script: self.script.clone() }), None)
+    }
+    fn core_channel(&self, _c: Option<&Channel>) -> (BoxedChat, bool) {
+        (Box::new(TruncChat { script: self.script.clone() }), false)
+    }
+}
+
+/// 被用户中止的通道：回调一律返回 false（调用方要求停止），但仍返回一段"只差一个括号"的信封。
+pub(crate) struct AbortChat {
+    pub(crate) raw: String,
+}
+
+impl Chat for AbortChat {
+    fn complete(&mut self, _m: &[Msg], _s: bool, on: &mut dyn FnMut(Chunk) -> bool) -> Completion {
+        let _ = on(Chunk::Start);
+        Completion::text(self.raw.clone())
+    }
+}
+
+pub(crate) struct AbortGateway {
+    pub(crate) raw: String,
+}
+
+impl ChatGateway for AbortGateway {
+    fn member_channel(&self, _c: Option<&Channel>, _id: &str) -> (BoxedChat, Option<String>) {
+        (Box::new(AbortChat { raw: self.raw.clone() }), None)
+    }
+    fn core_channel(&self, _c: Option<&Channel>) -> (BoxedChat, bool) {
+        (Box::new(AbortChat { raw: self.raw.clone() }), false)
+    }
+}
+
+#[test]
+fn an_aborted_generation_never_executes_a_repairable_envelope() {
+    // 被停止的生成留下的"只差一个括号"的信封：即便修复端口能修，也绝不执行——
+    // 半截信封是停下来的产物，不是模型的意图（真实会话里第一轮三次都是这个形状）。
+    let note = s(&["w", "a", "note.txt"]);
+    let raw = format!(
+        "{{\"type\":\"tool\",\"name\":\"write\",\"args\":{{\"path\":\"{}\",\"content\":\"正文\"}}",
+        note
+    );
+    let io = Arc::new(InMemorySysIo::new());
+    // 中止网关：这一轮的通道回调返回 false（调用方要求停止）
+    let mut core = core_with_io_gateway(vec![module_of("a")], AbortGateway { raw }, Arc::clone(&io));
+    let sid = core.create_work(work("w", WorkMode::Single, &["a"])).unwrap().sid;
+    let events = with_live(|l| core.single_say(&sid, "写", l)).unwrap();
+    let views = tool_views(&events);
+    assert!(!views[0].ok, "被停止的生成不执行工具：{}", views[0].output);
+    assert!(views[0].output.contains("还差"), "要如实说清信封没写完：{}", views[0].output);
+    assert_eq!(io.get(&["w", "a", "note.txt"]), None, "绝不落盘");
+}
+
+#[test]
+fn a_truncated_output_is_reported_as_truncation_not_as_a_bad_envelope() {
+    // 供应商说 finish_reason=length：回执要指出"是被按长度截断"，而不是让模型去查括号；
+    // 真实会话里正是分辨不出这两者，模型照着"内容过长"的假设白跑了两轮。
+    let broken = "{\"type\":\"tool\",\"name\":\"write\",\"args\":{\"path\":\"a\",\"content\":";
+    let mut core = core_with_gateway(
+        vec![module_of("a")],
+        TruncGateway { script: vec![broken.to_string(), "{\"type\":\"say\",\"text\":\"知道了\"}".to_string()] },
+    );
+    let sid = core.create_work(work("w", WorkMode::Single, &["a"])).unwrap().sid;
+    let events = with_live(|l| core.single_say(&sid, "写", l)).unwrap();
+    let views = tool_views(&events);
+    assert!(!views[0].ok);
+    assert!(views[0].output.contains("被供应商按输出长度截断"), "{}", views[0].output);
+    assert!(views[0].output.contains("还差"), "还差什么也要说：{}", views[0].output);
+
+    // 纯文本轮被截断：行尾如实标注（与"已停止"同一套做法），模型与用户都看得到
+    let mut core2 = core_with_gateway(vec![module_of("a")], TruncGateway { script: vec!["半句话".to_string()] });
+    let sid2 = core2.create_work(work("w", WorkMode::Single, &["a"])).unwrap().sid;
+    let events2 = with_live(|l| core2.single_say(&sid2, "说", l)).unwrap();
+    let rows = transcript_rows(&events2);
+    assert!(
+        rows.iter().any(|r| r.1.contains("半句话") && r.1.contains("（本段被输出长度截断）")),
+        "{:?}",
+        rows
+    );
 }
 
 #[test]

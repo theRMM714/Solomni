@@ -48,6 +48,8 @@ pub struct CollabSession {
     io: Arc<dyn SysIo + Send + Sync>,
     /// 信封修复端口（手写信封不合法时的无歧义补救）。
     repair: Arc<dyn crate::core::ports::EnvelopeRepair + Send + Sync>,
+    /// 运行日志（工具循环里"输出被长度截断"这类事实落盘）。
+    log: Arc<dyn crate::core::ports::Log + Send + Sync>,
     /// 运行包库来源（工具可用性按它判定）。
     packages: Arc<dyn PackageSource + Send + Sync>,
     /// 本会话的执行选型（档位 + 运行包定版）。
@@ -67,6 +69,7 @@ impl CollabSession {
         tools: Arc<dyn ToolRunner + Send + Sync>,
         io: Arc<dyn SysIo + Send + Sync>,
         repair: Arc<dyn crate::core::ports::EnvelopeRepair + Send + Sync>,
+        log: Arc<dyn crate::core::ports::Log + Send + Sync>,
         packages: Arc<dyn PackageSource + Send + Sync>,
         spec: ExecSpec,
         roster: Vec<AgentMeta>,
@@ -95,6 +98,7 @@ impl CollabSession {
             tools,
             io,
             repair,
+            log,
             packages,
             spec,
             sandboxes,
@@ -174,7 +178,7 @@ impl CollabSession {
             ],
         );
         let msgs = vec![Msg::system(self.prompts.core.slate.system.clone()), Msg::user(user)];
-        let raw = self.core_chat.complete(&msgs, false, &mut |_| true);
+        let raw = self.core_chat.complete(&msgs, false, &mut |_| true).raw;
         let parsed = envelope::extract_json_object(&raw).and_then(|obj| serde_json::from_str::<SlateReply>(&obj).ok());
         let Some(slate) = parsed else {
             sink(SessionEvent::Notice("[错误] 代拟失败（模型无响应格式）。请直接点名 agent。".into()));
@@ -381,6 +385,7 @@ impl CollabSession {
                 modules: crate::core::engine::tool_table(&modules),
                 observations: crate::core::systool::Observations::default(),
                 repair: Arc::clone(&self.repair),
+                log: Arc::clone(&self.log),
                 runner: Arc::clone(&self.tools),
                 sandbox,
                 io: Arc::clone(&self.io),
@@ -433,6 +438,7 @@ impl CollabSession {
         tools: Arc<dyn ToolRunner + Send + Sync>,
         io: Arc<dyn SysIo + Send + Sync>,
         repair: Arc<dyn crate::core::ports::EnvelopeRepair + Send + Sync>,
+        log: Arc<dyn crate::core::ports::Log + Send + Sync>,
         packages: Arc<dyn PackageSource + Send + Sync>,
         meta: &SessionMeta,
         events: &[serde_json::Value],
@@ -479,6 +485,7 @@ impl CollabSession {
             tools,
             io,
             repair,
+            log,
             packages,
             spec: meta.exec.clone(),
             sandboxes,

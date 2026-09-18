@@ -514,6 +514,14 @@ fn sse_delta(content: &str) -> String {
     )
 }
 
+/// 收尾分片：只带 finish_reason（供应商通常这样收尾）。
+fn sse_finish(reason: &str) -> String {
+    format!(
+        "data: {}\n\n",
+        serde_json::json!({"choices": [{"delta": {}, "finish_reason": reason}]})
+    )
+}
+
 fn gateway() -> HttpGateway {
     let log: Arc<dyn Log + Send + Sync> = Arc::new(NoopLog);
     HttpGateway::with_log(log, memo_new())
@@ -532,7 +540,9 @@ fn http_gateway_talks_to_a_real_endpoint_on_loopback() {
         "有通道时不得回落演示，也不得编造回落通知：{:?}",
         notice
     );
-    let out = chat.complete(&[Msg::user("你好")], false, &mut |_| true);
+    let out = chat
+        .complete(&[Msg::user("你好")], false, &mut |_| true)
+        .raw;
     assert_eq!(out, "来自本机假供应商");
     let hits = mock.requests();
     assert_eq!(hits.len(), 1, "端点一次命中就不再探测候选：{:?}", hits);
@@ -545,14 +555,16 @@ fn http_chat_streams_chunks_and_stops_when_the_caller_aborts() {
     let mock = Mock::start(vec![(200, "text/event-stream", body)]);
     let (mut chat, _) = gateway().member_channel(Some(&mock.channel("k")), "a");
     let mut seen: Vec<String> = Vec::new();
-    let out = chat.complete(&[Msg::user("讲两句")], true, &mut |c| {
-        seen.push(match c {
-            Chunk::Start => "start".to_string(),
-            Chunk::Text(t) => format!("text:{}", t),
-            Chunk::Reasoning(r) => format!("reasoning:{}", r),
-        });
-        true
-    });
+    let out = chat
+        .complete(&[Msg::user("讲两句")], true, &mut |c| {
+            seen.push(match c {
+                Chunk::Start => "start".to_string(),
+                Chunk::Text(t) => format!("text:{}", t),
+                Chunk::Reasoning(r) => format!("reasoning:{}", r),
+            });
+            true
+        })
+        .raw;
     assert_eq!(out, "你好", "流式返回完整正文");
     assert_eq!(
         seen,
@@ -565,14 +577,44 @@ fn http_chat_streams_chunks_and_stops_when_the_caller_aborts() {
     let mock2 = Mock::start(vec![(200, "text/event-stream", body2)]);
     let (mut chat2, _) = gateway().member_channel(Some(&mock2.channel("k")), "a");
     let mut seen2: Vec<String> = Vec::new();
-    let out2 = chat2.complete(&[Msg::user("停")], true, &mut |c| {
-        let is_text = matches!(c, Chunk::Text(_));
-        seen2.push(format!("{:?}", c));
-        !is_text
-    });
+    let out2 = chat2
+        .complete(&[Msg::user("停")], true, &mut |c| {
+            let is_text = matches!(c, Chunk::Text(_));
+            seen2.push(format!("{:?}", c));
+            !is_text
+        })
+        .raw;
     assert_eq!(out2, "你", "中止后返回已产出的正文，且不重开候选");
     assert_eq!(seen2.len(), 2, "中止后不再回调：{:?}", seen2);
     assert_eq!(mock2.requests().len(), 1, "中止不得把流重新拉起来");
+}
+
+#[test]
+fn finish_reason_is_carried_back_from_both_paths() {
+    // 非流式：结束原因在 choices[0].finish_reason
+    let body = serde_json::json!({
+        "choices": [{"message": {"content": "写完"}, "finish_reason": "stop"}]
+    })
+    .to_string();
+    let mock = Mock::start(vec![(200, "application/json", body)]);
+    let (mut chat, _) = gateway().member_channel(Some(&mock.channel("k")), "a");
+    let out = chat.complete(&[Msg::user("hi")], false, &mut |_| true);
+    assert_eq!(out.raw, "写完");
+    assert_eq!(out.finish, "stop", "结束原因要如实带回");
+    assert!(!out.truncated(), "stop 不是截断");
+
+    // 流式：收尾分片带 finish_reason = length（核心据此判定"被截断"，而不是"模型写错"）
+    let sse = format!(
+        "{}{}data: [DONE]\n\n",
+        sse_delta("半句"),
+        sse_finish("length")
+    );
+    let mock2 = Mock::start(vec![(200, "text/event-stream", sse)]);
+    let (mut chat2, _) = gateway().member_channel(Some(&mock2.channel("k")), "a");
+    let out2 = chat2.complete(&[Msg::user("hi")], true, &mut |_| true);
+    assert_eq!(out2.raw, "半句", "已产出的正文照常返回");
+    assert_eq!(out2.finish, "length");
+    assert!(out2.truncated(), "各家的截断取值都归到一处判定");
 }
 
 #[test]
@@ -585,7 +627,7 @@ fn http_errors_come_back_honestly_and_never_carry_the_api_key() {
         (401, "application/json", "{}".to_string()),
     ]);
     let (mut chat, _) = gateway().member_channel(Some(&mock.channel(secret)), "a");
-    let out = chat.complete(&[Msg::user("hi")], false, &mut |_| true);
+    let out = chat.complete(&[Msg::user("hi")], false, &mut |_| true).raw;
     assert!(out.contains("模型调用失败"), "失败必须如实回执：{}", out);
     assert!(!out.contains(secret), "出站错误里的密钥必须先脱敏：{}", out);
     assert!(
@@ -599,7 +641,7 @@ fn http_errors_come_back_honestly_and_never_carry_the_api_key() {
 fn http_gateway_falls_back_to_demo_only_when_there_is_no_channel() {
     let (mut chat, notice) = gateway().member_channel(None, "reviewer");
     assert!(notice.is_some(), "没有通道时必须如实告知回落：{:?}", notice);
-    let out = chat.complete(&[Msg::user("hi")], false, &mut |_| true);
+    let out = chat.complete(&[Msg::user("hi")], false, &mut |_| true).raw;
     assert!(out.contains("（演示）"), "{}", out);
     let (_, core_demo) = gateway().core_channel(None);
     assert!(core_demo, "核心通道同样如实标记");

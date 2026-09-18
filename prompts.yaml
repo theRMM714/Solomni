@@ -279,6 +279,7 @@ core:
     malformed_unclosed_brace: "工具信封没写完：**还差 {{missing}}**（字符串里的内容已经闭合，只是信封没收尾；补上就完整了）。完整格式：{\"type\":\"tool\",\"name\":\"工具名\",\"args\":{...}}。"
     malformed_unclosed_string: "工具信封**断在字符串中间**：内容没写完，补引号会让核心拿到半截内容，所以核心不猜、也没有执行工具。请重新输出完整信封；内容太长就分次写入。"
     malformed_missing_tail: "另外：信封还差 {{missing}} 才完整（内容字符串已经闭合，补上收尾括号就对了）。"
+    malformed_truncated: "注意：这次输出是**被供应商按输出长度截断的**（finish_reason=length），不是你 JSON 写坏了——请把内容分次写，或把这一步拆小。"
     malformed_cut_string: "另外：这次输出**断在字符串中间**（内容没写完），请重新完整输出，或分次写入。"
     malformed_control: "工具信封的字符串里出现了未转义的裸{{what}}（第 {{line}} 行），核心没有执行任何工具。字符串里的换行要写成 \\n、制表符写成 \\t、回车写成 \\r（反斜杠加字母），不能直接换行。"
     malformed_syntax: "工具信封不是合法 JSON：{{why}}。核心没有执行任何工具，请按报出的位置检查该处（引号是否成对、逗号是否多余、字符串里的引号要转义）。"
@@ -289,6 +290,7 @@ core:
     control_other: "控制字符 U+{{code}}"
     discuss_degraded: "　（信封缺失，按发言收录）"
     stopped_suffix: "（已停止）"
+    truncated_suffix: "（本段被输出长度截断）"
     # 工具进程的收尾标记：核心把它们拼进工具回执，随 [工具结果] 进模型上下文
     tool_stderr_header: "[stderr]"
     tool_timeout: "[超时] 工具进程与它拉起的整棵进程树已被终止"

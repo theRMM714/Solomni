@@ -2,7 +2,7 @@
 //! 双用途：核心回落演示（无可用模型通道时，如实告知）+ 单元测试脚本回放。
 //! 只实现 core 的 Chat/ChatGateway 端口，不做装配决策。
 
-use crate::core::ports::{BoxedChat, Chat, ChatGateway, Chunk, Msg, Raw};
+use crate::core::ports::{BoxedChat, Chat, ChatGateway, Chunk, Completion, Msg};
 use crate::core::providers::Channel;
 
 /// 脚本假模型：按调用次序回放脚本（最后一个条目重复兜底）；记录调用供测试断言。
@@ -29,19 +29,19 @@ impl Chat for FakeChat {
     /// 兑现 Chat 端口的流式与中止契约（与 http_chat 同一套语义）：
     /// stream = false 不回调；stream = true 先发 Chunk::Start，再发一条 Chunk::Text（整条脚本）。
     /// on 返回 false = 调用方要求中止，立即停止回调并返回已产出的正文（Start 阶段中止则返回空串）。
-    fn complete(&mut self, messages: &[Msg], stream: bool, on: &mut dyn FnMut(Chunk) -> bool) -> Raw {
+    fn complete(&mut self, messages: &[Msg], stream: bool, on: &mut dyn FnMut(Chunk) -> bool) -> Completion {
         self.calls.push(messages.to_vec());
         let text = self.next();
         if !stream {
-            return text;
+            return Completion::text(text);
         }
         if !on(Chunk::Start) {
-            return String::new();
+            return Completion::text("");
         }
         if !text.is_empty() {
             let _ = on(Chunk::Text(text.clone()));
         }
-        text
+        Completion::text(text)
     }
 }
 

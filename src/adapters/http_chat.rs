@@ -5,7 +5,7 @@
 
 use super::endpoint::{chat_candidates, memo_get, memo_set, resolve_candidates, retryable_status, Attempt, Memo};
 use super::fake_chat::DemoGateway;
-use crate::core::ports::{BoxedChat, Chat, ChatGateway, Chunk, Msg, Raw};
+use crate::core::ports::{BoxedChat, Chat, ChatGateway, Chunk, Completion, Msg};
 use crate::core::providers::Channel;
 
 /// 真实会话通道：拥有通道副本（含密钥；密钥不出适配层）。
@@ -30,7 +30,7 @@ impl HttpChat {
 }
 
 impl Chat for HttpChat {
-    fn complete(&mut self, messages: &[Msg], stream: bool, on: &mut dyn FnMut(Chunk) -> bool) -> Raw {
+    fn complete(&mut self, messages: &[Msg], stream: bool, on: &mut dyn FnMut(Chunk) -> bool) -> Completion {
         let body = serde_json::json!({
             "model": self.channel.model,
             "stream": stream,
@@ -71,7 +71,7 @@ impl Chat for HttpChat {
             }
             Err(e) => {
                 self.log.error("http_chat::complete", &format!("通道 {} 调用失败：{}", self.provider_id, e));
-                format!("模型调用失败：{}", e)
+                Completion::text(format!("模型调用失败：{}", e))
             }
         }
     }
@@ -81,7 +81,7 @@ impl Chat for HttpChat {
 /// 已经吐出过内容后不再换候选（避免重复输出）。
 /// 兼容两类供应商：发「增量」的、以及发「累积快照」的（此处统一归一成增量）。
 /// 中止与容积双保险：on 返回 false、或正文/思维链超过上限，立即停止读取。
-fn stream_once(url: &str, key: &str, body: &str, on: &mut dyn FnMut(Chunk) -> bool) -> Attempt<String> {
+fn stream_once(url: &str, key: &str, body: &str, on: &mut dyn FnMut(Chunk) -> bool) -> Attempt<Completion> {
     use std::io::BufRead;
     let agent = super::http_agent::agent(10, 300);
     let resp = match agent
@@ -102,10 +102,12 @@ fn stream_once(url: &str, key: &str, body: &str, on: &mut dyn FnMut(Chunk) -> bo
     const MAX_STREAM_CHARS: usize = 200_000;
     // 新一轮开始：让调用方清空本轮流式占位（工具多轮各成一段）
     if !on(Chunk::Start) {
-        return Attempt::Ok(String::new());
+        return Attempt::Ok(Completion::text(""));
     }
     let mut content = String::new();
     let mut reasoning_acc = String::new();
+    // 供应商的结束原因（通常只在最后一个分片里给）：如实带回，核心据此分辨"写完停"还是"被截断"
+    let mut finish = String::new();
     let mut got_any = false;
     let mut cancelled = false;
     for line in std::io::BufReader::new(resp.into_reader()).lines() {
@@ -125,7 +127,13 @@ fn stream_once(url: &str, key: &str, body: &str, on: &mut dyn FnMut(Chunk) -> bo
             continue;
         }
         let Ok(v) = serde_json::from_str::<serde_json::Value>(data) else { continue };
-        let Some(delta) = v.get("choices").and_then(|c| c.get(0)).and_then(|c| c.get("delta")) else { continue };
+        let Some(choice) = v.get("choices").and_then(|c| c.get(0)) else { continue };
+        if let Some(f) = choice.get("finish_reason").and_then(|f| f.as_str()) {
+            if !f.is_empty() {
+                finish = f.to_string();
+            }
+        }
+        let Some(delta) = choice.get("delta") else { continue };
         // 正文：累积快照 → 只取新增部分；正常增量 → 原样
         if let Some(t) = delta.get("content").and_then(|c| c.as_str()) {
             if !t.is_empty() {
@@ -171,16 +179,16 @@ fn stream_once(url: &str, key: &str, body: &str, on: &mut dyn FnMut(Chunk) -> bo
     }
     // 用户主动中止：原样收尾，绝不换候选重开（否则「停止」会把流重新拉起来）
     if cancelled {
-        return Attempt::Ok(content);
+        return Attempt::Ok(Completion { raw: content, finish });
     }
     if content.is_empty() && reasoning_acc.is_empty() {
         return Attempt::Retry("流式响应没有正文内容".to_string());
     }
-    Attempt::Ok(content)
+    Attempt::Ok(Completion { raw: content, finish })
 }
 
 /// 单次 POST：请求与解析都在此；失败按「可换候选 / 立即报」归类。
-fn attempt(url: &str, key: &str, body: &str) -> Attempt<String> {
+fn attempt(url: &str, key: &str, body: &str) -> Attempt<Completion> {
     let agent = super::http_agent::agent(10, 120);
     let resp = match agent
         .post(url)
@@ -209,16 +217,22 @@ fn attempt(url: &str, key: &str, body: &str) -> Attempt<String> {
     }
 }
 
-/// 解析补全响应：取 choices[0].message.content。
-fn parse_content(text: &str) -> Result<String, String> {
+/// 解析补全响应：取 choices[0].message.content 与 choices[0].finish_reason（后者可能没有）。
+fn parse_content(text: &str) -> Result<Completion, String> {
     let v: serde_json::Value = serde_json::from_str(text).map_err(|e| format!("响应不是 JSON：{}", e))?;
-    v.get("choices")
-        .and_then(|c| c.get(0))
+    let choice = v.get("choices").and_then(|c| c.get(0));
+    let raw = choice
         .and_then(|c| c.get("message"))
         .and_then(|m| m.get("content"))
         .and_then(|c| c.as_str())
         .map(|s| s.to_string())
-        .ok_or_else(|| "响应缺少 choices[0].message.content".to_string())
+        .ok_or_else(|| "响应缺少 choices[0].message.content".to_string())?;
+    let finish = choice
+        .and_then(|c| c.get("finish_reason"))
+        .and_then(|f| f.as_str())
+        .unwrap_or_default()
+        .to_string();
+    Ok(Completion { raw, finish })
 }
 
 /// 出站错误里的密钥一律替换掉再出适配层。

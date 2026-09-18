@@ -67,6 +67,8 @@ pub struct MemberTools {
     pub observations: crate::core::systool::Observations,
     /// 信封修复端口：手写信封不合法时先问它能不能按无歧义的写法修好（默认只转义裸控制字符）。
     pub repair: Arc<dyn crate::core::ports::EnvelopeRepair + Send + Sync>,
+    /// 运行日志：模型输出被长度截断这类"看不见的事实"要落盘，供事后确定问题。
+    pub log: Arc<dyn crate::core::ports::Log + Send + Sync>,
     pub runner: Arc<dyn ToolRunner + Send + Sync>,
     /// 本成员的沙箱：内置文件工具的寻址与越界依据（权限收口在 core）。
     pub sandbox: crate::core::workspace::Sandbox,
@@ -225,9 +227,9 @@ impl Discussion {
                 (m.system.clone(), m.id.clone())
             };
             let msgs = vec![Msg::system(system), Msg::user(opener.clone())];
-            let raw = self.members[i].chat.complete(&msgs, false, &mut |_| true);
-            let reply = envelope::parse(&raw);
-            self.absorb(&id, reply.verb, reply.text, reply.degraded);
+            let done = self.members[i].chat.complete(&msgs, false, &mut |_| true);
+            let reply = envelope::parse(&done.raw);
+            self.absorb(&id, reply.verb, reply.text, reply.degraded, done.truncated());
         }
         self.round = 1;
     }
@@ -265,12 +267,12 @@ impl Discussion {
                 &[("transcript", snapshot.iter().map(|l| l.text.clone()).collect::<Vec<_>>().join("\n"))],
             );
             let msgs = vec![Msg::system(system), Msg::user(step_prompt)];
-            let raw = self.members[i].chat.complete(&msgs, false, &mut |_| true);
-            let reply = envelope::parse(&raw);
+            let done = self.members[i].chat.complete(&msgs, false, &mut |_| true);
+            let reply = envelope::parse(&done.raw);
             let verb = reply.verb;
             let text = reply.text;
             let degraded = reply.degraded;
-            self.absorb(&id, verb, text.clone(), degraded);
+            self.absorb(&id, verb, text.clone(), degraded, done.truncated());
             let m = &mut self.members[i];
             match verb {
                 Verb::Leave => m.present = false,
@@ -298,7 +300,7 @@ impl Discussion {
         TurnOut::Round
     }
 
-    fn absorb(&mut self, id: &str, verb: Verb, text: String, degraded: bool) {
+    fn absorb(&mut self, id: &str, verb: Verb, text: String, degraded: bool, truncated: bool) {
         let tag = match verb {
             Verb::Say => "say",
             Verb::Ask => "ask",
@@ -310,6 +312,10 @@ impl Discussion {
         if degraded {
             line.push_str(&self.prompts.render(&self.prompts.core.tool_texts.discuss_degraded, &[]));
         }
+        // 被长度截断：如实写在行尾（与"降级"同一套做法）——模型与用户都看得到
+        if truncated {
+            line.push_str(&self.prompts.render(&self.prompts.core.tool_texts.truncated_suffix, &[]));
+        }
         self.transcript.push(DiscLine { text: line, degraded });
     }
 
@@ -320,7 +326,7 @@ impl Discussion {
             &[("transcript", self.transcript.iter().map(|l| l.text.clone()).collect::<Vec<_>>().join("\n"))],
         );
         let msgs = vec![Msg::system(self.prompts.core.synthesize.system.clone()), Msg::user(user)];
-        core_chat.complete(&msgs, false, &mut |_| true)
+        core_chat.complete(&msgs, false, &mut |_| true).raw
     }
 }
 
@@ -412,7 +418,7 @@ impl Execution {
             &[("plan", plan.to_string()), ("reports", reports)],
         );
         let msgs = vec![Msg::system(prompts.core.review.system.clone()), Msg::user(user)];
-        let raw = core_chat.complete(&msgs, false, &mut |_| true);
+        let raw = core_chat.complete(&msgs, false, &mut |_| true).raw;
         self.items = envelope::extract_json_array(&raw)
             .and_then(|arr| serde_json::from_str::<Vec<CheckItem>>(&arr).ok())
             .unwrap_or_default();
@@ -452,6 +458,15 @@ pub struct Round {
     /// 该轮压进历史的消息：工具轮 = [assistant(raw)]，末轮 = [assistant(text)]。
     pub text_msgs: Vec<Msg>,
     pub tool: Option<ToolRun>,
+    /// 供应商给的结束原因（原样；没给 = 空串）：核心据此分辨"写完停"还是"被长度截断"。
+    pub finish: String,
+}
+
+impl Round {
+    /// 这一轮的输出是不是被供应商按长度截断了。
+    pub fn truncated(&self) -> bool {
+        crate::core::ports::truncated(&self.finish)
+    }
 }
 
 /// 成员一次问询（含工具循环，非流式）：返回（最终答复, 本轮全部工具调用视图）。
@@ -498,23 +513,46 @@ pub(crate) fn converse_with(
     loop {
         // 逐轮累积思维链（原文以通道返回值为准：非流式通道不回 Chunk）。
         let mut reasoning = String::new();
-        let raw = {
+        let mut aborted = false;
+        let done = {
             let mut sink = |chunk: Chunk| {
                 match &chunk {
                     Chunk::Start => reasoning.clear(),
                     Chunk::Text(_) => {}
                     Chunk::Reasoning(r) => reasoning.push_str(r),
                 }
-                on(chunk)
+                let keep = on(chunk);
+                if !keep {
+                    aborted = true;
+                }
+                keep
             };
             chat.complete(&msgs, stream, &mut sink)
         };
+        // 结束原因如实带回：被长度截断要落日志——事后才判定得出"是截断还是模型自己写错"。
+        let finish = done.finish.clone();
+        let truncated = done.truncated();
+        let raw = done.raw;
+        if truncated {
+            if let Some(t) = tools.as_deref_mut() {
+                t.log.warn(
+                    "engine::converse",
+                    &format!(
+                        "模型输出被长度截断（finish_reason={}）：第 {} 轮，正文 {} 字",
+                        finish,
+                        rounds.len() + 1,
+                        raw.chars().count()
+                    ),
+                );
+            }
+        }
         let mut reply = envelope::parse(&raw);
         // 手写信封不合法时**先**问修复端口：只做无歧义的修补（默认实现只转义字符串里的裸控制字符）。
         // 修好并重新解析成合法工具信封 = 本轮照常执行工具；修不了就走原来的"失败工具行"路径。
         // 封顶后不修（与"封顶后不再执行工具"同一口径）。
+        // 用户中止的生成不修：半截信封是"被停下来"的产物，不是模型的意图——绝不据此执行工具。
         let mut repaired: Option<String> = None;
-        if !forced_final {
+        if !forced_final && !aborted {
             if let Some(kind) = reply.tool.as_ref().and_then(|t| t.malformed.clone()) {
                 if let Some(ctx) = tools.as_deref_mut() {
                     let out = ctx.repair.repair(&raw, &kind);
@@ -534,10 +572,15 @@ pub(crate) fn converse_with(
             Some(inv) if inv.malformed.is_some() && tools.is_some() && !forced_final => {
                 let ctx = tools.as_deref_mut().expect("上臂已判存在");
                 // 回执按判定出的类别给修法（未闭合 / 裸控制字符 / 语法错 / 字段不合法）。
-                let why = ctx
+                let mut why = ctx
                     .sandbox
                     .texts
                     .malformed_report(inv.malformed.as_ref().expect("上臂已判存在"));
+                // 供应商说是长度截断：那"写坏 JSON"就不是模型的错，改法也不同（分次写/拆小步骤）。
+                if truncated {
+                    why.push('\n');
+                    why.push_str(&ctx.sandbox.texts.malformed_truncated);
+                }
                 let view = ToolCallView {
                     speaker: speaker.to_string(),
                     module: inv.module.clone().unwrap_or_default(),
@@ -558,6 +601,7 @@ pub(crate) fn converse_with(
                     reasoning,
                     text_msgs: vec![raw_msg],
                     tool: Some(ToolRun { view, msgs: vec![result_msg] }),
+                    finish: finish.clone(),
                 });
                 if rounds.len() >= MAX_TOOL_CALLS {
                     forced_final = true;
@@ -618,6 +662,7 @@ pub(crate) fn converse_with(
                     reasoning,
                     text_msgs: vec![raw_msg],
                     tool: Some(ToolRun { view, msgs: vec![result_msg] }),
+                    finish: finish.clone(),
                 });
                 if rounds.len() >= MAX_TOOL_CALLS {
                     forced_final = true;
@@ -631,7 +676,7 @@ pub(crate) fn converse_with(
                 let text = reply.text;
                 let has_line = !text.trim().is_empty() || !reasoning.trim().is_empty();
                 let text_msgs = if has_line { vec![Msg::assistant(text.trim().to_string())] } else { Vec::new() };
-                rounds.push(Round { text, reasoning, text_msgs, tool: None });
+                rounds.push(Round { text, reasoning, text_msgs, tool: None, finish });
                 return rounds;
             }
         }

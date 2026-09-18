@@ -201,6 +201,8 @@ pub struct ToolTexts {
     /// 变量：missing（与其它类别叠加时的附带说明）
     pub malformed_missing_tail: String,
     pub malformed_cut_string: String,
+    /// 供应商说是长度截断时追加（改法完全不同：分次写，而不是查 JSON）
+    pub malformed_truncated: String,
     /// 变量：what, line
     pub malformed_control: String,
     /// 变量：why
@@ -215,6 +217,8 @@ pub struct ToolTexts {
     pub discuss_degraded: String,
     /// 追加在回复行末尾（该行重建后进上下文）
     pub stopped_suffix: String,
+    /// 追加在回复行末尾（该行被供应商按长度截断）
+    pub truncated_suffix: String,
     // —— 工具进程的收尾标记（机制侧拼进工具回执；它们随 [工具结果] 进模型上下文）——
     /// 工具进程 stderr 段的头。
     pub tool_stderr_header: String,

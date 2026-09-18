@@ -739,6 +739,7 @@ impl Core {
                     Arc::clone(&self.tools),
                     Arc::clone(&self.io),
                     Arc::clone(&self.repair),
+                    Arc::clone(&self.log),
                     Arc::clone(&self.packages),
                     meta.exec.clone(),
                     metas.clone(),
@@ -857,6 +858,7 @@ impl Core {
             modules: engine::tool_table(modules),
             observations: systool::Observations::default(),
             repair: Arc::clone(&self.repair),
+            log: Arc::clone(&self.log),
             runner: Arc::clone(&self.tools),
             sandbox: sb.clone(),
             io: Arc::clone(&self.io),
@@ -988,11 +990,13 @@ impl Core {
             ],
         );
         let (mut chat, _) = self.gateway.core_channel(Some(&channel));
-        let raw = chat.complete(
-            &[Msg::system(self.prompts.core.suggest_models.system.clone()), Msg::user(user)],
-            false,
-            &mut |_| true,
-        );
+        let raw = chat
+            .complete(
+                &[Msg::system(self.prompts.core.suggest_models.system.clone()), Msg::user(user)],
+                false,
+                &mut |_| true,
+            )
+            .raw;
         let parsed = envelope::extract_json_object(&raw)
             .and_then(|obj| serde_json::from_str::<SuggestReply>(&obj).ok())
             .ok_or_else(|| format!("核心推荐失败（响应不是约定的 JSON）：{}", raw.chars().take(200).collect::<String>()))?;
@@ -1198,6 +1202,7 @@ impl Core {
                 Arc::clone(&self.tools),
                 Arc::clone(&self.io),
                 Arc::clone(&self.repair),
+                Arc::clone(&self.log),
                 Arc::clone(&self.packages),
                 meta,
                 events,
