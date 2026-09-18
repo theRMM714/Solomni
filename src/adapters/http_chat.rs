@@ -22,6 +22,39 @@ pub struct HttpChat {
     memo_key: String,
 }
 
+/// 组一次 /chat/completions 的请求体。**真实会话与探针共用同一份形状**——
+/// 探针发出去的必须是线上真会发的东西，否则它测出来的结论代表不了线上行为。
+fn request_body(
+    model: &str,
+    stream: bool,
+    messages: serde_json::Value,
+    tools: Option<&[ToolDecl]>,
+) -> serde_json::Value {
+    let mut body = serde_json::json!({ "model": model, "stream": stream, "messages": messages });
+    // 原生工具调用：把工具声明带给供应商（"参数走结构化槽位"的全部秘密就在这一段）。
+    // 不声明 tools = 手写信封模式：模型照旧在正文里写信封，核心自己解析。
+    if let Some(tools) = tools {
+        if !tools.is_empty() {
+            body["tools"] = serde_json::Value::Array(tools.iter().map(decl_json).collect());
+            body["tool_choice"] = serde_json::json!("auto");
+        }
+    }
+    body
+}
+
+/// 发一段**合成好的 messages**（探针专用）：回放形状探测要发的不是普通消息，
+/// 而是含 tool_calls 与 role=tool 的历史。端点候选、脱敏与重试规则与真实请求完全一致。
+pub(crate) fn attempt_raw(
+    url: &str,
+    key: &str,
+    model: &str,
+    messages: serde_json::Value,
+    tools: Option<&[ToolDecl]>,
+) -> Attempt<Completion> {
+    let body = request_body(model, false, messages, tools).to_string();
+    attempt(url, key, &body)
+}
+
 impl HttpChat {
     /// 组合根/网关内部构造：通道 + 日志 + 共享端点记忆。
     fn new(channel: Channel, log: std::sync::Arc<dyn crate::core::ports::Log + Send + Sync>, memo: Memo) -> HttpChat {
@@ -34,23 +67,17 @@ impl HttpChat {
 impl Chat for HttpChat {
     fn complete(&mut self, messages: &[Msg], opts: CompleteOpts<'_>, on: &mut dyn FnMut(Chunk) -> bool) -> Completion {
         let stream = opts.stream;
-        let mut body = serde_json::json!({
-            "model": self.channel.model,
-            "stream": stream,
-            "messages": messages
-                .iter()
-                .map(|m| serde_json::json!({ "role": m.role, "content": m.content }))
-                .collect::<Vec<_>>(),
-        });
-        // 原生工具调用：把工具声明带给供应商（"参数走结构化槽位"的全部秘密就在这一段）。
-        // 不声明 tools = 手写信封模式：模型照旧在正文里写信封，核心自己解析。
-        if let Some(tools) = opts.tools {
-            if !tools.is_empty() {
-                body["tools"] = serde_json::Value::Array(tools.iter().map(decl_json).collect());
-                body["tool_choice"] = serde_json::json!("auto");
-            }
-        }
-        let body = body.to_string();
+        let wire: Vec<serde_json::Value> = messages
+            .iter()
+            .map(|m| serde_json::json!({ "role": m.role, "content": m.content }))
+            .collect();
+        let body = request_body(
+            &self.channel.model,
+            stream,
+            serde_json::Value::Array(wire),
+            opts.tools,
+        )
+        .to_string();
         let candidates: Vec<String> = match &self.resolved {
             Some(url) => vec![url.clone()],
             None => chat_candidates(&self.channel.provider.base_url),

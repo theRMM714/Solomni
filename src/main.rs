@@ -103,6 +103,63 @@ fn main() {
     // 信封修复：只把字符串里的裸控制字符转义（无歧义才修，其余交给模型重发）。
     let repair = adapters::UnambiguousRepair;
 
+    // 隐藏模式：探测"回放形状"——把上一轮的工具调用发回供应商时，哪种写法被接受。
+    // 它**不改任何登记处**（只有 --probe-tools 带写回策略）：探测结论是事实，采不采用由人定。
+    if let Some(i) = args.iter().position(|a| a == "--probe-replay") {
+        let Some(id) = args.get(i + 1) else {
+            eprintln!("用法：solomni --probe-replay <模型 id>");
+            std::process::exit(2);
+        };
+        let settings = match core::ports::SettingsStore::load(&store) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("[回放形状] 读取登记处失败：{}", e);
+                std::process::exit(1);
+            }
+        };
+        let channel = match settings.resolve(id) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("[回放形状] 失败：{}", e);
+                std::process::exit(1);
+            }
+        };
+        match adapters::http_probe::probe_replay(&channel, &log) {
+            Ok(report) => {
+                println!("[回放形状] 模型 {}（只报事实，不改登记处）：", id);
+                for s in &report.shapes {
+                    let verdict = if !s.accepted {
+                        "被拒  "
+                    } else if s.understood {
+                        "收+读懂"
+                    } else {
+                        "收未懂 "
+                    };
+                    println!("  {}  {:<16} {}", verdict, s.name, s.detail);
+                }
+                let list = |want: fn(&crate::adapters::http_probe::ShapeResult) -> bool| -> String {
+                    let names: Vec<&str> = report
+                        .shapes
+                        .iter()
+                        .filter(|s| want(s))
+                        .map(|s| s.name.as_str())
+                        .collect();
+                    if names.is_empty() { "（无）".to_string() } else { names.join(" / ") }
+                };
+                println!("[回放形状] 被接受的写法：{}", list(|s| s.accepted));
+                println!(
+                    "[回放形状] 模型真的读到了历史（回答里带回本次编号）的写法：{}",
+                    list(|s| s.understood)
+                );
+                std::process::exit(0);
+            }
+            Err(e) => {
+                eprintln!("[回放形状] 失败：{}", e);
+                std::process::exit(1);
+            }
+        }
+    }
+
     let mut core = match core::Core::new(
         Arc::new(store),
         Arc::new(history),

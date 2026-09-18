@@ -99,7 +99,8 @@ presentation ──▶ core ◀── adapters
 | `yaml_prompts.rs` | `PromptSource`：加载 `prompts.yaml` |
 | `endpoint.rs` | 端点补全/回落规则与进程内端点记忆（纯逻辑） |
 | `http_agent.rs` | 出站 HTTP 代理构建（TLS 后端选择与超时的单点） |
-| `http_chat.rs` | `Chat` / `ChatGateway`：OpenAI 兼容 `/chat/completions` |
+| `http_chat.rs` | `Chat` / `ChatGateway`：OpenAI 兼容 `/chat/completions`（请求体形状的唯一定义：真实会话与探针共用） |
+| `http_probe.rs` | 两条诊断探针（只报事实）：工具调用支持探测（`--probe-tools`）、回放形状探测（`--probe-replay`） |
 | `model_catalog.rs` | `ModelCatalog`：OpenAI 兼容 `GET /models` |
 | `fake_chat.rs` | 演示/测试通道：`FakeChat`（脚本回放）+ `DemoGateway`（无模型时回落） |
 | `log.rs` | `Log`：`logs/` 下按时间戳一份文件 |

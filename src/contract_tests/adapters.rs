@@ -463,6 +463,8 @@ struct Mock {
     base: String,
     stop: Arc<AtomicBool>,
     hits: Arc<Mutex<Vec<String>>>,
+    /// 收到的请求体（与 hits 同序）：探针类用例要断言"到底发出去了什么形状"。
+    bodies: Arc<Mutex<Vec<String>>>,
     handle: Option<std::thread::JoinHandle<()>>,
 }
 
@@ -473,17 +475,21 @@ impl Mock {
         let base = format!("http://127.0.0.1:{}", addr.port());
         let stop = Arc::new(AtomicBool::new(false));
         let hits = Arc::new(Mutex::new(Vec::new()));
-        let (st, hi) = (Arc::clone(&stop), Arc::clone(&hits));
+        let bodies = Arc::new(Mutex::new(Vec::new()));
+        let (st, hi, bo) = (Arc::clone(&stop), Arc::clone(&hits), Arc::clone(&bodies));
         let handle = std::thread::spawn(move || {
             let mut served = 0usize;
             while !st.load(Ordering::Relaxed) {
-                let req = match server.recv_timeout(Duration::from_millis(50)) {
+                let mut req = match server.recv_timeout(Duration::from_millis(50)) {
                     Ok(Some(r)) => r,
                     _ => continue,
                 };
                 hi.lock()
                     .expect("锁")
                     .push(format!("{} {}", req.method(), req.url()));
+                let mut body_text = String::new();
+                let _ = req.as_reader().read_to_string(&mut body_text);
+                bo.lock().expect("锁").push(body_text);
                 let (code, ctype, body) = match replies.get(served) {
                     Some(r) => (r.0, r.1, r.2.clone()),
                     None => (200, "application/json", "{}".to_string()),
@@ -502,6 +508,7 @@ impl Mock {
             base,
             stop,
             hits,
+            bodies,
             handle: Some(handle),
         }
     }
@@ -518,6 +525,10 @@ impl Mock {
 
     fn requests(&self) -> Vec<String> {
         self.hits.lock().expect("锁").clone()
+    }
+
+    fn bodies(&self) -> Vec<String> {
+        self.bodies.lock().expect("锁").clone()
     }
 }
 
@@ -807,6 +818,92 @@ fn tool_probe_tells_supported_unsupported_and_unknown_apart() {
     )]);
     let err = gateway()
         .probe_tools(&mock.channel("bad"))
+        .expect_err("通道不通就是 Err");
+    assert!(err.contains("通道本身就没打通"), "{}", err);
+}
+
+/// 回放形状探测：逐项如实回报哪种写法被接受（不合并、不替用户拍板），
+/// 且发出去的确实是那个形状；基线不通时如实报"测不了"，绝不把 401 说成"这个形状被拒"。
+#[test]
+fn replay_shape_probe_reports_which_writings_the_supplier_accepts() {
+    let log: Arc<dyn Log + Send + Sync> = Arc::new(NoopLog);
+    let rejected = serde_json::json!({
+        "error": { "message": "content is required when tool_calls is present" }
+    })
+    .to_string();
+    // 编号只放在工具结果里：回答里带回它才算"真的读到了"（收了 != 看懂了）。
+    // 而且模型常常把前缀省掉（真机实测就只回后半段）——那不算没读懂，判据要容得下。
+    let nonce = "solomni-7f3a91c2";
+    let mock = Mock::start(vec![
+        (200, "application/json", completion_body("7f3a91c2")),
+        (
+            200,
+            "application/json",
+            completion_body("那个编号是 7f3a91c2"),
+        ),
+        (400, "application/json", rejected),
+        (200, "application/json", completion_body("我看不到任何编号")),
+        (200, "application/json", completion_body("solomni-7f3a91c2")),
+    ]);
+    let report = crate::adapters::http_probe::probe_replay_with(&mock.channel("k"), &log, nonce)
+        .expect("基线通过就该拿到报告");
+    let got: Vec<(&str, bool, bool)> = report
+        .shapes
+        .iter()
+        .map(|s| (s.name.as_str(), s.accepted, s.understood))
+        .collect();
+    assert_eq!(
+        got,
+        vec![
+            ("baseline-text", true, true),
+            ("content-empty", true, true),
+            ("content-null", false, false),
+            ("content-prose", true, false),
+            ("tool-with-name", true, true),
+        ],
+        "每个形状的接受 / 被拒 / 有没有真被读懂都要逐项报出来（省掉前缀也算读懂）"
+    );
+    let no = report
+        .shapes
+        .iter()
+        .find(|s| !s.accepted)
+        .expect("有一条被拒");
+    assert!(
+        no.detail.contains("content is required"),
+        "被拒要带供应商原话：{}",
+        no.detail
+    );
+    // 发出去的确实是那个形状：助手回合带 tool_calls，结果消息用同一个 tool_call_id 对应。
+    let bodies = mock.bodies();
+    assert_eq!(bodies.len(), 5, "每个形状各发一次");
+    assert!(
+        !bodies[0].contains("tool_calls"),
+        "基线是文本回放，不带协议字段：{}",
+        bodies[0]
+    );
+    assert!(
+        bodies[0].contains("\"tools\""),
+        "每个形状都要带工具声明：{}",
+        bodies[0]
+    );
+    assert!(
+        bodies[1].contains("\"tool_calls\"")
+            && bodies[1].contains("\"tool_call_id\":\"call_solomni_probe\""),
+        "协议形状要真的发出去：{}",
+        bodies[1]
+    );
+    assert!(
+        bodies[1].contains(nonce),
+        "本次编号要真的在工具结果里：{}",
+        bodies[1]
+    );
+
+    let bad = Mock::start(vec![(
+        401,
+        "application/json",
+        "{\"error\":{\"message\":\"bad key\"}}".to_string(),
+    )]);
+    let err = crate::adapters::http_probe::probe_replay(&bad.channel("bad"), &log)
         .expect_err("通道不通就是 Err");
     assert!(err.contains("通道本身就没打通"), "{}", err);
 }
