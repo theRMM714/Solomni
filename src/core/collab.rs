@@ -46,6 +46,8 @@ pub struct CollabSession {
     tools: Arc<dyn ToolRunner + Send + Sync>,
     /// 内置文件工具读写端口。
     io: Arc<dyn SysIo + Send + Sync>,
+    /// 信封修复端口（手写信封不合法时的无歧义补救）。
+    repair: Arc<dyn crate::core::ports::EnvelopeRepair + Send + Sync>,
     /// 运行包库来源（工具可用性按它判定）。
     packages: Arc<dyn PackageSource + Send + Sync>,
     /// 本会话的执行选型（档位 + 运行包定版）。
@@ -64,6 +66,7 @@ impl CollabSession {
         prompts: Prompts,
         tools: Arc<dyn ToolRunner + Send + Sync>,
         io: Arc<dyn SysIo + Send + Sync>,
+        repair: Arc<dyn crate::core::ports::EnvelopeRepair + Send + Sync>,
         packages: Arc<dyn PackageSource + Send + Sync>,
         spec: ExecSpec,
         roster: Vec<AgentMeta>,
@@ -91,6 +94,7 @@ impl CollabSession {
             source,
             tools,
             io,
+            repair,
             packages,
             spec,
             sandboxes,
@@ -376,6 +380,7 @@ impl CollabSession {
                 // 模块 id → 该模块的（目录, 工具表）：多模块 agent 靠信封里的 module 消歧。
                 modules: crate::core::engine::tool_table(&modules),
                 observations: crate::core::systool::Observations::default(),
+                repair: Arc::clone(&self.repair),
                 runner: Arc::clone(&self.tools),
                 sandbox,
                 io: Arc::clone(&self.io),
@@ -427,6 +432,7 @@ impl CollabSession {
         prompts: Prompts,
         tools: Arc<dyn ToolRunner + Send + Sync>,
         io: Arc<dyn SysIo + Send + Sync>,
+        repair: Arc<dyn crate::core::ports::EnvelopeRepair + Send + Sync>,
         packages: Arc<dyn PackageSource + Send + Sync>,
         meta: &SessionMeta,
         events: &[serde_json::Value],
@@ -472,6 +478,7 @@ impl CollabSession {
             source,
             tools,
             io,
+            repair,
             packages,
             spec: meta.exec.clone(),
             sandboxes,

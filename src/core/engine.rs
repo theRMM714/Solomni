@@ -65,6 +65,8 @@ pub struct MemberTools {
     pub modules: BTreeMap<String, ModuleTools>,
     /// 本次会话的观察账本（哪些文件完整读过 / 由核心写过）：改动前的证据（见 systool::Observations）。
     pub observations: crate::core::systool::Observations,
+    /// 信封修复端口：手写信封不合法时先问它能不能按无歧义的写法修好（默认只转义裸控制字符）。
+    pub repair: Arc<dyn crate::core::ports::EnvelopeRepair + Send + Sync>,
     pub runner: Arc<dyn ToolRunner + Send + Sync>,
     /// 本成员的沙箱：内置文件工具的寻址与越界依据（权限收口在 core）。
     pub sandbox: crate::core::workspace::Sandbox,
@@ -507,7 +509,25 @@ pub(crate) fn converse_with(
             };
             chat.complete(&msgs, stream, &mut sink)
         };
-        let reply = envelope::parse(&raw);
+        let mut reply = envelope::parse(&raw);
+        // 手写信封不合法时**先**问修复端口：只做无歧义的修补（默认实现只转义字符串里的裸控制字符）。
+        // 修好并重新解析成合法工具信封 = 本轮照常执行工具；修不了就走原来的"失败工具行"路径。
+        // 封顶后不修（与"封顶后不再执行工具"同一口径）。
+        let mut repaired: Option<String> = None;
+        if !forced_final {
+            if let Some(kind) = reply.tool.as_ref().and_then(|t| t.malformed.clone()) {
+                if let Some(ctx) = tools.as_deref_mut() {
+                    let out = ctx.repair.repair(&raw, &kind);
+                    if let Some(text) = out.repaired.as_deref() {
+                        let again = envelope::parse(text);
+                        if again.tool.as_ref().map(|t| t.malformed.is_none()).unwrap_or(false) {
+                            reply = again;
+                            repaired = Some(out.what.join("；"));
+                        }
+                    }
+                }
+            }
+        }
         match reply.tool.clone() {
             // 信封非法：**不执行任何工具**，但记一条失败的工具行把"信封不合法"回注给模型（下一轮自己改）。
             // 同样计入上限，所以模型反复输出非法信封最终会被强制收尾，不会死循环。
@@ -560,6 +580,20 @@ pub(crate) fn converse_with(
                     )
                 } else {
                     dispatch_external(ctx, &inv)
+                };
+                // 修过信封就如实标注在回执最前面（模型与用户都能看到核心没有瞎猜）
+                let outcome = match repaired.as_deref() {
+                    Some(what) if !what.is_empty() => ToolOutcome {
+                        ok: outcome.ok,
+                        output: format!(
+                            "{}\n{}",
+                            ctx.sandbox
+                                .texts
+                                .render(&ctx.sandbox.texts.envelope_repaired, &[("what", what.to_string())]),
+                            outcome.output
+                        ),
+                    },
+                    _ => outcome,
                 };
                 let view = ToolCallView {
                     speaker: speaker.to_string(),

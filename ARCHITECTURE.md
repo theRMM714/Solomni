@@ -47,6 +47,7 @@ presentation ──▶ core ◀── adapters
 | `HistoryStore` | 会话历史：一个会话一个目录（meta + 事件流水） | `FsHistory` |
 | `PromptSource` | 提示词册加载（`prompts.yaml`） | `YamlPrompts` |
 | `ToolRunner` | 外部工具进程（围栏安装、拉起、stdin 送参、超时杀树、截断） | `ProcTools`（守门进程 = 本程序的 `--fence-run` 模式） |
+| `EnvelopeRepair` | 手写信封不合法时的**无歧义**补救（改了字段含义就是错；拿不准就返回不修） | `EscapeControls`（只转义字符串里的裸控制字符，其余交给模型重发） |
 | `FenceHost` | 围栏授权的释放（删除会话时请求一次撤销） | `confine::FenceHostAdapter`（本平台无该机制时为空操作） |
 | `Log` | 运行日志（三级） | `FileLog`（测试 `NoopLog`） |
 
@@ -88,6 +89,7 @@ presentation ──▶ core ◀── adapters
 | `confine/` | 守门进程与平台围栏后端：`mod.rs` 装配与能力自报，`linux.rs` / `macos.rs` / `windows.rs` / `other.rs` 各平台机制 |
 | `proc_tools.rs` | `ToolRunner`：守门进程拉起、stdin 送参、超时杀树、输出截断 |
 | `sys_io.rs` | `SysIo`：内置工具的读写机制（UTF-8 解码、非法字节 `lossy` 标注） |
+| `repair.rs` | `EnvelopeRepair`：信封修复（默认只做一件事——把字符串里的裸控制字符转义；其余类别一律不猜） |
 | `fs_modules.rs` | `ModuleSource`：扫描 `modules/` |
 | `fs_packages.rs` | `PackageSource`：扫描 `runtimes/` |
 | `fs_workspace.rs` | `Workspace`：`session/<工作名>/` 下的 work 与各 agent 沙箱 |
@@ -200,7 +202,7 @@ presentation ──▶ core ◀── adapters
 | | `builtin_tools` | 内置三件套的**参数契约**：模型侧说明与调用校验的唯一来源（不写进代码） |
 | | `no_agents` / `no_model` / `no_module_dirs` / `no_module_tools` / `no_module_tool_params` | 空态说法 |
 | | `module_tool_params_header` | 模块工具参数段的小标题（模块在 `module.yaml` 里声明了 `params` 时出现） |
-| | `tool_texts.*` | **运行时回执**：路径校验、参数不符（说事实 + 回发工具签名）、内置四件套回执与行区间/截断/编码标注、edit 的找不到（含"只差空白"提示）与多处命中、write 的"没读过/读后又被改/只读到一部分"三种拒绝、外部工具分派的三类失败、工具超限、**信封不合法四类**（未闭合 / 裸控制字符 / 语法错 / 字段不合法）、给模型看的清单骨架、追加在回复行末尾的 `（已停止）` |
+| | `tool_texts.*` | **运行时回执**：路径校验、参数不符（说事实 + 回发工具签名）、内置四件套回执与行区间/截断/编码标注、edit 的找不到（含"只差空白"提示）与多处命中、write 的"没读过/读后又被改/只读到一部分"三种拒绝、外部工具分派的三类失败、工具超限、**信封不合法四类**（未闭合 / 裸控制字符 / 语法错 / 字段不合法）与"已修复后执行"的如实标注、给模型看的清单骨架、追加在回复行末尾的 `（已停止）` |
 
 - **界面通知**（`[建组]`、`[上限]` 这类）是呈现层文案，**不属于**提示词册。
 - **不进册子的两类**（有意留在代码里）：①**会被解析的转录锚点**（`[轮次 N]`、`[用户:需求]`、`[代拟] …`、`[id:tag]` 等，`collab_state` 与回档定位要读它们，改文案等于改状态机）；②**只给用户看的呈现层文案**（各类 `SessionEvent::Notice`、工具轨迹行的成败字样、面向界面/CLI 的 `Err`）。

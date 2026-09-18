@@ -46,6 +46,24 @@
     端口矩阵新增一行（原生 tool_calls × 各供应商）且 cargo test 与 node run-tests.js 全绿。
   blocked_by: 未开始（本轮只做前两层）
 
+- id: tools.multi-call-and-concurrency
+  scope: global
+  level: T1
+  why: |
+    一次问询里模型只能发**一个**工具调用：多个互不依赖的读取要串成多轮往返（每轮都是一次完整模型调用）。
+    主流做法是一次回复里给出多个调用（如 Codex 的 multi_tool_use.parallel 包装工具），
+    并按工具声明决定能否并发执行。本项目所有工具一律串行，read 这类只读工具也不并行。
+  how: |
+    1) 信封支持 {"type":"tool","calls":[{module?,name,args}, ...]}（与单数形态互斥；GREEN FIELD 不保留双形态兼容分支）；
+    2) 每个调用各记一条工具行（前端视图不变），MAX_TOOL_CALLS 按**调用数**计；
+    3) 回档/截断以"轮"为原子单位（一轮 = 一次模型回复 + 它触发的全部调用行）；
+    4) 工具声明加"可并发"标记：只读类并发调度、写类独占、未声明默认串行；
+       结果一律按原始顺序回填（防乱序进上下文）。
+  accept: |
+    一次回复里的多个调用都执行且各成一条工具行；声明可并发的工具真的并发（用记录型替身断言时序）；
+    cargo test 与 node run-tests.js 全绿。
+  blocked_by: 未开始（本轮只做前两层 + 信封修复端口）
+
 - id: tests.layout-migration
   scope: global
   level: T2

@@ -223,6 +223,8 @@ pub struct Core {
     tools: Arc<dyn ToolRunner + Send + Sync>,
     /// 内置文件工具读写端口（策略在 core：寻址与越界校验）。
     io: Arc<dyn SysIo + Send + Sync>,
+    /// 信封修复端口（手写信封不合法时的无歧义补救；默认真现在 adapters，可整体替换）。
+    repair: Arc<dyn ports::EnvelopeRepair + Send + Sync>,
     log: Arc<dyn crate::core::ports::Log + Send + Sync>,
     settings: Settings,
     prompts: Prompts,
@@ -242,6 +244,7 @@ impl Core {
         catalog: Arc<dyn ModelCatalog + Send + Sync>,
         tools: Arc<dyn ToolRunner + Send + Sync>,
         io: Arc<dyn SysIo + Send + Sync>,
+        repair: Arc<dyn ports::EnvelopeRepair + Send + Sync>,
         prompt_source: Box<dyn PromptSource>,
         log: Arc<dyn crate::core::ports::Log + Send + Sync>,
     ) -> Result<Core, String> {
@@ -249,7 +252,7 @@ impl Core {
         let outcome = (|| -> Result<Core, String> {
             let settings = store.load()?;
             let prompts = prompt_source.load()?;
-            Ok(Core { store, history, workspace, source, packages, fence, gateway, catalog, tools, io, log: log_for_core, settings, prompts, sessions: HashMap::new() })
+            Ok(Core { store, history, workspace, source, packages, fence, gateway, catalog, tools, io, repair, log: log_for_core, settings, prompts, sessions: HashMap::new() })
         })();
         if let Err(e) = &outcome {
             log.error("core::new", &format!("装配失败：{}", e)); // 仅错误时借用，不与闭包 move 冲突
@@ -735,6 +738,7 @@ impl Core {
                     self.prompts.clone(),
                     Arc::clone(&self.tools),
                     Arc::clone(&self.io),
+                    Arc::clone(&self.repair),
                     Arc::clone(&self.packages),
                     meta.exec.clone(),
                     metas.clone(),
@@ -852,6 +856,7 @@ impl Core {
         engine::MemberTools {
             modules: engine::tool_table(modules),
             observations: systool::Observations::default(),
+            repair: Arc::clone(&self.repair),
             runner: Arc::clone(&self.tools),
             sandbox: sb.clone(),
             io: Arc::clone(&self.io),
@@ -1192,6 +1197,7 @@ impl Core {
                 self.prompts.clone(),
                 Arc::clone(&self.tools),
                 Arc::clone(&self.io),
+                Arc::clone(&self.repair),
                 Arc::clone(&self.packages),
                 meta,
                 events,

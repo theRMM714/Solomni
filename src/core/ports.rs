@@ -149,6 +149,25 @@ pub trait ToolRunner {
     fn run(&self, fence: &crate::core::fence::FenceSpec, command: &str, args_json: &str) -> ToolOutcome;
 }
 
+/// 一次信封修复的结果。
+pub struct RepairOutcome {
+    /// 修好后的全文；None = 没修（核心按"不合法"处理，让它重发）。
+    pub repaired: Option<String>,
+    /// 如实记录做了什么（拼进工具行回执：模型与用户都看得到核心没有瞎猜）。
+    pub what: Vec<String>,
+}
+
+/// 信封修复端口：模型手写的工具信封不合法时，**先**问它能不能按无歧义的写法修好。
+/// 契约：
+/// - 只做**不会产生歧义**的修补（例如把字符串里的裸控制字符转义）；改了字段含义就是错。
+/// - 修不了就 repaired = None，把原因写进 what（核心据此走原路：记一条失败的工具行，让模型重发）。
+/// - 宁缺毋滥：拿不准就别修——让模型重发一次，好过猜它想写什么。
+///
+/// 默认真现在 adapters（只做控制字符转义）；第三方实现满足本契约即可整体替换。
+pub trait EnvelopeRepair: Send + Sync {
+    fn repair(&self, raw: &str, kind: &crate::core::envelope::Malformed) -> RepairOutcome;
+}
+
 /// 运行日志端口：关键节点（异常/降级/边界）落盘，供事后确定问题，避免过度推理。
 /// core 只调用；文件/时间戳/目录机制在适配层。
 pub trait Log: Send + Sync {

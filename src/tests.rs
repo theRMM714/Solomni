@@ -220,6 +220,19 @@ pub(crate) fn s(parts: &[&str]) -> String {
     p(parts).replace(std::path::MAIN_SEPARATOR, "/")
 }
 
+/// 什么都不修的修复端口（严格要求合法信封）：测试基线，也是"宁缺毋滥"部署的对照实现。
+pub(crate) struct NoRepair;
+
+impl crate::core::ports::EnvelopeRepair for NoRepair {
+    fn repair(
+        &self,
+        _raw: &str,
+        _kind: &crate::core::envelope::Malformed,
+    ) -> crate::core::ports::RepairOutcome {
+        crate::core::ports::RepairOutcome { repaired: None, what: Vec::new() }
+    }
+}
+
 /// 一次内置工具调用（空账本）：只关心工具行为本身的用例用它；
 /// 关心"改动前有没有读过"的用例直接用 systool::execute 并自带 Observations。
 pub(crate) fn run_builtin(
@@ -590,6 +603,7 @@ fn core_with_workspace(modules: Vec<Module>, gateway: ScriptGateway, ws: Arc<InM
         Arc::new(FakeCatalog::new(vec!["m".to_string()])),
         Arc::new(SilentRunner),
         Arc::new(InMemorySysIo::new()),
+        Arc::new(NoRepair),
         Box::new(TestPrompts::ok()),
         Arc::new(crate::core::ports::NoopLog),
     )
@@ -662,6 +676,7 @@ fn core_with_pkgs(
         catalog,
         runner,
         io,
+        Arc::new(NoRepair),
         Box::new(TestPrompts::ok()),
         Arc::new(crate::core::ports::NoopLog),
     )
@@ -685,6 +700,7 @@ pub(crate) fn core_with_gateway(modules: Vec<Module>, gateway: impl ChatGateway 
         Arc::new(FakeCatalog::new(vec!["m".to_string()])),
         Arc::new(SilentRunner),
         Arc::new(InMemorySysIo::new()),
+        Arc::new(NoRepair),
         Box::new(TestPrompts::ok()),
         Arc::new(crate::core::ports::NoopLog),
     )
@@ -1711,6 +1727,7 @@ fn member_with_tools(id: &str, script: Vec<String>, runner: Arc<impl ToolRunner 
     m.tools = Some(MemberTools {
         modules,
         observations: crate::core::systool::Observations::default(),
+        repair: Arc::new(NoRepair),
         runner,
         sandbox: test_sandbox("m0", &[]),
         io: Arc::new(InMemorySysIo::new()),
@@ -2100,6 +2117,41 @@ fn prose_then_unclosed_tool_envelope_is_malformed_and_keeps_prose() {
     let h = core.single_history(&sid).unwrap();
     assert!(h.iter().any(|m| m.role == "assistant" && m.content == raw));
     assert!(h.iter().any(|m| m.role == "user" && m.content.contains("[工具结果] write")), "{:?}", h);
+}
+
+#[test]
+fn a_malformed_envelope_is_repaired_when_the_fix_is_unambiguous() {
+    // 真实事故的形状：write 的 content 里直接换了行 → 手写信封非法。
+    // 默认修复器只做无歧义的转义；修好就照常执行，并在回执最前面如实标注。
+    let note = s(&["demo", "m0", "note.txt"]);
+    let raw = format!(
+        "{{\"type\":\"tool\",\"name\":\"write\",\"args\":{{\"path\":\"{}\",\"content\":\"第一行\n第二行\"}}}}",
+        note
+    );
+    let runner = Arc::new(RecordingRunner { calls: Mutex::new(Vec::new()), out: String::new(), ok: true });
+    let prompts = test_prompts();
+    // 不修（严格基线）：信封不合法 → 失败工具行，工具绝不执行
+    let mut m = member_with_tools("m0", vec![raw.clone(), "{\"type\":\"say\",\"text\":\"改好了\"}".to_string()], Arc::clone(&runner));
+    assert!(m.tools.as_ref().expect("工具环境").repair.repair("x", &crate::core::envelope::Malformed::Unclosed).repaired.is_none());
+    let exec = crate::core::engine::Execution::run(std::slice::from_mut(&mut m), "任务", &prompts);
+    let trace = exec.traces.get("m0").expect("工具行");
+    assert!(!trace[0].ok, "不修时如实记失败：{}", trace[0].output);
+    // 默认修复器：同一个输入被无歧义修好 → 照常执行，且回执最前面如实标注
+    let mut m2 = member_with_tools("m0", vec![raw.clone(), "{\"type\":\"say\",\"text\":\"改好了\"}".to_string()], Arc::clone(&runner));
+    m2.tools.as_mut().expect("工具环境").repair = Arc::new(crate::adapters::EscapeControls);
+    let exec2 = crate::core::engine::Execution::run(std::slice::from_mut(&mut m2), "任务", &prompts);
+    let trace2 = exec2.traces.get("m0").expect("工具行");
+    assert!(trace2[0].ok, "修好即执行：{}", trace2[0].output);
+    assert!(trace2[0].output.starts_with("[信封修复]"), "{}", trace2[0].output);
+    assert!(trace2[0].output.contains("换行"), "{}", trace2[0].output);
+    assert!(trace2[0].args.contains("第一行\\n第二行"), "执行的是修好后的参数：{}", trace2[0].args);
+    // 修不了的不猜：未闭合即便有修复端口也照旧是失败行
+    let half = "{\"type\":\"tool\",\"name\":\"write\",\"args\":{";
+    let mut m3 = member_with_tools("m0", vec![half.to_string(), "{\"type\":\"say\",\"text\":\"知道了\"}".to_string()], Arc::clone(&runner));
+    m3.tools.as_mut().expect("工具环境").repair = Arc::new(crate::adapters::EscapeControls);
+    let exec3 = crate::core::engine::Execution::run(std::slice::from_mut(&mut m3), "任务", &prompts);
+    let trace3 = exec3.traces.get("m0").expect("工具行");
+    assert!(!trace3[0].ok && trace3[0].output.contains("没有收尾"), "{}", trace3[0].output);
 }
 
 #[test]
@@ -3044,6 +3096,7 @@ fn module_without_runtime_is_denied_with_reason() {
         Arc::new(FakeCatalog::new(vec!["m".to_string()])),
         Arc::clone(&runner) as Arc<dyn ToolRunner + Send + Sync>,
         Arc::new(InMemorySysIo::new()),
+        Arc::new(NoRepair),
         Box::new(TestPrompts::ok()),
         Arc::new(crate::core::ports::NoopLog),
     )
@@ -3295,6 +3348,7 @@ fn deleting_a_session_asks_the_fence_to_release_its_grants() {
         Arc::new(FakeCatalog::new(vec!["m".to_string()])),
         Arc::new(SilentRunner),
         Arc::new(InMemorySysIo::new()),
+        Arc::new(NoRepair),
         Box::new(TestPrompts::ok()),
         Arc::new(crate::core::ports::NoopLog),
     )

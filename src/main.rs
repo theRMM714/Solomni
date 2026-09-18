@@ -100,6 +100,8 @@ fn main() {
     );
     // 内置文件工具：纯 Rust 直接读写，不经过外部进程（编码问题不进本程序）。
     let io = adapters::FsSysIo::default();
+    // 信封修复：只把字符串里的裸控制字符转义（无歧义才修，其余交给模型重发）。
+    let repair = adapters::EscapeControls;
 
     let core = match core::Core::new(
         Arc::new(store),
@@ -112,6 +114,7 @@ fn main() {
         Arc::new(catalog),
         Arc::new(tools),
         Arc::new(io),
+        Arc::new(repair),
         Box::new(LoadedPrompts(book)),
         std::sync::Arc::clone(&log),
     ) {
