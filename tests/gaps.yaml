@@ -36,12 +36,24 @@
     两侧的补救已落地（信封不合法的四类判定 + 对应修法回执、read 行区间、edit、JSON 修复端口），
     但通道本身仍未做。
   how: |
-    1) Chat 端口增加 tools 通道：用 core/schema.rs 的声明生成各供应商的工具声明
-       （同一声明的第二形态 to_json_schema 已写好并测过，接上后去掉 #[cfg(test)]）；
-    2) 解析回复里的 tool_calls（每项带 id），按调用 id 回填工具结果；
-    3) 与手写信封的关系（GREEN FIELD：倾向只替换"参数怎么来"这一段，text 通道保留）；
-    4) 写文件的 FREEFORM 通道已由内置 patch 工具落地（补丁正文不走 JSON 转义、整体原子），
-       本条目只差"参数由供应商结构化槽位给出"这一半。
+    阶段 0（已落地）：models.yaml 的 tools: envelope|native（缺省 envelope），非法值拒收、编辑保留原值；
+      登记处契约写明"两种形态互斥"（一个通道走 native 就只认原生调用）。
+    阶段 1（已落地）：Chat 端口带 CompleteOpts{tools} 与 Completion.calls；HttpChat 两条路径都解析
+      tool_calls（含流式按 index 拼分片）；探测端口 + 隐藏模式 --probe-tools（不带声明的先证明通道通不通，
+      带声明的那条才在测支持；支持/明确不支持/无法判定三种结论都如实，只把确凿结论写回登记处）。
+      真实中继实测：4sapi.cn/v1 对 glm-5.3-flash 支持原生调用（finish_reason=tool_calls）。
+    阶段 2（未做，引擎侧，本轮因上下文预算停下，未动任何代码）：
+      ① Msg 支持 assistant(tool_calls) 与 tool(tool_call_id)（适配器按 OpenAI 形状序列化）；
+      ② 按通道形态决定这次请求带不带工具声明、回复按哪套协议解析；
+      ③ 一次回复 N 个调用 → N 条工具行、结果按 id 回填（先串行；并发是阶段 4）；
+      ④ ToolCallView 记下"这一行是什么形态"（native 记 id/name/args），重建历史按它拼消息，保证回放一致；
+      ⑤ 系统提示按形态注入"直接调用工具"或"写信封"（两套文案互斥，不能同时教），
+         形态变了就地刷新系统提示并给用户一句通知，没变什么都不做；
+      ⑥ native 模式下正文里出现信封 → 不执行，但记一条失败工具行说清"本通道用原生调用"；
+         声明 native 而供应商报错 → 如实报错，不静默降级成信封。
+    阶段 3：文档（MODULE_SPEC/ARCHITECTURE/TESTING）+ 探测的 GUI 按钮（目前只有 --probe-tools）。
+    阶段 4：工具声明加 parallel + 按声明并发（只读并发、写类独占），结果按原始顺序回填。
+    另：patch 的 FREEFORM 通道已落地（阶段 1 之外的那半件事已完成）。
   accept: |
     供应商支持原生工具调用时，参数从结构化槽位直达工具，模型不再手写 JSON；
     端口矩阵新增一行（原生 tool_calls × 各供应商）且 cargo test 与 node run-tests.js 全绿。
