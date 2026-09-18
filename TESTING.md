@@ -60,11 +60,15 @@ T0 不验证业务运行结果，而验证代码和测试系统自身是否保�
 检查项：
 
 ```text
-cargo fmt --check
+cargo fmt --all -- --check
 cargo check --all-targets
-cargo clippy --all-targets --all-features -- -D warnings
+cargo clippy --all-targets --all-features --keep-going -- -D warnings
 cargo tree --duplicates
 ```
+
+`--keep-going` 不是可选项：`-D warnings` 会让**首个失败的单元中断调度**，而 lint 计数取决于哪些单元真的被编译过，
+于是同一个提交连跑两次可能得到不同计数（同一个 commit 在 macOS 上曾一次报 `items_after_test_module`、一次不报）。
+加上它，所有目标单元都编译完，测量才可复现——门禁读的是计数，不是退出码。
 
 同时需要检查：
 

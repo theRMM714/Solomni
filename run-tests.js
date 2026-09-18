@@ -364,7 +364,7 @@ function baselineYaml(m, old) {
 function printBaseline() {
   const old = baseline(); // 其它平台的分区要保住
   const fmt = sh("cargo", ["fmt", "--all", "--", "--check"]);
-  const clippy = sh("cargo", ["clippy", "--all-targets", "--all-features", "--color", "never", "--", "-D", "warnings"]);
+  const clippy = sh("cargo", ["clippy", "--all-targets", "--all-features", "--keep-going", "--color", "never", "--", "-D", "warnings"]);
   const check = sh("cargo", ["check", "--all-targets", "--color", "never"]);
   const tree = sh("cargo", ["tree", "--duplicates", "--color", "never"]);
   process.stdout.write(
@@ -450,7 +450,9 @@ function main() {
     announceDone("env-skip", "cargo-clippy 未安装");
     steps.push({ step: "T0 静态检查（clippy）", status: "env-skip", detail: "cargo-clippy 未安装：rustup component add clippy" });
   } else {
-    const r = sh("cargo", ["clippy", "--all-targets", "--all-features", "--color", "never", "--", "-D", "warnings"]);
+    // --keep-going：-D warnings 会让首个失败的单元中断调度，而 lint 计数取决于哪些单元真的被编译过，
+    // 于是同一个提交连跑两次可能得到不同计数。加上它，所有目标单元都编译完，测量才可复现。
+    const r = sh("cargo", ["clippy", "--all-targets", "--all-features", "--keep-going", "--color", "never", "--", "-D", "warnings"]);
     const got = clippyLints(r.out);
     const mine = platformBase(base, "clippy");
     if (!mine) {
