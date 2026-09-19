@@ -1,0 +1,312 @@
+    Checking solomni v0.1.0 (D:\a\Solomni\Solomni)
+error: unnecessary use of `clone` to create a slice from a reference
+  --> tests\cross-platform\integration\fence_launcher.rs:28:51
+   |
+28 |     let (code, out, err) = run_launcher(&job_json(&[dir.clone()], &dir, false), "echo hello-from-tool");
+   |                                                   ^^^^^^^^^^^^^^ help: try: `std::slice::from_ref(&dir)`
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#cloned_ref_to_slice_refs
+   = note: `-D clippy::cloned-ref-to-slice-refs` implied by `-D warnings`
+   = help: to override `-D warnings` add `#[allow(clippy::cloned_ref_to_slice_refs)]`
+
+error: unnecessary use of `clone` to create a slice from a reference
+  --> tests\cross-platform\integration\fence_launcher.rs:57:44
+   |
+57 |     let mut child = spawn_fenced(&job_json(&[dir.clone()], &dir, false), &command);
+   |                                            ^^^^^^^^^^^^^^ help: try: `std::slice::from_ref(&dir)`
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#cloned_ref_to_slice_refs
+
+error: could not compile `solomni` (test "cross-platform") due to 2 previous errors
+warning: build failed, waiting for other jobs to finish...
+error: casting raw pointers to the same type and constness is unnecessary (`*mut std::ffi::c_void` -> `*mut std::ffi::c_void`)
+   --> src\adapters\confine\windows.rs:182:19
+    |
+182 |         LocalFree(sid as *mut c_void);
+    |                   ^^^^^^^^^^^^^^^^^^ help: try: `sid`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#unnecessary_cast
+    = note: `-D clippy::unnecessary-cast` implied by `-D warnings`
+    = help: to override `-D warnings` add `#[allow(clippy::unnecessary_cast)]`
+
+error: casting to the same type is unnecessary (`u32` -> `u32`)
+   --> src\adapters\confine\windows.rs:215:38
+    |
+215 |         grfInheritance: if inherit { (OBJECT_INHERIT_ACE | CONTAINER_INHERIT_ACE) as u32 } else { 0 },
+    |                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: try: `(OBJECT_INHERIT_ACE | CONTAINER_INHERIT_ACE)`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#unnecessary_cast
+
+error: casting raw pointers to the same type and constness is unnecessary (`*mut std::ffi::c_void` -> `*mut std::ffi::c_void`)
+   --> src\adapters\confine\windows.rs:228:23
+    |
+228 |             LocalFree(sd as *mut c_void);
+    |                       ^^^^^^^^^^^^^^^^^ help: try: `sd`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#unnecessary_cast
+
+error: casting raw pointers to the same type and constness is unnecessary (`*mut std::ffi::c_void` -> `*mut std::ffi::c_void`)
+   --> src\adapters\confine\windows.rs:263:19
+    |
+263 |         LocalFree(sd as *mut c_void);
+    |                   ^^^^^^^^^^^^^^^^^ help: try: `sd`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#unnecessary_cast
+
+error: casting raw pointers to the same type and constness is unnecessary (`*mut std::ffi::c_void` -> `*mut std::ffi::c_void`)
+   --> src\adapters\confine\windows.rs:307:23
+    |
+307 |             LocalFree(sd as *mut c_void);
+    |                       ^^^^^^^^^^^^^^^^^ help: try: `sd`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#unnecessary_cast
+
+error: casting raw pointers to the same type and constness is unnecessary (`*mut std::ffi::c_void` -> `*mut std::ffi::c_void`)
+   --> src\adapters\confine\windows.rs:344:19
+    |
+344 |         LocalFree(sd as *mut c_void);
+    |                   ^^^^^^^^^^^^^^^^^ help: try: `sd`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#unnecessary_cast
+
+error: casting raw pointers to the same type and constness is unnecessary (`*mut std::ffi::c_void` -> `*mut std::ffi::c_void`)
+   --> src\adapters\confine\windows.rs:717:19
+    |
+717 |         LocalFree(sd as *mut c_void);
+    |                   ^^^^^^^^^^^^^^^^^ help: try: `sd`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#unnecessary_cast
+
+error: the function `CreateProcessW` doesn't need a mutable reference
+   --> src\adapters\confine\windows.rs:819:13
+    |
+819 |             &mut si.StartupInfo,
+    |             ^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#unnecessary_mut_passed
+    = note: `-D clippy::unnecessary-mut-passed` implied by `-D warnings`
+    = help: to override `-D warnings` add `#[allow(clippy::unnecessary_mut_passed)]`
+help: remove this `mut`
+    |
+819 -             &mut si.StartupInfo,
+819 +             &si.StartupInfo,
+    |
+
+error: this `map_or` can be simplified
+  --> src\adapters\endpoint.rs:97:42
+   |
+97 |     matches!(chars.next(), Some('v')) && chars.next().map_or(false, |c| c.is_ascii_digit())
+   |                                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#unnecessary_map_or
+   = note: `-D clippy::unnecessary-map-or` implied by `-D warnings`
+   = help: to override `-D warnings` add `#[allow(clippy::unnecessary_map_or)]`
+help: use `is_some_and` instead
+   |
+97 -     matches!(chars.next(), Some('v')) && chars.next().map_or(false, |c| c.is_ascii_digit())
+97 +     matches!(chars.next(), Some('v')) && chars.next().is_some_and(|c| c.is_ascii_digit())
+   |
+
+error: consider using `sort_by_key`
+  --> src\adapters\fs_history.rs:72:9
+   |
+72 |         out.sort_by(|a, b| b.ts.cmp(&a.ts));
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#unnecessary_sort_by
+   = note: `-D clippy::unnecessary-sort-by` implied by `-D warnings`
+   = help: to override `-D warnings` add `#[allow(clippy::unnecessary_sort_by)]`
+help: try
+   |
+72 -         out.sort_by(|a, b| b.ts.cmp(&a.ts));
+72 +         out.sort_by_key(|a| std::cmp::Reverse(a.ts));
+   |
+
+error: this `map_or` can be simplified
+   --> src\core\api.rs:110:42
+    |
+110 |             .filter(|l| l.seq > since && sid.map_or(true, |x| l.sid == x))
+    |                                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#unnecessary_map_or
+help: use `is_none_or` instead
+    |
+110 -             .filter(|l| l.seq > since && sid.map_or(true, |x| l.sid == x))
+110 +             .filter(|l| l.seq > since && sid.is_none_or(|x| l.sid == x))
+    |
+
+error: this function has too many arguments (13/7)
+  --> src\core\collab.rs:66:5
+   |
+66 | /     pub fn start(
+67 | |         gateway: Arc<dyn ChatGateway + Send + Sync>,
+68 | |         source: Arc<dyn ModuleSource + Send + Sync>,
+69 | |         settings: Settings,
+...  |
+79 | |         sandboxes: Sandboxes,
+80 | |     ) -> Result<CollabSession, String> {
+   | |______________________________________^
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#too_many_arguments
+   = note: `-D clippy::too-many-arguments` implied by `-D warnings`
+   = help: to override `-D warnings` add `#[allow(clippy::too_many_arguments)]`
+
+error: this function has too many arguments (12/7)
+   --> src\core\collab.rs:445:5
+    |
+445 | /     pub fn restore(
+446 | |         gateway: Arc<dyn ChatGateway + Send + Sync>,
+447 | |         source: Arc<dyn ModuleSource + Send + Sync>,
+448 | |         settings: Settings,
+...   |
+457 | |         sandboxes: Sandboxes,
+458 | |     ) -> Result<CollabSession, String> {
+    | |______________________________________^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#too_many_arguments
+
+error: this `if` can be collapsed into the outer `match`
+   --> src\core\envelope.rs:354:17
+    |
+354 | /                 if depth > 0 {
+355 | |                     depth -= 1;
+356 | |                     stack.pop();
+357 | |                     if depth == 0 {
+...   |
+360 | |                 }
+    | |_________________^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#collapsible_match
+    = note: `-D clippy::collapsible-match` implied by `-D warnings`
+    = help: to override `-D warnings` add `#[allow(clippy::collapsible_match)]`
+help: collapse nested if block
+    |
+353 ~             b'}' | b']'
+354 ~                 if depth > 0 => {
+355 |                     depth -= 1;
+...
+359 |                     }
+360 ~                 }
+    |
+
+error: this function has too many arguments (8/7)
+  --> src\core\session.rs:54:5
+   |
+54 | /     pub fn new(
+55 | |         id: &str,
+56 | |         system: String,
+57 | |         chat: BoxedChat,
+...  |
+62 | |         tool_texts: crate::core::prompt::ToolTexts,
+63 | |     ) -> AgentSession {
+   | |_____________________^
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#too_many_arguments
+
+error: this function has too many arguments (10/7)
+  --> src\core\session.rs:81:5
+   |
+81 | /     pub fn restore(
+82 | |         id: &str,
+83 | |         history: Vec<Msg>,
+84 | |         marks: Vec<usize>,
+...  |
+91 | |         tool_texts: crate::core::prompt::ToolTexts,
+92 | |     ) -> AgentSession {
+   | |_____________________^
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#too_many_arguments
+
+error: large size difference between variants
+  --> src\core\mod.rs:46:1
+   |
+46 | / pub enum Session {
+47 | |     Single(session::AgentSession),
+   | |     ----------------------------- the second-largest variant contains at least 5848 bytes
+48 | |     Collab(CollabSession),
+   | |     --------------------- the largest variant contains at least 7232 bytes
+49 | | }
+   | |_^ the entire enum is at least 7232 bytes
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#large_enum_variant
+   = note: `-D clippy::large-enum-variant` implied by `-D warnings`
+   = help: to override `-D warnings` add `#[allow(clippy::large_enum_variant)]`
+help: consider boxing the large fields or introducing indirection in some other way to reduce the total size of the enum
+   |
+48 -     Collab(CollabSession),
+48 +     Collab(Box<CollabSession>),
+   |
+
+error: this function has too many arguments (13/7)
+   --> src\core\mod.rs:237:5
+    |
+237 | /     pub fn new(
+238 | |         store: Arc<dyn SettingsStore + Send + Sync>,
+239 | |         history: Arc<dyn HistoryStore + Send + Sync>,
+240 | |         workspace: Arc<dyn Workspace + Send + Sync>,
+...   |
+250 | |         log: Arc<dyn crate::core::ports::Log + Send + Sync>,
+251 | |     ) -> Result<Core, String> {
+    | |_____________________________^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#too_many_arguments
+
+error: you seem to be trying to use `match` for destructuring a single pattern. Consider using `if let`
+    --> src\core\mod.rs:1210:13
+     |
+1210 | /             match self.sessions.get_mut(sid) {
+1211 | |                 Some(Session::Single(s)) => s.rewind(keep_id),
+1212 | |                 _ => {}
+1213 | |             }
+     | |_____________^ help: try: `if let Some(Session::Single(s)) = self.sessions.get_mut(sid) { s.rewind(keep_id) }`
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#single_match
+     = note: `-D clippy::single-match` implied by `-D warnings`
+     = help: to override `-D warnings` add `#[allow(clippy::single_match)]`
+
+error: could not compile `solomni` (bin "solomni") due to 19 previous errors
+error: items after a test module
+   --> src\adapters\confine\mod.rs:360:1
+    |
+360 | mod tests {
+    | ^^^^^^^^^
+...
+478 | impl FenceSpec {
+    | ^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#items_after_test_module
+    = note: `-D clippy::items-after-test-module` implied by `-D warnings`
+    = help: to override `-D warnings` add `#[allow(clippy::items_after_test_module)]`
+    = help: move the items to before the test module was defined
+
+error: items after a test module
+   --> src\adapters\confine\windows.rs:840:1
+    |
+840 | mod tests {
+    | ^^^^^^^^^
+...
+952 | pub fn run_fenced(spec: &FenceSpec, prepared: bool, home: Option<&Path>, command: &str) -> i32 {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+993 | fn run_unfenced(spec: &FenceSpec, command: &str) -> i32 {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#items_after_test_module
+    = help: move the items to before the test module was defined
+
+error: writing `&PathBuf` instead of `&Path` involves a new object where a slice will do
+   --> src\adapters\proc_tools.rs:331:22
+    |
+331 |     fn spec_for(dir: &PathBuf) -> FenceSpec {
+    |                      ^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#ptr_arg
+    = note: `-D clippy::ptr-arg` implied by `-D warnings`
+    = help: to override `-D warnings` add `#[allow(clippy::ptr_arg)]`
+help: change this to
+    |
+331 ~     fn spec_for(dir: &Path) -> FenceSpec {
+332 ~         FenceSpec { agent: "proc".to_string(), rw: vec![dir.to_path_buf()], cwd: dir.to_path_buf(), net: false }
+    |
+
+error: could not compile `solomni` (bin "solomni" test) due to 22 previous errors
