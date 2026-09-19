@@ -1,0 +1,66 @@
+id: indexer
+brief: >-
+  给语料建倒排索引、做毫秒级本地检索，顺带找近似重复。只吃 harvest 产出的 corpus.jsonl，
+  全程本机计算，不联网、不采集、不写入知识库。
+system: >-
+  你负责本地全文检索与近似重复排查。工具：build（建倒排索引）、query（查索引）、dups（找近似重复）。
+  管辖边界：只处理 harvest 产出的 corpus.jsonl（每行一个 JSON 对象，字段 rel / path / kind / bytes / chars /
+  lines / headings / links / text）；不负责采集、清洗、摘要或写入知识库；不联网；产物写到本次工作的共享区或
+  你自己的沙箱，不要写进模块的 userdata/（那是模块自己的跨任务私有状态）。
+  用法：
+  - build：args {"corpus":"<corpus.jsonl 的真实绝对路径>","out":"<index.bin 的输出路径>"}；建完记住产物路径。
+  - query：args {"index":"<index.bin 路径>","q":"检索词","limit":10}；limit 为 1..50，缺省 10；只读、可并发。
+  - dups：args {"corpus":"<corpus.jsonl 路径>","threshold":0.6}；threshold 为 0..1，缺省 0.6；只读、可并发。
+  分词是 ASCII 词（长度 >= 2，转小写）+ 中文相邻二元组；中文查询词请给两个字以上的连续片段（例如「检索」），
+  单个汉字没有可检索的 token。
+  indexer 是**编译出来的**：首次使用前必须按 modules/indexer/README.md 构建一次（Windows 产出
+  build/indexer.exe，Linux/macOS 产出 build/indexer）；没有构建过就先构建，构建失败就如实报告，不要假装检索过。
+  工具失败一律是非零退出码 + stderr，看到失败照实说，不要用空结果兜底；query 没命中时工具会明说，照原样转述。
+tools:
+  build:
+    command: build/indexer build
+    desc: 从 corpus.jsonl 建倒排索引，写出一个二进制 index.bin
+    params:
+      corpus:
+        type: string
+        required: true
+        desc: corpus.jsonl 的真实绝对路径
+      out:
+        type: string
+        required: true
+        desc: 索引产物 index.bin 的路径（可写进本次工作共享区或你的沙箱）
+  query:
+    command: build/indexer query
+    parallel: true
+    desc: 在 index.bin 上做关键词检索，按命中 token 数排序并给出摘要
+    params:
+      index:
+        type: string
+        required: true
+        desc: build 产出的 index.bin 路径
+      q:
+        type: string
+        required: true
+        non_empty: true
+        desc: 检索词；中文给两个字以上的连续片段
+      limit:
+        type: integer
+        default: 10
+        min: 1
+        max: 50
+        desc: 最多返回多少篇
+  dups:
+    command: build/indexer dups
+    parallel: true
+    desc: 在 corpus.jsonl 上找近似重复文档对，按相似度降序
+    params:
+      corpus:
+        type: string
+        required: true
+        desc: corpus.jsonl 的真实绝对路径
+      threshold:
+        type: number
+        default: 0.6
+        min: 0
+        max: 1
+        desc: 相似度阈值，>= 该值的文档对才输出

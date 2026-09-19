@@ -65,6 +65,34 @@ cargo run                 # 工具链就绪后最直接的跑法：cargo run -- 
   的存量基线比对——**超出基线即失败**，降到基线以下也会要求同步下调基线（不许悄悄恶化）。
   存量清零是长期目标，记在 `tests/gaps.yaml`。分层、目录、缺口账与报告格式见 [TESTING.md](TESTING.md)。
 
+## 跑一遍演示 · Run the Demo
+
+`demo/` 里带着一份可以直接跑的演示：把 5 份混合格式的本地资料（`demo/sample-corpus/`）交给一个装了三个模块的 agent，
+让它整理成一份**可离线打开的 HTML 报告** + 一个**能毫秒级检索的索引包**。三个模块分别用 **python / node / C++** 写，
+正好演示"工具的语言完全自由"：
+
+| 模块 | 语言 | 工具 | 干什么 |
+|---|---|---|---|
+| `harvest` | python | `scan` | 扫共享区，把资料抽成语料清单 `corpus.jsonl`（正文、标题层级、链接、字数行数） |
+| `render` | node | `report` | 流式读语料，渲染**自包含** HTML 报告（目录 / 大纲 / 统计 / 坏链检查）+ 一份轻量索引 JSON |
+| `indexer` | C++ | `build` / `query` / `dups` | 建倒排索引（CJK 二元组）、毫秒级检索、近似重复检测（bottom-k 草图估 Jaccard） |
+
+```bash
+# 1) 起产品（默认网页端口 3081）
+node start.js -webUI
+# 2) 另开一个终端：投喂示例语料 → 跑完整流程 → 复核产物
+node demo/run-demo.mjs
+```
+
+- **C++ 模块要先编译一次**（源码入库、构建产物不入库）。编译器的运行库必须静态链进去：围栏只保证 `PATH` 上有系统自带
+  的东西，不带编译器的 bin，少了这些标志就会在运行时找不到 `libstdc++`。完整命令见 `modules/indexer/README.md`——
+  macOS：`g++ -O2 -std=c++17 -Wall -Wextra modules/indexer/tools/src/indexer.cpp -o modules/indexer/build/indexer`；
+  Linux：同上再加 `-static-libgcc -static-libstdc++`；
+  Windows（用项目自带工具链）：`& '.tools/mingw64/bin/g++.exe' -O2 -std=c++17 -Wall -Wextra -static -static-libgcc -static-libstdc++ modules/indexer/tools/src/indexer.cpp -o modules/indexer/build/indexer.exe`。
+  命令里写 `build/indexer` 两平台都认：守门进程经 shell 解释命令，Windows 会按 PATHEXT 补 `.exe`。
+- 三个模块**只用标准库 / 零第三方依赖**，所以整条流程**不需要网络**：围栏的可达范围只含本次工作的共享区、该 agent 的私有沙箱与它自己的模块目录。
+- 演示只走产品自己的 HTTP 能力面，不改登记处；产物落在本次工作的共享区或该 agent 的私有沙箱里。
+
 ## 它不是什么 · What It Is Not
 
 - 不是模型或供应商：通道与密钥是产品资源，模型可任意替换。
