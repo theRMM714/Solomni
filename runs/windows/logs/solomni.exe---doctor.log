@@ -1,0 +1,1 @@
+{"arch":"x86_64","externals":{"curl":"C:\\Windows\\system32\\curl.exe","node":"C:\\hostedtoolcache\\windows\\node\\24.20.0\\x64\\node.exe","python":"C:\\hostedtoolcache\\windows\\Python\\3.12.10\\x64\\python.exe"},"fence":{"fs":true,"net":true,"note":"Windows：AppContainer（文件系统可达范围 + 默认断网）与 Job Object（进程树）都由内核强制","tree":true},"platform":"windows"}
