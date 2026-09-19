@@ -146,6 +146,47 @@ pub fn release_fence(spec: &FenceSpec) -> Result<(), String> {
 /// 命令里可能出现的外部程序：按 PATH 解析出真实路径（解析不出的跳过，不猜）。
 /// 它们的**安装目录**必须放行（只读+执行），否则受限进程连解释器都起不来——Windows 的目录 ACL 与 macOS 的 seatbelt 都靠它。
 pub(crate) fn interpreter_dirs(command: &str) -> Vec<std::path::PathBuf> {
+    let path_var = std::env::var_os("PATH").unwrap_or_default();
+    let pathext = std::env::var("PATHEXT").ok();
+    interpreter_dirs_in(command, &path_var, pathext.as_deref())
+}
+
+/// 可执行扩展名：PATHEXT（若在场）**加**一份标准兜底，按小写去重。
+/// 兜底不是装饰：真机上见过 PATHEXT 缺席的进程环境（CI 的 runner 起 node 再起产品），
+/// 那时只按 PATHEXT 找扩展名会一个解释器都解析不出来——容器里的工具连 python 都找不到。
+fn exec_extensions(pathext: Option<&str>) -> Vec<String> {
+    let mut exts: Vec<String> = Vec::new();
+    let mut push = |ext: &str| {
+        let ext = ext.trim().to_ascii_lowercase();
+        if !ext.is_empty() && !exts.contains(&ext) {
+            exts.push(ext);
+        }
+    };
+    for ext in [".exe", ".cmd", ".bat", ".com"] {
+        push(ext);
+    }
+    if let Some(text) = pathext {
+        for ext in text.split(';') {
+            push(ext);
+        }
+    }
+    exts
+}
+
+/// 去掉 Windows 规范化路径的 `\\?\` 前缀：安全描述符接口不认这个前缀，带上就是白写一条授权。
+fn strip_verbatim_prefix(path: &std::path::Path) -> std::path::PathBuf {
+    match path.to_string_lossy().strip_prefix(r"\\?\") {
+        Some(rest) => std::path::PathBuf::from(rest),
+        None => path.to_path_buf(),
+    }
+}
+
+/// 解析规则由调用方把环境形状喂进来：**不能假设 PATH / PATHEXT 一定在场或一定干净**。
+fn interpreter_dirs_in(
+    command: &str,
+    path_var: &std::ffi::OsStr,
+    pathext: Option<&str>,
+) -> Vec<std::path::PathBuf> {
     let mut dirs: Vec<std::path::PathBuf> = Vec::new();
     let mut candidates: Vec<String> = Vec::new();
     for raw in command.split([' ', '\t', '&', '|', ';', '\n']) {
@@ -164,18 +205,19 @@ pub(crate) fn interpreter_dirs(command: &str) -> Vec<std::path::PathBuf> {
         }
         candidates.push(token.to_string());
     }
-    let path_var = std::env::var_os("PATH").unwrap_or_default();
-    let exts: Vec<String> = std::env::var("PATHEXT")
-        .unwrap_or_else(|_| String::new())
-        .split(';')
-        .filter(|s| !s.is_empty())
-        .map(|s| s.to_string())
-        .collect();
+    let exts = exec_extensions(pathext);
     for name in candidates {
-        for dir in std::env::split_paths(&path_var) {
+        for entry in std::env::split_paths(path_var) {
+            // PATH 项可能带外层引号（手写的 PATH 常见）：带引号去 join 就永远找不到。
+            let text = entry.to_string_lossy();
+            let unquoted = text.trim_matches('"');
+            let dir = if unquoted.len() == text.len() {
+                entry
+            } else {
+                std::path::PathBuf::from(unquoted.to_string())
+            };
             let mut tries: Vec<std::path::PathBuf> = vec![dir.join(&name)];
             for e in &exts {
-                tries.push(dir.join(format!("{}{}", name, e.to_lowercase())));
                 tries.push(dir.join(format!("{}{}", name, e)));
             }
             if let Some(hit) = tries.into_iter().find(|p| p.is_file() && is_executable(p)) {
@@ -186,6 +228,7 @@ pub(crate) fn interpreter_dirs(command: &str) -> Vec<std::path::PathBuf> {
                 // 符号链接要把**真身**的安装目录也放行：macOS 上 python3 常常是链接，动态库在真身旁边——
                 // 只放行链接所在目录会让加载器取不到库（进程直接 SIGABRT）。
                 if let Ok(real) = std::fs::canonicalize(&hit) {
+                    let real = strip_verbatim_prefix(&real);
                     if real != hit {
                         if let Some(parent) = real.parent() {
                             dirs.push(install_dir(parent));
@@ -352,6 +395,46 @@ mod tests {
         assert_eq!(FenceJob::from_json(&text).expect("回读守门进程入参"), job);
         assert!(FenceJob::from_json("{}").is_err(), "缺字段必须报错，不猜");
         assert!(FenceJob::from_json("这不是 JSON").is_err());
+    }
+
+    /// 解析解释器不能假设环境形状：PATHEXT 缺席（真机 CI 上见过）时靠标准兜底扩展名照样找到 .exe，
+    /// 带引号的 PATH 项照样能用——否则容器里的工具连解释器都找不到（真机上就是这么挂的）。
+    #[test]
+    fn interpreter_dirs_resolves_without_pathext_and_with_quoted_path_entries() {
+        let root = crate::contract_tests::scratch("interpreter-dirs");
+        let pydir = root.join("pydir");
+        std::fs::create_dir_all(&pydir).expect("建解释器目录");
+        let exe = pydir.join(if cfg!(windows) { "python.exe" } else { "python" });
+        std::fs::write(&exe, b"#!/bin/sh\nexit 0\n").expect("放一个假解释器");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perm = std::fs::metadata(&exe).expect("读权限位").permissions();
+            perm.set_mode(0o755);
+            std::fs::set_permissions(&exe, perm).expect("加执行位");
+        }
+        let path = pydir.as_os_str();
+        assert_eq!(
+            interpreter_dirs_in("python tools/x.py", path, None),
+            vec![pydir.clone()],
+            "PATHEXT 缺席也要解析出解释器目录"
+        );
+        assert_eq!(
+            interpreter_dirs_in("python tools/x.py", path, Some(".EXE;.BAT")),
+            vec![pydir.clone()],
+            "PATHEXT 在场照走 PATHEXT"
+        );
+        let quoted = std::ffi::OsString::from(format!("\"{}\"", pydir.display()));
+        assert_eq!(
+            interpreter_dirs_in("python tools/x.py", &quoted, None),
+            vec![pydir.clone()],
+            "带引号的 PATH 项也要能解析"
+        );
+        assert!(
+            interpreter_dirs_in(&format!("cat {}", exe.display()), path, None).iter().all(|d| d != &pydir),
+            "数据文件路径不算解释器（否则等于给围栏开洞）"
+        );
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     /// 命令里的解释器要按 PATH 解析出真实路径，并给出它的安装目录；
