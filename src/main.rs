@@ -24,6 +24,11 @@ fn main() {
     if args.iter().any(|a| a == "--doctor") {
         std::process::exit(doctor());
     }
+    // 隐藏模式：走**产品自己那套**出站链路打一次最小 HTTPS 请求，三态如实回报
+    // （ok / no-net / tls-fail|fail）——CI 三平台据此验本构建的 TLS 栈，不需要任何密钥。
+    if let Some(i) = args.iter().position(|a| a == "--https-check") {
+        std::process::exit(https_check(&args, i));
+    }
     // 入站契约（机器可读）：HTTP 路由目录的唯一定义（见 ARCHITECTURE.md「呈现层入站契约」）。
     if args.iter().any(|a| a == "--print-routes") {
         println!("{}", presentation::routes::catalog_json());
@@ -275,6 +280,29 @@ fn doctor() -> i32 {
     });
     println!("{}", doc);
     0
+}
+
+/// 隐藏模式：用**产品自己的出站代理**（含按平台装配的 TLS）打一次最小 HTTPS 请求，如实报结论。
+/// 三态机器可读：ok（通）/ no-net（环境连不上外网）/ tls-fail|fail（我们链路坏了）。
+/// 退出码恒 0：判定归调用方（测试按性质决定 env-skip 还是失败），这里只报事实。
+fn https_check(args: &[String], i: usize) -> i32 {
+    let url = args.get(i + 1).cloned().unwrap_or_default();
+    if url.is_empty() {
+        eprintln!("用法：solomni --https-check <https url>");
+        return 2;
+    }
+    let backend = adapters::http_agent::tls_backend();
+    let agent = adapters::http_agent::agent(10, 20);
+    match agent.get(&url).call() {
+        Ok(resp) => {
+            println!("[HTTPS] ok {} {} {}", resp.status().as_u16(), backend, url);
+            0
+        }
+        Err(e) => {
+            println!("[HTTPS] {} {} {}", adapters::http_agent::classify(&e), backend, e);
+            0
+        }
+    }
 }
 
 /// 在 PATH 里找一个可执行文件（找不到就是没有，不去别处翻）。

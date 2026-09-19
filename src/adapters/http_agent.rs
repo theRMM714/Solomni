@@ -28,6 +28,32 @@ pub fn agent(connect_secs: u64, total_secs: u64) -> ureq::Agent {
     builder.build().into()
 }
 
+/// 这条构建实际用的 TLS 后端（编译期事实）：探针与自检据此如实报出来，不靠人猜。
+pub fn tls_backend() -> &'static str {
+    if cfg!(windows) {
+        "native-tls"
+    } else {
+        "rustls"
+    }
+}
+
+/// 出站错误的**性质**分类（只用于如实区分"环境连不上外网"与"我们自己的链路坏了"）：
+/// - 网络类（Io / 域名解析不到 / 连接失败 / 超时）→ `no-net`：环境问题，探针据此 env-skip；
+/// - 其余（含 `Tls` 与按功能编译期存在的 `Rustls`/`NativeTls`/`Pem`/`Der`，都由 `_` 收）
+///   → 我们链路的问题，探针必须报失败（不许把 TLS 坏掉说成"环境不允许"）。
+pub fn classify(e: &ureq::Error) -> &'static str {
+    match e {
+        ureq::Error::Io(_)
+        | ureq::Error::HostNotFound
+        | ureq::Error::ConnectionFailed
+        | ureq::Error::Timeout(_) => "no-net",
+        ureq::Error::Tls(_) => "tls-fail",
+        // 其余一律算失败（含 native-tls/rustls 自己包装的证书类错误——它们由 _ 收到这里）：
+        // 名字不细分是有意的，原始错误原文就打在后面，绝不因为认不出性质就当成"环境不允许"。
+        _ => "fail",
+    }
+}
+
 /// 出站错误里的密钥一律替换掉再出适配层（红线）。
 pub fn redact(s: String, key: &str) -> String {
     if key.is_empty() {

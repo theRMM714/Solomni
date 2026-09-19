@@ -178,7 +178,10 @@ T2 不替代：
 - 断网；
 - 进程树和杀树；
 - ACL、容器 profile、Landlock、seatbelt；
-- 平台解释器或系统能力。
+- 平台解释器或系统能力；
+- **HTTPS/TLS**：走产品自己的出站链路打一次公网端点（`--https-check`），验这条构建的 TLS 后端
+  （Windows = native-tls、unix = rustls）真能连外网；连不上外网 = env-skip（附命令行原话），
+  TLS/HTTP 坏了 = 失败——绝不把"我们链路坏了"说成"环境不允许"。
 
 每条探针必须区分：
 
@@ -468,6 +471,7 @@ node run-tests.js --fence-live
 tests/
   helpers/
     probe.rs                    # T4 共用探针设施
+    https_probe.rs              # T4 HTTPS/TLS 探针（三平台目标共用这一份正文）
   cross-platform/
     main.rs                     # T3 目标入口
     integration/                # T3（含 fence_launcher.rs）
