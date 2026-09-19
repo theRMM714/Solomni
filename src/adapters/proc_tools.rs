@@ -87,7 +87,13 @@ impl ToolRunner for ProcTools {
         // 其它平台没有容器围栏，也就没有"要先授权"这一步。
         #[cfg(not(windows))]
         let prepared = false;
-        let mut cmd = confine::launcher(&self.exe, fence, prepared, command);
+        // 容器 profile 的台账落点：只有 Windows 的守门进程会写它（外层不知道 profile 建成了没有）。
+        #[cfg(windows)]
+        let home = Some(self.home.clone());
+        #[cfg(not(windows))]
+        let home: Option<std::path::PathBuf> = None;
+        let job = confine::FenceJob { spec: fence.clone(), prepared, home };
+        let mut cmd = confine::launcher(&self.exe, &job, command);
         cmd.current_dir(&fence.cwd)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())

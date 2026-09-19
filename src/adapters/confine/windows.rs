@@ -119,16 +119,27 @@ fn self_check() -> Result<(), String> {
     outcome.map_err(|e| format!("改不动目录 ACL：{}", e))
 }
 
-/// 容器名：只由（agent + 私有沙箱）决定，于是外层授权与守门进程能各自算出同一个 SID。
+/// 本程序建的容器 profile 前缀（`container_name` 生成的就是它；`--fence-clean` 按它扫整族）。
+const PROFILE_PREFIX: &str = "Solomni.Agent.";
+
+/// 容器名：**只由 agent 名决定**——一个 agent 一个 profile，跨会话复用（数量有界），
+/// 外层授权与守门进程因此各自能算出同一个 SID。各会话之间的路径隔离仍由那些目录上的 ACE 决定
+/// （同名 agent 的多个会话共用一个容器身份，这是"数量有界"换来的取舍）。
 fn container_name(spec: &FenceSpec) -> String {
-    let seed = format!("{}|{}", spec.agent, spec.private_or_cwd().to_string_lossy());
-    // FNV-1a：只为把名字收敛成定长标识（不是安全用途），避免容器名里出现路径与中文。
+    // FNV-1a：只为把名字收敛成定长标识（不是安全用途），避免容器名里出现中文与路径。
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
-    for b in seed.as_bytes() {
+    for b in spec.agent.as_bytes() {
         h ^= *b as u64;
         h = h.wrapping_mul(0x100_0000_01b3);
     }
-    format!("Solomni.Agent.{:016x}", h)
+    format!("{}{:016x}", PROFILE_PREFIX, h)
+}
+
+/// 名字是不是本程序建过的容器 profile（Windows 把包目录名转成小写，所以按不区分大小写比）。
+fn is_our_profile(name: &str) -> bool {
+    name.get(..PROFILE_PREFIX.len())
+        .map(|head| head.eq_ignore_ascii_case(PROFILE_PREFIX))
+        .unwrap_or(false)
 }
 
 /// 环境不允许容器围栏时的标记（探针据此区分"环境不允许"与"代码有问题"，不互相顶包）。
@@ -473,6 +484,43 @@ fn save_record(home: &Path, rec: &GrantRecord) -> Result<(), String> {
     std::fs::create_dir_all(home).map_err(|e| format!("建私有区失败：{}", e))?;
     let text = serde_json::to_string_pretty(rec).map_err(|e| e.to_string())?;
     std::fs::write(record_path(home), text).map_err(|e| e.to_string())
+}
+
+/// 记下"我们建过这个容器 profile"（与 `prepare_fence` 共用同一份台账），供 `--fence-clean` 精确回收。
+fn record_profile(home: &Path, name: &str) {
+    let mut rec = load_record(home);
+    if rec.profiles.insert(name.to_string()) {
+        if let Err(e) = save_record(home, &rec) {
+            eprintln!("[围栏] 容器 profile 台账落盘失败（影响 --fence-clean 的精确回收）：{}", e);
+        }
+    }
+}
+
+/// 扫掉本程序建过的整族容器 profile：台账只记"我们知道写过什么"，而 profile 可能来自没有台账的路径
+/// （探针、夹具的台账被删、旧版本）。名字前缀是本程序独有的，所以按它扫；`DeleteAppContainerProfile`
+/// 连该容器的存储一起删。返回扫掉的个数。
+pub fn sweep_profiles() -> Result<usize, String> {
+    let root = match std::env::var_os("LOCALAPPDATA") {
+        Some(v) => PathBuf::from(v).join("Packages"),
+        None => return Err("取不到 LOCALAPPDATA（容器 profile 的存储根）".to_string()),
+    };
+    let entries = match std::fs::read_dir(&root) {
+        Ok(e) => e,
+        // 没有 Packages 目录 = 本机没有容器 profile。
+        Err(_) => return Ok(0),
+    };
+    let mut deleted = 0usize;
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if !is_our_profile(&name) {
+            continue;
+        }
+        let wide: Vec<u16> = std::ffi::OsStr::new(&name).encode_wide().chain(std::iter::once(0)).collect();
+        if unsafe { DeleteAppContainerProfile(wide.as_ptr()) } >= 0 {
+            deleted += 1;
+        }
+    }
+    Ok(deleted)
 }
 
 fn record_grants(home: &Path, container: &str, written: &[(String, PathBuf, u32)]) -> Result<(), String> {
@@ -820,6 +868,35 @@ mod tests {
     use super::*;
     use std::sync::Mutex;
 
+    /// 容器 profile **一个 agent 一个**：同名 agent 跨会话复用同一个容器身份（数量有界），换 agent 就换 profile。
+    #[test]
+    fn container_profile_is_one_per_agent() {
+        let a = FenceSpec {
+            agent: "甲".to_string(),
+            rw: vec![PathBuf::from("session").join("w1")],
+            cwd: PathBuf::from("modules").join("m0"),
+            net: false,
+        };
+        let mut b = a.clone();
+        b.rw = vec![PathBuf::from("session").join("w2")];
+        b.cwd = PathBuf::from("modules").join("m1");
+        let mut c = a.clone();
+        c.agent = "乙".to_string();
+        assert_eq!(container_name(&a), container_name(&b), "同一个 agent 的不同会话共用一个 profile");
+        assert_ne!(container_name(&a), container_name(&c), "不同 agent 不共用");
+        assert!(is_our_profile(&container_name(&a)));
+    }
+
+    /// 清扫只认自己的前缀：别人的容器 profile 一个都不许动。
+    #[test]
+    fn profile_sweep_only_matches_our_prefix() {
+        assert!(is_our_profile("solomni.agent.0123456789abcdef"), "Windows 会把包目录名转小写");
+        assert!(is_our_profile("Solomni.Agent.0123456789abcdef"));
+        assert!(!is_our_profile("microsoft.windows.notepad"));
+        assert!(!is_our_profile("solomni"));
+        assert!(!is_our_profile(""));
+    }
+
     /// 已有 ACE 的权限位必须**覆盖得住**才算数：只看"SID 在场"会让基线被一个只有 SYNCHRONIZE 的继承 ACE
     /// 整条挡掉（真机上解释器目录就是这样，容器里连解释器都读不到）；通用位与展开后的具体位要等价看待。
     #[test]
@@ -854,9 +931,13 @@ mod tests {
         };
         let prepared = Mutex::new(std::collections::BTreeSet::new());
         // 台账落在探针自己的临时目录里（不碰真实 .home/）。
-        let outcome = prepare_fence(&spec, "cmd", &prepared, &dir);
-        let _ = std::fs::remove_dir_all(&dir);
+        let home = dir.join("ledger");
+        let outcome = prepare_fence(&spec, "cmd", &prepared, &home);
         assert!(outcome.is_ok(), "授权应当成功：{:?}", outcome.err());
+        // 收尾必须把自己写下的权限项按台账撤掉：测试不在本机留痕（撤不动就报出来，不静默）。
+        let report = clean(&home).expect("回收应当成功");
+        assert!(report.contains("撤销"), "回收要如实报数量：{}", report);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// 撤销的真效果：授权 → 撤权 → 目标目录上不再有该容器 SID 的 ACE。
@@ -888,12 +969,14 @@ mod tests {
         let sid = container_sid(&container_name(&spec)).expect("派生容器 SID");
         let still = has_ace_for(sid, &dir, RIGHTS_RW);
         free_sid(sid);
-        let _ = std::fs::remove_dir_all(&dir);
         assert!(!still, "撤权后根上不该再有该容器 SID 的 ACE");
+        // 基线授权（解释器目录只读、祖先穿过）也记在同一份台账里，一并按台账撤干净。
+        clean(&home).expect("基线回收应当成功");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
 
-pub fn run_fenced(spec: &FenceSpec, prepared: bool, command: &str) -> i32 {
+pub fn run_fenced(spec: &FenceSpec, prepared: bool, home: Option<&Path>, command: &str) -> i32 {
     if let Err(e) = join_kill_on_close_job(MAX_PROCESSES) {
         eprintln!("[围栏] 进程树围栏安装失败：{}", e);
     }
@@ -908,6 +991,10 @@ pub fn run_fenced(spec: &FenceSpec, prepared: bool, command: &str) -> i32 {
     if let Err(e) = ensure_profile(&name) {
         eprintln!("[围栏] {}{}）：按如实降级继续执行", ENV_BLOCKED_MARK, e);
         return run_unfenced(spec, command);
+    }
+    // 建过就记进台账：守门进程是唯一真正建 profile 的地方，外层只知道"该建"、不知道"建成了"。
+    if let Some(h) = home {
+        record_profile(h, &name);
     }
     let sid = match container_sid(&name) {
         Ok(s) => s,

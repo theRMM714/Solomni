@@ -33,7 +33,7 @@ pub fn job_json(rw: &[PathBuf], cwd: &PathBuf, prepared: bool) -> String {
     let esc = |p: &PathBuf| p.to_string_lossy().replace('\\', "/");
     let roots: Vec<String> = rw.iter().map(|p| format!("\"{}\"", esc(p))).collect();
     format!(
-        "{{\"agent\":\"probe\",\"rw\":[{}],\"cwd\":\"{}\",\"net\":false,\"prepared\":{}}}",
+        "{{\"agent\":\"probe\",\"rw\":[{}],\"cwd\":\"{}\",\"net\":false,\"prepared\":{},\"home\":null}}",
         roots.join(","),
         esc(cwd),
         prepared

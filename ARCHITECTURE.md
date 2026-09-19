@@ -262,6 +262,9 @@ session/<工作名>/
   工具进程的环境走**白名单**（`confine::fence_env`，外层滤好后传下去）：不继承父进程环境（密钥与无关凭据不进工具进程），
   `HOME` / `TEMP` / `USERPROFILE` / `LOCALAPPDATA` 一律落到该 agent 的私有沙箱；Windows 建 AppContainer 进程
   需要 `LOCALAPPDATA` 在场（缺了它 `CreateProcessW` 报 `os error 203`，容器会静默降级成无围栏）。
+  容器 profile **一个 agent 一个**（跨会话复用，数量有界）：守门进程是唯一建它的地方，建成即写进
+  `.home/fence-grants.json` 台账；`--fence-clean` 先按台账精确回收（撤 ACE + 删 profile），再按
+  `Solomni.Agent.` 前缀扫掉整族遗留 profile（探针、台账被删、旧版本建的都在这一扫里）。
 - `core/packages.rs` 是运行包契约与包库事实（校验、去重、系统路径冲突预检、能力索引），
   `core/exec.rs` 是执行档位与执行计划派生；两者都是纯逻辑，目录遍历在 `PackageSource` 适配层。契约见 [RUNTIME_SPEC.md](RUNTIME_SPEC.md)。
 - 登记处四份 yaml 的字段与读写规则见 [REGISTRY_SPEC.md](REGISTRY_SPEC.md)。

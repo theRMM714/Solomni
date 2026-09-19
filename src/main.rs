@@ -255,18 +255,37 @@ fn main() {
     }
 }
 
-/// 精确回收：按台账撤掉围栏写过的权限项、删掉建过的容器 profile（隐藏模式，用户经文档知道它）。
+/// 精确回收：按台账撤掉围栏写过的权限项、删掉建过的容器 profile，再按名字前缀扫掉整族遗留 profile
+/// （台账可能不存在：探针、夹具的台账被删、旧版本建的）——隐藏模式，用户经文档知道它。
 fn fence_clean(root: &std::path::Path) -> i32 {
     let home = root.join(".home");
+    let mut lines: Vec<String> = Vec::new();
+    let mut failed = false;
     match adapters::confine::clean(&home) {
-        Ok(msg) => {
-            println!("[围栏] 清理完成：{}", msg);
-            0
-        }
+        Ok(msg) => lines.push(msg),
         Err(e) => {
-            eprintln!("[围栏] 清理失败：{}", e);
-            1
+            lines.push(format!("台账回收未完成：{}", e));
+            failed = true;
         }
+    }
+    match adapters::confine::sweep_profiles() {
+        Ok(n) => lines.push(format!("扫掉 {} 个本程序建过的容器 profile", n)),
+        Err(e) => {
+            lines.push(format!("容器 profile 清扫未完成：{}", e));
+            failed = true;
+        }
+    }
+    for line in &lines {
+        if failed {
+            eprintln!("[围栏] 清理未完成：{}", line);
+        } else {
+            println!("[围栏] 清理完成：{}", line);
+        }
+    }
+    if failed {
+        1
+    } else {
+        0
     }
 }
 
@@ -361,7 +380,7 @@ fn fence_run(args: &[String], flag: usize) -> i32 {
         None => String::new(),
     };
     match adapters::confine::FenceJob::from_json(&raw_job) {
-        Ok(job) => adapters::confine::run_fenced(&job.spec, job.prepared, &command),
+        Ok(job) => adapters::confine::run_fenced(&job, &command),
         Err(e) => {
             eprintln!("[围栏] {}", e);
             adapters::confine::FENCE_FAILED
