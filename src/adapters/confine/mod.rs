@@ -70,23 +70,18 @@ pub fn run_fenced(spec: &FenceSpec, command: &str) -> i32 {
     backend::run_fenced(spec, command)
 }
 
-/// 外层进程调用：把围栏要用的授权一次性做好（Windows 需要写目录 ACL；其它平台是空操作）。
-/// prepared 是"已经授权过"的台账，避免每次工具调用重复改 ACL。
+/// 外层进程调用：把围栏要用的授权一次性做好（写目录 ACL）；prepared 是"已经授权过"的台账，
+/// 避免每次工具调用重复改 ACL。
+/// 只有 Windows 的容器围栏需要这一步——Linux 的 Landlock 与 macOS 的 seatbelt 在守门进程里自足，
+/// 所以本函数在非 Windows 平台上**不存在**（而不是"存在但空转"）。
+#[cfg(windows)]
 pub fn prepare_fence(
     spec: &FenceSpec,
     command: &str,
     prepared: &std::sync::Mutex<std::collections::BTreeSet<String>>,
     home: &std::path::Path,
 ) -> Result<(), String> {
-    #[cfg(windows)]
-    {
-        windows::prepare_fence(spec, command, prepared, home)
-    }
-    #[cfg(not(windows))]
-    {
-        let _ = (spec, command, prepared, home);
-        Ok(())
-    }
+    windows::prepare_fence(spec, command, prepared, home)
 }
 
 /// 精确回收：按台账撤掉我们写过的权限项、删掉我们建过的容器 profile（`--fence-clean` 用）。
@@ -205,8 +200,9 @@ fn is_executable(_path: &std::path::Path) -> bool {
     true
 }
 
-/// 祖先目录（不含自己）：受限进程要按名穿过它们才能到达被放行的根
-/// （Windows 授 FILE_TRAVERSE，macOS 放行只读元数据）。
+/// 祖先目录（不含自己）：受限进程要按名穿过它们才能到达被放行的根。
+/// 只有 Windows 的目录 ACL 需要逐个授 FILE_TRAVERSE（macOS 的 seatbelt 用子路径规则，不需要）。
+#[cfg(windows)]
 pub(crate) fn ancestors_of(path: &std::path::Path) -> Vec<std::path::PathBuf> {
     let mut out: Vec<std::path::PathBuf> = Vec::new();
     let mut cur = path.parent();

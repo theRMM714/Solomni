@@ -16,17 +16,50 @@ pub enum Verb {
     Tool,
 }
 
+/// 工具信封不合法时的**判定类别**：类别决定回给模型的修法（文案在提示词册）。
+/// 每类都是可判定的确切事实，不是猜测：说清"哪儿不对"，让模型下一轮能改对。
+/// 扫到结尾时的**确切状态**：还缺哪个收尾字符、是不是断在字符串中间。
+/// 存在的理由：只说"没写完"，模型只能猜（真实会话里它猜成了"内容过长"，于是改去分两次写，白跑两轮）。
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Tail {
+    /// 还缺的收尾字符（由内到外，例如 "}" 或 "]}"）。
+    pub missing: String,
+    /// 断在字符串中间 = 内容没写完（补引号会让核心拿到半截内容，只能让模型重发）。
+    pub in_string: bool,
+    /// 这一段里起了几段工具信封（≥2 = 模型把两段写在同一回复里了；补末尾括号救不了）。
+    pub envelopes: usize,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Malformed {
+    /// 收尾未闭合：信封没写完；Tail 说清还差什么。
+    Unclosed(Tail),
+    /// 字符串里出现未转义的裸控制字符（直接换行/制表符），JSON 非法。
+    /// tail = 同时还有未闭合时一并带上（两处都得改，只说一处会误导）。
+    RawControl { ch: char, line: usize, tail: Option<Tail> },
+    /// 括号平衡但 JSON 语法非法（引号不配对、逗号多余等）；附 JSON 解析器报出的位置与原因。
+    Syntax(String),
+    /// JSON 合法，但信封字段不合法（缺 name、类型不对等）；附字段层面的原因。
+    Shape(String),
+}
+
 /// 一次工具调用申请：module 指明工具属于哪个模块（多模块 agent 靠它消歧；内置工具与省略时为 None）。
 #[derive(Debug, Clone)]
 pub struct ToolInvoke {
-    /// true = 输出看起来是工具信封但 JSON 非法：**绝不据此执行工具**，只记一条失败的工具行。
+    /// Some = 输出看起来是工具信封但不合法：**绝不据此执行工具**，只记一条失败的工具行。
     /// name / module 此时是"尽力打捞"的结果（可能为空），仅用于显示与日志。
-    pub malformed: bool,
+    pub malformed: Option<Malformed>,
     /// 工具所属模块 id（trim 后非空才 Some）。
     pub module: Option<String>,
     pub name: String,
     /// 普通调用 = 规范化后的参数 JSON（经执行端口送入工具 stdin）；malformed = 提取到的对象或原文开头。
     pub args_json: String,
+    /// 信封**之后**的那段正文（原样，只去掉行首空白）。
+    /// 自由格式工具（patch）的输入取这里：绝不能把手写信封**之前**的正文混进文件内容。
+    pub body: String,
+    /// 信封**之前**的那段正文（原样，只去掉首尾空白）。
+    /// 自由格式工具显示只认它：补丁正文不该被当成 AI 发言渲染出来。
+    pub lead: String,
 }
 
 #[derive(Debug, Clone)]
@@ -35,14 +68,17 @@ pub struct Reply {
     pub text: String,
     /// 信封解析是否干净；不干净时 text = 原始输出（照进转录，不丢字）。
     pub degraded: bool,
-    /// verb = Tool 时的调用申请；其余动词恒为 None。
-    pub tool: Option<ToolInvoke>,
+    /// verb = Tool 时申请的调用（**一次回复可以发多个**：单数形态一个、calls 数组多个）；其余动词恒为空。
+    /// 只有一条表示：不另设"单数/复数"两个字段，否则两边会漂移。
+    pub tools: Vec<ToolInvoke>,
 }
 
 #[derive(Deserialize)]
 struct Envelope {
     #[serde(rename = "type")]
     verb: String,
+    /// 可省略：缺省为空串（leave / agree 常只表态不留言）。
+    #[serde(default)]
     text: String,
 }
 
@@ -52,9 +88,81 @@ struct ToolEnvelope {
     kind: String,
     #[serde(default)]
     module: Option<String>,
+    /// 单数形态：一个调用写 name + args。
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    args: serde_json::Value,
+    /// 复数形态：一次发多个调用写 calls 数组（**与单数形态互斥**）。
+    #[serde(default)]
+    calls: Option<Vec<CallEntry>>,
+}
+
+/// calls 数组里的一项（与单数形态同字段，只是没有 type）。
+#[derive(Deserialize)]
+struct CallEntry {
+    #[serde(default)]
+    module: Option<String>,
+    #[serde(default)]
     name: String,
     #[serde(default)]
     args: serde_json::Value,
+}
+
+/// 一封工具信封 → 调用列表。两种形态互斥：混用、都缺、calls 为空、数组项缺 name 都如实报错（不猜）。
+fn build_invokes(t: &ToolEnvelope, raw: &str, obj: &str) -> Result<Vec<ToolInvoke>, String> {
+    if t.name.is_some() && t.calls.is_some() {
+        return Err("一封工具信封里同时写了 name 与 calls：两种形态互斥，只能选一种".to_string());
+    }
+    if let Some(list) = &t.calls {
+        if list.is_empty() {
+            return Err("calls 是空数组：要么省掉它用单数形态，要么至少写一个调用".to_string());
+        }
+        let mut out = Vec::new();
+        for (i, c) in list.iter().enumerate() {
+            if c.name.trim().is_empty() {
+                return Err(format!("calls 第 {} 项没写 name", i + 1));
+            }
+            out.push(ToolInvoke {
+                malformed: None,
+                module: c.module.clone().map(|m| m.trim().to_string()).filter(|m| !m.is_empty()),
+                name: c.name.trim().to_string(),
+                args_json: c.args.to_string(),
+                // 复数形态里没有"信封之后的正文"这回事（自由格式工具只能单发）
+                body: String::new(),
+                lead: String::new(),
+            });
+        }
+        return Ok(out);
+    }
+    let name = t.name.clone().unwrap_or_default();
+    if name.trim().is_empty() {
+        return Err("工具信封没写 name（要调一个工具就写 name，要调多个就写 calls 数组）".to_string());
+    }
+    Ok(vec![ToolInvoke {
+        malformed: None,
+        body: after(raw, obj),
+        lead: before(raw, obj),
+        module: t.module.clone().map(|m| m.trim().to_string()).filter(|m| !m.is_empty()),
+        name: name.trim().to_string(),
+        args_json: t.args.to_string(),
+    }])
+}
+
+/// 信封**之前**的那段正文（只去掉首尾空白）。自由格式工具显示只认它。
+fn before(raw: &str, obj: &str) -> String {
+    match raw.find(obj) {
+        Some(i) => raw[..i].trim().to_string(),
+        None => String::new(),
+    }
+}
+
+/// 信封**之后**的那段正文（原样；只去掉行首空白）。自由格式工具（patch）的输入从这里取。
+fn after(raw: &str, obj: &str) -> String {
+    match raw.find(obj) {
+        Some(i) => raw[i + obj.len()..].trim_start().to_string(),
+        None => String::new(),
+    }
 }
 
 /// 从原文里去掉被提取出的那段 JSON（只去第一次出现的位置），剩下的就是信封之外的正文。
@@ -67,33 +175,40 @@ fn strip_once(raw: &str, obj: &str) -> String {
 
 /// 解析模型输出为信封。尽力提取 JSON 对象，失败则降级为 say(原文)。
 pub fn parse(raw: &str) -> Reply {
+    // JSON 合法但信封字段不合法时的原因（malformed 分类用）。
+    let mut shape_why: Option<String> = None;
     if let Some(obj) = extract_json_object(raw) {
         // tool 信封优先：name 缺失即视为不合法，落回普通信封解析（不猜测）。
-        if let Ok(t) = serde_json::from_str::<ToolEnvelope>(&obj) {
-            if t.kind == "tool" {
-                return Reply {
-                    verb: Verb::Tool,
-                    // text = 信封之外的那段正文（模型常在同一轮里先写一句再发信封）；只剩信封时为空串。
-                    // 信封 JSON 永不进 text：界面因此不会把 JSON 糊上屏，view.raw 另存完整原文供重建。
-                    text: strip_once(raw, &obj).trim().to_string(),
-                    degraded: false,
-                    tool: Some(ToolInvoke {
-                        malformed: false,
-                        module: t.module.map(|m| m.trim().to_string()).filter(|m| !m.is_empty()),
-                        name: t.name,
-                        args_json: t.args.to_string(),
-                    }),
-                };
-            }
+        match serde_json::from_str::<ToolEnvelope>(&obj) {
+            Ok(t) if t.kind == "tool" => match build_invokes(&t, raw, &obj) {
+                Ok(tools) => {
+                    return Reply {
+                        verb: Verb::Tool,
+                        // text = 信封之外的那段正文（模型常在同一轮里先写一句再发信封）；只剩信封时为空串。
+                        // 信封 JSON 永不进 text：界面因此不会把 JSON 糊上屏，view.raw 另存完整原文供重建。
+                        text: strip_once(raw, &obj).trim().to_string(),
+                        degraded: false,
+                        tools,
+                    };
+                }
+                // 字段不合法（缺 name / 混用两种形态 / calls 为空…）：落到 shape 分类，记一条失败工具行。
+                Err(why) => shape_why = Some(why),
+            },
+            Ok(_) => {}
+            Err(e) => shape_why = Some(e.to_string()),
         }
         if let Ok(env) = serde_json::from_str::<Envelope>(&obj) {
-            let verb = match env.verb.as_str() {
-                "ask" => Verb::Ask,
-                "leave" => Verb::Leave,
-                "agree" => Verb::Agree,
-                _ => Verb::Say,
-            };
-            return Reply { verb, text: env.text, degraded: false, tool: None };
+            // type = tool 却走到这里 = ToolEnvelope 已判不合法（缺 name 等）：这是 malformed 信号，
+            // 不能当普通信封收（否则缺 name 的工具信封会被静默当成发言）。
+            if env.verb != "tool" {
+                let verb = match env.verb.as_str() {
+                    "ask" => Verb::Ask,
+                    "leave" => Verb::Leave,
+                    "agree" => Verb::Agree,
+                    _ => Verb::Say,
+                };
+                return Reply { verb, text: env.text, degraded: false, tools: Vec::new() };
+            }
         }
     }
     // 像工具信封但 JSON 非法：给独立信号（degraded 是"信封缺失按发言收录"，语义不同）。
@@ -104,19 +219,23 @@ pub fn parse(raw: &str) -> Reply {
     // ②**以 JSON 对象为主体**（第一个非空白字符是 '{'）且该对象含 "type":"tool"：
     //   覆盖"平衡但字段不合法"（如缺 name）的输出。平衡的完整对象被正文引用时落两条之外，
     //   仍按发言收录（这就是反误判的那一半）。
-    if let Some(start) = unclosed_start(raw) {
+    if let Some((start, _)) = unclosed_scan(raw) {
+        // EOF 状态要按**信封那段**算（正文里可能有别的花括号/引号，混进来会让 missing 失真）。
         let frag = &raw[start..];
         if mentions_tool_type(frag) {
             return Reply {
                 verb: Verb::Tool,
                 text: raw[..start].trim().to_string(),
                 degraded: false,
-                tool: Some(ToolInvoke {
-                    malformed: true,
+                tools: vec![ToolInvoke {
+                    malformed: Some(broken_kind(frag, None)),
                     module: Some(salvage(frag, "module")).filter(|m| !m.is_empty()),
                     name: salvage(frag, "name"),
                     args_json: head_chars(frag, 200),
-                }),
+                    // 信封本身就不合法：没有可执行的正文
+                    body: String::new(),
+                    lead: raw[..start].trim().to_string(),
+                }],
             };
         }
     }
@@ -133,27 +252,81 @@ pub fn parse(raw: &str) -> Reply {
                 verb: Verb::Tool,
                 text: text.trim().to_string(),
                 degraded: false,
-                tool: Some(ToolInvoke {
-                    malformed: true,
+                tools: vec![ToolInvoke {
+                    malformed: Some(broken_kind(probe, shape_why.as_deref())),
                     module: Some(salvage(probe, "module")).filter(|m| !m.is_empty()),
                     name: salvage(probe, "name"),
                     args_json: obj.clone().unwrap_or_else(|| head_chars(raw, 200)),
-                }),
+                    body: String::new(),
+                    lead: raw[..raw.find('{').unwrap_or(0)].trim().to_string(),
+                }],
             };
         }
     }
-    Reply { verb: Verb::Say, text: raw.trim().to_string(), degraded: true, tool: None }
+    Reply { verb: Verb::Say, text: raw.trim().to_string(), degraded: true, tools: Vec::new() }
+}
+
+/// 判定一段坏信封属于哪一类（可判定的确切事实，按此给修法）：
+/// ①字符串里的裸控制字符（最常见：内容里直接换了行）→ ②JSON 合法但字段不合法 → ③JSON 语法非法 → ④未闭合。
+/// 控制字符与未闭合可以同时成立（真实会话里就是这样），所以两类都带上 tail，不互相遮蔽。
+fn broken_kind(frag: &str, shape_why: Option<&str>) -> Malformed {
+    if let Some((ch, at)) = raw_control_in_string(frag) {
+        return Malformed::RawControl {
+            ch,
+            line: line_of(frag, at),
+            tail: unclosed_scan(frag).map(|(_, t)| t),
+        };
+    }
+    match serde_json::from_str::<serde_json::Value>(frag) {
+        Ok(_) => Malformed::Shape(shape_why.unwrap_or_default().to_string()),
+        Err(e) => match unclosed_scan(frag) {
+            Some((_, tail)) => Malformed::Unclosed(tail),
+            None => Malformed::Syntax(e.to_string()),
+        },
+    }
+}
+
+/// 第一个"在字符串内部"的裸控制字符（char < 0x20）及其字节位置。
+/// JSON 的字符串里不允许任何裸控制字符——换行必须写成 \n，这是最常见的信封事故。
+fn raw_control_in_string(s: &str) -> Option<(char, usize)> {
+    let mut in_str = false;
+    let mut esc = false;
+    for (i, c) in s.char_indices() {
+        if in_str {
+            if esc {
+                esc = false;
+            } else if c == '\\' {
+                esc = true;
+            } else if c == '"' {
+                in_str = false;
+            } else if (c as u32) < 0x20 {
+                return Some((c, i));
+            }
+        } else if c == '"' {
+            in_str = true;
+        }
+    }
+    None
+}
+
+/// 字节位置对应的行号（从 1 数起）。
+fn line_of(s: &str, at: usize) -> usize {
+    s[..at].matches('\n').count() + 1
 }
 
 /// 扫一遍输出（沿用 extract_balanced 的"字符串内不计数"规则），
-/// 仅当**扫到结尾仍未闭合**时，返回最后一个「depth 从 0 变 1」的起点（即被截断的坏信封的开头）。
+/// 仅当**扫到结尾仍未闭合**时，返回（最后一个「depth 从 0 变 1」的起点, EOF 状态）。
 /// 平衡的完整对象会回到 depth 0，于是返回 None——这正是"正文里引用完整对象不误判"的依据。
-fn unclosed_start(s: &str) -> Option<usize> {
+/// 花括号与方括号都计数：missing 因此能如实说"还差 ]}"。
+fn unclosed_scan(s: &str) -> Option<(usize, Tail)> {
     let bytes = s.as_bytes();
     let mut depth = 0usize;
+    let mut stack: Vec<u8> = Vec::new();
     let mut in_str = false;
     let mut esc = false;
     let mut last_open: Option<usize> = None;
+    // 数一数这段文本里起了几段工具信封（只在字符串外认；内容里引用格式示例不算）。
+    let mut envelopes = 0usize;
     for (i, &b) in bytes.iter().enumerate() {
         if in_str {
             if esc {
@@ -167,15 +340,20 @@ fn unclosed_start(s: &str) -> Option<usize> {
         }
         match b {
             b'"' => in_str = true,
-            b'{' => {
+            b'{' | b'[' => {
+                if b == b'{' && mentions_tool_type(window(s, i, 96)) {
+                    envelopes += 1;
+                }
                 if depth == 0 {
                     last_open = Some(i);
                 }
                 depth += 1;
+                stack.push(if b == b'{' { b'}' } else { b']' });
             }
-            b'}' => {
+            b'}' | b']' => {
                 if depth > 0 {
                     depth -= 1;
+                    stack.pop();
                     if depth == 0 {
                         last_open = None;
                     }
@@ -185,10 +363,24 @@ fn unclosed_start(s: &str) -> Option<usize> {
         }
     }
     if depth > 0 {
-        last_open
+        // 由内到外拼出还缺的收尾字符（模型照着补就行）
+        let missing: String = stack.iter().rev().map(|&b| b as char).collect();
+        Some((
+            last_open.unwrap_or(0),
+            Tail { missing, in_string: in_str, envelopes: envelopes.max(1) },
+        ))
     } else {
         None
     }
+}
+
+/// 取从 at 起最多 n 字节的窗口（不劈开 UTF-8；只用于在 ASCII 模式上做识别）。
+fn window(s: &str, at: usize, n: usize) -> &str {
+    let mut end = (at + n).min(s.len());
+    while end > at && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    &s[at..end]
 }
 
 /// 文本里是否出现 "type" : "tool"（允许冒号前后空白；大小写按原样匹配）。

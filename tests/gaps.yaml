@@ -1,0 +1,43 @@
+# 全局测试与质量缺口（当前状态：条目存在 = 尚未完成；补上后删除条目）
+#
+# 这里只放**长期目标**：已经能机器判定的门禁不入账。平台与跨平台层的缺口记在
+# tests/cross-platform/gaps.yaml 与 tests/<平台>/gaps.yaml（它们决定 TEST-REPORT-ACCEPTED）。
+
+- id: quality.hard-gate-full
+  scope: global
+  level: T0
+  why: |
+    T0 现在分两级：编译与结构审查是硬失败；格式、clippy、编译告警、依赖重复走
+    tests/quality-baseline.yaml 的存量基线（超出即失败，降到基线以下要求同步下调）。
+    基线是过渡手段，不是终点——长期目标是存量清零后把这几项也升级成零容忍硬失败。
+  how: |
+    按 tests/quality-baseline.yaml 的清单逐项收敛：
+    1) 决定是否接受 cargo fmt 的全仓格式化（会展开现在的紧凑写法）或加 rustfmt.toml 贴近现有风格，然后清空 fmt_deviating_files；
+    2) 逐条修掉 clippy 存量：机械项直接修（unnecessary_cast / unnecessary_map_or / unnecessary_sort_by /
+       collapsible_match / single_match / unnecessary_mut_passed / cloned_ref_to_slice_refs / items_after_test_module），
+       设计取舍项（too_many_arguments / large_enum_variant）要么改签名，要么加**带理由的**窄 allow；
+    3) check_warnings 归零；
+    4) 为 duplicates 里的每个重复给出处理或保留理由（syn v2/v3 属 proc-macro 传递依赖，通常只能记录事实）。
+    每收敛一项就重新生成基线，基线随之变小。
+  accept: |
+    tests/quality-baseline.yaml 里 fmt_deviating_files、clippy、check_warnings 全部为空/零；
+    run-tests.js 的 T0 四项不再需要基线比对，直接以退出码与零容忍判定；
+    删除本条目与 tests/quality-baseline.yaml。
+  blocked_by: 需要先决定全仓格式化与「带理由 allow」这两项取舍
+
+- id: tests.layout-migration
+  scope: global
+  level: T2
+  why: |
+    端口契约测试现落在 src/contract_tests/（ports / fakes / adapters），替身仍在 src/tests.rs，
+    两者同属 T2 却被拆在两层；长期应合成 src/tests/ 目录，让 doubles 与契约测试同处一层。
+  how: |
+    1) 建 src/tests/mod.rs，把 src/tests.rs 的 T1 用例移入；
+    2) 把 InMemory*/Fake*/Recording*/ScriptGateway/TestPrompts 等替身集中到 src/tests/doubles.rs；
+    3) 把 src/contract_tests/ 下的 ports / fakes / adapters / api / intent / routes 平移到 src/tests/ 下同名文件；
+    4) 更新 src/main.rs 的 mod 声明与 TESTING.md §十一 与 §四 的路径引用。
+    纯搬运，不改断言语义；每步保持 cargo test 全绿。
+  accept: |
+    src/contract_tests.rs 与 src/tests.rs 都不存在；src/tests/ 下 doubles/ports/fakes/adapters 各一文件；
+    cargo test 与 node run-tests.js 全绿；TESTING.md 不再指向旧路径。
+  blocked_by: 缺少实现
