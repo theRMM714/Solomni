@@ -1,0 +1,120 @@
+{
+  "platform": "linux",
+  "arch": "x64",
+  "osKey": "linux",
+  "profile": "debug",
+  "fenceLive": true,
+  "doctor": {
+    "arch": "x86_64",
+    "externals": {
+      "curl": "/usr/bin/curl",
+      "node": "/opt/hostedtoolcache/node/24.20.0/x64/bin/node",
+      "python": "/usr/bin/python"
+    },
+    "fence": {
+      "fs": true,
+      "net": false,
+      "note": "Linux：Landlock（ABI 7）强制文件系统可达范围；出站网络不围栏",
+      "tree": true
+    },
+    "platform": "linux"
+  },
+  "steps": [
+    {
+      "step": "cargo build",
+      "status": "pass",
+      "detail": "",
+      "ms": 21215
+    },
+    {
+      "step": "T0 编译（--all-targets）",
+      "status": "pass",
+      "detail": "",
+      "ms": 8186
+    },
+    {
+      "step": "T0 结构审查",
+      "status": "pass",
+      "detail": "",
+      "ms": 5
+    },
+    {
+      "step": "T0 格式（fmt --check）",
+      "status": "pass",
+      "detail": "",
+      "ms": 1056
+    },
+    {
+      "step": "T0 静态检查（clippy）",
+      "status": "pass",
+      "detail": "",
+      "ms": 4192
+    },
+    {
+      "step": "T0 编译告警",
+      "status": "pass",
+      "detail": "",
+      "ms": 1
+    },
+    {
+      "step": "T0 依赖重复（cargo tree）",
+      "status": "pass",
+      "detail": "",
+      "ms": 92
+    },
+    {
+      "step": "L1 单元（--bin solomni）",
+      "status": "pass",
+      "detail": "217 passed / 0 failed",
+      "ms": 13561
+    },
+    {
+      "step": "目标 cross-platform",
+      "status": "pass",
+      "detail": "3 passed / 0 failed",
+      "ms": 8903
+    },
+    {
+      "step": "目标 windows",
+      "status": "skip-platform",
+      "detail": "0 passed / 0 failed（本平台不适用）",
+      "ms": 127
+    },
+    {
+      "step": "目标 linux",
+      "status": "pass",
+      "detail": "2 passed / 0 failed",
+      "ms": 437
+    },
+    {
+      "step": "目标 macos",
+      "status": "skip-platform",
+      "detail": "0 passed / 0 failed（本平台不适用）",
+      "ms": 134
+    },
+    {
+      "step": "前端冒烟",
+      "status": "pass",
+      "detail": "前端冒烟：3 个全部通过（app.smoke.cjs、config.smoke.cjs、md.smoke.cjs） / FRONTEND-SMOKE-OK",
+      "ms": 1058
+    },
+    {
+      "step": "L4 端到端",
+      "status": "pass",
+      "detail": "E2E-OK / [e2e] 围栏回收（退出码 0）：[围栏] 清理完成：本平台的围栏不留权限项，无需清理 | [围栏] 清理完成：扫掉 0 个本程序建过的容器 profile",
+      "ms": 1930
+    }
+  ],
+  "envSkips": [],
+  "quality": {
+    "failed": 0,
+    "steps": [],
+    "baselineStale": false
+  },
+  "globalGaps": [
+    "quality.hard-gate-full",
+    "tests.layout-migration"
+  ],
+  "gaps": [],
+  "failed": 0
+}
