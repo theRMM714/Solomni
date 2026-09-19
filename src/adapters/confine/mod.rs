@@ -58,16 +58,49 @@ pub fn capability() -> Capability {
     backend::capability()
 }
 
+/// 守门进程的入参：core 的围栏策略 + **外层是否已把本机授权做完**。
+/// 授权是改本机目录 ACL 的动作（只有 Windows 的容器围栏需要），所以它不进 core 的 `FenceSpec`，
+/// 由适配层随这次执行一起交给守门进程。JSON 是**扁平**的：FenceSpec 的字段同层再加一个 `prepared`。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FenceJob {
+    pub spec: FenceSpec,
+    pub prepared: bool,
+}
+
+impl FenceJob {
+    pub fn to_json(&self) -> String {
+        let mut fields = match serde_json::to_value(&self.spec) {
+            Ok(serde_json::Value::Object(o)) => o,
+            _ => serde_json::Map::new(),
+        };
+        fields.insert("prepared".to_string(), serde_json::Value::Bool(self.prepared));
+        serde_json::Value::Object(fields).to_string()
+    }
+
+    pub fn from_json(text: &str) -> Result<FenceJob, String> {
+        #[derive(serde::Deserialize)]
+        struct Raw {
+            #[serde(flatten)]
+            spec: FenceSpec,
+            /// 缺了这一项 = 调用方没说清有没有授权，如实报错（不默认成"有"）。
+            prepared: bool,
+        }
+        serde_json::from_str::<Raw>(text)
+            .map(|raw| FenceJob { spec: raw.spec, prepared: raw.prepared })
+            .map_err(|e| format!("围栏参数非法：{}", e))
+    }
+}
+
 /// 组装守门进程的命令行：工具命令作为**数据**传递（不拼进 shell 字符串，杜绝注入）。
-pub fn launcher(exe: &Path, spec: &FenceSpec, command: &str) -> Command {
+pub fn launcher(exe: &Path, spec: &FenceSpec, prepared: bool, command: &str) -> Command {
     let mut cmd = Command::new(exe);
-    cmd.arg(FENCE_FLAG).arg(spec.to_json()).arg("--").arg(command);
+    cmd.arg(FENCE_FLAG).arg(FenceJob { spec: spec.clone(), prepared }.to_json()).arg("--").arg(command);
     cmd
 }
 
 /// 守门进程内：装围栏 → 跑命令 → 返回退出码。失败必须报错（stderr）并用 FENCE_FAILED 退出。
-pub fn run_fenced(spec: &FenceSpec, command: &str) -> i32 {
-    backend::run_fenced(spec, command)
+pub fn run_fenced(spec: &FenceSpec, prepared: bool, command: &str) -> i32 {
+    backend::run_fenced(spec, prepared, command)
 }
 
 /// 外层进程调用：把围栏要用的授权一次性做好（写目录 ACL）；prepared 是"已经授权过"的台账，
@@ -260,6 +293,9 @@ pub fn fence_env(spec: &FenceSpec) -> Vec<(OsString, OsString)> {
     // 工作区内的落点：私有沙箱作为 HOME / TEMP（缓存与临时文件不出工作区）。
     let home = spec.private_or_cwd();
     out.push((OsString::from("HOME"), home.clone().into_os_string()));
+    // Windows 建 AppContainer 进程要读它：白名单里没有它就 CreateProcessW 直接失败（os error 203），
+    // 容器整条路会静默降级成无围栏执行。落点同样指进该 agent 的私有沙箱。
+    out.push((OsString::from("LOCALAPPDATA"), home.clone().into_os_string()));
     out.push((OsString::from("USERPROFILE"), home.clone().into_os_string()));
     out.push((OsString::from("TEMP"), home.clone().into_os_string()));
     out.push((OsString::from("TMP"), home.clone().into_os_string()));
@@ -298,6 +334,24 @@ mod tests {
         assert_eq!(windows_program_separators("build\\indexer build"), "build\\indexer build");
         assert_eq!(windows_program_separators("\"a/b\" rest"), "\"a\\b\" rest");
         assert_eq!(windows_program_separators("plain"), "plain");
+    }
+
+    /// 守门进程的入参是**扁平** JSON：FenceSpec 的字段同层再加一个 prepared；
+    /// 缺字段一律报错（不默认成"有授权"——那会把容器送进一个读不到东西的环境）。
+    #[test]
+    fn fence_job_round_trips_and_rejects_incomplete_json() {
+        let spec = FenceSpec {
+            agent: "a".to_string(),
+            rw: vec![PathBuf::from("demo").join("work")],
+            cwd: PathBuf::from("mods").join("m0"),
+            net: false,
+        };
+        let job = FenceJob { spec, prepared: true };
+        let text = job.to_json();
+        assert!(text.contains("\"prepared\":true"), "{}", text);
+        assert_eq!(FenceJob::from_json(&text).expect("回读守门进程入参"), job);
+        assert!(FenceJob::from_json("{}").is_err(), "缺字段必须报错，不猜");
+        assert!(FenceJob::from_json("这不是 JSON").is_err());
     }
 
     /// 命令里的解释器要按 PATH 解析出真实路径，并给出它的安装目录；

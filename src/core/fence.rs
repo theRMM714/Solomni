@@ -35,13 +35,4 @@ impl FenceSpec {
         out
     }
 
-    /// 交给守门进程的 JSON（含真实路径；只在进程内部传递，不落盘）。
-    pub fn to_json(&self) -> String {
-        serde_json::to_string(self).unwrap_or_default()
-    }
-
-    /// 守门进程读回围栏（非法 = 报错，不猜）。
-    pub fn from_json(text: &str) -> Result<FenceSpec, String> {
-        serde_json::from_str::<FenceSpec>(text).map_err(|e| format!("围栏参数非法：{}", e))
-    }
 }

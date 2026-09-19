@@ -256,6 +256,12 @@ session/<工作名>/
   ——Linux Landlock、macOS seatbelt、Windows AppContainer（先建容器 profile，再按 agent 派生容器 SID 与目录 ACL 授权，
   不给 capability 即断网）+ Job Object（进程树）；Windows 的目录授权由外层进程一次性做好（`confine::prepare_fence`）并记在内存台账里。
   装不上就**如实降级**（启动时自检并报告能力等级，绝不假装有）。命令行是守门进程的内部协议，模块作者与用户都不接触。
+  入参是**扁平 JSON**（`confine::FenceJob`）= 围栏策略字段 + `prepared`：后者说清外层有没有做完本机授权。
+  Windows 的容器要先有读放行与落点才可能真跑起来，所以没授权时守门进程直接按无围栏执行——不去试一个注定
+  读不到模块目录与解释器的容器；容器起不来也一样如实报出原因再降级。
+  工具进程的环境走**白名单**（`confine::fence_env`，外层滤好后传下去）：不继承父进程环境（密钥与无关凭据不进工具进程），
+  `HOME` / `TEMP` / `USERPROFILE` / `LOCALAPPDATA` 一律落到该 agent 的私有沙箱；Windows 建 AppContainer 进程
+  需要 `LOCALAPPDATA` 在场（缺了它 `CreateProcessW` 报 `os error 203`，容器会静默降级成无围栏）。
 - `core/packages.rs` 是运行包契约与包库事实（校验、去重、系统路径冲突预检、能力索引），
   `core/exec.rs` 是执行档位与执行计划派生；两者都是纯逻辑，目录遍历在 `PackageSource` 适配层。契约见 [RUNTIME_SPEC.md](RUNTIME_SPEC.md)。
 - 登记处四份 yaml 的字段与读写规则见 [REGISTRY_SPEC.md](REGISTRY_SPEC.md)。

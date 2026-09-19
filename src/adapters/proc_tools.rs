@@ -66,21 +66,28 @@ impl ProcTools {
 impl ToolRunner for ProcTools {
     fn run(&self, fence: &FenceSpec, command: &str, args_json: &str) -> ToolOutcome {
         // Windows：容器围栏要先把「可达范围」授权给容器 SID。
-        // **默认不写本机任何权限项**：只有用户显式授权（设置里的 fence_write，或环境变量 SOLOMNI_FENCE_WRITE=1）才做。
+        // **默认不写本机任何权限项**：只有用户显式授权（设置里的 fence_write，或环境变量 SOLOMNI_FENCE_WRITE=1）才做；
+        // 授权做成了才让守门进程去装容器——没做成就是无围栏执行，这一点如实进工具回执的 stderr。
         #[cfg(windows)]
-        {
+        let prepared = {
             use std::sync::atomic::Ordering;
+            let mut prepared = false;
             if self.write_allowed.load(Ordering::Relaxed) {
-                if let Err(e) = confine::prepare_fence(fence, command, &self.prepared, &self.home) {
-                    eprintln!("[围栏] 授权未完成（{}）：容器里的工具可能读不到工作目录", e);
+                match confine::prepare_fence(fence, command, &self.prepared, &self.home) {
+                    Ok(()) => prepared = true,
+                    Err(e) => eprintln!("[围栏] 授权未完成（{}）：本次按无围栏执行", e),
                 }
             } else if !self.disclosed.swap(true, Ordering::Relaxed) {
                 eprintln!(
                     "[围栏] 容器围栏未启用（没有授权在本机写权限）：外部工具按无围栏执行。要启用：在设置里打开，或在 .home/settings.yaml 写 fence_write: true"
                 );
             }
-        }
-        let mut cmd = confine::launcher(&self.exe, fence, command);
+            prepared
+        };
+        // 其它平台没有容器围栏，也就没有"要先授权"这一步。
+        #[cfg(not(windows))]
+        let prepared = false;
+        let mut cmd = confine::launcher(&self.exe, fence, prepared, command);
         cmd.current_dir(&fence.cwd)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -230,6 +237,13 @@ mod tests {
         assert!(get("SOLOMNI_PROBE_SECRET").is_none());
         assert_eq!(get("HOME").as_deref(), Some(private.to_string_lossy().as_ref()), "HOME 落在私有沙箱");
         assert_eq!(get("TEMP").as_deref(), Some(private.to_string_lossy().as_ref()));
+        // Windows 建 AppContainer 进程要读 LOCALAPPDATA：白名单里没有它，CreateProcessW 直接失败（os error 203），
+        // 容器整条路会静默降级成无围栏——落户同样指进私有沙箱。
+        assert_eq!(
+            get("LOCALAPPDATA").as_deref(),
+            Some(private.to_string_lossy().as_ref()),
+            "LOCALAPPDATA 也落在私有沙箱"
+        );
         assert_eq!(get("PYTHONIOENCODING").as_deref(), Some("utf-8"), "编码统一 UTF-8");
         std::env::remove_var("SOLOMNI_PROBE_SECRET");
     }
@@ -329,6 +343,33 @@ mod tests {
         let out = tools.run(&spec_for(&dir), &format!("{} echo_stdin.py", py), "{\"k\":\"v\"}");
         assert!(out.ok, "工具应当成功：{}", out.output);
         assert!(out.output.contains("{\"k\":\"v\"}"), "stdin 的 JSON 必须原样送达工具：{}", out.output);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 真实工具进程：父进程的无关变量（密钥之类）不得进工具进程——环境白名单要在真进程上生效。
+    #[test]
+    fn real_tool_process_does_not_inherit_foreign_env() {
+        let Some(exe) = built_exe() else {
+            eprintln!("[探针] 未找到已构建的 solomni 可执行文件（先 cargo build），跳过工具进程环境白名单契约");
+            return;
+        };
+        let Some(py) = python() else {
+            eprintln!("[探针] 本机没有可用的 python，跳过工具进程环境白名单契约");
+            return;
+        };
+        let dir = crate::contract_tests::scratch("proc-tools-env");
+        std::fs::write(
+            dir.join("echo_env.py"),
+            "import os\nprint('LEAK=' + str(os.environ.get('SOLOMNI_PROBE_ENV_LEAK')))\n",
+        )
+        .expect("写脚本");
+        std::env::set_var("SOLOMNI_PROBE_ENV_LEAK", "leak-me");
+        let tools = real_runner(exe, &dir, 60);
+        let out = tools.run(&spec_for(&dir), &format!("{} echo_env.py", py), "{}");
+        std::env::remove_var("SOLOMNI_PROBE_ENV_LEAK");
+        assert!(out.ok, "工具应当成功：{}", out.output);
+        assert!(out.output.contains("LEAK=None"), "无关变量不得进工具进程：{}", out.output);
+        assert!(!out.output.contains("leak-me"), "密钥不得进工具进程：{}", out.output);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

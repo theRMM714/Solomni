@@ -223,7 +223,8 @@ pub fn capability() -> Capability {
     }
 }
 
-pub fn run_fenced(spec: &FenceSpec, command: &str) -> i32 {
+/// `_prepared`（外层是否已完成本机授权）只有 Windows 的容器围栏用得上：Linux 的 Landlock 在守门进程里自足。
+pub fn run_fenced(spec: &FenceSpec, _prepared: bool, command: &str) -> i32 {
     match install(spec, command) {
         Ok(()) => {}
         Err(e) => {

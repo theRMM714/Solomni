@@ -817,33 +817,27 @@ mod tests {
     }
 }
 
-pub fn run_fenced(spec: &FenceSpec, command: &str) -> i32 {
+pub fn run_fenced(spec: &FenceSpec, prepared: bool, command: &str) -> i32 {
     if let Err(e) = join_kill_on_close_job(MAX_PROCESSES) {
         eprintln!("[围栏] 进程树围栏安装失败：{}", e);
+    }
+    // 容器要先把读放行与落点做好（改本机目录 ACL）才可能真跑起来：外层没授权就直接按无围栏执行，
+    // 不去试一个注定读不到模块目录与解释器的容器（那样只会把工具报成一堆"拒绝访问"）。
+    if !prepared {
+        eprintln!("[围栏] 外层未授权本机写入：容器围栏不可用，按如实降级继续执行");
+        return run_unfenced(spec, command);
     }
     let name = container_name(spec);
     // 容器身份先立起来（profile 是容器能读到系统目录的前提）。
     if let Err(e) = ensure_profile(&name) {
         eprintln!("[围栏] {}{}）：按如实降级继续执行", ENV_BLOCKED_MARK, e);
-        return match shell_command(command).current_dir(&spec.cwd).status() {
-            Ok(s) => s.code().unwrap_or(FENCE_FAILED),
-            Err(e2) => {
-                eprintln!("[围栏] 工具进程启动失败：{}", e2);
-                FENCE_FAILED
-            }
-        };
+        return run_unfenced(spec, command);
     }
     let sid = match container_sid(&name) {
         Ok(s) => s,
         Err(e) => {
             eprintln!("[围栏] 容器围栏未生效（{}）：按如实降级继续执行", e);
-            return match shell_command(command).current_dir(&spec.cwd).status() {
-                Ok(s) => s.code().unwrap_or(FENCE_FAILED),
-                Err(e) => {
-                    eprintln!("[围栏] 工具进程启动失败：{}", e);
-                    FENCE_FAILED
-                }
-            };
+            return run_unfenced(spec, command);
         }
     };
     let outcome = run_in_container(sid, spec, command);
@@ -853,13 +847,19 @@ pub fn run_fenced(spec: &FenceSpec, command: &str) -> i32 {
         Err(e) => {
             // 容器起不来也要如实说清，并退回普通方式执行（能力等级已在启动报告里说明）。
             eprintln!("[围栏] 容器围栏未生效（{}）：按如实降级继续执行", e);
-            match shell_command(command).current_dir(&spec.cwd).status() {
-                Ok(s) => s.code().unwrap_or(FENCE_FAILED),
-                Err(e2) => {
-                    eprintln!("[围栏] 工具进程启动失败：{}", e2);
-                    FENCE_FAILED
-                }
-            }
+            run_unfenced(spec, command)
+        }
+    }
+}
+
+/// 无围栏执行：容器不可用（外层没授权、profile 建不起来、容器起不来）时的如实降级——
+/// 命令仍交系统 shell 解释、cwd 仍是模块根，只是少了容器那层强制（启动报告里已说明能力等级）。
+fn run_unfenced(spec: &FenceSpec, command: &str) -> i32 {
+    match shell_command(command).current_dir(&spec.cwd).status() {
+        Ok(s) => s.code().unwrap_or(FENCE_FAILED),
+        Err(e) => {
+            eprintln!("[围栏] 工具进程启动失败：{}", e);
+            FENCE_FAILED
         }
     }
 }

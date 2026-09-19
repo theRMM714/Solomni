@@ -29,6 +29,11 @@ fn main() {
     if let Some(i) = args.iter().position(|a| a == "--https-check") {
         std::process::exit(https_check(&args, i));
     }
+    // 环境白名单（机器可读）：把运行期交给工具进程的环境逐行交出来——探针据此在**同一个环境**里驱动
+    // 守门进程，不另抄一份（抄一份会漂移，也会漏掉只有真实环境才暴露的问题）。
+    if let Some(i) = args.iter().position(|a| a == "--print-fence-env") {
+        std::process::exit(print_fence_env(&args, i));
+    }
     // 入站契约（机器可读）：HTTP 路由目录的唯一定义（见 ARCHITECTURE.md「呈现层入站契约」）。
     if args.iter().any(|a| a == "--print-routes") {
         println!("{}", presentation::routes::catalog_json());
@@ -331,15 +336,32 @@ impl core::ports::PromptSource for LoadedPrompts {
     }
 }
 
+/// 隐藏模式：按 KEY=VALUE 逐行打出运行期给工具进程的环境白名单（入参 = 守门进程那份 JSON）。
+fn print_fence_env(args: &[String], flag: usize) -> i32 {
+    let raw = args.get(flag + 1).cloned().unwrap_or_default();
+    match adapters::confine::FenceJob::from_json(&raw) {
+        Ok(job) => {
+            for (k, v) in adapters::confine::fence_env(&job.spec) {
+                println!("{}={}", k.to_string_lossy(), v.to_string_lossy());
+            }
+            0
+        }
+        Err(e) => {
+            eprintln!("[围栏] {}", e);
+            adapters::confine::FENCE_FAILED
+        }
+    }
+}
+
 /// 守门模式：读回围栏参数与命令，装围栏 → 跑命令 → 以工具退出码收场（失败如实报错，不静默）。
 fn fence_run(args: &[String], flag: usize) -> i32 {
-    let spec_json = args.get(flag + 1).cloned().unwrap_or_default();
+    let raw_job = args.get(flag + 1).cloned().unwrap_or_default();
     let command = match args.iter().position(|a| a == "--") {
         Some(j) => args.get(j + 1).cloned().unwrap_or_default(),
         None => String::new(),
     };
-    match core::fence::FenceSpec::from_json(&spec_json) {
-        Ok(spec) => adapters::confine::run_fenced(&spec, &command),
+    match adapters::confine::FenceJob::from_json(&raw_job) {
+        Ok(job) => adapters::confine::run_fenced(&job.spec, job.prepared, &command),
         Err(e) => {
             eprintln!("[围栏] {}", e);
             adapters::confine::FENCE_FAILED
