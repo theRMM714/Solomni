@@ -553,6 +553,45 @@ function pushStep(obj) {
     raw: unit.code === 0 ? null : unit.out.slice(-800),
   });
 
+  // 【临时诊断】L1 里到底哪几条慢：逐条跑测试二进制并计时，结果写进 target/test-logs/l1-slow.log（CI 会发布到
+  // ci-report）。Windows runner 的 L1 比 Linux/macOS 慢两个数量级，要靠它把名字找出来；定位完删掉本段。
+  try {
+    announce("L1 慢测试诊断（临时）");
+    const listed = sh("cargo", ["test", "--color", "never", "--bin", "solomni", "--", "--list"]).out;
+    const names = listed
+      .split(/\r?\n/)
+      .map((l) => (l.match(/^(\S+): test$/) || [])[1])
+      .filter(Boolean);
+    const deps = path.join(ROOT, "target", PROFILE, "deps");
+    const exe =
+      fs.existsSync(deps) && fs
+        .readdirSync(deps)
+        .filter((f) => /^solomni-[0-9a-f]+(\.exe)?$/.test(f))
+        .map((f) => path.join(deps, f))
+        .filter((p) => fs.statSync(p).isFile())
+        .sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs)[0];
+    if (!exe) throw new Error("没找到测试二进制（target/" + PROFILE + "/deps/solomni-<hash>）");
+    const rows = [];
+    for (const n of names) {
+      const t0 = Date.now();
+      const one = spawnSync(exe, [n, "--exact", "--test-threads=1"], { cwd: ROOT, env: buildEnv(), stdio: "ignore" });
+      rows.push([n, Date.now() - t0, one.status]);
+    }
+    rows.sort((a, b) => b[1] - a[1]);
+    const logFile = path.join(ROOT, "target", "test-logs", "l1-slow.log");
+    fs.writeFileSync(
+      logFile,
+      "逐测试用时（降序，共 " + rows.length + " 条）\n" +
+        rows.map(([n, ms, code]) => (ms / 1000).toFixed(2).padStart(8) + "s  " + (code === 0 ? "ok  " : "FAIL") + "  " + n).join("\n") + "\n",
+    );
+    const top = rows.slice(0, 8).map(([n, ms]) => n.split("::").pop() + " " + (ms / 1000).toFixed(1) + "s").join("；");
+    announceDone("完成", "最慢八条：" + top);
+    pushStep({ step: "L1 慢测试诊断（临时）", status: "pass", detail: "最慢八条：" + top });
+  } catch (e) {
+    announceDone("env-skip", "诊断没跑成：" + String(e.message || e));
+    pushStep({ step: "L1 慢测试诊断（临时）", status: "env-skip", detail: String(e.message || e) });
+  }
+
   // L2/L3：四个按平台分的测试目标逐一点名（缺目标即失败：新增测试文件必须挂到目标上）
   for (const t of PLATFORM_TARGETS) {
     announce("目标 " + t);
