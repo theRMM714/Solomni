@@ -1,7 +1,8 @@
 //! Windows 后端：AppContainer（文件系统与网络围栏）+ Job Object（进程树围栏）。
-//! 机制：按（agent + 私有沙箱）派生一个容器 SID → 把「可达范围」逐条授权给它
-//! （共享区与私有沙箱读写、模块目录读写、解释器安装目录只读+执行、祖先目录只允许按名穿过）
+//! 机制：按 agent 派生一个容器 SID → 把「可达范围」逐条授权给它
+//! （共享区与私有沙箱读写、模块目录读写、解释器安装目录只读+执行）
 //! → 用 STARTUPINFOEX 的 SECURITY_CAPABILITIES 启动工具（**不给任何 capability = 默认断网**）。
+//! 祖先目录不用授权：容器令牌自带 SeChangeNotifyPrivilege（绕过遍历检查），按名走到被放行的根不需要 FILE_TRAVERSE。
 //! 授权只落在用户自己拥有的目录上（不需要管理员）；撤销用同一套机制反向做。
 //! 授权与撤销由外层进程做（见 confine::prepare_fence），一次性做好并记在会话内存里；
 //! 守门进程只负责"按同一个名字派生同一个 SID 并把工具放进去"。
@@ -40,8 +41,7 @@ use windows_sys::Win32::System::Threading::{
 const SE_FILE_OBJECT: i32 = 1;
 // 权限位**只用具体位**：通用位（GENERIC_READ / WRITE / EXECUTE / ALL）的常量值极易记错，写错一个给出去的
 // 就是完全不同的权限。真机上抓到过：标着 GENERIC_READ 的是 0x4000_0000（其实是 GENERIC_WRITE）、
-// 标着 GENERIC_EXECUTE 的是 0x1000_0000（其实是 GENERIC_ALL）——于是"只读"的解释器基线实际授出了全权，
-// 而"祖先只穿过"的位是 0x0010_0000（SYNCHRONIZE），根本穿不过去。
+// 标着 GENERIC_EXECUTE 的是 0x1000_0000（其实是 GENERIC_ALL）——于是"只读"的解释器基线实际授出了全权。
 const FILE_GENERIC_READ: u32 = 0x0012_0089;
 const FILE_GENERIC_WRITE: u32 = 0x0012_0116;
 const FILE_GENERIC_EXECUTE: u32 = 0x0012_00A0;
@@ -188,8 +188,8 @@ fn wide(path: &Path) -> Vec<u16> {
 }
 
 /// 给一个对象授一条 ACE。`recursive` = 连**已有**子项一起设成这个 ACL（TreeSet）；`inherit` = 这条 ACE 被**新建**子项继承。
-/// 祖先目录的"只穿过"两个都不要：`inherit` 会牵动整棵子树的继承计算（真机实测：2000 个子项的可继承 ACE 写入
-/// 是空目录的 20 倍），而祖先本来只需要它自己能穿过；`recursive` 更是会把整盘设一遍 ACL。
+/// 两者都要有明确理由：`inherit` 会牵动整棵子树的继承计算（真机实测：2000 个子项的可继承 ACE 写入是空目录的
+/// 20 倍），`recursive` 更是会把整棵树设一遍 ACL——所以只对**真的需要被子项继承**的落点（解释器目录、数据边界）用。
 fn grant_one(sid: PSID, path: &Path, rights: u32, recursive: bool, inherit: bool) -> Result<(), String> {
     let mut old_dacl: *mut ACL = std::ptr::null_mut();
     let mut sd: PSID = std::ptr::null_mut();
@@ -355,7 +355,7 @@ fn interpreter_dirs(command: &str) -> Vec<PathBuf> {
 }
 
 /// 外层进程调用：把围栏要用的授权一次性做好（按 (SID, 路径, 权限) 去重，不重复改 ACL）。
-/// 授权落点：共享区/私有沙箱/模块目录（读写）、解释器安装目录（只读+执行）、它们的祖先（只穿过）。
+/// 授权落点只有两处：共享区/私有沙箱/模块目录（读写）、解释器安装目录（只读+执行）。
 pub fn prepare_fence(
     spec: &FenceSpec,
     command: &str,
@@ -943,7 +943,7 @@ mod tests {
         let still = has_ace_for(sid, &dir, RIGHTS_RW);
         free_sid(sid);
         assert!(!still, "撤权后根上不该再有该容器 SID 的 ACE");
-        // 基线授权（解释器目录只读、祖先穿过）也记在同一份台账里，一并按台账撤干净。
+        // 基线授权（解释器目录只读）也记在同一份台账里，一并按台账撤干净。
         clean(&home).expect("基线回收应当成功");
         let _ = std::fs::remove_dir_all(&dir);
     }
