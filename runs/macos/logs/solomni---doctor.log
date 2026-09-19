@@ -1,0 +1,1 @@
+{"arch":"aarch64","externals":{"curl":"/usr/bin/curl","node":"/Users/runner/hostedtoolcache/node/24.20.0/arm64/bin/node","python":"/Library/Frameworks/Python.framework/Versions/Current/bin/python"},"fence":{"fs":true,"net":true,"note":"macOS：seatbelt（sandbox_init，私有且已弃用的 ABI）强制可达范围并按档位断网","tree":true},"platform":"macos"}
