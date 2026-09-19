@@ -51,14 +51,16 @@ function buildEnv() {
 }
 
 let stepNo = 0;
+/// 每步的起跑时刻：报告里带 ms，才能看出"哪一步慢"（真机上 Windows 的 L1 比 Linux 慢两个数量级，就是靠这个定位）
+let stepStart = Date.now();
 function announce(label) {
   stepNo++;
+  stepStart = Date.now();
   process.stdout.write("[" + stepNo + "] " + label + " ... ");
 }
 function announceDone(status, detail) {
-  console.log(status + (detail ? "（" + detail + "）" : ""));
+  console.log(status + (detail ? "（" + detail + "）" : "") + "  [" + ((Date.now() - stepStart) / 1000).toFixed(1) + "s]");
 }
-
 function sh(cmd, args) {
   // 输出走文件而不是管道：受限环境里"用管道抓子进程输出"会 EPERM；落成日志还顺带留了档案。
   const logDir = path.join(ROOT, "target", "test-logs");
@@ -386,6 +388,10 @@ function printBaseline() {
 function main() {
   if (PRINT_BASELINE) { printBaseline(); return; }
   const steps = [];
+/** 记一步：用时自动带上（步骤对象不关心时间时也不用写两遍）。 */
+function pushStep(obj) {
+  steps.push(Object.assign({ ms: Date.now() - stepStart }, obj));
+}
   let doctor = null;
   announce("cargo build");
   console.log(FENCE_LIVE
@@ -393,7 +399,7 @@ function main() {
     : "[安全性] 安全模式：会改本机状态的测试已跳过（Windows 容器探针、端到端里的真实围栏写入）；要真跑加 --fence-live");
   const build = sh("cargo", ["build", "--color", "never"].concat(PROFILE === "release" ? ["--release"] : []));
   announceDone(build.code === 0 ? "完成" : "失败", build.code === 0 ? "" : build.log);
-  steps.push({
+  pushStep({
     step: "cargo build",
     status: build.code === 0 ? "pass" : "fail",
     detail: build.code === 0 ? "" : (build.error || "") + " 日志：" + build.log,
@@ -408,7 +414,7 @@ function main() {
   announce("T0 编译（--all-targets）");
   const check = sh("cargo", ["check", "--all-targets", "--color", "never"]);
   announceDone(check.code === 0 ? "完成" : "失败", check.code === 0 ? "" : check.log);
-  steps.push({
+  pushStep({
     step: "T0 编译（--all-targets）",
     status: check.code === 0 ? "pass" : "fail",
     detail: check.code === 0 ? "" : (check.error || "") + " 日志：" + check.log,
@@ -421,7 +427,7 @@ function main() {
     audit.problems.length ? "失败" : "完成",
     audit.problems.length ? audit.problems.length + " 条问题" : audit.targets.length + " 个目标 / " + audit.testFiles + " 个测试文件"
   );
-  steps.push({
+  pushStep({
     step: "T0 结构审查",
     status: audit.problems.length ? "quality-fail" : "pass",
     detail: audit.problems.join("；"),
@@ -434,13 +440,13 @@ function main() {
   announce("T0 格式（fmt --check）");
   if (!toolAvailable("fmt")) {
     announceDone("env-skip", "cargo-fmt 未安装");
-    steps.push({ step: "T0 格式（fmt --check）", status: "env-skip", detail: "cargo-fmt 未安装：rustup component add rustfmt" });
+    pushStep({ step: "T0 格式（fmt --check）", status: "env-skip", detail: "cargo-fmt 未安装：rustup component add rustfmt" });
   } else {
     const r = sh("cargo", ["fmt", "--all", "--", "--check", "--color", "never"]);
     const d = setDiff([...fmtDeviations(r.out)], base.fmt_deviating_files);
     const ok = !d.extra.length && !d.missing.length;
     announceDone(ok ? "完成" : "基线不符", ok ? "偏差文件 " + base.fmt_deviating_files.length : "新增 " + d.extra.length + " / 过期 " + d.missing.length);
-    steps.push({
+    pushStep({
       step: "T0 格式（fmt --check）",
       status: ok ? "pass" : "quality-fail",
       detail: ok ? "" : [d.extra.length ? "新出现格式偏差：" + d.extra.join("、") : "", d.missing.length ? "基线过期（已无偏差，请从基线删除）：" + d.missing.join("、") : ""].filter(Boolean).join("；"),
@@ -451,7 +457,7 @@ function main() {
   announce("T0 静态检查（clippy）");
   if (!toolAvailable("clippy")) {
     announceDone("env-skip", "cargo-clippy 未安装");
-    steps.push({ step: "T0 静态检查（clippy）", status: "env-skip", detail: "cargo-clippy 未安装：rustup component add clippy" });
+    pushStep({ step: "T0 静态检查（clippy）", status: "env-skip", detail: "cargo-clippy 未安装：rustup component add clippy" });
   } else {
     // --keep-going：-D warnings 会让首个失败的单元中断调度，而 lint 计数取决于哪些单元真的被编译过，
     // 于是同一个提交连跑两次可能得到不同计数。加上它，所有目标单元都编译完，测量才可复现。
@@ -461,7 +467,7 @@ function main() {
     if (!mine) {
       // 缺当前平台的分区 = 门禁无法判定：明确报错，绝不静默通过。
       announceDone("基线缺分区", OS_KEY);
-      steps.push({
+      pushStep({
         step: "T0 静态检查（clippy）",
         status: "quality-fail",
         detail: "基线里没有 " + OS_KEY + " 分区：请在该平台上跑 node run-tests.js --print-quality-baseline",
@@ -472,7 +478,7 @@ function main() {
       const ok = !d.extra.length && !d.missing.length;
       const total = Object.values(got).reduce((a, b) => a + b, 0);
       announceDone(ok ? "完成" : "基线不符", ok ? "存量 " + total + " 处（" + OS_KEY + "）" : "新增 " + d.extra.length + " 类 / 过期 " + d.missing.length + " 类");
-      steps.push({
+      pushStep({
         step: "T0 静态检查（clippy）",
         status: ok ? "pass" : "quality-fail",
         detail: ok ? "" : [d.extra.length ? "超基线：" + d.extra.join("、") : "", d.missing.length ? "基线过期（数量已下降，请重新生成基线）：" + d.missing.join("、") : ""].filter(Boolean).join("；"),
@@ -487,7 +493,7 @@ function main() {
     const mine = platformBase(base, "check_warnings");
     if (mine === null) {
       announceDone("基线缺分区", OS_KEY);
-      steps.push({
+      pushStep({
         step: "T0 编译告警",
         status: "quality-fail",
         detail: "基线里没有 " + OS_KEY + " 分区：请在该平台上跑 node run-tests.js --print-quality-baseline",
@@ -497,7 +503,7 @@ function main() {
       const d = countDiff({ warnings: got }, { warnings: mine });
       const ok = !d.extra.length && !d.missing.length;
       announceDone(ok ? "完成" : "基线不符", ok ? "存量 " + got + " 条（" + OS_KEY + "）" : "新增 " + d.extra.length + " / 过期 " + d.missing.length);
-      steps.push({
+      pushStep({
         step: "T0 编译告警",
         status: ok ? "pass" : "quality-fail",
         detail: ok ? "" : [d.extra.length ? "新增 rustc 告警：" + d.extra.join("、") : "", d.missing.length ? "基线过期（告警已减少，请重新生成基线）" : ""].filter(Boolean).join("；"),
@@ -509,13 +515,13 @@ function main() {
   announce("T0 依赖重复（cargo tree）");
   if (!toolAvailable("tree")) {
     announceDone("env-skip", "cargo-tree 不可用");
-    steps.push({ step: "T0 依赖重复（cargo tree）", status: "env-skip", detail: "cargo tree 不可用" });
+    pushStep({ step: "T0 依赖重复（cargo tree）", status: "env-skip", detail: "cargo tree 不可用" });
   } else {
     const r = sh("cargo", ["tree", "--duplicates", "--color", "never"]);
     const mine = platformBase(base, "duplicates");
     if (!mine) {
       announceDone("基线缺分区", OS_KEY);
-      steps.push({
+      pushStep({
         step: "T0 依赖重复（cargo tree）",
         status: "quality-fail",
         detail: "基线里没有 " + OS_KEY + " 分区：请在该平台上跑 node run-tests.js --print-quality-baseline",
@@ -525,7 +531,7 @@ function main() {
       const d = setDiff(duplicateCrates(r.out), mine);
       const ok = !d.extra.length && !d.missing.length;
       announceDone(ok ? "完成" : "基线不符", ok ? "存量 " + mine.length + " 个（" + OS_KEY + "）" : "新增 " + d.extra.length + " / 过期 " + d.missing.length);
-      steps.push({
+      pushStep({
         step: "T0 依赖重复（cargo tree）",
         status: ok ? "pass" : "quality-fail",
         detail: ok ? "" : [d.extra.length ? "新增重复依赖：" + d.extra.join("、") : "", d.missing.length ? "基线过期（重复已消失，请重新生成基线）：" + d.missing.join("、") : ""].filter(Boolean).join("；"),
@@ -539,7 +545,7 @@ function main() {
   const unit = sh("cargo", ["test", "--color", "never", "--bin", "solomni", "--", "--test-threads=1", "--nocapture"]);
   const uc = cargoCounts(unit.out);
   announceDone(unit.code === 0 ? "完成" : "失败", uc.passed + " passed / " + uc.failed + " failed");
-  steps.push({
+  pushStep({
     step: "L1 单元（--bin solomni）",
     status: unit.code === 0 ? "pass" : "fail",
     detail: uc.passed + " passed / " + uc.failed + " failed",
@@ -560,7 +566,7 @@ function main() {
     else if (c.passed === 0 && isOtherPlatform) status = "skip-platform";
     else status = "pass";
     announceDone(status === "fail" ? "失败" : status === "skip-platform" ? "本平台不适用" : "完成", c.passed + " passed / " + c.failed + " failed");
-    steps.push({
+    pushStep({
       step: "目标 " + t,
       status: status,
       detail:
@@ -576,7 +582,7 @@ function main() {
   announce("前端冒烟");
   const fe = sh(process.execPath, [path.join("src", "presentation", "web", "smoke.cjs")]);
   announceDone(fe.code === 0 ? "完成" : "失败", "");
-  steps.push({
+  pushStep({
     step: "前端冒烟",
     status: fe.code === 0 && fe.out.includes("FRONTEND-SMOKE-OK") ? "pass" : "fail",
     detail: fe.out.trim().split(/\r?\n/).slice(-2).join(" / "),
@@ -589,14 +595,14 @@ function main() {
     announce("L4 端到端");
     const r = sh(process.execPath, [e2e]);
     announceDone(r.code === 0 ? "完成" : "失败", "");
-    steps.push({
+    pushStep({
       step: "L4 端到端",
       status: r.code === 0 && r.out.includes("E2E-OK") ? "pass" : "fail",
       detail: r.out.trim().split(/\r?\n/).slice(-2).join(" / "),
       raw: r.code === 0 ? null : r.out.slice(-800),
     });
   } else {
-    steps.push({ step: "L4 端到端", status: "gap", detail: "cross-platform.e2e.not-in-runner（编排尚未迁入）" });
+    pushStep({ step: "L4 端到端", status: "gap", detail: "cross-platform.e2e.not-in-runner（编排尚未迁入）" });
   }
 
   const gaps = gapLedgers();
@@ -612,7 +618,7 @@ function main() {
     profile: PROFILE,
     fenceLive: FENCE_LIVE,
     doctor: doctor,
-    steps: steps.map((s) => ({ step: s.step, status: s.status, detail: s.detail })),
+    steps: steps.map((s) => ({ step: s.step, status: s.status, detail: s.detail, ms: s.ms })),
     envSkips: skips,
     quality: {
       failed: qualityFailed.length,
@@ -628,7 +634,9 @@ function main() {
 
   console.log("");
   console.log("=== 测试汇总（" + process.platform + " " + process.arch + "，报告见 target/test-report.json）===");
-  for (const s of steps) console.log("  " + s.status.padEnd(13) + " " + s.step.padEnd(24) + " " + (s.detail || ""));
+  for (const s of steps) {
+    console.log("  " + s.status.padEnd(13) + " " + s.step.padEnd(24) + " " + (s.detail || "") + (s.ms ? "  [" + (s.ms / 1000).toFixed(1) + "s]" : ""));
+  }
   if (doctor && doctor.fence) console.log("  [doctor] 围栏 fs=" + doctor.fence.fs + " net=" + doctor.fence.net + " tree=" + doctor.fence.tree + "（" + doctor.fence.note + "）");
   for (const s of envSkips) console.log("  [env-skip] " + s.step + "：" + s.detail);
   for (const s of skips) console.log("  [env-skip] " + s);

@@ -113,7 +113,7 @@ fn self_check() -> Result<(), String> {
     let sid = container_sid("Solomni.Fence.SelfCheck")?;
     let scratch = std::env::temp_dir().join(format!("solomni-fence-selfcheck-{}", std::process::id()));
     std::fs::create_dir_all(&scratch).map_err(|e| format!("建自检目录失败：{}", e))?;
-    let outcome = grant_one(sid, &scratch, RIGHTS_RO, false);
+    let outcome = grant_one(sid, &scratch, RIGHTS_RO, false, false);
     let _ = std::fs::remove_dir_all(&scratch);
     free_sid(sid);
     outcome.map_err(|e| format!("改不动目录 ACL：{}", e))
@@ -191,8 +191,10 @@ fn wide(path: &Path) -> Vec<u16> {
     path.as_os_str().encode_wide().chain(std::iter::once(0)).collect()
 }
 
-/// 给一个对象授一条 ACE：目录带 (OI)(CI) 让新建的子项继承；recursive = 连已有子项一起处理。
-fn grant_one(sid: PSID, path: &Path, rights: u32, recursive: bool) -> Result<(), String> {
+/// 给一个对象授一条 ACE。`recursive` = 连**已有**子项一起设成这个 ACL（TreeSet）；`inherit` = 这条 ACE 被**新建**子项继承。
+/// 祖先目录的"只穿过"两个都不要：`inherit` 会牵动整棵子树的继承计算（真机实测：2000 个子项的可继承 ACE 写入
+/// 是空目录的 20 倍），而祖先本来只需要它自己能穿过；`recursive` 更是会把整盘设一遍 ACL。
+fn grant_one(sid: PSID, path: &Path, rights: u32, recursive: bool, inherit: bool) -> Result<(), String> {
     let mut old_dacl: *mut ACL = std::ptr::null_mut();
     let mut sd: PSID = std::ptr::null_mut();
     let w = wide(path);
@@ -214,7 +216,7 @@ fn grant_one(sid: PSID, path: &Path, rights: u32, recursive: bool) -> Result<(),
     let ea = EXPLICIT_ACCESS_W {
         grfAccessPermissions: rights,
         grfAccessMode: GRANT_ACCESS,
-        grfInheritance: (OBJECT_INHERIT_ACE | CONTAINER_INHERIT_ACE) as u32,
+        grfInheritance: if inherit { (OBJECT_INHERIT_ACE | CONTAINER_INHERIT_ACE) as u32 } else { 0 },
         Trustee: TRUSTEE_W {
             pMultipleTrustee: std::ptr::null_mut(),
             MultipleTrusteeOperation: 0,
@@ -380,7 +382,7 @@ pub fn prepare_fence(
         if has_ace_for(base, &dir, RIGHTS_RO) {
             continue;
         }
-        if let Err(e) = grant_one(base, &dir, RIGHTS_RO, true) {
+        if let Err(e) = grant_one(base, &dir, RIGHTS_RO, true, true) {
             eprintln!("[围栏] 解释器目录授权未完成（{}）：{}", dir.display(), e);
             if result.is_ok() {
                 result = Err(e);
@@ -407,7 +409,7 @@ pub fn prepare_fence(
         if has_ace_for(base, &path, RIGHTS_TRAVERSE) {
             continue;
         }
-        if let Err(e) = grant_one(base, &path, RIGHTS_TRAVERSE, false) {
+        if let Err(e) = grant_one(base, &path, RIGHTS_TRAVERSE, false, false) {
             eprintln!("[围栏] 祖先目录未能放行（{}）：{}", path.display(), e);
         } else {
             written.push((String::from("S-1-15-2-1"), path, RIGHTS_TRAVERSE));
@@ -430,7 +432,7 @@ pub fn prepare_fence(
         if prepared.lock().expect("授权表锁").contains(&key) {
             continue;
         }
-        match grant_one(sid, &path, rights, recursive) {
+        match grant_one(sid, &path, rights, recursive, true) {
             Ok(()) => {
                 prepared.lock().expect("授权表锁").insert(key);
                 written.push((sid_to_string(sid), path.clone(), rights));

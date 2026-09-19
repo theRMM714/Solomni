@@ -453,7 +453,7 @@ node run-tests.js --fence-live
 - `skip-platform`：当前平台不适用的空平台目标；
 - `gap`：入口没有找到应运行的部分。
 
-报告字段：`steps`（逐步骤状态）、`envSkips`（探针级跳过）、`quality`（`failed` / `steps` / `baselineStale`）、
+报告字段：`steps`（逐步骤状态与用时 `ms`——"哪一步慢"要看它，不看感觉）、`envSkips`（探针级跳过）、`quality`（`failed` / `steps` / `baselineStale`）、
 `gaps`（平台缺口账）、`globalGaps`（`tests/gaps.yaml` 的长期目标）、`failed`（硬失败数）。
 `test-fail` 与 `blocked` 这两个更细的状态当前没有实现，也不在计划内——`fail` 与 `gap` 已能如实表达。
 
