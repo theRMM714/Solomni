@@ -74,7 +74,7 @@ cargo run                 # 工具链就绪后最直接的跑法：cargo run -- 
 | 模块 | 语言 | 工具 | 干什么 |
 |---|---|---|---|
 | `harvest` | python | `scan` | 扫共享区，把资料抽成语料清单 `corpus.jsonl`（正文、标题层级、链接、字数行数） |
-| `render` | node | `report` | 流式读语料，渲染**自包含** HTML 报告（目录 / 大纲 / 统计 / 坏链检查）+ 一份轻量索引 JSON |
+| `render` | node | `report` | 流式读语料，渲染**自包含** HTML 报告（目录 / 大纲 / 统计 / 坏链检查）+ 一份轻量清单 `report-manifest.json` |
 | `indexer` | C++ | `build` / `query` / `dups` | 建倒排索引（CJK 二元组）、毫秒级检索、近似重复检测（bottom-k 草图估 Jaccard） |
 
 ```bash
@@ -89,7 +89,8 @@ node demo/run-demo.mjs
   macOS：`g++ -O2 -std=c++17 -Wall -Wextra modules/indexer/tools/src/indexer.cpp -o modules/indexer/build/indexer`；
   Linux：同上再加 `-static-libgcc -static-libstdc++`；
   Windows（用项目自带工具链）：`& '.tools/mingw64/bin/g++.exe' -O2 -std=c++17 -Wall -Wextra -static -static-libgcc -static-libstdc++ modules/indexer/tools/src/indexer.cpp -o modules/indexer/build/indexer.exe`。
-  命令里写 `build/indexer` 两平台都认：守门进程经 shell 解释命令，Windows 会按 PATHEXT 补 `.exe`。
+  命令里写 `build/indexer` 三个平台都认：守门进程把命令交系统 shell 解释，Windows 按 PATHEXT 补 `.exe`，
+  并把**程序名**里的 `/` 换成 `\`（cmd 不认程序名里的正斜杠，理由见 [MODULE_SPEC.md](MODULE_SPEC.md) 的「工具执行」）。
 - 三个模块**只用标准库 / 零第三方依赖**，所以整条流程**不需要网络**：围栏的可达范围只含本次工作的共享区、该 agent 的私有沙箱与它自己的模块目录。
 - 演示只走产品自己的 HTTP 能力面，不改登记处；产物落在本次工作的共享区或该 agent 的私有沙箱里。
 
