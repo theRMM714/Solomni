@@ -1,7 +1,7 @@
 //! Landlock 探针：真机验收本平台的文件系统围栏——允许的根里写得进，根之外读不到。
 //! 驱动方式与运行期完全一致：交给守门进程（本程序 --fence-run）去装围栏。
 
-use crate::probe::{run_launcher, scratch, spec_json};
+use crate::probe::{job_json, run_launcher, scratch};
 
 /// 与 src/adapters/confine/linux.rs 的 RULES_REJECTED_MARK 一致（集成测试看不到 crate 内部）。
 /// 自检已确认本机 Landlock 有效，却仍装不上 = 我们的规则写错了；
@@ -14,7 +14,8 @@ fn fence_denies_outside_paths_and_allows_the_given_roots() {
     let outside = scratch("fence-outside");
     let secret = outside.join("secret.txt");
     std::fs::write(&secret, "SECRET-DO-NOT-LEAK").unwrap();
-    let spec = spec_json(&[inside.clone()], &inside);
+    // prepared = false：Linux 的 Landlock 在守门进程里自足，没有"外层先授权"这一步。
+    let spec = job_json(&[inside.clone()], &inside, false);
 
     // 允许的根里：写得进。
     let (code, out, err) = run_launcher(&spec, &format!("echo ok > {}", inside.join("x.txt").display()));

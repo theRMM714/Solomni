@@ -25,17 +25,53 @@ pub fn scratch(name: &str) -> PathBuf {
     d
 }
 
-/// 手写 FenceSpec 的 JSON（字段与 core/fence.rs 一致：agent / rw / cwd / net）。
-pub fn spec_json(rw: &[PathBuf], cwd: &PathBuf) -> String {
+/// 手写守门进程的入参 JSON（字段与 core/fence.rs 的 FenceSpec 同层，外加一个 prepared）：
+/// `prepared` = 外层是否已经把本机授权做完（只有 Windows 的容器围栏用得上）。
+/// 验容器机制传 true（ACL 授权是产品在真实会话里做的，探针不写本机权限项）；验协议与降级路径传 false
+/// ——那正是未授权机器上的真实路径。
+pub fn job_json(rw: &[PathBuf], cwd: &PathBuf, prepared: bool) -> String {
     let esc = |p: &PathBuf| p.to_string_lossy().replace('\\', "/");
     let roots: Vec<String> = rw.iter().map(|p| format!("\"{}\"", esc(p))).collect();
-    format!("{{\"agent\":\"probe\",\"rw\":[{}],\"cwd\":\"{}\",\"net\":false}}", roots.join(","), esc(cwd))
+    format!(
+        "{{\"agent\":\"probe\",\"rw\":[{}],\"cwd\":\"{}\",\"net\":false,\"prepared\":{}}}",
+        roots.join(","),
+        esc(cwd),
+        prepared
+    )
 }
 
-/// 按运行期同一套逻辑起守门进程（Unix 独立进程组；Windows 靠它自己的 Job Object）。
-pub fn spawn_fenced(spec: &str, command: &str) -> Child {
+/// 运行期交给工具进程的环境白名单：**问产品自己拿**（`--print-fence-env`），不在这里另抄一份。
+/// 探针必须在**同一个环境**里驱动守门进程：环境不同，围栏的真实行为就不同（真机上已抓到过这种盲区）。
+pub fn runtime_env(spec: &str) -> Vec<(String, String)> {
+    let out = Command::new(bin())
+        .arg("--print-fence-env")
+        .arg(spec)
+        .output()
+        .expect("问产品要环境白名单");
+    assert!(out.status.success(), "环境白名单要能问出来：{}", String::from_utf8_lossy(&out.stderr));
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter_map(|line| line.split_once('=').map(|(k, v)| (k.to_string(), v.to_string())))
+        .collect()
+}
+
+/// 起守门进程：先套运行期的环境（清空 + 白名单），再补调用方要的排障开关。
+fn fenced_command(spec: &str, command: &str, extra: &[(&str, &str)]) -> Command {
     let mut cmd = Command::new(bin());
     cmd.arg("--fence-run").arg(spec).arg("--").arg(command);
+    cmd.env_clear();
+    for (k, v) in runtime_env(spec) {
+        cmd.env(k, v);
+    }
+    for (k, v) in extra {
+        cmd.env(k, v);
+    }
+    cmd
+}
+
+/// 按运行期同一套逻辑起守门进程（同样的环境；Unix 独立进程组；Windows 靠它自己的 Job Object）。
+pub fn spawn_fenced(spec: &str, command: &str) -> Child {
+    let mut cmd = fenced_command(spec, command, &[]);
     cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
     #[cfg(unix)]
     {
@@ -58,15 +94,14 @@ pub fn kill_like_runtime(child: &mut Child) {
     let _ = child.wait();
 }
 
-/// 跑一次守门进程，拿回（退出码, stdout, stderr）。
+/// 跑一次守门进程，拿回（退出码, stdout, stderr）——环境与运行期一致。
 pub fn run_launcher(spec: &str, command: &str) -> (Option<i32>, String, String) {
-    let out = Command::new(bin())
-        .arg("--fence-run")
-        .arg(spec)
-        .arg("--")
-        .arg(command)
-        .output()
-        .expect("跑守门进程");
+    run_launcher_env(spec, command, &[])
+}
+
+/// 同上，并给**守门进程**补上调用方要的环境（例如 macOS 的 profile 排障开关：它不在白名单里，探针自己带）。
+pub fn run_launcher_env(spec: &str, command: &str, extra: &[(&str, &str)]) -> (Option<i32>, String, String) {
+    let out = fenced_command(spec, command, extra).output().expect("跑守门进程");
     (
         out.status.code(),
         String::from_utf8_lossy(&out.stdout).into_owned(),

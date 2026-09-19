@@ -2,7 +2,7 @@
 //! 这些断言不需要写目录 ACL（ACL 授权由产品在真实会话里做），但要**建一个 AppContainer profile**——
 //! 那是改本机状态的动作，所以默认不跑：必须显式开启（node run-tests.js --fence-live 会把它传进来）。
 
-use crate::probe::{env_blocks_container, run_launcher, scratch, spec_json};
+use crate::probe::{env_blocks_container, job_json, run_launcher, scratch};
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -26,7 +26,8 @@ fn skip_unless_live(name: &str) -> bool {
 
 /// 探针用的围栏：rw 给一个落点；cwd 用系统目录（容器默认可读，避免把"CWD 能不能读"混进断言）。
 fn spec_for(rw: &PathBuf) -> String {
-    spec_json(std::slice::from_ref(rw), &PathBuf::from("C:\\Windows\\System32"))
+    // prepared = true：这些探针就是要验容器机制本身；ACL 授权由产品在真实会话里做。
+    job_json(std::slice::from_ref(rw), &PathBuf::from("C:\\Windows\\System32"), true)
 }
 
 #[test]

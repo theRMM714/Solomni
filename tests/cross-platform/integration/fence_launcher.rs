@@ -1,6 +1,6 @@
 //! 守门进程协议与环境白名单（跨平台）：退出码如实回传、围栏装不上如实报错、超时连根杀掉整棵树。
 
-use crate::probe::{bin, kill_like_runtime, python_command, scratch, spec_json, spawn_fenced, wait, FENCE_FAILED};
+use crate::probe::{bin, job_json, kill_like_runtime, python_command, run_launcher, scratch, spawn_fenced, wait, FENCE_FAILED};
 use std::process::Command;
 use std::time::{Duration, Instant};
 
@@ -23,16 +23,11 @@ fn fence_failure_is_reported_honestly() {
 
 #[test]
 fn launcher_runs_the_command_and_passes_its_exit_code() {
+    // prepared = false = 未授权机器上的真实路径：守门进程不装容器，按平台围栏如实降级跑命令。
     let dir = scratch("ok");
-    let out = Command::new(bin())
-        .arg("--fence-run")
-        .arg(spec_json(&[dir.clone()], &dir))
-        .arg("--")
-        .arg("echo hello-from-tool")
-        .output()
-        .expect("跑守门进程");
-    assert_eq!(out.status.code(), Some(0), "退出码要如实回传");
-    assert!(String::from_utf8_lossy(&out.stdout).contains("hello-from-tool"));
+    let (code, out, err) = run_launcher(&job_json(&[dir.clone()], &dir, false), "echo hello-from-tool");
+    assert_eq!(code, Some(0), "退出码要如实回传：{} / {}", out, err);
+    assert!(out.contains("hello-from-tool"), "{}", out);
 }
 
 #[test]
@@ -59,7 +54,7 @@ fn killing_the_guarded_process_takes_the_whole_tree_with_it() {
             return;
         }
     };
-    let mut child = spawn_fenced(&spec_json(&[dir.clone()], &dir), &command);
+    let mut child = spawn_fenced(&job_json(&[dir.clone()], &dir, false), &command);
     wait(Duration::from_millis(1500));
     kill_like_runtime(&mut child);
     let deadline = Instant::now() + Duration::from_secs(7);
