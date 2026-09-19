@@ -352,7 +352,7 @@ function baselineYaml(m, old) {
   L.push("check_warnings:");
   for (const p of PLATFORMS) if (warn[p] !== undefined) L.push("  " + p + ": " + warn[p]);
   L.push("");
-  L.push("# cargo tree --duplicates 报出的重复 crate（按平台；unix 的 rustls 会多带一个 webpki-roots）。");
+  L.push("# cargo tree --duplicates 报出的重复 crate（按平台；该分区为空 = 没有重复）。");
   L.push("duplicates:");
   for (const p of PLATFORMS) {
     if (!dup[p]) continue;

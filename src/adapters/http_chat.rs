@@ -3,7 +3,8 @@
 //! 端点补全/回落规则见 endpoint 模块：无版本段先直连，404/405 再试 /v1。
 //! 密钥只在出站调用里使用，永不落提示词/转录/日志；错误信息经脱敏（红线）。
 
-use super::endpoint::{chat_candidates, memo_get, memo_set, resolve_candidates, retryable_status, Attempt, Memo};
+use super::endpoint::{chat_candidates, memo_get, memo_set, resolve_candidates, Attempt, Memo};
+use super::http_agent::{finish_request, redact};
 use super::fake_chat::DemoGateway;
 use crate::core::ports::{
     BoxedChat, Chat, ChatGateway, Chunk, CompleteOpts, Completion, Msg, ProbeOutcome, ToolCall, ToolDecl,
@@ -143,20 +144,17 @@ impl Chat for HttpChat {
 fn stream_once(url: &str, key: &str, body: &str, on: &mut dyn FnMut(Chunk) -> bool) -> Attempt<Completion> {
     use std::io::BufRead;
     let agent = super::http_agent::agent(10, 300);
-    let resp = match agent
-        .post(url)
-        .set("Authorization", &format!("Bearer {}", key))
-        .set("Content-Type", "application/json")
-        .send_string(body)
-    {
+    let resp = match finish_request(
+        agent
+            .post(url)
+            .header("Authorization", &format!("Bearer {}", key))
+            .header("Content-Type", "application/json")
+            .send(body),
+        key,
+    ) {
         Ok(r) => r,
-        Err(ureq::Error::Status(code, resp)) => {
-            let snippet = resp.into_string().unwrap_or_default();
-            let snippet: String = snippet.chars().take(200).collect();
-            let msg = redact(format!("供应商返回 {}：{}", code, snippet), key);
-            return if retryable_status(code) { Attempt::Retry(msg) } else { Attempt::Fatal(msg) };
-        }
-        Err(other) => return Attempt::Retry(redact(format!("网络错误：{}", other), key)),
+        Err((msg, true)) => return Attempt::Retry(msg),
+        Err((msg, false)) => return Attempt::Fatal(msg),
     };
     const MAX_STREAM_CHARS: usize = 200_000;
     // 新一轮开始：让调用方清空本轮流式占位（工具多轮各成一段）
@@ -171,7 +169,7 @@ fn stream_once(url: &str, key: &str, body: &str, on: &mut dyn FnMut(Chunk) -> bo
     let mut calls: Vec<ToolCall> = Vec::new();
     let mut got_any = false;
     let mut cancelled = false;
-    for line in std::io::BufReader::new(resp.into_reader()).lines() {
+    for line in std::io::BufReader::new(resp.into_body().into_reader()).lines() {
         let line = match line {
             Ok(l) => l,
             Err(e) => {
@@ -312,23 +310,21 @@ pub(crate) fn attempt_with_tools(
 /// 单次 POST：请求与解析都在此；失败按「可换候选 / 立即报」归类。
 fn attempt(url: &str, key: &str, body: &str) -> Attempt<Completion> {
     let agent = super::http_agent::agent(10, 120);
-    let resp = match agent
-        .post(url)
-        .set("Authorization", &format!("Bearer {}", key))
-        .set("Content-Type", "application/json")
-        .send_string(body)
-    {
+    // 红线：ureq 部分错误会回显请求头，密钥在 finish_request/redact 里统一脱敏后才出适配层。
+    let resp = match finish_request(
+        agent
+            .post(url)
+            .header("Authorization", &format!("Bearer {}", key))
+            .header("Content-Type", "application/json")
+            .send(body),
+        key,
+    ) {
         Ok(r) => r,
-        // 红线：ureq 部分错误会回显请求头，密钥必须先脱敏再出适配层。
-        Err(ureq::Error::Status(code, resp)) => {
-            let snippet = resp.into_string().unwrap_or_default();
-            let snippet: String = snippet.chars().take(200).collect();
-            let msg = redact(format!("供应商返回 {}：{}", code, snippet), key);
-            return if retryable_status(code) { Attempt::Retry(msg) } else { Attempt::Fatal(msg) };
-        }
-        Err(other) => return Attempt::Retry(redact(format!("网络错误：{}", other), key)),
+        Err((msg, true)) => return Attempt::Retry(msg),
+        Err((msg, false)) => return Attempt::Fatal(msg),
     };
-    let text = match resp.into_string() {
+    let mut got = resp.into_body();
+    let text = match got.read_to_string() {
         Ok(t) => t,
         Err(e) => return Attempt::Retry(redact(e.to_string(), key)),
     };
@@ -375,15 +371,6 @@ fn native_call(v: &serde_json::Value) -> Option<ToolCall> {
     let id = v.get("id").and_then(|i| i.as_str()).unwrap_or_default().to_string();
     let args_json = f.get("arguments").and_then(|a| a.as_str()).unwrap_or("{}").to_string();
     Some(ToolCall { id, name, args_json })
-}
-
-/// 出站错误里的密钥一律替换掉再出适配层。
-fn redact(s: String, key: &str) -> String {
-    if key.is_empty() {
-        s
-    } else {
-        s.replace(key, "***")
-    }
 }
 
 fn real_or_demo(channel: Option<&Channel>, log: &std::sync::Arc<dyn crate::core::ports::Log + Send + Sync>, memo: &Memo) -> (BoxedChat, bool) {
