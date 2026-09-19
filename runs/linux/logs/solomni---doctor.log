@@ -1,0 +1,1 @@
+{"arch":"x86_64","externals":{"curl":"/usr/bin/curl","node":"/opt/hostedtoolcache/node/24.20.0/x64/bin/node","python":"/usr/bin/python"},"fence":{"fs":true,"net":false,"note":"Linux：Landlock（ABI 7）强制文件系统可达范围；出站网络不围栏","tree":true},"platform":"linux"}
