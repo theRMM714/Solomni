@@ -1,0 +1,12 @@
+[1/3] app.smoke.cjs
+FRONTEND-INIT-OK
+  → 通过
+[2/3] config.smoke.cjs
+config.smoke: 53/53 断言通过
+CONFIG-SMOKE-OK
+  → 通过
+[3/3] md.smoke.cjs
+MD-OK
+  → 通过
+前端冒烟：3 个全部通过（app.smoke.cjs、config.smoke.cjs、md.smoke.cjs）
+FRONTEND-SMOKE-OK
