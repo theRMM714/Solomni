@@ -1,0 +1,11 @@
+   Compiling solomni v0.1.0 (/Users/runner/work/Solomni/Solomni)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.86s
+     Running tests/macos/main.rs (target/debug/deps/macos-246cd3754e6868ea)
+
+running 2 tests
+test probes::fence::fence_denies_outside_paths_and_allows_the_given_roots ... ok
+test probes::https::https_reaches_a_public_endpoint_through_the_product_chain ... [HTTPS] ok 200 rustls https://example.com/
+ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.33s
+
