@@ -38,12 +38,33 @@ use windows_sys::Win32::System::Threading::{
 
 /// 文件对象（SetNamedSecurityInfoW / GetNamedSecurityInfoW 的对象类型）。
 const SE_FILE_OBJECT: i32 = 1;
-/// 读写删（可达范围里的根）。
-const RIGHTS_RW: u32 = 0x4000_0000 /* GENERIC_READ */ | 0x8000_0000 /* GENERIC_WRITE */ | 0x1000_0000 /* GENERIC_EXECUTE */ | 0x0001_0000 /* DELETE */ | 0x0008_0000 /* WRITE_DAC */;
-/// 只读+执行（解释器安装目录：脚本要跑就得读得到它）。
-const RIGHTS_RO: u32 = 0x4000_0000 | 0x1000_0000;
-/// 只允许按名穿过（祖先目录：不能列目录、不能读文件）。
-const RIGHTS_TRAVERSE: u32 = 0x0010_0000 /* FILE_TRAVERSE */;
+// 权限位**只用具体位**：通用位（GENERIC_READ / WRITE / EXECUTE / ALL）的常量值极易记错，写错一个给出去的
+// 就是完全不同的权限。真机上抓到过：标着 GENERIC_READ 的是 0x4000_0000（其实是 GENERIC_WRITE）、
+// 标着 GENERIC_EXECUTE 的是 0x1000_0000（其实是 GENERIC_ALL）——于是"只读"的解释器基线实际授出了全权，
+// 而"祖先只穿过"的位是 0x0010_0000（SYNCHRONIZE），根本穿不过去。
+const FILE_GENERIC_READ: u32 = 0x0012_0089;
+const FILE_GENERIC_WRITE: u32 = 0x0012_0116;
+const FILE_GENERIC_EXECUTE: u32 = 0x0012_00A0;
+const FILE_ALL_ACCESS: u32 = 0x001F_01FF;
+/// 目录里建/删子项（工具要能重写自己的产物）。
+const FILE_DELETE_CHILD: u32 = 0x0000_0040;
+const DELETE: u32 = 0x0001_0000;
+const WRITE_DAC: u32 = 0x0004_0000;
+/// 通用位：ACL 里存的可能是它们，也可能是内核展开后的具体位，比较覆盖关系时两者等价。
+const GENERIC_READ: u32 = 0x8000_0000;
+const GENERIC_WRITE: u32 = 0x4000_0000;
+const GENERIC_EXECUTE: u32 = 0x2000_0000;
+const GENERIC_ALL: u32 = 0x1000_0000;
+/// 只允许按名穿过（祖先目录：不能列目录、不能读文件）。目录上 FILE_TRAVERSE 与 FILE_EXECUTE 同为 0x20。
+const FILE_TRAVERSE: u32 = 0x0000_0020;
+
+/// 数据边界（会话目录、模块目录）→ 读写 + 删子项 + 写 DACL（撤权要用）。
+const RIGHTS_RW: u32 =
+    FILE_GENERIC_READ | FILE_GENERIC_WRITE | FILE_GENERIC_EXECUTE | FILE_DELETE_CHILD | DELETE | WRITE_DAC;
+/// 只读 + 执行（解释器安装目录：脚本要跑就得读得到它）。
+const RIGHTS_RO: u32 = FILE_GENERIC_READ | FILE_GENERIC_EXECUTE;
+/// 祖先目录只要"穿过"。
+const RIGHTS_TRAVERSE: u32 = FILE_TRAVERSE;
 
 /// 一次工具执行最多这么多进程（含 shell 与它拉起的子进程）。
 const MAX_PROCESSES: u32 = 32;
@@ -340,37 +361,45 @@ pub fn prepare_fence(
     let mut result = Ok(());
     // 这一轮真正写下去的授权（用于如实打印足迹 + 落台账，供 --fence-clean 精确回收）。
     let mut written: Vec<(String, PathBuf, u32)> = Vec::new();
-    // 基线（解释器安装目录只读+执行；它们的祖先只穿过）→ 授给 ALL APPLICATION PACKAGES：
-    // 与 agent 无关，所以"根上已有 ACE"就直接跳过，第一次之后不再重走整棵树。
+    // 基线都授给 ALL APPLICATION PACKAGES（与 agent 无关）：已有**够用**的 ACE 就跳过，第一次之后不再重走整棵树。
     let base = baseline_sid()?;
-    let mut baseline: Vec<(PathBuf, u32, bool)> = Vec::new();
-    for dir in interpreter_dirs(command) {
-        baseline.push((dir, RIGHTS_RO, true));
-    }
-    // 祖先链（按名穿过）也归基线：它只与"产品装在哪儿、解释器装在哪儿"有关，与 agent 无关。
-    // 这样每来一个新 agent 都不会再往 D:\ 与产品根上多写一条 ACE（那是无界增长）。
-    let mut walk: Vec<PathBuf> = baseline.iter().map(|(p, _, _)| p.clone()).collect();
-    walk.extend(spec.rw.iter().cloned());
-    walk.push(spec.cwd.clone());
-    for root in walk {
-        if root.as_os_str().is_empty() {
+    let interpreters = interpreter_dirs(command);
+    // 基线一：解释器安装目录（只读+执行）——**必需**：拿不到它，容器里连解释器都起不来。
+    for dir in interpreters.iter().cloned() {
+        if has_ace_for(base, &dir, RIGHTS_RO) {
             continue;
         }
-        for a in ancestors(&root) {
-            baseline.push((a, RIGHTS_TRAVERSE, false));
-        }
-    }
-    for (path, rights, recursive) in baseline {
-        if has_ace_for(base, &path) {
-            continue;
-        }
-        if let Err(e) = grant_one(base, &path, rights, recursive) {
-            eprintln!("[围栏] 基线授权未完成：{}", e);
+        if let Err(e) = grant_one(base, &dir, RIGHTS_RO, true) {
+            eprintln!("[围栏] 解释器目录授权未完成（{}）：{}", dir.display(), e);
             if result.is_ok() {
                 result = Err(e);
             }
         } else {
-            written.push((String::from("S-1-15-2-1"), path, rights));
+            written.push((String::from("S-1-15-2-1"), dir, RIGHTS_RO));
+        }
+    }
+    // 基线二：祖先链的"只按名穿过"——**尽力而为**：系统默认 ACL 通常已经够穿过去，而产品未必拿得到这些
+    // 目录的写 DACL 权限（真机上 C:\ 归管理员，非提权进程授不上）。这一条失败不该把整次执行判成"装不上围栏"。
+    let mut walk: Vec<PathBuf> = interpreters;
+    walk.extend(spec.rw.iter().cloned());
+    walk.push(spec.cwd.clone());
+    let mut ancestor_paths: Vec<PathBuf> = Vec::new();
+    for root in walk {
+        if root.as_os_str().is_empty() {
+            continue;
+        }
+        ancestor_paths.extend(ancestors(&root));
+    }
+    ancestor_paths.sort();
+    ancestor_paths.dedup();
+    for path in ancestor_paths {
+        if has_ace_for(base, &path, RIGHTS_TRAVERSE) {
+            continue;
+        }
+        if let Err(e) = grant_one(base, &path, RIGHTS_TRAVERSE, false) {
+            eprintln!("[围栏] 祖先目录未能放行（{}）：{}", path.display(), e);
+        } else {
+            written.push((String::from("S-1-15-2-1"), path, RIGHTS_TRAVERSE));
         }
     }
     free_sid(base);
@@ -579,9 +608,34 @@ fn baseline_sid() -> Result<PSID, String> {
     Ok(sid)
 }
 
-/// 该对象上是不是已经有给这个 SID 的允许 ACE。
-/// 用途：基线授权只以递归方式写过一次，所以**根上已有 ACE 就跳过整棵树**——否则每来一个 agent 都要重走几万文件。
-fn has_ace_for(sid: PSID, path: &Path) -> bool {
+/// 把通用位展开成具体位：ACL 里存的是哪一套，覆盖关系比较都要等价成立。
+fn expand_generics(mask: u32) -> u32 {
+    let mut out = mask;
+    if mask & GENERIC_READ != 0 {
+        out |= FILE_GENERIC_READ;
+    }
+    if mask & GENERIC_WRITE != 0 {
+        out |= FILE_GENERIC_WRITE;
+    }
+    if mask & GENERIC_EXECUTE != 0 {
+        out |= FILE_GENERIC_EXECUTE;
+    }
+    if mask & GENERIC_ALL != 0 {
+        out |= FILE_ALL_ACCESS;
+    }
+    out
+}
+
+/// 已有 ACE 的权限位是不是覆盖得住我们需要的权限位。
+fn rights_covered(mask: u32, rights: u32) -> bool {
+    expand_generics(rights) & !expand_generics(mask) == 0
+}
+
+/// 该对象上是不是已经有给这个 SID 的允许 ACE，**且权限位覆盖得住**。
+/// 用途：基线授权只以递归方式写过一次，所以根上已有"够用"的 ACE 就跳过整棵树——否则每来一个 agent 都要重走几万文件。
+/// 只看"有没有该 SID 的 ACE"不够：真机上解释器目录继承了只有 SYNCHRONIZE 的 ALL APPLICATION PACKAGES ACE，
+/// 基线因此被整条跳过，容器里连解释器都读不到（工具报 python is not recognized）。
+fn has_ace_for(sid: PSID, path: &Path, rights: u32) -> bool {
     const ACCESS_ALLOWED_ACE_TYPE: u8 = 0;
     const ACL_SIZE_INFORMATION_CLASS: i32 = 2;
     let mut dacl: *mut ACL = std::ptr::null_mut();
@@ -621,6 +675,15 @@ fn has_ace_for(sid: PSID, path: &Path) -> bool {
             let base = ace as *const u8;
             // ACCESS_ALLOWED_ACE：AceType(1) + AceFlags(1) + AceSize(2) + Mask(4) → SID 从第 8 字节开始。
             if unsafe { *base } != ACCESS_ALLOWED_ACE_TYPE {
+                continue;
+            }
+            // 只继承给子项的 ACE 不作用于本对象，不算数。
+            const INHERIT_ONLY_ACE: u8 = 0x08;
+            if unsafe { *base.add(1) } & INHERIT_ONLY_ACE != 0 {
+                continue;
+            }
+            let mask = unsafe { std::ptr::read_unaligned(base.add(4) as *const u32) };
+            if !rights_covered(mask, rights) {
                 continue;
             }
             if unsafe { EqualSid(base.add(8) as PSID, sid) } != 0 {
@@ -757,6 +820,19 @@ mod tests {
     use super::*;
     use std::sync::Mutex;
 
+    /// 已有 ACE 的权限位必须**覆盖得住**才算数：只看"SID 在场"会让基线被一个只有 SYNCHRONIZE 的继承 ACE
+    /// 整条挡掉（真机上解释器目录就是这样，容器里连解释器都读不到）；通用位与展开后的具体位要等价看待。
+    #[test]
+    fn existing_ace_must_cover_the_rights_we_need() {
+        assert!(!rights_covered(0x0010_0000 /* SYNCHRONIZE */, RIGHTS_RO), "只有 SYNCHRONIZE 不算覆盖");
+        assert!(!rights_covered(FILE_GENERIC_READ, RIGHTS_RO), "只有读不算覆盖读+执行");
+        assert!(rights_covered(FILE_GENERIC_READ | FILE_GENERIC_EXECUTE, RIGHTS_RO), "读+执行刚够");
+        assert!(rights_covered(GENERIC_READ | GENERIC_EXECUTE, RIGHTS_RO), "通用位与具体位等价");
+        assert!(rights_covered(GENERIC_ALL, RIGHTS_RW), "GENERIC_ALL 覆盖一切");
+        assert!(!rights_covered(FILE_GENERIC_READ | FILE_GENERIC_EXECUTE, RIGHTS_RW), "只读+执行不覆盖读写");
+        assert!(rights_covered(FILE_ALL_ACCESS, RIGHTS_RW));
+    }
+
     /// 授权这条路的真机验收：真去改一个目录的 DACL。
     /// 本机环境不允许改 ACL 时（例如被沙箱挡住）如实打印原因并跳过——不静默当作通过。
     #[test]
@@ -806,11 +882,11 @@ mod tests {
         let prepared = Mutex::new(std::collections::BTreeSet::new());
         prepare_fence(&spec, "cmd", &prepared, &home).expect("授权应当成功");
         let sid = container_sid(&container_name(&spec)).expect("派生容器 SID");
-        assert!(has_ace_for(sid, &dir), "授权后根上应当有容器 SID 的 ACE");
+        assert!(has_ace_for(sid, &dir, RIGHTS_RW), "授权后根上应当有容器 SID 的 ACE");
         free_sid(sid);
         release_fence_home(&spec, Some(&home)).expect("撤权应当成功");
         let sid = container_sid(&container_name(&spec)).expect("派生容器 SID");
-        let still = has_ace_for(sid, &dir);
+        let still = has_ace_for(sid, &dir, RIGHTS_RW);
         free_sid(sid);
         let _ = std::fs::remove_dir_all(&dir);
         assert!(!still, "撤权后根上不该再有该容器 SID 的 ACE");
