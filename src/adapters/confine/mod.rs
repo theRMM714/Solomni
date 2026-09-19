@@ -213,11 +213,24 @@ pub(crate) fn ancestors_of(path: &std::path::Path) -> Vec<std::path::PathBuf> {
     out
 }
 
+/// 交给 cmd 解释前，把**程序名**里的正斜杠换成反斜杠。
+/// cmd 只把程序名里的 `\` 当路径分隔符：`build/indexer build` 会被它读成「命令 build + 开关 /indexer」，
+/// 报 `'build' is not recognized`。程序名之后的参数原样保留（`node tools/report.js` 这类命令靠参数里的正斜杠）。
+/// 程序名 = 第一个空白前的字段；模块作者若用引号包住程序名，只改引号内那一段。
+#[cfg(windows)]
+pub(crate) fn windows_program_separators(command: &str) -> String {
+    let end = match command.strip_prefix('"') {
+        Some(rest) => rest.find('"').map(|i| i + 2).unwrap_or(command.len()),
+        None => command.find(char::is_whitespace).unwrap_or(command.len()),
+    };
+    command[..end].replace('/', "\\") + &command[end..]
+}
+
 /// 工具进程的启动命令：命令行由**模块作者**写在 module.yaml 里，交系统 shell 解释（与既有语义一致）。
 #[cfg(windows)]
 pub fn shell_command(command: &str) -> Command {
     let mut c = Command::new("cmd");
-    c.arg("/C").arg(command);
+    c.arg("/C").arg(windows_program_separators(command));
     c
 }
 
@@ -271,6 +284,20 @@ mod tests {
         let scripts = root.join("home").join("u").join("env").join("Scripts");
         assert_eq!(install_dir(&scripts), root.join("home").join("u").join("env"), "Scripts 布局同样上溯");
         assert_eq!(install_dir(&root.join("usr").join("local").join("bin")), root.join("usr").join("local"), "usr/local/bin 上溯到 usr/local");
+    }
+
+    /// cmd 只认程序名里的反斜杠：`build/indexer build` 会被读成命令 build + 开关 /indexer（真机上模块工具因此跑不起来）。
+    /// 参数里的正斜杠必须原样保留——`node tools/report.js` 正是靠它。
+    #[cfg(windows)]
+    #[test]
+    fn windows_program_separators_rewrites_only_the_program_name() {
+        assert_eq!(windows_program_separators("build/indexer build"), "build\\indexer build");
+        assert_eq!(windows_program_separators("node tools/report.js"), "node tools/report.js");
+        assert_eq!(windows_program_separators("python tools/scan.py extra"), "python tools/scan.py extra");
+        assert_eq!(windows_program_separators(".tools/mingw64/bin/g++.exe -O2"), ".tools\\mingw64\\bin\\g++.exe -O2");
+        assert_eq!(windows_program_separators("build\\indexer build"), "build\\indexer build");
+        assert_eq!(windows_program_separators("\"a/b\" rest"), "\"a\\b\" rest");
+        assert_eq!(windows_program_separators("plain"), "plain");
     }
 
     /// 命令里的解释器要按 PATH 解析出真实路径，并给出它的安装目录；

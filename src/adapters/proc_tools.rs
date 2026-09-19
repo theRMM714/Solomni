@@ -332,6 +332,39 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// 命令里的**程序名**写成带正斜杠的相对路径也必须跑得起来：Windows 的 cmd 不认程序名里的 `/`
+    /// （`build/indexer build` 会被它读成命令 `build` + 开关 `/indexer`），守门进程要按平台把程序名里的 `/` 转成 `\`。
+    /// 参数里的正斜杠不受影响——`node tools/report.js` 这类命令靠的就是它。
+    #[test]
+    fn real_tool_process_runs_a_relative_program_path() {
+        let Some(exe) = built_exe() else {
+            eprintln!("[探针] 未找到已构建的 solomni 可执行文件（先 cargo build），跳过相对程序名契约");
+            return;
+        };
+        let dir = crate::contract_tests::scratch("proc-tools-relative-program");
+        let sub = dir.join("sub");
+        std::fs::create_dir_all(&sub).expect("建子目录");
+        let (name, body, command) = if cfg!(windows) {
+            ("probe.cmd", "@echo off\r\necho PROBE-OK\r\n", "sub/probe.cmd")
+        } else {
+            ("probe.sh", "echo PROBE-OK\n", "sub/probe.sh")
+        };
+        let script = sub.join(name);
+        std::fs::write(&script, body).expect("写脚本");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perm = std::fs::metadata(&script).expect("读权限位").permissions();
+            perm.set_mode(0o755);
+            std::fs::set_permissions(&script, perm).expect("加执行位");
+        }
+        let tools = real_runner(exe, &dir, 60);
+        let out = tools.run(&spec_for(&dir), command, "{}");
+        assert!(out.ok, "带正斜杠的相对程序名必须能跑起来：{}", out.output);
+        assert!(out.output.contains("PROBE-OK"), "工具输出要如实回来：{}", out.output);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// 超时：连根杀掉整棵树并如实回执失败（不静默、不无限等它自然结束）。
     #[test]
     fn real_tool_process_is_killed_on_timeout_and_reported() {

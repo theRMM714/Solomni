@@ -717,7 +717,7 @@ fn run_in_container(sid: PSID, spec: &FenceSpec, command: &str) -> Result<i32, S
     // 命令交系统 shell 解释（与既有语义一致：命令行来自 module.yaml）。
     // 镜像路径显式给出：容器里用 lpApplicationName 解析更稳（不给路径时搜索偶发失败）。
     let shell_exe = system_shell();
-    let shell = format!("\"{}\" /C {}", shell_exe.display(), command);
+    let shell = format!("\"{}\" /C {}", shell_exe.display(), super::windows_program_separators(command));
     let mut cmdline: Vec<u16> = std::ffi::OsStr::new(&shell).encode_wide().chain(std::iter::once(0)).collect();
     let app = wide(&shell_exe);
     let cwd = wide(&spec.cwd);
