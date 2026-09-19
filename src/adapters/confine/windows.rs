@@ -406,7 +406,10 @@ pub fn prepare_fence(
     ancestor_paths.sort();
     ancestor_paths.dedup();
     for path in ancestor_paths {
-        if has_ace_for(base, &path, RIGHTS_TRAVERSE) {
+        // 祖先这一趟只授 FILE_TRAVERSE，所以**只按"SID 在场"跳过**（`has_ace_any`）：改写 C:\、C:\Users
+        // 这种巨型目录的 DACL，Windows 会顺着整棵树重算继承，真机实测每个目录 ~90 s（CI 上两条 ACL 契约测试
+        // 因此各花 95 s）。而"读不到解释器"那类问题出在**读+执行**上，由上面解释器目录那一趟用权限位判定管住。
+        if has_ace_any(base, &path) {
             continue;
         }
         if let Err(e) = grant_one(base, &path, RIGHTS_TRAVERSE, false, false) {
@@ -681,7 +684,15 @@ fn rights_covered(mask: u32, rights: u32) -> bool {
     expand_generics(rights) & !expand_generics(mask) == 0
 }
 
-/// 该对象上是不是已经有给这个 SID 的允许 ACE，**且权限位覆盖得住**。
+/// 该对象上是不是已经有给这个 SID 的允许 ACE（不看权限位）。
+/// 用途：**只授"穿过"的祖先目录**——这类写入会牵动整棵子树的继承重算，巨型目录上代价极高，
+/// 而祖先只要"按名能走到"就够了，系统默认 ACL 通常已经给到（真机上 C:\ 与 C:\Users 都有 ALL APPLICATION PACKAGES 的 ACE）。
+/// 需要"读得到内容"的地方（解释器目录）不能用它，必须用下面的权限位判定。
+fn has_ace_any(sid: PSID, path: &Path) -> bool {
+    has_ace_for(sid, path, 0)
+}
+
+/// 该对象上是不是已经有给这个 SID 的允许 ACE，**且权限位覆盖得住**（`rights` = 0 时退化成"只要在场"）。
 /// 用途：基线授权只以递归方式写过一次，所以根上已有"够用"的 ACE 就跳过整棵树——否则每来一个 agent 都要重走几万文件。
 /// 只看"有没有该 SID 的 ACE"不够：真机上解释器目录继承了只有 SYNCHRONIZE 的 ALL APPLICATION PACKAGES ACE，
 /// 基线因此被整条跳过，容器里连解释器都读不到（工具报 python is not recognized）。
