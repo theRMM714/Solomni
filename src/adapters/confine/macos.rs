@@ -216,7 +216,7 @@ fn profile_text(spec: &FenceSpec, command: &str) -> String {
     // 祖先目录只放行"读元数据"：路径解析要能按名穿过它们（与 Windows 的 FILE_TRAVERSE 对称），
     // 但不能读内容——少了这条，被放行目录里的命令行都跑不起来（连路径都解析不了）。
     let mut metas: Vec<String> = Vec::new();
-    for p in ro_paths.iter().cloned().chain(rw_paths.into_iter()) {
+    for p in ro_paths.iter().cloned().chain(rw_paths) {
         let mut cur = p.as_str();
         while let Some(i) = cur.rfind('/') {
             if i == 0 {

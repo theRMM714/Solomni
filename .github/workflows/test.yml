@@ -1,6 +1,6 @@
 # 三平台测试：GitHub 托管 runner 是一次性机器，「会改本机状态」的真机围栏测试只在这里开。
 # 本地默认安全模式（见 TESTING.md）：会改本机状态的测试要显式 --fence-live。
-# 无论成败都把报告与日志留两份：产物（供人下载）与 ci-report 分支（供没有凭据的会话直接读）。
+# 无论成败都把报告与日志留两份：产物（供人下载）与 ci-report 分支（供没有凭据的会话直接读）。测试 job 仅需读取权限；只有 publish-report job 可写 ci-report。
 # 成功 run 的 job 日志要凭据才读得到、且没有产物，所以"绿了"本身必须自带现场（steps/envSkips/围栏能力）。
 name: 测试
 
@@ -9,7 +9,7 @@ on:
   pull_request:
 
 permissions:
-  contents: write # 仅用于把报告推到 ci-report 滚动分支（无论成败都推）
+  contents: read # 默认只读；仅 publish-report job 获得 ci-report 写权限。
 
 jobs:
   test:
@@ -19,11 +19,12 @@ jobs:
         os: [windows-latest, ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      # 最新稳定线：Node 的 lts/* = 当前 LTS（生产稳定线），随 LTS 迁移自动跟进，不用手工改版本号。
+      - uses: actions/setup-node@v7
         with:
-          node-version: "20"
+          node-version: "lts/*"
 
       - name: 准备 Rust（runner 自带工具链，不装项目外的任何东西）
         run: |
@@ -46,7 +47,7 @@ jobs:
 
       - name: 留产物（报告与日志，供人下载；无论成败）
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: test-report-${{ matrix.os }}
           path: |
@@ -54,9 +55,70 @@ jobs:
             target/test-logs/
           if-no-files-found: ignore
 
-      - name: 发布到 ci-report 分支（供没有凭据的会话读取；无论成败）
-        if: always()
+  publish-report:
+    name: 汇总并发布 ci-report
+    needs: test
+    permissions:
+      contents: write
+    if: ${{ always() && needs.test.result != 'cancelled' && github.event_name == 'push' }}
+    runs-on: ubuntu-latest
+    concurrency:
+      group: ci-report-publish
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: 下载三个测试 job 的报告产物
+        uses: actions/download-artifact@v8
+        with:
+          pattern: test-report-*
+          path: ci-artifacts
+          merge-multiple: false
+
+      - name: 先把 ci-report 重建为空分支
         env:
-          # Actions 不会把 token 自动放进环境，必须显式注入；工作流级 permissions 已给 contents: write。
+          REPORT_BRANCH: ci-report
+        run: |
+          source_sha="${GITHUB_SHA}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # artifacts 已完整下载后才清理并强推 ci-report；下载失败不会留下空报告分支。
+          # git rm 只删除已跟踪源码，保留未跟踪的 ci-artifacts；不要使用 git clean。
+          git checkout --orphan ci-report-clean
+          git rm -rf . >/dev/null 2>&1 || true
+          git commit --allow-empty -m "重建 ci-report 报告树（run ${GITHUB_RUN_NUMBER}）"
+          git push origin "HEAD:refs/heads/${REPORT_BRANCH}" --force
+
+      - name: 恢复源码工作树
+        run: git checkout --detach "${GITHUB_SHA}"
+
+      - name: 逐平台写入干净的报告分支
+        env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: node tests/ci-publish.mjs
+        run: |
+          set -euo pipefail
+
+          # ci-publish.mjs 负责报告内容、失败证据和 Contents API 写入；这里串行调用，
+          # 避免三个平台同时覆盖 ci-report，并使前面的空分支重建不会留下旧文件。
+          for platform in windows-latest ubuntu-latest macos-latest; do
+            rm -rf target
+            mkdir -p target/test-logs
+
+            artifact_target="ci-artifacts/test-report-${platform}"
+            if [ -d "${artifact_target}" ]; then
+              cp -R "${artifact_target}/." target/
+            fi
+
+            case "${platform}" in
+              windows-latest) runner_os="Windows" ;;
+              ubuntu-latest) runner_os="Linux" ;;
+              macos-latest) runner_os="macOS" ;;
+              *) echo "未知平台：${platform}" >&2; exit 1 ;;
+            esac
+
+            echo "发布 ${platform} 的报告"
+            RUNNER_OS="${runner_os}" node tests/ci-publish.mjs
+          done

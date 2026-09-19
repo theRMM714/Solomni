@@ -1,6 +1,7 @@
 // e2e 驱动（L4，由 orchestrator.js 调起）：隔离根内跑，绝不动真实 .home/ 与 session/。
 // 覆盖：agent 登记处 → 推荐复用 → 单 agent（1 个 agent 带多模块）+ 内置 write 落私沙箱
-//       → 协作（非代拟）跑完交付 → 代拟（复用+组装）确认后名单写回 meta 并建出沙箱。
+//       → 协作（非代拟）跑完交付 → 代拟（复用+组装）确认后名单写回 meta 并建出沙箱
+//       → 外部工具 cwd / 绝对路径 / 自由格式补丁 / 正文+信封 / 原生多调用（协议形状由假供应商核对）。
 const BASE = process.env.E2E_BASE || 'http://127.0.0.1:3099';
 const fs = require('fs');
 const path = require('path');
@@ -24,6 +25,15 @@ function assert(cond, label, extra) {
   console.log((cond ? 'PASS ' : 'FAIL ') + label + (cond || extra === undefined ? '' : ' :: ' + extra));
 }
 const dir = (name) => path.join(ROOT, 'session', name);
+/** 假供应商那一侧看到的最后一条请求（它记下了消息形状）：原生通道的协议形状只能在这里验。 */
+async function mockSeen() {
+  try {
+    const r = await fetch('http://127.0.0.1:8397/__seen');
+    return await r.json();
+  } catch {
+    return null;
+  }
+}
 /** 该工作的转录行（从落盘流水取，已应用回档截断）。 */
 async function lines(sid) {
   const r = await api('GET', '/api/history/' + encodeURIComponent(sid));
@@ -196,6 +206,31 @@ async function lines(sid) {
   assert(th.tool && th.tool.module === 'toolbox' && th.tool.name === 'read_txt' && th.tool.ok === true, '模块的外部工具用真实绝对路径读到了用户投喂的文件', JSON.stringify(th.tool || {}).slice(0, 260));
   assert(String((th.tool || {}).output || '').includes('绝对路径能读到'), '工具真的读到了内容（cwd 与路径都对）', String((th.tool || {}).output).slice(0, 200));
 
+  // 自由格式补丁：信封 + 之后原样跟补丁正文（不转义）——这条新路径必须在真实二进制上通
+  const name1p = 'e2e-patch-' + Date.now();
+  const c1p = await api('POST', '/api/sessions', {
+    name: name1p, mode: 'single',
+    agents: [{ name: '补丁手', transient: true, modules: ['research'], model: 'm1' }],
+  });
+  assert(c1p.status === 200, '建「补丁」工作', c1p.text.slice(0, 200));
+  const s1p = await api('POST', '/api/sessions/' + encodeURIComponent(name1p) + '/say', { text: '打补丁' });
+  assert(s1p.status === 200, '补丁发言', s1p.text.slice(0, 200));
+  const lpatch = await lines(name1p);
+  const tpatch = lpatch.filter((x) => x.tool).pop() || {};
+  assert(tpatch.tool && tpatch.tool.name === 'patch' && tpatch.tool.ok === true, '自由格式补丁落成一条成功的工具行', JSON.stringify(tpatch.tool || {}).slice(0, 260));
+  const patched = path.join(dir(name1p), '补丁手', 'mock-patch.txt');
+  assert(fs.existsSync(patched), '补丁真的写下了文件');
+  assert(
+    fs.readFileSync(patched, 'utf8') === '补丁第一行\n补丁第二行「引号、换行、冒号：都不用转义」',
+    '补丁内容原样落盘（引号/换行/中文都没被转义）',
+    JSON.stringify(fs.readFileSync(patched, 'utf8').slice(0, 200)),
+  );
+  assert(
+    lpatch.every((x) => !String(x.line || '').includes('*** Add File') && !String(x.line || '').includes('补丁已经给出')),
+    '补丁正文与它后面的散话都没有上屏（它是工具输入，不是发言）',
+    JSON.stringify(lpatch.map((x) => String(x.line || '').slice(0, 40))),
+  );
+
   // 协作里引用某个 agent 的私沙：如实说明只有那个 agent 能读（speaker = None）
   const name1e = 'e2e-refcollab-' + Date.now();
   const c1e = await api('POST', '/api/sessions', {
@@ -256,6 +291,50 @@ async function lines(sid) {
   assert(begun3.status === 200, '代拟名单后开始讨论', begun3.text.slice(0, 200));
   const ev3 = JSON.stringify((begun3.json && begun3.json.events) || []);
   assert(ev3.includes('单兵'), '代拟出来的 agent 真的在发言', ev3.slice(0, 240));
+
+  // 原生工具调用（真实二进制 + 真 HTTP）：先实测这条通道支持（探测把 tools 写回 native），
+  // 再跑一次"一次回复两个调用"，并核对**发给供应商的历史就是协议形状**。
+  // 放在最后：把 m1 判成 native 之后，前面那些信封场景的预期就不再成立。
+  const probe = await api('POST', '/api/models/m1/probe');
+  assert(probe.status === 200 && probe.json && probe.json.outcome === 'supported', '探针判这条通道支持原生工具调用', probe.text.slice(0, 200));
+  assert(probe.json && probe.json.mode === 'native', '探测结论写回登记处（mode=native）', JSON.stringify(probe.json));
+  // 关流式：这条断言要看"最终那一条请求的消息形状"，非流式最好断言（流式分片的形状由 T2 契约测试盯）。
+  assert((await api('POST', '/api/settings', { streaming: false })).status === 200, '关流式（本场景用）');
+  const name1n = 'e2e-native-' + Date.now();
+  const c1n = await api('POST', '/api/sessions', {
+    name: name1n, mode: 'single',
+    agents: [{ name: '多调手', transient: true, modules: ['summarizer'], model: 'm1' }],
+  });
+  assert(c1n.status === 200, '建「原生多调用」工作', c1n.text.slice(0, 200));
+  const s1n = await api('POST', '/api/sessions/' + encodeURIComponent(name1n) + '/say', { text: '原生多调用' });
+  assert(s1n.status === 200, '原生多调用发言', s1n.text.slice(0, 200));
+  const ln = await lines(name1n);
+  const toolsN = ln.filter((x) => x.tool);
+  assert(toolsN.length === 2, '一次回复里的两个调用各成一条工具行', JSON.stringify(toolsN.map((x) => x.tool && x.tool.name)));
+  assert(
+    toolsN[0] && toolsN[0].tool.call_id === 'call_a' && toolsN[1] && toolsN[1].tool.call_id === 'call_b',
+    '工具行记下供应商给的调用 id',
+    JSON.stringify(toolsN.map((x) => x.tool && x.tool.call_id)),
+  );
+  assert(
+    toolsN[0] && toolsN[1] && toolsN[0].tool.reply === toolsN[1].tool.reply,
+    '同一次回复的工具行同号（回档按它原子截断）',
+    JSON.stringify(toolsN.map((x) => x.tool && x.tool.reply)),
+  );
+  assert(toolsN.every((x) => x.tool.ok === true), '两个调用都真的执行了', JSON.stringify(toolsN.map((x) => x.tool && x.tool.ok)));
+  assert(
+    fs.existsSync(path.join(dir(name1n), '多调手', 'native-a.txt')) && fs.existsSync(path.join(dir(name1n), '多调手', 'native-b.txt')),
+    '两个调用各写下一个文件（顺序内的两个都真的跑了）',
+  );
+  assert(ln.every((x) => !String(x.line || '').includes('"type"')), '原生通道的转录里没有信封 JSON', JSON.stringify(ln.map((x) => String(x.line || '').slice(0, 40))));
+  const seen = await mockSeen();
+  assert(
+    seen && seen.assistantWithCalls === 1 && seen.toolMsgs === 2,
+    '发回去的历史是协议形状（一条助手消息带 tool_calls + 两条 role=tool）',
+    JSON.stringify(seen),
+  );
+  assert(seen && String(seen.toolIds) === 'call_a,call_b', '结果消息用 tool_call_id 各回应自己的调用', JSON.stringify(seen));
+  assert((await api('POST', '/api/settings', { streaming: true })).status === 200, '恢复流式');
 
   console.log((failed ? 'E2E-FAILED failed=' + failed : 'E2E-DONE exitCode=0'));
   process.exitCode = failed ? 1 : 0;

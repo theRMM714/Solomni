@@ -58,8 +58,12 @@ cargo run                 # 工具链就绪后最直接的跑法：cargo run -- 
 
 - **首次运行不需要手工准备环境**：启动层序会把工具链收敛在项目内（`platform/`、`.tools/`），缺 Rust 会先征求同意再装进去，并每次都交给 cargo 判断增量构建。
 - **没有配置供应商也能跑**：会使用内置假模型演示流程，并如实告知（不静默）。
-- **自测**：`node run-tests.js` 跑全部测试并给出四态汇总（通过 / 失败 / 环境跳过 / 缺口），**默认零副作用**；会改本机状态的测试（写权限项、建容器 profile）要显式 `--fence-live`，只在一次性环境（CI / VM）里开。`\.\test.bat`（PowerShell 带 `.\`）或 `./test.sh` 是薄包装。
-  分层、目录、缺口账与报告格式见 [TESTING.md](TESTING.md)。
+- **自测**：`node run-tests.js` 跑当前已接入的运行时测试并给出汇总（通过 / 失败 / 环境跳过 / 缺口），**默认零副作用**；
+  会改本机状态的测试（写权限项、建容器 profile）要显式 `--fence-live`，只在一次性环境（CI / VM）里开。
+  Windows 用 `.\test.bat`（PowerShell）、macOS/Linux 用 `./test.sh`，都是同一入口的薄包装。
+- **质量门禁（T0）已并入同一入口**：编译与结构审查是硬失败；格式、clippy、编译告警、依赖重复按 `tests/quality-baseline.yaml`
+  的存量基线比对——**超出基线即失败**，降到基线以下也会要求同步下调基线（不许悄悄恶化）。
+  存量清零是长期目标，记在 `tests/gaps.yaml`。分层、目录、缺口账与报告格式见 [TESTING.md](TESTING.md)。
 
 ## 它不是什么 · What It Is Not
 
@@ -72,9 +76,12 @@ cargo run                 # 工具链就绪后最直接的跑法：cargo run -- 
 | 文档 | 讲什么 | 给谁看 |
 |---|---|---|
 | [PHILOSOPHY.md](PHILOSOPHY.md) | 理念与不变量（两套，互不混同）：终极目标、角色、核心理念、不可违反的判据 | 想懂"为什么这么设计"的人 |
-| [ARCHITECTURE.md](ARCHITECTURE.md) | 架构与开发规则：分层与依赖方向、端口、组合根、日志、提示词册、落盘契约 | 改代码的人 |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | 架构与开发规则：分层与依赖方向、端口、模块地图、入站契约与路由目录、日志、提示词册、落盘契约 | 改代码的人 |
 | [PRODUCT.md](PRODUCT.md) | 产品与用户旅程：编排平面、agent、落盘与沙箱、运行流程、转录中心 | 用产品的人 |
-| [MODULE_SPEC.md](MODULE_SPEC.md) | 模块开发契约：打包格式、发言信封、回报与验收、工具与路径模型 | 写模块的人 |
+| [MODULE_SPEC.md](MODULE_SPEC.md) | 模块开发契约：打包格式、发言信封、回报与验收、工具与路径模型、测试交付 | 写模块的人 |
+| [RUNTIME_SPEC.md](RUNTIME_SPEC.md) | 运行包契约：`package.yaml` 字段、两种 kind、能力名、校验与拒收、与执行档位的关系 | 做运行包的人 |
+| [REGISTRY_SPEC.md](REGISTRY_SPEC.md) | 登记处契约：`providers.yaml` / `models.yaml` / `agents.yaml` / `settings.yaml` 的字段与安全边界 | 管理通道与模型的人 |
+| [TESTING.md](TESTING.md) | 测试架构：T0-T5 层级、测试替身、端口契约矩阵、质量门禁、缺口账与执行入口 | 写测试与验收的人 |
 | [AGENTS.md](AGENTS.md) | 仓库协作规则：核心约束、代码规范、路径规范、BUG 修复规则 | 协作者与 AI |
 
 ## 结语 · Closing

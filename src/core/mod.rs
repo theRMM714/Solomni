@@ -3,6 +3,7 @@
 //! 装配（new 适配器）只发生在 main 组合根。前端只见 Core 门面、会话句柄与 SessionEvent 流。
 
 pub mod agents;
+pub mod api;
 pub mod collab;
 pub mod collab_state;
 pub mod engine;
@@ -13,10 +14,12 @@ pub mod fence;
 pub mod history;
 pub mod module;
 pub mod packages;
+pub mod patch;
 pub mod ports;
 pub mod prompt;
 pub mod providers;
 pub mod refs;
+pub mod schema;
 pub mod session;
 pub mod systool;
 pub mod workspace;
@@ -221,6 +224,8 @@ pub struct Core {
     tools: Arc<dyn ToolRunner + Send + Sync>,
     /// 内置文件工具读写端口（策略在 core：寻址与越界校验）。
     io: Arc<dyn SysIo + Send + Sync>,
+    /// 信封修复端口（手写信封不合法时的无歧义补救；默认真现在 adapters，可整体替换）。
+    repair: Arc<dyn ports::EnvelopeRepair + Send + Sync>,
     log: Arc<dyn crate::core::ports::Log + Send + Sync>,
     settings: Settings,
     prompts: Prompts,
@@ -240,6 +245,7 @@ impl Core {
         catalog: Arc<dyn ModelCatalog + Send + Sync>,
         tools: Arc<dyn ToolRunner + Send + Sync>,
         io: Arc<dyn SysIo + Send + Sync>,
+        repair: Arc<dyn ports::EnvelopeRepair + Send + Sync>,
         prompt_source: Box<dyn PromptSource>,
         log: Arc<dyn crate::core::ports::Log + Send + Sync>,
     ) -> Result<Core, String> {
@@ -247,12 +253,17 @@ impl Core {
         let outcome = (|| -> Result<Core, String> {
             let settings = store.load()?;
             let prompts = prompt_source.load()?;
-            Ok(Core { store, history, workspace, source, packages, fence, gateway, catalog, tools, io, log: log_for_core, settings, prompts, sessions: HashMap::new() })
+            Ok(Core { store, history, workspace, source, packages, fence, gateway, catalog, tools, io, repair, log: log_for_core, settings, prompts, sessions: HashMap::new() })
         })();
         if let Err(e) = &outcome {
             log.error("core::new", &format!("装配失败：{}", e)); // 仅错误时借用，不与闭包 move 冲突
         }
         outcome
+    }
+
+    /// 日志端口句柄：入站手柄（core::api）与组合根共用同一份事实记录。
+    pub fn log_handle(&self) -> Arc<dyn crate::core::ports::Log + Send + Sync> {
+        Arc::clone(&self.log)
     }
 
     /// 清单即事实：每次调用重扫（策略在 core，机制在 ModuleSource）。
@@ -421,11 +432,6 @@ impl Core {
         self.settings.provider_views()
     }
 
-    /// CLI 展示行：供应商（不含密钥）。
-    pub fn provider_lines(&self) -> Vec<String> {
-        self.settings.provider_lines()
-    }
-
     /// 新建/更新供应商。更新时 api_key 留空 = 保留原密钥（界面从不回显密钥）。
     pub fn provider_upsert(&mut self, id: &str, base_url: &str, api_key: &str) -> Result<(), String> {
         if id.is_empty() || base_url.is_empty() {
@@ -442,7 +448,7 @@ impl Core {
         };
         self.settings.providers.insert(
             id.to_string(),
-            providers::Provider { kind: "llm".to_string(), base_url: base_url.to_string(), api_key: key },
+            providers::Provider { base_url: base_url.to_string(), api_key: key },
         );
         self.save_settings("core::provider_upsert")
     }
@@ -473,14 +479,41 @@ impl Core {
         self.settings.model_views()
     }
 
-    /// CLI 展示行：模型。
-    pub fn model_lines(&self) -> Vec<String> {
-        self.settings.model_lines()
-    }
-
     /// 核心 AI 默认模型 id。
     pub fn core_model(&self) -> Option<String> {
         self.settings.core.clone()
+    }
+
+    /// 实测一条通道支不支持原生工具调用，并把**结论写回登记处**（只写确定的结论）：
+    /// 支持 → `tools: native`；明确不支持 → `tools: envelope`；无法判定 → 不改，只把事实报回去。
+    /// 事实由适配层实测（两条最小请求对比），core 只做"要不要落盘"这一层策略。
+    pub fn probe_model_tools(&mut self, id: &str) -> Result<providers::ProbeOutcome, String> {
+        let channel = self.settings.resolve(id)?;
+        let outcome = self.gateway.probe_tools(&channel)?;
+        let want = match &outcome {
+            providers::ProbeOutcome::Supported { .. } => Some(providers::ToolMode::Native),
+            providers::ProbeOutcome::Unsupported { .. } => Some(providers::ToolMode::Envelope),
+            providers::ProbeOutcome::Unknown { .. } => None,
+        };
+        if let Some(mode) = want {
+            if let Some(m) = self.settings.models.get_mut(id) {
+                if m.tools != mode {
+                    m.tools = mode;
+                    self.save_settings("core::probe_model_tools")?;
+                }
+            }
+        }
+        Ok(outcome)
+    }
+
+    /// 实测一条通道的**回放形状**（工具调用历史怎么发回去才收）：解析 id → 交给适配层实测。
+    /// 只报事实、**不写登记处**——采不采用由人定（与 probe_model_tools 的写回策略不同）。
+    pub fn probe_replay_shape(
+        &self,
+        id: &str,
+    ) -> Result<providers::ReplayReport, String> {
+        let channel = self.settings.resolve(id)?;
+        self.gateway.probe_replay(&channel)
     }
 
     pub fn model_upsert(&mut self, id: &str, name: &str, api_model: &str, provider: &str, note: &str) -> Result<(), String> {
@@ -490,6 +523,9 @@ impl Core {
         if !self.settings.providers.contains_key(provider) {
             return Err(format!("无此供应商：{}", provider));
         }
+        // 工具调用形态：编辑时**保留原值**（登记表单暂不带这个字段，不能因为没带就重置成缺省），
+        // 新建缺省 envelope（任何供应商都能用的手写信封）。
+        let tools = self.settings.models.get(id).map(|m| m.tools).unwrap_or_default();
         self.settings.models.insert(
             id.to_string(),
             providers::ModelEntry {
@@ -497,6 +533,7 @@ impl Core {
                 api_model: api_model.to_string(),
                 provider: provider.to_string(),
                 note: note.to_string(),
+                tools,
             },
         );
         self.save_settings("core::model_upsert")
@@ -738,6 +775,8 @@ impl Core {
                     self.prompts.clone(),
                     Arc::clone(&self.tools),
                     Arc::clone(&self.io),
+                    Arc::clone(&self.repair),
+                    Arc::clone(&self.log),
                     Arc::clone(&self.packages),
                     meta.exec.clone(),
                     metas.clone(),
@@ -836,6 +875,7 @@ impl Core {
                 private,
                 modules,
                 texts: self.prompts.core.tool_texts.clone(),
+                builtin_tools: self.prompts.core.builtin_tools.clone(),
             });
         }
         Ok(workspace::Sandboxes { shared: roots.shared, list })
@@ -850,15 +890,22 @@ impl Core {
         sb: &workspace::Sandbox,
         unavailable: BTreeMap<String, Vec<String>>,
         net: bool,
+        mode: providers::ToolMode,
     ) -> engine::MemberTools {
         engine::MemberTools {
+            mode,
             modules: engine::tool_table(modules),
+            observations: systool::Observations::default(),
+            repair: Arc::clone(&self.repair),
+            log: Arc::clone(&self.log),
             runner: Arc::clone(&self.tools),
             sandbox: sb.clone(),
             io: Arc::clone(&self.io),
             unavailable,
             // 围栏：可达范围 + 断网 + 环境白名单的落点，全部由该 agent 的沙箱派生（机制在 adapters）。
             fence: crate::core::fence::FenceSpec::from_sandbox(sb, net),
+            // 从零开始；按落盘转录重建时由调用方按转录里的最大值续号（见 rebuild_session）。
+            reply_seq: 0,
         }
     }
 
@@ -873,6 +920,12 @@ impl Core {
         net: bool,
     ) -> (session::AgentSession, Vec<SessionEvent>) {
         let (chat, note) = self.gateway.member_channel(channel.as_ref(), &a.name);
+        // 形态按登记处解析；没有真实通道（演示回落）只能是手写信封——演示通道不会原生调用。
+        let mode = if channel.is_some() {
+            self.settings.tool_mode_for(a.model.as_deref())
+        } else {
+            providers::ToolMode::Envelope
+        };
         self.log.info(
             "core::build_single",
             &format!(
@@ -882,8 +935,8 @@ impl Core {
                 channel.as_ref().map(|c| c.model.as_str()).unwrap_or("无（演示）")
             ),
         );
-        let system = module::agent_system(&self.prompts, &a.name, modules, &systool::guide(&self.prompts, sb));
-        let tools = self.tools_env(modules, sb, unavailable, net);
+        let system = module::agent_system(&self.prompts, &a.name, modules, &systool::guide(&self.prompts, sb), mode);
+        let tools = self.tools_env(modules, sb, unavailable, net, mode);
         let roots = crate::core::refs::RefRoots { work: sb.shared.clone(), private: Some(sb.private.clone()) };
         let s = session::AgentSession::new(
             &a.name,
@@ -984,11 +1037,13 @@ impl Core {
             ],
         );
         let (mut chat, _) = self.gateway.core_channel(Some(&channel));
-        let raw = chat.complete(
-            &[Msg::system(self.prompts.core.suggest_models.system.clone()), Msg::user(user)],
-            false,
-            &mut |_| true,
-        );
+        let raw = chat
+            .complete(
+                &[Msg::system(self.prompts.core.suggest_models.system.clone()), Msg::user(user)],
+                crate::core::ports::CompleteOpts::plain(false),
+                &mut |_| true,
+            )
+            .raw;
         let parsed = envelope::extract_json_object(&raw)
             .and_then(|obj| serde_json::from_str::<SuggestReply>(&obj).ok())
             .ok_or_else(|| format!("核心推荐失败（响应不是约定的 JSON）：{}", raw.chars().take(200).collect::<String>()))?;
@@ -1026,13 +1081,53 @@ impl Core {
 
     // ---- 会话收发（前端永不接触会话本体） ----
 
+    /// 形态**不钉在会话里**：每次生成前按登记处重新解析。
+    /// 变了 → 走现有的重建路径刷新（系统提示随之换成另一套调用约定）并给用户一句通知；没变 → 什么都不做。
+    /// 这样"用户改了登记处就重新查、没改就不管"，同时系统提示与实际协议始终一致（回放也按同一规则派生）。
+    fn refresh_tool_mode(&mut self, sid: &str) -> Result<Option<String>, String> {
+        let (meta, raw) = self.history.load(sid)?;
+        let after = truncate_events(&raw);
+        let Some(a) = meta.agents.first() else {
+            return Ok(None);
+        };
+        let channel = a
+            .model
+            .as_deref()
+            .and_then(|id| self.settings.resolve(id).ok())
+            .or_else(|| self.settings.core_channel());
+        let want = if channel.is_some() {
+            self.settings.tool_mode_for(a.model.as_deref())
+        } else {
+            providers::ToolMode::Envelope
+        };
+        let cur = match self.sessions.get(sid) {
+            // 还没装进内存的会话：交给 ensure_session 按当前形态建，这里不动
+            Some(Session::Single(s)) => s.tool_mode(),
+            Some(_) => return Ok(None),
+            None => want,
+        };
+        if cur == want {
+            return Ok(None);
+        }
+        let rebuilt = self.rebuild_session(&meta, &after)?;
+        self.sessions.insert(sid.to_string(), rebuilt);
+        Ok(Some(match want {
+            providers::ToolMode::Native => "工具调用形态已按登记处改为**原生工具调用**（本条起生效）".to_string(),
+            providers::ToolMode::Envelope => "工具调用形态已按登记处改为**手写信封**（本条起生效）".to_string(),
+        }))
+    }
+
     /// 单 agent 会话发言。
     pub fn single_say(&mut self, sid: &str, text: &str, live: &mut Live) -> Result<Vec<SessionEvent>, String> {
+        let notice = self.refresh_tool_mode(sid)?;
         let mut events = match self.sessions.get_mut(sid) {
             Some(Session::Single(s)) => s.say(text, live),
             Some(_) => return Err("该会话不是单 agent 模式".to_string()),
             None => return Err("无此会话".to_string()),
         };
+        if let Some(n) = notice {
+            events.insert(0, SessionEvent::Notice(n));
+        }
         if live.cancelled() {
             self.log.warn("core::single_say", "生成被用户中止");
         }
@@ -1193,6 +1288,8 @@ impl Core {
                 self.prompts.clone(),
                 Arc::clone(&self.tools),
                 Arc::clone(&self.io),
+                Arc::clone(&self.repair),
+                Arc::clone(&self.log),
                 Arc::clone(&self.packages),
                 meta,
                 events,
@@ -1213,13 +1310,19 @@ impl Core {
                     .for_agent(&a.name)
                     .cloned()
                     .ok_or_else(|| format!("会话 {} 缺少 agent {} 的沙箱信息", meta.name, a.name))?;
-                let guide = systool::guide(&self.prompts, &sb);
-                let system = module::agent_system(&self.prompts, &a.name, &modules, &guide);
                 let channel = a
                     .model
                     .as_deref()
                     .and_then(|id| self.settings.resolve(id).ok())
                     .or_else(|| self.settings.core_channel());
+                // 重建时同样按登记处派生形态：系统提示与实际协议必须一致（回放才与实时一致）
+                let mode = if channel.is_some() {
+                    self.settings.tool_mode_for(a.model.as_deref())
+                } else {
+                    providers::ToolMode::Envelope
+                };
+                let guide = systool::guide(&self.prompts, &sb);
+                let system = module::agent_system(&self.prompts, &a.name, &modules, &guide, mode);
                 let (chat, note) = self.gateway.member_channel(channel.as_ref(), &a.name);
                 // 先把转录行按顺序摊平：分组判断要看「下一行是不是 tool 行」。
                 let mut rows: Vec<&serde_json::Value> = Vec::new();
@@ -1233,43 +1336,68 @@ impl Core {
                 }
                 let mut history = vec![Msg::system(system)];
                 let mut marks: Vec<usize> = Vec::new();
-                for (i, l) in rows.iter().enumerate() {
+                let mut line_reply: Vec<u64> = Vec::new();
+                let texts = &self.prompts.core.tool_texts;
+                let reply_of = |v: &serde_json::Value| v.get("reply").and_then(|x| x.as_u64()).unwrap_or(0);
+                let mut i = 0usize;
+                while i < rows.len() {
+                    let l = rows[i];
                     let line = l.get("line").and_then(|x| x.as_str()).unwrap_or("");
                     if let Some(t) = line.strip_prefix("[用户] ") {
                         history.push(Msg::user(t.to_string()));
-                    } else if let Some(tool) = l.get("tool") {
-                        // tool 行：重建该轮模型原始输出 + 回注的工具结果（两个都要，否则上下文缺一块）。
-                        let field = |k: &str| tool.get(k).and_then(|x| x.as_str()).unwrap_or("");
-                        history.push(Msg::assistant(field("raw").to_string()));
-                        let module = field("module");
-                        let name = field("name");
-                        let label = if module.is_empty() { name.to_string() } else { format!("{}.{}", module, name) };
-                        let texts = &self.prompts.core.tool_texts;
-                        history.push(Msg::user(texts.render(
-                            &texts.tool_result_wrapper,
-                            &[("label", label), ("output", field("output").to_string())],
-                        )));
+                        // 用户行不属于任何回复：给它自己的行号，回档时才不会与相邻行误并成一组。
+                        line_reply.push(l.get("id").and_then(|x| x.as_u64()).unwrap_or(0));
+                        marks.push(history.len());
+                        i += 1;
+                    } else if l.get("tool").is_some() {
+                        // 【回复分组 · 改动前务必读完】**同一次回复的 tool 行连续同号**（reply 由引擎给、
+                        // 落行时写入）；整组一起翻译成消息，靠的正是这个号——不靠"相邻行猜分组"。
+                        let reply = reply_of(l.get("tool").expect("已判存在"));
+                        let mut group: Vec<&serde_json::Value> = Vec::new();
+                        while i < rows.len() && reply_of(rows[i].get("tool").unwrap_or(&serde_json::Value::Null)) == reply {
+                            group.push(rows[i]);
+                            i += 1;
+                        }
+                        // 这一回复的助手消息正文（空正文的回复不带 raw；组内取一份即可）。
+                        let raw = group
+                            .iter()
+                            .find_map(|t| t.get("tool").and_then(|x| x.get("raw")).and_then(|x| x.as_str()).filter(|s| !s.is_empty()))
+                            .unwrap_or_default();
+                        let views: Vec<crate::core::events::ToolCallView> = group
+                            .iter()
+                            .filter_map(|t| t.get("tool").cloned())
+                            .filter_map(|t| serde_json::from_value(t).ok())
+                            .collect();
+                        for m in crate::core::engine::reply_msgs(mode, raw, &views, texts) {
+                            history.push(m);
+                        }
+                        for _ in 0..group.len() {
+                            line_reply.push(reply);
+                            marks.push(history.len());
+                        }
                     } else {
-                        // 【分组规则 · 改动前务必读完】工具轮可能产出「文本行 + tool 行」两行，
-                        // 但这一轮在历史里只有一条 assistant(raw)（raw 含正文+信封）——由 tool 行统一推进。
-                        // 所以：**若某文本行紧跟一条 tool 行（同一轮），这里不推 assistant**；
-                        // 只有「后面不是 tool 行」的文本行才推 assistant(该行文本)。
-                        // 否则重建出来的上下文会凭空多一条 assistant，与实时历史不一致。
+                        // 文本行：它紧跟 tool 行时属于同一次回复（历史由那组 tool 行统一推进，这里不推）；
+                        // 否则这一行自己就是一条回复，推 assistant(该行文本)。
                         let next_is_tool = rows.get(i + 1).map(|n| n.get("tool").is_some()).unwrap_or(false);
                         if !next_is_tool {
                             let text = line.split_once("] ").map(|(_, t)| t).unwrap_or(line).to_string();
                             history.push(Msg::assistant(text));
                         }
+                        line_reply.push(reply_of(l));
+                        marks.push(history.len());
+                        i += 1;
                     }
-                    marks.push(history.len());
                 }
                 let unavailable = self.unavailable_modules(&meta.exec, &modules);
-                let tools = self.tools_env(&modules, &sb, unavailable, meta.exec.net);
+                let mut tools = self.tools_env(&modules, &sb, unavailable, meta.exec.net, mode);
+                // 回复 id 跨重启单调：从转录里的最大值续号，否则新回复会与旧回复并成一组。
+                tools.reply_seq = crate::core::engine::max_reply(events);
                 let roots = crate::core::refs::RefRoots { work: sb.shared.clone(), private: Some(sb.private.clone()) };
                 Ok(Session::Single(session::AgentSession::restore(
                     &a.name,
                     history,
                     marks,
+                    line_reply,
                     chat,
                     note,
                     Some(tools),
@@ -1352,6 +1480,7 @@ fn truncate_events(events: &[serde_json::Value]) -> Vec<serde_json::Value> {
 /// 只保留「转录行 id < keep」的行（回档 = 删除该行及其后；keep = 0 → 转录清空）。
 /// 一旦某条事件里的行被截掉，其后的事件一并丢弃（事件流是时序的）。
 fn cut_before_line(events: &[serde_json::Value], keep: u64) -> Vec<serde_json::Value> {
+    let keep = align_keep(events, keep);
     let mut out = Vec::new();
     for ev in events {
         if ev.get("type").and_then(|t| t.as_str()) == Some("transcript") {
@@ -1376,6 +1505,42 @@ fn cut_before_line(events: &[serde_json::Value], keep: u64) -> Vec<serde_json::V
         }
     }
     out
+}
+
+/// 把"保留 id < keep"对齐到**回复边界**（见 session::keep_whole_replies）：
+/// keep 落在某次回复内部时退到该回复第一行之前，返回新的 keep（没有这样的行 = u64::MAX，即不截）。
+fn align_keep(events: &[serde_json::Value], keep: u64) -> u64 {
+    let rows: Vec<&serde_json::Value> = events
+        .iter()
+        .filter(|e| e.get("type").and_then(|t| t.as_str()) == Some("transcript"))
+        .filter_map(|e| e.get("lines").and_then(|l| l.as_array()))
+        .flatten()
+        .collect();
+    let idx = rows
+        .iter()
+        .position(|l| {
+            l.get("id")
+                .and_then(|i| i.as_u64())
+                .map(|i| i >= keep)
+                .unwrap_or(false)
+        })
+        .unwrap_or(rows.len());
+    let replies: Vec<u64> = rows.iter().map(|l| line_reply_of(l)).collect();
+    let aligned = crate::core::session::keep_whole_replies(&replies, idx);
+    rows.get(aligned)
+        .and_then(|l| l.get("id").and_then(|i| i.as_u64()))
+        .unwrap_or(u64::MAX)
+}
+
+/// 一行属于哪次回复：工具行的号在调用视图里，其余行在 LineView 上。
+/// 号 = 0 视为"没写"（回复号从 1 起），此时用**该行自己的 id**——绝不把相邻行误并成一组。
+fn line_reply_of(l: &serde_json::Value) -> u64 {
+    let own = l.get("id").and_then(|i| i.as_u64()).unwrap_or(0);
+    let stored = match l.get("tool") {
+        Some(t) => t.get("reply").and_then(|x| x.as_u64()),
+        None => l.get("reply").and_then(|x| x.as_u64()),
+    };
+    stored.filter(|r| *r != 0).unwrap_or(own)
 }
 
 /// 找最后一条以 prefix 开头的转录行的 id。

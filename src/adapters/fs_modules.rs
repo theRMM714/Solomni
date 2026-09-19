@@ -57,6 +57,10 @@ fn scan_dir(modules_dir: &Path) -> Roster {
                     rejected.push(format!("{}: {}", dir_name, why));
                     continue;
                 }
+                if let Err(why) = crate::core::module::check_tools(&m) {
+                    rejected.push(format!("{}: {}", dir_name, why));
+                    continue;
+                }
                 modules.push(Module { manifest: m, root: path });
             }
             Err(e) => rejected.push(format!(

@@ -7,10 +7,12 @@ mod core;
 mod presentation;
 
 #[cfg(test)]
+mod contract_tests;
+#[cfg(test)]
 mod tests;
 
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -21,6 +23,16 @@ fn main() {
     // 自检（机器可读）：把"这台机器能承载哪些测试"如实交出来——测试入口据此判定，不靠猜（见 TESTING.md）。
     if args.iter().any(|a| a == "--doctor") {
         std::process::exit(doctor());
+    }
+    // 隐藏模式：走**产品自己那套**出站链路打一次最小 HTTPS 请求，三态如实回报
+    // （ok / no-net / tls-fail|fail）——CI 三平台据此验本构建的 TLS 栈，不需要任何密钥。
+    if let Some(i) = args.iter().position(|a| a == "--https-check") {
+        std::process::exit(https_check(&args, i));
+    }
+    // 入站契约（机器可读）：HTTP 路由目录的唯一定义（见 ARCHITECTURE.md「呈现层入站契约」）。
+    if args.iter().any(|a| a == "--print-routes") {
+        println!("{}", presentation::routes::catalog_json());
+        std::process::exit(0);
     }
     // 启动形态：无参数 = CLI（默认）；-webUI = Web 转录中心。
     let web = args.iter().any(|a| a == "-webUI");
@@ -93,8 +105,10 @@ fn main() {
     );
     // 内置文件工具：纯 Rust 直接读写，不经过外部进程（编码问题不进本程序）。
     let io = adapters::FsSysIo::default();
+    // 信封修复：只把字符串里的裸控制字符转义（无歧义才修，其余交给模型重发）。
+    let repair = adapters::UnambiguousRepair;
 
-    let core = match core::Core::new(
+    let mut core = match core::Core::new(
         Arc::new(store),
         Arc::new(history),
         Arc::new(workspace),
@@ -105,6 +119,7 @@ fn main() {
         Arc::new(catalog),
         Arc::new(tools),
         Arc::new(io),
+        Arc::new(repair),
         Box::new(LoadedPrompts(book)),
         std::sync::Arc::clone(&log),
     ) {
@@ -114,6 +129,78 @@ fn main() {
             std::process::exit(1);
         }
     };
+
+    // 隐藏模式：实测一条通道支不支持原生工具调用，并把确定结论写回 models.yaml（要真实网络）。
+    if let Some(i) = args.iter().position(|a| a == "--probe-tools") {
+        let Some(id) = args.get(i + 1) else {
+            eprintln!("用法：solomni --probe-tools <模型 id>");
+            std::process::exit(2);
+        };
+        match core.probe_model_tools(id) {
+            Ok(core::providers::ProbeOutcome::Supported { detail }) => {
+                println!("[探测] 模型 {}：支持原生工具调用（{}）", id, detail);
+                println!("[探测] 已把 models.yaml 的 tools 写成 native");
+                std::process::exit(0);
+            }
+            Ok(core::providers::ProbeOutcome::Unsupported { detail }) => {
+                println!("[探测] 模型 {}：**不支持**原生工具调用（{}）", id, detail);
+                println!("[探测] 已把 models.yaml 的 tools 写成 envelope（手写信封照旧可用，能力没有任何损失）");
+                std::process::exit(0);
+            }
+            Ok(core::providers::ProbeOutcome::Unknown { detail }) => {
+                println!("[探测] 模型 {}：无法判定（{}）", id, detail);
+                println!("[探测] 登记处**没有改动**：请自行决定填 native 还是 envelope");
+                std::process::exit(0);
+            }
+            Err(e) => {
+                eprintln!("[探测] 失败：{}", e);
+                std::process::exit(1);
+            }
+        }
+    }
+
+    // 隐藏模式：探测"回放形状"——把上一轮的工具调用发回供应商时，哪种写法被接受。
+    // 它**不改任何登记处**（只有 --probe-tools 带写回策略）：探测结论是事实，采不采用由人定。
+    if let Some(i) = args.iter().position(|a| a == "--probe-replay") {
+        let Some(id) = args.get(i + 1) else {
+            eprintln!("用法：solomni --probe-replay <模型 id>");
+            std::process::exit(2);
+        };
+        match core.probe_replay_shape(id) {
+            Ok(report) => {
+                println!("[回放形状] 模型 {}（只报事实，不改登记处）：", id);
+                for s in &report.shapes {
+                    let verdict = if !s.accepted {
+                        "被拒  "
+                    } else if s.understood {
+                        "收+读懂"
+                    } else {
+                        "收未懂 "
+                    };
+                    println!("  {}  {:<16} {}", verdict, s.name, s.detail);
+                }
+                let names = |want: fn(&core::providers::ReplayShape) -> bool| -> String {
+                    let got: Vec<&str> = report
+                        .shapes
+                        .iter()
+                        .filter(|s| want(s))
+                        .map(|s| s.name.as_str())
+                        .collect();
+                    if got.is_empty() { "（无）".to_string() } else { got.join(" / ") }
+                };
+                println!("[回放形状] 被接受的写法：{}", names(|s| s.accepted));
+                println!(
+                    "[回放形状] 模型真的读到了历史（回答里带回本次编号）的写法：{}",
+                    names(|s| s.understood)
+                );
+                std::process::exit(0);
+            }
+            Err(e) => {
+                eprintln!("[回放形状] 失败：{}", e);
+                std::process::exit(1);
+            }
+        }
+    }
 
     // 写权限开关定稿：环境变量优先（测试/CI 用得到），否则看设置。
     {
@@ -143,13 +230,22 @@ fn main() {
             .unwrap_or(presentation::web::DEFAULT_PORT)
     };
 
+    // 核心搬到它自己的执行线程：此后呈现层只持有**入站能力面**——拿不到 Core，也拿不到任何核心锁。
+    let handle = match core::api::CoreHandle::spawn(core) {
+        Ok(h) => h,
+        Err(e) => {
+            eprintln!("[装配失败] {}", e);
+            std::process::exit(1);
+        }
+    };
+    let ops = core::api::Ops::from_handle(&handle);
+
     if web {
-        serve_web(core, port_flag(&args), std::sync::Arc::clone(&log));
+        serve_web(ops, port_flag(&args), std::sync::Arc::clone(&log));
     } else {
-        // CLI 里输入 webui 可直接转入 Web，无需重启进程。
-        let (core, exit) = presentation::cli::run(core);
-        if let presentation::cli::CliExit::Web(port) = exit {
-            serve_web(core, port, std::sync::Arc::clone(&log));
+        // CLI 里输入 webui 可直接转入 Web，无需重启进程（能力面可克隆，两份呈现共用同一个核心）。
+        if let presentation::cli::CliExit::Web(port) = presentation::cli::run(ops.clone()) {
+            serve_web(ops, port, std::sync::Arc::clone(&log));
         }
     }
 }
@@ -184,6 +280,29 @@ fn doctor() -> i32 {
     });
     println!("{}", doc);
     0
+}
+
+/// 隐藏模式：用**产品自己的出站代理**（含按平台装配的 TLS）打一次最小 HTTPS 请求，如实报结论。
+/// 三态机器可读：ok（通）/ no-net（环境连不上外网）/ tls-fail|fail（我们链路坏了）。
+/// 退出码恒 0：判定归调用方（测试按性质决定 env-skip 还是失败），这里只报事实。
+fn https_check(args: &[String], i: usize) -> i32 {
+    let url = args.get(i + 1).cloned().unwrap_or_default();
+    if url.is_empty() {
+        eprintln!("用法：solomni --https-check <https url>");
+        return 2;
+    }
+    let backend = adapters::http_agent::tls_backend();
+    let agent = adapters::http_agent::agent(10, 20);
+    match agent.get(&url).call() {
+        Ok(resp) => {
+            println!("[HTTPS] ok {} {} {}", resp.status().as_u16(), backend, url);
+            0
+        }
+        Err(e) => {
+            println!("[HTTPS] {} {} {}", adapters::http_agent::classify(&e), backend, e);
+            0
+        }
+    }
 }
 
 /// 在 PATH 里找一个可执行文件（找不到就是没有，不去别处翻）。
@@ -278,11 +397,10 @@ fn strip_unc_prefix(p: PathBuf) -> PathBuf {
     p
 }
 
-fn serve_web(core: core::Core, port: u16, log: std::sync::Arc<dyn core::ports::Log + Send + Sync>) {
-    let shared = Arc::new(Mutex::new(core));
+fn serve_web(ops: core::api::Ops, port: u16, log: std::sync::Arc<dyn core::ports::Log + Send + Sync>) {
     let cap = adapters::confine::capability();
     let fence = presentation::web::FenceInfo { fs: cap.fs, net: cap.net, tree: cap.tree, note: cap.note };
-    if let Err(e) = presentation::web::serve(shared, port, log, fence) {
+    if let Err(e) = presentation::web::serve(ops, port, log, fence) {
         eprintln!("[Web 服务异常] {}", e);
         std::process::exit(1);
     }

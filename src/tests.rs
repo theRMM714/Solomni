@@ -9,7 +9,8 @@ use crate::core::history::{AgentMeta, HistoryView, SessionMeta};
 use crate::core::exec::{self, Diagnosis, ExecSpec, Tier};
 use crate::core::packages::{Library, PackageManifest};
 use crate::core::ports::{
-    BoxedChat, Chat, ChatGateway, Chunk, FileRead, HistoryStore, ModelCatalog, ModuleSource, Msg, PackageSource,
+    BoxedChat, Chat, ChatGateway, Chunk, CompleteOpts, Completion, FileRead, HistoryStore, ModelCatalog, ModuleSource,
+    Msg, PackageSource,
     PromptSource, SettingsStore, SysIo, ToolOutcome, ToolRunner, Workspace,
 };
 use crate::core::prompt::{render, Prompts};
@@ -17,30 +18,45 @@ use crate::core::providers::{Channel, ModelEntry, Provider, Settings};
 use crate::core::{
     AgentInstance, CollabStep, ConfigAgent, Core, Live, Pending, SessionEdit, SessionEvent, WorkMode, WorkSpec,
 };
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 // ---------- 内存适配器（测试组合根） ----------
 
 /// 内存登记处：预置「供应商 p + 模型 m + 核心默认 m」，让会话都能拿到真实通道。
-struct InMemorySettings {
+pub(crate) struct InMemorySettings {
     s: Mutex<Settings>,
+    fail: Option<String>,
 }
 
 impl InMemorySettings {
-    fn new() -> InMemorySettings {
+    pub(crate) fn new() -> InMemorySettings {
         let mut s = Settings::default();
         s.providers.insert(
             "p".to_string(),
-            Provider { kind: "llm".to_string(), base_url: "http://test".to_string(), api_key: "k".to_string() },
+            Provider { base_url: "http://test".to_string(), api_key: "k".to_string() },
         );
         s.models.insert(
             "m".to_string(),
-            ModelEntry { name: "M".to_string(), api_model: "m".to_string(), provider: "p".to_string(), note: String::new() },
+            ModelEntry {
+                name: "M".to_string(),
+                api_model: "m".to_string(),
+                provider: "p".to_string(),
+                note: String::new(),
+                tools: crate::core::providers::ToolMode::Envelope,
+            },
         );
         s.core = Some("m".to_string());
-        InMemorySettings { s: Mutex::new(s) }
+        InMemorySettings { s: Mutex::new(s), fail: None }
+    }
+
+    /// 注入失败：load / save 一律返回该原因（端口契约测试用）。
+    pub(crate) fn fail_with(mut self, msg: &str) -> InMemorySettings {
+        self.fail = Some(msg.to_string());
+        self
     }
     /// 指定默认执行档位的登记处（断言虚拟机档下的诊断与工具回执）。
     fn with_tier(tier: Tier) -> InMemorySettings {
@@ -52,9 +68,15 @@ impl InMemorySettings {
 
 impl SettingsStore for InMemorySettings {
     fn load(&self) -> Result<Settings, String> {
+        if let Some(m) = &self.fail {
+            return Err(m.clone());
+        }
         Ok(self.s.lock().expect("锁").clone())
     }
     fn save(&self, s: &Settings) -> Result<(), String> {
+        if let Some(m) = &self.fail {
+            return Err(m.clone());
+        }
         *self.s.lock().expect("锁") = s.clone();
         Ok(())
     }
@@ -62,25 +84,38 @@ impl SettingsStore for InMemorySettings {
 
 /// 内存工作区：准备/写入都不碰盘，只记录（测试用）。
 #[derive(Default)]
-struct InMemoryWorkspace {
+pub(crate) struct InMemoryWorkspace {
     files: Mutex<BTreeMap<String, Vec<u8>>>,
+    fail: Option<String>,
 }
 
 impl InMemoryWorkspace {
-    fn new() -> InMemoryWorkspace {
-        InMemoryWorkspace { files: Mutex::new(BTreeMap::new()) }
+    pub(crate) fn new() -> InMemoryWorkspace {
+        InMemoryWorkspace { files: Mutex::new(BTreeMap::new()), fail: None }
+    }
+
+    /// 注入失败：prepare / roots / write_work / list 一律返回该原因（work_has 是布尔查询，不受影响）。
+    pub(crate) fn fail_with(mut self, msg: &str) -> InMemoryWorkspace {
+        self.fail = Some(msg.to_string());
+        self
     }
     /// 直接放一个文件（模拟落盘），键与真实布局同构：<session>/work/<名字> 或 <session>/<agent>/<相对路径>。
-    fn seed(&self, session: &str, area: &str, rel: &str) {
+    pub(crate) fn seed(&self, session: &str, area: &str, rel: &str) {
         self.files.lock().expect("锁").insert(format!("{}/{}/{}", session, area, rel), Vec::new());
     }
 }
 
 impl Workspace for InMemoryWorkspace {
     fn prepare(&self, _session: &str, _agents: &[String]) -> Result<(), String> {
+        if let Some(m) = &self.fail {
+            return Err(m.clone());
+        }
         Ok(())
     }
     fn roots(&self, session: &str, agents: &[String]) -> Result<crate::core::workspace::WorkRoots, String> {
+        if let Some(m) = &self.fail {
+            return Err(m.clone());
+        }
         // 与 FsWorkspace 同构的**绝对**路径（以当前目录为锚；只读 env，不碰盘）。
         let mut map = BTreeMap::new();
         for a in agents {
@@ -89,6 +124,9 @@ impl Workspace for InMemoryWorkspace {
         Ok(crate::core::workspace::WorkRoots { shared: abs(&[session, "work"]), agents: map })
     }
     fn write_work(&self, session: &str, name: &str, bytes: &[u8]) -> Result<(), String> {
+        if let Some(m) = &self.fail {
+            return Err(m.clone());
+        }
         self.files.lock().expect("锁").insert(format!("{}/work/{}", session, name), bytes.to_vec());
         Ok(())
     }
@@ -96,6 +134,9 @@ impl Workspace for InMemoryWorkspace {
         self.files.lock().expect("锁").contains_key(&format!("{}/work/{}", session, name))
     }
     fn list(&self, session: &str, agents: &[String]) -> Result<crate::core::workspace::WorkFiles, String> {
+        if let Some(m) = &self.fail {
+            return Err(m.clone());
+        }
         // 内存实现没有目录树，直接按前缀扫键（相对路径原样返回，/ 分隔）。
         let files = self.files.lock().expect("锁");
         let pick = |prefix: &str| -> Vec<String> {
@@ -118,36 +159,104 @@ impl Workspace for InMemoryWorkspace {
 
 /// 内存文件系统：内置文件工具的读写落在这里（测试可断言内容与越界拒绝）。
 #[derive(Default)]
-struct InMemorySysIo {
+pub(crate) struct InMemorySysIo {
     files: Mutex<BTreeMap<String, String>>,
+    fail: Option<String>,
+    /// 读取标注：模拟"超过单次上限"与"含非法 UTF-8"的文件（工具必须如实标注，而不是照改）。
+    lossy: bool,
+    cut: bool,
+    /// 并发观测：**同时在读**的调用数与其峰值——并发用例据此断言"真的并发"（串行绝不会重叠）。
+    active: AtomicUsize,
+    peak: AtomicUsize,
+    /// 每次读取的固定耗时（毫秒）：给并发留出可观测的窗口。
+    delay_ms: u64,
+    /// 指定文件的额外耗时：用来构造"后发的先完成"，验结果仍按原始顺序回填。
+    extra: Mutex<BTreeMap<String, u64>>,
 }
 
 impl InMemorySysIo {
-    fn new() -> InMemorySysIo {
-        InMemorySysIo { files: Mutex::new(BTreeMap::new()) }
+    pub(crate) fn new() -> InMemorySysIo {
+        InMemorySysIo {
+            files: Mutex::new(BTreeMap::new()),
+            fail: None,
+            lossy: false,
+            cut: false,
+            active: AtomicUsize::new(0),
+            peak: AtomicUsize::new(0),
+            delay_ms: 0,
+            extra: Mutex::new(BTreeMap::new()),
+        }
     }
-    fn seed(&self, parts: &[&str], text: &str) {
+
+    /// 注入读取标注（lossy = 含非法 UTF-8；cut = 只读到开头）。
+    pub(crate) fn marked(mut self, lossy: bool, cut: bool) -> InMemorySysIo {
+        self.lossy = lossy;
+        self.cut = cut;
+        self
+    }
+
+    /// 注入失败：read / write 一律返回该原因（端口契约测试用）。
+    pub(crate) fn fail_with(mut self, msg: &str) -> InMemorySysIo {
+        self.fail = Some(msg.to_string());
+        self
+    }
+
+    /// 让每次读取慢一点：并发（峰值 > 1）与串行（峰值恒为 1）因此可观测。
+    pub(crate) fn slow(mut self, ms: u64) -> InMemorySysIo {
+        self.delay_ms = ms;
+        self
+    }
+
+    /// 指定文件每读一次额外慢多少毫秒。
+    pub(crate) fn slow_file(&self, parts: &[&str], ms: u64) {
+        self.extra.lock().expect("锁").insert(p(parts), ms);
+    }
+
+    /// 同时在读的峰值（并发用例的唯一证据）。
+    pub(crate) fn peak_concurrent_reads(&self) -> usize {
+        self.peak.load(Ordering::SeqCst)
+    }
+
+    /// 记一次"进入读取"：整个读取期间计数 +1，并如实记下峰值与耗时。
+    fn enter(&self, key: &str) {
+        let now = self.active.fetch_add(1, Ordering::SeqCst) + 1;
+        self.peak.fetch_max(now, Ordering::SeqCst);
+        let extra = self.extra.lock().expect("锁").get(key).copied().unwrap_or(0);
+        let ms = self.delay_ms + extra;
+        if ms > 0 {
+            std::thread::sleep(Duration::from_millis(ms));
+        }
+        self.active.fetch_sub(1, Ordering::SeqCst);
+    }
+    pub(crate) fn seed(&self, parts: &[&str], text: &str) {
         self.files.lock().expect("锁").insert(p(parts), text.to_string());
     }
-    fn get(&self, parts: &[&str]) -> Option<String> {
+    pub(crate) fn get(&self, parts: &[&str]) -> Option<String> {
         self.files.lock().expect("锁").get(&p(parts)).cloned()
     }
 }
 
 impl SysIo for InMemorySysIo {
     fn read(&self, path: &std::path::Path) -> Result<FileRead, String> {
+        if let Some(m) = &self.fail {
+            return Err(m.clone());
+        }
         let key = path.to_string_lossy().into_owned();
+        self.enter(&key);
         let text = self.files.lock().expect("锁").get(&key).cloned().ok_or_else(|| format!("读取失败：{} 不存在", key))?;
-        Ok(FileRead { bytes: text.len(), text, lossy: false, cut: false })
+        Ok(FileRead { bytes: text.len(), text, lossy: self.lossy, cut: self.cut })
     }
     fn write(&self, path: &std::path::Path, content: &str) -> Result<(), String> {
+        if let Some(m) = &self.fail {
+            return Err(m.clone());
+        }
         self.files.lock().expect("锁").insert(path.to_string_lossy().into_owned(), content.to_string());
         Ok(())
     }
 }
 
 /// 测试用绝对根：以当前工作目录为锚（只读 env，不碰盘）——真实路径模型下所有根都是绝对路径。
-fn abs(parts: &[&str]) -> PathBuf {
+pub(crate) fn abs(parts: &[&str]) -> PathBuf {
     let mut b = std::env::current_dir().expect("取当前目录");
     for x in parts {
         b.push(x);
@@ -156,17 +265,59 @@ fn abs(parts: &[&str]) -> PathBuf {
 }
 
 /// 绝对路径的字符串期望值（平台分隔符；用于 PathBuf / 内存 IO 的键）。
-fn p(parts: &[&str]) -> String {
+pub(crate) fn p(parts: &[&str]) -> String {
     abs(parts).to_string_lossy().into_owned()
 }
 
 /// 路径的**书写形式**（进 JSON / 提示词 / 转录都是它）：一律 / 分隔（Windows 反斜杠在 JSON 里非法）。
-fn s(parts: &[&str]) -> String {
+pub(crate) fn s(parts: &[&str]) -> String {
     p(parts).replace(std::path::MAIN_SEPARATOR, "/")
 }
 
+/// 什么都不修的修复端口（严格要求合法信封）：测试基线，也是"宁缺毋滥"部署的对照实现。
+pub(crate) struct NoRepair;
+
+impl crate::core::ports::EnvelopeRepair for NoRepair {
+    fn repair(
+        &self,
+        _raw: &str,
+        _kind: &crate::core::envelope::Malformed,
+    ) -> crate::core::ports::RepairOutcome {
+        crate::core::ports::RepairOutcome { repaired: None, what: Vec::new() }
+    }
+}
+
+/// 一次内置工具调用（空账本）：只关心工具行为本身的用例用它；
+/// 关心"改动前有没有读过"的用例直接用 systool::execute 并自带 Observations。
+pub(crate) fn run_builtin(
+    sb: &crate::core::workspace::Sandbox,
+    io: &dyn crate::core::ports::SysIo,
+    name: &str,
+    args_json: &str,
+) -> crate::core::ports::ToolOutcome {
+    let mut obs = crate::core::systool::Observations::default();
+    crate::core::systool::execute(sb, io, &mut obs, name, args_json)
+}
+
+/// 测试用模块工具声明：只给启动命令（参数契约在需要的用例里另行声明）。
+pub(crate) fn decl(command: &str) -> crate::core::module::ToolDecl {
+    crate::core::module::ToolDecl {
+        command: command.to_string(),
+        desc: String::new(),
+        params: None,
+        parallel: false,
+    }
+}
+
+/// 测试用模块工具声明：带参数契约（YAML 里的 params 段）。
+pub(crate) fn decl_with(command: &str, params_yaml: &str) -> crate::core::module::ToolDecl {
+    let mut d = decl(command);
+    d.params = Some(serde_yaml::from_str(params_yaml).expect("测试参数声明要能解析"));
+    d
+}
+
 /// 测试沙箱：work 共享区 + agent 私有区 + 指定模块目录（都是绝对路径）。
-fn test_sandbox(agent: &str, modules: &[&str]) -> crate::core::workspace::Sandbox {
+pub(crate) fn test_sandbox(agent: &str, modules: &[&str]) -> crate::core::workspace::Sandbox {
     let mut map = BTreeMap::new();
     for id in modules {
         map.insert(id.to_string(), abs(&["mods", id]));
@@ -178,35 +329,55 @@ fn test_sandbox(agent: &str, modules: &[&str]) -> crate::core::workspace::Sandbo
         private: abs(&["demo", agent]),
         modules: map,
         texts: test_prompts().core.tool_texts,
+        builtin_tools: test_prompts().core.builtin_tools,
     }
 }
 
 /// 内存会话历史：供测试断言落盘与回放。
-struct InMemoryHistory {
+pub(crate) struct InMemoryHistory {
     metas: Mutex<BTreeMap<String, SessionMeta>>,
     events: Mutex<BTreeMap<String, Vec<serde_json::Value>>>,
+    fail: Option<String>,
 }
 
 impl InMemoryHistory {
-    fn new() -> InMemoryHistory {
-        InMemoryHistory { metas: Mutex::new(BTreeMap::new()), events: Mutex::new(BTreeMap::new()) }
+    pub(crate) fn new() -> InMemoryHistory {
+        InMemoryHistory { metas: Mutex::new(BTreeMap::new()), events: Mutex::new(BTreeMap::new()), fail: None }
+    }
+
+    /// 注入失败：全部 HistoryStore 方法一律返回该原因（端口契约测试用）。
+    pub(crate) fn fail_with(mut self, msg: &str) -> InMemoryHistory {
+        self.fail = Some(msg.to_string());
+        self
+    }
+
+    /// 失败注入的入口判定：Ok = 未注入。
+    fn guard(&self) -> Result<(), String> {
+        match &self.fail {
+            Some(m) => Err(m.clone()),
+            None => Ok(()),
+        }
     }
 }
 
 impl HistoryStore for InMemoryHistory {
     fn create(&self, meta: &SessionMeta) -> Result<(), String> {
+        self.guard()?;
         self.metas.lock().expect("锁").insert(meta.name.clone(), meta.clone());
         Ok(())
     }
     fn save_meta(&self, meta: &SessionMeta) -> Result<(), String> {
+        self.guard()?;
         self.metas.lock().expect("锁").insert(meta.name.clone(), meta.clone());
         Ok(())
     }
     fn append(&self, name: &str, events: &[serde_json::Value]) -> Result<(), String> {
+        self.guard()?;
         self.events.lock().expect("锁").entry(name.to_string()).or_default().extend_from_slice(events);
         Ok(())
     }
     fn list(&self) -> Result<Vec<HistoryView>, String> {
+        self.guard()?;
         let metas = self.metas.lock().expect("锁");
         let events = self.events.lock().expect("锁");
         Ok(metas
@@ -223,11 +394,13 @@ impl HistoryStore for InMemoryHistory {
             .collect())
     }
     fn load(&self, name: &str) -> Result<(SessionMeta, Vec<serde_json::Value>), String> {
+        self.guard()?;
         let meta = self.metas.lock().expect("锁").get(name).cloned().ok_or_else(|| format!("无此会话：{}", name))?;
         let events = self.events.lock().expect("锁").get(name).cloned().unwrap_or_default();
         Ok((meta, events))
     }
     fn delete(&self, name: &str) -> Result<bool, String> {
+        self.guard()?;
         let removed = self.metas.lock().expect("锁").remove(name).is_some();
         self.events.lock().expect("锁").remove(name);
         Ok(removed)
@@ -235,25 +408,35 @@ impl HistoryStore for InMemoryHistory {
 }
 
 /// 内存模型目录：回放固定模型名，并记录收到的 Provider（断言编辑期密钥复用）。
-struct FakeCatalog {
+pub(crate) struct FakeCatalog {
     models: Vec<String>,
-    seen: Mutex<Vec<Provider>>,
+    pub(crate) seen: Mutex<Vec<Provider>>,
+    fail: Option<String>,
 }
 
 impl FakeCatalog {
-    fn new(models: Vec<String>) -> FakeCatalog {
-        FakeCatalog { models, seen: Mutex::new(Vec::new()) }
+    pub(crate) fn new(models: Vec<String>) -> FakeCatalog {
+        FakeCatalog { models, seen: Mutex::new(Vec::new()), fail: None }
+    }
+
+    /// 注入失败：list_models 返回该原因（失败注入不记录调用——错误路径没走到"用哪个通道"）。
+    pub(crate) fn fail_with(mut self, msg: &str) -> FakeCatalog {
+        self.fail = Some(msg.to_string());
+        self
     }
 }
 
 impl ModelCatalog for FakeCatalog {
     fn list_models(&self, provider: &Provider) -> Result<Vec<String>, String> {
+        if let Some(m) = &self.fail {
+            return Err(m.clone());
+        }
         self.seen.lock().expect("锁").push(provider.clone());
         Ok(self.models.clone())
     }
 }
 
-struct VecSource(Vec<Module>);
+pub(crate) struct VecSource(pub(crate) Vec<Module>);
 
 impl ModuleSource for VecSource {
     fn scan(&self) -> crate::core::module::Roster {
@@ -262,7 +445,7 @@ impl ModuleSource for VecSource {
 }
 
 /// 无声围栏端口：测试里不碰任何 ACL（真实实现在 adapters/confine）。
-struct NoFenceHost;
+pub(crate) struct NoFenceHost;
 impl crate::core::ports::FenceHost for NoFenceHost {
     fn release(&self, _spec: &crate::core::fence::FenceSpec) -> Result<(), String> {
         Ok(())
@@ -270,25 +453,39 @@ impl crate::core::ports::FenceHost for NoFenceHost {
 }
 
 /// 记录型围栏端口：断言「删除会话时真的请求了撤销」。
-struct RecordingFence {
-    released: Mutex<Vec<String>>,
+pub(crate) struct RecordingFence {
+    pub(crate) released: Mutex<Vec<String>>,
+    fail: Option<String>,
+}
+impl RecordingFence {
+    pub(crate) fn new() -> RecordingFence {
+        RecordingFence { released: Mutex::new(Vec::new()), fail: None }
+    }
+    /// 注入失败：release 返回该原因（撤销失败必须如实传播，不能被当成已撤销）。
+    pub(crate) fn fail_with(mut self, msg: &str) -> RecordingFence {
+        self.fail = Some(msg.to_string());
+        self
+    }
 }
 impl crate::core::ports::FenceHost for RecordingFence {
     fn release(&self, spec: &crate::core::fence::FenceSpec) -> Result<(), String> {
+        if let Some(m) = &self.fail {
+            return Err(m.clone());
+        }
         self.released.lock().expect("锁").push(spec.agent.clone());
         Ok(())
     }
 }
 
 /// 内存运行包库（测试组合根）：直接给出包清单，不碰盘。
-struct InMemoryPackages(Vec<PackageManifest>);
+pub(crate) struct InMemoryPackages(Vec<PackageManifest>);
 
 impl InMemoryPackages {
-    fn empty() -> InMemoryPackages {
+    pub(crate) fn empty() -> InMemoryPackages {
         InMemoryPackages(Vec::new())
     }
     /// 用 yaml 文本造包（顺带覆盖清单解析）。
-    fn with(yamls: &[&str]) -> InMemoryPackages {
+    pub(crate) fn with(yamls: &[&str]) -> InMemoryPackages {
         InMemoryPackages(yamls.iter().map(|y| pkg_yaml(y)).collect())
     }
 }
@@ -303,18 +500,18 @@ impl PackageSource for InMemoryPackages {
 }
 
 /// 用 yaml 造一份包清单（顺带覆盖清单解析）。
-fn pkg_yaml(y: &str) -> PackageManifest {
+pub(crate) fn pkg_yaml(y: &str) -> PackageManifest {
     serde_yaml::from_str(y).expect("包清单必须能解析")
 }
 
 /// 造一个 prefix 类包（独立前缀 opt/rt/&lt;id&gt;-&lt;version&gt;）。
-fn pkg(id: &str, version: &str) -> PackageManifest {
+pub(crate) fn pkg(id: &str, version: &str) -> PackageManifest {
     pkg_yaml(&format!("id: {}
 version: {}
 prefix: opt/rt/{}-{}", id, version, id, version))
 }
 
-fn module_of(id: &str) -> Module {
+pub(crate) fn module_of(id: &str) -> Module {
     Module {
         manifest: ModuleManifest {
             id: id.to_string(),
@@ -375,35 +572,40 @@ fn collab_work(name: &str, modules: &[&str], delegate: bool, task: &str) -> Work
     w
 }
 
-fn scripted(s: Vec<String>) -> BoxedChat {
+pub(crate) fn scripted(s: Vec<String>) -> BoxedChat {
     Box::new(FakeChat::new(s))
 }
 
 /// 共享脚本队列：多条核心响应按 complete 次序弹出（末条重复兜底）。
 /// 与真实通道时序一致：建通道时不消费，调用时才消费。Arc 分身共享（网关与测试两侧）。
 /// 共享脚本队列（Mutex 版：需跨线程 Send+Sync）。
-struct SharedScript {
-    q: Arc<Mutex<Vec<String>>>,
+pub(crate) struct SharedScript {
+    pub(crate) q: Arc<Mutex<Vec<String>>>,
 }
 
 impl Chat for SharedScript {
-    fn complete(&mut self, _messages: &[Msg], _stream: bool, _on: &mut dyn FnMut(Chunk) -> bool) -> String {
+    fn complete(&mut self, _messages: &[Msg], _opts: CompleteOpts<'_>, _on: &mut dyn FnMut(Chunk) -> bool) -> Completion {
         let mut q = self.q.lock().expect("脚本队列锁");
-        if q.len() > 1 {
-            q.remove(0)
-        } else {
-            q.first().cloned().unwrap_or_default()
-        }
+        let text = if q.len() > 1 { q.remove(0) } else { q.first().cloned().unwrap_or_default() };
+        Completion::text(text)
     }
 }
 
 /// 脚本网关：按 agent 实例名回放各自脚本；核心通道走共享队列。
-struct ScriptGateway {
+pub(crate) struct ScriptGateway {
     member: BTreeMap<String, Vec<String>>,
     core: Arc<Mutex<Vec<String>>>,
 }
+impl ScriptGateway {
+    pub(crate) fn new(member: BTreeMap<String, Vec<String>>, core: Vec<String>) -> ScriptGateway {
+        ScriptGateway { member, core: Arc::new(Mutex::new(core)) }
+    }
+}
 
 impl ChatGateway for ScriptGateway {
+    fn probe_tools(&self, _c: &Channel) -> Result<crate::core::ports::ProbeOutcome, String> {
+        Err("脚本替身没有真实供应商，测不了工具调用支持".to_string())
+    }
     fn member_channel(&self, _c: Option<&Channel>, id: &str) -> (BoxedChat, Option<String>) {
         let script = self.member.get(id).cloned().unwrap_or_else(|| {
             vec!["{\"type\":\"say\",\"text\":\"（演示）收到。\"}".to_string()]
@@ -415,18 +617,35 @@ impl ChatGateway for ScriptGateway {
     }
 }
 
-struct TestPrompts;
+/// 提示词册替身：默认回放内置册子；fail_with 注入加载失败。
+pub(crate) struct TestPrompts {
+    fail: Option<String>,
+}
+
+impl TestPrompts {
+    pub(crate) fn ok() -> TestPrompts {
+        TestPrompts { fail: None }
+    }
+    pub(crate) fn fail_with(mut self, msg: &str) -> TestPrompts {
+        self.fail = Some(msg.to_string());
+        self
+    }
+}
+
 impl PromptSource for TestPrompts {
     fn load(&self) -> Result<Prompts, String> {
+        if let Some(m) = &self.fail {
+            return Err(m.clone());
+        }
         Ok(test_prompts())
     }
 }
 
-fn test_prompts() -> Prompts {
+pub(crate) fn test_prompts() -> Prompts {
     serde_yaml::from_str::<Prompts>(include_str!("../prompts.yaml")).expect("内置提示词册必须合法")
 }
 
-fn core_with(modules: Vec<Module>, gateway: ScriptGateway) -> Core {
+pub(crate) fn core_with(modules: Vec<Module>, gateway: ScriptGateway) -> Core {
     core_with_runner(modules, gateway, Arc::new(SilentRunner))
 }
 
@@ -443,7 +662,8 @@ fn core_with_workspace(modules: Vec<Module>, gateway: ScriptGateway, ws: Arc<InM
         Arc::new(FakeCatalog::new(vec!["m".to_string()])),
         Arc::new(SilentRunner),
         Arc::new(InMemorySysIo::new()),
-        Box::new(TestPrompts),
+        Arc::new(NoRepair),
+        Box::new(TestPrompts::ok()),
         Arc::new(crate::core::ports::NoopLog),
     )
     .expect("内存装配不应失败")
@@ -515,14 +735,59 @@ fn core_with_pkgs(
         catalog,
         runner,
         io,
-        Box::new(TestPrompts),
+        Arc::new(NoRepair),
+        Box::new(TestPrompts::ok()),
         Arc::new(crate::core::ports::NoopLog),
     )
     .expect("内存装配不应失败")
 }
 
-fn gw(member: BTreeMap<String, Vec<String>>, core: Vec<String>) -> ScriptGateway {
+pub(crate) fn gw(member: BTreeMap<String, Vec<String>>, core: Vec<String>) -> ScriptGateway {
     ScriptGateway { member, core: Arc::new(Mutex::new(core)) }
+}
+
+/// 指定任意网关 + 指定内存文件系统的装配（既换通道又要断言落盘的用例用它）。
+pub(crate) fn core_with_io_gateway(
+    modules: Vec<Module>,
+    gateway: impl ChatGateway + Send + Sync + 'static,
+    io: Arc<InMemorySysIo>,
+) -> Core {
+    Core::new(
+        Arc::new(InMemorySettings::new()),
+        Arc::new(InMemoryHistory::new()),
+        Arc::new(InMemoryWorkspace::new()),
+        Arc::new(VecSource(modules)),
+        Arc::new(InMemoryPackages::empty()),
+        Arc::new(NoFenceHost),
+        Arc::new(gateway),
+        Arc::new(FakeCatalog::new(vec!["m".to_string()])),
+        Arc::new(SilentRunner),
+        io,
+        Arc::new(NoRepair),
+        Box::new(TestPrompts::ok()),
+        Arc::new(crate::core::ports::NoopLog),
+    )
+    .expect("内存装配不应失败")
+}
+
+/// 指定任意网关的装配（入站契约测试用：需要自定义时序的通道）。
+pub(crate) fn core_with_gateway(modules: Vec<Module>, gateway: impl ChatGateway + Send + Sync + 'static) -> Core {
+    Core::new(
+        Arc::new(InMemorySettings::new()),
+        Arc::new(InMemoryHistory::new()),
+        Arc::new(InMemoryWorkspace::new()),
+        Arc::new(VecSource(modules)),
+        Arc::new(InMemoryPackages::empty()),
+        Arc::new(NoFenceHost),
+        Arc::new(gateway),
+        Arc::new(FakeCatalog::new(vec!["m".to_string()])),
+        Arc::new(SilentRunner),
+        Arc::new(InMemorySysIo::new()),
+        Arc::new(NoRepair),
+        Box::new(TestPrompts::ok()),
+        Arc::new(crate::core::ports::NoopLog),
+    )
+    .expect("内存装配不应失败")
 }
 
 // ---------- 信封 ----------
@@ -547,6 +812,21 @@ fn envelope_wrapped_json_still_parses() {
     let r = crate::core::envelope::parse("好的：{\"type\":\"agree\",\"text\":\"同意\"} 以上。");
     assert!(matches!(r.verb, crate::core::envelope::Verb::Agree));
     assert!(!r.degraded);
+}
+
+#[test]
+fn envelope_text_may_be_omitted() {
+    let r = crate::core::envelope::parse("{\"type\":\"agree\"}");
+    assert!(matches!(r.verb, crate::core::envelope::Verb::Agree), "缺 text 不影响表态");
+    assert_eq!(r.text, "", "缺 text = 空串");
+    assert!(!r.degraded);
+    let say = crate::core::envelope::parse("{\"type\":\"say\"}");
+    assert!(matches!(say.verb, crate::core::envelope::Verb::Say) && !say.degraded, "缺 text 的发言仍是干净信封");
+    assert!(say.text.is_empty());
+    // 缺 name 的工具信封仍是 malformed 信号，不被缺省 text 收编成发言。
+    let bad = crate::core::envelope::parse("{\"type\":\"tool\",\"args\":{}}");
+    assert!(matches!(bad.verb, crate::core::envelope::Verb::Tool));
+    assert!(bad.tools.iter().any(|t| t.malformed.is_some()));
 }
 
 // ---------- 提示词渲染层 ----------
@@ -576,12 +856,38 @@ fn prompt_render_keeps_single_braces() {
 #[test]
 fn settings_resolves_model_to_channel() {
     let mut s = Settings::default();
-    s.providers.insert("p".into(), Provider { kind: "llm".into(), base_url: "http://x".into(), api_key: "k".into() });
-    s.models.insert("m".into(), ModelEntry { name: "展示名".into(), api_model: "real-model".into(), provider: "p".into(), note: String::new() });
+    s.providers.insert("p".into(), Provider { base_url: "http://x".into(), api_key: "k".into() });
+    s.models.insert(
+        "m".into(),
+        ModelEntry {
+            name: "展示名".into(),
+            api_model: "real-model".into(),
+            provider: "p".into(),
+            note: String::new(),
+            tools: crate::core::providers::ToolMode::Native,
+        },
+    );
     s.core = Some("m".into());
     let ch = s.resolve("m").unwrap();
     assert_eq!(ch.model, "real-model", "发给供应商的是 api_model，不是展示名");
     assert_eq!(ch.provider.base_url, "http://x");
+    // 缺省 = envelope（手写信封：任何供应商都能用）；模型视图也如实带出来
+    s.models.insert(
+        "d".into(),
+        ModelEntry {
+            name: "缺省".into(),
+            api_model: "d".into(),
+            provider: "p".into(),
+            note: String::new(),
+            tools: Default::default(),
+        },
+    );
+    assert!(s.resolve("d").is_ok(), "缺省形态的模型照样能解析出通道");
+    assert_eq!(
+        s.model_views().iter().find(|v| v.id == "m").map(|v| v.tools),
+        Some(crate::core::providers::ToolMode::Native),
+        "模型视图要带上形态（前端显示与探测结果都靠它）"
+    );
     assert!(s.resolve("ghost").is_err(), "未知模型必须报错");
     assert_eq!(s.core_channel().unwrap().model, "real-model");
 }
@@ -590,10 +896,10 @@ fn settings_resolves_model_to_channel() {
 fn provider_lifecycle_and_key_never_leaks_to_view() {
     let mut core = core_with(vec![module_of("a")], gw(BTreeMap::new(), vec!["[]".into()]));
     core.provider_upsert("p1", "http://x", "sk-密钥XYZ").unwrap();
-    for line in core.provider_lines() {
-        assert!(!line.contains("sk-密钥XYZ"), "视图出现密钥：{}", line);
-    }
     for v in core.provider_views() {
+        // 展示文案由呈现层拼（core 不再提供 CLI 行），"密钥永不出现"这条红线两处都要成立。
+        let shown = format!("{}  {}", v.id, v.base_url);
+        assert!(!shown.contains("sk-密钥XYZ"), "视图出现密钥：{}", shown);
         assert!(!format!("{:?}", v).contains("sk-密钥XYZ"));
     }
     // 仍被模型引用时拒绝删除供应商（不静默级联）
@@ -942,9 +1248,9 @@ fn suggest_models_reuses_stored_agent_without_suggesting_model() {
 #[test]
 fn same_named_tools_across_modules_are_no_longer_a_conflict() {
     let mut a = module_of("a");
-    a.manifest.tools.insert("dump".to_string(), "python a/dump.py".to_string());
+    a.manifest.tools.insert("dump".to_string(), decl("python a/dump.py"));
     let mut b = module_of("b");
-    b.manifest.tools.insert("dump".to_string(), "python b/dump.py".to_string());
+    b.manifest.tools.insert("dump".to_string(), decl("python b/dump.py"));
     let mut core = core_with(vec![a, b], gw(BTreeMap::new(), vec!["[]".into()]));
     // 跨模块同名工具不再冲突：信封里的 module 消歧（行为见 same_named_tools_in_two_modules_run_in_their_own_root）。
     let one_agent = WorkSpec {
@@ -1481,7 +1787,7 @@ fn extract_balanced_array() {
 // ---------- 工具执行器 ----------
 
 /// 守护 runner：任何调用即失败（守护不该用工具的路径）。
-struct SilentRunner;
+pub(crate) struct SilentRunner;
 impl ToolRunner for SilentRunner {
     fn run(&self, _fence: &crate::core::fence::FenceSpec, _command: &str, _args: &str) -> ToolOutcome {
         panic!("不应调用工具");
@@ -1489,10 +1795,15 @@ impl ToolRunner for SilentRunner {
 }
 
 /// 记录型 runner：记录 (root, command, args)，回放固定输出。
-struct RecordingRunner {
-    calls: Mutex<Vec<(PathBuf, String, String)>>,
+pub(crate) struct RecordingRunner {
+    pub(crate) calls: Mutex<Vec<(PathBuf, String, String)>>,
     out: String,
     ok: bool,
+}
+impl RecordingRunner {
+    pub(crate) fn new(out: &str, ok: bool) -> RecordingRunner {
+        RecordingRunner { calls: Mutex::new(Vec::new()), out: out.to_string(), ok }
+    }
 }
 impl ToolRunner for RecordingRunner {
     fn run(&self, fence: &crate::core::fence::FenceSpec, command: &str, args_json: &str) -> ToolOutcome {
@@ -1505,6 +1816,36 @@ impl ToolRunner for RecordingRunner {
     }
 }
 
+/// 并发记录型 runner：记录**同时在跑**的调用数峰值（模块工具是否真的并发，只有它能作证）。
+pub(crate) struct ParallelRunner {
+    active: AtomicUsize,
+    peak: AtomicUsize,
+    delay_ms: u64,
+}
+
+impl ParallelRunner {
+    pub(crate) fn new(delay_ms: u64) -> ParallelRunner {
+        ParallelRunner { active: AtomicUsize::new(0), peak: AtomicUsize::new(0), delay_ms }
+    }
+
+    /// 同时在跑的峰值（串行恒为 1）。
+    pub(crate) fn peak_concurrent(&self) -> usize {
+        self.peak.load(Ordering::SeqCst)
+    }
+}
+
+impl ToolRunner for ParallelRunner {
+    fn run(&self, _fence: &crate::core::fence::FenceSpec, command: &str, args_json: &str) -> ToolOutcome {
+        let now = self.active.fetch_add(1, Ordering::SeqCst) + 1;
+        self.peak.fetch_max(now, Ordering::SeqCst);
+        if self.delay_ms > 0 {
+            std::thread::sleep(Duration::from_millis(self.delay_ms));
+        }
+        self.active.fetch_sub(1, Ordering::SeqCst);
+        ToolOutcome { ok: true, output: format!("{} 跑完了 {}", command, args_json) }
+    }
+}
+
 const TOOL_CALL: &str = "{\"type\":\"tool\",\"name\":\"grep\",\"args\":{\"keyword\":\"x\"}}";
 
 /// 带工具环境的成员：模块 m0 声明 grep → python tools/grep.py（cwd = 该模块目录）。
@@ -1512,16 +1853,29 @@ fn member_with_tools(id: &str, script: Vec<String>, runner: Arc<impl ToolRunner 
     let mut commands = BTreeMap::new();
     commands.insert("grep".to_string(), "python tools/grep.py".to_string());
     let mut modules = BTreeMap::new();
-    modules.insert("m0".to_string(), ModuleTools { root: abs(&["mods", "root"]), commands });
+    modules.insert(
+        "m0".to_string(),
+        ModuleTools {
+            root: abs(&["mods", "root"]),
+            commands,
+            books: BTreeMap::new(),
+            parallel: BTreeSet::new(),
+        },
+    );
     let mut m = Member::new(id, "职责".to_string(), scripted(script));
     // 该路径走模块声明的外部命令（grep）：空沙箱 + 内存 IO，内置工具不参与。
     m.tools = Some(MemberTools {
+        mode: crate::core::providers::ToolMode::Envelope,
         modules,
+        observations: crate::core::systool::Observations::default(),
+        repair: Arc::new(NoRepair),
+        log: Arc::new(crate::core::ports::NoopLog),
         runner,
         sandbox: test_sandbox("m0", &[]),
         io: Arc::new(InMemorySysIo::new()),
         unavailable: BTreeMap::new(),
         fence: crate::core::fence::FenceSpec::from_sandbox(&test_sandbox("m0", &[]), false),
+        reply_seq: 0,
     });
     m
 }
@@ -1538,10 +1892,10 @@ fn same_named_tools_in_two_modules_run_in_their_own_root() {
     ]);
     let mut a = module_of("a");
     a.root = abs(&["mods", "a"]);
-    a.manifest.tools.insert("read_txt".to_string(), "python tools/read_txt.py".to_string());
+    a.manifest.tools.insert("read_txt".to_string(), decl("python tools/read_txt.py"));
     let mut b = module_of("b");
     b.root = abs(&["mods", "b"]);
-    b.manifest.tools.insert("read_txt".to_string(), "python tools/read_txt.py".to_string());
+    b.manifest.tools.insert("read_txt".to_string(), decl("python tools/read_txt.py"));
     let mut core = core_with_runner(vec![a, b], gw(member, vec!["[]".into()]), Arc::clone(&runner));
     // 跨模块同名不再算冲突：照样能建工作。
     let sid = core.create_work(work("w", WorkMode::Single, &["a", "b"])).unwrap().sid;
@@ -1573,9 +1927,9 @@ fn external_tool_without_module_is_refused_when_agent_has_many_modules() {
         "{\"type\":\"say\",\"text\":\"知道了\"}".to_string(),
     ]);
     let mut a = module_of("a");
-    a.manifest.tools.insert("read_txt".to_string(), "python tools/read_txt.py".to_string());
+    a.manifest.tools.insert("read_txt".to_string(), decl("python tools/read_txt.py"));
     let mut b = module_of("b");
-    b.manifest.tools.insert("read_txt".to_string(), "python tools/read_txt.py".to_string());
+    b.manifest.tools.insert("read_txt".to_string(), decl("python tools/read_txt.py"));
     let mut core = core_with_runner(vec![a, b], gw(member, vec!["[]".into()]), Arc::clone(&runner));
     let sid = core.create_work(work("w", WorkMode::Single, &["a", "b"])).unwrap().sid;
     let events = with_live(|l| core.single_say(&sid, "干活", l)).unwrap();
@@ -1600,7 +1954,7 @@ fn tool_call_event_is_emitted_before_the_next_round() {
     let mut member = BTreeMap::new();
     member.insert("a".to_string(), vec![TOOL_CALL.into(), "{\"type\":\"say\",\"text\":\"完成\"}".into()]);
     let mut mod_a = module_of("a");
-    mod_a.manifest.tools.insert("grep".to_string(), "python tools/grep.py".to_string());
+    mod_a.manifest.tools.insert("grep".to_string(), decl("python tools/grep.py"));
     let runner = Arc::new(RecordingRunner { calls: Mutex::new(Vec::new()), out: "ok".into(), ok: true });
     let mut core = core_with_runner(vec![mod_a], gw(member, vec!["[]".into()]), runner);
     let sid = core.create_work(work("w", WorkMode::Single, &["a"])).unwrap().sid;
@@ -1774,7 +2128,6 @@ fn broken_tool(path: &str) -> String {
 fn malformed_tool_envelope_becomes_a_failed_tool_line() {
     // 真实案例：模型想调 write，但信封 JSON 非法（结尾多个 ]）——
     // 必须记一条 ok=false 的 tool 行，绝不把 JSON 当 AI 消息渲染，也绝不执行工具。
-    let catalogue = test_prompts().core.tool_texts.malformed_note;
     let raw_path = s(&["w", "work", "README.md"]);
     let broken = broken_tool(&raw_path);
     let hist = Arc::new(InMemoryHistory::new());
@@ -1799,13 +2152,17 @@ fn malformed_tool_envelope_becomes_a_failed_tool_line() {
     assert!(!views[0].ok, "非法的调用必须记为失败");
     assert_eq!(views[0].name, "write", "名字要尽力打捞出来（只用于显示）");
     assert_eq!(views[0].module, "", "没写 module → 空串");
-    assert_eq!(views[0].output, catalogue, "回注册子文案");
+    assert!(views[0].output.contains("不是合法 JSON"), "回注册子文案：{}", views[0].output);
     assert_eq!(views[0].raw, broken, "原文留档（重建上下文用）");
     assert_eq!(io.get(&["w", "work", "README.md"]), None, "非法信封绝不执行工具");
     // 历史：assistant(原文) + [工具结果]（含册子文案）→ 模型下一轮能自己改
     let h = core.single_history(&sid).unwrap();
     assert!(h.iter().any(|m| m.role == "assistant" && m.content == broken));
-    assert!(h.iter().any(|m| m.role == "user" && m.content.contains("[工具结果] write") && m.content.contains(&catalogue)), "{:?}", h);
+    assert!(
+        h.iter().any(|m| m.role == "user" && m.content.contains("[工具结果] write") && m.content.contains("不是合法 JSON")),
+        "{:?}",
+        h
+    );
     // 重建一致（重启后从落盘流水重建上下文）
     drop(core);
     let mut core2 = core_with_all(
@@ -1886,7 +2243,6 @@ fn tool_type_mention_in_plain_speech_is_not_misjudged() {
 fn prose_then_unclosed_tool_envelope_is_malformed_and_keeps_prose() {
     // 正文在前、坏信封在后（未闭合）：也要判 malformed，且正文照常显示、JSON 不上屏。
     let raw = "好的。{\"type\":\"tool\",\"name\":\"write\",\"args\":{\"path\":\"a\"}";
-    let catalogue = test_prompts().core.tool_texts.malformed_note;
     let mut member = BTreeMap::new();
     member.insert("a".to_string(), vec![raw.to_string(), "{\"type\":\"say\",\"text\":\"改好了\"}".to_string()]);
     let mut core = core_with(vec![module_of("a")], gw(member, vec!["[]".into()]));
@@ -1899,7 +2255,7 @@ fn prose_then_unclosed_tool_envelope_is_malformed_and_keeps_prose() {
     let views = tool_views(&events);
     assert!(!views[0].ok && views[0].name == "write", "{:?}", views[0]);
     assert!(views[0].args.contains("\"path\":\"a\""), "参数尽力打捞：{:?}", views[0].args);
-    assert_eq!(views[0].output, catalogue);
+    assert!(views[0].output.contains("还差 }"), "未闭合要说清还差哪个字符：{}", views[0].output);
     // 历史：assistant(原文) + [工具结果]（模型下一轮能自己改）
     let h = core.single_history(&sid).unwrap();
     assert!(h.iter().any(|m| m.role == "assistant" && m.content == raw));
@@ -1907,28 +2263,161 @@ fn prose_then_unclosed_tool_envelope_is_malformed_and_keeps_prose() {
 }
 
 #[test]
+fn a_malformed_envelope_is_repaired_when_the_fix_is_unambiguous() {
+    // 真实事故的形状：write 的 content 里直接换了行 → 手写信封非法。
+    // 默认修复器只做无歧义的转义；修好就照常执行，并在回执最前面如实标注。
+    let note = s(&["demo", "m0", "note.txt"]);
+    let raw = format!(
+        "{{\"type\":\"tool\",\"name\":\"write\",\"args\":{{\"path\":\"{}\",\"content\":\"第一行\n第二行\"}}}}",
+        note
+    );
+    let runner = Arc::new(RecordingRunner { calls: Mutex::new(Vec::new()), out: String::new(), ok: true });
+    let prompts = test_prompts();
+    // 不修（严格基线）：信封不合法 → 失败工具行，工具绝不执行
+    let mut m = member_with_tools("m0", vec![raw.clone(), "{\"type\":\"say\",\"text\":\"改好了\"}".to_string()], Arc::clone(&runner));
+    assert!(m.tools.as_ref().expect("工具环境").repair.repair("x", &crate::core::envelope::Malformed::Syntax("x".into())).repaired.is_none());
+    let exec = crate::core::engine::Execution::run(std::slice::from_mut(&mut m), "任务", &prompts);
+    let trace = exec.traces.get("m0").expect("工具行");
+    assert!(!trace[0].ok, "不修时如实记失败：{}", trace[0].output);
+    // 默认修复器：同一个输入被无歧义修好 → 照常执行，且回执最前面如实标注
+    let mut m2 = member_with_tools("m0", vec![raw.clone(), "{\"type\":\"say\",\"text\":\"改好了\"}".to_string()], Arc::clone(&runner));
+    m2.tools.as_mut().expect("工具环境").repair = Arc::new(crate::adapters::UnambiguousRepair);
+    let exec2 = crate::core::engine::Execution::run(std::slice::from_mut(&mut m2), "任务", &prompts);
+    let trace2 = exec2.traces.get("m0").expect("工具行");
+    assert!(trace2[0].ok, "修好即执行：{}", trace2[0].output);
+    assert!(trace2[0].output.starts_with("[信封修复]"), "{}", trace2[0].output);
+    assert!(trace2[0].output.contains("换行"), "{}", trace2[0].output);
+    assert!(trace2[0].args.contains("第一行\\n第二行"), "执行的是修好后的参数：{}", trace2[0].args);
+    // 真实会话的形状：内容字符串写完、只差信封的收尾括号 → 补上就执行，不必让模型重发
+    let note2 = s(&["demo", "m0", "note2.txt"]);
+    let missing_brace = format!(
+        "已读完，落盘。{{\"type\":\"tool\",\"name\":\"write\",\"args\":{{\"path\":\"{}\",\"content\":\"正文\"}}",
+        note2
+    );
+    let mut m3 = member_with_tools("m0", vec![missing_brace, "{\"type\":\"say\",\"text\":\"落好了\"}".to_string()], Arc::clone(&runner));
+    m3.tools.as_mut().expect("工具环境").repair = Arc::new(crate::adapters::UnambiguousRepair);
+    let exec3 = crate::core::engine::Execution::run(std::slice::from_mut(&mut m3), "任务", &prompts);
+    let trace3 = exec3.traces.get("m0").expect("工具行");
+    assert!(trace3[0].ok, "补上收尾括号后照常执行：{}", trace3[0].output);
+    assert!(
+        trace3[0].output.starts_with("[信封修复]") && trace3[0].output.contains("补上缺的收尾"),
+        "要如实标注补了什么：{}",
+        trace3[0].output
+    );
+    // 补不出来的（缺的是一个值而不是括号）不猜：照旧记失败行，并说清还差什么
+    let hopeless = "{\"type\":\"tool\",\"name\":\"write\",\"args\":{\"path\":\"a\",\"content\":";
+    let mut m4 = member_with_tools("m0", vec![hopeless.to_string(), "{\"type\":\"say\",\"text\":\"知道了\"}".to_string()], Arc::clone(&runner));
+    m4.tools.as_mut().expect("工具环境").repair = Arc::new(crate::adapters::UnambiguousRepair);
+    let exec4 = crate::core::engine::Execution::run(std::slice::from_mut(&mut m4), "任务", &prompts);
+    let trace4 = exec4.traces.get("m0").expect("工具行");
+    assert!(!trace4[0].ok && trace4[0].output.contains("还差"), "{}", trace4[0].output);
+}
+
+#[test]
+fn malformed_envelopes_are_classified_so_the_model_gets_the_right_fix() {
+    // 类别是可判定的确切事实：模型据此能直接改对，而不是被笼统告知"JSON 不合法"。
+    use crate::core::envelope::{parse, Malformed};
+    // ① 字符串里直接换行（真实事故：write 的 content 里裸换行 → 整段 JSON 非法）
+    let r = parse("{\"type\":\"tool\",\"name\":\"write\",\"args\":{\"path\":\"a\",\"content\":\"第一行\n第二行\"}}");
+    match r.tools.first().cloned().expect("应给出非法信封信号").malformed.expect("应判定类别") {
+        Malformed::RawControl { ch, line, tail } => {
+            assert_eq!(ch, '\n', "要报出是哪个控制字符");
+            assert_eq!(line, 1, "要报出在哪一行");
+            assert!(tail.is_none(), "这一例括号是平衡的：{:?}", tail);
+        }
+        other => panic!("应判为裸控制字符：{:?}", other),
+    }
+    // ② 收尾未闭合（输出被截断）：要说清还差哪个字符，而不是笼统说"不完整"
+    let r = parse("好。{\"type\":\"tool\",\"name\":\"write\",\"args\":{\"path\":\"a\"}");
+    assert_eq!(
+        r.tools.first().cloned().expect("信号").malformed,
+        Some(Malformed::Unclosed(crate::core::envelope::Tail {
+            missing: "}".to_string(),
+            in_string: false,
+            envelopes: 1,
+        }))
+    );
+    // 断在字符串中间：状态要说清"内容没写完"（补引号会拿到半截内容）
+    let r = parse("{\"type\":\"tool\",\"name\":\"write\",\"args\":{\"path\":\"a\",\"content\":\"写了一半");
+    match r.tools.first().cloned().expect("信号").malformed.expect("类别") {
+        Malformed::Unclosed(t) => assert!(t.in_string, "要报出断在字符串里：{:?}", t),
+        other => panic!("应判为未闭合：{:?}", other),
+    }
+    // ③ JSON 合法但字段不合法（缺 name）
+    let r = parse("{\"type\":\"tool\",\"args\":{}}");
+    match r.tools.first().cloned().expect("信号").malformed.expect("类别") {
+        Malformed::Shape(why) => assert!(why.contains("name"), "要说清缺哪个字段：{}", why),
+        other => panic!("应判为字段不合法：{:?}", other),
+    }
+    // ④ 括号平衡但 JSON 语法非法：要带上解析器报的位置
+    let r = parse("{\"type\":\"tool\",\"name\":\"write\",\"args\":{\"path\":,\"content\":\"x\"}}");
+    match r.tools.first().cloned().expect("信号").malformed.expect("类别") {
+        Malformed::Syntax(why) => assert!(why.contains("line") && why.contains("column"), "要带位置：{}", why),
+        other => panic!("应判为语法错：{:?}", other),
+    }
+    // 四类各有各的修法（不是同一条笼统提示）
+    let texts = test_prompts().core.tool_texts;
+    let control = texts.malformed_report(&Malformed::RawControl { ch: '\n', line: 3, tail: None });
+    assert!(control.contains("裸换行") && control.contains("第 3 行"), "{}", control);
+    assert!(control.contains("\\n"), "要教模型把换行写成反斜杠 n：{}", control);
+    let shape = texts.malformed_report(&Malformed::Shape("missing field name".to_string()));
+    assert!(shape.contains("字段不合法") && shape.contains("missing field"), "{}", shape);
+    let tab = texts.malformed_report(&Malformed::RawControl { ch: '\t', line: 1, tail: None });
+    // 只差收尾括号：要说清"还差 }"（而不是误导成"内容过长"）
+    let brace = texts.malformed_report(&Malformed::Unclosed(crate::core::envelope::Tail {
+        missing: "}".to_string(),
+        in_string: false,
+        envelopes: 1,
+    }));
+    assert!(brace.contains("还差 }"), "{}", brace);
+    assert!(!brace.contains("分次写入"), "内容写完就别引导它去分次写：{}", brace);
+    // 断在字符串中间才是"内容没写完"，这时才谈分次写
+    let cut = texts.malformed_report(&Malformed::Unclosed(crate::core::envelope::Tail {
+        missing: "}\"}".to_string(),
+        in_string: true,
+        envelopes: 1,
+    }));
+    // 一段回复里起了两段信封：要说清"只发一段"，而不是让它去补末尾括号（真实事故的形状）
+    let multi = texts.malformed_report(&Malformed::Unclosed(crate::core::envelope::Tail {
+        missing: "}}".to_string(),
+        in_string: false,
+        envelopes: 2,
+    }));
+    assert!(multi.contains("2 段") && multi.contains("只发一段"), "{}", multi);
+    assert!(!multi.contains("补上就完整了"), "两段时不能说「补上就完整」：{}", multi);
+    assert!(cut.contains("断在字符串中间") && cut.contains("分次写入"), "{}", cut);
+    assert!(tab.contains("制表符"), "{}", tab);
+    assert!(
+        texts.malformed_unclosed_brace != texts.malformed_unclosed_string
+            && texts.malformed_unclosed_string != texts.malformed_syntax
+            && texts.malformed_syntax != texts.malformed_shape,
+        "每一类的文案都要各说各的"
+    );
+}
+
+#[test]
 fn envelope_tool_parses_name_and_args() {
     let r = crate::core::envelope::parse(TOOL_CALL);
     assert_eq!(r.verb, crate::core::envelope::Verb::Tool);
-    let inv = r.tool.expect("应有调用申请");
+    let inv = r.tools.first().cloned().expect("应有调用申请");
     assert_eq!(inv.name, "grep");
     assert!(inv.module.is_none(), "没写 module = None（单模块 agent 靠这个兜底）");
     assert!(inv.args_json.contains("keyword"));
     // 带 module 的信封：trim 后非空才是 Some（空串按省略处理）。
     let with_mod = crate::core::envelope::parse("{\"type\":\"tool\",\"module\":\" reviewer \",\"name\":\"read_txt\",\"args\":{}}");
-    assert_eq!(with_mod.tool.expect("应有调用申请").module.as_deref(), Some("reviewer"));
+    assert_eq!(with_mod.tools.first().cloned().expect("应有调用申请").module.as_deref(), Some("reviewer"));
     let blank_mod = crate::core::envelope::parse("{\"type\":\"tool\",\"module\":\"  \",\"name\":\"read_txt\",\"args\":{}}");
-    assert!(blank_mod.tool.expect("应有调用申请").module.is_none());
+    assert!(blank_mod.tools.first().cloned().expect("应有调用申请").module.is_none());
     // name 缺失 = 工具信封但不合法 → **独立的 malformed 信号**（不再按原文发言收录）。
     let bad = crate::core::envelope::parse("{\"type\":\"tool\",\"args\":{}}");
     assert_eq!(bad.verb, crate::core::envelope::Verb::Tool, "看得出是想发工具信封");
     assert!(!bad.degraded, "malformed 与 degraded 是两回事（后者是信封缺失）");
-    let inv = bad.tool.expect("应给出非法信封信号");
-    assert!(inv.malformed && inv.name.is_empty(), "打捞不到名字就留空：{:?}", inv);
+    let inv = bad.tools.first().cloned().expect("应给出非法信封信号");
+    assert!(inv.malformed.is_some() && inv.name.is_empty(), "打捞不到名字就留空：{:?}", inv);
     assert!(bad.text.is_empty(), "非法信封的 JSON 也不进 text");
     // 真的"没有信封"仍然是 degraded say（原文收录）。
     let plain = crate::core::envelope::parse("没有信封的发言");
-    assert!(plain.degraded && plain.tool.is_none() && plain.text == "没有信封的发言");
+    assert!(plain.degraded && plain.tools.is_empty() && plain.text == "没有信封的发言");
     // 信封之外的正文才进 text（永不把信封 JSON 当文本）；只剩信封时 text 为空串。
     assert!(crate::core::envelope::parse(TOOL_CALL).text.is_empty(), "只剩信封 → text 空");
     let prose = crate::core::envelope::parse("先看一眼。{\"type\":\"tool\",\"name\":\"grep\",\"args\":{}}后记");
@@ -1963,7 +2452,7 @@ fn envelope_only_round_produces_only_a_tool_line() {
     let mut member = BTreeMap::new();
     member.insert("a".to_string(), vec![TOOL_CALL.into(), "{\"type\":\"say\",\"text\":\"完成\"}".into()]);
     let mut mod_a = module_of("a");
-    mod_a.manifest.tools.insert("grep".to_string(), "python tools/grep.py".to_string());
+    mod_a.manifest.tools.insert("grep".to_string(), decl("python tools/grep.py"));
     let runner = Arc::new(RecordingRunner { calls: Mutex::new(Vec::new()), out: "ok".into(), ok: true });
     let mut core = core_with_runner(vec![mod_a], gw(member, vec!["[]".into()]), runner);
     let sid = core.create_work(work("w", WorkMode::Single, &["a"])).unwrap().sid;
@@ -2036,7 +2525,7 @@ fn forced_final_tool_envelope_shows_no_json() {
     let mut member = BTreeMap::new();
     member.insert("a".to_string(), script);
     let mut mod_a = module_of("a");
-    mod_a.manifest.tools.insert("grep".to_string(), "python tools/grep.py".to_string());
+    mod_a.manifest.tools.insert("grep".to_string(), decl("python tools/grep.py"));
     let mut core = core_with_runner(vec![mod_a], gw(member, vec!["[]".into()]), Arc::clone(&runner));
     let sid = core.create_work(work("w", WorkMode::Single, &["a"])).unwrap().sid;
     let events = with_live(|l| core.single_say(&sid, "跑满", l)).unwrap();
@@ -2071,6 +2560,59 @@ fn tool_loop_runs_declared_tool() {
     assert_eq!(trace[0].module, "m0", "信封省略 module 时按唯一模块兜底");
     assert!(trace[0].ok && trace[0].args.contains("keyword"), "{:?}", trace[0]);
     assert!(trace[0].raw.contains("\"type\":\"tool\""), "原始输出要留档（重建上下文用）");
+}
+
+#[test]
+fn module_tool_params_are_declared_in_the_manifest_and_enforced_by_core() {
+    // 参数契约写在 module.yaml（不埋进代码）：核心按它校验，并把说明写进系统提示。
+    let mut mod_m0 = module_of("m0");
+    mod_m0.manifest.tools.insert(
+        "grep".to_string(),
+        decl_with("python tools/grep.py", "keyword: {type: string, required: true}\n"),
+    );
+    let prompts = test_prompts();
+    let system = crate::core::module::agent_system(
+        &prompts,
+        "m0",
+        std::slice::from_ref(&mod_m0),
+        "工具说明",
+        crate::core::providers::ToolMode::Envelope,
+    );
+    assert!(system.contains("【模块工具参数】"), "系统提示要有参数段：{}", system);
+    assert!(system.contains("- m0.grep") && system.contains("keyword（string，必填）"), "{}", system);
+
+    let table = crate::core::engine::tool_table(std::slice::from_ref(&mod_m0));
+    let books = table.get("m0").expect("放行表").books.clone();
+    assert_eq!(books.len(), 1, "只给声明了参数的工具建契约");
+
+    // 参数不符：拒收，且说清缺哪个参数、并把工具签名发回（不启动进程）。
+    let runner = Arc::new(RecordingRunner { calls: Mutex::new(Vec::new()), out: "ok".into(), ok: true });
+    let mut m = member_with_tools(
+        "m0",
+        vec!["{\"type\":\"tool\",\"name\":\"grep\",\"args\":{}}".to_string(), "{\"type\":\"say\",\"text\":\"完成\"}".to_string()],
+        Arc::clone(&runner),
+    );
+    m.tools.as_mut().expect("工具环境").modules.get_mut("m0").expect("模块").books = books;
+    let exec = crate::core::engine::Execution::run(std::slice::from_mut(&mut m), "任务", &prompts);
+    assert!(runner.calls.lock().expect("锁").is_empty(), "参数不合法绝不落进程");
+    let trace = exec.traces.get("m0").expect("失败的调用也要入册");
+    assert!(trace[0].output.contains("缺少必填参数 keyword"), "{}", trace[0].output);
+    assert!(trace[0].output.contains("keyword（string，必填）"), "失败要带上参数签名：{}", trace[0].output);
+
+    // 参数合法：照旧执行，args 原样交给工具。
+    let runner2 = Arc::new(RecordingRunner { calls: Mutex::new(Vec::new()), out: "ok".into(), ok: true });
+    let mut m2 = member_with_tools("m0", vec![TOOL_CALL.to_string(), "{\"type\":\"say\",\"text\":\"完成\"}".to_string()], Arc::clone(&runner2));
+    let books2 = table.get("m0").expect("放行表").books.clone();
+    m2.tools.as_mut().expect("工具环境").modules.get_mut("m0").expect("模块").books = books2;
+    crate::core::engine::Execution::run(std::slice::from_mut(&mut m2), "任务", &prompts);
+    let calls = runner2.calls.lock().expect("锁");
+    assert_eq!(calls.len(), 1, "合法调用照常执行");
+    assert!(calls[0].2.contains("keyword"));
+
+    // 没声明参数的工具照旧不校验（不给模块开发者添门槛）。
+    let plain = module_of("m0");
+    let plain_table = crate::core::engine::tool_table(std::slice::from_ref(&plain));
+    assert!(plain_table.get("m0").expect("放行表").books.is_empty(), "没声明参数 = 没有契约");
 }
 
 #[test]
@@ -2120,7 +2662,7 @@ fn core_direct_tool_flow_injects_result_into_history() {
         "{\"type\":\"say\",\"text\":\"依据第 3 行，结论成立\"}".to_string(),
     ]);
     let mut manifest_tools = BTreeMap::new();
-    manifest_tools.insert("grep".to_string(), "python tools/grep.py".to_string());
+    manifest_tools.insert("grep".to_string(), decl("python tools/grep.py"));
     let mut mod_a = module_of("a");
     mod_a.manifest.tools = manifest_tools;
     let mut core = core_with_runner(vec![mod_a], gw(member, vec!["[]".into()]), Arc::clone(&runner));
@@ -2188,13 +2730,13 @@ fn builtin_search_reports_line_numbers_and_respects_case() {
     io.seed(&["demo", "work", "note.txt"], "第一行 Alpha\n第二行 beta\nalpha 小写\n");
     let path = s(&["demo", "work", "note.txt"]);
     // 默认区分大小写
-    let out = crate::core::systool::execute(&sb, &io, "search", &format!("{{\"path\":\"{}\",\"keyword\":\"alpha\"}}", path));
+    let out = run_builtin(&sb, &io, "search", &format!("{{\"path\":\"{}\",\"keyword\":\"alpha\"}}", path));
     assert!(out.ok, "{}", out.output);
     assert!(out.output.contains("3 | alpha 小写"), "{}", out.output);
     assert!(!out.output.contains("第一行 Alpha"), "默认区分大小写：{}", out.output);
     assert!(out.output.contains("命中 1 行 / 全文 3 行"), "{}", out.output);
     // ignore_case = true
-    let out = crate::core::systool::execute(
+    let out = run_builtin(
         &sb,
         &io,
         "search",
@@ -2203,7 +2745,7 @@ fn builtin_search_reports_line_numbers_and_respects_case() {
     assert!(out.output.contains("1 | 第一行 Alpha") && out.output.contains("3 | alpha 小写"), "{}", out.output);
     assert!(out.output.contains("命中 2 行 / 全文 3 行"), "{}", out.output);
     // 越界被拒
-    let bad = crate::core::systool::execute(
+    let bad = run_builtin(
         &sb,
         &io,
         "search",
@@ -2272,16 +2814,790 @@ fn builtin_write_into_module_dir_is_allowed_with_notice() {
     let io = InMemorySysIo::new();
     let sb = test_sandbox("a1", &["data"]);
     let keep = s(&["mods", "data", "keep.txt"]);
-    let out = crate::core::systool::execute(&sb, &io, "write", &format!("{{\"path\":\"{}\",\"content\":\"状态\"}}", keep));
+    let out = run_builtin(&sb, &io, "write", &format!("{{\"path\":\"{}\",\"content\":\"状态\"}}", keep));
     assert!(out.ok, "{}", out.output);
     assert_eq!(io.get(&["mods", "data", "keep.txt"]).as_deref(), Some("状态"));
     assert!(out.output.contains("模块 data"), "写模块目录要如实提示：{}", out.output);
     assert!(out.output.contains(crate::core::systool::MODULE_WRITE_MARK), "要有可供轨迹识别的标记：{}", out.output);
     // 越界写入：拒绝且不落盘。
     let other = s(&["mods", "other", "x.txt"]);
-    let bad = crate::core::systool::execute(&sb, &io, "write", &format!("{{\"path\":\"{}\",\"content\":\"x\"}}", other));
+    let bad = run_builtin(&sb, &io, "write", &format!("{{\"path\":\"{}\",\"content\":\"x\"}}", other));
     assert!(!bad.ok);
     assert_eq!(io.get(&["mods", "other", "x.txt"]), None);
+}
+
+#[test]
+fn builtin_edit_replaces_the_requested_span_and_reports_what_it_did() {
+    let io = InMemorySysIo::new();
+    let sb = test_sandbox("a1", &[]);
+    let note = s(&["demo", "work", "note.txt"]);
+    io.seed(&["demo", "work", "note.txt"], "第一段\n要改的句子\n第三段\n");
+    let mut obs = crate::core::systool::Observations::default();
+    let edit = |obs: &mut crate::core::systool::Observations, args: &str| {
+        let full = format!("{{\"path\":\"{}\",{}}}", note, args);
+        crate::core::systool::execute(&sb, &io, obs, "edit", &full)
+    };
+    // 唯一命中：只改那一处，别处一字不动
+    let ok = edit(&mut obs, "\"old_string\":\"要改的句子\",\"new_string\":\"改好了\"");
+    assert!(ok.ok, "{}", ok.output);
+    assert_eq!(io.get(&["demo", "work", "note.txt"]).as_deref(), Some("第一段\n改好了\n第三段\n"));
+    assert!(ok.output.contains("替换 1 处"), "{}", ok.output);
+    // old == new：什么都不会变，如实拒绝
+    let same = edit(&mut obs, "\"old_string\":\"改好了\",\"new_string\":\"改好了\"");
+    assert!(!same.ok && same.output.contains("什么都不会变"), "{}", same.output);
+    // 找不到：说清没找到，并指出"只差空白"的那一行（模型据此改对缩进）
+    let miss = edit(&mut obs, "\"old_string\":\"   改好了\",\"new_string\":\"x\"");
+    assert!(!miss.ok && miss.output.contains("没找到 old_string"), "{}", miss.output);
+    assert!(miss.output.contains("第 2 行与它只差空白"), "{}", miss.output);
+    // 多处命中：列出位置，且绝不写盘
+    io.seed(&["demo", "work", "note.txt"], "dup\ndup\n");
+    let multi = edit(&mut obs, "\"old_string\":\"dup\",\"new_string\":\"x\"");
+    assert!(!multi.ok && multi.output.contains("命中 2 处") && multi.output.contains("第 1、2 行"), "{}", multi.output);
+    assert_eq!(io.get(&["demo", "work", "note.txt"]).as_deref(), Some("dup\ndup\n"), "拒收时绝不写盘");
+    // replace_all：全改
+    let all = edit(&mut obs, "\"old_string\":\"dup\",\"new_string\":\"x\",\"replace_all\":true");
+    assert!(all.ok && all.output.contains("替换 2 处"), "{}", all.output);
+    assert_eq!(io.get(&["demo", "work", "note.txt"]).as_deref(), Some("x\nx\n"));
+    // new_string 空串 = 把这一段删掉
+    let del = edit(&mut obs, "\"old_string\":\"x\",\"new_string\":\"\",\"replace_all\":true");
+    assert!(del.ok, "{}", del.output);
+    assert_eq!(io.get(&["demo", "work", "note.txt"]).as_deref(), Some("\n\n"));
+}
+
+#[test]
+fn builtin_edit_refuses_files_it_cannot_see_whole() {
+    // 只看到开头 / 看到的是替换字符：改写会把没读到的内容或原始字节一起弄丢 → 一律不写盘。
+    let note = s(&["demo", "work", "note.txt"]);
+    let args = format!("{{\"path\":\"{}\",\"old_string\":\"a\",\"new_string\":\"b\"}}", note);
+    let sb = test_sandbox("a1", &[]);
+    for (io, want) in [
+        (InMemorySysIo::new().marked(false, true), "超过单次读取上限"),
+        (InMemorySysIo::new().marked(true, false), "非法 UTF-8"),
+    ] {
+        io.seed(&["demo", "work", "note.txt"], "abc");
+        let mut obs = crate::core::systool::Observations::default();
+        let out = crate::core::systool::execute(&sb, &io, &mut obs, "edit", &args);
+        assert!(!out.ok && out.output.contains(want), "{}", out.output);
+        assert_eq!(io.get(&["demo", "work", "note.txt"]).as_deref(), Some("abc"), "拒绝时不写盘");
+    }
+}
+
+#[test]
+fn builtin_write_needs_a_complete_prior_read_of_an_existing_file() {
+    let io = InMemorySysIo::new();
+    let sb = test_sandbox("a1", &[]);
+    let note = s(&["demo", "work", "note.txt"]);
+    let run = |obs: &mut crate::core::systool::Observations, tool: &str, args: String| {
+        crate::core::systool::execute(&sb, &io, obs, tool, &args)
+    };
+    let mut obs = crate::core::systool::Observations::default();
+    // 新建文件：不需要"读过"什么
+    let made = run(&mut obs, "write", format!("{{\"path\":\"{}\",\"content\":\"第一版\"}}", note));
+    assert!(made.ok, "{}", made.output);
+    // 核心自己写过的文件：账本里有它的内容指纹 → 可以直接再写
+    let again = run(&mut obs, "write", format!("{{\"path\":\"{}\",\"content\":\"第二版\\n还有一行\"}}", note));
+    assert!(again.ok, "{}", again.output);
+    // 只读到一段 = 证据不足：整份覆盖被拒，并指出改法
+    let mut obs2 = crate::core::systool::Observations::default();
+    let partial = run(&mut obs2, "read", format!("{{\"path\":\"{}\",\"limit\":1}}", note));
+    assert!(partial.ok && partial.output.contains("共 2 行"), "{}", partial.output);
+    let refused = run(&mut obs2, "write", format!("{{\"path\":\"{}\",\"content\":\"覆盖\"}}", note));
+    assert!(!refused.ok && refused.output.contains("只读到一部分"), "{}", refused.output);
+    assert!(refused.output.contains("edit"), "要给出改法：{}", refused.output);
+    assert_eq!(io.get(&["demo", "work", "note.txt"]).as_deref(), Some("第二版\n还有一行"), "拒收时绝不写盘");
+    // 完整读过 → 放行
+    let full = run(&mut obs2, "read", format!("{{\"path\":\"{}\"}}", note));
+    assert!(full.ok && full.output.contains("已到文件末尾"), "{}", full.output);
+    let ok = run(&mut obs2, "write", format!("{{\"path\":\"{}\",\"content\":\"第三版\"}}", note));
+    assert!(ok.ok, "{}", ok.output);
+    // 读过之后文件被别人改过：指纹不符 → 拒绝凭记忆覆盖
+    let mut obs3 = crate::core::systool::Observations::default();
+    run(&mut obs3, "read", format!("{{\"path\":\"{}\"}}", note));
+    io.seed(&["demo", "work", "note.txt"], "别人改过的内容");
+    let stale = run(&mut obs3, "write", format!("{{\"path\":\"{}\",\"content\":\"我的版本\"}}", note));
+    assert!(!stale.ok && stale.output.contains("又被改动过"), "{}", stale.output);
+    assert_eq!(io.get(&["demo", "work", "note.txt"]).as_deref(), Some("别人改过的内容"), "拒不覆盖");
+}
+
+/// 被供应商按长度截断的通道替身：正文照发，但 finish_reason = length。
+pub(crate) struct TruncChat {
+    pub(crate) script: Vec<String>,
+}
+
+impl Chat for TruncChat {
+    fn complete(&mut self, _m: &[Msg], _opts: CompleteOpts<'_>, _on: &mut dyn FnMut(Chunk) -> bool) -> Completion {
+        let text = if self.script.len() > 1 { self.script.remove(0) } else { self.script.first().cloned().unwrap_or_default() };
+        Completion { raw: text, finish: "length".to_string(), calls: Vec::new() }
+    }
+}
+
+/// 一律回"被截断"的网关（验核心能不能把截断与写错分开）。
+pub(crate) struct TruncGateway {
+    pub(crate) script: Vec<String>,
+}
+
+impl ChatGateway for TruncGateway {
+    fn probe_tools(&self, _c: &Channel) -> Result<crate::core::ports::ProbeOutcome, String> {
+        Err("脚本替身没有真实供应商，测不了工具调用支持".to_string())
+    }
+    fn member_channel(&self, _c: Option<&Channel>, _id: &str) -> (BoxedChat, Option<String>) {
+        (Box::new(TruncChat { script: self.script.clone() }), None)
+    }
+    fn core_channel(&self, _c: Option<&Channel>) -> (BoxedChat, bool) {
+        (Box::new(TruncChat { script: self.script.clone() }), false)
+    }
+}
+
+/// 被用户中止的通道：回调一律返回 false（调用方要求停止），但仍返回一段"只差一个括号"的信封。
+pub(crate) struct AbortChat {
+    pub(crate) raw: String,
+}
+
+impl Chat for AbortChat {
+    fn complete(&mut self, _m: &[Msg], _opts: CompleteOpts<'_>, on: &mut dyn FnMut(Chunk) -> bool) -> Completion {
+        let _ = on(Chunk::Start);
+        Completion::text(self.raw.clone())
+    }
+}
+
+pub(crate) struct AbortGateway {
+    pub(crate) raw: String,
+}
+
+impl ChatGateway for AbortGateway {
+    fn probe_tools(&self, _c: &Channel) -> Result<crate::core::ports::ProbeOutcome, String> {
+        Err("脚本替身没有真实供应商，测不了工具调用支持".to_string())
+    }
+    fn member_channel(&self, _c: Option<&Channel>, _id: &str) -> (BoxedChat, Option<String>) {
+        (Box::new(AbortChat { raw: self.raw.clone() }), None)
+    }
+    fn core_channel(&self, _c: Option<&Channel>) -> (BoxedChat, bool) {
+        (Box::new(AbortChat { raw: self.raw.clone() }), false)
+    }
+}
+
+#[test]
+fn an_aborted_generation_never_executes_a_repairable_envelope() {
+    // 被停止的生成留下的"只差一个括号"的信封：即便修复端口能修，也绝不执行——
+    // 半截信封是停下来的产物，不是模型的意图（真实会话里第一轮三次都是这个形状）。
+    let note = s(&["w", "a", "note.txt"]);
+    let raw = format!(
+        "{{\"type\":\"tool\",\"name\":\"write\",\"args\":{{\"path\":\"{}\",\"content\":\"正文\"}}",
+        note
+    );
+    let io = Arc::new(InMemorySysIo::new());
+    // 中止网关：这一轮的通道回调返回 false（调用方要求停止）
+    let mut core = core_with_io_gateway(vec![module_of("a")], AbortGateway { raw }, Arc::clone(&io));
+    let sid = core.create_work(work("w", WorkMode::Single, &["a"])).unwrap().sid;
+    let events = with_live(|l| core.single_say(&sid, "写", l)).unwrap();
+    let views = tool_views(&events);
+    assert!(!views[0].ok, "被停止的生成不执行工具：{}", views[0].output);
+    assert!(views[0].output.contains("还差"), "要如实说清信封没写完：{}", views[0].output);
+    assert_eq!(io.get(&["w", "a", "note.txt"]), None, "绝不落盘");
+}
+
+#[test]
+fn a_truncated_output_is_reported_as_truncation_not_as_a_bad_envelope() {
+    // 供应商说 finish_reason=length：回执要指出"是被按长度截断"，而不是让模型去查括号；
+    // 真实会话里正是分辨不出这两者，模型照着"内容过长"的假设白跑了两轮。
+    let broken = "{\"type\":\"tool\",\"name\":\"write\",\"args\":{\"path\":\"a\",\"content\":";
+    let mut core = core_with_gateway(
+        vec![module_of("a")],
+        TruncGateway { script: vec![broken.to_string(), "{\"type\":\"say\",\"text\":\"知道了\"}".to_string()] },
+    );
+    let sid = core.create_work(work("w", WorkMode::Single, &["a"])).unwrap().sid;
+    let events = with_live(|l| core.single_say(&sid, "写", l)).unwrap();
+    let views = tool_views(&events);
+    assert!(!views[0].ok);
+    assert!(views[0].output.contains("被供应商按输出长度截断"), "{}", views[0].output);
+    assert!(views[0].output.contains("还差"), "还差什么也要说：{}", views[0].output);
+
+    // 纯文本轮被截断：行尾如实标注（与"已停止"同一套做法），模型与用户都看得到
+    let mut core2 = core_with_gateway(vec![module_of("a")], TruncGateway { script: vec!["半句话".to_string()] });
+    let sid2 = core2.create_work(work("w", WorkMode::Single, &["a"])).unwrap().sid;
+    let events2 = with_live(|l| core2.single_say(&sid2, "说", l)).unwrap();
+    let rows = transcript_rows(&events2);
+    assert!(
+        rows.iter().any(|r| r.1.contains("半句话") && r.1.contains("（本段被输出长度截断）")),
+        "{:?}",
+        rows
+    );
+}
+
+/// 固定探测结论的网关：专测"结论怎么落到登记处"这一层策略（事实本身由适配器测）。
+pub(crate) struct ProbeGateway {
+    pub(crate) outcome: Arc<Mutex<crate::core::providers::ProbeOutcome>>,
+}
+
+impl ChatGateway for ProbeGateway {
+    fn probe_tools(&self, _c: &Channel) -> Result<crate::core::ports::ProbeOutcome, String> {
+        Ok(self.outcome.lock().expect("锁").clone())
+    }
+    fn member_channel(&self, _c: Option<&Channel>, _id: &str) -> (BoxedChat, Option<String>) {
+        (scripted(vec!["{\"type\":\"say\",\"text\":\"收到\"}".to_string()]), None)
+    }
+    fn core_channel(&self, _c: Option<&Channel>) -> (BoxedChat, bool) {
+        (scripted(vec!["[]".to_string()]), true)
+    }
+}
+
+#[test]
+fn a_probe_writes_back_only_conclusive_results() {
+    use crate::core::providers::{ProbeOutcome, ToolMode};
+    let fresh = |outcome: ProbeOutcome| {
+        let mut core = core_with_gateway(vec![], ProbeGateway { outcome: Arc::new(Mutex::new(outcome)) });
+        core.provider_upsert("p", "http://x", "k").expect("登记供应商");
+        core.model_upsert("m", "M", "api-m", "p", "").expect("登记模型");
+        core
+    };
+    let mode_of = |core: &Core| core.model_views().iter().find(|v| v.id == "m").map(|v| v.tools);
+
+    // 支持 → 写回 native
+    let mut core = fresh(ProbeOutcome::Supported { detail: "真的调了".to_string() });
+    assert_eq!(mode_of(&core), Some(ToolMode::Envelope), "探测前是缺省 envelope");
+    assert!(matches!(core.probe_model_tools("m"), Ok(ProbeOutcome::Supported { .. })));
+    assert_eq!(mode_of(&core), Some(ToolMode::Native), "支持就写回 native");
+
+    // 明确不支持 → 写回 envelope
+    let mut core = fresh(ProbeOutcome::Unsupported { detail: "供应商说 tools 不认识".to_string() });
+    assert!(matches!(core.probe_model_tools("m"), Ok(ProbeOutcome::Unsupported { .. })));
+    assert_eq!(mode_of(&core), Some(ToolMode::Envelope), "不支持就老实回到信封");
+
+    // 无法判定 → 不改（不替用户拍板），但事实照样报回去
+    let mut core = fresh(ProbeOutcome::Unknown { detail: "没发起调用".to_string() });
+    assert!(matches!(core.probe_model_tools("m"), Ok(ProbeOutcome::Unknown { .. })));
+    assert_eq!(mode_of(&core), Some(ToolMode::Envelope), "没法定论就不动登记处");
+
+    // 无此模型 → 如实报错
+    assert!(core.probe_model_tools("ghost").is_err());
+}
+
+/// 原生通道的脚本替身：一步 = 一次"原生工具调用"或一段文本；
+/// 同时记录每次请求带过来的工具声明与消息（用来断言"声明真的发出去了、结果真的回填了"）。
+pub(crate) enum NativeStep {
+    Calls(Vec<crate::core::ports::ToolCall>),
+    Text(String),
+}
+
+/// 每次请求声明的工具（名字 + 参数 Schema）。
+pub(crate) type DeclLog = Arc<Mutex<Vec<Vec<(String, serde_json::Value)>>>>;
+
+/// 每次请求看到的消息。
+pub(crate) type SeenLog = Arc<Mutex<Vec<Vec<Msg>>>>;
+
+pub(crate) struct NativeChat {
+    pub(crate) steps: Vec<NativeStep>,
+    pub(crate) declared: DeclLog,
+    pub(crate) seen: SeenLog,
+}
+
+impl Chat for NativeChat {
+    fn complete(&mut self, messages: &[Msg], opts: CompleteOpts<'_>, _on: &mut dyn FnMut(Chunk) -> bool) -> Completion {
+        self.seen.lock().expect("锁").push(messages.to_vec());
+        let decls: Vec<(String, serde_json::Value)> = opts
+            .tools
+            .map(|ts| ts.iter().map(|d| (d.name.clone(), d.parameters.clone())).collect())
+            .unwrap_or_default();
+        self.declared.lock().expect("锁").push(decls);
+        if self.steps.is_empty() {
+            return Completion::text("{\"type\":\"say\",\"text\":\"脚本用完了\"}");
+        }
+        match self.steps.remove(0) {
+            NativeStep::Calls(calls) => Completion {
+                raw: String::new(),
+                finish: "tool_calls".to_string(),
+                calls,
+            },
+            NativeStep::Text(t) => Completion::text(t),
+        }
+    }
+}
+
+/// 原生形态的成员：沙箱用测试根，模块表为空，工具执行走内存 IO。
+pub(crate) fn native_member(
+    id: &str,
+    io: Arc<InMemorySysIo>,
+    steps: Vec<NativeStep>,
+    declared: DeclLog,
+    seen: SeenLog,
+) -> Member {
+    let chat: BoxedChat = Box::new(NativeChat { steps, declared, seen });
+    let mut m = Member::new(id, "职责".to_string(), chat);
+    let mut modules = BTreeMap::new();
+    modules.insert(
+        "m0".to_string(),
+        ModuleTools {
+            root: abs(&["mods", "root"]),
+            commands: BTreeMap::new(),
+            books: BTreeMap::new(),
+            parallel: BTreeSet::new(),
+        },
+    );
+    let sb = test_sandbox(id, &[]);
+    m.tools = Some(MemberTools {
+        mode: crate::core::providers::ToolMode::Native,
+        modules,
+        observations: crate::core::systool::Observations::default(),
+        repair: Arc::new(NoRepair),
+        log: Arc::new(crate::core::ports::NoopLog),
+        runner: Arc::new(SilentRunner),
+        sandbox: sb.clone(),
+        io,
+        unavailable: BTreeMap::new(),
+        fence: crate::core::fence::FenceSpec::from_sandbox(&sb, false),
+        reply_seq: 0,
+    });
+    m
+}
+
+#[test]
+fn native_mode_declares_tools_and_runs_multiple_structured_calls() {
+    use crate::core::ports::ToolCall;
+    let io = Arc::new(InMemorySysIo::new());
+    io.seed(&["demo", "work", "note.txt"], "第一行\n第二行\n");
+    let note = s(&["demo", "work", "note.txt"]);
+    let declared = Arc::new(Mutex::new(Vec::new()));
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let mut m = native_member(
+        "a",
+        Arc::clone(&io),
+        vec![
+            // 一次回复里两个互不依赖的调用（原生协议本来就是数组）
+            NativeStep::Calls(vec![
+                ToolCall {
+                    id: "c1".to_string(),
+                    name: "read".to_string(),
+                    args_json: format!("{{\"path\":\"{}\"}}", note),
+                },
+                ToolCall {
+                    id: "c2".to_string(),
+                    name: "search".to_string(),
+                    args_json: format!("{{\"path\":\"{}\",\"keyword\":\"第二\"}}", note),
+                },
+            ]),
+            NativeStep::Text("{\"type\":\"say\",\"text\":\"读完了\"}".to_string()),
+        ],
+        Arc::clone(&declared),
+        Arc::clone(&seen),
+    );
+    let prompts = test_prompts();
+    let exec = crate::core::engine::Execution::run(std::slice::from_mut(&mut m), "任务", &prompts);
+    assert_eq!(exec.reports.get("a").map(|s| s.as_str()), Some("读完了"), "两个调用跑完后回到文本轮");
+
+    // ① 声明真的发出去了：内置五个工具一个不少；patch 的参数契约是 body（不是信封里的 args）
+    let decls = declared.lock().expect("锁");
+    let first = &decls[0];
+    let names: Vec<&str> = first.iter().map(|(n, _)| n.as_str()).collect();
+    for want in ["read", "write", "edit", "patch", "search"] {
+        assert!(names.contains(&want), "没声明 {}：{:?}", want, names);
+    }
+    let patch = first.iter().find(|(n, _)| n == "patch").expect("patch 的声明").1.clone();
+    assert_eq!(patch["required"], serde_json::json!(["body"]), "patch 在原生通道上用 body 承载补丁正文");
+    assert_eq!(patch["additionalProperties"], serde_json::json!(false));
+    // read 的声明来自 prompts.yaml 的声明（含 path 必填）
+    let read = first.iter().find(|(n, _)| n == "read").expect("read 的声明").1.clone();
+    assert_eq!(read["required"], serde_json::json!(["path"]));
+
+    // ② 两个调用各成一条工具行，结果按原顺序回填
+    let trace = exec.traces.get("a").expect("工具调用应入册");
+    assert_eq!(trace.len(), 2, "一次两个调用 = 两条工具行：{:?}", trace.iter().map(|v| &v.name).collect::<Vec<_>>());
+    assert!(trace[0].ok && trace[0].name == "read" && trace[0].output.contains("第一行"), "{:?}", trace[0]);
+    assert!(trace[1].ok && trace[1].name == "search" && trace[1].output.contains("2 | 第二行"), "{:?}", trace[1]);
+
+    // ③ 第二轮请求里：**一条**助手消息带两个 tool_calls，后面跟两条 role=tool（协议形状）
+    let msgs = seen.lock().expect("锁");
+    let second = &msgs[1];
+    let with_calls: Vec<&Msg> = second.iter().filter(|m| !m.tool_calls.is_empty()).collect();
+    assert_eq!(
+        with_calls.len(),
+        1,
+        "一次回复只推一条助手消息（多个调用都挂在它上面）：{:?}",
+        second.iter().map(|m| (m.role.clone(), m.tool_calls.len())).collect::<Vec<_>>()
+    );
+    let calls = &with_calls[0].tool_calls;
+    assert_eq!(calls.len(), 2, "两个调用都挂在这条助手消息上");
+    assert_eq!(calls[0].id, "c1");
+    assert_eq!(calls[0].name, "read");
+    assert_eq!(calls[0].args_json, format!("{{\"path\":\"{}\"}}", note));
+    assert_eq!(calls[1].id, "c2");
+    assert_eq!(calls[1].name, "search");
+    let results: Vec<&Msg> = second.iter().filter(|m| m.role == "tool").collect();
+    assert_eq!(results.len(), 2, "每条调用一条 role=tool 的结果：{:?}", second);
+    assert_eq!(results[0].tool_call_id, "c1", "结果靠 tool_call_id 回应它的调用");
+    assert_eq!(results[1].tool_call_id, "c2");
+    assert!(
+        results[0].content.contains("[工具结果] read") && results[0].content.contains("第一行"),
+        "{:?}",
+        results[0]
+    );
+    assert!(results[1].content.contains("2 | 第二行"), "{:?}", results[1]);
+}
+
+#[test]
+fn native_mode_refuses_a_hand_written_envelope() {
+    let io = Arc::new(InMemorySysIo::new());
+    let target = s(&["demo", "work", "out.md"]);
+    let envelope = format!(
+        "正文先写着。{{\"type\":\"tool\",\"name\":\"write\",\"args\":{{\"path\":\"{}\",\"content\":\"x\"}}}}",
+        target
+    );
+    let mut m = native_member(
+        "a",
+        Arc::clone(&io),
+        vec![NativeStep::Text(envelope), NativeStep::Text("{\"type\":\"say\",\"text\":\"知道了\"}".to_string())],
+        Arc::new(Mutex::new(Vec::new())),
+        Arc::new(Mutex::new(Vec::new())),
+    );
+    let prompts = test_prompts();
+    let exec = crate::core::engine::Execution::run(std::slice::from_mut(&mut m), "任务", &prompts);
+    let trace = exec.traces.get("a").expect("应记一条失败的工具行");
+    assert_eq!(trace.len(), 1);
+    assert!(!trace[0].ok, "原生模式下信封不执行");
+    assert_eq!(trace[0].output, prompts.core.tool_texts.native_no_envelope, "要如实说清本通道用原生调用");
+    assert_eq!(io.get(&["demo", "work", "out.md"]), None, "绝不落盘");
+}
+
+/// 声明可并发的读取**真的并发**，且结果一律按**原始调用顺序**回填。
+/// 第一个文件故意慢：它会**后完成**，但结果仍必须排在前面（上下文里不许乱序）。
+#[test]
+fn declared_parallel_reads_overlap_and_results_keep_the_call_order() {
+    use crate::core::ports::ToolCall;
+    let io = Arc::new(InMemorySysIo::new().slow(40));
+    io.seed(&["demo", "work", "a.txt"], "A1\nA2\n");
+    io.seed(&["demo", "work", "b.txt"], "B1\nB2\n");
+    // 先发的读 a.txt 慢 120ms（后完成），后发的读 b.txt 快——顺序只能靠"按原始下标回填"保住。
+    io.slow_file(&["demo", "work", "a.txt"], 120);
+    let a = s(&["demo", "work", "a.txt"]);
+    let b = s(&["demo", "work", "b.txt"]);
+    let call = |id: &str, path: &str| ToolCall {
+        id: id.to_string(),
+        name: "read".to_string(),
+        args_json: format!("{{\"path\":\"{}\"}}", path),
+    };
+    let mut m = native_member(
+        "a",
+        Arc::clone(&io),
+        vec![
+            NativeStep::Calls(vec![call("c1", &a), call("c2", &b)]),
+            NativeStep::Text("{\"type\":\"say\",\"text\":\"读完了\"}".to_string()),
+        ],
+        Arc::new(Mutex::new(Vec::new())),
+        Arc::new(Mutex::new(Vec::new())),
+    );
+    let prompts = test_prompts();
+    let exec = crate::core::engine::Execution::run(std::slice::from_mut(&mut m), "任务", &prompts);
+    let peak = io.peak_concurrent_reads();
+    assert!(peak >= 2, "册子声明 parallel 的读取要真的并发（峰值 {}）", peak);
+    let trace = exec.traces.get("a").expect("两条工具行");
+    assert_eq!(trace.len(), 2);
+    assert!(
+        trace[0].output.contains("A1") && trace[1].output.contains("B1"),
+        "结果按原始调用顺序回填（慢的那个也排在前面）：{:?}",
+        trace.iter().map(|v| v.output.chars().take(20).collect::<String>()).collect::<Vec<_>>()
+    );
+}
+
+/// 写入类独占执行：它是并发批次之间的**屏障**，并且能看到并发批次**合并后**的账本。
+#[test]
+fn a_writing_call_is_a_barrier_and_sees_the_merged_ledger() {
+    use crate::core::ports::ToolCall;
+    let io = Arc::new(InMemorySysIo::new().slow(30));
+    io.seed(&["demo", "work", "a.txt"], "原文\n");
+    let a = s(&["demo", "work", "a.txt"]);
+    let mut m = native_member(
+        "a",
+        Arc::clone(&io),
+        vec![
+            NativeStep::Calls(vec![
+                ToolCall {
+                    id: "c1".to_string(),
+                    name: "read".to_string(),
+                    args_json: format!("{{\"path\":\"{}\"}}", a),
+                },
+                // 整份覆盖要求"本次会话完整读过"：这条证据只能来自上面并发批次的合并。
+                ToolCall {
+                    id: "c2".to_string(),
+                    name: "write".to_string(),
+                    args_json: format!("{{\"path\":\"{}\",\"content\":\"新内容\\n\"}}", a),
+                },
+            ]),
+            NativeStep::Text("{\"type\":\"say\",\"text\":\"改好了\"}".to_string()),
+        ],
+        Arc::new(Mutex::new(Vec::new())),
+        Arc::new(Mutex::new(Vec::new())),
+    );
+    let prompts = test_prompts();
+    let exec = crate::core::engine::Execution::run(std::slice::from_mut(&mut m), "任务", &prompts);
+    let trace = exec.traces.get("a").expect("两条工具行");
+    assert_eq!(trace.len(), 2);
+    assert!(
+        trace[1].ok,
+        "写入类排在并发批次之后，且能看到合并后的账本：{}",
+        trace[1].output
+    );
+    assert_eq!(io.get(&["demo", "work", "a.txt"]).as_deref(), Some("新内容\n"));
+    assert_eq!(
+        io.peak_concurrent_reads(),
+        1,
+        "写入类是屏障：它绝不与只读批次重叠"
+    );
+}
+
+/// 模块工具的可并发性是**模块作者在 module.yaml 里的声明**：声明了才并发，没声明一律串行。
+#[test]
+fn module_tools_are_concurrent_only_when_declared() {
+    use crate::core::ports::ToolCall;
+    /// 原生形态 + 模块 m0 声明外部工具 grep（线上名 m0_grep）；parallel 决定它是否可并发。
+    fn grep_member(
+        runner: Arc<dyn ToolRunner + Send + Sync>,
+        parallel: bool,
+    ) -> Member {
+        let steps = vec![
+            NativeStep::Calls(vec![
+                ToolCall {
+                    id: "c1".to_string(),
+                    name: "m0_grep".to_string(),
+                    args_json: "{\"keyword\":\"甲\"}".to_string(),
+                },
+                ToolCall {
+                    id: "c2".to_string(),
+                    name: "m0_grep".to_string(),
+                    args_json: "{\"keyword\":\"乙\"}".to_string(),
+                },
+            ]),
+            NativeStep::Text("{\"type\":\"say\",\"text\":\"查完了\"}".to_string()),
+        ];
+        let mut m = native_member(
+            "a",
+            Arc::new(InMemorySysIo::new()),
+            steps,
+            Arc::new(Mutex::new(Vec::new())),
+            Arc::new(Mutex::new(Vec::new())),
+        );
+        let t = m.tools.as_mut().expect("工具环境");
+        let mt = t.modules.get_mut("m0").expect("模块");
+        mt.commands.insert("grep".to_string(), "python tools/grep.py".to_string());
+        if parallel {
+            mt.parallel.insert("grep".to_string());
+        }
+        t.runner = runner;
+        m
+    }
+    let prompts = test_prompts();
+    // ① 声明 parallel：两个调用真的并发
+    let runner = Arc::new(ParallelRunner::new(40));
+    let mut m = grep_member(Arc::clone(&runner) as Arc<dyn ToolRunner + Send + Sync>, true);
+    let exec = crate::core::engine::Execution::run(std::slice::from_mut(&mut m), "任务", &prompts);
+    let peak = runner.peak_concurrent();
+    assert!(peak >= 2, "声明 parallel 的模块工具要真的并发（峰值 {}）", peak);
+    assert_eq!(exec.traces.get("a").map(|t| t.len()), Some(2));
+    // ② 没声明：同样两个调用逐个跑
+    let runner = Arc::new(ParallelRunner::new(5));
+    let mut m = grep_member(Arc::clone(&runner) as Arc<dyn ToolRunner + Send + Sync>, false);
+    let _ = crate::core::engine::Execution::run(std::slice::from_mut(&mut m), "任务", &prompts);
+    assert_eq!(
+        runner.peak_concurrent(),
+        1,
+        "未声明可并发 = 独占串行（峰值 {}）",
+        runner.peak_concurrent()
+    );
+}
+
+#[test]
+fn changing_the_declared_mode_takes_effect_on_the_next_generation() {
+    use crate::core::providers::ProbeOutcome;
+    // 一开始登记处说"不支持原生"：会话按手写信封装配（系统提示也就教信封）
+    let outcome = Arc::new(Mutex::new(ProbeOutcome::Unsupported { detail: "先不支持".to_string() }));
+    let mut core = core_with_gateway(vec![module_of("a")], ProbeGateway { outcome: Arc::clone(&outcome) });
+    core.provider_upsert("p", "http://x", "k").expect("登记供应商");
+    core.model_upsert("m", "M", "api-m", "p", "").expect("登记模型");
+    let sid = core
+        .create_work(WorkSpec {
+            name: "w".to_string(),
+            mode: WorkMode::Single,
+            agents: vec![AgentInstance {
+                name: "a".to_string(),
+                transient: true,
+                modules: vec!["a".to_string()],
+                model: Some("m".to_string()),
+            }],
+            task: None,
+            delegate: false,
+        })
+        .expect("建会话")
+        .sid;
+    let notes = |ev: &Vec<SessionEvent>| -> Vec<String> {
+        ev.iter()
+            .filter_map(|e| match e {
+                SessionEvent::Notice(n) => Some(n.clone()),
+                _ => None,
+            })
+            .collect()
+    };
+    // ① 没动登记处：不该有任何形态通知
+    let e1 = with_live(|l| core.single_say(&sid, "你好", l)).expect("发言");
+    assert!(
+        !notes(&e1).iter().any(|n| n.contains("形态已按登记处")),
+        "没改登记处就不该重新查：{:?}",
+        notes(&e1)
+    );
+    // ② 用户改了登记处（探测确认支持）→ 下一次生成前重新解析、就地刷新、如实通知
+    *outcome.lock().expect("锁") = ProbeOutcome::Supported { detail: "支持".to_string() };
+    core.probe_model_tools("m").expect("探测");
+    let e2 = with_live(|l| core.single_say(&sid, "再问", l)).expect("发言");
+    assert!(
+        notes(&e2).iter().any(|n| n.contains("原生工具调用")),
+        "形态变了要如实通知：{:?}",
+        notes(&e2)
+    );
+    // ③ 形态没再变：不重复通知（没动就不管）
+    let e3 = with_live(|l| core.single_say(&sid, "又问", l)).expect("发言");
+    assert!(
+        !notes(&e3).iter().any(|n| n.contains("形态已按登记处")),
+        "形态没变不该重复通知：{:?}",
+        notes(&e3)
+    );
+}
+
+#[test]
+fn patch_channel_writes_files_without_json_escaping() {
+    // 自由格式：信封之后原样跟补丁文本（含中文与换行，完全不转义）；一次两块、落在两个文件。
+    let old = s(&["w", "m0", "note.txt"]);
+    let new = s(&["w", "m0", "out.md"]);
+    let body = format!(
+        "*** Update File: {}\n*** SEARCH\n旧的第一行\n*** REPLACE\n新的第一行\n*** End File\n*** Add File: {}\n第一行\n第二行「带引号也没事」\n*** End File\n先改这两处。",
+        old, new
+    );
+    let raw = format!("{{\"type\":\"tool\",\"name\":\"patch\"}}\n{}", body);
+    let io = Arc::new(InMemorySysIo::new());
+    io.seed(&["w", "m0", "note.txt"], "旧的第一行\n第二行\n");
+    let mut member = BTreeMap::new();
+    member.insert("m0".to_string(), vec![raw, "{\"type\":\"say\",\"text\":\"改好了\"}".to_string()]);
+    let mut core = core_with_io_gateway(vec![module_of("m0")], gw(member, vec!["[]".into()]), Arc::clone(&io));
+    let sid = core.create_work(work("w", WorkMode::Single, &["m0"])).unwrap().sid;
+    let events = with_live(|l| core.single_say(&sid, "改一下", l)).unwrap();
+    let views = tool_views(&events);
+    assert!(views[0].ok, "两块都该成功：{}", views[0].output);
+    assert!(views[0].output.contains("已应用 2 块改动"), "{}", views[0].output);
+    // 补丁正文不上屏：它是工具输入，不是 AI 发言（自由格式工具只显示信封之前那段）
+    let rows = transcript_rows(&events);
+    assert!(
+        rows.iter().all(|r| !r.1.contains("*** Update File")
+            && !r.1.contains("*** Add File")
+            && !r.1.contains("先改这两处")),
+        "补丁正文与之后的散话都不该当成发言：{:?}",
+        rows
+    );
+    assert_eq!(
+        io.get(&["w", "m0", "note.txt"]).as_deref(),
+        Some("新的第一行\n第二行\n"),
+        "只改 SEARCH 指定的那几行"
+    );
+    // 原样落盘：模型写了几行就是几行（末尾没有空行就不补——与 read/write 的"照原文"口径一致）
+    assert_eq!(
+        io.get(&["w", "m0", "out.md"]).as_deref(),
+        Some("第一行\n第二行「带引号也没事」"),
+        "新建文件的整份内容原样落盘（补丁之后那句话没有混进去）"
+    );
+}
+
+#[test]
+fn a_failing_patch_block_writes_nothing_at_all() {
+    // 第 2 块找不到 SEARCH：整体不写盘，回执点名第几块、为什么
+    let first = s(&["w", "m0", "a.txt"]);
+    let second = s(&["w", "m0", "b.txt"]);
+    let body = format!(
+        "*** Add File: {}\n新文件内容\n*** End File\n*** Update File: {}\n*** SEARCH\n这行不存在\n*** REPLACE\nx\n*** End File\n",
+        first, second
+    );
+    let raw = format!("{{\"type\":\"tool\",\"name\":\"patch\"}}\n{}", body);
+    let io = Arc::new(InMemorySysIo::new());
+    io.seed(&["w", "m0", "b.txt"], "只有这一行\n");
+    let mut member = BTreeMap::new();
+    member.insert("m0".to_string(), vec![raw, "{\"type\":\"say\",\"text\":\"知道了\"}".to_string()]);
+    let mut core = core_with_io_gateway(vec![module_of("m0")], gw(member, vec!["[]".into()]), Arc::clone(&io));
+    let sid = core.create_work(work("w", WorkMode::Single, &["m0"])).unwrap().sid;
+    let events = with_live(|l| core.single_say(&sid, "改两处", l)).unwrap();
+    let views = tool_views(&events);
+    assert!(!views[0].ok, "{}", views[0].output);
+    assert!(views[0].output.contains("第 2 块"), "{}", views[0].output);
+    assert!(views[0].output.contains("没有任何文件被写入"), "{}", views[0].output);
+    assert!(views[0].output.contains("找不到"), "{}", views[0].output);
+    assert_eq!(io.get(&["w", "m0", "a.txt"]), None, "第 1 块也不许写盘（原子）");
+    assert_eq!(io.get(&["w", "m0", "b.txt"]).as_deref(), Some("只有这一行\n"), "没改");
+}
+
+#[test]
+fn a_patch_without_end_marker_is_refused_with_the_line() {
+    // 少了 End File：不能猜哪里是结尾（否则补丁后面那句话会被写进文件）
+    let target = s(&["w", "m0", "out.md"]);
+    let raw = format!(
+        "{{\"type\":\"tool\",\"name\":\"patch\"}}\n*** Add File: {}\n内容\n我改完了。\n",
+        target
+    );
+    let io = Arc::new(InMemorySysIo::new());
+    let mut member = BTreeMap::new();
+    member.insert("m0".to_string(), vec![raw, "{\"type\":\"say\",\"text\":\"知道了\"}".to_string()]);
+    let mut core = core_with_io_gateway(vec![module_of("m0")], gw(member, vec!["[]".into()]), Arc::clone(&io));
+    let sid = core.create_work(work("w", WorkMode::Single, &["m0"])).unwrap().sid;
+    let events = with_live(|l| core.single_say(&sid, "加个文件", l)).unwrap();
+    let views = tool_views(&events);
+    assert!(!views[0].ok && views[0].output.contains("*** End File"), "{}", views[0].output);
+    assert_eq!(io.get(&["w", "m0", "out.md"]), None, "绝不落盘");
+}
+
+#[test]
+fn a_freeform_envelope_is_never_repaired() {
+    // 自由格式工具的信封本身不合法时：不做信封修复（修会把正文里的换行当作字符串内容转义掉），
+    // 如实报"信封没写完"，也绝不落盘。
+    let target = s(&["w", "m0", "out.md"]);
+    let raw = format!(
+        "{{\"type\":\"tool\",\"name\":\"patch\"\n*** Add File: {}\n正文第一行\n正文第二行\n*** End File\n",
+        target
+    );
+    let io = Arc::new(InMemorySysIo::new());
+    let mut member = BTreeMap::new();
+    member.insert("m0".to_string(), vec![raw, "{\"type\":\"say\",\"text\":\"知道了\"}".to_string()]);
+    let mut core = core_with_io_gateway(vec![module_of("m0")], gw(member, vec!["[]".into()]), Arc::clone(&io));
+    let sid = core.create_work(work("w", WorkMode::Single, &["m0"])).unwrap().sid;
+    let events = with_live(|l| core.single_say(&sid, "打补丁", l)).unwrap();
+    let views = tool_views(&events);
+    assert!(!views[0].ok, "{}", views[0].output);
+    assert!(views[0].output.contains("还差"), "要报信封本身没写完：{}", views[0].output);
+    assert!(!views[0].output.contains("信封修复"), "自由格式不做信封修复：{}", views[0].output);
+    assert_eq!(io.get(&["w", "m0", "out.md"]), None, "绝不落盘");
+}
+
+#[test]
+fn rewind_clears_the_read_ledger_so_overwrite_needs_a_fresh_read() {
+    // 回档把转录截掉了：那段"我完整读过 / 我写过"的证据随之作废（保守，宁肯让模型重读）。
+    let io = Arc::new(InMemorySysIo::new());
+    let note = s(&["w", "a", "note.txt"]);
+    let write = format!("{{\"type\":\"tool\",\"name\":\"write\",\"args\":{{\"path\":\"{}\",\"content\":\"v1\"}}}}", note);
+    let mut member = BTreeMap::new();
+    member.insert(
+        "a".to_string(),
+        vec![
+            write.clone(),
+            "{\"type\":\"say\",\"text\":\"写好了\"}".to_string(),
+            write.clone(),
+            "{\"type\":\"say\",\"text\":\"又写了一次\"}".to_string(),
+        ],
+    );
+    let mut core = core_with_io(vec![module_of("a")], gw(member, vec!["[]".into()]), Arc::clone(&io));
+    let sid = core.create_work(work("w", WorkMode::Single, &["a"])).unwrap().sid;
+    // 第一轮：新建，放行
+    let e1 = with_live(|l| core.single_say(&sid, "写", l)).unwrap();
+    let v1 = tool_views(&e1);
+    assert!(v1[0].ok, "新建文件不需要先读过：{}", v1[0].output);
+    // 回档：证据作废
+    core.rewind(&sid, 0).unwrap();
+    // 第二轮：同一个路径已存在，而账本已被清空 → 拒绝并提示先读
+    let e2 = with_live(|l| core.single_say(&sid, "再写", l)).unwrap();
+    let v2 = tool_views(&e2);
+    assert!(!v2[0].ok, "回档后旧的读取证据不再算数：{}", v2[0].output);
+    assert!(v2[0].output.contains("必须在本次会话里先"), "{}", v2[0].output);
+    assert_eq!(io.get(&["w", "a", "note.txt"]).as_deref(), Some("v1"), "拒不覆盖");
 }
 
 #[test]
@@ -2290,20 +3606,104 @@ fn builtin_read_reports_errors_verbatim() {
     let sb = test_sandbox("a1", &[]);
     io.seed(&["demo", "work", "note.txt"], "内容");
     let note = s(&["demo", "work", "note.txt"]);
-    let ok = crate::core::systool::execute(&sb, &io, "read", &format!("{{\"path\":\"{}\"}}", note));
+    let ok = run_builtin(&sb, &io, "read", &format!("{{\"path\":\"{}\"}}", note));
     assert!(ok.ok && ok.output.contains("内容"), "{}", ok.output);
     assert!(ok.output.contains(&note), "回执要写明读的是哪个文件：{}", ok.output);
-    let missing = crate::core::systool::execute(&sb, &io, "read", &format!("{{\"path\":\"{}\"}}", s(&["demo", "work", "nope.txt"])));
+    let missing = run_builtin(&sb, &io, "read", &format!("{{\"path\":\"{}\"}}", s(&["demo", "work", "nope.txt"])));
     assert!(!missing.ok);
     assert!(missing.output.contains("不存在"), "{}", missing.output);
     // 参数不合法 = 如实报错，不猜用户想干什么。
-    assert!(!crate::core::systool::execute(&sb, &io, "read", "{").ok);
-    assert!(!crate::core::systool::execute(&sb, &io, "read", "{}").ok);
+    assert!(!run_builtin(&sb, &io, "read", "{").ok);
+    assert!(!run_builtin(&sb, &io, "read", "{}").ok);
     // 非绝对路径一律拒绝（相对路径、带冒号前缀的伪路径都落在这里）。
-    let rel = crate::core::systool::execute(&sb, &io, "read", "{\"path\":\"nope.txt\"}");
+    let rel = run_builtin(&sb, &io, "read", "{\"path\":\"nope.txt\"}");
     assert!(!rel.ok && rel.output.contains("需要绝对路径"), "{}", rel.output);
-    let fake = crate::core::systool::execute(&sb, &io, "read", "{\"path\":\"work:/nope.txt\"}");
+    let fake = run_builtin(&sb, &io, "read", "{\"path\":\"work:/nope.txt\"}");
     assert!(!fake.ok && fake.output.contains("需要绝对路径"), "{}", fake.output);
+}
+
+#[test]
+fn builtin_read_range_numbers_lines_and_points_at_the_next_offset() {
+    let io = InMemorySysIo::new();
+    let sb = test_sandbox("a1", &[]);
+    io.seed(&["demo", "work", "note.txt"], "l1\nl2\nl3\nl4\nl5\n");
+    let note = s(&["demo", "work", "note.txt"]);
+    let read = |args: &str| run_builtin(&sb, &io, "read", &format!("{{\"path\":\"{}\",{}}}", note, args));
+    // 整读：行号从 1 数起，末尾如实说共几行
+    let all = read("\"offset\":1");
+    assert!(all.ok, "{}", all.output);
+    assert!(all.output.contains("1: l1") && all.output.contains("5: l5"), "{}", all.output);
+    assert!(all.output.contains("已到文件末尾，共 5 行"), "{}", all.output);
+    // 区间读：只给这一段，并给出接着读的 offset
+    let mid = read("\"offset\":2,\"limit\":2");
+    assert!(mid.output.contains("2: l2") && mid.output.contains("3: l3"), "{}", mid.output);
+    assert!(!mid.output.contains("1: l1") && !mid.output.contains("4: l4"), "不该越出请求的区间：{}", mid.output);
+    assert!(mid.output.contains("已显示第 2-3 行，共 5 行；继续读用 offset=4"), "{}", mid.output);
+    // 末尾区间：到文件末尾
+    let last = read("\"offset\":5,\"limit\":2");
+    assert!(last.output.contains("5: l5") && last.output.contains("已到文件末尾，共 5 行"), "{}", last.output);
+    // 越过末行：不是错误，如实说总行数
+    let past = read("\"offset\":9");
+    assert!(past.ok, "越过末行要如实告知而不是报错：{}", past.output);
+    assert!(past.output.contains("超出末行：该文件共 5 行"), "{}", past.output);
+}
+
+#[test]
+fn builtin_arg_mistakes_are_named_and_the_signature_comes_back() {
+    let io = InMemorySysIo::new();
+    let sb = test_sandbox("a1", &[]);
+    io.seed(&["demo", "work", "note.txt"], "内容\n");
+    let note = s(&["demo", "work", "note.txt"]);
+    let run = |tool: &str, args: &str| run_builtin(&sb, &io, tool, args);
+    // 上界由声明给出（不再是代码里的手写判断）
+    let big = run("read", &format!("{{\"path\":\"{}\",\"limit\":3000}}", note));
+    assert!(!big.ok && big.output.contains("参数 limit 不能大于 2000"), "{}", big.output);
+    assert!(big.output.contains("read\n读取文本文件（UTF-8）。"), "失败要把工具签名发回去：{}", big.output);
+    assert!(big.output.contains("- limit（integer，缺省 2000，不小于 1，不大于 2000）"), "{}", big.output);
+    let small = run("read", &format!("{{\"path\":\"{}\",\"offset\":0}}", note));
+    assert!(!small.ok && small.output.contains("参数 offset 不能小于 1"), "{}", small.output);
+    let wrong = run("read", &format!("{{\"path\":{}}}", 1));
+    assert!(!wrong.ok && wrong.output.contains("参数 path 需要 string"), "{}", wrong.output);
+    let unknown = run("read", &format!("{{\"path\":\"{}\",\"encoding\":\"utf8\"}}", note));
+    assert!(!unknown.ok && unknown.output.contains("没有参数 encoding"), "{}", unknown.output);
+    let missing = run("write", &format!("{{\"path\":\"{}\"}}", note));
+    assert!(!missing.ok && missing.output.contains("缺少必填参数 content"), "{}", missing.output);
+    let empty = run("search", &format!("{{\"path\":\"{}\",\"keyword\":\"\"}}", note));
+    assert!(!empty.ok && empty.output.contains("参数 keyword 不能是空字符串"), "{}", empty.output);
+    let not_object = run("read", "\"just a string\"");
+    assert!(!not_object.ok && not_object.output.contains("args 必须是一个参数对象"), "{}", not_object.output);
+    let nope = run("nope", "{}");
+    assert!(!nope.ok && nope.output.contains("未知的内置工具：nope"), "{}", nope.output);
+}
+
+#[test]
+fn builtin_tool_book_is_the_one_source_of_names_and_paths() {
+    // 保留名（代码里的常量）与 prompts.yaml 的声明必须一致，否则模型看到的工具与放行的工具会走偏。
+    let prompts = test_prompts();
+    let book = &prompts.core.builtin_tools;
+    let mut declared: Vec<String> = book.keys().cloned().collect();
+    declared.sort();
+    let mut reserved = crate::core::systool::names();
+    reserved.sort();
+    assert_eq!(declared, reserved, "builtin_tools 的声明要与保留名一致");
+    // 内置工具一律按真实绝对路径寻址：JSON 工具必须声明必填 path；自由格式工具（patch）不吃参数校验。
+    for (name, schema) in book {
+        if crate::core::systool::is_freeform(name) {
+            assert!(schema.params.is_none(), "自由格式工具不声明 JSON 参数：{}", name);
+            continue;
+        }
+        let path = schema.params.as_ref().and_then(|p| p.get("path"));
+        assert!(path.map(|p| p.required).unwrap_or(false), "{} 必须声明必填 path", name);
+    }
+    // 模型侧说明来自同一份声明
+    let sb = test_sandbox("a1", &[]);
+    let guide = crate::core::systool::guide(&prompts, &sb);
+    assert!(guide.contains("【工具参数】"), "{}", guide);
+    assert!(guide.contains("- offset（integer，缺省 1，不小于 1）"), "{}", guide);
+    assert!(guide.contains("- ignore_case（boolean）：是否忽略大小写；省略即区分大小写"), "{}", guide);
+    // patch 的写法说明也进系统提示（自由格式：正文不走 JSON）
+    assert!(guide.contains("【改文件：用 patch"), "{}", guide);
+    assert!(guide.contains("*** End File"), "每块要收尾这件事必须写清楚：{}", guide);
 }
 
 #[test]
@@ -2319,7 +3719,7 @@ fn core_collab_tool_modules_run_in_execution() {
     ]);
     let mut mod_a = module_of("a");
     let mut manifest_tools = BTreeMap::new();
-    manifest_tools.insert("grep".to_string(), "python tools/grep.py".to_string());
+    manifest_tools.insert("grep".to_string(), decl("python tools/grep.py"));
     mod_a.manifest.tools = manifest_tools;
     // 核心脚本：整理（方案）→ 验收（全过）。
     let mut core = core_with_runner(
@@ -2368,6 +3768,19 @@ fn module_runtimes_are_validated() {
     assert!(crate::core::module::check_runtimes(&m.manifest).is_err(), "大写不合法");
     m.manifest.runtimes = vec!["python".to_string(), "python".to_string()];
     assert!(crate::core::module::check_runtimes(&m.manifest).unwrap_err().contains("重复"), "重复声明要拒收");
+}
+
+#[test]
+fn module_tools_may_not_take_builtin_names() {
+    let mut m = module_of("a");
+    m.manifest.tools.insert("read_txt".to_string(), decl("python tools/read_txt.py"));
+    assert!(crate::core::module::check_tools(&m.manifest).is_ok(), "普通工具名可用");
+    for name in ["read", "write", "search"] {
+        m.manifest.tools.insert(name.to_string(), decl("python tools/x.py"));
+        let why = crate::core::module::check_tools(&m.manifest).unwrap_err();
+        assert!(why.contains("保留名"), "内置工具名要拒收：{}", why);
+        m.manifest.tools.remove(name);
+    }
 }
 
 #[test]
@@ -2530,7 +3943,7 @@ fn module_without_runtime_is_denied_with_reason() {
     let mut member = BTreeMap::new();
     member.insert("a".to_string(), vec![TOOL_CALL.into(), "{\"type\":\"say\",\"text\":\"改用内置工具\"}".into()]);
     let mut mod_a = module_with_runtimes("a", &["python"]);
-    mod_a.manifest.tools.insert("grep".to_string(), "python tools/grep.py".to_string());
+    mod_a.manifest.tools.insert("grep".to_string(), decl("python tools/grep.py"));
     let runner = Arc::new(RecordingRunner { calls: Mutex::new(Vec::new()), out: "ok".into(), ok: true });
     let mut core = Core::new(
         Arc::new(InMemorySettings::with_tier(Tier::Vm)),
@@ -2543,7 +3956,8 @@ fn module_without_runtime_is_denied_with_reason() {
         Arc::new(FakeCatalog::new(vec!["m".to_string()])),
         Arc::clone(&runner) as Arc<dyn ToolRunner + Send + Sync>,
         Arc::new(InMemorySysIo::new()),
-        Box::new(TestPrompts),
+        Arc::new(NoRepair),
+        Box::new(TestPrompts::ok()),
         Arc::new(crate::core::ports::NoopLog),
     )
     .expect("内存装配不应失败");
@@ -2569,7 +3983,7 @@ fn module_without_runtime_is_denied_with_reason() {
     let mut member2 = BTreeMap::new();
     member2.insert("a".to_string(), vec![TOOL_CALL.into(), "{\"type\":\"say\",\"text\":\"跑完了\"}".into()]);
     let mut mod_b = module_with_runtimes("a", &["python"]);
-    mod_b.manifest.tools.insert("grep".to_string(), "python tools/grep.py".to_string());
+    mod_b.manifest.tools.insert("grep".to_string(), decl("python tools/grep.py"));
     let runner2 = Arc::new(RecordingRunner { calls: Mutex::new(Vec::new()), out: "ok".into(), ok: true });
     let mut core2 = core_with_runner(vec![mod_b], gw(member2, vec!["[]".into()]), Arc::clone(&runner2));
     let sid2 = core2.create_work(work("w2", WorkMode::Single, &["a"])).unwrap().sid;
@@ -2651,7 +4065,7 @@ fn session_config_reports_tier_missing_and_runtimes_dir() {
 fn edit_session_writes_meta_appends_config_record_and_rebuilds() {
     let hist = Arc::new(InMemoryHistory::new());
     let mut a = module_of("a");
-    a.manifest.tools.insert("grep".to_string(), "python tools/grep.py".to_string());
+    a.manifest.tools.insert("grep".to_string(), decl("python tools/grep.py"));
     let mut core = core_with_pkgs(
         vec![a, module_of("b")],
         gw(BTreeMap::new(), vec!["[]".into()]),
@@ -2781,7 +4195,7 @@ fn edit_session_enforces_the_same_rules_as_creation() {
 #[test]
 fn deleting_a_session_asks_the_fence_to_release_its_grants() {
     let hist = Arc::new(InMemoryHistory::new());
-    let fence = Arc::new(RecordingFence { released: Mutex::new(Vec::new()) });
+    let fence = Arc::new(RecordingFence::new());
     seed_session(&hist, "w", "single", vec![agent_meta("甲", &["a"], None)], ExecSpec::default());
     let mut core = Core::new(
         Arc::new(InMemorySettings::new()),
@@ -2794,7 +4208,8 @@ fn deleting_a_session_asks_the_fence_to_release_its_grants() {
         Arc::new(FakeCatalog::new(vec!["m".to_string()])),
         Arc::new(SilentRunner),
         Arc::new(InMemorySysIo::new()),
-        Box::new(TestPrompts),
+        Arc::new(NoRepair),
+        Box::new(TestPrompts::ok()),
         Arc::new(crate::core::ports::NoopLog),
     )
     .expect("内存装配不应失败");
@@ -2835,5 +4250,250 @@ fn session_meta_exec_section_roundtrips_and_reads_legacy_meta() {
     assert!(legacy.exec.base.is_none());
     assert!(!legacy.exec.net);
     assert!(legacy.exec.pins.is_empty());
+}
+
+/// 手写信封通道的**批量调用**：一封 calls 数组里的多个调用各成一条工具行，结果按原序回填，
+/// 且与原生通道一样「重建出来必须与实时逐条一致」（手写信封不涉及 role=tool）。
+#[test]
+fn envelope_multi_call_runs_every_call_and_rebuilds_identically() {
+    let hist = Arc::new(InMemoryHistory::new());
+    let io = Arc::new(InMemorySysIo::new());
+    io.seed(&["w", "a", "a.txt"], "A1\n");
+    io.seed(&["w", "a", "b.txt"], "B1\n");
+    let a = s(&["w", "a", "a.txt"]);
+    let b = s(&["w", "a", "b.txt"]);
+    let raw = format!(
+        "{{\"type\":\"tool\",\"calls\":[{{\"name\":\"read\",\"args\":{{\"path\":\"{}\"}}}},{{\"name\":\"read\",\"args\":{{\"path\":\"{}\"}}}}]}}",
+        a, b
+    );
+    let mut member = BTreeMap::new();
+    member.insert(
+        "a".to_string(),
+        vec![raw.clone(), "{\"type\":\"say\",\"text\":\"读完了\"}".to_string()],
+    );
+    let mut core = core_with_all(
+        vec![module_of("a")],
+        gw(member, vec!["[]".into()]),
+        Arc::new(SilentRunner),
+        Arc::new(FakeCatalog::new(vec!["m".to_string()])),
+        Arc::clone(&hist),
+        Arc::clone(&io),
+    );
+    let sid = core.create_work(work("w", WorkMode::Single, &["a"])).unwrap().sid;
+    let events = with_live(|l| core.single_say(&sid, "读两个文件", l)).unwrap();
+    let views = tool_views(&events);
+    assert_eq!(
+        views.len(),
+        2,
+        "两个调用两条工具行：{:?}",
+        views.iter().map(|v| v.name.clone()).collect::<Vec<_>>()
+    );
+    assert!(views[0].output.contains("A1") && views[1].output.contains("B1"), "结果按原序回填");
+    assert!(views[0].call_id.is_empty(), "手写信封没有原生调用 id");
+    assert_eq!(views[0].reply, views[1].reply, "同一次回复的工具行同号");
+    let live = core.single_history(&sid).unwrap();
+    assert!(live.iter().all(|m| m.role != "tool"), "手写信封通道不发 role=tool");
+    assert_eq!(
+        live.iter().filter(|m| m.role == "user" && m.content.contains("[工具结果]")).count(),
+        2,
+        "两条结果各发一条用户消息：{:?}",
+        live
+    );
+
+    // 「重启」：同一份落盘历史交给新核心，重建上下文必须与实时逐条一致。
+    drop(core);
+    let mut core2 = core_with_all(
+        vec![module_of("a")],
+        gw(BTreeMap::new(), vec!["[]".into()]),
+        Arc::new(SilentRunner),
+        Arc::new(FakeCatalog::new(vec!["m".to_string()])),
+        Arc::clone(&hist),
+        Arc::clone(&io),
+    );
+    core2
+        .rewind(&sid, transcript_rows(&events).len() as u64)
+        .unwrap();
+    let rebuilt = core2.single_history(&sid).unwrap();
+    let key = |h: &[Msg]| {
+        h.iter()
+            .map(|m| (m.role.clone(), m.content.clone(), m.tool_calls.len()))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(key(&rebuilt), key(&live), "重建上下文必须与实时历史逐条一致");
+}
+
+/// 两种信封形态**互斥**：一封里既有 name 又有 calls = 字段不合法 → 记一条失败工具行、一个工具都不执行。
+#[test]
+fn envelope_rejects_mixing_the_single_and_calls_shapes() {
+    let io = Arc::new(InMemorySysIo::new());
+    let out = s(&["w", "a", "out.md"]);
+    let raw = format!(
+        "{{\"type\":\"tool\",\"name\":\"write\",\"args\":{{\"path\":\"{}\",\"content\":\"x\"}},\"calls\":[{{\"name\":\"write\",\"args\":{{\"path\":\"{}\",\"content\":\"y\"}}}}]}}",
+        out, out
+    );
+    let mut member = BTreeMap::new();
+    member.insert(
+        "a".to_string(),
+        vec![raw.clone(), "{\"type\":\"say\",\"text\":\"知道了\"}".to_string()],
+    );
+    let mut core = core_with_io_gateway(
+        vec![module_of("a")],
+        gw(member, vec!["[]".into()]),
+        Arc::clone(&io),
+    );
+    let sid = core.create_work(work("w", WorkMode::Single, &["a"])).unwrap().sid;
+    let events = with_live(|l| core.single_say(&sid, "写", l)).unwrap();
+    let views = tool_views(&events);
+    assert_eq!(views.len(), 1, "只记一条失败工具行");
+    assert!(!views[0].ok, "混用两种形态必须失败");
+    assert!(views[0].output.contains("互斥"), "{}", views[0].output);
+    assert_eq!(io.get(&["w", "a", "out.md"]), None, "一个工具都不执行（绝不落盘）");
+}
+
+// ---------- 原生多调用的回放一致性（实时 vs 重建） ----------
+
+/// 原生形态的网关：每次要通道就弹出一份脚本（第一份给实时会话，第二份给重建）。
+pub(crate) struct NativeGateway {
+    scripts: Mutex<Vec<Vec<NativeStep>>>,
+}
+
+impl ChatGateway for NativeGateway {
+    fn probe_tools(&self, _c: &Channel) -> Result<crate::core::ports::ProbeOutcome, String> {
+        Ok(crate::core::ports::ProbeOutcome::Supported { detail: "替身".to_string() })
+    }
+    fn member_channel(&self, _c: Option<&Channel>, _id: &str) -> (BoxedChat, Option<String>) {
+        let steps = self.scripts.lock().expect("锁").pop().unwrap_or_default();
+        (
+            Box::new(NativeChat {
+                steps,
+                declared: Arc::new(Mutex::new(Vec::new())),
+                seen: Arc::new(Mutex::new(Vec::new())),
+            }),
+            None,
+        )
+    }
+    fn core_channel(&self, _c: Option<&Channel>) -> (BoxedChat, bool) {
+        (Box::new(FakeChat::new(vec!["[]".to_string()])), false)
+    }
+}
+
+/// 指定网关 + 指定落盘历史装配一个核心（重建用例要读同一份转录）。
+fn native_core(gateway: NativeGateway, history: Arc<InMemoryHistory>, io: Arc<InMemorySysIo>) -> Core {
+    Core::new(
+        Arc::new(InMemorySettings::new()),
+        history,
+        Arc::new(InMemoryWorkspace::new()),
+        Arc::new(VecSource(vec![module_of("a")])),
+        Arc::new(InMemoryPackages::empty()),
+        Arc::new(NoFenceHost),
+        Arc::new(gateway),
+        Arc::new(FakeCatalog::new(vec!["m".to_string()])),
+        Arc::new(SilentRunner),
+        io,
+        Arc::new(NoRepair),
+        Box::new(TestPrompts::ok()),
+        Arc::new(crate::core::ports::NoopLog),
+    )
+    .expect("内存装配不应失败")
+}
+
+/// 一次回复里的**多个**原生调用：实时历史与重建历史必须逐条一致（含 tool_calls 与 tool_call_id）。
+/// 这就是原先不一致的那条：实时只推第一条调用的回执、第二条起什么都不推，重建却每条都推。
+#[test]
+fn native_multi_call_rebuilds_identically_to_live() {
+    use crate::core::ports::ToolCall;
+    let hist = Arc::new(InMemoryHistory::new());
+    let io = Arc::new(InMemorySysIo::new());
+    io.seed(&["w", "a", "a.txt"], "A1\nA2\n");
+    io.seed(&["w", "a", "b.txt"], "B1\nB2\n");
+    let a = s(&["w", "a", "a.txt"]);
+    let b = s(&["w", "a", "b.txt"]);
+    let scripts = || {
+        vec![
+            NativeStep::Calls(vec![
+                ToolCall { id: "c1".to_string(), name: "read".to_string(), args_json: format!("{{\"path\":\"{}\"}}", a) },
+                ToolCall { id: "c2".to_string(), name: "read".to_string(), args_json: format!("{{\"path\":\"{}\"}}", b) },
+            ]),
+            NativeStep::Text("{\"type\":\"say\",\"text\":\"读完了\"}".to_string()),
+        ]
+    };
+    let mut core = native_core(
+        NativeGateway { scripts: Mutex::new(vec![scripts()]) },
+        Arc::clone(&hist),
+        Arc::clone(&io),
+    );
+    core.probe_model_tools("m").expect("探测（把这条通道判成原生）");
+    let sid = core.create_work(work("w", WorkMode::Single, &["a"])).unwrap().sid;
+    let events = with_live(|l| core.single_say(&sid, "读两个文件", l)).unwrap();
+    let live = core.single_history(&sid).unwrap();
+
+    // 转录行：两条工具行同属一次回复（回复号 = 该回复第一条工具行的 id）。
+    let views = tool_views(&events);
+    assert_eq!(views.len(), 2, "两个调用两条工具行");
+    assert_eq!(views[0].reply, views[1].reply, "同一回复的两条工具行必须同号");
+    assert_eq!(views[0].call_id, "c1", "工具行记下供应商给的调用 id");
+    assert_eq!(views[1].call_id, "c2");
+
+    // 「重启」：同一份落盘历史交给新核心，按转录重建上下文——必须与实时逐条一致。
+    drop(core);
+    let mut core2 = native_core(
+        NativeGateway { scripts: Mutex::new(Vec::new()) },
+        Arc::clone(&hist),
+        Arc::clone(&io),
+    );
+    core2.probe_model_tools("m").expect("探测");
+    let rows = transcript_rows(&events).len() as u64;
+    core2.rewind(&sid, rows).unwrap();
+    let rebuilt = core2.single_history(&sid).unwrap();
+    let key = |h: &[Msg]| {
+        h.iter()
+            .map(|m| (m.role.clone(), m.content.clone(), m.tool_calls.len(), m.tool_call_id.clone()))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(key(&rebuilt), key(&live), "重建上下文必须与实时历史逐条一致（含 tool_calls / tool_call_id）");
+    assert_eq!(
+        live.iter().filter(|m| !m.tool_calls.is_empty()).count(),
+        1,
+        "一次回复只推一条助手消息"
+    );
+}
+
+/// 回档**按回复原子**：截在一次回复中间时整条回复一起丢，绝不留下"孤儿工具结果"。
+#[test]
+fn rewind_never_splits_a_reply() {
+    use crate::core::ports::ToolCall;
+    let hist = Arc::new(InMemoryHistory::new());
+    let io = Arc::new(InMemorySysIo::new());
+    io.seed(&["w", "a", "a.txt"], "A1\n");
+    io.seed(&["w", "a", "b.txt"], "B1\n");
+    let a = s(&["w", "a", "a.txt"]);
+    let b = s(&["w", "a", "b.txt"]);
+    let steps = vec![
+        NativeStep::Calls(vec![
+            ToolCall { id: "c1".to_string(), name: "read".to_string(), args_json: format!("{{\"path\":\"{}\"}}", a) },
+            ToolCall { id: "c2".to_string(), name: "read".to_string(), args_json: format!("{{\"path\":\"{}\"}}", b) },
+        ]),
+        NativeStep::Text("{\"type\":\"say\",\"text\":\"读完了\"}".to_string()),
+    ];
+    let mut core = native_core(NativeGateway { scripts: Mutex::new(vec![steps]) }, Arc::clone(&hist), Arc::clone(&io));
+    core.probe_model_tools("m").expect("探测");
+    let sid = core.create_work(work("w", WorkMode::Single, &["a"])).unwrap().sid;
+    with_live(|l| core.single_say(&sid, "读两个文件", l)).unwrap();
+
+    // 行序：0 用户 / 1 工具 / 2 工具 / 3 答复。回档到第 2 行 = 落在回复内部 → 整条回复一起丢。
+    let replayed = core.rewind(&sid, 2).unwrap();
+    assert_eq!(
+        replay_lines(&replayed),
+        vec!["[用户] 读两个文件".to_string()],
+        "截在回复中间要把该回复的工具行与答复行一起丢掉：{:?}",
+        replay_lines(&replayed)
+    );
+    let history = core.single_history(&sid).unwrap();
+    assert_eq!(history.len(), 2, "历史 = system + 用户：{:?}", history);
+    assert!(
+        history.iter().all(|m| m.tool_call_id.is_empty()),
+        "历史里不许出现没有对应助手消息的孤儿工具结果：{:?}",
+        history
+    );
 }
 

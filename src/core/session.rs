@@ -8,6 +8,22 @@ use crate::core::events::{LineView, Live, SessionEvent, ToolCallView};
 use crate::core::ports::Chunk;
 use crate::core::ports::{BoxedChat, Msg};
 
+/// 把"保留前 keep 行"对齐到**回复边界**：keep 落在某次回复内部时，退到该回复的第一行之前。
+///
+/// 为什么必须对齐：一次回复的消息是「一条助手消息 + N 条结果」，截在中间会留下孤儿结果
+/// （协议要求结果紧跟发起它的助手消息）。转录的截断与内存历史的截断**必须用同一个函数**，
+/// 否则前端看到的事件流与模型上下文会不一致。
+pub(crate) fn keep_whole_replies(line_reply: &[u64], keep: usize) -> usize {
+    let mut keep = keep.min(line_reply.len());
+    if keep > 0 && keep < line_reply.len() {
+        let losing = line_reply[keep];
+        while keep > 0 && line_reply[keep - 1] == losing {
+            keep -= 1;
+        }
+    }
+    keep
+}
+
 /// 一个 agent 的会话：模块数不限（形态只在校验与界面标签上区分）。
 pub struct AgentSession {
     /// agent 实例名（说话人标签；重建时也按它命名）。
@@ -27,6 +43,11 @@ pub struct AgentSession {
     next_line: u64,
     /// 每行 id 对应「该行完成时的历史长度」，回档按它截断历史。
     marks: Vec<usize>,
+    /// 每行属于哪次模型回复（id 相同 = 同一次回复）。回档**按回复原子**截断靠它：
+    /// 截在一次回复中间会留下"孤儿工具结果"，而协议要求结果紧跟发起它的那条助手消息。
+    line_reply: Vec<u64>,
+    /// 正在落行的回复 id（每轮开始时设置；line() 用它，免得每个调用点都传一遍）。
+    cur_reply: u64,
 }
 
 impl AgentSession {
@@ -40,7 +61,20 @@ impl AgentSession {
         roots: crate::core::refs::RefRoots,
         tool_texts: crate::core::prompt::ToolTexts,
     ) -> AgentSession {
-        AgentSession { id: id.to_string(), history: vec![Msg::system(system)], chat, note, tools, refs, roots, tool_texts, next_line: 0, marks: Vec::new() }
+        AgentSession {
+            id: id.to_string(),
+            history: vec![Msg::system(system)],
+            chat,
+            note,
+            tools,
+            refs,
+            roots,
+            tool_texts,
+            next_line: 0,
+            marks: Vec::new(),
+            line_reply: Vec::new(),
+            cur_reply: 0,
+        }
     }
 
     /// 从落盘事件重建（继续/回档历史会话用）。
@@ -48,6 +82,7 @@ impl AgentSession {
         id: &str,
         history: Vec<Msg>,
         marks: Vec<usize>,
+        line_reply: Vec<u64>,
         chat: BoxedChat,
         note: Option<String>,
         tools: Option<MemberTools>,
@@ -55,7 +90,25 @@ impl AgentSession {
         roots: crate::core::refs::RefRoots,
         tool_texts: crate::core::prompt::ToolTexts,
     ) -> AgentSession {
-        AgentSession { id: id.to_string(), next_line: marks.len() as u64, history, chat, note, tools, refs, roots, tool_texts, marks }
+        AgentSession {
+            id: id.to_string(),
+            next_line: marks.len() as u64,
+            history,
+            chat,
+            note,
+            tools,
+            refs,
+            roots,
+            tool_texts,
+            marks,
+            line_reply,
+            cur_reply: 0,
+        }
+    }
+
+    /// 这条会话**正在用**的工具调用形态（系统提示就是按它拼的）。
+    pub fn tool_mode(&self) -> crate::core::providers::ToolMode {
+        self.tools.as_ref().map(|t| t.mode).unwrap_or_default()
     }
 
     /// 开场事件（通道回落告知）。
@@ -63,10 +116,12 @@ impl AgentSession {
         self.note.clone().map(|n| vec![SessionEvent::Notice(n)]).unwrap_or_default()
     }
 
-    /// 生成一条转录行，并记下它完成时的历史长度（回档按 marks 逐行精确回退）。
+    /// 生成一条转录行，并记下它完成时的历史长度（回档按 marks 逐行精确回退）与它属于哪次回复。
     fn line(&mut self, line: String, reasoning: Option<String>, tool: Option<ToolCallView>) -> LineView {
-        let v = LineView { id: self.next_line, line, reasoning, tool, degraded: false };
+        let reply = self.cur_reply;
+        let v = LineView { id: self.next_line, reply, line, reasoning, tool, degraded: false };
         self.next_line += 1;
+        self.line_reply.push(reply);
         self.marks.push(self.history.len());
         v
     }
@@ -78,8 +133,14 @@ impl AgentSession {
 
     /// 回档：只保留前 keep_id 行（= 删掉该行及其后）；历史与 marks 同步截断。
     /// keep_id = 0 → 转录清空，历史只剩 system（marks 也清空）。
+    /// **按回复原子**：截在一次回复内部会留下"孤儿工具结果"（协议要求结果紧跟发起它的助手消息），
+    /// 所以 keep_id 落在某次回复中间时，这条回复整条丢掉（退到它的第一行之前）。
     pub fn rewind(&mut self, keep_id: u64) {
-        let keep = (keep_id as usize).min(self.marks.len());
+        // 回档把转录截掉了：那段"我完整读过哪些文件"的读取证据随之作废（保守，宁肯让模型重读）。
+        if let Some(t) = self.tools.as_mut() {
+            t.observations.clear();
+        }
+        let keep = keep_whole_replies(&self.line_reply, keep_id as usize);
         if keep == 0 {
             self.marks.clear();
             self.history.truncate(1);
@@ -97,6 +158,9 @@ impl AgentSession {
     pub fn say(&mut self, text: &str, live: &mut Live) -> Vec<SessionEvent> {
         let text = crate::core::refs::rewrite(text, Some(&self.id), &self.roots, &self.refs);
         self.history.push(Msg::user(text.clone()));
+        // 用户行不属于任何模型回复：给它**自己的行号**当回复号（与重建时的规则一致），
+        // 否则它会继承上一轮的回复号，回档时与上一轮误并成一组。
+        self.cur_reply = self.next_line;
         let user_line = self.line(format!("[用户] {}", text), None, None);
         let mut out: Vec<SessionEvent> = vec![SessionEvent::Transcript(vec![user_line])];
         out.extend(self.rounds_events(live));
@@ -116,8 +180,12 @@ impl AgentSession {
         let stopped = live.cancelled();
         let mut out: Vec<SessionEvent> = Vec::new();
         for round in rounds {
+            // 这一轮的所有行同属一次回复（回档按它原子截断、重建按它分组）。
+            self.cur_reply = round.reply;
             let text = round.text.trim().to_string();
             let has_line = !text.is_empty() || !round.reasoning.trim().is_empty();
+            // 供应商说是长度截断：如实写在行尾（与"已停止"同一套做法）
+            let truncated = round.truncated();
             let mut reasoning = if round.reasoning.trim().is_empty() { None } else { Some(round.reasoning.clone()) };
             match round.tool {
                 Some(run) => {
@@ -130,6 +198,9 @@ impl AgentSession {
                         }
                         if stopped {
                             line.push_str(&self.tool_texts.stopped_suffix);
+                        }
+                        if truncated {
+                            line.push_str(&self.tool_texts.truncated_suffix);
                         }
                         out.push(SessionEvent::Transcript(vec![self.line(line, reasoning.take(), None)]));
                     }
@@ -157,6 +228,9 @@ impl AgentSession {
                         if stopped {
                             line.push_str(&self.tool_texts.stopped_suffix);
                         }
+                        if truncated {
+                            line.push_str(&self.tool_texts.truncated_suffix);
+                        }
                         out.push(SessionEvent::Transcript(vec![self.line(line, reasoning.take(), None)]));
                     }
                 }
@@ -180,7 +254,7 @@ impl AgentSession {
             let AgentSession { history, chat, tools, .. } = self;
             crate::core::engine::converse_with(
                 chat.as_mut(),
-                tools.as_ref(),
+                tools.as_mut(),
                 history.clone(),
                 stream,
                 &label,

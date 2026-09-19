@@ -46,7 +46,14 @@ function writeToolbox(py) {
     "  - read_txt：读文本并带行号输出，参数 {\"path\":\"…\"}（相对路径以本模块目录为基准）。",
     "  读用户投喂的材料请优先用内置 read（路径用 agent 提示词里列出的真实根目录）。",
     "tools:",
-    "  read_txt: " + py + " tools/read_txt.py",
+    "  read_txt:",
+    "    command: " + py + " tools/read_txt.py",
+    "    desc: 读文本并带行号输出",
+    "    params:",
+    "      path:",
+    "        type: string",
+    "        required: true",
+    "        desc: 要读取的文件路径（相对路径以本模块目录为基准）",
     "",
   ].join("\n");
   fs.writeFileSync(path.join(dir, "module.yaml"), text);
@@ -77,6 +84,11 @@ async function main() {
   // 清运行期痕迹（夹具本身不动）。
   fs.rmSync(path.join(FIXTURE, "session"), { recursive: true, force: true });
   fs.rmSync(path.join(FIXTURE, "logs"), { recursive: true, force: true });
+  // 登记处也是运行期状态（驱动每次用 API 重新登记）：必须清空，
+  // 否则上一次跑出来的结论会漏进这一次（例如原生探测把 tools 写回 native，后面的信封场景就全变了）。
+  const home = path.join(FIXTURE, ".home");
+  fs.rmSync(home, { recursive: true, force: true });
+  fs.mkdirSync(home, { recursive: true });
   fs.rmSync(path.join(FIXTURE, "modules", "toolbox", "userdata"), { recursive: true, force: true });
 
   const mock = spawn(process.execPath, [path.join(HERE, "mock.js")], { cwd: HERE, stdio: "inherit" });

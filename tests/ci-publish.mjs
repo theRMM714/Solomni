@@ -54,9 +54,11 @@ if (fs.existsSync(logDir)) {
   }
 }
 
-// 成败按报告自身判定：测试步骤挂了 run-tests.js 也会先写下 failed>0 的报告；
+// 成败按报告自身判定：**硬失败与质量失败都算失败**——T0 的 quality-fail 会让入口返回非零，
+// 报告这边也必须同样算失败，否则 CI 摘要会把红的说成绿的（曾经真的发生过）。
 // 连报告都没有（更早的步骤就挂了，或没跑到）同样按失败处理。
-const failed = !report || (report.failed || 0) > 0;
+const qualityFailed = (report && report.quality && report.quality.failed) || 0;
+const failed = !report || (report.failed || 0) > 0 || qualityFailed > 0;
 let summary = "平台=" + osName + " 模式=" + (report && report.fenceLive ? "真机(--fence-live)" : "安全") + " 结果=" + (failed ? "失败" : "通过") + "\n";
 if (report) {
   for (const s of report.steps || []) {
@@ -120,7 +122,11 @@ if (token) {
     await ensureReportBranch();
     await putFile(
       "runs/" + osName + "/meta.json",
-      JSON.stringify({ run: runNumber, sha, os: osName, at: new Date().toISOString(), failed: failed }, null, 2),
+      JSON.stringify(
+        { run: runNumber, sha, os: osName, at: new Date().toISOString(), failed: failed, qualityFailed: qualityFailed },
+        null,
+        2,
+      ),
     );
     if (report) await putFile("runs/" + osName + "/test-report.json", JSON.stringify(report, null, 2));
     if (fs.existsSync(logDir)) {

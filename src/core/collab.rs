@@ -11,7 +11,7 @@ use crate::core::events::{CheckView, LineView, Pending, SessionEvent};
 use crate::core::history::{AgentMeta, SessionMeta};
 use crate::core::module::{self, Module};
 use crate::core::exec::{self, ExecSpec};
-use crate::core::ports::{ChatGateway, ModuleSource, Msg, PackageSource, SysIo, ToolRunner};
+use crate::core::ports::{ChatGateway, CompleteOpts, ModuleSource, Msg, PackageSource, SysIo, ToolRunner};
 use crate::core::prompt::Prompts;
 use crate::core::providers::Settings;
 use crate::core::workspace::Sandboxes;
@@ -37,6 +37,8 @@ pub struct CollabSession {
     emitted: usize,
     /// 下一条转录行的 id（会话内稳定序号）。
     next_line: u64,
+    /// 回复 id 计数器（转录行按它分组；按落盘重建时从转录里的最大值续号）。
+    reply_seq: u64,
     core_chat: crate::core::ports::BoxedChat,
     core_is_demo: bool,
     prompts: Prompts,
@@ -46,6 +48,10 @@ pub struct CollabSession {
     tools: Arc<dyn ToolRunner + Send + Sync>,
     /// 内置文件工具读写端口。
     io: Arc<dyn SysIo + Send + Sync>,
+    /// 信封修复端口（手写信封不合法时的无歧义补救）。
+    repair: Arc<dyn crate::core::ports::EnvelopeRepair + Send + Sync>,
+    /// 运行日志（工具循环里"输出被长度截断"这类事实落盘）。
+    log: Arc<dyn crate::core::ports::Log + Send + Sync>,
     /// 运行包库来源（工具可用性按它判定）。
     packages: Arc<dyn PackageSource + Send + Sync>,
     /// 本会话的执行选型（档位 + 运行包定版）。
@@ -64,6 +70,8 @@ impl CollabSession {
         prompts: Prompts,
         tools: Arc<dyn ToolRunner + Send + Sync>,
         io: Arc<dyn SysIo + Send + Sync>,
+        repair: Arc<dyn crate::core::ports::EnvelopeRepair + Send + Sync>,
+        log: Arc<dyn crate::core::ports::Log + Send + Sync>,
         packages: Arc<dyn PackageSource + Send + Sync>,
         spec: ExecSpec,
         roster: Vec<AgentMeta>,
@@ -84,6 +92,7 @@ impl CollabSession {
             disc: None,
             emitted: 0,
             next_line: 0,
+            reply_seq: 0,
             core_chat,
             core_is_demo,
             prompts,
@@ -91,6 +100,8 @@ impl CollabSession {
             source,
             tools,
             io,
+            repair,
+            log,
             packages,
             spec,
             sandboxes,
@@ -115,7 +126,8 @@ impl CollabSession {
 
     /// 生成一条带 id 的转录行（工具行另走 tool_line，带调用视图）。
     fn view(&mut self, line: String) -> LineView {
-        let v = LineView { id: self.next_line, line, ..Default::default() };
+        // 协作的讨论行各自成一条回复（协作的模型上下文不是从转录重建的，这个号只用于显示与分组一致）。
+        let v = LineView { id: self.next_line, reply: self.next_line, line, ..Default::default() };
         self.next_line += 1;
         v
     }
@@ -170,7 +182,7 @@ impl CollabSession {
             ],
         );
         let msgs = vec![Msg::system(self.prompts.core.slate.system.clone()), Msg::user(user)];
-        let raw = self.core_chat.complete(&msgs, false, &mut |_| true);
+        let raw = self.core_chat.complete(&msgs, CompleteOpts::plain(false), &mut |_| true).raw;
         let parsed = envelope::extract_json_object(&raw).and_then(|obj| serde_json::from_str::<SlateReply>(&obj).ok());
         let Some(slate) = parsed else {
             sink(SessionEvent::Notice("[错误] 代拟失败（模型无响应格式）。请直接点名 agent。".into()));
@@ -368,16 +380,27 @@ impl CollabSession {
                 .cloned()
                 .ok_or_else(|| format!("agent {} 没有被分配沙箱（工作区未记录该 agent）", a.name))?;
             let guide = crate::core::systool::guide(&prompts, &sandbox);
-            let system = module::agent_system(&prompts, &a.name, &modules, &guide);
+            // 形态按该 agent 的模型（或核心默认）解析：系统提示与实际协议必须一致
+            let mode = if channel.is_some() {
+                self.settings.tool_mode_for(a.model.as_deref())
+            } else {
+                crate::core::providers::ToolMode::Envelope
+            };
+            let system = module::agent_system(&prompts, &a.name, &modules, &guide, mode);
             let mut member = Member::new(&a.name, system, chat);
             // 围栏：可达范围 + 断网，由该 agent 的沙箱与 exec 段派生（机制在 adapters）。
             let fence = crate::core::fence::FenceSpec::from_sandbox(&sandbox, self.spec.net);
             member.tools = Some(MemberTools {
+                mode,
                 // 模块 id → 该模块的（目录, 工具表）：多模块 agent 靠信封里的 module 消歧。
                 modules: crate::core::engine::tool_table(&modules),
+                observations: crate::core::systool::Observations::default(),
+                repair: Arc::clone(&self.repair),
+                log: Arc::clone(&self.log),
                 runner: Arc::clone(&self.tools),
                 sandbox,
                 io: Arc::clone(&self.io),
+                reply_seq: self.reply_seq,
                 // 本档位下不能执行工具的模块（缺运行包）：机制侧据此拒绝执行。
                 unavailable: exec::unavailable(&self.spec, &modules, &library),
                 fence,
@@ -426,6 +449,8 @@ impl CollabSession {
         prompts: Prompts,
         tools: Arc<dyn ToolRunner + Send + Sync>,
         io: Arc<dyn SysIo + Send + Sync>,
+        repair: Arc<dyn crate::core::ports::EnvelopeRepair + Send + Sync>,
+        log: Arc<dyn crate::core::ports::Log + Send + Sync>,
         packages: Arc<dyn PackageSource + Send + Sync>,
         meta: &SessionMeta,
         events: &[serde_json::Value],
@@ -464,6 +489,7 @@ impl CollabSession {
             disc: None,
             emitted: 0,
             next_line: total,
+            reply_seq: crate::core::engine::max_reply(events),
             core_chat,
             core_is_demo,
             prompts: prompts.clone(),
@@ -471,6 +497,8 @@ impl CollabSession {
             source,
             tools,
             io,
+            repair,
+            log,
             packages,
             spec: meta.exec.clone(),
             sandboxes,
@@ -541,6 +569,8 @@ fn emit_tool_lines(exec: &Execution, id: &str, next_line: &mut u64, sink: &mut d
         let line = format!("[{}:tool] {} → {}", id, v.label(), status);
         sink(SessionEvent::Transcript(vec![LineView {
             id: *next_line,
+            // 回复号来自引擎（同一次回复的多个调用同号）：这样转录里能看出它们是一组的。
+            reply: v.reply,
             line,
             tool: Some(v.clone()),
             ..Default::default()
@@ -555,7 +585,13 @@ fn push_delta(disc: &Discussion, emitted: &mut usize, next_line: &mut u64, sink:
         let views: Vec<LineView> = disc.transcript[*emitted..]
             .iter()
             .map(|l| {
-                let v = LineView { id: *next_line, line: l.text.clone(), degraded: l.degraded, ..Default::default() };
+                let v = LineView {
+                    id: *next_line,
+                    reply: *next_line,
+                    line: l.text.clone(),
+                    degraded: l.degraded,
+                    ..Default::default()
+                };
                 *next_line += 1;
                 v
             })

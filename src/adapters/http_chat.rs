@@ -3,9 +3,12 @@
 //! 端点补全/回落规则见 endpoint 模块：无版本段先直连，404/405 再试 /v1。
 //! 密钥只在出站调用里使用，永不落提示词/转录/日志；错误信息经脱敏（红线）。
 
-use super::endpoint::{chat_candidates, memo_get, memo_set, resolve_candidates, retryable_status, Attempt, Memo};
+use super::endpoint::{chat_candidates, memo_get, memo_set, resolve_candidates, Attempt, Memo};
+use super::http_agent::{finish_request, redact};
 use super::fake_chat::DemoGateway;
-use crate::core::ports::{BoxedChat, Chat, ChatGateway, Chunk, Msg, Raw};
+use crate::core::ports::{
+    BoxedChat, Chat, ChatGateway, Chunk, CompleteOpts, Completion, Msg, ProbeOutcome, ToolCall, ToolDecl,
+};
 use crate::core::providers::Channel;
 
 /// 真实会话通道：拥有通道副本（含密钥；密钥不出适配层）。
@@ -20,6 +23,63 @@ pub struct HttpChat {
     memo_key: String,
 }
 
+/// 一条消息 → wire 形态。**协议字段按需出现**：手写信封通道的消息没有调用，
+/// 所以它的请求体与从前逐字节相同；只有原生通道的助手/工具消息才带上 tool_calls 与 tool_call_id。
+fn msg_json(m: &Msg) -> serde_json::Value {
+    let mut v = serde_json::json!({ "role": m.role, "content": m.content });
+    if !m.tool_calls.is_empty() {
+        v["tool_calls"] = serde_json::Value::Array(
+            m.tool_calls
+                .iter()
+                .map(|c| {
+                    serde_json::json!({
+                        "id": c.id,
+                        "type": "function",
+                        "function": { "name": c.name, "arguments": c.args_json },
+                    })
+                })
+                .collect(),
+        );
+    }
+    if !m.tool_call_id.is_empty() {
+        v["tool_call_id"] = serde_json::json!(m.tool_call_id);
+    }
+    v
+}
+
+/// 组一次 /chat/completions 的请求体。**真实会话与探针共用同一份形状**——
+/// 探针发出去的必须是线上真会发的东西，否则它测出来的结论代表不了线上行为。
+fn request_body(
+    model: &str,
+    stream: bool,
+    messages: serde_json::Value,
+    tools: Option<&[ToolDecl]>,
+) -> serde_json::Value {
+    let mut body = serde_json::json!({ "model": model, "stream": stream, "messages": messages });
+    // 原生工具调用：把工具声明带给供应商（"参数走结构化槽位"的全部秘密就在这一段）。
+    // 不声明 tools = 手写信封模式：模型照旧在正文里写信封，核心自己解析。
+    if let Some(tools) = tools {
+        if !tools.is_empty() {
+            body["tools"] = serde_json::Value::Array(tools.iter().map(decl_json).collect());
+            body["tool_choice"] = serde_json::json!("auto");
+        }
+    }
+    body
+}
+
+/// 发一段**合成好的 messages**（探针专用）：回放形状探测要发的不是普通消息，
+/// 而是含 tool_calls 与 role=tool 的历史。端点候选、脱敏与重试规则与真实请求完全一致。
+pub(crate) fn attempt_raw(
+    url: &str,
+    key: &str,
+    model: &str,
+    messages: serde_json::Value,
+    tools: Option<&[ToolDecl]>,
+) -> Attempt<Completion> {
+    let body = request_body(model, false, messages, tools).to_string();
+    attempt(url, key, &body)
+}
+
 impl HttpChat {
     /// 组合根/网关内部构造：通道 + 日志 + 共享端点记忆。
     fn new(channel: Channel, log: std::sync::Arc<dyn crate::core::ports::Log + Send + Sync>, memo: Memo) -> HttpChat {
@@ -30,15 +90,15 @@ impl HttpChat {
 }
 
 impl Chat for HttpChat {
-    fn complete(&mut self, messages: &[Msg], stream: bool, on: &mut dyn FnMut(Chunk) -> bool) -> Raw {
-        let body = serde_json::json!({
-            "model": self.channel.model,
-            "stream": stream,
-            "messages": messages
-                .iter()
-                .map(|m| serde_json::json!({ "role": m.role, "content": m.content }))
-                .collect::<Vec<_>>(),
-        })
+    fn complete(&mut self, messages: &[Msg], opts: CompleteOpts<'_>, on: &mut dyn FnMut(Chunk) -> bool) -> Completion {
+        let stream = opts.stream;
+        let wire: Vec<serde_json::Value> = messages.iter().map(msg_json).collect();
+        let body = request_body(
+            &self.channel.model,
+            stream,
+            serde_json::Value::Array(wire),
+            opts.tools,
+        )
         .to_string();
         let candidates: Vec<String> = match &self.resolved {
             Some(url) => vec![url.clone()],
@@ -71,7 +131,7 @@ impl Chat for HttpChat {
             }
             Err(e) => {
                 self.log.error("http_chat::complete", &format!("通道 {} 调用失败：{}", self.provider_id, e));
-                format!("模型调用失败：{}", e)
+                Completion::text(format!("模型调用失败：{}", e))
             }
         }
     }
@@ -81,34 +141,35 @@ impl Chat for HttpChat {
 /// 已经吐出过内容后不再换候选（避免重复输出）。
 /// 兼容两类供应商：发「增量」的、以及发「累积快照」的（此处统一归一成增量）。
 /// 中止与容积双保险：on 返回 false、或正文/思维链超过上限，立即停止读取。
-fn stream_once(url: &str, key: &str, body: &str, on: &mut dyn FnMut(Chunk) -> bool) -> Attempt<String> {
+fn stream_once(url: &str, key: &str, body: &str, on: &mut dyn FnMut(Chunk) -> bool) -> Attempt<Completion> {
     use std::io::BufRead;
     let agent = super::http_agent::agent(10, 300);
-    let resp = match agent
-        .post(url)
-        .set("Authorization", &format!("Bearer {}", key))
-        .set("Content-Type", "application/json")
-        .send_string(body)
-    {
+    let resp = match finish_request(
+        agent
+            .post(url)
+            .header("Authorization", &format!("Bearer {}", key))
+            .header("Content-Type", "application/json")
+            .send(body),
+        key,
+    ) {
         Ok(r) => r,
-        Err(ureq::Error::Status(code, resp)) => {
-            let snippet = resp.into_string().unwrap_or_default();
-            let snippet: String = snippet.chars().take(200).collect();
-            let msg = redact(format!("供应商返回 {}：{}", code, snippet), key);
-            return if retryable_status(code) { Attempt::Retry(msg) } else { Attempt::Fatal(msg) };
-        }
-        Err(other) => return Attempt::Retry(redact(format!("网络错误：{}", other), key)),
+        Err((msg, true)) => return Attempt::Retry(msg),
+        Err((msg, false)) => return Attempt::Fatal(msg),
     };
     const MAX_STREAM_CHARS: usize = 200_000;
     // 新一轮开始：让调用方清空本轮流式占位（工具多轮各成一段）
     if !on(Chunk::Start) {
-        return Attempt::Ok(String::new());
+        return Attempt::Ok(Completion::text(""));
     }
     let mut content = String::new();
     let mut reasoning_acc = String::new();
+    // 供应商的结束原因（通常只在最后一个分片里给）：如实带回，核心据此分辨"写完停"还是"被截断"
+    let mut finish = String::new();
+    // 原生工具调用：按 index 分片来（id/name 一般在第一片，arguments 逐片拼接）——最常见的坑就在这里
+    let mut calls: Vec<ToolCall> = Vec::new();
     let mut got_any = false;
     let mut cancelled = false;
-    for line in std::io::BufReader::new(resp.into_reader()).lines() {
+    for line in std::io::BufReader::new(resp.into_body().into_reader()).lines() {
         let line = match line {
             Ok(l) => l,
             Err(e) => {
@@ -125,7 +186,38 @@ fn stream_once(url: &str, key: &str, body: &str, on: &mut dyn FnMut(Chunk) -> bo
             continue;
         }
         let Ok(v) = serde_json::from_str::<serde_json::Value>(data) else { continue };
-        let Some(delta) = v.get("choices").and_then(|c| c.get(0)).and_then(|c| c.get("delta")) else { continue };
+        let Some(choice) = v.get("choices").and_then(|c| c.get(0)) else { continue };
+        if let Some(f) = choice.get("finish_reason").and_then(|f| f.as_str()) {
+            if !f.is_empty() {
+                finish = f.to_string();
+            }
+        }
+        let Some(delta) = choice.get("delta") else { continue };
+        // 原生工具调用的分片：按 index 归位，name/id 出现即记，arguments 追加
+        if let Some(arr) = delta.get("tool_calls").and_then(|t| t.as_array()) {
+            for item in arr {
+                let idx = item.get("index").and_then(|i| i.as_u64()).unwrap_or(calls.len() as u64) as usize;
+                while calls.len() <= idx {
+                    calls.push(ToolCall { id: String::new(), name: String::new(), args_json: String::new() });
+                }
+                let slot = &mut calls[idx];
+                if let Some(id) = item.get("id").and_then(|i| i.as_str()) {
+                    if !id.is_empty() {
+                        slot.id = id.to_string();
+                    }
+                }
+                if let Some(f) = item.get("function") {
+                    if let Some(n) = f.get("name").and_then(|n| n.as_str()) {
+                        if !n.is_empty() {
+                            slot.name = n.to_string();
+                        }
+                    }
+                    if let Some(a) = f.get("arguments").and_then(|a| a.as_str()) {
+                        slot.args_json.push_str(a);
+                    }
+                }
+            }
+        }
         // 正文：累积快照 → 只取新增部分；正常增量 → 原样
         if let Some(t) = delta.get("content").and_then(|c| c.as_str()) {
             if !t.is_empty() {
@@ -171,34 +263,68 @@ fn stream_once(url: &str, key: &str, body: &str, on: &mut dyn FnMut(Chunk) -> bo
     }
     // 用户主动中止：原样收尾，绝不换候选重开（否则「停止」会把流重新拉起来）
     if cancelled {
-        return Attempt::Ok(content);
+        return Attempt::Ok(Completion { raw: content, finish, calls });
     }
-    if content.is_empty() && reasoning_acc.is_empty() {
+    // 纯工具调用轮的正文是空的：这不算"没内容"，不能因此换候选重试。
+    if content.is_empty() && reasoning_acc.is_empty() && calls.is_empty() {
         return Attempt::Retry("流式响应没有正文内容".to_string());
     }
-    Attempt::Ok(content)
+    Attempt::Ok(Completion { raw: content, finish, calls })
+}
+
+/// 工具声明 → OpenAI 兼容的 function 形状（唯一一处映射，探测与正式请求共用）。
+fn decl_json(t: &ToolDecl) -> serde_json::Value {
+    serde_json::json!({
+        "type": "function",
+        "function": {
+            "name": t.name,
+            "description": t.description,
+            "parameters": t.parameters,
+        },
+    })
+}
+
+/// 一条最小请求：单条用户消息 + 可选工具声明（探测用它；正式对话走 complete）。
+/// 复用同一套端点解析、脱敏与响应解析，不另写一份。
+pub(crate) fn attempt_with_tools(
+    url: &str,
+    key: &str,
+    model: &str,
+    user: &str,
+    tools: Option<&[ToolDecl]>,
+) -> Attempt<Completion> {
+    let mut body = serde_json::json!({
+        "model": model,
+        "stream": false,
+        "messages": [{ "role": "user", "content": user }],
+    });
+    if let Some(tools) = tools {
+        if !tools.is_empty() {
+            body["tools"] = serde_json::Value::Array(tools.iter().map(decl_json).collect());
+            body["tool_choice"] = serde_json::json!("auto");
+        }
+    }
+    attempt(url, key, &body.to_string())
 }
 
 /// 单次 POST：请求与解析都在此；失败按「可换候选 / 立即报」归类。
-fn attempt(url: &str, key: &str, body: &str) -> Attempt<String> {
+fn attempt(url: &str, key: &str, body: &str) -> Attempt<Completion> {
     let agent = super::http_agent::agent(10, 120);
-    let resp = match agent
-        .post(url)
-        .set("Authorization", &format!("Bearer {}", key))
-        .set("Content-Type", "application/json")
-        .send_string(body)
-    {
+    // 红线：ureq 部分错误会回显请求头，密钥在 finish_request/redact 里统一脱敏后才出适配层。
+    let resp = match finish_request(
+        agent
+            .post(url)
+            .header("Authorization", &format!("Bearer {}", key))
+            .header("Content-Type", "application/json")
+            .send(body),
+        key,
+    ) {
         Ok(r) => r,
-        // 红线：ureq 部分错误会回显请求头，密钥必须先脱敏再出适配层。
-        Err(ureq::Error::Status(code, resp)) => {
-            let snippet = resp.into_string().unwrap_or_default();
-            let snippet: String = snippet.chars().take(200).collect();
-            let msg = redact(format!("供应商返回 {}：{}", code, snippet), key);
-            return if retryable_status(code) { Attempt::Retry(msg) } else { Attempt::Fatal(msg) };
-        }
-        Err(other) => return Attempt::Retry(redact(format!("网络错误：{}", other), key)),
+        Err((msg, true)) => return Attempt::Retry(msg),
+        Err((msg, false)) => return Attempt::Fatal(msg),
     };
-    let text = match resp.into_string() {
+    let mut got = resp.into_body();
+    let text = match got.read_to_string() {
         Ok(t) => t,
         Err(e) => return Attempt::Retry(redact(e.to_string(), key)),
     };
@@ -209,25 +335,42 @@ fn attempt(url: &str, key: &str, body: &str) -> Attempt<String> {
     }
 }
 
-/// 解析补全响应：取 choices[0].message.content。
-fn parse_content(text: &str) -> Result<String, String> {
+/// 解析补全响应：取 choices[0].message.content、finish_reason 与原生 tool_calls（后两者可能没有）。
+fn parse_content(text: &str) -> Result<Completion, String> {
     let v: serde_json::Value = serde_json::from_str(text).map_err(|e| format!("响应不是 JSON：{}", e))?;
-    v.get("choices")
-        .and_then(|c| c.get(0))
+    let choice = v.get("choices").and_then(|c| c.get(0));
+    // 有些供应商在纯工具调用时 content 是 null（不是缺字段）：按空串处理，不算错。
+    let raw = choice
         .and_then(|c| c.get("message"))
         .and_then(|m| m.get("content"))
         .and_then(|c| c.as_str())
-        .map(|s| s.to_string())
-        .ok_or_else(|| "响应缺少 choices[0].message.content".to_string())
+        .unwrap_or_default()
+        .to_string();
+    let finish = choice
+        .and_then(|c| c.get("finish_reason"))
+        .and_then(|f| f.as_str())
+        .unwrap_or_default()
+        .to_string();
+    let calls = choice
+        .and_then(|c| c.get("message"))
+        .and_then(|m| m.get("tool_calls"))
+        .and_then(|t| t.as_array())
+        .map(|arr| arr.iter().filter_map(native_call).collect::<Vec<_>>())
+        .unwrap_or_default();
+    if raw.is_empty() && calls.is_empty() {
+        return Err("响应缺少 choices[0].message.content（也没有 tool_calls）".to_string());
+    }
+    Ok(Completion { raw, finish, calls })
 }
 
-/// 出站错误里的密钥一律替换掉再出适配层。
-fn redact(s: String, key: &str) -> String {
-    if key.is_empty() {
-        s
-    } else {
-        s.replace(key, "***")
-    }
+/// 从一段 OpenAI 形状的 tool_calls 元素里取（id, name, arguments）。
+/// arguments 是**一段 JSON 文本**（供应商原样给），能不能解析留给上层如实报。
+fn native_call(v: &serde_json::Value) -> Option<ToolCall> {
+    let f = v.get("function")?;
+    let name = f.get("name").and_then(|n| n.as_str())?.to_string();
+    let id = v.get("id").and_then(|i| i.as_str()).unwrap_or_default().to_string();
+    let args_json = f.get("arguments").and_then(|a| a.as_str()).unwrap_or("{}").to_string();
+    Some(ToolCall { id, name, args_json })
 }
 
 fn real_or_demo(channel: Option<&Channel>, log: &std::sync::Arc<dyn crate::core::ports::Log + Send + Sync>, memo: &Memo) -> (BoxedChat, bool) {
@@ -254,6 +397,18 @@ impl HttpGateway {
 }
 
 impl ChatGateway for HttpGateway {
+    /// 回放形状探测（要真实网络）：转给适配层的实现，结论是"关于这条通道的事实"。
+    fn probe_replay(
+        &self,
+        channel: &Channel,
+    ) -> Result<crate::core::providers::ReplayReport, String> {
+        crate::adapters::http_probe::probe_replay(channel, &self.log)
+    }
+
+    fn probe_tools(&self, channel: &Channel) -> Result<ProbeOutcome, String> {
+        crate::adapters::http_probe::probe(channel, &self.log)
+    }
+
     fn member_channel(&self, channel: Option<&Channel>, module_id: &str) -> (BoxedChat, Option<String>) {
         match channel {
             Some(c) => {

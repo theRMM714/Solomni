@@ -2,7 +2,8 @@
 //! 端点补全/回落规则见 endpoint 模块：无版本段先直连，404/405 再试 /v1。
 //! 机制only：密钥只用于出站请求头；错误信息先脱敏再出适配层；响应形状不符即报错，不猜测兜底。
 
-use super::endpoint::{memo_get, memo_set, models_candidates, resolve_candidates, retryable_status, Attempt, Memo};
+use super::endpoint::{memo_get, memo_set, models_candidates, resolve_candidates, Attempt, Memo};
+use super::http_agent::{finish_request, redact};
 use crate::core::ports::{Log, ModelCatalog};
 use crate::core::providers::Provider;
 use std::sync::Arc;
@@ -22,21 +23,19 @@ impl HttpModelCatalog {
     /// 单次 GET：请求与解析都在此；失败按「可换候选 / 立即报」归类。
     fn fetch(&self, url: &str, provider: &Provider) -> Attempt<Vec<String>> {
         let agent = super::http_agent::agent(10, 30);
-        let resp = match agent
-            .get(url)
-            .set("Authorization", &format!("Bearer {}", provider.api_key))
-            .call()
-        {
+        let resp = match finish_request(
+            agent
+                .get(url)
+                .header("Authorization", &format!("Bearer {}", provider.api_key))
+                .call(),
+            &provider.api_key,
+        ) {
             Ok(r) => r,
-            Err(ureq::Error::Status(code, resp)) => {
-                let snippet = resp.into_string().unwrap_or_default();
-                let snippet: String = snippet.chars().take(200).collect();
-                let msg = redact(format!("供应商返回 {}：{}", code, snippet), &provider.api_key);
-                return if retryable_status(code) { Attempt::Retry(msg) } else { Attempt::Fatal(msg) };
-            }
-            Err(other) => return Attempt::Retry(redact(format!("网络错误：{}", other), &provider.api_key)),
+            Err((msg, true)) => return Attempt::Retry(msg),
+            Err((msg, false)) => return Attempt::Fatal(msg),
         };
-        let body = match resp.into_string() {
+        let mut got = resp.into_body();
+        let body = match got.read_to_string() {
             Ok(t) => t,
             Err(e) => return Attempt::Retry(redact(e.to_string(), &provider.api_key)),
         };
@@ -72,15 +71,6 @@ impl ModelCatalog for HttpModelCatalog {
                 Err(e)
             }
         }
-    }
-}
-
-/// 出站错误里的密钥一律替换掉再出适配层。
-fn redact(s: String, key: &str) -> String {
-    if key.is_empty() {
-        s
-    } else {
-        s.replace(key, "***")
     }
 }
 

@@ -15,10 +15,14 @@ pub struct ProcTools {
     /// 守门进程用的可执行文件（组合根注入当前程序路径）。
     pub exe: PathBuf,
     /// 产品私有区（`.home/`）：围栏授权台账落在这里，供 `--fence-clean` 精确回收。
+    /// 只有 Windows 的容器围栏需要写目录 ACL，所以下面这三项只在本平台存在。
+    #[cfg(windows)]
     pub home: PathBuf,
     /// 是否允许在本机写权限（由组合根按设置与 `SOLOMNI_FENCE_WRITE` 注入；默认否）。
+    #[cfg(windows)]
     pub write_allowed: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// 「未授权」的提示只出一次，不刷屏。
+    #[cfg(windows)]
     pub disclosed: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// 工具回执里那些收尾标记的文案（来自提示词册：它们随 [工具结果] 进模型上下文，所以不硬编码）。
     pub texts: crate::core::prompt::ToolTexts,
@@ -39,12 +43,18 @@ impl ProcTools {
         home: PathBuf,
         write_allowed: std::sync::Arc<std::sync::atomic::AtomicBool>,
     ) -> ProcTools {
+        // 其它平台没有容器围栏这一步：家目录与写权限开关不参与装配，显式忽略以免被误读成漏用。
+        #[cfg(not(windows))]
+        let _ = (&home, &write_allowed);
         ProcTools {
             exe,
-            texts,
+            #[cfg(windows)]
             home,
+            #[cfg(windows)]
             write_allowed,
+            #[cfg(windows)]
             disclosed: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            texts,
             timeout: Duration::from_secs(30),
             max_output_chars: 16_000,
             #[cfg(windows)]
@@ -255,5 +265,111 @@ mod tests {
         let long = "字".repeat(20_000);
         let cut = tools.assemble(long, String::new(), false, Some(0));
         assert!(cut.output.contains("20000"), "截断要如实报字符数：{}", &cut.output[cut.output.len() - 80..]);
+    }
+
+    // ---------- 真实工具进程（T2 真实适配器边界；见 TESTING.md 端口矩阵的 ToolRunner 行） ----------
+
+    /// 已构建的产品可执行文件（守门进程就是它自己）：`cargo build` 之后才存在；没有就如实跳过。
+    fn built_exe() -> Option<PathBuf> {
+        let me = std::env::current_exe().ok()?;
+        let profile_dir = me.parent()?.parent()?; // target/<profile>/deps → target/<profile>
+        let name = if cfg!(windows) { "solomni.exe" } else { "solomni" };
+        let p = profile_dir.join(name);
+        if p.is_file() { Some(p) } else { None }
+    }
+
+    /// 本机可用的 python（没有就如实跳过需要解释器的用例）。
+    fn python() -> Option<&'static str> {
+        for name in ["python", "python3"] {
+            if let Ok(o) = std::process::Command::new(name).arg("-c").arg("print(1)").output() {
+                if o.status.success() {
+                    return Some(name);
+                }
+            }
+        }
+        None
+    }
+
+    fn prompt_texts() -> crate::core::prompt::ToolTexts {
+        let prompts: crate::core::prompt::Prompts =
+            serde_yaml::from_str(include_str!("../../prompts.yaml")).expect("内置提示词册必须合法");
+        prompts.core.tool_texts
+    }
+
+    /// 造一个按「cwd = 隔离根」跑真工具的 runner（命令用裸文件名，避免命令行里出现引号）。
+    fn real_runner(exe: PathBuf, home: &std::path::Path, timeout_secs: u64) -> ProcTools {
+        let mut t = ProcTools::new(
+            exe,
+            prompt_texts(),
+            home.to_path_buf(),
+            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        );
+        t.timeout = Duration::from_secs(timeout_secs);
+        t
+    }
+
+    fn spec_for(dir: &PathBuf) -> FenceSpec {
+        FenceSpec { agent: "proc".to_string(), rw: vec![dir.clone()], cwd: dir.clone(), net: false }
+    }
+
+    /// 真实工具进程：stdin 的 JSON 原样送达，退出码决定 ok（不猜、不吞）。
+    #[test]
+    fn real_tool_process_receives_stdin_json_and_reports_success() {
+        let Some(exe) = built_exe() else {
+            eprintln!("[探针] 未找到已构建的 solomni 可执行文件（先 cargo build），跳过真实工具进程契约");
+            return;
+        };
+        let Some(py) = python() else {
+            eprintln!("[探针] 本机没有可用的 python，跳过真实工具进程契约");
+            return;
+        };
+        let dir = crate::contract_tests::scratch("proc-tools-stdin");
+        std::fs::write(dir.join("echo_stdin.py"), "import sys\nprint(sys.stdin.read().strip())\n").expect("写脚本");
+        let tools = real_runner(exe, &dir, 60);
+        let out = tools.run(&spec_for(&dir), &format!("{} echo_stdin.py", py), "{\"k\":\"v\"}");
+        assert!(out.ok, "工具应当成功：{}", out.output);
+        assert!(out.output.contains("{\"k\":\"v\"}"), "stdin 的 JSON 必须原样送达工具：{}", out.output);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 超时：连根杀掉整棵树并如实回执失败（不静默、不无限等它自然结束）。
+    #[test]
+    fn real_tool_process_is_killed_on_timeout_and_reported() {
+        let Some(exe) = built_exe() else {
+            eprintln!("[探针] 未找到已构建的 solomni 可执行文件，跳过超时杀树契约");
+            return;
+        };
+        let Some(py) = python() else {
+            eprintln!("[探针] 本机没有可用的 python，跳过超时杀树契约");
+            return;
+        };
+        if !crate::adapters::confine::capability().tree {
+            eprintln!("[探针] 本机进程树围栏不可用，跳过超时杀树契约");
+            return;
+        }
+        let dir = crate::contract_tests::scratch("proc-tools-timeout");
+        std::fs::write(dir.join("sleep60.py"), "import time\ntime.sleep(60)\n").expect("写脚本");
+        let tools = real_runner(exe, &dir, 2);
+        let started = Instant::now();
+        let out = tools.run(&spec_for(&dir), &format!("{} sleep60.py", py), "{}");
+        assert!(!out.ok, "超时必须如实回执失败：{}", out.output);
+        assert!(out.output.contains(&tools.texts.tool_timeout), "回执要带上超时标记：{}", out.output);
+        assert!(
+            started.elapsed() < Duration::from_secs(30),
+            "超时后不得继续等它自然结束（实际 {:?}）",
+            started.elapsed()
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 守门进程起不来：如实回执「启动失败」，不 panic、不假装跑过。
+    #[test]
+    fn missing_launcher_binary_is_reported_honestly() {
+        let dir = crate::contract_tests::scratch("proc-tools-missing-exe");
+        let tools = real_runner(PathBuf::from("definitely-not-here-solomni"), &dir, 5);
+        let out = tools.run(&spec_for(&dir), "echo hi", "{}");
+        assert!(!out.ok);
+        assert!(out.output.contains("工具进程启动失败"), "{}", out.output);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
