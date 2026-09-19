@@ -187,7 +187,9 @@ function platformBase(base, section) {
 /** fmt --check：有偏差的文件集合（仓库相对路径、/ 分隔）。 */
 function fmtDeviations(out) {
   const files = new Set();
-  for (const line of out.split(/\r?\n/)) {
+  // 先剥 ANSI 颜色转义：Windows 上 rustfmt 会带颜色输出，而下面按**行首**锚定，
+  // 带转义前缀的行会被整条漏掉（实测：一条真正的格式偏差就是这样从 Windows 门禁眼皮底下溜过去的）。
+  for (const line of out.replace(/\u001b\[[0-9;]*m/g, "").split(/\r?\n/)) {
     const m = line.match(/^Diff in (.+?):\d+:\s*$/);
     if (!m) continue;
     let p = normPath(m[1]);
@@ -363,7 +365,8 @@ function baselineYaml(m, old) {
 
 function printBaseline() {
   const old = baseline(); // 其它平台的分区要保住
-  const fmt = sh("cargo", ["fmt", "--all", "--", "--check"]);
+  // --color never：与其它 cargo 步骤一致，输出不带 ANSI（Windows 上加过色，解析会漏条目）。
+  const fmt = sh("cargo", ["fmt", "--all", "--", "--check", "--color", "never"]);
   const clippy = sh("cargo", ["clippy", "--all-targets", "--all-features", "--keep-going", "--color", "never", "--", "-D", "warnings"]);
   const check = sh("cargo", ["check", "--all-targets", "--color", "never"]);
   const tree = sh("cargo", ["tree", "--duplicates", "--color", "never"]);
@@ -433,7 +436,7 @@ function main() {
     announceDone("env-skip", "cargo-fmt 未安装");
     steps.push({ step: "T0 格式（fmt --check）", status: "env-skip", detail: "cargo-fmt 未安装：rustup component add rustfmt" });
   } else {
-    const r = sh("cargo", ["fmt", "--all", "--", "--check"]);
+    const r = sh("cargo", ["fmt", "--all", "--", "--check", "--color", "never"]);
     const d = setDiff([...fmtDeviations(r.out)], base.fmt_deviating_files);
     const ok = !d.extra.length && !d.missing.length;
     announceDone(ok ? "完成" : "基线不符", ok ? "偏差文件 " + base.fmt_deviating_files.length : "新增 " + d.extra.length + " / 过期 " + d.missing.length);
