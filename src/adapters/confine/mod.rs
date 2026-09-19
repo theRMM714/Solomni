@@ -298,19 +298,6 @@ fn is_executable(_path: &std::path::Path) -> bool {
     true
 }
 
-/// 祖先目录（不含自己）：受限进程要按名穿过它们才能到达被放行的根。
-/// 只有 Windows 的目录 ACL 需要逐个授 FILE_TRAVERSE（macOS 的 seatbelt 用子路径规则，不需要）。
-#[cfg(windows)]
-pub(crate) fn ancestors_of(path: &std::path::Path) -> Vec<std::path::PathBuf> {
-    let mut out: Vec<std::path::PathBuf> = Vec::new();
-    let mut cur = path.parent();
-    while let Some(p) = cur {
-        out.push(p.to_path_buf());
-        cur = p.parent();
-    }
-    out
-}
-
 /// 交给 cmd 解释前，把**程序名**里的正斜杠换成反斜杠。
 /// cmd 只把程序名里的 `\` 当路径分隔符：`build/indexer build` 会被它读成「命令 build + 开关 /indexer」，
 /// 报 `'build' is not recognized`。程序名之后的参数原样保留（`node tools/report.js` 这类命令靠参数里的正斜杠）。

@@ -55,16 +55,12 @@ const GENERIC_READ: u32 = 0x8000_0000;
 const GENERIC_WRITE: u32 = 0x4000_0000;
 const GENERIC_EXECUTE: u32 = 0x2000_0000;
 const GENERIC_ALL: u32 = 0x1000_0000;
-/// 只允许按名穿过（祖先目录：不能列目录、不能读文件）。目录上 FILE_TRAVERSE 与 FILE_EXECUTE 同为 0x20。
-const FILE_TRAVERSE: u32 = 0x0000_0020;
 
 /// 数据边界（会话目录、模块目录）→ 读写 + 删子项 + 写 DACL（撤权要用）。
 const RIGHTS_RW: u32 =
     FILE_GENERIC_READ | FILE_GENERIC_WRITE | FILE_GENERIC_EXECUTE | FILE_DELETE_CHILD | DELETE | WRITE_DAC;
 /// 只读 + 执行（解释器安装目录：脚本要跑就得读得到它）。
 const RIGHTS_RO: u32 = FILE_GENERIC_READ | FILE_GENERIC_EXECUTE;
-/// 祖先目录只要"穿过"。
-const RIGHTS_TRAVERSE: u32 = FILE_TRAVERSE;
 
 /// 一次工具执行最多这么多进程（含 shell 与它拉起的子进程）。
 const MAX_PROCESSES: u32 = 32;
@@ -353,11 +349,6 @@ fn revoke_one(sid: PSID, path: &Path, recursive: bool) -> Result<(), String> {
     Ok(())
 }
 
-/// 祖先目录（不含自己）：与 macOS 的「祖先只放行元数据」是同一套语义（共用实现在 confine/mod.rs）。
-fn ancestors(path: &Path) -> Vec<PathBuf> {
-    super::ancestors_of(path)
-}
-
 /// 命令里解释器的安装目录：共用实现在 confine/mod.rs（Windows 的目录 ACL 与 macOS 的 seatbelt 同一套语义）。
 fn interpreter_dirs(command: &str) -> Vec<PathBuf> {
     super::interpreter_dirs(command)
@@ -391,33 +382,10 @@ pub fn prepare_fence(
             written.push((String::from("S-1-15-2-1"), dir, RIGHTS_RO));
         }
     }
-    // 基线二：祖先链的"只按名穿过"——**尽力而为**：系统默认 ACL 通常已经够穿过去，而产品未必拿得到这些
-    // 目录的写 DACL 权限（真机上 C:\ 归管理员，非提权进程授不上）。这一条失败不该把整次执行判成"装不上围栏"。
-    let mut walk: Vec<PathBuf> = interpreters;
-    walk.extend(spec.rw.iter().cloned());
-    walk.push(spec.cwd.clone());
-    let mut ancestor_paths: Vec<PathBuf> = Vec::new();
-    for root in walk {
-        if root.as_os_str().is_empty() {
-            continue;
-        }
-        ancestor_paths.extend(ancestors(&root));
-    }
-    ancestor_paths.sort();
-    ancestor_paths.dedup();
-    for path in ancestor_paths {
-        // 祖先这一趟只授 FILE_TRAVERSE，所以**只按"SID 在场"跳过**（`has_ace_any`）：改写 C:\、C:\Users
-        // 这种巨型目录的 DACL，Windows 会顺着整棵树重算继承，真机实测每个目录 ~90 s（CI 上两条 ACL 契约测试
-        // 因此各花 95 s）。而"读不到解释器"那类问题出在**读+执行**上，由上面解释器目录那一趟用权限位判定管住。
-        if has_ace_any(base, &path) {
-            continue;
-        }
-        if let Err(e) = grant_one(base, &path, RIGHTS_TRAVERSE, false, false) {
-            eprintln!("[围栏] 祖先目录未能放行（{}）：{}", path.display(), e);
-        } else {
-            written.push((String::from("S-1-15-2-1"), path, RIGHTS_TRAVERSE));
-        }
-    }
+    // **祖先链不用授**：容器的令牌里有 SeChangeNotifyPrivilege（Bypass traverse checking，真机 whoami /priv
+    // 确认 Enabled），按名走到被放行的根不需要祖先上的 FILE_TRAVERSE。以前那一趟"给祖先授穿过"只在改写
+    // C:\、C:\Users 这种巨型目录的 DACL 时付出代价——Windows 会顺着整棵树重算继承，真机实测 ~90 s/条
+    // （CI 上两条 ACL 契约测试各 95 s，就是它）。删掉这一趟：授权面更小，也不再碰产品目录之外的系统目录。
     free_sid(base);
 
     // 数据边界（会话目录、模块目录）→ 只授权**叶子本身**，授给该 agent 自己的容器 SID（互相看不见）。
@@ -684,15 +652,7 @@ fn rights_covered(mask: u32, rights: u32) -> bool {
     expand_generics(rights) & !expand_generics(mask) == 0
 }
 
-/// 该对象上是不是已经有给这个 SID 的允许 ACE（不看权限位）。
-/// 用途：**只授"穿过"的祖先目录**——这类写入会牵动整棵子树的继承重算，巨型目录上代价极高，
-/// 而祖先只要"按名能走到"就够了，系统默认 ACL 通常已经给到（真机上 C:\ 与 C:\Users 都有 ALL APPLICATION PACKAGES 的 ACE）。
-/// 需要"读得到内容"的地方（解释器目录）不能用它，必须用下面的权限位判定。
-fn has_ace_any(sid: PSID, path: &Path) -> bool {
-    has_ace_for(sid, path, 0)
-}
-
-/// 该对象上是不是已经有给这个 SID 的允许 ACE，**且权限位覆盖得住**（`rights` = 0 时退化成"只要在场"）。
+/// 该对象上是不是已经有给这个 SID 的允许 ACE，**且权限位覆盖得住**。
 /// 用途：基线授权只以递归方式写过一次，所以根上已有"够用"的 ACE 就跳过整棵树——否则每来一个 agent 都要重走几万文件。
 /// 只看"有没有该 SID 的 ACE"不够：真机上解释器目录继承了只有 SYNCHRONIZE 的 ALL APPLICATION PACKAGES ACE，
 /// 基线因此被整条跳过，容器里连解释器都读不到（工具报 python is not recognized）。
