@@ -97,10 +97,7 @@ check_warnings:
 # cargo tree --duplicates 报出的重复 crate（按平台；unix 的 rustls 会多带一个 webpki-roots）。
 duplicates:
   windows:
-    - syn
   linux:
-    - syn
     - webpki-roots
   macos:
-    - syn
     - webpki-roots

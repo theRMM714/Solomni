@@ -19,11 +19,12 @@ jobs:
         os: [windows-latest, ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      # 最新稳定线：Node 的 lts/* = 当前 LTS（生产稳定线），随 LTS 迁移自动跟进，不用手工改版本号。
+      - uses: actions/setup-node@v7
         with:
-          node-version: "20"
+          node-version: "lts/*"
 
       - name: 准备 Rust（runner 自带工具链，不装项目外的任何东西）
         run: |
@@ -46,7 +47,7 @@ jobs:
 
       - name: 留产物（报告与日志，供人下载；无论成败）
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: test-report-${{ matrix.os }}
           path: |
@@ -65,12 +66,12 @@ jobs:
       group: ci-report-publish
       cancel-in-progress: false
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
       - name: 下载三个测试 job 的报告产物
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: test-report-*
           path: ci-artifacts
