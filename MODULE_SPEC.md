@@ -314,6 +314,6 @@ JSON 工具的**参数契约同样写在 `prompts.yaml` 的 `core.builtin_tools`
 5. 放入 `modules/`——完成。清单自动出现它，菜单自动展示它的 brief
 
 文件读写、精确改写（含自由格式补丁）、关键词搜索这类通用能力**不用自己造**：核心内置了 `read` / `write` / `edit` / `patch` / `search`（见「内置文件工具与路径模型」）——
-随仓的三个示例模块（`research` / `reviewer` / `summarizer`）就只写了 `system`、一个外部工具都没声明。
+只写 `system`、一个外部工具都不需要声明，就是一个能用的模块。
 
 没有注册、没有继承、没有编译依赖。**一个文件夹就是全部。**

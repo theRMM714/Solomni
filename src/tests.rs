@@ -2637,8 +2637,11 @@ fn shipped_modules_scan_clean() {
     let roster = crate::adapters::FsModules::new(PathBuf::from("modules")).scan();
     assert!(!roster.modules.is_empty(), "仓库应自带模块");
     assert!(roster.rejected.is_empty(), "随仓清单必须全部合法：{:?}", roster.rejected);
-    assert!(roster.modules.iter().any(|m| m.manifest.id == "summarizer"));
-    assert!(roster.modules.iter().any(|m| m.manifest.id == "reviewer"));
+    // 随仓的三件就是演示工作流那三件：少了任何一件，演示就跑不起来。
+    let ids: Vec<&str> = roster.modules.iter().map(|m| m.manifest.id.as_str()).collect();
+    for id in ["harvest", "indexer", "render"] {
+        assert!(ids.contains(&id), "随仓模块少了 {}（现在是 {:?}）", id, ids);
+    }
 }
 
 #[test]

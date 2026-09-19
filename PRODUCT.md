@@ -117,7 +117,7 @@ session/<工作名>/
 
 ```text
 $ start.bat                 # Windows（或 node start.js）；macOS/Linux 用 ./start.sh
-[发现] research · db · notes · weather     <- 扫描 modules/，只报事实
+[发现] harvest · indexer · render           <- 扫描 modules/，只报事实
 （菜单：编排入口 + 模块清单，brief 在此给用户看）
 ```
 
@@ -162,8 +162,8 @@ agent 可以退出（此后核心不再向它转达）；可以请教用户（�
 ### 单 agent（`single`）
 
 ```text
-> single research            # 直接用登记处的 agent（模块数不限）
-> single research notes      # 把点名 agent 的模块并成一个临时 agent
+> single harvest             # 直接用登记处的 agent（模块数不限）
+> single harvest notes       # 把点名 agent 的模块并成一个临时 agent
 > single                     # 登记处全部 agent 的模块并成一个（全选）
 （上下文 = 该 agent 的职责提示词（其模块 system 的合成）+ 用户消息，直接对话干活；
   内置 read/write/edit/patch/search 随时可用，其模块声明的外部工具也可用；每次调用以工具卡片如实呈现）
