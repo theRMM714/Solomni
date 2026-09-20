@@ -33,6 +33,8 @@ pub struct FenceInfo {
     pub effective_net: bool,
     /// 用户有没有授权在本机写权限项。
     pub write_allowed: bool,
+    /// 用户显式授权的只读根个数（`settings.yaml` 的 `fence_read`）；0 = 一个都没授。
+    pub read_only_roots: usize,
 }
 
 /// 启动转录中心服务器（阻塞直至出错）。端口可指定，默认 3081，只绑本机回环。
@@ -537,6 +539,7 @@ pub(crate) fn route(
                 // 执行档位与围栏写权限：界面暂未暴露（后续阶段），改设置只保留现有值。
                 tier: current.tier,
                 fence_write: current.fence_write,
+                fence_read: current.fence_read.clone(),
             };
             match ops.registry.set_settings(settings) {
                 Ok(()) => ok_json(json!({ "ok": true })),

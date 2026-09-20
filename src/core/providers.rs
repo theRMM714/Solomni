@@ -72,6 +72,10 @@ pub struct AppSettings {
     /// 默认否：没经过用户显式授权，本程序不动本机任何权限项。
     #[serde(default)]
     pub fence_write: bool,
+    /// 用户显式授权的**只读根**（工具进程只读可达，不继承写）。默认空 = 一个都不放行。
+    /// 授权落在用户自己的目录上；本程序只加只读 ACE，不给写权限。
+    #[serde(default)]
+    pub fence_read: Vec<String>,
 }
 
 fn default_true() -> bool {
@@ -85,6 +89,7 @@ impl Default for AppSettings {
             show_reasoning: true,
             tier: crate::core::exec::Tier::Host,
             fence_write: false,
+            fence_read: Vec::new(),
         }
     }
 }

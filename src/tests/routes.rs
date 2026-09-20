@@ -345,6 +345,7 @@ impl HistoryOps for FakeOps {
             mode: "direct".to_string(),
             ts: 1,
             done: false,
+            exec: Default::default(),
         }])
     }
     fn open(&self, name: &str) -> Result<(SessionMeta, Vec<serde_json::Value>), String> {
@@ -363,6 +364,9 @@ impl HistoryOps for FakeOps {
                 sid: h.name.clone(),
                 mode: h.mode.clone(),
                 done: h.done,
+                tier: h.exec.tier.as_str().to_string(),
+                tier_ready: true,
+                tier_missing: Vec::new(),
             })
             .collect())
     }
@@ -403,6 +407,7 @@ fn fence() -> FenceInfo {
         effective_fs: true,
         effective_net: true,
         write_allowed: true,
+        read_only_roots: 0,
     }
 }
 

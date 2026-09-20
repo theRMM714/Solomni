@@ -95,8 +95,9 @@ const calls = [];
 const jsonRes = (v, ok, status) => ({ ok: ok !== false, status: status || 200, json: async () => v });
 const sandbox = {
   document,
+  // 原生弹窗是红线：换自研弹窗之后，这里被调用一次就算失败。
   alert: (m) => alerts.push(m),
-  confirm: () => true,
+  confirm: (m) => { alerts.push(m); return true; },
   console, JSON, Promise, Map, Set, Error, Object, Array, String, Number, Boolean, Math, Date,
   setTimeout, clearTimeout,
   fetch: async (url, opts) => {

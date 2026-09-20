@@ -465,6 +465,7 @@ impl HistoryStore for InMemoryHistory {
                             .any(|e| e.get("type").and_then(|t| t.as_str()) == Some("ended"))
                     })
                     .unwrap_or(false),
+                exec: m.exec.clone(),
             })
             .collect())
     }

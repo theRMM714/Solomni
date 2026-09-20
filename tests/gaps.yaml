@@ -23,23 +23,3 @@
     届时删除本条并同步 PRODUCT.md / RUNTIME_SPEC.md 的当前状态。
   blocked_by: 缺少实现
 
-- id: fence.read-only-default-policy
-  scope: global
-  level: T4
-  why: |
-    "未授权 = 完全无围栏"的替代方案里，有一类是"默认放行只读/遍历"。当前未实现，且**不适合直接做**：
-    Windows 上授在目录上的 FILE_GENERIC_READ + 继承位就是递归读整棵子树；现有 RIGHTS_RO 只授给
-    基线 SID S-1-15-2-1（ALL APPLICATION PACKAGES），等于本机任何 AppContainer 程序都能读到那份数据。
-    另一个候选是给 FenceSpec 增加显式只读根（ro），仍走"显式授权"，只是权限位换成只读。
-    这三条路的取舍未定，需要先与用户确认权限模型，再决定是否实现。
-  how: |
-    先定权限模型，再落实现（三选一或组合）：
-    1) 不做默认只读放行——可达范围继续只落在会话沙箱内，需要读宿主时由用户投喂副本；
-    2) FenceSpec 增加 ro: Vec<PathBuf>，与 rw 一样走显式授权，台账复用 fence-grants.json 现有的
-       rights 字段区分只读/读写，release_fence_home 与 --fence-clean 不需改结构；
-    3) 默认只读放行——需要先解决"授给谁"（按 per-agent 容器 SID 而非 ALL APPLICATION PACKAGES）
-       与"授到哪些根"（不覆盖用户目录/项目根）两个前提。
-  accept: |
-    权限模型经用户确认；实现后 T4 探针钉住"越界读拿不到、授权只读的根读得到但写不进"，
-    且 --fence-clean 能把只读授权一并撤净（台账无残条）。
-  blocked_by: 需要用户先决定权限模型

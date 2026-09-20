@@ -232,6 +232,12 @@ fn profile_text(spec: &FenceSpec, command: &str) -> String {
     for dir in super::interpreter_dirs(command) {
         ro_paths.push(dir.to_string_lossy().replace('\\', "/"));
     }
+    // 用户显式授权的只读根（`fence_read`）：只放 `file-read*`，不碰 `file-write*`。
+    for root in &spec.ro {
+        if !root.as_os_str().is_empty() {
+            ro_paths.push(root.to_string_lossy().replace('\\', "/"));
+        }
+    }
     ro_paths.sort();
     ro_paths.dedup();
     for p in &ro_paths {

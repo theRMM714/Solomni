@@ -76,6 +76,8 @@ impl HistoryStore for FsHistory {
                 mode: meta.mode,
                 ts: meta.ts,
                 done,
+                // 档位来自 meta 的 exec 段：列表视图据此提示"环境已变"，不拦打开。
+                exec: meta.exec,
             });
         }
         out.sort_by_key(|a| std::cmp::Reverse(a.ts));

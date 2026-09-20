@@ -245,7 +245,9 @@ function renderHistory() {
     el.className = 'history-item';
     const name = document.createElement('span'); name.className = 'hname'; name.textContent = h.name;
     const mode = document.createElement('span'); mode.className = 'hmode';
-    mode.textContent = (h.done ? '' : '·进行中 ') + h.mode;
+    mode.textContent =
+      (h.done ? '' : '·进行中 ') + h.mode +
+      (h.tier === 'vm' && h.tier_ready === false ? '·虚拟机档不可用' : '');
     const acts = document.createElement('div'); acts.className = 'history-acts';
 
     const open = btn('打开', 'hbtn');
@@ -277,9 +279,26 @@ function generating(sid) {
   return !!(s && s.busy);
 }
 
+/* 记的是虚拟机档、但本机现在承载不了：**不拦打开**（记录是用户的），只主动把原因与出路说清。
+ * 为什么必须提示：虚拟机档的 guest 本体尚未接入，此刻选它只会得到一个更差的本机档——
+ * 用户有权知道这一点，也有权知道怎么才能用上。 */
+function warnIfTierUnavailable(name) {
+  const view = (state.history || []).find((h) => h.name === name);
+  if (!view || view.tier !== 'vm' || view.tier_ready !== false) return;
+  const missing = (view.tier_missing || []).join('；') || '本机不具备虚拟机档的前置条件';
+  notice(
+    '这条会话的虚拟机档当前不可用',
+    '原因：' + missing +
+      '。\n\n本次仍会打开（历史记录不受影响），但它实际按本机档执行。' +
+      '\n要真正用上虚拟机档：先在本机启用虚拟化（Windows「虚拟机平台」/ Linux 的 /dev/kvm / macOS 11+），' +
+      '并在「编辑」里确认执行档位与基础根；暂时不需要就在「编辑」里改回本机档。',
+    'warn'
+  );
+}
+
 async function openHistory(name) {
   const existing = state.sessions.get(name);
-  if (existing && !existing.readonly) { setActive(name); return; }
+  if (existing && !existing.readonly) { setActive(name); warnIfTierUnavailable(name); return; }
   try {
     const r = await api('GET', '/api/history/' + encodeURIComponent(name));
     const s = {
@@ -290,11 +309,12 @@ async function openHistory(name) {
     for (const ev of (r.events || [])) absorb(s, ev);
     setActive(name);
     renderAll();
-  } catch (err) { alert(err.message); }
+    warnIfTierUnavailable(name);
+  } catch (err) { notice('操作失败', err.message, 'err'); }
 }
 
 async function deleteHistory(name) {
-  if (!confirm('删除会话「' + name + '」？该会话的记录将被永久删除。')) return;
+  if (!(await confirmBox('删除会话', '删除会话「' + name + '」？该会话的记录将被永久删除。', '删除'))) return;
   try {
     await api('POST', '/api/history/' + encodeURIComponent(name) + '/delete', {});
     if (state.sessions.has(name)) {
@@ -306,7 +326,7 @@ async function deleteHistory(name) {
     }
     await refreshState();
     renderAll();
-  } catch (err) { alert(err.message); }
+  } catch (err) { notice('操作失败', err.message, 'err'); }
 }
 
 /* ---------- 配置视图（会话列表的「编辑」）：名单 / 模块 / 模型 / 档位 / 运行能力 / 定版 ----------
@@ -694,6 +714,58 @@ function field(labelText, input) {
 function emptyHint(text) {
   const e = document.createElement('div'); e.className = 'reg-empty'; e.textContent = text;
   return e;
+}
+
+
+/* ---------- 屏幕居中的提示弹窗（自研，顶替原生 alert/confirm） ----------
+ * 为什么自己做：原生弹窗样式不可控、会阻塞主线程、在受限环境（内嵌浏览器 / 移动端 webview）里表现不一。
+ * 与主区弹层（openModal）分开：那个在主区里、靠上对齐；这个固定在视口正中，任何布局下都在屏幕中间。
+ * 三档 kind：info / warn / err（只影响配色），都只给一个「知道了」；confirmBox 返回 Promise<boolean>。
+ */
+function notice(title, text, kind) {
+  const root = $("#notice-root");
+  root.innerHTML = "";
+  root.className = "notice-root open";
+  const overlay = document.createElement("div"); overlay.className = "notice-overlay";
+  const panel = document.createElement("div"); panel.className = "notice-panel notice-" + (kind || "info");
+  const head = document.createElement("div"); head.className = "notice-title"; head.textContent = title || "";
+  const body = document.createElement("div"); body.className = "notice-text"; body.textContent = text || "";
+  const row = document.createElement("div"); row.className = "notice-actions";
+  const ok = btn("知道了", "btn btn-primary");
+  const close = () => { root.innerHTML = ""; root.className = "notice-root"; document.removeEventListener("keydown", onKey); };
+  const onKey = (e) => { if (e.key === "Escape") close(); };
+  ok.onclick = close;
+  row.appendChild(ok);
+  panel.appendChild(head); panel.appendChild(body); panel.appendChild(row);
+  overlay.appendChild(panel);
+  overlay.onclick = (e) => { if (e.target === overlay) close(); };
+  document.addEventListener("keydown", onKey);
+  root.appendChild(overlay);
+  return close;
+}
+
+/// 需要用户二选一的确认（顶替原生 confirm）：返回 Promise<boolean>，只认"确认"或"取消"。
+function confirmBox(title, text, confirmLabel) {
+  return new Promise((resolve) => {
+    const root = $("#notice-root");
+    root.innerHTML = "";
+    root.className = "notice-root open";
+    const overlay = document.createElement("div"); overlay.className = "notice-overlay";
+    const panel = document.createElement("div"); panel.className = "notice-panel notice-warn";
+    const head = document.createElement("div"); head.className = "notice-title"; head.textContent = title || "";
+    const body = document.createElement("div"); body.className = "notice-text"; body.textContent = text || "";
+    const row = document.createElement("div"); row.className = "notice-actions";
+    const done = (v) => { root.innerHTML = ""; root.className = "notice-root"; document.removeEventListener("keydown", onKey); resolve(v); };
+    const onKey = (e) => { if (e.key === "Escape") done(false); };
+    const no = btn("取消", "btn"); no.onclick = () => done(false);
+    const yes = btn(confirmLabel || "确认", "btn btn-primary"); yes.onclick = () => done(true);
+    row.appendChild(no); row.appendChild(yes);
+    panel.appendChild(head); panel.appendChild(body); panel.appendChild(row);
+    overlay.appendChild(panel);
+    overlay.onclick = (e) => { if (e.target === overlay) done(false); };
+    document.addEventListener("keydown", onKey);
+    root.appendChild(overlay);
+  });
 }
 
 /* ---------- 主区弹层（清空一律 innerHTML=''） ---------- */
@@ -1086,17 +1158,17 @@ uploadPicker.addEventListener('change', () => {
   const f = uploadPicker.files && uploadPicker.files[0];
   if (!f) return;
   const s = activeSession();
-  if (!s) { alert('先打开或新建一个工作，再上传文件到它的 work/'); uploadPicker.value = ''; return; }
+  if (!s) { notice('还不能上传', '先打开或新建一个工作，再上传文件到它的 work/。'); uploadPicker.value = ''; return; }
   const reader = new FileReader();
   reader.onload = async () => {
     const b64 = String(reader.result || '').split(',')[1] || '';
     try {
       await api('POST', '/api/sessions/' + encodeURIComponent(s.sid) + '/upload', { name: f.name, data_base64: b64 });
       filesCache.delete(s.sid); // 文件清单变了，@ 菜单下次重拉
-      alert('已上传到本次工作的 work/：' + f.name);
+      notice('已上传', '已上传到本次工作的 work/：' + f.name);
     } catch (err) {
       if (err.status === 409) conflictUpload(s.sid, f.name, b64);
-      else alert(err.message);
+      else notice('操作失败', err.message, 'err');
     }
     uploadPicker.value = '';
   };
@@ -1118,8 +1190,8 @@ async function sendUpload(sid, name, b64, overwrite) {
     if (overwrite) body.overwrite = true;
     await api('POST', '/api/sessions/' + encodeURIComponent(sid) + '/upload', body);
     filesCache.delete(sid); // 文件清单变了，@ 菜单下次重拉
-    alert('已上传：' + name);
-  } catch (e) { alert(e.message); }
+    notice('已上传', '已上传：' + name);
+  } catch (e) { notice('操作失败', e.message, 'err'); }
 }
 
 function conflictUpload(sid, name, b64) {
@@ -1141,7 +1213,7 @@ function renameUpload(sid, name, b64, alt) {
       try {
         await api('POST', '/api/sessions/' + encodeURIComponent(sid) + '/upload', { name: v, data_base64: b64 });
         filesCache.delete(sid); // 文件清单变了，@ 菜单下次重拉
-        closeModal(); alert('已上传：' + v);
+        closeModal(); notice('已上传', '已上传：' + v);
       } catch (e) {
         if (e.status === 409) { c.setMsg('还是同名，请换一个名字', true); return; }
         c.setMsg(e.message, true);
@@ -1478,7 +1550,7 @@ function openWizard() {
 
     // 真正下发（重名时先经 choiceModal 让用户裁决，绝不用原生 confirm）
     async function submit(body) {
-      try { await startSession(body); closeModal(); } catch (e) { alert(e.message); }
+      try { await startSession(body); closeModal(); } catch (e) { notice('操作失败', e.message, 'err'); }
     }
 
     createBtn.onclick = async () => {
@@ -1963,7 +2035,7 @@ async function updateTask(text) {
     for (const ev of (r.events || [])) absorb(s, ev);
     await refreshPending(s);
     renderAll();
-  } catch (err) { alert(err.message); }
+  } catch (err) { notice('操作失败', err.message, 'err'); }
 }
 
 function gateCard(q, btns) {
@@ -1973,7 +2045,7 @@ function gateCard(q, btns) {
   const bs = document.createElement('div'); bs.className = 'btns';
   for (const [label, fn] of btns) {
     const b = document.createElement('button'); b.className = 'btn'; b.textContent = label;
-    b.onclick = () => fn().catch((err) => alert(err.message));
+    b.onclick = () => fn().catch((err) => notice('操作失败', err.message, 'err'));
     bs.appendChild(b);
   }
   el.appendChild(bs);
@@ -2041,7 +2113,7 @@ function rewindTo(id) {
         s.readonly = false; // 历史回放会话一旦删除即转为活动会话
         for (const ev of (r.events || [])) absorb(s, ev);
         renderAll();
-      } catch (err) { alert(err.message); }
+      } catch (err) { notice('操作失败', err.message, 'err'); }
     }],
     ['取消', 'btn btn-ghost', () => {}],
   ]);
@@ -2057,7 +2129,7 @@ function withdrawAgree(agent) {
         const r = await api('POST', '/api/sessions/' + encodeURIComponent(s.sid) + '/withdraw', { agent });
         applyActionEvents(s, r);
         renderAll();
-      } catch (err) { alert(err.message); }
+      } catch (err) { notice('操作失败', err.message, 'err'); }
     }],
     ['取消', 'btn btn-ghost', () => {}],
   ]);
@@ -2373,4 +2445,4 @@ $('#btn-agents').onclick = openAgentsModal;
 $('#btn-upload').onclick = pickUploadFile;
 
 /* ---------- 启动 ---------- */
-refreshState().then(pollLoop).catch((err) => alert('初始化失败：' + err.message));
+refreshState().then(pollLoop).catch((err) => notice('初始化失败', err.message, 'err'));

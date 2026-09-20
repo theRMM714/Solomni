@@ -250,12 +250,14 @@ fn main() {
             usable(cap.tree),
             cap.note
         );
+        let ro = core.app_settings().fence_read.len();
         println!(
-            "[围栏] 本次实际：文件系统={} 断网={} 进程树={}；容器授权={}（未授权时只放行进程树与资源上限，不写本机任何权限项；要启用：设置里打开，或 .home/settings.yaml 写 fence_write: true）",
+            "[围栏] 本次实际：文件系统={} 断网={} 进程树={}；容器授权={}；只读根={} 个（未授权时只放行进程树与资源上限，不写本机任何权限项；要启用：设置里打开，或 .home/settings.yaml 写 fence_write: true / fence_read: [路径…]）",
             usable(fs),
             usable(net),
             usable(cap.tree),
-            if allow { "已授权" } else { "未授权" }
+            if allow { "已授权" } else { "未授权" },
+            ro
         );
     }
 
@@ -551,6 +553,11 @@ fn serve_web(
         effective_fs: fs,
         effective_net: net,
         write_allowed,
+        read_only_roots: ops
+            .registry
+            .settings()
+            .map(|s| s.fence_read.len())
+            .unwrap_or(0),
     };
     if let Err(e) = presentation::web::serve(ops, port, log, fence) {
         eprintln!("[Web 服务异常] {}", e);

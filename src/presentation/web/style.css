@@ -272,6 +272,27 @@ body {
 .modal-body { padding: 14px; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; max-height: 70vh; }
 .modal-msg { min-height: 1.2em; padding: 0 14px 12px; font-size: 12px; color: var(--fg-dim); }
 .modal-msg.err { color: var(--err); }
+/* ---- 屏幕居中的提示弹窗（自研，顶替原生 alert/confirm） ----
+ * 固定在视口正中，与主区弹层（.modal-*，在主区里靠上）分开：任何布局下都在屏幕中间。
+ * 高面板用 max-height + 内部滚动，不会因为居中而把顶部裁掉。 */
+.notice-root { display: none; position: fixed; inset: 0; z-index: 60; }
+.notice-root.open { display: block; }
+.notice-overlay {
+  position: absolute; inset: 0; background: rgba(10, 12, 16, .6);
+  display: flex; align-items: center; justify-content: center;
+  padding: 24px 12px; overflow-y: auto;
+}
+.notice-panel {
+  width: min(460px, 100%); background: var(--bg2);
+  border: 1px solid var(--line); border-radius: var(--radius);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, .5);
+  display: flex; flex-direction: column; max-height: 70vh;
+}
+.notice-panel.notice-warn { border-color: #8a6d1f; }
+.notice-panel.notice-err { border-color: var(--err); }
+.notice-title { padding: 14px 16px 0; font-weight: 600; }
+.notice-text { padding: 8px 16px 4px; overflow-y: auto; color: var(--fg-dim); white-space: pre-wrap; }
+.notice-actions { display: flex; gap: 8px; justify-content: flex-end; padding: 12px 16px 16px; }
 
 /* ---- 表单控件 ---- */
 .field-input {

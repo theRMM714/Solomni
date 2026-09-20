@@ -20,6 +20,16 @@ use crate::core::prompt::Prompts;
 use crate::core::providers::Settings;
 use crate::core::workspace::Sandboxes;
 use std::sync::Arc;
+/// 用户显式授权的只读根（`settings.yaml` 的 `fence_read`）：空 = 一个都不放行。
+/// 与 `Core::fence_read_roots` 同义——两处都在 core 内，读的是同一份设置事实。
+fn read_only_roots(app: &crate::core::providers::AppSettings) -> Vec<std::path::PathBuf> {
+    app.fence_read
+        .iter()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .map(std::path::PathBuf::from)
+        .collect()
+}
 
 pub struct CollabSession {
     /// 是否代拟：显式传入（WorkSpec.delegate / meta.delegate），不从名单是否为空推断。
@@ -476,8 +486,10 @@ impl CollabSession {
             };
             let system = module::agent_system(&prompts, &a.name, &modules, &guide, mode);
             let mut member = Member::new(&a.name, system, chat);
-            // 围栏：可达范围 + 断网，由该 agent 的沙箱与 exec 段派生（机制在 adapters）。
-            let fence = crate::core::fence::FenceSpec::from_sandbox(&sandbox, self.spec.net);
+            // 围栏：可达范围 + 断网，由该 agent 的沙箱与 exec 段派生（机制在 adapters）；
+            // 只读根来自用户显式授权（`fence_read`），默认空。
+            let fence = crate::core::fence::FenceSpec::from_sandbox(&sandbox, self.spec.net)
+                .with_read_only(read_only_roots(&self.settings.app));
             member.tools = Some(MemberTools {
                 mode,
                 // 模块 id → 该模块的（目录, 工具表）：多模块 agent 靠信封里的 module 消歧。

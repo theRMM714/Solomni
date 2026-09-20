@@ -46,4 +46,8 @@ pub struct HistoryView {
     pub mode: String,
     pub ts: i64,
     pub done: bool,
+    /// 这条会话记的执行档位与选型（meta.yaml 的 exec 段；缺字段的旧会话按默认 = 本机档读回）。
+    /// 列表视图据此提示"环境已变"——**不拦打开**，记录是用户的。
+    #[serde(default)]
+    pub exec: crate::core::exec::ExecSpec,
 }

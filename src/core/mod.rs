@@ -190,6 +190,12 @@ pub struct SessionView {
     pub sid: String,
     pub mode: String,
     pub done: bool,
+    /// 这条会话记的执行档位（`host` / `vm`）：打开时据此提示"环境已变"。
+    pub tier: String,
+    /// 记的档位**现在还能不能承载**（本机档恒真）。为假时前端打开前给提示，但不拦打开。
+    pub tier_ready: bool,
+    /// 承载不了时缺什么（空 = 齐了）。
+    pub tier_missing: Vec<String>,
 }
 
 /// 会话文件清单视图（前端 @ 菜单与「长路径缩写」用）：相对清单 + 真实根。
@@ -732,6 +738,20 @@ impl Core {
         self.settings.app.clone()
     }
 
+    /// 用户显式授权的只读根（`settings.yaml` 的 `fence_read`）。
+    /// 策略层只带事实：哪些目录只读可达由用户定，只读位怎么落由适配层定。
+    /// 空 = 一个都不放行（默认不动本机任何权限项）。
+    fn fence_read_roots(&self) -> Vec<std::path::PathBuf> {
+        self.settings
+            .app
+            .fence_read
+            .iter()
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .map(std::path::PathBuf::from)
+            .collect()
+    }
+
     pub fn set_app_settings(&mut self, app: AppSettings) -> Result<(), String> {
         self.settings.app = app;
         self.save_settings("core::set_app_settings")
@@ -777,15 +797,18 @@ impl Core {
                     Session::Collab(c) => c.is_done(),
                     Session::Single(_) => false,
                 };
-                let mode = history
-                    .iter()
-                    .find(|h| &h.name == sid)
-                    .map(|h| h.mode.clone())
-                    .unwrap_or_default();
+                let entry = history.iter().find(|h| &h.name == sid);
+                let mode = entry.map(|h| h.mode.clone()).unwrap_or_default();
+                // 记的档位来自落盘 meta（权威）：环境后来变了也要如实提示——**不拦打开**（记录是用户的）。
+                let exec = entry.map(|h| h.exec.clone()).unwrap_or_default();
+                let readiness = exec::tier_readiness(&exec);
                 SessionView {
                     sid: sid.clone(),
                     mode,
                     done,
+                    tier: exec.tier.as_str().to_string(),
+                    tier_ready: readiness.ready(),
+                    tier_missing: readiness.missing().iter().map(|s| s.to_string()).collect(),
                 }
             })
             .collect()
@@ -1091,8 +1114,10 @@ impl Core {
             sandbox: sb.clone(),
             io: Arc::clone(&self.io),
             unavailable,
-            // 围栏：可达范围 + 断网 + 环境白名单的落点，全部由该 agent 的沙箱派生（机制在 adapters）。
-            fence: crate::core::fence::FenceSpec::from_sandbox(sb, net),
+            // 围栏：可达范围 + 断网 + 环境白名单的落点，全部由该 agent 的沙箱派生（机制在 adapters）；
+            // 只读根来自用户显式授权（`fence_read`），默认空。
+            fence: crate::core::fence::FenceSpec::from_sandbox(sb, net)
+                .with_read_only(self.fence_read_roots()),
             // 从零开始；按落盘转录重建时由调用方按转录里的最大值续号（见 rebuild_session）。
             reply_seq: 0,
         }
@@ -1185,7 +1210,9 @@ impl Core {
             match self.sandboxes(&meta, &roster) {
                 Ok(sandboxes) => {
                     for sb in &sandboxes.list {
-                        let spec = fence::FenceSpec::from_sandbox(sb, meta.exec.net);
+                        // 撤销要覆盖同一次授权写下的全部条目：读写根 + 用户授权的只读根。
+                        let spec = fence::FenceSpec::from_sandbox(sb, meta.exec.net)
+                            .with_read_only(self.fence_read_roots());
                         if let Err(e) = self.fence.release(&spec) {
                             self.log.warn(
                                 "core::history_delete",

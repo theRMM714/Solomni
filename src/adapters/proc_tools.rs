@@ -286,6 +286,7 @@ mod tests {
             agent: "a".to_string(),
             rw: vec![PathBuf::from("demo").join("work"), private.clone()],
             cwd: PathBuf::from("mods").join("m0"),
+            ro: Vec::new(),
             net: false,
         };
         let env: Vec<(String, String)> = crate::adapters::confine::fence_env(&spec)
@@ -468,6 +469,7 @@ mod tests {
             agent: "proc".to_string(),
             rw: vec![dir.to_path_buf()],
             cwd: dir.to_path_buf(),
+            ro: Vec::new(),
             net: false,
         }
     }

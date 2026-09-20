@@ -452,6 +452,15 @@ pub fn prepare_fence(
         }
         todo.push((root.clone(), RIGHTS_RW, true));
     }
+    // 用户显式授权的只读根（`fence_read`）：只写只读 ACE，**授给该 agent 自己的容器 SID**。
+    // 不能像解释器基线那样授给共享组（S-1-15-2-1）——那等于把用户数据开放给机器上任意容器程序。
+    // 只读根不递归：用户可能授一个很大的目录（例如项目根），递归会改整棵树的 DACL。
+    for root in &spec.ro {
+        if root.as_os_str().is_empty() {
+            continue;
+        }
+        todo.push((root.clone(), RIGHTS_RO, false));
+    }
     for (path, rights, recursive) in todo {
         let key = format!("{:?}|{}|{}", sid, path.to_string_lossy(), rights);
         if prepared.lock().expect("授权表锁").contains(&key) {
@@ -661,7 +670,9 @@ pub fn clean(home: &Path) -> Result<String, String> {
 pub fn release_fence_home(spec: &FenceSpec, home: Option<&Path>) -> Result<(), String> {
     let sid = container_sid(&container_name(spec))?;
     let mut result = Ok(());
+    // 撤权要覆盖**同一次授权写下的全部条目**：读写根、只读根与工作目录。
     let mut paths: Vec<PathBuf> = spec.rw.clone();
+    paths.extend(spec.ro.iter().cloned());
     paths.push(spec.cwd.clone());
     paths.sort();
     paths.dedup();
@@ -1013,6 +1024,7 @@ mod tests {
             agent: "甲".to_string(),
             rw: vec![PathBuf::from("session").join("w1")],
             cwd: PathBuf::from("modules").join("m0"),
+            ro: Vec::new(),
             net: false,
         };
         let mut b = a.clone();
@@ -1090,6 +1102,7 @@ mod tests {
             agent: "probe".to_string(),
             rw: vec![dir.clone()],
             cwd: dir.clone(),
+            ro: Vec::new(),
             net: false,
         };
         let prepared = Mutex::new(std::collections::BTreeSet::new());
@@ -1120,6 +1133,7 @@ mod tests {
             agent: "probe".to_string(),
             rw: vec![dir.clone()],
             cwd: dir.clone(),
+            ro: Vec::new(),
             net: false,
         };
         let home = dir.join("ledger");
@@ -1139,5 +1153,46 @@ mod tests {
         // 基线授权（解释器目录只读）也记在同一份台账里，一并按台账撤干净。
         clean(&home).expect("基线回收应当成功");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+    /// 只读档的真机验收：授权的只读根上写下的是**只读 ACE**，且撤权能把它撤净。
+    /// 与读写授权分开断言——只读档的价值就在于"读得到、写不进"。
+    #[test]
+    fn read_only_grants_write_ro_aces_and_revoke_removes_them() {
+        if !capability().fs {
+            eprintln!(
+                "[探针] 本机不允许改目录 ACL（{}）：只读授权探针跳过（不静默当作通过）",
+                capability().note
+            );
+            return;
+        }
+        let dir = std::env::temp_dir().join(format!("solomni-ro-probe-{}", std::process::id()));
+        let ro = std::env::temp_dir().join(format!("solomni-ro-target-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("建探针目录");
+        std::fs::create_dir_all(&ro).expect("建只读根");
+        let spec = FenceSpec {
+            agent: "probe-ro".to_string(),
+            rw: vec![dir.clone()],
+            ro: vec![ro.clone()],
+            cwd: dir.clone(),
+            net: false,
+        };
+        let home = dir.join("ledger");
+        let prepared = Mutex::new(std::collections::BTreeSet::new());
+        prepare_fence(&spec, "cmd", &prepared, &home).expect("授权应当成功");
+        let sid = container_sid(&container_name(&spec)).expect("派生容器 SID");
+        assert!(has_ace_for(sid, &ro, RIGHTS_RO), "只读根上要有只读 ACE");
+        assert!(
+            !has_ace_for(sid, &ro, RIGHTS_RW),
+            "只读根上不该有读写 ACE——那正是只读档的意义"
+        );
+        free_sid(sid);
+        release_fence_home(&spec, Some(&home)).expect("撤权应当成功");
+        let sid = container_sid(&container_name(&spec)).expect("派生容器 SID");
+        let still = has_ace_for(sid, &ro, RIGHTS_RO);
+        free_sid(sid);
+        assert!(!still, "撤权后只读根上不该再有该容器 SID 的 ACE");
+        clean(&home).expect("台账回收应当成功");
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&ro);
     }
 }

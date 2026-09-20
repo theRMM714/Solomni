@@ -100,11 +100,15 @@ streaming: true        # 流式传输：向供应商请求逐片返回（默认 
 show_reasoning: true   # 思维链显示（默认 true；界面上永远默认折叠、点击才展开）
 tier: host             # 默认执行档位：host（本机）| vm（虚拟机）（默认 host）
 fence_write: false     # 是否允许围栏在本机写权限（默认 false：不动本机任何权限项）
+fence_read: []         # 用户显式授权的只读根（默认空：一个都不放行）
 ```
 
 - 这些是**默认值**：会话可在 `meta.yaml` 的 `exec` 段单独选定档位与定版
   （见 [ARCHITECTURE.md](ARCHITECTURE.md)「状态与落盘契约」与 [RUNTIME_SPEC.md](RUNTIME_SPEC.md)）。
 - `fence_write` 可被环境变量 `SOLOMNI_FENCE_WRITE=1/0` 临时覆盖（优先级高于设置，测试与 CI 用得到）。
+- `fence_read` 是**用户显式授权的只读根**（字符串数组，默认空 = 一个都不放行）：工具进程对这些目录**只读可达**，
+  不继承写。授权落在用户自己的目录上；本程序只加只读 ACE（Windows 上授给该 agent 自己的容器身份，不是共享组），
+  撤权与 `fence_write` 走同一份台账（`--fence-clean` 一并撤净）。
 
 ## 六、名字与 id
 

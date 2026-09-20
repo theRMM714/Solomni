@@ -26,6 +26,7 @@ fn spec() -> FenceSpec {
         agent: "a".to_string(),
         rw: Vec::new(),
         cwd: PathBuf::from("mods").join("m0"),
+        ro: Vec::new(),
         net: false,
     }
 }

@@ -36,8 +36,27 @@ pub fn job_json(rw: &[PathBuf], cwd: &PathBuf, prepared: bool) -> String {
     let esc = |p: &PathBuf| p.to_string_lossy().replace('\\', "/");
     let roots: Vec<String> = rw.iter().map(|p| format!("\"{}\"", esc(p))).collect();
     format!(
-        "{{\"agent\":\"probe\",\"rw\":[{}],\"cwd\":\"{}\",\"net\":false,\"prepared\":{},\"home\":null}}",
+        "{{\"agent\":\"probe\",\"rw\":[{}],\"ro\":[],\"cwd\":\"{}\",\"net\":false,\"prepared\":{},\"home\":null}}",
         roots.join(","),
+        esc(cwd),
+        prepared
+    )
+}
+
+/// 带**只读根**的守门进程入参（只读档的探针用）：`ro` 与 `rw` 同层，`prepared` 说明外层有没有做完本机授权。
+/// 只读根的授权只在 Windows 上需要写 ACE；unix 的机制在守门进程内自足，所以 prepared 传什么都行。
+pub fn job_json_ro(rw: &[PathBuf], ro: &[PathBuf], cwd: &PathBuf, prepared: bool) -> String {
+    let esc = |p: &PathBuf| p.to_string_lossy().replace('\\', "/");
+    let list = |ps: &[PathBuf]| -> String {
+        ps.iter()
+            .map(|p| format!("\"{}\"", esc(p)))
+            .collect::<Vec<_>>()
+            .join(",")
+    };
+    format!(
+        "{{\"agent\":\"probe\",\"rw\":[{}],\"ro\":[{}],\"cwd\":\"{}\",\"net\":false,\"prepared\":{},\"home\":null}}",
+        list(rw),
+        list(ro),
         esc(cwd),
         prepared
     )

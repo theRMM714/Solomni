@@ -120,3 +120,49 @@ fn env_unavailable_degrades_and_still_runs_the_command() {
         err
     );
 }
+/// 只读档（用户显式授权的 `fence_read`）：授权的根**读得到、写不进**，而读写根照旧写得进。
+/// 三件事分开断言，才能区分"只读位生效"与"整条围栏坏了"。
+#[test]
+fn read_only_roots_are_readable_but_not_writable() {
+    use crate::probe::{job_json_ro, run_launcher, scratch};
+    let inside = scratch("fence-ro-inside");
+    let shared = scratch("fence-ro-shared");
+    let secret = shared.join("data.txt");
+    std::fs::write(&secret, "READ-ONLY-VISIBLE").unwrap();
+    let spec = job_json_ro(&[inside.clone()], &[shared.clone()], &inside, false);
+
+    // ① 只读根读得到。
+    let (code, out, err) = run_launcher(&spec, &format!("cat {}", secret.display()));
+    if err.contains(RULES_REJECTED_MARK) {
+        panic!(
+            "本机 Landlock 机制有效，但规则装不上（规则写错，不是环境不允许）：{}",
+            err.trim()
+        );
+    }
+    if err.contains("文件系统围栏未生效") {
+        eprintln!(
+            "[探针] 本机 Landlock 不产生实际约束（环境结论，如实跳过）：{}",
+            err.trim()
+        );
+        return;
+    }
+    assert!(
+        out.contains("READ-ONLY-VISIBLE"),
+        "只读根要读得到：{} / {}",
+        out,
+        err
+    );
+    assert_eq!(code, Some(0), "{} / {}", out, err);
+
+    // ② 只读根写不进。
+    let target = shared.join("should-not-exist.txt");
+    let (wcode, _wout, _werr) = run_launcher(&spec, &format!("echo x > {}", target.display()));
+    assert!(!target.exists(), "只读根不该写得进");
+    assert_ne!(wcode, Some(0), "写只读根应以非零退出");
+
+    // ③ 读写根照旧写得进（对照：证明不是整条围栏坏了）。
+    let ok = inside.join("ok.txt");
+    let (ocode, _oout, oerr) = run_launcher(&spec, &format!("echo ok > {}", ok.display()));
+    assert!(ok.exists(), "读写根要写得进：{}", oerr);
+    assert_eq!(ocode, Some(0), "{}", oerr);
+}

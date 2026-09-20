@@ -312,6 +312,12 @@ fn install_rules(spec: &FenceSpec, command: &str) -> Result<(), String> {
     if !spec.cwd.as_os_str().is_empty() {
         wanted.push((spec.cwd.clone(), allowed_rw));
     }
+    // 用户显式授权的只读根（`fence_read`）：只给只读位，一个写位都不给。
+    for root in &spec.ro {
+        if !root.as_os_str().is_empty() {
+            wanted.push((root.clone(), RO_ALL));
+        }
+    }
     for p in READ_ONLY_BASELINE {
         let path = Path::new(p);
         if path.exists() {
