@@ -82,6 +82,8 @@ fn report() -> RuntimeReport {
         available: BTreeMap::new(),
         missing: BTreeMap::new(),
         diagnoses: Vec::new(),
+        tier_ready: true,
+        tier_missing: Vec::new(),
         rejected: Vec::new(),
         rejected_packages: Vec::new(),
     }
@@ -173,6 +175,10 @@ impl SessionOps for FakeOps {
             base: None,
             net: false,
             pins: BTreeMap::new(),
+            tier_ready: true,
+            tier_missing: Vec::new(),
+            vm_available: true,
+            vm_unavailable_reason: String::new(),
             runtime: report(),
             runtimes_dir: "runtimes".to_string(),
         })
@@ -394,6 +400,9 @@ fn fence() -> FenceInfo {
         net: true,
         tree: true,
         note: "测试".to_string(),
+        effective_fs: true,
+        effective_net: true,
+        write_allowed: true,
     }
 }
 

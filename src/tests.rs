@@ -3823,6 +3823,42 @@ fn vm_spec() -> ExecSpec {
     ExecSpec { tier: Tier::Vm, base: Some("base-linux".to_string()), pins: BTreeMap::new(), net: false }
 }
 
+
+/// 档位承载（与选型是两回事）：本机档没有额外前置；虚拟机档缺基础根或本机没有虚拟机监视器时**不可选**。
+/// 界面上的"能不能选"与创建/编辑的拒绝走同一个函数，所以这里钉住的就是那两处共同的事实。
+#[test]
+fn vm_tier_readiness_gates_creation_and_editing() {
+    // 本机档：任何机器上都能承载（不装载运行包、不要 guest）。
+    let host = exec::tier_readiness(&ExecSpec::default());
+    assert!(host.ready(), "本机档没有前置条件");
+    assert!(exec::tier_refusal(&ExecSpec::default()).is_none());
+
+    // 基础根不存在 = 不成立（用户填错路径就是填错路径，不猜、不兜底）。
+    let ghost = ExecSpec {
+        tier: Tier::Vm,
+        base: Some("definitely-not-a-real-base-root".to_string()),
+        ..Default::default()
+    };
+    let r = exec::tier_readiness(&ghost);
+    assert!(!r.ready() && !r.base, "基础根不在场就不成立：{:?}", r);
+    assert!(r.missing().contains(&"基础根不存在"), "缺什么要如实说：{:?}", r.missing());
+    let why = exec::tier_refusal(&ghost).expect("不成立就要给可读理由");
+    assert!(why.contains("基础根不存在") && why.contains("虚拟机档暂不可用"), "{}", why);
+
+    // 基础根在场时：成立与否只取决于本机有没有虚拟机监视器（这里只断言这份一致性）。
+    let dir = crate::contract_tests::scratch("tier-readiness");
+    let real = ExecSpec { tier: Tier::Vm, base: Some(dir.to_string_lossy().into_owned()), ..Default::default() };
+    let r2 = exec::tier_readiness(&real);
+    assert!(r2.base, "在场的基础根要认出来");
+    if r2.ready() {
+        assert!(exec::tier_refusal(&real).is_none(), "成立时不该有拒绝理由");
+    } else {
+        let why = exec::tier_refusal(&real).expect("不成立就要给可读理由");
+        assert!(why.contains(exec::hypervisor_hint()), "理由要说清缺什么：{}", why);
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn exec_host_tier_ignores_packages() {
     let modules = vec![module_with_runtimes("a", &["python"])];
@@ -3906,6 +3942,83 @@ fn diagnose_text_spells_out_every_reason() {
         b: "b@1".to_string(),
     }]);
     assert!(clash.contains("usr/lib") && clash.contains("a@1") && clash.contains("b@1"), "{}", clash);
+}
+
+
+/// 虚拟机档的承载校验：前置条件不具备时，**创建与编辑都如实拒绝**（用户环境问题，不是选型问题）。
+/// 与界面上的"能不能选"同源（`exec::tier_readiness`），两处不会各说各话。
+#[test]
+fn vm_tier_is_refused_when_the_machine_cannot_carry_it() {
+    let mut member = BTreeMap::new();
+    member.insert("a".to_string(), vec!["[]".into()]);
+    let mut core = Core::new(
+        Arc::new(InMemorySettings::with_tier(Tier::Vm)),
+        Arc::new(InMemoryHistory::new()),
+        Arc::new(InMemoryWorkspace::new()),
+        Arc::new(VecSource(vec![module_of("a")])),
+        Arc::new(InMemoryPackages::empty()),
+        Arc::new(NoFenceHost),
+        Arc::new(gw(member.clone(), vec!["[]".into()])),
+        Arc::new(FakeCatalog::new(vec!["m".to_string()])),
+        Arc::new(SilentRunner),
+        Arc::new(InMemorySysIo::new()),
+        Arc::new(NoRepair),
+        Box::new(TestPrompts::ok()),
+        Arc::new(crate::core::ports::NoopLog),
+    )
+    .expect("内存装配不应失败");
+    // 创建路径的档位来自设置（基础根留空）：成立与否随本机而定，这里钉的是**接线**——
+    // 机器承载不了就必须拒绝，且什么都不留下。
+    let default_vm = ExecSpec { tier: Tier::Vm, ..ExecSpec::default() };
+    let opened = core.create_work(work("vm-default", WorkMode::Single, &["a"]));
+    if exec::tier_readiness(&default_vm).ready() {
+        opened.expect("本机能承载虚拟机档时不该拒绝");
+    } else {
+        let err = opened.expect_err("本机承载不了虚拟机档就不许建");
+        assert!(err.contains("虚拟机档暂不可用"), "{}", err);
+        assert!(!core.session_exists("vm-default"), "拒绝就该什么都不留下");
+    }
+
+    // 编辑路径：基础根由用户给定（这里给一个不存在的），所以这一条不随机器变——必须拒绝、档位保持原样。
+    let mut core2 = Core::new(
+        Arc::new(InMemorySettings::new()),
+        Arc::new(InMemoryHistory::new()),
+        Arc::new(InMemoryWorkspace::new()),
+        Arc::new(VecSource(vec![module_of("a")])),
+        Arc::new(InMemoryPackages::empty()),
+        Arc::new(NoFenceHost),
+        Arc::new(gw(member, vec!["[]".into()])),
+        Arc::new(FakeCatalog::new(vec!["m".to_string()])),
+        Arc::new(SilentRunner),
+        Arc::new(InMemorySysIo::new()),
+        Arc::new(NoRepair),
+        Box::new(TestPrompts::ok()),
+        Arc::new(crate::core::ports::NoopLog),
+    )
+    .expect("内存装配不应失败");
+    let sid = core2.create_work(work("w", WorkMode::Single, &["a"])).unwrap().sid;
+    let err = core2
+        .edit_session(
+            &sid,
+            SessionEdit {
+                agents: vec![ConfigAgent { name: "a".to_string(), modules: vec!["a".to_string()], model: String::new() }],
+                tier: "vm".to_string(),
+                base: Some("definitely-not-a-real-base-root".to_string()),
+                pins: BTreeMap::new(),
+                net: false,
+            },
+        )
+        .expect_err("基础根不在场就不许改入虚拟机档");
+    assert!(err.contains("虚拟机档暂不可用") && err.contains("基础根不存在"), "{}", err);
+    let cfg = core2.session_config(&sid).unwrap();
+    assert_eq!(cfg.tier, "host", "被拒后档位保持原样");
+    // 界面读的是**已保存的**配置（用户没提交的 base 输入后端看不到），两个字段必须自洽：
+    // 可用时没有理由、不可用时必须有理由——界面据此决定禁用与说明。
+    assert_eq!(
+        cfg.vm_available,
+        cfg.vm_unavailable_reason.is_empty(),
+        "能不能选与为什么不能选必须说同一件事"
+    );
 }
 
 #[test]
@@ -4084,12 +4197,15 @@ fn edit_session_writes_meta_appends_config_record_and_rebuilds() {
         "单 agent 会话在用户开口之前还没内容：名字仍改得动"
     );
     // 改：模块 a → b，模型指定 m，档位换虚拟机档、放行网络。
+    // 基础根给一个**真实存在**的目录：档位承载是独立的一层校验（虚拟机档要求基础根在场），
+    // 这条测试验的是"编辑写回与重建"，所以先让承载成立，别把两件事混在一条断言里。
+    let base_dir = crate::contract_tests::scratch("edit-session-base");
     core.edit_session(
         &sid,
         SessionEdit {
             agents: vec![ConfigAgent { name: "a".to_string(), modules: vec!["b".to_string()], model: "m".to_string() }],
             tier: "vm".to_string(),
-            base: Some("base-linux".to_string()),
+            base: Some(base_dir.to_string_lossy().into_owned()),
             pins: BTreeMap::new(),
             net: true,
         },
@@ -4102,7 +4218,7 @@ fn edit_session_writes_meta_appends_config_record_and_rebuilds() {
     let (meta, events) = hist.load(&sid).unwrap();
     assert_eq!(meta.agents[0].modules, vec!["b".to_string()], "meta.yaml 是名单的唯一真相");
     assert_eq!(meta.exec.tier, Tier::Vm);
-    assert_eq!(meta.exec.base.as_deref(), Some("base-linux"));
+    assert_eq!(meta.exec.base.as_deref(), Some(base_dir.to_string_lossy().as_ref()), "基础根随提交写回");
     assert!(
         events.iter().any(|e| e.get("type").and_then(|t| t.as_str()) == Some("config")),
         "每次提交编辑追加一条旁路配置记录：{:?}",

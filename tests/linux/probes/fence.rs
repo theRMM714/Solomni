@@ -50,3 +50,19 @@ fn fence_denies_outside_paths_and_allows_the_given_roots() {
     assert!(!out.contains("SECRET-DO-NOT-LEAK"), "越界读必须拿不到：{} / {}", out, err);
     assert_ne!(code, Some(0), "越界读应以非零退出：{} / {}", out, err);
 }
+
+/// 未授权时段（`prepared = false`）的机制验证：把"环境不允许"与"我们写错了"分开。
+/// 两者在守门进程里都表现为降级，只有 `--fence-verify` 能把它们区分开——
+/// 分不开就会出现"用户以为有围栏、实际没有"（见 PRODUCT.md「隔离级别如实」）。
+#[test]
+fn verify_separates_env_unavailable_from_broken_rules() {
+    use crate::probe::{job_json, verdict_is_broken, verdict_is_env_unavailable, verify_fence};
+    let dir = scratch("fence-verify");
+    let spec = job_json(&[dir.clone()], &dir, false);
+    let verdict = verify_fence(&spec, "true");
+    if verdict_is_env_unavailable(&verdict) {
+        eprintln!("[探针] 本机 Landlock 不产生实际约束（环境结论，如实跳过）：{}", verdict);
+        return;
+    }
+    assert!(verdict_is_broken(&verdict), "本机 Landlock 有效时规则就该装得上：{}", verdict);
+}

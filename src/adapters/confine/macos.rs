@@ -4,7 +4,7 @@
 //! spec.net 为假时连网络一起拒。装不上时如实降级（打印说明后照常执行），启动时已报告能力等级；
 //! 降级原因分两类并各自带标记：「本机 ABI 失效」是环境结论，「profile 被拒」是 profile 写错（探针硬失败）。
 
-use super::{shell_command, Capability, FENCE_FAILED};
+use super::{shell_command, Capability, FenceVerdict, FENCE_FAILED};
 use crate::core::fence::FenceSpec;
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int};
@@ -134,11 +134,30 @@ pub fn run_fenced(spec: &FenceSpec, _prepared: bool, _home: Option<&std::path::P
     }
 }
 
+/// 装围栏并**如实分类**结果：自检不过 = 本机环境结论（降级照跑）；自检过了还装不上 = 我们写错了。
+/// 探针早就按这两类分别处理（前者如实跳过、后者响亮失败），运行期在未授权时段也照这一份结论走。
+pub fn verify(spec: &FenceSpec, command: &str) -> FenceVerdict {
+    if !seatbelt_confines() {
+        return FenceVerdict::EnvUnavailable(
+            "本机 sandbox_init 不产生实际约束（该私有 ABI 在新版 macOS 上已失效）".to_string(),
+        );
+    }
+    match install_profile(spec, command) {
+        Ok(()) => FenceVerdict::Enforced,
+        Err(e) => FenceVerdict::Broken(e),
+    }
+}
+
+/// 守门进程路径：装围栏（自检不过与 profile 被拒都如实降级照跑——能力等级已在启动报告里说过）。
 fn install(spec: &FenceSpec, command: &str) -> Result<(), String> {
-    // 先自检：本机 sandbox_init 是否真的产生约束。不产生就别假装装上了（探针据此如实跳过）。
     if !seatbelt_confines() {
         return Err("本机 sandbox_init 不产生实际约束（该私有 ABI 在新版 macOS 上已失效）".to_string());
     }
+    install_profile(spec, command)
+}
+
+/// 生成并装上 profile（自检由调用方先做）：走到这里才失败 = profile 写错，一律带稳定标记。
+fn install_profile(spec: &FenceSpec, command: &str) -> Result<(), String> {
     let profile = profile_text(spec, command);
     // 规则规模如实报一行：失败时（探针/端到端日志）能据此判断"是不是规则太宽/太窄"。
     eprintln!(

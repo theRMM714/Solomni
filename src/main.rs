@@ -34,6 +34,11 @@ fn main() {
     if let Some(i) = args.iter().position(|a| a == "--print-fence-env") {
         std::process::exit(print_fence_env(&args, i));
     }
+    // 机制验证（机器可读，探针与测试驱动）：不装围栏、不写任何权限项，只如实报"这次能不能强制住"。
+    // 未授权时段的拒绝执行（见 adapters/proc_tools.rs）就靠这一份结论。
+    if let Some(i) = args.iter().position(|a| a == "--fence-verify") {
+        std::process::exit(fence_verify(&args, i));
+    }
     // 入站契约（机器可读）：HTTP 路由目录的唯一定义（见 ARCHITECTURE.md「呈现层入站契约」）。
     if args.iter().any(|a| a == "--print-routes") {
         println!("{}", presentation::routes::catalog_json());
@@ -101,6 +106,8 @@ fn main() {
     // 默认不准——没经过用户同意，本程序不动本机任何权限项。
     let home = root.join(".home");
     let write_allowed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    // 启动报告已经算过的同一个事实：Web 概览要按它区分"本机能力"与"本次实际"（下面那块必定赋值）。
+    let allow_fence_write;
     // 工具执行：外层拉起的守门进程就是本程序自己（围栏在它里面装）。
     let tools = adapters::ProcTools::new(
         std::env::current_exe().unwrap_or_default(),
@@ -216,14 +223,19 @@ fn main() {
             _ => core.app_settings().fence_write,
         };
         write_allowed.store(allow, std::sync::atomic::Ordering::Relaxed);
+        allow_fence_write = allow;
         let cap = adapters::confine::capability();
+        // 能力与本次实际**分开报**：授权与否决定路径级围栏装不装，但进程树围栏、资源上限与环境白名单
+        // 在两种时段都生效（未授权不等于无围栏）。只说"本机能力"会让用户以为未授权时什么都没有。
+        let usable = |ok: bool| if ok { "可用" } else { "不可用" };
+        let (fs, net) = if allow { (cap.fs, cap.net) } else { (false, false) };
+        println!("[围栏] 本机能力：文件系统={} 断网={} 进程树={}（{}）", usable(cap.fs), usable(cap.net), usable(cap.tree), cap.note);
         println!(
-            "[围栏] 本机能力：文件系统={} 断网={} 进程树={}；写权限={}（{}）",
-            cap.fs,
-            cap.net,
-            cap.tree,
-            if allow { "已授权" } else { "未授权" },
-            if allow { cap.note.as_str() } else { "未授权时段：外部工具按无围栏执行；要启用请设 fence_write: true" }
+            "[围栏] 本次实际：文件系统={} 断网={} 进程树={}；容器授权={}（未授权时只放行进程树与资源上限，不写本机任何权限项；要启用：设置里打开，或 .home/settings.yaml 写 fence_write: true）",
+            usable(fs),
+            usable(net),
+            usable(cap.tree),
+            if allow { "已授权" } else { "未授权" }
         );
     }
 
@@ -246,11 +258,11 @@ fn main() {
     let ops = core::api::Ops::from_handle(&handle);
 
     if web {
-        serve_web(ops, port_flag(&args), std::sync::Arc::clone(&log));
+        serve_web(ops, port_flag(&args), std::sync::Arc::clone(&log), allow_fence_write);
     } else {
         // CLI 里输入 webui 可直接转入 Web，无需重启进程（能力面可克隆，两份呈现共用同一个核心）。
         if let presentation::cli::CliExit::Web(port) = presentation::cli::run(ops.clone()) {
-            serve_web(ops, port, std::sync::Arc::clone(&log));
+            serve_web(ops, port, std::sync::Arc::clone(&log), allow_fence_write);
         }
     }
 }
@@ -372,6 +384,37 @@ fn print_fence_env(args: &[String], flag: usize) -> i32 {
     }
 }
 
+/// 隐藏模式：只做机制验证，如实报三态（enforced / env-unavailable / broken），恒退出 0——
+/// 判定归调用方（探针按性质决定 env-skip 还是失败）。入参 = 守门进程那份 JSON，`--` 之后是命令。
+fn fence_verify(args: &[String], flag: usize) -> i32 {
+    let raw = args.get(flag + 1).cloned().unwrap_or_default();
+    let command = match args.iter().position(|a| a == "--") {
+        Some(j) => args.get(j + 1).cloned().unwrap_or_default(),
+        None => String::new(),
+    };
+    let job = match adapters::confine::FenceJob::from_json(&raw) {
+        Ok(j) => j,
+        Err(e) => {
+            eprintln!("[围栏] {}", e);
+            return adapters::confine::FENCE_FAILED;
+        }
+    };
+    match adapters::confine::verify(&job.spec, &command) {
+        adapters::confine::FenceVerdict::Enforced => {
+            println!("enforced");
+            0
+        }
+        adapters::confine::FenceVerdict::EnvUnavailable(why) => {
+            println!("env-unavailable {}", why);
+            0
+        }
+        adapters::confine::FenceVerdict::Broken(why) => {
+            println!("broken {}", why);
+            0
+        }
+    }
+}
+
 /// 守门模式：读回围栏参数与命令，装围栏 → 跑命令 → 以工具退出码收场（失败如实报错，不静默）。
 fn fence_run(args: &[String], flag: usize) -> i32 {
     let raw_job = args.get(flag + 1).cloned().unwrap_or_default();
@@ -438,9 +481,25 @@ fn strip_unc_prefix(p: PathBuf) -> PathBuf {
     p
 }
 
-fn serve_web(ops: core::api::Ops, port: u16, log: std::sync::Arc<dyn core::ports::Log + Send + Sync>) {
+fn serve_web(
+    ops: core::api::Ops,
+    port: u16,
+    log: std::sync::Arc<dyn core::ports::Log + Send + Sync>,
+    write_allowed: bool,
+) {
     let cap = adapters::confine::capability();
-    let fence = presentation::web::FenceInfo { fs: cap.fs, net: cap.net, tree: cap.tree, note: cap.note };
+    // 能力与本次实际**分开报**（与启动报告同一套说法）：未授权时路径级围栏是关的，
+    // 但进程树与资源上限照旧生效——概览里必须让用户看到这个区别，不能只看"本机能力"。
+    let (fs, net) = if write_allowed { (cap.fs, cap.net) } else { (false, false) };
+    let fence = presentation::web::FenceInfo {
+        fs: cap.fs,
+        net: cap.net,
+        tree: cap.tree,
+        note: cap.note,
+        effective_fs: fs,
+        effective_net: net,
+        write_allowed,
+    };
     if let Err(e) = presentation::web::serve(ops, port, log, fence) {
         eprintln!("[Web 服务异常] {}", e);
         std::process::exit(1);

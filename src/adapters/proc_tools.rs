@@ -82,6 +82,12 @@ impl ToolRunner for ProcTools {
                     "[围栏] 容器围栏未启用（没有授权在本机写权限）：外部工具按无围栏执行。要启用：在设置里打开，或在 .home/settings.yaml 写 fence_write: true"
                 );
             }
+            if !prepared {
+                // 未授权时段先问机制：环境不允许就如实降级，我们写错了就拒绝执行（见 refuse_when_broken）。
+                if let Some(outcome) = refuse_when_broken(&self.texts, confine::verify(fence, command)) {
+                    return outcome;
+                }
+            }
             prepared
         };
         // 其它平台没有容器围栏，也就没有"要先授权"这一步。
@@ -148,6 +154,23 @@ impl ToolRunner for ProcTools {
         let err = err_reader.join().unwrap_or_default();
         let code = child.try_wait().ok().flatten().and_then(|s| s.code());
         self.assemble(out, err, timed_out, code)
+    }
+}
+
+/// 未授权时段遇到机制自检结论时的放行规矩：**只有本机装不上能降级**。
+/// 自检已确认机制有效却仍装不上 = 我们写错了——那种情况按无围栏跑，等于用户以为有围栏、实际什么都没有，
+/// 所以拒绝执行（命令不落进程），回执用提示词册里的固定说法（它随工具结果进模型上下文）。
+#[cfg(windows)]
+fn refuse_when_broken(
+    texts: &crate::core::prompt::ToolTexts,
+    verdict: confine::FenceVerdict,
+) -> Option<ToolOutcome> {
+    match verdict {
+        confine::FenceVerdict::Broken(why) => {
+            eprintln!("[围栏] 容器围栏机制装不上（{}）：本次拒绝执行，不按无围栏跑", why);
+            Some(ToolOutcome { ok: false, output: texts.tool_fence_failed.clone() })
+        }
+        confine::FenceVerdict::Enforced | confine::FenceVerdict::EnvUnavailable(_) => None,
     }
 }
 
@@ -285,6 +308,28 @@ mod tests {
         let long = "字".repeat(20_000);
         let cut = tools.assemble(long, String::new(), false, Some(0));
         assert!(cut.output.contains("20000"), "截断要如实报字符数：{}", &cut.output[cut.output.len() - 80..]);
+    }
+
+
+    /// 未授权时段的放行规矩：**只有本机装不上能降级**。
+    /// 自检已确认机制有效却仍装不上 = 我们写错了，那一路必须拒绝执行——
+    /// 按无围栏跑等于用户以为有围栏、实际什么都没有（回执文案取自提示词册）。
+    #[cfg(windows)]
+    #[test]
+    fn broken_mechanism_refuses_execution_instead_of_degrading() {
+        let texts = prompt_texts();
+        let broken = refuse_when_broken(&texts, confine::FenceVerdict::Broken("profile 写错".to_string()))
+            .expect("我们写错了必须拒绝执行");
+        assert!(!broken.ok, "拒绝执行时 ok 必须为假");
+        assert_eq!(broken.output, texts.tool_fence_failed, "回执用册子里的固定说法");
+        assert!(
+            refuse_when_broken(&texts, confine::FenceVerdict::Enforced).is_none(),
+            "机制装上了就没有拒绝的理由"
+        );
+        assert!(
+            refuse_when_broken(&texts, confine::FenceVerdict::EnvUnavailable("内核不支持".to_string())).is_none(),
+            "本机不允许是环境结论：如实降级照跑，不拒绝"
+        );
     }
 
     // ---------- 真实工具进程（T2 真实适配器边界；见 TESTING.md 端口矩阵的 ToolRunner 行） ----------

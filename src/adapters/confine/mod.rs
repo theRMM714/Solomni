@@ -31,6 +31,26 @@ pub const FENCE_FLAG: &str = "--fence-run";
 /// 围栏装不上时守门进程的退出码（工具执行据此如实报错，不静默）。
 pub const FENCE_FAILED: i32 = 111;
 
+/// 本机能不能强制住这次执行的围栏——**机制层的验证结论**，与"外层授权了没有"无关。
+/// 三态的理由：把"本机不允许"与"我们的机制写错了"分开。
+/// 前者是环境结论，如实降级照跑（能力等级已在启动报告里说过）；后者绝不能静默降级——
+/// 那等于用户以为有围栏、实际什么都没有。探针早就按这两类分别处理，运行期也必须一样。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FenceVerdict {
+    /// 机制真装上了，强制生效。
+    Enforced,
+    /// 本机环境不允许装（内核不支持、私有 ABI 失效、系统拒绝建容器）——降级照跑，不是我们的错。
+    EnvUnavailable(String),
+    /// 自检已确认机制有效，但我们的规则/步骤装不上 = 我们写错了。未授权时据此**拒绝执行**。
+    Broken(String),
+}
+
+/// 本机能不能强制住这次执行的围栏（机制层自检，**不写本机任何权限项**）。
+/// 未授权时段靠它把"环境不允许"与"我们写错了"分开——后者绝不能被当成降级吞掉。
+pub fn verify(spec: &FenceSpec, command: &str) -> FenceVerdict {
+    backend::verify(spec, command)
+}
+
 /// 围栏授权释放的适配器（实现 core 的 FenceHost 端口）：core 只说「这个会话的围栏撤掉」。
 pub struct FenceHostAdapter;
 

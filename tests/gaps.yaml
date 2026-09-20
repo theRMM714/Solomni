@@ -1,6 +1,7 @@
 # 全局测试与质量缺口（当前状态：条目存在 = 尚未完成；补上后删除条目）
 #
-# 这里只放**长期目标**：已经能机器判定的门禁不入账。平台与跨平台层的缺口记在
+# 这里放两类：**长期目标**（存量收敛、目录迁移）与**已确认但尚未实施的产品/机制缺口**。
+# 已经能机器判定的门禁不入账。平台与跨平台层的缺口记在
 # tests/cross-platform/gaps.yaml 与 tests/<平台>/gaps.yaml（它们决定 TEST-REPORT-ACCEPTED）。
 
 - id: quality.hard-gate-full
@@ -40,3 +41,63 @@
     src/contract_tests.rs 与 src/tests.rs 都不存在；src/tests/ 下 doubles/ports/fakes/adapters 各一文件；
     cargo test 与 node run-tests.js 全绿；TESTING.md 不再指向旧路径。
   blocked_by: 缺少实现
+
+- id: fence.env-unavailable-observed-by-probes
+  scope: global
+  level: T4
+  why: |
+    未授权时段的机制验证现在分三态（enforced / env-unavailable / broken），其中**只有 broken 会拒绝执行**；
+    env-unavailable（内核不支持、私有 ABI 失效、系统不允许建容器）仍如实降级照跑。这是当前有意选定的行为，
+    但还缺一条**机器可判的事实**：三平台探针目前只在真机上按当时结论分支，没有一条能确定性地覆盖
+    "本环境不允许"这一路（Windows 上容器 profile 建不起来就是它，Linux/macOS 上要靠老内核或 ABI 失效）。
+    这条不补，env-unavailable 的分支就只被真机偶然验证过，质量门禁拿不到它。
+  how: |
+    给 `--fence-verify` 加一个**只在测试里打开**的注入开关（与 macOS 现有的 SOLOMNI_FENCE_PROFILE 同性质），
+    让探针能构造"自检不过"的结论；三平台各加一条探针：
+    1) 断言结论是 env-unavailable（而不是 broken）；
+    2) 断言守门进程仍照常执行命令（降级照跑），且回执里如实说明文件系统围栏未生效；
+    3) 断言这一路**不写**任何本机权限项（与 broken 的拒绝执行形成对照）。
+  accept: |
+    tests/windows、tests/linux、tests/macos 各有一条确定性探针覆盖 env-unavailable；
+    两条分支（env-unavailable 照跑 / broken 拒绝执行）在报告里可区分，且不依赖真机偶然条件。
+  blocked_by: 缺少实现（需要一条测试专用的注入开关）
+
+- id: fence.guest-tier-not-wired
+  scope: global
+  level: T4
+  why: |
+    虚拟机档的选型、诊断与装配计划已就位，但 guest 本体未接入：ExecPlan.packages 全仓没有任何执行消费点
+    （create_work 只把它打进日志），选 vm 档实际仍按本机档跑。这意味着当前产品**不存在**"用户不授权本机写权限
+    也能拿到强隔离"的路径——未授权时文件系统与断网围栏都是关的。在 guest 落地前，界面必须如实标注"未接入"。
+  how: |
+    1) 落地会话级 guest（PRODUCT.md「后置工作」；前置条件因机器而异：Windows 需虚拟机平台/WSL、
+       Linux 需 /dev/kvm、macOS 需 11+），装配阶段消费 exec::plan 的 packages；
+    2) 档位承载检查已在本次实现（exec::tier_readiness / tier_refusal：创建与编辑都拒绝、界面禁用），
+       这条缺口只覆盖**guest 本体**与装配接线；
+    3) 界面文案已在 app.js 如实标注 guest 未接入。
+  accept: |
+    在真机上选 vm 档跑一次工具：进程确实跑在 guest 内（可达范围与宿主隔离）；前置条件不具备时，
+    编辑与「开始」都如实拒绝、不产生 vm 档会话；三平台探针覆盖"guest 可用 / 不可用"两种结论；
+    届时删除本条并同步 PRODUCT.md / RUNTIME_SPEC.md 的当前状态。
+  blocked_by: 缺少实现
+
+- id: fence.read-only-default-policy
+  scope: global
+  level: T4
+  why: |
+    "未授权 = 完全无围栏"的替代方案里，有一类是"默认放行只读/遍历"。当前未实现，且**不适合直接做**：
+    Windows 上授在目录上的 FILE_GENERIC_READ + 继承位就是递归读整棵子树；现有 RIGHTS_RO 只授给
+    基线 SID S-1-15-2-1（ALL APPLICATION PACKAGES），等于本机任何 AppContainer 程序都能读到那份数据。
+    另一个候选是给 FenceSpec 增加显式只读根（ro），仍走"显式授权"，只是权限位换成只读。
+    这三条路的取舍未定，需要先与用户确认权限模型，再决定是否实现。
+  how: |
+    先定权限模型，再落实现（三选一或组合）：
+    1) 不做默认只读放行——可达范围继续只落在会话沙箱内，需要读宿主时由用户投喂副本；
+    2) FenceSpec 增加 ro: Vec<PathBuf>，与 rw 一样走显式授权，台账复用 fence-grants.json 现有的
+       rights 字段区分只读/读写，release_fence_home 与 --fence-clean 不需改结构；
+    3) 默认只读放行——需要先解决"授给谁"（按 per-agent 容器 SID 而非 ALL APPLICATION PACKAGES）
+       与"授到哪些根"（不覆盖用户目录/项目根）两个前提。
+  accept: |
+    权限模型经用户确认；实现后 T4 探针钉住"越界读拿不到、授权只读的根读得到但写不进"，
+    且 --fence-clean 能把只读授权一并撤净（台账无残条）。
+  blocked_by: 需要用户先决定权限模型

@@ -111,3 +111,23 @@ fn container_has_no_network() {
         err
     );
 }
+
+/// 未授权时段（`prepared = false`）的机制验证：把"本环境不允许建容器"与"我们的步骤写错了"分开。
+/// 与上面几条探针的尺子相反——那些要的是**跑起来**，这条只要**结论**（不写任何 ACL）。
+/// 这条不改本机状态（不写权限项），但会建一次容器 profile，所以仍归真机开关管。
+#[test]
+fn verify_separates_env_unavailable_from_broken_container_steps() {
+    use crate::probe::{job_json, verdict_is_broken, verdict_is_env_unavailable, verify_fence};
+    if skip_unless_live("verify_separates_env_unavailable_from_broken_container_steps") {
+        return;
+    }
+    let dir = scratch("container-verify");
+    // prepared = false：这正是未授权机器上的真实形态（外层不写 ACL，只问机制能不能用）。
+    let spec = job_json(std::slice::from_ref(&dir), &PathBuf::from("C:\\Windows\\System32"), false);
+    let verdict = verify_fence(&spec, "cmd");
+    if verdict_is_env_unavailable(&verdict) {
+        eprintln!("[探针] 本环境不允许建容器 profile（环境结论，如实跳过）：{}", verdict);
+        return;
+    }
+    assert!(verdict_is_broken(&verdict), "本机能建容器时步骤就该走得通：{}", verdict);
+}

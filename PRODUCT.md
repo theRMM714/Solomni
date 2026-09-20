@@ -98,7 +98,9 @@ session/<工作名>/
 - agent 的文件读写用核心自带的**内置工具**（`read` / `write` / `edit` / `patch` / `search`；`patch` 用自由格式补丁，大段内容不必塞进 JSON）：核心在提示词里把**占位符替换成运行时的真实根目录**，agent 拿到的就是真实绝对路径；越出这些根（相对路径、`..` 跳出）一律拒绝；模块目录只有它所属的 agent 可达（细节见 [MODULE_SPEC.md](MODULE_SPEC.md)）
 - **执行档位**（`exec` 段）：**本机档**（默认）= 脚本直接在宿主上跑；**虚拟机档** = 一整套 guest。
   虚拟机档的选型、诊断与装配计划已就位，**guest 本体尚未接入**——未接入前实际仍按本机档执行，产品如实标注，不夸大
-  （见"后置工作"与 [RUNTIME_SPEC.md](RUNTIME_SPEC.md)）
+  （见"后置工作"与 [RUNTIME_SPEC.md](RUNTIME_SPEC.md)）。
+  **档位承载也如实判**：本机不具备虚拟机档的前置条件（缺基础根，或没有虚拟机监视器）时，虚拟机档**不允许创建或改入**，
+  配置界面直接禁用并说明缺什么——这是用户环境问题，不是选型问题，产品不替用户"降级成能跑的样子"
 - **运行能力**：模块用自己的 `runtimes` 声明工具需要哪些运行包（`python` / `node` / `bash` / `cc`……），包放在依赖文件夹 `runtimes/` 里，
   放入即出现。缺包 = 该模块的工具不执行并如实说明缺什么，**不是**会话崩溃（契约见 [RUNTIME_SPEC.md](RUNTIME_SPEC.md)）
 - 隔离级别如实：三层各说各的**实际**强度——① 内置 read/write/edit/patch/search 是**工具层**越界拒绝（路径校验）；
@@ -106,6 +108,11 @@ session/<工作名>/
   超时连根杀掉整棵进程树、Windows 上用 Job Object 围住进程树；③ 文件系统与网络围栏按平台接入：Linux（Landlock）、macOS（seatbelt）、
   Windows（AppContainer：按 agent 派生容器 SID、可达范围凭目录 ACL 授权、不给 capability 即断网）。
   **启动时会对本机做一次自检并如实报告能力等级**——机制装不上就说装不上（例如受限环境里不允许改目录 ACL 或建容器 profile）。
+  **未授权不等于无围栏**：没授权时段，路径级文件系统围栏与断网是关的（它们要写目录 ACL 才装得上），
+  但**进程树围栏、进程数上限与环境白名单照旧生效**——启动报告把"本机能力"与"本次实际"分两行说清，不让人误读。
+  机制自检分三态：本机不允许（内核不支持、私有 ABI 失效、系统拒绝建容器）如实降级照跑；
+  **自检已确认机制有效却仍装不上 = 程序自己写错了，那一路拒绝执行**（命令不落进程，工具回执如实说明），
+  绝不按"无围栏"跑——否则用户以为有围栏、实际什么都没有。
   三平台围栏都已在各自平台的真机上跑过探针（Windows AppContainer + 目录 ACL、Linux Landlock、macOS seatbelt），
   探针在 `tests/windows/`、`tests/linux/`、`tests/macos/`，缺口账现状见 [TESTING.md](TESTING.md)
 - **围栏要用就征得同意**：Windows 上的路径级围栏必须在本机目录上写权限项，所以本程序**默认不写**——只有显式授权（`.home/settings.yaml` 的 `fence_write: true`，或环境变量 `SOLOMNI_FENCE_WRITE=1`）才做；授权后每次写入都在 stderr 逐条列出并记进授权台账；`solomni --fence-clean` 按台账精确撤销并删掉建过的容器 profile（删除会话时也会撤销该会话的授权）

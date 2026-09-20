@@ -324,11 +324,11 @@ function cfgDiv(cls, text) {
 function cfgHint(text, kind) {
   return cfgDiv('cfg-hint' + (kind ? ' ' + kind : ''), text);
 }
-/// 执行档位二选一：原生 radio（同名即互斥）。
-function cfgRadio(labelText, checked, group) {
+/// 执行档位二选一：原生 radio（同名即互斥）。disabled = 本机承载不了（例如虚拟机档的前置条件不具备）。
+function cfgRadio(labelText, checked, group, disabled) {
   const wrap = document.createElement('label'); wrap.className = 'chk';
   const box = document.createElement('input');
-  box.type = 'radio'; box.name = group; box.checked = !!checked;
+  box.type = 'radio'; box.name = group; box.checked = !!checked; box.disabled = !!disabled;
   const span = document.createElement('span'); span.textContent = labelText;
   wrap.appendChild(box); wrap.appendChild(span);
   return { wrap, box };
@@ -438,8 +438,11 @@ function buildConfigForm(sid, cfg, c, box) {
   // 执行档位：本机 / 虚拟机（如实说明各自是什么）
   const secT = cfgDiv('cfg-sec');
   secT.appendChild(cfgDiv('cfg-sec-title', '执行档位'));
+  // 虚拟机档的**承载**由后端判定（与「开始」/保存同一把尺子）：前置条件不具备时禁用，不让选。
+  // 与「未接入」是两回事：guest 本体尚未接入这一点写在下面的提示里，两条都如实说。
+  const vmOk = cfg.vm_available !== false;
   const hostR = cfgRadio('本机档 —— 脚本直接在宿主上跑：宿主自备解释器，不装载运行包；隔离就是宿主本身（快，但风险也在宿主上）。', draft.tier === 'host', 'cfg-tier');
-  const vmR = cfgRadio('虚拟机档 —— 一整套 guest，脚本在 guest 里跑：按模块声明的运行能力装载运行包；隔离更强，代价是更重、依赖运行包。', draft.tier === 'vm', 'cfg-tier');
+  const vmR = cfgRadio('虚拟机档 —— 一整套 guest，脚本在 guest 里跑：按模块声明的运行能力装载运行包；隔离更强，代价是更重、依赖运行包。', draft.tier === 'vm', 'cfg-tier', !vmOk);
   const baseIn = textInput('base（可选）：虚拟机的基础根（发行版基底名或目录）');
   baseIn.value = draft.base;
   baseIn.addEventListener('input', () => { draft.base = baseIn.value; });
@@ -453,7 +456,13 @@ function buildConfigForm(sid, cfg, c, box) {
   hostR.box.addEventListener('change', () => { if (hostR.box.checked) { draft.tier = 'host'; syncTier(); } });
   vmR.box.addEventListener('change', () => { if (vmR.box.checked) { draft.tier = 'vm'; syncTier(); } });
   secT.appendChild(hostR.wrap); secT.appendChild(vmR.wrap);
+  if (!vmOk) {
+    // 缺什么由后端如实给出（不在这里猜）：环境问题就说环境，界面照抄。
+    secT.appendChild(cfgHint('本机现在不能选虚拟机档：' + (cfg.vm_unavailable_reason || '前置条件不具备') + '。', 'err'));
+  }
   secT.appendChild(baseWrap); secT.appendChild(baseHint);
+  // 虚拟机档的 guest 本体尚未接入（如实标注，不夸大）：选了也仍按本机档执行。
+  secT.appendChild(cfgHint('注意：虚拟机档的 guest 本体尚未接入——选它实际仍按本机档执行（见 RUNTIME_SPEC.md 的当前状态）。', 'warn'));
   box.appendChild(secT);
   syncTier();
 

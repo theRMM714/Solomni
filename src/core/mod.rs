@@ -120,6 +120,11 @@ pub struct RuntimeReport {
     pub missing: BTreeMap<String, Vec<String>>,
     /// 虚拟机档下不能成立的诊断；本机档为空。
     pub diagnoses: Vec<exec::Diagnosis>,
+    /// 本机能不能承载**当前档位**（虚拟机档的前置条件；本机档恒为可）。
+    /// 界面据此决定虚拟机档能不能选，并与「开始」/编辑的校验同源（`exec::tier_readiness`）。
+    pub tier_ready: bool,
+    /// 承载不了时缺什么（空 = 齐了）。
+    pub tier_missing: Vec<String>,
     /// 被拒收的模块（原因如实）。
     pub rejected: Vec<String>,
     /// 被拒收的运行包（原因如实）。
@@ -148,6 +153,14 @@ pub struct SessionConfig {
     pub base: Option<String>,
     pub net: bool,
     pub pins: BTreeMap<String, String>,
+    /// 本机能不能承载**当前档位**（虚拟机档的前置条件）：界面据此决定虚拟机档能不能选。
+    pub tier_ready: bool,
+    /// 承载不了时缺什么（空 = 齐了）。
+    pub tier_missing: Vec<String>,
+    /// **虚拟机档**能不能选（与当前档位无关）：为假时界面禁用虚拟机档，编辑与「开始」也会拒绝。
+    pub vm_available: bool,
+    /// 虚拟机档为什么不能选（`vm_available` 为真时为空）。
+    pub vm_unavailable_reason: String,
     /// 运行能力报告（模块声明 / 包库可用 / 缺包 / 虚拟机档诊断 / 拒收原因）。
     pub runtime: RuntimeReport,
     /// 依赖文件夹（把运行包放进这里；真实路径，给用户看）。
@@ -282,12 +295,15 @@ impl Core {
         } else {
             Vec::new()
         };
+        let readiness = exec::tier_readiness(&spec);
         RuntimeReport {
             tier: tier.as_str().to_string(),
             declared: exec::declared(&roster.modules),
             available: lib.capability_versions(),
             missing: exec::absent(&roster.modules, &lib),
             diagnoses,
+            tier_ready: readiness.ready(),
+            tier_missing: readiness.missing().iter().map(|s| s.to_string()).collect(),
             rejected: roster.rejected.clone(),
             rejected_packages: lib.rejected.clone(),
         }
@@ -302,6 +318,8 @@ impl Core {
     pub fn session_config(&self, sid: &str) -> Result<SessionConfig, String> {
         let (meta, events) = self.history_open(sid)?;
         let tier = meta.exec.tier;
+        // 虚拟机档的承载探针：用用户填的基础根（若有），否则问"裸虚拟机档"能不能成立。
+        let vm_probe = exec::ExecSpec { tier: exec::Tier::Vm, base: meta.exec.base.clone(), ..exec::ExecSpec::default() };
         Ok(SessionConfig {
             sid: meta.name.clone(),
             mode: meta.mode.clone(),
@@ -321,6 +339,15 @@ impl Core {
             pins: meta.exec.pins.clone(),
             runtime: self.runtime_report(tier),
             runtimes_dir: workspace::slash(&self.packages.dir()),
+            tier_ready: exec::tier_readiness(&meta.exec).ready(),
+            tier_missing: exec::tier_readiness(&meta.exec)
+                .missing()
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
+            // 虚拟机档能不能选**与当前档位无关**：本机档会话也要如实告诉用户 vm 现在不可用（界面据此禁用）。
+            vm_available: exec::tier_readiness(&vm_probe).ready(),
+            vm_unavailable_reason: exec::tier_refusal(&vm_probe).unwrap_or_default(),
         })
     }
 
@@ -384,6 +411,11 @@ impl Core {
             other => return Err(format!("未知执行档位：{}（只认 host / vm）", other)),
         };
         let spec = exec::ExecSpec { tier, base: edit.base.clone(), pins: edit.pins.clone(), net: edit.net };
+        // 承载校验：前置条件不具备时**不允许改入虚拟机档**（用户环境问题，不是选型问题）。
+        // 界面上的"能不能选"由 SessionConfig 的 tier_ready 说同一件事，两处不会各说各话。
+        if let Some(why) = exec::tier_refusal(&spec) {
+            return Err(why);
+        }
         let session_modules: Vec<Module> = roster
             .modules
             .iter()
@@ -732,6 +764,11 @@ impl Core {
             agents: metas.clone(),
             exec: exec::ExecSpec { tier: self.settings.app.tier, ..exec::ExecSpec::default() },
         };
+        // 承载校验：默认档位的前置条件不具备时**不允许创建虚拟机档会话**（用户环境问题，不是选型问题）。
+        // 必须在建工作区之前收口——拒绝就该什么都不留下。
+        if let Some(why) = exec::tier_refusal(&meta.exec) {
+            return Err(why);
+        }
         // 工作区：work + 各 agent 沙箱（失败即失败，不假装已建）。代拟确认名单时再补建。
         self.workspace.prepare(&name, &agent_names)?;
         let sandboxes = self.sandboxes(&meta, &roster)?;

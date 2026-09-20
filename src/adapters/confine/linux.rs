@@ -3,12 +3,12 @@
 //! 机制不可用时（老内核、或规则被内核拒）如实降级：打印说明后照常执行——能力等级在启动时已如实告知，不静默假装有围栏。
 //! 只做文件系统；网络在 spec.net 为假时靠调用方（虚拟机档）断网，本档不承诺。
 
-use super::{shell_command, Capability, FENCE_FAILED};
+use super::{shell_command, Capability, FenceVerdict, FENCE_FAILED};
 use crate::core::fence::FenceSpec;
 use std::ffi::CString;
 use std::os::raw::c_int;
 use std::os::unix::process::CommandExt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// 稳定标记：本机 Landlock 机制有效（自检已过），但我们的规则/安装步骤装不上。
 /// 与「本机内核不能围栏」是两回事——前者是代码写错（掩码/路径），探针据此响亮失败；
@@ -257,12 +257,30 @@ pub fn run_fenced(spec: &FenceSpec, _prepared: bool, _home: Option<&std::path::P
     }
 }
 
+/// 装围栏并**如实分类**结果：自检不过 = 本机环境结论（降级照跑）；自检过了还装不上 = 我们写错了。
+/// 探针早就按这两类分别处理（前者如实跳过、后者响亮失败），运行期在未授权时段也照这一份结论走。
+pub fn verify(spec: &FenceSpec, command: &str) -> FenceVerdict {
+    if !landlock_confines() {
+        return FenceVerdict::EnvUnavailable(
+            "本机 Landlock 不产生实际约束（内核不支持，或规则被内核拒绝）".to_string(),
+        );
+    }
+    match install_rules(spec, command) {
+        Ok(()) => FenceVerdict::Enforced,
+        Err(e) => FenceVerdict::Broken(e),
+    }
+}
+
+/// 守门进程路径：装围栏（自检不过与规则装不上都如实降级照跑——能力等级已在启动报告里说过）。
 fn install(spec: &FenceSpec, command: &str) -> Result<(), String> {
-    // 先自检：本机 Landlock 是否真的产生约束。装上了也可能完全没约束，别假装有围栏。
     if !landlock_confines() {
         return Err("本机 Landlock 不产生实际约束（内核不支持，或规则被内核拒绝）".to_string());
     }
-    // 自检之后的任何失败都是「我们的规则/安装步骤有问题」：带标记，探针据此响亮失败。
+    install_rules(spec, command)
+}
+
+/// 装规则（自检由调用方先做）：走到这里才失败 = 规则/安装步骤写错，一律带稳定标记。
+fn install_rules(spec: &FenceSpec, command: &str) -> Result<(), String> {
     let abi = abi_version().map_err(rules_rejected)?;
     let attr = RulesetAttr {
         handled_access_fs: mask_for(abi, RW_ALL | RO_ALL),
@@ -274,22 +292,29 @@ fn install(spec: &FenceSpec, command: &str) -> Result<(), String> {
             std::io::Error::last_os_error()
         )));
     }
+    // **先收集所有放行规则，最后统一挂**：挂上第一条之后进程自己也被约束，
+    // 后续 add_rule 要去 open 的路径（系统只读基线、解释器目录）可能已经打不开——
+    // 那会被报成"规则被拒绝"，而真相是我们的安装顺序写错了。先算清楚再装，两类失败就不会互相顶包。
+    let mut wanted: Vec<(PathBuf, u64)> = Vec::new();
     let allowed_rw = mask_for(abi, RW_ALL);
     for root in &spec.rw {
-        add_rule(fd, root, allowed_rw).map_err(rules_rejected)?;
+        wanted.push((root.clone(), allowed_rw));
     }
     if !spec.cwd.as_os_str().is_empty() {
-        add_rule(fd, &spec.cwd, allowed_rw).map_err(rules_rejected)?;
+        wanted.push((spec.cwd.clone(), allowed_rw));
     }
     for p in READ_ONLY_BASELINE {
         let path = Path::new(p);
         if path.exists() {
-            add_rule(fd, path, RO_ALL).map_err(rules_rejected)?;
+            wanted.push((path.to_path_buf(), RO_ALL));
         }
     }
     // 命令里解释器的安装目录也要只读放行：否则解释器装在 /usr 之外（pyenv、homebrew、自装）时，工具在围栏里起不来。
     for dir in super::interpreter_dirs(command) {
-        add_rule(fd, &dir, RO_ALL).map_err(rules_rejected)?;
+        wanted.push((dir, RO_ALL));
+    }
+    for (path, access) in &wanted {
+        add_rule(fd, path, *access).map_err(rules_rejected)?;
     }
     // Landlock 的前置条件：不许再提权。
     if unsafe { libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) } != 0 {

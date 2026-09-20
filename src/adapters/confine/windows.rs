@@ -8,7 +8,7 @@
 //! 守门进程只负责"按同一个名字派生同一个 SID 并把工具放进去"。
 //! 机制不可用时一律如实降级（stderr 说明 + 启动报告 fs/net=false），绝不假装有围栏。
 
-use super::{shell_command, Capability, FENCE_FAILED};
+use super::{shell_command, Capability, FenceVerdict, FENCE_FAILED};
 use crate::core::fence::FenceSpec;
 use std::collections::BTreeSet;
 use std::ffi::c_void;
@@ -946,6 +946,22 @@ mod tests {
         // 基线授权（解释器目录只读）也记在同一份台账里，一并按台账撤干净。
         clean(&home).expect("基线回收应当成功");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+/// 本机能不能强制住容器围栏（**不写任何目录 ACL**）：建容器 profile + 派生容器 SID 就是容器能起来的全部前提。
+/// 三态：profile 建不起来（环境拒绝建）= 环境结论；profile 建得起来却派生不出 SID = 我们的步骤写错了。
+pub fn verify(spec: &FenceSpec, _command: &str) -> FenceVerdict {
+    let name = container_name(spec);
+    if let Err(e) = ensure_profile(&name) {
+        return FenceVerdict::EnvUnavailable(format!("容器 profile 建不起来：{}", e));
+    }
+    match container_sid(&name) {
+        Ok(sid) => {
+            free_sid(sid);
+            FenceVerdict::Enforced
+        }
+        Err(e) => FenceVerdict::Broken(format!("容器 profile 已建起却派生不出容器 SID：{}", e)),
     }
 }
 

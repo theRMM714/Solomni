@@ -7,6 +7,7 @@ use crate::core::module::Module;
 use crate::core::packages::{Library, PackageManifest, KIND_SYSTEM};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
+use std::path::Path;
 
 /// 执行档位：本机 = 直接在宿主上跑；虚拟机 = 整台 guest（不信任 AI 时的可选档）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -160,6 +161,88 @@ pub fn vm_diagnoses(modules: &[Module], lib: &Library, spec: &ExecSpec) -> Vec<D
     out.sort();
     out.dedup();
     out
+}
+
+
+/// 执行档位的能力前置条件（本机档没有额外前置）。
+/// `RUNTIME_SPEC.md` 把「选型」与「本机能不能承载」分开：定版/缺包/冲突是选型，这里是承载。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TierReadiness {
+    /// 基础根在场（或用户没指定）。
+    pub base: bool,
+    /// 虚拟机监视器可用（Linux 看 /dev/kvm，Windows 看 System32 下的虚拟机平台 DLL，其余按不支持）。
+    pub hypervisor: bool,
+}
+
+impl TierReadiness {
+    pub fn ready(&self) -> bool {
+        self.base && self.hypervisor
+    }
+
+    /// 缺什么（空 = 齐了）：呈现层按它如实说明，不猜。
+    pub fn missing(&self) -> Vec<&'static str> {
+        let mut out = Vec::new();
+        if !self.base {
+            out.push("基础根不存在");
+        }
+        if !self.hypervisor {
+            out.push(hypervisor_hint());
+        }
+        out
+    }
+}
+
+/// 虚拟机监视器不可用时该怎么提示（各平台如实说各自的前置条件）。
+pub fn hypervisor_hint() -> &'static str {
+    if cfg!(windows) {
+        "本机虚拟机监视器不可用（要启用「虚拟机平台」组件）"
+    } else if cfg!(target_os = "linux") {
+        "本机虚拟机监视器不可用（要有 /dev/kvm）"
+    } else if cfg!(target_os = "macos") {
+        "本机虚拟机监视器不可用（需要 macOS 11 及以上）"
+    } else {
+        "本平台没有接入虚拟机档"
+    }
+}
+
+/// 本机能不能承载这个档位（**只读事实，不碰任何东西**）。
+/// 虚拟机档的前置条件不具备时，虚拟机档**不允许创建或改入**——这是用户环境问题，不是选型问题；
+/// 界面的"能不能点"与「开始」的校验走同一个函数，两处不会各说各话。
+pub fn tier_readiness(spec: &ExecSpec) -> TierReadiness {
+    if spec.tier != Tier::Vm {
+        return TierReadiness { base: true, hypervisor: true };
+    }
+    let base = match spec.base.as_deref().map(str::trim) {
+        None | Some("") => true,
+        Some(p) => Path::new(p).is_dir(),
+    };
+    TierReadiness { base, hypervisor: hypervisor_available() }
+}
+
+/// 虚拟机监视器在场吗（只问事实，不起任何虚拟机）。
+fn hypervisor_available() -> bool {
+    if cfg!(windows) {
+        std::env::var_os("SystemRoot")
+            .map(|root| Path::new(&root).join("System32").join("WinHvPlatform.dll").is_file())
+            .unwrap_or(false)
+    } else if cfg!(target_os = "linux") {
+        Path::new("/dev/kvm").exists()
+    } else {
+        // macOS（11+ 都能起虚拟机）与其它平台：只问事实，不起任何虚拟机。
+        cfg!(target_os = "macos")
+    }
+}
+
+/// 虚拟机档的可读拒绝理由（创建与编辑共用同一把尺子）。
+pub fn tier_refusal(spec: &ExecSpec) -> Option<String> {
+    let readiness = tier_readiness(spec);
+    if readiness.ready() {
+        return None;
+    }
+    Some(format!(
+        "本机不具备虚拟机档的前置条件（{}）：虚拟机档暂不可用——请换本机档，或先解决前置条件（见 RUNTIME_SPEC.md 与 PRODUCT.md 的「后置工作」）",
+        readiness.missing().join("；")
+    ))
 }
 
 /// 派生执行计划：本机档不装载运行包（宿主自备解释器）。

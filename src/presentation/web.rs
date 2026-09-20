@@ -19,10 +19,20 @@ pub const DEFAULT_PORT: u16 = 3081;
 /// 本机工具围栏能力（由组合根注入；呈现层如实显示，不假装）。
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct FenceInfo {
+    /// 本机能力：这台机器**能不能**强制文件系统围栏。
     pub fs: bool,
+    /// 本机能力：这台机器**能不能**断网。
     pub net: bool,
+    /// 本机能力：进程树围栏（未授权时段同样生效）。
     pub tree: bool,
+    /// 如实说明（机制名 + 限制）。
     pub note: String,
+    /// **本次实际**生效的文件系统围栏（未授权本机写权限时为假：路径级围栏要写目录 ACL 才装得上）。
+    pub effective_fs: bool,
+    /// **本次实际**生效的断网。
+    pub effective_net: bool,
+    /// 用户有没有授权在本机写权限项。
+    pub write_allowed: bool,
 }
 
 /// 启动转录中心服务器（阻塞直至出错）。端口可指定，默认 3081，只绑本机回环。

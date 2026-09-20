@@ -63,6 +63,8 @@ const CFG = {
   agents: [{ name: "调研员", modules: ["research"], model: "m1" }],
   tier: "vm", base: "base-linux", net: true,
   pins: { python: "3.12", ruby: "3.2" },
+  vm_available: true, vm_unavailable_reason: "",
+  tier_ready: true, tier_missing: [],
   runtime: {
     tier: "vm",
     declared: { research: ["python"] },
@@ -83,6 +85,9 @@ const RAW = { // 还没开过的协作会话：名字可改、本机档
   sid: "raw", mode: "collab", started: false,
   agents: [{ name: "x", modules: ["research"], model: "" }, { name: "y", modules: ["research"], model: "m2" }],
   tier: "host", base: null, net: false, pins: {},
+  // 这台机器**不具备**虚拟机档的前置条件：界面必须禁用虚拟机档并给出后端原话（本机档不受影响）。
+  vm_available: false, vm_unavailable_reason: "本机虚拟机监视器不可用（要启用「虚拟机平台」组件）",
+  tier_ready: true, tier_missing: [],
   runtime: { tier: "host", declared: {}, available: {}, missing: {}, diagnoses: [], rejected: [], rejected_packages: [] },
   runtimes_dir: "/runtimes",
 };
@@ -186,6 +191,9 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   check("config: 两个档位 radio 同名互斥且选中当前档位",
     radios.length === 2 && radios[0].name === radios[1].name && radios[1].checked === true,
     JSON.stringify(radios.map((r) => [r.name, r.checked])));
+  // 承载判定归后端：本机具备前置条件时虚拟机档可选，且 guest 未接入这一点如实标注。
+  check("config: 本机具备前置条件时虚拟机档可选", radios[1].disabled !== true);
+  check("config: guest 本体尚未接入如实标注", t.indexOf("guest 本体尚未接入") >= 0);
   check("config: 虚拟机档给出 base 输入", t.indexOf("虚拟机基础根 base（可选）") >= 0);
   check("config: 依赖文件夹真实路径（照它去放包）", t.indexOf("/runtimes") >= 0);
   check("config: declared 呈现", t.indexOf("模块 research 需要：python") >= 0);
@@ -265,6 +273,13 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   check("config(raw): 协作形态说明", t2.indexOf("协作（N 个 agent，各自独立沙箱）") >= 0);
   check("config(raw): 本机档不显示 base 字段",
     t2.indexOf("虚拟机基础根 base（可选）") >= 0 && String(baseField(m2).className).indexOf("hidden") >= 0, baseField(m2).className);
+  // 前置条件不具备 = 虚拟机档禁用（不让选），并把后端给的原因原样呈现；本机档照旧可选。
+  const radiosRaw = walk(m2, []).filter((x) => x.type === "radio");
+  check("config(raw): 虚拟机档不可用时禁用且本机档仍可选",
+    radiosRaw.length === 2 && radiosRaw[1].disabled === true && radiosRaw[0].disabled !== true,
+    JSON.stringify(radiosRaw.map((r) => [r.name, r.checked, r.disabled])));
+  check("config(raw): 虚拟机档不可用的原因如实呈现",
+    t2.indexOf("本机现在不能选虚拟机档") >= 0 && t2.indexOf("本机虚拟机监视器不可用") >= 0);
   const dupHints = findByClass(m2, "cfg-hint").map((x) => x.textContent)
     .filter((x) => String(x).indexOf("同一模块只能属于一个 agent") >= 0);
   check("config(raw): 跨 agent 重复模块实时提示",

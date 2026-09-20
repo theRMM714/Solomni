@@ -65,3 +65,26 @@ fn killing_the_guarded_process_takes_the_whole_tree_with_it() {
         wait(Duration::from_millis(250));
     }
 }
+/// 机制验证协议（跨平台）：`--fence-verify` **不装围栏、不写权限项**，只如实报三态之一。
+/// 三种结论各自是什么由平台探针验收（tests/<平台>/），这里钉的是**协议**：
+/// 任何平台都必须给出可判定的结论，不能空着、也不能把"装不上"说成别的。
+#[test]
+fn fence_verify_always_reports_one_of_three_verdicts() {
+    use crate::probe::{job_json, verdict_is_broken, verdict_is_env_unavailable, verify_fence};
+    let dir = scratch("verify-contract");
+    // prepared = false = 未授权机器上的真实形态：外层不写 ACL，只问机制能不能强制住。
+    let spec = job_json(std::slice::from_ref(&dir), &dir, false);
+    let verdict = verify_fence(&spec, "echo hi");
+    assert!(
+        verdict == "enforced" || verdict_is_env_unavailable(&verdict) || verdict_is_broken(&verdict),
+        "结论必须是三态之一，不能是别的：{}",
+        verdict
+    );
+    // 验证不改本机状态：目录里不该多出任何东西。
+    let extra: Vec<String> = std::fs::read_dir(&dir)
+        .expect("读验证落点")
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .collect();
+    assert!(extra.is_empty(), "机制验证不该在落点里留下任何东西：{:?}", extra);
+}

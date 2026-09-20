@@ -114,6 +114,33 @@ pub fn env_blocks_container(err: &str) -> bool {
     err.contains(ENV_BLOCKED_MARK)
 }
 
+/// 机制验证（机器可读）：**不装围栏、不写任何权限项**，只问"这次能不能强制住"。
+/// 三态原话交回调用方（enforced / env-unavailable / broken）：探针据此决定 env-skip 还是失败。
+pub fn verify_fence(spec: &str, command: &str) -> String {
+    let out = Command::new(bin())
+        .arg("--fence-verify")
+        .arg(spec)
+        .arg("--")
+        .arg(command)
+        .env_clear()
+        .envs(runtime_env(spec))
+        .output()
+        .expect("问产品要机制验证结论");
+    assert!(out.status.success(), "机制验证要能跑完：{}", String::from_utf8_lossy(&out.stderr));
+    String::from_utf8_lossy(&out.stdout).trim().to_string()
+}
+
+/// 自检已确认机制有效却仍装不上 = 我们写错了（不是环境不允许）。
+/// 与 src/adapters/confine/linux.rs 的 RULES_REJECTED_MARK、macos.rs 的 PROFILE_REJECTED_MARK 同义。
+pub fn verdict_is_broken(verdict: &str) -> bool {
+    verdict.starts_with("broken")
+}
+
+/// 本环境不允许装围栏（环境结论：如实跳过，而不是失败）。
+pub fn verdict_is_env_unavailable(verdict: &str) -> bool {
+    verdict.starts_with("env-unavailable")
+}
+
 /// 本机有没有能用的 python（没有就如实跳过需要它的探针）。
 /// 平台差异如实处理：Linux / macOS 常见的是 python3，Windows 常见的是 python。
 pub fn python_command(script: &str) -> Option<String> {

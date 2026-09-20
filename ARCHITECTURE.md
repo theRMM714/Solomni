@@ -67,7 +67,7 @@ presentation ──▶ core ◀── adapters
 | `schema.rs` | 工具参数契约（**声明在文本层**）：解析/校验/两种渲染（模型侧说明、JSON Schema） |
 | `module.rs` | `module.yaml` 契约、扫描结果 `Roster`、`runtimes`/`tools` 校验、agent system 合成 |
 | `packages.rs` | `package.yaml` 契约与包库事实（校验、去重、系统路径冲突预检） |
-| `exec.rs` | 执行档位（`ExecSpec`）与执行计划（`ExecPlan`）派生、虚拟机档诊断 |
+| `exec.rs` | 执行档位（`ExecSpec`）与执行计划（`ExecPlan`）派生、虚拟机档诊断、档位承载（`TierReadiness`：本机能不能承载这个档位） |
 | `fence.rs` | 一次工具执行的围栏策略（纯数据：可达根、断网、工作目录） |
 | `workspace.rs` | 工作区与沙箱的纯数据定义、寻址与越界判定 |
 | `systool.rs` | 内置工具 `read` / `write` / `edit` / `patch` / `search` 的放行、寻址、**按声明校验参数**、改动前的"读过"证据（`Observations`）、自由格式补丁的原子应用与回执文案 |
@@ -256,6 +256,12 @@ session/<工作名>/
   ——Linux Landlock、macOS seatbelt、Windows AppContainer（先建容器 profile，再按 agent 派生容器 SID 与目录 ACL 授权，
   不给 capability 即断网）+ Job Object（进程树）；Windows 的目录授权由外层进程一次性做好（`confine::prepare_fence`）并记在内存台账里。
   装不上就**如实降级**（启动时自检并报告能力等级，绝不假装有）。命令行是守门进程的内部协议，模块作者与用户都不接触。
+  **未授权不等于无围栏**：授权与否只决定"路径级围栏装不装"（要写目录 ACL），进程树围栏、资源上限与
+  环境白名单在两种时段都生效；启动报告因此把**本机能力**与**本次实际**分两行说清，不让人误读。
+  机制验证分三态（`confine::verify` / `FenceVerdict`；`--fence-verify` 是它的机器可读入口，探针据此驱动）：
+  `Enforced`（装上了）/ `EnvUnavailable`（本机不允许：内核不支持、私有 ABI 失效、系统拒绝建容器）/
+  `Broken`（自检已确认机制有效却仍装不上 = 我们写错了）。前两态如实降级照跑，**`Broken` 在未授权时段拒绝执行**
+  （命令不落进程，回执用册子里的固定说法）——把"我们写错了"当成降级吞掉，等于用户以为有围栏、实际什么都没有。
   入参是**扁平 JSON**（`confine::FenceJob`）= 围栏策略字段 + `prepared`：后者说清外层有没有做完本机授权。
   Windows 的容器要先有读放行与落点才可能真跑起来，所以没授权时守门进程直接按无围栏执行——不去试一个注定
   读不到模块目录与解释器的容器；容器起不来也一样如实报出原因再降级。
