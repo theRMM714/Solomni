@@ -161,6 +161,10 @@ session/<工作名>/
   入参是**扁平 JSON**（`confine::FenceJob`）= 围栏策略字段 + `prepared`：后者说清外层有没有做完本机授权。
   Windows 的容器要先有读放行与落点才可能真跑起来，所以没授权时守门进程直接按无围栏执行——不去试一个注定
   读不到模块目录与解释器的容器；容器起不来也一样如实报出原因再降级。
+  Windows 的目录授权除数据边界叶子外，还给**叶子的直接父目录**一条只读属性位（`RIGHTS_STAT`，不递归不继承）：
+  容器里对中间目录没有它时，`exists()` 会对一个**确实存在**的目录返回假，模块"父目录不存在就先建"的逻辑
+  会一路建到盘卷根才报 `WinError 5`（真机 CI 抓到的就是 Python 的 `os.makedirs`）。只授属性位：
+  能判断存在性，读不到内容、列不了目录；落点清单由 `confine::grant_targets` 统一给出，授权与撤权共用同一份。
   工具进程的环境走**白名单**（`confine::fence_env`，外层滤好后传下去）：不继承父进程环境（密钥与无关凭据不进工具进程），
   `HOME` / `TEMP` / `USERPROFILE` / `LOCALAPPDATA` 一律落到该 agent 的私有沙箱；Windows 建 AppContainer 进程
   需要 `LOCALAPPDATA` 在场（缺了它 `CreateProcessW` 报 `os error 203`，容器会静默降级成无围栏）。

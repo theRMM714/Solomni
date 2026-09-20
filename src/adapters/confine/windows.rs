@@ -70,6 +70,9 @@ const RIGHTS_RW: u32 = FILE_GENERIC_READ
     | WRITE_DAC;
 /// 只读 + 执行（解释器安装目录：脚本要跑就得读得到它）。
 const RIGHTS_RO: u32 = FILE_GENERIC_READ | FILE_GENERIC_EXECUTE;
+/// 只读属性：**能判断"这个目录在不在"**，但读不到内容、列不了目录。
+/// 数据边界的父目录只授这一位（理由见 grant_targets）。
+const RIGHTS_STAT: u32 = 0x0000_0080;
 
 /// 一次工具执行最多这么多进程（含 shell 与它拉起的子进程）。
 const MAX_PROCESSES: u32 = 32;
@@ -408,6 +411,45 @@ fn interpreter_dirs(command: &str) -> Vec<PathBuf> {
     super::interpreter_dirs(command)
 }
 
+/// 围栏要授权的全部落点：数据边界叶子（读写 / 用户授权的只读）+ **它们的父目录**（只读属性）。
+///
+/// 父目录为什么要授：容器里对**中间目录**没有 FILE_READ_ATTRIBUTES 时，`exists()` / `stat()` 这类
+/// 常规判断会对一个**确实存在**的目录返回假。后果不是"读不到"，而是模块的"父目录不存在就先建"逻辑
+/// 以为整条链都不存在，一路向上建到盘卷根，撞出 `WinError 5 Access is denied: 'D:\'`
+/// （真机 CI 上抓到的：Python 的 `os.makedirs(parent, exist_ok=True)`）。
+///
+/// 只授"读属性"、**不递归、不继承**：容器能判断存在性，但读不到内容、列不了目录。
+/// 只到**直接父目录**为止（不是整条祖先链）：再往上就是产品根之外，而 stat 到直接父目录已足够让
+/// "父目录在不在"这个判断成立。当年那趟"给祖先链授穿过"要改写 `C:\` 这种巨型目录的 DACL
+/// （顺整棵树重算继承，真机 ~90 s/条），这里授的是产品内的小目录，各一条 ACE。
+fn grant_targets(spec: &FenceSpec) -> Vec<(PathBuf, u32, bool)> {
+    let mut todo: Vec<(PathBuf, u32, bool)> = Vec::new();
+    let mut leaves: Vec<(PathBuf, u32, bool)> = Vec::new();
+    for root in spec.rw.iter().chain(std::iter::once(&spec.cwd)) {
+        if !root.as_os_str().is_empty() {
+            leaves.push((root.clone(), RIGHTS_RW, true));
+        }
+    }
+    // 用户显式授权的只读根（`fence_read`）：只写只读 ACE，**授给该 agent 自己的容器 SID**。
+    // 不能像解释器基线那样授给共享组（S-1-15-2-1）——那等于把用户数据开放给机器上任意容器程序。
+    // 只读根不递归：用户可能授一个很大的目录（例如项目根），递归会改整棵树的 DACL。
+    for root in &spec.ro {
+        if !root.as_os_str().is_empty() {
+            leaves.push((root.clone(), RIGHTS_RO, false));
+        }
+    }
+    // 父目录：只读属性、不递归、不继承。同一个父目录被多个叶子共用时靠调用方的去重表收口。
+    for (leaf, _, _) in &leaves {
+        if let Some(parent) = leaf.parent() {
+            if !parent.as_os_str().is_empty() {
+                todo.push((parent.to_path_buf(), RIGHTS_STAT, false));
+            }
+        }
+    }
+    todo.extend(leaves);
+    todo
+}
+
 /// 外层进程调用：把围栏要用的授权一次性做好（按 (SID, 路径, 权限) 去重，不重复改 ACL）。
 /// 授权落点只有两处：共享区/私有沙箱/模块目录（读写）、解释器安装目录（只读+执行）。
 pub fn prepare_fence(
@@ -442,25 +484,10 @@ pub fn prepare_fence(
     // （CI 上两条 ACL 契约测试各 95 s，就是它）。删掉这一趟：授权面更小，也不再碰产品目录之外的系统目录。
     free_sid(base);
 
-    // 数据边界（会话目录、模块目录）→ 只授权**叶子本身**，授给该 agent 自己的容器 SID（互相看不见）。
-    // 祖先链由上面的基线负责，所以这一层不随会话数量增长。
+    // 数据边界（会话目录、模块目录）→ 授给该 agent 自己的容器 SID（互相看不见）；
+    // 落点清单由 grant_targets 统一给出（叶子 + 父目录的只读属性），prepare 与 release 共用同一份。
     let sid = container_sid(&container_name(spec))?;
-    let mut todo: Vec<(PathBuf, u32, bool)> = Vec::new();
-    for root in spec.rw.iter().chain(std::iter::once(&spec.cwd)) {
-        if root.as_os_str().is_empty() {
-            continue;
-        }
-        todo.push((root.clone(), RIGHTS_RW, true));
-    }
-    // 用户显式授权的只读根（`fence_read`）：只写只读 ACE，**授给该 agent 自己的容器 SID**。
-    // 不能像解释器基线那样授给共享组（S-1-15-2-1）——那等于把用户数据开放给机器上任意容器程序。
-    // 只读根不递归：用户可能授一个很大的目录（例如项目根），递归会改整棵树的 DACL。
-    for root in &spec.ro {
-        if root.as_os_str().is_empty() {
-            continue;
-        }
-        todo.push((root.clone(), RIGHTS_RO, false));
-    }
+    let todo = grant_targets(spec);
     for (path, rights, recursive) in todo {
         let key = format!("{:?}|{}|{}", sid, path.to_string_lossy(), rights);
         if prepared.lock().expect("授权表锁").contains(&key) {
@@ -670,10 +697,9 @@ pub fn clean(home: &Path) -> Result<String, String> {
 pub fn release_fence_home(spec: &FenceSpec, home: Option<&Path>) -> Result<(), String> {
     let sid = container_sid(&container_name(spec))?;
     let mut result = Ok(());
-    // 撤权要覆盖**同一次授权写下的全部条目**：读写根、只读根与工作目录。
-    let mut paths: Vec<PathBuf> = spec.rw.clone();
-    paths.extend(spec.ro.iter().cloned());
-    paths.push(spec.cwd.clone());
+    // 撤权要覆盖**同一次授权写下的全部条目**：叶子（读写根 / 只读根 / 工作目录）**与它们的父目录**。
+    // 落点清单与 prepare_fence 共用 grant_targets——两处各写一份迟早会漏掉某一类。
+    let mut paths: Vec<PathBuf> = grant_targets(spec).into_iter().map(|(p, _, _)| p).collect();
     paths.sort();
     paths.dedup();
     // 台账比对用字符串：下面 paths 会被消费掉。
@@ -1083,6 +1109,58 @@ mod tests {
             "只读+执行不覆盖读写"
         );
         assert!(rights_covered(FILE_ALL_ACCESS, RIGHTS_RW));
+    }
+
+    /// 数据边界的**父目录**必须拿到只读属性（RIGHTS_STAT）：容器里对中间目录没有这一位时，
+    /// `exists()` 会对一个确实存在的目录返回假，模块的"父目录不存在就先建"逻辑会一路建到盘卷根
+    /// （真机 CI 上抓到的 `WinError 5 Access is denied: 'D:\\'`）。这里钉住落点清单，不必真改 ACL。
+    #[test]
+    fn grant_targets_include_parents_with_stat_only() {
+        let dir = std::env::temp_dir()
+            .join("solomni-grant-targets")
+            .join("work");
+        let module_root = std::env::temp_dir()
+            .join("solomni-grant-targets")
+            .join("modules")
+            .join("m0");
+        let spec = FenceSpec {
+            agent: "probe".to_string(),
+            rw: vec![dir.clone()],
+            ro: vec![std::env::temp_dir()
+                .join("solomni-grant-targets")
+                .join("shared")],
+            cwd: module_root.clone(),
+            net: false,
+        };
+        let targets = grant_targets(&spec);
+        let find = |p: &std::path::Path| targets.iter().find(|(x, _, _)| x == p).cloned();
+        // 叶子：读写根递归、只读根不递归。
+        assert_eq!(
+            find(&dir).map(|(_, r, rec)| (r, rec)),
+            Some((RIGHTS_RW, true)),
+            "读写叶子要递归授权"
+        );
+        assert_eq!(
+            find(
+                &std::env::temp_dir()
+                    .join("solomni-grant-targets")
+                    .join("shared")
+            )
+            .map(|(_, r, rec)| (r, rec)),
+            Some((RIGHTS_RO, false)),
+            "用户授权的只读根不递归"
+        );
+        // 父目录：只读属性、不递归、不继承（grant_one 的 inherit 恒为 true，故这里看 rights 与 recursive）。
+        for leaf in [&dir, &module_root] {
+            let parent = leaf.parent().expect("叶子有父目录").to_path_buf();
+            let got = find(&parent).expect("父目录要在落点清单里");
+            assert_eq!(got.1, RIGHTS_STAT, "父目录只授读属性：{:?}", parent);
+            assert!(!got.2, "父目录不递归：{:?}", parent);
+            assert!(
+                !rights_covered(RIGHTS_STAT, FILE_GENERIC_READ),
+                "读属性不等于能读内容（只够判断存在性）"
+            );
+        }
     }
 
     /// 授权这条路的真机验收：真去改一个目录的 DACL。
