@@ -129,7 +129,12 @@ fn read_only_roots_are_readable_but_not_writable() {
     let shared = scratch("fence-ro-shared");
     let secret = shared.join("data.txt");
     std::fs::write(&secret, "READ-ONLY-VISIBLE").unwrap();
-    let spec = job_json_ro(&[inside.clone()], &[shared.clone()], &inside, false);
+    let spec = job_json_ro(
+        std::slice::from_ref(&inside),
+        std::slice::from_ref(&shared),
+        &inside,
+        false,
+    );
 
     // ① 只读根读得到。
     let (code, out, err) = run_launcher(&spec, &format!("cat {}", secret.display()));

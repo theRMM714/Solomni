@@ -446,6 +446,7 @@ mod tests {
             agent: "a".to_string(),
             rw: vec![PathBuf::from("demo").join("work")],
             cwd: PathBuf::from("mods").join("m0"),
+            ro: Vec::new(),
             net: false,
         };
         // 运行期不该有这个开关（探针自己给守门进程带）。
@@ -540,6 +541,7 @@ mod tests {
             agent: "a".to_string(),
             rw: vec![PathBuf::from("demo").join("work")],
             cwd: PathBuf::from("mods").join("m0"),
+            ro: Vec::new(),
             net: false,
         };
         let job = FenceJob {
@@ -555,6 +557,7 @@ mod tests {
             agent: "b".to_string(),
             rw: vec![PathBuf::from("demo").join("work")],
             cwd: PathBuf::from("mods").join("m1"),
+            ro: Vec::new(),
             net: true,
         };
         let no_home = FenceJob {

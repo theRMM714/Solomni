@@ -251,6 +251,36 @@ function structuralAudit() {
       if (!fs.existsSync(path.resolve(dir, ref))) problems.push(label + " 引用的文档不存在：" + ref);
     }
   };
+  // 结构审查：**跨平台字面量完整性**——平台专属代码本地不编译（unix 的 #[cfg] 在 Windows 上不存在，
+  // 反之亦然），漏字段这类错只在别的平台炸。这里按文本检查：每个 FenceSpec 字面量都要写全字段
+  // （`ro` 与 `rw` 同层），本地就能抓住 CI 才会暴露的那类问题。
+  const checkFenceSpecLiterals = (dir) => {
+    const walk = (d) => {
+      for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+        const p = path.join(d, e.name);
+        if (e.isDirectory()) { walk(p); continue; }
+        if (!e.name.endsWith(".rs")) continue;
+        const text = fs.readFileSync(p, "utf8");
+        const lines = text.split(/\r?\n/);
+        lines.forEach((line, i) => {
+          // 只认**字面量**：排除 `struct FenceSpec {` / `impl FenceSpec {` 与函数签名（含 `->`）。
+          const t = line.trim();
+          if (!t.endsWith("FenceSpec {") || t.includes("->")) return;
+          if (/^(pub\s+)?(struct|enum|impl|fn)\b/.test(t)) return;
+          // 字面量以单独一行 `}` 或 `};` 收尾：在这之前必须出现 ro。
+          let end = i + 1;
+          while (end < lines.length && !/^\s*\};?\s*$/.test(lines[end])) end++;
+          const body = lines.slice(i + 1, end).join("\n");
+          if (!/\bro:/.test(body)) {
+            problems.push(rel(p) + ":" + (i + 1) + " 的 FenceSpec 字面量缺 ro（平台专属代码本地不编译，CI 才会炸）");
+          }
+        });
+      }
+    };
+    walk(dir);
+  };
+  checkFenceSpecLiterals(path.join(ROOT, "src"));
+
   const portalFiles = ["README.md", "AGENTS.md", "ARCHITECTURE.md", "PRODUCT.md", "MODULE_SPEC.md", "RUNTIME_SPEC.md", "REGISTRY_SPEC.md", "TESTING.md"];
   for (const p of portalFiles) {
     const abs = path.join(ROOT, p);
