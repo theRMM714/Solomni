@@ -311,6 +311,37 @@ function structuralAudit() {
       }
     });
   }
+
+  // 文档分层（AGENTS.md「文档分层与同步」）：门户引用 docs/ 下的细则，细则引用彼此——
+  // 两边都要真实存在。只查引用不查正文，避免把文档写法变成门禁。
+  // **相对解析**：链接按所在文件的目录解析（门户在根、细则在 docs/<领域>/），所以 docs/ 内部写错的同级引用也会被抓到。
+  const mdLinks = (text) => [...text.matchAll(/\]\(([^)#\s]+\.md)(?:#[^)]*)?\)/g)].map((m) => m[1]);
+  const checkDocLinks = (absFile, label) => {
+    const dir = path.dirname(absFile);
+    for (const ref of mdLinks(fs.readFileSync(absFile, "utf8"))) {
+      if (/^[a-z]+:/i.test(ref)) continue; // 外链不查
+      if (!fs.existsSync(path.resolve(dir, ref))) problems.push(label + " 引用的文档不存在：" + ref);
+    }
+  };
+  const portalFiles = ["README.md", "AGENTS.md", "ARCHITECTURE.md", "PRODUCT.md", "MODULE_SPEC.md", "RUNTIME_SPEC.md", "REGISTRY_SPEC.md", "TESTING.md"];
+  for (const p of portalFiles) {
+    const abs = path.join(ROOT, p);
+    if (!fs.existsSync(abs)) { problems.push("缺门户文档：" + p); continue; }
+    checkDocLinks(abs, p);
+  }
+  const docsDir = path.join(ROOT, "docs");
+  if (fs.existsSync(docsDir)) {
+    const walkDocs = (d) => {
+      for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+        const p = path.join(d, e.name);
+        if (e.isDirectory()) { walkDocs(p); continue; }
+        if (!e.name.endsWith(".md")) continue;
+        checkDocLinks(p, rel(p));
+      }
+    };
+    walkDocs(docsDir);
+  }
+
   return { problems, targets: targets.map((t) => t.name), testFiles: allTestFiles.length };
 }
 
@@ -327,7 +358,7 @@ function baselineYaml(m, old) {
   dup[OS_KEY] = m.duplicates;
 
   const L = [];
-  L.push("# 质量存量基线（TESTING.md §八「质量、冗余和静态检查」）。");
+  L.push("# 质量存量基线（docs/testing/quality-isolation.md「质量、冗余和静态检查」）。");
   L.push("# 门禁比对基线：**超出即 quality-fail**（不许新增存量）；降到基线以下也报「基线过期」，");
   L.push("# 要求同步下调基线——这样「逐渐收敛到全量硬失败」才是可判定的。");
   L.push("#");

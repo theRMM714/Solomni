@@ -63,7 +63,7 @@ cargo run                 # 工具链就绪后最直接的跑法：cargo run -- 
   Windows 用 `.\test.bat`（PowerShell）、macOS/Linux 用 `./test.sh`，都是同一入口的薄包装。
 - **质量门禁（T0）已并入同一入口**：编译与结构审查是硬失败；格式、clippy、编译告警、依赖重复按 `tests/quality-baseline.yaml`
   的存量基线比对——**超出基线即失败**，降到基线以下也会要求同步下调基线（不许悄悄恶化）。
-  存量清零是长期目标，记在 `tests/gaps.yaml`。分层、目录、缺口账与报告格式见 [TESTING.md](TESTING.md)。
+  存量清零是长期目标，记在 `tests/gaps.yaml`。分层、目录、缺口账与报告格式见 [TESTING.md](TESTING.md) 与 `docs/testing/`。
 
 ## 跑一遍演示 · Run the Demo
 
@@ -105,13 +105,17 @@ node demo/run-demo.mjs
 | 文档 | 讲什么 | 给谁看 |
 |---|---|---|
 | [PHILOSOPHY.md](PHILOSOPHY.md) | 理念与不变量（两套，互不混同）：终极目标、角色、核心理念、不可违反的判据 | 想懂"为什么这么设计"的人 |
-| [ARCHITECTURE.md](ARCHITECTURE.md) | 架构与开发规则：分层与依赖方向、端口、模块地图、入站契约与路由目录、日志、提示词册、落盘契约 | 改代码的人 |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | 架构与开发规则：分层与依赖方向、端口、日志、提示词册、落盘契约、可测性与跨平台 | 改代码的人 |
 | [PRODUCT.md](PRODUCT.md) | 产品与用户旅程：编排平面、agent、落盘与沙箱、运行流程、转录中心 | 用产品的人 |
 | [MODULE_SPEC.md](MODULE_SPEC.md) | 模块开发契约：打包格式、发言信封、回报与验收、工具与路径模型、测试交付 | 写模块的人 |
 | [RUNTIME_SPEC.md](RUNTIME_SPEC.md) | 运行包契约：`package.yaml` 字段、两种 kind、能力名、校验与拒收、与执行档位的关系 | 做运行包的人 |
 | [REGISTRY_SPEC.md](REGISTRY_SPEC.md) | 登记处契约：`providers.yaml` / `models.yaml` / `agents.yaml` / `settings.yaml` 的字段与安全边界 | 管理通道与模型的人 |
-| [TESTING.md](TESTING.md) | 测试架构：T0-T5 层级、测试替身、端口契约矩阵、质量门禁、缺口账与执行入口 | 写测试与验收的人 |
-| [AGENTS.md](AGENTS.md) | 仓库协作规则：核心约束、代码规范、路径规范、BUG 修复规则 | 协作者与 AI |
+| [TESTING.md](TESTING.md) | 测试架构**门户**：测试目的、当前状态，以及「要做事时读哪一份」的路由 | 写测试与验收的人 |
+| [AGENTS.md](AGENTS.md) | 仓库协作规则：核心约束、代码规范、路径规范、BUG 修复规则、文档路由 | 协作者与 AI |
+
+> **两层结构**：仓库根是**门户**（定位 + 引用），`docs/` 是**细则**——同一事实只有一份权威。
+> 细则：`docs/testing/`（层级、替身、端口矩阵、质量与隔离、入口与 CI、缺口与验收、模块交付）、
+> `docs/architecture/`（模块地图、呈现层入站契约与路由目录）。完整路由见 [AGENTS.md](AGENTS.md) 的「文档路由」。
 
 ## 结语 · Closing
 

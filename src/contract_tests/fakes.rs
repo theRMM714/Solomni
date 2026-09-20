@@ -1,4 +1,4 @@
-//! FakeChat / DemoGateway 的独立契约测试（TESTING.md 端口矩阵的 Chat 与 ChatGateway 行）。
+//! FakeChat / DemoGateway 的独立契约测试（docs/testing/port-matrix.md 的 Chat 与 ChatGateway 行）。
 //! 两者既是 T1 的脚本替身，也是产品在「没有可用模型通道」时的演示回落，所以两条路都要钉住。
 
 use crate::adapters::fake_chat::{DemoGateway, FakeChat};

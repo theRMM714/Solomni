@@ -114,7 +114,7 @@ session/<工作名>/
   **自检已确认机制有效却仍装不上 = 程序自己写错了，那一路拒绝执行**（命令不落进程，工具回执如实说明），
   绝不按"无围栏"跑——否则用户以为有围栏、实际什么都没有。
   三平台围栏都已在各自平台的真机上跑过探针（Windows AppContainer + 目录 ACL、Linux Landlock、macOS seatbelt），
-  探针在 `tests/windows/`、`tests/linux/`、`tests/macos/`，缺口账现状见 [TESTING.md](TESTING.md)
+  探针在 `tests/windows/`、`tests/linux/`、`tests/macos/`，缺口账现状见 [TESTING.md](TESTING.md) 与 `docs/testing/`
 - **围栏要用就征得同意**：Windows 上的路径级围栏必须在本机目录上写权限项，所以本程序**默认不写**——只有显式授权（`.home/settings.yaml` 的 `fence_write: true`，或环境变量 `SOLOMNI_FENCE_WRITE=1`）才做；授权后每次写入都在 stderr 逐条列出并记进授权台账；`solomni --fence-clean` 按台账精确撤销并删掉建过的容器 profile（删除会话时也会撤销该会话的授权）
 - 上传同名文件绝不静默覆盖（弹出覆盖 / 改名 / 取消）
 
@@ -260,7 +260,7 @@ agent 可以退出（此后核心不再向它转达）；可以请教用户（�
 ## 后置工作
 
 **测试相关的未完成项不在本文维护**：唯一真相是 `tests/gaps.yaml`（全局）与 `tests/<平台>/gaps.yaml`（平台），
-入口与判定见 [TESTING.md](TESTING.md)。
+入口与判定见 [TESTING.md](TESTING.md) 与 `docs/testing/`。
 
 产品侧仍待接入的能力：
 

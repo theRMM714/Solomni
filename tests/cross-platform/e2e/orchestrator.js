@@ -2,7 +2,7 @@
 /**
  * L4 端到端编排（跨平台）：清隔离根 → 起假供应商 → 起 Web → 跑断言驱动 → 收尾杀掉自己起的进程。
  * 夹具根 = 本目录下的 root/：真实 .home/ 与 session/ 全程不被触碰。
- * 成功打印固定标记 E2E-OK（见 TESTING.md 六）。
+ * 成功打印固定标记 E2E-OK（见 docs/testing/execution-ci.md）。
  */
 "use strict";
 const { spawn } = require("child_process");

@@ -43,6 +43,28 @@
 - 长期文档只保留当前状态，不写过程、旧实现复盘或变更历史；历史由 Git、PR、issue 和 CI 报告承载。
 - 不生产无实际约束、行为或使用价值的文档。
 
+### 文档分层与同步
+
+**两层**：仓库根是**门户**（定位、引用、最小必要契约），`docs/` 是**细则**。
+
+- 根门户只写「这份文档管什么、要做事时读哪一份」，**不复述细则正文**；同一个事实只有一份权威。
+- 细则按领域进 `docs/<领域>/`（现有 `docs/testing/`、`docs/architecture/`）；新增领域时建新目录，不往门户里堆。
+- 细则之间用相对路径互引；门户用 `docs/<领域>/<文件>.md` 引用细则。
+
+**改文档必须同步**——下列任一处改动，都要在同一次提交里把相关方一起改掉，不得留下过期引用或两处说法：
+
+| 改了什么 | 必须同时检查 |
+| --- | --- |
+| 细则正文（`docs/**`） | 该领域的门户（根文档）、`AGENTS.md` 文档路由表、其它文档里指向该节的引用 |
+| 门户的节标题或结构 | 该领域细则里的回引、`AGENTS.md` 文档路由表、`README.md` 文档表 |
+| 新增/删除/改名文档 | `AGENTS.md` 文档路由表、`README.md` 文档表、所有引用它的文档与代码注释 |
+| 代码里被文档机器比对的段落 | 该文档与比对它的测试（例如路由表 ↔ `src/contract_tests/routes.rs`） |
+| `tests/gaps.yaml` 的条目 | `TESTING.md` 门户与 `docs/testing/gaps-acceptance.md` 的现状描述 |
+
+- 引用一律用**相对仓库根的路径**（`docs/testing/levels.md`），不写机器路径、不写绝对路径。
+- 文档里的当前状态必须与代码一致；未实现的内容写进缺口账，不写成当前能力。
+- 门户与细则都只保留当前状态，不写变更历史。
+
 ## 五、请求分类
 
 | 类型 | 判据 | 处理方式 |
@@ -97,7 +119,11 @@
 
 专项要求具有强制性；工作涉及多个领域时，必读文档累加。
 
-| 工作内容 | 必须阅读并遵照 |
+**先读门户，再按需要读细则**（门户在仓库根，细则在 `docs/` 下；同一事实只有一份权威）。
+
+### 门户
+
+| 工作内容 | 门户 |
 | --- | --- |
 | 项目概括和快速开始 | `README.md` |
 | 任意代码、架构、分层、端口、日志、提示词或落盘修改 | `ARCHITECTURE.md` |
@@ -107,3 +133,17 @@
 | 运行包开发或修改 | `RUNTIME_SPEC.md` |
 | providers、models、agents、settings 登记处 | `REGISTRY_SPEC.md` |
 | 任意测试、测试替身、质量门禁、缺口账或测试报告 | `TESTING.md` |
+
+### 细则（`docs/`）
+
+| 工作内容 | 细则 |
+| --- | --- |
+| 判断测试属于哪层、放哪、怎么判定 | `docs/testing/levels.md` |
+| 写或改替身（Stub / Fake / Mock / Spy / Fixture）、验收 Fake | `docs/testing/doubles.md` |
+| 新增端口或替身、核对真实适配器覆盖范围 | `docs/testing/port-matrix.md` |
+| 声明测试资源边界、清理副作用、质量门禁与基线 | `docs/testing/quality-isolation.md` |
+| 跑本地入口、读报告、认成功标记、CI 与报告发布 | `docs/testing/execution-ci.md` |
+| 记缺口、目录与命名、按验收清单收口 | `docs/testing/gaps-acceptance.md` |
+| 交付模块（模块作者要交什么测试证据） | `docs/testing/module-delivery.md` |
+| 逐个文件看 `core/` / `adapters/` / `presentation/` 各干什么 | `docs/architecture/module-map.md` |
+| 呈现层入站契约、HTTP 路由目录 | `docs/architecture/contracts.md` |

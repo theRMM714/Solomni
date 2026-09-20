@@ -35,7 +35,7 @@
     1) 建 src/tests/mod.rs，把 src/tests.rs 的 T1 用例移入；
     2) 把 InMemory*/Fake*/Recording*/ScriptGateway/TestPrompts 等替身集中到 src/tests/doubles.rs；
     3) 把 src/contract_tests/ 下的 ports / fakes / adapters / api / intent / routes 平移到 src/tests/ 下同名文件；
-    4) 更新 src/main.rs 的 mod 声明与 TESTING.md §十一 与 §四 的路径引用。
+    4) 更新 src/main.rs 的 mod 声明与 docs/testing/ 的路径引用。
     纯搬运，不改断言语义；每步保持 cargo test 全绿。
   accept: |
     src/contract_tests.rs 与 src/tests.rs 都不存在；src/tests/ 下 doubles/ports/fakes/adapters 各一文件；

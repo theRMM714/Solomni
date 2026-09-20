@@ -557,12 +557,13 @@ fn catalog_is_free_of_duplicates_and_routes_do_not_overlap() {
 
 #[test]
 fn documented_route_table_matches_the_catalog() {
-    let doc = include_str!("../../ARCHITECTURE.md");
+    // 路由表本体在细则文件里（门户不复述细则正文，见 AGENTS.md「文档分层与同步」）。
+    let doc = include_str!("../../docs/architecture/contracts.md");
     let body = doc
         .split_once("<!-- ROUTES:BEGIN -->")
         .and_then(|(_, rest)| rest.split_once("<!-- ROUTES:END -->"))
         .map(|(b, _)| b)
-        .expect("ARCHITECTURE.md 必须有 ROUTES:BEGIN/END 包裹的路由表");
+        .expect("docs/architecture/contracts.md 必须有 ROUTES:BEGIN/END 包裹的路由表");
     let mut documented: Vec<(String, String)> = Vec::new();
     for line in body.lines() {
         let cells: Vec<&str> = line.split('|').map(str::trim).collect();

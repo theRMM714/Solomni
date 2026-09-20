@@ -1,4 +1,4 @@
-//! 真实适配器边界（TESTING.md §六 矩阵的「真实适配器」列）。
+//! 真实适配器边界（docs/testing/port-matrix.md 的「真实适配器」列）。
 //! 一律用隔离根 `target/test-scratch/contract/<name>`（target/ 不入库），跑完删除；
 //! 不碰真实 `.home/` 与 `session/`。HTTP 适配器只对本机环回假供应商说话（无外网、无真实密钥）。
 

@@ -332,7 +332,7 @@ mod tests {
         );
     }
 
-    // ---------- 真实工具进程（T2 真实适配器边界；见 TESTING.md 端口矩阵的 ToolRunner 行） ----------
+    // ---------- 真实工具进程（T2 真实适配器边界；见 docs/testing/port-matrix.md 的 ToolRunner 行） ----------
 
     /// 已构建的产品可执行文件（守门进程就是它自己）：`cargo build` 之后才存在；没有就如实跳过。
     fn built_exe() -> Option<PathBuf> {

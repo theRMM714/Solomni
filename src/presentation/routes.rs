@@ -2,7 +2,7 @@
 //!
 //! web.rs 的分发由这份目录驱动，所以「代码里有路由但目录里没有」在结构上不可能发生；
 //! 反过来「目录里有路由但没有处理器」由契约测试逐条点名叫出来（见 contract_tests/routes.rs）。
-//! 文档表（ARCHITECTURE.md 的 ROUTES 段落）也由契约测试与这里比对，杜绝文档过期。
+//! 文档表（docs/architecture/contracts.md 的 ROUTES 段落）也由契约测试与这里比对，杜绝文档过期。
 
 use serde_json::json;
 
