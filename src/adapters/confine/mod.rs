@@ -435,6 +435,11 @@ mod tests {
 
     /// 测试专用注入开关：打开它，机制验证必须确定性地报「本机不允许」。
     /// 这是覆盖 EnvUnavailable 那一路的唯一确定性手段——三平台探针都靠它。
+    ///
+    /// **不能在进程内调未注入的真实后端**：unix 上 Landlock 与 seatbelt 都是**进程级且不可逆**的
+    /// ——装了它，测试进程此后连 `target/` 都写不了（macOS CI 上真抓到过：后续 123 个用例全挂在
+    /// "建契约测试隔离根：Operation not permitted"）。真实后端的行为由平台探针（子进程里）验收，
+    /// 这里只钉注入开关本身的语义。
     #[test]
     fn selfcheck_injection_switch_reports_env_unavailable() {
         let spec = FenceSpec {
@@ -443,28 +448,26 @@ mod tests {
             cwd: PathBuf::from("mods").join("m0"),
             net: false,
         };
-        // 没注入时：三平台各自的真实结论（enforced 或 env-unavailable 都可能，环境而定）。
+        // 运行期不该有这个开关（探针自己给守门进程带）。
         assert!(!selfcheck_forced_unavailable(), "运行期不该有这个开关");
-        let plain = verify(&spec, "true");
-        assert!(
-            plain == FenceVerdict::Enforced || matches!(plain, FenceVerdict::EnvUnavailable(_)),
-            "未注入时只能是真实结论：{:?}",
-            plain
-        );
-        // 注入后：必须报本机不允许，且带得出注入标记（探针据此区分"环境结论"与"我们写错了"）。
+        // 注入后：必须在触到后端之前就返回「本机不允许」，且带得出注入标记
+        // （探针据此把"环境结论"与"我们写错了"分开）。
         std::env::set_var(SELFCHECK_FAIL_FLAG, "1");
         let injected = verify(&spec, "true");
         std::env::remove_var(SELFCHECK_FAIL_FLAG);
         match injected {
-            FenceVerdict::EnvUnavailable(why) => {
-                assert!(
-                    why.contains(SELFCHECK_FAIL_FLAG),
-                    "理由要带得出注入标记：{}",
-                    why
-                )
-            }
+            FenceVerdict::EnvUnavailable(why) => assert!(
+                why.contains(SELFCHECK_FAIL_FLAG),
+                "理由要带得出注入标记：{}",
+                why
+            ),
             other => panic!("注入后必须是本机不允许，实际 {:?}", other),
         }
+        // 开关关掉之后必须回到真实判定入口（不被上一次注入粘住）。
+        assert!(
+            !selfcheck_forced_unavailable(),
+            "注入是一次性的，不该留下状态"
+        );
     }
     /// 安装目录上溯**绝不能停在文件系统根**：/bin 的父目录就是 /，
     /// 一旦返回 / 就等于把整盘放行（macOS 的 seatbelt 会因此形同虚设，真机上已抓到过一次）。
