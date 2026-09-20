@@ -426,6 +426,11 @@ async function lines(sid) {
   const sayR = await api('POST', '/api/sessions/' + encodeURIComponent(nameR) + '/say', { text: '真工具链路：先抽语料，再建索引并检索' });
   assert(sayR.status === 200, '「真工具」发言', sayR.text.slice(0, 200));
   const rowsR = (await all(nameR)).filter((x) => x.tool).map((x) => x.tool);
+  // 失败时把工具原文打出来：真机围栏开着时（CI）只有它能说清是哪一层拦住了。
+  for (const r of rowsR) {
+    console.log('   工具 ' + (r.module || '') + '.' + r.name + (r.ok ? ' 成功' : ' 失败') + ' → '
+      + String(r.output || '').replace(/\s+/g, ' ').slice(0, 300));
+  }
   assert(rowsR.some((r) => r.name === 'scan'), 'harvest.scan 真的跑了（python 工具进程）', JSON.stringify(rowsR.map((r) => r.name)));
   assert(fs.existsSync(corpusPath), 'corpus.jsonl 真的落地', corpusPath);
   assert(rowsR.some((r) => r.name === 'build'), 'indexer.build 真的跑了（C++ 工具进程）', JSON.stringify(rowsR.map((r) => r.name)));
