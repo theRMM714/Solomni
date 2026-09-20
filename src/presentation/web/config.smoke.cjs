@@ -63,7 +63,7 @@ const CFG = {
   agents: [{ name: "调研员", modules: ["research"], model: "m1" }],
   tier: "vm", base: "base-linux", net: true,
   pins: { python: "3.12", ruby: "3.2" },
-  vm_available: true, vm_unavailable_reason: "",
+  vm_available: true, vm_unavailable_reason: "", vm_requirements: [],
   tier_ready: true, tier_missing: [],
   runtime: {
     tier: "vm",
@@ -86,7 +86,13 @@ const RAW = { // 还没开过的协作会话：名字可改、本机档
   agents: [{ name: "x", modules: ["research"], model: "" }, { name: "y", modules: ["research"], model: "m2" }],
   tier: "host", base: null, net: false, pins: {},
   // 这台机器**不具备**虚拟机档的前置条件：界面必须禁用虚拟机档并给出后端原话（本机档不受影响）。
-  vm_available: false, vm_unavailable_reason: "本机虚拟机监视器不可用（要启用「虚拟机平台」组件）",
+  vm_available: false, vm_unavailable_reason: "虚拟机档现在不可用（guest 本体尚未接入）",
+  vm_requirements: [
+    { id: "hypervisor", met: false, detail: "本机虚拟机监视器不可用（要启用「虚拟机平台」组件）", how: "启用「虚拟机平台」组件，然后重启" },
+    { id: "guest", met: false, detail: "guest 本体尚未接入（工具进程仍在宿主上跑，没有真正的 guest）", how: "等产品的 guest 接入" },
+    { id: "qemu", met: false, detail: "没有找到 qemu-system-x86_64.exe（按PATH找过）", how: "自行安装 QEMU 并放进 PATH，或在设置里登记它的完整路径" },
+    { id: "base", met: false, detail: "没有指定基础根", how: "自备一份最小系统（发行版基底 + 内核）" },
+  ],
   tier_ready: true, tier_missing: [],
   runtime: { tier: "host", declared: {}, available: {}, missing: {}, diagnoses: [], rejected: [], rejected_packages: [] },
   runtimes_dir: "/runtimes",
@@ -194,7 +200,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     JSON.stringify(radios.map((r) => [r.name, r.checked])));
   // 承载判定归后端：本机具备前置条件时虚拟机档可选，且 guest 未接入这一点如实标注。
   check("config: 本机具备前置条件时虚拟机档可选", radios[1].disabled !== true);
-  check("config: guest 本体尚未接入如实标注", t.indexOf("guest 本体尚未接入") >= 0);
+  check("config: 虚拟机档可选时不渲染前置清单（那是禁用态的事）",
+    t.indexOf("虚拟机档前置") < 0);
   check("config: 虚拟机档给出 base 输入", t.indexOf("虚拟机基础根 base（可选）") >= 0);
   check("config: 依赖文件夹真实路径（照它去放包）", t.indexOf("/runtimes") >= 0);
   check("config: declared 呈现", t.indexOf("模块 research 需要：python") >= 0);
@@ -280,7 +287,11 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     radiosRaw.length === 2 && radiosRaw[1].disabled === true && radiosRaw[0].disabled !== true,
     JSON.stringify(radiosRaw.map((r) => [r.name, r.checked, r.disabled])));
   check("config(raw): 虚拟机档不可用的原因如实呈现",
-    t2.indexOf("本机现在不能选虚拟机档") >= 0 && t2.indexOf("本机虚拟机监视器不可用") >= 0);
+    t2.indexOf("虚拟机档现在不能选") >= 0 && t2.indexOf("本机虚拟机监视器不可用") >= 0);
+  // 逐项前置照抄后端：缺哪几项、每项怎么补（不笼统说"前置条件不具备"）。
+  check("config(raw): 虚拟机档前置逐项列出并给怎么补",
+    t2.indexOf("虚拟机档前置（") >= 0 && t2.indexOf("guest 本体尚未接入") >= 0 &&
+    t2.indexOf("怎么补：") >= 0 && t2.indexOf("自行安装 QEMU") >= 0 && t2.indexOf("自备一份最小系统") >= 0);
   const dupHints = findByClass(m2, "cfg-hint").map((x) => x.textContent)
     .filter((x) => String(x).indexOf("同一模块只能属于一个 agent") >= 0);
   check("config(raw): 跨 agent 重复模块实时提示",

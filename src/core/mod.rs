@@ -164,6 +164,8 @@ pub struct SessionConfig {
     pub vm_available: bool,
     /// 虚拟机档为什么不能选（`vm_available` 为真时为空）。
     pub vm_unavailable_reason: String,
+    /// 虚拟机档的**逐项前置**（缺哪几项、每项怎么补）：界面照抄，不自己编话。
+    pub vm_requirements: Vec<crate::core::exec::VmRequirement>,
     /// 运行能力报告（模块声明 / 包库可用 / 缺包 / 虚拟机档诊断 / 拒收原因）。
     pub runtime: RuntimeReport,
     /// 依赖文件夹（把运行包放进这里；真实路径，给用户看）。
@@ -326,7 +328,7 @@ impl Core {
         } else {
             Vec::new()
         };
-        let readiness = exec::tier_readiness(&spec);
+        let readiness = exec::tier_readiness(&spec, self.qemu_path());
         RuntimeReport {
             tier: tier.as_str().to_string(),
             declared: exec::declared(&roster.modules),
@@ -378,15 +380,21 @@ impl Core {
             pins: meta.exec.pins.clone(),
             runtime: self.runtime_report(tier),
             runtimes_dir: workspace::slash(&self.packages.dir()),
-            tier_ready: exec::tier_readiness(&meta.exec).ready(),
-            tier_missing: exec::tier_readiness(&meta.exec)
+            tier_ready: exec::tier_readiness(&meta.exec, self.qemu_path()).ready(),
+            tier_missing: exec::tier_readiness(&meta.exec, self.qemu_path())
                 .missing()
                 .iter()
                 .map(|s| s.to_string())
                 .collect(),
             // 虚拟机档能不能选**与当前档位无关**：本机档会话也要如实告诉用户 vm 现在不可用（界面据此禁用）。
-            vm_available: exec::tier_readiness(&vm_probe).ready(),
-            vm_unavailable_reason: exec::tier_refusal(&vm_probe).unwrap_or_default(),
+            // 逐项清单一起给出：界面照抄"缺哪几项、每项怎么补"，不自己编话。
+            vm_available: exec::tier_readiness(&vm_probe, self.qemu_path()).ready(),
+            vm_unavailable_reason: exec::tier_refusal(&vm_probe, self.qemu_path())
+                .unwrap_or_default(),
+            vm_requirements: exec::vm_requirements(&exec::VmInputs {
+                base: vm_probe.base.as_deref(),
+                qemu: self.qemu_path(),
+            }),
         })
     }
 
@@ -466,7 +474,22 @@ impl Core {
         };
         // 承载校验：前置条件不具备时**不允许改入虚拟机档**（用户环境问题，不是选型问题）。
         // 界面上的"能不能选"由 SessionConfig 的 tier_ready 说同一件事，两处不会各说各话。
-        if let Some(why) = exec::tier_refusal(&spec) {
+        // 已经在虚拟机档上的会话只校验**它自己那几项**（基础根等）：改模块、改模型、定版、开网络都不该被拦住——
+        // 一条已存在的会话连改都不让改，是拿用户自己的记录当人质。
+        let staying_vm = meta.exec.tier == exec::Tier::Vm && tier == exec::Tier::Vm;
+        if staying_vm {
+            // 留在 vm 档：只校验用户这次填的基础根（填错路径就是填错路径），
+            // 不拿"本机能不能提供 vm 档"去拦一条已经存在的会话。
+            let base_item = exec::tier_readiness(&spec, self.qemu_path())
+                .requirements
+                .into_iter()
+                .find(|r| r.id == "base");
+            if let Some(item) = base_item {
+                if !item.met {
+                    return Err(format!("{}：{}", item.detail, item.how));
+                }
+            }
+        } else if let Some(why) = exec::tier_refusal(&spec, self.qemu_path()) {
             return Err(why);
         }
         let session_modules: Vec<Module> = roster
@@ -741,6 +764,16 @@ impl Core {
     /// 用户显式授权的只读根（`settings.yaml` 的 `fence_read`）。
     /// 策略层只带事实：哪些目录只读可达由用户定，只读位怎么落由适配层定。
     /// 空 = 一个都不放行（默认不动本机任何权限项）。
+    /// 设置里登记的 QEMU 可执行文件路径（默认空 = 兜底看 PATH）。产品不自带、不下载 QEMU。
+    fn qemu_path(&self) -> Option<&str> {
+        let p = self.settings.app.qemu_path.trim();
+        if p.is_empty() {
+            None
+        } else {
+            Some(p)
+        }
+    }
+
     fn fence_read_roots(&self) -> Vec<std::path::PathBuf> {
         self.settings
             .app
@@ -801,7 +834,7 @@ impl Core {
                 let mode = entry.map(|h| h.mode.clone()).unwrap_or_default();
                 // 记的档位来自落盘 meta（权威）：环境后来变了也要如实提示——**不拦打开**（记录是用户的）。
                 let exec = entry.map(|h| h.exec.clone()).unwrap_or_default();
-                let readiness = exec::tier_readiness(&exec);
+                let readiness = exec::tier_readiness(&exec, self.qemu_path());
                 SessionView {
                     sid: sid.clone(),
                     mode,
@@ -904,7 +937,7 @@ impl Core {
         };
         // 承载校验：默认档位的前置条件不具备时**不允许创建虚拟机档会话**（用户环境问题，不是选型问题）。
         // 必须在建工作区之前收口——拒绝就该什么都不留下。
-        if let Some(why) = exec::tier_refusal(&meta.exec) {
+        if let Some(why) = exec::tier_refusal(&meta.exec, self.qemu_path()) {
             return Err(why);
         }
         // 工作区：work + 各 agent 沙箱（失败即失败，不假装已建）。代拟确认名单时再补建。

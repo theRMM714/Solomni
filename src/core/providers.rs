@@ -76,6 +76,10 @@ pub struct AppSettings {
     /// 授权落在用户自己的目录上；本程序只加只读 ACE，不给写权限。
     #[serde(default)]
     pub fence_read: Vec<String>,
+    /// 虚拟机档用的 QEMU 可执行文件路径（用户自备；默认空 = 兜底看 PATH）。
+    /// 产品不自带、不下载 QEMU，只检测与指路。
+    #[serde(default)]
+    pub qemu_path: String,
 }
 
 fn default_true() -> bool {
@@ -90,6 +94,7 @@ impl Default for AppSettings {
             tier: crate::core::exec::Tier::Host,
             fence_write: false,
             fence_read: Vec::new(),
+            qemu_path: String::new(),
         }
     }
 }

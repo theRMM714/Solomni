@@ -8,18 +8,26 @@
   scope: global
   level: T4
   why: |
-    虚拟机档的选型、诊断与装配计划已就位，但 guest 本体未接入：ExecPlan.packages 全仓没有任何执行消费点
-    （create_work 只把它打进日志），选 vm 档实际仍按本机档跑。这意味着当前产品**不存在**"用户不授权本机写权限
-    也能拿到强隔离"的路径——未授权时文件系统与断网围栏都是关的。在 guest 落地前，界面必须如实标注"未接入"。
+    虚拟机档的选型、诊断、装配计划与**逐项前置检测**都已就位，但 guest 本体未接入：ExecPlan.packages
+    全仓没有任何执行消费点（create_work 只把它打进日志），选 vm 档实际仍按本机档跑。这意味着当前产品
+    **不存在**"用户不授权本机写权限也能拿到强隔离"的路径——未授权时文件系统与断网围栏都是关的。
+    因为 guest 本体是**所有机器**共同缺的一项，虚拟机档现在一律不可选（exec::tier_readiness），
+    界面逐项列出缺什么、每项怎么补。
   how: |
-    1) 落地会话级 guest（PRODUCT.md「后置工作」；前置条件因机器而异：Windows 需虚拟机平台/WSL、
-       Linux 需 /dev/kvm、macOS 需 11+），装配阶段消费 exec::plan 的 packages；
-    2) 档位承载检查已在本次实现（exec::tier_readiness / tier_refusal：创建与编辑都拒绝、界面禁用），
-       这条缺口只覆盖**guest 本体**与装配接线；
-    3) 界面文案已在 app.js 如实标注 guest 未接入。
+    方向已定（不再讨论）：走**平台原生虚拟化**（Windows 虚拟机平台 / Linux KVM / macOS 虚拟化框架），
+    **不内置 QEMU、不随仓库分发镜像**——QEMU 与镜像用户自备，产品只检测与指路
+    （设置项 qemu_path 与 base；这样不背 GPL 源码分发义务、仓库也不膨胀）。
+    要做的事，按顺序：
+    1) 把 guest 抽象成端口（core/ports.rs，与 ToolRunner / FenceHost 同层）：start / exec / stop，
+       由适配层按平台实现；core 依旧无 IO。FenceSpec 的 rw / ro 在 guest 内变成挂载，net 变成"给不给网卡"。
+    2) 三平台后端各一套：Linux QEMU+KVM；macOS Virtualization.framework；Windows 虚拟机平台 / HCS。
+    3) 装配接线：消费 exec::plan 的 packages（prefix 只读共享、system 叠层），会话级一个 guest，
+       会话删除时销毁 guest 与它的磁盘（与 --fence-clean 同哲学）。
   accept: |
-    在真机上选 vm 档跑一次工具：进程确实跑在 guest 内（可达范围与宿主隔离）；前置条件不具备时，
-    编辑与「开始」都如实拒绝、不产生 vm 档会话；三平台探针覆盖"guest 可用 / 不可用"两种结论；
-    届时删除本条并同步 PRODUCT.md / RUNTIME_SPEC.md 的当前状态。
-  blocked_by: 缺少实现
+    在真机上选 vm 档跑一次工具：进程确实跑在 guest 内（可达范围与宿主隔离）；会话删除后 guest 与其磁盘被销毁；
+    三平台探针覆盖"guest 可用 / 不可用"两种结论；届时删除本条并同步 PRODUCT.md / RUNTIME_SPEC.md 的当前状态。
+  blocked_by: |
+    有意推迟（不是缺条件）：guest 相对现有围栏的独特价值只有"不授权本机写权限也能拿到强隔离"一条，
+    而代价是三套原生 API、每平台真机验证，且 CI 起不了 hypervisor（只能真机验 + env-skip）。
+    项目成熟、需求更清楚时再做。
 

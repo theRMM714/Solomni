@@ -331,6 +331,12 @@ fn fence_clean(root: &std::path::Path) -> i32 {
 /// 自检：本机事实（平台 + 围栏能力 + 外部解释器）。只报事实，不猜、不改任何东西（围栏自检那个临时目录除外）。
 fn doctor() -> i32 {
     let cap = adapters::confine::capability();
+    // 虚拟机档的逐项前置（**只读事实**）：这里按"没登记 QEMU、没指定基础根"问一次，
+    // 也就是最朴素的情形——登记过的路径以会话配置界面为准（那里按会话选型问同一份清单）。
+    let vm = core::exec::vm_requirements(&core::exec::VmInputs {
+        base: None,
+        qemu: None,
+    });
     let doc = serde_json::json!({
         "platform": std::env::consts::OS,
         "arch": std::env::consts::ARCH,
@@ -339,6 +345,12 @@ fn doctor() -> i32 {
             "python": find_exe("python"),
             "node": find_exe("node"),
             "curl": find_exe("curl"),
+        },
+        "vm_tier": {
+            "available": vm.iter().all(|r| r.met),
+            "requirements": vm.iter().map(|r| serde_json::json!({
+                "id": r.id, "met": r.met, "detail": r.detail, "how": r.how,
+            })).collect::<Vec<_>>(),
         },
     });
     println!("{}", doc);

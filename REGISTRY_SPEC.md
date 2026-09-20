@@ -101,6 +101,7 @@ show_reasoning: true   # 思维链显示（默认 true；界面上永远默认�
 tier: host             # 默认执行档位：host（本机）| vm（虚拟机）（默认 host）
 fence_write: false     # 是否允许围栏在本机写权限（默认 false：不动本机任何权限项）
 fence_read: []         # 用户显式授权的只读根（默认空：一个都不放行）
+qemu_path: ""          # 虚拟机档用的 QEMU 可执行文件路径（用户自备；默认空 = 兜底看 PATH）
 ```
 
 - 这些是**默认值**：会话可在 `meta.yaml` 的 `exec` 段单独选定档位与定版

@@ -476,13 +476,24 @@ function buildConfigForm(sid, cfg, c, box) {
   hostR.box.addEventListener('change', () => { if (hostR.box.checked) { draft.tier = 'host'; syncTier(); } });
   vmR.box.addEventListener('change', () => { if (vmR.box.checked) { draft.tier = 'vm'; syncTier(); } });
   secT.appendChild(hostR.wrap); secT.appendChild(vmR.wrap);
+  // 前置逐项照抄后端（缺哪几项、每项怎么补），界面不自己编话、也不笼统说"前置条件不具备"。
+  const reqs = cfg.vm_requirements || [];
   if (!vmOk) {
-    // 缺什么由后端如实给出（不在这里猜）：环境问题就说环境，界面照抄。
-    secT.appendChild(cfgHint('本机现在不能选虚拟机档：' + (cfg.vm_unavailable_reason || '前置条件不具备') + '。', 'err'));
+    secT.appendChild(cfgHint('虚拟机档现在不能选：' + (cfg.vm_unavailable_reason || '前置条件不具备'), 'err'));
+    if (reqs.length) {
+      const box2 = cfgDiv('cfg-sec');
+      box2.appendChild(cfgDiv('cfg-sec-title', '虚拟机档前置（' + reqs.filter((r) => !r.met).length + ' 项未满足）'));
+      for (const r of reqs) {
+        const line = document.createElement('div');
+        line.className = 'cfg-hint' + (r.met ? '' : ' err');
+        line.textContent =
+          (r.met ? '✓ ' : '✗ ') + r.detail + (r.met ? '' : '　怎么补：' + r.how);
+        box2.appendChild(line);
+      }
+      secT.appendChild(box2);
+    }
   }
   secT.appendChild(baseWrap); secT.appendChild(baseHint);
-  // 虚拟机档的 guest 本体尚未接入（如实标注，不夸大）：选了也仍按本机档执行。
-  secT.appendChild(cfgHint('注意：虚拟机档的 guest 本体尚未接入——选它实际仍按本机档执行（见 RUNTIME_SPEC.md 的当前状态）。', 'warn'));
   box.appendChild(secT);
   syncTier();
 

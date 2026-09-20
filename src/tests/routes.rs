@@ -179,6 +179,7 @@ impl SessionOps for FakeOps {
             tier_missing: Vec::new(),
             vm_available: true,
             vm_unavailable_reason: String::new(),
+            vm_requirements: Vec::new(),
             runtime: report(),
             runtimes_dir: "runtimes".to_string(),
         })

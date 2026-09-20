@@ -5074,55 +5074,97 @@ pub(crate) fn vm_spec() -> ExecSpec {
     }
 }
 
-/// 档位承载（与选型是两回事）：本机档没有额外前置；虚拟机档缺基础根或本机没有虚拟机监视器时**不可选**。
 /// 界面上的"能不能选"与创建/编辑的拒绝走同一个函数，所以这里钉住的就是那两处共同的事实。
+/// 现在的判据是**逐项清单**：缺哪几项、每项怎么补，都要能读出来。
 #[test]
 pub(crate) fn vm_tier_readiness_gates_creation_and_editing() {
     // 本机档：任何机器上都能承载（不装载运行包、不要 guest）。
-    let host = exec::tier_readiness(&ExecSpec::default());
+    let host = exec::tier_readiness(&ExecSpec::default(), None);
     assert!(host.ready(), "本机档没有前置条件");
-    assert!(exec::tier_refusal(&ExecSpec::default()).is_none());
+    assert!(host.requirements.is_empty(), "本机档不该有虚拟机前置清单");
+    assert!(exec::tier_refusal(&ExecSpec::default(), None).is_none());
 
-    // 基础根不存在 = 不成立（用户填错路径就是填错路径，不猜、不兜底）。
+    // 虚拟机档：guest 本体尚未接入是**所有机器**共同缺的一项，所以现在谁都不能建。
     let ghost = ExecSpec {
         tier: Tier::Vm,
         base: Some("definitely-not-a-real-base-root".to_string()),
         ..Default::default()
     };
-    let r = exec::tier_readiness(&ghost);
-    assert!(!r.ready() && !r.base, "基础根不在场就不成立：{:?}", r);
+    let r = exec::tier_readiness(&ghost, None);
+    assert!(!r.ready(), "前置不齐就不成立：{:?}", r);
+    let unmet: Vec<&str> = r.unmet().iter().map(|x| x.id).collect();
     assert!(
-        r.missing().contains(&"基础根不存在"),
-        "缺什么要如实说：{:?}",
-        r.missing()
+        unmet.contains(&"guest"),
+        "guest 未接入要如实列出：{:?}",
+        unmet
     );
-    let why = exec::tier_refusal(&ghost).expect("不成立就要给可读理由");
     assert!(
-        why.contains("基础根不存在") && why.contains("虚拟机档暂不可用"),
-        "{}",
-        why
+        unmet.contains(&"base"),
+        "填错的基础根要如实列出：{:?}",
+        unmet
     );
+    for item in r.unmet() {
+        assert!(
+            !item.how.is_empty(),
+            "每一项没满足都要给出怎么补：{:?}",
+            item
+        );
+        assert!(!item.detail.is_empty(), "每一项都要有现状描述：{:?}", item);
+    }
+    let why = exec::tier_refusal(&ghost, None).expect("不成立就要给可读理由");
+    assert!(why.contains("虚拟机档现在不可用"), "{}", why);
 
-    // 基础根在场时：成立与否只取决于本机有没有虚拟机监视器（这里只断言这份一致性）。
+    // 基础根在场：base 这一项要认出来（其余项照旧按事实）。
     let dir = crate::tests::scratch("tier-readiness");
     let real = ExecSpec {
         tier: Tier::Vm,
         base: Some(dir.to_string_lossy().into_owned()),
         ..Default::default()
     };
-    let r2 = exec::tier_readiness(&real);
-    assert!(r2.base, "在场的基础根要认出来");
-    if r2.ready() {
-        assert!(exec::tier_refusal(&real).is_none(), "成立时不该有拒绝理由");
-    } else {
-        let why = exec::tier_refusal(&real).expect("不成立就要给可读理由");
-        assert!(
-            why.contains(exec::hypervisor_hint()),
-            "理由要说清缺什么：{}",
-            why
-        );
-    }
+    let r2 = exec::tier_readiness(&real, None);
+    let base_item = r2
+        .requirements
+        .iter()
+        .find(|x| x.id == "base")
+        .expect("清单里要有基础根这一项");
+    assert!(base_item.met, "在场的基础根要认出来：{:?}", base_item);
+    // 严格：guest 未接入时**任何机器**都不能建虚拟机档会话。
+    assert!(!r2.ready(), "guest 未接入期间一律不可用");
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// QEMU 检测：登记了就用登记的路径，没登记就看 PATH；产品不自带、不下载。
+#[test]
+pub(crate) fn vm_requirements_report_qemu_registration() {
+    let base = crate::tests::scratch("vm-req-qemu");
+    let base_str = base.to_string_lossy().into_owned();
+    let spec = ExecSpec {
+        tier: Tier::Vm,
+        base: Some(base_str.clone()),
+        ..Default::default()
+    };
+
+    // 登记了一个不存在的路径：必须报"找不到"，并给出怎么补。
+    let r = exec::tier_readiness(&spec, Some("definitely-not-qemu.exe"));
+    let qemu = r
+        .requirements
+        .iter()
+        .find(|x| x.id == "qemu")
+        .expect("清单里要有 QEMU 这一项");
+    assert!(!qemu.met, "不存在的路径不算找到：{:?}", qemu);
+    assert!(!qemu.how.is_empty(), "没找到就要给怎么补：{:?}", qemu);
+
+    // 登记一个真实存在的文件：要认出来（QEMU 是不是真的不重要——这里只钉"登记生效"）。
+    let fake = base.join("qemu-system-x86_64");
+    std::fs::write(&fake, b"stub").unwrap();
+    let r2 = exec::tier_readiness(&spec, Some(fake.to_string_lossy().as_ref()));
+    let qemu2 = r2
+        .requirements
+        .iter()
+        .find(|x| x.id == "qemu")
+        .expect("清单里要有 QEMU 这一项");
+    assert!(qemu2.met, "登记的路径在场就要认出来：{:?}", qemu2);
+    let _ = std::fs::remove_dir_all(&base);
 }
 
 #[test]
@@ -5299,11 +5341,11 @@ pub(crate) fn vm_tier_is_refused_when_the_machine_cannot_carry_it() {
         ..ExecSpec::default()
     };
     let opened = core.create_work(work("vm-default", WorkMode::Single, &["a"]));
-    if exec::tier_readiness(&default_vm).ready() {
+    if exec::tier_readiness(&default_vm, None).ready() {
         opened.expect("本机能承载虚拟机档时不该拒绝");
     } else {
         let err = opened.expect_err("本机承载不了虚拟机档就不许建");
-        assert!(err.contains("虚拟机档暂不可用"), "{}", err);
+        assert!(err.contains("虚拟机档现在不可用"), "{}", err);
         assert!(!core.session_exists("vm-default"), "拒绝就该什么都不留下");
     }
 
@@ -5345,7 +5387,7 @@ pub(crate) fn vm_tier_is_refused_when_the_machine_cannot_carry_it() {
         )
         .expect_err("基础根不在场就不许改入虚拟机档");
     assert!(
-        err.contains("虚拟机档暂不可用") && err.contains("基础根不存在"),
+        err.contains("虚拟机档现在不可用") && err.contains("基础根不在场"),
         "{}",
         err
     );
@@ -5422,9 +5464,12 @@ pub(crate) fn module_without_runtime_is_denied_with_reason() {
         out: "ok".into(),
         ok: true,
     });
+    // 设置里的默认档位是**创建**时的档位来源：这里用本机档建（虚拟机档现在一律不可选），
+    // 建好之后再把这条件裁成"已存在的虚拟机档会话"。
+    let hist = Arc::new(InMemoryHistory::new());
     let mut core = Core::new(
-        Arc::new(InMemorySettings::with_tier(Tier::Vm)),
-        Arc::new(InMemoryHistory::new()),
+        Arc::new(InMemorySettings::with_tier(Tier::Host)),
+        Arc::clone(&hist) as Arc<dyn HistoryStore + Send + Sync>,
         Arc::new(InMemoryWorkspace::new()),
         Arc::new(VecSource(vec![mod_a])),
         Arc::new(InMemoryPackages::empty()),
@@ -5438,10 +5483,23 @@ pub(crate) fn module_without_runtime_is_denied_with_reason() {
         Arc::new(crate::core::ports::NoopLog),
     )
     .expect("内存装配不应失败");
+    // 虚拟机档现在一律不可选（guest 本体尚未接入），所以**创建**走本机档；
+    // 建好之后把落盘档位改成 vm——这正是"档位承载检查"与"缺包不拦会话"两件事的交界：
+    // 已存在的会话照常打开、按 vm 档判工具可用性。
     let sid = core
         .create_work(work("w", WorkMode::Single, &["a"]))
         .unwrap()
         .sid;
+    hist.force_tier(&sid, Tier::Vm);
+    // 编辑一次会把内存里的会话丢掉；下一次访问按落盘 meta（已是 vm 档）重建，
+    // 于是"工具可用性按 vm 档判"这条路才真的被走到。
+    let base_dir = crate::tests::scratch("module-without-runtime-base");
+    let mut rebuild = edit_of(vec![("a", &["a"], "")]);
+    rebuild.tier = "vm".to_string();
+    rebuild.base = Some(base_dir.to_string_lossy().into_owned());
+    core.edit_session(&sid, rebuild).unwrap();
+    // 访问一次（前端打开会话就是这一步）把会话按新配置重建；single_say 只认内存里已建好的会话。
+    with_live(|l| core.continue_flow(&sid, l)).unwrap();
     let events = with_live(|l| core.single_say(&sid, "干活", l)).unwrap();
     assert!(
         runner.calls.lock().expect("锁").is_empty(),
@@ -5623,8 +5681,9 @@ pub(crate) fn edit_session_writes_meta_appends_config_record_and_rebuilds() {
         "单 agent 会话在用户开口之前还没内容：名字仍改得动"
     );
     // 改：模块 a → b，模型指定 m，档位换虚拟机档、放行网络。
-    // 基础根给一个**真实存在**的目录：档位承载是独立的一层校验（虚拟机档要求基础根在场），
-    // 这条测试验的是"编辑写回与重建"，所以先让承载成立，别把两件事混在一条断言里。
+    // 虚拟机档现在一律不可选（guest 本体尚未接入），所以**先把它做成已存在的虚拟机档会话**——
+    // 已在 vm 档的会话只校验它自己那几项（基础根等），改模块/模型/网络照旧允许。
+    hist.force_tier(&sid, Tier::Vm);
     let base_dir = crate::tests::scratch("edit-session-base");
     core.edit_session(
         &sid,
@@ -5763,12 +5822,19 @@ pub(crate) fn edit_session_enforces_the_same_rules_as_creation() {
 
     // 虚拟机档选型不成立（同一能力多版本未定版）：编辑与「开始」同一把尺子，如实拒绝。
     let hist2 = Arc::new(InMemoryHistory::new());
+    // 已经在虚拟机档上的会话（"留在 vm 档"这一路：只校验它自己那几项，不拿"本机能不能提供 vm 档"拦它）。
+    // 基础根给一个真实存在的目录：留在 vm 档时仍然要校验用户填的那个路径。
+    let vm_base = crate::tests::scratch("edit-rules-vm-base");
     seed_session(
         &hist2,
         "c",
         "collab",
         vec![agent_meta("x", &["a"], None)],
-        ExecSpec::default(),
+        ExecSpec {
+            tier: Tier::Vm,
+            base: Some(vm_base.to_string_lossy().into_owned()),
+            ..ExecSpec::default()
+        },
     );
     let mut core2 = core_with_pkgs(
         vec![module_with_runtimes("a", &["python"])],
@@ -5784,6 +5850,7 @@ pub(crate) fn edit_session_enforces_the_same_rules_as_creation() {
     );
     let mut vm_edit = edit_of(vec![("x", &["a"], "")]);
     vm_edit.tier = "vm".to_string();
+    vm_edit.base = Some(vm_base.to_string_lossy().into_owned());
     let e = core2.edit_session("c", vm_edit.clone()).unwrap_err();
     assert!(e.contains("多个版本"), "{}", e);
     // 定版之后可以提交（缺包不拦：那只是该模块工具不可用）。

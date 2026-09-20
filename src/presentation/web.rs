@@ -540,6 +540,7 @@ pub(crate) fn route(
                 tier: current.tier,
                 fence_write: current.fence_write,
                 fence_read: current.fence_read.clone(),
+                qemu_path: current.qemu_path.clone(),
             };
             match ops.registry.set_settings(settings) {
                 Ok(()) => ok_json(json!({ "ok": true })),
