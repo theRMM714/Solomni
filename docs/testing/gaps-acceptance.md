@@ -30,7 +30,6 @@ tests/
     probes/
     gaps.yaml
   gaps.yaml                     # 全局长期目标（不影响 TEST-REPORT-ACCEPTED）
-  quality-baseline.yaml         # T0 存量基线（由 --print-quality-baseline 生成）
   ci-publish.mjs                # CI 报告发布脚本（把三平台报告写入 ci-report 分支）
 ```
 
@@ -107,5 +106,5 @@ tests/
 未能回答的问题不是"以后再说"，而是测试设计或观察面仍不完整，应进入缺口账。
 
 **需要 CI 才算验收的场景**（其余按 [execution-ci.md](execution-ci.md) 的 CI 表）：改了平台专属代码（`adapters/confine/` 或 `tests/<平台>/`）、
-改了平台围栏机制、改了 HTTPS/TLS 链路、改了 `tests/quality-baseline.yaml` 的其它平台分区、
-或改了只在其它平台编译的 `#[cfg]` 分支——这些本地跑不出结论，必须等 CI 并比对 `sha`。
+改了平台围栏机制、改了 HTTPS/TLS 链路、改了只在其它平台编译的 `#[cfg]` 分支，
+或改了 T0 六项检查本身——这些本地跑不出结论，必须等 CI 并比对 `sha`。

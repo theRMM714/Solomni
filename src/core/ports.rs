@@ -44,7 +44,10 @@ pub struct CompleteOpts<'a> {
 impl<'a> CompleteOpts<'a> {
     /// 本次不声明工具（手写信封模式；测试替身与演示通道也用它）。
     pub fn plain(stream: bool) -> CompleteOpts<'a> {
-        CompleteOpts { stream, tools: None }
+        CompleteOpts {
+            stream,
+            tools: None,
+        }
     }
 }
 
@@ -59,7 +62,12 @@ pub struct ToolCall {
 }
 
 pub trait Chat {
-    fn complete(&mut self, messages: &[Msg], opts: CompleteOpts<'_>, on: &mut dyn FnMut(Chunk) -> bool) -> Completion;
+    fn complete(
+        &mut self,
+        messages: &[Msg],
+        opts: CompleteOpts<'_>,
+        on: &mut dyn FnMut(Chunk) -> bool,
+    ) -> Completion;
 }
 
 /// 拥有所有权的会话通道（装箱端口对象；会话可跨线程移动，Web 泵线程所需）。
@@ -81,16 +89,28 @@ pub struct Msg {
 }
 
 impl Msg {
-    pub fn system(content: impl Into<String>) -> Msg { Msg::plain("system", content) }
-    pub fn user(content: impl Into<String>) -> Msg { Msg::plain("user", content) }
-    pub fn assistant(content: impl Into<String>) -> Msg { Msg::plain("assistant", content) }
+    pub fn system(content: impl Into<String>) -> Msg {
+        Msg::plain("system", content)
+    }
+    pub fn user(content: impl Into<String>) -> Msg {
+        Msg::plain("user", content)
+    }
+    pub fn assistant(content: impl Into<String>) -> Msg {
+        Msg::plain("assistant", content)
+    }
     /// 一次回复的助手消息：正文 + 它发起的**全部**调用（一次回复多个调用就靠它）。
     pub fn assistant_calls(content: impl Into<String>, calls: Vec<ToolCall>) -> Msg {
-        Msg { tool_calls: calls, ..Msg::plain("assistant", content) }
+        Msg {
+            tool_calls: calls,
+            ..Msg::plain("assistant", content)
+        }
     }
     /// 一条工具结果：回应某个调用 id（协议要求与助手消息里的调用成对出现）。
     pub fn tool(call_id: &str, content: impl Into<String>) -> Msg {
-        Msg { tool_call_id: call_id.to_string(), ..Msg::plain("tool", content) }
+        Msg {
+            tool_call_id: call_id.to_string(),
+            ..Msg::plain("tool", content)
+        }
     }
     fn plain(role: &str, content: impl Into<String>) -> Msg {
         Msg {
@@ -119,7 +139,11 @@ pub struct Completion {
 impl Completion {
     /// 没有结束原因、没有原生调用的通道（演示通道、测试替身、本地失败兜底）：只有正文。
     pub fn text(raw: impl Into<String>) -> Completion {
-        Completion { raw: raw.into(), finish: String::new(), calls: Vec::new() }
+        Completion {
+            raw: raw.into(),
+            finish: String::new(),
+            calls: Vec::new(),
+        }
     }
 
     /// 这一次是不是被输出长度截断的。
@@ -174,9 +198,17 @@ pub trait Workspace {
     /// work/ 下是否已有同名文件（上传同名冲突判定）。
     fn work_has(&self, session: &str, name: &str) -> bool;
     /// 沙箱寻址根（work 与各 agent 私有区）：布局机制在适配层，拼接与越界校验在 core。
-    fn roots(&self, session: &str, agents: &[String]) -> Result<crate::core::workspace::WorkRoots, String>;
+    fn roots(
+        &self,
+        session: &str,
+        agents: &[String],
+    ) -> Result<crate::core::workspace::WorkRoots, String>;
     /// 列出本工作可引用的文件（work/ 与各 agent 沙箱；相对路径、/ 分隔、排序稳定）。
-    fn list(&self, session: &str, agents: &[String]) -> Result<crate::core::workspace::WorkFiles, String>;
+    fn list(
+        &self,
+        session: &str,
+        agents: &[String],
+    ) -> Result<crate::core::workspace::WorkFiles, String>;
 }
 
 /// 一次文件读取：文本 + 原始字节数 + 编码与截断的如实标注。
@@ -212,7 +244,11 @@ pub enum ProbeOutcome {
 /// 「用哪条模型通道」由 core 解析后传入（策略在 core）——网关不做选择。
 /// channel = None 表示无可用模型：实现方必须回落演示通道并如实告知（不得静默）。
 pub trait ChatGateway {
-    fn member_channel(&self, channel: Option<&Channel>, module_id: &str) -> (BoxedChat, Option<String>);
+    fn member_channel(
+        &self,
+        channel: Option<&Channel>,
+        module_id: &str,
+    ) -> (BoxedChat, Option<String>);
     /// 核心自身通道（整理/验收/代拟/推荐）；bool = 是否演示通道（供如实告知）。
     fn core_channel(&self, channel: Option<&Channel>) -> (BoxedChat, bool);
     /// 实测这条通道支不支持原生工具调用（发两条最小请求对比：不带 tools / 带 tools）。
@@ -255,7 +291,12 @@ pub struct ToolOutcome {
 /// 工具执行端口：机制（围栏安装/进程拉起/stdin 送参/超时杀树/截断）在适配层。
 /// 策略在核心：哪个模块能调哪个工具、命令映射、可达到哪些根，由核心按 module.yaml 与沙箱派生后传入。
 pub trait ToolRunner {
-    fn run(&self, fence: &crate::core::fence::FenceSpec, command: &str, args_json: &str) -> ToolOutcome;
+    fn run(
+        &self,
+        fence: &crate::core::fence::FenceSpec,
+        command: &str,
+        args_json: &str,
+    ) -> ToolOutcome;
 }
 
 /// 一次信封修复的结果。

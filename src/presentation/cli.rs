@@ -79,7 +79,12 @@ fn print_roster(ops: &Ops) {
         if roster.modules.is_empty() {
             "（无模块）".to_string()
         } else {
-            roster.modules.iter().map(|m| m.manifest.id.clone()).collect::<Vec<_>>().join(" · ")
+            roster
+                .modules
+                .iter()
+                .map(|m| m.manifest.id.clone())
+                .collect::<Vec<_>>()
+                .join(" · ")
         }
     );
     for m in &roster.modules {
@@ -101,7 +106,11 @@ fn print_roster(ops: &Ops) {
         println!("[运行包] 档位 {}；包库：{}", report.tier, lib);
     }
     for (id, caps) in &report.missing {
-        println!("[缺运行包] 模块 {} 需要 {}；把包放进依赖文件夹 runtimes/（契约见 RUNTIME_SPEC.md）", id, caps.join("、"));
+        println!(
+            "[缺运行包] 模块 {} 需要 {}；把包放进依赖文件夹 runtimes/（契约见 RUNTIME_SPEC.md）",
+            id,
+            caps.join("、")
+        );
     }
     // 虚拟机档的诊断：缺包之外（多版本未定版 / 定版不存在 / 路径冲突）会挡住「开始」，在这里如实说明。
     let hard: Vec<crate::core::exec::Diagnosis> = report
@@ -111,7 +120,10 @@ fn print_roster(ops: &Ops) {
         .cloned()
         .collect();
     if !hard.is_empty() {
-        println!("[档位诊断] {}（虚拟机档要先解决这些才能开始会话）", crate::core::exec::diagnose_text(&hard));
+        println!(
+            "[档位诊断] {}（虚拟机档要先解决这些才能开始会话）",
+            crate::core::exec::diagnose_text(&hard)
+        );
     }
     for r in &report.rejected_packages {
         println!("[运行包拒收] {}", r);
@@ -131,14 +143,21 @@ fn print_menu(ops: &Ops) {
         println!("  （登记处还没有 agent：到 Web 界面「设置 → agent 管理」建一个）");
     }
     for a in &agents {
-        println!("  {:<14} {} · 模型 {}", a.name, a.modules.join(" + "), model_label(a.model.as_deref()));
+        println!(
+            "  {:<14} {} · 模型 {}",
+            a.name,
+            a.modules.join(" + "),
+            model_label(a.model.as_deref())
+        );
     }
     println!("命令：single [agent名…] | collab [agent名…|?] | provider list|add|rm|discover | model list|add|rm | core <模型id> | rescan | webui | exit");
 }
 
 /// 模型标签（CLI 展示文案；核心默认是登记处的概念，不是提示词）。
 fn model_label(model: Option<&str>) -> String {
-    model.map(|m| m.to_string()).unwrap_or_else(|| "（核心默认）".to_string())
+    model
+        .map(|m| m.to_string())
+        .unwrap_or_else(|| "（核心默认）".to_string())
 }
 
 /// 展示文案归呈现层：core 只给结构化事实（视图），怎么排版是这里的事。
@@ -147,8 +166,15 @@ fn provider_line(p: &ProviderView) -> String {
 }
 
 fn model_line(m: &ModelView, core: Option<&str>) -> String {
-    let mark = if core == Some(m.id.as_str()) { "（核心默认）" } else { "" };
-    format!("{}{}  {} → {}  [{}]", m.id, mark, m.name, m.api_model, m.provider)
+    let mark = if core == Some(m.id.as_str()) {
+        "（核心默认）"
+    } else {
+        ""
+    };
+    format!(
+        "{}{}  {} → {}  [{}]",
+        m.id, mark, m.name, m.api_model, m.provider
+    )
 }
 
 // ---------- 事件渲染：CLI 与 Web 前端同源 ----------
@@ -235,7 +261,8 @@ fn single_flow(ops: &Ops, arg: &str) {
             return;
         }
     };
-    let opened = match intent::open_work(ops, work_name, WorkMode::Single, vec![agent], None, false) {
+    let opened = match intent::open_work(ops, work_name, WorkMode::Single, vec![agent], None, false)
+    {
         Ok(o) => o,
         Err(e) => {
             println!("[错误] {}", e);
@@ -286,7 +313,14 @@ fn collab_flow(ops: &Ops, arg: &str) {
             return;
         }
     };
-    let sid = match intent::open_work(ops, work_name, WorkMode::Collab, agents, Some(task), delegate) {
+    let sid = match intent::open_work(
+        ops,
+        work_name,
+        WorkMode::Collab,
+        agents,
+        Some(task),
+        delegate,
+    ) {
         Ok(o) => {
             render(&o.events);
             o.sid
@@ -308,14 +342,23 @@ fn collab_flow(ops: &Ops, arg: &str) {
                         a.name,
                         a.modules.join(" + "),
                         model_label(a.model.as_deref()),
-                        if a.transient { "组装（临时）" } else { "复用已存 agent" }
+                        if a.transient {
+                            "组装（临时）"
+                        } else {
+                            "复用已存 agent"
+                        }
                     );
                 }
             }
             Err(e) => println!("[提示] 取名单失败：{}", e),
         }
         let ok = prompt("确认名单？（yes 开始 / 其他取消）");
-        match intent::act(ops, &sid, intent::Action::Step(CollabStep::ConfirmSlate, &ok), Output::Final) {
+        match intent::act(
+            ops,
+            &sid,
+            intent::Action::Step(CollabStep::ConfirmSlate, &ok),
+            Output::Final,
+        ) {
             Ok(acted) => render(&intent::into_events(acted)),
             Err(e) => println!("[错误] {}", e),
         }
@@ -323,7 +366,12 @@ fn collab_flow(ops: &Ops, arg: &str) {
     // 开始确认。
     if matches!(ops.sessions.pending(&sid), Ok(Some(Pending::ConfirmBegin))) {
         let ans = prompt("开始讨论？（yes / yes,allow：授权小组自裁细节）");
-        match intent::act(ops, &sid, intent::Action::Step(CollabStep::Begin, &ans), Output::Final) {
+        match intent::act(
+            ops,
+            &sid,
+            intent::Action::Step(CollabStep::Begin, &ans),
+            Output::Final,
+        ) {
             Ok(acted) => render(&intent::into_events(acted)),
             Err(e) => println!("[错误] {}", e),
         }
@@ -333,7 +381,12 @@ fn collab_flow(ops: &Ops, arg: &str) {
         if let Ok(Some(Pending::Ask { member, question })) = ops.sessions.pending(&sid) {
             println!("[请教] {}：{}", member, question);
             let ans = prompt("你的回答（回车 = 无补充，继续）>");
-            match intent::act(ops, &sid, intent::Action::Step(CollabStep::Answer, &ans), Output::Final) {
+            match intent::act(
+                ops,
+                &sid,
+                intent::Action::Step(CollabStep::Answer, &ans),
+                Output::Final,
+            ) {
                 Ok(acted) => render(&intent::into_events(acted)),
                 Err(e) => {
                     println!("[错误] {}", e);
@@ -405,14 +458,20 @@ fn model_flow(ops: &Ops, arg: &str) {
             };
             let core = ops.registry.core_model().ok().flatten();
             if views.is_empty() {
-                println!("（无模型）用 model add <id> <展示名> <实际模型串> <供应商id> [note] 添加");
+                println!(
+                    "（无模型）用 model add <id> <展示名> <实际模型串> <供应商id> [note] 添加"
+                );
             }
             for m in &views {
                 println!("  {}", model_line(m, core.as_deref()));
             }
         }
         "add" => {
-            let w: Vec<&str> = rest.splitn(5, ' ').map(str::trim).filter(|s| !s.is_empty()).collect();
+            let w: Vec<&str> = rest
+                .splitn(5, ' ')
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .collect();
             if w.len() < 4 {
                 println!("[错误] 用法：model add <id> <展示名> <实际模型串> <供应商id> [note]");
                 return;
@@ -435,7 +494,10 @@ fn model_flow(ops: &Ops, arg: &str) {
 fn core_flow(ops: &Ops, arg: &str) {
     if arg.is_empty() {
         let cur = ops.registry.core_model().ok().flatten();
-        println!("核心默认模型：{}", cur.unwrap_or_else(|| "（未设定）".to_string()));
+        println!(
+            "核心默认模型：{}",
+            cur.unwrap_or_else(|| "（未设定）".to_string())
+        );
         return;
     }
     match ops.registry.set_core_model(arg) {

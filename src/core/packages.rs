@@ -16,7 +16,8 @@ pub fn valid_capability(name: &str) -> bool {
     if name.len() > 64 {
         return false;
     }
-    name.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '-' | '_' | '.'))
+    name.chars()
+        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '-' | '_' | '.'))
 }
 
 /// kind 取值：包整体挂到自己的独立前缀（可重定位、只读、互不干扰）。
@@ -87,7 +88,10 @@ impl Library {
                 rejected.push(format!("{}@{}：{}", manifest.id, manifest.version, why));
                 continue;
             }
-            if packages.iter().any(|p| p.id == manifest.id && p.version == manifest.version) {
+            if packages
+                .iter()
+                .any(|p| p.id == manifest.id && p.version == manifest.version)
+            {
                 rejected.push(format!(
                     "{}@{}：同一 id 与版本出现两次（只收先出现的那份）",
                     manifest.id, manifest.version
@@ -96,18 +100,25 @@ impl Library {
             }
             packages.push(manifest);
         }
-        packages.sort_by(|a, b| (a.id.as_str(), a.version.as_str()).cmp(&(b.id.as_str(), b.version.as_str())));
+        packages.sort_by(|a, b| {
+            (a.id.as_str(), a.version.as_str()).cmp(&(b.id.as_str(), b.version.as_str()))
+        });
         Library { packages, rejected }
     }
 
     /// 提供该能力的所有版本（升序稳定）；空 = 库里没有任何包提供它。
     pub fn versions_of(&self, capability: &str) -> Vec<&PackageManifest> {
-        self.packages.iter().filter(|p| p.id == capability).collect()
+        self.packages
+            .iter()
+            .filter(|p| p.id == capability)
+            .collect()
     }
 
     /// 定版取包：能力 + 精确版本。
     pub fn pick(&self, capability: &str, version: &str) -> Option<&PackageManifest> {
-        self.packages.iter().find(|p| p.id == capability && p.version == version)
+        self.packages
+            .iter()
+            .find(|p| p.id == capability && p.version == version)
     }
 
     /// 能力名 → 可用版本（呈现用：运行能力报告）。
@@ -123,23 +134,37 @@ impl Library {
 /// 清单校验（纯逻辑；由 Library::build 调用）：非法 = 拒收并说明原因，不纠正。
 pub fn check_manifest(m: &PackageManifest) -> Result<(), String> {
     if !valid_capability(&m.id) {
-        return Err("id 不合法（只允许小写字母、数字、- _ .，且以字母或数字开头，长度 1..=64）".to_string());
+        return Err(
+            "id 不合法（只允许小写字母、数字、- _ .，且以字母或数字开头，长度 1..=64）".to_string(),
+        );
     }
-    if m.version.trim().is_empty() || m.version.chars().any(|c| c.is_whitespace() || matches!(c, '/' | '\\')) {
+    if m.version.trim().is_empty()
+        || m.version
+            .chars()
+            .any(|c| c.is_whitespace() || matches!(c, '/' | '\\'))
+    {
         return Err("version 不能为空，也不能含空白或路径分隔符".to_string());
     }
     match m.kind.as_str() {
         KIND_PREFIX => {
             if !valid_rel_path(&m.prefix) {
-                return Err("kind = prefix 时必须给出合法的 prefix（相对、/ 分隔、无空段、无 . 与 ..）".to_string());
+                return Err(
+                    "kind = prefix 时必须给出合法的 prefix（相对、/ 分隔、无空段、无 . 与 ..）"
+                        .to_string(),
+                );
             }
             if !m.provides_paths.is_empty() {
-                return Err("kind = prefix 的包不该声明 provides_paths（那是 system 类包的事）".to_string());
+                return Err(
+                    "kind = prefix 的包不该声明 provides_paths（那是 system 类包的事）".to_string(),
+                );
             }
         }
         KIND_SYSTEM => {
             if m.provides_paths.is_empty() {
-                return Err("kind = system 时必须声明 provides_paths（它会写进 guest 系统路径）".to_string());
+                return Err(
+                    "kind = system 时必须声明 provides_paths（它会写进 guest 系统路径）"
+                        .to_string(),
+                );
             }
             for p in &m.provides_paths {
                 if !valid_rel_path(p) {
@@ -147,7 +172,12 @@ pub fn check_manifest(m: &PackageManifest) -> Result<(), String> {
                 }
             }
         }
-        other => return Err(format!("kind 只认 {} 与 {}，收到：{}", KIND_PREFIX, KIND_SYSTEM, other)),
+        other => {
+            return Err(format!(
+                "kind 只认 {} 与 {}，收到：{}",
+                KIND_PREFIX, KIND_SYSTEM, other
+            ))
+        }
     }
     for r in &m.requires {
         if !valid_capability(r) {
@@ -165,7 +195,8 @@ pub fn valid_rel_path(p: &str) -> bool {
     if p.is_empty() || p.starts_with('/') || p.contains('\\') {
         return false;
     }
-    p.split('/').all(|seg| !seg.is_empty() && seg != "." && seg != "..")
+    p.split('/')
+        .all(|seg| !seg.is_empty() && seg != "." && seg != "..")
 }
 
 /// 系统路径冲突预检：两个包会写到同一处（相等或互为前缀）——叠加时互相覆盖，顺序消解不了。
@@ -191,7 +222,11 @@ pub fn conflicts(chosen: &[&PackageManifest]) -> Vec<(String, String, String)> {
                 continue; // 同一个包自己的两条路径不算冲突
             }
             if overlaps(a, b) {
-                let shorter = if a.len() <= b.len() { a.clone() } else { b.clone() };
+                let shorter = if a.len() <= b.len() {
+                    a.clone()
+                } else {
+                    b.clone()
+                };
                 out.push((shorter, la.clone(), lb.clone()));
             }
         }

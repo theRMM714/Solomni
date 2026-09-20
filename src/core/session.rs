@@ -51,6 +51,9 @@ pub struct AgentSession {
 }
 
 impl AgentSession {
+    // 组合根注入的构造函数：参数天然多，收口成参数对象只是把参数挪个地方、并让装配更难读。
+    // 这是有意的设计取舍（见 docs/testing/quality-isolation.md 的 allow 清单），不是没修。
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         id: &str,
         system: String,
@@ -78,6 +81,9 @@ impl AgentSession {
     }
 
     /// 从落盘事件重建（继续/回档历史会话用）。
+    // 组合根注入的构造函数：参数天然多，收口成参数对象只是把参数挪个地方、并让装配更难读。
+    // 这是有意的设计取舍（见 docs/testing/quality-isolation.md 的 allow 清单），不是没修。
+    #[allow(clippy::too_many_arguments)]
     pub fn restore(
         id: &str,
         history: Vec<Msg>,
@@ -113,13 +119,28 @@ impl AgentSession {
 
     /// 开场事件（通道回落告知）。
     pub fn open(&self) -> Vec<SessionEvent> {
-        self.note.clone().map(|n| vec![SessionEvent::Notice(n)]).unwrap_or_default()
+        self.note
+            .clone()
+            .map(|n| vec![SessionEvent::Notice(n)])
+            .unwrap_or_default()
     }
 
     /// 生成一条转录行，并记下它完成时的历史长度（回档按 marks 逐行精确回退）与它属于哪次回复。
-    fn line(&mut self, line: String, reasoning: Option<String>, tool: Option<ToolCallView>) -> LineView {
+    fn line(
+        &mut self,
+        line: String,
+        reasoning: Option<String>,
+        tool: Option<ToolCallView>,
+    ) -> LineView {
         let reply = self.cur_reply;
-        let v = LineView { id: self.next_line, reply, line, reasoning, tool, degraded: false };
+        let v = LineView {
+            id: self.next_line,
+            reply,
+            line,
+            reasoning,
+            tool,
+            degraded: false,
+        };
         self.next_line += 1;
         self.line_reply.push(reply);
         self.marks.push(self.history.len());
@@ -186,7 +207,11 @@ impl AgentSession {
             let has_line = !text.is_empty() || !round.reasoning.trim().is_empty();
             // 供应商说是长度截断：如实写在行尾（与"已停止"同一套做法）
             let truncated = round.truncated();
-            let mut reasoning = if round.reasoning.trim().is_empty() { None } else { Some(round.reasoning.clone()) };
+            let mut reasoning = if round.reasoning.trim().is_empty() {
+                None
+            } else {
+                Some(round.reasoning.clone())
+            };
             match round.tool {
                 Some(run) => {
                     // 先出「思考+正文」文本行（只有信封没有正文/思维链时不出空行）。
@@ -202,7 +227,11 @@ impl AgentSession {
                         if truncated {
                             line.push_str(&self.tool_texts.truncated_suffix);
                         }
-                        out.push(SessionEvent::Transcript(vec![self.line(line, reasoning.take(), None)]));
+                        out.push(SessionEvent::Transcript(vec![self.line(
+                            line,
+                            reasoning.take(),
+                            None,
+                        )]));
                     }
                     for m in round.text_msgs {
                         self.history.push(m);
@@ -213,7 +242,11 @@ impl AgentSession {
                     let status = if run.view.ok { "成功" } else { "失败" };
                     // 没有文本行时思维链挂到工具行上，不丢。
                     let line = format!("[{}] 工具 {} → {}", self.id, run.view.label(), status);
-                    out.push(SessionEvent::Transcript(vec![self.line(line, reasoning.take(), Some(run.view))]));
+                    out.push(SessionEvent::Transcript(vec![self.line(
+                        line,
+                        reasoning.take(),
+                        Some(run.view),
+                    )]));
                 }
                 None => {
                     for m in round.text_msgs {
@@ -231,13 +264,19 @@ impl AgentSession {
                         if truncated {
                             line.push_str(&self.tool_texts.truncated_suffix);
                         }
-                        out.push(SessionEvent::Transcript(vec![self.line(line, reasoning.take(), None)]));
+                        out.push(SessionEvent::Transcript(vec![self.line(
+                            line,
+                            reasoning.take(),
+                            None,
+                        )]));
                     }
                 }
             }
         }
         if stopped {
-            out.push(SessionEvent::Notice("[已停止] 生成已按你的要求中止（保留已产出的部分）".to_string()));
+            out.push(SessionEvent::Notice(
+                "[已停止] 生成已按你的要求中止（保留已产出的部分）".to_string(),
+            ));
         }
         out
     }
@@ -251,7 +290,12 @@ impl AgentSession {
         let emit = std::cell::RefCell::new(&mut *live.emit);
         let mut acc = String::new();
         {
-            let AgentSession { history, chat, tools, .. } = self;
+            let AgentSession {
+                history,
+                chat,
+                tools,
+                ..
+            } = self;
             crate::core::engine::converse_with(
                 chat.as_mut(),
                 tools.as_mut(),
@@ -276,7 +320,11 @@ impl AgentSession {
                             piece = r.clone();
                         }
                     }
-                    (emit.borrow_mut())(SessionEvent::Delta { speaker: label.clone(), kind: kind.to_string(), text: piece });
+                    (emit.borrow_mut())(SessionEvent::Delta {
+                        speaker: label.clone(),
+                        kind: kind.to_string(),
+                        text: piece,
+                    });
                     !cancel.load(std::sync::atomic::Ordering::Relaxed)
                 },
                 &mut |view: &ToolCallView| {

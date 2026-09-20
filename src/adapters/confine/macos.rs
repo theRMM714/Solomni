@@ -67,7 +67,8 @@ fn seatbelt_confines() -> bool {
 }
 
 fn seatbelt_confines_probe() -> bool {
-    let canary = std::env::temp_dir().join(format!("solomni-seatbelt-selfcheck-{}", std::process::id()));
+    let canary =
+        std::env::temp_dir().join(format!("solomni-seatbelt-selfcheck-{}", std::process::id()));
     if std::fs::write(&canary, "canary").is_err() {
         return false;
     }
@@ -101,7 +102,12 @@ fn seatbelt_confines_probe() -> bool {
 
 /// `_prepared`（外层是否已完成本机授权）与 `_home`（容器 profile 的台账落点）只有 Windows 的容器围栏用得上：
 /// macOS 的 seatbelt 在守门进程里自足，也没有容器 profile 这一步。
-pub fn run_fenced(spec: &FenceSpec, _prepared: bool, _home: Option<&std::path::Path>, command: &str) -> i32 {
+pub fn run_fenced(
+    spec: &FenceSpec,
+    _prepared: bool,
+    _home: Option<&std::path::Path>,
+    command: &str,
+) -> i32 {
     match install(spec, command) {
         Ok(()) => {}
         Err(e) => {
@@ -151,7 +157,9 @@ pub fn verify(spec: &FenceSpec, command: &str) -> FenceVerdict {
 /// 守门进程路径：装围栏（自检不过与 profile 被拒都如实降级照跑——能力等级已在启动报告里说过）。
 fn install(spec: &FenceSpec, command: &str) -> Result<(), String> {
     if !seatbelt_confines() {
-        return Err("本机 sandbox_init 不产生实际约束（该私有 ABI 在新版 macOS 上已失效）".to_string());
+        return Err(
+            "本机 sandbox_init 不产生实际约束（该私有 ABI 在新版 macOS 上已失效）".to_string(),
+        );
     }
     install_profile(spec, command)
 }
@@ -252,7 +260,10 @@ fn profile_text(spec: &FenceSpec, command: &str) -> String {
     for m in &metas {
         // literal 而不是 subpath：穿过祖先只需要对**祖先本身**取元数据；
         // 用 subpath 会把整棵子树的元数据都放行，等于把围栏开成筛子。
-        out.push_str(&format!("(allow file-read-metadata (literal \"{}\"))\n", escape(m)));
+        out.push_str(&format!(
+            "(allow file-read-metadata (literal \"{}\"))\n",
+            escape(m)
+        ));
     }
     if !spec.net {
         out.push_str("(deny network*)\n");
@@ -264,4 +275,3 @@ fn profile_text(spec: &FenceSpec, command: &str) -> String {
 fn escape(s: &str) -> String {
     s.replace('\\', "\\\\").replace('"', "\\\"")
 }
-

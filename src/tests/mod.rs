@@ -92,7 +92,10 @@ pub(crate) struct SlowGateway {
 }
 
 impl crate::core::ports::ChatGateway for SlowGateway {
-    fn probe_tools(&self, _c: &crate::core::providers::Channel) -> Result<crate::core::ports::ProbeOutcome, String> {
+    fn probe_tools(
+        &self,
+        _c: &crate::core::providers::Channel,
+    ) -> Result<crate::core::ports::ProbeOutcome, String> {
         Err("脚本替身没有真实供应商，测不了工具调用支持".to_string())
     }
     fn member_channel(

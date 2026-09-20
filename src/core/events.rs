@@ -15,7 +15,11 @@ pub enum SessionEvent {
     /// 整理方案就绪。
     Plan(String),
     /// 成员执行回报（rework = 第几轮执行，0 为首轮）。
-    Report { id: String, text: String, rework: usize },
+    Report {
+        id: String,
+        text: String,
+        rework: usize,
+    },
     /// 验收清单（raw = 解析失败时的原文）。
     Review { items: Vec<CheckView>, raw: String },
     /// 交付结论（over_rework = 返工超限交用户裁决）。
@@ -26,7 +30,11 @@ pub enum SessionEvent {
     ToolCall(ToolCallView),
     /// 流式增量（短暂，不落盘）：按到达顺序的分段。
     /// kind = start / text / reasoning；start 表示新一轮开始（前端清空本轮占位）。
-    Delta { speaker: String, kind: String, text: String },
+    Delta {
+        speaker: String,
+        kind: String,
+        text: String,
+    },
 }
 
 /// 实时输出通道：流式开关 + 中止开关 + 短暂事件出口（不落盘，仅活动会话实时刷新）。
@@ -119,7 +127,9 @@ impl SessionEvent {
     pub fn to_json(&self) -> serde_json::Value {
         match self {
             SessionEvent::Notice(n) => serde_json::json!({ "type": "notice", "text": n }),
-            SessionEvent::Transcript(lines) => serde_json::json!({ "type": "transcript", "lines": lines }),
+            SessionEvent::Transcript(lines) => {
+                serde_json::json!({ "type": "transcript", "lines": lines })
+            }
             SessionEvent::DiscussionDone { round, over_cap } => {
                 serde_json::json!({ "type": "discussion_done", "round": round, "over_cap": over_cap })
             }
@@ -127,12 +137,18 @@ impl SessionEvent {
             SessionEvent::Report { id, text, rework } => {
                 serde_json::json!({ "type": "report", "id": id, "text": text, "rework": rework })
             }
-            SessionEvent::Review { items, raw } => serde_json::json!({ "type": "review", "items": items, "raw": raw }),
+            SessionEvent::Review { items, raw } => {
+                serde_json::json!({ "type": "review", "items": items, "raw": raw })
+            }
             SessionEvent::Delivery { ok, over_rework } => {
                 serde_json::json!({ "type": "delivery", "ok": ok, "over_rework": over_rework })
             }
             SessionEvent::Ended => serde_json::json!({ "type": "ended" }),
-            SessionEvent::Delta { speaker, kind, text } => {
+            SessionEvent::Delta {
+                speaker,
+                kind,
+                text,
+            } => {
                 serde_json::json!({ "type": "delta", "speaker": speaker, "kind": kind, "text": text })
             }
             SessionEvent::ToolCall(v) => serde_json::json!({

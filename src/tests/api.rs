@@ -1,11 +1,11 @@
 //! 入站契约（`core::api`）的契约测试：命令/事件模型、能力分面、停止语义、panic 隔离。
 //! 这一层不碰 HTTP；HTTP 侧（路由目录与逐路由契约）另见本目录的 routes。
 
+use super::doubles::module_of;
 use super::{ops_with, single_work, slow_ops};
 use crate::core::api::{CoreHandle, Ops, Output};
 use crate::core::exec::Tier;
 use crate::core::module::Module;
-use super::doubles::module_of;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::{Duration, Instant};

@@ -36,7 +36,10 @@ fn https_reaches_a_public_endpoint_through_the_product_chain() {
         // 连不上外网：如实跳过（这不是被测代码的问题）
         "no-net" => eprintln!("[探针] 本环境连不上外网，HTTPS/TLS 探针跳过：{}", line),
         // 本进程取不到系统 TLS 凭证：环境结论，如实跳过并附原话（判据是错误码，不是文案）。
-        "env-tls" => eprintln!("[探针] 本进程取不到系统 TLS 凭证（环境结论，如实跳过）：{}", line),
+        "env-tls" => eprintln!(
+            "[探针] 本进程取不到系统 TLS 凭证（环境结论，如实跳过）：{}",
+            line
+        ),
         // 其余（tls-fail / fail / 空）：链路真有问题，必须失败
         _ => panic!("HTTPS/TLS 链路失败：{}", line),
     }

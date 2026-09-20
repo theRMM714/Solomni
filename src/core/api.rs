@@ -107,7 +107,7 @@ impl EventBus {
         let lines = g
             .lines
             .iter()
-            .filter(|l| l.seq > since && sid.map_or(true, |x| l.sid == x))
+            .filter(|l| l.seq > since && sid.is_none_or(|x| l.sid == x))
             .cloned()
             .collect();
         (lines, g.seq)

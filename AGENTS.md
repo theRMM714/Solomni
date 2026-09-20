@@ -143,7 +143,7 @@
 | 判断测试属于哪层、放哪、怎么判定 | `docs/testing/levels.md` |
 | 写或改替身（Stub / Fake / Mock / Spy / Fixture）、验收 Fake | `docs/testing/doubles.md` |
 | 新增端口或替身、核对真实适配器覆盖范围 | `docs/testing/port-matrix.md` |
-| 声明测试资源边界、清理副作用、质量门禁与基线 | `docs/testing/quality-isolation.md` |
+| 声明测试资源边界、清理副作用、质量门禁 | `docs/testing/quality-isolation.md` |
 | 跑本地入口、读报告、认成功标记、CI 与报告发布 | `docs/testing/execution-ci.md` |
 | 记缺口、目录与命名、按验收清单收口 | `docs/testing/gaps-acceptance.md` |
 | 交付模块（模块作者要交什么测试证据） | `docs/testing/module-delivery.md` |

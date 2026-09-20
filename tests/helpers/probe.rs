@@ -19,7 +19,10 @@ pub fn bin() -> PathBuf {
 
 /// 每次用的干净落点（target/ 下，不入库）。
 pub fn scratch(name: &str) -> PathBuf {
-    let d = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target").join("test-scratch").join(name);
+    let d = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("target")
+        .join("test-scratch")
+        .join(name);
     let _ = std::fs::remove_dir_all(&d);
     std::fs::create_dir_all(&d).expect("建探针目录");
     d
@@ -48,10 +51,17 @@ pub fn runtime_env(spec: &str) -> Vec<(String, String)> {
         .arg(spec)
         .output()
         .expect("问产品要环境白名单");
-    assert!(out.status.success(), "环境白名单要能问出来：{}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "环境白名单要能问出来：{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     String::from_utf8_lossy(&out.stdout)
         .lines()
-        .filter_map(|line| line.split_once('=').map(|(k, v)| (k.to_string(), v.to_string())))
+        .filter_map(|line| {
+            line.split_once('=')
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+        })
         .collect()
 }
 
@@ -100,8 +110,14 @@ pub fn run_launcher(spec: &str, command: &str) -> (Option<i32>, String, String) 
 }
 
 /// 同上，并给**守门进程**补上调用方要的环境（例如 macOS 的 profile 排障开关：它不在白名单里，探针自己带）。
-pub fn run_launcher_env(spec: &str, command: &str, extra: &[(&str, &str)]) -> (Option<i32>, String, String) {
-    let out = fenced_command(spec, command, extra).output().expect("跑守门进程");
+pub fn run_launcher_env(
+    spec: &str,
+    command: &str,
+    extra: &[(&str, &str)],
+) -> (Option<i32>, String, String) {
+    let out = fenced_command(spec, command, extra)
+        .output()
+        .expect("跑守门进程");
     (
         out.status.code(),
         String::from_utf8_lossy(&out.stdout).into_owned(),
@@ -126,7 +142,11 @@ pub fn verify_fence(spec: &str, command: &str) -> String {
         .envs(runtime_env(spec))
         .output()
         .expect("问产品要机制验证结论");
-    assert!(out.status.success(), "机制验证要能跑完：{}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "机制验证要能跑完：{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     String::from_utf8_lossy(&out.stdout).trim().to_string()
 }
 

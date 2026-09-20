@@ -58,13 +58,14 @@ fn main() {
     }
 
     // 组合根：唯一允许 new 具体适配器的地方（依赖注入）。
-    let log: std::sync::Arc<dyn core::ports::Log + Send + Sync> = match adapters::FileLog::new(&root, "Solomni 运行日志") {
-        Ok(l) => std::sync::Arc::new(l),
-        Err(e) => {
-            eprintln!("[日志系统异常] {}（进程继续，日志降级为 stderr）", e);
-            std::sync::Arc::new(core::ports::NoopLog)
-        }
-    };
+    let log: std::sync::Arc<dyn core::ports::Log + Send + Sync> =
+        match adapters::FileLog::new(&root, "Solomni 运行日志") {
+            Ok(l) => std::sync::Arc::new(l),
+            Err(e) => {
+                eprintln!("[日志系统异常] {}（进程继续，日志降级为 stderr）", e);
+                std::sync::Arc::new(core::ports::NoopLog)
+            }
+        };
     if let Some(note) = &root_note {
         eprintln!("[根目录] {}", note);
         log.warn("main::root", note);
@@ -73,7 +74,10 @@ fn main() {
     let fence_cap = adapters::confine::capability();
     log.info(
         "main::fence",
-        &format!("围栏能力：文件系统={} 断网={} 进程树={}；{}", fence_cap.fs, fence_cap.net, fence_cap.tree, fence_cap.note),
+        &format!(
+            "围栏能力：文件系统={} 断网={} 进程树={}；{}",
+            fence_cap.fs, fence_cap.net, fence_cap.tree, fence_cap.note
+        ),
     );
     println!("[围栏] {}", fence_cap.note);
     let store = adapters::YamlSettingsStore::new(
@@ -89,8 +93,12 @@ fn main() {
     let packages = adapters::FsPackages::new(root.join("runtimes"));
     // 端点记忆：谁先通了就固定谁，后续会话不再反复探测候选。
     let memo = adapters::endpoint::memo_new();
-    let gateway = adapters::HttpGateway::with_log(std::sync::Arc::clone(&log), std::sync::Arc::clone(&memo));
-    let catalog = adapters::HttpModelCatalog::with_log(std::sync::Arc::clone(&log), std::sync::Arc::clone(&memo));
+    let gateway =
+        adapters::HttpGateway::with_log(std::sync::Arc::clone(&log), std::sync::Arc::clone(&memo));
+    let catalog = adapters::HttpModelCatalog::with_log(
+        std::sync::Arc::clone(&log),
+        std::sync::Arc::clone(&memo),
+    );
     let prompts = adapters::YamlPrompts::new(root.join("prompts.yaml"));
     // 册子只读一次：core 与适配层（工具回执里的那些收尾标记）共用同一份。
     let book = match core::ports::PromptSource::load(&prompts) {
@@ -196,7 +204,11 @@ fn main() {
                         .filter(|s| want(s))
                         .map(|s| s.name.as_str())
                         .collect();
-                    if got.is_empty() { "（无）".to_string() } else { got.join(" / ") }
+                    if got.is_empty() {
+                        "（无）".to_string()
+                    } else {
+                        got.join(" / ")
+                    }
                 };
                 println!("[回放形状] 被接受的写法：{}", names(|s| s.accepted));
                 println!(
@@ -226,8 +238,18 @@ fn main() {
         // 能力与本次实际**分开报**：授权与否决定路径级围栏装不装，但进程树围栏、资源上限与环境白名单
         // 在两种时段都生效（未授权不等于无围栏）。只说"本机能力"会让用户以为未授权时什么都没有。
         let usable = |ok: bool| if ok { "可用" } else { "不可用" };
-        let (fs, net) = if allow { (cap.fs, cap.net) } else { (false, false) };
-        println!("[围栏] 本机能力：文件系统={} 断网={} 进程树={}（{}）", usable(cap.fs), usable(cap.net), usable(cap.tree), cap.note);
+        let (fs, net) = if allow {
+            (cap.fs, cap.net)
+        } else {
+            (false, false)
+        };
+        println!(
+            "[围栏] 本机能力：文件系统={} 断网={} 进程树={}（{}）",
+            usable(cap.fs),
+            usable(cap.net),
+            usable(cap.tree),
+            cap.note
+        );
         println!(
             "[围栏] 本次实际：文件系统={} 断网={} 进程树={}；容器授权={}（未授权时只放行进程树与资源上限，不写本机任何权限项；要启用：设置里打开，或 .home/settings.yaml 写 fence_write: true）",
             usable(fs),
@@ -256,7 +278,12 @@ fn main() {
     let ops = core::api::Ops::from_handle(&handle);
 
     if web {
-        serve_web(ops, port_flag(&args), std::sync::Arc::clone(&log), allow_fence_write);
+        serve_web(
+            ops,
+            port_flag(&args),
+            std::sync::Arc::clone(&log),
+            allow_fence_write,
+        );
     } else {
         // CLI 里输入 webui 可直接转入 Web，无需重启进程（能力面可克隆，两份呈现共用同一个核心）。
         if let presentation::cli::CliExit::Web(port) = presentation::cli::run(ops.clone()) {
@@ -334,7 +361,12 @@ fn https_check(args: &[String], i: usize) -> i32 {
             0
         }
         Err(e) => {
-            println!("[HTTPS] {} {} {}", adapters::http_agent::classify(&e), backend, e);
+            println!(
+                "[HTTPS] {} {} {}",
+                adapters::http_agent::classify(&e),
+                backend,
+                e
+            );
             0
         }
     }
@@ -344,7 +376,12 @@ fn https_check(args: &[String], i: usize) -> i32 {
 fn find_exe(name: &str) -> Option<String> {
     let path_var = std::env::var_os("PATH")?;
     let exts: Vec<String> = std::env::var("PATHEXT")
-        .map(|v| v.split(';').filter(|s| !s.is_empty()).map(|s| s.to_string()).collect())
+        .map(|v| {
+            v.split(';')
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string())
+                .collect()
+        })
         .unwrap_or_else(|_| vec![String::new()]);
     for dir in std::env::split_paths(&path_var) {
         for ext in &exts {
@@ -435,17 +472,27 @@ fn fence_run(args: &[String], flag: usize) -> i32 {
 fn resolve_root(raw: &std::path::Path) -> (PathBuf, Option<String>) {
     match std::env::current_dir() {
         Ok(cwd) => {
-            let joined = if raw.is_absolute() { raw.to_path_buf() } else { cwd.join(raw) };
+            let joined = if raw.is_absolute() {
+                raw.to_path_buf()
+            } else {
+                cwd.join(raw)
+            };
             (lexical_abs(&joined), None)
         }
         Err(e) => match std::fs::canonicalize(raw) {
             Ok(p) => (
                 strip_unc_prefix(p),
-                Some(format!("取不到当前目录（{}）：改用 canonicalize 规范化产品根", e)),
+                Some(format!(
+                    "取不到当前目录（{}）：改用 canonicalize 规范化产品根",
+                    e
+                )),
             ),
             Err(e2) => (
                 lexical_abs(raw),
-                Some(format!("取不到当前目录（{}），canonicalize 也失败（{}）：产品根可能不是绝对路径", e, e2)),
+                Some(format!(
+                    "取不到当前目录（{}），canonicalize 也失败（{}）：产品根可能不是绝对路径",
+                    e, e2
+                )),
             ),
         },
     }
@@ -456,7 +503,9 @@ fn lexical_abs(p: &std::path::Path) -> PathBuf {
     let mut out = PathBuf::new();
     for c in p.components() {
         match c {
-            std::path::Component::Prefix(_) | std::path::Component::RootDir => out.push(c.as_os_str()),
+            std::path::Component::Prefix(_) | std::path::Component::RootDir => {
+                out.push(c.as_os_str())
+            }
             std::path::Component::Normal(s) => out.push(s),
             std::path::Component::CurDir => {}
             std::path::Component::ParentDir => out.push(".."),
@@ -489,7 +538,11 @@ fn serve_web(
     let cap = adapters::confine::capability();
     // 能力与本次实际**分开报**（与启动报告同一套说法）：未授权时路径级围栏是关的，
     // 但进程树与资源上限照旧生效——概览里必须让用户看到这个区别，不能只看"本机能力"。
-    let (fs, net) = if write_allowed { (cap.fs, cap.net) } else { (false, false) };
+    let (fs, net) = if write_allowed {
+        (cap.fs, cap.net)
+    } else {
+        (false, false)
+    };
     let fence = presentation::web::FenceInfo {
         fs: cap.fs,
         net: cap.net,

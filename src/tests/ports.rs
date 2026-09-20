@@ -3,6 +3,12 @@
 //! 真实适配器的对应边界在 adapters.rs，进程与 HTTP 的真实路径在 tests/cross-platform/。
 //! 替身统一复用 super::doubles 的 `InMemory*` / `Fake*` / `Recording*`——契约测试不另造一份。
 
+use super::core::{RecordingRunner, SilentRunner};
+use super::doubles::{
+    abs, module_of, FakeCatalog, InMemoryHistory, InMemoryPackages, InMemorySettings,
+    InMemorySysIo, InMemoryWorkspace, NoFenceHost, RecordingFence, ScriptGateway, SharedScript,
+    TestPrompts, VecSource,
+};
 use crate::core::exec::ExecSpec;
 use crate::core::fence::FenceSpec;
 use crate::core::history::{AgentMeta, SessionMeta};
@@ -11,12 +17,6 @@ use crate::core::ports::{
     NoopLog, PackageSource, PromptSource, SettingsStore, SysIo, ToolRunner, Workspace,
 };
 use crate::core::providers::{Provider, Settings};
-use super::core::{RecordingRunner, SilentRunner};
-use super::doubles::{
-    abs, module_of, FakeCatalog, InMemoryHistory, InMemoryPackages, InMemorySettings,
-    InMemorySysIo, InMemoryWorkspace, NoFenceHost, RecordingFence, ScriptGateway, SharedScript,
-    TestPrompts, VecSource,
-};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};

@@ -71,10 +71,16 @@ pub fn derive(events: &[serde_json::Value], roster_names: &[String]) -> CollabSt
         let kind = ev.get("type").and_then(|t| t.as_str()).unwrap_or("");
         match kind {
             "transcript" => {
-                let Some(lines) = ev.get("lines").and_then(|l| l.as_array()) else { continue };
+                let Some(lines) = ev.get("lines").and_then(|l| l.as_array()) else {
+                    continue;
+                };
                 for l in lines {
-                    let Some(line) = l.get("line").and_then(|x| x.as_str()) else { continue };
-                    let Some((tag, text)) = split_tag(line) else { continue };
+                    let Some(line) = l.get("line").and_then(|x| x.as_str()) else {
+                        continue;
+                    };
+                    let Some((tag, text)) = split_tag(line) else {
+                        continue;
+                    };
                     if tag == "用户:需求" {
                         st.task = Some(text.to_string());
                     } else if tag == "用户:撤回" {
@@ -97,7 +103,11 @@ pub fn derive(events: &[serde_json::Value], roster_names: &[String]) -> CollabSt
                     } else if tag == "core" {
                         st.pending_ask = None;
                     } else if tag == "轮次" || tag.starts_with("轮次 ") {
-                        st.round = tag.split_whitespace().nth(1).and_then(|n| n.parse().ok()).unwrap_or(st.round);
+                        st.round = tag
+                            .split_whitespace()
+                            .nth(1)
+                            .and_then(|n| n.parse().ok())
+                            .unwrap_or(st.round);
                         st.closed = false;
                         reset_agreed(&mut st);
                     } else if tag.contains(':') {
@@ -115,20 +125,43 @@ pub fn derive(events: &[serde_json::Value], roster_names: &[String]) -> CollabSt
                 }
             }
             "discussion_done" => st.closed = true,
-            "plan" => st.plan = ev.get("text").and_then(|t| t.as_str()).map(|s| s.to_string()),
+            "plan" => {
+                st.plan = ev
+                    .get("text")
+                    .and_then(|t| t.as_str())
+                    .map(|s| s.to_string())
+            }
             "report" => {
-                let id = ev.get("id").and_then(|t| t.as_str()).unwrap_or("").to_string();
-                let text = ev.get("text").and_then(|t| t.as_str()).unwrap_or("").to_string();
+                let id = ev
+                    .get("id")
+                    .and_then(|t| t.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let text = ev
+                    .get("text")
+                    .and_then(|t| t.as_str())
+                    .unwrap_or("")
+                    .to_string();
                 let rework = ev.get("rework").and_then(|t| t.as_u64()).unwrap_or(0) as usize;
                 st.report_rework(id, text, rework);
             }
             "review" => {
-                let items = ev.get("items").and_then(|t| t.as_array()).cloned().unwrap_or_default();
+                let items = ev
+                    .get("items")
+                    .and_then(|t| t.as_array())
+                    .cloned()
+                    .unwrap_or_default();
                 st.review_pass = !items.is_empty()
                     && items.iter().all(|i| {
-                        i.get("status").and_then(|s| s.as_str()).map(|s| s.eq_ignore_ascii_case("pass")).unwrap_or(false)
+                        i.get("status")
+                            .and_then(|s| s.as_str())
+                            .map(|s| s.eq_ignore_ascii_case("pass"))
+                            .unwrap_or(false)
                     });
-                st.review_raw = ev.get("raw").and_then(|t| t.as_str()).map(|s| s.to_string());
+                st.review_raw = ev
+                    .get("raw")
+                    .and_then(|t| t.as_str())
+                    .map(|s| s.to_string());
             }
             "delivery" => st.delivery = ev.get("ok").and_then(|t| t.as_bool()),
             "ended" => st.ended = true,
@@ -141,7 +174,8 @@ pub fn derive(events: &[serde_json::Value], roster_names: &[String]) -> CollabSt
         let picked = st.picked.clone();
         let all = !picked.is_empty()
             && picked.iter().all(|id| {
-                st.present.get(id).copied().unwrap_or(true) && st.agreed.get(id).copied().unwrap_or(false)
+                st.present.get(id).copied().unwrap_or(true)
+                    && st.agreed.get(id).copied().unwrap_or(false)
             });
         if all {
             st.closed = true;

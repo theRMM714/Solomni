@@ -15,10 +15,13 @@ fn fence_denies_outside_paths_and_allows_the_given_roots() {
     let secret = outside.join("secret.txt");
     std::fs::write(&secret, "SECRET-DO-NOT-LEAK").unwrap();
     // prepared = false：Linux 的 Landlock 在守门进程里自足，没有"外层先授权"这一步。
-    let spec = job_json(&[inside.clone()], &inside, false);
+    let spec = job_json(std::slice::from_ref(&inside), &inside, false);
 
     // 允许的根里：写得进。
-    let (code, out, err) = run_launcher(&spec, &format!("echo ok > {}", inside.join("x.txt").display()));
+    let (code, out, err) = run_launcher(
+        &spec,
+        &format!("echo ok > {}", inside.join("x.txt").display()),
+    );
     if err.contains(RULES_REJECTED_MARK) {
         // 掩码/路径写错都会走到这里：是规则写错，不是环境不允许。
         panic!(
@@ -47,7 +50,12 @@ fn fence_denies_outside_paths_and_allows_the_given_roots() {
 
     // 允许的根之外：同一个用户、同一台机器，只有围栏能挡住这一读。
     let (code, out, err) = run_launcher(&spec, &format!("cat {}", secret.display()));
-    assert!(!out.contains("SECRET-DO-NOT-LEAK"), "越界读必须拿不到：{} / {}", out, err);
+    assert!(
+        !out.contains("SECRET-DO-NOT-LEAK"),
+        "越界读必须拿不到：{} / {}",
+        out,
+        err
+    );
     assert_ne!(code, Some(0), "越界读应以非零退出：{} / {}", out, err);
 }
 
@@ -64,7 +72,10 @@ fn verify_separates_env_unavailable_from_broken_rules() {
     let spec = job_json(std::slice::from_ref(&dir), &dir, false);
     let verdict = verify_fence(&spec, "true");
     if verdict_is_env_unavailable(&verdict) {
-        eprintln!("[探针] 本机 Landlock 不产生实际约束（环境结论，如实跳过）：{}", verdict);
+        eprintln!(
+            "[探针] 本机 Landlock 不产生实际约束（环境结论，如实跳过）：{}",
+            verdict
+        );
         return;
     }
     assert!(

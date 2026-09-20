@@ -42,7 +42,7 @@
   - `routes.rs`（HTTP 路由目录 ↔ 处理器 ↔ 文档 ↔ 前端调用四者机器比对；假能力面逐条验成功 / 错误 / 空 / 边界）；
 - **入站契约也是契约**：呈现层只依赖 `core::api` 的四个角色接口与事件台（拿不到 `Core`、拿不到任何核心锁），
   所以它能被假实现整体替换——`routes.rs` 的 `FakeOps` 就是这么逐条测路由的。
-- T0 质量门禁已并入同一入口：编译与结构审查是硬失败，格式 / clippy / 编译告警 / 依赖重复按 `tests/quality-baseline.yaml` 比对。
+- T0 质量门禁已并入同一入口，且**全部是零容忍硬失败**：编译、结构审查、格式、clippy、编译告警、依赖重复。
 
 当前平台缺口账（`tests/cross-platform/gaps.yaml`、`tests/<平台>/gaps.yaml`）**为空**：三平台围栏机制与整仓测试
 已由三平台 CI 真跑通过（Windows AppContainer + 目录 ACL 授权与撤权、Linux Landlock、macOS seatbelt）。
@@ -60,7 +60,7 @@
 | 判断一个测试属于哪层、放哪、允许与禁止什么、怎么判定 | [docs/testing/levels.md](docs/testing/levels.md) |
 | 写或改 Stub / Fake / Mock / Spy / Fixture，或验收 Fake | [docs/testing/doubles.md](docs/testing/doubles.md) |
 | 新增端口、新增替身，或核对真实适配器的覆盖范围 | [docs/testing/port-matrix.md](docs/testing/port-matrix.md) |
-| 声明测试的资源边界、清理副作用，或处理质量门禁与基线 | [docs/testing/quality-isolation.md](docs/testing/quality-isolation.md) |
+| 声明测试的资源边界、清理副作用，或处理质量门禁 | [docs/testing/quality-isolation.md](docs/testing/quality-isolation.md) |
 | 跑本地入口、读报告、认成功标记，或处理 CI 与报告发布 | [docs/testing/execution-ci.md](docs/testing/execution-ci.md) |
 | 记缺口、看目录与命名、按验收清单收口 | [docs/testing/gaps-acceptance.md](docs/testing/gaps-acceptance.md) |
 | 交付一个模块（模块作者要交什么证据） | [docs/testing/module-delivery.md](docs/testing/module-delivery.md) |

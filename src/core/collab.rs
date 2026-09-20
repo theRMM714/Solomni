@@ -5,13 +5,17 @@
 //! 依赖全部为端口与核心数据；无 IO，无具体适配器。
 
 use crate::core::agents::{self, RosterPick};
-use crate::core::engine::{Discussion, Execution, Member, MemberTools, TurnOut, MAX_REWORK, MAX_ROUNDS};
+use crate::core::engine::{
+    Discussion, Execution, Member, MemberTools, TurnOut, MAX_REWORK, MAX_ROUNDS,
+};
 use crate::core::envelope;
 use crate::core::events::{CheckView, LineView, Pending, SessionEvent};
+use crate::core::exec::{self, ExecSpec};
 use crate::core::history::{AgentMeta, SessionMeta};
 use crate::core::module::{self, Module};
-use crate::core::exec::{self, ExecSpec};
-use crate::core::ports::{ChatGateway, CompleteOpts, ModuleSource, Msg, PackageSource, SysIo, ToolRunner};
+use crate::core::ports::{
+    ChatGateway, CompleteOpts, ModuleSource, Msg, PackageSource, SysIo, ToolRunner,
+};
 use crate::core::prompt::Prompts;
 use crate::core::providers::Settings;
 use crate::core::workspace::Sandboxes;
@@ -63,6 +67,9 @@ pub struct CollabSession {
 
 impl CollabSession {
     /// 装配会话：roster = 本次工作的 agent 名单（代拟时为空，等 draft_slate 填）。
+    // 组合根注入的构造函数：参数天然多，收口成参数对象只是把参数挪个地方、并让装配更难读。
+    // 这是有意的设计取舍（见 docs/testing/quality-isolation.md 的 allow 清单），不是没修。
+    #[allow(clippy::too_many_arguments)]
     pub fn start(
         gateway: Arc<dyn ChatGateway + Send + Sync>,
         source: Arc<dyn ModuleSource + Send + Sync>,
@@ -127,7 +134,12 @@ impl CollabSession {
     /// 生成一条带 id 的转录行（工具行另走 tool_line，带调用视图）。
     fn view(&mut self, line: String) -> LineView {
         // 协作的讨论行各自成一条回复（协作的模型上下文不是从转录重建的，这个号只用于显示与分组一致）。
-        let v = LineView { id: self.next_line, reply: self.next_line, line, ..Default::default() };
+        let v = LineView {
+            id: self.next_line,
+            reply: self.next_line,
+            line,
+            ..Default::default()
+        };
         self.next_line += 1;
         v
     }
@@ -149,7 +161,10 @@ impl CollabSession {
     /// 提交需求（总是第一步）。需求入转录（用户看到的与进上下文的一致）。
     /// 协作里用户不属任何 agent 的沙箱：@ 引用按 speaker = None 改写（共读同一段文字）。
     pub fn set_task(&mut self, task: &str, sink: &mut dyn FnMut(SessionEvent)) {
-        let roots = crate::core::refs::RefRoots { work: self.sandboxes.shared.clone(), private: None };
+        let roots = crate::core::refs::RefRoots {
+            work: self.sandboxes.shared.clone(),
+            private: None,
+        };
         let task = crate::core::refs::rewrite(task, None, &roots, &self.prompts.core.refs);
         if task.trim().is_empty() {
             sink(SessionEvent::Notice("[取消] 需求为空".into()));
@@ -163,7 +178,10 @@ impl CollabSession {
         if self.delegated {
             self.draft_slate(sink);
         } else {
-            sink(SessionEvent::Notice(format!("[建组] {}", self.names().join(" + "))));
+            sink(SessionEvent::Notice(format!(
+                "[建组] {}",
+                self.names().join(" + ")
+            )));
             self.pending = Some(Pending::ConfirmBegin);
         }
     }
@@ -181,17 +199,31 @@ impl CollabSession {
                 ("task", self.task.clone()),
             ],
         );
-        let msgs = vec![Msg::system(self.prompts.core.slate.system.clone()), Msg::user(user)];
-        let raw = self.core_chat.complete(&msgs, CompleteOpts::plain(false), &mut |_| true).raw;
-        let parsed = envelope::extract_json_object(&raw).and_then(|obj| serde_json::from_str::<SlateReply>(&obj).ok());
+        let msgs = vec![
+            Msg::system(self.prompts.core.slate.system.clone()),
+            Msg::user(user),
+        ];
+        let raw = self
+            .core_chat
+            .complete(&msgs, CompleteOpts::plain(false), &mut |_| true)
+            .raw;
+        let parsed = envelope::extract_json_object(&raw)
+            .and_then(|obj| serde_json::from_str::<SlateReply>(&obj).ok());
         let Some(slate) = parsed else {
-            sink(SessionEvent::Notice("[错误] 代拟失败（模型无响应格式）。请直接点名 agent。".into()));
+            sink(SessionEvent::Notice(
+                "[错误] 代拟失败（模型无响应格式）。请直接点名 agent。".into(),
+            ));
             sink(SessionEvent::Ended);
             self.done = true;
             return;
         };
         // 逐条校验（存在性、模型真实、整份名单内模块不重复）；拒收项如实告知。
-        let (picks, rejected) = agents::resolve_picks(slate.picks, &self.settings.agents, &roster, &self.settings.models);
+        let (picks, rejected) = agents::resolve_picks(
+            slate.picks,
+            &self.settings.agents,
+            &roster,
+            &self.settings.models,
+        );
         for r in rejected {
             sink(SessionEvent::Notice(format!("[代拟] {}，拒收", r)));
         }
@@ -203,7 +235,11 @@ impl CollabSession {
         }
         let line = self.view(format!(
             "[代拟] {}",
-            picks.iter().map(|(a, why)| slate_item(a, why)).collect::<Vec<_>>().join("；")
+            picks
+                .iter()
+                .map(|(a, why)| slate_item(a, why))
+                .collect::<Vec<_>>()
+                .join("；")
         ));
         sink(SessionEvent::Transcript(vec![line]));
         self.slate_picks = picks.into_iter().map(|(a, _)| a).collect();
@@ -223,12 +259,17 @@ impl CollabSession {
         if self.slate_picks.is_empty() {
             // 名单只活在内存里（落档发生在确认之后）；重启后回来会空手。
             // 与其拿着空名单开工，不如如实告知并重新拟一份（名单本来就是要用户过目的提案）。
-            sink(SessionEvent::Notice("[提示] 上次拟的名单未落档（重启会丢），重新拟一份，请再确认。".into()));
+            sink(SessionEvent::Notice(
+                "[提示] 上次拟的名单未落档（重启会丢），重新拟一份，请再确认。".into(),
+            ));
             self.draft_slate(sink);
             return;
         }
         self.roster = self.slate_picks.clone();
-        sink(SessionEvent::Notice(format!("[建组] {}", self.names().join(" + "))));
+        sink(SessionEvent::Notice(format!(
+            "[建组] {}",
+            self.names().join(" + ")
+        )));
         self.pending = Some(Pending::ConfirmBegin);
     }
 
@@ -238,7 +279,10 @@ impl CollabSession {
             return;
         }
         self.allow = allow;
-        let line = self.view(format!("[用户:开始] {}", if allow { "yes,allow" } else { "yes" }));
+        let line = self.view(format!(
+            "[用户:开始] {}",
+            if allow { "yes,allow" } else { "yes" }
+        ));
         sink(SessionEvent::Transcript(vec![line]));
         let prompts = self.prompts.clone();
         let (members, notes) = match self.assemble_members() {
@@ -252,7 +296,9 @@ impl CollabSession {
             sink(SessionEvent::Notice(n));
         }
         if self.core_is_demo {
-            sink(SessionEvent::Notice("[提示] 核心未配置供应商：整理/验收使用内置假模型（演示）".into()));
+            sink(SessionEvent::Notice(
+                "[提示] 核心未配置供应商：整理/验收使用内置假模型（演示）".into(),
+            ));
         }
         let mut disc = Discussion::new(members, self.allow, prompts);
         disc.open(&self.task);
@@ -264,7 +310,10 @@ impl CollabSession {
     pub fn answer(&mut self, text: &str, sink: &mut dyn FnMut(SessionEvent)) {
         if matches!(self.pending, Some(Pending::Ask { .. })) {
             self.pending = None;
-            let roots = crate::core::refs::RefRoots { work: self.sandboxes.shared.clone(), private: None };
+            let roots = crate::core::refs::RefRoots {
+                work: self.sandboxes.shared.clone(),
+                private: None,
+            };
             let text = crate::core::refs::rewrite(text, None, &roots, &self.prompts.core.refs);
             if let Some(disc) = self.disc.as_mut() {
                 disc.pending_user_answers.push(text);
@@ -296,7 +345,9 @@ impl CollabSession {
                         let round = self.disc.as_ref().expect("disc 存在").round;
                         let over_cap = round > MAX_ROUNDS;
                         if over_cap {
-                            sink(SessionEvent::Notice("[上限] 讨论轮次超限，交用户裁决。".into()));
+                            sink(SessionEvent::Notice(
+                                "[上限] 讨论轮次超限，交用户裁决。".into(),
+                            ));
                         }
                         sink(SessionEvent::DiscussionDone { round, over_cap });
                         break;
@@ -308,35 +359,64 @@ impl CollabSession {
         let plan = match self.plan.clone() {
             Some(p) => p,
             None => {
-                let p = self.disc.as_ref().expect("disc 存在").synthesize(self.core_chat.as_mut());
+                let p = self
+                    .disc
+                    .as_ref()
+                    .expect("disc 存在")
+                    .synthesize(self.core_chat.as_mut());
                 self.plan = Some(p.clone());
                 sink(SessionEvent::Plan(p.clone()));
                 p
             }
         };
         // 执行 → 验收 → 返工（上限内）→ 交付。
-        let members = self.disc.as_mut().expect("disc 存在").members.as_mut_slice();
+        let members = self
+            .disc
+            .as_mut()
+            .expect("disc 存在")
+            .members
+            .as_mut_slice();
         let mut exec = Execution::run(members, &plan, &prompts);
         for (id, text) in &exec.reports {
             emit_tool_lines(&exec, id, &mut self.next_line, sink);
-            sink(SessionEvent::Report { id: id.clone(), text: text.clone(), rework: 0 });
+            sink(SessionEvent::Report {
+                id: id.clone(),
+                text: text.clone(),
+                rework: 0,
+            });
         }
         exec.review(self.core_chat.as_mut(), &plan, &prompts);
         sink(review_event(&exec));
         while !exec.all_pass() && exec.rework < MAX_REWORK {
-            sink(SessionEvent::Notice(format!("[返工] 第 {} 次（上限 {}）", exec.rework + 1, MAX_REWORK)));
+            sink(SessionEvent::Notice(format!(
+                "[返工] 第 {} 次（上限 {}）",
+                exec.rework + 1,
+                MAX_REWORK
+            )));
             let review_text = fail_text(&exec);
-            let members = self.disc.as_mut().expect("disc 存在").members.as_mut_slice();
+            let members = self
+                .disc
+                .as_mut()
+                .expect("disc 存在")
+                .members
+                .as_mut_slice();
             exec.rerun(members, &plan, &review_text, &prompts);
             for (id, text) in &exec.reports {
                 emit_tool_lines(&exec, id, &mut self.next_line, sink);
-                sink(SessionEvent::Report { id: id.clone(), text: text.clone(), rework: exec.rework });
+                sink(SessionEvent::Report {
+                    id: id.clone(),
+                    text: text.clone(),
+                    rework: exec.rework,
+                });
             }
             exec.review(self.core_chat.as_mut(), &plan, &prompts);
             sink(review_event(&exec));
         }
         let ok = exec.all_pass();
-        sink(SessionEvent::Delivery { ok, over_rework: !ok });
+        sink(SessionEvent::Delivery {
+            ok,
+            over_rework: !ok,
+        });
         sink(SessionEvent::Ended);
         self.done = true;
     }
@@ -354,7 +434,13 @@ impl CollabSession {
             let modules: Vec<Module> = a
                 .modules
                 .iter()
-                .filter_map(|id| roster.modules.iter().find(|m| &m.manifest.id == id).cloned())
+                .filter_map(|id| {
+                    roster
+                        .modules
+                        .iter()
+                        .find(|m| &m.manifest.id == id)
+                        .cloned()
+                })
                 .collect();
             if modules.len() != a.modules.len() {
                 let missing: Vec<String> = a
@@ -363,7 +449,11 @@ impl CollabSession {
                     .filter(|id| !roster.modules.iter().any(|m| &&m.manifest.id == id))
                     .cloned()
                     .collect();
-                return Err(format!("agent {} 的模块已不在清单：{}", a.name, missing.join("、")));
+                return Err(format!(
+                    "agent {} 的模块已不在清单：{}",
+                    a.name,
+                    missing.join("、")
+                ));
             }
             let channel = a
                 .model
@@ -374,11 +464,9 @@ impl CollabSession {
             if let Some(n) = note {
                 notes.push(n);
             }
-            let sandbox = self
-                .sandboxes
-                .for_agent(&a.name)
-                .cloned()
-                .ok_or_else(|| format!("agent {} 没有被分配沙箱（工作区未记录该 agent）", a.name))?;
+            let sandbox = self.sandboxes.for_agent(&a.name).cloned().ok_or_else(|| {
+                format!("agent {} 没有被分配沙箱（工作区未记录该 agent）", a.name)
+            })?;
             let guide = crate::core::systool::guide(&prompts, &sandbox);
             // 形态按该 agent 的模型（或核心默认）解析：系统提示与实际协议必须一致
             let mode = if channel.is_some() {
@@ -422,7 +510,9 @@ impl CollabSession {
         if self.delegated && self.slate_picks.is_empty() && self.roster.is_empty() {
             self.draft_slate(sink);
         } else {
-            sink(SessionEvent::Notice("[提示] 等待你在裁决门确认名单 / 开始讨论。".into()));
+            sink(SessionEvent::Notice(
+                "[提示] 等待你在裁决门确认名单 / 开始讨论。".into(),
+            ));
         }
     }
 
@@ -442,6 +532,9 @@ impl CollabSession {
 
     /// 从落盘事件重建协作会话：名单取 meta.agents（权威），讨论进度由转录派生。
     /// 通道是可重建的机制，不是状态：按会话来时记住的 agent 名单重新装配。
+    // 组合根注入的构造函数：参数天然多，收口成参数对象只是把参数挪个地方、并让装配更难读。
+    // 这是有意的设计取舍（见 docs/testing/quality-isolation.md 的 allow 清单），不是没修。
+    #[allow(clippy::too_many_arguments)]
     pub fn restore(
         gateway: Arc<dyn ChatGateway + Send + Sync>,
         source: Arc<dyn ModuleSource + Send + Sync>,
@@ -467,7 +560,10 @@ impl CollabSession {
                         if let Some(s) = l.get("line").and_then(|x| x.as_str()) {
                             all_lines.push(crate::core::engine::DiscLine {
                                 text: s.to_string(),
-                                degraded: l.get("degraded").and_then(|d| d.as_bool()).unwrap_or(false),
+                                degraded: l
+                                    .get("degraded")
+                                    .and_then(|d| d.as_bool())
+                                    .unwrap_or(false),
                             });
                         }
                     }
@@ -537,7 +633,13 @@ impl CollabSession {
 /// 代拟行里的一项（只给人看）：复用项标出来，组装项带上模块与模型。
 fn slate_item(a: &AgentMeta, why: &str) -> String {
     if a.transient {
-        format!("{}〈{}〉→ {}（{}）", a.name, a.modules.join(","), a.model.clone().unwrap_or_default(), why)
+        format!(
+            "{}〈{}〉→ {}（{}）",
+            a.name,
+            a.modules.join(","),
+            a.model.clone().unwrap_or_default(),
+            why
+        )
     } else {
         format!("{}（复用；{}）", a.name, why)
     }
@@ -557,13 +659,19 @@ fn derive_pending(st: &crate::core::collab_state::CollabState) -> Option<Pending
         }
         return None;
     }
-    st.pending_ask
-        .as_ref()
-        .map(|(m, q)| Pending::Ask { member: m.clone(), question: q.clone() })
+    st.pending_ask.as_ref().map(|(m, q)| Pending::Ask {
+        member: m.clone(),
+        question: q.clone(),
+    })
 }
 
 /// 某 agent 的工具调用各发一条 tool 转录行（行文本沿用「成员:tool 模块.工具 → 成败」口径）。
-fn emit_tool_lines(exec: &Execution, id: &str, next_line: &mut u64, sink: &mut dyn FnMut(SessionEvent)) {
+fn emit_tool_lines(
+    exec: &Execution,
+    id: &str,
+    next_line: &mut u64,
+    sink: &mut dyn FnMut(SessionEvent),
+) {
     for v in exec.traces.get(id).into_iter().flatten() {
         let status = if v.ok { "成功" } else { "失败" };
         let line = format!("[{}:tool] {} → {}", id, v.label(), status);
@@ -580,7 +688,12 @@ fn emit_tool_lines(exec: &Execution, id: &str, next_line: &mut u64, sink: &mut d
 }
 
 /// 发出自上次以来的新转录行（增量），逐行分配会话内稳定 id。
-fn push_delta(disc: &Discussion, emitted: &mut usize, next_line: &mut u64, sink: &mut dyn FnMut(SessionEvent)) {
+fn push_delta(
+    disc: &Discussion,
+    emitted: &mut usize,
+    next_line: &mut u64,
+    sink: &mut dyn FnMut(SessionEvent),
+) {
     if disc.transcript.len() > *emitted {
         let views: Vec<LineView> = disc.transcript[*emitted..]
             .iter()
@@ -608,10 +721,17 @@ fn review_event(exec: &Execution) -> SessionEvent {
         .map(|i| CheckView {
             item: i.item.clone(),
             status: i.status.clone(),
-            note: i.reason.clone().or_else(|| i.evidence.clone()).unwrap_or_default(),
+            note: i
+                .reason
+                .clone()
+                .or_else(|| i.evidence.clone())
+                .unwrap_or_default(),
         })
         .collect();
-    SessionEvent::Review { items, raw: exec.checklist_raw.clone() }
+    SessionEvent::Review {
+        items,
+        raw: exec.checklist_raw.clone(),
+    }
 }
 
 fn fail_text(exec: &Execution) -> String {
@@ -620,8 +740,10 @@ fn fail_text(exec: &Execution) -> String {
         .filter(|i| !i.status.eq_ignore_ascii_case("pass"))
         .map(|i| format!("- {}：{}", i.item, i.reason.clone().unwrap_or_default()))
         .collect::<Vec<_>>()
-        .join("
-")
+        .join(
+            "
+",
+        )
 }
 
 /// 代拟/推荐共用的应答形状：名单项（复用或组装）。

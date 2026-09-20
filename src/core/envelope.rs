@@ -36,7 +36,11 @@ pub enum Malformed {
     Unclosed(Tail),
     /// 字符串里出现未转义的裸控制字符（直接换行/制表符），JSON 非法。
     /// tail = 同时还有未闭合时一并带上（两处都得改，只说一处会误导）。
-    RawControl { ch: char, line: usize, tail: Option<Tail> },
+    RawControl {
+        ch: char,
+        line: usize,
+        tail: Option<Tail>,
+    },
     /// 括号平衡但 JSON 语法非法（引号不配对、逗号多余等）；附 JSON 解析器报出的位置与原因。
     Syntax(String),
     /// JSON 合法，但信封字段不合法（缺 name、类型不对等）；附字段层面的原因。
@@ -125,7 +129,11 @@ fn build_invokes(t: &ToolEnvelope, raw: &str, obj: &str) -> Result<Vec<ToolInvok
             }
             out.push(ToolInvoke {
                 malformed: None,
-                module: c.module.clone().map(|m| m.trim().to_string()).filter(|m| !m.is_empty()),
+                module: c
+                    .module
+                    .clone()
+                    .map(|m| m.trim().to_string())
+                    .filter(|m| !m.is_empty()),
                 name: c.name.trim().to_string(),
                 args_json: c.args.to_string(),
                 // 复数形态里没有"信封之后的正文"这回事（自由格式工具只能单发）
@@ -137,13 +145,19 @@ fn build_invokes(t: &ToolEnvelope, raw: &str, obj: &str) -> Result<Vec<ToolInvok
     }
     let name = t.name.clone().unwrap_or_default();
     if name.trim().is_empty() {
-        return Err("工具信封没写 name（要调一个工具就写 name，要调多个就写 calls 数组）".to_string());
+        return Err(
+            "工具信封没写 name（要调一个工具就写 name，要调多个就写 calls 数组）".to_string(),
+        );
     }
     Ok(vec![ToolInvoke {
         malformed: None,
         body: after(raw, obj),
         lead: before(raw, obj),
-        module: t.module.clone().map(|m| m.trim().to_string()).filter(|m| !m.is_empty()),
+        module: t
+            .module
+            .clone()
+            .map(|m| m.trim().to_string())
+            .filter(|m| !m.is_empty()),
         name: name.trim().to_string(),
         args_json: t.args.to_string(),
     }])
@@ -207,7 +221,12 @@ pub fn parse(raw: &str) -> Reply {
                     "agree" => Verb::Agree,
                     _ => Verb::Say,
                 };
-                return Reply { verb, text: env.text, degraded: false, tools: Vec::new() };
+                return Reply {
+                    verb,
+                    text: env.text,
+                    degraded: false,
+                    tools: Vec::new(),
+                };
             }
         }
     }
@@ -263,7 +282,12 @@ pub fn parse(raw: &str) -> Reply {
             };
         }
     }
-    Reply { verb: Verb::Say, text: raw.trim().to_string(), degraded: true, tools: Vec::new() }
+    Reply {
+        verb: Verb::Say,
+        text: raw.trim().to_string(),
+        degraded: true,
+        tools: Vec::new(),
+    }
 }
 
 /// 判定一段坏信封属于哪一类（可判定的确切事实，按此给修法）：
@@ -350,13 +374,12 @@ fn unclosed_scan(s: &str) -> Option<(usize, Tail)> {
                 depth += 1;
                 stack.push(if b == b'{' { b'}' } else { b']' });
             }
-            b'}' | b']' => {
-                if depth > 0 {
-                    depth -= 1;
-                    stack.pop();
-                    if depth == 0 {
-                        last_open = None;
-                    }
+            // 折进 match 的守卫：只有真的在括号里才退栈（clippy 的 collapsible_match）。
+            b'}' | b']' if depth > 0 => {
+                depth -= 1;
+                stack.pop();
+                if depth == 0 {
+                    last_open = None;
                 }
             }
             _ => {}
@@ -367,7 +390,11 @@ fn unclosed_scan(s: &str) -> Option<(usize, Tail)> {
         let missing: String = stack.iter().rev().map(|&b| b as char).collect();
         Some((
             last_open.unwrap_or(0),
-            Tail { missing, in_string: in_str, envelopes: envelopes.max(1) },
+            Tail {
+                missing,
+                in_string: in_str,
+                envelopes: envelopes.max(1),
+            },
         ))
     } else {
         None
@@ -453,9 +480,13 @@ fn extract_balanced(s: &str, open: char, close: char) -> Option<String> {
     let mut esc = false;
     for (i, &b) in bytes.iter().enumerate().skip(start) {
         if in_str {
-            if esc { esc = false; }
-            else if b == b'\\' { esc = true; }
-            else if b == b'"' { in_str = false; }
+            if esc {
+                esc = false;
+            } else if b == b'\\' {
+                esc = true;
+            } else if b == b'"' {
+                in_str = false;
+            }
             continue;
         }
         match b {

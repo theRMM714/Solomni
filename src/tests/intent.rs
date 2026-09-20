@@ -1,11 +1,11 @@
 //! 共享意图层（presentation/intent）的契约测试：点名、归并、唯一名、动作分发、编辑前置判断。
 //! 规则只写一份，这里把它钉住——CLI 与 Web 因此不会各自漂移。
 
+use super::doubles::module_of;
 use super::{ops_with, single_work, slow_ops};
 use crate::core::api::Output;
 use crate::core::AgentInstance;
 use crate::presentation::intent;
-use super::doubles::module_of;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 

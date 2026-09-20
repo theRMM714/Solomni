@@ -1,7 +1,7 @@
 # 执行入口、报告与 CI
 
 > 本文是**测试执行入口、报告状态、成功标记与 CI 流程的唯一权威**。
-> 质量门禁与基线见 [quality-isolation.md](quality-isolation.md)，验收清单见 [gaps-acceptance.md](gaps-acceptance.md)。
+> 质量门禁见 [quality-isolation.md](quality-isolation.md)，验收清单见 [gaps-acceptance.md](gaps-acceptance.md)。
 
 ## 九、执行入口与报告
 
@@ -15,8 +15,7 @@ cargo clippy --all-targets --all-features -- -D warnings
 
 快速检查用于本地反馈，不替代完整入口。
 
-注意：`cargo test` 预期全绿；`cargo fmt --check` 与 `cargo clippy … -D warnings` **当前不会全绿**——
-存量记在 `tests/quality-baseline.yaml`（**具体数字以该文件为准，本文不复述**）。存量清零是 `tests/gaps.yaml` 的长期目标。
+注意：`cargo test` 与 `cargo fmt --check`、`cargo clippy … -D warnings` **都预期全绿**——T0 六项全是零容忍硬失败，没有存量基线。
 
 ### 完整本地入口
 
@@ -29,11 +28,11 @@ node run-tests.js
 1. `cargo build`（并打印安全模式 / 真机围栏模式说明）；
 2. 运行 `solomni --doctor`，记录当前平台和围栏能力；
 3. `T0 编译（--all-targets）`（硬失败）；
-4. `T0 结构审查`（硬失败：目标登记 / 孤儿测试文件 / 缺口账格式）；
-5. `T0 格式（fmt --check）`（基线比对）；
-6. `T0 静态检查（clippy）`（基线比对）；
-7. `T0 编译告警`（基线比对）；
-8. `T0 依赖重复（cargo tree）`（基线比对）；
+4. `T0 结构审查`（硬失败：目标登记 / 孤儿测试文件 / 缺口账格式 / 文档链接完整性）；
+5. `T0 格式（fmt --check）`（硬失败）；
+6. `T0 静态检查（clippy）`（硬失败）；
+7. `T0 编译告警`（硬失败）；
+8. `T0 依赖重复（cargo tree）`（硬失败）；
 9. `L1 单元（--bin solomni）`；
 10. 逐个运行 `cargo test --test cross-platform/windows/linux/macos`；
 11. 前端冒烟；
@@ -63,7 +62,7 @@ node run-tests.js --fence-live
 | 平台专属代码（`adapters/confine/` 各平台文件、`tests/<平台>/`） | 平台目标的 `main.rs` 首行是 `#![cfg(target_os = …)]`：非本平台的目标整目标为空，代码根本不编译 | 三平台各编译并各跑一次 |
 | 真机围栏（ACL / 容器 profile / Landlock / seatbelt） | 本地默认安全模式会跳过会改本机状态的探针 | 一次性 runner 上真跑，并验撤权与 profile 回收 |
 | HTTPS/TLS 出站链路 | 受限环境可能取不到系统 TLS 凭证（判据见 [levels.md](levels.md) 的 T4），本地只能 env-skip | 干净 runner 上真连公网端点 |
-| 质量基线按平台分区 | `--print-quality-baseline` 只重算当前平台 | 三平台各自比对，缺分区即 `quality-fail` |
+| T0 六项（clippy 只编译当前平台的 `#[cfg]`、依赖图随平台变） | 本机只能代表本平台 | 三平台各自零容忍跑一遍 |
 | 发布前验收 | 本地通过 ≠ 三平台通过 | 三平台报告 + 三平台 `TEST-REPORT-ACCEPTED` |
 
 **报告怎么读（硬规矩）**：只用 `git` 或 git CLI 拉 `ci-report` 分支，**禁止轮询网页**；时机无法确认时委托用户拉取（见 `AGENTS.md`）。
@@ -98,12 +97,12 @@ git show origin/ci-report:runs/windows/logs/<某一步>.log  # 失败证据原�
 
 - `pass`：步骤完成；
 - `fail`：断言或命令失败（硬失败）；
-- `quality-fail`：超出质量基线，或基线已过期；
+- `quality-fail`：T0 任一项不过（编译 / 结构审查 / 格式 / clippy / 编译告警 / 依赖重复）；
 - `env-skip`：工具缺失等环境性跳过（步骤级），与 `envSkips`（探针级的 `[探针]` 行）并列；
 - `skip-platform`：当前平台不适用的空平台目标；
 - `gap`：入口没有找到应运行的部分。
 
-报告字段：`steps`（逐步骤状态与用时 `ms`——"哪一步慢"要看它，不看感觉）、`envSkips`（探针级跳过）、`quality`（`failed` / `steps` / `baselineStale`）、
+报告字段：`steps`（逐步骤状态与用时 `ms`——"哪一步慢"要看它，不看感觉）、`envSkips`（探针级跳过）、`quality`（`failed` / `steps`）、
 `gaps`（平台缺口账）、`globalGaps`（`tests/gaps.yaml` 的长期目标）、`failed`（硬失败数）。
 `test-fail` 与 `blocked` 这两个更细的状态当前没有实现，也不在计划内——`fail` 与 `gap` 已能如实表达。
 
@@ -114,7 +113,7 @@ git show origin/ci-report:runs/windows/logs/<某一步>.log  # 失败证据原�
 - `FRONTEND-SMOKE-OK`：前端冒烟完成；
 - `E2E-OK`：端到端场景完成；
 - `TEST-REPORT-OK`：当前入口的运行步骤没有失败；
-- `TEST-REPORT-FAIL`：当前入口有硬失败步骤**或**质量基线不符（同时以非零退出码暴露）；
+- `TEST-REPORT-FAIL`：当前入口有硬失败步骤**或** T0 任一项不过（同时以非零退出码暴露）；
 - `TEST-REPORT-ACCEPTED`：当前平台缺口账为空。
 
 固定标记不能替代质量门禁，也不能覆盖 `env-skip`、`gap` 或 `quality-fail`。测试入口必须以非零退出码暴露失败。

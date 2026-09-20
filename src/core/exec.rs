@@ -50,7 +50,10 @@ pub enum Diagnosis {
     /// 模块（含它的包的传递依赖）需要的能力，包库里没有任何包提供。
     Missing { module: String, capability: String },
     /// 同一能力有多个版本，需用户定版。
-    Ambiguous { capability: String, versions: Vec<String> },
+    Ambiguous {
+        capability: String,
+        versions: Vec<String>,
+    },
     /// exec 段定的版本在库里不存在。
     UnknownPin { capability: String, version: String },
     /// 两个包会写进同一处路径。
@@ -127,14 +130,20 @@ pub fn vm_diagnoses(modules: &[Module], lib: &Library, spec: &ExecSpec) -> Vec<D
         }
         let versions = lib.versions_of(&cap);
         if versions.is_empty() {
-            out.push(Diagnosis::Missing { module, capability: cap });
+            out.push(Diagnosis::Missing {
+                module,
+                capability: cap,
+            });
             continue;
         }
         let picked: Option<&PackageManifest> = match spec.pins.get(&cap) {
             Some(v) => match lib.pick(&cap, v) {
                 Some(p) => Some(p),
                 None => {
-                    out.push(Diagnosis::UnknownPin { capability: cap.clone(), version: v.clone() });
+                    out.push(Diagnosis::UnknownPin {
+                        capability: cap.clone(),
+                        version: v.clone(),
+                    });
                     None
                 }
             },
@@ -162,7 +171,6 @@ pub fn vm_diagnoses(modules: &[Module], lib: &Library, spec: &ExecSpec) -> Vec<D
     out.dedup();
     out
 }
-
 
 /// 执行档位的能力前置条件（本机档没有额外前置）。
 /// `RUNTIME_SPEC.md` 把「选型」与「本机能不能承载」分开：定版/缺包/冲突是选型，这里是承载。
@@ -210,20 +218,31 @@ pub fn hypervisor_hint() -> &'static str {
 /// 界面的"能不能点"与「开始」的校验走同一个函数，两处不会各说各话。
 pub fn tier_readiness(spec: &ExecSpec) -> TierReadiness {
     if spec.tier != Tier::Vm {
-        return TierReadiness { base: true, hypervisor: true };
+        return TierReadiness {
+            base: true,
+            hypervisor: true,
+        };
     }
     let base = match spec.base.as_deref().map(str::trim) {
         None | Some("") => true,
         Some(p) => Path::new(p).is_dir(),
     };
-    TierReadiness { base, hypervisor: hypervisor_available() }
+    TierReadiness {
+        base,
+        hypervisor: hypervisor_available(),
+    }
 }
 
 /// 虚拟机监视器在场吗（只问事实，不起任何虚拟机）。
 fn hypervisor_available() -> bool {
     if cfg!(windows) {
         std::env::var_os("SystemRoot")
-            .map(|root| Path::new(&root).join("System32").join("WinHvPlatform.dll").is_file())
+            .map(|root| {
+                Path::new(&root)
+                    .join("System32")
+                    .join("WinHvPlatform.dll")
+                    .is_file()
+            })
             .unwrap_or(false)
     } else if cfg!(target_os = "linux") {
         Path::new("/dev/kvm").exists()
@@ -248,9 +267,18 @@ pub fn tier_refusal(spec: &ExecSpec) -> Option<String> {
 /// 派生执行计划：本机档不装载运行包（宿主自备解释器）。
 /// 虚拟机档只有**选型不成立**才拒绝（多版本未定版 / 定版不存在 / 系统路径冲突——用户要解决的选型问题）；
 /// **缺包不拦会话**：那只是该模块的工具不可用（由 unavailable 收口，降级而非崩溃）。
-pub fn plan(spec: &ExecSpec, modules: &[Module], lib: &Library) -> Result<ExecPlan, Vec<Diagnosis>> {
+pub fn plan(
+    spec: &ExecSpec,
+    modules: &[Module],
+    lib: &Library,
+) -> Result<ExecPlan, Vec<Diagnosis>> {
     match spec.tier {
-        Tier::Host => Ok(ExecPlan { tier: Tier::Host, net: spec.net, base: None, packages: Vec::new() }),
+        Tier::Host => Ok(ExecPlan {
+            tier: Tier::Host,
+            net: spec.net,
+            base: None,
+            packages: Vec::new(),
+        }),
         Tier::Vm => {
             let hard: Vec<Diagnosis> = vm_diagnoses(modules, lib, spec)
                 .into_iter()
@@ -261,7 +289,10 @@ pub fn plan(spec: &ExecSpec, modules: &[Module], lib: &Library) -> Result<ExecPl
             }
             let mut chosen: Vec<&PackageManifest> = Vec::new();
             let mut seen: BTreeSet<String> = BTreeSet::new();
-            let mut queue: Vec<String> = modules.iter().flat_map(|m| m.manifest.runtimes.clone()).collect();
+            let mut queue: Vec<String> = modules
+                .iter()
+                .flat_map(|m| m.manifest.runtimes.clone())
+                .collect();
             while let Some(cap) = queue.pop() {
                 if !seen.insert(cap.clone()) {
                     continue;
@@ -280,7 +311,11 @@ pub fn plan(spec: &ExecSpec, modules: &[Module], lib: &Library) -> Result<ExecPl
             }
             // 装载顺序：先独立前缀，后写进系统路径的包；各自内部按 (id, version) 稳定。
             chosen.sort_by(|a, b| {
-                (rank(&a.kind), a.id.as_str(), a.version.as_str()).cmp(&(rank(&b.kind), b.id.as_str(), b.version.as_str()))
+                (rank(&a.kind), a.id.as_str(), a.version.as_str()).cmp(&(
+                    rank(&b.kind),
+                    b.id.as_str(),
+                    b.version.as_str(),
+                ))
             });
             let packages = chosen
                 .iter()
@@ -291,14 +326,23 @@ pub fn plan(spec: &ExecSpec, modules: &[Module], lib: &Library) -> Result<ExecPl
                     prefix: p.prefix.clone(),
                 })
                 .collect();
-            Ok(ExecPlan { tier: Tier::Vm, net: spec.net, base: spec.base.clone(), packages })
+            Ok(ExecPlan {
+                tier: Tier::Vm,
+                net: spec.net,
+                base: spec.base.clone(),
+                packages,
+            })
         }
     }
 }
 
 /// 本档位下不能执行工具的模块（模块 id → 缺失的能力名）：本机档不装载运行包，一律可用（空表）。
 /// 虚拟机档：装配不成立（歧义 / 定版不存在 / 冲突）时，凡声明了运行能力的模块都不能执行工具。
-pub fn unavailable(spec: &ExecSpec, modules: &[Module], lib: &Library) -> BTreeMap<String, Vec<String>> {
+pub fn unavailable(
+    spec: &ExecSpec,
+    modules: &[Module],
+    lib: &Library,
+) -> BTreeMap<String, Vec<String>> {
     let mut out: BTreeMap<String, Vec<String>> = BTreeMap::new();
     if spec.tier != Tier::Vm {
         return out;
@@ -311,7 +355,9 @@ pub fn unavailable(spec: &ExecSpec, modules: &[Module], lib: &Library) -> BTreeM
     for d in &diags {
         match d {
             Diagnosis::Missing { module, capability } => {
-                out.entry(module.clone()).or_default().push(capability.clone());
+                out.entry(module.clone())
+                    .or_default()
+                    .push(capability.clone());
             }
             _ => assembly_broken = true,
         }
@@ -335,12 +381,25 @@ pub fn diagnose_text(diags: &[Diagnosis]) -> String {
         .iter()
         .map(|d| match d {
             Diagnosis::Missing { module, capability } => {
-                format!("模块 {} 需要运行包 {}，包库里没有（把它放进依赖文件夹 runtimes/）", module, capability)
+                format!(
+                    "模块 {} 需要运行包 {}，包库里没有（把它放进依赖文件夹 runtimes/）",
+                    module, capability
+                )
             }
-            Diagnosis::Ambiguous { capability, versions } => {
-                format!("运行包 {} 有多个版本，需用户定版：{}", capability, versions.join("、"))
+            Diagnosis::Ambiguous {
+                capability,
+                versions,
+            } => {
+                format!(
+                    "运行包 {} 有多个版本，需用户定版：{}",
+                    capability,
+                    versions.join("、")
+                )
             }
-            Diagnosis::UnknownPin { capability, version } => {
+            Diagnosis::UnknownPin {
+                capability,
+                version,
+            } => {
                 format!("运行包 {} 的定版 {} 不在包库里", capability, version)
             }
             Diagnosis::Conflict { path, a, b } => {
@@ -357,7 +416,11 @@ pub fn plan_summary(plan: &ExecPlan) -> String {
     if plan.tier == Tier::Host {
         return format!("执行档位 本机（不装载运行包）；网络 {}", net);
     }
-    let pkgs: Vec<String> = plan.packages.iter().map(|p| format!("{}@{}（{}）", p.id, p.version, p.kind)).collect();
+    let pkgs: Vec<String> = plan
+        .packages
+        .iter()
+        .map(|p| format!("{}@{}（{}）", p.id, p.version, p.kind))
+        .collect();
     format!(
         "执行档位 虚拟机；基础根 {}；装载 {} 个包：{}；网络 {}",
         plan.base.as_deref().unwrap_or("（未指定）"),

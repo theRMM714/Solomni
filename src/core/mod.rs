@@ -26,8 +26,8 @@ pub mod workspace;
 
 pub use events::{Live, Pending, SessionEvent};
 pub use ports::{
-    ChatGateway, HistoryStore, ModelCatalog, ModuleSource, PackageSource, PromptSource, SettingsStore, SysIo, ToolRunner,
-    Workspace,
+    ChatGateway, HistoryStore, ModelCatalog, ModuleSource, PackageSource, PromptSource,
+    SettingsStore, SysIo, ToolRunner, Workspace,
 };
 
 use crate::core::collab::CollabSession;
@@ -43,6 +43,9 @@ use std::sync::Arc;
 pub type SessionId = String;
 
 /// 会话实例：单 agent 会话或协作会话（本体自带端口，可跨线程移动）。
+/// 两变体大小差得远（协作会话带整份讨论状态），装箱只换来一次间接寻址、
+/// 却把"会话本体可直接移动"这个形状改掉——有意不装箱（见 docs/testing/quality-isolation.md 的 allow 清单）。
+#[allow(clippy::large_enum_variant)]
 pub enum Session {
     Single(session::AgentSession),
     Collab(CollabSession),
@@ -247,6 +250,9 @@ pub struct Core {
 
 impl Core {
     /// 组合根专用：main 负责创建适配器并注入；core 不自建任何具体实现。
+    // 组合根注入的构造函数：参数天然多，收口成参数对象只是把参数挪个地方、并让装配更难读。
+    // 这是有意的设计取舍（见 docs/testing/quality-isolation.md 的 allow 清单），不是没修。
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         store: Arc<dyn SettingsStore + Send + Sync>,
         history: Arc<dyn HistoryStore + Send + Sync>,
@@ -266,7 +272,23 @@ impl Core {
         let outcome = (|| -> Result<Core, String> {
             let settings = store.load()?;
             let prompts = prompt_source.load()?;
-            Ok(Core { store, history, workspace, source, packages, fence, gateway, catalog, tools, io, repair, log: log_for_core, settings, prompts, sessions: HashMap::new() })
+            Ok(Core {
+                store,
+                history,
+                workspace,
+                source,
+                packages,
+                fence,
+                gateway,
+                catalog,
+                tools,
+                io,
+                repair,
+                log: log_for_core,
+                settings,
+                prompts,
+                sessions: HashMap::new(),
+            })
         })();
         if let Err(e) = &outcome {
             log.error("core::new", &format!("装配失败：{}", e)); // 仅错误时借用，不与闭包 move 冲突
@@ -289,7 +311,10 @@ impl Core {
     pub fn runtime_report(&self, tier: exec::Tier) -> RuntimeReport {
         let roster = self.source.scan();
         let lib = self.packages.scan();
-        let spec = exec::ExecSpec { tier, ..exec::ExecSpec::default() };
+        let spec = exec::ExecSpec {
+            tier,
+            ..exec::ExecSpec::default()
+        };
         let diagnoses = if tier == exec::Tier::Vm {
             exec::vm_diagnoses(&roster.modules, &lib, &spec)
         } else {
@@ -310,7 +335,11 @@ impl Core {
     }
 
     /// 本档位下不能执行工具的模块（模块 id → 缺的能力名）：建会话与重建时收口给工具环境。
-    fn unavailable_modules(&self, spec: &exec::ExecSpec, modules: &[Module]) -> BTreeMap<String, Vec<String>> {
+    fn unavailable_modules(
+        &self,
+        spec: &exec::ExecSpec,
+        modules: &[Module],
+    ) -> BTreeMap<String, Vec<String>> {
         exec::unavailable(spec, modules, &self.packages.scan())
     }
 
@@ -319,7 +348,11 @@ impl Core {
         let (meta, events) = self.history_open(sid)?;
         let tier = meta.exec.tier;
         // 虚拟机档的承载探针：用用户填的基础根（若有），否则问"裸虚拟机档"能不能成立。
-        let vm_probe = exec::ExecSpec { tier: exec::Tier::Vm, base: meta.exec.base.clone(), ..exec::ExecSpec::default() };
+        let vm_probe = exec::ExecSpec {
+            tier: exec::Tier::Vm,
+            base: meta.exec.base.clone(),
+            ..exec::ExecSpec::default()
+        };
         Ok(SessionConfig {
             sid: meta.name.clone(),
             mode: meta.mode.clone(),
@@ -364,7 +397,9 @@ impl Core {
             let old: Vec<String> = meta.agents.iter().map(|a| a.name.clone()).collect();
             let new: Vec<String> = edit.agents.iter().map(|a| a.name.clone()).collect();
             if old != new {
-                return Err("这轮会话已经开过：agent 名单与形态冻结（要换人请新建会话）".to_string());
+                return Err(
+                    "这轮会话已经开过：agent 名单与形态冻结（要换人请新建会话）".to_string()
+                );
             }
         }
         // 校验：模块与模型真实存在；同一模块不得同属两个 agent（沙箱与发言归属会歧义）。
@@ -381,7 +416,10 @@ impl Core {
                     return Err(format!("无此模块：{}", id));
                 }
                 if seen.iter().any(|x| x == id) {
-                    return Err(format!("模块 {} 被多个 agent 同时使用；同一模块只能属于一个 agent", id));
+                    return Err(format!(
+                        "模块 {} 被多个 agent 同时使用；同一模块只能属于一个 agent",
+                        id
+                    ));
                 }
                 seen.push(id.clone());
             }
@@ -395,7 +433,11 @@ impl Core {
                 name: a.name.clone(),
                 transient: !self.settings.agents.contains_key(&a.name),
                 modules: a.modules.clone(),
-                model: if a.model.is_empty() { None } else { Some(a.model.clone()) },
+                model: if a.model.is_empty() {
+                    None
+                } else {
+                    Some(a.model.clone())
+                },
             });
         }
         if metas.is_empty() {
@@ -410,7 +452,12 @@ impl Core {
             "vm" => exec::Tier::Vm,
             other => return Err(format!("未知执行档位：{}（只认 host / vm）", other)),
         };
-        let spec = exec::ExecSpec { tier, base: edit.base.clone(), pins: edit.pins.clone(), net: edit.net };
+        let spec = exec::ExecSpec {
+            tier,
+            base: edit.base.clone(),
+            pins: edit.pins.clone(),
+            net: edit.net,
+        };
         // 承载校验：前置条件不具备时**不允许改入虚拟机档**（用户环境问题，不是选型问题）。
         // 界面上的"能不能选"由 SessionConfig 的 tier_ready 说同一件事，两处不会各说各话。
         if let Some(why) = exec::tier_refusal(&spec) {
@@ -422,8 +469,12 @@ impl Core {
             .filter(|m| seen.iter().any(|id| id == &m.manifest.id))
             .cloned()
             .collect();
-        let plan = exec::plan(&spec, &session_modules, &self.packages.scan()).map_err(|diags| exec::diagnose_text(&diags))?;
-        self.log.info("core::edit_session", &format!("sid={}；{}", sid, exec::plan_summary(&plan)));
+        let plan = exec::plan(&spec, &session_modules, &self.packages.scan())
+            .map_err(|diags| exec::diagnose_text(&diags))?;
+        self.log.info(
+            "core::edit_session",
+            &format!("sid={}；{}", sid, exec::plan_summary(&plan)),
+        );
 
         let mut new_meta = meta.clone();
         new_meta.modules = metas.iter().flat_map(|a| a.modules.clone()).collect();
@@ -453,7 +504,8 @@ impl Core {
             })).collect::<Vec<_>>(),
         });
         if let Err(e) = self.history.append(sid, &[ev]) {
-            self.log.warn("core::record_config", &format!("配置记录落盘失败：{}", e));
+            self.log
+                .warn("core::record_config", &format!("配置记录落盘失败：{}", e));
         }
     }
 
@@ -465,7 +517,12 @@ impl Core {
     }
 
     /// 新建/更新供应商。更新时 api_key 留空 = 保留原密钥（界面从不回显密钥）。
-    pub fn provider_upsert(&mut self, id: &str, base_url: &str, api_key: &str) -> Result<(), String> {
+    pub fn provider_upsert(
+        &mut self,
+        id: &str,
+        base_url: &str,
+        api_key: &str,
+    ) -> Result<(), String> {
         if id.is_empty() || base_url.is_empty() {
             return Err("id / base_url 不能为空".to_string());
         }
@@ -480,7 +537,10 @@ impl Core {
         };
         self.settings.providers.insert(
             id.to_string(),
-            providers::Provider { base_url: base_url.to_string(), api_key: key },
+            providers::Provider {
+                base_url: base_url.to_string(),
+                api_key: key,
+            },
         );
         self.save_settings("core::provider_upsert")
     }
@@ -495,7 +555,11 @@ impl Core {
             .map(|(mid, _)| mid.clone())
             .collect();
         if !referenced.is_empty() {
-            return Err(format!("供应商 {} 仍被模型引用：{}；请先删除这些模型", id, referenced.join("、")));
+            return Err(format!(
+                "供应商 {} 仍被模型引用：{}；请先删除这些模型",
+                id,
+                referenced.join("、")
+            ));
         }
         let removed = self.settings.providers.remove(id).is_some();
         if removed {
@@ -540,15 +604,19 @@ impl Core {
 
     /// 实测一条通道的**回放形状**（工具调用历史怎么发回去才收）：解析 id → 交给适配层实测。
     /// 只报事实、**不写登记处**——采不采用由人定（与 probe_model_tools 的写回策略不同）。
-    pub fn probe_replay_shape(
-        &self,
-        id: &str,
-    ) -> Result<providers::ReplayReport, String> {
+    pub fn probe_replay_shape(&self, id: &str) -> Result<providers::ReplayReport, String> {
         let channel = self.settings.resolve(id)?;
         self.gateway.probe_replay(&channel)
     }
 
-    pub fn model_upsert(&mut self, id: &str, name: &str, api_model: &str, provider: &str, note: &str) -> Result<(), String> {
+    pub fn model_upsert(
+        &mut self,
+        id: &str,
+        name: &str,
+        api_model: &str,
+        provider: &str,
+        note: &str,
+    ) -> Result<(), String> {
         if id.is_empty() || name.is_empty() || api_model.is_empty() || provider.is_empty() {
             return Err("id / name / api_model / provider 均不能为空".to_string());
         }
@@ -557,7 +625,12 @@ impl Core {
         }
         // 工具调用形态：编辑时**保留原值**（登记表单暂不带这个字段，不能因为没带就重置成缺省），
         // 新建缺省 envelope（任何供应商都能用的手写信封）。
-        let tools = self.settings.models.get(id).map(|m| m.tools).unwrap_or_default();
+        let tools = self
+            .settings
+            .models
+            .get(id)
+            .map(|m| m.tools)
+            .unwrap_or_default();
         self.settings.models.insert(
             id.to_string(),
             providers::ModelEntry {
@@ -574,7 +647,10 @@ impl Core {
     /// 删除模型；是核心默认模型时拒绝（先改默认再删）。
     pub fn model_remove(&mut self, id: &str) -> Result<bool, String> {
         if self.settings.core.as_deref() == Some(id) {
-            return Err(format!("{} 是核心默认模型；请先把核心默认模型改成别的再删", id));
+            return Err(format!(
+                "{} 是核心默认模型；请先把核心默认模型改成别的再删",
+                id
+            ));
         }
         let removed = self.settings.models.remove(id).is_some();
         if removed {
@@ -608,7 +684,13 @@ impl Core {
     }
 
     /// 新建/覆盖一个 agent（校验模块与模型都真实存在；不静默）。
-    pub fn agent_upsert(&mut self, name: &str, module_ids: &[String], model: &str, note: &str) -> Result<(), String> {
+    pub fn agent_upsert(
+        &mut self,
+        name: &str,
+        module_ids: &[String],
+        model: &str,
+        note: &str,
+    ) -> Result<(), String> {
         agents::validate_name(name)?;
         if module_ids.is_empty() {
             return Err("agent 至少要有一个模块".to_string());
@@ -626,7 +708,11 @@ impl Core {
             name.to_string(),
             agents::Agent {
                 modules: module_ids.to_vec(),
-                model: if model.is_empty() { None } else { Some(model.to_string()) },
+                model: if model.is_empty() {
+                    None
+                } else {
+                    Some(model.to_string())
+                },
                 note: note.to_string(),
             },
         );
@@ -653,11 +739,21 @@ impl Core {
 
     /// 用登记处已存的供应商去拉取其可用模型名（发现机制在适配层）。
     pub fn discover_models(&self, provider_id: &str) -> Result<Vec<String>, String> {
-        let provider = self.settings.providers.get(provider_id).ok_or_else(|| format!("无此供应商：{}", provider_id))?;
+        let provider = self
+            .settings
+            .providers
+            .get(provider_id)
+            .ok_or_else(|| format!("无此供应商：{}", provider_id))?;
         let outcome = self.catalog.list_models(provider);
         match &outcome {
-            Ok(models) => self.log.info("core::discover_models", &format!("供应商 {} 拉取模型 {} 个", provider_id, models.len())),
-            Err(e) => self.log.error("core::discover_models", &format!("供应商 {} 拉取模型失败：{}", provider_id, e)),
+            Ok(models) => self.log.info(
+                "core::discover_models",
+                &format!("供应商 {} 拉取模型 {} 个", provider_id, models.len()),
+            ),
+            Err(e) => self.log.error(
+                "core::discover_models",
+                &format!("供应商 {} 拉取模型失败：{}", provider_id, e),
+            ),
         }
         outcome
     }
@@ -681,8 +777,16 @@ impl Core {
                     Session::Collab(c) => c.is_done(),
                     Session::Single(_) => false,
                 };
-                let mode = history.iter().find(|h| &h.name == sid).map(|h| h.mode.clone()).unwrap_or_default();
-                SessionView { sid: sid.clone(), mode, done }
+                let mode = history
+                    .iter()
+                    .find(|h| &h.name == sid)
+                    .map(|h| h.mode.clone())
+                    .unwrap_or_default();
+                SessionView {
+                    sid: sid.clone(),
+                    mode,
+                    done,
+                }
             })
             .collect()
     }
@@ -715,7 +819,10 @@ impl Core {
                     return Err(format!("无此模块：{}", id));
                 }
                 if seen_modules.iter().any(|x| x == id) {
-                    return Err(format!("模块 {} 被多个 agent 同时使用；同一模块只能属于一个 agent", id));
+                    return Err(format!(
+                        "模块 {} 被多个 agent 同时使用；同一模块只能属于一个 agent",
+                        id
+                    ));
                 }
                 seen_modules.push(id.clone());
             }
@@ -745,7 +852,12 @@ impl Core {
         for a in &spec.agents {
             let name = agents::unique_instance_name(&a.name, &taken);
             taken.push(name.clone());
-            metas.push(AgentMeta { name, transient: a.transient, modules: a.modules.clone(), model: a.model.clone() });
+            metas.push(AgentMeta {
+                name,
+                transient: a.transient,
+                modules: a.modules.clone(),
+                model: a.model.clone(),
+            });
         }
         // 模块扁平清单（展示用；顺序按 agent 名单展开）
         let module_ids: Vec<String> = metas.iter().flat_map(|m| m.modules.clone()).collect();
@@ -762,7 +874,10 @@ impl Core {
             task: spec.task.clone(),
             ts: now_ts(),
             agents: metas.clone(),
-            exec: exec::ExecSpec { tier: self.settings.app.tier, ..exec::ExecSpec::default() },
+            exec: exec::ExecSpec {
+                tier: self.settings.app.tier,
+                ..exec::ExecSpec::default()
+            },
         };
         // 承载校验：默认档位的前置条件不具备时**不允许创建虚拟机档会话**（用户环境问题，不是选型问题）。
         // 必须在建工作区之前收口——拒绝就该什么都不留下。
@@ -780,27 +895,41 @@ impl Core {
             .cloned()
             .collect();
         for (id, caps) in exec::absent(&session_modules, &self.packages.scan()) {
-            self.log.warn("core::create_work", &format!("模块 {} 声明的运行包不在包库：{}", id, caps.join("、")));
+            self.log.warn(
+                "core::create_work",
+                &format!("模块 {} 声明的运行包不在包库：{}", id, caps.join("、")),
+            );
         }
         // 执行选型的完整性检查（「开始」即冻结）：虚拟机档的选型不成立（多版本未定版 / 定版不存在 /
         // 路径冲突）如实拒绝；只是缺包的照常开始——那是该模块的工具不可用（降级而非崩溃）。装配阶段按同一份计划取包。
         let plan = exec::plan(&meta.exec, &session_modules, &self.packages.scan())
             .map_err(|diags| exec::diagnose_text(&diags))?;
-        self.log.info("core::create_work", &exec::plan_summary(&plan));
+        self.log
+            .info("core::create_work", &exec::plan_summary(&plan));
 
         let (session, mut events) = match spec.mode {
             // 单 agent（模块数不限）。
             WorkMode::Single => {
                 let a = metas.first().ok_or("至少要有一个 agent")?;
-                let sb = sandboxes.for_agent(&a.name).cloned().ok_or_else(|| format!("缺少 agent {} 的沙箱", a.name))?;
+                let sb = sandboxes
+                    .for_agent(&a.name)
+                    .cloned()
+                    .ok_or_else(|| format!("缺少 agent {} 的沙箱", a.name))?;
                 let chosen: Vec<Module> = a
                     .modules
                     .iter()
-                    .filter_map(|id| roster.modules.iter().find(|m| &m.manifest.id == id).cloned())
+                    .filter_map(|id| {
+                        roster
+                            .modules
+                            .iter()
+                            .find(|m| &m.manifest.id == id)
+                            .cloned()
+                    })
                     .collect();
                 let channel = self.channel_of(a.model.as_deref());
                 let unavailable = self.unavailable_modules(&meta.exec, &chosen);
-                let (s, opened) = self.build_single(a, &chosen, channel, &sb, unavailable, meta.exec.net);
+                let (s, opened) =
+                    self.build_single(a, &chosen, channel, &sb, unavailable, meta.exec.net);
                 (Session::Single(s), opened)
             }
             WorkMode::Collab => {
@@ -829,12 +958,22 @@ impl Core {
         self.history.create(&meta)?;
         self.sessions.insert(name.clone(), session);
         self.record_events(&name, &mut events);
-        Ok(WorkOpened { sid: name, agents: agent_names, events })
+        Ok(WorkOpened {
+            sid: name,
+            agents: agent_names,
+            events,
+        })
     }
 
     /// 界面投喂：把文件写进本次工作的 work/。
     /// 返回 Ok(false) = 同名文件已存在且未选择覆盖（交前端让用户决定：覆盖/改名/取消）。
-    pub fn work_upload(&mut self, sid: &str, name: &str, bytes: &[u8], overwrite: bool) -> Result<bool, String> {
+    pub fn work_upload(
+        &mut self,
+        sid: &str,
+        name: &str,
+        bytes: &[u8],
+        overwrite: bool,
+    ) -> Result<bool, String> {
         // 策略在 core：先净化文件名，再交给工作区端口（机制只看已净化的名字）。
         let name = workspace::safe_file_name(name)?;
         if !self.sessions.contains_key(sid) && self.history.load(sid).is_err() {
@@ -851,7 +990,10 @@ impl Core {
     /// 名单取自会话 meta（活动会话与历史会话都以 meta.agents 为权威）；列目录的机制在 Workspace 端口，
     /// 根取自沙箱（与文件清单同源）：agents 与 roots.agents 同序同名。
     pub fn files_view(&self, sid: &str) -> Result<FilesView, String> {
-        let (meta, _) = self.history.load(sid).map_err(|_| format!("无此会话：{}", sid))?;
+        let (meta, _) = self
+            .history
+            .load(sid)
+            .map_err(|_| format!("无此会话：{}", sid))?;
         let names: Vec<String> = meta.agents.iter().map(|a| a.name.clone()).collect();
         let files = self.workspace.list(sid, &names)?;
         let roster = self.scan();
@@ -874,7 +1016,10 @@ impl Core {
         Ok(FilesView {
             work: files.work,
             agents,
-            roots: FilesRootsView { work: workspace::slash(&sandboxes.shared), agents: agent_roots },
+            roots: FilesRootsView {
+                work: workspace::slash(&sandboxes.shared),
+                agents: agent_roots,
+            },
         })
     }
 
@@ -889,7 +1034,11 @@ impl Core {
     /// 组装本次工作的沙箱清单：工作根来自 Workspace 端口，模块目录来自清单。
     /// 权限策略在此收口：模块目录只对其所属 agent 可达（同一模块不会同属两个 agent，创建时已校验）。
     /// 每个 agent 的沙箱按 meta.agents 建；共享区根任何时候都有（代拟还没名单时也有，@ 改写要用）。
-    fn sandboxes(&self, meta: &SessionMeta, roster: &module::Roster) -> Result<workspace::Sandboxes, String> {
+    fn sandboxes(
+        &self,
+        meta: &SessionMeta,
+        roster: &module::Roster,
+    ) -> Result<workspace::Sandboxes, String> {
         let names: Vec<String> = meta.agents.iter().map(|a| a.name.clone()).collect();
         let roots = self.workspace.roots(&meta.name, &names)?;
         let mut list: Vec<workspace::Sandbox> = Vec::new();
@@ -915,7 +1064,10 @@ impl Core {
                 builtin_tools: self.prompts.core.builtin_tools.clone(),
             });
         }
-        Ok(workspace::Sandboxes { shared: roots.shared, list })
+        Ok(workspace::Sandboxes {
+            shared: roots.shared,
+            list,
+        })
     }
 
     /// 工具环境：内置文件工具永远可用；外部工具按模块分组放行（模块 id → 目录 + 工具表）。
@@ -969,12 +1121,24 @@ impl Core {
                 "单 agent 工作：agent {}，模块 {}，模型 {}",
                 a.name,
                 a.modules.join("+"),
-                channel.as_ref().map(|c| c.model.as_str()).unwrap_or("无（演示）")
+                channel
+                    .as_ref()
+                    .map(|c| c.model.as_str())
+                    .unwrap_or("无（演示）")
             ),
         );
-        let system = module::agent_system(&self.prompts, &a.name, modules, &systool::guide(&self.prompts, sb), mode);
+        let system = module::agent_system(
+            &self.prompts,
+            &a.name,
+            modules,
+            &systool::guide(&self.prompts, sb),
+            mode,
+        );
         let tools = self.tools_env(modules, sb, unavailable, net, mode);
-        let roots = crate::core::refs::RefRoots { work: sb.shared.clone(), private: Some(sb.private.clone()) };
+        let roots = crate::core::refs::RefRoots {
+            work: sb.shared.clone(),
+            private: Some(sb.private.clone()),
+        };
         let s = session::AgentSession::new(
             &a.name,
             system,
@@ -996,7 +1160,8 @@ impl Core {
         match self.history.list() {
             Ok(v) => v,
             Err(e) => {
-                self.log.error("core::history_list", &format!("会话列表失败：{}", e));
+                self.log
+                    .error("core::history_list", &format!("会话列表失败：{}", e));
                 Vec::new()
             }
         }
@@ -1004,7 +1169,10 @@ impl Core {
 
     /// 打开历史会话：返回元信息与事件流（只读回放；是否续跑由用户点「继续」授权）。
     /// 回放同样应用 rewind 截断——流水保留审计，会话内容以截断后为准。
-    pub fn history_open(&self, name: &str) -> Result<(SessionMeta, Vec<serde_json::Value>), String> {
+    pub fn history_open(
+        &self,
+        name: &str,
+    ) -> Result<(SessionMeta, Vec<serde_json::Value>), String> {
         let (meta, events) = self.history.load(name)?;
         Ok((meta, truncate_events(&events)))
     }
@@ -1019,11 +1187,17 @@ impl Core {
                     for sb in &sandboxes.list {
                         let spec = fence::FenceSpec::from_sandbox(sb, meta.exec.net);
                         if let Err(e) = self.fence.release(&spec) {
-                            self.log.warn("core::history_delete", &format!("撤销围栏授权未完成：{}", e));
+                            self.log.warn(
+                                "core::history_delete",
+                                &format!("撤销围栏授权未完成：{}", e),
+                            );
                         }
                     }
                 }
-                Err(e) => self.log.warn("core::history_delete", &format!("取沙箱失败，未撤销授权：{}", e)),
+                Err(e) => self.log.warn(
+                    "core::history_delete",
+                    &format!("取沙箱失败，未撤销授权：{}", e),
+                ),
             }
         }
         self.sessions.remove(name);
@@ -1042,21 +1216,31 @@ impl Core {
             .map(|e| e.to_json())
             .collect();
         if let Err(e) = self.history.append(sid, &jsons) {
-            self.log.error("core::history_append", &format!("会话 {} 落盘失败：{}", sid, e));
-            events.push(SessionEvent::Notice(format!("[警告] 会话记录落盘失败：{}", e)));
+            self.log.error(
+                "core::history_append",
+                &format!("会话 {} 落盘失败：{}", sid, e),
+            );
+            events.push(SessionEvent::Notice(format!(
+                "[警告] 会话记录落盘失败：{}",
+                e
+            )));
         }
     }
 
     /// 核心推荐：按本次需求推荐 agent 名单（优先复用登记处的 agent，否则组装新的并给出模型）。
     /// 核心只建议、不代选；非法条目一律拒收（规则与代拟共用 agents::resolve_picks）。
-    pub fn suggest_models(&self, task: &str, mode: WorkMode) -> Result<Vec<AgentSuggestion>, String> {
+    pub fn suggest_models(
+        &self,
+        task: &str,
+        mode: WorkMode,
+    ) -> Result<Vec<AgentSuggestion>, String> {
         if self.settings.models.is_empty() {
             return Err("登记处还没有任何模型，请先到「模型登记」添加".to_string());
         }
-        let channel = self
-            .settings
-            .core_channel()
-            .ok_or_else(|| "核心未设定默认模型（或它引用的供应商不存在），请先到「核心 AI 默认模型」设定".to_string())?;
+        let channel = self.settings.core_channel().ok_or_else(|| {
+            "核心未设定默认模型（或它引用的供应商不存在），请先到「核心 AI 默认模型」设定"
+                .to_string()
+        })?;
         let roster = self.scan();
         // 形态描述文案在提示词册里（代码不硬编码给模型的说明）。
         let mode_text = match mode {
@@ -1067,26 +1251,49 @@ impl Core {
             &self.prompts.core.suggest_models.user,
             &[
                 ("mode", mode_text.to_string()),
-                ("agents", agents::listing(&self.prompts, &self.settings.agents)),
-                ("modules", module::listing(&roster, &self.prompts.core.tool_texts)),
-                ("models", agents::model_listing(&self.settings.models, &self.prompts.core.tool_texts)),
+                (
+                    "agents",
+                    agents::listing(&self.prompts, &self.settings.agents),
+                ),
+                (
+                    "modules",
+                    module::listing(&roster, &self.prompts.core.tool_texts),
+                ),
+                (
+                    "models",
+                    agents::model_listing(&self.settings.models, &self.prompts.core.tool_texts),
+                ),
                 ("task", task.to_string()),
             ],
         );
         let (mut chat, _) = self.gateway.core_channel(Some(&channel));
         let raw = chat
             .complete(
-                &[Msg::system(self.prompts.core.suggest_models.system.clone()), Msg::user(user)],
+                &[
+                    Msg::system(self.prompts.core.suggest_models.system.clone()),
+                    Msg::user(user),
+                ],
                 crate::core::ports::CompleteOpts::plain(false),
                 &mut |_| true,
             )
             .raw;
         let parsed = envelope::extract_json_object(&raw)
             .and_then(|obj| serde_json::from_str::<SuggestReply>(&obj).ok())
-            .ok_or_else(|| format!("核心推荐失败（响应不是约定的 JSON）：{}", raw.chars().take(200).collect::<String>()))?;
-        let (picks, rejected) = agents::resolve_picks(parsed.agents, &self.settings.agents, &roster, &self.settings.models);
+            .ok_or_else(|| {
+                format!(
+                    "核心推荐失败（响应不是约定的 JSON）：{}",
+                    raw.chars().take(200).collect::<String>()
+                )
+            })?;
+        let (picks, rejected) = agents::resolve_picks(
+            parsed.agents,
+            &self.settings.agents,
+            &roster,
+            &self.settings.models,
+        );
         for r in &rejected {
-            self.log.warn("core::suggest_models", &format!("推荐条目拒收：{}", r));
+            self.log
+                .warn("core::suggest_models", &format!("推荐条目拒收：{}", r));
         }
         let core_default = self.settings.core.clone();
         let drafts: Vec<AgentSuggestion> = picks
@@ -1149,13 +1356,22 @@ impl Core {
         let rebuilt = self.rebuild_session(&meta, &after)?;
         self.sessions.insert(sid.to_string(), rebuilt);
         Ok(Some(match want {
-            providers::ToolMode::Native => "工具调用形态已按登记处改为**原生工具调用**（本条起生效）".to_string(),
-            providers::ToolMode::Envelope => "工具调用形态已按登记处改为**手写信封**（本条起生效）".to_string(),
+            providers::ToolMode::Native => {
+                "工具调用形态已按登记处改为**原生工具调用**（本条起生效）".to_string()
+            }
+            providers::ToolMode::Envelope => {
+                "工具调用形态已按登记处改为**手写信封**（本条起生效）".to_string()
+            }
         }))
     }
 
     /// 单 agent 会话发言。
-    pub fn single_say(&mut self, sid: &str, text: &str, live: &mut Live) -> Result<Vec<SessionEvent>, String> {
+    pub fn single_say(
+        &mut self,
+        sid: &str,
+        text: &str,
+        live: &mut Live,
+    ) -> Result<Vec<SessionEvent>, String> {
         let notice = self.refresh_tool_mode(sid)?;
         let mut events = match self.sessions.get_mut(sid) {
             Some(Session::Single(s)) => s.say(text, live),
@@ -1173,7 +1389,12 @@ impl Core {
     }
 
     /// 协作推进一步：由前端按 pending 驱动；返回期间产生的全部事件。
-    pub fn collab_continue(&mut self, sid: &str, step: CollabStep, text: &str) -> Result<Vec<SessionEvent>, String> {
+    pub fn collab_continue(
+        &mut self,
+        sid: &str,
+        step: CollabStep,
+        text: &str,
+    ) -> Result<Vec<SessionEvent>, String> {
         let mut out = Vec::new();
         let mut confirmed: Option<Vec<AgentMeta>> = None;
         {
@@ -1239,14 +1460,16 @@ impl Core {
         let (meta, raw_before) = self.history.load(sid)?;
         let before = truncate_events(&raw_before);
         self.history
-            .append(sid, &[serde_json::json!({ "type": "rewind", "keep": keep_id })])
+            .append(
+                sid,
+                &[serde_json::json!({ "type": "rewind", "keep": keep_id })],
+            )
             .map_err(|e| format!("回档落盘失败：{}", e))?;
         let (_, raw_after) = self.history.load(sid)?;
         let after = truncate_events(&raw_after);
         if precise {
-            match self.sessions.get_mut(sid) {
-                Some(Session::Single(s)) => s.rewind(keep_id),
-                _ => {}
+            if let Some(Session::Single(s)) = self.sessions.get_mut(sid) {
+                s.rewind(keep_id);
             }
         } else {
             let rebuilt = self.rebuild_session(&meta, &after)?;
@@ -1314,7 +1537,11 @@ impl Core {
     }
 
     /// 按会话元信息 + 转录事件重建会话对象（通道是机制，按记录的选择重新装配）。
-    fn rebuild_session(&self, meta: &SessionMeta, events: &[serde_json::Value]) -> Result<Session, String> {
+    fn rebuild_session(
+        &self,
+        meta: &SessionMeta,
+        events: &[serde_json::Value],
+    ) -> Result<Session, String> {
         let roster = self.source.scan();
         let sandboxes = self.sandboxes(meta, &roster)?;
         match meta.mode.as_str() {
@@ -1334,19 +1561,27 @@ impl Core {
             )?)),
             // 单 agent：按 meta.agents[0] 重建（名单是唯一真相；模块数不限）。
             "single" => {
-                let a = meta.agents.first().ok_or_else(|| format!("会话 {} 缺少 agent 名单", meta.name))?;
+                let a = meta
+                    .agents
+                    .first()
+                    .ok_or_else(|| format!("会话 {} 缺少 agent 名单", meta.name))?;
                 let modules: Vec<Module> = a
                     .modules
                     .iter()
-                    .filter_map(|id| roster.modules.iter().find(|m| &m.manifest.id == id).cloned())
+                    .filter_map(|id| {
+                        roster
+                            .modules
+                            .iter()
+                            .find(|m| &m.manifest.id == id)
+                            .cloned()
+                    })
                     .collect();
                 if modules.len() != a.modules.len() {
                     return Err(format!("agent {} 的模块已不在清单", a.name));
                 }
-                let sb = sandboxes
-                    .for_agent(&a.name)
-                    .cloned()
-                    .ok_or_else(|| format!("会话 {} 缺少 agent {} 的沙箱信息", meta.name, a.name))?;
+                let sb = sandboxes.for_agent(&a.name).cloned().ok_or_else(|| {
+                    format!("会话 {} 缺少 agent {} 的沙箱信息", meta.name, a.name)
+                })?;
                 let channel = a
                     .model
                     .as_deref()
@@ -1375,7 +1610,8 @@ impl Core {
                 let mut marks: Vec<usize> = Vec::new();
                 let mut line_reply: Vec<u64> = Vec::new();
                 let texts = &self.prompts.core.tool_texts;
-                let reply_of = |v: &serde_json::Value| v.get("reply").and_then(|x| x.as_u64()).unwrap_or(0);
+                let reply_of =
+                    |v: &serde_json::Value| v.get("reply").and_then(|x| x.as_u64()).unwrap_or(0);
                 let mut i = 0usize;
                 while i < rows.len() {
                     let l = rows[i];
@@ -1391,14 +1627,22 @@ impl Core {
                         // 落行时写入）；整组一起翻译成消息，靠的正是这个号——不靠"相邻行猜分组"。
                         let reply = reply_of(l.get("tool").expect("已判存在"));
                         let mut group: Vec<&serde_json::Value> = Vec::new();
-                        while i < rows.len() && reply_of(rows[i].get("tool").unwrap_or(&serde_json::Value::Null)) == reply {
+                        while i < rows.len()
+                            && reply_of(rows[i].get("tool").unwrap_or(&serde_json::Value::Null))
+                                == reply
+                        {
                             group.push(rows[i]);
                             i += 1;
                         }
                         // 这一回复的助手消息正文（空正文的回复不带 raw；组内取一份即可）。
                         let raw = group
                             .iter()
-                            .find_map(|t| t.get("tool").and_then(|x| x.get("raw")).and_then(|x| x.as_str()).filter(|s| !s.is_empty()))
+                            .find_map(|t| {
+                                t.get("tool")
+                                    .and_then(|x| x.get("raw"))
+                                    .and_then(|x| x.as_str())
+                                    .filter(|s| !s.is_empty())
+                            })
                             .unwrap_or_default();
                         let views: Vec<crate::core::events::ToolCallView> = group
                             .iter()
@@ -1415,9 +1659,16 @@ impl Core {
                     } else {
                         // 文本行：它紧跟 tool 行时属于同一次回复（历史由那组 tool 行统一推进，这里不推）；
                         // 否则这一行自己就是一条回复，推 assistant(该行文本)。
-                        let next_is_tool = rows.get(i + 1).map(|n| n.get("tool").is_some()).unwrap_or(false);
+                        let next_is_tool = rows
+                            .get(i + 1)
+                            .map(|n| n.get("tool").is_some())
+                            .unwrap_or(false);
                         if !next_is_tool {
-                            let text = line.split_once("] ").map(|(_, t)| t).unwrap_or(line).to_string();
+                            let text = line
+                                .split_once("] ")
+                                .map(|(_, t)| t)
+                                .unwrap_or(line)
+                                .to_string();
                             history.push(Msg::assistant(text));
                         }
                         line_reply.push(reply_of(l));
@@ -1429,7 +1680,10 @@ impl Core {
                 let mut tools = self.tools_env(&modules, &sb, unavailable, meta.exec.net, mode);
                 // 回复 id 跨重启单调：从转录里的最大值续号，否则新回复会与旧回复并成一组。
                 tools.reply_seq = crate::core::engine::max_reply(events);
-                let roots = crate::core::refs::RefRoots { work: sb.shared.clone(), private: Some(sb.private.clone()) };
+                let roots = crate::core::refs::RefRoots {
+                    work: sb.shared.clone(),
+                    private: Some(sb.private.clone()),
+                };
                 Ok(Session::Single(session::AgentSession::restore(
                     &a.name,
                     history,
@@ -1449,7 +1703,11 @@ impl Core {
 
     /// 继续：由用户点击授权。单 agent 会话需要轮到用户（末条是 AI 就只提醒、不发请求）；
     /// 协作不需要用户发言，继续 = 从断点推进流水线。
-    pub fn continue_flow(&mut self, sid: &str, live: &mut Live) -> Result<Vec<SessionEvent>, String> {
+    pub fn continue_flow(
+        &mut self,
+        sid: &str,
+        live: &mut Live,
+    ) -> Result<Vec<SessionEvent>, String> {
         self.ensure_session(sid)?;
         let mut events = {
             let s = self.sessions.get_mut(sid).ok_or("无此活动会话")?;
@@ -1524,7 +1782,12 @@ fn cut_before_line(events: &[serde_json::Value], keep: u64) -> Vec<serde_json::V
             if let Some(lines) = ev.get("lines").and_then(|l| l.as_array()) {
                 let kept: Vec<serde_json::Value> = lines
                     .iter()
-                    .take_while(|l| l.get("id").and_then(|i| i.as_u64()).map(|i| i < keep).unwrap_or(false))
+                    .take_while(|l| {
+                        l.get("id")
+                            .and_then(|i| i.as_u64())
+                            .map(|i| i < keep)
+                            .unwrap_or(false)
+                    })
                     .cloned()
                     .collect();
                 let done = kept.len() < lines.len();
@@ -1587,9 +1850,15 @@ fn find_line_id(events: &[serde_json::Value], prefix: &str) -> Option<u64> {
         if ev.get("type").and_then(|t| t.as_str()) != Some("transcript") {
             continue;
         }
-        let Some(lines) = ev.get("lines").and_then(|l| l.as_array()) else { continue };
+        let Some(lines) = ev.get("lines").and_then(|l| l.as_array()) else {
+            continue;
+        };
         for l in lines {
-            if l.get("line").and_then(|x| x.as_str()).map(|s| s.starts_with(prefix)).unwrap_or(false) {
+            if l.get("line")
+                .and_then(|x| x.as_str())
+                .map(|s| s.starts_with(prefix))
+                .unwrap_or(false)
+            {
                 found = l.get("id").and_then(|i| i.as_u64());
             }
         }
@@ -1599,12 +1868,18 @@ fn find_line_id(events: &[serde_json::Value], prefix: &str) -> Option<u64> {
 
 /// 会话是否「已经开过」（流水里有内容）：agent 名单与形态据此冻结。配置记录与回档记录不算内容。
 fn session_started(events: &[serde_json::Value]) -> bool {
-    events.iter().any(|ev| match ev.get("type").and_then(|t| t.as_str()) {
-        Some("config") | Some("rewind") => false,
-        Some("transcript") => ev.get("lines").and_then(|l| l.as_array()).map(|l| !l.is_empty()).unwrap_or(false),
-        Some(_) => true,
-        None => false,
-    })
+    events
+        .iter()
+        .any(|ev| match ev.get("type").and_then(|t| t.as_str()) {
+            Some("config") | Some("rewind") => false,
+            Some("transcript") => ev
+                .get("lines")
+                .and_then(|l| l.as_array())
+                .map(|l| !l.is_empty())
+                .unwrap_or(false),
+            Some(_) => true,
+            None => false,
+        })
 }
 
 /// 工作形态 → 会话元信息里的标识。
@@ -1634,7 +1909,13 @@ fn merged_suggestion(drafts: Vec<AgentSuggestion>) -> AgentSuggestion {
             why.push(a.why);
         }
     }
-    AgentSuggestion { name: "组合".to_string(), modules, model, why: why.join("；"), reuse: false }
+    AgentSuggestion {
+        name: "组合".to_string(),
+        modules,
+        model,
+        why: why.join("；"),
+        reuse: false,
+    }
 }
 
 /// 当前时间戳（秒）。

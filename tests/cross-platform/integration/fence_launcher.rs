@@ -1,6 +1,9 @@
 //! 守门进程协议与环境白名单（跨平台）：退出码如实回传、围栏装不上如实报错、超时连根杀掉整棵树。
 
-use crate::probe::{bin, job_json, kill_like_runtime, python_command, run_launcher, scratch, spawn_fenced, wait, FENCE_FAILED};
+use crate::probe::{
+    bin, job_json, kill_like_runtime, python_command, run_launcher, scratch, spawn_fenced, wait,
+    FENCE_FAILED,
+};
 use std::process::Command;
 use std::time::{Duration, Instant};
 
@@ -15,9 +18,19 @@ fn fence_failure_is_reported_honestly() {
         .arg("echo 不该被执行")
         .output()
         .expect("跑守门进程");
-    assert_eq!(out.status.code(), Some(FENCE_FAILED), "围栏装不上必须如实失败");
-    assert!(String::from_utf8_lossy(&out.stderr).contains("[围栏]"), "要在 stderr 说明原因");
-    assert!(!String::from_utf8_lossy(&out.stdout).contains("不该被执行"), "命令不得执行");
+    assert_eq!(
+        out.status.code(),
+        Some(FENCE_FAILED),
+        "围栏装不上必须如实失败"
+    );
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("[围栏]"),
+        "要在 stderr 说明原因"
+    );
+    assert!(
+        !String::from_utf8_lossy(&out.stdout).contains("不该被执行"),
+        "命令不得执行"
+    );
     let _ = dir;
 }
 
@@ -25,7 +38,10 @@ fn fence_failure_is_reported_honestly() {
 fn launcher_runs_the_command_and_passes_its_exit_code() {
     // prepared = false = 未授权机器上的真实路径：守门进程不装容器，按平台围栏如实降级跑命令。
     let dir = scratch("ok");
-    let (code, out, err) = run_launcher(&job_json(&[dir.clone()], &dir, false), "echo hello-from-tool");
+    let (code, out, err) = run_launcher(
+        &job_json(std::slice::from_ref(&dir), &dir, false),
+        "echo hello-from-tool",
+    );
     assert_eq!(code, Some(0), "退出码要如实回传：{} / {}", out, err);
     assert!(out.contains("hello-from-tool"), "{}", out);
 }
@@ -43,9 +59,15 @@ fn killing_the_guarded_process_takes_the_whole_tree_with_it() {
     #[cfg(not(windows))]
     let grandchild = format!("sleep 5; echo late > {}", path);
     #[cfg(windows)]
-    let spawn = format!("import subprocess,time;subprocess.Popen(['cmd','/C','{}']);time.sleep(30)", grandchild);
+    let spawn = format!(
+        "import subprocess,time;subprocess.Popen(['cmd','/C','{}']);time.sleep(30)",
+        grandchild
+    );
     #[cfg(not(windows))]
-    let spawn = format!("import subprocess,time;subprocess.Popen(['sh','-c','{}']);time.sleep(30)", grandchild);
+    let spawn = format!(
+        "import subprocess,time;subprocess.Popen(['sh','-c','{}']);time.sleep(30)",
+        grandchild
+    );
     let script = spawn;
     let command = match python_command(&script) {
         Some(c) => c,
@@ -54,7 +76,7 @@ fn killing_the_guarded_process_takes_the_whole_tree_with_it() {
             return;
         }
     };
-    let mut child = spawn_fenced(&job_json(&[dir.clone()], &dir, false), &command);
+    let mut child = spawn_fenced(&job_json(std::slice::from_ref(&dir), &dir, false), &command);
     wait(Duration::from_millis(1500));
     kill_like_runtime(&mut child);
     let deadline = Instant::now() + Duration::from_secs(7);
@@ -76,7 +98,9 @@ fn fence_verify_always_reports_one_of_three_verdicts() {
     let spec = job_json(std::slice::from_ref(&dir), &dir, false);
     let verdict = verify_fence(&spec, "echo hi");
     assert!(
-        verdict == "enforced" || verdict_is_env_unavailable(&verdict) || verdict_is_broken(&verdict),
+        verdict == "enforced"
+            || verdict_is_env_unavailable(&verdict)
+            || verdict_is_broken(&verdict),
         "结论必须是三态之一，不能是别的：{}",
         verdict
     );
@@ -86,5 +110,9 @@ fn fence_verify_always_reports_one_of_three_verdicts() {
         .flatten()
         .map(|e| e.file_name().to_string_lossy().into_owned())
         .collect();
-    assert!(extra.is_empty(), "机制验证不该在落点里留下任何东西：{:?}", extra);
+    assert!(
+        extra.is_empty(),
+        "机制验证不该在落点里留下任何东西：{:?}",
+        extra
+    );
 }

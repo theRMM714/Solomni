@@ -8,7 +8,9 @@ use std::process::Command;
 
 /// 是否允许跑"会改本机状态"的探针（默认否：测试不该在真机上留下痕迹）。
 fn live_enabled() -> bool {
-    std::env::var("SOLOMNI_FENCE_LIVE").map(|v| v == "1").unwrap_or(false)
+    std::env::var("SOLOMNI_FENCE_LIVE")
+        .map(|v| v == "1")
+        .unwrap_or(false)
 }
 
 /// 未开启就如实跳过（不静默算过，并说清为什么与怎么开）。
@@ -23,11 +25,14 @@ fn skip_unless_live(name: &str) -> bool {
     true
 }
 
-
 /// 探针用的围栏：rw 给一个落点；cwd 用系统目录（容器默认可读，避免把"CWD 能不能读"混进断言）。
 fn spec_for(rw: &PathBuf) -> String {
     // prepared = true：这些探针就是要验容器机制本身；ACL 授权由产品在真实会话里做。
-    job_json(std::slice::from_ref(rw), &PathBuf::from("C:\\Windows\\System32"), true)
+    job_json(
+        std::slice::from_ref(rw),
+        &PathBuf::from("C:\\Windows\\System32"),
+        true,
+    )
 }
 
 #[test]
@@ -38,11 +43,19 @@ fn container_starts_and_passes_stdio_through() {
     let dir = scratch("container-ok");
     let (code, out, err) = run_launcher(&spec_for(&dir), "echo container-ok");
     if env_blocks_container(&err) {
-        eprintln!("[探针] 本环境不允许容器围栏：{}（请在普通 shell 里重跑本探针）", err.trim());
+        eprintln!(
+            "[探针] 本环境不允许容器围栏：{}（请在普通 shell 里重跑本探针）",
+            err.trim()
+        );
         return;
     }
     assert!(!err.contains("容器围栏未生效"), "本机应能建起容器：{}", err);
-    assert!(out.contains("container-ok"), "stdout 要透传：{} / {}", out, err);
+    assert!(
+        out.contains("container-ok"),
+        "stdout 要透传：{} / {}",
+        out,
+        err
+    );
     assert_eq!(code, Some(0));
 }
 
@@ -56,10 +69,18 @@ fn container_cannot_read_outside_its_roots() {
     std::fs::write(&secret, "SECRET-DO-NOT-LEAK").unwrap();
     let (code, out, err) = run_launcher(&spec_for(&dir), &format!("type {}", secret.display()));
     if env_blocks_container(&err) {
-        eprintln!("[探针] 本环境不允许容器围栏，跳过越界读断言：{}", err.trim());
+        eprintln!(
+            "[探针] 本环境不允许容器围栏，跳过越界读断言：{}",
+            err.trim()
+        );
         return;
     }
-    assert!(!out.contains("SECRET-DO-NOT-LEAK"), "越界读必须拿不到：{} / {}", out, err);
+    assert!(
+        !out.contains("SECRET-DO-NOT-LEAK"),
+        "越界读必须拿不到：{} / {}",
+        out,
+        err
+    );
     assert_ne!(code, Some(0), "越界读应以非零退出：{} / {}", out, err);
 }
 
@@ -72,7 +93,10 @@ fn container_cannot_write_outside_its_roots() {
     let target = dir.join("should-not-exist.txt");
     let (code, out, err) = run_launcher(&spec_for(&dir), &format!("echo x> {}", target.display()));
     if env_blocks_container(&err) {
-        eprintln!("[探针] 本环境不允许容器围栏，跳过越界写断言：{}", err.trim());
+        eprintln!(
+            "[探针] 本环境不允许容器围栏，跳过越界写断言：{}",
+            err.trim()
+        );
         return;
     }
     assert!(!target.exists(), "越界写不该落盘：{} / {}", out, err);
@@ -87,7 +111,11 @@ fn container_has_no_network() {
     // 先在本机（容器外）证明那个监听确实连得上，再在容器里证明连不上——否则这条断言没有意义。
     // 用外网（IP 直连，避开 DNS）而不是回环：AppContainer 的回环本来就可能可连，拿它当断网证据不成立。
     let cmd = "curl -s -m 4 -o NUL -w %{http_code} http://1.1.1.1/".to_string();
-    let outside = Command::new("cmd").arg("/C").arg(&cmd).output().expect("容器外跑一遍");
+    let outside = Command::new("cmd")
+        .arg("/C")
+        .arg(&cmd)
+        .output()
+        .expect("容器外跑一遍");
     let outside_code = String::from_utf8_lossy(&outside.stdout).trim().to_string();
     if outside_code.is_empty() || outside_code == "000" {
         eprintln!(
@@ -125,10 +153,17 @@ fn verify_separates_env_unavailable_from_broken_container_steps() {
     }
     let dir = scratch("container-verify");
     // prepared = false：这正是未授权机器上的真实形态（外层不写 ACL，只问机制能不能用）。
-    let spec = job_json(std::slice::from_ref(&dir), &PathBuf::from("C:\\Windows\\System32"), false);
+    let spec = job_json(
+        std::slice::from_ref(&dir),
+        &PathBuf::from("C:\\Windows\\System32"),
+        false,
+    );
     let verdict = verify_fence(&spec, "cmd");
     if verdict_is_env_unavailable(&verdict) {
-        eprintln!("[探针] 本环境不允许建容器 profile（环境结论，如实跳过）：{}", verdict);
+        eprintln!(
+            "[探针] 本环境不允许建容器 profile（环境结论，如实跳过）：{}",
+            verdict
+        );
         return;
     }
     assert!(

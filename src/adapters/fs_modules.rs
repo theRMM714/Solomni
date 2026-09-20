@@ -48,7 +48,11 @@ fn scan_dir(modules_dir: &Path) -> Roster {
         };
         match serde_yaml::from_str::<ModuleManifest>(&yaml_text) {
             Ok(m) => {
-                let dir_name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
+                let dir_name = path
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_string();
                 if m.id != dir_name {
                     rejected.push(format!("{}: id '{}' 与文件夹名不一致", dir_name, m.id));
                     continue;
@@ -61,7 +65,10 @@ fn scan_dir(modules_dir: &Path) -> Roster {
                     rejected.push(format!("{}: {}", dir_name, why));
                     continue;
                 }
-                modules.push(Module { manifest: m, root: path });
+                modules.push(Module {
+                    manifest: m,
+                    root: path,
+                });
             }
             Err(e) => rejected.push(format!(
                 "{}: module.yaml 非法（{}）",

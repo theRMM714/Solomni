@@ -58,7 +58,10 @@ impl ModelCatalog for HttpModelCatalog {
             &candidates,
             |url| self.fetch(url, provider),
             |url, err, next| {
-                self.log.warn("model_catalog::list_models", &format!("端点 {} 不可用（{}），改试 {}", url, err, next));
+                self.log.warn(
+                    "model_catalog::list_models",
+                    &format!("端点 {} 不可用（{}），改试 {}", url, err, next),
+                );
             },
         );
         match outcome {
@@ -67,7 +70,10 @@ impl ModelCatalog for HttpModelCatalog {
                 Ok(models)
             }
             Err(e) => {
-                self.log.error("model_catalog::list_models", &format!("供应商 {} 全部候选端点失败：{}", provider.base_url, e));
+                self.log.error(
+                    "model_catalog::list_models",
+                    &format!("供应商 {} 全部候选端点失败：{}", provider.base_url, e),
+                );
                 Err(e)
             }
         }
@@ -77,7 +83,8 @@ impl ModelCatalog for HttpModelCatalog {
 /// 解析 OpenAI 兼容 /models 响应：取 data[].id，按出现顺序去重。
 /// 形状不符或空列表 = 报错暴露，不静默兜底。
 pub fn parse_models(body: &str) -> Result<Vec<String>, String> {
-    let v: serde_json::Value = serde_json::from_str(body).map_err(|e| format!("响应不是 JSON：{}", e))?;
+    let v: serde_json::Value =
+        serde_json::from_str(body).map_err(|e| format!("响应不是 JSON：{}", e))?;
     let arr = v.get("data").and_then(|d| d.as_array()).ok_or_else(|| {
         let snippet: String = body.chars().take(200).collect();
         format!("响应缺少 data 数组：{}", snippet)

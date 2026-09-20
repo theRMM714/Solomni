@@ -69,20 +69,28 @@ impl Sandbox {
         let spec = raw.trim();
         // 所有拒绝都附上"允许的根目录"，模型照着改。
         let deny = |why: String| {
-            self.texts
-                .render(&self.texts.roots_wrapper, &[("why", why), ("roots", self.roots_listing())])
+            self.texts.render(
+                &self.texts.roots_wrapper,
+                &[("why", why), ("roots", self.roots_listing())],
+            )
         };
         if spec.is_empty() {
             return Err(deny(self.texts.path_empty.clone()));
         }
         let p = Path::new(spec);
         if !p.is_absolute() {
-            return Err(deny(self.texts.render(&self.texts.path_need_absolute, &[("path", spec.to_string())])));
+            return Err(deny(self.texts.render(
+                &self.texts.path_need_absolute,
+                &[("path", spec.to_string())],
+            )));
         }
         // 空段（连续分隔符）：components() 会吞掉，这里如实挡掉。
         let flat = spec.replace('\\', "/");
         if flat.trim_start_matches('/').contains("//") {
-            return Err(deny(self.texts.render(&self.texts.path_empty_segment, &[("path", spec.to_string())])));
+            return Err(deny(self.texts.render(
+                &self.texts.path_empty_segment,
+                &[("path", spec.to_string())],
+            )));
         }
         let mut norm = PathBuf::new();
         for c in p.components() {
@@ -90,10 +98,16 @@ impl Sandbox {
                 Component::Prefix(_) | Component::RootDir => norm.push(c.as_os_str()),
                 Component::Normal(s) => norm.push(s),
                 Component::CurDir => {
-                    return Err(deny(self.texts.render(&self.texts.path_cur_dir, &[("path", spec.to_string())])))
+                    return Err(deny(
+                        self.texts
+                            .render(&self.texts.path_cur_dir, &[("path", spec.to_string())]),
+                    ))
                 }
                 Component::ParentDir => {
-                    return Err(deny(self.texts.render(&self.texts.path_parent_dir, &[("path", spec.to_string())])))
+                    return Err(deny(self.texts.render(
+                        &self.texts.path_parent_dir,
+                        &[("path", spec.to_string())],
+                    )))
                 }
             }
         }
@@ -109,13 +123,19 @@ impl Sandbox {
         }
         match best {
             Some((place, _)) => Ok((place, norm)),
-            None => Err(deny(self.texts.render(&self.texts.path_outside_roots, &[("path", spec.to_string())]))),
+            None => Err(deny(self.texts.render(
+                &self.texts.path_outside_roots,
+                &[("path", spec.to_string())],
+            ))),
         }
     }
 
     /// 允许的根：共享区、私有沙箱、每个成员模块目录（顺序稳定，便于取最长匹配）。
     fn roots(&self) -> Vec<(Place, PathBuf)> {
-        let mut v = vec![(Place::Shared, self.shared.clone()), (Place::Private, self.private.clone())];
+        let mut v = vec![
+            (Place::Shared, self.shared.clone()),
+            (Place::Private, self.private.clone()),
+        ];
         for (id, root) in &self.modules {
             v.push((Place::Module(id.clone()), root.clone()));
         }
@@ -125,14 +145,16 @@ impl Sandbox {
     /// 允许的根目录清单（错误文案里列全，模型照着改）。
     pub fn roots_listing(&self) -> String {
         let mut lines = vec![
-            self.texts.render(&self.texts.roots_shared, &[("root", slash(&self.shared))]),
-            self.texts.render(&self.texts.roots_private, &[("root", slash(&self.private))]),
+            self.texts
+                .render(&self.texts.roots_shared, &[("root", slash(&self.shared))]),
+            self.texts
+                .render(&self.texts.roots_private, &[("root", slash(&self.private))]),
         ];
         for (id, root) in &self.modules {
-            lines.push(
-                self.texts
-                    .render(&self.texts.roots_module, &[("id", id.clone()), ("root", slash(root))]),
-            );
+            lines.push(self.texts.render(
+                &self.texts.roots_module,
+                &[("id", id.clone()), ("root", slash(root))],
+            ));
         }
         lines.join("\n")
     }

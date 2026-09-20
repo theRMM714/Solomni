@@ -43,11 +43,13 @@ pub struct ToolDecl {
 impl ToolDecl {
     /// 参数契约的声明形态（校验与渲染共用）；没声明参数 = None = 不校验。
     pub fn schema(&self) -> Option<crate::core::schema::ToolSchema> {
-        self.params.as_ref().map(|p| crate::core::schema::ToolSchema {
-            desc: self.desc.clone(),
-            params: Some(p.clone()),
-            parallel: self.parallel,
-        })
+        self.params
+            .as_ref()
+            .map(|p| crate::core::schema::ToolSchema {
+                desc: self.desc.clone(),
+                params: Some(p.clone()),
+                parallel: self.parallel,
+            })
     }
 }
 
@@ -119,8 +121,12 @@ pub fn agent_system(
             (
                 "tool_calling",
                 match mode {
-                    crate::core::providers::ToolMode::Native => prompts.core.tool_calling_native.clone(),
-                    crate::core::providers::ToolMode::Envelope => prompts.core.tool_calling_envelope.clone(),
+                    crate::core::providers::ToolMode::Native => {
+                        prompts.core.tool_calling_native.clone()
+                    }
+                    crate::core::providers::ToolMode::Envelope => {
+                        prompts.core.tool_calling_envelope.clone()
+                    }
                 },
             ),
         ],
@@ -148,7 +154,11 @@ pub fn module_tool_params(prompts: &crate::core::prompt::Prompts, modules: &[Mod
     if sections.is_empty() {
         return prompts.core.no_module_tool_params.clone();
     }
-    format!("{}\n{}", prompts.core.module_tool_params_header, sections.join("\n"))
+    format!(
+        "{}\n{}",
+        prompts.core.module_tool_params_header,
+        sections.join("\n")
+    )
 }
 
 /// 该 agent 的外部工具清单：**按模块分组，每行一个模块**（模块 id：工具名、…）。
@@ -166,7 +176,10 @@ pub fn module_tools(prompts: &crate::core::prompt::Prompts, modules: &[Module]) 
                 .cloned()
                 .collect::<Vec<_>>()
                 .join(&texts.tool_list_separator);
-            texts.render(&texts.module_tools_line, &[("id", m.manifest.id.clone()), ("tools", names)])
+            texts.render(
+                &texts.module_tools_line,
+                &[("id", m.manifest.id.clone()), ("tools", names)],
+            )
         })
         .collect();
     if lines.is_empty() {
@@ -187,7 +200,15 @@ pub fn listing(roster: &Roster, texts: &crate::core::prompt::ToolTexts) -> Strin
     roster
         .modules
         .iter()
-        .map(|m| texts.render(&texts.module_listing_line, &[("id", m.manifest.id.clone()), ("brief", m.manifest.brief.clone())]))
+        .map(|m| {
+            texts.render(
+                &texts.module_listing_line,
+                &[
+                    ("id", m.manifest.id.clone()),
+                    ("brief", m.manifest.brief.clone()),
+                ],
+            )
+        })
         .collect::<Vec<_>>()
         .join("\n")
 }

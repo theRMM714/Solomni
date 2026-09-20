@@ -18,10 +18,14 @@ fn fence_denies_outside_paths_and_allows_the_given_roots() {
     let secret = outside.join("secret.txt");
     std::fs::write(&secret, "SECRET-DO-NOT-LEAK").unwrap();
     // prepared = false：macOS 的 seatbelt 在守门进程里自足，没有"外层先授权"这一步。
-    let spec = job_json(&[inside.clone()], &inside, false);
+    let spec = job_json(std::slice::from_ref(&inside), &inside, false);
 
     // 允许的根里：写得进。
-    let (code, out, err) = run_launcher_env(&spec, &format!("echo ok > {}", inside.join("x.txt").display()), profile);
+    let (code, out, err) = run_launcher_env(
+        &spec,
+        &format!("echo ok > {}", inside.join("x.txt").display()),
+        profile,
+    );
     if err.contains(PROFILE_REJECTED_MARK) {
         // 非法操作名、语法错、转义错都会走到这里：是 profile 写错，不是环境不允许。
         panic!(
@@ -71,7 +75,10 @@ fn verify_separates_env_unavailable_from_a_rejected_profile() {
     let spec = job_json(std::slice::from_ref(&dir), &dir, false);
     let verdict = verify_fence(&spec, "true");
     if verdict_is_env_unavailable(&verdict) {
-        eprintln!("[探针] 本机 seatbelt 不产生实际约束（环境结论，如实跳过）：{}", verdict);
+        eprintln!(
+            "[探针] 本机 seatbelt 不产生实际约束（环境结论，如实跳过）：{}",
+            verdict
+        );
         return;
     }
     assert!(

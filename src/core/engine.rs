@@ -120,7 +120,11 @@ pub fn max_reply(events: &[serde_json::Value]) -> u64 {
             if let Some(r) = l.get("reply").and_then(|x| x.as_u64()) {
                 max = max.max(r);
             }
-            if let Some(r) = l.get("tool").and_then(|t| t.get("reply")).and_then(|x| x.as_u64()) {
+            if let Some(r) = l
+                .get("tool")
+                .and_then(|t| t.get("reply"))
+                .and_then(|x| x.as_u64())
+            {
                 max = max.max(r);
             }
         }
@@ -196,10 +200,19 @@ fn run_branch(
 /// 未声明 = 独占串行；**没写 module 的外部工具也按独占**（那要等 dispatch 才知道是哪个模块，核心不猜）。
 fn is_parallel(ctx: &MemberTools, module: Option<&str>, name: &str) -> bool {
     match module {
-        Some(id) => ctx.modules.get(id).map(|m| m.parallel.contains(name)).unwrap_or(false),
+        Some(id) => ctx
+            .modules
+            .get(id)
+            .map(|m| m.parallel.contains(name))
+            .unwrap_or(false),
         None => {
             crate::core::systool::is_builtin(name)
-                && ctx.sandbox.builtin_tools.get(name).map(|s| s.parallel).unwrap_or(false)
+                && ctx
+                    .sandbox
+                    .builtin_tools
+                    .get(name)
+                    .map(|s| s.parallel)
+                    .unwrap_or(false)
         }
     }
 }
@@ -243,7 +256,9 @@ fn run_batch(
             i += 1;
         }
     }
-    done.into_iter().map(|d| d.expect("每个调用都有执行结果")).collect()
+    done.into_iter()
+        .map(|d| d.expect("每个调用都有执行结果"))
+        .collect()
 }
 
 /// 本成员这次请求要声明的工具（原生通道用）：内置工具 + 模块工具。
@@ -263,9 +278,10 @@ fn tool_decls(ctx: &MemberTools) -> ToolDecls {
     }
     let patch = crate::core::systool::patch_decl();
     taken.push(patch.name.clone());
-    decls
-        .wire
-        .insert(patch.name.clone(), (None, crate::core::systool::PATCH.to_string()));
+    decls.wire.insert(
+        patch.name.clone(),
+        (None, crate::core::systool::PATCH.to_string()),
+    );
     decls.list.push(patch);
     for (id, mt) in &ctx.modules {
         for tool in mt.commands.keys() {
@@ -311,7 +327,10 @@ fn deny(ctx: &MemberTools, why: String) -> ToolOutcome {
     let texts = &ctx.sandbox.texts;
     ToolOutcome {
         ok: false,
-        output: texts.render(&texts.available_wrapper, &[("why", why), ("tools", available_tools(ctx))]),
+        output: texts.render(
+            &texts.available_wrapper,
+            &[("why", why), ("tools", available_tools(ctx))],
+        ),
     }
 }
 
@@ -322,15 +341,18 @@ fn dispatch_external(ctx: &MemberTools, inv: &ToolInvoke) -> (String, ToolOutcom
         Some(m) => m.to_string(),
         None if ctx.modules.len() == 1 => ctx.modules.keys().next().cloned().unwrap_or_default(),
         None => {
-            let why = ctx
-                .sandbox
-                .texts
-                .render(&ctx.sandbox.texts.no_module_field, &[("tool", inv.name.clone())]);
+            let why = ctx.sandbox.texts.render(
+                &ctx.sandbox.texts.no_module_field,
+                &[("tool", inv.name.clone())],
+            );
             return (String::new(), deny(ctx, why));
         }
     };
     let Some(mt) = ctx.modules.get(&module) else {
-        let why = ctx.sandbox.texts.render(&ctx.sandbox.texts.unknown_module, &[("module", module.clone())]);
+        let why = ctx.sandbox.texts.render(
+            &ctx.sandbox.texts.unknown_module,
+            &[("module", module.clone())],
+        );
         return (module.clone(), deny(ctx, why));
     };
     // 运行包未就绪（本档位下该模块的工具不执行）：如实报缺哪个能力，让模型换工具或告诉用户。
@@ -339,7 +361,10 @@ fn dispatch_external(ctx: &MemberTools, inv: &ToolInvoke) -> (String, ToolOutcom
             &ctx.sandbox.texts.module_unavailable,
             &[
                 ("module", module.clone()),
-                ("capability", caps.join(&ctx.sandbox.texts.tool_list_separator)),
+                (
+                    "capability",
+                    caps.join(&ctx.sandbox.texts.tool_list_separator),
+                ),
             ],
         );
         return (module.clone(), deny(ctx, why));
@@ -353,20 +378,29 @@ fn dispatch_external(ctx: &MemberTools, inv: &ToolInvoke) -> (String, ToolOutcom
                 match serde_json::from_str::<serde_json::Value>(&inv.args_json) {
                     Ok(args) => {
                         if let Err(fault) = book.check(&args) {
-                            let why = crate::core::systool::arg_fault_text(&ctx.sandbox.texts, &full, book, &fault);
+                            let why = crate::core::systool::arg_fault_text(
+                                &ctx.sandbox.texts,
+                                &full,
+                                book,
+                                &fault,
+                            );
                             return (module.clone(), deny(ctx, why));
                         }
                     }
                     Err(e) => {
-                        let why = ctx
-                            .sandbox
-                            .texts
-                            .render(&ctx.sandbox.texts.bad_args_json, &[("error", e.to_string())]);
+                        let why = ctx.sandbox.texts.render(
+                            &ctx.sandbox.texts.bad_args_json,
+                            &[("error", e.to_string())],
+                        );
                         return (module.clone(), deny(ctx, why));
                     }
                 }
             }
-            (module, ctx.runner.run(&ctx.fence.at(&mt.root), command, &inv.args_json))
+            (
+                module,
+                ctx.runner
+                    .run(&ctx.fence.at(&mt.root), command, &inv.args_json),
+            )
         }
         None => {
             let why = ctx.sandbox.texts.render(
@@ -390,7 +424,14 @@ pub struct Member {
 
 impl Member {
     pub fn new(id: &str, system: String, chat: BoxedChat) -> Member {
-        Member { id: id.to_string(), system, chat, present: true, agreed: false, tools: None }
+        Member {
+            id: id.to_string(),
+            system,
+            chat,
+            present: true,
+            agreed: false,
+            tools: None,
+        }
     }
 }
 
@@ -426,14 +467,25 @@ pub struct Discussion {
 
 impl Discussion {
     pub fn new(members: Vec<Member>, allow_autonomy: bool, prompts: Prompts) -> Discussion {
-        Discussion { members, transcript: Vec::new(), round: 0, pending_user_answers: Vec::new(), closed: false, allow_autonomy, prompts }
+        Discussion {
+            members,
+            transcript: Vec::new(),
+            round: 0,
+            pending_user_answers: Vec::new(),
+            closed: false,
+            allow_autonomy,
+            prompts,
+        }
     }
 
     /// 首轮：聊天约定 + 用户需求（文案经提示词册渲染）。
     pub fn open(&mut self, task: &str) {
         let opener = self.prompts.render(
             &self.prompts.core.discuss.opener,
-            &[("protocol", self.prompts.core.chat_protocol.clone()), ("task", task.to_string())],
+            &[
+                ("protocol", self.prompts.core.chat_protocol.clone()),
+                ("task", task.to_string()),
+            ],
         );
         for i in 0..self.members.len() {
             let (system, id) = {
@@ -441,9 +493,18 @@ impl Discussion {
                 (m.system.clone(), m.id.clone())
             };
             let msgs = vec![Msg::system(system), Msg::user(opener.clone())];
-            let done = self.members[i].chat.complete(&msgs, CompleteOpts::plain(false), &mut |_| true);
+            let done =
+                self.members[i]
+                    .chat
+                    .complete(&msgs, CompleteOpts::plain(false), &mut |_| true);
             let reply = envelope::parse(&done.raw);
-            self.absorb(&id, reply.verb, reply.text, reply.degraded, done.truncated());
+            self.absorb(
+                &id,
+                reply.verb,
+                reply.text,
+                reply.degraded,
+                done.truncated(),
+            );
         }
         self.round = 1;
     }
@@ -455,11 +516,17 @@ impl Discussion {
             return TurnOut::Done;
         }
         // 轮次边界：本轮的发言都在这条之后（回放时据此重算「本轮谁已同意」）。
-        self.transcript.push(DiscLine { text: format!("[轮次 {}]", self.round + 1), degraded: false });
+        self.transcript.push(DiscLine {
+            text: format!("[轮次 {}]", self.round + 1),
+            degraded: false,
+        });
         // 用户回答优先转达。
         if let Some(ans) = self.pending_user_answers.first().cloned() {
             self.pending_user_answers.remove(0);
-            self.transcript.push(DiscLine { text: format!("[用户] {}", ans), degraded: false });
+            self.transcript.push(DiscLine {
+                text: format!("[用户] {}", ans),
+                degraded: false,
+            });
         }
         // 同意是针对方案的：转录变化后以本轮最新表态为准。
         for m in self.members.iter_mut() {
@@ -478,10 +545,20 @@ impl Discussion {
             }
             let step_prompt = self.prompts.render(
                 &self.prompts.core.discuss.step,
-                &[("transcript", snapshot.iter().map(|l| l.text.clone()).collect::<Vec<_>>().join("\n"))],
+                &[(
+                    "transcript",
+                    snapshot
+                        .iter()
+                        .map(|l| l.text.clone())
+                        .collect::<Vec<_>>()
+                        .join("\n"),
+                )],
             );
             let msgs = vec![Msg::system(system), Msg::user(step_prompt)];
-            let done = self.members[i].chat.complete(&msgs, CompleteOpts::plain(false), &mut |_| true);
+            let done =
+                self.members[i]
+                    .chat
+                    .complete(&msgs, CompleteOpts::plain(false), &mut |_| true);
             let reply = envelope::parse(&done.raw);
             let verb = reply.verb;
             let text = reply.text;
@@ -494,10 +571,16 @@ impl Discussion {
                 Verb::Ask => {
                     if self.allow_autonomy {
                         let note = self.prompts.core.discuss.autonomy_note.clone();
-                        self.transcript.push(DiscLine { text: note, degraded: false });
+                        self.transcript.push(DiscLine {
+                            text: note,
+                            degraded: false,
+                        });
                         continue;
                     }
-                    return TurnOut::AskUser { member: id, question: text };
+                    return TurnOut::AskUser {
+                        member: id,
+                        question: text,
+                    };
                 }
                 Verb::Say | Verb::Tool => {}
             }
@@ -524,23 +607,46 @@ impl Discussion {
         };
         let mut line = format!("[{}:{}] {}", id, tag, text);
         if degraded {
-            line.push_str(&self.prompts.render(&self.prompts.core.tool_texts.discuss_degraded, &[]));
+            line.push_str(
+                &self
+                    .prompts
+                    .render(&self.prompts.core.tool_texts.discuss_degraded, &[]),
+            );
         }
         // 被长度截断：如实写在行尾（与"降级"同一套做法）——模型与用户都看得到
         if truncated {
-            line.push_str(&self.prompts.render(&self.prompts.core.tool_texts.truncated_suffix, &[]));
+            line.push_str(
+                &self
+                    .prompts
+                    .render(&self.prompts.core.tool_texts.truncated_suffix, &[]),
+            );
         }
-        self.transcript.push(DiscLine { text: line, degraded });
+        self.transcript.push(DiscLine {
+            text: line,
+            degraded,
+        });
     }
 
     /// 全员同意后：核心整理——总结讨论，为每个留下的成员写执行任务提示词。
     pub fn synthesize(&self, core_chat: &mut dyn Chat) -> String {
         let user = self.prompts.render(
             &self.prompts.core.synthesize.user,
-            &[("transcript", self.transcript.iter().map(|l| l.text.clone()).collect::<Vec<_>>().join("\n"))],
+            &[(
+                "transcript",
+                self.transcript
+                    .iter()
+                    .map(|l| l.text.clone())
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+            )],
         );
-        let msgs = vec![Msg::system(self.prompts.core.synthesize.system.clone()), Msg::user(user)];
-        core_chat.complete(&msgs, CompleteOpts::plain(false), &mut |_| true).raw
+        let msgs = vec![
+            Msg::system(self.prompts.core.synthesize.system.clone()),
+            Msg::user(user),
+        ];
+        core_chat
+            .complete(&msgs, CompleteOpts::plain(false), &mut |_| true)
+            .raw
     }
 }
 
@@ -570,18 +676,33 @@ pub struct Execution {
 
 impl Execution {
     pub fn new() -> Execution {
-        Execution { reports: BTreeMap::new(), traces: BTreeMap::new(), checklist_raw: String::new(), items: Vec::new(), rework: 0 }
+        Execution {
+            reports: BTreeMap::new(),
+            traces: BTreeMap::new(),
+            checklist_raw: String::new(),
+            items: Vec::new(),
+            rework: 0,
+        }
     }
 
     /// 执行：各在组成员按任务回报（文案经提示词册渲染）；声明了工具的成员走工具循环。
     pub fn run(members: &mut [Member], tasks: &str, prompts: &Prompts) -> Execution {
         let mut exec = Execution::new();
-        exec.collect_reports(members, prompts.render(&prompts.core.execute.user, &[("tasks", tasks.to_string())]));
+        exec.collect_reports(
+            members,
+            prompts.render(&prompts.core.execute.user, &[("tasks", tasks.to_string())]),
+        );
         exec
     }
 
     /// 返工：把验收差距发回各在组成员，重取回报（次数由调用方受 MAX_REWORK 约束）。
-    pub fn rerun(&mut self, members: &mut [Member], tasks: &str, review_text: &str, prompts: &Prompts) {
+    pub fn rerun(
+        &mut self,
+        members: &mut [Member],
+        tasks: &str,
+        review_text: &str,
+        prompts: &Prompts,
+    ) {
         self.rework += 1;
         for m in members.iter_mut() {
             if !m.present {
@@ -592,7 +713,10 @@ impl Execution {
                 &[
                     ("tasks", tasks.to_string()),
                     ("review", review_text.to_string()),
-                    ("report", self.reports.get(&m.id).cloned().unwrap_or_default()),
+                    (
+                        "report",
+                        self.reports.get(&m.id).cloned().unwrap_or_default(),
+                    ),
                 ],
             );
             let (text, views) = self.collect_one(m, user);
@@ -615,8 +739,20 @@ impl Execution {
 
     /// 单成员一次问询：拆字段借用（chat 可变 / tools 只读互不冲突），工具调用入册。
     fn collect_one(&mut self, m: &mut Member, user_prompt: String) -> (String, Vec<ToolCallView>) {
-        let Member { id, system, chat, tools, .. } = m;
-        converse(system, chat.as_mut(), tools.as_mut(), id, Msg::user(user_prompt))
+        let Member {
+            id,
+            system,
+            chat,
+            tools,
+            ..
+        } = m;
+        converse(
+            system,
+            chat.as_mut(),
+            tools.as_mut(),
+            id,
+            Msg::user(user_prompt),
+        )
     }
 
     /// 验收：核心对照方案逐项核对，输出结构化 pass/fail 清单。
@@ -631,8 +767,13 @@ impl Execution {
             &prompts.core.review.user,
             &[("plan", plan.to_string()), ("reports", reports)],
         );
-        let msgs = vec![Msg::system(prompts.core.review.system.clone()), Msg::user(user)];
-        let raw = core_chat.complete(&msgs, CompleteOpts::plain(false), &mut |_| true).raw;
+        let msgs = vec![
+            Msg::system(prompts.core.review.system.clone()),
+            Msg::user(user),
+        ];
+        let raw = core_chat
+            .complete(&msgs, CompleteOpts::plain(false), &mut |_| true)
+            .raw;
         self.items = envelope::extract_json_array(&raw)
             .and_then(|arr| serde_json::from_str::<Vec<CheckItem>>(&arr).ok())
             .unwrap_or_default();
@@ -641,7 +782,11 @@ impl Execution {
 
     pub fn all_pass(&self) -> bool {
         // 清单为空（解析失败）= 保守判否；有清单则逐项全过才通过。
-        !self.items.is_empty() && self.items.iter().all(|i| i.status.eq_ignore_ascii_case("pass"))
+        !self.items.is_empty()
+            && self
+                .items
+                .iter()
+                .all(|i| i.status.eq_ignore_ascii_case("pass"))
     }
 }
 
@@ -929,10 +1074,21 @@ pub(crate) fn converse_with(
                         rounds.push(Round {
                             reply: reply_id,
                             // 正文只挂在本回复的第一条工具行上（只显示一条，不重复）
-                            text: if i == 0 { reply_text.clone() } else { String::new() },
+                            text: if i == 0 {
+                                reply_text.clone()
+                            } else {
+                                String::new()
+                            },
                             reasoning: std::mem::take(&mut reasoning),
-                            text_msgs: if i == 0 { vec![msgs_of[0].clone()] } else { Vec::new() },
-                            tool: Some(ToolRun { view, msgs: vec![msgs_of[i + 1].clone()] }),
+                            text_msgs: if i == 0 {
+                                vec![msgs_of[0].clone()]
+                            } else {
+                                Vec::new()
+                            },
+                            tool: Some(ToolRun {
+                                view,
+                                msgs: vec![msgs_of[i + 1].clone()],
+                            }),
                             finish: finish.clone(),
                         });
                         if rounds.len() >= MAX_TOOL_CALLS {
@@ -971,7 +1127,10 @@ pub(crate) fn converse_with(
                             text: reply.text.clone(),
                             reasoning,
                             text_msgs: vec![msgs_of[0].clone()],
-                            tool: Some(ToolRun { view, msgs: vec![msgs_of[1].clone()] }),
+                            tool: Some(ToolRun {
+                                view,
+                                msgs: vec![msgs_of[1].clone()],
+                            }),
                             finish: finish.clone(),
                         });
                         if rounds.len() >= MAX_TOOL_CALLS {
@@ -1023,7 +1182,10 @@ pub(crate) fn converse_with(
                     text: reply.text.clone(),
                     reasoning,
                     text_msgs: vec![msgs_of[0].clone()],
-                    tool: Some(ToolRun { view, msgs: vec![msgs_of[1].clone()] }),
+                    tool: Some(ToolRun {
+                        view,
+                        msgs: vec![msgs_of[1].clone()],
+                    }),
                     finish: finish.clone(),
                 });
                 if rounds.len() >= MAX_TOOL_CALLS {
@@ -1044,7 +1206,11 @@ pub(crate) fn converse_with(
                     .iter()
                     .map(|t| {
                         let freeform = crate::core::systool::is_freeform(&t.name);
-                        let args = if freeform { t.body.clone() } else { t.args_json.clone() };
+                        let args = if freeform {
+                            t.body.clone()
+                        } else {
+                            t.args_json.clone()
+                        };
                         (t.module.clone(), t.name.clone(), args)
                     })
                     .collect();
@@ -1097,10 +1263,21 @@ pub(crate) fn converse_with(
                     on_tool(&view);
                     rounds.push(Round {
                         reply: reply_id,
-                        text: if i == 0 { reply.text.clone() } else { String::new() },
+                        text: if i == 0 {
+                            reply.text.clone()
+                        } else {
+                            String::new()
+                        },
                         reasoning: std::mem::take(&mut reasoning),
-                        text_msgs: if i == 0 { vec![msgs_of[0].clone()] } else { Vec::new() },
-                        tool: Some(ToolRun { view, msgs: vec![msgs_of[i + 1].clone()] }),
+                        text_msgs: if i == 0 {
+                            vec![msgs_of[0].clone()]
+                        } else {
+                            Vec::new()
+                        },
+                        tool: Some(ToolRun {
+                            view,
+                            msgs: vec![msgs_of[i + 1].clone()],
+                        }),
                         finish: finish.clone(),
                     });
                     if rounds.len() >= MAX_TOOL_CALLS {
@@ -1117,8 +1294,19 @@ pub(crate) fn converse_with(
                 // 否则实时历史会比重建历史多一条空消息。
                 let text = reply.text;
                 let has_line = !text.trim().is_empty() || !reasoning.trim().is_empty();
-                let text_msgs = if has_line { vec![Msg::assistant(text.trim().to_string())] } else { Vec::new() };
-                rounds.push(Round { reply: reply_id, text, reasoning, text_msgs, tool: None, finish });
+                let text_msgs = if has_line {
+                    vec![Msg::assistant(text.trim().to_string())]
+                } else {
+                    Vec::new()
+                };
+                rounds.push(Round {
+                    reply: reply_id,
+                    text,
+                    reasoning,
+                    text_msgs,
+                    tool: None,
+                    finish,
+                });
                 return rounds;
             }
         }

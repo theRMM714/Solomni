@@ -13,7 +13,10 @@ pub struct FakeChat {
 
 impl FakeChat {
     pub fn new(script: Vec<String>) -> FakeChat {
-        FakeChat { script, calls: Vec::new() }
+        FakeChat {
+            script,
+            calls: Vec::new(),
+        }
     }
 
     fn next(&mut self) -> String {
@@ -29,7 +32,12 @@ impl Chat for FakeChat {
     /// 兑现 Chat 端口的流式与中止契约（与 http_chat 同一套语义）：
     /// stream = false 不回调；stream = true 先发 Chunk::Start，再发一条 Chunk::Text（整条脚本）。
     /// on 返回 false = 调用方要求中止，立即停止回调并返回已产出的正文（Start 阶段中止则返回空串）。
-    fn complete(&mut self, messages: &[Msg], opts: CompleteOpts<'_>, on: &mut dyn FnMut(Chunk) -> bool) -> Completion {
+    fn complete(
+        &mut self,
+        messages: &[Msg],
+        opts: CompleteOpts<'_>,
+        on: &mut dyn FnMut(Chunk) -> bool,
+    ) -> Completion {
         self.calls.push(messages.to_vec());
         let stream = opts.stream;
         let text = self.next();
@@ -55,13 +63,20 @@ impl ChatGateway for DemoGateway {
         Err("演示通道没有真实供应商，测不了工具调用支持".to_string())
     }
 
-    fn member_channel(&self, _channel: Option<&Channel>, module_id: &str) -> (BoxedChat, Option<String>) {
+    fn member_channel(
+        &self,
+        _channel: Option<&Channel>,
+        module_id: &str,
+    ) -> (BoxedChat, Option<String>) {
         (
             Box::new(FakeChat::new(vec![format!(
                 "{{\"type\":\"say\",\"text\":\"（演示）{} 收到。\"}}",
                 module_id
             )])),
-            Some(format!("[{}] 未配置模型通道，使用内置假模型演示", module_id)),
+            Some(format!(
+                "[{}] 未配置模型通道，使用内置假模型演示",
+                module_id
+            )),
         )
     }
 

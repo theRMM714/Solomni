@@ -33,7 +33,11 @@ impl PackageSource for FsPackages {
             if !path.is_dir() {
                 continue;
             }
-            let folder = path.file_name().unwrap_or_default().to_string_lossy().to_string();
+            let folder = path
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string();
             let yaml_path = path.join("package.yaml");
             let text = match std::fs::read_to_string(&yaml_path) {
                 Ok(t) => t,

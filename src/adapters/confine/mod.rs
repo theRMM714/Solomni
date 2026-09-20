@@ -97,8 +97,14 @@ impl FenceJob {
             Ok(serde_json::Value::Object(o)) => o,
             _ => serde_json::Map::new(),
         };
-        fields.insert("prepared".to_string(), serde_json::Value::Bool(self.prepared));
-        fields.insert("home".to_string(), serde_json::to_value(&self.home).unwrap_or(serde_json::Value::Null));
+        fields.insert(
+            "prepared".to_string(),
+            serde_json::Value::Bool(self.prepared),
+        );
+        fields.insert(
+            "home".to_string(),
+            serde_json::to_value(&self.home).unwrap_or(serde_json::Value::Null),
+        );
         serde_json::Value::Object(fields).to_string()
     }
 
@@ -114,7 +120,11 @@ impl FenceJob {
             home: Option<PathBuf>,
         }
         serde_json::from_str::<Raw>(text)
-            .map(|raw| FenceJob { spec: raw.spec, prepared: raw.prepared, home: raw.home })
+            .map(|raw| FenceJob {
+                spec: raw.spec,
+                prepared: raw.prepared,
+                home: raw.home,
+            })
             .map_err(|e| format!("围栏参数非法：{}", e))
     }
 }
@@ -122,7 +132,10 @@ impl FenceJob {
 /// 组装守门进程的命令行：工具命令作为**数据**传递（不拼进 shell 字符串，杜绝注入）。
 pub fn launcher(exe: &Path, job: &FenceJob, command: &str) -> Command {
     let mut cmd = Command::new(exe);
-    cmd.arg(FENCE_FLAG).arg(job.to_json()).arg("--").arg(command);
+    cmd.arg(FENCE_FLAG)
+        .arg(job.to_json())
+        .arg("--")
+        .arg(command);
     cmd
 }
 
@@ -233,7 +246,11 @@ fn interpreter_dirs_in(
     let mut candidates: Vec<String> = Vec::new();
     for raw in command.split([' ', '\t', '&', '|', ';', '\n']) {
         let token = raw.trim_matches(|c| c == '"' || c == '\'' || c == '(' || c == ')');
-        if token.is_empty() || token.starts_with('-') || token.starts_with('/') || token.starts_with('%') {
+        if token.is_empty()
+            || token.starts_with('-')
+            || token.starts_with('/')
+            || token.starts_with('%')
+        {
             continue;
         }
         // 绝对路径：只有「可执行文件」才算程序（命令里的数据文件路径不是解释器——
@@ -350,8 +367,16 @@ pub fn shell_command(command: &str) -> Command {
 /// 解释器需要 HOME/TEMP 这类落点：全部指到该 agent 的私有沙箱里（缓存与临时文件落在工作区内）。
 pub fn fence_env(spec: &FenceSpec) -> Vec<(OsString, OsString)> {
     let keep = [
-        "PATH", "PATHEXT", "SystemRoot", "WINDIR", "COMSPEC", "ComSpec", "SYSTEMDRIVE",
-        "LANG", "LC_ALL", "TZ",
+        "PATH",
+        "PATHEXT",
+        "SystemRoot",
+        "WINDIR",
+        "COMSPEC",
+        "ComSpec",
+        "SYSTEMDRIVE",
+        "LANG",
+        "LC_ALL",
+        "TZ",
     ];
     let mut out: Vec<(OsString, OsString)> = Vec::new();
     for k in keep {
@@ -367,13 +392,23 @@ pub fn fence_env(spec: &FenceSpec) -> Vec<(OsString, OsString)> {
     out.push((OsString::from("HOME"), home.clone().into_os_string()));
     // Windows 建 AppContainer 进程要读它：白名单里没有它就 CreateProcessW 直接失败（os error 203），
     // 容器整条路会静默降级成无围栏执行。落点同样指进该 agent 的私有沙箱。
-    out.push((OsString::from("LOCALAPPDATA"), home.clone().into_os_string()));
+    out.push((
+        OsString::from("LOCALAPPDATA"),
+        home.clone().into_os_string(),
+    ));
     out.push((OsString::from("USERPROFILE"), home.clone().into_os_string()));
     out.push((OsString::from("TEMP"), home.clone().into_os_string()));
     out.push((OsString::from("TMP"), home.clone().into_os_string()));
     // macOS / Linux 认 TMPDIR：不设的话进程会去读系统临时区（那不在可达范围内）。
     out.push((OsString::from("TMPDIR"), home.into_os_string()));
     out
+}
+
+impl FenceSpec {
+    /// 该 agent 的私有沙箱（没有就退回工作目录）——环境里的 HOME / TEMP 落点。
+    pub fn private_or_cwd(&self) -> PathBuf {
+        self.rw.get(1).cloned().unwrap_or_else(|| self.cwd.clone())
+    }
 }
 
 #[cfg(test)]
@@ -384,14 +419,34 @@ mod tests {
     /// 一旦返回 / 就等于把整盘放行（macOS 的 seatbelt 会因此形同虚设，真机上已抓到过一次）。
     #[test]
     fn install_dir_never_climbs_to_the_filesystem_root() {
-        let root = if cfg!(windows) { PathBuf::from("C:\\") } else { PathBuf::from("/") };
-        assert_eq!(install_dir(&root.join("bin")), root.join("bin"), "根下的 bin 不再上溯");
+        let root = if cfg!(windows) {
+            PathBuf::from("C:\\")
+        } else {
+            PathBuf::from("/")
+        };
+        assert_eq!(
+            install_dir(&root.join("bin")),
+            root.join("bin"),
+            "根下的 bin 不再上溯"
+        );
         assert_eq!(install_dir(&root), root, "根就是根");
         let deep = root.join("home").join("u").join(".venv").join("bin");
-        assert_eq!(install_dir(&deep), root.join("home").join("u").join(".venv"), "普通布局上溯一层");
+        assert_eq!(
+            install_dir(&deep),
+            root.join("home").join("u").join(".venv"),
+            "普通布局上溯一层"
+        );
         let scripts = root.join("home").join("u").join("env").join("Scripts");
-        assert_eq!(install_dir(&scripts), root.join("home").join("u").join("env"), "Scripts 布局同样上溯");
-        assert_eq!(install_dir(&root.join("usr").join("local").join("bin")), root.join("usr").join("local"), "usr/local/bin 上溯到 usr/local");
+        assert_eq!(
+            install_dir(&scripts),
+            root.join("home").join("u").join("env"),
+            "Scripts 布局同样上溯"
+        );
+        assert_eq!(
+            install_dir(&root.join("usr").join("local").join("bin")),
+            root.join("usr").join("local"),
+            "usr/local/bin 上溯到 usr/local"
+        );
     }
 
     /// cmd 只认程序名里的反斜杠：`build/indexer build` 会被读成命令 build + 开关 /indexer（真机上模块工具因此跑不起来）。
@@ -399,11 +454,26 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn windows_program_separators_rewrites_only_the_program_name() {
-        assert_eq!(windows_program_separators("build/indexer build"), "build\\indexer build");
-        assert_eq!(windows_program_separators("node tools/report.js"), "node tools/report.js");
-        assert_eq!(windows_program_separators("python tools/scan.py extra"), "python tools/scan.py extra");
-        assert_eq!(windows_program_separators(".tools/mingw64/bin/g++.exe -O2"), ".tools\\mingw64\\bin\\g++.exe -O2");
-        assert_eq!(windows_program_separators("build\\indexer build"), "build\\indexer build");
+        assert_eq!(
+            windows_program_separators("build/indexer build"),
+            "build\\indexer build"
+        );
+        assert_eq!(
+            windows_program_separators("node tools/report.js"),
+            "node tools/report.js"
+        );
+        assert_eq!(
+            windows_program_separators("python tools/scan.py extra"),
+            "python tools/scan.py extra"
+        );
+        assert_eq!(
+            windows_program_separators(".tools/mingw64/bin/g++.exe -O2"),
+            ".tools\\mingw64\\bin\\g++.exe -O2"
+        );
+        assert_eq!(
+            windows_program_separators("build\\indexer build"),
+            "build\\indexer build"
+        );
         assert_eq!(windows_program_separators("\"a/b\" rest"), "\"a\\b\" rest");
         assert_eq!(windows_program_separators("plain"), "plain");
     }
@@ -418,7 +488,11 @@ mod tests {
             cwd: PathBuf::from("mods").join("m0"),
             net: false,
         };
-        let job = FenceJob { spec, prepared: true, home: Some(PathBuf::from("home")) };
+        let job = FenceJob {
+            spec,
+            prepared: true,
+            home: Some(PathBuf::from("home")),
+        };
         let text = job.to_json();
         assert!(text.contains("\"prepared\":true"), "{}", text);
         assert_eq!(FenceJob::from_json(&text).expect("回读守门进程入参"), job);
@@ -429,8 +503,15 @@ mod tests {
             cwd: PathBuf::from("mods").join("m1"),
             net: true,
         };
-        let no_home = FenceJob { spec: bare, prepared: false, home: None };
-        assert_eq!(FenceJob::from_json(&no_home.to_json()).expect("回读"), no_home);
+        let no_home = FenceJob {
+            spec: bare,
+            prepared: false,
+            home: None,
+        };
+        assert_eq!(
+            FenceJob::from_json(&no_home.to_json()).expect("回读"),
+            no_home
+        );
         assert!(FenceJob::from_json("{}").is_err(), "缺字段必须报错，不猜");
         assert!(FenceJob::from_json("这不是 JSON").is_err());
     }
@@ -442,7 +523,11 @@ mod tests {
         let root = crate::tests::scratch("interpreter-dirs");
         let pydir = root.join("pydir");
         std::fs::create_dir_all(&pydir).expect("建解释器目录");
-        let exe = pydir.join(if cfg!(windows) { "python.exe" } else { "python" });
+        let exe = pydir.join(if cfg!(windows) {
+            "python.exe"
+        } else {
+            "python"
+        });
         std::fs::write(&exe, b"#!/bin/sh\nexit 0\n").expect("放一个假解释器");
         #[cfg(unix)]
         {
@@ -469,7 +554,9 @@ mod tests {
             "带引号的 PATH 项也要能解析"
         );
         assert!(
-            interpreter_dirs_in(&format!("cat {}", exe.display()), path, None).iter().all(|d| d != &pydir),
+            interpreter_dirs_in(&format!("cat {}", exe.display()), path, None)
+                .iter()
+                .all(|d| d != &pydir),
             "数据文件路径不算解释器（否则等于给围栏开洞）"
         );
         let _ = std::fs::remove_dir_all(&root);
@@ -479,7 +566,11 @@ mod tests {
     /// 数据文件路径不算解释器（否则会把那个文件放行，等于开洞）。
     #[test]
     fn interpreter_dirs_resolves_programs_but_not_data_files() {
-        let cmd = if cfg!(windows) { "cmd /C echo hi" } else { "sh -c 'echo hi'" };
+        let cmd = if cfg!(windows) {
+            "cmd /C echo hi"
+        } else {
+            "sh -c 'echo hi'"
+        };
         let dirs = interpreter_dirs(cmd);
         assert!(!dirs.is_empty(), "系统 shell 应当能被解析出来：{:?}", dirs);
         for d in &dirs {
@@ -487,17 +578,16 @@ mod tests {
             assert!(d.parent().is_some(), "绝不报文件系统根：{:?}", d);
         }
         // 明确的非程序路径（一个不存在的文件）不该被当成解释器。
-        let missing = if cfg!(windows) { "C:\\nope\\nope.exe" } else { "/nope/nope" };
+        let missing = if cfg!(windows) {
+            "C:\\nope\\nope.exe"
+        } else {
+            "/nope/nope"
+        };
         assert!(
-            interpreter_dirs(&format!("cat {}", missing)).iter().all(|d| !d.ends_with("nope")),
+            interpreter_dirs(&format!("cat {}", missing))
+                .iter()
+                .all(|d| !d.ends_with("nope")),
             "数据/缺失路径不该被当成解释器"
         );
-    }
-}
-
-impl FenceSpec {
-    /// 该 agent 的私有沙箱（没有就退回工作目录）——环境里的 HOME / TEMP 落点。
-    pub fn private_or_cwd(&self) -> PathBuf {
-        self.rw.get(1).cloned().unwrap_or_else(|| self.cwd.clone())
     }
 }

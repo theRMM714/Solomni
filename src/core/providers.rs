@@ -80,7 +80,12 @@ fn default_true() -> bool {
 
 impl Default for AppSettings {
     fn default() -> Self {
-        AppSettings { streaming: true, show_reasoning: true, tier: crate::core::exec::Tier::Host, fence_write: false }
+        AppSettings {
+            streaming: true,
+            show_reasoning: true,
+            tier: crate::core::exec::Tier::Host,
+            fence_write: false,
+        }
     }
 }
 
@@ -107,12 +112,18 @@ pub struct Channel {
 impl Settings {
     /// 模型 id → 成品通道；模型或供应商缺失 = 报错（不猜测回退）。
     pub fn resolve(&self, model_id: &str) -> Result<Channel, String> {
-        let m = self.models.get(model_id).ok_or_else(|| format!("无此模型：{}", model_id))?;
+        let m = self
+            .models
+            .get(model_id)
+            .ok_or_else(|| format!("无此模型：{}", model_id))?;
         let p = self
             .providers
             .get(&m.provider)
             .ok_or_else(|| format!("模型 {} 引用的供应商不存在：{}", model_id, m.provider))?;
-        Ok(Channel { provider: p.clone(), model: m.api_model.clone() })
+        Ok(Channel {
+            provider: p.clone(),
+            model: m.api_model.clone(),
+        })
     }
 
     /// 某 agent 的工具调用形态：它自己的模型优先，其次核心默认；两者都没有 = envelope（兜底，任何供应商都能用）。
@@ -133,7 +144,10 @@ impl Settings {
     pub fn provider_views(&self) -> Vec<ProviderView> {
         self.providers
             .iter()
-            .map(|(id, p)| ProviderView { id: id.clone(), base_url: p.base_url.clone() })
+            .map(|(id, p)| ProviderView {
+                id: id.clone(),
+                base_url: p.base_url.clone(),
+            })
             .collect()
     }
 
@@ -152,7 +166,6 @@ impl Settings {
             })
             .collect()
     }
-
 }
 
 /// 供应商展示视图（不含密钥）。

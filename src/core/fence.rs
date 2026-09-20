@@ -25,7 +25,12 @@ impl FenceSpec {
     pub fn from_sandbox(sb: &Sandbox, net: bool) -> FenceSpec {
         let mut rw = vec![sb.shared.clone(), sb.private.clone()];
         rw.extend(sb.modules.values().cloned());
-        FenceSpec { agent: sb.agent.clone(), rw, cwd: PathBuf::new(), net }
+        FenceSpec {
+            agent: sb.agent.clone(),
+            rw,
+            cwd: PathBuf::new(),
+            net,
+        }
     }
 
     /// 把这个围栏的工作目录设成某个模块的根（该模块的工具就在这里跑）。
@@ -34,5 +39,4 @@ impl FenceSpec {
         out.cwd = module_root.to_path_buf();
         out
     }
-
 }

@@ -37,16 +37,17 @@ cargo tree --duplicates
 
 `cargo tree --duplicates` 只检查依赖树中的重复版本，不等于源码重复检查。`clippy` 也不能替代业务测试。三者的职责必须分开记录。
 
-当前状态：四项都已并入 `node run-tests.js`，但**强度分两级**：
+当前状态：六项全部并入 `node run-tests.js`，且**全是零容忍硬失败**（没有存量基线）：
 
-- **硬失败**：`cargo check --all-targets` 与结构审查（测试目标登记、孤儿测试文件、缺口账格式）——不通过即 `TEST-REPORT-FAIL`；
-- **基线比对**：`cargo fmt --all -- --check`、`cargo clippy --all-targets --all-features -- -D warnings`、
-  `cargo check` 的 rustc 告警数、`cargo tree --duplicates`——与 `tests/quality-baseline.yaml` 比对：
-  **超出基线即 `quality-fail`**；降到基线以下同样报「基线过期」，要求同步下调基线（不许悄悄恶化）。
-  工具缺失（没装 rustfmt / clippy 组件）记 `env-skip` 并写明怎么装。
+- `cargo check --all-targets`；
+- 结构审查（测试目标登记、孤儿测试文件、缺口账格式、文档链接完整性）；
+- `cargo fmt --all -- --check`；
+- `cargo clippy --all-targets --all-features --keep-going -- -D warnings`；
+- `cargo check` 的 rustc 告警数；
+- `cargo tree --duplicates`。
 
-基线由 `node run-tests.js --print-quality-baseline` 生成，不要手工编辑数字。存量清零、把四项也升级成零容忍硬失败，
-是记在 `tests/gaps.yaml` 的长期目标（`quality.hard-gate-full`）。
+任何一项不过即 `quality-fail`。工具缺失（没装 rustfmt / clippy 组件）记 `env-skip` 并写明怎么装——
+环境跳过不算通过。设计取舍类 lint 要**带理由窄 allow**，清单见 [quality-isolation.md](quality-isolation.md)。
 
 ### T1：单元测试
 

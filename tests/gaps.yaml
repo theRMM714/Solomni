@@ -4,27 +4,6 @@
 # 已经能机器判定的门禁不入账。平台与跨平台层的缺口记在
 # tests/cross-platform/gaps.yaml 与 tests/<平台>/gaps.yaml（它们决定 TEST-REPORT-ACCEPTED）。
 
-- id: quality.hard-gate-full
-  scope: global
-  level: T0
-  why: |
-    T0 现在分两级：编译与结构审查是硬失败；格式、clippy、编译告警、依赖重复走
-    tests/quality-baseline.yaml 的存量基线（超出即失败，降到基线以下要求同步下调）。
-    基线是过渡手段，不是终点——长期目标是存量清零后把这几项也升级成零容忍硬失败。
-  how: |
-    按 tests/quality-baseline.yaml 的清单收敛**剩下的两项**（编译告警与依赖重复此刻已经清零，不再记账）：
-    1) 决定是否接受 cargo fmt 的全仓格式化（会展开现在的紧凑写法）或加 rustfmt.toml 贴近现有风格，
-       然后清空 fmt_deviating_files；
-    2) 逐条修掉 clippy 存量：机械项直接修（unnecessary_cast / unnecessary_map_or / unnecessary_sort_by /
-       collapsible_match / single_match / unnecessary_mut_passed / cloned_ref_to_slice_refs / items_after_test_module），
-       设计取舍项（too_many_arguments / large_enum_variant）要么改签名，要么加**带理由的**窄 allow。
-    每收敛一项就重新生成基线，基线随之变小。
-  accept: |
-    tests/quality-baseline.yaml 里四项（fmt_deviating_files / clippy / check_warnings / duplicates）全部为空或零；
-    run-tests.js 的 T0 四项不再需要基线比对，直接以退出码与零容忍判定；
-    删除本条目与 tests/quality-baseline.yaml。
-  blocked_by: 需要先决定全仓格式化与「带理由 allow」这两项取舍
-
 - id: fence.env-unavailable-observed-by-probes
   scope: global
   level: T4

@@ -61,9 +61,8 @@ cargo run                 # 工具链就绪后最直接的跑法：cargo run -- 
 - **自测**：`node run-tests.js` 跑当前已接入的运行时测试并给出汇总（通过 / 失败 / 环境跳过 / 缺口），**默认零副作用**；
   会改本机状态的测试（写权限项、建容器 profile）要显式 `--fence-live`，只在一次性环境（CI / VM）里开。
   Windows 用 `.\test.bat`（PowerShell）、macOS/Linux 用 `./test.sh`，都是同一入口的薄包装。
-- **质量门禁（T0）已并入同一入口**：编译与结构审查是硬失败；格式、clippy、编译告警、依赖重复按 `tests/quality-baseline.yaml`
-  的存量基线比对——**超出基线即失败**，降到基线以下也会要求同步下调基线（不许悄悄恶化）。
-  存量清零是长期目标，记在 `tests/gaps.yaml`。分层、目录、缺口账与报告格式见 [TESTING.md](TESTING.md) 与 `docs/testing/`。
+- **质量门禁（T0）已并入同一入口，且全部零容忍**：编译、结构审查、格式、clippy、编译告警、依赖重复——
+  任何一项不过即 `quality-fail`（没有存量基线）。分层、目录、缺口账与报告格式见 [TESTING.md](TESTING.md) 与 `docs/testing/`。
 
 ## 跑一遍演示 · Run the Demo
 

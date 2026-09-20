@@ -27,7 +27,11 @@ pub fn render(template: &str, vars: Vars) -> Result<String, String> {
             }
         }
         // 字面 {{（非占位）按原样保留；JSON 示例中的花括号不受影响（单括号）。
-        let ch_len = template[i..].chars().next().map(|c| c.len_utf8()).unwrap_or(1);
+        let ch_len = template[i..]
+            .chars()
+            .next()
+            .map(|c| c.len_utf8())
+            .unwrap_or(1);
         out.push_str(&template[i..i + ch_len]);
         i += ch_len;
     }
@@ -309,13 +313,19 @@ impl ToolTexts {
         if tail.envelopes > 1 {
             return self.render(
                 &self.malformed_multi,
-                &[("n", tail.envelopes.to_string()), ("missing", tail.missing.clone())],
+                &[
+                    ("n", tail.envelopes.to_string()),
+                    ("missing", tail.missing.clone()),
+                ],
             );
         }
         if tail.in_string {
             self.malformed_unclosed_string.clone()
         } else {
-            self.render(&self.malformed_unclosed_brace, &[("missing", tail.missing.clone())])
+            self.render(
+                &self.malformed_unclosed_brace,
+                &[("missing", tail.missing.clone())],
+            )
         }
     }
 
@@ -324,7 +334,10 @@ impl ToolTexts {
         if tail.in_string {
             self.malformed_cut_string.clone()
         } else {
-            self.render(&self.malformed_missing_tail, &[("missing", tail.missing.clone())])
+            self.render(
+                &self.malformed_missing_tail,
+                &[("missing", tail.missing.clone())],
+            )
         }
     }
 
@@ -337,9 +350,15 @@ impl ToolTexts {
                     '\n' => self.control_lf.clone(),
                     '\r' => self.control_cr.clone(),
                     '\t' => self.control_tab.clone(),
-                    other => self.render(&self.control_other, &[("code", format!("{:04X}", *other as u32))]),
+                    other => self.render(
+                        &self.control_other,
+                        &[("code", format!("{:04X}", *other as u32))],
+                    ),
                 };
-                let mut out = self.render(&self.malformed_control, &[("what", what), ("line", line.to_string())]);
+                let mut out = self.render(
+                    &self.malformed_control,
+                    &[("what", what), ("line", line.to_string())],
+                );
                 // 同时还没闭合就一并说清（只说一处会让模型改错方向）
                 if let Some(t) = tail {
                     out.push('\n');
@@ -426,6 +445,7 @@ pub struct AgentPrompts {
 
 impl Prompts {
     pub fn render<'a>(&self, template: &str, vars: Vars<'a>) -> String {
-        render(template, vars).expect("提示词渲染失败：变量缺失属于装配错误，须修复 prompts.yaml 或调用方")
+        render(template, vars)
+            .expect("提示词渲染失败：变量缺失属于装配错误，须修复 prompts.yaml 或调用方")
     }
 }

@@ -12,7 +12,9 @@ pub struct FsSysIo {
 
 impl Default for FsSysIo {
     fn default() -> FsSysIo {
-        FsSysIo { max_read_bytes: 1_000_000 }
+        FsSysIo {
+            max_read_bytes: 1_000_000,
+        }
     }
 }
 
@@ -26,13 +28,21 @@ impl SysIo for FsSysIo {
             Err(e) => {
                 if e.error_len().is_none() && n < total {
                     // 只是切片落在多字节字符中间：退回完整字符边界，不算编码错误。
-                    (String::from_utf8_lossy(&bytes[..e.valid_up_to()]).into_owned(), false)
+                    (
+                        String::from_utf8_lossy(&bytes[..e.valid_up_to()]).into_owned(),
+                        false,
+                    )
                 } else {
                     (String::from_utf8_lossy(&bytes[..n]).into_owned(), true)
                 }
             }
         };
-        Ok(FileRead { text, bytes: total, lossy, cut: n < total })
+        Ok(FileRead {
+            text,
+            bytes: total,
+            lossy,
+            cut: n < total,
+        })
     }
 
     fn write(&self, path: &Path, content: &str) -> Result<(), String> {
