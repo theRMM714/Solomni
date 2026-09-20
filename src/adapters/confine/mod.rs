@@ -439,7 +439,7 @@ mod tests {
     /// 带引号的 PATH 项照样能用——否则容器里的工具连解释器都找不到（真机上就是这么挂的）。
     #[test]
     fn interpreter_dirs_resolves_without_pathext_and_with_quoted_path_entries() {
-        let root = crate::contract_tests::scratch("interpreter-dirs");
+        let root = crate::tests::scratch("interpreter-dirs");
         let pydir = root.join("pydir");
         std::fs::create_dir_all(&pydir).expect("建解释器目录");
         let exe = pydir.join(if cfg!(windows) { "python.exe" } else { "python" });

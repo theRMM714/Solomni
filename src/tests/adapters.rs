@@ -13,7 +13,7 @@ use crate::adapters::model_catalog::HttpModelCatalog;
 use crate::adapters::sys_io::FsSysIo;
 use crate::adapters::yaml_prompts::YamlPrompts;
 use crate::adapters::yaml_settings::YamlSettingsStore;
-use crate::contract_tests::scratch;
+use super::scratch;
 use crate::core::exec::ExecSpec;
 use crate::core::history::{AgentMeta, SessionMeta};
 use crate::core::ports::{

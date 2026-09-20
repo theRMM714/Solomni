@@ -26,15 +26,15 @@
 
 当前仓库已经具备：
 
-- `src/tests.rs` 中的全内存核心测试装配；
+- `src/tests/` 中的测试层：`core.rs`（T1 用例，全内存装配）、`doubles.rs`（替身与装配辅助）；
 - `tests/cross-platform/` 跨平台集成与端到端测试；
 - `tests/windows/`、`tests/linux/`、`tests/macos/` 平台探针（`tests/helpers/probe.rs` 提供共用探针设施）；
 - `src/presentation/web/*.smoke.cjs` 前端冒烟测试；
 - `tests/gaps.yaml` 与 `tests/<平台>/gaps.yaml` 缺口账；
 - `node run-tests.js` 测试汇总入口（`node start.js -test` 是备好环境后的同一入口）；
 - `src/adapters/fake_chat.rs` 中的 `FakeChat` 与 `DemoGateway`；
-- `src/tests.rs` 中的 `InMemory*`、`FakeCatalog`、`VecSource`、`ScriptGateway`、`RecordingRunner`、`RecordingFence`、`TestPrompts`、`NoopLog` 等测试装配（替身支持失败注入，供 T2 复用）；
-- `src/contract_tests/` 中的契约测试（T2）：
+- `src/tests/doubles.rs` 与 `src/tests/core.rs` 中的 `InMemory*`、`FakeCatalog`、`VecSource`、`ScriptGateway`、`RecordingRunner`、`RecordingFence`、`TestPrompts`、`NoopLog` 等测试装配（替身支持失败注入，供 T2 复用）；
+- `src/tests/` 中的契约测试（T2）：
   - `ports.rs`（13 个端口的替身语义）、`fakes.rs`（FakeChat / DemoGateway 的独立契约）；
   - `adapters.rs`（8 个文件系统适配器的真实边界 + 本机环回 HTTP 适配器）；
   - `api.rs`（入站契约：命令与事件、生成期间停止立刻生效、错误如实传播、单条命令 panic 不带垮核心）；

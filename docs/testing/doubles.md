@@ -32,18 +32,18 @@ Fake 必须：
 | --- | --- | --- |
 | `src/adapters/fake_chat.rs:FakeChat` | 脚本模型，同时记录 `calls`，兼具 Fake + Spy | 契约已就位（成功 / 空 / 流式 / 中止 / 记录） |
 | `src/adapters/fake_chat.rs:DemoGateway` | 演示/回落网关 | 契约已就位（两类通道 / 回落告知 / 无网络无密钥） |
-| `src/tests.rs:InMemorySettings`、`InMemoryHistory`、`InMemoryWorkspace`、`InMemorySysIo` | 内存 Fake | 已被核心测试装配使用；需按端口补最小契约覆盖 |
-| `src/tests.rs:InMemoryPackages` | 包库 Fake | 已被核心测试使用；契约矩阵尚未完整登记 |
-| `src/tests.rs:FakeCatalog` | 模型目录 Fake + 调用记录（`seen`） | 已被核心测试使用；契约矩阵尚未完整登记 |
-| `src/tests.rs:VecSource` | 模块清单 Fake | 已被核心测试使用；契约矩阵尚未完整登记 |
-| `src/tests.rs:ScriptGateway`、`SharedScript` | 脚本网关 Fake | 已被核心测试使用；失败/取消场景需单独核对 |
-| `src/tests.rs:TestPrompts` | 提示词册 Fake（返回内存册子） | 已被核心测试使用；契约矩阵尚未完整登记 |
-| `src/tests.rs:RecordingRunner` | 工具执行 Fake + 记录 `calls` | 已被核心测试使用；失败/超时/取消场景需单独核对 |
-| `src/tests.rs:ParallelRunner` | 工具执行 Spy：记录**同时在跑**的峰值 | 已钉住"声明可并发才并发、未声明一律串行" |
-| `src/tests.rs:NativeGateway`、`NativeChat` | 原生通道替身：按脚本发结构化调用，并记录每次请求的声明与消息 | 已钉住协议形状与"实时/重建逐条一致" |
-| `src/tests.rs:SilentRunner` | 守护 Stub：任何调用即 panic | 用于"不该用工具"的路径 |
-| `src/tests.rs:NoFenceHost` | 围栏释放空操作 Stub | 已被核心测试使用 |
-| `src/tests.rs:RecordingFence` | 围栏释放记录型 Spy | 已钉住"删会话即请求撤销授权" |
+| `src/tests/doubles.rs:InMemorySettings`、`InMemoryHistory`、`InMemoryWorkspace`、`InMemorySysIo` | 内存 Fake | 已被核心测试装配使用；需按端口补最小契约覆盖 |
+| `src/tests/doubles.rs:InMemoryPackages` | 包库 Fake | 已被核心测试使用；契约矩阵尚未完整登记 |
+| `src/tests/doubles.rs:FakeCatalog` | 模型目录 Fake + 调用记录（`seen`） | 已被核心测试使用；契约矩阵尚未完整登记 |
+| `src/tests/doubles.rs:VecSource` | 模块清单 Fake | 已被核心测试使用；契约矩阵尚未完整登记 |
+| `src/tests/doubles.rs:ScriptGateway`、`SharedScript` | 脚本网关 Fake | 已被核心测试使用；失败/取消场景需单独核对 |
+| `src/tests/doubles.rs:TestPrompts` | 提示词册 Fake（返回内存册子） | 已被核心测试使用；契约矩阵尚未完整登记 |
+| `src/tests/core.rs:RecordingRunner` | 工具执行 Fake + 记录 `calls` | 已被核心测试使用；失败/超时/取消场景需单独核对 |
+| `src/tests/core.rs:ParallelRunner` | 工具执行 Spy：记录**同时在跑**的峰值 | 已钉住"声明可并发才并发、未声明一律串行" |
+| `src/tests/core.rs:NativeGateway`、`NativeChat` | 原生通道替身：按脚本发结构化调用，并记录每次请求的声明与消息 | 已钉住协议形状与"实时/重建逐条一致" |
+| `src/tests/core.rs:SilentRunner` | 守护 Stub：任何调用即 panic | 用于"不该用工具"的路径 |
+| `src/tests/doubles.rs:NoFenceHost` | 围栏释放空操作 Stub | 已被核心测试使用 |
+| `src/tests/doubles.rs:RecordingFence` | 围栏释放记录型 Spy | 已钉住"删会话即请求撤销授权" |
 | `src/core/ports.rs:NoopLog` | 无声日志 Stub | 已存在；不用于验证日志内容 |
 | `tests/cross-platform/e2e/mock.js` | 本地假供应商服务 | 已用于 T5；应覆盖协议错误、断开、延迟等场景 |
 

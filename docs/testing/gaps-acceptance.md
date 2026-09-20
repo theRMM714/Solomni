@@ -34,8 +34,7 @@ tests/
   ci-publish.mjs                # CI 报告发布脚本（把三平台报告写入 ci-report 分支）
 ```
 
-单元层的契约测试在 `src/contract_tests/`（`ports.rs` / `fakes.rs` / `adapters.rs` / `api.rs` / `intent.rs` / `routes.rs`），替身在 `src/tests.rs`；
-两者合并进 `src/tests/` 目录是记在 `tests/gaps.yaml` 的长期目标（`tests.layout-migration`）。
+单元层的契约测试与替身**同处 `src/tests/`**（契约：`ports.rs` / `fakes.rs` / `adapters.rs` / `api.rs` / `intent.rs` / `routes.rs`；替身：`doubles.rs`；T1 用例：`core.rs`）。
 
 四个平台目标在 `Cargo.toml` 中显式登记。新增测试目标、Fixture 或脚本必须能从入口追溯到执行位置，否则属于结构质量问题。
 

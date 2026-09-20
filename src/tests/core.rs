@@ -1,19 +1,18 @@
-//! 核心测试：全内存装配（InMemoryStore + VecSource + ScriptGateway），不碰文件系统。
-//! 测试里的组合根 = 内存适配器；core 的可测性正是端口化的直接收益。
-//! Web 阶段适配：适配器以 Arc 注入；会话经中心 id 收发；SharedScript 对齐真实通道时序。
+//! 核心测试（T1）：全内存装配，不碰文件系统。
+//! 替身与装配辅助见 super::doubles；层级与判定见 docs/testing/levels.md。
 
+use super::doubles::*;
 use crate::adapters::fake_chat::FakeChat;
 use crate::core::engine::{Discussion, Member, MemberTools, ModuleTools, TurnOut, MAX_ROUNDS, MAX_TOOL_CALLS};
-use crate::core::module::{Module, ModuleManifest};
-use crate::core::history::{AgentMeta, HistoryView, SessionMeta};
+use crate::core::module::Module;
+use crate::core::history::{AgentMeta, SessionMeta};
 use crate::core::exec::{self, Diagnosis, ExecSpec, Tier};
 use crate::core::packages::{Library, PackageManifest};
 use crate::core::ports::{
-    BoxedChat, Chat, ChatGateway, Chunk, CompleteOpts, Completion, FileRead, HistoryStore, ModelCatalog, ModuleSource,
-    Msg, PackageSource,
-    PromptSource, SettingsStore, SysIo, ToolOutcome, ToolRunner, Workspace,
+    BoxedChat, Chat, ChatGateway, Chunk, CompleteOpts, Completion, HistoryStore, ModuleSource, Msg,
+    ToolOutcome, ToolRunner, Workspace,
 };
-use crate::core::prompt::{render, Prompts};
+use crate::core::prompt::render;
 use crate::core::providers::{Channel, ModelEntry, Provider, Settings};
 use crate::core::{
     AgentInstance, CollabStep, ConfigAgent, Core, Live, Pending, SessionEdit, SessionEvent, WorkMode, WorkSpec,
@@ -23,777 +22,10 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-
-// ---------- 内存适配器（测试组合根） ----------
-
-/// 内存登记处：预置「供应商 p + 模型 m + 核心默认 m」，让会话都能拿到真实通道。
-pub(crate) struct InMemorySettings {
-    s: Mutex<Settings>,
-    fail: Option<String>,
-}
-
-impl InMemorySettings {
-    pub(crate) fn new() -> InMemorySettings {
-        let mut s = Settings::default();
-        s.providers.insert(
-            "p".to_string(),
-            Provider { base_url: "http://test".to_string(), api_key: "k".to_string() },
-        );
-        s.models.insert(
-            "m".to_string(),
-            ModelEntry {
-                name: "M".to_string(),
-                api_model: "m".to_string(),
-                provider: "p".to_string(),
-                note: String::new(),
-                tools: crate::core::providers::ToolMode::Envelope,
-            },
-        );
-        s.core = Some("m".to_string());
-        InMemorySettings { s: Mutex::new(s), fail: None }
-    }
-
-    /// 注入失败：load / save 一律返回该原因（端口契约测试用）。
-    pub(crate) fn fail_with(mut self, msg: &str) -> InMemorySettings {
-        self.fail = Some(msg.to_string());
-        self
-    }
-    /// 指定默认执行档位的登记处（断言虚拟机档下的诊断与工具回执）。
-    fn with_tier(tier: Tier) -> InMemorySettings {
-        let s = InMemorySettings::new();
-        s.s.lock().expect("锁").app.tier = tier;
-        s
-    }
-}
-
-impl SettingsStore for InMemorySettings {
-    fn load(&self) -> Result<Settings, String> {
-        if let Some(m) = &self.fail {
-            return Err(m.clone());
-        }
-        Ok(self.s.lock().expect("锁").clone())
-    }
-    fn save(&self, s: &Settings) -> Result<(), String> {
-        if let Some(m) = &self.fail {
-            return Err(m.clone());
-        }
-        *self.s.lock().expect("锁") = s.clone();
-        Ok(())
-    }
-}
-
-/// 内存工作区：准备/写入都不碰盘，只记录（测试用）。
-#[derive(Default)]
-pub(crate) struct InMemoryWorkspace {
-    files: Mutex<BTreeMap<String, Vec<u8>>>,
-    fail: Option<String>,
-}
-
-impl InMemoryWorkspace {
-    pub(crate) fn new() -> InMemoryWorkspace {
-        InMemoryWorkspace { files: Mutex::new(BTreeMap::new()), fail: None }
-    }
-
-    /// 注入失败：prepare / roots / write_work / list 一律返回该原因（work_has 是布尔查询，不受影响）。
-    pub(crate) fn fail_with(mut self, msg: &str) -> InMemoryWorkspace {
-        self.fail = Some(msg.to_string());
-        self
-    }
-    /// 直接放一个文件（模拟落盘），键与真实布局同构：<session>/work/<名字> 或 <session>/<agent>/<相对路径>。
-    pub(crate) fn seed(&self, session: &str, area: &str, rel: &str) {
-        self.files.lock().expect("锁").insert(format!("{}/{}/{}", session, area, rel), Vec::new());
-    }
-}
-
-impl Workspace for InMemoryWorkspace {
-    fn prepare(&self, _session: &str, _agents: &[String]) -> Result<(), String> {
-        if let Some(m) = &self.fail {
-            return Err(m.clone());
-        }
-        Ok(())
-    }
-    fn roots(&self, session: &str, agents: &[String]) -> Result<crate::core::workspace::WorkRoots, String> {
-        if let Some(m) = &self.fail {
-            return Err(m.clone());
-        }
-        // 与 FsWorkspace 同构的**绝对**路径（以当前目录为锚；只读 env，不碰盘）。
-        let mut map = BTreeMap::new();
-        for a in agents {
-            map.insert(a.clone(), abs(&[session, a]));
-        }
-        Ok(crate::core::workspace::WorkRoots { shared: abs(&[session, "work"]), agents: map })
-    }
-    fn write_work(&self, session: &str, name: &str, bytes: &[u8]) -> Result<(), String> {
-        if let Some(m) = &self.fail {
-            return Err(m.clone());
-        }
-        self.files.lock().expect("锁").insert(format!("{}/work/{}", session, name), bytes.to_vec());
-        Ok(())
-    }
-    fn work_has(&self, session: &str, name: &str) -> bool {
-        self.files.lock().expect("锁").contains_key(&format!("{}/work/{}", session, name))
-    }
-    fn list(&self, session: &str, agents: &[String]) -> Result<crate::core::workspace::WorkFiles, String> {
-        if let Some(m) = &self.fail {
-            return Err(m.clone());
-        }
-        // 内存实现没有目录树，直接按前缀扫键（相对路径原样返回，/ 分隔）。
-        let files = self.files.lock().expect("锁");
-        let pick = |prefix: &str| -> Vec<String> {
-            files
-                .keys()
-                .filter_map(|k| k.strip_prefix(prefix).map(|s| s.to_string()))
-                .collect::<Vec<_>>()
-        };
-        let mut work = pick(&format!("{}/work/", session));
-        work.sort();
-        let mut map = BTreeMap::new();
-        for a in agents {
-            let mut got = pick(&format!("{}/{}/", session, a));
-            got.sort();
-            map.insert(a.clone(), got);
-        }
-        Ok(crate::core::workspace::WorkFiles { work, agents: map })
-    }
-}
-
-/// 内存文件系统：内置文件工具的读写落在这里（测试可断言内容与越界拒绝）。
-#[derive(Default)]
-pub(crate) struct InMemorySysIo {
-    files: Mutex<BTreeMap<String, String>>,
-    fail: Option<String>,
-    /// 读取标注：模拟"超过单次上限"与"含非法 UTF-8"的文件（工具必须如实标注，而不是照改）。
-    lossy: bool,
-    cut: bool,
-    /// 并发观测：**同时在读**的调用数与其峰值——并发用例据此断言"真的并发"（串行绝不会重叠）。
-    active: AtomicUsize,
-    peak: AtomicUsize,
-    /// 每次读取的固定耗时（毫秒）：给并发留出可观测的窗口。
-    delay_ms: u64,
-    /// 指定文件的额外耗时：用来构造"后发的先完成"，验结果仍按原始顺序回填。
-    extra: Mutex<BTreeMap<String, u64>>,
-}
-
-impl InMemorySysIo {
-    pub(crate) fn new() -> InMemorySysIo {
-        InMemorySysIo {
-            files: Mutex::new(BTreeMap::new()),
-            fail: None,
-            lossy: false,
-            cut: false,
-            active: AtomicUsize::new(0),
-            peak: AtomicUsize::new(0),
-            delay_ms: 0,
-            extra: Mutex::new(BTreeMap::new()),
-        }
-    }
-
-    /// 注入读取标注（lossy = 含非法 UTF-8；cut = 只读到开头）。
-    pub(crate) fn marked(mut self, lossy: bool, cut: bool) -> InMemorySysIo {
-        self.lossy = lossy;
-        self.cut = cut;
-        self
-    }
-
-    /// 注入失败：read / write 一律返回该原因（端口契约测试用）。
-    pub(crate) fn fail_with(mut self, msg: &str) -> InMemorySysIo {
-        self.fail = Some(msg.to_string());
-        self
-    }
-
-    /// 让每次读取慢一点：并发（峰值 > 1）与串行（峰值恒为 1）因此可观测。
-    pub(crate) fn slow(mut self, ms: u64) -> InMemorySysIo {
-        self.delay_ms = ms;
-        self
-    }
-
-    /// 指定文件每读一次额外慢多少毫秒。
-    pub(crate) fn slow_file(&self, parts: &[&str], ms: u64) {
-        self.extra.lock().expect("锁").insert(p(parts), ms);
-    }
-
-    /// 同时在读的峰值（并发用例的唯一证据）。
-    pub(crate) fn peak_concurrent_reads(&self) -> usize {
-        self.peak.load(Ordering::SeqCst)
-    }
-
-    /// 记一次"进入读取"：整个读取期间计数 +1，并如实记下峰值与耗时。
-    fn enter(&self, key: &str) {
-        let now = self.active.fetch_add(1, Ordering::SeqCst) + 1;
-        self.peak.fetch_max(now, Ordering::SeqCst);
-        let extra = self.extra.lock().expect("锁").get(key).copied().unwrap_or(0);
-        let ms = self.delay_ms + extra;
-        if ms > 0 {
-            std::thread::sleep(Duration::from_millis(ms));
-        }
-        self.active.fetch_sub(1, Ordering::SeqCst);
-    }
-    pub(crate) fn seed(&self, parts: &[&str], text: &str) {
-        self.files.lock().expect("锁").insert(p(parts), text.to_string());
-    }
-    pub(crate) fn get(&self, parts: &[&str]) -> Option<String> {
-        self.files.lock().expect("锁").get(&p(parts)).cloned()
-    }
-}
-
-impl SysIo for InMemorySysIo {
-    fn read(&self, path: &std::path::Path) -> Result<FileRead, String> {
-        if let Some(m) = &self.fail {
-            return Err(m.clone());
-        }
-        let key = path.to_string_lossy().into_owned();
-        self.enter(&key);
-        let text = self.files.lock().expect("锁").get(&key).cloned().ok_or_else(|| format!("读取失败：{} 不存在", key))?;
-        Ok(FileRead { bytes: text.len(), text, lossy: self.lossy, cut: self.cut })
-    }
-    fn write(&self, path: &std::path::Path, content: &str) -> Result<(), String> {
-        if let Some(m) = &self.fail {
-            return Err(m.clone());
-        }
-        self.files.lock().expect("锁").insert(path.to_string_lossy().into_owned(), content.to_string());
-        Ok(())
-    }
-}
-
-/// 测试用绝对根：以当前工作目录为锚（只读 env，不碰盘）——真实路径模型下所有根都是绝对路径。
-pub(crate) fn abs(parts: &[&str]) -> PathBuf {
-    let mut b = std::env::current_dir().expect("取当前目录");
-    for x in parts {
-        b.push(x);
-    }
-    b
-}
-
-/// 绝对路径的字符串期望值（平台分隔符；用于 PathBuf / 内存 IO 的键）。
-pub(crate) fn p(parts: &[&str]) -> String {
-    abs(parts).to_string_lossy().into_owned()
-}
-
-/// 路径的**书写形式**（进 JSON / 提示词 / 转录都是它）：一律 / 分隔（Windows 反斜杠在 JSON 里非法）。
-pub(crate) fn s(parts: &[&str]) -> String {
-    p(parts).replace(std::path::MAIN_SEPARATOR, "/")
-}
-
-/// 什么都不修的修复端口（严格要求合法信封）：测试基线，也是"宁缺毋滥"部署的对照实现。
-pub(crate) struct NoRepair;
-
-impl crate::core::ports::EnvelopeRepair for NoRepair {
-    fn repair(
-        &self,
-        _raw: &str,
-        _kind: &crate::core::envelope::Malformed,
-    ) -> crate::core::ports::RepairOutcome {
-        crate::core::ports::RepairOutcome { repaired: None, what: Vec::new() }
-    }
-}
-
-/// 一次内置工具调用（空账本）：只关心工具行为本身的用例用它；
-/// 关心"改动前有没有读过"的用例直接用 systool::execute 并自带 Observations。
-pub(crate) fn run_builtin(
-    sb: &crate::core::workspace::Sandbox,
-    io: &dyn crate::core::ports::SysIo,
-    name: &str,
-    args_json: &str,
-) -> crate::core::ports::ToolOutcome {
-    let mut obs = crate::core::systool::Observations::default();
-    crate::core::systool::execute(sb, io, &mut obs, name, args_json)
-}
-
-/// 测试用模块工具声明：只给启动命令（参数契约在需要的用例里另行声明）。
-pub(crate) fn decl(command: &str) -> crate::core::module::ToolDecl {
-    crate::core::module::ToolDecl {
-        command: command.to_string(),
-        desc: String::new(),
-        params: None,
-        parallel: false,
-    }
-}
-
-/// 测试用模块工具声明：带参数契约（YAML 里的 params 段）。
-pub(crate) fn decl_with(command: &str, params_yaml: &str) -> crate::core::module::ToolDecl {
-    let mut d = decl(command);
-    d.params = Some(serde_yaml::from_str(params_yaml).expect("测试参数声明要能解析"));
-    d
-}
-
-/// 测试沙箱：work 共享区 + agent 私有区 + 指定模块目录（都是绝对路径）。
-pub(crate) fn test_sandbox(agent: &str, modules: &[&str]) -> crate::core::workspace::Sandbox {
-    let mut map = BTreeMap::new();
-    for id in modules {
-        map.insert(id.to_string(), abs(&["mods", id]));
-    }
-    crate::core::workspace::Sandbox {
-        work_name: "demo".to_string(),
-        agent: agent.to_string(),
-        shared: abs(&["demo", "work"]),
-        private: abs(&["demo", agent]),
-        modules: map,
-        texts: test_prompts().core.tool_texts,
-        builtin_tools: test_prompts().core.builtin_tools,
-    }
-}
-
-/// 内存会话历史：供测试断言落盘与回放。
-pub(crate) struct InMemoryHistory {
-    metas: Mutex<BTreeMap<String, SessionMeta>>,
-    events: Mutex<BTreeMap<String, Vec<serde_json::Value>>>,
-    fail: Option<String>,
-}
-
-impl InMemoryHistory {
-    pub(crate) fn new() -> InMemoryHistory {
-        InMemoryHistory { metas: Mutex::new(BTreeMap::new()), events: Mutex::new(BTreeMap::new()), fail: None }
-    }
-
-    /// 注入失败：全部 HistoryStore 方法一律返回该原因（端口契约测试用）。
-    pub(crate) fn fail_with(mut self, msg: &str) -> InMemoryHistory {
-        self.fail = Some(msg.to_string());
-        self
-    }
-
-    /// 失败注入的入口判定：Ok = 未注入。
-    fn guard(&self) -> Result<(), String> {
-        match &self.fail {
-            Some(m) => Err(m.clone()),
-            None => Ok(()),
-        }
-    }
-}
-
-impl HistoryStore for InMemoryHistory {
-    fn create(&self, meta: &SessionMeta) -> Result<(), String> {
-        self.guard()?;
-        self.metas.lock().expect("锁").insert(meta.name.clone(), meta.clone());
-        Ok(())
-    }
-    fn save_meta(&self, meta: &SessionMeta) -> Result<(), String> {
-        self.guard()?;
-        self.metas.lock().expect("锁").insert(meta.name.clone(), meta.clone());
-        Ok(())
-    }
-    fn append(&self, name: &str, events: &[serde_json::Value]) -> Result<(), String> {
-        self.guard()?;
-        self.events.lock().expect("锁").entry(name.to_string()).or_default().extend_from_slice(events);
-        Ok(())
-    }
-    fn list(&self) -> Result<Vec<HistoryView>, String> {
-        self.guard()?;
-        let metas = self.metas.lock().expect("锁");
-        let events = self.events.lock().expect("锁");
-        Ok(metas
-            .values()
-            .map(|m| HistoryView {
-                name: m.name.clone(),
-                mode: m.mode.clone(),
-                ts: m.ts,
-                done: events
-                    .get(&m.name)
-                    .map(|v| v.iter().any(|e| e.get("type").and_then(|t| t.as_str()) == Some("ended")))
-                    .unwrap_or(false),
-            })
-            .collect())
-    }
-    fn load(&self, name: &str) -> Result<(SessionMeta, Vec<serde_json::Value>), String> {
-        self.guard()?;
-        let meta = self.metas.lock().expect("锁").get(name).cloned().ok_or_else(|| format!("无此会话：{}", name))?;
-        let events = self.events.lock().expect("锁").get(name).cloned().unwrap_or_default();
-        Ok((meta, events))
-    }
-    fn delete(&self, name: &str) -> Result<bool, String> {
-        self.guard()?;
-        let removed = self.metas.lock().expect("锁").remove(name).is_some();
-        self.events.lock().expect("锁").remove(name);
-        Ok(removed)
-    }
-}
-
-/// 内存模型目录：回放固定模型名，并记录收到的 Provider（断言编辑期密钥复用）。
-pub(crate) struct FakeCatalog {
-    models: Vec<String>,
-    pub(crate) seen: Mutex<Vec<Provider>>,
-    fail: Option<String>,
-}
-
-impl FakeCatalog {
-    pub(crate) fn new(models: Vec<String>) -> FakeCatalog {
-        FakeCatalog { models, seen: Mutex::new(Vec::new()), fail: None }
-    }
-
-    /// 注入失败：list_models 返回该原因（失败注入不记录调用——错误路径没走到"用哪个通道"）。
-    pub(crate) fn fail_with(mut self, msg: &str) -> FakeCatalog {
-        self.fail = Some(msg.to_string());
-        self
-    }
-}
-
-impl ModelCatalog for FakeCatalog {
-    fn list_models(&self, provider: &Provider) -> Result<Vec<String>, String> {
-        if let Some(m) = &self.fail {
-            return Err(m.clone());
-        }
-        self.seen.lock().expect("锁").push(provider.clone());
-        Ok(self.models.clone())
-    }
-}
-
-pub(crate) struct VecSource(pub(crate) Vec<Module>);
-
-impl ModuleSource for VecSource {
-    fn scan(&self) -> crate::core::module::Roster {
-        crate::core::module::Roster { modules: self.0.clone(), rejected: Vec::new() }
-    }
-}
-
-/// 无声围栏端口：测试里不碰任何 ACL（真实实现在 adapters/confine）。
-pub(crate) struct NoFenceHost;
-impl crate::core::ports::FenceHost for NoFenceHost {
-    fn release(&self, _spec: &crate::core::fence::FenceSpec) -> Result<(), String> {
-        Ok(())
-    }
-}
-
-/// 记录型围栏端口：断言「删除会话时真的请求了撤销」。
-pub(crate) struct RecordingFence {
-    pub(crate) released: Mutex<Vec<String>>,
-    fail: Option<String>,
-}
-impl RecordingFence {
-    pub(crate) fn new() -> RecordingFence {
-        RecordingFence { released: Mutex::new(Vec::new()), fail: None }
-    }
-    /// 注入失败：release 返回该原因（撤销失败必须如实传播，不能被当成已撤销）。
-    pub(crate) fn fail_with(mut self, msg: &str) -> RecordingFence {
-        self.fail = Some(msg.to_string());
-        self
-    }
-}
-impl crate::core::ports::FenceHost for RecordingFence {
-    fn release(&self, spec: &crate::core::fence::FenceSpec) -> Result<(), String> {
-        if let Some(m) = &self.fail {
-            return Err(m.clone());
-        }
-        self.released.lock().expect("锁").push(spec.agent.clone());
-        Ok(())
-    }
-}
-
-/// 内存运行包库（测试组合根）：直接给出包清单，不碰盘。
-pub(crate) struct InMemoryPackages(Vec<PackageManifest>);
-
-impl InMemoryPackages {
-    pub(crate) fn empty() -> InMemoryPackages {
-        InMemoryPackages(Vec::new())
-    }
-    /// 用 yaml 文本造包（顺带覆盖清单解析）。
-    pub(crate) fn with(yamls: &[&str]) -> InMemoryPackages {
-        InMemoryPackages(yamls.iter().map(|y| pkg_yaml(y)).collect())
-    }
-}
-
-impl PackageSource for InMemoryPackages {
-    fn scan(&self) -> Library {
-        Library::build(self.0.clone(), Vec::new())
-    }
-    fn dir(&self) -> PathBuf {
-        abs(&["runtimes"])
-    }
-}
-
-/// 用 yaml 造一份包清单（顺带覆盖清单解析）。
-pub(crate) fn pkg_yaml(y: &str) -> PackageManifest {
-    serde_yaml::from_str(y).expect("包清单必须能解析")
-}
-
-/// 造一个 prefix 类包（独立前缀 opt/rt/&lt;id&gt;-&lt;version&gt;）。
-pub(crate) fn pkg(id: &str, version: &str) -> PackageManifest {
-    pkg_yaml(&format!("id: {}
-version: {}
-prefix: opt/rt/{}-{}", id, version, id, version))
-}
-
-pub(crate) fn module_of(id: &str) -> Module {
-    Module {
-        manifest: ModuleManifest {
-            id: id.to_string(),
-            brief: format!("{} 的简介", id),
-            system: format!("你负责{}", id),
-            runtimes: Vec::new(),
-            tools: BTreeMap::new(),
-        },
-        root: abs(&[id]),
-    }
-}
-
-/// 声明了运行能力的模块（工具的可用性按它判定）。
-fn module_with_runtimes(id: &str, caps: &[&str]) -> Module {
-    let mut m = module_of(id);
-    m.manifest.runtimes = caps.iter().map(|s| s.to_string()).collect();
-    m
-}
-
-/// 测试用静默 Live（不流式、不派发短暂事件）。
-fn with_live<T>(f: impl FnOnce(&mut Live) -> T) -> T {
-    let mut noop = |_e: SessionEvent| {};
-    let mut live = Live { stream: false, cancel: Arc::new(std::sync::atomic::AtomicBool::new(false)), emit: &mut noop };
-    f(&mut live)
-}
-
-/// 把模块包成"每模块一个临时 agent"（协作的成员语义）。
-fn agents_of(modules: &[&str]) -> Vec<AgentInstance> {
-    modules
-        .iter()
-        .map(|m| AgentInstance { name: m.to_string(), transient: true, modules: vec![m.to_string()], model: None })
-        .collect()
-}
-
-/// 测试用工作规格（模型留空 = 走核心默认 m）。
-/// 单 agent 形态：1 个 agent（模块数不限；单模块时以模块名给 agent 起名，便于断言说话人）；
-/// 协作形态：每模块一个 agent（成员 id = agent 名 = 模块名）。
-fn work(name: &str, mode: WorkMode, modules: &[&str]) -> WorkSpec {
-    let agents = if mode == WorkMode::Collab {
-        agents_of(modules)
-    } else {
-        let agent_name = if modules.len() == 1 { modules[0] } else { "组合" };
-        vec![AgentInstance {
-            name: agent_name.to_string(),
-            transient: true,
-            modules: modules.iter().map(|s| s.to_string()).collect(),
-            model: None,
-        }]
-    };
-    WorkSpec { name: name.to_string(), mode, agents, task: None, delegate: false }
-}
-
-/// 协作工作规格（含需求）。
-fn collab_work(name: &str, modules: &[&str], delegate: bool, task: &str) -> WorkSpec {
-    let mut w = work(name, WorkMode::Collab, modules);
-    w.delegate = delegate;
-    w.task = Some(task.to_string());
-    w
-}
-
-pub(crate) fn scripted(s: Vec<String>) -> BoxedChat {
-    Box::new(FakeChat::new(s))
-}
-
-/// 共享脚本队列：多条核心响应按 complete 次序弹出（末条重复兜底）。
-/// 与真实通道时序一致：建通道时不消费，调用时才消费。Arc 分身共享（网关与测试两侧）。
-/// 共享脚本队列（Mutex 版：需跨线程 Send+Sync）。
-pub(crate) struct SharedScript {
-    pub(crate) q: Arc<Mutex<Vec<String>>>,
-}
-
-impl Chat for SharedScript {
-    fn complete(&mut self, _messages: &[Msg], _opts: CompleteOpts<'_>, _on: &mut dyn FnMut(Chunk) -> bool) -> Completion {
-        let mut q = self.q.lock().expect("脚本队列锁");
-        let text = if q.len() > 1 { q.remove(0) } else { q.first().cloned().unwrap_or_default() };
-        Completion::text(text)
-    }
-}
-
-/// 脚本网关：按 agent 实例名回放各自脚本；核心通道走共享队列。
-pub(crate) struct ScriptGateway {
-    member: BTreeMap<String, Vec<String>>,
-    core: Arc<Mutex<Vec<String>>>,
-}
-impl ScriptGateway {
-    pub(crate) fn new(member: BTreeMap<String, Vec<String>>, core: Vec<String>) -> ScriptGateway {
-        ScriptGateway { member, core: Arc::new(Mutex::new(core)) }
-    }
-}
-
-impl ChatGateway for ScriptGateway {
-    fn probe_tools(&self, _c: &Channel) -> Result<crate::core::ports::ProbeOutcome, String> {
-        Err("脚本替身没有真实供应商，测不了工具调用支持".to_string())
-    }
-    fn member_channel(&self, _c: Option<&Channel>, id: &str) -> (BoxedChat, Option<String>) {
-        let script = self.member.get(id).cloned().unwrap_or_else(|| {
-            vec!["{\"type\":\"say\",\"text\":\"（演示）收到。\"}".to_string()]
-        });
-        (scripted(script), None)
-    }
-    fn core_channel(&self, _c: Option<&Channel>) -> (BoxedChat, bool) {
-        (Box::new(SharedScript { q: Arc::clone(&self.core) }), false)
-    }
-}
-
-/// 提示词册替身：默认回放内置册子；fail_with 注入加载失败。
-pub(crate) struct TestPrompts {
-    fail: Option<String>,
-}
-
-impl TestPrompts {
-    pub(crate) fn ok() -> TestPrompts {
-        TestPrompts { fail: None }
-    }
-    pub(crate) fn fail_with(mut self, msg: &str) -> TestPrompts {
-        self.fail = Some(msg.to_string());
-        self
-    }
-}
-
-impl PromptSource for TestPrompts {
-    fn load(&self) -> Result<Prompts, String> {
-        if let Some(m) = &self.fail {
-            return Err(m.clone());
-        }
-        Ok(test_prompts())
-    }
-}
-
-pub(crate) fn test_prompts() -> Prompts {
-    serde_yaml::from_str::<Prompts>(include_str!("../prompts.yaml")).expect("内置提示词册必须合法")
-}
-
-pub(crate) fn core_with(modules: Vec<Module>, gateway: ScriptGateway) -> Core {
-    core_with_runner(modules, gateway, Arc::new(SilentRunner))
-}
-
-/// 注入指定内存工作区的装配（断言 @ 文件清单取自会话 meta.agents）。
-fn core_with_workspace(modules: Vec<Module>, gateway: ScriptGateway, ws: Arc<InMemoryWorkspace>) -> Core {
-    Core::new(
-        Arc::new(InMemorySettings::new()),
-        Arc::new(InMemoryHistory::new()),
-        ws,
-        Arc::new(VecSource(modules)),
-        Arc::new(InMemoryPackages::empty()),
-        Arc::new(NoFenceHost),
-        Arc::new(gateway),
-        Arc::new(FakeCatalog::new(vec!["m".to_string()])),
-        Arc::new(SilentRunner),
-        Arc::new(InMemorySysIo::new()),
-        Arc::new(NoRepair),
-        Box::new(TestPrompts::ok()),
-        Arc::new(crate::core::ports::NoopLog),
-    )
-    .expect("内存装配不应失败")
-}
-
-/// 注入指定内存文件系统的装配（断言内置文件工具真正落盘）。
-fn core_with_io(modules: Vec<Module>, gateway: ScriptGateway, io: Arc<InMemorySysIo>) -> Core {
-    core_with_all(
-        modules,
-        gateway,
-        Arc::new(SilentRunner),
-        Arc::new(FakeCatalog::new(vec!["m".to_string()])),
-        Arc::new(InMemoryHistory::new()),
-        io,
-    )
-}
-
-fn core_with_runner(modules: Vec<Module>, gateway: ScriptGateway, runner: Arc<impl ToolRunner + Send + Sync + 'static>) -> Core {
-    core_with_catalog(modules, gateway, runner, Arc::new(FakeCatalog::new(vec!["m".to_string()])))
-}
-
-/// 指定模型目录的装配（断言编辑期密钥复用）。
-fn core_with_catalog(
-    modules: Vec<Module>,
-    gateway: ScriptGateway,
-    runner: Arc<impl ToolRunner + Send + Sync + 'static>,
-    catalog: Arc<FakeCatalog>,
-) -> Core {
-    core_with_all(
-        modules,
-        gateway,
-        runner,
-        catalog,
-        Arc::new(InMemoryHistory::new()),
-        Arc::new(InMemorySysIo::new()),
-    )
-}
-
-/// 指定全部端口的装配（历史落盘断言用）：默认空包库。
-fn core_with_all(
-    modules: Vec<Module>,
-    gateway: ScriptGateway,
-    runner: Arc<impl ToolRunner + Send + Sync + 'static>,
-    catalog: Arc<FakeCatalog>,
-    history: Arc<InMemoryHistory>,
-    io: Arc<InMemorySysIo>,
-) -> Core {
-    core_with_pkgs(modules, gateway, runner, catalog, history, io, Arc::new(InMemoryPackages::empty()))
-}
-
-/// 指定全部端口 + 运行包库的装配（断言缺包诊断与工具回执）。
-fn core_with_pkgs(
-    modules: Vec<Module>,
-    gateway: ScriptGateway,
-    runner: Arc<impl ToolRunner + Send + Sync + 'static>,
-    catalog: Arc<FakeCatalog>,
-    history: Arc<InMemoryHistory>,
-    io: Arc<InMemorySysIo>,
-    packages: Arc<InMemoryPackages>,
-) -> Core {
-    Core::new(
-        Arc::new(InMemorySettings::new()),
-        history,
-        Arc::new(InMemoryWorkspace::new()),
-        Arc::new(VecSource(modules)),
-        packages,
-        Arc::new(NoFenceHost),
-        Arc::new(gateway),
-        catalog,
-        runner,
-        io,
-        Arc::new(NoRepair),
-        Box::new(TestPrompts::ok()),
-        Arc::new(crate::core::ports::NoopLog),
-    )
-    .expect("内存装配不应失败")
-}
-
-pub(crate) fn gw(member: BTreeMap<String, Vec<String>>, core: Vec<String>) -> ScriptGateway {
-    ScriptGateway { member, core: Arc::new(Mutex::new(core)) }
-}
-
-/// 指定任意网关 + 指定内存文件系统的装配（既换通道又要断言落盘的用例用它）。
-pub(crate) fn core_with_io_gateway(
-    modules: Vec<Module>,
-    gateway: impl ChatGateway + Send + Sync + 'static,
-    io: Arc<InMemorySysIo>,
-) -> Core {
-    Core::new(
-        Arc::new(InMemorySettings::new()),
-        Arc::new(InMemoryHistory::new()),
-        Arc::new(InMemoryWorkspace::new()),
-        Arc::new(VecSource(modules)),
-        Arc::new(InMemoryPackages::empty()),
-        Arc::new(NoFenceHost),
-        Arc::new(gateway),
-        Arc::new(FakeCatalog::new(vec!["m".to_string()])),
-        Arc::new(SilentRunner),
-        io,
-        Arc::new(NoRepair),
-        Box::new(TestPrompts::ok()),
-        Arc::new(crate::core::ports::NoopLog),
-    )
-    .expect("内存装配不应失败")
-}
-
-/// 指定任意网关的装配（入站契约测试用：需要自定义时序的通道）。
-pub(crate) fn core_with_gateway(modules: Vec<Module>, gateway: impl ChatGateway + Send + Sync + 'static) -> Core {
-    Core::new(
-        Arc::new(InMemorySettings::new()),
-        Arc::new(InMemoryHistory::new()),
-        Arc::new(InMemoryWorkspace::new()),
-        Arc::new(VecSource(modules)),
-        Arc::new(InMemoryPackages::empty()),
-        Arc::new(NoFenceHost),
-        Arc::new(gateway),
-        Arc::new(FakeCatalog::new(vec!["m".to_string()])),
-        Arc::new(SilentRunner),
-        Arc::new(InMemorySysIo::new()),
-        Arc::new(NoRepair),
-        Box::new(TestPrompts::ok()),
-        Arc::new(crate::core::ports::NoopLog),
-    )
-    .expect("内存装配不应失败")
-}
-
 // ---------- 信封 ----------
 
 #[test]
-fn envelope_parse_clean() {
+pub(crate) fn envelope_parse_clean() {
     let r = crate::core::envelope::parse("{\"type\":\"ask\",\"text\":\"要 A 还是 B？\"}");
     assert!(matches!(r.verb, crate::core::envelope::Verb::Ask));
     assert_eq!(r.text, "要 A 还是 B？");
@@ -801,21 +33,21 @@ fn envelope_parse_clean() {
 }
 
 #[test]
-fn envelope_degraded_keeps_raw() {
+pub(crate) fn envelope_degraded_keeps_raw() {
     let r = crate::core::envelope::parse("这不是 JSON");
     assert!(r.degraded);
     assert_eq!(r.text, "这不是 JSON");
 }
 
 #[test]
-fn envelope_wrapped_json_still_parses() {
+pub(crate) fn envelope_wrapped_json_still_parses() {
     let r = crate::core::envelope::parse("好的：{\"type\":\"agree\",\"text\":\"同意\"} 以上。");
     assert!(matches!(r.verb, crate::core::envelope::Verb::Agree));
     assert!(!r.degraded);
 }
 
 #[test]
-fn envelope_text_may_be_omitted() {
+pub(crate) fn envelope_text_may_be_omitted() {
     let r = crate::core::envelope::parse("{\"type\":\"agree\"}");
     assert!(matches!(r.verb, crate::core::envelope::Verb::Agree), "缺 text 不影响表态");
     assert_eq!(r.text, "", "缺 text = 空串");
@@ -832,21 +64,21 @@ fn envelope_text_may_be_omitted() {
 // ---------- 提示词渲染层 ----------
 
 #[test]
-fn prompt_render_replaces_and_rejects_missing() {
+pub(crate) fn prompt_render_replaces_and_rejects_missing() {
     let ok = render("你好 {{name}}！", &[("name", "世界".to_string())]).unwrap();
     assert_eq!(ok, "你好 世界！");
     assert!(render("{{missing}}", &[]).is_err());
 }
 
 #[test]
-fn prompt_book_loads_from_yaml() {
+pub(crate) fn prompt_book_loads_from_yaml() {
     let p = test_prompts();
     assert!(p.core.chat_protocol.contains("ask"));
     assert!(p.core.discuss.opener.contains("{{protocol}}"));
 }
 
 #[test]
-fn prompt_render_keeps_single_braces() {
+pub(crate) fn prompt_render_keeps_single_braces() {
     let ok = render("输出 {\"a\":1} 和 {{x}}", &[("x", "Y".to_string())]).unwrap();
     assert_eq!(ok, "输出 {\"a\":1} 和 Y");
 }
@@ -854,7 +86,7 @@ fn prompt_render_keeps_single_braces() {
 // ---------- 登记处解析链与密钥治理 ----------
 
 #[test]
-fn settings_resolves_model_to_channel() {
+pub(crate) fn settings_resolves_model_to_channel() {
     let mut s = Settings::default();
     s.providers.insert("p".into(), Provider { base_url: "http://x".into(), api_key: "k".into() });
     s.models.insert(
@@ -893,7 +125,7 @@ fn settings_resolves_model_to_channel() {
 }
 
 #[test]
-fn provider_lifecycle_and_key_never_leaks_to_view() {
+pub(crate) fn provider_lifecycle_and_key_never_leaks_to_view() {
     let mut core = core_with(vec![module_of("a")], gw(BTreeMap::new(), vec!["[]".into()]));
     core.provider_upsert("p1", "http://x", "sk-密钥XYZ").unwrap();
     for v in core.provider_views() {
@@ -910,7 +142,7 @@ fn provider_lifecycle_and_key_never_leaks_to_view() {
 }
 
 #[test]
-fn model_guards_core_default_and_discovery_uses_stored_provider() {
+pub(crate) fn model_guards_core_default_and_discovery_uses_stored_provider() {
     let catalog = Arc::new(FakeCatalog::new(vec!["m-a".to_string(), "m-b".to_string()]));
     let mut core = core_with_catalog(
         vec![module_of("a")],
@@ -932,7 +164,7 @@ fn model_guards_core_default_and_discovery_uses_stored_provider() {
 }
 
 #[test]
-fn create_work_persists_and_history_replays() {
+pub(crate) fn create_work_persists_and_history_replays() {
     let hist = Arc::new(InMemoryHistory::new());
     let mut core = core_with_all(
         vec![module_of("a")],
@@ -961,7 +193,7 @@ fn create_work_persists_and_history_replays() {
 }
 
 #[test]
-fn direct_rewind_drops_tail_then_continue_allows_user_turn() {
+pub(crate) fn direct_rewind_drops_tail_then_continue_allows_user_turn() {
     let mut member = BTreeMap::new();
     member.insert(
         "a".to_string(),
@@ -1007,7 +239,7 @@ fn direct_rewind_drops_tail_then_continue_allows_user_turn() {
 }
 
 /// 从事件流里抽出转录行，便于断言。
-fn replay_lines(events: &[serde_json::Value]) -> Vec<String> {
+pub(crate) fn replay_lines(events: &[serde_json::Value]) -> Vec<String> {
     events
         .iter()
         .filter(|e| e.get("type").and_then(|t| t.as_str()) == Some("transcript"))
@@ -1017,7 +249,7 @@ fn replay_lines(events: &[serde_json::Value]) -> Vec<String> {
 }
 
 /// 事件流里的转录行视图：(id, line, 是否是 tool 行)。
-fn transcript_rows(events: &[SessionEvent]) -> Vec<(u64, String, bool)> {
+pub(crate) fn transcript_rows(events: &[SessionEvent]) -> Vec<(u64, String, bool)> {
     events
         .iter()
         .flat_map(|e| match e {
@@ -1028,7 +260,7 @@ fn transcript_rows(events: &[SessionEvent]) -> Vec<(u64, String, bool)> {
 }
 
 /// 事件流里的工具调用视图（tool 行携带的那个）。
-fn tool_views(events: &[SessionEvent]) -> Vec<crate::core::events::ToolCallView> {
+pub(crate) fn tool_views(events: &[SessionEvent]) -> Vec<crate::core::events::ToolCallView> {
     events
         .iter()
         .flat_map(|e| match e {
@@ -1039,7 +271,7 @@ fn tool_views(events: &[SessionEvent]) -> Vec<crate::core::events::ToolCallView>
 }
 
 /// 事件流里 tool 行的行文本（给人看的那一行）。
-fn tool_line_texts(events: &[SessionEvent]) -> Vec<String> {
+pub(crate) fn tool_line_texts(events: &[SessionEvent]) -> Vec<String> {
     events
         .iter()
         .flat_map(|e| match e {
@@ -1052,7 +284,7 @@ fn tool_line_texts(events: &[SessionEvent]) -> Vec<String> {
 }
 
 #[test]
-fn rewind_keeps_only_lines_before_the_mark() {
+pub(crate) fn rewind_keeps_only_lines_before_the_mark() {
     let mut member = BTreeMap::new();
     member.insert("a".to_string(), vec![
         "{\"type\":\"say\",\"text\":\"答一\"}".to_string(),
@@ -1080,7 +312,7 @@ fn rewind_keeps_only_lines_before_the_mark() {
 }
 
 #[test]
-fn rebuilt_context_keeps_tool_result() {
+pub(crate) fn rebuilt_context_keeps_tool_result() {
     // 同一份落盘历史 + 新的 Core 模拟「重启」：重建上下文时工具子轮不能丢。
     let hist = Arc::new(InMemoryHistory::new());
     let io = Arc::new(InMemorySysIo::new());
@@ -1128,7 +360,7 @@ fn rebuilt_context_keeps_tool_result() {
 }
 
 #[test]
-fn collab_state_derive_and_withdraw() {
+pub(crate) fn collab_state_derive_and_withdraw() {
     use crate::core::collab_state::derive;
     let ev = |id: u64, line: &str| serde_json::json!({"type":"transcript","lines":[{"id":id,"line":line}]});
     let events = vec![
@@ -1155,7 +387,7 @@ fn collab_state_derive_and_withdraw() {
 }
 
 #[test]
-fn collab_rewind_rebuilds_from_transcript_and_resume_waits_at_gate() {
+pub(crate) fn collab_rewind_rebuilds_from_transcript_and_resume_waits_at_gate() {
     let mut member = BTreeMap::new();
     member.insert("a".to_string(), vec!["{\"type\":\"say\",\"text\":\"好\"}".to_string()]);
     let mut core = core_with(vec![module_of("a")], gw(member, vec!["[]".into()]));
@@ -1171,7 +403,7 @@ fn collab_rewind_rebuilds_from_transcript_and_resume_waits_at_gate() {
 }
 
 #[test]
-fn collab_update_task_rewinds_and_latest_wins() {
+pub(crate) fn collab_update_task_rewinds_and_latest_wins() {
     let mut core = core_with(vec![module_of("a")], gw(BTreeMap::new(), vec!["[]".into()]));
     let sid = core.create_work(collab_work("c", &["a"], false, "旧需求")).unwrap().sid;
     let replayed = core.update_task(&sid, "新需求").unwrap();
@@ -1183,7 +415,7 @@ fn collab_update_task_rewinds_and_latest_wins() {
 }
 
 #[test]
-fn suggest_models_recommends_agents() {
+pub(crate) fn suggest_models_recommends_agents() {
     // 不存在的模块 / 不存在的模型 / 重复占用的模块一律拒收。
     let script = "{\"agents\":[{\"name\":\"甲\",\"modules\":[\"a\"],\"model\":\"m\",\"why\":\"对口\"},{\"name\":\"乙\",\"modules\":[\"b\"],\"model\":\"m\",\"why\":\"补位\"},{\"name\":\"鬼\",\"modules\":[\"ghost\"],\"model\":\"m\",\"why\":\"模块不存在\"},{\"name\":\"丙\",\"modules\":[\"a\"],\"model\":\"nope\",\"why\":\"模型不存在\"},{\"name\":\"丁\",\"modules\":[\"a\"],\"model\":\"m\",\"why\":\"重复占模块\"}]}".to_string();
     let core = core_with(vec![module_of("a"), module_of("b")], gw(BTreeMap::new(), vec![script.clone()]));
@@ -1203,7 +435,7 @@ fn suggest_models_recommends_agents() {
 }
 
 #[test]
-fn suggest_models_single_mode_keeps_lone_pick_as_is() {
+pub(crate) fn suggest_models_single_mode_keeps_lone_pick_as_is() {
     // 只给一条 → 原样采纳（模块数与 reuse 都保持它自己的，不裁模块、不改 reuse）。
     let core = core_with(vec![module_of("a"), module_of("b")], gw(BTreeMap::new(), vec![
         "{\"agents\":[{\"name\":\"全能\",\"modules\":[\"a\",\"b\"],\"model\":\"m\",\"why\":\"一个 AI 全包\"}]}".to_string(),
@@ -1225,7 +457,7 @@ fn suggest_models_single_mode_keeps_lone_pick_as_is() {
 }
 
 #[test]
-fn suggest_models_reuses_stored_agent_without_suggesting_model() {
+pub(crate) fn suggest_models_reuses_stored_agent_without_suggesting_model() {
     let mut core = core_with(vec![module_of("a")], gw(BTreeMap::new(), vec![
         // 只有复用项（模型与模块都取登记处自己的）；幽灵项应被拒收。
         "{\"agents\":[{\"agent\":\"调研\",\"why\":\"正好用得上\"},{\"agent\":\"幽灵\",\"why\":\"不在登记处\"}]}".to_string(),
@@ -1246,7 +478,7 @@ fn suggest_models_reuses_stored_agent_without_suggesting_model() {
 }
 
 #[test]
-fn same_named_tools_across_modules_are_no_longer_a_conflict() {
+pub(crate) fn same_named_tools_across_modules_are_no_longer_a_conflict() {
     let mut a = module_of("a");
     a.manifest.tools.insert("dump".to_string(), decl("python a/dump.py"));
     let mut b = module_of("b");
@@ -1276,7 +508,7 @@ fn same_named_tools_across_modules_are_no_longer_a_conflict() {
 }
 
 #[test]
-fn agent_crud_and_work_with_agents() {
+pub(crate) fn agent_crud_and_work_with_agents() {
     let mut core = core_with(vec![module_of("a"), module_of("b")], gw(BTreeMap::new(), vec!["[]".into()]));
     assert!(core.agent_upsert("", &["a".to_string()], "", "").unwrap_err().contains("不能为空"));
     assert!(core.agent_upsert("x", &[], "", "").unwrap_err().contains("至少要有一个模块"));
@@ -1324,7 +556,7 @@ fn agent_crud_and_work_with_agents() {
 }
 
 #[test]
-fn work_upload_conflict_and_safe_name() {
+pub(crate) fn work_upload_conflict_and_safe_name() {
     let mut core = core_with(vec![module_of("a")], gw(BTreeMap::new(), vec!["[]".into()]));
     let sid = core.create_work(work("up", WorkMode::Single, &["a"])).unwrap().sid;
     assert!(core.work_upload(&sid, "x.txt", b"hello", false).unwrap());
@@ -1335,7 +567,7 @@ fn work_upload_conflict_and_safe_name() {
 }
 
 #[test]
-fn create_work_validates_user_choices() {
+pub(crate) fn create_work_validates_user_choices() {
     let mut core = core_with(vec![module_of("a"), module_of("b")], gw(BTreeMap::new(), vec!["[]".into()]));
     assert!(core.create_work(work("", WorkMode::Single, &["a"])).unwrap_err().contains("工作名不能为空"));
     assert!(core.create_work(work("x", WorkMode::Single, &["ghost"])).unwrap_err().contains("无此模块"));
@@ -1364,7 +596,7 @@ fn create_work_validates_user_choices() {
 }
 
 #[test]
-fn model_catalog_parses_openai_shape_and_rejects_bad() {
+pub(crate) fn model_catalog_parses_openai_shape_and_rejects_bad() {
     use crate::adapters::model_catalog::parse_models;
     assert_eq!(
         parse_models(r#"{"data":[{"id":"gpt-4o"},{"id":"o3"},{"id":"gpt-4o"}]}"#).unwrap(),
@@ -1376,7 +608,7 @@ fn model_catalog_parses_openai_shape_and_rejects_bad() {
 }
 
 #[test]
-fn endpoint_candidates_complete_and_fall_back() {
+pub(crate) fn endpoint_candidates_complete_and_fall_back() {
     use crate::adapters::endpoint::{chat_candidates, models_candidates, retryable_status};
     // 已带版本段：只补后缀（含尾斜杠）
     assert_eq!(chat_candidates("https://api.x/v1"), vec!["https://api.x/v1/chat/completions"]);
@@ -1401,7 +633,7 @@ fn endpoint_candidates_complete_and_fall_back() {
 }
 
 #[test]
-fn endpoint_resolve_candidates_retries_shape_mismatch_and_stops_on_fatal() {
+pub(crate) fn endpoint_resolve_candidates_retries_shape_mismatch_and_stops_on_fatal() {
     use crate::adapters::endpoint::{resolve_candidates, Attempt};
     let cands = vec!["a".to_string(), "b".to_string(), "c".to_string()];
 
@@ -1439,7 +671,7 @@ fn endpoint_resolve_candidates_retries_shape_mismatch_and_stops_on_fatal() {
 // ---------- 模块清单（内存来源） ----------
 
 #[test]
-fn roster_lists_modules() {
+pub(crate) fn roster_lists_modules() {
     let core = core_with(vec![module_of("a"), module_of("b")], gw(BTreeMap::new(), vec!["[]".into()]));
     let r = core.scan();
     let ids: Vec<_> = r.modules.iter().map(|m| m.manifest.id.clone()).collect();
@@ -1448,7 +680,7 @@ fn roster_lists_modules() {
 
 // ---------- 讨论引擎 ----------
 
-fn scripted_discussion(scripts: Vec<Vec<String>>, allow: bool) -> Discussion {
+pub(crate) fn scripted_discussion(scripts: Vec<Vec<String>>, allow: bool) -> Discussion {
     let members: Vec<Member> = scripts
         .into_iter()
         .enumerate()
@@ -1458,7 +690,7 @@ fn scripted_discussion(scripts: Vec<Vec<String>>, allow: bool) -> Discussion {
 }
 
 #[test]
-fn discussion_full_agreement() {
+pub(crate) fn discussion_full_agreement() {
     let mut d = scripted_discussion(
         vec![
             vec!["{\"type\":\"say\",\"text\":\"好\"}".into(), "{\"type\":\"agree\",\"text\":\"同意\"}".into()],
@@ -1478,7 +710,7 @@ fn discussion_full_agreement() {
 }
 
 #[test]
-fn discussion_ask_pauses() {
+pub(crate) fn discussion_ask_pauses() {
     let mut d = scripted_discussion(vec![vec!["{\"type\":\"ask\",\"text\":\"需要参数?\"}".into()]], false);
     d.open("任务");
     match d.step() {
@@ -1491,7 +723,7 @@ fn discussion_ask_pauses() {
 }
 
 #[test]
-fn discussion_leave_shrinks() {
+pub(crate) fn discussion_leave_shrinks() {
     let mut d = scripted_discussion(vec![vec!["{\"type\":\"leave\",\"text\":\"撤了\"}".into()]], false);
     d.open("任务");
     let _ = d.step();
@@ -1499,7 +731,7 @@ fn discussion_leave_shrinks() {
 }
 
 #[test]
-fn discussion_autonomy_archives_ask() {
+pub(crate) fn discussion_autonomy_archives_ask() {
     let mut d = scripted_discussion(
         vec![vec![
             "{\"type\":\"say\",\"text\":\"开场\"}".into(),
@@ -1520,7 +752,7 @@ fn discussion_autonomy_archives_ask() {
 }
 
 #[test]
-fn discussion_round_cap_enforced() {
+pub(crate) fn discussion_round_cap_enforced() {
     let mut d = scripted_discussion(vec![vec!["{\"type\":\"say\",\"text\":\"继续\"}".into()]; 2], false);
     d.open("任务");
     loop {
@@ -1534,7 +766,7 @@ fn discussion_round_cap_enforced() {
 }
 
 #[test]
-fn degraded_discussion_line_carries_a_structured_flag() {
+pub(crate) fn degraded_discussion_line_carries_a_structured_flag() {
     let prompts = test_prompts();
     // 成员给出"不是信封"的原文 → 该行按降级收录：文本里有说明，**结构上另带 degraded**。
     let members = vec![Member::new("m0", "职责".to_string(), scripted(vec!["我觉得可以".into()]))];
@@ -1563,7 +795,7 @@ fn degraded_discussion_line_carries_a_structured_flag() {
 // ---------- 执行/验收 ----------
 
 #[test]
-fn execution_review_pass_and_fail_paths() {
+pub(crate) fn execution_review_pass_and_fail_paths() {
     let prompts = test_prompts();
     let mut members = vec![Member::new("m0", "职责".to_string(), scripted(vec!["{\"type\":\"say\",\"text\":\"汇报内容\"}".into()]))];
     let mut exec = crate::core::engine::Execution::run(members.as_mut_slice(), "任务A", &prompts);
@@ -1578,7 +810,7 @@ fn execution_review_pass_and_fail_paths() {
 }
 
 #[test]
-fn review_parse_failure_is_conservative_fail() {
+pub(crate) fn review_parse_failure_is_conservative_fail() {
     let prompts = test_prompts();
     let mut members = vec![Member::new("m0", "职责".to_string(), scripted(vec!["{\"type\":\"say\",\"text\":\"x\"}".into()]))];
     let mut exec = crate::core::engine::Execution::run(members.as_mut_slice(), "任务", &prompts);
@@ -1591,7 +823,7 @@ fn review_parse_failure_is_conservative_fail() {
 // ---------- Core 门面：会话中心（内存组合根） ----------
 
 #[test]
-fn core_direct_seeds_system_prompt() {
+pub(crate) fn core_direct_seeds_system_prompt() {
     let mut member = BTreeMap::new();
     member.insert("a".to_string(), vec!["{\"type\":\"say\",\"text\":\"你好\"}".to_string()]);
     let mut core = core_with(vec![module_of("a")], gw(member, vec!["[]".into()]));
@@ -1612,7 +844,7 @@ fn core_direct_seeds_system_prompt() {
 }
 
 #[test]
-fn single_mode_accepts_multi_module_agent_and_converses() {
+pub(crate) fn single_mode_accepts_multi_module_agent_and_converses() {
     // 单 agent 形态允许 1 个 agent 带多个模块：能建、system 并入全部职责、说话人是 agent 名。
     let mut member = BTreeMap::new();
     member.insert("组合".to_string(), vec!["{\"type\":\"say\",\"text\":\"收到\"}".to_string()]);
@@ -1634,7 +866,7 @@ fn single_mode_accepts_multi_module_agent_and_converses() {
 }
 
 #[test]
-fn mode_vocabulary_is_single_or_collab_only() {
+pub(crate) fn mode_vocabulary_is_single_or_collab_only() {
     // web 与 core 的形态词汇只有 single / collab；旧的 direct / compose 一概不认（GREEN FIELD，无兼容）。
     use crate::presentation::web::parse_mode;
     assert!(matches!(parse_mode("single"), Ok(WorkMode::Single)));
@@ -1670,7 +902,7 @@ fn mode_vocabulary_is_single_or_collab_only() {
 }
 
 #[test]
-fn core_collab_demo_runs_full_five_stages() {
+pub(crate) fn core_collab_demo_runs_full_five_stages() {
     let mut member = BTreeMap::new();
     member.insert("a".to_string(), vec![
         "{\"type\":\"say\",\"text\":\"我先说\"}".to_string(),
@@ -1690,7 +922,7 @@ fn core_collab_demo_runs_full_five_stages() {
 }
 
 #[test]
-fn core_collab_delegated_slate_flow() {
+pub(crate) fn core_collab_delegated_slate_flow() {
     let mut member = BTreeMap::new();
     member.insert("a".to_string(), vec![
         "{\"type\":\"say\",\"text\":\"我先说\"}".to_string(),
@@ -1714,7 +946,7 @@ fn core_collab_delegated_slate_flow() {
 }
 
 #[test]
-fn core_collab_slate_rejects_invalid_picks() {
+pub(crate) fn core_collab_slate_rejects_invalid_picks() {
     // 不存在的模块 / 不存在的模型 / 不在登记处的复用项：整条拒收，合法的留下。
     let mut core = core_with(vec![module_of("a")], gw(BTreeMap::new(), vec![
         "{\"picks\":[{\"name\":\"鬼\",\"modules\":[\"ghost\"],\"model\":\"m\",\"why\":\"模块不存在\"},{\"agent\":\"幽灵\",\"why\":\"不在登记处\"},{\"name\":\"甲\",\"modules\":[\"a\"],\"model\":\"nope\",\"why\":\"模型不存在\"},{\"name\":\"乙\",\"modules\":[\"a\"],\"model\":\"m\",\"why\":\"对口\"}]}".to_string(),
@@ -1729,7 +961,7 @@ fn core_collab_slate_rejects_invalid_picks() {
 }
 
 #[test]
-fn collab_delegated_roster_written_back_and_rebuilt_from_meta() {
+pub(crate) fn collab_delegated_roster_written_back_and_rebuilt_from_meta() {
     // 发言席是 agent：脚本按 agent 名 "调研员" 回放（不再按模块 id）。
     let mut member = BTreeMap::new();
     member.insert("调研员".to_string(), vec![
@@ -1776,7 +1008,7 @@ fn collab_delegated_roster_written_back_and_rebuilt_from_meta() {
 // ---------- 平衡提取器 ----------
 
 #[test]
-fn extract_balanced_array() {
+pub(crate) fn extract_balanced_array() {
     let s = "前缀 [ {\"a\":1}, {\"b\":\"}\"} ] 后缀";
     let got = crate::core::envelope::extract_json_array(s).unwrap();
     assert!(got.starts_with('[') && got.ends_with(']'));
@@ -1849,7 +1081,7 @@ impl ToolRunner for ParallelRunner {
 const TOOL_CALL: &str = "{\"type\":\"tool\",\"name\":\"grep\",\"args\":{\"keyword\":\"x\"}}";
 
 /// 带工具环境的成员：模块 m0 声明 grep → python tools/grep.py（cwd = 该模块目录）。
-fn member_with_tools(id: &str, script: Vec<String>, runner: Arc<impl ToolRunner + Send + Sync + 'static>) -> Member {
+pub(crate) fn member_with_tools(id: &str, script: Vec<String>, runner: Arc<impl ToolRunner + Send + Sync + 'static>) -> Member {
     let mut commands = BTreeMap::new();
     commands.insert("grep".to_string(), "python tools/grep.py".to_string());
     let mut modules = BTreeMap::new();
@@ -1882,7 +1114,7 @@ fn member_with_tools(id: &str, script: Vec<String>, runner: Arc<impl ToolRunner 
 
 /// 两个模块可以声明**同名**工具（信封里的 module 消歧）；每次调用跑在各自模块的目录里。
 #[test]
-fn same_named_tools_in_two_modules_run_in_their_own_root() {
+pub(crate) fn same_named_tools_in_two_modules_run_in_their_own_root() {
     let runner = Arc::new(RecordingRunner { calls: Mutex::new(Vec::new()), out: "ok".into(), ok: true });
     let mut member = BTreeMap::new();
     member.insert("组合".to_string(), vec![
@@ -1919,7 +1151,7 @@ fn same_named_tools_in_two_modules_run_in_their_own_root() {
 
 /// 多模块 agent 下省略 module：核心不猜，如实报错并把可用的「模块.工具」列全。
 #[test]
-fn external_tool_without_module_is_refused_when_agent_has_many_modules() {
+pub(crate) fn external_tool_without_module_is_refused_when_agent_has_many_modules() {
     let runner = Arc::new(RecordingRunner { calls: Mutex::new(Vec::new()), out: "ok".into(), ok: true });
     let mut member = BTreeMap::new();
     member.insert("组合".to_string(), vec![
@@ -1949,7 +1181,7 @@ fn external_tool_without_module_is_refused_when_agent_has_many_modules() {
 }
 
 #[test]
-fn tool_call_event_is_emitted_before_the_next_round() {
+pub(crate) fn tool_call_event_is_emitted_before_the_next_round() {
     // 短暂事件：工具跑完立刻发 tool_call（不落盘），供活动会话实时刷新。
     let mut member = BTreeMap::new();
     member.insert("a".to_string(), vec![TOOL_CALL.into(), "{\"type\":\"say\",\"text\":\"完成\"}".into()]);
@@ -1976,7 +1208,7 @@ fn tool_call_event_is_emitted_before_the_next_round() {
 }
 
 #[test]
-fn refs_rewrite_covers_prefixes_speakers_and_punctuation() {
+pub(crate) fn refs_rewrite_covers_prefixes_speakers_and_punctuation() {
     use crate::core::refs::{rewrite, RefRoots};
     // 文案来自提示词册：期望值也用册子渲染出来，代码里不复制那两句中文。
     let t = test_prompts().core.refs;
@@ -2057,7 +1289,7 @@ fn refs_rewrite_covers_prefixes_speakers_and_punctuation() {
 }
 
 #[test]
-fn user_at_reference_is_rewritten_in_transcript_and_history() {
+pub(crate) fn user_at_reference_is_rewritten_in_transcript_and_history() {
     let mut member = BTreeMap::new();
     member.insert("a".to_string(), vec!["{\"type\":\"say\",\"text\":\"好的\"}".to_string()]);
     let mut core = core_with(vec![module_of("a")], gw(member, vec!["[]".into()]));
@@ -2075,7 +1307,7 @@ fn user_at_reference_is_rewritten_in_transcript_and_history() {
 }
 
 #[test]
-fn workspace_list_reports_work_and_agent_files() {
+pub(crate) fn workspace_list_reports_work_and_agent_files() {
     let ws = InMemoryWorkspace::new();
     ws.seed("w", "work", "投喂.txt");
     ws.seed("w", "work", "sub/b.txt");
@@ -2089,7 +1321,7 @@ fn workspace_list_reports_work_and_agent_files() {
 }
 
 #[test]
-fn core_files_view_carries_lists_and_real_roots() {
+pub(crate) fn core_files_view_carries_lists_and_real_roots() {
     let ws = Arc::new(InMemoryWorkspace::new());
     let mut core = core_with_workspace(vec![module_of("a")], gw(BTreeMap::new(), vec!["[]".into()]), Arc::clone(&ws));
     let sid = core.create_work(work("w", WorkMode::Single, &["a"])).unwrap().sid;
@@ -2120,12 +1352,12 @@ fn core_files_view_carries_lists_and_real_roots() {
 
 /// 真实的坏信封：结尾多了一个 ]（括号不配对）。路径用真实绝对路径（模型写对了路径、写坏了信封）。
 /// 坏的形状照真案例：args 先闭合、多一个 ]、外层才闭合（整段不是合法 JSON）。
-fn broken_tool(path: &str) -> String {
+pub(crate) fn broken_tool(path: &str) -> String {
     format!("{{\"type\":\"tool\",\"name\":\"write\",\"args\":{{\"path\":\"{}\",\"content\":\"hi\"}}]}}", path)
 }
 
 #[test]
-fn malformed_tool_envelope_becomes_a_failed_tool_line() {
+pub(crate) fn malformed_tool_envelope_becomes_a_failed_tool_line() {
     // 真实案例：模型想调 write，但信封 JSON 非法（结尾多个 ]）——
     // 必须记一条 ok=false 的 tool 行，绝不把 JSON 当 AI 消息渲染，也绝不执行工具。
     let raw_path = s(&["w", "work", "README.md"]);
@@ -2180,7 +1412,7 @@ fn malformed_tool_envelope_becomes_a_failed_tool_line() {
 }
 
 #[test]
-fn malformed_tool_without_salvageable_name_still_records_a_line() {
+pub(crate) fn malformed_tool_without_salvageable_name_still_records_a_line() {
     // 断在半截、括号不平衡：打捞不到名字也不能 panic，仍是一条 ok=false 的 tool 行。
     let half = "{\"type\":\"tool\",\"args\":{";
     let mut member = BTreeMap::new();
@@ -2195,7 +1427,7 @@ fn malformed_tool_without_salvageable_name_still_records_a_line() {
 }
 
 #[test]
-fn repeated_malformed_envelopes_hit_the_tool_cap_and_stop() {
+pub(crate) fn repeated_malformed_envelopes_hit_the_tool_cap_and_stop() {
     // 模型反复输出非法信封：计入工具上限，最终强制收尾，不会死循环。
     let broken = broken_tool(&s(&["w", "work", "README.md"]));
     let script: Vec<String> = (0..MAX_TOOL_CALLS + 1).map(|_| broken.clone()).collect();
@@ -2210,7 +1442,7 @@ fn repeated_malformed_envelopes_hit_the_tool_cap_and_stop() {
 }
 
 #[test]
-fn tool_type_mention_in_plain_speech_is_not_misjudged() {
+pub(crate) fn tool_type_mention_in_plain_speech_is_not_misjudged() {
     // ① 合法 say 信封的正文里引用 {"type":"tool"}：正常发言，不是工具调用。
     let say = serde_json::json!({"type": "say", "text": "调用格式是 {\"type\":\"tool\"} 这样"}).to_string();
     let mut member = BTreeMap::new();
@@ -2240,7 +1472,7 @@ fn tool_type_mention_in_plain_speech_is_not_misjudged() {
 }
 
 #[test]
-fn prose_then_unclosed_tool_envelope_is_malformed_and_keeps_prose() {
+pub(crate) fn prose_then_unclosed_tool_envelope_is_malformed_and_keeps_prose() {
     // 正文在前、坏信封在后（未闭合）：也要判 malformed，且正文照常显示、JSON 不上屏。
     let raw = "好的。{\"type\":\"tool\",\"name\":\"write\",\"args\":{\"path\":\"a\"}";
     let mut member = BTreeMap::new();
@@ -2263,7 +1495,7 @@ fn prose_then_unclosed_tool_envelope_is_malformed_and_keeps_prose() {
 }
 
 #[test]
-fn a_malformed_envelope_is_repaired_when_the_fix_is_unambiguous() {
+pub(crate) fn a_malformed_envelope_is_repaired_when_the_fix_is_unambiguous() {
     // 真实事故的形状：write 的 content 里直接换了行 → 手写信封非法。
     // 默认修复器只做无歧义的转义；修好就照常执行，并在回执最前面如实标注。
     let note = s(&["demo", "m0", "note.txt"]);
@@ -2314,7 +1546,7 @@ fn a_malformed_envelope_is_repaired_when_the_fix_is_unambiguous() {
 }
 
 #[test]
-fn malformed_envelopes_are_classified_so_the_model_gets_the_right_fix() {
+pub(crate) fn malformed_envelopes_are_classified_so_the_model_gets_the_right_fix() {
     // 类别是可判定的确切事实：模型据此能直接改对，而不是被笼统告知"JSON 不合法"。
     use crate::core::envelope::{parse, Malformed};
     // ① 字符串里直接换行（真实事故：write 的 content 里裸换行 → 整段 JSON 非法）
@@ -2396,7 +1628,7 @@ fn malformed_envelopes_are_classified_so_the_model_gets_the_right_fix() {
 }
 
 #[test]
-fn envelope_tool_parses_name_and_args() {
+pub(crate) fn envelope_tool_parses_name_and_args() {
     let r = crate::core::envelope::parse(TOOL_CALL);
     assert_eq!(r.verb, crate::core::envelope::Verb::Tool);
     let inv = r.tools.first().cloned().expect("应有调用申请");
@@ -2426,7 +1658,7 @@ fn envelope_tool_parses_name_and_args() {
 }
 
 #[test]
-fn streaming_stops_at_the_envelope_brace() {
+pub(crate) fn streaming_stops_at_the_envelope_brace() {
     // 正文开头照常流；一旦出现 "{"（信封开始）就不再外送后续片段。
     use crate::core::session::stream_piece;
     let (send, acc) = stream_piece("", "我先看看。");
@@ -2447,7 +1679,7 @@ fn streaming_stops_at_the_envelope_brace() {
 }
 
 #[test]
-fn envelope_only_round_produces_only_a_tool_line() {
+pub(crate) fn envelope_only_round_produces_only_a_tool_line() {
     // 只有信封、没有正文也没有思维链 → 只出 tool 行，不产生空行。
     let mut member = BTreeMap::new();
     member.insert("a".to_string(), vec![TOOL_CALL.into(), "{\"type\":\"say\",\"text\":\"完成\"}".into()]);
@@ -2463,7 +1695,7 @@ fn envelope_only_round_produces_only_a_tool_line() {
 }
 
 #[test]
-fn prose_then_tool_envelope_keeps_prose_line_and_rebuilds_identically() {
+pub(crate) fn prose_then_tool_envelope_keeps_prose_line_and_rebuilds_identically() {
     // 同一轮里「先写正文再发信封」：正文与思维链要落进文本行，且正文行不得含 JSON；
     // 重建上下文必须与实时历史逐条一致（工具轮的文本行不另推 assistant）。
     let hist = Arc::new(InMemoryHistory::new());
@@ -2517,7 +1749,7 @@ fn prose_then_tool_envelope_keeps_prose_line_and_rebuilds_identically() {
 }
 
 #[test]
-fn forced_final_tool_envelope_shows_no_json() {
+pub(crate) fn forced_final_tool_envelope_shows_no_json() {
     // 超限强制收尾后模型仍发信封：显示文本取信封之外的正文（没有正文就是空），JSON 绝不进转录。
     let runner = Arc::new(RecordingRunner { calls: Mutex::new(Vec::new()), out: "ok".into(), ok: true });
     let mut script: Vec<String> = (0..MAX_TOOL_CALLS).map(|_| TOOL_CALL.to_string()).collect();
@@ -2539,7 +1771,7 @@ fn forced_final_tool_envelope_shows_no_json() {
 }
 
 #[test]
-fn tool_loop_runs_declared_tool() {
+pub(crate) fn tool_loop_runs_declared_tool() {
     let runner = Arc::new(RecordingRunner { calls: Mutex::new(Vec::new()), out: "  3 | 命中行".into(), ok: true });
     let mut m = member_with_tools(
         "m0",
@@ -2563,7 +1795,7 @@ fn tool_loop_runs_declared_tool() {
 }
 
 #[test]
-fn module_tool_params_are_declared_in_the_manifest_and_enforced_by_core() {
+pub(crate) fn module_tool_params_are_declared_in_the_manifest_and_enforced_by_core() {
     // 参数契约写在 module.yaml（不埋进代码）：核心按它校验，并把说明写进系统提示。
     let mut mod_m0 = module_of("m0");
     mod_m0.manifest.tools.insert(
@@ -2616,7 +1848,7 @@ fn module_tool_params_are_declared_in_the_manifest_and_enforced_by_core() {
 }
 
 #[test]
-fn tool_loop_rejects_undeclared_tool() {
+pub(crate) fn tool_loop_rejects_undeclared_tool() {
     let runner = Arc::new(RecordingRunner { calls: Mutex::new(Vec::new()), out: String::new(), ok: true });
     let mut m = member_with_tools(
         "m0",
@@ -2632,7 +1864,7 @@ fn tool_loop_rejects_undeclared_tool() {
 }
 
 #[test]
-fn shipped_modules_scan_clean() {
+pub(crate) fn shipped_modules_scan_clean() {
     // 随仓模块（modules/）是产品内容的一部分：清单必须全部合法、id 与目录一致。
     let roster = crate::adapters::FsModules::new(PathBuf::from("modules")).scan();
     assert!(!roster.modules.is_empty(), "仓库应自带模块");
@@ -2645,7 +1877,7 @@ fn shipped_modules_scan_clean() {
 }
 
 #[test]
-fn tool_loop_cap_forces_final_answer() {
+pub(crate) fn tool_loop_cap_forces_final_answer() {
     let runner = Arc::new(RecordingRunner { calls: Mutex::new(Vec::new()), out: "r".into(), ok: true });
     let mut script: Vec<String> = (0..MAX_TOOL_CALLS).map(|_| TOOL_CALL.to_string()).collect();
     script.push("{\"type\":\"say\",\"text\":\"最终回报\"}".into());
@@ -2657,7 +1889,7 @@ fn tool_loop_cap_forces_final_answer() {
 }
 
 #[test]
-fn core_direct_tool_flow_injects_result_into_history() {
+pub(crate) fn core_direct_tool_flow_injects_result_into_history() {
     let runner = Arc::new(RecordingRunner { calls: Mutex::new(Vec::new()), out: "  3 | 依据行".into(), ok: true });
     let mut member = BTreeMap::new();
     member.insert("a".to_string(), vec![
@@ -2692,7 +1924,7 @@ fn core_direct_tool_flow_injects_result_into_history() {
 // ---------- 内置文件工具：沙箱寻址与越界 ----------
 
 #[test]
-fn sandbox_resolve_accepts_only_absolute_paths_inside_roots() {
+pub(crate) fn sandbox_resolve_accepts_only_absolute_paths_inside_roots() {
     use crate::core::workspace::Place;
     let sb = test_sandbox("a1", &["data"]);
     // 绝对且在根内 → 通过（返回归一化后的绝对路径）
@@ -2727,7 +1959,7 @@ fn sandbox_resolve_accepts_only_absolute_paths_inside_roots() {
 }
 
 #[test]
-fn builtin_search_reports_line_numbers_and_respects_case() {
+pub(crate) fn builtin_search_reports_line_numbers_and_respects_case() {
     let io = InMemorySysIo::new();
     let sb = test_sandbox("a1", &[]);
     io.seed(&["demo", "work", "note.txt"], "第一行 Alpha\n第二行 beta\nalpha 小写\n");
@@ -2758,7 +1990,7 @@ fn builtin_search_reports_line_numbers_and_respects_case() {
 }
 
 #[test]
-fn agent_system_carries_the_real_roots() {
+pub(crate) fn agent_system_carries_the_real_roots() {
     // 提示词里给出的根必须是真实绝对路径（模型据此拼路径；外部工具也认它）。
     let mut core = core_with(vec![module_of("a")], gw(BTreeMap::new(), vec!["[]".into()]));
     let sid = core.create_work(work("w", WorkMode::Single, &["a"])).unwrap().sid;
@@ -2778,14 +2010,14 @@ fn agent_system_carries_the_real_roots() {
 }
 
 #[test]
-fn sandboxes_lookup_is_by_agent() {
+pub(crate) fn sandboxes_lookup_is_by_agent() {
     let boxes = crate::core::workspace::Sandboxes { shared: abs(&["w", "work"]), list: vec![test_sandbox("甲", &["a"])] };
     assert!(boxes.for_agent("甲").is_some(), "按 agent 实例名取沙箱");
     assert!(boxes.for_agent("a").is_none(), "沙箱不再按模块 id 反查");
 }
 
 #[test]
-fn builtin_file_tools_run_in_direct_session() {
+pub(crate) fn builtin_file_tools_run_in_direct_session() {
     let io = Arc::new(InMemorySysIo::new());
     let note = s(&["w", "a", "note.txt"]);
     let mut member = BTreeMap::new();
@@ -2813,7 +2045,7 @@ fn builtin_file_tools_run_in_direct_session() {
 }
 
 #[test]
-fn builtin_write_into_module_dir_is_allowed_with_notice() {
+pub(crate) fn builtin_write_into_module_dir_is_allowed_with_notice() {
     let io = InMemorySysIo::new();
     let sb = test_sandbox("a1", &["data"]);
     let keep = s(&["mods", "data", "keep.txt"]);
@@ -2830,7 +2062,7 @@ fn builtin_write_into_module_dir_is_allowed_with_notice() {
 }
 
 #[test]
-fn builtin_edit_replaces_the_requested_span_and_reports_what_it_did() {
+pub(crate) fn builtin_edit_replaces_the_requested_span_and_reports_what_it_did() {
     let io = InMemorySysIo::new();
     let sb = test_sandbox("a1", &[]);
     let note = s(&["demo", "work", "note.txt"]);
@@ -2868,7 +2100,7 @@ fn builtin_edit_replaces_the_requested_span_and_reports_what_it_did() {
 }
 
 #[test]
-fn builtin_edit_refuses_files_it_cannot_see_whole() {
+pub(crate) fn builtin_edit_refuses_files_it_cannot_see_whole() {
     // 只看到开头 / 看到的是替换字符：改写会把没读到的内容或原始字节一起弄丢 → 一律不写盘。
     let note = s(&["demo", "work", "note.txt"]);
     let args = format!("{{\"path\":\"{}\",\"old_string\":\"a\",\"new_string\":\"b\"}}", note);
@@ -2886,7 +2118,7 @@ fn builtin_edit_refuses_files_it_cannot_see_whole() {
 }
 
 #[test]
-fn builtin_write_needs_a_complete_prior_read_of_an_existing_file() {
+pub(crate) fn builtin_write_needs_a_complete_prior_read_of_an_existing_file() {
     let io = InMemorySysIo::new();
     let sb = test_sandbox("a1", &[]);
     let note = s(&["demo", "work", "note.txt"]);
@@ -2980,7 +2212,7 @@ impl ChatGateway for AbortGateway {
 }
 
 #[test]
-fn an_aborted_generation_never_executes_a_repairable_envelope() {
+pub(crate) fn an_aborted_generation_never_executes_a_repairable_envelope() {
     // 被停止的生成留下的"只差一个括号"的信封：即便修复端口能修，也绝不执行——
     // 半截信封是停下来的产物，不是模型的意图（真实会话里第一轮三次都是这个形状）。
     let note = s(&["w", "a", "note.txt"]);
@@ -3000,7 +2232,7 @@ fn an_aborted_generation_never_executes_a_repairable_envelope() {
 }
 
 #[test]
-fn a_truncated_output_is_reported_as_truncation_not_as_a_bad_envelope() {
+pub(crate) fn a_truncated_output_is_reported_as_truncation_not_as_a_bad_envelope() {
     // 供应商说 finish_reason=length：回执要指出"是被按长度截断"，而不是让模型去查括号；
     // 真实会话里正是分辨不出这两者，模型照着"内容过长"的假设白跑了两轮。
     let broken = "{\"type\":\"tool\",\"name\":\"write\",\"args\":{\"path\":\"a\",\"content\":";
@@ -3045,7 +2277,7 @@ impl ChatGateway for ProbeGateway {
 }
 
 #[test]
-fn a_probe_writes_back_only_conclusive_results() {
+pub(crate) fn a_probe_writes_back_only_conclusive_results() {
     use crate::core::providers::{ProbeOutcome, ToolMode};
     let fresh = |outcome: ProbeOutcome| {
         let mut core = core_with_gateway(vec![], ProbeGateway { outcome: Arc::new(Mutex::new(outcome)) });
@@ -3154,7 +2386,7 @@ pub(crate) fn native_member(
 }
 
 #[test]
-fn native_mode_declares_tools_and_runs_multiple_structured_calls() {
+pub(crate) fn native_mode_declares_tools_and_runs_multiple_structured_calls() {
     use crate::core::ports::ToolCall;
     let io = Arc::new(InMemorySysIo::new());
     io.seed(&["demo", "work", "note.txt"], "第一行\n第二行\n");
@@ -3237,7 +2469,7 @@ fn native_mode_declares_tools_and_runs_multiple_structured_calls() {
 }
 
 #[test]
-fn native_mode_refuses_a_hand_written_envelope() {
+pub(crate) fn native_mode_refuses_a_hand_written_envelope() {
     let io = Arc::new(InMemorySysIo::new());
     let target = s(&["demo", "work", "out.md"]);
     let envelope = format!(
@@ -3263,7 +2495,7 @@ fn native_mode_refuses_a_hand_written_envelope() {
 /// 声明可并发的读取**真的并发**，且结果一律按**原始调用顺序**回填。
 /// 第一个文件故意慢：它会**后完成**，但结果仍必须排在前面（上下文里不许乱序）。
 #[test]
-fn declared_parallel_reads_overlap_and_results_keep_the_call_order() {
+pub(crate) fn declared_parallel_reads_overlap_and_results_keep_the_call_order() {
     use crate::core::ports::ToolCall;
     let io = Arc::new(InMemorySysIo::new().slow(40));
     io.seed(&["demo", "work", "a.txt"], "A1\nA2\n");
@@ -3302,7 +2534,7 @@ fn declared_parallel_reads_overlap_and_results_keep_the_call_order() {
 
 /// 写入类独占执行：它是并发批次之间的**屏障**，并且能看到并发批次**合并后**的账本。
 #[test]
-fn a_writing_call_is_a_barrier_and_sees_the_merged_ledger() {
+pub(crate) fn a_writing_call_is_a_barrier_and_sees_the_merged_ledger() {
     use crate::core::ports::ToolCall;
     let io = Arc::new(InMemorySysIo::new().slow(30));
     io.seed(&["demo", "work", "a.txt"], "原文\n");
@@ -3348,7 +2580,7 @@ fn a_writing_call_is_a_barrier_and_sees_the_merged_ledger() {
 
 /// 模块工具的可并发性是**模块作者在 module.yaml 里的声明**：声明了才并发，没声明一律串行。
 #[test]
-fn module_tools_are_concurrent_only_when_declared() {
+pub(crate) fn module_tools_are_concurrent_only_when_declared() {
     use crate::core::ports::ToolCall;
     /// 原生形态 + 模块 m0 声明外部工具 grep（线上名 m0_grep）；parallel 决定它是否可并发。
     fn grep_member(
@@ -3407,7 +2639,7 @@ fn module_tools_are_concurrent_only_when_declared() {
 }
 
 #[test]
-fn changing_the_declared_mode_takes_effect_on_the_next_generation() {
+pub(crate) fn changing_the_declared_mode_takes_effect_on_the_next_generation() {
     use crate::core::providers::ProbeOutcome;
     // 一开始登记处说"不支持原生"：会话按手写信封装配（系统提示也就教信封）
     let outcome = Arc::new(Mutex::new(ProbeOutcome::Unsupported { detail: "先不支持".to_string() }));
@@ -3463,7 +2695,7 @@ fn changing_the_declared_mode_takes_effect_on_the_next_generation() {
 }
 
 #[test]
-fn patch_channel_writes_files_without_json_escaping() {
+pub(crate) fn patch_channel_writes_files_without_json_escaping() {
     // 自由格式：信封之后原样跟补丁文本（含中文与换行，完全不转义）；一次两块、落在两个文件。
     let old = s(&["w", "m0", "note.txt"]);
     let new = s(&["w", "m0", "out.md"]);
@@ -3505,7 +2737,7 @@ fn patch_channel_writes_files_without_json_escaping() {
 }
 
 #[test]
-fn a_failing_patch_block_writes_nothing_at_all() {
+pub(crate) fn a_failing_patch_block_writes_nothing_at_all() {
     // 第 2 块找不到 SEARCH：整体不写盘，回执点名第几块、为什么
     let first = s(&["w", "m0", "a.txt"]);
     let second = s(&["w", "m0", "b.txt"]);
@@ -3531,7 +2763,7 @@ fn a_failing_patch_block_writes_nothing_at_all() {
 }
 
 #[test]
-fn a_patch_without_end_marker_is_refused_with_the_line() {
+pub(crate) fn a_patch_without_end_marker_is_refused_with_the_line() {
     // 少了 End File：不能猜哪里是结尾（否则补丁后面那句话会被写进文件）
     let target = s(&["w", "m0", "out.md"]);
     let raw = format!(
@@ -3550,7 +2782,7 @@ fn a_patch_without_end_marker_is_refused_with_the_line() {
 }
 
 #[test]
-fn a_freeform_envelope_is_never_repaired() {
+pub(crate) fn a_freeform_envelope_is_never_repaired() {
     // 自由格式工具的信封本身不合法时：不做信封修复（修会把正文里的换行当作字符串内容转义掉），
     // 如实报"信封没写完"，也绝不落盘。
     let target = s(&["w", "m0", "out.md"]);
@@ -3572,7 +2804,7 @@ fn a_freeform_envelope_is_never_repaired() {
 }
 
 #[test]
-fn rewind_clears_the_read_ledger_so_overwrite_needs_a_fresh_read() {
+pub(crate) fn rewind_clears_the_read_ledger_so_overwrite_needs_a_fresh_read() {
     // 回档把转录截掉了：那段"我完整读过 / 我写过"的证据随之作废（保守，宁肯让模型重读）。
     let io = Arc::new(InMemorySysIo::new());
     let note = s(&["w", "a", "note.txt"]);
@@ -3604,7 +2836,7 @@ fn rewind_clears_the_read_ledger_so_overwrite_needs_a_fresh_read() {
 }
 
 #[test]
-fn builtin_read_reports_errors_verbatim() {
+pub(crate) fn builtin_read_reports_errors_verbatim() {
     let io = InMemorySysIo::new();
     let sb = test_sandbox("a1", &[]);
     io.seed(&["demo", "work", "note.txt"], "内容");
@@ -3626,7 +2858,7 @@ fn builtin_read_reports_errors_verbatim() {
 }
 
 #[test]
-fn builtin_read_range_numbers_lines_and_points_at_the_next_offset() {
+pub(crate) fn builtin_read_range_numbers_lines_and_points_at_the_next_offset() {
     let io = InMemorySysIo::new();
     let sb = test_sandbox("a1", &[]);
     io.seed(&["demo", "work", "note.txt"], "l1\nl2\nl3\nl4\nl5\n");
@@ -3652,7 +2884,7 @@ fn builtin_read_range_numbers_lines_and_points_at_the_next_offset() {
 }
 
 #[test]
-fn builtin_arg_mistakes_are_named_and_the_signature_comes_back() {
+pub(crate) fn builtin_arg_mistakes_are_named_and_the_signature_comes_back() {
     let io = InMemorySysIo::new();
     let sb = test_sandbox("a1", &[]);
     io.seed(&["demo", "work", "note.txt"], "内容\n");
@@ -3680,7 +2912,7 @@ fn builtin_arg_mistakes_are_named_and_the_signature_comes_back() {
 }
 
 #[test]
-fn builtin_tool_book_is_the_one_source_of_names_and_paths() {
+pub(crate) fn builtin_tool_book_is_the_one_source_of_names_and_paths() {
     // 保留名（代码里的常量）与 prompts.yaml 的声明必须一致，否则模型看到的工具与放行的工具会走偏。
     let prompts = test_prompts();
     let book = &prompts.core.builtin_tools;
@@ -3710,7 +2942,7 @@ fn builtin_tool_book_is_the_one_source_of_names_and_paths() {
 }
 
 #[test]
-fn core_collab_tool_modules_run_in_execution() {
+pub(crate) fn core_collab_tool_modules_run_in_execution() {
     let runner = Arc::new(RecordingRunner { calls: Mutex::new(Vec::new()), out: "  1 | 内容".into(), ok: true });
     let mut member = BTreeMap::new();
     // 脚本排布：讨论开场 say → 讨论 step agree（收敛）→ 执行阶段 TOOL_CALL → 最终回报。
@@ -3749,7 +2981,7 @@ fn core_collab_tool_modules_run_in_execution() {
 // ---------- 运行包：契约、包库、诊断、执行计划 ----------
 
 #[test]
-fn package_manifest_check_rejects_illegal_forms() {
+pub(crate) fn package_manifest_check_rejects_illegal_forms() {
     let check = crate::core::packages::check_manifest;
     assert!(check(&pkg("python", "3.12.4")).is_ok(), "prefix 类默认 kind");
     assert!(check(&pkg_yaml("id: Python\nversion: 1\nprefix: opt/p")).is_err(), "id 只允许小写");
@@ -3763,7 +2995,7 @@ fn package_manifest_check_rejects_illegal_forms() {
 }
 
 #[test]
-fn module_runtimes_are_validated() {
+pub(crate) fn module_runtimes_are_validated() {
     let mut m = module_of("a");
     m.manifest.runtimes = vec!["python".to_string(), "cc".to_string()];
     assert!(crate::core::module::check_runtimes(&m.manifest).is_ok());
@@ -3774,7 +3006,7 @@ fn module_runtimes_are_validated() {
 }
 
 #[test]
-fn module_tools_may_not_take_builtin_names() {
+pub(crate) fn module_tools_may_not_take_builtin_names() {
     let mut m = module_of("a");
     m.manifest.tools.insert("read_txt".to_string(), decl("python tools/read_txt.py"));
     assert!(crate::core::module::check_tools(&m.manifest).is_ok(), "普通工具名可用");
@@ -3787,7 +3019,7 @@ fn module_tools_may_not_take_builtin_names() {
 }
 
 #[test]
-fn library_keeps_versions_and_rejects_duplicates() {
+pub(crate) fn library_keeps_versions_and_rejects_duplicates() {
     let lib = Library::build(
         vec![pkg("python", "3.12.4"), pkg("python", "3.11.9"), pkg("python", "3.12.4"), pkg_yaml("id: bad\nversion: 1")],
         vec!["x：package.yaml 非法".to_string()],
@@ -3802,7 +3034,7 @@ fn library_keeps_versions_and_rejects_duplicates() {
 }
 
 #[test]
-fn package_conflicts_flag_overlapping_paths() {
+pub(crate) fn package_conflicts_flag_overlapping_paths() {
     let lib = Library::build(
         vec![
             pkg_yaml("id: a\nversion: 1\nkind: system\nprovides_paths: [usr/lib]"),
@@ -3819,7 +3051,7 @@ fn package_conflicts_flag_overlapping_paths() {
 }
 
 /// 虚拟机档选型：基础根 + 不联网（定版留空 = 让库自己决定；多版本时报歧义）。
-fn vm_spec() -> ExecSpec {
+pub(crate) fn vm_spec() -> ExecSpec {
     ExecSpec { tier: Tier::Vm, base: Some("base-linux".to_string()), pins: BTreeMap::new(), net: false }
 }
 
@@ -3827,7 +3059,7 @@ fn vm_spec() -> ExecSpec {
 /// 档位承载（与选型是两回事）：本机档没有额外前置；虚拟机档缺基础根或本机没有虚拟机监视器时**不可选**。
 /// 界面上的"能不能选"与创建/编辑的拒绝走同一个函数，所以这里钉住的就是那两处共同的事实。
 #[test]
-fn vm_tier_readiness_gates_creation_and_editing() {
+pub(crate) fn vm_tier_readiness_gates_creation_and_editing() {
     // 本机档：任何机器上都能承载（不装载运行包、不要 guest）。
     let host = exec::tier_readiness(&ExecSpec::default());
     assert!(host.ready(), "本机档没有前置条件");
@@ -3846,7 +3078,7 @@ fn vm_tier_readiness_gates_creation_and_editing() {
     assert!(why.contains("基础根不存在") && why.contains("虚拟机档暂不可用"), "{}", why);
 
     // 基础根在场时：成立与否只取决于本机有没有虚拟机监视器（这里只断言这份一致性）。
-    let dir = crate::contract_tests::scratch("tier-readiness");
+    let dir = crate::tests::scratch("tier-readiness");
     let real = ExecSpec { tier: Tier::Vm, base: Some(dir.to_string_lossy().into_owned()), ..Default::default() };
     let r2 = exec::tier_readiness(&real);
     assert!(r2.base, "在场的基础根要认出来");
@@ -3860,7 +3092,7 @@ fn vm_tier_readiness_gates_creation_and_editing() {
 }
 
 #[test]
-fn exec_host_tier_ignores_packages() {
+pub(crate) fn exec_host_tier_ignores_packages() {
     let modules = vec![module_with_runtimes("a", &["python"])];
     let plan = exec::plan(&ExecSpec::default(), &modules, &Library::default())
         .expect("本机档不装载运行包，不会因缺包失败");
@@ -3873,7 +3105,7 @@ fn exec_host_tier_ignores_packages() {
 }
 
 #[test]
-fn exec_vm_tier_reports_missing_ambiguous_and_unavailable() {
+pub(crate) fn exec_vm_tier_reports_missing_ambiguous_and_unavailable() {
     let modules = vec![module_with_runtimes("a", &["python"])];
     let empty = Library::default();
     let spec = vm_spec();
@@ -3905,7 +3137,7 @@ fn exec_vm_tier_reports_missing_ambiguous_and_unavailable() {
 }
 
 #[test]
-fn exec_vm_plan_pins_versions_and_orders_prefix_before_system() {
+pub(crate) fn exec_vm_plan_pins_versions_and_orders_prefix_before_system() {
     let lib = Library::build(
         vec![
             pkg_yaml("id: cc\nversion: 13.2.0\nkind: system\nprovides_paths: [usr/bin, usr/include]\nrequires: [binutils]"),
@@ -3926,7 +3158,7 @@ fn exec_vm_plan_pins_versions_and_orders_prefix_before_system() {
 }
 
 #[test]
-fn diagnose_text_spells_out_every_reason() {
+pub(crate) fn diagnose_text_spells_out_every_reason() {
     let missing = exec::diagnose_text(&[Diagnosis::Missing { module: "a".to_string(), capability: "python".to_string() }]);
     assert!(missing.contains("模块 a") && missing.contains("python") && missing.contains("runtimes/"), "{}", missing);
     let ambiguous = exec::diagnose_text(&[Diagnosis::Ambiguous {
@@ -3948,7 +3180,7 @@ fn diagnose_text_spells_out_every_reason() {
 /// 虚拟机档的承载校验：前置条件不具备时，**创建与编辑都如实拒绝**（用户环境问题，不是选型问题）。
 /// 与界面上的"能不能选"同源（`exec::tier_readiness`），两处不会各说各话。
 #[test]
-fn vm_tier_is_refused_when_the_machine_cannot_carry_it() {
+pub(crate) fn vm_tier_is_refused_when_the_machine_cannot_carry_it() {
     let mut member = BTreeMap::new();
     member.insert("a".to_string(), vec!["[]".into()]);
     let mut core = Core::new(
@@ -4022,7 +3254,7 @@ fn vm_tier_is_refused_when_the_machine_cannot_carry_it() {
 }
 
 #[test]
-fn runtime_report_is_tier_aware() {
+pub(crate) fn runtime_report_is_tier_aware() {
     let cores = |pkgs: Arc<InMemoryPackages>, modules: Vec<Module>| {
         core_with_pkgs(
             modules,
@@ -4054,7 +3286,7 @@ fn runtime_report_is_tier_aware() {
 }
 
 #[test]
-fn module_without_runtime_is_denied_with_reason() {
+pub(crate) fn module_without_runtime_is_denied_with_reason() {
     // 虚拟机档 + 空包库：模块声明的运行包没装载 → 工具不落进程，回执如实说缺哪个能力。
     let mut member = BTreeMap::new();
     member.insert("a".to_string(), vec![TOOL_CALL.into(), "{\"type\":\"say\",\"text\":\"改用内置工具\"}".into()]);
@@ -4111,7 +3343,7 @@ fn module_without_runtime_is_denied_with_reason() {
 // ---------- 配置视图：读、改、冻结 ----------
 
 /// 造一条 agent 名单记录。
-fn agent_meta(name: &str, modules: &[&str], model: Option<&str>) -> AgentMeta {
+pub(crate) fn agent_meta(name: &str, modules: &[&str], model: Option<&str>) -> AgentMeta {
     AgentMeta {
         name: name.to_string(),
         transient: false,
@@ -4121,7 +3353,7 @@ fn agent_meta(name: &str, modules: &[&str], model: Option<&str>) -> AgentMeta {
 }
 
 /// 直接把一份 meta 放进内存历史（模拟"重启后从盘上读回该会话"）。
-fn seed_session(hist: &Arc<InMemoryHistory>, name: &str, mode: &str, agents: Vec<AgentMeta>, exec: ExecSpec) {
+pub(crate) fn seed_session(hist: &Arc<InMemoryHistory>, name: &str, mode: &str, agents: Vec<AgentMeta>, exec: ExecSpec) {
     hist.create(&SessionMeta {
         name: name.to_string(),
         mode: mode.to_string(),
@@ -4136,7 +3368,7 @@ fn seed_session(hist: &Arc<InMemoryHistory>, name: &str, mode: &str, agents: Vec
 }
 
 /// 一次编辑提交（名字 / 模块 / 模型；档位与定版默认本机档）。
-fn edit_of(agents: Vec<(&str, &[&str], &str)>) -> SessionEdit {
+pub(crate) fn edit_of(agents: Vec<(&str, &[&str], &str)>) -> SessionEdit {
     SessionEdit {
         agents: agents
             .into_iter()
@@ -4154,7 +3386,7 @@ fn edit_of(agents: Vec<(&str, &[&str], &str)>) -> SessionEdit {
 }
 
 #[test]
-fn session_config_reports_tier_missing_and_runtimes_dir() {
+pub(crate) fn session_config_reports_tier_missing_and_runtimes_dir() {
     let hist = Arc::new(InMemoryHistory::new());
     seed_session(&hist, "w", "single", vec![agent_meta("a", &["a"], Some("m"))], ExecSpec { tier: Tier::Vm, ..Default::default() });
     let core = core_with_pkgs(
@@ -4178,7 +3410,7 @@ fn session_config_reports_tier_missing_and_runtimes_dir() {
 }
 
 #[test]
-fn edit_session_writes_meta_appends_config_record_and_rebuilds() {
+pub(crate) fn edit_session_writes_meta_appends_config_record_and_rebuilds() {
     let hist = Arc::new(InMemoryHistory::new());
     let mut a = module_of("a");
     a.manifest.tools.insert("grep".to_string(), decl("python tools/grep.py"));
@@ -4199,7 +3431,7 @@ fn edit_session_writes_meta_appends_config_record_and_rebuilds() {
     // 改：模块 a → b，模型指定 m，档位换虚拟机档、放行网络。
     // 基础根给一个**真实存在**的目录：档位承载是独立的一层校验（虚拟机档要求基础根在场），
     // 这条测试验的是"编辑写回与重建"，所以先让承载成立，别把两件事混在一条断言里。
-    let base_dir = crate::contract_tests::scratch("edit-session-base");
+    let base_dir = crate::tests::scratch("edit-session-base");
     core.edit_session(
         &sid,
         SessionEdit {
@@ -4234,7 +3466,7 @@ fn edit_session_writes_meta_appends_config_record_and_rebuilds() {
 }
 
 #[test]
-fn edit_session_freezes_names_only_after_content() {
+pub(crate) fn edit_session_freezes_names_only_after_content() {
     let hist = Arc::new(InMemoryHistory::new());
     seed_session(&hist, "raw", "single", vec![agent_meta("a", &["a"], None)], ExecSpec::default());
     let mut core = core_with_pkgs(
@@ -4259,7 +3491,7 @@ fn edit_session_freezes_names_only_after_content() {
 }
 
 #[test]
-fn edit_session_enforces_the_same_rules_as_creation() {
+pub(crate) fn edit_session_enforces_the_same_rules_as_creation() {
     let hist = Arc::new(InMemoryHistory::new());
     seed_session(&hist, "w", "single", vec![agent_meta("a", &["a"], None)], ExecSpec::default());
     seed_session(
@@ -4312,7 +3544,7 @@ fn edit_session_enforces_the_same_rules_as_creation() {
 }
 
 #[test]
-fn deleting_a_session_asks_the_fence_to_release_its_grants() {
+pub(crate) fn deleting_a_session_asks_the_fence_to_release_its_grants() {
     let hist = Arc::new(InMemoryHistory::new());
     let fence = Arc::new(RecordingFence::new());
     seed_session(&hist, "w", "single", vec![agent_meta("甲", &["a"], None)], ExecSpec::default());
@@ -4341,7 +3573,7 @@ fn deleting_a_session_asks_the_fence_to_release_its_grants() {
 }
 
 #[test]
-fn session_meta_exec_section_roundtrips_and_reads_legacy_meta() {
+pub(crate) fn session_meta_exec_section_roundtrips_and_reads_legacy_meta() {
     let meta = SessionMeta {
         name: "w".to_string(),
         mode: "single".to_string(),
@@ -4374,7 +3606,7 @@ fn session_meta_exec_section_roundtrips_and_reads_legacy_meta() {
 /// 手写信封通道的**批量调用**：一封 calls 数组里的多个调用各成一条工具行，结果按原序回填，
 /// 且与原生通道一样「重建出来必须与实时逐条一致」（手写信封不涉及 role=tool）。
 #[test]
-fn envelope_multi_call_runs_every_call_and_rebuilds_identically() {
+pub(crate) fn envelope_multi_call_runs_every_call_and_rebuilds_identically() {
     let hist = Arc::new(InMemoryHistory::new());
     let io = Arc::new(InMemorySysIo::new());
     io.seed(&["w", "a", "a.txt"], "A1\n");
@@ -4443,7 +3675,7 @@ fn envelope_multi_call_runs_every_call_and_rebuilds_identically() {
 
 /// 两种信封形态**互斥**：一封里既有 name 又有 calls = 字段不合法 → 记一条失败工具行、一个工具都不执行。
 #[test]
-fn envelope_rejects_mixing_the_single_and_calls_shapes() {
+pub(crate) fn envelope_rejects_mixing_the_single_and_calls_shapes() {
     let io = Arc::new(InMemorySysIo::new());
     let out = s(&["w", "a", "out.md"]);
     let raw = format!(
@@ -4497,7 +3729,7 @@ impl ChatGateway for NativeGateway {
 }
 
 /// 指定网关 + 指定落盘历史装配一个核心（重建用例要读同一份转录）。
-fn native_core(gateway: NativeGateway, history: Arc<InMemoryHistory>, io: Arc<InMemorySysIo>) -> Core {
+pub(crate) fn native_core(gateway: NativeGateway, history: Arc<InMemoryHistory>, io: Arc<InMemorySysIo>) -> Core {
     Core::new(
         Arc::new(InMemorySettings::new()),
         history,
@@ -4519,7 +3751,7 @@ fn native_core(gateway: NativeGateway, history: Arc<InMemoryHistory>, io: Arc<In
 /// 一次回复里的**多个**原生调用：实时历史与重建历史必须逐条一致（含 tool_calls 与 tool_call_id）。
 /// 这就是原先不一致的那条：实时只推第一条调用的回执、第二条起什么都不推，重建却每条都推。
 #[test]
-fn native_multi_call_rebuilds_identically_to_live() {
+pub(crate) fn native_multi_call_rebuilds_identically_to_live() {
     use crate::core::ports::ToolCall;
     let hist = Arc::new(InMemoryHistory::new());
     let io = Arc::new(InMemorySysIo::new());
@@ -4579,7 +3811,7 @@ fn native_multi_call_rebuilds_identically_to_live() {
 
 /// 回档**按回复原子**：截在一次回复中间时整条回复一起丢，绝不留下"孤儿工具结果"。
 #[test]
-fn rewind_never_splits_a_reply() {
+pub(crate) fn rewind_never_splits_a_reply() {
     use crate::core::ports::ToolCall;
     let hist = Arc::new(InMemoryHistory::new());
     let io = Arc::new(InMemorySysIo::new());

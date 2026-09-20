@@ -23,6 +23,6 @@
 | `FenceHost` | `RecordingFence`、`NoFenceHost` | `released` | `fail_with` | 不适用 | `confine::FenceHostAdapter`（真机撤权在 `tests/windows/`） | 已验收 |
 | `Log` | `NoopLog` | 不记录（Stub） | 不适用 | 不适用 | `FileLog`（三个级别都落盘） | 已验收 |
 
-"已验收"指该端口在 `src/contract_tests/` 与 `src/adapters/*` 的契约测试里有成功、失败、空/边界与交互记录的断言；
+"已验收"指该端口在 `src/tests/` 与 `src/adapters/*` 的契约测试里有成功、失败、空/边界与交互记录的断言；
 真实适配器边界的覆盖范围以本表的"真实适配器"列为准。新增端口或新增替身必须同时补齐这一行。
 

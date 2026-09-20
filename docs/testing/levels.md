@@ -50,7 +50,7 @@ cargo tree --duplicates
 
 ### T1：单元测试
 
-位置：实现模块内部的 `#[cfg(test)] mod tests`，以及现有的 `src/tests.rs`。
+位置：实现模块内部的 `#[cfg(test)] mod tests`，以及 `src/tests/core.rs`（全内存装配的用例）。
 
 验证：
 

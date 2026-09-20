@@ -60,7 +60,7 @@
 | 细则正文（`docs/**`） | 该领域的门户（根文档）、`AGENTS.md` 文档路由表、其它文档里指向该节的引用 |
 | 门户的节标题或结构 | 该领域细则里的回引、`AGENTS.md` 文档路由表、`README.md` 文档表 |
 | 新增/删除/改名文档 | `AGENTS.md` 文档路由表、`README.md` 文档表、所有引用它的文档与代码注释 |
-| 代码里被文档机器比对的段落 | 该文档与比对它的测试（例如路由表 ↔ `src/contract_tests/routes.rs`） |
+| 代码里被文档机器比对的段落 | 该文档与比对它的测试（例如路由表 ↔ `src/tests/routes.rs`） |
 | `tests/gaps.yaml` 的条目 | `TESTING.md` 门户与 `docs/testing/gaps-acceptance.md` 的现状描述 |
 
 - 引用一律用**相对仓库根的路径**（`docs/testing/levels.md`），不写机器路径、不写绝对路径。

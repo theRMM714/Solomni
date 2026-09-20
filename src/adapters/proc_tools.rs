@@ -388,7 +388,7 @@ mod tests {
             eprintln!("[探针] 本机没有可用的 python，跳过真实工具进程契约");
             return;
         };
-        let dir = crate::contract_tests::scratch("proc-tools-stdin");
+        let dir = crate::tests::scratch("proc-tools-stdin");
         std::fs::write(dir.join("echo_stdin.py"), "import sys\nprint(sys.stdin.read().strip())\n").expect("写脚本");
         let tools = real_runner(exe, &dir, 60);
         let out = tools.run(&spec_for(&dir), &format!("{} echo_stdin.py", py), "{\"k\":\"v\"}");
@@ -408,7 +408,7 @@ mod tests {
             eprintln!("[探针] 本机没有可用的 python，跳过工具进程环境白名单契约");
             return;
         };
-        let dir = crate::contract_tests::scratch("proc-tools-env");
+        let dir = crate::tests::scratch("proc-tools-env");
         std::fs::write(
             dir.join("echo_env.py"),
             "import os\nprint('LEAK=' + str(os.environ.get('SOLOMNI_PROBE_ENV_LEAK')))\n",
@@ -433,7 +433,7 @@ mod tests {
             eprintln!("[探针] 未找到已构建的 solomni 可执行文件（先 cargo build），跳过相对程序名契约");
             return;
         };
-        let dir = crate::contract_tests::scratch("proc-tools-relative-program");
+        let dir = crate::tests::scratch("proc-tools-relative-program");
         let sub = dir.join("sub");
         std::fs::create_dir_all(&sub).expect("建子目录");
         let (name, body, command) = if cfg!(windows) {
@@ -472,7 +472,7 @@ mod tests {
             eprintln!("[探针] 本机进程树围栏不可用，跳过超时杀树契约");
             return;
         }
-        let dir = crate::contract_tests::scratch("proc-tools-timeout");
+        let dir = crate::tests::scratch("proc-tools-timeout");
         std::fs::write(dir.join("sleep60.py"), "import time\ntime.sleep(60)\n").expect("写脚本");
         let tools = real_runner(exe, &dir, 2);
         let started = Instant::now();
@@ -490,7 +490,7 @@ mod tests {
     /// 守门进程起不来：如实回执「启动失败」，不 panic、不假装跑过。
     #[test]
     fn missing_launcher_binary_is_reported_honestly() {
-        let dir = crate::contract_tests::scratch("proc-tools-missing-exe");
+        let dir = crate::tests::scratch("proc-tools-missing-exe");
         let tools = real_runner(PathBuf::from("definitely-not-here-solomni"), &dir, 5);
         let out = tools.run(&spec_for(&dir), "echo hi", "{}");
         assert!(!out.ok);

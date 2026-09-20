@@ -1,12 +1,12 @@
-//! T2：端口与适配器契约测试（唯一权威见 docs/testing/port-matrix.md）。
-//! 替身语义在这里统一验收（成功 / 失败 / 空 / 边界 / 重复 / 清理）；真实适配器边界用隔离根跑，跑完清理。
+//! 测试层（T1 单元 + T2 端口与适配器契约）——替身与契约测试同处一层。
+//! 目录与命名见 docs/testing/gaps-acceptance.md，替身语义见 docs/testing/doubles.md，
+//! 层级与判定见 docs/testing/levels.md，端口矩阵见 docs/testing/port-matrix.md。
 //! 硬规矩：不碰真实 `.home/`、真实 `session/`、真实权限或外部网络；只绑本地环回。
-//!
-//! 长期迁移目标（记在 tests/gaps.yaml）：本模块与 src/tests.rs 合并为 src/tests/ 目录
-//! （doubles / ports / fakes / adapters 各一文件），替身与契约测试同处一层。
 
 mod adapters;
 mod api;
+mod core;
+mod doubles;
 mod fakes;
 mod intent;
 mod ports;
@@ -23,7 +23,8 @@ pub(crate) fn scratch(name: &str) -> std::path::PathBuf {
     std::fs::create_dir_all(&d).expect("建契约测试隔离根");
     d
 }
-/// 起一个内存装配的核心手柄并把能力面拆成 `Ops`（T2 契约测试共用）。
+
+/// 起一个内存装配的核心手柄并把能力面拆成 `Ops`（契约测试共用）。
 /// 返回手柄是为了能观察事件台与测试注入；只用能力面的用例可以忽略它。
 pub(crate) fn ops_with(
     modules: Vec<crate::core::module::Module>,
@@ -34,10 +35,9 @@ pub(crate) fn ops_with(
         "a".to_string(),
         vec!["{\"type\":\"say\",\"text\":\"好\"}".to_string()],
     );
-    let gateway = crate::tests::gw(member, core_script.into_iter().map(String::from).collect());
-    let handle =
-        crate::core::api::CoreHandle::spawn(crate::tests::core_with_gateway(modules, gateway))
-            .expect("起核心线程");
+    let gateway = doubles::gw(member, core_script.into_iter().map(String::from).collect());
+    let handle = crate::core::api::CoreHandle::spawn(doubles::core_with_gateway(modules, gateway))
+        .expect("起核心线程");
     let ops = crate::core::api::Ops::from_handle(&handle);
     (handle, ops)
 }
@@ -57,6 +57,7 @@ pub(crate) fn single_work(name: &str, modules: &[&str]) -> crate::core::WorkSpec
         delegate: false,
     }
 }
+
 /// 边流边等停止的通道：把「生成中」变成可观察状态——取消后下一次回调即返回 false。
 /// 上限约 30 秒：只要提前返回，就说明是「停止」生效而不是它自然跑完。
 pub(crate) struct SlowChat {
@@ -131,9 +132,8 @@ pub(crate) fn slow_ops(
         ticks: std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
     };
     let ticks = std::sync::Arc::clone(&gateway.ticks);
-    let handle =
-        crate::core::api::CoreHandle::spawn(crate::tests::core_with_gateway(modules, gateway))
-            .expect("起核心线程");
+    let handle = crate::core::api::CoreHandle::spawn(doubles::core_with_gateway(modules, gateway))
+        .expect("起核心线程");
     let ops = crate::core::api::Ops::from_handle(&handle);
     (handle, ops, ticks)
 }
