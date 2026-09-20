@@ -87,3 +87,39 @@ fn verify_separates_env_unavailable_from_a_rejected_profile() {
         verdict
     );
 }
+/// 未授权时段 + **本机不允许**这一路（测试专用注入）：结论必须是 env-unavailable（不是 broken），
+/// 而且守门进程要**照常执行命令**（如实降级，不是拒绝执行）——这条分支正常 runner 上碰不到。
+#[test]
+fn env_unavailable_degrades_and_still_runs_the_command() {
+    use crate::probe::{
+        degraded_by_env, job_json, run_launcher_env, verdict_is_broken, verdict_is_env_unavailable,
+        verify_fence_with, SELFCHECK_FAIL_FLAG,
+    };
+    let dir = scratch("fence-env-unavailable");
+    let spec = job_json(std::slice::from_ref(&dir), &dir, false);
+    let injected: &[(&str, &str)] = &[(SELFCHECK_FAIL_FLAG, "1")];
+
+    let verdict = verify_fence_with(&spec, "true", injected);
+    assert!(
+        verdict_is_env_unavailable(&verdict),
+        "注入后必须报本机不允许：{}",
+        verdict
+    );
+    assert!(
+        !verdict_is_broken(&verdict),
+        "本机不允许不是我们写错了：{}",
+        verdict
+    );
+
+    // 降级照跑：命令真的执行了（写出文件），stderr 如实说明围栏未生效。
+    let mark = dir.join("ran.txt");
+    let (code, _out, err) =
+        run_launcher_env(&spec, &format!("echo ok > {}", mark.display()), injected);
+    assert_eq!(code, Some(0), "本机不允许时应降级照跑：{}", err);
+    assert!(mark.exists(), "命令要真的执行了：{}", err);
+    assert!(
+        degraded_by_env(&err),
+        "stderr 要如实说明围栏未生效：{}",
+        err
+    );
+}

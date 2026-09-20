@@ -116,6 +116,8 @@
 - 完成修改和适用测试后创建本地提交。
 - 只有需要真机或 GitHub Actions 验证，或用户明确授权时，才允许推送；其它情况不得擅自 `git push`。
 - actions的ci-report直接用git或git cli拉取，禁止轮询查网页。无法确认时机时委托用户拉取。
+- 拉取节奏（推荐）：push 后先等 5 分钟；`meta.json` 的 `sha` 还对不上（run 没结束）就每次再等 2 分钟重拉，
+  直到三平台 `sha` 都对得上，或确认 run 已失败/取消（判据见 `docs/testing/execution-ci.md`）。
 
 ## 八、文档路由
 

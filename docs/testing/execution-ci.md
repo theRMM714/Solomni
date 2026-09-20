@@ -81,6 +81,10 @@ git show origin/ci-report:runs/windows/logs/<某一步>.log  # 失败证据原�
 3. 再读 `test-report.json` 的 `steps` 与 `envSkips`：**CI 上的 env-skip 同样不算通过**，它只说明那条围栏没被验收。
 4. 失败时从 `logs/` 取断言原文，不在摘要里找感觉。
 
+**等多久再拉（推荐节奏）**：push 之后**先等 5 分钟**再拉 `ci-report`；若某个平台的 `meta.json` 的 `sha` 还对不上
+（这次 run 没结束），**每次再等 2 分钟**重拉一次，直到三平台的 `sha` 都对得上，或确认 run 已失败/取消。
+等的是 git 拉取，不是网页轮询——`AGENTS.md` 禁止查网页；时间上拿不准（比如 runner 排队很久）就委托用户拉取。
+
 **发布通道**（由 `tests/ci-publish.mjs` 在 CI 里自助发布，成败都发）：
 
 - Actions 注释：失败逐条 `::error::`（带断言原文），通过一条 `::notice::` 概览——匿名可读，不需要凭据；

@@ -145,6 +145,13 @@ T2 不替代：
 本机授权：验容器机制传 `true`，验协议与降级路径传 `false`），环境问产品自己要（`--print-fence-env`，即运行期那份白名单）。
 探针的环境与运行期不一致就会漏掉只有真实环境才暴露的问题——真机 AppContainer 上抓到过一次。
 
+**环境不允许那一路要确定性地覆盖，不靠真机偶然**：`EnvUnavailable`（内核不支持 / 私有 ABI 失效 /
+环境拒绝建容器）在正常 runner 上碰不到，只靠真机偶然就是没验收。所以 `--fence-verify` 认一个
+**测试专用注入开关** `SOLOMNI_FENCE_SELFCHECK_FAIL`（`confine::SELFCHECK_FAIL_FLAG`）：打开它 =
+自检按"本机不允许"处理。三平台各有一条探针用它断言两件事——结论是 `env-unavailable`（不是 `broken`），
+且守门进程**照常执行命令**（如实降级，不是拒绝执行）。开关只在探针里给守门进程带，运行期永不设置它；
+它不改本机状态（不写 ACL、不建 profile），因此不归 `--fence-live` 管。
+
 每条探针必须区分：
 
 - 代码失败：`test-fail`；

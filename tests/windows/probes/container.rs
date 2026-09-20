@@ -172,3 +172,52 @@ fn verify_separates_env_unavailable_from_broken_container_steps() {
         verdict
     );
 }
+/// 未授权时段 + **本环境不允许建容器**这一路（测试专用注入）：结论必须是 env-unavailable（不是 broken），
+/// 而且守门进程要**照常执行命令**（如实降级，不是拒绝执行）——这条分支真机上要靠环境恰好不允许才会出现。
+/// 注入不改本机状态（不写 ACL、不建 profile），所以不归 --fence-live 管。
+#[test]
+fn env_unavailable_degrades_and_still_runs_the_command() {
+    use crate::probe::{
+        degraded_by_env, job_json, run_launcher_env, verdict_is_broken, verdict_is_env_unavailable,
+        verify_fence_with, SELFCHECK_FAIL_FLAG,
+    };
+    let dir = scratch("container-env-unavailable");
+    let spec = job_json(
+        std::slice::from_ref(&dir),
+        &PathBuf::from("C:\\Windows\\System32"),
+        false,
+    );
+    let injected: &[(&str, &str)] = &[(SELFCHECK_FAIL_FLAG, "1")];
+
+    let verdict = verify_fence_with(&spec, "cmd", injected);
+    assert!(
+        verdict_is_env_unavailable(&verdict),
+        "注入后必须报本环境不允许：{}",
+        verdict
+    );
+    assert!(
+        !verdict_is_broken(&verdict),
+        "本环境不允许不是我们写错了：{}",
+        verdict
+    );
+
+    let mark = dir.join("ran.txt");
+    let (code, _out, err) =
+        run_launcher_env(&spec, &format!("echo ok> {}", mark.display()), injected);
+    assert_eq!(code, Some(0), "本环境不允许时应降级照跑：{}", err);
+    assert!(mark.exists(), "命令要真的执行了：{}", err);
+    assert!(
+        degraded_by_env(&err),
+        "stderr 要如实说明容器围栏未生效：{}",
+        err
+    );
+    // 这一路**不写**本机任何权限项：与「我们写错了」那条拒绝执行的路径形成对照，
+    // 也让"降级照跑"不等于"偷偷动了本机状态"这一点可判。
+    assert!(
+        !dir.join("fence-grants.json").exists() && !dir.join("ledger").exists(),
+        "本机不允许这一路不该留下任何授权台账：{:?}",
+        std::fs::read_dir(&dir)
+            .map(|d| d.flatten().map(|e| e.file_name()).collect::<Vec<_>>())
+            .unwrap_or_default()
+    );
+}

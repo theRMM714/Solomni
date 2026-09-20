@@ -147,6 +147,10 @@ fn mask_for(abi: i32, mut access: u64) -> u64 {
 /// 只问 ABI 版本不够——landlock_add_rule 会因为规则细节被内核拒（例如掩码带了该类型不支持的位），
 /// 那之后 landlock_restrict_self 根本没被调用，围栏等于不存在。
 fn landlock_confines() -> bool {
+    // 测试专用的注入：探针要能确定性地走「本机不允许」这一路（见 confine::SELFCHECK_FAIL_FLAG）。
+    if super::selfcheck_forced_unavailable() {
+        return false;
+    }
     static EFFECTIVE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *EFFECTIVE.get_or_init(landlock_confines_probe)
 }

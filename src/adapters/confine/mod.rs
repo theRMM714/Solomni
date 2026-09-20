@@ -45,9 +45,27 @@ pub enum FenceVerdict {
     Broken(String),
 }
 
+/// 测试专用的注入开关：让探针能确定性地构造「本机不允许」这一态。
+/// 为什么需要：`EnvUnavailable` 在真机上要靠老内核 / 失效的私有 ABI / 被环境拒绝建容器才会出现，
+/// 正常 runner 上碰不到——没有这条开关，那一路分支就只被偶然验证过。
+/// **只在测试里打开**（探针自己给守门进程带这个环境变量），运行期永不设置它。
+pub const SELFCHECK_FAIL_FLAG: &str = "SOLOMNI_FENCE_SELFCHECK_FAIL";
+
+/// 自检该不该按「本机不允许」处理：测试专用注入优先，否则问真实自检。
+/// 三平台的自检入口共用这一份判断，避免各写一遍导致探针在某平台上失效。
+pub(crate) fn selfcheck_forced_unavailable() -> bool {
+    std::env::var_os(SELFCHECK_FAIL_FLAG).is_some()
+}
+
 /// 本机能不能强制住这次执行的围栏（机制层自检，**不写本机任何权限项**）。
-/// 未授权时段靠它把"环境不允许"与"我们写错了"分开——后者绝不能被当成降级吞掉。
+/// 未授权时段靠它把「环境不允许」与「我们写错了」分开——后者绝不能被当成降级吞掉。
 pub fn verify(spec: &FenceSpec, command: &str) -> FenceVerdict {
+    if selfcheck_forced_unavailable() {
+        return FenceVerdict::EnvUnavailable(format!(
+            "{}（测试注入：按本机不允许处理）",
+            SELFCHECK_FAIL_FLAG
+        ));
+    }
     backend::verify(spec, command)
 }
 
@@ -415,6 +433,39 @@ impl FenceSpec {
 mod tests {
     use super::*;
 
+    /// 测试专用注入开关：打开它，机制验证必须确定性地报「本机不允许」。
+    /// 这是覆盖 EnvUnavailable 那一路的唯一确定性手段——三平台探针都靠它。
+    #[test]
+    fn selfcheck_injection_switch_reports_env_unavailable() {
+        let spec = FenceSpec {
+            agent: "a".to_string(),
+            rw: vec![PathBuf::from("demo").join("work")],
+            cwd: PathBuf::from("mods").join("m0"),
+            net: false,
+        };
+        // 没注入时：三平台各自的真实结论（enforced 或 env-unavailable 都可能，环境而定）。
+        assert!(!selfcheck_forced_unavailable(), "运行期不该有这个开关");
+        let plain = verify(&spec, "true");
+        assert!(
+            plain == FenceVerdict::Enforced || matches!(plain, FenceVerdict::EnvUnavailable(_)),
+            "未注入时只能是真实结论：{:?}",
+            plain
+        );
+        // 注入后：必须报本机不允许，且带得出注入标记（探针据此区分"环境结论"与"我们写错了"）。
+        std::env::set_var(SELFCHECK_FAIL_FLAG, "1");
+        let injected = verify(&spec, "true");
+        std::env::remove_var(SELFCHECK_FAIL_FLAG);
+        match injected {
+            FenceVerdict::EnvUnavailable(why) => {
+                assert!(
+                    why.contains(SELFCHECK_FAIL_FLAG),
+                    "理由要带得出注入标记：{}",
+                    why
+                )
+            }
+            other => panic!("注入后必须是本机不允许，实际 {:?}", other),
+        }
+    }
     /// 安装目录上溯**绝不能停在文件系统根**：/bin 的父目录就是 /，
     /// 一旦返回 / 就等于把整盘放行（macOS 的 seatbelt 会因此形同虚设，真机上已抓到过一次）。
     #[test]

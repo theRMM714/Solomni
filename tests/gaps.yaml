@@ -4,26 +4,6 @@
 # 已经能机器判定的门禁不入账。平台与跨平台层的缺口记在
 # tests/cross-platform/gaps.yaml 与 tests/<平台>/gaps.yaml（它们决定 TEST-REPORT-ACCEPTED）。
 
-- id: fence.env-unavailable-observed-by-probes
-  scope: global
-  level: T4
-  why: |
-    未授权时段的机制验证现在分三态（enforced / env-unavailable / broken），其中**只有 broken 会拒绝执行**；
-    env-unavailable（内核不支持、私有 ABI 失效、系统不允许建容器）仍如实降级照跑。这是当前有意选定的行为，
-    但还缺一条**机器可判的事实**：三平台探针目前只在真机上按当时结论分支，没有一条能确定性地覆盖
-    "本环境不允许"这一路（Windows 上容器 profile 建不起来就是它，Linux/macOS 上要靠老内核或 ABI 失效）。
-    这条不补，env-unavailable 的分支就只被真机偶然验证过，质量门禁拿不到它。
-  how: |
-    给 `--fence-verify` 加一个**只在测试里打开**的注入开关（与 macOS 现有的 SOLOMNI_FENCE_PROFILE 同性质），
-    让探针能构造"自检不过"的结论；三平台各加一条探针：
-    1) 断言结论是 env-unavailable（而不是 broken）；
-    2) 断言守门进程仍照常执行命令（降级照跑），且回执里如实说明文件系统围栏未生效；
-    3) 断言这一路**不写**任何本机权限项（与 broken 的拒绝执行形成对照）。
-  accept: |
-    tests/windows、tests/linux、tests/macos 各有一条确定性探针覆盖 env-unavailable；
-    两条分支（env-unavailable 照跑 / broken 拒绝执行）在报告里可区分，且不依赖真机偶然条件。
-  blocked_by: 缺少实现（需要一条测试专用的注入开关）
-
 - id: fence.guest-tier-not-wired
   scope: global
   level: T4

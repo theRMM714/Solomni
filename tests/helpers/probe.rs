@@ -130,24 +130,41 @@ pub fn env_blocks_container(err: &str) -> bool {
     err.contains(ENV_BLOCKED_MARK)
 }
 
+/// 测试专用的自检注入开关（与 src/adapters/confine/mod.rs 的 SELFCHECK_FAIL_FLAG 一致）。
+/// 打开它 = 让机制验证确定性地报「本机不允许」，用来覆盖那条正常 runner 上碰不到的分支。
+pub const SELFCHECK_FAIL_FLAG: &str = "SOLOMNI_FENCE_SELFCHECK_FAIL";
+
 /// 机制验证（机器可读）：**不装围栏、不写任何权限项**，只问"这次能不能强制住"。
 /// 三态原话交回调用方（enforced / env-unavailable / broken）：探针据此决定 env-skip 还是失败。
 pub fn verify_fence(spec: &str, command: &str) -> String {
-    let out = Command::new(bin())
-        .arg("--fence-verify")
+    verify_fence_with(spec, command, &[])
+}
+
+/// 同上，并给守门进程补上调用方要的环境（例如测试专用的自检注入开关）。
+pub fn verify_fence_with(spec: &str, command: &str, extra: &[(&str, &str)]) -> String {
+    let mut cmd = Command::new(bin());
+    cmd.arg("--fence-verify")
         .arg(spec)
         .arg("--")
         .arg(command)
         .env_clear()
-        .envs(runtime_env(spec))
-        .output()
-        .expect("问产品要机制验证结论");
+        .envs(runtime_env(spec));
+    for (k, v) in extra {
+        cmd.env(k, v);
+    }
+    let out = cmd.output().expect("问产品要机制验证结论");
     assert!(
         out.status.success(),
         "机制验证要能跑完：{}",
         String::from_utf8_lossy(&out.stderr)
     );
     String::from_utf8_lossy(&out.stdout).trim().to_string()
+}
+
+/// 守门进程（`--fence-run`）按「本机不允许」执行时的降级标记。
+/// 与 src/adapters/confine/linux.rs / macos.rs / windows.rs 的原文一致——探针据此断言"确实降级了"。
+pub fn degraded_by_env(err: &str) -> bool {
+    err.contains("文件系统围栏未生效") || err.contains("容器围栏不可用")
 }
 
 /// 自检已确认机制有效却仍装不上 = 我们写错了（不是环境不允许）。

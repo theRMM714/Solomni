@@ -62,6 +62,10 @@ pub fn capability() -> Capability {
 /// 这是**唯一**能分辨「机制在本机失效」与「我们的 profile 写错」的办法：
 /// 前者如实降级，后者由探针响亮失败（见 tests/macos/probes/fence.rs）。
 fn seatbelt_confines() -> bool {
+    // 测试专用的注入：探针要能确定性地走「本机不允许」这一路（见 confine::SELFCHECK_FAIL_FLAG）。
+    if super::selfcheck_forced_unavailable() {
+        return false;
+    }
     static EFFECTIVE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *EFFECTIVE.get_or_init(seatbelt_confines_probe)
 }
