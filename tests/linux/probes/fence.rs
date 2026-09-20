@@ -51,18 +51,25 @@ fn fence_denies_outside_paths_and_allows_the_given_roots() {
     assert_ne!(code, Some(0), "越界读应以非零退出：{} / {}", out, err);
 }
 
-/// 未授权时段（`prepared = false`）的机制验证：把"环境不允许"与"我们写错了"分开。
+/// 未授权时段（`prepared = false`）的机制验证：把"本机不允许"与"我们写错了"分开。
 /// 两者在守门进程里都表现为降级，只有 `--fence-verify` 能把它们区分开——
 /// 分不开就会出现"用户以为有围栏、实际没有"（见 PRODUCT.md「隔离级别如实」）。
+/// **三态都要认**：本机围栏装得上（真机 CI 就是这一态，断言要照它过）也走这一条；
+/// 只有既不是装上了、也不是本机不允许的结论才该响亮失败（那才是"我们写错了"）。
 #[test]
 fn verify_separates_env_unavailable_from_broken_rules() {
     use crate::probe::{job_json, verdict_is_broken, verdict_is_env_unavailable, verify_fence};
     let dir = scratch("fence-verify");
-    let spec = job_json(&[dir.clone()], &dir, false);
+    // 单元素切片用 from_ref：`&[dir.clone()]` 是多余的 clone（clippy 会点名）。
+    let spec = job_json(std::slice::from_ref(&dir), &dir, false);
     let verdict = verify_fence(&spec, "true");
     if verdict_is_env_unavailable(&verdict) {
         eprintln!("[探针] 本机 Landlock 不产生实际约束（环境结论，如实跳过）：{}", verdict);
         return;
     }
-    assert!(verdict_is_broken(&verdict), "本机 Landlock 有效时规则就该装得上：{}", verdict);
+    assert!(
+        !verdict_is_broken(&verdict),
+        "本机 Landlock 有效时规则就该装得上，装不上就是我们写错了：{}",
+        verdict
+    );
 }

@@ -115,6 +115,8 @@ fn container_has_no_network() {
 /// 未授权时段（`prepared = false`）的机制验证：把"本环境不允许建容器"与"我们的步骤写错了"分开。
 /// 与上面几条探针的尺子相反——那些要的是**跑起来**，这条只要**结论**（不写任何 ACL）。
 /// 这条不改本机状态（不写权限项），但会建一次容器 profile，所以仍归真机开关管。
+/// **三态都要认**：runner 上容器建得起来（真机 CI 就是这一态，断言要照它过）也走这一条；
+/// 只有既不是建起来了、也不是本环境不允许的结论才该响亮失败（那才是"步骤写错"）。
 #[test]
 fn verify_separates_env_unavailable_from_broken_container_steps() {
     use crate::probe::{job_json, verdict_is_broken, verdict_is_env_unavailable, verify_fence};
@@ -129,5 +131,9 @@ fn verify_separates_env_unavailable_from_broken_container_steps() {
         eprintln!("[探针] 本环境不允许建容器 profile（环境结论，如实跳过）：{}", verdict);
         return;
     }
-    assert!(verdict_is_broken(&verdict), "本机能建容器时步骤就该走得通：{}", verdict);
+    assert!(
+        !verdict_is_broken(&verdict),
+        "本机能建容器时步骤就该走得通，走不通就是步骤写错：{}",
+        verdict
+    );
 }

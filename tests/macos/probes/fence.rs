@@ -61,15 +61,22 @@ fn fence_denies_outside_paths_and_allows_the_given_roots() {
 
 /// 未授权时段（`prepared = false`）的机制验证：把"本机 ABI 失效"与"我们的 profile 写错"分开。
 /// 与 `fence_denies_outside_paths_and_allows_the_given_roots` 同一把尺子，只是这里要的是**结论**，不是跑命令。
+/// **三态都要认**：本机 seatbelt 装得上（真机 CI 就是这一态，断言要照它过）也走这一条；
+/// 只有既不是装上了、也不是本机不允许的结论才该响亮失败（那才是"profile 写错"）。
 #[test]
 fn verify_separates_env_unavailable_from_a_rejected_profile() {
     use crate::probe::{job_json, verdict_is_broken, verdict_is_env_unavailable, verify_fence};
     let dir = scratch("fence-verify");
-    let spec = job_json(&[dir.clone()], &dir, false);
+    // 单元素切片用 from_ref：`&[dir.clone()]` 是多余的 clone（clippy 会点名）。
+    let spec = job_json(std::slice::from_ref(&dir), &dir, false);
     let verdict = verify_fence(&spec, "true");
     if verdict_is_env_unavailable(&verdict) {
         eprintln!("[探针] 本机 seatbelt 不产生实际约束（环境结论，如实跳过）：{}", verdict);
         return;
     }
-    assert!(verdict_is_broken(&verdict), "本机 seatbelt 有效时 profile 就该装得上：{}", verdict);
+    assert!(
+        !verdict_is_broken(&verdict),
+        "本机 seatbelt 有效时 profile 就该装得上，装不上就是 profile 写错：{}",
+        verdict
+    );
 }
