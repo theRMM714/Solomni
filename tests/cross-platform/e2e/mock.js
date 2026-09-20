@@ -4,6 +4,10 @@
 const http = require('http');
 /** 供应商这一侧看到的最后一条请求的消息形状：驱动据此断言"发回去的历史是不是协议形状"。 */
 let lastSeen = null;
+/** 返工会话里验收被调用的次数（第一次 fail，之后 pass）。 */
+let reworkReviews = 0;
+// 端口可指定：本机可能残留上一次跑的假供应商占着固定端口，新进程起不来而驱动仍打到旧的。
+const PORT = Number(process.env.E2E_MOCK_PORT || 8397);
 http.createServer((req, res) => {
   if (req.url.includes('/__seen')) {
     res.setHeader('Content-Type', 'application/json');
@@ -29,6 +33,8 @@ http.createServer((req, res) => {
     const msgs = j.messages || [];
     const sys = (msgs.find((m) => m.role === 'system') || {}).content || '';
     const user = ((msgs.filter((m) => m.role === 'user').pop()) || {}).content || '';
+    // 整段对话里的用户消息：工具循环的后续轮里，任务原话已不在最后一条，只有从整段里才看得见。
+    const allUser = msgs.filter((m) => m.role === 'user').map((m) => m.content || '').join('\n');
     // 从系统提示词里取真实根目录（sys_tools 里固定有两行：共享区 / 沙箱）
     const workRoot = (sys.match(/本次工作的共享区：([^\n]+)/) || [])[1];
     const sandboxRoot = (sys.match(/你私有的沙箱：([^\n]+)/) || [])[1];
@@ -59,15 +65,64 @@ http.createServer((req, res) => {
         ],
       });
     } else if (user.includes('== 讨论至今 ==')) {
-      content = JSON.stringify({ type: 'agree', text: '同意' });
+      // 讨论轮次的信封按**会话里已经出现的行**路由——状态机验收要按内容构造各种走向。
+      // 判据只用转录里的事实（说话人标签 / 轮次标记 / 任务原话），不改产品行为。
+      // 判断"这条请求属于哪个 agent"：系统提示词里带该 agent 的全部模块 system，用模块名认。
+      // 哪个 agent 在说话：系统提示词里带该 agent 全部模块的 system，用模块特征认（甲=摘要，乙=核对）。
+      const isJia = sys.includes('摘要') || sys.includes('压缩');
+      // 到第几轮了：转录里 [轮次 N] 的条数（step 每轮开头推一条）。
+      const stepNo = (user.match(/\[轮次 (\d+)\]/g) || []).length;
+      const say = (t) => JSON.stringify({ type: 'say', text: t });
+      const agree = () => JSON.stringify({ type: 'agree', text: '同意' });
+      if (user.includes('上限')) {
+        // 谁都不 agree：一路 say 到轮次上限（MAX_ROUNDS=6）。
+        content = say('再议一轮');
+      } else if (user.includes('退场')) {
+        // 甲在第一轮 step 退场；此后它不该再被询问（再被问到 = leave 不可逆被破坏）。
+        content = isJia && stepNo <= 1 ? JSON.stringify({ type: 'leave', text: '我撤了' }) : agree();
+      } else if (user.includes('提问')) {
+        // 甲在第一步请教用户；回答之后（stepNo >= 2）不再问，让流程能收尾。
+        content = isJia && stepNo <= 1 ? JSON.stringify({ type: 'ask', text: '用哪个方案？' }) : say('等你定');
+      } else if (user.includes('不收敛')) {
+        // 首轮：甲说、乙同意 → 有人同意但没全票，不该收敛；次轮甲也同意才收敛。
+        content = isJia ? (stepNo <= 1 ? say('我还有意见') : agree()) : agree();
+      } else {
+        content = agree();
+      }
     } else if (user.includes('== 用户需求 ==')) {
-      content = JSON.stringify({ type: 'say', text: '我建议直接动手' });
+      // 把任务原话带进首轮发言：后续轮次的 step 提示**只带转录、不带任务**，
+      // 夹具要按会话构造走向，就得让关键字留在转录里（只用转录事实，不改产品行为）。
+      const task = (user.split('== 用户需求 ==')[1] || '').trim().split('\n')[0].trim();
+      content = JSON.stringify({ type: 'say', text: '我建议直接动手｜' + task });
     } else if (user.includes('== 你的任务 ==')) {
       content = JSON.stringify({ summary: '做完了', changes: '无外部影响', open: '' });
     } else if (sys.includes('核心验收者') || user.includes('== 方案 ==')) {
-      content = JSON.stringify([{ item: '方案条目', status: 'pass', evidence: '回报' }]);
+      // 返工会话：第一次验收给 fail（定向返工），之后给 pass——用来验"fail → 返工 → 重验 → 交付"闭环。
+      if (user.includes('返工')) {
+        reworkReviews += 1;
+        content = reworkReviews === 1
+          ? JSON.stringify([{ item: '方案条目', status: 'fail', evidence: '回报', reason: '还差一步（归属：甲）' }])
+          : JSON.stringify([{ item: '方案条目', status: 'pass', evidence: '回报' }]);
+      } else {
+        content = JSON.stringify([{ item: '方案条目', status: 'pass', evidence: '回报' }]);
+      }
     } else if (sys.includes('总结讨论')) {
-      content = '方案：一次把事情做完';
+      // 方案里回显任务关键词：验收请求会带上方案，据此路由（不改产品行为，只让夹具可判定）。
+      content = user.includes('返工') ? '方案：返工一次' : '方案：一次把事情做完';
+    } else if (sys.includes('harvest') && allUser.includes('真工具链路')) {
+      // 真工具链路：按**整段对话里**已经收到的工具结果条数决定下一个调用（真进程、真三语言模块）。
+      // 路径用提示词里给出的真实共享区根目录（相对路径会被围栏拒绝）。
+      const w = workRoot || '';
+      const n = (allUser.match(/\[工具结果\]/g) || []).length;
+      if (n === 0) {
+        content = JSON.stringify({ type: 'tool', module: 'harvest', name: 'scan', args: { root: w, out: w + '/corpus.jsonl' } });
+      } else if (n === 1) {
+        content = JSON.stringify({ type: 'tool', module: 'indexer', name: 'build', args: { corpus: w + '/corpus.jsonl', out: w + '/index.bin' } });
+      } else if (n === 2) {
+        content = JSON.stringify({ type: 'tool', module: 'indexer', name: 'query', args: { index: w + '/index.bin', q: '检索' } });
+      } else {
+        content = JSON.stringify({ summary: '语料与索引都做好了', changes: 'corpus.jsonl 与 index.bin', open: '' });
+      }
     } else if (sys.includes('内置文件工具') && !sawToolResult) {
       if (/read_txt/.test(sys)) {
         // 该 agent 的某个模块声明了外部工具（夹具 toolbox）：用**相对路径**调用，专门验证 cwd = 它自己的模块目录。
@@ -134,4 +189,4 @@ http.createServer((req, res) => {
     }
     res.end(JSON.stringify({ choices: [{ message: { role: 'assistant', content } }] }));
   });
-}).listen(8397, '127.0.0.1', () => console.log('MOCK-UP'));
+}).listen(PORT, '127.0.0.1', () => console.log('MOCK-UP ' + PORT));
