@@ -437,13 +437,55 @@ node run-tests.js
 
 T0 与业务测试在同一次运行里出结果，但结论分开记：质量失败不能被业务测试通过抵消，反之亦然。
 
-### CI 真机入口
+### 真机入口（本地）
 
 ```text
 node run-tests.js --fence-live
 ```
 
-仅允许在一次性 runner、VM 或明确授权的环境使用。CI 仍应保留 Actions artifact 与 `ci-report` 报告分支中的报告和日志。
+仅允许在一次性 runner、VM 或明确授权的环境使用：它会改本机状态（写目录 ACL、建容器 profile）并创建容器身份。
+普通开发机上**不要**开；本地默认安全模式（见 §七）。
+
+### CI（GitHub Actions）：跨平台与真机的唯一事实来源
+
+工作流 `.github/workflows/test.yml`，矩阵 `windows-latest / ubuntu-latest / macos-latest`（`fail-fast: false`，
+一个平台失败不影响另外两个出结论），`on: push` 与 `pull_request`；每个平台跑 `node run-tests.js --fence-live`。
+
+**为什么必须有 CI**——下面这些结论本地拿不到：
+
+| 场景 | 本地为什么不够 | CI 提供什么 |
+| --- | --- | --- |
+| 平台专属代码（`adapters/confine/` 各平台文件、`tests/<平台>/`） | 平台目标的 `main.rs` 首行是 `#![cfg(target_os = …)]`：非本平台的目标整目标为空，代码根本不编译 | 三平台各编译并各跑一次 |
+| 真机围栏（ACL / 容器 profile / Landlock / seatbelt） | 本地默认安全模式会跳过会改本机状态的探针 | 一次性 runner 上真跑，并验撤权与 profile 回收 |
+| HTTPS/TLS 出站链路 | 受限环境可能取不到系统 TLS 凭证（判据见 §T4），本地只能 env-skip | 干净 runner 上真连公网端点 |
+| 质量基线按平台分区 | `--print-quality-baseline` 只重算当前平台 | 三平台各自比对，缺分区即 `quality-fail` |
+| 发布前验收 | 本地通过 ≠ 三平台通过 | 三平台报告 + 三平台 `TEST-REPORT-ACCEPTED` |
+
+**报告怎么读（硬规矩）**：只用 `git` 或 git CLI 拉 `ci-report` 分支，**禁止轮询网页**；时机无法确认时委托用户拉取（见 `AGENTS.md`）。
+
+```text
+git fetch origin
+git show origin/ci-report:runs/windows/meta.json        # run / sha / failed / qualityFailed
+git show origin/ci-report:runs/windows/test-report.json  # 与本地 target/test-report.json 同构
+git show origin/ci-report:runs/windows/logs/<某一步>.log  # 失败证据原文
+```
+
+`runs/<os>/` 的 `os` 取 `windows` / `linux` / `macos`。判定顺序：
+
+1. **先比 `sha`**：`meta.json` 的 `sha` 必须等于要验收的那个提交；不等 = 这次 CI 还没覆盖它，别拿旧结论当新证据。
+2. 再看 `failed` 与 `qualityFailed`（都为假才算通过）。
+3. 再读 `test-report.json` 的 `steps` 与 `envSkips`：**CI 上的 env-skip 同样不算通过**，它只说明那条围栏没被验收。
+4. 失败时从 `logs/` 取断言原文，不在摘要里找感觉。
+
+**发布通道**（由 `tests/ci-publish.mjs` 在 CI 里自助发布，成败都发）：
+
+- Actions 注释：失败逐条 `::error::`（带断言原文），通过一条 `::notice::` 概览——匿名可读，不需要凭据；
+- `ci-report` 滚动分支：同一路径每次覆盖，**只留最近一次**（要历史看 Actions 产物 `test-report-<os>`）；
+- 只有 **push 事件**才发布 `ci-report`；`pull_request` 的结论只能在 Actions 注释里看；
+- 报告发布失败（例如 token 权限不对）只是 `::warning::`，**不影响**测试本身的成败——所以"没读到报告"不等于"测试没过"。
+
+**本地与 CI 的关系**：本地入口是快速反馈，CI 是跨平台与真机的最终判据。两边都跑通、且 CI 的 `sha` 对得上，
+才算本次验收完成（见 §十四）。
 
 ### 当前报告状态
 
@@ -521,7 +563,8 @@ tests/
 
 ### 全局缺口
 
-`tests/gaps.yaml` 记录 T0、T2、T5 和测试基础设施的跨平台缺口，以及**长期目标**（存量收敛、目录迁移）。
+`tests/gaps.yaml` 记录 T0、T2、T5 和测试基础设施的跨平台缺口、**长期目标**（存量收敛、目录迁移），
+以及**已确认但尚未实施的产品/机制缺口**（例如围栏权限模型待定）。
 它不参与 `TEST-REPORT-ACCEPTED` 判定，但每条都会以 `[global-gap]` 进报告与 `report.globalGaps`。
 
 ### 平台缺口
@@ -554,7 +597,8 @@ tests/
 7. 失败时修代码或测试；环境不允许时记录 `env-skip`；未实现时建立 `gap`；不要把任何一种写成通过。
 8. 运行完整入口并阅读 `target/test-report.json`，确认报告与日志能解释结果。
 9. 测试完成后检查 `git status` 和 `.gitignore`，确保没有测试产物被跟踪。
-10. 只有当目标行为、质量门禁和当前平台缺口都符合要求，才可宣称本次测试验收完成。
+10. 需要 CI 的场景（见 §十四）：推上去后按 §九「CI」的读法拉 `ci-report`，**先比对 `sha`**，再按平台核对 steps / envSkips。
+11. 只有当目标行为、质量门禁、当前平台缺口与（需要时）CI 三平台结论都符合要求，才可宣称本次测试验收完成。
 
 ## 十四、验收清单
 
@@ -566,9 +610,14 @@ tests/
 - 是否需要真实文件、网络、进程、权限或平台探针？
 - 测试是否会修改本机状态？如果会，如何隔离和回收？
 - 测试是否被入口实际执行？
+- 本次改动落在哪个平台上：只在当前平台可判，还是需要 CI？需要 CI 时，`ci-report` 的 `sha` 是否已经对得上本次提交？
 - 失败、跳过、缺口和质量失败能否在报告中区分？
 - 是否引入了重复测试、重复 Fixture、重复依赖或无意义抽象？
 - 相关 `gaps.yaml` 是否更新为当前状态？
 - 文档、报告和日志是否只使用项目相对路径？
 
 未能回答的问题不是"以后再说"，而是测试设计或观察面仍不完整，应进入缺口账。
+
+**需要 CI 才算验收的场景**（其余按 §九「CI」表）：改了平台专属代码（`adapters/confine/` 或 `tests/<平台>/`）、
+改了平台围栏机制、改了 HTTPS/TLS 链路、改了 `tests/quality-baseline.yaml` 的其它平台分区、
+或改了只在其它平台编译的 `#[cfg]` 分支——这些本地跑不出结论，必须等 CI 并比对 `sha`。
