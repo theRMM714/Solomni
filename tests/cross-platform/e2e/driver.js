@@ -429,8 +429,10 @@ async function lines(sid) {
   // 失败时把工具原文打出来：真机围栏开着时（CI）只有它能说清是哪一层拦住了。
   for (const r of rowsR) {
     console.log('   工具 ' + (r.module || '') + '.' + r.name + (r.ok ? ' 成功' : ' 失败') + ' → '
-      + String(r.output || '').replace(/\s+/g, ' ').slice(0, 300));
+      + String(r.output || '').replace(/\s+/g, ' ').slice(0, 1500));
   }
+  // 失败时要能一眼分清"目录不在"与"在但没权限"——两者的修法完全不同。
+  console.log('   共享区存在吗：' + fs.existsSync(workDir) + '（' + workDir + '）');
   assert(rowsR.some((r) => r.name === 'scan'), 'harvest.scan 真的跑了（python 工具进程）', JSON.stringify(rowsR.map((r) => r.name)));
   assert(fs.existsSync(corpusPath), 'corpus.jsonl 真的落地', corpusPath);
   assert(rowsR.some((r) => r.name === 'build'), 'indexer.build 真的跑了（C++ 工具进程）', JSON.stringify(rowsR.map((r) => r.name)));
