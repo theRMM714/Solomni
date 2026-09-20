@@ -1029,3 +1029,36 @@ fn http_model_catalog_lists_models_and_rejects_broken_shapes() {
         .unwrap_err();
     assert!(err2.contains("400"), "{}", err2);
 }
+/// 出站错误分类的判据：**网络类**算环境（env-skip），**其余 TLS 错误**算我们的问题（必须失败），
+/// 只有「本进程取不到系统 TLS 凭证」那一码才算环境结论（env-tls）。
+/// 现场：DSH 沙箱挡住工作区外的用户凭证存储时，schannel 报 SEC_E_NO_CREDENTIALS——
+/// 连 Windows 自带的 curl.exe 都握不了手，放开沙箱后同一条链路立刻通。
+/// 这条测试钉的就是「绝不把 TLS 坏了说成环境不允许」这条红线，同时不把环境结论误报成失败。
+#[test]
+fn outbound_error_classification_keeps_environment_and_our_bug_apart() {
+    use crate::adapters::http_agent::classify;
+    // 网络类：环境结论。
+    assert_eq!(classify(&ureq::Error::HostNotFound), "no-net");
+    assert_eq!(classify(&ureq::Error::ConnectionFailed), "no-net");
+    // 取不到系统凭证（十进制与十六进制两种原文都要认，且大小写无关）。
+    let dec = ureq::Error::Tls("安全包中没有可用的凭证 (os error -2146893042)");
+    assert_eq!(classify(&dec), "env-tls", "判据只认稳定错误码，不认本地化文案");
+    let hex = ureq::Error::Tls("schannel: AcquireCredentialsHandle failed: SEC_E_NO_CREDENTIALS (0x8009030e)");
+    assert_eq!(classify(&hex), "env-tls", "十六进制写法也要认");
+    // 其余 TLS 错误：我们链路的问题，必须失败——不许借「环境」二字溜过去。
+    let other = ureq::Error::Tls("certificate verify failed");
+    assert_eq!(classify(&other), "tls-fail");
+    let bad_host = ureq::Error::Tls("hostname mismatch");
+    assert_eq!(classify(&bad_host), "tls-fail");
+
+    // 判据本身：只认那一码的两种写法，别的原文一律不算（"环境"不能是个筐）。
+    // Windows 上 native-tls 的错误走 NativeTls 变体（不是通用 Tls 壳），那个变体构造不出来，
+    // 所以由真机探针（--https-check → env-tls）验接线，这里把判据本身钉死。
+    use crate::adapters::http_agent::lacks_system_credentials;
+    assert!(lacks_system_credentials("(os error -2146893042)"), "有符号十进制要认");
+    assert!(lacks_system_credentials("(0x8009030e)"), "十六进制要认");
+    assert!(lacks_system_credentials("(0x8009030E)"), "大小写无关");
+    assert!(!lacks_system_credentials("certificate verify failed"));
+    assert!(!lacks_system_credentials("hostname mismatch"));
+    assert!(!lacks_system_credentials(""), "空原文不能算环境结论");
+}

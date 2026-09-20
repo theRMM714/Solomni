@@ -319,7 +319,8 @@ fn doctor() -> i32 {
 }
 
 /// 隐藏模式：用**产品自己的出站代理**（含按平台装配的 TLS）打一次最小 HTTPS 请求，如实报结论。
-/// 三态机器可读：ok（通）/ no-net（环境连不上外网）/ tls-fail|fail（我们链路坏了）。
+/// 四态机器可读：ok（通）/ no-net（环境连不上外网）/ env-tls（本进程取不到系统 TLS 凭证，如沙箱挡住凭证存储）/
+/// tls-fail|fail（我们链路坏了）。
 /// 退出码恒 0：判定归调用方（测试按性质决定 env-skip 还是失败），这里只报事实。
 fn https_check(args: &[String], i: usize) -> i32 {
     let url = args.get(i + 1).cloned().unwrap_or_default();
