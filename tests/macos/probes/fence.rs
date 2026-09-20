@@ -141,7 +141,7 @@ fn read_only_roots_are_readable_but_not_writable() {
 
     // ① 只读根读得到。
     let (code, out, err) = run_launcher(&spec, &format!("cat {}", secret.display()));
-    if err.contains(RULES_REJECTED_MARK) {
+    if err.contains(PROFILE_REJECTED_MARK) {
         panic!(
             "本机 seatbelt 机制有效，但 profile 被拒（profile 写错，不是环境不允许）：{}",
             err.trim()

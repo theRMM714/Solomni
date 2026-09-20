@@ -281,6 +281,32 @@ function structuralAudit() {
   };
   checkFenceSpecLiterals(path.join(ROOT, "src"));
 
+  // 平台专属文件本地不编译（tests/<平台>/main.rs 首行是 #![cfg(target_os = …)]）：
+  // 常量名写串了（macOS 探针里写 Linux 的标记）只在那个平台上炸。按文本挡住这一对。
+  const crossPlatformMarks = [
+    ["tests/macos", "RULES_REJECTED_MARK", "Linux 的标记出现在 macOS 探针里"],
+    ["tests/linux", "PROFILE_REJECTED_MARK", "macOS 的标记出现在 Linux 探针里"],
+  ];
+  for (const [dir, needle, why] of crossPlatformMarks) {
+    const abs = path.join(ROOT, dir);
+    if (!fs.existsSync(abs)) continue;
+    const walkMarks = (d) => {
+      for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+        const p = path.join(d, e.name);
+        if (e.isDirectory()) { walkMarks(p); continue; }
+        if (!e.name.endsWith(".rs")) continue;
+        fs.readFileSync(p, "utf8")
+          .split(/\r?\n/)
+          .forEach((line, i) => {
+            if (line.includes(needle) && !line.trim().startsWith("//")) {
+              problems.push(rel(p) + ":" + (i + 1) + " " + why + "（本地不编译，CI 才会炸）");
+            }
+          });
+      }
+    };
+    walkMarks(abs);
+  }
+
   const portalFiles = ["README.md", "AGENTS.md", "ARCHITECTURE.md", "PRODUCT.md", "MODULE_SPEC.md", "RUNTIME_SPEC.md", "REGISTRY_SPEC.md", "TESTING.md"];
   for (const p of portalFiles) {
     const abs = path.join(ROOT, p);
