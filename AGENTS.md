@@ -151,3 +151,4 @@
 | 交付模块（模块作者要交什么测试证据） | `docs/testing/module-delivery.md` |
 | 逐个文件看 `core/` / `adapters/` / `presentation/` 各干什么 | `docs/architecture/module-map.md` |
 | 呈现层入站契约、HTTP 路由目录 | `docs/architecture/contracts.md` |
+| 系统工具、角色（身份）与"谁能用哪些工具" | `docs/architecture/tools-and-roles.md` |

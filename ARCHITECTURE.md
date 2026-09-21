@@ -60,6 +60,7 @@ presentation ──▶ core ◀── adapters
 
 - 逐个文件讲 `core/` / `adapters/` / `presentation/` 各干什么：[docs/architecture/module-map.md](docs/architecture/module-map.md)。
 - 呈现层入站契约（能力接口、事件台、命令/事件规则）与机器可读的 HTTP 路由目录：[docs/architecture/contracts.md](docs/architecture/contracts.md)。
+- 系统工具总表、角色表与"谁能用哪些工具"（含越权校验与提示词按角色分配）：[docs/architecture/tools-and-roles.md](docs/architecture/tools-and-roles.md)。
 
 **路由表由契约测试机器比对**（`src/tests/routes.rs` 直接读 `docs/architecture/contracts.md`）：
 表与 `presentation/routes.rs` 的 `ROUTES` 对不上就是测试失败。

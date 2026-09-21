@@ -124,7 +124,7 @@ node demo/run-demo-collab.mjs
 
 > **两层结构**：仓库根是**门户**（定位 + 引用），`docs/` 是**细则**——同一事实只有一份权威。
 > 细则：`docs/testing/`（层级、替身、端口矩阵、质量与隔离、入口与 CI、缺口与验收、模块交付）、
-> `docs/architecture/`（模块地图、呈现层入站契约与路由目录）。完整路由见 [AGENTS.md](AGENTS.md) 的「文档路由」。
+> `docs/architecture/`（模块地图、呈现层入站契约与路由目录、系统工具与角色）。完整路由见 [AGENTS.md](AGENTS.md) 的「文档路由」。
 
 ## 结语 · Closing
 
