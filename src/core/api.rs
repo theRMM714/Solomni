@@ -351,7 +351,7 @@ impl CoreHandle {
             let t = text.clone();
             move |core| core.prepare_single(&sid, t.as_deref(), out == Output::Stream)
         })?;
-        let (session, prefix, llm) = match prepared {
+        let (session, prefix, llm, persister) = match prepared {
             // 不用跑模型（例如"末条是 AI 发言"）：把提示直接回给调用方。
             Prepared::Immediate(events) => {
                 let seq = bus.push(sid, &events);
@@ -369,7 +369,8 @@ impl CoreHandle {
                 session,
                 prefix,
                 llm,
-            } => (*session, prefix, llm),
+                persister,
+            } => (*session, prefix, llm, persister),
         };
         // 取消标志在**派发时**就登记：生成一开始「停止」就能生效（它本来就不进队列）。
         let cancel = jobs.register(sid);
@@ -393,12 +394,26 @@ impl CoreHandle {
                         cancel,
                         emit: &mut emit,
                     };
-                    let mut events = prefix;
-                    events.extend(match &text {
-                        Some(t) => session.say(t, &mut live),
-                        None => session.continue_reply(&mut live),
-                    });
-                    (session, events)
+                    // 逐轮外送 + 边落盘：一轮跑完就上屏并落盘（中途刷新页面因此看得到已产生的部分）。
+                    // seq 取**最后一次**入台的序号：客户端按它去重（逐轮外送因此是多批）。
+                    let mut events: Vec<SessionEvent> = Vec::new();
+                    let mut seq = 0u64;
+                    let mut sink = |ev: SessionEvent| {
+                        seq = bus.push(&sid, std::slice::from_ref(&ev));
+                        if let Some(warn) = persister.persist(std::slice::from_ref(&ev)) {
+                            bus.push(&sid, std::slice::from_ref(&SessionEvent::Notice(warn)));
+                        }
+                        events.push(ev);
+                    };
+                    // 生成前的提示（例如工具形态变更）先出，再跑。
+                    for ev in prefix {
+                        sink(ev);
+                    }
+                    match &text {
+                        Some(t) => session.say(t, &mut live, &mut sink),
+                        None => session.continue_reply(&mut live, &mut sink),
+                    }
+                    (session, events, seq)
                 })
                 .map_err(|e| format!("起生成线程失败：{}", e))?
         };
@@ -406,7 +421,7 @@ impl CoreHandle {
         //    **所有状态变更仍只发生在核心线程上**：工作线程只跑生成，不碰核心状态。
         let joined = worker.join();
         jobs.unregister(sid);
-        let (session, events) = match joined {
+        let (session, events, seq) = match joined {
             Ok(x) => x,
             Err(_) => {
                 // 线程崩了：会话对象随线程没了，但**转录在盘上**——解除"生成中"，
@@ -421,12 +436,12 @@ impl CoreHandle {
                 return Err("生成线程崩溃：会话已按落盘转录保留，可继续".to_string());
             }
         };
-        let seq = bus.push(sid, &events);
+        // 事件已由上面的 sink 逐轮入台（不再整批补推，否则同一批事实在台上有两份）。
+        // 交回核心只做"重新插入"：转录也已逐轮增量落盘。
         self.call({
             let sid = sid.to_string();
-            let ev = events.clone();
             move |core| {
-                core.put_single(&sid, session, &ev);
+                core.put_single(&sid, session);
                 Ok(())
             }
         })?;

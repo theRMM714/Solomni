@@ -176,121 +176,107 @@ impl AgentSession {
 
     /// 发言：先把 @ 引用改写成寻址 → 压入用户消息 → 逐轮（文本行 / 工具行）落转录。
     /// 改写在这一处完成，所以转录行与进上下文的消息是同一份文本（转录即内容）。
-    pub fn say(&mut self, text: &str, live: &mut Live) -> Vec<SessionEvent> {
+    pub fn say(&mut self, text: &str, live: &mut Live, sink: &mut dyn FnMut(SessionEvent)) {
         let text = crate::core::refs::rewrite(text, Some(&self.id), &self.roots, &self.refs);
         self.history.push(Msg::user(text.clone()));
         // 用户行不属于任何模型回复：给它**自己的行号**当回复号（与重建时的规则一致），
         // 否则它会继承上一轮的回复号，回档时与上一轮误并成一组。
         self.cur_reply = self.next_line;
         let user_line = self.line(format!("[用户] {}", text), None, None);
-        let mut out: Vec<SessionEvent> = vec![SessionEvent::Transcript(vec![user_line])];
-        out.extend(self.rounds_events(live));
-        out
+        sink(SessionEvent::Transcript(vec![user_line]));
+        self.rounds_events(live, sink);
     }
 
     /// 继续：末条已是用户发言，直接用现有历史问模型（不新增用户消息）。
-    pub fn continue_reply(&mut self, live: &mut Live) -> Vec<SessionEvent> {
-        self.rounds_events(live)
+    pub fn continue_reply(&mut self, live: &mut Live, sink: &mut dyn FnMut(SessionEvent)) {
+        self.rounds_events(live, sink);
     }
 
     /// 把一次问询的逐轮产出落成转录行：一轮的正文/思维链出文本行，工具另占一条工具行。
     /// marks 逐行精确（回档按行截断）；工具轮的文本行与工具行同属一轮，
     /// 所以历史统一在工具行推进（这一轮只贡献 assistant(raw) + [工具结果]），实时与重建两边一致。
-    fn rounds_events(&mut self, live: &mut Live) -> Vec<SessionEvent> {
-        let rounds = self.run(live);
+    /// 逐轮外送：**一轮跑完就出这一轮的行**（以前攒到回合收尾才一次性出，工具轮会把上一轮的
+    /// 流式文本从界面上抹掉）。行在回调里**只构造一次**；`run` 返回后只补记账——`marks` 是回档
+    /// 依据，必须保持"文本行的 mark 在 text_msgs 之前、工具行的 mark 在两个 msgs 之后"这个原时序。
+    fn rounds_events(&mut self, live: &mut Live, sink: &mut dyn FnMut(SessionEvent)) {
+        let label = self.id.clone();
+        let texts = self.tool_texts.clone();
         let stopped = live.cancelled();
-        let mut out: Vec<SessionEvent> = Vec::new();
-        for round in rounds {
-            // 调用失败（超时 / 网络）：这一轮**没有模型回复**——如实告知并中断本轮，
-            // 绝不落任何转录行（错误文本一旦进转录，核心按转录派生的"轮到谁"就歪了）。
+        let next_line = std::cell::Cell::new(self.next_line);
+        let per_round: std::cell::RefCell<Vec<Vec<LineView>>> = std::cell::RefCell::new(Vec::new());
+        let error: std::cell::RefCell<Option<String>> = std::cell::RefCell::new(None);
+        let mut on_round = |round: &Round, s: &mut dyn FnMut(SessionEvent)| {
             if let Some(err) = round.error.clone() {
-                out.push(SessionEvent::Notice(crate::core::events::interrupted_note(
-                    &err,
-                )));
+                *error.borrow_mut() = Some(err);
+                return;
+            }
+            let views = build_round_lines(&label, &texts, round, stopped, &next_line);
+            if !views.is_empty() {
+                s(SessionEvent::Transcript(views.clone()));
+            }
+            per_round.borrow_mut().push(views);
+        };
+        let rounds = self.run(live, &mut on_round, sink);
+        self.next_line = next_line.get();
+
+        // 只补记账（不再构造行、不再外送）：顺序与旧逻辑逐字对应。
+        for (round, views) in rounds.iter().zip(per_round.into_inner()) {
+            if error.borrow().is_some() {
                 break;
             }
-            // 这一轮的所有行同属一次回复（回档按它原子截断、重建按它分组）。
             self.cur_reply = round.reply;
-            let text = round.text.trim().to_string();
-            let has_line = !text.is_empty() || !round.reasoning.trim().is_empty();
-            // 供应商说是长度截断：如实写在行尾（与"已停止"同一套做法）
-            let truncated = round.truncated();
-            let mut reasoning = if round.reasoning.trim().is_empty() {
-                None
-            } else {
-                Some(round.reasoning.clone())
-            };
-            match round.tool {
+            let has_line = !round.text.trim().is_empty() || !round.reasoning.trim().is_empty();
+            let mut it = views.into_iter();
+            match &round.tool {
                 Some(run) => {
-                    // 先出「思考+正文」文本行（只有信封没有正文/思维链时不出空行）。
                     if has_line {
-                        let mut line = format!("[{}]", self.id);
-                        if !text.is_empty() {
-                            line.push(' ');
-                            line.push_str(&text);
+                        if let Some(v) = it.next() {
+                            self.line_reply.push(v.reply);
+                            self.marks.push(self.history.len());
                         }
-                        if stopped {
-                            line.push_str(&self.tool_texts.stopped_suffix);
-                        }
-                        if truncated {
-                            line.push_str(&self.tool_texts.truncated_suffix);
-                        }
-                        out.push(SessionEvent::Transcript(vec![self.line(
-                            line,
-                            reasoning.take(),
-                            None,
-                        )]));
                     }
-                    for m in round.text_msgs {
-                        self.history.push(m);
+                    for m in &round.text_msgs {
+                        self.history.push(m.clone());
                     }
-                    for m in run.msgs {
-                        self.history.push(m);
+                    for m in &run.msgs {
+                        self.history.push(m.clone());
                     }
-                    let status = if run.view.ok { "成功" } else { "失败" };
-                    // 没有文本行时思维链挂到工具行上，不丢。
-                    let line = format!("[{}] 工具 {} → {}", self.id, run.view.label(), status);
-                    out.push(SessionEvent::Transcript(vec![self.line(
-                        line,
-                        reasoning.take(),
-                        Some(run.view),
-                    )]));
+                    if let Some(v) = it.next() {
+                        self.line_reply.push(v.reply);
+                        self.marks.push(self.history.len());
+                    }
                 }
                 None => {
-                    for m in round.text_msgs {
-                        self.history.push(m);
+                    // 与旧逻辑同一时序：先扩展历史，再记这一行的 mark。
+                    for m in &round.text_msgs {
+                        self.history.push(m.clone());
                     }
-                    if has_line {
-                        let mut line = format!("[{}]", self.id);
-                        if !text.is_empty() {
-                            line.push(' ');
-                            line.push_str(&text);
-                        }
-                        if stopped {
-                            line.push_str(&self.tool_texts.stopped_suffix);
-                        }
-                        if truncated {
-                            line.push_str(&self.tool_texts.truncated_suffix);
-                        }
-                        out.push(SessionEvent::Transcript(vec![self.line(
-                            line,
-                            reasoning.take(),
-                            None,
-                        )]));
+                    if let Some(v) = it.next() {
+                        self.line_reply.push(v.reply);
+                        self.marks.push(self.history.len());
                     }
                 }
             }
         }
+        if let Some(err) = error.borrow().as_ref() {
+            sink(SessionEvent::Notice(crate::core::events::interrupted_note(
+                err,
+            )));
+        }
         if stopped {
-            out.push(SessionEvent::Notice(
+            sink(SessionEvent::Notice(
                 "[已停止] 生成已按你的要求中止（保留已产出的部分）".to_string(),
             ));
         }
-        out
     }
 
     /// 以现有历史跑一次工具循环；流式时逐片外送短暂 Delta（信封正文不外流，避免糊屏）。
-    fn run(&mut self, live: &mut Live) -> Vec<Round> {
+    fn run(
+        &mut self,
+        live: &mut Live,
+        on_round: &mut crate::core::engine::RoundSink<'_>,
+        sink: &mut dyn FnMut(SessionEvent),
+    ) -> Vec<Round> {
         let label = self.id.clone();
         let llm = live.llm;
         let cancel = std::sync::Arc::clone(&live.cancel);
@@ -338,11 +324,76 @@ impl AgentSession {
                 &mut |view: &ToolCallView| {
                     (emit.borrow_mut())(SessionEvent::ToolCall(view.clone()));
                 },
-                // 逐轮外送（下一步接上：一轮跑完就出这一轮的行）。当前先空着，行为不变。
-                &mut |_r: &crate::core::engine::Round| {},
+                on_round,
+                sink,
             )
         }
     }
+}
+
+/// 一轮的转录行：文本行（有正文/思维链时）+ 工具行（有工具时）。
+/// **不依赖 `&mut self`**：它由逐轮回调在 `converse_with` 内部调用，那时 `self` 已被拆开。
+/// 行号从 `next_line` 递增（回调里记不了账，所以由调用方在回合收尾时按同一批行补 marks）。
+fn build_round_lines(
+    id: &str,
+    texts: &crate::core::prompt::ToolTexts,
+    round: &Round,
+    stopped: bool,
+    next_line: &std::cell::Cell<u64>,
+) -> Vec<LineView> {
+    let text = round.text.trim().to_string();
+    let has_line = !text.is_empty() || !round.reasoning.trim().is_empty();
+    let truncated = round.truncated();
+    let mut reasoning = if round.reasoning.trim().is_empty() {
+        None
+    } else {
+        Some(round.reasoning.clone())
+    };
+    let make = |line: String, reasoning: Option<String>, tool: Option<ToolCallView>| {
+        let num = next_line.get();
+        next_line.set(num + 1);
+        LineView {
+            id: num,
+            reply: round.reply,
+            line,
+            reasoning,
+            tool,
+            degraded: false,
+        }
+    };
+    let mut out = Vec::new();
+    let text_line = |reasoning: &mut Option<String>, out: &mut Vec<LineView>| {
+        if !has_line {
+            return;
+        }
+        let mut line = format!("[{}]", id);
+        if !text.is_empty() {
+            line.push(' ');
+            line.push_str(&text);
+        }
+        if stopped {
+            line.push_str(&texts.stopped_suffix);
+        }
+        if truncated {
+            line.push_str(&texts.truncated_suffix);
+        }
+        out.push(make(line, reasoning.take(), None));
+    };
+    match &round.tool {
+        Some(run) => {
+            // 先出「思考+正文」文本行（只有信封没有正文/思维链时不出空行）。
+            text_line(&mut reasoning, &mut out);
+            let status = if run.view.ok { "成功" } else { "失败" };
+            // 没有文本行时思维链挂到工具行上，不丢。
+            out.push(make(
+                format!("[{}] 工具 {} → {}", id, run.view.label(), status),
+                reasoning.take(),
+                Some(run.view.clone()),
+            ));
+        }
+        None => text_line(&mut reasoning, &mut out),
+    }
+    out
 }
 
 /// 流式外送规则：信封之前照常外送，一旦累积文本里出现 "{" 就不再外送后续片段

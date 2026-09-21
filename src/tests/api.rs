@@ -67,16 +67,16 @@ fn generation_pushes_facts_to_the_event_bus_with_sequence_numbers() {
         .expect("说一句");
     assert!(adv.seq > 0, "本批事件必须带序号");
     let (lines, head) = bus.snapshot(Some(&opened.sid), 0);
-    assert_eq!(lines.len(), 1, "一次推进一批：{:?}", lines.len());
+    // 逐轮外送：事件按"一轮一批"进台，所以这里是多批（以前是整回合一批）。
+    // Advance.seq 是**最后一批**的序号——客户端按它去重，与逐轮外送同源。
+    assert!(!lines.is_empty(), "生成期间就该有事件进台");
     assert_eq!(
-        lines[0].seq, adv.seq,
-        "回复里的序号就是事件台上的序号（客户端据此去重）"
+        lines[lines.len() - 1].seq,
+        adv.seq,
+        "回复里的序号是最后一批的序号（客户端据此去重）"
     );
-    assert_eq!(
-        lines[0].events.len(),
-        adv.events.len(),
-        "事件台与回复是同一批事实"
-    );
+    let on_bus: usize = lines.iter().map(|l| l.events.len()).sum();
+    assert_eq!(on_bus, adv.events.len(), "事件台与回复是同一批事实");
     assert_eq!(head, adv.seq);
     assert!(
         bus.snapshot(Some(&opened.sid), adv.seq).0.is_empty(),

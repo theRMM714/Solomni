@@ -1018,6 +1018,10 @@ fn tool_cap_msg(texts: &crate::core::prompt::ToolTexts) -> Msg {
     Msg::user(texts.render(&texts.tool_cap, &[("n", MAX_TOOL_CALLS.to_string())]))
 }
 
+/// 逐轮产出回调：拿到刚定稿的一轮 + 本次的出口。
+/// 出口当参数传而不是让回调捕获它——否则回调借着 sink，调用方随后用不了同一个 sink。
+pub type RoundSink<'a> = dyn FnMut(&Round, &mut dyn FnMut(SessionEvent)) + 'a;
+
 /// 讨论行的**逐成员外送回调**：拿到刚定稿的行 + 本次的出口。
 /// 出口当参数传而不是让回调捕获它——否则回调借着 sink，`step`/`open` 的调用方随后用不了它。
 pub type LineSink<'a> = dyn FnMut(&[DiscLine], &mut dyn FnMut(SessionEvent)) + 'a;
@@ -1070,7 +1074,8 @@ pub(crate) fn converse(
         speaker,
         &mut noop,
         &mut |v: &ToolCallView| views.push(v.clone()),
-        &mut |_r: &Round| {},
+        &mut |_r: &Round, _s: &mut dyn FnMut(SessionEvent)| {},
+        &mut |_e: SessionEvent| {},
     );
     // 末轮恒为文本轮（工具轮之后必然再问一次；超限后按原文作答也走文本轮）。
     let last = rounds.last();
@@ -1094,7 +1099,8 @@ pub(crate) fn converse_with(
     speaker: &str,
     on: &mut dyn FnMut(Chunk) -> bool,
     on_tool: &mut dyn FnMut(&ToolCallView),
-    on_round: &mut dyn FnMut(&Round),
+    on_round: &mut RoundSink<'_>,
+    sink: &mut dyn FnMut(SessionEvent),
 ) -> Vec<Round> {
     // 观察账本随会话保存（回档时清空），这里不动它——它的语义是"这一段转录里的读取证据"。
     let mut rounds: Vec<Round> = Vec::new();
@@ -1103,7 +1109,7 @@ pub(crate) fn converse_with(
     macro_rules! push_round {
         ($r:expr) => {{
             let r = $r;
-            on_round(&r);
+            on_round(&r, sink);
             rounds.push(r);
         }};
     }

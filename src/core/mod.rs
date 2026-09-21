@@ -245,6 +245,8 @@ pub(crate) enum Prepared {
         /// 生成前要先给用户的事件（例如工具形态变更的提示）。
         prefix: Vec<SessionEvent>,
         llm: ports::LlmOpts,
+        /// 增量落盘手柄：逐轮外送的同时就落盘（中途刷新页面因此看得到已产生的部分）。
+        persister: Persister,
     },
     /// 不用跑模型：直接把这批事件回给调用方（例如"末条是 AI 发言"）。
     Immediate(Vec<SessionEvent>),
@@ -435,9 +437,16 @@ impl Core {
         self.sessions.insert(sid.to_string(), Session::Collab(c));
     }
 
-    /// 生成结束**交回**：重新插入 + 转录落盘 + 解除"生成中"。
-    /// 所有状态变更仍只发生在核心线程上（工作线程只跑生成，不碰核心状态）。
-    pub(crate) fn put_single(
+    /// 生成结束**交回**：重新插入 + 解除"生成中"。
+    /// 转录**已由工作线程按"一轮一次"的粒度增量落盘**（见 `Persister`），这里不重复落。
+    pub(crate) fn put_single(&mut self, sid: &str, s: session::AgentSession) {
+        self.running.remove(sid);
+        self.sessions.insert(sid.to_string(), Session::Single(s));
+    }
+
+    /// 测试用交回：整段落盘（测试不经过工作线程，所以没有增量落盘那一步）。
+    #[cfg(test)]
+    pub(crate) fn put_single_recorded(
         &mut self,
         sid: &str,
         s: session::AgentSession,
@@ -1628,10 +1637,12 @@ impl Core {
             }
         }
         let session = self.take_single(sid)?;
+        let persister = self.persister(sid);
         Ok(Prepared::Run {
             session: Box::new(session),
             prefix,
             llm,
+            persister,
         })
     }
 
@@ -1652,11 +1663,14 @@ impl Core {
             } => {
                 let mut session = *session;
                 let mut events = prefix;
-                events.extend(session.say(text, live));
+                {
+                    let mut sink = |ev: SessionEvent| events.push(ev);
+                    session.say(text, live, &mut sink);
+                }
                 if live.cancelled() {
                     self.log.warn("core::single_say", "生成被用户中止");
                 }
-                self.put_single(sid, session, &events);
+                self.put_single_recorded(sid, session, &events);
                 Ok(events)
             }
         }
@@ -1997,7 +2011,12 @@ impl Core {
             match s {
                 Session::Single(s) => {
                     if s.last_is_user() {
-                        s.continue_reply(live)
+                        let mut out = Vec::new();
+                        {
+                            let mut sink = |ev: SessionEvent| out.push(ev);
+                            s.continue_reply(live, &mut sink);
+                        }
+                        out
                     } else {
                         vec![SessionEvent::Notice(NEED_USER.to_string())]
                     }
