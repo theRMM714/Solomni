@@ -34,11 +34,37 @@ pub struct ToolDecl {
     pub parameters: serde_json::Value,
 }
 
-/// 一次补全的请求选项：策略在 core（要不要流式、要不要声明工具），机制在适配器。
+/// 单次模型调用的默认总预算（秒）。见 `AppSettings::llm_timeout_secs`。
+pub const DEFAULT_LLM_TIMEOUT_SECS: u64 = 300;
+
+/// 一次模型调用的通道参数：**策略在 core 定**（都来自全局设置），机制在适配器。
+/// 一个值一路传下去，而不是把 stream / 预算分别塞进各个函数的参数表——两处各传一份迟早会漏。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LlmOpts {
+    /// 要不要流式（全局设置 `streaming`）：讨论、执行、验收、单 agent 全用它。
+    pub stream: bool,
+    /// 单次调用总预算（全局设置 `llm_timeout_secs`）。
+    pub timeout_secs: u64,
+}
+
+impl Default for LlmOpts {
+    fn default() -> Self {
+        LlmOpts {
+            stream: false,
+            timeout_secs: DEFAULT_LLM_TIMEOUT_SECS,
+        }
+    }
+}
+
+/// 一次补全的请求选项：策略在 core（要不要流式、要不要声明工具、给多少预算），机制在适配器。
 pub struct CompleteOpts<'a> {
     pub stream: bool,
     /// 要声明的工具；None = 本次不声明（手写信封模式，或本轮不需要工具）。
     pub tools: Option<&'a [ToolDecl]>,
+    /// 本次调用的**总预算**（秒）：连接之外，等响应头、读响应体与整体都用它。
+    /// 为什么是一个预算而不是拆几个：**非流式**下供应商要等整段生成完才发响应头，
+    /// 单独设一个小的"头超时"会把长回复误判成不通（真机上就是这么炸的：49~53 秒的回复撞了 60 秒头超时）。
+    pub timeout_secs: u64,
 }
 
 impl<'a> CompleteOpts<'a> {
@@ -47,7 +73,14 @@ impl<'a> CompleteOpts<'a> {
         CompleteOpts {
             stream,
             tools: None,
+            timeout_secs: DEFAULT_LLM_TIMEOUT_SECS,
         }
+    }
+
+    /// 带上本次预算（核心按设置给；设置是全局的，见 `AppSettings::llm_timeout_secs`）。
+    pub fn with_timeout(mut self, secs: u64) -> CompleteOpts<'a> {
+        self.timeout_secs = secs;
+        self
     }
 }
 
@@ -134,15 +167,31 @@ pub struct Completion {
     pub finish: String,
     /// 原生工具调用（按供应商给的顺序；手写信封模式恒为空）。
     pub calls: Vec<ToolCall>,
+    /// 这次调用**失败**了（超时 / 网络 / 形状不对）：非空 = 没有拿到模型的回复。
+    /// 为什么必须与正文分开：失败原因若当成正文，会作为**模型发言**落进转录，
+    /// 而核心正是按转录派生"下一步该谁说话"——错误文本一旦混进去，状态就歪了。
+    /// 有它，上层才能如实告知用户并**中断**这一轮（而不是假装模型说了这句话）。
+    pub error: Option<String>,
 }
 
 impl Completion {
-    /// 没有结束原因、没有原生调用的通道（演示通道、测试替身、本地失败兜底）：只有正文。
+    /// 没有结束原因、没有原生调用的通道（演示通道、测试替身）：只有正文。
     pub fn text(raw: impl Into<String>) -> Completion {
         Completion {
             raw: raw.into(),
             finish: String::new(),
             calls: Vec::new(),
+            error: None,
+        }
+    }
+
+    /// 这次调用没成功：只带原因，**不带正文**（上层据此如实告知并中断）。
+    pub fn failure(reason: impl Into<String>) -> Completion {
+        Completion {
+            raw: String::new(),
+            finish: String::new(),
+            calls: Vec::new(),
+            error: Some(reason.into()),
         }
     }
 

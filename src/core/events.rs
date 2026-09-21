@@ -37,9 +37,19 @@ pub enum SessionEvent {
     },
 }
 
-/// 实时输出通道：流式开关 + 中止开关 + 短暂事件出口（不落盘，仅活动会话实时刷新）。
+/// 调用失败时的用户可见说明：**如实说原因**，并说清会话没被作废（可以点「继续」重试）。
+/// 为什么统一在这里生成：讨论、执行、验收、单 agent 都要说同一句话，各写一份必然漂移。
+pub fn interrupted_note(reason: &str) -> String {
+    format!(
+        "[中断] {}；本轮已中断，会话保留——点「继续」可重试。",
+        reason
+    )
+}
+
+/// 实时输出通道：调用参数（流式与预算，来自全局设置）+ 中止开关 + 短暂事件出口
+/// （不落盘，仅活动会话实时刷新）。
 pub struct Live<'a> {
-    pub stream: bool,
+    pub llm: crate::core::ports::LlmOpts,
     /// 用户点「停止」时置位；会话与适配层据此立即中止生成。
     pub cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
     pub emit: &'a mut dyn FnMut(SessionEvent),

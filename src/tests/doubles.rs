@@ -72,6 +72,17 @@ impl InMemorySettings {
         s.s.lock().expect("锁").app.tier = tier;
         s
     }
+
+    /// 指定全局流式与调用预算的登记处（断言"设置是流式的上限、预算全局通用"）。
+    pub(crate) fn with_llm(streaming: bool, timeout_secs: u64) -> InMemorySettings {
+        let s = InMemorySettings::new();
+        {
+            let mut g = s.s.lock().expect("锁");
+            g.app.streaming = streaming;
+            g.app.llm_timeout_secs = timeout_secs;
+        }
+        s
+    }
 }
 
 impl SettingsStore for InMemorySettings {
@@ -645,7 +656,7 @@ pub(crate) fn module_with_runtimes(id: &str, caps: &[&str]) -> Module {
 pub(crate) fn with_live<T>(f: impl FnOnce(&mut Live) -> T) -> T {
     let mut noop = |_e: SessionEvent| {};
     let mut live = Live {
-        stream: false,
+        llm: Default::default(),
         cancel: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         emit: &mut noop,
     };
@@ -908,6 +919,26 @@ pub(crate) fn core_with_pkgs(
         catalog,
         runner,
         io,
+        Arc::new(NoRepair),
+        Box::new(TestPrompts::ok()),
+        Arc::new(crate::core::ports::NoopLog),
+    )
+    .expect("内存装配不应失败")
+}
+
+/// 用**指定登记处**装配（断言"全局设置是流式的上限、预算全局通用"这类判据）。
+pub(crate) fn core_with_settings(store: InMemorySettings) -> Core {
+    Core::new(
+        Arc::new(store),
+        Arc::new(InMemoryHistory::new()),
+        Arc::new(InMemoryWorkspace::new()),
+        Arc::new(VecSource(Vec::new())),
+        Arc::new(InMemoryPackages::empty()),
+        Arc::new(NoFenceHost),
+        Arc::new(gw(BTreeMap::new(), Vec::new())),
+        Arc::new(FakeCatalog::new(vec!["m".to_string()])),
+        Arc::new(SilentRunner),
+        Arc::new(InMemorySysIo::new()),
         Arc::new(NoRepair),
         Box::new(TestPrompts::ok()),
         Arc::new(crate::core::ports::NoopLog),

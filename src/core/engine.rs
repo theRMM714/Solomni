@@ -95,6 +95,8 @@ pub struct MemberTools {
     /// **回复 id 计数器**：一次模型回复一个号，跨重启单调（重建时按转录里的最大值续号）。
     /// 转录行靠它分组（哪几行属于同一次回复），会话靠它按回复原子回档。
     pub reply_seq: u64,
+    /// 本次调用的通道参数（流式 + 预算）：来自**全局设置**，与单 agent 共用同一份。
+    pub llm: crate::core::ports::LlmOpts,
 }
 
 impl MemberTools {
@@ -438,6 +440,8 @@ impl Member {
 pub enum TurnOut {
     /// 一轮正常走完，转达给用户过目。
     Round,
+    /// 调用失败（超时 / 网络）：本轮**中断**——不把失败当发言吸收，交给用户决定何时继续。
+    Interrupted(String),
     /// 有模块请教用户：轮转中止，等用户回答。
     AskUser { member: String, question: String },
     /// 留在组的成员全部同意 → 讨论终止。
@@ -463,10 +467,17 @@ pub struct Discussion {
     pub allow_autonomy: bool,
     /// 提示词册（讨论文案来源）。
     prompts: Prompts,
+    /// 本次调用的通道参数（流式 + 预算）：**全局设置**，与单 agent 共用同一份。
+    llm: crate::core::ports::LlmOpts,
 }
 
 impl Discussion {
-    pub fn new(members: Vec<Member>, allow_autonomy: bool, prompts: Prompts) -> Discussion {
+    pub fn new(
+        members: Vec<Member>,
+        allow_autonomy: bool,
+        prompts: Prompts,
+        llm: crate::core::ports::LlmOpts,
+    ) -> Discussion {
         Discussion {
             members,
             transcript: Vec::new(),
@@ -475,11 +486,17 @@ impl Discussion {
             closed: false,
             allow_autonomy,
             prompts,
+            llm,
         }
     }
 
+    /// 本轮的调用选项：流式与预算都取全局设置（讨论也走同一份，不再是写死的非流式）。
+    fn opts(&self) -> crate::core::ports::CompleteOpts<'static> {
+        crate::core::ports::CompleteOpts::plain(self.llm.stream).with_timeout(self.llm.timeout_secs)
+    }
+
     /// 首轮：聊天约定 + 用户需求（文案经提示词册渲染）。
-    pub fn open(&mut self, task: &str) {
+    pub fn open(&mut self, task: &str) -> Option<String> {
         let opener = self.prompts.render(
             &self.prompts.core.discuss.opener,
             &[
@@ -493,10 +510,12 @@ impl Discussion {
                 (m.system.clone(), m.id.clone())
             };
             let msgs = vec![Msg::system(system), Msg::user(opener.clone())];
-            let done =
-                self.members[i]
-                    .chat
-                    .complete(&msgs, CompleteOpts::plain(false), &mut |_| true);
+            let opts = self.opts();
+            let done = self.members[i].chat.complete(&msgs, opts, &mut |_| true);
+            // 调用失败：**不**当发言吸收，如实把原因交回（用户可点「继续」重试）。
+            if let Some(err) = done.error.clone() {
+                return Some(err);
+            }
             let reply = envelope::parse(&done.raw);
             self.absorb(
                 &id,
@@ -507,6 +526,7 @@ impl Discussion {
             );
         }
         self.round = 1;
+        None
     }
 
     /// 推进一轮：把当前转录并入上下文，依次转达给每个在组且未同意的成员。
@@ -555,10 +575,11 @@ impl Discussion {
                 )],
             );
             let msgs = vec![Msg::system(system), Msg::user(step_prompt)];
-            let done =
-                self.members[i]
-                    .chat
-                    .complete(&msgs, CompleteOpts::plain(false), &mut |_| true);
+            let opts = self.opts();
+            let done = self.members[i].chat.complete(&msgs, opts, &mut |_| true);
+            if let Some(err) = done.error.clone() {
+                return TurnOut::Interrupted(err);
+            }
             let reply = envelope::parse(&done.raw);
             let verb = reply.verb;
             let text = reply.text;
@@ -628,7 +649,7 @@ impl Discussion {
     }
 
     /// 全员同意后：核心整理——总结讨论，为每个留下的成员写执行任务提示词。
-    pub fn synthesize(&self, core_chat: &mut dyn Chat) -> String {
+    pub fn synthesize(&self, core_chat: &mut dyn Chat) -> Result<String, String> {
         let user = self.prompts.render(
             &self.prompts.core.synthesize.user,
             &[(
@@ -644,9 +665,11 @@ impl Discussion {
             Msg::system(self.prompts.core.synthesize.system.clone()),
             Msg::user(user),
         ];
-        core_chat
-            .complete(&msgs, CompleteOpts::plain(false), &mut |_| true)
-            .raw
+        let done = core_chat.complete(&msgs, self.opts(), &mut |_| true);
+        match done.error {
+            Some(err) => Err(err),
+            None => Ok(done.raw),
+        }
     }
 }
 
@@ -672,6 +695,9 @@ pub struct Execution {
     pub items: Vec<CheckItem>,
     /// 已返工次数。
     pub rework: usize,
+    /// 执行/验收途中调用失败（超时 / 网络）：非空 = 本轮**中断**，不交付。
+    /// 上层据此如实告知用户；会话保持可继续（用户点「继续」重新推进）。
+    pub error: Option<String>,
 }
 
 impl Execution {
@@ -682,6 +708,7 @@ impl Execution {
             checklist_raw: String::new(),
             items: Vec::new(),
             rework: 0,
+            error: None,
         }
     }
 
@@ -719,9 +746,13 @@ impl Execution {
                     ),
                 ],
             );
-            let (text, views) = self.collect_one(m, user);
+            let (text, views, error) = self.collect_one(m, user);
             self.traces.entry(m.id.clone()).or_default().extend(views);
             self.reports.insert(m.id.clone(), text);
+            if let Some(err) = error {
+                self.error = Some(err);
+                return;
+            }
         }
     }
 
@@ -731,14 +762,22 @@ impl Execution {
             if !m.present {
                 continue;
             }
-            let (text, views) = self.collect_one(m, user_prompt.clone());
+            let (text, views, error) = self.collect_one(m, user_prompt.clone());
             self.traces.entry(m.id.clone()).or_default().extend(views);
             self.reports.insert(m.id.clone(), text);
+            if let Some(err) = error {
+                self.error = Some(err);
+                return;
+            }
         }
     }
 
     /// 单成员一次问询：拆字段借用（chat 可变 / tools 只读互不冲突），工具调用入册。
-    fn collect_one(&mut self, m: &mut Member, user_prompt: String) -> (String, Vec<ToolCallView>) {
+    fn collect_one(
+        &mut self,
+        m: &mut Member,
+        user_prompt: String,
+    ) -> (String, Vec<ToolCallView>, Option<String>) {
         let Member {
             id,
             system,
@@ -756,7 +795,13 @@ impl Execution {
     }
 
     /// 验收：核心对照方案逐项核对，输出结构化 pass/fail 清单。
-    pub fn review(&mut self, core_chat: &mut dyn Chat, plan: &str, prompts: &Prompts) {
+    pub fn review(
+        &mut self,
+        core_chat: &mut dyn Chat,
+        plan: &str,
+        prompts: &Prompts,
+        llm: crate::core::ports::LlmOpts,
+    ) {
         let reports = self
             .reports
             .iter()
@@ -771,9 +816,14 @@ impl Execution {
             Msg::system(prompts.core.review.system.clone()),
             Msg::user(user),
         ];
-        let raw = core_chat
-            .complete(&msgs, CompleteOpts::plain(false), &mut |_| true)
-            .raw;
+        let opts =
+            crate::core::ports::CompleteOpts::plain(llm.stream).with_timeout(llm.timeout_secs);
+        let done = core_chat.complete(&msgs, opts, &mut |_| true);
+        if let Some(err) = done.error.clone() {
+            self.error = Some(err);
+            return;
+        }
+        let raw = done.raw;
         self.items = envelope::extract_json_array(&raw)
             .and_then(|arr| serde_json::from_str::<Vec<CheckItem>>(&arr).ok())
             .unwrap_or_default();
@@ -864,6 +914,9 @@ pub struct Round {
     pub tool: Option<ToolRun>,
     /// 供应商给的结束原因（原样；没给 = 空串）：核心据此分辨"写完停"还是"被长度截断"。
     pub finish: String,
+    /// 这次调用失败了（超时 / 网络）：非空 = **没有拿到模型回复**，这一轮不该落转录。
+    /// 上层据此如实告知用户并中断本轮（用户可以点「继续」重试）。
+    pub error: Option<String>,
 }
 
 impl Round {
@@ -881,21 +934,24 @@ pub(crate) fn converse(
     tools: Option<&mut MemberTools>,
     speaker: &str,
     first: Msg,
-) -> (String, Vec<ToolCallView>) {
+) -> (String, Vec<ToolCallView>, Option<String>) {
     let mut noop = |_c: Chunk| true;
     let mut views: Vec<ToolCallView> = Vec::new();
+    let llm = tools.as_ref().map(|t| t.llm).unwrap_or_default();
     let rounds = converse_with(
         chat,
         tools,
         vec![Msg::system(system.to_string()), first],
-        false,
+        llm,
         speaker,
         &mut noop,
         &mut |v: &ToolCallView| views.push(v.clone()),
     );
     // 末轮恒为文本轮（工具轮之后必然再问一次；超限后按原文作答也走文本轮）。
-    let text = rounds.last().map(|r| r.text.clone()).unwrap_or_default();
-    (text, views)
+    let last = rounds.last();
+    let text = last.map(|r| r.text.clone()).unwrap_or_default();
+    let error = last.and_then(|r| r.error.clone());
+    (text, views, error)
 }
 
 /// 从既有消息列表续跑，**逐轮**返回产出；顺序即 round0 文本 → round0 工具 → round1 文本 → …
@@ -906,7 +962,7 @@ pub(crate) fn converse_with(
     chat: &mut dyn Chat,
     mut tools: Option<&mut MemberTools>,
     mut msgs: Vec<Msg>,
-    stream: bool,
+    llm: crate::core::ports::LlmOpts,
     speaker: &str,
     on: &mut dyn FnMut(Chunk) -> bool,
     on_tool: &mut dyn FnMut(&ToolCallView),
@@ -955,15 +1011,31 @@ pub(crate) fn converse_with(
                 keep
             };
             let opts = CompleteOpts {
-                stream,
+                stream: llm.stream,
                 tools: if decls.list.is_empty() {
                     None
                 } else {
                     Some(&decls.list)
                 },
+                timeout_secs: llm.timeout_secs,
             };
             chat.complete(&msgs, opts, &mut sink)
         };
+        // 调用失败（超时 / 网络）：**不是模型的回复**——这一轮不解析信封、不执行工具、不落转录，
+        // 只把原因带回，让上层如实告知用户并中断本轮（用户可以点「继续」重试）。
+        // 为什么必须短路：错误文本若被当成发言吸收，核心按转录派生的"下一步该谁说话"就歪了。
+        if let Some(err) = done.error.clone() {
+            rounds.push(Round {
+                reply: reply_id,
+                text: String::new(),
+                reasoning: String::new(),
+                text_msgs: Vec::new(),
+                tool: None,
+                finish: String::new(),
+                error: Some(err),
+            });
+            return rounds;
+        }
         // 结束原因如实带回：被长度截断要落日志——事后才判定得出"是截断还是模型自己写错"。
         let finish = done.finish.clone();
         let truncated = done.truncated();
@@ -1090,6 +1162,7 @@ pub(crate) fn converse_with(
                                 msgs: vec![msgs_of[i + 1].clone()],
                             }),
                             finish: finish.clone(),
+                            error: None,
                         });
                         if rounds.len() >= MAX_TOOL_CALLS {
                             forced_final = true;
@@ -1132,6 +1205,7 @@ pub(crate) fn converse_with(
                                 msgs: vec![msgs_of[1].clone()],
                             }),
                             finish: finish.clone(),
+                            error: None,
                         });
                         if rounds.len() >= MAX_TOOL_CALLS {
                             forced_final = true;
@@ -1187,6 +1261,7 @@ pub(crate) fn converse_with(
                         msgs: vec![msgs_of[1].clone()],
                     }),
                     finish: finish.clone(),
+                    error: None,
                 });
                 if rounds.len() >= MAX_TOOL_CALLS {
                     forced_final = true;
@@ -1279,6 +1354,7 @@ pub(crate) fn converse_with(
                             msgs: vec![msgs_of[i + 1].clone()],
                         }),
                         finish: finish.clone(),
+                        error: None,
                     });
                     if rounds.len() >= MAX_TOOL_CALLS {
                         forced_final = true;
@@ -1306,6 +1382,7 @@ pub(crate) fn converse_with(
                     text_msgs,
                     tool: None,
                     finish,
+                    error: None,
                 });
                 return rounds;
             }

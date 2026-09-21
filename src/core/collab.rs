@@ -20,6 +20,16 @@ use crate::core::prompt::Prompts;
 use crate::core::providers::Settings;
 use crate::core::workspace::Sandboxes;
 use std::sync::Arc;
+impl CollabSession {
+    /// 本次调用的通道参数（流式 + 预算）：**全局设置**，与单 agent 共用同一份。
+    fn llm_opts(&self) -> crate::core::ports::LlmOpts {
+        crate::core::ports::LlmOpts {
+            stream: self.settings.app.streaming,
+            timeout_secs: self.settings.app.llm_timeout_secs,
+        }
+    }
+}
+
 /// 用户显式授权的只读根（`settings.yaml` 的 `fence_read`）：空 = 一个都不放行。
 /// 与 `Core::fence_read_roots` 同义——两处都在 core 内，读的是同一份设置事实。
 fn read_only_roots(app: &crate::core::providers::AppSettings) -> Vec<std::path::PathBuf> {
@@ -310,9 +320,21 @@ impl CollabSession {
                 "[提示] 核心未配置供应商：整理/验收使用内置假模型（演示）".into(),
             ));
         }
-        let mut disc = Discussion::new(members, self.allow, prompts);
-        disc.open(&self.task);
+        // 讨论也走**全局设置**（流式 + 预算），与单 agent 共用同一份。
+        let llm = crate::core::ports::LlmOpts {
+            stream: self.settings.app.streaming,
+            timeout_secs: self.settings.app.llm_timeout_secs,
+        };
+        let mut disc = Discussion::new(members, self.allow, prompts, llm);
+        let interrupted = disc.open(&self.task);
         self.disc = Some(disc);
+        // 开场就失败：如实告知并**中断**（会话保持可继续，用户点「继续」重试）。
+        if let Some(err) = interrupted {
+            sink(SessionEvent::Notice(crate::core::events::interrupted_note(
+                &err,
+            )));
+            return;
+        }
         self.pump_with(sink);
     }
 
@@ -347,6 +369,13 @@ impl CollabSession {
                 }
                 match outcome {
                     TurnOut::Round => {}
+                    TurnOut::Interrupted(err) => {
+                        // 讨论中调用失败：**不**把它当发言吸收，如实告知并中断本轮。
+                        sink(SessionEvent::Notice(crate::core::events::interrupted_note(
+                            &err,
+                        )));
+                        return;
+                    }
                     TurnOut::AskUser { member, question } => {
                         self.pending = Some(Pending::Ask { member, question });
                         return;
@@ -374,12 +403,24 @@ impl CollabSession {
                     .as_ref()
                     .expect("disc 存在")
                     .synthesize(self.core_chat.as_mut());
-                self.plan = Some(p.clone());
-                sink(SessionEvent::Plan(p.clone()));
-                p
+                match p {
+                    Ok(p) => {
+                        self.plan = Some(p.clone());
+                        sink(SessionEvent::Plan(p.clone()));
+                        p
+                    }
+                    // 整理失败：不落方案、不往下走，如实告知并中断（用户可点「继续」重试）。
+                    Err(err) => {
+                        sink(SessionEvent::Notice(crate::core::events::interrupted_note(
+                            &err,
+                        )));
+                        return;
+                    }
+                }
             }
         };
         // 执行 → 验收 → 返工（上限内）→ 交付。
+        let llm = self.llm_opts();
         let members = self
             .disc
             .as_mut()
@@ -387,6 +428,13 @@ impl CollabSession {
             .members
             .as_mut_slice();
         let mut exec = Execution::run(members, &plan, &prompts);
+        // 执行阶段有成员调用失败：不交付、不返工，如实告知并中断（会话保持可继续）。
+        if let Some(err) = exec.error.clone() {
+            sink(SessionEvent::Notice(crate::core::events::interrupted_note(
+                &err,
+            )));
+            return;
+        }
         for (id, text) in &exec.reports {
             emit_tool_lines(&exec, id, &mut self.next_line, sink);
             sink(SessionEvent::Report {
@@ -395,7 +443,13 @@ impl CollabSession {
                 rework: 0,
             });
         }
-        exec.review(self.core_chat.as_mut(), &plan, &prompts);
+        exec.review(self.core_chat.as_mut(), &plan, &prompts, llm);
+        if let Some(err) = exec.error.clone() {
+            sink(SessionEvent::Notice(crate::core::events::interrupted_note(
+                &err,
+            )));
+            return;
+        }
         sink(review_event(&exec));
         while !exec.all_pass() && exec.rework < MAX_REWORK {
             sink(SessionEvent::Notice(format!(
@@ -411,6 +465,12 @@ impl CollabSession {
                 .members
                 .as_mut_slice();
             exec.rerun(members, &plan, &review_text, &prompts);
+            if let Some(err) = exec.error.clone() {
+                sink(SessionEvent::Notice(crate::core::events::interrupted_note(
+                    &err,
+                )));
+                return;
+            }
             for (id, text) in &exec.reports {
                 emit_tool_lines(&exec, id, &mut self.next_line, sink);
                 sink(SessionEvent::Report {
@@ -419,7 +479,13 @@ impl CollabSession {
                     rework: exec.rework,
                 });
             }
-            exec.review(self.core_chat.as_mut(), &plan, &prompts);
+            exec.review(self.core_chat.as_mut(), &plan, &prompts, llm);
+            if let Some(err) = exec.error.clone() {
+                sink(SessionEvent::Notice(crate::core::events::interrupted_note(
+                    &err,
+                )));
+                return;
+            }
             sink(review_event(&exec));
         }
         let ok = exec.all_pass();
@@ -504,6 +570,11 @@ impl CollabSession {
                 // 本档位下不能执行工具的模块（缺运行包）：机制侧据此拒绝执行。
                 unavailable: exec::unavailable(&self.spec, &modules, &library),
                 fence,
+                // 流式与预算取全局设置：讨论/执行/验收与单 agent 共用同一份。
+                llm: crate::core::ports::LlmOpts {
+                    stream: self.settings.app.streaming,
+                    timeout_secs: self.settings.app.llm_timeout_secs,
+                },
             });
             members.push(member);
         }
@@ -621,7 +692,8 @@ impl CollabSession {
                 .unwrap_or(all_lines.len());
             let disc_lines = all_lines[start..].to_vec();
             let (members, _) = s.assemble_members()?;
-            let mut disc = Discussion::new(members, st.allow, prompts);
+            let llm = s.llm_opts();
+            let mut disc = Discussion::new(members, st.allow, prompts, llm);
             disc.round = st.round.max(1);
             disc.closed = st.closed;
             for m in disc.members.iter_mut() {

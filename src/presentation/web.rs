@@ -541,6 +541,10 @@ pub(crate) fn route(
                 fence_write: current.fence_write,
                 fence_read: current.fence_read.clone(),
                 qemu_path: current.qemu_path.clone(),
+                llm_timeout_secs: req
+                    .get("llm_timeout_secs")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(current.llm_timeout_secs),
             };
             match ops.registry.set_settings(settings) {
                 Ok(()) => ok_json(json!({ "ok": true })),

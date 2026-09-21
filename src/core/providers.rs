@@ -80,6 +80,15 @@ pub struct AppSettings {
     /// 产品不自带、不下载 QEMU，只检测与指路。
     #[serde(default)]
     pub qemu_path: String,
+    /// **单次模型调用的总预算（秒）**，全局通用（讨论、执行、验收、单 agent 都用它）。
+    /// 默认给得比较宽：非流式下供应商要等整段生成完才发响应头，长回复本来就要几十秒；
+    /// 预算用尽 = 中断这一轮并如实告知（用户可以点「继续」重试），不是把会话作废。
+    #[serde(default = "default_llm_timeout_secs")]
+    pub llm_timeout_secs: u64,
+}
+
+fn default_llm_timeout_secs() -> u64 {
+    crate::core::ports::DEFAULT_LLM_TIMEOUT_SECS
 }
 
 fn default_true() -> bool {
@@ -95,6 +104,7 @@ impl Default for AppSettings {
             fence_write: false,
             fence_read: Vec::new(),
             qemu_path: String::new(),
+            llm_timeout_secs: crate::core::ports::DEFAULT_LLM_TIMEOUT_SECS,
         }
     }
 }

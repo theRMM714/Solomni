@@ -357,8 +357,10 @@ impl SessionOps for CoreHandle {
                 }
             };
             let result = {
+                // 流式与预算都取**全局设置**（单 agent 与协作共用同一份，见 AppSettings）。
+                let llm = core.llm_opts(out == Output::Stream);
                 let mut live = Live {
-                    stream: out == Output::Stream,
+                    llm,
                     cancel: Arc::clone(&cancel),
                     emit: &mut emit,
                 };
@@ -382,8 +384,9 @@ impl SessionOps for CoreHandle {
                 }
             };
             let result = {
+                let llm = core.llm_opts(out == Output::Stream);
                 let mut live = Live {
-                    stream: out == Output::Stream,
+                    llm,
                     cancel: Arc::clone(&cancel),
                     emit: &mut emit,
                 };

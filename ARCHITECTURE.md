@@ -145,6 +145,11 @@ session/<工作名>/
 - `meta.yaml` 的 `exec` 段是**执行选型**的唯一真相：档位（`tier` = 本机 / 虚拟机）、虚拟机基础根、能力定版（`pins`）、是否放行出站网络；
   缺这段的 `meta.yaml` 按默认读回（本机档、不定版、不联网）。执行计划本身（`core/exec.rs` 的 `ExecPlan`）**从不落盘**——它含真实路径，只在运行时派生。
 - 会话的**旁路配置记录**（`{"type":"config"}`）只在编辑提交时追加：供呈现与审计，**不进模型上下文**，回放与状态派生都跳过它。
+- 出站模型调用的参数由**核心**决定、随端口传下去：`core::ports::LlmOpts{stream, timeout_secs}` 与 `CompleteOpts` 的对应字段，
+  取值来自**全局设置**（`streaming` / `llm_timeout_secs`），讨论、执行、验收与单 agent 共用同一份判据（`Core::llm_opts`）。
+  `Output` 只管回包形状：设置是流式的**上限**，调用方可在本次放弃流式。
+  调用失败**不是**模型的回复：`Completion.error` 与正文分离，上层据此发 `Notice` 并**中断本轮**（不落任何转录行），
+  会话保持可继续——错误文本若被当成发言吸收，按转录派生的「轮到谁」就歪了。
 - `core/fence.rs` 是工具进程围栏的**策略**（可达范围 = 共享区 + 自己的私有沙箱 + 自己的模块目录 + 用户显式授权的只读根 `ro`、断网、工作目录），
   `ro` 来自 `.home/settings.yaml` 的 `fence_read`（默认空）：**只读位由各平台机制落实**（Landlock 只读位 /
   seatbelt `file-read*` / Windows `RIGHTS_RO`），且只授给该 agent 自己的容器身份——不能像解释器基线那样授给共享组。

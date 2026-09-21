@@ -992,13 +992,140 @@ pub(crate) fn roster_lists_modules() {
 
 // ---------- 讨论引擎 ----------
 
+// ---------- 出站调用的全局参数（流式 / 预算 / 失败中断） ----------
+
+/// 记录调用参数、并能按脚本失败的通道替身。
+/// 用来钉两件机器可判的事实：**流式与预算来自全局设置**、**调用失败 = 中断而不是发言**。
+pub(crate) struct OptsChat {
+    pub(crate) seen: OptsLog,
+    /// 每次调用的结果：None = 回一个 agree 信封；Some(原因) = 失败。
+    pub(crate) results: Vec<Option<String>>,
+}
+
+/// 调用参数账本：(流式, 预算秒)。
+pub(crate) type OptsLog = Arc<Mutex<Vec<(bool, u64)>>>;
+
+impl crate::core::ports::Chat for OptsChat {
+    fn complete(
+        &mut self,
+        _m: &[crate::core::ports::Msg],
+        opts: crate::core::ports::CompleteOpts<'_>,
+        _on: &mut dyn FnMut(crate::core::ports::Chunk) -> bool,
+    ) -> crate::core::ports::Completion {
+        self.seen
+            .lock()
+            .expect("锁")
+            .push((opts.stream, opts.timeout_secs));
+        let r = if self.results.len() > 1 {
+            self.results.remove(0)
+        } else {
+            self.results.first().cloned().unwrap_or(None)
+        };
+        match r {
+            Some(reason) => crate::core::ports::Completion::failure(reason),
+            None => crate::core::ports::Completion::text("{\"type\":\"agree\",\"text\":\"同意\"}"),
+        }
+    }
+}
+
+fn opts_discussion(
+    results: Vec<Option<String>>,
+    llm: crate::core::ports::LlmOpts,
+) -> (Discussion, OptsLog) {
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let members = vec![Member::new(
+        "m0",
+        "职责0".to_string(),
+        Box::new(OptsChat {
+            seen: Arc::clone(&seen),
+            results,
+        }),
+    )];
+    (Discussion::new(members, false, test_prompts(), llm), seen)
+}
+
+/// 讨论的调用参数**必须来自全局设置**（以前这里写死非流式，正是协作卡住的成因之一）。
+#[test]
+pub(crate) fn discussion_calls_carry_the_global_streaming_and_budget() {
+    let llm = crate::core::ports::LlmOpts {
+        stream: true,
+        timeout_secs: 123,
+    };
+    let (mut d, seen) = opts_discussion(vec![None, None, None], llm);
+    assert!(d.open("任务").is_none(), "开场正常");
+    let got = seen.lock().expect("锁").clone();
+    assert_eq!(
+        got[0],
+        (true, 123),
+        "开场调用要带上设置里的流式与预算：{:?}",
+        got
+    );
+    let _ = d.step();
+    let got = seen.lock().expect("锁").clone();
+    assert_eq!(got[1], (true, 123), "轮次调用同样：{:?}", got);
+}
+
+/// 调用失败：如实中断，**绝不把失败当发言吸收**（错误文本一旦进转录，"轮到谁"就歪了）。
+#[test]
+pub(crate) fn discussion_call_failure_interrupts_without_absorbing_a_line() {
+    let (mut d, _seen) = opts_discussion(
+        vec![None, Some("模型调用失败：超时".to_string()), None],
+        Default::default(),
+    );
+    assert!(d.open("任务").is_none(), "开场正常");
+    match d.step() {
+        TurnOut::Interrupted(err) => assert!(err.contains("超时"), "原因要原样带回：{}", err),
+        other => panic!(
+            "失败必须中断，实际：{}",
+            match other {
+                TurnOut::Round => "Round",
+                TurnOut::Done => "Done",
+                TurnOut::AskUser { .. } => "AskUser",
+                TurnOut::Interrupted(_) => "Interrupted",
+            }
+        ),
+    }
+    // 开场那一次是正常的（留下一条发言）；失败那一次**不该**再添发言。
+    let spoken = d
+        .transcript
+        .iter()
+        .filter(|l| l.text.contains("[m0:"))
+        .count();
+    assert_eq!(
+        spoken,
+        1,
+        "失败不该被当成发言（只有开场那一条）：{:?}",
+        d.transcript
+            .iter()
+            .map(|l| l.text.clone())
+            .collect::<Vec<_>>()
+    );
+    assert!(
+        d.transcript.iter().all(|l| !l.text.contains("超时")),
+        "失败原因不该进转录"
+    );
+    assert!(!d.closed, "中断后讨论保持可继续（用户点「继续」重试）");
+}
+
+/// 设置是流式的**上限**：设置关掉时，调用方要流式也拿不到（全局通用）。
+#[test]
+pub(crate) fn streaming_setting_is_the_ceiling_for_every_call() {
+    let core = crate::tests::doubles::core_with_settings(InMemorySettings::with_llm(false, 77));
+    assert!(!core.llm_opts(true).stream, "设置关掉时一律非流式");
+    assert_eq!(core.llm_opts(true).timeout_secs, 77, "预算来自设置");
+    let core2 = crate::tests::doubles::core_with_settings(InMemorySettings::with_llm(true, 88));
+    assert!(core2.llm_opts(true).stream, "设置打开且调用方要流式");
+    assert!(!core2.llm_opts(false).stream, "调用方可以在本次放弃流式");
+    assert_eq!(core2.llm_opts(false).timeout_secs, 88, "预算与流式开关无关");
+}
+
 pub(crate) fn scripted_discussion(scripts: Vec<Vec<String>>, allow: bool) -> Discussion {
     let members: Vec<Member> = scripts
         .into_iter()
         .enumerate()
         .map(|(i, s)| Member::new(&format!("m{}", i), format!("职责{}", i), scripted(s)))
         .collect();
-    Discussion::new(members, allow, test_prompts())
+    Discussion::new(members, allow, test_prompts(), Default::default())
 }
 
 #[test]
@@ -1022,6 +1149,7 @@ pub(crate) fn discussion_full_agreement() {
             TurnOut::Round => continue,
             TurnOut::Done => break,
             TurnOut::AskUser { .. } => panic!("不该请教"),
+            TurnOut::Interrupted(e) => panic!("不该中断：{e}"),
         }
     }
     assert!(d.transcript.iter().any(|l| l.text.contains("[m0:agree]")));
@@ -1070,6 +1198,7 @@ pub(crate) fn discussion_autonomy_archives_ask() {
             TurnOut::Round => continue,
             TurnOut::Done => break,
             TurnOut::AskUser { .. } => panic!("自裁模式不该暂停"),
+            TurnOut::Interrupted(e) => panic!("不该中断：{e}"),
         }
     }
     assert!(d.transcript.iter().any(|l| l.text.contains("自裁")));
@@ -1087,6 +1216,7 @@ pub(crate) fn discussion_round_cap_enforced() {
             TurnOut::Round => continue,
             TurnOut::Done => break,
             TurnOut::AskUser { .. } => panic!("不该请教"),
+            TurnOut::Interrupted(e) => panic!("不该中断：{e}"),
         }
     }
     assert!(d.round > MAX_ROUNDS);
@@ -1101,7 +1231,7 @@ pub(crate) fn degraded_discussion_line_carries_a_structured_flag() {
         "职责".to_string(),
         scripted(vec!["我觉得可以".into()]),
     )];
-    let mut disc = Discussion::new(members, true, prompts.clone());
+    let mut disc = Discussion::new(members, true, prompts.clone(), Default::default());
     disc.open("任务");
     let line = disc
         .transcript
@@ -1154,11 +1284,11 @@ pub(crate) fn execution_review_pass_and_fail_paths() {
     let mut core_chat = scripted(vec![
         "[{\"item\":\"A\",\"status\":\"fail\",\"reason\":\"没做完\"}]".into(),
     ]);
-    exec.review(core_chat.as_mut(), "方案", &prompts);
+    exec.review(core_chat.as_mut(), "方案", &prompts, Default::default());
     assert!(!exec.all_pass());
     exec.rerun(members.as_mut_slice(), "任务A", "- A：没做完", &prompts);
     let mut core_chat2 = scripted(vec!["[{\"item\":\"A\",\"status\":\"pass\"}]".into()]);
-    exec.review(core_chat2.as_mut(), "方案", &prompts);
+    exec.review(core_chat2.as_mut(), "方案", &prompts, Default::default());
     assert!(exec.all_pass());
 }
 
@@ -1172,7 +1302,7 @@ pub(crate) fn review_parse_failure_is_conservative_fail() {
     )];
     let mut exec = crate::core::engine::Execution::run(members.as_mut_slice(), "任务", &prompts);
     let mut core_chat = scripted(vec!["完全不是清单".to_string()]);
-    exec.review(core_chat.as_mut(), "方案", &prompts);
+    exec.review(core_chat.as_mut(), "方案", &prompts, Default::default());
     assert!(exec.items.is_empty());
     assert!(!exec.all_pass(), "解析失败必须保守判否");
 }
@@ -1585,6 +1715,7 @@ pub(crate) fn member_with_tools(
         unavailable: BTreeMap::new(),
         fence: crate::core::fence::FenceSpec::from_sandbox(&test_sandbox("m0", &[]), false),
         reply_seq: 0,
+        llm: Default::default(),
     });
     m
 }
@@ -1769,7 +1900,7 @@ pub(crate) fn tool_call_event_is_emitted_before_the_next_round() {
             });
         };
         let mut live = Live {
-            stream: false,
+            llm: Default::default(),
             cancel: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             emit: &mut emit,
         };
@@ -3688,6 +3819,7 @@ impl Chat for TruncChat {
             raw: text,
             finish: "length".to_string(),
             calls: Vec::new(),
+            error: None,
         }
     }
 }
@@ -3977,6 +4109,7 @@ impl Chat for NativeChat {
                 raw: String::new(),
                 finish: "tool_calls".to_string(),
                 calls,
+                error: None,
             },
             NativeStep::Text(t) => Completion::text(t),
         }
@@ -4020,6 +4153,7 @@ pub(crate) fn native_member(
         unavailable: BTreeMap::new(),
         fence: crate::core::fence::FenceSpec::from_sandbox(&sb, false),
         reply_seq: 0,
+        llm: Default::default(),
     });
     m
 }

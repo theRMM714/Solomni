@@ -13,7 +13,7 @@ const $ = (s) => document.querySelector(s);
 const state = {
   modules: [], providers: [], models: [], core: null, rejected: [], agents: [],
   history: [],           // 会话历史（名字/mode/时间）
-  settings: { streaming: true, show_reasoning: true }, // 基本设置
+  settings: { streaming: true, show_reasoning: true, llm_timeout_secs: 300 }, // 基本设置
   sessions: new Map(),   // sid -> { sid, mode, title, lines, pending, busy, done, awaiting, readonly }
   activeSid: null,
   settingsOpen: false,
@@ -46,7 +46,7 @@ async function refreshState() {
   state.rejected = s.rejected || [];
   state.agents = s.agents || [];
   state.history = s.history || [];
-  state.settings = s.settings || { streaming: true, show_reasoning: true };
+  state.settings = s.settings || { streaming: true, show_reasoning: true, llm_timeout_secs: 300 };
   renderSidebar();
   renderHistory();
 }
@@ -700,6 +700,13 @@ function textInput(placeholder, type) {
   if (type) i.type = type;
   return i;
 }
+/** 数字输入 + 标签 + 边界（设置里的"秒"这类：不许留空、不许越界）。 */
+function numberInput(labelText, value, min, max) {
+  const input = textInput('', 'number');
+  input.min = String(min); input.max = String(max);
+  input.value = String(value === undefined || value === null ? '' : value);
+  return { input, wrap: field(labelText, input) };
+}
 function areaInput(placeholder) {
   const t = document.createElement('textarea');
   t.className = 'field-input'; t.rows = 3; t.placeholder = placeholder || '';
@@ -1037,16 +1044,24 @@ function openSettingsModal() {
   openModal('基本设置', (c) => {
     const stream = checkbox('流式传输（供应商逐片返回，边收边显示）', state.settings.streaming);
     const cot = checkbox('思维链显示（每条回答下的思维链，永远默认折叠、点击展开）', state.settings.show_reasoning);
+    // 单次模型调用的总预算（全局：讨论 / 执行 / 验收 / 单 agent 共用）。
+    const to = numberInput('单次模型调用的超时（秒）', state.settings.llm_timeout_secs, 10, 3600);
     const save = btn('保存', 'btn btn-primary btn-block');
     save.onclick = async () => {
       try {
-        await api('POST', '/api/settings', { streaming: stream.box.checked, show_reasoning: cot.box.checked });
+        await api('POST', '/api/settings', {
+          streaming: stream.box.checked,
+          show_reasoning: cot.box.checked,
+          llm_timeout_secs: Number(to.input.value) || 300,
+        });
         await refreshState();
         c.setMsg('已保存');
       } catch (e) { c.setMsg(e.message, true); }
     };
     c.body.appendChild(stream.wrap);
     c.body.appendChild(cot.wrap);
+    c.body.appendChild(to.wrap);
+    c.body.appendChild(cfgHint('超时是全局的：讨论、执行、验收与单 agent 共用这一份预算。用尽时会中断本轮并提示，点「继续」可重试（会话不会作废）。'));
     c.body.appendChild(save);
   });
 }

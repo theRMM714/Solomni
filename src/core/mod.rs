@@ -764,6 +764,16 @@ impl Core {
     /// 用户显式授权的只读根（`settings.yaml` 的 `fence_read`）。
     /// 策略层只带事实：哪些目录只读可达由用户定，只读位怎么落由适配层定。
     /// 空 = 一个都不放行（默认不动本机任何权限项）。
+    /// 本次模型调用的通道参数：**预算与"能不能流式"都取全局设置**（讨论、执行、验收、单 agent 共用一份）。
+    /// `want_stream` 是调用方这一次的意愿（呈现层按回包形状给）：**设置是上限，调用方可以在本次放弃流式**；
+    /// 设置关掉时一律非流式。两处各判一次迟早会打架，所以判据只在这里。
+    pub(crate) fn llm_opts(&self, want_stream: bool) -> crate::core::ports::LlmOpts {
+        crate::core::ports::LlmOpts {
+            stream: self.settings.app.streaming && want_stream,
+            timeout_secs: self.settings.app.llm_timeout_secs,
+        }
+    }
+
     /// 设置里登记的 QEMU 可执行文件路径（默认空 = 兜底看 PATH）。产品不自带、不下载 QEMU。
     fn qemu_path(&self) -> Option<&str> {
         let p = self.settings.app.qemu_path.trim();
@@ -1153,6 +1163,8 @@ impl Core {
                 .with_read_only(self.fence_read_roots()),
             // 从零开始；按落盘转录重建时由调用方按转录里的最大值续号（见 rebuild_session）。
             reply_seq: 0,
+            // 流式与预算取全局设置（与协作会话共用同一份；这里不预设"本次要不要流式"，由调用方给）。
+            llm: self.llm_opts(true),
         }
     }
 

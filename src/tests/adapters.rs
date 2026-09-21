@@ -965,17 +965,18 @@ fn http_errors_come_back_honestly_and_never_carry_the_api_key() {
         (401, "application/json", "{}".to_string()),
     ]);
     let (mut chat, _) = gateway().member_channel(Some(&mock.channel(secret)), "a");
-    let out = chat
-        .complete(&[Msg::user("hi")], CompleteOpts::plain(false), &mut |_| {
-            true
-        })
-        .raw;
-    assert!(out.contains("模型调用失败"), "失败必须如实回执：{}", out);
-    assert!(!out.contains(secret), "出站错误里的密钥必须先脱敏：{}", out);
+    let done = chat.complete(&[Msg::user("hi")], CompleteOpts::plain(false), &mut |_| {
+        true
+    });
+    // 失败**不是**模型的回复：正文为空，原因在 error 里（上层据此如实告知并中断本轮）。
+    assert!(done.raw.is_empty(), "失败不该有正文：{}", done.raw);
+    let err = done.error.expect("失败必须如实带原因");
+    assert!(err.contains("模型调用失败"), "失败必须如实回执：{}", err);
+    assert!(!err.contains(secret), "出站错误里的密钥必须先脱敏：{}", err);
     assert!(
-        out.contains("***") || out.contains("401"),
+        err.contains("***") || err.contains("401"),
         "要留下可定位的事实：{}",
-        out
+        err
     );
 }
 

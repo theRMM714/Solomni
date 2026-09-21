@@ -78,7 +78,13 @@ pub(crate) fn attempt_raw(
     tools: Option<&[ToolDecl]>,
 ) -> Attempt<Completion> {
     let body = request_body(model, false, messages, tools).to_string();
-    attempt(url, key, &body)
+    // 探针是一次性诊断，用默认预算（它不参与真实会话的设置）。
+    attempt(
+        url,
+        key,
+        &body,
+        crate::core::ports::DEFAULT_LLM_TIMEOUT_SECS,
+    )
 }
 
 impl HttpChat {
@@ -122,10 +128,11 @@ impl Chat for HttpChat {
             None => chat_candidates(&self.channel.provider.base_url),
         };
         let key = self.channel.provider.api_key.clone();
+        let timeout_secs = opts.timeout_secs;
         let outcome = if stream {
             resolve_candidates(
                 &candidates,
-                |url| stream_once(url, &key, &body, on),
+                |url| stream_once(url, &key, &body, timeout_secs, on),
                 |url, err, next| {
                     self.log.warn(
                         "http_chat::stream",
@@ -136,7 +143,7 @@ impl Chat for HttpChat {
         } else {
             resolve_candidates(
                 &candidates,
-                |url| attempt(url, &key, &body),
+                |url| attempt(url, &key, &body, timeout_secs),
                 |url, err, next| {
                     self.log.warn(
                         "http_chat::complete",
@@ -157,7 +164,8 @@ impl Chat for HttpChat {
                     "http_chat::complete",
                     &format!("通道 {} 调用失败：{}", self.provider_id, e),
                 );
-                Completion::text(format!("模型调用失败：{}", e))
+                // 失败**不是**模型的回复：带上原因、不带正文，由核心如实告知并中断这一轮。
+                Completion::failure(format!("模型调用失败：{}", e))
             }
         }
     }
@@ -171,10 +179,11 @@ fn stream_once(
     url: &str,
     key: &str,
     body: &str,
+    timeout_secs: u64,
     on: &mut dyn FnMut(Chunk) -> bool,
 ) -> Attempt<Completion> {
     use std::io::BufRead;
-    let agent = super::http_agent::agent(10, 300);
+    let agent = super::http_agent::agent_for_llm(timeout_secs);
     let resp = match finish_request(
         agent
             .post(url)
@@ -326,6 +335,7 @@ fn stream_once(
             raw: content,
             finish,
             calls,
+            error: None,
         });
     }
     // 纯工具调用轮的正文是空的：这不算"没内容"，不能因此换候选重试。
@@ -336,6 +346,7 @@ fn stream_once(
         raw: content,
         finish,
         calls,
+        error: None,
     })
 }
 
@@ -371,12 +382,18 @@ pub(crate) fn attempt_with_tools(
             body["tool_choice"] = serde_json::json!("auto");
         }
     }
-    attempt(url, key, &body.to_string())
+    // 探针是一次性诊断，用默认预算（它不参与真实会话的设置）。
+    attempt(
+        url,
+        key,
+        &body.to_string(),
+        crate::core::ports::DEFAULT_LLM_TIMEOUT_SECS,
+    )
 }
 
 /// 单次 POST：请求与解析都在此；失败按「可换候选 / 立即报」归类。
-fn attempt(url: &str, key: &str, body: &str) -> Attempt<Completion> {
-    let agent = super::http_agent::agent(10, 120);
+fn attempt(url: &str, key: &str, body: &str, timeout_secs: u64) -> Attempt<Completion> {
+    let agent = super::http_agent::agent_for_llm(timeout_secs);
     // 红线：ureq 部分错误会回显请求头，密钥在 finish_request/redact 里统一脱敏后才出适配层。
     let resp = match finish_request(
         agent
@@ -428,7 +445,12 @@ fn parse_content(text: &str) -> Result<Completion, String> {
     if raw.is_empty() && calls.is_empty() {
         return Err("响应缺少 choices[0].message.content（也没有 tool_calls）".to_string());
     }
-    Ok(Completion { raw, finish, calls })
+    Ok(Completion {
+        raw,
+        finish,
+        calls,
+        error: None,
+    })
 }
 
 /// 从一段 OpenAI 形状的 tool_calls 元素里取（id, name, arguments）。

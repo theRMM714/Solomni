@@ -201,6 +201,14 @@ impl AgentSession {
         let stopped = live.cancelled();
         let mut out: Vec<SessionEvent> = Vec::new();
         for round in rounds {
+            // 调用失败（超时 / 网络）：这一轮**没有模型回复**——如实告知并中断本轮，
+            // 绝不落任何转录行（错误文本一旦进转录，核心按转录派生的"轮到谁"就歪了）。
+            if let Some(err) = round.error.clone() {
+                out.push(SessionEvent::Notice(crate::core::events::interrupted_note(
+                    &err,
+                )));
+                break;
+            }
             // 这一轮的所有行同属一次回复（回档按它原子截断、重建按它分组）。
             self.cur_reply = round.reply;
             let text = round.text.trim().to_string();
@@ -284,7 +292,7 @@ impl AgentSession {
     /// 以现有历史跑一次工具循环；流式时逐片外送短暂 Delta（信封正文不外流，避免糊屏）。
     fn run(&mut self, live: &mut Live) -> Vec<Round> {
         let label = self.id.clone();
-        let stream = live.stream;
+        let llm = live.llm;
         let cancel = std::sync::Arc::clone(&live.cancel);
         // 两个回调（流式分片 / 工具完成）都要外送短暂事件：把 emit 借出来共享（顺序因此天然正确）。
         let emit = std::cell::RefCell::new(&mut *live.emit);
@@ -300,7 +308,7 @@ impl AgentSession {
                 chat.as_mut(),
                 tools.as_mut(),
                 history.clone(),
-                stream,
+                llm,
                 &label,
                 &mut |chunk| {
                     let mut kind = "text";
