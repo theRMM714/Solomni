@@ -1,8 +1,8 @@
 //! 入站契约（`core::api`）的契约测试：命令/事件模型、能力分面、停止语义、panic 隔离。
 //! 这一层不碰 HTTP；HTTP 侧（路由目录与逐路由契约）另见本目录的 routes。
 
-use super::doubles::module_of;
-use super::{ops_with, single_work, slow_ops};
+use super::doubles::{collab_work, module_of};
+use super::{gated_ops, ops_with, single_work, slow_ops};
 use crate::core::api::{CoreHandle, Ops, Output};
 use crate::core::exec::Tier;
 use crate::core::module::Module;
@@ -185,6 +185,58 @@ fn reads_are_not_queued_behind_a_long_generation() {
 
     ops.sessions.stop(&sid);
     let _ = worker.join().expect("生成线程");
+}
+
+/// 协作的长步骤（开始讨论）期间，只读命令同样不排队——B-1 只搬了单 agent，这条是协作。
+#[test]
+fn reads_are_not_queued_behind_a_collab_discussion() {
+    let (_handle, ops, started, release) = gated_ops(vec![module_of("a"), module_of("b")]);
+    let sid = ops
+        .sessions
+        .create_work(collab_work("c", &["a", "b"], false, "把资料整理成报告"))
+        .expect("建协作会话")
+        .sid;
+    let worker = {
+        let sessions = Arc::clone(&ops.sessions);
+        let sid = sid.clone();
+        std::thread::spawn(move || {
+            sessions.collab_step(&sid, crate::core::CollabStep::Begin, "yes")
+        })
+    };
+    // 等讨论真的开始（通道已被调用并卡在那里）。
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while started.load(Ordering::Relaxed) == 0 {
+        assert!(Instant::now() < deadline, "讨论没有启动");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    // 讨论进行中：只读命令必须立刻返回。
+    let t0 = Instant::now();
+    let history = ops.history.list().expect("讨论期间读历史");
+    let read = t0.elapsed();
+    let t1 = Instant::now();
+    let _ = ops
+        .history
+        .session_views(&history)
+        .expect("讨论期间读会话视图");
+    let view = t1.elapsed();
+    assert!(
+        read < Duration::from_secs(1),
+        "讨论期间读历史不该排队（{:?}）",
+        read
+    );
+    assert!(
+        view < Duration::from_secs(1),
+        "讨论期间读会话视图不该排队（{:?}）",
+        view
+    );
+    assert!(
+        ops.sessions.is_running(&sid),
+        "读完成时讨论必须仍在进行（否则读是被排队到讨论结束才返回的）"
+    );
+
+    // 放行：协作的泵目前没有取消检查（缺口账另记），所以用放行结束而不是「停止」。
+    release.store(true, Ordering::Relaxed);
+    let _ = worker.join().expect("协作线程");
 }
 
 // ---------- 错误如实传播，不静默兜底 ----------

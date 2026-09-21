@@ -8,6 +8,7 @@
 
 use super::core::SilentRunner;
 use crate::adapters::fake_chat::FakeChat;
+use crate::core::events::Live;
 use crate::core::exec::Tier;
 use crate::core::history::{HistoryView, SessionMeta};
 use crate::core::module::{Module, ModuleManifest};
@@ -19,7 +20,7 @@ use crate::core::ports::{
 };
 use crate::core::prompt::Prompts;
 use crate::core::providers::{Channel, ModelEntry, Provider, Settings};
-use crate::core::{AgentInstance, Core, Live, SessionEvent, WorkMode, WorkSpec};
+use crate::core::{AgentInstance, Core, SessionEvent, WorkMode, WorkSpec};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};

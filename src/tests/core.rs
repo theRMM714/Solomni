@@ -6,6 +6,7 @@ use crate::adapters::fake_chat::FakeChat;
 use crate::core::engine::{
     Discussion, Member, MemberTools, ModuleTools, TurnOut, MAX_ROUNDS, MAX_TOOL_CALLS,
 };
+use crate::core::events::Live;
 use crate::core::exec::{self, Diagnosis, ExecSpec, Tier};
 use crate::core::history::{AgentMeta, SessionMeta};
 use crate::core::module::Module;
@@ -17,8 +18,8 @@ use crate::core::ports::{
 use crate::core::prompt::render;
 use crate::core::providers::{Channel, ModelEntry, Provider, Settings};
 use crate::core::{
-    AgentInstance, CollabStep, ConfigAgent, Core, Live, Pending, SessionEdit, SessionEvent,
-    WorkMode, WorkSpec,
+    AgentInstance, CollabStep, ConfigAgent, Core, Pending, SessionEdit, SessionEvent, WorkMode,
+    WorkSpec,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;

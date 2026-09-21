@@ -24,7 +24,10 @@ pub mod session;
 pub mod systool;
 pub mod workspace;
 
-pub use events::{Live, Pending, SessionEvent};
+pub use events::{Pending, SessionEvent};
+// 测试用同步入口的签名要它；生产路径的 Live 构造在 api.rs（那里直接引 events::Live）。
+#[cfg(test)]
+pub(crate) use events::Live;
 pub use ports::{
     ChatGateway, HistoryStore, ModelCatalog, ModuleSource, PackageSource, PromptSource,
     SettingsStore, SysIo, ToolRunner, Workspace,
@@ -354,6 +357,36 @@ impl Core {
             }
             None => Err("无此会话".to_string()),
         }
+    }
+
+    /// 把协作会话**交给工作线程**（核心表里留"生成中"）。
+    /// 会话还没装进内存时先从落盘重建：协作的"继续"可能先于"打开"到达。
+    pub(crate) fn take_collab(&mut self, sid: &str) -> Result<CollabSession, String> {
+        if self.running.contains(sid) {
+            return Err(Self::running_refusal(sid));
+        }
+        if !self.sessions.contains_key(sid) {
+            self.ensure_session(sid)?;
+        }
+        match self.sessions.remove(sid) {
+            Some(Session::Collab(c)) => {
+                self.running.insert(sid.to_string());
+                Ok(c)
+            }
+            Some(other) => {
+                self.sessions.insert(sid.to_string(), other);
+                Err("该会话不是协作模式".to_string())
+            }
+            None => Err("无此会话".to_string()),
+        }
+    }
+
+    /// 协作生成结束**交回**：重新插入 + 转录落盘 + 解除"生成中"。
+    pub(crate) fn put_collab(&mut self, sid: &str, c: CollabSession, events: &[SessionEvent]) {
+        self.running.remove(sid);
+        self.sessions.insert(sid.to_string(), Session::Collab(c));
+        let mut ev = events.to_vec();
+        self.record_events(sid, &mut ev);
     }
 
     /// 生成结束**交回**：重新插入 + 转录落盘 + 解除"生成中"。
@@ -1535,6 +1568,8 @@ impl Core {
         want_stream: bool,
     ) -> Result<Prepared, String> {
         let llm = self.llm_opts(want_stream);
+        // 还没装进内存的会话先从落盘重建（"继续"可能先于"打开"到达；真没这个会话仍然报无此会话）。
+        self.ensure_session(sid)?;
         if matches!(self.sessions.get(sid), Some(Session::Collab(_))) {
             return Ok(Prepared::NotSingle);
         }
@@ -1907,6 +1942,8 @@ impl Core {
 
     /// 继续：由用户点击授权。单 agent 会话需要轮到用户（末条是 AI 就只提醒、不发请求）；
     /// 协作不需要用户发言，继续 = 从断点推进流水线。
+    /// **测试用同步入口**：生产路径的两条（单 agent / 协作）都在工作线程上跑（见 CoreHandle）。
+    #[cfg(test)]
     pub fn continue_flow(
         &mut self,
         sid: &str,

@@ -86,6 +86,94 @@ impl crate::core::ports::Chat for SlowChat {
     }
 }
 
+/// 阻塞到被放行的通道：把"生成中"变成**可观察且可控**的状态。
+/// 为什么需要它：协作的泵目前**没有取消检查**（见缺口账），只能靠放行来结束，
+/// 否则测试会一直等到整段讨论跑完。
+pub(crate) struct GatedChat {
+    pub started: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    pub release: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl crate::core::ports::Chat for GatedChat {
+    fn complete(
+        &mut self,
+        _m: &[crate::core::ports::Msg],
+        _opts: crate::core::ports::CompleteOpts<'_>,
+        on: &mut dyn FnMut(crate::core::ports::Chunk) -> bool,
+    ) -> crate::core::ports::Completion {
+        use std::sync::atomic::Ordering;
+        self.started.fetch_add(1, Ordering::Relaxed);
+        if !on(crate::core::ports::Chunk::Start) {
+            return crate::core::ports::Completion::text("");
+        }
+        while !self.release.load(Ordering::Relaxed) {
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        crate::core::ports::Completion::text("{\"type\":\"agree\",\"text\":\"同意\"}")
+    }
+}
+
+/// 一律发"阻塞到放行"通道的网关。
+pub(crate) struct GatedGateway {
+    pub started: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    pub release: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl crate::core::ports::ChatGateway for GatedGateway {
+    fn probe_tools(
+        &self,
+        _c: &crate::core::providers::Channel,
+    ) -> Result<crate::core::ports::ProbeOutcome, String> {
+        Err("脚本替身没有真实供应商，测不了工具调用支持".to_string())
+    }
+    fn member_channel(
+        &self,
+        _c: Option<&crate::core::providers::Channel>,
+        _id: &str,
+    ) -> (crate::core::ports::BoxedChat, Option<String>) {
+        (
+            Box::new(GatedChat {
+                started: std::sync::Arc::clone(&self.started),
+                release: std::sync::Arc::clone(&self.release),
+            }),
+            None,
+        )
+    }
+    fn core_channel(
+        &self,
+        _c: Option<&crate::core::providers::Channel>,
+    ) -> (crate::core::ports::BoxedChat, bool) {
+        (
+            Box::new(GatedChat {
+                started: std::sync::Arc::clone(&self.started),
+                release: std::sync::Arc::clone(&self.release),
+            }),
+            false,
+        )
+    }
+}
+
+/// 装配一个「生成阻塞到放行」的核心（观察"生成期间读接口不排队"）。
+pub(crate) fn gated_ops(
+    modules: Vec<crate::core::module::Module>,
+) -> (
+    crate::core::api::CoreHandle,
+    crate::core::api::Ops,
+    std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    std::sync::Arc<std::sync::atomic::AtomicBool>,
+) {
+    let gateway = GatedGateway {
+        started: std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+        release: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+    };
+    let started = std::sync::Arc::clone(&gateway.started);
+    let release = std::sync::Arc::clone(&gateway.release);
+    let handle = crate::core::api::CoreHandle::spawn(doubles::core_with_gateway(modules, gateway))
+        .expect("起核心线程");
+    let ops = crate::core::api::Ops::from_handle(&handle);
+    (handle, ops, started, release)
+}
+
 /// 一律发慢通道的网关（可选网关参数：慢通道要自定义时序，`ops_with` 覆盖不了）。
 pub(crate) struct SlowGateway {
     pub ticks: std::sync::Arc<std::sync::atomic::AtomicUsize>,

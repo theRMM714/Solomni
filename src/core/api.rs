@@ -256,6 +256,15 @@ pub trait DiscoveryOps: Send + Sync {
 
 // ---------- 核心手柄（命令通道） ----------
 
+/// 协作在工作线程上要做的事：推进一个阶段，或从断点继续。
+/// 为什么要分开：`CollabStep` 是**对外**的阶段枚举（前端按 pending 决定），
+/// "继续"不是它的阶段之一（前端走 `continue_flow`），所以内部再分一层，不污染对外契约。
+#[derive(Clone, Copy)]
+enum CollabWork {
+    Step(CollabStep),
+    Resume,
+}
+
 /// 一次命令：在核心自己的线程上执行（因此核心状态不需要任何锁）。
 type Job = Box<dyn FnOnce(&mut Core) + Send>;
 
@@ -353,7 +362,8 @@ impl CoreHandle {
                 if text.is_some() {
                     return Err("该会话不是单 agent 模式".to_string());
                 }
-                return self.queued_continue(sid, out);
+                // 协作会话的"继续"：走同一条 own-and-return（泵在工作线程上）。
+                return self.collab_generation(sid, CollabWork::Resume, "");
             }
             Prepared::Run {
                 session,
@@ -423,46 +433,79 @@ impl CoreHandle {
         Ok(Advance { events, seq })
     }
 
-    /// 协作会话的"继续"：仍在核心线程上推进（B-1 只搬单 agent 生成，协作见后续）。
-    fn queued_continue(&self, sid: &str, out: Output) -> Result<Advance, String> {
-        let sid = sid.to_string();
-        let jobs = Arc::clone(&self.jobs);
+    /// 协作的长步骤（开始讨论 / 回答 / 继续）：与单 agent 同一条 own-and-return——
+    /// 队列只占"取/交"两步，泵在工作线程上跑；事件**边产边送**事件台，界面因此能看着讨论推进。
+    fn collab_generation(
+        &self,
+        sid: &str,
+        work: CollabWork,
+        text: &str,
+    ) -> Result<Advance, String> {
         let bus = Arc::clone(&self.bus);
-        self.call(move |core| {
-            let cancel = jobs.register(&sid);
-            let mut emit = {
-                let bus = Arc::clone(&bus);
-                let sid = sid.clone();
-                move |ev: SessionEvent| {
-                    bus.push(&sid, std::slice::from_ref(&ev));
-                }
-            };
-            let result = {
-                let llm = core.llm_opts(out == Output::Stream);
-                let mut live = Live {
-                    llm,
-                    cancel: Arc::clone(&cancel),
-                    emit: &mut emit,
-                };
-                core.continue_flow(&sid, &mut live)
-            };
-            finish(&jobs, &bus, &sid, result)
-        })
+        let jobs = Arc::clone(&self.jobs);
+        let session = self.call({
+            let sid = sid.to_string();
+            move |core| core.take_collab(&sid)
+        })?;
+        // 登记"在跑"：生成期间改配置 / 回档 / 删除因此被如实拒绝（停止标志照旧不进队列）。
+        let _cancel = jobs.register(sid);
+        let text = text.to_string();
+        let worker = {
+            let sid = sid.to_string();
+            let bus = Arc::clone(&bus);
+            std::thread::Builder::new()
+                .name("solomni-collab".to_string())
+                .spawn(move || {
+                    let mut c = session;
+                    let mut events: Vec<SessionEvent> = Vec::new();
+                    let mut seq = 0u64;
+                    {
+                        // 边产边送：长流程里用户能看着讨论一轮轮推进，而不是等整段结束才一次性出现。
+                        let mut sink = |ev: SessionEvent| {
+                            seq = bus.push(&sid, std::slice::from_ref(&ev));
+                            events.push(ev);
+                        };
+                        match work {
+                            CollabWork::Step(CollabStep::Begin) => {
+                                c.begin(text.contains("allow"), &mut sink)
+                            }
+                            CollabWork::Step(CollabStep::Answer) => c.answer(&text, &mut sink),
+                            CollabWork::Step(_) => {}
+                            CollabWork::Resume => c.resume(&mut sink),
+                        }
+                    }
+                    (c, events, seq)
+                })
+                .map_err(|e| format!("起协作线程失败：{}", e))?
+        };
+        let joined = worker.join();
+        jobs.unregister(sid);
+        let (c, events, seq) = match joined {
+            Ok(x) => x,
+            Err(_) => {
+                // 线程崩了：会话对象没了，但转录在盘上——解除"生成中"，下次访问按盘重建。
+                self.call({
+                    let sid = sid.to_string();
+                    move |core| {
+                        core.abort_running(&sid);
+                        Ok(())
+                    }
+                })?;
+                return Err("协作线程崩溃：会话已按落盘转录保留，可继续".to_string());
+            }
+        };
+        self.call({
+            let sid = sid.to_string();
+            let ev = events.clone();
+            move |core| {
+                core.put_collab(&sid, c, &ev);
+                Ok(())
+            }
+        })?;
+        Ok(Advance { events, seq })
     }
 }
 
-/// 生成收尾：注销取消标志（无论成败）→ 本批事件入箱 → 返回事件与序号。
-fn finish(
-    jobs: &JobRegistry,
-    bus: &EventBus,
-    sid: &str,
-    result: Result<Vec<SessionEvent>, String>,
-) -> Result<Advance, String> {
-    jobs.unregister(sid);
-    let events = result?;
-    let seq = bus.push(sid, &events);
-    Ok(Advance { events, seq })
-}
 impl SessionOps for CoreHandle {
     fn create_work(&self, spec: WorkSpec) -> Result<WorkOpened, String> {
         self.call(move |core| core.create_work(spec))
@@ -477,15 +520,23 @@ impl SessionOps for CoreHandle {
     }
 
     fn collab_step(&self, sid: &str, step: CollabStep, text: &str) -> Result<Advance, String> {
-        let sid = sid.to_string();
-        let text = text.to_string();
-        let bus = Arc::clone(&self.bus);
-        self.call(move |core| {
-            let result = core.collab_continue(&sid, step, &text);
-            let events = result?;
-            let seq = bus.push(&sid, &events);
-            Ok(Advance { events, seq })
-        })
+        match step {
+            // 短步骤（写需求 / 定名单）不调模型，而且"定名单"还有落盘与建沙箱的后续——留在核心线程上。
+            CollabStep::SetTask | CollabStep::ConfirmSlate => {
+                let sid = sid.to_string();
+                let text = text.to_string();
+                let bus = Arc::clone(&self.bus);
+                self.call(move |core| {
+                    let events = core.collab_continue(&sid, step, &text)?;
+                    let seq = bus.push(&sid, &events);
+                    Ok(Advance { events, seq })
+                })
+            }
+            // 长步骤（开始讨论 / 回答）：队列只占"取/交"两步，泵在工作线程上跑。
+            CollabStep::Begin | CollabStep::Answer => {
+                self.collab_generation(sid, CollabWork::Step(step), text)
+            }
+        }
     }
 
     fn withdraw_agree(&self, sid: &str, agent: &str) -> Result<Advance, String> {
