@@ -552,13 +552,18 @@ impl Discussion {
                 return Err(err);
             }
             let reply = envelope::parse(&done.raw);
-            self.absorb(
-                &id,
-                reply.verb,
-                reply.text,
-                reply.degraded,
-                done.truncated(),
-            );
+            let verb = reply.verb;
+            self.absorb(&id, verb, reply.text, reply.degraded, done.truncated());
+            // 开场的表态与轮次里**同一口径**：同意 / 离开立刻生效。
+            // （以前开场只落一行、不记表态，于是"开场就同意"的人下一轮还会被问一遍。）
+            {
+                let m = &mut self.members[i];
+                match verb {
+                    Verb::Leave => m.present = false,
+                    Verb::Agree => m.agreed = true,
+                    Verb::Ask | Verb::Say | Verb::Tool => {}
+                }
+            }
             // 逐成员外送：开场也是**一个人说完就出它那一行**（以前整轮问完才一次性出）。
             on_lines(&self.transcript[handed..], sink);
             handed = self.transcript.len();
@@ -596,19 +601,16 @@ impl Discussion {
                 degraded: false,
             });
         }
-        // 同意是针对方案的：转录变化后以本轮最新表态为准。
-        for m in self.members.iter_mut() {
-            if m.present {
-                m.agreed = false;
-            }
-        }
+        // 同意是**粘住**的：发过 agree 的人不再被追问，直到在场者全部同意（离开的不算）。
+        // 以前每轮开头把所有人的同意清空，等于每轮把所有人问一遍——那是"轮询"而不是"轮流发言"。
         let snapshot = self.transcript.clone();
         for i in 0..self.members.len() {
             let (system, id) = {
                 let m = &self.members[i];
                 (m.system.clone(), m.id.clone())
             };
-            if !self.members[i].present {
+            // 已同意的人不再被追问（同意粘住）；离开的人不算在场。
+            if !self.members[i].present || self.members[i].agreed {
                 continue;
             }
             let step_prompt = self.prompts.render(

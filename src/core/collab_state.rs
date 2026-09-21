@@ -109,7 +109,8 @@ pub fn derive(events: &[serde_json::Value], roster_names: &[String]) -> CollabSt
                             .and_then(|n| n.parse().ok())
                             .unwrap_or(st.round);
                         st.closed = false;
-                        reset_agreed(&mut st);
+                        // 轮次边界**不清空同意**：同意是粘住的（与 Discussion::step 同一口径），
+                        // 否则重建出来的"谁已同意"会与实时不一致。
                     } else if tag.contains(':') {
                         let mut it = tag.splitn(2, ':');
                         let who = it.next().unwrap_or("");

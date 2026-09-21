@@ -1024,7 +1024,9 @@ impl crate::core::ports::Chat for OptsChat {
         };
         match r {
             Some(reason) => crate::core::ports::Completion::failure(reason),
-            None => crate::core::ports::Completion::text("{\"type\":\"agree\",\"text\":\"同意\"}"),
+            // 默认回**发言**而不是同意：同意是粘住的，开场就同意会让后面几轮被跳过，
+            // 那些用例（预算 / 失败中断）要的是"还在讨论中"。
+            None => crate::core::ports::Completion::text("{\"type\":\"say\",\"text\":\"我先说\"}"),
         }
     }
 }
@@ -1143,6 +1145,55 @@ pub(crate) fn scripted_discussion(scripts: Vec<Vec<String>>, allow: bool) -> Dis
         Default::default(),
         Default::default(),
     )
+}
+
+/// 同意是**粘住**的：发过 agree 的人不再被追问（以前每轮重置，等于每轮把所有人问一遍）。
+#[test]
+pub(crate) fn agreement_is_sticky_so_agreed_members_are_not_asked_again() {
+    let mut d = scripted_discussion(
+        vec![
+            vec!["{\"type\":\"agree\",\"text\":\"同意\"}".into()],
+            vec![
+                "{\"type\":\"say\",\"text\":\"我补充\"}".into(),
+                "{\"type\":\"say\",\"text\":\"再补充\"}".into(),
+                "{\"type\":\"agree\",\"text\":\"同意\"}".into(),
+            ],
+            vec![
+                "{\"type\":\"say\",\"text\":\"我也说\"}".into(),
+                "{\"type\":\"say\",\"text\":\"还说\"}".into(),
+                "{\"type\":\"agree\",\"text\":\"同意\"}".into(),
+            ],
+        ],
+        false,
+    );
+    assert!(
+        d.open("任务", &mut |_, _| {}, &mut |_| {}).is_ok(),
+        "开场正常"
+    );
+    loop {
+        match d.step(&mut |_, _| {}, &mut |_| {}) {
+            TurnOut::Round => continue,
+            TurnOut::Done => break,
+            TurnOut::AskUser { .. } => panic!("不该请教"),
+            TurnOut::Interrupted(e) => panic!("不该中断：{e}"),
+            TurnOut::Stopped => panic!("不该停止"),
+        }
+    }
+    // m0 在开场就同意了：之后每一轮都该跳过它（以前每轮重置同意，会把它反复问一遍）。
+    let asked_m0 = d
+        .transcript
+        .iter()
+        .filter(|l| l.text.contains("[m0:"))
+        .count();
+    assert_eq!(
+        asked_m0,
+        1,
+        "发过 agree 的人不该被再问一次：{:?}",
+        d.transcript
+            .iter()
+            .map(|l| l.text.clone())
+            .collect::<Vec<_>>()
+    );
 }
 
 #[test]
