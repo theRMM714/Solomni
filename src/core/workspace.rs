@@ -58,7 +58,7 @@ pub struct Sandbox {
     pub modules: BTreeMap<String, PathBuf>,
     /// 模型侧文案（来自 prompts/）：随沙箱注入，不是状态。
     pub texts: ToolTexts,
-    /// 内置工具的参数契约（来自 prompts/shared/tools.yaml 的 builtin_tools）：说明与校验都按它来。
+    /// 内置工具的参数契约（来自 systools/tools.yaml 的 tools）：说明与校验都按它来。
     pub builtin_tools: crate::core::schema::ToolBook,
 }
 

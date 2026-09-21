@@ -409,21 +409,24 @@ fn fs_packages_scans_the_dependency_folder_and_reports_each_rejection() {
 #[test]
 fn yaml_prompts_loads_the_shipped_book_and_reports_missing_or_broken_files() {
     let root = scratch("yaml-prompts");
-    let real = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("prompts");
-    let ok = YamlPrompts::new(real)
+    let root_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let real = root_dir.join("prompts");
+    let ok = YamlPrompts::new(real, root_dir.join("systools"))
         .load()
         .expect("产品自带提示词册必须合法");
     assert!(!ok.core.no_agents.is_empty());
 
     // 目录不存在 = 装配错误（如实报，不静默造默认文案）。
-    let missing = YamlPrompts::new(root.join("nope")).load().unwrap_err();
+    let missing = YamlPrompts::new(root.join("nope"), root.join("systools"))
+        .load()
+        .unwrap_err();
     assert!(missing.contains("提示词册目录读不了"), "{}", missing);
 
     // 空目录 = 一个 .yaml 都没有，同样是装配错误。
     let empty = root.join("empty");
     std::fs::create_dir_all(&empty).expect("造空目录");
     assert!(
-        YamlPrompts::new(empty)
+        YamlPrompts::new(empty, root.join("systools"))
             .load()
             .unwrap_err()
             .contains("一个 .yaml 都没有"),
@@ -434,7 +437,7 @@ fn yaml_prompts_loads_the_shipped_book_and_reports_missing_or_broken_files() {
     let broken = root.join("broken");
     std::fs::create_dir_all(&broken).expect("造坏目录");
     std::fs::write(broken.join("a.yaml"), "core: [不是映射").expect("造坏册子");
-    assert!(YamlPrompts::new(broken.clone())
+    assert!(YamlPrompts::new(broken.clone(), root.join("systools"))
         .load()
         .unwrap_err()
         .contains("提示词册非法"));
@@ -443,7 +446,7 @@ fn yaml_prompts_loads_the_shipped_book_and_reports_missing_or_broken_files() {
     std::fs::write(broken.join("a.yaml"), "no_model: \"甲\"").expect("造册子");
     std::fs::write(broken.join("b.yaml"), "no_model: \"乙\"").expect("造重复键");
     assert!(
-        YamlPrompts::new(broken)
+        YamlPrompts::new(broken, root.join("systools"))
             .load()
             .unwrap_err()
             .contains("重复"),

@@ -1,29 +1,60 @@
-//! 提示词册加载：`prompts/` 目录 → core::prompt::Prompts（实现 PromptSource 端口）。
+//! 装配输入加载：`prompts/` 目录 → core::prompt::Prompts，`systools/tools.yaml` → 内置工具声明。
 //! 缺目录/缺文件 = 装配错误（如实报错，不静默造默认文案）。
+//!
+//! 为什么工具声明单独一个文件：它是**工具总表**的内容（工具是什么），不是提示词。
+//! 但内存形态仍挂在册子上（`Prompts.core.builtin_tools`）——消费点因此不用改，
+//! 只是"这一份声明的家"从册子搬到了总表。
 
 use crate::core::ports::PromptSource;
 use crate::core::prompt::Prompts;
+use crate::core::schema::ToolBook;
+use serde::Deserialize;
 use std::path::{Path, PathBuf};
 
+/// 工具总表的文件形状。
+#[derive(Deserialize)]
+struct ToolFile {
+    tools: ToolBook,
+}
+
 pub struct YamlPrompts {
-    dir: PathBuf,
+    prompts: PathBuf,
+    systools: PathBuf,
 }
 
 impl YamlPrompts {
-    pub fn new(dir: PathBuf) -> YamlPrompts {
-        YamlPrompts { dir }
+    /// prompts = 提示词册目录；systools = 系统工具目录（其下 `tools.yaml` 是工具总表）。
+    pub fn new(prompts: PathBuf, systools: PathBuf) -> YamlPrompts {
+        YamlPrompts { prompts, systools }
     }
 }
 
 impl PromptSource for YamlPrompts {
     fn load(&self) -> Result<Prompts, String> {
+        let mut book = crate::core::prompt::merge_book(&self.read_docs()?)?;
+        // 工具声明来自**总表**（唯一真相）：册子里不再有这一段。
+        let path = self.systools.join("tools.yaml");
+        let text = std::fs::read_to_string(&path)
+            .map_err(|e| format!("工具总表读不了（systools/tools.yaml）：{}", e))?;
+        let file: ToolFile = serde_yaml::from_str(&text)
+            .map_err(|e| format!("工具总表非法（systools/tools.yaml）：{}", e))?;
+        if file.tools.is_empty() {
+            return Err("工具总表里一个工具都没有（systools/tools.yaml）".to_string());
+        }
+        book.core.builtin_tools = file.tools;
+        Ok(book)
+    }
+}
+
+impl YamlPrompts {
+    /// 册子的各文件（按路径排序：装配必须确定——同一份代码在任何机器上装配出同一册子）。
+    fn read_docs(&self) -> Result<Vec<String>, String> {
         let mut files: Vec<PathBuf> = Vec::new();
-        collect_yaml(&self.dir, &mut files)
+        collect_yaml(&self.prompts, &mut files)
             .map_err(|e| format!("提示词册目录读不了（prompts/）：{}", e))?;
         if files.is_empty() {
             return Err("提示词册目录里一个 .yaml 都没有（prompts/）".to_string());
         }
-        // 按路径排序：装配必须确定——同一份代码在任何机器上都要装配出同一册子。
         files.sort();
         let mut docs = Vec::new();
         for file in &files {
@@ -31,7 +62,7 @@ impl PromptSource for YamlPrompts {
                 .map_err(|e| format!("提示词册文件读不了（{}）：{}", file.display(), e))?;
             docs.push(text);
         }
-        crate::core::prompt::merge_book(&docs)
+        Ok(docs)
     }
 }
 

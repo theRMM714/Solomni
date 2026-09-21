@@ -2,7 +2,7 @@
 //!
 //! 为什么单独一层：参数 schema 不该埋在 Rust 代码里——它是**模块与产品对模型的承诺**，
 //! 要能像文案一样被看到、被修改、被复核。所以：
-//! - 内置工具的参数声明在 `prompts/shared/tools.yaml` 的 `core.builtin_tools`；
+//! - 内置工具的参数声明在 `systools/tools.yaml` 的 `tools`；
 //! - 模块工具的参数声明在 `module.yaml` 的 `tools.<名字>.params`（**可选**：不写就照旧工作）。
 //!
 //! 同一份声明同时驱动两件事：模型侧说明（`render_for_prompt`）与调用校验（`check`），

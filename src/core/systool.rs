@@ -1,6 +1,6 @@
 //! 核心自带的内置工具：read / write / edit / search。
 //! 策略在 core（名字固定、放行、寻址、根内校验、参数校验、改动前的"读过"证据、回执文案）；机制在 SysIo 端口（适配层）。
-//! **参数契约不在本文件里**：声明在 prompts/shared/tools.yaml 的 builtin_tools，本文件只按声明校验、取缺省值与拼回执。
+//! **参数契约不在本文件里**：声明在 systools/tools.yaml 的 tools，本文件只按声明校验、取缺省值与拼回执。
 //! 存在的理由：读盘落盘不经过任何外部进程，编码问题不进本程序——模型自己看内容自己决定。
 //! 路径一律是真实绝对路径（根目录经提示词册如实告知）；模块声明的外部工具与内置工具用同一套路径。
 
@@ -30,7 +30,7 @@ pub const MAX_SEARCH_LINE_CHARS: usize = 300;
 pub const MODULE_WRITE_MARK: &str = "[模块目录]";
 
 /// 内置工具名（保留名）。
-/// 与 prompts/shared/tools.yaml 的 builtin_tools 是同一份名单，测试「builtin_tool_book_is_the_one_source_of_names_and_paths」锁死两者一致。
+/// 与 systools/tools.yaml 的 tools 是同一份名单，测试「builtin_tool_book_is_the_one_source_of_names_and_paths」锁死两者一致。
 pub fn is_builtin(name: &str) -> bool {
     name == READ || name == WRITE || name == EDIT || name == PATCH || name == SEARCH
 }

@@ -1,6 +1,7 @@
 # 端到端跑出来的东西不入库（夹具本身入库）：
 # 提示词册是产品的一部分，每次运行从产品根整份复制（它已按角色分成目录）；.home 与 session/logs/userdata 都是运行期状态。
 root/prompts/
+root/systools/
 root/.home
 root/modules/toolbox/module.yaml
 root/session/

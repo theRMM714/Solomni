@@ -98,7 +98,10 @@ pub struct CorePrompts {
     pub sys_tools: String,
     /// patch 通道的写法说明（模型侧）；变量：work_root, sandbox_root
     pub patch_guide: String,
-    /// 内置工具的参数契约（prompts/shared/tools.yaml 的 builtin_tools）：模型说明与调用校验的唯一来源。
+    /// 内置工具的参数契约：模型说明与调用校验的唯一来源。
+    /// **它不是册子的内容**——声明在 `systools/tools.yaml`（工具总表），由装配期填进来；
+    /// 所以这里允许缺省（册子里没有这一段），但装配器读不到总表就报错，不会静默留空。
+    #[serde(default)]
     pub builtin_tools: crate::core::schema::ToolBook,
     /// 登记处还没有 agent 时的说明（拟名单的 {{agents}} 取值）。
     pub no_agents: String,

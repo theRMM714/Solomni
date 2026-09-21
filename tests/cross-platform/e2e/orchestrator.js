@@ -148,6 +148,11 @@ async function main() {
     recursive: true,
     force: true,
   });
+  // 工具总表也是产品的一部分（工具是什么的唯一真相），同样整份复制。
+  fs.cpSync(path.join(PRODUCT_ROOT, "systools"), path.join(FIXTURE, "systools"), {
+    recursive: true,
+    force: true,
+  });
   // 工具命令行按平台生成：Linux / macOS 上解释器通常叫 python3，Windows 上叫 python（写死一个必然在另一个平台挂）。
   writeToolbox(interpreter());
   // 清运行期痕迹（夹具本身不动）。
