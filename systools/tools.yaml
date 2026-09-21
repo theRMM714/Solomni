@@ -77,3 +77,38 @@ tools:
         desc: 是否忽略大小写；省略即区分大小写
 
   # —— 工具调用约定：两套**互斥**（一个通道只用一套，不能同时教，否则模型在正文里讲解参数会被当成调用）——
+
+  # —— 协作动词：讨论阶段的表态（声明式工具，不再是"从正文里解析手写信封"）——
+  say:
+    capability: none
+    desc: 发表意见（讨论阶段的正常发言）。
+    params:
+      text:
+        type: string
+        required: true
+        desc: 要说的话
+  agree:
+    capability: none
+    desc: 同意当前方案。发过 agree 之后不再被追问，直到在场者全部同意。
+    params:
+      text:
+        type: string
+        required: true
+        desc: 附一句同意理由（可短）
+  leave:
+    capability: none
+    desc: 退出讨论（离开的人不计入"在场者全部同意"）。
+    params:
+      text:
+        type: string
+        required: true
+        desc: 为什么不再参与
+  ask:
+    capability: none
+    desc: 需要用户决定（讨论暂停，等用户回答后继续）。
+    params:
+      text:
+        type: string
+        required: true
+        desc: 要问用户什么
+

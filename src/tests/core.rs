@@ -83,7 +83,8 @@ pub(crate) fn prompt_render_replaces_and_rejects_missing() {
 #[test]
 pub(crate) fn prompt_book_loads_from_yaml() {
     let p = test_prompts();
-    assert!(p.core.chat_protocol.contains("ask"));
+    // 语气约定；**能用哪些表态由角色表渲染**（见 systools/roles.yaml），不在这句话里。
+    assert!(!p.core.chat_protocol.trim().is_empty());
     assert!(p.core.discuss.opener.contains("{{protocol}}"));
 }
 
@@ -1045,7 +1046,14 @@ fn opts_discussion(
         }),
     )];
     (
-        Discussion::new(members, false, test_prompts(), llm, Default::default()),
+        Discussion::new(
+            members,
+            false,
+            test_prompts(),
+            llm,
+            Default::default(),
+            String::new(),
+        ),
         seen,
     )
 }
@@ -1144,6 +1152,7 @@ pub(crate) fn scripted_discussion(scripts: Vec<Vec<String>>, allow: bool) -> Dis
         test_prompts(),
         Default::default(),
         Default::default(),
+        String::new(),
     )
 }
 
@@ -1308,6 +1317,7 @@ pub(crate) fn degraded_discussion_line_carries_a_structured_flag() {
         prompts.clone(),
         Default::default(),
         Default::default(),
+        String::new(),
     );
     let _ = disc.open("任务", &mut |_, _| {}, &mut |_| {});
     let line = disc
@@ -5112,16 +5122,30 @@ pub(crate) fn builtin_arg_mistakes_are_named_and_the_signature_comes_back() {
 
 #[test]
 pub(crate) fn builtin_tool_book_is_the_one_source_of_names_and_paths() {
-    // 保留名（代码里的常量）与 prompts/ 的声明必须一致，否则模型看到的工具与放行的工具会走偏。
+    // 保留名（代码里的常量）**必须都有声明**，否则模型看到的工具与放行的工具会走偏。
+    // 反过来不成立：总表里还有协作动词（say/agree/leave/ask），它们的实现不在 systool。
     let prompts = test_prompts();
     let book = &prompts.core.builtin_tools;
-    let mut declared: Vec<String> = book.keys().cloned().collect();
-    declared.sort();
-    let mut reserved = crate::core::systool::names();
-    reserved.sort();
-    assert_eq!(declared, reserved, "builtin_tools 的声明要与保留名一致");
+    for name in crate::core::systool::names() {
+        assert!(
+            book.contains_key(&name),
+            "保留名 {} 必须在工具总表里有声明",
+            name
+        );
+    }
+    // 协作动词也在总表里，且不碰文件系统（capability = none）。
+    for verb in ["say", "agree", "leave", "ask"] {
+        let schema = book
+            .get(verb)
+            .unwrap_or_else(|| panic!("动词 {} 该在总表里", verb));
+        assert_eq!(schema.capability, "none", "{} 不碰文件系统", verb);
+    }
     // 内置工具一律按真实绝对路径寻址：JSON 工具必须声明必填 path；自由格式工具（patch）不吃参数校验。
     for (name, schema) in book {
+        // 只查文件域工具（按真实绝对路径寻址）：协作动词不碰文件系统，不吃这条。
+        if schema.capability == "none" {
+            continue;
+        }
         if crate::core::systool::is_freeform(name) {
             assert!(
                 schema.params.is_none(),

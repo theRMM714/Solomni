@@ -471,6 +471,9 @@ pub struct Discussion {
     prompts: Prompts,
     /// 本次调用的通道参数（流式 + 预算）：**全局设置**，与单 agent 共用同一份。
     llm: crate::core::ports::LlmOpts,
+    /// 本席位的**可用表态清单**（由角色表渲染而来，见 SystemTools::render_face）：
+    /// 开场提示词里那份"能用哪些信封"就是它，不再在提示词里另写一遍。
+    protocol: String,
     /// 「停止」标志：由 CollabSession 注入（它从任务登记处拿到）。
     /// 泵在**每次调用前**与**调用中途**都看它——所以停止能在一个模型调用内收尾，而不是等它跑完。
     cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
@@ -483,6 +486,7 @@ impl Discussion {
         prompts: Prompts,
         llm: crate::core::ports::LlmOpts,
         cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+        protocol: String,
     ) -> Discussion {
         Discussion {
             members,
@@ -494,6 +498,7 @@ impl Discussion {
             prompts,
             llm,
             cancel,
+            protocol,
         }
     }
 
@@ -524,7 +529,7 @@ impl Discussion {
         let opener = self.prompts.render(
             &self.prompts.core.discuss.opener,
             &[
-                ("protocol", self.prompts.core.chat_protocol.clone()),
+                ("protocol", self.protocol.clone()),
                 ("task", task.to_string()),
             ],
         );

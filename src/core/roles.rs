@@ -33,6 +33,47 @@ pub struct SystemTools {
 }
 
 impl SystemTools {
+    /// 按角色组装工具面：角色引用的 id 逐个解析成工具声明（顺序即角色表里的顺序）。
+    ///
+    /// 未知名一律**如实报错**（不静默跳过）：悬空引用是装配错误，不是运行期可以忽略的小事。
+    pub fn tool_face(
+        &self,
+        role: &str,
+    ) -> Result<Vec<(&str, &crate::core::schema::ToolSchema)>, String> {
+        let decl = self
+            .roles
+            .get(role)
+            .ok_or_else(|| format!("角色表里没有这个角色：{}", role))?;
+        let mut out = Vec::new();
+        for id in &decl.tools {
+            let schema = self
+                .tools
+                .get(id)
+                .ok_or_else(|| format!("角色 {} 引用了不存在的系统工具：{}", role, id))?;
+            out.push((id.as_str(), schema));
+        }
+        Ok(out)
+    }
+
+    /// 按角色渲染**可用表态清单**（信封模式要把它写进提示词；原生模式则由工具声明直接给出）。
+    ///
+    /// 为什么由声明渲染而不是在提示词里另写一遍：提示词与工具面分开写必然漂——
+    /// "提示词说能用 agree、工具面里没给"这种错会很难查。
+    pub fn render_face(&self, role: &str) -> Result<String, String> {
+        let face = self.tool_face(role)?;
+        let mut out = String::new();
+        for (id, schema) in face {
+            out.push_str("- ");
+            out.push_str(id);
+            if !schema.desc.is_empty() {
+                out.push('：');
+                out.push_str(&schema.desc);
+            }
+            out.push('\n');
+        }
+        Ok(out.trim_end().to_string())
+    }
+
     /// 这个角色能不能调这个工具（越权校验的唯一判据）。
     /// 目前只有自洽测试在用它——运行期的越权拒绝要等角色真正发放给发言席（下一步接线）；
     /// 那之前不让它进二进制，免得成为"看着有人用、其实没人用"的代码。

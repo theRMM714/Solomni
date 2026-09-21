@@ -9,8 +9,9 @@ roles:
   # 讨论阶段：发言 + 表态，外加文件域（讨论可以读资料）。
   discussant:
     prompt: roles/discussant
-    tools: [read, write, edit, patch, search]
+    tools: [say, agree, leave, ask, read, write, edit, patch, search]
   # 任务执行（子会话）：文件域 + 提交验收；模块工具按成员归属自动获得。
+  # 执行者不讨论：它不拿讨论动词（拿了也调不动——越权会被如实拒绝）。
   executor:
     prompt: roles/executor
     tools: [read, write, edit, patch, search]

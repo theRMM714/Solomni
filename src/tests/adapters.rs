@@ -405,6 +405,38 @@ fn fs_packages_scans_the_dependency_folder_and_reports_each_rejection() {
 }
 
 // ---------- YamlPrompts ----------
+/// 角色的可用表态清单**由角色表渲染**（不是提示词里另写一遍）：给什么写什么，没给的不出现。
+#[test]
+fn role_face_is_rendered_from_the_tables() {
+    let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let st = YamlPrompts::new(root.join("prompts"), root.join("systools"))
+        .system_tools()
+        .expect("读两张表");
+    let discussant = st.render_face("discussant").expect("讨论者角色在");
+    for verb in ["say", "agree", "leave", "ask"] {
+        assert!(
+            discussant.contains(verb),
+            "讨论者该能用 {}：{}",
+            verb,
+            discussant
+        );
+    }
+    // 执行者不讨论：它的清单里**不该**出现讨论动词（渲染与越权判据同源，所以这就够了）。
+    let executor = st.render_face("executor").expect("执行者角色在");
+    for verb in ["say", "agree", "leave", "ask"] {
+        assert!(
+            !executor.contains(verb),
+            "执行者不该拿到 {}：{}",
+            verb,
+            executor
+        );
+    }
+    assert!(
+        st.render_face("不存在的角色").is_err(),
+        "未知角色要如实报错"
+    );
+}
+
 /// 两张表必须自洽：悬空引用 / 缺能力都会被挡下（不靠人看）。
 #[test]
 fn system_tools_and_roles_are_self_consistent() {

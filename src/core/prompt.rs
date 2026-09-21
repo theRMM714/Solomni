@@ -38,10 +38,14 @@ pub fn render(template: &str, vars: Vars) -> Result<String, String> {
     Ok(out)
 }
 
-/// 提示词册（内存形态）：由 `prompts/` 下的多个文件合并而成。
+/// 装配输入的**内存形态**：册子（`prompts/`）+ 系统工具与角色（`systools/`）。
+/// 为什么放一起：它们同一次装配、同一个注入点（core 只拿这一份）；分开注入只是多一条通道。
 #[derive(Debug, Clone, Deserialize)]
 pub struct Prompts {
     pub core: CorePrompts,
+    /// 工具总表与角色表（不是提示词，但和册子一起装配）。
+    #[serde(skip)]
+    pub systools: crate::core::roles::SystemTools,
 }
 
 /// 把册子的多个文件合并成内存形态：各文件的**顶层键**合并后就是 `core:` 的内容。

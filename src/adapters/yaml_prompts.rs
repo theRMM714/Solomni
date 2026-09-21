@@ -39,8 +39,10 @@ impl YamlPrompts {
 impl PromptSource for YamlPrompts {
     fn load(&self) -> Result<Prompts, String> {
         let mut book = crate::core::prompt::merge_book(&self.read_docs()?)?;
-        // 工具声明来自**总表**（唯一真相）：册子里不再有这一段。
-        book.core.builtin_tools = self.system_tools()?.tools;
+        // 工具声明与角色来自**两张表**（唯一真相）：册子里不再有这些。
+        let st = self.system_tools()?;
+        book.core.builtin_tools = st.tools.clone();
+        book.systools = st;
         Ok(book)
     }
 }

@@ -353,12 +353,24 @@ impl CollabSession {
             stream: self.settings.app.streaming,
             timeout_secs: self.settings.app.llm_timeout_secs,
         };
+        // 本席位的可用表态清单**由角色表渲染**（不是提示词里另写一遍）：漂不了。
+        let protocol = match self.prompts.systools.render_face("discussant") {
+            Ok(face) => format!("{}\n{}", self.prompts.core.chat_protocol, face),
+            Err(e) => {
+                sink(SessionEvent::Notice(format!(
+                    "[装配失败] 角色表不可用：{}",
+                    e
+                )));
+                return;
+            }
+        };
         let mut disc = Discussion::new(
             members,
             self.allow,
             prompts,
             llm,
             std::sync::Arc::clone(&self.cancel),
+            protocol,
         );
         // 开场逐成员外送：一个人说完就出它那一行（与轮次里同一段逻辑）。
         // 回调**不捕获 sink**（由 Discussion 传进来），否则它与后面泵对 sink 的使用冲突。
@@ -762,12 +774,17 @@ impl CollabSession {
             let disc_lines = all_lines[start..].to_vec();
             let (members, _) = s.assemble_members()?;
             let llm = s.llm_opts();
+            let protocol = match s.prompts.systools.render_face("discussant") {
+                Ok(face) => format!("{}\n{}", s.prompts.core.chat_protocol, face),
+                Err(_) => s.prompts.core.chat_protocol.clone(),
+            };
             let mut disc = Discussion::new(
                 members,
                 st.allow,
                 prompts,
                 llm,
                 std::sync::Arc::clone(&s.cancel),
+                protocol,
             );
             disc.round = st.round.max(1);
             disc.closed = st.closed;
