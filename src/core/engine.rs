@@ -1070,6 +1070,7 @@ pub(crate) fn converse(
         speaker,
         &mut noop,
         &mut |v: &ToolCallView| views.push(v.clone()),
+        &mut |_r: &Round| {},
     );
     // 末轮恒为文本轮（工具轮之后必然再问一次；超限后按原文作答也走文本轮）。
     let last = rounds.last();
@@ -1082,6 +1083,9 @@ pub(crate) fn converse(
 /// stream/on 透传给通道（呈现层在 on 里外送 Delta）；on 返回 false = 用户要求中止。
 /// on_tool 在每个工具跑完后立刻回调（工具行与文本行因此天然有序）。
 /// 终止保证：超限后告知一次并强制收尾；其后再来 tool 信封按原文作答，不再执行。
+// 逐轮外送要的四个出口（分片 / 工具 / 逐轮 / 提示词）都是回调，收口成参数对象只是把参数挪个地方、
+// 并让"谁在什么时候拿到什么"更难读。这是有意的设计取舍（同 docs/testing/quality-isolation.md 的 allow 清单）。
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn converse_with(
     chat: &mut dyn Chat,
     mut tools: Option<&mut MemberTools>,
@@ -1090,9 +1094,19 @@ pub(crate) fn converse_with(
     speaker: &str,
     on: &mut dyn FnMut(Chunk) -> bool,
     on_tool: &mut dyn FnMut(&ToolCallView),
+    on_round: &mut dyn FnMut(&Round),
 ) -> Vec<Round> {
     // 观察账本随会话保存（回档时清空），这里不动它——它的语义是"这一段转录里的读取证据"。
     let mut rounds: Vec<Round> = Vec::new();
+    // 逐轮产出：**一轮跑完就把它交出去**（调用方据此立刻外送与落盘，不必等整个回合结束）。
+    // 用宏而不是逐个改写 push 点：5 个分支都要"先回调、再入册"，写死五遍迟早漏一处。
+    macro_rules! push_round {
+        ($r:expr) => {{
+            let r = $r;
+            on_round(&r);
+            rounds.push(r);
+        }};
+    }
     let mut forced_final = false;
     // 没有工具环境时的回复号来源（见下面 reply_id）。
     let mut local_reply = 0u64;
@@ -1149,7 +1163,7 @@ pub(crate) fn converse_with(
         // 只把原因带回，让上层如实告知用户并中断本轮（用户可以点「继续」重试）。
         // 为什么必须短路：错误文本若被当成发言吸收，核心按转录派生的"下一步该谁说话"就歪了。
         if let Some(err) = done.error.clone() {
-            rounds.push(Round {
+            push_round!(Round {
                 reply: reply_id,
                 text: String::new(),
                 reasoning: String::new(),
@@ -1267,7 +1281,7 @@ pub(crate) fn converse_with(
                     }
                     for (i, view) in views.into_iter().enumerate() {
                         on_tool(&view);
-                        rounds.push(Round {
+                        push_round!(Round {
                             reply: reply_id,
                             // 正文只挂在本回复的第一条工具行上（只显示一条，不重复）
                             text: if i == 0 {
@@ -1319,7 +1333,7 @@ pub(crate) fn converse_with(
                         for m in &msgs_of {
                             msgs.push(m.clone());
                         }
-                        rounds.push(Round {
+                        push_round!(Round {
                             reply: reply_id,
                             text: reply.text.clone(),
                             reasoning,
@@ -1375,7 +1389,7 @@ pub(crate) fn converse_with(
                 for m in &msgs_of {
                     msgs.push(m.clone());
                 }
-                rounds.push(Round {
+                push_round!(Round {
                     reply: reply_id,
                     text: reply.text.clone(),
                     reasoning,
@@ -1460,7 +1474,7 @@ pub(crate) fn converse_with(
                 // text = 信封之外的那段正文（可能为空；信封 JSON 已被 parse 剥掉，永不进 text）。
                 for (i, view) in views.into_iter().enumerate() {
                     on_tool(&view);
-                    rounds.push(Round {
+                    push_round!(Round {
                         reply: reply_id,
                         text: if i == 0 {
                             reply.text.clone()
@@ -1499,7 +1513,7 @@ pub(crate) fn converse_with(
                 } else {
                     Vec::new()
                 };
-                rounds.push(Round {
+                push_round!(Round {
                     reply: reply_id,
                     text,
                     reasoning,

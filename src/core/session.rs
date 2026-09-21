@@ -338,6 +338,8 @@ impl AgentSession {
                 &mut |view: &ToolCallView| {
                     (emit.borrow_mut())(SessionEvent::ToolCall(view.clone()));
                 },
+                // 逐轮外送（下一步接上：一轮跑完就出这一轮的行）。当前先空着，行为不变。
+                &mut |_r: &crate::core::engine::Round| {},
             )
         }
     }
