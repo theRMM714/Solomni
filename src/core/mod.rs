@@ -189,6 +189,53 @@ pub struct SessionEdit {
     pub net: bool,
 }
 
+/// 事件落盘（短暂事件不落盘）：失败如实告知，返回要外送的警告（None = 一切正常）。
+///
+/// 为什么抽成自由函数：工作线程按**一次模型调用**的粒度增量落盘，必须与核心走同一段逻辑——
+/// 两条路径各写一份的话，"什么算定稿、什么不落盘"迟早会不一致。
+pub(crate) fn persist_events(
+    history: &dyn HistoryStore,
+    log: &dyn ports::Log,
+    sid: &str,
+    events: &[SessionEvent],
+) -> Option<String> {
+    // 流式增量与工具调用实时事件都是短暂事件，不落盘；历史只记定稿后的行。
+    let jsons: Vec<serde_json::Value> = events
+        .iter()
+        .filter(|e| !matches!(e, SessionEvent::Delta { .. } | SessionEvent::ToolCall(_)))
+        .map(|e| e.to_json())
+        .collect();
+    if jsons.is_empty() {
+        return None;
+    }
+    match history.append(sid, &jsons) {
+        Ok(()) => None,
+        Err(e) => {
+            log.error(
+                "core::history_append",
+                &format!("会话 {} 落盘失败：{}", sid, e),
+            );
+            Some(format!("[警告] 会话记录落盘失败：{}", e))
+        }
+    }
+}
+
+/// 增量落盘手柄：工作线程按"一次模型调用"的粒度把定稿事件落盘。
+/// 为什么要它：以前整段生成跑完才落一次盘，中途刷新页面看不到已经产生的部分。
+#[derive(Clone)]
+pub(crate) struct Persister {
+    history: Arc<dyn HistoryStore + Send + Sync>,
+    log: Arc<dyn ports::Log + Send + Sync>,
+    sid: String,
+}
+
+impl Persister {
+    /// 落盘这一批；返回要外送给用户的警告（None = 正常）。
+    pub(crate) fn persist(&self, events: &[SessionEvent]) -> Option<String> {
+        persist_events(self.history.as_ref(), self.log.as_ref(), &self.sid, events)
+    }
+}
+
 /// 一次单 agent 生成的**准备结果**（核心线程上只算到这里，模型调用在工作线程上）。
 pub(crate) enum Prepared {
     /// 可以跑：会话已从核心表取出，由工作线程独占。
@@ -381,12 +428,11 @@ impl Core {
         }
     }
 
-    /// 协作生成结束**交回**：重新插入 + 转录落盘 + 解除"生成中"。
-    pub(crate) fn put_collab(&mut self, sid: &str, c: CollabSession, events: &[SessionEvent]) {
+    /// 协作生成结束**交回**：重新插入 + 解除"生成中"。
+    /// 转录**已由工作线程按"一次模型调用"的粒度增量落盘**（见 `Persister`），这里不重复落。
+    pub(crate) fn put_collab(&mut self, sid: &str, c: CollabSession) {
         self.running.remove(sid);
         self.sessions.insert(sid.to_string(), Session::Collab(c));
-        let mut ev = events.to_vec();
-        self.record_events(sid, &mut ev);
     }
 
     /// 生成结束**交回**：重新插入 + 转录落盘 + 解除"生成中"。
@@ -1402,21 +1448,17 @@ impl Core {
         if events.is_empty() {
             return;
         }
-        // 流式增量与工具调用实时事件都是短暂事件，不落盘；历史只记定稿后的行。
-        let jsons: Vec<serde_json::Value> = events
-            .iter()
-            .filter(|e| !matches!(e, SessionEvent::Delta { .. } | SessionEvent::ToolCall(_)))
-            .map(|e| e.to_json())
-            .collect();
-        if let Err(e) = self.history.append(sid, &jsons) {
-            self.log.error(
-                "core::history_append",
-                &format!("会话 {} 落盘失败：{}", sid, e),
-            );
-            events.push(SessionEvent::Notice(format!(
-                "[警告] 会话记录落盘失败：{}",
-                e
-            )));
+        if let Some(warn) = persist_events(self.history.as_ref(), self.log.as_ref(), sid, events) {
+            events.push(SessionEvent::Notice(warn));
+        }
+    }
+
+    /// 增量落盘手柄：交给工作线程，按"一次模型调用"的粒度落盘（见 `Persister`）。
+    pub(crate) fn persister(&self, sid: &str) -> Persister {
+        Persister {
+            history: Arc::clone(&self.history),
+            log: Arc::clone(&self.log),
+            sid: sid.to_string(),
         }
     }
 

@@ -102,9 +102,14 @@ impl crate::core::ports::Chat for GatedChat {
         on: &mut dyn FnMut(crate::core::ports::Chunk) -> bool,
     ) -> crate::core::ports::Completion {
         use std::sync::atomic::Ordering;
-        self.started.fetch_add(1, Ordering::Relaxed);
+        let n = self.started.fetch_add(1, Ordering::Relaxed);
         if !on(crate::core::ports::Chunk::Start) {
             return crate::core::ports::Completion::text("");
+        }
+        // 第一次调用立刻返回（让"已产生的行"真的落下来），之后才阻塞：
+        // 这样既能观察"生成中途"的状态，又能靠放行结束。
+        if n == 0 {
+            return crate::core::ports::Completion::text("{\"type\":\"say\",\"text\":\"我先说\"}");
         }
         // 等放行；但**也要尊重分片回调**——「停止」正是靠 on 返回 false 在调用中途生效的。
         while !self.release.load(Ordering::Relaxed) {

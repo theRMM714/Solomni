@@ -458,6 +458,11 @@ impl CoreHandle {
         // 把「停止」接到泵上：它在每次模型调用前与**调用中途**都看这个标志。
         let mut session = session;
         session.set_cancel(Arc::clone(&cancel));
+        // 增量落盘手柄：泵产出一条定稿事件就落一条，中途刷新页面因此能看到已产生的部分。
+        let persister = self.call({
+            let sid = sid.to_string();
+            move |core| Ok(core.persister(&sid))
+        })?;
         let text = text.to_string();
         let worker = {
             let sid = sid.to_string();
@@ -469,9 +474,14 @@ impl CoreHandle {
                     let mut events: Vec<SessionEvent> = Vec::new();
                     let mut seq = 0u64;
                     {
-                        // 边产边送：长流程里用户能看着讨论一轮轮推进，而不是等整段结束才一次性出现。
+                        // 边产边送 + 边落盘：长流程里用户能看着讨论一轮轮推进，
+                        // 中途刷新页面也能看到已产生的部分（不再等整段结束才一次性出现）。
                         let mut sink = |ev: SessionEvent| {
                             seq = bus.push(&sid, std::slice::from_ref(&ev));
+                            // 落盘失败要**如实告知**（落一条警告进事件台），不静默丢历史。
+                            if let Some(warn) = persister.persist(std::slice::from_ref(&ev)) {
+                                bus.push(&sid, std::slice::from_ref(&SessionEvent::Notice(warn)));
+                            }
                             events.push(ev);
                         };
                         match work {
@@ -503,11 +513,11 @@ impl CoreHandle {
                 return Err("协作线程崩溃：会话已按落盘转录保留，可继续".to_string());
             }
         };
+        // 交回核心只做"重新插入"：转录已由上面的 sink 增量落盘，这里不再重复落。
         self.call({
             let sid = sid.to_string();
-            let ev = events.clone();
             move |core| {
-                core.put_collab(&sid, c, &ev);
+                core.put_collab(&sid, c);
                 Ok(())
             }
         })?;

@@ -303,6 +303,43 @@ fn stopping_a_collab_discussion_is_prompt_and_keeps_the_session() {
     );
 }
 
+/// 协作生成**中途**就已经落盘：中途刷新页面能看到已产生的部分（以前整段跑完才落一次）。
+#[test]
+fn collab_transcript_lands_on_disk_while_the_discussion_runs() {
+    let (_handle, ops, started, release) = gated_ops(vec![module_of("a"), module_of("b")]);
+    let sid = ops
+        .sessions
+        .create_work(collab_work("c", &["a", "b"], false, "把资料整理成报告"))
+        .expect("建协作会话")
+        .sid;
+    let worker = {
+        let sessions = Arc::clone(&ops.sessions);
+        let sid = sid.clone();
+        std::thread::spawn(move || {
+            sessions.collab_step(&sid, crate::core::CollabStep::Begin, "yes")
+        })
+    };
+    // 等第二个成员卡在调用里：此时第一个成员的发言已经定稿。
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while started.load(Ordering::Relaxed) < 2 {
+        assert!(Instant::now() < deadline, "讨论没有推进到第二个成员");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert!(
+        ops.sessions.is_running(&sid),
+        "讨论必须仍在进行，这条断言才有意义"
+    );
+    // 生成**还在跑**：盘上已经该有定稿的行（以前是整段跑完才落一次）。
+    let (_, events) = ops.history.open(&sid).expect("中途读转录");
+    assert!(
+        !events.is_empty(),
+        "生成中途就该有落盘内容（中途刷新页面靠它）"
+    );
+
+    release.store(true, Ordering::Relaxed);
+    let _ = worker.join().expect("协作线程");
+}
+
 // ---------- 错误如实传播，不静默兜底 ----------
 
 #[test]
