@@ -186,6 +186,22 @@ pub struct SessionEdit {
     pub net: bool,
 }
 
+/// 一次单 agent 生成的**准备结果**（核心线程上只算到这里，模型调用在工作线程上）。
+pub(crate) enum Prepared {
+    /// 可以跑：会话已从核心表取出，由工作线程独占。
+    Run {
+        /// 装箱：这个变体比其它两个大得多（会话本体），而它本来就是**一次性移交**给工作线程的。
+        session: Box<session::AgentSession>,
+        /// 生成前要先给用户的事件（例如工具形态变更的提示）。
+        prefix: Vec<SessionEvent>,
+        llm: ports::LlmOpts,
+    },
+    /// 不用跑模型：直接把这批事件回给调用方（例如"末条是 AI 发言"）。
+    Immediate(Vec<SessionEvent>),
+    /// 不是单 agent 会话：交回调用方走它自己那条路（协作）。
+    NotSingle,
+}
+
 /// 会话列表视图。
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct SessionView {
@@ -254,6 +270,11 @@ pub struct Core {
     settings: Settings,
     prompts: Prompts,
     sessions: HashMap<SessionId, Session>,
+    /// 正在生成的会话：对象被工作线程**取走**了，核心表里暂时没有它。
+    /// 为什么取出而不是就地生成：生成要跑几十秒到几分钟，占着唯一的命令队列会让
+    /// 读接口（历史列表、状态）与其它会话的命令全排在它后面——界面因此"假死"。
+    /// 这一态只表示"不在表里是因为在生成"，不是"不存在"。
+    running: std::collections::BTreeSet<SessionId>,
 }
 
 impl Core {
@@ -296,6 +317,7 @@ impl Core {
                 settings,
                 prompts,
                 sessions: HashMap::new(),
+                running: std::collections::BTreeSet::new(),
             })
         })();
         if let Err(e) = &outcome {
@@ -307,6 +329,51 @@ impl Core {
     /// 日志端口句柄：入站手柄（core::api）与组合根共用同一份事实记录。
     pub fn log_handle(&self) -> Arc<dyn crate::core::ports::Log + Send + Sync> {
         Arc::clone(&self.log)
+    }
+
+    /// 生成期间"会话不在表里"的三种进入点共用这一句（错误文案要一致，别处不再各写一份）。
+    fn running_refusal(sid: &str) -> String {
+        format!("会话 {} 正在生成中：先「停止」或等它结束，再做这一步", sid)
+    }
+
+    /// 把单 agent 会话**交给工作线程**（核心表里留"生成中"）。
+    /// 取出的窗口内，核心队列是空的——读接口与其它会话的命令因此照常。
+    pub(crate) fn take_single(&mut self, sid: &str) -> Result<session::AgentSession, String> {
+        if self.running.contains(sid) {
+            return Err(Self::running_refusal(sid));
+        }
+        match self.sessions.remove(sid) {
+            Some(Session::Single(s)) => {
+                self.running.insert(sid.to_string());
+                Ok(s)
+            }
+            Some(other) => {
+                // 不是单 agent：原样放回，交给协作那条路（B-1 只搬单 agent）。
+                self.sessions.insert(sid.to_string(), other);
+                Err("该会话不是单 agent 模式".to_string())
+            }
+            None => Err("无此会话".to_string()),
+        }
+    }
+
+    /// 生成结束**交回**：重新插入 + 转录落盘 + 解除"生成中"。
+    /// 所有状态变更仍只发生在核心线程上（工作线程只跑生成，不碰核心状态）。
+    pub(crate) fn put_single(
+        &mut self,
+        sid: &str,
+        s: session::AgentSession,
+        events: &[SessionEvent],
+    ) {
+        self.running.remove(sid);
+        self.sessions.insert(sid.to_string(), Session::Single(s));
+        let mut ev = events.to_vec();
+        self.record_events(sid, &mut ev);
+    }
+
+    /// 生成线程崩溃：会话对象随线程一起没了，但**转录在盘上**。
+    /// 只解除"生成中"，下次访问按落盘转录重建——绝不把会话卡在"生成中"。
+    pub(crate) fn abort_running(&mut self, sid: &str) {
+        self.running.remove(sid);
     }
 
     /// 清单即事实：每次调用重扫（策略在 core，机制在 ModuleSource）。
@@ -402,6 +469,9 @@ impl Core {
     /// 生效点：下一次访问按新配置从转录重建会话对象（所以改完不必重开会话）。
     /// 冻结：流水里有内容（会话已经开过）时，agent 名单与形态不可改——换人请新建会话。
     pub fn edit_session(&mut self, sid: &str, edit: SessionEdit) -> Result<(), String> {
+        if self.running.contains(sid) {
+            return Err(Self::running_refusal(sid));
+        }
         let (meta, events) = self.history_open(sid)?;
         match meta.mode.as_str() {
             "single" | "collab" => {}
@@ -833,20 +903,35 @@ impl Core {
 
     /// 会话列表视图（进行中的工作）。形态取落盘 meta（单一真相，不在内存里留影子状态）。
     pub fn session_views(&self, history: &[HistoryView]) -> Vec<SessionView> {
-        self.sessions
+        // 在表里的会话 + **正在生成的会话**（后者对象在工作线程上，但它确实存在、也确实在跑）。
+        // 漏掉它们会让界面以为会话不见了。
+        let running: Vec<(String, bool)> = self
+            .running
+            .iter()
+            .map(|sid| (sid.clone(), false))
+            .collect();
+        let listed: Vec<(String, bool)> = self
+            .sessions
             .iter()
             .map(|(sid, s)| {
                 let done = match s {
                     Session::Collab(c) => c.is_done(),
                     Session::Single(_) => false,
                 };
-                let entry = history.iter().find(|h| &h.name == sid);
+                (sid.clone(), done)
+            })
+            .chain(running)
+            .collect();
+        listed
+            .into_iter()
+            .map(|(sid, done)| {
+                let entry = history.iter().find(|h| h.name == sid);
                 let mode = entry.map(|h| h.mode.clone()).unwrap_or_default();
                 // 记的档位来自落盘 meta（权威）：环境后来变了也要如实提示——**不拦打开**（记录是用户的）。
                 let exec = entry.map(|h| h.exec.clone()).unwrap_or_default();
                 let readiness = exec::tier_readiness(&exec, self.qemu_path());
                 SessionView {
-                    sid: sid.clone(),
+                    sid,
                     mode,
                     done,
                     tier: exec.tier.as_str().to_string(),
@@ -1250,6 +1335,9 @@ impl Core {
     /// 删除会话（= 删目录）。内存中的同名会话一并移除，避免内存与磁盘不一致。
     /// 删之前先请适配层撤销该会话各 agent 的围栏授权：痕迹与会话同生共死，不随会话数量堆积。
     pub fn history_delete(&mut self, name: &str) -> Result<bool, String> {
+        if self.running.contains(name) {
+            return Err(Self::running_refusal(name));
+        }
         if let Ok((meta, _)) = self.history.load(name) {
             let roster = self.source.scan();
             match self.sandboxes(&meta, &roster) {
@@ -1437,27 +1525,64 @@ impl Core {
         }))
     }
 
-    /// 单 agent 会话发言。
+    /// 生成前的**准备**（短命令：只做检查与取出会话，不跑模型）。
+    /// 语义与原来的 single_say / continue_flow 一致：工具形态变了先给一句提示；
+    /// 继续时末条必须是用户发言（否则只提醒，不替用户发言）。
+    pub(crate) fn prepare_single(
+        &mut self,
+        sid: &str,
+        text: Option<&str>,
+        want_stream: bool,
+    ) -> Result<Prepared, String> {
+        let llm = self.llm_opts(want_stream);
+        if matches!(self.sessions.get(sid), Some(Session::Collab(_))) {
+            return Ok(Prepared::NotSingle);
+        }
+        let mut prefix: Vec<SessionEvent> = Vec::new();
+        if let Some(n) = self.refresh_tool_mode(sid)? {
+            prefix.push(SessionEvent::Notice(n));
+        }
+        if text.is_none() {
+            let last_is_user =
+                matches!(self.sessions.get(sid), Some(Session::Single(s)) if s.last_is_user());
+            if !last_is_user {
+                prefix.push(SessionEvent::Notice(NEED_USER.to_string()));
+                return Ok(Prepared::Immediate(prefix));
+            }
+        }
+        let session = self.take_single(sid)?;
+        Ok(Prepared::Run {
+            session: Box::new(session),
+            prefix,
+            llm,
+        })
+    }
+
+    /// 测试用同步入口：与工作线程那条路**同一段语义**（准备 → 生成 → 交回落盘）。
+    /// 生产路径不再走它——那里的生成在工作线程上（见 `CoreHandle::single_generation`）。
+    #[cfg(test)]
     pub fn single_say(
         &mut self,
         sid: &str,
         text: &str,
         live: &mut Live,
     ) -> Result<Vec<SessionEvent>, String> {
-        let notice = self.refresh_tool_mode(sid)?;
-        let mut events = match self.sessions.get_mut(sid) {
-            Some(Session::Single(s)) => s.say(text, live),
-            Some(_) => return Err("该会话不是单 agent 模式".to_string()),
-            None => return Err("无此会话".to_string()),
-        };
-        if let Some(n) = notice {
-            events.insert(0, SessionEvent::Notice(n));
+        match self.prepare_single(sid, Some(text), live.llm.stream)? {
+            Prepared::Immediate(events) => Ok(events),
+            Prepared::NotSingle => Err("该会话不是单 agent 模式".to_string()),
+            Prepared::Run {
+                session, prefix, ..
+            } => {
+                let mut session = *session;
+                let mut events = prefix;
+                events.extend(session.say(text, live));
+                if live.cancelled() {
+                    self.log.warn("core::single_say", "生成被用户中止");
+                }
+                self.put_single(sid, session, &events);
+                Ok(events)
+            }
         }
-        if live.cancelled() {
-            self.log.warn("core::single_say", "生成被用户中止");
-        }
-        self.record_events(sid, &mut events);
-        Ok(events)
     }
 
     /// 协作推进一步：由前端按 pending 驱动；返回期间产生的全部事件。
@@ -1525,6 +1650,9 @@ impl Core {
     /// 返回重放后的完整事件流，供前端整体重建（不用前端自己推算截断）。
     /// 单 agent 的活动会话按历史精确回退；协作与历史会话按转录重建（状态全部派生）。
     pub fn rewind(&mut self, sid: &str, keep_id: u64) -> Result<Vec<serde_json::Value>, String> {
+        if self.running.contains(sid) {
+            return Err(Self::running_refusal(sid));
+        }
         let precise = matches!(self.sessions.get(sid), Some(Session::Single(_)));
         if !precise {
             self.ensure_session(sid)?;
@@ -1601,6 +1729,10 @@ impl Core {
     fn ensure_session(&mut self, sid: &str) -> Result<(), String> {
         if self.sessions.contains_key(sid) {
             return Ok(());
+        }
+        // 会话对象在工作线程上（生成中）：**不能**从盘上再建一份（会变成两个实例）。
+        if self.running.contains(sid) {
+            return Err(Self::running_refusal(sid));
         }
         let (meta, events) = self.history_open(sid)?;
         let rebuilt = self.rebuild_session(&meta, &events)?;

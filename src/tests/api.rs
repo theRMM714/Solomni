@@ -129,6 +129,64 @@ fn stop_takes_effect_while_generation_is_still_running() {
     );
 }
 
+/// 生成期间，**只读命令不再排队**：以前生成占着唯一的命令队列，读接口（历史列表 / 会话视图）
+/// 会一直等到生成结束——界面因此"假死"。现在生成在工作线程上，队列只占"取/交"两步。
+#[test]
+fn reads_are_not_queued_behind_a_long_generation() {
+    let (_handle, ops, ticks) = slow_ops(vec![module_of("a")]);
+    let sid = ops
+        .sessions
+        .create_work(single_work("w", &["a"]))
+        .expect("建会话")
+        .sid;
+    let worker = {
+        let sessions = Arc::clone(&ops.sessions);
+        let sid = sid.clone();
+        std::thread::spawn(move || sessions.say(&sid, "慢慢来", Output::Stream))
+    };
+    // 等生成真的开始（通道已经在吐片）。
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while ticks.load(Ordering::Relaxed) == 0 {
+        assert!(Instant::now() < deadline, "生成没有启动");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    // 生成进行中：两条只读命令都必须立刻返回——这是这次改动的全部意义。
+    let t0 = Instant::now();
+    let history = ops.history.list().expect("生成期间读历史");
+    let read = t0.elapsed();
+    let t1 = Instant::now();
+    let views = ops
+        .history
+        .session_views(&history)
+        .expect("生成期间读会话视图");
+    let view = t1.elapsed();
+    assert!(
+        read < Duration::from_secs(1),
+        "生成期间读历史不该排队（{:?}）",
+        read
+    );
+    assert!(
+        view < Duration::from_secs(1),
+        "生成期间读会话视图不该排队（{:?}）",
+        view
+    );
+    // 正在生成的会话仍要出现在视图里（对象在工作线程上，但它确实存在）。
+    assert!(
+        views.iter().any(|v| v.sid == sid),
+        "生成中的会话不该从列表里消失：{:?}",
+        views.iter().map(|v| v.sid.clone()).collect::<Vec<_>>()
+    );
+    // 关键判据：读完成时生成**必须还在跑**。若读被排在生成后面，它只会在生成结束后返回，
+    // 那时这里就是 false——这条断言让"读没排队"这件事不必靠时间阈值单独成立。
+    assert!(
+        ops.sessions.is_running(&sid),
+        "读完成时生成必须仍在进行（否则读是被排队到生成结束才返回的）"
+    );
+
+    ops.sessions.stop(&sid);
+    let _ = worker.join().expect("生成线程");
+}
+
 // ---------- 错误如实传播，不静默兜底 ----------
 
 #[test]

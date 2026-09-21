@@ -17,6 +17,7 @@ use crate::core::exec::Tier;
 use crate::core::history::{HistoryView, SessionMeta};
 use crate::core::module::Roster;
 use crate::core::providers::{AppSettings, ModelView, ProviderView};
+use crate::core::Prepared;
 use crate::core::{
     AgentMeta, AgentSuggestion, CollabStep, Core, FilesView, Pending, RuntimeReport, SessionConfig,
     SessionEdit, SessionId, SessionView, WorkMode, WorkOpened, WorkSpec,
@@ -322,55 +323,108 @@ impl CoreHandle {
     pub(crate) fn panic_probe(&self) -> Result<(), String> {
         self.call(|_core| -> Result<(), String> { panic!("入站契约测试注入的 panic") })
     }
-}
 
-/// 生成收尾：注销取消标志（无论成败）→ 本批事件入箱 → 返回事件与序号。
-fn finish(
-    jobs: &JobRegistry,
-    bus: &EventBus,
-    sid: &str,
-    result: Result<Vec<SessionEvent>, String>,
-) -> Result<Advance, String> {
-    jobs.unregister(sid);
-    let events = result?;
-    let seq = bus.push(sid, &events);
-    Ok(Advance { events, seq })
-}
-
-impl SessionOps for CoreHandle {
-    fn create_work(&self, spec: WorkSpec) -> Result<WorkOpened, String> {
-        self.call(move |core| core.create_work(spec))
-    }
-
-    fn say(&self, sid: &str, text: &str, out: Output) -> Result<Advance, String> {
-        let sid = sid.to_string();
-        let text = text.to_string();
-        let jobs = Arc::clone(&self.jobs);
+    /// 单 agent 生成：**核心队列只占两步短命令**（取出会话 / 交回会话），生成本身在工作线程上跑。
+    /// 为什么必须这样：生成要跑几十秒到几分钟，以前它占着唯一的命令队列，
+    /// 读接口（历史列表 / 状态）与其它会话的命令全排在它后面——界面因此"假死"。
+    /// 不变量：会话状态只被一个线程碰——生成期间由工作线程独占，核心表里只留"生成中"这一态。
+    fn single_generation(
+        &self,
+        sid: &str,
+        text: Option<String>,
+        out: Output,
+    ) -> Result<Advance, String> {
         let bus = Arc::clone(&self.bus);
-        self.call(move |core| {
-            let cancel = jobs.register(&sid);
-            let mut emit = {
-                let bus = Arc::clone(&bus);
-                let sid = sid.clone();
-                move |ev: SessionEvent| {
-                    bus.push(&sid, std::slice::from_ref(&ev));
+        let jobs = Arc::clone(&self.jobs);
+        // ① 短命令：检查 + 把会话取出来 + 定下本次调用参数（都在核心线程上，毫秒级）。
+        let prepared = self.call({
+            let sid = sid.to_string();
+            let t = text.clone();
+            move |core| core.prepare_single(&sid, t.as_deref(), out == Output::Stream)
+        })?;
+        let (session, prefix, llm) = match prepared {
+            // 不用跑模型（例如"末条是 AI 发言"）：把提示直接回给调用方。
+            Prepared::Immediate(events) => {
+                let seq = bus.push(sid, &events);
+                return Ok(Advance { events, seq });
+            }
+            // 协作会话的"继续"仍在核心线程上推进（B-1 只搬单 agent 生成）。
+            Prepared::NotSingle => {
+                if text.is_some() {
+                    return Err("该会话不是单 agent 模式".to_string());
                 }
-            };
-            let result = {
-                // 流式与预算都取**全局设置**（单 agent 与协作共用同一份，见 AppSettings）。
-                let llm = core.llm_opts(out == Output::Stream);
-                let mut live = Live {
-                    llm,
-                    cancel: Arc::clone(&cancel),
-                    emit: &mut emit,
-                };
-                core.single_say(&sid, &text, &mut live)
-            };
-            finish(&jobs, &bus, &sid, result)
-        })
+                return self.queued_continue(sid, out);
+            }
+            Prepared::Run {
+                session,
+                prefix,
+                llm,
+            } => (*session, prefix, llm),
+        };
+        // 取消标志在**派发时**就登记：生成一开始「停止」就能生效（它本来就不进队列）。
+        let cancel = jobs.register(sid);
+        // ② 工作线程：跑生成。短暂事件（流式增量 / 工具行）直送事件台——它是独立锁，不进核心队列。
+        let worker = {
+            let sid = sid.to_string();
+            let bus = Arc::clone(&bus);
+            std::thread::Builder::new()
+                .name("solomni-gen".to_string())
+                .spawn(move || {
+                    let mut session = session;
+                    let mut emit = {
+                        let bus = Arc::clone(&bus);
+                        let sid = sid.clone();
+                        move |ev: SessionEvent| {
+                            bus.push(&sid, std::slice::from_ref(&ev));
+                        }
+                    };
+                    let mut live = Live {
+                        llm,
+                        cancel,
+                        emit: &mut emit,
+                    };
+                    let mut events = prefix;
+                    events.extend(match &text {
+                        Some(t) => session.say(t, &mut live),
+                        None => session.continue_reply(&mut live),
+                    });
+                    (session, events)
+                })
+                .map_err(|e| format!("起生成线程失败：{}", e))?
+        };
+        // ③ 收尾：拿回会话 → 入台 → 交回核心（重新插入 + 转录落盘）。
+        //    **所有状态变更仍只发生在核心线程上**：工作线程只跑生成，不碰核心状态。
+        let joined = worker.join();
+        jobs.unregister(sid);
+        let (session, events) = match joined {
+            Ok(x) => x,
+            Err(_) => {
+                // 线程崩了：会话对象随线程没了，但**转录在盘上**——解除"生成中"，
+                // 下次访问按落盘转录重建。绝不把会话卡在"生成中"。
+                self.call({
+                    let sid = sid.to_string();
+                    move |core| {
+                        core.abort_running(&sid);
+                        Ok(())
+                    }
+                })?;
+                return Err("生成线程崩溃：会话已按落盘转录保留，可继续".to_string());
+            }
+        };
+        let seq = bus.push(sid, &events);
+        self.call({
+            let sid = sid.to_string();
+            let ev = events.clone();
+            move |core| {
+                core.put_single(&sid, session, &ev);
+                Ok(())
+            }
+        })?;
+        Ok(Advance { events, seq })
     }
 
-    fn continue_flow(&self, sid: &str, out: Output) -> Result<Advance, String> {
+    /// 协作会话的"继续"：仍在核心线程上推进（B-1 只搬单 agent 生成，协作见后续）。
+    fn queued_continue(&self, sid: &str, out: Output) -> Result<Advance, String> {
         let sid = sid.to_string();
         let jobs = Arc::clone(&self.jobs);
         let bus = Arc::clone(&self.bus);
@@ -394,6 +448,32 @@ impl SessionOps for CoreHandle {
             };
             finish(&jobs, &bus, &sid, result)
         })
+    }
+}
+
+/// 生成收尾：注销取消标志（无论成败）→ 本批事件入箱 → 返回事件与序号。
+fn finish(
+    jobs: &JobRegistry,
+    bus: &EventBus,
+    sid: &str,
+    result: Result<Vec<SessionEvent>, String>,
+) -> Result<Advance, String> {
+    jobs.unregister(sid);
+    let events = result?;
+    let seq = bus.push(sid, &events);
+    Ok(Advance { events, seq })
+}
+impl SessionOps for CoreHandle {
+    fn create_work(&self, spec: WorkSpec) -> Result<WorkOpened, String> {
+        self.call(move |core| core.create_work(spec))
+    }
+
+    fn say(&self, sid: &str, text: &str, out: Output) -> Result<Advance, String> {
+        self.single_generation(sid, Some(text.to_string()), out)
+    }
+
+    fn continue_flow(&self, sid: &str, out: Output) -> Result<Advance, String> {
+        self.single_generation(sid, None, out)
     }
 
     fn collab_step(&self, sid: &str, step: CollabStep, text: &str) -> Result<Advance, String> {
