@@ -6,6 +6,7 @@ use super::{gated_ops, ops_with, single_work, slow_ops};
 use crate::core::api::{CoreHandle, Ops, Output};
 use crate::core::exec::Tier;
 use crate::core::module::Module;
+use crate::core::SessionEvent;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -237,6 +238,69 @@ fn reads_are_not_queued_behind_a_collab_discussion() {
     // 放行：协作的泵目前没有取消检查（缺口账另记），所以用放行结束而不是「停止」。
     release.store(true, Ordering::Relaxed);
     let _ = worker.join().expect("协作线程");
+}
+
+/// 协作的「停止」：在一个成员调用内收尾；**被中断的那条发言不吸收**；会话保持可继续。
+#[test]
+fn stopping_a_collab_discussion_is_prompt_and_keeps_the_session() {
+    let (_handle, ops, started, release) = gated_ops(vec![module_of("a"), module_of("b")]);
+    let sid = ops
+        .sessions
+        .create_work(collab_work("c", &["a", "b"], false, "把资料整理成报告"))
+        .expect("建协作会话")
+        .sid;
+    let worker = {
+        let sessions = Arc::clone(&ops.sessions);
+        let sid = sid.clone();
+        std::thread::spawn(move || {
+            sessions.collab_step(&sid, crate::core::CollabStep::Begin, "yes")
+        })
+    };
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while started.load(Ordering::Relaxed) == 0 {
+        assert!(Instant::now() < deadline, "讨论没有启动");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+
+    let stopped = Instant::now();
+    assert!(ops.sessions.stop(&sid), "在跑就该停得掉");
+    let out = worker
+        .join()
+        .expect("协作线程")
+        .expect("停止是正常收尾，不是错误");
+    assert!(
+        stopped.elapsed() < Duration::from_secs(3),
+        "停止要在一个成员调用内收尾（{:?}）",
+        stopped.elapsed()
+    );
+    // 如实告知：用户看得到"停在哪、没作废"。
+    assert!(
+        out.events
+            .iter()
+            .any(|e| matches!(e, SessionEvent::Notice(n) if n.contains("[停止]"))),
+        "要有「已停止」的如实说明"
+    );
+    // 被中断的那条发言（半截 agree）**不该**进转录。
+    let lines: Vec<String> = out
+        .events
+        .iter()
+        .filter_map(|e| match e {
+            SessionEvent::Transcript(ls) => Some(ls.iter().map(|l| l.line.clone())),
+            _ => None,
+        })
+        .flatten()
+        .collect();
+    assert!(
+        !lines.iter().any(|t| t.contains("[a:") || t.contains("[b:")),
+        "被中断的发言不该进转录：{:?}",
+        lines
+    );
+    // 可继续：放行后再点「继续」，泵应接着推进（取消标志是每次派发新登记的，不会粘住）。
+    release.store(true, Ordering::Relaxed);
+    assert!(
+        ops.sessions.continue_flow(&sid, Output::Final).is_ok(),
+        "停止之后必须能「继续」"
+    );
 }
 
 // ---------- 错误如实传播，不静默兜底 ----------

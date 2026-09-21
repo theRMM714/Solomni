@@ -106,7 +106,11 @@ impl crate::core::ports::Chat for GatedChat {
         if !on(crate::core::ports::Chunk::Start) {
             return crate::core::ports::Completion::text("");
         }
+        // 等放行；但**也要尊重分片回调**——「停止」正是靠 on 返回 false 在调用中途生效的。
         while !self.release.load(Ordering::Relaxed) {
+            if !on(crate::core::ports::Chunk::Text("…".to_string())) {
+                break;
+            }
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
         crate::core::ports::Completion::text("{\"type\":\"agree\",\"text\":\"同意\"}")

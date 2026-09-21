@@ -442,6 +442,8 @@ pub enum TurnOut {
     Round,
     /// 调用失败（超时 / 网络）：本轮**中断**——不把失败当发言吸收，交给用户决定何时继续。
     Interrupted(String),
+    /// 用户点了「停止」：本轮**停止**——被中断的那条发言**不吸收**（半截发言进转录会把状态算歪）。
+    Stopped,
     /// 有模块请教用户：轮转中止，等用户回答。
     AskUser { member: String, question: String },
     /// 留在组的成员全部同意 → 讨论终止。
@@ -469,6 +471,9 @@ pub struct Discussion {
     prompts: Prompts,
     /// 本次调用的通道参数（流式 + 预算）：**全局设置**，与单 agent 共用同一份。
     llm: crate::core::ports::LlmOpts,
+    /// 「停止」标志：由 CollabSession 注入（它从任务登记处拿到）。
+    /// 泵在**每次调用前**与**调用中途**都看它——所以停止能在一个模型调用内收尾，而不是等它跑完。
+    cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl Discussion {
@@ -477,6 +482,7 @@ impl Discussion {
         allow_autonomy: bool,
         prompts: Prompts,
         llm: crate::core::ports::LlmOpts,
+        cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
     ) -> Discussion {
         Discussion {
             members,
@@ -487,7 +493,18 @@ impl Discussion {
             allow_autonomy,
             prompts,
             llm,
+            cancel,
         }
+    }
+
+    /// 接上「停止」标志（CollabSession 注入；回档重建后也要重新接）。
+    pub fn set_cancel(&mut self, cancel: std::sync::Arc<std::sync::atomic::AtomicBool>) {
+        self.cancel = cancel;
+    }
+
+    /// 是否已被要求停止。
+    fn cancelled(&self) -> bool {
+        self.cancel.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// 本轮的调用选项：流式与预算都取全局设置（讨论也走同一份，不再是写死的非流式）。
@@ -496,7 +513,7 @@ impl Discussion {
     }
 
     /// 首轮：聊天约定 + 用户需求（文案经提示词册渲染）。
-    pub fn open(&mut self, task: &str) -> Option<String> {
+    pub fn open(&mut self, task: &str) -> Result<(), String> {
         let opener = self.prompts.render(
             &self.prompts.core.discuss.opener,
             &[
@@ -509,12 +526,23 @@ impl Discussion {
                 let m = &self.members[i];
                 (m.system.clone(), m.id.clone())
             };
+            if self.cancelled() {
+                return Err("已停止".to_string());
+            }
             let msgs = vec![Msg::system(system), Msg::user(opener.clone())];
             let opts = self.opts();
-            let done = self.members[i].chat.complete(&msgs, opts, &mut |_| true);
-            // 调用失败：**不**当发言吸收，如实把原因交回（用户可点「继续」重试）。
+            // 分片回调里看「停止」：克隆标志而不是借 self——成员那侧正被可变借用。
+            let cancel = std::sync::Arc::clone(&self.cancel);
+            let mut keep = move |_c: crate::core::ports::Chunk| {
+                !cancel.load(std::sync::atomic::Ordering::Relaxed)
+            };
+            let done = self.members[i].chat.complete(&msgs, opts, &mut keep);
+            // 中途被打断 / 调用失败：**都不**吸收，如实交回（用户可点「继续」重试）。
+            if self.cancelled() {
+                return Err("已停止".to_string());
+            }
             if let Some(err) = done.error.clone() {
-                return Some(err);
+                return Err(err);
             }
             let reply = envelope::parse(&done.raw);
             self.absorb(
@@ -526,7 +554,7 @@ impl Discussion {
             );
         }
         self.round = 1;
-        None
+        Ok(())
     }
 
     /// 推进一轮：把当前转录并入上下文，依次转达给每个在组且未同意的成员。
@@ -534,6 +562,10 @@ impl Discussion {
     pub fn step(&mut self) -> TurnOut {
         if self.closed {
             return TurnOut::Done;
+        }
+        // 已被要求停止：连轮次标记都不留（这一轮根本没开始）。
+        if self.cancelled() {
+            return TurnOut::Stopped;
         }
         // 轮次边界：本轮的发言都在这条之后（回放时据此重算「本轮谁已同意」）。
         self.transcript.push(DiscLine {
@@ -574,9 +606,22 @@ impl Discussion {
                         .join("\n"),
                 )],
             );
+            // 停止是逐成员生效的：上一个成员说完后要停就停，不开始下一个。
+            if self.cancelled() {
+                return TurnOut::Stopped;
+            }
             let msgs = vec![Msg::system(system), Msg::user(step_prompt)];
             let opts = self.opts();
-            let done = self.members[i].chat.complete(&msgs, opts, &mut |_| true);
+            // 分片回调里看「停止」：克隆标志而不是借 self——成员那侧正被可变借用。
+            let cancel = std::sync::Arc::clone(&self.cancel);
+            let mut keep = move |_c: crate::core::ports::Chunk| {
+                !cancel.load(std::sync::atomic::Ordering::Relaxed)
+            };
+            let done = self.members[i].chat.complete(&msgs, opts, &mut keep);
+            // 中途被打断：这条回复是**半截**的，绝不吸收（半截 say/agree 会让状态算歪）。
+            if self.cancelled() {
+                return TurnOut::Stopped;
+            }
             if let Some(err) = done.error.clone() {
                 return TurnOut::Interrupted(err);
             }
@@ -665,7 +710,16 @@ impl Discussion {
             Msg::system(self.prompts.core.synthesize.system.clone()),
             Msg::user(user),
         ];
-        let done = core_chat.complete(&msgs, self.opts(), &mut |_| true);
+        if self.cancelled() {
+            return Err("已停止".to_string());
+        }
+        let cancel = std::sync::Arc::clone(&self.cancel);
+        let mut keep =
+            move |_c: crate::core::ports::Chunk| !cancel.load(std::sync::atomic::Ordering::Relaxed);
+        let done = core_chat.complete(&msgs, self.opts(), &mut keep);
+        if self.cancelled() {
+            return Err("已停止".to_string());
+        }
         match done.error {
             Some(err) => Err(err),
             None => Ok(done.raw),
@@ -698,6 +752,10 @@ pub struct Execution {
     /// 执行/验收途中调用失败（超时 / 网络）：非空 = 本轮**中断**，不交付。
     /// 上层据此如实告知用户；会话保持可继续（用户点「继续」重新推进）。
     pub error: Option<String>,
+    /// 被用户「停止」：非空 = 本轮**停止**，未收完的回报**不入册**（半截回报进转录会误导验收）。
+    pub stopped: bool,
+    /// 「停止」标志（泵注入）：每次模型调用前与调用中途都看它。
+    cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl Execution {
@@ -709,12 +767,20 @@ impl Execution {
             items: Vec::new(),
             rework: 0,
             error: None,
+            stopped: false,
+            cancel: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }
     }
 
     /// 执行：各在组成员按任务回报（文案经提示词册渲染）；声明了工具的成员走工具循环。
-    pub fn run(members: &mut [Member], tasks: &str, prompts: &Prompts) -> Execution {
+    pub fn run(
+        members: &mut [Member],
+        tasks: &str,
+        prompts: &Prompts,
+        cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    ) -> Execution {
         let mut exec = Execution::new();
+        exec.cancel = cancel;
         exec.collect_reports(
             members,
             prompts.render(&prompts.core.execute.user, &[("tasks", tasks.to_string())]),
@@ -746,7 +812,16 @@ impl Execution {
                     ),
                 ],
             );
+            if self.cancelled() {
+                self.stopped = true;
+                return;
+            }
             let (text, views, error) = self.collect_one(m, user);
+            // 中途被打断：这条回报是**半截**的，不入册。
+            if self.cancelled() {
+                self.stopped = true;
+                return;
+            }
             self.traces.entry(m.id.clone()).or_default().extend(views);
             self.reports.insert(m.id.clone(), text);
             if let Some(err) = error {
@@ -762,7 +837,15 @@ impl Execution {
             if !m.present {
                 continue;
             }
+            if self.cancelled() {
+                self.stopped = true;
+                return;
+            }
             let (text, views, error) = self.collect_one(m, user_prompt.clone());
+            if self.cancelled() {
+                self.stopped = true;
+                return;
+            }
             self.traces.entry(m.id.clone()).or_default().extend(views);
             self.reports.insert(m.id.clone(), text);
             if let Some(err) = error {
@@ -770,6 +853,11 @@ impl Execution {
                 return;
             }
         }
+    }
+
+    /// 是否已被要求停止。
+    fn cancelled(&self) -> bool {
+        self.cancel.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// 单成员一次问询：拆字段借用（chat 可变 / tools 只读互不冲突），工具调用入册。
@@ -791,6 +879,7 @@ impl Execution {
             tools.as_mut(),
             id,
             Msg::user(user_prompt),
+            std::sync::Arc::clone(&self.cancel),
         )
     }
 
@@ -816,9 +905,19 @@ impl Execution {
             Msg::system(prompts.core.review.system.clone()),
             Msg::user(user),
         ];
+        if self.cancelled() {
+            self.stopped = true;
+            return;
+        }
         let opts =
             crate::core::ports::CompleteOpts::plain(llm.stream).with_timeout(llm.timeout_secs);
-        let done = core_chat.complete(&msgs, opts, &mut |_| true);
+        let cancel = std::sync::Arc::clone(&self.cancel);
+        let mut keep = move |_c: Chunk| !cancel.load(std::sync::atomic::Ordering::Relaxed);
+        let done = core_chat.complete(&msgs, opts, &mut keep);
+        if self.cancelled() {
+            self.stopped = true;
+            return;
+        }
         if let Some(err) = done.error.clone() {
             self.error = Some(err);
             return;
@@ -934,8 +1033,10 @@ pub(crate) fn converse(
     tools: Option<&mut MemberTools>,
     speaker: &str,
     first: Msg,
+    cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
 ) -> (String, Vec<ToolCallView>, Option<String>) {
-    let mut noop = |_c: Chunk| true;
+    // 分片回调里看「停止」：用户点了停止，不必等这个成员把话说完。
+    let mut noop = |_c: Chunk| !cancel.load(std::sync::atomic::Ordering::Relaxed);
     let mut views: Vec<ToolCallView> = Vec::new();
     let llm = tools.as_ref().map(|t| t.llm).unwrap_or_default();
     let rounds = converse_with(

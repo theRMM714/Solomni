@@ -1042,7 +1042,10 @@ fn opts_discussion(
             results,
         }),
     )];
-    (Discussion::new(members, false, test_prompts(), llm), seen)
+    (
+        Discussion::new(members, false, test_prompts(), llm, Default::default()),
+        seen,
+    )
 }
 
 /// 讨论的调用参数**必须来自全局设置**（以前这里写死非流式，正是协作卡住的成因之一）。
@@ -1053,7 +1056,7 @@ pub(crate) fn discussion_calls_carry_the_global_streaming_and_budget() {
         timeout_secs: 123,
     };
     let (mut d, seen) = opts_discussion(vec![None, None, None], llm);
-    assert!(d.open("任务").is_none(), "开场正常");
+    assert!(d.open("任务").is_ok(), "开场正常");
     let got = seen.lock().expect("锁").clone();
     assert_eq!(
         got[0],
@@ -1073,7 +1076,7 @@ pub(crate) fn discussion_call_failure_interrupts_without_absorbing_a_line() {
         vec![None, Some("模型调用失败：超时".to_string()), None],
         Default::default(),
     );
-    assert!(d.open("任务").is_none(), "开场正常");
+    assert!(d.open("任务").is_ok(), "开场正常");
     match d.step() {
         TurnOut::Interrupted(err) => assert!(err.contains("超时"), "原因要原样带回：{}", err),
         other => panic!(
@@ -1083,6 +1086,7 @@ pub(crate) fn discussion_call_failure_interrupts_without_absorbing_a_line() {
                 TurnOut::Done => "Done",
                 TurnOut::AskUser { .. } => "AskUser",
                 TurnOut::Interrupted(_) => "Interrupted",
+                TurnOut::Stopped => "Stopped",
             }
         ),
     }
@@ -1126,7 +1130,13 @@ pub(crate) fn scripted_discussion(scripts: Vec<Vec<String>>, allow: bool) -> Dis
         .enumerate()
         .map(|(i, s)| Member::new(&format!("m{}", i), format!("职责{}", i), scripted(s)))
         .collect();
-    Discussion::new(members, allow, test_prompts(), Default::default())
+    Discussion::new(
+        members,
+        allow,
+        test_prompts(),
+        Default::default(),
+        Default::default(),
+    )
 }
 
 #[test]
@@ -1144,13 +1154,14 @@ pub(crate) fn discussion_full_agreement() {
         ],
         false,
     );
-    d.open("任务");
+    let _ = d.open("任务");
     loop {
         match d.step() {
             TurnOut::Round => continue,
             TurnOut::Done => break,
             TurnOut::AskUser { .. } => panic!("不该请教"),
             TurnOut::Interrupted(e) => panic!("不该中断：{e}"),
+            TurnOut::Stopped => panic!("不该停止"),
         }
     }
     assert!(d.transcript.iter().any(|l| l.text.contains("[m0:agree]")));
@@ -1162,7 +1173,7 @@ pub(crate) fn discussion_ask_pauses() {
         vec![vec!["{\"type\":\"ask\",\"text\":\"需要参数?\"}".into()]],
         false,
     );
-    d.open("任务");
+    let _ = d.open("任务");
     match d.step() {
         TurnOut::AskUser { member, question } => {
             assert_eq!(member, "m0");
@@ -1178,7 +1189,7 @@ pub(crate) fn discussion_leave_shrinks() {
         vec![vec!["{\"type\":\"leave\",\"text\":\"撤了\"}".into()]],
         false,
     );
-    d.open("任务");
+    let _ = d.open("任务");
     let _ = d.step();
     assert!(d.members.iter().all(|m| !m.present));
 }
@@ -1193,13 +1204,14 @@ pub(crate) fn discussion_autonomy_archives_ask() {
         ]],
         true,
     );
-    d.open("任务");
+    let _ = d.open("任务");
     loop {
         match d.step() {
             TurnOut::Round => continue,
             TurnOut::Done => break,
             TurnOut::AskUser { .. } => panic!("自裁模式不该暂停"),
             TurnOut::Interrupted(e) => panic!("不该中断：{e}"),
+            TurnOut::Stopped => panic!("不该停止"),
         }
     }
     assert!(d.transcript.iter().any(|l| l.text.contains("自裁")));
@@ -1211,13 +1223,14 @@ pub(crate) fn discussion_round_cap_enforced() {
         vec![vec!["{\"type\":\"say\",\"text\":\"继续\"}".into()]; 2],
         false,
     );
-    d.open("任务");
+    let _ = d.open("任务");
     loop {
         match d.step() {
             TurnOut::Round => continue,
             TurnOut::Done => break,
             TurnOut::AskUser { .. } => panic!("不该请教"),
             TurnOut::Interrupted(e) => panic!("不该中断：{e}"),
+            TurnOut::Stopped => panic!("不该停止"),
         }
     }
     assert!(d.round > MAX_ROUNDS);
@@ -1232,8 +1245,14 @@ pub(crate) fn degraded_discussion_line_carries_a_structured_flag() {
         "职责".to_string(),
         scripted(vec!["我觉得可以".into()]),
     )];
-    let mut disc = Discussion::new(members, true, prompts.clone(), Default::default());
-    disc.open("任务");
+    let mut disc = Discussion::new(
+        members,
+        true,
+        prompts.clone(),
+        Default::default(),
+        Default::default(),
+    );
+    let _ = disc.open("任务");
     let line = disc
         .transcript
         .iter()
@@ -1280,7 +1299,12 @@ pub(crate) fn execution_review_pass_and_fail_paths() {
         "职责".to_string(),
         scripted(vec!["{\"type\":\"say\",\"text\":\"汇报内容\"}".into()]),
     )];
-    let mut exec = crate::core::engine::Execution::run(members.as_mut_slice(), "任务A", &prompts);
+    let mut exec = crate::core::engine::Execution::run(
+        members.as_mut_slice(),
+        "任务A",
+        &prompts,
+        Default::default(),
+    );
     assert_eq!(exec.reports.get("m0").map(|s| s.as_str()), Some("汇报内容"));
     let mut core_chat = scripted(vec![
         "[{\"item\":\"A\",\"status\":\"fail\",\"reason\":\"没做完\"}]".into(),
@@ -1301,7 +1325,12 @@ pub(crate) fn review_parse_failure_is_conservative_fail() {
         "职责".to_string(),
         scripted(vec!["{\"type\":\"say\",\"text\":\"x\"}".into()]),
     )];
-    let mut exec = crate::core::engine::Execution::run(members.as_mut_slice(), "任务", &prompts);
+    let mut exec = crate::core::engine::Execution::run(
+        members.as_mut_slice(),
+        "任务",
+        &prompts,
+        Default::default(),
+    );
     let mut core_chat = scripted(vec!["完全不是清单".to_string()]);
     exec.review(core_chat.as_mut(), "方案", &prompts, Default::default());
     assert!(exec.items.is_empty());
@@ -2547,7 +2576,12 @@ pub(crate) fn a_malformed_envelope_is_repaired_when_the_fix_is_unambiguous() {
         .repair("x", &crate::core::envelope::Malformed::Syntax("x".into()))
         .repaired
         .is_none());
-    let exec = crate::core::engine::Execution::run(std::slice::from_mut(&mut m), "任务", &prompts);
+    let exec = crate::core::engine::Execution::run(
+        std::slice::from_mut(&mut m),
+        "任务",
+        &prompts,
+        Default::default(),
+    );
     let trace = exec.traces.get("m0").expect("工具行");
     assert!(!trace[0].ok, "不修时如实记失败：{}", trace[0].output);
     // 默认修复器：同一个输入被无歧义修好 → 照常执行，且回执最前面如实标注
@@ -2560,8 +2594,12 @@ pub(crate) fn a_malformed_envelope_is_repaired_when_the_fix_is_unambiguous() {
         Arc::clone(&runner),
     );
     m2.tools.as_mut().expect("工具环境").repair = Arc::new(crate::adapters::UnambiguousRepair);
-    let exec2 =
-        crate::core::engine::Execution::run(std::slice::from_mut(&mut m2), "任务", &prompts);
+    let exec2 = crate::core::engine::Execution::run(
+        std::slice::from_mut(&mut m2),
+        "任务",
+        &prompts,
+        Default::default(),
+    );
     let trace2 = exec2.traces.get("m0").expect("工具行");
     assert!(trace2[0].ok, "修好即执行：{}", trace2[0].output);
     assert!(
@@ -2590,8 +2628,12 @@ pub(crate) fn a_malformed_envelope_is_repaired_when_the_fix_is_unambiguous() {
         Arc::clone(&runner),
     );
     m3.tools.as_mut().expect("工具环境").repair = Arc::new(crate::adapters::UnambiguousRepair);
-    let exec3 =
-        crate::core::engine::Execution::run(std::slice::from_mut(&mut m3), "任务", &prompts);
+    let exec3 = crate::core::engine::Execution::run(
+        std::slice::from_mut(&mut m3),
+        "任务",
+        &prompts,
+        Default::default(),
+    );
     let trace3 = exec3.traces.get("m0").expect("工具行");
     assert!(trace3[0].ok, "补上收尾括号后照常执行：{}", trace3[0].output);
     assert!(
@@ -2610,8 +2652,12 @@ pub(crate) fn a_malformed_envelope_is_repaired_when_the_fix_is_unambiguous() {
         Arc::clone(&runner),
     );
     m4.tools.as_mut().expect("工具环境").repair = Arc::new(crate::adapters::UnambiguousRepair);
-    let exec4 =
-        crate::core::engine::Execution::run(std::slice::from_mut(&mut m4), "任务", &prompts);
+    let exec4 = crate::core::engine::Execution::run(
+        std::slice::from_mut(&mut m4),
+        "任务",
+        &prompts,
+        Default::default(),
+    );
     let trace4 = exec4.traces.get("m0").expect("工具行");
     assert!(
         !trace4[0].ok && trace4[0].output.contains("还差"),
@@ -3069,7 +3115,12 @@ pub(crate) fn tool_loop_runs_declared_tool() {
         Arc::clone(&runner),
     );
     let prompts = test_prompts();
-    let exec = crate::core::engine::Execution::run(std::slice::from_mut(&mut m), "任务", &prompts);
+    let exec = crate::core::engine::Execution::run(
+        std::slice::from_mut(&mut m),
+        "任务",
+        &prompts,
+        Default::default(),
+    );
     assert_eq!(exec.reports.get("m0").map(|s| s.as_str()), Some("完成"));
     let calls = runner.calls.lock().expect("锁");
     assert_eq!(calls.len(), 1, "声明过的工具应恰好执行一次");
@@ -3150,7 +3201,12 @@ pub(crate) fn module_tool_params_are_declared_in_the_manifest_and_enforced_by_co
         .get_mut("m0")
         .expect("模块")
         .books = books;
-    let exec = crate::core::engine::Execution::run(std::slice::from_mut(&mut m), "任务", &prompts);
+    let exec = crate::core::engine::Execution::run(
+        std::slice::from_mut(&mut m),
+        "任务",
+        &prompts,
+        Default::default(),
+    );
     assert!(
         runner.calls.lock().expect("锁").is_empty(),
         "参数不合法绝不落进程"
@@ -3189,7 +3245,12 @@ pub(crate) fn module_tool_params_are_declared_in_the_manifest_and_enforced_by_co
         .get_mut("m0")
         .expect("模块")
         .books = books2;
-    crate::core::engine::Execution::run(std::slice::from_mut(&mut m2), "任务", &prompts);
+    crate::core::engine::Execution::run(
+        std::slice::from_mut(&mut m2),
+        "任务",
+        &prompts,
+        Default::default(),
+    );
     let calls = runner2.calls.lock().expect("锁");
     assert_eq!(calls.len(), 1, "合法调用照常执行");
     assert!(calls[0].2.contains("keyword"));
@@ -3219,7 +3280,12 @@ pub(crate) fn tool_loop_rejects_undeclared_tool() {
         Arc::clone(&runner),
     );
     let prompts = test_prompts();
-    let exec = crate::core::engine::Execution::run(std::slice::from_mut(&mut m), "任务", &prompts);
+    let exec = crate::core::engine::Execution::run(
+        std::slice::from_mut(&mut m),
+        "任务",
+        &prompts,
+        Default::default(),
+    );
     assert!(
         runner.calls.lock().expect("锁").is_empty(),
         "未声明的工具绝不落进程"
@@ -3265,7 +3331,12 @@ pub(crate) fn tool_loop_cap_forces_final_answer() {
     script.push("{\"type\":\"say\",\"text\":\"最终回报\"}".into());
     let mut m = member_with_tools("m0", script, Arc::clone(&runner));
     let prompts = test_prompts();
-    let exec = crate::core::engine::Execution::run(std::slice::from_mut(&mut m), "任务", &prompts);
+    let exec = crate::core::engine::Execution::run(
+        std::slice::from_mut(&mut m),
+        "任务",
+        &prompts,
+        Default::default(),
+    );
     assert_eq!(
         runner.calls.lock().expect("锁").len(),
         MAX_TOOL_CALLS,
@@ -4190,7 +4261,12 @@ pub(crate) fn native_mode_declares_tools_and_runs_multiple_structured_calls() {
         Arc::clone(&seen),
     );
     let prompts = test_prompts();
-    let exec = crate::core::engine::Execution::run(std::slice::from_mut(&mut m), "任务", &prompts);
+    let exec = crate::core::engine::Execution::run(
+        std::slice::from_mut(&mut m),
+        "任务",
+        &prompts,
+        Default::default(),
+    );
     assert_eq!(
         exec.reports.get("a").map(|s| s.as_str()),
         Some("读完了"),
@@ -4307,7 +4383,12 @@ pub(crate) fn native_mode_refuses_a_hand_written_envelope() {
         Arc::new(Mutex::new(Vec::new())),
     );
     let prompts = test_prompts();
-    let exec = crate::core::engine::Execution::run(std::slice::from_mut(&mut m), "任务", &prompts);
+    let exec = crate::core::engine::Execution::run(
+        std::slice::from_mut(&mut m),
+        "任务",
+        &prompts,
+        Default::default(),
+    );
     let trace = exec.traces.get("a").expect("应记一条失败的工具行");
     assert_eq!(trace.len(), 1);
     assert!(!trace[0].ok, "原生模式下信封不执行");
@@ -4346,7 +4427,12 @@ pub(crate) fn declared_parallel_reads_overlap_and_results_keep_the_call_order() 
         Arc::new(Mutex::new(Vec::new())),
     );
     let prompts = test_prompts();
-    let exec = crate::core::engine::Execution::run(std::slice::from_mut(&mut m), "任务", &prompts);
+    let exec = crate::core::engine::Execution::run(
+        std::slice::from_mut(&mut m),
+        "任务",
+        &prompts,
+        Default::default(),
+    );
     let peak = io.peak_concurrent_reads();
     assert!(
         peak >= 2,
@@ -4395,7 +4481,12 @@ pub(crate) fn a_writing_call_is_a_barrier_and_sees_the_merged_ledger() {
         Arc::new(Mutex::new(Vec::new())),
     );
     let prompts = test_prompts();
-    let exec = crate::core::engine::Execution::run(std::slice::from_mut(&mut m), "任务", &prompts);
+    let exec = crate::core::engine::Execution::run(
+        std::slice::from_mut(&mut m),
+        "任务",
+        &prompts,
+        Default::default(),
+    );
     let trace = exec.traces.get("a").expect("两条工具行");
     assert_eq!(trace.len(), 2);
     assert!(
@@ -4459,7 +4550,12 @@ pub(crate) fn module_tools_are_concurrent_only_when_declared() {
         Arc::clone(&runner) as Arc<dyn ToolRunner + Send + Sync>,
         true,
     );
-    let exec = crate::core::engine::Execution::run(std::slice::from_mut(&mut m), "任务", &prompts);
+    let exec = crate::core::engine::Execution::run(
+        std::slice::from_mut(&mut m),
+        "任务",
+        &prompts,
+        Default::default(),
+    );
     let peak = runner.peak_concurrent();
     assert!(
         peak >= 2,
@@ -4473,7 +4569,12 @@ pub(crate) fn module_tools_are_concurrent_only_when_declared() {
         Arc::clone(&runner) as Arc<dyn ToolRunner + Send + Sync>,
         false,
     );
-    let _ = crate::core::engine::Execution::run(std::slice::from_mut(&mut m), "任务", &prompts);
+    let _ = crate::core::engine::Execution::run(
+        std::slice::from_mut(&mut m),
+        "任务",
+        &prompts,
+        Default::default(),
+    );
     assert_eq!(
         runner.peak_concurrent(),
         1,

@@ -4,26 +4,6 @@
 # 已经能机器判定的门禁不入账。平台与跨平台层的缺口记在
 # tests/cross-platform/gaps.yaml 与 tests/<平台>/gaps.yaml（它们决定 TEST-REPORT-ACCEPTED）。
 
-- id: collab.stop-not-wired
-  scope: global
-  level: T5
-  why: |
-    协作生成（开始讨论 / 回答 / 继续）跑起来后，用户点「停止」**不生效**：泵
-    （Discussion::step → Execution → 验收）从不检查取消标志。生成期间改配置 / 回档 / 删除已被如实拒绝
-    （派发时登记了"在跑"），但"停止"只置位、没人看——用户唯一的办法是等它跑完。
-    单 agent 没有这个问题（流式回调里检查取消）。行为上这是**如实性**缺口：
-    界面让用户以为能停，实际停不了。
-  how: |
-    把取消标志一路传进协作的泵，与单 agent 同一口径检查（每轮成员调用前后、每次执行 / 验收调用前），
-    已置位就停止推进并走现有收尾路径（事件照常落转录，行尾标"已停止"），不做特殊分支。
-    机制上：CollabSession 持有 Arc<AtomicBool>，或让 pump_with 接受一个 Live，由 CoreHandle 派发时注入。
-  accept: |
-    协作讨论进行中点「停止」→ 泵在一个成员调用内收尾（亚秒级返回）；会话可继续（点「继续」从断点推进）；
-    转录如实记下"已停止"；三平台 CI 绿。
-  blocked_by: |
-    有意推迟：不属于"生成脱离命令队列"的范围（发现于那次改动的测试）；修复本身很小，
-    但要连带定义"停止后协作处于什么状态"（可继续 / 需重新开始），值得单独一轮确认。
-
 - id: fence.guest-tier-not-wired
   scope: global
   level: T4

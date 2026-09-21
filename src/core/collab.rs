@@ -83,6 +83,8 @@ pub struct CollabSession {
     /// 本工作的沙箱清单（按 agent 实例名取）。
     sandboxes: Sandboxes,
     done: bool,
+    /// 「停止」标志：由 CoreHandle 在派发时把任务登记处的取消标志注入（见 set_cancel）。
+    cancel: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl CollabSession {
@@ -133,7 +135,33 @@ impl CollabSession {
             spec,
             sandboxes,
             done: false,
+            cancel: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         })
+    }
+
+    /// 接上「停止」：CoreHandle 在派发时注入任务登记处的取消标志。
+    /// 注入后泵在每次模型调用前与**调用中途**都看它，所以「停止」能在一个调用内收尾。
+    pub fn set_cancel(&mut self, cancel: Arc<std::sync::atomic::AtomicBool>) {
+        if let Some(d) = self.disc.as_mut() {
+            d.set_cancel(Arc::clone(&cancel));
+        }
+        self.cancel = cancel;
+    }
+
+    /// 是否已被要求停止。
+    fn cancelled(&self) -> bool {
+        self.cancel.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// 执行 / 验收阶段该不该收尾：**停止（用户的意图）与失败（故障）分开说**。
+    /// 两者都如实收尾并保持会话可继续，但用户看到的话不一样——混成一句会让用户以为出了故障。
+    fn exec_note(&self, exec: &Execution) -> Option<String> {
+        if exec.stopped || self.cancelled() {
+            return Some(crate::core::events::stopped_note());
+        }
+        exec.error
+            .clone()
+            .map(|err| crate::core::events::interrupted_note(&err))
     }
 
     /// 在组名单（agent 实例）。
@@ -325,14 +353,23 @@ impl CollabSession {
             stream: self.settings.app.streaming,
             timeout_secs: self.settings.app.llm_timeout_secs,
         };
-        let mut disc = Discussion::new(members, self.allow, prompts, llm);
-        let interrupted = disc.open(&self.task);
+        let mut disc = Discussion::new(
+            members,
+            self.allow,
+            prompts,
+            llm,
+            std::sync::Arc::clone(&self.cancel),
+        );
+        let opened = disc.open(&self.task);
         self.disc = Some(disc);
-        // 开场就失败：如实告知并**中断**（会话保持可继续，用户点「继续」重试）。
-        if let Some(err) = interrupted {
-            sink(SessionEvent::Notice(crate::core::events::interrupted_note(
-                &err,
-            )));
+        // 开场就被停止 / 失败：都如实告知并交回用户（会话保持可继续，点「继续」重试）。
+        if let Err(err) = opened {
+            let note = if self.cancelled() {
+                crate::core::events::stopped_note()
+            } else {
+                crate::core::events::interrupted_note(&err)
+            };
+            sink(SessionEvent::Notice(note));
             return;
         }
         self.pump_with(sink);
@@ -376,6 +413,12 @@ impl CollabSession {
                         )));
                         return;
                     }
+                    TurnOut::Stopped => {
+                        // 用户点了「停止」：被中断的那条发言没有吸收（半截 say/agree 会把状态算歪），
+                        // 讨论保持可继续——点「继续」从断点接着推进。
+                        sink(SessionEvent::Notice(crate::core::events::stopped_note()));
+                        return;
+                    }
                     TurnOut::AskUser { member, question } => {
                         self.pending = Some(Pending::Ask { member, question });
                         return;
@@ -409,11 +452,14 @@ impl CollabSession {
                         sink(SessionEvent::Plan(p.clone()));
                         p
                     }
-                    // 整理失败：不落方案、不往下走，如实告知并中断（用户可点「继续」重试）。
+                    // 整理被停止 / 失败：都不落方案、不往下走，如实告知并交回用户。
                     Err(err) => {
-                        sink(SessionEvent::Notice(crate::core::events::interrupted_note(
-                            &err,
-                        )));
+                        let note = if self.cancelled() {
+                            crate::core::events::stopped_note()
+                        } else {
+                            crate::core::events::interrupted_note(&err)
+                        };
+                        sink(SessionEvent::Notice(note));
                         return;
                     }
                 }
@@ -427,12 +473,15 @@ impl CollabSession {
             .expect("disc 存在")
             .members
             .as_mut_slice();
-        let mut exec = Execution::run(members, &plan, &prompts);
-        // 执行阶段有成员调用失败：不交付、不返工，如实告知并中断（会话保持可继续）。
-        if let Some(err) = exec.error.clone() {
-            sink(SessionEvent::Notice(crate::core::events::interrupted_note(
-                &err,
-            )));
+        let mut exec = Execution::run(
+            members,
+            &plan,
+            &prompts,
+            std::sync::Arc::clone(&self.cancel),
+        );
+        // 执行阶段被停止 / 有成员调用失败：都不交付、不返工，如实告知并交回用户。
+        if let Some(note) = self.exec_note(&exec) {
+            sink(SessionEvent::Notice(note));
             return;
         }
         for (id, text) in &exec.reports {
@@ -444,10 +493,8 @@ impl CollabSession {
             });
         }
         exec.review(self.core_chat.as_mut(), &plan, &prompts, llm);
-        if let Some(err) = exec.error.clone() {
-            sink(SessionEvent::Notice(crate::core::events::interrupted_note(
-                &err,
-            )));
+        if let Some(note) = self.exec_note(&exec) {
+            sink(SessionEvent::Notice(note));
             return;
         }
         sink(review_event(&exec));
@@ -465,10 +512,8 @@ impl CollabSession {
                 .members
                 .as_mut_slice();
             exec.rerun(members, &plan, &review_text, &prompts);
-            if let Some(err) = exec.error.clone() {
-                sink(SessionEvent::Notice(crate::core::events::interrupted_note(
-                    &err,
-                )));
+            if let Some(note) = self.exec_note(&exec) {
+                sink(SessionEvent::Notice(note));
                 return;
             }
             for (id, text) in &exec.reports {
@@ -480,10 +525,8 @@ impl CollabSession {
                 });
             }
             exec.review(self.core_chat.as_mut(), &plan, &prompts, llm);
-            if let Some(err) = exec.error.clone() {
-                sink(SessionEvent::Notice(crate::core::events::interrupted_note(
-                    &err,
-                )));
+            if let Some(note) = self.exec_note(&exec) {
+                sink(SessionEvent::Notice(note));
                 return;
             }
             sink(review_event(&exec));
@@ -682,6 +725,7 @@ impl CollabSession {
             spec: meta.exec.clone(),
             sandboxes,
             done: st.ended,
+            cancel: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         };
         if st.begun {
             // 讨论转录 = 最后一条 [用户:开始] 之后的行。
@@ -693,7 +737,13 @@ impl CollabSession {
             let disc_lines = all_lines[start..].to_vec();
             let (members, _) = s.assemble_members()?;
             let llm = s.llm_opts();
-            let mut disc = Discussion::new(members, st.allow, prompts, llm);
+            let mut disc = Discussion::new(
+                members,
+                st.allow,
+                prompts,
+                llm,
+                std::sync::Arc::clone(&s.cancel),
+            );
             disc.round = st.round.max(1);
             disc.closed = st.closed;
             for m in disc.members.iter_mut() {

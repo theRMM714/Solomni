@@ -443,12 +443,21 @@ impl CoreHandle {
     ) -> Result<Advance, String> {
         let bus = Arc::clone(&self.bus);
         let jobs = Arc::clone(&self.jobs);
-        let session = self.call({
+        // **先登记再取会话**：登记早于派发，所以「停止」从派发那一刻起就能生效。
+        let cancel = jobs.register(sid);
+        let session = match self.call({
             let sid = sid.to_string();
             move |core| core.take_collab(&sid)
-        })?;
-        // 登记"在跑"：生成期间改配置 / 回档 / 删除因此被如实拒绝（停止标志照旧不进队列）。
-        let _cancel = jobs.register(sid);
+        }) {
+            Ok(s) => s,
+            Err(e) => {
+                jobs.unregister(sid);
+                return Err(e);
+            }
+        };
+        // 把「停止」接到泵上：它在每次模型调用前与**调用中途**都看这个标志。
+        let mut session = session;
+        session.set_cancel(Arc::clone(&cancel));
         let text = text.to_string();
         let worker = {
             let sid = sid.to_string();
