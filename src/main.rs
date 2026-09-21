@@ -99,7 +99,7 @@ fn main() {
         std::sync::Arc::clone(&log),
         std::sync::Arc::clone(&memo),
     );
-    let prompts = adapters::YamlPrompts::new(root.join("prompts.yaml"));
+    let prompts = adapters::YamlPrompts::new(root.join("prompts"));
     // 册子只读一次：core 与适配层（工具回执里的那些收尾标记）共用同一份。
     let book = match core::ports::PromptSource::load(&prompts) {
         Ok(b) => b,

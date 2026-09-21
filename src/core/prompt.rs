@@ -1,6 +1,6 @@
 //! 提示词渲染层：{{key}} 占位替换，纯逻辑。
 //! 册子文本来自 PromptSource（文件机制在适配层）；缺键/缺变量报错，不静默。
-//! 提示词是最不稳定的文本：改文案只动 prompts.yaml，不改代码。
+//! 提示词是最不稳定的文本：改文案只动 prompts/，不改代码。
 
 use serde::Deserialize;
 
@@ -38,10 +38,40 @@ pub fn render(template: &str, vars: Vars) -> Result<String, String> {
     Ok(out)
 }
 
-/// 提示词册（prompts.yaml 的内存形态）。
+/// 提示词册（内存形态）：由 `prompts/` 下的多个文件合并而成。
 #[derive(Debug, Clone, Deserialize)]
 pub struct Prompts {
     pub core: CorePrompts,
+}
+
+/// 把册子的多个文件合并成内存形态：各文件的**顶层键**合并后就是 `core:` 的内容。
+///
+/// 为什么合并而不是把结构也拆开：册子的内存形态是**契约**——core 各处按 `prompts.core.x` 引用，
+/// 文件怎么分是组织问题，不该让每个引用点跟着改。所以"拆分"只动文件与加载器。
+///
+/// 两条如实报错（不静默）：**键在两个文件里重复**（拆分时最可能犯的错）、**缺键或类型不对**。
+pub fn merge_book(docs: &[String]) -> Result<Prompts, String> {
+    let mut merged = serde_yaml::Mapping::new();
+    for doc in docs {
+        let value: serde_yaml::Value =
+            serde_yaml::from_str(doc).map_err(|e| format!("提示词册非法：{}", e))?;
+        let map = match value {
+            serde_yaml::Value::Mapping(m) => m,
+            _ => return Err("提示词册非法：每个文件的最外层必须是一张键表".to_string()),
+        };
+        for (key, value) in map {
+            if merged.insert(key.clone(), value).is_some() {
+                return Err(format!("提示词册非法：键 {:?} 在两个文件里重复", key));
+            }
+        }
+    }
+    let mut root = serde_yaml::Mapping::new();
+    root.insert(
+        serde_yaml::Value::String("core".to_string()),
+        serde_yaml::Value::Mapping(merged),
+    );
+    serde_yaml::from_value(serde_yaml::Value::Mapping(root))
+        .map_err(|e| format!("提示词册缺键或类型不对：{}", e))
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -68,7 +98,7 @@ pub struct CorePrompts {
     pub sys_tools: String,
     /// patch 通道的写法说明（模型侧）；变量：work_root, sandbox_root
     pub patch_guide: String,
-    /// 内置工具的参数契约（prompts.yaml 的 builtin_tools）：模型说明与调用校验的唯一来源。
+    /// 内置工具的参数契约（prompts/shared/tools.yaml 的 builtin_tools）：模型说明与调用校验的唯一来源。
     pub builtin_tools: crate::core::schema::ToolBook,
     /// 登记处还没有 agent 时的说明（拟名单的 {{agents}} 取值）。
     pub no_agents: String,
@@ -446,6 +476,6 @@ pub struct AgentPrompts {
 impl Prompts {
     pub fn render<'a>(&self, template: &str, vars: Vars<'a>) -> String {
         render(template, vars)
-            .expect("提示词渲染失败：变量缺失属于装配错误，须修复 prompts.yaml 或调用方")
+            .expect("提示词渲染失败：变量缺失属于装配错误，须修复 prompts/ 或调用方")
     }
 }

@@ -409,20 +409,47 @@ fn fs_packages_scans_the_dependency_folder_and_reports_each_rejection() {
 #[test]
 fn yaml_prompts_loads_the_shipped_book_and_reports_missing_or_broken_files() {
     let root = scratch("yaml-prompts");
-    let real = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("prompts.yaml");
+    let real = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("prompts");
     let ok = YamlPrompts::new(real)
         .load()
         .expect("产品自带提示词册必须合法");
     assert!(!ok.core.no_agents.is_empty());
 
-    let missing = YamlPrompts::new(root.join("nope.yaml")).load().unwrap_err();
-    assert!(missing.contains("提示词册缺失"), "{}", missing);
-    let broken = root.join("broken.yaml");
-    std::fs::write(&broken, "core: [不是映射").expect("造坏册子");
-    assert!(YamlPrompts::new(broken)
+    // 目录不存在 = 装配错误（如实报，不静默造默认文案）。
+    let missing = YamlPrompts::new(root.join("nope")).load().unwrap_err();
+    assert!(missing.contains("提示词册目录读不了"), "{}", missing);
+
+    // 空目录 = 一个 .yaml 都没有，同样是装配错误。
+    let empty = root.join("empty");
+    std::fs::create_dir_all(&empty).expect("造空目录");
+    assert!(
+        YamlPrompts::new(empty)
+            .load()
+            .unwrap_err()
+            .contains("一个 .yaml 都没有"),
+        "空目录必须如实报错"
+    );
+
+    // 语法坏 = 如实报。
+    let broken = root.join("broken");
+    std::fs::create_dir_all(&broken).expect("造坏目录");
+    std::fs::write(broken.join("a.yaml"), "core: [不是映射").expect("造坏册子");
+    assert!(YamlPrompts::new(broken.clone())
         .load()
         .unwrap_err()
-        .contains("prompts.yaml 非法"));
+        .contains("提示词册非法"));
+
+    // 键在两个文件里重复：**拆分时最可能犯的错**，必须被抓到（否则静默丢一份）。
+    std::fs::write(broken.join("a.yaml"), "no_model: \"甲\"").expect("造册子");
+    std::fs::write(broken.join("b.yaml"), "no_model: \"乙\"").expect("造重复键");
+    assert!(
+        YamlPrompts::new(broken)
+            .load()
+            .unwrap_err()
+            .contains("重复"),
+        "重复键必须如实报错"
+    );
+
     let _ = std::fs::remove_dir_all(&root);
 }
 

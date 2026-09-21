@@ -331,8 +331,12 @@ mod tests {
     /// 回执里的标记文案必须来自提示词册（它们随 [工具结果] 进模型上下文，所以不能在代码里另写一份）。
     #[test]
     fn receipt_markers_come_from_the_prompt_book() {
-        let prompts: crate::core::prompt::Prompts =
-            serde_yaml::from_str(include_str!("../../prompts.yaml")).expect("内置提示词册必须合法");
+        use crate::core::ports::PromptSource;
+        let prompts = crate::adapters::YamlPrompts::new(
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("prompts"),
+        )
+        .load()
+        .expect("内置提示词册必须合法");
         let texts = prompts.core.tool_texts;
         let tools = ProcTools::new(
             PathBuf::from("solomni"),
@@ -447,8 +451,12 @@ mod tests {
     }
 
     fn prompt_texts() -> crate::core::prompt::ToolTexts {
-        let prompts: crate::core::prompt::Prompts =
-            serde_yaml::from_str(include_str!("../../prompts.yaml")).expect("内置提示词册必须合法");
+        use crate::core::ports::PromptSource;
+        let prompts = crate::adapters::YamlPrompts::new(
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("prompts"),
+        )
+        .load()
+        .expect("内置提示词册必须合法");
         prompts.core.tool_texts
     }
 

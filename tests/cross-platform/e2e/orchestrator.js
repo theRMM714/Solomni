@@ -143,7 +143,11 @@ async function main() {
     return 1;
   }
   // 提示词册是产品的一部分，必须用当前那份（夹具里不放副本，否则必然过期）。
-  fs.copyFileSync(path.join(PRODUCT_ROOT, "prompts.yaml"), path.join(FIXTURE, "prompts.yaml"));
+  // 册子是**目录**（按角色分文件）：整份复制过去，夹具里不留第二份真相。
+  fs.cpSync(path.join(PRODUCT_ROOT, "prompts"), path.join(FIXTURE, "prompts"), {
+    recursive: true,
+    force: true,
+  });
   // 工具命令行按平台生成：Linux / macOS 上解释器通常叫 python3，Windows 上叫 python（写死一个必然在另一个平台挂）。
   writeToolbox(interpreter());
   // 清运行期痕迹（夹具本身不动）。

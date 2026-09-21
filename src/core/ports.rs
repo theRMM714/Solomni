@@ -25,7 +25,7 @@ pub enum Chunk {
 /// stream = 要求供应商流式返回；on 逐片回调（非流式实现不回调）。
 /// on 返回 false = 调用方要求中止，实现方必须立即停止读取并返回已产出的正文。
 /// 声明给供应商的一个工具（原生工具调用通道用）：名字 + 说明 + JSON Schema 参数。
-/// 说明与 Schema 都来自文本层（内置工具在 prompts.yaml、模块工具在 module.yaml），这里只是搬运形态。
+/// 说明与 Schema 都来自文本层（内置工具在 prompts/、模块工具在 module.yaml），这里只是搬运形态。
 #[derive(Debug, Clone)]
 pub struct ToolDecl {
     pub name: String,

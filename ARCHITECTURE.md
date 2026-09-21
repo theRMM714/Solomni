@@ -45,7 +45,7 @@ presentation ──▶ core ◀── adapters
 | `Workspace` | 一次工作的 work 目录、各 agent 沙箱、文件清单与寻址根 | `FsWorkspace` |
 | `SysIo` | 内置文件工具的读写机制（读严格 UTF-8、非法字节如实标注；写一律 UTF-8） | `FsSysIo` |
 | `HistoryStore` | 会话历史：一个会话一个目录（meta + 事件流水） | `FsHistory` |
-| `PromptSource` | 提示词册加载（`prompts.yaml`） | `YamlPrompts` |
+| `PromptSource` | 提示词册加载（`prompts/`） | `YamlPrompts` |
 | `ToolRunner` | 外部工具进程（围栏安装、拉起、stdin 送参、超时杀树、截断） | `ProcTools`（守门进程 = 本程序的 `--fence-run` 模式） |
 | `EnvelopeRepair` | 手写信封不合法时的**无歧义**补救（改了字段含义就是错；拿不准就返回不修） | `UnambiguousRepair`（转义字符串里的裸控制字符 + 补上扫描器算出的收尾括号；断在字符串中间不修，一段回复里起了两段信封不修——补哪一段都是猜；调用方中止的生成一律不修） |
 | `FenceHost` | 围栏授权的释放（删除会话时请求一次撤销） | `confine::FenceHostAdapter`（本平台无该机制时为空操作） |
@@ -73,15 +73,15 @@ presentation ──▶ core ◀── adapters
 - 组合根创建唯一的 `FileLog` 并注入 core 与呈现层；测试用 `NoopLog`。
 - 目的：出问题时**看日志定因**，不靠推理猜。
 
-## 五、提示词册（prompts.yaml）
+## 五、提示词册（prompts/）
 
-- **所有发给 LLM 的提示词一律写入 `prompts.yaml`**，禁止硬编码进代码；改文案只改册子。
+- **所有发给 LLM 的提示词一律写入 `prompts/`**，禁止硬编码进代码；改文案只改册子。
 - 占位符 `{{key}}`；渲染器在 `core/prompt.rs`（纯逻辑）；文件加载经 `PromptSource` 端口在适配层。
 - **缺文件 / 缺键 / 缺变量 = 报错暴露**，禁止静默兜底文案。
 - 文案的注入方式与端口一致：随环境对象传入（沙箱/工具环境/引用改写器），而不是让纯逻辑自己去读文件。
 - 路径类占位符（`{{work_root}}` 等）由 core 在运行时替换成**真实根目录**后才交给 AI——仓库里永远不出现机器路径。
 
-册子结构（`prompts.yaml`）：
+册子结构（`prompts/`）：
 
 | 段 | 键 | 用途 |
 | --- | --- | --- |
@@ -126,8 +126,8 @@ session/<工作名>/
   **不钉在会话里**：每次生成前按登记处重新解析——变了就按重建路径就地刷新系统提示并给用户一句通知，没变什么都不做。
   **两套形态互斥**：envelope 不声明工具、只解析正文里的信封；native 只把工具声明发给供应商、不解析信封
   （正文里出现信封时**不执行**，但如实记一条失败工具行）。系统提示始终与实际协议一致，
-  回放按同一规则派生（与"改 prompts.yaml 后重建"同源）。
-- **工具声明里的 `parallel` 决定并发**（内置工具在 `prompts.yaml` 的 `builtin_tools`，模块工具在 `module.yaml` 的 `tools.<名字>`；
+  回放按同一规则派生（与"改 prompts/ 后重建"同源）。
+- **工具声明里的 `parallel` 决定并发**（内置工具在 `prompts/shared/tools.yaml` 的 `builtin_tools`，模块工具在 `module.yaml` 的 `tools.<名字>`；
   缺省 false = 独占）：一次回复里的**连续**可并发调用合成一批并发跑，其余各自独占（写入类因此是批次之间的屏障）；
   工具行、结果消息与账本合并**一律按原始调用顺序**——并发只影响执行，不影响上下文里的顺序。
 - **观察账本**（`systool::Observations`）是**进程内状态，不落盘**：记"本次会话完整读过 / 由核心写过哪些文件、当时的内容指纹"，

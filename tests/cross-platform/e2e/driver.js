@@ -7,7 +7,7 @@ const BASE = process.env.E2E_BASE || 'http://127.0.0.1:3099';
 const MOCK_BASE = process.env.E2E_MOCK_BASE || 'http://127.0.0.1:8397';
 const fs = require('fs');
 const path = require('path');
-// 夹具根：本目录下的 root/（隔离根：prompts.yaml、.home、modules 都在里面）。
+// 夹具根：本目录下的 root/（隔离根：prompts/、.home、modules 都在里面）。
 const ROOT = path.join(__dirname, 'root');
 
 async function api(method, p, body) {

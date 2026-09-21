@@ -1,0 +1,13 @@
+# 讨论者：讨论阶段的提示词与约定。
+discuss:
+  opener: |-
+    {{protocol}}
+
+    == 用户需求 ==
+    {{task}}
+  step: |-
+    == 讨论至今 ==
+    {{transcript}}
+
+    请继续。
+  autonomy_note: "[core] 已授权小组自裁：该问题留档，不逐轮请示。"

@@ -198,7 +198,7 @@ fn run_branch(
 }
 
 /// 这个工具有没有**声明可并发**（策略在册子/清单里，代码里不写名单）：
-/// 内置工具看 `prompts.yaml` 的 `builtin_tools.<名字>.parallel`，模块工具看 `module.yaml` 的 `tools.<名字>.parallel`。
+/// 内置工具看 `prompts/shared/tools.yaml` 的 `builtin_tools.<名字>.parallel`，模块工具看 `module.yaml` 的 `tools.<名字>.parallel`。
 /// 未声明 = 独占串行；**没写 module 的外部工具也按独占**（那要等 dispatch 才知道是哪个模块，核心不猜）。
 fn is_parallel(ctx: &MemberTools, module: Option<&str>, name: &str) -> bool {
     match module {

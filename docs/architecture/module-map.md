@@ -44,7 +44,7 @@
 | `fs_workspace.rs` | `Workspace`：`session/<工作名>/` 下的 work 与各 agent 沙箱 |
 | `fs_history.rs` | `HistoryStore`：`meta.yaml` + `transcript.jsonl` |
 | `yaml_settings.rs` | `SettingsStore`：登记处四份 yaml 的读写（见 [REGISTRY_SPEC.md](../../REGISTRY_SPEC.md)） |
-| `yaml_prompts.rs` | `PromptSource`：加载 `prompts.yaml` |
+| `yaml_prompts.rs` | `PromptSource`：加载 `prompts/` |
 | `endpoint.rs` | 端点补全/回落规则与进程内端点记忆（纯逻辑） |
 | `http_agent.rs` | 出站 HTTP 代理构建（TLS 后端选择与超时的单点） |
 | `http_chat.rs` | `Chat` / `ChatGateway`：OpenAI 兼容 `/chat/completions`（请求体形状的唯一定义：真实会话与探针共用） |

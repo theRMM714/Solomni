@@ -4292,7 +4292,7 @@ pub(crate) fn native_mode_declares_tools_and_runs_multiple_structured_calls() {
         "patch 在原生通道上用 body 承载补丁正文"
     );
     assert_eq!(patch["additionalProperties"], serde_json::json!(false));
-    // read 的声明来自 prompts.yaml 的声明（含 path 必填）
+    // read 的声明来自 prompts/ 的声明（含 path 必填）
     let read = first
         .iter()
         .find(|(n, _)| n == "read")
@@ -5055,7 +5055,7 @@ pub(crate) fn builtin_arg_mistakes_are_named_and_the_signature_comes_back() {
 
 #[test]
 pub(crate) fn builtin_tool_book_is_the_one_source_of_names_and_paths() {
-    // 保留名（代码里的常量）与 prompts.yaml 的声明必须一致，否则模型看到的工具与放行的工具会走偏。
+    // 保留名（代码里的常量）与 prompts/ 的声明必须一致，否则模型看到的工具与放行的工具会走偏。
     let prompts = test_prompts();
     let book = &prompts.core.builtin_tools;
     let mut declared: Vec<String> = book.keys().cloned().collect();
