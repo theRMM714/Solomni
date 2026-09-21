@@ -360,7 +360,17 @@ impl CollabSession {
             llm,
             std::sync::Arc::clone(&self.cancel),
         );
-        let opened = disc.open(&self.task);
+        // 开场逐成员外送：一个人说完就出它那一行（与轮次里同一段逻辑）。
+        // 回调**不捕获 sink**（由 Discussion 传进来），否则它与后面泵对 sink 的使用冲突。
+        let next_line = std::cell::Cell::new(self.next_line);
+        let handed = std::cell::Cell::new(0usize);
+        let mut on_lines = |lines: &[crate::core::engine::DiscLine],
+                            s: &mut dyn FnMut(SessionEvent)| {
+            emit_new_lines(lines, &next_line, &handed, s);
+        };
+        let opened = disc.open(&self.task, &mut on_lines, sink);
+        self.next_line = next_line.get();
+        self.emitted += handed.get();
         self.disc = Some(disc);
         // 开场就被停止 / 失败：都如实告知并交回用户（会话保持可继续，点「继续」重试）。
         if let Err(err) = opened {
@@ -400,7 +410,22 @@ impl CollabSession {
         // 讨论阶段：只在未收敛时步进（回档/重启后可从中途接着走）。
         if !self.disc.as_ref().expect("disc 已确认存在").closed {
             loop {
-                let outcome = self.disc.as_mut().expect("disc 已确认存在").step();
+                // 逐成员外送：一个成员说完就出它那一行（以前是整轮问完才一次性出，界面因此整轮不动）。
+                // 回调里不能借 self（disc 正被可变借用），所以用 Cell/RefCell 暂存，调用后并回会话。
+                let next_line = std::cell::Cell::new(self.next_line);
+                let handed = std::cell::Cell::new(0usize);
+                let mut on_lines =
+                    |lines: &[crate::core::engine::DiscLine], s: &mut dyn FnMut(SessionEvent)| {
+                        emit_new_lines(lines, &next_line, &handed, s);
+                    };
+                let outcome = self
+                    .disc
+                    .as_mut()
+                    .expect("disc 已确认存在")
+                    .step(&mut on_lines, sink);
+                self.next_line = next_line.get();
+                self.emitted += handed.get();
+                // 兜底：step 提前返回（停止 / 失败 / 收敛）时把剩下的行补齐；已交出去过的不会再出。
                 if let Some(d) = self.disc.as_ref() {
                     push_delta(d, &mut self.emitted, &mut self.next_line, sink);
                 }
@@ -818,6 +843,35 @@ fn emit_tool_lines(
             ..Default::default()
         }]));
         *next_line += 1;
+    }
+}
+
+/// 逐成员外送：把刚定稿的讨论行变成带**会话内稳定 id** 的转录事件交出去。
+/// 为什么要 Cell/RefCell：回调在 `Discussion::step/open` 内部被调用，那时 `self` 正被可变借用，
+/// 碰不到 `self.next_line` 与 `sink`——所以调用前后各并回一次，行只构造一次。
+fn emit_new_lines(
+    lines: &[crate::core::engine::DiscLine],
+    next_line: &std::cell::Cell<u64>,
+    handed: &std::cell::Cell<usize>,
+    sink: &mut dyn FnMut(SessionEvent),
+) {
+    let views: Vec<LineView> = lines
+        .iter()
+        .map(|l| {
+            let id = next_line.get();
+            next_line.set(id + 1);
+            LineView {
+                id,
+                reply: id,
+                line: l.text.clone(),
+                degraded: l.degraded,
+                ..Default::default()
+            }
+        })
+        .collect();
+    handed.set(handed.get() + views.len());
+    if !views.is_empty() {
+        sink(SessionEvent::Transcript(views));
     }
 }
 

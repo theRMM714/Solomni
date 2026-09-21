@@ -290,9 +290,20 @@ fn stopping_a_collab_discussion_is_prompt_and_keeps_the_session() {
         })
         .flatten()
         .collect();
+    // 替身让第一个成员正常说完、第二个卡住：只有**被中断的那个**不该有发言。
+    let spoken: Vec<&String> = lines
+        .iter()
+        .filter(|t| t.contains("[a:") || t.contains("[b:"))
+        .collect();
+    assert_eq!(
+        spoken.len(),
+        1,
+        "只该有第一个成员那一条（被中断的那条不吸收）：{:?}",
+        lines
+    );
     assert!(
-        !lines.iter().any(|t| t.contains("[a:") || t.contains("[b:")),
-        "被中断的发言不该进转录：{:?}",
+        lines.iter().all(|t| !t.contains("[b:")),
+        "被中断的成员不该有发言：{:?}",
         lines
     );
     // 可继续：放行后再点「继续」，泵应接着推进（取消标志是每次派发新登记的，不会粘住）。
@@ -334,6 +345,54 @@ fn collab_transcript_lands_on_disk_while_the_discussion_runs() {
     assert!(
         !events.is_empty(),
         "生成中途就该有落盘内容（中途刷新页面靠它）"
+    );
+
+    release.store(true, Ordering::Relaxed);
+    let _ = worker.join().expect("协作线程");
+}
+
+/// 协作逐成员外送：一个成员说完，它那一行**立刻**进事件台（以前整轮问完才一次性出）。
+#[test]
+fn collab_discussion_emits_each_member_line_as_it_speaks() {
+    let (handle, ops, started, release) = gated_ops(vec![module_of("a"), module_of("b")]);
+    let sid = ops
+        .sessions
+        .create_work(collab_work("c", &["a", "b"], false, "把资料整理成报告"))
+        .expect("建协作会话")
+        .sid;
+    let worker = {
+        let sessions = Arc::clone(&ops.sessions);
+        let sid = sid.clone();
+        std::thread::spawn(move || {
+            sessions.collab_step(&sid, crate::core::CollabStep::Begin, "yes")
+        })
+    };
+    // 等第二个成员卡住：说明第一个成员已经说完，但**整轮还没结束**。
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while started.load(Ordering::Relaxed) < 2 {
+        assert!(Instant::now() < deadline, "讨论没有推进到第二个成员");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert!(
+        ops.sessions.is_running(&sid),
+        "整轮必须还没结束，这条断言才有意义"
+    );
+    let (lines, _) = handle.events().snapshot(Some(&sid), 0);
+    let spoken: Vec<String> = lines
+        .iter()
+        .flat_map(|l| l.events.iter())
+        .filter_map(|e| match e {
+            SessionEvent::Transcript(ls) => Some(ls.iter().map(|x| x.line.clone())),
+            _ => None,
+        })
+        .flatten()
+        .collect();
+    assert!(
+        spoken
+            .iter()
+            .any(|t| t.contains("[a:") || t.contains("[b:")),
+        "整轮还没结束时，第一个成员的发言就该已经外送：{:?}",
+        spoken
     );
 
     release.store(true, Ordering::Relaxed);

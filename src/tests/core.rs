@@ -1056,7 +1056,10 @@ pub(crate) fn discussion_calls_carry_the_global_streaming_and_budget() {
         timeout_secs: 123,
     };
     let (mut d, seen) = opts_discussion(vec![None, None, None], llm);
-    assert!(d.open("任务").is_ok(), "开场正常");
+    assert!(
+        d.open("任务", &mut |_, _| {}, &mut |_| {}).is_ok(),
+        "开场正常"
+    );
     let got = seen.lock().expect("锁").clone();
     assert_eq!(
         got[0],
@@ -1064,7 +1067,7 @@ pub(crate) fn discussion_calls_carry_the_global_streaming_and_budget() {
         "开场调用要带上设置里的流式与预算：{:?}",
         got
     );
-    let _ = d.step();
+    let _ = d.step(&mut |_, _| {}, &mut |_| {});
     let got = seen.lock().expect("锁").clone();
     assert_eq!(got[1], (true, 123), "轮次调用同样：{:?}", got);
 }
@@ -1076,8 +1079,11 @@ pub(crate) fn discussion_call_failure_interrupts_without_absorbing_a_line() {
         vec![None, Some("模型调用失败：超时".to_string()), None],
         Default::default(),
     );
-    assert!(d.open("任务").is_ok(), "开场正常");
-    match d.step() {
+    assert!(
+        d.open("任务", &mut |_, _| {}, &mut |_| {}).is_ok(),
+        "开场正常"
+    );
+    match d.step(&mut |_, _| {}, &mut |_| {}) {
         TurnOut::Interrupted(err) => assert!(err.contains("超时"), "原因要原样带回：{}", err),
         other => panic!(
             "失败必须中断，实际：{}",
@@ -1154,9 +1160,9 @@ pub(crate) fn discussion_full_agreement() {
         ],
         false,
     );
-    let _ = d.open("任务");
+    let _ = d.open("任务", &mut |_, _| {}, &mut |_| {});
     loop {
-        match d.step() {
+        match d.step(&mut |_, _| {}, &mut |_| {}) {
             TurnOut::Round => continue,
             TurnOut::Done => break,
             TurnOut::AskUser { .. } => panic!("不该请教"),
@@ -1173,8 +1179,8 @@ pub(crate) fn discussion_ask_pauses() {
         vec![vec!["{\"type\":\"ask\",\"text\":\"需要参数?\"}".into()]],
         false,
     );
-    let _ = d.open("任务");
-    match d.step() {
+    let _ = d.open("任务", &mut |_, _| {}, &mut |_| {});
+    match d.step(&mut |_, _| {}, &mut |_| {}) {
         TurnOut::AskUser { member, question } => {
             assert_eq!(member, "m0");
             assert_eq!(question, "需要参数?");
@@ -1189,8 +1195,8 @@ pub(crate) fn discussion_leave_shrinks() {
         vec![vec!["{\"type\":\"leave\",\"text\":\"撤了\"}".into()]],
         false,
     );
-    let _ = d.open("任务");
-    let _ = d.step();
+    let _ = d.open("任务", &mut |_, _| {}, &mut |_| {});
+    let _ = d.step(&mut |_, _| {}, &mut |_| {});
     assert!(d.members.iter().all(|m| !m.present));
 }
 
@@ -1204,9 +1210,9 @@ pub(crate) fn discussion_autonomy_archives_ask() {
         ]],
         true,
     );
-    let _ = d.open("任务");
+    let _ = d.open("任务", &mut |_, _| {}, &mut |_| {});
     loop {
-        match d.step() {
+        match d.step(&mut |_, _| {}, &mut |_| {}) {
             TurnOut::Round => continue,
             TurnOut::Done => break,
             TurnOut::AskUser { .. } => panic!("自裁模式不该暂停"),
@@ -1223,9 +1229,9 @@ pub(crate) fn discussion_round_cap_enforced() {
         vec![vec!["{\"type\":\"say\",\"text\":\"继续\"}".into()]; 2],
         false,
     );
-    let _ = d.open("任务");
+    let _ = d.open("任务", &mut |_, _| {}, &mut |_| {});
     loop {
-        match d.step() {
+        match d.step(&mut |_, _| {}, &mut |_| {}) {
             TurnOut::Round => continue,
             TurnOut::Done => break,
             TurnOut::AskUser { .. } => panic!("不该请教"),
@@ -1252,7 +1258,7 @@ pub(crate) fn degraded_discussion_line_carries_a_structured_flag() {
         Default::default(),
         Default::default(),
     );
-    let _ = disc.open("任务");
+    let _ = disc.open("任务", &mut |_, _| {}, &mut |_| {});
     let line = disc
         .transcript
         .iter()

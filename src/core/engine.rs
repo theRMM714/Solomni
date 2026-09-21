@@ -6,7 +6,7 @@
 //! 结果与工具行一律按原始顺序回填——并发只影响执行，不影响上下文里的顺序。
 
 use crate::core::envelope::{self, ToolInvoke, Verb};
-use crate::core::events::ToolCallView;
+use crate::core::events::{SessionEvent, ToolCallView};
 use crate::core::ports::{BoxedChat, Chat, Chunk, CompleteOpts, Msg, ToolOutcome, ToolRunner};
 use crate::core::prompt::Prompts;
 use serde::Deserialize;
@@ -513,7 +513,14 @@ impl Discussion {
     }
 
     /// 首轮：聊天约定 + 用户需求（文案经提示词册渲染）。
-    pub fn open(&mut self, task: &str) -> Result<(), String> {
+    pub fn open(
+        &mut self,
+        task: &str,
+        on_lines: &mut LineSink<'_>,
+        sink: &mut dyn FnMut(SessionEvent),
+    ) -> Result<(), String> {
+        // 本轮到此刻还没交出去的行数：开场也是一个人说完就交一批。
+        let mut handed = self.transcript.len();
         let opener = self.prompts.render(
             &self.prompts.core.discuss.opener,
             &[
@@ -552,6 +559,9 @@ impl Discussion {
                 reply.degraded,
                 done.truncated(),
             );
+            // 逐成员外送：开场也是**一个人说完就出它那一行**（以前整轮问完才一次性出）。
+            on_lines(&self.transcript[handed..], sink);
+            handed = self.transcript.len();
         }
         self.round = 1;
         Ok(())
@@ -559,7 +569,11 @@ impl Discussion {
 
     /// 推进一轮：把当前转录并入上下文，依次转达给每个在组且未同意的成员。
     /// 讨论阶段不接工具循环：工具属执行机制，讨论只出主意（最小边界）。
-    pub fn step(&mut self) -> TurnOut {
+    pub fn step(
+        &mut self,
+        on_lines: &mut LineSink<'_>,
+        sink: &mut dyn FnMut(SessionEvent),
+    ) -> TurnOut {
         if self.closed {
             return TurnOut::Done;
         }
@@ -567,6 +581,8 @@ impl Discussion {
         if self.cancelled() {
             return TurnOut::Stopped;
         }
+        // 本轮到此刻还没交出去的行数（轮次标记也算）：一个成员说完就把它那一批交出去。
+        let mut handed = self.transcript.len();
         // 轮次边界：本轮的发言都在这条之后（回放时据此重算「本轮谁已同意」）。
         self.transcript.push(DiscLine {
             text: format!("[轮次 {}]", self.round + 1),
@@ -630,6 +646,9 @@ impl Discussion {
             let text = reply.text;
             let degraded = reply.degraded;
             self.absorb(&id, verb, text.clone(), degraded, done.truncated());
+            // 逐成员外送：**这个人说完就出它那一行**，不等整轮问完。
+            on_lines(&self.transcript[handed..], sink);
+            handed = self.transcript.len();
             let m = &mut self.members[i];
             match verb {
                 Verb::Leave => m.present = false,
@@ -998,6 +1017,10 @@ pub(crate) fn reply_msgs(
 fn tool_cap_msg(texts: &crate::core::prompt::ToolTexts) -> Msg {
     Msg::user(texts.render(&texts.tool_cap, &[("n", MAX_TOOL_CALLS.to_string())]))
 }
+
+/// 讨论行的**逐成员外送回调**：拿到刚定稿的行 + 本次的出口。
+/// 出口当参数传而不是让回调捕获它——否则回调借着 sink，`step`/`open` 的调用方随后用不了它。
+pub type LineSink<'a> = dyn FnMut(&[DiscLine], &mut dyn FnMut(SessionEvent)) + 'a;
 
 /// 一轮模型调用的产出（一轮 = 一条文本转录行；有工具时紧跟一条工具行）。
 /// 原始输出不进这里：工具轮由 ToolCallView.raw 承载、文本轮进上下文的就是解析后的文本。
