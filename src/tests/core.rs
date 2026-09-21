@@ -1053,6 +1053,7 @@ fn opts_discussion(
             llm,
             Default::default(),
             String::new(),
+            vec![],
         ),
         seen,
     )
@@ -1153,7 +1154,26 @@ pub(crate) fn scripted_discussion(scripts: Vec<Vec<String>>, allow: bool) -> Dis
         Default::default(),
         Default::default(),
         String::new(),
+        vec![],
     )
+}
+
+/// 原生通道：供应商的结构化槽位 → 讨论动词；不认识的工具名 = 不认识（调用点据此**如实拒绝**）。
+#[test]
+pub(crate) fn native_tool_names_map_to_discussion_verbs() {
+    use crate::core::engine::{arg_text, verb_of};
+    use crate::core::envelope::Verb;
+    assert_eq!(verb_of("say"), Some(Verb::Say));
+    assert_eq!(verb_of("agree"), Some(Verb::Agree));
+    assert_eq!(verb_of("leave"), Some(Verb::Leave));
+    assert_eq!(verb_of("ask"), Some(Verb::Ask));
+    // 不是协作动词 = 不认识：讨论里出现这种调用就是越权，调用点会如实拒绝、不当表态吸收。
+    assert_eq!(verb_of("read"), None);
+    assert_eq!(verb_of("create_session"), None);
+    // 参数里取正文；取不到就是空串（不猜）。
+    assert_eq!(arg_text("{\"text\":\"同意\"}"), "同意");
+    assert_eq!(arg_text("{}"), "");
+    assert_eq!(arg_text("不是 JSON"), "");
 }
 
 /// 同意是**粘住**的：发过 agree 的人不再被追问（以前每轮重置，等于每轮把所有人问一遍）。
@@ -1318,6 +1338,7 @@ pub(crate) fn degraded_discussion_line_carries_a_structured_flag() {
         Default::default(),
         Default::default(),
         String::new(),
+        vec![],
     );
     let _ = disc.open("任务", &mut |_, _| {}, &mut |_| {});
     let line = disc

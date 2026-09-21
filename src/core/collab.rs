@@ -153,6 +153,21 @@ impl CollabSession {
         self.cancel.load(std::sync::atomic::Ordering::Relaxed)
     }
 
+    /// 讨论动词的**声明**（原生通道用）：只取协作动词，按角色表发放。
+    /// 与 render_face 同源（都出自角色表），所以两套通道不会说两套话。
+    fn verbs_of(&self, role: &str) -> Vec<crate::core::ports::ToolDecl> {
+        self.prompts
+            .systools
+            .tool_face(role)
+            .map(|face| {
+                face.into_iter()
+                    .filter(|(id, _)| matches!(*id, "say" | "agree" | "leave" | "ask"))
+                    .map(|(id, schema)| schema.decl(id))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
     /// 执行 / 验收阶段该不该收尾：**停止（用户的意图）与失败（故障）分开说**。
     /// 两者都如实收尾并保持会话可继续，但用户看到的话不一样——混成一句会让用户以为出了故障。
     fn exec_note(&self, exec: &Execution) -> Option<String> {
@@ -364,6 +379,7 @@ impl CollabSession {
                 return;
             }
         };
+        let verbs = self.verbs_of("discussant");
         let mut disc = Discussion::new(
             members,
             self.allow,
@@ -371,6 +387,7 @@ impl CollabSession {
             llm,
             std::sync::Arc::clone(&self.cancel),
             protocol,
+            verbs,
         );
         // 开场逐成员外送：一个人说完就出它那一行（与轮次里同一段逻辑）。
         // 回调**不捕获 sink**（由 Discussion 传进来），否则它与后面泵对 sink 的使用冲突。
@@ -778,6 +795,7 @@ impl CollabSession {
                 Ok(face) => format!("{}\n{}", s.prompts.core.chat_protocol, face),
                 Err(_) => s.prompts.core.chat_protocol.clone(),
             };
+            let verbs = s.verbs_of("discussant");
             let mut disc = Discussion::new(
                 members,
                 st.allow,
@@ -785,6 +803,7 @@ impl CollabSession {
                 llm,
                 std::sync::Arc::clone(&s.cancel),
                 protocol,
+                verbs,
             );
             disc.round = st.round.max(1);
             disc.closed = st.closed;

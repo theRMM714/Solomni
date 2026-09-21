@@ -474,6 +474,9 @@ pub struct Discussion {
     /// 本席位的**可用表态清单**（由角色表渲染而来，见 SystemTools::render_face）：
     /// 开场提示词里那份"能用哪些信封"就是它，不再在提示词里另写一遍。
     protocol: String,
+    /// 本席位的动词**声明**（原生通道给供应商的结构化槽位；信封通道不声明，照旧写信封）。
+    /// 与 protocol 同源（都出自角色表），所以两套通道不会说两套话。
+    verbs: Vec<crate::core::ports::ToolDecl>,
     /// 「停止」标志：由 CollabSession 注入（它从任务登记处拿到）。
     /// 泵在**每次调用前**与**调用中途**都看它——所以停止能在一个模型调用内收尾，而不是等它跑完。
     cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
@@ -487,6 +490,7 @@ impl Discussion {
         llm: crate::core::ports::LlmOpts,
         cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
         protocol: String,
+        verbs: Vec<crate::core::ports::ToolDecl>,
     ) -> Discussion {
         Discussion {
             members,
@@ -499,6 +503,7 @@ impl Discussion {
             llm,
             cancel,
             protocol,
+            verbs,
         }
     }
 
@@ -542,7 +547,15 @@ impl Discussion {
                 return Err("已停止".to_string());
             }
             let msgs = vec![Msg::system(system), Msg::user(opener.clone())];
-            let opts = self.opts();
+            // 与轮次里同一口径：原生声明动词、信封照旧写信封。
+            let native = matches!(
+                self.members[i].tools.as_ref().map(|t| t.mode),
+                Some(crate::core::providers::ToolMode::Native)
+            );
+            let mut opts = self.opts();
+            if native {
+                opts.tools = Some(&self.verbs);
+            }
             // 分片回调里看「停止」：克隆标志而不是借 self——成员那侧正被可变借用。
             let cancel = std::sync::Arc::clone(&self.cancel);
             let mut keep = move |_c: crate::core::ports::Chunk| {
@@ -556,9 +569,28 @@ impl Discussion {
             if let Some(err) = done.error.clone() {
                 return Err(err);
             }
-            let reply = envelope::parse(&done.raw);
-            let verb = reply.verb;
-            self.absorb(&id, verb, reply.text, reply.degraded, done.truncated());
+            let (verb, text, degraded) = if native {
+                match done.calls.first() {
+                    Some(call) => match verb_of(&call.name) {
+                        Some(v) => (v, arg_text(&call.args_json), false),
+                        None => {
+                            sink(SessionEvent::Notice(format!(
+                                "[越权] 本席位没有工具 {}：本轮不执行、不当表态（如实拒绝）",
+                                call.name
+                            )));
+                            continue;
+                        }
+                    },
+                    None => {
+                        let r = envelope::parse(&done.raw);
+                        (r.verb, r.text, r.degraded)
+                    }
+                }
+            } else {
+                let r = envelope::parse(&done.raw);
+                (r.verb, r.text, r.degraded)
+            };
+            self.absorb(&id, verb, text, degraded, done.truncated());
             // 开场的表态与轮次里**同一口径**：同意 / 离开立刻生效。
             // （以前开场只落一行、不记表态，于是"开场就同意"的人下一轮还会被问一遍。）
             {
@@ -634,7 +666,15 @@ impl Discussion {
                 return TurnOut::Stopped;
             }
             let msgs = vec![Msg::system(system), Msg::user(step_prompt)];
-            let opts = self.opts();
+            // 原生通道：把本席位的动词**声明**给供应商（结构化槽位）；信封通道不声明（照旧写信封）。
+            let native = matches!(
+                self.members[i].tools.as_ref().map(|t| t.mode),
+                Some(crate::core::providers::ToolMode::Native)
+            );
+            let mut opts = self.opts();
+            if native {
+                opts.tools = Some(&self.verbs);
+            }
             // 分片回调里看「停止」：克隆标志而不是借 self——成员那侧正被可变借用。
             let cancel = std::sync::Arc::clone(&self.cancel);
             let mut keep = move |_c: crate::core::ports::Chunk| {
@@ -648,10 +688,29 @@ impl Discussion {
             if let Some(err) = done.error.clone() {
                 return TurnOut::Interrupted(err);
             }
-            let reply = envelope::parse(&done.raw);
-            let verb = reply.verb;
-            let text = reply.text;
-            let degraded = reply.degraded;
+            // 两套通道**同语义**：原生走供应商的结构化槽位，信封从正文解析。
+            let (verb, text, degraded) = if native {
+                match done.calls.first() {
+                    Some(call) => match verb_of(&call.name) {
+                        Some(v) => (v, arg_text(&call.args_json), false),
+                        None => {
+                            // 越权 / 未知工具：**如实拒绝**——这一轮不执行、也不当表态吸收。
+                            sink(SessionEvent::Notice(format!(
+                                "[越权] 本席位没有工具 {}：本轮不执行、不当表态（如实拒绝）",
+                                call.name
+                            )));
+                            continue;
+                        }
+                    },
+                    None => {
+                        let r = envelope::parse(&done.raw);
+                        (r.verb, r.text, r.degraded)
+                    }
+                }
+            } else {
+                let r = envelope::parse(&done.raw);
+                (r.verb, r.text, r.degraded)
+            };
             self.absorb(&id, verb, text.clone(), degraded, done.truncated());
             // 逐成员外送：**这个人说完就出它那一行**，不等整轮问完。
             on_lines(&self.transcript[handed..], sink);
@@ -1032,6 +1091,29 @@ pub type RoundSink<'a> = dyn FnMut(&Round, &mut dyn FnMut(SessionEvent)) + 'a;
 /// 讨论行的**逐成员外送回调**：拿到刚定稿的行 + 本次的出口。
 /// 出口当参数传而不是让回调捕获它——否则回调借着 sink，`step`/`open` 的调用方随后用不了它。
 pub type LineSink<'a> = dyn FnMut(&[DiscLine], &mut dyn FnMut(SessionEvent)) + 'a;
+
+/// 原生通道的工具名 → 讨论动词：**只认协作动词**，其余一律不认识（不认识 = 越权，如实拒绝）。
+pub(crate) fn verb_of(name: &str) -> Option<Verb> {
+    match name {
+        "say" => Some(Verb::Say),
+        "agree" => Some(Verb::Agree),
+        "leave" => Some(Verb::Leave),
+        "ask" => Some(Verb::Ask),
+        _ => None,
+    }
+}
+
+/// 原生调用的参数里取正文（供应商给的是一段 JSON 文本；取不到就是空串——不猜）。
+pub(crate) fn arg_text(args_json: &str) -> String {
+    serde_json::from_str::<serde_json::Value>(args_json)
+        .ok()
+        .and_then(|v| {
+            v.get("text")
+                .and_then(|t| t.as_str())
+                .map(|s| s.to_string())
+        })
+        .unwrap_or_default()
+}
 
 /// 一轮模型调用的产出（一轮 = 一条文本转录行；有工具时紧跟一条工具行）。
 /// 原始输出不进这里：工具轮由 ToolCallView.raw 承载、文本轮进上下文的就是解析后的文本。
