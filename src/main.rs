@@ -108,6 +108,21 @@ fn main() {
             std::process::exit(1);
         }
     };
+    // 工具总表与角色表必须自洽（悬空引用 / 缺能力都是装配错误）：装配期就挡下，不拖到运行期。
+    match prompts.system_tools() {
+        Ok(st) if st.problems().is_empty() => {}
+        Ok(st) => {
+            eprintln!(
+                "[装配失败] 系统工具与角色表不自洽：{}",
+                st.problems().join("；")
+            );
+            std::process::exit(1);
+        }
+        Err(e) => {
+            eprintln!("[装配失败] {}", e);
+            std::process::exit(1);
+        }
+    }
     // 围栏是否允许在本机写权限：设置里授权过、或环境变量显式指定（SOLOMNI_FENCE_WRITE=1/0 可取反）。
     // 默认不准——没经过用户同意，本程序不动本机任何权限项。
     let home = root.join(".home");

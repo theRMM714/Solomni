@@ -49,6 +49,8 @@ impl ToolDecl {
                 desc: self.desc.clone(),
                 params: Some(p.clone()),
                 parallel: self.parallel,
+                // 模块工具的能力由它的运行方式决定（外部命令），不在这一层声明。
+                capability: String::new(),
             })
     }
 }

@@ -4,6 +4,7 @@
 
 tools:
   read:
+    capability: fs-read        # 权限收口依据：碰文件系统的系统工具照样受沙箱/围栏约束
     desc: 读取文本文件（UTF-8）。
     parallel: true                    # 只读、无副作用：同一回复里的多个读取**真的并发跑**
     params:
@@ -23,6 +24,7 @@ tools:
         default: 2000
         desc: 本次最多返回的行数；省略即尽量多读
   write:
+    capability: fs-write        # 权限收口依据：碰文件系统的系统工具照样受沙箱/围栏约束
     desc: 整份写入文本文件（UTF-8）：文件不存在则新建；已存在则整份覆盖，但**要求你在本次会话里先完整读过它**（只改一处请用 edit）。
     params:
       path:
@@ -34,6 +36,7 @@ tools:
         required: true
         desc: 要写入的**完整**内容（会整份覆盖，不是追加、不是局部修改）
   edit:
+    capability: fs-write        # 权限收口依据：碰文件系统的系统工具照样受沙箱/围栏约束
     desc: 对已存在的文本文件做一处精确替换（按字面匹配，不动别处）。
     params:
       path:
@@ -53,8 +56,10 @@ tools:
         type: boolean
         desc: 是否替换全部命中；省略 = 要求唯一命中（多处命中会报错并列出位置）
   patch:
+    capability: fs-write        # 权限收口依据：碰文件系统的系统工具照样受沙箱/围栏约束
     desc: 用一段**自由格式**的补丁文本改文件（信封之后原样跟补丁；大段内容不要塞进 JSON）。语法见 patch_guide。
   search:
+    capability: fs-read        # 权限收口依据：碰文件系统的系统工具照样受沙箱/围栏约束
     desc: 在文本文件里查关键词，返回带行号的命中行。
     parallel: true                    # 只读、无副作用
     params:

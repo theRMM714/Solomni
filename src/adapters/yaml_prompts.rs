@@ -7,6 +7,7 @@
 
 use crate::core::ports::PromptSource;
 use crate::core::prompt::Prompts;
+use crate::core::roles::{RoleTable, SystemTools};
 use crate::core::schema::ToolBook;
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
@@ -15,6 +16,12 @@ use std::path::{Path, PathBuf};
 #[derive(Deserialize)]
 struct ToolFile {
     tools: ToolBook,
+}
+
+/// 角色表的文件形状。
+#[derive(Deserialize)]
+struct RoleFile {
+    roles: RoleTable,
 }
 
 pub struct YamlPrompts {
@@ -33,16 +40,31 @@ impl PromptSource for YamlPrompts {
     fn load(&self) -> Result<Prompts, String> {
         let mut book = crate::core::prompt::merge_book(&self.read_docs()?)?;
         // 工具声明来自**总表**（唯一真相）：册子里不再有这一段。
+        book.core.builtin_tools = self.system_tools()?.tools;
+        Ok(book)
+    }
+}
+
+impl YamlPrompts {
+    /// 系统工具与角色：读 `systools/tools.yaml`（工具是什么）与 `systools/roles.yaml`（身份有什么）。
+    pub fn system_tools(&self) -> Result<SystemTools, String> {
         let path = self.systools.join("tools.yaml");
         let text = std::fs::read_to_string(&path)
             .map_err(|e| format!("工具总表读不了（systools/tools.yaml）：{}", e))?;
-        let file: ToolFile = serde_yaml::from_str(&text)
+        let tools: ToolFile = serde_yaml::from_str(&text)
             .map_err(|e| format!("工具总表非法（systools/tools.yaml）：{}", e))?;
-        if file.tools.is_empty() {
+        if tools.tools.is_empty() {
             return Err("工具总表里一个工具都没有（systools/tools.yaml）".to_string());
         }
-        book.core.builtin_tools = file.tools;
-        Ok(book)
+        let path = self.systools.join("roles.yaml");
+        let text = std::fs::read_to_string(&path)
+            .map_err(|e| format!("角色表读不了（systools/roles.yaml）：{}", e))?;
+        let roles: RoleFile = serde_yaml::from_str(&text)
+            .map_err(|e| format!("角色表非法（systools/roles.yaml）：{}", e))?;
+        Ok(SystemTools {
+            tools: tools.tools,
+            roles: roles.roles,
+        })
     }
 }
 

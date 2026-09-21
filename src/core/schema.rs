@@ -85,6 +85,10 @@ pub struct ToolSchema {
     /// 未声明的（含写入类）独占执行，并作为并发批次之间的屏障。
     #[serde(default)]
     pub parallel: bool,
+    /// **权限收口依据**（如 `fs-read` / `fs-write`）：决定这个工具要不要沙箱与围栏约束。
+    /// 为什么挂在能力上而不是"系统工具就免检"：`read`/`write` 也是系统工具，但它们碰文件系统。
+    #[serde(default)]
+    pub capability: String,
 }
 
 impl ToolSchema {

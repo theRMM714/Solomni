@@ -405,6 +405,45 @@ fn fs_packages_scans_the_dependency_folder_and_reports_each_rejection() {
 }
 
 // ---------- YamlPrompts ----------
+/// 两张表必须自洽：悬空引用 / 缺能力都会被挡下（不靠人看）。
+#[test]
+fn system_tools_and_roles_are_self_consistent() {
+    let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let st = YamlPrompts::new(root.join("prompts"), root.join("systools"))
+        .system_tools()
+        .expect("读系统工具与角色");
+    assert!(
+        st.problems().is_empty(),
+        "两张表必须自洽：{:?}",
+        st.problems()
+    );
+    // 越权判据只有一处：角色表给了的放行，没给的不放行。
+    assert!(st.allows("discussant", "read"), "discussant 该能读");
+    assert!(
+        !st.allows("discussant", "create_session"),
+        "没给的工具必须不放行"
+    );
+    assert!(
+        !st.allows("不存在的角色", "read"),
+        "不存在的角色什么都不放行"
+    );
+    // 悬空引用会被 problems 逮到。
+    let mut broken = st.clone();
+    broken
+        .roles
+        .get_mut("discussant")
+        .expect("角色在")
+        .tools
+        .push("no_such_tool".to_string());
+    assert!(
+        broken
+            .problems()
+            .iter()
+            .any(|p| p.contains("不存在的系统工具")),
+        "悬空引用必须被挡下：{:?}",
+        broken.problems()
+    );
+}
 
 #[test]
 fn yaml_prompts_loads_the_shipped_book_and_reports_missing_or_broken_files() {

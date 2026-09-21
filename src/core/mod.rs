@@ -19,6 +19,7 @@ pub mod ports;
 pub mod prompt;
 pub mod providers;
 pub mod refs;
+pub mod roles;
 pub mod schema;
 pub mod session;
 pub mod systool;
