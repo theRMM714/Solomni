@@ -546,22 +546,41 @@ impl Core {
         &mut self,
         sid: &str,
     ) -> (Vec<SessionEvent>, Vec<(String, String, String)>) {
-        let ready: Vec<(String, String)> = match self.sessions.get(sid) {
-            Some(Session::Collab(c)) if c.plan_approved() => c
-                .chain()
-                .map(|ch| {
-                    ch.ready()
-                        .into_iter()
-                        .filter(|n| n.sub_session.is_none())
-                        .map(|n| (n.id.clone(), n.assignee.clone()))
-                        .collect()
-                })
-                .unwrap_or_default(),
+        let (ready, busy): (Vec<(String, String)>, Vec<String>) = match self.sessions.get(sid) {
+            Some(Session::Collab(c)) if c.plan_approved() => {
+                let chain = c.chain();
+                let busy = chain
+                    .map(|ch| {
+                        ch.nodes
+                            .iter()
+                            .filter(|n| matches!(n.status, chain::NodeStatus::Running))
+                            .map(|n| n.assignee.clone())
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                let ready = chain
+                    .map(|ch| {
+                        ch.ready()
+                            .into_iter()
+                            .filter(|n| n.sub_session.is_none())
+                            .map(|n| (n.id.clone(), n.assignee.clone()))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                (ready, busy)
+            }
             _ => return (Vec::new(), Vec::new()),
         };
         let mut out = Vec::new();
         let mut todo = Vec::new();
+        // 资源约束：**一个 agent 的会话一次只能跑一轮**——它已有在跑的节点（或本轮已派的）就跳过，
+        // 下一轮推进时再派。不同 agent 不受影响，照旧并发。
+        let mut taken: Vec<String> = Vec::new();
         for (node, assignee) in ready {
+            if busy.contains(&assignee) || taken.contains(&assignee) {
+                continue;
+            }
+            taken.push(assignee.clone());
             match self.spawn_sub_session(sid, &node) {
                 Ok(child) => {
                     // 派发文案用册子里的执行提示词模板渲染（objective 是核心 AI 写的那段任务提示词）。
@@ -603,7 +622,7 @@ impl Core {
     /// 复用"按 meta 重建"的整条装配路径——子会话与用户建的会话**没有第二种实现**。
     pub(crate) fn spawn_sub_session(&mut self, parent: &str, node: &str) -> Result<String, String> {
         let (pmeta, _) = self.history.load(parent)?;
-        let (objective, assignee) = {
+        let assignee = {
             let c = match self.sessions.get(parent) {
                 Some(Session::Collab(c)) => c,
                 _ => return Err("无此协作会话".to_string()),
@@ -612,7 +631,7 @@ impl Core {
                 .chain()
                 .and_then(|ch| ch.nodes.iter().find(|n| n.id == node))
                 .ok_or_else(|| format!("链里没有节点 {}", node))?;
-            (n.objective.clone(), n.assignee.clone())
+            n.assignee.clone()
         };
         let agent = pmeta
             .agents
@@ -620,16 +639,19 @@ impl Core {
             .find(|a| a.name == assignee)
             .cloned()
             .ok_or_else(|| format!("名单里没有负责人 {}", assignee))?;
-        let child = format!("{}--{}", parent, node);
+        // **一个 agent 一个会话**（不是一节点一会话）：它在这场工作里的完整经历，
+        // 讨论与执行不分家（见 docs/architecture/session-model.md）。同名即复用，幂等。
+        let child = format!("{}--{}", parent, assignee);
         if self.history.load(&child).is_ok() {
-            return Ok(child); // 幂等：已经有就复用，不重建
+            return Ok(child);
         }
         let meta = SessionMeta {
             name: child.clone(),
             mode: "single".to_string(),
             delegate: false,
             modules: agent.modules.clone(),
-            task: Some(objective),
+            // 会话跨整场工作，所以记**工作的需求**（节点目标由链记着，随回合下发）。
+            task: pmeta.task.clone(),
             ts: now_ts(),
             agents: vec![agent.clone()],
             exec: pmeta.exec.clone(),

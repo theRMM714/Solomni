@@ -1769,7 +1769,11 @@ pub(crate) fn approved_plan_spawns_a_sub_session_per_ready_node() {
     let (node, child, assignee) = &started[0];
     assert_eq!(node, "n1");
     assert_eq!(assignee, "a");
-    assert_eq!(child, &format!("{}--n1", sid));
+    assert_eq!(
+        child,
+        &format!("{}--a", sid),
+        "一个 agent 一个会话（不是一节点一会话）"
+    );
 
     // 子会话是**普通单 agent 会话**：meta 记着编排者与节点，沙箱锚在父会话上。
     let (cmeta, _) = core.history_open(child).unwrap();
@@ -1779,6 +1783,55 @@ pub(crate) fn approved_plan_spawns_a_sub_session_per_ready_node() {
     assert_eq!(cmeta.work(), sid.as_str(), "沙箱锚在父会话上（共用工作区）");
     assert_eq!(cmeta.agents.len(), 1, "子会话只有一个席位");
     assert_eq!(cmeta.agents[0].name, "a");
+}
+
+/// 同一个 agent 的多个节点**串行**（一个会话一次只能跑一轮）；不同 agent 照旧并发。
+#[test]
+pub(crate) fn same_agent_nodes_serialize_but_different_agents_run_together() {
+    let mut member = BTreeMap::new();
+    for who in ["a", "b"] {
+        member.insert(
+            who.to_string(),
+            vec![
+                "{\"type\":\"say\",\"text\":\"我先说\"}".to_string(),
+                "{\"type\":\"agree\",\"text\":\"同意\"}".to_string(),
+            ],
+        );
+    }
+    let mut core = core_with(
+        vec![module_of("a"), module_of("b")],
+        gw(
+            member,
+            vec![
+                // 三个节点都没有依赖：n1/n2 都归 a（该串行），n3 归 b（该和 n1 一起开工）。
+                "{\"plan\":\"方案\",\"nodes\":[{\"id\":\"n1\",\"title\":\"一\",\"objective\":\"做一\",\"assignee\":\"a\",\"deps\":[]},{\"id\":\"n2\",\"title\":\"二\",\"objective\":\"做二\",\"assignee\":\"a\",\"deps\":[]},{\"id\":\"n3\",\"title\":\"三\",\"objective\":\"做三\",\"assignee\":\"b\",\"deps\":[]}]}".to_string(),
+                "[{\"node\":\"n1\",\"ok\":true,\"note\":\"够用\"},{\"node\":\"n2\",\"ok\":true,\"note\":\"够用\"},{\"node\":\"n3\",\"ok\":true,\"note\":\"够用\"}]".to_string(),
+                "[{\"item\":\"做\",\"status\":\"pass\"}]".to_string(),
+            ],
+        ),
+    );
+    let sid = core
+        .create_work(collab_work("w", &["a", "b"], false, "做个东西"))
+        .unwrap()
+        .sid;
+    core.collab_continue(&sid, CollabStep::Begin, "yes")
+        .unwrap();
+    let evs = core
+        .collab_continue(&sid, CollabStep::ApprovePlan, "")
+        .unwrap();
+    let order: Vec<String> = evs
+        .iter()
+        .filter_map(|e| match e {
+            SessionEvent::NodeStarted { node, .. } => Some(node.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        order,
+        vec!["n1", "n3", "n2"],
+        "同一 agent 的 n2 必须等 n1 跑完；不同 agent 的 n3 与 n1 一起开工：{:?}",
+        evs
+    );
 }
 
 /// 节点验收没过 → **暂停并交用户**；点「继续」重派该节点，验过才交付。
