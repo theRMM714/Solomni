@@ -64,6 +64,8 @@ pub struct TaskChain {
 
 impl TaskChain {
     /// 现在可以启动的节点：自身待办 + **依赖全部完成**。
+    /// 消费方是下一步的推进驱动；在那之前只进测试构建（与 SystemTools::allows 同一处置）。
+    #[cfg(test)]
     /// 返回多个 = 它们可以**并发**跑；返回空 = 要么在跑、要么全结束、要么卡住（卡住由 problems 挡）。
     pub fn ready(&self) -> Vec<&TaskNode> {
         self.nodes
@@ -81,7 +83,8 @@ impl TaskChain {
             .collect()
     }
 
-    /// 全部结束：链非空且每个节点都 Done 或 Failed。
+    /// 全部结束：链非空且每个节点都 Done 或 Failed。消费方同 ready()。
+    #[cfg(test)]
     pub fn finished(&self) -> bool {
         !self.nodes.is_empty()
             && self

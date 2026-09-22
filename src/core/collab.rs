@@ -56,6 +56,8 @@ pub struct CollabSession {
     allow: bool,
     /// 已记录在案的执行方案（回档/重启后沿用，未整理则为 None）。
     plan: Option<String>,
+    /// 核心给出的**任务链**（与方案一起出；审查关卡把它交用户看）。
+    chain: Option<crate::core::chain::TaskChain>,
     disc: Option<Discussion>,
     /// 已发出的转录行数（增量事件用）。
     emitted: usize,
@@ -120,6 +122,7 @@ impl CollabSession {
             pending: None,
             allow: false,
             plan: None,
+            chain: None,
             disc: None,
             emitted: 0,
             next_line: 0,
@@ -504,37 +507,57 @@ impl CollabSession {
             }
         }
         // 整理：只在还没有方案时做（回档/重启后沿用已记的方案，不重复花钱）。
-        let plan = match self.plan.clone() {
-            Some(p) => p,
-            None => {
-                let p = self
-                    .disc
-                    .as_ref()
-                    .expect("disc 存在")
-                    .synthesize(self.core_chat.as_mut());
-                match p {
-                    Ok(p) => {
-                        self.plan = Some(p.clone());
-                        sink(SessionEvent::Plan(p.clone()));
-                        p
-                    }
-                    // 整理被停止 / 失败：都不落方案、不往下走，如实告知并交回用户。
-                    Err(err) => {
-                        let note = if self.cancelled() {
-                            crate::core::events::stopped_note()
-                        } else {
-                            crate::core::events::interrupted_note(&err)
-                        };
-                        sink(SessionEvent::Notice(note));
+        if self.plan.is_none() {
+            let made = self
+                .disc
+                .as_ref()
+                .expect("disc 存在")
+                .synthesize(self.core_chat.as_mut());
+            match made {
+                Ok((plan, chain)) => {
+                    // **装配期门禁**：链必须自洽（悬空依赖 / 环 / 未知负责人 / 空目标）——
+                    // 不静默开工；挡下时如实说明，用户点「继续」会重新整理。
+                    let roster: Vec<String> = self
+                        .disc
+                        .as_ref()
+                        .expect("disc 存在")
+                        .members
+                        .iter()
+                        .filter(|m| m.present)
+                        .map(|m| m.id.clone())
+                        .collect();
+                    let problems = chain.problems(&roster);
+                    if !problems.is_empty() {
+                        sink(SessionEvent::Notice(format!(
+                            "[错误] 核心给出的任务链不自洽：{}。点「继续」会重新整理。",
+                            problems.join("；")
+                        )));
                         return;
                     }
+                    self.plan = Some(plan.clone());
+                    self.chain = Some(chain);
+                    sink(SessionEvent::Plan(plan));
+                }
+                // 整理被停止 / 失败 / 回执不合法：都不落方案、不往下走，如实告知并交回用户。
+                Err(err) => {
+                    let note = if self.cancelled() {
+                        crate::core::events::stopped_note()
+                    } else {
+                        crate::core::events::interrupted_note(&err)
+                    };
+                    sink(SessionEvent::Notice(note));
+                    return;
                 }
             }
-        };
-        // **审查关卡**：整理完不自动开工——方案先交用户审查，点「同意」才推进。
-        // 为什么闸门在这里：整理之后就是花钱的执行（每个成员一轮工具循环），让用户先看一眼方案最省事。
+        }
+        let plan = self.plan.clone().unwrap_or_default();
+        // **审查关卡**：整理完不自动开工——方案与链先交用户审查，点「同意」才推进。
+        // 为什么闸门在这里：整理之后就是花钱的执行（每个成员一轮工具循环），让用户先看一眼最省事。
         if !self.plan_approved {
-            sink(SessionEvent::PlanReview { plan: plan.clone() });
+            sink(SessionEvent::PlanReview {
+                plan: plan.clone(),
+                chain: self.chain.clone().unwrap_or_default(),
+            });
             self.pending = Some(Pending::PlanReview);
             return;
         }
@@ -781,6 +804,8 @@ impl CollabSession {
             pending: None,
             allow: st.allow,
             plan: st.plan.clone(),
+            // 链暂不落档（方案本身已按转录派生）：重建后点「继续」会重新整理一次。
+            chain: None,
             disc: None,
             emitted: 0,
             next_line: total,

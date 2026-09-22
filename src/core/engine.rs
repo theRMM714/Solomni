@@ -779,17 +779,32 @@ impl Discussion {
     }
 
     /// 全员同意后：核心整理——总结讨论，为每个留下的成员写执行任务提示词。
-    pub fn synthesize(&self, core_chat: &mut dyn Chat) -> Result<String, String> {
+    /// 整理：核心 AI 总结讨论并出**任务链**（见 docs/architecture/task-chain.md）。
+    /// 回执必须是 JSON（plan + nodes）；解析不了就**如实报错**，不把原文当方案糊过去。
+    pub fn synthesize(
+        &self,
+        core_chat: &mut dyn Chat,
+    ) -> Result<(String, crate::core::chain::TaskChain), String> {
+        let roster = self
+            .members
+            .iter()
+            .filter(|m| m.present)
+            .map(|m| m.id.clone())
+            .collect::<Vec<_>>()
+            .join("、");
         let user = self.prompts.render(
             &self.prompts.core.synthesize.user,
-            &[(
-                "transcript",
-                self.transcript
-                    .iter()
-                    .map(|l| l.text.clone())
-                    .collect::<Vec<_>>()
-                    .join("\n"),
-            )],
+            &[
+                ("roster", roster),
+                (
+                    "transcript",
+                    self.transcript
+                        .iter()
+                        .map(|l| l.text.clone())
+                        .collect::<Vec<_>>()
+                        .join("\n"),
+                ),
+            ],
         );
         let msgs = vec![
             Msg::system(self.prompts.core.synthesize.system.clone()),
@@ -805,11 +820,60 @@ impl Discussion {
         if self.cancelled() {
             return Err("已停止".to_string());
         }
-        match done.error {
-            Some(err) => Err(err),
-            None => Ok(done.raw),
+        if let Some(err) = done.error {
+            return Err(err);
         }
+        let raw = done.raw;
+        // 结构化回执：解析不了就如实报错（附原文前 200 字，便于判断是格式漂了还是模型没照做）。
+        let obj = envelope::extract_json_object(&raw)
+            .ok_or_else(|| format!("整理没有给出 JSON 形状的任务链：{}", head_chars(&raw, 200)))?;
+        let parsed: SynthReply = serde_json::from_str(&obj)
+            .map_err(|e| format!("整理的任务链不合法（{}）：{}", e, head_chars(&obj, 200)))?;
+        let chain = crate::core::chain::TaskChain {
+            nodes: parsed
+                .nodes
+                .into_iter()
+                .map(|n| crate::core::chain::TaskNode {
+                    id: n.id,
+                    title: n.title,
+                    objective: n.objective,
+                    assignee: n.assignee,
+                    deps: n.deps,
+                    status: crate::core::chain::NodeStatus::Pending,
+                    sub_session: None,
+                    acceptance: None,
+                })
+                .collect(),
+        };
+        Ok((parsed.plan, chain))
     }
+}
+
+/// 原文前 n 个字符（如实报错时带上一点现场；按字符切，不切坏多字节）。
+fn head_chars(s: &str, n: usize) -> String {
+    s.chars().take(n).collect()
+}
+
+/// 核心整理的结构化回执（形状见 prompts/roles/planner.yaml 的 synthesize）。
+#[derive(Debug, Clone, Deserialize)]
+struct SynthReply {
+    plan: String,
+    #[serde(default)]
+    nodes: Vec<SynthNode>,
+}
+
+/// 任务链里的一个节点（核心给的是"意图"，状态与子会话由核心自己管）。
+#[derive(Debug, Clone, Deserialize)]
+struct SynthNode {
+    id: String,
+    #[serde(default)]
+    title: String,
+    #[serde(default)]
+    objective: String,
+    #[serde(default)]
+    assignee: String,
+    #[serde(default)]
+    deps: Vec<String>,
 }
 
 /// 验收清单条目：核心输出的结构化核对结果。

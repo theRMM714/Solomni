@@ -69,7 +69,9 @@ http.createServer((req, res) => {
       // 判据只用转录里的事实（说话人标签 / 轮次标记 / 任务原话），不改产品行为。
       // 判断"这条请求属于哪个 agent"：系统提示词里带该 agent 的全部模块 system，用模块名认。
       // 哪个 agent 在说话：系统提示词里带该 agent 全部模块的 system，用模块特征认（甲=摘要，乙=核对）。
-      const isJia = sys.includes('摘要') || sys.includes('压缩');
+      // 用只有 summarizer 才有的特征认甲：reviewer 的 system 里也含"摘要"（它负责核对摘要），
+      // 拿它当判据会把乙也当成甲——退场场景于是两人都撤、名单空了。
+      const isJia = sys.includes('压缩');
       // 到第几轮了：转录里 [轮次 N] 的条数（step 每轮开头推一条）。
       const stepNo = (user.match(/\[轮次 (\d+)\]/g) || []).length;
       const say = (t) => JSON.stringify({ type: 'say', text: t });
@@ -108,7 +110,16 @@ http.createServer((req, res) => {
       }
     } else if (sys.includes('总结讨论')) {
       // 方案里回显任务关键词：验收请求会带上方案，据此路由（不改产品行为，只让夹具可判定）。
-      content = user.includes('返工') ? '方案：返工一次' : '方案：一次把事情做完';
+      // 核心整理的回执是**结构化任务链**（plan + nodes）：形状见 prompts/roles/planner.yaml。
+  // 负责人要取**提示词里给的名单**（退场场景下甲已不在名单里，写死甲会被自洽门禁如实挡下）。
+  const ulines = user.split('\n');
+  const ridx = ulines.findIndex((l) => l.includes('名单'));
+  const rosterLine = ridx >= 0 ? (ulines[ridx + 1] || '').trim() : '';
+  const who = rosterLine.split('、').map((s) => s.trim()).filter(Boolean)[0] || '甲';
+
+  content = user.includes('返工')
+    ? JSON.stringify({ plan: '方案：返工一次', nodes: [{ id: 'n1', title: '返工一次', objective: '把事重做一遍', assignee: who, deps: [] }] })
+    : JSON.stringify({ plan: '方案：一次把事情做完', nodes: [{ id: 'n1', title: '做完', objective: '把事做完', assignee: who, deps: [] }] });
     } else if (sys.includes('harvest') && allUser.includes('真工具链路')) {
       // 真工具链路：按**整段对话里**已经收到的工具结果条数决定下一个调用（真进程、真三语言模块）。
       // 路径用提示词里给出的真实共享区根目录（相对路径会被围栏拒绝）。

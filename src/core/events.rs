@@ -16,7 +16,11 @@ pub enum SessionEvent {
     Plan(String),
     /// 方案待审（审查关卡）：把方案交给用户，等他点「同意」才开工。
     /// 与 \`Plan\` 的区别：\`Plan\` 是"整理好了"这个事实，\`PlanReview\` 是"请用户裁决"这个请求。
-    PlanReview { plan: String },
+    PlanReview {
+        plan: String,
+        /// 核心给出的任务链（审查关卡要连同链一起给用户看）。
+        chain: crate::core::chain::TaskChain,
+    },
     /// 成员执行回报（rework = 第几轮执行，0 为首轮）。
     Report {
         id: String,
@@ -147,8 +151,8 @@ impl SessionEvent {
     pub fn to_json(&self) -> serde_json::Value {
         match self {
             SessionEvent::Notice(n) => serde_json::json!({ "type": "notice", "text": n }),
-            SessionEvent::PlanReview { plan } => {
-                serde_json::json!({ "type": "plan_review", "plan": plan })
+            SessionEvent::PlanReview { plan, chain } => {
+                serde_json::json!({ "type": "plan_review", "plan": plan, "chain": chain })
             }
             SessionEvent::Transcript(lines) => {
                 serde_json::json!({ "type": "transcript", "lines": lines })

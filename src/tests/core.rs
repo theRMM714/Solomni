@@ -1668,7 +1668,7 @@ pub(crate) fn collab_pauses_for_plan_review_until_the_user_approves() {
         gw(
             member,
             vec![
-                "{\"type\":\"say\",\"text\":\"方案：A 做 X\"}".to_string(),
+                "{\"plan\":\"方案：A 做 X\",\"nodes\":[{\"id\":\"n1\",\"title\":\"做 X\",\"objective\":\"把 X 做完\",\"assignee\":\"a\",\"deps\":[]}]}".to_string(),
                 "[{\"item\":\"做 X\",\"status\":\"pass\",\"evidence\":\"已做\"}]".to_string(),
             ],
         ),
@@ -1700,6 +1700,17 @@ pub(crate) fn collab_pauses_for_plan_review_until_the_user_approves() {
         matches!(core.collab_pending(&sid), Ok(Some(Pending::PlanReview))),
         "待审要挂起等用户"
     );
+    // 链随方案一起交给用户审查：节点、负责人、目标都在（审查关卡看的就是这张图）。
+    let reviewed = events
+        .iter()
+        .find_map(|e| match e {
+            SessionEvent::PlanReview { chain, .. } => Some(chain.clone()),
+            _ => None,
+        })
+        .expect("待审事件要带链");
+    assert_eq!(reviewed.nodes.len(), 1, "链里该有一个节点：{:?}", reviewed);
+    assert_eq!(reviewed.nodes[0].assignee, "a");
+    assert_eq!(reviewed.nodes[0].objective, "把 X 做完");
 
     // 点「同意」之后才推进：执行回报与交付都该出现。
     let after = core
@@ -1736,7 +1747,7 @@ pub(crate) fn core_collab_demo_runs_full_five_stages() {
         gw(
             member,
             vec![
-                "{\"type\":\"say\",\"text\":\"方案：A 做 X\"}".to_string(),
+                "{\"plan\":\"方案：A 做 X\",\"nodes\":[{\"id\":\"n1\",\"title\":\"做 X\",\"objective\":\"把 X 做完\",\"assignee\":\"a\",\"deps\":[]}]}".to_string(),
                 "[{\"item\":\"做 X\",\"status\":\"pass\",\"evidence\":\"已做\"}]".to_string(),
             ],
         ),
@@ -1782,7 +1793,7 @@ pub(crate) fn core_collab_delegated_slate_flow() {
     let mut core = core_with(vec![module_of("a")], gw(member, vec![
         // 代拟（组装一个 agent）→ 整理 → 验收。
         "{\"picks\":[{\"name\":\"a\",\"modules\":[\"a\"],\"model\":\"m\",\"why\":\"对口\"}]}".to_string(),
-        "{\"type\":\"say\",\"text\":\"方案：A 做 X\"}".to_string(),
+        "{\"plan\":\"方案：A 做 X\",\"nodes\":[{\"id\":\"n1\",\"title\":\"做 X\",\"objective\":\"把 X 做完\",\"assignee\":\"a\",\"deps\":[]}]}".to_string(),
         "[{\"item\":\"做 X\",\"status\":\"pass\"}]".to_string(),
     ]));
     let opened = core
@@ -1857,7 +1868,8 @@ pub(crate) fn collab_delegated_roster_written_back_and_rebuilt_from_meta() {
     );
     let mut core = core_with(vec![module_of("a")], gw(member, vec![
         "{\"picks\":[{\"name\":\"调研员\",\"modules\":[\"a\"],\"model\":\"m\",\"why\":\"对口\"}]}".to_string(),
-        "{\"type\":\"say\",\"text\":\"方案：A 做 X\"}".to_string(),
+        // 负责人必须是**名单里真实存在的席位**（代拟出来的叫"调研员"）——否则链的自洽门禁会如实挡下。
+        "{\"plan\":\"方案：A 做 X\",\"nodes\":[{\"id\":\"n1\",\"title\":\"做 X\",\"objective\":\"把 X 做完\",\"assignee\":\"调研员\",\"deps\":[]}]}".to_string(),
         "[{\"item\":\"做 X\",\"status\":\"pass\"}]".to_string(),
     ]));
     let sid = core
@@ -5449,7 +5461,7 @@ pub(crate) fn core_collab_tool_modules_run_in_execution() {
         gw(
             member,
             vec![
-                "{\"type\":\"say\",\"text\":\"方案：查证后回报\"}".into(),
+                "{\"plan\":\"方案：查证后回报\",\"nodes\":[{\"id\":\"n1\",\"title\":\"做 X\",\"objective\":\"把 X 做完\",\"assignee\":\"a\",\"deps\":[]}]}".into(),
                 "[{\"item\":\"查证\",\"status\":\"pass\"}]".into(),
             ],
         ),

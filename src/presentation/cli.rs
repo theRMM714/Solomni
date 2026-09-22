@@ -191,8 +191,14 @@ fn render(events: &[SessionEvent]) {
             }
             SessionEvent::DiscussionDone { .. } => {}
             SessionEvent::Plan(p) => println!("[整理] \n{}", p),
-            SessionEvent::PlanReview { plan } => {
-                println!("[待审] 方案如下，点「同意」才开工：\n{}", plan)
+            SessionEvent::PlanReview { plan, chain } => {
+                println!("[待审] 方案如下，点「同意」才开工：\n{}", plan);
+                for n in &chain.nodes {
+                    println!(
+                        "  - {}（{}）负责人 {} 依赖 {:?}",
+                        n.id, n.title, n.assignee, n.deps
+                    );
+                }
             }
             SessionEvent::Report { id, text, rework } => {
                 if *rework > 0 {
