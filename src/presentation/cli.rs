@@ -190,6 +190,16 @@ fn render(events: &[SessionEvent]) {
                 }
             }
             SessionEvent::DiscussionDone { .. } => {}
+            SessionEvent::NodeStarted {
+                node,
+                sid,
+                assignee,
+            } => {
+                println!(
+                    "[派发] 节点 {} → 子会话 {}（负责人 {}）",
+                    node, sid, assignee
+                )
+            }
             SessionEvent::Plan(p) => println!("[整理] \n{}", p),
             SessionEvent::PlanReview { plan, chain } => {
                 println!("[待审] 方案如下，点「同意」才开工：\n{}", plan);

@@ -520,7 +520,7 @@ impl CoreHandle {
         };
         let joined = worker.join();
         jobs.unregister(sid);
-        let (c, events, seq) = match joined {
+        let (c, mut events, mut seq) = match joined {
             Ok(x) => x,
             Err(_) => {
                 // 线程崩了：会话对象没了，但转录在盘上——解除"生成中"，下次访问按盘重建。
@@ -534,14 +534,16 @@ impl CoreHandle {
                 return Err("协作线程崩溃：会话已按落盘转录保留，可继续".to_string());
             }
         };
-        // 交回核心只做"重新插入"：转录已由上面的 sink 增量落盘，这里不再重复落。
-        self.call({
+        // 交回核心：重新插入 + **为就绪节点派发子会话**（返回派发事件）。
+        // 转录已由上面的 sink 增量落盘，这里不再重复落。
+        let spawned = self.call({
             let sid = sid.to_string();
-            move |core| {
-                core.put_collab(&sid, c);
-                Ok(())
-            }
+            move |core| Ok(core.put_collab(&sid, c))
         })?;
+        for ev in spawned {
+            seq = bus.push(sid, std::slice::from_ref(&ev));
+            events.push(ev);
+        }
         Ok(Advance { events, seq })
     }
 }

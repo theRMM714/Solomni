@@ -194,6 +194,26 @@ impl CollabSession {
             .map(|err| crate::core::events::interrupted_note(&err))
     }
 
+    /// 任务链（未整理 = None）。
+    pub fn chain(&self) -> Option<&crate::core::chain::TaskChain> {
+        self.chain.as_ref()
+    }
+
+    /// 方案是否已过审。
+    pub fn plan_approved(&self) -> bool {
+        self.plan_approved
+    }
+
+    /// 记下某个节点跑在哪个子会话里，并把它标成"在跑"。
+    pub fn mark_node_started(&mut self, node: &str, sub: &str) {
+        if let Some(chain) = self.chain.as_mut() {
+            if let Some(n) = chain.nodes.iter_mut().find(|n| n.id == node) {
+                n.sub_session = Some(sub.to_string());
+                n.status = crate::core::chain::NodeStatus::Running;
+            }
+        }
+    }
+
     /// 在组名单（agent 实例）。
     pub fn roster(&self) -> &[AgentMeta] {
         &self.roster

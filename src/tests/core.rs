@@ -1675,6 +1675,64 @@ pub(crate) fn mode_vocabulary_is_single_or_collab_only() {
     assert!(err.contains("未知会话形态"), "{}", err);
 }
 
+/// 方案过审后：就绪节点各建一个**子会话**（普通单 agent 会话，沙箱锚在父会话上）。
+#[test]
+pub(crate) fn approved_plan_spawns_a_sub_session_per_ready_node() {
+    let mut member = BTreeMap::new();
+    member.insert(
+        "a".to_string(),
+        vec![
+            "{\"type\":\"say\",\"text\":\"我先说\"}".to_string(),
+            "{\"type\":\"agree\",\"text\":\"同意\"}".to_string(),
+        ],
+    );
+    let mut core = core_with(
+        vec![module_of("a")],
+        gw(
+            member,
+            vec![
+                "{\"plan\":\"方案：A 做 X\",\"nodes\":[{\"id\":\"n1\",\"title\":\"做 X\",\"objective\":\"把 X 做完\",\"assignee\":\"a\",\"deps\":[]}]}".to_string(),
+                "[{\"item\":\"做 X\",\"status\":\"pass\"}]".to_string(),
+            ],
+        ),
+    );
+    let sid = core
+        .create_work(collab_work("w", &["a"], false, "做个东西"))
+        .unwrap()
+        .sid;
+    core.collab_continue(&sid, CollabStep::Begin, "yes")
+        .unwrap();
+    let after = core
+        .collab_continue(&sid, CollabStep::ApprovePlan, "")
+        .unwrap();
+
+    let started: Vec<(String, String, String)> = after
+        .iter()
+        .filter_map(|e| match e {
+            SessionEvent::NodeStarted {
+                node,
+                sid,
+                assignee,
+            } => Some((node.clone(), sid.clone(), assignee.clone())),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(started.len(), 1, "一个就绪节点该建一个子会话：{:?}", after);
+    let (node, child, assignee) = &started[0];
+    assert_eq!(node, "n1");
+    assert_eq!(assignee, "a");
+    assert_eq!(child, &format!("{}--n1", sid));
+
+    // 子会话是**普通单 agent 会话**：meta 记着编排者与节点，沙箱锚在父会话上。
+    let (cmeta, _) = core.history_open(child).unwrap();
+    assert_eq!(cmeta.parent.as_deref(), Some(sid.as_str()));
+    assert_eq!(cmeta.node.as_deref(), Some("n1"));
+    assert_eq!(cmeta.mode, "single");
+    assert_eq!(cmeta.work(), sid.as_str(), "沙箱锚在父会话上（共用工作区）");
+    assert_eq!(cmeta.agents.len(), 1, "子会话只有一个席位");
+    assert_eq!(cmeta.agents[0].name, "a");
+}
+
 /// 审查关卡：整理完**不自动开工**——停在待审，点「同意」才推进（见 docs/architecture/task-chain.md）。
 #[test]
 pub(crate) fn collab_pauses_for_plan_review_until_the_user_approves() {

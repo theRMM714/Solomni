@@ -21,6 +21,12 @@ pub enum SessionEvent {
         /// 核心给出的任务链（审查关卡要连同链一起给用户看）。
         chain: crate::core::chain::TaskChain,
     },
+    /// 任务链的一个节点开工：它跑在自己的**子会话**里（用户可进去干预）。
+    NodeStarted {
+        node: String,
+        sid: String,
+        assignee: String,
+    },
     /// 成员执行回报（rework = 第几轮执行，0 为首轮）。
     Report {
         id: String,
@@ -154,6 +160,16 @@ impl SessionEvent {
             SessionEvent::PlanReview { plan, chain } => {
                 serde_json::json!({ "type": "plan_review", "plan": plan, "chain": chain })
             }
+            SessionEvent::NodeStarted {
+                node,
+                sid,
+                assignee,
+            } => serde_json::json!({
+                "type": "node_started",
+                "node": node,
+                "sid": sid,
+                "assignee": assignee
+            }),
             SessionEvent::Transcript(lines) => {
                 serde_json::json!({ "type": "transcript", "lines": lines })
             }

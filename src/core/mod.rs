@@ -434,11 +434,97 @@ impl Core {
         }
     }
 
-    /// 协作生成结束**交回**：重新插入 + 解除"生成中"。
-    /// 转录**已由工作线程按"一次模型调用"的粒度增量落盘**（见 `Persister`），这里不重复落。
-    pub(crate) fn put_collab(&mut self, sid: &str, c: CollabSession) {
+    /// 协作生成结束**交回**：重新插入 + 解除"生成中"，并**为就绪节点派发子会话**。
+    /// 转录已由工作线程按"一次模型调用"的粒度增量落盘（见 `Persister`），这里不重复落。
+    /// 返回值：派发产生的事件（调用方负责入台）。
+    pub(crate) fn put_collab(&mut self, sid: &str, c: CollabSession) -> Vec<SessionEvent> {
         self.running.remove(sid);
         self.sessions.insert(sid.to_string(), Session::Collab(c));
+        self.spawn_ready_nodes(sid)
+    }
+
+    /// 方案过审后：链里**就绪且还没有子会话**的节点各建一个子会话，并如实外送。
+    /// 为什么在这里：会话表只有核心能碰（泵不建会话）；派发是核心的职责。
+    fn spawn_ready_nodes(&mut self, sid: &str) -> Vec<SessionEvent> {
+        let ready: Vec<(String, String)> = match self.sessions.get(sid) {
+            Some(Session::Collab(c)) if c.plan_approved() => c
+                .chain()
+                .map(|ch| {
+                    ch.ready()
+                        .into_iter()
+                        .filter(|n| n.sub_session.is_none())
+                        .map(|n| (n.id.clone(), n.assignee.clone()))
+                        .collect()
+                })
+                .unwrap_or_default(),
+            _ => return Vec::new(),
+        };
+        let mut out = Vec::new();
+        for (node, assignee) in ready {
+            match self.spawn_sub_session(sid, &node) {
+                Ok(child) => {
+                    if let Some(Session::Collab(c)) = self.sessions.get_mut(sid) {
+                        c.mark_node_started(&node, &child);
+                    }
+                    out.push(SessionEvent::NodeStarted {
+                        node,
+                        sid: child,
+                        assignee,
+                    });
+                }
+                Err(e) => out.push(SessionEvent::Notice(format!(
+                    "[错误] 节点 {} 派发失败：{}",
+                    node, e
+                ))),
+            }
+        }
+        out
+    }
+
+    /// 为任务链的一个节点建**子会话**：它就是一个普通单 agent 会话，
+    /// 只是沙箱锚在父会话上（meta.parent），并记住自己服务哪个节点（meta.node）。
+    /// 复用"按 meta 重建"的整条装配路径——子会话与用户建的会话**没有第二种实现**。
+    pub(crate) fn spawn_sub_session(&mut self, parent: &str, node: &str) -> Result<String, String> {
+        let (pmeta, _) = self.history.load(parent)?;
+        let (objective, assignee) = {
+            let c = match self.sessions.get(parent) {
+                Some(Session::Collab(c)) => c,
+                _ => return Err("无此协作会话".to_string()),
+            };
+            let n = c
+                .chain()
+                .and_then(|ch| ch.nodes.iter().find(|n| n.id == node))
+                .ok_or_else(|| format!("链里没有节点 {}", node))?;
+            (n.objective.clone(), n.assignee.clone())
+        };
+        let agent = pmeta
+            .agents
+            .iter()
+            .find(|a| a.name == assignee)
+            .cloned()
+            .ok_or_else(|| format!("名单里没有负责人 {}", assignee))?;
+        let child = format!("{}--{}", parent, node);
+        if self.history.load(&child).is_ok() {
+            return Ok(child); // 幂等：已经有就复用，不重建
+        }
+        let meta = SessionMeta {
+            name: child.clone(),
+            mode: "single".to_string(),
+            delegate: false,
+            modules: agent.modules.clone(),
+            task: Some(objective),
+            ts: now_ts(),
+            agents: vec![agent.clone()],
+            exec: pmeta.exec.clone(),
+            parent: Some(parent.to_string()),
+            node: Some(node.to_string()),
+        };
+        // 沙箱锚在父会话上：该 agent 的目录在父会话里已经建好。
+        self.workspace
+            .prepare(meta.work(), std::slice::from_ref(&agent.name))?;
+        self.history.create(&meta)?;
+        self.ensure_session(&child)?;
+        Ok(child)
     }
 
     /// 生成结束**交回**：重新插入 + 解除"生成中"。
@@ -1729,6 +1815,10 @@ impl Core {
                 c.set_sandboxes(sandboxes);
             }
         }
+        // 方案过审后：就绪节点各建一个子会话——**与生产路径同一处置**，
+        // 只在一边接会漏（上一版 ApprovePlan 就是这么漏的，靠 e2e 才逮到）。
+        // 必须在"终结后移出中心"之前做：会话一移出，链就找不到了。
+        out.extend(self.spawn_ready_nodes(sid));
         // 会话终结后移出中心（前端据 Ended 回收）。
         if let Some(Session::Collab(c)) = self.sessions.get(sid) {
             if c.is_done() {
