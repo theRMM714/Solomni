@@ -480,10 +480,31 @@ pub struct Discussion {
     /// 「停止」标志：由 CollabSession 注入（它从任务登记处拿到）。
     /// 泵在**每次调用前**与**调用中途**都看它——所以停止能在一个模型调用内收尾，而不是等它跑完。
     cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// 轮次推进的游标（可暂停：问到哪了）——见 advance/feed。
+    cursor: Cursor,
+    /// 本轮到此刻**还没交出去**的行数（轮次标记也算）：一个成员说完就把它那一批交出去。
+    handed: usize,
+}
+
+/// 推进讨论的**一步**：该问谁（或终态）。
+/// 泵只决定"该问谁"，**不自己调模型**——驱动权归核心（见 docs/architecture/session-model.md 二之二）。
+pub enum Adv {
+    /// 该问这个成员一回合：把 msgs 发进它的会话，把结果交给 feed。
+    Ask { i: usize, msgs: Vec<Msg> },
+    /// 终态 / 轮次结束（原样交回上层）。
+    Out(TurnOut),
+}
+
+/// 轮次推进的游标（状态机可暂停：问到哪了）。
+enum Cursor {
+    /// 本轮还没开始：下一次 advance 写轮次标记与用户回答，再从第一个人问起。
+    Fresh,
+    /// 本轮问到第 i 个成员。
+    At(usize),
 }
 
 /// 一个成员回合的结果：两套通道**统一形态**（上层不必再关心是哪条通道）。
-struct MemberTurn {
+pub struct MemberTurn {
     verb: Verb,
     text: String,
     degraded: bool,
@@ -673,6 +694,8 @@ impl Discussion {
             cancel,
             protocol,
             face,
+            cursor: Cursor::Fresh,
+            handed: 0,
         }
     }
 
@@ -745,101 +768,136 @@ impl Discussion {
         on_lines: &mut LineSink<'_>,
         sink: &mut dyn FnMut(SessionEvent),
     ) -> TurnOut {
+        // 状态机驱动：本函数只负责"问 → 收 → 再问"，判定全在 advance/feed 里。
+        // 驱动权将来归核心（见 docs/architecture/session-model.md 二之二）：那时把这一圈换成
+        // 核心的 take/put 序列即可，判定一行不用改。
+        loop {
+            match self.advance() {
+                Adv::Ask { i, msgs, .. } => {
+                    let turn = match self.member_turn(i, msgs, sink) {
+                        Ok(t) => t,
+                        Err(_) if self.cancelled() => return TurnOut::Stopped,
+                        Err(err) => return TurnOut::Interrupted(err),
+                    };
+                    if let Some(out) = self.feed(i, turn, on_lines, sink) {
+                        return out;
+                    }
+                }
+                Adv::Out(out) => return out,
+            }
+        }
+    }
+
+    /// 推进讨论的**一步**：只决定"该问谁"（或给出终态）——**不自己调模型**。
+    /// 驱动权归核心（它同时看得到协作会话与各 agent 的会话），见 session-model.md 二之二。
+    pub fn advance(&mut self) -> Adv {
         if self.closed {
-            return TurnOut::Done;
+            return Adv::Out(TurnOut::Done);
         }
         // 已被要求停止：连轮次标记都不留（这一轮根本没开始）。
         if self.cancelled() {
-            return TurnOut::Stopped;
+            return Adv::Out(TurnOut::Stopped);
         }
-        // 本轮到此刻还没交出去的行数（轮次标记也算）：一个成员说完就把它那一批交出去。
-        let mut handed = self.transcript.len();
-        // 轮次边界：本轮的发言都在这条之后（回放时据此重算「本轮谁已同意」）。
-        self.transcript.push(DiscLine {
-            text: format!("[轮次 {}]", self.round + 1),
-            degraded: false,
-            tool: None,
-        });
-        // 用户回答优先转达。
-        if let Some(ans) = self.pending_user_answers.first().cloned() {
-            self.pending_user_answers.remove(0);
+        if matches!(self.cursor, Cursor::Fresh) {
+            // 本轮到此刻还没交出去的行数（轮次标记也算）：一个成员说完就把它那一批交出去。
+            self.handed = self.transcript.len();
+            // 轮次边界：本轮的发言都在这条之后（回放时据此重算「本轮谁已同意」）。
             self.transcript.push(DiscLine {
-                text: format!("[用户] {}", ans),
+                text: format!("[轮次 {}]", self.round + 1),
                 degraded: false,
                 tool: None,
             });
+            // 用户回答优先转达。
+            if let Some(ans) = self.pending_user_answers.first().cloned() {
+                self.pending_user_answers.remove(0);
+                self.transcript.push(DiscLine {
+                    text: format!("[用户] {}", ans),
+                    degraded: false,
+                    tool: None,
+                });
+            }
+            self.cursor = Cursor::At(0);
         }
-        // 同意是**粘住**的：发过 agree 的人不再被追问，直到在场者全部同意（离开的不算）。
-        // 以前每轮开头把所有人的同意清空，等于每轮把所有人问一遍——那是"轮询"而不是"轮流发言"。
-        let snapshot = self.transcript.clone();
-        for i in 0..self.members.len() {
-            let (system, id) = {
-                let m = &self.members[i];
-                (m.system.clone(), m.id.clone())
-            };
-            // 已同意的人不再被追问（同意粘住）；离开的人不算在场。
-            if !self.members[i].present || self.members[i].agreed {
-                continue;
+        // 同意是**粘住**的：发过 agree 的人不再被追问；离开的人不算在场。
+        let mut i = match self.cursor {
+            Cursor::At(i) => i,
+            Cursor::Fresh => 0,
+        };
+        while i < self.members.len() && (!self.members[i].present || self.members[i].agreed) {
+            i += 1;
+        }
+        if i >= self.members.len() {
+            // 本轮问完：收敛 / 上限判定，交回上层（下一次从新的一轮开始）。
+            self.round += 1;
+            self.cursor = Cursor::Fresh;
+            if self.members.iter().filter(|m| m.present).all(|m| m.agreed) {
+                self.closed = true;
+                return Adv::Out(TurnOut::Done);
             }
-            let step_prompt = self.prompts.render(
-                &self.prompts.core.discuss.step,
-                &[(
-                    "transcript",
-                    snapshot
-                        .iter()
-                        .map(|l| l.text.clone())
-                        .collect::<Vec<_>>()
-                        .join("\n"),
-                )],
-            );
-            // 停止是逐成员生效的：上一个成员说完后要停就停，不开始下一个。
-            if self.cancelled() {
-                return TurnOut::Stopped;
+            if self.round > MAX_ROUNDS {
+                self.closed = true;
+                return Adv::Out(TurnOut::Done);
             }
-            let msgs = vec![Msg::system(system), Msg::user(step_prompt)];
-            // 一个回合：可以先核实（只读工具），最后用动词表态；两条通道共用同一条循环。
-            let turn = match self.member_turn(i, msgs, sink) {
-                Ok(t) => t,
-                Err(_) if self.cancelled() => return TurnOut::Stopped,
-                Err(err) => return TurnOut::Interrupted(err),
-            };
-            let (verb, text, degraded) = (turn.verb, turn.text, turn.degraded);
-            self.absorb(&id, verb, text.clone(), degraded, turn.truncated);
-            // 逐成员外送：**这个人说完就出它那一行**，不等整轮问完。
-            on_lines(&self.transcript[handed..], sink);
-            handed = self.transcript.len();
-            let m = &mut self.members[i];
-            match verb {
-                Verb::Leave => m.present = false,
-                Verb::Agree => m.agreed = true,
-                Verb::Ask => {
-                    if self.allow_autonomy {
-                        let note = self.prompts.core.discuss.autonomy_note.clone();
-                        self.transcript.push(DiscLine {
-                            text: note,
-                            degraded: false,
-                            tool: None,
-                        });
-                        continue;
-                    }
-                    return TurnOut::AskUser {
-                        member: id,
-                        question: text,
-                    };
+            return Adv::Out(TurnOut::Round);
+        }
+        self.cursor = Cursor::At(i);
+        let system = self.members[i].system.clone();
+        let step_prompt = self.prompts.render(
+            &self.prompts.core.discuss.step,
+            &[(
+                "transcript",
+                self.transcript
+                    .iter()
+                    .map(|l| l.text.clone())
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+            )],
+        );
+        Adv::Ask {
+            i,
+            msgs: vec![Msg::system(system), Msg::user(step_prompt)],
+        }
+    }
+
+    /// 收下一个成员回合的结果（状态机的一步）：吸收、外送它那一批行、按动词改状态。
+    /// 返回 Some = 该立刻交回上层（请教用户）；None = 继续问下一个。
+    pub fn feed(
+        &mut self,
+        i: usize,
+        turn: MemberTurn,
+        on_lines: &mut LineSink<'_>,
+        sink: &mut dyn FnMut(SessionEvent),
+    ) -> Option<TurnOut> {
+        let (verb, text, degraded) = (turn.verb, turn.text.clone(), turn.degraded);
+        let id = self.members[i].id.clone();
+        self.absorb(&id, verb, text.clone(), degraded, turn.truncated);
+        // 逐成员外送：**这个人说完就出它那一行**，不等整轮问完。
+        on_lines(&self.transcript[self.handed..], sink);
+        self.handed = self.transcript.len();
+        // 本轮往后挪一格（advance 下次从下一个人接着问）。
+        self.cursor = Cursor::At(i + 1);
+        let m = &mut self.members[i];
+        match verb {
+            Verb::Leave => m.present = false,
+            Verb::Agree => m.agreed = true,
+            Verb::Ask => {
+                if self.allow_autonomy {
+                    let note = self.prompts.core.discuss.autonomy_note.clone();
+                    self.transcript.push(DiscLine {
+                        text: note,
+                        degraded: false,
+                        tool: None,
+                    });
+                    return None;
                 }
-                Verb::Say | Verb::Tool => {}
+                return Some(TurnOut::AskUser {
+                    member: id,
+                    question: text,
+                });
             }
+            Verb::Say | Verb::Tool => {}
         }
-        self.round += 1;
-        if self.members.iter().filter(|m| m.present).all(|m| m.agreed) {
-            self.closed = true;
-            return TurnOut::Done;
-        }
-        if self.round > MAX_ROUNDS {
-            self.closed = true;
-            return TurnOut::Done;
-        }
-        TurnOut::Round
+        None
     }
 
     fn absorb(&mut self, id: &str, verb: Verb, text: String, degraded: bool, truncated: bool) {
