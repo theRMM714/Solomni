@@ -1158,6 +1158,27 @@ pub(crate) fn scripted_discussion(scripts: Vec<Vec<String>>, allow: bool) -> Dis
     )
 }
 
+/// 链随 plan_review 事件派生：按转录重建时**不重新整理**（省一次模型调用）。
+#[test]
+pub(crate) fn collab_state_derives_the_task_chain_from_plan_review() {
+    let events = vec![
+        serde_json::json!({ "type": "plan", "text": "方案：A 做 X" }),
+        serde_json::json!({
+            "type": "plan_review",
+            "plan": "方案：A 做 X",
+            "chain": { "nodes": [ {
+                "id": "n1", "title": "做 X", "objective": "把 X 做完",
+                "assignee": "a", "deps": []
+            } ] }
+        }),
+    ];
+    let st = crate::core::collab_state::derive(&events, &["a".to_string()]);
+    assert_eq!(st.plan.as_deref(), Some("方案：A 做 X"));
+    assert_eq!(st.chain.nodes.len(), 1, "链该从 plan_review 派生出来");
+    assert_eq!(st.chain.nodes[0].assignee, "a");
+    assert_eq!(st.chain.nodes[0].objective, "把 X 做完");
+}
+
 // ---------- 任务链（依赖图） ----------
 
 fn chain_node(id: &str, deps: &[&str]) -> crate::core::chain::TaskNode {

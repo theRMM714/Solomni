@@ -28,6 +28,8 @@ pub struct CollabState {
     /// 用户在审查关卡点过「同意」（[用户:同意方案]）：方案过关，可以开工。
     pub plan_approved: bool,
     pub plan: Option<String>,
+    /// 核心给出的任务链（从 plan_review 事件派生）。
+    pub chain: crate::core::chain::TaskChain,
     pub reports: BTreeMap<String, String>,
     pub review_raw: Option<String>,
     pub review_pass: bool,
@@ -135,6 +137,16 @@ pub fn derive(events: &[serde_json::Value], roster_names: &[String]) -> CollabSt
                     .get("text")
                     .and_then(|t| t.as_str())
                     .map(|s| s.to_string())
+            }
+            // 任务链随"方案待审"事件落档：重启/回档后按它重建，**不重新整理**（省一次模型调用）。
+            "plan_review" => {
+                if let Some(chain) = ev.get("chain") {
+                    if let Ok(parsed) =
+                        serde_json::from_value::<crate::core::chain::TaskChain>(chain.clone())
+                    {
+                        st.chain = parsed;
+                    }
+                }
             }
             "report" => {
                 let id = ev

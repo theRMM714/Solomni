@@ -506,8 +506,8 @@ impl CollabSession {
                 }
             }
         }
-        // 整理：只在还没有方案时做（回档/重启后沿用已记的方案，不重复花钱）。
-        if self.plan.is_none() {
+        // 整理：只在还没有方案（或没有链）时做——回档/重启后沿用已记的，不重复花钱。
+        if self.plan.is_none() || self.chain.is_none() {
             let made = self
                 .disc
                 .as_ref()
@@ -804,8 +804,12 @@ impl CollabSession {
             pending: None,
             allow: st.allow,
             plan: st.plan.clone(),
-            // 链暂不落档（方案本身已按转录派生）：重建后点「继续」会重新整理一次。
-            chain: None,
+            // 链随 plan_review 事件落档：重建后按它还原，不重新整理（省一次模型调用）。
+            chain: if st.chain.nodes.is_empty() {
+                None
+            } else {
+                Some(st.chain.clone())
+            },
             disc: None,
             emitted: 0,
             next_line: total,
