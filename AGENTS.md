@@ -153,3 +153,4 @@
 | 呈现层入站契约、HTTP 路由目录 | `docs/architecture/contracts.md` |
 | 系统工具、角色（身份）与"谁能用哪些工具" | `docs/architecture/tools-and-roles.md` |
 | 审查关卡、任务链（依赖图）、子会话与验收 | `docs/architecture/task-chain.md` |
+| 会话模型（主/子会话、回合、发言标记、回档同步、上下文压缩） | `docs/architecture/session-model.md` |

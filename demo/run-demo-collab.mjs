@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 /**
- * 协作演示（L4 演示脚本，**在真机上跑**）：三个 agent 各持一个模块，走完整协作五阶段，
+ * 协作演示（L4 演示脚本，**在真机上跑**）：三个 agent 各持一个模块，走完整协作六阶段，
  * 把共享区里的资料变成"语料 + 报告 + 离线索引"三件产物。
  *
  * 与 demo/run-demo.mjs 的区别：那个是**组合式**（一个 agent 装三个模块），这个走**小组协作**
- * （N 个 agent 分权协商：讨论 → 收敛 → 执行 → 验收 → 交付）。三个模块仍是三种语言：
- * harvest=python、render=node、indexer=C++。
+ * （N 个 agent 分权协商：讨论 → 整理出任务链 → **审查关卡** → 链驱动（子会话）→ 节点验收 → 总验收）。
+ * 三个模块仍是三种语言：harvest=python、render=node、indexer=C++。
+ * 细则见 docs/architecture/task-chain.md。
  *
  * 用法：
  *   1) 先起产品：node start.js -webUI            （默认网页端口 3081）
@@ -86,6 +87,15 @@ async function lines(sid) {
 
 const toolRows = (ls) => ls.filter((l) => l.tool).map((l) => l.tool);
 
+/** 本工作 + 它**子会话**的全部转录行：节点跑在自己的子会话里，工具调用落在那边。 */
+async function allLines(sid) {
+  const out = await lines(sid);
+  const st = await api("GET", "/api/state");
+  const kids = ((st.json && st.json.history) || []).filter((h) => h.parent === sid);
+  for (const k of kids) out.push(...(await lines(k.name)));
+  return out;
+}
+
 /** 本工作共享区/沙箱里找产物（成品可以落在共享区，也可以落在某个 agent 的私有沙箱）。 */
 function artifacts(work) {
   const root = join(process.cwd(), "session", work);
@@ -153,6 +163,20 @@ async function main() {
       ok(ans.status === 200, "回答 agent 的提问", ans.text);
       continue;
     }
+    // **审查关卡**：整理完不自动开工——方案与任务链先给用户看，点「同意」才推进。
+    if (pending && pending.type === "plan_review") {
+      console.log("   [审查关卡] 方案与任务链已备好，点「同意」开工");
+      const a = await api("POST", "/api/sessions/" + encodeURIComponent(sid) + "/approve-plan", {});
+      ok(a.status === 200, "审查关卡：同意方案开工", a.text);
+      continue;
+    }
+    // **节点验收没过**：如实报告是哪几个节点，然后点「继续」重派它们。
+    if (pending && pending.type === "node_blocked") {
+      console.log("   [节点验收] 没通过：" + JSON.stringify(pending.nodes || []));
+      const c = await api("POST", "/api/sessions/" + encodeURIComponent(sid) + "/continue", {});
+      ok(c.status === 200, "重派没通过的节点", c.text);
+      continue;
+    }
     const ev = await events(sid);
     if (ev.some((e) => e.type === "ended")) { delivered = true; break; }
     const c = await api("POST", "/api/sessions/" + encodeURIComponent(sid) + "/continue", {});
@@ -164,6 +188,8 @@ async function main() {
   const kinds = ev.map((e) => e.type);
   ok(kinds.includes("discussion_done"), "讨论收敛（discussion_done）", kinds.join(","));
   ok(kinds.includes("plan"), "整理出方案（plan）", kinds.join(","));
+  ok(kinds.includes("plan_review"), "审查关卡：整理完停在待审（plan_review）", kinds.join(","));
+  ok(kinds.includes("node_started"), "就绪节点各起了子会话（node_started）", kinds.join(","));
   ok(kinds.includes("report"), "各 agent 交了回报（report）", kinds.join(","));
   ok(kinds.includes("review"), "核心逐项验收（review）", kinds.join(","));
   const delivery = ev.filter((e) => e.type === "delivery").pop();
@@ -186,7 +212,12 @@ async function main() {
   }
 
   // 检索真的可用：至少有一次成功的 query，且结果里有命中。
-  const rows = toolRows(await lines(sid));
+  // 子会话真的建出来了：侧栏据此把子会话缩进挂在父会话下（history.parent）。
+  const st = await api("GET", "/api/state");
+  const kids = ((st.json && st.json.history) || []).filter((h) => h.parent === sid);
+  ok(kids.length > 0, "子会话挂在父会话下（history.parent）", JSON.stringify(kids.map((k) => k.name)));
+
+  const rows = toolRows(await allLines(sid));
   console.log("   工具调用：" + (rows.map((r) => (r.label || r.name) + (r.ok ? "✓" : "✗")).join("、") || "（没有）"));
   const q = rows.filter((r) => /query/.test(r.name) && r.ok).pop();
   ok(!!q, "索引建好后当场检索过", JSON.stringify(rows.map((r) => [r.name, r.ok])));
