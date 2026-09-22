@@ -271,11 +271,20 @@ pub struct FileRead {
     pub cut: bool,
 }
 
+/// 目录里的一项（列目录用；大小只对文件有意义，目录恒为 0）。
+pub struct DirEntry {
+    pub name: String,
+    pub is_dir: bool,
+    pub bytes: u64,
+}
+
 /// 内置文件工具的读写端口：机制在适配层，放行/寻址/越界在 core。
-/// 读严格按 UTF-8 解码，非法字节如实标注；写一律 UTF-8。
+/// 读严格按 UTF-8 解码，非法字节如实标注；写一律 UTF-8；列目录只报名字/类型/大小。
 pub trait SysIo: Send + Sync {
     fn read(&self, path: &std::path::Path) -> Result<FileRead, String>;
     fn write(&self, path: &std::path::Path, content: &str) -> Result<(), String>;
+    /// 列一个目录（按名字排序）。路径不是目录时如实报错——core 据此把 read 的失败引导到 list。
+    fn list(&self, path: &std::path::Path) -> Result<Vec<DirEntry>, String>;
 }
 
 /// 探测结论：这条通道到底支不支持原生工具调用（**事实**，不是猜测；三种都如实回报）。

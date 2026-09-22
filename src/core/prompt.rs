@@ -169,6 +169,15 @@ pub struct ToolTexts {
     pub unknown_builtin: String,
     /// 变量：path, bytes, text
     pub read_header: String,
+    /// read 遇到目录时的如实引导。变量：path
+    pub read_is_dir: String,
+    // —— list：列目录 ——
+    /// 变量：path, count
+    pub list_header: String,
+    /// 变量：name, dir_mark, bytes
+    pub list_row: String,
+    pub list_dir_mark: String,
+    pub list_empty: String,
     /// 变量：path, chars
     pub write_header: String,
     // —— edit：精确替换与"没找到/多处命中"的如实回报（第二层）——

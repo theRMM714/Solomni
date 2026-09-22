@@ -309,6 +309,34 @@ impl SysIo for InMemorySysIo {
             cut: self.cut,
         })
     }
+    fn list(&self, path: &std::path::Path) -> Result<Vec<crate::core::ports::DirEntry>, String> {
+        if let Some(m) = &self.fail {
+            return Err(m.clone());
+        }
+        // 内存替身：把已 seed 的路径按"父目录等于该目录"筛出来（只报直接子项）。
+        let dir = path.to_string_lossy().into_owned();
+        let files = self.files.lock().expect("锁");
+        let mut out: Vec<crate::core::ports::DirEntry> = Vec::new();
+        for (k, v) in files.iter() {
+            let Some((parent, name)) = k.rsplit_once(['/', '\\']) else {
+                continue;
+            };
+            if parent != dir.trim_end_matches(['/', '\\']) {
+                continue;
+            }
+            out.push(crate::core::ports::DirEntry {
+                name: name.to_string(),
+                is_dir: false,
+                bytes: v.len() as u64,
+            });
+        }
+        if out.is_empty() {
+            return Err(format!("列目录失败：{} 不是目录", dir));
+        }
+        out.sort_by(|a, b| a.name.cmp(&b.name));
+        Ok(out)
+    }
+
     fn write(&self, path: &std::path::Path, content: &str) -> Result<(), String> {
         if let Some(m) = &self.fail {
             return Err(m.clone());

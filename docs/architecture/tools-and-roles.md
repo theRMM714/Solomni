@@ -26,7 +26,8 @@ tools:
     impl: builtin                     # 实现来源：builtin = 核心能力
 ```
 
-- **`capability` 决定收口，不按"系统/模块"一刀切**：`read`/`write`/`edit`/`patch`/`search` 虽然都是系统工具，但它们碰文件系统，**照样受沙箱与围栏约束**；`say`/`agree` 这类不碰文件。
+- **`capability` 决定收口，不按"系统/模块"一刀切**：`read`/`list`/`search`/`write`/`edit`/`patch` 虽然都是系统工具，但它们碰文件系统，**照样受沙箱与围栏约束**；`say`/`agree` 这类不碰文件。
+- **列目录是"核实"的前提**：`read` 只读文件，`search` 要关键词，**没有 `list` 就确认不了"资料齐不齐、脚本在不在"**；`read` 遇到目录会如实引导到 `list`，不抛 IO 错。
 - 参数不合法 → **如实拒绝并落工具行**，不静默。
 
 ### 角色表字段
@@ -35,7 +36,7 @@ tools:
 roles:
   - id: discussant
     prompt: roles/discussant          # 提示词与工具面**同处声明**
-    tools: [say, agree, leave, ask, read, write, edit, patch, search]
+    tools: [say, agree, leave, ask, read, list, search]   # 讨论回合只做核实：读类 + 讨论动词
 ```
 
 - **角色 = 场景绑定的身份**：`discussant` 只存在于讨论阶段，`orchestrator` 只存在于任务链推进阶段。**不再引入"阶段 → 工具"的第二张表**（否则两个真相源）。

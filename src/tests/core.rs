@@ -5350,6 +5350,37 @@ pub(crate) fn builtin_read_reports_errors_verbatim() {
     );
 }
 
+/// list：列目录（名字 / 大小，按名字排序）；read 遇到目录**如实引导**到 list，而不是抛 IO 错。
+#[test]
+pub(crate) fn builtin_list_shows_a_directory_and_read_guides_to_it() {
+    let io = InMemorySysIo::new();
+    let sb = test_sandbox("a1", &[]);
+    io.seed(&["demo", "work", "b.txt"], "bb");
+    io.seed(&["demo", "work", "a.md"], "aaaa");
+    let work = s(&["demo", "work"]);
+
+    let ls = run_builtin(&sb, &io, "list", &format!("{{\"path\":\"{}\"}}", work));
+    assert!(ls.ok, "{}", ls.output);
+    assert!(
+        ls.output.contains("a.md") && ls.output.contains("b.txt"),
+        "{}",
+        ls.output
+    );
+    assert!(ls.output.contains("2 项"), "{}", ls.output);
+    let a = ls.output.find("a.md").expect("a.md");
+    let b = ls.output.find("b.txt").expect("b.txt");
+    assert!(a < b, "该按名字排序：{}", ls.output);
+
+    // read 一个目录：给引导，不给 IO 错。
+    let rd = run_builtin(&sb, &io, "read", &format!("{{\"path\":\"{}\"}}", work));
+    assert!(!rd.ok, "read 目录不该成功：{}", rd.output);
+    assert!(
+        rd.output.contains("用 list"),
+        "该引导到 list：{}",
+        rd.output
+    );
+}
+
 #[test]
 pub(crate) fn builtin_read_range_numbers_lines_and_points_at_the_next_offset() {
     let io = InMemorySysIo::new();

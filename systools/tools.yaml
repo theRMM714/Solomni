@@ -58,6 +58,15 @@ tools:
   patch:
     capability: fs-write        # 权限收口依据：碰文件系统的系统工具照样受沙箱/围栏约束
     desc: 用一段**自由格式**的补丁文本改文件（信封之后原样跟补丁；大段内容不要塞进 JSON）。语法见 patch_guide。
+  list:
+    capability: fs-read        # 权限收口依据：碰文件系统的系统工具照样受沙箱/围栏约束
+    desc: 列一个目录（名字 / 是否目录 / 字节数，按名字排序）。**确认资料齐不齐、脚本在不在就用它**；read 只读文件，遇到目录会引导你用 list。
+    parallel: true                    # 只读、无副作用
+    params:
+      path:
+        type: string
+        required: true
+        desc: 要列的目录的真实绝对路径
   search:
     capability: fs-read        # 权限收口依据：碰文件系统的系统工具照样受沙箱/围栏约束
     desc: 在文本文件里查关键词，返回带行号的命中行。

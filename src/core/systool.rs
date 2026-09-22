@@ -15,6 +15,7 @@ pub const READ: &str = "read";
 pub const WRITE: &str = "write";
 pub const EDIT: &str = "edit";
 pub const PATCH: &str = "patch";
+pub const LIST: &str = "list";
 pub const SEARCH: &str = "search";
 
 /// 单次读取回传的字符上限（超出如实截断，并在回执里给出接着读的 offset）。
@@ -32,7 +33,7 @@ pub const MODULE_WRITE_MARK: &str = "[模块目录]";
 /// 内置工具名（保留名）。
 /// 与 systools/tools.yaml 的 tools 是同一份名单，测试「builtin_tool_book_is_the_one_source_of_names_and_paths」锁死两者一致。
 pub fn is_builtin(name: &str) -> bool {
-    name == READ || name == WRITE || name == EDIT || name == PATCH || name == SEARCH
+    name == READ || name == WRITE || name == EDIT || name == PATCH || name == LIST || name == SEARCH
 }
 
 /// 内置工具名清单（拼错误提示用）。
@@ -42,6 +43,7 @@ pub fn names() -> Vec<String> {
         WRITE.to_string(),
         EDIT.to_string(),
         PATCH.to_string(),
+        LIST.to_string(),
         SEARCH.to_string(),
     ]
 }
@@ -286,11 +288,58 @@ pub fn execute(
         READ => read(sb, io, obs, &args, &spec, &path),
         WRITE => write(sb, io, obs, &args, &spec, &path, &place),
         EDIT => edit(sb, io, obs, &args, &spec, &path),
+        LIST => list(sb, io, &spec, &path),
         SEARCH => search(sb, io, &args, &spec, &path),
         other => fail(
             sb.texts
                 .render(&sb.texts.unknown_builtin, &[("name", other.to_string())]),
         ),
+    }
+}
+
+/// list：列目录（名字 / 是否目录 / 字节数，按名字排序）。
+/// 存在的理由：确认"资料齐不齐、脚本在不在、运行包装没装"必须能列目录——read 只读文件。
+fn list(sb: &Sandbox, io: &dyn SysIo, spec: &str, path: &Path) -> ToolOutcome {
+    let texts = &sb.texts;
+    let entries = match io.list(path) {
+        Ok(e) => e,
+        Err(e) => return fail(e),
+    };
+    let rows = if entries.is_empty() {
+        texts.list_empty.clone()
+    } else {
+        entries
+            .iter()
+            .map(|e| {
+                texts.render(
+                    &texts.list_row,
+                    &[
+                        ("name", e.name.clone()),
+                        (
+                            "dir_mark",
+                            if e.is_dir {
+                                texts.list_dir_mark.clone()
+                            } else {
+                                String::new()
+                            },
+                        ),
+                        ("bytes", e.bytes.to_string()),
+                    ],
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    let header = texts.render(
+        &texts.list_header,
+        &[
+            ("path", spec.to_string()),
+            ("count", entries.len().to_string()),
+        ],
+    );
+    ToolOutcome {
+        ok: true,
+        output: format!("{}\n{}", header, rows),
     }
 }
 
@@ -306,7 +355,11 @@ fn read(
     let texts = &sb.texts;
     let got = match io.read(path) {
         Ok(g) => g,
-        Err(e) => return fail(e),
+        // 目录不是文件：如实引导到 list，而不是把 IO 错原样丢给模型。
+        Err(e) => match io.list(path) {
+            Ok(_) => return fail(texts.render(&texts.read_is_dir, &[("path", spec.to_string())])),
+            Err(_) => return fail(e),
+        },
     };
     let header = |body: String| {
         texts.render(
