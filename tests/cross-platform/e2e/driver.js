@@ -272,8 +272,11 @@ async function lines(sid) {
   assert(c2.status === 200, '建协作工作（2 个 agent）', c2.text.slice(0, 200));
   const begin = await api('POST', '/api/sessions/' + encodeURIComponent(name2) + '/begin', { text: 'yes,allow' });
   assert(begin.status === 200, '确认开始讨论', begin.text.slice(0, 200));
-  // 整理完停在**待审**：点「同意」才开工。
-  const ev2 = JSON.stringify([].concat((begin.json && begin.json.events) || [], await approvePlan(name2)));
+  // 整理完停在**待审**：点「同意」才开工；开工后节点在子会话里跑，交付是异步产生的。
+  await approvePlan(name2);
+  const ev2 = JSON.stringify(
+    [].concat((begin.json && begin.json.events) || [], await waitForDelivery(name2)),
+  );
   assert(ev2.includes('甲') && ev2.includes('乙'), '协作转录以 agent 名为说话人', ev2.slice(0, 240));
   assert(ev2.includes('delivery') || ev2.includes('交付'), '协作跑完并交付', ev2.slice(-240));
   assert(fs.existsSync(path.join(dir(name2), '甲')) && fs.existsSync(path.join(dir(name2), '乙')), '两个 agent 各自沙箱目录已建');
@@ -292,7 +295,10 @@ async function lines(sid) {
   assert(fs.existsSync(path.join(dir(name3), '单兵')) && fs.existsSync(path.join(dir(name3), '新助手')), '确认名单后按 agent 名建出沙箱目录');
   const begun3 = await api('POST', '/api/sessions/' + encodeURIComponent(name3) + '/begin', { text: 'yes,allow' });
   assert(begun3.status === 200, '代拟名单后开始讨论', begun3.text.slice(0, 200));
-  const ev3 = JSON.stringify([].concat((begun3.json && begun3.json.events) || [], await approvePlan(name3)));
+  await approvePlan(name3);
+  const ev3 = JSON.stringify(
+    [].concat((begun3.json && begun3.json.events) || [], await waitForDelivery(name3)),
+  );
   assert(ev3.includes('单兵'), '代拟出来的 agent 真的在发言', ev3.slice(0, 240));
 
 
@@ -311,10 +317,21 @@ async function approvePlan(name) {
   const all = (sid) => lines(sid);
   const joined = (ls) => ls.map((x) => String(x.line || '')).join('\n');
   /** 全部事件（notice / delivery / ended 这些不是转录行，得从这里看）。 */
-  const eventsOf = async (sid) => {
+  async function eventsOf(sid) {
     const r = await api('GET', '/api/history/' + encodeURIComponent(sid));
     return (r.json && r.json.events) || [];
-  };
+  }
+
+  /** 等链驱动跑完：节点在**自己的子会话**里跑，父会话的交付是异步产生的。 */
+  async function waitForDelivery(sid, ms = 90000) {
+    const until = Date.now() + ms;
+    for (;;) {
+      const ev = await eventsOf(sid);
+      if (JSON.stringify(ev).includes('delivery')) return ev;
+      if (Date.now() > until) return ev;
+      await new Promise((r) => setTimeout(r, 500));
+    }
+  }
 
   // ① agree 收敛：只有一个人同意时不该收敛（要出现下一轮），两人都同意才收敛。
   const nA = 'e2e-collab-noconv-' + Date.now();
@@ -342,7 +359,7 @@ async function approvePlan(name) {
   assert((await api('POST', '/api/sessions/' + encodeURIComponent(nB) + '/begin', { text: 'yes,allow' })).status === 200, '「退场」开始讨论');
   await approvePlan(nB);
   const tB = joined(await all(nB));
-  const evB = JSON.stringify(await eventsOf(nB));
+  const evB = JSON.stringify(await waitForDelivery(nB));
   assert(tB.includes('甲:leave'), '甲发了 leave', tB.slice(-300));
   // leave 之后不该再出现甲的发言：取 leave 之后那一段来断言。
   const afterLeave = tB.slice(tB.indexOf('甲:leave'));
@@ -373,7 +390,7 @@ async function approvePlan(name) {
   })).status === 200, '建「返工」协作工作');
   assert((await api('POST', '/api/sessions/' + encodeURIComponent(nD) + '/begin', { text: 'yes,allow' })).status === 200, '「返工」开始讨论');
   await approvePlan(nD);
-  const evD = JSON.stringify(await eventsOf(nD));
+  const evD = JSON.stringify(await waitForDelivery(nD));
   assert(evD.includes('返工'), '验收 fail → 触发返工', evD.slice(-400));
   assert(evD.includes('delivery'), '返工后重验通过并交付', evD.slice(-240));
 

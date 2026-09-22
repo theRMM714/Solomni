@@ -5,9 +5,7 @@
 //! 依赖全部为端口与核心数据；无 IO，无具体适配器。
 
 use crate::core::agents::{self, RosterPick};
-use crate::core::engine::{
-    Discussion, Execution, Member, MemberTools, TurnOut, MAX_REWORK, MAX_ROUNDS,
-};
+use crate::core::engine::{Discussion, Execution, Member, MemberTools, TurnOut, MAX_ROUNDS};
 use crate::core::envelope;
 use crate::core::events::{CheckView, LineView, Pending, SessionEvent};
 use crate::core::exec::{self, ExecSpec};
@@ -210,6 +208,19 @@ impl CollabSession {
             if let Some(n) = chain.nodes.iter_mut().find(|n| n.id == node) {
                 n.sub_session = Some(sub.to_string());
                 n.status = crate::core::chain::NodeStatus::Running;
+            }
+        }
+    }
+
+    /// 记下节点完成（产出即它的交付物），供父会话做总验收。
+    pub fn mark_node_done(&mut self, node: &str, note: &str) {
+        if let Some(chain) = self.chain.as_mut() {
+            if let Some(n) = chain.nodes.iter_mut().find(|n| n.id == node) {
+                n.status = crate::core::chain::NodeStatus::Done;
+                n.acceptance = Some(crate::core::chain::Acceptance {
+                    ok: true,
+                    note: note.to_string(),
+                });
             }
         }
     }
@@ -581,30 +592,38 @@ impl CollabSession {
             self.pending = Some(Pending::PlanReview);
             return;
         }
-        // 执行 → 验收 → 返工（上限内）→ 交付。
-        let llm = self.llm_opts();
-        let members = self
-            .disc
-            .as_mut()
-            .expect("disc 存在")
-            .members
-            .as_mut_slice();
-        let mut exec = Execution::run(
-            members,
-            &plan,
-            &prompts,
-            std::sync::Arc::clone(&self.cancel),
-        );
-        // 执行阶段被停止 / 有成员调用失败：都不交付、不返工，如实告知并交回用户。
-        if let Some(note) = self.exec_note(&exec) {
-            sink(SessionEvent::Notice(note));
+        // **链驱动**：每个节点跑在它自己的子会话里（核心负责建会话与派发）。
+        // 本会话在此**让出**——全部节点落定后才回来做总验收。
+        let settled = self
+            .chain
+            .as_ref()
+            .map(|c| {
+                !c.nodes.is_empty()
+                    && c.nodes.iter().all(|n| {
+                        matches!(
+                            n.status,
+                            crate::core::chain::NodeStatus::Done
+                                | crate::core::chain::NodeStatus::Failed
+                        )
+                    })
+            })
+            .unwrap_or(false);
+        if !settled {
             return;
         }
-        for (id, text) in &exec.reports {
-            emit_tool_lines(&exec, id, &mut self.next_line, sink);
+        // 总验收：核心 AI 按**各节点的产出**核对（复用执行阶段的验收机制）→ 交付。
+        let llm = self.llm_opts();
+        let mut exec = Execution::new();
+        for n in self.chain.as_ref().expect("链存在").nodes.iter() {
+            let note = n
+                .acceptance
+                .as_ref()
+                .map(|a| a.note.clone())
+                .unwrap_or_else(|| "（该节点没有产出）".to_string());
+            exec.reports.insert(n.id.clone(), note.clone());
             sink(SessionEvent::Report {
-                id: id.clone(),
-                text: text.clone(),
+                id: n.id.clone(),
+                text: note,
                 rework: 0,
             });
         }
@@ -614,39 +633,6 @@ impl CollabSession {
             return;
         }
         sink(review_event(&exec));
-        while !exec.all_pass() && exec.rework < MAX_REWORK {
-            sink(SessionEvent::Notice(format!(
-                "[返工] 第 {} 次（上限 {}）",
-                exec.rework + 1,
-                MAX_REWORK
-            )));
-            let review_text = fail_text(&exec);
-            let members = self
-                .disc
-                .as_mut()
-                .expect("disc 存在")
-                .members
-                .as_mut_slice();
-            exec.rerun(members, &plan, &review_text, &prompts);
-            if let Some(note) = self.exec_note(&exec) {
-                sink(SessionEvent::Notice(note));
-                return;
-            }
-            for (id, text) in &exec.reports {
-                emit_tool_lines(&exec, id, &mut self.next_line, sink);
-                sink(SessionEvent::Report {
-                    id: id.clone(),
-                    text: text.clone(),
-                    rework: exec.rework,
-                });
-            }
-            exec.review(self.core_chat.as_mut(), &plan, &prompts, llm);
-            if let Some(note) = self.exec_note(&exec) {
-                sink(SessionEvent::Notice(note));
-                return;
-            }
-            sink(review_event(&exec));
-        }
         let ok = exec.all_pass();
         sink(SessionEvent::Delivery {
             ok,
@@ -729,11 +715,6 @@ impl CollabSession {
                 // 本档位下不能执行工具的模块（缺运行包）：机制侧据此拒绝执行。
                 unavailable: exec::unavailable(&self.spec, &modules, &library),
                 fence,
-                // 流式与预算取全局设置：讨论/执行/验收与单 agent 共用同一份。
-                llm: crate::core::ports::LlmOpts {
-                    stream: self.settings.app.streaming,
-                    timeout_secs: self.settings.app.llm_timeout_secs,
-                },
             });
             members.push(member);
         }
@@ -929,26 +910,10 @@ fn derive_pending(st: &crate::core::collab_state::CollabState) -> Option<Pending
     })
 }
 
-/// 某 agent 的工具调用各发一条 tool 转录行（行文本沿用「成员:tool 模块.工具 → 成败」口径）。
-fn emit_tool_lines(
-    exec: &Execution,
-    id: &str,
-    next_line: &mut u64,
-    sink: &mut dyn FnMut(SessionEvent),
-) {
-    for v in exec.traces.get(id).into_iter().flatten() {
-        let status = if v.ok { "成功" } else { "失败" };
-        let line = format!("[{}:tool] {} → {}", id, v.label(), status);
-        sink(SessionEvent::Transcript(vec![LineView {
-            id: *next_line,
-            // 回复号来自引擎（同一次回复的多个调用同号）：这样转录里能看出它们是一组的。
-            reply: v.reply,
-            line,
-            tool: Some(v.clone()),
-            ..Default::default()
-        }]));
-        *next_line += 1;
-    }
+/// 代拟/推荐共用的应答形状：名单项（复用或组装）。
+#[derive(serde::Deserialize)]
+struct SlateReply {
+    picks: Vec<RosterPick>,
 }
 
 /// 逐成员外送：把刚定稿的讨论行变成带**会话内稳定 id** 的转录事件交出去。
@@ -1025,22 +990,4 @@ fn review_event(exec: &Execution) -> SessionEvent {
         items,
         raw: exec.checklist_raw.clone(),
     }
-}
-
-fn fail_text(exec: &Execution) -> String {
-    exec.items
-        .iter()
-        .filter(|i| !i.status.eq_ignore_ascii_case("pass"))
-        .map(|i| format!("- {}：{}", i.item, i.reason.clone().unwrap_or_default()))
-        .collect::<Vec<_>>()
-        .join(
-            "
-",
-        )
-}
-
-/// 代拟/推荐共用的应答形状：名单项（复用或组装）。
-#[derive(serde::Deserialize)]
-struct SlateReply {
-    picks: Vec<RosterPick>,
 }

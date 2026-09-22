@@ -437,7 +437,11 @@ impl Core {
     /// 协作生成结束**交回**：重新插入 + 解除"生成中"，并**为就绪节点派发子会话**。
     /// 转录已由工作线程按"一次模型调用"的粒度增量落盘（见 `Persister`），这里不重复落。
     /// 返回值：派发产生的事件（调用方负责入台）。
-    pub(crate) fn put_collab(&mut self, sid: &str, c: CollabSession) -> Vec<SessionEvent> {
+    pub(crate) fn put_collab(
+        &mut self,
+        sid: &str,
+        c: CollabSession,
+    ) -> (Vec<SessionEvent>, Vec<(String, String, String)>) {
         self.running.remove(sid);
         self.sessions.insert(sid.to_string(), Session::Collab(c));
         self.spawn_ready_nodes(sid)
@@ -445,7 +449,87 @@ impl Core {
 
     /// 方案过审后：链里**就绪且还没有子会话**的节点各建一个子会话，并如实外送。
     /// 为什么在这里：会话表只有核心能碰（泵不建会话）；派发是核心的职责。
-    fn spawn_ready_nodes(&mut self, sid: &str) -> Vec<SessionEvent> {
+    /// 子会话的产出（最后一条转录行）= 该节点的交付物；取不到就如实说"没有产出"。
+    fn node_note(&self, child: &str) -> String {
+        let lines = match self.history.load(child) {
+            Ok((_, evs)) => evs
+                .iter()
+                .filter_map(|e| e.get("lines").and_then(|l| l.as_array()))
+                .flatten()
+                .filter_map(|l| l.get("line").and_then(|x| x.as_str()))
+                .map(|s| s.to_string())
+                .collect::<Vec<_>>(),
+            Err(_) => Vec::new(),
+        };
+        lines
+            .last()
+            .cloned()
+            .unwrap_or_else(|| "（该节点没有产出）".to_string())
+    }
+
+    /// 标记节点完成（记下它的产出），供父会话做总验收。
+    fn mark_node_done(&mut self, sid: &str, node: &str, note: &str) {
+        if let Some(Session::Collab(c)) = self.sessions.get_mut(sid) {
+            c.mark_node_done(node, note);
+        }
+    }
+
+    /// **同步**跑一个节点的子会话（CLI 与测试走这条；Web 生产路径由 CoreHandle 起工作线程）。
+    fn drive_node(&mut self, child: &str, objective: &str) -> Vec<SessionEvent> {
+        match self.prepare_single(child, Some(objective), false) {
+            Ok(Prepared::Run {
+                session,
+                prefix,
+                llm,
+                ..
+            }) => {
+                let mut session = *session;
+                let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+                // 两个出口（流式短暂事件 / 定稿事件）都要收进同一份事件流：用 RefCell 共享。
+                let out = std::cell::RefCell::new(prefix);
+                {
+                    let mut live = crate::core::events::Live {
+                        llm,
+                        cancel,
+                        emit: &mut |ev: SessionEvent| out.borrow_mut().push(ev),
+                    };
+                    let mut sink = |ev: SessionEvent| out.borrow_mut().push(ev);
+                    session.say(objective, &mut live, &mut sink);
+                }
+                let events = out.into_inner();
+                self.put_single_recorded(child, session, &events);
+                events
+            }
+            _ => Vec::new(),
+        }
+    }
+
+    /// 推进任务链：反复「派发就绪节点 → 同步跑完 → 标记完成」，直到没有可推进的。
+    /// 与 Web 生产路径（CoreHandle 起工作线程）**同一套判定**，只是这里同步做（CLI 与测试走这条）。
+    fn advance_chain(&mut self, sid: &str) -> Vec<SessionEvent> {
+        let mut out = Vec::new();
+        loop {
+            let (events, todo) = self.spawn_ready_nodes(sid);
+            out.extend(events);
+            if todo.is_empty() {
+                break;
+            }
+            for (node, child, objective) in todo {
+                out.extend(self.drive_node(&child, &objective));
+                let note = self.node_note(&child);
+                self.mark_node_done(sid, &node, &note);
+            }
+        }
+        out
+    }
+
+    /// 为链里"就绪且还没有子会话"的节点建子会话并标记派发。
+    /// 返回（要外送的事件, 要起生成的节点：(节点, 子会话, 任务提示词)）——
+    /// 生成怎么跑由调用方决定：测试路径同步跑，生产路径交给工作线程。
+    fn spawn_ready_nodes(
+        &mut self,
+        sid: &str,
+    ) -> (Vec<SessionEvent>, Vec<(String, String, String)>) {
         let ready: Vec<(String, String)> = match self.sessions.get(sid) {
             Some(Session::Collab(c)) if c.plan_approved() => c
                 .chain()
@@ -457,20 +541,37 @@ impl Core {
                         .collect()
                 })
                 .unwrap_or_default(),
-            _ => return Vec::new(),
+            _ => return (Vec::new(), Vec::new()),
         };
         let mut out = Vec::new();
+        let mut todo = Vec::new();
         for (node, assignee) in ready {
             match self.spawn_sub_session(sid, &node) {
                 Ok(child) => {
+                    // 派发文案用册子里的执行提示词模板渲染（objective 是核心 AI 写的那段任务提示词）。
+                    let raw = self
+                        .sessions
+                        .get(sid)
+                        .and_then(|s| match s {
+                            Session::Collab(c) => c
+                                .chain()
+                                .and_then(|ch| ch.nodes.iter().find(|n| n.id == node))
+                                .map(|n| n.objective.clone()),
+                            _ => None,
+                        })
+                        .unwrap_or_default();
+                    let objective = self
+                        .prompts
+                        .render(&self.prompts.core.execute.user, &[("tasks", raw)]);
                     if let Some(Session::Collab(c)) = self.sessions.get_mut(sid) {
                         c.mark_node_started(&node, &child);
                     }
                     out.push(SessionEvent::NodeStarted {
-                        node,
-                        sid: child,
+                        node: node.clone(),
+                        sid: child.clone(),
                         assignee,
                     });
+                    todo.push((node, child, objective));
                 }
                 Err(e) => out.push(SessionEvent::Notice(format!(
                     "[错误] 节点 {} 派发失败：{}",
@@ -478,7 +579,7 @@ impl Core {
                 ))),
             }
         }
-        out
+        (out, todo)
     }
 
     /// 为任务链的一个节点建**子会话**：它就是一个普通单 agent 会话，
@@ -529,13 +630,20 @@ impl Core {
 
     /// 生成结束**交回**：重新插入 + 解除"生成中"。
     /// 转录**已由工作线程按"一轮一次"的粒度增量落盘**（见 `Persister`），这里不重复落。
-    pub(crate) fn put_single(&mut self, sid: &str, s: session::AgentSession) {
+    /// 返回：若这是个**子会话**，返回它的父会话（调用方据此**叫醒父会话**推进任务链）。
+    pub(crate) fn put_single(&mut self, sid: &str, s: session::AgentSession) -> Option<String> {
         self.running.remove(sid);
         self.sessions.insert(sid.to_string(), Session::Single(s));
+        // 子会话完成 = 它的节点交付了：标记节点（产出即交付物），并交回父会话。
+        let (meta, _) = self.history.load(sid).ok()?;
+        let parent = meta.parent.clone()?;
+        let node = meta.node.clone()?;
+        let note = self.node_note(sid);
+        self.mark_node_done(&parent, &node, &note);
+        Some(parent)
     }
 
-    /// 测试用交回：整段落盘（测试不经过工作线程，所以没有增量落盘那一步）。
-    #[cfg(test)]
+    /// 同步路径的交回：整段落盘（同步跑不经过工作线程，所以没有逐轮增量落盘那一步）。
     pub(crate) fn put_single_recorded(
         &mut self,
         sid: &str,
@@ -1430,8 +1538,6 @@ impl Core {
                 .with_read_only(self.fence_read_roots()),
             // 从零开始；按落盘转录重建时由调用方按转录里的最大值续号（见 rebuild_session）。
             reply_seq: 0,
-            // 流式与预算取全局设置（与协作会话共用同一份；这里不预设"本次要不要流式"，由调用方给）。
-            llm: self.llm_opts(true),
         }
     }
 
@@ -1779,6 +1885,7 @@ impl Core {
     ) -> Result<Vec<SessionEvent>, String> {
         let mut out = Vec::new();
         let mut confirmed: Option<Vec<AgentMeta>> = None;
+        let mut approve = false;
         {
             let s = self.sessions.get_mut(sid).ok_or("无此会话")?;
             let collab = match s {
@@ -1795,10 +1902,19 @@ impl Core {
                 }
                 CollabStep::Begin => collab.begin(text.contains("allow"), &mut |e| out.push(e)),
                 CollabStep::Answer => collab.answer(text, &mut |e| out.push(e)),
-                CollabStep::ApprovePlan => {
-                    collab.approve_plan(&mut |e| out.push(e));
-                    collab.resume(&mut |e| out.push(e));
-                }
+                // 「同意」要先记过关，再**同步推进链**（借 self 的动作在块外做）。
+                CollabStep::ApprovePlan => approve = true,
+            }
+        }
+        if approve {
+            if let Some(Session::Collab(c)) = self.sessions.get_mut(sid) {
+                c.approve_plan(&mut |e| out.push(e));
+            }
+            // 链驱动（同步版）：派发就绪节点 → 跑完 → 标记完成，直到没有可推进的。
+            // 生产路径由 CoreHandle 起工作线程做**同一套判定**（见 spawn_ready_nodes 的返回值）。
+            out.extend(self.advance_chain(sid));
+            if let Some(Session::Collab(c)) = self.sessions.get_mut(sid) {
+                c.resume(&mut |e| out.push(e));
             }
         }
         // 名单刚定下来：落档 meta（重启/回档后 rebuild_session 从这里拿名单与沙箱归属）并建沙箱目录。
@@ -1818,7 +1934,8 @@ impl Core {
         // 方案过审后：就绪节点各建一个子会话——**与生产路径同一处置**，
         // 只在一边接会漏（上一版 ApprovePlan 就是这么漏的，靠 e2e 才逮到）。
         // 必须在"终结后移出中心"之前做：会话一移出，链就找不到了。
-        out.extend(self.spawn_ready_nodes(sid));
+        let (spawned, _) = self.spawn_ready_nodes(sid);
+        out.extend(spawned);
         // 会话终结后移出中心（前端据 Ended 回收）。
         if let Some(Session::Collab(c)) = self.sessions.get(sid) {
             if c.is_done() {

@@ -85,7 +85,6 @@ pub struct CorePrompts {
     pub synthesize: SynthPrompts,
     pub execute: ExecutePrompts,
     pub review: ReviewPrompts,
-    pub rerun: RerunPrompts,
     pub slate: SlatePrompts,
     pub suggest_models: SuggestPrompts,
     /// 一个 agent 的职责提示词（由它的模块合成为一份能力包）。
@@ -447,12 +446,6 @@ pub struct ExecutePrompts {
 pub struct ReviewPrompts {
     pub system: String,
     /// user 变量：plan, reports
-    pub user: String,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct RerunPrompts {
-    /// user 变量：tasks, review, report
     pub user: String,
 }
 

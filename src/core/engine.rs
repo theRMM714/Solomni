@@ -16,8 +16,6 @@ use std::sync::Arc;
 
 /// 讨论轮次上限（超限交用户裁决——上限必生效）。
 pub const MAX_ROUNDS: usize = 6;
-/// 返工次数上限（超限交用户裁决）。
-pub const MAX_REWORK: usize = 2;
 /// 单次问询内的工具调用上限（超限强制收尾——上限必生效）。
 pub const MAX_TOOL_CALLS: usize = 8;
 
@@ -95,8 +93,6 @@ pub struct MemberTools {
     /// **回复 id 计数器**：一次模型回复一个号，跨重启单调（重建时按转录里的最大值续号）。
     /// 转录行靠它分组（哪几行属于同一次回复），会话靠它按回复原子回档。
     pub reply_seq: u64,
-    /// 本次调用的通道参数（流式 + 预算）：来自**全局设置**，与单 agent 共用同一份。
-    pub llm: crate::core::ports::LlmOpts,
 }
 
 impl MemberTools {
@@ -890,14 +886,10 @@ pub struct CheckItem {
 /// 执行与验收：成员按任务干活并回报；核心对照回报产出结构化清单。
 pub struct Execution {
     pub reports: BTreeMap<String, String>,
-    /// 工具调用（成员 id → 该成员本轮的调用视图；会话据此发 tool 转录行）。
-    pub traces: BTreeMap<String, Vec<ToolCallView>>,
     /// 验收原始输出（解析失败时如实呈现）。
     pub checklist_raw: String,
     /// 结构化清单；空 = 解析失败（all_pass 保守判否）。
     pub items: Vec<CheckItem>,
-    /// 已返工次数。
-    pub rework: usize,
     /// 执行/验收途中调用失败（超时 / 网络）：非空 = 本轮**中断**，不交付。
     /// 上层据此如实告知用户；会话保持可继续（用户点「继续」重新推进）。
     pub error: Option<String>,
@@ -911,128 +903,19 @@ impl Execution {
     pub fn new() -> Execution {
         Execution {
             reports: BTreeMap::new(),
-            traces: BTreeMap::new(),
             checklist_raw: String::new(),
             items: Vec::new(),
-            rework: 0,
             error: None,
             stopped: false,
             cancel: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }
     }
 
-    /// 执行：各在组成员按任务回报（文案经提示词册渲染）；声明了工具的成员走工具循环。
-    pub fn run(
-        members: &mut [Member],
-        tasks: &str,
-        prompts: &Prompts,
-        cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    ) -> Execution {
-        let mut exec = Execution::new();
-        exec.cancel = cancel;
-        exec.collect_reports(
-            members,
-            prompts.render(&prompts.core.execute.user, &[("tasks", tasks.to_string())]),
-        );
-        exec
-    }
-
-    /// 返工：把验收差距发回各在组成员，重取回报（次数由调用方受 MAX_REWORK 约束）。
-    pub fn rerun(
-        &mut self,
-        members: &mut [Member],
-        tasks: &str,
-        review_text: &str,
-        prompts: &Prompts,
-    ) {
-        self.rework += 1;
-        for m in members.iter_mut() {
-            if !m.present {
-                continue;
-            }
-            let user = prompts.render(
-                &prompts.core.rerun.user,
-                &[
-                    ("tasks", tasks.to_string()),
-                    ("review", review_text.to_string()),
-                    (
-                        "report",
-                        self.reports.get(&m.id).cloned().unwrap_or_default(),
-                    ),
-                ],
-            );
-            if self.cancelled() {
-                self.stopped = true;
-                return;
-            }
-            let (text, views, error) = self.collect_one(m, user);
-            // 中途被打断：这条回报是**半截**的，不入册。
-            if self.cancelled() {
-                self.stopped = true;
-                return;
-            }
-            self.traces.entry(m.id.clone()).or_default().extend(views);
-            self.reports.insert(m.id.clone(), text);
-            if let Some(err) = error {
-                self.error = Some(err);
-                return;
-            }
-        }
-    }
-
-    /// 逐成员收集回报（工具循环在 converse 内）。
-    fn collect_reports(&mut self, members: &mut [Member], user_prompt: String) {
-        for m in members.iter_mut() {
-            if !m.present {
-                continue;
-            }
-            if self.cancelled() {
-                self.stopped = true;
-                return;
-            }
-            let (text, views, error) = self.collect_one(m, user_prompt.clone());
-            if self.cancelled() {
-                self.stopped = true;
-                return;
-            }
-            self.traces.entry(m.id.clone()).or_default().extend(views);
-            self.reports.insert(m.id.clone(), text);
-            if let Some(err) = error {
-                self.error = Some(err);
-                return;
-            }
-        }
-    }
-
-    /// 是否已被要求停止。
+    /// 是否已被要求停止（总验收共用）。
     fn cancelled(&self) -> bool {
         self.cancel.load(std::sync::atomic::Ordering::Relaxed)
     }
 
-    /// 单成员一次问询：拆字段借用（chat 可变 / tools 只读互不冲突），工具调用入册。
-    fn collect_one(
-        &mut self,
-        m: &mut Member,
-        user_prompt: String,
-    ) -> (String, Vec<ToolCallView>, Option<String>) {
-        let Member {
-            id,
-            system,
-            chat,
-            tools,
-            ..
-        } = m;
-        converse(
-            system,
-            chat.as_mut(),
-            tools.as_mut(),
-            id,
-            Msg::user(user_prompt),
-            std::sync::Arc::clone(&self.cancel),
-        )
-    }
-
-    /// 验收：核心对照方案逐项核对，输出结构化 pass/fail 清单。
     pub fn review(
         &mut self,
         core_chat: &mut dyn Chat,
@@ -1205,39 +1088,6 @@ impl Round {
     }
 }
 
-/// 成员一次问询（含工具循环，非流式）：返回（最终答复, 本轮全部工具调用视图）。
-/// 执行阶段不复用历史，所以不返回消息；单 agent 会话走 converse_with 逐轮取消息。
-pub(crate) fn converse(
-    system: &str,
-    chat: &mut dyn Chat,
-    tools: Option<&mut MemberTools>,
-    speaker: &str,
-    first: Msg,
-    cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
-) -> (String, Vec<ToolCallView>, Option<String>) {
-    // 分片回调里看「停止」：用户点了停止，不必等这个成员把话说完。
-    let mut noop = |_c: Chunk| !cancel.load(std::sync::atomic::Ordering::Relaxed);
-    let mut views: Vec<ToolCallView> = Vec::new();
-    let llm = tools.as_ref().map(|t| t.llm).unwrap_or_default();
-    let rounds = converse_with(
-        chat,
-        tools,
-        vec![Msg::system(system.to_string()), first],
-        llm,
-        speaker,
-        &mut noop,
-        &mut |v: &ToolCallView| views.push(v.clone()),
-        &mut |_r: &Round, _s: &mut dyn FnMut(SessionEvent)| {},
-        &mut |_e: SessionEvent| {},
-    );
-    // 末轮恒为文本轮（工具轮之后必然再问一次；超限后按原文作答也走文本轮）。
-    let last = rounds.last();
-    let text = last.map(|r| r.text.clone()).unwrap_or_default();
-    let error = last.and_then(|r| r.error.clone());
-    (text, views, error)
-}
-
-/// 从既有消息列表续跑，**逐轮**返回产出；顺序即 round0 文本 → round0 工具 → round1 文本 → …
 /// stream/on 透传给通道（呈现层在 on 里外送 Delta）；on 返回 false = 用户要求中止。
 /// on_tool 在每个工具跑完后立刻回调（工具行与文本行因此天然有序）。
 /// 终止保证：超限后告知一次并强制收尾；其后再来 tool 信封按原文作答，不再执行。

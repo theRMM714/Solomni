@@ -438,14 +438,38 @@ impl CoreHandle {
         };
         // 事件已由上面的 sink 逐轮入台（不再整批补推，否则同一批事实在台上有两份）。
         // 交回核心只做"重新插入"：转录也已逐轮增量落盘。
-        self.call({
+        let parent = self.call({
             let sid = sid.to_string();
-            move |core| {
-                core.put_single(&sid, session);
-                Ok(())
-            }
+            move |core| Ok(core.put_single(&sid, session))
         })?;
+        // 这是**子会话**完成：叫醒父会话推进任务链（脱离本次调用，不等它跑完）。
+        if let Some(parent) = parent {
+            self.spawn_detached_collab(&parent);
+        }
         Ok(Advance { events, seq })
+    }
+
+    /// 起一轮**脱离调用方**的单 agent 生成（派发节点用）：不等它跑完。
+    /// 完成后由 `single_generation` 的叫醒逻辑推进父会话——所以这里只是"点火"。
+    fn spawn_detached_single(&self, sid: &str, text: &str) {
+        let me = self.clone();
+        let (sid, text) = (sid.to_string(), text.to_string());
+        let _ = std::thread::Builder::new()
+            .name("solomni-node".to_string())
+            .spawn(move || {
+                let _ = me.single_generation(&sid, Some(text), Output::Final);
+            });
+    }
+
+    /// 起一次**脱离调用方**的协作推进（叫醒父会话用）：不等它跑完。
+    fn spawn_detached_collab(&self, sid: &str) {
+        let me = self.clone();
+        let sid = sid.to_string();
+        let _ = std::thread::Builder::new()
+            .name("solomni-chain".to_string())
+            .spawn(move || {
+                let _ = me.collab_generation(&sid, CollabWork::Resume, "");
+            });
     }
 
     /// 协作的长步骤（开始讨论 / 回答 / 继续）：与单 agent 同一条 own-and-return——
@@ -534,15 +558,19 @@ impl CoreHandle {
                 return Err("协作线程崩溃：会话已按落盘转录保留，可继续".to_string());
             }
         };
-        // 交回核心：重新插入 + **为就绪节点派发子会话**（返回派发事件）。
+        // 交回核心：重新插入 + **为就绪节点派发子会话**（返回派发事件与待起生成的节点）。
         // 转录已由上面的 sink 增量落盘，这里不再重复落。
-        let spawned = self.call({
+        let (spawned, todo) = self.call({
             let sid = sid.to_string();
             move |core| Ok(core.put_collab(&sid, c))
         })?;
         for ev in spawned {
             seq = bus.push(sid, std::slice::from_ref(&ev));
             events.push(ev);
+        }
+        // 派发：每个就绪节点在**它自己的子会话**里起一轮生成（脱离本次调用，不等它跑完）。
+        for (_node, child, objective) in todo {
+            self.spawn_detached_single(&child, &objective);
         }
         Ok(Advance { events, seq })
     }
