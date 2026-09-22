@@ -85,6 +85,8 @@ pub struct CorePrompts {
     pub synthesize: SynthPrompts,
     pub execute: ExecutePrompts,
     pub review: ReviewPrompts,
+    /// 节点级验收（任务链：逐节点核对当前目标）。
+    pub node_review: NodeReviewPrompts,
     pub slate: SlatePrompts,
     pub suggest_models: SuggestPrompts,
     /// 一个 agent 的职责提示词（由它的模块合成为一份能力包）。
@@ -446,6 +448,13 @@ pub struct ExecutePrompts {
 pub struct ReviewPrompts {
     pub system: String,
     /// user 变量：plan, reports
+    pub user: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct NodeReviewPrompts {
+    pub system: String,
+    /// user 变量：nodes
     pub user: String,
 }
 

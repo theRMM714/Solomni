@@ -78,6 +78,8 @@ impl HistoryStore for FsHistory {
                 done,
                 // 档位来自 meta 的 exec 段：列表视图据此提示"环境已变"，不拦打开。
                 exec: meta.exec,
+                // 编排者：子会话在侧栏里缩进挂在父会话下。
+                parent: meta.parent,
             });
         }
         out.sort_by_key(|a| std::cmp::Reverse(a.ts));

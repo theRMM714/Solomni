@@ -219,4 +219,6 @@ pub enum Pending {
     ConfirmBegin,
     /// 方案待审：整理完**不自动开工**，等用户点「同意」（见 docs/architecture/task-chain.md）。
     PlanReview,
+    /// 节点验收没过：等用户点「继续」重派这些节点。
+    NodeBlocked { nodes: Vec<String> },
 }

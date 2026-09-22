@@ -356,6 +356,8 @@ select.field-input { cursor: pointer; }
   background: var(--bg3); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px;
 }
 .history-item:hover { border-color: var(--line); }
+/* 子会话：缩进挂在父会话下（见 app.js 的 renderHistory）。 */
+.history-item.history-child { margin-left: 14px; border-left: 2px solid var(--line); }
 .history-item .hname { flex: 1; min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .history-item .hmode { flex: none; color: var(--fg-dim); font-size: 11px; }
 .history-acts { flex: none; display: flex; gap: 4px; }

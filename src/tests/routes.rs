@@ -349,6 +349,7 @@ impl HistoryOps for FakeOps {
             ts: 1,
             done: false,
             exec: Default::default(),
+            parent: None,
         }])
     }
     fn open(&self, name: &str) -> Result<(SessionMeta, Vec<serde_json::Value>), String> {

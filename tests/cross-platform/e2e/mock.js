@@ -98,7 +98,10 @@ http.createServer((req, res) => {
       content = JSON.stringify({ type: 'say', text: '我建议直接动手｜' + task });
     } else if (user.includes('== 你的任务 ==')) {
       content = JSON.stringify({ summary: '做完了', changes: '无外部影响', open: '' });
-    } else if (sys.includes('核心验收者') || user.includes('== 方案 ==')) {
+    } else if (sys.includes('逐节点核对') || user.includes('== 各节点 ==')) {
+      // **节点级验收**：逐节点判"够不够当前目标"。夹具一律判过（要验不通过另设场景）。
+      content = JSON.stringify([{ node: 'n1', ok: true, note: '够用' }]);
+    } else if (user.includes('== 方案 ==')) {
       // 返工会话：第一次验收给 fail（定向返工），之后给 pass——用来验"fail → 返工 → 重验 → 交付"闭环。
       if (user.includes('返工')) {
         reworkReviews += 1;

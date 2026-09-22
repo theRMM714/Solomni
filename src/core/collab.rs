@@ -1,4 +1,5 @@
-//! 协作会话状态机：建组 → 讨论 → 整理 → 执行 → 验收（拉模式）。
+//! 协作会话状态机：建组 → 讨论 → 整理（出任务链）→ **审查关卡** → 链驱动（节点各跑在子会话里）
+//! → 节点验收 → 总验收（拉模式）。见 docs/architecture/task-chain.md。
 //! 前端经 Core 门面按 pending 驱动（set_task → confirm_slate? → begin → answer…），泵式收事件。
 //! 发言席只有 agent：名单是 Vec<AgentMeta>（名字 / 模块 / 模型），member id = agent 实例名。
 //! 名单的权威来源是会话 meta.agents（代拟确认后由 Core 写回 meta）；转录只用来恢复讨论进度。
@@ -12,12 +13,22 @@ use crate::core::exec::{self, ExecSpec};
 use crate::core::history::{AgentMeta, SessionMeta};
 use crate::core::module::{self, Module};
 use crate::core::ports::{
-    ChatGateway, CompleteOpts, ModuleSource, Msg, PackageSource, SysIo, ToolRunner,
+    Chat, ChatGateway, CompleteOpts, ModuleSource, Msg, PackageSource, SysIo, ToolRunner,
 };
 use crate::core::prompt::Prompts;
 use crate::core::providers::Settings;
 use crate::core::workspace::Sandboxes;
 use std::sync::Arc;
+
+/// 节点验收的一条结论（核心 AI 的 JSON 回执，见 prompts/roles/planner.yaml 的 node_review）。
+#[derive(Debug, Clone, serde::Deserialize)]
+struct NodeVerdict {
+    node: String,
+    ok: bool,
+    #[serde(default)]
+    note: String,
+}
+
 impl CollabSession {
     /// 本次调用的通道参数（流式 + 预算）：**全局设置**，与单 agent 共用同一份。
     fn llm_opts(&self) -> crate::core::ports::LlmOpts {
@@ -212,15 +223,84 @@ impl CollabSession {
         }
     }
 
-    /// 记下节点完成（产出即它的交付物），供父会话做总验收。
-    pub fn mark_node_done(&mut self, node: &str, note: &str) {
+    /// **节点级验收**：核心 AI 按各节点**当前目标**判它的产出，返回逐节点结论。
+    /// 一次调用判完整条链（比逐节点各调一次省得多，也便于横向比较）。
+    /// 取字段而不是 &mut self：调用点在泵里，core_chat 要被可变借用。
+    fn review_nodes(
+        prompts: &Prompts,
+        cancel: &std::sync::Arc<std::sync::atomic::AtomicBool>,
+        chain: Option<&crate::core::chain::TaskChain>,
+        opts: crate::core::ports::CompleteOpts<'static>,
+        core_chat: &mut dyn Chat,
+    ) -> Result<Vec<(String, bool, String)>, String> {
+        let nodes = chain.map(|c| c.nodes.clone()).unwrap_or_default();
+        let listed = nodes
+            .iter()
+            .map(|n| {
+                format!(
+                    "- {}（{}）：目标「{}」\n  产出：{}",
+                    n.id,
+                    n.title,
+                    n.objective,
+                    n.report
+                        .clone()
+                        .unwrap_or_else(|| "（没有产出）".to_string())
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let user = prompts.render(&prompts.core.node_review.user, &[("nodes", listed)]);
+        let msgs = vec![
+            Msg::system(prompts.core.node_review.system.clone()),
+            Msg::user(user),
+        ];
+        if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+            return Err("已停止".to_string());
+        }
+        let stop = std::sync::Arc::clone(cancel);
+        let mut keep =
+            move |_c: crate::core::ports::Chunk| !stop.load(std::sync::atomic::Ordering::Relaxed);
+        let done = core_chat.complete(&msgs, opts, &mut keep);
+        if let Some(err) = done.error {
+            return Err(err);
+        }
+        let arr = envelope::extract_json_array(&done.raw)
+            .ok_or_else(|| format!("节点验收没有给出 JSON 数组：{}", done.raw))?;
+        let parsed: Vec<NodeVerdict> = serde_json::from_str(&arr)
+            .map_err(|e| format!("节点验收清单不合法（{}）：{}", e, arr))?;
+        Ok(parsed.into_iter().map(|v| (v.node, v.ok, v.note)).collect())
+    }
+
+    /// 记下节点完成（产出先存下来，**验收由核心 AI 判**，见 review_nodes）。
+    pub fn mark_node_done(&mut self, node: &str, report: &str) {
         if let Some(chain) = self.chain.as_mut() {
             if let Some(n) = chain.nodes.iter_mut().find(|n| n.id == node) {
                 n.status = crate::core::chain::NodeStatus::Done;
+                n.report = Some(report.to_string());
+            }
+        }
+    }
+
+    /// 记下一个节点的验收结论。
+    pub fn set_node_acceptance(&mut self, node: &str, ok: bool, note: &str) {
+        if let Some(chain) = self.chain.as_mut() {
+            if let Some(n) = chain.nodes.iter_mut().find(|n| n.id == node) {
                 n.acceptance = Some(crate::core::chain::Acceptance {
-                    ok: true,
+                    ok,
                     note: note.to_string(),
                 });
+            }
+        }
+    }
+
+    /// 把节点退回待办（验收没过 → 用户点「继续」→ 重派它）。
+    pub fn reset_node(&mut self, node: &str) {
+        if let Some(chain) = self.chain.as_mut() {
+            if let Some(n) = chain.nodes.iter_mut().find(|n| n.id == node) {
+                n.status = crate::core::chain::NodeStatus::Pending;
+                n.sub_session = None;
+                n.report = None;
+                n.acceptance = None;
             }
         }
     }
@@ -592,8 +672,16 @@ impl CollabSession {
             self.pending = Some(Pending::PlanReview);
             return;
         }
+        // 用户点「继续」= 重派没过的节点：先退回待办，再让核心重新派发（新起一轮子会话）。
+        if let Some(Pending::NodeBlocked { nodes }) = self.pending.clone() {
+            self.pending = None;
+            for n in &nodes {
+                self.reset_node(n);
+            }
+            return;
+        }
         // **链驱动**：每个节点跑在它自己的子会话里（核心负责建会话与派发）。
-        // 本会话在此**让出**——全部节点落定后才回来做总验收。
+        // 本会话在此**让出**——全部节点落定后才回来做节点验收与总验收。
         let settled = self
             .chain
             .as_ref()
@@ -611,14 +699,46 @@ impl CollabSession {
         if !settled {
             return;
         }
+        // **节点级验收**：核心 AI 按各节点**当前目标**判它的产出；没过就暂停并交用户。
+        let verdicts = match Self::review_nodes(
+            &self.prompts,
+            &self.cancel,
+            self.chain.as_ref(),
+            crate::core::ports::CompleteOpts::plain(self.settings.app.streaming)
+                .with_timeout(self.settings.app.llm_timeout_secs),
+            self.core_chat.as_mut(),
+        ) {
+            Ok(v) => v,
+            Err(err) => {
+                sink(SessionEvent::Notice(crate::core::events::interrupted_note(
+                    &err,
+                )));
+                return;
+            }
+        };
+        for (node, ok, note) in &verdicts {
+            self.set_node_acceptance(node, *ok, note);
+        }
+        let bad: Vec<String> = verdicts
+            .iter()
+            .filter(|(_, ok, _)| !ok)
+            .map(|(n, _, _)| n.clone())
+            .collect();
+        if !bad.is_empty() {
+            sink(SessionEvent::Notice(format!(
+                "[验收] 这些节点没通过：{}。点「继续」会重派它们。",
+                bad.join("、")
+            )));
+            self.pending = Some(Pending::NodeBlocked { nodes: bad });
+            return;
+        }
         // 总验收：核心 AI 按**各节点的产出**核对（复用执行阶段的验收机制）→ 交付。
         let llm = self.llm_opts();
         let mut exec = Execution::new();
         for n in self.chain.as_ref().expect("链存在").nodes.iter() {
             let note = n
-                .acceptance
-                .as_ref()
-                .map(|a| a.note.clone())
+                .report
+                .clone()
                 .unwrap_or_else(|| "（该节点没有产出）".to_string());
             exec.reports.insert(n.id.clone(), note.clone());
             sink(SessionEvent::Report {

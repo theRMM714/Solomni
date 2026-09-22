@@ -837,6 +837,7 @@ impl Discussion {
                     deps: n.deps,
                     status: crate::core::chain::NodeStatus::Pending,
                     sub_session: None,
+                    report: None,
                     acceptance: None,
                 })
                 .collect(),

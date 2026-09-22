@@ -4,25 +4,6 @@
 # 已经能机器判定的门禁不入账。平台与跨平台层的缺口记在
 # tests/cross-platform/gaps.yaml 与 tests/<平台>/gaps.yaml（它们决定 TEST-REPORT-ACCEPTED）。
 
-- id: chain.node-acceptance-and-tree-not-wired
-  scope: global
-  level: T5
-  why: |
-    任务链与子会话已落地（见 docs/architecture/task-chain.md），但三件仍缺：
-    ① **节点级 AI 验收**：现在"子会话跑完一轮"就算该节点交付，判定统一放在总验收那一步；
-    ② **节点失败的暂停与通知**：现在只把节点标 Failed，不暂停父会话、也不通知用户；
-    ③ **会话树的界面呈现**：SessionMeta 已有 parent/node，但侧栏还没按父子缩进呈现。
-    这三件都影响"链推进时用户能不能看清并介入"，不是可选打磨。
-  how: |
-    ① 复用 Execution::review 的形状，输入换成"该节点**当前** objective + 子会话产出"，在 put_single 标记节点时调；
-    ② 节点标 Failed 时给父会话发 Notice 并置 Pending（照 Pending::PlanReview 的做法）；
-    ③ /api/state 的 history 带 parent，前端侧栏按它缩进（子会话标题 = agent + 节点标题）。
-  accept: |
-    节点验收不通过时如实说明并按链的规则处理（返工或暂停）；节点失败会暂停并通知用户；
-    侧栏能看到父子缩进，且能点进子会话发言。
-  blocked_by: |
-    有意分批：这三件是"链跑通之后"的可用性收尾，与链驱动本身分开落地更清楚。
-
 - id: fence.guest-tier-not-wired
   scope: global
   level: T4

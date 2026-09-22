@@ -504,6 +504,22 @@ impl Core {
         }
     }
 
+    /// 继续一次协作（同步版，CLI 与测试走这条）：**先让泵处理**（它可能把验收没过的节点退回待办），
+    /// 再派发/跑完就绪节点，最后再让泵做节点验收与总验收。
+    /// 生产路径是"工作线程跑泵 + put_collab 派发 + 子会话完成叫醒"，判定完全一致。
+    pub fn collab_resume(&mut self, sid: &str) -> Result<Vec<SessionEvent>, String> {
+        let mut out = Vec::new();
+        if let Some(Session::Collab(c)) = self.sessions.get_mut(sid) {
+            c.resume(&mut |e| out.push(e));
+        }
+        out.extend(self.advance_chain(sid));
+        if let Some(Session::Collab(c)) = self.sessions.get_mut(sid) {
+            c.resume(&mut |e| out.push(e));
+        }
+        self.record_events(sid, &mut out);
+        Ok(out)
+    }
+
     /// 推进任务链：反复「派发就绪节点 → 同步跑完 → 标记完成」，直到没有可推进的。
     /// 与 Web 生产路径（CoreHandle 起工作线程）**同一套判定**，只是这里同步做（CLI 与测试走这条）。
     fn advance_chain(&mut self, sid: &str) -> Vec<SessionEvent> {
@@ -1910,12 +1926,7 @@ impl Core {
             if let Some(Session::Collab(c)) = self.sessions.get_mut(sid) {
                 c.approve_plan(&mut |e| out.push(e));
             }
-            // 链驱动（同步版）：派发就绪节点 → 跑完 → 标记完成，直到没有可推进的。
-            // 生产路径由 CoreHandle 起工作线程做**同一套判定**（见 spawn_ready_nodes 的返回值）。
-            out.extend(self.advance_chain(sid));
-            if let Some(Session::Collab(c)) = self.sessions.get_mut(sid) {
-                c.resume(&mut |e| out.push(e));
-            }
+            out.extend(self.collab_resume(sid)?);
         }
         // 名单刚定下来：落档 meta（重启/回档后 rebuild_session 从这里拿名单与沙箱归属）并建沙箱目录。
         if let Some(roster) = confirmed {

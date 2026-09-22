@@ -46,6 +46,9 @@ pub struct TaskNode {
     /// 它跑在哪个子会话里（未启动 = None）。
     #[serde(default)]
     pub sub_session: Option<String>,
+    /// 该节点的**产出**（子会话跑完一轮的最后一条转录行）；未跑完 = None。
+    #[serde(default)]
+    pub report: Option<String>,
     /// 验收结论（未验收 = None）。
     #[serde(default)]
     pub acceptance: Option<Acceptance>,

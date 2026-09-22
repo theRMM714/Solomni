@@ -242,8 +242,10 @@ function renderHistory() {
   if (!items.length) { box.textContent = '（还没有历史会话）'; return; }
   for (const h of items) {
     const el = document.createElement('div');
-    el.className = 'history-item';
-    const name = document.createElement('span'); name.className = 'hname'; name.textContent = h.name;
+    // 子会话（parent 指向另一个会话）在侧栏里**缩进**挂在父会话下。
+    el.className = 'history-item' + (h.parent ? ' history-child' : '');
+    const name = document.createElement('span'); name.className = 'hname';
+    name.textContent = (h.parent ? '└ ' : '') + h.name;
     const mode = document.createElement('span'); mode.className = 'hmode';
     mode.textContent =
       (h.done ? '' : '·进行中 ') + h.mode +

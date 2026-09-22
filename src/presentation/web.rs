@@ -659,5 +659,6 @@ pub fn pending_json(p: &Option<Pending>) -> serde_json::Value {
         Some(Pending::ConfirmSlate) => json!({ "type": "confirm_slate" }),
         Some(Pending::ConfirmBegin) => json!({ "type": "confirm_begin" }),
         Some(Pending::PlanReview) => json!({ "type": "plan_review" }),
+        Some(Pending::NodeBlocked { nodes }) => json!({ "type": "node_blocked", "nodes": nodes }),
     }
 }

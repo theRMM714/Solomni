@@ -1238,6 +1238,7 @@ fn chain_node(id: &str, deps: &[&str]) -> crate::core::chain::TaskNode {
         deps: deps.iter().map(|d| d.to_string()).collect(),
         status: crate::core::chain::NodeStatus::Pending,
         sub_session: None,
+        report: None,
         acceptance: None,
     }
 }
@@ -1738,6 +1739,7 @@ pub(crate) fn approved_plan_spawns_a_sub_session_per_ready_node() {
             member,
             vec![
                 "{\"plan\":\"方案：A 做 X\",\"nodes\":[{\"id\":\"n1\",\"title\":\"做 X\",\"objective\":\"把 X 做完\",\"assignee\":\"a\",\"deps\":[]}]}".to_string(),
+                "[{\"node\":\"n1\",\"ok\":true,\"note\":\"够用\"}]".to_string(),
                 "[{\"item\":\"做 X\",\"status\":\"pass\"}]".to_string(),
             ],
         ),
@@ -1779,6 +1781,68 @@ pub(crate) fn approved_plan_spawns_a_sub_session_per_ready_node() {
     assert_eq!(cmeta.agents[0].name, "a");
 }
 
+/// 节点验收没过 → **暂停并交用户**；点「继续」重派该节点，验过才交付。
+#[test]
+pub(crate) fn failed_node_acceptance_pauses_then_continue_redispatches() {
+    let mut member = BTreeMap::new();
+    member.insert(
+        "a".to_string(),
+        vec![
+            "{\"type\":\"say\",\"text\":\"我先说\"}".to_string(),
+            "{\"type\":\"agree\",\"text\":\"同意\"}".to_string(),
+        ],
+    );
+    let mut core = core_with(
+        vec![module_of("a")],
+        gw(
+            member,
+            vec![
+                "{\"plan\":\"方案：A 做 X\",\"nodes\":[{\"id\":\"n1\",\"title\":\"做 X\",\"objective\":\"把 X 做完\",\"assignee\":\"a\",\"deps\":[]}]}".to_string(),
+                // 第一次节点验收：没过 → 该暂停等用户。
+                "[{\"node\":\"n1\",\"ok\":false,\"note\":\"还差依据\"}]".to_string(),
+                // 「继续」之后重派并再验：这次过。
+                "[{\"node\":\"n1\",\"ok\":true,\"note\":\"够用\"}]".to_string(),
+                "[{\"item\":\"做 X\",\"status\":\"pass\"}]".to_string(),
+            ],
+        ),
+    );
+    let sid = core
+        .create_work(collab_work("w", &["a"], false, "做个东西"))
+        .unwrap()
+        .sid;
+    core.collab_continue(&sid, CollabStep::Begin, "yes")
+        .unwrap();
+
+    let first = core
+        .collab_continue(&sid, CollabStep::ApprovePlan, "")
+        .unwrap();
+    assert!(
+        matches!(
+            core.collab_pending(&sid),
+            Ok(Some(Pending::NodeBlocked { .. }))
+        ),
+        "节点没过该暂停并交用户：{:?}",
+        first
+    );
+    assert!(
+        !first
+            .iter()
+            .any(|e| matches!(e, SessionEvent::Delivery { .. })),
+        "没过就不该交付：{:?}",
+        first
+    );
+
+    // 点「继续」：把没过的节点退回待办并重派，再验通过 → 交付。
+    let second = core.collab_resume(&sid).unwrap();
+    assert!(
+        second
+            .iter()
+            .any(|e| matches!(e, SessionEvent::Delivery { ok: true, .. })),
+        "重派后验过就该交付：{:?}",
+        second
+    );
+}
+
 /// 审查关卡：整理完**不自动开工**——停在待审，点「同意」才推进（见 docs/architecture/task-chain.md）。
 #[test]
 pub(crate) fn collab_pauses_for_plan_review_until_the_user_approves() {
@@ -1796,6 +1860,7 @@ pub(crate) fn collab_pauses_for_plan_review_until_the_user_approves() {
             member,
             vec![
                 "{\"plan\":\"方案：A 做 X\",\"nodes\":[{\"id\":\"n1\",\"title\":\"做 X\",\"objective\":\"把 X 做完\",\"assignee\":\"a\",\"deps\":[]}]}".to_string(),
+                "[{\"node\":\"n1\",\"ok\":true,\"note\":\"够用\"}]".to_string(),
                 "[{\"item\":\"做 X\",\"status\":\"pass\",\"evidence\":\"已做\"}]".to_string(),
             ],
         ),
@@ -1875,6 +1940,7 @@ pub(crate) fn core_collab_demo_runs_full_five_stages() {
             member,
             vec![
                 "{\"plan\":\"方案：A 做 X\",\"nodes\":[{\"id\":\"n1\",\"title\":\"做 X\",\"objective\":\"把 X 做完\",\"assignee\":\"a\",\"deps\":[]}]}".to_string(),
+                "[{\"node\":\"n1\",\"ok\":true,\"note\":\"够用\"}]".to_string(),
                 "[{\"item\":\"做 X\",\"status\":\"pass\",\"evidence\":\"已做\"}]".to_string(),
             ],
         ),
@@ -1921,6 +1987,7 @@ pub(crate) fn core_collab_delegated_slate_flow() {
         // 代拟（组装一个 agent）→ 整理 → 验收。
         "{\"picks\":[{\"name\":\"a\",\"modules\":[\"a\"],\"model\":\"m\",\"why\":\"对口\"}]}".to_string(),
         "{\"plan\":\"方案：A 做 X\",\"nodes\":[{\"id\":\"n1\",\"title\":\"做 X\",\"objective\":\"把 X 做完\",\"assignee\":\"a\",\"deps\":[]}]}".to_string(),
+        "[{\"node\":\"n1\",\"ok\":true,\"note\":\"够用\"}]".to_string(),
         "[{\"item\":\"做 X\",\"status\":\"pass\"}]".to_string(),
     ]));
     let opened = core
@@ -1997,6 +2064,7 @@ pub(crate) fn collab_delegated_roster_written_back_and_rebuilt_from_meta() {
         "{\"picks\":[{\"name\":\"调研员\",\"modules\":[\"a\"],\"model\":\"m\",\"why\":\"对口\"}]}".to_string(),
         // 负责人必须是**名单里真实存在的席位**（代拟出来的叫"调研员"）——否则链的自洽门禁会如实挡下。
         "{\"plan\":\"方案：A 做 X\",\"nodes\":[{\"id\":\"n1\",\"title\":\"做 X\",\"objective\":\"把 X 做完\",\"assignee\":\"调研员\",\"deps\":[]}]}".to_string(),
+        "[{\"node\":\"n1\",\"ok\":true,\"note\":\"够用\"}]".to_string(),
         "[{\"item\":\"做 X\",\"status\":\"pass\"}]".to_string(),
     ]));
     let sid = core
@@ -5511,6 +5579,7 @@ pub(crate) fn core_collab_tool_modules_run_in_execution() {
             member,
             vec![
                 "{\"plan\":\"方案：查证后回报\",\"nodes\":[{\"id\":\"n1\",\"title\":\"做 X\",\"objective\":\"把 X 做完\",\"assignee\":\"a\",\"deps\":[]}]}".into(),
+                "[{\"node\":\"n1\",\"ok\":true,\"note\":\"够用\"}]".into(),
                 "[{\"item\":\"查证\",\"status\":\"pass\"}]".into(),
             ],
         ),

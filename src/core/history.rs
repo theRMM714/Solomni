@@ -64,4 +64,7 @@ pub struct HistoryView {
     /// 列表视图据此提示"环境已变"——**不拦打开**，记录是用户的。
     #[serde(default)]
     pub exec: crate::core::exec::ExecSpec,
+    /// 谁编排的（子会话 = 父会话名）：侧栏据此把子会话缩进挂在父会话下。
+    #[serde(default)]
+    pub parent: Option<String>,
 }
