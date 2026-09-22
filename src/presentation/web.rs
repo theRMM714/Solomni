@@ -370,6 +370,8 @@ pub(crate) fn route(
                 "slate" => intent::Action::Step(CollabStep::ConfirmSlate, &text),
                 "begin" => intent::Action::Step(CollabStep::Begin, &text),
                 "answer" => intent::Action::Step(CollabStep::Answer, &text),
+                // 审查关卡：用户点「同意」才开工（方案待审时前端给的就是这个动作）。
+                "approve-plan" => intent::Action::Step(CollabStep::ApprovePlan, &text),
                 "withdraw" => intent::Action::Withdraw(&agent),
                 "rewind" => intent::Action::Rewind(
                     req.get("id").and_then(|v| v.as_u64()).unwrap_or(u64::MAX),
@@ -656,5 +658,6 @@ pub fn pending_json(p: &Option<Pending>) -> serde_json::Value {
         }
         Some(Pending::ConfirmSlate) => json!({ "type": "confirm_slate" }),
         Some(Pending::ConfirmBegin) => json!({ "type": "confirm_begin" }),
+        Some(Pending::PlanReview) => json!({ "type": "plan_review" }),
     }
 }

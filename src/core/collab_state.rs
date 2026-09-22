@@ -25,6 +25,8 @@ pub struct CollabState {
     pub agreed: BTreeMap<String, bool>,
     /// 讨论已收敛或超限（discussion_done）。
     pub closed: bool,
+    /// 用户在审查关卡点过「同意」（[用户:同意方案]）：方案过关，可以开工。
+    pub plan_approved: bool,
     pub plan: Option<String>,
     pub reports: BTreeMap<String, String>,
     pub review_raw: Option<String>,
@@ -87,6 +89,8 @@ pub fn derive(events: &[serde_json::Value], roster_names: &[String]) -> CollabSt
                         st.agreed.insert(text.trim().to_string(), false);
                     } else if tag == "用户:名单" {
                         st.slate_confirmed = text.starts_with("确认");
+                    } else if tag == "用户:同意方案" {
+                        st.plan_approved = true;
                     } else if tag == "用户:开始" {
                         st.begun = true;
                         st.allow = text.contains("allow");

@@ -100,7 +100,7 @@ pub const ROUTES: &[Route] = &[
         request: "{text?,agent?,id?,overwrite?,data_base64?,编辑体}",
         response: "{sid,events,seq} / {sid,events} / {ok} / {sid,pending}",
         statuses: &[200, 400, 404, 409],
-        note: "动作：say / task / slate / begin / answer / continue / withdraw / stop / rewind / update-task / edit / upload / pending",
+        note: "动作：say / task / slate / begin / answer / approve-plan / continue / withdraw / stop / rewind / update-task / edit / upload / pending",
     },
     Route {
         id: "session.config",

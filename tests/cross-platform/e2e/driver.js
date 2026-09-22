@@ -272,7 +272,8 @@ async function lines(sid) {
   assert(c2.status === 200, '建协作工作（2 个 agent）', c2.text.slice(0, 200));
   const begin = await api('POST', '/api/sessions/' + encodeURIComponent(name2) + '/begin', { text: 'yes,allow' });
   assert(begin.status === 200, '确认开始讨论', begin.text.slice(0, 200));
-  const ev2 = JSON.stringify((begin.json && begin.json.events) || []);
+  // 整理完停在**待审**：点「同意」才开工。
+  const ev2 = JSON.stringify([].concat((begin.json && begin.json.events) || [], await approvePlan(name2)));
   assert(ev2.includes('甲') && ev2.includes('乙'), '协作转录以 agent 名为说话人', ev2.slice(0, 240));
   assert(ev2.includes('delivery') || ev2.includes('交付'), '协作跑完并交付', ev2.slice(-240));
   assert(fs.existsSync(path.join(dir(name2), '甲')) && fs.existsSync(path.join(dir(name2), '乙')), '两个 agent 各自沙箱目录已建');
@@ -291,11 +292,18 @@ async function lines(sid) {
   assert(fs.existsSync(path.join(dir(name3), '单兵')) && fs.existsSync(path.join(dir(name3), '新助手')), '确认名单后按 agent 名建出沙箱目录');
   const begun3 = await api('POST', '/api/sessions/' + encodeURIComponent(name3) + '/begin', { text: 'yes,allow' });
   assert(begun3.status === 200, '代拟名单后开始讨论', begun3.text.slice(0, 200));
-  const ev3 = JSON.stringify((begun3.json && begun3.json.events) || []);
+  const ev3 = JSON.stringify([].concat((begun3.json && begun3.json.events) || [], await approvePlan(name3)));
   assert(ev3.includes('单兵'), '代拟出来的 agent 真的在发言', ev3.slice(0, 240));
 
 
-  /* ---------- 协作状态机的六条判据（L4） ----------
+  /** 走完审查关卡：整理完停在待审，点「同意」才开工（协作的必经一步）。 */
+async function approvePlan(name) {
+  const r = await api('POST', '/api/sessions/' + encodeURIComponent(name) + '/approve-plan', {});
+  assert(r.status === 200, '审查关卡：点「同意」开工', r.text.slice(0, 200));
+  return (r.json && r.json.events) || [];
+}
+
+/* ---------- 协作状态机的六条判据（L4） ----------
    * 现有用例只断言"跑完并交付"；这里把状态机的承诺逐条钉住：
    * agree 收敛 / leave 不可逆 / 轮次上限 / 返工闭环 / 撤回同意 / ask 中止。
    * 信封走向由 mock.js 按转录事实路由（夹具不改产品行为）。
@@ -332,6 +340,7 @@ async function lines(sid) {
     ],
   })).status === 200, '建「退场」协作工作');
   assert((await api('POST', '/api/sessions/' + encodeURIComponent(nB) + '/begin', { text: 'yes,allow' })).status === 200, '「退场」开始讨论');
+  await approvePlan(nB);
   const tB = joined(await all(nB));
   const evB = JSON.stringify(await eventsOf(nB));
   assert(tB.includes('甲:leave'), '甲发了 leave', tB.slice(-300));
@@ -363,6 +372,7 @@ async function lines(sid) {
     ],
   })).status === 200, '建「返工」协作工作');
   assert((await api('POST', '/api/sessions/' + encodeURIComponent(nD) + '/begin', { text: 'yes,allow' })).status === 200, '「返工」开始讨论');
+  await approvePlan(nD);
   const evD = JSON.stringify(await eventsOf(nD));
   assert(evD.includes('返工'), '验收 fail → 触发返工', evD.slice(-400));
   assert(evD.includes('delivery'), '返工后重验通过并交付', evD.slice(-240));

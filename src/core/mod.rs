@@ -66,6 +66,8 @@ pub enum CollabStep {
     ConfirmSlate,
     Begin,
     Answer,
+    /// 用户在审查关卡点了「同意」：方案过关，按它开工。
+    ApprovePlan,
 }
 
 /// 工作形态：单 agent（模块数不限）/ 协作（多 agent 分权协商）。
@@ -1706,6 +1708,10 @@ impl Core {
                 }
                 CollabStep::Begin => collab.begin(text.contains("allow"), &mut |e| out.push(e)),
                 CollabStep::Answer => collab.answer(text, &mut |e| out.push(e)),
+                CollabStep::ApprovePlan => {
+                    collab.approve_plan(&mut |e| out.push(e));
+                    collab.resume(&mut |e| out.push(e));
+                }
             }
         }
         // 名单刚定下来：落档 meta（重启/回档后 rebuild_session 从这里拿名单与沙箱归属）并建沙箱目录。

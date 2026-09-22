@@ -1652,6 +1652,75 @@ pub(crate) fn mode_vocabulary_is_single_or_collab_only() {
     assert!(err.contains("未知会话形态"), "{}", err);
 }
 
+/// 审查关卡：整理完**不自动开工**——停在待审，点「同意」才推进（见 docs/architecture/task-chain.md）。
+#[test]
+pub(crate) fn collab_pauses_for_plan_review_until_the_user_approves() {
+    let mut member = BTreeMap::new();
+    member.insert(
+        "a".to_string(),
+        vec![
+            "{\"type\":\"say\",\"text\":\"我先说\"}".to_string(),
+            "{\"type\":\"agree\",\"text\":\"同意方案\"}".to_string(),
+        ],
+    );
+    let mut core = core_with(
+        vec![module_of("a")],
+        gw(
+            member,
+            vec![
+                "{\"type\":\"say\",\"text\":\"方案：A 做 X\"}".to_string(),
+                "[{\"item\":\"做 X\",\"status\":\"pass\",\"evidence\":\"已做\"}]".to_string(),
+            ],
+        ),
+    );
+    let sid = core
+        .create_work(collab_work("w", &["a"], false, "做个东西"))
+        .unwrap()
+        .sid;
+
+    let events = core
+        .collab_continue(&sid, CollabStep::Begin, "yes")
+        .unwrap();
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, SessionEvent::PlanReview { .. })),
+        "整理完该停在**待审**：{:?}",
+        events
+    );
+    assert!(
+        !events.iter().any(|e| matches!(
+            e,
+            SessionEvent::Report { .. } | SessionEvent::Delivery { .. }
+        )),
+        "没过审不该开工：{:?}",
+        events
+    );
+    assert!(
+        matches!(core.collab_pending(&sid), Ok(Some(Pending::PlanReview))),
+        "待审要挂起等用户"
+    );
+
+    // 点「同意」之后才推进：执行回报与交付都该出现。
+    let after = core
+        .collab_continue(&sid, CollabStep::ApprovePlan, "")
+        .unwrap();
+    assert!(
+        after
+            .iter()
+            .any(|e| matches!(e, SessionEvent::Report { .. })),
+        "同意后该开工：{:?}",
+        after
+    );
+    assert!(
+        after
+            .iter()
+            .any(|e| matches!(e, SessionEvent::Delivery { .. })),
+        "同意后该走到交付：{:?}",
+        after
+    );
+}
+
 #[test]
 pub(crate) fn core_collab_demo_runs_full_five_stages() {
     let mut member = BTreeMap::new();
@@ -1683,6 +1752,15 @@ pub(crate) fn core_collab_demo_runs_full_five_stages() {
     let events = core
         .collab_continue(&sid, CollabStep::Begin, "yes")
         .unwrap();
+    // 整理完停在**审查关卡**：点「同意」才继续（P4b 起协作的必经一步）。
+    let events = {
+        let mut e = events;
+        e.extend(
+            core.collab_continue(&sid, CollabStep::ApprovePlan, "")
+                .unwrap(),
+        );
+        e
+    };
     assert!(events.iter().any(|e| matches!(e, SessionEvent::Plan(_))));
     assert!(events
         .iter()
@@ -1729,6 +1807,15 @@ pub(crate) fn core_collab_delegated_slate_flow() {
     let events = core
         .collab_continue(&sid, CollabStep::Begin, "yes")
         .unwrap();
+    // 整理完停在**审查关卡**：点「同意」才继续（P4b 起协作的必经一步）。
+    let events = {
+        let mut e = events;
+        e.extend(
+            core.collab_continue(&sid, CollabStep::ApprovePlan, "")
+                .unwrap(),
+        );
+        e
+    };
     assert!(events
         .iter()
         .any(|e| matches!(e, SessionEvent::Delivery { ok: true, .. })));
@@ -1807,6 +1894,15 @@ pub(crate) fn collab_delegated_roster_written_back_and_rebuilt_from_meta() {
     let events = core
         .collab_continue(&sid, CollabStep::Begin, "yes")
         .unwrap();
+    // 整理完停在**审查关卡**：点「同意」才继续（P4b 起协作的必经一步）。
+    let events = {
+        let mut e = events;
+        e.extend(
+            core.collab_continue(&sid, CollabStep::ApprovePlan, "")
+                .unwrap(),
+        );
+        e
+    };
     assert!(
         events
             .iter()
@@ -5365,6 +5461,11 @@ pub(crate) fn core_collab_tool_modules_run_in_execution() {
     let sid = opened.sid;
     let mut events = opened.events;
     events.extend(core.collab_continue(&sid, CollabStep::Begin, "").unwrap());
+    // 整理完停在**审查关卡**：点「同意」才继续（P4b 起协作的必经一步）。
+    events.extend(
+        core.collab_continue(&sid, CollabStep::ApprovePlan, "")
+            .unwrap(),
+    );
     // 工具只在执行阶段跑：发一条 tool 转录行 + 恰好一次进程调用。
     assert!(
         events.iter().any(|e| matches!(e, SessionEvent::Transcript(ls)

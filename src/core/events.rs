@@ -14,6 +14,9 @@ pub enum SessionEvent {
     DiscussionDone { round: usize, over_cap: bool },
     /// 整理方案就绪。
     Plan(String),
+    /// 方案待审（审查关卡）：把方案交给用户，等他点「同意」才开工。
+    /// 与 \`Plan\` 的区别：\`Plan\` 是"整理好了"这个事实，\`PlanReview\` 是"请用户裁决"这个请求。
+    PlanReview { plan: String },
     /// 成员执行回报（rework = 第几轮执行，0 为首轮）。
     Report {
         id: String,
@@ -144,6 +147,9 @@ impl SessionEvent {
     pub fn to_json(&self) -> serde_json::Value {
         match self {
             SessionEvent::Notice(n) => serde_json::json!({ "type": "notice", "text": n }),
+            SessionEvent::PlanReview { plan } => {
+                serde_json::json!({ "type": "plan_review", "plan": plan })
+            }
             SessionEvent::Transcript(lines) => {
                 serde_json::json!({ "type": "transcript", "lines": lines })
             }
@@ -191,4 +197,6 @@ pub enum Pending {
     ConfirmSlate,
     /// 名单已定，等用户确认开始讨论（可授权自裁）。
     ConfirmBegin,
+    /// 方案待审：整理完**不自动开工**，等用户点「同意」（见 docs/architecture/task-chain.md）。
+    PlanReview,
 }

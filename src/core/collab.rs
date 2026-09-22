@@ -85,6 +85,8 @@ pub struct CollabSession {
     done: bool,
     /// 「停止」标志：由 CoreHandle 在派发时把任务登记处的取消标志注入（见 set_cancel）。
     cancel: Arc<std::sync::atomic::AtomicBool>,
+    /// 方案是否已过审（审查关卡）：没过审不开工。由转录里的 [用户:同意方案] 派生。
+    plan_approved: bool,
 }
 
 impl CollabSession {
@@ -136,7 +138,17 @@ impl CollabSession {
             sandboxes,
             done: false,
             cancel: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            plan_approved: false,
         })
+    }
+
+    /// 用户点「同意」：方案过关，可以开工。
+    /// 记录在**转录**里（重启/回档后按它派生），不是内存里的临时状态。
+    pub fn approve_plan(&mut self, sink: &mut dyn FnMut(SessionEvent)) {
+        let line = self.view("[用户:同意方案]".to_string());
+        sink(SessionEvent::Transcript(vec![line]));
+        self.plan_approved = true;
+        self.pending = None;
     }
 
     /// 接上「停止」：CoreHandle 在派发时注入任务登记处的取消标志。
@@ -519,6 +531,13 @@ impl CollabSession {
                 }
             }
         };
+        // **审查关卡**：整理完不自动开工——方案先交用户审查，点「同意」才推进。
+        // 为什么闸门在这里：整理之后就是花钱的执行（每个成员一轮工具循环），让用户先看一眼方案最省事。
+        if !self.plan_approved {
+            sink(SessionEvent::PlanReview { plan: plan.clone() });
+            self.pending = Some(Pending::PlanReview);
+            return;
+        }
         // 执行 → 验收 → 返工（上限内）→ 交付。
         let llm = self.llm_opts();
         let members = self
@@ -780,6 +799,7 @@ impl CollabSession {
             sandboxes,
             done: st.ended,
             cancel: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            plan_approved: st.plan_approved,
         };
         if st.begun {
             // 讨论转录 = 最后一条 [用户:开始] 之后的行。

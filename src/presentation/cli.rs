@@ -191,6 +191,9 @@ fn render(events: &[SessionEvent]) {
             }
             SessionEvent::DiscussionDone { .. } => {}
             SessionEvent::Plan(p) => println!("[整理] \n{}", p),
+            SessionEvent::PlanReview { plan } => {
+                println!("[待审] 方案如下，点「同意」才开工：\n{}", plan)
+            }
             SessionEvent::Report { id, text, rework } => {
                 if *rework > 0 {
                     println!("[执行·返工{}] [{}] {}", rework, id, text);
