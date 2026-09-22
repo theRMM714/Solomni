@@ -1158,6 +1158,126 @@ pub(crate) fn scripted_discussion(scripts: Vec<Vec<String>>, allow: bool) -> Dis
     )
 }
 
+// ---------- 任务链（依赖图） ----------
+
+fn chain_node(id: &str, deps: &[&str]) -> crate::core::chain::TaskNode {
+    crate::core::chain::TaskNode {
+        id: id.to_string(),
+        title: format!("节点{}", id),
+        objective: format!("把 {} 做完", id),
+        assignee: "甲".to_string(),
+        deps: deps.iter().map(|d| d.to_string()).collect(),
+        status: crate::core::chain::NodeStatus::Pending,
+        sub_session: None,
+        acceptance: None,
+    }
+}
+
+fn roster() -> Vec<String> {
+    vec!["甲".to_string(), "乙".to_string()]
+}
+
+/// 串：链式依赖按序就绪——前一环没完成，后一环不开始。
+#[test]
+pub(crate) fn chain_ready_advances_along_a_serial_chain() {
+    use crate::core::chain::NodeStatus;
+    let mut chain = crate::core::chain::TaskChain {
+        nodes: vec![
+            chain_node("a", &[]),
+            chain_node("b", &["a"]),
+            chain_node("c", &["b"]),
+        ],
+    };
+    assert_eq!(chain.ready().len(), 1);
+    assert_eq!(chain.ready()[0].id, "a");
+    chain.nodes[0].status = NodeStatus::Done;
+    assert_eq!(chain.ready()[0].id, "b");
+    chain.nodes[1].status = NodeStatus::Done;
+    assert_eq!(chain.ready()[0].id, "c");
+    chain.nodes[2].status = NodeStatus::Done;
+    assert!(chain.ready().is_empty(), "全完成之后没有可启动的");
+    assert!(chain.finished());
+}
+
+/// 并 + 混合：无依赖的节点**同时**就绪；"等它们全部结束"的节点在两者都完成后才就绪。
+#[test]
+pub(crate) fn chain_ready_returns_parallel_nodes_together() {
+    use crate::core::chain::NodeStatus;
+    let mut chain = crate::core::chain::TaskChain {
+        nodes: vec![
+            chain_node("a", &[]),
+            chain_node("b", &[]),
+            chain_node("c", &["a", "b"]),
+        ],
+    };
+    let mut ids: Vec<String> = chain.ready().iter().map(|n| n.id.clone()).collect();
+    ids.sort();
+    assert_eq!(
+        ids,
+        vec!["a".to_string(), "b".to_string()],
+        "a/b 该同时就绪"
+    );
+    assert!(chain.ready().iter().all(|n| n.id != "c"), "c 要等 a、b");
+    chain.nodes[0].status = NodeStatus::Done;
+    assert_eq!(chain.ready().len(), 1, "只完成一半，c 还不能开始");
+    assert_eq!(chain.ready()[0].id, "b");
+    chain.nodes[1].status = NodeStatus::Done;
+    assert_eq!(chain.ready()[0].id, "c", "两个依赖都完成，c 就绪");
+    assert!(!chain.finished(), "c 还没结束");
+}
+
+/// 装配期自洽：环、悬空依赖、重复 id、空目标、未知负责人——逐条如实列出。
+#[test]
+pub(crate) fn chain_problems_reject_cycles_and_bad_refs() {
+    use crate::core::chain::TaskChain;
+    let good = TaskChain {
+        nodes: vec![chain_node("a", &[]), chain_node("b", &["a"])],
+    };
+    assert!(
+        good.problems(&roster()).is_empty(),
+        "{:?}",
+        good.problems(&roster())
+    );
+
+    // 环：a 等 b、b 等 a。
+    let cyc = TaskChain {
+        nodes: vec![chain_node("a", &["b"]), chain_node("b", &["a"])],
+    };
+    let p = cyc.problems(&roster());
+    assert!(p.iter().any(|x| x.contains("环")), "{:?}", p);
+
+    // 悬空依赖 + 重复 id + 空目标 + 未知负责人。
+    let mut bad = TaskChain {
+        nodes: vec![chain_node("a", &["没有这个"]), chain_node("a", &[])],
+    };
+    bad.nodes[1].objective = String::new();
+    bad.nodes[1].assignee = "丙".to_string();
+    let p = bad.problems(&roster());
+    assert!(p.iter().any(|x| x.contains("不存在的节点")), "{:?}", p);
+    assert!(p.iter().any(|x| x.contains("id 重复")), "{:?}", p);
+    assert!(p.iter().any(|x| x.contains("没有目标")), "{:?}", p);
+    assert!(p.iter().any(|x| x.contains("不在名单里")), "{:?}", p);
+
+    // 空链也算装配错误（没什么可推进的）。
+    assert!(!TaskChain::default().problems(&roster()).is_empty());
+}
+
+/// 结束判定：链非空、且每个节点都落定（Done / Failed）——空链不算结束。
+#[test]
+pub(crate) fn chain_finished_needs_every_node_settled() {
+    use crate::core::chain::{NodeStatus, TaskChain};
+    let mut chain = TaskChain {
+        nodes: vec![chain_node("a", &[]), chain_node("b", &["a"])],
+    };
+    assert!(!chain.finished());
+    chain.nodes[0].status = NodeStatus::Done;
+    assert!(!chain.finished(), "b 还没落定");
+    // 失败也算落定（链不静默跳过：会暂停并通知用户，但不会永远卡着）。
+    chain.nodes[1].status = NodeStatus::Failed;
+    assert!(chain.finished());
+    assert!(!TaskChain::default().finished(), "空链不算结束");
+}
+
 /// 原生通道：供应商的结构化槽位 → 讨论动词；不认识的工具名 = 不认识（调用点据此**如实拒绝**）。
 #[test]
 pub(crate) fn native_tool_names_map_to_discussion_verbs() {

@@ -19,6 +19,10 @@ pub mod ports;
 pub mod prompt;
 pub mod providers;
 pub mod refs;
+// 任务链（依赖图）：模型 + 调度器（纯函数）。**P4b 起由协作会话消费**；
+// 在那之前只进测试构建，免得成为"看着有人用、其实没人用"的代码（与 SystemTools::allows 同一处置）。
+#[cfg(test)]
+pub mod chain;
 pub mod roles;
 pub mod schema;
 pub mod session;
