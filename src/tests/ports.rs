@@ -53,6 +53,8 @@ fn meta(name: &str) -> SessionMeta {
             model: None,
         }],
         exec: ExecSpec::default(),
+        parent: None,
+        node: None,
     }
 }
 

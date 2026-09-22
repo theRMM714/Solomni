@@ -1117,6 +1117,9 @@ impl Core {
             task: spec.task.clone(),
             ts: now_ts(),
             agents: metas.clone(),
+            // 顶层会话：没有编排者，也没有节点（子会话由 spawn_sub_session 建）。
+            parent: None,
+            node: None,
             exec: exec::ExecSpec {
                 tier: self.settings.app.tier,
                 ..exec::ExecSpec::default()
@@ -1283,7 +1286,8 @@ impl Core {
         roster: &module::Roster,
     ) -> Result<workspace::Sandboxes, String> {
         let names: Vec<String> = meta.agents.iter().map(|a| a.name.clone()).collect();
-        let roots = self.workspace.roots(&meta.name, &names)?;
+        // 沙箱锚在**工作**上：子会话与父会话共用一套工作区（见 SessionMeta::work）。
+        let roots = self.workspace.roots(meta.work(), &names)?;
         let mut list: Vec<workspace::Sandbox> = Vec::new();
         for a in &meta.agents {
             let private = roots
@@ -1298,7 +1302,7 @@ impl Core {
                 }
             }
             list.push(workspace::Sandbox {
-                work_name: meta.name.clone(),
+                work_name: meta.work().to_string(),
                 agent: a.name.clone(),
                 shared: roots.shared.clone(),
                 private,

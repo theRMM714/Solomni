@@ -99,6 +99,8 @@ fn meta(name: &str) -> SessionMeta {
         ts: 1,
         agents: Vec::new(),
         exec: crate::core::exec::ExecSpec::default(),
+        parent: None,
+        node: None,
     }
 }
 

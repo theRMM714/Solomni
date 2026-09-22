@@ -1666,6 +1666,8 @@ pub(crate) fn mode_vocabulary_is_single_or_collab_only() {
             model: None,
         }],
         exec: ExecSpec::default(),
+        parent: None,
+        node: None,
     })
     .unwrap();
     // 内存里没有这个会话 → 走 rebuild_session，对未知形态如实报错。
@@ -6186,6 +6188,8 @@ pub(crate) fn seed_session(
         ts: 1,
         agents,
         exec,
+        parent: None,
+        node: None,
     })
     .unwrap();
 }
@@ -6510,6 +6514,8 @@ pub(crate) fn session_meta_exec_section_roundtrips_and_reads_legacy_meta() {
             pins: BTreeMap::from([("python".to_string(), "3.12.4".to_string())]),
             net: false,
         },
+        parent: None,
+        node: None,
     };
     let text = serde_yaml::to_string(&meta).expect("序列化");
     let back: SessionMeta = serde_yaml::from_str(&text).expect("反序列化");
