@@ -907,7 +907,13 @@ impl CollabSession {
                                     .get("degraded")
                                     .and_then(|d| d.as_bool())
                                     .unwrap_or(false),
-                                tool: None,
+                                // 核实行重建后仍是核实行（呈现层不因重启换样式）。
+                                tool: l.get("tool").and_then(|t| {
+                                    serde_json::from_value::<crate::core::events::ToolCallView>(
+                                        t.clone(),
+                                    )
+                                    .ok()
+                                }),
                             });
                         }
                     }

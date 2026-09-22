@@ -1512,6 +1512,94 @@ pub(crate) fn discussion_round_cap_enforced() {
     assert!(d.round > MAX_ROUNDS);
 }
 
+/// 讨论回合能**先核实再发言**：只读工具真跑（核实行带工具视图），随后照常表态。
+#[test]
+pub(crate) fn discussion_member_can_inspect_before_speaking() {
+    let mut member = BTreeMap::new();
+    member.insert(
+        "a".to_string(),
+        vec![
+            // 先核实一次：路径不合法 → 工具**如实失败**，但它确实跑了、留了核实行。
+            "{\"type\":\"tool\",\"name\":\"list\",\"args\":{\"path\":\"x\"}}".to_string(),
+            "{\"type\":\"say\",\"text\":\"查过了\"}".to_string(),
+            "{\"type\":\"agree\",\"text\":\"同意\"}".to_string(),
+        ],
+    );
+    let mut core = core_with(
+        vec![module_of("a")],
+        gw(
+            member,
+            vec![
+                "{\"plan\":\"方案\",\"nodes\":[{\"id\":\"n1\",\"title\":\"做\",\"objective\":\"做\",\"assignee\":\"a\",\"deps\":[]}]}".to_string(),
+                "[{\"node\":\"n1\",\"ok\":true,\"note\":\"够用\"}]".to_string(),
+                "[{\"item\":\"做\",\"status\":\"pass\"}]".to_string(),
+            ],
+        ),
+    );
+    let sid = core
+        .create_work(collab_work("w", &["a"], false, "做个东西"))
+        .unwrap()
+        .sid;
+    let events = core
+        .collab_continue(&sid, CollabStep::Begin, "yes")
+        .unwrap();
+    let inspected = events.iter().any(|e| {
+        matches!(e, SessionEvent::Transcript(ls)
+            if ls.iter().any(|l| l.tool.as_ref().map(|t| t.name.as_str() == "list").unwrap_or(false)))
+    });
+    assert!(
+        inspected,
+        "讨论里的核实要留下**带工具视图**的行：{:?}",
+        events
+    );
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, SessionEvent::Transcript(ls)
+            if ls.iter().any(|l| l.line.contains("查过了")))),
+        "核实之后要能正常发言：{:?}",
+        events
+    );
+}
+
+/// 讨论回合**拿不到干活的手段**：模块工具被如实拒绝，且不当表态吸收。
+#[test]
+pub(crate) fn discussion_member_cannot_use_module_tools() {
+    let mut member = BTreeMap::new();
+    member.insert(
+        "a".to_string(),
+        vec![
+            "{\"type\":\"tool\",\"name\":\"harvest.scan\",\"args\":{}}".to_string(),
+            "{\"type\":\"say\",\"text\":\"我不该干活\"}".to_string(),
+            "{\"type\":\"agree\",\"text\":\"同意\"}".to_string(),
+        ],
+    );
+    let mut core = core_with(
+        vec![module_of("a")],
+        gw(
+            member,
+            vec![
+                "{\"plan\":\"方案\",\"nodes\":[{\"id\":\"n1\",\"title\":\"做\",\"objective\":\"做\",\"assignee\":\"a\",\"deps\":[]}]}".to_string(),
+                "[{\"node\":\"n1\",\"ok\":true,\"note\":\"够用\"}]".to_string(),
+                "[{\"item\":\"做\",\"status\":\"pass\"}]".to_string(),
+            ],
+        ),
+    );
+    let sid = core
+        .create_work(collab_work("w", &["a"], false, "做个东西"))
+        .unwrap()
+        .sid;
+    let events = core
+        .collab_continue(&sid, CollabStep::Begin, "yes")
+        .unwrap();
+    assert!(
+        events.iter().any(|e| matches!(e, SessionEvent::Notice(n)
+            if n.contains("[越权]") && n.contains("harvest.scan"))),
+        "模块工具在讨论回合该被如实拒绝：{:?}",
+        events
+    );
+}
+
 #[test]
 pub(crate) fn degraded_discussion_line_carries_a_structured_flag() {
     let prompts = test_prompts();
