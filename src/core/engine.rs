@@ -452,6 +452,9 @@ pub enum TurnOut {
 pub struct DiscLine {
     pub text: String,
     pub degraded: bool,
+    /// 这一行是"讨论回合里的一次核实"（只读工具调用）时带上调用视图；普通发言没有。
+    /// 呈现层据此把核实行与发言行分开样式（与单 agent 的工具行同一形态）。
+    pub tool: Option<ToolCallView>,
 }
 
 pub struct Discussion {
@@ -625,6 +628,7 @@ impl Discussion {
         self.transcript.push(DiscLine {
             text: format!("[轮次 {}]", self.round + 1),
             degraded: false,
+            tool: None,
         });
         // 用户回答优先转达。
         if let Some(ans) = self.pending_user_answers.first().cloned() {
@@ -632,6 +636,7 @@ impl Discussion {
             self.transcript.push(DiscLine {
                 text: format!("[用户] {}", ans),
                 degraded: false,
+                tool: None,
             });
         }
         // 同意是**粘住**的：发过 agree 的人不再被追问，直到在场者全部同意（离开的不算）。
@@ -721,6 +726,7 @@ impl Discussion {
                         self.transcript.push(DiscLine {
                             text: note,
                             degraded: false,
+                            tool: None,
                         });
                         continue;
                     }
@@ -771,6 +777,7 @@ impl Discussion {
         self.transcript.push(DiscLine {
             text: line,
             degraded,
+            tool: None,
         });
     }
 

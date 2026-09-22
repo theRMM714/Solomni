@@ -907,6 +907,7 @@ impl CollabSession {
                                     .get("degraded")
                                     .and_then(|d| d.as_bool())
                                     .unwrap_or(false),
+                                tool: None,
                             });
                         }
                     }
@@ -1055,6 +1056,8 @@ fn emit_new_lines(
                 reply: id,
                 line: l.text.clone(),
                 degraded: l.degraded,
+                // 讨论回合里的核实行带着工具视图（与单 agent 的工具行同一形态）。
+                tool: l.tool.clone(),
                 ..Default::default()
             }
         })
