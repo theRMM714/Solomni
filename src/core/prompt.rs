@@ -169,6 +169,8 @@ pub struct ToolTexts {
     pub unknown_builtin: String,
     /// 变量：name
     pub tool_not_allowed: String,
+    /// 压缩回合的提示词（无变量）：让 AI 自己压，并调 compact 工具写下摘要。
+    pub compact_prompt: String,
     /// 变量：path, bytes, text
     pub read_header: String,
     /// read 遇到目录时的如实引导。变量：path

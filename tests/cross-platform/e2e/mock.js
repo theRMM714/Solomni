@@ -69,9 +69,10 @@ http.createServer((req, res) => {
       // 判据只用转录里的事实（说话人标签 / 轮次标记 / 任务原话），不改产品行为。
       // 判断"这条请求属于哪个 agent"：系统提示词里带该 agent 的全部模块 system，用模块名认。
       // 哪个 agent 在说话：系统提示词里带该 agent 全部模块的 system，用模块特征认（甲=摘要，乙=核对）。
-      // 用只有 summarizer 才有的特征认甲：reviewer 的 system 里也含"摘要"（它负责核对摘要），
-      // 拿它当判据会把乙也当成甲——退场场景于是两人都撤、名单空了。
-      const isJia = sys.includes('压缩');
+      // 认甲用**模块 id**（系统提示里带模块根目录那行），不要用描述性词：
+      // reviewer 的 system 里也有"摘要"（它负责核对摘要），而工具说明里会出现"压缩"之类的通用词——
+      // 拿它们当判据都会把乙也认成甲（退场场景于是两人都撤、名单空了）。
+      const isJia = sys.includes('summarizer');
       // 到第几轮了：转录里 [轮次 N] 的条数（step 每轮开头推一条）。
       const stepNo = (user.match(/\[轮次 (\d+)\]/g) || []).length;
       const say = (t) => JSON.stringify({ type: 'say', text: t });

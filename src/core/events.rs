@@ -21,6 +21,9 @@ pub enum SessionEvent {
         /// 核心给出的任务链（审查关卡要连同链一起给用户看）。
         chain: crate::core::chain::TaskChain,
     },
+    /// 上下文压缩：`up_to` 之前的转录**不再发给模型**（转录本身完整保留、用户仍可查看），
+    /// 由一份 summary 代替（见 docs/architecture/session-model.md 六）。
+    Compacted { up_to: u64, summary: String },
     /// 任务链的一个节点开工：它跑在自己的**子会话**里（用户可进去干预）。
     NodeStarted {
         node: String,
@@ -170,6 +173,11 @@ impl SessionEvent {
             SessionEvent::PlanReview { plan, chain } => {
                 serde_json::json!({ "type": "plan_review", "plan": plan, "chain": chain })
             }
+            SessionEvent::Compacted { up_to, summary } => serde_json::json!({
+                "type": "compacted",
+                "up_to": up_to,
+                "summary": summary
+            }),
             SessionEvent::NodeStarted {
                 node,
                 sid,

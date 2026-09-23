@@ -164,6 +164,78 @@ impl AgentSession {
         vec![SessionEvent::Transcript(views)]
     }
 
+    /// 压缩回合：把提示词追加到历史之后、**只声明 compact 工具**，跑一次模型；拿到摘要就返回。
+    /// 两条通道都认：native 从结构化槽位取，信封通道从正文里的信封取（与讨论回合同口径）。
+    pub fn compact_turn(
+        &mut self,
+        prompt: &str,
+        decl: Option<&crate::core::ports::ToolDecl>,
+    ) -> Result<String, String> {
+        let mut msgs = self.history.clone();
+        msgs.push(Msg::user(prompt.to_string()));
+        let mut opts = crate::core::ports::CompleteOpts::plain(false);
+        if let Some(d) = decl {
+            opts.tools = Some(std::slice::from_ref(d));
+        }
+        let mut keep = |_c: crate::core::ports::Chunk| true;
+        let done = self.chat.complete(&msgs, opts, &mut keep);
+        if let Some(err) = done.error {
+            return Err(err);
+        }
+        let (name, args) = match done.calls.first() {
+            Some(c) => (c.name.clone(), c.args_json.clone()),
+            None => {
+                let r = crate::core::envelope::parse(&done.raw);
+                let t = r
+                    .tools
+                    .first()
+                    .ok_or_else(|| "压缩回合没有调用 compact（没给出摘要）".to_string())?;
+                (t.name.clone(), t.args_json.clone())
+            }
+        };
+        if name != "compact" {
+            return Err(format!("压缩回合该只调 compact，实际调了 {}", name));
+        }
+        let v: serde_json::Value = serde_json::from_str(&args)
+            .map_err(|e| format!("压缩参数不合法（{}）：{}", e, args))?;
+        let summary = v
+            .get("summary")
+            .and_then(|s| s.as_str())
+            .unwrap_or("")
+            .to_string();
+        if summary.trim().is_empty() {
+            return Err("压缩回合给出的摘要是空的".to_string());
+        }
+        Ok(summary)
+    }
+
+    /// 当前下一条转录行的 id（压缩点用它：把此前的行全部移出发送视图）。
+    pub fn next_line_id(&self) -> u64 {
+        self.next_line
+    }
+
+    /// 上下文压缩：把 up_to 之前的行移出**发送视图**（转录不动、用户照样能看），用一份摘要代替。
+    /// 见 docs/architecture/session-model.md 六：改的是"发给模型什么"，不是"留下什么"。
+    pub fn compact(&mut self, up_to: u64, summary: &str) {
+        // 按行找到历史里的截断点（marks 就是"行 → 该行完成时的历史长度"）。
+        let keep = self
+            .marks
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| (*i as u64) < up_to)
+            .count();
+        let hist = if keep == 0 { 1 } else { self.marks[keep - 1] };
+        self.history.truncate(hist.max(1));
+        // 摘要插在系统提示之后：此后模型只看到"摘要 + 之后的内容"。
+        let at = self.history.len().min(1);
+        self.history
+            .insert(at, Msg::user(format!("[此前内容摘要]\n{}", summary)));
+        // 插了一条消息，marks 里"行完成时的历史长度"整体后移一格。
+        for m in self.marks.iter_mut() {
+            *m += 1;
+        }
+    }
+
     /// 给接下来的行打上回合 id（节点执行也用整场工作的同一套计数：回档才对得上）。
     pub fn set_turn(&mut self, turn_id: u64) {
         self.cur_turn = turn_id;

@@ -190,6 +190,13 @@ fn render(events: &[SessionEvent]) {
                 }
             }
             SessionEvent::DiscussionDone { .. } => {}
+            SessionEvent::Compacted { up_to, summary } => {
+                println!(
+                    "[压缩] 此前内容已压成摘要（不再发给模型，仍可查看）：\n{}",
+                    summary
+                );
+                println!("  （压缩到第 {} 行）", up_to);
+            }
             SessionEvent::NodeStarted {
                 node,
                 sid,

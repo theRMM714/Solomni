@@ -149,6 +149,41 @@ impl crate::core::ports::Chat for RecordingChat {
     }
 }
 
+/// 包一层记录器：把每个成员通道收到的消息记下来（判"发送视图"用）。
+pub(crate) struct RecordingGateway {
+    pub inner: crate::tests::doubles::ScriptGateway,
+    pub seen: std::sync::Arc<std::sync::Mutex<Vec<Vec<String>>>>,
+}
+
+impl crate::core::ports::ChatGateway for RecordingGateway {
+    fn probe_tools(
+        &self,
+        c: &crate::core::providers::Channel,
+    ) -> Result<crate::core::ports::ProbeOutcome, String> {
+        self.inner.probe_tools(c)
+    }
+    fn member_channel(
+        &self,
+        c: Option<&crate::core::providers::Channel>,
+        id: &str,
+    ) -> (crate::core::ports::BoxedChat, Option<String>) {
+        let (chat, note) = self.inner.member_channel(c, id);
+        (
+            Box::new(RecordingChat {
+                inner: chat,
+                seen: std::sync::Arc::clone(&self.seen),
+            }),
+            note,
+        )
+    }
+    fn core_channel(
+        &self,
+        c: Option<&crate::core::providers::Channel>,
+    ) -> (crate::core::ports::BoxedChat, bool) {
+        self.inner.core_channel(c)
+    }
+}
+
 impl crate::core::ports::ChatGateway for GatedGateway {
     fn probe_tools(
         &self,

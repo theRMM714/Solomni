@@ -373,6 +373,8 @@ pub(crate) fn route(
                 // 审查关卡：用户点「同意」才开工（方案待审时前端给的就是这个动作）。
                 "approve-plan" => intent::Action::Step(CollabStep::ApprovePlan, &text),
                 "withdraw" => intent::Action::Withdraw(&agent),
+                // 压缩上下文：AI 自己压成摘要（此后此前内容不再发给模型，用户仍可查看）。
+                "compact" => intent::Action::Compact,
                 "rewind" => intent::Action::Rewind(
                     req.get("id").and_then(|v| v.as_u64()).unwrap_or(u64::MAX),
                 ),

@@ -188,6 +188,8 @@ pub trait SessionOps: Send + Sync {
     fn slate(&self, sid: &str) -> Result<Vec<AgentMeta>, String>;
     /// 回档：返回重放后的完整事件流（已是线格式，供前端整体重建）。
     fn rewind(&self, sid: &str, keep_id: u64) -> Result<Vec<serde_json::Value>, String>;
+    /// 压缩这个会话的上下文（AI 自己压；压不动如实说）。
+    fn compact(&self, sid: &str) -> Result<Advance, String>;
     /// 改需求：同样返回完整重放。
     fn update_task(&self, sid: &str, text: &str) -> Result<Vec<serde_json::Value>, String>;
     fn pending(&self, sid: &str) -> Result<Option<Pending>, String>;
@@ -560,6 +562,82 @@ impl CoreHandle {
         Ok(turn)
     }
 
+    /// 手动压缩（`/compact`）：**让 AI 自己压**——核心只给 compact 工具，不是系统替它总结。
+    /// 与单 agent 同一条 own-and-return：队列只占"取/交"，模型调用在工作线程上（界面不被阻塞）。
+    /// 压不动就**如实说**（通知 + 继续用完整上下文），不静默降级、不假装压过。
+    pub fn compact(&self, sid: &str) -> Result<Advance, String> {
+        let bus = Arc::clone(&self.bus);
+        let session = self.call({
+            let sid = sid.to_string();
+            move |core| core.take_single(&sid)
+        })?;
+        let (prompt, decl, up_to) = self.call({
+            let sid = sid.to_string();
+            move |core| Ok(core.compact_plan(&sid))
+        })?;
+        let joined = std::thread::Builder::new()
+            .name("solomni-compact".to_string())
+            .spawn(move || {
+                let mut s = session;
+                let made = s.compact_turn(&prompt, decl.as_ref());
+                if let Ok(summary) = &made {
+                    s.compact(up_to, summary);
+                }
+                (s, made)
+            })
+            .map_err(|e| format!("起压缩线程失败：{}", e))?
+            .join();
+        let (s, made) = match joined {
+            Ok(x) => x,
+            Err(_) => {
+                self.call({
+                    let sid = sid.to_string();
+                    move |core| {
+                        core.abort_running(&sid);
+                        Ok(())
+                    }
+                })?;
+                return Err("压缩线程崩溃：会话已按落盘转录保留".to_string());
+            }
+        };
+        let summary = match made {
+            Ok(sm) => sm,
+            Err(err) => {
+                self.call({
+                    let sid = sid.to_string();
+                    move |core| {
+                        core.put_single(&sid, s);
+                        Ok(())
+                    }
+                })?;
+                let note = SessionEvent::Notice(crate::core::events::interrupted_note(&format!(
+                    "压缩没成功：{}",
+                    err
+                )));
+                let seq = bus.push(sid, std::slice::from_ref(&note));
+                return Ok(Advance {
+                    events: vec![note],
+                    seq,
+                });
+            }
+        };
+        let ev = SessionEvent::Compacted { up_to, summary };
+        self.call({
+            let sid = sid.to_string();
+            let ev = ev.clone();
+            move |core| {
+                core.put_single(&sid, s);
+                core.persister(&sid).persist(std::slice::from_ref(&ev));
+                Ok(())
+            }
+        })?;
+        let seq = bus.push(sid, std::slice::from_ref(&ev));
+        Ok(Advance {
+            events: vec![ev],
+            seq,
+        })
+    }
+
     /// 起一轮**脱离调用方**的单 agent 生成（派发节点用）：不等它跑完。
     /// 完成后由 `single_generation` 的叫醒逻辑推进父会话——所以这里只是"点火"。
     fn spawn_detached_single(&self, sid: &str, text: &str) {
@@ -805,6 +883,10 @@ impl SessionOps for CoreHandle {
     fn slate(&self, sid: &str) -> Result<Vec<AgentMeta>, String> {
         let sid = sid.to_string();
         self.call(move |core| core.collab_slate(&sid))
+    }
+
+    fn compact(&self, sid: &str) -> Result<Advance, String> {
+        CoreHandle::compact(self, sid)
     }
 
     fn rewind(&self, sid: &str, keep_id: u64) -> Result<Vec<serde_json::Value>, String> {

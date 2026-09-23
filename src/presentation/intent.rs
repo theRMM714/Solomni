@@ -145,6 +145,8 @@ pub enum Action<'a> {
     Rewind(u64),
     /// 改需求。
     UpdateTask(&'a str),
+    /// 压缩上下文（AI 自己压成摘要；此后此前内容不再发给模型，用户仍可查看）。
+    Compact,
 }
 
 /// 动作结果：生成类给事件批（带事件台序号），回档/改需求给完整重放。
@@ -165,6 +167,7 @@ pub fn act(ops: &Ops, sid: &str, action: Action<'_>, out: Output) -> Result<Acte
         Action::Withdraw(agent) => ops.sessions.withdraw_agree(sid, agent).map(Acted::Advanced),
         Action::Rewind(keep_id) => ops.sessions.rewind(sid, keep_id).map(Acted::Replayed),
         Action::UpdateTask(text) => ops.sessions.update_task(sid, text).map(Acted::Replayed),
+        Action::Compact => ops.sessions.compact(sid).map(Acted::Advanced),
     }
 }
 

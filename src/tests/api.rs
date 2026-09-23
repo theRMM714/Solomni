@@ -435,3 +435,68 @@ fn a_panicking_command_does_not_take_the_core_down() {
     assert!(ops.registry.settings().is_ok(), "panic 之后必须还能服务");
     assert!(ops.discovery.roster().is_ok());
 }
+
+/// 压缩：发送视图变成「摘要 + 之后的内容」（转录完整）；压两次只有**一份**摘要（滚动）。
+#[test]
+fn compacting_replaces_the_send_view_with_one_rolling_summary() {
+    let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let mut member = std::collections::BTreeMap::new();
+    member.insert(
+        "a".to_string(),
+        vec![
+            "第一件事".to_string(),
+            "{\"type\":\"tool\",\"name\":\"compact\",\"args\":{\"summary\":\"摘要一\"}}"
+                .to_string(),
+            "{\"type\":\"tool\",\"name\":\"compact\",\"args\":{\"summary\":\"摘要二\"}}"
+                .to_string(),
+        ],
+    );
+    let gateway = super::RecordingGateway {
+        inner: super::doubles::ScriptGateway::new(member, vec![]),
+        seen: Arc::clone(&seen),
+    };
+    let handle = crate::core::api::CoreHandle::spawn(super::doubles::core_with_gateway(
+        vec![module_of("a")],
+        gateway,
+    ))
+    .expect("起核心线程");
+    let ops = crate::core::api::Ops::from_handle(&handle);
+    let sid = ops
+        .sessions
+        .create_work(single_work("w", &["a"]))
+        .expect("建会话")
+        .sid;
+    ops.sessions
+        .say(&sid, "先做第一件事", crate::core::api::Output::Final)
+        .expect("说一句");
+
+    let first = ops.sessions.compact(&sid).expect("第一次压缩");
+    assert!(
+        first
+            .events
+            .iter()
+            .any(|e| matches!(e, SessionEvent::Compacted { summary, .. } if summary == "摘要一")),
+        "第一次压缩该如实落一条压缩事件：{:?}",
+        first.events
+    );
+    let second = ops.sessions.compact(&sid).expect("第二次压缩");
+    assert!(
+        second
+            .events
+            .iter()
+            .any(|e| matches!(e, SessionEvent::Compacted { summary, .. } if summary == "摘要二")),
+        "第二次压缩该如实落一条压缩事件：{:?}",
+        second.events
+    );
+
+    let all = seen.lock().expect("锁").clone();
+    let last = all.last().expect("至少问过一次").clone();
+    assert!(
+        last.iter().any(|c| c.contains("摘要一")),
+        "第二次压缩的发送视图该带上上一份摘要（滚动摘要）：{last:?}"
+    );
+    assert!(
+        !last.iter().any(|c| c.contains("第一件事")),
+        "原始内容该已移出发送视图：{last:?}"
+    );
+}

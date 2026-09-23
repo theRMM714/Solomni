@@ -150,6 +150,13 @@ impl SessionOps for FakeOps {
         self.guard()?;
         Ok(Vec::new())
     }
+    fn compact(&self, _sid: &str) -> Result<crate::core::api::Advance, String> {
+        self.guard()?;
+        Ok(crate::core::api::Advance {
+            events: Vec::new(),
+            seq: 0,
+        })
+    }
     fn rewind(&self, _sid: &str, _keep_id: u64) -> Result<Vec<serde_json::Value>, String> {
         self.guard()?;
         Ok(vec![json!({ "type": "line", "line": "重放" })])

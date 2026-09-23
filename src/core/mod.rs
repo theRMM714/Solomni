@@ -474,6 +474,23 @@ impl Core {
         }
     }
 
+    /// 压缩一个会话的上下文：**让 AI 自己压**（核心只给 compact 工具），不是系统替它总结。
+    /// 返回（提示词, compact 的声明, 压缩点）——模型调用由调用方在工作线程上跑（界面不被阻塞）。
+    pub fn compact_plan(&self, sid: &str) -> (String, Option<crate::core::ports::ToolDecl>, u64) {
+        let prompt = self.prompts.core.tool_texts.compact_prompt.clone();
+        let decl = self
+            .prompts
+            .core
+            .builtin_tools
+            .get("compact")
+            .map(|t| t.decl("compact"));
+        let up_to = match self.sessions.get(sid) {
+            Some(Session::Single(s)) => s.next_line_id(),
+            _ => 0,
+        };
+        (prompt, decl, up_to)
+    }
+
     /// 给某个会话接下来的行打上**整场工作的下一个回合 id**（节点执行也用同一套编号）。
     /// 一个 agent 一个会话：它的回合计数来自父会话——回档同步靠两边同一套编号。
     fn bump_turn_of_child(&mut self, child: &str) -> u64 {

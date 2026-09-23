@@ -36,6 +36,11 @@ tool_texts:
   arg_unknown: "没有参数 {{name}}"
   unknown_builtin: "未知的内置工具：{{name}}"
   tool_not_allowed: "这个席位没有工具 {{name}}：角色表没发给它（越权调用一律不执行）。"
+  compact_prompt: |-
+    上下文要压一压了。请把**以上全部内容**写成一份摘要，调用 compact 工具：
+    - 留下：结论、决定、待办、关键路径、还没解决的问题；
+    - 丢掉：过程细节、重复的来回、已经作废的中间稿；
+    - 摘要之后你会只看到"这份摘要 + 之后的新内容"，所以别留下"见上文"这类指代。
   read_header: "[read] {{path}} （{{bytes}} 字节）\n{{text}}"
   write_header: "[write] 已写入 {{path}}（{{chars}} 字符，UTF-8）"
   write_module_note: "{{mark}} 这是模块 {{id}} 的目录（你的能力，不是本工作私有区），改动会保留。"
