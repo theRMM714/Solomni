@@ -54,6 +54,15 @@ pub struct ModelEntry {
     /// 工具调用形态（缺省 envelope；填 native 前应当用探测确认真实支持，见 REGISTRY_SPEC）。
     #[serde(default)]
     pub tools: ToolMode,
+    /// 这个模型的**上下文窗口**（tokens）。缺省给保守值：宁可早压，也别撑爆。
+    /// 自动压缩按它 × 设置的百分比触发（见 docs/architecture/session-model.md 六）。
+    #[serde(default = "default_context_tokens")]
+    pub context: u64,
+}
+
+/// 保守的上下文窗口缺省值（模型没声明时用）。
+fn default_context_tokens() -> u64 {
+    32_000
 }
 
 /// 基本设置（settings.yaml）：一般 agent 都有的开关。
@@ -85,6 +94,14 @@ pub struct AppSettings {
     /// 预算用尽 = 中断这一轮并如实告知（用户可以点「继续」重试），不是把会话作废。
     #[serde(default = "default_llm_timeout_secs")]
     pub llm_timeout_secs: u64,
+    /// **上下文用到多少就该压**（占模型窗口的百分比）。到点自动压一次；用户也可以手动 /compact。
+    /// 默认 70：留三成余量给"这一轮还要生成的内容"，免得刚压完又爆。
+    #[serde(default = "default_compact_percent")]
+    pub compact_at_percent: u8,
+}
+
+fn default_compact_percent() -> u8 {
+    70
 }
 
 fn default_llm_timeout_secs() -> u64 {
@@ -105,6 +122,7 @@ impl Default for AppSettings {
             fence_read: Vec::new(),
             qemu_path: String::new(),
             llm_timeout_secs: crate::core::ports::DEFAULT_LLM_TIMEOUT_SECS,
+            compact_at_percent: 70,
         }
     }
 }

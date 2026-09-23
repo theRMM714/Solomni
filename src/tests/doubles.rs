@@ -53,6 +53,7 @@ impl InMemorySettings {
                 provider: "p".to_string(),
                 note: String::new(),
                 tools: crate::core::providers::ToolMode::Envelope,
+                context: 32_000,
             },
         );
         s.core = Some("m".to_string());

@@ -114,6 +114,7 @@ pub(crate) fn settings_resolves_model_to_channel() {
             provider: "p".into(),
             note: String::new(),
             tools: crate::core::providers::ToolMode::Native,
+            context: 32_000,
         },
     );
     s.core = Some("m".into());
@@ -132,6 +133,7 @@ pub(crate) fn settings_resolves_model_to_channel() {
             provider: "p".into(),
             note: String::new(),
             tools: Default::default(),
+            context: 32_000,
         },
     );
     assert!(s.resolve("d").is_ok(), "缺省形态的模型照样能解析出通道");

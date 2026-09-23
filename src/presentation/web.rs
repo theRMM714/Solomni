@@ -549,6 +549,12 @@ pub(crate) fn route(
                     .get("llm_timeout_secs")
                     .and_then(|v| v.as_u64())
                     .unwrap_or(current.llm_timeout_secs),
+                // 压缩阈值可由界面调；缺省沿用现值。
+                compact_at_percent: req
+                    .get("compact_at_percent")
+                    .and_then(|v| v.as_u64())
+                    .map(|v| v as u8)
+                    .unwrap_or(current.compact_at_percent),
             };
             match ops.registry.set_settings(settings) {
                 Ok(()) => ok_json(json!({ "ok": true })),

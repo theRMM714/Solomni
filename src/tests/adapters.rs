@@ -226,6 +226,7 @@ fn yaml_settings_store_defaults_saves_and_reports_malformed_files() {
             provider: "p".to_string(),
             note: String::new(),
             tools: crate::core::providers::ToolMode::Envelope,
+            context: 32_000,
         },
     );
     want.core = Some("m".to_string());

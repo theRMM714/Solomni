@@ -1217,6 +1217,7 @@ impl Core {
                 provider: provider.to_string(),
                 note: note.to_string(),
                 tools,
+                context: 32_000,
             },
         );
         self.save_settings("core::model_upsert")
@@ -1736,6 +1737,22 @@ impl Core {
         }
     }
 
+    /// 自动压缩的**字符预算** = 该模型的上下文窗口 × 设置百分比 × 4（≈ 字符/token 的粗估）。
+    /// 百分比为 0 = 关。见 docs/architecture/session-model.md 六。
+    fn compact_budget(&self, model: Option<&str>) -> usize {
+        let pct = self.settings.app.compact_at_percent as u64;
+        if pct == 0 {
+            return 0;
+        }
+        let id = model
+            .map(|s| s.to_string())
+            .or_else(|| self.settings.core.clone());
+        let ctx = id
+            .and_then(|i| self.settings.models.get(&i).map(|m| m.context))
+            .unwrap_or(32_000);
+        (ctx * pct / 100 * 4) as usize
+    }
+
     /// 角色表发放的系统工具 id 清单（工具面的名字部分）。
     /// 为什么不留第二份名单：代码里出现"哪个角色能调哪个工具"必然与表漂。
     fn role_tools(&self, role: &str) -> Vec<String> {
@@ -1787,7 +1804,7 @@ impl Core {
             work: sb.shared.clone(),
             private: Some(sb.private.clone()),
         };
-        let s = session::AgentSession::new(
+        let mut s = session::AgentSession::new(
             &a.name,
             system,
             chat,
@@ -1797,6 +1814,8 @@ impl Core {
             roots,
             self.prompts.core.tool_texts.clone(),
         );
+        // 自动压缩的预算按**这个 agent 的模型**窗口算（见 session-model.md 六）。
+        s.set_compact_budget(self.compact_budget(a.model.as_deref()));
         let opened = s.open();
         (s, opened)
     }

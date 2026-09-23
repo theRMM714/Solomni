@@ -500,3 +500,52 @@ fn compacting_replaces_the_send_view_with_one_rolling_summary() {
         "原始内容该已移出发送视图：{last:?}"
     );
 }
+
+/// 到点自动压一次：历史超过预算时，**这一轮开始前**先压（发送视图里出现摘要）。
+#[test]
+fn auto_compaction_kicks_in_when_the_history_exceeds_the_budget() {
+    let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let long = "长".repeat(2000);
+    let mut member = std::collections::BTreeMap::new();
+    member.insert(
+        "a".to_string(),
+        vec![
+            long.clone(),
+            "{\"type\":\"tool\",\"name\":\"compact\",\"args\":{\"summary\":\"自动摘要\"}}"
+                .to_string(),
+            "继续做".to_string(),
+        ],
+    );
+    let gateway = super::RecordingGateway {
+        inner: super::doubles::ScriptGateway::new(member, vec![]),
+        seen: Arc::clone(&seen),
+    };
+    let handle = crate::core::api::CoreHandle::spawn(super::doubles::core_with_gateway(
+        vec![module_of("a")],
+        gateway,
+    ))
+    .expect("起核心线程");
+    let ops = crate::core::api::Ops::from_handle(&handle);
+    // 阈值调到 1%：预算 = 32000 × 1% × 4 ≈ 1280 字符，上面那条长回复会超。
+    let mut st = ops.registry.settings().expect("读设置");
+    st.compact_at_percent = 1;
+    ops.registry.set_settings(st).expect("写设置");
+    let sid = ops
+        .sessions
+        .create_work(single_work("w", &["a"]))
+        .expect("建会话")
+        .sid;
+    ops.sessions
+        .say(&sid, "先做第一件事", crate::core::api::Output::Final)
+        .expect("第一轮");
+    ops.sessions
+        .say(&sid, "接着做", crate::core::api::Output::Final)
+        .expect("第二轮（开头该自动压一次）");
+
+    let all = seen.lock().expect("锁").clone();
+    assert!(
+        all.iter()
+            .any(|msgs| msgs.iter().any(|c| c.contains("自动摘要"))),
+        "超过预算时该自动压一次（发送视图里出现摘要）：{all:?}"
+    );
+}

@@ -1688,6 +1688,14 @@ function activeSession() { return state.sessions.get(state.activeSid); }
 function absorb(s, ev) {
   switch (ev.type) {
     case 'notice': s.lines.push({ cls: 'sys', who: '', text: ev.text }); break;
+    // 压缩：显示**分界 + 摘要**（旧内容仍在上方可查——它只是不再发给模型）。
+    case 'compacted':
+      s.lines.push({
+        cls: 'sys compacted',
+        who: '',
+        text: '[压缩] 此前内容已压成摘要（不再发给模型，仍可查看）：\n' + ev.summary,
+      });
+      break;
     case 'transcript':
       // 服务端权威转录：每行带会话内稳定 id（回档按 id 定位）。
       // 权威行到达：撤掉乐观回显与流式块，改用服务端的行；带 tool 的行渲染成工具卡片。

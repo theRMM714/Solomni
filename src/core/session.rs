@@ -50,6 +50,9 @@ pub struct AgentSession {
     cur_reply: u64,
     /// 正在落行的**回合 id**（讨论的回合标记用它；单 agent 回合为 0）。
     cur_turn: u64,
+    /// 自动压缩的**字符预算**（≈ 模型窗口 × 设置百分比 × 4）；0 = 关。
+    /// 到点就在这一轮开始前先压一次（见 docs/architecture/session-model.md 六）。
+    compact_at: usize,
 }
 
 impl AgentSession {
@@ -79,6 +82,7 @@ impl AgentSession {
     ) -> AgentSession {
         AgentSession {
             cur_turn: 0,
+            compact_at: 0,
             id: id.to_string(),
             history: vec![Msg::system(system)],
             chat,
@@ -112,6 +116,7 @@ impl AgentSession {
     ) -> AgentSession {
         AgentSession {
             cur_turn: 0,
+            compact_at: 0,
             id: id.to_string(),
             next_line: marks.len() as u64,
             history,
@@ -209,6 +214,40 @@ impl AgentSession {
         Ok(summary)
     }
 
+    /// 设自动压缩的字符预算（装配时按模型窗口 × 设置百分比算出来；0 = 关）。
+    pub fn set_compact_budget(&mut self, chars: usize) {
+        self.compact_at = chars;
+    }
+
+    /// 到点自动压一次：估算历史字符数（≈ tokens × 4），超预算就跑一个压缩回合。
+    /// 压不动就**如实通知并继续用完整上下文**（不静默降级、不假装压过）。
+    fn maybe_compact(&mut self, sink: &mut dyn FnMut(SessionEvent)) {
+        if self.compact_at == 0 {
+            return;
+        }
+        let chars: usize = self.history.iter().map(|m| m.content.chars().count()).sum();
+        if chars <= self.compact_at {
+            return;
+        }
+        let decl = self
+            .tools
+            .as_ref()
+            .and_then(|t| t.sandbox.builtin_tools.get("compact"))
+            .map(|s| s.decl("compact"));
+        let prompt = self.tool_texts.compact_prompt.clone();
+        let up_to = self.next_line;
+        match self.compact_turn(&prompt, decl.as_ref()) {
+            Ok(summary) => {
+                self.compact(up_to, &summary);
+                sink(SessionEvent::Compacted { up_to, summary });
+            }
+            Err(err) => sink(SessionEvent::Notice(format!(
+                "[警告] 自动压缩没成功：{}（继续用完整上下文）",
+                err
+            ))),
+        }
+    }
+
     /// 当前下一条转录行的 id（压缩点用它：把此前的行全部移出发送视图）。
     pub fn next_line_id(&self) -> u64 {
         self.next_line
@@ -294,6 +333,8 @@ impl AgentSession {
     /// 发言：先把 @ 引用改写成寻址 → 压入用户消息 → 逐轮（文本行 / 工具行）落转录。
     /// 改写在这一处完成，所以转录行与进上下文的消息是同一份文本（转录即内容）。
     pub fn say(&mut self, text: &str, live: &mut Live, sink: &mut dyn FnMut(SessionEvent)) {
+        // 到点先压一次：**同一个工作线程内**跑，不阻塞核心。
+        self.maybe_compact(sink);
         let text = crate::core::refs::rewrite(text, Some(&self.id), &self.roots, &self.refs);
         self.history.push(Msg::user(text.clone()));
         // 用户行不属于任何模型回复：给它**自己的行号**当回复号（与重建时的规则一致），
