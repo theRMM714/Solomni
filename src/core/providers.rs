@@ -98,6 +98,23 @@ pub struct AppSettings {
     /// 默认 70：留三成余量给"这一轮还要生成的内容"，免得刚压完又爆。
     #[serde(default = "default_compact_percent")]
     pub compact_at_percent: u8,
+    /// **讨论阶段子会话在一轮内能跑的模型调用上限**。
+    /// 为什么要它：讨论时子会话可以自己核实很久，但必须有天花板——否则它会无限留在自己的会话里，
+    /// 忘了要用讨论动词回话（见 docs/architecture/session-model.md 二）。
+    #[serde(default = "default_discuss_call_cap")]
+    pub discuss_call_cap: u32,
+    /// **一轮内对同一个成员最多提醒几次**（提醒 = 系统注入"你还没用讨论动词表态"）。
+    /// 到顶就放它过去：主会话如实记一行"未回应"，整轮继续（不阻塞）。
+    #[serde(default = "default_discuss_remind_cap")]
+    pub discuss_remind_cap: u32,
+}
+
+fn default_discuss_call_cap() -> u32 {
+    30
+}
+
+fn default_discuss_remind_cap() -> u32 {
+    3
 }
 
 fn default_compact_percent() -> u8 {
@@ -123,6 +140,8 @@ impl Default for AppSettings {
             qemu_path: String::new(),
             llm_timeout_secs: crate::core::ports::DEFAULT_LLM_TIMEOUT_SECS,
             compact_at_percent: 70,
+            discuss_call_cap: 30,
+            discuss_remind_cap: 3,
         }
     }
 }

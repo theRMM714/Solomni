@@ -214,6 +214,18 @@ impl AgentSession {
         Ok(summary)
     }
 
+    /// 注入一条**系统消息**：既落进它自己的转录（前端据此显示系统行），也进它的上下文
+    /// （提醒是给模型的指令，所以按用户角色进去，但**用户看到的是系统行**）。
+    /// 见 docs/architecture/session-model.md 二"系统消息"。
+    pub fn note_system(&mut self, text: &str) -> Vec<SessionEvent> {
+        self.history.push(Msg::user(text.to_string()));
+        let v = self.line(text.to_string(), None, None);
+        vec![SessionEvent::Transcript(vec![LineView {
+            system: true,
+            ..v
+        }])]
+    }
+
     /// 设自动压缩的字符预算（装配时按模型窗口 × 设置百分比算出来；0 = 关）。
     pub fn set_compact_budget(&mut self, chars: usize) {
         self.compact_at = chars;
@@ -295,6 +307,7 @@ impl AgentSession {
             reasoning,
             tool,
             degraded: false,
+            system: false,
             turn: self.cur_turn,
         };
         self.next_line += 1;
@@ -517,6 +530,7 @@ fn build_round_lines(
             reasoning,
             tool,
             degraded: false,
+            system: false,
             turn: round.reply, // 单 agent 的每一轮各成"回合"（回档按它对齐）
         }
     };

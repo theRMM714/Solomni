@@ -186,7 +186,9 @@ fn render(events: &[SessionEvent]) {
             SessionEvent::Transcript(lines) => {
                 println!("---- 转录 ----");
                 for l in lines {
-                    println!("{}", l.line);
+                    // 系统消息（提醒/"未回应"这类**不是谁说的**内容）标出来，别和用户/发言混在一起。
+                    let mark = if l.system { "[系统] " } else { "" };
+                    println!("{}{}", mark, l.line);
                 }
             }
             SessionEvent::DiscussionDone { .. } => {}

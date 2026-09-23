@@ -1613,13 +1613,14 @@ pub(crate) fn discussion_turn_carries_the_agent_sessions_own_history() {
         crate::core::ports::CompleteOpts::plain(false),
         "a",
         &[crate::core::ports::Msg::user("只看第二份资料")],
+        8,
         &mut chat,
         None,
         vec![crate::core::ports::Msg::user("讨论上下文")],
         &mut |_| {},
     )
     .expect("跑一个回合");
-    assert!(matches!(turn.verb, crate::core::envelope::Verb::Say));
+    assert!(matches!(turn.verb, Some(crate::core::envelope::Verb::Say)));
     let got = seen.lock().expect("锁").clone();
     assert!(
         got.iter()

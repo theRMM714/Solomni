@@ -1701,6 +1701,11 @@ function absorb(s, ev) {
       // 权威行到达：撤掉乐观回显与流式块，改用服务端的行；带 tool 的行渲染成工具卡片。
       s.lines = s.lines.filter((x) => !x.pending);
       for (const l of ev.lines) {
+        // 系统消息（提醒、未回应这类不是谁说的内容）：独立样式，别和用户/发言混在一起。
+        if (l.system) {
+          s.lines.push({ cls: 'sys system', id: l.id, who: '', text: l.line });
+          continue;
+        }
         if (l.tool) {
           s.lines.push({ cls: 'tool', id: l.id, tool: l.tool, reasoning: l.reasoning || null, who: '', text: '', speaker: l.tool.speaker || '' });
           continue;

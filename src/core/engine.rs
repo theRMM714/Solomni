@@ -20,6 +20,20 @@ use std::sync::Arc;
 pub const MAX_ROUNDS: usize = 6;
 /// 单次问询内的工具调用上限（超限强制收尾——上限必生效）。
 pub const MAX_TOOL_CALLS: usize = 8;
+/// 一轮内对同一个成员最多提醒几次（**内存驱动**用；生产按设置走）。
+#[cfg(test)]
+pub const MAX_DISCUSS_REMIND: u32 = 3;
+
+/// 一次成员回合之后的处置（核心据此决定，见 docs/architecture/session-model.md 二）。
+#[derive(Debug, PartialEq)]
+pub enum AfterTurn {
+    /// 已表态：正常往下走。
+    Done,
+    /// 没表态但还有提醒额度：**注入提醒后重问同一个人**（核心只提醒、不强制）。
+    Remind,
+    /// 没表态且提醒到顶：主会话记一行"未回应"，本轮放过它（**不阻塞整轮**）。
+    Unanswered,
+}
 
 /// 一个模块的外部工具环境：模块目录（外部工具进程的 cwd）+ 它声明的工具表。
 /// cwd 必须落在声明它的模块里（命令形如 python tools/x.py，是相对模块根写的）。
@@ -485,6 +499,8 @@ pub struct DiscLine {
     /// 这一行属于哪个回合（讨论的一次发言回合；0 = 不属任何回合）。
     /// 两边的转录行靠它对齐（回档同步，见 docs/architecture/session-model.md 五）。
     pub turn: u64,
+    /// 这一行是**系统消息**（系统注入的提醒/边界；不是用户说的，也不是模型说的）。
+    pub system: bool,
     /// 这一行是"讨论回合里的一次核实"（只读工具调用）时带上调用视图；普通发言没有。
     /// 呈现层据此把核实行与发言行分开样式（与单 agent 的工具行同一形态）。
     pub tool: Option<ToolCallView>,
@@ -507,6 +523,10 @@ pub struct Discussion {
     /// 开场提示词里那份"能用哪些信封"就是它，不再在提示词里另写一遍。
     protocol: String,
 
+    /// 这一轮对每个成员**提醒过几次**（到顶就记"未回应"放过它）；每轮开始归零。
+    reminded: std::collections::BTreeMap<String, u32>,
+    /// 上面那份计数属于第几轮（轮次变了就清空）。
+    remind_round: usize,
     /// 「停止」标志：由 CollabSession 注入（它从任务登记处拿到）。
     /// 泵在**每次调用前**与**调用中途**都看它——所以停止能在一个模型调用内收尾，而不是等它跑完。
     cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
@@ -541,7 +561,9 @@ enum Cursor {
 
 /// 一个成员回合的结果：两套通道**统一形态**（上层不必再关心是哪条通道）。
 pub struct MemberTurn {
-    pub verb: Verb,
+    /// 这一回合的表态；**None = 没表态**（散文 / 空回执 / 越权 / 到顶）。
+    /// 没表态**不投影主会话**：原文只落进它自己的会话；提醒由核心在边界注入。
+    pub verb: Option<Verb>,
     pub text: String,
     pub degraded: bool,
     /// 这一轮的输出被供应商按长度截断了（如实标注，不假装完整）。
@@ -574,6 +596,7 @@ impl Discussion {
                 opts,
                 &speaker,
                 &[],
+                MAX_TOOL_CALLS,
                 chat.as_mut(),
                 tools.as_mut(),
                 msgs,
@@ -598,6 +621,8 @@ impl Discussion {
         speaker: &str,
         // 该 agent **会话自己的历史**：用户进它会话说的话，下一回合它带着（不分家的核心承诺）。
         history: &[Msg],
+        // 一轮内允许的模型调用上限（用户可设；到顶就交回"没表态"，由核心决定提醒还是放过）。
+        cap: usize,
         chat: &mut dyn Chat,
         mut tools: Option<&mut MemberTools>,
         mut msgs: Vec<Msg>,
@@ -655,24 +680,37 @@ impl Discussion {
                     .collect()
             };
             // ① 表态优先：**任何一个调用是动词**，这一轮就是发言（收尾）。
-            let said = calls
-                .iter()
-                .find_map(|(_, name, args)| verb_of(name).map(|v| (v, arg_text(args))));
-            if let Some((verb, text)) = said {
+            // 两条通道各认各的：native 从结构化槽位认动词；**信封通道从正文里的信封认**
+            //（动词信封落在 parsed.verb 里，不在 parsed.tools 里——这里漏了，信封就永远认不出动词）。
+            let from_text = |r: &envelope::Reply| match r.verb {
+                Verb::Tool => None,
+                v => Some((v, r.text.clone(), r.degraded)),
+            };
+            let said: Option<(Verb, String, bool)> = if native {
+                calls
+                    .iter()
+                    .find_map(|(_, name, args)| verb_of(name).map(|v| (v, arg_text(args), false)))
+                    .or_else(|| from_text(&parsed))
+            } else {
+                from_text(&parsed)
+            };
+            if let Some((verb, text, degraded)) = said {
                 return Ok(MemberTurn {
-                    verb,
+                    verb: Some(verb),
                     text,
-                    degraded: false,
+                    degraded,
                     truncated: done.truncated(),
                     lines,
                 });
             }
             if calls.is_empty() {
                 // 既没表态也没申请调用：按发言原文收录（降级是**结构化信号**，由上层如实落转录）。
+                // 既没表态也没申请调用（散文 / 空回执）：这一轮到此为止，交回"没表态"。
                 return Ok(MemberTurn {
-                    verb: parsed.verb,
+                    verb: None,
                     text: parsed.text,
-                    degraded: parsed.degraded,
+                    // 工具信封却解析不出调用 = 写坏了：如实标降级，与"散文"区分开。
+                    degraded: parsed.degraded || parsed.verb == Verb::Tool,
                     truncated: done.truncated(),
                     lines,
                 });
@@ -681,7 +719,7 @@ impl Discussion {
             // 没有工具环境（替身/降级）：跑不了核实，如实按原文收录。
             let Some(texts) = tools.as_ref().map(|t| t.sandbox.texts.clone()) else {
                 return Ok(MemberTurn {
-                    verb: Verb::Say,
+                    verb: None,
                     text: done.raw.clone(),
                     degraded: true,
                     truncated: done.truncated(),
@@ -691,13 +729,13 @@ impl Discussion {
             let mut round_views: Vec<ToolCallView> = Vec::new();
             for (call_id, name, args) in &calls {
                 // **按角色表校验**：这个席位没有的工具一律如实拒绝（代码里不写"谁能用哪个"）。
-                if !systools.allows(role, name) || used >= MAX_TOOL_CALLS {
+                if !systools.allows(role, name) || used >= cap {
                     sink(SessionEvent::Notice(format!(
                         "[越权] 本席位没有工具 {}：本轮不执行、不当表态（如实拒绝）",
                         name
                     )));
                     return Ok(MemberTurn {
-                        verb: Verb::Say,
+                        verb: None,
                         text: done.raw.clone(),
                         degraded: true,
                         truncated: done.truncated(),
@@ -733,6 +771,7 @@ impl Discussion {
                 lines.push(DiscLine {
                     // 回合 id 由驱动补（它才知道整场工作的计数）；这里先占位。
                     turn: 0,
+                    system: false,
                     text: format!(
                         "[{}:{}] {} {}",
                         speaker,
@@ -778,6 +817,8 @@ impl Discussion {
             llm,
             cancel,
             protocol,
+            reminded: std::collections::BTreeMap::new(),
+            remind_round: 0,
             opener: String::new(),
             cursor: Cursor::Fresh,
             handed: 0,
@@ -844,8 +885,19 @@ impl Discussion {
             match self.advance() {
                 Adv::Ask { i, msgs } => {
                     let turn = self.member_turn(i, msgs, sink)?;
-                    // 开场不因请教而中止（feed 已按阶段处理）。
-                    let _ = self.feed(i, turn, 0, on_lines, sink);
+                    // 开场也要有"没表态"的处置，否则这个循环会卡在同一个人身上空转。
+                    match self.after_turn(i, turn.verb.is_some(), false, MAX_DISCUSS_REMIND) {
+                        // 开场不因请教而中止（feed 已按阶段处理）。
+                        AfterTurn::Done => {
+                            let _ = self.feed(i, turn, 0, on_lines, sink);
+                        }
+                        // 内存驱动没有会话可注入提醒：直接重问同一个人（计数照走）。
+                        AfterTurn::Remind => continue,
+                        AfterTurn::Unanswered => {
+                            self.note_system(&format!("[{}] 本轮未回应", self.members[i].id));
+                            self.skip(i);
+                        }
+                    }
                 }
                 // 开场问完（或已是终态）：交回上层，轮次由 step 继续。
                 Adv::Opened | Adv::Out(_) => return Ok(()),
@@ -861,6 +913,8 @@ impl Discussion {
         on_lines: &mut LineSink<'_>,
         sink: &mut dyn FnMut(SessionEvent),
     ) -> TurnOut {
+        // 这个循环**必须有前进条件**：没表态时由 after_turn 计数（提醒 → 放过），
+        // 否则假模型瞬间返回会把这里变成紧凑死循环（真烧过 CPU）。
         // 状态机驱动：本函数只负责"问 → 收 → 再问"，判定全在 advance/feed 里。
         // 驱动权将来归核心（见 docs/architecture/session-model.md 二之二）：那时把这一圈换成
         // 核心的 take/put 序列即可，判定一行不用改。
@@ -872,8 +926,20 @@ impl Discussion {
                         Err(_) if self.cancelled() => return TurnOut::Stopped,
                         Err(err) => return TurnOut::Interrupted(err),
                     };
-                    if let Some(out) = self.feed(i, turn, 0, on_lines, sink) {
-                        return out;
+                    let has_verb = turn.verb.is_some();
+                    // 与生产路径**同一条策略**：没表态就重问（上限），到顶记"未回应"放过它。
+                    match self.after_turn(i, has_verb, false, MAX_DISCUSS_REMIND) {
+                        AfterTurn::Done => {
+                            if let Some(out) = self.feed(i, turn, 0, on_lines, sink) {
+                                return out;
+                            }
+                        }
+                        // 内存驱动没有会话可注入提醒：直接重问同一个人（计数照走）。
+                        AfterTurn::Remind => continue,
+                        AfterTurn::Unanswered => {
+                            self.note_system(&format!("[{}] 本轮未回应", self.members[i].id));
+                            self.skip(i);
+                        }
                     }
                 }
                 // 开场刚问完（只有 open 会碰到）：接着进轮次。
@@ -915,6 +981,7 @@ impl Discussion {
                 degraded: false,
                 tool: None,
                 turn: 0,
+                system: false,
             });
             // 用户回答优先转达。
             if let Some(ans) = self.pending_user_answers.first().cloned() {
@@ -924,6 +991,7 @@ impl Discussion {
                     degraded: false,
                     tool: None,
                     turn: 0,
+                    system: false,
                 });
             }
             self.cursor = Cursor::At(0);
@@ -982,8 +1050,19 @@ impl Discussion {
     ) -> Option<TurnOut> {
         // 开场与轮次共用这一条收尾路径；区别只在"请教要不要中止"（开场不中止）。
         let opener = matches!(self.cursor, Cursor::Opener(_));
-        let (verb, text, degraded) = (turn.verb, turn.text.clone(), turn.degraded);
         let id = self.members[i].id.clone();
+        // **没表态**：不投影主会话（原文只在它自己的会话里）、不改它的状态。
+        // 但**照样往后挪一格**——这是安全默认：任何驱动都不会因为"没表态"而卡在同一人身上
+        //（要重问的驱动**根本不调 feed**，见 after_turn 的 Remind 分支）。
+        let Some(verb) = turn.verb else {
+            self.cursor = if opener {
+                Cursor::Opener(i + 1)
+            } else {
+                Cursor::At(i + 1)
+            };
+            return None;
+        };
+        let (text, degraded) = (turn.text.clone(), turn.degraded);
         self.absorb(&id, verb, text.clone(), degraded, turn.truncated, turn_id);
         // 逐成员外送：**这个人说完就出它那一行**，不等整轮问完。
         on_lines(&self.transcript[self.handed..], sink);
@@ -1010,6 +1089,8 @@ impl Discussion {
                         degraded: false,
                         tool: None,
                         turn: 0,
+                        // 这是**系统**给的自主说明，不是用户说的。
+                        system: true,
                     });
                     return None;
                 }
@@ -1060,6 +1141,58 @@ impl Discussion {
             degraded,
             tool: None,
             turn,
+            system: false,
+        });
+    }
+
+    /// 成员一轮之后的处置：**核心只提醒、不强制**（见 docs/architecture/session-model.md 二）。
+    /// 用户主动中止时计数不再工作（不注入提醒）；每轮开始时提醒次数归零。
+    pub fn after_turn(
+        &mut self,
+        i: usize,
+        has_verb: bool,
+        user_stopped: bool,
+        remind_cap: u32,
+    ) -> AfterTurn {
+        if self.round != self.remind_round {
+            self.reminded.clear();
+            self.remind_round = self.round;
+        }
+        let id = self.members[i].id.clone();
+        if has_verb {
+            self.reminded.remove(&id);
+            return AfterTurn::Done;
+        }
+        if user_stopped {
+            return AfterTurn::Done;
+        }
+        let n = self.reminded.entry(id.clone()).or_insert(0);
+        if *n < remind_cap {
+            *n += 1;
+            return AfterTurn::Remind;
+        }
+        self.reminded.remove(&id);
+        AfterTurn::Unanswered
+    }
+
+    /// 放过一个没表态的成员：不吸收、只把游标往后挪一格（提醒到顶时用）。
+    pub fn skip(&mut self, i: usize) {
+        self.cursor = if matches!(self.cursor, Cursor::Opener(_)) {
+            Cursor::Opener(i + 1)
+        } else {
+            Cursor::At(i + 1)
+        };
+    }
+
+    /// 记一行**系统消息**（提醒/边界这类不是谁说的内容）到主会话转录。
+    /// 见 docs/architecture/session-model.md 二"系统消息"。
+    pub fn note_system(&mut self, text: &str) {
+        self.transcript.push(DiscLine {
+            text: text.to_string(),
+            degraded: false,
+            tool: None,
+            turn: 0,
+            system: true,
         });
     }
 

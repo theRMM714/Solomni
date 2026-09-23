@@ -171,6 +171,8 @@ pub struct ToolTexts {
     pub tool_not_allowed: String,
     /// 压缩回合的提示词（无变量）：让 AI 自己压，并调 compact 工具写下摘要。
     pub compact_prompt: String,
+    /// 轮次边界给"上一轮没表态"的成员的提醒（无变量）。
+    pub discuss_reminder: String,
     /// 变量：path, bytes, text
     pub read_header: String,
     /// read 遇到目录时的如实引导。变量：path

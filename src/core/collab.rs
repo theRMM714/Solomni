@@ -39,6 +39,46 @@ impl CollabSession {
     }
 }
 
+impl CollabSession {
+    /// 成员一轮之后的处置：**策略在 Discussion**（两条驱动共用同一份判定，
+    /// 见 docs/architecture/session-model.md 二）。用户主动中止时计数不再工作。
+    pub fn after_member_turn(
+        &mut self,
+        i: usize,
+        has_verb: bool,
+        user_stopped: bool,
+        remind_cap: u32,
+    ) -> crate::core::engine::AfterTurn {
+        self.disc.as_mut().expect("disc 已确认存在").after_turn(
+            i,
+            has_verb,
+            user_stopped,
+            remind_cap,
+        )
+    }
+
+    /// 提醒到顶：主会话如实记一行"未回应"（**系统消息**——不是它说的），本轮放过它。
+    pub fn pass_over(&mut self, i: usize, sink: &mut dyn FnMut(SessionEvent)) {
+        let Some(id) = self.member_id(i) else {
+            return;
+        };
+        let note = format!("[{}] 本轮未回应", id);
+        if let Some(d) = self.disc.as_mut() {
+            d.note_system(&note);
+            // 放过它：游标往后挪一格（本轮不再问它）。
+            d.skip(i);
+        }
+        if let Some(d) = self.disc.as_ref() {
+            push_delta(d, &mut self.emitted, &mut self.next_line, sink);
+        }
+    }
+
+    /// 注入到该成员会话里的提醒文案（核心在轮次边界注入；用户主动中止时不注入）。
+    pub fn reminder_text(&self) -> String {
+        self.prompts.core.tool_texts.discuss_reminder.clone()
+    }
+}
+
 /// 用户显式授权的只读根（`settings.yaml` 的 `fence_read`）：空 = 一个都不放行。
 /// 与 `Core::fence_read_roots` 同义——两处都在 core 内，读的是同一份设置事实。
 fn read_only_roots(app: &crate::core::providers::AppSettings) -> Vec<std::path::PathBuf> {
@@ -183,7 +223,8 @@ impl CollabSession {
     }
 
     /// 是否已被要求停止。
-    fn cancelled(&self) -> bool {
+    /// 用户是否已**主动中止**（中止时计数不再工作：不注入提醒）。
+    pub fn cancelled(&self) -> bool {
         self.cancel.load(std::sync::atomic::Ordering::Relaxed)
     }
 
@@ -1017,6 +1058,7 @@ impl CollabSession {
                                 }),
                                 // 回合 id 随行落档：回档时两边按它对上（见 session-model.md 五）。
                                 turn: l.get("turn").and_then(|t| t.as_u64()).unwrap_or(0),
+                                system: l.get("system").and_then(|s| s.as_bool()).unwrap_or(false),
                             });
                         }
                     }
@@ -1171,6 +1213,8 @@ fn emit_new_lines(
                 tool: l.tool.clone(),
                 // 回合 id 落进线格式：回档时两边按它对上（见 session-model.md 五）。
                 turn: l.turn,
+                // 系统消息标记落进线格式：前端据此显示系统行，不靠匹配文本。
+                system: l.system,
                 ..Default::default()
             }
         })

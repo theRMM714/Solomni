@@ -140,6 +140,10 @@ pub struct LineView {
     /// **结构化信号**：呈现层据此做样式，不靠匹配行文本里的说明文案。
     #[serde(default, skip_serializing_if = "is_false")]
     pub degraded: bool,
+    /// 这一行是**系统消息**（系统注入的提醒/边界这类"不是用户说的、也不是模型说的"内容）。
+    /// **结构化信号**：呈现层据此换样式，不靠匹配文本——否则系统消息在前端与记录里长得像用户发的。
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub system: bool,
     /// 这一行属于哪个**回合**（讨论的一次发言回合；0 = 不属任何回合，如需求/用户行）。
     /// 两边的转录行靠它对齐：回档主会话时，各 agent 会话按同一个回合 id 同步截断
     /// （见 docs/architecture/session-model.md 五）。

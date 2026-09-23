@@ -36,6 +36,7 @@ pub use ports::{
 };
 
 use crate::core::collab::CollabSession;
+use crate::core::engine::AfterTurn;
 use crate::core::history::{AgentMeta, HistoryView, SessionMeta};
 use crate::core::module::Module;
 use crate::core::ports::Msg;
@@ -491,6 +492,16 @@ impl Core {
         (prompt, decl, up_to)
     }
 
+    /// 往某个会话注入一条**系统消息**（讨论的提醒走这条；见 session-model.md 二"系统消息"）。
+    /// 返回要外送/落盘的事件。
+    pub fn note_system(&mut self, sid: &str, text: &str) -> Result<Vec<SessionEvent>, String> {
+        let mut s = self.take_single(sid)?;
+        let events = s.note_system(text);
+        self.put_single(sid, s);
+        self.persister(sid).persist(&events);
+        Ok(events)
+    }
+
     /// 给某个会话接下来的行打上**整场工作的下一个回合 id**（节点执行也用同一套编号）。
     /// 一个 agent 一个会话：它的回合计数来自父会话——回档同步靠两边同一套编号。
     fn bump_turn_of_child(&mut self, child: &str) -> u64 {
@@ -547,6 +558,8 @@ impl Core {
     /// 契约见 docs/architecture/session-model.md 二之二。事件由调用方统一落档。
     pub fn collab_advance(&mut self, sid: &str) -> Result<Vec<SessionEvent>, String> {
         let mut out = Vec::new();
+        // 安全网计数（见循环尾）：提醒/重问必须有终点，不能让驱动空转。
+        let mut guard = 0usize;
         loop {
             // ① 泵推一步：协作会话**裸搬**（不碰任务链派发那套副作用）。
             let (ask, systools, cancel, opts, member, turn_id) = {
@@ -583,6 +596,7 @@ impl Core {
                     opts,
                     &agent,
                     &hist,
+                    self.discuss_call_cap(),
                     chat,
                     tools,
                     msgs,
@@ -604,12 +618,14 @@ impl Core {
             };
             // ③b 该回合的产出落进**它自己的会话**：回合标记 + 核实行 + 它自己的发言。
             // 主会话只留"谁说了什么"（发言由 feed 投影过去），核实的痕迹留在各自会话里。
+            // 没表态也要落它自己的会话（那是它的回合记录）；标签如实写"未表态"。
             let tag = match turn.verb {
-                crate::core::envelope::Verb::Say => "say",
-                crate::core::envelope::Verb::Ask => "ask",
-                crate::core::envelope::Verb::Leave => "leave",
-                crate::core::envelope::Verb::Agree => "agree",
-                crate::core::envelope::Verb::Tool => "tool",
+                Some(crate::core::envelope::Verb::Say) => "say",
+                Some(crate::core::envelope::Verb::Ask) => "ask",
+                Some(crate::core::envelope::Verb::Leave) => "leave",
+                Some(crate::core::envelope::Verb::Agree) => "agree",
+                Some(crate::core::envelope::Verb::Tool) => "tool",
+                None => "未表态",
             };
             let round = match self.sessions.get(sid) {
                 Some(Session::Collab(c)) => c.round(),
@@ -624,10 +640,53 @@ impl Core {
             // 落盘到**它自己的目录**（讨论的核实痕迹随会话一起重启后还在）。
             self.persister(&child).persist(&note);
             out.extend(note);
-            // ④ 交回泵（它接着推下一步）。
-            let mut c = self.take_collab_raw(sid)?;
-            c.feed_with(i, turn, turn_id, &mut |e| out.push(e));
-            self.sessions.insert(sid.to_string(), Session::Collab(c));
+            // ④ **核心只提醒、不强制**（见 session-model.md 二）：没表态时按计数决定提醒还是放过。
+            let user_stopped = cancel.load(std::sync::atomic::Ordering::Relaxed);
+            let (after, reminder) = {
+                let mut c = self.take_collab_raw(sid)?;
+                let a = c.after_member_turn(
+                    i,
+                    turn.verb.is_some(),
+                    user_stopped,
+                    self.settings.app.discuss_remind_cap,
+                );
+                let text = c.reminder_text();
+                self.sessions.insert(sid.to_string(), Session::Collab(c));
+                (a, text)
+            };
+            match after {
+                AfterTurn::Done => {
+                    let mut c = self.take_collab_raw(sid)?;
+                    c.feed_with(i, turn, turn_id, &mut |e| out.push(e));
+                    self.sessions.insert(sid.to_string(), Session::Collab(c));
+                }
+                AfterTurn::Remind => {
+                    // 提醒注入**它自己的会话**（系统消息：用户看到的是系统行），然后**不 feed**——
+                    // 泵会重问同一个人（提醒后调用计数自然重来）。
+                    let evs = {
+                        let mut s = self.take_single(&child)?;
+                        let e = s.note_system(&reminder);
+                        self.put_single(&child, s);
+                        e
+                    };
+                    self.persister(&child).persist(&evs);
+                    out.extend(evs);
+                }
+                AfterTurn::Unanswered => {
+                    // 提醒到顶：主会话记一行"未回应"（系统消息），本轮放过它，整轮继续。
+                    let mut c = self.take_collab_raw(sid)?;
+                    c.pass_over(i, &mut |e| out.push(e));
+                    self.sessions.insert(sid.to_string(), Session::Collab(c));
+                }
+            }
+            // 安全网：提醒/重问必须有终点（计数有上限，这里再兜一层，防实现走偏时空转）。
+            guard += 1;
+            if guard > 500 {
+                out.push(SessionEvent::Notice(
+                    "[警告] 讨论推进次数异常（已到安全上限），已停下等用户处理".to_string(),
+                ));
+                break;
+            }
         }
         Ok(out)
     }
@@ -1735,6 +1794,16 @@ impl Core {
             // 执行席的系统工具面**由角色表发放**（越权校验的唯一判据）。
             allowed: self.role_tools("executor"),
         }
+    }
+
+    /// 讨论阶段一轮内允许的模型调用上限（用户可设，见 session-model.md 二）。
+    pub fn discuss_call_cap(&self) -> usize {
+        self.settings.app.discuss_call_cap as usize
+    }
+
+    /// 一轮内对同一个成员最多提醒几次（用户可设，见 session-model.md 二）。
+    pub fn discuss_remind_cap(&self) -> u32 {
+        self.settings.app.discuss_remind_cap
     }
 
     /// 自动压缩的**字符预算** = 该模型的上下文窗口 × 设置百分比 × 4（≈ 字符/token 的粗估）。

@@ -290,6 +290,8 @@ struct AskReq {
     round: usize,
     /// 回合 id（整场工作单调递增；两边对得上就靠它）。
     turn_id: u64,
+    /// 这一轮允许的模型调用上限（用户可设；到顶就交回"没表态"）。
+    cap: usize,
 }
 
 impl CoreHandle {
@@ -491,6 +493,8 @@ impl CoreHandle {
         let opts = req.opts;
         let msgs = req.msgs.clone();
         let agent = req.agent.clone();
+        // 上限按值带进工作线程（引用带不进去：闭包要 'static）。
+        let cap = req.cap;
         let _ = &msgs;
         let joined = std::thread::Builder::new()
             .name("solomni-member".to_string())
@@ -506,6 +510,7 @@ impl CoreHandle {
                         opts,
                         &agent,
                         &hist,
+                        cap,
                         chat,
                         tools,
                         msgs,
@@ -543,12 +548,14 @@ impl CoreHandle {
             }
         };
         // 该回合的产出落进**它自己的会话**：回合标记 + 核实行 + 它自己的发言。
+        // 没表态也要落它自己的会话（那是它的回合记录）；标签如实写"未表态"。
         let tag = match turn.verb {
-            crate::core::envelope::Verb::Say => "say",
-            crate::core::envelope::Verb::Ask => "ask",
-            crate::core::envelope::Verb::Leave => "leave",
-            crate::core::envelope::Verb::Agree => "agree",
-            crate::core::envelope::Verb::Tool => "tool",
+            Some(crate::core::envelope::Verb::Say) => "say",
+            Some(crate::core::envelope::Verb::Ask) => "ask",
+            Some(crate::core::envelope::Verb::Leave) => "leave",
+            Some(crate::core::envelope::Verb::Agree) => "agree",
+            Some(crate::core::envelope::Verb::Tool) => "tool",
+            None => "未表态",
         };
         let note = s.note_turn(req.round, req.turn_id, tag, &turn.text, &turn.lines);
         self.call({
@@ -704,6 +711,10 @@ impl CoreHandle {
             move |core| Ok(core.persister(&sid))
         })?;
         let text = text.to_string();
+        // 讨论的调用上限与提醒上限都由设置来（用户可调，见 session-model.md 二）：起线程前问一次核心。
+        let discuss_cap = self.call(|core| Ok(core.discuss_call_cap())).unwrap_or(30);
+        let remind_cap = self.call(|core| Ok(core.discuss_remind_cap())).unwrap_or(3);
+        let handle = self.clone();
         // 握手通道：泵 → 主线程（要一个成员回合）；主线程 → 泵（回合结果）。
         let (ask_tx, ask_rx) = std::sync::mpsc::channel::<AskReq>();
         let (turn_tx, turn_rx) =
@@ -717,6 +728,8 @@ impl CoreHandle {
                     let mut c = session;
                     let mut events: Vec<SessionEvent> = Vec::new();
                     let mut seq = 0u64;
+                    // 安全网计数（见循环尾）：提醒/重问必须有终点，不能让泵空转。
+                    let mut guard = 0usize;
                     {
                         // 边产边送 + 边落盘：长流程里用户能看着讨论一轮轮推进，
                         // 中途刷新页面也能看到已产生的部分（不再等整段结束才一次性出现）。
@@ -754,10 +767,13 @@ impl CoreHandle {
                             };
                             let Some((i, msgs)) = ask else { break };
                             let Some(agent) = c.member_id(i) else { break };
+                            // 提醒时要往它自己的会话里写（那边用的是同一个名字）。
+                            let agent_name = agent.clone();
                             let req = AskReq {
                                 agent,
                                 msgs,
                                 systools: c.systools().clone(),
+                                cap: discuss_cap,
                                 cancel: c.disc_cancel(),
                                 opts: c.disc_opts(),
                                 round: c.round(),
@@ -770,7 +786,49 @@ impl CoreHandle {
                             // 等主线程跑完这一回合（它取会话、跑模型、落盘，再把结果送回来）。
                             let Ok(res) = turn_rx.recv() else { break };
                             match res {
-                                Ok(turn) => c.feed_with(i, turn, turn_id, &mut sink),
+                                Ok(turn) => {
+                                    // **核心只提醒、不强制**（见 session-model.md 二）：
+                                    // 没表态时按计数决定"注入提醒后重问"还是"记未回应后放过"。
+                                    let after = c.after_member_turn(
+                                        i,
+                                        turn.verb.is_some(),
+                                        c.cancelled(),
+                                        remind_cap,
+                                    );
+                                    match after {
+                                        crate::core::engine::AfterTurn::Done => {
+                                            c.feed_with(i, turn, turn_id, &mut sink)
+                                        }
+                                        crate::core::engine::AfterTurn::Remind => {
+                                            // 提醒进**它自己的会话**（系统消息）；不 feed——泵重问同一个人。
+                                            let text = c.reminder_text();
+                                            let child =
+                                                format!("{}--{}", sid, agent_name);
+                                            let target = child.clone();
+                                            if let Ok(evs) = handle.call(move |core| {
+                                                core.note_system(&child, &text)
+                                            }) {
+                                                // 提醒属于**它自己的会话**：按子会话的 sid 外送，
+                                                // 不能混进主会话的事件流（否则主会话会冒出系统行）。
+                                                for e in evs {
+                                                    bus.push(&target, std::slice::from_ref(&e));
+                                                }
+                                            }
+                                        }
+                                        crate::core::engine::AfterTurn::Unanswered => {
+                                            c.pass_over(i, &mut sink)
+                                        }
+                                    }
+                                    // 安全网：提醒/重问必须有终点（计数有上限，这里再兜一层）。
+                                    guard += 1;
+                                    if guard > 500 {
+                                        sink(SessionEvent::Notice(
+                                            "[警告] 讨论推进次数异常（已到安全上限），已停下等用户处理"
+                                                .to_string(),
+                                        ));
+                                        break;
+                                    }
+                                }
                                 Err(err) => {
                                     // 如实交回（由泵统一外送中断通知），不再往下推。
                                     c.note_turn_failure(err);
