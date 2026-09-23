@@ -1761,10 +1761,10 @@ pub(crate) fn discussion_member_cannot_use_module_tools() {
     );
 }
 
+/// **没写信封的原文不算表态**：不投影主会话；提醒到顶才留一行**系统消息**"未回应"。
+/// 判据是结构化的（system / degraded 字段），呈现层不靠匹配文案。
 #[test]
-pub(crate) fn degraded_discussion_line_carries_a_structured_flag() {
-    let prompts = test_prompts();
-    // 成员给出"不是信封"的原文 → 该行按降级收录：文本里有说明，**结构上另带 degraded**。
+pub(crate) fn prose_without_an_envelope_is_not_a_statement() {
     let members = vec![Member::new(
         "m0",
         "职责".to_string(),
@@ -1773,35 +1773,43 @@ pub(crate) fn degraded_discussion_line_carries_a_structured_flag() {
     let mut disc = Discussion::new(
         members,
         true,
-        prompts.clone(),
+        test_prompts(),
         Default::default(),
         Default::default(),
         String::new(),
     );
     let _ = disc.open("任务", &mut |_, _| {}, &mut |_| {});
-    let line = disc
+    assert!(
+        !disc
+            .transcript
+            .iter()
+            .any(|l| l.text.starts_with("[m0:say]")),
+        "散文不是表态，不该投影主会话：{:?}",
+        disc.transcript
+            .iter()
+            .map(|l| l.text.clone())
+            .collect::<Vec<_>>()
+    );
+    let note = disc
         .transcript
         .iter()
-        .find(|l| l.text.starts_with("[m0:say]"))
-        .expect("应有 m0 的发言行");
+        .find(|l| l.text.contains("未回应"))
+        .expect("提醒到顶该记一行未回应");
     assert!(
-        line.degraded,
-        "降级必须带结构化标记（呈现层靠它，不靠匹配文案）"
-    );
-    assert!(
-        line.text
-            .contains(&prompts.core.tool_texts.discuss_degraded),
-        "文本里仍保留给人/模型看的说明"
+        note.system,
+        "未回应是**系统消息**：结构化标记，呈现层不靠匹配文案"
     );
 
-    // 线格式：只在为真时写出 degraded
+    // 线格式：只在为真时写出这两个字段
     let yes = SessionEvent::Transcript(vec![crate::core::events::LineView {
         id: 0,
         line: "x".into(),
+        system: true,
         degraded: true,
         ..Default::default()
     }])
     .to_json();
+    assert_eq!(yes["lines"][0]["system"], serde_json::Value::Bool(true));
     assert_eq!(yes["lines"][0]["degraded"], serde_json::Value::Bool(true));
     let no = SessionEvent::Transcript(vec![crate::core::events::LineView {
         id: 0,
@@ -1810,8 +1818,8 @@ pub(crate) fn degraded_discussion_line_carries_a_structured_flag() {
     }])
     .to_json();
     assert!(
-        no["lines"][0].get("degraded").is_none(),
-        "非降级行不写这个字段"
+        no["lines"][0].get("system").is_none() && no["lines"][0].get("degraded").is_none(),
+        "非系统/非降级行不写这些字段"
     );
 }
 

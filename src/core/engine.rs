@@ -684,7 +684,11 @@ impl Discussion {
             //（动词信封落在 parsed.verb 里，不在 parsed.tools 里——这里漏了，信封就永远认不出动词）。
             let from_text = |r: &envelope::Reply| match r.verb {
                 Verb::Tool => None,
-                v => Some((v, r.text.clone(), r.degraded)),
+                // **降级 = 没写信封**（散文按原文收录）：那不算表态。
+                // 否则散文会被当成 say 混进主会话，与契约"没表态就不投影、由核心在边界提醒"直接冲突——
+                // 真机上就是这样一轮轮空转的（每个成员每轮都"说了"一句空话，谁也不同意）。
+                v if !r.degraded => Some((v, r.text.clone(), false)),
+                _ => None,
             };
             let said: Option<(Verb, String, bool)> = if native {
                 calls
