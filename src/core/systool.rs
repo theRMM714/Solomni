@@ -965,6 +965,11 @@ pub fn arg_fault_text(
     )
 }
 
+/// 越权调用：这个席位没有这个工具（角色表决定工具面）——**如实拒绝**，不执行。
+pub fn refuse(texts: &ToolTexts, name: &str) -> ToolOutcome {
+    fail(texts.render(&texts.tool_not_allowed, &[("name", name.to_string())]))
+}
+
 fn fail(msg: String) -> ToolOutcome {
     ToolOutcome {
         ok: false,

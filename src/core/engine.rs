@@ -95,6 +95,9 @@ pub struct MemberTools {
     /// **回复 id 计数器**：一次模型回复一个号，跨重启单调（重建时按转录里的最大值续号）。
     /// 转录行靠它分组（哪几行属于同一次回复），会话靠它按回复原子回档。
     pub reply_seq: u64,
+    /// 这个席位**可以调的系统工具 id**（由角色表发放：讨论席 = discussant、执行席 = executor）。
+    /// 存在的理由：把"谁能用哪些工具"变成**校验**，而不是提示词里的一句话。
+    pub allowed: Vec<String>,
 }
 
 impl MemberTools {
@@ -171,16 +174,24 @@ fn run_branch(
 ) -> (String, ToolOutcome, crate::core::systool::Observations) {
     let mut branch = ctx.observations.clone();
     let (label, outcome) = if crate::core::systool::is_builtin(name) {
-        (
-            String::new(),
-            crate::core::systool::execute(
-                &ctx.sandbox,
-                ctx.io.as_ref(),
-                &mut branch,
-                name,
-                args_json,
-            ),
-        )
+        // **按角色表校验**：这个席位没有的工具，如实拒绝（不静默执行）。
+        if !ctx.allowed.iter().any(|t| t == name) {
+            (
+                String::new(),
+                crate::core::systool::refuse(&ctx.sandbox.texts, name),
+            )
+        } else {
+            (
+                String::new(),
+                crate::core::systool::execute(
+                    &ctx.sandbox,
+                    ctx.io.as_ref(),
+                    &mut branch,
+                    name,
+                    args_json,
+                ),
+            )
+        }
     } else {
         let inv = ToolInvoke {
             malformed: None,
@@ -492,10 +503,7 @@ pub struct Discussion {
     /// 本席位的**可用表态清单**（由角色表渲染而来，见 SystemTools::render_face）：
     /// 开场提示词里那份"能用哪些信封"就是它，不再在提示词里另写一遍。
     protocol: String,
-    /// 讨论回合的**工具面** = 动词 + **只读**文件工具（read/list/search）。
-    /// 存在的理由：讨论要能**核实**（资料齐不齐、脚本在不在、README 怎么说），
-    /// 但**不能干活**——模块工具（产物那套）不在这一面里，讨论回合也就拿不到它。
-    face: Vec<crate::core::ports::ToolDecl>,
+
     /// 「停止」标志：由 CollabSession 注入（它从任务登记处拿到）。
     /// 泵在**每次调用前**与**调用中途**都看它——所以停止能在一个模型调用内收尾，而不是等它跑完。
     cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
@@ -557,7 +565,8 @@ impl Discussion {
             let Member { chat, tools, .. } = m;
             let chat = chat.as_mut().expect("测试通道");
             Self::turn_with(
-                &self.face,
+                &self.prompts.systools,
+                "discussant",
                 &self.cancel,
                 opts,
                 &speaker,
@@ -579,7 +588,8 @@ impl Discussion {
     /// 其余工具一律**如实拒绝**（讨论回合拿不到干活的手段，见 face 字段）。
     #[allow(clippy::too_many_arguments)]
     pub fn turn_with(
-        face: &[crate::core::ports::ToolDecl],
+        systools: &crate::core::roles::SystemTools,
+        role: &str,
         cancel: &std::sync::Arc<std::sync::atomic::AtomicBool>,
         opts: crate::core::ports::CompleteOpts<'static>,
         speaker: &str,
@@ -596,6 +606,11 @@ impl Discussion {
             all.extend(msgs);
             msgs = all;
         }
+        // 工具面**由角色表发放**（动词 + 只读核实工具）：表是唯一真相，代码里不另写一份名单。
+        let face: Vec<crate::core::ports::ToolDecl> = systools
+            .tool_face(role)
+            .map(|f| f.into_iter().map(|(id, s)| s.decl(id)).collect())
+            .unwrap_or_default();
         let native = matches!(
             tools.as_ref().map(|t| t.mode),
             Some(crate::core::providers::ToolMode::Native)
@@ -609,7 +624,7 @@ impl Discussion {
             // 每轮都要一份（Copy）：只换 tools 槽位，其余照旧。
             let mut opts = opts;
             if native {
-                opts.tools = Some(face);
+                opts.tools = Some(&face);
             }
             let stop = std::sync::Arc::clone(cancel);
             let mut keep = move |_c: crate::core::ports::Chunk| {
@@ -670,13 +685,8 @@ impl Discussion {
                     lines,
                 });
             };
-            let readonly = matches!(
-                name.as_str(),
-                crate::core::systool::READ
-                    | crate::core::systool::LIST
-                    | crate::core::systool::SEARCH
-            );
-            if !readonly || used >= MAX_TOOL_CALLS {
+            // **按角色表校验**：这个席位没有的工具一律如实拒绝（代码里不写"谁能用哪个"）。
+            if !systools.allows(role, &name) || used >= MAX_TOOL_CALLS {
                 sink(SessionEvent::Notice(format!(
                     "[越权] 本席位没有工具 {}：本轮不执行、不当表态（如实拒绝）",
                     name
@@ -739,19 +749,7 @@ impl Discussion {
         llm: crate::core::ports::LlmOpts,
         cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
         protocol: String,
-        verbs: Vec<crate::core::ports::ToolDecl>,
     ) -> Discussion {
-        // 只读核实工具：从内置工具总表取声明（与单 agent 同源，不另写一份）。
-        let mut face = verbs.clone();
-        for name in [
-            crate::core::systool::READ,
-            crate::core::systool::LIST,
-            crate::core::systool::SEARCH,
-        ] {
-            if let Some(schema) = prompts.core.builtin_tools.get(name) {
-                face.push(schema.decl(name));
-            }
-        }
         Discussion {
             members,
             transcript: Vec::new(),
@@ -763,7 +761,6 @@ impl Discussion {
             llm,
             cancel,
             protocol,
-            face,
             opener: String::new(),
             cursor: Cursor::Fresh,
             handed: 0,
@@ -792,11 +789,6 @@ impl Discussion {
     /// 第 i 个成员的 agent 名（核心据此拼出它的会话名）。
     pub fn member_id(&self, i: usize) -> Option<&str> {
         self.members.get(i).map(|m| m.id.as_str())
-    }
-
-    /// 讨论回合的工具面（动词 + 只读核实）——核心驱动时交给 turn_with。
-    pub fn face(&self) -> &[crate::core::ports::ToolDecl] {
-        &self.face
     }
 
     /// 「停止」标志（与核心共享同一个）。

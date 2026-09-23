@@ -1101,7 +1101,6 @@ fn opts_discussion(
             llm,
             Default::default(),
             String::new(),
-            vec![],
         ),
         seen,
     )
@@ -1202,7 +1201,6 @@ pub(crate) fn scripted_discussion(scripts: Vec<Vec<String>>, allow: bool) -> Dis
         Default::default(),
         Default::default(),
         String::new(),
-        vec![],
     )
 }
 
@@ -1524,7 +1522,8 @@ pub(crate) fn discussion_turn_carries_the_agent_sessions_own_history() {
     };
     let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let turn = crate::core::engine::Discussion::turn_with(
-        &[],
+        &test_prompts().systools,
+        "discussant",
         &cancel,
         crate::core::ports::CompleteOpts::plain(false),
         "a",
@@ -1599,6 +1598,45 @@ pub(crate) fn discussion_member_can_inspect_before_speaking() {
     );
 }
 
+/// 讨论回合**按角色表校验**：面里没有的内置工具（write）被如实拒绝，不当表态吸收。
+#[test]
+pub(crate) fn discussion_member_cannot_call_a_builtin_outside_its_role_face() {
+    let mut member = BTreeMap::new();
+    member.insert(
+        "a".to_string(),
+        vec![
+            "{\"type\":\"tool\",\"name\":\"write\",\"args\":{\"path\":\"x\",\"content\":\"y\"}}"
+                .to_string(),
+            "{\"type\":\"say\",\"text\":\"我不该写文件\"}".to_string(),
+            "{\"type\":\"agree\",\"text\":\"同意\"}".to_string(),
+        ],
+    );
+    let mut core = core_with(
+        vec![module_of("a")],
+        gw(
+            member,
+            vec![
+                "{\"plan\":\"方案\",\"nodes\":[{\"id\":\"n1\",\"title\":\"做\",\"objective\":\"做\",\"assignee\":\"a\",\"deps\":[]}]}".to_string(),
+                "[{\"node\":\"n1\",\"ok\":true,\"note\":\"够用\"}]".to_string(),
+                "[{\"item\":\"做\",\"status\":\"pass\"}]".to_string(),
+            ],
+        ),
+    );
+    let sid = core
+        .create_work(collab_work("w", &["a"], false, "做个东西"))
+        .unwrap()
+        .sid;
+    let events = core
+        .collab_continue(&sid, CollabStep::Begin, "yes")
+        .unwrap();
+    assert!(
+        events.iter().any(|e| matches!(e, SessionEvent::Notice(n)
+            if n.contains("[越权]") && n.contains("write"))),
+        "角色表没发给讨论席的工具该被如实拒绝：{:?}",
+        events
+    );
+}
+
 /// 讨论回合**拿不到干活的手段**：模块工具被如实拒绝，且不当表态吸收。
 #[test]
 pub(crate) fn discussion_member_cannot_use_module_tools() {
@@ -1653,7 +1691,6 @@ pub(crate) fn degraded_discussion_line_carries_a_structured_flag() {
         Default::default(),
         Default::default(),
         String::new(),
-        vec![],
     );
     let _ = disc.open("任务", &mut |_, _| {}, &mut |_| {});
     let line = disc
@@ -2437,6 +2474,8 @@ pub(crate) fn member_with_tools(
         unavailable: BTreeMap::new(),
         fence: crate::core::fence::FenceSpec::from_sandbox(&test_sandbox("m0", &[]), false),
         reply_seq: 0,
+        // 测试替身按"执行席"发放全部内置工具（角色表的越权校验另有专门用例）。
+        allowed: crate::core::systool::names(),
     });
     m
 }
@@ -4871,6 +4910,8 @@ pub(crate) fn native_member(
         unavailable: BTreeMap::new(),
         fence: crate::core::fence::FenceSpec::from_sandbox(&sb, false),
         reply_seq: 0,
+        // 测试替身按"执行席"发放全部内置工具（角色表的越权校验另有专门用例）。
+        allowed: crate::core::systool::names(),
     });
     m
 }

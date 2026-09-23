@@ -167,6 +167,8 @@ pub struct ToolTexts {
     pub arg_unknown: String,
     /// 变量：name
     pub unknown_builtin: String,
+    /// 变量：name
+    pub tool_not_allowed: String,
     /// 变量：path, bytes, text
     pub read_header: String,
     /// read 遇到目录时的如实引导。变量：path

@@ -35,6 +35,7 @@ tool_texts:
   arg_too_big: "参数 {{name}} 不能大于 {{max}}"
   arg_unknown: "没有参数 {{name}}"
   unknown_builtin: "未知的内置工具：{{name}}"
+  tool_not_allowed: "这个席位没有工具 {{name}}：角色表没发给它（越权调用一律不执行）。"
   read_header: "[read] {{path}} （{{bytes}} 字节）\n{{text}}"
   write_header: "[write] 已写入 {{path}}（{{chars}} 字符，UTF-8）"
   write_module_note: "{{mark}} 这是模块 {{id}} 的目录（你的能力，不是本工作私有区），改动会保留。"

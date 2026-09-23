@@ -75,9 +75,6 @@ impl SystemTools {
     }
 
     /// 这个角色能不能调这个工具（越权校验的唯一判据）。
-    /// 目前只有自洽测试在用它——运行期的越权拒绝要等角色真正发放给发言席（下一步接线）；
-    /// 那之前不让它进二进制，免得成为"看着有人用、其实没人用"的代码。
-    #[cfg(test)]
     pub fn allows(&self, role: &str, tool: &str) -> bool {
         self.roles
             .get(role)

@@ -510,18 +510,19 @@ impl Core {
         let mut out = Vec::new();
         loop {
             // ① 泵推一步：协作会话**裸搬**（不碰任务链派发那套副作用）。
-            let (ask, face, cancel, opts, member, turn_id) = {
+            let (ask, systools, cancel, opts, member, turn_id) = {
                 let mut c = self.take_collab_raw(sid)?;
                 c.start_if_needed();
                 c.pump_with(&mut |e| out.push(e));
                 let ask = c.take_ask();
                 let member = ask.as_ref().and_then(|(i, _)| c.member_id(*i));
-                let face = c.disc_face();
+                // 角色表按值带出来（小表）：驱动要它来发放工具面与校验越权。
+                let systools = c.systools().clone();
                 let cancel = c.disc_cancel();
                 let opts = c.disc_opts();
                 let turn_id = if ask.is_some() { c.next_turn_id() } else { 0 };
                 self.sessions.insert(sid.to_string(), Session::Collab(c));
-                (ask, face, cancel, opts, member, turn_id)
+                (ask, systools, cancel, opts, member, turn_id)
             };
             let (Some((i, msgs)), Some(agent), turn_id) = (ask, member, turn_id) else {
                 break;
@@ -537,7 +538,8 @@ impl Core {
                 let hist = s.msgs().to_vec();
                 let (chat, tools) = s.parts_mut();
                 crate::core::engine::Discussion::turn_with(
-                    &face,
+                    &systools,
+                    "discussant",
                     &cancel,
                     opts,
                     &agent,
@@ -1690,7 +1692,19 @@ impl Core {
                 .with_read_only(self.fence_read_roots()),
             // 从零开始；按落盘转录重建时由调用方按转录里的最大值续号（见 rebuild_session）。
             reply_seq: 0,
+            // 执行席的系统工具面**由角色表发放**（越权校验的唯一判据）。
+            allowed: self.role_tools("executor"),
         }
+    }
+
+    /// 角色表发放的系统工具 id 清单（工具面的名字部分）。
+    /// 为什么不留第二份名单：代码里出现"哪个角色能调哪个工具"必然与表漂。
+    fn role_tools(&self, role: &str) -> Vec<String> {
+        self.prompts
+            .systools
+            .tool_face(role)
+            .map(|f| f.into_iter().map(|(id, _)| id.to_string()).collect())
+            .unwrap_or_default()
     }
 
     /// 装配单 agent 会话（不插入会话中心；插入与落盘由 create_work 统一做）。

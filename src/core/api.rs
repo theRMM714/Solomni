@@ -280,7 +280,8 @@ pub struct CoreHandle {
 struct AskReq {
     agent: String,
     msgs: Vec<crate::core::ports::Msg>,
-    face: Vec<crate::core::ports::ToolDecl>,
+    /// 角色表（按值带一份小表）：发放工具面与校验越权都用它。
+    systools: crate::core::roles::SystemTools,
     cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
     opts: crate::core::ports::CompleteOpts<'static>,
     /// 这一回合属于第几轮（写进 agent 会话的回合标记）。
@@ -483,7 +484,7 @@ impl CoreHandle {
             let name = child.clone();
             move |core| core.take_single(&name)
         })?;
-        let face = req.face.clone();
+        let systools = req.systools.clone();
         let cancel = std::sync::Arc::clone(&req.cancel);
         let opts = req.opts;
         let msgs = req.msgs.clone();
@@ -497,7 +498,8 @@ impl CoreHandle {
                     let hist = s.msgs().to_vec();
                     let (chat, tools) = s.parts_mut();
                     crate::core::engine::Discussion::turn_with(
-                        &face,
+                        &systools,
+                        "discussant",
                         &cancel,
                         opts,
                         &agent,
@@ -669,7 +671,7 @@ impl CoreHandle {
                             let req = AskReq {
                                 agent,
                                 msgs,
-                                face: c.disc_face(),
+                                systools: c.systools().clone(),
                                 cancel: c.disc_cancel(),
                                 opts: c.disc_opts(),
                                 round: c.round(),

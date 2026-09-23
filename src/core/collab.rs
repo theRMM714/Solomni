@@ -187,21 +187,6 @@ impl CollabSession {
         self.cancel.load(std::sync::atomic::Ordering::Relaxed)
     }
 
-    /// 讨论动词的**声明**（原生通道用）：只取协作动词，按角色表发放。
-    /// 与 render_face 同源（都出自角色表），所以两套通道不会说两套话。
-    fn verbs_of(&self, role: &str) -> Vec<crate::core::ports::ToolDecl> {
-        self.prompts
-            .systools
-            .tool_face(role)
-            .map(|face| {
-                face.into_iter()
-                    .filter(|(id, _)| matches!(*id, "say" | "agree" | "leave" | "ask"))
-                    .map(|(id, schema)| schema.decl(id))
-                    .collect()
-            })
-            .unwrap_or_default()
-    }
-
     /// 执行 / 验收阶段该不该收尾：**停止（用户的意图）与失败（故障）分开说**。
     /// 两者都如实收尾并保持会话可继续，但用户看到的话不一样——混成一句会让用户以为出了故障。
     fn exec_note(&self, exec: &Execution) -> Option<String> {
@@ -554,7 +539,6 @@ impl CollabSession {
                 return;
             }
         };
-        let verbs = self.verbs_of("discussant");
         let mut disc = Discussion::new(
             members,
             self.allow,
@@ -562,7 +546,6 @@ impl CollabSession {
             llm,
             std::sync::Arc::clone(&self.cancel),
             protocol,
-            verbs,
         );
         // 开场**不在这里跑**：核心驱动（见 session-model.md 二之二）——这里只渲染提示词、置游标，
         // 下一步由核心取该 agent 的会话跑第一个回合（逐成员外送在 feed_with 里）。
@@ -614,11 +597,8 @@ impl CollabSession {
     }
 
     /// 讨论回合的**工具面**（动词 + 只读核实）：核心驱动时交给 turn_with。
-    pub fn disc_face(&self) -> Vec<crate::core::ports::ToolDecl> {
-        self.disc
-            .as_ref()
-            .map(|d| d.face().to_vec())
-            .unwrap_or_default()
+    pub fn systools(&self) -> &crate::core::roles::SystemTools {
+        &self.prompts.systools
     }
 
     /// 「停止」标志：与核心共享同一个（停止能在一个模型调用内收尾）。
@@ -946,6 +926,13 @@ impl CollabSession {
                 // 本档位下不能执行工具的模块（缺运行包）：机制侧据此拒绝执行。
                 unavailable: exec::unavailable(&self.spec, &modules, &library),
                 fence,
+                // 讨论席的系统工具面**由角色表发放**（越权校验的唯一判据）。
+                allowed: self
+                    .prompts
+                    .systools
+                    .tool_face("discussant")
+                    .map(|f| f.into_iter().map(|(id, _)| id.to_string()).collect())
+                    .unwrap_or_default(),
             });
             members.push(member);
         }
@@ -1086,7 +1073,7 @@ impl CollabSession {
                 Ok(face) => format!("{}\n{}", s.prompts.core.chat_protocol, face),
                 Err(_) => s.prompts.core.chat_protocol.clone(),
             };
-            let verbs = s.verbs_of("discussant");
+
             let mut disc = Discussion::new(
                 members,
                 st.allow,
@@ -1094,7 +1081,6 @@ impl CollabSession {
                 llm,
                 std::sync::Arc::clone(&s.cancel),
                 protocol,
-                verbs,
             );
             disc.round = st.round.max(1);
             disc.closed = st.closed;
