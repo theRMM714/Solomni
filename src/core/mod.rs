@@ -1891,10 +1891,12 @@ impl Core {
 
     // ---- 会话历史 ----
 
-    /// 历史列表（读盘失败如实记日志，返回空表）。
+    /// 历史列表：**树序**（每个父会话紧跟它的子会话）——侧栏据此缩进，
+    /// 顺序与缩进同源，不会再出现"子会话排到父会话上面"的错位（见 session-model.md 一）。
+    /// 读盘失败如实记日志，返回空表。
     pub fn history_list(&self) -> Vec<HistoryView> {
         match self.history.list() {
-            Ok(v) => v,
+            Ok(v) => tree_order(v),
             Err(e) => {
                 self.log
                     .error("core::history_list", &format!("会话列表失败：{}", e));
@@ -2649,6 +2651,39 @@ fn truncate_events(events: &[serde_json::Value]) -> Vec<serde_json::Value> {
         }
     }
     content
+}
+
+/// 会话列表按**树序**排：顶层保持后端给的时间倒序，每个会话后面**紧跟**它的子会话
+/// （子会话内部同样按时间倒序），深度优先。
+/// 为什么必须在后端做：顺序与缩进是同一件事的两面——前端各排各的，就会出现子会话排在父会话上面。
+pub(crate) fn tree_order(list: Vec<HistoryView>) -> Vec<HistoryView> {
+    let mut kids: std::collections::BTreeMap<String, Vec<HistoryView>> =
+        std::collections::BTreeMap::new();
+    let mut roots: Vec<HistoryView> = Vec::new();
+    for h in list {
+        match h.parent.clone() {
+            Some(p) => kids.entry(p).or_default().push(h),
+            None => roots.push(h),
+        }
+    }
+    let mut out: Vec<HistoryView> = Vec::new();
+    for r in roots {
+        let mut stack = vec![r];
+        while let Some(cur) = stack.pop() {
+            let mut mine = kids.remove(&cur.name).unwrap_or_default();
+            mine.sort_by_key(|h| std::cmp::Reverse(h.ts));
+            // 逆序压栈 → 弹出时按时间倒序（与顶层同一口径）。
+            for k in mine.into_iter().rev() {
+                stack.push(k);
+            }
+            out.push(cur);
+        }
+    }
+    // 父会话已不在（被删）的子会话：如实列在最后，不能凭空消失。
+    for (_, v) in kids {
+        out.extend(v);
+    }
+    out
 }
 
 /// 只保留「转录行 id < keep」的行（回档 = 删除该行及其后；keep = 0 → 转录清空）。

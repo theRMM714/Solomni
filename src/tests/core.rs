@@ -7300,3 +7300,29 @@ pub(crate) fn rewind_never_splits_a_reply() {
         history
     );
 }
+
+/// 侧栏顺序 = **树序**：父会话紧跟它的子会话（顺序与缩进同源，不会再错位）。
+#[test]
+pub(crate) fn history_list_is_ordered_as_a_tree() {
+    let hv = |name: &str, parent: Option<&str>, ts: i64| crate::core::history::HistoryView {
+        name: name.to_string(),
+        mode: "collab".to_string(),
+        ts,
+        done: false,
+        exec: Default::default(),
+        parent: parent.map(|s| s.to_string()),
+    };
+    // 顶层 A(10) 比 B(5) 新；A 下两个子会话（甲=9 比 乙=8 新）。
+    let got = crate::core::tree_order(vec![
+        hv("A", None, 10),
+        hv("B", None, 5),
+        hv("A--甲", Some("A"), 9),
+        hv("A--乙", Some("A"), 8),
+    ]);
+    let names: Vec<&str> = got.iter().map(|h| h.name.as_str()).collect();
+    assert_eq!(
+        names,
+        vec!["A", "A--甲", "A--乙", "B"],
+        "父会话必须紧跟它的子会话"
+    );
+}
