@@ -641,45 +641,34 @@ impl Discussion {
                 return Err(err);
             }
             let parsed = envelope::parse(&done.raw);
-            let from_text = |r: &envelope::Reply| match r.verb {
-                Verb::Tool => None,
-                v => Some((v, r.text.clone())),
-            };
-            let said: Option<(Verb, String, bool)> = if native {
-                match done
-                    .calls
-                    .first()
-                    .and_then(|c| verb_of(&c.name).map(|v| (v, arg_text(&c.args_json))))
-                {
-                    Some((v, t)) => Some((v, t, false)),
-                    None => from_text(&parsed).map(|(v, t)| (v, t, parsed.degraded)),
-                }
+            // 这一轮的调用：native 从结构化槽位取，信封通道从正文里的信封取（一次可以多个）。
+            let calls: Vec<(String, String, String)> = if native && !done.calls.is_empty() {
+                done.calls
+                    .iter()
+                    .map(|c| (c.id.clone(), c.name.clone(), c.args_json.clone()))
+                    .collect()
             } else {
-                from_text(&parsed).map(|(v, t)| (v, t, parsed.degraded))
+                parsed
+                    .tools
+                    .iter()
+                    .map(|t| (String::new(), t.name.clone(), t.args_json.clone()))
+                    .collect()
             };
-            if let Some((verb, text, degraded)) = said {
+            // ① 表态优先：**任何一个调用是动词**，这一轮就是发言（收尾）。
+            let said = calls
+                .iter()
+                .find_map(|(_, name, args)| verb_of(name).map(|v| (v, arg_text(args))));
+            if let Some((verb, text)) = said {
                 return Ok(MemberTurn {
                     verb,
                     text,
-                    degraded,
+                    degraded: false,
                     truncated: done.truncated(),
                     lines,
                 });
             }
-            let from_tools = |r: &envelope::Reply| {
-                r.tools
-                    .first()
-                    .map(|t| (t.name.clone(), t.args_json.clone()))
-            };
-            let call: Option<(String, String)> = if native {
-                done.calls
-                    .first()
-                    .map(|c| (c.name.clone(), c.args_json.clone()))
-                    .or_else(|| from_tools(&parsed))
-            } else {
-                from_tools(&parsed)
-            };
-            let Some((name, args)) = call else {
+            if calls.is_empty() {
+                // 既没表态也没申请调用：按发言原文收录（降级是**结构化信号**，由上层如实落转录）。
                 return Ok(MemberTurn {
                     verb: parsed.verb,
                     text: parsed.text,
@@ -687,13 +676,10 @@ impl Discussion {
                     truncated: done.truncated(),
                     lines,
                 });
-            };
-            // **按角色表校验**：这个席位没有的工具一律如实拒绝（代码里不写"谁能用哪个"）。
-            if !systools.allows(role, &name) || used >= MAX_TOOL_CALLS {
-                sink(SessionEvent::Notice(format!(
-                    "[越权] 本席位没有工具 {}：本轮不执行、不当表态（如实拒绝）",
-                    name
-                )));
+            }
+            // ② 核实：**逐个**执行（只读工具），并把结果按协议形状回灌。
+            // 没有工具环境（替身/降级）：跑不了核实，如实按原文收录。
+            let Some(texts) = tools.as_ref().map(|t| t.sandbox.texts.clone()) else {
                 return Ok(MemberTurn {
                     verb: Verb::Say,
                     text: done.raw.clone(),
@@ -701,47 +687,73 @@ impl Discussion {
                     truncated: done.truncated(),
                     lines,
                 });
-            }
-            used += 1;
-            let (ok, output) = match tools.as_deref_mut() {
-                Some(t) => {
-                    let out = crate::core::systool::execute(
-                        &t.sandbox,
-                        t.io.as_ref(),
-                        &mut t.observations,
-                        &name,
-                        &args,
-                    );
-                    (out.ok, out.output)
-                }
-                None => (false, "这个席位没有工具环境".to_string()),
             };
-            let head = output.lines().next().unwrap_or("").to_string();
-            lines.push(DiscLine {
-                // 回合 id 由驱动补（它才知道整场工作的计数）；这里先占位。
-                turn: 0,
-                text: format!(
-                    "[{}:{}] {} {}",
-                    speaker,
-                    name,
-                    if ok { "成功" } else { "失败" },
-                    head
-                ),
-                degraded: false,
-                tool: Some(ToolCallView {
+            let mut round_views: Vec<ToolCallView> = Vec::new();
+            for (call_id, name, args) in &calls {
+                // **按角色表校验**：这个席位没有的工具一律如实拒绝（代码里不写"谁能用哪个"）。
+                if !systools.allows(role, name) || used >= MAX_TOOL_CALLS {
+                    sink(SessionEvent::Notice(format!(
+                        "[越权] 本席位没有工具 {}：本轮不执行、不当表态（如实拒绝）",
+                        name
+                    )));
+                    return Ok(MemberTurn {
+                        verb: Verb::Say,
+                        text: done.raw.clone(),
+                        degraded: true,
+                        truncated: done.truncated(),
+                        lines,
+                    });
+                }
+                used += 1;
+                let (ok, output) = match tools.as_deref_mut() {
+                    Some(t) => {
+                        let out = crate::core::systool::execute(
+                            &t.sandbox,
+                            t.io.as_ref(),
+                            &mut t.observations,
+                            name,
+                            args,
+                        );
+                        (out.ok, out.output)
+                    }
+                    None => (false, "这个席位没有工具环境".to_string()),
+                };
+                let head = output.lines().next().unwrap_or("").to_string();
+                let view = ToolCallView {
                     speaker: speaker.to_string(),
                     module: String::new(),
                     name: name.clone(),
                     ok,
                     args: args.clone(),
-                    output: output.clone(),
+                    output,
                     raw: done.raw.clone(),
-                    call_id: done.calls.first().map(|c| c.id.clone()).unwrap_or_default(),
+                    call_id: call_id.clone(),
                     reply: 0,
-                }),
-            });
-            msgs.push(Msg::assistant(done.raw.clone()));
-            msgs.push(Msg::user(format!("[工具 {}]\n{}", name, output)));
+                };
+                lines.push(DiscLine {
+                    // 回合 id 由驱动补（它才知道整场工作的计数）；这里先占位。
+                    turn: 0,
+                    text: format!(
+                        "[{}:{}] {} {}",
+                        speaker,
+                        name,
+                        if ok { "成功" } else { "失败" },
+                        head
+                    ),
+                    degraded: false,
+                    tool: Some(view.clone()),
+                });
+                round_views.push(view);
+            }
+            // **回灌必须走共享拼装**：native 要带 tool_calls + role=tool + call_id。
+            // 手写 assistant(raw)+user("[工具…]") 会把协议破坏掉——真机上模型于是**看不见结果、反复调同一个工具**，
+            // 撞上上限后以空发言收尾，讨论因此永不收敛（e2e 的假供应商不在乎形状，只有真机能照出来）。
+            msgs.extend(reply_msgs(
+                tools.as_ref().map(|t| t.mode).unwrap_or_default(),
+                &done.raw,
+                &round_views,
+                &texts,
+            ));
         }
     }
 }

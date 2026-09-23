@@ -247,6 +247,11 @@ fn stream_once(
         };
         // 原生工具调用的分片：按 index 归位，name/id 出现即记，arguments 追加
         if let Some(arr) = delta.get("tool_calls").and_then(|t| t.as_array()) {
+            // **工具调用也算"有内容"**：只有工具调用、没有正文的流是**正常回执**（模型决定调工具），
+            // 不能当成"流式响应没有正文内容"——那会把整段工具调用丢掉（真机上就是这么丢的）。
+            if !arr.is_empty() {
+                got_any = true;
+            }
             for item in arr {
                 let idx = item
                     .get("index")
