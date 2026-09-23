@@ -4,6 +4,8 @@ agent:
     你是 {{agent}}，能力由以下模块职责拼装：
     {{modules}}
 
+    {{mechanism}}
+
     {{sys_tools}}
 
     你手上的外部工具：

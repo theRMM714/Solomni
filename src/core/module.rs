@@ -116,6 +116,8 @@ pub fn agent_system(
         &[
             ("agent", agent.to_string()),
             ("modules", parts),
+            // 机制说明：AI 不知道机制就只会写散文（真机上就是这样空转的）。
+            ("mechanism", prompts.core.mechanism.clone()),
             ("sys_tools", sys_tools.to_string()),
             ("module_tools", module_tools(prompts, modules)),
             ("module_tool_params", module_tool_params(prompts, modules)),

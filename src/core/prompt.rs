@@ -80,6 +80,9 @@ pub fn merge_book(docs: &[String]) -> Result<Prompts, String> {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct CorePrompts {
+    /// 机制说明（这个系统怎么运转、一个 agent 一个会话、表态只能用动词）。
+    /// 讨论席与执行席**都**拿它——AI 不知道机制，就只会写散文。
+    pub mechanism: String,
     pub chat_protocol: String,
     pub discuss: DiscussPrompts,
     pub synthesize: SynthPrompts,

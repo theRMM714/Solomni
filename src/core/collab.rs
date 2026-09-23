@@ -570,8 +570,13 @@ impl CollabSession {
             timeout_secs: self.settings.app.llm_timeout_secs,
         };
         // 本席位的可用表态清单**由角色表渲染**（不是提示词里另写一遍）：漂不了。
+        // 讨论席的"协议"= **机制说明 + 讨论约定 + 角色表渲染的表态清单**（三样缺一不可）：
+        // 只说约定不说机制，AI 就不知道自己在什么流程里、该干什么（真机上就是空转）。
         let protocol = match self.prompts.systools.render_face("discussant") {
-            Ok(face) => format!("{}\n{}", self.prompts.core.chat_protocol, face),
+            Ok(face) => format!(
+                "{}\n{}\n{}",
+                self.prompts.core.mechanism, self.prompts.core.chat_protocol, face
+            ),
             Err(e) => {
                 sink(SessionEvent::Notice(format!(
                     "[装配失败] 角色表不可用：{}",
@@ -1117,8 +1122,14 @@ impl CollabSession {
             let (members, _) = s.assemble_members()?;
             let llm = s.llm_opts();
             let protocol = match s.prompts.systools.render_face("discussant") {
-                Ok(face) => format!("{}\n{}", s.prompts.core.chat_protocol, face),
-                Err(_) => s.prompts.core.chat_protocol.clone(),
+                Ok(face) => format!(
+                    "{}\n{}\n{}",
+                    s.prompts.core.mechanism, s.prompts.core.chat_protocol, face
+                ),
+                Err(_) => format!(
+                    "{}\n{}",
+                    s.prompts.core.mechanism, s.prompts.core.chat_protocol
+                ),
             };
 
             let mut disc = Discussion::new(
