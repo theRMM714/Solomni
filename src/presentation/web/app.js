@@ -2102,14 +2102,38 @@ function takeInput() {
   return v;
 }
 
-/* 动作回包与长轮询可能携带同一批事件：按发件箱序号去重，保证只派发一次。 */
-function applyActionEvents(s, r) {
-  const evs = r.events || [];
-  if (typeof r.seq === 'number') {
-    if (r.seq <= appliedSeq) return; // 长轮询已派发过这一批
-    appliedSeq = r.seq;
+/* 已应用到的批序号 + 乱序缓冲。
+   动作回包与长轮询是**两股流**，同一个 seq 可能倒着到：直接丢会造成**永久丢失**
+   （删除先到、更新后到，界面就再也不对，只能刷新）。所以缺口未到先攒着，补上再按序应用。 */
+let appliedSeq = 0;
+const pendingBatches = new Map();
+/* 状态（侧栏/历史）可能被**别的客户端**改了：置位后由轮询统一拉一次。 */
+let needState = false;
+let lastStateAt = Date.now();
+/** 收一批事件：按 seq 顺序应用。返回 'full' | 'live' | 'none'（渲染粒度）。 */
+function applyBatch(seq, sid, events) {
+  if (typeof seq === 'number' && seq > appliedSeq) pendingBatches.set(seq, { sid, events });
+  let mode = 'none';
+  while (pendingBatches.has(appliedSeq + 1)) {
+    const item = pendingBatches.get(appliedSeq + 1);
+    pendingBatches.delete(appliedSeq + 1);
+    appliedSeq += 1;
+    const s = state.sessions.get(item.sid);
+    // 未知会话 = 有别的客户端建了会话（演示脚本、另一个标签页）：拉一次状态。
+    if (!s) { needState = true; continue; }
+    const m = absorbEvents(s, item.events);
+    if (m === 'full') mode = 'full';
+    else if (m === 'live' && mode !== 'full') mode = 'live';
   }
-  for (const ev of evs) absorb(s, ev);
+  return mode;
+}
+/* 动作回包：走同一条按序应用的路（不再各判一套）。 */
+function applyActionEvents(s, r) {
+  if (typeof r.seq !== 'number') {
+    for (const ev of r.events || []) absorb(s, ev);
+    return;
+  }
+  applyBatch(r.seq, s.sid, r.events || []);
 }
 
 async function act(action, text) {
@@ -2430,8 +2454,6 @@ function onSend() {
 
 /* ---------- 长轮询：增量事件 + 连接状态 ---------- */
 let pollSince = 0;
-/* 已派发到的事件批序号：动作回包与长轮询共用，保证同一批只 absorb 一次。 */
-let appliedSeq = 0;
 let pollActive = false;
 async function pollLoop() {
   if (pollActive) return;
@@ -2446,15 +2468,19 @@ async function pollLoop() {
       let mode = 'none';
       for (const item of data.lines) {
         try {
-          if (item.seq <= appliedSeq) continue; // 动作回包已派发过这一批
-          appliedSeq = item.seq;
-          const s = state.sessions.get(item.sid);
-          if (!s) continue;
-          const m = absorbEvents(s, item.events);
+          const m = applyBatch(item.seq, item.sid, item.events);
           if (m === 'full') mode = 'full';
           else if (m === 'live' && mode !== 'full') mode = 'live';
           // 不在这里改 busy：流式增量到达时会把「停止」按钮误翻回「发送」。
         } catch { /* 单行损坏不拖垮轮询 */ }
+      }
+      // 状态对齐：别的客户端（演示脚本、另一个标签页）建/删/改会话时，侧栏自己跟上——
+      // 不需要用户刷新浏览器；未知会话会立刻置 needState，其余靠 3 秒兜底。
+      if (needState || Date.now() - lastStateAt > 3000) {
+        needState = false;
+        lastStateAt = Date.now();
+        await refreshState();
+        renderList();
       }
       // 纯流式增量：只 append 新节点（折叠、<pre> 滚动、外层滚动都不被打断）。
       if (mode === 'full') renderAll();
