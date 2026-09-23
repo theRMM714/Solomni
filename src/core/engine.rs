@@ -480,6 +480,8 @@ pub struct Discussion {
     /// 「停止」标志：由 CollabSession 注入（它从任务登记处拿到）。
     /// 泵在**每次调用前**与**调用中途**都看它——所以停止能在一个模型调用内收尾，而不是等它跑完。
     cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// 开场提示词（渲染一次，开场阶段每个成员都用它）——由 start() 设。
+    opener: String,
     /// 轮次推进的游标（可暂停：问到哪了）——见 advance/feed。
     cursor: Cursor,
     /// 本轮到此刻**还没交出去**的行数（轮次标记也算）：一个成员说完就把它那一批交出去。
@@ -491,12 +493,16 @@ pub struct Discussion {
 pub enum Adv {
     /// 该问这个成员一回合：把 msgs 发进它的会话，把结果交给 feed。
     Ask { i: usize, msgs: Vec<Msg> },
+    /// 开场问完了（可以进轮次了）。
+    Opened,
     /// 终态 / 轮次结束（原样交回上层）。
     Out(TurnOut),
 }
 
 /// 轮次推进的游标（状态机可暂停：问到哪了）。
 enum Cursor {
+    /// 开场：问到第 i 个成员（开场不跳过任何人）。
+    Opener(usize),
     /// 本轮还没开始：下一次 advance 写轮次标记与用户回答，再从第一个人问起。
     Fresh,
     /// 本轮问到第 i 个成员。
@@ -728,9 +734,24 @@ impl Discussion {
             cancel,
             protocol,
             face,
+            opener: String::new(),
             cursor: Cursor::Fresh,
             handed: 0,
         }
+    }
+
+    /// 开始讨论：渲染开场提示词（一次），游标进入开场阶段。
+    /// 与 advance/feed 一起构成可暂停的状态机——**驱动权在核心**（见 session-model.md 二之二）。
+    pub fn start(&mut self, task: &str) {
+        self.opener = self.prompts.render(
+            &self.prompts.core.discuss.opener,
+            &[
+                ("protocol", self.protocol.clone()),
+                ("task", task.to_string()),
+            ],
+        );
+        self.handed = self.transcript.len();
+        self.cursor = Cursor::Opener(0);
     }
 
     /// 接上「停止」标志（CollabSession 注入；回档重建后也要重新接）。
@@ -755,44 +776,21 @@ impl Discussion {
         on_lines: &mut LineSink<'_>,
         sink: &mut dyn FnMut(SessionEvent),
     ) -> Result<(), String> {
-        // 本轮到此刻还没交出去的行数：开场也是一个人说完就交一批。
-        let mut handed = self.transcript.len();
-        let opener = self.prompts.render(
-            &self.prompts.core.discuss.opener,
-            &[
-                ("protocol", self.protocol.clone()),
-                ("task", task.to_string()),
-            ],
-        );
-        for i in 0..self.members.len() {
-            let (system, id) = {
-                let m = &self.members[i];
-                (m.system.clone(), m.id.clone())
-            };
-            if self.cancelled() {
-                return Err("已停止".to_string());
-            }
-            let msgs = vec![Msg::system(system), Msg::user(opener.clone())];
-            // 开场也是**一个回合**：可以先核实（只读工具），最后用动词表态。
-            let turn = self.member_turn(i, msgs, sink)?;
-            let (verb, text, degraded) = (turn.verb, turn.text, turn.degraded);
-            self.absorb(&id, verb, text, degraded, turn.truncated);
-            // 开场的表态与轮次里**同一口径**：同意 / 离开立刻生效。
-            // （以前开场只落一行、不记表态，于是"开场就同意"的人下一轮还会被问一遍。）
-            {
-                let m = &mut self.members[i];
-                match verb {
-                    Verb::Leave => m.present = false,
-                    Verb::Agree => m.agreed = true,
-                    Verb::Ask | Verb::Say | Verb::Tool => {}
+        // 状态机驱动：开场也是"问 → 收 → 再问"，判定全在 advance/feed 里
+        //（开场的表态与轮次同一口径：同意 / 离开立刻生效）。
+        // 驱动权将来归核心：把这一圈换成核心的 take/put 序列即可。
+        self.start(task);
+        loop {
+            match self.advance() {
+                Adv::Ask { i, msgs } => {
+                    let turn = self.member_turn(i, msgs, sink)?;
+                    // 开场不因请教而中止（feed 已按阶段处理）。
+                    let _ = self.feed(i, turn, on_lines, sink);
                 }
+                // 开场问完（或已是终态）：交回上层，轮次由 step 继续。
+                Adv::Opened | Adv::Out(_) => return Ok(()),
             }
-            // 逐成员外送：开场也是**一个人说完就出它那一行**（以前整轮问完才一次性出）。
-            on_lines(&self.transcript[handed..], sink);
-            handed = self.transcript.len();
         }
-        self.round = 1;
-        Ok(())
     }
 
     /// 推进一轮：把当前转录并入上下文，依次转达给每个在组且未同意的成员。
@@ -817,6 +815,8 @@ impl Discussion {
                         return out;
                     }
                 }
+                // 开场刚问完（只有 open 会碰到）：接着进轮次。
+                Adv::Opened => continue,
                 Adv::Out(out) => return out,
             }
         }
@@ -831,6 +831,19 @@ impl Discussion {
         // 已被要求停止：连轮次标记都不留（这一轮根本没开始）。
         if self.cancelled() {
             return Adv::Out(TurnOut::Stopped);
+        }
+        // 开场：逐个问一遍（开场不跳过任何人），问完进轮次。
+        if let Cursor::Opener(i) = self.cursor {
+            if i >= self.members.len() {
+                self.round = 1;
+                self.cursor = Cursor::Fresh;
+                return Adv::Opened;
+            }
+            let system = self.members[i].system.clone();
+            return Adv::Ask {
+                i,
+                msgs: vec![Msg::system(system), Msg::user(self.opener.clone())],
+            };
         }
         if matches!(self.cursor, Cursor::Fresh) {
             // 本轮到此刻还没交出去的行数（轮次标记也算）：一个成员说完就把它那一批交出去。
@@ -856,6 +869,7 @@ impl Discussion {
         let mut i = match self.cursor {
             Cursor::At(i) => i,
             Cursor::Fresh => 0,
+            Cursor::Opener(i) => i,
         };
         while i < self.members.len() && (!self.members[i].present || self.members[i].agreed) {
             i += 1;
@@ -902,19 +916,29 @@ impl Discussion {
         on_lines: &mut LineSink<'_>,
         sink: &mut dyn FnMut(SessionEvent),
     ) -> Option<TurnOut> {
+        // 开场与轮次共用这一条收尾路径；区别只在"请教要不要中止"（开场不中止）。
+        let opener = matches!(self.cursor, Cursor::Opener(_));
         let (verb, text, degraded) = (turn.verb, turn.text.clone(), turn.degraded);
         let id = self.members[i].id.clone();
         self.absorb(&id, verb, text.clone(), degraded, turn.truncated);
         // 逐成员外送：**这个人说完就出它那一行**，不等整轮问完。
         on_lines(&self.transcript[self.handed..], sink);
         self.handed = self.transcript.len();
-        // 本轮往后挪一格（advance 下次从下一个人接着问）。
-        self.cursor = Cursor::At(i + 1);
+        // 往后挪一格（advance 下次从下一个人接着问）。
+        self.cursor = if opener {
+            Cursor::Opener(i + 1)
+        } else {
+            Cursor::At(i + 1)
+        };
         let m = &mut self.members[i];
         match verb {
             Verb::Leave => m.present = false,
             Verb::Agree => m.agreed = true,
             Verb::Ask => {
+                // 开场不因请教而中止：开场是各人表态，还没有可讨论的方案。
+                if opener {
+                    return None;
+                }
                 if self.allow_autonomy {
                     let note = self.prompts.core.discuss.autonomy_note.clone();
                     self.transcript.push(DiscLine {
