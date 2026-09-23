@@ -276,6 +276,19 @@ pub struct CoreHandle {
     bus: Arc<EventBus>,
 }
 
+/// 一次"要一个成员回合"的请求：泵在工作线程上让出，回头找主线程驱动（它才拿得到各 agent 的会话）。
+struct AskReq {
+    agent: String,
+    msgs: Vec<crate::core::ports::Msg>,
+    face: Vec<crate::core::ports::ToolDecl>,
+    cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    opts: crate::core::ports::CompleteOpts<'static>,
+    /// 这一回合属于第几轮（写进 agent 会话的回合标记）。
+    round: usize,
+    /// 回合 id（整场工作单调递增；两边对得上就靠它）。
+    turn_id: u64,
+}
+
 impl CoreHandle {
     /// 把核心搬到它自己的执行线程：此后所有核心状态只被这一个线程碰。
     /// 全部手柄丢弃后线程自然结束（通道断开即退出）。
@@ -449,6 +462,102 @@ impl CoreHandle {
         Ok(Advance { events, seq })
     }
 
+    /// 主线程侧：为一个成员回合取该 agent 的会话，跑完把回合结果带回来（并落进它自己的会话）。
+    fn run_member_turn(
+        &self,
+        sid: &str,
+        req: &AskReq,
+    ) -> Result<crate::core::engine::MemberTurn, String> {
+        let child = format!("{}--{}", sid, req.agent);
+        // 会话不存在就按需建（名单确认时已建，这里兜底）。
+        {
+            let (parent, agent, name) = (sid.to_string(), req.agent.clone(), child.clone());
+            self.call(move |core| {
+                if core.history_open(&name).is_err() {
+                    core.spawn_agent_session(&parent, &agent)?;
+                }
+                Ok(())
+            })?;
+        }
+        let session = self.call({
+            let name = child.clone();
+            move |core| core.take_single(&name)
+        })?;
+        let face = req.face.clone();
+        let cancel = std::sync::Arc::clone(&req.cancel);
+        let opts = req.opts;
+        let msgs = req.msgs.clone();
+        let agent = req.agent.clone();
+        let _ = &msgs;
+        let joined = std::thread::Builder::new()
+            .name("solomni-member".to_string())
+            .spawn(move || {
+                let mut s = session;
+                let ran = {
+                    let hist = s.msgs().to_vec();
+                    let (chat, tools) = s.parts_mut();
+                    crate::core::engine::Discussion::turn_with(
+                        &face,
+                        &cancel,
+                        opts,
+                        &agent,
+                        &hist,
+                        chat,
+                        tools,
+                        msgs,
+                        &mut |_e| {},
+                    )
+                };
+                (s, ran)
+            })
+            .map_err(|e| format!("起成员线程失败：{}", e))?
+            .join();
+        let (mut s, ran) = match joined {
+            Ok(x) => x,
+            Err(_) => {
+                self.call({
+                    let name = child.clone();
+                    move |core| {
+                        core.abort_running(&name);
+                        Ok(())
+                    }
+                })?;
+                return Err("成员线程崩溃：该会话已按落盘转录保留".to_string());
+            }
+        };
+        let turn = match ran {
+            Ok(t) => t,
+            Err(err) => {
+                self.call({
+                    let name = child.clone();
+                    move |core| {
+                        core.put_single(&name, s);
+                        Ok(())
+                    }
+                })?;
+                return Err(err);
+            }
+        };
+        // 该回合的产出落进**它自己的会话**：回合标记 + 核实行 + 它自己的发言。
+        let tag = match turn.verb {
+            crate::core::envelope::Verb::Say => "say",
+            crate::core::envelope::Verb::Ask => "ask",
+            crate::core::envelope::Verb::Leave => "leave",
+            crate::core::envelope::Verb::Agree => "agree",
+            crate::core::envelope::Verb::Tool => "tool",
+        };
+        let note = s.note_turn(req.round, req.turn_id, tag, &turn.text, &turn.lines);
+        self.call({
+            let name = child.clone();
+            move |core| {
+                core.put_single(&name, s);
+                core.persister(&name).persist(&note);
+                Ok(())
+            }
+        })?;
+        Ok(turn)
+    }
+
     /// 起一轮**脱离调用方**的单 agent 生成（派发节点用）：不等它跑完。
     /// 完成后由 `single_generation` 的叫醒逻辑推进父会话——所以这里只是"点火"。
     fn spawn_detached_single(&self, sid: &str, text: &str) {
@@ -474,6 +583,10 @@ impl CoreHandle {
 
     /// 协作的长步骤（开始讨论 / 回答 / 继续）：与单 agent 同一条 own-and-return——
     /// 队列只占"取/交"两步，泵在工作线程上跑；事件**边产边送**事件台，界面因此能看着讨论推进。
+    ///
+    /// **核心驱动**（见 docs/architecture/session-model.md 二之二）：泵只决定"该问谁"，
+    /// 成员回合由主线程取该 agent 的会话去跑（它才拿得到那些会话）。所以泵线程与主线程**握手**：
+    /// 泵让出 → 发 AskReq → 主线程跑完回 MemberTurn → 泵继续。
     fn collab_generation(
         &self,
         sid: &str,
@@ -503,6 +616,10 @@ impl CoreHandle {
             move |core| Ok(core.persister(&sid))
         })?;
         let text = text.to_string();
+        // 握手通道：泵 → 主线程（要一个成员回合）；主线程 → 泵（回合结果）。
+        let (ask_tx, ask_rx) = std::sync::mpsc::channel::<AskReq>();
+        let (turn_tx, turn_rx) =
+            std::sync::mpsc::channel::<Result<crate::core::engine::MemberTurn, String>>();
         let worker = {
             let sid = sid.to_string();
             let bus = Arc::clone(&bus);
@@ -537,11 +654,64 @@ impl CoreHandle {
                             CollabWork::Step(_) => {}
                             CollabWork::Resume => c.resume(&mut sink),
                         }
+                        // 核心驱动：泵让出"该问谁"就回头找主线程（它才拿得到各 agent 的会话）。
+                        loop {
+                            // 先看有没有已经让出的那一步；没有就推一步（推完再看一次）。
+                            let ask = match c.take_ask() {
+                                Some(a) => Some(a),
+                                None => {
+                                    c.pump_with(&mut sink);
+                                    c.take_ask()
+                                }
+                            };
+                            let Some((i, msgs)) = ask else { break };
+                            let Some(agent) = c.member_id(i) else { break };
+                            let req = AskReq {
+                                agent,
+                                msgs,
+                                face: c.disc_face(),
+                                cancel: c.disc_cancel(),
+                                opts: c.disc_opts(),
+                                round: c.round(),
+                                turn_id: c.next_turn_id(),
+                            };
+                            if ask_tx.send(req).is_err() {
+                                break;
+                            }
+                            // 等主线程跑完这一回合（它取会话、跑模型、落盘，再把结果送回来）。
+                            let Ok(res) = turn_rx.recv() else { break };
+                            match res {
+                                Ok(turn) => c.feed_with(i, turn, &mut sink),
+                                Err(err) => {
+                                    // 如实交回（由泵统一外送中断通知），不再往下推。
+                                    c.note_turn_failure(err);
+                                    c.pump_with(&mut sink);
+                                    break;
+                                }
+                            }
+                        }
                     }
                     (c, events, seq)
                 })
                 .map_err(|e| format!("起协作线程失败：{}", e))?
         };
+        // 主线程驱动每个请求：取该 agent 的会话、跑这一回合、把结果发回泵。
+        // 模型调用在成员线程上（own-and-return），核心队列只占"取/交"两步——界面因此不被阻塞。
+        while let Ok(req) = ask_rx.recv() {
+            match self.run_member_turn(sid, &req) {
+                Ok(turn) => {
+                    if turn_tx.send(Ok(turn)).is_err() {
+                        break;
+                    }
+                }
+                Err(err) => {
+                    // 把失败交回泵（它统一外送中断通知），不再往下推。
+                    let _ = turn_tx.send(Err(err));
+                    break;
+                }
+            }
+        }
+        drop(turn_tx);
         let joined = worker.join();
         jobs.unregister(sid);
         let (c, mut events, mut seq) = match joined {

@@ -7,7 +7,9 @@
 
 use crate::core::envelope::{self, ToolInvoke, Verb};
 use crate::core::events::{SessionEvent, ToolCallView};
-use crate::core::ports::{BoxedChat, Chat, Chunk, CompleteOpts, Msg, ToolOutcome, ToolRunner};
+#[cfg(test)]
+use crate::core::ports::BoxedChat;
+use crate::core::ports::{Chat, Chunk, CompleteOpts, Msg, ToolOutcome, ToolRunner};
 use crate::core::prompt::Prompts;
 use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet};
@@ -413,7 +415,9 @@ fn dispatch_external(ctx: &MemberTools, inv: &ToolInvoke) -> (String, ToolOutcom
 pub struct Member {
     pub id: String,
     pub system: String,
-    pub chat: BoxedChat,
+    /// 内存通道：**只有测试用**（生产里回合跑在各自的 agent 会话里，见 session-model.md 二之二）。
+    #[cfg(test)]
+    pub chat: Option<BoxedChat>,
     pub present: bool,
     pub agreed: bool,
     /// 工具环境；None = 本模块未声明工具（tool 信封按原文收录）。
@@ -421,14 +425,29 @@ pub struct Member {
 }
 
 impl Member {
+    /// 生产构造：成员不持有通道（驱动权在核心，回合在各自的会话里跑）。
+    pub fn plain(id: &str, system: String) -> Member {
+        Member {
+            id: id.to_string(),
+            system,
+            present: true,
+            agreed: false,
+            tools: None,
+            #[cfg(test)]
+            chat: None,
+        }
+    }
+
+    /// 测试构造：带内存通道（配合 cfg(test) 的 open/step/member_turn 直接驱动讨论）。
+    #[cfg(test)]
     pub fn new(id: &str, system: String, chat: BoxedChat) -> Member {
         Member {
             id: id.to_string(),
             system,
-            chat,
             present: true,
             agreed: false,
             tools: None,
+            chat: Some(chat),
         }
     }
 }
@@ -524,6 +543,7 @@ pub struct MemberTurn {
 impl Discussion {
     /// 内存通道的成员回合（薄包装）：借用本席位自己的 chat/tools，把核实行并进讨论转录。
     /// 核心驱动那条路直接调 turn_with，把核实行落进该 agent 自己的会话。
+    #[cfg(test)]
     fn member_turn(
         &mut self,
         i: usize,
@@ -535,11 +555,13 @@ impl Discussion {
         let turn = {
             let m = &mut self.members[i];
             let Member { chat, tools, .. } = m;
+            let chat = chat.as_mut().expect("测试通道");
             Self::turn_with(
                 &self.face,
                 &self.cancel,
                 opts,
                 &speaker,
+                &[],
                 chat.as_mut(),
                 tools.as_mut(),
                 msgs,
@@ -561,11 +583,19 @@ impl Discussion {
         cancel: &std::sync::Arc<std::sync::atomic::AtomicBool>,
         opts: crate::core::ports::CompleteOpts<'static>,
         speaker: &str,
+        // 该 agent **会话自己的历史**：用户进它会话说的话，下一回合它带着（不分家的核心承诺）。
+        history: &[Msg],
         chat: &mut dyn Chat,
         mut tools: Option<&mut MemberTools>,
         mut msgs: Vec<Msg>,
         sink: &mut dyn FnMut(SessionEvent),
     ) -> Result<MemberTurn, String> {
+        // 会话自己的历史在前，本回合的讨论上下文在后。
+        if !history.is_empty() {
+            let mut all = history.to_vec();
+            all.extend(msgs);
+            msgs = all;
+        }
         let native = matches!(
             tools.as_ref().map(|t| t.mode),
             Some(crate::core::providers::ToolMode::Native)
@@ -759,6 +789,26 @@ impl Discussion {
         self.cancel = cancel;
     }
 
+    /// 第 i 个成员的 agent 名（核心据此拼出它的会话名）。
+    pub fn member_id(&self, i: usize) -> Option<&str> {
+        self.members.get(i).map(|m| m.id.as_str())
+    }
+
+    /// 讨论回合的工具面（动词 + 只读核实）——核心驱动时交给 turn_with。
+    pub fn face(&self) -> &[crate::core::ports::ToolDecl] {
+        &self.face
+    }
+
+    /// 「停止」标志（与核心共享同一个）。
+    pub fn cancel_flag(&self) -> std::sync::Arc<std::sync::atomic::AtomicBool> {
+        std::sync::Arc::clone(&self.cancel)
+    }
+
+    /// 开场还没开始过（核心驱动的第一步据此调 start）。
+    pub fn not_started(&self) -> bool {
+        matches!(self.cursor, Cursor::Fresh) && self.round == 0
+    }
+
     /// 是否已被要求停止。
     fn cancelled(&self) -> bool {
         self.cancel.load(std::sync::atomic::Ordering::Relaxed)
@@ -770,6 +820,7 @@ impl Discussion {
     }
 
     /// 首轮：聊天约定 + 用户需求（文案经提示词册渲染）。
+    #[cfg(test)]
     pub fn open(
         &mut self,
         task: &str,
@@ -795,6 +846,7 @@ impl Discussion {
 
     /// 推进一轮：把当前转录并入上下文，依次转达给每个在组且未同意的成员。
     /// 讨论阶段不接工具循环：工具属执行机制，讨论只出主意（最小边界）。
+    #[cfg(test)]
     pub fn step(
         &mut self,
         on_lines: &mut LineSink<'_>,

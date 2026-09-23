@@ -504,18 +504,114 @@ impl Core {
         }
     }
 
+    /// 推进协作（**核心驱动**）：泵只决定"该问谁"，核心取该 agent 的会话跑这一回合再交回。
+    /// 契约见 docs/architecture/session-model.md 二之二。事件由调用方统一落档。
+    pub fn collab_advance(&mut self, sid: &str) -> Result<Vec<SessionEvent>, String> {
+        let mut out = Vec::new();
+        loop {
+            // ① 泵推一步：协作会话**裸搬**（不碰任务链派发那套副作用）。
+            let (ask, face, cancel, opts, member, turn_id) = {
+                let mut c = self.take_collab_raw(sid)?;
+                c.start_if_needed();
+                c.pump_with(&mut |e| out.push(e));
+                let ask = c.take_ask();
+                let member = ask.as_ref().and_then(|(i, _)| c.member_id(*i));
+                let face = c.disc_face();
+                let cancel = c.disc_cancel();
+                let opts = c.disc_opts();
+                let turn_id = if ask.is_some() { c.next_turn_id() } else { 0 };
+                self.sessions.insert(sid.to_string(), Session::Collab(c));
+                (ask, face, cancel, opts, member, turn_id)
+            };
+            let (Some((i, msgs)), Some(agent), turn_id) = (ask, member, turn_id) else {
+                break;
+            };
+            // ② 该 agent 的会话：没有就按需建（名单确认时已建，这里兜底）。
+            let child = format!("{}--{}", sid, agent);
+            if self.history.load(&child).is_err() {
+                self.spawn_agent_session(sid, &agent)?;
+            }
+            // ③ 跑这一回合（工具面 = 动词 + 只读核实）。
+            let mut s = self.take_single(&child)?;
+            let ran = {
+                let hist = s.msgs().to_vec();
+                let (chat, tools) = s.parts_mut();
+                crate::core::engine::Discussion::turn_with(
+                    &face,
+                    &cancel,
+                    opts,
+                    &agent,
+                    &hist,
+                    chat,
+                    tools,
+                    msgs,
+                    &mut |e| out.push(e),
+                )
+            };
+            self.put_single(&child, s);
+            let turn = match ran {
+                Ok(t) => t,
+                Err(err) => {
+                    let note = if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+                        crate::core::events::stopped_note()
+                    } else {
+                        crate::core::events::interrupted_note(&err)
+                    };
+                    out.push(SessionEvent::Notice(note));
+                    break;
+                }
+            };
+            // ③b 该回合的产出落进**它自己的会话**：回合标记 + 核实行 + 它自己的发言。
+            // 主会话只留"谁说了什么"（发言由 feed 投影过去），核实的痕迹留在各自会话里。
+            let tag = match turn.verb {
+                crate::core::envelope::Verb::Say => "say",
+                crate::core::envelope::Verb::Ask => "ask",
+                crate::core::envelope::Verb::Leave => "leave",
+                crate::core::envelope::Verb::Agree => "agree",
+                crate::core::envelope::Verb::Tool => "tool",
+            };
+            let round = match self.sessions.get(sid) {
+                Some(Session::Collab(c)) => c.round(),
+                _ => 0,
+            };
+            let note = {
+                let mut s = self.take_single(&child)?;
+                let events = s.note_turn(round, turn_id, tag, &turn.text, &turn.lines);
+                self.put_single(&child, s);
+                events
+            };
+            // 落盘到**它自己的目录**（讨论的核实痕迹随会话一起重启后还在）。
+            self.persister(&child).persist(&note);
+            out.extend(note);
+            // ④ 交回泵（它接着推下一步）。
+            let mut c = self.take_collab_raw(sid)?;
+            c.feed_with(i, turn, &mut |e| out.push(e));
+            self.sessions.insert(sid.to_string(), Session::Collab(c));
+        }
+        Ok(out)
+    }
+
+    /// 裸搬协作会话（不触发任务链派发那套副作用）：驱动循环每步都要搬一次。
+    fn take_collab_raw(&mut self, sid: &str) -> Result<CollabSession, String> {
+        match self.sessions.remove(sid) {
+            Some(Session::Collab(c)) => Ok(c),
+            Some(other) => {
+                self.sessions.insert(sid.to_string(), other);
+                Err("该会话不是协作模式".to_string())
+            }
+            None => Err("无此会话".to_string()),
+        }
+    }
+
     /// 继续一次协作（同步版，CLI 与测试走这条）：**先让泵处理**（它可能把验收没过的节点退回待办），
     /// 再派发/跑完就绪节点，最后再让泵做节点验收与总验收。
     /// 生产路径是"工作线程跑泵 + put_collab 派发 + 子会话完成叫醒"，判定完全一致。
     pub fn collab_resume(&mut self, sid: &str) -> Result<Vec<SessionEvent>, String> {
         let mut out = Vec::new();
-        if let Some(Session::Collab(c)) = self.sessions.get_mut(sid) {
-            c.resume(&mut |e| out.push(e));
-        }
+        // 泵（讨论回合 / 退回没过的节点 / 总验收）→ 派发并跑完就绪节点 → 再泵一步（总验收 → 交付）。
+        out.extend(self.collab_advance(sid)?);
         out.extend(self.advance_chain(sid));
-        if let Some(Session::Collab(c)) = self.sessions.get_mut(sid) {
-            c.resume(&mut |e| out.push(e));
-        }
+        out.extend(self.collab_advance(sid)?);
         self.record_events(sid, &mut out);
         Ok(out)
     }
@@ -617,9 +713,48 @@ impl Core {
         (out, todo)
     }
 
-    /// 为任务链的一个节点建**子会话**：它就是一个普通单 agent 会话，
-    /// 只是沙箱锚在父会话上（meta.parent），并记住自己服务哪个节点（meta.node）。
+    /// 为一个 agent 建它的会话（名单确认时建）：节点执行与讨论回合**共用同一个**会话。
     /// 复用"按 meta 重建"的整条装配路径——子会话与用户建的会话**没有第二种实现**。
+    pub(crate) fn spawn_agent_session(
+        &mut self,
+        parent: &str,
+        agent: &str,
+    ) -> Result<String, String> {
+        let (pmeta, _) = self.history.load(parent)?;
+        let a = pmeta
+            .agents
+            .iter()
+            .find(|x| x.name == agent)
+            .cloned()
+            .ok_or_else(|| format!("名单里没有 {}", agent))?;
+        // **一个 agent 一个会话**（不是一节点一会话）：它在这场工作里的完整经历，
+        // 讨论与执行不分家（见 docs/architecture/session-model.md）。同名即复用，幂等。
+        let child = format!("{}--{}", parent, agent);
+        if self.history.load(&child).is_ok() {
+            return Ok(child);
+        }
+        let meta = SessionMeta {
+            name: child.clone(),
+            mode: "single".to_string(),
+            delegate: false,
+            modules: a.modules.clone(),
+            // 会话跨整场工作，所以记**工作的需求**（节点目标由链记着，随回合下发）。
+            task: pmeta.task.clone(),
+            ts: now_ts(),
+            agents: vec![a.clone()],
+            exec: pmeta.exec.clone(),
+            parent: Some(parent.to_string()),
+            node: None,
+        };
+        // 沙箱锚在父会话上：该 agent 的目录在父会话里已经建好。
+        self.workspace
+            .prepare(meta.work(), std::slice::from_ref(&a.name))?;
+        self.history.create(&meta)?;
+        self.ensure_session(&child)?;
+        Ok(child)
+    }
+
+    /// 为任务链的一个节点建**子会话**：它就是该节点负责人的 agent 会话（一个 agent 一个会话）。
     pub(crate) fn spawn_sub_session(&mut self, parent: &str, node: &str) -> Result<String, String> {
         let (pmeta, _) = self.history.load(parent)?;
         let assignee = {
@@ -633,37 +768,10 @@ impl Core {
                 .ok_or_else(|| format!("链里没有节点 {}", node))?;
             n.assignee.clone()
         };
-        let agent = pmeta
-            .agents
-            .iter()
-            .find(|a| a.name == assignee)
-            .cloned()
-            .ok_or_else(|| format!("名单里没有负责人 {}", assignee))?;
-        // **一个 agent 一个会话**（不是一节点一会话）：它在这场工作里的完整经历，
-        // 讨论与执行不分家（见 docs/architecture/session-model.md）。同名即复用，幂等。
-        let child = format!("{}--{}", parent, assignee);
-        if self.history.load(&child).is_ok() {
-            return Ok(child);
-        }
-        let meta = SessionMeta {
-            name: child.clone(),
-            mode: "single".to_string(),
-            delegate: false,
-            modules: agent.modules.clone(),
-            // 会话跨整场工作，所以记**工作的需求**（节点目标由链记着，随回合下发）。
-            task: pmeta.task.clone(),
-            ts: now_ts(),
-            agents: vec![agent.clone()],
-            exec: pmeta.exec.clone(),
-            parent: Some(parent.to_string()),
-            node: Some(node.to_string()),
-        };
-        // 沙箱锚在父会话上：该 agent 的目录在父会话里已经建好。
-        self.workspace
-            .prepare(meta.work(), std::slice::from_ref(&agent.name))?;
-        self.history.create(&meta)?;
-        self.ensure_session(&child)?;
-        Ok(child)
+        // 节点的会话**就是它负责人的 agent 会话**（一个 agent 一个会话，讨论与执行不分家）。
+        // 节点本身不再记在 meta 里——哪个节点正跑在这个会话里，由链的 sub_session 认。
+        let _ = pmeta;
+        self.spawn_agent_session(parent, &assignee)
     }
 
     /// 生成结束**交回**：重新插入 + 解除"生成中"。
@@ -672,12 +780,18 @@ impl Core {
     pub(crate) fn put_single(&mut self, sid: &str, s: session::AgentSession) -> Option<String> {
         self.running.remove(sid);
         self.sessions.insert(sid.to_string(), Session::Single(s));
-        // 子会话完成 = 它的节点交付了：标记节点（产出即交付物），并交回父会话。
+        // 子会话完成 = 它的节点交付了：标记**正跑在这个会话里的那个节点**（产出即交付物），并交回父会话。
+        // 一个 agent 一个会话（可能依次服务多个节点），所以按 sub_session 认节点，不靠 meta.node。
         let (meta, _) = self.history.load(sid).ok()?;
         let parent = meta.parent.clone()?;
-        let node = meta.node.clone()?;
         let note = self.node_note(sid);
-        self.mark_node_done(&parent, &node, &note);
+        let node = match self.sessions.get_mut(&parent) {
+            Some(Session::Collab(c)) => c.running_node_of(sid),
+            _ => None,
+        };
+        if let Some(node) = node {
+            self.mark_node_done(&parent, &node, &note);
+        }
         Some(parent)
     }
 
@@ -1949,6 +2063,9 @@ impl Core {
                 c.approve_plan(&mut |e| out.push(e));
             }
             out.extend(self.collab_resume(sid)?);
+        } else {
+            // 泵让出了"该问谁"：由核心取该 agent 的会话跑这一回合（契约 8 步）。
+            out.extend(self.collab_advance(sid)?);
         }
         // 名单刚定下来：落档 meta（重启/回档后 rebuild_session 从这里拿名单与沙箱归属）并建沙箱目录。
         if let Some(roster) = confirmed {

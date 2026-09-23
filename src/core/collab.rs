@@ -68,6 +68,13 @@ pub struct CollabSession {
     /// 核心给出的**任务链**（与方案一起出；审查关卡把它交用户看）。
     chain: Option<crate::core::chain::TaskChain>,
     disc: Option<Discussion>,
+    /// 回合 id 计数器（整场工作单调递增）：agent 会话的回合标记用它。
+    turns: u64,
+    /// 上一次成员回合失败的原因：下一次泵推一步时如实交回（TurnOut::Interrupted）。
+    turn_error: Option<String>,
+    /// 泵让出的那一步：该问哪个成员、给它什么上下文。
+    /// 泵**不自己调模型**——由核心取该 agent 的会话跑完再 feed 回来（见 session-model.md 二之二）。
+    pending_ask: Option<(usize, Vec<crate::core::ports::Msg>)>,
     /// 已发出的转录行数（增量事件用）。
     emitted: usize,
     /// 下一条转录行的 id（会话内稳定序号）。
@@ -133,6 +140,9 @@ impl CollabSession {
             plan: None,
             chain: None,
             disc: None,
+            turns: 0,
+            turn_error: None,
+            pending_ask: None,
             emitted: 0,
             next_line: 0,
             reply_seq: 0,
@@ -291,6 +301,45 @@ impl CollabSession {
                 });
             }
         }
+    }
+
+    /// 正在等用户（请教 / 方案待审 / 节点没过）：泵**不再往下推**，直到用户回应。
+    pub fn awaiting_user(&self) -> bool {
+        matches!(
+            self.pending,
+            Some(Pending::Ask { .. })
+                | Some(Pending::PlanReview)
+                | Some(Pending::NodeBlocked { .. })
+        )
+    }
+
+    /// 成员回合失败：记下原因，下一次泵推一步时如实交回（不静默吞掉）。
+    pub fn note_turn_failure(&mut self, err: String) {
+        self.turn_error = Some(err);
+    }
+
+    /// 当前轮次（写进 agent 会话的回合标记里）。
+    pub fn round(&self) -> usize {
+        self.disc.as_ref().map(|d| d.round).unwrap_or(0)
+    }
+
+    /// 下一个**回合 id**：整场工作单调递增，写进 agent 会话的回合标记。
+    pub fn next_turn_id(&mut self) -> u64 {
+        self.turns += 1;
+        self.turns
+    }
+
+    /// 哪个节点**正跑在这个会话里**（一个 agent 一个会话，可能依次服务多个节点）。
+    pub fn running_node_of(&self, sub: &str) -> Option<String> {
+        let chain = self.chain.as_ref()?;
+        chain
+            .nodes
+            .iter()
+            .find(|n| {
+                n.sub_session.as_deref() == Some(sub)
+                    && matches!(n.status, crate::core::chain::NodeStatus::Running)
+            })
+            .map(|n| n.id.clone())
     }
 
     /// 把节点退回待办（验收没过 → 用户点「继续」→ 重派它）。
@@ -515,29 +564,84 @@ impl CollabSession {
             protocol,
             verbs,
         );
-        // 开场逐成员外送：一个人说完就出它那一行（与轮次里同一段逻辑）。
-        // 回调**不捕获 sink**（由 Discussion 传进来），否则它与后面泵对 sink 的使用冲突。
+        // 开场**不在这里跑**：核心驱动（见 session-model.md 二之二）——这里只渲染提示词、置游标，
+        // 下一步由核心取该 agent 的会话跑第一个回合（逐成员外送在 feed_with 里）。
+        disc.start(&self.task);
+        self.disc = Some(disc);
+        self.pump_with(sink);
+    }
+
+    /// 核心把某个成员回合的结果**交回来**：吸收、外送、继续泵（驱动权在核心，见 session-model.md 二之二）。
+    /// 调用前核心应把该回合的核实行落进**该 agent 自己的会话**（它们不属于主会话）。
+    pub fn feed_with(
+        &mut self,
+        i: usize,
+        turn: crate::core::engine::MemberTurn,
+        sink: &mut dyn FnMut(SessionEvent),
+    ) {
         let next_line = std::cell::Cell::new(self.next_line);
         let handed = std::cell::Cell::new(0usize);
         let mut on_lines = |lines: &[crate::core::engine::DiscLine],
                             s: &mut dyn FnMut(SessionEvent)| {
             emit_new_lines(lines, &next_line, &handed, s);
         };
-        let opened = disc.open(&self.task, &mut on_lines, sink);
+        let out = self
+            .disc
+            .as_mut()
+            .expect("disc 已确认存在")
+            .feed(i, turn, &mut on_lines, sink);
         self.next_line = next_line.get();
         self.emitted += handed.get();
-        self.disc = Some(disc);
-        // 开场就被停止 / 失败：都如实告知并交回用户（会话保持可继续，点「继续」重试）。
-        if let Err(err) = opened {
-            let note = if self.cancelled() {
-                crate::core::events::stopped_note()
-            } else {
-                crate::core::events::interrupted_note(&err)
-            };
-            sink(SessionEvent::Notice(note));
+        // 兜底：feed 提前返回时把剩下的行补齐；已交出去过的不会再出。
+        if let Some(d) = self.disc.as_ref() {
+            push_delta(d, &mut self.emitted, &mut self.next_line, sink);
+        }
+        if let Some(TurnOut::AskUser { member, question }) = out {
+            self.pending = Some(Pending::Ask { member, question });
             return;
         }
         self.pump_with(sink);
+    }
+
+    /// 泵让出的那一步（该问谁、给它什么上下文）——由核心取走并驱动。
+    pub fn take_ask(&mut self) -> Option<(usize, Vec<crate::core::ports::Msg>)> {
+        self.pending_ask.take()
+    }
+
+    /// 第 i 个成员的 agent 名（核心据此拼出它的会话名 <工作>--<agent>）。
+    pub fn member_id(&self, i: usize) -> Option<String> {
+        self.disc.as_ref()?.member_id(i).map(|s| s.to_string())
+    }
+
+    /// 讨论回合的**工具面**（动词 + 只读核实）：核心驱动时交给 turn_with。
+    pub fn disc_face(&self) -> Vec<crate::core::ports::ToolDecl> {
+        self.disc
+            .as_ref()
+            .map(|d| d.face().to_vec())
+            .unwrap_or_default()
+    }
+
+    /// 「停止」标志：与核心共享同一个（停止能在一个模型调用内收尾）。
+    pub fn disc_cancel(&self) -> std::sync::Arc<std::sync::atomic::AtomicBool> {
+        self.disc
+            .as_ref()
+            .map(|d| d.cancel_flag())
+            .unwrap_or_else(|| std::sync::Arc::clone(&self.cancel))
+    }
+
+    /// 本回合的调用选项（流式 + 预算，取全局设置）。
+    pub fn disc_opts(&self) -> crate::core::ports::CompleteOpts<'static> {
+        crate::core::ports::CompleteOpts::plain(self.settings.app.streaming)
+            .with_timeout(self.settings.app.llm_timeout_secs)
+    }
+
+    /// 开场还没开始过就先开始（核心驱动的第一步）。
+    pub fn start_if_needed(&mut self) {
+        if let Some(d) = self.disc.as_mut() {
+            if d.not_started() {
+                d.start(&self.task);
+            }
+        }
     }
 
     /// 回答 ask（仅 Ask 挂起时有效）；回答转达后继续泵。用户回答同样先改写 @ 引用。
@@ -565,32 +669,38 @@ impl CollabSession {
         // 讨论阶段：只在未收敛时步进（回档/重启后可从中途接着走）。
         if !self.disc.as_ref().expect("disc 已确认存在").closed {
             loop {
+                // 已在等用户（请教 / 待审 / 待继续）：泵不再往下推——驱动循环据此停下。
+                if self.awaiting_user() {
+                    return;
+                }
                 // 逐成员外送：一个成员说完就出它那一行（以前是整轮问完才一次性出，界面因此整轮不动）。
                 // 回调里不能借 self（disc 正被可变借用），所以用 Cell/RefCell 暂存，调用后并回会话。
-                let next_line = std::cell::Cell::new(self.next_line);
-                let handed = std::cell::Cell::new(0usize);
-                let mut on_lines =
-                    |lines: &[crate::core::engine::DiscLine], s: &mut dyn FnMut(SessionEvent)| {
-                        emit_new_lines(lines, &next_line, &handed, s);
-                    };
-                let outcome = self
-                    .disc
-                    .as_mut()
-                    .expect("disc 已确认存在")
-                    .step(&mut on_lines, sink);
-                self.next_line = next_line.get();
-                self.emitted += handed.get();
-                // 兜底：step 提前返回（停止 / 失败 / 收敛）时把剩下的行补齐；已交出去过的不会再出。
-                if let Some(d) = self.disc.as_ref() {
-                    push_delta(d, &mut self.emitted, &mut self.next_line, sink);
-                }
+                // 上一个成员回合失败 / 被停：如实交回（不静默吞掉，也不当发言吸收）。
+                let outcome = if let Some(err) = self.turn_error.take() {
+                    TurnOut::Interrupted(err)
+                } else {
+                    // 泵只推**一步**：该问谁就存下并让出——驱动权在核心（它同时看得到协作会话与各 agent 的会话）。
+                    match self.disc.as_mut().expect("disc 已确认存在").advance() {
+                        crate::core::engine::Adv::Ask { i, msgs } => {
+                            self.pending_ask = Some((i, msgs));
+                            return;
+                        }
+                        // 开场刚问完：接着进轮次。
+                        crate::core::engine::Adv::Opened => continue,
+                        crate::core::engine::Adv::Out(out) => out,
+                    }
+                };
                 match outcome {
                     TurnOut::Round => {}
                     TurnOut::Interrupted(err) => {
-                        // 讨论中调用失败：**不**把它当发言吸收，如实告知并中断本轮。
-                        sink(SessionEvent::Notice(crate::core::events::interrupted_note(
-                            &err,
-                        )));
+                        // 讨论中调用失败 / 被停：**不**把它当发言吸收，如实告知并中断本轮。
+                        // 停止与失败用不同文案（用户看得到"是我停的"还是"它断了"）。
+                        let note = if self.cancelled() {
+                            crate::core::events::stopped_note()
+                        } else {
+                            crate::core::events::interrupted_note(&err)
+                        };
+                        sink(SessionEvent::Notice(note));
                         return;
                     }
                     TurnOut::Stopped => {
@@ -801,7 +911,8 @@ impl CollabSession {
                 .as_deref()
                 .and_then(|id| self.settings.resolve(id).ok())
                 .or_else(|| self.settings.core_channel());
-            let (chat, note) = self.gateway.member_channel(channel.as_ref(), &a.name);
+            // 通道本身不再由成员持有（回合跑在各自的 agent 会话里）；这里只取它的如实告知。
+            let (_chat, note) = self.gateway.member_channel(channel.as_ref(), &a.name);
             if let Some(n) = note {
                 notes.push(n);
             }
@@ -816,7 +927,7 @@ impl CollabSession {
                 crate::core::providers::ToolMode::Envelope
             };
             let system = module::agent_system(&prompts, &a.name, &modules, &guide, mode);
-            let mut member = Member::new(&a.name, system, chat);
+            let mut member = Member::plain(&a.name, system);
             // 围栏：可达范围 + 断网，由该 agent 的沙箱与 exec 段派生（机制在 adapters）；
             // 只读根来自用户显式授权（`fence_read`），默认空。
             let fence = crate::core::fence::FenceSpec::from_sandbox(&sandbox, self.spec.net)
@@ -939,6 +1050,9 @@ impl CollabSession {
                 Some(st.chain.clone())
             },
             disc: None,
+            turns: 0,
+            turn_error: None,
+            pending_ask: None,
             emitted: 0,
             next_line: total,
             reply_seq: crate::core::engine::max_reply(events),

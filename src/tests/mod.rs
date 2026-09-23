@@ -128,6 +128,27 @@ pub(crate) struct GatedGateway {
     pub release: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
+/// 记录每次问询收到的消息，再转发给内层通道。
+pub(crate) struct RecordingChat {
+    pub inner: crate::core::ports::BoxedChat,
+    pub seen: std::sync::Arc<std::sync::Mutex<Vec<Vec<String>>>>,
+}
+
+impl crate::core::ports::Chat for RecordingChat {
+    fn complete(
+        &mut self,
+        m: &[crate::core::ports::Msg],
+        o: crate::core::ports::CompleteOpts<'_>,
+        on: &mut dyn FnMut(crate::core::ports::Chunk) -> bool,
+    ) -> crate::core::ports::Completion {
+        self.seen
+            .lock()
+            .expect("锁")
+            .push(m.iter().map(|x| x.content.clone()).collect());
+        self.inner.complete(m, o, on)
+    }
+}
+
 impl crate::core::ports::ChatGateway for GatedGateway {
     fn probe_tools(
         &self,

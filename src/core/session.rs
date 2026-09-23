@@ -51,6 +51,17 @@ pub struct AgentSession {
 }
 
 impl AgentSession {
+    /// 本会话已有的消息历史（讨论回合要把它带上：用户在这个会话里说的话，下一回合它就该记得）。
+    pub fn msgs(&self) -> &[crate::core::ports::Msg] {
+        &self.history
+    }
+
+    /// 讨论回合要**在这个会话里**跑：一次借出通道与工具环境。
+    /// 为什么一次借两样：分开借会同时可变借用 self（编译不过），而它们本就是同一回合的两半。
+    pub fn parts_mut(&mut self) -> (&mut dyn crate::core::ports::Chat, Option<&mut MemberTools>) {
+        (self.chat.as_mut(), self.tools.as_mut())
+    }
+
     // 组合根注入的构造函数：参数天然多，收口成参数对象只是把参数挪个地方、并让装配更难读。
     // 这是有意的设计取舍（见 docs/testing/quality-isolation.md 的 allow 清单），不是没修。
     #[allow(clippy::too_many_arguments)]
@@ -123,6 +134,26 @@ impl AgentSession {
             .clone()
             .map(|n| vec![SessionEvent::Notice(n)])
             .unwrap_or_default()
+    }
+
+    /// 讨论回合的产出落进**本会话**：回合标记 + 核实行 + 它自己的发言。
+    /// 一个 agent 的会话是它在这场工作里的完整经历（见 docs/architecture/session-model.md）：
+    /// 主会话只留"谁说了什么"，核实（只读工具）的痕迹留在各自会话里。
+    pub fn note_turn(
+        &mut self,
+        round: usize,
+        turn_id: u64,
+        verb: &str,
+        text: &str,
+        tools: &[crate::core::engine::DiscLine],
+    ) -> Vec<SessionEvent> {
+        let mut views = Vec::new();
+        views.push(self.line(format!("[回合 t{}｜第 {} 轮]", turn_id, round), None, None));
+        for l in tools {
+            views.push(self.line(l.text.clone(), None, l.tool.clone()));
+        }
+        views.push(self.line(format!("[{}:{}] {}", self.id, verb, text), None, None));
+        vec![SessionEvent::Transcript(views)]
     }
 
     /// 生成一条转录行，并记下它完成时的历史长度（回档按 marks 逐行精确回退）与它属于哪次回复。

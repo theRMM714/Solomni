@@ -1019,7 +1019,7 @@ pub(crate) fn run_execution(
         let mut noop = |_c: crate::core::ports::Chunk| true;
         let mut sink = |_e: crate::core::events::SessionEvent| {};
         let rounds = crate::core::engine::converse_with(
-            m.chat.as_mut(),
+            m.chat.as_mut().expect("测试通道").as_mut(),
             m.tools.as_mut(),
             vec![
                 crate::core::ports::Msg::system(system),
@@ -1512,6 +1512,43 @@ pub(crate) fn discussion_round_cap_enforced() {
     assert!(d.round > MAX_ROUNDS);
 }
 
+/// 用户进 agent 会话说的话，**下一回合它带着**——"讨论与执行不分家"的核心承诺。
+/// 判据在"回合收到的消息"上：主会话内容靠**注入**（讨论上下文）给各 agent，
+/// 而用户在某个 agent 会话说的话进**它自己的历史**，下一回合一起带上。
+#[test]
+pub(crate) fn discussion_turn_carries_the_agent_sessions_own_history() {
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let mut chat = super::RecordingChat {
+        inner: scripted(vec!["{\"type\":\"say\",\"text\":\"收到\"}".into()]),
+        seen: Arc::clone(&seen),
+    };
+    let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let turn = crate::core::engine::Discussion::turn_with(
+        &[],
+        &cancel,
+        crate::core::ports::CompleteOpts::plain(false),
+        "a",
+        &[crate::core::ports::Msg::user("只看第二份资料")],
+        &mut chat,
+        None,
+        vec![crate::core::ports::Msg::user("讨论上下文")],
+        &mut |_| {},
+    )
+    .expect("跑一个回合");
+    assert!(matches!(turn.verb, crate::core::envelope::Verb::Say));
+    let got = seen.lock().expect("锁").clone();
+    assert!(
+        got.iter()
+            .any(|msgs| msgs.iter().any(|c| c.contains("只看第二份资料"))),
+        "下一回合该带着用户那句话：{got:?}"
+    );
+    assert!(
+        got.iter()
+            .any(|msgs| msgs.iter().any(|c| c.contains("讨论上下文"))),
+        "讨论上下文照旧注入：{got:?}"
+    );
+}
+
 /// 讨论回合能**先核实再发言**：只读工具真跑（核实行带工具视图），随后照常表态。
 #[test]
 pub(crate) fn discussion_member_can_inspect_before_speaking() {
@@ -1866,7 +1903,10 @@ pub(crate) fn approved_plan_spawns_a_sub_session_per_ready_node() {
     // 子会话是**普通单 agent 会话**：meta 记着编排者与节点，沙箱锚在父会话上。
     let (cmeta, _) = core.history_open(child).unwrap();
     assert_eq!(cmeta.parent.as_deref(), Some(sid.as_str()));
-    assert_eq!(cmeta.node.as_deref(), Some("n1"));
+    assert!(
+        cmeta.node.is_none(),
+        "节点不再记在会话 meta 里：一个 agent 一个会话，哪个节点正跑在它里面由链的 sub_session 认"
+    );
     assert_eq!(cmeta.mode, "single");
     assert_eq!(cmeta.work(), sid.as_str(), "沙箱锚在父会话上（共用工作区）");
     assert_eq!(cmeta.agents.len(), 1, "子会话只有一个席位");
@@ -5733,11 +5773,14 @@ pub(crate) fn core_collab_tool_modules_run_in_execution() {
     let mut member = BTreeMap::new();
     // 脚本按**通道**各自一份（子会话拿的是新的一份）：所以第一项要同时能应付两条路——
     // 讨论开场收下它（tool 动词在讨论里只落一行），节点执行则真的跑这个工具。
+    // 一个 agent 一个会话：讨论与**节点执行**共用同一条通道，所以脚本按"整场经历"排。
+    // 开场同意（收敛）→ 整理 → 同意方案 → 节点执行时真的跑那个工具。
     member.insert(
         "a".to_string(),
         vec![
-            TOOL_CALL.to_string(),
             "{\"type\":\"agree\",\"text\":\"同意\"}".to_string(),
+            TOOL_CALL.to_string(),
+            "{\"type\":\"say\",\"text\":\"执行完毕\"}".to_string(),
         ],
     );
     let mut mod_a = module_of("a");
