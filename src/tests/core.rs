@@ -1510,6 +1510,89 @@ pub(crate) fn discussion_round_cap_enforced() {
     assert!(d.round > MAX_ROUNDS);
 }
 
+/// 回档主会话 → 各 agent 会话按**同一个回合 id** 同步截断（见 session-model.md 五）。
+#[test]
+pub(crate) fn rewinding_the_main_session_truncates_agent_sessions_by_turn() {
+    // 从事件里读转录行（id / 文本 / 回合 id）。
+    fn lines_of(evs: &[serde_json::Value]) -> Vec<(u64, String, u64)> {
+        let mut out = Vec::new();
+        for ev in evs {
+            if let Some(ls) = ev.get("lines").and_then(|l| l.as_array()) {
+                for l in ls {
+                    out.push((
+                        l.get("id").and_then(|i| i.as_u64()).unwrap_or(0),
+                        l.get("line")
+                            .and_then(|x| x.as_str())
+                            .unwrap_or("")
+                            .to_string(),
+                        l.get("turn").and_then(|t| t.as_u64()).unwrap_or(0),
+                    ));
+                }
+            }
+        }
+        out
+    }
+
+    let mut member = BTreeMap::new();
+    member.insert(
+        "a".to_string(),
+        vec![
+            "{\"type\":\"say\",\"text\":\"我先说\"}".to_string(),
+            "{\"type\":\"agree\",\"text\":\"同意\"}".to_string(),
+        ],
+    );
+    let mut core = core_with(
+        vec![module_of("a")],
+        gw(
+            member,
+            vec![
+                "{\"plan\":\"方案\",\"nodes\":[{\"id\":\"n1\",\"title\":\"做\",\"objective\":\"做\",\"assignee\":\"a\",\"deps\":[]}]}".to_string(),
+                "[{\"node\":\"n1\",\"ok\":true,\"note\":\"够用\"}]".to_string(),
+                "[{\"item\":\"做\",\"status\":\"pass\"}]".to_string(),
+            ],
+        ),
+    );
+    let sid = core
+        .create_work(collab_work("w", &["a"], false, "做个东西"))
+        .unwrap()
+        .sid;
+    core.collab_continue(&sid, CollabStep::Begin, "yes")
+        .unwrap();
+    let child = format!("{}--a", sid);
+
+    // 主会话里第一条**带回合**的发言行（开场那次）——回档就保留到它。
+    let (_, main_evs) = core.history_open(&sid).unwrap();
+    let (line_id, turn) = lines_of(&main_evs)
+        .into_iter()
+        .find(|(_, text, t)| text.contains("[a:say]") && *t > 0)
+        .map(|(id, _, t)| (id, t))
+        .expect("开场该有带回合的发言行");
+
+    let (_, before) = core.history_open(&child).unwrap();
+    let max_before = lines_of(&before)
+        .iter()
+        .map(|(_, _, t)| *t)
+        .max()
+        .unwrap_or(0);
+    assert!(
+        max_before > turn,
+        "回档前 agent 会话该有更晚的回合：{before:?}"
+    );
+
+    core.rewind(&sid, line_id + 1).unwrap();
+
+    let (_, after) = core.history_open(&child).unwrap();
+    let max_after = lines_of(&after)
+        .iter()
+        .map(|(_, _, t)| *t)
+        .max()
+        .unwrap_or(0);
+    assert!(
+        max_after <= turn,
+        "回档后 agent 会话该截到同一回合（小于等于 {turn}，实为 {max_after}）：{after:?}"
+    );
+}
+
 /// 用户进 agent 会话说的话，**下一回合它带着**——"讨论与执行不分家"的核心承诺。
 /// 判据在"回合收到的消息"上：主会话内容靠**注入**（讨论上下文）给各 agent，
 /// 而用户在某个 agent 会话说的话进**它自己的历史**，下一回合一起带上。

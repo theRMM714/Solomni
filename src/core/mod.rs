@@ -474,8 +474,30 @@ impl Core {
         }
     }
 
+    /// 给某个会话接下来的行打上**整场工作的下一个回合 id**（节点执行也用同一套编号）。
+    /// 一个 agent 一个会话：它的回合计数来自父会话——回档同步靠两边同一套编号。
+    fn bump_turn_of_child(&mut self, child: &str) -> u64 {
+        let parent = self
+            .history
+            .load(child)
+            .ok()
+            .and_then(|(m, _)| m.parent.clone());
+        let Some(parent) = parent else {
+            return 0;
+        };
+        let tid = match self.sessions.get_mut(&parent) {
+            Some(Session::Collab(c)) => c.next_turn_id(),
+            _ => 0,
+        };
+        if let Some(Session::Single(s)) = self.sessions.get_mut(child) {
+            s.set_turn(tid);
+        }
+        tid
+    }
+
     /// **同步**跑一个节点的子会话（CLI 与测试走这条；Web 生产路径由 CoreHandle 起工作线程）。
     fn drive_node(&mut self, child: &str, objective: &str) -> Vec<SessionEvent> {
+        self.bump_turn_of_child(child);
         match self.prepare_single(child, Some(objective), false) {
             Ok(Prepared::Run {
                 session,
@@ -587,7 +609,7 @@ impl Core {
             out.extend(note);
             // ④ 交回泵（它接着推下一步）。
             let mut c = self.take_collab_raw(sid)?;
-            c.feed_with(i, turn, &mut |e| out.push(e));
+            c.feed_with(i, turn, turn_id, &mut |e| out.push(e));
             self.sessions.insert(sid.to_string(), Session::Collab(c));
         }
         Ok(out)
@@ -2149,6 +2171,12 @@ impl Core {
             let rebuilt = self.rebuild_session(&meta, &after)?;
             self.sessions.insert(sid.to_string(), rebuilt);
         }
+        // **回档同步**：主会话回到第 keep_id 行，各 agent 会话按同一个**回合 id** 同步截断
+        // （见 docs/architecture/session-model.md 五）——子会话不在主会话的流水里，得各自回档。
+        if !precise {
+            let keep_turn = Self::turn_of_line(&before, keep_id);
+            self.rewind_children(sid, keep_turn)?;
+        }
         let dropped = crate::core::collab_state::tool_runs(&before)
             .saturating_sub(crate::core::collab_state::tool_runs(&after));
         let mut out = after;
@@ -2159,6 +2187,67 @@ impl Core {
             }));
         }
         Ok(out)
+    }
+
+    /// 主会话第 keep_id 行所属的**回合**（没有 = 0）。
+    fn turn_of_line(events: &[serde_json::Value], keep_id: u64) -> u64 {
+        for ev in events {
+            if let Some(lines) = ev.get("lines").and_then(|l| l.as_array()) {
+                for l in lines {
+                    if l.get("id").and_then(|i| i.as_u64()) == Some(keep_id) {
+                        return l.get("turn").and_then(|t| t.as_u64()).unwrap_or(0);
+                    }
+                }
+            }
+        }
+        0
+    }
+
+    /// 最后一个 `turn ≤ keep_turn` 的行的 id（没有 = 0 = 该会话全部截掉）。
+    fn last_line_within(events: &[serde_json::Value], keep_turn: u64) -> u64 {
+        // 规则：**从第一行超出保留点的行开始全截掉**（turn = 0 的行不属于任何回合，
+        // 跟着它前面那一回合走——用户插话、需求这类行因此不会被误删）。
+        let mut cut = 0u64;
+        for ev in events {
+            if let Some(lines) = ev.get("lines").and_then(|l| l.as_array()) {
+                for l in lines {
+                    let t = l.get("turn").and_then(|t| t.as_u64()).unwrap_or(0);
+                    if t > keep_turn {
+                        return l.get("id").and_then(|i| i.as_u64()).unwrap_or(0);
+                    }
+                    cut = l.get("id").and_then(|i| i.as_u64()).unwrap_or(cut) + 1;
+                }
+            }
+        }
+        cut
+    }
+
+    /// 主会话回档后，把各 agent 会话**同步**截断到"最后一个回合 ≤ T 的行"。
+    /// 正在跑的会话跳过（它自己的收尾会落盘，硬截会留下半截）。
+    fn rewind_children(&mut self, sid: &str, keep_turn: u64) -> Result<(), String> {
+        let kids: Vec<String> = self
+            .history_list()
+            .into_iter()
+            .filter(|h| h.parent.as_deref() == Some(sid))
+            .map(|h| h.name)
+            .collect();
+        for kid in kids {
+            if self.running.contains(&kid) {
+                continue;
+            }
+            let (_, events) = self.history.load(&kid)?;
+            let keep = Self::last_line_within(&truncate_events(&events), keep_turn);
+            self.history
+                .append(
+                    &kid,
+                    &[serde_json::json!({ "type": "rewind", "keep": keep })],
+                )
+                .map_err(|e| format!("子会话 {} 回档落盘失败：{}", kid, e))?;
+            if let Some(Session::Single(s)) = self.sessions.get_mut(&kid) {
+                s.rewind(keep);
+            }
+        }
+        Ok(())
     }
 
     /// 协作中途改需求：回到需求行并追加一条新需求（旧需求留在流水里，派生以最后一条为准）。

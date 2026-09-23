@@ -482,6 +482,9 @@ pub enum TurnOut {
 pub struct DiscLine {
     pub text: String,
     pub degraded: bool,
+    /// 这一行属于哪个回合（讨论的一次发言回合；0 = 不属任何回合）。
+    /// 两边的转录行靠它对齐（回档同步，见 docs/architecture/session-model.md 五）。
+    pub turn: u64,
     /// 这一行是"讨论回合里的一次核实"（只读工具调用）时带上调用视图；普通发言没有。
     /// 呈现层据此把核实行与发言行分开样式（与单 agent 的工具行同一形态）。
     pub tool: Option<ToolCallView>,
@@ -715,6 +718,8 @@ impl Discussion {
             };
             let head = output.lines().next().unwrap_or("").to_string();
             lines.push(DiscLine {
+                // 回合 id 由驱动补（它才知道整场工作的计数）；这里先占位。
+                turn: 0,
                 text: format!(
                     "[{}:{}] {} {}",
                     speaker,
@@ -828,7 +833,7 @@ impl Discussion {
                 Adv::Ask { i, msgs } => {
                     let turn = self.member_turn(i, msgs, sink)?;
                     // 开场不因请教而中止（feed 已按阶段处理）。
-                    let _ = self.feed(i, turn, on_lines, sink);
+                    let _ = self.feed(i, turn, 0, on_lines, sink);
                 }
                 // 开场问完（或已是终态）：交回上层，轮次由 step 继续。
                 Adv::Opened | Adv::Out(_) => return Ok(()),
@@ -855,7 +860,7 @@ impl Discussion {
                         Err(_) if self.cancelled() => return TurnOut::Stopped,
                         Err(err) => return TurnOut::Interrupted(err),
                     };
-                    if let Some(out) = self.feed(i, turn, on_lines, sink) {
+                    if let Some(out) = self.feed(i, turn, 0, on_lines, sink) {
                         return out;
                     }
                 }
@@ -897,6 +902,7 @@ impl Discussion {
                 text: format!("[轮次 {}]", self.round + 1),
                 degraded: false,
                 tool: None,
+                turn: 0,
             });
             // 用户回答优先转达。
             if let Some(ans) = self.pending_user_answers.first().cloned() {
@@ -905,6 +911,7 @@ impl Discussion {
                     text: format!("[用户] {}", ans),
                     degraded: false,
                     tool: None,
+                    turn: 0,
                 });
             }
             self.cursor = Cursor::At(0);
@@ -957,6 +964,7 @@ impl Discussion {
         &mut self,
         i: usize,
         turn: MemberTurn,
+        turn_id: u64,
         on_lines: &mut LineSink<'_>,
         sink: &mut dyn FnMut(SessionEvent),
     ) -> Option<TurnOut> {
@@ -964,7 +972,7 @@ impl Discussion {
         let opener = matches!(self.cursor, Cursor::Opener(_));
         let (verb, text, degraded) = (turn.verb, turn.text.clone(), turn.degraded);
         let id = self.members[i].id.clone();
-        self.absorb(&id, verb, text.clone(), degraded, turn.truncated);
+        self.absorb(&id, verb, text.clone(), degraded, turn.truncated, turn_id);
         // 逐成员外送：**这个人说完就出它那一行**，不等整轮问完。
         on_lines(&self.transcript[self.handed..], sink);
         self.handed = self.transcript.len();
@@ -989,6 +997,7 @@ impl Discussion {
                         text: note,
                         degraded: false,
                         tool: None,
+                        turn: 0,
                     });
                     return None;
                 }
@@ -1002,7 +1011,15 @@ impl Discussion {
         None
     }
 
-    fn absorb(&mut self, id: &str, verb: Verb, text: String, degraded: bool, truncated: bool) {
+    fn absorb(
+        &mut self,
+        id: &str,
+        verb: Verb,
+        text: String,
+        degraded: bool,
+        truncated: bool,
+        turn: u64,
+    ) {
         let tag = match verb {
             Verb::Say => "say",
             Verb::Ask => "ask",
@@ -1030,6 +1047,7 @@ impl Discussion {
             text: line,
             degraded,
             tool: None,
+            turn,
         });
     }
 

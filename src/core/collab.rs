@@ -560,6 +560,7 @@ impl CollabSession {
         &mut self,
         i: usize,
         turn: crate::core::engine::MemberTurn,
+        turn_id: u64,
         sink: &mut dyn FnMut(SessionEvent),
     ) {
         let next_line = std::cell::Cell::new(self.next_line);
@@ -568,11 +569,13 @@ impl CollabSession {
                             s: &mut dyn FnMut(SessionEvent)| {
             emit_new_lines(lines, &next_line, &handed, s);
         };
-        let out = self
-            .disc
-            .as_mut()
-            .expect("disc 已确认存在")
-            .feed(i, turn, &mut on_lines, sink);
+        let out = self.disc.as_mut().expect("disc 已确认存在").feed(
+            i,
+            turn,
+            turn_id,
+            &mut on_lines,
+            sink,
+        );
         self.next_line = next_line.get();
         self.emitted += handed.get();
         // 兜底：feed 提前返回时把剩下的行补齐；已交出去过的不会再出。
@@ -1012,6 +1015,8 @@ impl CollabSession {
                                     )
                                     .ok()
                                 }),
+                                // 回合 id 随行落档：回档时两边按它对上（见 session-model.md 五）。
+                                turn: l.get("turn").and_then(|t| t.as_u64()).unwrap_or(0),
                             });
                         }
                     }
@@ -1164,6 +1169,8 @@ fn emit_new_lines(
                 degraded: l.degraded,
                 // 讨论回合里的核实行带着工具视图（与单 agent 的工具行同一形态）。
                 tool: l.tool.clone(),
+                // 回合 id 落进线格式：回档时两边按它对上（见 session-model.md 五）。
+                turn: l.turn,
                 ..Default::default()
             }
         })

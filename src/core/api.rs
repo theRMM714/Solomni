@@ -563,6 +563,14 @@ impl CoreHandle {
     /// 起一轮**脱离调用方**的单 agent 生成（派发节点用）：不等它跑完。
     /// 完成后由 `single_generation` 的叫醒逻辑推进父会话——所以这里只是"点火"。
     fn spawn_detached_single(&self, sid: &str, text: &str) {
+        // 节点执行也用整场工作的同一套回合计数（回档同步靠两边同一套编号）。
+        let _ = self.call({
+            let sid = sid.to_string();
+            move |core| {
+                core.bump_turn_of_child(&sid);
+                Ok(())
+            }
+        });
         let me = self.clone();
         let (sid, text) = (sid.to_string(), text.to_string());
         let _ = std::thread::Builder::new()
@@ -677,13 +685,14 @@ impl CoreHandle {
                                 round: c.round(),
                                 turn_id: c.next_turn_id(),
                             };
+                            let turn_id = req.turn_id;
                             if ask_tx.send(req).is_err() {
                                 break;
                             }
                             // 等主线程跑完这一回合（它取会话、跑模型、落盘，再把结果送回来）。
                             let Ok(res) = turn_rx.recv() else { break };
                             match res {
-                                Ok(turn) => c.feed_with(i, turn, &mut sink),
+                                Ok(turn) => c.feed_with(i, turn, turn_id, &mut sink),
                                 Err(err) => {
                                     // 如实交回（由泵统一外送中断通知），不再往下推。
                                     c.note_turn_failure(err);

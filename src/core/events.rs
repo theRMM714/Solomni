@@ -137,6 +137,16 @@ pub struct LineView {
     /// **结构化信号**：呈现层据此做样式，不靠匹配行文本里的说明文案。
     #[serde(default, skip_serializing_if = "is_false")]
     pub degraded: bool,
+    /// 这一行属于哪个**回合**（讨论的一次发言回合；0 = 不属任何回合，如需求/用户行）。
+    /// 两边的转录行靠它对齐：回档主会话时，各 agent 会话按同一个回合 id 同步截断
+    /// （见 docs/architecture/session-model.md 五）。
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub turn: u64,
+}
+
+/// serde 用：0 时不写进线格式。
+fn is_zero(n: &u64) -> bool {
+    *n == 0
 }
 
 /// serde 用：false 时不写进线格式。

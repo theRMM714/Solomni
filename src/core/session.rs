@@ -48,6 +48,8 @@ pub struct AgentSession {
     line_reply: Vec<u64>,
     /// 正在落行的回复 id（每轮开始时设置；line() 用它，免得每个调用点都传一遍）。
     cur_reply: u64,
+    /// 正在落行的**回合 id**（讨论的回合标记用它；单 agent 回合为 0）。
+    cur_turn: u64,
 }
 
 impl AgentSession {
@@ -76,6 +78,7 @@ impl AgentSession {
         tool_texts: crate::core::prompt::ToolTexts,
     ) -> AgentSession {
         AgentSession {
+            cur_turn: 0,
             id: id.to_string(),
             history: vec![Msg::system(system)],
             chat,
@@ -108,6 +111,7 @@ impl AgentSession {
         tool_texts: crate::core::prompt::ToolTexts,
     ) -> AgentSession {
         AgentSession {
+            cur_turn: 0,
             id: id.to_string(),
             next_line: marks.len() as u64,
             history,
@@ -147,13 +151,22 @@ impl AgentSession {
         text: &str,
         tools: &[crate::core::engine::DiscLine],
     ) -> Vec<SessionEvent> {
+        // 这一回合的行都带上回合 id（回档时两边按它对上）。
+        self.cur_turn = turn_id;
         let mut views = Vec::new();
         views.push(self.line(format!("[回合 t{}｜第 {} 轮]", turn_id, round), None, None));
         for l in tools {
             views.push(self.line(l.text.clone(), None, l.tool.clone()));
         }
         views.push(self.line(format!("[{}:{}] {}", self.id, verb, text), None, None));
+        // 回合结束后清掉：后面的单 agent 回合各自另算。
+        self.cur_turn = 0;
         vec![SessionEvent::Transcript(views)]
+    }
+
+    /// 给接下来的行打上回合 id（节点执行也用整场工作的同一套计数：回档才对得上）。
+    pub fn set_turn(&mut self, turn_id: u64) {
+        self.cur_turn = turn_id;
     }
 
     /// 生成一条转录行，并记下它完成时的历史长度（回档按 marks 逐行精确回退）与它属于哪次回复。
@@ -171,6 +184,7 @@ impl AgentSession {
             reasoning,
             tool,
             degraded: false,
+            turn: self.cur_turn,
         };
         self.next_line += 1;
         self.line_reply.push(reply);
@@ -390,6 +404,7 @@ fn build_round_lines(
             reasoning,
             tool,
             degraded: false,
+            turn: round.reply, // 单 agent 的每一轮各成"回合"（回档按它对齐）
         }
     };
     let mut out = Vec::new();
