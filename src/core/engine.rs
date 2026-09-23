@@ -505,55 +505,92 @@ enum Cursor {
 
 /// 一个成员回合的结果：两套通道**统一形态**（上层不必再关心是哪条通道）。
 pub struct MemberTurn {
-    verb: Verb,
-    text: String,
-    degraded: bool,
+    pub verb: Verb,
+    pub text: String,
+    pub degraded: bool,
     /// 这一轮的输出被供应商按长度截断了（如实标注，不假装完整）。
-    truncated: bool,
+    pub truncated: bool,
+    /// 这一回合里**核实**留下的行（只读工具调用）。
+    /// 内存通道把它并进讨论转录；核心驱动时由核心落进**该 agent 自己的会话**。
+    pub lines: Vec<DiscLine>,
 }
 
 impl Discussion {
-    /// 一个成员回合：允许**先核实**（只读文件工具 read/list/search），最后用**动词**表态。
-    /// 两条通道共用这一条循环：native 从结构化槽位取调用，信封通道从正文里的信封取。
-    /// 动词 = 发言（收尾）；只读工具 = 核实（执行 → 外送核实行 → 结果回灌 → 继续，上限 MAX_TOOL_CALLS）；
-    /// 其余工具一律**如实拒绝**（讨论回合拿不到干活的手段，见 face 字段）。
+    /// 内存通道的成员回合（薄包装）：借用本席位自己的 chat/tools，把核实行并进讨论转录。
+    /// 核心驱动那条路直接调 turn_with，把核实行落进该 agent 自己的会话。
     fn member_turn(
         &mut self,
         i: usize,
+        msgs: Vec<Msg>,
+        sink: &mut dyn FnMut(SessionEvent),
+    ) -> Result<MemberTurn, String> {
+        let opts = self.opts();
+        let speaker = self.members[i].id.clone();
+        let turn = {
+            let m = &mut self.members[i];
+            let Member { chat, tools, .. } = m;
+            Self::turn_with(
+                &self.face,
+                &self.cancel,
+                opts,
+                &speaker,
+                chat.as_mut(),
+                tools.as_mut(),
+                msgs,
+                sink,
+            )?
+        };
+        self.transcript.extend(turn.lines.clone());
+        Ok(turn)
+    }
+
+    /// 一个成员回合（**关联函数**：chat/tools 由调用方给——核心驱动时来自该 agent 的会话）。
+    /// 允许**先核实**（只读文件工具 read/list/search），最后用**动词**表态。
+    /// 两条通道共用这一条循环：native 从结构化槽位取调用，信封通道从正文里的信封取。
+    /// 动词 = 发言（收尾）；只读工具 = 核实（执行 → 收进 lines → 结果回灌 → 继续，上限 MAX_TOOL_CALLS）；
+    /// 其余工具一律**如实拒绝**（讨论回合拿不到干活的手段，见 face 字段）。
+    #[allow(clippy::too_many_arguments)]
+    pub fn turn_with(
+        face: &[crate::core::ports::ToolDecl],
+        cancel: &std::sync::Arc<std::sync::atomic::AtomicBool>,
+        opts: crate::core::ports::CompleteOpts<'static>,
+        speaker: &str,
+        chat: &mut dyn Chat,
+        mut tools: Option<&mut MemberTools>,
         mut msgs: Vec<Msg>,
         sink: &mut dyn FnMut(SessionEvent),
     ) -> Result<MemberTurn, String> {
         let native = matches!(
-            self.members[i].tools.as_ref().map(|t| t.mode),
+            tools.as_ref().map(|t| t.mode),
             Some(crate::core::providers::ToolMode::Native)
         );
+        let mut lines: Vec<DiscLine> = Vec::new();
         let mut used = 0usize;
         loop {
-            if self.cancelled() {
+            if cancel.load(std::sync::atomic::Ordering::Relaxed) {
                 return Err("已停止".to_string());
             }
-            let mut opts = self.opts();
+            // 每轮都要一份（Copy）：只换 tools 槽位，其余照旧。
+            let mut opts = opts;
             if native {
-                opts.tools = Some(&self.face);
+                opts.tools = Some(face);
             }
-            let cancel = std::sync::Arc::clone(&self.cancel);
+            let stop = std::sync::Arc::clone(cancel);
             let mut keep = move |_c: crate::core::ports::Chunk| {
-                !cancel.load(std::sync::atomic::Ordering::Relaxed)
+                !stop.load(std::sync::atomic::Ordering::Relaxed)
             };
-            let done = self.members[i].chat.complete(&msgs, opts, &mut keep);
-            if self.cancelled() {
+            let done = chat.complete(&msgs, opts, &mut keep);
+            if cancel.load(std::sync::atomic::Ordering::Relaxed) {
                 return Err("已停止".to_string());
             }
             if let Some(err) = done.error.clone() {
                 return Err(err);
             }
-            // 两套通道**同语义**：native 认结构化槽位，信封从正文解析；native 没给调用时也退回正文。
             let parsed = envelope::parse(&done.raw);
             let from_text = |r: &envelope::Reply| match r.verb {
                 Verb::Tool => None,
                 v => Some((v, r.text.clone())),
             };
-            // ① 表态。降级标志跟着**来源**走：结构化槽位干净；正文信封照它自己的解析结果。
             let said: Option<(Verb, String, bool)> = if native {
                 match done
                     .calls
@@ -572,9 +609,9 @@ impl Discussion {
                     text,
                     degraded,
                     truncated: done.truncated(),
+                    lines,
                 });
             }
-            // ② 核实：取这次回复申请的调用（信封通道一次可发多个，取第一个）。
             let from_tools = |r: &envelope::Reply| {
                 r.tools
                     .first()
@@ -589,15 +626,14 @@ impl Discussion {
                 from_tools(&parsed)
             };
             let Some((name, args)) = call else {
-                // 既没表态也没申请调用：按发言原文收录（降级是**结构化信号**，由上层如实落转录）。
                 return Ok(MemberTurn {
                     verb: parsed.verb,
                     text: parsed.text,
                     degraded: parsed.degraded,
                     truncated: done.truncated(),
+                    lines,
                 });
             };
-            // ③ 只读核实工具：执行、外送、回灌、继续；其余（含模块工具）**如实拒绝**。
             let readonly = matches!(
                 name.as_str(),
                 crate::core::systool::READ
@@ -614,10 +650,11 @@ impl Discussion {
                     text: done.raw.clone(),
                     degraded: true,
                     truncated: done.truncated(),
+                    lines,
                 });
             }
             used += 1;
-            let (ok, output) = match self.members[i].tools.as_mut() {
+            let (ok, output) = match tools.as_deref_mut() {
                 Some(t) => {
                     let out = crate::core::systool::execute(
                         &t.sandbox,
@@ -630,9 +667,8 @@ impl Discussion {
                 }
                 None => (false, "这个席位没有工具环境".to_string()),
             };
-            let speaker = self.members[i].id.clone();
             let head = output.lines().next().unwrap_or("").to_string();
-            self.transcript.push(DiscLine {
+            lines.push(DiscLine {
                 text: format!(
                     "[{}:{}] {} {}",
                     speaker,
@@ -641,9 +677,8 @@ impl Discussion {
                     head
                 ),
                 degraded: false,
-                // 核实行带工具视图：呈现层据此与发言行分开样式（与单 agent 的工具行同一形态）。
                 tool: Some(ToolCallView {
-                    speaker,
+                    speaker: speaker.to_string(),
                     module: String::new(),
                     name: name.clone(),
                     ok,
@@ -654,7 +689,6 @@ impl Discussion {
                     reply: 0,
                 }),
             });
-            // 结果回灌：它的申请 + 工具结果，供它接着说（下一轮或直接表态）。
             msgs.push(Msg::assistant(done.raw.clone()));
             msgs.push(Msg::user(format!("[工具 {}]\n{}", name, output)));
         }

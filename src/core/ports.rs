@@ -57,6 +57,8 @@ impl Default for LlmOpts {
 }
 
 /// 一次补全的请求选项：策略在 core（要不要流式、要不要声明工具、给多少预算），机制在适配器。
+/// Copy：讨论回合的工具循环每轮都要一份（只换 tools 槽位，其余照旧）。
+#[derive(Clone, Copy)]
 pub struct CompleteOpts<'a> {
     pub stream: bool,
     /// 要声明的工具；None = 本次不声明（手写信封模式，或本轮不需要工具）。
