@@ -8,4 +8,5 @@ review:
     == 回报 ==
     {{reports}}
 
-    逐项核对，只输出 JSON 数组：每项 {"item":"方案条目","status":"pass|fail","evidence":"对应回报","reason":"fail 时给差距与归属"}。
+    逐项核对，用 checklist 工具交出：items 数组，每项
+    {"item":"方案条目","status":"pass|fail","evidence":"对应回报","reason":"fail 时给差距与归属"}。

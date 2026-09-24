@@ -58,6 +58,7 @@
 | lint | 位置 | 为什么是取舍而不是缺陷 |
 | --- | --- | --- |
 | `too_many_arguments` | `core/collab.rs` 的 `start` / `restore`、`core/session.rs` 的 `new` / `restore`、`core/mod.rs` 的 `Core::new` | 全是**组合根注入的构造函数**：参数天然多，收口成参数对象只是把参数挪个地方、并让装配更难读 |
+| `too_many_arguments` | `core/engine.rs` 的 `core_operation` | 与同文件的 `converse_with` / `turn_with` 同一组参数（工具面 / 通道 / 消息 / 出口）：它们必须一路透传，收口成参数对象只是把参数挪个地方 |
 | `large_enum_variant` | `core/mod.rs` 的 `enum Session` | 两变体大小差得远，但装箱只换来一次间接寻址，却把"会话本体可直接移动"这个形状改掉 |
 
 新增 allow 必须同时更新本表；理由说不清的就不该 allow。

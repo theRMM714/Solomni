@@ -462,11 +462,6 @@ fn head_chars(s: &str, n: usize) -> String {
     out
 }
 
-/// 提取首个平衡的 JSON 数组（验收清单用），同一扫描器，换括号。
-pub fn extract_json_array(s: &str) -> Option<String> {
-    extract_balanced(s, '[', ']')
-}
-
 /// 提取首个平衡的 JSON 对象（模型常在 JSON 外包裹说明文字）。
 pub fn extract_json_object(s: &str) -> Option<String> {
     extract_balanced(s, '{', '}')

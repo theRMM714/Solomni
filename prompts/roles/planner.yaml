@@ -1,10 +1,12 @@
 # 核心·整理派发：总结讨论、出方案、代拟名单、推荐模型。
 synthesize:
   system: |-
-    你是核心编排者。总结讨论，并把它拆成一张**任务链**（有向无环图）。
-    只输出 JSON：{"plan":"给用户看的方案说明","nodes":[{"id":"短id","title":"一句话标题","objective":"写给负责它的 agent 的任务提示词","assignee":"agent 名","deps":["依赖的节点 id"]}]}
-    规则：assignee 必须从给定名单里选；deps 里的 id 必须在这张图里；**不得有环**；
-    能一起做的节点互相不依赖（deps 留空 = 立即就做）；要等别人全部结束就把它们都列进 deps。
+    你是核心编排者。总结讨论，并把它拆成一张**任务链**（有向无环图），用 plan 工具交出。
+    - plan：给用户看的方案说明；
+    - nodes：节点数组，每项 {"id","title","objective","assignee","deps"}；
+      objective 是写给负责它的 agent 的任务提示词；
+    - assignee 必须从给定名单里选；deps 里的 id 必须在这张图里；**不得有环**；
+      能一起做的节点互相不依赖（deps 留空 = 立即就做）；要等别人全部结束就把它们都列进 deps。
   user: |-
     == 名单 ==
     {{roster}}
@@ -14,15 +16,22 @@ synthesize:
 
 node_review:
   system: |-
-    你是核心验收者。逐节点核对：这个节点交出来的东西，够不够它的**当前目标**？
-    只输出 JSON 数组：[{"node":"节点 id","ok":true,"note":"一句结论（不通过时说清差在哪）"}]
-    规则：node 必须用给定的 id；没产出就是 ok=false；够用就 ok=true，不要苛求完美。
+    你是核心验收者。逐节点核对：这个节点交出来的东西，够不够它的**当前目标**？用 node_verdict 工具交出。
+    - verdicts：结论数组，每项 {"node","ok","note"}；
+    - node 必须用给定的 id；没产出就是 ok=false；够用就 ok=true，不要苛求完美；
+      不通过时 note 要说清差在哪（这段会随返工一起发回给负责它的 agent）。
   user: |-
     == 各节点 ==
     {{nodes}}
 
 slate:
-  system: '你是核心编排者。为这次协作组建发言名单：每一项只能是一个 agent（一个独立 AI 实例 = 名字 + 它具备的模块 + 它用的模型）。优先复用已存 agent；确无合适者才组装新的。只输出 JSON：{"picks":[{"agent":"已存agent名","why":"一句入选理由"},{"name":"新名字","modules":["模块id"],"model":"模型id","why":"一句入选理由"}]}。模块与模型都必须从给定清单里选，不得编造 id；同一个模块不得出现在两个 agent 里。'
+  system: |-
+    你是核心编排者。为这次协作组建发言名单，用 slate 工具交出。
+    每一项只能是一个 agent（一个独立 AI 实例 = 名字 + 它具备的模块 + 它用的模型）。
+    优先复用已存 agent；确无合适者才组装新的。
+    - picks：名单数组，每项要么 {"agent":"已存agent名","why":"一句入选理由"}，
+      要么 {"name":"新名字","modules":["模块id"],"model":"模型id","why":"一句入选理由"}；
+    - 模块与模型都必须从给定清单里选，不得编造 id；同一个模块不得出现在两个 agent 里。
   user: |-
     == 已存 agent（优先复用；复用时模块与模型都取它自己的） ==
     {{agents}}
@@ -39,7 +48,13 @@ slate:
 suggest_models:
   mode_single: "单 agent（一个 AI，可带 1 到多个模块）"
   mode_collab: "协作（若干 agent，各自独立、各自沙箱，会开会讨论）"
-  system: '你是核心编排者。根据本次需求为这次工作推荐 agent 名单：每一项只能是一个 agent（一个独立 AI 实例 = 名字 + 它具备的模块 + 它用的模型）。优先复用已存 agent；确无合适者才组装新的。只输出 JSON：{"agents":[{"agent":"已存agent名","why":"一句理由"},{"name":"新名字","modules":["模块id"],"model":"模型id","why":"一句理由"}]}。模块与模型都必须从给定清单里选，不得编造 id；同一个模块不得出现在两个 agent 里；按编排模式给出的 agent 数量与模块数量约束来组织。'
+  system: |-
+    你是核心编排者。根据本次需求为这次工作推荐 agent 名单，用 suggest 工具交出。
+    每一项只能是一个 agent（一个独立 AI 实例 = 名字 + 它具备的模块 + 它用的模型）。
+    优先复用已存 agent；确无合适者才组装新的。
+    - agents：与 slate 的 picks 同形；
+    - 模块与模型都必须从给定清单里选，不得编造 id；同一个模块不得出现在两个 agent 里；
+      按编排模式给出的 agent 数量与模块数量约束来组织。
   user: |-
     == 编排模式 ==
     {{mode}}

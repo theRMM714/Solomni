@@ -1202,10 +1202,11 @@ impl Discussion {
 
     /// 全员同意后：核心整理——总结讨论，为每个留下的成员写执行任务提示词。
     /// 整理：核心 AI 总结讨论并出**任务链**（见 docs/architecture/task-chain.md）。
-    /// 回执必须是 JSON（plan + nodes）；解析不了就**如实报错**，不把原文当方案糊过去。
+    /// 产出走 **plan 工具调用**（核心操作不手写 JSON）；没调用或载荷不合法就**如实报错**。
     pub fn synthesize(
         &self,
         core_chat: &mut dyn Chat,
+        mode: crate::core::providers::ToolMode,
     ) -> Result<(String, crate::core::chain::TaskChain), String> {
         let roster = self
             .members
@@ -1238,19 +1239,22 @@ impl Discussion {
         let cancel = std::sync::Arc::clone(&self.cancel);
         let mut keep =
             move |_c: crate::core::ports::Chunk| !cancel.load(std::sync::atomic::Ordering::Relaxed);
-        let done = core_chat.complete(&msgs, self.opts(), &mut keep);
+        // 核心操作走工具调用：载荷形状与从前一致（plan + nodes），只是入口变成 plan 工具。
+        let payload = core_operation(
+            &self.prompts.systools,
+            "planner",
+            "plan",
+            mode,
+            core_chat,
+            &msgs,
+            self.opts(),
+            &mut keep,
+        )?;
         if self.cancelled() {
             return Err("已停止".to_string());
         }
-        if let Some(err) = done.error {
-            return Err(err);
-        }
-        let raw = done.raw;
-        // 结构化回执：解析不了就如实报错（附原文前 200 字，便于判断是格式漂了还是模型没照做）。
-        let obj = envelope::extract_json_object(&raw)
-            .ok_or_else(|| format!("整理没有给出 JSON 形状的任务链：{}", head_chars(&raw, 200)))?;
-        let parsed: SynthReply = serde_json::from_str(&obj)
-            .map_err(|e| format!("整理的任务链不合法（{}）：{}", e, head_chars(&obj, 200)))?;
+        let parsed: SynthReply = serde_json::from_value(payload)
+            .map_err(|e| format!("plan 工具的载荷不合法（{}）", e))?;
         let chain = crate::core::chain::TaskChain {
             nodes: parsed
                 .nodes
@@ -1349,6 +1353,7 @@ impl Execution {
         plan: &str,
         prompts: &Prompts,
         llm: crate::core::ports::LlmOpts,
+        mode: crate::core::providers::ToolMode,
     ) {
         let reports = self
             .reports
@@ -1372,20 +1377,35 @@ impl Execution {
             crate::core::ports::CompleteOpts::plain(llm.stream).with_timeout(llm.timeout_secs);
         let cancel = std::sync::Arc::clone(&self.cancel);
         let mut keep = move |_c: Chunk| !cancel.load(std::sync::atomic::Ordering::Relaxed);
-        let done = core_chat.complete(&msgs, opts, &mut keep);
+        // 核心操作走工具调用：总验收清单由 checklist 工具承载。
+        let made = core_operation(
+            &prompts.systools,
+            "orchestrator",
+            "checklist",
+            mode,
+            core_chat,
+            &msgs,
+            opts,
+            &mut keep,
+        );
         if self.cancelled() {
             self.stopped = true;
             return;
         }
-        if let Some(err) = done.error.clone() {
-            self.error = Some(err);
-            return;
+        match made {
+            Ok(payload) => {
+                // 载荷里的 items 数组；形状不对就如实记空清单（all_pass 保守判否）。
+                self.items = payload
+                    .get("items")
+                    .cloned()
+                    .and_then(|v| serde_json::from_value::<Vec<CheckItem>>(v).ok())
+                    .unwrap_or_default();
+                self.checklist_raw = payload.to_string();
+            }
+            Err(err) => {
+                self.error = Some(err);
+            }
         }
-        let raw = done.raw;
-        self.items = envelope::extract_json_array(&raw)
-            .and_then(|arr| serde_json::from_str::<Vec<CheckItem>>(&arr).ok())
-            .unwrap_or_default();
-        self.checklist_raw = raw;
     }
 
     pub fn all_pass(&self) -> bool {
@@ -1403,6 +1423,62 @@ pub struct ToolRun {
     pub view: ToolCallView,
     /// 该工具行压进历史的消息（[工具结果] …）。
     pub msgs: Vec<Msg>,
+}
+
+/// 核心 AI 的一次**操作**：声明该角色的工具面、跑一次模型、从**工具调用参数**里取载荷。
+///
+/// 为什么必须走工具调用（见 docs/architecture/tools-and-roles.md）：核心操作会驱动核心走下一步
+/// （建任务链、判交付、确认名单、推进状态机），属于"操作"而不是"说话"——
+/// 正文里手写 JSON 既没有 schema 校验、也不进工具台账，写坏就整轮失败。
+///
+/// 两条通道都认：native 从结构化槽位取；手写信封从正文里的信封取。
+// 与 turn_with / converse_with 同一组参数（工具面 / 通道 / 消息 / 出口）：不是随手堆参数，
+// 收口成参数对象只会把参数挪个地方、并让"谁拿到什么"更难读。有意取舍（见 docs/testing/quality-isolation.md）。
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn core_operation(
+    systools: &crate::core::roles::SystemTools,
+    role: &str,
+    tool: &str,
+    mode: crate::core::providers::ToolMode,
+    chat: &mut dyn Chat,
+    msgs: &[Msg],
+    opts: crate::core::ports::CompleteOpts<'static>,
+    keep: &mut dyn FnMut(crate::core::ports::Chunk) -> bool,
+) -> Result<serde_json::Value, String> {
+    // 声明面按**通道形态**给：原生通道才声明（信封通道的模型看提示词里的工具说明）。
+    let mut opts = opts;
+    let decls: Vec<crate::core::ports::ToolDecl> =
+        if mode == crate::core::providers::ToolMode::Native {
+            systools
+                .tool_face(role)
+                .map(|f| f.into_iter().map(|(id, s)| s.decl(id)).collect())
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+    if !decls.is_empty() {
+        opts.tools = Some(&decls);
+    }
+    let done = chat.complete(msgs, opts, keep);
+    if let Some(err) = done.error {
+        return Err(err);
+    }
+    // native：结构化槽位里找这个名字的调用。
+    if let Some(c) = done.calls.iter().find(|c| c.name == tool) {
+        return serde_json::from_str(&c.args_json)
+            .map_err(|e| format!("{} 的参数不是合法 JSON（{}）：{}", tool, e, c.args_json));
+    }
+    // 手写信封：正文里的信封里找。
+    let parsed = crate::core::envelope::parse(&done.raw);
+    if let Some(t) = parsed.tools.iter().find(|t| t.name == tool) {
+        return serde_json::from_str(&t.args_json)
+            .map_err(|e| format!("{} 的参数不是合法 JSON（{}）：{}", tool, e, t.args_json));
+    }
+    Err(format!(
+        "没有调用 {}（核心操作必须走工具调用）：{}",
+        tool,
+        head_chars(&done.raw, 200)
+    ))
 }
 
 /// 把**一次模型回复**翻译成发给模型的消息——**实时与重建都只走这一处**。

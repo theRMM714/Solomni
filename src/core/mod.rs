@@ -300,11 +300,6 @@ pub struct FilesAgentRootView {
     pub root: String,
 }
 
-#[derive(serde::Deserialize)]
-struct SuggestReply {
-    agents: Vec<agents::RosterPick>,
-}
-
 /// 核心门面：持有注入的端口与会话中心；前端只经此操作。
 /// 线程共享形态：组合根把它放进 Arc 加 Mutex（Web 多连接/多会话所需）。
 pub struct Core {
@@ -2046,26 +2041,33 @@ impl Core {
             ],
         );
         let (mut chat, _) = self.gateway.core_channel(Some(&channel));
-        let raw = chat
-            .complete(
-                &[
-                    Msg::system(self.prompts.core.suggest_models.system.clone()),
-                    Msg::user(user),
-                ],
-                crate::core::ports::CompleteOpts::plain(false),
-                &mut |_| true,
-            )
-            .raw;
-        let parsed = envelope::extract_json_object(&raw)
-            .and_then(|obj| serde_json::from_str::<SuggestReply>(&obj).ok())
+        // 核心操作走工具调用：推荐名单由 suggest 工具承载。
+        let payload = crate::core::engine::core_operation(
+            &self.prompts.systools,
+            "planner",
+            "suggest",
+            self.settings.tool_mode_for(None),
+            chat.as_mut(),
+            &[
+                Msg::system(self.prompts.core.suggest_models.system.clone()),
+                Msg::user(user),
+            ],
+            crate::core::ports::CompleteOpts::plain(false),
+            &mut |_| true,
+        )?;
+        // 载荷里就是名单**数组**本身（工具参数 agents 的值）。
+        let parsed: Vec<agents::RosterPick> = payload
+            .get("agents")
+            .cloned()
+            .and_then(|v| serde_json::from_value(v).ok())
             .ok_or_else(|| {
                 format!(
-                    "核心推荐失败（响应不是约定的 JSON）：{}",
-                    raw.chars().take(200).collect::<String>()
+                    "核心推荐的载荷没有 agents 数组：{}",
+                    payload.to_string().chars().take(200).collect::<String>()
                 )
             })?;
         let (picks, rejected) = agents::resolve_picks(
-            parsed.agents,
+            parsed,
             &self.settings.agents,
             &roster,
             &self.settings.models,

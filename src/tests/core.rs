@@ -594,7 +594,7 @@ pub(crate) fn collab_update_task_rewinds_and_latest_wins() {
 #[test]
 pub(crate) fn suggest_models_recommends_agents() {
     // 不存在的模块 / 不存在的模型 / 重复占用的模块一律拒收。
-    let script = "{\"agents\":[{\"name\":\"甲\",\"modules\":[\"a\"],\"model\":\"m\",\"why\":\"对口\"},{\"name\":\"乙\",\"modules\":[\"b\"],\"model\":\"m\",\"why\":\"补位\"},{\"name\":\"鬼\",\"modules\":[\"ghost\"],\"model\":\"m\",\"why\":\"模块不存在\"},{\"name\":\"丙\",\"modules\":[\"a\"],\"model\":\"nope\",\"why\":\"模型不存在\"},{\"name\":\"丁\",\"modules\":[\"a\"],\"model\":\"m\",\"why\":\"重复占模块\"}]}".to_string();
+    let script = "{\"type\":\"tool\",\"name\":\"suggest\",\"args\":{\"agents\":[{\"name\":\"甲\",\"modules\":[\"a\"],\"model\":\"m\",\"why\":\"对口\"},{\"name\":\"乙\",\"modules\":[\"b\"],\"model\":\"m\",\"why\":\"补位\"},{\"name\":\"鬼\",\"modules\":[\"ghost\"],\"model\":\"m\",\"why\":\"模块不存在\"},{\"name\":\"丙\",\"modules\":[\"a\"],\"model\":\"nope\",\"why\":\"模型不存在\"},{\"name\":\"丁\",\"modules\":[\"a\"],\"model\":\"m\",\"why\":\"重复占模块\"}]}}".to_string();
     let core = core_with(
         vec![module_of("a"), module_of("b")],
         gw(BTreeMap::new(), vec![script.clone()]),
@@ -618,7 +618,7 @@ pub(crate) fn suggest_models_recommends_agents() {
 pub(crate) fn suggest_models_single_mode_keeps_lone_pick_as_is() {
     // 只给一条 → 原样采纳（模块数与 reuse 都保持它自己的，不裁模块、不改 reuse）。
     let core = core_with(vec![module_of("a"), module_of("b")], gw(BTreeMap::new(), vec![
-        "{\"agents\":[{\"name\":\"全能\",\"modules\":[\"a\",\"b\"],\"model\":\"m\",\"why\":\"一个 AI 全包\"}]}".to_string(),
+        "{\"type\":\"tool\",\"name\":\"suggest\",\"args\":{\"agents\":[{\"name\":\"全能\",\"modules\":[\"a\",\"b\"],\"model\":\"m\",\"why\":\"一个 AI 全包\"}]}}".to_string(),
     ]));
     let out = core.suggest_models("做个东西", WorkMode::Single).unwrap();
     assert_eq!(out.len(), 1);
@@ -634,7 +634,10 @@ pub(crate) fn suggest_models_single_mode_keeps_lone_pick_as_is() {
         vec![module_of("a")],
         gw(
             BTreeMap::new(),
-            vec!["{\"agents\":[{\"agent\":\"调研\",\"why\":\"正好\"}]}".to_string()],
+            vec![
+                "{\"type\":\"tool\",\"name\":\"suggest\",\"args\":{\"agents\":[{\"agent\":\"调研\",\"why\":\"正好\"}]}}"
+                    .to_string(),
+            ],
         ),
     );
     reuse
@@ -650,7 +653,7 @@ pub(crate) fn suggest_models_single_mode_keeps_lone_pick_as_is() {
 pub(crate) fn suggest_models_reuses_stored_agent_without_suggesting_model() {
     let mut core = core_with(vec![module_of("a")], gw(BTreeMap::new(), vec![
         // 只有复用项（模型与模块都取登记处自己的）；幽灵项应被拒收。
-        "{\"agents\":[{\"agent\":\"调研\",\"why\":\"正好用得上\"},{\"agent\":\"幽灵\",\"why\":\"不在登记处\"}]}".to_string(),
+        "{\"type\":\"tool\",\"name\":\"suggest\",\"args\":{\"agents\":[{\"agent\":\"调研\",\"why\":\"正好用得上\"},{\"agent\":\"幽灵\",\"why\":\"不在登记处\"}]}}".to_string(),
     ]));
     core.agent_upsert("调研", &["a".to_string()], "m", "说明")
         .unwrap();
@@ -665,7 +668,10 @@ pub(crate) fn suggest_models_reuses_stored_agent_without_suggesting_model() {
         vec![module_of("a")],
         gw(
             BTreeMap::new(),
-            vec!["{\"agents\":[{\"agent\":\"幽灵\",\"why\":\"不在登记处\"}]}".to_string()],
+            vec![
+                "{\"type\":\"tool\",\"name\":\"suggest\",\"args\":{\"agents\":[{\"agent\":\"幽灵\",\"why\":\"不在登记处\"}]}}"
+                    .to_string(),
+            ],
         ),
     );
     empty
@@ -1585,9 +1591,9 @@ pub(crate) fn rewinding_the_main_session_truncates_agent_sessions_by_turn() {
         gw(
             member,
             vec![
-                "{\"plan\":\"方案\",\"nodes\":[{\"id\":\"n1\",\"title\":\"做\",\"objective\":\"做\",\"assignee\":\"a\",\"deps\":[]}]}".to_string(),
-                "[{\"node\":\"n1\",\"ok\":true,\"note\":\"够用\"}]".to_string(),
-                "[{\"item\":\"做\",\"status\":\"pass\"}]".to_string(),
+                "{\"type\":\"tool\",\"name\":\"plan\",\"args\":{\"plan\":\"方案\",\"nodes\":[{\"id\":\"n1\",\"title\":\"做\",\"objective\":\"做\",\"assignee\":\"a\",\"deps\":[]}]}}".to_string(),
+                "{\"type\":\"tool\",\"name\":\"node_verdict\",\"args\":{\"verdicts\":[{\"node\":\"n1\",\"ok\":true,\"note\":\"够用\"}]}}".to_string(),
+                "{\"type\":\"tool\",\"name\":\"checklist\",\"args\":{\"items\":[{\"item\":\"做\",\"status\":\"pass\"}]}}".to_string(),
             ],
         ),
     );
@@ -1689,9 +1695,9 @@ pub(crate) fn discussion_member_can_inspect_before_speaking() {
         gw(
             member,
             vec![
-                "{\"plan\":\"方案\",\"nodes\":[{\"id\":\"n1\",\"title\":\"做\",\"objective\":\"做\",\"assignee\":\"a\",\"deps\":[]}]}".to_string(),
-                "[{\"node\":\"n1\",\"ok\":true,\"note\":\"够用\"}]".to_string(),
-                "[{\"item\":\"做\",\"status\":\"pass\"}]".to_string(),
+                "{\"type\":\"tool\",\"name\":\"plan\",\"args\":{\"plan\":\"方案\",\"nodes\":[{\"id\":\"n1\",\"title\":\"做\",\"objective\":\"做\",\"assignee\":\"a\",\"deps\":[]}]}}".to_string(),
+                "{\"type\":\"tool\",\"name\":\"node_verdict\",\"args\":{\"verdicts\":[{\"node\":\"n1\",\"ok\":true,\"note\":\"够用\"}]}}".to_string(),
+                "{\"type\":\"tool\",\"name\":\"checklist\",\"args\":{\"items\":[{\"item\":\"做\",\"status\":\"pass\"}]}}".to_string(),
             ],
         ),
     );
@@ -1739,9 +1745,9 @@ pub(crate) fn discussion_member_cannot_call_a_builtin_outside_its_role_face() {
         gw(
             member,
             vec![
-                "{\"plan\":\"方案\",\"nodes\":[{\"id\":\"n1\",\"title\":\"做\",\"objective\":\"做\",\"assignee\":\"a\",\"deps\":[]}]}".to_string(),
-                "[{\"node\":\"n1\",\"ok\":true,\"note\":\"够用\"}]".to_string(),
-                "[{\"item\":\"做\",\"status\":\"pass\"}]".to_string(),
+                "{\"type\":\"tool\",\"name\":\"plan\",\"args\":{\"plan\":\"方案\",\"nodes\":[{\"id\":\"n1\",\"title\":\"做\",\"objective\":\"做\",\"assignee\":\"a\",\"deps\":[]}]}}".to_string(),
+                "{\"type\":\"tool\",\"name\":\"node_verdict\",\"args\":{\"verdicts\":[{\"node\":\"n1\",\"ok\":true,\"note\":\"够用\"}]}}".to_string(),
+                "{\"type\":\"tool\",\"name\":\"checklist\",\"args\":{\"items\":[{\"item\":\"做\",\"status\":\"pass\"}]}}".to_string(),
             ],
         ),
     );
@@ -1777,9 +1783,9 @@ pub(crate) fn discussion_member_cannot_use_module_tools() {
         gw(
             member,
             vec![
-                "{\"plan\":\"方案\",\"nodes\":[{\"id\":\"n1\",\"title\":\"做\",\"objective\":\"做\",\"assignee\":\"a\",\"deps\":[]}]}".to_string(),
-                "[{\"node\":\"n1\",\"ok\":true,\"note\":\"够用\"}]".to_string(),
-                "[{\"item\":\"做\",\"status\":\"pass\"}]".to_string(),
+                "{\"type\":\"tool\",\"name\":\"plan\",\"args\":{\"plan\":\"方案\",\"nodes\":[{\"id\":\"n1\",\"title\":\"做\",\"objective\":\"做\",\"assignee\":\"a\",\"deps\":[]}]}}".to_string(),
+                "{\"type\":\"tool\",\"name\":\"node_verdict\",\"args\":{\"verdicts\":[{\"node\":\"n1\",\"ok\":true,\"note\":\"够用\"}]}}".to_string(),
+                "{\"type\":\"tool\",\"name\":\"checklist\",\"args\":{\"items\":[{\"item\":\"做\",\"status\":\"pass\"}]}}".to_string(),
             ],
         ),
     );
@@ -1877,16 +1883,31 @@ pub(crate) fn execution_review_pass_and_fail_paths() {
     let mut exec = crate::core::engine::Execution::new();
     exec.reports = ran.reports.clone();
     let mut core_chat = scripted(vec![
-        "[{\"item\":\"A\",\"status\":\"fail\",\"reason\":\"没做完\"}]".into(),
+        "{\"type\":\"tool\",\"name\":\"checklist\",\"args\":{\"items\":[{\"item\":\"A\",\"status\":\"fail\",\"reason\":\"没做完\"}]}}".into(),
     ]);
-    exec.review(core_chat.as_mut(), "方案", &prompts, Default::default());
+    exec.review(
+        core_chat.as_mut(),
+        "方案",
+        &prompts,
+        Default::default(),
+        Default::default(),
+    );
     assert!(!exec.all_pass(), "有 fail 项就不通过");
 
     // 再验一次：这次全 pass。
     let mut exec2 = crate::core::engine::Execution::new();
     exec2.reports = ran.reports.clone();
-    let mut core_chat2 = scripted(vec!["[{\"item\":\"A\",\"status\":\"pass\"}]".into()]);
-    exec2.review(core_chat2.as_mut(), "方案", &prompts, Default::default());
+    let mut core_chat2 = scripted(vec![
+        "{\"type\":\"tool\",\"name\":\"checklist\",\"args\":{\"items\":[{\"item\":\"A\",\"status\":\"pass\"}]}}"
+            .into(),
+    ]);
+    exec2.review(
+        core_chat2.as_mut(),
+        "方案",
+        &prompts,
+        Default::default(),
+        Default::default(),
+    );
     assert!(exec2.all_pass());
 }
 
@@ -1901,7 +1922,13 @@ pub(crate) fn review_parse_failure_is_conservative_fail() {
     let mut exec = crate::core::engine::Execution::new();
     exec.reports = run_execution(members.as_mut_slice(), "任务", &prompts).reports;
     let mut core_chat = scripted(vec!["完全不是清单".to_string()]);
-    exec.review(core_chat.as_mut(), "方案", &prompts, Default::default());
+    exec.review(
+        core_chat.as_mut(),
+        "方案",
+        &prompts,
+        Default::default(),
+        Default::default(),
+    );
     assert!(exec.items.is_empty());
     assert!(!exec.all_pass(), "解析失败必须保守判否");
 }
@@ -2031,9 +2058,9 @@ pub(crate) fn approved_plan_spawns_a_sub_session_per_ready_node() {
         gw(
             member,
             vec![
-                "{\"plan\":\"方案：A 做 X\",\"nodes\":[{\"id\":\"n1\",\"title\":\"做 X\",\"objective\":\"把 X 做完\",\"assignee\":\"a\",\"deps\":[]}]}".to_string(),
-                "[{\"node\":\"n1\",\"ok\":true,\"note\":\"够用\"}]".to_string(),
-                "[{\"item\":\"做 X\",\"status\":\"pass\"}]".to_string(),
+                "{\"type\":\"tool\",\"name\":\"plan\",\"args\":{\"plan\":\"方案：A 做 X\",\"nodes\":[{\"id\":\"n1\",\"title\":\"做 X\",\"objective\":\"把 X 做完\",\"assignee\":\"a\",\"deps\":[]}]}}".to_string(),
+                "{\"type\":\"tool\",\"name\":\"node_verdict\",\"args\":{\"verdicts\":[{\"node\":\"n1\",\"ok\":true,\"note\":\"够用\"}]}}".to_string(),
+                "{\"type\":\"tool\",\"name\":\"checklist\",\"args\":{\"items\":[{\"item\":\"做 X\",\"status\":\"pass\"}]}}".to_string(),
             ],
         ),
     );
@@ -2100,9 +2127,9 @@ pub(crate) fn same_agent_nodes_serialize_but_different_agents_run_together() {
             member,
             vec![
                 // 三个节点都没有依赖：n1/n2 都归 a（该串行），n3 归 b（该和 n1 一起开工）。
-                "{\"plan\":\"方案\",\"nodes\":[{\"id\":\"n1\",\"title\":\"一\",\"objective\":\"做一\",\"assignee\":\"a\",\"deps\":[]},{\"id\":\"n2\",\"title\":\"二\",\"objective\":\"做二\",\"assignee\":\"a\",\"deps\":[]},{\"id\":\"n3\",\"title\":\"三\",\"objective\":\"做三\",\"assignee\":\"b\",\"deps\":[]}]}".to_string(),
-                "[{\"node\":\"n1\",\"ok\":true,\"note\":\"够用\"},{\"node\":\"n2\",\"ok\":true,\"note\":\"够用\"},{\"node\":\"n3\",\"ok\":true,\"note\":\"够用\"}]".to_string(),
-                "[{\"item\":\"做\",\"status\":\"pass\"}]".to_string(),
+                "{\"type\":\"tool\",\"name\":\"plan\",\"args\":{\"plan\":\"方案\",\"nodes\":[{\"id\":\"n1\",\"title\":\"一\",\"objective\":\"做一\",\"assignee\":\"a\",\"deps\":[]},{\"id\":\"n2\",\"title\":\"二\",\"objective\":\"做二\",\"assignee\":\"a\",\"deps\":[]},{\"id\":\"n3\",\"title\":\"三\",\"objective\":\"做三\",\"assignee\":\"b\",\"deps\":[]}]}}".to_string(),
+                "{\"type\":\"tool\",\"name\":\"node_verdict\",\"args\":{\"verdicts\":[{\"node\":\"n1\",\"ok\":true,\"note\":\"够用\"},{\"node\":\"n2\",\"ok\":true,\"note\":\"够用\"},{\"node\":\"n3\",\"ok\":true,\"note\":\"够用\"}]}}".to_string(),
+                "{\"type\":\"tool\",\"name\":\"checklist\",\"args\":{\"items\":[{\"item\":\"做\",\"status\":\"pass\"}]}}".to_string(),
             ],
         ),
     );
@@ -2146,12 +2173,12 @@ pub(crate) fn failed_node_acceptance_pauses_then_continue_redispatches() {
         gw(
             member,
             vec![
-                "{\"plan\":\"方案：A 做 X\",\"nodes\":[{\"id\":\"n1\",\"title\":\"做 X\",\"objective\":\"把 X 做完\",\"assignee\":\"a\",\"deps\":[]}]}".to_string(),
+                "{\"type\":\"tool\",\"name\":\"plan\",\"args\":{\"plan\":\"方案：A 做 X\",\"nodes\":[{\"id\":\"n1\",\"title\":\"做 X\",\"objective\":\"把 X 做完\",\"assignee\":\"a\",\"deps\":[]}]}}".to_string(),
                 // 第一次节点验收：没过 → 该暂停等用户。
-                "[{\"node\":\"n1\",\"ok\":false,\"note\":\"还差依据\"}]".to_string(),
+                "{\"type\":\"tool\",\"name\":\"node_verdict\",\"args\":{\"verdicts\":[{\"node\":\"n1\",\"ok\":false,\"note\":\"还差依据\"}]}}".to_string(),
                 // 「继续」之后重派并再验：这次过。
-                "[{\"node\":\"n1\",\"ok\":true,\"note\":\"够用\"}]".to_string(),
-                "[{\"item\":\"做 X\",\"status\":\"pass\"}]".to_string(),
+                "{\"type\":\"tool\",\"name\":\"node_verdict\",\"args\":{\"verdicts\":[{\"node\":\"n1\",\"ok\":true,\"note\":\"够用\"}]}}".to_string(),
+                "{\"type\":\"tool\",\"name\":\"checklist\",\"args\":{\"items\":[{\"item\":\"做 X\",\"status\":\"pass\"}]}}".to_string(),
             ],
         ),
     );
@@ -2208,9 +2235,9 @@ pub(crate) fn collab_pauses_for_plan_review_until_the_user_approves() {
         gw(
             member,
             vec![
-                "{\"plan\":\"方案：A 做 X\",\"nodes\":[{\"id\":\"n1\",\"title\":\"做 X\",\"objective\":\"把 X 做完\",\"assignee\":\"a\",\"deps\":[]}]}".to_string(),
-                "[{\"node\":\"n1\",\"ok\":true,\"note\":\"够用\"}]".to_string(),
-                "[{\"item\":\"做 X\",\"status\":\"pass\",\"evidence\":\"已做\"}]".to_string(),
+                "{\"type\":\"tool\",\"name\":\"plan\",\"args\":{\"plan\":\"方案：A 做 X\",\"nodes\":[{\"id\":\"n1\",\"title\":\"做 X\",\"objective\":\"把 X 做完\",\"assignee\":\"a\",\"deps\":[]}]}}".to_string(),
+                "{\"type\":\"tool\",\"name\":\"node_verdict\",\"args\":{\"verdicts\":[{\"node\":\"n1\",\"ok\":true,\"note\":\"够用\"}]}}".to_string(),
+                "{\"type\":\"tool\",\"name\":\"checklist\",\"args\":{\"items\":[{\"item\":\"做 X\",\"status\":\"pass\",\"evidence\":\"已做\"}]}}".to_string(),
             ],
         ),
     );
@@ -2288,9 +2315,9 @@ pub(crate) fn core_collab_demo_runs_full_five_stages() {
         gw(
             member,
             vec![
-                "{\"plan\":\"方案：A 做 X\",\"nodes\":[{\"id\":\"n1\",\"title\":\"做 X\",\"objective\":\"把 X 做完\",\"assignee\":\"a\",\"deps\":[]}]}".to_string(),
-                "[{\"node\":\"n1\",\"ok\":true,\"note\":\"够用\"}]".to_string(),
-                "[{\"item\":\"做 X\",\"status\":\"pass\",\"evidence\":\"已做\"}]".to_string(),
+                "{\"type\":\"tool\",\"name\":\"plan\",\"args\":{\"plan\":\"方案：A 做 X\",\"nodes\":[{\"id\":\"n1\",\"title\":\"做 X\",\"objective\":\"把 X 做完\",\"assignee\":\"a\",\"deps\":[]}]}}".to_string(),
+                "{\"type\":\"tool\",\"name\":\"node_verdict\",\"args\":{\"verdicts\":[{\"node\":\"n1\",\"ok\":true,\"note\":\"够用\"}]}}".to_string(),
+                "{\"type\":\"tool\",\"name\":\"checklist\",\"args\":{\"items\":[{\"item\":\"做 X\",\"status\":\"pass\",\"evidence\":\"已做\"}]}}".to_string(),
             ],
         ),
     );
@@ -2334,10 +2361,10 @@ pub(crate) fn core_collab_delegated_slate_flow() {
     );
     let mut core = core_with(vec![module_of("a")], gw(member, vec![
         // 代拟（组装一个 agent）→ 整理 → 验收。
-        "{\"picks\":[{\"name\":\"a\",\"modules\":[\"a\"],\"model\":\"m\",\"why\":\"对口\"}]}".to_string(),
-        "{\"plan\":\"方案：A 做 X\",\"nodes\":[{\"id\":\"n1\",\"title\":\"做 X\",\"objective\":\"把 X 做完\",\"assignee\":\"a\",\"deps\":[]}]}".to_string(),
-        "[{\"node\":\"n1\",\"ok\":true,\"note\":\"够用\"}]".to_string(),
-        "[{\"item\":\"做 X\",\"status\":\"pass\"}]".to_string(),
+        "{\"type\":\"tool\",\"name\":\"slate\",\"args\":{\"picks\":[{\"name\":\"a\",\"modules\":[\"a\"],\"model\":\"m\",\"why\":\"对口\"}]}}".to_string(),
+        "{\"type\":\"tool\",\"name\":\"plan\",\"args\":{\"plan\":\"方案：A 做 X\",\"nodes\":[{\"id\":\"n1\",\"title\":\"做 X\",\"objective\":\"把 X 做完\",\"assignee\":\"a\",\"deps\":[]}]}}".to_string(),
+        "{\"type\":\"tool\",\"name\":\"node_verdict\",\"args\":{\"verdicts\":[{\"node\":\"n1\",\"ok\":true,\"note\":\"够用\"}]}}".to_string(),
+        "{\"type\":\"tool\",\"name\":\"checklist\",\"args\":{\"items\":[{\"item\":\"做 X\",\"status\":\"pass\"}]}}".to_string(),
     ]));
     let opened = core
         .create_work(collab_work("w", &[], true, "做个东西"))
@@ -2379,9 +2406,9 @@ pub(crate) fn core_collab_delegated_slate_flow() {
 pub(crate) fn core_collab_slate_rejects_invalid_picks() {
     // 不存在的模块 / 不存在的模型 / 不在登记处的复用项：整条拒收，合法的留下。
     let mut core = core_with(vec![module_of("a")], gw(BTreeMap::new(), vec![
-        "{\"picks\":[{\"name\":\"鬼\",\"modules\":[\"ghost\"],\"model\":\"m\",\"why\":\"模块不存在\"},{\"agent\":\"幽灵\",\"why\":\"不在登记处\"},{\"name\":\"甲\",\"modules\":[\"a\"],\"model\":\"nope\",\"why\":\"模型不存在\"},{\"name\":\"乙\",\"modules\":[\"a\"],\"model\":\"m\",\"why\":\"对口\"}]}".to_string(),
+        "{\"type\":\"tool\",\"name\":\"slate\",\"args\":{\"picks\":[{\"name\":\"鬼\",\"modules\":[\"ghost\"],\"model\":\"m\",\"why\":\"模块不存在\"},{\"agent\":\"幽灵\",\"why\":\"不在登记处\"},{\"name\":\"甲\",\"modules\":[\"a\"],\"model\":\"nope\",\"why\":\"模型不存在\"},{\"name\":\"乙\",\"modules\":[\"a\"],\"model\":\"m\",\"why\":\"对口\"}]}}".to_string(),
         "{\"type\":\"say\",\"text\":\"方案\"}".to_string(),
-        "[{\"item\":\"x\",\"status\":\"pass\"}]".to_string(),
+        "{\"type\":\"tool\",\"name\":\"checklist\",\"args\":{\"items\":[{\"item\":\"x\",\"status\":\"pass\"}]}}".to_string(),
     ]));
     let ev = core
         .create_work(collab_work("w", &[], true, "任务"))
@@ -2410,11 +2437,11 @@ pub(crate) fn collab_delegated_roster_written_back_and_rebuilt_from_meta() {
         ],
     );
     let mut core = core_with(vec![module_of("a")], gw(member, vec![
-        "{\"picks\":[{\"name\":\"调研员\",\"modules\":[\"a\"],\"model\":\"m\",\"why\":\"对口\"}]}".to_string(),
+        "{\"type\":\"tool\",\"name\":\"slate\",\"args\":{\"picks\":[{\"name\":\"调研员\",\"modules\":[\"a\"],\"model\":\"m\",\"why\":\"对口\"}]}}".to_string(),
         // 负责人必须是**名单里真实存在的席位**（代拟出来的叫"调研员"）——否则链的自洽门禁会如实挡下。
-        "{\"plan\":\"方案：A 做 X\",\"nodes\":[{\"id\":\"n1\",\"title\":\"做 X\",\"objective\":\"把 X 做完\",\"assignee\":\"调研员\",\"deps\":[]}]}".to_string(),
-        "[{\"node\":\"n1\",\"ok\":true,\"note\":\"够用\"}]".to_string(),
-        "[{\"item\":\"做 X\",\"status\":\"pass\"}]".to_string(),
+        "{\"type\":\"tool\",\"name\":\"plan\",\"args\":{\"plan\":\"方案：A 做 X\",\"nodes\":[{\"id\":\"n1\",\"title\":\"做 X\",\"objective\":\"把 X 做完\",\"assignee\":\"调研员\",\"deps\":[]}]}}".to_string(),
+        "{\"type\":\"tool\",\"name\":\"node_verdict\",\"args\":{\"verdicts\":[{\"node\":\"n1\",\"ok\":true,\"note\":\"够用\"}]}}".to_string(),
+        "{\"type\":\"tool\",\"name\":\"checklist\",\"args\":{\"items\":[{\"item\":\"做 X\",\"status\":\"pass\"}]}}".to_string(),
     ]));
     let sid = core
         .create_work(collab_work("w", &[], true, "做个东西"))
@@ -2471,10 +2498,8 @@ pub(crate) fn collab_delegated_roster_written_back_and_rebuilt_from_meta() {
 // ---------- 平衡提取器 ----------
 
 #[test]
-pub(crate) fn extract_balanced_array() {
-    let s = "前缀 [ {\"a\":1}, {\"b\":\"}\"} ] 后缀";
-    let got = crate::core::envelope::extract_json_array(s).unwrap();
-    assert!(got.starts_with('[') && got.ends_with(']'));
+pub(crate) fn extract_balanced_object() {
+    // 核心操作改走工具调用之后，正文 JSON 的提取只剩"信封"这一处用途（对象形态）。
     let obj = crate::core::envelope::extract_json_object("x {\"k\":\"{\"} y").unwrap();
     assert!(obj.starts_with('{') && obj.ends_with('}'));
 }
@@ -5965,9 +5990,9 @@ pub(crate) fn core_collab_tool_modules_run_in_execution() {
         gw(
             member,
             vec![
-                "{\"plan\":\"方案：查证后回报\",\"nodes\":[{\"id\":\"n1\",\"title\":\"做 X\",\"objective\":\"把 X 做完\",\"assignee\":\"a\",\"deps\":[]}]}".into(),
-                "[{\"node\":\"n1\",\"ok\":true,\"note\":\"够用\"}]".into(),
-                "[{\"item\":\"查证\",\"status\":\"pass\"}]".into(),
+                "{\"type\":\"tool\",\"name\":\"plan\",\"args\":{\"plan\":\"方案：查证后回报\",\"nodes\":[{\"id\":\"n1\",\"title\":\"做 X\",\"objective\":\"把 X 做完\",\"assignee\":\"a\",\"deps\":[]}]}}".into(),
+                "{\"type\":\"tool\",\"name\":\"node_verdict\",\"args\":{\"verdicts\":[{\"node\":\"n1\",\"ok\":true,\"note\":\"够用\"}]}}".into(),
+                "{\"type\":\"tool\",\"name\":\"checklist\",\"args\":{\"items\":[{\"item\":\"查证\",\"status\":\"pass\"}]}}".into(),
             ],
         ),
         Arc::clone(&runner),
@@ -7372,6 +7397,62 @@ pub(crate) fn history_list_is_ordered_as_a_tree() {
     );
 }
 
+/// 核心操作必须走**工具调用**：正文里手写 JSON 不再被接受（真机上它既无 schema 校验也不进工具台账）。
+#[test]
+pub(crate) fn core_operations_require_a_tool_call_not_body_json() {
+    let prompts = test_prompts();
+    // 角色表把核心操作发给对应的核心身份（越权校验与工具面的判据都是它）。
+    for (role, tool) in [
+        ("planner", "plan"),
+        ("planner", "slate"),
+        ("planner", "suggest"),
+        ("orchestrator", "node_verdict"),
+        ("orchestrator", "checklist"),
+    ] {
+        assert!(
+            prompts.systools.allows(role, tool),
+            "{} 该拿到 {} 工具",
+            role,
+            tool
+        );
+    }
+    // 讨论席与执行席不拿核心操作（越权会被如实拒绝）。
+    assert!(!prompts.systools.allows("discussant", "plan"));
+    assert!(!prompts.systools.allows("executor", "checklist"));
+    // 载荷是**数组**参数（嵌套结构），不是标量。
+    let schema = prompts
+        .core
+        .builtin_tools
+        .get("plan")
+        .expect("plan 该在工具总表里");
+    assert_eq!(
+        schema.params.as_ref().expect("有参数")["nodes"].ty,
+        crate::core::schema::ParamType::Array,
+        "任务链节点表是数组载荷"
+    );
+}
+
+/// 正文里手写 JSON 不再被当成核心操作：**如实报错**，不把原文糊成方案。
+#[test]
+pub(crate) fn body_json_is_not_a_core_operation() {
+    let prompts = test_prompts();
+    let mut chat = scripted(vec![
+        "{\"plan\":\"方案\",\"nodes\":[{\"id\":\"n1\",\"title\":\"做\",\"objective\":\"做\",\"assignee\":\"a\",\"deps\":[]}]}"
+            .to_string(),
+    ]);
+    let out = crate::core::engine::core_operation(
+        &prompts.systools,
+        "planner",
+        "plan",
+        crate::core::providers::ToolMode::Envelope,
+        chat.as_mut(),
+        &[crate::core::ports::Msg::user("出方案")],
+        crate::core::ports::CompleteOpts::plain(false),
+        &mut |_| true,
+    );
+    let err = out.expect_err("正文 JSON 不是工具调用，该如实报错");
+    assert!(err.contains("没有调用 plan"), "{}", err);
+}
 /// 回报走**工具调用**（不是正文 JSON）：执行席拿得到它，调用它不碰文件、回执带出回报内容。
 #[test]
 pub(crate) fn executor_reports_through_a_tool_call() {

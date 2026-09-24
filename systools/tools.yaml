@@ -87,6 +87,56 @@ tools:
 
   # —— 工具调用约定：两套**互斥**（一个通道只用一套，不能同时教，否则模型在正文里讲解参数会被当成调用）——
 
+  # —— 核心操作：核心 AI 的产出（驱动核心走下一步）必须走工具调用，不在正文里手写 JSON ——
+  plan:
+    capability: none
+    desc: 交出方案与任务链：总结讨论，把它拆成一张有向无环图。
+    params:
+      plan:
+        type: string
+        required: true
+        non_empty: true
+        desc: 给用户看的方案说明
+      nodes:
+        type: array
+        required: true
+        desc: 节点数组，每项 {"id","title","objective","assignee","deps"}；assignee 必须从名单里选，deps 必须在这张图里且不得成环。
+
+  node_verdict:
+    capability: none
+    desc: 交出节点验收结论：逐节点核对产出够不够它的当前目标。
+    params:
+      verdicts:
+        type: array
+        required: true
+        desc: 结论数组，每项 {"node","ok","note"}；node 用给定的 id，不通过时 note 要说清差在哪。
+
+  checklist:
+    capability: none
+    desc: 交出总验收清单：按方案逐条核对回报。
+    params:
+      items:
+        type: array
+        required: true
+        desc: 清单数组，每项 {"item","status":"pass|fail","evidence","reason"}；fail 时给差距与归属。
+
+  slate:
+    capability: none
+    desc: 交出这次协作的发言名单（代拟）。
+    params:
+      picks:
+        type: array
+        required: true
+        desc: 名单数组，每项要么 {"agent":"已存agent名","why":...}，要么 {"name","modules","model","why"}；模块与模型必须从清单里选。
+
+  suggest:
+    capability: none
+    desc: 交出为这次工作推荐的 agent 名单。
+    params:
+      agents:
+        type: array
+        required: true
+        desc: 与 slate 同形（每项复用已存 agent 或组装新的）；按编排模式的约束组织。
   submit_report:
     capability: none              # 不碰文件：承载"这个节点做完了什么"
     desc: 回报这个节点的产出：做完了什么、动了什么、还留什么问题。**收尾时用它**——它就是这一轮的最终答复。

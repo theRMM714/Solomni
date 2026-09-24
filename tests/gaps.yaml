@@ -30,23 +30,29 @@
     有意推迟（不是缺条件）：guest 相对现有围栏的独特价值只有"不授权本机写权限也能拿到强隔离"一条，
     而代价是三套原生 API、每平台真机验证，且 CI 起不了 hypervisor（只能真机验 + env-skip）。
     项目成熟、需求更清楚时再做。
-- id: tools.core-operations-must-be-tool-calls
+
+- id: prompt.tool-book-rendered-instead-of-role-face
   scope: global
   level: T2
   why: |
-    规则：**任何会驱动核心的操作都必须走工具调用**（两条等价通道：原生结构化槽位 / 手写信封）；
-    不驱动核心的普通说话可以是正文。执行席的回报已改走 submit_report 工具（不碰文件、只承载回报），
-    但**核心 AI 的五个核心操作**仍在正文里手写 JSON、由核心解析：整理方案+任务链（engine.rs:1250）、
-    总验收（engine.rs:1385）、节点验收（collab.rs:303）、代拟名单（collab.rs:474）、推荐 agent（mod.rs:2019）。
-    这些既没有 schema 校验，也不进工具台账，写坏就整轮失败。
+    角色表已经是**执行时**的唯一判据（成员回合按 allows 校验，面里没有的一律如实拒绝），但**提示词里
+    列的仍是整本工具总表**：systool::guide 把 Sandbox.builtin_tools（装的是 prompts.core.builtin_tools 全量）
+    整体交给 render_book，只有原生通道的声明槽用了角色面。后果一：会话被明确告知一批它必然被拒的工具
+    （讨论席的提示词里写着 write/edit/patch，乃至 plan/node_verdict/checklist/slate/suggest 这些核心席专属工具），
+    模型于是去调、被拒、再试。后果二：任何按提示词措辞判断请求类型的代码都会被工具说明里的词误伤——
+    真实发生过：成员提示词里出现 node_verdict 的说明“逐节点核对”后，e2e 的假供应商把它当成了核心的节点验收请求。
   how: |
-    把这五处变成工具（plan / node_verdict / checklist / slate / suggest），复用核心通道已有的两套声明与解析；
-    契约写进 docs/architecture/tools-and-roles.md：核心操作只能走工具调用，普通说话可以是正文。
-    不加结构审查门禁（用户已明确：太严）。
+    让 guide 只渲染**该会话用得上的那一份**：按角色过滤 builtin_tools 后再 render_book。
+    一个 agent 会话在讨论与执行两个阶段共用同一份系统提示（它不能按回合变，否则回放与实时不一致），
+    所以传的是**它可能担任的角色之并**（协作成员 = discussant ∪ executor，单 agent 执行 = executor）。
+    契约已写在 docs/architecture/tools-and-roles.md 二与四（“该角色能用的信封清单要渲染进提示词”）。
   accept: |
-    这五处都从工具调用参数取；提示词里不再要求核心手写 JSON 来驱动自己；契约写明该规则。
+    协作成员的提示词里不再出现核心席专属工具（plan / node_verdict / checklist / slate / suggest / compact）；
+    讨论席的提示词里不再出现 write / edit / patch；执行席仍看得到它要用的每一个工具（有测试按提示词断言）。
   blocked_by: |
-    排期问题，不是缺条件。
+    要先定一件事：成员会话在两个阶段共用一份系统提示，是按**角色并集**渲染（改动最小、回放与重建不变），
+    还是改成每阶段一份提示词（要动回放与重建的形态）。前者是建议，等确认后再做。
+
 - id: web.static-assets-cache-policy-unstated
   scope: global
   level: T5

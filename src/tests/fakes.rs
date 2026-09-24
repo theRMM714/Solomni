@@ -152,11 +152,22 @@ fn demo_gateway_core_channel_is_marked_demo_and_replies() {
     assert!(demo, "核心通道回落时必须标记成演示通道（供上层如实告知）");
     let (first, _) = call(chat.as_mut(), false);
     assert!(matches!(parse(&first).verb, Verb::Say), "{}", first);
+    // 核心操作走**工具调用**：演示通道发手写信封，清单在 checklist 的参数里。
     let (second, _) = call(chat.as_mut(), false);
-    let list: serde_json::Value =
-        serde_json::from_str(&second).expect("演示验收清单必须是合法 JSON 数组");
+    let r = parse(&second);
+    let tool = r
+        .tools
+        .iter()
+        .find(|t| t.name == "checklist")
+        .unwrap_or_else(|| panic!("演示验收清单必须走 checklist 工具调用：{}", second));
+    let payload: serde_json::Value =
+        serde_json::from_str(&tool.args_json).expect("参数必须是合法 JSON");
     assert!(
-        list.is_array() && !list.as_array().expect("数组").is_empty(),
+        payload
+            .get("items")
+            .and_then(|v| v.as_array())
+            .map(|a| !a.is_empty())
+            .unwrap_or(false),
         "{}",
         second
     );
@@ -174,10 +185,12 @@ fn demo_gateway_scripts_are_valid_envelopes() {
     let (mut core_chat, _) = DemoGateway.core_channel(None);
     let (say, _) = call(core_chat.as_mut(), false);
     assert!(!parse(&say).degraded, "{}", say);
+    // 核心操作走工具调用：演示通道发的是**手写信封**，载荷与真实通道同形。
     let (list, _) = call(core_chat.as_mut(), false);
+    let r = parse(&list);
     assert!(
-        crate::core::envelope::extract_json_array(&list).is_some(),
-        "验收清单一律是 JSON 数组：{}",
+        !r.degraded && r.tools.iter().any(|t| t.name == "checklist"),
+        "验收清单走 checklist 工具调用：{}",
         list
     );
 }

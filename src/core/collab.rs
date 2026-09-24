@@ -7,7 +7,6 @@
 
 use crate::core::agents::{self, RosterPick};
 use crate::core::engine::{Discussion, Execution, Member, MemberTools, TurnOut, MAX_ROUNDS};
-use crate::core::envelope;
 use crate::core::events::{CheckView, LineView, Pending, SessionEvent};
 use crate::core::exec::{self, ExecSpec};
 use crate::core::history::{AgentMeta, SessionMeta};
@@ -123,6 +122,8 @@ pub struct CollabSession {
     reply_seq: u64,
     core_chat: crate::core::ports::BoxedChat,
     core_is_demo: bool,
+    /// 核心通道的工具调用形态（原生才声明工具；信封通道看提示词里的说明）。
+    core_mode: crate::core::providers::ToolMode,
     prompts: Prompts,
     gateway: Arc<dyn ChatGateway + Send + Sync>,
     source: Arc<dyn ModuleSource + Send + Sync>,
@@ -169,7 +170,9 @@ impl CollabSession {
     ) -> Result<CollabSession, String> {
         let core_channel = settings.core_channel();
         let (core_chat, core_is_demo) = gateway.core_channel(core_channel.as_ref());
+        let core_mode = settings.tool_mode_for(None);
         Ok(CollabSession {
+            core_mode,
             delegated,
             roster,
             task: String::new(),
@@ -267,6 +270,7 @@ impl CollabSession {
         cancel: &std::sync::Arc<std::sync::atomic::AtomicBool>,
         chain: Option<&crate::core::chain::TaskChain>,
         opts: crate::core::ports::CompleteOpts<'static>,
+        mode: crate::core::providers::ToolMode,
         core_chat: &mut dyn Chat,
     ) -> Result<Vec<(String, bool, String)>, String> {
         let nodes = chain.map(|c| c.nodes.clone()).unwrap_or_default();
@@ -296,14 +300,22 @@ impl CollabSession {
         let stop = std::sync::Arc::clone(cancel);
         let mut keep =
             move |_c: crate::core::ports::Chunk| !stop.load(std::sync::atomic::Ordering::Relaxed);
-        let done = core_chat.complete(&msgs, opts, &mut keep);
-        if let Some(err) = done.error {
-            return Err(err);
-        }
-        let arr = envelope::extract_json_array(&done.raw)
-            .ok_or_else(|| format!("节点验收没有给出 JSON 数组：{}", done.raw))?;
-        let parsed: Vec<NodeVerdict> = serde_json::from_str(&arr)
-            .map_err(|e| format!("节点验收清单不合法（{}）：{}", e, arr))?;
+        // 核心操作走工具调用：节点验收结论由 node_verdict 工具承载。
+        let payload = crate::core::engine::core_operation(
+            &prompts.systools,
+            "orchestrator",
+            "node_verdict",
+            mode,
+            core_chat,
+            &msgs,
+            opts,
+            &mut keep,
+        )?;
+        let parsed: Vec<NodeVerdict> = payload
+            .get("verdicts")
+            .cloned()
+            .and_then(|v| serde_json::from_value(v).ok())
+            .ok_or_else(|| format!("node_verdict 的载荷没有 verdicts 数组：{}", payload))?;
         Ok(parsed.into_iter().map(|v| (v.node, v.ok, v.note)).collect())
     }
 
@@ -467,13 +479,26 @@ impl CollabSession {
             Msg::system(self.prompts.core.slate.system.clone()),
             Msg::user(user),
         ];
-        let raw = self
-            .core_chat
-            .complete(&msgs, CompleteOpts::plain(false), &mut |_| true)
-            .raw;
-        let parsed = envelope::extract_json_object(&raw)
-            .and_then(|obj| serde_json::from_str::<SlateReply>(&obj).ok());
-        let Some(slate) = parsed else {
+        // 核心操作走工具调用：代拟名单由 slate 工具承载。
+        let parsed = crate::core::engine::core_operation(
+            &self.prompts.systools,
+            "planner",
+            "slate",
+            self.core_mode,
+            self.core_chat.as_mut(),
+            &msgs,
+            CompleteOpts::plain(false),
+            &mut |_| true,
+        )
+        .ok()
+        .and_then(|payload| {
+            // 载荷里就是名单**数组**本身（工具参数 picks 的值）。
+            payload
+                .get("picks")
+                .cloned()
+                .and_then(|v| serde_json::from_value::<Vec<RosterPick>>(v).ok())
+        });
+        let Some(picks) = parsed else {
             sink(SessionEvent::Notice(
                 "[错误] 代拟失败（模型无响应格式）。请直接点名 agent。".into(),
             ));
@@ -482,12 +507,8 @@ impl CollabSession {
             return;
         };
         // 逐条校验（存在性、模型真实、整份名单内模块不重复）；拒收项如实告知。
-        let (picks, rejected) = agents::resolve_picks(
-            slate.picks,
-            &self.settings.agents,
-            &roster,
-            &self.settings.models,
-        );
+        let (picks, rejected) =
+            agents::resolve_picks(picks, &self.settings.agents, &roster, &self.settings.models);
         for r in rejected {
             sink(SessionEvent::Notice(format!("[代拟] {}，拒收", r)));
         }
@@ -762,7 +783,7 @@ impl CollabSession {
                 .disc
                 .as_ref()
                 .expect("disc 存在")
-                .synthesize(self.core_chat.as_mut());
+                .synthesize(self.core_chat.as_mut(), self.core_mode);
             match made {
                 Ok((plan, chain)) => {
                     // **装配期门禁**：链必须自洽（悬空依赖 / 环 / 未知负责人 / 空目标）——
@@ -845,6 +866,7 @@ impl CollabSession {
             self.chain.as_ref(),
             crate::core::ports::CompleteOpts::plain(self.settings.app.streaming)
                 .with_timeout(self.settings.app.llm_timeout_secs),
+            self.core_mode,
             self.core_chat.as_mut(),
         ) {
             Ok(v) => v,
@@ -886,7 +908,13 @@ impl CollabSession {
                 rework: 0,
             });
         }
-        exec.review(self.core_chat.as_mut(), &plan, &prompts, llm);
+        exec.review(
+            self.core_chat.as_mut(),
+            &plan,
+            &prompts,
+            llm,
+            self.core_mode,
+        );
         if let Some(note) = self.exec_note(&exec) {
             sink(SessionEvent::Notice(note));
             return;
@@ -1073,6 +1101,8 @@ impl CollabSession {
         let total = all_lines.len() as u64;
         let core_channel = settings.core_channel();
         let (core_chat, core_is_demo) = gateway.core_channel(core_channel.as_ref());
+        // 形态要在 settings 被移进结构体之前算出来。
+        let core_mode = settings.tool_mode_for(None);
         let mut s = CollabSession {
             delegated: meta.delegate,
             roster: meta.agents.clone(),
@@ -1097,6 +1127,7 @@ impl CollabSession {
             reply_seq: crate::core::engine::max_reply(events),
             core_chat,
             core_is_demo,
+            core_mode,
             prompts: prompts.clone(),
             gateway,
             source,
@@ -1193,12 +1224,6 @@ fn derive_pending(st: &crate::core::collab_state::CollabState) -> Option<Pending
         member: m.clone(),
         question: q.clone(),
     })
-}
-
-/// 代拟/推荐共用的应答形状：名单项（复用或组装）。
-#[derive(serde::Deserialize)]
-struct SlateReply {
-    picks: Vec<RosterPick>,
 }
 
 /// 逐成员外送：把刚定稿的讨论行变成带**会话内稳定 id** 的转录事件交出去。

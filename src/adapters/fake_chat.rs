@@ -81,10 +81,25 @@ impl ChatGateway for DemoGateway {
     }
 
     fn core_channel(&self, _channel: Option<&Channel>) -> (BoxedChat, bool) {
+        // 核心操作走**工具调用**（见 docs/architecture/tools-and-roles.md）：演示通道没有原生能力，
+        // 所以发手写信封——它是这条通道唯一能用的形态。载荷形状与真实通道完全一致。
+        let env = |tool: &str, args: &str| {
+            format!(
+                "{{\"type\":\"tool\",\"name\":\"{}\",\"args\":{}}}",
+                tool, args
+            )
+        };
         (
             Box::new(FakeChat::new(vec![
                 "{\"type\":\"say\",\"text\":\"（演示）核心通道。\"}".to_string(),
-                "[{\"item\":\"演示项\",\"status\":\"pass\",\"evidence\":\"演示\"}]".to_string(),
+                env(
+                    "checklist",
+                    "{\"items\":[{\"item\":\"演示项\",\"status\":\"pass\",\"evidence\":\"演示\"}]}",
+                ),
+                env(
+                    "plan",
+                    "{\"plan\":\"（演示）方案\",\"nodes\":[{\"id\":\"n1\",\"title\":\"做\",\"objective\":\"做\",\"assignee\":\"a\",\"deps\":[]}]}",
+                ),
             ])),
             true,
         )

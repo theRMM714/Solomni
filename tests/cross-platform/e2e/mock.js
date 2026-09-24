@@ -45,6 +45,8 @@ http.createServer((req, res) => {
     let content;
     /** 原生工具调用：给了它就用结构化槽位回（而不是 content）。 */
     let calls = null;
+    /** 角色工具/核心操作的信封：核心只从**工具调用**里取载荷，正文里手写 JSON 不算调用。 */
+    const env = (name, args) => JSON.stringify({ type: 'tool', name, args });
     if (wantsPing) {
       calls = [{ id: 'call_probe', type: 'function', function: { name: 'solomni_ping', arguments: '{}' } }];
     } else if (sys.includes('内置文件工具') && user.includes('原生多调用') && !sawToolResult) {
@@ -56,9 +58,9 @@ http.createServer((req, res) => {
         { id: 'call_b', type: 'function', function: { name: 'write', arguments: JSON.stringify({ path: b, content: '第二个' }) } },
       ];
     } else if (user.includes('== 编排模式 ==')) {
-      content = JSON.stringify({ agents: [{ agent: '双子', why: '它正合适' }] });
+      content = env('suggest', { agents: [{ agent: '双子', why: '它正合适' }] });
     } else if (user.includes('== 已存 agent') && user.includes('== 需求 ==')) {
-      content = JSON.stringify({
+      content = env('slate', {
         picks: [
           { agent: '单兵', why: '单人够用' },
           { name: '新助手', modules: ['research'], model: 'm1', why: '补上调研' },
@@ -98,22 +100,26 @@ http.createServer((req, res) => {
       const task = (user.split('== 用户需求 ==')[1] || '').trim().split('\n')[0].trim();
       content = JSON.stringify({ type: 'say', text: '我建议直接动手｜' + task });
     } else if (user.includes('== 你的任务 ==')) {
-      content = JSON.stringify({ summary: '做完了', changes: '无外部影响', open: '' });
-    } else if (sys.includes('逐节点核对') || user.includes('== 各节点 ==')) {
+      // 回报本身也是一次工具调用：核心回灌结果后会再问一次，那一次用**纯正文**收尾（无信封 = 这一轮到此为止）。
+      content = sawToolResult
+        ? '回报已经交了。'
+        : env('submit_report', { summary: '做完了', changes: '无外部影响', open: '' });
+    } else if (user.includes('== 各节点 ==')) {
       // **节点级验收**：逐节点判"够不够当前目标"。夹具一律判过（要验不通过另设场景）。
-      content = JSON.stringify([{ node: 'n1', ok: true, note: '够用' }]);
+      content = env('node_verdict', { verdicts: [{ node: 'n1', ok: true, note: '够用' }] });
     } else if (user.includes('== 方案 ==')) {
       // 返工会话：第一次验收给 fail（定向返工），之后给 pass——用来验"fail → 返工 → 重验 → 交付"闭环。
       if (user.includes('返工')) {
         reworkReviews += 1;
         content = reworkReviews === 1
-          ? JSON.stringify([{ item: '方案条目', status: 'fail', evidence: '回报', reason: '还差一步（归属：甲）' }])
-          : JSON.stringify([{ item: '方案条目', status: 'pass', evidence: '回报' }]);
+          ? env('checklist', { items: [{ item: '方案条目', status: 'fail', evidence: '回报', reason: '还差一步（归属：甲）' }] })
+          : env('checklist', { items: [{ item: '方案条目', status: 'pass', evidence: '回报' }] });
       } else {
-        content = JSON.stringify([{ item: '方案条目', status: 'pass', evidence: '回报' }]);
+        content = env('checklist', { items: [{ item: '方案条目', status: 'pass', evidence: '回报' }] });
       }
-    } else if (sys.includes('总结讨论')) {
-      // 方案里回显任务关键词：验收请求会带上方案，据此路由（不改产品行为，只让夹具可判定）。
+    } else if (user.includes('== 讨论转录 ==')) {
+      // 按**用户提示词里的标记**路由，不按工具说明里的措辞：成员与核心的系统提示都会列工具说明，
+      // 拿"逐节点核对/总结讨论"这类词当判据会把别的请求也认成核心操作（工具总表一加工具就撞）。
       // 核心整理的回执是**结构化任务链**（plan + nodes）：形状见 prompts/roles/planner.yaml。
   // 负责人要取**提示词里给的名单**（退场场景下甲已不在名单里，写死甲会被自洽门禁如实挡下）。
   const ulines = user.split('\n');
@@ -122,8 +128,8 @@ http.createServer((req, res) => {
   const who = rosterLine.split('、').map((s) => s.trim()).filter(Boolean)[0] || '甲';
 
   content = user.includes('返工')
-    ? JSON.stringify({ plan: '方案：返工一次', nodes: [{ id: 'n1', title: '返工一次', objective: '把事重做一遍', assignee: who, deps: [] }] })
-    : JSON.stringify({ plan: '方案：一次把事情做完', nodes: [{ id: 'n1', title: '做完', objective: '把事做完', assignee: who, deps: [] }] });
+    ? env('plan', { plan: '方案：返工一次', nodes: [{ id: 'n1', title: '返工一次', objective: '把事重做一遍', assignee: who, deps: [] }] })
+    : env('plan', { plan: '方案：一次把事情做完', nodes: [{ id: 'n1', title: '做完', objective: '把事做完', assignee: who, deps: [] }] });
     } else if (sys.includes('harvest') && allUser.includes('真工具链路')) {
       // 真工具链路：按**整段对话里**已经收到的工具结果条数决定下一个调用（真进程、真三语言模块）。
       // 路径用提示词里给出的真实共享区根目录（相对路径会被围栏拒绝）。
@@ -135,8 +141,10 @@ http.createServer((req, res) => {
         content = JSON.stringify({ type: 'tool', module: 'indexer', name: 'build', args: { corpus: w + '/corpus.jsonl', out: w + '/index.bin' } });
       } else if (n === 2) {
         content = JSON.stringify({ type: 'tool', module: 'indexer', name: 'query', args: { index: w + '/index.bin', q: '检索' } });
+      } else if (n === 3) {
+        content = env('submit_report', { summary: '语料与索引都做好了', changes: 'corpus.jsonl 与 index.bin', open: '' });
       } else {
-        content = JSON.stringify({ summary: '语料与索引都做好了', changes: 'corpus.jsonl 与 index.bin', open: '' });
+        content = '回报已经交了。';
       }
     } else if (sys.includes('内置文件工具') && !sawToolResult) {
       if (/read_txt/.test(sys)) {
