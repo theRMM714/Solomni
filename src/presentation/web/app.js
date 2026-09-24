@@ -2134,9 +2134,23 @@ function applyBatch(seq, sid, events) {
     const item = pendingBatches.get(appliedSeq + 1);
     pendingBatches.delete(appliedSeq + 1);
     appliedSeq += 1;
-    const s = state.sessions.get(item.sid);
-    // 未知会话 = 有别的客户端建了会话（演示脚本、另一个标签页）：拉一次状态。
-    if (!s) { needState = true; continue; }
+    let s = state.sessions.get(item.sid);
+    if (!s) {
+      // 未知会话 = 有**别的客户端**建了会话（演示脚本、另一个标签页）。
+      // **必须就地建出会话状态**再吸收事件：否则它的事件（含流式 delta）会被永久丢掉，
+      // 只有手动点开时才靠历史回放补上——那正是"流式没起效、别人的会话不更新"的来源。
+      const h = (state.history || []).find((x) => x.name === item.sid);
+      s = {
+        sid: item.sid, mode: (h && h.mode) || 'single', title: item.sid,
+        lines: [], live: [], pending: null, busy: false,
+        done: !!(h && h.done), awaiting: null, fold: {}, scroll: {},
+      };
+      state.sessions.set(item.sid, s);
+      needState = true; // 侧栏也顺手对齐
+    }
+    // 运行态：别人在跑时前端自己的 busy 不知道，用事件流推断（有增量=在跑；见到收尾=跑完）。
+    if (item.events.some((e) => e.type === 'delta')) s.busy = true;
+    if (item.events.some((e) => e.type === 'ended' || e.type === 'delivery' || e.type === 'discussion_done')) s.busy = false;
     const m = absorbEvents(s, item.events);
     if (m === 'full') mode = 'full';
     else if (m === 'live' && mode !== 'full') mode = 'live';

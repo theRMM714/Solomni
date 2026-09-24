@@ -37,8 +37,22 @@ const ok = (cond, label, extra) => {
   console.log((cond ? "PASS " : "FAIL ") + label + (cond || extra === undefined ? "" : " :: " + String(extra).slice(0, 400)));
 };
 
-/** 一次能力面调用：不设客户端超时（一轮可能跑几分钟），等它自己返回。 */
-function api(method, path, body) {
+/** 一次能力面调用：不设客户端超时（一轮可能跑几分钟），等它自己返回。
+    长请求被网络层重置（ECONNRESET）是常态——**重试**，而不是让整个演示崩掉。 */
+async function api(method, path, body, tries = 3) {
+  for (let i = 1; ; i++) {
+    try {
+      return await once(method, path, body);
+    } catch (e) {
+      if (i >= tries) throw e;
+      console.log("   [重试 " + i + "] " + path + "：" + (e.code || e.message));
+      await new Promise((r) => setTimeout(r, 2000 * i));
+    }
+  }
+}
+
+/** 真正发一次请求（api 负责重试）。 */
+function once(method, path, body) {
   return new Promise((resolve, reject) => {
     const payload = body === undefined ? null : Buffer.from(JSON.stringify(body), "utf8");
     const headers = payload ? { "Content-Type": "application/json", "Content-Length": payload.length } : undefined;
