@@ -152,9 +152,13 @@ async function main() {
   ok(begin.status === 200, "开始讨论", begin.text);
 
   // ④ 轮询：协作是拉模式——有 pending 就回答，没 pending 就继续推进，直到交付。
-  // 每一步都如实打印发生了什么（讨论轮次 / 方案 / 回报 / 验收 / 返工 / 交付）。
+  // **每一步之间必须等**：/pending 与 /continue 都是"问一次就回"，连打会在几毫秒内把配额用完，
+  // 于是断言在任务真正跑完之前就执行——真机上就因此报过 6 个假 FAIL（其实全部成功）。
+  // 所以这里按**时间**兜底，并且每次问完都等一会儿。
+  const DEADLINE = Date.now() + 25 * 60 * 1000;
   let delivered = false;
-  for (let step = 0; step < 40; step++) {
+  while (Date.now() < DEADLINE) {
+    await new Promise((r) => setTimeout(r, 2000));
     const p = await api("POST", "/api/sessions/" + encodeURIComponent(sid) + "/pending", {});
     const pending = p.json && p.json.pending;
     if (pending && pending.type === "ask") {
@@ -184,6 +188,9 @@ async function main() {
   }
 
   // ⑤ 复核：不靠模型自述——阶段事件、产物、报告的自包含性都自己查一遍。
+  if (!delivered) {
+    ok(false, "协作在时限内交付（ended）", "超时 " + Math.round((Date.now() - (DEADLINE - 25 * 60 * 1000)) / 1000) + "s");
+  }
   const ev = await events(sid);
   const kinds = ev.map((e) => e.type);
   ok(kinds.includes("discussion_done"), "讨论收敛（discussion_done）", kinds.join(","));
