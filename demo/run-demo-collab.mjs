@@ -198,7 +198,12 @@ async function main() {
     const ev = await events(sid);
     if (ev.some((e) => e.type === "ended")) { delivered = true; break; }
     const c = await api("POST", "/api/sessions/" + encodeURIComponent(sid) + "/continue", {});
-    if (c.status !== 200) { ok(false, "推进协作", c.text); break; }
+    // 「正在生成中」是**正常**的：协作在跑，此刻不该推进——等下一轮再问，别当失败更别 break
+    //（之前就是这样提前退出，于是断言在任务跑完之前执行，报出一串假 FAIL）。
+    if (c.status !== 200 && !/正在生成中/.test(c.text || "")) {
+      ok(false, "推进协作", c.text);
+      break;
+    }
   }
 
   // ⑤ 复核：不靠模型自述——阶段事件、产物、报告的自包含性都自己查一遍。
