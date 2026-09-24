@@ -1017,7 +1017,9 @@ function openModelsModal() {
     form.appendChild(field('api_model', apiIn));
     form.appendChild(field('供应商', providerSel));
     form.appendChild(field('note', noteIn));
-    form.appendChild(field('上下文窗口（tokens）', ctxIn));
+    // numberInput 返回 { input, wrap }，而 wrap **已经带标签**——直接把 wrap 挂上去
+    //（传对象给 field 会让 appendChild 抛异常，整个表单就建不起来）。
+    form.appendChild(ctxIn.wrap);
     form.appendChild(save);
     c.body.appendChild(form);
     const discTitle = document.createElement('div'); discTitle.className = 'wf-label'; discTitle.textContent = '从供应商获取模型（点选填入 api_model）';
