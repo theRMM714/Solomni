@@ -1746,14 +1746,15 @@ function absorb(s, ev) {
     case 'node_started':
       s.lines.push({ cls: 'sys system', who: '', text: '[节点] 开工：' + (ev.assignee || '') + ' · ' + (ev.node || '') });
       break;
+    // 节点回报 = **它把活交回来了**：主会话记一行"完成"（摘要取首行，正文在子会话里看）。
+    // 失败的节点由核心的验收结论另行如实说明（这里只显示"交回"这个事实，不替验收下判）。
     case 'report':
-      s.lines.push({ cls: 'sys system', who: '', text: '[节点] 回报：' + (ev.id || '') + (ev.rework ? '（第 ' + ev.rework + ' 轮返工）' : '') });
-      break;
-    case 'review':
-      s.lines.push({ cls: 'sys system', who: '', text: '[节点] 验收：' + ((ev.items || []).map((i) => i.item + (i.ok ? '✓' : '✗')).join('；') || '（无逐项）') });
-      break;
-    case 'delivery':
-      s.lines.push({ cls: 'sys system', who: '', text: '[交付] ok=' + !!ev.ok + ' over_rework=' + !!ev.over_rework });
+      s.lines.push({
+        cls: 'sys system',
+        who: '',
+        text: '[节点] 完成：' + (ev.id || '') + (ev.rework ? '（第 ' + ev.rework + ' 轮返工）' : '')
+          + (ev.text ? ' —— ' + String(ev.text).split('\n')[0].slice(0, 80) : ''),
+      });
       break;
     case 'transcript':
       // 服务端权威转录：每行带会话内稳定 id（回档按 id 定位）。
@@ -1802,7 +1803,6 @@ function absorb(s, ev) {
       if (ev.over_cap) s.lines.push({ cls: 'sys', who: '', text: '讨论超轮次上限，进入裁决。' });
       break;
     case 'plan': s.lines.push({ cls: 'plan', who: '核心整理', text: ev.text }); break;
-    case 'report': s.lines.push({ cls: 'line', who: ev.rework > 0 ? '执行·返工' + ev.rework + ' · ' + ev.id : '执行 · ' + ev.id, text: ev.text }); break;
     case 'review':
       if (!ev.items || ev.items.length === 0) {
         s.lines.push({ cls: 'bad', who: '验收', text: '清单解析失败，原文：\n' + ev.raw });

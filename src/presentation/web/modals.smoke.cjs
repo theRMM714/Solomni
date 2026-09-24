@@ -146,6 +146,19 @@ if (!loadErrors.length) {
     return got.afterTwo === 0 && got.applied === 2 &&
       got.lines.length === 2 && got.lines[0].indexOf("第一") >= 0 && got.lines[1].indexOf("第二") >= 0;
   });
+  // ⑥ 节点回报要显示成一行"完成"（此前只有"开工"，用户看不到节点交回来了）。
+  check("节点回报显示成完成行", () => {
+    const snippet = [
+      "(() => {",
+      '  state.sessions.set("s2", { sid: "s2", lines: [], live: [], pending: null, busy: false, done: false, fold: {}, scroll: {} });',
+      '  absorb(state.sessions.get("s2"), { type: "report", id: "n1", rework: 0, text: "语料抽好了\\n第二行不该显示" });',
+      '  return state.sessions.get("s2").lines.map((l) => l.text);',
+      "})()",
+    ].join("\n");
+    const got = vm.runInNewContext(snippet, sandbox);
+    return got.length === 1 && got[0].indexOf("[节点] 完成：n1") === 0 &&
+      got[0].indexOf("语料抽好了") > 0 && got[0].indexOf("第二行") < 0;
+  });
 }
 
 const failed = results.filter((r) => !r[1]);
