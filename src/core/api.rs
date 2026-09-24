@@ -366,14 +366,34 @@ impl CoreHandle {
         text: Option<String>,
         out: Output,
     ) -> Result<Advance, String> {
-        let bus = Arc::clone(&self.bus);
-        let jobs = Arc::clone(&self.jobs);
         // ① 短命令：检查 + 把会话取出来 + 定下本次调用参数（都在核心线程上，毫秒级）。
         let prepared = self.call({
             let sid = sid.to_string();
             let t = text.clone();
             move |core| core.prepare_single(&sid, t.as_deref(), out == Output::Stream)
         })?;
+        self.run_prepared(sid, prepared, text)
+    }
+
+    /// 一个节点的执行回合：**核心把任务提示词作为系统消息注入**（不是用户发言），再生成。
+    /// 与 CLI 的 `Core::drive_node` 同一条语义——各前端只做各自的界面，管道只有这一条。
+    fn node_generation(&self, child: &str, objective: &str) -> Result<Advance, String> {
+        let prepared = self.call({
+            let (child, objective) = (child.to_string(), objective.to_string());
+            move |core| core.prepare_node(&child, &objective)
+        })?;
+        self.run_prepared(child, prepared, None)
+    }
+
+    /// 生成的工作线程与收尾：用户发言、**核心注入的任务**、继续都走这一条。
+    fn run_prepared(
+        &self,
+        sid: &str,
+        prepared: Prepared,
+        text: Option<String>,
+    ) -> Result<Advance, String> {
+        let bus = Arc::clone(&self.bus);
+        let jobs = Arc::clone(&self.jobs);
         let (session, identity, prefix, llm, persister) = match prepared {
             // 不用跑模型（例如"末条是 AI 发言"）：把提示直接回给调用方。
             Prepared::Immediate(events) => {
@@ -654,9 +674,9 @@ impl CoreHandle {
         })
     }
 
-    /// 起一轮**脱离调用方**的单 agent 生成（派发节点用）：不等它跑完。
-    /// 完成后由 `single_generation` 的叫醒逻辑推进父会话——所以这里只是"点火"。
-    fn spawn_detached_single(&self, sid: &str, text: &str) {
+    /// 起一轮**脱离调用方**的节点执行：核心注入任务 + 不等它跑完。
+    /// 完成后由叫醒逻辑推进父会话——所以这里只是"点火"。
+    fn spawn_detached_node(&self, sid: &str, objective: &str) {
         // 节点执行也用整场工作的同一套回合计数（回档同步靠两边同一套编号）。
         let _ = self.call({
             let sid = sid.to_string();
@@ -666,11 +686,11 @@ impl CoreHandle {
             }
         });
         let me = self.clone();
-        let (sid, text) = (sid.to_string(), text.to_string());
+        let (sid, objective) = (sid.to_string(), objective.to_string());
         let _ = std::thread::Builder::new()
             .name("solomni-node".to_string())
             .spawn(move || {
-                let _ = me.single_generation(&sid, Some(text), Output::Final);
+                let _ = me.node_generation(&sid, &objective);
             });
     }
 
@@ -897,7 +917,7 @@ impl CoreHandle {
         }
         // 派发：每个就绪节点在**它自己的子会话**里起一轮生成（脱离本次调用，不等它跑完）。
         for (_node, child, objective) in todo {
-            self.spawn_detached_single(&child, &objective);
+            self.spawn_detached_node(&child, &objective);
         }
         Ok(Advance { events, seq })
     }

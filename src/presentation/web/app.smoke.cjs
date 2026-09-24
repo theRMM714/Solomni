@@ -63,10 +63,29 @@ setTimeout(() => {
       rendered = noticeRoot.className.indexOf("open") >= 0 && noticeRoot.children.length > 0;
     } catch (e) { loadErrors.push("notice 调用失败：" + e.message); }
   }
-  const ok = alerts.length === 0 && loadErrors.length === 0 && rendered && tierWarned;
+  // 每条消息都要显示身份（说话人 · 动词）：正文**追加**，不许把身份标题一起抹掉。
+  // 真实 DOM 里 el.innerHTML = … 会清空子节点——桩 DOM 默认是一根普通属性，测不出这个错，
+  // 所以这里用**会清空 children 的**严格元素来验（agree 这类非 line 类的消息曾经因此丢了说话人）。
+  let identityKept = false;
+  if (!loadErrors.length) {
+    try {
+      const parts = vm.runInNewContext("parseLine('[资料手:agree] 同意', false)", sandbox);
+      const p = parts[0];
+      const strict = { children: [], className: "", appendChild(c) { strict.children.push(c); } };
+      Object.defineProperty(strict, "innerHTML", {
+        set() { strict.children = []; },
+        get() { return ""; },
+      });
+      const who = { textContent: p.who };
+      strict.appendChild(who);
+      vm.runInNewContext("appendBody", sandbox)(strict, p.cls, p.text);
+      identityKept = String(p.who).indexOf("资料手 · agree") >= 0 && strict.children.indexOf(who) >= 0;
+    } catch (e) { loadErrors.push("身份标题检查失败：" + e.message); }
+  }
+  const ok = alerts.length === 0 && loadErrors.length === 0 && rendered && tierWarned && identityKept;
   if (!ok) {
     console.log("alerts（原生弹窗被调用的次数，应为 0）:", JSON.stringify(alerts));
-    console.log("notice 渲染:", rendered, "| 虚拟机档不可用提示:", tierWarned);
+    console.log("notice 渲染:", rendered, "| 虚拟机档不可用提示:", tierWarned, "| 身份标题保留:", identityKept);
     console.log("loadErrors:", JSON.stringify(loadErrors));
   }
   console.log(ok ? "FRONTEND-INIT-OK" : "FRONTEND-INIT-FAIL");

@@ -5126,6 +5126,43 @@ pub(crate) fn native_member(
     m
 }
 
+/// **节点任务是核心注入的系统消息，不是用户发言**：Web 与 CLI 走同一条语义
+/// （此前 Web 把它当用户发言——界面上显示成"用户"，上下文里也成了 user 角色）。
+#[test]
+pub(crate) fn node_task_is_injected_as_a_system_message() {
+    let mut core = core_with(vec![module_of("a")], gw(BTreeMap::new(), vec!["[]".into()]));
+    let sid = core
+        .create_work(work("w", WorkMode::Single, &["a"]))
+        .unwrap()
+        .sid;
+    let prepared = core
+        .prepare_node(&sid, "== 你的任务 ==\n把事做完")
+        .expect("准备节点回合");
+    let crate::core::Prepared::Run {
+        session, prefix, ..
+    } = prepared
+    else {
+        panic!("节点回合该是可以跑的");
+    };
+    let dialogue = session.dialogue();
+    let last = dialogue.last().expect("注入过任务");
+    assert_eq!(last.role, "system", "节点任务是 system 角色：{:?}", last);
+    assert!(last.content.contains("把事做完"), "{}", last.content);
+    assert!(
+        dialogue.iter().all(|m| m.role != "user"),
+        "核心注入不产生用户消息：{:?}",
+        dialogue.iter().map(|m| m.role.clone()).collect::<Vec<_>>()
+    );
+    assert!(
+        prefix.iter().any(|e| matches!(
+            e,
+            crate::core::events::SessionEvent::Transcript(lines)
+                if lines.iter().any(|l| l.system && l.line.contains("把事做完"))
+        )),
+        "转录行要带 system 标记（界面据此不显示成用户）"
+    );
+}
+
 /// **改形态不必重建会话**：会话里存的是**参数**（`SessionParams`），身份块每次调用现渲染。
 /// 判据：同一个会话（没被重建）在建好之后，把登记处里的形态探测成 native——
 /// 下一回合的请求已经换了一套调用约定，而对话（此前说过的话）一条没丢。

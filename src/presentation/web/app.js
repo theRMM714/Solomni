@@ -63,8 +63,16 @@ function mdNode(text) {
 
 /// 正文：AI/用户发言按 Markdown 渲染，系统提示保持纯文本。
 function appendBody(el, cls, text) {
-  if (cls === 'line' || cls === 'plan' || cls === 'user') el.appendChild(mdNode(text));
-  else el.innerHTML = shortPath(escHtml(text)); // 系统/验收等行：纯文本转义后同样缩写长路径
+  // 正文必须**追加**，不能 el.innerHTML = …：那会把上面刚挂的身份标题（.who）一起抹掉，
+  // 于是 agree（绿框）这类非 line 类的消息就"没了说话人"——用户不知道这句来自谁。
+  if (cls === 'line' || cls === 'plan' || cls === 'user') {
+    el.appendChild(mdNode(text));
+    return;
+  }
+  const body = document.createElement('div');
+  body.className = 'body';
+  body.innerHTML = shortPath(escHtml(text)); // 系统/验收等行：纯文本转义后同样缩写长路径
+  el.appendChild(body);
 }
 
 /// 纯文本转义：工具卡片的原始 JSON 一律按字面显示（<pre> 里不解释 HTML）。

@@ -2202,6 +2202,40 @@ impl Core {
         })
     }
 
+    /// 起一个节点的执行回合（Web 生产路径）：**核心把任务提示词作为系统消息注入**（不是用户发言），
+    /// 再把会话交给工作线程继续生成。CLI 的 `drive_node` 与本条是同一条语义——
+    /// 各前端只做各自的界面，节点派发只有这一条管道（此前 Web 走 `prepare_single(Some(任务))`，
+    /// 把核心的任务提示词当成了**用户发言**，界面上也显示成"用户"）。
+    pub(crate) fn prepare_node(
+        &mut self,
+        child: &str,
+        objective: &str,
+    ) -> Result<Prepared, String> {
+        let llm = self.llm_opts(false);
+        self.ensure_session(child)?;
+        if matches!(self.sessions.get(child), Some(Session::Collab(_))) {
+            return Ok(Prepared::NotSingle);
+        }
+        let mut prefix: Vec<SessionEvent> = Vec::new();
+        if let Some(n) = self.refresh_tool_mode(child)? {
+            prefix.push(SessionEvent::Notice(n));
+        }
+        let mut session = self.take_single(child)?;
+        // 核心注入：系统角色 + 系统行（与 `inject_system` 同一段记录逻辑，只是不在这里跑模型）。
+        prefix.extend(session.note_system(objective));
+        let identity = session
+            .params()
+            .identity(&self.prompts, session.tool_mode());
+        let persister = self.persister(child);
+        Ok(Prepared::Run {
+            session: Box::new(session),
+            identity,
+            prefix,
+            llm,
+            persister,
+        })
+    }
+
     /// 测试用同步入口：与工作线程那条路**同一段语义**（准备 → 生成 → 交回落盘）。
     /// 生产路径不再走它——那里的生成在工作线程上（见 `CoreHandle::single_generation`）。
     #[cfg(test)]
