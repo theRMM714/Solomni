@@ -47,20 +47,6 @@
     这五处都从工具调用参数取；提示词里不再要求核心手写 JSON 来驱动自己；契约写明该规则。
   blocked_by: |
     排期问题，不是缺条件。
-- id: ui.frontend-has-no-automated-judgement
-  scope: global
-  level: T5
-  why: |
-    连续三轮的真机 bug 全部落在前端渲染层（未知会话事件被丢、忙碌态来源、回合分隔行不可见），
-    而前端没有任何自动判据——每次都要用户肉眼发现。
-  how: |
-    不上无头浏览器（对本地工具太重）：把无 DOM 依赖的纯逻辑抽成可测单元（行解析 parseLine、按序补洞 applyBatch），
-    用 node --test 直接测；回合分隔行那类 case 必须有断言。
-  accept: |
-    抽出的纯函数有测试且能在本地入口跑起来；回合分隔行（轮次/回合两种标签）有专门用例。
-  blocked_by: |
-    排期问题，不是缺条件。
-
 - id: web.static-assets-cache-policy-unstated
   scope: global
   level: T5

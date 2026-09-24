@@ -1835,6 +1835,8 @@ function parseLine(l, degraded) {
     const text = sp[2].trim();
     // 核心自己的**分隔行**：轮次（讨论）与回合（agent 会话）都要有可见的分隔，
     // 否则一个 agent 的讨论段与执行段会糊成一片——"楼层丢失"就是这么来的（此前只认轮次）。
+    // 核心自己的**分隔行**：轮次（讨论）与回合（agent 会话）都要有可见的分隔，
+    // 否则一个 agent 的讨论段与执行段会糊成一片——"楼层丢失"就是这么来的（此前只认轮次）。
     if (!text && /^(轮次|回合)/.test(tag)) return [{ cls: 'sys system', who: '', text: l }];
     if (looksLikeToolEnvelope(text)) return [envelopeLine(text, tag)];
     return [{ cls: 'line', who: tag, text }];
