@@ -68,7 +68,7 @@ pub const ROUTES: &[Route] = &[
         pattern: "/api/events",
         capability: "事件台（core::api::EventBus）",
         request: "查询 sid / since",
-        response: "{lines:[{seq,sid,events}],head}",
+        response: "{lines:[{seq,sid,events}],head,oldest}",
         statuses: &[200],
         note: "长轮询：有新事件立刻回，否则最多等 20s",
     },

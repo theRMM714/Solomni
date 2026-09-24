@@ -246,7 +246,10 @@ fn render(events: &[SessionEvent]) {
             }
             SessionEvent::Ended => {}
             // 流式增量与工具调用实时事件都是短暂事件，终端不在流中渲染（最终行会到）。
-            SessionEvent::Delta { .. } | SessionEvent::ToolCall(_) => {}
+            // 短暂事件（流式增量 / 运行态 / 工具调用）：Web 前端用来做实时渲染，CLI 不逐条打。
+            SessionEvent::Delta { .. }
+            | SessionEvent::Working { .. }
+            | SessionEvent::ToolCall(_) => {}
         }
     }
 }

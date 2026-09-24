@@ -51,6 +51,11 @@ pub enum SessionEvent {
         kind: String,
         text: String,
     },
+    /// **正在工作**（短暂，不落盘）：主会话据此知道"现在是谁在干活"。
+    /// 为什么要有它：成员回合跑在它自己的会话里，主会话在整回合里一个事件都收不到——
+    /// 前端只能靠"有增量"去猜运行态，猜不到就不切按钮、也没有占位动画（用户完全不知道在干什么）。
+    /// `agent = None` = 空闲（这一回合结束了）。
+    Working { agent: Option<String> },
 }
 
 /// 调用失败时的用户可见说明：**如实说原因**，并说清会话没被作废（可以点「继续」重试）。
@@ -215,6 +220,9 @@ impl SessionEvent {
                 text,
             } => {
                 serde_json::json!({ "type": "delta", "speaker": speaker, "kind": kind, "text": text })
+            }
+            SessionEvent::Working { agent } => {
+                serde_json::json!({ "type": "working", "agent": agent })
             }
             SessionEvent::ToolCall(v) => serde_json::json!({
                 "type": "tool_call",

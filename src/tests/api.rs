@@ -66,7 +66,7 @@ fn generation_pushes_facts_to_the_event_bus_with_sequence_numbers() {
         .say(&opened.sid, "你好", Output::Final)
         .expect("说一句");
     assert!(adv.seq > 0, "本批事件必须带序号");
-    let (lines, head) = bus.snapshot(Some(&opened.sid), 0);
+    let (lines, head, _oldest) = bus.snapshot(Some(&opened.sid), 0);
     // 逐轮外送：事件按"一轮一批"进台，所以这里是多批（以前是整回合一批）。
     // Advance.seq 是**最后一批**的序号——客户端按它去重，与逐轮外送同源。
     assert!(!lines.is_empty(), "生成期间就该有事件进台");
@@ -377,7 +377,7 @@ fn collab_discussion_emits_each_member_line_as_it_speaks() {
         ops.sessions.is_running(&sid),
         "整轮必须还没结束，这条断言才有意义"
     );
-    let (lines, _) = handle.events().snapshot(Some(&sid), 0);
+    let (lines, _, _oldest) = handle.events().snapshot(Some(&sid), 0);
     let spoken: Vec<String> = lines
         .iter()
         .flat_map(|l| l.events.iter())

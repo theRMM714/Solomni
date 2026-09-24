@@ -207,7 +207,14 @@ pub(crate) fn persist_events(
     // 流式增量与工具调用实时事件都是短暂事件，不落盘；历史只记定稿后的行。
     let jsons: Vec<serde_json::Value> = events
         .iter()
-        .filter(|e| !matches!(e, SessionEvent::Delta { .. } | SessionEvent::ToolCall(_)))
+        .filter(|e| {
+            !matches!(
+                e,
+                SessionEvent::Delta { .. }
+                    | SessionEvent::Working { .. }
+                    | SessionEvent::ToolCall(_)
+            )
+        })
         .map(|e| e.to_json())
         .collect();
     if jsons.is_empty() {
@@ -273,6 +280,9 @@ pub struct SessionView {
     pub tier_ready: bool,
     /// 承载不了时缺什么（空 = 齐了）。
     pub tier_missing: Vec<String>,
+    /// **这条会话此刻在跑吗**（生成中）：界面据此把「发送/继续」换成「停止」并显示占位动画。
+    /// 它是**核心侧的权威事实**（不是前端从事件里猜的）——刷新后依然成立。
+    pub running: bool,
 }
 
 /// 会话文件清单视图（前端 @ 菜单与「长路径缩写」用）：相对清单 + 真实根。
@@ -1496,6 +1506,8 @@ impl Core {
             .iter()
             .map(|sid| (sid.clone(), false))
             .collect();
+        let running_now: std::collections::BTreeSet<String> =
+            self.running.iter().cloned().collect();
         let listed: Vec<(String, bool)> = self
             .sessions
             .iter()
@@ -1517,6 +1529,7 @@ impl Core {
                 let exec = entry.map(|h| h.exec.clone()).unwrap_or_default();
                 let readiness = exec::tier_readiness(&exec, self.qemu_path());
                 SessionView {
+                    running: running_now.contains(&sid),
                     sid,
                     mode,
                     done,

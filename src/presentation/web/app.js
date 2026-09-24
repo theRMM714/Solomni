@@ -46,9 +46,13 @@ async function refreshState() {
   state.rejected = s.rejected || [];
   state.agents = s.agents || [];
   state.history = s.history || [];
+  // 服务端的**权威运行态**：自己或子会话在跑。刷新页面后据此立刻显示"正在工作"。
+  state.running = new Set((state.history || []).filter((h) => h.running).map((h) => h.name));
   state.settings = s.settings || { streaming: true, show_reasoning: true, llm_timeout_secs: 300, discuss_remind_cap: 3, compact_at_percent: 70 };
   renderSidebar();
   renderHistory();
+  const cur = activeSession();
+  if (cur) { syncTyping(cur); syncSendButton(cur); }
 }
 
 /// 思维链块：永远默认折叠，点击（原生 details）才展开。
@@ -283,10 +287,24 @@ function renderHistory() {
   }
 }
 
-/// 本标签页里该会话是否正在生成（前端自有的状态；后端对照同一件事再拦一次）。
+/// 这条会话此刻在不在干活：**服务端权威运行态**（自己 or 它的任一子会话在跑）
+/// + 本标签页的本地推断（自己发起的动作、正在到达的流式增量）。
+/// 为什么要服务端那份：成员回合跑在它自己的会话里，主会话整回合收不到事件——
+/// 只靠"有增量"猜就永远切不出「停止」按钮、也没有占位动画。
+function isBusy(s) {
+  if (!s) return false;
+  if (s.busy) return true;
+  const run = state.running;
+  if (!run) return false;
+  if (run.has(s.sid)) return true;
+  const pre = s.sid + '--';
+  for (const k of run) if (k.indexOf(pre) === 0) return true;
+  return false;
+}
+
 function generating(sid) {
   const s = state.sessions.get(sid);
-  return !!(s && s.busy);
+  return isBusy(s);
 }
 
 /* 记的是虚拟机档、但本机现在承载不了：**不拦打开**（记录是用户的），只主动把原因与出路说清。
@@ -1770,6 +1788,12 @@ function absorb(s, ev) {
       else segs.push({ kind: ev.kind, text: ev.text });
       return true; // 短暂流式事件：只走增量渲染，不整帧重建
     }
+    case 'working':
+      // **权威运行态**：核心开始问某个 agent = 忙（带名字），agent=null = 这一回合收尾了。
+      // 它不进转录（短暂事件）：用户看到的是占位动画与按钮切换，不是一条消息。
+      s.working = ev.agent || null;
+      s.busy = !!ev.agent;
+      return true;
     case 'tool_call':
       // 工具调用发生在轮与轮之间：按到达顺序插进流式块里（module 为空 = 内置 read/write）。
       s.live.push({ kind: 'tool', tool: ev });
@@ -1888,17 +1912,20 @@ function syncTyping(s) {
   if (!typingNode) return;
   const live = s.live || [];
   const hasLive = live.some((b) => b.kind === 'tool' || (b.segments && b.segments.length));
-  typingNode.className = s.busy && !hasLive ? 'typing' : 'typing hidden';
+  const busy = isBusy(s);
+  typingNode.textContent = s.working ? '正在工作：' + s.working : '正在工作…';
+  typingNode.className = busy && !hasLive ? 'typing' : 'typing hidden';
 }
 
 function syncSendButton(s) {
   const sendBtn = $('#btn-send');
   if (!sendBtn) return;
   // 忙碌时只留一个「停止」：用户一眼就知道这个会话在跑，而不是拿「继续/发送」去试探。
-  sendBtn.textContent = s.busy ? '停止' : '发送';
-  sendBtn.className = s.busy ? 'btn btn-danger' : 'btn btn-primary';
+  const busy = isBusy(s);
+  sendBtn.textContent = busy ? '停止' : '发送';
+  sendBtn.className = busy ? 'btn btn-danger' : 'btn btn-primary';
   const cont = $('#btn-continue');
-  if (cont) cont.className = s.busy ? 'btn hidden' : 'btn';
+  if (cont) cont.className = busy ? 'btn hidden' : 'btn';
 }
 
 /// 只有本来就在底部才自动跟随；用户往上滚时保持原位置（流式刷新不抢滚动条）。
@@ -2080,7 +2107,7 @@ function renderLiveTick(s) {
 function renderGate(s) {
   const gate = $('#gate');
   gate.innerHTML = '';
-  if (!s || s.busy || s.done || s.readonly) return;
+  if (!s || isBusy(s) || s.done || s.readonly) return;
   if (s.awaiting === 'task') {
     gate.appendChild(gateCard('请提交本次协作需求：', [
       ['提交', async () => { const v = takeInput(); if (v) await act('task', v); }],
@@ -2117,7 +2144,7 @@ function renderGate(s) {
 /* 改需求：服务端回到需求行并追加新需求，返回完整重放，前端整体重建。 */
 async function updateTask(text) {
   const s = activeSession();
-  if (!s || s.busy) return;
+  if (!s || isBusy(s)) return;
   try {
     const r = await api('POST', '/api/sessions/' + encodeURIComponent(s.sid) + '/update-task', { text });
     s.lines = []; s.pending = null; s.readonly = false; s.done = false;
@@ -2158,9 +2185,28 @@ const pendingBatches = new Map();
 /* 状态（侧栏/历史）可能被**别的客户端**改了：置位后由轮询统一拉一次。 */
 let needState = false;
 let lastStateAt = Date.now();
+/** 事件流出现**补不齐的缺口**（服务端裁剪）后，按历史重放一次当前会话。
+ * 为什么：spinner 与按钮都靠事件流，干等会让界面停在旧状态；重放比"攒着不显示"诚实。 */
+async function resyncActive() {
+  const s = activeSession();
+  if (!s || s.readonly) return;
+  try {
+    const r = await api('GET', '/api/history/' + encodeURIComponent(s.sid));
+    s.lines = []; s.live = [];
+    for (const ev of (r.events || [])) absorb(s, ev);
+    renderStream(true);
+  } catch { /* 拿不到就等下一次状态刷新 */ }
+}
+
 /** 收一批事件：按 seq 顺序应用。返回 'full' | 'live' | 'none'（渲染粒度）。 */
 function applyBatch(seq, sid, events) {
   if (typeof seq === 'number' && seq > appliedSeq) pendingBatches.set(seq, { sid, events });
+  // 兜底护栏：攒到几百批还补不齐（缺口已永久丢失）= 放弃按序补齐，免得越攒越多。
+  if (pendingBatches.size > 200) {
+    pendingBatches.clear();
+    appliedSeq = typeof seq === 'number' ? seq - 1 : appliedSeq;
+    needState = true;
+  }
   let mode = 'none';
   while (pendingBatches.has(appliedSeq + 1)) {
     const item = pendingBatches.get(appliedSeq + 1);
@@ -2200,7 +2246,7 @@ function applyActionEvents(s, r) {
 
 async function act(action, text) {
   const s = activeSession();
-  if (!s || s.busy || s.readonly) return;
+  if (!s || isBusy(s) || s.readonly) return;
   s.busy = true;
   // 乐观回显：自己的发言立刻可见；服务端权威行到达时自动替换（见 absorb）。
   if (text && (action === 'say' || action === 'task' || action === 'answer')) {
@@ -2226,7 +2272,7 @@ async function act(action, text) {
 /* 删除：删掉这一行和它之后的所有消息；服务端返回重放后的完整事件流，前端整体重建。 */
 function rewindTo(id) {
   const s = activeSession();
-  if (!s || s.busy) return;
+  if (!s || isBusy(s)) return;
   choiceModal('删除消息', '删除这一行和之后的所有消息？此操作不可撤销。', [
     ['删除', 'btn btn-danger', async () => {
       try {
@@ -2249,7 +2295,7 @@ function rewindTo(id) {
 /* 撤回某 agent 的同意（转录追加撤回行，协作才有意义）；值 = agent 实例名。 */
 function withdrawAgree(agent) {
   const s = activeSession();
-  if (!s || s.busy) return;
+  if (!s || isBusy(s)) return;
   choiceModal('撤回同意', '撤回「' + agent + '」的同意？继续时会按剩余转录重新判定。', [
     ['撤回', 'btn btn-danger', async () => {
       try {
@@ -2265,7 +2311,7 @@ function withdrawAgree(agent) {
 /* 继续：由用户点击授权核心往下走。单 agent 若末条是 AI，服务端只回提醒、不发请求。 */
 async function continueFlow() {
   const s = activeSession();
-  if (!s || s.busy) return;
+  if (!s || isBusy(s)) return;
   s.busy = true;
   renderStream();
   try {
@@ -2465,7 +2511,7 @@ async function atOnInput() {
   const tok = atToken();
   const s = activeSession();
   // busy（生成中）仍拒绝，避免与「停止」抢键盘；readonly（历史只读会话）允许——插入文本无害。
-  if (!tok || !s || s.busy) { atClose(); return; }
+  if (!tok || !s || isBusy(s)) { atClose(); return; }
   // 同步先开菜单：/files 还没有回来，↑↓/Enter 也必须已经被菜单接管，
   // 否则这期间按 Enter 会把消息直接发出去。
   atState.open = true;
@@ -2498,7 +2544,7 @@ function autoGrow() {
 /* 停止生成：只置位服务端的中止开关；in-flight 的 say/continue 会立刻收尾返回。 */
 async function stopGeneration() {
   const s = activeSession();
-  if (!s || !s.busy) return;
+  if (!s || !isBusy(s)) return;
   try {
     await api('POST', '/api/sessions/' + encodeURIComponent(s.sid) + '/stop', {});
   } catch (e) { /* 停止失败不吵用户；按钮仍是停止，可再点一次 */ }
@@ -2507,7 +2553,7 @@ async function stopGeneration() {
 function onSend() {
   const s = activeSession();
   if (!s || s.readonly) return;
-  if (s.busy) { stopGeneration(); return; } // 生成中：同一个键变成「停止」
+  if (isBusy(s)) { stopGeneration(); return; } // 生成中：同一个键变成「停止」
   if (s.awaiting === 'task') { const v = takeInput(); if (v) act('task', v); return; }
   if (s.pending && s.pending.type === 'ask') { const v = takeInput(); if (v) act('answer', v); return; }
   if (s.mode !== 'collab') { const v = takeInput(); if (v) act('say', v); return; } // 单 agent 形态可以自由发言
@@ -2526,7 +2572,18 @@ async function pollLoop() {
       if (!r.ok) throw new Error('轮询失败 ' + r.status);
       const data = await r.json();
       setConn(true);
-      pollSince = data.head != null ? data.head : pollSince;
+      const head = data.head != null ? data.head : pollSince;
+      const oldest = typeof data.oldest === 'number' ? data.oldest : 0;
+      // 事件台裁剪过：since 之后有一段**永久丢了**。按 seq 干等会让后续批次全部滞留
+      // （只有刷新页面才恢复）——所以这里重新对齐：丢掉滞留，跳到还留着的起点，
+      // 并把当前会话按历史重放一次。
+      if (oldest > 0 && oldest > appliedSeq + 1) {
+        pendingBatches.clear();
+        appliedSeq = oldest - 1;
+        needState = true;
+        await resyncActive();
+      }
+      pollSince = head;
       let mode = 'none';
       for (const item of data.lines) {
         try {

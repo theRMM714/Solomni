@@ -5147,6 +5147,63 @@ pub(crate) fn native_member(
     m
 }
 
+/// 讨论回合也要**逐片外送**（此前 Chunk 只用来当中止信号、内容全丢，界面整回合不动）。
+#[test]
+pub(crate) fn discussion_turn_streams_deltas_and_never_leaks_the_envelope() {
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let mut chat = super::RecordingChat {
+        // 正文在信封**之前**：正文可以逐片流出去，信封本身绝不能。
+        inner: scripted(vec![
+            "我说两句。{\"type\":\"say\",\"text\":\"我说两句\"}".into()
+        ]),
+        seen: Arc::clone(&seen),
+    };
+    let mut events: Vec<crate::core::events::SessionEvent> = Vec::new();
+    let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let _ = crate::core::engine::Discussion::turn_with(
+        &test_prompts().systools,
+        "discussant",
+        &cancel,
+        crate::core::ports::CompleteOpts::plain(true), // 开流式
+        "a",
+        "（测试）身份",
+        &[],
+        &mut chat,
+        None,
+        vec![crate::core::ports::Msg::user("说说")],
+        &mut |e| events.push(e),
+    )
+    .expect("跑一个回合");
+    let kinds: Vec<String> = events
+        .iter()
+        .filter_map(|e| match e {
+            crate::core::events::SessionEvent::Delta { kind, .. } => Some(kind.clone()),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        kinds.iter().any(|k| k == "start"),
+        "要有起始片：{:?}",
+        kinds
+    );
+    assert!(kinds.iter().any(|k| k == "text"), "要有正文片：{:?}", kinds);
+    let text: String = events
+        .iter()
+        .filter_map(|e| match e {
+            crate::core::events::SessionEvent::Delta { kind, text, .. } if kind == "text" => {
+                Some(text.clone())
+            }
+            _ => None,
+        })
+        .collect();
+    assert!(text.contains("我说两句。"), "正文该逐片流出去：{}", text);
+    assert!(
+        !text.contains("\"type\"") && !text.contains('{'),
+        "信封不能当正文流出去：{}",
+        text
+    );
+}
+
 /// **节点任务是核心注入的系统消息，不是用户发言**：Web 与 CLI 走同一条语义
 /// （此前 Web 把它当用户发言——界面上显示成"用户"，上下文里也成了 user 角色）。
 #[test]

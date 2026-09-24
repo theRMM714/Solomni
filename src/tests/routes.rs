@@ -380,6 +380,7 @@ impl HistoryOps for FakeOps {
                 tier: h.exec.tier.as_str().to_string(),
                 tier_ready: true,
                 tier_missing: Vec::new(),
+                running: false,
             })
             .collect())
     }

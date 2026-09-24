@@ -102,8 +102,11 @@ impl EventBus {
         self.push(sid, &[])
     }
 
-    /// 取 `since` 之后的事件批 + 当前头部（**同一把锁内**：客户端据头部推进游标不会漏事件）。
-    pub fn snapshot(&self, sid: Option<&str>, since: u64) -> (Vec<EventLine>, u64) {
+    /// 取 `since` 之后的事件批 + 当前头部 + **最老还留着的序号**（同一把锁内）。
+    /// 为什么要把 oldest 给客户端：事件台会裁剪（BUS_MAX/BUS_KEEP），`since` 之后那一小段可能
+    /// 已经永久没了。客户端据此**重新对齐**（拉一次历史重放），而不是按 seq 干等——干等的结果
+    /// 是后续批次全部滞留，只有刷新页面才恢复（真机上就是这个症状：必须手动刷新才同步）。
+    pub fn snapshot(&self, sid: Option<&str>, since: u64) -> (Vec<EventLine>, u64, u64) {
         let g = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         let lines = g
             .lines
@@ -111,7 +114,8 @@ impl EventBus {
             .filter(|l| l.seq > since && sid.is_none_or(|x| l.sid == x))
             .cloned()
             .collect();
-        (lines, g.seq)
+        let oldest = g.lines.first().map(|l| l.seq).unwrap_or(g.seq + 1);
+        (lines, g.seq, oldest)
     }
 }
 
@@ -519,10 +523,17 @@ impl CoreHandle {
         let identity = req.identity.clone();
         let agent = req.agent.clone();
         let _ = &turn;
+        // 这一回合的**短暂事件**（流式增量、越权提醒）按**子会话**的 sid 外送：
+        // 打开那个 agent 的会话就能看到它逐字在说；回合定稿的行由调用方落盘（不走这里）。
+        let bus = Arc::clone(&self.bus);
+        let child_sid = child.clone();
         let joined = std::thread::Builder::new()
             .name("solomni-member".to_string())
             .spawn(move || {
                 let mut s = session;
+                let mut sink = |ev: crate::core::events::SessionEvent| {
+                    bus.push(&child_sid, std::slice::from_ref(&ev));
+                };
                 let ran = {
                     // 这一回合的消息 = 身份块（现渲染）+ 本回合工具 + 该会话的**对话** + 开场/轮转词。
                     let hist = s.dialogue().to_vec();
@@ -538,7 +549,7 @@ impl CoreHandle {
                         chat,
                         tools,
                         turn,
-                        &mut |_e| {},
+                        &mut sink,
                     )
                 };
                 (s, ran)
@@ -793,6 +804,13 @@ impl CoreHandle {
                             let Some(agent) = c.member_id(i) else { break };
                             // 提醒时要往它自己的会话里写（那边用的是同一个名字）。
                             let agent_name = agent.clone();
+                            // 主会话据此显示"某某正在工作"（按钮切换与占位动画都读它）。
+                            bus.push(
+                                &sid,
+                                &[crate::core::events::SessionEvent::Working {
+                                    agent: Some(agent_name.clone()),
+                                }],
+                            );
                             let req = AskReq {
                                 agent,
                                 identity,
@@ -861,6 +879,12 @@ impl CoreHandle {
                                 }
                             }
                         }
+                        // 泵停了（问完了 / 出错 / 被中断）：主会话回到"空闲"。
+                        // 下一次问谁时会再推一条带名字的，所以这里只需要收尾这一条。
+                        bus.push(
+                            &sid,
+                            &[crate::core::events::SessionEvent::Working { agent: None }],
+                        );
                     }
                     (c, events, seq)
                 })

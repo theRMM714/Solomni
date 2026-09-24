@@ -217,7 +217,7 @@ pub(crate) fn route(
             let deadline = Instant::now() + POLL_WAIT;
             loop {
                 // 同一把锁里取「批 + 头部」：客户端据头部推进游标不会漏事件。
-                let (lines, head) = ops.events.snapshot(sid.as_deref(), since);
+                let (lines, head, oldest) = ops.events.snapshot(sid.as_deref(), since);
                 if !lines.is_empty() || Instant::now() >= deadline {
                     let snap: Vec<serde_json::Value> = lines
                         .iter()
@@ -225,7 +225,8 @@ pub(crate) fn route(
                             |l| json!({ "seq": l.seq, "sid": l.sid, "events": ev_json(&l.events) }),
                         )
                         .collect();
-                    return ok_json(json!({ "lines": snap, "head": head }));
+                    // oldest = 事件台里还留着的最老序号：客户端发现"since 之后那段已裁掉"时据此重新对齐。
+                    return ok_json(json!({ "lines": snap, "head": head, "oldest": oldest }));
                 }
                 std::thread::sleep(POLL_TICK);
             }

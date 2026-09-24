@@ -719,10 +719,48 @@ impl Discussion {
                 opts.tools = Some(&face);
             }
             let stop = std::sync::Arc::clone(cancel);
-            let mut keep = move |_c: crate::core::ports::Chunk| {
-                !stop.load(std::sync::atomic::Ordering::Relaxed)
+            // **逐片外送**：讨论席的发言也要能看到"正在生成"（此前只把 Chunk 当中止信号、
+            // 内容全丢掉，于是整个成员回合界面一动不动）。信封不能当正文流上屏，
+            // 所以复用会话那条"到 { 就截住"的分片规则（session::stream_piece）。
+            let mut acc = String::new();
+            let done = {
+                let sink_cell = std::cell::RefCell::new(&mut *sink);
+                let mut keep = |c: crate::core::ports::Chunk| {
+                    if stop.load(std::sync::atomic::Ordering::Relaxed) {
+                        return false;
+                    }
+                    let ev = match c {
+                        crate::core::ports::Chunk::Start => Some(SessionEvent::Delta {
+                            speaker: speaker.to_string(),
+                            kind: "start".to_string(),
+                            text: String::new(),
+                        }),
+                        crate::core::ports::Chunk::Text(t) => {
+                            let (send, next) = crate::core::session::stream_piece(&acc, &t);
+                            acc = next;
+                            if send.is_empty() {
+                                None
+                            } else {
+                                Some(SessionEvent::Delta {
+                                    speaker: speaker.to_string(),
+                                    kind: "text".to_string(),
+                                    text: send,
+                                })
+                            }
+                        }
+                        crate::core::ports::Chunk::Reasoning(r) => Some(SessionEvent::Delta {
+                            speaker: speaker.to_string(),
+                            kind: "reasoning".to_string(),
+                            text: r,
+                        }),
+                    };
+                    if let Some(ev) = ev {
+                        (sink_cell.borrow_mut())(ev);
+                    }
+                    true
+                };
+                chat.complete(&msgs, opts, &mut keep)
             };
-            let done = chat.complete(&msgs, opts, &mut keep);
             if cancel.load(std::sync::atomic::Ordering::Relaxed) {
                 return Err("已停止".to_string());
             }
@@ -836,6 +874,9 @@ impl Discussion {
                     call_id: call_id.clone(),
                     reply: 0,
                 };
+                // 核实行**实时**外送一条（短暂，不落盘）：用户能看到它在读、在查，而不是整回合黑箱。
+                // 回合定稿时这段核实行会作为权威转录行重来一次（短暂块在收到权威行时被替换掉，不重复）。
+                sink(SessionEvent::ToolCall(view.clone()));
                 lines.push(DiscLine {
                     // 回合 id 由驱动补（它才知道整场工作的计数）；这里先占位。
                     turn: 0,

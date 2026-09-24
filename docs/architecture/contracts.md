@@ -40,6 +40,9 @@
 
 事件台是**服务端单向推送**（客户端不在实时通道上发东西——命令走普通 HTTP POST）。当前用**长轮询**：
 `GET /api/events?since=N` 最多挂 20 秒，有新事件立即回；客户端拿 `head` 推进游标、按 `seq` 增量取。
+`oldest` 是事件台里**还留着的最老序号**：事件台会裁剪（`BUS_MAX`/`BUS_KEEP`），`since` 之后那段
+可能已永久丢失——客户端据此**重新对齐**（拉一次历史重放），而不是按 `seq` 干等
+（干等会让后续批次全部滞留，只有刷新页面才恢复）。
 
 选它而不是 SSE 的理由（针对本项目的实际形态：**本机、单客户端、直连无代理**）：
 
@@ -67,7 +70,7 @@
 | GET | `/style.css` | 静态资源 | — | `style.css` | 200 |
 | GET | `/app.js` | 静态资源 | — | `app.js` | 200 |
 | GET | `/md.js` | 静态资源 | — | `md.js` | 200 |
-| GET | `/api/events` | 事件台（`EventBus`） | 查询 `sid` / `since` | `{lines:[{seq,sid,events}],head}` | 200 |
+| GET | `/api/events` | 事件台（`EventBus`） | 查询 `sid` / `since` | `{lines:[{seq,sid,events}],head,oldest}` | 200 |
 | GET | `/api/state` | `DiscoveryOps` + `RegistryOps` + `HistoryOps` | — | `{modules,rejected,fence,providers,models,core,agents,settings,sessions,history}` | 200, 400 |
 | POST | `/api/sessions` | `SessionOps::create_work` | `{name,mode,agents[],task?,delegate?}` | `{sid,agents,events}` | 200, 400 |
 | POST | `/api/sessions/{sid}/{action}` | `SessionOps` + `intent::act` | `{text?,agent?,id?,overwrite?,data_base64?,编辑体}` | `{sid,events,seq}` 等 | 200, 400, 404, 409 |
