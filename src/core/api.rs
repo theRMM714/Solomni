@@ -283,7 +283,10 @@ pub struct CoreHandle {
 /// 一次"要一个成员回合"的请求：泵在工作线程上让出，回头找主线程驱动（它才拿得到各 agent 的会话）。
 struct AskReq {
     agent: String,
-    msgs: Vec<crate::core::ports::Msg>,
+    /// 本回合的**身份块**（由泵按当前提示词册现渲染）。
+    identity: String,
+    /// 本回合的提示（开场词 / 轮转词）。
+    turn: Vec<crate::core::ports::Msg>,
     /// 角色表（按值带一份小表）：发放工具面与校验越权都用它。
     systools: crate::core::roles::SystemTools,
     cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
@@ -371,7 +374,7 @@ impl CoreHandle {
             let t = text.clone();
             move |core| core.prepare_single(&sid, t.as_deref(), out == Output::Stream)
         })?;
-        let (session, prefix, llm, persister) = match prepared {
+        let (session, identity, prefix, llm, persister) = match prepared {
             // 不用跑模型（例如"末条是 AI 发言"）：把提示直接回给调用方。
             Prepared::Immediate(events) => {
                 let seq = bus.push(sid, &events);
@@ -387,10 +390,11 @@ impl CoreHandle {
             }
             Prepared::Run {
                 session,
+                identity,
                 prefix,
                 llm,
                 persister,
-            } => (*session, prefix, llm, persister),
+            } => (*session, identity, prefix, llm, persister),
         };
         // 取消标志在**派发时**就登记：生成一开始「停止」就能生效（它本来就不进队列）。
         let cancel = jobs.register(sid);
@@ -430,8 +434,8 @@ impl CoreHandle {
                         sink(ev);
                     }
                     match &text {
-                        Some(t) => session.say(t, &mut live, &mut sink),
-                        None => session.continue_reply(&mut live, &mut sink),
+                        Some(t) => session.say(t, &identity, &mut live, &mut sink),
+                        None => session.continue_reply(&identity, &mut live, &mut sink),
                     }
                     (session, events, seq)
                 })
@@ -493,17 +497,19 @@ impl CoreHandle {
         let systools = req.systools.clone();
         let cancel = std::sync::Arc::clone(&req.cancel);
         let opts = req.opts;
-        let msgs = req.msgs.clone();
+        let turn = req.turn.clone();
+        let identity = req.identity.clone();
         let agent = req.agent.clone();
         // 上限按值带进工作线程（引用带不进去：闭包要 'static）。
         let cap = req.cap;
-        let _ = &msgs;
+        let _ = &turn;
         let joined = std::thread::Builder::new()
             .name("solomni-member".to_string())
             .spawn(move || {
                 let mut s = session;
                 let ran = {
-                    let hist = s.msgs().to_vec();
+                    // 这一回合的消息 = 身份块（现渲染）+ 本回合工具 + 该会话的**对话** + 开场/轮转词。
+                    let hist = s.dialogue().to_vec();
                     let (chat, tools) = s.parts_mut();
                     crate::core::engine::Discussion::turn_with(
                         &systools,
@@ -511,11 +517,12 @@ impl CoreHandle {
                         &cancel,
                         opts,
                         &agent,
+                        &identity,
                         &hist,
                         cap,
                         chat,
                         tools,
-                        msgs,
+                        turn,
                         &mut |_e| {},
                     )
                 };
@@ -580,7 +587,7 @@ impl CoreHandle {
             let sid = sid.to_string();
             move |core| core.take_single(&sid)
         })?;
-        let (prompt, decl, up_to) = self.call({
+        let (prompt, decl, up_to, identity) = self.call({
             let sid = sid.to_string();
             move |core| Ok(core.compact_plan(&sid))
         })?;
@@ -588,7 +595,7 @@ impl CoreHandle {
             .name("solomni-compact".to_string())
             .spawn(move || {
                 let mut s = session;
-                let made = s.compact_turn(&prompt, decl.as_ref());
+                let made = s.compact_turn(&prompt, decl.as_ref(), &identity);
                 if let Ok(summary) = &made {
                     s.compact(up_to, summary);
                 }
@@ -767,13 +774,14 @@ impl CoreHandle {
                                     c.take_ask()
                                 }
                             };
-                            let Some((i, msgs)) = ask else { break };
+                            let Some((i, identity, turn)) = ask else { break };
                             let Some(agent) = c.member_id(i) else { break };
                             // 提醒时要往它自己的会话里写（那边用的是同一个名字）。
                             let agent_name = agent.clone();
                             let req = AskReq {
                                 agent,
-                                msgs,
+                                identity,
+                                turn,
                                 systools: c.systools().clone(),
                                 cap: discuss_cap,
                                 cancel: c.disc_cancel(),

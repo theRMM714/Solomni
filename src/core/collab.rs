@@ -113,7 +113,8 @@ pub struct CollabSession {
     turn_error: Option<String>,
     /// 泵让出的那一步：该问哪个成员、给它什么上下文。
     /// 泵**不自己调模型**——由核心取该 agent 的会话跑完再 feed 回来（见 session-model.md 二之二）。
-    pending_ask: Option<(usize, Vec<crate::core::ports::Msg>)>,
+    /// 泵让出的那一步：成员下标 / 身份块 / 本回合提示（身份每回合现渲染，不存进任何人的消息列表）。
+    pending_ask: Option<(usize, String, Vec<crate::core::ports::Msg>)>,
     /// 已发出的转录行数（增量事件用）。
     emitted: usize,
     /// 下一条转录行的 id（会话内稳定序号）。
@@ -649,7 +650,7 @@ impl CollabSession {
     }
 
     /// 泵让出的那一步（该问谁、给它什么上下文）——由核心取走并驱动。
-    pub fn take_ask(&mut self) -> Option<(usize, Vec<crate::core::ports::Msg>)> {
+    pub fn take_ask(&mut self) -> Option<(usize, String, Vec<crate::core::ports::Msg>)> {
         self.pending_ask.take()
     }
 
@@ -723,8 +724,8 @@ impl CollabSession {
                 } else {
                     // 泵只推**一步**：该问谁就存下并让出——驱动权在核心（它同时看得到协作会话与各 agent 的会话）。
                     match self.disc.as_mut().expect("disc 已确认存在").advance() {
-                        crate::core::engine::Adv::Ask { i, msgs } => {
-                            self.pending_ask = Some((i, msgs));
+                        crate::core::engine::Adv::Ask { i, identity, turn } => {
+                            self.pending_ask = Some((i, identity, turn));
                             return;
                         }
                         // 开场刚问完：接着进轮次。
@@ -968,21 +969,22 @@ impl CollabSession {
             let sandbox = self.sandboxes.for_agent(&a.name).cloned().ok_or_else(|| {
                 format!("agent {} 没有被分配沙箱（工作区未记录该 agent）", a.name)
             })?;
-            let env = crate::core::systool::env_block(&prompts, &sandbox);
-            // 形态按该 agent 的模型（或核心默认）解析：系统提示与实际协议必须一致
+            // 形态按该 agent 的模型（或核心默认）解析：身份块里的调用约定与实际协议必须一致
             let mode = if channel.is_some() {
                 self.settings.tool_mode_for(a.model.as_deref())
             } else {
                 crate::core::providers::ToolMode::Envelope
             };
-            let system = module::agent_system(&prompts, &a.name, &modules, &env, mode);
-            let mut member = Member::plain(&a.name, system);
+            // **会话参数**：身份块每回合由它现渲染，不存进任何人的消息列表。
+            let params =
+                crate::core::session::SessionParams::from_workspace(&a.name, &sandbox, &modules);
+            let mut member = Member::plain(&a.name, params, mode);
             // 围栏：可达范围 + 断网，由该 agent 的沙箱与 exec 段派生（机制在 adapters）；
             // 只读根来自用户显式授权（`fence_read`），默认空。
             let fence = crate::core::fence::FenceSpec::from_sandbox(&sandbox, self.spec.net)
                 .with_read_only(read_only_roots(&self.settings.app));
             // 工具说明块的素材（patch 语法 / 模块工具 / 模块参数）：装配期按这个 agent 的沙箱与模块算一次。
-            let notes = crate::core::systool::tool_notes(&prompts, &sandbox, &modules);
+            let tool_notes = crate::core::systool::tool_notes(&prompts, &sandbox, &modules);
             member.tools = Some(MemberTools {
                 mode,
                 // 模块 id → 该模块的（目录, 工具表）：多模块 agent 靠信封里的 module 消歧。
@@ -1006,7 +1008,7 @@ impl CollabSession {
                     .unwrap_or_default(),
                 // 讨论席不干活：拿不到自己模块的工具（角色表的 module_tools）。
                 with_modules: self.prompts.systools.allows_module_tools("discussant"),
-                notes,
+                notes: tool_notes,
             });
             members.push(member);
         }

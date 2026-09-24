@@ -424,22 +424,19 @@ pub(crate) fn rewind_keeps_only_lines_before_the_mark() {
     );
     assert_eq!(
         core.single_history(&sid).unwrap().len(),
-        3,
-        "system + 用户 + 答一"
+        2,
+        "用户 + 答一（身份由参数现渲染，不占对话）"
     );
 
-    // 回档到第 0 行 = 转录清空、历史只剩 system
+    // 回档到第 0 行 = 转录清空、对话也清空（身份由参数现渲染，不在对话里）
     let replayed = core.rewind(&sid, 0).unwrap();
     assert!(
         replay_lines(&replayed).is_empty(),
         "点第一行 → 转录清空：{:?}",
         replayed
     );
-    assert_eq!(
-        core.single_history(&sid).unwrap().len(),
-        1,
-        "历史只剩 system"
-    );
+    assert!(core.single_history(&sid).unwrap().is_empty(), "对话清空");
+    assert!(core.single_identity(&sid).is_some(), "身份块不受回档影响");
 
     // next_line 归零：下一条行 id 从 0 开始
     let ev = with_live(|l| core.single_say(&sid, "再来", l)).unwrap();
@@ -1054,7 +1051,7 @@ pub(crate) fn run_execution(
         if !m.present {
             continue;
         }
-        let system = m.system.clone();
+        let identity = m.params.identity(prompts, m.mode);
         let id = m.id.clone();
         let user = prompts.render(
             &prompts.core.execute.user,
@@ -1066,10 +1063,8 @@ pub(crate) fn run_execution(
         let rounds = crate::core::engine::converse_with(
             m.chat.as_mut().expect("测试通道").as_mut(),
             m.tools.as_mut(),
-            vec![
-                crate::core::ports::Msg::system(system),
-                crate::core::ports::Msg::user(user),
-            ],
+            &identity,
+            vec![crate::core::ports::Msg::user(user)],
             Default::default(),
             &id,
             &mut noop,
@@ -1132,7 +1127,8 @@ fn opts_discussion(
     let seen = Arc::new(Mutex::new(Vec::new()));
     let members = vec![Member::new(
         "m0",
-        "职责0".to_string(),
+        crate::tests::doubles::test_params("m0"),
+        crate::core::providers::ToolMode::Envelope,
         Box::new(OptsChat {
             seen: Arc::clone(&seen),
             results,
@@ -1237,7 +1233,15 @@ pub(crate) fn scripted_discussion(scripts: Vec<Vec<String>>, allow: bool) -> Dis
     let members: Vec<Member> = scripts
         .into_iter()
         .enumerate()
-        .map(|(i, s)| Member::new(&format!("m{}", i), format!("职责{}", i), scripted(s)))
+        .map(|(i, s)| {
+            let id = format!("m{}", i);
+            Member::new(
+                &id,
+                crate::tests::doubles::test_params(&id),
+                crate::core::providers::ToolMode::Envelope,
+                scripted(s),
+            )
+        })
         .collect();
     Discussion::new(
         members,
@@ -1655,6 +1659,7 @@ pub(crate) fn discussion_turn_carries_the_agent_sessions_own_history() {
         &cancel,
         crate::core::ports::CompleteOpts::plain(false),
         "a",
+        "（测试）身份",
         &[crate::core::ports::Msg::user("只看第二份资料")],
         8,
         &mut chat,
@@ -1810,7 +1815,8 @@ pub(crate) fn discussion_member_cannot_use_module_tools() {
 pub(crate) fn prose_without_an_envelope_is_not_a_statement() {
     let members = vec![Member::new(
         "m0",
-        "职责".to_string(),
+        crate::tests::doubles::test_params("m0"),
+        crate::core::providers::ToolMode::Envelope,
         scripted(vec!["我觉得可以".into()]),
     )];
     let mut disc = Discussion::new(
@@ -1873,7 +1879,8 @@ pub(crate) fn execution_review_pass_and_fail_paths() {
     let prompts = test_prompts();
     let mut members = vec![Member::new(
         "m0",
-        "职责".to_string(),
+        crate::tests::doubles::test_params("m0"),
+        crate::core::providers::ToolMode::Envelope,
         scripted(vec!["{\"type\":\"say\",\"text\":\"汇报内容\"}".into()]),
     )];
     let ran = run_execution(members.as_mut_slice(), "任务A", &prompts);
@@ -1916,7 +1923,8 @@ pub(crate) fn review_parse_failure_is_conservative_fail() {
     let prompts = test_prompts();
     let mut members = vec![Member::new(
         "m0",
-        "职责".to_string(),
+        crate::tests::doubles::test_params("m0"),
+        crate::core::providers::ToolMode::Envelope,
         scripted(vec!["{\"type\":\"say\",\"text\":\"x\"}".into()]),
     )];
     let mut exec = crate::core::engine::Execution::new();
@@ -1947,10 +1955,13 @@ pub(crate) fn core_direct_seeds_system_prompt() {
         .create_work(work("w", WorkMode::Single, &["a"]))
         .unwrap()
         .sid;
-    // 回归：单 agent 会话的历史首条必须是职责提示词（system）。
-    let h = core.single_history(&sid).unwrap();
-    assert_eq!(h[0].role, "system");
-    assert!(h[0].content.contains("你负责a"));
+    // 回归：单 agent 会话的身份块必须是职责提示词（由会话参数现渲染，不进对话列表）。
+    let identity = core.single_identity(&sid).expect("身份块");
+    assert!(identity.contains("你负责a"), "{}", identity);
+    assert!(
+        core.single_history(&sid).unwrap().is_empty(),
+        "对话里只有真正发生过的事（此刻还没有）"
+    );
     let events = with_live(|l| core.single_say(&sid, "在吗", l)).unwrap();
     // 回归：用户发言必须入转录（此前只进历史、不进转录，历史回放会丢用户消息）。
     match &events[0] {
@@ -1985,11 +1996,11 @@ pub(crate) fn single_mode_accepts_multi_module_agent_and_converses() {
         meta.agents[0].modules,
         vec!["a".to_string(), "b".to_string()]
     );
-    let h = core.single_history(&sid).unwrap();
-    assert_eq!(h[0].role, "system");
+    let identity = core.single_identity(&sid).expect("身份块");
     assert!(
-        h[0].content.contains("你负责a") && h[0].content.contains("你负责b"),
-        "system 必须并入全部模块职责"
+        identity.contains("你负责a") && identity.contains("你负责b"),
+        "身份块必须并入全部模块职责：{}",
+        identity
     );
     let events = with_live(|l| core.single_say(&sid, "在吗", l)).unwrap();
     assert!(
@@ -2616,7 +2627,12 @@ pub(crate) fn member_with_tools(
             parallel: BTreeSet::new(),
         },
     );
-    let mut m = Member::new(id, "职责".to_string(), scripted(script));
+    let mut m = Member::new(
+        id,
+        crate::tests::doubles::test_params(id),
+        crate::core::providers::ToolMode::Envelope,
+        scripted(script),
+    );
     // 该路径走模块声明的外部命令（grep）：空沙箱 + 内存 IO，内置工具不参与。
     m.tools = Some(MemberTools {
         mode: crate::core::providers::ToolMode::Envelope,
@@ -2677,11 +2693,11 @@ pub(crate) fn same_named_tools_in_two_modules_run_in_their_own_root() {
         .sid;
     // 模块工具清单**不在系统提示里**（随回合注入）：分组形态由
     // module_tool_params_are_declared_in_the_manifest_and_enforced_by_core 盯。
-    let h = core.single_history(&sid).unwrap();
+    let identity = core.single_identity(&sid).expect("身份块");
     assert!(
-        !h[0].content.contains("read_txt"),
+        !identity.contains("read_txt"),
         "系统提示里不许出现工具清单：{}",
-        h[0].content
+        identity
     );
     let events = with_live(|l| core.single_say(&sid, "干活", l)).unwrap();
     // 信封写了 module → tool 行呈现成 模块.工具（用户一眼看出调的是谁的）。
@@ -4025,7 +4041,7 @@ pub(crate) fn module_tool_params_are_declared_in_the_manifest_and_enforced_by_co
     let system = crate::core::module::agent_system(
         &prompts,
         "m0",
-        std::slice::from_ref(&mod_m0),
+        &[(mod_m0.manifest.id.clone(), mod_m0.manifest.system.clone())],
         "工具说明",
         crate::core::providers::ToolMode::Envelope,
     );
@@ -4416,8 +4432,7 @@ pub(crate) fn agent_system_carries_the_real_roots() {
         .create_work(work("w", WorkMode::Single, &["a"]))
         .unwrap()
         .sid;
-    let h = core.single_history(&sid).unwrap();
-    let system = &h[0].content;
+    let system = &core.single_identity(&sid).expect("身份块");
     assert!(
         system.contains(&s(&["w", "work"])),
         "system 要含共享区真实根：{}",
@@ -5074,7 +5089,12 @@ pub(crate) fn native_member(
         declared,
         seen,
     });
-    let mut m = Member::new(id, "职责".to_string(), chat);
+    let mut m = Member::new(
+        id,
+        crate::tests::doubles::test_params(id),
+        crate::core::providers::ToolMode::Native,
+        chat,
+    );
     let mut modules = BTreeMap::new();
     modules.insert(
         "m0".to_string(),
@@ -5104,6 +5124,62 @@ pub(crate) fn native_member(
         notes: crate::tests::doubles::test_notes(&sb, &[]),
     });
     m
+}
+
+/// **改形态不必重建会话**：会话里存的是**参数**（`SessionParams`），身份块每次调用现渲染。
+/// 判据：同一个会话（没被重建）在建好之后，把登记处里的形态探测成 native——
+/// 下一回合的请求已经换了一套调用约定，而对话（此前说过的话）一条没丢。
+#[test]
+pub(crate) fn tool_mode_change_needs_no_session_rebuild() {
+    let hist = Arc::new(InMemoryHistory::new());
+    let io = Arc::new(InMemorySysIo::new());
+    let mut core = native_core(
+        NativeGateway {
+            scripts: Mutex::new(vec![vec![NativeStep::Text(
+                "{\"type\":\"say\",\"text\":\"答一\"}".to_string(),
+            )]]),
+        },
+        Arc::clone(&hist),
+        Arc::clone(&io),
+    );
+    let sid = core
+        .create_work(work("w", WorkMode::Single, &["a"]))
+        .unwrap()
+        .sid;
+    let before = core.single_identity(&sid).expect("身份块");
+    assert!(
+        before.contains("只输出一个 JSON 信封"),
+        "建会话时是信封形态：{}",
+        before
+    );
+    with_live(|l| core.single_say(&sid, "问一", l)).unwrap();
+    let said = core.single_history(&sid).unwrap();
+    assert!(
+        said.iter().any(|m| m.content.contains("问一")),
+        "用户那句话在对话里：{:?}",
+        said
+    );
+
+    // 登记处把模型判成原生（产品里就是「测工具调用」那一下）：形态不钉在会话里。
+    core.probe_model_tools("m").expect("探测");
+    with_live(|l| core.single_say(&sid, "问二", l)).unwrap();
+    let after = core.single_identity(&sid).expect("身份块");
+    assert!(
+        after.contains("原生工具调用"),
+        "形态改了，身份块跟着改（不必重建会话）：{}",
+        after
+    );
+    let dialogue = core.single_history(&sid).unwrap();
+    assert!(
+        dialogue.iter().any(|m| m.content.contains("问一")),
+        "换形态不该丢对话：{:?}",
+        dialogue
+    );
+    assert!(
+        dialogue.iter().all(|m| !m.content.contains("【工作环境】")),
+        "对话里不许出现身份块：{:?}",
+        dialogue
+    );
 }
 
 /// **总表不进提示词**：模型只看到"这一回合能用的工具"那一块；没拿到的不出现——
@@ -6030,7 +6106,10 @@ pub(crate) fn builtin_tool_book_is_the_one_source_of_names_and_paths() {
     }
     // 工作环境块：**只有路径与规矩，没有工具清单**（总表只留在核心手里当判据）。
     let sb = test_sandbox("a1", &[]);
-    let env = crate::core::systool::env_block(&prompts, &sb);
+    let env = crate::core::systool::env_block(
+        &prompts,
+        &crate::core::session::SessionParams::from_workspace("a1", &sb, &[]),
+    );
     assert!(env.contains("【工作环境】"), "{}", env);
     assert!(
         !env.contains("【工具参数】") && !env.contains("offset（integer"),
@@ -6946,8 +7025,10 @@ pub(crate) fn edit_session_writes_meta_appends_config_record_and_rebuilds() {
     // 下一次访问按新配置从转录重建（单 agent 会话还没轮到用户：它只提醒，不硬发请求）。
     with_live(|l| core.continue_flow(&sid, l)).unwrap();
     assert!(core.session_exists(&sid), "访问会话即按新配置重建");
-    let history = core.single_history(&sid).unwrap();
-    assert!(!history.is_empty(), "重建后上下文还在");
+    // 重建后：身份块照样现渲染（不在对话里），对话里的内容也还在。
+    let identity = core.single_identity(&sid).expect("重建后身份块");
+    assert!(!identity.is_empty(), "重建后身份块还在");
+    let _ = core.single_history(&sid).unwrap();
 }
 
 #[test]
@@ -7476,7 +7557,12 @@ pub(crate) fn rewind_never_splits_a_reply() {
         replay_lines(&replayed)
     );
     let history = core.single_history(&sid).unwrap();
-    assert_eq!(history.len(), 2, "历史 = system + 用户：{:?}", history);
+    assert_eq!(
+        history.len(),
+        1,
+        "对话 = 用户（身份不占对话）：{:?}",
+        history
+    );
     assert!(
         history.iter().all(|m| m.tool_call_id.is_empty()),
         "历史里不许出现没有对应助手消息的孤儿工具结果：{:?}",

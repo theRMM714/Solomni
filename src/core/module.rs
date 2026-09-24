@@ -103,13 +103,13 @@ pub struct Module {
 pub fn agent_system(
     prompts: &crate::core::prompt::Prompts,
     agent: &str,
-    modules: &[Module],
+    modules: &[(String, String)],
     env: &str,
     mode: crate::core::providers::ToolMode,
 ) -> String {
     let parts = modules
         .iter()
-        .map(|m| format!("\n== {} ==\n{}", m.manifest.id, m.manifest.system.trim()))
+        .map(|(id, system)| format!("\n== {} ==\n{}", id, system.trim()))
         .collect::<Vec<_>>()
         .join("");
     prompts.render(

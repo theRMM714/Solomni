@@ -24,19 +24,75 @@ pub(crate) fn keep_whole_replies(line_reply: &[u64], keep: usize) -> usize {
     keep
 }
 
+/// 会话参数：拼请求要的**前提**（身份、环境）。**不是对话**——不占对话列表的位置，
+/// 每次模型调用由驱动现渲染（见 `identity`）。
+///
+/// 为什么单独有个位置：参数是**派生**的（登记处 + 提示词册 + 工作区路径）。把它渲染成
+/// "第 0 条消息"存进会话，就等于让参数冒充对话：回档、压缩、重建都得单独照顾那一条，
+/// 参数一改还得把整个会话重建一遍。
+#[derive(Debug, Clone)]
+pub struct SessionParams {
+    /// agent 实例名（身份块的 {{agent}}，也是重建时的命名依据）。
+    pub agent: String,
+    /// 工作名（环境块的 {{work_name}}）。
+    pub work_name: String,
+    /// 共享区（真实根）。
+    pub shared: std::path::PathBuf,
+    /// 该 agent 的私有沙箱（真实根）。
+    pub private: std::path::PathBuf,
+    /// 模块 id → 目录（环境块列出的模块目录）。
+    pub module_dirs: std::collections::BTreeMap<String, std::path::PathBuf>,
+    /// 模块能力包：id + 模块 system（顺序即装配顺序）。
+    pub modules: Vec<(String, String)>,
+}
+
+impl SessionParams {
+    /// 从（agent、沙箱、模块清单）装配：沙箱给真实根与模块目录，模块清单给能力包。
+    /// 这是**唯一**的装配口径——会话的建立与重建都走它，参数不会两处各拼一套。
+    pub fn from_workspace(
+        agent: &str,
+        sb: &crate::core::workspace::Sandbox,
+        modules: &[crate::core::module::Module],
+    ) -> SessionParams {
+        SessionParams {
+            agent: agent.to_string(),
+            work_name: sb.work_name.clone(),
+            shared: sb.shared.clone(),
+            private: sb.private.clone(),
+            module_dirs: sb.modules.clone(),
+            modules: modules
+                .iter()
+                .map(|m| (m.manifest.id.clone(), m.manifest.system.clone()))
+                .collect(),
+        }
+    }
+
+    /// 身份块：**每次调用现渲染**（模板与文案取当前提示词册，通道形态取当前登记处）。
+    pub fn identity(
+        &self,
+        prompts: &crate::core::prompt::Prompts,
+        mode: crate::core::providers::ToolMode,
+    ) -> String {
+        let env = crate::core::systool::env_block(prompts, self);
+        crate::core::module::agent_system(prompts, &self.agent, &self.modules, &env, mode)
+    }
+}
+
 /// 一个 agent 的会话：模块数不限（形态只在校验与界面标签上区分）。
 pub struct AgentSession {
     /// agent 实例名（说话人标签；重建时也按它命名）。
     id: String,
-    history: Vec<Msg>,
+    /// 会话参数（派生的前提）：不占对话的位置，每次调用现渲染。
+    params: SessionParams,
+    /// **只有对话**：user / assistant / tool（+ 核心注入的系统消息）。
+    /// 身份与环境不在这里——它们由 params 现渲染（见 docs/architecture/tools-and-roles.md 二）。
+    dialogue: Vec<Msg>,
     chat: BoxedChat,
     note: Option<String>,
     /// 工具环境：内置文件工具按该 agent 的沙箱放行 + 该 agent 模块声明的外部工具。
     tools: Option<MemberTools>,
     /// @ 引用的说明文案（提示词册）；改写在入历史与转录之前做。
     refs: crate::core::prompt::RefsPrompts,
-    /// @ 改写要用的真实根（本工作共享区 + 自己的私有沙箱）。
-    roots: crate::core::refs::RefRoots,
     /// 模型侧运行时文案（提示词册）；本会话要用的那几条。
     tool_texts: crate::core::prompt::ToolTexts,
     /// 下一条转录行的 id。
@@ -56,9 +112,23 @@ pub struct AgentSession {
 }
 
 impl AgentSession {
-    /// 本会话已有的消息历史（讨论回合要把它带上：用户在这个会话里说的话，下一回合它就该记得）。
-    pub fn msgs(&self) -> &[crate::core::ports::Msg] {
-        &self.history
+    /// 本会话的**对话**（讨论回合要把它带上：用户在这个会话里说的话，下一回合它就该记得）。
+    /// 身份与环境不在里面——它们由 params 现渲染（见 SessionParams::identity）。
+    pub fn dialogue(&self) -> &[crate::core::ports::Msg] {
+        &self.dialogue
+    }
+
+    /// 会话参数：驱动据此现渲染身份块。
+    pub fn params(&self) -> &SessionParams {
+        &self.params
+    }
+
+    /// @ 改写要用的真实根：由参数派生，不另存一份。
+    fn roots(&self) -> crate::core::refs::RefRoots {
+        crate::core::refs::RefRoots {
+            work: self.params.shared.clone(),
+            private: Some(self.params.private.clone()),
+        }
     }
 
     /// 讨论回合要**在这个会话里**跑：一次借出通道与工具环境。
@@ -72,24 +142,23 @@ impl AgentSession {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         id: &str,
-        system: String,
+        params: SessionParams,
         chat: BoxedChat,
         note: Option<String>,
         tools: Option<MemberTools>,
         refs: crate::core::prompt::RefsPrompts,
-        roots: crate::core::refs::RefRoots,
         tool_texts: crate::core::prompt::ToolTexts,
     ) -> AgentSession {
         AgentSession {
             cur_turn: 0,
             compact_at: 0,
             id: id.to_string(),
-            history: vec![Msg::system(system)],
+            params,
+            dialogue: Vec::new(),
             chat,
             note,
             tools,
             refs,
-            roots,
             tool_texts,
             next_line: 0,
             marks: Vec::new(),
@@ -104,14 +173,14 @@ impl AgentSession {
     #[allow(clippy::too_many_arguments)]
     pub fn restore(
         id: &str,
-        history: Vec<Msg>,
+        params: SessionParams,
+        dialogue: Vec<Msg>,
         marks: Vec<usize>,
         line_reply: Vec<u64>,
         chat: BoxedChat,
         note: Option<String>,
         tools: Option<MemberTools>,
         refs: crate::core::prompt::RefsPrompts,
-        roots: crate::core::refs::RefRoots,
         tool_texts: crate::core::prompt::ToolTexts,
     ) -> AgentSession {
         AgentSession {
@@ -119,12 +188,12 @@ impl AgentSession {
             compact_at: 0,
             id: id.to_string(),
             next_line: marks.len() as u64,
-            history,
+            params,
+            dialogue,
             chat,
             note,
             tools,
             refs,
-            roots,
             tool_texts,
             marks,
             line_reply,
@@ -132,9 +201,16 @@ impl AgentSession {
         }
     }
 
-    /// 这条会话**正在用**的工具调用形态（系统提示就是按它拼的）。
+    /// 这条会话**正在用**的工具调用形态（身份块里的调用约定按它现渲染）。
     pub fn tool_mode(&self) -> crate::core::providers::ToolMode {
         self.tools.as_ref().map(|t| t.mode).unwrap_or_default()
+    }
+
+    /// 改形态：**只改这一格**（登记处派生出来的参数），不重建会话。
+    pub fn set_tool_mode(&mut self, mode: crate::core::providers::ToolMode) {
+        if let Some(t) = self.tools.as_mut() {
+            t.mode = mode;
+        }
     }
 
     /// 开场事件（通道回落告知）。
@@ -175,21 +251,17 @@ impl AgentSession {
         &mut self,
         prompt: &str,
         decl: Option<&crate::core::ports::ToolDecl>,
+        identity: &str,
     ) -> Result<String, String> {
-        let mut msgs = self.history.clone();
-        // 这个回合**只声明 compact**：工具块也只列它（系统提示里没有工具总表）。
-        if let Some(t) = self.tools.as_ref() {
-            let block = t.tools_block(&["compact".to_string()], false);
-            if !block.is_empty() {
-                let at = if msgs.first().map(|m| m.role.as_str()) == Some("system") {
-                    1
-                } else {
-                    0
-                };
-                msgs.insert(at, Msg::system(block));
-            }
-        }
-        msgs.push(Msg::user(prompt.to_string()));
+        // 整条消息**只有这一处装配**：身份 + 本回合工具（只有 compact）+ 对话 + 压缩提示。
+        let msgs = crate::core::engine::assemble(
+            identity,
+            self.tools.as_ref(),
+            &["compact".to_string()],
+            false,
+            &self.dialogue,
+            &[Msg::user(prompt.to_string())],
+        );
         let mut opts = crate::core::ports::CompleteOpts::plain(false);
         if let Some(d) = decl {
             opts.tools = Some(std::slice::from_ref(d));
@@ -229,7 +301,7 @@ impl AgentSession {
     /// 注入一条**系统消息**：上下文里是 system 角色，转录里是系统行。
     /// **系统/核心发的消息不得用用户身份**——无论进上下文还是进界面（见 session-model.md 二"系统消息"）。
     pub fn note_system(&mut self, text: &str) -> Vec<SessionEvent> {
-        self.history.push(Msg::system(text.to_string()));
+        self.dialogue.push(Msg::system(text.to_string()));
         let v = self.line(text.to_string(), None, None);
         vec![SessionEvent::Transcript(vec![LineView {
             system: true,
@@ -244,11 +316,15 @@ impl AgentSession {
 
     /// 到点自动压一次：估算历史字符数（≈ tokens × 4），超预算就跑一个压缩回合。
     /// 压不动就**如实通知并继续用完整上下文**（不静默降级、不假装压过）。
-    fn maybe_compact(&mut self, sink: &mut dyn FnMut(SessionEvent)) {
+    fn maybe_compact(&mut self, identity: &str, sink: &mut dyn FnMut(SessionEvent)) {
         if self.compact_at == 0 {
             return;
         }
-        let chars: usize = self.history.iter().map(|m| m.content.chars().count()).sum();
+        let chars: usize = self
+            .dialogue
+            .iter()
+            .map(|m| m.content.chars().count())
+            .sum();
         if chars <= self.compact_at {
             return;
         }
@@ -259,7 +335,7 @@ impl AgentSession {
             .map(|s| s.decl("compact"));
         let prompt = self.tool_texts.compact_prompt.clone();
         let up_to = self.next_line;
-        match self.compact_turn(&prompt, decl.as_ref()) {
+        match self.compact_turn(&prompt, decl.as_ref(), identity) {
             Ok(summary) => {
                 self.compact(up_to, &summary);
                 sink(SessionEvent::Compacted { up_to, summary });
@@ -286,12 +362,12 @@ impl AgentSession {
             .enumerate()
             .filter(|(i, _)| (*i as u64) < up_to)
             .count();
-        let hist = if keep == 0 { 1 } else { self.marks[keep - 1] };
-        self.history.truncate(hist.max(1));
-        // 摘要插在系统提示之后：此后模型只看到"摘要 + 之后的内容"。
-        let at = self.history.len().min(1);
-        self.history
-            .insert(at, Msg::user(format!("[此前内容摘要]\n{}", summary)));
+        let hist = if keep == 0 { 0 } else { self.marks[keep - 1] };
+        self.dialogue.truncate(hist);
+        // 摘要放在**对话最前面**（身份与环境由参数现渲染，不占对话的位置）：
+        // 此后模型只看到"身份 + 摘要 + 之后的内容"。
+        self.dialogue
+            .insert(0, Msg::user(format!("[此前内容摘要]\n{}", summary)));
         // 插了一条消息，marks 里"行完成时的历史长度"整体后移一格。
         for m in self.marks.iter_mut() {
             *m += 1;
@@ -323,17 +399,17 @@ impl AgentSession {
         };
         self.next_line += 1;
         self.line_reply.push(reply);
-        self.marks.push(self.history.len());
+        self.marks.push(self.dialogue.len());
         v
     }
 
     /// 末条是否为用户发言（继续能不能直接发请求的判据）。
     pub fn last_is_user(&self) -> bool {
-        matches!(self.history.last().map(|m| m.role.as_str()), Some("user"))
+        matches!(self.dialogue.last().map(|m| m.role.as_str()), Some("user"))
     }
 
-    /// 回档：只保留前 keep_id 行（= 删掉该行及其后）；历史与 marks 同步截断。
-    /// keep_id = 0 → 转录清空，历史只剩 system（marks 也清空）。
+    /// 回档：只保留前 keep_id 行（= 删掉该行及其后）；对话与 marks 同步截断。
+    /// keep_id = 0 → 转录清空，对话也清空（marks 同清）；身份与环境不在这里，不受影响。
     /// **按回复原子**：截在一次回复内部会留下"孤儿工具结果"（协议要求结果紧跟发起它的助手消息），
     /// 所以 keep_id 落在某次回复中间时，这条回复整条丢掉（退到它的第一行之前）。
     pub fn rewind(&mut self, keep_id: u64) {
@@ -344,29 +420,35 @@ impl AgentSession {
         let keep = keep_whole_replies(&self.line_reply, keep_id as usize);
         if keep == 0 {
             self.marks.clear();
-            self.history.truncate(1);
+            self.dialogue.clear();
             self.next_line = 0;
             return;
         }
         let hist = self.marks[keep - 1];
         self.marks.truncate(keep);
-        self.history.truncate(hist);
+        self.dialogue.truncate(hist);
         self.next_line = keep as u64;
     }
 
     /// 发言：先把 @ 引用改写成寻址 → 压入用户消息 → 逐轮（文本行 / 工具行）落转录。
     /// 改写在这一处完成，所以转录行与进上下文的消息是同一份文本（转录即内容）。
-    pub fn say(&mut self, text: &str, live: &mut Live, sink: &mut dyn FnMut(SessionEvent)) {
+    pub fn say(
+        &mut self,
+        text: &str,
+        identity: &str,
+        live: &mut Live,
+        sink: &mut dyn FnMut(SessionEvent),
+    ) {
         // 到点先压一次：**同一个工作线程内**跑，不阻塞核心。
-        self.maybe_compact(sink);
-        let text = crate::core::refs::rewrite(text, Some(&self.id), &self.roots, &self.refs);
-        self.history.push(Msg::user(text.clone()));
+        self.maybe_compact(identity, sink);
+        let text = crate::core::refs::rewrite(text, Some(&self.id), &self.roots(), &self.refs);
+        self.dialogue.push(Msg::user(text.clone()));
         // 用户行不属于任何模型回复：给它**自己的行号**当回复号（与重建时的规则一致），
         // 否则它会继承上一轮的回复号，回档时与上一轮误并成一组。
         self.cur_reply = self.next_line;
         let user_line = self.line(format!("[用户] {}", text), None, None);
         sink(SessionEvent::Transcript(vec![user_line]));
-        self.rounds_events(live, sink);
+        self.rounds_events(identity, live, sink);
     }
 
     /// **系统注入**：上下文里是 system 角色，转录里是系统行，随后正常问模型。
@@ -374,11 +456,12 @@ impl AgentSession {
     pub fn inject_system(
         &mut self,
         text: &str,
+        identity: &str,
         live: &mut Live,
         sink: &mut dyn FnMut(SessionEvent),
     ) {
-        self.maybe_compact(sink);
-        self.history.push(Msg::system(text.to_string()));
+        self.maybe_compact(identity, sink);
+        self.dialogue.push(Msg::system(text.to_string()));
         // 系统行不属于任何模型回复：给它自己的行号当回复号（与重建规则一致）。
         self.cur_reply = self.next_line;
         let v = self.line(text.to_string(), None, None);
@@ -386,12 +469,17 @@ impl AgentSession {
             system: true,
             ..v
         }]));
-        self.rounds_events(live, sink);
+        self.rounds_events(identity, live, sink);
     }
 
-    /// 继续：末条已是用户发言，直接用现有历史问模型（不新增用户消息）。
-    pub fn continue_reply(&mut self, live: &mut Live, sink: &mut dyn FnMut(SessionEvent)) {
-        self.rounds_events(live, sink);
+    /// 继续：末条已是用户发言，直接用现有对话问模型（不新增用户消息）。
+    pub fn continue_reply(
+        &mut self,
+        identity: &str,
+        live: &mut Live,
+        sink: &mut dyn FnMut(SessionEvent),
+    ) {
+        self.rounds_events(identity, live, sink);
     }
 
     /// 把一次问询的逐轮产出落成转录行：一轮的正文/思维链出文本行，工具另占一条工具行。
@@ -400,7 +488,12 @@ impl AgentSession {
     /// 逐轮外送：**一轮跑完就出这一轮的行**（以前攒到回合收尾才一次性出，工具轮会把上一轮的
     /// 流式文本从界面上抹掉）。行在回调里**只构造一次**；`run` 返回后只补记账——`marks` 是回档
     /// 依据，必须保持"文本行的 mark 在 text_msgs 之前、工具行的 mark 在两个 msgs 之后"这个原时序。
-    fn rounds_events(&mut self, live: &mut Live, sink: &mut dyn FnMut(SessionEvent)) {
+    fn rounds_events(
+        &mut self,
+        identity: &str,
+        live: &mut Live,
+        sink: &mut dyn FnMut(SessionEvent),
+    ) {
         let label = self.id.clone();
         let texts = self.tool_texts.clone();
         let stopped = live.cancelled();
@@ -418,7 +511,7 @@ impl AgentSession {
             }
             per_round.borrow_mut().push(views);
         };
-        let rounds = self.run(live, &mut on_round, sink);
+        let rounds = self.run(identity, live, &mut on_round, sink);
         self.next_line = next_line.get();
 
         // 只补记账（不再构造行、不再外送）：顺序与旧逻辑逐字对应。
@@ -434,28 +527,28 @@ impl AgentSession {
                     if has_line {
                         if let Some(v) = it.next() {
                             self.line_reply.push(v.reply);
-                            self.marks.push(self.history.len());
+                            self.marks.push(self.dialogue.len());
                         }
                     }
                     for m in &round.text_msgs {
-                        self.history.push(m.clone());
+                        self.dialogue.push(m.clone());
                     }
                     for m in &run.msgs {
-                        self.history.push(m.clone());
+                        self.dialogue.push(m.clone());
                     }
                     if let Some(v) = it.next() {
                         self.line_reply.push(v.reply);
-                        self.marks.push(self.history.len());
+                        self.marks.push(self.dialogue.len());
                     }
                 }
                 None => {
                     // 与旧逻辑同一时序：先扩展历史，再记这一行的 mark。
                     for m in &round.text_msgs {
-                        self.history.push(m.clone());
+                        self.dialogue.push(m.clone());
                     }
                     if let Some(v) = it.next() {
                         self.line_reply.push(v.reply);
-                        self.marks.push(self.history.len());
+                        self.marks.push(self.dialogue.len());
                     }
                 }
             }
@@ -472,9 +565,11 @@ impl AgentSession {
         }
     }
 
-    /// 以现有历史跑一次工具循环；流式时逐片外送短暂 Delta（信封正文不外流，避免糊屏）。
+    /// 以现有对话跑一次工具循环；流式时逐片外送短暂 Delta（信封正文不外流，避免糊屏）。
+    /// identity = 本回合的身份块（由驱动按当前提示词册现渲染；不进对话）。
     fn run(
         &mut self,
+        identity: &str,
         live: &mut Live,
         on_round: &mut crate::core::engine::RoundSink<'_>,
         sink: &mut dyn FnMut(SessionEvent),
@@ -487,7 +582,7 @@ impl AgentSession {
         let mut acc = String::new();
         {
             let AgentSession {
-                history,
+                dialogue,
                 chat,
                 tools,
                 ..
@@ -495,7 +590,8 @@ impl AgentSession {
             crate::core::engine::converse_with(
                 chat.as_mut(),
                 tools.as_mut(),
-                history.clone(),
+                identity,
+                dialogue.clone(),
                 llm,
                 &label,
                 &mut |chunk| {
@@ -613,14 +709,6 @@ pub(crate) fn stream_piece(acc: &str, piece: &str) -> (String, String) {
         }
     };
     (send, format!("{}{}", acc, piece))
-}
-
-// 测试访问器：验证职责提示词已入历史首条（回归：会话曾丢失 system 提示词）。
-#[cfg(test)]
-impl AgentSession {
-    pub fn history(&self) -> &[Msg] {
-        &self.history
-    }
 }
 
 // MAX_TOOL_CALLS 供引擎循环使用；此处引用以保持常量归属清晰。

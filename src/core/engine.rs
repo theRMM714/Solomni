@@ -481,7 +481,10 @@ fn dispatch_external(ctx: &MemberTools, inv: &ToolInvoke) -> (String, ToolOutcom
 
 pub struct Member {
     pub id: String,
-    pub system: String,
+    /// 会话参数：身份块由它**每回合现渲染**（不给成员存一份渲染好的文本）。
+    pub params: crate::core::session::SessionParams,
+    /// 该席位的通道形态（登记处派生）：身份块里的调用约定按它渲染。
+    pub mode: crate::core::providers::ToolMode,
     /// 内存通道：**只有测试用**（生产里回合跑在各自的 agent 会话里，见 session-model.md 二之二）。
     #[cfg(test)]
     pub chat: Option<BoxedChat>,
@@ -493,10 +496,15 @@ pub struct Member {
 
 impl Member {
     /// 生产构造：成员不持有通道（驱动权在核心，回合在各自的会话里跑）。
-    pub fn plain(id: &str, system: String) -> Member {
+    pub fn plain(
+        id: &str,
+        params: crate::core::session::SessionParams,
+        mode: crate::core::providers::ToolMode,
+    ) -> Member {
         Member {
             id: id.to_string(),
-            system,
+            params,
+            mode,
             present: true,
             agreed: false,
             tools: None,
@@ -507,10 +515,16 @@ impl Member {
 
     /// 测试构造：带内存通道（配合 cfg(test) 的 open/step/member_turn 直接驱动讨论）。
     #[cfg(test)]
-    pub fn new(id: &str, system: String, chat: BoxedChat) -> Member {
+    pub fn new(
+        id: &str,
+        params: crate::core::session::SessionParams,
+        mode: crate::core::providers::ToolMode,
+        chat: BoxedChat,
+    ) -> Member {
         Member {
             id: id.to_string(),
-            system,
+            params,
+            mode,
             present: true,
             agreed: false,
             tools: None,
@@ -583,8 +597,13 @@ pub struct Discussion {
 /// 推进讨论的**一步**：该问谁（或终态）。
 /// 泵只决定"该问谁"，**不自己调模型**——驱动权归核心（见 docs/architecture/session-model.md 二之二）。
 pub enum Adv {
-    /// 该问这个成员一回合：把 msgs 发进它的会话，把结果交给 feed。
-    Ask { i: usize, msgs: Vec<Msg> },
+    /// 该问这个成员一回合：身份块 + 本回合提示交给驱动（它取会话、装配、跑模型）。
+    /// 身份**每回合现渲染**（由成员的 params + 当前提示词册），不存在谁的会话里。
+    Ask {
+        i: usize,
+        identity: String,
+        turn: Vec<Msg>,
+    },
     /// 开场问完了（可以进轮次了）。
     Opened,
     /// 终态 / 轮次结束（原样交回上层）。
@@ -622,7 +641,8 @@ impl Discussion {
     fn member_turn(
         &mut self,
         i: usize,
-        msgs: Vec<Msg>,
+        identity: &str,
+        turn: Vec<Msg>,
         sink: &mut dyn FnMut(SessionEvent),
     ) -> Result<MemberTurn, String> {
         let opts = self.opts();
@@ -637,11 +657,12 @@ impl Discussion {
                 &self.cancel,
                 opts,
                 &speaker,
+                identity,
                 &[],
                 MAX_TOOL_CALLS,
                 chat.as_mut(),
                 tools.as_mut(),
-                msgs,
+                turn,
                 sink,
             )?
         };
@@ -661,40 +682,33 @@ impl Discussion {
         cancel: &std::sync::Arc<std::sync::atomic::AtomicBool>,
         opts: crate::core::ports::CompleteOpts<'static>,
         speaker: &str,
-        // 该 agent **会话自己的历史**：用户进它会话说的话，下一回合它带着（不分家的核心承诺）。
-        history: &[Msg],
+        // 本回合的身份块（驱动按当前提示词册现渲染；不进对话）。
+        identity: &str,
+        // 该 agent **会话自己的对话**：用户进它会话说的话，下一回合它带着（不分家的核心承诺）。
+        dialogue: &[Msg],
         // 一轮内允许的模型调用上限（用户可设；到顶就交回"没表态"，由核心决定提醒还是放过）。
         cap: usize,
         chat: &mut dyn Chat,
         mut tools: Option<&mut MemberTools>,
-        mut msgs: Vec<Msg>,
+        turn: Vec<Msg>,
         sink: &mut dyn FnMut(SessionEvent),
     ) -> Result<MemberTurn, String> {
-        // 会话自己的历史在前，本回合的讨论上下文在后。
-        if !history.is_empty() {
-            let mut all = history.to_vec();
-            all.extend(msgs);
-            msgs = all;
-        }
         // 工具面**由角色表发放**（动词 + 只读核实工具）：表是唯一真相，代码里不另写一份名单。
         let face_rows: Vec<(&str, &crate::core::schema::ToolSchema)> =
             systools.tool_face(role).unwrap_or_default();
         let face_ids: Vec<String> = face_rows.iter().map(|(id, _)| id.to_string()).collect();
         let face: Vec<crate::core::ports::ToolDecl> =
             face_rows.iter().map(|(id, s)| s.decl(id)).collect();
-        // **本回合的工具块**：核心按这一角色的表现现渲染，只列这一回合真能调的（总表不进提示词）。
+        // 身份 + 本回合工具 + 对话 + 本回合提示：**唯一的装配点**。
         // 模块工具只在"这一身份能干活"时列出（角色表的 module_tools）——讨论席列出它等于请模型去撞墙。
-        if let Some(ctx) = tools.as_ref() {
-            let block = ctx.tools_block(&face_ids, systools.allows_module_tools(role));
-            if !block.is_empty() {
-                let at = if msgs.first().map(|m| m.role.as_str()) == Some("system") {
-                    1
-                } else {
-                    0
-                };
-                msgs.insert(at, Msg::system(block));
-            }
-        }
+        let mut msgs = assemble(
+            identity,
+            tools.as_deref(),
+            &face_ids,
+            systools.allows_module_tools(role),
+            dialogue,
+            &turn,
+        );
         let native = matches!(
             tools.as_ref().map(|t| t.mode),
             Some(crate::core::providers::ToolMode::Native)
@@ -943,8 +957,8 @@ impl Discussion {
         self.start(task);
         loop {
             match self.advance() {
-                Adv::Ask { i, msgs } => {
-                    let turn = self.member_turn(i, msgs, sink)?;
+                Adv::Ask { i, identity, turn } => {
+                    let turn = self.member_turn(i, &identity, turn, sink)?;
                     // 开场也要有"没表态"的处置，否则这个循环会卡在同一个人身上空转。
                     match self.after_turn(i, turn.verb.is_some(), false, MAX_DISCUSS_REMIND) {
                         // 开场不因请教而中止（feed 已按阶段处理）。
@@ -980,8 +994,8 @@ impl Discussion {
         // 核心的 take/put 序列即可，判定一行不用改。
         loop {
             match self.advance() {
-                Adv::Ask { i, msgs, .. } => {
-                    let turn = match self.member_turn(i, msgs, sink) {
+                Adv::Ask { i, identity, turn } => {
+                    let turn = match self.member_turn(i, &identity, turn, sink) {
                         Ok(t) => t,
                         Err(_) if self.cancelled() => return TurnOut::Stopped,
                         Err(err) => return TurnOut::Interrupted(err),
@@ -1026,10 +1040,10 @@ impl Discussion {
                 self.cursor = Cursor::Fresh;
                 return Adv::Opened;
             }
-            let system = self.members[i].system.clone();
             return Adv::Ask {
                 i,
-                msgs: vec![Msg::system(system), Msg::user(self.opener.clone())],
+                identity: self.member_identity(i),
+                turn: vec![Msg::user(self.opener.clone())],
             };
         }
         if matches!(self.cursor, Cursor::Fresh) {
@@ -1080,7 +1094,7 @@ impl Discussion {
             return Adv::Out(TurnOut::Round);
         }
         self.cursor = Cursor::At(i);
-        let system = self.members[i].system.clone();
+        let identity = self.member_identity(i);
         let step_prompt = self.prompts.render(
             &self.prompts.core.discuss.step,
             &[(
@@ -1094,8 +1108,15 @@ impl Discussion {
         );
         Adv::Ask {
             i,
-            msgs: vec![Msg::system(system), Msg::user(step_prompt)],
+            identity,
+            turn: vec![Msg::user(step_prompt)],
         }
+    }
+
+    /// 这个席位的身份块：**每回合现渲染**（成员的参数 + 当前提示词册 + 登记处给的形态）。
+    fn member_identity(&self, i: usize) -> String {
+        let m = &self.members[i];
+        m.params.identity(&self.prompts, m.mode)
     }
 
     /// 收下一个成员回合的结果（状态机的一步）：吸收、外送它那一批行、按动词改状态。
@@ -1537,6 +1558,32 @@ pub(crate) fn core_operation(
     ))
 }
 
+/// 拼一次模型调用的消息：**身份 + 本回合工具 + 对话 + 本回合提示**。
+///
+/// 为什么只有这一处：身份与工具块都是**派生**的（登记处 + 提示词册 + 这一回合的身份），
+/// 它们不占对话的位置——对话里只有真正发生过的事（谁说了什么、调了什么工具）。
+/// 实时与重建都从这里拼，所以"回放与实时产出同样的消息"只约束对话本身。
+pub(crate) fn assemble(
+    identity: &str,
+    tools: Option<&MemberTools>,
+    ids: &[String],
+    with_modules: bool,
+    dialogue: &[Msg],
+    turn: &[Msg],
+) -> Vec<Msg> {
+    let mut out: Vec<Msg> = Vec::with_capacity(dialogue.len() + turn.len() + 2);
+    out.push(Msg::system(identity));
+    if let Some(ctx) = tools {
+        let block = ctx.tools_block(ids, with_modules);
+        if !block.is_empty() {
+            out.push(Msg::system(block));
+        }
+    }
+    out.extend(dialogue.iter().cloned());
+    out.extend(turn.iter().cloned());
+    out
+}
+
 /// 把**一次模型回复**翻译成发给模型的消息——**实时与重建都只走这一处**。
 ///
 /// 为什么必须只有一处：转录行与消息列表是同一件事的两份表示，两边各拼一次就会漂移。
@@ -1655,8 +1702,9 @@ impl Round {
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn converse_with(
     chat: &mut dyn Chat,
-    mut tools: Option<&mut MemberTools>,
-    mut msgs: Vec<Msg>,
+    tools: Option<&mut MemberTools>,
+    identity: &str,
+    dialogue: Vec<Msg>,
     llm: crate::core::ports::LlmOpts,
     speaker: &str,
     on: &mut dyn FnMut(Chunk) -> bool,
@@ -1664,6 +1712,20 @@ pub(crate) fn converse_with(
     on_round: &mut RoundSink<'_>,
     sink: &mut dyn FnMut(SessionEvent),
 ) -> Vec<Round> {
+    // 身份 + 本回合工具 + 对话：**唯一的装配点**。工具面取自这一席位（执行席的表现 + 它自己模块的工具）。
+    let (ids, with_modules) = match tools.as_ref() {
+        Some(ctx) => (ctx.allowed.clone(), ctx.with_modules),
+        None => (Vec::new(), false),
+    };
+    let mut msgs = assemble(
+        identity,
+        tools.as_deref(),
+        &ids,
+        with_modules,
+        &dialogue,
+        &[],
+    );
+    let mut tools = tools;
     // 观察账本随会话保存（回档时清空），这里不动它——它的语义是"这一段转录里的读取证据"。
     let mut rounds: Vec<Round> = Vec::new();
     // 逐轮产出：**一轮跑完就把它交出去**（调用方据此立刻外送与落盘，不必等整个回合结束）。
@@ -1674,21 +1736,6 @@ pub(crate) fn converse_with(
             on_round(&r, sink);
             rounds.push(r);
         }};
-    }
-    // **本回合的工具块**：执行席的表现 + 它自己模块的工具（只有执行席那支会走到这里），
-    // 随回合注入；系统提示里不列工具总表（见 docs/architecture/tools-and-roles.md 三之二）。
-    if let Some(ctx) = tools.as_mut() {
-        let ids = ctx.allowed.clone();
-        let with_modules = ctx.with_modules;
-        let block = ctx.tools_block(&ids, with_modules);
-        if !block.is_empty() {
-            let at = if msgs.first().map(|m| m.role.as_str()) == Some("system") {
-                1
-            } else {
-                0
-            };
-            msgs.insert(at, Msg::system(block));
-        }
     }
     let mut forced_final = false;
     // 没有工具环境时的回复号来源（见下面 reply_id）。

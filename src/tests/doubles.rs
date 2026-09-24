@@ -431,6 +431,11 @@ pub(crate) fn test_sandbox(agent: &str, modules: &[&str]) -> crate::core::worksp
     }
 }
 
+/// 测试用会话参数：agent 名 + 该 agent 的沙箱（无模块）。身份块由它现渲染。
+pub(crate) fn test_params(agent: &str) -> crate::core::session::SessionParams {
+    crate::core::session::SessionParams::from_workspace(agent, &test_sandbox(agent, &[]), &[])
+}
+
 /// 测试用工具说明块素材（patch 语法 + 给定的模块工具）。
 pub(crate) fn test_notes(
     sb: &crate::core::workspace::Sandbox,

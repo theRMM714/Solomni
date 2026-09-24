@@ -87,15 +87,16 @@ pub fn is_freeform(name: &str) -> bool {
 
 /// **工作环境块**：提示词册 env 渲染（真实根目录 + 路径规矩）。**不含任何工具清单**——
 /// 能用哪些工具由核心按这一回合的身份现渲染后随回合注入（见 core::engine 的 MemberTools::tools_block）。
-pub fn env_block(prompts: &Prompts, sb: &Sandbox) -> String {
-    let module_roots = if sb.modules.is_empty() {
+pub fn env_block(prompts: &Prompts, p: &crate::core::session::SessionParams) -> String {
+    let texts = &prompts.core.tool_texts;
+    let module_roots = if p.module_dirs.is_empty() {
         prompts.core.no_module_dirs.clone()
     } else {
-        sb.modules
+        p.module_dirs
             .iter()
             .map(|(id, root)| {
-                sb.texts.render(
-                    &sb.texts.module_root_line,
+                texts.render(
+                    &texts.module_root_line,
                     &[
                         ("id", id.clone()),
                         ("root", crate::core::workspace::slash(root)),
@@ -108,10 +109,10 @@ pub fn env_block(prompts: &Prompts, sb: &Sandbox) -> String {
     prompts.render(
         &prompts.core.env,
         &[
-            ("work_name", sb.work_name.clone()),
-            ("agent", sb.agent.clone()),
-            ("work_root", crate::core::workspace::slash(&sb.shared)),
-            ("sandbox_root", crate::core::workspace::slash(&sb.private)),
+            ("work_name", p.work_name.clone()),
+            ("agent", p.agent.clone()),
+            ("work_root", crate::core::workspace::slash(&p.shared)),
+            ("sandbox_root", crate::core::workspace::slash(&p.private)),
             ("module_roots", module_roots),
         ],
     )

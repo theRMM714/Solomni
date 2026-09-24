@@ -247,6 +247,8 @@ pub(crate) enum Prepared {
     Run {
         /// 装箱：这个变体比其它两个大得多（会话本体），而它本来就是**一次性移交**给工作线程的。
         session: Box<session::AgentSession>,
+        /// 本回合的**身份块**：按当前提示词册与登记处现渲染（不进会话的消息列表）。
+        identity: String,
         /// 生成前要先给用户的事件（例如工具形态变更的提示）。
         prefix: Vec<SessionEvent>,
         llm: ports::LlmOpts,
@@ -490,8 +492,11 @@ impl Core {
     }
 
     /// 压缩一个会话的上下文：**让 AI 自己压**（核心只给 compact 工具），不是系统替它总结。
-    /// 返回（提示词, compact 的声明, 压缩点）——模型调用由调用方在工作线程上跑（界面不被阻塞）。
-    pub fn compact_plan(&self, sid: &str) -> (String, Option<crate::core::ports::ToolDecl>, u64) {
+    /// 返回（提示词, compact 的声明, 压缩点, 本回合的身份块）——模型调用由调用方在工作线程上跑（界面不被阻塞）。
+    pub fn compact_plan(
+        &self,
+        sid: &str,
+    ) -> (String, Option<crate::core::ports::ToolDecl>, u64, String) {
         let prompt = self.prompts.core.tool_texts.compact_prompt.clone();
         let decl = self
             .prompts
@@ -499,11 +504,14 @@ impl Core {
             .builtin_tools
             .get("compact")
             .map(|t| t.decl("compact"));
-        let up_to = match self.sessions.get(sid) {
-            Some(Session::Single(s)) => s.next_line_id(),
-            _ => 0,
+        let (up_to, identity) = match self.sessions.get(sid) {
+            Some(Session::Single(s)) => (
+                s.next_line_id(),
+                s.params().identity(&self.prompts, s.tool_mode()),
+            ),
+            _ => (0, String::new()),
         };
-        (prompt, decl, up_to)
+        (prompt, decl, up_to, identity)
     }
 
     /// 往某个会话注入一条**系统消息**（讨论的提醒走这条；见 session-model.md 二"系统消息"）。
@@ -559,7 +567,10 @@ impl Core {
                     };
                     let mut sink = |ev: SessionEvent| out.borrow_mut().push(ev);
                     // 执行提示词是**核心注入的系统消息**，不是用户发言（不得借用 say）。
-                    session.inject_system(objective, &mut live, &mut sink);
+                    let identity = session
+                        .params()
+                        .identity(&self.prompts, session.tool_mode());
+                    session.inject_system(objective, &identity, &mut live, &mut sink);
                 }
                 let events = out.into_inner();
                 self.put_single_recorded(child, session, &events);
@@ -582,7 +593,7 @@ impl Core {
                 c.start_if_needed();
                 c.pump_with(&mut |e| out.push(e));
                 let ask = c.take_ask();
-                let member = ask.as_ref().and_then(|(i, _)| c.member_id(*i));
+                let member = ask.as_ref().and_then(|(i, _, _)| c.member_id(*i));
                 // 角色表按值带出来（小表）：驱动要它来发放工具面与校验越权。
                 let systools = c.systools().clone();
                 let cancel = c.disc_cancel();
@@ -591,7 +602,7 @@ impl Core {
                 self.sessions.insert(sid.to_string(), Session::Collab(c));
                 (ask, systools, cancel, opts, member, turn_id)
             };
-            let (Some((i, msgs)), Some(agent), turn_id) = (ask, member, turn_id) else {
+            let (Some((i, identity, turn)), Some(agent), turn_id) = (ask, member, turn_id) else {
                 break;
             };
             // ② 该 agent 的会话：没有就按需建（名单确认时已建，这里兜底）。
@@ -602,7 +613,8 @@ impl Core {
             // ③ 跑这一回合（工具面 = 动词 + 只读核实）。
             let mut s = self.take_single(&child)?;
             let ran = {
-                let hist = s.msgs().to_vec();
+                // 身份块由泵现渲染；对话来自该 agent 自己的会话；本回合提示由泵给出。
+                let hist = s.dialogue().to_vec();
                 let (chat, tools) = s.parts_mut();
                 crate::core::engine::Discussion::turn_with(
                     &systools,
@@ -610,11 +622,12 @@ impl Core {
                     &cancel,
                     opts,
                     &agent,
+                    &identity,
                     &hist,
                     self.discuss_call_cap(),
                     chat,
                     tools,
-                    msgs,
+                    turn,
                     &mut |e| out.push(e),
                 )
             };
@@ -1899,26 +1912,16 @@ impl Core {
                     .unwrap_or("无（演示）")
             ),
         );
-        let system = module::agent_system(
-            &self.prompts,
-            &a.name,
-            modules,
-            &systool::env_block(&self.prompts, sb),
-            mode,
-        );
+        // **会话参数**：身份块每回合由它现渲染（不存进消息列表）。
+        let params = session::SessionParams::from_workspace(&a.name, sb, modules);
         let tools = self.tools_env(modules, sb, unavailable, net, mode);
-        let roots = crate::core::refs::RefRoots {
-            work: sb.shared.clone(),
-            private: Some(sb.private.clone()),
-        };
         let mut s = session::AgentSession::new(
             &a.name,
-            system,
+            params,
             chat,
             note,
             Some(tools),
             self.prompts.core.refs.clone(),
-            roots,
             self.prompts.core.tool_texts.clone(),
         );
         // 自动压缩的预算按**这个 agent 的模型**窗口算（见 session-model.md 六）。
@@ -2110,13 +2113,18 @@ impl Core {
     // ---- 会话收发（前端永不接触会话本体） ----
 
     /// 形态**不钉在会话里**：每次生成前按登记处重新解析。
-    /// 变了 → 走现有的重建路径刷新（系统提示随之换成另一套调用约定）并给用户一句通知；没变 → 什么都不做。
-    /// 这样"用户改了登记处就重新查、没改就不管"，同时系统提示与实际协议始终一致（回放也按同一规则派生）。
+    /// 变了 → 只改会话参数里的那一格并给用户一句通知（身份块下次调用就按新约定渲染）；没变 → 什么都不做。
+    /// 这样"用户改了登记处就重新查、没改就不管"，同时身份块里的约定与实际协议始终一致。
     fn refresh_tool_mode(&mut self, sid: &str) -> Result<Option<String>, String> {
-        let (meta, raw) = self.history.load(sid)?;
-        let after = truncate_events(&raw);
-        let Some(a) = meta.agents.first() else {
-            return Ok(None);
+        let a = match self.sessions.get(sid) {
+            Some(Session::Single(_)) => {
+                let (meta, _) = self.history.load(sid)?;
+                match meta.agents.first().cloned() {
+                    Some(a) => a,
+                    None => return Ok(None),
+                }
+            }
+            _ => return Ok(None),
         };
         let channel = a
             .model
@@ -2129,16 +2137,18 @@ impl Core {
             providers::ToolMode::Envelope
         };
         let cur = match self.sessions.get(sid) {
-            // 还没装进内存的会话：交给 ensure_session 按当前形态建，这里不动
             Some(Session::Single(s)) => s.tool_mode(),
-            Some(_) => return Ok(None),
-            None => want,
+            // 还没装进内存的会话：交给 ensure_session 按当前形态建，这里不动
+            _ => want,
         };
         if cur == want {
             return Ok(None);
         }
-        let rebuilt = self.rebuild_session(&meta, &after)?;
-        self.sessions.insert(sid.to_string(), rebuilt);
+        // **只改这一格**：形态是登记处派生出来的参数，没必要把整个会话从盘上重建一遍
+        //（身份块每次调用现渲染，改完这一格下一回合就生效）。
+        if let Some(Session::Single(s)) = self.sessions.get_mut(sid) {
+            s.set_tool_mode(want);
+        }
         Ok(Some(match want {
             providers::ToolMode::Native => {
                 "工具调用形态已按登记处改为**原生工具调用**（本条起生效）".to_string()
@@ -2176,10 +2186,16 @@ impl Core {
                 return Ok(Prepared::Immediate(prefix));
             }
         }
+        // 身份块**现渲染**（形态刚在上一步对齐过，所以这里读到的就是本回合的形态）。
+        let identity = match self.sessions.get(sid) {
+            Some(Session::Single(s)) => s.params().identity(&self.prompts, s.tool_mode()),
+            _ => return Ok(Prepared::NotSingle),
+        };
         let session = self.take_single(sid)?;
         let persister = self.persister(sid);
         Ok(Prepared::Run {
             session: Box::new(session),
+            identity,
             prefix,
             llm,
             persister,
@@ -2199,13 +2215,16 @@ impl Core {
             Prepared::Immediate(events) => Ok(events),
             Prepared::NotSingle => Err("该会话不是单 agent 模式".to_string()),
             Prepared::Run {
-                session, prefix, ..
+                session,
+                identity,
+                prefix,
+                ..
             } => {
                 let mut session = *session;
                 let mut events = prefix;
                 {
                     let mut sink = |ev: SessionEvent| events.push(ev);
-                    session.say(text, live, &mut sink);
+                    session.say(text, &identity, live, &mut sink);
                 }
                 if live.cancelled() {
                     self.log.warn("core::single_say", "生成被用户中止");
@@ -2512,8 +2531,8 @@ impl Core {
                 } else {
                     providers::ToolMode::Envelope
                 };
-                let env = systool::env_block(&self.prompts, &sb);
-                let system = module::agent_system(&self.prompts, &a.name, &modules, &env, mode);
+                // **会话参数**：与建立时同一个口径（身份块每回合现渲染，不进消息列表）。
+                let params = session::SessionParams::from_workspace(&a.name, &sb, &modules);
                 let (chat, note) = self.gateway.member_channel(channel.as_ref(), &a.name);
                 // 先把转录行按顺序摊平：分组判断要看「下一行是不是 tool 行」。
                 let mut rows: Vec<&serde_json::Value> = Vec::new();
@@ -2525,7 +2544,8 @@ impl Core {
                         rows.extend(lines.iter());
                     }
                 }
-                let mut history = vec![Msg::system(system)];
+                // 对话里**只有**真正发生过的事；身份与环境由 params 现渲染。
+                let mut history: Vec<Msg> = Vec::new();
                 let mut marks: Vec<usize> = Vec::new();
                 let mut line_reply: Vec<u64> = Vec::new();
                 let texts = &self.prompts.core.tool_texts;
@@ -2605,12 +2625,9 @@ impl Core {
                 let mut tools = self.tools_env(&modules, &sb, unavailable, meta.exec.net, mode);
                 // 回复 id 跨重启单调：从转录里的最大值续号，否则新回复会与旧回复并成一组。
                 tools.reply_seq = crate::core::engine::max_reply(events);
-                let roots = crate::core::refs::RefRoots {
-                    work: sb.shared.clone(),
-                    private: Some(sb.private.clone()),
-                };
                 Ok(Session::Single(session::AgentSession::restore(
                     &a.name,
+                    params,
                     history,
                     marks,
                     line_reply,
@@ -2618,7 +2635,6 @@ impl Core {
                     note,
                     Some(tools),
                     self.prompts.core.refs.clone(),
-                    roots,
                     self.prompts.core.tool_texts.clone(),
                 )))
             }
@@ -2644,7 +2660,8 @@ impl Core {
                         let mut out = Vec::new();
                         {
                             let mut sink = |ev: SessionEvent| out.push(ev);
-                            s.continue_reply(live, &mut sink);
+                            let identity = s.params().identity(&self.prompts, s.tool_mode());
+                            s.continue_reply(&identity, live, &mut sink);
                         }
                         out
                     } else {
@@ -2678,7 +2695,15 @@ impl Core {
 impl Core {
     pub fn single_history(&self, sid: &str) -> Option<Vec<Msg>> {
         match self.sessions.get(sid) {
-            Some(Session::Single(s)) => Some(s.history().to_vec()),
+            Some(Session::Single(s)) => Some(s.dialogue().to_vec()),
+            _ => None,
+        }
+    }
+
+    /// 该会话此刻的**身份块**（按当前提示词册与形态现渲染）：测试用它断言"它被告诉了什么"。
+    pub fn single_identity(&self, sid: &str) -> Option<String> {
+        match self.sessions.get(sid) {
+            Some(Session::Single(s)) => Some(s.params().identity(&self.prompts, s.tool_mode())),
             _ => None,
         }
     }
