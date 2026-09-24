@@ -1696,6 +1696,19 @@ function absorb(s, ev) {
         text: '[压缩] 此前内容已压成摘要（不再发给模型，仍可查看）：\n' + ev.summary,
       });
       break;
+    // 任务链的进展：节点开工/回报/验收/交付——主会话也要看得到，不必点进子会话。
+    case 'node_started':
+      s.lines.push({ cls: 'sys system', who: '', text: '[节点] 开工：' + (ev.assignee || '') + ' · ' + (ev.node || '') });
+      break;
+    case 'report':
+      s.lines.push({ cls: 'sys system', who: '', text: '[节点] 回报：' + (ev.id || '') + (ev.rework ? '（第 ' + ev.rework + ' 轮返工）' : '') });
+      break;
+    case 'review':
+      s.lines.push({ cls: 'sys system', who: '', text: '[节点] 验收：' + ((ev.items || []).map((i) => i.item + (i.ok ? '✓' : '✗')).join('；') || '（无逐项）') });
+      break;
+    case 'delivery':
+      s.lines.push({ cls: 'sys system', who: '', text: '[交付] ok=' + !!ev.ok + ' over_rework=' + !!ev.over_rework });
+      break;
     case 'transcript':
       // 服务端权威转录：每行带会话内稳定 id（回档按 id 定位）。
       // 权威行到达：撤掉乐观回显与流式块，改用服务端的行；带 tool 的行渲染成工具卡片。
@@ -1849,8 +1862,11 @@ function syncTyping(s) {
 function syncSendButton(s) {
   const sendBtn = $('#btn-send');
   if (!sendBtn) return;
+  // 忙碌时只留一个「停止」：用户一眼就知道这个会话在跑，而不是拿「继续/发送」去试探。
   sendBtn.textContent = s.busy ? '停止' : '发送';
   sendBtn.className = s.busy ? 'btn btn-danger' : 'btn btn-primary';
+  const cont = $('#btn-continue');
+  if (cont) cont.className = s.busy ? 'btn hidden' : 'btn';
 }
 
 /// 只有本来就在底部才自动跟随；用户往上滚时保持原位置（流式刷新不抢滚动条）。
