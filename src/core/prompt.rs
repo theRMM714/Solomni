@@ -300,8 +300,6 @@ pub struct ToolTexts {
     // —— 工具循环与讨论（engine）——
     /// 变量：label, output
     pub tool_result_wrapper: String,
-    /// 变量：n
-    pub tool_cap: String,
     // 工具信封不合法：按判定出的类别给各自改法
     /// 变量：what（修好并执行时如实标注在工具回执最前面）
     pub envelope_repaired: String,

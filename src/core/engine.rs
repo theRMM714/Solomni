@@ -18,8 +18,6 @@ use std::sync::Arc;
 
 /// 讨论轮次上限（超限交用户裁决——上限必生效）。
 pub const MAX_ROUNDS: usize = 6;
-/// 单次问询内的工具调用上限（超限强制收尾——上限必生效）。
-pub const MAX_TOOL_CALLS: usize = 8;
 /// 一轮内对同一个成员最多提醒几次（**内存驱动**用；生产按设置走）。
 #[cfg(test)]
 pub const MAX_DISCUSS_REMIND: u32 = 3;
@@ -659,7 +657,6 @@ impl Discussion {
                 &speaker,
                 identity,
                 &[],
-                MAX_TOOL_CALLS,
                 chat.as_mut(),
                 tools.as_mut(),
                 turn,
@@ -686,8 +683,6 @@ impl Discussion {
         identity: &str,
         // 该 agent **会话自己的对话**：用户进它会话说的话，下一回合它带着（不分家的核心承诺）。
         dialogue: &[Msg],
-        // 一轮内允许的模型调用上限（用户可设；到顶就交回"没表态"，由核心决定提醒还是放过）。
-        cap: usize,
         chat: &mut dyn Chat,
         mut tools: Option<&mut MemberTools>,
         turn: Vec<Msg>,
@@ -714,7 +709,6 @@ impl Discussion {
             Some(crate::core::providers::ToolMode::Native)
         );
         let mut lines: Vec<DiscLine> = Vec::new();
-        let mut used = 0usize;
         loop {
             if cancel.load(std::sync::atomic::Ordering::Relaxed) {
                 return Err("已停止".to_string());
@@ -803,7 +797,8 @@ impl Discussion {
             let mut round_views: Vec<ToolCallView> = Vec::new();
             for (call_id, name, args) in &calls {
                 // **按角色表校验**：这个席位没有的工具一律如实拒绝（代码里不写"谁能用哪个"）。
-                if !systools.allows(role, name) || used >= cap {
+                // 没有调用次数上限：模型继续核实就继续跑，直到它给出表态（或用户点停止）。
+                if !systools.allows(role, name) {
                     sink(SessionEvent::Notice(format!(
                         "[越权] 本席位没有工具 {}：本轮不执行、不当表态（如实拒绝）",
                         name
@@ -816,7 +811,6 @@ impl Discussion {
                         lines,
                     });
                 }
-                used += 1;
                 let (ok, output) = match tools.as_deref_mut() {
                     Some(t) => {
                         let out = crate::core::systool::execute(
@@ -1085,10 +1079,13 @@ impl Discussion {
             self.cursor = Cursor::Fresh;
             if self.members.iter().filter(|m| m.present).all(|m| m.agreed) {
                 self.closed = true;
+                // 讨论收束 = 进入下一阶段：提醒计数一并归零（它只在本阶段有意义）。
+                self.reminded.clear();
                 return Adv::Out(TurnOut::Done);
             }
             if self.round > MAX_ROUNDS {
                 self.closed = true;
+                self.reminded.clear();
                 return Adv::Out(TurnOut::Done);
             }
             return Adv::Out(TurnOut::Round);
@@ -1632,11 +1629,6 @@ pub(crate) fn reply_msgs(
     out
 }
 
-/// 工具调用超限时告知模型的那条消息（文案来自册子：tool_cap）。
-fn tool_cap_msg(texts: &crate::core::prompt::ToolTexts) -> Msg {
-    Msg::user(texts.render(&texts.tool_cap, &[("n", MAX_TOOL_CALLS.to_string())]))
-}
-
 /// 逐轮产出回调：拿到刚定稿的一轮 + 本次的出口。
 /// 出口当参数传而不是让回调捕获它——否则回调借着 sink，调用方随后用不了同一个 sink。
 pub type RoundSink<'a> = dyn FnMut(&Round, &mut dyn FnMut(SessionEvent)) + 'a;
@@ -1736,10 +1728,17 @@ pub(crate) fn converse_with(
             rounds.push(r);
         }};
     }
-    let mut forced_final = false;
     // 没有工具环境时的回复号来源（见下面 reply_id）。
     let mut local_reply = 0u64;
+    // 本代是否被用户中途停止（通道回调返回 false）：循环顶部据此退出（见下）。
+    let mut aborted = false;
     loop {
+        // 用户在生成中途点了「停止」（通道回调返回 false）：**这一轮到此为止**，不再发起下一次调用。
+        // 没有这条出口，被停的生成会以"每次调用立刻返回"的速度空转（真机上烧过一次 CPU）；
+        // 此前是靠工具调用上限兜底的——上限删掉后这条出口必须自己站住。
+        if aborted {
+            return rounds;
+        }
         // 这一回复的稳定 id：一次模型回复一个号，本次问询里的多条工具行共用它。
         // 没有工具环境时给本代内的局部号即可（那条路径不落转录行、也不分组）。
         let reply_id = match tools.as_deref_mut() {
@@ -1763,7 +1762,6 @@ pub(crate) fn converse_with(
         };
         // 逐轮累积思维链（原文以通道返回值为准：非流式通道不回 Chunk）。
         let mut reasoning = String::new();
-        let mut aborted = false;
         let done = {
             let mut sink = |chunk: Chunk| {
                 match &chunk {
@@ -1832,7 +1830,7 @@ pub(crate) fn converse_with(
             .iter()
             .any(|t| crate::core::systool::is_freeform(&t.name));
         let mut repaired: Option<String> = None;
-        if !forced_final && !aborted && !freeform_tool {
+        if !aborted && !freeform_tool {
             if let Some(kind) = reply.tools.first().and_then(|t| t.malformed.clone()) {
                 if let Some(ctx) = tools.as_deref_mut() {
                     let out = ctx.repair.repair(&raw, &kind);
@@ -1852,7 +1850,7 @@ pub(crate) fn converse_with(
         if mode == crate::core::providers::ToolMode::Native {
             if let Some(ctx) = tools.as_deref_mut() {
                 // ① 有原生调用：逐个执行，各成一条工具行；助手消息如实记下"它调了什么"（回放与下一轮都看得到）
-                if !forced_final && !calls.is_empty() {
+                if !calls.is_empty() {
                     // 先定好每个调用落在哪个工具、参数是什么（patch 的正文在 body 参数里，
                     // 原生协议要求参数是 JSON 对象；转义交给供应商的解码器）。
                     let plan: Vec<(Option<String>, String, String)> = calls
@@ -1931,18 +1929,11 @@ pub(crate) fn converse_with(
                             finish: finish.clone(),
                             error: None,
                         });
-                        if rounds.len() >= MAX_TOOL_CALLS {
-                            forced_final = true;
-                        }
-                    }
-                    if forced_final {
-                        let texts = &ctx.sandbox.texts;
-                        msgs.push(tool_cap_msg(texts));
                     }
                     continue;
                 }
                 // ② 没有原生调用却写了信封：**不执行**（两套形态互斥），但也不静默丢掉意图
-                if !forced_final {
+                {
                     if let Some(inv) = reply.tools.first().cloned() {
                         let texts = &ctx.sandbox.texts;
                         let view = ToolCallView {
@@ -1974,10 +1965,6 @@ pub(crate) fn converse_with(
                             finish: finish.clone(),
                             error: None,
                         });
-                        if rounds.len() >= MAX_TOOL_CALLS {
-                            forced_final = true;
-                            msgs.push(tool_cap_msg(texts));
-                        }
                         continue;
                     }
                 }
@@ -1988,7 +1975,7 @@ pub(crate) fn converse_with(
         match malformed.clone() {
             // 信封不合法（缺 name / 混用两种形态 / calls 为空 / 没写完…）：**一个工具都不执行**，
             // 但记一条失败的工具行把"哪里不合法"回注给模型（下一轮自己改）。同样计入上限，不会死循环。
-            _ if malformed.is_some() && tools.is_some() && !forced_final => {
+            _ if malformed.is_some() && tools.is_some() => {
                 let inv = reply.tools.first().cloned().expect("上臂已判非空");
                 let ctx = tools.as_deref_mut().expect("上臂已判存在");
                 // 回执按判定出的类别给修法（未闭合 / 裸控制字符 / 语法错 / 字段不合法）。
@@ -2030,13 +2017,9 @@ pub(crate) fn converse_with(
                     finish: finish.clone(),
                     error: None,
                 });
-                if rounds.len() >= MAX_TOOL_CALLS {
-                    forced_final = true;
-                    msgs.push(tool_cap_msg(texts));
-                }
             }
             // 合法信封：**一次回复里的多个调用一起执行**（同一套声明并发调度），各成一条工具行。
-            _ if tools.is_some() && !forced_final && !reply.tools.is_empty() => {
+            _ if tools.is_some() && !reply.tools.is_empty() => {
                 let ctx = tools.as_deref_mut().expect("上臂已判存在");
                 let invokes = reply.tools.clone();
                 // 自由格式工具（patch）只能单发：它的输入是**信封之后的那段正文**（不必转义），
@@ -2123,15 +2106,9 @@ pub(crate) fn converse_with(
                         finish: finish.clone(),
                         error: None,
                     });
-                    if rounds.len() >= MAX_TOOL_CALLS {
-                        forced_final = true;
-                    }
-                }
-                if forced_final {
-                    msgs.push(tool_cap_msg(texts));
                 }
             }
-            // 无工具环境 / 已超限：按原文口径如实收录（信封已被剥掉，显示文本里不会有 JSON），循环终止。
+            // 无工具环境 / 模型不再发起调用：按原文口径如实收录（信封已被剥掉，显示文本里不会有 JSON），循环终止。
             _ => {
                 // 只有会出文本行（有正文或思维链）时才往历史里放这条 assistant，
                 // 否则实时历史会比重建历史多一条空消息。

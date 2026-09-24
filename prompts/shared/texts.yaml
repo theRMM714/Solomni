@@ -113,7 +113,6 @@ tool_texts:
   available_wrapper: "{{why}}。可用：{{tools}}"
   # 工具循环与讨论（engine）
   tool_result_wrapper: "[工具结果] {{label}}\n{{output}}"
-  tool_cap: "[工具超限] 单次问询工具调用上限 {{n}} 次已到，请直接给出最终答复，不再调用工具。"
   # 工具信封不合法（envelope 判定类别）：每类给各自的改法，不让模型猜
   envelope_repaired: "[信封修复] {{what}}；核心按无歧义的写法修好后执行了本次调用（下次请直接输出合法信封）。"
   native_no_envelope: "这条通道用**原生工具调用**：正文里的 JSON 信封不会被当成调用执行。需要工具时请直接发起工具调用（一次可以发起多个）。"

@@ -624,7 +624,6 @@ impl Core {
                     &agent,
                     &identity,
                     &hist,
-                    self.discuss_call_cap(),
                     chat,
                     tools,
                     turn,
@@ -1845,11 +1844,6 @@ impl Core {
             with_modules: self.prompts.systools.allows_module_tools("executor"),
             notes: systool::tool_notes(&self.prompts, sb, modules),
         }
-    }
-
-    /// 讨论阶段一轮内允许的模型调用上限（用户可设，见 session-model.md 二）。
-    pub fn discuss_call_cap(&self) -> usize {
-        self.settings.app.discuss_call_cap as usize
     }
 
     /// 一轮内对同一个成员最多提醒几次（用户可设，见 session-model.md 二）。

@@ -65,7 +65,7 @@ const sandbox = {
           providers: [{ id: "p1", base_url: "http://x" }],
           models: [{ id: "m1", name: "M", api_model: "m", provider: "p1", note: "", tools: "native", context: 32000, is_core: true }],
           agents: [],
-          settings: { streaming: true, show_reasoning: true, llm_timeout_secs: 300, discuss_call_cap: 30, discuss_remind_cap: 3, compact_at_percent: 70 },
+          settings: { streaming: true, show_reasoning: true, llm_timeout_secs: 300, discuss_remind_cap: 3, compact_at_percent: 70 },
           history: [],
         }),
       };
@@ -110,12 +110,13 @@ if (!loadErrors.length) {
     const nums = inputsIn(body).filter((i) => i.type === "number");
     return nums.length >= 1;
   });
-  // ② 基本设置弹窗：三项讨论/压缩设置都在（都是数字输入）。
-  check("基本设置弹窗含讨论与压缩三项", () => {
+  // ② 基本设置弹窗：超时 / 提醒次数 / 压缩阈值三项都在（都是数字输入）。
+  //（调用次数上限已撤掉：模型调用没有次数上限，只有提醒次数。）
+  check("基本设置弹窗含超时、提醒与压缩三项", () => {
     vm.runInNewContext("openSettingsModal()", sandbox);
     const body = roots.get("#modal-root").children[0].children[0].children[1];
     const nums = inputsIn(body).filter((i) => i.type === "number");
-    return nums.length >= 4;
+    return nums.length >= 3;
   });
   // ③ 回合分隔行要可见：解析成系统分隔行，而不是 who=标签、text 为空的空行。
   check("回合分隔行解析成系统行", () => {

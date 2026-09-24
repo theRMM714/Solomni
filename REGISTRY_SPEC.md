@@ -103,10 +103,14 @@ fence_write: false     # 是否允许围栏在本机写权限（默认 false：�
 fence_read: []         # 用户显式授权的只读根（默认空：一个都不放行）
 qemu_path: ""          # 虚拟机档用的 QEMU 可执行文件路径（用户自备；默认空 = 兜底看 PATH）
 llm_timeout_secs: 300  # 单次模型调用的总预算（秒），全局通用（讨论/执行/验收/单 agent）
+compact_at_percent: 70 # 上下文用到模型窗口的百分之多少就自动压一次（0 = 关）
+discuss_remind_cap: 3  # 讨论里一轮内对同一个成员最多提醒几次（提醒 = "你还没用动词表态"）
 ```
 
 - 这些是**默认值**：会话可在 `meta.yaml` 的 `exec` 段单独选定档位与定版
   （见 [ARCHITECTURE.md](ARCHITECTURE.md)「状态与落盘契约」与 [RUNTIME_SPEC.md](RUNTIME_SPEC.md)）。
+- **模型调用次数没有上限**：工具循环跑到模型不再发起调用为止（执行席与讨论席一样），
+  用户随时可以点「停止」。`discuss_remind_cap` 只是**提醒次数**：提醒到顶就如实记一行"未回应"放过它，整轮继续。
 - `fence_write` 可被环境变量 `SOLOMNI_FENCE_WRITE=1/0` 临时覆盖（优先级高于设置，测试与 CI 用得到）。
 - `llm_timeout_secs` 是**单次模型调用的总预算**，全局通用：连接之外，等响应头 / 读响应体 / 整体都用它。
   **为什么是一个预算**：非流式下供应商要等整段生成完才发响应头，单独设一个小的「头超时」会把几十秒的正常长回复误判成不通。

@@ -295,8 +295,6 @@ struct AskReq {
     round: usize,
     /// 回合 id（整场工作单调递增；两边对得上就靠它）。
     turn_id: u64,
-    /// 这一轮允许的模型调用上限（用户可设；到顶就交回"没表态"）。
-    cap: usize,
 }
 
 impl CoreHandle {
@@ -520,8 +518,6 @@ impl CoreHandle {
         let turn = req.turn.clone();
         let identity = req.identity.clone();
         let agent = req.agent.clone();
-        // 上限按值带进工作线程（引用带不进去：闭包要 'static）。
-        let cap = req.cap;
         let _ = &turn;
         let joined = std::thread::Builder::new()
             .name("solomni-member".to_string())
@@ -539,7 +535,6 @@ impl CoreHandle {
                         &agent,
                         &identity,
                         &hist,
-                        cap,
                         chat,
                         tools,
                         turn,
@@ -740,8 +735,8 @@ impl CoreHandle {
             move |core| Ok(core.persister(&sid))
         })?;
         let text = text.to_string();
-        // 讨论的调用上限与提醒上限都由设置来（用户可调，见 session-model.md 二）：起线程前问一次核心。
-        let discuss_cap = self.call(|core| Ok(core.discuss_call_cap())).unwrap_or(30);
+        // 提醒上限由设置来（用户可调，见 session-model.md 二）：起线程前问一次核心。
+        // 调用次数**没有上限**：模型继续核实就继续跑，直到它给出表态（或用户点停止）。
         let remind_cap = self.call(|core| Ok(core.discuss_remind_cap())).unwrap_or(3);
         let handle = self.clone();
         // 握手通道：泵 → 主线程（要一个成员回合）；主线程 → 泵（回合结果）。
@@ -803,7 +798,6 @@ impl CoreHandle {
                                 identity,
                                 turn,
                                 systools: c.systools().clone(),
-                                cap: discuss_cap,
                                 cancel: c.disc_cancel(),
                                 opts: c.disc_opts(),
                                 round: c.round(),

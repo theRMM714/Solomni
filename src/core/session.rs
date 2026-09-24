@@ -3,7 +3,7 @@
 //! 支持工具循环（联动 engine::converse_with）；转录行带会话内稳定 id（自 0 递增），
 //! 并记录每行对应的历史长度，供回档精确回退。
 
-use crate::core::engine::{MemberTools, Round, MAX_TOOL_CALLS};
+use crate::core::engine::{MemberTools, Round};
 use crate::core::events::{LineView, Live, SessionEvent, ToolCallView};
 use crate::core::ports::Chunk;
 use crate::core::ports::{BoxedChat, Msg};
@@ -710,8 +710,3 @@ pub(crate) fn stream_piece(acc: &str, piece: &str) -> (String, String) {
     };
     (send, format!("{}{}", acc, piece))
 }
-
-// MAX_TOOL_CALLS 供引擎循环使用；此处引用以保持常量归属清晰。
-const _: () = {
-    let _ = MAX_TOOL_CALLS;
-};

@@ -556,11 +556,6 @@ pub(crate) fn route(
                     .and_then(|v| v.as_u64())
                     .map(|v| v as u8)
                     .unwrap_or(current.compact_at_percent),
-                discuss_call_cap: req
-                    .get("discuss_call_cap")
-                    .and_then(|v| v.as_u64())
-                    .map(|v| v as u32)
-                    .unwrap_or(current.discuss_call_cap),
                 discuss_remind_cap: req
                     .get("discuss_remind_cap")
                     .and_then(|v| v.as_u64())

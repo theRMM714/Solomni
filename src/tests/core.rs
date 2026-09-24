@@ -3,9 +3,7 @@
 
 use super::doubles::*;
 use crate::adapters::fake_chat::FakeChat;
-use crate::core::engine::{
-    Discussion, Member, MemberTools, ModuleTools, TurnOut, MAX_ROUNDS, MAX_TOOL_CALLS,
-};
+use crate::core::engine::{Discussion, Member, MemberTools, ModuleTools, TurnOut, MAX_ROUNDS};
 use crate::core::events::Live;
 use crate::core::exec::{self, Diagnosis, ExecSpec, Tier};
 use crate::core::history::{AgentMeta, SessionMeta};
@@ -1661,7 +1659,6 @@ pub(crate) fn discussion_turn_carries_the_agent_sessions_own_history() {
         "a",
         "（测试）身份",
         &[crate::core::ports::Msg::user("只看第二份资料")],
-        8,
         &mut chat,
         None,
         vec![crate::core::ports::Msg::user("讨论上下文")],
@@ -3291,10 +3288,12 @@ pub(crate) fn malformed_tool_without_salvageable_name_still_records_a_line() {
 }
 
 #[test]
-pub(crate) fn repeated_malformed_envelopes_hit_the_tool_cap_and_stop() {
-    // 模型反复输出非法信封：计入工具上限，最终强制收尾，不会死循环。
+pub(crate) fn repeated_malformed_envelopes_each_get_a_failed_row() {
+    // 非法信封**没有次数上限**了：每个都各记一条失败行回注给模型，直到它不再发信封（或用户停）。
+    const N: usize = 12; // 比原来的上限 8 多：证明"超过旧上限照跑"
     let broken = broken_tool(&s(&["w", "work", "README.md"]));
-    let script: Vec<String> = (0..MAX_TOOL_CALLS + 1).map(|_| broken.clone()).collect();
+    let mut script: Vec<String> = (0..N).map(|_| broken.clone()).collect();
+    script.push("到此为止。".to_string());
     let mut member = BTreeMap::new();
     member.insert("a".to_string(), script);
     let mut core = core_with(vec![module_of("a")], gw(member, vec!["[]".into()]));
@@ -3306,8 +3305,15 @@ pub(crate) fn repeated_malformed_envelopes_hit_the_tool_cap_and_stop() {
     let rows = transcript_rows(&events);
     assert_eq!(
         rows.iter().filter(|r| r.2).count(),
-        MAX_TOOL_CALLS,
-        "上限内每次非法信封各记一条：{:?}",
+        N,
+        "每次非法信封各记一条（N 超过旧上限）+ 末行正文：{:?}",
+        rows
+    );
+    assert!(
+        rows.last()
+            .map(|r| r.1.contains("到此为止。"))
+            .unwrap_or(false),
+        "模型给出正文就收尾：{:?}",
         rows
     );
     assert!(
@@ -3928,15 +3934,18 @@ pub(crate) fn prose_then_tool_envelope_keeps_prose_line_and_rebuilds_identically
 }
 
 #[test]
-pub(crate) fn forced_final_tool_envelope_shows_no_json() {
-    // 超限强制收尾后模型仍发信封：显示文本取信封之外的正文（没有正文就是空），JSON 绝不进转录。
+pub(crate) fn tool_envelope_after_prose_runs_and_json_never_shows() {
+    // 正文之后跟信封：**照常执行**（不再有强制收尾），显示文本取信封之外的正文，JSON 绝不进转录。
     let runner = Arc::new(RecordingRunner {
         calls: Mutex::new(Vec::new()),
         out: "ok".into(),
         ok: true,
     });
-    let mut script: Vec<String> = (0..MAX_TOOL_CALLS).map(|_| TOOL_CALL.to_string()).collect();
+    const N: usize = 10; // 比原来的上限 8 多：证明没有调用次数上限
+    let mut script: Vec<String> = (0..N).map(|_| TOOL_CALL.to_string()).collect();
     script.push("到此为止。{\"type\":\"tool\",\"name\":\"grep\",\"args\":{}}".to_string());
+    // 脚本替身会**重复最后一条**：末条必须是"不再发起工具调用"的正文，否则就是死循环。
+    script.push("收工。".to_string());
     let mut member = BTreeMap::new();
     member.insert("a".to_string(), script);
     let mut mod_a = module_of("a");
@@ -3956,25 +3965,21 @@ pub(crate) fn forced_final_tool_envelope_shows_no_json() {
     let events = with_live(|l| core.single_say(&sid, "跑满", l)).unwrap();
     assert_eq!(
         runner.calls.lock().expect("锁").len(),
-        MAX_TOOL_CALLS,
-        "超限后不再执行工具"
+        N + 1,
+        "每次调用都执行（正文之后的那个信封也执行）"
     );
     let rows = transcript_rows(&events);
-    assert_eq!(
-        rows.iter().filter(|r| r.2).count(),
-        MAX_TOOL_CALLS,
-        "{:?}",
+    assert_eq!(rows.iter().filter(|r| r.2).count(), N + 1, "{:?}", rows);
+    // 信封之外的正文如实收录成一条正文行（信封本身走工具行，绝不当正文显示）。
+    assert!(
+        rows.iter().any(|r| !r.2 && r.1.contains("到此为止。")),
+        "信封之外的正文要如实收录：{:?}",
         rows
     );
     let last = rows.last().expect("应有末行");
     assert!(
-        last.1.contains("到此为止。"),
-        "超限后的正文要如实收录：{:?}",
-        last
-    );
-    assert!(
-        !last.1.contains('{') && !last.1.contains("\"type\""),
-        "显示文本不得出现 JSON：{:?}",
+        last.1.contains("收工。") && !last.1.contains('{') && !last.1.contains("\"type\""),
+        "末行是模型的收尾正文且不含 JSON：{:?}",
         last
     );
     assert!(
@@ -4215,26 +4220,27 @@ pub(crate) fn shipped_modules_scan_clean() {
 }
 
 #[test]
-pub(crate) fn tool_loop_cap_forces_final_answer() {
+pub(crate) fn tool_loop_has_no_call_cap() {
     let runner = Arc::new(RecordingRunner {
         calls: Mutex::new(Vec::new()),
         out: "r".into(),
         ok: true,
     });
-    let mut script: Vec<String> = (0..MAX_TOOL_CALLS).map(|_| TOOL_CALL.to_string()).collect();
+    const N: usize = 10; // 比原来的上限 8 多：证明没有调用次数上限
+    let mut script: Vec<String> = (0..N).map(|_| TOOL_CALL.to_string()).collect();
     script.push("{\"type\":\"say\",\"text\":\"最终回报\"}".into());
     let mut m = member_with_tools("m0", script, Arc::clone(&runner));
     let prompts = test_prompts();
     let exec = run_execution(std::slice::from_mut(&mut m), "任务", &prompts);
     assert_eq!(
         runner.calls.lock().expect("锁").len(),
-        MAX_TOOL_CALLS,
-        "调用数封顶"
+        N,
+        "几次调用就几次（没有封顶）"
     );
     assert_eq!(
         exec.reports.get("m0").map(|s| s.as_str()),
         Some("最终回报"),
-        "超限后强制收尾"
+        "模型给出 say 才收尾"
     );
 }
 
@@ -4823,7 +4829,11 @@ impl Chat for AbortChat {
         _opts: CompleteOpts<'_>,
         on: &mut dyn FnMut(Chunk) -> bool,
     ) -> Completion {
+        // 已停止的生成：引擎侧的回调在收到第一片时就返回 false（用户点了「停止」），
+        // 但**已经收到的内容照样返回**——半截信封正是这么来的（回调的裁决由引擎读，
+        // 替身不替引擎决定要不要中止：中止与否是**取消标志**的事）。
         let _ = on(Chunk::Start);
+        let _ = on(Chunk::Text(self.raw.clone()));
         Completion::text(self.raw.clone())
     }
 }
@@ -4871,7 +4881,18 @@ pub(crate) fn an_aborted_generation_never_executes_a_repairable_envelope() {
         .create_work(work("w", WorkMode::Single, &["a"]))
         .unwrap()
         .sid;
-    let events = with_live(|l| core.single_say(&sid, "写", l)).unwrap();
+    // 取消标志在生成开始前就已置位 = 用户按下了「停止」：引擎据此收尾，
+    // 不再发起下一次调用（此前靠工具调用上限兜底，上限删掉后必须自己站住）。
+    let events = {
+        let cancel = Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let mut noop = |_e: crate::core::events::SessionEvent| {};
+        let mut live = crate::core::events::Live {
+            llm: Default::default(),
+            cancel,
+            emit: &mut noop,
+        };
+        core.single_say(&sid, "写", &mut live).unwrap()
+    };
     let views = tool_views(&events);
     assert!(!views[0].ok, "被停止的生成不执行工具：{}", views[0].output);
     assert!(

@@ -13,7 +13,7 @@ const $ = (s) => document.querySelector(s);
 const state = {
   modules: [], providers: [], models: [], core: null, rejected: [], agents: [],
   history: [],           // 会话历史（名字/mode/时间）
-  settings: { streaming: true, show_reasoning: true, llm_timeout_secs: 300, discuss_call_cap: 30, discuss_remind_cap: 3, compact_at_percent: 70 }, // 基本设置
+  settings: { streaming: true, show_reasoning: true, llm_timeout_secs: 300, discuss_remind_cap: 3, compact_at_percent: 70 }, // 基本设置
   sessions: new Map(),   // sid -> { sid, mode, title, lines, pending, busy, done, awaiting, readonly }
   activeSid: null,
   settingsOpen: false,
@@ -46,7 +46,7 @@ async function refreshState() {
   state.rejected = s.rejected || [];
   state.agents = s.agents || [];
   state.history = s.history || [];
-  state.settings = s.settings || { streaming: true, show_reasoning: true, llm_timeout_secs: 300, discuss_call_cap: 30, discuss_remind_cap: 3, compact_at_percent: 70 };
+  state.settings = s.settings || { streaming: true, show_reasoning: true, llm_timeout_secs: 300, discuss_remind_cap: 3, compact_at_percent: 70 };
   renderSidebar();
   renderHistory();
 }
@@ -1064,8 +1064,8 @@ function openSettingsModal() {
     const cot = checkbox('思维链显示（每条回答下的思维链，永远默认折叠、点击展开）', state.settings.show_reasoning);
     // 单次模型调用的总预算（全局：讨论 / 执行 / 验收 / 单 agent 共用）。
     const to = numberInput('单次模型调用的超时（秒）', state.settings.llm_timeout_secs, 10, 3600);
-    // 讨论阶段的两个上限（用户可调）：一轮内子会话能跑多少次模型调用、最多提醒几次。
-    const cap = numberInput('讨论一轮内的模型调用上限', state.settings.discuss_call_cap, 1, 200);
+    // 讨论阶段的提醒次数（用户可调）：一轮内对同一个成员最多提醒几次。
+    // **调用次数没有上限**：模型继续核实就继续跑，直到它给出表态（或用户点停止）。
     const remind = numberInput('一轮内最多提醒几次', state.settings.discuss_remind_cap, 0, 20);
     // 上下文用到多少就该压（占模型窗口的百分比）。
     const pct = numberInput('上下文用到百分之多少就压缩', state.settings.compact_at_percent, 0, 100);
@@ -1076,7 +1076,6 @@ function openSettingsModal() {
           streaming: stream.box.checked,
           show_reasoning: cot.box.checked,
           llm_timeout_secs: Number(to.input.value) || 300,
-          discuss_call_cap: Number(cap.input.value) || 30,
           discuss_remind_cap: Number(remind.input.value) || 0,
           compact_at_percent: Number(pct.input.value) || 0,
         });
@@ -1088,9 +1087,8 @@ function openSettingsModal() {
     c.body.appendChild(cot.wrap);
     c.body.appendChild(to.wrap);
     c.body.appendChild(cfgHint('超时是全局的：讨论、执行、验收与单 agent 共用这一份预算。用尽时会中断本轮并提示，点「继续」可重试（会话不会作废）。'));
-    c.body.appendChild(cap.wrap);
-    c.body.appendChild(cfgHint('讨论时子会话可以自己核实很久，但要有天花板——到上限核心只提醒它表态，不强制。'));
     c.body.appendChild(remind.wrap);
+    c.body.appendChild(cfgHint('调用次数没有上限：模型继续核实就继续跑，直到它给出表态（你可以随时点「停止」）。'));
     c.body.appendChild(cfgHint('一轮内提醒到顶就记一行「未回应」放过它，整轮继续（不阻塞）。'));
     c.body.appendChild(pct.wrap);
     c.body.appendChild(cfgHint('压缩由 AI 自己做：到点自动压一次；也可以随时手动 /compact。填 0 = 不自动压。'));
