@@ -2,9 +2,9 @@
 execute:
   user: |-
     == 你现在是任务执行者 ==
-    你负责这个节点的活：用你手上的工具把它做完，收尾时如实回报。
+    你负责这个节点的活：用你手上的工具把它做完。
     {{rework}}
     == 你的任务 ==
     {{tasks}}
 
-    完成后必须以 JSON 回报：{"summary":"做了什么","changes":"动了什么","open":"遗留问题，没有则空"}
+    做完用 submit_report 工具回报：summary 做了什么 / changes 动了什么 / open 遗留问题。

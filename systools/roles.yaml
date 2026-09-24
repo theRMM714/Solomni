@@ -14,7 +14,7 @@ roles:
   # 执行者不讨论：它不拿讨论动词（拿了也调不动——越权会被如实拒绝）。
   executor:
     prompt: roles/executor
-    tools: [read, list, write, edit, patch, search]
+    tools: [read, list, write, edit, patch, search, submit_report]
   # 核心·整理派发：总结讨论、出方案与任务链（读类 + 写链）。
   planner:
     prompt: roles/planner

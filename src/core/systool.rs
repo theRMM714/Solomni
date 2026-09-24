@@ -30,10 +30,20 @@ pub const MAX_SEARCH_LINE_CHARS: usize = 300;
 /// 写进模块目录的标记：回执里带上它，给模型看；工具轨迹据此给用户一句可见提示（同一常量，两处共用）。
 pub const MODULE_WRITE_MARK: &str = "[模块目录]";
 
+/// 执行席的**回报**工具：不碰文件，只把"做完了什么"承载成一次工具调用。
+/// 为什么是工具而不是正文 JSON：回报会驱动核心（判节点完成），属于核心操作（见 tools-and-roles.md）。
+pub const REPORT: &str = "submit_report";
+
 /// 内置工具名（保留名）。
 /// 与 systools/tools.yaml 的 tools 是同一份名单，测试「builtin_tool_book_is_the_one_source_of_names_and_paths」锁死两者一致。
 pub fn is_builtin(name: &str) -> bool {
-    name == READ || name == WRITE || name == EDIT || name == PATCH || name == LIST || name == SEARCH
+    name == READ
+        || name == WRITE
+        || name == EDIT
+        || name == PATCH
+        || name == LIST
+        || name == SEARCH
+        || name == REPORT
 }
 
 /// 内置工具名清单（拼错误提示用）。
@@ -45,6 +55,7 @@ pub fn names() -> Vec<String> {
         PATCH.to_string(),
         LIST.to_string(),
         SEARCH.to_string(),
+        REPORT.to_string(),
     ]
 }
 
@@ -275,6 +286,24 @@ pub fn execute(
         return fail(arg_fault_text(texts, name, schema, &fault));
     }
     schema.apply_defaults(&mut args);
+    // 回报工具：不碰文件，回执就是把回报原样带出来（节点产出由它承载）。
+    if name == REPORT {
+        let get = |k: &str| {
+            args.get(k)
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string()
+        };
+        let (s, c, o) = (get("summary"), get("changes"), get("open"));
+        let mut out = format!("summary：{}\nchanges：{}", s, c);
+        if !o.trim().is_empty() {
+            out.push_str(&format!("\nopen：{}", o));
+        }
+        return ToolOutcome {
+            ok: true,
+            output: out,
+        };
+    }
     let spec = match args.get("path").and_then(|p| p.as_str()) {
         Some(p) => p.to_string(),
         // 声明里每个内置工具都声明了必填 path，走到这里说明声明与实现不一致。

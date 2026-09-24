@@ -7349,6 +7349,43 @@ pub(crate) fn history_list_is_ordered_as_a_tree() {
     );
 }
 
+/// 回报走**工具调用**（不是正文 JSON）：执行席拿得到它，调用它不碰文件、回执带出回报内容。
+#[test]
+pub(crate) fn executor_reports_through_a_tool_call() {
+    let prompts = test_prompts();
+    // 角色表把 report 发给执行席（越权校验的判据就是它）。
+    assert!(
+        prompts.systools.allows("executor", "submit_report"),
+        "执行席该拿到回报工具"
+    );
+    assert!(
+        !prompts.systools.allows("discussant", "submit_report"),
+        "讨论席不该拿到回报工具"
+    );
+    // 它不是文件域工具：没有 path 也照跑，回执把三个字段带出来。
+    let io = InMemorySysIo::new();
+    let sb = test_sandbox("a1", &[]);
+    let mut obs = crate::core::systool::Observations::default();
+    let out = crate::core::systool::execute(
+        &sb,
+        &io,
+        &mut obs,
+        "submit_report",
+        "{\"summary\":\"抽了语料\",\"changes\":\"work/corpus.jsonl\",\"open\":\"\"}",
+    );
+    assert!(out.ok, "回报该成功：{:?}", out.output);
+    assert!(
+        out.output.contains("抽了语料"),
+        "回执要带出 summary: {}",
+        out.output
+    );
+    assert!(
+        out.output.contains("work/corpus.jsonl"),
+        "回执要带出 changes: {}",
+        out.output
+    );
+}
+
 /// 返工必须带上**上次没通过的原因**：否则 agent 只能把同一件事原样再做一遍。
 #[test]
 pub(crate) fn rework_prompt_carries_the_acceptance_note() {

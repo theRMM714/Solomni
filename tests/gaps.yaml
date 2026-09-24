@@ -35,17 +35,16 @@
   level: T2
   why: |
     规则：**任何会驱动核心的操作都必须走工具调用**（两条等价通道：原生结构化槽位 / 手写信封）；
-    不驱动核心的普通说话可以是正文。当前仍有 6 处让模型在正文里手写 JSON、核心再解析，它们都是核心操作：
-    整理方案+任务链（engine.rs:1250）、总验收（engine.rs:1385）、节点验收（collab.rs:303）、
-    代拟名单（collab.rs:474）、推荐 agent（mod.rs:2019）、执行回报（prompts/roles/executor.yaml:10）。
+    不驱动核心的普通说话可以是正文。执行席的回报已改走 submit_report 工具（不碰文件、只承载回报），
+    但**核心 AI 的五个核心操作**仍在正文里手写 JSON、由核心解析：整理方案+任务链（engine.rs:1250）、
+    总验收（engine.rs:1385）、节点验收（collab.rs:303）、代拟名单（collab.rs:474）、推荐 agent（mod.rs:2019）。
     这些既没有 schema 校验，也不进工具台账，写坏就整轮失败。
   how: |
-    分三段做：① 执行回报变 report 工具（执行席角色表加工具、删掉提示词里"必须以 JSON 回报"）；
-    ② 核心 AI 的五处核心操作变工具（plan / node_verdict / checklist / slate / suggest），
-    复用核心通道已有的两套声明与解析；③ 契约写进 docs/architecture/tools-and-roles.md：
-    核心操作只能走工具调用，普通说话可以是正文。不加结构审查门禁（用户已明确：太严）。
+    把这五处变成工具（plan / node_verdict / checklist / slate / suggest），复用核心通道已有的两套声明与解析；
+    契约写进 docs/architecture/tools-and-roles.md：核心操作只能走工具调用，普通说话可以是正文。
+    不加结构审查门禁（用户已明确：太严）。
   accept: |
-    提示词里不再要求模型手写 JSON 来驱动核心；这 6 处都从工具调用参数取；契约写明该规则。
+    这五处都从工具调用参数取；提示词里不再要求核心手写 JSON 来驱动自己；契约写明该规则。
   blocked_by: |
     排期问题，不是缺条件。
 - id: ui.settings-not-surfaced

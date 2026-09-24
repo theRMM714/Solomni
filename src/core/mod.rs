@@ -450,21 +450,40 @@ impl Core {
 
     /// 方案过审后：链里**就绪且还没有子会话**的节点各建一个子会话，并如实外送。
     /// 为什么在这里：会话表只有核心能碰（泵不建会话）；派发是核心的职责。
-    /// 子会话的产出（最后一条转录行）= 该节点的交付物；取不到就如实说"没有产出"。
+    /// 子会话的产出 = 它**用 submit_report 工具交的回报**（核心操作走工具调用，不认正文里的 JSON）。
+    /// 没交回报就退回"最后一条转录行"（如实取到的东西），仍取不到就说"没有产出"。
     fn node_note(&self, child: &str) -> String {
-        let lines = match self.history.load(child) {
-            Ok((_, evs)) => evs
-                .iter()
-                .filter_map(|e| e.get("lines").and_then(|l| l.as_array()))
-                .flatten()
-                .filter_map(|l| l.get("line").and_then(|x| x.as_str()))
-                .map(|s| s.to_string())
-                .collect::<Vec<_>>(),
+        let evs = match self.history.load(child) {
+            Ok((_, evs)) => evs,
             Err(_) => Vec::new(),
         };
-        lines
-            .last()
-            .cloned()
+        let mut lines: Vec<String> = Vec::new();
+        let mut reported: Option<String> = None;
+        for ev in &evs {
+            let Some(ls) = ev.get("lines").and_then(|l| l.as_array()) else {
+                continue;
+            };
+            for l in ls {
+                if let Some(t) = l.get("line").and_then(|x| x.as_str()) {
+                    lines.push(t.to_string());
+                }
+                let Some(tool) = l.get("tool") else { continue };
+                let name = tool.get("name").and_then(|x| x.as_str()).unwrap_or("");
+                if name != crate::core::systool::REPORT {
+                    continue;
+                }
+                let out = tool
+                    .get("output")
+                    .and_then(|x| x.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                if !out.trim().is_empty() {
+                    reported = Some(out);
+                }
+            }
+        }
+        reported
+            .or_else(|| lines.last().cloned())
             .unwrap_or_else(|| "（该节点没有产出）".to_string())
     }
 

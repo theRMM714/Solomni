@@ -87,6 +87,24 @@ tools:
 
   # —— 工具调用约定：两套**互斥**（一个通道只用一套，不能同时教，否则模型在正文里讲解参数会被当成调用）——
 
+  submit_report:
+    capability: none              # 不碰文件：承载"这个节点做完了什么"
+    desc: 回报这个节点的产出：做完了什么、动了什么、还留什么问题。**收尾时用它**——它就是这一轮的最终答复。
+    params:
+      summary:
+        type: string
+        required: true
+        non_empty: true
+        desc: 做了什么
+      changes:
+        type: string
+        required: true
+        non_empty: true
+        desc: 动了什么（产物路径、改了哪些文件）
+      open:
+        type: string
+        desc: 遗留问题；没有就留空
+
   compact:
     capability: none              # 不碰文件：改的是"发给模型什么"，不是"留下什么"
     desc: 压缩上下文：把此前的内容写成一份 summary（此后不再发给模型，但用户仍可查看）。**只在压缩回合由系统发起时使用**。
