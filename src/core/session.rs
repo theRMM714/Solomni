@@ -214,11 +214,10 @@ impl AgentSession {
         Ok(summary)
     }
 
-    /// 注入一条**系统消息**：既落进它自己的转录（前端据此显示系统行），也进它的上下文
-    /// （提醒是给模型的指令，所以按用户角色进去，但**用户看到的是系统行**）。
-    /// 见 docs/architecture/session-model.md 二"系统消息"。
+    /// 注入一条**系统消息**：上下文里是 system 角色，转录里是系统行。
+    /// **系统/核心发的消息不得用用户身份**——无论进上下文还是进界面（见 session-model.md 二"系统消息"）。
     pub fn note_system(&mut self, text: &str) -> Vec<SessionEvent> {
-        self.history.push(Msg::user(text.to_string()));
+        self.history.push(Msg::system(text.to_string()));
         let v = self.line(text.to_string(), None, None);
         vec![SessionEvent::Transcript(vec![LineView {
             system: true,
@@ -355,6 +354,26 @@ impl AgentSession {
         self.cur_reply = self.next_line;
         let user_line = self.line(format!("[用户] {}", text), None, None);
         sink(SessionEvent::Transcript(vec![user_line]));
+        self.rounds_events(live, sink);
+    }
+
+    /// **系统注入**：上下文里是 system 角色，转录里是系统行，随后正常问模型。
+    /// 系统/核心发的消息一律走这条（不得借用 say——那是用户发言）。
+    pub fn inject_system(
+        &mut self,
+        text: &str,
+        live: &mut Live,
+        sink: &mut dyn FnMut(SessionEvent),
+    ) {
+        self.maybe_compact(sink);
+        self.history.push(Msg::system(text.to_string()));
+        // 系统行不属于任何模型回复：给它自己的行号当回复号（与重建规则一致）。
+        self.cur_reply = self.next_line;
+        let v = self.line(text.to_string(), None, None);
+        sink(SessionEvent::Transcript(vec![LineView {
+            system: true,
+            ..v
+        }]));
         self.rounds_events(live, sink);
     }
 

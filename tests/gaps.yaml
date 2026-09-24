@@ -30,35 +30,6 @@
     有意推迟（不是缺条件）：guest 相对现有围栏的独特价值只有"不授权本机写权限也能拿到强隔离"一条，
     而代价是三套原生 API、每平台真机验证，且 CI 起不了 hypervisor（只能真机验 + env-skip）。
     项目成熟、需求更清楚时再做。
-- id: identity.system-messages-sent-as-user
-  scope: global
-  level: T2
-  why: |
-    系统与核心注入的消息走了"用户发言"那条路：执行提示词用 AgentSession::say 注入（推 Msg::user、落用户行），
-    讨论提醒用 note_system（也推 Msg::user）。于是模型把系统指令当用户要求，界面上也渲染成用户气泡
-    （真机截图里"用户 == 你现在是任务执行者 =="就是这条）。系统/核心发的消息不得用用户身份，
-    无论进上下文还是进界面。
-  how: |
-    注入统一走系统消息：上下文里用 Msg::system，转录里落系统行（LineView.system 已有）；
-    执行提示词不再借用 say，改走同一条系统注入路径。
-  accept: |
-    系统注入的消息在界面上是系统行、在上下文里是 system 角色；界面上不再出现用户样式的系统指令。
-  blocked_by: |
-    排期问题，不是缺条件。
-
-- id: rework.does-not-carry-acceptance-note
-  scope: global
-  level: T2
-  why: |
-    节点验收没过、被重派时，走的还是最初那段开工提示词（drive_node(child, objective)），
-    验收结论（review 里对该节点的逐项 note）没有传下去——agent 不知道上次错在哪，只能从头再做一遍。
-  how: |
-    重派时把上次验收结论附进提示词（正面写法：这次要满足什么），由执行席提示词模板承接。
-  accept: |
-    真机跑一次返工：被重派节点的提示词里含上次未通过的具体原因，且 agent 的返工回报针对该原因。
-  blocked_by: |
-    排期问题，不是缺条件。
-
 - id: tools.core-operations-must-be-tool-calls
   scope: global
   level: T2

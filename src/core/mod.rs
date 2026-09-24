@@ -544,7 +544,8 @@ impl Core {
                         emit: &mut |ev: SessionEvent| out.borrow_mut().push(ev),
                     };
                     let mut sink = |ev: SessionEvent| out.borrow_mut().push(ev);
-                    session.say(objective, &mut live, &mut sink);
+                    // 执行提示词是**核心注入的系统消息**，不是用户发言（不得借用 say）。
+                    session.inject_system(objective, &mut live, &mut sink);
                 }
                 let events = out.into_inner();
                 self.put_single_recorded(child, session, &events);
@@ -780,20 +781,37 @@ impl Core {
             match self.spawn_sub_session(sid, &node) {
                 Ok(child) => {
                     // 派发文案用册子里的执行提示词模板渲染（objective 是核心 AI 写的那段任务提示词）。
-                    let raw = self
+                    // 上一次的验收结论（没有 = 首轮）：**返工必须知道上次错在哪**，
+                    // 否则它只能把同一件事原样再做一遍（真机上就是这样白跑一轮的）。
+                    let (raw, rework) = self
                         .sessions
                         .get(sid)
                         .and_then(|s| match s {
-                            Session::Collab(c) => c
-                                .chain()
-                                .and_then(|ch| ch.nodes.iter().find(|n| n.id == node))
-                                .map(|n| n.objective.clone()),
+                            Session::Collab(c) => c.chain().and_then(|ch| {
+                                ch.nodes.iter().find(|n| n.id == node).map(|n| {
+                                    let note = n
+                                        .acceptance
+                                        .as_ref()
+                                        .map(|a| a.note.clone())
+                                        .unwrap_or_default();
+                                    let rework = if note.trim().is_empty() {
+                                        String::new()
+                                    } else {
+                                        format!(
+                                            "\n== 上次没通过的原因 ==\n{}\n这次请针对上面的原因返工。\n",
+                                            note
+                                        )
+                                    };
+                                    (n.objective.clone(), rework)
+                                })
+                            }),
                             _ => None,
                         })
                         .unwrap_or_default();
-                    let objective = self
-                        .prompts
-                        .render(&self.prompts.core.execute.user, &[("tasks", raw)]);
+                    let objective = self.prompts.render(
+                        &self.prompts.core.execute.user,
+                        &[("tasks", raw), ("rework", rework)],
+                    );
                     if let Some(Session::Collab(c)) = self.sessions.get_mut(sid) {
                         c.mark_node_started(&node, &child);
                     }
@@ -2490,7 +2508,13 @@ impl Core {
                 while i < rows.len() {
                     let l = rows[i];
                     let line = l.get("line").and_then(|x| x.as_str()).unwrap_or("");
-                    if let Some(t) = line.strip_prefix("[用户] ") {
+                    // 系统注入的行（提醒、执行提示词这类）在上下文里是 system 角色。
+                    if l.get("system").and_then(|x| x.as_bool()).unwrap_or(false) {
+                        history.push(Msg::system(line.to_string()));
+                        line_reply.push(l.get("id").and_then(|x| x.as_u64()).unwrap_or(0));
+                        marks.push(history.len());
+                        i += 1;
+                    } else if let Some(t) = line.strip_prefix("[用户] ") {
                         history.push(Msg::user(t.to_string()));
                         // 用户行不属于任何回复：给它自己的行号，回档时才不会与相邻行误并成一组。
                         line_reply.push(l.get("id").and_then(|x| x.as_u64()).unwrap_or(0));

@@ -1027,7 +1027,10 @@ pub(crate) fn run_execution(
         }
         let system = m.system.clone();
         let id = m.id.clone();
-        let user = prompts.render(&prompts.core.execute.user, &[("tasks", tasks.to_string())]);
+        let user = prompts.render(
+            &prompts.core.execute.user,
+            &[("tasks", tasks.to_string()), ("rework", String::new())],
+        );
         let mut views = Vec::new();
         let mut noop = |_c: crate::core::ports::Chunk| true;
         let mut sink = |_e: crate::core::events::SessionEvent| {};
@@ -7344,4 +7347,26 @@ pub(crate) fn history_list_is_ordered_as_a_tree() {
         vec!["A", "A--甲", "A--乙", "B"],
         "父会话必须紧跟它的子会话"
     );
+}
+
+/// 返工必须带上**上次没通过的原因**：否则 agent 只能把同一件事原样再做一遍。
+#[test]
+pub(crate) fn rework_prompt_carries_the_acceptance_note() {
+    // 验收没过时，渲染出的提示词要含上次的原因；首轮（没有结论）不出现返工段。
+    let p = test_prompts();
+    let note = "报告里缺了坏链检查";
+    let rework = format!(
+        "\n== 上次没通过的原因 ==\n{}\n这次请针对上面的原因返工。\n",
+        note
+    );
+    let out = p.render(
+        &p.core.execute.user,
+        &[("tasks", "把语料抽出来".to_string()), ("rework", rework)],
+    );
+    assert!(out.contains(note), "返工提示词要带上次的原因：{out}");
+    let first = p.render(
+        &p.core.execute.user,
+        &[("tasks", "x".to_string()), ("rework", String::new())],
+    );
+    assert!(!first.contains("上次没通过"), "首轮不该出现返工段：{first}");
 }
