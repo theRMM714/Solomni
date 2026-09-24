@@ -7532,6 +7532,16 @@ pub(crate) fn core_operations_require_a_tool_call_not_body_json() {
     // 讨论席与执行席不拿核心操作（越权会被如实拒绝）。
     assert!(!prompts.systools.allows("discussant", "plan"));
     assert!(!prompts.systools.allows("executor", "checklist"));
+    // 谁能用"自己模块的工具"也由角色表说了算：只有干活的那一席发（讨论席列出来等于请它去撞墙）。
+    assert!(
+        prompts.systools.allows_module_tools("executor"),
+        "执行席要能用自己模块的工具"
+    );
+    assert!(
+        !prompts.systools.allows_module_tools("discussant"),
+        "讨论席不发模块工具"
+    );
+    assert!(!prompts.systools.allows_module_tools("planner"));
     // 载荷是**数组**参数（嵌套结构），不是标量。
     let schema = prompts
         .core
