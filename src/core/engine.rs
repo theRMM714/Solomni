@@ -1322,6 +1322,7 @@ impl Discussion {
         &self,
         core_chat: &mut dyn Chat,
         mode: crate::core::providers::ToolMode,
+        verify: Option<&mut MemberTools>,
     ) -> Result<(String, crate::core::chain::TaskChain), String> {
         let roster = self
             .members
@@ -1364,6 +1365,7 @@ impl Discussion {
             &msgs,
             self.opts(),
             &mut keep,
+            verify,
         )?;
         if self.cancelled() {
             return Err("已停止".to_string());
@@ -1469,6 +1471,7 @@ impl Execution {
         prompts: &Prompts,
         llm: crate::core::ports::LlmOpts,
         mode: crate::core::providers::ToolMode,
+        verify: Option<&mut MemberTools>,
     ) {
         let reports = self
             .reports
@@ -1502,6 +1505,7 @@ impl Execution {
             &msgs,
             opts,
             &mut keep,
+            verify,
         );
         if self.cancelled() {
             self.stopped = true;
@@ -1559,41 +1563,112 @@ pub(crate) fn core_operation(
     msgs: &[Msg],
     opts: crate::core::ports::CompleteOpts<'static>,
     keep: &mut dyn FnMut(crate::core::ports::Chunk) -> bool,
+    verify: Option<&mut MemberTools>,
 ) -> Result<serde_json::Value, String> {
     // 声明面按**通道形态**给：原生通道才声明（信封通道的模型看提示词里的工具说明）。
+    let face_rows: Vec<(&str, &crate::core::schema::ToolSchema)> =
+        systools.tool_face(role).unwrap_or_default();
+    let face_ids: Vec<String> = face_rows.iter().map(|(id, _)| id.to_string()).collect();
     let mut opts = opts;
     let decls: Vec<crate::core::ports::ToolDecl> =
         if mode == crate::core::providers::ToolMode::Native {
-            systools
-                .tool_face(role)
-                .map(|f| f.into_iter().map(|(id, s)| s.decl(id)).collect())
-                .unwrap_or_default()
+            face_rows.iter().map(|(id, s)| s.decl(id)).collect()
         } else {
             Vec::new()
         };
     if !decls.is_empty() {
         opts.tools = Some(&decls);
     }
-    let done = chat.complete(msgs, opts, keep);
-    if let Some(err) = done.error {
-        return Err(err);
+    // **核实回路**：核心操作也是"先看现场再下结论"。模型想先读/查（很合理的动作）时，
+    // 执行它请求的**只读**工具并把结果回灌，然后再要那一次核心操作调用。
+    // 没有这条，模型一想核实就被判"没调用 X"→整步中断（真机上就是这么卡死的）。
+    let mut msgs = msgs.to_vec();
+    let mut verify = verify;
+    loop {
+        let done = chat.complete(&msgs, opts, keep);
+        if let Some(err) = done.error {
+            return Err(err);
+        }
+        // native：结构化槽位里找这个名字的调用。
+        if let Some(c) = done.calls.iter().find(|c| c.name == tool) {
+            return serde_json::from_str(&c.args_json)
+                .map_err(|e| format!("{} 的参数不是合法 JSON（{}）：{}", tool, e, c.args_json));
+        }
+        // 手写信封：正文里的信封里找。
+        let parsed = crate::core::envelope::parse(&done.raw);
+        if let Some(t) = parsed.tools.iter().find(|t| t.name == tool) {
+            return serde_json::from_str(&t.args_json)
+                .map_err(|e| format!("{} 的参数不是合法 JSON（{}）：{}", tool, e, t.args_json));
+        }
+        // 没有目标调用：看它请求的是不是**该角色拿得到的只读核实工具**（read / search）。
+        let calls: Vec<(String, String, String)> =
+            if mode == crate::core::providers::ToolMode::Native && !done.calls.is_empty() {
+                done.calls
+                    .iter()
+                    .map(|c| (c.id.clone(), c.name.clone(), c.args_json.clone()))
+                    .collect()
+            } else {
+                parsed
+                    .tools
+                    .iter()
+                    .map(|t| (String::new(), t.name.clone(), t.args_json.clone()))
+                    .collect()
+            };
+        let ctx = match verify.as_deref_mut() {
+            Some(c) => c,
+            None => {
+                return Err(format!(
+                    "没有调用 {}（核心操作必须走工具调用）：{}",
+                    tool,
+                    head_chars(&done.raw, 200)
+                ))
+            }
+        };
+        let readonly: Vec<(String, String, String)> = calls
+            .into_iter()
+            .filter(|(_, n, _)| {
+                face_ids.iter().any(|f| f == n)
+                    && ctx
+                        .sandbox
+                        .builtin_tools
+                        .get(n)
+                        .map(|s| s.capability == "fs-read")
+                        .unwrap_or(false)
+            })
+            .collect();
+        if readonly.is_empty() {
+            return Err(format!(
+                "没有调用 {}（核心操作必须走工具调用）：{}",
+                tool,
+                head_chars(&done.raw, 200)
+            ));
+        }
+        let mut views: Vec<ToolCallView> = Vec::new();
+        for (call_id, name, args) in readonly {
+            let out = crate::core::systool::execute(
+                &ctx.sandbox,
+                ctx.io.as_ref(),
+                &mut ctx.observations,
+                &name,
+                &args,
+            );
+            views.push(ToolCallView {
+                speaker: "核心".to_string(),
+                module: String::new(),
+                name,
+                ok: out.ok,
+                args,
+                output: out.output,
+                raw: done.raw.clone(),
+                call_id,
+                reply: 0,
+            });
+        }
+        // 按通道形态把结果回灌（原生：一条助手消息带 tool_calls + 每条结果 role=tool）。
+        for m in reply_msgs(mode, &done.raw, &views, &ctx.sandbox.texts) {
+            msgs.push(m);
+        }
     }
-    // native：结构化槽位里找这个名字的调用。
-    if let Some(c) = done.calls.iter().find(|c| c.name == tool) {
-        return serde_json::from_str(&c.args_json)
-            .map_err(|e| format!("{} 的参数不是合法 JSON（{}）：{}", tool, e, c.args_json));
-    }
-    // 手写信封：正文里的信封里找。
-    let parsed = crate::core::envelope::parse(&done.raw);
-    if let Some(t) = parsed.tools.iter().find(|t| t.name == tool) {
-        return serde_json::from_str(&t.args_json)
-            .map_err(|e| format!("{} 的参数不是合法 JSON（{}）：{}", tool, e, t.args_json));
-    }
-    Err(format!(
-        "没有调用 {}（核心操作必须走工具调用）：{}",
-        tool,
-        head_chars(&done.raw, 200)
-    ))
 }
 
 /// 拼一次模型调用的消息：**身份 + 本回合工具 + 对话 + 本回合提示**。

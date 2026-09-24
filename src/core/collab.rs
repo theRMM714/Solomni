@@ -273,6 +273,7 @@ impl CollabSession {
         opts: crate::core::ports::CompleteOpts<'static>,
         mode: crate::core::providers::ToolMode,
         core_chat: &mut dyn Chat,
+        verify: Option<&mut crate::core::engine::MemberTools>,
     ) -> Result<Vec<(String, bool, String)>, String> {
         let nodes = chain.map(|c| c.nodes.clone()).unwrap_or_default();
         let listed = nodes
@@ -302,6 +303,7 @@ impl CollabSession {
         let mut keep =
             move |_c: crate::core::ports::Chunk| !stop.load(std::sync::atomic::Ordering::Relaxed);
         // 核心操作走工具调用：节点验收结论由 node_verdict 工具承载。
+        // 带核实回路：模型想先读/查落盘物时，核心执行只读工具再回灌（不再直接判"没调用"）。
         let payload = crate::core::engine::core_operation(
             &prompts.systools,
             "orchestrator",
@@ -311,6 +313,7 @@ impl CollabSession {
             &msgs,
             opts,
             &mut keep,
+            verify,
         )?;
         let parsed: Vec<NodeVerdict> = payload
             .get("verdicts")
@@ -480,7 +483,8 @@ impl CollabSession {
             Msg::system(self.prompts.core.slate.system.clone()),
             Msg::user(user),
         ];
-        // 核心操作走工具调用：代拟名单由 slate 工具承载。
+        // 核心操作走工具调用：代拟名单由 slate 工具承载（带只读核实回路）。
+        let mut verify = self.core_verify_tools("planner");
         let parsed = crate::core::engine::core_operation(
             &self.prompts.systools,
             "planner",
@@ -490,6 +494,7 @@ impl CollabSession {
             &msgs,
             CompleteOpts::plain(false),
             &mut |_| true,
+            verify.as_mut(),
         )
         .ok()
         .and_then(|payload| {
@@ -659,6 +664,39 @@ impl CollabSession {
         self.disc.as_ref()?.member_id(i).map(|s| s.to_string())
     }
 
+    /// 核心核实用的小工具环境：**只读**、根是本次工作的共享区。
+    /// 为什么要它：核心操作（出方案 / 节点验收…）也常需要"先看看现场再下结论"，
+    /// 而核心不是 member、手里没有工具环境——没有它，模型一想核实就被判"没调用 X"而整步中断。
+    /// 工具面只发**该角色的只读核实工具**（按声明里的 capability = fs-read 判定），写类一律不发。
+    fn core_verify_tools(&self, role: &str) -> Option<crate::core::engine::MemberTools> {
+        let mut sb = self.sandboxes.list.first()?.clone();
+        sb.agent = "核心".to_string();
+        sb.private = sb.shared.clone();
+        sb.modules.clear();
+        let allowed: Vec<String> = self
+            .prompts
+            .systools
+            .tool_face(role)
+            .map(|f| f.into_iter().map(|(id, _)| id.to_string()).collect())
+            .unwrap_or_default();
+        Some(crate::core::engine::MemberTools {
+            mode: self.core_mode,
+            modules: std::collections::BTreeMap::new(),
+            observations: crate::core::systool::Observations::default(),
+            repair: Arc::clone(&self.repair),
+            log: Arc::clone(&self.log),
+            runner: Arc::clone(&self.tools),
+            sandbox: sb.clone(),
+            io: Arc::clone(&self.io),
+            unavailable: std::collections::BTreeMap::new(),
+            fence: crate::core::fence::FenceSpec::from_sandbox(&sb, false),
+            reply_seq: 0,
+            allowed,
+            with_modules: false,
+            notes: crate::core::systool::ToolNotes::default(),
+        })
+    }
+
     /// 讨论回合的**工具面**（动词 + 只读核实）：核心驱动时交给 turn_with。
     pub fn systools(&self) -> &crate::core::roles::SystemTools {
         &self.prompts.systools
@@ -772,11 +810,12 @@ impl CollabSession {
         }
         // 整理：只在还没有方案（或没有链）时做——回档/重启后沿用已记的，不重复花钱。
         if self.plan.is_none() || self.chain.is_none() {
-            let made = self
-                .disc
-                .as_ref()
-                .expect("disc 存在")
-                .synthesize(self.core_chat.as_mut(), self.core_mode);
+            let mut verify = self.core_verify_tools("planner");
+            let made = self.disc.as_ref().expect("disc 存在").synthesize(
+                self.core_chat.as_mut(),
+                self.core_mode,
+                verify.as_mut(),
+            );
             match made {
                 Ok((plan, chain)) => {
                     // **装配期门禁**：链必须自洽（悬空依赖 / 环 / 未知负责人 / 空目标）——
@@ -853,6 +892,7 @@ impl CollabSession {
             return;
         }
         // **节点级验收**：核心 AI 按各节点**当前目标**判它的产出；没过就暂停并交用户。
+        let mut verify = self.core_verify_tools("orchestrator");
         let verdicts = match Self::review_nodes(
             &self.prompts,
             &self.cancel,
@@ -861,6 +901,7 @@ impl CollabSession {
                 .with_timeout(self.settings.app.llm_timeout_secs),
             self.core_mode,
             self.core_chat.as_mut(),
+            verify.as_mut(),
         ) {
             Ok(v) => v,
             Err(err) => {
@@ -901,12 +942,14 @@ impl CollabSession {
                 rework: 0,
             });
         }
+        let mut verify = self.core_verify_tools("orchestrator");
         exec.review(
             self.core_chat.as_mut(),
             &plan,
             &prompts,
             llm,
             self.core_mode,
+            verify.as_mut(),
         );
         if let Some(note) = self.exec_note(&exec) {
             sink(SessionEvent::Notice(note));

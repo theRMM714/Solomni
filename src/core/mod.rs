@@ -2067,6 +2067,8 @@ impl Core {
             ],
             crate::core::ports::CompleteOpts::plain(false),
             &mut |_| true,
+            // 推荐是**一次性建议**（用户点了才生成、没有工作区可核实）：不接核实回路。
+            None,
         )?;
         // 载荷里就是名单**数组**本身（工具参数 agents 的值）。
         let parsed: Vec<agents::RosterPick> = payload

@@ -1895,6 +1895,7 @@ pub(crate) fn execution_review_pass_and_fail_paths() {
         &prompts,
         Default::default(),
         Default::default(),
+        None,
     );
     assert!(!exec.all_pass(), "有 fail 项就不通过");
 
@@ -1911,6 +1912,7 @@ pub(crate) fn execution_review_pass_and_fail_paths() {
         &prompts,
         Default::default(),
         Default::default(),
+        None,
     );
     assert!(exec2.all_pass());
 }
@@ -1933,6 +1935,7 @@ pub(crate) fn review_parse_failure_is_conservative_fail() {
         &prompts,
         Default::default(),
         Default::default(),
+        None,
     );
     assert!(exec.items.is_empty());
     assert!(!exec.all_pass(), "解析失败必须保守判否");
@@ -7756,6 +7759,73 @@ pub(crate) fn core_operations_require_a_tool_call_not_body_json() {
     );
 }
 
+/// **核心操作也要能先核实**：模型先发只读核实（read），核心执行并把结果回灌，
+/// 然后再要那一次核心操作调用（plan）。此前是单次调用——模型一想核实就被判"没有调用 plan"，
+/// 整步中断（真机上核心就是这么卡在多轮 `[中断] 没有调用 node_verdict` 上的）。
+#[test]
+pub(crate) fn core_operation_runs_readonly_verification_before_the_op() {
+    let prompts = test_prompts();
+    let io = Arc::new(InMemorySysIo::new());
+    let note = s(&["demo", "work", "note.txt"]);
+    io.seed(&["demo", "work", "note.txt"], "现场：一切正常\n");
+    let sb = test_sandbox("核心", &[]);
+    let io_port: Arc<dyn crate::core::ports::SysIo + Send + Sync> = io.clone();
+    let mut verify = MemberTools {
+        mode: crate::core::providers::ToolMode::Envelope,
+        modules: BTreeMap::new(),
+        observations: crate::core::systool::Observations::default(),
+        repair: Arc::new(NoRepair),
+        log: Arc::new(crate::core::ports::NoopLog),
+        runner: Arc::new(SilentRunner),
+        sandbox: sb.clone(),
+        io: io_port,
+        unavailable: BTreeMap::new(),
+        fence: crate::core::fence::FenceSpec::from_sandbox(&sb, false),
+        reply_seq: 0,
+        allowed: vec!["read".to_string(), "plan".to_string()],
+        with_modules: false,
+        notes: crate::core::systool::ToolNotes::default(),
+    };
+    // 第一轮：先核实（read）；第二轮：交出 plan。
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let mut chat = super::RecordingChat {
+        inner: scripted(vec![
+            format!(
+                "{{\"type\":\"tool\",\"name\":\"read\",\"args\":{{\"path\":\"{}\"}}}}",
+                note
+            ),
+            "{\"type\":\"tool\",\"name\":\"plan\",\"args\":{\"plan\":\"方案\",\"nodes\":[]}}"
+                .to_string(),
+        ]),
+        seen: Arc::clone(&seen),
+    };
+    let out = crate::core::engine::core_operation(
+        &prompts.systools,
+        "planner",
+        "plan",
+        crate::core::providers::ToolMode::Envelope,
+        &mut chat,
+        &[crate::core::ports::Msg::user("出方案")],
+        crate::core::ports::CompleteOpts::plain(false),
+        &mut |_| true,
+        Some(&mut verify),
+    )
+    .expect("核实之后要能交出方案");
+    assert_eq!(out["plan"], "方案");
+    // 核实那次真的执行并回灌了：第二轮请求的消息里带着它的结果。
+    let calls = seen.lock().expect("锁");
+    assert!(
+        calls.len() >= 2,
+        "至少两次模型调用（核实 + 交出）：{}",
+        calls.len()
+    );
+    assert!(
+        calls[1].iter().any(|m| m.contains("现场：一切正常")),
+        "第二轮请求要带上核实结果：{:?}",
+        calls[1]
+    );
+}
+
 /// 正文里手写 JSON 不再被当成核心操作：**如实报错**，不把原文糊成方案。
 #[test]
 pub(crate) fn body_json_is_not_a_core_operation() {
@@ -7773,6 +7843,7 @@ pub(crate) fn body_json_is_not_a_core_operation() {
         &[crate::core::ports::Msg::user("出方案")],
         crate::core::ports::CompleteOpts::plain(false),
         &mut |_| true,
+        None,
     );
     let err = out.expect_err("正文 JSON 不是工具调用，该如实报错");
     assert!(err.contains("没有调用 plan"), "{}", err);
