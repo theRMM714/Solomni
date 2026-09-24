@@ -561,8 +561,8 @@ pub struct Discussion {
     prompts: Prompts,
     /// 本次调用的通道参数（流式 + 预算）：**全局设置**，与单 agent 共用同一份。
     llm: crate::core::ports::LlmOpts,
-    /// 本席位的**可用表态清单**（由角色表渲染而来，见 SystemTools::render_face）：
-    /// 开场提示词里那份"能用哪些信封"就是它，不再在提示词里另写一遍。
+    /// 讨论席的**机制说明 + 讨论约定**（开场与轮转都带它）：只说约定不说机制，AI 会空转。
+    /// 能用哪些工具**不在这里**——随回合注入（见 MemberTools::tools_block）。
     protocol: String,
 
     /// 这一轮对每个成员**提醒过几次**（到顶就记"未回应"放过它）；每轮开始归零。

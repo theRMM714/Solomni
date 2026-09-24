@@ -408,36 +408,56 @@ fn fs_packages_scans_the_dependency_folder_and_reports_each_rejection() {
 }
 
 // ---------- YamlPrompts ----------
-/// 角色的可用表态清单**由角色表渲染**（不是提示词里另写一遍）：给什么写什么，没给的不出现。
+/// 角色的工具面**来自角色表**（不是提示词里另写一遍）：给什么写什么，没给的不出现。
+/// 这一份面同时喂三处：回合注入的工具块、原生声明槽、越权校验——所以判据只有它一个。
 #[test]
-fn role_face_is_rendered_from_the_tables() {
+fn role_face_comes_from_the_role_table() {
     let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let st = YamlPrompts::new(root.join("prompts"), root.join("systools"))
         .system_tools()
         .expect("读两张表");
-    let discussant = st.render_face("discussant").expect("讨论者角色在");
+    let ids = |role: &str| -> Vec<String> {
+        st.tool_face(role)
+            .expect("角色表里的角色")
+            .into_iter()
+            .map(|(id, _)| id.to_string())
+            .collect()
+    };
+    let discussant = ids("discussant");
     for verb in ["say", "agree", "leave", "ask"] {
         assert!(
-            discussant.contains(verb),
-            "讨论者该能用 {}：{}",
+            discussant.iter().any(|t| t == verb),
+            "讨论者该能用 {}：{:?}",
             verb,
             discussant
         );
     }
-    // 执行者不讨论：它的清单里**不该**出现讨论动词（渲染与越权判据同源，所以这就够了）。
-    let executor = st.render_face("executor").expect("执行者角色在");
+    // 执行者不讨论：它的面里**不该**出现讨论动词（工具块与声明槽都照这份面走，所以这就够了）。
+    let executor = ids("executor");
     for verb in ["say", "agree", "leave", "ask"] {
         assert!(
-            !executor.contains(verb),
-            "执行者不该拿到 {}：{}",
+            !executor.iter().any(|t| t == verb),
+            "执行者不该拿到 {}：{:?}",
             verb,
             executor
         );
     }
+    // 描述与参数也来自工具总表（模型侧说明与校验同源）。
+    let (_, schema) = st
+        .tool_face("discussant")
+        .expect("讨论者角色在")
+        .into_iter()
+        .find(|(id, _)| *id == "agree")
+        .expect("agree 在讨论席面里");
+    assert!(!schema.desc.is_empty(), "工具说明不该为空");
     assert!(
-        st.render_face("不存在的角色").is_err(),
-        "未知角色要如实报错"
+        schema
+            .params
+            .as_ref()
+            .is_some_and(|p| p.contains_key("text")),
+        "agree 的参数契约来自 tools.yaml"
     );
+    assert!(st.tool_face("不存在的角色").is_err(), "未知角色要如实报错");
 }
 
 /// 两张表必须自洽：悬空引用 / 缺能力都会被挡下（不靠人看）。

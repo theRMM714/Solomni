@@ -590,22 +590,14 @@ impl CollabSession {
             stream: self.settings.app.streaming,
             timeout_secs: self.settings.app.llm_timeout_secs,
         };
-        // 本席位的可用表态清单**由角色表渲染**（不是提示词里另写一遍）：漂不了。
-        // 讨论席的"协议"= **机制说明 + 讨论约定 + 角色表渲染的表态清单**（三样缺一不可）：
-        // 只说约定不说机制，AI 就不知道自己在什么流程里、该干什么（真机上就是空转）。
-        let protocol = match self.prompts.systools.render_face("discussant") {
-            Ok(face) => format!(
-                "{}\n{}\n{}",
-                self.prompts.core.mechanism, self.prompts.core.chat_protocol, face
-            ),
-            Err(e) => {
-                sink(SessionEvent::Notice(format!(
-                    "[装配失败] 角色表不可用：{}",
-                    e
-                )));
-                return;
-            }
-        };
+        // 讨论席的"协议"= **机制说明 + 讨论约定**：只说约定不说机制，AI 就不知道自己在什么流程里、
+        // 该干什么（真机上就是空转）。
+        // **能用哪些表态不在这里列**：核心按这一回合的身份注入工具块（engine::MemberTools::tools_block），
+        // 清单与越权校验同源——同一份清单在提示词里再列一遍只会多一个会漂的地方。
+        let protocol = format!(
+            "{}\n{}",
+            self.prompts.core.mechanism, self.prompts.core.chat_protocol
+        );
         let mut disc = Discussion::new(
             members,
             self.allow,
@@ -1157,16 +1149,11 @@ impl CollabSession {
             let disc_lines = all_lines[start..].to_vec();
             let (members, _) = s.assemble_members()?;
             let llm = s.llm_opts();
-            let protocol = match s.prompts.systools.render_face("discussant") {
-                Ok(face) => format!(
-                    "{}\n{}\n{}",
-                    s.prompts.core.mechanism, s.prompts.core.chat_protocol, face
-                ),
-                Err(_) => format!(
-                    "{}\n{}",
-                    s.prompts.core.mechanism, s.prompts.core.chat_protocol
-                ),
-            };
+            // 恢复时与实时同一句：只有机制与约定，工具面随回合注入（见 tools_block）。
+            let protocol = format!(
+                "{}\n{}",
+                s.prompts.core.mechanism, s.prompts.core.chat_protocol
+            );
 
             let mut disc = Discussion::new(
                 members,

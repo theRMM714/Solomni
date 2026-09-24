@@ -60,25 +60,6 @@ impl SystemTools {
         Ok(out)
     }
 
-    /// 按角色渲染**可用表态清单**（信封模式要把它写进提示词；原生模式则由工具声明直接给出）。
-    ///
-    /// 为什么由声明渲染而不是在提示词里另写一遍：提示词与工具面分开写必然漂——
-    /// "提示词说能用 agree、工具面里没给"这种错会很难查。
-    pub fn render_face(&self, role: &str) -> Result<String, String> {
-        let face = self.tool_face(role)?;
-        let mut out = String::new();
-        for (id, schema) in face {
-            out.push_str("- ");
-            out.push_str(id);
-            if !schema.desc.is_empty() {
-                out.push('：');
-                out.push_str(&schema.desc);
-            }
-            out.push('\n');
-        }
-        Ok(out.trim_end().to_string())
-    }
-
     /// 这个身份能不能用它自己模块的工具（论据：角色表的 module_tools）。
     pub fn allows_module_tools(&self, role: &str) -> bool {
         self.roles
