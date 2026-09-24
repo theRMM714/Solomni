@@ -810,6 +810,28 @@ fn replay_probe_passes_every_shape_through_verbatim() {
     assert!(text.contains("假能力面"), "{}", text);
 }
 
+/// 事件台的 `sid` 过滤要**解百分号**：会话名常带中文（`<工作>--<agent>`，节点与讨论都用这个名字），
+/// 不解回来就永远匹配不到任何事件——长轮询只能干等到超时，客户端拿到空批。
+#[test]
+fn events_sid_filter_decodes_percent_escapes() {
+    let ops = fake_ops(None);
+    ops.events.seed_for_test("工作--甲");
+    // 「工作--甲」的 encodeURIComponent 结果（前端就是这么发的）。
+    let encoded = "%E5%B7%A5%E4%BD%9C--%E7%94%B2";
+    let (code, text) = call(
+        &ops,
+        "GET",
+        &format!("/api/events?sid={}&since=0", encoded),
+        "",
+    );
+    assert_eq!(code, 200, "{}", text);
+    assert!(
+        text.contains("工作--甲"),
+        "编码过的 sid 要解回原文才能过滤到事件：{}",
+        text
+    );
+}
+
 #[test]
 fn success_shapes_are_pinned_per_route() {
     let ops = fake_ops(None);

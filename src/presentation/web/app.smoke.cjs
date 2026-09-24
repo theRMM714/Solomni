@@ -8,6 +8,10 @@ const path = require("path");
 const vm = require("vm");
 const alerts = [];
 const loadErrors = [];
+let eventPolls = 0;
+// 应用侧异常一律走 console.error（app.js 的 eventError）：这里记下来，当成硬失败。
+// 为什么必须有它：连接状态已经不看应用异常了，没有这一条，"渲染里抛异常"就会悄悄溜过去。
+const consoleErrors = [];
 function el() {
   const node = {
     textContent: "", innerHTML: "", value: "", className: "", dataset: {},
@@ -20,17 +24,54 @@ function el() {
   return node;
 }
 // notice/confirmBox 要能跑起来：桩一个最小 DOM（含 #notice-root）。
+// 选择器结果**按选择器记忆**：setConn 写过的元素要能读回来（否则测不出"状态点被误置红"）。
 const noticeRoot = el();
+const els = new Map();
 const sandbox = {
-  document: { querySelector: (s) => (s === "#notice-root" ? noticeRoot : el()), createElement: () => el(), addEventListener() {} },
+  document: {
+    querySelector: (s) => {
+      if (s === "#notice-root") return noticeRoot;
+      if (!els.has(s)) els.set(s, el());
+      return els.get(s);
+    },
+    createElement: () => el(),
+    addEventListener() {},
+  },
   // 原生弹窗是红线：换自研弹窗之后，这里被调用一次就算失败。
   alert: (m) => alerts.push(m),
   confirm: (m) => { alerts.push(m); return true; },
-  console, JSON, Promise, Map, Set, Error, Object, Array, String, Number, Boolean, Math, Date,
+  console: {
+    log: console.log,
+    warn: console.warn,
+    error: (...a) => { consoleErrors.push(a.map((x) => String((x && x.stack) || x)).join(" ")); console.error(...a); },
+  },
+  JSON, Promise, Map, Set, Error, Object, Array, String, Number, Boolean, Math, Date,
   setTimeout, clearTimeout,
   fetch: async (url) => {
-    if (String(url).indexOf("/api/state") === 0) {
-      return { ok: true, json: async () => ({ modules: [{ id: "research", brief: "调研" }], providers: [], rejected: ["broken-mod"] }) };
+    const u = String(url);
+    if (u.indexOf("/api/state") === 0) {
+      return {
+        ok: true,
+        json: async () => ({
+          modules: [{ id: "research", brief: "调研" }],
+          providers: [], rejected: ["broken-mod"], agents: [], history: [],
+          settings: { streaming: true, show_reasoning: true, llm_timeout_secs: 300, discuss_remind_cap: 3, compact_at_percent: 70 },
+        }),
+      };
+    }
+    if (u.indexOf("/api/events") === 0) {
+      eventPolls += 1;
+      if (eventPolls === 1) {
+        // 一批**定稿**事件：轮询要能应用它，并且仍然显示"已连接"。
+        return {
+          ok: true,
+          json: async () => ({
+            lines: [{ seq: 1, sid: "smoke-w", events: [{ type: "transcript", lines: [{ id: 0, line: "[甲:say] 完整一句" }] }] }],
+            head: 1, oldest: 0,
+          }),
+        };
+      }
+      return new Promise(() => {}); // 长轮询挂着等新事件（不空转）
     }
     throw new Error("poll-not-stubbed");
   },
@@ -82,10 +123,39 @@ setTimeout(() => {
       identityKept = String(p.who).indexOf("资料手 · agree") >= 0 && strict.children.indexOf(who) >= 0;
     } catch (e) { loadErrors.push("身份标题检查失败：" + e.message); }
   }
-  const ok = alerts.length === 0 && loadErrors.length === 0 && rendered && tierWarned && identityKept;
+  // **轮询取到事件后状态点必须是"已连接"**：这条钉住一个真实缺陷——轮询的状态刷新分支调了
+  // 一个作用域外的函数（agent 登记弹窗内部的 renderList），每轮都抛 ReferenceError，
+  // 被同一个 catch 当成"断线"，状态点因此一直红着，而服务其实好好的。
+  let pollConn = "";
+  let pollApplied = false;
+  if (!loadErrors.length) {
+    try {
+      pollConn = String(els.get("#conn-text").textContent || "");
+      pollApplied = vm.runInNewContext("(state.sessions.get('smoke-w') || { lines: [] }).lines.length", sandbox) > 0;
+    } catch (e) { loadErrors.push("轮询检查失败：" + e.message); }
+  }
+  // **权威行到达后流式块必须被替换**：否则那一行会一直挂着闪烁光标（"已落盘的还在流式"）。
+  let liveReplaced = false;
+  if (!loadErrors.length) {
+    try {
+      const r = vm.runInNewContext(
+        "(function () { const s = { sid: 'x', lines: [], live: [], fold: {}, scroll: {} };" +
+          "absorb(s, { type: 'delta', kind: 'text', speaker: '甲', text: '半截' }); const afterDelta = s.live.length;" +
+          "absorb(s, { type: 'transcript', lines: [{ id: 1, line: '[甲:say] 完整一句' }] });" +
+          "return { afterDelta: afterDelta, afterTranscript: s.live.length, lines: s.lines.length }; })()",
+        sandbox
+      );
+      liveReplaced = r.afterDelta === 1 && r.afterTranscript === 0 && r.lines === 1;
+      if (!liveReplaced) loadErrors.push("流式替换检查：delta 后 live=" + r.afterDelta + "、定稿后 live=" + r.afterTranscript + "、行数=" + r.lines);
+    } catch (e) { loadErrors.push("流式替换检查失败：" + e.message); }
+  }
+  const ok = alerts.length === 0 && loadErrors.length === 0 && rendered && tierWarned && identityKept
+    && pollConn === "已连接" && pollApplied && liveReplaced && consoleErrors.length === 0;
   if (!ok) {
     console.log("alerts（原生弹窗被调用的次数，应为 0）:", JSON.stringify(alerts));
     console.log("notice 渲染:", rendered, "| 虚拟机档不可用提示:", tierWarned, "| 身份标题保留:", identityKept);
+    console.log("轮询状态点:", JSON.stringify(pollConn), "| 事件已应用:", pollApplied, "| 流式被替换:", liveReplaced);
+    console.log("应用侧 console.error:", JSON.stringify(consoleErrors.slice(0, 3)));
     console.log("loadErrors:", JSON.stringify(loadErrors));
   }
   console.log(ok ? "FRONTEND-INIT-OK" : "FRONTEND-INIT-FAIL");

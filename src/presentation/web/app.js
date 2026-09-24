@@ -2567,11 +2567,22 @@ async function pollLoop() {
   if (pollActive) return;
   pollActive = true;
   while (true) {
+    // ① 取事件：**只有这一步失败才算断线**（服务没起来 / 连接断了）。
+    let data;
     try {
       const r = await fetch('/api/events?sid=&since=' + pollSince);
       if (!r.ok) throw new Error('轮询失败 ' + r.status);
-      const data = await r.json();
-      setConn(true);
+      data = await r.json();
+    } catch (err) {
+      setConn(false, err);
+      await new Promise((res) => setTimeout(res, 3000));
+      continue;
+    }
+    setConn(true);
+    // ② 应用事件：出错是**界面自己的问题**，不能说成断线（连接明明好着），也不能吞掉。
+    // 为什么必须分开：渲染里的一个异常曾被当成"网络断了"，于是状态点一直红着、
+    // 而真正的异常连一行日志都没有——用户只看到"重连中"，服务其实好好的。
+    try {
       const head = data.head != null ? data.head : pollSince;
       const oldest = typeof data.oldest === 'number' ? data.oldest : 0;
       // 事件台裁剪过：since 之后有一段**永久丢了**。按 seq 干等会让后续批次全部滞留
@@ -2598,22 +2609,36 @@ async function pollLoop() {
       if (needState || Date.now() - lastStateAt > 3000) {
         needState = false;
         lastStateAt = Date.now();
+        // refreshState 自己会把侧栏与历史重画；agent 登记弹窗里的列表归那个弹窗自己管。
+        // refreshState 自己会把侧栏与历史重画；agent 登记弹窗里的列表归那个弹窗自己管。
+        // 曾经这里调了弹窗内部的 `renderList`——那个名字在顶层作用域根本不存在，
+        // 于是每次刷新都抛一次 ReferenceError，被轮询的 catch 当成"断线"，状态点一直红着。
         await refreshState();
-        renderList();
       }
       // 纯流式增量：只 append 新节点（折叠、<pre> 滚动、外层滚动都不被打断）。
       if (mode === 'full') renderAll();
       else if (mode === 'live') renderLiveTick(activeSession());
       // 有会话动作在等回包时，让动作回包自己刷新 pending；轮询只补漏。
-    } catch {
-      setConn(false);
-      await new Promise((res) => setTimeout(res, 3000));
+    } catch (err) {
+      eventError(err);
     }
   }
 }
-function setConn(ok) {
+function setConn(ok, err) {
   $('#conn-state .dot').className = 'dot ' + (ok ? 'dot-ok' : 'dot-bad');
   $('#conn-text').textContent = ok ? '已连接' : '重连中…';
+  if (!ok) console.warn('事件流连接失败：', err || '');
+}
+
+/// 事件应用/渲染出错：**不是断线**（连接好着，是界面自己没处理对）。
+/// 同一个错只弹一次（否则每 3 秒一次会刷屏），但绝不静默吞掉——先落控制台，再如实告诉用户。
+let lastEventError = '';
+function eventError(err) {
+  console.error('事件处理出错：', err);
+  const msg = String((err && err.message) || err);
+  if (msg === lastEventError) return;
+  lastEventError = msg;
+  try { notice('界面处理事件出错', msg, 'err'); } catch { /* 弹窗本身出问题就只剩控制台 */ }
 }
 
 /* ---------- 抽屉（移动端） ---------- */

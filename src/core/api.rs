@@ -420,6 +420,13 @@ impl CoreHandle {
         };
         // 取消标志在**派发时**就登记：生成一开始「停止」就能生效（它本来就不进队列）。
         let cancel = jobs.register(sid);
+        // **运行态**：这条会话开始干活，推给它自己的事件台——节点执行、单 agent 发言、继续都走这里，
+        // 打开它的标签页要立刻看到占位与「停止」按钮，而不是等 3 秒的状态轮询。
+        // 它和收尾那条都算这一批事实：事件台里有什么，回包（Advance.events）就有什么。
+        let start_working = SessionEvent::Working {
+            agent: Some(session.params().agent.clone()),
+        };
+        bus.push(sid, std::slice::from_ref(&start_working));
         // ② 工作线程：跑生成。短暂事件（流式增量 / 工具行）直送事件台——它是独立锁，不进核心队列。
         let worker = {
             let sid = sid.to_string();
@@ -467,7 +474,11 @@ impl CoreHandle {
         //    **所有状态变更仍只发生在核心线程上**：工作线程只跑生成，不碰核心状态。
         let joined = worker.join();
         jobs.unregister(sid);
-        let (session, events, seq) = match joined {
+        // 运行态收尾：不管这一回合是跑完、崩了还是被用户停掉，都不再"在跑"。
+        // seq 取**最后一批**（收尾这条）的序号：客户端按它去重（与逐轮外送同源）。
+        let end_working = SessionEvent::Working { agent: None };
+        let seq = bus.push(sid, std::slice::from_ref(&end_working));
+        let (session, mut events, _worker_seq) = match joined {
             Ok(x) => x,
             Err(_) => {
                 // 线程崩了：会话对象随线程没了，但**转录在盘上**——解除"生成中"，
@@ -482,7 +493,10 @@ impl CoreHandle {
                 return Err("生成线程崩溃：会话已按落盘转录保留，可继续".to_string());
             }
         };
-        // 事件已由上面的 sink 逐轮入台（不再整批补推，否则同一批事实在台上有两份）。
+        // 事件已由上面的 sink 逐轮入台（不再整批补推，否则同一批事实在台上有两份）；
+        // 这里只把起止两条运行态补进**本次回包**——它们确实也进了事件台，回包因此与事件台同源。
+        events.insert(0, start_working);
+        events.push(end_working);
         // 交回核心只做"重新插入"：转录也已逐轮增量落盘。
         let parent = self.call({
             let sid = sid.to_string();
@@ -524,8 +538,10 @@ impl CoreHandle {
         let agent = req.agent.clone();
         let _ = &turn;
         // 这一回合的**短暂事件**（流式增量、越权提醒）按**子会话**的 sid 外送：
-        // 打开那个 agent 的会话就能看到它逐字在说；回合定稿的行由调用方落盘（不走这里）。
+        // 打开那个 agent 的会话就能看到它逐字在说。
         let bus = Arc::clone(&self.bus);
+        // 子会话自己的**权威行**与**运行态收尾**同样走它自己的事件台（见这一回合的收尾处）。
+        let child_bus = Arc::clone(&self.bus);
         let child_sid = child.clone();
         let joined = std::thread::Builder::new()
             .name("solomni-member".to_string())
@@ -593,6 +609,16 @@ impl CoreHandle {
             None => "未表态",
         };
         let note = s.note_turn(req.round, req.turn_id, tag, &turn.text, &turn.lines);
+        // **权威行也要推子会话自己的事件台**（不只是落盘）：打开它的标签页时，
+        // 流式块必须有这一行来替换——否则"已落盘的正文"会一直挂着闪烁光标、看着像还在流式
+        // （真机反馈：主会话已经是定稿行，子会话却停在流式态）。
+        child_bus.push(&child, &note);
+        // 运行态收尾：主会话有 working{None}，子会话也要有——它的"有增量=在跑"才清得掉，
+        // 否则那个标签页永远显示"正在工作"、按钮永远停在「停止」。
+        child_bus.push(
+            &child,
+            &[crate::core::events::SessionEvent::Working { agent: None }],
+        );
         self.call({
             let name = child.clone();
             move |core| {
@@ -807,6 +833,14 @@ impl CoreHandle {
                             // 主会话据此显示"某某正在工作"（按钮切换与占位动画都读它）。
                             bus.push(
                                 &sid,
+                                &[crate::core::events::SessionEvent::Working {
+                                    agent: Some(agent_name.clone()),
+                                }],
+                            );
+                            // **它自己的标签页同样要进"在跑"**：不然打开它只会看到上一次的运行态
+                            // （或者按钮一直停在「停止」）。收尾那条在成员回合的收尾处推。
+                            bus.push(
+                                &format!("{}--{}", sid, agent_name),
                                 &[crate::core::events::SessionEvent::Working {
                                     agent: Some(agent_name.clone()),
                                 }],

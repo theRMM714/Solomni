@@ -272,6 +272,12 @@ async function lines(sid) {
   assert(c2.status === 200, '建协作工作（2 个 agent）', c2.text.slice(0, 200));
   const begin = await api('POST', '/api/sessions/' + encodeURIComponent(name2) + '/begin', { text: 'yes,allow' });
   assert(begin.status === 200, '确认开始讨论', begin.text.slice(0, 200));
+  // 子会话的**事件台**要有它自己的权威行与运行态（不能只落在盘上）：否则打开它的标签页，
+  // 流式块永远等不到替换它的那一行——光标一直挂着、按钮永远停在「停止」（真机反馈过）。
+  const childBus = await api('GET', '/api/events?sid=' + encodeURIComponent(name2 + '--甲') + '&since=0');
+  const childJson = JSON.stringify((childBus.json && childBus.json.lines) || []);
+  assert(childJson.includes('[甲:say]'), '子会话事件台带它自己的权威发言行', childJson.slice(0, 200));
+  assert(childJson.includes('"working"'), '子会话事件台带运行态（在跑/收尾）', childJson.slice(0, 200));
   // 整理完停在**待审**：点「同意」才开工；开工后节点在子会话里跑，交付是异步产生的。
   await approvePlan(name2);
   const ev2 = JSON.stringify(

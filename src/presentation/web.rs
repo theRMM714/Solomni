@@ -207,7 +207,9 @@ pub(crate) fn route(
             for pair in q.split('&') {
                 let mut kv = pair.splitn(2, '=');
                 match (kv.next(), kv.next()) {
-                    (Some("sid"), Some(v)) if !v.is_empty() => sid = Some(v.to_string()),
+                    // 查询参数和路径段一样是百分号编码的：会话名常带中文（<工作>--<agent>），
+                    // 不解回来就永远匹配不到任何事件（真机 sid 就是中文）。
+                    (Some("sid"), Some(v)) if !v.is_empty() => sid = Some(routes::url_decode(v)),
                     (Some("since"), v) => {
                         since = v.and_then(|x| x.parse::<u64>().ok()).unwrap_or(0)
                     }
