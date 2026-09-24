@@ -1702,7 +1702,7 @@ impl Round {
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn converse_with(
     chat: &mut dyn Chat,
-    tools: Option<&mut MemberTools>,
+    mut tools: Option<&mut MemberTools>,
     identity: &str,
     dialogue: Vec<Msg>,
     llm: crate::core::ports::LlmOpts,
@@ -1725,7 +1725,6 @@ pub(crate) fn converse_with(
         &dialogue,
         &[],
     );
-    let mut tools = tools;
     // 观察账本随会话保存（回档时清空），这里不动它——它的语义是"这一段转录里的读取证据"。
     let mut rounds: Vec<Round> = Vec::new();
     // 逐轮产出：**一轮跑完就把它交出去**（调用方据此立刻外送与落盘，不必等整个回合结束）。
