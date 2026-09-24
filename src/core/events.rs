@@ -149,6 +149,13 @@ pub struct LineView {
     /// **结构化信号**：呈现层据此换样式，不靠匹配文本——否则系统消息在前端与记录里长得像用户发的。
     #[serde(default, skip_serializing_if = "is_false")]
     pub system: bool,
+    /// 这一行是**核心派给这个 agent 的任务**（派发行）：界面上是系统行（说话人是核心，不冒充用户），
+    /// 上下文里以 **user 角色**转发——派活是一次"回合"，而会话协议要求请求里至少有一条 user 消息
+    /// （一条 user 都没有的请求会被供应商整条拒收，实测）。
+    /// **结构化信号**：重建/回放据此产出发出去的那**同一条消息**，不靠匹配文本。
+    /// 见 docs/architecture/session-model.md 二"系统消息"与四之二"节点执行只有一条管道"。
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub task: bool,
     /// 这一行属于哪个**回合**（讨论的一次发言回合；0 = 不属任何回合，如需求/用户行）。
     /// 两边的转录行靠它对齐：回档主会话时，各 agent 会话按同一个回合 id 同步截断
     /// （见 docs/architecture/session-model.md 五）。

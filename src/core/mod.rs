@@ -558,7 +558,7 @@ impl Core {
     /// **同步**跑一个节点的子会话（CLI 与测试走这条；Web 生产路径由 CoreHandle 起工作线程）。
     fn drive_node(&mut self, child: &str, objective: &str) -> Vec<SessionEvent> {
         self.bump_turn_of_child(child);
-        match self.prepare_single(child, Some(objective), false) {
+        match self.prepare_single(child, Some(objective), true) {
             Ok(Prepared::Run {
                 session,
                 prefix,
@@ -576,11 +576,11 @@ impl Core {
                         emit: &mut |ev: SessionEvent| out.borrow_mut().push(ev),
                     };
                     let mut sink = |ev: SessionEvent| out.borrow_mut().push(ev);
-                    // 执行提示词是**核心注入的系统消息**，不是用户发言（不得借用 say）。
+                    // 执行提示词是**核心派的活**（派发行）：界面系统行、上下文 user 角色。
                     let identity = session
                         .params()
                         .identity(&self.prompts, session.tool_mode());
-                    session.inject_system(objective, &identity, &mut live, &mut sink);
+                    session.dispatch_task(objective, &identity, &mut live, &mut sink);
                 }
                 let events = out.into_inner();
                 self.put_single_recorded(child, session, &events);
@@ -2211,16 +2211,18 @@ impl Core {
         })
     }
 
-    /// 起一个节点的执行回合（Web 生产路径）：**核心把任务提示词作为系统消息注入**（不是用户发言），
+    /// 起一个节点的执行回合（Web 生产路径）：**核心注入派发任务**（界面系统行、上下文 user 角色），
     /// 再把会话交给工作线程继续生成。CLI 的 `drive_node` 与本条是同一条语义——
-    /// 各前端只做各自的界面，节点派发只有这一条管道（此前 Web 走 `prepare_single(Some(任务))`，
-    /// 把核心的任务提示词当成了**用户发言**，界面上也显示成"用户"）。
+    /// 各前端只做各自的界面，节点派发只有这一条管道。
+    /// 界面的身份与进上下文的角色是两件事：界面上它是核心说的话（不得显示成"用户"），
+    /// 而上下文里必须有一条 user 回合，否则请求被供应商整条拒收（见 session-model.md 四之二）。
     pub(crate) fn prepare_node(
         &mut self,
         child: &str,
         objective: &str,
     ) -> Result<Prepared, String> {
-        let llm = self.llm_opts(false);
+        // 节点的生成跟随设置里的流式开关（此前写死非流式，节点执行在界面上永远不逐字出）。
+        let llm = self.llm_opts(true);
         self.ensure_session(child)?;
         if matches!(self.sessions.get(child), Some(Session::Collab(_))) {
             return Ok(Prepared::NotSingle);
@@ -2230,8 +2232,9 @@ impl Core {
             prefix.push(SessionEvent::Notice(n));
         }
         let mut session = self.take_single(child)?;
-        // 核心注入：系统角色 + 系统行（与 `inject_system` 同一段记录逻辑，只是不在这里跑模型）。
-        prefix.extend(session.note_system(objective));
+        // 核心注入：派发行（界面系统行、上下文 user 角色），这里只记录、不跑模型——
+        // 生成交给工作线程（与 CLI 的 `drive_node` 同一段语义，见 session-model.md 四之二）。
+        prefix.extend(session.note_task(objective));
         let identity = session
             .params()
             .identity(&self.prompts, session.tool_mode());
@@ -2598,9 +2601,15 @@ impl Core {
                 while i < rows.len() {
                     let l = rows[i];
                     let line = l.get("line").and_then(|x| x.as_str()).unwrap_or("");
-                    // 系统注入的行（提醒、执行提示词这类）在上下文里是 system 角色。
+                    // 系统注入的行按它该有的角色还原：提醒/边界是 system，
+                    // **派发行**（`task`）是 user——否则重建出来的请求又变成一条 user 都没有，供应商照样拒收。
                     if l.get("system").and_then(|x| x.as_bool()).unwrap_or(false) {
-                        history.push(Msg::system(line.to_string()));
+                        let is_task = l.get("task").and_then(|x| x.as_bool()).unwrap_or(false);
+                        history.push(if is_task {
+                            Msg::user(line.to_string())
+                        } else {
+                            Msg::system(line.to_string())
+                        });
                         line_reply.push(l.get("id").and_then(|x| x.as_u64()).unwrap_or(0));
                         marks.push(history.len());
                         i += 1;

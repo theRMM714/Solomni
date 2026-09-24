@@ -298,13 +298,30 @@ impl AgentSession {
         Ok(summary)
     }
 
-    /// 注入一条**系统消息**：上下文里是 system 角色，转录里是系统行。
-    /// **系统/核心发的消息不得用用户身份**——无论进上下文还是进界面（见 session-model.md 二"系统消息"）。
+    /// 注入一条**系统消息**（提醒/边界这类"不是用户说的、也不是模型说的"内容）：
+    /// 上下文里是 system 角色，转录里是系统行。
+    /// 它**不得在界面与记录里长得像用户发的**——身份是核心，界面按系统行样式（见 session-model.md 二）。
     pub fn note_system(&mut self, text: &str) -> Vec<SessionEvent> {
         self.dialogue.push(Msg::system(text.to_string()));
         let v = self.line(text.to_string(), None, None);
         vec![SessionEvent::Transcript(vec![LineView {
             system: true,
+            ..v
+        }])]
+    }
+
+    /// 注入一条**派发任务**（核心给这个 agent 派的活，见 session-model.md 四之二）。
+    /// 界面：**系统行**——说话人是核心，不冒充用户；上下文：**user 角色**——派活是一次"回合"，
+    /// 会话协议要求请求里至少有一条 user 消息（全是 system 的请求会被供应商整条拒收）。
+    /// 两处口径随行落档（`system` + `task`），重建/回放才产得出**同一条**消息。
+    pub fn note_task(&mut self, text: &str) -> Vec<SessionEvent> {
+        self.dialogue.push(Msg::user(text.to_string()));
+        // 派发行不属于任何模型回复：给它自己的行号当回复号（与重建规则一致）。
+        self.cur_reply = self.next_line;
+        let v = self.line(text.to_string(), None, None);
+        vec![SessionEvent::Transcript(vec![LineView {
+            system: true,
+            task: true,
             ..v
         }])]
     }
@@ -395,6 +412,7 @@ impl AgentSession {
             tool,
             degraded: false,
             system: false,
+            task: false,
             turn: self.cur_turn,
         };
         self.next_line += 1;
@@ -451,9 +469,9 @@ impl AgentSession {
         self.rounds_events(identity, live, sink);
     }
 
-    /// **系统注入**：上下文里是 system 角色，转录里是系统行，随后正常问模型。
-    /// 系统/核心发的消息一律走这条（不得借用 say——那是用户发言）。
-    pub fn inject_system(
+    /// **派发并跑这一回合**：注入任务（`note_task`）后正常问模型。
+    /// 节点派发只有这一条语义——CLI 与 Web 各自只是"点火"，不各写一套（见 session-model.md 四之二）。
+    pub fn dispatch_task(
         &mut self,
         text: &str,
         identity: &str,
@@ -461,14 +479,9 @@ impl AgentSession {
         sink: &mut dyn FnMut(SessionEvent),
     ) {
         self.maybe_compact(identity, sink);
-        self.dialogue.push(Msg::system(text.to_string()));
-        // 系统行不属于任何模型回复：给它自己的行号当回复号（与重建规则一致）。
-        self.cur_reply = self.next_line;
-        let v = self.line(text.to_string(), None, None);
-        sink(SessionEvent::Transcript(vec![LineView {
-            system: true,
-            ..v
-        }]));
+        for e in self.note_task(text) {
+            sink(e);
+        }
         self.rounds_events(identity, live, sink);
     }
 
@@ -658,6 +671,7 @@ fn build_round_lines(
             tool,
             degraded: false,
             system: false,
+            task: false,
             turn: round.reply, // 单 agent 的每一轮各成"回合"（回档按它对齐）
         }
     };

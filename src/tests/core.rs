@@ -5207,11 +5207,22 @@ pub(crate) fn discussion_turn_streams_deltas_and_never_leaks_the_envelope() {
     );
 }
 
-/// **节点任务是核心注入的系统消息，不是用户发言**：Web 与 CLI 走同一条语义
-/// （此前 Web 把它当用户发言——界面上显示成"用户"，上下文里也成了 user 角色）。
+/// **派发行：界面是系统行，上下文是 user 角色**——Web 与 CLI 走同一条语义。
+/// 界面上它是核心说的话（不得显示成"用户"），但请求里必须有一条 user 消息：
+/// 一条 user 都没有的请求会被供应商**整条拒收**（真机 400）。
+/// 这条同时守住"重建 = 实时"：重启后从落盘转录重建，派发行还得是 user，否则请求又坏掉。
 #[test]
-pub(crate) fn node_task_is_injected_as_a_system_message() {
-    let mut core = core_with(vec![module_of("a")], gw(BTreeMap::new(), vec!["[]".into()]));
+pub(crate) fn node_task_is_a_system_line_but_a_user_message() {
+    let hist = Arc::new(InMemoryHistory::new());
+    let io = Arc::new(InMemorySysIo::new());
+    let mut core = core_with_all(
+        vec![module_of("a")],
+        gw(BTreeMap::new(), vec!["[]".into()]),
+        Arc::new(SilentRunner),
+        Arc::new(FakeCatalog::new(vec!["m".to_string()])),
+        Arc::clone(&hist),
+        Arc::clone(&io),
+    );
     let sid = core
         .create_work(work("w", WorkMode::Single, &["a"]))
         .unwrap()
@@ -5220,28 +5231,52 @@ pub(crate) fn node_task_is_injected_as_a_system_message() {
         .prepare_node(&sid, "== 你的任务 ==\n把事做完")
         .expect("准备节点回合");
     let crate::core::Prepared::Run {
-        session, prefix, ..
+        session,
+        prefix,
+        llm,
+        ..
     } = prepared
     else {
         panic!("节点回合该是可以跑的");
     };
+    // 节点执行跟随设置里的流式开关（此前写死非流式，节点在界面上永远不逐字出）。
+    assert!(llm.stream, "默认设置下节点执行也要流式");
     let dialogue = session.dialogue();
     let last = dialogue.last().expect("注入过任务");
-    assert_eq!(last.role, "system", "节点任务是 system 角色：{:?}", last);
+    assert_eq!(last.role, "user", "派发行进上下文是 user 角色：{:?}", last);
     assert!(last.content.contains("把事做完"), "{}", last.content);
-    assert!(
-        dialogue.iter().all(|m| m.role != "user"),
-        "核心注入不产生用户消息：{:?}",
-        dialogue.iter().map(|m| m.role.clone()).collect::<Vec<_>>()
-    );
     assert!(
         prefix.iter().any(|e| matches!(
             e,
             crate::core::events::SessionEvent::Transcript(lines)
-                if lines.iter().any(|l| l.system && l.line.contains("把事做完"))
+                if lines.iter().any(|l| l.system && l.task && l.line.contains("把事做完"))
         )),
-        "转录行要带 system 标记（界面据此不显示成用户）"
+        "转录行要带 system + task 标记（界面是系统行，不是用户行）"
     );
+    // 唯一装配点发出去的请求里至少有一条 user 消息（协议要求）。
+    let msgs = crate::core::engine::assemble("身份", None, &[], false, session.dialogue(), &[]);
+    assert!(
+        msgs.iter().any(|m| m.role == "user"),
+        "请求里必须有 user 消息：{:?}",
+        msgs.iter().map(|m| m.role.clone()).collect::<Vec<_>>()
+    );
+    // 重建 = 实时：重启后从落盘流水重建，最后这条还得是同一条 user 消息。
+    core.put_single_recorded(&sid, *session, &prefix);
+    drop(core);
+    let mut core2 = core_with_all(
+        vec![module_of("a")],
+        gw(BTreeMap::new(), vec!["[]".into()]),
+        Arc::new(SilentRunner),
+        Arc::new(FakeCatalog::new(vec!["m".to_string()])),
+        Arc::clone(&hist),
+        Arc::clone(&io),
+    );
+    // keep_id = MAX：不截断，只为触发"按落盘转录重建"。
+    core2.rewind(&sid, u64::MAX).expect("回档即重建");
+    let rebuilt = core2.single_history(&sid).expect("重建后应在内存里");
+    let tail = rebuilt.last().expect("重建后仍有任务行");
+    assert_eq!(tail.role, "user", "重建后派发行仍是 user 角色：{:?}", tail);
+    assert!(tail.content.contains("把事做完"), "{}", tail.content);
 }
 
 /// **改形态不必重建会话**：会话里存的是**参数**（`SessionParams`），身份块每次调用现渲染。
