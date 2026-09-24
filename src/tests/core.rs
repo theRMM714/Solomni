@@ -2632,6 +2632,8 @@ pub(crate) fn member_with_tools(
         reply_seq: 0,
         // 测试替身按"执行席"发放全部内置工具（角色表的越权校验另有专门用例）。
         allowed: crate::core::systool::names(),
+        with_modules: true,
+        notes: crate::tests::doubles::test_notes(&test_sandbox("m0", &[]), &[]),
     });
     m
 }
@@ -2673,11 +2675,12 @@ pub(crate) fn same_named_tools_in_two_modules_run_in_their_own_root() {
         .create_work(work("w", WorkMode::Single, &["a", "b"]))
         .unwrap()
         .sid;
-    // 提示词里的工具清单按模块分组，模型照此写 module。
+    // 模块工具清单**不在系统提示里**（随回合注入）：分组形态由
+    // module_tool_params_are_declared_in_the_manifest_and_enforced_by_core 盯。
     let h = core.single_history(&sid).unwrap();
     assert!(
-        h[0].content.contains("- a：read_txt") && h[0].content.contains("- b：read_txt"),
-        "清单要按模块分组：{}",
+        !h[0].content.contains("read_txt"),
+        "系统提示里不许出现工具清单：{}",
         h[0].content
     );
     let events = with_live(|l| core.single_say(&sid, "干活", l)).unwrap();
@@ -4026,15 +4029,44 @@ pub(crate) fn module_tool_params_are_declared_in_the_manifest_and_enforced_by_co
         "工具说明",
         crate::core::providers::ToolMode::Envelope,
     );
+    // 模块工具清单与参数**不进系统提示**：随回合注入（能不能用模块工具由角色表的 module_tools 决定）。
     assert!(
-        system.contains("【模块工具参数】"),
-        "系统提示要有参数段：{}",
+        !system.contains("【模块工具参数】"),
+        "系统提示里不许出现模块工具清单：{}",
         system
     );
+    let notes = crate::tests::doubles::test_notes(
+        &test_sandbox("m0", &["m0"]),
+        std::slice::from_ref(&mod_m0),
+    );
     assert!(
-        system.contains("- m0.grep") && system.contains("keyword（string，必填）"),
-        "{}",
-        system
+        notes.module_tool_params.contains("【模块工具参数】")
+            && notes.module_tools.contains("- m0：grep"),
+        "模块工具说明由装配期算好、随回合注入：{:?}",
+        notes
+    );
+    assert!(
+        notes.module_tool_params.contains("keyword（string，必填）"),
+        "{:?}",
+        notes
+    );
+    // 跨模块**同名**工具：清单按模块分组（模型照此写信封里的 module）。
+    let mut mod_a = module_of("a");
+    mod_a
+        .manifest
+        .tools
+        .insert("read_txt".to_string(), decl("python tools/read_txt.py"));
+    let mut mod_b = module_of("b");
+    mod_b
+        .manifest
+        .tools
+        .insert("read_txt".to_string(), decl("python tools/read_txt.py"));
+    let pair =
+        crate::tests::doubles::test_notes(&test_sandbox("组合", &["a", "b"]), &[mod_a, mod_b]);
+    assert!(
+        pair.module_tools.contains("- a：read_txt") && pair.module_tools.contains("- b：read_txt"),
+        "清单要按模块分组：{}",
+        pair.module_tools
     );
 
     let table = crate::core::engine::tool_table(std::slice::from_ref(&mod_m0));
@@ -4401,10 +4433,10 @@ pub(crate) fn agent_system_carries_the_real_roots() {
         "system 要含模块目录真实根：{}",
         system
     );
-    // 示例必须用真实根拼
+    // 路径写法要用真实根拼（模型照抄它）
     assert!(
-        system.contains(&format!("\"path\":\"{}/note.txt\"", s(&["w", "work"]))),
-        "示例要用真实根拼路径：{}",
+        system.contains(&format!("{}/note.txt", s(&["w", "work"]))),
+        "路径写法要用真实根拼：{}",
         system
     );
     // 护栏：提示词里不得出现任何解析不了的路径写法（模型会照抄它）
@@ -5068,8 +5100,67 @@ pub(crate) fn native_member(
         reply_seq: 0,
         // 测试替身按"执行席"发放全部内置工具（角色表的越权校验另有专门用例）。
         allowed: crate::core::systool::names(),
+        with_modules: true,
+        notes: crate::tests::doubles::test_notes(&sb, &[]),
     });
     m
+}
+
+/// **总表不进提示词**：模型只看到"这一回合能用的工具"那一块；没拿到的不出现——
+/// 提示词块与原生声明槽用的是**同一份 allowed**（两处一起收口，不然就是列了必然被拒的）。
+#[test]
+pub(crate) fn only_this_turns_tools_are_advertised() {
+    let io = Arc::new(InMemorySysIo::new());
+    let declared = Arc::new(Mutex::new(Vec::new()));
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let mut m = native_member("a", io, vec![], Arc::clone(&declared), Arc::clone(&seen));
+    let prompts = test_prompts();
+    let _ = run_execution(std::slice::from_mut(&mut m), "任务", &prompts);
+    {
+        let log = seen.lock().expect("锁");
+        let systems: Vec<&str> = log[0]
+            .iter()
+            .filter(|x| x.role == "system")
+            .map(|x| x.content.as_str())
+            .collect();
+        assert_eq!(systems.len(), 2, "身份 + 本回合工具块：{:?}", systems);
+        assert!(
+            !systems[0].contains("【本回合可用的工具】") && !systems[0].contains("offset（integer"),
+            "系统身份里不许出现工具清单：{}",
+            systems[0]
+        );
+        assert!(
+            systems[1].contains("【本回合可用的工具】"),
+            "工具块随回合注入：{}",
+            systems[1]
+        );
+    }
+    // 换成"只拿到 read"的席位：提示词块与声明槽同时收口。
+    m.tools.as_mut().expect("工具环境").allowed = vec!["read".to_string()];
+    let _ = run_execution(std::slice::from_mut(&mut m), "任务", &prompts);
+    let log = seen.lock().expect("锁");
+    let block = log[1]
+        .iter()
+        .find(|x| x.role == "system" && x.content.contains("【本回合可用的工具】"))
+        .expect("工具块");
+    assert!(
+        block.content.contains("- path（string，必填）"),
+        "{}",
+        block.content
+    );
+    assert!(
+        !block.content.contains("patch") && !block.content.contains("submit_report"),
+        "没拿到的工具不进工具块：{}",
+        block.content
+    );
+    let decls = declared.lock().expect("锁");
+    let names: Vec<&str> = decls[1].iter().map(|(n, _)| n.as_str()).collect();
+    assert_eq!(
+        names,
+        vec!["read"],
+        "声明槽与 allowed 同一份判据：{:?}",
+        names
+    );
 }
 
 #[test]
@@ -5937,27 +6028,49 @@ pub(crate) fn builtin_tool_book_is_the_one_source_of_names_and_paths() {
             name
         );
     }
-    // 模型侧说明来自同一份声明
+    // 工作环境块：**只有路径与规矩，没有工具清单**（总表只留在核心手里当判据）。
     let sb = test_sandbox("a1", &[]);
-    let guide = crate::core::systool::guide(&prompts, &sb);
-    assert!(guide.contains("【工具参数】"), "{}", guide);
+    let env = crate::core::systool::env_block(&prompts, &sb);
+    assert!(env.contains("【工作环境】"), "{}", env);
     assert!(
-        guide.contains("- offset（integer，缺省 1，不小于 1）"),
+        !env.contains("【工具参数】") && !env.contains("offset（integer"),
+        "系统提示里不许出现工具清单：{}",
+        env
+    );
+
+    // 工具说明来自同一份声明，但**按回合注入**：核心查这一回合的身份，只渲染它那一份。
+    let m = member_with_tools("a1", vec![], Arc::new(SilentRunner));
+    let block = m
+        .tools
+        .as_ref()
+        .expect("工具环境")
+        .tools_block(&crate::core::systool::names(), true);
+    assert!(block.contains("【本回合可用的工具】"), "{}", block);
+    assert!(
+        block.contains("- offset（integer，缺省 1，不小于 1）"),
         "{}",
-        guide
+        block
     );
     assert!(
-        guide.contains("- ignore_case（boolean）：是否忽略大小写；省略即区分大小写"),
+        block.contains("- ignore_case（boolean）：是否忽略大小写；省略即区分大小写"),
         "{}",
-        guide
+        block
     );
-    // patch 的写法说明也进系统提示（自由格式：正文不走 JSON）
-    assert!(guide.contains("【改文件：用 patch"), "{}", guide);
+    // patch 的写法说明跟着它一起注入（自由格式：正文不走 JSON）
+    assert!(block.contains("【改文件：用 patch"), "{}", block);
     assert!(
-        guide.contains("*** End File"),
+        block.contains("*** End File"),
         "每块要收尾这件事必须写清楚：{}",
-        guide
+        block
     );
+    // 没有拿到的工具**不进**这个块（这是"总表不进提示词"的正面表述）。
+    let only_read = m
+        .tools
+        .as_ref()
+        .expect("工具环境")
+        .tools_block(&["read".to_string()], false);
+    assert!(only_read.contains("- offset（integer"), "{}", only_read);
+    assert!(!only_read.contains("patch"), "{}", only_read);
 }
 
 #[test]

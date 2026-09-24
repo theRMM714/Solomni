@@ -976,19 +976,21 @@ impl CollabSession {
             let sandbox = self.sandboxes.for_agent(&a.name).cloned().ok_or_else(|| {
                 format!("agent {} 没有被分配沙箱（工作区未记录该 agent）", a.name)
             })?;
-            let guide = crate::core::systool::guide(&prompts, &sandbox);
+            let env = crate::core::systool::env_block(&prompts, &sandbox);
             // 形态按该 agent 的模型（或核心默认）解析：系统提示与实际协议必须一致
             let mode = if channel.is_some() {
                 self.settings.tool_mode_for(a.model.as_deref())
             } else {
                 crate::core::providers::ToolMode::Envelope
             };
-            let system = module::agent_system(&prompts, &a.name, &modules, &guide, mode);
+            let system = module::agent_system(&prompts, &a.name, &modules, &env, mode);
             let mut member = Member::plain(&a.name, system);
             // 围栏：可达范围 + 断网，由该 agent 的沙箱与 exec 段派生（机制在 adapters）；
             // 只读根来自用户显式授权（`fence_read`），默认空。
             let fence = crate::core::fence::FenceSpec::from_sandbox(&sandbox, self.spec.net)
                 .with_read_only(read_only_roots(&self.settings.app));
+            // 工具说明块的素材（patch 语法 / 模块工具 / 模块参数）：装配期按这个 agent 的沙箱与模块算一次。
+            let notes = crate::core::systool::tool_notes(&prompts, &sandbox, &modules);
             member.tools = Some(MemberTools {
                 mode,
                 // 模块 id → 该模块的（目录, 工具表）：多模块 agent 靠信封里的 module 消歧。
@@ -1010,6 +1012,9 @@ impl CollabSession {
                     .tool_face("discussant")
                     .map(|f| f.into_iter().map(|(id, _)| id.to_string()).collect())
                     .unwrap_or_default(),
+                // 讨论席不干活：拿不到自己模块的工具（角色表的 module_tools）。
+                with_modules: self.prompts.systools.allows_module_tools("discussant"),
+                notes,
             });
             members.push(member);
         }

@@ -431,6 +431,14 @@ pub(crate) fn test_sandbox(agent: &str, modules: &[&str]) -> crate::core::worksp
     }
 }
 
+/// 测试用工具说明块素材（patch 语法 + 给定的模块工具）。
+pub(crate) fn test_notes(
+    sb: &crate::core::workspace::Sandbox,
+    modules: &[crate::core::module::Module],
+) -> crate::core::systool::ToolNotes {
+    crate::core::systool::tool_notes(&test_prompts(), sb, modules)
+}
+
 /// 内存会话历史：供测试断言落盘与回放。
 pub(crate) struct InMemoryHistory {
     metas: Mutex<BTreeMap<String, SessionMeta>>,

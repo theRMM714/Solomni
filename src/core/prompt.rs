@@ -102,8 +102,9 @@ pub struct CorePrompts {
     pub tool_calling_native: String,
     /// 工具与路径相关的**模型侧文案**（回执、失败说明、清单行）；改文案只改册子。
     pub tool_texts: ToolTexts,
-    /// 内置文件工具说明块；变量：work_name, agent, work_root, sandbox_root, module_roots, tool_params, patch_guide
-    pub sys_tools: String,
+    /// **工作环境块**：真实根目录与路径规矩。变量：work_name, agent, work_root, sandbox_root, module_roots。
+    /// 这里**不列工具**——能用哪些工具由核心按这一回合的身份从角色表现渲染、随回合注入。
+    pub env: String,
     /// patch 通道的写法说明（模型侧）；变量：work_root, sandbox_root
     pub patch_guide: String,
     /// 内置工具的参数契约：模型说明与调用校验的唯一来源。
@@ -172,6 +173,8 @@ pub struct ToolTexts {
     pub unknown_builtin: String,
     /// 变量：name
     pub tool_not_allowed: String,
+    /// 本回合可用工具块的标题行；变量：tools（由核心按该回合的角色表现渲染）。
+    pub tools_this_turn: String,
     /// 压缩回合的提示词（无变量）：让 AI 自己压，并调 compact 工具写下摘要。
     pub compact_prompt: String,
     /// 轮次边界给"上一轮没表态"的成员的提醒（无变量）。
@@ -496,7 +499,7 @@ pub struct SuggestPrompts {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct AgentPrompts {
-    /// system 变量：agent, modules, sys_tools, module_tools, module_tool_params
+    /// system 变量：agent, modules, mechanism, env, tool_calling
     pub system: String,
 }
 

@@ -95,8 +95,8 @@ presentation ──▶ core ◀── adapters
 | | `rerun.user` | 返工 |
 | | `slate.system` / `slate.user` | 代拟名单 |
 | | `suggest_models.*` | 模型推荐（单 agent / 协作两种说法） |
-| | `agent.system` | agent 职责提示词骨架（模块 `system` 合成 + 内置工具说明 + 外部工具清单 + 模块工具参数段） |
-| | `sys_tools` | 内置工具说明块（含本 agent 的真实根目录、模块目录、`{{tool_params}}` 参数签名与 `{{patch_guide}}`） |
+| | `agent.system` | agent 职责提示词骨架（模块 `system` 合成 + 工作环境 + 调用约定；**工具清单不在这里**，随回合注入） |
+| | `env` | **工作环境块**：本 agent 的真实根目录（共享区 / 沙箱 / 模块目录）与路径规矩 |
 | | `patch_guide` | 自由格式补丁的写法（每块以 `*** End File` 收尾、SEARCH 要整行一致、一次可多块、整体原子） |
 | | `tool_calling_envelope` / `tool_calling_native` | 工具调用约定**两套，互斥**：一个通道只用一套，由通道形态决定注入哪套（同时教会让模型在正文里讲解参数而被误判成调用） |
 | | `builtin_tools` | 内置三件套的**参数契约**：模型侧说明与调用校验的唯一来源（不写进代码） |

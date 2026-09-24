@@ -31,35 +31,6 @@
     而代价是三套原生 API、每平台真机验证，且 CI 起不了 hypervisor（只能真机验 + env-skip）。
     项目成熟、需求更清楚时再做。
 
-- id: prompt.tool-book-rendered-instead-of-role-face
-  scope: global
-  level: T2
-  why: |
-    工具的**发放**只有两处按角色走（讨论回合的原生声明用 tool_face、两处的执行时校验用角色面），
-    另外两处**发的是整本工具总表**：
-    ① 提示词正文：systool::guide 把 Sandbox.builtin_tools（装的是 prompts.core.builtin_tools 全量）
-       整体交给 render_book——信封模式下这是模型唯一看得到的工具清单，于是会话被明确告知一批它必然
-       被拒的工具（说话回合的提示词里写着 write/edit/patch/submit_report，跑节点时写着四个讨论动词，
-       两边都写着 plan/node_verdict/checklist/slate/suggest/compact 这些核心席专属工具）；
-    ② 执行回合的原生声明槽：tool_decls(ctx) 遍历整本总表 + patch，不按 MemberTools.allowed 过滤
-       （讨论回合的声明槽用了 tool_face，只有这条漏了）。
-    两处都不是“执行了不该执行的”——越权调用会在执行时被如实拒绝；问题是模型被**邀请**去调一个必然被拒的工具。
-    另有一个连带后果：任何按提示词措辞判断请求类型的代码都会被工具说明里的词误伤——真实发生过：
-    成员提示词里出现 node_verdict 的说明“逐节点核对”后，e2e 的假供应商把它当成了核心的节点验收请求。
-  how: |
-    两处都按角色面收口：提示词按角色过滤 builtin_tools 后再 render_book；执行回合的声明槽按 allowed 过滤。
-    难点只有一个：一个 agent 会话**同时**有说话与执行两种身份（用户跟它说话走 turn_with(discussant)，
-    跑节点走 converse_with(executor)），而系统提示只有一份、且重建必须产出同一份消息。所以要选：
-    A. 按**角色并集**渲染（说话席 ∪ 执行席 = 11 个内置工具；核心席专属的不再出现）——改动最小、回放与重建不变，
-       代价是单次回合里仍会列出几个当回合会被拒的（说话回合列着写类工具，跑节点列着讨论动词）；
-    B. 按回合所属角色渲染（说话回合给说话席那份、跑节点给执行席那份）——列出的与能调的完全一致，
-       代价是同一会话的系统消息随回合变，回放/重建要能判定每个历史回合当时用的是哪一份。
-    契约在 docs/architecture/tools-and-roles.md 二与四（“该角色能用的信封清单要渲染进提示词”）。
-  accept: |
-    提示词里不再出现**该会话两种身份都用不到**的工具（六个核心席专属工具）；
-    执行回合的原生声明与 allowed 一致（席位外的不声明）；说话回合与跑节点各自列出的工具都有测试断言。
-  blocked_by: |
-    等用户在上面的 A / B 里选一个：A 是并集（改动最小），B 是每阶段一份（语义最干净、要动回放形态）。
 
 - id: web.static-assets-cache-policy-unstated
   scope: global

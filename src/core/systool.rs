@@ -85,8 +85,9 @@ pub fn is_freeform(name: &str) -> bool {
     name == PATCH
 }
 
-/// 内置工具说明块：提示词册 sys_tools 渲染（含本 agent 的真实根目录、模块目录与工具参数）。
-pub fn guide(prompts: &Prompts, sb: &Sandbox) -> String {
+/// **工作环境块**：提示词册 env 渲染（真实根目录 + 路径规矩）。**不含任何工具清单**——
+/// 能用哪些工具由核心按这一回合的身份现渲染后随回合注入（见 core::engine 的 MemberTools::tools_block）。
+pub fn env_block(prompts: &Prompts, sb: &Sandbox) -> String {
     let module_roots = if sb.modules.is_empty() {
         prompts.core.no_module_dirs.clone()
     } else {
@@ -105,29 +106,42 @@ pub fn guide(prompts: &Prompts, sb: &Sandbox) -> String {
             .join("\n")
     };
     prompts.render(
-        &prompts.core.sys_tools,
+        &prompts.core.env,
         &[
             ("work_name", sb.work_name.clone()),
             ("agent", sb.agent.clone()),
             ("work_root", crate::core::workspace::slash(&sb.shared)),
             ("sandbox_root", crate::core::workspace::slash(&sb.private)),
             ("module_roots", module_roots),
-            (
-                "tool_params",
-                crate::core::schema::render_book(&sb.builtin_tools),
-            ),
-            (
-                "patch_guide",
-                prompts.render(
-                    &prompts.core.patch_guide,
-                    &[
-                        ("work_root", crate::core::workspace::slash(&sb.shared)),
-                        ("sandbox_root", crate::core::workspace::slash(&sb.private)),
-                    ],
-                ),
-            ),
         ],
     )
+}
+
+/// 工具说明块的**素材**（装配期算一次，随回合注入）：patch 语法、模块工具清单、模块工具参数。
+/// 为什么在这里算：它们只与这个 agent 的沙箱与模块有关、与回合无关；而回合执行路径上拿不到提示词册。
+#[derive(Debug, Clone, Default)]
+pub struct ToolNotes {
+    pub patch_guide: String,
+    pub module_tools: String,
+    pub module_tool_params: String,
+}
+
+pub fn tool_notes(
+    prompts: &Prompts,
+    sb: &Sandbox,
+    modules: &[crate::core::module::Module],
+) -> ToolNotes {
+    ToolNotes {
+        patch_guide: prompts.render(
+            &prompts.core.patch_guide,
+            &[
+                ("work_root", crate::core::workspace::slash(&sb.shared)),
+                ("sandbox_root", crate::core::workspace::slash(&sb.private)),
+            ],
+        ),
+        module_tools: crate::core::module::module_tools(prompts, modules),
+        module_tool_params: crate::core::module::module_tool_params(prompts, modules),
+    }
 }
 
 /// 观察账本：**本次会话里核心见过哪些文件的什么内容**。

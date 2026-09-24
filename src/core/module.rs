@@ -96,14 +96,15 @@ pub struct Module {
     pub root: PathBuf,
 }
 
-/// 一个 agent 的职责提示词：把它的模块 system 合成一份能力包，再挂内置工具说明与外部工具清单。
+/// 一个 agent 的职责提示词：把它的模块 system 合成一份能力包，再挂工作环境与调用约定。
 /// 模块只是能力包（没有"发言"这回事）；发言席是 agent，所以这份 system 按 agent 成文。
-/// sys_tools 由 core::systool 按该 agent 的沙箱渲染后传入。
+/// env 由 core::systool 按该 agent 的沙箱渲染后传入。
+/// **工具清单不在这里**：本回合能用哪些工具随回合注入（见 core::engine::tools_block）。
 pub fn agent_system(
     prompts: &crate::core::prompt::Prompts,
     agent: &str,
     modules: &[Module],
-    sys_tools: &str,
+    env: &str,
     mode: crate::core::providers::ToolMode,
 ) -> String {
     let parts = modules
@@ -118,9 +119,7 @@ pub fn agent_system(
             ("modules", parts),
             // 机制说明：AI 不知道机制就只会写散文（真机上就是这样空转的）。
             ("mechanism", prompts.core.mechanism.clone()),
-            ("sys_tools", sys_tools.to_string()),
-            ("module_tools", module_tools(prompts, modules)),
-            ("module_tool_params", module_tool_params(prompts, modules)),
+            ("env", env.to_string()),
             // 两套调用约定**互斥**：一个通道只用一套（同时教会让模型在正文里讲解参数而被误判成调用）
             (
                 "tool_calling",

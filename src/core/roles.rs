@@ -20,6 +20,11 @@ pub struct RoleDecl {
     /// 这个角色能用的**系统工具 id**（模块工具按成员归属自动获得，不在这里）。
     #[serde(default)]
     pub tools: Vec<String>,
+    /// 这个身份**能不能用它自己所属模块的工具**（默认否）。
+    /// 为什么要在表里：讨论席拿不到干活的手段（模块工具一律拒绝），执行席才发。
+    /// 少了这一格，"本回合该不该把模块工具写进提示词"就只能在代码里各判一次，迟早漂。
+    #[serde(default)]
+    pub module_tools: bool,
 }
 
 /// 角色表（key = 角色 id）。
@@ -72,6 +77,14 @@ impl SystemTools {
             out.push('\n');
         }
         Ok(out.trim_end().to_string())
+    }
+
+    /// 这个身份能不能用它自己模块的工具（论据：角色表的 module_tools）。
+    pub fn allows_module_tools(&self, role: &str) -> bool {
+        self.roles
+            .get(role)
+            .map(|d| d.module_tools)
+            .unwrap_or(false)
     }
 
     /// 这个角色能不能调这个工具（越权校验的唯一判据）。

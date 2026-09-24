@@ -177,6 +177,18 @@ impl AgentSession {
         decl: Option<&crate::core::ports::ToolDecl>,
     ) -> Result<String, String> {
         let mut msgs = self.history.clone();
+        // 这个回合**只声明 compact**：工具块也只列它（系统提示里没有工具总表）。
+        if let Some(t) = self.tools.as_ref() {
+            let block = t.tools_block(&["compact".to_string()], false);
+            if !block.is_empty() {
+                let at = if msgs.first().map(|m| m.role.as_str()) == Some("system") {
+                    1
+                } else {
+                    0
+                };
+                msgs.insert(at, Msg::system(block));
+            }
+        }
         msgs.push(Msg::user(prompt.to_string()));
         let mut opts = crate::core::ports::CompleteOpts::plain(false);
         if let Some(d) = decl {

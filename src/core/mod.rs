@@ -1828,6 +1828,9 @@ impl Core {
             reply_seq: 0,
             // 执行席的系统工具面**由角色表发放**（越权校验的唯一判据）。
             allowed: self.role_tools("executor"),
+            // 能不能用自己模块的工具、以及工具说明块的素材：都按角色表与这个 agent 的模块装配期算好。
+            with_modules: self.prompts.systools.allows_module_tools("executor"),
+            notes: systool::tool_notes(&self.prompts, sb, modules),
         }
     }
 
@@ -1900,7 +1903,7 @@ impl Core {
             &self.prompts,
             &a.name,
             modules,
-            &systool::guide(&self.prompts, sb),
+            &systool::env_block(&self.prompts, sb),
             mode,
         );
         let tools = self.tools_env(modules, sb, unavailable, net, mode);
@@ -2509,8 +2512,8 @@ impl Core {
                 } else {
                     providers::ToolMode::Envelope
                 };
-                let guide = systool::guide(&self.prompts, &sb);
-                let system = module::agent_system(&self.prompts, &a.name, &modules, &guide, mode);
+                let env = systool::env_block(&self.prompts, &sb);
+                let system = module::agent_system(&self.prompts, &a.name, &modules, &env, mode);
                 let (chat, note) = self.gateway.member_channel(channel.as_ref(), &a.name);
                 // 先把转录行按顺序摊平：分组判断要看「下一行是不是 tool 行」。
                 let mut rows: Vec<&serde_json::Value> = Vec::new();

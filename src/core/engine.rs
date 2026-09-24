@@ -112,6 +112,10 @@ pub struct MemberTools {
     /// 这个席位**可以调的系统工具 id**（由角色表发放：讨论席 = discussant、执行席 = executor）。
     /// 存在的理由：把"谁能用哪些工具"变成**校验**，而不是提示词里的一句话。
     pub allowed: Vec<String>,
+    /// 这个席位**能不能用它自己模块的工具**（角色表的 module_tools；执行席是，讨论席不是）。
+    pub with_modules: bool,
+    /// 工具说明块的素材（patch 语法 / 模块工具 / 模块工具参数）：装配期算一次，随回合注入。
+    pub notes: crate::core::systool::ToolNotes,
 }
 
 impl MemberTools {
@@ -119,6 +123,36 @@ impl MemberTools {
     fn next_reply(&mut self) -> u64 {
         self.reply_seq += 1;
         self.reply_seq
+    }
+
+    /// **本回合的工具说明块**：核心按这一回合的身份（ids）现渲染，只列这一回合真能调的。
+    ///
+    /// 为什么不是系统提示里的整本总表：模型会照着给的清单去调工具，列出必然被拒的等于请它去撞墙；
+    /// 总表只该留在核心手里当校验判据（见 docs/architecture/tools-and-roles.md 二、三之二）。
+    /// 为什么随回合：同一个 agent 会话会用两种身份干活（说话 / 干活），能用的工具随回合变。
+    /// 空串 = 这一回合没有可用工具（调用方不注入空块）。
+    pub(crate) fn tools_block(&self, ids: &[String], with_modules: bool) -> String {
+        let mut parts: Vec<String> = Vec::new();
+        for id in ids {
+            if let Some(schema) = self.sandbox.builtin_tools.get(id) {
+                parts.push(format!("{}\n{}", id, schema.render_for_prompt()));
+            }
+        }
+        // patch 是自由格式工具：它不在参数清单里，写法跟一段补丁正文（只有拿到它的席位才给）。
+        if ids.iter().any(|i| i == crate::core::systool::PATCH) {
+            parts.push(self.notes.patch_guide.clone());
+        }
+        if with_modules {
+            parts.push(self.notes.module_tools.clone());
+            parts.push(self.notes.module_tool_params.clone());
+        }
+        if parts.is_empty() {
+            return String::new();
+        }
+        self.sandbox.texts.render(
+            &self.sandbox.texts.tools_this_turn,
+            &[("tools", parts.join("\n"))],
+        )
     }
 }
 
@@ -292,7 +326,12 @@ fn run_batch(
 fn tool_decls(ctx: &MemberTools) -> ToolDecls {
     let mut decls = ToolDecls::default();
     let mut taken: Vec<String> = Vec::new();
+    // **只声明这个席位拿到的工具**（判据与执行时校验同一份 allowed）：声明了却调不动没有意义，
+    // 模型会照着声明去调，被拒一次就白烧一轮（见 docs/architecture/tools-and-roles.md 二）。
     for (name, schema) in &ctx.sandbox.builtin_tools {
+        if !ctx.allowed.iter().any(|t| t == name) {
+            continue;
+        }
         // patch 是自由格式：它的声明单独写（参数是 body 字符串，不是 JSON 信封的 args）
         if crate::core::systool::is_freeform(name) {
             continue;
@@ -301,14 +340,17 @@ fn tool_decls(ctx: &MemberTools) -> ToolDecls {
         taken.push(name.clone());
         decls.wire.insert(name.clone(), (None, name.clone()));
     }
-    let patch = crate::core::systool::patch_decl();
-    taken.push(patch.name.clone());
-    decls.wire.insert(
-        patch.name.clone(),
-        (None, crate::core::systool::PATCH.to_string()),
-    );
-    decls.list.push(patch);
-    for (id, mt) in &ctx.modules {
+    if ctx.allowed.iter().any(|t| t == crate::core::systool::PATCH) {
+        let patch = crate::core::systool::patch_decl();
+        taken.push(patch.name.clone());
+        decls.wire.insert(
+            patch.name.clone(),
+            (None, crate::core::systool::PATCH.to_string()),
+        );
+        decls.list.push(patch);
+    }
+    // 模块工具按**成员归属**发放（不是角色属性）：拿不到模块工具的身份（讨论席）不声明它们。
+    for (id, mt) in ctx.modules.iter().filter(|_| ctx.with_modules) {
         for tool in mt.commands.keys() {
             let mut wire_name = format!("{}_{}", id, tool);
             let mut n = 2;
@@ -635,10 +677,24 @@ impl Discussion {
             msgs = all;
         }
         // 工具面**由角色表发放**（动词 + 只读核实工具）：表是唯一真相，代码里不另写一份名单。
-        let face: Vec<crate::core::ports::ToolDecl> = systools
-            .tool_face(role)
-            .map(|f| f.into_iter().map(|(id, s)| s.decl(id)).collect())
-            .unwrap_or_default();
+        let face_rows: Vec<(&str, &crate::core::schema::ToolSchema)> =
+            systools.tool_face(role).unwrap_or_default();
+        let face_ids: Vec<String> = face_rows.iter().map(|(id, _)| id.to_string()).collect();
+        let face: Vec<crate::core::ports::ToolDecl> =
+            face_rows.iter().map(|(id, s)| s.decl(id)).collect();
+        // **本回合的工具块**：核心按这一角色的表现现渲染，只列这一回合真能调的（总表不进提示词）。
+        // 模块工具只在"这一身份能干活"时列出（角色表的 module_tools）——讨论席列出它等于请模型去撞墙。
+        if let Some(ctx) = tools.as_ref() {
+            let block = ctx.tools_block(&face_ids, systools.allows_module_tools(role));
+            if !block.is_empty() {
+                let at = if msgs.first().map(|m| m.role.as_str()) == Some("system") {
+                    1
+                } else {
+                    0
+                };
+                msgs.insert(at, Msg::system(block));
+            }
+        }
         let native = matches!(
             tools.as_ref().map(|t| t.mode),
             Some(crate::core::providers::ToolMode::Native)
@@ -1618,6 +1674,21 @@ pub(crate) fn converse_with(
             on_round(&r, sink);
             rounds.push(r);
         }};
+    }
+    // **本回合的工具块**：执行席的表现 + 它自己模块的工具（只有执行席那支会走到这里），
+    // 随回合注入；系统提示里不列工具总表（见 docs/architecture/tools-and-roles.md 三之二）。
+    if let Some(ctx) = tools.as_mut() {
+        let ids = ctx.allowed.clone();
+        let with_modules = ctx.with_modules;
+        let block = ctx.tools_block(&ids, with_modules);
+        if !block.is_empty() {
+            let at = if msgs.first().map(|m| m.role.as_str()) == Some("system") {
+                1
+            } else {
+                0
+            };
+            msgs.insert(at, Msg::system(block));
+        }
     }
     let mut forced_final = false;
     // 没有工具环境时的回复号来源（见下面 reply_id）。

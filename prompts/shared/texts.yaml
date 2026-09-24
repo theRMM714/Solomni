@@ -36,6 +36,10 @@ tool_texts:
   arg_unknown: "没有参数 {{name}}"
   unknown_builtin: "未知的内置工具：{{name}}"
   tool_not_allowed: "这个席位没有工具 {{name}}：角色表没发给它（越权调用一律不执行）。"
+  # 本回合可用的工具（由核心按该回合身份从角色表现渲染，随回合注入；系统提示里不列工具）
+  tools_this_turn: |-
+    【本回合可用的工具】只有下面这些能用（怎么写调用见上面的约定）；不在其中的一律调不动。
+    {{tools}}
   discuss_reminder: "你上一轮**没有用讨论动词表态**（只写了正文或什么都没说）。这一轮请明确表态：say（发表意见）/ agree（同意当前方案）/ leave（退出）/ ask（要用户决定）。"
   compact_prompt: |-
     上下文要压一压了。请把**以上全部内容**写成一份摘要，调用 compact 工具：

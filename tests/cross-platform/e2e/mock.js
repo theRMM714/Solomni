@@ -31,11 +31,12 @@ http.createServer((req, res) => {
       return;
     }
     const msgs = j.messages || [];
-    const sys = (msgs.find((m) => m.role === 'system') || {}).content || '';
+    // 供应商看到的是**全部** system 消息：会话身份（工作环境）在前，工具面按回合注入在后。
+    const sys = msgs.filter((m) => m.role === 'system').map((m) => m.content || '').join('\n');
     const user = ((msgs.filter((m) => m.role === 'user').pop()) || {}).content || '';
     // 整段对话里的用户消息：工具循环的后续轮里，任务原话已不在最后一条，只有从整段里才看得见。
     const allUser = msgs.filter((m) => m.role === 'user').map((m) => m.content || '').join('\n');
-    // 从系统提示词里取真实根目录（sys_tools 里固定有两行：共享区 / 沙箱）
+    // 从系统提示词里取真实根目录（工作环境块里固定有两行：共享区 / 沙箱）
     const workRoot = (sys.match(/本次工作的共享区：([^\n]+)/) || [])[1];
     const sandboxRoot = (sys.match(/你私有的沙箱：([^\n]+)/) || [])[1];
     // 已经跑过工具（手写信封走用户消息，原生通道走 role=tool 的结果消息）。
@@ -49,7 +50,7 @@ http.createServer((req, res) => {
     const env = (name, args) => JSON.stringify({ type: 'tool', name, args });
     if (wantsPing) {
       calls = [{ id: 'call_probe', type: 'function', function: { name: 'solomni_ping', arguments: '{}' } }];
-    } else if (sys.includes('内置文件工具') && user.includes('原生多调用') && !sawToolResult) {
+    } else if (sys.includes('【工作环境】') && user.includes('原生多调用') && !sawToolResult) {
       // 原生通道：一次回复里给**两个**调用（各写一个文件）——验证协议形状与"一条助手消息 + N 条结果"。
       const a = (sandboxRoot || 'sandbox-root') + '/native-a.txt';
       const b = (sandboxRoot || 'sandbox-root') + '/native-b.txt';
@@ -146,7 +147,7 @@ http.createServer((req, res) => {
       } else {
         content = '回报已经交了。';
       }
-    } else if (sys.includes('内置文件工具') && !sawToolResult) {
+    } else if (sys.includes('【工作环境】') && !sawToolResult) {
       if (/read_txt/.test(sys)) {
         // 该 agent 的某个模块声明了外部工具（夹具 toolbox）：用**相对路径**调用，专门验证 cwd = 它自己的模块目录。
         const env = { type: 'tool', module: 'toolbox', name: 'read_txt', args: { path: 'userdata/e2e.txt' } };

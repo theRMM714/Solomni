@@ -299,14 +299,6 @@ pub enum ArgFault {
     Unknown(String),
 }
 
-/// 一本书的模型侧说明：每个工具一段（工具名 + 签名），给模型读。
-pub fn render_book(book: &ToolBook) -> String {
-    book.iter()
-        .map(|(name, s)| format!("{}\n{}", name, s.render_for_prompt()))
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
 /// 数值的 JSON 写法：整数就写整数（2000 而不是 2000.0）。
 fn json_num(n: f64) -> serde_json::Value {
     if n.fract() == 0.0 && n.abs() < 9.0e15 {
