@@ -13,7 +13,7 @@ const $ = (s) => document.querySelector(s);
 const state = {
   modules: [], providers: [], models: [], core: null, rejected: [], agents: [],
   history: [],           // 会话历史（名字/mode/时间）
-  settings: { streaming: true, show_reasoning: true, llm_timeout_secs: 300 }, // 基本设置
+  settings: { streaming: true, show_reasoning: true, llm_timeout_secs: 300, discuss_call_cap: 30, discuss_remind_cap: 3, compact_at_percent: 70 }, // 基本设置
   sessions: new Map(),   // sid -> { sid, mode, title, lines, pending, busy, done, awaiting, readonly }
   activeSid: null,
   settingsOpen: false,
@@ -46,7 +46,7 @@ async function refreshState() {
   state.rejected = s.rejected || [];
   state.agents = s.agents || [];
   state.history = s.history || [];
-  state.settings = s.settings || { streaming: true, show_reasoning: true, llm_timeout_secs: 300 };
+  state.settings = s.settings || { streaming: true, show_reasoning: true, llm_timeout_secs: 300, discuss_call_cap: 30, discuss_remind_cap: 3, compact_at_percent: 70 };
   renderSidebar();
   renderHistory();
 }
@@ -890,6 +890,8 @@ function openModelsModal() {
     const apiIn = textInput('api_model（真正发给供应商的串）');
     const providerSel = selectInput(state.providers.map((p) => ({ value: p.id, label: p.id })), null);
     const noteIn = textInput('note（能力说明）');
+    // 上下文窗口：自动压缩按它 × 设置里的百分比触发；填 0/留空 = 保留现值（新建缺省 32k）。
+    const ctxIn = numberInput('上下文窗口（tokens）', 0, 0, 2000000);
     const save = btn('登记 / 更新', 'btn btn-primary btn-block');
 
     function rebuild() {
@@ -905,7 +907,8 @@ function openModelsModal() {
         }
         const sub = document.createElement('div'); sub.className = 'reg-sub';
         sub.textContent = m.name + ' · ' + m.api_model + ' · 供应商 ' + m.provider +
-          ' · 工具调用 ' + (m.tools === 'native' ? '原生' : '手写信封');
+          ' · 工具调用 ' + (m.tools === 'native' ? '原生' : '手写信封') +
+          ' · 窗口 ' + (m.context || 0) + ' tokens';
         const note = document.createElement('div'); note.className = 'reg-note'; note.textContent = m.note || '';
         main.appendChild(id); main.appendChild(sub); main.appendChild(note);
         const acts = document.createElement('div'); acts.className = 'reg-acts';
@@ -913,6 +916,7 @@ function openModelsModal() {
         edit.onclick = () => {
           idIn.value = m.id; nameIn.value = m.name; apiIn.value = m.api_model;
           providerSel.value = m.provider; noteIn.value = m.note || '';
+          ctxIn.input.value = m.context || 0;
           c.setMsg('编辑 ' + m.id);
         };
         const del = btn('删除', 'link-btn danger');
@@ -993,6 +997,7 @@ function openModelsModal() {
       const body = {
         id: idIn.value.trim(), name: nameIn.value.trim(), api_model: apiIn.value.trim(),
         provider: providerSel.value, note: noteIn.value.trim(),
+        context: Number(ctxIn.input.value) || 0,
       };
       if (!body.id || !body.name || !body.api_model || !body.provider) {
         c.setMsg('id / 名字 / api_model / 供应商 均不能为空', true); return;
@@ -1012,6 +1017,7 @@ function openModelsModal() {
     form.appendChild(field('api_model', apiIn));
     form.appendChild(field('供应商', providerSel));
     form.appendChild(field('note', noteIn));
+    form.appendChild(field('上下文窗口（tokens）', ctxIn));
     form.appendChild(save);
     c.body.appendChild(form);
     const discTitle = document.createElement('div'); discTitle.className = 'wf-label'; discTitle.textContent = '从供应商获取模型（点选填入 api_model）';
@@ -1048,6 +1054,11 @@ function openSettingsModal() {
     const cot = checkbox('思维链显示（每条回答下的思维链，永远默认折叠、点击展开）', state.settings.show_reasoning);
     // 单次模型调用的总预算（全局：讨论 / 执行 / 验收 / 单 agent 共用）。
     const to = numberInput('单次模型调用的超时（秒）', state.settings.llm_timeout_secs, 10, 3600);
+    // 讨论阶段的两个上限（用户可调）：一轮内子会话能跑多少次模型调用、最多提醒几次。
+    const cap = numberInput('讨论一轮内的模型调用上限', state.settings.discuss_call_cap, 1, 200);
+    const remind = numberInput('一轮内最多提醒几次', state.settings.discuss_remind_cap, 0, 20);
+    // 上下文用到多少就该压（占模型窗口的百分比）。
+    const pct = numberInput('上下文用到百分之多少就压缩', state.settings.compact_at_percent, 0, 100);
     const save = btn('保存', 'btn btn-primary btn-block');
     save.onclick = async () => {
       try {
@@ -1055,6 +1066,9 @@ function openSettingsModal() {
           streaming: stream.box.checked,
           show_reasoning: cot.box.checked,
           llm_timeout_secs: Number(to.input.value) || 300,
+          discuss_call_cap: Number(cap.input.value) || 30,
+          discuss_remind_cap: Number(remind.input.value) || 0,
+          compact_at_percent: Number(pct.input.value) || 0,
         });
         await refreshState();
         c.setMsg('已保存');
@@ -1064,6 +1078,12 @@ function openSettingsModal() {
     c.body.appendChild(cot.wrap);
     c.body.appendChild(to.wrap);
     c.body.appendChild(cfgHint('超时是全局的：讨论、执行、验收与单 agent 共用这一份预算。用尽时会中断本轮并提示，点「继续」可重试（会话不会作废）。'));
+    c.body.appendChild(cap.wrap);
+    c.body.appendChild(cfgHint('讨论时子会话可以自己核实很久，但要有天花板——到上限核心只提醒它表态，不强制。'));
+    c.body.appendChild(remind.wrap);
+    c.body.appendChild(cfgHint('一轮内提醒到顶就记一行「未回应」放过它，整轮继续（不阻塞）。'));
+    c.body.appendChild(pct.wrap);
+    c.body.appendChild(cfgHint('压缩由 AI 自己做：到点自动压一次；也可以随时手动 /compact。填 0 = 不自动压。'));
     c.body.appendChild(save);
   });
 }

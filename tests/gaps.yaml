@@ -47,22 +47,6 @@
     这五处都从工具调用参数取；提示词里不再要求核心手写 JSON 来驱动自己；契约写明该规则。
   blocked_by: |
     排期问题，不是缺条件。
-- id: ui.settings-not-surfaced
-  scope: global
-  level: T2
-  why: |
-    后端认得但界面够不到的设置：compact_at_percent（压到百分之多少）、discuss_call_cap（讨论一轮内调用上限 30）、
-    discuss_remind_cap（一轮内提醒上限 3）、以及 models.yaml 每个模型的 context（上下文窗口）。
-    这四个都是用户明确要求"可自己调"的。另有 tier / fence_write / fence_read / qemu_path 是有意留到后续，
-    属于已规划的未实现能力。
-  how: |
-    设置弹窗补前四项的输入（POST /api/settings 已接受这些字段）；档位与围栏四项保持未暴露，
-    在文档里写明是有意留后。
-  accept: |
-    这四项能在界面上改并立即生效（改完 /api/state 回读一致）；档位与围栏仍如实标为未暴露。
-  blocked_by: |
-    排期问题，不是缺条件。
-
 - id: ui.frontend-has-no-automated-judgement
   scope: global
   level: T5

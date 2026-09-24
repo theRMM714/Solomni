@@ -1290,6 +1290,7 @@ impl Core {
         api_model: &str,
         provider: &str,
         note: &str,
+        context: u64,
     ) -> Result<(), String> {
         if id.is_empty() || name.is_empty() || api_model.is_empty() || provider.is_empty() {
             return Err("id / name / api_model / provider 均不能为空".to_string());
@@ -1299,12 +1300,14 @@ impl Core {
         }
         // 工具调用形态：编辑时**保留原值**（登记表单暂不带这个字段，不能因为没带就重置成缺省），
         // 新建缺省 envelope（任何供应商都能用的手写信封）。
-        let tools = self
+        let (tools, old_ctx) = self
             .settings
             .models
             .get(id)
-            .map(|m| m.tools)
+            .map(|m| (m.tools, m.context))
             .unwrap_or_default();
+        // 上下文窗口：表单没带（0）就保留现值（新建缺省 32k）——编辑别的字段不该顺手重置它。
+        let context = if context == 0 { old_ctx } else { context };
         self.settings.models.insert(
             id.to_string(),
             providers::ModelEntry {
@@ -1313,7 +1316,7 @@ impl Core {
                 provider: provider.to_string(),
                 note: note.to_string(),
                 tools,
-                context: 32_000,
+                context,
             },
         );
         self.save_settings("core::model_upsert")

@@ -219,6 +219,7 @@ impl Settings {
                 provider: m.provider.clone(),
                 note: m.note.clone(),
                 tools: m.tools,
+                context: m.context,
                 is_core: self.core.as_deref() == Some(id.as_str()),
             })
             .collect()
@@ -242,5 +243,7 @@ pub struct ModelView {
     pub note: String,
     /// 工具调用形态（envelope / native）——前端据此显示，也让用户知道当前走哪套协议。
     pub tools: ToolMode,
+    /// 上下文窗口（tokens）：自动压缩按它 × 设置里的百分比触发；前端显示并可改。
+    pub context: u64,
     pub is_core: bool,
 }

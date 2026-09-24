@@ -256,6 +256,7 @@ impl RegistryOps for FakeOps {
             provider: "p1".to_string(),
             note: String::new(),
             tools: crate::core::providers::ToolMode::Envelope,
+            context: 32_000,
             is_core: true,
         }])
     }
@@ -270,6 +271,7 @@ impl RegistryOps for FakeOps {
         _api_model: &str,
         _provider: &str,
         _note: &str,
+        _context: u64,
     ) -> Result<(), String> {
         self.guard()
     }

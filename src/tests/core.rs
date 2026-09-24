@@ -172,13 +172,35 @@ pub(crate) fn provider_lifecycle_and_key_never_leaks_to_view() {
         assert!(!format!("{:?}", v).contains("sk-密钥XYZ"));
     }
     // 仍被模型引用时拒绝删除供应商（不静默级联）
-    core.model_upsert("m1", "M", "api-m", "p1", "快").unwrap();
+    core.model_upsert("m1", "M", "api-m", "p1", "快", 0)
+        .unwrap();
     assert!(core
         .provider_remove("p1")
         .unwrap_err()
         .contains("仍被模型引用"));
     assert!(core.model_remove("m1").unwrap());
     assert!(core.provider_remove("p1").unwrap());
+}
+
+/// 模型的上下文窗口：给了就改；表单没带（0）时**保留现值**——编辑别的字段不该顺手重置它。
+#[test]
+pub(crate) fn model_context_is_kept_when_the_form_omits_it() {
+    let mut core = core_with(vec![module_of("a")], gw(BTreeMap::new(), vec!["[]".into()]));
+    core.provider_upsert("p1", "http://x", "k").unwrap();
+    core.model_upsert("m", "M", "api-m", "p1", "", 64_000)
+        .unwrap();
+    let stored = |c: &crate::core::Core| {
+        c.model_views()
+            .iter()
+            .find(|v| v.id == "m")
+            .map(|v| v.context)
+            .unwrap_or(0)
+    };
+    assert_eq!(stored(&core), 64_000, "给了窗口就按它存");
+    // 再存一次（比如只改说明），不带窗口 → 保留 64000，而不是被重置成缺省。
+    core.model_upsert("m", "M2", "api-m", "p1", "改了说明", 0)
+        .unwrap();
+    assert_eq!(stored(&core), 64_000, "表单没带窗口时保留现值");
 }
 
 #[test]
@@ -202,12 +224,13 @@ pub(crate) fn model_guards_core_default_and_discovery_uses_stored_provider() {
         .contains("无此供应商"));
     // 引用了不存在的供应商 → 拒绝登记
     assert!(core
-        .model_upsert("bad", "B", "b", "ghost", "")
+        .model_upsert("bad", "B", "b", "ghost", "", 0)
         .unwrap_err()
         .contains("无此供应商"));
     // 核心默认模型不可删；换默认后旧的可删
     assert!(core.model_remove("m").unwrap_err().contains("核心默认模型"));
-    core.model_upsert("m2", "M2", "api-m2", "p2", "").unwrap();
+    core.model_upsert("m2", "M2", "api-m2", "p2", "", 0)
+        .unwrap();
     assert!(core.core_set_model("m2").unwrap());
     assert!(core.model_remove("m").unwrap());
 }
@@ -4872,7 +4895,7 @@ pub(crate) fn a_probe_writes_back_only_conclusive_results() {
         );
         core.provider_upsert("p", "http://x", "k")
             .expect("登记供应商");
-        core.model_upsert("m", "M", "api-m", "p", "")
+        core.model_upsert("m", "M", "api-m", "p", "", 0)
             .expect("登记模型");
         core
     };
@@ -5362,7 +5385,7 @@ pub(crate) fn changing_the_declared_mode_takes_effect_on_the_next_generation() {
     );
     core.provider_upsert("p", "http://x", "k")
         .expect("登记供应商");
-    core.model_upsert("m", "M", "api-m", "p", "")
+    core.model_upsert("m", "M", "api-m", "p", "", 0)
         .expect("登记模型");
     let sid = core
         .create_work(WorkSpec {

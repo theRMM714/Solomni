@@ -457,6 +457,7 @@ pub(crate) fn route(
                 &str_field(&req, "api_model"),
                 &str_field(&req, "provider"),
                 &str_field(&req, "note"),
+                req.get("context").and_then(|v| v.as_u64()).unwrap_or(0),
             ) {
                 Ok(()) => ok_json(json!({ "ok": true })),
                 Err(e) => complaint(400, e),

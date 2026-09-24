@@ -505,7 +505,7 @@ fn model_flow(ops: &Ops, arg: &str) {
                 return;
             }
             let note = w.get(4).copied().unwrap_or("");
-            match ops.registry.upsert_model(w[0], w[1], w[2], w[3], note) {
+            match ops.registry.upsert_model(w[0], w[1], w[2], w[3], note, 0) {
                 Ok(()) => println!("[登记] 模型 {}", w[0]),
                 Err(e) => println!("[错误] {}", e),
             }

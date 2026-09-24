@@ -218,6 +218,8 @@ pub trait RegistryOps: Send + Sync {
         api_model: &str,
         provider: &str,
         note: &str,
+        // 上下文窗口（tokens）；0 = 保留现值（新建缺省 32k）。
+        context: u64,
     ) -> Result<(), String>;
     fn remove_model(&self, id: &str) -> Result<bool, String>;
     fn set_core_model(&self, id: &str) -> Result<bool, String>;
@@ -1025,6 +1027,7 @@ impl RegistryOps for CoreHandle {
         api_model: &str,
         provider: &str,
         note: &str,
+        context: u64,
     ) -> Result<(), String> {
         let (id, name, api_model, provider, note) = (
             id.to_string(),
@@ -1033,7 +1036,7 @@ impl RegistryOps for CoreHandle {
             provider.to_string(),
             note.to_string(),
         );
-        self.call(move |core| core.model_upsert(&id, &name, &api_model, &provider, &note))
+        self.call(move |core| core.model_upsert(&id, &name, &api_model, &provider, &note, context))
     }
     fn remove_model(&self, id: &str) -> Result<bool, String> {
         let id = id.to_string();
