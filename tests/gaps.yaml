@@ -30,3 +30,92 @@
     有意推迟（不是缺条件）：guest 相对现有围栏的独特价值只有"不授权本机写权限也能拿到强隔离"一条，
     而代价是三套原生 API、每平台真机验证，且 CI 起不了 hypervisor（只能真机验 + env-skip）。
     项目成熟、需求更清楚时再做。
+- id: identity.system-messages-sent-as-user
+  scope: global
+  level: T2
+  why: |
+    系统与核心注入的消息走了"用户发言"那条路：执行提示词用 AgentSession::say 注入（推 Msg::user、落用户行），
+    讨论提醒用 note_system（也推 Msg::user）。于是模型把系统指令当用户要求，界面上也渲染成用户气泡
+    （真机截图里"用户 == 你现在是任务执行者 =="就是这条）。系统/核心发的消息不得用用户身份，
+    无论进上下文还是进界面。
+  how: |
+    注入统一走系统消息：上下文里用 Msg::system，转录里落系统行（LineView.system 已有）；
+    执行提示词不再借用 say，改走同一条系统注入路径。
+  accept: |
+    系统注入的消息在界面上是系统行、在上下文里是 system 角色；界面上不再出现用户样式的系统指令。
+  blocked_by: |
+    排期问题，不是缺条件。
+
+- id: rework.does-not-carry-acceptance-note
+  scope: global
+  level: T2
+  why: |
+    节点验收没过、被重派时，走的还是最初那段开工提示词（drive_node(child, objective)），
+    验收结论（review 里对该节点的逐项 note）没有传下去——agent 不知道上次错在哪，只能从头再做一遍。
+  how: |
+    重派时把上次验收结论附进提示词（正面写法：这次要满足什么），由执行席提示词模板承接。
+  accept: |
+    真机跑一次返工：被重派节点的提示词里含上次未通过的具体原因，且 agent 的返工回报针对该原因。
+  blocked_by: |
+    排期问题，不是缺条件。
+
+- id: tools.llm-outputs-are-hand-written-json
+  scope: global
+  level: T2
+  why: |
+    项目规定 LLM 产出只能走两条等价通道（原生结构化槽位 / 手写信封），但仍有 6 处让模型在正文里手写 JSON、
+    核心再解析：整理方案+任务链（engine.rs:1250）、总验收（engine.rs:1385）、节点验收（collab.rs:303）、
+    代拟名单（collab.rs:474）、推荐 agent（mod.rs:2019）、执行回报（prompts/roles/executor.yaml:10）。
+    这些既没有 schema 校验，也不进工具台账，写坏就整轮失败。
+  how: |
+    分三段做：① 执行回报变 report 工具（执行席角色表加工具、删掉提示词里"必须以 JSON 回报"）；
+    ② 核心 AI 的五处产出变工具（plan / node_verdict / checklist / slate / suggest），复用核心通道已有的两套声明与解析；
+    ③ 契约写进 docs/architecture/tools-and-roles.md：LLM 产出只能走工具调用，禁止正文 JSON。
+    不加结构审查门禁（用户已明确：太严）。
+  accept: |
+    提示词里不再要求模型手写 JSON；这 6 处的数据都从工具调用参数取；契约写明该规则。
+  blocked_by: |
+    排期问题，不是缺条件。
+
+- id: ui.settings-not-surfaced
+  scope: global
+  level: T2
+  why: |
+    后端认得但界面够不到的设置：compact_at_percent（压到百分之多少）、discuss_call_cap（讨论一轮内调用上限 30）、
+    discuss_remind_cap（一轮内提醒上限 3）、以及 models.yaml 每个模型的 context（上下文窗口）。
+    这四个都是用户明确要求"可自己调"的。另有 tier / fence_write / fence_read / qemu_path 是有意留到后续，
+    属于已规划的未实现能力。
+  how: |
+    设置弹窗补前四项的输入（POST /api/settings 已接受这些字段）；档位与围栏四项保持未暴露，
+    在文档里写明是有意留后。
+  accept: |
+    这四项能在界面上改并立即生效（改完 /api/state 回读一致）；档位与围栏仍如实标为未暴露。
+  blocked_by: |
+    排期问题，不是缺条件。
+
+- id: ui.frontend-has-no-automated-judgement
+  scope: global
+  level: T5
+  why: |
+    连续三轮的真机 bug 全部落在前端渲染层（未知会话事件被丢、忙碌态来源、回合分隔行不可见），
+    而前端没有任何自动判据——每次都要用户肉眼发现。
+  how: |
+    不上无头浏览器（对本地工具太重）：把无 DOM 依赖的纯逻辑抽成可测单元（行解析 parseLine、按序补洞 applyBatch），
+    用 node --test 直接测；回合分隔行那类 case 必须有断言。
+  accept: |
+    抽出的纯函数有测试且能在本地入口跑起来；回合分隔行（轮次/回合两种标签）有专门用例。
+  blocked_by: |
+    排期问题，不是缺条件。
+
+- id: web.static-assets-cache-policy-unstated
+  scope: global
+  level: T5
+  why: |
+    静态资源（app.js 等）没有声明缓存策略：改了前端后浏览器可能仍在用旧文件。本轮"忙碌态/同步/流式"
+    三处改动是否因此未生效尚未确认——若确实如此，这条就是根因；即使不是，缺显式策略也会反复咬人。
+  how: |
+    给静态资源明确策略（开发期 no-cache，或按内容摘要生成 URL）。先确认是否真是它。
+  accept: |
+    改前端后刷新即生效（无需硬刷新）；或在文档里写明必须硬刷新及其原因。
+  blocked_by: |
+    待确认：需要用户硬刷新一次，看那三处是否生效。
