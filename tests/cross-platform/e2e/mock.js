@@ -111,7 +111,8 @@ http.createServer((req, res) => {
     } else if (user.includes('== 各节点 ==')) {
       // **节点级验收**：逐节点判"够不够当前目标"。夹具一律判过（要验不通过另设场景）。
       content = env('node_verdict', {
-        verdicts: [{ node: 'n1', ok: true, note: '够用' }],
+        // 节点序号由核心按阶段派生（n1-1）；判定必须落到这些 id 上。
+        verdicts: [{ node: 'n1-1', ok: true, note: '够用' }],
         advice: '我建议放行：产出够用。',
       });
     } else if (user.includes('== 方案 ==')) {

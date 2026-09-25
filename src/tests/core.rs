@@ -1375,52 +1375,65 @@ fn roster() -> Vec<String> {
 }
 
 /// 串：链式依赖按序就绪——前一环没完成，后一环不开始。
+/// **阶段**由依赖图派生（最长路径分层）：串行链一个节点一阶段；并 + 混合的两条并行同阶段、汇合点下一阶段。
 #[test]
-pub(crate) fn chain_ready_advances_along_a_serial_chain() {
-    use crate::core::chain::NodeStatus;
-    let mut chain = crate::core::chain::TaskChain {
+pub(crate) fn chain_stages_lay_out_along_the_dependency_graph() {
+    let serial = crate::core::chain::TaskChain {
         nodes: vec![
             chain_node("a", &[]),
             chain_node("b", &["a"]),
             chain_node("c", &["b"]),
         ],
     };
-    assert_eq!(chain.ready().len(), 1);
-    assert_eq!(chain.ready()[0].id, "a");
-    chain.nodes[0].status = NodeStatus::Done;
-    assert_eq!(chain.ready()[0].id, "b");
-    chain.nodes[1].status = NodeStatus::Done;
-    assert_eq!(chain.ready()[0].id, "c");
-    chain.nodes[2].status = NodeStatus::Done;
-    assert!(chain.ready().is_empty(), "全完成之后没有可启动的");
-    assert!(chain.finished());
-}
-
-/// 并 + 混合：无依赖的节点**同时**就绪；"等它们全部结束"的节点在两者都完成后才就绪。
-#[test]
-pub(crate) fn chain_ready_returns_parallel_nodes_together() {
-    use crate::core::chain::NodeStatus;
-    let mut chain = crate::core::chain::TaskChain {
+    assert_eq!(serial.stages(), vec![1, 2, 3]);
+    assert_eq!(serial.stage_nodes(1).len(), 1);
+    assert_eq!(serial.current_stage(), Some(1));
+    let mut parallel = crate::core::chain::TaskChain {
         nodes: vec![
             chain_node("a", &[]),
             chain_node("b", &[]),
             chain_node("c", &["a", "b"]),
         ],
     };
-    let mut ids: Vec<String> = chain.ready().iter().map(|n| n.id.clone()).collect();
+    assert_eq!(parallel.stages(), vec![1, 1, 2]);
+    let mut ids: Vec<String> = parallel
+        .stage_ready(1)
+        .iter()
+        .map(|n| n.id.clone())
+        .collect();
     ids.sort();
-    assert_eq!(
-        ids,
-        vec!["a".to_string(), "b".to_string()],
-        "a/b 该同时就绪"
-    );
-    assert!(chain.ready().iter().all(|n| n.id != "c"), "c 要等 a、b");
-    chain.nodes[0].status = NodeStatus::Done;
-    assert_eq!(chain.ready().len(), 1, "只完成一半，c 还不能开始");
-    assert_eq!(chain.ready()[0].id, "b");
-    chain.nodes[1].status = NodeStatus::Done;
-    assert_eq!(chain.ready()[0].id, "c", "两个依赖都完成，c 就绪");
-    assert!(!chain.finished(), "c 还没结束");
+    assert_eq!(ids, vec!["a".to_string(), "b".to_string()], "同阶段一起派");
+    assert!(parallel.stage_ready(1).iter().all(|n| n.id != "c"));
+    assert!(parallel.current_stage() == Some(1));
+    // 阶段一的两个节点都结束并通过 → 阶段一过了，当前阶段前进到二。
+    for i in [0, 1] {
+        parallel.nodes[i].status = crate::core::chain::NodeStatus::Done;
+        parallel.nodes[i].acceptance = Some(crate::core::chain::Acceptance {
+            ok: true,
+            note: String::new(),
+        });
+    }
+    assert!(parallel.stage_passed(1));
+    assert_eq!(parallel.current_stage(), Some(2));
+    assert_eq!(parallel.stage_ready(2).len(), 1, "阶段二才轮到 c");
+}
+
+/// 序号**由核心按阶段派生**：n1-1 / n1-2（同阶段并行）→ n2-1（下一阶段），依赖整体重映射。
+#[test]
+pub(crate) fn chain_ids_are_derived_from_stages() {
+    let mut chain = crate::core::chain::TaskChain {
+        nodes: vec![
+            chain_node("x", &[]),
+            chain_node("y", &[]),
+            chain_node("z", &["x", "y"]),
+        ],
+    };
+    chain.renumber_by_stage();
+    let ids: Vec<&str> = chain.nodes.iter().map(|n| n.id.as_str()).collect();
+    assert_eq!(ids, vec!["n1-1", "n1-2", "n2-1"]);
+    assert_eq!(chain.nodes[2].deps, vec!["n1-1", "n1-2"], "依赖整体重映射");
+    assert_eq!(chain.current_stage(), Some(1));
+    assert!(!chain.stage_passed(1), "还没验收就不算通过");
 }
 
 /// 装配期自洽：环、悬空依赖、重复 id、空目标、未知负责人——逐条如实列出。
@@ -1670,7 +1683,7 @@ pub(crate) fn rewinding_the_main_session_truncates_agent_sessions_by_turn() {
             vec![
                 "{\"type\":\"tool\",\"name\":\"plan\",\"args\":{\"plan\":\"方案\",\"nodes\":[{\"id\":\"n1\",\"title\":\"做\",\"objective\":\"做\",\"assignee\":\"a\",\"deps\":[]}]}}".to_string(),
                 "{\"type\":\"tool\",\"name\":\"verdict\",\"args\":{\"clear\":true,\"why\":\"照他说的开工\"}}".to_string(),
-                "{\"type\":\"tool\",\"name\":\"node_verdict\",\"args\":{\"verdicts\":[{\"node\":\"n1\",\"ok\":true,\"note\":\"够用\"}]}}".to_string(),
+                "{\"type\":\"tool\",\"name\":\"node_verdict\",\"args\":{\"verdicts\":[{\"node\":\"n1-1\",\"ok\":true,\"note\":\"够用\"}]}}".to_string(),
                 "{\"type\":\"tool\",\"name\":\"checklist\",\"args\":{\"items\":[{\"item\":\"做\",\"status\":\"pass\"}]}}".to_string(),
             ],
         ),
@@ -1777,7 +1790,7 @@ pub(crate) fn discussion_member_can_inspect_before_speaking() {
             vec![
                 "{\"type\":\"tool\",\"name\":\"plan\",\"args\":{\"plan\":\"方案\",\"nodes\":[{\"id\":\"n1\",\"title\":\"做\",\"objective\":\"做\",\"assignee\":\"a\",\"deps\":[]}]}}".to_string(),
                 "{\"type\":\"tool\",\"name\":\"verdict\",\"args\":{\"clear\":true,\"why\":\"照他说的开工\"}}".to_string(),
-                "{\"type\":\"tool\",\"name\":\"node_verdict\",\"args\":{\"verdicts\":[{\"node\":\"n1\",\"ok\":true,\"note\":\"够用\"}]}}".to_string(),
+                "{\"type\":\"tool\",\"name\":\"node_verdict\",\"args\":{\"verdicts\":[{\"node\":\"n1-1\",\"ok\":true,\"note\":\"够用\"}]}}".to_string(),
                 "{\"type\":\"tool\",\"name\":\"checklist\",\"args\":{\"items\":[{\"item\":\"做\",\"status\":\"pass\"}]}}".to_string(),
             ],
         ),
@@ -1828,7 +1841,7 @@ pub(crate) fn discussion_member_cannot_call_a_builtin_outside_its_role_face() {
             vec![
                 "{\"type\":\"tool\",\"name\":\"plan\",\"args\":{\"plan\":\"方案\",\"nodes\":[{\"id\":\"n1\",\"title\":\"做\",\"objective\":\"做\",\"assignee\":\"a\",\"deps\":[]}]}}".to_string(),
                 "{\"type\":\"tool\",\"name\":\"verdict\",\"args\":{\"clear\":true,\"why\":\"照他说的开工\"}}".to_string(),
-                "{\"type\":\"tool\",\"name\":\"node_verdict\",\"args\":{\"verdicts\":[{\"node\":\"n1\",\"ok\":true,\"note\":\"够用\"}]}}".to_string(),
+                "{\"type\":\"tool\",\"name\":\"node_verdict\",\"args\":{\"verdicts\":[{\"node\":\"n1-1\",\"ok\":true,\"note\":\"够用\"}]}}".to_string(),
                 "{\"type\":\"tool\",\"name\":\"checklist\",\"args\":{\"items\":[{\"item\":\"做\",\"status\":\"pass\"}]}}".to_string(),
             ],
         ),
@@ -1867,7 +1880,7 @@ pub(crate) fn discussion_member_cannot_use_module_tools() {
             vec![
                 "{\"type\":\"tool\",\"name\":\"plan\",\"args\":{\"plan\":\"方案\",\"nodes\":[{\"id\":\"n1\",\"title\":\"做\",\"objective\":\"做\",\"assignee\":\"a\",\"deps\":[]}]}}".to_string(),
                 "{\"type\":\"tool\",\"name\":\"verdict\",\"args\":{\"clear\":true,\"why\":\"照他说的开工\"}}".to_string(),
-                "{\"type\":\"tool\",\"name\":\"node_verdict\",\"args\":{\"verdicts\":[{\"node\":\"n1\",\"ok\":true,\"note\":\"够用\"}]}}".to_string(),
+                "{\"type\":\"tool\",\"name\":\"node_verdict\",\"args\":{\"verdicts\":[{\"node\":\"n1-1\",\"ok\":true,\"note\":\"够用\"}]}}".to_string(),
                 "{\"type\":\"tool\",\"name\":\"checklist\",\"args\":{\"items\":[{\"item\":\"做\",\"status\":\"pass\"}]}}".to_string(),
             ],
         ),
@@ -1909,7 +1922,7 @@ pub(crate) fn discussion_member_turn_finalizes_by_round_and_rebuilds_the_same_di
             vec![
                 "{\"type\":\"tool\",\"name\":\"plan\",\"args\":{\"plan\":\"方案\",\"nodes\":[{\"id\":\"n1\",\"title\":\"做\",\"objective\":\"做\",\"assignee\":\"a\",\"deps\":[]}]}}".to_string(),
                 "{\"type\":\"tool\",\"name\":\"verdict\",\"args\":{\"clear\":true,\"why\":\"照他说的开工\"}}".to_string(),
-                "{\"type\":\"tool\",\"name\":\"node_verdict\",\"args\":{\"verdicts\":[{\"node\":\"n1\",\"ok\":true,\"note\":\"够用\"}]}}".to_string(),
+                "{\"type\":\"tool\",\"name\":\"node_verdict\",\"args\":{\"verdicts\":[{\"node\":\"n1-1\",\"ok\":true,\"note\":\"够用\"}]}}".to_string(),
                 "{\"type\":\"tool\",\"name\":\"checklist\",\"args\":{\"items\":[{\"item\":\"做\",\"status\":\"pass\"}]}}".to_string(),
             ],
         ),
@@ -2248,7 +2261,7 @@ pub(crate) fn approved_plan_spawns_a_sub_session_per_ready_node() {
             vec![
                 "{\"type\":\"tool\",\"name\":\"plan\",\"args\":{\"plan\":\"方案：A 做 X\",\"nodes\":[{\"id\":\"n1\",\"title\":\"做 X\",\"objective\":\"把 X 做完\",\"assignee\":\"a\",\"deps\":[]}]}}".to_string(),
                 "{\"type\":\"tool\",\"name\":\"verdict\",\"args\":{\"clear\":true,\"why\":\"照他说的开工\"}}".to_string(),
-                "{\"type\":\"tool\",\"name\":\"node_verdict\",\"args\":{\"verdicts\":[{\"node\":\"n1\",\"ok\":true,\"note\":\"够用\"}]}}".to_string(),
+                "{\"type\":\"tool\",\"name\":\"node_verdict\",\"args\":{\"verdicts\":[{\"node\":\"n1-1\",\"ok\":true,\"note\":\"够用\"}]}}".to_string(),
                 "{\"type\":\"tool\",\"name\":\"checklist\",\"args\":{\"items\":[{\"item\":\"做 X\",\"status\":\"pass\"}]}}".to_string(),
             ],
         ),
@@ -2276,7 +2289,7 @@ pub(crate) fn approved_plan_spawns_a_sub_session_per_ready_node() {
         .collect();
     assert_eq!(started.len(), 1, "一个就绪节点该建一个子会话：{:?}", after);
     let (node, child, assignee) = &started[0];
-    assert_eq!(node, "n1");
+    assert_eq!(node, "n1-1", "序号由阶段派生");
     assert_eq!(assignee, "a");
     assert_eq!(
         child,
@@ -2318,7 +2331,7 @@ pub(crate) fn same_agent_nodes_serialize_but_different_agents_run_together() {
                 // 三个节点都没有依赖：n1/n2 都归 a（该串行），n3 归 b（该和 n1 一起开工）。
                 "{\"type\":\"tool\",\"name\":\"plan\",\"args\":{\"plan\":\"方案\",\"nodes\":[{\"id\":\"n1\",\"title\":\"一\",\"objective\":\"做一\",\"assignee\":\"a\",\"deps\":[]},{\"id\":\"n2\",\"title\":\"二\",\"objective\":\"做二\",\"assignee\":\"a\",\"deps\":[]},{\"id\":\"n3\",\"title\":\"三\",\"objective\":\"做三\",\"assignee\":\"b\",\"deps\":[]}]}}".to_string(),
                 "{\"type\":\"tool\",\"name\":\"verdict\",\"args\":{\"clear\":true,\"why\":\"照他说的开工\"}}".to_string(),
-                "{\"type\":\"tool\",\"name\":\"node_verdict\",\"args\":{\"verdicts\":[{\"node\":\"n1\",\"ok\":true,\"note\":\"够用\"},{\"node\":\"n2\",\"ok\":true,\"note\":\"够用\"},{\"node\":\"n3\",\"ok\":true,\"note\":\"够用\"}]}}".to_string(),
+                "{\"type\":\"tool\",\"name\":\"node_verdict\",\"args\":{\"verdicts\":[{\"node\":\"n1-1\",\"ok\":true,\"note\":\"够用\"},{\"node\":\"n1-2\",\"ok\":true,\"note\":\"够用\"},{\"node\":\"n1-3\",\"ok\":true,\"note\":\"够用\"}]}}".to_string(),
                 "{\"type\":\"tool\",\"name\":\"checklist\",\"args\":{\"items\":[{\"item\":\"做\",\"status\":\"pass\"}]}}".to_string(),
             ],
         ),
@@ -2341,7 +2354,7 @@ pub(crate) fn same_agent_nodes_serialize_but_different_agents_run_together() {
         .collect();
     assert_eq!(
         order,
-        vec!["n1", "n3", "n2"],
+        vec!["n1-1", "n1-3", "n1-2"],
         "同一 agent 的 n2 必须等 n1 跑完；不同 agent 的 n3 与 n1 一起开工：{:?}",
         evs
     );
@@ -2366,9 +2379,9 @@ pub(crate) fn failed_node_acceptance_pauses_then_continue_redispatches() {
                 "{\"type\":\"tool\",\"name\":\"plan\",\"args\":{\"plan\":\"方案：A 做 X\",\"nodes\":[{\"id\":\"n1\",\"title\":\"做 X\",\"objective\":\"把 X 做完\",\"assignee\":\"a\",\"deps\":[]}]}}".to_string(),
                 "{\"type\":\"tool\",\"name\":\"verdict\",\"args\":{\"clear\":true,\"why\":\"照他说的开工\"}}".to_string(),
                 // 第一次节点验收：没过 → 该暂停等用户。
-                "{\"type\":\"tool\",\"name\":\"node_verdict\",\"args\":{\"verdicts\":[{\"node\":\"n1\",\"ok\":false,\"note\":\"还差依据\"}]}}".to_string(),
+                "{\"type\":\"tool\",\"name\":\"node_verdict\",\"args\":{\"verdicts\":[{\"node\":\"n1-1\",\"ok\":false,\"note\":\"还差依据\"}]}}".to_string(),
                 // 「继续」之后重派并再验：这次过。
-                "{\"type\":\"tool\",\"name\":\"node_verdict\",\"args\":{\"verdicts\":[{\"node\":\"n1\",\"ok\":true,\"note\":\"够用\"}]}}".to_string(),
+                "{\"type\":\"tool\",\"name\":\"node_verdict\",\"args\":{\"verdicts\":[{\"node\":\"n1-1\",\"ok\":true,\"note\":\"够用\"}]}}".to_string(),
                 "{\"type\":\"tool\",\"name\":\"checklist\",\"args\":{\"items\":[{\"item\":\"做 X\",\"status\":\"pass\"}]}}".to_string(),
             ],
         ),
@@ -2428,7 +2441,7 @@ pub(crate) fn collab_pauses_for_plan_review_until_the_user_approves() {
             vec![
                 "{\"type\":\"tool\",\"name\":\"plan\",\"args\":{\"plan\":\"方案：A 做 X\",\"nodes\":[{\"id\":\"n1\",\"title\":\"做 X\",\"objective\":\"把 X 做完\",\"assignee\":\"a\",\"deps\":[]}]}}".to_string(),
                 "{\"type\":\"tool\",\"name\":\"verdict\",\"args\":{\"clear\":true,\"why\":\"照他说的开工\"}}".to_string(),
-                "{\"type\":\"tool\",\"name\":\"node_verdict\",\"args\":{\"verdicts\":[{\"node\":\"n1\",\"ok\":true,\"note\":\"够用\"}]}}".to_string(),
+                "{\"type\":\"tool\",\"name\":\"node_verdict\",\"args\":{\"verdicts\":[{\"node\":\"n1-1\",\"ok\":true,\"note\":\"够用\"}]}}".to_string(),
                 "{\"type\":\"tool\",\"name\":\"checklist\",\"args\":{\"items\":[{\"item\":\"做 X\",\"status\":\"pass\",\"evidence\":\"已做\"}]}}".to_string(),
             ],
         ),
@@ -2509,7 +2522,7 @@ pub(crate) fn core_collab_demo_runs_full_five_stages() {
             vec![
                 "{\"type\":\"tool\",\"name\":\"plan\",\"args\":{\"plan\":\"方案：A 做 X\",\"nodes\":[{\"id\":\"n1\",\"title\":\"做 X\",\"objective\":\"把 X 做完\",\"assignee\":\"a\",\"deps\":[]}]}}".to_string(),
                 "{\"type\":\"tool\",\"name\":\"verdict\",\"args\":{\"clear\":true,\"why\":\"照他说的开工\"}}".to_string(),
-                "{\"type\":\"tool\",\"name\":\"node_verdict\",\"args\":{\"verdicts\":[{\"node\":\"n1\",\"ok\":true,\"note\":\"够用\"}]}}".to_string(),
+                "{\"type\":\"tool\",\"name\":\"node_verdict\",\"args\":{\"verdicts\":[{\"node\":\"n1-1\",\"ok\":true,\"note\":\"够用\"}]}}".to_string(),
                 "{\"type\":\"tool\",\"name\":\"checklist\",\"args\":{\"items\":[{\"item\":\"做 X\",\"status\":\"pass\",\"evidence\":\"已做\"}]}}".to_string(),
             ],
         ),
@@ -2557,7 +2570,7 @@ pub(crate) fn core_collab_delegated_slate_flow() {
         "{\"type\":\"tool\",\"name\":\"slate\",\"args\":{\"picks\":[{\"name\":\"a\",\"modules\":[\"a\"],\"model\":\"m\",\"why\":\"对口\"}]}}".to_string(),
         "{\"type\":\"tool\",\"name\":\"plan\",\"args\":{\"plan\":\"方案：A 做 X\",\"nodes\":[{\"id\":\"n1\",\"title\":\"做 X\",\"objective\":\"把 X 做完\",\"assignee\":\"a\",\"deps\":[]}]}}".to_string(),
         "{\"type\":\"tool\",\"name\":\"verdict\",\"args\":{\"clear\":true,\"why\":\"照他说的开工\"}}".to_string(),
-        "{\"type\":\"tool\",\"name\":\"node_verdict\",\"args\":{\"verdicts\":[{\"node\":\"n1\",\"ok\":true,\"note\":\"够用\"}]}}".to_string(),
+        "{\"type\":\"tool\",\"name\":\"node_verdict\",\"args\":{\"verdicts\":[{\"node\":\"n1-1\",\"ok\":true,\"note\":\"够用\"}]}}".to_string(),
         "{\"type\":\"tool\",\"name\":\"checklist\",\"args\":{\"items\":[{\"item\":\"做 X\",\"status\":\"pass\"}]}}".to_string(),
     ]));
     let opened = core
@@ -2635,7 +2648,7 @@ pub(crate) fn collab_delegated_roster_written_back_and_rebuilt_from_meta() {
         // 负责人必须是**名单里真实存在的席位**（代拟出来的叫"调研员"）——否则链的自洽门禁会如实挡下。
         "{\"type\":\"tool\",\"name\":\"plan\",\"args\":{\"plan\":\"方案：A 做 X\",\"nodes\":[{\"id\":\"n1\",\"title\":\"做 X\",\"objective\":\"把 X 做完\",\"assignee\":\"调研员\",\"deps\":[]}]}}".to_string(),
         "{\"type\":\"tool\",\"name\":\"verdict\",\"args\":{\"clear\":true,\"why\":\"照他说的开工\"}}".to_string(),
-        "{\"type\":\"tool\",\"name\":\"node_verdict\",\"args\":{\"verdicts\":[{\"node\":\"n1\",\"ok\":true,\"note\":\"够用\"}]}}".to_string(),
+        "{\"type\":\"tool\",\"name\":\"node_verdict\",\"args\":{\"verdicts\":[{\"node\":\"n1-1\",\"ok\":true,\"note\":\"够用\"}]}}".to_string(),
         "{\"type\":\"tool\",\"name\":\"checklist\",\"args\":{\"items\":[{\"item\":\"做 X\",\"status\":\"pass\"}]}}".to_string(),
     ]));
     let sid = core
@@ -6593,7 +6606,7 @@ pub(crate) fn core_collab_tool_modules_run_in_execution() {
             vec![
                 "{\"type\":\"tool\",\"name\":\"plan\",\"args\":{\"plan\":\"方案：查证后回报\",\"nodes\":[{\"id\":\"n1\",\"title\":\"做 X\",\"objective\":\"把 X 做完\",\"assignee\":\"a\",\"deps\":[]}]}}".into(),
                 "{\"type\":\"tool\",\"name\":\"verdict\",\"args\":{\"clear\":true,\"why\":\"照他说的开工\"}}".into(),
-                "{\"type\":\"tool\",\"name\":\"node_verdict\",\"args\":{\"verdicts\":[{\"node\":\"n1\",\"ok\":true,\"note\":\"够用\"}]}}".into(),
+                "{\"type\":\"tool\",\"name\":\"node_verdict\",\"args\":{\"verdicts\":[{\"node\":\"n1-1\",\"ok\":true,\"note\":\"够用\"}]}}".into(),
                 "{\"type\":\"tool\",\"name\":\"checklist\",\"args\":{\"items\":[{\"item\":\"查证\",\"status\":\"pass\"}]}}".into(),
             ],
         ),

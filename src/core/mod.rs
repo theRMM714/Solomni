@@ -785,9 +785,11 @@ impl Core {
                             .collect()
                     })
                     .unwrap_or_default();
+                // **只派当前阶段**：同一阶段的节点并发跑，下一阶段要等本阶段整体验收通过。
                 let ready = chain
                     .map(|ch| {
-                        ch.ready()
+                        let stage = ch.current_stage().unwrap_or(1);
+                        ch.stage_ready(stage)
                             .into_iter()
                             .filter(|n| n.sub_session.is_none())
                             .map(|n| (n.id.clone(), n.assignee.clone()))

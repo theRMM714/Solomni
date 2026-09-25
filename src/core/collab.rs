@@ -1060,6 +1060,10 @@ impl CollabSession {
                         )));
                         return;
                     }
+                    // **按阶段定名**：阶段由依赖图派生，节点 id 由核心给（n{阶段}-{序号}），
+                    // 模型给的 id 只用来解析依赖——用户看到的序号因此带前后关系。
+                    let mut chain = chain;
+                    chain.renumber_by_stage();
                     self.plan = Some(plan.clone());
                     self.chain = Some(chain);
                     sink(SessionEvent::Plan(plan));
@@ -1087,7 +1091,8 @@ impl CollabSession {
             self.ask_user(Pending::PlanReview, sink);
             return;
         }
-        // 用户点「继续」= 重派没过的节点：先退回待办，再让核心重新派发（新起一轮子会话）。
+        // 用户点「继续」= 重派**核心判定没过**的那些节点：先退回待办，再让核心重新派发（新起一轮子会话）。
+        // 只动这些：同一阶段里已经通过的节点保持"已通过"，不整阶段重来。
         if let Some(Pending::NodeBlocked { nodes }) = self.pending.clone() {
             self.pending = None;
             self.gate_advice.clear();
@@ -1096,67 +1101,90 @@ impl CollabSession {
             }
             return;
         }
-        // **链驱动**：每个节点跑在它自己的子会话里（核心负责建会话与派发）。
-        // 本会话在此**让出**——全部节点落定后才回来做节点验收与总验收。
-        let settled = self
-            .chain
-            .as_ref()
-            .map(|c| {
-                !c.nodes.is_empty()
-                    && c.nodes.iter().all(|n| {
-                        matches!(
-                            n.status,
-                            crate::core::chain::NodeStatus::Done
-                                | crate::core::chain::NodeStatus::Failed
-                        )
-                    })
-            })
-            .unwrap_or(false);
-        if !settled {
-            // 节点跑在各自的子会话里：主会话这一刻没有"谁在干活"，
-            // 但**子会话在跑**要照实显示（前端按运行态快照把主会话标成在跑）。
+        // **阶段驱动**：同一阶段（依赖图里同一层）的节点并发跑，跨阶段串行。
+        // 本阶段跑完 → 核心 AI 做**一次阶段验收**（判这一阶段的产出够不够下一阶段用）；
+        // 通过才解锁下一阶段；没过就暂停交用户——**重派哪些节点由核心的结论决定**
+        // （结论里没通过的才退回待办，同阶段其余节点保持已通过，不整阶段重来）。
+        while let Some(stage) = self.chain.as_ref().and_then(|c| c.current_stage()) {
+            // 本阶段还有节点在跑 / 待派：让出（核心侧派发）。
+            if !self
+                .chain
+                .as_ref()
+                .map(|c| c.stage_settled(stage))
+                .unwrap_or(false)
+            {
+                // 节点跑在各自的子会话里：主会话这一刻没有"谁在干活"，
+                // 但**子会话在跑**要照实显示（前端按运行态快照把主会话标成在跑）。
+                sink(crate::core::events::idle());
+                return;
+            }
+            // 这一阶段的节点逐个判（核心 AI 给结论，也由它决定重派哪些）。
+            let reviewed = crate::core::chain::TaskChain {
+                nodes: self
+                    .chain
+                    .as_ref()
+                    .map(|c| c.stage_nodes(stage).into_iter().cloned().collect())
+                    .unwrap_or_default(),
+            };
+            sink(crate::core::events::working("核心"));
+            let mut verify = self.core_verify_tools("orchestrator");
+            let made = Self::review_nodes(
+                &self.prompts,
+                &self.cancel,
+                Some(&reviewed),
+                crate::core::ports::CompleteOpts::plain(self.settings.app.streaming)
+                    .with_timeout(self.settings.app.llm_timeout_secs),
+                self.core_mode,
+                self.core_chat.as_mut(),
+                verify.as_mut(),
+            );
             sink(crate::core::events::idle());
-            return;
-        }
-        // **阶段验收**：核心 AI 按各节点**当前目标**判它的产出；没过就暂停并交用户。
-        sink(crate::core::events::working("核心"));
-        let mut verify = self.core_verify_tools("orchestrator");
-        let (verdicts, advice) = match Self::review_nodes(
-            &self.prompts,
-            &self.cancel,
-            self.chain.as_ref(),
-            crate::core::ports::CompleteOpts::plain(self.settings.app.streaming)
-                .with_timeout(self.settings.app.llm_timeout_secs),
-            self.core_mode,
-            self.core_chat.as_mut(),
-            verify.as_mut(),
-        ) {
-            Ok(v) => v,
-            Err(err) => {
-                sink(SessionEvent::Notice(crate::core::events::interrupted_note(
-                    &err,
+            let (verdicts, advice) = match made {
+                Ok(v) => v,
+                Err(err) => {
+                    sink(SessionEvent::Notice(crate::core::events::interrupted_note(
+                        &err,
+                    )));
+                    return;
+                }
+            };
+            // 核心 AI 的建议随验收结论一起来（同一批产出）。
+            self.gate_advice = advice;
+            for (node, ok, note) in &verdicts {
+                self.set_node_acceptance(node, *ok, note);
+            }
+            // 结论必须落到**本阶段**的节点上：名字对不上（模型写错 id）就不算判定，
+            // 如实交回用户——绝不能空转着反复花调用，也不能假装这一阶段过了。
+            let covered = self
+                .chain
+                .as_ref()
+                .map(|c| c.stage_nodes(stage).iter().all(|n| n.acceptance.is_some()))
+                .unwrap_or(false);
+            if !covered {
+                sink(SessionEvent::Notice(format!(
+                    "[阶段 {} 验收] 判定没落到这一阶段的节点上（id 对不上），先不开工；点「继续」重试。",
+                    stage
                 )));
                 return;
             }
-        };
-        sink(crate::core::events::idle());
-        // 核心 AI 的建议随验收结论一起来（同一批产出）。
-        self.gate_advice = advice;
-        for (node, ok, note) in &verdicts {
-            self.set_node_acceptance(node, *ok, note);
-        }
-        let bad: Vec<String> = verdicts
-            .iter()
-            .filter(|(_, ok, _)| !ok)
-            .map(|(n, _, _)| n.clone())
-            .collect();
-        if !bad.is_empty() {
+            let bad: Vec<String> = verdicts
+                .iter()
+                .filter(|(_, ok, _)| !ok)
+                .map(|(n, _, _)| n.clone())
+                .collect();
+            if !bad.is_empty() {
+                sink(SessionEvent::Notice(format!(
+                    "[阶段 {} 验收] 没通过：{}。点「继续」后**只重派这些**（下一阶段先不开工）。",
+                    stage,
+                    bad.join("、")
+                )));
+                self.ask_user(Pending::NodeBlocked { nodes: bad }, sink);
+                return;
+            }
             sink(SessionEvent::Notice(format!(
-                "[验收] 这些节点没通过：{}。点「继续」会重派它们。",
-                bad.join("、")
+                "[阶段 {} 通过] 下一阶段开工。",
+                stage
             )));
-            self.ask_user(Pending::NodeBlocked { nodes: bad }, sink);
-            return;
         }
         // 总验收：核心 AI 按**各节点的产出**核对（复用执行阶段的验收机制）→ 交付。
         let llm = self.llm_opts();
