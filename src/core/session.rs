@@ -238,7 +238,8 @@ impl AgentSession {
         let mut views = Vec::new();
         views.push(self.line(format!("[回合 t{}｜第 {} 轮]", turn_id, round), None, None));
         for l in tools {
-            views.push(self.line(l.text.clone(), None, l.tool.clone()));
+            // 行上的思维链随行落档（工具轮的思维链因此不再丢）。
+            views.push(self.line(l.text.clone(), l.reasoning.clone(), l.tool.clone()));
         }
         views.push(self.line(format!("[{}:{}] {}", self.id, verb, text), reasoning, None));
         // 回合结束后清掉：后面的单 agent 回合各自另算。

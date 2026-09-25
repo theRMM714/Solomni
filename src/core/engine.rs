@@ -549,6 +549,9 @@ pub enum TurnOut {
 #[derive(Debug, Clone)]
 pub struct DiscLine {
     pub text: String,
+    /// 这一轮的**思维链**（若模型给出）：随这一行的权威行落档——流式结束后仍可查看，
+    /// 工具轮的思维链因此不会"流式完就丢"。
+    pub reasoning: Option<String>,
     pub degraded: bool,
     /// 这一行属于哪个回合（讨论的一次发言回合；0 = 不属任何回合）。
     /// 两边的转录行靠它对齐（回档同步，见 docs/architecture/session-model.md 五）。
@@ -908,6 +911,12 @@ impl Discussion {
                         if ok { "成功" } else { "失败" },
                         head
                     ),
+                    // 该轮的思维链随这条核实行一起落档（工具轮尤其：正文可能为空，思维链是唯一内容）。
+                    reasoning: if reasoning.trim().is_empty() {
+                        None
+                    } else {
+                        Some(reasoning.clone())
+                    },
                     degraded: false,
                     tool: Some(view.clone()),
                 });
@@ -1106,6 +1115,7 @@ impl Discussion {
             self.handed = self.transcript.len();
             // 轮次边界：本轮的发言都在这条之后（回放时据此重算「本轮谁已同意」）。
             self.transcript.push(DiscLine {
+                reasoning: None,
                 text: format!("[轮次 {}]", self.round + 1),
                 degraded: false,
                 tool: None,
@@ -1116,6 +1126,7 @@ impl Discussion {
             if let Some(ans) = self.pending_user_answers.first().cloned() {
                 self.pending_user_answers.remove(0);
                 self.transcript.push(DiscLine {
+                    reasoning: None,
                     text: format!("[用户] {}", ans),
                     degraded: false,
                     tool: None,
@@ -1224,6 +1235,7 @@ impl Discussion {
                 if self.allow_autonomy {
                     let note = self.prompts.core.discuss.autonomy_note.clone();
                     self.transcript.push(DiscLine {
+                        reasoning: None,
                         text: note,
                         degraded: false,
                         tool: None,
@@ -1276,6 +1288,7 @@ impl Discussion {
             );
         }
         self.transcript.push(DiscLine {
+            reasoning: None,
             text: line,
             degraded,
             tool: None,
@@ -1327,6 +1340,7 @@ impl Discussion {
     /// 见 docs/architecture/session-model.md 二"系统消息"。
     pub fn note_system(&mut self, text: &str) {
         self.transcript.push(DiscLine {
+            reasoning: None,
             text: text.to_string(),
             degraded: false,
             tool: None,

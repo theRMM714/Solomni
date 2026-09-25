@@ -565,6 +565,58 @@ pub(crate) fn collab_rewind_rebuilds_from_transcript_and_resume_waits_at_gate() 
     assert!(matches!(&ev[0], SessionEvent::Notice(n) if n.contains("裁决门")));
 }
 
+/// **工具轮的思维链随该轮的工具行落档**：流式结束后仍可查看（不再"流式完就丢"）。
+#[test]
+pub(crate) fn note_turn_records_the_round_reasoning_on_the_tool_line() {
+    let mut core = core_with(vec![module_of("a")], gw(BTreeMap::new(), vec!["[]".into()]));
+    let sid = core
+        .create_work(work("w", WorkMode::Single, &["a"]))
+        .unwrap()
+        .sid;
+    let crate::core::Prepared::Run { mut session, .. } = core
+        .prepare_single(&sid, Some("准备"), false)
+        .expect("准备一个回合")
+    else {
+        panic!("这条会话该是可以跑的");
+    };
+    let tool = crate::core::events::ToolCallView {
+        speaker: "a".to_string(),
+        module: String::new(),
+        name: "read".to_string(),
+        ok: true,
+        args: "{}".to_string(),
+        output: "内容".to_string(),
+        raw: String::new(),
+        call_id: String::new(),
+        reply: 0,
+    };
+    let lines = vec![crate::core::engine::DiscLine {
+        text: "[a:read] 成功 内容".to_string(),
+        reasoning: Some("先思考".to_string()),
+        degraded: false,
+        turn: 0,
+        system: false,
+        tool: Some(tool),
+    }];
+    let evs = session.note_turn(1, 1, "agree", "同意", Some("总思维链".to_string()), &lines);
+    let rows: Vec<crate::core::events::LineView> = evs
+        .iter()
+        .filter_map(|e| match e {
+            SessionEvent::Transcript(ls) => Some(ls.clone()),
+            _ => None,
+        })
+        .flatten()
+        .collect();
+    let tool_row = rows.iter().find(|l| l.tool.is_some()).expect("要有工具行");
+    assert_eq!(
+        tool_row.reasoning.as_deref(),
+        Some("先思考"),
+        "工具轮的思维链要随该行落档：{:?}",
+        rows.iter()
+            .map(|l| (l.line.clone(), l.reasoning.clone()))
+            .collect::<Vec<_>>()
+    );
+}
 /// 裁决的**建议由核心 AI 给**（随 plan 那一次调用一起产出，不额外花调用）：
 /// 它出现在推的 Decision 事件里（前端卡片上的"建议"就是它）。
 #[test]

@@ -1337,6 +1337,7 @@ impl CollabSession {
                     for l in lines {
                         if let Some(s) = l.get("line").and_then(|x| x.as_str()) {
                             all_lines.push(crate::core::engine::DiscLine {
+                                reasoning: None,
                                 text: s.to_string(),
                                 degraded: l
                                     .get("degraded")
