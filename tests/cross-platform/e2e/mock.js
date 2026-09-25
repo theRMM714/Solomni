@@ -119,8 +119,10 @@ http.createServer((req, res) => {
       });
     } else if (user.includes('== 方案 ==')) {
       // 返工会话：第一次验收给 fail（定向返工），之后给 pass——用来验"fail → 返工 → 重验 → 交付"闭环。
-      const stamp = (user.match(/方案：返工一次 #(\d+)/) || [])[1] || '0';
-      if (user.includes('返工') && !reworkSeen.has(stamp)) {
+      // 只认**带序号的返工方案**（只有"返工场景"有）：不能拿"提示词里出现返工"当判据——
+      // 工具说明里就写着"返工建议"，凡核心请求都会带上它（这是本夹具自己踩过的坑）。
+      const stamp = (user.match(/方案：返工一次 #(\d+)/) || [])[1];
+      if (stamp && !reworkSeen.has(stamp)) {
         reworkSeen.add(stamp);
         // 第一次验收没过，并**指名**要返工的节点 id（结构化字段，不是人名）。
         content = env('checklist', {
