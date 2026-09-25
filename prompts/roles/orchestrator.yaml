@@ -7,8 +7,13 @@ review:
     == 方案 ==
     {{plan}}
 
+    == 节点 id — 负责人 ==
+    {{nodes}}
+
     == 回报 ==
     {{reports}}
 
     逐项核对，用 checklist 工具交出：items 数组，每项
-    {"item":"方案条目","status":"pass|fail","evidence":"对应回报","reason":"fail 时给差距与归属"}。
+    {"item":"方案条目","status":"pass|fail","evidence":"对应回报","reason":"fail 时给差距","rework":"要返工的节点 id"}。
+    fail 的条目**必须**填 rework，且只能取上面那张表里的节点 id——核心只把那些节点退回待办，用户点「继续」后只重派它们；
+    填了表里没有的 id 或漏填 = 这次判定不算，核心会要求你重填。全部 pass 才交付。

@@ -427,6 +427,10 @@ async function approvePlan(name) {
   })).status === 200, '建「返工」协作工作');
   assert((await api('POST', '/api/sessions/' + encodeURIComponent(nD) + '/begin', { text: 'yes,allow' })).status === 200, '「返工」开始讨论');
   await approvePlan(nD);
+  // 没过 = 暂停并**指名要返工的节点**（结构化字段），而不是整条链重来。
+  // 总验收没过 → **指名要返工的节点**（结构化 rework 字段）→ 只重派它 → 重验通过才交付。
+  // 这条路的判据由单测逐条钉住（total_review_rework_names_the_nodes_and_only_they_are_redispatched）；
+  // 这里只断言闭环真的跑通（夹具的失败/通过轮次按方案序号记，见 mock.js）。
   const evD = JSON.stringify(await waitForDelivery(nD));
   assert(evD.includes('返工'), '验收 fail → 触发返工', evD.slice(-400));
   assert(evD.includes('delivery'), '返工后重验通过并交付', evD.slice(-240));

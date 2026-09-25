@@ -2076,6 +2076,8 @@ pub(crate) fn execution_review_pass_and_fail_paths() {
     exec.review(
         core_chat.as_mut(),
         "方案",
+        "",
+        None,
         &prompts,
         Default::default(),
         Default::default(),
@@ -2093,6 +2095,8 @@ pub(crate) fn execution_review_pass_and_fail_paths() {
     exec2.review(
         core_chat2.as_mut(),
         "方案",
+        "",
+        None,
         &prompts,
         Default::default(),
         Default::default(),
@@ -2116,6 +2120,8 @@ pub(crate) fn review_parse_failure_is_conservative_fail() {
     exec.review(
         core_chat.as_mut(),
         "方案",
+        "",
+        None,
         &prompts,
         Default::default(),
         Default::default(),
@@ -2357,6 +2363,175 @@ pub(crate) fn same_agent_nodes_serialize_but_different_agents_run_together() {
         vec!["n1-1", "n1-3", "n1-2"],
         "同一 agent 的 n2 必须等 n1 跑完；不同 agent 的 n3 与 n1 一起开工：{:?}",
         evs
+    );
+}
+
+/// 返工定向的**字段契约**：fail 必须指名节点 id（核心只把那些节点退回待办重派）；
+/// 表里没有的 id / 漏填 = 这次判定用不了 → 核心据此要求重填，不静默丢掉一条判定。
+#[test]
+pub(crate) fn checklist_rework_is_a_validated_node_id() {
+    let known = vec!["n1-1".to_string(), "n2-1".to_string()];
+    let item = |status: &str, rework: Option<&str>| crate::core::engine::CheckItem {
+        item: "方案条目".to_string(),
+        status: status.to_string(),
+        evidence: None,
+        reason: Some("还差一步".to_string()),
+        rework: rework.map(|r| r.to_string()),
+    };
+    let mut exec = crate::core::engine::Execution::new();
+    exec.items = vec![item("fail", Some("n2-1")), item("pass", None)];
+    assert_eq!(exec.rework_targets(), vec!["n2-1".to_string()]);
+    assert!(
+        exec.rework_problems(&known).is_empty(),
+        "合法 id 不该被判无效"
+    );
+    assert!(!exec.all_pass());
+    exec.items = vec![item("fail", None)];
+    assert_eq!(exec.rework_problems(&known).len(), 1, "漏填要重填");
+    assert!(exec.rework_targets().is_empty(), "没指名就不退任何节点");
+    exec.items = vec![item("fail", Some("n9"))];
+    assert_eq!(
+        exec.rework_problems(&known).len(),
+        1,
+        "表里没有的 id 要重填"
+    );
+    exec.items = vec![item("pass", None)];
+    assert!(exec.rework_problems(&known).is_empty());
+    assert!(exec.all_pass());
+}
+
+/// 阶段验收的 id 填错**不改系统状态**：核心被要求重填，重填对了才照常推进（不设次数上限）。
+#[test]
+pub(crate) fn stage_review_refills_until_the_ids_are_valid() {
+    let mut member = BTreeMap::new();
+    member.insert(
+        "a".to_string(),
+        vec![
+            "{\"type\":\"say\",\"text\":\"我先说\"}".to_string(),
+            "{\"type\":\"agree\",\"text\":\"同意\"}".to_string(),
+        ],
+    );
+    let mut core = core_with(
+        vec![module_of("a")],
+        gw(
+            member,
+            vec![
+                "{\"type\":\"tool\",\"name\":\"plan\",\"args\":{\"plan\":\"方案\",\"nodes\":[{\"id\":\"n1\",\"title\":\"做\",\"objective\":\"把事做完\",\"assignee\":\"a\",\"deps\":[]}]}}".to_string(),
+                "{\"type\":\"tool\",\"name\":\"verdict\",\"args\":{\"clear\":true,\"why\":\"照他说的开工\"}}".to_string(),
+                // 第一次把 id 写错（不在表里）→ 核心必须重填，而不是把判定丢掉或假装过了。
+                "{\"type\":\"tool\",\"name\":\"node_verdict\",\"args\":{\"verdicts\":[{\"node\":\"n9\",\"ok\":true,\"note\":\"够用\"}]}}".to_string(),
+                "{\"type\":\"tool\",\"name\":\"node_verdict\",\"args\":{\"verdicts\":[{\"node\":\"n1-1\",\"ok\":true,\"note\":\"够用\"}]}}".to_string(),
+                "{\"type\":\"tool\",\"name\":\"checklist\",\"args\":{\"items\":[{\"item\":\"做\",\"status\":\"pass\"}]}}".to_string(),
+            ],
+        ),
+    );
+    let sid = core
+        .create_work(collab_work("w", &["a"], false, "做个东西"))
+        .unwrap()
+        .sid;
+    core.collab_continue(&sid, CollabStep::Begin, "yes")
+        .unwrap();
+    let evs = core
+        .collab_continue(&sid, CollabStep::Decide, "同意开工")
+        .unwrap();
+    assert!(
+        evs.iter()
+            .any(|e| matches!(e, SessionEvent::Notice(n) if n.contains("重填"))),
+        "id 不在表里该要求核心重填：{:?}",
+        evs.iter()
+            .filter_map(|e| match e {
+                SessionEvent::Notice(n) => Some(n.clone()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    );
+    assert!(
+        evs.iter()
+            .any(|e| matches!(e, SessionEvent::Delivery { ok: true, .. })),
+        "重填对了就照常推进并交付"
+    );
+}
+
+/// 总验收没过 → **核心指名要返工的节点**（rework 字段）：只退这些、暂停交用户；
+/// 点「继续」只重派它们，重验通过才交付（不整条链重来）。
+#[test]
+pub(crate) fn total_review_rework_names_the_nodes_and_only_they_are_redispatched() {
+    let mut member = BTreeMap::new();
+    member.insert(
+        "a".to_string(),
+        vec![
+            "{\"type\":\"say\",\"text\":\"我先说\"}".to_string(),
+            "{\"type\":\"agree\",\"text\":\"同意\"}".to_string(),
+        ],
+    );
+    let script = |items: &str| {
+        format!(
+            "{{\"type\":\"tool\",\"name\":\"checklist\",\"args\":{{\"items\":{}}}}}",
+            items
+        )
+    };
+    let mut core = core_with(
+        vec![module_of("a")],
+        gw(
+            member,
+            vec![
+                "{\"type\":\"tool\",\"name\":\"plan\",\"args\":{\"plan\":\"方案\",\"nodes\":[{\"id\":\"n1\",\"title\":\"做\",\"objective\":\"把事做完\",\"assignee\":\"a\",\"deps\":[]}]}}".to_string(),
+                "{\"type\":\"tool\",\"name\":\"verdict\",\"args\":{\"clear\":true,\"why\":\"照他说的开工\"}}".to_string(),
+                "{\"type\":\"tool\",\"name\":\"node_verdict\",\"args\":{\"verdicts\":[{\"node\":\"n1-1\",\"ok\":true,\"note\":\"够用\"}]}}".to_string(),
+                // 总验收：没过，并**指名**要返工的节点（不写人名）。
+                script("[{\"item\":\"方案条目\",\"status\":\"fail\",\"reason\":\"还差依据\",\"rework\":\"n1-1\"}]"),
+                // 点「继续」之后：阶段重验 + 总验收通过 → 交付。
+                "{\"type\":\"tool\",\"name\":\"node_verdict\",\"args\":{\"verdicts\":[{\"node\":\"n1-1\",\"ok\":true,\"note\":\"够用\"}]}}".to_string(),
+                script("[{\"item\":\"方案条目\",\"status\":\"pass\",\"evidence\":\"回报\"}]"),
+            ],
+        ),
+    );
+    let sid = core
+        .create_work(collab_work("w", &["a"], false, "做个东西"))
+        .unwrap()
+        .sid;
+    core.collab_continue(&sid, CollabStep::Begin, "yes")
+        .unwrap();
+    let first = core
+        .collab_continue(&sid, CollabStep::Decide, "同意开工")
+        .unwrap();
+    match core.collab_pending(&sid).unwrap() {
+        Some(Pending::NodeBlocked { nodes }) => {
+            assert_eq!(nodes, vec!["n1-1".to_string()], "只退核心指名的那个节点")
+        }
+        other => panic!("总验收没过该暂停并指名要返工的节点：{:?}", other),
+    }
+    assert!(
+        !first
+            .iter()
+            .any(|e| matches!(e, SessionEvent::Delivery { .. })),
+        "没过就不交付"
+    );
+    assert!(
+        first
+            .iter()
+            .any(|e| matches!(e, SessionEvent::Notice(n) if n.contains("只重派这些"))),
+        "如实说明只重派指名的那些"
+    );
+    let second = core.collab_resume(&sid).unwrap();
+    let redispatch: Vec<&String> = second
+        .iter()
+        .filter_map(|e| match e {
+            SessionEvent::NodeStarted { node, .. } => Some(node),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        !redispatch.is_empty() && redispatch.iter().all(|n| *n == "n1-1"),
+        "只重派指名的节点：{:?}",
+        redispatch
+    );
+    assert!(
+        second
+            .iter()
+            .any(|e| matches!(e, SessionEvent::Delivery { ok: true, .. })),
+        "重派并验过之后才交付：{:?}",
+        second
     );
 }
 

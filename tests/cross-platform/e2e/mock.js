@@ -5,7 +5,9 @@ const http = require('http');
 /** 供应商这一侧看到的最后一条请求的消息形状：驱动据此断言"发回去的历史是不是协议形状"。 */
 let lastSeen = null;
 /** 返工会话里验收被调用的次数（第一次 fail，之后 pass）。 */
-let reworkReviews = 0;
+// 返工会话的"第一次验收"按**这一次方案**记（方案文本带 #序号）：驱动重试/多次调用都不会把它用掉。
+const reworkSeen = new Set();
+let planSeq = 0;
 // 端口可指定：本机可能残留上一次跑的假供应商占着固定端口，新进程起不来而驱动仍打到旧的。
 const PORT = Number(process.env.E2E_MOCK_PORT || 8397);
 http.createServer((req, res) => {
@@ -108,7 +110,7 @@ http.createServer((req, res) => {
       content = sawToolResult
         ? '回报已经交了。'
         : env('submit_report', { summary: '做完了', changes: '无外部影响', open: '' });
-    } else if (user.includes('== 各节点 ==')) {
+    } else if (user.includes('产出：')) {
       // **节点级验收**：逐节点判"够不够当前目标"。夹具一律判过（要验不通过另设场景）。
       content = env('node_verdict', {
         // 节点序号由核心按阶段派生（n1-1）；判定必须落到这些 id 上。
@@ -117,11 +119,13 @@ http.createServer((req, res) => {
       });
     } else if (user.includes('== 方案 ==')) {
       // 返工会话：第一次验收给 fail（定向返工），之后给 pass——用来验"fail → 返工 → 重验 → 交付"闭环。
-      if (user.includes('返工')) {
-        reworkReviews += 1;
-        content = reworkReviews === 1
-          ? env('checklist', { items: [{ item: '方案条目', status: 'fail', evidence: '回报', reason: '还差一步（归属：甲）' }] })
-          : env('checklist', { items: [{ item: '方案条目', status: 'pass', evidence: '回报' }] });
+      const stamp = (user.match(/方案：返工一次 #(\d+)/) || [])[1] || '0';
+      if (user.includes('返工') && !reworkSeen.has(stamp)) {
+        reworkSeen.add(stamp);
+        // 第一次验收没过，并**指名**要返工的节点 id（结构化字段，不是人名）。
+        content = env('checklist', {
+          items: [{ item: '方案条目', status: 'fail', evidence: '回报', reason: '还差一步', rework: 'n1-1' }],
+        });
       } else {
         content = env('checklist', { items: [{ item: '方案条目', status: 'pass', evidence: '回报' }] });
       }
@@ -136,7 +140,7 @@ http.createServer((req, res) => {
   const who = rosterLine.split('、').map((s) => s.trim()).filter(Boolean)[0] || '甲';
 
   content = user.includes('返工')
-    ? env('plan', { plan: '方案：返工一次', advice: '我建议批准：返工一次就能过。', nodes: [{ id: 'n1', title: '返工一次', objective: '把事重做一遍', assignee: who, deps: [] }] })
+    ? env('plan', { plan: '方案：返工一次 #' + (++planSeq), advice: '我建议批准：返工一次就能过。', nodes: [{ id: 'n1', title: '返工一次', objective: '把事重做一遍', assignee: who, deps: [] }] })
     : env('plan', { plan: '方案：一次把事情做完', advice: '我建议现在开工：三件产物都能一次做完。', nodes: [{ id: 'n1', title: '做完', objective: '把事做完', assignee: who, deps: [] }] });
     } else if (sys.includes('harvest') && allUser.includes('真工具链路')) {
       // 真工具链路：按**整段对话里**已经收到的工具结果条数决定下一个调用（真进程、真三语言模块）。

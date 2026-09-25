@@ -359,6 +359,9 @@ impl CollabSession {
     /// **节点级验收**：核心 AI 按各节点**当前目标**判它的产出，返回逐节点结论。
     /// 一次调用判完整条链（比逐节点各调一次省得多，也便于横向比较）。
     /// 取字段而不是 &mut self：调用点在泵里，core_chat 要被可变借用。
+    // 参数是一组"取字段而不是自己"的出口（prompts / cancel / opts / mode / chat / verify / 重填说明），
+    // 与 judge_clear / Execution::review 同一取舍（见 docs/testing/quality-isolation.md）。
+    #[allow(clippy::too_many_arguments)]
     fn review_nodes(
         prompts: &Prompts,
         cancel: &std::sync::Arc<std::sync::atomic::AtomicBool>,
@@ -367,15 +370,18 @@ impl CollabSession {
         mode: crate::core::providers::ToolMode,
         core_chat: &mut dyn Chat,
         verify: Option<&mut crate::core::engine::MemberTools>,
+        // 上一次填错了要它重填的话（核心据此**一直重填**到合法，不设次数上限）。
+        retry: Option<&str>,
     ) -> Result<(NodeVerdicts, String), String> {
         let nodes = chain.map(|c| c.nodes.clone()).unwrap_or_default();
         let listed = nodes
             .iter()
             .map(|n| {
                 format!(
-                    "- {}（{}）：目标「{}」\n  产出：{}",
+                    "- {}（{}，负责人 {}）：目标「{}」\n  产出：{}",
                     n.id,
                     n.title,
+                    n.assignee,
                     n.objective,
                     n.report
                         .clone()
@@ -385,10 +391,13 @@ impl CollabSession {
             .collect::<Vec<_>>()
             .join("\n");
         let user = prompts.render(&prompts.core.node_review.user, &[("nodes", listed)]);
-        let msgs = vec![
+        let mut msgs = vec![
             Msg::system(prompts.core.node_review.system.clone()),
             Msg::user(user),
         ];
+        if let Some(again) = retry {
+            msgs.push(Msg::user(again.to_string()));
+        }
         if cancel.load(std::sync::atomic::Ordering::Relaxed) {
             return Err("已停止".to_string());
         }
@@ -1119,53 +1128,85 @@ impl CollabSession {
                 return;
             }
             // 这一阶段的节点逐个判（核心 AI 给结论，也由它决定重派哪些）。
-            let reviewed = crate::core::chain::TaskChain {
-                nodes: self
-                    .chain
-                    .as_ref()
-                    .map(|c| c.stage_nodes(stage).into_iter().cloned().collect())
-                    .unwrap_or_default(),
-            };
-            sink(crate::core::events::working("核心"));
-            let mut verify = self.core_verify_tools("orchestrator");
-            let made = Self::review_nodes(
-                &self.prompts,
-                &self.cancel,
-                Some(&reviewed),
-                crate::core::ports::CompleteOpts::plain(self.settings.app.streaming)
-                    .with_timeout(self.settings.app.llm_timeout_secs),
-                self.core_mode,
-                self.core_chat.as_mut(),
-                verify.as_mut(),
-            );
-            sink(crate::core::events::idle());
-            let (verdicts, advice) = match made {
-                Ok(v) => v,
-                Err(err) => {
-                    sink(SessionEvent::Notice(crate::core::events::interrupted_note(
-                        &err,
-                    )));
+            let stage_nodes: Vec<crate::core::chain::TaskNode> = self
+                .chain
+                .as_ref()
+                .map(|c| c.stage_nodes(stage).into_iter().cloned().collect())
+                .unwrap_or_default();
+            let known: Vec<String> = stage_nodes.iter().map(|n| n.id.clone()).collect();
+            // **填错就一直重填**（不设次数上限；用户用「停止」控制流程）：判定必须落到这一阶段的
+            // 节点上，否则"退回待办并重派"的名单就是错的。
+            let mut retry: Option<String> = None;
+            let (verdicts, advice) = loop {
+                let reviewed = crate::core::chain::TaskChain {
+                    nodes: stage_nodes.clone(),
+                };
+                sink(crate::core::events::working("核心"));
+                let mut verify = self.core_verify_tools("orchestrator");
+                let made = Self::review_nodes(
+                    &self.prompts,
+                    &self.cancel,
+                    Some(&reviewed),
+                    crate::core::ports::CompleteOpts::plain(self.settings.app.streaming)
+                        .with_timeout(self.settings.app.llm_timeout_secs),
+                    self.core_mode,
+                    self.core_chat.as_mut(),
+                    verify.as_mut(),
+                    retry.as_deref(),
+                );
+                sink(crate::core::events::idle());
+                let (verdicts, advice) = match made {
+                    Ok(v) => v,
+                    Err(err) => {
+                        sink(SessionEvent::Notice(crate::core::events::interrupted_note(
+                            &err,
+                        )));
+                        return;
+                    }
+                };
+                let unknown: Vec<String> = verdicts
+                    .iter()
+                    .map(|(n, _, _)| n.clone())
+                    .filter(|n| !known.iter().any(|k| k == n))
+                    .collect();
+                let missing: Vec<String> = known
+                    .iter()
+                    .filter(|k| !verdicts.iter().any(|(n, _, _)| n == *k))
+                    .cloned()
+                    .collect();
+                if unknown.is_empty() && missing.is_empty() {
+                    break (verdicts, advice);
+                }
+                let mut what: Vec<String> = Vec::new();
+                if !unknown.is_empty() {
+                    what.push(format!("不在表里的 id：{}", unknown.join("、")));
+                }
+                if !missing.is_empty() {
+                    what.push(format!("没给结论的节点：{}", missing.join("、")));
+                }
+                sink(SessionEvent::Notice(format!(
+                    "[阶段 {} 验收] 这次判定用不了（{}），已要求核心重填；要停就点「停止」。",
+                    stage,
+                    what.join("；")
+                )));
+                if self.cancelled() {
+                    sink(SessionEvent::Notice(crate::core::events::stopped_note()));
                     return;
                 }
+                retry = Some(format!(
+                    "你上一次的判定没落到这一阶段的节点上（{}）。请只从下面这张表里选 node，并且**每个节点都给一条结论**：\n{}",
+                    what.join("；"),
+                    stage_nodes
+                        .iter()
+                        .map(|n| format!("- {} — 负责人 {}", n.id, n.assignee))
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                ));
             };
             // 核心 AI 的建议随验收结论一起来（同一批产出）。
             self.gate_advice = advice;
             for (node, ok, note) in &verdicts {
                 self.set_node_acceptance(node, *ok, note);
-            }
-            // 结论必须落到**本阶段**的节点上：名字对不上（模型写错 id）就不算判定，
-            // 如实交回用户——绝不能空转着反复花调用，也不能假装这一阶段过了。
-            let covered = self
-                .chain
-                .as_ref()
-                .map(|c| c.stage_nodes(stage).iter().all(|n| n.acceptance.is_some()))
-                .unwrap_or(false);
-            if !covered {
-                sink(SessionEvent::Notice(format!(
-                    "[阶段 {} 验收] 判定没落到这一阶段的节点上（id 对不上），先不开工；点「继续」重试。",
-                    stage
-                )));
-                return;
             }
             let bad: Vec<String> = verdicts
                 .iter()
@@ -1201,26 +1242,76 @@ impl CollabSession {
                 rework: 0,
             });
         }
-        sink(crate::core::events::working("核心"));
-        let mut verify = self.core_verify_tools("orchestrator");
-        exec.review(
-            self.core_chat.as_mut(),
-            &plan,
-            &prompts,
-            llm,
-            self.core_mode,
-            verify.as_mut(),
-        );
-        sink(crate::core::events::idle());
-        if let Some(note) = self.exec_note(&exec) {
-            sink(SessionEvent::Notice(note));
-            return;
+        // "节点 id — 负责人"对照表：模型只能从它里面选 rework。
+        let table = self
+            .chain
+            .as_ref()
+            .map(|c| {
+                c.nodes
+                    .iter()
+                    .map(|n| format!("- {} — 负责人 {}", n.id, n.assignee))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            })
+            .unwrap_or_default();
+        let known: Vec<String> = self
+            .chain
+            .as_ref()
+            .map(|c| c.nodes.iter().map(|n| n.id.clone()).collect())
+            .unwrap_or_default();
+        // **填错就一直重填**（不设次数上限；用户用「停止」控制）：没过（fail）的条目必须指名
+        // 要返工的节点，且只能取上面那张表里的 id——退错了节点等于让错的人白跑一遍。
+        let mut retry: Option<String> = None;
+        loop {
+            sink(crate::core::events::working("核心"));
+            let mut verify = self.core_verify_tools("orchestrator");
+            exec.review(
+                self.core_chat.as_mut(),
+                &plan,
+                &table,
+                retry.as_deref(),
+                &prompts,
+                llm,
+                self.core_mode,
+                verify.as_mut(),
+            );
+            sink(crate::core::events::idle());
+            if let Some(note) = self.exec_note(&exec) {
+                sink(SessionEvent::Notice(note));
+                return;
+            }
+            let problems = exec.rework_problems(&known);
+            if problems.is_empty() {
+                break;
+            }
+            sink(SessionEvent::Notice(format!(
+                "[总验收] 这次判定用不了（{}），已要求核心重填；要停就点「停止」。",
+                problems.join("；")
+            )));
+            if self.cancelled() {
+                sink(SessionEvent::Notice(crate::core::events::stopped_note()));
+                return;
+            }
+            retry = Some(format!(
+                "你上一次的清单用不了（{}）。没过（fail）的条目**必须**填 rework，且只能取下面这张表里的节点 id：\n{}",
+                problems.join("；"),
+                table
+            ));
         }
         sink(review_event(&exec));
-        let ok = exec.all_pass();
+        // 没过 = 只把这些节点退回待办，等用户点「继续」后重派（不交付）。
+        let bad = exec.rework_targets();
+        if !bad.is_empty() {
+            sink(SessionEvent::Notice(format!(
+                "[总验收] 没通过：{}。点「继续」后**只重派这些**（不交付）。",
+                bad.join("、")
+            )));
+            self.ask_user(Pending::NodeBlocked { nodes: bad }, sink);
+            return;
+        }
         sink(SessionEvent::Delivery {
-            ok,
-            over_rework: !ok,
+            ok: exec.all_pass(),
+            over_rework: false,
         });
         sink(SessionEvent::Ended);
         self.done = true;

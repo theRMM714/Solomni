@@ -1313,6 +1313,10 @@ pub struct CheckItem {
     pub evidence: Option<String>,
     #[serde(default)]
     pub reason: Option<String>,
+    /// `status = fail` 时**要返工的节点 id**（核心按链校验；填错/漏填会让核心重填）。
+    /// 为什么是节点 id 而不是人名：链是节点级的，一个 agent 可能负责多个节点（见 task-chain.md 五）。
+    #[serde(default)]
+    pub rework: Option<String>,
 }
 
 /// 执行与验收：成员按任务干活并回报；核心对照回报产出结构化清单。
@@ -1348,10 +1352,17 @@ impl Execution {
         self.cancel.load(std::sync::atomic::Ordering::Relaxed)
     }
 
+    // 参数是一组必须一路透传的出口（chat / plan / 对照表 / 重填说明 / 提示词册 / 通道 / 核实环境）：
+    // 与 judge_clear / review_nodes 同一取舍（见 docs/testing/quality-isolation.md）。
+    #[allow(clippy::too_many_arguments)]
+    /// 总验收（一次调用）。`nodes` = "节点 id — 负责人"对照表（模型只能从这里选 `rework`）；
+    /// `retry` = 上一次填错了要它重填的话（核心据此**一直重填**到合法为止，不设次数上限）。
     pub fn review(
         &mut self,
         core_chat: &mut dyn Chat,
         plan: &str,
+        nodes: &str,
+        retry: Option<&str>,
         prompts: &Prompts,
         llm: crate::core::ports::LlmOpts,
         mode: crate::core::providers::ToolMode,
@@ -1365,12 +1376,19 @@ impl Execution {
             .join("");
         let user = prompts.render(
             &prompts.core.review.user,
-            &[("plan", plan.to_string()), ("reports", reports)],
+            &[
+                ("plan", plan.to_string()),
+                ("reports", reports),
+                ("nodes", nodes.to_string()),
+            ],
         );
-        let msgs = vec![
+        let mut msgs = vec![
             Msg::system(prompts.core.review.system.clone()),
             Msg::user(user),
         ];
+        if let Some(again) = retry {
+            msgs.push(Msg::user(again.to_string()));
+        }
         if self.cancelled() {
             self.stopped = true;
             return;
@@ -1409,6 +1427,41 @@ impl Execution {
                 self.error = Some(err);
             }
         }
+    }
+
+    /// `status = fail` 且填了 `rework` 的节点（按清单顺序去重）：核心据此**只重派这些**。
+    pub fn rework_targets(&self) -> Vec<String> {
+        let mut out: Vec<String> = Vec::new();
+        for it in &self.items {
+            if it.status.eq_ignore_ascii_case("fail") {
+                if let Some(r) = it.rework.as_deref() {
+                    if !r.trim().is_empty() && !out.iter().any(|x| x == r) {
+                        out.push(r.to_string());
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    /// 这次判定里的问题（空 = 合法）：fail 必须填 `rework`，且只能是 `known` 里的节点 id。
+    /// 核心据此**要求模型重填**（一直重填，不设上限）——绝不静默丢掉一条判定。
+    pub fn rework_problems(&self, known: &[String]) -> Vec<String> {
+        let mut out = Vec::new();
+        for it in &self.items {
+            if !it.status.eq_ignore_ascii_case("fail") {
+                continue;
+            }
+            match it.rework.as_deref().map(str::trim) {
+                Some(r) if !r.is_empty() => {
+                    if !known.iter().any(|k| k == r) {
+                        out.push(format!("条目「{}」填的 rework={} 不在节点表里", it.item, r));
+                    }
+                }
+                _ => out.push(format!("条目「{}」没过（fail）但没填 rework", it.item)),
+            }
+        }
+        out
     }
 
     pub fn all_pass(&self) -> bool {

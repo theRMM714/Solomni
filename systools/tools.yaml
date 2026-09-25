@@ -100,31 +100,38 @@ tools:
       nodes:
         type: array
         required: true
-        desc: 节点数组，每项 {"id","title","objective","assignee","deps"}；assignee 必须从名单里选，deps 必须在这张图里且不得成环。
+        desc: 节点数组，每项 {"id","title","objective","assignee","deps"}；assignee 必须从名单里选，deps 必须在这张图里且不得成环。id 只用来表达依赖——**落库的序号由核心按阶段派生**（n1-1 / n1-2 / n2-1 …），界面上显示的是派生后的号。
       advice:
         type: string
         desc: 给用户的**建议**（推荐现在开工还是先改方案 + 一句理由）；会显示在裁决卡片上。
 
   node_verdict:
     capability: none
-    desc: 交出节点验收结论：逐节点核对产出够不够它的当前目标。
+    desc: |
+      交出这一阶段的验收结论：逐节点核对产出够不够它的**当前目标**。
+      后果（核心据此动作）：ok=false 的节点会被**退回待办**——用户点「继续」后**只重派这些**（同阶段其余节点保持"已通过"，不整阶段重来）；整阶段全部 ok 才解锁下一阶段。
+      node 必须取提示词里那张"节点 id — 负责人"表里的 id（核心按它校验；填错会被要求重填）。
     params:
       verdicts:
         type: array
         required: true
-        desc: 结论数组，每项 {"node","ok","note"}；node 用给定的 id，不通过时 note 要说清差在哪。
+        desc: 结论数组，每项 {"node","ok","note"}；node 取表里的节点 id；ok=false 时 note 要说清差在哪（这段会随返工一起发回给负责它的 agent）。
       advice:
         type: string
-        desc: 有节点没过时给用户的**建议**（放行还是返工 + 一句理由）；会显示在裁决卡片上。
+        desc: 给用户的**返工建议**（放行还是返工 + 一句理由）；会显示在裁决卡片上。
 
   checklist:
     capability: none
-    desc: 交出总验收清单：按方案逐条核对回报。
+    desc: |
+      交出总验收清单：按方案逐条核对各节点的回报。
+      后果（核心据此动作）：status=fail 的条目**必须**填 rework = 要返工的**节点 id**（从提示词里那张"节点 id — 负责人"表里选）——
+      核心只把这些节点退回待办，用户点「继续」后只重派它们；全部 pass 才交付。
+      填了表里没有的 id 或漏填 = 这次判定不算，核心会要求重填。
     params:
       items:
         type: array
         required: true
-        desc: 清单数组，每项 {"item","status":"pass|fail","evidence","reason"}；fail 时给差距与归属。
+        desc: 清单数组，每项 {"item","status":"pass|fail","evidence","reason","rework"}；fail 时 reason 说清差距、rework 填要返工的**节点 id**（没有它这次判定不算）。
 
   verdict:
     capability: none
@@ -133,7 +140,8 @@ tools:
       clear:
         type: boolean
         required: true
-        desc: 他的意图是否明确（明确 = 可以照他说的开工/放行；含糊、只是表态、还要再想想、在反问 = false）
+        desc: 他的意图是否明确（明确 = 可以照他说的开工/放行；含糊、只是表态、还要再想想、在反问 = false）。
+          后果：true = 核心按他说的**开工 / 放行**（不再追问）；false = 核心**不开工**，请他再补一句。
       why:
         type: string
         required: true
