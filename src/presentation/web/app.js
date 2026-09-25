@@ -2095,6 +2095,16 @@ function renderLive(s, full) {
     if (visible) blk._node.classList.remove('empty');
     else blk._node.classList.add('empty');
   }
+  // **只有正在传的那一块**是"流式观感"：一轮开始（新块）之后，前一块就已经讲完了
+  // （后面跟着它那一轮的工具卡），不该再挂着光标——块的正文要等整个回合定稿才被权威行替换，
+  // 期间前几块挂着光标，看起来就是"已经落盘的东西还在流"（真机反馈）。
+  let lastMsg = -1;
+  for (let bi = 0; bi < live.length; bi++) if (live[bi].kind === 'msg') lastMsg = bi;
+  for (let bi = 0; bi < live.length; bi++) {
+    const b = live[bi];
+    if (b.kind !== 'msg' || !b._node || !b._node.className) continue;
+    b._node.className = bi === lastMsg ? 'line line streaming' : 'line line';
+  }
   flushScroll(s);
 }
 

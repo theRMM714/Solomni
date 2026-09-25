@@ -214,9 +214,29 @@ setTimeout(() => {
       if (!decisionCardRule) loadErrors.push("裁决卡检查：输入框=" + r.hasInput + "、按钮=" + r.hasBtns + "、二选一卡=" + r.slateKids);
     } catch (e) { loadErrors.push("裁决卡检查失败：" + e.message); }
   }
+  // **只有正在传的那一块带光标**：一轮开始后，前一块不再像"还在流式"（否则看着像已落盘还在流）。
+  let onlyLastStreams = false;
+  if (!loadErrors.length) {
+    try {
+      const r = vm.runInNewContext(
+        "(function () {" +
+          "const s = { sid: 'lv', lines: [], live: [], busy: true, done: false, readonly: false, fold: {}, scroll: {} };" +
+          "state.sessions.set('lv', s); state.activeSid = 'lv';" +
+          "absorb(s, { type: 'delta', kind: 'start', speaker: 'a', text: '' });" +
+          "absorb(s, { type: 'delta', kind: 'text', speaker: 'a', text: '第一轮' });" +
+          "absorb(s, { type: 'delta', kind: 'start', speaker: 'a', text: '' });" +
+          "absorb(s, { type: 'delta', kind: 'text', speaker: 'a', text: '第二轮' });" +
+          "renderStream(true);" +
+          "return { n: s.live.length, first: s.live[0]._node.className, last: s.live[s.live.length - 1]._node.className }; })()",
+        sandbox
+      );
+      onlyLastStreams = r.n === 2 && r.first.indexOf("streaming") < 0 && r.last.indexOf("streaming") >= 0;
+      if (!onlyLastStreams) loadErrors.push("流式光标检查：块数=" + r.n + "、首块=" + r.first + "、末块=" + r.last);
+    } catch (e) { loadErrors.push("流式光标检查失败：" + e.message); }
+  }
   const ok = alerts.length === 0 && loadErrors.length === 0 && rendered && tierWarned && identityKept
     && pollConn === "已连接" && pollApplied && liveReplaced && liveClearedOnIdle && toolReasoningRendered
-    && taskButtonRule && decisionCardRule && consoleErrors.length === 0;
+    && taskButtonRule && decisionCardRule && onlyLastStreams && consoleErrors.length === 0;
   if (!ok) {
     console.log("alerts（原生弹窗被调用的次数，应为 0）:", JSON.stringify(alerts));
     console.log("notice 渲染:", rendered, "| 虚拟机档不可用提示:", tierWarned, "| 身份标题保留:", identityKept);
