@@ -139,7 +139,9 @@ http.createServer((req, res) => {
   const rosterLine = ridx >= 0 ? (ulines[ridx + 1] || '').trim() : '';
   const who = rosterLine.split('、').map((s) => s.trim()).filter(Boolean)[0] || '甲';
 
-  content = user.includes('返工')
+  // 判据取**任务原文**（"返工：第一次验收不过"）：只写"返工"会连云工具相那条场景的整理提示词也命中，
+  // 于是它被派了个"方案：返工一次"、总验收必然 fail → 那条场景白等一次暂停（曾白等 90 秒）。
+  content = user.includes('返工：第一次验收不过')
     ? env('plan', { plan: '方案：返工一次 #' + (++planSeq), advice: '我建议批准：返工一次就能过。', nodes: [{ id: 'n1', title: '返工一次', objective: '把事重做一遍', assignee: who, deps: [] }] })
     : env('plan', { plan: '方案：一次把事情做完', advice: '我建议现在开工：三件产物都能一次做完。', nodes: [{ id: 'n1', title: '做完', objective: '把事做完', assignee: who, deps: [] }] });
     } else if (sys.includes('harvest') && allUser.includes('真工具链路')) {
