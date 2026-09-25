@@ -338,6 +338,7 @@ fn stream_once(
     if cancelled {
         return Attempt::Ok(Completion {
             raw: content,
+            reasoning: reasoning_acc,
             finish,
             calls,
             error: None,
@@ -349,6 +350,7 @@ fn stream_once(
     }
     Attempt::Ok(Completion {
         raw: content,
+        reasoning: reasoning_acc,
         finish,
         calls,
         error: None,
@@ -436,6 +438,12 @@ fn parse_content(text: &str) -> Result<Completion, String> {
         .and_then(|c| c.as_str())
         .unwrap_or_default()
         .to_string();
+    let reasoning = choice
+        .and_then(|c| c.get("message"))
+        .and_then(|m| m.get("reasoning_content").or_else(|| m.get("reasoning")))
+        .and_then(|r| r.as_str())
+        .unwrap_or_default()
+        .to_string();
     let finish = choice
         .and_then(|c| c.get("finish_reason"))
         .and_then(|f| f.as_str())
@@ -447,11 +455,12 @@ fn parse_content(text: &str) -> Result<Completion, String> {
         .and_then(|t| t.as_array())
         .map(|arr| arr.iter().filter_map(native_call).collect::<Vec<_>>())
         .unwrap_or_default();
-    if raw.is_empty() && calls.is_empty() {
+    if raw.is_empty() && reasoning.is_empty() && calls.is_empty() {
         return Err("响应缺少 choices[0].message.content（也没有 tool_calls）".to_string());
     }
     Ok(Completion {
         raw,
+        reasoning,
         finish,
         calls,
         error: None,

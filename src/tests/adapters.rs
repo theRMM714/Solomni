@@ -773,6 +773,7 @@ fn finish_reason_is_carried_back_from_both_paths() {
     });
     assert_eq!(out.raw, "写完");
     assert_eq!(out.finish, "stop", "结束原因要如实带回");
+    assert_eq!(out.reasoning, "", "没有思维链字段时保持为空");
     assert!(!out.truncated(), "stop 不是截断");
 
     // 流式：收尾分片带 finish_reason = length（核心据此判定"被截断"，而不是"模型写错"）
@@ -821,6 +822,23 @@ fn sse_tool(index: u64, id: Option<&str>, name: Option<&str>, args: Option<&str>
         "data: {}\n\n",
         serde_json::json!({ "choices": [{ "delta": { "tool_calls": [f] } }] })
     )
+}
+
+#[test]
+fn http_chat_reads_non_stream_reasoning() {
+    let body = serde_json::json!({
+        "choices": [{
+            "message": { "content": "写完", "reasoning_content": "先思考" },
+            "finish_reason": "stop"
+        }]
+    })
+    .to_string();
+    let mock = Mock::start(vec![(200, "application/json", body)]);
+    let (mut chat, _) = gateway().member_channel(Some(&mock.channel("k")), "a");
+    let out = chat.complete(&[Msg::user("hi")], CompleteOpts::plain(false), &mut |_| {
+        true
+    });
+    assert_eq!(out.reasoning, "先思考");
 }
 
 #[test]

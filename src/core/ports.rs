@@ -165,6 +165,8 @@ impl Msg {
 pub struct Completion {
     /// 供应商返回的正文（原样，不做任何修补）。
     pub raw: String,
+    /// 供应商返回的思维链（非流式响应也可提供）。
+    pub reasoning: String,
     /// 结束原因原样（供应商没给 = 空串）：stop / length / content_filter / tool_calls …
     pub finish: String,
     /// 原生工具调用（按供应商给的顺序；手写信封模式恒为空）。
@@ -181,6 +183,7 @@ impl Completion {
     pub fn text(raw: impl Into<String>) -> Completion {
         Completion {
             raw: raw.into(),
+            reasoning: String::new(),
             finish: String::new(),
             calls: Vec::new(),
             error: None,
@@ -191,6 +194,7 @@ impl Completion {
     pub fn failure(reason: impl Into<String>) -> Completion {
         Completion {
             raw: String::new(),
+            reasoning: String::new(),
             finish: String::new(),
             calls: Vec::new(),
             error: Some(reason.into()),

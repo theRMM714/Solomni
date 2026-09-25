@@ -608,7 +608,18 @@ impl CoreHandle {
             Some(crate::core::envelope::Verb::Tool) => "tool",
             None => "未表态",
         };
-        let note = s.note_turn(req.round, req.turn_id, tag, &turn.text, &turn.lines);
+        let note = s.note_turn(
+            req.round,
+            req.turn_id,
+            tag,
+            &turn.text,
+            if turn.reasoning.is_empty() {
+                None
+            } else {
+                Some(turn.reasoning.clone())
+            },
+            &turn.lines,
+        );
         // **权威行也要推子会话自己的事件台**（不只是落盘）：打开它的标签页时，
         // 流式块必须有这一行来替换——否则"已落盘的正文"会一直挂着闪烁光标、看着像还在流式
         // （真机反馈：主会话已经是定稿行，子会话却停在流式态）。

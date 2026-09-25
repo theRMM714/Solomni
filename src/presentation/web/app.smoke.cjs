@@ -136,6 +136,8 @@ setTimeout(() => {
   }
   // **权威行到达后流式块必须被替换**：否则那一行会一直挂着闪烁光标（"已落盘的还在流式"）。
   let liveReplaced = false;
+  let liveClearedOnIdle = false;
+  let toolReasoningRendered = false;
   if (!loadErrors.length) {
     try {
       const r = vm.runInNewContext(
@@ -149,12 +151,37 @@ setTimeout(() => {
       if (!liveReplaced) loadErrors.push("流式替换检查：delta 后 live=" + r.afterDelta + "、定稿后 live=" + r.afterTranscript + "、行数=" + r.lines);
     } catch (e) { loadErrors.push("流式替换检查失败：" + e.message); }
   }
+
+  if (!loadErrors.length) {
+    try {
+      const r = vm.runInNewContext(
+        "(function () { const s = { sid: 'x', lines: [], live: [], fold: {}, scroll: {} };" +
+          "absorb(s, { type: 'delta', kind: 'text', speaker: '甲', text: '半截' });" +
+          "const before = s.live.length; absorb(s, { type: 'working', agent: null });" +
+          "return { before: before, after: s.live.length, busy: s.busy === true }; })()",
+        sandbox
+      );
+      liveClearedOnIdle = r.before === 1 && r.after === 0 && !r.busy;
+      if (!liveClearedOnIdle) loadErrors.push("空闲收尾检查：idle 前=" + r.before + "、idle 后=" + r.after + "、busy=" + r.busy);
+    } catch (e) { loadErrors.push("空闲收尾检查失败：" + e.message); }
+  }
+  if (!loadErrors.length) {
+    try {
+      const r = vm.runInNewContext(
+        "(function () { const s = { sid: 'x', lines: [], live: [], fold: {}, scroll: {} };" +
+          "absorb(s, { type: 'transcript', lines: [{ id: 1, line: '[甲:say] 完整一句', reasoning: '过程说明' }] });" +
+          "return { reasoning: s.lines[0].reasoning, show: state.settings.show_reasoning }; })()",
+        sandbox
+      );
+      toolReasoningRendered = r.reasoning === '过程说明' && r.show === true;
+    } catch (e) { loadErrors.push("定稿思维链检查失败：" + e.message); }
+  }
   const ok = alerts.length === 0 && loadErrors.length === 0 && rendered && tierWarned && identityKept
-    && pollConn === "已连接" && pollApplied && liveReplaced && consoleErrors.length === 0;
+    && pollConn === "已连接" && pollApplied && liveReplaced && liveClearedOnIdle && toolReasoningRendered && consoleErrors.length === 0;
   if (!ok) {
     console.log("alerts（原生弹窗被调用的次数，应为 0）:", JSON.stringify(alerts));
     console.log("notice 渲染:", rendered, "| 虚拟机档不可用提示:", tierWarned, "| 身份标题保留:", identityKept);
-    console.log("轮询状态点:", JSON.stringify(pollConn), "| 事件已应用:", pollApplied, "| 流式被替换:", liveReplaced);
+    console.log("轮询状态点:", JSON.stringify(pollConn), "| 事件已应用:", pollApplied, "| 流式被替换:", liveReplaced, "| 空闲清理:", liveClearedOnIdle, "| 思维链:", toolReasoningRendered);
     console.log("应用侧 console.error:", JSON.stringify(consoleErrors.slice(0, 3)));
     console.log("loadErrors:", JSON.stringify(loadErrors));
   }

@@ -3805,6 +3805,74 @@ pub(crate) fn streaming_stops_at_the_envelope_brace() {
     assert_eq!(acc, "你好，世界");
 }
 
+struct ReasoningChat;
+
+impl Chat for ReasoningChat {
+    fn complete(
+        &mut self,
+        _messages: &[Msg],
+        _opts: CompleteOpts<'_>,
+        _on: &mut dyn FnMut(Chunk) -> bool,
+    ) -> Completion {
+        Completion {
+            raw: "{\"type\":\"say\",\"text\":\"完成\"}".to_string(),
+            reasoning: "先思考".to_string(),
+            finish: "stop".to_string(),
+            calls: Vec::new(),
+            error: None,
+        }
+    }
+}
+
+struct ReasoningGateway;
+
+impl ChatGateway for ReasoningGateway {
+    fn probe_tools(&self, _channel: &Channel) -> Result<crate::core::ports::ProbeOutcome, String> {
+        Err("测试替身没有真实供应商，测不了工具调用支持".to_string())
+    }
+
+    fn member_channel(
+        &self,
+        _channel: Option<&Channel>,
+        _module_id: &str,
+    ) -> (BoxedChat, Option<String>) {
+        (Box::new(ReasoningChat), None)
+    }
+
+    fn core_channel(&self, _channel: Option<&Channel>) -> (BoxedChat, bool) {
+        (Box::new(ReasoningChat), false)
+    }
+}
+
+#[test]
+pub(crate) fn reasoning_is_kept_on_final_transcript_lines() {
+    let mut core = core_with_io_gateway(
+        vec![module_of("a")],
+        ReasoningGateway,
+        Arc::new(InMemorySysIo::new()),
+    );
+    let sid = core
+        .create_work(work("w", WorkMode::Single, &["a"]))
+        .unwrap()
+        .sid;
+    let events = with_live(|l| core.single_say(&sid, "保留思维链", l)).unwrap();
+    let lines: Vec<_> = events
+        .iter()
+        .filter_map(|e| match e {
+            SessionEvent::Transcript(ls) => Some(ls),
+            _ => None,
+        })
+        .flatten()
+        .collect();
+    assert!(
+        lines
+            .iter()
+            .any(|l| l.reasoning.as_deref() == Some("先思考")),
+        "定稿行应保留思维链：{:?}",
+        lines
+    );
+}
+
 #[test]
 pub(crate) fn envelope_only_round_produces_only_a_tool_line() {
     // 只有信封、没有正文也没有思维链 → 只出 tool 行，不产生空行。
@@ -4786,6 +4854,7 @@ impl Chat for TruncChat {
         };
         Completion {
             raw: text,
+            reasoning: String::new(),
             finish: "length".to_string(),
             calls: Vec::new(),
             error: None,
@@ -5091,6 +5160,7 @@ impl Chat for NativeChat {
         match self.steps.remove(0) {
             NativeStep::Calls(calls) => Completion {
                 raw: String::new(),
+                reasoning: String::new(),
                 finish: "tool_calls".to_string(),
                 calls,
                 error: None,

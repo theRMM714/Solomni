@@ -624,6 +624,8 @@ pub struct MemberTurn {
     /// 没表态**不投影主会话**：原文只落进它自己的会话；提醒由核心在边界注入。
     pub verb: Option<Verb>,
     pub text: String,
+    /// 该回合模型产生的思维链，随定稿转录保存。
+    pub reasoning: String,
     pub degraded: bool,
     /// 这一轮的输出被供应商按长度截断了（如实标注，不假装完整）。
     pub truncated: bool,
@@ -709,6 +711,7 @@ impl Discussion {
             Some(crate::core::providers::ToolMode::Native)
         );
         let mut lines: Vec<DiscLine> = Vec::new();
+        let mut reasoning_all = String::new();
         loop {
             if cancel.load(std::sync::atomic::Ordering::Relaxed) {
                 return Err("已停止".to_string());
@@ -723,6 +726,7 @@ impl Discussion {
             // 内容全丢掉，于是整个成员回合界面一动不动）。信封不能当正文流上屏，
             // 所以复用会话那条"到 { 就截住"的分片规则（session::stream_piece）。
             let mut acc = String::new();
+            let mut reasoning = String::new();
             let done = {
                 let sink_cell = std::cell::RefCell::new(&mut *sink);
                 let mut keep = |c: crate::core::ports::Chunk| {
@@ -748,11 +752,14 @@ impl Discussion {
                                 })
                             }
                         }
-                        crate::core::ports::Chunk::Reasoning(r) => Some(SessionEvent::Delta {
-                            speaker: speaker.to_string(),
-                            kind: "reasoning".to_string(),
-                            text: r,
-                        }),
+                        crate::core::ports::Chunk::Reasoning(r) => {
+                            reasoning.push_str(&r);
+                            Some(SessionEvent::Delta {
+                                speaker: speaker.to_string(),
+                                kind: "reasoning".to_string(),
+                                text: r,
+                            })
+                        }
                     };
                     if let Some(ev) = ev {
                         (sink_cell.borrow_mut())(ev);
@@ -764,8 +771,17 @@ impl Discussion {
             if cancel.load(std::sync::atomic::Ordering::Relaxed) {
                 return Err("已停止".to_string());
             }
+            if reasoning.is_empty() {
+                reasoning = done.reasoning.clone();
+            }
             if let Some(err) = done.error.clone() {
                 return Err(err);
+            }
+            if !reasoning.trim().is_empty() {
+                if !reasoning_all.is_empty() {
+                    reasoning_all.push_str("\n\n");
+                }
+                reasoning_all.push_str(&reasoning);
             }
             let parsed = envelope::parse(&done.raw);
             // 这一轮的调用：native 从结构化槽位取，信封通道从正文里的信封取（一次可以多个）。
@@ -804,6 +820,7 @@ impl Discussion {
                 return Ok(MemberTurn {
                     verb: Some(verb),
                     text,
+                    reasoning: reasoning_all,
                     degraded,
                     truncated: done.truncated(),
                     lines,
@@ -815,6 +832,7 @@ impl Discussion {
                 return Ok(MemberTurn {
                     verb: None,
                     text: parsed.text,
+                    reasoning: reasoning_all,
                     // 工具信封却解析不出调用 = 写坏了：如实标降级，与"散文"区分开。
                     degraded: parsed.degraded || parsed.verb == Verb::Tool,
                     truncated: done.truncated(),
@@ -827,6 +845,7 @@ impl Discussion {
                 return Ok(MemberTurn {
                     verb: None,
                     text: done.raw.clone(),
+                    reasoning: reasoning_all,
                     degraded: true,
                     truncated: done.truncated(),
                     lines,
@@ -844,6 +863,7 @@ impl Discussion {
                     return Ok(MemberTurn {
                         verb: None,
                         text: done.raw.clone(),
+                        reasoning: reasoning_all,
                         degraded: true,
                         truncated: done.truncated(),
                         lines,
@@ -1916,6 +1936,10 @@ pub(crate) fn converse_with(
                 error: Some(err),
             });
             return rounds;
+        }
+        // 非流式供应商不回 Chunk，使用响应里的思维链。
+        if reasoning.is_empty() {
+            reasoning = done.reasoning.clone();
         }
         // 结束原因如实带回：被长度截断要落日志——事后才判定得出"是截断还是模型自己写错"。
         let finish = done.finish.clone();

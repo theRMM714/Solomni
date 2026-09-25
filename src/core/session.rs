@@ -230,6 +230,7 @@ impl AgentSession {
         turn_id: u64,
         verb: &str,
         text: &str,
+        reasoning: Option<String>,
         tools: &[crate::core::engine::DiscLine],
     ) -> Vec<SessionEvent> {
         // 这一回合的行都带上回合 id（回档时两边按它对上）。
@@ -239,7 +240,7 @@ impl AgentSession {
         for l in tools {
             views.push(self.line(l.text.clone(), None, l.tool.clone()));
         }
-        views.push(self.line(format!("[{}:{}] {}", self.id, verb, text), None, None));
+        views.push(self.line(format!("[{}:{}] {}", self.id, verb, text), reasoning, None));
         // 回合结束后清掉：后面的单 agent 回合各自另算。
         self.cur_turn = 0;
         vec![SessionEvent::Transcript(views)]
@@ -677,7 +678,8 @@ fn build_round_lines(
     };
     let mut out = Vec::new();
     let text_line = |reasoning: &mut Option<String>, out: &mut Vec<LineView>| {
-        if !has_line {
+        // 工具轮没有正文时，思维链必须挂到工具行，不能额外造一条空回答行。
+        if !has_line || (text.is_empty() && round.tool.is_some()) {
             return;
         }
         let mut line = format!("[{}]", id);

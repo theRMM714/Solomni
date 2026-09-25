@@ -670,7 +670,18 @@ impl Core {
             };
             let note = {
                 let mut s = self.take_single(&child)?;
-                let events = s.note_turn(round, turn_id, tag, &turn.text, &turn.lines);
+                let events = s.note_turn(
+                    round,
+                    turn_id,
+                    tag,
+                    &turn.text,
+                    if turn.reasoning.is_empty() {
+                        None
+                    } else {
+                        Some(turn.reasoning.clone())
+                    },
+                    &turn.lines,
+                );
                 self.put_single(&child, s);
                 events
             };

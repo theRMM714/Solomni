@@ -1794,6 +1794,11 @@ function absorb(s, ev) {
       // 它不进转录（短暂事件）：用户看到的是占位动画与按钮切换，不是一条消息。
       s.working = ev.agent || null;
       s.busy = !!ev.agent;
+      if (!ev.agent) {
+        // 回合收尾却没有权威行（停止 / 错误）：未定稿的分片不得继续闪光标或冒充转录。
+        s.live = [];
+        return false;
+      }
       return true;
     case 'tool_call':
       // 工具调用发生在轮与轮之间：按到达顺序插进流式块里（module 为空 = 内置 read/write）。
@@ -1815,7 +1820,7 @@ function absorb(s, ev) {
       s.lines.push(ev.ok ? { cls: 'ok', who: '交付', text: '全部通过，交付用户。' }
         : { cls: 'bad', who: '裁决', text: '返工超限仍未通过，交用户裁决。' });
       break;
-    case 'ended': s.done = true; break;
+    case 'ended': s.done = true; s.live = []; s.busy = false; break;
   }
   return false; // 定稿事件：需要整帧重建
 }
@@ -1962,6 +1967,7 @@ function renderDone(s) {
     if (l.tool || l.rawTool) {
       const card = l.tool ? toolCard(l.tool, s, 'T' + toolSeq) : rawToolCard(l.text, s, 'L' + l.id, l.speaker);
       if (l.tool) toolSeq += 1;
+      if (l.reasoning && state.settings.show_reasoning) card.appendChild(reasoningBlock(l.reasoning, s, 'L' + l.id));
       if (typeof l.id === 'number') card.appendChild(rewindButton(l.id));
       doneBox.appendChild(card);
       continue;
