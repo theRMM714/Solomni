@@ -38,12 +38,12 @@ pub enum Output {
     Final,
 }
 
-/// 一次会话推进的结果：本批事件 + 它在事件台上的序号。
-/// 客户端用序号与长轮询去重（同一批事件既随回复返回、也会被其它端从事件台取走）。
+/// 一次会话推进的结果：**只回事件台的头部序号**。
+/// 命令不携带事实——事实只有一条来路（事件台）：想看就按 `since` 订阅，
+/// 谁发起的命令都一样（CLI / Web / 桌面 / 演示脚本）。
 #[derive(Debug, Clone)]
 pub struct Advance {
-    pub events: Vec<SessionEvent>,
-    pub seq: u64,
+    pub head: u64,
 }
 
 // ---------- 事件台 ----------
@@ -94,6 +94,12 @@ impl EventBus {
             g.lines.drain(..drop);
         }
         seq
+    }
+
+    /// 事件台当前头部序号：命令回包只给这个，调用方拿它当**订阅起点**。
+    pub fn head(&self) -> u64 {
+        let g = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        g.seq
     }
 
     /// 测试专用：往事件台放一条空事件批，让长轮询立刻返回（不真等 20 秒）。
@@ -180,7 +186,8 @@ impl JobRegistry {
 
 /// 会话能力：创建、推进、回档、编辑、停止。会话界面只需要这一个。
 pub trait SessionOps: Send + Sync {
-    fn create_work(&self, spec: WorkSpec) -> Result<WorkOpened, String>;
+    /// 建工作：回包是（会话与名单）+ **事件台头部**——开场事实只进事件台（命令不携带事实）。
+    fn create_work(&self, spec: WorkSpec) -> Result<(WorkOpened, u64), String>;
     /// 单 agent 会话里说一句（生成可被 `stop` 中止）。
     fn say(&self, sid: &str, text: &str, out: Output) -> Result<Advance, String>;
     /// 继续一次会话（协作的执行阶段 / 单 agent 的继续）。
@@ -397,10 +404,10 @@ impl CoreHandle {
         let bus = Arc::clone(&self.bus);
         let jobs = Arc::clone(&self.jobs);
         let (session, identity, prefix, llm, persister) = match prepared {
-            // 不用跑模型（例如"末条是 AI 发言"）：把提示直接回给调用方。
+            // 不用跑模型（例如"末条是 AI 发言"）：提示本身也是事实，进事件台；回包只给头部。
             Prepared::Immediate(events) => {
-                let seq = bus.push(sid, &events);
-                return Ok(Advance { events, seq });
+                let head = bus.push(sid, &events);
+                return Ok(Advance { head });
             }
             // 协作会话的"继续"仍在核心线程上推进（B-1 只搬单 agent 生成）。
             Prepared::NotSingle => {
@@ -422,7 +429,7 @@ impl CoreHandle {
         let cancel = jobs.register(sid);
         // **运行态**：这条会话开始干活，推给它自己的事件台——节点执行、单 agent 发言、继续都走这里，
         // 打开它的标签页要立刻看到占位与「停止」按钮，而不是等 3 秒的状态轮询。
-        // 它和收尾那条都算这一批事实：事件台里有什么，回包（Advance.events）就有什么。
+        // 事实只进事件台；命令回包只给头部序号（谁要看谁自己订阅）。
         let start_working = SessionEvent::Working {
             agent: Some(session.params().agent.clone()),
         };
@@ -448,15 +455,13 @@ impl CoreHandle {
                         emit: &mut emit,
                     };
                     // 逐轮外送 + 边落盘：一轮跑完就上屏并落盘（中途刷新页面因此看得到已产生的部分）。
-                    // seq 取**最后一次**入台的序号：客户端按它去重（逐轮外送因此是多批）。
-                    let mut events: Vec<SessionEvent> = Vec::new();
+                    // seq 取**最后一次**入台的序号：命令回包按它给订阅起点。
                     let mut seq = 0u64;
                     let mut sink = |ev: SessionEvent| {
                         seq = bus.push(&sid, std::slice::from_ref(&ev));
                         if let Some(warn) = persister.persist(std::slice::from_ref(&ev)) {
                             bus.push(&sid, std::slice::from_ref(&SessionEvent::Notice(warn)));
                         }
-                        events.push(ev);
                     };
                     // 生成前的提示（例如工具形态变更）先出，再跑。
                     for ev in prefix {
@@ -466,7 +471,7 @@ impl CoreHandle {
                         Some(t) => session.say(t, &identity, &mut live, &mut sink),
                         None => session.continue_reply(&identity, &mut live, &mut sink),
                     }
-                    (session, events, seq)
+                    (session, seq)
                 })
                 .map_err(|e| format!("起生成线程失败：{}", e))?
         };
@@ -478,7 +483,7 @@ impl CoreHandle {
         // seq 取**最后一批**（收尾这条）的序号：客户端按它去重（与逐轮外送同源）。
         let end_working = SessionEvent::Working { agent: None };
         let seq = bus.push(sid, std::slice::from_ref(&end_working));
-        let (session, mut events, _worker_seq) = match joined {
+        let (session, _worker_seq) = match joined {
             Ok(x) => x,
             Err(_) => {
                 // 线程崩了：会话对象随线程没了，但**转录在盘上**——解除"生成中"，
@@ -493,10 +498,8 @@ impl CoreHandle {
                 return Err("生成线程崩溃：会话已按落盘转录保留，可继续".to_string());
             }
         };
-        // 事件已由上面的 sink 逐轮入台（不再整批补推，否则同一批事实在台上有两份）；
-        // 这里只把起止两条运行态补进**本次回包**——它们确实也进了事件台，回包因此与事件台同源。
-        events.insert(0, start_working);
-        events.push(end_working);
+        // 事实只进事件台（这一回合的行由 sink 逐轮入台，起止两条运行态也已入台）；
+        // 回包只给头部序号——想看的端自己按 since 订阅，不在命令里捎带事实。
         // 交回核心只做"重新插入"：转录也已逐轮增量落盘。
         let parent = self.call({
             let sid = sid.to_string();
@@ -506,7 +509,7 @@ impl CoreHandle {
         if let Some(parent) = parent {
             self.spawn_detached_collab(&parent);
         }
-        Ok(Advance { events, seq })
+        Ok(Advance { head: seq })
     }
 
     /// 主线程侧：为一个成员回合取该 agent 的会话，跑完把回合结果带回来（并落进它自己的会话）。
@@ -693,11 +696,8 @@ impl CoreHandle {
                     "压缩没成功：{}",
                     err
                 )));
-                let seq = bus.push(sid, std::slice::from_ref(&note));
-                return Ok(Advance {
-                    events: vec![note],
-                    seq,
-                });
+                let head = bus.push(sid, std::slice::from_ref(&note));
+                return Ok(Advance { head });
             }
         };
         let ev = SessionEvent::Compacted { up_to, summary };
@@ -710,11 +710,8 @@ impl CoreHandle {
                 Ok(())
             }
         })?;
-        let seq = bus.push(sid, std::slice::from_ref(&ev));
-        Ok(Advance {
-            events: vec![ev],
-            seq,
-        })
+        let head = bus.push(sid, std::slice::from_ref(&ev));
+        Ok(Advance { head })
     }
 
     /// 起一轮**脱离调用方**的节点执行：核心注入任务 + 不等它跑完。
@@ -798,7 +795,6 @@ impl CoreHandle {
                 .name("solomni-collab".to_string())
                 .spawn(move || {
                     let mut c = session;
-                    let mut events: Vec<SessionEvent> = Vec::new();
                     let mut seq = 0u64;
                     // 安全网计数（见循环尾）：提醒/重问必须有终点，不能让泵空转。
                     let mut guard = 0usize;
@@ -811,7 +807,6 @@ impl CoreHandle {
                             if let Some(warn) = persister.persist(std::slice::from_ref(&ev)) {
                                 bus.push(&sid, std::slice::from_ref(&SessionEvent::Notice(warn)));
                             }
-                            events.push(ev);
                         };
                         match work {
                             CollabWork::Step(CollabStep::Begin) => {
@@ -931,7 +926,7 @@ impl CoreHandle {
                             &[crate::core::events::SessionEvent::Working { agent: None }],
                         );
                     }
-                    (c, events, seq)
+                    (c, seq)
                 })
                 .map_err(|e| format!("起协作线程失败：{}", e))?
         };
@@ -954,7 +949,7 @@ impl CoreHandle {
         drop(turn_tx);
         let joined = worker.join();
         jobs.unregister(sid);
-        let (c, mut events, mut seq) = match joined {
+        let (c, mut seq) = match joined {
             Ok(x) => x,
             Err(_) => {
                 // 线程崩了：会话对象没了，但转录在盘上——解除"生成中"，下次访问按盘重建。
@@ -976,19 +971,23 @@ impl CoreHandle {
         })?;
         for ev in spawned {
             seq = bus.push(sid, std::slice::from_ref(&ev));
-            events.push(ev);
         }
         // 派发：每个就绪节点在**它自己的子会话**里起一轮生成（脱离本次调用，不等它跑完）。
         for (_node, child, objective) in todo {
             self.spawn_detached_node(&child, &objective);
         }
-        Ok(Advance { events, seq })
+        Ok(Advance { head: seq })
     }
 }
 
 impl SessionOps for CoreHandle {
-    fn create_work(&self, spec: WorkSpec) -> Result<WorkOpened, String> {
-        self.call(move |core| core.create_work(spec))
+    fn create_work(&self, spec: WorkSpec) -> Result<(WorkOpened, u64), String> {
+        let bus = Arc::clone(&self.bus);
+        self.call(move |core| {
+            let opened = core.create_work(spec)?;
+            let head = bus.push(&opened.sid, &opened.facts);
+            Ok((opened, head))
+        })
     }
 
     fn say(&self, sid: &str, text: &str, out: Output) -> Result<Advance, String> {
@@ -1008,8 +1007,8 @@ impl SessionOps for CoreHandle {
                 let bus = Arc::clone(&self.bus);
                 self.call(move |core| {
                     let events = core.collab_continue(&sid, step, &text)?;
-                    let seq = bus.push(&sid, &events);
-                    Ok(Advance { events, seq })
+                    let head = bus.push(&sid, &events);
+                    Ok(Advance { head })
                 })
             }
             // 长步骤（开始讨论 / 回答）：队列只占"取/交"两步，泵在工作线程上跑。
@@ -1026,8 +1025,8 @@ impl SessionOps for CoreHandle {
         let bus = Arc::clone(&self.bus);
         self.call(move |core| {
             let events = core.withdraw_agree(&sid, &agent)?;
-            let seq = bus.push(&sid, &events);
-            Ok(Advance { events, seq })
+            let head = bus.push(&sid, &events);
+            Ok(Advance { head })
         })
     }
 

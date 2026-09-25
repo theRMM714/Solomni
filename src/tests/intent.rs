@@ -104,11 +104,12 @@ fn act_dispatches_to_the_two_result_shapes() {
         .sessions
         .create_work(single_work("w", &["a"]))
         .expect("建会话")
+        .0
         .sid;
 
     match intent::act(&ops, &sid, intent::Action::Say("你好"), Output::Final).expect("说一句")
     {
-        intent::Acted::Advanced(adv) => assert!(adv.seq > 0, "生成类给事件批与序号"),
+        intent::Acted::Advanced(adv) => assert!(adv.head > 0, "生成类只回事件台头部序号"),
         intent::Acted::Replayed(_) => panic!("说一句不该给重放"),
     }
     // 回档给的是「完整重放」（线格式事件数组），不是事件批；keep_id = 0 表示一行不留。
@@ -122,10 +123,6 @@ fn act_dispatches_to_the_two_result_shapes() {
         intent::act(&ops, "没这个会话", intent::Action::Say("x"), Output::Final).is_err(),
         "无此会话如实报错"
     );
-    assert!(
-        intent::into_events(intent::Acted::Replayed(vec![serde_json::json!({})])).is_empty(),
-        "重放没有可渲染的事件行"
-    );
 }
 
 #[test]
@@ -135,6 +132,7 @@ fn editing_is_refused_while_a_session_is_generating() {
         .sessions
         .create_work(single_work("w", &["a"]))
         .expect("建会话")
+        .0
         .sid;
     intent::ensure_editable(&ops, &sid).expect("没在生成时可以改");
 

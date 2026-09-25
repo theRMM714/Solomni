@@ -280,9 +280,8 @@ async function lines(sid) {
   assert(childJson.includes('"working"'), '子会话事件台带运行态（在跑/收尾）', childJson.slice(0, 200));
   // 整理完停在**待审**：点「同意」才开工；开工后节点在子会话里跑，交付是异步产生的。
   await approvePlan(name2);
-  const ev2 = JSON.stringify(
-    [].concat((begin.json && begin.json.events) || [], await waitForDelivery(name2)),
-  );
+  // 命令回包不再携带事实：协作的转录与交付从**落盘重放**取（快照）。
+  const ev2 = JSON.stringify(await waitForDelivery(name2));
   assert(ev2.includes('甲') && ev2.includes('乙'), '协作转录以 agent 名为说话人', ev2.slice(0, 240));
   assert(ev2.includes('delivery') || ev2.includes('交付'), '协作跑完并交付', ev2.slice(-240));
   assert(fs.existsSync(path.join(dir(name2), '甲')) && fs.existsSync(path.join(dir(name2), '乙')), '两个 agent 各自沙箱目录已建');
@@ -291,7 +290,11 @@ async function lines(sid) {
   const name3 = 'e2e-delegate-' + Date.now();
   const c3 = await api('POST', '/api/sessions', { name: name3, mode: 'collab', agents: [], task: '调研一下再总结', delegate: true });
   assert(c3.status === 200, '建代拟工作（无名单）', c3.text.slice(0, 200));
-  assert(JSON.stringify((c3.json && c3.json.events) || []).includes('代拟'), '核心已代拟名单', JSON.stringify((c3.json && c3.json.events) || []).slice(0, 240));
+  // 开场事实在**事件台**上（回包只给 head）：按会话过滤取它自己的流。
+  const c3Bus = JSON.stringify(
+    ((await api('GET', '/api/events?sid=' + encodeURIComponent(name3) + '&since=0')).json || {}).lines || [],
+  );
+  assert(c3Bus.includes('代拟'), '核心已代拟名单', c3Bus.slice(0, 240));
   const slate = await api('POST', '/api/sessions/' + encodeURIComponent(name3) + '/slate', { text: 'yes' });
   assert(slate.status === 200, '确认代拟名单', slate.text.slice(0, 200));
   const meta3 = fs.readFileSync(path.join(dir(name3), 'meta.yaml'), 'utf8');
@@ -302,9 +305,7 @@ async function lines(sid) {
   const begun3 = await api('POST', '/api/sessions/' + encodeURIComponent(name3) + '/begin', { text: 'yes,allow' });
   assert(begun3.status === 200, '代拟名单后开始讨论', begun3.text.slice(0, 200));
   await approvePlan(name3);
-  const ev3 = JSON.stringify(
-    [].concat((begun3.json && begun3.json.events) || [], await waitForDelivery(name3)),
-  );
+  const ev3 = JSON.stringify(await waitForDelivery(name3));
   assert(ev3.includes('单兵'), '代拟出来的 agent 真的在发言', ev3.slice(0, 240));
 
 
@@ -412,7 +413,10 @@ async function approvePlan(name) {
   assert((await api('POST', '/api/sessions/' + encodeURIComponent(nE) + '/begin', { text: 'yes,allow' })).status === 200, '「撤回」开始讨论');
   const w = await api('POST', '/api/sessions/' + encodeURIComponent(nE) + '/withdraw', { agent: '乙' });
   assert(w.status === 200, '撤回乙的同意', w.text.slice(0, 200));
-  assert(JSON.stringify((w.json && w.json.events) || []).includes('[用户:撤回] 乙'), '撤回如实进转录', w.text.slice(0, 240));
+  const wBus = JSON.stringify(
+    ((await api('GET', '/api/events?sid=' + encodeURIComponent(nE) + '&since=0')).json || {}).lines || [],
+  );
+  assert(wBus.includes('[用户:撤回] 乙'), '撤回如实进转录（事实在事件台）', wBus.slice(0, 240));
 
   // ⑥ ask 中止：agent 提问 → 轮转中止并呈给用户；回答后继续。
   const nF = 'e2e-collab-ask-' + Date.now();

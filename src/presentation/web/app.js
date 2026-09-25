@@ -1691,7 +1691,7 @@ async function startSession(body) {
     lines: [], live: [], pending: null, busy: false, done: false, awaiting: null, fold: {}, scroll: {},
   };
   state.sessions.set(sid, s);
-  for (const ev of (r.events || [])) absorb(s, ev);
+  // 开场事实不随回包走：它们已经在事件台上，长轮询会照 seq 补进来。
   setActive(sid);
   if (body.mode === 'collab') await refreshPending(s);
   renderAll();
@@ -2183,11 +2183,10 @@ function takeInput() {
   return v;
 }
 
-/* 已应用到的批序号 + 乱序缓冲。
-   动作回包与长轮询是**两股流**，同一个 seq 可能倒着到：直接丢会造成**永久丢失**
-   （删除先到、更新后到，界面就再也不对，只能刷新）。所以缺口未到先攒着，补上再按序应用。 */
+/* 已应用到的批序号（**单调游标**）。
+   事实只有一条来路（事件台）：批次按 seq 到达，游标只前进；服务端裁剪造成跳号时由
+   `oldest` 触发一次历史重放重新对齐（见 pollLoop）。 */
 let appliedSeq = 0;
-const pendingBatches = new Map();
 /* 状态（侧栏/历史）可能被**别的客户端**改了：置位后由轮询统一拉一次。 */
 let needState = false;
 let lastStateAt = Date.now();
@@ -2204,52 +2203,28 @@ async function resyncActive() {
   } catch { /* 拿不到就等下一次状态刷新 */ }
 }
 
-/** 收一批事件：按 seq 顺序应用。返回 'full' | 'live' | 'none'（渲染粒度）。 */
+/** 收一批事件并应用。返回 'full' | 'live' | 'none'（渲染粒度）。 */
 function applyBatch(seq, sid, events) {
-  if (typeof seq === 'number' && seq > appliedSeq) pendingBatches.set(seq, { sid, events });
-  // 兜底护栏：攒到几百批还补不齐（缺口已永久丢失）= 放弃按序补齐，免得越攒越多。
-  if (pendingBatches.size > 200) {
-    pendingBatches.clear();
-    appliedSeq = typeof seq === 'number' ? seq - 1 : appliedSeq;
-    needState = true;
+  if (typeof seq === 'number') appliedSeq = Math.max(appliedSeq, seq);
+  let s = state.sessions.get(sid);
+  if (!s) {
+    // 未知会话 = 有**别的客户端**建了会话（演示脚本、另一个标签页）。
+    // **必须就地建出会话状态**再吸收事件：否则它的事件（含流式 delta）会被永久丢掉，
+    // 只有手动点开时才靠历史回放补上——那正是"流式没起效、别人的会话不更新"的来源。
+    const h = (state.history || []).find((x) => x.name === sid);
+    s = {
+      sid, mode: (h && h.mode) || 'single', title: sid,
+      lines: [], live: [], pending: null, busy: false,
+      done: !!(h && h.done), awaiting: null, fold: {}, scroll: {},
+    };
+    state.sessions.set(sid, s);
+    needState = true; // 侧栏也顺手对齐
   }
-  let mode = 'none';
-  while (pendingBatches.has(appliedSeq + 1)) {
-    const item = pendingBatches.get(appliedSeq + 1);
-    pendingBatches.delete(appliedSeq + 1);
-    appliedSeq += 1;
-    let s = state.sessions.get(item.sid);
-    if (!s) {
-      // 未知会话 = 有**别的客户端**建了会话（演示脚本、另一个标签页）。
-      // **必须就地建出会话状态**再吸收事件：否则它的事件（含流式 delta）会被永久丢掉，
-      // 只有手动点开时才靠历史回放补上——那正是"流式没起效、别人的会话不更新"的来源。
-      const h = (state.history || []).find((x) => x.name === item.sid);
-      s = {
-        sid: item.sid, mode: (h && h.mode) || 'single', title: item.sid,
-        lines: [], live: [], pending: null, busy: false,
-        done: !!(h && h.done), awaiting: null, fold: {}, scroll: {},
-      };
-      state.sessions.set(item.sid, s);
-      needState = true; // 侧栏也顺手对齐
-    }
-    // 运行态：别人在跑时前端自己的 busy 不知道，用事件流推断（有增量=在跑；见到收尾=跑完）。
-    if (item.events.some((e) => e.type === 'delta')) s.busy = true;
-    if (item.events.some((e) => e.type === 'ended' || e.type === 'delivery' || e.type === 'discussion_done')) s.busy = false;
-    const m = absorbEvents(s, item.events);
-    if (m === 'full') mode = 'full';
-    else if (m === 'live' && mode !== 'full') mode = 'live';
-  }
-  return mode;
+  // 运行态：别人在跑时前端自己的 busy 不知道，用事件流推断（有增量=在跑；见到收尾=跑完）。
+  if (events.some((e) => e.type === 'delta')) s.busy = true;
+  if (events.some((e) => e.type === 'ended' || e.type === 'delivery' || e.type === 'discussion_done')) s.busy = false;
+  return absorbEvents(s, events);
 }
-/* 动作回包：走同一条按序应用的路（不再各判一套）。 */
-function applyActionEvents(s, r) {
-  if (typeof r.seq !== 'number') {
-    for (const ev of r.events || []) absorb(s, ev);
-    return;
-  }
-  applyBatch(r.seq, s.sid, r.events || []);
-}
-
 async function act(action, text) {
   const s = activeSession();
   if (!s || isBusy(s) || s.readonly) return;
@@ -2260,8 +2235,8 @@ async function act(action, text) {
   }
   renderStream();
   try {
-    const r = await api('POST', '/api/sessions/' + encodeURIComponent(s.sid) + '/' + action, { text });
-    applyActionEvents(s, r);
+    // 命令回包只有头部序号：事实（含自己那条发言的权威行）由事件流补进来。
+    await api('POST', '/api/sessions/' + encodeURIComponent(s.sid) + '/' + action, { text });
     s.awaiting = null;
     await refreshPending(s);
     renderAll();
@@ -2305,8 +2280,7 @@ function withdrawAgree(agent) {
   choiceModal('撤回同意', '撤回「' + agent + '」的同意？继续时会按剩余转录重新判定。', [
     ['撤回', 'btn btn-danger', async () => {
       try {
-        const r = await api('POST', '/api/sessions/' + encodeURIComponent(s.sid) + '/withdraw', { agent });
-        applyActionEvents(s, r);
+        await api('POST', '/api/sessions/' + encodeURIComponent(s.sid) + '/withdraw', { agent });
         renderAll();
       } catch (err) { notice('操作失败', err.message, 'err'); }
     }],
@@ -2321,9 +2295,8 @@ async function continueFlow() {
   s.busy = true;
   renderStream();
   try {
-    const r = await api('POST', '/api/sessions/' + encodeURIComponent(s.sid) + '/continue', {});
+    await api('POST', '/api/sessions/' + encodeURIComponent(s.sid) + '/continue', {});
     s.readonly = false; // 历史回放会话一旦继续即转为活动会话（跨重启续跑）
-    applyActionEvents(s, r);
     await refreshPending(s);
     renderAll();
   } catch (err) {
@@ -2595,7 +2568,6 @@ async function pollLoop() {
       // （只有刷新页面才恢复）——所以这里重新对齐：丢掉滞留，跳到还留着的起点，
       // 并把当前会话按历史重放一次。
       if (oldest > 0 && oldest > appliedSeq + 1) {
-        pendingBatches.clear();
         appliedSeq = oldest - 1;
         needState = true;
         await resyncActive();

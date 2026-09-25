@@ -100,12 +100,14 @@ pub struct WorkSpec {
     pub delegate: bool,
 }
 
-/// 创建工作后的结果：最终实例名（重名已加尾号）与开场事件。
+/// 创建工作后的结果：最终实例名（重名已加尾号）、名单，以及**开场事实**。
+/// 事实由 api 层发布进事件台（核心不持有事件台）；**不上回包**——
+/// 回包只给事件台头部序号，谁要看谁按 `since` 订阅。
 #[derive(Debug, Clone)]
 pub struct WorkOpened {
     pub sid: SessionId,
     pub agents: Vec<String>,
-    pub events: Vec<SessionEvent>,
+    pub facts: Vec<SessionEvent>,
 }
 
 /// 核心推荐的 agent 草案（名字 + 模块 + 模型 + 理由；用户可改，核心不代选）。
@@ -1722,10 +1724,11 @@ impl Core {
         self.history.create(&meta)?;
         self.sessions.insert(name.clone(), session);
         self.record_events(&name, &mut events);
+        // 事实（开场转录 + 提示）随结果交出：核心不持有事件台，发布是 api 层的职责。
         Ok(WorkOpened {
             sid: name,
             agents: agent_names,
-            events,
+            facts: events,
         })
     }
 

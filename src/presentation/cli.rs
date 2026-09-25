@@ -254,6 +254,26 @@ fn render(events: &[SessionEvent]) {
     }
 }
 
+/// **订阅事件台**：把 `from` 之后属于这条会话的批次渲染出来，返回新的游标。
+/// 命令回包只给头部序号——事实一条不落都在事件台上，CLI 与 Web 前端读的是同一份。
+fn drain(ops: &Ops, sid: &str, from: u64) -> u64 {
+    let (lines, head, _oldest) = ops.events.snapshot(Some(sid), from);
+    for l in &lines {
+        render(&l.events);
+    }
+    head
+}
+
+/// 一次命令之后的订阅。回档/改需求给的是**重放快照**（不是增量事实）：终端不重复打，
+/// 只把游标推到当前头部（与从前"只渲生成类结果"的行为一致）。
+fn follow(ops: &Ops, sid: &str, cursor: &mut u64, acted: intent::Acted) {
+    if matches!(acted, intent::Acted::Replayed(_)) {
+        *cursor = ops.events.head();
+        return;
+    }
+    *cursor = drain(ops, sid, *cursor);
+}
+
 // ---------- 形态一：单 agent（模块数不限） ----------
 
 fn single_flow(ops: &Ops, arg: &str) {
@@ -292,6 +312,8 @@ fn single_flow(ops: &Ops, arg: &str) {
             return;
         }
     };
+    // 订阅起点：命令回包只给头部序号，事实一律从事件台按 since 取。
+    let mut cursor = ops.events.head();
     let opened = match intent::open_work(ops, work_name, WorkMode::Single, vec![agent], None, false)
     {
         Ok(o) => o,
@@ -300,7 +322,7 @@ fn single_flow(ops: &Ops, arg: &str) {
             return;
         }
     };
-    render(&opened.events);
+    cursor = drain(ops, &opened.sid, cursor);
     let sid = opened.sid;
     println!("（单 agent {} —— 输入消息，空行结束会话）", sid);
     loop {
@@ -310,7 +332,7 @@ fn single_flow(ops: &Ops, arg: &str) {
         }
         // 终端只在最终结果上渲染，不要流式（怎么显示是呈现层的事）。
         match intent::act(ops, &sid, intent::Action::Say(&say), Output::Final) {
-            Ok(acted) => render(&intent::into_events(acted)),
+            Ok(acted) => follow(ops, &sid, &mut cursor, acted),
             Err(e) => {
                 println!("[错误] {}", e);
                 break;
@@ -344,6 +366,7 @@ fn collab_flow(ops: &Ops, arg: &str) {
             return;
         }
     };
+    let mut cursor = ops.events.head();
     let sid = match intent::open_work(
         ops,
         work_name,
@@ -353,7 +376,7 @@ fn collab_flow(ops: &Ops, arg: &str) {
         delegate,
     ) {
         Ok(o) => {
-            render(&o.events);
+            cursor = drain(ops, &o.sid, cursor);
             o.sid
         }
         Err(e) => {
@@ -390,7 +413,7 @@ fn collab_flow(ops: &Ops, arg: &str) {
             intent::Action::Step(CollabStep::ConfirmSlate, &ok),
             Output::Final,
         ) {
-            Ok(acted) => render(&intent::into_events(acted)),
+            Ok(acted) => follow(ops, &sid, &mut cursor, acted),
             Err(e) => println!("[错误] {}", e),
         }
     }
@@ -403,7 +426,7 @@ fn collab_flow(ops: &Ops, arg: &str) {
             intent::Action::Step(CollabStep::Begin, &ans),
             Output::Final,
         ) {
-            Ok(acted) => render(&intent::into_events(acted)),
+            Ok(acted) => follow(ops, &sid, &mut cursor, acted),
             Err(e) => println!("[错误] {}", e),
         }
     }
@@ -418,7 +441,7 @@ fn collab_flow(ops: &Ops, arg: &str) {
                 intent::Action::Step(CollabStep::Answer, &ans),
                 Output::Final,
             ) {
-                Ok(acted) => render(&intent::into_events(acted)),
+                Ok(acted) => follow(ops, &sid, &mut cursor, acted),
                 Err(e) => {
                     println!("[错误] {}", e);
                     break;

@@ -2381,7 +2381,7 @@ pub(crate) fn core_collab_delegated_slate_flow() {
         .create_work(collab_work("w", &[], true, "做个东西"))
         .unwrap();
     let sid = opened.sid;
-    let ev = opened.events;
+    let ev = opened.facts;
     assert!(matches!(
         core.collab_pending(&sid),
         Ok(Some(Pending::ConfirmSlate))
@@ -2424,7 +2424,7 @@ pub(crate) fn core_collab_slate_rejects_invalid_picks() {
     let ev = core
         .create_work(collab_work("w", &[], true, "任务"))
         .unwrap()
-        .events;
+        .facts;
     for want in ["ghost 不存在", "幽灵 不在登记处", "nope 不存在"] {
         assert!(
             ev.iter()
@@ -6416,7 +6416,7 @@ pub(crate) fn core_collab_tool_modules_run_in_execution() {
         .create_work(collab_work("w", &["a"], false, "任务"))
         .unwrap();
     let sid = opened.sid;
-    let mut events = opened.events;
+    let mut events = opened.facts;
     events.extend(core.collab_continue(&sid, CollabStep::Begin, "").unwrap());
     // 整理完停在**审查关卡**：点「同意」才继续（P4b 起协作的必经一步）。
     events.extend(

@@ -296,9 +296,7 @@ pub(crate) fn route(
                     .unwrap_or(false),
             };
             match ops.sessions.create_work(spec) {
-                Ok(o) => ok_json(
-                    json!({ "sid": o.sid, "agents": o.agents, "events": ev_json(&o.events) }),
-                ),
+                Ok((o, head)) => ok_json(json!({ "sid": o.sid, "agents": o.agents, "head": head })),
                 Err(e) => {
                     log.error("web::create_work", &format!("创建工作失败：{}", e));
                     complaint(400, e)
@@ -385,10 +383,9 @@ pub(crate) fn route(
                 _ => return complaint(400, format!("未知动作：{}", action)),
             };
             match intent::act(ops, &sid, what, out) {
-                // 动作回包即时返回本批事件与事件台序号；同批也早已入台供其它端增量取。
-                // 客户端按 seq 去重，避免「动作回包 + 长轮询」把同一批事件派发两次。
+                // 命令回包只给**事件台头部序号**：事实由长轮询按 since 订阅（不在这里捎带）。
                 Ok(intent::Acted::Advanced(adv)) => {
-                    ok_json(json!({ "sid": sid, "events": ev_json(&adv.events), "seq": adv.seq }))
+                    ok_json(json!({ "sid": sid, "head": adv.head }))
                 }
                 // 回档 / 改需求返回完整重放（前端整体重建）。
                 Ok(intent::Acted::Replayed(events)) => {

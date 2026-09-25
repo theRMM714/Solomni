@@ -105,27 +105,25 @@ fn meta(name: &str) -> SessionMeta {
 }
 
 impl SessionOps for FakeOps {
-    fn create_work(&self, _spec: WorkSpec) -> Result<WorkOpened, String> {
+    fn create_work(&self, _spec: WorkSpec) -> Result<(WorkOpened, u64), String> {
         self.guard()?;
-        Ok(WorkOpened {
-            sid: "w1".to_string(),
-            agents: vec!["甲".to_string()],
-            events: vec![crate::core::SessionEvent::Notice("开好了".to_string())],
-        })
+        Ok((
+            WorkOpened {
+                sid: "w1".to_string(),
+                agents: vec!["甲".to_string()],
+                facts: vec![crate::core::SessionEvent::Notice("开好了".to_string())],
+            },
+            7,
+        ))
     }
     fn say(&self, _sid: &str, _text: &str, _out: Output) -> Result<Advance, String> {
+        // 命令回包只给事件台头部序号：事实由长轮询按 since 订阅。
         self.guard()?;
-        Ok(Advance {
-            events: vec![crate::core::SessionEvent::Notice("推进了".to_string())],
-            seq: 7,
-        })
+        Ok(Advance { head: 7 })
     }
     fn continue_flow(&self, _sid: &str, _out: Output) -> Result<Advance, String> {
         self.guard()?;
-        Ok(Advance {
-            events: Vec::new(),
-            seq: 8,
-        })
+        Ok(Advance { head: 8 })
     }
     fn collab_step(
         &self,
@@ -134,17 +132,11 @@ impl SessionOps for FakeOps {
         _text: &str,
     ) -> Result<Advance, String> {
         self.guard()?;
-        Ok(Advance {
-            events: Vec::new(),
-            seq: 9,
-        })
+        Ok(Advance { head: 9 })
     }
     fn withdraw_agree(&self, _sid: &str, _agent: &str) -> Result<Advance, String> {
         self.guard()?;
-        Ok(Advance {
-            events: Vec::new(),
-            seq: 10,
-        })
+        Ok(Advance { head: 10 })
     }
     fn slate(&self, _sid: &str) -> Result<Vec<AgentMeta>, String> {
         self.guard()?;
@@ -152,10 +144,7 @@ impl SessionOps for FakeOps {
     }
     fn compact(&self, _sid: &str) -> Result<crate::core::api::Advance, String> {
         self.guard()?;
-        Ok(crate::core::api::Advance {
-            events: Vec::new(),
-            seq: 0,
-        })
+        Ok(crate::core::api::Advance { head: 0 })
     }
     fn rewind(&self, _sid: &str, _keep_id: u64) -> Result<Vec<serde_json::Value>, String> {
         self.guard()?;
@@ -855,7 +844,7 @@ fn success_shapes_are_pinned_per_route() {
             "/api/sessions/w1/say",
             r#"{"text":"你好"}"#,
             200,
-            "\"seq\"",
+            "\"head\"",
         ),
         (
             "POST",
@@ -876,7 +865,7 @@ fn success_shapes_are_pinned_per_route() {
             "/api/sessions/w1/withdraw",
             r#"{"agent":"甲"}"#,
             200,
-            "\"seq\"",
+            "\"head\"",
         ),
         ("POST", "/api/sessions/w1/pending", "{}", 200, "\"pending\""),
         (

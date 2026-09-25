@@ -55,31 +55,34 @@ fn generation_pushes_facts_to_the_event_bus_with_sequence_numbers() {
     let handle = spawn(vec![module_of("a")], Vec::new());
     let ops = Ops::from_handle(&handle);
     let bus = handle.events();
-    let opened = ops
+    // 建工作：回包给（会话 + 名单 + 事件台头部），开场事实**只**进事件台。
+    let (opened, base) = ops
         .sessions
         .create_work(single_work("w", &["a"]))
         .expect("建会话");
-    assert!(bus.snapshot(None, 0).0.is_empty(), "建会话本身不入事件台");
+    assert!(base > 0, "开场事实也进事件台");
+    assert!(
+        !bus.snapshot(Some(&opened.sid), 0).0.is_empty(),
+        "建工作的开场事实在事件台上"
+    );
 
     let adv = ops
         .sessions
         .say(&opened.sid, "你好", Output::Final)
         .expect("说一句");
-    assert!(adv.seq > 0, "本批事件必须带序号");
-    let (lines, head, _oldest) = bus.snapshot(Some(&opened.sid), 0);
+    // 命令回包只给**事件台头部序号**：事实只有一条来路，不再随回包返回。
+    assert!(adv.head > base, "回包给的是事件台头部序号");
+    let (lines, head, _oldest) = bus.snapshot(Some(&opened.sid), base);
     // 逐轮外送：事件按"一轮一批"进台，所以这里是多批（以前是整回合一批）。
-    // Advance.seq 是**最后一批**的序号——客户端按它去重，与逐轮外送同源。
     assert!(!lines.is_empty(), "生成期间就该有事件进台");
+    assert_eq!(head, adv.head, "回包头部 = 事件台头部");
     assert_eq!(
         lines[lines.len() - 1].seq,
-        adv.seq,
-        "回复里的序号是最后一批的序号（客户端据此去重）"
+        adv.head,
+        "最后一批就是头部那一批"
     );
-    let on_bus: usize = lines.iter().map(|l| l.events.len()).sum();
-    assert_eq!(on_bus, adv.events.len(), "事件台与回复是同一批事实");
-    assert_eq!(head, adv.seq);
     assert!(
-        bus.snapshot(Some(&opened.sid), adv.seq).0.is_empty(),
+        bus.snapshot(Some(&opened.sid), adv.head).0.is_empty(),
         "游标之后不再重复"
     );
     assert!(
@@ -98,6 +101,7 @@ fn stop_takes_effect_while_generation_is_still_running() {
         .sessions
         .create_work(single_work("w", &["a"]))
         .expect("建会话")
+        .0
         .sid;
 
     let worker = {
@@ -139,6 +143,7 @@ fn reads_are_not_queued_behind_a_long_generation() {
         .sessions
         .create_work(single_work("w", &["a"]))
         .expect("建会话")
+        .0
         .sid;
     let worker = {
         let sessions = Arc::clone(&ops.sessions);
@@ -196,6 +201,7 @@ fn reads_are_not_queued_behind_a_collab_discussion() {
         .sessions
         .create_work(collab_work("c", &["a", "b"], false, "把资料整理成报告"))
         .expect("建协作会话")
+        .0
         .sid;
     let worker = {
         let sessions = Arc::clone(&ops.sessions);
@@ -243,11 +249,12 @@ fn reads_are_not_queued_behind_a_collab_discussion() {
 /// 协作的「停止」：在一个成员调用内收尾；**被中断的那条发言不吸收**；会话保持可继续。
 #[test]
 fn stopping_a_collab_discussion_is_prompt_and_keeps_the_session() {
-    let (_handle, ops, started, release) = gated_ops(vec![module_of("a"), module_of("b")]);
+    let (handle, ops, started, release) = gated_ops(vec![module_of("a"), module_of("b")]);
     let sid = ops
         .sessions
         .create_work(collab_work("c", &["a", "b"], false, "把资料整理成报告"))
         .expect("建协作会话")
+        .0
         .sid;
     let worker = {
         let sessions = Arc::clone(&ops.sessions);
@@ -264,7 +271,7 @@ fn stopping_a_collab_discussion_is_prompt_and_keeps_the_session() {
 
     let stopped = Instant::now();
     assert!(ops.sessions.stop(&sid), "在跑就该停得掉");
-    let out = worker
+    worker
         .join()
         .expect("协作线程")
         .expect("停止是正常收尾，不是错误");
@@ -273,16 +280,18 @@ fn stopping_a_collab_discussion_is_prompt_and_keeps_the_session() {
         "停止要在一个成员调用内收尾（{:?}）",
         stopped.elapsed()
     );
+    // 回包只给头部序号；事实从**事件台**取（命令不携带事实）。
+    let (batches, _head, _oldest) = handle.events().snapshot(Some(&sid), 0);
+    let on_bus: Vec<&SessionEvent> = batches.iter().flat_map(|l| l.events.iter()).collect();
     // 如实告知：用户看得到"停在哪、没作废"。
     assert!(
-        out.events
+        on_bus
             .iter()
             .any(|e| matches!(e, SessionEvent::Notice(n) if n.contains("[停止]"))),
         "要有「已停止」的如实说明"
     );
     // 被中断的那条发言（半截 agree）**不该**进转录。
-    let lines: Vec<String> = out
-        .events
+    let lines: Vec<String> = on_bus
         .iter()
         .filter_map(|e| match e {
             SessionEvent::Transcript(ls) => Some(ls.iter().map(|l| l.line.clone())),
@@ -322,6 +331,7 @@ fn collab_transcript_lands_on_disk_while_the_discussion_runs() {
         .sessions
         .create_work(collab_work("c", &["a", "b"], false, "把资料整理成报告"))
         .expect("建协作会话")
+        .0
         .sid;
     let worker = {
         let sessions = Arc::clone(&ops.sessions);
@@ -359,6 +369,7 @@ fn collab_discussion_emits_each_member_line_as_it_speaks() {
         .sessions
         .create_work(collab_work("c", &["a", "b"], false, "把资料整理成报告"))
         .expect("建协作会话")
+        .0
         .sid;
     let worker = {
         let sessions = Arc::clone(&ops.sessions);
@@ -465,28 +476,29 @@ fn compacting_replaces_the_send_view_with_one_rolling_summary() {
         .sessions
         .create_work(single_work("w", &["a"]))
         .expect("建会话")
+        .0
         .sid;
     ops.sessions
         .say(&sid, "先做第一件事", crate::core::api::Output::Final)
         .expect("说一句");
 
     let first = ops.sessions.compact(&sid).expect("第一次压缩");
+    let (b1, head1, _o1) = handle.events().snapshot(Some(&sid), 0);
+    let s1: Vec<&SessionEvent> = b1.iter().flat_map(|l| l.events.iter()).collect();
     assert!(
-        first
-            .events
-            .iter()
+        s1.iter()
             .any(|e| matches!(e, SessionEvent::Compacted { summary, .. } if summary == "摘要一")),
-        "第一次压缩该如实落一条压缩事件：{:?}",
-        first.events
+        "第一次压缩该如实落一条压缩事件（头部 {}）",
+        first.head
     );
     let second = ops.sessions.compact(&sid).expect("第二次压缩");
+    let (b2, _head2, _o2) = handle.events().snapshot(Some(&sid), head1);
+    let s2: Vec<&SessionEvent> = b2.iter().flat_map(|l| l.events.iter()).collect();
     assert!(
-        second
-            .events
-            .iter()
+        s2.iter()
             .any(|e| matches!(e, SessionEvent::Compacted { summary, .. } if summary == "摘要二")),
-        "第二次压缩该如实落一条压缩事件：{:?}",
-        second.events
+        "第二次压缩该如实落一条压缩事件（头部 {}）",
+        second.head
     );
 
     let all = seen.lock().expect("锁").clone();
@@ -534,6 +546,7 @@ fn auto_compaction_kicks_in_when_the_history_exceeds_the_budget() {
         .sessions
         .create_work(single_work("w", &["a"]))
         .expect("建会话")
+        .0
         .sid;
     ops.sessions
         .say(&sid, "先做第一件事", crate::core::api::Output::Final)

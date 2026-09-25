@@ -16,8 +16,9 @@
 
 规则：
 
-- **命令**：呈现层调能力接口 → 核心在自己的线程上执行 → 同步回包（`Advance`：本批事件 + 事件台序号）。
-- **事件**：生成过程中的短暂事件与最终事件都进事件台；Web 长轮询按 `since` 取，客户端按 `seq` 去重。
+- **命令**：呈现层调能力接口 → 核心在自己的线程上执行 → 同步回包（`Advance`：**事件台头部序号**）。
+  命令**不携带事实**——事实只有一条来路（事件台）；回包里的 `head` 只是"我现在说到哪了"。
+- **事件**：生成过程中的短暂事件与最终事件都进事件台；Web 长轮询按 `since` 取，客户端按 `seq` 增量取。
 - **事件按会话分开**：一条会话在自己那一回合里产生的东西进**它自己的事件流**（`sid` 就是那条流）——
   流式增量、核实行、**定稿的转录行**、运行态都是。主会话只拿"谁说了什么"的投影；
   子会话拿完整的一份（含定稿行）。客户端打开哪个标签页读哪条流，不靠"从别人的流里猜自己"。
@@ -54,13 +55,15 @@
 
 - 挂起的请求在页面关闭/空闲时**释放**；SSE 会让**每个标签页永久占一条连接**（HTTP/1.1 每域 6 条）；
 - SSE 的主要优势（内建重连、省掉每请求开销）在这里没有痛点：本机直连、客户端已有失败重试、开销可忽略；
-- **SSE 也不解决顺序问题**：命令回包（`Advance` 带 `seq`）与事件流仍是**两股流**，乱序风险照样存在。
+- **传输可替换**：契约在**事件台**（一个可重读的日志）——换 SSE / WebSocket 只换"怎么把批次送到前端"，
+  不改事实词汇与命令形状。
 
 **何时重估**：需要多标签页/多客户端并用，或从别的机器访问（那时代理、重连、连接复用才真正值钱）。
 
-**顺序与去重（客户端硬约束）**：命令回包与长轮询携带**同一个 `seq` 空间**，两股流可能乱序到达。
-客户端必须按 `seq` **排序/补洞**后应用，**不能**用"序号更小就丢弃"的单向去重——那会让倒着到的整批
-事件永久丢失（界面显示错值且不会自愈，只能刷新）。
+**顺序与去重（客户端硬约束）**：事实只有**一条来路**（事件台）。命令回包只给 `head`，
+客户端因此只需维护一个单调游标 `appliedSeq`：取到的批次按 `seq` 排序后应用；
+`oldest` 已经越过游标说明那段被裁剪了，就拉一次历史重放**重新对齐**。
+（从前回包也带事件，两股流可能乱序，客户端得排序/补洞——那条复杂度随这次契约收紧一起消失。）
 ## 二、HTTP 路由目录（机器可读）
 
 `presentation/routes.rs` 的 `ROUTES` 是路由的**唯一定义**：`web.rs` 的匹配与分发都由它驱动
@@ -78,8 +81,8 @@
 | GET | `/md.js` | 静态资源 | — | `md.js` | 200 |
 | GET | `/api/events` | 事件台（`EventBus`） | 查询 `sid` / `since` | `{lines:[{seq,sid,events}],head,oldest}` | 200 |
 | GET | `/api/state` | `DiscoveryOps` + `RegistryOps` + `HistoryOps` | — | `{modules,rejected,fence,providers,models,core,agents,settings,sessions,history}` | 200, 400 |
-| POST | `/api/sessions` | `SessionOps::create_work` | `{name,mode,agents[],task?,delegate?}` | `{sid,agents,events}` | 200, 400 |
-| POST | `/api/sessions/{sid}/{action}` | `SessionOps` + `intent::act` | `{text?,agent?,id?,overwrite?,data_base64?,编辑体}` | `{sid,events,seq}` 等 | 200, 400, 404, 409 |
+| POST | `/api/sessions` | `SessionOps::create_work` | `{name,mode,agents[],task?,delegate?}` | `{sid,agents,head}` | 200, 400 |
+| POST | `/api/sessions/{sid}/{action}` | `SessionOps` + `intent::act` | `{text?,agent?,id?,overwrite?,data_base64?,编辑体}` | `{sid,head}` / `{sid,events}`（重放快照）等 | 200, 400, 404, 409 |
 | GET | `/api/sessions/{sid}/config` | `SessionOps::config` | — | `{config}` | 200, 400 |
 | GET | `/api/sessions/{sid}/files` | `SessionOps::files` | — | `{work,agents,roots}` | 200, 404 |
 | POST | `/api/providers` | `RegistryOps::upsert_provider` | `{id,base_url,api_key}` | `{ok}` | 200, 400 |

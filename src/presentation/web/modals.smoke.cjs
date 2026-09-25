@@ -128,23 +128,20 @@ if (!loadErrors.length) {
     const out = vm.runInNewContext('parseLine("[轮次 2]", false)', sandbox);
     return out.length === 1 && out[0].cls === "sys system";
   });
-  // ⑤ 乱序批按序补洞：先到 seq=2、后到 seq=1，两条都要应用且顺序正确。
-  check("乱序批按 seq 补洞后按序应用", () => {
+  // ⑤ 批次按 seq 应用，游标**单调前进**（事实只有一条来路：事件台）。
+  check("批次按 seq 应用，游标只前进", () => {
     const got = vm.runInNewContext(`
       (() => {
         state.sessions.set("s1", { sid: "s1", lines: [], live: [], pending: null, busy: false, done: false, fold: {}, scroll: {} });
         appliedSeq = 0;
-        pendingBatches.clear();
-        applyBatch(2, "s1", [{ type: "notice", text: "第二" }]);
-        const afterTwo = state.sessions.get("s1").lines.length;
         applyBatch(1, "s1", [{ type: "notice", text: "第一" }]);
+        applyBatch(2, "s1", [{ type: "notice", text: "第二" }]);
         const lines = state.sessions.get("s1").lines.map((l) => l.text);
-        return { afterTwo, lines, applied: appliedSeq };
+        return { lines, applied: appliedSeq };
       })()
     `, sandbox);
-    // seq=2 先到时不能应用（缺口没补），补上 seq=1 后两条按序都进来。
-    return got.afterTwo === 0 && got.applied === 2 &&
-      got.lines.length === 2 && got.lines[0].indexOf("第一") >= 0 && got.lines[1].indexOf("第二") >= 0;
+    return got.applied === 2 && got.lines.length === 2 &&
+      got.lines[0].indexOf("第一") >= 0 && got.lines[1].indexOf("第二") >= 0;
   });
   // ⑥ 节点回报要显示成一行"完成"（此前只有"开工"，用户看不到节点交回来了）。
   check("节点回报显示成完成行", () => {

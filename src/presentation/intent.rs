@@ -9,7 +9,7 @@
 
 use crate::core::agents::AgentView;
 use crate::core::api::{Ops, Output};
-use crate::core::{AgentInstance, CollabStep, SessionEdit, SessionEvent, WorkOpened, WorkSpec};
+use crate::core::{AgentInstance, CollabStep, SessionEdit, WorkOpened, WorkSpec};
 
 /// 登记处为空时的引导文案（CLI 与 Web 同源）。
 pub const NO_AGENTS: &str = "登记处还没有 agent：请先到 Web 界面「设置 → agent 管理」建一个";
@@ -122,13 +122,15 @@ pub fn open_work(
     task: Option<String>,
     delegate: bool,
 ) -> Result<WorkOpened, String> {
-    ops.sessions.create_work(WorkSpec {
+    // 命令回包只给头部序号；事实由调用方按 `since` 从事件台订阅（谁发起的都一样）。
+    let (opened, _head) = ops.sessions.create_work(WorkSpec {
         name,
         mode,
         agents,
         task,
         delegate,
-    })
+    })?;
+    Ok(opened)
 }
 
 /// 一次会话动作：CLI 与 Web 共用同一分发（新增动作只改这里）。
@@ -149,7 +151,8 @@ pub enum Action<'a> {
     Compact,
 }
 
-/// 动作结果：生成类给事件批（带事件台序号），回档/改需求给完整重放。
+/// 动作结果：生成类只回**事件台头部序号**（事实在事件台上，订阅者自己按 since 取）；
+/// 回档/改需求给完整重放（那是快照，不是增量事实）。
 pub enum Acted {
     Advanced(crate::core::api::Advance),
     Replayed(Vec<serde_json::Value>),
@@ -183,12 +186,4 @@ pub fn ensure_editable(ops: &Ops, sid: &str) -> Result<(), String> {
 pub fn edit_session(ops: &Ops, sid: &str, edit: SessionEdit) -> Result<(), String> {
     ensure_editable(ops, sid)?;
     ops.sessions.edit(sid, edit)
-}
-
-/// 渲染用的扁平结果：`Replayed` 是历史重放（无 `SessionEvent` 形态），CLI 只关心「有没有事件可渲染」。
-pub fn into_events(acted: Acted) -> Vec<SessionEvent> {
-    match acted {
-        Acted::Advanced(adv) => adv.events,
-        Acted::Replayed(_) => Vec::new(),
-    }
 }
