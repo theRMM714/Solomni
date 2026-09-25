@@ -747,8 +747,7 @@ impl CollabSession {
     ) {
         let next_line = std::cell::Cell::new(self.next_line);
         let handed = std::cell::Cell::new(0usize);
-        let mut on_lines = |lines: &[crate::core::engine::DiscLine],
-                            s: &mut dyn FnMut(SessionEvent)| {
+        let mut on_lines = |lines: &[LineView], s: &mut dyn FnMut(SessionEvent)| {
             emit_new_lines(lines, &next_line, &handed, s);
         };
         let out = self.disc.as_mut().expect("disc 已确认存在").feed(
@@ -1330,15 +1329,19 @@ impl CollabSession {
         let names: Vec<String> = meta.agents.iter().map(|a| a.name.clone()).collect();
         let st = crate::core::collab_state::derive(events, &names);
         // 全部已发出的转录行（按 id 顺序），连降级标记一起读回（样式靠它，不靠文案）。
-        let mut all_lines: Vec<crate::core::engine::DiscLine> = Vec::new();
+        let mut all_lines: Vec<LineView> = Vec::new();
         for ev in events {
             if ev.get("type").and_then(|t| t.as_str()) == Some("transcript") {
                 if let Some(lines) = ev.get("lines").and_then(|l| l.as_array()) {
                     for l in lines {
                         if let Some(s) = l.get("line").and_then(|x| x.as_str()) {
-                            all_lines.push(crate::core::engine::DiscLine {
-                                reasoning: None,
-                                text: s.to_string(),
+                            all_lines.push(LineView {
+                                line: s.to_string(),
+                                // 思维链随行落档：重建后仍可查看（重启不丢）。
+                                reasoning: l
+                                    .get("reasoning")
+                                    .and_then(|r| r.as_str())
+                                    .map(|r| r.to_string()),
                                 degraded: l
                                     .get("degraded")
                                     .and_then(|d| d.as_bool())
@@ -1353,6 +1356,7 @@ impl CollabSession {
                                 // 回合 id 随行落档：回档时两边按它对上（见 session-model.md 五）。
                                 turn: l.get("turn").and_then(|t| t.as_u64()).unwrap_or(0),
                                 system: l.get("system").and_then(|s| s.as_bool()).unwrap_or(false),
+                                ..Default::default()
                             });
                         }
                     }
@@ -1408,7 +1412,7 @@ impl CollabSession {
             // 讨论转录 = 最后一条 [用户:开始] 之后的行。
             let start = all_lines
                 .iter()
-                .rposition(|l| l.text.starts_with("[用户:开始]"))
+                .rposition(|l| l.line.starts_with("[用户:开始]"))
                 .map(|i| i + 1)
                 .unwrap_or(all_lines.len());
             let disc_lines = all_lines[start..].to_vec();
@@ -1487,7 +1491,7 @@ fn derive_pending(st: &crate::core::collab_state::CollabState) -> Option<Pending
 /// 为什么要 Cell/RefCell：回调在 `Discussion::step/open` 内部被调用，那时 `self` 正被可变借用，
 /// 碰不到 `self.next_line` 与 `sink`——所以调用前后各并回一次，行只构造一次。
 fn emit_new_lines(
-    lines: &[crate::core::engine::DiscLine],
+    lines: &[LineView],
     next_line: &std::cell::Cell<u64>,
     handed: &std::cell::Cell<usize>,
     sink: &mut dyn FnMut(SessionEvent),
@@ -1495,20 +1499,13 @@ fn emit_new_lines(
     let views: Vec<LineView> = lines
         .iter()
         .map(|l| {
+            // 会话内稳定 id 由**主会话**在行的第一次见光时分配（行自己不带 id）。
             let id = next_line.get();
             next_line.set(id + 1);
             LineView {
                 id,
                 reply: id,
-                line: l.text.clone(),
-                degraded: l.degraded,
-                // 讨论回合里的核实行带着工具视图（与单 agent 的工具行同一形态）。
-                tool: l.tool.clone(),
-                // 回合 id 落进线格式：回档时两边按它对上（见 session-model.md 五）。
-                turn: l.turn,
-                // 系统消息标记落进线格式：前端据此显示系统行，不靠匹配文本。
-                system: l.system,
-                ..Default::default()
+                ..l.clone()
             }
         })
         .collect();
@@ -1529,12 +1526,11 @@ fn push_delta(
         let views: Vec<LineView> = disc.transcript[*emitted..]
             .iter()
             .map(|l| {
+                // 整行照搬（工具视图 / 降级 / 回合号 / 系统标记都不丢）。
                 let v = LineView {
                     id: *next_line,
                     reply: *next_line,
-                    line: l.text.clone(),
-                    degraded: l.degraded,
-                    ..Default::default()
+                    ..l.clone()
                 };
                 *next_line += 1;
                 v

@@ -60,19 +60,21 @@ impl SystemTools {
         Ok(out)
     }
 
+    /// 一个角色这一回合的**工具面**（id 清单 + 是否给它自己模块的工具）。
+    /// 单一口径：装配期发放会话面、按回合切面（讨论席说话 / 执行席干活）都读它。
+    pub fn role_face(&self, role: &str) -> (Vec<String>, bool) {
+        let ids = self
+            .tool_face(role)
+            .map(|f| f.into_iter().map(|(id, _)| id.to_string()).collect())
+            .unwrap_or_default();
+        (ids, self.allows_module_tools(role))
+    }
+
     /// 这个身份能不能用它自己模块的工具（论据：角色表的 module_tools）。
     pub fn allows_module_tools(&self, role: &str) -> bool {
         self.roles
             .get(role)
             .map(|d| d.module_tools)
-            .unwrap_or(false)
-    }
-
-    /// 这个角色能不能调这个工具（越权校验的唯一判据）。
-    pub fn allows(&self, role: &str, tool: &str) -> bool {
-        self.roles
-            .get(role)
-            .map(|d| d.tools.iter().any(|t| t == tool))
             .unwrap_or(false)
     }
 

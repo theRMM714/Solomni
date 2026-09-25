@@ -629,26 +629,33 @@ impl Core {
             if self.history.load(&child).is_err() {
                 self.spawn_agent_session(sid, &agent)?;
             }
-            // ③ 跑这一回合（工具面 = 动词 + 只读核实）。
+            // ③ 跑这一回合：**与单 agent 同一条轮循环**（身份块 + 本回合工具面 + 对话 + 本回合提示 + 表态）。
+            // 工具面由角色表发放（讨论席 = 动词 + 只读核实）；产出逐轮落进**它自己的会话**。
             let mut s = self.take_single(&child)?;
-            let ran = {
-                // 身份块由泵现渲染；对话来自该 agent 自己的会话；本回合提示由泵给出。
-                let hist = s.dialogue().to_vec();
-                let (chat, tools) = s.parts_mut();
-                crate::core::engine::Discussion::turn_with(
-                    &systools,
-                    "discussant",
-                    &cancel,
-                    opts,
-                    &agent,
-                    &identity,
-                    &hist,
-                    chat,
-                    tools,
-                    turn,
-                    &mut |e| out.push(e),
-                )
+            let round = match self.sessions.get(sid) {
+                Some(Session::Collab(c)) => c.round(),
+                _ => 0,
             };
+            let (ran, notes) = {
+                // 两个出口（流式短暂事件 / 定稿事件）都收进同一份事件流。
+                let notes = std::cell::RefCell::new(Vec::new());
+                let mut live = crate::core::events::Live {
+                    llm: crate::core::ports::LlmOpts {
+                        stream: opts.stream,
+                        timeout_secs: opts.timeout_secs,
+                    },
+                    cancel: std::sync::Arc::clone(&cancel),
+                    emit: &mut |e: SessionEvent| notes.borrow_mut().push(e),
+                };
+                let mut sink = |e: SessionEvent| notes.borrow_mut().push(e);
+                let face = systools.role_face("discussant");
+                let t =
+                    s.discussion_turn(&identity, face, turn, turn_id, round, &mut live, &mut sink);
+                (t, notes.into_inner())
+            };
+            // 落盘到**它自己的目录**（讨论的核实痕迹随会话一起重启后还在）。
+            self.persister(&child).persist(&notes);
+            out.extend(notes);
             self.put_single(&child, s);
             let turn = match ran {
                 Ok(t) => t,
@@ -662,41 +669,6 @@ impl Core {
                     break;
                 }
             };
-            // ③b 该回合的产出落进**它自己的会话**：回合标记 + 核实行 + 它自己的发言。
-            // 主会话只留"谁说了什么"（发言由 feed 投影过去），核实的痕迹留在各自会话里。
-            // 没表态也要落它自己的会话（那是它的回合记录）；标签如实写"未表态"。
-            let tag = match turn.verb {
-                Some(crate::core::envelope::Verb::Say) => "say",
-                Some(crate::core::envelope::Verb::Ask) => "ask",
-                Some(crate::core::envelope::Verb::Leave) => "leave",
-                Some(crate::core::envelope::Verb::Agree) => "agree",
-                Some(crate::core::envelope::Verb::Tool) => "tool",
-                None => "未表态",
-            };
-            let round = match self.sessions.get(sid) {
-                Some(Session::Collab(c)) => c.round(),
-                _ => 0,
-            };
-            let note = {
-                let mut s = self.take_single(&child)?;
-                let events = s.note_turn(
-                    round,
-                    turn_id,
-                    tag,
-                    &turn.text,
-                    if turn.reasoning.is_empty() {
-                        None
-                    } else {
-                        Some(turn.reasoning.clone())
-                    },
-                    &turn.lines,
-                );
-                self.put_single(&child, s);
-                events
-            };
-            // 落盘到**它自己的目录**（讨论的核实痕迹随会话一起重启后还在）。
-            self.persister(&child).persist(&note);
-            out.extend(note);
             // ④ **核心只提醒、不强制**（见 session-model.md 二）：没表态时按计数决定提醒还是放过。
             let user_stopped = cancel.load(std::sync::atomic::Ordering::Relaxed);
             let (after, reminder) = {

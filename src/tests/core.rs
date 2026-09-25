@@ -566,19 +566,10 @@ pub(crate) fn collab_rewind_rebuilds_from_transcript_and_resume_waits_at_gate() 
 }
 
 /// **工具轮的思维链随该轮的工具行落档**：流式结束后仍可查看（不再"流式完就丢"）。
+/// 行由**唯一那处**构造函数产出（单 agent 与讨论席共用），所以这里直接问它。
 #[test]
-pub(crate) fn note_turn_records_the_round_reasoning_on_the_tool_line() {
-    let mut core = core_with(vec![module_of("a")], gw(BTreeMap::new(), vec!["[]".into()]));
-    let sid = core
-        .create_work(work("w", WorkMode::Single, &["a"]))
-        .unwrap()
-        .sid;
-    let crate::core::Prepared::Run { mut session, .. } = core
-        .prepare_single(&sid, Some("准备"), false)
-        .expect("准备一个回合")
-    else {
-        panic!("这条会话该是可以跑的");
-    };
+pub(crate) fn tool_round_reasoning_lands_on_the_tool_line() {
+    let prompts = test_prompts();
     let tool = crate::core::events::ToolCallView {
         speaker: "a".to_string(),
         module: String::new(),
@@ -590,31 +581,35 @@ pub(crate) fn note_turn_records_the_round_reasoning_on_the_tool_line() {
         call_id: String::new(),
         reply: 0,
     };
-    let lines = vec![crate::core::engine::DiscLine {
-        text: "[a:read] 成功 内容".to_string(),
-        reasoning: Some("先思考".to_string()),
+    let round = crate::core::engine::Round {
+        reply: 1,
+        // 工具轮没有正文：思维链不能另造一条空回答行，只能挂到工具行上。
+        text: String::new(),
+        reasoning: "先思考".to_string(),
+        text_msgs: Vec::new(),
+        tool: Some(crate::core::engine::ToolRun {
+            view: tool,
+            msgs: Vec::new(),
+        }),
+        finish: String::new(),
+        error: None,
+        verb: None,
         degraded: false,
-        turn: 0,
-        system: false,
-        tool: Some(tool),
-    }];
-    let evs = session.note_turn(1, 1, "agree", "同意", Some("总思维链".to_string()), &lines);
-    let rows: Vec<crate::core::events::LineView> = evs
-        .iter()
-        .filter_map(|e| match e {
-            SessionEvent::Transcript(ls) => Some(ls.clone()),
-            _ => None,
-        })
-        .flatten()
-        .collect();
-    let tool_row = rows.iter().find(|l| l.tool.is_some()).expect("要有工具行");
+    };
+    let next = std::cell::Cell::new(0u64);
+    let lines = crate::core::session::build_round_lines(
+        "a",
+        &prompts.core.tool_texts,
+        &round,
+        false,
+        &next,
+        None,
+    );
+    assert_eq!(lines.len(), 1, "工具轮没有正文时只出工具行：{lines:?}");
     assert_eq!(
-        tool_row.reasoning.as_deref(),
+        lines[0].reasoning.as_deref(),
         Some("先思考"),
-        "工具轮的思维链要随该行落档：{:?}",
-        rows.iter()
-            .map(|l| (l.line.clone(), l.reasoning.clone()))
-            .collect::<Vec<_>>()
+        "工具轮的思维链要随该行落档：{lines:?}"
     );
 }
 /// 裁决的**建议由核心 AI 给**（随 plan 那一次调用一起产出，不额外花调用）：
@@ -1159,6 +1154,8 @@ pub(crate) fn run_execution(
             &mut |_r: &crate::core::engine::Round,
                   _s: &mut dyn FnMut(crate::core::events::SessionEvent)| {},
             &mut sink,
+            &[],
+            false,
         );
         let text = rounds.last().map(|r| r.text.clone()).unwrap_or_default();
         out.reports.insert(id.clone(), text);
@@ -1286,7 +1283,7 @@ pub(crate) fn discussion_call_failure_interrupts_without_absorbing_a_line() {
     let spoken = d
         .transcript
         .iter()
-        .filter(|l| l.text.contains("[m0:"))
+        .filter(|l| l.line.contains("[m0:"))
         .count();
     assert_eq!(
         spoken,
@@ -1294,11 +1291,11 @@ pub(crate) fn discussion_call_failure_interrupts_without_absorbing_a_line() {
         "失败不该被当成发言（只有开场那一条）：{:?}",
         d.transcript
             .iter()
-            .map(|l| l.text.clone())
+            .map(|l| l.line.clone())
             .collect::<Vec<_>>()
     );
     assert!(
-        d.transcript.iter().all(|l| !l.text.contains("超时")),
+        d.transcript.iter().all(|l| !l.line.contains("超时")),
         "失败原因不该进转录"
     );
     assert!(!d.closed, "中断后讨论保持可继续（用户点「继续」重试）");
@@ -1536,7 +1533,7 @@ pub(crate) fn agreement_is_sticky_so_agreed_members_are_not_asked_again() {
     let asked_m0 = d
         .transcript
         .iter()
-        .filter(|l| l.text.contains("[m0:"))
+        .filter(|l| l.line.contains("[m0:"))
         .count();
     assert_eq!(
         asked_m0,
@@ -1544,7 +1541,7 @@ pub(crate) fn agreement_is_sticky_so_agreed_members_are_not_asked_again() {
         "发过 agree 的人不该被再问一次：{:?}",
         d.transcript
             .iter()
-            .map(|l| l.text.clone())
+            .map(|l| l.line.clone())
             .collect::<Vec<_>>()
     );
 }
@@ -1574,7 +1571,7 @@ pub(crate) fn discussion_full_agreement() {
             TurnOut::Stopped => panic!("不该停止"),
         }
     }
-    assert!(d.transcript.iter().any(|l| l.text.contains("[m0:agree]")));
+    assert!(d.transcript.iter().any(|l| l.line.contains("[m0:agree]")));
 }
 
 #[test]
@@ -1624,7 +1621,7 @@ pub(crate) fn discussion_autonomy_archives_ask() {
             TurnOut::Stopped => panic!("不该停止"),
         }
     }
-    assert!(d.transcript.iter().any(|l| l.text.contains("自裁")));
+    assert!(d.transcript.iter().any(|l| l.line.contains("自裁")));
 }
 
 #[test]
@@ -1741,8 +1738,9 @@ pub(crate) fn discussion_turn_carries_the_agent_sessions_own_history() {
         seen: Arc::clone(&seen),
     };
     let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let prompts = test_prompts();
     let turn = crate::core::engine::Discussion::turn_with(
-        &test_prompts().systools,
+        &prompts.systools,
         "discussant",
         &cancel,
         crate::core::ports::CompleteOpts::plain(false),
@@ -1752,6 +1750,7 @@ pub(crate) fn discussion_turn_carries_the_agent_sessions_own_history() {
         &mut chat,
         None,
         vec![crate::core::ports::Msg::user("讨论上下文")],
+        &prompts.core.tool_texts,
         &mut |_| {},
     )
     .expect("跑一个回合");
@@ -1899,6 +1898,97 @@ pub(crate) fn discussion_member_cannot_use_module_tools() {
     );
 }
 
+/// 讨论席的一回合：**逐轮定稿**（核实行与发言行各是各的一条落档事件，不是攒到回合末一条），
+/// 并且**实时落的行与回档重建出的对话同口径**——重启后子会话的上下文不歪
+/// （回档按行截断历史，靠的就是这两边一致；见 docs/architecture/session-model.md 二之二、五）。
+#[test]
+pub(crate) fn discussion_member_turn_finalizes_by_round_and_rebuilds_the_same_dialogue() {
+    let mut member = BTreeMap::new();
+    member.insert(
+        "a".to_string(),
+        vec![
+            // 先核实一次（读数），再表态（收尾）。
+            "{\"type\":\"tool\",\"name\":\"list\",\"args\":{\"path\":\".\"}}".to_string(),
+            "{\"type\":\"say\",\"text\":\"看过了\"}".to_string(),
+            "{\"type\":\"agree\",\"text\":\"同意\"}".to_string(),
+        ],
+    );
+    let mut core = core_with(
+        vec![module_of("a")],
+        gw(
+            member,
+            vec![
+                "{\"type\":\"tool\",\"name\":\"plan\",\"args\":{\"plan\":\"方案\",\"nodes\":[{\"id\":\"n1\",\"title\":\"做\",\"objective\":\"做\",\"assignee\":\"a\",\"deps\":[]}]}}".to_string(),
+                "{\"type\":\"tool\",\"name\":\"verdict\",\"args\":{\"clear\":true,\"why\":\"照他说的开工\"}}".to_string(),
+                "{\"type\":\"tool\",\"name\":\"node_verdict\",\"args\":{\"verdicts\":[{\"node\":\"n1\",\"ok\":true,\"note\":\"够用\"}]}}".to_string(),
+                "{\"type\":\"tool\",\"name\":\"checklist\",\"args\":{\"items\":[{\"item\":\"做\",\"status\":\"pass\"}]}}".to_string(),
+            ],
+        ),
+    );
+    let sid = core
+        .create_work(collab_work("w", &["a"], false, "做个东西"))
+        .unwrap()
+        .sid;
+    core.collab_continue(&sid, CollabStep::Begin, "yes")
+        .unwrap();
+    let child = format!("{}--a", sid);
+    // ① 逐轮定稿：核实行与发言行是两条 Transcript，且同属一个回合号。
+    let (_, rows) = core.history_open(&child).unwrap();
+    let batches: Vec<Vec<serde_json::Value>> = rows
+        .iter()
+        .filter(|e| e.get("type").and_then(|t| t.as_str()) == Some("transcript"))
+        .filter_map(|e| e.get("lines").and_then(|l| l.as_array()))
+        .map(|ls| ls.to_vec())
+        .filter(|b: &Vec<serde_json::Value>| !b.is_empty())
+        .collect();
+    let row_text = |l: &serde_json::Value| {
+        l.get("line")
+            .and_then(|x| x.as_str())
+            .unwrap_or("")
+            .to_string()
+    };
+    let tool_at = batches
+        .iter()
+        .position(|b| b.iter().any(|l| l.get("tool").is_some()))
+        .expect("核实行该落档");
+    let said_at = batches
+        .iter()
+        .position(|b| b.iter().any(|l| row_text(l).contains(":say] 看过了")))
+        .expect("发言行该落档");
+    let turn_of = |b: &Vec<serde_json::Value>, pick: &dyn Fn(&serde_json::Value) -> bool| {
+        b.iter()
+            .find(|l| pick(l))
+            .and_then(|l| l.get("turn").and_then(|t| t.as_u64()))
+    };
+    let tool_turn = turn_of(&batches[tool_at], &|l| l.get("tool").is_some());
+    let said_turn = turn_of(&batches[said_at], &|l| row_text(l).contains(":say] 看过了"));
+    assert!(
+        tool_at < said_at,
+        "一轮一条：核实行先出、发言行后出（不是回合末一次性一批）：{batches:?}"
+    );
+    assert_eq!(tool_turn, said_turn, "同一个回合的行带同一个回合号");
+    // ② 实时与重建同口径：把会话从表里丢掉，再取一次 = 按落盘转录重建。
+    let shown = |s: &crate::core::session::AgentSession| {
+        s.dialogue()
+            .iter()
+            .map(|m| format!("{}:{}", m.role, m.content))
+            .collect::<Vec<_>>()
+    };
+    let live = core.take_single(&child).expect("会话在表里");
+    let live_msgs = shown(&live);
+    // 丢掉会话本体 + 撤下"生成中"：这一步之后的取用只能**按落盘转录重建**（崩溃/重启同一条路）。
+    drop(live);
+    core.abort_running(&child);
+    core.prepare_single(&child, None, false)
+        .expect("按落盘转录重建（ensure_session 这条路）");
+    let rebuilt = core.take_single(&child).expect("取回重建出来的会话");
+    assert_eq!(
+        shown(&rebuilt),
+        live_msgs,
+        "实时与重建必须逐条一致（否则重启后子会话的上下文就歪了）"
+    );
+}
+
 /// **没写信封的原文不算表态**：不投影主会话；提醒到顶才留一行**系统消息**"未回应"。
 /// 判据是结构化的（system / degraded 字段），呈现层不靠匹配文案。
 #[test]
@@ -1922,17 +2012,17 @@ pub(crate) fn prose_without_an_envelope_is_not_a_statement() {
         !disc
             .transcript
             .iter()
-            .any(|l| l.text.starts_with("[m0:say]")),
+            .any(|l| l.line.starts_with("[m0:say]")),
         "散文不是表态，不该投影主会话：{:?}",
         disc.transcript
             .iter()
-            .map(|l| l.text.clone())
+            .map(|l| l.line.clone())
             .collect::<Vec<_>>()
     );
     let note = disc
         .transcript
         .iter()
-        .find(|l| l.text.contains("未回应"))
+        .find(|l| l.line.contains("未回应"))
         .expect("提醒到顶该记一行未回应");
     assert!(
         note.system,
@@ -5333,8 +5423,9 @@ pub(crate) fn discussion_turn_streams_deltas_and_never_leaks_the_envelope() {
     };
     let mut events: Vec<crate::core::events::SessionEvent> = Vec::new();
     let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let prompts = test_prompts();
     let _ = crate::core::engine::Discussion::turn_with(
-        &test_prompts().systools,
+        &prompts.systools,
         "discussant",
         &cancel,
         crate::core::ports::CompleteOpts::plain(true), // 开流式
@@ -5344,6 +5435,7 @@ pub(crate) fn discussion_turn_streams_deltas_and_never_leaks_the_envelope() {
         &mut chat,
         None,
         vec![crate::core::ports::Msg::user("说说")],
+        &prompts.core.tool_texts,
         &mut |e| events.push(e),
     )
     .expect("跑一个回合");
@@ -7933,15 +8025,16 @@ pub(crate) fn core_operations_require_a_tool_call_not_body_json() {
         ("orchestrator", "checklist"),
     ] {
         assert!(
-            prompts.systools.allows(role, tool),
+            prompts.systools.role_face(role).0.iter().any(|t| t == tool),
             "{} 该拿到 {} 工具",
             role,
             tool
         );
     }
     // 讨论席与执行席不拿核心操作（越权会被如实拒绝）。
-    assert!(!prompts.systools.allows("discussant", "plan"));
-    assert!(!prompts.systools.allows("executor", "checklist"));
+    let face = |role: &str| prompts.systools.role_face(role).0;
+    assert!(!face("discussant").iter().any(|t| t == "plan"));
+    assert!(!face("executor").iter().any(|t| t == "checklist"));
     // 谁能用"自己模块的工具"也由角色表说了算：只有干活的那一席发（讨论席列出来等于请它去撞墙）。
     assert!(
         prompts.systools.allows_module_tools("executor"),
@@ -8059,12 +8152,13 @@ pub(crate) fn body_json_is_not_a_core_operation() {
 pub(crate) fn executor_reports_through_a_tool_call() {
     let prompts = test_prompts();
     // 角色表把 report 发给执行席（越权校验的判据就是它）。
+    let face = |role: &str| prompts.systools.role_face(role).0;
     assert!(
-        prompts.systools.allows("executor", "submit_report"),
+        face("executor").iter().any(|t| t == "submit_report"),
         "执行席该拿到回报工具"
     );
     assert!(
-        !prompts.systools.allows("discussant", "submit_report"),
+        !face("discussant").iter().any(|t| t == "submit_report"),
         "讨论席不该拿到回报工具"
     );
     // 它不是文件域工具：没有 path 也照跑，回执把三个字段带出来。

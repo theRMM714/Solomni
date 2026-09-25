@@ -3,7 +3,7 @@
 //! 支持工具循环（联动 engine::converse_with）；转录行带会话内稳定 id（自 0 递增），
 //! 并记录每行对应的历史长度，供回档精确回退。
 
-use crate::core::engine::{MemberTools, Round};
+use crate::core::engine::{MemberTools, MemberTurn, Round};
 use crate::core::events::{LineView, Live, SessionEvent, ToolCallView};
 use crate::core::ports::Chunk;
 use crate::core::ports::{BoxedChat, Msg};
@@ -78,6 +78,22 @@ impl SessionParams {
     }
 }
 
+/// 跑**一个回合**要的那几样（单 agent / 节点 / 讨论成员共用同一条轮循环，差别只在这里）：
+/// 身份块（谁）、工具面（能调什么）、本回合提示（说什么）、表态约定、回合号（行按它对上）。
+pub struct TurnRun<'a> {
+    /// 本回合的身份块（驱动按当前提示词册现渲染；不进对话）。
+    pub identity: &'a str,
+    /// 本回合的工具面（角色表发放的 id + 是否给它自己模块的工具）；None = 会话自己的（执行席）。
+    /// 讨论席按回合切面：同一个 agent 会话会用两种身份干活（说话 / 干活）。
+    pub face: Option<(Vec<String>, bool)>,
+    /// 本回合的提示（讨论席的开场/轮转词；执行席常为空——它的指令在派发行里）。
+    pub turn: Vec<Msg>,
+    /// 本回合认不认**协作表态**（讨论席认；执行席不认）。
+    pub verbs: bool,
+    /// 本回合的回合号（转录行按它对上）；None = 用该轮自己的回复号（单 agent 的每轮各成回合）。
+    pub turn_id: Option<u64>,
+}
+
 /// 一个 agent 的会话：模块数不限（形态只在校验与界面标签上区分）。
 pub struct AgentSession {
     /// agent 实例名（说话人标签；重建时也按它命名）。
@@ -112,8 +128,9 @@ pub struct AgentSession {
 }
 
 impl AgentSession {
-    /// 本会话的**对话**（讨论回合要把它带上：用户在这个会话里说的话，下一回合它就该记得）。
+    /// 本会话的**对话**（测试据此断言"用户说过的话，下一回合带上了"）。
     /// 身份与环境不在里面——它们由 params 现渲染（见 SessionParams::identity）。
+    #[cfg(test)]
     pub fn dialogue(&self) -> &[crate::core::ports::Msg] {
         &self.dialogue
     }
@@ -129,12 +146,6 @@ impl AgentSession {
             work: self.params.shared.clone(),
             private: Some(self.params.private.clone()),
         }
-    }
-
-    /// 讨论回合要**在这个会话里**跑：一次借出通道与工具环境。
-    /// 为什么一次借两样：分开借会同时可变借用 self（编译不过），而它们本就是同一回合的两半。
-    pub fn parts_mut(&mut self) -> (&mut dyn crate::core::ports::Chat, Option<&mut MemberTools>) {
-        (self.chat.as_mut(), self.tools.as_mut())
     }
 
     // 组合根注入的构造函数：参数天然多，收口成参数对象只是把参数挪个地方、并让装配更难读。
@@ -219,32 +230,6 @@ impl AgentSession {
             .clone()
             .map(|n| vec![SessionEvent::Notice(n)])
             .unwrap_or_default()
-    }
-
-    /// 讨论回合的产出落进**本会话**：回合标记 + 核实行 + 它自己的发言。
-    /// 一个 agent 的会话是它在这场工作里的完整经历（见 docs/architecture/session-model.md）：
-    /// 主会话只留"谁说了什么"，核实（只读工具）的痕迹留在各自会话里。
-    pub fn note_turn(
-        &mut self,
-        round: usize,
-        turn_id: u64,
-        verb: &str,
-        text: &str,
-        reasoning: Option<String>,
-        tools: &[crate::core::engine::DiscLine],
-    ) -> Vec<SessionEvent> {
-        // 这一回合的行都带上回合 id（回档时两边按它对上）。
-        self.cur_turn = turn_id;
-        let mut views = Vec::new();
-        views.push(self.line(format!("[回合 t{}｜第 {} 轮]", turn_id, round), None, None));
-        for l in tools {
-            // 行上的思维链随行落档（工具轮的思维链因此不再丢）。
-            views.push(self.line(l.text.clone(), l.reasoning.clone(), l.tool.clone()));
-        }
-        views.push(self.line(format!("[{}:{}] {}", self.id, verb, text), reasoning, None));
-        // 回合结束后清掉：后面的单 agent 回合各自另算。
-        self.cur_turn = 0;
-        vec![SessionEvent::Transcript(views)]
     }
 
     /// 压缩回合：把提示词追加到历史之后、**只声明 compact 工具**，跑一次模型；拿到摘要就返回。
@@ -487,6 +472,49 @@ impl AgentSession {
         self.rounds_events(identity, live, sink);
     }
 
+    /// 讨论席的一个**成员回合**：与单 agent / 节点**同一条轮循环**（见 TurnRun），
+    /// 差别只有三样：身份块、这一回合的工具面（角色表发放）、本回合提示；外加认协作表态（动词）。
+    /// 产出落进**本会话**（这是它在这场工作里的经历）：回合标记（系统行）+ 逐轮的权威行；
+    /// 返回这一回合的结论（表态 / 正文 / 思维链）交主会话收下（核实行留在它自己的会话里）。
+    #[allow(clippy::too_many_arguments)]
+    pub fn discussion_turn(
+        &mut self,
+        identity: &str,
+        face: (Vec<String>, bool),
+        turn: Vec<Msg>,
+        turn_id: u64,
+        round: usize,
+        live: &mut Live,
+        sink: &mut dyn FnMut(SessionEvent),
+    ) -> Result<MemberTurn, String> {
+        // 回合标记是**系统消息**（不是谁说的）：进上下文与转录都按 system，回档按同一口径还原。
+        for e in self.note_system(&format!("[回合 t{}｜第 {} 轮]", turn_id, round)) {
+            sink(e);
+        }
+        let spec = TurnRun {
+            identity,
+            face: Some(face),
+            turn,
+            verbs: true,
+            turn_id: Some(turn_id),
+        };
+        let rounds = self.run_rounds(&spec, live, sink);
+        if live.cancelled() {
+            return Err("已停止".to_string());
+        }
+        // 末轮就是这一回合的结论（表态轮，或"没表态"的散文轮）；调用失败如实报错。
+        let last = rounds.last().ok_or_else(|| "已停止".to_string())?;
+        if let Some(err) = &last.error {
+            return Err(err.clone());
+        }
+        Ok(MemberTurn::verdict(
+            last.verb,
+            last.text.clone(),
+            last.degraded,
+            last.truncated(),
+        ))
+    }
+
     /// 继续：末条已是用户发言，直接用现有对话问模型（不新增用户消息）。
     pub fn continue_reply(
         &mut self,
@@ -497,18 +525,36 @@ impl AgentSession {
         self.rounds_events(identity, live, sink);
     }
 
-    /// 把一次问询的逐轮产出落成转录行：一轮的正文/思维链出文本行，工具另占一条工具行。
-    /// marks 逐行精确（回档按行截断）；工具轮的文本行与工具行同属一轮，
-    /// 所以历史统一在工具行推进（这一轮只贡献 assistant(raw) + [工具结果]），实时与重建两边一致。
-    /// 逐轮外送：**一轮跑完就出这一轮的行**（以前攒到回合收尾才一次性出，工具轮会把上一轮的
-    /// 流式文本从界面上抹掉）。行在回调里**只构造一次**；`run` 返回后只补记账——`marks` 是回档
-    /// 依据，必须保持"文本行的 mark 在 text_msgs 之前、工具行的 mark 在两个 msgs 之后"这个原时序。
+    /// 单 agent / 节点的一回合：**同一条轮循环**（见 TurnRun），工具面用会话自己的（执行席）。
+    /// 讨论席的成员回合（`discussion_turn`）只是换了 TurnRun 的几个参数——没有第二条循环。
     fn rounds_events(
         &mut self,
         identity: &str,
         live: &mut Live,
         sink: &mut dyn FnMut(SessionEvent),
     ) {
+        let spec = TurnRun {
+            identity,
+            face: None,
+            turn: Vec::new(),
+            verbs: false,
+            turn_id: None,
+        };
+        self.run_rounds(&spec, live, sink);
+    }
+
+    /// 把一次问询的逐轮产出落成转录行：一轮的正文/思维链出文本行，工具另占一条工具行。
+    /// marks 逐行精确（回档按行截断）；工具轮的文本行与工具行同属一轮，
+    /// 所以历史统一在工具行推进（这一轮只贡献 assistant(raw) + [工具结果]），实时与重建两边一致。
+    /// 逐轮外送：**一轮跑完就出这一轮的行**（以前攒到回合收尾才一次性出，工具轮会把上一轮的
+    /// 流式文本从界面上抹掉）。行在回调里**只构造一次**；`run` 返回后只补记账——`marks` 是回档
+    /// 依据，必须保持"文本行的 mark 在 text_msgs 之前、工具行的 mark 在两个 msgs 之后"这个原时序。
+    fn run_rounds(
+        &mut self,
+        spec: &TurnRun<'_>,
+        live: &mut Live,
+        sink: &mut dyn FnMut(SessionEvent),
+    ) -> Vec<Round> {
         let label = self.id.clone();
         let texts = self.tool_texts.clone();
         let stopped = live.cancelled();
@@ -520,13 +566,13 @@ impl AgentSession {
                 *error.borrow_mut() = Some(err);
                 return;
             }
-            let views = build_round_lines(&label, &texts, round, stopped, &next_line);
+            let views = build_round_lines(&label, &texts, round, stopped, &next_line, spec.turn_id);
             if !views.is_empty() {
                 s(SessionEvent::Transcript(views.clone()));
             }
             per_round.borrow_mut().push(views);
         };
-        let rounds = self.run(identity, live, &mut on_round, sink);
+        let rounds = self.run(spec, live, &mut on_round, sink);
         self.next_line = next_line.get();
 
         // 只补记账（不再构造行、不再外送）：顺序与旧逻辑逐字对应。
@@ -578,13 +624,14 @@ impl AgentSession {
                 "[已停止] 生成已按你的要求中止（保留已产出的部分）".to_string(),
             ));
         }
+        rounds
     }
 
     /// 以现有对话跑一次工具循环；流式时逐片外送短暂 Delta（信封正文不外流，避免糊屏）。
     /// identity = 本回合的身份块（由驱动按当前提示词册现渲染；不进对话）。
     fn run(
         &mut self,
-        identity: &str,
+        spec: &TurnRun<'_>,
         live: &mut Live,
         on_round: &mut crate::core::engine::RoundSink<'_>,
         sink: &mut dyn FnMut(SessionEvent),
@@ -592,10 +639,19 @@ impl AgentSession {
         let label = self.id.clone();
         let llm = live.llm;
         let cancel = std::sync::Arc::clone(&live.cancel);
+        // 本回合的工具面（角色表发放）：**按回合换**——同一个会话会用两种身份干活（说话 / 干活）。
+        // 装进这一回合的环境（声明与执行都读它），跑完还原。
+        let saved = match spec.face.as_ref().zip(self.tools.as_mut()) {
+            Some(((ids, with_modules), t)) => Some((
+                std::mem::replace(&mut t.allowed, ids.clone()),
+                std::mem::replace(&mut t.with_modules, *with_modules),
+            )),
+            None => None,
+        };
         // 两个回调（流式分片 / 工具完成）都要外送短暂事件：把 emit 借出来共享（顺序因此天然正确）。
         let emit = std::cell::RefCell::new(&mut *live.emit);
         let mut acc = String::new();
-        {
+        let rounds = {
             let AgentSession {
                 dialogue,
                 chat,
@@ -605,7 +661,7 @@ impl AgentSession {
             crate::core::engine::converse_with(
                 chat.as_mut(),
                 tools.as_mut(),
-                identity,
+                spec.identity,
                 dialogue.clone(),
                 llm,
                 &label,
@@ -639,20 +695,30 @@ impl AgentSession {
                 },
                 on_round,
                 sink,
+                &spec.turn,
+                spec.verbs,
             )
+        };
+        if let (Some(t), Some((allowed, with_modules))) = (self.tools.as_mut(), saved) {
+            t.allowed = allowed;
+            t.with_modules = with_modules;
         }
+        rounds
     }
 }
 
 /// 一轮的转录行：文本行（有正文/思维链时）+ 工具行（有工具时）。
 /// **不依赖 `&mut self`**：它由逐轮回调在 `converse_with` 内部调用，那时 `self` 已被拆开。
 /// 行号从 `next_line` 递增（回调里记不了账，所以由调用方在回合收尾时按同一批行补 marks）。
-fn build_round_lines(
+/// `turn` = 这一行属于哪个回合（讨论席的回合号）；None = 用该轮自己的回复号（单 agent 每轮各成回合）。
+/// **行格式只有这一处定义**：单 agent 与讨论席的行都从这里出（回档按同一口径解析回发言）。
+pub(crate) fn build_round_lines(
     id: &str,
     texts: &crate::core::prompt::ToolTexts,
     round: &Round,
     stopped: bool,
     next_line: &std::cell::Cell<u64>,
+    turn: Option<u64>,
 ) -> Vec<LineView> {
     let text = round.text.trim().to_string();
     let has_line = !text.is_empty() || !round.reasoning.trim().is_empty();
@@ -662,6 +728,8 @@ fn build_round_lines(
     } else {
         Some(round.reasoning.clone())
     };
+    // 回合号：讨论席一轮一个回合号（整场工作单调递增）；单 agent 的每一轮各成"回合"（回档按它对齐）。
+    let turn = turn.unwrap_or(round.reply);
     let make = |line: String, reasoning: Option<String>, tool: Option<ToolCallView>| {
         let num = next_line.get();
         next_line.set(num + 1);
@@ -674,7 +742,7 @@ fn build_round_lines(
             degraded: false,
             system: false,
             task: false,
-            turn: round.reply, // 单 agent 的每一轮各成"回合"（回档按它对齐）
+            turn,
         }
     };
     let mut out = Vec::new();
@@ -683,7 +751,11 @@ fn build_round_lines(
         if !has_line || (text.is_empty() && round.tool.is_some()) {
             return;
         }
-        let mut line = format!("[{}]", id);
+        // 表态轮的行带上动词标签（`[谁:say] 内容`）——回档按同一格式解析回发言原文。
+        let mut line = match round.verb {
+            Some(v) => format!("[{}:{}]", id, crate::core::engine::verb_tag(v)),
+            None => format!("[{}]", id),
+        };
         if !text.is_empty() {
             line.push(' ');
             line.push_str(&text);

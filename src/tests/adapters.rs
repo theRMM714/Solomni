@@ -472,16 +472,12 @@ fn system_tools_and_roles_are_self_consistent() {
         "两张表必须自洽：{:?}",
         st.problems()
     );
-    // 越权判据只有一处：角色表给了的放行，没给的不放行。
-    assert!(st.allows("discussant", "read"), "discussant 该能读");
-    assert!(
-        !st.allows("discussant", "create_session"),
-        "没给的工具必须不放行"
-    );
-    assert!(
-        !st.allows("不存在的角色", "read"),
-        "不存在的角色什么都不放行"
-    );
+    // 越权判据只有一处：**这一回合的工具面**（角色表发放），给了的放行、没给的不放行。
+    let face = |role: &str| st.role_face(role).0;
+    let has = |role: &str, tool: &str| face(role).iter().any(|t| t == tool);
+    assert!(has("discussant", "read"), "discussant 该能读");
+    assert!(!has("discussant", "create_session"), "没给的工具必须不放行");
+    assert!(face("不存在的角色").is_empty(), "不存在的角色什么都不放行");
     // 悬空引用会被 problems 逮到。
     let mut broken = st.clone();
     broken

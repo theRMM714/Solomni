@@ -533,49 +533,63 @@ impl CoreHandle {
             let name = child.clone();
             move |core| core.take_single(&name)
         })?;
-        let systools = req.systools.clone();
+        // 这一回合的调用参数（流式 + 预算）：与单 agent 共用同一份全局设置。
+        let llm = crate::core::ports::LlmOpts {
+            stream: req.opts.stream,
+            timeout_secs: req.opts.timeout_secs,
+        };
         let cancel = std::sync::Arc::clone(&req.cancel);
-        let opts = req.opts;
+        let systools = req.systools.clone();
         let turn = req.turn.clone();
         let identity = req.identity.clone();
-        let agent = req.agent.clone();
-        let _ = &turn;
-        // 这一回合的**短暂事件**（流式增量、越权提醒）按**子会话**的 sid 外送：
-        // 打开那个 agent 的会话就能看到它逐字在说。
+        let round = req.round;
+        let turn_id = req.turn_id;
+        // 子会话自己的**权威行**（逐轮）与**运行态收尾**都走它自己的事件台，
+        // 并且**边产边落盘**：这个会话不经过主会话那条 sink，落盘手柄随线程带过去。
+        let persister = self.call({
+            let name = child.clone();
+            move |core| Ok(core.persister(&name))
+        })?;
         let bus = Arc::clone(&self.bus);
-        // 子会话自己的**权威行**与**运行态收尾**同样走它自己的事件台（见这一回合的收尾处）。
         let child_bus = Arc::clone(&self.bus);
         let child_sid = child.clone();
         let joined = std::thread::Builder::new()
             .name("solomni-member".to_string())
             .spawn(move || {
                 let mut s = session;
+                // **短暂事件**（流式增量）：按子会话的 sid 外送——打开它的会话就能看到它逐字在说。
+                let mut emit = {
+                    let bus = Arc::clone(&bus);
+                    let sid = child_sid.clone();
+                    move |ev: crate::core::events::SessionEvent| {
+                        bus.push(&sid, std::slice::from_ref(&ev));
+                    }
+                };
+                let mut live = crate::core::events::Live {
+                    llm,
+                    cancel: Arc::clone(&cancel),
+                    emit: &mut emit,
+                };
+                // 权威行与通知也进它自己的台，并在产出的当下落盘（重建与实时同源）。
                 let mut sink = |ev: crate::core::events::SessionEvent| {
                     bus.push(&child_sid, std::slice::from_ref(&ev));
+                    if let Some(warn) = persister.persist(std::slice::from_ref(&ev)) {
+                        bus.push(
+                            &child_sid,
+                            std::slice::from_ref(&SessionEvent::Notice(warn)),
+                        );
+                    }
                 };
-                let ran = {
-                    // 这一回合的消息 = 身份块（现渲染）+ 本回合工具 + 该会话的**对话** + 开场/轮转词。
-                    let hist = s.dialogue().to_vec();
-                    let (chat, tools) = s.parts_mut();
-                    crate::core::engine::Discussion::turn_with(
-                        &systools,
-                        "discussant",
-                        &cancel,
-                        opts,
-                        &agent,
-                        &identity,
-                        &hist,
-                        chat,
-                        tools,
-                        turn,
-                        &mut sink,
-                    )
-                };
+                // 这一回合的工具面**由角色表发放**（讨论席：动词 + 只读核实工具）。
+                let face = systools.role_face("discussant");
+                // 这一回合：身份块（现渲染）+ 本回合工具面 + 该会话的**对话** + 开场/轮转词 + 表态。
+                let ran =
+                    s.discussion_turn(&identity, face, turn, turn_id, round, &mut live, &mut sink);
                 (s, ran)
             })
             .map_err(|e| format!("起成员线程失败：{}", e))?
             .join();
-        let (mut s, ran) = match joined {
+        let (s, ran) = match joined {
             Ok(x) => x,
             Err(_) => {
                 self.call({
@@ -619,34 +633,9 @@ impl CoreHandle {
                 return Err(err);
             }
         };
-        // 该回合的产出落进**它自己的会话**：回合标记 + 核实行 + 它自己的发言。
-        // 没表态也要落它自己的会话（那是它的回合记录）；标签如实写"未表态"。
-        let tag = match turn.verb {
-            Some(crate::core::envelope::Verb::Say) => "say",
-            Some(crate::core::envelope::Verb::Ask) => "ask",
-            Some(crate::core::envelope::Verb::Leave) => "leave",
-            Some(crate::core::envelope::Verb::Agree) => "agree",
-            Some(crate::core::envelope::Verb::Tool) => "tool",
-            None => "未表态",
-        };
-        let note = s.note_turn(
-            req.round,
-            req.turn_id,
-            tag,
-            &turn.text,
-            if turn.reasoning.is_empty() {
-                None
-            } else {
-                Some(turn.reasoning.clone())
-            },
-            &turn.lines,
-        );
-        // **权威行也要推子会话自己的事件台**（不只是落盘）：打开它的标签页时，
-        // 流式块必须有这一行来替换——否则"已落盘的正文"会一直挂着闪烁光标、看着像还在流式
-        // （真机反馈：主会话已经是定稿行，子会话却停在流式态）。
-        child_bus.push(&child, &note);
-        // 运行态收尾：主会话有 working{None}，子会话也要有——它的"有增量=在跑"才清得掉，
-        // 否则那个标签页永远显示"正在工作"、按钮永远停在「停止」。
+        // 该回合的产出在跑的时候就已经落进**它自己的会话**并入了它自己的事件台（逐轮、逐条落盘）；
+        // 这里只做运行态收尾：主会话有 working{None}，子会话也要有——否则那个标签页一直显示
+        // "正在工作"、按钮一直停在「停止」。
         child_bus.push(
             &child,
             &[crate::core::events::SessionEvent::Working { agent: None }],
@@ -655,7 +644,6 @@ impl CoreHandle {
             let name = child.clone();
             move |core| {
                 core.put_single(&name, s);
-                core.persister(&name).persist(&note);
                 Ok(())
             }
         })?;

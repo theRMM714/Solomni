@@ -6,7 +6,7 @@
 //! 结果与工具行一律按原始顺序回填——并发只影响执行，不影响上下文里的顺序。
 
 use crate::core::envelope::{self, ToolInvoke, Verb};
-use crate::core::events::{SessionEvent, ToolCallView};
+use crate::core::events::{LineView, SessionEvent, ToolCallView};
 #[cfg(test)]
 use crate::core::ports::BoxedChat;
 use crate::core::ports::{Chat, Chunk, CompleteOpts, Msg, ToolOutcome, ToolRunner};
@@ -219,25 +219,23 @@ fn run_branch(
     args_json: &str,
 ) -> (String, ToolOutcome, crate::core::systool::Observations) {
     let mut branch = ctx.observations.clone();
-    let (label, outcome) = if crate::core::systool::is_builtin(name) {
-        // **按角色表校验**：这个席位没有的工具，如实拒绝（不静默执行）。
-        if !ctx.allowed.iter().any(|t| t == name) {
-            (
-                String::new(),
-                crate::core::systool::refuse(&ctx.sandbox.texts, name),
-            )
-        } else {
-            (
-                String::new(),
-                crate::core::systool::execute(
-                    &ctx.sandbox,
-                    ctx.io.as_ref(),
-                    &mut branch,
-                    name,
-                    args_json,
-                ),
-            )
-        }
+    let (label, outcome) = if !face_has(ctx, module, name) {
+        // **按这一回合的工具面校验**：不在面里的调用一律如实拒绝（不静默执行、也不当表态）。
+        (
+            String::new(),
+            crate::core::systool::refuse(&ctx.sandbox.texts, name),
+        )
+    } else if crate::core::systool::is_builtin(name) {
+        (
+            String::new(),
+            crate::core::systool::execute(
+                &ctx.sandbox,
+                ctx.io.as_ref(),
+                &mut branch,
+                name,
+                args_json,
+            ),
+        )
     } else {
         let inv = ToolInvoke {
             malformed: None,
@@ -250,6 +248,33 @@ fn run_branch(
         dispatch_external(ctx, &inv)
     };
     (label, outcome, branch)
+}
+
+/// 这次调用在**本回合的工具面**里吗：内置按角色表发放的 id 清单，外部工具按"这一回合给不给模块工具"
+/// 与模块归属（判据只有这一处——执行侧与"如实说一句越权"都读它）。
+fn face_has(ctx: &MemberTools, module: Option<&str>, name: &str) -> bool {
+    if crate::core::systool::is_builtin(name) {
+        ctx.allowed.iter().any(|t| t == name)
+    } else {
+        // 没写 module 不算越权：那是"派发时消歧"的事，由 dispatch_external 如实说清（多模块下不猜）。
+        ctx.with_modules && module.map(|m| ctx.modules.contains_key(m)).unwrap_or(true)
+    }
+}
+
+/// 本回合的工具面之外的调用：**如实说一句**（用户可见），执行侧负责不执行（见 run_branch）。
+fn note_unauthorized(
+    ctx: &MemberTools,
+    plan: &[(Option<String>, String, String)],
+    sink: &mut dyn FnMut(SessionEvent),
+) {
+    for (module, tool, _args) in plan {
+        if !face_has(ctx, module.as_deref(), tool) {
+            sink(SessionEvent::Notice(format!(
+                "[越权] 本席位没有工具 {}：本轮不执行、不当表态（如实拒绝）",
+                tool
+            )));
+        }
+    }
 }
 
 /// 这个工具有没有**声明可并发**（策略在册子/清单里，代码里不写名单）：
@@ -544,28 +569,10 @@ pub enum TurnOut {
     Done,
 }
 
-/// 讨论转录的一行：文本 + 该行是否"信封缺失、按发言原文收录"。
-/// 降级是结构化信号（呈现层与后续判断都读它），文本里那句说明只给人和模型看。
-#[derive(Debug, Clone)]
-pub struct DiscLine {
-    pub text: String,
-    /// 这一轮的**思维链**（若模型给出）：随这一行的权威行落档——流式结束后仍可查看，
-    /// 工具轮的思维链因此不会"流式完就丢"。
-    pub reasoning: Option<String>,
-    pub degraded: bool,
-    /// 这一行属于哪个回合（讨论的一次发言回合；0 = 不属任何回合）。
-    /// 两边的转录行靠它对齐（回档同步，见 docs/architecture/session-model.md 五）。
-    pub turn: u64,
-    /// 这一行是**系统消息**（系统注入的提醒/边界；不是用户说的，也不是模型说的）。
-    pub system: bool,
-    /// 这一行是"讨论回合里的一次核实"（只读工具调用）时带上调用视图；普通发言没有。
-    /// 呈现层据此把核实行与发言行分开样式（与单 agent 的工具行同一形态）。
-    pub tool: Option<ToolCallView>,
-}
-
 pub struct Discussion {
     pub members: Vec<Member>,
-    pub transcript: Vec<DiscLine>,
+    /// 讨论转录：**与单 agent 同一行类型**（LineView）——行格式只有一处定义，呈现层也只有一套渲染。
+    pub transcript: Vec<LineView>,
     pub round: usize,
     /// 用户对 ask 的回答在此队列：先入先转达。
     pub pending_user_answers: Vec<String>,
@@ -627,14 +634,33 @@ pub struct MemberTurn {
     /// 没表态**不投影主会话**：原文只落进它自己的会话；提醒由核心在边界注入。
     pub verb: Option<Verb>,
     pub text: String,
-    /// 该回合模型产生的思维链，随定稿转录保存。
-    pub reasoning: String,
     pub degraded: bool,
     /// 这一轮的输出被供应商按长度截断了（如实标注，不假装完整）。
     pub truncated: bool,
     /// 这一回合里**核实**留下的行（只读工具调用）。
-    /// 内存通道把它并进讨论转录；核心驱动时由核心落进**该 agent 自己的会话**。
-    pub lines: Vec<DiscLine>,
+    /// 内存通道把它并进讨论转录；核心驱动时由核心逐轮落进**该 agent 自己的会话**。
+    #[cfg(test)]
+    pub lines: Vec<LineView>,
+}
+
+impl MemberTurn {
+    /// 一回合的**结论**：表态 / 正文 + 两个如实标记。
+    /// 思维链与核实行不在这里——它们随行落进**各自的会话**（内存测试通道另走它自己的构造点）。
+    pub fn verdict(
+        verb: Option<Verb>,
+        text: String,
+        degraded: bool,
+        truncated: bool,
+    ) -> MemberTurn {
+        MemberTurn {
+            verb,
+            text,
+            degraded,
+            truncated,
+            #[cfg(test)]
+            lines: Vec::new(),
+        }
+    }
 }
 
 impl Discussion {
@@ -649,6 +675,7 @@ impl Discussion {
         sink: &mut dyn FnMut(SessionEvent),
     ) -> Result<MemberTurn, String> {
         let opts = self.opts();
+        let texts = self.prompts.core.tool_texts.clone();
         let speaker = self.members[i].id.clone();
         let turn = {
             let m = &mut self.members[i];
@@ -665,6 +692,7 @@ impl Discussion {
                 chat.as_mut(),
                 tools.as_mut(),
                 turn,
+                &texts,
                 sink,
             )?
         };
@@ -672,11 +700,12 @@ impl Discussion {
         Ok(turn)
     }
 
-    /// 一个成员回合（**关联函数**：chat/tools 由调用方给——核心驱动时来自该 agent 的会话）。
-    /// 允许**先核实**（只读文件工具 read/list/search），最后用**动词**表态。
-    /// 两条通道共用这一条循环：native 从结构化槽位取调用，信封通道从正文里的信封取。
-    /// 动词 = 发言（收尾）；只读工具 = 核实（执行 → 收进 lines → 结果回灌 → 继续，上限 MAX_TOOL_CALLS）；
-    /// 其余工具一律**如实拒绝**（讨论回合拿不到干活的手段，见 face 字段）。
+    /// 一个成员回合（**关联函数**：chat/tools 由调用方给）：**薄适配**——把本席位自己的通道交给
+    /// 单 agent / 节点 / 讨论席**共用的那一条轮循环**（engine::converse_with），装配前把这一回合的
+    /// 工具面（角色表发放）装进工具环境，跑完从末轮取表态。
+    /// 生产里成员回合跑在各自的 agent 会话里（session::AgentSession::discussion_turn）——两条路同一条循环。
+    /// 允许**先核实**（只读工具），最后用**动词**表态；其余工具一律**如实拒绝**（讨论回合拿不到干活的手段）。
+    #[cfg(test)]
     #[allow(clippy::too_many_arguments)]
     pub fn turn_with(
         systools: &crate::core::roles::SystemTools,
@@ -691,247 +720,103 @@ impl Discussion {
         chat: &mut dyn Chat,
         mut tools: Option<&mut MemberTools>,
         turn: Vec<Msg>,
+        // 模型侧运行时文案（行尾的"降级/截断"说明按它现渲染）。
+        texts: &crate::core::prompt::ToolTexts,
         sink: &mut dyn FnMut(SessionEvent),
     ) -> Result<MemberTurn, String> {
         // 工具面**由角色表发放**（动词 + 只读核实工具）：表是唯一真相，代码里不另写一份名单。
-        let face_rows: Vec<(&str, &crate::core::schema::ToolSchema)> =
-            systools.tool_face(role).unwrap_or_default();
-        let face_ids: Vec<String> = face_rows.iter().map(|(id, _)| id.to_string()).collect();
-        let face: Vec<crate::core::ports::ToolDecl> =
-            face_rows.iter().map(|(id, s)| s.decl(id)).collect();
-        // 身份 + 本回合工具 + 对话 + 本回合提示：**唯一的装配点**。
-        // 模块工具只在"这一身份能干活"时列出（角色表的 module_tools）——讨论席列出它等于请模型去撞墙。
-        let mut msgs = assemble(
-            identity,
-            tools.as_deref(),
-            &face_ids,
-            systools.allows_module_tools(role),
-            dialogue,
-            &turn,
-        );
-        let native = matches!(
-            tools.as_ref().map(|t| t.mode),
-            Some(crate::core::providers::ToolMode::Native)
-        );
-        let mut lines: Vec<DiscLine> = Vec::new();
-        let mut reasoning_all = String::new();
-        loop {
-            if cancel.load(std::sync::atomic::Ordering::Relaxed) {
-                return Err("已停止".to_string());
+        let (face, with_modules) = systools.role_face(role);
+        // 这一回合的工具面装进工具环境（声明与执行都读它）；跑完还原——只是借来跑一个回合。
+        let saved = tools.as_deref_mut().map(|t| {
+            (
+                std::mem::replace(&mut t.allowed, face),
+                std::mem::replace(&mut t.with_modules, with_modules),
+            )
+        });
+        let llm = crate::core::ports::LlmOpts {
+            stream: opts.stream,
+            timeout_secs: opts.timeout_secs,
+        };
+        let mut lines: Vec<LineView> = Vec::new();
+        let next_line = std::cell::Cell::new(0u64);
+        // 工具调用**实时**外送一条（短暂，不落盘）：用户能看到它在读、在查，而不是整回合黑箱。
+        let sink_cell = std::cell::RefCell::new(&mut *sink);
+        let mut on_tool = |v: &ToolCallView| {
+            (sink_cell.borrow_mut())(SessionEvent::ToolCall(v.clone()));
+        };
+        // 行在回调里**只构造一次**：走与单 agent 同一条构造函数（行格式只有一处定义）。
+        // **只要核实留下的行**：表态/正文那条由主会话的投影写（feed/absorb），这里再收一份主转录就重了。
+        let mut on_round = |round: &Round, _s: &mut dyn FnMut(SessionEvent)| {
+            if round.tool.is_none() {
+                return;
             }
-            // 每轮都要一份（Copy）：只换 tools 槽位，其余照旧。
-            let mut opts = opts;
-            if native {
-                opts.tools = Some(&face);
-            }
-            let stop = std::sync::Arc::clone(cancel);
-            // **逐片外送**：讨论席的发言也要能看到"正在生成"（此前只把 Chunk 当中止信号、
-            // 内容全丢掉，于是整个成员回合界面一动不动）。信封不能当正文流上屏，
-            // 所以复用会话那条"到 { 就截住"的分片规则（session::stream_piece）。
-            let mut acc = String::new();
-            let mut reasoning = String::new();
-            let done = {
-                let sink_cell = std::cell::RefCell::new(&mut *sink);
-                let mut keep = |c: crate::core::ports::Chunk| {
-                    if stop.load(std::sync::atomic::Ordering::Relaxed) {
-                        return false;
-                    }
-                    let ev = match c {
-                        crate::core::ports::Chunk::Start => Some(SessionEvent::Delta {
-                            speaker: speaker.to_string(),
-                            kind: "start".to_string(),
-                            text: String::new(),
-                        }),
-                        crate::core::ports::Chunk::Text(t) => {
-                            let (send, next) = crate::core::session::stream_piece(&acc, &t);
-                            acc = next;
-                            if send.is_empty() {
-                                None
-                            } else {
-                                Some(SessionEvent::Delta {
-                                    speaker: speaker.to_string(),
-                                    kind: "text".to_string(),
-                                    text: send,
-                                })
-                            }
-                        }
-                        crate::core::ports::Chunk::Reasoning(r) => {
-                            reasoning.push_str(&r);
-                            Some(SessionEvent::Delta {
-                                speaker: speaker.to_string(),
-                                kind: "reasoning".to_string(),
-                                text: r,
-                            })
-                        }
-                    };
-                    if let Some(ev) = ev {
-                        (sink_cell.borrow_mut())(ev);
-                    }
-                    true
-                };
-                chat.complete(&msgs, opts, &mut keep)
-            };
-            if cancel.load(std::sync::atomic::Ordering::Relaxed) {
-                return Err("已停止".to_string());
-            }
-            if reasoning.is_empty() {
-                reasoning = done.reasoning.clone();
-            }
-            if let Some(err) = done.error.clone() {
-                return Err(err);
-            }
-            if !reasoning.trim().is_empty() {
-                if !reasoning_all.is_empty() {
-                    reasoning_all.push_str("\n\n");
-                }
-                reasoning_all.push_str(&reasoning);
-            }
-            let parsed = envelope::parse(&done.raw);
-            // 这一轮的调用：native 从结构化槽位取，信封通道从正文里的信封取（一次可以多个）。
-            let calls: Vec<(String, String, String)> = if native && !done.calls.is_empty() {
-                done.calls
-                    .iter()
-                    .map(|c| (c.id.clone(), c.name.clone(), c.args_json.clone()))
-                    .collect()
-            } else {
-                parsed
-                    .tools
-                    .iter()
-                    .map(|t| (String::new(), t.name.clone(), t.args_json.clone()))
-                    .collect()
-            };
-            // ① 表态优先：**任何一个调用是动词**，这一轮就是发言（收尾）。
-            // 两条通道各认各的：native 从结构化槽位认动词；**信封通道从正文里的信封认**
-            //（动词信封落在 parsed.verb 里，不在 parsed.tools 里——这里漏了，信封就永远认不出动词）。
-            let from_text = |r: &envelope::Reply| match r.verb {
-                Verb::Tool => None,
-                // **降级 = 没写信封**（散文按原文收录）：那不算表态。
-                // 否则散文会被当成 say 混进主会话，与契约"没表态就不投影、由核心在边界提醒"直接冲突——
-                // 真机上就是这样一轮轮空转的（每个成员每轮都"说了"一句空话，谁也不同意）。
-                v if !r.degraded => Some((v, r.text.clone(), false)),
-                _ => None,
-            };
-            let said: Option<(Verb, String, bool)> = if native {
-                calls
-                    .iter()
-                    .find_map(|(_, name, args)| verb_of(name).map(|v| (v, arg_text(args), false)))
-                    .or_else(|| from_text(&parsed))
-            } else {
-                from_text(&parsed)
-            };
-            if let Some((verb, text, degraded)) = said {
-                return Ok(MemberTurn {
-                    verb: Some(verb),
-                    text,
-                    reasoning: reasoning_all,
-                    degraded,
-                    truncated: done.truncated(),
-                    lines,
-                });
-            }
-            if calls.is_empty() {
-                // 既没表态也没申请调用：按发言原文收录（降级是**结构化信号**，由上层如实落转录）。
-                // 既没表态也没申请调用（散文 / 空回执）：这一轮到此为止，交回"没表态"。
-                return Ok(MemberTurn {
-                    verb: None,
-                    text: parsed.text,
-                    reasoning: reasoning_all,
-                    // 工具信封却解析不出调用 = 写坏了：如实标降级，与"散文"区分开。
-                    degraded: parsed.degraded || parsed.verb == Verb::Tool,
-                    truncated: done.truncated(),
-                    lines,
-                });
-            }
-            // ② 核实：**逐个**执行（只读工具），并把结果按协议形状回灌。
-            // 没有工具环境（替身/降级）：跑不了核实，如实按原文收录。
-            let Some(texts) = tools.as_ref().map(|t| t.sandbox.texts.clone()) else {
-                return Ok(MemberTurn {
-                    verb: None,
-                    text: done.raw.clone(),
-                    reasoning: reasoning_all,
-                    degraded: true,
-                    truncated: done.truncated(),
-                    lines,
-                });
-            };
-            let mut round_views: Vec<ToolCallView> = Vec::new();
-            for (call_id, name, args) in &calls {
-                // **按角色表校验**：这个席位没有的工具一律如实拒绝（代码里不写"谁能用哪个"）。
-                // 没有调用次数上限：模型继续核实就继续跑，直到它给出表态（或用户点停止）。
-                if !systools.allows(role, name) {
-                    sink(SessionEvent::Notice(format!(
-                        "[越权] 本席位没有工具 {}：本轮不执行、不当表态（如实拒绝）",
-                        name
-                    )));
-                    return Ok(MemberTurn {
-                        verb: None,
-                        text: done.raw.clone(),
-                        reasoning: reasoning_all,
-                        degraded: true,
-                        truncated: done.truncated(),
-                        lines,
-                    });
-                }
-                let (ok, output) = match tools.as_deref_mut() {
-                    Some(t) => {
-                        let out = crate::core::systool::execute(
-                            &t.sandbox,
-                            t.io.as_ref(),
-                            &mut t.observations,
-                            name,
-                            args,
-                        );
-                        (out.ok, out.output)
-                    }
-                    None => (false, "这个席位没有工具环境".to_string()),
-                };
-                let head = output.lines().next().unwrap_or("").to_string();
-                let view = ToolCallView {
-                    speaker: speaker.to_string(),
-                    module: String::new(),
-                    name: name.clone(),
-                    ok,
-                    args: args.clone(),
-                    output,
-                    raw: done.raw.clone(),
-                    call_id: call_id.clone(),
-                    reply: 0,
-                };
-                // 核实行**实时**外送一条（短暂，不落盘）：用户能看到它在读、在查，而不是整回合黑箱。
-                // 回合定稿时这段核实行会作为权威转录行重来一次（短暂块在收到权威行时被替换掉，不重复）。
-                sink(SessionEvent::ToolCall(view.clone()));
-                lines.push(DiscLine {
-                    // 回合 id 由驱动补（它才知道整场工作的计数）；这里先占位。
-                    turn: 0,
-                    system: false,
-                    text: format!(
-                        "[{}:{}] {} {}",
-                        speaker,
-                        name,
-                        if ok { "成功" } else { "失败" },
-                        head
-                    ),
-                    // 该轮的思维链随这条核实行一起落档（工具轮尤其：正文可能为空，思维链是唯一内容）。
-                    reasoning: if reasoning.trim().is_empty() {
-                        None
-                    } else {
-                        Some(reasoning.clone())
-                    },
-                    degraded: false,
-                    tool: Some(view.clone()),
-                });
-                round_views.push(view);
-            }
-            // **回灌必须走共享拼装**：native 要带 tool_calls + role=tool + call_id。
-            // 手写 assistant(raw)+user("[工具…]") 会把协议破坏掉——真机上模型于是**看不见结果、反复调同一个工具**，
-            // 撞上上限后以空发言收尾，讨论因此永不收敛（e2e 的假供应商不在乎形状，只有真机能照出来）。
-            msgs.extend(reply_msgs(
-                tools.as_ref().map(|t| t.mode).unwrap_or_default(),
-                &done.raw,
-                &round_views,
-                &texts,
+            lines.extend(crate::core::session::build_round_lines(
+                speaker, texts, round, false, &next_line, None,
             ));
+        };
+        // **逐片外送**：讨论席的发言也要能看到"正在生成"（信封不能当正文流上屏，见 session::stream_piece）。
+        let mut acc = String::new();
+        let mut on_chunk = |chunk: Chunk| {
+            let mut kind = "text";
+            let mut piece = String::new();
+            match &chunk {
+                Chunk::Start => {
+                    acc.clear();
+                    kind = "start";
+                }
+                Chunk::Text(t) => {
+                    let (send, next) = crate::core::session::stream_piece(&acc, t);
+                    piece = send;
+                    acc = next;
+                }
+                Chunk::Reasoning(r) => {
+                    kind = "reasoning";
+                    piece = r.clone();
+                }
+            }
+            (sink_cell.borrow_mut())(SessionEvent::Delta {
+                speaker: speaker.to_string(),
+                kind: kind.to_string(),
+                text: piece,
+            });
+            !cancel.load(std::sync::atomic::Ordering::Relaxed)
+        };
+        // 定稿行不走这个出口（讨论席的发言由主会话投影写）：给它一个占位，别把两处的行写重。
+        let mut discard = |_e: SessionEvent| {};
+        let rounds = converse_with(
+            chat,
+            tools.as_deref_mut(),
+            identity,
+            dialogue.to_vec(),
+            llm,
+            speaker,
+            &mut on_chunk,
+            &mut on_tool,
+            &mut on_round,
+            &mut discard,
+            &turn,
+            true,
+        );
+        if let (Some(t), Some((allowed, with_modules))) = (tools, saved) {
+            t.allowed = allowed;
+            t.with_modules = with_modules;
         }
+        if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+            return Err("已停止".to_string());
+        }
+        // 末轮就是这一回合的结论（表态轮，或"没表态"的散文轮）；调用失败如实报错。
+        let last = rounds.last().ok_or_else(|| "已停止".to_string())?;
+        if let Some(err) = &last.error {
+            return Err(err.clone());
+        }
+        Ok(MemberTurn {
+            verb: last.verb,
+            text: last.text.clone(),
+            degraded: last.degraded,
+            truncated: last.truncated(),
+            #[cfg(test)]
+            lines,
+        })
     }
 }
 
@@ -1114,24 +999,16 @@ impl Discussion {
             // 本轮到此刻还没交出去的行数（轮次标记也算）：一个成员说完就把它那一批交出去。
             self.handed = self.transcript.len();
             // 轮次边界：本轮的发言都在这条之后（回放时据此重算「本轮谁已同意」）。
-            self.transcript.push(DiscLine {
-                reasoning: None,
-                text: format!("[轮次 {}]", self.round + 1),
-                degraded: false,
-                tool: None,
-                turn: 0,
-                system: false,
+            self.transcript.push(LineView {
+                line: format!("[轮次 {}]", self.round + 1),
+                ..Default::default()
             });
             // 用户回答优先转达。
             if let Some(ans) = self.pending_user_answers.first().cloned() {
                 self.pending_user_answers.remove(0);
-                self.transcript.push(DiscLine {
-                    reasoning: None,
-                    text: format!("[用户] {}", ans),
-                    degraded: false,
-                    tool: None,
-                    turn: 0,
-                    system: false,
+                self.transcript.push(LineView {
+                    line: format!("[用户] {}", ans),
+                    ..Default::default()
                 });
             }
             self.cursor = Cursor::At(0);
@@ -1170,7 +1047,7 @@ impl Discussion {
                 "transcript",
                 self.transcript
                     .iter()
-                    .map(|l| l.text.clone())
+                    .map(|l| l.line.clone())
                     .collect::<Vec<_>>()
                     .join("\n"),
             )],
@@ -1234,14 +1111,11 @@ impl Discussion {
                 }
                 if self.allow_autonomy {
                     let note = self.prompts.core.discuss.autonomy_note.clone();
-                    self.transcript.push(DiscLine {
-                        reasoning: None,
-                        text: note,
-                        degraded: false,
-                        tool: None,
-                        turn: 0,
+                    self.transcript.push(LineView {
+                        line: note,
                         // 这是**系统**给的自主说明，不是用户说的。
                         system: true,
+                        ..Default::default()
                     });
                     return None;
                 }
@@ -1264,14 +1138,7 @@ impl Discussion {
         truncated: bool,
         turn: u64,
     ) {
-        let tag = match verb {
-            Verb::Say => "say",
-            Verb::Ask => "ask",
-            Verb::Leave => "leave",
-            Verb::Agree => "agree",
-            Verb::Tool => "tool",
-        };
-        let mut line = format!("[{}:{}] {}", id, tag, text);
+        let mut line = format!("[{}:{}] {}", id, verb_tag(verb), text);
         if degraded {
             line.push_str(
                 &self
@@ -1287,13 +1154,11 @@ impl Discussion {
                     .render(&self.prompts.core.tool_texts.truncated_suffix, &[]),
             );
         }
-        self.transcript.push(DiscLine {
-            reasoning: None,
-            text: line,
+        self.transcript.push(LineView {
+            line,
             degraded,
-            tool: None,
             turn,
-            system: false,
+            ..Default::default()
         });
     }
 
@@ -1339,13 +1204,10 @@ impl Discussion {
     /// 记一行**系统消息**（提醒/边界这类不是谁说的内容）到主会话转录。
     /// 见 docs/architecture/session-model.md 二"系统消息"。
     pub fn note_system(&mut self, text: &str) {
-        self.transcript.push(DiscLine {
-            reasoning: None,
-            text: text.to_string(),
-            degraded: false,
-            tool: None,
-            turn: 0,
+        self.transcript.push(LineView {
+            line: text.to_string(),
             system: true,
+            ..Default::default()
         });
     }
 
@@ -1373,7 +1235,7 @@ impl Discussion {
                     "transcript",
                     self.transcript
                         .iter()
-                        .map(|l| l.text.clone())
+                        .map(|l| l.line.clone())
                         .collect::<Vec<_>>()
                         .join("\n"),
                 ),
@@ -1788,7 +1650,18 @@ pub type RoundSink<'a> = dyn FnMut(&Round, &mut dyn FnMut(SessionEvent)) + 'a;
 
 /// 讨论行的**逐成员外送回调**：拿到刚定稿的行 + 本次的出口。
 /// 出口当参数传而不是让回调捕获它——否则回调借着 sink，`step`/`open` 的调用方随后用不了它。
-pub type LineSink<'a> = dyn FnMut(&[DiscLine], &mut dyn FnMut(SessionEvent)) + 'a;
+pub type LineSink<'a> = dyn FnMut(&[LineView], &mut dyn FnMut(SessionEvent)) + 'a;
+
+/// 表态动词的**行标签**：讨论转录行写成 `[谁:say] 内容`（行格式与回档解析同一处定义）。
+pub(crate) fn verb_tag(v: Verb) -> &'static str {
+    match v {
+        Verb::Say => "say",
+        Verb::Ask => "ask",
+        Verb::Leave => "leave",
+        Verb::Agree => "agree",
+        Verb::Tool => "tool",
+    }
+}
 
 /// 原生通道的工具名 → 讨论动词：**只认协作动词**，其余一律不认识（不认识 = 越权，如实拒绝）。
 pub(crate) fn verb_of(name: &str) -> Option<Verb> {
@@ -1830,6 +1703,11 @@ pub struct Round {
     /// 这次调用失败了（超时 / 网络）：非空 = **没有拿到模型回复**，这一轮不该落转录。
     /// 上层据此如实告知用户并中断本轮（用户可以点「继续」重试）。
     pub error: Option<String>,
+    /// 这一轮是一次**表态**（讨论席的协作动词）：它是该回合的收尾轮，行上带动词标签。
+    /// 执行席不表态（恒为 None）。
+    pub verb: Option<Verb>,
+    /// 这一轮的回复**没写成信封**（散文 / 信封写坏）：如实传给上层，不假装它是一次规范回复。
+    pub degraded: bool,
 }
 
 impl Round {
@@ -1856,8 +1734,13 @@ pub(crate) fn converse_with(
     on_tool: &mut dyn FnMut(&ToolCallView),
     on_round: &mut RoundSink<'_>,
     sink: &mut dyn FnMut(SessionEvent),
+    // 本回合的提示（讨论席的开场/轮转词；执行席常为空——它的指令在派发行里）。
+    turn: &[Msg],
+    // 本回合认不认**协作表态**（讨论席认：见到动词就是这一回合的发言，收尾）。
+    verbs: bool,
 ) -> Vec<Round> {
-    // 身份 + 本回合工具 + 对话：**唯一的装配点**。工具面取自这一席位（执行席的表现 + 它自己模块的工具）。
+    // 身份 + 本回合工具 + 对话 + 本回合提示：**唯一的装配点**。
+    // 工具面取自这一席位（执行席的表现 + 它自己模块的工具）；讨论席的动词面也在这里（见 session::TurnRun）。
     let (ids, with_modules) = match tools.as_ref() {
         Some(ctx) => (ctx.allowed.clone(), ctx.with_modules),
         None => (Vec::new(), false),
@@ -1868,7 +1751,7 @@ pub(crate) fn converse_with(
         &ids,
         with_modules,
         &dialogue,
-        &[],
+        turn,
     );
     // 观察账本随会话保存（回档时清空），这里不动它——它的语义是"这一段转录里的读取证据"。
     let mut rounds: Vec<Round> = Vec::new();
@@ -1951,6 +1834,8 @@ pub(crate) fn converse_with(
                 tool: None,
                 finish: String::new(),
                 error: Some(err),
+                verb: None,
+                degraded: false,
             });
             return rounds;
         }
@@ -2003,6 +1888,47 @@ pub(crate) fn converse_with(
                 }
             }
         }
+        // ── 讨论席的**表态**：这一轮就是它的发言——不执行任何调用，本回合到此收尾 ──
+        // 与单 agent 的末轮同一形态（正文一行 + 历史一条 assistant），不同的只是行上带动词标签。
+        // 两条通道各认各的：native 从结构化槽位认动词，信封从信封自己的动词字段认（散文不算表态）。
+        if verbs {
+            let from_envelope = |r: &envelope::Reply| -> Option<(Verb, String, bool)> {
+                if r.degraded || r.verb == Verb::Tool {
+                    None
+                } else {
+                    Some((r.verb, r.text.clone(), false))
+                }
+            };
+            let said: Option<(Verb, String, bool)> =
+                if mode == crate::core::providers::ToolMode::Native {
+                    calls
+                        .iter()
+                        .find_map(|c| verb_of(&c.name).map(|v| (v, arg_text(&c.args_json), false)))
+                        .or_else(|| from_envelope(&reply))
+                } else {
+                    from_envelope(&reply)
+                };
+            if let Some((verb, text, degraded)) = said {
+                let has_line = !text.trim().is_empty() || !reasoning.trim().is_empty();
+                let text_msgs = if has_line {
+                    vec![Msg::assistant(text.trim().to_string())]
+                } else {
+                    Vec::new()
+                };
+                push_round!(Round {
+                    reply: reply_id,
+                    text,
+                    reasoning,
+                    text_msgs,
+                    tool: None,
+                    finish,
+                    error: None,
+                    verb: Some(verb),
+                    degraded,
+                });
+                return rounds;
+            }
+        }
         // ── 原生通道：工具调用来自供应商的结构化槽位（不解析信封）──
         if mode == crate::core::providers::ToolMode::Native {
             if let Some(ctx) = tools.as_deref_mut() {
@@ -2035,6 +1961,7 @@ pub(crate) fn converse_with(
                         .collect();
                     // 调度：**连续**声明可并发的调用合成一批并发跑，其余各自独占（写入类因此是批次之间的屏障）。
                     // 结果按原始下标返回，随后一律按原序回填——并发只影响执行，不影响上下文里的顺序。
+                    note_unauthorized(ctx, &plan, sink);
                     let done = run_batch(ctx, &plan);
                     // 先按原序把工具行建好（执行已经做完），再让**唯一那处**构造函数产出这一回复的消息：
                     // 实时与重建走同一个函数，"重建上下文与实时一致"因此是结构保证的。
@@ -2085,6 +2012,8 @@ pub(crate) fn converse_with(
                             }),
                             finish: finish.clone(),
                             error: None,
+                            verb: None,
+                            degraded: false,
                         });
                     }
                     continue;
@@ -2121,6 +2050,8 @@ pub(crate) fn converse_with(
                             }),
                             finish: finish.clone(),
                             error: None,
+                            verb: None,
+                            degraded: false,
                         });
                         continue;
                     }
@@ -2173,6 +2104,8 @@ pub(crate) fn converse_with(
                     }),
                     finish: finish.clone(),
                     error: None,
+                    verb: None,
+                    degraded: true,
                 });
             }
             // 合法信封：**一次回复里的多个调用一起执行**（同一套声明并发调度），各成一条工具行。
@@ -2197,6 +2130,7 @@ pub(crate) fn converse_with(
                     })
                     .collect();
                 // 内置工具（read/write/edit/search）优先且不属于任何模块；外部工具按模块定 cwd。
+                note_unauthorized(ctx, &plan, sink);
                 let done = run_batch(ctx, &plan);
                 // 修过信封就如实标注在回执最前面（模型与用户都能看到核心没有瞎猜）
                 let annotate = |outcome: ToolOutcome| -> ToolOutcome {
@@ -2262,6 +2196,8 @@ pub(crate) fn converse_with(
                         }),
                         finish: finish.clone(),
                         error: None,
+                        verb: None,
+                        degraded: false,
                     });
                 }
             }
@@ -2284,6 +2220,8 @@ pub(crate) fn converse_with(
                     tool: None,
                     finish,
                     error: None,
+                    verb: None,
+                    degraded: reply.degraded || reply.verb == Verb::Tool,
                 });
                 return rounds;
             }
