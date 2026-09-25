@@ -290,6 +290,26 @@ fn stopping_a_collab_discussion_is_prompt_and_keeps_the_session() {
             .any(|e| matches!(e, SessionEvent::Notice(n) if n.contains("[停止]"))),
         "要有「已停止」的如实说明"
     );
+    // **子会话也要收尾**：它那一回合没有定稿行，流式层必须撤下并如实说一句——
+    // 否则打开那个标签页，光标一直挂着、按钮一直停在「停止」。
+    // 替身让第一个成员（a）正常说完、第二个（b）卡住被停——收尾要看**被停的那个**。
+    let child = format!("{}--b", sid);
+    let (child_batches, _ch, _co) = handle.events().snapshot(Some(&child), 0);
+    let on_child: Vec<&SessionEvent> = child_batches.iter().flat_map(|l| l.events.iter()).collect();
+    assert!(
+        on_child
+            .iter()
+            .any(|e| matches!(e, SessionEvent::Working { agent: None })),
+        "被停的子会话要收到运行态收尾：{:?}",
+        on_child.iter().map(|e| e.to_json()).collect::<Vec<_>>()
+    );
+    assert!(
+        on_child
+            .iter()
+            .any(|e| matches!(e, SessionEvent::Notice(n) if n.contains("[停止]"))),
+        "子会话要如实收到「已停止」：{:?}",
+        on_child.iter().map(|e| e.to_json()).collect::<Vec<_>>()
+    );
     // 被中断的那条发言（半截 agree）**不该**进转录。
     let lines: Vec<String> = on_bus
         .iter()

@@ -284,10 +284,12 @@ async function lines(sid) {
   const pendPlan = (viewPlan && viewPlan.pending) || null;
   // 待裁决是**快照字段**（与推的 Decision 同源）：刷新页面照样画得出那张卡。
   // 卡片里的"建议"由核心 AI 随 plan 那一次调用一起给（契约见单测 plan_review_carries_the_core_advice）。
+  // 卡片上那句"建议"**由核心 AI 给**（随 plan 那一次调用一起产出），快照里必须带上它。
   assert(
-    pendPlan && pendPlan.kind === 'plan_review' && !!pendPlan.question,
-    '方案待审：快照里带待裁决（kind + 要回答的那句）',
-    JSON.stringify(pendPlan).slice(0, 200),
+    pendPlan && pendPlan.kind === 'plan_review' && !!pendPlan.question
+      && String(pendPlan.advice || '').length > 0,
+    '方案待审：快照里带核心 AI 的建议',
+    JSON.stringify(pendPlan).slice(0, 220),
   );
   // 整理完停在**待审**：用户回一句明确的开工才推进；开工后节点在子会话里跑，交付是异步产生的。
   await approvePlan(name2);

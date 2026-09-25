@@ -585,6 +585,14 @@ impl CoreHandle {
                         Ok(())
                     }
                 })?;
+                // 崩溃也要给子会话**收尾**：否则它的标签页永远停在"在跑"、流式层一直挂着。
+                child_bus.push(&child, &[SessionEvent::Working { agent: None }]);
+                child_bus.push(
+                    &child,
+                    &[SessionEvent::Notice(crate::core::events::interrupted_note(
+                        "成员线程崩溃",
+                    ))],
+                );
                 return Err("成员线程崩溃：该会话已按落盘转录保留".to_string());
             }
         };
@@ -598,6 +606,16 @@ impl CoreHandle {
                         Ok(())
                     }
                 })?;
+                // 子会话也要**收尾**：失败/被停时没有定稿行，流式层必须撤下并如实说一句，
+                // 否则那个标签页的光标一直挂着、按钮一直停在「停止」。
+                let stopped = req.cancel.load(std::sync::atomic::Ordering::Relaxed);
+                let why = if stopped {
+                    crate::core::events::stopped_note()
+                } else {
+                    crate::core::events::interrupted_note(&err)
+                };
+                child_bus.push(&child, &[SessionEvent::Working { agent: None }]);
+                child_bus.push(&child, &[SessionEvent::Notice(why)]);
                 return Err(err);
             }
         };
