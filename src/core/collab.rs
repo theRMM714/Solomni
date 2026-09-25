@@ -457,6 +457,8 @@ impl CollabSession {
     fn ask_user(&mut self, p: Pending, sink: &mut dyn FnMut(SessionEvent)) {
         // 建议是核心 AI 给的（随方案/验收那一次调用）：关卡挂着期间一直有效（快照也要它），
         // 解除挂起时（见各 pending = None 处）清掉，别漏到下一关。
+        // 等用户 = 这一刻没人在干活（否则界面一直显示上一个成员的名字）。
+        sink(crate::core::events::idle());
         let ev = p.decision(&self.gate_advice);
         self.pending = Some(p);
         sink(ev);
@@ -598,6 +600,7 @@ impl CollabSession {
             Msg::user(user),
         ];
         // 核心操作走工具调用：代拟名单由 slate 工具承载（带只读核实回路）。
+        sink(crate::core::events::working("核心"));
         let mut verify = self.core_verify_tools("planner");
         let parsed = crate::core::engine::core_operation(
             &self.prompts.systools,
@@ -618,6 +621,8 @@ impl CollabSession {
                 .cloned()
                 .and_then(|v| serde_json::from_value::<Vec<RosterPick>>(v).ok())
         });
+        // 核心这一次调用结束了：交回"谁在干活"——下一棒（泵的下一步 / 等用户）会再推。
+        sink(crate::core::events::idle());
         let Some(picks) = parsed else {
             sink(SessionEvent::Notice(
                 "[错误] 代拟失败（模型无响应格式）。请直接点名 agent。".into(),
@@ -877,6 +882,7 @@ impl CollabSession {
                 let brief = self.decision_brief(&p);
                 let text_owned = text.to_string();
                 let mut verify = self.core_verify_tools("planner");
+                sink(crate::core::events::working("核心"));
                 let judged = Self::judge_clear(
                     &self.prompts,
                     &self.cancel,
@@ -889,6 +895,7 @@ impl CollabSession {
                     &brief,
                     &text_owned,
                 );
+                sink(crate::core::events::idle());
                 match judged {
                     Ok((true, why)) => {
                         self.note_user(text, sink);
@@ -1022,12 +1029,14 @@ impl CollabSession {
         }
         // 整理：只在还没有方案（或没有链）时做——回档/重启后沿用已记的，不重复花钱。
         if self.plan.is_none() || self.chain.is_none() {
+            sink(crate::core::events::working("核心"));
             let mut verify = self.core_verify_tools("planner");
             let made = self.disc.as_ref().expect("disc 存在").synthesize(
                 self.core_chat.as_mut(),
                 self.core_mode,
                 verify.as_mut(),
             );
+            sink(crate::core::events::idle());
             match made {
                 Ok((plan, chain, advice)) => {
                     // 核心 AI 的建议随方案一起来（同一批产出，不额外花一次调用）。
@@ -1104,9 +1113,13 @@ impl CollabSession {
             })
             .unwrap_or(false);
         if !settled {
+            // 节点跑在各自的子会话里：主会话这一刻没有"谁在干活"，
+            // 但**子会话在跑**要照实显示（前端按运行态快照把主会话标成在跑）。
+            sink(crate::core::events::idle());
             return;
         }
-        // **节点级验收**：核心 AI 按各节点**当前目标**判它的产出；没过就暂停并交用户。
+        // **阶段验收**：核心 AI 按各节点**当前目标**判它的产出；没过就暂停并交用户。
+        sink(crate::core::events::working("核心"));
         let mut verify = self.core_verify_tools("orchestrator");
         let (verdicts, advice) = match Self::review_nodes(
             &self.prompts,
@@ -1126,6 +1139,7 @@ impl CollabSession {
                 return;
             }
         };
+        sink(crate::core::events::idle());
         // 核心 AI 的建议随验收结论一起来（同一批产出）。
         self.gate_advice = advice;
         for (node, ok, note) in &verdicts {
@@ -1159,6 +1173,7 @@ impl CollabSession {
                 rework: 0,
             });
         }
+        sink(crate::core::events::working("核心"));
         let mut verify = self.core_verify_tools("orchestrator");
         exec.review(
             self.core_chat.as_mut(),
@@ -1168,6 +1183,7 @@ impl CollabSession {
             self.core_mode,
             verify.as_mut(),
         );
+        sink(crate::core::events::idle());
         if let Some(note) = self.exec_note(&exec) {
             sink(SessionEvent::Notice(note));
             return;

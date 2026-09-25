@@ -89,6 +89,21 @@ pub fn stopped_note() -> String {
         .to_string()
 }
 
+/// 运行态：**这一刻谁在干活**。它在每个干活的人开始前推一条（带名字），收尾推空闲——
+/// 前端据此显示"正在工作：某某"与「停止」按钮（见 docs/architecture/session-model.md 二之二）。
+/// 为什么要有它：核心自己的模型调用（整理 / 裁决判定 / 验收）也在干活，不推的话界面显示的
+/// 就一直是上一个成员的名字，用户无法判断会话到底在不在跑。
+pub fn working(agent: &str) -> SessionEvent {
+    SessionEvent::Working {
+        agent: Some(agent.to_string()),
+    }
+}
+
+/// 收尾 / 空闲 / 等用户（下一棒开始时会再推自己的名字）。
+pub fn idle() -> SessionEvent {
+    SessionEvent::Working { agent: None }
+}
+
 /// 实时输出通道：调用参数（流式与预算，来自全局设置）+ 中止开关 + 短暂事件出口
 /// （不落盘，仅活动会话实时刷新）。
 pub struct Live<'a> {

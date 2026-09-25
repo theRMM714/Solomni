@@ -330,8 +330,21 @@ function snapshotRunning(sid) {
 function isBusy(s) {
   if (!s) return false;
   if (s.sending) return true;
-  if (s.running_known) return !!s.running;
-  return snapshotRunning(s.sid);
+  // ① 这条会话**自己**的运行态：有实时知识（收过它的 Working）就以事件为准，否则用快照对账。
+  if (s.running_known ? s.running : snapshotRunning(s.sid)) return true;
+  // ② 它的**子会话**在跑也算——成员回合、节点执行都跑在各自的子会话里，主会话整回合收不到事件，
+  //    所以子会话的运行态只有快照说得清；子会话标签页开着时，它自己的实时知识比快照新，优先用它。
+  const pre = s.sid + '--';
+  for (const k of state.running || []) {
+    if (k.indexOf(pre) !== 0) continue;
+    const child = state.sessions.get(k);
+    if (child && child.running_known) {
+      if (child.running) return true;
+      continue;
+    }
+    return true;
+  }
+  return false;
 }
 
 function generating(sid) {
@@ -356,9 +369,81 @@ function warnIfTierUnavailable(name) {
   );
 }
 
+/** **按落盘转录补水**：会话对象可能是"事件到达时就地建出来"的（刷新页面后正在跑的工作就是这样），
+ * 那样只有刷新之后的新行——看着像记录丢了。这里按盘上事件回放补齐；回放期间到达的实时事件先入
+ * buffer，回放完按序接上（同 id 的行不重复）。 */
+async function hydrateHistory(s) {
+  if (!s || s.hydrating || s.hydrated) return;
+  s.hydrating = true;
+  let events = [];
+  try {
+    const r = await api('GET', '/api/history/' + encodeURIComponent(s.sid));
+    events = r.events || [];
+  } catch (err) { eventError(err); }
+  const seen = new Set();
+  const apply = (ev) => {
+    if (ev && ev.type === 'transcript') {
+      const fresh = (ev.lines || []).filter((l) => !seen.has(l.id));
+      if (!fresh.length) return;
+      for (const l of fresh) seen.add(l.id);
+      absorb(s, { type: 'transcript', lines: fresh });
+      return;
+    }
+    if (ev) absorb(s, ev);
+  };
+  for (const ev of events) apply(ev);
+  const buffered = s.buffer || [];
+  s.buffer = null;
+  for (const item of buffered) for (const ev of item) apply(ev);
+  s.hydrating = false;
+  s.hydrated = true;
+  renderAll();
+}
+
+/** 打开的标签页与当前标签**跨刷新保留**（否则刷新后记录看着像丢了）。 */
+function saveTabs() {
+  try {
+    localStorage.setItem('dsh.tabs', JSON.stringify({
+      open: Array.from(state.sessions.keys()),
+      active: state.activeSid || null,
+    }));
+  } catch { /* 无 localStorage（冒烟桩）就不记 */ }
+}
+async function restoreTabs() {
+  let saved = null;
+  try { saved = JSON.parse(localStorage.getItem('dsh.tabs') || 'null'); } catch { saved = null; }
+  if (!saved || !Array.isArray(saved.open)) return;
+  for (const sid of saved.open) {
+    if (state.sessions.has(sid)) continue;
+    try {
+      const r = await api('GET', '/api/history/' + encodeURIComponent(sid));
+      const v = (state.views || new Map()).get(sid);
+      const s = {
+        sid, mode: (r.meta && r.meta.mode) || 'single', title: sid,
+        lines: [], live: [], pending: (v && v.pending) || null, sending: false,
+        running: false, working: null, running_known: false,
+        done: !!(r.meta && r.meta.done), awaiting: null,
+        // 核心表里还在 = 活动会话（可以接着操作）；不在 = 历史回放（只读，点「继续」才转为活动）。
+        readonly: !v, hydrated: true, fold: {}, scroll: {},
+      };
+      for (const ev of (r.events || [])) absorb(s, ev);
+      state.sessions.set(sid, s);
+    } catch { /* 单个标签拿不到就跳过，不拖垮整页 */ }
+  }
+  if (saved.active && state.sessions.has(saved.active)) state.activeSid = saved.active;
+  else if (state.sessions.size) state.activeSid = state.sessions.keys().next().value;
+  renderAll();
+}
+
 async function openHistory(name) {
   const existing = state.sessions.get(name);
-  if (existing && !existing.readonly) { setActive(name); warnIfTierUnavailable(name); return; }
+  if (existing && !existing.readonly) {
+    // 事件建出来的会话还没补过盘上转录：先补，再显示（否则只有刷新之后的新行）。
+    hydrateHistory(existing);
+    setActive(name);
+    warnIfTierUnavailable(name);
+    return;
+  }
   try {
     const r = await api('GET', '/api/history/' + encodeURIComponent(name));
     const s = {
@@ -367,6 +452,7 @@ async function openHistory(name) {
       running: false, working: null, running_known: false,
       done: true, awaiting: null, readonly: true, fold: {}, scroll: {},
     };
+    s.hydrated = true;
     state.sessions.set(name, s);
     for (const ev of (r.events || [])) absorb(s, ev);
     setActive(name);
@@ -1726,6 +1812,8 @@ async function startSession(body) {
     running: false, working: null, running_known: false,
     done: false, awaiting: null, fold: {}, scroll: {},
   };
+  // 新建的会话：盘上只有建组那几条，不再补历史（避免多一次读）。
+  s.hydrated = true;
   state.sessions.set(sid, s);
   // 开场事实不随回包走：它们已经在事件台上，长轮询会照 seq 补进来。
   setActive(sid);
@@ -1737,6 +1825,7 @@ async function startSession(body) {
 function setActive(sid) {
   atClose(); // 换会话 = 换一份文件清单，菜单先收起来
   state.activeSid = sid;
+  saveTabs(); // 当前标签也记住：刷新后回到同一条会话
   // 换会话先清掉上一份根（免得拿别人的根去缩）；缓存里有就同步先缩，避免先长后短的闪烁。
   shortPathRoots = null;
   const cached = filesCache.get(sid);
@@ -1941,6 +2030,7 @@ function renderTabs() {
       if (state.activeSid === s.sid) {
         state.activeSid = state.sessions.keys().next().done ? null : state.sessions.keys().next().value;
       }
+      saveTabs();
       renderAll();
     };
     tabs.appendChild(el);
@@ -2312,9 +2402,18 @@ function applyBatch(seq, sid, events) {
       running: false, working: null, running_known: false,
       can_update_task: !!(v && v.can_update_task),
       done: !!(h && h.done), awaiting: null, fold: {}, scroll: {},
+      // 这个对象是"事件到了就地建出来"的：盘上转录还没回放，先按盘补上（见 hydrateHistory）。
+      hydrated: false, buffer: [],
     };
     state.sessions.set(sid, s);
     needState = true; // 侧栏也顺手对齐
+    hydrateHistory(s);
+  }
+  // 补水期间到达的实时事件先攒着：回放完按序接上（同 id 的行不重复）。
+  if (s.hydrating) {
+    if (!s.buffer) s.buffer = [];
+    s.buffer.push(events);
+    return 'none';
   }
   // 运行态**不从增量猜**：核心在起止各推一条 `working`（同一个批次里就在 events 里），
   // 事件按序吸收，运行态因此自己就对了——猜"有增量=在跑"只会与事件打架。
@@ -2731,4 +2830,7 @@ $('#btn-agents').onclick = openAgentsModal;
 $('#btn-upload').onclick = pickUploadFile;
 
 /* ---------- 启动 ---------- */
-refreshState().then(pollLoop).catch((err) => notice('初始化失败', err.message, 'err'));
+refreshState()
+  .then(restoreTabs) // 打开的标签页跨刷新保留（记录不因刷新看着像丢了）
+  .then(pollLoop)
+  .catch((err) => notice('初始化失败', err.message, 'err'));

@@ -62,6 +62,18 @@ const sandbox = {
         }),
       };
     }
+    if (u.indexOf("/api/history/") === 0) {
+      // 盘上转录：**比实时新行更早**的一条（刷新后靠它把记录补齐）。
+      return {
+        ok: true,
+        json: async () => ({
+          meta: { name: "smoke-w", mode: "single", done: false },
+          events: [
+            { type: "transcript", lines: [{ id: 0, kind: "user", speaker: "用户", line: "刷新前的一句" }] },
+          ],
+        }),
+      };
+    }
     if (u.indexOf("/api/events") === 0) {
       eventPolls += 1;
       if (eventPolls === 1) {
@@ -69,7 +81,7 @@ const sandbox = {
         return {
           ok: true,
           json: async () => ({
-            lines: [{ seq: 1, sid: "smoke-w", events: [{ type: "transcript", lines: [{ id: 0, line: "[甲:say] 完整一句" }] }] }],
+            lines: [{ seq: 1, sid: "smoke-w", events: [{ type: "transcript", lines: [{ id: 1, kind: "msg", speaker: "甲", verb: "say", line: "完整一句" }] }] }],
             head: 1, oldest: 0,
           }),
         };
@@ -134,10 +146,20 @@ setTimeout(async () => {
   // 被同一个 catch 当成"断线"，状态点因此一直红着，而服务其实好好的。
   let pollConn = "";
   let pollApplied = false;
+  let hydratedHistory = false;
   if (!loadErrors.length) {
     try {
       pollConn = String(els.get("#conn-text").textContent || "");
-      pollApplied = vm.runInNewContext("(state.sessions.get('smoke-w') || { lines: [] }).lines.length", sandbox) > 0;
+      const r = vm.runInNewContext(
+        "(function () { const s = state.sessions.get('smoke-w') || { lines: [] };" +
+          " return { n: s.lines.length, first: (s.lines[0] || {}).text, last: (s.lines[s.lines.length - 1] || {}).text };" +
+          "})()",
+        sandbox
+      );
+      pollApplied = r.n > 0;
+      // 刷新后"事件就地建出来的会话"必须先把**盘上转录**补上（否则看着像记录丢了）。
+      hydratedHistory = String(r.first || "").indexOf("刷新前的一句") >= 0 && String(r.last || "").indexOf("完整一句") >= 0;
+      if (!hydratedHistory) loadErrors.push("补水检查：" + JSON.stringify(r));
     } catch (e) { loadErrors.push("轮询检查失败：" + e.message); }
   }
   // **权威行到达后流式块必须被替换**：否则那一行会一直挂着闪烁光标（"已落盘的还在流式"）。
@@ -247,36 +269,50 @@ setTimeout(async () => {
   let runningRules = false;
   if (!loadErrors.length) {
     try {
-      stateStub.sessions = [{ sid: 'rec', running: true }, { sid: 'fresh', running: true }, { sid: 'stale', running: false }];
+      stateStub.sessions = [
+        { sid: 'rec', running: true },
+        { sid: 'fresh', running: true },
+        { sid: 'stale', running: false },
+        { sid: 'par--kid', running: true },
+        { sid: 'par--kid2', running: true },
+      ];
       const r = await vm.runInNewContext(
         "(function () {" +
           " const rec = { sid: 'rec', lines: [], live: [], running: false, running_known: true, sending: false };" +
           " const fresh = { sid: 'fresh', lines: [], live: [], running: false, running_known: false, sending: false };" +
           " const stale = { sid: 'stale', lines: [], live: [], running: true, working: '甲', running_known: false, sending: false };" +
           " const mine = { sid: 'mine', lines: [], live: [], running: false, running_known: true, sending: true };" +
+          // 主会话自己收尾了，但它有子会话在跑（成员回合 / 节点都跑在子会话里）：照样算忙。
+          " const childLive = { sid: 'kid2', lines: [], live: [], running: false, running_known: true, sending: false };" +
+          " const parent = { sid: 'par', lines: [], live: [], running: false, running_known: true, sending: false };" +
           " state.sessions.set('rec', rec); state.sessions.set('fresh', fresh);" +
-          " state.sessions.set('stale', stale); state.sessions.set('mine', mine); state.activeSid = null;" +
+          " state.sessions.set('stale', stale); state.sessions.set('mine', mine);" +
+          " state.sessions.set('kid2', childLive); state.sessions.set('par', parent); state.activeSid = null;" +
+          // 快照里有两条子会话记录：一条没开标签页（只有快照说得清）、一条开着（它的实时知识说"没跑"）。
+          " state.sessions.get('kid2').sid = 'par--kid2';" +
           " return refreshState().then(function () {" +
           "   return { rec: { run: rec.running, busy: isBusy(rec) }, fresh: { run: fresh.running, busy: isBusy(fresh) }," +
-          "            stale: { run: stale.running, who: stale.working, busy: isBusy(stale) }, mine: isBusy(mine) };" +
+          "            stale: { run: stale.running, who: stale.working, busy: isBusy(stale) }, mine: isBusy(mine)," +
+          "            parent: isBusy(parent) };" +
           " }); })()",
         sandbox
       );
       runningRules = r.rec.run === false && r.rec.busy === false
         && r.fresh.run === true && r.fresh.busy === true
         && r.stale.run === false && r.stale.who === null && r.stale.busy === false
-        && r.mine === true;
-      if (!runningRules) loadErrors.push("运行态归一：有实时知识 rec=" + JSON.stringify(r.rec) + "、无知识 fresh=" + JSON.stringify(r.fresh) + "、遗留 stale=" + JSON.stringify(r.stale) + "、在途=" + r.mine);
+        && r.mine === true
+        && r.parent === true;   // 子会话在跑 → 主会话也忙（停止按钮）
+      if (!runningRules) loadErrors.push("运行态归一：有实时知识 rec=" + JSON.stringify(r.rec) + "、无知识 fresh=" + JSON.stringify(r.fresh) + "、遗留 stale=" + JSON.stringify(r.stale) + "、在途=" + r.mine + "、子会话在跑=" + r.parent);
     } catch (e) { loadErrors.push("运行态归一检查失败：" + e.message); }
     stateStub.sessions = [];
   }
   const ok = alerts.length === 0 && loadErrors.length === 0 && rendered && tierWarned && identityKept
-    && pollConn === "已连接" && pollApplied && liveReplaced && liveClearedOnIdle && toolReasoningRendered
+    && pollConn === "已连接" && pollApplied && hydratedHistory && liveReplaced && liveClearedOnIdle && toolReasoningRendered
     && taskButtonRule && decisionCardRule && onlyLastStreams && runningRules && consoleErrors.length === 0;
   if (!ok) {
     console.log("alerts（原生弹窗被调用的次数，应为 0）:", JSON.stringify(alerts));
     console.log("notice 渲染:", rendered, "| 虚拟机档不可用提示:", tierWarned, "| 身份标题保留:", identityKept);
-    console.log("轮询状态点:", JSON.stringify(pollConn), "| 事件已应用:", pollApplied, "| 流式被替换:", liveReplaced, "| 空闲清理:", liveClearedOnIdle, "| 思维链:", toolReasoningRendered);
+    console.log("轮询状态点:", JSON.stringify(pollConn), "| 事件已应用:", pollApplied, "| 盘上转录已补:", hydratedHistory, "| 流式被替换:", liveReplaced, "| 空闲清理:", liveClearedOnIdle, "| 思维链:", toolReasoningRendered);
     console.log("运行态归一（事件为准 / 快照只对账）:", runningRules);
     console.log("应用侧 console.error:", JSON.stringify(consoleErrors.slice(0, 3)));
     console.log("loadErrors:", JSON.stringify(loadErrors));
