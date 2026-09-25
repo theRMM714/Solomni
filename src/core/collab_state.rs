@@ -49,13 +49,6 @@ impl CollabState {
     }
 }
 
-/// 拆 [tag] 前缀，返回 (tag, 正文)。
-fn split_tag(line: &str) -> Option<(&str, &str)> {
-    let rest = line.strip_prefix('[')?;
-    let end = rest.find(']')?;
-    Some((&rest[..end], rest[end + 1..].trim_start()))
-}
-
 /// 从事件流水派生协作状态：纯函数，可单测；回放可复现。
 /// roster_names = 会话 meta 里的 agent 实例名（顺序即名单，权威来源）；其余状态由转录文本锚点派生。
 /// 人名即发言席：present/agreed/reports/pending_ask 的键都是 agent 名。
@@ -79,54 +72,50 @@ pub fn derive(events: &[serde_json::Value], roster_names: &[String]) -> CollabSt
                     continue;
                 };
                 for l in lines {
-                    let Some(line) = l.get("line").and_then(|x| x.as_str()) else {
-                        continue;
-                    };
-                    let Some((tag, text)) = split_tag(line) else {
-                        continue;
-                    };
-                    if tag == "用户:需求" {
-                        st.task = Some(text.to_string());
-                    } else if tag == "用户:撤回" {
-                        st.agreed.insert(text.trim().to_string(), false);
-                    } else if tag == "用户:名单" {
-                        st.slate_confirmed = text.starts_with("确认");
-                    } else if tag == "用户:同意方案" {
-                        st.plan_approved = true;
-                    } else if tag == "用户:开始" {
-                        st.begun = true;
-                        st.allow = text.contains("allow");
-                        st.round = 1;
-                        in_discussion = true;
-                        st.closed = false;
-                        reset_agreed(&mut st);
-                    } else if tag == "代拟" {
-                        // 代拟行只给人看；名单的权威来源是 meta.agents（确认后写回）。
-                        st.slate = Some(text.to_string());
-                    } else if tag == "用户" {
-                        // 用户回答并入后，未答的请教作废。
-                        st.pending_ask = None;
-                    } else if tag == "core" {
-                        st.pending_ask = None;
-                    } else if tag == "轮次" || tag.starts_with("轮次 ") {
-                        st.round = tag
-                            .split_whitespace()
-                            .nth(1)
-                            .and_then(|n| n.parse().ok())
-                            .unwrap_or(st.round);
+                    // **读结构化字段**（说话人 / 动词 / 种类 / 正文），不从正文里抠标签。
+                    let speaker = l.get("speaker").and_then(|x| x.as_str()).unwrap_or("");
+                    let verb = l.get("verb").and_then(|x| x.as_str()).unwrap_or("");
+                    let kind = l.get("kind").and_then(|x| x.as_str()).unwrap_or("");
+                    let text = l.get("line").and_then(|x| x.as_str()).unwrap_or("");
+                    if kind == "round" {
+                        st.round = text.parse().unwrap_or(st.round);
                         st.closed = false;
                         // 轮次边界**不清空同意**：同意是粘住的（与 Discussion::step 同一口径），
                         // 否则重建出来的"谁已同意"会与实时不一致。
-                    } else if tag.contains(':') {
-                        let mut it = tag.splitn(2, ':');
-                        let who = it.next().unwrap_or("");
-                        let verb = it.next().unwrap_or("");
-                        if verb == "agree" {
-                            st.agreed.insert(who.to_string(), true);
-                        } else if verb == "leave" {
-                            st.present.insert(who.to_string(), false);
-                        } else if verb == "ask" {
-                            st.pending_ask = Some((who.to_string(), text.to_string()));
+                    } else if speaker == "用户" {
+                        match verb {
+                            "需求" => st.task = Some(text.to_string()),
+                            "撤回" => {
+                                st.agreed.insert(text.trim().to_string(), false);
+                            }
+                            "名单" => st.slate_confirmed = text.starts_with("确认"),
+                            "同意方案" => st.plan_approved = true,
+                            "开始" => {
+                                st.begun = true;
+                                st.allow = text.contains("allow");
+                                st.round = 1;
+                                in_discussion = true;
+                                st.closed = false;
+                                reset_agreed(&mut st);
+                            }
+                            // 普通用户发言：未答的请教作废。
+                            _ => st.pending_ask = None,
+                        }
+                    } else if speaker == "代拟" {
+                        // 代拟行只给人看；名单的权威来源是 meta.agents（确认后写回）。
+                        st.slate = Some(text.to_string());
+                    } else if speaker == "core" {
+                        st.pending_ask = None;
+                    } else if !speaker.is_empty() {
+                        match verb {
+                            "agree" => {
+                                st.agreed.insert(speaker.to_string(), true);
+                            }
+                            "leave" => {
+                                st.present.insert(speaker.to_string(), false);
+                            }
+                            "ask" => st.pending_ask = Some((speaker.to_string(), text.to_string())),
+                            _ => {}
                         }
                     }
                 }

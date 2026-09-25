@@ -316,7 +316,7 @@ pub(crate) fn direct_rewind_drops_tail_then_continue_allows_user_turn() {
     let reply = ev
         .iter()
         .find_map(|e| match e {
-            SessionEvent::Transcript(l) => l.first().map(|x| x.line.clone()),
+            SessionEvent::Transcript(l) => l.first().map(|x| x.render()),
             _ => None,
         })
         .expect("应有转录回复");
@@ -334,7 +334,7 @@ pub(crate) fn direct_rewind_drops_tail_then_continue_allows_user_turn() {
     );
 }
 
-/// 从事件流里抽出转录行，便于断言。
+/// 从事件流里抽出转录行并**渲染成文本**（行怎么变文本只有 LineView::render 一处）。
 pub(crate) fn replay_lines(events: &[serde_json::Value]) -> Vec<String> {
     events
         .iter()
@@ -345,12 +345,8 @@ pub(crate) fn replay_lines(events: &[serde_json::Value]) -> Vec<String> {
                 .cloned()
                 .unwrap_or_default()
         })
-        .map(|l| {
-            l.get("line")
-                .and_then(|x| x.as_str())
-                .unwrap_or("")
-                .to_string()
-        })
+        .map(|l| serde_json::from_value::<crate::core::events::LineView>(l).map(|v| v.render()))
+        .filter_map(Result::ok)
         .collect()
 }
 
@@ -361,7 +357,7 @@ pub(crate) fn transcript_rows(events: &[SessionEvent]) -> Vec<(u64, String, bool
         .flat_map(|e| match e {
             SessionEvent::Transcript(ls) => ls
                 .iter()
-                .map(|l| (l.id, l.line.clone(), l.tool.is_some()))
+                .map(|l| (l.id, l.render(), l.tool.is_some()))
                 .collect::<Vec<_>>(),
             _ => Vec::new(),
         })
@@ -389,7 +385,7 @@ pub(crate) fn tool_line_texts(events: &[SessionEvent]) -> Vec<String> {
             SessionEvent::Transcript(ls) => ls
                 .iter()
                 .filter(|l| l.tool.is_some())
-                .map(|l| l.line.clone())
+                .map(|l| l.render())
                 .collect::<Vec<_>>(),
             _ => Vec::new(),
         })
@@ -504,12 +500,13 @@ pub(crate) fn rebuilt_context_keeps_tool_result() {
 #[test]
 pub(crate) fn collab_state_derive_and_withdraw() {
     use crate::core::collab_state::derive;
-    let ev = |id: u64, line: &str| serde_json::json!({"type":"transcript","lines":[{"id":id,"line":line}]});
+    // 行按**结构化字段**造（种类 / 说话人 / 动词 / 正文），与生产写的线格式同源。
+    let ev = |id: u64, kind: &str, speaker: &str, verb: &str, line: &str| serde_json::json!({"type":"transcript","lines":[{"id":id,"kind":kind,"speaker":speaker,"verb":verb,"line":line}]});
     let events = vec![
-        ev(0, "[用户:需求] 做个东西"),
-        ev(1, "[用户:开始] yes"),
-        ev(2, "[轮次 2]"),
-        ev(3, "[a:agree] 同意"),
+        ev(0, "user", "用户", "需求", "做个东西"),
+        ev(1, "user", "用户", "开始", "yes"),
+        ev(2, "round", "轮次", "", "2"),
+        ev(3, "msg", "a", "agree", "同意"),
     ];
     let st = derive(&events, &["a".to_string()]);
     assert_eq!(st.task.as_deref(), Some("做个东西"));
@@ -518,13 +515,19 @@ pub(crate) fn collab_state_derive_and_withdraw() {
     assert!(st.agreed["a"] && st.closed, "全员同意即收敛");
     // 撤回该同意后：不再算同意、讨论不再收敛
     let mut withdrawn = events.clone();
-    withdrawn.push(ev(4, "[用户:撤回] a"));
+    withdrawn.push(ev(4, "user", "用户", "撤回", "a"));
     let st2 = derive(&withdrawn, &["a".to_string()]);
     assert!(!st2.agreed["a"] && !st2.closed);
     // 代拟行只给人看：名单不由它派生（权威来源是 meta.agents）。
     let with_slate = vec![
-        ev(0, "[代拟] 甲〈a〉→ m（对口）；乙（复用；补位）"),
-        ev(1, "[用户:名单] 确认"),
+        ev(
+            0,
+            "system",
+            "代拟",
+            "",
+            "甲〈a〉→ m（对口）；乙（复用；补位）",
+        ),
+        ev(1, "user", "用户", "名单", "确认"),
     ];
     let st3 = derive(&with_slate, &["a".to_string()]);
     assert_eq!(st3.picked, vec!["a".to_string()], "名单仍来自 meta.agents");
@@ -1280,19 +1283,12 @@ pub(crate) fn discussion_call_failure_interrupts_without_absorbing_a_line() {
         ),
     }
     // 开场那一次是正常的（留下一条发言）；失败那一次**不该**再添发言。
-    let spoken = d
-        .transcript
-        .iter()
-        .filter(|l| l.line.contains("[m0:"))
-        .count();
+    let spoken = d.transcript.iter().filter(|l| l.speaker == "m0").count();
     assert_eq!(
         spoken,
         1,
         "失败不该被当成发言（只有开场那一条）：{:?}",
-        d.transcript
-            .iter()
-            .map(|l| l.line.clone())
-            .collect::<Vec<_>>()
+        d.transcript.iter().map(|l| l.render()).collect::<Vec<_>>()
     );
     assert!(
         d.transcript.iter().all(|l| !l.line.contains("超时")),
@@ -1530,19 +1526,12 @@ pub(crate) fn agreement_is_sticky_so_agreed_members_are_not_asked_again() {
         }
     }
     // m0 在开场就同意了：之后每一轮都该跳过它（以前每轮重置同意，会把它反复问一遍）。
-    let asked_m0 = d
-        .transcript
-        .iter()
-        .filter(|l| l.line.contains("[m0:"))
-        .count();
+    let asked_m0 = d.transcript.iter().filter(|l| l.speaker == "m0").count();
     assert_eq!(
         asked_m0,
         1,
         "发过 agree 的人不该被再问一次：{:?}",
-        d.transcript
-            .iter()
-            .map(|l| l.line.clone())
-            .collect::<Vec<_>>()
+        d.transcript.iter().map(|l| l.render()).collect::<Vec<_>>()
     );
 }
 
@@ -1571,7 +1560,10 @@ pub(crate) fn discussion_full_agreement() {
             TurnOut::Stopped => panic!("不该停止"),
         }
     }
-    assert!(d.transcript.iter().any(|l| l.line.contains("[m0:agree]")));
+    assert!(d
+        .transcript
+        .iter()
+        .any(|l| l.speaker == "m0" && l.verb == "agree"));
 }
 
 #[test]
@@ -1652,14 +1644,11 @@ pub(crate) fn rewinding_the_main_session_truncates_agent_sessions_by_turn() {
         for ev in evs {
             if let Some(ls) = ev.get("lines").and_then(|l| l.as_array()) {
                 for l in ls {
-                    out.push((
-                        l.get("id").and_then(|i| i.as_u64()).unwrap_or(0),
-                        l.get("line")
-                            .and_then(|x| x.as_str())
-                            .unwrap_or("")
-                            .to_string(),
-                        l.get("turn").and_then(|t| t.as_u64()).unwrap_or(0),
-                    ));
+                    if let Ok(v) =
+                        serde_json::from_value::<crate::core::events::LineView>(l.clone())
+                    {
+                        out.push((v.id, v.render(), v.turn));
+                    }
                 }
             }
         }
@@ -1941,19 +1930,16 @@ pub(crate) fn discussion_member_turn_finalizes_by_round_and_rebuilds_the_same_di
         .map(|ls| ls.to_vec())
         .filter(|b: &Vec<serde_json::Value>| !b.is_empty())
         .collect();
-    let row_text = |l: &serde_json::Value| {
-        l.get("line")
-            .and_then(|x| x.as_str())
-            .unwrap_or("")
-            .to_string()
-    };
     let tool_at = batches
         .iter()
         .position(|b| b.iter().any(|l| l.get("tool").is_some()))
         .expect("核实行该落档");
     let said_at = batches
         .iter()
-        .position(|b| b.iter().any(|l| row_text(l).contains(":say] 看过了")))
+        .position(|b| {
+            b.iter()
+                .any(|l| l.get("verb").and_then(|v| v.as_str()) == Some("say"))
+        })
         .expect("发言行该落档");
     let turn_of = |b: &Vec<serde_json::Value>, pick: &dyn Fn(&serde_json::Value) -> bool| {
         b.iter()
@@ -1961,7 +1947,9 @@ pub(crate) fn discussion_member_turn_finalizes_by_round_and_rebuilds_the_same_di
             .and_then(|l| l.get("turn").and_then(|t| t.as_u64()))
     };
     let tool_turn = turn_of(&batches[tool_at], &|l| l.get("tool").is_some());
-    let said_turn = turn_of(&batches[said_at], &|l| row_text(l).contains(":say] 看过了"));
+    let said_turn = turn_of(&batches[said_at], &|l| {
+        l.get("verb").and_then(|v| v.as_str()) == Some("say")
+    });
     assert!(
         tool_at < said_at,
         "一轮一条：核实行先出、发言行后出（不是回合末一次性一批）：{batches:?}"
@@ -2012,11 +2000,11 @@ pub(crate) fn prose_without_an_envelope_is_not_a_statement() {
         !disc
             .transcript
             .iter()
-            .any(|l| l.line.starts_with("[m0:say]")),
+            .any(|l| l.speaker == "m0" && l.verb == "say"),
         "散文不是表态，不该投影主会话：{:?}",
         disc.transcript
             .iter()
-            .map(|l| l.line.clone())
+            .map(|l| l.render())
             .collect::<Vec<_>>()
     );
     let note = disc
@@ -2148,12 +2136,16 @@ pub(crate) fn core_direct_seeds_system_prompt() {
     let events = with_live(|l| core.single_say(&sid, "在吗", l)).unwrap();
     // 回归：用户发言必须入转录（此前只进历史、不进转录，历史回放会丢用户消息）。
     match &events[0] {
-        SessionEvent::Transcript(lines) => assert_eq!(lines[0].line, "[用户] 在吗"),
+        SessionEvent::Transcript(lines) => {
+            assert_eq!(lines[0].kind, "user");
+            assert_eq!(lines[0].speaker, "用户");
+            assert_eq!(lines[0].line, "在吗");
+        }
         _ => panic!("首条应为用户转录行"),
     }
-    assert!(events.iter().any(
-        |e| matches!(e, SessionEvent::Transcript(l) if l.iter().any(|x| x.line.contains("[a]")))
-    ));
+    assert!(events
+        .iter()
+        .any(|e| matches!(e, SessionEvent::Transcript(l) if l.iter().any(|x| x.speaker == "a"))));
 }
 
 #[test]
@@ -2187,7 +2179,9 @@ pub(crate) fn single_mode_accepts_multi_module_agent_and_converses() {
     );
     let events = with_live(|l| core.single_say(&sid, "在吗", l)).unwrap();
     assert!(
-        events.iter().any(|e| matches!(e, SessionEvent::Transcript(l) if l.iter().any(|x| x.line.starts_with("[组合] ")))),
+        events.iter().any(
+            |e| matches!(e, SessionEvent::Transcript(l) if l.iter().any(|x| x.speaker == "组合"))
+        ),
         "转录说话人必须是 agent 名：{:?}",
         events
     );
@@ -2576,7 +2570,7 @@ pub(crate) fn core_collab_delegated_slate_flow() {
         Ok(Some(Pending::ConfirmSlate))
     ));
     assert!(ev.iter().any(
-        |e| matches!(e, SessionEvent::Transcript(l) if l.iter().any(|x| x.line.contains("[代拟]")))
+        |e| matches!(e, SessionEvent::Transcript(l) if l.iter().any(|x| x.speaker == "代拟"))
     ));
     let _ = core
         .collab_continue(&sid, CollabStep::ConfirmSlate, "yes")

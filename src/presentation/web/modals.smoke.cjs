@@ -120,12 +120,18 @@ if (!loadErrors.length) {
   });
   // ③ 回合分隔行要可见：解析成系统分隔行，而不是 who=标签、text 为空的空行。
   check("回合分隔行解析成系统行", () => {
-    const out = vm.runInNewContext('parseLine("[回合 t2｜第 0 轮]", false)', sandbox);
+    const out = vm.runInNewContext(
+      "lineParts({ kind: 'system', line: '[回合 t2｜第 0 轮]' })",
+      sandbox
+    );
     return out.length === 1 && out[0].cls === "sys system" && out[0].text.indexOf("回合") >= 0;
   });
   // ④ 轮次分隔行同样（两种标签都要认）。
   check("轮次分隔行解析成系统行", () => {
-    const out = vm.runInNewContext('parseLine("[轮次 2]", false)', sandbox);
+    const out = vm.runInNewContext(
+      "lineParts({ kind: 'round', speaker: '轮次', line: '2' })",
+      sandbox
+    );
     return out.length === 1 && out[0].cls === "sys system";
   });
   // ⑤ 批次按 seq 应用，游标**单调前进**（事实只有一条来路：事件台）。

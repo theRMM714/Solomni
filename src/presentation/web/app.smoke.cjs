@@ -113,7 +113,10 @@ setTimeout(async () => {
   let identityKept = false;
   if (!loadErrors.length) {
     try {
-      const parts = vm.runInNewContext("parseLine('[资料手:agree] 同意', false)", sandbox);
+      const parts = vm.runInNewContext(
+        "lineParts({ kind: 'msg', speaker: '资料手', verb: 'agree', line: '同意' })",
+        sandbox
+      );
       const p = parts[0];
       const strict = { children: [], className: "", appendChild(c) { strict.children.push(c); } };
       Object.defineProperty(strict, "innerHTML", {

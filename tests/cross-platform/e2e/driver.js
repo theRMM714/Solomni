@@ -140,14 +140,14 @@ async function lines(sid) {
   const saidRef = await api('POST', '/api/sessions/' + encodeURIComponent(name1) + '/say', { text: '@work:f.txt 看一下' });
   assert(saidRef.status === 200, '@ 引用发言', saidRef.text.slice(0, 200));
   const lr = await lines(name1);
-  const ul = lr.filter((x) => String(x.line).startsWith('[用户')).pop() || {};
+  const ul = lr.filter((x) => x.speaker === '用户').pop() || {};
   assert(!/@work:/.test(String(ul.line)) && /work[\\/]+f\.txt/.test(String(ul.line)), '核心把 @work:… 改写成真实绝对路径', String(ul.line).slice(0, 200));
 
   // 句读标点不进路径：@work:f.txt，看一下 → work:/f.txt，看一下
   const saidPunct = await api('POST', '/api/sessions/' + encodeURIComponent(name1) + '/say', { text: '@work:f.txt，看一下' });
   assert(saidPunct.status === 200, '带句读的引用发言', saidPunct.text.slice(0, 200));
   const lp = await lines(name1);
-  const upl = lp.filter((x) => String(x.line).startsWith('[用户')).pop() || {};
+  const upl = lp.filter((x) => x.speaker === '用户').pop() || {};
   assert(/work[\\/]+f\.txt，看一下/.test(String(upl.line)), '句读标点不入路径（留在正文里）', String(upl.line).slice(0, 200));
 
   // 文件名含空格：引用用引号包住路径 → 仍能改写成正确路径
@@ -157,7 +157,7 @@ async function lines(sid) {
   const saidSpace = await api('POST', '/api/sessions/' + encodeURIComponent(name1) + '/say', { text: '@work:"' + spaced + '" 看一下' });
   assert(saidSpace.status === 200, '引用含空格文件名', saidSpace.text.slice(0, 200));
   const ls = await lines(name1);
-  const usl = ls.filter((x) => String(x.line).startsWith('[用户')).pop() || {};
+  const usl = ls.filter((x) => x.speaker === '用户').pop() || {};
   assert(new RegExp('项目 说明\\.md').test(String(usl.line)) && !/@work:/.test(String(usl.line)), '引号内的空格路径被完整改写（真实路径）', String(usl.line).slice(0, 240));
 
   // 非法工具信封：必须记成一条失败的工具行，且 JSON 绝不上屏（真实 bug 的回归）
@@ -241,7 +241,7 @@ async function lines(sid) {
   });
   assert(c1e.status === 200, '建引用私沙的协作工作', c1e.text.slice(0, 200));
   const le = await lines(name1e);
-  const demand = le.filter((x) => String(x.line).includes('需求')).pop() || {};
+  const demand = le.filter((x) => x.speaker === '用户' && x.verb === '需求').pop() || {};
   assert(String(demand.line).includes('秘密.md') && String(demand.line).includes('能读') && !/@sandbox:/.test(String(demand.line)), '协作里引用私沙 → 改写并如实说明只有该 agent 能读', String(demand.line).slice(0, 200));
   assert(!String(demand.line).includes('）.md') && !String(demand.line).includes(') .md'), '改写后不残留路径尾巴（扩展名没被句读切断）', String(demand.line).slice(0, 200));
 
@@ -276,7 +276,11 @@ async function lines(sid) {
   // 流式块永远等不到替换它的那一行——光标一直挂着、按钮永远停在「停止」（真机反馈过）。
   const childBus = await api('GET', '/api/events?sid=' + encodeURIComponent(name2 + '--甲') + '&since=0');
   const childJson = JSON.stringify((childBus.json && childBus.json.lines) || []);
-  assert(childJson.includes('[甲:say]'), '子会话事件台带它自己的权威发言行', childJson.slice(0, 200));
+  assert(
+    childJson.includes('"speaker":"甲"') && childJson.includes('"verb":"say"'),
+    '子会话事件台带它自己的权威发言行（说话人与动词是结构化字段）',
+    childJson.slice(0, 200)
+  );
   assert(childJson.includes('"working"'), '子会话事件台带运行态（在跑/收尾）', childJson.slice(0, 200));
   // 裁决卡上的**建议由核心 AI 给**（随 plan 那一次调用一起产出，不额外花调用）。
   const stPlan = await api('GET', '/api/state');
@@ -337,7 +341,18 @@ async function approvePlan(name) {
    * 信封走向由 mock.js 按转录事实路由（夹具不改产品行为）。
    */
   const all = (sid) => lines(sid);
-  const joined = (ls) => ls.map((x) => String(x.line || '')).join('\n');
+  /** 一行 → 文本：**行身份在结构化字段里**（speaker / verb / kind），正文里没有标签——
+   * 与 core 的 LineView::render 同一拼法（断言因此读"人看到的文本"）。 */
+  function renderLine(l) {
+    const text = String(l.line || '');
+    const speaker = String(l.speaker || '');
+    const verb = String(l.verb || '');
+    if (l.kind === 'round') return '[' + speaker + ' ' + text + ']';
+    const label = speaker ? (verb ? speaker + ':' + verb : speaker) : '';
+    if (!label) return text;
+    return text ? '[' + label + '] ' + text : '[' + label + ']';
+  }
+  const joined = (ls) => ls.map(renderLine).join('\n');
   /** 全部事件（notice / delivery / ended 这些不是转录行，得从这里看）。 */
   async function eventsOf(sid) {
     const r = await api('GET', '/api/history/' + encodeURIComponent(sid));
@@ -431,7 +446,11 @@ async function approvePlan(name) {
   const wBus = JSON.stringify(
     ((await api('GET', '/api/events?sid=' + encodeURIComponent(nE) + '&since=0')).json || {}).lines || [],
   );
-  assert(wBus.includes('[用户:撤回] 乙'), '撤回如实进转录（事实在事件台）', wBus.slice(0, 240));
+  assert(
+    wBus.includes('"speaker":"用户"') && wBus.includes('"verb":"撤回"') && wBus.includes('"line":"乙"'),
+    '撤回如实进转录（说话人/动词/正文都是结构化字段）',
+    wBus.slice(0, 240)
+  );
 
   // ⑥ ask 中止：agent 提问 → 轮转中止并呈给用户；回答后继续。
   const nF = 'e2e-collab-ask-' + Date.now();

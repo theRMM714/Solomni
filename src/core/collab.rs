@@ -218,7 +218,7 @@ impl CollabSession {
     /// 用户点「同意」：方案过关，可以开工。
     /// 记录在**转录**里（重启/回档后按它派生），不是内存里的临时状态。
     pub fn approve_plan(&mut self, sink: &mut dyn FnMut(SessionEvent)) {
-        let line = self.view("[用户:同意方案]".to_string());
+        let line = self.view(LineView::user("同意方案", String::new()));
         sink(SessionEvent::Transcript(vec![line]));
         self.plan_approved = true;
         self.pending = None;
@@ -528,15 +528,12 @@ impl CollabSession {
         self.sandboxes = sandboxes;
     }
 
-    /// 生成一条带 id 的转录行（工具行另走 tool_line，带调用视图）。
-    fn view(&mut self, line: String) -> LineView {
+    /// 生成一条带 id 的转录行（说话人/动词/种类都在字段里；工具行走带 tool 视图的那条路）。
+    fn view(&mut self, mut line: LineView) -> LineView {
         // 协作的讨论行各自成一条回复（协作的模型上下文不是从转录重建的，这个号只用于显示与分组一致）。
-        let v = LineView {
-            id: self.next_line,
-            reply: self.next_line,
-            line,
-            ..Default::default()
-        };
+        line.id = self.next_line;
+        line.reply = self.next_line;
+        let v = line;
         self.next_line += 1;
         v
     }
@@ -570,7 +567,7 @@ impl CollabSession {
             return;
         }
         self.task = task.clone();
-        let user = self.view(format!("[用户:需求] {}", task));
+        let user = self.view(LineView::user("需求", task.clone()));
         sink(SessionEvent::Transcript(vec![user]));
         if self.delegated {
             self.draft_slate(sink);
@@ -641,13 +638,13 @@ impl CollabSession {
             self.done = true;
             return;
         }
-        let line = self.view(format!(
-            "[代拟] {}",
+        let line = self.view(LineView::system(
+            "代拟",
             picks
                 .iter()
                 .map(|(a, why)| slate_item(a, why))
                 .collect::<Vec<_>>()
-                .join("；")
+                .join("；"),
         ));
         sink(SessionEvent::Transcript(vec![line]));
         self.slate_picks = picks.into_iter().map(|(a, _)| a).collect();
@@ -656,7 +653,10 @@ impl CollabSession {
 
     /// 回应代拟名单确认（仅 ConfirmSlate 挂起时有效）。
     pub fn confirm_slate(&mut self, ok: bool, sink: &mut dyn FnMut(SessionEvent)) {
-        let line = self.view(format!("[用户:名单] {}", if ok { "确认" } else { "取消" }));
+        let line = self.view(LineView::user(
+            "名单",
+            if ok { "确认" } else { "取消" }.to_string(),
+        ));
         sink(SessionEvent::Transcript(vec![line]));
         if !ok {
             sink(SessionEvent::Notice("[取消] 已按用户意愿取消".into()));
@@ -687,9 +687,9 @@ impl CollabSession {
             return;
         }
         self.allow = allow;
-        let line = self.view(format!(
-            "[用户:开始] {}",
-            if allow { "yes,allow" } else { "yes" }
+        let line = self.view(LineView::user(
+            "开始",
+            if allow { "yes,allow" } else { "yes" }.to_string(),
         ));
         sink(SessionEvent::Transcript(vec![line]));
         let prompts = self.prompts.clone();
@@ -949,7 +949,7 @@ impl CollabSession {
             private: None,
         };
         let text = crate::core::refs::rewrite(text, None, &roots, &self.prompts.core.refs);
-        let line = self.view(format!("[用户] {}", text));
+        let line = self.view(LineView::user("", text));
         sink(SessionEvent::Transcript(vec![line]));
     }
 
@@ -1295,7 +1295,7 @@ impl CollabSession {
 
     /// 撤回某 agent 的同意：转录追加一条撤回行（用户可见、也进上下文），并就地复位本轮表态。
     pub fn withdraw_agree(&mut self, agent: &str, sink: &mut dyn FnMut(SessionEvent)) {
-        let line = self.view(format!("[用户:撤回] {}", agent));
+        let line = self.view(LineView::user("撤回", agent.to_string()));
         sink(SessionEvent::Transcript(vec![line]));
         if let Some(disc) = self.disc.as_mut() {
             for m in disc.members.iter_mut() {
@@ -1334,30 +1334,9 @@ impl CollabSession {
             if ev.get("type").and_then(|t| t.as_str()) == Some("transcript") {
                 if let Some(lines) = ev.get("lines").and_then(|l| l.as_array()) {
                     for l in lines {
-                        if let Some(s) = l.get("line").and_then(|x| x.as_str()) {
-                            all_lines.push(LineView {
-                                line: s.to_string(),
-                                // 思维链随行落档：重建后仍可查看（重启不丢）。
-                                reasoning: l
-                                    .get("reasoning")
-                                    .and_then(|r| r.as_str())
-                                    .map(|r| r.to_string()),
-                                degraded: l
-                                    .get("degraded")
-                                    .and_then(|d| d.as_bool())
-                                    .unwrap_or(false),
-                                // 核实行重建后仍是核实行（呈现层不因重启换样式）。
-                                tool: l.get("tool").and_then(|t| {
-                                    serde_json::from_value::<crate::core::events::ToolCallView>(
-                                        t.clone(),
-                                    )
-                                    .ok()
-                                }),
-                                // 回合 id 随行落档：回档时两边按它对上（见 session-model.md 五）。
-                                turn: l.get("turn").and_then(|t| t.as_u64()).unwrap_or(0),
-                                system: l.get("system").and_then(|s| s.as_bool()).unwrap_or(false),
-                                ..Default::default()
-                            });
+                        // **按线格式直接读回**：字段与落盘同源（说话人/动词/种类/思维链/工具视图都在）。
+                        if let Ok(v) = serde_json::from_value::<LineView>(l.clone()) {
+                            all_lines.push(v);
                         }
                     }
                 }
@@ -1412,7 +1391,8 @@ impl CollabSession {
             // 讨论转录 = 最后一条 [用户:开始] 之后的行。
             let start = all_lines
                 .iter()
-                .rposition(|l| l.line.starts_with("[用户:开始]"))
+                // 讨论转录 = 最后一条 [用户:开始] 之后的行。
+                .rposition(|l| l.kind == "user" && l.verb == "开始")
                 .map(|i| i + 1)
                 .unwrap_or(all_lines.len());
             let disc_lines = all_lines[start..].to_vec();

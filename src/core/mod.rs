@@ -2493,7 +2493,9 @@ impl Core {
         }
         self.ensure_session(sid)?;
         let (_, events) = self.history_open(sid)?;
-        let keep = find_line_id(&events, "[用户:需求]").ok_or("该会话没有需求行")?;
+        // 需求行按**结构化字段**认（种类=user、动词=需求），不匹配正文。
+        let keep = find_line_id(&events, |l| l.kind == "user" && l.verb == "需求")
+            .ok_or("该会话没有需求行")?;
         // 回档语义是「保留 id < keep」：需求行本身要留下（旧需求留在流水里），所以传 keep + 1。
         let mut out = self.rewind(sid, keep + 1)?;
         let mut fresh = Vec::new();
@@ -2618,9 +2620,13 @@ impl Core {
                 while i < rows.len() {
                     let l = rows[i];
                     let line = l.get("line").and_then(|x| x.as_str()).unwrap_or("");
+                    // **读结构化字段**（种类 / 系统标记 / 正文），不从正文里抠 [标签]。
+                    let kind = l.get("kind").and_then(|x| x.as_str()).unwrap_or("");
                     // 系统注入的行按它该有的角色还原：提醒/边界是 system，
                     // **派发行**（`task`）是 user——否则重建出来的请求又变成一条 user 都没有，供应商照样拒收。
-                    if l.get("system").and_then(|x| x.as_bool()).unwrap_or(false) {
+                    if kind == "system"
+                        || l.get("system").and_then(|x| x.as_bool()).unwrap_or(false)
+                    {
                         let is_task = l.get("task").and_then(|x| x.as_bool()).unwrap_or(false);
                         history.push(if is_task {
                             Msg::user(line.to_string())
@@ -2630,8 +2636,9 @@ impl Core {
                         line_reply.push(l.get("id").and_then(|x| x.as_u64()).unwrap_or(0));
                         marks.push(history.len());
                         i += 1;
-                    } else if let Some(t) = line.strip_prefix("[用户] ") {
-                        history.push(Msg::user(t.to_string()));
+                    } else if kind == "user" {
+                        // 用户说的行：正文就是用户那句话（[用户] / [用户:需求] 这类标签在字段里）。
+                        history.push(Msg::user(line.to_string()));
                         // 用户行不属于任何回复：给它自己的行号，回档时才不会与相邻行误并成一组。
                         line_reply.push(l.get("id").and_then(|x| x.as_u64()).unwrap_or(0));
                         marks.push(history.len());
@@ -2678,12 +2685,8 @@ impl Core {
                             .map(|n| n.get("tool").is_some())
                             .unwrap_or(false);
                         if !next_is_tool {
-                            let text = line
-                                .split_once("] ")
-                                .map(|(_, t)| t)
-                                .unwrap_or(line)
-                                .to_string();
-                            history.push(Msg::assistant(text));
+                            // 正文本身就是内容（说话人/动词在字段里），直接进助手消息。
+                            history.push(Msg::assistant(line.to_string()));
                         }
                         line_reply.push(reply_of(l));
                         marks.push(history.len());
@@ -2902,8 +2905,11 @@ fn line_reply_of(l: &serde_json::Value) -> u64 {
     stored.filter(|r| *r != 0).unwrap_or(own)
 }
 
-/// 找最后一条以 prefix 开头的转录行的 id。
-fn find_line_id(events: &[serde_json::Value], prefix: &str) -> Option<u64> {
+/// 找最后一条满足条件的转录行的 id（按**结构化字段**判，不匹配正文）。
+fn find_line_id(
+    events: &[serde_json::Value],
+    pick: impl Fn(&crate::core::events::LineView) -> bool,
+) -> Option<u64> {
     let mut found = None;
     for ev in events {
         if ev.get("type").and_then(|t| t.as_str()) != Some("transcript") {
@@ -2913,12 +2919,10 @@ fn find_line_id(events: &[serde_json::Value], prefix: &str) -> Option<u64> {
             continue;
         };
         for l in lines {
-            if l.get("line")
-                .and_then(|x| x.as_str())
-                .map(|s| s.starts_with(prefix))
-                .unwrap_or(false)
-            {
-                found = l.get("id").and_then(|i| i.as_u64());
+            if let Ok(v) = serde_json::from_value::<crate::core::events::LineView>(l.clone()) {
+                if pick(&v) {
+                    found = Some(v.id);
+                }
             }
         }
     }

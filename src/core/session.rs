@@ -290,11 +290,8 @@ impl AgentSession {
     /// 它**不得在界面与记录里长得像用户发的**——身份是核心，界面按系统行样式（见 session-model.md 二）。
     pub fn note_system(&mut self, text: &str) -> Vec<SessionEvent> {
         self.dialogue.push(Msg::system(text.to_string()));
-        let v = self.line(text.to_string(), None, None);
-        vec![SessionEvent::Transcript(vec![LineView {
-            system: true,
-            ..v
-        }])]
+        let v = self.line(text.to_string(), "system", "", "", None, None);
+        vec![SessionEvent::Transcript(vec![v])]
     }
 
     /// 注入一条**派发任务**（核心给这个 agent 派的活，见 session-model.md 四之二）。
@@ -305,12 +302,8 @@ impl AgentSession {
         self.dialogue.push(Msg::user(text.to_string()));
         // 派发行不属于任何模型回复：给它自己的行号当回复号（与重建规则一致）。
         self.cur_reply = self.next_line;
-        let v = self.line(text.to_string(), None, None);
-        vec![SessionEvent::Transcript(vec![LineView {
-            system: true,
-            task: true,
-            ..v
-        }])]
+        let v = self.line(text.to_string(), "system", "", "", None, None);
+        vec![SessionEvent::Transcript(vec![LineView { task: true, ..v }])]
     }
 
     /// 设自动压缩的字符预算（装配时按模型窗口 × 设置百分比算出来；0 = 关）。
@@ -387,6 +380,9 @@ impl AgentSession {
     fn line(
         &mut self,
         line: String,
+        kind: &str,
+        speaker: &str,
+        verb: &str,
         reasoning: Option<String>,
         tool: Option<ToolCallView>,
     ) -> LineView {
@@ -395,10 +391,13 @@ impl AgentSession {
             id: self.next_line,
             reply,
             line,
+            speaker: speaker.to_string(),
+            verb: verb.to_string(),
+            kind: kind.to_string(),
             reasoning,
             tool,
             degraded: false,
-            system: false,
+            system: kind == "system",
             task: false,
             turn: self.cur_turn,
         };
@@ -451,7 +450,7 @@ impl AgentSession {
         // 用户行不属于任何模型回复：给它**自己的行号**当回复号（与重建时的规则一致），
         // 否则它会继承上一轮的回复号，回档时与上一轮误并成一组。
         self.cur_reply = self.next_line;
-        let user_line = self.line(format!("[用户] {}", text), None, None);
+        let user_line = self.line(text.to_string(), "user", "用户", "", None, None);
         sink(SessionEvent::Transcript(vec![user_line]));
         self.rounds_events(identity, live, sink);
     }
@@ -730,13 +729,26 @@ pub(crate) fn build_round_lines(
     };
     // 回合号：讨论席一轮一个回合号（整场工作单调递增）；单 agent 的每一轮各成"回合"（回档按它对齐）。
     let turn = turn.unwrap_or(round.reply);
-    let make = |line: String, reasoning: Option<String>, tool: Option<ToolCallView>| {
+    // 说话人与动词是**结构化字段**（正文里不再带 [谁:动词] 标签）；渲染由 LineView::render 拼回。
+    let speaker = id.to_string();
+    let verb = round
+        .verb
+        .map(crate::core::engine::verb_tag)
+        .unwrap_or_default();
+    let make = |line: String,
+                verb: &str,
+                kind: &str,
+                reasoning: Option<String>,
+                tool: Option<ToolCallView>| {
         let num = next_line.get();
         next_line.set(num + 1);
         LineView {
             id: num,
             reply: round.reply,
             line,
+            speaker: speaker.clone(),
+            verb: verb.to_string(),
+            kind: kind.to_string(),
             reasoning,
             tool,
             degraded: false,
@@ -751,22 +763,15 @@ pub(crate) fn build_round_lines(
         if !has_line || (text.is_empty() && round.tool.is_some()) {
             return;
         }
-        // 表态轮的行带上动词标签（`[谁:say] 内容`）——回档按同一格式解析回发言原文。
-        let mut line = match round.verb {
-            Some(v) => format!("[{}:{}]", id, crate::core::engine::verb_tag(v)),
-            None => format!("[{}]", id),
-        };
-        if !text.is_empty() {
-            line.push(' ');
-            line.push_str(&text);
-        }
+        // 正文 = 内容本身（说话人/动词在字段里）；被停/被截断的说明照样跟在正文后。
+        let mut line = text.clone();
         if stopped {
             line.push_str(&texts.stopped_suffix);
         }
         if truncated {
             line.push_str(&texts.truncated_suffix);
         }
-        out.push(make(line, reasoning.take(), None));
+        out.push(make(line, verb, "msg", reasoning.take(), None));
     };
     match &round.tool {
         Some(run) => {
@@ -774,8 +779,11 @@ pub(crate) fn build_round_lines(
             text_line(&mut reasoning, &mut out);
             let status = if run.view.ok { "成功" } else { "失败" };
             // 没有文本行时思维链挂到工具行上，不丢。
+            // 工具行自带调用视图（呈现层按卡片渲染）：说话人已知，动词留空（不是一次表态）。
             out.push(make(
-                format!("[{}] 工具 {} → {}", id, run.view.label(), status),
+                format!("工具 {} → {}", run.view.label(), status),
+                "",
+                "tool",
                 reasoning.take(),
                 Some(run.view.clone()),
             ));

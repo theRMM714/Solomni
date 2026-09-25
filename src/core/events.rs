@@ -142,19 +142,33 @@ impl ToolCallView {
 
 /// 一条转录行：id = 会话内稳定序号（自 0 递增，回放可复现）。
 /// 一行 = 一轮模型调用；工具调用另占一行并带上调用视图。
-#[derive(Debug, Clone, Default, serde::Serialize)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct LineView {
     pub id: u64,
     /// 这一行属于哪次模型回复（同一次回复的所有行同号；值 = 该回复第一行的 id）。
     /// 重建上下文时靠它把"一条助手消息 + N 条结果"重新拼回去，回档也按它原子截断。
     #[serde(default)]
     pub reply: u64,
+    /// **正文**：这一行说的内容。**行首标签不在这里**——说话人与动词是结构化字段
+    /// （`speaker` / `verb`），渲染时才拼回 `[谁:动词] 正文`（见 `render`）。
+    /// 为什么分开：呈现层与状态派生读字段，不再从正文里抠标签（见 docs/architecture/session-model.md 二）。
     pub line: String,
+    /// **说话人**：agent 实例名 / `用户` / 核心自己的标签（`轮次` / `代拟` / `节点`…）；空 = 无标签。
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub speaker: String,
+    /// **标签的第二段**（`[说话人:动词]` 的那个动词）：say / agree / leave / ask / 需求 / 开始 / 撤回…；空 = 没有。
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub verb: String,
+    /// **行的种类**：`msg`（模型发言）/ `user`（用户说的）/ `system`（系统注入或核心自己的行）/
+    /// `tool`（工具行，另有 `tool` 视图）/ `round`（讨论的轮次分隔行，正文是轮次号）。
+    /// 呈现、重建与状态派生都读它——不靠匹配行文本。
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub kind: String,
     /// 思维链（若该轮模型给出）；前端永远默认折叠，点击才展开。
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reasoning: Option<String>,
     /// 该行是一次工具调用时带上调用视图；普通文本行没有。
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool: Option<ToolCallView>,
     /// 该行是"信封缺失、按发言原文收录"的降级行。
     /// **结构化信号**：呈现层据此做样式，不靠匹配行文本里的说明文案。
@@ -176,6 +190,70 @@ pub struct LineView {
     /// （见 docs/architecture/session-model.md 五）。
     #[serde(default, skip_serializing_if = "is_zero")]
     pub turn: u64,
+}
+
+impl LineView {
+    /// **模型发言行**：谁说的 + 动词（空 = 该身份没有动词，如单 agent 的正文行）。
+    pub fn speech(speaker: &str, verb: &str, line: String) -> LineView {
+        LineView {
+            speaker: speaker.to_string(),
+            verb: verb.to_string(),
+            kind: "msg".to_string(),
+            line,
+            ..Default::default()
+        }
+    }
+
+    /// **用户说的行**：第二段是核心给用户行起的标签（需求 / 开始 / 撤回 / 同意方案…），空 = 普通发言。
+    pub fn user(verb: &str, line: String) -> LineView {
+        LineView {
+            speaker: "用户".to_string(),
+            verb: verb.to_string(),
+            kind: "user".to_string(),
+            line,
+            ..Default::default()
+        }
+    }
+
+    /// **核心自己的行**：系统注入的提醒/边界（`speaker` 空 = 没有说话人），
+    /// 或核心的分隔/说明行（如"代拟"、"节点"）。正文即所见。
+    pub fn system(speaker: &str, line: String) -> LineView {
+        LineView {
+            speaker: speaker.to_string(),
+            kind: "system".to_string(),
+            system: true,
+            line,
+            ..Default::default()
+        }
+    }
+
+    /// **讨论的轮次分隔行**：正文 = 轮次号（结构化，不再从"轮次 2"里抠数字）。
+    pub fn round(n: usize) -> LineView {
+        LineView {
+            speaker: "轮次".to_string(),
+            kind: "round".to_string(),
+            line: n.to_string(),
+            ..Default::default()
+        }
+    }
+
+    /// 渲染成**文本**：`[谁:动词] 正文` / `[谁] 正文` / `[轮次 N]` / 正文。
+    /// 提示词里的转录、回档重建、回放比较都读它——"行怎么变成文本"只有这一处。
+    pub fn render(&self) -> String {
+        if self.kind == "round" {
+            return format!("[{} {}]", self.speaker, self.line);
+        }
+        let label = match (self.speaker.is_empty(), self.verb.is_empty()) {
+            (true, _) => String::new(),
+            (false, true) => self.speaker.clone(),
+            (false, false) => format!("{}:{}", self.speaker, self.verb),
+        };
+        match (label.is_empty(), self.line.is_empty()) {
+            (true, _) => self.line.clone(),
+            (false, true) => format!("[{}]", label),
+            (false, false) => format!("[{}] {}", label, self.line),
+        }
+    }
 }
 
 /// serde 用：0 时不写进线格式。

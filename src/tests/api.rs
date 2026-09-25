@@ -314,7 +314,7 @@ fn stopping_a_collab_discussion_is_prompt_and_keeps_the_session() {
     let lines: Vec<String> = on_bus
         .iter()
         .filter_map(|e| match e {
-            SessionEvent::Transcript(ls) => Some(ls.iter().map(|l| l.line.clone())),
+            SessionEvent::Transcript(ls) => Some(ls.iter().map(|l| l.render())),
             _ => None,
         })
         .flatten()
@@ -413,7 +413,7 @@ fn collab_discussion_emits_each_member_line_as_it_speaks() {
         .iter()
         .flat_map(|l| l.events.iter())
         .filter_map(|e| match e {
-            SessionEvent::Transcript(ls) => Some(ls.iter().map(|x| x.line.clone())),
+            SessionEvent::Transcript(ls) => Some(ls.iter().map(|x| x.render())),
             _ => None,
         })
         .flatten()

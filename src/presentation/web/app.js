@@ -1796,16 +1796,8 @@ function absorb(s, ev) {
       // 权威行到达：撤掉乐观回显与流式块，改用服务端的行；带 tool 的行渲染成工具卡片。
       s.lines = s.lines.filter((x) => !x.pending);
       for (const l of ev.lines) {
-        // 系统消息（提醒、未回应这类不是谁说的内容）：独立样式，别和用户/发言混在一起。
-        if (l.system) {
-          s.lines.push({ cls: 'sys system', id: l.id, who: '', text: l.line });
-          continue;
-        }
-        if (l.tool) {
-          s.lines.push({ cls: 'tool', id: l.id, tool: l.tool, reasoning: l.reasoning || null, who: '', text: '', speaker: l.tool.speaker || '' });
-          continue;
-        }
-        const parts = parseLine(l.line, l.degraded);
+        // 身份与样式**全读结构化字段**（种类 / 说话人 / 动词），不再从正文里抠标签（见 lineParts）。
+        const parts = lineParts(l);
         for (const p of parts) { p.id = l.id; if (l.reasoning) p.reasoning = l.reasoning; }
         s.lines.push(...parts);
       }
@@ -1896,35 +1888,38 @@ function envelopeLine(text, speaker) {
   return { cls: 'line', who: '', text: text, speaker: speaker || '', rawTool: true };
 }
 
-function parseLine(l, degraded) {
-  const m = l.match(/^\[([^\]]+):([a-z]+)\]([\s\S]*)$/);
-  if (m) {
-    const cls = m[2] === 'agree' ? 'ok' : m[2] === 'leave' ? 'sys' : m[2] === 'ask' ? 'plan' : 'line';
-    // 降级标记来自服务端的**结构化字段**（行上的 degraded），不靠匹配行文本里的说明文案。
-    const deg = degraded === true;
-    const text = m[3].trim();
-    // 自由发言（say）的正文若整段就是工具信封，按卡片渲染，而不是当消息
-    if (cls === 'line' && looksLikeToolEnvelope(text)) return [envelopeLine(text, m[1])];
-    return [{ cls: deg ? 'sys' : cls, who: m[1] + ' · ' + m[2] + (deg ? ' · 信封缺失' : ''), text, speaker: m[1], verb: m[2], degraded: deg }];
+/// 一行 → 渲染对象：**全读结构化字段**（种类 / 说话人 / 动词 / 正文），不从正文里抠标签。
+/// 服务端在落行时就把身份写进字段（见 core/events.rs 的 LineView）——
+/// 这里只做"种类 → 样式"的映射：系统行、用户行、轮次分隔行、模型发言、工具卡片。
+function lineParts(l) {
+  const text = l.line || '';
+  const speaker = l.speaker || '';
+  const verb = l.verb || '';
+  const kind = l.kind || '';
+  const reasoning = l.reasoning || null;
+  // 工具行：按调用视图渲染成卡片（说话人取自视图）。
+  if (l.tool || kind === 'tool') {
+    return [{ cls: 'tool', tool: l.tool || null, reasoning: reasoning, who: '', text: '', speaker: (l.tool && l.tool.speaker) || speaker }];
   }
-  if (l.startsWith('[用户')) return [{ cls: 'user', who: '用户', text: l.replace(/^\[[^\]]+\]\s*/, '') }];
-  if (l.startsWith('[代拟]')) return [{ cls: 'sys', who: '核心代拟', text: l.slice(4) }];
-  // 单 agent 的文本行：[说话人] 正文（协作的 [名字:动词] 上面已认）。
-  // 正文**可能为空**：那一轮只思考、或只发了工具信封（思维链在 reasoning 里，正文没有）。
-  // 核心自己的标签（[轮次 2] 这类）方括号里以「轮次」开头，保持系统行原样，不当成说话人。
-  const sp = l.match(/^\[([^\]]+)\]\s*([\s\S]*)$/);
-  if (sp) {
-    const tag = sp[1];
-    const text = sp[2].trim();
-    // 核心自己的**分隔行**：轮次（讨论）与回合（agent 会话）都要有可见的分隔，
-    // 否则一个 agent 的讨论段与执行段会糊成一片——"楼层丢失"就是这么来的（此前只认轮次）。
-    // 核心自己的**分隔行**：轮次（讨论）与回合（agent 会话）都要有可见的分隔，
-    // 否则一个 agent 的讨论段与执行段会糊成一片——"楼层丢失"就是这么来的（此前只认轮次）。
-    if (!text && /^(轮次|回合)/.test(tag)) return [{ cls: 'sys system', who: '', text: l }];
-    if (looksLikeToolEnvelope(text)) return [envelopeLine(text, tag)];
-    return [{ cls: 'line', who: tag, text }];
-  }
-  return [{ cls: 'line', who: '', text: l }];
+  // 系统行：系统注入的提醒/边界（没有说话人），或核心自己的行（代拟…）。
+  if (kind === 'system' || l.system) return [{ cls: 'sys system', who: speaker, text: text }];
+  // 讨论的轮次分隔行：标签是"轮次 + 号"（号在正文里，结构化）。
+  if (kind === 'round') return [{ cls: 'sys system', who: '', text: '[' + speaker + ' ' + text + ']' }];
+  // 用户说的行：标签在字段里（需求/开始/撤回/名单…），界面上就是"用户 + 那句话"。
+  if (kind === 'user') return [{ cls: 'user', who: '用户', text: text }];
+  // 模型发言：动词决定样式；"降级"是结构化信号（不在正文里找说明文案）。
+  const cls = verb === 'agree' ? 'ok' : verb === 'leave' ? 'sys' : verb === 'ask' ? 'plan' : 'line';
+  const deg = l.degraded === true;
+  // 自由发言（say）的正文若整段就是工具信封，按卡片渲染，而不是当消息
+  if (cls === 'line' && looksLikeToolEnvelope(text)) return [envelopeLine(text, speaker)];
+  return [{
+    cls: deg ? 'sys' : cls,
+    who: speaker + (verb ? ' · ' + verb : '') + (deg ? ' · 信封缺失' : ''),
+    text: text,
+    speaker: speaker,
+    verb: verb,
+    degraded: deg,
+  }];
 }
 
 /* ---------- 渲染 ---------- */

@@ -999,17 +999,11 @@ impl Discussion {
             // 本轮到此刻还没交出去的行数（轮次标记也算）：一个成员说完就把它那一批交出去。
             self.handed = self.transcript.len();
             // 轮次边界：本轮的发言都在这条之后（回放时据此重算「本轮谁已同意」）。
-            self.transcript.push(LineView {
-                line: format!("[轮次 {}]", self.round + 1),
-                ..Default::default()
-            });
+            self.transcript.push(LineView::round(self.round + 1));
             // 用户回答优先转达。
             if let Some(ans) = self.pending_user_answers.first().cloned() {
                 self.pending_user_answers.remove(0);
-                self.transcript.push(LineView {
-                    line: format!("[用户] {}", ans),
-                    ..Default::default()
-                });
+                self.transcript.push(LineView::user("", ans));
             }
             self.cursor = Cursor::At(0);
         }
@@ -1047,7 +1041,7 @@ impl Discussion {
                 "transcript",
                 self.transcript
                     .iter()
-                    .map(|l| l.line.clone())
+                    .map(|l| l.render())
                     .collect::<Vec<_>>()
                     .join("\n"),
             )],
@@ -1111,12 +1105,8 @@ impl Discussion {
                 }
                 if self.allow_autonomy {
                     let note = self.prompts.core.discuss.autonomy_note.clone();
-                    self.transcript.push(LineView {
-                        line: note,
-                        // 这是**系统**给的自主说明，不是用户说的。
-                        system: true,
-                        ..Default::default()
-                    });
+                    // 这是**系统**给的自主说明，不是用户说的。
+                    self.transcript.push(LineView::system("", note));
                     return None;
                 }
                 return Some(TurnOut::AskUser {
@@ -1138,7 +1128,8 @@ impl Discussion {
         truncated: bool,
         turn: u64,
     ) {
-        let mut line = format!("[{}:{}] {}", id, verb_tag(verb), text);
+        // 正文 = 发言本身（说话人与动词在字段里）；降级/截断的说明照样跟在正文后。
+        let mut line = text;
         if degraded {
             line.push_str(
                 &self
@@ -1154,12 +1145,10 @@ impl Discussion {
                     .render(&self.prompts.core.tool_texts.truncated_suffix, &[]),
             );
         }
-        self.transcript.push(LineView {
-            line,
-            degraded,
-            turn,
-            ..Default::default()
-        });
+        let mut v = LineView::speech(id, verb_tag(verb), line);
+        v.degraded = degraded;
+        v.turn = turn;
+        self.transcript.push(v);
     }
 
     /// 成员一轮之后的处置：**核心只提醒、不强制**（见 docs/architecture/session-model.md 二）。
@@ -1204,11 +1193,7 @@ impl Discussion {
     /// 记一行**系统消息**（提醒/边界这类不是谁说的内容）到主会话转录。
     /// 见 docs/architecture/session-model.md 二"系统消息"。
     pub fn note_system(&mut self, text: &str) {
-        self.transcript.push(LineView {
-            line: text.to_string(),
-            system: true,
-            ..Default::default()
-        });
+        self.transcript.push(LineView::system("", text.to_string()));
     }
 
     /// 全员同意后：核心整理——总结讨论，为每个留下的成员写执行任务提示词。
@@ -1235,7 +1220,7 @@ impl Discussion {
                     "transcript",
                     self.transcript
                         .iter()
-                        .map(|l| l.line.clone())
+                        .map(|l| l.render())
                         .collect::<Vec<_>>()
                         .join("\n"),
                 ),
