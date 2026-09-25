@@ -2513,6 +2513,16 @@ pub(crate) fn total_review_rework_names_the_nodes_and_only_they_are_redispatched
             .any(|e| matches!(e, SessionEvent::Notice(n) if n.contains("只重派这些"))),
         "如实说明只重派指名的那些"
     );
+    // **唤醒不能替用户点「继续」**：单纯再推一步（子会话完成叫醒走的就是这条）不该重派任何节点，
+    // 否则"暂停等你定"形同虚设。
+    let wake = core.collab_advance(&sid).unwrap();
+    assert!(
+        !wake
+            .iter()
+            .any(|e| matches!(e, SessionEvent::NodeStarted { .. })),
+        "挂着等用户时，唤醒不能自己重派：{:?}",
+        wake
+    );
     let second = core.collab_resume(&sid).unwrap();
     let redispatch: Vec<&String> = second
         .iter()

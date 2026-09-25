@@ -1100,14 +1100,11 @@ impl CollabSession {
             self.ask_user(Pending::PlanReview, sink);
             return;
         }
-        // 用户点「继续」= 重派**核心判定没过**的那些节点：先退回待办，再让核心重新派发（新起一轮子会话）。
-        // 只动这些：同一阶段里已经通过的节点保持"已通过"，不整阶段重来。
-        if let Some(Pending::NodeBlocked { nodes }) = self.pending.clone() {
-            self.pending = None;
-            self.gate_advice.clear();
-            for n in &nodes {
-                self.reset_node(n);
-            }
+        // 等用户的事挂着（请教 / 方案待审 / 节点没过）：**泵不往下推**——唤醒（子会话完成、
+        // 别的客户端动作）也不能替用户点「继续」，否则"暂停"形同虚设（真机上演过：总验收没过、
+        // 本该停下等用户，节点子会话一完成就把那些节点又派了一遍）。重派在**用户那一步**做（见 resume）。
+        if self.awaiting_user() {
+            sink(crate::core::events::idle());
             return;
         }
         // **阶段驱动**：同一阶段（依赖图里同一层）的节点并发跑，跨阶段串行。
@@ -1414,6 +1411,15 @@ impl CollabSession {
     pub fn resume(&mut self, sink: &mut dyn FnMut(SessionEvent)) {
         if self.done {
             return;
+        }
+        // 用户点「继续」= **重派核心指名没过的那几个节点**（只退这些；同阶段已通过的保持已通过，
+        // 不整阶段重来）。放在这里而不是泵里：唤醒（子会话完成）不能替用户做这个决定。
+        if let Some(Pending::NodeBlocked { nodes }) = self.pending.clone() {
+            self.pending = None;
+            self.gate_advice.clear();
+            for n in &nodes {
+                self.reset_node(n);
+            }
         }
         if self.disc.is_some() {
             self.pump_with(sink);

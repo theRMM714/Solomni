@@ -359,6 +359,18 @@ async function approvePlan(name) {
     return (r.json && r.json.events) || [];
   }
 
+  /** 等一张**推来**的裁决（Decision：短暂事件，只在**事件台**上、不落盘）：驱动据此点「继续」。 */
+  async function waitForDecision(sid, kind, ms = 60000) {
+    const until = Date.now() + ms;
+    for (;;) {
+      const r = await api('GET', '/api/events?sid=' + encodeURIComponent(sid) + '&since=0');
+      const ev = JSON.stringify((r.json && r.json.lines) || []);
+      if (ev.includes('"kind":"' + kind + '"')) return ev;
+      if (Date.now() > until) return ev;
+      await new Promise((res) => setTimeout(res, 500));
+    }
+  }
+
   /** 等链驱动跑完：节点在**自己的子会话**里跑，父会话的交付是异步产生的。 */
   async function waitForDelivery(sid, ms = 90000) {
     const until = Date.now() + ms;
@@ -428,9 +440,18 @@ async function approvePlan(name) {
   assert((await api('POST', '/api/sessions/' + encodeURIComponent(nD) + '/begin', { text: 'yes,allow' })).status === 200, '「返工」开始讨论');
   await approvePlan(nD);
   // 没过 = 暂停并**指名要返工的节点**（结构化字段），而不是整条链重来。
-  // 总验收没过 → **指名要返工的节点**（结构化 rework 字段）→ 只重派它 → 重验通过才交付。
-  // 这条路的判据由单测逐条钉住（total_review_rework_names_the_nodes_and_only_they_are_redispatched）；
-  // 这里只断言闭环真的跑通（夹具的失败/通过轮次按方案序号记，见 mock.js）。
+  // 总验收没过 → **指名要返工的节点**（结构化 rework 字段）→ 暂停等你定 → 点「继续」只重派它 → 重验交付。
+  // 夹具按"这一次方案"记失败轮次（mock.js），所以首次必 fail、重派后必过。
+  const evPause = await waitForDecision(nD, 'node_blocked');
+  assert(
+    evPause.includes('"nodes":["n1-1"]'),
+    '总验收没过要指名要返工的节点 id（结构化字段，不是自由文本）',
+    evPause.slice(-300),
+  );
+  assert(
+    (await api('POST', '/api/sessions/' + encodeURIComponent(nD) + '/continue', {})).status === 200,
+    '点「继续」重派指名的节点',
+  );
   const evD = JSON.stringify(await waitForDelivery(nD));
   assert(evD.includes('返工'), '验收 fail → 触发返工', evD.slice(-400));
   assert(evD.includes('delivery'), '返工后重验通过并交付', evD.slice(-240));

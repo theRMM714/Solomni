@@ -739,7 +739,13 @@ impl Core {
     /// 生产路径是"工作线程跑泵 + put_collab 派发 + 子会话完成叫醒"，判定完全一致。
     pub fn collab_resume(&mut self, sid: &str) -> Result<Vec<SessionEvent>, String> {
         let mut out = Vec::new();
-        // 泵（讨论回合 / 退回没过的节点 / 总验收）→ 派发并跑完就绪节点 → 再泵一步（总验收 → 交付）。
+        // **用户那一步**先做：重派核心指名没过的节点（唤醒不会替用户做这个决定，见 pump_with 的闸）。
+        {
+            let mut c = self.take_collab_raw(sid)?;
+            c.resume(&mut |e| out.push(e));
+            self.sessions.insert(sid.to_string(), Session::Collab(c));
+        }
+        // 泵（讨论回合 / 总验收）→ 派发并跑完就绪节点 → 再泵一步（总验收 → 交付）。
         out.extend(self.collab_advance(sid)?);
         out.extend(self.advance_chain(sid));
         out.extend(self.collab_advance(sid)?);
