@@ -6,7 +6,7 @@
 
 use crate::core::api::{Ops, Output};
 use crate::core::providers::AppSettings;
-use crate::core::{CollabStep, Pending, SessionEdit, SessionEvent, WorkMode, WorkSpec};
+use crate::core::{CollabStep, SessionEdit, SessionEvent, WorkMode, WorkSpec};
 use crate::presentation::{intent, routes};
 use serde_json::json;
 use std::sync::Arc;
@@ -351,13 +351,7 @@ pub(crate) fn route(
                     Err(e) => complaint(400, e),
                 };
             }
-            // 名单状态：前端据此决定下一个动作（这一问不产出事件）。
-            if action == "pending" {
-                return match ops.sessions.pending(&sid) {
-                    Ok(p) => ok_json(json!({ "sid": sid, "pending": pending_json(&p) })),
-                    Err(e) => complaint(400, e),
-                };
-            }
+
             // 生成类动作：流式与否是**显示**的选择，归呈现层（取自设置）。
             let out = match ops.registry.settings() {
                 Ok(s) if s.streaming => Output::Stream,
@@ -370,9 +364,8 @@ pub(crate) fn route(
                 "task" => intent::Action::Step(CollabStep::SetTask, &text),
                 "slate" => intent::Action::Step(CollabStep::ConfirmSlate, &text),
                 "begin" => intent::Action::Step(CollabStep::Begin, &text),
-                "answer" => intent::Action::Step(CollabStep::Answer, &text),
-                // 审查关卡：用户点「同意」才开工（方案待审时前端给的就是这个动作）。
-                "approve-plan" => intent::Action::Step(CollabStep::ApprovePlan, &text),
+                // 用户对裁决的回应：自然语言一句话。核心 AI 判定意图是否明确，明确了才开工/放行。
+                "decide" => intent::Action::Step(CollabStep::Decide, &text),
                 "withdraw" => intent::Action::Withdraw(&agent),
                 // 压缩上下文：AI 自己压成摘要（此后此前内容不再发给模型，用户仍可查看）。
                 "compact" => intent::Action::Compact,
@@ -661,18 +654,4 @@ fn state_json(ops: &Ops, fence: &FenceInfo) -> Result<serde_json::Value, String>
 /// 事件 → JSON（线格式唯一定义在 core::events::SessionEvent::to_json）。
 fn ev_json(events: &[SessionEvent]) -> serde_json::Value {
     serde_json::Value::Array(events.iter().map(|e| e.to_json()).collect())
-}
-
-/// Pending 的 JSON 形态（前端决定下一个动作）。
-pub fn pending_json(p: &Option<Pending>) -> serde_json::Value {
-    match p {
-        None => json!(null),
-        Some(Pending::Ask { member, question }) => {
-            json!({ "type": "ask", "member": member, "question": question })
-        }
-        Some(Pending::ConfirmSlate) => json!({ "type": "confirm_slate" }),
-        Some(Pending::ConfirmBegin) => json!({ "type": "confirm_begin" }),
-        Some(Pending::PlanReview) => json!({ "type": "plan_review" }),
-        Some(Pending::NodeBlocked { nodes }) => json!({ "type": "node_blocked", "nodes": nodes }),
-    }
 }

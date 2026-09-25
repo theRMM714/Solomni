@@ -370,6 +370,8 @@ impl HistoryOps for FakeOps {
                 tier_ready: true,
                 tier_missing: Vec::new(),
                 running: false,
+                can_update_task: h.mode == "collab",
+                pending: None,
             })
             .collect())
     }
@@ -867,7 +869,6 @@ fn success_shapes_are_pinned_per_route() {
             200,
             "\"head\"",
         ),
-        ("POST", "/api/sessions/w1/pending", "{}", 200, "\"pending\""),
         (
             "POST",
             "/api/sessions/w1/edit",

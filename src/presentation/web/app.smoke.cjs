@@ -176,8 +176,47 @@ setTimeout(() => {
       toolReasoningRendered = r.reasoning === '过程说明' && r.show === true;
     } catch (e) { loadErrors.push("定稿思维链检查失败：" + e.message); }
   }
+  // **改需求按钮**：没有能力位就根本不渲染（不是灰着）；会话工作时不可点。
+  let taskButtonRule = false;
+  if (!loadErrors.length) {
+    try {
+      const r = vm.runInNewContext(
+        "(function () {" +
+          "function st(can, busy) { return { sid: 'x', can_update_task: can, busy: busy, done: false, readonly: false, lines: [], live: [] }; }" +
+          "syncSendButton(st(false, false)); const off = document.querySelector('#btn-update-task').className;" +
+          "syncSendButton(st(true, false)); const on = document.querySelector('#btn-update-task').className;" +
+          "syncSendButton(st(true, true)); const busyHidden = document.querySelector('#btn-update-task').disabled;" +
+          "return { off: off, on: on, busyDisabled: busyHidden }; })()",
+        sandbox
+      );
+      taskButtonRule = r.off.indexOf("hidden") >= 0 && r.on.indexOf("hidden") < 0 && r.busyDisabled === true;
+      if (!taskButtonRule) loadErrors.push("改需求按钮规则：无权=" + r.off + "、有权=" + r.on + "、工作中 disabled=" + r.busyDisabled);
+    } catch (e) { loadErrors.push("改需求按钮检查失败：" + e.message); }
+  }
+  // **裁决卡**：自由文本那类渲染成"说明 + 建议 + 问题 + 输入框 + 提交"；二选一仍给按钮。
+  let decisionCardRule = false;
+  if (!loadErrors.length) {
+    try {
+      const r = vm.runInNewContext(
+        "(function () {" +
+          "const s = { sid: 'd', lines: [], live: [], busy: false, done: false, readonly: false, fold: {}, scroll: {}," +
+          "  pending: { type: 'decision', kind: 'plan_review', summary: 'S', advice: 'A', question: 'Q', payload: {} } };" +
+          "renderGate(s); const g = document.querySelector('#gate');" +
+          "const card = g.children[0] || { children: [] };" +
+          "const cls = card.children.map(function (c) { return c.className; });" +
+          "const slate = { sid: 'd2', lines: [], live: [], busy: false, done: false, readonly: false, fold: {}, scroll: {}," +
+          "  pending: { type: 'decision', kind: 'confirm_slate', summary: 'S2' } };" +
+          "renderGate(slate); const g2 = document.querySelector('#gate');" +
+          "return { hasInput: cls.indexOf('decision-input') >= 0, hasBtns: cls.indexOf('btns') >= 0, slateKids: g2.children.length }; })()",
+        sandbox
+      );
+      decisionCardRule = r.hasInput && r.hasBtns && r.slateKids > 0;
+      if (!decisionCardRule) loadErrors.push("裁决卡检查：输入框=" + r.hasInput + "、按钮=" + r.hasBtns + "、二选一卡=" + r.slateKids);
+    } catch (e) { loadErrors.push("裁决卡检查失败：" + e.message); }
+  }
   const ok = alerts.length === 0 && loadErrors.length === 0 && rendered && tierWarned && identityKept
-    && pollConn === "已连接" && pollApplied && liveReplaced && liveClearedOnIdle && toolReasoningRendered && consoleErrors.length === 0;
+    && pollConn === "已连接" && pollApplied && liveReplaced && liveClearedOnIdle && toolReasoningRendered
+    && taskButtonRule && decisionCardRule && consoleErrors.length === 0;
   if (!ok) {
     console.log("alerts（原生弹窗被调用的次数，应为 0）:", JSON.stringify(alerts));
     console.log("notice 渲染:", rendered, "| 虚拟机档不可用提示:", tierWarned, "| 身份标题保留:", identityKept);

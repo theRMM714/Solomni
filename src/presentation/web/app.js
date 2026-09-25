@@ -46,8 +46,22 @@ async function refreshState() {
   state.rejected = s.rejected || [];
   state.agents = s.agents || [];
   state.history = s.history || [];
-  // 服务端的**权威运行态**：自己或子会话在跑。刷新页面后据此立刻显示"正在工作"。
-  state.running = new Set((state.history || []).filter((h) => h.running).map((h) => h.name));
+  // 服务端的**权威会话视图**：在跑 / 有没有"本次需求" / 有没有等裁决。
+  // 事件流给增量（推），这里是刷新后照样成立的快照（拉）——两面同一个事实。
+  state.views = new Map((s.sessions || []).map((v) => [v.sid, v]));
+  state.running = new Set(
+    [].concat(
+      (s.sessions || []).filter((v) => v.running).map((v) => v.sid),
+      (state.history || []).filter((h) => h.running).map((h) => h.name),
+    ),
+  );
+  // 已打开的标签页跟着快照对齐（增量事件到达时会覆盖成同一份）。
+  for (const cur of state.sessions.values()) {
+    const v = state.views.get(cur.sid);
+    if (!v) continue;
+    cur.can_update_task = !!v.can_update_task;
+    cur.pending = v.pending || null;
+  }
   state.settings = s.settings || { streaming: true, show_reasoning: true, llm_timeout_secs: 300, discuss_remind_cap: 3, compact_at_percent: 70 };
   renderSidebar();
   renderHistory();
@@ -1693,7 +1707,6 @@ async function startSession(body) {
   state.sessions.set(sid, s);
   // 开场事实不随回包走：它们已经在事件台上，长轮询会照 seq 补进来。
   setActive(sid);
-  if (body.mode === 'collab') await refreshPending(s);
   renderAll();
   await refreshState(); // 会话历史随建随现
   return s;
@@ -1820,6 +1833,10 @@ function absorb(s, ev) {
       s.lines.push(ev.ok ? { cls: 'ok', who: '交付', text: '全部通过，交付用户。' }
         : { cls: 'bad', who: '裁决', text: '返工超限仍未通过，交用户裁决。' });
       break;
+    case 'decision':
+      // 请用户裁决（短暂）：与快照里的 pending 是同一个事实，只是到达得更快。
+      s.pending = ev;
+      return false; // 门要整帧重画
     case 'ended': s.done = true; s.live = []; s.busy = false; break;
   }
   return false; // 定稿事件：需要整帧重建
@@ -1931,6 +1948,14 @@ function syncSendButton(s) {
   sendBtn.className = busy ? 'btn btn-danger' : 'btn btn-primary';
   const cont = $('#btn-continue');
   if (cont) cont.className = busy ? 'btn hidden' : 'btn';
+  // 「改需求」是**用户的动作**（不是核心推的门）：没有"本次需求"就**根本不渲染**（不是灰着）；
+  // 会话正在工作时不可点。
+  const up = $('#btn-update-task');
+  if (up) {
+    const can = !!(s && s.can_update_task);
+    up.className = can ? 'btn' : 'btn hidden';
+    up.disabled = busy;
+  }
 }
 
 /// 只有本来就在底部才自动跟随；用户往上滚时保持原位置（流式刷新不抢滚动条）。
@@ -2109,7 +2134,8 @@ function renderLiveTick(s) {
   syncSendButton(s);
 }
 
-/* 裁决门：确认名单 / 确认开始 / 请教回答 */
+/* 裁决门：核心请用户定的事。二选一的（名单/开始）给按钮；其余给**自由文本**。
+   改需求**不是**门——它是会话级按钮（见 syncSendButton / updateTaskFlow）。 */
 function renderGate(s) {
   const gate = $('#gate');
   gate.innerHTML = '';
@@ -2118,36 +2144,66 @@ function renderGate(s) {
     gate.appendChild(gateCard('请提交本次协作需求：', [
       ['提交', async () => { const v = takeInput(); if (v) await act('task', v); }],
     ]));
-  } else if (s.pending) {
-    if (s.pending.type === 'confirm_slate') {
-      gate.appendChild(gateCard('核心已代拟名单（见转录），是否按此建组？', [
-        ['确认建组', () => act('slate', 'yes')],
-        ['取消', () => act('slate', 'no')],
-      ]));
-    } else if (s.pending.type === 'confirm_begin') {
-      gate.appendChild(gateCard('名单已定，开始讨论？', [
-        ['开始', () => act('begin', 'yes')],
-        ['开始（授权小组自裁细节）', () => act('begin', 'yes,allow')],
-        ['暂不', () => {}],
-      ]));
-    } else if (s.pending.type === 'ask') {
-      gate.appendChild(gateCard(s.pending.member + ' 请教：' + s.pending.question, [
-        ['回答', async () => { const v = takeInput(); if (v !== null) await act('answer', v); }],
-      ]));
-    }
+    return;
   }
-  // 协作：随时可改本次需求（回到需求行、追加新需求，核心按最后一条判定）。
-  if (s.mode === 'collab') {
-    gate.appendChild(gateCard('需要修改本次需求？', [
-      ['改需求', async () => {
-        const v = window.prompt('新的本次需求：', '');
-        if (v !== null && v.trim()) await updateTask(v.trim());
-      }],
+  const p = s.pending;
+  if (!p) return;
+  if (p.kind === 'confirm_slate') {
+    gate.appendChild(gateCard('核心已代拟名单（见转录），是否按此建组？', [
+      ['确认建组', () => act('slate', 'yes')],
+      ['取消', () => act('slate', 'no')],
     ]));
+  } else if (p.kind === 'confirm_begin') {
+    gate.appendChild(gateCard('名单已定，开始讨论？', [
+      ['开始', () => act('begin', 'yes')],
+      ['开始（授权小组自裁细节）', () => act('begin', 'yes,allow')],
+      ['暂不', () => {}],
+    ]));
+  } else {
+    gate.appendChild(decisionCard(p));
   }
 }
 
-/* 改需求：服务端回到需求行并追加新需求，返回完整重放，前端整体重建。 */
+/// 裁决卡：**核心的说明 + 建议 + 要你回答的那句 + 自由文本**。
+/// 用户写自己的想法即可（"马上做"这种自然语言就算明确）；核心 AI 判定意图是否明确，明确了才开工/放行。
+function decisionCard(p) {
+  const el = document.createElement('div');
+  el.className = 'gate-card';
+  const q = document.createElement('div'); q.className = 'q'; q.textContent = p.summary || ''; el.appendChild(q);
+  if (p.advice) {
+    const a = document.createElement('div'); a.className = 'advice'; a.textContent = '建议：' + p.advice; el.appendChild(a);
+  }
+  if (p.question) {
+    const qq = document.createElement('div'); qq.className = 'ask'; qq.textContent = p.question; el.appendChild(qq);
+  }
+  const hint = document.createElement('div');
+  hint.className = 'hint';
+  hint.textContent = '用你自己的话说一句——它会进主会话，所有成员都看得到。';
+  el.appendChild(hint);
+  const inp = document.createElement('input');
+  inp.className = 'decision-input';
+  inp.placeholder = '你的想法…';
+  el.appendChild(inp);
+  const bs = document.createElement('div'); bs.className = 'btns';
+  const b = document.createElement('button'); b.className = 'btn btn-primary'; b.textContent = '提交';
+  b.onclick = async () => { const v = inp.value && inp.value.trim(); if (v) await act('decide', v); };
+  bs.appendChild(b); el.appendChild(bs);
+  return el;
+}
+
+/* 改需求：**用户自己点的动作**（不是核心推的门）。
+   服务端回到需求行并追加新需求，返回完整重放，前端整体重建。 */
+async function updateTaskFlow() {
+  const s = activeSession();
+  if (!s || isBusy(s) || !s.can_update_task) return;
+  const v = takeInput();
+  if (!v) {
+    notice('改需求', '先在输入框写下新的本次需求，再点「改需求」。', 'info');
+    return;
+  }
+  await updateTask(v);
+}
+
 async function updateTask(text) {
   const s = activeSession();
   if (!s || isBusy(s)) return;
@@ -2155,7 +2211,6 @@ async function updateTask(text) {
     const r = await api('POST', '/api/sessions/' + encodeURIComponent(s.sid) + '/update-task', { text });
     s.lines = []; s.pending = null; s.readonly = false; s.done = false;
     for (const ev of (r.events || [])) absorb(s, ev);
-    await refreshPending(s);
     renderAll();
   } catch (err) { notice('操作失败', err.message, 'err'); }
 }
@@ -2212,9 +2267,11 @@ function applyBatch(seq, sid, events) {
     // **必须就地建出会话状态**再吸收事件：否则它的事件（含流式 delta）会被永久丢掉，
     // 只有手动点开时才靠历史回放补上——那正是"流式没起效、别人的会话不更新"的来源。
     const h = (state.history || []).find((x) => x.name === sid);
+    const v = (state.views || new Map()).get(sid);
     s = {
       sid, mode: (h && h.mode) || 'single', title: sid,
-      lines: [], live: [], pending: null, busy: false,
+      lines: [], live: [], pending: (v && v.pending) || null, busy: false,
+      can_update_task: !!(v && v.can_update_task),
       done: !!(h && h.done), awaiting: null, fold: {}, scroll: {},
     };
     state.sessions.set(sid, s);
@@ -2238,7 +2295,6 @@ async function act(action, text) {
     // 命令回包只有头部序号：事实（含自己那条发言的权威行）由事件流补进来。
     await api('POST', '/api/sessions/' + encodeURIComponent(s.sid) + '/' + action, { text });
     s.awaiting = null;
-    await refreshPending(s);
     renderAll();
   } catch (err) {
     s.lines = s.lines.filter((x) => !x.pending);
@@ -2297,7 +2353,6 @@ async function continueFlow() {
   try {
     await api('POST', '/api/sessions/' + encodeURIComponent(s.sid) + '/continue', {});
     s.readonly = false; // 历史回放会话一旦继续即转为活动会话（跨重启续跑）
-    await refreshPending(s);
     renderAll();
   } catch (err) {
     s.lines.push({ cls: 'bad', who: '错误', text: err.message });
@@ -2305,17 +2360,6 @@ async function continueFlow() {
   } finally {
     s.busy = false;
     renderAll();
-  }
-}
-
-async function refreshPending(s) {
-  // 服务端在 Ended 后回收会话：查询报「无此会话」即视为已终结。
-  if (s.done) return;
-  try {
-    const r = await api('POST', '/api/sessions/' + encodeURIComponent(s.sid) + '/pending', {});
-    s.pending = r.pending || null;
-  } catch (err) {
-    if (String(err.message).includes('无此会话')) { s.done = true; s.pending = null; }
   }
 }
 
@@ -2512,6 +2556,7 @@ async function atOnInput() {
 /* ---------- 发送 ---------- */
 $('#btn-send').onclick = onSend;
 $('#btn-continue').onclick = continueFlow;
+$('#btn-update-task').onclick = updateTaskFlow;
 $('#input').addEventListener('keydown', (e) => {
   if (atKey(e)) return; // 菜单打开时 ↑/↓/Enter/Esc 归菜单
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); onSend(); }
@@ -2534,7 +2579,12 @@ function onSend() {
   if (!s || s.readonly) return;
   if (isBusy(s)) { stopGeneration(); return; } // 生成中：同一个键变成「停止」
   if (s.awaiting === 'task') { const v = takeInput(); if (v) act('task', v); return; }
-  if (s.pending && s.pending.type === 'ask') { const v = takeInput(); if (v) act('answer', v); return; }
+  // 裁决是自由文本：把输入框里的话作为回应提交（核心 AI 判定意图是否明确）。
+  if (s.pending && s.pending.kind !== 'confirm_slate' && s.pending.kind !== 'confirm_begin') {
+    const v = takeInput();
+    if (v) act('decide', v);
+    return;
+  }
   if (s.mode !== 'collab') { const v = takeInput(); if (v) act('say', v); return; } // 单 agent 形态可以自由发言
   // 协作无挂起时忽略发送（避免打断泵）。
 }

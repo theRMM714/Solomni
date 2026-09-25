@@ -2082,7 +2082,7 @@ pub(crate) fn approved_plan_spawns_a_sub_session_per_ready_node() {
     core.collab_continue(&sid, CollabStep::Begin, "yes")
         .unwrap();
     let after = core
-        .collab_continue(&sid, CollabStep::ApprovePlan, "")
+        .collab_continue(&sid, CollabStep::Decide, "同意开工")
         .unwrap();
 
     let started: Vec<(String, String, String)> = after
@@ -2151,7 +2151,7 @@ pub(crate) fn same_agent_nodes_serialize_but_different_agents_run_together() {
     core.collab_continue(&sid, CollabStep::Begin, "yes")
         .unwrap();
     let evs = core
-        .collab_continue(&sid, CollabStep::ApprovePlan, "")
+        .collab_continue(&sid, CollabStep::Decide, "同意开工")
         .unwrap();
     let order: Vec<String> = evs
         .iter()
@@ -2201,7 +2201,7 @@ pub(crate) fn failed_node_acceptance_pauses_then_continue_redispatches() {
         .unwrap();
 
     let first = core
-        .collab_continue(&sid, CollabStep::ApprovePlan, "")
+        .collab_continue(&sid, CollabStep::Decide, "同意开工")
         .unwrap();
     assert!(
         matches!(
@@ -2293,7 +2293,7 @@ pub(crate) fn collab_pauses_for_plan_review_until_the_user_approves() {
 
     // 点「同意」之后才推进：执行回报与交付都该出现。
     let after = core
-        .collab_continue(&sid, CollabStep::ApprovePlan, "")
+        .collab_continue(&sid, CollabStep::Decide, "同意开工")
         .unwrap();
     assert!(
         after
@@ -2347,7 +2347,7 @@ pub(crate) fn core_collab_demo_runs_full_five_stages() {
     let events = {
         let mut e = events;
         e.extend(
-            core.collab_continue(&sid, CollabStep::ApprovePlan, "")
+            core.collab_continue(&sid, CollabStep::Decide, "同意开工")
                 .unwrap(),
         );
         e
@@ -2403,7 +2403,7 @@ pub(crate) fn core_collab_delegated_slate_flow() {
     let events = {
         let mut e = events;
         e.extend(
-            core.collab_continue(&sid, CollabStep::ApprovePlan, "")
+            core.collab_continue(&sid, CollabStep::Decide, "同意开工")
                 .unwrap(),
         );
         e
@@ -2492,7 +2492,7 @@ pub(crate) fn collab_delegated_roster_written_back_and_rebuilt_from_meta() {
     let events = {
         let mut e = events;
         e.extend(
-            core.collab_continue(&sid, CollabStep::ApprovePlan, "")
+            core.collab_continue(&sid, CollabStep::Decide, "同意开工")
                 .unwrap(),
         );
         e
@@ -6420,7 +6420,7 @@ pub(crate) fn core_collab_tool_modules_run_in_execution() {
     events.extend(core.collab_continue(&sid, CollabStep::Begin, "").unwrap());
     // 整理完停在**审查关卡**：点「同意」才继续（P4b 起协作的必经一步）。
     events.extend(
-        core.collab_continue(&sid, CollabStep::ApprovePlan, "")
+        core.collab_continue(&sid, CollabStep::Decide, "同意开工")
             .unwrap(),
     );
     // 工具在**节点自己的子会话**里跑：那条 tool 转录行落在子会话的转录上（单 agent 行格式）。

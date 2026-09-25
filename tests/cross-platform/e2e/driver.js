@@ -309,11 +309,11 @@ async function lines(sid) {
   assert(ev3.includes('单兵'), '代拟出来的 agent 真的在发言', ev3.slice(0, 240));
 
 
-  /** 走完审查关卡：整理完停在待审，点「同意」才开工（协作的必经一步）。 */
+  /** 走完审查关卡：整理完停在待审，用户回一句**明确的开工**才推进（协作的必经一步）。 */
 async function approvePlan(name) {
-  const r = await api('POST', '/api/sessions/' + encodeURIComponent(name) + '/approve-plan', {});
-  assert(r.status === 200, '审查关卡：点「同意」开工', r.text.slice(0, 200));
-  return (r.json && r.json.events) || [];
+  const r = await api('POST', '/api/sessions/' + encodeURIComponent(name) + '/decide', { text: '同意开工，按方案推进。' });
+  assert(r.status === 200, '审查关卡：明确开工', r.text.slice(0, 200));
+  return [];
 }
 
 /* ---------- 协作状态机的六条判据（L4） ----------
@@ -430,9 +430,12 @@ async function approvePlan(name) {
   // 不给 allow：授权自裁（yes,allow）会让 ask 留档不中止——这正是 allow 的语义分界，所以这里要验"不授权"那一侧。
   const beginF = await api('POST', '/api/sessions/' + encodeURIComponent(nF) + '/begin', { text: 'yes' });
   assert(beginF.status === 200, '「提问」开始讨论（不授权自裁）', beginF.text.slice(0, 200));
-  const pendF = await api('POST', '/api/sessions/' + encodeURIComponent(nF) + '/pending', {});
-  assert(pendF.status === 200 && pendF.json && pendF.json.pending && pendF.json.pending.type === 'ask', 'ask 中止轮转并把问题呈给用户', pendF.text.slice(0, 300));
-  const ansF = await api('POST', '/api/sessions/' + encodeURIComponent(nF) + '/answer', { text: '用第一个方案' });
+  // 待裁决是**快照字段**（与推的 Decision 同源）：从 /api/state 的会话视图读。
+  const stF = await api('GET', '/api/state');
+  const viewF = ((stF.json && stF.json.sessions) || []).find((v) => v.sid === nF);
+  const pendF = (viewF && viewF.pending) || null;
+  assert(pendF && pendF.kind === 'ask', 'ask 中止轮转并把问题呈给用户（快照里带待裁决）', JSON.stringify(pendF).slice(0, 300));
+  const ansF = await api('POST', '/api/sessions/' + encodeURIComponent(nF) + '/decide', { text: '用第一个方案' });
   assert(ansF.status === 200, '回答 ask 后继续', ansF.text.slice(0, 200));
   const tF = joined(await all(nF));
   assert(tF.includes('用第一个方案'), '用户回答并入转录（进上下文）', tF.slice(-300));

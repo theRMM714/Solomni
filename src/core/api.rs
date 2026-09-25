@@ -812,13 +812,8 @@ impl CoreHandle {
                             CollabWork::Step(CollabStep::Begin) => {
                                 c.begin(text.contains("allow"), &mut sink)
                             }
-                            CollabWork::Step(CollabStep::Answer) => c.answer(&text, &mut sink),
-                            // 审查关卡点「同意」：记下过关，然后接着推进（这条是生产路径——
-                            // 只接 Core::collab_continue 会漏掉它，单元测试看不出来，e2e 才逮得到）。
-                            CollabWork::Step(CollabStep::ApprovePlan) => {
-                                c.approve_plan(&mut sink);
-                                c.resume(&mut sink);
-                            }
+                            // 提请裁决 / 方案过审 / 节点放行都走这条（自由文本 + 核心判定）。
+                            CollabWork::Step(CollabStep::Decide) => c.decide(&text, &mut sink),
                             CollabWork::Step(_) => {}
                             CollabWork::Resume => c.resume(&mut sink),
                         }
@@ -1013,7 +1008,7 @@ impl SessionOps for CoreHandle {
             }
             // 长步骤（开始讨论 / 回答）：队列只占"取/交"两步，泵在工作线程上跑。
             // 「同意方案」也要跑泵（过关后接着推进），所以和长步骤走同一条路。
-            CollabStep::Begin | CollabStep::Answer | CollabStep::ApprovePlan => {
+            CollabStep::Begin | CollabStep::Decide => {
                 self.collab_generation(sid, CollabWork::Step(step), text)
             }
         }

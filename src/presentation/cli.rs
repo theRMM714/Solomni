@@ -245,6 +245,22 @@ fn render(events: &[SessionEvent]) {
                 }
             }
             SessionEvent::Ended => {}
+            // 请用户裁决：把"为什么要你定 + 建议"如实打出来（与 Web 那张卡同一份事实）。
+            SessionEvent::Decision {
+                summary,
+                advice,
+                question,
+                ..
+            } => {
+                println!("[裁决] {}", summary);
+                if !advice.trim().is_empty() {
+                    println!("  建议：{}", advice);
+                }
+                if !question.trim().is_empty() {
+                    println!("  {}", question);
+                }
+                println!("  （用自然语言回一句即可；回话会进主会话，所有成员都看得到）");
+            }
             // 流式增量与工具调用实时事件都是短暂事件，终端不在流中渲染（最终行会到）。
             // 短暂事件（流式增量 / 运行态 / 工具调用）：Web 前端用来做实时渲染，CLI 不逐条打。
             SessionEvent::Delta { .. }
@@ -438,7 +454,7 @@ fn collab_flow(ops: &Ops, arg: &str) {
             match intent::act(
                 ops,
                 &sid,
-                intent::Action::Step(CollabStep::Answer, &ans),
+                intent::Action::Step(CollabStep::Decide, &ans),
                 Output::Final,
             ) {
                 Ok(acted) => follow(ops, &sid, &mut cursor, acted),

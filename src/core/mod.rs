@@ -63,9 +63,8 @@ pub enum CollabStep {
     SetTask,
     ConfirmSlate,
     Begin,
-    Answer,
-    /// 用户在审查关卡点了「同意」：方案过关，按它开工。
-    ApprovePlan,
+    /// **用户对裁决的自由文本回应**：核心 AI 判定意图是否明确，明确了才开工/放行。
+    Decide,
 }
 
 /// 工作形态：单 agent（模块数不限）/ 协作（多 agent 分权协商）。
@@ -215,6 +214,7 @@ pub(crate) fn persist_events(
                 SessionEvent::Delta { .. }
                     | SessionEvent::Working { .. }
                     | SessionEvent::ToolCall(_)
+                    | SessionEvent::Decision { .. }
             )
         })
         .map(|e| e.to_json())
@@ -285,6 +285,13 @@ pub struct SessionView {
     /// **这条会话此刻在跑吗**（生成中）：界面据此把「发送/继续」换成「停止」并显示占位动画。
     /// 它是**核心侧的权威事实**（不是前端从事件里猜的）——刷新后依然成立。
     pub running: bool,
+    /// **这条工作有「本次需求」吗**：前端据此决定要不要渲染「改需求」按钮——
+    /// 没有就**根本不渲染**（不是灰着）。这是领域事实（有没有需求行），不是"模式"。
+    pub can_update_task: bool,
+    /// 当前等用户裁决的事（None = 没有）：**快照形态**，与推的 `SessionEvent::Decision` 同源。
+    /// 刷新页面时界面照样画得出那张卡；推的那条只是增量。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pending: Option<serde_json::Value>,
 }
 
 /// 会话文件清单视图（前端 @ 菜单与「长路径缩写」用）：相对清单 + 真实根。
@@ -1541,6 +1548,18 @@ impl Core {
                 // 记的档位来自落盘 meta（权威）：环境后来变了也要如实提示——**不拦打开**（记录是用户的）。
                 let exec = entry.map(|h| h.exec.clone()).unwrap_or_default();
                 let readiness = exec::tier_readiness(&exec, self.qemu_path());
+                // 「改需求」能力位：有本次需求行才给。在表里看会话种类；不在表里（生成中/未打开）
+                // 看落盘 meta 的形态（那是名单与形态的单一真相）。
+                let can_update_task = match self.sessions.get(&sid) {
+                    Some(Session::Collab(_)) => true,
+                    Some(Session::Single(_)) => false,
+                    None => mode == "collab",
+                };
+                // 待裁决：对象不在表里（正在生成）时拿不到，如实给 None（推的 Decision 事件会补上）。
+                let pending = match self.sessions.get(&sid) {
+                    Some(Session::Collab(c)) => c.pending.as_ref().map(|p| p.to_json()),
+                    _ => None,
+                };
                 SessionView {
                     running: running_now.contains(&sid),
                     sid,
@@ -1549,6 +1568,8 @@ impl Core {
                     tier: exec.tier.as_str().to_string(),
                     tier_ready: readiness.ready(),
                     tier_missing: readiness.missing().iter().map(|s| s.to_string()).collect(),
+                    can_update_task,
+                    pending,
                 }
             })
             .collect()
@@ -2320,9 +2341,15 @@ impl Core {
                     }
                 }
                 CollabStep::Begin => collab.begin(text.contains("allow"), &mut |e| out.push(e)),
-                CollabStep::Answer => collab.answer(text, &mut |e| out.push(e)),
-                // 「同意」要先记过关，再**同步推进链**（借 self 的动作在块外做）。
-                CollabStep::ApprovePlan => approve = true,
+                // 自由文本回应：请教 = 他的话进主会话；待审 = 记他的话 + 过审开工；
+                // 节点没过 = 记他的话 + 重派。过审后要**同步推进链**（借 self 的动作在块外做）。
+                CollabStep::Decide => {
+                    let before = collab.plan_approved();
+                    collab.decide(text, &mut |e| out.push(e));
+                    if !before && collab.plan_approved() {
+                        approve = true;
+                    }
+                }
             }
         }
         if approve {

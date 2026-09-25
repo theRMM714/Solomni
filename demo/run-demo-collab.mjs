@@ -173,24 +173,26 @@ async function main() {
   let delivered = false;
   while (Date.now() < DEADLINE) {
     await new Promise((r) => setTimeout(r, 2000));
-    const p = await api("POST", "/api/sessions/" + encodeURIComponent(sid) + "/pending", {});
-    const pending = p.json && p.json.pending;
-    if (pending && pending.type === "ask") {
-      console.log("   [待裁决] " + String(pending.member || "") + " 提问：" + String(pending.question || "").slice(0, 200));
-      const ans = await api("POST", "/api/sessions/" + encodeURIComponent(sid) + "/answer", { text: "按你的判断做" });
-      ok(ans.status === 200, "回答 agent 的提问", ans.text);
+    // 待裁决是**快照字段**（与推的 Decision 同源）：从 /api/state 的会话视图读。
+    const st = await api("GET", "/api/state");
+    const view = ((st.json && st.json.sessions) || []).find((v) => v.sid === sid);
+    const pending = view && view.pending;
+    if (pending && pending.kind === "ask") {
+      console.log("   [裁决] " + String(pending.summary || "") + " 提问：" + String(pending.question || "").slice(0, 200));
+      const ans = await api("POST", "/api/sessions/" + encodeURIComponent(sid) + "/decide", { text: "按你的判断做" });
+      ok(ans.status === 200, "回应 agent 的请教（自由文本）", ans.text);
       continue;
     }
-    // **审查关卡**：整理完不自动开工——方案与任务链先给用户看，点「同意」才推进。
-    if (pending && pending.type === "plan_review") {
-      console.log("   [审查关卡] 方案与任务链已备好，点「同意」开工");
-      const a = await api("POST", "/api/sessions/" + encodeURIComponent(sid) + "/approve-plan", {});
-      ok(a.status === 200, "审查关卡：同意方案开工", a.text);
+    // **审查关卡**：整理完不自动开工——方案与任务链先给用户看，用户回一句明确的"开工"才推进。
+    if (pending && pending.kind === "plan_review") {
+      console.log("   [裁决] " + String(pending.summary || "") + " → 回一句明确的开工");
+      const a = await api("POST", "/api/sessions/" + encodeURIComponent(sid) + "/decide", { text: "同意开工，按方案推进。" });
+      ok(a.status === 200, "审查关卡：明确开工", a.text);
       continue;
     }
     // **节点验收没过**：如实报告是哪几个节点，然后点「继续」重派它们。
-    if (pending && pending.type === "node_blocked") {
-      console.log("   [节点验收] 没通过：" + JSON.stringify(pending.nodes || []));
+    if (pending && pending.kind === "node_blocked") {
+      console.log("   [节点验收] 没通过：" + JSON.stringify((pending.payload && pending.payload.nodes) || []));
       const c = await api("POST", "/api/sessions/" + encodeURIComponent(sid) + "/continue", {});
       ok(c.status === 200, "重派没通过的节点", c.text);
       continue;

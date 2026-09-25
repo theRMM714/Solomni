@@ -345,6 +345,15 @@ impl CollabSession {
         }
     }
 
+    /// 挂起一件等用户裁决的事，并**推**一条 `Decision`。
+    /// `Pending` 是快照字段（刷新页面照样画得出那张卡），这条是增量（界面立刻出卡）——
+    /// 两处同源：都来自 `Pending::decision_parts`，不做第二真相。
+    fn ask_user(&mut self, p: Pending, sink: &mut dyn FnMut(SessionEvent)) {
+        let ev = p.decision();
+        self.pending = Some(p);
+        sink(ev);
+    }
+
     /// 正在等用户（请教 / 方案待审 / 节点没过）：泵**不再往下推**，直到用户回应。
     pub fn awaiting_user(&self) -> bool {
         matches!(
@@ -462,7 +471,7 @@ impl CollabSession {
                 "[建组] {}",
                 self.names().join(" + ")
             )));
-            self.pending = Some(Pending::ConfirmBegin);
+            self.ask_user(Pending::ConfirmBegin, sink);
         }
     }
 
@@ -534,7 +543,7 @@ impl CollabSession {
         ));
         sink(SessionEvent::Transcript(vec![line]));
         self.slate_picks = picks.into_iter().map(|(a, _)| a).collect();
-        self.pending = Some(Pending::ConfirmSlate);
+        self.ask_user(Pending::ConfirmSlate, sink);
     }
 
     /// 回应代拟名单确认（仅 ConfirmSlate 挂起时有效）。
@@ -561,7 +570,7 @@ impl CollabSession {
             "[建组] {}",
             self.names().join(" + ")
         )));
-        self.pending = Some(Pending::ConfirmBegin);
+        self.ask_user(Pending::ConfirmBegin, sink);
     }
 
     /// 确认开始讨论（allow = yes,allow 自裁授权）；开聊并一路泵到暂停或交付。
@@ -648,7 +657,7 @@ impl CollabSession {
             push_delta(d, &mut self.emitted, &mut self.next_line, sink);
         }
         if let Some(TurnOut::AskUser { member, question }) = out {
-            self.pending = Some(Pending::Ask { member, question });
+            self.ask_user(Pending::Ask { member, question }, sink);
             return;
         }
         self.pump_with(sink);
@@ -741,6 +750,51 @@ impl CollabSession {
         }
     }
 
+    /// 用户对当前裁决的**自由文本回应**（与"二选一确认"分开）：
+    /// - 请教：他的话进**主会话**（所有成员下一回合都看得到），继续泵；**不单独转给那个成员**。
+    /// - 方案待审：先记下他的话（进主会话），再过审开工。
+    /// - 节点没过：先记下他的话，再重派没过的节点。
+    /// - 名单 / 开始是二选一（前端给的是确认按钮），不走这条路——如实说明，不假装收下。
+    ///
+    /// 没有挂起的事同样如实说。
+    pub fn decide(&mut self, text: &str, sink: &mut dyn FnMut(SessionEvent)) {
+        match self.pending.clone() {
+            Some(Pending::Ask { .. }) => self.answer(text, sink),
+            Some(Pending::PlanReview) => {
+                self.note_user(text, sink);
+                self.approve_plan(sink);
+                self.resume(sink);
+            }
+            Some(Pending::NodeBlocked { .. }) => {
+                self.note_user(text, sink);
+                self.resume(sink);
+            }
+            Some(Pending::ConfirmSlate) | Some(Pending::ConfirmBegin) => {
+                sink(SessionEvent::Notice(
+                    "[裁决] 这一步是二选一（确认 / 取消），请用卡片上的按钮。".to_string(),
+                ));
+            }
+            None => sink(SessionEvent::Notice(
+                "[裁决] 现在没有等你定的事。".to_string(),
+            )),
+        }
+    }
+
+    /// 用户的话进**主会话转录**（所有成员的下一回合都看得到）。空话不记。
+    fn note_user(&mut self, text: &str, sink: &mut dyn FnMut(SessionEvent)) {
+        let text = text.trim();
+        if text.is_empty() {
+            return;
+        }
+        let roots = crate::core::refs::RefRoots {
+            work: self.sandboxes.shared.clone(),
+            private: None,
+        };
+        let text = crate::core::refs::rewrite(text, None, &roots, &self.prompts.core.refs);
+        let line = self.view(format!("[用户] {}", text));
+        sink(SessionEvent::Transcript(vec![line]));
+    }
+
     /// 泵：推进讨论直至暂停（ask）或收敛并走完整理/执行/验收/交付；事件逐条经 sink 外送。
     pub fn pump_with(&mut self, sink: &mut dyn FnMut(SessionEvent)) {
         if self.done || self.disc.is_none() {
@@ -791,7 +845,7 @@ impl CollabSession {
                         return;
                     }
                     TurnOut::AskUser { member, question } => {
-                        self.pending = Some(Pending::Ask { member, question });
+                        self.ask_user(Pending::Ask { member, question }, sink);
                         return;
                     }
                     TurnOut::Done => {
@@ -861,7 +915,7 @@ impl CollabSession {
                 plan: plan.clone(),
                 chain: self.chain.clone().unwrap_or_default(),
             });
-            self.pending = Some(Pending::PlanReview);
+            self.ask_user(Pending::PlanReview, sink);
             return;
         }
         // 用户点「继续」= 重派没过的节点：先退回待办，再让核心重新派发（新起一轮子会话）。
@@ -924,7 +978,7 @@ impl CollabSession {
                 "[验收] 这些节点没通过：{}。点「继续」会重派它们。",
                 bad.join("、")
             )));
-            self.pending = Some(Pending::NodeBlocked { nodes: bad });
+            self.ask_user(Pending::NodeBlocked { nodes: bad }, sink);
             return;
         }
         // 总验收：核心 AI 按**各节点的产出**核对（复用执行阶段的验收机制）→ 交付。

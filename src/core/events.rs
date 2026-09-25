@@ -51,6 +51,21 @@ pub enum SessionEvent {
         kind: String,
         text: String,
     },
+    /// **请用户裁决**（短暂、不落盘）：核心把"为什么停下来等你"和"我建议怎么做"说清楚，
+    /// 用户用自然语言回一句；核心 AI 判定意图是否明确，明确了才开工/放行。
+    /// 与 `Pending` 同源：快照里带同一份（刷新页面照样画得出），这条只是推的增量。
+    Decision {
+        /// 什么在等裁决：ask / confirm_slate / confirm_begin / plan_review / node_blocked
+        kind: String,
+        /// 核心对当前情况的说明（为什么要你定）
+        summary: String,
+        /// 核心的建议（没有建议时为空串）
+        advice: String,
+        /// 要用户回答的那句（ask 时是成员的原话）
+        question: String,
+        /// 相关载荷（未过的节点 id、名单说明之类）
+        payload: serde_json::Value,
+    },
     /// **正在工作**（短暂，不落盘）：主会话据此知道"现在是谁在干活"。
     /// 为什么要有它：成员回合跑在它自己的会话里，主会话在整回合里一个事件都收不到——
     /// 前端只能靠"有增量"去猜运行态，猜不到就不切按钮、也没有占位动画（用户完全不知道在干什么）。
@@ -231,6 +246,20 @@ impl SessionEvent {
             SessionEvent::Working { agent } => {
                 serde_json::json!({ "type": "working", "agent": agent })
             }
+            SessionEvent::Decision {
+                kind,
+                summary,
+                advice,
+                question,
+                payload,
+            } => serde_json::json!({
+                "type": "decision",
+                "kind": kind,
+                "summary": summary,
+                "advice": advice,
+                "question": question,
+                "payload": payload
+            }),
             SessionEvent::ToolCall(v) => serde_json::json!({
                 "type": "tool_call",
                 "speaker": v.speaker,
@@ -258,4 +287,76 @@ pub enum Pending {
     PlanReview,
     /// 节点验收没过：等用户点「继续」重派这些节点。
     NodeBlocked { nodes: Vec<String> },
+}
+
+impl Pending {
+    /// 裁决的五个部分：kind / 说明 / 建议 / 要回答的那句 / 载荷。
+    /// **只有这一处派生**：推的 `Decision` 事件与快照里的 `pending` 都来自它，不做第二真相。
+    pub fn decision_parts(&self) -> (&'static str, String, String, String, serde_json::Value) {
+        match self {
+            Pending::Ask { member, question } => (
+                "ask",
+                format!(
+                    "{} 在等你回话。你说的话会进主会话，所有成员都看得到。",
+                    member
+                ),
+                String::new(),
+                question.clone(),
+                serde_json::json!({ "member": member }),
+            ),
+            Pending::ConfirmSlate => (
+                "confirm_slate",
+                "核心已代拟名单（见转录）。".to_string(),
+                String::new(),
+                "是否按此建组？".to_string(),
+                serde_json::json!({}),
+            ),
+            Pending::ConfirmBegin => (
+                "confirm_begin",
+                "名单已定。".to_string(),
+                String::new(),
+                "现在开始讨论？".to_string(),
+                serde_json::json!({}),
+            ),
+            Pending::PlanReview => (
+                "plan_review",
+                "方案与任务链已备好；按规则**不自动开工**。".to_string(),
+                String::new(),
+                "要不要现在开工？".to_string(),
+                serde_json::json!({}),
+            ),
+            Pending::NodeBlocked { nodes } => (
+                "node_blocked",
+                "有节点没过验收。".to_string(),
+                String::new(),
+                "要不要放行 / 返工？".to_string(),
+                serde_json::json!({ "nodes": nodes }),
+            ),
+        }
+    }
+
+    /// 推给用户的裁决事件（与快照里的 `pending` 同一个事实）。
+    pub fn decision(&self) -> SessionEvent {
+        let (kind, summary, advice, question, payload) = self.decision_parts();
+        SessionEvent::Decision {
+            kind: kind.to_string(),
+            summary,
+            advice,
+            question,
+            payload,
+        }
+    }
+
+    /// 快照形态（会话视图里的 `pending`）：与 `decision` 同一个形状。
+    pub fn to_json(&self) -> serde_json::Value {
+        let (kind, summary, advice, question, payload) = self.decision_parts();
+        serde_json::json!({
+            "type": "decision",
+            "kind": kind,
+            "summary": summary,
+            "advice": advice,
+            "question": question,
+            "payload": payload
+        })
+    }
 }
