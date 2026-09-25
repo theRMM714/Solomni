@@ -12,6 +12,8 @@ let eventPolls = 0;
 // 应用侧异常一律走 console.error（app.js 的 eventError）：这里记下来，当成硬失败。
 // 为什么必须有它：连接状态已经不看应用异常了，没有这一条，"渲染里抛异常"就会悄悄溜过去。
 const consoleErrors = [];
+// /api/state 的桩：默认没有进行中的会话；运行态那条用例会临时塞一条进去。
+const stateStub = { sessions: [] };
 function el() {
   const node = {
     textContent: "", innerHTML: "", value: "", className: "", dataset: {},
@@ -56,6 +58,7 @@ const sandbox = {
           modules: [{ id: "research", brief: "调研" }],
           providers: [], rejected: ["broken-mod"], agents: [], history: [],
           settings: { streaming: true, show_reasoning: true, llm_timeout_secs: 300, discuss_remind_cap: 3, compact_at_percent: 70 },
+          sessions: stateStub.sessions,
         }),
       };
     }
@@ -85,7 +88,7 @@ const appPath = path.join(__dirname, "app.js");
 try {
   vm.runInNewContext(fs.readFileSync(appPath, "utf8"), sandbox, { filename: "app.js" });
 } catch (e) { loadErrors.push("load error: " + e.message); }
-setTimeout(() => {
+setTimeout(async () => {
   // 正向观察面：自研居中弹窗真的渲染出来（只断言"原生没被调用"是不够的——那样全删掉也能过）。
   let rendered = false;
   let tierWarned = false;
@@ -158,11 +161,11 @@ setTimeout(() => {
         "(function () { const s = { sid: 'x', lines: [], live: [], fold: {}, scroll: {} };" +
           "absorb(s, { type: 'delta', kind: 'text', speaker: '甲', text: '半截' });" +
           "const before = s.live.length; absorb(s, { type: 'working', agent: null });" +
-          "return { before: before, after: s.live.length, busy: s.busy === true }; })()",
+          "return { before: before, after: s.live.length, running: s.running === true, working: s.working }; })()",
         sandbox
       );
-      liveClearedOnIdle = r.before === 1 && r.after === 0 && !r.busy;
-      if (!liveClearedOnIdle) loadErrors.push("空闲收尾检查：idle 前=" + r.before + "、idle 后=" + r.after + "、busy=" + r.busy);
+      liveClearedOnIdle = r.before === 1 && r.after === 0 && !r.running && r.working === null;
+      if (!liveClearedOnIdle) loadErrors.push("空闲收尾检查：idle 前=" + r.before + "、idle 后=" + r.after + "、running=" + r.running);
     } catch (e) { loadErrors.push("空闲收尾检查失败：" + e.message); }
   }
   if (!loadErrors.length) {
@@ -182,7 +185,7 @@ setTimeout(() => {
     try {
       const r = vm.runInNewContext(
         "(function () {" +
-          "function st(can, busy) { return { sid: 'x', can_update_task: can, busy: busy, done: false, readonly: false, lines: [], live: [] }; }" +
+          "function st(can, busy) { return { sid: 'x', can_update_task: can, running: busy, running_known: true, sending: false, done: false, readonly: false, lines: [], live: [] }; }" +
           "syncSendButton(st(false, false)); const off = document.querySelector('#btn-update-task').className;" +
           "syncSendButton(st(true, false)); const on = document.querySelector('#btn-update-task').className;" +
           "syncSendButton(st(true, true)); const busyHidden = document.querySelector('#btn-update-task').disabled;" +
@@ -199,12 +202,12 @@ setTimeout(() => {
     try {
       const r = vm.runInNewContext(
         "(function () {" +
-          "const s = { sid: 'd', lines: [], live: [], busy: false, done: false, readonly: false, fold: {}, scroll: {}," +
+          "const s = { sid: 'd', lines: [], live: [], sending: false, done: false, readonly: false, fold: {}, scroll: {}," +
           "  pending: { type: 'decision', kind: 'plan_review', summary: 'S', advice: 'A', question: 'Q', payload: {} } };" +
           "renderGate(s); const g = document.querySelector('#gate');" +
           "const card = g.children[0] || { children: [] };" +
           "const cls = card.children.map(function (c) { return c.className; });" +
-          "const slate = { sid: 'd2', lines: [], live: [], busy: false, done: false, readonly: false, fold: {}, scroll: {}," +
+          "const slate = { sid: 'd2', lines: [], live: [], sending: false, done: false, readonly: false, fold: {}, scroll: {}," +
           "  pending: { type: 'decision', kind: 'confirm_slate', summary: 'S2' } };" +
           "renderGate(slate); const g2 = document.querySelector('#gate');" +
           "return { hasInput: cls.indexOf('decision-input') >= 0, hasBtns: cls.indexOf('btns') >= 0, slateKids: g2.children.length }; })()",
@@ -220,7 +223,7 @@ setTimeout(() => {
     try {
       const r = vm.runInNewContext(
         "(function () {" +
-          "const s = { sid: 'lv', lines: [], live: [], busy: true, done: false, readonly: false, fold: {}, scroll: {} };" +
+          "const s = { sid: 'lv', lines: [], live: [], sending: true, done: false, readonly: false, fold: {}, scroll: {} };" +
           "state.sessions.set('lv', s); state.activeSid = 'lv';" +
           "absorb(s, { type: 'delta', kind: 'start', speaker: 'a', text: '' });" +
           "absorb(s, { type: 'delta', kind: 'text', speaker: 'a', text: '第一轮' });" +
@@ -234,13 +237,44 @@ setTimeout(() => {
       if (!onlyLastStreams) loadErrors.push("流式光标检查：块数=" + r.n + "、首块=" + r.first + "、末块=" + r.last);
     } catch (e) { loadErrors.push("流式光标检查失败：" + e.message); }
   }
+  // **运行态归一**：事件是唯一真相，/api/state 的 running 只是**对账副本**。
+  //  ① 有实时知识的会话：快照说在跑也不能覆盖（收尾事件到了就是收尾）；
+  //  ② 没有实时知识的会话：快照补齐（刚刷新页面照样显示"正在工作"），快照说没跑就清掉本地遗留；
+  //  ③ 本页发出的命令在途 = 忙（本地事实，与服务端运行态是两回事）。
+  let runningRules = false;
+  if (!loadErrors.length) {
+    try {
+      stateStub.sessions = [{ sid: 'rec', running: true }, { sid: 'fresh', running: true }, { sid: 'stale', running: false }];
+      const r = await vm.runInNewContext(
+        "(function () {" +
+          " const rec = { sid: 'rec', lines: [], live: [], running: false, running_known: true, sending: false };" +
+          " const fresh = { sid: 'fresh', lines: [], live: [], running: false, running_known: false, sending: false };" +
+          " const stale = { sid: 'stale', lines: [], live: [], running: true, working: '甲', running_known: false, sending: false };" +
+          " const mine = { sid: 'mine', lines: [], live: [], running: false, running_known: true, sending: true };" +
+          " state.sessions.set('rec', rec); state.sessions.set('fresh', fresh);" +
+          " state.sessions.set('stale', stale); state.sessions.set('mine', mine); state.activeSid = null;" +
+          " return refreshState().then(function () {" +
+          "   return { rec: { run: rec.running, busy: isBusy(rec) }, fresh: { run: fresh.running, busy: isBusy(fresh) }," +
+          "            stale: { run: stale.running, who: stale.working, busy: isBusy(stale) }, mine: isBusy(mine) };" +
+          " }); })()",
+        sandbox
+      );
+      runningRules = r.rec.run === false && r.rec.busy === false
+        && r.fresh.run === true && r.fresh.busy === true
+        && r.stale.run === false && r.stale.who === null && r.stale.busy === false
+        && r.mine === true;
+      if (!runningRules) loadErrors.push("运行态归一：有实时知识 rec=" + JSON.stringify(r.rec) + "、无知识 fresh=" + JSON.stringify(r.fresh) + "、遗留 stale=" + JSON.stringify(r.stale) + "、在途=" + r.mine);
+    } catch (e) { loadErrors.push("运行态归一检查失败：" + e.message); }
+    stateStub.sessions = [];
+  }
   const ok = alerts.length === 0 && loadErrors.length === 0 && rendered && tierWarned && identityKept
     && pollConn === "已连接" && pollApplied && liveReplaced && liveClearedOnIdle && toolReasoningRendered
-    && taskButtonRule && decisionCardRule && onlyLastStreams && consoleErrors.length === 0;
+    && taskButtonRule && decisionCardRule && onlyLastStreams && runningRules && consoleErrors.length === 0;
   if (!ok) {
     console.log("alerts（原生弹窗被调用的次数，应为 0）:", JSON.stringify(alerts));
     console.log("notice 渲染:", rendered, "| 虚拟机档不可用提示:", tierWarned, "| 身份标题保留:", identityKept);
     console.log("轮询状态点:", JSON.stringify(pollConn), "| 事件已应用:", pollApplied, "| 流式被替换:", liveReplaced, "| 空闲清理:", liveClearedOnIdle, "| 思维链:", toolReasoningRendered);
+    console.log("运行态归一（事件为准 / 快照只对账）:", runningRules);
     console.log("应用侧 console.error:", JSON.stringify(consoleErrors.slice(0, 3)));
     console.log("loadErrors:", JSON.stringify(loadErrors));
   }

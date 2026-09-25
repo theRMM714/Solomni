@@ -14,7 +14,7 @@ const state = {
   modules: [], providers: [], models: [], core: null, rejected: [], agents: [],
   history: [],           // 会话历史（名字/mode/时间）
   settings: { streaming: true, show_reasoning: true, llm_timeout_secs: 300, discuss_remind_cap: 3, compact_at_percent: 70 }, // 基本设置
-  sessions: new Map(),   // sid -> { sid, mode, title, lines, pending, busy, done, awaiting, readonly }
+  sessions: new Map(),   // sid -> { sid, mode, title, lines, pending, sending, running, working, done, awaiting, readonly }
   activeSid: null,
   settingsOpen: false,
 };
@@ -46,9 +46,11 @@ async function refreshState() {
   state.rejected = s.rejected || [];
   state.agents = s.agents || [];
   state.history = s.history || [];
-  // 服务端的**权威会话视图**：在跑 / 有没有"本次需求" / 有没有等裁决。
+  // 服务端的**权威会话视图**：有没有"本次需求" / 有没有等裁决。
   // 事件流给增量（推），这里是刷新后照样成立的快照（拉）——两面同一个事实。
   state.views = new Map((s.sessions || []).map((v) => [v.sid, v]));
+  // 运行态的**对账副本**：事件是唯一真相（见 isBusy）；这份快照只在"本页对这条会话还没有实时
+  // 知识"时用——刚刷新页面、事件台有缺口、别人建的会话。
   state.running = new Set(
     [].concat(
       (s.sessions || []).filter((v) => v.running).map((v) => v.sid),
@@ -61,6 +63,13 @@ async function refreshState() {
     if (!v) continue;
     cur.can_update_task = !!v.can_update_task;
     cur.pending = v.pending || null;
+    // 运行态**只对账、不覆盖**：这条会话已经有实时知识（事件就是真相）时，快照比它滞后——
+    // 一次迟到的轮询不能把已经收尾的回合标回"在跑"。没有实时知识时按快照补齐，并清掉本地遗留
+    // （快照说没跑就是没跑）；谁在跑未知时照旧显示"正在工作…"。
+    if (!cur.running_known) {
+      cur.running = snapshotRunning(cur.sid);
+      if (!cur.running) cur.working = null;
+    }
   }
   state.settings = s.settings || { streaming: true, show_reasoning: true, llm_timeout_secs: 300, discuss_remind_cap: 3, compact_at_percent: 70 };
   renderSidebar();
@@ -301,19 +310,28 @@ function renderHistory() {
   }
 }
 
-/// 这条会话此刻在不在干活：**服务端权威运行态**（自己 or 它的任一子会话在跑）
-/// + 本标签页的本地推断（自己发起的动作、正在到达的流式增量）。
-/// 为什么要服务端那份：成员回合跑在它自己的会话里，主会话整回合收不到事件——
-/// 只靠"有增量"猜就永远切不出「停止」按钮、也没有占位动画。
-function isBusy(s) {
-  if (!s) return false;
-  if (s.busy) return true;
+/// 快照（/api/state）说这条会话、或它的任一子会话在跑吗。
+/// **对账副本的唯一读法**：只在 isBusy 的第三档（本页没有实时知识）用。
+function snapshotRunning(sid) {
   const run = state.running;
-  if (!run) return false;
-  if (run.has(s.sid)) return true;
-  const pre = s.sid + '--';
+  if (!run || !sid) return false;
+  if (run.has(sid)) return true;
+  const pre = sid + '--';
   for (const k of run) if (k.indexOf(pre) === 0) return true;
   return false;
+}
+
+/// 这条会话此刻在不在干活。**运行态的唯一真相是事件**（每个生产者在起止各推一条 `Working`；
+/// 刷新页面或事件台有缺口时用快照对账）——三个来源各司其职，不是三份互相打架的真话：
+/// 1. `s.sending`：本页发起的命令还在途（本地事实，与服务端运行态无关）；
+/// 2. `s.running` + `s.running_known`：收到过它的运行态事件 → 以事件为准，快照不得覆盖；
+/// 3. 没有实时知识：用快照对账——成员回合跑在它自己的会话里，主会话整回合收不到事件，
+///    只靠"有增量"猜就永远切不出「停止」按钮、也没有占位动画。
+function isBusy(s) {
+  if (!s) return false;
+  if (s.sending) return true;
+  if (s.running_known) return !!s.running;
+  return snapshotRunning(s.sid);
 }
 
 function generating(sid) {
@@ -345,7 +363,9 @@ async function openHistory(name) {
     const r = await api('GET', '/api/history/' + encodeURIComponent(name));
     const s = {
       sid: name, mode: (r.meta && r.meta.mode) || 'single', title: name,
-      lines: [], live: [], pending: null, busy: false, done: true, awaiting: null, readonly: true, fold: {}, scroll: {},
+      lines: [], live: [], pending: null, sending: false,
+      running: false, working: null, running_known: false,
+      done: true, awaiting: null, readonly: true, fold: {}, scroll: {},
     };
     state.sessions.set(name, s);
     for (const ev of (r.events || [])) absorb(s, ev);
@@ -1702,7 +1722,9 @@ async function startSession(body) {
   const sid = r.sid;
   const s = {
     sid, mode: body.mode, title: body.name || sid,
-    lines: [], live: [], pending: null, busy: false, done: false, awaiting: null, fold: {}, scroll: {},
+    lines: [], live: [], pending: null, sending: false,
+    running: false, working: null, running_known: false,
+    done: false, awaiting: null, fold: {}, scroll: {},
   };
   state.sessions.set(sid, s);
   // 开场事实不随回包走：它们已经在事件台上，长轮询会照 seq 补进来。
@@ -1805,8 +1827,10 @@ function absorb(s, ev) {
     case 'working':
       // **权威运行态**：核心开始问某个 agent = 忙（带名字），agent=null = 这一回合收尾了。
       // 它不进转录（短暂事件）：用户看到的是占位动画与按钮切换，不是一条消息。
+      // 事件即真相：agent 有名字 = 忙，null = 这一回合收尾（此后不再听快照的）。
+      s.running = !!ev.agent;
       s.working = ev.agent || null;
-      s.busy = !!ev.agent;
+      s.running_known = true;
       if (!ev.agent) {
         // 回合收尾却没有权威行（停止 / 错误）：未定稿的分片不得继续闪光标或冒充转录。
         s.live = [];
@@ -1837,7 +1861,14 @@ function absorb(s, ev) {
       // 请用户裁决（短暂）：与快照里的 pending 是同一个事实，只是到达得更快。
       s.pending = ev;
       return false; // 门要整帧重画
-    case 'ended': s.done = true; s.live = []; s.busy = false; break;
+    case 'ended':
+      // 整场工作结束：运行态也是"没在跑"（事件给的事实，不靠快照）。
+      s.done = true;
+      s.live = [];
+      s.running = false;
+      s.working = null;
+      s.running_known = true;
+      break;
   }
   return false; // 定稿事件：需要整帧重建
 }
@@ -2263,6 +2294,8 @@ async function resyncActive() {
   try {
     const r = await api('GET', '/api/history/' + encodeURIComponent(s.sid));
     s.lines = []; s.live = [];
+    // 重放的是**转录**（运行态是短暂事件，不在盘上）：这条会话的实时知识同样作废，按快照对账。
+    s.running_known = false;
     for (const ev of (r.events || [])) absorb(s, ev);
     renderStream(true);
   } catch { /* 拿不到就等下一次状态刷新 */ }
@@ -2280,22 +2313,23 @@ function applyBatch(seq, sid, events) {
     const v = (state.views || new Map()).get(sid);
     s = {
       sid, mode: (h && h.mode) || 'single', title: sid,
-      lines: [], live: [], pending: (v && v.pending) || null, busy: false,
+      lines: [], live: [], pending: (v && v.pending) || null, sending: false,
+      running: false, working: null, running_known: false,
       can_update_task: !!(v && v.can_update_task),
       done: !!(h && h.done), awaiting: null, fold: {}, scroll: {},
     };
     state.sessions.set(sid, s);
     needState = true; // 侧栏也顺手对齐
   }
-  // 运行态：别人在跑时前端自己的 busy 不知道，用事件流推断（有增量=在跑；见到收尾=跑完）。
-  if (events.some((e) => e.type === 'delta')) s.busy = true;
-  if (events.some((e) => e.type === 'ended' || e.type === 'delivery' || e.type === 'discussion_done')) s.busy = false;
+  // 运行态**不从增量猜**：核心在起止各推一条 `working`（同一个批次里就在 events 里），
+  // 事件按序吸收，运行态因此自己就对了——猜"有增量=在跑"只会与事件打架。
   return absorbEvents(s, events);
 }
 async function act(action, text) {
   const s = activeSession();
   if (!s || isBusy(s) || s.readonly) return;
-  s.busy = true;
+  // 本地事实：我的命令在途（不是服务端运行态）——按钮立刻切「停止」，避免重复提交。
+  s.sending = true;
   // 乐观回显：自己的发言立刻可见；服务端权威行到达时自动替换（见 absorb）。
   if (text && (action === 'say' || action === 'task' || action === 'answer')) {
     s.lines.push({ cls: 'user', who: '用户', text, pending: true });
@@ -2311,7 +2345,10 @@ async function act(action, text) {
     s.lines.push({ cls: 'bad', who: '错误', text: err.message });
     renderAll();
   } finally {
-    s.busy = false;
+    s.sending = false;
+    // 回包只给头部序号；事实由事件流补进来。顺手要一次快照**对账**：命令已结束但它的
+    // 收尾事件可能还在路上，运行态由事件（或这轮快照）说了算，不由"我在不在途"说了算。
+    needState = true;
     renderAll();
   }
 }
@@ -2358,7 +2395,7 @@ function withdrawAgree(agent) {
 async function continueFlow() {
   const s = activeSession();
   if (!s || isBusy(s)) return;
-  s.busy = true;
+  s.sending = true;
   renderStream();
   try {
     await api('POST', '/api/sessions/' + encodeURIComponent(s.sid) + '/continue', {});
@@ -2368,7 +2405,8 @@ async function continueFlow() {
     s.lines.push({ cls: 'bad', who: '错误', text: err.message });
     renderAll();
   } finally {
-    s.busy = false;
+    s.sending = false;
+    needState = true; // 同上：运行态以事件为准，快照只对账
     renderAll();
   }
 }
@@ -2543,7 +2581,7 @@ function atKey(e) {
 async function atOnInput() {
   const tok = atToken();
   const s = activeSession();
-  // busy（生成中）仍拒绝，避免与「停止」抢键盘；readonly（历史只读会话）允许——插入文本无害。
+  // 忙碌（生成中）仍拒绝，避免与「停止」抢键盘；readonly（历史只读会话）允许——插入文本无害。
   if (!tok || !s || isBusy(s)) { atClose(); return; }
   // 同步先开菜单：/files 还没有回来，↑↓/Enter 也必须已经被菜单接管，
   // 否则这期间按 Enter 会把消息直接发出去。
@@ -2629,6 +2667,9 @@ async function pollLoop() {
       // 并把当前会话按历史重放一次。
       if (oldest > 0 && oldest > appliedSeq + 1) {
         appliedSeq = oldest - 1;
+        // 事件台裁掉了一段：**运行态的实时知识作废**（收尾那条可能就在丢掉的那段里），
+        // 退回"用快照对账"，直到事件重新告诉我们为止。
+        for (const cur of state.sessions.values()) cur.running_known = false;
         needState = true;
         await resyncActive();
       }
@@ -2639,7 +2680,8 @@ async function pollLoop() {
           const m = applyBatch(item.seq, item.sid, item.events);
           if (m === 'full') mode = 'full';
           else if (m === 'live' && mode !== 'full') mode = 'live';
-          // 不在这里改 busy：流式增量到达时会把「停止」按钮误翻回「发送」。
+          // 运行态只在 applyBatch 里由事件改（`working`）——
+    // 这里碰它，一个迟到的流式增量就会把「停止」按钮误翻回「发送」。
         } catch { /* 单行损坏不拖垮轮询 */ }
       }
       // 状态对齐：别的客户端（演示脚本、另一个标签页）建/删/改会话时，侧栏自己跟上——

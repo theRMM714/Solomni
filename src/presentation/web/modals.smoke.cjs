@@ -132,7 +132,7 @@ if (!loadErrors.length) {
   check("批次按 seq 应用，游标只前进", () => {
     const got = vm.runInNewContext(`
       (() => {
-        state.sessions.set("s1", { sid: "s1", lines: [], live: [], pending: null, busy: false, done: false, fold: {}, scroll: {} });
+        state.sessions.set("s1", { sid: "s1", lines: [], live: [], pending: null, sending: false, done: false, fold: {}, scroll: {} });
         appliedSeq = 0;
         applyBatch(1, "s1", [{ type: "notice", text: "第一" }]);
         applyBatch(2, "s1", [{ type: "notice", text: "第二" }]);
@@ -147,7 +147,7 @@ if (!loadErrors.length) {
   check("节点回报显示成完成行", () => {
     const snippet = [
       "(() => {",
-      '  state.sessions.set("s2", { sid: "s2", lines: [], live: [], pending: null, busy: false, done: false, fold: {}, scroll: {} });',
+      '  state.sessions.set("s2", { sid: "s2", lines: [], live: [], pending: null, sending: false, done: false, fold: {}, scroll: {} });',
       '  absorb(state.sessions.get("s2"), { type: "report", id: "n1", rework: 0, text: "语料抽好了\\n第二行不该显示" });',
       '  return state.sessions.get("s2").lines.map((l) => l.text);',
       "})()",

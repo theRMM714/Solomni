@@ -157,7 +157,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   if (loadErrors.length) return finish();
 
   await sleep(80); // 让启动路径的 refreshState 落地（renderHistory 用的是桩历史）
-  state.sessions.set("busy-one", { sid: "busy-one", busy: true, mode: "collab" }); // 本标签页正在生成
+  state.sessions.set("busy-one", { sid: "busy-one", sending: false, running: true, running_known: true, mode: "collab" }); // 本标签页收到了它的运行态事件
   renderHistory();
 
   /* ---- 会话列表：三个按钮 + 点条目不进会话 + 生成中禁用「编辑」 ---- */
