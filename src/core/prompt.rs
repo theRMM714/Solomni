@@ -92,6 +92,8 @@ pub struct CorePrompts {
     pub node_review: NodeReviewPrompts,
     pub slate: SlatePrompts,
     pub suggest_models: SuggestPrompts,
+    /// 判定用户对裁决的回应是否明确到可以开工/放行。
+    pub verdict: VerdictPrompts,
     /// 一个 agent 的职责提示词（由它的模块合成为一份能力包）。
     pub agent: AgentPrompts,
     /// @ 引用的两句说明文案。
@@ -448,6 +450,13 @@ pub struct DiscussPrompts {
     /// step 变量：transcript
     pub step: String,
     pub autonomy_note: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct VerdictPrompts {
+    pub system: String,
+    /// user 变量：kind, payload, text
+    pub user: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]

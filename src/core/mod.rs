@@ -1557,7 +1557,9 @@ impl Core {
                 };
                 // 待裁决：对象不在表里（正在生成）时拿不到，如实给 None（推的 Decision 事件会补上）。
                 let pending = match self.sessions.get(&sid) {
-                    Some(Session::Collab(c)) => c.pending.as_ref().map(|p| p.to_json()),
+                    Some(Session::Collab(c)) => {
+                        c.pending.as_ref().map(|p| p.to_json(c.gate_advice()))
+                    }
                     _ => None,
                 };
                 SessionView {

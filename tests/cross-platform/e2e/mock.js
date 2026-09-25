@@ -67,6 +67,9 @@ http.createServer((req, res) => {
           { name: '新助手', modules: ['research'], model: 'm1', why: '补上调研' },
         ],
       });
+    } else if (user.includes('== 在等用户定的事 ==')) {
+      // 用户对裁决的回应：判他的意图明确了吗（假供应商一律判"明确"，让流程能收尾）。
+      content = env('verdict', { clear: true, why: '他说得很明确，照他说的开工。' });
     } else if (user.includes('== 讨论至今 ==')) {
       // 讨论轮次的信封按**会话里已经出现的行**路由——状态机验收要按内容构造各种走向。
       // 判据只用转录里的事实（说话人标签 / 轮次标记 / 任务原话），不改产品行为。
@@ -107,7 +110,10 @@ http.createServer((req, res) => {
         : env('submit_report', { summary: '做完了', changes: '无外部影响', open: '' });
     } else if (user.includes('== 各节点 ==')) {
       // **节点级验收**：逐节点判"够不够当前目标"。夹具一律判过（要验不通过另设场景）。
-      content = env('node_verdict', { verdicts: [{ node: 'n1', ok: true, note: '够用' }] });
+      content = env('node_verdict', {
+        verdicts: [{ node: 'n1', ok: true, note: '够用' }],
+        advice: '我建议放行：产出够用。',
+      });
     } else if (user.includes('== 方案 ==')) {
       // 返工会话：第一次验收给 fail（定向返工），之后给 pass——用来验"fail → 返工 → 重验 → 交付"闭环。
       if (user.includes('返工')) {
@@ -129,8 +135,8 @@ http.createServer((req, res) => {
   const who = rosterLine.split('、').map((s) => s.trim()).filter(Boolean)[0] || '甲';
 
   content = user.includes('返工')
-    ? env('plan', { plan: '方案：返工一次', nodes: [{ id: 'n1', title: '返工一次', objective: '把事重做一遍', assignee: who, deps: [] }] })
-    : env('plan', { plan: '方案：一次把事情做完', nodes: [{ id: 'n1', title: '做完', objective: '把事做完', assignee: who, deps: [] }] });
+    ? env('plan', { plan: '方案：返工一次', advice: '我建议批准：返工一次就能过。', nodes: [{ id: 'n1', title: '返工一次', objective: '把事重做一遍', assignee: who, deps: [] }] })
+    : env('plan', { plan: '方案：一次把事情做完', advice: '我建议现在开工：三件产物都能一次做完。', nodes: [{ id: 'n1', title: '做完', objective: '把事做完', assignee: who, deps: [] }] });
     } else if (sys.includes('harvest') && allUser.includes('真工具链路')) {
       // 真工具链路：按**整段对话里**已经收到的工具结果条数决定下一个调用（真进程、真三语言模块）。
       // 路径用提示词里给出的真实共享区根目录（相对路径会被围栏拒绝）。

@@ -1343,7 +1343,7 @@ impl Discussion {
         core_chat: &mut dyn Chat,
         mode: crate::core::providers::ToolMode,
         verify: Option<&mut MemberTools>,
-    ) -> Result<(String, crate::core::chain::TaskChain), String> {
+    ) -> Result<(String, crate::core::chain::TaskChain, String), String> {
         let roster = self
             .members
             .iter()
@@ -1409,7 +1409,7 @@ impl Discussion {
                 })
                 .collect(),
         };
-        Ok((parsed.plan, chain))
+        Ok((parsed.plan, chain, parsed.advice))
     }
 }
 
@@ -1424,6 +1424,9 @@ struct SynthReply {
     plan: String,
     #[serde(default)]
     nodes: Vec<SynthNode>,
+    /// 核心给用户的**建议**（推荐现在开工还是先改方案）；没有就是空串。
+    #[serde(default)]
+    advice: String,
 }
 
 /// 任务链里的一个节点（核心给的是"意图"，状态与子会话由核心自己管）。

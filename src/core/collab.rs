@@ -19,6 +19,9 @@ use crate::core::providers::Settings;
 use crate::core::workspace::Sandboxes;
 use std::sync::Arc;
 
+/// 节点验收的结论：逐节点 (node, ok, note)。
+type NodeVerdicts = Vec<(String, bool, String)>;
+
 /// 节点验收的一条结论（核心 AI 的 JSON 回执，见 prompts/roles/planner.yaml 的 node_review）。
 #[derive(Debug, Clone, serde::Deserialize)]
 struct NodeVerdict {
@@ -147,6 +150,9 @@ pub struct CollabSession {
     cancel: Arc<std::sync::atomic::AtomicBool>,
     /// 方案是否已过审（审查关卡）：没过审不开工。由转录里的 [用户:同意方案] 派生。
     plan_approved: bool,
+    /// 核心 AI 给用户的**建议**（随方案 / 节点验收那一次调用一起产出）：只属于当前这一关，
+    /// 进推的 Decision 与快照里的 pending；用掉就清，别漏到下一关。
+    gate_advice: String,
 }
 
 impl CollabSession {
@@ -205,6 +211,7 @@ impl CollabSession {
             done: false,
             cancel: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             plan_approved: false,
+            gate_advice: String::new(),
         })
     }
 
@@ -215,6 +222,7 @@ impl CollabSession {
         sink(SessionEvent::Transcript(vec![line]));
         self.plan_approved = true;
         self.pending = None;
+        self.gate_advice.clear(); // 这一关解除了，建议不再属于任何挂起的事
     }
 
     /// 接上「停止」：CoreHandle 在派发时注入任务登记处的取消标志。
@@ -263,6 +271,91 @@ impl CollabSession {
         }
     }
 
+    /// 裁决的**背景**：交给核心 AI 判"用户的意图明确了吗"用——把现场说清楚，别让它猜。
+    fn decision_brief(&self, p: &Pending) -> String {
+        match p {
+            Pending::PlanReview => {
+                let chain = self
+                    .chain
+                    .as_ref()
+                    .map(|c| {
+                        c.nodes
+                            .iter()
+                            .map(|n| format!("- {}（{}）→ {}", n.id, n.title, n.assignee))
+                            .collect::<Vec<_>>()
+                            .join("\n")
+                    })
+                    .unwrap_or_default();
+                format!(
+                    "方案：{}\n任务链：\n{}",
+                    self.plan.clone().unwrap_or_default(),
+                    chain
+                )
+            }
+            Pending::NodeBlocked { nodes } => format!("没过验收的节点：{}", nodes.join("、")),
+            Pending::Ask { member, question } => format!("{} 问：{}", member, question),
+            Pending::ConfirmSlate => "代拟名单待用户确认。".to_string(),
+            Pending::ConfirmBegin => "名单已定，等用户确认开始讨论。".to_string(),
+        }
+    }
+
+    /// 用户对裁决的回应**明确到可以开工 / 放行**了吗：由核心 AI 判（`verdict` 工具）。
+    /// 取字段而不是 &mut self：调用点在泵里，core_chat 要被可变借用（同 review_nodes）。
+    // 参数是一组"取字段而不是自己"的出口（prompts/cancel/opts/chat/verify/三句输入），
+    // 收口成参数对象只会把它们藏起来、让"谁读什么"更难看清（同 engine::converse_with 的取舍）。
+    #[allow(clippy::too_many_arguments)]
+    fn judge_clear(
+        prompts: &Prompts,
+        cancel: &std::sync::Arc<std::sync::atomic::AtomicBool>,
+        opts: crate::core::ports::CompleteOpts<'static>,
+        mode: crate::core::providers::ToolMode,
+        core_chat: &mut dyn Chat,
+        verify: Option<&mut crate::core::engine::MemberTools>,
+        kind: &str,
+        payload: &str,
+        text: &str,
+    ) -> Result<(bool, String), String> {
+        let user = prompts.render(
+            &prompts.core.verdict.user,
+            &[
+                ("kind", kind.to_string()),
+                ("payload", payload.to_string()),
+                ("text", text.to_string()),
+            ],
+        );
+        let msgs = vec![
+            Msg::system(prompts.core.verdict.system.clone()),
+            Msg::user(user),
+        ];
+        if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+            return Err("已停止".to_string());
+        }
+        let stop = std::sync::Arc::clone(cancel);
+        let mut keep =
+            move |_c: crate::core::ports::Chunk| !stop.load(std::sync::atomic::Ordering::Relaxed);
+        let payload = crate::core::engine::core_operation(
+            &prompts.systools,
+            "planner",
+            "verdict",
+            mode,
+            core_chat,
+            &msgs,
+            opts,
+            &mut keep,
+            verify,
+        )?;
+        let clear = payload
+            .get("clear")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let why = payload
+            .get("why")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        Ok((clear, why))
+    }
+
     /// **节点级验收**：核心 AI 按各节点**当前目标**判它的产出，返回逐节点结论。
     /// 一次调用判完整条链（比逐节点各调一次省得多，也便于横向比较）。
     /// 取字段而不是 &mut self：调用点在泵里，core_chat 要被可变借用。
@@ -274,7 +367,7 @@ impl CollabSession {
         mode: crate::core::providers::ToolMode,
         core_chat: &mut dyn Chat,
         verify: Option<&mut crate::core::engine::MemberTools>,
-    ) -> Result<Vec<(String, bool, String)>, String> {
+    ) -> Result<(NodeVerdicts, String), String> {
         let nodes = chain.map(|c| c.nodes.clone()).unwrap_or_default();
         let listed = nodes
             .iter()
@@ -320,7 +413,15 @@ impl CollabSession {
             .cloned()
             .and_then(|v| serde_json::from_value(v).ok())
             .ok_or_else(|| format!("node_verdict 的载荷没有 verdicts 数组：{}", payload))?;
-        Ok(parsed.into_iter().map(|v| (v.node, v.ok, v.note)).collect())
+        let advice = payload
+            .get("advice")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        Ok((
+            parsed.into_iter().map(|v| (v.node, v.ok, v.note)).collect(),
+            advice,
+        ))
     }
 
     /// 记下节点完成（产出先存下来，**验收由核心 AI 判**，见 review_nodes）。
@@ -345,11 +446,18 @@ impl CollabSession {
         }
     }
 
+    /// 当前这一关的建议（核心 AI 给的；没有就是空串）。
+    pub fn gate_advice(&self) -> &str {
+        &self.gate_advice
+    }
+
     /// 挂起一件等用户裁决的事，并**推**一条 `Decision`。
     /// `Pending` 是快照字段（刷新页面照样画得出那张卡），这条是增量（界面立刻出卡）——
     /// 两处同源：都来自 `Pending::decision_parts`，不做第二真相。
     fn ask_user(&mut self, p: Pending, sink: &mut dyn FnMut(SessionEvent)) {
-        let ev = p.decision();
+        // 建议是核心 AI 给的（随方案/验收那一次调用）：关卡挂着期间一直有效（快照也要它），
+        // 解除挂起时（见各 pending = None 处）清掉，别漏到下一关。
+        let ev = p.decision(&self.gate_advice);
         self.pending = Some(p);
         sink(ev);
     }
@@ -738,6 +846,7 @@ impl CollabSession {
     pub fn answer(&mut self, text: &str, sink: &mut dyn FnMut(SessionEvent)) {
         if matches!(self.pending, Some(Pending::Ask { .. })) {
             self.pending = None;
+            self.gate_advice.clear();
             let roots = crate::core::refs::RefRoots {
                 work: self.sandboxes.shared.clone(),
                 private: None,
@@ -759,15 +868,65 @@ impl CollabSession {
     /// 没有挂起的事同样如实说。
     pub fn decide(&mut self, text: &str, sink: &mut dyn FnMut(SessionEvent)) {
         match self.pending.clone() {
+            // 请教：他的话进主会话（所有成员下一回合都看得到），继续泵。
+            // 这不是"放行工作"，所以**不判明确性**——他说什么就是什么。
             Some(Pending::Ask { .. }) => self.answer(text, sink),
-            Some(Pending::PlanReview) => {
-                self.note_user(text, sink);
-                self.approve_plan(sink);
-                self.resume(sink);
-            }
-            Some(Pending::NodeBlocked { .. }) => {
-                self.note_user(text, sink);
-                self.resume(sink);
+            // 放行类（方案待审 / 节点没过）：**由核心 AI 判定他的意图是否明确**，明确才开工/放行。
+            // 不明确就不开工（他的话仍进主会话当反馈，关卡留着等他补一句）。
+            Some(p @ Pending::PlanReview) | Some(p @ Pending::NodeBlocked { .. }) => {
+                let kind = p.decision_parts().0;
+                let brief = self.decision_brief(&p);
+                let text_owned = text.to_string();
+                let mut verify = self.core_verify_tools("planner");
+                let judged = Self::judge_clear(
+                    &self.prompts,
+                    &self.cancel,
+                    crate::core::ports::CompleteOpts::plain(self.settings.app.streaming)
+                        .with_timeout(self.settings.app.llm_timeout_secs),
+                    self.core_mode,
+                    self.core_chat.as_mut(),
+                    verify.as_mut(),
+                    kind,
+                    &brief,
+                    &text_owned,
+                );
+                match judged {
+                    Ok((true, why)) => {
+                        self.note_user(text, sink);
+                        if !why.trim().is_empty() {
+                            sink(SessionEvent::Notice(format!(
+                                "[裁决] 照你说的开工：{}",
+                                why
+                            )));
+                        }
+                        match p {
+                            Pending::PlanReview => {
+                                self.approve_plan(sink);
+                                self.resume(sink);
+                            }
+                            _ => self.resume(sink),
+                        }
+                    }
+                    // 不明确 = **不开工**：不自动重试、不自己往下推，等他补一句。
+                    Ok((false, why)) => {
+                        self.note_user(text, sink);
+                        sink(SessionEvent::Notice(if why.trim().is_empty() {
+                            "[裁决] 我还没听出明确的意思，先不开工；请再说一句（要做 / 不要做 / 照哪个走）。"
+                                .to_string()
+                        } else {
+                            format!("[裁决] 先不开工——{}；请再说一句。", why)
+                        }));
+                    }
+                    Err(err) => {
+                        self.note_user(text, sink);
+                        sink(SessionEvent::Notice(crate::core::events::interrupted_note(
+                            &format!(
+                                "判定你的意思时没能问模型（{}）；为稳妥先不开工，请再说一句。",
+                                err
+                            ),
+                        )));
+                    }
+                }
             }
             Some(Pending::ConfirmSlate) | Some(Pending::ConfirmBegin) => {
                 sink(SessionEvent::Notice(
@@ -871,7 +1030,9 @@ impl CollabSession {
                 verify.as_mut(),
             );
             match made {
-                Ok((plan, chain)) => {
+                Ok((plan, chain, advice)) => {
+                    // 核心 AI 的建议随方案一起来（同一批产出，不额外花一次调用）。
+                    self.gate_advice = advice;
                     // **装配期门禁**：链必须自洽（悬空依赖 / 环 / 未知负责人 / 空目标）——
                     // 不静默开工；挡下时如实说明，用户点「继续」会重新整理。
                     let roster: Vec<String> = self
@@ -921,6 +1082,7 @@ impl CollabSession {
         // 用户点「继续」= 重派没过的节点：先退回待办，再让核心重新派发（新起一轮子会话）。
         if let Some(Pending::NodeBlocked { nodes }) = self.pending.clone() {
             self.pending = None;
+            self.gate_advice.clear();
             for n in &nodes {
                 self.reset_node(n);
             }
@@ -947,7 +1109,7 @@ impl CollabSession {
         }
         // **节点级验收**：核心 AI 按各节点**当前目标**判它的产出；没过就暂停并交用户。
         let mut verify = self.core_verify_tools("orchestrator");
-        let verdicts = match Self::review_nodes(
+        let (verdicts, advice) = match Self::review_nodes(
             &self.prompts,
             &self.cancel,
             self.chain.as_ref(),
@@ -965,6 +1127,8 @@ impl CollabSession {
                 return;
             }
         };
+        // 核心 AI 的建议随验收结论一起来（同一批产出）。
+        self.gate_advice = advice;
         for (node, ok, note) in &verdicts {
             self.set_node_acceptance(node, *ok, note);
         }
@@ -1237,6 +1401,7 @@ impl CollabSession {
             done: st.ended,
             cancel: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             plan_approved: st.plan_approved,
+            gate_advice: String::new(),
         };
         if st.begun {
             // 讨论转录 = 最后一条 [用户:开始] 之后的行。

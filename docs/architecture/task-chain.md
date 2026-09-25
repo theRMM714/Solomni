@@ -51,8 +51,10 @@ TaskNode  { id, title, objective, assignee, deps, status, sub_session, acceptanc
 
 ## 五、审查关卡与任务目标
 
-- 审查关卡是**核心请用户裁决**（`SessionEvent::Decision`，`kind = plan_review`）：
+- 审查关卡是**核心请用户裁决**（`SessionEvent::Decision`，`kind = plan_review`）；
   核心把"为什么要你定 + 我建议怎么做"说清楚，用户用**自然语言**回一句。
+  这两句由核心 AI 给：**建议随方案（`plan`）与节点验收（`node_verdict`）那一次调用一起产出**，
+  不额外花调用；没有建议就是空串。
 - **由核心 AI 判定用户的意图是否明确**：明确才开工；模糊的回应不算明确，**不开工**——
   它进主会话当反馈，关卡留在那儿等用户（核心不做自动重试、不自己往下推）。
 - **改需求不是关卡**：它是会话级动作（`can_update_task` 为真才渲染按钮），用户想改随时点，

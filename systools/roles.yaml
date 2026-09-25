@@ -20,7 +20,7 @@ roles:
   # 核心·整理派发：总结讨论、出方案与任务链（读类 + 写链）。
   planner:
     prompt: roles/planner
-    tools: [read, search, plan, slate, suggest]
+    tools: [read, search, plan, slate, suggest, verdict]
   # 核心·链中推进：读状态、验收、推进（读类 + 判定）。
   orchestrator:
     prompt: roles/orchestrator

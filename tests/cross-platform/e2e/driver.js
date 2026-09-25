@@ -278,10 +278,23 @@ async function lines(sid) {
   const childJson = JSON.stringify((childBus.json && childBus.json.lines) || []);
   assert(childJson.includes('[甲:say]'), '子会话事件台带它自己的权威发言行', childJson.slice(0, 200));
   assert(childJson.includes('"working"'), '子会话事件台带运行态（在跑/收尾）', childJson.slice(0, 200));
-  // 整理完停在**待审**：点「同意」才开工；开工后节点在子会话里跑，交付是异步产生的。
+  // 裁决卡上的**建议由核心 AI 给**（随 plan 那一次调用一起产出，不额外花调用）。
+  const stPlan = await api('GET', '/api/state');
+  const viewPlan = ((stPlan.json && stPlan.json.sessions) || []).find((v) => v.sid === name2);
+  const pendPlan = (viewPlan && viewPlan.pending) || null;
+  // 待裁决是**快照字段**（与推的 Decision 同源）：刷新页面照样画得出那张卡。
+  // 卡片里的"建议"由核心 AI 随 plan 那一次调用一起给（契约见单测 plan_review_carries_the_core_advice）。
+  assert(
+    pendPlan && pendPlan.kind === 'plan_review' && !!pendPlan.question,
+    '方案待审：快照里带待裁决（kind + 要回答的那句）',
+    JSON.stringify(pendPlan).slice(0, 200),
+  );
+  // 整理完停在**待审**：用户回一句明确的开工才推进；开工后节点在子会话里跑，交付是异步产生的。
   await approvePlan(name2);
   // 命令回包不再携带事实：协作的转录与交付从**落盘重放**取（快照）。
   const ev2 = JSON.stringify(await waitForDelivery(name2));
+  // 用户回一句之后，**由核心 AI 判"明确了吗"**：明确才开工（这句是判定通过后核心说的话）。
+  assert(ev2.includes('照你说的开工'), '用户回应后由核心 AI 判定"明确"并开工', ev2.slice(-300));
   assert(ev2.includes('甲') && ev2.includes('乙'), '协作转录以 agent 名为说话人', ev2.slice(0, 240));
   assert(ev2.includes('delivery') || ev2.includes('交付'), '协作跑完并交付', ev2.slice(-240));
   assert(fs.existsSync(path.join(dir(name2), '甲')) && fs.existsSync(path.join(dir(name2), '乙')), '两个 agent 各自沙箱目录已建');

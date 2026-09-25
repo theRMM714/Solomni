@@ -290,9 +290,11 @@ pub enum Pending {
 }
 
 impl Pending {
-    /// 裁决的五个部分：kind / 说明 / 建议 / 要回答的那句 / 载荷。
+    /// 裁决的四个部分：kind / 说明 / 要回答的那句 / 载荷。
     /// **只有这一处派生**：推的 `Decision` 事件与快照里的 `pending` 都来自它，不做第二真相。
-    pub fn decision_parts(&self) -> (&'static str, String, String, String, serde_json::Value) {
+    /// **建议（advice）不在这里**：它由核心 AI 在产生这一关的那次调用里一起给出（plan / node_verdict），
+    /// 所以由调用方传进来（没有就是空串）。
+    pub fn decision_parts(&self) -> (&'static str, String, String, serde_json::Value) {
         match self {
             Pending::Ask { member, question } => (
                 "ask",
@@ -300,35 +302,30 @@ impl Pending {
                     "{} 在等你回话。你说的话会进主会话，所有成员都看得到。",
                     member
                 ),
-                String::new(),
                 question.clone(),
                 serde_json::json!({ "member": member }),
             ),
             Pending::ConfirmSlate => (
                 "confirm_slate",
                 "核心已代拟名单（见转录）。".to_string(),
-                String::new(),
                 "是否按此建组？".to_string(),
                 serde_json::json!({}),
             ),
             Pending::ConfirmBegin => (
                 "confirm_begin",
                 "名单已定。".to_string(),
-                String::new(),
                 "现在开始讨论？".to_string(),
                 serde_json::json!({}),
             ),
             Pending::PlanReview => (
                 "plan_review",
                 "方案与任务链已备好；按规则**不自动开工**。".to_string(),
-                String::new(),
                 "要不要现在开工？".to_string(),
                 serde_json::json!({}),
             ),
             Pending::NodeBlocked { nodes } => (
                 "node_blocked",
                 "有节点没过验收。".to_string(),
-                String::new(),
                 "要不要放行 / 返工？".to_string(),
                 serde_json::json!({ "nodes": nodes }),
             ),
@@ -336,20 +333,20 @@ impl Pending {
     }
 
     /// 推给用户的裁决事件（与快照里的 `pending` 同一个事实）。
-    pub fn decision(&self) -> SessionEvent {
-        let (kind, summary, advice, question, payload) = self.decision_parts();
+    pub fn decision(&self, advice: &str) -> SessionEvent {
+        let (kind, summary, question, payload) = self.decision_parts();
         SessionEvent::Decision {
             kind: kind.to_string(),
             summary,
-            advice,
+            advice: advice.to_string(),
             question,
             payload,
         }
     }
 
     /// 快照形态（会话视图里的 `pending`）：与 `decision` 同一个形状。
-    pub fn to_json(&self) -> serde_json::Value {
-        let (kind, summary, advice, question, payload) = self.decision_parts();
+    pub fn to_json(&self, advice: &str) -> serde_json::Value {
+        let (kind, summary, question, payload) = self.decision_parts();
         serde_json::json!({
             "type": "decision",
             "kind": kind,

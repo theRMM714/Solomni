@@ -101,6 +101,9 @@ tools:
         type: array
         required: true
         desc: 节点数组，每项 {"id","title","objective","assignee","deps"}；assignee 必须从名单里选，deps 必须在这张图里且不得成环。
+      advice:
+        type: string
+        desc: 给用户的**建议**（推荐现在开工还是先改方案 + 一句理由）；会显示在裁决卡片上。
 
   node_verdict:
     capability: none
@@ -110,6 +113,9 @@ tools:
         type: array
         required: true
         desc: 结论数组，每项 {"node","ok","note"}；node 用给定的 id，不通过时 note 要说清差在哪。
+      advice:
+        type: string
+        desc: 有节点没过时给用户的**建议**（放行还是返工 + 一句理由）；会显示在裁决卡片上。
 
   checklist:
     capability: none
@@ -119,6 +125,20 @@ tools:
         type: array
         required: true
         desc: 清单数组，每项 {"item","status":"pass|fail","evidence","reason"}；fail 时给差距与归属。
+
+  verdict:
+    capability: none
+    desc: 判定用户对裁决的回应是否**明确到可以开工 / 放行**。
+    params:
+      clear:
+        type: boolean
+        required: true
+        desc: 他的意图是否明确（明确 = 可以照他说的开工/放行；含糊、只是表态、还要再想想、在反问 = false）
+      why:
+        type: string
+        required: true
+        non_empty: true
+        desc: 一句话说清判定：明确时说"照他说的做什么"；不明确时说清还差什么。
 
   slate:
     capability: none
