@@ -8,6 +8,9 @@
 
 use super::core::SilentRunner;
 use crate::adapters::fake_chat::FakeChat;
+use crate::capabilities::llm::api::{
+    BoxedChat, Chat, ChatGateway, Chunk, CompleteOpts, Completion, ModelCatalog, Msg,
+};
 use crate::capabilities::prompt::api::Prompts;
 use crate::capabilities::prompt::ports::PromptSource;
 use crate::capabilities::registry::api::{Channel, ModelEntry, Provider, Settings};
@@ -17,8 +20,7 @@ use crate::core::history::{HistoryView, SessionMeta};
 use crate::core::module::{Module, ModuleManifest};
 use crate::core::packages::{Library, PackageManifest};
 use crate::core::ports::{
-    BoxedChat, Chat, ChatGateway, Chunk, CompleteOpts, Completion, FileRead, HistoryStore,
-    ModelCatalog, ModuleSource, Msg, PackageSource, SysIo, ToolRunner, Workspace,
+    FileRead, HistoryStore, ModuleSource, PackageSource, SysIo, ToolRunner, Workspace,
 };
 use crate::core::{AgentInstance, Core, SessionEvent, WorkMode, WorkSpec};
 use crate::kernel::types::Tier;
@@ -373,13 +375,13 @@ pub(crate) fn s(parts: &[&str]) -> String {
 /// 什么都不修的修复端口（严格要求合法信封）：测试基线，也是"宁缺毋滥"部署的对照实现。
 pub(crate) struct NoRepair;
 
-impl crate::core::ports::EnvelopeRepair for NoRepair {
+impl crate::capabilities::llm::api::EnvelopeRepair for NoRepair {
     fn repair(
         &self,
         _raw: &str,
-        _kind: &crate::core::envelope::Malformed,
-    ) -> crate::core::ports::RepairOutcome {
-        crate::core::ports::RepairOutcome {
+        _kind: &crate::capabilities::llm::api::Malformed,
+    ) -> crate::capabilities::llm::api::RepairOutcome {
+        crate::capabilities::llm::api::RepairOutcome {
             repaired: None,
             what: Vec::new(),
         }
@@ -799,7 +801,10 @@ impl ScriptGateway {
 }
 
 impl ChatGateway for ScriptGateway {
-    fn probe_tools(&self, _c: &Channel) -> Result<crate::core::ports::ProbeOutcome, String> {
+    fn probe_tools(
+        &self,
+        _c: &Channel,
+    ) -> Result<crate::capabilities::llm::api::ProbeOutcome, String> {
         Err("脚本替身没有真实供应商，测不了工具调用支持".to_string())
     }
     fn member_channel(&self, _c: Option<&Channel>, id: &str) -> (BoxedChat, Option<String>) {

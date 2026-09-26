@@ -28,7 +28,7 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 
 // 入站契约返回的词汇：能力接口的返回类型在这里有一份**正式名字**。
 // 呈现层只认这里，不直接碰 ports / providers 的内部路径。
-pub use crate::core::ports::ProbeOutcome;
+pub use crate::capabilities::llm::api::ProbeOutcome;
 use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, Mutex};
 
@@ -245,7 +245,10 @@ pub trait RegistryOps: Send + Sync {
     fn discover_models(&self, provider_id: &str) -> Result<Vec<String>, String>;
     /// 实测一条通道支不支持原生工具调用（要真实网络；三种结论都如实回报，
     /// 只把**确定**的结论写回登记处 —— 这条规则在 core，不在呈现层）。
-    fn probe_model_tools(&self, id: &str) -> Result<crate::core::ports::ProbeOutcome, String>;
+    fn probe_model_tools(
+        &self,
+        id: &str,
+    ) -> Result<crate::capabilities::llm::api::ProbeOutcome, String>;
     /// 实测这种"回放形状"供应商收不收、模型有没有真的读懂（要真实网络；**不改登记处**）。
     fn probe_replay_shape(
         &self,
@@ -306,11 +309,11 @@ struct AskReq {
     /// 本回合的**身份块**（由泵按当前提示词册现渲染）。
     identity: String,
     /// 本回合的提示（开场词 / 轮转词）。
-    turn: Vec<crate::core::ports::Msg>,
+    turn: Vec<crate::capabilities::llm::api::Msg>,
     /// 角色表（按值带一份小表）：发放工具面与校验越权都用它。
     systools: crate::core::roles::SystemTools,
     cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    opts: crate::core::ports::CompleteOpts<'static>,
+    opts: crate::capabilities::llm::api::CompleteOpts<'static>,
     /// 这一回合属于第几轮（写进 agent 会话的回合标记）。
     round: usize,
     /// 回合 id（整场工作单调递增；两边对得上就靠它）。
@@ -548,7 +551,7 @@ impl CoreHandle {
             move |core| core.take_single(&name)
         })?;
         // 这一回合的调用参数（流式 + 预算）：与单 agent 共用同一份全局设置。
-        let llm = crate::core::ports::LlmOpts {
+        let llm = crate::capabilities::llm::api::LlmOpts {
             stream: req.opts.stream,
             timeout_secs: req.opts.timeout_secs,
         };
@@ -1191,7 +1194,10 @@ impl RegistryOps for CoreHandle {
         let provider_id = provider_id.to_string();
         self.call(move |core| core.discover_models(&provider_id))
     }
-    fn probe_model_tools(&self, id: &str) -> Result<crate::core::ports::ProbeOutcome, String> {
+    fn probe_model_tools(
+        &self,
+        id: &str,
+    ) -> Result<crate::capabilities::llm::api::ProbeOutcome, String> {
         let id = id.to_string();
         self.call(move |core| core.probe_model_tools(&id))
     }

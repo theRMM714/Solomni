@@ -2,8 +2,10 @@
 //! 双用途：核心回落演示（无可用模型通道时，如实告知）+ 单元测试脚本回放。
 //! 只实现 core 的 Chat/ChatGateway 端口，不做装配决策。
 
+use crate::capabilities::llm::api::{
+    BoxedChat, Chat, ChatGateway, Chunk, CompleteOpts, Completion, Msg,
+};
 use crate::capabilities::registry::api::Channel;
-use crate::core::ports::{BoxedChat, Chat, ChatGateway, Chunk, CompleteOpts, Completion, Msg};
 
 /// 脚本假模型：按调用次序回放脚本（最后一个条目重复兜底）；记录调用供测试断言。
 pub struct FakeChat {
@@ -59,7 +61,10 @@ pub struct DemoGateway;
 
 impl ChatGateway for DemoGateway {
     /// 演示通道没有真实供应商可测：如实说"测不了"，不假装测过。
-    fn probe_tools(&self, _channel: &Channel) -> Result<crate::core::ports::ProbeOutcome, String> {
+    fn probe_tools(
+        &self,
+        _channel: &Channel,
+    ) -> Result<crate::capabilities::llm::api::ProbeOutcome, String> {
         Err("演示通道没有真实供应商，测不了工具调用支持".to_string())
     }
 

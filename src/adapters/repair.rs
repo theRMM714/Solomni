@@ -10,10 +10,10 @@
 //! - 只补"缺的那几个收尾字符"，不做任何猜测性改写；结果由引擎重新解析成**合法工具信封**才算数
 //!   （解析通过就是"无歧义"的判据）。
 //!
-//! 机制在适配层：任何满足 core::ports::EnvelopeRepair 契约的实现都能整体替换本实现。
+//! 机制在适配层：任何满足 capabilities::llm::ports::EnvelopeRepair 契约的实现都能整体替换本实现。
 
-use crate::core::envelope::{Malformed, Tail};
-use crate::core::ports::{EnvelopeRepair, RepairOutcome};
+use crate::capabilities::llm::api::{EnvelopeRepair, RepairOutcome};
+use crate::capabilities::llm::api::{Malformed, Tail};
 
 /// 只做上述两类无歧义修补。
 pub struct UnambiguousRepair;
@@ -135,7 +135,7 @@ fn note(list: &mut Vec<String>, what: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::envelope::parse;
+    use crate::capabilities::llm::api::parse;
 
     fn raw_control(tail: Option<Tail>) -> Malformed {
         Malformed::RawControl {

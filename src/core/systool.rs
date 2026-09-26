@@ -62,8 +62,8 @@ pub fn names() -> Vec<String> {
 /// patch 在**原生通道**上的声明：参数只有一个 body。
 /// 原生协议要求参数是 JSON 对象，所以补丁正文当字符串值传——转义交给供应商的解码器，
 /// 模型不必自己写转义（这正是原生通道相对手写信封的收益）。
-pub fn patch_decl() -> crate::core::ports::ToolDecl {
-    crate::core::ports::ToolDecl {
+pub fn patch_decl() -> crate::capabilities::llm::api::ToolDecl {
+    crate::capabilities::llm::api::ToolDecl {
         name: PATCH.to_string(),
         description:
             "用一段补丁文本改文件（*** Add File: 路径 / *** Update File: 路径 … *** End File）"

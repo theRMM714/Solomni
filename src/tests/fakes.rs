@@ -2,9 +2,9 @@
 //! 两者既是 T1 的脚本替身，也是产品在「没有可用模型通道」时的演示回落，所以两条路都要钉住。
 
 use crate::adapters::fake_chat::{DemoGateway, FakeChat};
+use crate::capabilities::llm::api::{parse, Verb};
+use crate::capabilities::llm::api::{Chat, ChatGateway, Chunk, CompleteOpts, Msg};
 use crate::capabilities::registry::api::{Channel, Provider};
-use crate::core::envelope::{parse, Verb};
-use crate::core::ports::{Chat, ChatGateway, Chunk, CompleteOpts, Msg};
 
 /// 故意指向不可路由地址（TEST-NET-1）：任何真实拨号都会失败或超时——「没有网络依赖」因此可观察。
 fn unreachable_channel() -> Channel {

@@ -30,7 +30,7 @@ struct FakeOps {
     fail: Option<String>,
     running: AtomicBool,
     /// 探测结论可换（缺省"支持"）：用来验三种结论都**原样**穿过呈现层、不被改写。
-    probe: Option<crate::core::ports::ProbeOutcome>,
+    probe: Option<crate::capabilities::llm::api::ProbeOutcome>,
 }
 
 impl FakeOps {
@@ -50,7 +50,7 @@ impl FakeOps {
     }
 }
 
-fn fake_ops_probe(fail: Option<&str>, probe: crate::core::ports::ProbeOutcome) -> Ops {
+fn fake_ops_probe(fail: Option<&str>, probe: crate::capabilities::llm::api::ProbeOutcome) -> Ops {
     let mut f = FakeOps::new(fail);
     f.probe = Some(probe);
     let f = Arc::new(f);
@@ -328,12 +328,15 @@ impl RegistryOps for FakeOps {
             ],
         })
     }
-    fn probe_model_tools(&self, _id: &str) -> Result<crate::core::ports::ProbeOutcome, String> {
+    fn probe_model_tools(
+        &self,
+        _id: &str,
+    ) -> Result<crate::capabilities::llm::api::ProbeOutcome, String> {
         self.guard()?;
         Ok(self
             .probe
             .clone()
-            .unwrap_or(crate::core::ports::ProbeOutcome::Supported {
+            .unwrap_or(crate::capabilities::llm::api::ProbeOutcome::Supported {
                 detail: "替身说支持".to_string(),
             }))
     }
@@ -728,7 +731,7 @@ fn session_action_boundaries_are_explicit() {
 /// 探测回包：三种结论**原样**穿过呈现层（不改写、不降级），`mode` 取自登记处（探测后的事实）。
 #[test]
 fn model_probe_passes_the_verdict_through_verbatim() {
-    use crate::core::ports::ProbeOutcome;
+    use crate::capabilities::llm::api::ProbeOutcome;
     let cases = [
         (
             ProbeOutcome::Supported {

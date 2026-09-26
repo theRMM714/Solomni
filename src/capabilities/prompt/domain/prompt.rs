@@ -359,7 +359,7 @@ impl ToolTexts {
     }
 
     /// 未闭合的修法：内容写完只是少了收尾括号 → 直接说还差什么；断在字符串中间 → 才谈"分次写"。
-    fn unclosed_report(&self, tail: &crate::core::envelope::Tail) -> String {
+    fn unclosed_report(&self, tail: &crate::capabilities::llm::api::Tail) -> String {
         // 一段回复里起了两段信封：这不是"补个括号"能救的（末尾补括号补不到中间那段），
         // 而且补哪一段都是猜——如实说清，让模型只发一段。
         if tail.envelopes > 1 {
@@ -382,7 +382,7 @@ impl ToolTexts {
     }
 
     /// 附带说明：信封还差什么（与其它类别叠加时用）。
-    fn tail_note(&self, tail: &crate::core::envelope::Tail) -> String {
+    fn tail_note(&self, tail: &crate::capabilities::llm::api::Tail) -> String {
         if tail.in_string {
             self.malformed_cut_string.clone()
         } else {
@@ -394,10 +394,10 @@ impl ToolTexts {
     }
 
     /// 工具信封不合法的回执：按**判定出的类别**给出对应修法（类别由 envelope 判定，文案在这里）。
-    pub fn malformed_report(&self, kind: &crate::core::envelope::Malformed) -> String {
+    pub fn malformed_report(&self, kind: &crate::capabilities::llm::api::Malformed) -> String {
         match kind {
-            crate::core::envelope::Malformed::Unclosed(tail) => self.unclosed_report(tail),
-            crate::core::envelope::Malformed::RawControl { ch, line, tail } => {
+            crate::capabilities::llm::api::Malformed::Unclosed(tail) => self.unclosed_report(tail),
+            crate::capabilities::llm::api::Malformed::RawControl { ch, line, tail } => {
                 let what = match ch {
                     '\n' => self.control_lf.clone(),
                     '\r' => self.control_cr.clone(),
@@ -418,10 +418,10 @@ impl ToolTexts {
                 }
                 out
             }
-            crate::core::envelope::Malformed::Syntax(why) => {
+            crate::capabilities::llm::api::Malformed::Syntax(why) => {
                 self.render(&self.malformed_syntax, &[("why", why.clone())])
             }
-            crate::core::envelope::Malformed::Shape(why) => {
+            crate::capabilities::llm::api::Malformed::Shape(why) => {
                 self.render(&self.malformed_shape, &[("why", why.clone())])
             }
         }

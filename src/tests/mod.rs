@@ -64,25 +64,27 @@ pub(crate) struct SlowChat {
     pub ticks: std::sync::Arc<std::sync::atomic::AtomicUsize>,
 }
 
-impl crate::core::ports::Chat for SlowChat {
+impl crate::capabilities::llm::api::Chat for SlowChat {
     fn complete(
         &mut self,
-        _m: &[crate::core::ports::Msg],
-        _opts: crate::core::ports::CompleteOpts<'_>,
-        on: &mut dyn FnMut(crate::core::ports::Chunk) -> bool,
-    ) -> crate::core::ports::Completion {
+        _m: &[crate::capabilities::llm::api::Msg],
+        _opts: crate::capabilities::llm::api::CompleteOpts<'_>,
+        on: &mut dyn FnMut(crate::capabilities::llm::api::Chunk) -> bool,
+    ) -> crate::capabilities::llm::api::Completion {
         use std::sync::atomic::Ordering;
-        if !on(crate::core::ports::Chunk::Start) {
-            return crate::core::ports::Completion::text("");
+        if !on(crate::capabilities::llm::api::Chunk::Start) {
+            return crate::capabilities::llm::api::Completion::text("");
         }
         for _ in 0..6_000 {
             self.ticks.fetch_add(1, Ordering::Relaxed);
-            if !on(crate::core::ports::Chunk::Text("·".to_string())) {
+            if !on(crate::capabilities::llm::api::Chunk::Text("·".to_string())) {
                 break;
             }
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
-        crate::core::ports::Completion::text("{\"type\":\"say\",\"text\":\"（慢通道）收到停止\"}")
+        crate::capabilities::llm::api::Completion::text(
+            "{\"type\":\"say\",\"text\":\"（慢通道）收到停止\"}",
+        )
     }
 }
 
@@ -94,31 +96,33 @@ pub(crate) struct GatedChat {
     pub release: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
-impl crate::core::ports::Chat for GatedChat {
+impl crate::capabilities::llm::api::Chat for GatedChat {
     fn complete(
         &mut self,
-        _m: &[crate::core::ports::Msg],
-        _opts: crate::core::ports::CompleteOpts<'_>,
-        on: &mut dyn FnMut(crate::core::ports::Chunk) -> bool,
-    ) -> crate::core::ports::Completion {
+        _m: &[crate::capabilities::llm::api::Msg],
+        _opts: crate::capabilities::llm::api::CompleteOpts<'_>,
+        on: &mut dyn FnMut(crate::capabilities::llm::api::Chunk) -> bool,
+    ) -> crate::capabilities::llm::api::Completion {
         use std::sync::atomic::Ordering;
         let n = self.started.fetch_add(1, Ordering::Relaxed);
-        if !on(crate::core::ports::Chunk::Start) {
-            return crate::core::ports::Completion::text("");
+        if !on(crate::capabilities::llm::api::Chunk::Start) {
+            return crate::capabilities::llm::api::Completion::text("");
         }
         // 第一次调用立刻返回（让"已产生的行"真的落下来），之后才阻塞：
         // 这样既能观察"生成中途"的状态，又能靠放行结束。
         if n == 0 {
-            return crate::core::ports::Completion::text("{\"type\":\"say\",\"text\":\"我先说\"}");
+            return crate::capabilities::llm::api::Completion::text(
+                "{\"type\":\"say\",\"text\":\"我先说\"}",
+            );
         }
         // 等放行；但**也要尊重分片回调**——「停止」正是靠 on 返回 false 在调用中途生效的。
         while !self.release.load(Ordering::Relaxed) {
-            if !on(crate::core::ports::Chunk::Text("…".to_string())) {
+            if !on(crate::capabilities::llm::api::Chunk::Text("…".to_string())) {
                 break;
             }
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
-        crate::core::ports::Completion::text("{\"type\":\"agree\",\"text\":\"同意\"}")
+        crate::capabilities::llm::api::Completion::text("{\"type\":\"agree\",\"text\":\"同意\"}")
     }
 }
 
@@ -130,17 +134,17 @@ pub(crate) struct GatedGateway {
 
 /// 记录每次问询收到的消息，再转发给内层通道。
 pub(crate) struct RecordingChat {
-    pub inner: crate::core::ports::BoxedChat,
+    pub inner: crate::capabilities::llm::api::BoxedChat,
     pub seen: std::sync::Arc<std::sync::Mutex<Vec<Vec<String>>>>,
 }
 
-impl crate::core::ports::Chat for RecordingChat {
+impl crate::capabilities::llm::api::Chat for RecordingChat {
     fn complete(
         &mut self,
-        m: &[crate::core::ports::Msg],
-        o: crate::core::ports::CompleteOpts<'_>,
-        on: &mut dyn FnMut(crate::core::ports::Chunk) -> bool,
-    ) -> crate::core::ports::Completion {
+        m: &[crate::capabilities::llm::api::Msg],
+        o: crate::capabilities::llm::api::CompleteOpts<'_>,
+        on: &mut dyn FnMut(crate::capabilities::llm::api::Chunk) -> bool,
+    ) -> crate::capabilities::llm::api::Completion {
         self.seen
             .lock()
             .expect("锁")
@@ -155,18 +159,18 @@ pub(crate) struct RecordingGateway {
     pub seen: std::sync::Arc<std::sync::Mutex<Vec<Vec<String>>>>,
 }
 
-impl crate::core::ports::ChatGateway for RecordingGateway {
+impl crate::capabilities::llm::api::ChatGateway for RecordingGateway {
     fn probe_tools(
         &self,
         c: &crate::capabilities::registry::api::Channel,
-    ) -> Result<crate::core::ports::ProbeOutcome, String> {
+    ) -> Result<crate::capabilities::llm::api::ProbeOutcome, String> {
         self.inner.probe_tools(c)
     }
     fn member_channel(
         &self,
         c: Option<&crate::capabilities::registry::api::Channel>,
         id: &str,
-    ) -> (crate::core::ports::BoxedChat, Option<String>) {
+    ) -> (crate::capabilities::llm::api::BoxedChat, Option<String>) {
         let (chat, note) = self.inner.member_channel(c, id);
         (
             Box::new(RecordingChat {
@@ -179,23 +183,23 @@ impl crate::core::ports::ChatGateway for RecordingGateway {
     fn core_channel(
         &self,
         c: Option<&crate::capabilities::registry::api::Channel>,
-    ) -> (crate::core::ports::BoxedChat, bool) {
+    ) -> (crate::capabilities::llm::api::BoxedChat, bool) {
         self.inner.core_channel(c)
     }
 }
 
-impl crate::core::ports::ChatGateway for GatedGateway {
+impl crate::capabilities::llm::api::ChatGateway for GatedGateway {
     fn probe_tools(
         &self,
         _c: &crate::capabilities::registry::api::Channel,
-    ) -> Result<crate::core::ports::ProbeOutcome, String> {
+    ) -> Result<crate::capabilities::llm::api::ProbeOutcome, String> {
         Err("脚本替身没有真实供应商，测不了工具调用支持".to_string())
     }
     fn member_channel(
         &self,
         _c: Option<&crate::capabilities::registry::api::Channel>,
         _id: &str,
-    ) -> (crate::core::ports::BoxedChat, Option<String>) {
+    ) -> (crate::capabilities::llm::api::BoxedChat, Option<String>) {
         (
             Box::new(GatedChat {
                 started: std::sync::Arc::clone(&self.started),
@@ -207,7 +211,7 @@ impl crate::core::ports::ChatGateway for GatedGateway {
     fn core_channel(
         &self,
         _c: Option<&crate::capabilities::registry::api::Channel>,
-    ) -> (crate::core::ports::BoxedChat, bool) {
+    ) -> (crate::capabilities::llm::api::BoxedChat, bool) {
         (
             Box::new(GatedChat {
                 started: std::sync::Arc::clone(&self.started),
@@ -244,18 +248,18 @@ pub(crate) struct SlowGateway {
     pub ticks: std::sync::Arc<std::sync::atomic::AtomicUsize>,
 }
 
-impl crate::core::ports::ChatGateway for SlowGateway {
+impl crate::capabilities::llm::api::ChatGateway for SlowGateway {
     fn probe_tools(
         &self,
         _c: &crate::capabilities::registry::api::Channel,
-    ) -> Result<crate::core::ports::ProbeOutcome, String> {
+    ) -> Result<crate::capabilities::llm::api::ProbeOutcome, String> {
         Err("脚本替身没有真实供应商，测不了工具调用支持".to_string())
     }
     fn member_channel(
         &self,
         _c: Option<&crate::capabilities::registry::api::Channel>,
         _id: &str,
-    ) -> (crate::core::ports::BoxedChat, Option<String>) {
+    ) -> (crate::capabilities::llm::api::BoxedChat, Option<String>) {
         (
             Box::new(SlowChat {
                 ticks: std::sync::Arc::clone(&self.ticks),
@@ -266,7 +270,7 @@ impl crate::core::ports::ChatGateway for SlowGateway {
     fn core_channel(
         &self,
         _c: Option<&crate::capabilities::registry::api::Channel>,
-    ) -> (crate::core::ports::BoxedChat, bool) {
+    ) -> (crate::capabilities::llm::api::BoxedChat, bool) {
         (
             Box::new(SlowChat {
                 ticks: std::sync::Arc::clone(&self.ticks),

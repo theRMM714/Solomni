@@ -14,15 +14,15 @@ use crate::adapters::model_catalog::HttpModelCatalog;
 use crate::adapters::sys_io::FsSysIo;
 use crate::adapters::yaml_prompts::YamlPrompts;
 use crate::adapters::yaml_settings::YamlSettingsStore;
+use crate::capabilities::llm::api::{
+    ChatGateway, Chunk, CompleteOpts, ModelCatalog, Msg, ProbeOutcome,
+};
 use crate::capabilities::prompt::ports::PromptSource;
 use crate::capabilities::registry::api::{Channel, Provider, Settings};
 use crate::capabilities::registry::ports::SettingsStore;
 use crate::core::exec::ExecSpec;
 use crate::core::history::{AgentMeta, SessionMeta};
-use crate::core::ports::{
-    ChatGateway, Chunk, CompleteOpts, HistoryStore, ModelCatalog, ModuleSource, Msg, PackageSource,
-    ProbeOutcome, SysIo, Workspace,
-};
+use crate::core::ports::{HistoryStore, ModuleSource, PackageSource, SysIo, Workspace};
 use crate::kernel::log::{Log, NoopLog};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -858,7 +858,7 @@ fn http_chat_reads_native_tool_calls() {
     assert_eq!(out.finish, "tool_calls");
     assert_eq!(
         out.calls,
-        vec![crate::core::ports::ToolCall {
+        vec![crate::capabilities::llm::api::ToolCall {
             id: "call_1".to_string(),
             name: "read".to_string(),
             args_json: "{\"path\":\"/x\"}".to_string(),
@@ -914,7 +914,7 @@ fn native_history_goes_out_in_protocol_shape() {
         Msg::user("读一下"),
         Msg::assistant_calls(
             "我看看这个文件。",
-            vec![crate::core::ports::ToolCall {
+            vec![crate::capabilities::llm::api::ToolCall {
                 id: "call_1".to_string(),
                 name: "read".to_string(),
                 args_json: "{\"path\":\"/x\"}".to_string(),

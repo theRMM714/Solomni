@@ -41,10 +41,10 @@ presentation ──▶ core ◀── adapters
 
 | 端口 | 职责 | 适配层实现 |
 | --- | --- | --- |
-| `Chat` | 一次模型会话：收消息列表（可带**工具声明**）回 `Completion`（正文 + 结束原因 + 原生工具调用）；`on` 逐片回调，返回 `false` 即要求中止 | `HttpChat`（测试 `FakeChat`） |
-| `ChatGateway` | 建通道（含核心通道与回落告知）；**不选择**模型；实测一条通道支不支持原生工具调用 | `HttpGateway`（无可用模型时回落 `DemoGateway`；探测发两条最小请求对比） |
+| `Chat`（`capabilities/llm/ports.rs`） | 一次模型会话：收消息列表（可带**工具声明**）回 `Completion`（正文 + 结束原因 + 原生工具调用）；`on` 逐片回调，返回 `false` 即要求中止 | `HttpChat`（测试 `FakeChat`） |
+| `ChatGateway` | 建通道（含核心通道与回落告知）；**不选择**模型；实测一条通道支不支持原生工具调用。**已随能力搬出**：定义在 `capabilities/llm/ports.rs` | `HttpGateway`（无可用模型时回落 `DemoGateway`；探测发两条最小请求对比） |
 | `SettingsStore` | 登记处持久化（providers / models / settings / agents 四个 yaml）。**已随能力搬出 core**：定义在 `capabilities/registry/ports.rs` | `YamlSettingsStore` |
-| `ModelCatalog` | 列出一条通道当前可用的模型名 | `HttpModelCatalog` |
+| `ModelCatalog` | 列出一条通道当前可用的模型名。**已随能力搬出**：`capabilities/llm/ports.rs` | `HttpModelCatalog` |
 | `ModuleSource` | 模块清单来源（扫描 `modules/`） | `FsModules` |
 | `PackageSource` | 运行包库来源（扫描依赖文件夹 `runtimes/`） | `FsPackages` |
 | `Workspace` | 一次工作的 work 目录、各 agent 沙箱、文件清单与寻址根 | `FsWorkspace` |
@@ -52,7 +52,7 @@ presentation ──▶ core ◀── adapters
 | `HistoryStore` | 会话历史：一个会话一个目录（meta + 事件流水） | `FsHistory` |
 | `PromptSource` | 提示词册加载（`prompts/`）。**已随能力搬出 core**：定义在 `capabilities/prompt/ports.rs` | `YamlPrompts` |
 | `ToolRunner` | 外部工具进程（围栏安装、拉起、stdin 送参、超时杀树、截断） | `ProcTools`（守门进程 = 本程序的 `--fence-run` 模式） |
-| `EnvelopeRepair` | 手写信封不合法时的**无歧义**补救（改了字段含义就是错；拿不准就返回不修） | `UnambiguousRepair`（转义字符串里的裸控制字符 + 补上扫描器算出的收尾括号；断在字符串中间不修，一段回复里起了两段信封不修——补哪一段都是猜；调用方中止的生成一律不修） |
+| `EnvelopeRepair`（`capabilities/llm/ports.rs`） | 手写信封不合法时的**无歧义**补救（改了字段含义就是错；拿不准就返回不修） | `UnambiguousRepair`（转义字符串里的裸控制字符 + 补上扫描器算出的收尾括号；断在字符串中间不修，一段回复里起了两段信封不修——补哪一段都是猜；调用方中止的生成一律不修） |
 | `FenceHost` | 围栏授权的释放（删除会话时请求一次撤销） | `confine::FenceHostAdapter`（本平台无该机制时为空操作） |
 | `Log` | 运行日志（三级） | `FileLog`（测试 `NoopLog`） |
 | `HostProbe` | 宿主能力探测（**只问事实**：路径存在性、PATH 上的可执行文件、本机虚拟化能力；不执行、不安装、不写） | `HostProbeAdapter`（测试 `FixedProbe`） |

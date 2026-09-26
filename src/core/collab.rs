@@ -5,6 +5,7 @@
 //! 名单的权威来源是会话 meta.agents（代拟确认后由 Core 写回 meta）；转录只用来恢复讨论进度。
 //! 依赖全部为端口与核心数据；无 IO，无具体适配器。
 
+use crate::capabilities::llm::api::{Chat, ChatGateway, CompleteOpts, Msg};
 use crate::capabilities::prompt::api::Prompts;
 use crate::capabilities::registry::api::RosterPick;
 use crate::capabilities::registry::api::Settings;
@@ -13,9 +14,7 @@ use crate::core::events::{CheckView, LineView, Pending, SessionEvent};
 use crate::core::exec::{self, ExecSpec};
 use crate::core::history::{AgentMeta, SessionMeta};
 use crate::core::module::{self, Module};
-use crate::core::ports::{
-    Chat, ChatGateway, CompleteOpts, ModuleSource, Msg, PackageSource, SysIo, ToolRunner,
-};
+use crate::core::ports::{ModuleSource, PackageSource, SysIo, ToolRunner};
 use crate::core::workspace::Sandboxes;
 use std::sync::Arc;
 
@@ -33,8 +32,8 @@ struct NodeVerdict {
 
 impl CollabSession {
     /// 本次调用的通道参数（流式 + 预算）：**全局设置**，与单 agent 共用同一份。
-    fn llm_opts(&self) -> crate::core::ports::LlmOpts {
-        crate::core::ports::LlmOpts {
+    fn llm_opts(&self) -> crate::capabilities::llm::api::LlmOpts {
+        crate::capabilities::llm::api::LlmOpts {
             stream: self.settings.app.streaming,
             timeout_secs: self.settings.app.llm_timeout_secs,
         }
@@ -119,14 +118,14 @@ pub struct CollabSession {
     /// 泵让出的那一步：该问哪个成员、给它什么上下文。
     /// 泵**不自己调模型**——由核心取该 agent 的会话跑完再 feed 回来（见 session-model.md 二之二）。
     /// 泵让出的那一步：成员下标 / 身份块 / 本回合提示（身份每回合现渲染，不存进任何人的消息列表）。
-    pending_ask: Option<(usize, String, Vec<crate::core::ports::Msg>)>,
+    pending_ask: Option<(usize, String, Vec<crate::capabilities::llm::api::Msg>)>,
     /// 已发出的转录行数（增量事件用）。
     emitted: usize,
     /// 下一条转录行的 id（会话内稳定序号）。
     next_line: u64,
     /// 回复 id 计数器（转录行按它分组；按落盘重建时从转录里的最大值续号）。
     reply_seq: u64,
-    core_chat: crate::core::ports::BoxedChat,
+    core_chat: crate::capabilities::llm::api::BoxedChat,
     core_is_demo: bool,
     /// 核心通道的工具调用形态（原生才声明工具；信封通道看提示词里的说明）。
     core_mode: crate::capabilities::registry::api::ToolMode,
@@ -140,7 +139,7 @@ pub struct CollabSession {
     /// 内置文件工具读写端口。
     io: Arc<dyn SysIo + Send + Sync>,
     /// 信封修复端口（手写信封不合法时的无歧义补救）。
-    repair: Arc<dyn crate::core::ports::EnvelopeRepair + Send + Sync>,
+    repair: Arc<dyn crate::capabilities::llm::api::EnvelopeRepair + Send + Sync>,
     /// 运行日志（工具循环里"输出被长度截断"这类事实落盘）。
     log: Arc<dyn crate::kernel::log::Log + Send + Sync>,
     /// 运行包库来源（工具可用性按它判定）。
@@ -172,7 +171,7 @@ impl CollabSession {
         systools: crate::core::roles::SystemTools,
         tools: Arc<dyn ToolRunner + Send + Sync>,
         io: Arc<dyn SysIo + Send + Sync>,
-        repair: Arc<dyn crate::core::ports::EnvelopeRepair + Send + Sync>,
+        repair: Arc<dyn crate::capabilities::llm::api::EnvelopeRepair + Send + Sync>,
         log: Arc<dyn crate::kernel::log::Log + Send + Sync>,
         packages: Arc<dyn PackageSource + Send + Sync>,
         spec: ExecSpec,
@@ -314,7 +313,7 @@ impl CollabSession {
         prompts: &Prompts,
         systools: &crate::core::roles::SystemTools,
         cancel: &std::sync::Arc<std::sync::atomic::AtomicBool>,
-        opts: crate::core::ports::CompleteOpts<'static>,
+        opts: crate::capabilities::llm::api::CompleteOpts<'static>,
         mode: crate::capabilities::registry::api::ToolMode,
         core_chat: &mut dyn Chat,
         verify: Option<&mut crate::core::engine::MemberTools>,
@@ -340,8 +339,9 @@ impl CollabSession {
             return Err("已停止".to_string());
         }
         let stop = std::sync::Arc::clone(cancel);
-        let mut keep =
-            move |_c: crate::core::ports::Chunk| !stop.load(std::sync::atomic::Ordering::Relaxed);
+        let mut keep = move |_c: crate::capabilities::llm::api::Chunk| {
+            !stop.load(std::sync::atomic::Ordering::Relaxed)
+        };
         let payload = crate::core::engine::core_operation(
             systools, "planner", "verdict", mode, core_chat, &msgs, opts, &mut keep, verify, sink,
         )?;
@@ -368,7 +368,7 @@ impl CollabSession {
         systools: &crate::core::roles::SystemTools,
         cancel: &std::sync::Arc<std::sync::atomic::AtomicBool>,
         chain: Option<&crate::kernel::chain::TaskChain>,
-        opts: crate::core::ports::CompleteOpts<'static>,
+        opts: crate::capabilities::llm::api::CompleteOpts<'static>,
         mode: crate::capabilities::registry::api::ToolMode,
         core_chat: &mut dyn Chat,
         verify: Option<&mut crate::core::engine::MemberTools>,
@@ -406,8 +406,9 @@ impl CollabSession {
             return Err("已停止".to_string());
         }
         let stop = std::sync::Arc::clone(cancel);
-        let mut keep =
-            move |_c: crate::core::ports::Chunk| !stop.load(std::sync::atomic::Ordering::Relaxed);
+        let mut keep = move |_c: crate::capabilities::llm::api::Chunk| {
+            !stop.load(std::sync::atomic::Ordering::Relaxed)
+        };
         // 核心操作走工具调用：节点验收结论由 node_verdict 工具承载。
         // 带核实回路：模型想先读/查落盘物时，核心执行只读工具再回灌（不再直接判"没调用"）。
         let payload = crate::core::engine::core_operation(
@@ -738,7 +739,7 @@ impl CollabSession {
             ));
         }
         // 讨论也走**全局设置**（流式 + 预算），与单 agent 共用同一份。
-        let llm = crate::core::ports::LlmOpts {
+        let llm = crate::capabilities::llm::api::LlmOpts {
             stream: self.settings.app.streaming,
             timeout_secs: self.settings.app.llm_timeout_secs,
         };
@@ -801,7 +802,7 @@ impl CollabSession {
     }
 
     /// 泵让出的那一步（该问谁、给它什么上下文）——由核心取走并驱动。
-    pub fn take_ask(&mut self) -> Option<(usize, String, Vec<crate::core::ports::Msg>)> {
+    pub fn take_ask(&mut self) -> Option<(usize, String, Vec<crate::capabilities::llm::api::Msg>)> {
         self.pending_ask.take()
     }
 
@@ -857,8 +858,8 @@ impl CollabSession {
     }
 
     /// 本回合的调用选项（流式 + 预算，取全局设置）。
-    pub fn disc_opts(&self) -> crate::core::ports::CompleteOpts<'static> {
-        crate::core::ports::CompleteOpts::plain(self.settings.app.streaming)
+    pub fn disc_opts(&self) -> crate::capabilities::llm::api::CompleteOpts<'static> {
+        crate::capabilities::llm::api::CompleteOpts::plain(self.settings.app.streaming)
             .with_timeout(self.settings.app.llm_timeout_secs)
     }
 
@@ -917,7 +918,7 @@ impl CollabSession {
                     &self.prompts,
                     &self.systools,
                     &self.cancel,
-                    crate::core::ports::CompleteOpts::plain(self.settings.app.streaming)
+                    crate::capabilities::llm::api::CompleteOpts::plain(self.settings.app.streaming)
                         .with_timeout(self.settings.app.llm_timeout_secs),
                     self.core_mode,
                     self.core_chat.as_mut(),
@@ -1202,7 +1203,7 @@ impl CollabSession {
                     &self.systools,
                     &self.cancel,
                     Some(&reviewed),
-                    crate::core::ports::CompleteOpts::plain(self.settings.app.streaming)
+                    crate::capabilities::llm::api::CompleteOpts::plain(self.settings.app.streaming)
                         .with_timeout(self.settings.app.llm_timeout_secs),
                     self.core_mode,
                     self.core_chat.as_mut(),
@@ -1543,7 +1544,7 @@ impl CollabSession {
         systools: crate::core::roles::SystemTools,
         tools: Arc<dyn ToolRunner + Send + Sync>,
         io: Arc<dyn SysIo + Send + Sync>,
-        repair: Arc<dyn crate::core::ports::EnvelopeRepair + Send + Sync>,
+        repair: Arc<dyn crate::capabilities::llm::api::EnvelopeRepair + Send + Sync>,
         log: Arc<dyn crate::kernel::log::Log + Send + Sync>,
         packages: Arc<dyn PackageSource + Send + Sync>,
         meta: &SessionMeta,

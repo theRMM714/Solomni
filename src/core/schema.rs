@@ -254,8 +254,8 @@ impl ToolSchema {
     }
 
     /// 原生工具调用用的声明形态：名字 + 一句话说明 + JSON Schema 参数。
-    pub fn decl(&self, name: &str) -> crate::core::ports::ToolDecl {
-        crate::core::ports::ToolDecl {
+    pub fn decl(&self, name: &str) -> crate::capabilities::llm::api::ToolDecl {
+        crate::capabilities::llm::api::ToolDecl {
             name: name.to_string(),
             description: self.desc.clone(),
             parameters: self.to_json_schema(),

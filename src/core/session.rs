@@ -3,10 +3,10 @@
 //! 支持工具循环（联动 engine::converse_with）；转录行带会话内稳定 id（自 0 递增），
 //! 并记录每行对应的历史长度，供回档精确回退。
 
+use crate::capabilities::llm::api::Chunk;
+use crate::capabilities::llm::api::{BoxedChat, Msg};
 use crate::core::engine::{MemberTools, MemberTurn, Round};
 use crate::core::events::{LineView, Live, SessionEvent, ToolCallView};
-use crate::core::ports::Chunk;
-use crate::core::ports::{BoxedChat, Msg};
 
 /// 把"保留前 keep 行"对齐到**回复边界**：keep 落在某次回复内部时，退到该回复的第一行之前。
 ///
@@ -131,7 +131,7 @@ impl AgentSession {
     /// 本会话的**对话**（测试据此断言"用户说过的话，下一回合带上了"）。
     /// 身份与环境不在里面——它们由 params 现渲染（见 SessionParams::identity）。
     #[cfg(test)]
-    pub fn dialogue(&self) -> &[crate::core::ports::Msg] {
+    pub fn dialogue(&self) -> &[crate::capabilities::llm::api::Msg] {
         &self.dialogue
     }
 
@@ -237,7 +237,7 @@ impl AgentSession {
     pub fn compact_turn(
         &mut self,
         prompt: &str,
-        decl: Option<&crate::core::ports::ToolDecl>,
+        decl: Option<&crate::capabilities::llm::api::ToolDecl>,
         identity: &str,
     ) -> Result<String, String> {
         // 整条消息**只有这一处装配**：身份 + 本回合工具（只有 compact）+ 对话 + 压缩提示。
@@ -249,11 +249,11 @@ impl AgentSession {
             &self.dialogue,
             &[Msg::user(prompt.to_string())],
         );
-        let mut opts = crate::core::ports::CompleteOpts::plain(false);
+        let mut opts = crate::capabilities::llm::api::CompleteOpts::plain(false);
         if let Some(d) = decl {
             opts.tools = Some(std::slice::from_ref(d));
         }
-        let mut keep = |_c: crate::core::ports::Chunk| true;
+        let mut keep = |_c: crate::capabilities::llm::api::Chunk| true;
         let done = self.chat.complete(&msgs, opts, &mut keep);
         if let Some(err) = done.error {
             return Err(err);
@@ -261,7 +261,7 @@ impl AgentSession {
         let (name, args) = match done.calls.first() {
             Some(c) => (c.name.clone(), c.args_json.clone()),
             None => {
-                let r = crate::core::envelope::parse(&done.raw);
+                let r = crate::capabilities::llm::api::parse(&done.raw);
                 let t = r
                     .tools
                     .first()

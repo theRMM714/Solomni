@@ -107,7 +107,7 @@ pub fn idle() -> SessionEvent {
 /// 实时输出通道：调用参数（流式与预算，来自全局设置）+ 中止开关 + 短暂事件出口
 /// （不落盘，仅活动会话实时刷新）。
 pub struct Live<'a> {
-    pub llm: crate::core::ports::LlmOpts,
+    pub llm: crate::capabilities::llm::api::LlmOpts,
     /// 用户点「停止」时置位；会话与适配层据此立即中止生成。
     pub cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
     pub emit: &'a mut dyn FnMut(SessionEvent),

@@ -6,7 +6,6 @@ pub mod api;
 pub mod collab;
 pub mod collab_state;
 pub mod engine;
-pub mod envelope;
 pub mod events;
 pub mod exec;
 pub mod fence;
@@ -23,22 +22,20 @@ pub mod workspace;
 
 pub use events::{Pending, SessionEvent};
 // 测试用同步入口的签名要它；生产路径的 Live 构造在 api.rs（那里直接引 events::Live）。
+pub use crate::capabilities::llm::api::{ChatGateway, ModelCatalog};
 pub use crate::capabilities::prompt::ports::PromptSource;
 pub use crate::capabilities::registry::ports::SettingsStore;
 #[cfg(test)]
 pub(crate) use events::Live;
-pub use ports::{
-    ChatGateway, HistoryStore, ModelCatalog, ModuleSource, PackageSource, SysIo, ToolRunner,
-    Workspace,
-};
+pub use ports::{HistoryStore, ModuleSource, PackageSource, SysIo, ToolRunner, Workspace};
 
+use crate::capabilities::llm::api::Msg;
 use crate::capabilities::prompt::api::Prompts;
 use crate::capabilities::registry::api::{AppSettings, Channel, Settings};
 use crate::core::collab::CollabSession;
 use crate::core::engine::AfterTurn;
 use crate::core::history::{AgentMeta, HistoryView, SessionMeta};
 use crate::core::module::Module;
-use crate::core::ports::Msg;
 use crate::core::roles::SystemTools;
 use crate::kernel::log::Log;
 use crate::kernel::types::SessionId;
@@ -296,7 +293,7 @@ pub(crate) enum Prepared {
         identity: String,
         /// 生成前要先给用户的事件（例如工具形态变更的提示）。
         prefix: Vec<SessionEvent>,
-        llm: ports::LlmOpts,
+        llm: crate::capabilities::llm::api::LlmOpts,
         /// 增量落盘手柄：逐轮外送的同时就落盘（中途刷新页面因此看得到已产生的部分）。
         persister: Persister,
     },
@@ -376,7 +373,7 @@ pub struct Core {
     /// 内置文件工具读写端口（策略在 core：寻址与越界校验）。
     io: Arc<dyn SysIo + Send + Sync>,
     /// 信封修复端口（手写信封不合法时的无歧义补救；默认真现在 adapters，可整体替换）。
-    repair: Arc<dyn ports::EnvelopeRepair + Send + Sync>,
+    repair: Arc<dyn crate::capabilities::llm::api::EnvelopeRepair + Send + Sync>,
     log: Arc<dyn crate::kernel::log::Log + Send + Sync>,
     /// 宿主能力探测（读环境、查路径存在性都在它后面；core 因此不碰 std::env 与文件系统）。
     probe: Arc<dyn ports::HostProbe + Send + Sync>,
@@ -408,7 +405,7 @@ impl Core {
         catalog: Arc<dyn ModelCatalog + Send + Sync>,
         tools: Arc<dyn ToolRunner + Send + Sync>,
         io: Arc<dyn SysIo + Send + Sync>,
-        repair: Arc<dyn ports::EnvelopeRepair + Send + Sync>,
+        repair: Arc<dyn crate::capabilities::llm::api::EnvelopeRepair + Send + Sync>,
         prompt_source: Box<dyn PromptSource>,
         systools: SystemTools,
         log: Arc<dyn crate::kernel::log::Log + Send + Sync>,
@@ -561,7 +558,12 @@ impl Core {
     pub fn compact_plan(
         &self,
         sid: &str,
-    ) -> (String, Option<crate::core::ports::ToolDecl>, u64, String) {
+    ) -> (
+        String,
+        Option<crate::capabilities::llm::api::ToolDecl>,
+        u64,
+        String,
+    ) {
         let prompt = self.prompts.core.tool_texts.compact_prompt.clone();
         let decl = self
             .systools
@@ -685,7 +687,7 @@ impl Core {
                 // 两个出口（流式短暂事件 / 定稿事件）都收进同一份事件流。
                 let notes = std::cell::RefCell::new(Vec::new());
                 let mut live = crate::core::events::Live {
-                    llm: crate::core::ports::LlmOpts {
+                    llm: crate::capabilities::llm::api::LlmOpts {
                         stream: opts.stream,
                         timeout_secs: opts.timeout_secs,
                     },
@@ -1498,8 +1500,8 @@ impl Core {
     /// 本次模型调用的通道参数：**预算与"能不能流式"都取全局设置**（讨论、执行、验收、单 agent 共用一份）。
     /// `want_stream` 是调用方这一次的意愿（呈现层按回包形状给）：**设置是上限，调用方可以在本次放弃流式**；
     /// 设置关掉时一律非流式。两处各判一次迟早会打架，所以判据只在这里。
-    pub(crate) fn llm_opts(&self, want_stream: bool) -> crate::core::ports::LlmOpts {
-        crate::core::ports::LlmOpts {
+    pub(crate) fn llm_opts(&self, want_stream: bool) -> crate::capabilities::llm::api::LlmOpts {
+        crate::capabilities::llm::api::LlmOpts {
             stream: self.settings.app.streaming && want_stream,
             timeout_secs: self.settings.app.llm_timeout_secs,
         }
@@ -2156,7 +2158,7 @@ impl Core {
                 Msg::system(self.prompts.core.suggest_models.system.clone()),
                 Msg::user(user),
             ],
-            crate::core::ports::CompleteOpts::plain(false),
+            crate::capabilities::llm::api::CompleteOpts::plain(false),
             &mut |_| true,
             // 推荐是**一次性建议**（用户点了才生成、没有工作区可核实）：不接核实回路。
             None,

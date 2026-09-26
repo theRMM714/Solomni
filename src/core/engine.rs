@@ -5,12 +5,13 @@
 //! 一次回复里的多个原生调用按**声明**调度：声明可并发的只读类并发跑，其余（含写入类）独占并按原序生效；
 //! 结果与工具行一律按原始顺序回填——并发只影响执行，不影响上下文里的顺序。
 
-use crate::capabilities::prompt::api::Prompts;
-use crate::core::envelope::{self, ToolInvoke, Verb};
-use crate::core::events::{LineView, SessionEvent, ToolCallView};
 #[cfg(test)]
-use crate::core::ports::BoxedChat;
-use crate::core::ports::{Chat, Chunk, CompleteOpts, Msg, ToolOutcome, ToolRunner};
+use crate::capabilities::llm::api::BoxedChat;
+use crate::capabilities::llm::api::{self as envelope, ToolInvoke, Verb};
+use crate::capabilities::llm::api::{Chat, Chunk, CompleteOpts, Msg};
+use crate::capabilities::prompt::api::Prompts;
+use crate::core::events::{LineView, SessionEvent, ToolCallView};
+use crate::core::ports::{ToolOutcome, ToolRunner};
 use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
@@ -92,7 +93,7 @@ pub struct MemberTools {
     /// 本次会话的观察账本（哪些文件完整读过 / 由核心写过）：改动前的证据（见 systool::Observations）。
     pub observations: crate::core::systool::Observations,
     /// 信封修复端口：手写信封不合法时先问它能不能按无歧义的写法修好（默认只转义裸控制字符）。
-    pub repair: Arc<dyn crate::core::ports::EnvelopeRepair + Send + Sync>,
+    pub repair: Arc<dyn crate::capabilities::llm::api::EnvelopeRepair + Send + Sync>,
     /// 运行日志：模型输出被长度截断这类"看不见的事实"要落盘，供事后确定问题。
     pub log: Arc<dyn crate::kernel::log::Log + Send + Sync>,
     pub runner: Arc<dyn ToolRunner + Send + Sync>,
@@ -188,7 +189,7 @@ pub fn max_reply(events: &[serde_json::Value]) -> u64 {
 pub type WireTools = BTreeMap<String, (Option<String>, String)>;
 
 /// 一次请求要声明的工具表（给供应商的那一份）。
-pub type Decls = Vec<crate::core::ports::ToolDecl>;
+pub type Decls = Vec<crate::capabilities::llm::api::ToolDecl>;
 
 /// 本成员这次请求的**工具声明面**（原生通道用）：发给供应商的声明 + 线上名回译表 + 可并发的线上名。
 #[derive(Default)]
@@ -391,7 +392,7 @@ fn tool_decls(ctx: &MemberTools) -> ToolDecls {
             let decl = match mt.books.get(tool) {
                 Some(schema) => schema.decl(&wire_name),
                 // 没声明参数：如实说明参数由工具自己解释（不编 schema）
-                None => crate::core::ports::ToolDecl {
+                None => crate::capabilities::llm::api::ToolDecl {
                     name: wire_name.clone(),
                     description: format!("模块 {} 的外部工具 {}（参数由工具自己解释）", id, tool),
                     parameters: serde_json::json!({ "type": "object", "additionalProperties": true }),
@@ -587,7 +588,7 @@ pub struct Discussion {
     /// 工具总表与角色表：**不挂在册子上**（两者互不依赖）。
     systools: crate::core::roles::SystemTools,
     /// 本次调用的通道参数（流式 + 预算）：**全局设置**，与单 agent 共用同一份。
-    llm: crate::core::ports::LlmOpts,
+    llm: crate::capabilities::llm::api::LlmOpts,
     /// 讨论席的**机制说明 + 讨论约定**（开场与轮转都带它）：只说约定不说机制，AI 会空转。
     /// 能用哪些工具**不在这里**——随回合注入（见 MemberTools::tools_block）。
     protocol: String,
@@ -716,7 +717,7 @@ impl Discussion {
         systools: &crate::core::roles::SystemTools,
         role: &str,
         cancel: &std::sync::Arc<std::sync::atomic::AtomicBool>,
-        opts: crate::core::ports::CompleteOpts<'static>,
+        opts: crate::capabilities::llm::api::CompleteOpts<'static>,
         speaker: &str,
         // 本回合的身份块（驱动按当前提示词册现渲染；不进对话）。
         identity: &str,
@@ -738,7 +739,7 @@ impl Discussion {
                 std::mem::replace(&mut t.with_modules, with_modules),
             )
         });
-        let llm = crate::core::ports::LlmOpts {
+        let llm = crate::capabilities::llm::api::LlmOpts {
             stream: opts.stream,
             timeout_secs: opts.timeout_secs,
         };
@@ -831,7 +832,7 @@ impl Discussion {
         allow_autonomy: bool,
         prompts: Prompts,
         systools: crate::core::roles::SystemTools,
-        llm: crate::core::ports::LlmOpts,
+        llm: crate::capabilities::llm::api::LlmOpts,
         cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
         protocol: String,
     ) -> Discussion {
@@ -895,8 +896,9 @@ impl Discussion {
     }
 
     /// 本轮的调用选项：流式与预算都取全局设置（讨论也走同一份，不再是写死的非流式）。
-    fn opts(&self) -> crate::core::ports::CompleteOpts<'static> {
-        crate::core::ports::CompleteOpts::plain(self.llm.stream).with_timeout(self.llm.timeout_secs)
+    fn opts(&self) -> crate::capabilities::llm::api::CompleteOpts<'static> {
+        crate::capabilities::llm::api::CompleteOpts::plain(self.llm.stream)
+            .with_timeout(self.llm.timeout_secs)
     }
 
     /// 首轮：聊天约定 + 用户需求（文案经提示词册渲染）。
@@ -1243,8 +1245,9 @@ impl Discussion {
             return Err("已停止".to_string());
         }
         let cancel = std::sync::Arc::clone(&self.cancel);
-        let mut keep =
-            move |_c: crate::core::ports::Chunk| !cancel.load(std::sync::atomic::Ordering::Relaxed);
+        let mut keep = move |_c: crate::capabilities::llm::api::Chunk| {
+            !cancel.load(std::sync::atomic::Ordering::Relaxed)
+        };
         // 核心操作走工具调用：载荷形状与从前一致（plan + nodes），只是入口变成 plan 工具。
         let payload = core_operation(
             &self.systools,
@@ -1376,7 +1379,7 @@ impl Execution {
         retry: Option<&str>,
         prompts: &Prompts,
         systools: &crate::core::roles::SystemTools,
-        llm: crate::core::ports::LlmOpts,
+        llm: crate::capabilities::llm::api::LlmOpts,
         mode: crate::capabilities::registry::api::ToolMode,
         verify: Option<&mut MemberTools>,
         // 核心这一轮的行推给谁（总验收也要能看到它在核对什么）。
@@ -1407,8 +1410,8 @@ impl Execution {
             self.stopped = true;
             return;
         }
-        let opts =
-            crate::core::ports::CompleteOpts::plain(llm.stream).with_timeout(llm.timeout_secs);
+        let opts = crate::capabilities::llm::api::CompleteOpts::plain(llm.stream)
+            .with_timeout(llm.timeout_secs);
         let cancel = std::sync::Arc::clone(&self.cancel);
         let mut keep = move |_c: Chunk| !cancel.load(std::sync::atomic::Ordering::Relaxed);
         // 核心操作走工具调用：总验收清单由 checklist 工具承载。
@@ -1552,8 +1555,8 @@ pub(crate) fn core_operation(
     mode: crate::capabilities::registry::api::ToolMode,
     chat: &mut dyn Chat,
     msgs: &[Msg],
-    opts: crate::core::ports::CompleteOpts<'static>,
-    keep: &mut dyn FnMut(crate::core::ports::Chunk) -> bool,
+    opts: crate::capabilities::llm::api::CompleteOpts<'static>,
+    keep: &mut dyn FnMut(crate::capabilities::llm::api::Chunk) -> bool,
     verify: Option<&mut MemberTools>,
     // 核心这一轮的**事实出口**（推；落盘与否由会话模块决定）。
     sink: &mut dyn FnMut(SessionEvent),
@@ -1563,7 +1566,7 @@ pub(crate) fn core_operation(
         systools.tool_face(role).unwrap_or_default();
     let face_ids: Vec<String> = face_rows.iter().map(|(id, _)| id.to_string()).collect();
     let mut opts = opts;
-    let decls: Vec<crate::core::ports::ToolDecl> =
+    let decls: Vec<crate::capabilities::llm::api::ToolDecl> =
         if mode == crate::capabilities::registry::api::ToolMode::Native {
             face_rows.iter().map(|(id, s)| s.decl(id)).collect()
         } else {
@@ -1582,20 +1585,20 @@ pub(crate) fn core_operation(
     let mut acc = String::new();
     loop {
         let done = {
-            let mut on = |chunk: crate::core::ports::Chunk| {
+            let mut on = |chunk: crate::capabilities::llm::api::Chunk| {
                 let mut kind = "text";
                 let mut piece = String::new();
                 match &chunk {
-                    crate::core::ports::Chunk::Start => {
+                    crate::capabilities::llm::api::Chunk::Start => {
                         acc.clear();
                         kind = "start";
                     }
-                    crate::core::ports::Chunk::Text(t) => {
+                    crate::capabilities::llm::api::Chunk::Text(t) => {
                         let (send, next) = crate::core::session::stream_piece(&acc, t);
                         piece = send;
                         acc = next;
                     }
-                    crate::core::ports::Chunk::Reasoning(r) => {
+                    crate::capabilities::llm::api::Chunk::Reasoning(r) => {
                         kind = "reasoning";
                         piece = r.clone();
                     }
@@ -1612,7 +1615,7 @@ pub(crate) fn core_operation(
         if let Some(err) = done.error {
             return Err(err);
         }
-        let parsed = crate::core::envelope::parse(&done.raw);
+        let parsed = crate::capabilities::llm::api::parse(&done.raw);
         // native：结构化槽位里找这个名字的调用。
         if let Some(c) = done.calls.iter().find(|c| c.name == tool) {
             let payload: serde_json::Value = serde_json::from_str(&c.args_json)
@@ -1790,7 +1793,7 @@ pub(crate) fn reply_msgs(
             raw,
             calls
                 .iter()
-                .map(|c| crate::core::ports::ToolCall {
+                .map(|c| crate::capabilities::llm::api::ToolCall {
                     id: c.call_id.clone(),
                     name: c.name.clone(),
                     args_json: c.args.clone(),
@@ -1883,7 +1886,7 @@ pub struct Round {
 impl Round {
     /// 这一轮的输出是不是被供应商按长度截断了。
     pub fn truncated(&self) -> bool {
-        crate::core::ports::truncated(&self.finish)
+        crate::capabilities::llm::api::truncated(&self.finish)
     }
 }
 
@@ -1898,7 +1901,7 @@ pub(crate) fn converse_with(
     mut tools: Option<&mut MemberTools>,
     identity: &str,
     dialogue: Vec<Msg>,
-    llm: crate::core::ports::LlmOpts,
+    llm: crate::capabilities::llm::api::LlmOpts,
     speaker: &str,
     on: &mut dyn FnMut(Chunk) -> bool,
     on_tool: &mut dyn FnMut(&ToolCallView),

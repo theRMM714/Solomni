@@ -3,6 +3,9 @@
 
 use super::doubles::*;
 use crate::adapters::fake_chat::FakeChat;
+use crate::capabilities::llm::api::{
+    BoxedChat, Chat, ChatGateway, Chunk, CompleteOpts, Completion, Msg,
+};
 use crate::capabilities::prompt::domain::prompt::render;
 use crate::capabilities::registry::api::{Channel, ModelEntry, Provider, Settings};
 use crate::core::engine::{Discussion, Member, MemberTools, ModuleTools, TurnOut, MAX_ROUNDS};
@@ -11,10 +14,7 @@ use crate::core::exec::{self, Diagnosis, ExecSpec};
 use crate::core::history::{AgentMeta, SessionMeta};
 use crate::core::module::Module;
 use crate::core::packages::{Library, PackageManifest};
-use crate::core::ports::{
-    BoxedChat, Chat, ChatGateway, Chunk, CompleteOpts, Completion, HistoryStore, ModuleSource, Msg,
-    ToolOutcome, ToolRunner, Workspace,
-};
+use crate::core::ports::{HistoryStore, ModuleSource, ToolOutcome, ToolRunner, Workspace};
 use crate::core::{
     AgentInstance, CollabStep, ConfigAgent, Core, Pending, SessionEdit, SessionEvent, WorkMode,
     WorkSpec,
@@ -29,44 +29,48 @@ use std::time::Duration;
 
 #[test]
 pub(crate) fn envelope_parse_clean() {
-    let r = crate::core::envelope::parse("{\"type\":\"ask\",\"text\":\"要 A 还是 B？\"}");
-    assert!(matches!(r.verb, crate::core::envelope::Verb::Ask));
+    let r = crate::capabilities::llm::api::parse("{\"type\":\"ask\",\"text\":\"要 A 还是 B？\"}");
+    assert!(matches!(r.verb, crate::capabilities::llm::api::Verb::Ask));
     assert_eq!(r.text, "要 A 还是 B？");
     assert!(!r.degraded);
 }
 
 #[test]
 pub(crate) fn envelope_degraded_keeps_raw() {
-    let r = crate::core::envelope::parse("这不是 JSON");
+    let r = crate::capabilities::llm::api::parse("这不是 JSON");
     assert!(r.degraded);
     assert_eq!(r.text, "这不是 JSON");
 }
 
 #[test]
 pub(crate) fn envelope_wrapped_json_still_parses() {
-    let r = crate::core::envelope::parse("好的：{\"type\":\"agree\",\"text\":\"同意\"} 以上。");
-    assert!(matches!(r.verb, crate::core::envelope::Verb::Agree));
+    let r =
+        crate::capabilities::llm::api::parse("好的：{\"type\":\"agree\",\"text\":\"同意\"} 以上。");
+    assert!(matches!(r.verb, crate::capabilities::llm::api::Verb::Agree));
     assert!(!r.degraded);
 }
 
 #[test]
 pub(crate) fn envelope_text_may_be_omitted() {
-    let r = crate::core::envelope::parse("{\"type\":\"agree\"}");
+    let r = crate::capabilities::llm::api::parse("{\"type\":\"agree\"}");
     assert!(
-        matches!(r.verb, crate::core::envelope::Verb::Agree),
+        matches!(r.verb, crate::capabilities::llm::api::Verb::Agree),
         "缺 text 不影响表态"
     );
     assert_eq!(r.text, "", "缺 text = 空串");
     assert!(!r.degraded);
-    let say = crate::core::envelope::parse("{\"type\":\"say\"}");
+    let say = crate::capabilities::llm::api::parse("{\"type\":\"say\"}");
     assert!(
-        matches!(say.verb, crate::core::envelope::Verb::Say) && !say.degraded,
+        matches!(say.verb, crate::capabilities::llm::api::Verb::Say) && !say.degraded,
         "缺 text 的发言仍是干净信封"
     );
     assert!(say.text.is_empty());
     // 缺 name 的工具信封仍是 malformed 信号，不被缺省 text 收编成发言。
-    let bad = crate::core::envelope::parse("{\"type\":\"tool\",\"args\":{}}");
-    assert!(matches!(bad.verb, crate::core::envelope::Verb::Tool));
+    let bad = crate::capabilities::llm::api::parse("{\"type\":\"tool\",\"args\":{}}");
+    assert!(matches!(
+        bad.verb,
+        crate::capabilities::llm::api::Verb::Tool
+    ));
     assert!(bad.tools.iter().any(|t| t.malformed.is_some()));
 }
 
@@ -1184,13 +1188,13 @@ pub(crate) fn run_execution(
             &[("tasks", tasks.to_string()), ("rework", String::new())],
         );
         let mut views = Vec::new();
-        let mut noop = |_c: crate::core::ports::Chunk| true;
+        let mut noop = |_c: crate::capabilities::llm::api::Chunk| true;
         let mut sink = |_e: crate::core::events::SessionEvent| {};
         let rounds = crate::core::engine::converse_with(
             m.chat.as_mut().expect("测试通道").as_mut(),
             m.tools.as_mut(),
             &identity,
-            vec![crate::core::ports::Msg::user(user)],
+            vec![crate::capabilities::llm::api::Msg::user(user)],
             Default::default(),
             &id,
             &mut noop,
@@ -1223,13 +1227,13 @@ pub(crate) struct OptsChat {
 /// 调用参数账本：(流式, 预算秒)。
 pub(crate) type OptsLog = Arc<Mutex<Vec<(bool, u64)>>>;
 
-impl crate::core::ports::Chat for OptsChat {
+impl crate::capabilities::llm::api::Chat for OptsChat {
     fn complete(
         &mut self,
-        _m: &[crate::core::ports::Msg],
-        opts: crate::core::ports::CompleteOpts<'_>,
-        _on: &mut dyn FnMut(crate::core::ports::Chunk) -> bool,
-    ) -> crate::core::ports::Completion {
+        _m: &[crate::capabilities::llm::api::Msg],
+        opts: crate::capabilities::llm::api::CompleteOpts<'_>,
+        _on: &mut dyn FnMut(crate::capabilities::llm::api::Chunk) -> bool,
+    ) -> crate::capabilities::llm::api::Completion {
         self.seen
             .lock()
             .expect("锁")
@@ -1240,17 +1244,19 @@ impl crate::core::ports::Chat for OptsChat {
             self.results.first().cloned().unwrap_or(None)
         };
         match r {
-            Some(reason) => crate::core::ports::Completion::failure(reason),
+            Some(reason) => crate::capabilities::llm::api::Completion::failure(reason),
             // 默认回**发言**而不是同意：同意是粘住的，开场就同意会让后面几轮被跳过，
             // 那些用例（预算 / 失败中断）要的是"还在讨论中"。
-            None => crate::core::ports::Completion::text("{\"type\":\"say\",\"text\":\"我先说\"}"),
+            None => crate::capabilities::llm::api::Completion::text(
+                "{\"type\":\"say\",\"text\":\"我先说\"}",
+            ),
         }
     }
 }
 
 fn opts_discussion(
     results: Vec<Option<String>>,
-    llm: crate::core::ports::LlmOpts,
+    llm: crate::capabilities::llm::api::LlmOpts,
 ) -> (Discussion, OptsLog) {
     let seen = Arc::new(Mutex::new(Vec::new()));
     let members = vec![Member::new(
@@ -1279,7 +1285,7 @@ fn opts_discussion(
 /// 讨论的调用参数**必须来自全局设置**（以前这里写死非流式，正是协作卡住的成因之一）。
 #[test]
 pub(crate) fn discussion_calls_carry_the_global_streaming_and_budget() {
-    let llm = crate::core::ports::LlmOpts {
+    let llm = crate::capabilities::llm::api::LlmOpts {
         stream: true,
         timeout_secs: 123,
     };
@@ -1535,8 +1541,8 @@ pub(crate) fn chain_finished_needs_every_node_settled() {
 /// 原生通道：供应商的结构化槽位 → 讨论动词；不认识的工具名 = 不认识（调用点据此**如实拒绝**）。
 #[test]
 pub(crate) fn native_tool_names_map_to_discussion_verbs() {
+    use crate::capabilities::llm::api::Verb;
     use crate::core::engine::{arg_text, verb_of};
-    use crate::core::envelope::Verb;
     assert_eq!(verb_of("say"), Some(Verb::Say));
     assert_eq!(verb_of("agree"), Some(Verb::Agree));
     assert_eq!(verb_of("leave"), Some(Verb::Leave));
@@ -1789,18 +1795,21 @@ pub(crate) fn discussion_turn_carries_the_agent_sessions_own_history() {
         &test_systools(),
         "discussant",
         &cancel,
-        crate::core::ports::CompleteOpts::plain(false),
+        crate::capabilities::llm::api::CompleteOpts::plain(false),
         "a",
         "（测试）身份",
-        &[crate::core::ports::Msg::user("只看第二份资料")],
+        &[crate::capabilities::llm::api::Msg::user("只看第二份资料")],
         &mut chat,
         None,
-        vec![crate::core::ports::Msg::user("讨论上下文")],
+        vec![crate::capabilities::llm::api::Msg::user("讨论上下文")],
         &prompts.core.tool_texts,
         &mut |_| {},
     )
     .expect("跑一个回合");
-    assert!(matches!(turn.verb, Some(crate::core::envelope::Verb::Say)));
+    assert!(matches!(
+        turn.verb,
+        Some(crate::capabilities::llm::api::Verb::Say)
+    ));
     let got = seen.lock().expect("锁").clone();
     assert!(
         got.iter()
@@ -3007,7 +3016,8 @@ pub(crate) fn collab_delegated_roster_written_back_and_rebuilt_from_meta() {
 #[test]
 pub(crate) fn extract_balanced_object() {
     // 核心操作改走工具调用之后，正文 JSON 的提取只剩"信封"这一处用途（对象形态）。
-    let obj = crate::core::envelope::extract_json_object("x {\"k\":\"{\"} y").unwrap();
+    let obj = crate::capabilities::llm::domain::envelope::extract_json_object("x {\"k\":\"{\"} y")
+        .unwrap();
     assert!(obj.starts_with('{') && obj.ends_with('}'));
 }
 
@@ -3984,7 +3994,10 @@ pub(crate) fn a_malformed_envelope_is_repaired_when_the_fix_is_unambiguous() {
         .as_ref()
         .expect("工具环境")
         .repair
-        .repair("x", &crate::core::envelope::Malformed::Syntax("x".into()))
+        .repair(
+            "x",
+            &crate::capabilities::llm::api::Malformed::Syntax("x".into())
+        )
         .repaired
         .is_none());
     let exec = run_execution(std::slice::from_mut(&mut m), "任务", &prompts);
@@ -4060,7 +4073,7 @@ pub(crate) fn a_malformed_envelope_is_repaired_when_the_fix_is_unambiguous() {
 #[test]
 pub(crate) fn malformed_envelopes_are_classified_so_the_model_gets_the_right_fix() {
     // 类别是可判定的确切事实：模型据此能直接改对，而不是被笼统告知"JSON 不合法"。
-    use crate::core::envelope::{parse, Malformed};
+    use crate::capabilities::llm::api::{parse, Malformed};
     // ① 字符串里直接换行（真实事故：write 的 content 里裸换行 → 整段 JSON 非法）
     let r = parse("{\"type\":\"tool\",\"name\":\"write\",\"args\":{\"path\":\"a\",\"content\":\"第一行\n第二行\"}}");
     match r
@@ -4082,7 +4095,7 @@ pub(crate) fn malformed_envelopes_are_classified_so_the_model_gets_the_right_fix
     let r = parse("好。{\"type\":\"tool\",\"name\":\"write\",\"args\":{\"path\":\"a\"}");
     assert_eq!(
         r.tools.first().cloned().expect("信号").malformed,
-        Some(Malformed::Unclosed(crate::core::envelope::Tail {
+        Some(Malformed::Unclosed(crate::capabilities::llm::api::Tail {
             missing: "}".to_string(),
             in_string: false,
             envelopes: 1,
@@ -4162,7 +4175,7 @@ pub(crate) fn malformed_envelopes_are_classified_so_the_model_gets_the_right_fix
         tail: None,
     });
     // 只差收尾括号：要说清"还差 }"（而不是误导成"内容过长"）
-    let brace = texts.malformed_report(&Malformed::Unclosed(crate::core::envelope::Tail {
+    let brace = texts.malformed_report(&Malformed::Unclosed(crate::capabilities::llm::api::Tail {
         missing: "}".to_string(),
         in_string: false,
         envelopes: 1,
@@ -4174,13 +4187,13 @@ pub(crate) fn malformed_envelopes_are_classified_so_the_model_gets_the_right_fix
         brace
     );
     // 断在字符串中间才是"内容没写完"，这时才谈分次写
-    let cut = texts.malformed_report(&Malformed::Unclosed(crate::core::envelope::Tail {
+    let cut = texts.malformed_report(&Malformed::Unclosed(crate::capabilities::llm::api::Tail {
         missing: "}\"}".to_string(),
         in_string: true,
         envelopes: 1,
     }));
     // 一段回复里起了两段信封：要说清"只发一段"，而不是让它去补末尾括号（真实事故的形状）
-    let multi = texts.malformed_report(&Malformed::Unclosed(crate::core::envelope::Tail {
+    let multi = texts.malformed_report(&Malformed::Unclosed(crate::capabilities::llm::api::Tail {
         missing: "}}".to_string(),
         in_string: false,
         envelopes: 2,
@@ -4211,8 +4224,8 @@ pub(crate) fn malformed_envelopes_are_classified_so_the_model_gets_the_right_fix
 
 #[test]
 pub(crate) fn envelope_tool_parses_name_and_args() {
-    let r = crate::core::envelope::parse(TOOL_CALL);
-    assert_eq!(r.verb, crate::core::envelope::Verb::Tool);
+    let r = crate::capabilities::llm::api::parse(TOOL_CALL);
+    assert_eq!(r.verb, crate::capabilities::llm::api::Verb::Tool);
     let inv = r.tools.first().cloned().expect("应有调用申请");
     assert_eq!(inv.name, "grep");
     assert!(
@@ -4221,7 +4234,7 @@ pub(crate) fn envelope_tool_parses_name_and_args() {
     );
     assert!(inv.args_json.contains("keyword"));
     // 带 module 的信封：trim 后非空才是 Some（空串按省略处理）。
-    let with_mod = crate::core::envelope::parse(
+    let with_mod = crate::capabilities::llm::api::parse(
         "{\"type\":\"tool\",\"module\":\" reviewer \",\"name\":\"read_txt\",\"args\":{}}",
     );
     assert_eq!(
@@ -4234,7 +4247,7 @@ pub(crate) fn envelope_tool_parses_name_and_args() {
             .as_deref(),
         Some("reviewer")
     );
-    let blank_mod = crate::core::envelope::parse(
+    let blank_mod = crate::capabilities::llm::api::parse(
         "{\"type\":\"tool\",\"module\":\"  \",\"name\":\"read_txt\",\"args\":{}}",
     );
     assert!(blank_mod
@@ -4245,10 +4258,10 @@ pub(crate) fn envelope_tool_parses_name_and_args() {
         .module
         .is_none());
     // name 缺失 = 工具信封但不合法 → **独立的 malformed 信号**（不再按原文发言收录）。
-    let bad = crate::core::envelope::parse("{\"type\":\"tool\",\"args\":{}}");
+    let bad = crate::capabilities::llm::api::parse("{\"type\":\"tool\",\"args\":{}}");
     assert_eq!(
         bad.verb,
-        crate::core::envelope::Verb::Tool,
+        crate::capabilities::llm::api::Verb::Tool,
         "看得出是想发工具信封"
     );
     assert!(
@@ -4263,14 +4276,16 @@ pub(crate) fn envelope_tool_parses_name_and_args() {
     );
     assert!(bad.text.is_empty(), "非法信封的 JSON 也不进 text");
     // 真的"没有信封"仍然是 degraded say（原文收录）。
-    let plain = crate::core::envelope::parse("没有信封的发言");
+    let plain = crate::capabilities::llm::api::parse("没有信封的发言");
     assert!(plain.degraded && plain.tools.is_empty() && plain.text == "没有信封的发言");
     // 信封之外的正文才进 text（永不把信封 JSON 当文本）；只剩信封时 text 为空串。
     assert!(
-        crate::core::envelope::parse(TOOL_CALL).text.is_empty(),
+        crate::capabilities::llm::api::parse(TOOL_CALL)
+            .text
+            .is_empty(),
         "只剩信封 → text 空"
     );
-    let prose = crate::core::envelope::parse(
+    let prose = crate::capabilities::llm::api::parse(
         "先看一眼。{\"type\":\"tool\",\"name\":\"grep\",\"args\":{}}后记",
     );
     assert_eq!(prose.text, "先看一眼。后记", "信封之外的正文进 text");
@@ -4324,7 +4339,10 @@ impl Chat for ReasoningChat {
 struct ReasoningGateway;
 
 impl ChatGateway for ReasoningGateway {
-    fn probe_tools(&self, _channel: &Channel) -> Result<crate::core::ports::ProbeOutcome, String> {
+    fn probe_tools(
+        &self,
+        _channel: &Channel,
+    ) -> Result<crate::capabilities::llm::api::ProbeOutcome, String> {
         Err("测试替身没有真实供应商，测不了工具调用支持".to_string())
     }
 
@@ -5372,7 +5390,10 @@ pub(crate) struct TruncGateway {
 }
 
 impl ChatGateway for TruncGateway {
-    fn probe_tools(&self, _c: &Channel) -> Result<crate::core::ports::ProbeOutcome, String> {
+    fn probe_tools(
+        &self,
+        _c: &Channel,
+    ) -> Result<crate::capabilities::llm::api::ProbeOutcome, String> {
         Err("脚本替身没有真实供应商，测不了工具调用支持".to_string())
     }
     fn member_channel(&self, _c: Option<&Channel>, _id: &str) -> (BoxedChat, Option<String>) {
@@ -5419,7 +5440,10 @@ pub(crate) struct AbortGateway {
 }
 
 impl ChatGateway for AbortGateway {
-    fn probe_tools(&self, _c: &Channel) -> Result<crate::core::ports::ProbeOutcome, String> {
+    fn probe_tools(
+        &self,
+        _c: &Channel,
+    ) -> Result<crate::capabilities::llm::api::ProbeOutcome, String> {
         Err("脚本替身没有真实供应商，测不了工具调用支持".to_string())
     }
     fn member_channel(&self, _c: Option<&Channel>, _id: &str) -> (BoxedChat, Option<String>) {
@@ -5538,7 +5562,10 @@ pub(crate) struct ProbeGateway {
 }
 
 impl ChatGateway for ProbeGateway {
-    fn probe_tools(&self, _c: &Channel) -> Result<crate::core::ports::ProbeOutcome, String> {
+    fn probe_tools(
+        &self,
+        _c: &Channel,
+    ) -> Result<crate::capabilities::llm::api::ProbeOutcome, String> {
         Ok(self.outcome.lock().expect("锁").clone())
     }
     fn member_channel(&self, _c: Option<&Channel>, _id: &str) -> (BoxedChat, Option<String>) {
@@ -5626,7 +5653,7 @@ pub(crate) fn a_probe_writes_back_only_conclusive_results() {
 /// 原生通道的脚本替身：一步 = 一次"原生工具调用"或一段文本；
 /// 同时记录每次请求带过来的工具声明与消息（用来断言"声明真的发出去了、结果真的回填了"）。
 pub(crate) enum NativeStep {
-    Calls(Vec<crate::core::ports::ToolCall>),
+    Calls(Vec<crate::capabilities::llm::api::ToolCall>),
     Text(String),
 }
 
@@ -5744,13 +5771,13 @@ pub(crate) fn discussion_turn_streams_deltas_and_never_leaks_the_envelope() {
         &test_systools(),
         "discussant",
         &cancel,
-        crate::core::ports::CompleteOpts::plain(true), // 开流式
+        crate::capabilities::llm::api::CompleteOpts::plain(true), // 开流式
         "a",
         "（测试）身份",
         &[],
         &mut chat,
         None,
-        vec![crate::core::ports::Msg::user("说说")],
+        vec![crate::capabilities::llm::api::Msg::user("说说")],
         &prompts.core.tool_texts,
         &mut |e| events.push(e),
     )
@@ -5972,7 +5999,7 @@ pub(crate) fn only_this_turns_tools_are_advertised() {
 
 #[test]
 pub(crate) fn native_mode_declares_tools_and_runs_multiple_structured_calls() {
-    use crate::core::ports::ToolCall;
+    use crate::capabilities::llm::api::ToolCall;
     let io = Arc::new(InMemorySysIo::new());
     io.seed(&["demo", "work", "note.txt"], "第一行\n第二行\n");
     let note = s(&["demo", "work", "note.txt"]);
@@ -6133,7 +6160,7 @@ pub(crate) fn native_mode_refuses_a_hand_written_envelope() {
 /// 第一个文件故意慢：它会**后完成**，但结果仍必须排在前面（上下文里不许乱序）。
 #[test]
 pub(crate) fn declared_parallel_reads_overlap_and_results_keep_the_call_order() {
-    use crate::core::ports::ToolCall;
+    use crate::capabilities::llm::api::ToolCall;
     let io = Arc::new(InMemorySysIo::new().slow(40));
     io.seed(&["demo", "work", "a.txt"], "A1\nA2\n");
     io.seed(&["demo", "work", "b.txt"], "B1\nB2\n");
@@ -6179,7 +6206,7 @@ pub(crate) fn declared_parallel_reads_overlap_and_results_keep_the_call_order() 
 /// 写入类独占执行：它是并发批次之间的**屏障**，并且能看到并发批次**合并后**的账本。
 #[test]
 pub(crate) fn a_writing_call_is_a_barrier_and_sees_the_merged_ledger() {
-    use crate::core::ports::ToolCall;
+    use crate::capabilities::llm::api::ToolCall;
     let io = Arc::new(InMemorySysIo::new().slow(30));
     io.seed(&["demo", "work", "a.txt"], "原文\n");
     let a = s(&["demo", "work", "a.txt"]);
@@ -6228,7 +6255,7 @@ pub(crate) fn a_writing_call_is_a_barrier_and_sees_the_merged_ledger() {
 /// 模块工具的可并发性是**模块作者在 module.yaml 里的声明**：声明了才并发，没声明一律串行。
 #[test]
 pub(crate) fn module_tools_are_concurrent_only_when_declared() {
-    use crate::core::ports::ToolCall;
+    use crate::capabilities::llm::api::ToolCall;
     /// 原生形态 + 模块 m0 声明外部工具 grep（线上名 m0_grep）；parallel 决定它是否可并发。
     fn grep_member(runner: Arc<dyn ToolRunner + Send + Sync>, parallel: bool) -> Member {
         let steps = vec![
@@ -8132,8 +8159,11 @@ pub(crate) struct NativeGateway {
 }
 
 impl ChatGateway for NativeGateway {
-    fn probe_tools(&self, _c: &Channel) -> Result<crate::core::ports::ProbeOutcome, String> {
-        Ok(crate::core::ports::ProbeOutcome::Supported {
+    fn probe_tools(
+        &self,
+        _c: &Channel,
+    ) -> Result<crate::capabilities::llm::api::ProbeOutcome, String> {
+        Ok(crate::capabilities::llm::api::ProbeOutcome::Supported {
             detail: "替身".to_string(),
         })
     }
@@ -8183,7 +8213,7 @@ pub(crate) fn native_core(
 /// 这就是原先不一致的那条：实时只推第一条调用的回执、第二条起什么都不推，重建却每条都推。
 #[test]
 pub(crate) fn native_multi_call_rebuilds_identically_to_live() {
-    use crate::core::ports::ToolCall;
+    use crate::capabilities::llm::api::ToolCall;
     let hist = Arc::new(InMemoryHistory::new());
     let io = Arc::new(InMemorySysIo::new());
     io.seed(&["w", "a", "a.txt"], "A1\nA2\n");
@@ -8273,7 +8303,7 @@ pub(crate) fn native_multi_call_rebuilds_identically_to_live() {
 /// 回档**按回复原子**：截在一次回复中间时整条回复一起丢，绝不留下"孤儿工具结果"。
 #[test]
 pub(crate) fn rewind_never_splits_a_reply() {
-    use crate::core::ports::ToolCall;
+    use crate::capabilities::llm::api::ToolCall;
     let hist = Arc::new(InMemoryHistory::new());
     let io = Arc::new(InMemorySysIo::new());
     io.seed(&["w", "a", "a.txt"], "A1\n");
@@ -8445,8 +8475,8 @@ pub(crate) fn core_operation_runs_readonly_verification_before_the_op() {
         "plan",
         crate::capabilities::registry::api::ToolMode::Envelope,
         &mut chat,
-        &[crate::core::ports::Msg::user("出方案")],
-        crate::core::ports::CompleteOpts::plain(false),
+        &[crate::capabilities::llm::api::Msg::user("出方案")],
+        crate::capabilities::llm::api::CompleteOpts::plain(false),
         &mut |_| true,
         Some(&mut verify),
         &mut |_e: crate::core::events::SessionEvent| {},
@@ -8480,8 +8510,8 @@ pub(crate) fn body_json_is_not_a_core_operation() {
         "plan",
         crate::capabilities::registry::api::ToolMode::Envelope,
         chat.as_mut(),
-        &[crate::core::ports::Msg::user("出方案")],
-        crate::core::ports::CompleteOpts::plain(false),
+        &[crate::capabilities::llm::api::Msg::user("出方案")],
+        crate::capabilities::llm::api::CompleteOpts::plain(false),
         &mut |_| true,
         None,
         &mut |_e: crate::core::events::SessionEvent| {},

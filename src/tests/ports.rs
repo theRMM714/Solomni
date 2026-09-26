@@ -9,6 +9,7 @@ use super::doubles::{
     InMemorySysIo, InMemoryWorkspace, NoFenceHost, RecordingFence, ScriptGateway, SharedScript,
     TestPrompts, VecSource,
 };
+use crate::capabilities::llm::api::{Chat, ChatGateway, CompleteOpts, ModelCatalog, Msg};
 use crate::capabilities::prompt::ports::PromptSource;
 use crate::capabilities::registry::api::{Provider, Settings};
 use crate::capabilities::registry::ports::SettingsStore;
@@ -16,8 +17,7 @@ use crate::core::exec::ExecSpec;
 use crate::core::fence::FenceSpec;
 use crate::core::history::{AgentMeta, SessionMeta};
 use crate::core::ports::{
-    Chat, ChatGateway, CompleteOpts, FenceHost, HistoryStore, ModelCatalog, ModuleSource, Msg,
-    PackageSource, SysIo, ToolRunner, Workspace,
+    FenceHost, HistoryStore, ModuleSource, PackageSource, SysIo, ToolRunner, Workspace,
 };
 use crate::kernel::log::{Log, NoopLog};
 use std::collections::BTreeMap;
