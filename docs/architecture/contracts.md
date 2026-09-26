@@ -83,6 +83,9 @@
 
 下面这张表由契约测试与 `ROUTES` 机器比对——对不上就是测试失败，不是靠人记得改文档：
 
+静态资源（`/`、`style.css`、`app.js`、`md.js`）一律 `Cache-Control: no-store`：改了前端**刷新即生效**，
+不需要硬刷新（`presentation/web.rs` 的 `static_head`）。
+
 <!-- ROUTES:BEGIN -->
 | 方法 | 路径 | 能力 | 请求 | 响应 | 状态码 |
 | --- | --- | --- | --- | --- | --- |

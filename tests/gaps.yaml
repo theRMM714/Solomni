@@ -32,15 +32,55 @@
     项目成熟、需求更清楚时再做。
 
 
-- id: web.static-assets-cache-policy-unstated
+- id: web.external-file-delete-not-reflected
   scope: global
   level: T5
   why: |
-    静态资源（app.js 等）没有声明缓存策略：改了前端后浏览器可能仍在用旧文件。本轮"忙碌态/同步/流式"
-    三处改动是否因此未生效尚未确认——若确实如此，这条就是根因；即使不是，缺显式策略也会反复咬人。
+    用户在会话的共享区/沙箱里**手工删掉**文件后，@ 菜单还会把它列出来：前端按会话缓存文件清单，
+    只有应用内的上传/编辑/删除才让缓存失效。用户会照着菜单去引用一个已经不存在的文件。
   how: |
-    给静态资源明确策略（开发期 no-cache，或按内容摘要生成 URL）。先确认是否真是它。
+    给文件清单一个明确的过期判据：每次打开 @ 菜单重拉一次（不跨打开缓存），或随状态刷新按 mtime 失效。
+    不引入目录 watcher——本机、跨平台，代价不值。
   accept: |
-    改前端后刷新即生效（无需硬刷新）；或在文档里写明必须硬刷新及其原因。
+    在会外删掉一个文件后，再打开 @ 菜单列不出它；应用内上传/编辑后**立刻**仍能列出来。
   blocked_by: |
-    待确认：需要用户硬刷新一次，看那三处是否生效。
+    待排期：本轮先收口会话流与行渲染的统一，这条是观察到的界面同步问题，尚未动手。
+
+- id: session.delete-without-file-check
+  scope: global
+  level: T5
+  why: |
+    「删除会话」只确认"记录将被永久删除"，不看共享区与各 agent 沙箱里**还有没有文件**（产物可能还没被拿走）。
+    用户以为只是删记录，实际把工作区一起带走了。
+  how: |
+    删除前统计共享区与各沙箱里的文件（数量 + 总字节）；非空就如实列出来，让用户明确选择"连文件一起删"。
+  accept: |
+    工作区非空时删除会先列出文件并要求确认；工作区为空保持一步删除。
+  blocked_by: |
+    待排期（同上）：删除语义要一并定"记录与文件分开删"的话术，属于产品口径变更。
+
+- id: session.create-has-no-tier-choice
+  scope: global
+  level: T5
+  why: |
+    执行档位（本机档 / 虚拟机档）只能在会话建好之后的「编辑」里改，创建向导里没有这一项
+    （WorkSpec 只有 name/mode/agents/task/delegate）——建完再改是多余的一步。
+  how: |
+    创建向导加档位选择（默认本机档）；不可用的档位按现有 tier_readiness 逐项说明缺什么并禁用，
+    选定值随 WorkSpec 进 create_work。
+  accept: |
+    创建向导能选档位；选不可用档位时逐项说明缺什么；建出来的会话 meta 档位与所选一致。
+  blocked_by: |
+    待排期：档位可用性判定（exec::tier_readiness）已就位，缺的只是向导里那一格与 WorkSpec 的字段。
+
+- id: cli.webui-ctrl-c-exits-process
+  scope: global
+  level: T5
+  why: |
+    从 CLI 进 Web 转录中心后，Ctrl+C 直接结束整个进程，而不是退回 CLI（用户得重启程序）。
+  how: |
+    给 Web 服务器一个可中断的等待：收到 Ctrl+C / SIGINT 后正常关闭服务器并回到 CLI 主循环。
+  accept: |
+    Ctrl+C 后回到 CLI 提示符、进程仍在；再输入 webui 能重新起服务器。
+  blocked_by: |
+    待排期：要把 Web 服务器从"阻塞到出错"改成可中断等待（收 SIGINT 后正常关闭再回 CLI 主循环）。
