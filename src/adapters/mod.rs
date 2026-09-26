@@ -17,6 +17,7 @@ pub mod log;
 pub mod model_catalog;
 pub mod proc_tools;
 pub mod repair;
+pub mod root;
 pub mod sys_io;
 pub mod yaml_prompts;
 pub mod yaml_settings;

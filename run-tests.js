@@ -376,6 +376,10 @@ function structuralAudit() {
       if (r.startsWith("src/adapters/")) return "adapters";
       // 前端（交付机制）：各渠道一个顶层目录，与 adapters 平级；不是业务能力。
       if (r.startsWith("src/cli/") || r.startsWith("src/web/")) return "presentation";
+      // 程序入口层：组合根 + 机器可读探针 + 围栏守门进程（第二个程序入口）。
+      // 它依赖所有人，**任何人都不许依赖它**。
+      if (r === "src/main.rs" || r.startsWith("src/diagnostics/") || r.startsWith("src/guard/"))
+        return "entry";
       if (r.startsWith("src/kernel/")) return "kernel";
       if (r.startsWith("src/capabilities/")) return "capabilities";
       if (r.startsWith("src/tests/")) return "tests";
@@ -385,11 +389,11 @@ function structuralAudit() {
     // 层 → 它不得引用的层。core 不引用 adapters（端口由 core 定义、适配层实现，永不反向）。
     const FORBIDDEN = {
       // kernel 在最底层：无领域语义的机制，**不依赖任何人**。
-      kernel: ["core", "capabilities", "adapters", "presentation"],
+      kernel: ["core", "capabilities", "adapters", "presentation", "entry"],
       // 能力是最高的业务层：不反向依赖旧巨石、适配层或呈现层。
-      capabilities: ["core", "adapters", "presentation"],
-      core: ["adapters", "presentation"],
-      adapters: ["presentation"],
+      capabilities: ["core", "adapters", "presentation", "entry"],
+      core: ["adapters", "presentation", "entry"],
+      adapters: ["presentation", "entry"],
     };
 
     const rsFiles = [];

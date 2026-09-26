@@ -25,7 +25,7 @@ cli / web ──▶ core ◀── adapters
 | `cli/` + `web/` | **前端（交付机制）**：各渠道一个顶层目录，完全分开——传输（argv/stdout vs HTTP/SSE）、路由、**纯渲染**。**不是业务能力**（无状态、无不变式） | 只依赖 **入站能力面**（`core::api` 或各能力的 `::api`）；**永不接触端口对象，也拿不到 `Core` 本身**；**两者之间互不依赖** |
 | `capabilities/` | **业务能力**：按业务功能垂直切分。每个能力有 `api`（入站契约）/ `ports`（出站端口）/ `domain`（纯逻辑）/ `detail`（细节实现） | **业务之间只经对方的 `api`**；不反向依赖 `core` / `adapters` / `presentation`（迁移期残留记为基线豁免，见 [docs/architecture/refactor-plan.md](docs/architecture/refactor-plan.md) §四） |
 | `kernel/` | **机制型内核**：无领域语义、无领域状态的机制（运行日志端口、生成中作业的取消表、跨业务共享的事实类型） | **不依赖任何人**（不认识 core / adapters / presentation）；不放有领域语义的类型 |
-| `main.rs` | 组合根：`new` 出所有适配器并注入 | 除装配外无业务 |
+| 入口层（`main.rs` + `diagnostics/` + `guard/`） | **组合根**（`main.rs`：`new` 出所有适配器并注入）+ **机器可读探针**（`diagnostics/`：`--doctor` / `--https-check` / `--print-routes` / `--print-fence-env` / `--fence-verify`）+ **围栏守门进程**（`guard/`：`--fence-run` / `--fence-clean`，**第二个程序入口**） | 它依赖所有人，**任何人都不许依赖它**（门禁判定）。除装配与探针外无业务 |
 
 推论：
 

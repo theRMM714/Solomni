@@ -443,7 +443,7 @@ kernel       ──▶ （无）
 | **12** | **session 能力落位**：`capabilities/session/`（`session` + `history` + `events`）+ `HistoryStore`。**12a** 循环反转切掉 `engine ⇄ session`；**12b** 提取能力 | 11 | **已完成**（**反向边基线清空**——没有任何能力再依赖 `core`；环 7 → **5**，且 5 个节点全是能力、`core` 完全脱环；`core/ports.rs` 消失） |
 | **13** | **rewind 归位**：纯行 / 事件算术进 `capabilities/session/domain/rewind.rs`；`Core` 保留编排（`rewind` / `rewind_children` / `rebuild_session`） | 12 | **已完成**（`marks` 归属方案 A 照旧；无新增依赖边） |
 | **14** | **collab 能力落位**：`capabilities/collab/`（`collab` + `collab_state` + `engine`）。**执行顺序调整**：先做 14 再做 13——`rewind` 的回档重建要同时碰 `session` 与 `collab` 两侧，两边就位后才切得干净（已获用户同意） | 12 | **已完成**（环不变——`capabilities/collab` **不在环里**：没有任何它依赖的能力反过来依赖它；`core/` 只剩 `api.rs` + `mod.rs`） |
-| **15** | **断环（已完成）** → 能力图零环；**收口 1（已完成）**：入站词汇归 `core/api.rs` → 基线全空；**收口 2（已完成）**：`intent.rs` 规则下沉；**收口 3（已完成）**：`Action`/`Acted` 与分发收进 `core::api`（`SessionOps::act` 默认方法）、`split_names`/`NO_AGENTS` 归 CLI、**`intent.rs` 删除**、`presentation/` 拆成 **`cli/` + `web/`** 两个独立顶层目录（静态资源随 `web/assets/`）；**后续（未开始）**：`main.rs` 拆四件事 | 14 | 断环 ✓、收口 1/2/3 ✓；`main.rs` 未开始 |
+| **15** | **断环（已完成）** → 能力图零环；**收口 1（已完成）**：入站词汇归 `core/api.rs` → 基线全空；**收口 2（已完成）**：`intent.rs` 规则下沉；**收口 3（已完成）**：`Action`/`Acted` 与分发收进 `core::api`（`SessionOps::act` 默认方法）、`split_names`/`NO_AGENTS` 归 CLI、**`intent.rs` 删除**、`presentation/` 拆成 **`cli/` + `web/`** 两个独立顶层目录（静态资源随 `web/assets/`）；**收口 4（已完成）**：`main.rs` 拆四件事——组合根留 `main.rs`、机器可读探针进 `diagnostics/`、围栏守门进程进 `guard/`（**第二个程序入口**）、路径机制下沉 `adapters/root.rs`；门禁新增**入口层**并禁止任何人依赖它 | 14 | **全部完成** |
 
 **豁免清零判据**：`tests/dependency-baseline.json` 的**三个数组全部清空**（`reverse` / `presentation` / `coreCycles`），
 且 `Core` 这个类型不再存在。门禁对**新增**与**过期**都报失败，所以销账不靠自觉——

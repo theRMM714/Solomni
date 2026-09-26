@@ -36,7 +36,8 @@
 | `fs_packages.rs` | `PackageSource`：扫描 `runtimes/` |
 | `fs_workspace.rs` | `Workspace`：`session/<工作名>/` 下的 work 与各 agent 沙箱 |
 | `fs_history.rs` | `HistoryStore`：`meta.yaml` + `transcript.jsonl` |
-| `host_probe.rs` | `HostProbe`：宿主能力探测（路径存在性、PATH 上的可执行文件、本机虚拟化能力）——**只读事实**，不执行、不安装、不写 |
+| `host_probe.rs` | `HostProbe`：宿主能力探测（路径存在性、PATH 上的可执行文件、本机虚拟化能力）——**只读事实**，不执行、不安装、不写。`find_exe` 是**可执行文件查找的唯一一份**（`has_exe` 与自检报告共用） |
+| `root.rs` | 产品根规范化：传入的根 → 干净的绝对路径（词法拼接优先；取不到当前目录才 canonicalize，并剥掉 Windows 的扩展长度前缀） |
 | `yaml_settings.rs` | `SettingsStore`：登记处四份 yaml 的读写（见 [REGISTRY_SPEC.md](../../REGISTRY_SPEC.md)） |
 | `yaml_prompts.rs` | `PromptSource`：加载 `prompts/`（**只有文本**）；`system_tools()` 另行装配 `systools/` 两张表 |
 | `endpoint.rs` | 端点补全/回落规则与进程内端点记忆（纯逻辑） |
@@ -99,3 +100,12 @@
 | `web/routes.rs` | **HTTP 入站契约的唯一定义**：`ROUTES` 目录 + 匹配器（[contracts.md](contracts.md) 的表与它机器比对） |
 | `web/assets/` | 浏览器端：`app.js` / `md.js` / `style.css` / `index.html`，以及 `*.smoke.cjs` 冒烟 |
 
+## 六、入口层（`main.rs` + `diagnostics/` + `guard/`）
+
+**它依赖所有人，任何人都不许依赖它**（门禁判定）。三个入口各司其职，互不借用：
+
+| 文件 | 职责 |
+| --- | --- |
+| `main.rs` | **组合根**：`new` 出所有适配器 → 注入 `Core` → 交给某一前端；只做装配与分发，无业务 |
+| `diagnostics/mod.rs` | **机器可读探针**（测试与 CI 的接口，不是用户功能）：`--doctor` / `--https-check` / `--print-routes` / `--print-fence-env` / `--fence-verify`。多数**恒退出 0**——判定归调用方 |
+| `guard/mod.rs` | **围栏守门进程**：`--fence-run`（装围栏 → 跑模块命令 → 以工具退出码收场）/ `--fence-clean`。它是**第二个程序入口**，跑的是模块作者写的命令 |

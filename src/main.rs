@@ -6,6 +6,8 @@ mod adapters;
 mod capabilities;
 mod cli;
 mod core;
+mod diagnostics;
+mod guard;
 mod kernel;
 mod web;
 
@@ -19,30 +21,30 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     // 守门模式（内部协议，用户不用）：把围栏装好再跑模块声明的命令，退出码即工具退出码。
     if let Some(i) = args.iter().position(|a| a == adapters::confine::FENCE_FLAG) {
-        std::process::exit(fence_run(&args, i));
+        std::process::exit(guard::fence_run(&args, i));
     }
     // 自检（机器可读）：把"这台机器能承载哪些测试"如实交出来——测试入口据此判定，不靠猜（见 TESTING.md）。
     if args.iter().any(|a| a == "--doctor") {
-        std::process::exit(doctor());
+        std::process::exit(diagnostics::doctor());
     }
     // 隐藏模式：走**产品自己那套**出站链路打一次最小 HTTPS 请求，三态如实回报
     // （ok / no-net / tls-fail|fail）——CI 三平台据此验本构建的 TLS 栈，不需要任何密钥。
     if let Some(i) = args.iter().position(|a| a == "--https-check") {
-        std::process::exit(https_check(&args, i));
+        std::process::exit(diagnostics::https_check(&args, i));
     }
     // 环境白名单（机器可读）：把运行期交给工具进程的环境逐行交出来——探针据此在**同一个环境**里驱动
     // 守门进程，不另抄一份（抄一份会漂移，也会漏掉只有真实环境才暴露的问题）。
     if let Some(i) = args.iter().position(|a| a == "--print-fence-env") {
-        std::process::exit(print_fence_env(&args, i));
+        std::process::exit(diagnostics::print_fence_env(&args, i));
     }
     // 机制验证（机器可读，探针与测试驱动）：不装围栏、不写任何权限项，只如实报"这次能不能强制住"。
     // 未授权时段的拒绝执行（见 adapters/proc_tools.rs）就靠这一份结论。
     if let Some(i) = args.iter().position(|a| a == "--fence-verify") {
-        std::process::exit(fence_verify(&args, i));
+        std::process::exit(diagnostics::fence_verify(&args, i));
     }
     // 入站契约（机器可读）：HTTP 路由目录的唯一定义（见 docs/architecture/contracts.md）。
     if args.iter().any(|a| a == "--print-routes") {
-        println!("{}", web::routes::catalog_json());
+        diagnostics::print_routes();
         std::process::exit(0);
     }
     // 启动形态：无参数 = CLI（默认）；-webUI = Web 转录中心。
@@ -54,10 +56,10 @@ fn main() {
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("."));
     // 产品根规范化成**干净的绝对路径**：提示词里给 AI 的、以及各适配器给出的根都是它。
-    let (root, root_note) = resolve_root(&raw_root);
+    let (root, root_note) = adapters::root::resolve_root(&raw_root);
     // 隐藏模式：精确回收围栏写过的权限项（不需要装配核心，也就不需要提示词册）。
     if args.iter().any(|a| a == "--fence-clean") {
-        std::process::exit(fence_clean(&root));
+        std::process::exit(guard::fence_clean(&root));
     }
 
     // 组合根：唯一允许 new 具体适配器的地方（依赖注入）。
@@ -309,122 +311,6 @@ fn main() {
     }
 }
 
-/// 精确回收：按台账撤掉围栏写过的权限项、删掉建过的容器 profile，再按名字前缀扫掉整族遗留 profile
-/// （台账可能不存在：探针、夹具的台账被删、旧版本建的）——隐藏模式，用户经文档知道它。
-fn fence_clean(root: &std::path::Path) -> i32 {
-    let home = root.join(".home");
-    let mut lines: Vec<String> = Vec::new();
-    let mut failed = false;
-    match adapters::confine::clean(&home) {
-        Ok(msg) => lines.push(msg),
-        Err(e) => {
-            lines.push(format!("台账回收未完成：{}", e));
-            failed = true;
-        }
-    }
-    match adapters::confine::sweep_profiles() {
-        Ok(n) => lines.push(format!("扫掉 {} 个本程序建过的容器 profile", n)),
-        Err(e) => {
-            lines.push(format!("容器 profile 清扫未完成：{}", e));
-            failed = true;
-        }
-    }
-    for line in &lines {
-        if failed {
-            eprintln!("[围栏] 清理未完成：{}", line);
-        } else {
-            println!("[围栏] 清理完成：{}", line);
-        }
-    }
-    if failed {
-        1
-    } else {
-        0
-    }
-}
-
-/// 自检：本机事实（平台 + 围栏能力 + 外部解释器）。只报事实，不猜、不改任何东西（围栏自检那个临时目录除外）。
-fn doctor() -> i32 {
-    let cap = adapters::confine::capability();
-    // 虚拟机档的逐项前置（**只读事实**）：这里按"没登记 QEMU、没指定基础根"问一次，
-    // 也就是最朴素的情形——登记过的路径以会话配置界面为准（那里按会话选型问同一份清单）。
-    let vm =
-        capabilities::workspace::api::vm_requirements(&capabilities::workspace::api::VmInputs {
-            base: None,
-            qemu: None,
-            probe: &adapters::HostProbeAdapter,
-        });
-    let doc = serde_json::json!({
-        "platform": std::env::consts::OS,
-        "arch": std::env::consts::ARCH,
-        "fence": { "fs": cap.fs, "net": cap.net, "tree": cap.tree, "note": cap.note },
-        "externals": {
-            "python": find_exe("python"),
-            "node": find_exe("node"),
-            "curl": find_exe("curl"),
-        },
-        "vm_tier": {
-            "available": vm.iter().all(|r| r.met),
-            "requirements": vm.iter().map(|r| serde_json::json!({
-                "id": r.id, "met": r.met, "detail": r.detail, "how": r.how,
-            })).collect::<Vec<_>>(),
-        },
-    });
-    println!("{}", doc);
-    0
-}
-
-/// 隐藏模式：用**产品自己的出站代理**（含按平台装配的 TLS）打一次最小 HTTPS 请求，如实报结论。
-/// 四态机器可读：ok（通）/ no-net（环境连不上外网）/ env-tls（本进程取不到系统 TLS 凭证，如沙箱挡住凭证存储）/
-/// tls-fail|fail（我们链路坏了）。
-/// 退出码恒 0：判定归调用方（测试按性质决定 env-skip 还是失败），这里只报事实。
-fn https_check(args: &[String], i: usize) -> i32 {
-    let url = args.get(i + 1).cloned().unwrap_or_default();
-    if url.is_empty() {
-        eprintln!("用法：solomni --https-check <https url>");
-        return 2;
-    }
-    let backend = adapters::http_agent::tls_backend();
-    let agent = adapters::http_agent::agent(10, 20);
-    match agent.get(&url).call() {
-        Ok(resp) => {
-            println!("[HTTPS] ok {} {} {}", resp.status().as_u16(), backend, url);
-            0
-        }
-        Err(e) => {
-            println!(
-                "[HTTPS] {} {} {}",
-                adapters::http_agent::classify(&e),
-                backend,
-                e
-            );
-            0
-        }
-    }
-}
-
-/// 在 PATH 里找一个可执行文件（找不到就是没有，不去别处翻）。
-fn find_exe(name: &str) -> Option<String> {
-    let path_var = std::env::var_os("PATH")?;
-    let exts: Vec<String> = std::env::var("PATHEXT")
-        .map(|v| {
-            v.split(';')
-                .filter(|s| !s.is_empty())
-                .map(|s| s.to_string())
-                .collect()
-        })
-        .unwrap_or_else(|_| vec![String::new()]);
-    for dir in std::env::split_paths(&path_var) {
-        for ext in &exts {
-            let candidate = dir.join(format!("{}{}", name, ext.to_lowercase()));
-            if candidate.is_file() {
-                return Some(candidate.to_string_lossy().into_owned());
-            }
-        }
-    }
-    None
-}
-
 /// 装配期已经读好的册子（同一份事实不再读第二遍）。
 struct LoadedPrompts(capabilities::prompt::api::Prompts);
 
@@ -432,132 +318,6 @@ impl capabilities::prompt::ports::PromptSource for LoadedPrompts {
     fn load(&self) -> Result<capabilities::prompt::api::Prompts, String> {
         Ok(self.0.clone())
     }
-}
-
-/// 隐藏模式：按 KEY=VALUE 逐行打出运行期给工具进程的环境白名单（入参 = 守门进程那份 JSON）。
-fn print_fence_env(args: &[String], flag: usize) -> i32 {
-    let raw = args.get(flag + 1).cloned().unwrap_or_default();
-    match adapters::confine::FenceJob::from_json(&raw) {
-        Ok(job) => {
-            for (k, v) in adapters::confine::fence_env(&job.spec) {
-                println!("{}={}", k.to_string_lossy(), v.to_string_lossy());
-            }
-            0
-        }
-        Err(e) => {
-            eprintln!("[围栏] {}", e);
-            adapters::confine::FENCE_FAILED
-        }
-    }
-}
-
-/// 隐藏模式：只做机制验证，如实报三态（enforced / env-unavailable / broken），恒退出 0——
-/// 判定归调用方（探针按性质决定 env-skip 还是失败）。入参 = 守门进程那份 JSON，`--` 之后是命令。
-fn fence_verify(args: &[String], flag: usize) -> i32 {
-    let raw = args.get(flag + 1).cloned().unwrap_or_default();
-    let command = match args.iter().position(|a| a == "--") {
-        Some(j) => args.get(j + 1).cloned().unwrap_or_default(),
-        None => String::new(),
-    };
-    let job = match adapters::confine::FenceJob::from_json(&raw) {
-        Ok(j) => j,
-        Err(e) => {
-            eprintln!("[围栏] {}", e);
-            return adapters::confine::FENCE_FAILED;
-        }
-    };
-    match adapters::confine::verify(&job.spec, &command) {
-        adapters::confine::FenceVerdict::Enforced => {
-            println!("enforced");
-            0
-        }
-        adapters::confine::FenceVerdict::EnvUnavailable(why) => {
-            println!("env-unavailable {}", why);
-            0
-        }
-        adapters::confine::FenceVerdict::Broken(why) => {
-            println!("broken {}", why);
-            0
-        }
-    }
-}
-
-/// 守门模式：读回围栏参数与命令，装围栏 → 跑命令 → 以工具退出码收场（失败如实报错，不静默）。
-fn fence_run(args: &[String], flag: usize) -> i32 {
-    let raw_job = args.get(flag + 1).cloned().unwrap_or_default();
-    let command = match args.iter().position(|a| a == "--") {
-        Some(j) => args.get(j + 1).cloned().unwrap_or_default(),
-        None => String::new(),
-    };
-    match adapters::confine::FenceJob::from_json(&raw_job) {
-        Ok(job) => adapters::confine::run_fenced(&job, &command),
-        Err(e) => {
-            eprintln!("[围栏] {}", e);
-            adapters::confine::FENCE_FAILED
-        }
-    }
-}
-
-/// 产品根 → 干净的绝对路径：用 current_dir 与传入的根做**纯词法**拼接（不去解析 ..、不碰盘符大小写、不碰盘）。
-/// 只有"取不到 current_dir"这种异常情况才退回 canonicalize（并剥掉 Windows 的 \\?\ 扩展长度前缀）。
-fn resolve_root(raw: &std::path::Path) -> (PathBuf, Option<String>) {
-    match std::env::current_dir() {
-        Ok(cwd) => {
-            let joined = if raw.is_absolute() {
-                raw.to_path_buf()
-            } else {
-                cwd.join(raw)
-            };
-            (lexical_abs(&joined), None)
-        }
-        Err(e) => match std::fs::canonicalize(raw) {
-            Ok(p) => (
-                strip_unc_prefix(p),
-                Some(format!(
-                    "取不到当前目录（{}）：改用 canonicalize 规范化产品根",
-                    e
-                )),
-            ),
-            Err(e2) => (
-                lexical_abs(raw),
-                Some(format!(
-                    "取不到当前目录（{}），canonicalize 也失败（{}）：产品根可能不是绝对路径",
-                    e, e2
-                )),
-            ),
-        },
-    }
-}
-
-/// 纯词法归一化：去掉 . 段、收掉重复与尾部分隔符（components 自带），保留盘符/根前缀与 .. 段（不解析）。
-fn lexical_abs(p: &std::path::Path) -> PathBuf {
-    let mut out = PathBuf::new();
-    for c in p.components() {
-        match c {
-            std::path::Component::Prefix(_) | std::path::Component::RootDir => {
-                out.push(c.as_os_str())
-            }
-            std::path::Component::Normal(s) => out.push(s),
-            std::path::Component::CurDir => {}
-            std::path::Component::ParentDir => out.push(".."),
-        }
-    }
-    out
-}
-
-/// Windows 上 canonicalize 会给出 \\?\C:\… 形式：它对多数工具可用但会污染提示词，去掉这个前缀。
-#[cfg(windows)]
-fn strip_unc_prefix(p: PathBuf) -> PathBuf {
-    let s = p.to_string_lossy().into_owned();
-    match s.strip_prefix(r"\\?\") {
-        Some(rest) => PathBuf::from(rest),
-        None => p,
-    }
-}
-
-#[cfg(not(windows))]
-fn strip_unc_prefix(p: PathBuf) -> PathBuf {
-    p
 }
 
 fn serve_web(ops: core::api::Ops, port: u16, write_allowed: bool) {

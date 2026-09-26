@@ -9,6 +9,30 @@ const EXE_SUFFIX: &str = ".exe";
 #[cfg(not(windows))]
 const EXE_SUFFIX: &str = "";
 
+/// 在 PATH 里找一个可执行文件，返回**真实路径**（找不到就是没有，不去别处翻）。
+/// 平台扩展名按 `PATHEXT` 展开（Windows 不设时用平台后缀）——**查法只有这一处**，
+/// `has_exe` 与自检报告共用它，免得两处各写一遍再慢慢漂移。
+pub fn find_exe(name: &str) -> Option<std::path::PathBuf> {
+    let path_var = std::env::var_os("PATH")?;
+    let exts: Vec<String> = std::env::var("PATHEXT")
+        .map(|v| {
+            v.split(';')
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string())
+                .collect()
+        })
+        .unwrap_or_else(|_| vec![EXE_SUFFIX.to_string()]);
+    for dir in std::env::split_paths(&path_var) {
+        for ext in &exts {
+            let candidate = dir.join(format!("{}{}", name, ext.to_lowercase()));
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+    }
+    None
+}
+
 /// 本机事实探测（生产实现）。
 pub struct HostProbeAdapter;
 
@@ -23,11 +47,7 @@ impl HostProbe for HostProbeAdapter {
 
     /// 在 PATH 里找可执行文件（只问事实，不执行它）。
     fn has_exe(&self, name: &str) -> bool {
-        let Some(paths) = std::env::var_os("PATH") else {
-            return false;
-        };
-        std::env::split_paths(&paths)
-            .any(|dir| dir.join(format!("{}{}", name, EXE_SUFFIX)).is_file())
+        find_exe(name).is_some()
     }
 
     /// 虚拟机监视器在场吗（只问事实，不起任何虚拟机）。
