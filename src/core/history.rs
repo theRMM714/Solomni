@@ -23,7 +23,7 @@ pub struct SessionMeta {
     pub agents: Vec<AgentMeta>,
     /// 执行档位与运行包选型（exec 段；缺字段的旧会话按默认 = 本机档读回）。
     #[serde(default)]
-    pub exec: crate::core::exec::ExecSpec,
+    pub exec: crate::capabilities::workspace::api::ExecSpec,
     /// 谁编排的（子会话 = 父会话名；顶层会话为空）。
     /// 也是**沙箱锚点**：子会话与父会话共用一套工作区（协作的产物要在一起）。
     #[serde(default)]
@@ -63,7 +63,7 @@ pub struct HistoryView {
     /// 这条会话记的执行档位与选型（meta.yaml 的 exec 段；缺字段的旧会话按默认 = 本机档读回）。
     /// 列表视图据此提示"环境已变"——**不拦打开**，记录是用户的。
     #[serde(default)]
-    pub exec: crate::core::exec::ExecSpec,
+    pub exec: crate::capabilities::workspace::api::ExecSpec,
     /// 谁编排的（子会话 = 父会话名）：侧栏据此把子会话缩进挂在父会话下。
     #[serde(default)]
     pub parent: Option<String>,

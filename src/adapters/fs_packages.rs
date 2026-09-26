@@ -2,8 +2,8 @@
 //! 目录遍历与 yaml 解析是机制；清单校验、去重、冲突预检在 core（packages::Library::build）。
 //! 「清单即事实」：放在依赖文件夹里即出现，移出即消失——没有注册仪式。
 
-use crate::core::packages::{Library, PackageManifest};
-use crate::core::ports::PackageSource;
+use crate::capabilities::workspace::api::{Library, PackageManifest};
+use crate::capabilities::workspace::ports::PackageSource;
 use std::path::PathBuf;
 
 pub struct FsPackages {

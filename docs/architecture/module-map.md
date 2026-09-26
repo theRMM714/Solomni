@@ -11,6 +11,7 @@
 | `types.rs` | 跨业务共享的**事实类型**：只放没有领域逻辑的（`SessionId`） |
 | `log.rs` | `Log` 端口（三级）与测试用的 `NoopLog`；文件/时间戳/目录机制在适配层 |
 | `path.rs` | 路径的**对外书写形式**（一律 `/`）：跨平台机制，与任何业务无关 |
+| `host.rs` | `HostProbe`：宿主能力探测（路径存在性 / PATH 可执行文件 / 本机虚拟化）——**只读事实** |
 | `chain.rs` | 任务链的**纯数据 + 纯图算法**（节点、依赖、阶段、就绪与验收判定）。被三个能力共享（`collab` 驱动 / `session` 的线格式携带 / 呈现层渲染），自己零出边（见 [task-chain.md](task-chain.md)） |
 | `jobs.rs` | 生成中作业的**取消表**：核心登记，呈现层只能说「停哪个会话」；「停止」不排队、不碰核心状态，所以生成期间立刻生效 |
 
@@ -24,11 +25,8 @@
 | `events.rs` | 呈现侧契约：`SessionEvent` 与介入请求的词汇（**事实**的线格式定义在这）；转录行 `LineView` 带 `speaker` / `verb` / `kind`，`render()` 是"字段 → 文本"的唯一拼法 |
 | `schema.rs` | 工具参数契约（**声明在文本层**）：解析/校验/两种渲染（模型侧说明、JSON Schema） |
 | `roles.rs` | 系统工具与**角色**表（`systools/tools.yaml` + `roles.yaml`）：按角色组装工具面、按表校验调用；"哪个角色能调哪个工具"只有这一份（见 [tools-and-roles.md](tools-and-roles.md)） |
-| `module.rs` | `module.yaml` 契约、扫描结果 `Roster`、`runtimes`/`tools` 校验、agent system 合成 |
-| `packages.rs` | `package.yaml` 契约与包库事实（校验、去重、系统路径冲突预检） |
 | `exec.rs` | 执行档位（`ExecSpec`）与执行计划（`ExecPlan`）派生、虚拟机档诊断、档位承载（`TierReadiness`：本机能不能承载这个档位）。宿主事实（路径存在性 / PATH 可执行文件 / 虚拟化能力）**经 `ports::HostProbe` 问**，本文件不碰环境变量与文件系统；档位枚举 `Tier` 在 `kernel/types`（登记处也要用它，留在本文件会让登记处反向依赖执行能力） |
 | `fence.rs` | 一次工具执行的围栏策略（纯数据：可达根、断网、工作目录） |
-| `workspace.rs` | 工作区与沙箱的纯数据定义、寻址与越界判定。路径的**对外书写形式**在 `kernel::path`（纯机制）；**不持工具册**——内置工具的参数契约归工具面（`MemberTools`），沙箱只管路径 |
 | `systool.rs` | 内置工具 `read` / `write` / `edit` / `patch` / `search` 的放行、寻址、**按声明校验参数**、改动前的"读过"证据（`Observations`）、自由格式补丁的原子应用与回执文案 |
 | `patch.rs` | 补丁通道的**纯逻辑**：解析自由格式补丁（Add / Update / SEARCH / REPLACE / End File）与整行应用（逐行匹配、行尾风格保持、失败点名第几处） |
 | `history.rs` | 会话元信息与历史视图的内存形态 |
@@ -75,6 +73,12 @@
 | `registry/domain/agents.rs` | agent 登记处、代拟名单落地与名字校验（从 `core/agents.rs` 搬来） |
 | `llm/api.rs` | **入站能力面**：`Chat` / `ChatGateway` / `ModelCatalog` / `EnvelopeRepair` 与协议类型（`Msg` / `Completion` / `Chunk` / `ToolCall` / …）的对外名字 |
 | `llm/ports.rs` | 模型通道的端口族与协议类型（从 `core/ports.rs` 随能力搬出） |
+| `workspace/api.rs` | **入站能力面**：模块清单 / 运行包库 / 执行档位与计划 / 沙箱寻址的对外名字 |
+| `workspace/ports.rs` | `ModuleSource` / `PackageSource` / `Workspace`（从 `core/ports.rs` 随能力搬出） |
+| `workspace/domain/module.rs` | `module.yaml` 契约、`Roster`、`runtimes`/`tools` 校验、agent system 合成（从 `core/module.rs` 搬来） |
+| `workspace/domain/packages.rs` | `package.yaml` 契约与包库事实（从 `core/packages.rs` 搬来） |
+| `workspace/domain/exec.rs` | 执行档位（`ExecSpec`）与执行计划（`ExecPlan`）派生、虚拟机档诊断与承载判定（从 `core/exec.rs` 搬来） |
+| `workspace/domain/workspace.rs` | 工作区与沙箱的纯数据定义、寻址与越界判定（从 `core/workspace.rs` 搬来） |
 | `llm/domain/envelope.rs` | 发言信封解析（从 `core/envelope.rs` 搬来，纯逻辑）：`ToolInvoke.body` = 信封之后的正文；判定**未闭合 / 裸控制字符 / 语法错 / 字段不合法**四类；未闭合带上 EOF 状态 |
 
 ## 五、`presentation/`（呈现）

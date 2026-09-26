@@ -5,7 +5,7 @@
 //! 默认空 = 一个都不放行（与 `fence_write` 同一套哲学：没经用户同意就不动本机任何权限项）。
 //! 本机档与虚拟机档共用这份围栏：虚拟机档的 guest 内视图由装配阶段按同一批根组装。
 
-use crate::core::workspace::Sandbox;
+use crate::capabilities::workspace::api::Sandbox;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 

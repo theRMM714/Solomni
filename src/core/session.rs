@@ -51,8 +51,8 @@ impl SessionParams {
     /// 这是**唯一**的装配口径——会话的建立与重建都走它，参数不会两处各拼一套。
     pub fn from_workspace(
         agent: &str,
-        sb: &crate::core::workspace::Sandbox,
-        modules: &[crate::core::module::Module],
+        sb: &crate::capabilities::workspace::api::Sandbox,
+        modules: &[crate::capabilities::workspace::api::Module],
     ) -> SessionParams {
         SessionParams {
             agent: agent.to_string(),
@@ -74,7 +74,13 @@ impl SessionParams {
         mode: crate::capabilities::registry::api::ToolMode,
     ) -> String {
         let env = crate::core::systool::env_block(prompts, self);
-        crate::core::module::agent_system(prompts, &self.agent, &self.modules, &env, mode)
+        crate::capabilities::workspace::api::agent_system(
+            prompts,
+            &self.agent,
+            &self.modules,
+            &env,
+            mode,
+        )
     }
 }
 

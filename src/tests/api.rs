@@ -3,8 +3,8 @@
 
 use super::doubles::{collab_work, module_of};
 use super::{gated_ops, ops_with, single_work, slow_ops};
+use crate::capabilities::workspace::api::Module;
 use crate::core::api::{CoreHandle, Ops, Output};
-use crate::core::module::Module;
 use crate::core::{SessionEvent, WorkMode};
 use crate::kernel::types::Tier;
 use std::sync::atomic::Ordering;

@@ -8,13 +8,14 @@ use crate::capabilities::llm::api::{
 };
 use crate::capabilities::prompt::domain::prompt::render;
 use crate::capabilities::registry::api::{Channel, ModelEntry, Provider, Settings};
+use crate::capabilities::workspace::api::Module;
+use crate::capabilities::workspace::api::{self as exec, Diagnosis, ExecSpec};
+use crate::capabilities::workspace::api::{Library, PackageManifest};
+use crate::capabilities::workspace::ports::{ModuleSource, Workspace};
 use crate::core::engine::{Discussion, Member, MemberTools, ModuleTools, TurnOut, MAX_ROUNDS};
 use crate::core::events::Live;
-use crate::core::exec::{self, Diagnosis, ExecSpec};
 use crate::core::history::{AgentMeta, SessionMeta};
-use crate::core::module::Module;
-use crate::core::packages::{Library, PackageManifest};
-use crate::core::ports::{HistoryStore, ModuleSource, ToolOutcome, ToolRunner, Workspace};
+use crate::core::ports::{HistoryStore, ToolOutcome, ToolRunner};
 use crate::core::{
     AgentInstance, CollabStep, ConfigAgent, Core, Pending, SessionEdit, SessionEvent, WorkMode,
     WorkSpec,
@@ -4148,11 +4149,14 @@ pub(crate) fn malformed_envelopes_are_classified_so_the_model_gets_the_right_fix
     }
     // 四类各有各的修法（不是同一条笼统提示）
     let texts = test_prompts().core.tool_texts;
-    let control = texts.malformed_report(&Malformed::RawControl {
-        ch: '\n',
-        line: 3,
-        tail: None,
-    });
+    let control = crate::capabilities::llm::api::malformed_report(
+        &texts,
+        &Malformed::RawControl {
+            ch: '\n',
+            line: 3,
+            tail: None,
+        },
+    );
     assert!(
         control.contains("裸换行") && control.contains("第 3 行"),
         "{}",
@@ -4163,23 +4167,32 @@ pub(crate) fn malformed_envelopes_are_classified_so_the_model_gets_the_right_fix
         "要教模型把换行写成反斜杠 n：{}",
         control
     );
-    let shape = texts.malformed_report(&Malformed::Shape("missing field name".to_string()));
+    let shape = crate::capabilities::llm::api::malformed_report(
+        &texts,
+        &Malformed::Shape("missing field name".to_string()),
+    );
     assert!(
         shape.contains("字段不合法") && shape.contains("missing field"),
         "{}",
         shape
     );
-    let tab = texts.malformed_report(&Malformed::RawControl {
-        ch: '\t',
-        line: 1,
-        tail: None,
-    });
+    let tab = crate::capabilities::llm::api::malformed_report(
+        &texts,
+        &Malformed::RawControl {
+            ch: '\t',
+            line: 1,
+            tail: None,
+        },
+    );
     // 只差收尾括号：要说清"还差 }"（而不是误导成"内容过长"）
-    let brace = texts.malformed_report(&Malformed::Unclosed(crate::capabilities::llm::api::Tail {
-        missing: "}".to_string(),
-        in_string: false,
-        envelopes: 1,
-    }));
+    let brace = crate::capabilities::llm::api::malformed_report(
+        &texts,
+        &Malformed::Unclosed(crate::capabilities::llm::api::Tail {
+            missing: "}".to_string(),
+            in_string: false,
+            envelopes: 1,
+        }),
+    );
     assert!(brace.contains("还差 }"), "{}", brace);
     assert!(
         !brace.contains("分次写入"),
@@ -4187,17 +4200,23 @@ pub(crate) fn malformed_envelopes_are_classified_so_the_model_gets_the_right_fix
         brace
     );
     // 断在字符串中间才是"内容没写完"，这时才谈分次写
-    let cut = texts.malformed_report(&Malformed::Unclosed(crate::capabilities::llm::api::Tail {
-        missing: "}\"}".to_string(),
-        in_string: true,
-        envelopes: 1,
-    }));
+    let cut = crate::capabilities::llm::api::malformed_report(
+        &texts,
+        &Malformed::Unclosed(crate::capabilities::llm::api::Tail {
+            missing: "}\"}".to_string(),
+            in_string: true,
+            envelopes: 1,
+        }),
+    );
     // 一段回复里起了两段信封：要说清"只发一段"，而不是让它去补末尾括号（真实事故的形状）
-    let multi = texts.malformed_report(&Malformed::Unclosed(crate::capabilities::llm::api::Tail {
-        missing: "}}".to_string(),
-        in_string: false,
-        envelopes: 2,
-    }));
+    let multi = crate::capabilities::llm::api::malformed_report(
+        &texts,
+        &Malformed::Unclosed(crate::capabilities::llm::api::Tail {
+            missing: "}}".to_string(),
+            in_string: false,
+            envelopes: 2,
+        }),
+    );
     assert!(
         multi.contains("2 段") && multi.contains("只发一段"),
         "{}",
@@ -4629,7 +4648,7 @@ pub(crate) fn module_tool_params_are_declared_in_the_manifest_and_enforced_by_co
         ),
     );
     let prompts = test_prompts();
-    let system = crate::core::module::agent_system(
+    let system = crate::capabilities::workspace::api::agent_system(
         &prompts,
         "m0",
         &[(mod_m0.manifest.id.clone(), mod_m0.manifest.system.clone())],
@@ -4896,7 +4915,7 @@ pub(crate) fn core_direct_tool_flow_injects_result_into_history() {
 
 #[test]
 pub(crate) fn sandbox_resolve_accepts_only_absolute_paths_inside_roots() {
-    use crate::core::workspace::Place;
+    use crate::capabilities::workspace::api::Place;
     let sb = test_sandbox("a1", &["data"]);
     // 绝对且在根内 → 通过（返回归一化后的绝对路径）
     let (place, path) = sb
@@ -5056,7 +5075,7 @@ pub(crate) fn agent_system_carries_the_real_roots() {
 
 #[test]
 pub(crate) fn sandboxes_lookup_is_by_agent() {
-    let boxes = crate::core::workspace::Sandboxes {
+    let boxes = crate::capabilities::workspace::api::Sandboxes {
         shared: abs(&["w", "work"]),
         list: vec![test_sandbox("甲", &["a"])],
     };
@@ -6980,7 +6999,7 @@ pub(crate) fn core_collab_tool_modules_run_in_execution() {
 
 #[test]
 pub(crate) fn package_manifest_check_rejects_illegal_forms() {
-    let check = crate::core::packages::check_manifest;
+    let check = crate::capabilities::workspace::domain::packages::check_manifest;
     assert!(
         check(&pkg("python", "3.12.4")).is_ok(),
         "prefix 类默认 kind"
@@ -7023,15 +7042,15 @@ pub(crate) fn package_manifest_check_rejects_illegal_forms() {
 pub(crate) fn module_runtimes_are_validated() {
     let mut m = module_of("a");
     m.manifest.runtimes = vec!["python".to_string(), "cc".to_string()];
-    assert!(crate::core::module::check_runtimes(&m.manifest).is_ok());
+    assert!(crate::capabilities::workspace::api::check_runtimes(&m.manifest).is_ok());
     m.manifest.runtimes = vec!["Python".to_string()];
     assert!(
-        crate::core::module::check_runtimes(&m.manifest).is_err(),
+        crate::capabilities::workspace::api::check_runtimes(&m.manifest).is_err(),
         "大写不合法"
     );
     m.manifest.runtimes = vec!["python".to_string(), "python".to_string()];
     assert!(
-        crate::core::module::check_runtimes(&m.manifest)
+        crate::capabilities::workspace::api::check_runtimes(&m.manifest)
             .unwrap_err()
             .contains("重复"),
         "重复声明要拒收"
@@ -7045,14 +7064,14 @@ pub(crate) fn module_tools_may_not_take_builtin_names() {
         .tools
         .insert("read_txt".to_string(), decl("python tools/read_txt.py"));
     assert!(
-        crate::core::module::check_tools(&m.manifest).is_ok(),
+        crate::capabilities::workspace::api::check_tools(&m.manifest).is_ok(),
         "普通工具名可用"
     );
     for name in ["read", "write", "search"] {
         m.manifest
             .tools
             .insert(name.to_string(), decl("python tools/x.py"));
-        let why = crate::core::module::check_tools(&m.manifest).unwrap_err();
+        let why = crate::capabilities::workspace::api::check_tools(&m.manifest).unwrap_err();
         assert!(why.contains("保留名"), "内置工具名要拒收：{}", why);
         m.manifest.tools.remove(name);
     }
@@ -7109,7 +7128,7 @@ pub(crate) fn package_conflicts_flag_overlapping_paths() {
         Vec::new(),
     );
     let refs: Vec<&PackageManifest> = lib.packages.iter().collect();
-    let got = crate::core::packages::conflicts(&refs);
+    let got = crate::capabilities::workspace::domain::packages::conflicts(&refs);
     assert_eq!(got.len(), 1, "只有那对写进同一处的包冲突：{:?}", got);
     assert_eq!(got[0].0, "usr/lib");
     assert!(

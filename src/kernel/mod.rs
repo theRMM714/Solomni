@@ -5,6 +5,7 @@
 //! 依赖方向由 T0 结构审查的**依赖方向门禁**机器判定（tests/dependency-baseline.json）。
 
 pub mod chain;
+pub mod host;
 pub mod jobs;
 pub mod log;
 pub mod path;

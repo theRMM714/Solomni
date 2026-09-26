@@ -50,7 +50,9 @@ pub struct ModuleTools {
 /// 放行表：模块 id → 该模块的（目录, 工具表）。
 /// **包含没有声明任何工具的模块**（命令表为空）——这样报错能区分「没有这个模块」与「这个模块没有这个工具」。
 /// 跨模块同名工具不再冲突：模块内名字唯一由 map 保证，跨模块由信封里的 module 消歧。
-pub fn tool_table(modules: &[crate::core::module::Module]) -> BTreeMap<String, ModuleTools> {
+pub fn tool_table(
+    modules: &[crate::capabilities::workspace::api::Module],
+) -> BTreeMap<String, ModuleTools> {
     modules
         .iter()
         .map(|m| {
@@ -98,7 +100,7 @@ pub struct MemberTools {
     pub log: Arc<dyn crate::kernel::log::Log + Send + Sync>,
     pub runner: Arc<dyn ToolRunner + Send + Sync>,
     /// 本成员的沙箱：内置文件工具的寻址与越界依据（权限收口在 core）。
-    pub sandbox: crate::core::workspace::Sandbox,
+    pub sandbox: crate::capabilities::workspace::api::Sandbox,
     /// 内置工具的参数契约（来自 `systools/tools.yaml` 的 tools）：说明与校验都按它来。
     /// 它属于**工具面**，不属于沙箱——沙箱只管路径。
     pub builtin_tools: crate::core::schema::ToolBook,
@@ -2240,10 +2242,10 @@ pub(crate) fn converse_with(
                 let inv = reply.tools.first().cloned().expect("上臂已判非空");
                 let ctx = tools.as_deref_mut().expect("上臂已判存在");
                 // 回执按判定出的类别给修法（未闭合 / 裸控制字符 / 语法错 / 字段不合法）。
-                let mut why = ctx
-                    .sandbox
-                    .texts
-                    .malformed_report(inv.malformed.as_ref().expect("上臂已判存在"));
+                let mut why = crate::capabilities::llm::api::malformed_report(
+                    &ctx.sandbox.texts,
+                    inv.malformed.as_ref().expect("上臂已判存在"),
+                );
                 // 供应商说是长度截断：那"写坏 JSON"就不是模型的错，改法也不同（分次写/拆小步骤）。
                 if truncated {
                     why.push('\n');

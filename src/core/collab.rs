@@ -9,13 +9,13 @@ use crate::capabilities::llm::api::{Chat, ChatGateway, CompleteOpts, Msg};
 use crate::capabilities::prompt::api::Prompts;
 use crate::capabilities::registry::api::RosterPick;
 use crate::capabilities::registry::api::Settings;
+use crate::capabilities::workspace::api::Sandboxes;
+use crate::capabilities::workspace::api::{ExecSpec, Module};
+use crate::capabilities::workspace::ports::{ModuleSource, PackageSource};
 use crate::core::engine::{Discussion, Execution, Member, MemberTools, TurnOut, MAX_ROUNDS};
 use crate::core::events::{CheckView, LineView, Pending, SessionEvent};
-use crate::core::exec::{self, ExecSpec};
 use crate::core::history::{AgentMeta, SessionMeta};
-use crate::core::module::{self, Module};
-use crate::core::ports::{ModuleSource, PackageSource, SysIo, ToolRunner};
-use crate::core::workspace::Sandboxes;
+use crate::core::ports::{SysIo, ToolRunner};
 use std::sync::Arc;
 
 /// 节点验收的结论：逐节点 (node, ok, note)。
@@ -562,10 +562,13 @@ impl CollabSession {
     }
 
     /// 拟名单给模型看的三份清单（已存 agent / 模块公地 / 可用模型）。
-    fn briefing(&self, roster: &module::Roster) -> (String, String, String) {
+    fn briefing(
+        &self,
+        roster: &crate::capabilities::workspace::api::Roster,
+    ) -> (String, String, String) {
         (
             crate::capabilities::registry::api::listing(&self.prompts, &self.settings.agents),
-            module::listing(roster, &self.prompts.core.tool_texts),
+            crate::capabilities::workspace::api::listing(roster, &self.prompts.core.tool_texts),
             crate::capabilities::registry::api::model_listing(
                 &self.settings.models,
                 &self.prompts.core.tool_texts,
@@ -1473,7 +1476,9 @@ impl CollabSession {
                 io: Arc::clone(&self.io),
                 reply_seq: self.reply_seq,
                 // 本档位下不能执行工具的模块（缺运行包）：机制侧据此拒绝执行。
-                unavailable: exec::unavailable(&self.spec, &modules, &library),
+                unavailable: crate::capabilities::workspace::api::unavailable(
+                    &self.spec, &modules, &library,
+                ),
                 fence,
                 // 讨论席的系统工具面**由角色表发放**（越权校验的唯一判据）。
                 allowed: self

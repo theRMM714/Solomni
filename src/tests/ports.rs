@@ -13,12 +13,11 @@ use crate::capabilities::llm::api::{Chat, ChatGateway, CompleteOpts, ModelCatalo
 use crate::capabilities::prompt::ports::PromptSource;
 use crate::capabilities::registry::api::{Provider, Settings};
 use crate::capabilities::registry::ports::SettingsStore;
-use crate::core::exec::ExecSpec;
+use crate::capabilities::workspace::api::ExecSpec;
+use crate::capabilities::workspace::ports::{ModuleSource, PackageSource, Workspace};
 use crate::core::fence::FenceSpec;
 use crate::core::history::{AgentMeta, SessionMeta};
-use crate::core::ports::{
-    FenceHost, HistoryStore, ModuleSource, PackageSource, SysIo, ToolRunner, Workspace,
-};
+use crate::core::ports::{FenceHost, HistoryStore, SysIo, ToolRunner};
 use crate::kernel::log::{Log, NoopLog};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -436,7 +435,7 @@ fn noop_log_is_silent_and_shareable_across_threads() {
 /// 真实适配器：路径事实按真实文件系统回答（scratch 里真建一个目录与一个文件）。
 #[test]
 fn host_probe_adapter_reports_real_path_facts_and_absent_exes() {
-    use crate::core::ports::HostProbe;
+    use crate::kernel::host::HostProbe;
     let real = crate::adapters::HostProbeAdapter;
     let dir = crate::tests::scratch("host-probe");
     let file = dir.join("a.txt");
@@ -455,7 +454,7 @@ fn host_probe_adapter_reports_real_path_facts_and_absent_exes() {
 /// 替身：**只按给定答案回答**，不读真实环境（用例要确定性）。
 #[test]
 fn fixed_probe_answers_only_what_was_declared() {
-    use crate::core::ports::HostProbe;
+    use crate::kernel::host::HostProbe;
     use crate::tests::doubles::FixedProbe;
     let dir = std::path::PathBuf::from("some-dir");
     let file = std::path::PathBuf::from("some-file");

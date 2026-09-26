@@ -59,7 +59,7 @@ impl ToolDecl {
 pub fn check_runtimes(m: &ModuleManifest) -> Result<(), String> {
     let mut seen: Vec<&String> = Vec::new();
     for c in &m.runtimes {
-        if !crate::core::packages::valid_capability(c) {
+        if !crate::capabilities::workspace::domain::packages::valid_capability(c) {
             return Err(format!(
                 "runtimes 里的能力名不合法：{}（只允许小写字母、数字、- _ .，且以字母或数字开头）",
                 c

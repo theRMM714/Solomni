@@ -1,8 +1,8 @@
 //! 模块清单来源：扫描 modules/ 目录（实现 core 的 ModuleSource 端口）。
 //! 目录遍历与 yaml 解析是机制；「清单即事实」的重扫策略由 core 决定。
 
-use crate::core::module::{Module, ModuleManifest, Roster};
-use crate::core::ports::ModuleSource;
+use crate::capabilities::workspace::api::{Module, ModuleManifest, Roster};
+use crate::capabilities::workspace::ports::ModuleSource;
 use std::path::{Path, PathBuf};
 
 pub struct FsModules {
@@ -57,11 +57,11 @@ fn scan_dir(modules_dir: &Path) -> Roster {
                     rejected.push(format!("{}: id '{}' 与文件夹名不一致", dir_name, m.id));
                     continue;
                 }
-                if let Err(why) = crate::core::module::check_runtimes(&m) {
+                if let Err(why) = crate::capabilities::workspace::api::check_runtimes(&m) {
                     rejected.push(format!("{}: {}", dir_name, why));
                     continue;
                 }
-                if let Err(why) = crate::core::module::check_tools(&m) {
+                if let Err(why) = crate::capabilities::workspace::api::check_tools(&m) {
                     rejected.push(format!("{}: {}", dir_name, why));
                     continue;
                 }

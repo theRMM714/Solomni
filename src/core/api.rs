@@ -13,9 +13,9 @@
 
 use crate::capabilities::registry::api::AgentView;
 use crate::capabilities::registry::api::{AppSettings, ModelView, ProviderView};
+use crate::capabilities::workspace::api::Roster;
 use crate::core::events::{Live, SessionEvent};
 use crate::core::history::{HistoryView, SessionMeta};
-use crate::core::module::Roster;
 use crate::core::Prepared;
 use crate::core::{
     AgentMeta, AgentSuggestion, CollabStep, Core, FilesView, Pending, RuntimeReport, SessionConfig,

@@ -3,6 +3,7 @@
 pub use crate::capabilities::llm::domain::envelope::{
     parse, Malformed, Reply, Tail, ToolInvoke, Verb,
 };
+pub use crate::capabilities::llm::domain::malformed::malformed_report;
 pub use crate::capabilities::llm::ports::{
     truncated, BoxedChat, Chat, ChatGateway, Chunk, CompleteOpts, Completion, EnvelopeRepair,
     LlmOpts, ModelCatalog, Msg, ProbeOutcome, RepairOutcome, ToolCall, ToolDecl,

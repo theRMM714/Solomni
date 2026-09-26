@@ -348,11 +348,12 @@ fn doctor() -> i32 {
     let cap = adapters::confine::capability();
     // 虚拟机档的逐项前置（**只读事实**）：这里按"没登记 QEMU、没指定基础根"问一次，
     // 也就是最朴素的情形——登记过的路径以会话配置界面为准（那里按会话选型问同一份清单）。
-    let vm = core::exec::vm_requirements(&core::exec::VmInputs {
-        base: None,
-        qemu: None,
-        probe: &adapters::HostProbeAdapter,
-    });
+    let vm =
+        capabilities::workspace::api::vm_requirements(&capabilities::workspace::api::VmInputs {
+            base: None,
+            qemu: None,
+            probe: &adapters::HostProbeAdapter,
+        });
     let doc = serde_json::json!({
         "platform": std::env::consts::OS,
         "arch": std::env::consts::ARCH,

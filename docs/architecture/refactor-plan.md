@@ -143,10 +143,10 @@ capabilities/<name>/
 | **kernel** | 内核 | **已落位** `src/kernel/`（`jobs` / `log` / `types`） | 生成中作业表（取消标志） | — | **已完成**（批次 1；`bus` 与运行态合并推迟到批次 9，见 §3.2） |
 | **session** | 领域 | `core/session.rs`、`history.rs`、`events.rs`（`collab_state.rs` 已改判归 `collab`——它派生的是**协作**状态） | 对话、转录行、行索引 | `HistoryStore` | 未开始 |
 | **llm** | 领域 | **已落位** `capabilities/llm/`（`ports` 的通道族 + `domain/envelope`） | 通道协议与回复解析 | `Chat` `ChatGateway` `ModelCatalog` `EnvelopeRepair` | **已完成**（批次 9） |
-| **tools** | 领域 | `core/systool.rs`、`patch.rs`、`schema.rs`、`roles.rs`、`fence.rs`、`workspace.rs` | 观察账本、围栏策略、工具面 | `SysIo` `ToolRunner` `FenceHost` `Workspace` | 未开始 |
+| **tools** | 领域 | `core/systool.rs`、`patch.rs`、`schema.rs`、`roles.rs`、`fence.rs`（`workspace.rs` 的沙箱数据已随批次 10 归 `workspace`） | 观察账本、围栏策略、工具面 | `SysIo` `ToolRunner` `FenceHost` | 未开始 |
 | **prompt** | 领域 | `core/prompt.rs`、`refs.rs` | 提示词册 | `PromptSource` | 未开始 |
 | **registry** | 领域 | **已落位** `capabilities/registry/`（`providers` + `agents`） | 四份 yaml 的内存形态 | `SettingsStore` | **已完成**（批次 8） |
-| **workspace** | 领域 | `core/module.rs`、`packages.rs`、`exec.rs` | 清单快照、执行计划 | `ModuleSource` `PackageSource` | 未开始 |
+| **workspace** | 领域 | **已落位** `capabilities/workspace/`（`module` + `packages` + `exec` + `workspace` 沙箱数据） | 清单快照、执行计划、沙箱寻址 | `ModuleSource` `PackageSource` `Workspace` | **已完成**（批次 10） |
 | **rewind** | 协调 | 散布 5 处（见 §3.6） | 只持自己的日志，**不持会话数据** | — | 未开始 |
 | **collab** | 协调 | `core/collab.rs`、`collab_state.rs`、`engine.rs`（任务链的**数据与图算法**已落位 `kernel/chain.rs`，见批次 5） | 讨论游标、任务链、待裁决 | — | 未开始 |
 | **presentation** | 呈现 | `presentation/` | 界面状态 | — | 未开始 |
@@ -436,7 +436,7 @@ kernel       ──▶ （无）
 | **7** | **prompt 能力落位**：`capabilities/prompt/`（`api` / `ports` / `domain`）；`PromptSource` 随能力迁出 `core/ports.rs` | 4, 5 | **已完成**（门禁已认 `capabilities/` 层、`kernel` 不依赖能力、以及「业务之间只经对方的 `::api`」；`ports.rs` 枢纽 8 → 7 条边；1 条反向边 `→ core::envelope` 记入基线，随 `envelope` 落位清零） |
 | **8** | **registry 能力落位**：`capabilities/registry/`（`api` / `ports` / `domain`），`providers.rs` + `agents.rs` 一起搬出；`SettingsStore` 与 `DEFAULT_LLM_TIMEOUT_SECS` 随之下沉 | 5 | **已完成**（**呈现层 3 条豁免自动过期**——它现在走 `registry::api`；`registry` 进环，环 12 → 11；2 条反向边 `→ core::{history, module}` 记入基线） |
 | **9** | **llm 能力落位**：`capabilities/llm/`（`api` / `ports` / `domain/envelope`）；`envelope.rs` 随能力搬出 | 8 | **已完成**（`prompt → core::envelope` 那条基线豁免**自动清零**；⚠️ 环从 11 涨到 15——见批次 10 的前置项） |
-| **10** | **workspace 能力落位**：`module` / `packages` / `exec`。**前置（批次 9 暴露）**：`prompt → llm`（`ToolTexts::malformed_report(&Malformed)` 要 `llm` 的失败类型）把 `prompt` 重新拉回环——它成了 `workspace → prompt` 与 `prompt → llm` 之间的**桥**，连带把 `fence`/`workspace` 也拉进来。做法：把**协议→文案的映射**移进 `llm`（`malformed_report(texts, kind)`，模板仍留 `prompt`），`prompt` 即脱环 | 6, 9 | 未开始 |
+| **10** | **workspace 能力落位**：`module` / `packages` / `exec` / `workspace`（沙箱数据）+ 三个端口；**前置（批次 9 暴露的桥）已先切**：把协议→文案的映射移进 `llm`（模板仍留 `prompt`） | 6, 9 | **已完成**（`prompt` 零外部依赖、彻底脱环；环 15 → **12**；两处自动清零：`registry → core::module`、`presentation → core::exec`；`HostProbe` 下沉 `kernel/host.rs`） |
 | **11** | **tools**（钉死 §3.4：实现锁内部、机制留端口、工具调用发一对短暂事件、**产出事实不落盘**）：`systool` / `patch` / `schema` / `roles` / `fence` | 10 | 未开始 |
 | **12** | **session**（含压缩 `compact`：钉死 §3.5 的五条不变式与压缩×回档边界；并合并运行态的两份真相、落位 `bus`） | 11 | 未开始 |
 | **13** | **rewind**（协调型；`marks` 归属方案 A） | 12 | 未开始 |

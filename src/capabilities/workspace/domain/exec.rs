@@ -3,9 +3,9 @@
 //! 存两种东西：ExecSpec 进 meta.yaml 的 exec 段（会话选型）；ExecPlan 只在运行时派生、从不落盘。
 //! 谁定版本：模块只声明能力名（module.yaml 的 runtimes）；精确版本由用户定版，核心不替用户挑。
 
-use crate::core::module::Module;
-use crate::core::packages::{Library, PackageManifest, KIND_SYSTEM};
-use crate::core::ports::HostProbe;
+use crate::capabilities::workspace::domain::module::Module;
+use crate::capabilities::workspace::domain::packages::{Library, PackageManifest, KIND_SYSTEM};
+use crate::kernel::host::HostProbe;
 use crate::kernel::types::Tier;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -148,7 +148,7 @@ pub fn vm_diagnoses(modules: &[Module], lib: &Library, spec: &ExecSpec) -> Vec<D
         }
     }
     let refs: Vec<&PackageManifest> = chosen.values().copied().collect();
-    for (path, a, b) in crate::core::packages::conflicts(&refs) {
+    for (path, a, b) in crate::capabilities::workspace::domain::packages::conflicts(&refs) {
         out.push(Diagnosis::Conflict { path, a, b });
     }
     out.sort();

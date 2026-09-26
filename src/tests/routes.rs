@@ -5,11 +5,11 @@
 
 use crate::capabilities::registry::api::AgentView;
 use crate::capabilities::registry::api::{AppSettings, ModelView, ProviderView};
+use crate::capabilities::workspace::api::Roster;
 use crate::core::api::{
     Advance, DiscoveryOps, EventBus, HistoryOps, Ops, Output, RegistryOps, SessionOps,
 };
 use crate::core::history::{AgentMeta, HistoryView, SessionMeta};
-use crate::core::module::Roster;
 use crate::core::{
     AgentSuggestion, ConfigAgent, FilesAgentView, FilesRootsView, FilesView, Pending,
     RuntimeReport, SessionConfig, SessionEdit, SessionView, WorkMode, WorkOpened, WorkSpec,
@@ -99,7 +99,7 @@ fn meta(name: &str) -> SessionMeta {
         task: None,
         ts: 1,
         agents: Vec::new(),
-        exec: crate::core::exec::ExecSpec::default(),
+        exec: crate::capabilities::workspace::api::ExecSpec::default(),
         parent: None,
         node: None,
     }

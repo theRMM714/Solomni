@@ -45,9 +45,9 @@ presentation ──▶ core ◀── adapters
 | `ChatGateway` | 建通道（含核心通道与回落告知）；**不选择**模型；实测一条通道支不支持原生工具调用。**已随能力搬出**：定义在 `capabilities/llm/ports.rs` | `HttpGateway`（无可用模型时回落 `DemoGateway`；探测发两条最小请求对比） |
 | `SettingsStore` | 登记处持久化（providers / models / settings / agents 四个 yaml）。**已随能力搬出 core**：定义在 `capabilities/registry/ports.rs` | `YamlSettingsStore` |
 | `ModelCatalog` | 列出一条通道当前可用的模型名。**已随能力搬出**：`capabilities/llm/ports.rs` | `HttpModelCatalog` |
-| `ModuleSource` | 模块清单来源（扫描 `modules/`） | `FsModules` |
-| `PackageSource` | 运行包库来源（扫描依赖文件夹 `runtimes/`） | `FsPackages` |
-| `Workspace` | 一次工作的 work 目录、各 agent 沙箱、文件清单与寻址根 | `FsWorkspace` |
+| `ModuleSource` | 模块清单来源（扫描 `modules/`）。**已随能力搬出**：`capabilities/workspace/ports.rs` | `FsModules` |
+| `PackageSource` | 运行包库来源（扫描依赖文件夹 `runtimes/`）。**已随能力搬出**：`capabilities/workspace/ports.rs` | `FsPackages` |
+| `Workspace` | 一次工作的 work 目录、各 agent 沙箱、文件清单与寻址根。**已随能力搬出**：`capabilities/workspace/ports.rs` | `FsWorkspace` |
 | `SysIo` | 内置文件工具的读写机制（读严格 UTF-8、非法字节如实标注；写一律 UTF-8） | `FsSysIo` |
 | `HistoryStore` | 会话历史：一个会话一个目录（meta + 事件流水） | `FsHistory` |
 | `PromptSource` | 提示词册加载（`prompts/`）。**已随能力搬出 core**：定义在 `capabilities/prompt/ports.rs` | `YamlPrompts` |
@@ -55,7 +55,7 @@ presentation ──▶ core ◀── adapters
 | `EnvelopeRepair`（`capabilities/llm/ports.rs`） | 手写信封不合法时的**无歧义**补救（改了字段含义就是错；拿不准就返回不修） | `UnambiguousRepair`（转义字符串里的裸控制字符 + 补上扫描器算出的收尾括号；断在字符串中间不修，一段回复里起了两段信封不修——补哪一段都是猜；调用方中止的生成一律不修） |
 | `FenceHost` | 围栏授权的释放（删除会话时请求一次撤销） | `confine::FenceHostAdapter`（本平台无该机制时为空操作） |
 | `Log` | 运行日志（三级） | `FileLog`（测试 `NoopLog`） |
-| `HostProbe` | 宿主能力探测（**只问事实**：路径存在性、PATH 上的可执行文件、本机虚拟化能力；不执行、不安装、不写） | `HostProbeAdapter`（测试 `FixedProbe`） |
+| `HostProbe` | 宿主能力探测（**只问事实**：路径存在性、PATH 上的可执行文件、本机虚拟化能力；不执行、不安装、不写）。**在 `kernel/host.rs`**（无领域语义，执行档位与自检共用） | `HostProbeAdapter`（测试 `FixedProbe`） |
 
 新增端口前先问一句：**这是 IO 或可替换点吗**？不是就别加 trait。
 
@@ -140,7 +140,7 @@ session/<工作名>/
   （截在一次回复中间会留下"孤儿工具结果"，而协议要求结果紧跟发起它的助手消息）。行分组因此不靠"相邻行猜"——那正是把实时与重建拆开的做法。
 - `meta.yaml` 的 `agents` 是名单的**唯一真相**（代拟路径在用户确认名单那一刻写回）。
 - `meta.yaml` 的 `exec` 段是**执行选型**的唯一真相：档位（`tier` = 本机 / 虚拟机）、虚拟机基础根、能力定版（`pins`）、是否放行出站网络；
-  缺这段的 `meta.yaml` 按默认读回（本机档、不定版、不联网）。执行计划本身（`core/exec.rs` 的 `ExecPlan`）**从不落盘**——它含真实路径，只在运行时派生。
+  缺这段的 `meta.yaml` 按默认读回（本机档、不定版、不联网）。执行计划本身（`capabilities/workspace/` 的 `ExecPlan`）**从不落盘**——它含真实路径，只在运行时派生。
 - 会话的**旁路配置记录**（`{"type":"config"}`）只在编辑提交时追加：供呈现与审计，**不进模型上下文**，回放与状态派生都跳过它。
 - 出站模型调用的参数由**核心**决定、随端口传下去：`core::ports::LlmOpts{stream, timeout_secs}` 与 `CompleteOpts` 的对应字段，
   取值来自**全局设置**（`streaming` / `llm_timeout_secs`），讨论、执行、验收与单 agent 共用同一份判据（`Core::llm_opts`）。
@@ -173,8 +173,8 @@ session/<工作名>/
   容器 profile **一个 agent 一个**（跨会话复用，数量有界）：守门进程是唯一建它的地方，建成即写进
   `.home/fence-grants.json` 台账；`--fence-clean` 先按台账精确回收（撤 ACE + 删 profile），再按
   `Solomni.Agent.` 前缀扫掉整族遗留 profile（探针、台账被删、旧版本建的都在这一扫里）。
-- `core/packages.rs` 是运行包契约与包库事实（校验、去重、系统路径冲突预检、能力索引），
-  `core/exec.rs` 是执行档位与执行计划派生；两者都是纯逻辑，目录遍历在 `PackageSource` 适配层。契约见 [RUNTIME_SPEC.md](RUNTIME_SPEC.md)。
+- `capabilities/workspace/` 里的 `packages` 是运行包契约与包库事实（校验、去重、系统路径冲突预检、能力索引），
+  `exec` 是执行档位与执行计划派生；两者都是纯逻辑，目录遍历在 `PackageSource` 适配层。契约见 [RUNTIME_SPEC.md](RUNTIME_SPEC.md)。
 - 登记处四份 yaml 的字段与读写规则见 [REGISTRY_SPEC.md](REGISTRY_SPEC.md)。
 - 内存与落盘不一致时**以流水为准**（可回放、可重建）。
 

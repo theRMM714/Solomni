@@ -15,13 +15,12 @@ use crate::capabilities::prompt::api::Prompts;
 use crate::capabilities::prompt::ports::PromptSource;
 use crate::capabilities::registry::api::{Channel, ModelEntry, Provider, Settings};
 use crate::capabilities::registry::ports::SettingsStore;
+use crate::capabilities::workspace::api::{Library, PackageManifest};
+use crate::capabilities::workspace::api::{Module, ModuleManifest};
+use crate::capabilities::workspace::ports::{ModuleSource, PackageSource, Workspace};
 use crate::core::events::Live;
 use crate::core::history::{HistoryView, SessionMeta};
-use crate::core::module::{Module, ModuleManifest};
-use crate::core::packages::{Library, PackageManifest};
-use crate::core::ports::{
-    FileRead, HistoryStore, ModuleSource, PackageSource, SysIo, ToolRunner, Workspace,
-};
+use crate::core::ports::{FileRead, HistoryStore, SysIo, ToolRunner};
 use crate::core::{AgentInstance, Core, SessionEvent, WorkMode, WorkSpec};
 use crate::kernel::types::Tier;
 use std::collections::BTreeMap;
@@ -146,7 +145,7 @@ impl Workspace for InMemoryWorkspace {
         &self,
         session: &str,
         agents: &[String],
-    ) -> Result<crate::core::workspace::WorkRoots, String> {
+    ) -> Result<crate::capabilities::workspace::api::WorkRoots, String> {
         if let Some(m) = &self.fail {
             return Err(m.clone());
         }
@@ -155,7 +154,7 @@ impl Workspace for InMemoryWorkspace {
         for a in agents {
             map.insert(a.clone(), abs(&[session, a]));
         }
-        Ok(crate::core::workspace::WorkRoots {
+        Ok(crate::capabilities::workspace::api::WorkRoots {
             shared: abs(&[session, "work"]),
             agents: map,
         })
@@ -180,7 +179,7 @@ impl Workspace for InMemoryWorkspace {
         &self,
         session: &str,
         agents: &[String],
-    ) -> Result<crate::core::workspace::WorkFiles, String> {
+    ) -> Result<crate::capabilities::workspace::api::WorkFiles, String> {
         if let Some(m) = &self.fail {
             return Err(m.clone());
         }
@@ -200,7 +199,7 @@ impl Workspace for InMemoryWorkspace {
             got.sort();
             map.insert(a.clone(), got);
         }
-        Ok(crate::core::workspace::WorkFiles { work, agents: map })
+        Ok(crate::capabilities::workspace::api::WorkFiles { work, agents: map })
     }
 }
 
@@ -391,7 +390,7 @@ impl crate::capabilities::llm::api::EnvelopeRepair for NoRepair {
 /// 一次内置工具调用（空账本）：只关心工具行为本身的用例用它；
 /// 关心"改动前有没有读过"的用例直接用 systool::execute 并自带 Observations。
 pub(crate) fn run_builtin(
-    sb: &crate::core::workspace::Sandbox,
+    sb: &crate::capabilities::workspace::api::Sandbox,
     io: &dyn crate::core::ports::SysIo,
     name: &str,
     args_json: &str,
@@ -401,8 +400,8 @@ pub(crate) fn run_builtin(
 }
 
 /// 测试用模块工具声明：只给启动命令（参数契约在需要的用例里另行声明）。
-pub(crate) fn decl(command: &str) -> crate::core::module::ToolDecl {
-    crate::core::module::ToolDecl {
+pub(crate) fn decl(command: &str) -> crate::capabilities::workspace::domain::module::ToolDecl {
+    crate::capabilities::workspace::domain::module::ToolDecl {
         command: command.to_string(),
         desc: String::new(),
         params: None,
@@ -411,19 +410,25 @@ pub(crate) fn decl(command: &str) -> crate::core::module::ToolDecl {
 }
 
 /// 测试用模块工具声明：带参数契约（YAML 里的 params 段）。
-pub(crate) fn decl_with(command: &str, params_yaml: &str) -> crate::core::module::ToolDecl {
+pub(crate) fn decl_with(
+    command: &str,
+    params_yaml: &str,
+) -> crate::capabilities::workspace::domain::module::ToolDecl {
     let mut d = decl(command);
     d.params = Some(serde_yaml::from_str(params_yaml).expect("测试参数声明要能解析"));
     d
 }
 
 /// 测试沙箱：work 共享区 + agent 私有区 + 指定模块目录（都是绝对路径）。
-pub(crate) fn test_sandbox(agent: &str, modules: &[&str]) -> crate::core::workspace::Sandbox {
+pub(crate) fn test_sandbox(
+    agent: &str,
+    modules: &[&str],
+) -> crate::capabilities::workspace::api::Sandbox {
     let mut map = BTreeMap::new();
     for id in modules {
         map.insert(id.to_string(), abs(&["mods", id]));
     }
-    crate::core::workspace::Sandbox {
+    crate::capabilities::workspace::api::Sandbox {
         work_name: "demo".to_string(),
         agent: agent.to_string(),
         shared: abs(&["demo", "work"]),
@@ -440,8 +445,8 @@ pub(crate) fn test_params(agent: &str) -> crate::core::session::SessionParams {
 
 /// 测试用工具说明块素材（patch 语法 + 给定的模块工具）。
 pub(crate) fn test_notes(
-    sb: &crate::core::workspace::Sandbox,
-    modules: &[crate::core::module::Module],
+    sb: &crate::capabilities::workspace::api::Sandbox,
+    modules: &[crate::capabilities::workspace::api::Module],
 ) -> crate::core::systool::ToolNotes {
     crate::core::systool::tool_notes(&test_prompts(), sb, modules)
 }
@@ -597,8 +602,8 @@ impl ModelCatalog for FakeCatalog {
 pub(crate) struct VecSource(pub(crate) Vec<Module>);
 
 impl ModuleSource for VecSource {
-    fn scan(&self) -> crate::core::module::Roster {
-        crate::core::module::Roster {
+    fn scan(&self) -> crate::capabilities::workspace::api::Roster {
+        crate::capabilities::workspace::api::Roster {
             modules: self.0.clone(),
             rejected: Vec::new(),
         }
@@ -874,7 +879,7 @@ pub(crate) struct FixedProbe {
     pub hypervisor: bool,
 }
 
-impl crate::core::ports::HostProbe for FixedProbe {
+impl crate::kernel::host::HostProbe for FixedProbe {
     fn is_file(&self, path: &std::path::Path) -> bool {
         self.files.iter().any(|p| p == path)
     }

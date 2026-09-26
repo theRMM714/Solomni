@@ -1,53 +1,14 @@
 //! 核心端口：依赖倒置的边界。core 定义，adapters 实现，main 注入。
-//! **已随能力搬出**：`capabilities/prompt/ports.rs`（PromptSource）、`capabilities/registry/ports.rs`（SettingsStore）、
-//! `capabilities/llm/ports.rs`（Chat / ChatGateway / ModelCatalog / EnvelopeRepair）。
-//! 本文件只剩尚未搬出的部分（workspace / tools / session / 宿主探测）。
+//! **已随能力/内核搬出**：prompt（PromptSource）、registry（SettingsStore）、llm（通道端口族）、
+//! workspace（ModuleSource / PackageSource / Workspace）、kernel（Log、HostProbe）。
+//! 本文件只剩尚未搬出的部分（tools / session）。
 
 use crate::core::history::{HistoryView, SessionMeta};
-use crate::core::module::Roster;
-use std::path::Path;
-
-/// 模块清单来源端口。
-pub trait ModuleSource {
-    fn scan(&self) -> Roster;
-}
 
 /// 围栏授权的释放端口：会话删除时由核心请求一次，把该会话各 agent 的围栏授权撤掉。
 /// 机制在适配层（confine）；本平台没有该机制时实现为空操作。核心只提出请求，不碰任何 ACL。
 pub trait FenceHost: Send + Sync {
     fn release(&self, spec: &crate::core::fence::FenceSpec) -> Result<(), String>;
-}
-
-/// 运行包库来源端口：扫描依赖文件夹（runtimes/）里的包清单。
-/// 「清单即事实」：每次调用重扫，放入即出现；清单校验、去重与冲突预检在 core（packages::Library::build），
-/// 目录遍历与 yaml 解析在适配层。
-pub trait PackageSource {
-    fn scan(&self) -> crate::core::packages::Library;
-    /// 包库所在目录（配置界面要把"把包放哪儿"如实告诉用户）。
-    fn dir(&self) -> std::path::PathBuf;
-}
-
-/// 工作区端口：一次工作的 work 目录与各 agent 沙箱（目录布局机制在适配层）。
-/// core 只说"哪次工作、哪些 agent"，不碰路径拼接细节。
-pub trait Workspace {
-    /// 准备工作区：建 session/<工作名>/work 与每个 agent 的沙箱目录。
-    fn prepare(&self, session: &str, agents: &[String]) -> Result<(), String>;
-    /// 界面投喂：把文件写进本工作的 work/（文件名由调用方净化）。
-    fn write_work(&self, session: &str, name: &str, bytes: &[u8]) -> Result<(), String>;
-    /// work/ 下是否已有同名文件（上传同名冲突判定）。
-    fn work_has(&self, session: &str, name: &str) -> bool;
-    /// 沙箱寻址根（work 与各 agent 私有区）：布局机制在适配层，拼接与越界校验在 core。
-    fn roots(
-        &self,
-        session: &str,
-        agents: &[String],
-    ) -> Result<crate::core::workspace::WorkRoots, String>;
-    /// 列出本工作可引用的文件（work/ 与各 agent 沙箱；相对路径、/ 分隔、排序稳定）。
-    fn list(
-        &self,
-        session: &str,
-        agents: &[String],
-    ) -> Result<crate::core::workspace::WorkFiles, String>;
 }
 
 /// 一次文件读取：文本 + 原始字节数 + 编码与截断的如实标注。
@@ -105,18 +66,4 @@ pub trait ToolRunner {
         command: &str,
         args_json: &str,
     ) -> ToolOutcome;
-}
-
-/// 宿主能力探测：**只问事实**——不执行任何程序、不安装、不写任何东西。
-/// 机制（读环境变量、查路径存在性、按平台判定虚拟化能力）在适配层；
-/// core 只按结论做判断，因此 core 里不出现 std::env 与 is_file / is_dir。
-pub trait HostProbe: Send + Sync {
-    /// 这个路径存在且是文件。
-    fn is_file(&self, path: &Path) -> bool;
-    /// 这个路径存在且是目录。
-    fn is_dir(&self, path: &Path) -> bool;
-    /// PATH 上有没有这个可执行文件（只查存在性，不执行它；平台扩展名由适配层处理）。
-    fn has_exe(&self, name: &str) -> bool;
-    /// 本机能不能起硬件虚拟化（只问事实，不起任何虚拟机）。
-    fn hypervisor_available(&self) -> bool;
 }

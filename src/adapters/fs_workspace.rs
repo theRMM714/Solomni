@@ -1,8 +1,8 @@
 //! 工作区落盘：session/<工作名>/ 下的 work 与各 agent 沙箱（实现 core 的 Workspace 端口）。
 //! 目录布局机制集中在这里；路径一律用路径组件拼接（交给运行环境）。
 
-use crate::core::ports::Workspace;
-use crate::core::workspace::{WorkFiles, WorkRoots};
+use crate::capabilities::workspace::api::{WorkFiles, WorkRoots};
+use crate::capabilities::workspace::ports::Workspace;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
