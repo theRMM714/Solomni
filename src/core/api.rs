@@ -965,13 +965,21 @@ impl CoreHandle {
             }
         };
         // 交回核心：重新插入 + **为就绪节点派发子会话**（返回派发事件与待起生成的节点）。
-        // 转录已由上面的 sink 增量落盘，这里不再重复落。
         let (spawned, todo) = self.call({
             let sid = sid.to_string();
             move |core| Ok(core.put_collab(&sid, c))
         })?;
+        // 派发事件（"[节点] 开工"等）**也要落盘**：它们是在这里产生的，不经过上面那条 sink——
+        // 只推不落的话，刷新后回放会少掉"节点开工"那几行（真机上就是这么发现的）。
+        let persister = self.call({
+            let sid = sid.to_string();
+            move |core| Ok(core.persister(&sid))
+        })?;
         for ev in spawned {
             seq = bus.push(sid, std::slice::from_ref(&ev));
+            if let Some(warn) = persister.persist(std::slice::from_ref(&ev)) {
+                bus.push(sid, std::slice::from_ref(&SessionEvent::Notice(warn)));
+            }
         }
         // 派发：每个就绪节点在**它自己的子会话**里起一轮生成（脱离本次调用，不等它跑完）。
         for (_node, child, objective) in todo {
