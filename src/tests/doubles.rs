@@ -874,7 +874,7 @@ pub(crate) fn core_with_workspace(
         Arc::new(InMemorySysIo::new()),
         Arc::new(NoRepair),
         Box::new(TestPrompts::ok()),
-        Arc::new(crate::core::ports::NoopLog),
+        Arc::new(crate::kernel::log::NoopLog),
     )
     .expect("内存装配不应失败")
 }
@@ -968,7 +968,7 @@ pub(crate) fn core_with_pkgs(
         io,
         Arc::new(NoRepair),
         Box::new(TestPrompts::ok()),
-        Arc::new(crate::core::ports::NoopLog),
+        Arc::new(crate::kernel::log::NoopLog),
     )
     .expect("内存装配不应失败")
 }
@@ -988,7 +988,7 @@ pub(crate) fn core_with_settings(store: InMemorySettings) -> Core {
         Arc::new(InMemorySysIo::new()),
         Arc::new(NoRepair),
         Box::new(TestPrompts::ok()),
-        Arc::new(crate::core::ports::NoopLog),
+        Arc::new(crate::kernel::log::NoopLog),
     )
     .expect("内存装配不应失败")
 }
@@ -1019,7 +1019,7 @@ pub(crate) fn core_with_io_gateway(
         io,
         Arc::new(NoRepair),
         Box::new(TestPrompts::ok()),
-        Arc::new(crate::core::ports::NoopLog),
+        Arc::new(crate::kernel::log::NoopLog),
     )
     .expect("内存装配不应失败")
 }
@@ -1042,7 +1042,7 @@ pub(crate) fn core_with_gateway(
         Arc::new(InMemorySysIo::new()),
         Arc::new(NoRepair),
         Box::new(TestPrompts::ok()),
-        Arc::new(crate::core::ports::NoopLog),
+        Arc::new(crate::kernel::log::NoopLog),
     )
     .expect("内存装配不应失败")
 }

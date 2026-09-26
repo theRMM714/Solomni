@@ -17,10 +17,11 @@ use crate::adapters::yaml_settings::YamlSettingsStore;
 use crate::core::exec::ExecSpec;
 use crate::core::history::{AgentMeta, SessionMeta};
 use crate::core::ports::{
-    ChatGateway, Chunk, CompleteOpts, HistoryStore, Log, ModelCatalog, ModuleSource, Msg, NoopLog,
-    PackageSource, ProbeOutcome, PromptSource, SettingsStore, SysIo, Workspace,
+    ChatGateway, Chunk, CompleteOpts, HistoryStore, ModelCatalog, ModuleSource, Msg, PackageSource,
+    ProbeOutcome, PromptSource, SettingsStore, SysIo, Workspace,
 };
 use crate::core::providers::{Channel, Provider, Settings};
+use crate::kernel::log::{Log, NoopLog};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;

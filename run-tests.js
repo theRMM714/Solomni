@@ -370,12 +370,18 @@ function structuralAudit() {
       if (r.startsWith("src/core/")) return "core";
       if (r.startsWith("src/adapters/")) return "adapters";
       if (r.startsWith("src/presentation/")) return "presentation";
+      if (r.startsWith("src/kernel/")) return "kernel";
       if (r.startsWith("src/tests/")) return "tests";
       if (r === "src/main.rs") return "main";
       return null;
     };
     // 层 → 它不得引用的层。core 不引用 adapters（端口由 core 定义、适配层实现，永不反向）。
-    const FORBIDDEN = { core: ["adapters", "presentation"], adapters: ["presentation"] };
+    const FORBIDDEN = {
+      // kernel 在最底层：无领域语义的机制，**不依赖任何人**。
+      kernel: ["core", "adapters", "presentation"],
+      core: ["adapters", "presentation"],
+      adapters: ["presentation"],
+    };
 
     const rsFiles = [];
     const collectRs = (d) => {

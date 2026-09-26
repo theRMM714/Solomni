@@ -4,8 +4,9 @@
 //! 三种结论都如实回报（支持 / 明确不支持 / 无法判定），绝不替用户拍板。
 
 use crate::adapters::endpoint::{chat_candidates, resolve_candidates, Attempt};
-use crate::core::ports::{Completion, Log, ProbeOutcome, ToolDecl};
+use crate::core::ports::{Completion, ProbeOutcome, ToolDecl};
 use crate::core::providers::{Channel, ReplayReport, ReplayShape};
+use crate::kernel::log::Log;
 
 /// 探针工具：无参数、只有说明——目的是让模型有东西可调。
 fn ping_decl() -> ToolDecl {

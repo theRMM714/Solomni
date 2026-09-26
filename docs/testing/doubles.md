@@ -42,7 +42,7 @@ Fake 必须：
 | `src/tests/core.rs:SilentRunner` | 守护 Stub：任何调用即 panic | 用于"不该用工具"的路径 |
 | `src/tests/doubles.rs:NoFenceHost` | 围栏释放空操作 Stub | 已被核心测试使用 |
 | `src/tests/doubles.rs:RecordingFence` | 围栏释放记录型 Spy | 已钉住"删会话即请求撤销授权" |
-| `src/core/ports.rs:NoopLog` | 无声日志 Stub | 已存在；不用于验证日志内容 |
+| `src/kernel/log.rs:NoopLog` | 无声日志 Stub | 已存在；不用于验证日志内容 |
 | `tests/cross-platform/e2e/mock.js` | 本地假供应商服务 | 已用于 T5；应覆盖协议错误、断开、延迟等场景 |
 
 ### 1.3 Mock
@@ -126,6 +126,9 @@ Fixture 必须：
 | `EnvelopeRepair` | `NoRepair` | 不适用 | 不适用（修复器遇不确定一律不修） | 不适用 | `UnambiguousRepair`（转义裸控制字符 + 补上缺的收尾括号；断在字符串中间、起了两段信封一律不修） | 已验收 |
 | `FenceHost` | `RecordingFence`、`NoFenceHost` | `released` | `fail_with` | 不适用 | `confine::FenceHostAdapter`（真机撤权在 `tests/windows/`） | 已验收 |
 | `Log` | `NoopLog` | 不记录（Stub） | 不适用 | 不适用 | `FileLog`（三个级别都落盘） | 已验收 |
+
+`Log` 是唯一**不在 `core/ports.rs`** 的端口：它在 `kernel/log.rs`（机制型内核，无领域语义）。
+见 [../architecture/module-map.md](../architecture/module-map.md) 一。
 
 "已验收"指该端口在 `src/tests/` 与 `src/adapters/*` 的契约测试里有成功、失败、空/边界与交互记录的断言；
 

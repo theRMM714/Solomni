@@ -13,10 +13,11 @@ use crate::core::exec::ExecSpec;
 use crate::core::fence::FenceSpec;
 use crate::core::history::{AgentMeta, SessionMeta};
 use crate::core::ports::{
-    Chat, ChatGateway, CompleteOpts, FenceHost, HistoryStore, Log, ModelCatalog, ModuleSource, Msg,
-    NoopLog, PackageSource, PromptSource, SettingsStore, SysIo, ToolRunner, Workspace,
+    Chat, ChatGateway, CompleteOpts, FenceHost, HistoryStore, ModelCatalog, ModuleSource, Msg,
+    PackageSource, PromptSource, SettingsStore, SysIo, ToolRunner, Workspace,
 };
 use crate::core::providers::{Provider, Settings};
+use crate::kernel::log::{Log, NoopLog};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};

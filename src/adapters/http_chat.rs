@@ -17,7 +17,7 @@ use crate::core::providers::Channel;
 pub struct HttpChat {
     pub channel: Channel,
     pub provider_id: String,
-    pub log: std::sync::Arc<dyn crate::core::ports::Log + Send + Sync>,
+    pub log: std::sync::Arc<dyn crate::kernel::log::Log + Send + Sync>,
     resolved: Option<String>,
     /// 进程内共享的端点记忆：一旦通了就固定，后续会话不再探测。
     memo: Memo,
@@ -91,7 +91,7 @@ impl HttpChat {
     /// 组合根/网关内部构造：通道 + 日志 + 共享端点记忆。
     fn new(
         channel: Channel,
-        log: std::sync::Arc<dyn crate::core::ports::Log + Send + Sync>,
+        log: std::sync::Arc<dyn crate::kernel::log::Log + Send + Sync>,
         memo: Memo,
     ) -> HttpChat {
         let memo_key = format!("{}|chat", channel.provider.base_url);
@@ -491,7 +491,7 @@ fn native_call(v: &serde_json::Value) -> Option<ToolCall> {
 
 fn real_or_demo(
     channel: Option<&Channel>,
-    log: &std::sync::Arc<dyn crate::core::ports::Log + Send + Sync>,
+    log: &std::sync::Arc<dyn crate::kernel::log::Log + Send + Sync>,
     memo: &Memo,
 ) -> (BoxedChat, bool) {
     match channel {
@@ -512,14 +512,14 @@ fn real_or_demo(
 
 /// 真实网关：机制only。回落演示是如实告知的兜底，不是选择策略。
 pub struct HttpGateway {
-    log: std::sync::Arc<dyn crate::core::ports::Log + Send + Sync>,
+    log: std::sync::Arc<dyn crate::kernel::log::Log + Send + Sync>,
     memo: Memo,
 }
 
 impl HttpGateway {
     /// 组合根注入日志端口（异常路径落盘）与共享端点记忆。
     pub fn with_log(
-        log: std::sync::Arc<dyn crate::core::ports::Log + Send + Sync>,
+        log: std::sync::Arc<dyn crate::kernel::log::Log + Send + Sync>,
         memo: Memo,
     ) -> HttpGateway {
         HttpGateway { log, memo }

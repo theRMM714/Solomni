@@ -3128,7 +3128,7 @@ pub(crate) fn member_with_tools(
         modules,
         observations: crate::core::systool::Observations::default(),
         repair: Arc::new(NoRepair),
-        log: Arc::new(crate::core::ports::NoopLog),
+        log: Arc::new(crate::kernel::log::NoopLog),
         runner,
         sandbox: test_sandbox("m0", &[]),
         io: Arc::new(InMemorySysIo::new()),
@@ -5694,7 +5694,7 @@ pub(crate) fn native_member(
         modules,
         observations: crate::core::systool::Observations::default(),
         repair: Arc::new(NoRepair),
-        log: Arc::new(crate::core::ports::NoopLog),
+        log: Arc::new(crate::kernel::log::NoopLog),
         runner: Arc::new(SilentRunner),
         sandbox: sb.clone(),
         io,
@@ -7341,7 +7341,7 @@ pub(crate) fn vm_tier_is_refused_when_the_machine_cannot_carry_it() {
         Arc::new(InMemorySysIo::new()),
         Arc::new(NoRepair),
         Box::new(TestPrompts::ok()),
-        Arc::new(crate::core::ports::NoopLog),
+        Arc::new(crate::kernel::log::NoopLog),
     )
     .expect("内存装配不应失败");
     // 创建路径的档位来自设置（基础根留空）：成立与否随本机而定，这里钉的是**接线**——
@@ -7373,7 +7373,7 @@ pub(crate) fn vm_tier_is_refused_when_the_machine_cannot_carry_it() {
         Arc::new(InMemorySysIo::new()),
         Arc::new(NoRepair),
         Box::new(TestPrompts::ok()),
-        Arc::new(crate::core::ports::NoopLog),
+        Arc::new(crate::kernel::log::NoopLog),
     )
     .expect("内存装配不应失败");
     let sid = core2
@@ -7490,7 +7490,7 @@ pub(crate) fn module_without_runtime_is_denied_with_reason() {
         Arc::new(InMemorySysIo::new()),
         Arc::new(NoRepair),
         Box::new(TestPrompts::ok()),
-        Arc::new(crate::core::ports::NoopLog),
+        Arc::new(crate::kernel::log::NoopLog),
     )
     .expect("内存装配不应失败");
     // 虚拟机档现在一律不可选（guest 本体尚未接入），所以**创建**走本机档；
@@ -7905,7 +7905,7 @@ pub(crate) fn deleting_a_session_asks_the_fence_to_release_its_grants() {
         Arc::new(InMemorySysIo::new()),
         Arc::new(NoRepair),
         Box::new(TestPrompts::ok()),
-        Arc::new(crate::core::ports::NoopLog),
+        Arc::new(crate::kernel::log::NoopLog),
     )
     .expect("内存装配不应失败");
     assert!(core.history_delete("w").unwrap(), "会话目录该被删掉");
@@ -8128,7 +8128,7 @@ pub(crate) fn native_core(
         io,
         Arc::new(NoRepair),
         Box::new(TestPrompts::ok()),
-        Arc::new(crate::core::ports::NoopLog),
+        Arc::new(crate::kernel::log::NoopLog),
     )
     .expect("内存装配不应失败")
 }
@@ -8373,7 +8373,7 @@ pub(crate) fn core_operation_runs_readonly_verification_before_the_op() {
         modules: BTreeMap::new(),
         observations: crate::core::systool::Observations::default(),
         repair: Arc::new(NoRepair),
-        log: Arc::new(crate::core::ports::NoopLog),
+        log: Arc::new(crate::kernel::log::NoopLog),
         runner: Arc::new(SilentRunner),
         sandbox: sb.clone(),
         io: io_port,

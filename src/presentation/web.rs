@@ -41,7 +41,7 @@ pub struct FenceInfo {
 pub fn serve(
     ops: Ops,
     port: u16,
-    log: Arc<dyn crate::core::ports::Log + Send + Sync>,
+    log: Arc<dyn crate::kernel::log::Log + Send + Sync>,
     fence: FenceInfo,
 ) -> Result<(), String> {
     log.info("web::serve", &format!("转录中心启动，端口 {}", port));
@@ -163,7 +163,7 @@ const POLL_TICK: Duration = Duration::from_millis(300);
 pub(crate) fn route(
     ops: &Ops,
     fence: &FenceInfo,
-    log: &Arc<dyn crate::core::ports::Log + Send + Sync>,
+    log: &Arc<dyn crate::kernel::log::Log + Send + Sync>,
     method: &str,
     url: &str,
     body: &str,

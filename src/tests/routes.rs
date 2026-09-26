@@ -10,12 +10,12 @@ use crate::core::api::{
 use crate::core::exec::Tier;
 use crate::core::history::{AgentMeta, HistoryView, SessionMeta};
 use crate::core::module::Roster;
-use crate::core::ports::NoopLog;
 use crate::core::providers::{AppSettings, ModelView, ProviderView};
 use crate::core::{
     AgentSuggestion, ConfigAgent, FilesAgentView, FilesRootsView, FilesView, Pending,
     RuntimeReport, SessionConfig, SessionEdit, SessionView, WorkMode, WorkOpened, WorkSpec,
 };
+use crate::kernel::log::NoopLog;
 use crate::presentation::routes::{self, ROUTES};
 use crate::presentation::web::{self, FenceInfo};
 use serde_json::json;
@@ -417,7 +417,7 @@ fn fence() -> FenceInfo {
 }
 
 fn call(ops: &Ops, method: &str, url: &str, body: &str) -> (u16, String) {
-    let log: Arc<dyn crate::core::ports::Log + Send + Sync> = Arc::new(NoopLog);
+    let log: Arc<dyn crate::kernel::log::Log + Send + Sync> = Arc::new(NoopLog);
     let (code, _headers, text) = web::route(ops, &fence(), &log, method, url, body);
     (code, text)
 }

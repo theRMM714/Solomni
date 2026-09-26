@@ -1,15 +1,24 @@
 # 模块地图
 
-> 本文是**模块地图的唯一权威**：`core/`、`adapters/`、`presentation/` 各文件职责一览。
+> 本文是**模块地图的唯一权威**：`kernel/`、`core/`、`adapters/`、`presentation/` 各文件职责一览。
 > 分层规则与依赖方向见 [ARCHITECTURE.md](../../ARCHITECTURE.md)，呈现层入站契约见 [contracts.md](contracts.md)。
 
-## 一、`core/`（抽象与业务，无 IO）
+## 一、`kernel/`（机制型内核）
+
+| 文件 | 职责 |
+| --- | --- |
+| `mod.rs` | 内核入口：只声明模块，不放逻辑 |
+| `types.rs` | 跨业务共享的**事实类型**：只放没有领域逻辑的（`SessionId`） |
+| `log.rs` | `Log` 端口（三级）与测试用的 `NoopLog`；文件/时间戳/目录机制在适配层 |
+| `jobs.rs` | 生成中作业的**取消表**：核心登记，呈现层只能说「停哪个会话」；「停止」不排队、不碰核心状态，所以生成期间立刻生效 |
+
+## 二、`core/`（抽象与业务，无 IO）
 
 | 文件 | 职责 |
 | --- | --- |
 | `mod.rs` | 核心层入口与 `Core` 门面：会话中心、登记处编排、运行包报告 |
-| `ports.rs` | 出站端口 trait 与跨层数据结构（依赖倒置的边界；core 需要什么，由适配器实现） |
-| `api.rs` | **入站契约**：四个按角色的能力接口 + `CoreHandle`（核心自有线程、命令/事件）+ `EventBus` + `JobRegistry`；单 agent 与协作长步骤的生成都在**工作线程**上跑（队列只占"取/交"两步） |
+| `ports.rs` | 出站端口 trait 与跨层数据结构（依赖倒置的边界；core 需要什么，由适配器实现）。**无领域语义的机制端口在 `kernel/`** |
+| `api.rs` | **入站契约**：四个按角色的能力接口 + `CoreHandle`（核心自有线程、命令/事件）+ `EventBus`；单 agent 与协作长步骤的生成都在**工作线程**上跑（队列只占"取/交"两步） |
 | `events.rs` | 呈现侧契约：`SessionEvent` 与介入请求的词汇（**事实**的线格式定义在这）；转录行 `LineView` 带 `speaker` / `verb` / `kind`，`render()` 是"字段 → 文本"的唯一拼法 |
 | `prompt.rs` | 提示词渲染：`{{key}}` 占位替换，缺键/缺变量报错 |
 | `schema.rs` | 工具参数契约（**声明在文本层**）：解析/校验/两种渲染（模型侧说明、JSON Schema） |
@@ -32,7 +41,7 @@
 | `engine.rs` | 讨论/执行/验收的引擎；**唯一的轮循环** `converse_with`（单 agent / 节点 / 讨论席共用：表态与工具两套形态、按声明调度的并发、逐轮外送）；**唯一的请求装配点** `assemble`（身份 + 本回合工具面 + 对话 + 本回合提示） |
 | `session.rs` | 单 agent 会话：**会话参数**（`SessionParams`：身份与环境，每次调用现渲染）与**对话**（`dialogue`：只有发生过的事）分开；转录行带稳定 id；`TurnRun` + `build_round_lines`（**唯一的行构造点**）；`discussion_turn` = 讨论席那一回合（同一条循环 + 表态 + 逐轮落进它自己的会话） |
 
-## 二、`adapters/`（机制，实现 core 端口）
+## 三、`adapters/`（机制，实现 core 端口）
 
 | 文件 | 职责 |
 | --- | --- |
@@ -55,7 +64,7 @@
 | `fake_chat.rs` | 演示/测试通道：`FakeChat`（脚本回放）+ `DemoGateway`（无模型时回落） |
 | `log.rs` | `Log`：`logs/` 下按时间戳一份文件 |
 
-## 三、`presentation/`（呈现）
+## 四、`presentation/`（呈现）
 
 | 文件 | 职责 |
 | --- | --- |

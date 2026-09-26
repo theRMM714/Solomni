@@ -138,7 +138,7 @@ pub struct CollabSession {
     /// 信封修复端口（手写信封不合法时的无歧义补救）。
     repair: Arc<dyn crate::core::ports::EnvelopeRepair + Send + Sync>,
     /// 运行日志（工具循环里"输出被长度截断"这类事实落盘）。
-    log: Arc<dyn crate::core::ports::Log + Send + Sync>,
+    log: Arc<dyn crate::kernel::log::Log + Send + Sync>,
     /// 运行包库来源（工具可用性按它判定）。
     packages: Arc<dyn PackageSource + Send + Sync>,
     /// 本会话的执行选型（档位 + 运行包定版）。
@@ -168,7 +168,7 @@ impl CollabSession {
         tools: Arc<dyn ToolRunner + Send + Sync>,
         io: Arc<dyn SysIo + Send + Sync>,
         repair: Arc<dyn crate::core::ports::EnvelopeRepair + Send + Sync>,
-        log: Arc<dyn crate::core::ports::Log + Send + Sync>,
+        log: Arc<dyn crate::kernel::log::Log + Send + Sync>,
         packages: Arc<dyn PackageSource + Send + Sync>,
         spec: ExecSpec,
         roster: Vec<AgentMeta>,
@@ -1526,7 +1526,7 @@ impl CollabSession {
         tools: Arc<dyn ToolRunner + Send + Sync>,
         io: Arc<dyn SysIo + Send + Sync>,
         repair: Arc<dyn crate::core::ports::EnvelopeRepair + Send + Sync>,
-        log: Arc<dyn crate::core::ports::Log + Send + Sync>,
+        log: Arc<dyn crate::kernel::log::Log + Send + Sync>,
         packages: Arc<dyn PackageSource + Send + Sync>,
         meta: &SessionMeta,
         events: &[serde_json::Value],

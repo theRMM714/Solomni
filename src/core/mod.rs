@@ -42,11 +42,10 @@ use crate::core::module::Module;
 use crate::core::ports::Msg;
 use crate::core::prompt::Prompts;
 use crate::core::providers::{AppSettings, Channel, Settings};
+use crate::kernel::log::Log;
+use crate::kernel::types::SessionId;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
-
-/// 前端唯一的会话标识 = 工作名（用户的命名，也是将来落盘目录名）。
-pub type SessionId = String;
 
 /// 会话实例：单 agent 会话或协作会话（本体自带端口，可跨线程移动）。
 /// 两变体大小差得远（协作会话带整份讨论状态），装箱只换来一次间接寻址、
@@ -247,7 +246,7 @@ fn persist_policy_for(sid: &str) -> PersistPolicy {
 /// 两条路径各写一份的话，"什么算定稿、什么不落盘"迟早会不一致。
 pub(crate) fn persist_events(
     history: &dyn HistoryStore,
-    log: &dyn ports::Log,
+    log: &dyn Log,
     sid: &str,
     events: &[SessionEvent],
 ) -> Option<String> {
@@ -278,7 +277,7 @@ pub(crate) fn persist_events(
 #[derive(Clone)]
 pub(crate) struct Persister {
     history: Arc<dyn HistoryStore + Send + Sync>,
-    log: Arc<dyn ports::Log + Send + Sync>,
+    log: Arc<dyn Log + Send + Sync>,
     sid: String,
 }
 
@@ -380,7 +379,7 @@ pub struct Core {
     io: Arc<dyn SysIo + Send + Sync>,
     /// 信封修复端口（手写信封不合法时的无歧义补救；默认真现在 adapters，可整体替换）。
     repair: Arc<dyn ports::EnvelopeRepair + Send + Sync>,
-    log: Arc<dyn crate::core::ports::Log + Send + Sync>,
+    log: Arc<dyn crate::kernel::log::Log + Send + Sync>,
     settings: Settings,
     prompts: Prompts,
     sessions: HashMap<SessionId, Session>,
@@ -409,7 +408,7 @@ impl Core {
         io: Arc<dyn SysIo + Send + Sync>,
         repair: Arc<dyn ports::EnvelopeRepair + Send + Sync>,
         prompt_source: Box<dyn PromptSource>,
-        log: Arc<dyn crate::core::ports::Log + Send + Sync>,
+        log: Arc<dyn crate::kernel::log::Log + Send + Sync>,
     ) -> Result<Core, String> {
         let log_for_core = Arc::clone(&log);
         let outcome = (|| -> Result<Core, String> {
@@ -441,7 +440,7 @@ impl Core {
     }
 
     /// 日志端口句柄：入站手柄（core::api）与组合根共用同一份事实记录。
-    pub fn log_handle(&self) -> Arc<dyn crate::core::ports::Log + Send + Sync> {
+    pub fn log_handle(&self) -> Arc<dyn crate::kernel::log::Log + Send + Sync> {
         Arc::clone(&self.log)
     }
 

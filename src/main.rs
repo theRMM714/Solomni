@@ -4,6 +4,7 @@
 
 mod adapters;
 mod core;
+mod kernel;
 mod presentation;
 
 #[cfg(test)]
@@ -58,12 +59,12 @@ fn main() {
     }
 
     // 组合根：唯一允许 new 具体适配器的地方（依赖注入）。
-    let log: std::sync::Arc<dyn core::ports::Log + Send + Sync> =
+    let log: std::sync::Arc<dyn kernel::log::Log + Send + Sync> =
         match adapters::FileLog::new(&root, "Solomni 运行日志") {
             Ok(l) => std::sync::Arc::new(l),
             Err(e) => {
                 eprintln!("[日志系统异常] {}（进程继续，日志降级为 stderr）", e);
-                std::sync::Arc::new(core::ports::NoopLog)
+                std::sync::Arc::new(kernel::log::NoopLog)
             }
         };
     if let Some(note) = &root_note {
@@ -561,7 +562,7 @@ fn strip_unc_prefix(p: PathBuf) -> PathBuf {
 fn serve_web(
     ops: core::api::Ops,
     port: u16,
-    log: std::sync::Arc<dyn core::ports::Log + Send + Sync>,
+    log: std::sync::Arc<dyn kernel::log::Log + Send + Sync>,
     write_allowed: bool,
 ) {
     let cap = adapters::confine::capability();

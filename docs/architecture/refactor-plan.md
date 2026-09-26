@@ -140,7 +140,7 @@ capabilities/<name>/
 
 | 能力 | 类型 | 现有文件 | 状态所有权 | 端口 | 状态 |
 | --- | --- | --- | --- | --- | --- |
-| **kernel** | 内核 | `core/api.rs` 的 EventBus/JobRegistry/线程、`core/ports.rs` 的 Log、`adapters/log.rs` | 运行态（唯一真相）、事件台序号 | — | 未开始 |
+| **kernel** | 内核 | **已落位** `src/kernel/`（`jobs` / `log` / `types`） | 生成中作业表（取消标志） | — | **已完成**（批次 1；`bus` 与运行态合并推迟到批次 9，见 §3.2） |
 | **session** | 领域 | `core/session.rs`、`history.rs`、`collab_state.rs`、`events.rs` | 对话、转录行、行索引 | `HistoryStore` | 未开始 |
 | **llm** | 领域 | `core/providers.rs` 的 Channel 侧、`ports.rs` 的通道族 | 选型解析 | `Chat` `ChatGateway` `ModelCatalog` | 未开始 |
 | **tools** | 领域 | `core/systool.rs`、`patch.rs`、`schema.rs`、`roles.rs`、`fence.rs`、`workspace.rs` | 观察账本、围栏策略、工具面 | `SysIo` `ToolRunner` `FenceHost` `Workspace` | 未开始 |
@@ -153,18 +153,25 @@ capabilities/<name>/
 
 ### 3.2 kernel（机制型内核）
 
-只放**窄**接口，**不做通用"并发管理器"**：
+只放**窄**接口，**不做通用"并发管理器"**。**实际落位（批次 1 已完成）**：
 
-- `kernel/jobs`：`JobRegistry`——取消标志 + **运行态的唯一真相**；
-- `kernel/bus`：`EventBus`——事实发布，多消费者按 `since` 增量取；
+- `kernel/jobs`：`JobRegistry`——取消标志 + 生成中作业表；
 - `kernel/log`：`Log` trait + `NoopLog`；
-- `kernel/types`：`SessionId`、`Msg`、`Completion`、`Chunk`、`LlmOpts`、`CompleteOpts` 等**事实类型**（R6）。
+- `kernel/types`：`SessionId`（跨业务共享、**无领域逻辑**的事实类型，R6）。
 
 **命令队列不进内核的 trait**：它是 R5 的**不变式**，一旦做成可替换点，跨能力读改写的原子性就没了。
 
-**顺带修掉的重复真相**：今天 `Core.running: BTreeSet`（`mod.rs:391`）与
-`JobRegistry.running: Mutex<HashMap<_, Arc<AtomicBool>>>`（`api.rs:184`）是**两份运行态**，
-由两条路径各自维护、靠约定同步。收进 `kernel/jobs` 后合成一份。
+**三处按项目自己的判据推迟**（不是漏做）：
+
+- **`bus` 不进 kernel**：`EventBus` 的载荷是 `SessionEvent`，且 `tail_excluding` 直接调
+  `SessionEvent::to_json`——按 §2.2 的**领域词测试**它会"需要知道什么是回合/回复/工具执行"，
+  所以它**不是内核**；按 R3（DIP 只画在 IO 或可替换点上），为它加泛型也是无谓抽象（只有一个实例化）。
+  它属于**事件的线格式**，随 `session`（批次 9）一起落位。
+- **运行态的两份真相暂不合并**：`Core.running`（对象被工作线程取走）与 `JobRegistry.running`
+  （有可取消的作业）**语义不同**，只是今天的可观察区间重合；合并要先定"对象被取走算不算运行中"，
+  那是 `session` 的状态所有权问题，随批次 9 一起定。
+- **`Msg` / `Completion` / `Chunk` / `LlmOpts` / `CompleteOpts` 不进 kernel**：它们是**模型通道协议**，
+  归 `llm`（§3.3）。kernel 只收没有领域语义的类型。
 
 ### 3.3 领域型业务
 
@@ -408,7 +415,7 @@ kernel       ──▶ （无）
 | 批次 | 目标 | 现状 | 前置 | 状态 |
 | --- | --- | --- | --- | --- |
 | **0** | **依赖方向门禁**：T0 加 `use` 边检查 + 基线豁免清单 | 无门禁 | — | **已完成**（`run-tests.js` 的 T0 结构审查 + `tests/dependency-baseline.json`） |
-| **1** | **kernel**：`jobs` / `bus` / `log` / `types`；运行态合成一份 | `api.rs` 的 EventBus+JobRegistry+线程；`ports.rs` 的 Log | 0 | 未开始 |
+| **1** | **kernel**：`jobs` / `log` / `types`（`bus` 与运行态合并按 §3.2 推迟到批次 9） | `api.rs` 的 JobRegistry；`ports.rs` 的 Log；`core/mod.rs` 的 SessionId | 0 | **已完成**（`src/kernel/`） |
 | **2** | **修两处违约**：`exec.rs` 宿主探测下沉为端口；`presentation` 不再持 `Log`/`ProbeOutcome` | `exec.rs:357-384`；`web.rs:44,611` | 0 | 未开始 |
 | **3** | **prompt** | `prompt.rs` `refs.rs` | 1 | 未开始 |
 | **4** | **workspace**：`module` / `packages` / `exec` | `module.rs` `packages.rs` `exec.rs` | 2,3 | 未开始 |

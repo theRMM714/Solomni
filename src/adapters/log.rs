@@ -1,6 +1,6 @@
 //! 文件日志适配器：实现 core 的 Log 端口。
 //! 机制：每次运行在 logs/ 下按时间戳创建一个文件；逐行追加；进程内全局共享。
-use crate::core::ports::Log;
+use crate::kernel::log::Log;
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::path::PathBuf;

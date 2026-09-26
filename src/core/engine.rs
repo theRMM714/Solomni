@@ -94,7 +94,7 @@ pub struct MemberTools {
     /// 信封修复端口：手写信封不合法时先问它能不能按无歧义的写法修好（默认只转义裸控制字符）。
     pub repair: Arc<dyn crate::core::ports::EnvelopeRepair + Send + Sync>,
     /// 运行日志：模型输出被长度截断这类"看不见的事实"要落盘，供事后确定问题。
-    pub log: Arc<dyn crate::core::ports::Log + Send + Sync>,
+    pub log: Arc<dyn crate::kernel::log::Log + Send + Sync>,
     pub runner: Arc<dyn ToolRunner + Send + Sync>,
     /// 本成员的沙箱：内置文件工具的寻址与越界依据（权限收口在 core）。
     pub sandbox: crate::core::workspace::Sandbox,
