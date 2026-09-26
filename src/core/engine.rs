@@ -1267,6 +1267,7 @@ impl Discussion {
                     sub_session: None,
                     report: None,
                     acceptance: None,
+                    reported: false,
                 })
                 .collect(),
         };

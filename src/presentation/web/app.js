@@ -380,7 +380,11 @@ async function hydrateHistory(s) {
     const r = await api('GET', '/api/history/' + encodeURIComponent(s.sid));
     events = r.events || [];
   } catch (err) { eventError(err); }
-  const seen = new Set();
+  // 去重要把**本页已经收过的行**算进来：新页面是 since=0 从事件台重放起来的，那些行已经在 s.lines 里，
+  // 落盘历史只是补齐它们——不能整批再插一遍（否则刷新后记录翻倍：需求行、"yes" 各出现两次）。
+  const seen = new Set(
+    (s.lines || []).map((x) => x.id).filter((v) => typeof v === 'number')
+  );
   const apply = (ev) => {
     if (ev && ev.type === 'transcript') {
       const fresh = (ev.lines || []).filter((l) => !seen.has(l.id));

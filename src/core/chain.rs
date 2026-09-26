@@ -52,6 +52,10 @@ pub struct TaskNode {
     /// 验收结论（未验收 = None）。
     #[serde(default)]
     pub acceptance: Option<Acceptance>,
+    /// 它的"完成"有没有**当场报过**（用户看到的顺序：开工 → 完成 → 阶段通过/返工）。
+    /// 重派后由 reset_node 清掉，所以再完成会再报一次。
+    #[serde(default)]
+    pub reported: bool,
 }
 
 fn pending() -> NodeStatus {

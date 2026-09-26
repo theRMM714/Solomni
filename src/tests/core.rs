@@ -1367,6 +1367,7 @@ fn chain_node(id: &str, deps: &[&str]) -> crate::core::chain::TaskNode {
         sub_session: None,
         report: None,
         acceptance: None,
+        reported: false,
     }
 }
 
@@ -2512,6 +2513,28 @@ pub(crate) fn total_review_rework_names_the_nodes_and_only_they_are_redispatched
             .iter()
             .any(|e| matches!(e, SessionEvent::Notice(n) if n.contains("只重派这些"))),
         "如实说明只重派指名的那些"
+    );
+    // 用户看到的顺序：**完成**先报（节点提交那一刻），再是**返工提示**、最后那三句汇总。
+    let done_at = first
+        .iter()
+        .position(|e| matches!(e, SessionEvent::Report { id, .. } if id == "n1-1"));
+    let rework_at = first.iter().position(
+        |e| matches!(e, SessionEvent::Notice(n) if n.contains("[返工]") && n.contains("n1-1")),
+    );
+    let tail_at = first
+        .iter()
+        .position(|e| matches!(e, SessionEvent::Notice(n) if n.contains("只重派这些")));
+    assert!(
+        done_at.is_some() && rework_at.is_some(),
+        "要有「节点完成」与「返工提示」：{:?}",
+        first
+    );
+    assert!(
+        done_at < rework_at && rework_at < tail_at,
+        "顺序该是：节点完成 → 返工提示 → 汇总（{:?}/{:?}/{:?}）",
+        done_at,
+        rework_at,
+        tail_at
     );
     // **唤醒不能替用户点「继续」**：单纯再推一步（子会话完成叫醒走的就是这条）不该重派任何节点，
     // 否则"暂停等你定"形同虚设。

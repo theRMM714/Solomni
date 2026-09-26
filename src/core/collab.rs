@@ -520,6 +520,7 @@ impl CollabSession {
                 n.sub_session = None;
                 n.report = None;
                 n.acceptance = None;
+                n.reported = false; // 重派后"完成"要再报一次
             }
         }
     }
@@ -1100,6 +1101,38 @@ impl CollabSession {
             self.ask_user(Pending::PlanReview, sink);
             return;
         }
+        // **一提交就报完成**：节点 Done 但还没验收的那一步就是"完成"这一条（不是攒到总验收才报）。
+        // 用户看到的顺序因此是：谁 开工 → 谁 节点完成 → 阶段通过 / 返工。
+        let freshly: Vec<(String, String)> = self
+            .chain
+            .as_ref()
+            .map(|c| {
+                c.nodes
+                    .iter()
+                    .filter(|n| n.status == crate::core::chain::NodeStatus::Done && !n.reported)
+                    .map(|n| {
+                        (
+                            n.id.clone(),
+                            n.report
+                                .clone()
+                                .unwrap_or_else(|| "（该节点没有产出）".to_string()),
+                        )
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        for (id, text) in freshly {
+            if let Some(c) = self.chain.as_mut() {
+                if let Some(n) = c.nodes.iter_mut().find(|n| n.id == id) {
+                    n.reported = true;
+                }
+            }
+            sink(SessionEvent::Report {
+                id,
+                text,
+                rework: 0,
+            });
+        }
         // 等用户的事挂着（请教 / 方案待审 / 节点没过）：**泵不往下推**——唤醒（子会话完成、
         // 别的客户端动作）也不能替用户点「继续」，否则"暂停"形同虚设（真机上演过：总验收没过、
         // 本该停下等用户，节点子会话一完成就把那些节点又派了一遍）。重派在**用户那一步**做（见 resume）。
@@ -1211,6 +1244,18 @@ impl CollabSession {
                 .map(|(n, _, _)| n.clone())
                 .collect();
             if !bad.is_empty() {
+                // 每个没过节点单列一条**返工提示**（带核心给的原因），用户一眼看到要返工谁、差在哪。
+                for (node, ok, note) in &verdicts {
+                    if *ok {
+                        continue;
+                    }
+                    let why = note.trim();
+                    sink(SessionEvent::Notice(if why.is_empty() {
+                        format!("[返工] {}：没过（等用户点「继续」后只重派它）", node)
+                    } else {
+                        format!("[返工] {}：{}", node, why)
+                    }));
+                }
                 sink(SessionEvent::Notice(format!(
                     "[阶段 {} 验收] 没通过：{}。点「继续」后**只重派这些**（下一阶段先不开工）。",
                     stage,
@@ -1232,12 +1277,8 @@ impl CollabSession {
                 .report
                 .clone()
                 .unwrap_or_else(|| "（该节点没有产出）".to_string());
-            exec.reports.insert(n.id.clone(), note.clone());
-            sink(SessionEvent::Report {
-                id: n.id.clone(),
-                text: note,
-                rework: 0,
-            });
+            // 只把回报交给验收用；"[节点] 完成"那条在**节点提交那一刻**就报过了（见泵的"一提交就报完成"）。
+            exec.reports.insert(n.id.clone(), note);
         }
         // "节点 id — 负责人"对照表：模型只能从它里面选 rework。
         let table = self
@@ -1299,6 +1340,19 @@ impl CollabSession {
         // 没过 = 只把这些节点退回待办，等用户点「继续」后重派（不交付）。
         let bad = exec.rework_targets();
         if !bad.is_empty() {
+            // 每个要返工的节点单列一条（带核心给的原因）：用户一眼看到返工谁、差在哪。
+            for it in &exec.items {
+                if !it.status.eq_ignore_ascii_case("fail") {
+                    continue;
+                }
+                let node = it.rework.as_deref().unwrap_or("");
+                let why = it.reason.as_deref().unwrap_or("").trim();
+                sink(SessionEvent::Notice(if why.is_empty() {
+                    format!("[返工] {}：没过（等用户点「继续」后只重派它）", node)
+                } else {
+                    format!("[返工] {}：{}", node, why)
+                }));
+            }
             sink(SessionEvent::Notice(format!(
                 "[总验收] 没通过：{}。点「继续」后**只重派这些**（不交付）。",
                 bad.join("、")
