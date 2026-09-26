@@ -38,7 +38,7 @@
 ```text
 presentation ──▶ 各业务的 api
                       ▲
-   协调型业务（rewind / collab） ──▶ 领域型业务（session / llm / tools / registry / workspace / prompt）
+   协调型业务（collab） ──▶ 领域型业务（session / llm / tools / registry / workspace / prompt）
                       ▲                                   ▲
                       └──────────────  kernel  ───────────┘
                           （jobs / bus / log；只被依赖，不依赖任何人）
@@ -147,7 +147,7 @@ capabilities/<name>/
 | **prompt** | 领域 | `core/prompt.rs`、`refs.rs` | 提示词册 | `PromptSource` | 未开始 |
 | **registry** | 领域 | **已落位** `capabilities/registry/`（`providers` + `agents`） | 四份 yaml 的内存形态 | `SettingsStore` | **已完成**（批次 8） |
 | **workspace** | 领域 | **已落位** `capabilities/workspace/`（`module` + `packages` + `exec` + `workspace` 沙箱数据） | 清单快照、执行计划、沙箱寻址 | `ModuleSource` `PackageSource` `Workspace` | **已完成**（批次 10） |
-| **rewind** | 协调 | 散布 5 处（见 §3.6） | 只持自己的日志，**不持会话数据** | — | 未开始 |
+| ~~**rewind**~~ | ~~协调~~ | **改判：不是独立能力**——无独立状态所有权，归 `session`（见 §3.6） | — | — | **已并入批次 13** |
 | **collab** | 协调 | **已落位** `capabilities/collab/`（`collab` + `collab_state` + `engine`）（任务链的**数据与图算法**已落位 `kernel/chain.rs`，见批次 5） | 讨论游标、任务链、待裁决 | — | **已完成**（批次 14） |
 | **presentation** | 呈现 | `presentation/` | 界面状态 | — | 未开始 |
 
@@ -328,9 +328,9 @@ tools 自持一个就等于绕过状态所有权——**直接写别人的文件
 `session.compaction-send-view-not-truncated`（F1+F2）与 `session.compaction-not-replayed`（F3），
 **与批次 9（`session`）一并修**，不单独改两遍。
 
-### 3.6 rewind（协调型业务）
+### 3.6 rewind（**已定：归 `session`，不是独立能力**）
 
-**它拥有的不变式（没有任何参与方单独拥有）**：
+**它要保证的不变式**（仍然成立，但由 `session` 的 api 与 `Core` 的编排共同保证）：
 
 1. **按 reply 原子截断**——截在一次回复内部会留下"孤儿工具结果"，协议要求结果紧跟发起它的助手消息；
 2. **主/子会话按 turn 同步截断**——子会话不在主会话流水里，得各自回档；
@@ -338,28 +338,19 @@ tools 自持一个就等于绕过状态所有权——**直接写别人的文件
 4. **回档后工具账本作废**——宁可让模型重读一遍；
 5. **用户可见后果**——"回档删掉了其后 N 次工具执行，副作用不会回滚"。
 
-**为什么它是业务而不是脚本**：这 5 条跨越 `session` / `tools` / `history` / `collab_state` 四方，
-但没有一条属于其中任何一个；且它**已被当作原语复用**——`Core::update_task`（改需求）的实现就是
-"回档到需求行 + 追加新需求"（`mod.rs:2551`）。
+**为什么不是独立能力**：它读写的**全部状态**（转录行、`marks` / `line_reply` / `next_line`）都归 `session` 所有——它自己没有状态，不满足 §二「独立状态所有权」这条必要判据。下面的方案 A（索引留 `session`）本来就已经承认了这一点。
 
-**现状散布（5 处）**：
+**切法（批次 13 已完成）**：
 
 | 位置 | 内容 |
 | --- | --- |
-| `core/mod.rs` | `rewind`、`turn_of_line`、`last_line_within`、`rewind_children`、`truncate_events`、`cut_before_line`、`align_keep`、`line_reply_of`、`find_line_id`（≈250 行） |
-| `capabilities/session/domain/session.rs` | `rewind`、`keep_whole_replies`，及 `marks`/`line_reply`/`next_line` 字段与 15 处簿记 |
-| `capabilities/collab/domain/collab_state.rs` | `tool_runs()`——算"删掉了几次工具执行" |
+| `capabilities/session/domain/rewind.rs` | **纯行 / 事件算术**：`turn_of_line`、`last_line_within`、`truncate_events`、`cut_before_line`、`align_keep`、`line_reply_of`、`find_line_id` |
+| `capabilities/session/domain/session.rs` | `AgentSession::rewind`、`keep_whole_replies`，及 `marks` / `line_reply` / `next_line` 与簿记 |
+| `capabilities/collab/domain/collab_state.rs` | `tool_runs()`——算"删掉了几次工具执行"（经 `collab::api`） |
 | `capabilities/session/domain/history.rs` | append-only 的 `rewind` 记录协议 |
-| `core/mod.rs` | `rebuild_session`（177 行）——协作会话回档走整段重建 |
+| `core/mod.rs`（**门面，保留**） | `rewind` 编排、`rewind_children`（撤子会话）、`rebuild_session`（整段重建）——要装配端口、走历史流水、驱动多个会话，是组合根职责 |
 
-**越界耦合（切出来正好消掉）**：`AgentSession::rewind` 里 `t.observations.clear()`
-（`session.rs:421-423`）——会话的回档操作伸手改了**工具能力**的内部状态。
-
-**约束**：
-
-- `api` 必须是领域词：`rewind(sid, keep_id)` ✔；`set_dialogue_length(sid, n)` ✘；
-- **无状态**（或只持自己的日志），不得持有会话数据；
-- 参与方**不得反向调用它**——现状的边是干净的（调用点只有 `api.rs:1103` 入站与 `mod.rs:2551` 内部复用），切分不会引入环 ✔。
+**越界耦合已消**：`AgentSession::rewind` 里 `t.observations.clear()` 伸手改工具账本——`MemberTools` 已在批次 12a 归 `session`，所以这不再是跨能力越界。
 
 **`marks`/`line_reply` 归谁（已定：方案 A）**
 
@@ -380,20 +371,26 @@ tools 自持一个就等于绕过状态所有权——**直接写别人的文件
 
 ### 3.8 目标依赖图（必须无环）
 
+**目标**：
+
 ```text
-presentation ──▶ {session, llm, tools, prompt, registry, workspace, rewind, collab, kernel} 的 api
-rewind       ──▶ session, tools
+presentation ──▶ {session, llm, tools, prompt, registry, workspace, collab, kernel} 的声明面
 collab       ──▶ session, llm, tools, prompt, registry, workspace
-tools        ──▶ prompt, workspace, kernel
-session      ──▶ kernel
+session      ──▶ llm, tools, prompt, kernel
+registry     ──▶ session, prompt, workspace, kernel
+tools        ──▶ llm, prompt, workspace, kernel
 llm          ──▶ kernel
-registry     ──▶ kernel
-workspace    ──▶ kernel
+workspace    ──▶ prompt, kernel
 prompt       ──▶ kernel
 kernel       ──▶ （无）
 ```
 
-`rewind` 与 `collab` 同层，允许 `collab → rewind`（改需求复用回档），但**禁止反向**。
+**现状（批次 14 结束时）**：还差一处真环 `llm → registry → session → llm`——
+`llm` 要 `registry::api::Channel`（解析结果），`registry` 要 `session::api::AgentMeta`（代拟名单），
+`session` 要 `llm::api::BoxedChat`（对话通道）。**批次 15 的收口项**：把 `Channel` 从 `registry` 移到 `llm`
+（它是通道的配置事实），三条边随即变成 `registry → llm` + `session → llm`，环消。
+
+`rewind` 不再是能力（见 §3.6），`collab` 的改需求复用回档改为经 `core` 门面。
 
 ---
 
@@ -438,7 +435,7 @@ kernel       ──▶ （无）
 | **10** | **workspace 能力落位**：`module` / `packages` / `exec` / `workspace`（沙箱数据）+ 三个端口；**前置（批次 9 暴露的桥）已先切**：把协议→文案的映射移进 `llm`（模板仍留 `prompt`） | 6, 9 | **已完成**（`prompt` 零外部依赖、彻底脱环；环 15 → **12**；两处自动清零：`registry → core::module`、`presentation → core::exec`；`HostProbe` 下沉 `kernel/host.rs`） |
 | **11** | **tools 能力落位**：`capabilities/tools/`（`systool` / `patch` / `schema` / `roles` / `fence`）+ 三个端口；钉死 §3.4（实现锁内部、机制留端口、产出事实不落盘） | 10 | **已完成**（环 12 → **8**；批次 10 的两条反向边自动清零；1 条新反向边 `→ core::session`；`core/ports.rs` 只剩 `HistoryStore`） |
 | **12** | **session 能力落位**：`capabilities/session/`（`session` + `history` + `events`）+ `HistoryStore`。**12a** 循环反转切掉 `engine ⇄ session`；**12b** 提取能力 | 11 | **已完成**（**反向边基线清空**——没有任何能力再依赖 `core`；环 7 → **5**，且 5 个节点全是能力、`core` 完全脱环；`core/ports.rs` 消失） |
-| **13** | **rewind**（协调型；`marks` 归属方案 A） | 12 | 未开始 |
+| **13** | **rewind 归位**：纯行 / 事件算术进 `capabilities/session/domain/rewind.rs`；`Core` 保留编排（`rewind` / `rewind_children` / `rebuild_session`） | 12 | **已完成**（`marks` 归属方案 A 照旧；无新增依赖边） |
 | **14** | **collab 能力落位**：`capabilities/collab/`（`collab` + `collab_state` + `engine`）。**执行顺序调整**：先做 14 再做 13——`rewind` 的回档重建要同时碰 `session` 与 `collab` 两侧，两边就位后才切得干净（已获用户同意） | 12 | **已完成**（环不变——`capabilities/collab` **不在环里**：没有任何它依赖的能力反过来依赖它；`core/` 只剩 `api.rs` + `mod.rs`） |
 | **15** | **presentation 收口 + 前端分区**：只 `use` 各业务 `api`；`app.js` 分区 | 14 | 未开始 |
 

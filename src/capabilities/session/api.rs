@@ -5,6 +5,9 @@ pub use crate::capabilities::session::domain::events::{
     SessionEvent, ToolCallView,
 };
 pub use crate::capabilities::session::domain::history::{AgentMeta, HistoryView, SessionMeta};
+pub use crate::capabilities::session::domain::rewind::{
+    find_line_id, last_line_within, truncate_events, turn_of_line,
+};
 pub use crate::capabilities::session::domain::session::{
     keep_whole_replies, stream_piece, AgentSession, MemberTools, ModuleTools, SessionParams,
     TurnRun,

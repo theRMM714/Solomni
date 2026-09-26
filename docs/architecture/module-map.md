@@ -19,7 +19,7 @@
 
 | 文件 | 职责 |
 | --- | --- |
-| `mod.rs` | 核心层入口与 `Core` 门面：会话中心、登记处编排、运行包报告 |
+| `mod.rs` | 核心层入口与 `Core` 门面：会话中心、登记处编排、运行包报告、**回档编排**（`rewind` / `rewind_children` / `rebuild_session`——纯算术在 `capabilities/session/domain/rewind.rs`） |
 | `api.rs` | **入站契约**：五个按角色的能力接口（`SessionOps` / `RegistryOps` / `HistoryOps` / `DiscoveryOps` / `LogOps`）+ `CoreHandle`（核心自有线程、命令/事件）+ `EventBus`；单 agent 与协作长步骤的生成都在**工作线程**上跑（队列只占"取/交"两步） |
 | `engine.rs` | 讨论/执行/验收的引擎；**唯一的轮循环** `converse_with`（单 agent / 节点 / 讨论席共用：表态与工具形态、按声明调度的并发、逐轮外送）；**唯一的请求装配点** `assemble`；**回合驱动**（`say` / `dispatch_task` / `discussion_turn` / `continue_reply` / `compact_turn` / `run_rounds` / `run`——批次 12a 从 `session.rs` 搬来，依赖方向才是 `engine → session`）；`build_round_lines`（**唯一的行构造点**） |
 
@@ -79,6 +79,7 @@
 | `session/domain/session.rs` | 会话状态与簿记 + 工具面 `MemberTools` / `ModuleTools`（从 `core/session.rs` 搬来） |
 | `session/domain/history.rs` | 会话元信息与历史视图的内存形态（从 `core/history.rs` 搬来） |
 | `session/domain/events.rs` | 呈现侧契约：`SessionEvent` 与介入请求的词汇、转录行 `LineView`（从 `core/events.rs` 搬来） |
+| `session/domain/rewind.rs` | 回档的**纯行 / 事件算术**：`turn_of_line` / `last_line_within` / `truncate_events` / `cut_before_line` / `align_keep` / `line_reply_of` / `find_line_id`（从 `core/mod.rs` 搬来；**编排留在门面**） |
 | `collab/api.rs` | **入站能力面**：`CollabSession` / 讨论与执行引擎 / 回合与验收词汇 / 协作状态派生的对外名字 |
 | `collab/domain/collab.rs` | 协作会话状态机与讨论泵（从 `core/collab.rs` 搬来） |
 | `collab/domain/engine.rs` | 讨论/执行/验收引擎 + **唯一的轮循环** `converse_with` + **唯一的请求装配点** `assemble` + 回合驱动 + 行构造（从 `core/engine.rs` 搬来） |

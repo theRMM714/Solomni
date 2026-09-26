@@ -2091,7 +2091,10 @@ impl Core {
         name: &str,
     ) -> Result<(SessionMeta, Vec<serde_json::Value>), String> {
         let (meta, events) = self.history.load(name)?;
-        Ok((meta, truncate_events(&events)))
+        Ok((
+            meta,
+            crate::capabilities::session::api::truncate_events(&events),
+        ))
     }
 
     /// 删除会话（= 删目录）。内存中的同名会话一并移除，避免内存与磁盘不一致。
@@ -2524,7 +2527,7 @@ impl Core {
             self.ensure_session(sid)?;
         }
         let (meta, raw_before) = self.history.load(sid)?;
-        let before = truncate_events(&raw_before);
+        let before = crate::capabilities::session::api::truncate_events(&raw_before);
         self.history
             .append(
                 sid,
@@ -2532,7 +2535,7 @@ impl Core {
             )
             .map_err(|e| format!("回档落盘失败：{}", e))?;
         let (_, raw_after) = self.history.load(sid)?;
-        let after = truncate_events(&raw_after);
+        let after = crate::capabilities::session::api::truncate_events(&raw_after);
         if precise {
             if let Some(Session::Single(s)) = self.sessions.get_mut(sid) {
                 s.rewind(keep_id);
@@ -2544,7 +2547,7 @@ impl Core {
         // **回档同步**：主会话回到第 keep_id 行，各 agent 会话按同一个**回合 id** 同步截断
         // （见 docs/architecture/session-model.md 五）——子会话不在主会话的流水里，得各自回档。
         if !precise {
-            let keep_turn = Self::turn_of_line(&before, keep_id);
+            let keep_turn = crate::capabilities::session::api::turn_of_line(&before, keep_id);
             self.rewind_children(sid, keep_turn)?;
         }
         let dropped = crate::capabilities::collab::api::tool_runs(&before)
@@ -2557,39 +2560,6 @@ impl Core {
             }));
         }
         Ok(out)
-    }
-
-    /// 主会话第 keep_id 行所属的**回合**（没有 = 0）。
-    fn turn_of_line(events: &[serde_json::Value], keep_id: u64) -> u64 {
-        for ev in events {
-            if let Some(lines) = ev.get("lines").and_then(|l| l.as_array()) {
-                for l in lines {
-                    if l.get("id").and_then(|i| i.as_u64()) == Some(keep_id) {
-                        return l.get("turn").and_then(|t| t.as_u64()).unwrap_or(0);
-                    }
-                }
-            }
-        }
-        0
-    }
-
-    /// 最后一个 `turn ≤ keep_turn` 的行的 id（没有 = 0 = 该会话全部截掉）。
-    fn last_line_within(events: &[serde_json::Value], keep_turn: u64) -> u64 {
-        // 规则：**从第一行超出保留点的行开始全截掉**（turn = 0 的行不属于任何回合，
-        // 跟着它前面那一回合走——用户插话、需求这类行因此不会被误删）。
-        let mut cut = 0u64;
-        for ev in events {
-            if let Some(lines) = ev.get("lines").and_then(|l| l.as_array()) {
-                for l in lines {
-                    let t = l.get("turn").and_then(|t| t.as_u64()).unwrap_or(0);
-                    if t > keep_turn {
-                        return l.get("id").and_then(|i| i.as_u64()).unwrap_or(0);
-                    }
-                    cut = l.get("id").and_then(|i| i.as_u64()).unwrap_or(cut) + 1;
-                }
-            }
-        }
-        cut
     }
 
     /// 主会话回档后，把各 agent 会话**同步**截断到"最后一个回合 ≤ T 的行"。
@@ -2606,7 +2576,10 @@ impl Core {
                 continue;
             }
             let (_, events) = self.history.load(&kid)?;
-            let keep = Self::last_line_within(&truncate_events(&events), keep_turn);
+            let keep = crate::capabilities::session::api::last_line_within(
+                &crate::capabilities::session::api::truncate_events(&events),
+                keep_turn,
+            );
             self.history
                 .append(
                     &kid,
@@ -2630,8 +2603,10 @@ impl Core {
         self.ensure_session(sid)?;
         let (_, events) = self.history_open(sid)?;
         // 需求行按**结构化字段**认（种类=user、动词=需求），不匹配正文。
-        let keep = find_line_id(&events, |l| l.kind == "user" && l.verb == "需求")
-            .ok_or("该会话没有需求行")?;
+        let keep = crate::capabilities::session::api::find_line_id(&events, |l| {
+            l.kind == "user" && l.verb == "需求"
+        })
+        .ok_or("该会话没有需求行")?;
         // 回档语义是「保留 id < keep」：需求行本身要留下（旧需求留在流水里），所以传 keep + 1。
         let mut out = self.rewind(sid, keep + 1)?;
         let mut fresh = Vec::new();
@@ -2927,23 +2902,6 @@ impl Core {
 /// 继续被拦下时的提醒（单 agent 会话：该轮到用户发言）。
 const NEED_USER: &str = "最后一条是 AI 发言：部分供应商不允许连续 AI 发言；请先发言再继续。";
 
-/// 应用流水里的 rewind 记录：会话内容 = 回放时只保留「id < keep」的转录行（回档 = 删该行及其后）。
-fn truncate_events(events: &[serde_json::Value]) -> Vec<serde_json::Value> {
-    let mut content: Vec<serde_json::Value> = Vec::new();
-    for ev in events {
-        match ev.get("type").and_then(|t| t.as_str()) {
-            Some("rewind") => {
-                // 缺 keep 字段 = 不截断（安全默认：宁可多留，不可清空一切）。
-                if let Some(keep) = ev.get("keep").and_then(|k| k.as_u64()) {
-                    content = cut_before_line(&content, keep);
-                }
-            }
-            _ => content.push(ev.clone()),
-        }
-    }
-    content
-}
-
 /// 会话列表按**树序**排：顶层保持后端给的时间倒序，每个会话后面**紧跟**它的子会话
 /// （子会话内部同样按时间倒序），深度优先。
 /// 为什么必须在后端做：顺序与缩进是同一件事的两面——前端各排各的，就会出现子会话排在父会话上面。
@@ -2975,103 +2933,6 @@ pub(crate) fn tree_order(list: Vec<HistoryView>) -> Vec<HistoryView> {
         out.extend(v);
     }
     out
-}
-
-/// 只保留「转录行 id < keep」的行（回档 = 删除该行及其后；keep = 0 → 转录清空）。
-/// 一旦某条事件里的行被截掉，其后的事件一并丢弃（事件流是时序的）。
-fn cut_before_line(events: &[serde_json::Value], keep: u64) -> Vec<serde_json::Value> {
-    let keep = align_keep(events, keep);
-    let mut out = Vec::new();
-    for ev in events {
-        if ev.get("type").and_then(|t| t.as_str()) == Some("transcript") {
-            if let Some(lines) = ev.get("lines").and_then(|l| l.as_array()) {
-                let kept: Vec<serde_json::Value> = lines
-                    .iter()
-                    .take_while(|l| {
-                        l.get("id")
-                            .and_then(|i| i.as_u64())
-                            .map(|i| i < keep)
-                            .unwrap_or(false)
-                    })
-                    .cloned()
-                    .collect();
-                let done = kept.len() < lines.len();
-                if !kept.is_empty() {
-                    let mut e2 = ev.clone();
-                    e2["lines"] = serde_json::Value::Array(kept);
-                    out.push(e2);
-                }
-                if done {
-                    return out;
-                }
-            }
-        } else {
-            out.push(ev.clone());
-        }
-    }
-    out
-}
-
-/// 把"保留 id < keep"对齐到**回复边界**（见 crate::capabilities::session::api::keep_whole_replies）：
-/// keep 落在某次回复内部时退到该回复第一行之前，返回新的 keep（没有这样的行 = u64::MAX，即不截）。
-fn align_keep(events: &[serde_json::Value], keep: u64) -> u64 {
-    let rows: Vec<&serde_json::Value> = events
-        .iter()
-        .filter(|e| e.get("type").and_then(|t| t.as_str()) == Some("transcript"))
-        .filter_map(|e| e.get("lines").and_then(|l| l.as_array()))
-        .flatten()
-        .collect();
-    let idx = rows
-        .iter()
-        .position(|l| {
-            l.get("id")
-                .and_then(|i| i.as_u64())
-                .map(|i| i >= keep)
-                .unwrap_or(false)
-        })
-        .unwrap_or(rows.len());
-    let replies: Vec<u64> = rows.iter().map(|l| line_reply_of(l)).collect();
-    let aligned = crate::capabilities::session::api::keep_whole_replies(&replies, idx);
-    rows.get(aligned)
-        .and_then(|l| l.get("id").and_then(|i| i.as_u64()))
-        .unwrap_or(u64::MAX)
-}
-
-/// 一行属于哪次回复：工具行的号在调用视图里，其余行在 LineView 上。
-/// 号 = 0 视为"没写"（回复号从 1 起），此时用**该行自己的 id**——绝不把相邻行误并成一组。
-fn line_reply_of(l: &serde_json::Value) -> u64 {
-    let own = l.get("id").and_then(|i| i.as_u64()).unwrap_or(0);
-    let stored = match l.get("tool") {
-        Some(t) => t.get("reply").and_then(|x| x.as_u64()),
-        None => l.get("reply").and_then(|x| x.as_u64()),
-    };
-    stored.filter(|r| *r != 0).unwrap_or(own)
-}
-
-/// 找最后一条满足条件的转录行的 id（按**结构化字段**判，不匹配正文）。
-fn find_line_id(
-    events: &[serde_json::Value],
-    pick: impl Fn(&crate::capabilities::session::api::LineView) -> bool,
-) -> Option<u64> {
-    let mut found = None;
-    for ev in events {
-        if ev.get("type").and_then(|t| t.as_str()) != Some("transcript") {
-            continue;
-        }
-        let Some(lines) = ev.get("lines").and_then(|l| l.as_array()) else {
-            continue;
-        };
-        for l in lines {
-            if let Ok(v) =
-                serde_json::from_value::<crate::capabilities::session::api::LineView>(l.clone())
-            {
-                if pick(&v) {
-                    found = Some(v.id);
-                }
-            }
-        }
-    }
-    found
 }
 
 /// 会话是否「已经开过」（流水里有内容）：agent 名单与形态据此冻结。配置记录与回档记录不算内容。
