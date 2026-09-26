@@ -1,0 +1,166 @@
+[e2e] 夹具解释器：python → /usr/bin/python
+[e2e] 真模块已复制进夹具：harvest / render / indexer
+[e2e] 试编译器：c++
+c++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0
+Copyright (C) 2023 Free Software Foundation, Inc.
+This is free software; see the source for copying conditions.  There is NO
+warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+
+[e2e] indexer 就绪：modules/indexer/build/indexer（135808 字节）
+MOCK-UP 8480
+[围栏] Linux：Landlock（ABI 7）强制文件系统可达范围；出站网络不围栏
+[围栏] 本机能力：文件系统=可用 断网=不可用 进程树=可用（Linux：Landlock（ABI 7）强制文件系统可达范围；出站网络不围栏）
+[围栏] 本次实际：文件系统=可用 断网=不可用 进程树=可用；容器授权=已授权；只读根=0 个（未授权时只放行进程树与资源上限，不写本机任何权限项；要启用：设置里打开，或 .home/settings.yaml 写 fence_write: true / fence_read: [路径…]）
+Solomni 转录中心：http://127.0.0.1:3099（只监听本机）
+PASS GET /api/state 带 agents
+PASS 登记供应商
+PASS 登记模型 m1
+PASS 登记模型 m2
+PASS 设核心默认 m1
+PASS 登记 agent 单兵
+PASS 登记 agent 双子（2 模块 / m2）
+PASS POST /api/suggest-models(mode=single)
+PASS 复用项带 reuse=true
+PASS 复用沿用登记处的模型（不代拟）
+PASS 复用带全部模块（不截断）
+PASS 建单 agent 工作
+PASS meta.mode = single
+PASS 单 agent 发言
+PASS 内置 write 落在该 agent 私沙箱
+PASS 一次工具循环 = 用户行 + 工具行 + 文本行（id 连续）
+PASS 工具调用是一条 tool 行（内置工具 module 为空）
+PASS 最后一行是纯文本行
+PASS 回档到第一行
+PASS 删除第一行后转录清空
+PASS 建单 agent 工作（1 个 agent 带 2 个模块）
+PASS meta 记录了该 agent 的两个模块
+PASS 多模块 agent 发言
+PASS 外部工具用它自己模块的目录当 cwd 并成功（落成 tool 行）
+PASS 工具结果原文进了转录（重启/回档后仍可回放）
+PASS 漏写 module 时仍能发言（不崩）
+PASS 漏写 module → tool 行记为失败并如实说明
+PASS 报错里列出可用的 模块.工具
+PASS 上传同名返回 409（不静默覆盖）
+PASS 投喂落在 work/
+PASS GET /files 列出共享区文件
+PASS /files 列出该 agent 沙箱里的成品
+PASS /files 返回共享区真实根（/ 分隔）
+PASS /files 返回 agent 沙箱真实根（与 agents 同序同名）
+PASS @ 引用发言
+PASS 核心把 @work:… 改写成真实绝对路径
+PASS 带句读的引用发言
+PASS 句读标点不入路径（留在正文里）
+PASS 上传含空格文件名的文件
+PASS 引用含空格文件名
+PASS 引号内的空格路径被完整改写（真实路径）
+PASS 建「坏信封」工作
+PASS 非法信封发言
+PASS 非法信封 → 一条 ok=false 的工具行（名字打捞为 write）
+PASS 非法信封的 JSON 没有上屏
+PASS 非法信封没有被执行（沙箱里没有 a.md）
+PASS 建「半截信封」工作
+PASS 半截信封发言
+PASS 未闭合信封也记成失败的工具行
+PASS 正文被保留下来（未闭合的坏 JSON 没有混进去）
+PASS 未闭合信封的 JSON 没有上屏
+PASS 建「绝对路径」工作
+PASS 投喂 g.txt
+PASS 绝对路径发言
+PASS 模块的外部工具用真实绝对路径读到了用户投喂的文件
+PASS 工具真的读到了内容（cwd 与路径都对）
+PASS 建「补丁」工作
+PASS 补丁发言
+PASS 自由格式补丁落成一条成功的工具行
+PASS 补丁真的写下了文件
+PASS 补丁内容原样落盘（引号/换行/中文都没被转义）
+PASS 补丁正文与它后面的散话都没有上屏（它是工具输入，不是发言）
+PASS 建引用私沙的协作工作
+PASS 协作里引用私沙 → 改写并如实说明只有该 agent 能读
+PASS 改写后不残留路径尾巴（扩展名没被句读切断）
+PASS 建「正文+工具」工作
+PASS 「正文+工具」发言
+PASS 正文行 + tool 行 + 答复行（4 条，id 连续）
+PASS 工具轮的正文进了转录且不含 JSON
+PASS 正文之后紧跟工具卡片
+PASS 整条转录里没有信封 JSON
+PASS 建协作工作（2 个 agent）
+PASS 确认开始讨论
+PASS 子会话事件台带它自己的权威发言行（说话人与动词是结构化字段）
+PASS 子会话事件台带运行态（在跑/收尾）
+PASS 方案待审：快照里带核心 AI 的建议
+PASS 审查关卡：明确开工
+PASS 用户回应后由核心 AI 判定"明确"并开工
+PASS 协作转录以 agent 名为说话人
+PASS 协作跑完并交付
+PASS 两个 agent 各自沙箱目录已建
+PASS 建代拟工作（无名单）
+PASS 核心已代拟名单
+PASS 确认代拟名单
+PASS 名单写回 meta.yaml（复用项 + 组装项）
+PASS 复用项记为非常驻（transient: false）
+PASS 组装项记为临时（transient: true）
+PASS 确认名单后按 agent 名建出沙箱目录
+PASS 代拟名单后开始讨论
+PASS 审查关卡：明确开工
+PASS 代拟出来的 agent 真的在发言
+PASS 建「不收敛」协作工作
+PASS 「不收敛」开始讨论
+PASS 有人同意、有人没同意 → 不收敛，进入下一轮
+PASS 未收敛时不交付
+PASS 建「退场」协作工作
+PASS 「退场」开始讨论
+PASS 审查关卡：明确开工
+PASS 甲发了 leave
+PASS leave 不可逆：退场之后甲不再发言
+PASS 退场者不算门槛：剩下的人同意即收敛并交付
+PASS 建「上限」协作工作
+PASS 「上限」开始讨论
+PASS 触上限要如实说明并交用户裁决
+PASS 建「返工」协作工作
+PASS 「返工」开始讨论
+PASS 审查关卡：明确开工
+PASS 总验收没过要指名要返工的节点 id（结构化字段，不是自由文本）
+PASS 点「继续」重派指名的节点
+PASS 验收 fail → 触发返工
+PASS 返工后重验通过并交付
+PASS 建「撤回」协作工作
+PASS 「撤回」开始讨论
+PASS 撤回乙的同意
+PASS 撤回如实进转录（说话人/动词/正文都是结构化字段）
+PASS 建「提问」协作工作
+PASS 「提问」开始讨论（不授权自裁）
+PASS ask 中止轮转并把问题呈给用户（快照里带待裁决）
+PASS 回答 ask 后继续
+PASS 用户回答并入转录（进上下文）
+PASS 建「真工具」工作（harvest + indexer）
+PASS 投喂甲.md
+PASS 投喂乙.md
+PASS 「真工具」发言
+   工具 harvest.scan 成功 → 语料清单：/home/runner/work/Solomni/Solomni/tests/cross-platform/e2e/root/session/e2e-realtools-1790412557927/work/corpus.jsonl 文件 2 份（md 2） 合计 46 字符 / 6 行 最大的几份：甲.md(26) 乙.md(20) 链接 0 条（相对 0 / 外链 0） 
+   工具 indexer.build 成功 → 已建索引：/home/runner/work/Solomni/Solomni/tests/cross-platform/e2e/root/session/e2e-realtools-1790412557927/work/index.bin 文档 2 篇，词项 18 个，文件 626 字节 
+   工具 indexer.query 成功 → 命中 2 篇（索引 2 篇，显示前 2 篇）；格式：命中token数 <TAB> rel <TAB> 摘要 1 乙.md # 乙 本地优先的检索：离线查更稳。 1 甲.md # 甲 本地优先的检索：索引建好之后可以离线查。 
+   工具 .submit_report 成功 → summary：语料与索引都做好了 changes：corpus.jsonl 与 index.bin
+   共享区存在吗：true（/home/runner/work/Solomni/Solomni/tests/cross-platform/e2e/root/session/e2e-realtools-1790412557927/work）
+PASS harvest.scan 真的跑了（python 工具进程）
+PASS corpus.jsonl 真的落地
+PASS indexer.build 真的跑了（C++ 工具进程）
+PASS index.bin 真的落地
+PASS indexer.query 真的跑了并成功
+PASS query 有命中（不是空结果兜底）
+PASS 探针判这条通道支持原生工具调用
+PASS 探测结论写回登记处（mode=native）
+PASS 关流式（本场景用）
+PASS 建「原生多调用」工作
+PASS 原生多调用发言
+PASS 一次回复里的两个调用各成一条工具行
+PASS 工具行记下供应商给的调用 id
+PASS 同一次回复的工具行同号（回档按它原子截断）
+PASS 两个调用都真的执行了
+PASS 两个调用各写下一个文件（顺序内的两个都真的跑了）
+PASS 原生通道的转录里没有信封 JSON
+PASS 发回去的历史是协议形状（一条助手消息带 tool_calls + 两条 role=tool）
+PASS 结果消息用 tool_call_id 各回应自己的调用
+PASS 恢复流式
+E2E-DONE exitCode=0
+E2E-OK
+[e2e] 围栏回收（退出码 0）：[围栏] 清理完成：本平台的围栏不留权限项，无需清理 | [围栏] 清理完成：扫掉 0 个本程序建过的容器 profile
