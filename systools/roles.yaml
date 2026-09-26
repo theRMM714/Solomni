@@ -1,0 +1,27 @@
+# 角色表：这个**身份有什么**（唯一真相：引用的系统工具 id + 提示词）。
+# 角色 = 场景绑定的身份：discussant 只存在于讨论阶段，orchestrator 只存在于任务链推进阶段。
+# 只引用**系统工具**：模块工具是"这个 agent 的能力"，按成员归属自动获得，不是角色属性。
+# module_tools（默认否）= 这个身份**能不能用它自己模块的工具**：讨论席发不到（它不干活），执行席发。
+# 不做角色继承：重复列几个 id 没有代价，继承会引入隐式耦合。
+#
+# 引用的 id 必须在 systools/tools.yaml 里存在——悬空引用会被测试门禁挡下（不靠人看）。
+
+roles:
+  # 讨论阶段：发言 + 表态，外加文件域（讨论可以读资料）。
+  discussant:
+    prompt: roles/discussant
+    tools: [say, agree, leave, ask, read, list, search]
+  # 任务执行（子会话）：文件域 + 提交验收；模块工具按成员归属自动获得（module_tools: true）。
+  # 执行者不讨论：它不拿讨论动词（拿了也调不动——越权会被如实拒绝）。
+  executor:
+    prompt: roles/executor
+    tools: [read, list, write, edit, patch, search, submit_report]
+    module_tools: true
+  # 核心·整理派发：总结讨论、出方案与任务链（读类 + 写链）。
+  planner:
+    prompt: roles/planner
+    tools: [read, search, plan, slate, suggest, verdict]
+  # 核心·链中推进：读状态、验收、推进（读类 + 判定）。
+  orchestrator:
+    prompt: roles/orchestrator
+    tools: [read, search, node_verdict, checklist]

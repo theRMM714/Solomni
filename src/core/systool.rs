@@ -1,6 +1,6 @@
 //! 核心自带的内置工具：read / write / edit / search。
 //! 策略在 core（名字固定、放行、寻址、根内校验、参数校验、改动前的"读过"证据、回执文案）；机制在 SysIo 端口（适配层）。
-//! **参数契约不在本文件里**：声明在 prompts.yaml 的 builtin_tools，本文件只按声明校验、取缺省值与拼回执。
+//! **参数契约不在本文件里**：声明在 systools/tools.yaml 的 tools，本文件只按声明校验、取缺省值与拼回执。
 //! 存在的理由：读盘落盘不经过任何外部进程，编码问题不进本程序——模型自己看内容自己决定。
 //! 路径一律是真实绝对路径（根目录经提示词册如实告知）；模块声明的外部工具与内置工具用同一套路径。
 
@@ -15,6 +15,7 @@ pub const READ: &str = "read";
 pub const WRITE: &str = "write";
 pub const EDIT: &str = "edit";
 pub const PATCH: &str = "patch";
+pub const LIST: &str = "list";
 pub const SEARCH: &str = "search";
 
 /// 单次读取回传的字符上限（超出如实截断，并在回执里给出接着读的 offset）。
@@ -29,10 +30,20 @@ pub const MAX_SEARCH_LINE_CHARS: usize = 300;
 /// 写进模块目录的标记：回执里带上它，给模型看；工具轨迹据此给用户一句可见提示（同一常量，两处共用）。
 pub const MODULE_WRITE_MARK: &str = "[模块目录]";
 
+/// 执行席的**回报**工具：不碰文件，只把"做完了什么"承载成一次工具调用。
+/// 为什么是工具而不是正文 JSON：回报会驱动核心（判节点完成），属于核心操作（见 tools-and-roles.md）。
+pub const REPORT: &str = "submit_report";
+
 /// 内置工具名（保留名）。
-/// 与 prompts.yaml 的 builtin_tools 是同一份名单，测试「builtin_tool_book_is_the_one_source_of_names_and_paths」锁死两者一致。
+/// 与 systools/tools.yaml 的 tools 是同一份名单，测试「builtin_tool_book_is_the_one_source_of_names_and_paths」锁死两者一致。
 pub fn is_builtin(name: &str) -> bool {
-    name == READ || name == WRITE || name == EDIT || name == PATCH || name == SEARCH
+    name == READ
+        || name == WRITE
+        || name == EDIT
+        || name == PATCH
+        || name == LIST
+        || name == SEARCH
+        || name == REPORT
 }
 
 /// 内置工具名清单（拼错误提示用）。
@@ -42,7 +53,9 @@ pub fn names() -> Vec<String> {
         WRITE.to_string(),
         EDIT.to_string(),
         PATCH.to_string(),
+        LIST.to_string(),
         SEARCH.to_string(),
+        REPORT.to_string(),
     ]
 }
 
@@ -52,7 +65,9 @@ pub fn names() -> Vec<String> {
 pub fn patch_decl() -> crate::core::ports::ToolDecl {
     crate::core::ports::ToolDecl {
         name: PATCH.to_string(),
-        description: "用一段补丁文本改文件（*** Add File: 路径 / *** Update File: 路径 … *** End File）".to_string(),
+        description:
+            "用一段补丁文本改文件（*** Add File: 路径 / *** Update File: 路径 … *** End File）"
+                .to_string(),
         parameters: serde_json::json!({
             "type": "object",
             "properties": {
@@ -70,43 +85,64 @@ pub fn is_freeform(name: &str) -> bool {
     name == PATCH
 }
 
-/// 内置工具说明块：提示词册 sys_tools 渲染（含本 agent 的真实根目录、模块目录与工具参数）。
-pub fn guide(prompts: &Prompts, sb: &Sandbox) -> String {
-    let module_roots = if sb.modules.is_empty() {
+/// **工作环境块**：提示词册 env 渲染（真实根目录 + 路径规矩）。**不含任何工具清单**——
+/// 能用哪些工具由核心按这一回合的身份现渲染后随回合注入（见 core::engine 的 MemberTools::tools_block）。
+pub fn env_block(prompts: &Prompts, p: &crate::core::session::SessionParams) -> String {
+    let texts = &prompts.core.tool_texts;
+    let module_roots = if p.module_dirs.is_empty() {
         prompts.core.no_module_dirs.clone()
     } else {
-        sb.modules
+        p.module_dirs
             .iter()
             .map(|(id, root)| {
-                sb.texts.render(
-                    &sb.texts.module_root_line,
-                    &[("id", id.clone()), ("root", crate::core::workspace::slash(root))],
+                texts.render(
+                    &texts.module_root_line,
+                    &[
+                        ("id", id.clone()),
+                        ("root", crate::core::workspace::slash(root)),
+                    ],
                 )
             })
             .collect::<Vec<_>>()
             .join("\n")
     };
     prompts.render(
-        &prompts.core.sys_tools,
+        &prompts.core.env,
         &[
-            ("work_name", sb.work_name.clone()),
-            ("agent", sb.agent.clone()),
-            ("work_root", crate::core::workspace::slash(&sb.shared)),
-            ("sandbox_root", crate::core::workspace::slash(&sb.private)),
+            ("work_name", p.work_name.clone()),
+            ("agent", p.agent.clone()),
+            ("work_root", crate::core::workspace::slash(&p.shared)),
+            ("sandbox_root", crate::core::workspace::slash(&p.private)),
             ("module_roots", module_roots),
-            ("tool_params", crate::core::schema::render_book(&sb.builtin_tools)),
-            (
-                "patch_guide",
-                prompts.render(
-                    &prompts.core.patch_guide,
-                    &[
-                        ("work_root", crate::core::workspace::slash(&sb.shared)),
-                        ("sandbox_root", crate::core::workspace::slash(&sb.private)),
-                    ],
-                ),
-            ),
         ],
     )
+}
+
+/// 工具说明块的**素材**（装配期算一次，随回合注入）：patch 语法、模块工具清单、模块工具参数。
+/// 为什么在这里算：它们只与这个 agent 的沙箱与模块有关、与回合无关；而回合执行路径上拿不到提示词册。
+#[derive(Debug, Clone, Default)]
+pub struct ToolNotes {
+    pub patch_guide: String,
+    pub module_tools: String,
+    pub module_tool_params: String,
+}
+
+pub fn tool_notes(
+    prompts: &Prompts,
+    sb: &Sandbox,
+    modules: &[crate::core::module::Module],
+) -> ToolNotes {
+    ToolNotes {
+        patch_guide: prompts.render(
+            &prompts.core.patch_guide,
+            &[
+                ("work_root", crate::core::workspace::slash(&sb.shared)),
+                ("sandbox_root", crate::core::workspace::slash(&sb.private)),
+            ],
+        ),
+        module_tools: crate::core::module::module_tools(prompts, modules),
+        module_tool_params: crate::core::module::module_tool_params(prompts, modules),
+    }
 }
 
 /// 观察账本：**本次会话里核心见过哪些文件的什么内容**。
@@ -138,7 +174,9 @@ impl Observations {
         if complete {
             self.seen.insert(path.to_path_buf(), Seen::Known(hash));
         } else {
-            self.seen.entry(path.to_path_buf()).or_insert(Seen::Partial(why));
+            self.seen
+                .entry(path.to_path_buf())
+                .or_insert(Seen::Partial(why));
         }
     }
 
@@ -234,7 +272,13 @@ fn near_match(hay: &str, old: &str) -> Option<(usize, String)> {
 
 /// 执行一次内置工具调用（args_json = 模型信封里的 args 对象）。
 /// 顺序：解析 JSON → 认工具 → 按声明校验参数 → 补缺省 → 寻址（内置工具一律需要一个 path）。
-pub fn execute(sb: &Sandbox, io: &dyn SysIo, obs: &mut Observations, name: &str, args_json: &str) -> ToolOutcome {
+pub fn execute(
+    sb: &Sandbox,
+    io: &dyn SysIo,
+    obs: &mut Observations,
+    name: &str,
+    args_json: &str,
+) -> ToolOutcome {
     let texts = &sb.texts;
     // 自由格式工具：输入是一段原样文本（不是 JSON），也不吃参数校验——认工具后就交给它自己解释。
     if is_freeform(name) {
@@ -257,6 +301,24 @@ pub fn execute(sb: &Sandbox, io: &dyn SysIo, obs: &mut Observations, name: &str,
         return fail(arg_fault_text(texts, name, schema, &fault));
     }
     schema.apply_defaults(&mut args);
+    // 回报工具：不碰文件，回执就是把回报原样带出来（节点产出由它承载）。
+    if name == REPORT {
+        let get = |k: &str| {
+            args.get(k)
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string()
+        };
+        let (s, c, o) = (get("summary"), get("changes"), get("open"));
+        let mut out = format!("summary：{}\nchanges：{}", s, c);
+        if !o.trim().is_empty() {
+            out.push_str(&format!("\nopen：{}", o));
+        }
+        return ToolOutcome {
+            ok: true,
+            output: out,
+        };
+    }
     let spec = match args.get("path").and_then(|p| p.as_str()) {
         Some(p) => p.to_string(),
         // 声明里每个内置工具都声明了必填 path，走到这里说明声明与实现不一致。
@@ -270,42 +332,120 @@ pub fn execute(sb: &Sandbox, io: &dyn SysIo, obs: &mut Observations, name: &str,
         READ => read(sb, io, obs, &args, &spec, &path),
         WRITE => write(sb, io, obs, &args, &spec, &path, &place),
         EDIT => edit(sb, io, obs, &args, &spec, &path),
+        LIST => list(sb, io, &spec, &path),
         SEARCH => search(sb, io, &args, &spec, &path),
-        other => fail(sb.texts.render(&sb.texts.unknown_builtin, &[("name", other.to_string())])),
+        other => fail(
+            sb.texts
+                .render(&sb.texts.unknown_builtin, &[("name", other.to_string())]),
+        ),
+    }
+}
+
+/// list：列目录（名字 / 是否目录 / 字节数，按名字排序）。
+/// 存在的理由：确认"资料齐不齐、脚本在不在、运行包装没装"必须能列目录——read 只读文件。
+fn list(sb: &Sandbox, io: &dyn SysIo, spec: &str, path: &Path) -> ToolOutcome {
+    let texts = &sb.texts;
+    let entries = match io.list(path) {
+        Ok(e) => e,
+        Err(e) => return fail(e),
+    };
+    let rows = if entries.is_empty() {
+        texts.list_empty.clone()
+    } else {
+        entries
+            .iter()
+            .map(|e| {
+                texts.render(
+                    &texts.list_row,
+                    &[
+                        ("name", e.name.clone()),
+                        (
+                            "dir_mark",
+                            if e.is_dir {
+                                texts.list_dir_mark.clone()
+                            } else {
+                                String::new()
+                            },
+                        ),
+                        ("bytes", e.bytes.to_string()),
+                    ],
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    let header = texts.render(
+        &texts.list_header,
+        &[
+            ("path", spec.to_string()),
+            ("count", entries.len().to_string()),
+        ],
+    );
+    ToolOutcome {
+        ok: true,
+        output: format!("{}\n{}", header, rows),
     }
 }
 
 /// read：按行区间返回，行号从 1 数起；回执末尾告诉模型接着用哪个 offset，并如实记账"读到的是不是全文"。
-fn read(sb: &Sandbox, io: &dyn SysIo, obs: &mut Observations, args: &serde_json::Value, spec: &str, path: &Path) -> ToolOutcome {
+fn read(
+    sb: &Sandbox,
+    io: &dyn SysIo,
+    obs: &mut Observations,
+    args: &serde_json::Value,
+    spec: &str,
+    path: &Path,
+) -> ToolOutcome {
     let texts = &sb.texts;
     let got = match io.read(path) {
         Ok(g) => g,
-        Err(e) => return fail(e),
+        // 目录不是文件：如实引导到 list，而不是把 IO 错原样丢给模型。
+        Err(e) => match io.list(path) {
+            Ok(_) => return fail(texts.render(&texts.read_is_dir, &[("path", spec.to_string())])),
+            Err(_) => return fail(e),
+        },
     };
     let header = |body: String| {
         texts.render(
             &texts.read_header,
-            &[("path", spec.to_string()), ("bytes", got.bytes.to_string()), ("text", body)],
+            &[
+                ("path", spec.to_string()),
+                ("bytes", got.bytes.to_string()),
+                ("text", body),
+            ],
         )
     };
     let lines: Vec<&str> = got.text.lines().collect();
     let total = lines.len();
     let offset = args.get("offset").and_then(|v| v.as_u64()).unwrap_or(1) as usize;
-    let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(total as u64).max(1) as usize;
+    let limit = args
+        .get("limit")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(total as u64)
+        .max(1) as usize;
     let hash = fnv1a(&got.text);
     if offset > total {
         obs.note_read(path, false, texts.read_partial_none.clone(), hash);
         let note = texts.render(&texts.read_past_end, &[("total", total.to_string())]);
-        return ToolOutcome { ok: true, output: header(note) };
+        return ToolOutcome {
+            ok: true,
+            output: header(note),
+        };
     }
     let mut body: Vec<String> = Vec::new();
     let mut used = 0usize;
     let mut to = offset - 1;
     for (i, line) in lines.iter().enumerate().skip(offset - 1).take(limit) {
         let (text, cut) = truncate_chars(line, MAX_READ_LINE_CHARS);
-        let mut row = texts.render(&texts.read_line, &[("n", (i + 1).to_string()), ("line", text)]);
+        let mut row = texts.render(
+            &texts.read_line,
+            &[("n", (i + 1).to_string()), ("line", text)],
+        );
         if cut {
-            row.push_str(&texts.render(&texts.read_line_capped, &[("limit", MAX_READ_LINE_CHARS.to_string())]));
+            row.push_str(&texts.render(
+                &texts.read_line_capped,
+                &[("limit", MAX_READ_LINE_CHARS.to_string())],
+            ));
         }
         // 字符预算用完就停：至少给出第一行，绝不空手而归。
         let cost = row.chars().count() + 1;
@@ -325,14 +465,21 @@ fn read(sb: &Sandbox, io: &dyn SysIo, obs: &mut Observations, args: &serde_json:
     } else {
         texts.render(
             &texts.read_partial_range,
-            &[("from", offset.to_string()), ("to", to.to_string()), ("total", total.to_string())],
+            &[
+                ("from", offset.to_string()),
+                ("to", to.to_string()),
+                ("total", total.to_string()),
+            ],
         )
     };
     obs.note_read(path, complete, why, hash);
     let mut out = header(body.join("\n"));
     let tail = if got.cut {
         // 机制层只读了开头：总行数不可知，也不能声称"到文件末尾"。
-        texts.render(&texts.read_more_cut, &[("from", offset.to_string()), ("to", to.to_string())])
+        texts.render(
+            &texts.read_more_cut,
+            &[("from", offset.to_string()), ("to", to.to_string())],
+        )
     } else if to < total {
         texts.render(
             &texts.read_more,
@@ -350,16 +497,28 @@ fn read(sb: &Sandbox, io: &dyn SysIo, obs: &mut Observations, args: &serde_json:
     if got.lossy {
         out.push_str(&format!("\n{}", texts.lossy_note));
     }
-    ToolOutcome { ok: true, output: out }
+    ToolOutcome {
+        ok: true,
+        output: out,
+    }
 }
 
 /// 整份覆盖已存在文件的证据检查：本次会话里**完整读过**它、且读后没被改过（write 与 patch 的 Add 共用）。
-fn overwrite_check(texts: &ToolTexts, obs: &Observations, spec: &str, path: &Path, current: &str) -> Result<(), String> {
+fn overwrite_check(
+    texts: &ToolTexts,
+    obs: &Observations,
+    spec: &str,
+    path: &Path,
+    current: &str,
+) -> Result<(), String> {
     match obs.known(path) {
         Some(seen) if seen == fnv1a(current) => Ok(()),
         Some(_) => Err(texts.render(&texts.write_stale, &[("path", spec.to_string())])),
         None => Err(match obs.partial_why(path) {
-            Some(w) => texts.render(&texts.write_partial, &[("path", spec.to_string()), ("why", w)]),
+            Some(w) => texts.render(
+                &texts.write_partial,
+                &[("path", spec.to_string()), ("why", w)],
+            ),
             None => texts.render(&texts.write_need_read, &[("path", spec.to_string())]),
         }),
     }
@@ -367,9 +526,20 @@ fn overwrite_check(texts: &ToolTexts, obs: &Observations, spec: &str, path: &Pat
 
 /// write：整份写入（同名文件被整份覆盖）。
 /// 覆盖已存在的文件必须先有"完整读过、且读后没被改过"的证据——否则拒绝，并让模型改用 edit。
-fn write(sb: &Sandbox, io: &dyn SysIo, obs: &mut Observations, args: &serde_json::Value, spec: &str, path: &Path, place: &Place) -> ToolOutcome {
+fn write(
+    sb: &Sandbox,
+    io: &dyn SysIo,
+    obs: &mut Observations,
+    args: &serde_json::Value,
+    spec: &str,
+    path: &Path,
+    place: &Place,
+) -> ToolOutcome {
     let texts = &sb.texts;
-    let content = args.get("content").and_then(|c| c.as_str()).unwrap_or_default();
+    let content = args
+        .get("content")
+        .and_then(|c| c.as_str())
+        .unwrap_or_default();
     match io.read(path) {
         // 读不到 = 还没有这个文件（新建不需要读过什么）；机制层的真实错误由下面的 write 如实报出。
         Err(_) => {}
@@ -385,25 +555,50 @@ fn write(sb: &Sandbox, io: &dyn SysIo, obs: &mut Observations, args: &serde_json
     obs.note_written(path, fnv1a(content));
     let mut out = texts.render(
         &texts.write_header,
-        &[("path", spec.to_string()), ("chars", content.chars().count().to_string())],
+        &[
+            ("path", spec.to_string()),
+            ("chars", content.chars().count().to_string()),
+        ],
     );
     // 写进模块目录属于「动了自己的能力」：放行，但如实提示（模型可见；工具轨迹据此也给用户一句）。
     if let Place::Module(id) = place {
         out.push_str(&format!(
             "\n{}",
-            texts.render(&texts.write_module_note, &[("mark", MODULE_WRITE_MARK.to_string()), ("id", id.clone())])
+            texts.render(
+                &texts.write_module_note,
+                &[("mark", MODULE_WRITE_MARK.to_string()), ("id", id.clone())]
+            )
         ));
     }
-    ToolOutcome { ok: true, output: out }
+    ToolOutcome {
+        ok: true,
+        output: out,
+    }
 }
 
 /// edit：按字面替换一处（默认要求唯一命中）。证据是 old_string 本身——它就是要改的那段原文，不需要先读过。
 /// 被截断或含非法 UTF-8 的文件一律不改（改写会把没读到的部分或原始字节一起弄丢）。
-fn edit(sb: &Sandbox, io: &dyn SysIo, obs: &mut Observations, args: &serde_json::Value, spec: &str, path: &Path) -> ToolOutcome {
+fn edit(
+    sb: &Sandbox,
+    io: &dyn SysIo,
+    obs: &mut Observations,
+    args: &serde_json::Value,
+    spec: &str,
+    path: &Path,
+) -> ToolOutcome {
     let texts = &sb.texts;
-    let old = args.get("old_string").and_then(|v| v.as_str()).unwrap_or_default();
-    let new = args.get("new_string").and_then(|v| v.as_str()).unwrap_or_default();
-    let all = args.get("replace_all").and_then(|v| v.as_bool()).unwrap_or(false);
+    let old = args
+        .get("old_string")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default();
+    let new = args
+        .get("new_string")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default();
+    let all = args
+        .get("replace_all")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
     if old == new {
         return fail(texts.edit_same.clone());
     }
@@ -420,10 +615,16 @@ fn edit(sb: &Sandbox, io: &dyn SysIo, obs: &mut Observations, args: &serde_json:
     let hay = got.text;
     let hits = find_all(&hay, old);
     if hits.is_empty() {
-        let mut why = texts.render(&texts.edit_no_match, &[("total", hay.lines().count().to_string())]);
+        let mut why = texts.render(
+            &texts.edit_no_match,
+            &[("total", hay.lines().count().to_string())],
+        );
         if let Some((line, actual)) = near_match(&hay, old) {
             why.push('\n');
-            why.push_str(&texts.render(&texts.edit_no_match_near, &[("line", line.to_string()), ("actual", actual)]));
+            why.push_str(&texts.render(
+                &texts.edit_no_match_near,
+                &[("line", line.to_string()), ("actual", actual)],
+            ));
         }
         return fail(why);
     }
@@ -438,7 +639,10 @@ fn edit(sb: &Sandbox, io: &dyn SysIo, obs: &mut Observations, args: &serde_json:
         (hay.replace(old, new), hits.len())
     } else {
         let at = hits[0];
-        (format!("{}{}{}", &hay[..at], new, &hay[at + old.len()..]), 1)
+        (
+            format!("{}{}{}", &hay[..at], new, &hay[at + old.len()..]),
+            1,
+        )
     };
     if let Err(e) = io.write(path, &out) {
         return fail(e);
@@ -448,27 +652,52 @@ fn edit(sb: &Sandbox, io: &dyn SysIo, obs: &mut Observations, args: &serde_json:
         ok: true,
         output: texts.render(
             &texts.edit_header,
-            &[("path", spec.to_string()), ("n", n.to_string()), ("lines", out.lines().count().to_string())],
+            &[
+                ("path", spec.to_string()),
+                ("n", n.to_string()),
+                ("lines", out.lines().count().to_string()),
+            ],
         ),
     }
 }
 
 /// search：逐行找关键词，返回带行号的命中行（命中总数与截断如实报）。
-fn search(sb: &Sandbox, io: &dyn SysIo, args: &serde_json::Value, spec: &str, path: &Path) -> ToolOutcome {
+fn search(
+    sb: &Sandbox,
+    io: &dyn SysIo,
+    args: &serde_json::Value,
+    spec: &str,
+    path: &Path,
+) -> ToolOutcome {
     let texts = &sb.texts;
-    let keyword = args.get("keyword").and_then(|k| k.as_str()).unwrap_or_default().to_string();
-    let ignore_case = args.get("ignore_case").and_then(|v| v.as_bool()).unwrap_or(false);
+    let keyword = args
+        .get("keyword")
+        .and_then(|k| k.as_str())
+        .unwrap_or_default()
+        .to_string();
+    let ignore_case = args
+        .get("ignore_case")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
     let got = match io.read(path) {
         Ok(g) => g,
         Err(e) => return fail(e),
     };
-    let needle = if ignore_case { keyword.to_lowercase() } else { keyword.clone() };
+    let needle = if ignore_case {
+        keyword.to_lowercase()
+    } else {
+        keyword.clone()
+    };
     let mut hits: Vec<(usize, String)> = Vec::new();
     let mut matched = 0usize;
     let mut total = 0usize;
     for (i, line) in got.text.lines().enumerate() {
         total += 1;
-        let hay = if ignore_case { line.to_lowercase() } else { line.to_string() };
+        let hay = if ignore_case {
+            line.to_lowercase()
+        } else {
+            line.to_string()
+        };
         if hay.contains(&needle) {
             matched += 1;
             if hits.len() < MAX_SEARCH_HITS {
@@ -476,10 +705,18 @@ fn search(sb: &Sandbox, io: &dyn SysIo, args: &serde_json::Value, spec: &str, pa
             }
         }
     }
-    let mode = if ignore_case { texts.search_mode_insensitive.clone() } else { texts.search_mode_sensitive.clone() };
+    let mode = if ignore_case {
+        texts.search_mode_insensitive.clone()
+    } else {
+        texts.search_mode_sensitive.clone()
+    };
     let mut out = texts.render(
         &texts.search_header,
-        &[("path", spec.to_string()), ("keyword", keyword.clone()), ("mode", mode)],
+        &[
+            ("path", spec.to_string()),
+            ("keyword", keyword.clone()),
+            ("mode", mode),
+        ],
     );
     if hits.is_empty() {
         out.push_str(&format!("\n{}", texts.search_no_hits));
@@ -487,17 +724,26 @@ fn search(sb: &Sandbox, io: &dyn SysIo, args: &serde_json::Value, spec: &str, pa
     for (n, line) in &hits {
         out.push_str(&format!(
             "\n{}",
-            texts.render(&texts.search_hit_line, &[("n", n.to_string()), ("line", line.clone())])
+            texts.render(
+                &texts.search_hit_line,
+                &[("n", n.to_string()), ("line", line.clone())]
+            )
         ));
     }
     out.push_str(&format!(
         "\n{}",
-        texts.render(&texts.search_summary, &[("hits", matched.to_string()), ("total", total.to_string())])
+        texts.render(
+            &texts.search_summary,
+            &[("hits", matched.to_string()), ("total", total.to_string())]
+        )
     ));
     if matched > hits.len() {
         out.push_str(&format!(
             "\n{}",
-            texts.render(&texts.search_truncated, &[("limit", MAX_SEARCH_HITS.to_string())])
+            texts.render(
+                &texts.search_truncated,
+                &[("limit", MAX_SEARCH_HITS.to_string())]
+            )
         ));
     }
     if got.lossy {
@@ -506,7 +752,10 @@ fn search(sb: &Sandbox, io: &dyn SysIo, args: &serde_json::Value, spec: &str, pa
     if got.cut {
         out.push_str(&format!("\n{}", texts.search_truncated_bytes));
     }
-    ToolOutcome { ok: true, output: out }
+    ToolOutcome {
+        ok: true,
+        output: out,
+    }
 }
 
 /// patch：把一段**自由格式**的补丁应用到一处或多处文件（信封之后原样跟补丁文本，不走 JSON）。
@@ -547,14 +796,20 @@ fn apply_patch(sb: &Sandbox, io: &dyn SysIo, obs: &mut Observations, body: &str)
                     }
                     lines.push(texts.render(
                         &texts.patch_block_overwrite,
-                        &[("path", spec.clone()), ("chars", content.chars().count().to_string())],
+                        &[
+                            ("path", spec.clone()),
+                            ("chars", content.chars().count().to_string()),
+                        ],
                     ));
                     pending.insert(path.clone(), align_eol(content, cur));
                 }
                 None => {
                     lines.push(texts.render(
                         &texts.patch_block_add,
-                        &[("path", spec.clone()), ("chars", content.chars().count().to_string())],
+                        &[
+                            ("path", spec.clone()),
+                            ("chars", content.chars().count().to_string()),
+                        ],
                     ));
                     pending.insert(path.clone(), content.clone());
                 }
@@ -632,7 +887,10 @@ fn apply_patch(sb: &Sandbox, io: &dyn SysIo, obs: &mut Observations, body: &str)
             ));
         }
     }
-    ToolOutcome { ok: true, output: out }
+    ToolOutcome {
+        ok: true,
+        output: out,
+    }
 }
 
 /// 整份覆盖已有文件时，内容按原文件的行尾风格写（免得把 CRLF 文件改成 LF）。
@@ -646,7 +904,10 @@ fn align_eol(content: &str, current: &str) -> String {
 
 /// 某一块不成立的回执（整体不写盘，所以措辞要直说这一点）。
 fn block_fault(texts: &ToolTexts, n: usize, why: String) -> String {
-    texts.render(&texts.patch_block_fault, &[("n", n.to_string()), ("why", why)])
+    texts.render(
+        &texts.patch_block_fault,
+        &[("n", n.to_string()), ("why", why)],
+    )
 }
 
 /// patch 解析失败的回执（每一类都说清事实）。
@@ -663,15 +924,23 @@ fn patch_fault(texts: &ToolTexts, f: &crate::core::patch::Fault) -> String {
             &[("line", line.to_string()), ("marker", marker.clone())],
         ),
         F::EmptyAdd { line } => texts.render(&texts.patch_empty_add, &[("line", line.to_string())]),
-        F::EmptyUpdate { line } => texts.render(&texts.patch_empty_update, &[("line", line.to_string())]),
-        F::EmptySearch { line } => texts.render(&texts.patch_empty_search, &[("line", line.to_string())]),
-        F::MissingEnd { line } => texts.render(&texts.patch_missing_end, &[("line", line.to_string())]),
-        F::SearchWithoutReplace { line } => {
-            texts.render(&texts.patch_search_no_replace, &[("line", line.to_string())])
+        F::EmptyUpdate { line } => {
+            texts.render(&texts.patch_empty_update, &[("line", line.to_string())])
         }
-        F::ReplaceWithoutSearch { line } => {
-            texts.render(&texts.patch_replace_no_search, &[("line", line.to_string())])
+        F::EmptySearch { line } => {
+            texts.render(&texts.patch_empty_search, &[("line", line.to_string())])
         }
+        F::MissingEnd { line } => {
+            texts.render(&texts.patch_missing_end, &[("line", line.to_string())])
+        }
+        F::SearchWithoutReplace { line } => texts.render(
+            &texts.patch_search_no_replace,
+            &[("line", line.to_string())],
+        ),
+        F::ReplaceWithoutSearch { line } => texts.render(
+            &texts.patch_replace_no_search,
+            &[("line", line.to_string())],
+        ),
     }
 }
 
@@ -679,12 +948,21 @@ fn patch_fault(texts: &ToolTexts, f: &crate::core::patch::Fault) -> String {
 fn edit_fault_reason(texts: &ToolTexts, f: &crate::core::patch::EditFault) -> String {
     use crate::core::patch::EditFault as E;
     match f {
-        E::NotFound { total } => texts.render(&texts.patch_not_found, &[("total", total.to_string())]),
+        E::NotFound { total } => {
+            texts.render(&texts.patch_not_found, &[("total", total.to_string())])
+        }
         E::Multiple { lines } => texts.render(
             &texts.patch_multiple,
             &[
                 ("n", lines.len().to_string()),
-                ("lines", lines.iter().map(|l| l.to_string()).collect::<Vec<_>>().join("、")),
+                (
+                    "lines",
+                    lines
+                        .iter()
+                        .map(|l| l.to_string())
+                        .collect::<Vec<_>>()
+                        .join("、"),
+                ),
             ],
         ),
         E::NearMiss { line, actual } => texts.render(
@@ -695,7 +973,12 @@ fn edit_fault_reason(texts: &ToolTexts, f: &crate::core::patch::EditFault) -> St
 }
 
 /// 参数不符的回执：说清是哪一条不合（由声明判定），再把工具签名原样发回去。
-pub fn arg_fault_text(texts: &ToolTexts, name: &str, schema: &ToolSchema, fault: &ArgFault) -> String {
+pub fn arg_fault_text(
+    texts: &ToolTexts,
+    name: &str,
+    schema: &ToolSchema,
+    fault: &ArgFault,
+) -> String {
     let why = match fault {
         ArgFault::NotObject => texts.arg_not_object.clone(),
         ArgFault::Missing(n) => texts.render(&texts.arg_missing, &[("name", n.clone())]),
@@ -716,12 +999,26 @@ pub fn arg_fault_text(texts: &ToolTexts, name: &str, schema: &ToolSchema, fault:
     };
     texts.render(
         &texts.arg_fault,
-        &[("why", why), ("signature", format!("{}\n{}", name, schema.render_for_prompt()))],
+        &[
+            ("why", why),
+            (
+                "signature",
+                format!("{}\n{}", name, schema.render_for_prompt()),
+            ),
+        ],
     )
 }
 
+/// 越权调用：这个席位没有这个工具（角色表决定工具面）——**如实拒绝**，不执行。
+pub fn refuse(texts: &ToolTexts, name: &str) -> ToolOutcome {
+    fail(texts.render(&texts.tool_not_allowed, &[("name", name.to_string())]))
+}
+
 fn fail(msg: String) -> ToolOutcome {
-    ToolOutcome { ok: false, output: msg }
+    ToolOutcome {
+        ok: false,
+        output: msg,
+    }
 }
 
 /// 按字符截断（不劈开 UTF-8）；返回（文本, 是否截断）。

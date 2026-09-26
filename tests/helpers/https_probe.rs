@@ -1,8 +1,9 @@
 //! HTTPS/TLS 探针（三个平台目标共用这**一份正文**：各自只在自己的平台上编译，所以只会跑一次）。
 //! 为什么单独有它：TLS 后端是**按平台选的**（Windows = native-tls、unix = rustls），
 //! 而 T3 明令不依赖外网，所以"这条构建的 TLS 栈真能连外网"只能在平台探针（T4）里验。
-//! 三态如实区分（见 TESTING.md 的探针四态）：连不上外网 = env-skip（附命令行原话）；
-//! TLS/HTTP 坏了 = 失败——绝不把"我们链路坏了"说成"环境不允许"；通了 = 通过并报状态码与后端。
+//! 四态如实区分（见 docs/testing/levels.md 的探针四态）：连不上外网 = env-skip（附命令行原话）；
+//! **本进程取不到系统 TLS 凭证**（沙箱挡住凭证存储时就是这样，连 curl.exe 都握不了手）= env-skip；
+//! 其余 TLS/HTTP 坏了 = 失败——绝不把"我们链路坏了"说成"环境不允许"；通了 = 通过并报状态码与后端。
 
 use crate::probe::bin;
 use std::process::Command;
@@ -34,6 +35,11 @@ fn https_reaches_a_public_endpoint_through_the_product_chain() {
         }
         // 连不上外网：如实跳过（这不是被测代码的问题）
         "no-net" => eprintln!("[探针] 本环境连不上外网，HTTPS/TLS 探针跳过：{}", line),
+        // 本进程取不到系统 TLS 凭证：环境结论，如实跳过并附原话（判据是错误码，不是文案）。
+        "env-tls" => eprintln!(
+            "[探针] 本进程取不到系统 TLS 凭证（环境结论，如实跳过）：{}",
+            line
+        ),
         // 其余（tls-fail / fail / 空）：链路真有问题，必须失败
         _ => panic!("HTTPS/TLS 链路失败：{}", line),
     }

@@ -25,7 +25,7 @@ pub enum Chunk {
 /// stream = 要求供应商流式返回；on 逐片回调（非流式实现不回调）。
 /// on 返回 false = 调用方要求中止，实现方必须立即停止读取并返回已产出的正文。
 /// 声明给供应商的一个工具（原生工具调用通道用）：名字 + 说明 + JSON Schema 参数。
-/// 说明与 Schema 都来自文本层（内置工具在 prompts.yaml、模块工具在 module.yaml），这里只是搬运形态。
+/// 说明与 Schema 都来自文本层（内置工具在 prompts/、模块工具在 module.yaml），这里只是搬运形态。
 #[derive(Debug, Clone)]
 pub struct ToolDecl {
     pub name: String,
@@ -34,17 +34,55 @@ pub struct ToolDecl {
     pub parameters: serde_json::Value,
 }
 
-/// 一次补全的请求选项：策略在 core（要不要流式、要不要声明工具），机制在适配器。
+/// 单次模型调用的默认总预算（秒）。见 `AppSettings::llm_timeout_secs`。
+pub const DEFAULT_LLM_TIMEOUT_SECS: u64 = 300;
+
+/// 一次模型调用的通道参数：**策略在 core 定**（都来自全局设置），机制在适配器。
+/// 一个值一路传下去，而不是把 stream / 预算分别塞进各个函数的参数表——两处各传一份迟早会漏。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LlmOpts {
+    /// 要不要流式（全局设置 `streaming`）：讨论、执行、验收、单 agent 全用它。
+    pub stream: bool,
+    /// 单次调用总预算（全局设置 `llm_timeout_secs`）。
+    pub timeout_secs: u64,
+}
+
+impl Default for LlmOpts {
+    fn default() -> Self {
+        LlmOpts {
+            stream: false,
+            timeout_secs: DEFAULT_LLM_TIMEOUT_SECS,
+        }
+    }
+}
+
+/// 一次补全的请求选项：策略在 core（要不要流式、要不要声明工具、给多少预算），机制在适配器。
+/// Copy：讨论回合的工具循环每轮都要一份（只换 tools 槽位，其余照旧）。
+#[derive(Clone, Copy)]
 pub struct CompleteOpts<'a> {
     pub stream: bool,
     /// 要声明的工具；None = 本次不声明（手写信封模式，或本轮不需要工具）。
     pub tools: Option<&'a [ToolDecl]>,
+    /// 本次调用的**总预算**（秒）：连接之外，等响应头、读响应体与整体都用它。
+    /// 为什么是一个预算而不是拆几个：**非流式**下供应商要等整段生成完才发响应头，
+    /// 单独设一个小的"头超时"会把长回复误判成不通（真机上就是这么炸的：49~53 秒的回复撞了 60 秒头超时）。
+    pub timeout_secs: u64,
 }
 
 impl<'a> CompleteOpts<'a> {
     /// 本次不声明工具（手写信封模式；测试替身与演示通道也用它）。
     pub fn plain(stream: bool) -> CompleteOpts<'a> {
-        CompleteOpts { stream, tools: None }
+        CompleteOpts {
+            stream,
+            tools: None,
+            timeout_secs: DEFAULT_LLM_TIMEOUT_SECS,
+        }
+    }
+
+    /// 带上本次预算（核心按设置给；设置是全局的，见 `AppSettings::llm_timeout_secs`）。
+    pub fn with_timeout(mut self, secs: u64) -> CompleteOpts<'a> {
+        self.timeout_secs = secs;
+        self
     }
 }
 
@@ -59,7 +97,12 @@ pub struct ToolCall {
 }
 
 pub trait Chat {
-    fn complete(&mut self, messages: &[Msg], opts: CompleteOpts<'_>, on: &mut dyn FnMut(Chunk) -> bool) -> Completion;
+    fn complete(
+        &mut self,
+        messages: &[Msg],
+        opts: CompleteOpts<'_>,
+        on: &mut dyn FnMut(Chunk) -> bool,
+    ) -> Completion;
 }
 
 /// 拥有所有权的会话通道（装箱端口对象；会话可跨线程移动，Web 泵线程所需）。
@@ -81,16 +124,28 @@ pub struct Msg {
 }
 
 impl Msg {
-    pub fn system(content: impl Into<String>) -> Msg { Msg::plain("system", content) }
-    pub fn user(content: impl Into<String>) -> Msg { Msg::plain("user", content) }
-    pub fn assistant(content: impl Into<String>) -> Msg { Msg::plain("assistant", content) }
+    pub fn system(content: impl Into<String>) -> Msg {
+        Msg::plain("system", content)
+    }
+    pub fn user(content: impl Into<String>) -> Msg {
+        Msg::plain("user", content)
+    }
+    pub fn assistant(content: impl Into<String>) -> Msg {
+        Msg::plain("assistant", content)
+    }
     /// 一次回复的助手消息：正文 + 它发起的**全部**调用（一次回复多个调用就靠它）。
     pub fn assistant_calls(content: impl Into<String>, calls: Vec<ToolCall>) -> Msg {
-        Msg { tool_calls: calls, ..Msg::plain("assistant", content) }
+        Msg {
+            tool_calls: calls,
+            ..Msg::plain("assistant", content)
+        }
     }
     /// 一条工具结果：回应某个调用 id（协议要求与助手消息里的调用成对出现）。
     pub fn tool(call_id: &str, content: impl Into<String>) -> Msg {
-        Msg { tool_call_id: call_id.to_string(), ..Msg::plain("tool", content) }
+        Msg {
+            tool_call_id: call_id.to_string(),
+            ..Msg::plain("tool", content)
+        }
     }
     fn plain(role: &str, content: impl Into<String>) -> Msg {
         Msg {
@@ -110,16 +165,40 @@ impl Msg {
 pub struct Completion {
     /// 供应商返回的正文（原样，不做任何修补）。
     pub raw: String,
+    /// 供应商返回的思维链（非流式响应也可提供）。
+    pub reasoning: String,
     /// 结束原因原样（供应商没给 = 空串）：stop / length / content_filter / tool_calls …
     pub finish: String,
     /// 原生工具调用（按供应商给的顺序；手写信封模式恒为空）。
     pub calls: Vec<ToolCall>,
+    /// 这次调用**失败**了（超时 / 网络 / 形状不对）：非空 = 没有拿到模型的回复。
+    /// 为什么必须与正文分开：失败原因若当成正文，会作为**模型发言**落进转录，
+    /// 而核心正是按转录派生"下一步该谁说话"——错误文本一旦混进去，状态就歪了。
+    /// 有它，上层才能如实告知用户并**中断**这一轮（而不是假装模型说了这句话）。
+    pub error: Option<String>,
 }
 
 impl Completion {
-    /// 没有结束原因、没有原生调用的通道（演示通道、测试替身、本地失败兜底）：只有正文。
+    /// 没有结束原因、没有原生调用的通道（演示通道、测试替身）：只有正文。
     pub fn text(raw: impl Into<String>) -> Completion {
-        Completion { raw: raw.into(), finish: String::new(), calls: Vec::new() }
+        Completion {
+            raw: raw.into(),
+            reasoning: String::new(),
+            finish: String::new(),
+            calls: Vec::new(),
+            error: None,
+        }
+    }
+
+    /// 这次调用没成功：只带原因，**不带正文**（上层据此如实告知并中断）。
+    pub fn failure(reason: impl Into<String>) -> Completion {
+        Completion {
+            raw: String::new(),
+            reasoning: String::new(),
+            finish: String::new(),
+            calls: Vec::new(),
+            error: Some(reason.into()),
+        }
     }
 
     /// 这一次是不是被输出长度截断的。
@@ -174,9 +253,17 @@ pub trait Workspace {
     /// work/ 下是否已有同名文件（上传同名冲突判定）。
     fn work_has(&self, session: &str, name: &str) -> bool;
     /// 沙箱寻址根（work 与各 agent 私有区）：布局机制在适配层，拼接与越界校验在 core。
-    fn roots(&self, session: &str, agents: &[String]) -> Result<crate::core::workspace::WorkRoots, String>;
+    fn roots(
+        &self,
+        session: &str,
+        agents: &[String],
+    ) -> Result<crate::core::workspace::WorkRoots, String>;
     /// 列出本工作可引用的文件（work/ 与各 agent 沙箱；相对路径、/ 分隔、排序稳定）。
-    fn list(&self, session: &str, agents: &[String]) -> Result<crate::core::workspace::WorkFiles, String>;
+    fn list(
+        &self,
+        session: &str,
+        agents: &[String],
+    ) -> Result<crate::core::workspace::WorkFiles, String>;
 }
 
 /// 一次文件读取：文本 + 原始字节数 + 编码与截断的如实标注。
@@ -190,11 +277,20 @@ pub struct FileRead {
     pub cut: bool,
 }
 
+/// 目录里的一项（列目录用；大小只对文件有意义，目录恒为 0）。
+pub struct DirEntry {
+    pub name: String,
+    pub is_dir: bool,
+    pub bytes: u64,
+}
+
 /// 内置文件工具的读写端口：机制在适配层，放行/寻址/越界在 core。
-/// 读严格按 UTF-8 解码，非法字节如实标注；写一律 UTF-8。
+/// 读严格按 UTF-8 解码，非法字节如实标注；写一律 UTF-8；列目录只报名字/类型/大小。
 pub trait SysIo: Send + Sync {
     fn read(&self, path: &std::path::Path) -> Result<FileRead, String>;
     fn write(&self, path: &std::path::Path, content: &str) -> Result<(), String>;
+    /// 列一个目录（按名字排序）。路径不是目录时如实报错——core 据此把 read 的失败引导到 list。
+    fn list(&self, path: &std::path::Path) -> Result<Vec<DirEntry>, String>;
 }
 
 /// 探测结论：这条通道到底支不支持原生工具调用（**事实**，不是猜测；三种都如实回报）。
@@ -212,7 +308,11 @@ pub enum ProbeOutcome {
 /// 「用哪条模型通道」由 core 解析后传入（策略在 core）——网关不做选择。
 /// channel = None 表示无可用模型：实现方必须回落演示通道并如实告知（不得静默）。
 pub trait ChatGateway {
-    fn member_channel(&self, channel: Option<&Channel>, module_id: &str) -> (BoxedChat, Option<String>);
+    fn member_channel(
+        &self,
+        channel: Option<&Channel>,
+        module_id: &str,
+    ) -> (BoxedChat, Option<String>);
     /// 核心自身通道（整理/验收/代拟/推荐）；bool = 是否演示通道（供如实告知）。
     fn core_channel(&self, channel: Option<&Channel>) -> (BoxedChat, bool);
     /// 实测这条通道支不支持原生工具调用（发两条最小请求对比：不带 tools / 带 tools）。
@@ -255,7 +355,12 @@ pub struct ToolOutcome {
 /// 工具执行端口：机制（围栏安装/进程拉起/stdin 送参/超时杀树/截断）在适配层。
 /// 策略在核心：哪个模块能调哪个工具、命令映射、可达到哪些根，由核心按 module.yaml 与沙箱派生后传入。
 pub trait ToolRunner {
-    fn run(&self, fence: &crate::core::fence::FenceSpec, command: &str, args_json: &str) -> ToolOutcome;
+    fn run(
+        &self,
+        fence: &crate::core::fence::FenceSpec,
+        command: &str,
+        args_json: &str,
+    ) -> ToolOutcome;
 }
 
 /// 一次信封修复的结果。

@@ -66,21 +66,46 @@ impl ProcTools {
 impl ToolRunner for ProcTools {
     fn run(&self, fence: &FenceSpec, command: &str, args_json: &str) -> ToolOutcome {
         // Windows：容器围栏要先把「可达范围」授权给容器 SID。
-        // **默认不写本机任何权限项**：只有用户显式授权（设置里的 fence_write，或环境变量 SOLOMNI_FENCE_WRITE=1）才做。
+        // **默认不写本机任何权限项**：只有用户显式授权（设置里的 fence_write，或环境变量 SOLOMNI_FENCE_WRITE=1）才做；
+        // 授权做成了才让守门进程去装容器——没做成就是无围栏执行，这一点如实进工具回执的 stderr。
         #[cfg(windows)]
-        {
+        let prepared = {
             use std::sync::atomic::Ordering;
+            let mut prepared = false;
             if self.write_allowed.load(Ordering::Relaxed) {
-                if let Err(e) = confine::prepare_fence(fence, command, &self.prepared, &self.home) {
-                    eprintln!("[围栏] 授权未完成（{}）：容器里的工具可能读不到工作目录", e);
+                match confine::prepare_fence(fence, command, &self.prepared, &self.home) {
+                    Ok(()) => prepared = true,
+                    Err(e) => eprintln!("[围栏] 授权未完成（{}）：本次按无围栏执行", e),
                 }
             } else if !self.disclosed.swap(true, Ordering::Relaxed) {
                 eprintln!(
                     "[围栏] 容器围栏未启用（没有授权在本机写权限）：外部工具按无围栏执行。要启用：在设置里打开，或在 .home/settings.yaml 写 fence_write: true"
                 );
             }
-        }
-        let mut cmd = confine::launcher(&self.exe, fence, command);
+            if !prepared {
+                // 未授权时段先问机制：环境不允许就如实降级，我们写错了就拒绝执行（见 refuse_when_broken）。
+                if let Some(outcome) =
+                    refuse_when_broken(&self.texts, confine::verify(fence, command))
+                {
+                    return outcome;
+                }
+            }
+            prepared
+        };
+        // 其它平台没有容器围栏，也就没有"要先授权"这一步。
+        #[cfg(not(windows))]
+        let prepared = false;
+        // 容器 profile 的台账落点：只有 Windows 的守门进程会写它（外层不知道 profile 建成了没有）。
+        #[cfg(windows)]
+        let home = Some(self.home.clone());
+        #[cfg(not(windows))]
+        let home: Option<std::path::PathBuf> = None;
+        let job = confine::FenceJob {
+            spec: fence.clone(),
+            prepared,
+            home,
+        };
+        let mut cmd = confine::launcher(&self.exe, &job, command);
         cmd.current_dir(&fence.cwd)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -98,7 +123,12 @@ impl ToolRunner for ProcTools {
         }
         let mut child = match cmd.spawn() {
             Ok(c) => c,
-            Err(e) => return ToolOutcome { ok: false, output: format!("工具进程启动失败：{}", e) },
+            Err(e) => {
+                return ToolOutcome {
+                    ok: false,
+                    output: format!("工具进程启动失败：{}", e),
+                }
+            }
         };
         // stdin 独立线程送参：参数再大也不与 stdout 读取互锁。
         let mut stdin = child.stdin.take().expect("stdin 已声明管道");
@@ -138,6 +168,29 @@ impl ToolRunner for ProcTools {
     }
 }
 
+/// 未授权时段遇到机制自检结论时的放行规矩：**只有本机装不上能降级**。
+/// 自检已确认机制有效却仍装不上 = 我们写错了——那种情况按无围栏跑，等于用户以为有围栏、实际什么都没有，
+/// 所以拒绝执行（命令不落进程），回执用提示词册里的固定说法（它随工具结果进模型上下文）。
+#[cfg(windows)]
+fn refuse_when_broken(
+    texts: &crate::core::prompt::ToolTexts,
+    verdict: confine::FenceVerdict,
+) -> Option<ToolOutcome> {
+    match verdict {
+        confine::FenceVerdict::Broken(why) => {
+            eprintln!(
+                "[围栏] 容器围栏机制装不上（{}）：本次拒绝执行，不按无围栏跑",
+                why
+            );
+            Some(ToolOutcome {
+                ok: false,
+                output: texts.tool_fence_failed.clone(),
+            })
+        }
+        confine::FenceVerdict::Enforced | confine::FenceVerdict::EnvUnavailable(_) => None,
+    }
+}
+
 /// 杀掉整棵进程树：工具进程 fork 出来的子孙一并收掉（不留孤儿）。
 fn kill_tree(child: &mut std::process::Child) {
     #[cfg(unix)]
@@ -165,7 +218,13 @@ fn read_to_string(r: &mut impl std::io::Read) -> String {
 impl ProcTools {
     /// 把工具进程的原始输出与事实拼成回执：成功与否看退出码；
     /// stderr 段头、超时、围栏没装上、截断这些**标记文案全部来自提示词册**——它们随工具结果进模型上下文。
-    fn assemble(&self, out: String, err: String, timed_out: bool, code: Option<i32>) -> ToolOutcome {
+    fn assemble(
+        &self,
+        out: String,
+        err: String,
+        timed_out: bool,
+        code: Option<i32>,
+    ) -> ToolOutcome {
         let mut ok = !timed_out && code == Some(0);
         let mut output = out;
         if !err.is_empty() {
@@ -186,7 +245,10 @@ impl ProcTools {
             output.push('\n');
             output.push_str(&self.texts.tool_fence_failed);
         }
-        ToolOutcome { ok, output: self.truncate(&output) }
+        ToolOutcome {
+            ok,
+            output: self.truncate(&output),
+        }
     }
 
     /// 按字符截断（不劈开 UTF-8），尾部如实注明（文案来自提示词册）。
@@ -198,7 +260,10 @@ impl ProcTools {
         let head: String = s.chars().take(self.max_output_chars).collect();
         let tail = self.texts.render(
             &self.texts.tool_truncated,
-            &[("chars", count.to_string()), ("limit", self.max_output_chars.to_string())],
+            &[
+                ("chars", count.to_string()),
+                ("limit", self.max_output_chars.to_string()),
+            ],
         );
         format!("{}\n{}", head, tail)
     }
@@ -208,7 +273,9 @@ impl ProcTools {
 mod tests {
     use super::*;
     use crate::core::fence::FenceSpec;
-    use std::path::PathBuf;
+    // 测试夹具按 &Path 收参（clippy 的 ptr_arg）：Path 显式写在测试模块里，
+    // 顶层只按需导入 PathBuf——否则顶层会多出一次"只被 glob 用到"的导入。
+    use std::path::{Path, PathBuf};
 
     /// 环境白名单：父进程的无关变量（密钥之类）不进子进程；HOME / TEMP 落在该 agent 的私有沙箱里。
     #[test]
@@ -219,26 +286,57 @@ mod tests {
             agent: "a".to_string(),
             rw: vec![PathBuf::from("demo").join("work"), private.clone()],
             cwd: PathBuf::from("mods").join("m0"),
+            ro: Vec::new(),
             net: false,
         };
         let env: Vec<(String, String)> = crate::adapters::confine::fence_env(&spec)
             .into_iter()
-            .map(|(k, v)| (k.to_string_lossy().into_owned(), v.to_string_lossy().into_owned()))
+            .map(|(k, v)| {
+                (
+                    k.to_string_lossy().into_owned(),
+                    v.to_string_lossy().into_owned(),
+                )
+            })
             .collect();
         let get = |key: &str| env.iter().find(|(k, _)| k == key).map(|(_, v)| v.clone());
-        assert!(!env.iter().any(|(_, v)| v.contains("leak-me")), "无关变量不得进子进程");
+        assert!(
+            !env.iter().any(|(_, v)| v.contains("leak-me")),
+            "无关变量不得进子进程"
+        );
         assert!(get("SOLOMNI_PROBE_SECRET").is_none());
-        assert_eq!(get("HOME").as_deref(), Some(private.to_string_lossy().as_ref()), "HOME 落在私有沙箱");
-        assert_eq!(get("TEMP").as_deref(), Some(private.to_string_lossy().as_ref()));
-        assert_eq!(get("PYTHONIOENCODING").as_deref(), Some("utf-8"), "编码统一 UTF-8");
+        assert_eq!(
+            get("HOME").as_deref(),
+            Some(private.to_string_lossy().as_ref()),
+            "HOME 落在私有沙箱"
+        );
+        assert_eq!(
+            get("TEMP").as_deref(),
+            Some(private.to_string_lossy().as_ref())
+        );
+        // Windows 建 AppContainer 进程要读 LOCALAPPDATA：白名单里没有它，CreateProcessW 直接失败（os error 203），
+        // 容器整条路会静默降级成无围栏——落户同样指进私有沙箱。
+        assert_eq!(
+            get("LOCALAPPDATA").as_deref(),
+            Some(private.to_string_lossy().as_ref()),
+            "LOCALAPPDATA 也落在私有沙箱"
+        );
+        assert_eq!(
+            get("PYTHONIOENCODING").as_deref(),
+            Some("utf-8"),
+            "编码统一 UTF-8"
+        );
         std::env::remove_var("SOLOMNI_PROBE_SECRET");
     }
 
     /// 回执里的标记文案必须来自提示词册（它们随 [工具结果] 进模型上下文，所以不能在代码里另写一份）。
     #[test]
     fn receipt_markers_come_from_the_prompt_book() {
-        let prompts: crate::core::prompt::Prompts =
-            serde_yaml::from_str(include_str!("../../prompts.yaml")).expect("内置提示词册必须合法");
+        use crate::core::ports::PromptSource;
+        let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let prompts =
+            crate::adapters::YamlPrompts::new(root.join("prompts"), root.join("systools"))
+                .load()
+                .expect("内置提示词册必须合法");
         let texts = prompts.core.tool_texts;
         let tools = ProcTools::new(
             PathBuf::from("solomni"),
@@ -252,36 +350,98 @@ mod tests {
         assert_eq!(ok.output, "正常输出", "没有异常就不加任何标记");
 
         let with_err = tools.assemble("正文".to_string(), "警告".to_string(), false, Some(0));
-        assert!(with_err.output.contains(&texts.tool_stderr_header) && with_err.output.contains("警告"));
+        assert!(
+            with_err.output.contains(&texts.tool_stderr_header) && with_err.output.contains("警告")
+        );
 
         let timed = tools.assemble(String::new(), String::new(), true, None);
         assert!(!timed.ok);
-        assert!(timed.output.contains(&texts.tool_timeout), "{}", timed.output);
+        assert!(
+            timed.output.contains(&texts.tool_timeout),
+            "{}",
+            timed.output
+        );
 
-        let fenced = tools.assemble(String::new(), String::new(), false, Some(confine::FENCE_FAILED));
+        let fenced = tools.assemble(
+            String::new(),
+            String::new(),
+            false,
+            Some(confine::FENCE_FAILED),
+        );
         assert!(!fenced.ok);
-        assert!(fenced.output.contains(&texts.tool_fence_failed), "{}", fenced.output);
+        assert!(
+            fenced.output.contains(&texts.tool_fence_failed),
+            "{}",
+            fenced.output
+        );
 
         let long = "字".repeat(20_000);
         let cut = tools.assemble(long, String::new(), false, Some(0));
-        assert!(cut.output.contains("20000"), "截断要如实报字符数：{}", &cut.output[cut.output.len() - 80..]);
+        assert!(
+            cut.output.contains("20000"),
+            "截断要如实报字符数：{}",
+            &cut.output[cut.output.len() - 80..]
+        );
     }
 
-    // ---------- 真实工具进程（T2 真实适配器边界；见 TESTING.md 端口矩阵的 ToolRunner 行） ----------
+    /// 未授权时段的放行规矩：**只有本机装不上能降级**。
+    /// 自检已确认机制有效却仍装不上 = 我们写错了，那一路必须拒绝执行——
+    /// 按无围栏跑等于用户以为有围栏、实际什么都没有（回执文案取自提示词册）。
+    #[cfg(windows)]
+    #[test]
+    fn broken_mechanism_refuses_execution_instead_of_degrading() {
+        let texts = prompt_texts();
+        let broken = refuse_when_broken(
+            &texts,
+            confine::FenceVerdict::Broken("profile 写错".to_string()),
+        )
+        .expect("我们写错了必须拒绝执行");
+        assert!(!broken.ok, "拒绝执行时 ok 必须为假");
+        assert_eq!(
+            broken.output, texts.tool_fence_failed,
+            "回执用册子里的固定说法"
+        );
+        assert!(
+            refuse_when_broken(&texts, confine::FenceVerdict::Enforced).is_none(),
+            "机制装上了就没有拒绝的理由"
+        );
+        assert!(
+            refuse_when_broken(
+                &texts,
+                confine::FenceVerdict::EnvUnavailable("内核不支持".to_string())
+            )
+            .is_none(),
+            "本机不允许是环境结论：如实降级照跑，不拒绝"
+        );
+    }
+
+    // ---------- 真实工具进程（T2 真实适配器边界；见 docs/testing/port-matrix.md 的 ToolRunner 行） ----------
 
     /// 已构建的产品可执行文件（守门进程就是它自己）：`cargo build` 之后才存在；没有就如实跳过。
     fn built_exe() -> Option<PathBuf> {
         let me = std::env::current_exe().ok()?;
         let profile_dir = me.parent()?.parent()?; // target/<profile>/deps → target/<profile>
-        let name = if cfg!(windows) { "solomni.exe" } else { "solomni" };
+        let name = if cfg!(windows) {
+            "solomni.exe"
+        } else {
+            "solomni"
+        };
         let p = profile_dir.join(name);
-        if p.is_file() { Some(p) } else { None }
+        if p.is_file() {
+            Some(p)
+        } else {
+            None
+        }
     }
 
     /// 本机可用的 python（没有就如实跳过需要解释器的用例）。
     fn python() -> Option<&'static str> {
         for name in ["python", "python3"] {
-            if let Ok(o) = std::process::Command::new(name).arg("-c").arg("print(1)").output() {
+            if let Ok(o) = std::process::Command::new(name)
+                .arg("-c")
+                .arg("print(1)")
+                .output()
+            {
                 if o.status.success() {
                     return Some(name);
                 }
@@ -291,8 +451,12 @@ mod tests {
     }
 
     fn prompt_texts() -> crate::core::prompt::ToolTexts {
-        let prompts: crate::core::prompt::Prompts =
-            serde_yaml::from_str(include_str!("../../prompts.yaml")).expect("内置提示词册必须合法");
+        use crate::core::ports::PromptSource;
+        let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let prompts =
+            crate::adapters::YamlPrompts::new(root.join("prompts"), root.join("systools"))
+                .load()
+                .expect("内置提示词册必须合法");
         prompts.core.tool_texts
     }
 
@@ -308,27 +472,125 @@ mod tests {
         t
     }
 
-    fn spec_for(dir: &PathBuf) -> FenceSpec {
-        FenceSpec { agent: "proc".to_string(), rw: vec![dir.clone()], cwd: dir.clone(), net: false }
+    fn spec_for(dir: &Path) -> FenceSpec {
+        FenceSpec {
+            agent: "proc".to_string(),
+            rw: vec![dir.to_path_buf()],
+            cwd: dir.to_path_buf(),
+            ro: Vec::new(),
+            net: false,
+        }
     }
 
     /// 真实工具进程：stdin 的 JSON 原样送达，退出码决定 ok（不猜、不吞）。
     #[test]
     fn real_tool_process_receives_stdin_json_and_reports_success() {
         let Some(exe) = built_exe() else {
-            eprintln!("[探针] 未找到已构建的 solomni 可执行文件（先 cargo build），跳过真实工具进程契约");
+            eprintln!(
+                "[探针] 未找到已构建的 solomni 可执行文件（先 cargo build），跳过真实工具进程契约"
+            );
             return;
         };
         let Some(py) = python() else {
             eprintln!("[探针] 本机没有可用的 python，跳过真实工具进程契约");
             return;
         };
-        let dir = crate::contract_tests::scratch("proc-tools-stdin");
-        std::fs::write(dir.join("echo_stdin.py"), "import sys\nprint(sys.stdin.read().strip())\n").expect("写脚本");
+        let dir = crate::tests::scratch("proc-tools-stdin");
+        std::fs::write(
+            dir.join("echo_stdin.py"),
+            "import sys\nprint(sys.stdin.read().strip())\n",
+        )
+        .expect("写脚本");
         let tools = real_runner(exe, &dir, 60);
-        let out = tools.run(&spec_for(&dir), &format!("{} echo_stdin.py", py), "{\"k\":\"v\"}");
+        let out = tools.run(
+            &spec_for(&dir),
+            &format!("{} echo_stdin.py", py),
+            "{\"k\":\"v\"}",
+        );
         assert!(out.ok, "工具应当成功：{}", out.output);
-        assert!(out.output.contains("{\"k\":\"v\"}"), "stdin 的 JSON 必须原样送达工具：{}", out.output);
+        assert!(
+            out.output.contains("{\"k\":\"v\"}"),
+            "stdin 的 JSON 必须原样送达工具：{}",
+            out.output
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 真实工具进程：父进程的无关变量（密钥之类）不得进工具进程——环境白名单要在真进程上生效。
+    #[test]
+    fn real_tool_process_does_not_inherit_foreign_env() {
+        let Some(exe) = built_exe() else {
+            eprintln!("[探针] 未找到已构建的 solomni 可执行文件（先 cargo build），跳过工具进程环境白名单契约");
+            return;
+        };
+        let Some(py) = python() else {
+            eprintln!("[探针] 本机没有可用的 python，跳过工具进程环境白名单契约");
+            return;
+        };
+        let dir = crate::tests::scratch("proc-tools-env");
+        std::fs::write(
+            dir.join("echo_env.py"),
+            "import os\nprint('LEAK=' + str(os.environ.get('SOLOMNI_PROBE_ENV_LEAK')))\n",
+        )
+        .expect("写脚本");
+        std::env::set_var("SOLOMNI_PROBE_ENV_LEAK", "leak-me");
+        let tools = real_runner(exe, &dir, 60);
+        let out = tools.run(&spec_for(&dir), &format!("{} echo_env.py", py), "{}");
+        std::env::remove_var("SOLOMNI_PROBE_ENV_LEAK");
+        assert!(out.ok, "工具应当成功：{}", out.output);
+        assert!(
+            out.output.contains("LEAK=None"),
+            "无关变量不得进工具进程：{}",
+            out.output
+        );
+        assert!(
+            !out.output.contains("leak-me"),
+            "密钥不得进工具进程：{}",
+            out.output
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 命令里的**程序名**写成带正斜杠的相对路径也必须跑得起来：Windows 的 cmd 不认程序名里的 `/`
+    /// （`build/indexer build` 会被它读成命令 `build` + 开关 `/indexer`），守门进程要按平台把程序名里的 `/` 转成 `\`。
+    /// 参数里的正斜杠不受影响——`node tools/report.js` 这类命令靠的就是它。
+    #[test]
+    fn real_tool_process_runs_a_relative_program_path() {
+        let Some(exe) = built_exe() else {
+            eprintln!(
+                "[探针] 未找到已构建的 solomni 可执行文件（先 cargo build），跳过相对程序名契约"
+            );
+            return;
+        };
+        let dir = crate::tests::scratch("proc-tools-relative-program");
+        let sub = dir.join("sub");
+        std::fs::create_dir_all(&sub).expect("建子目录");
+        let (name, body, command) = if cfg!(windows) {
+            (
+                "probe.cmd",
+                "@echo off\r\necho PROBE-OK\r\n",
+                "sub/probe.cmd",
+            )
+        } else {
+            ("probe.sh", "echo PROBE-OK\n", "sub/probe.sh")
+        };
+        let script = sub.join(name);
+        std::fs::write(&script, body).expect("写脚本");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perm = std::fs::metadata(&script).expect("读权限位").permissions();
+            perm.set_mode(0o755);
+            std::fs::set_permissions(&script, perm).expect("加执行位");
+        }
+        let tools = real_runner(exe, &dir, 60);
+        let out = tools.run(&spec_for(&dir), command, "{}");
+        assert!(out.ok, "带正斜杠的相对程序名必须能跑起来：{}", out.output);
+        assert!(
+            out.output.contains("PROBE-OK"),
+            "工具输出要如实回来：{}",
+            out.output
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -347,13 +609,17 @@ mod tests {
             eprintln!("[探针] 本机进程树围栏不可用，跳过超时杀树契约");
             return;
         }
-        let dir = crate::contract_tests::scratch("proc-tools-timeout");
+        let dir = crate::tests::scratch("proc-tools-timeout");
         std::fs::write(dir.join("sleep60.py"), "import time\ntime.sleep(60)\n").expect("写脚本");
         let tools = real_runner(exe, &dir, 2);
         let started = Instant::now();
         let out = tools.run(&spec_for(&dir), &format!("{} sleep60.py", py), "{}");
         assert!(!out.ok, "超时必须如实回执失败：{}", out.output);
-        assert!(out.output.contains(&tools.texts.tool_timeout), "回执要带上超时标记：{}", out.output);
+        assert!(
+            out.output.contains(&tools.texts.tool_timeout),
+            "回执要带上超时标记：{}",
+            out.output
+        );
         assert!(
             started.elapsed() < Duration::from_secs(30),
             "超时后不得继续等它自然结束（实际 {:?}）",
@@ -365,7 +631,7 @@ mod tests {
     /// 守门进程起不来：如实回执「启动失败」，不 panic、不假装跑过。
     #[test]
     fn missing_launcher_binary_is_reported_honestly() {
-        let dir = crate::contract_tests::scratch("proc-tools-missing-exe");
+        let dir = crate::tests::scratch("proc-tools-missing-exe");
         let tools = real_runner(PathBuf::from("definitely-not-here-solomni"), &dir, 5);
         let out = tools.run(&spec_for(&dir), "echo hi", "{}");
         assert!(!out.ok);

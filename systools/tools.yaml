@@ -1,0 +1,229 @@
+# 系统工具总表：工具**是什么**（唯一真相：说明、参数契约、能否并发）。
+# 改工具的参数或说明只改这里；模型侧说明与调用校验都由这一份声明驱动。
+# 与模块工具的区别：模块工具在各自 module.yaml（外部命令），系统工具的实现是核心能力。
+
+tools:
+  read:
+    capability: fs-read        # 权限收口依据：碰文件系统的系统工具照样受沙箱/围栏约束
+    desc: 读取文本文件（UTF-8）。
+    parallel: true                    # 只读、无副作用：同一回复里的多个读取**真的并发跑**
+    params:
+      path:
+        type: string
+        required: true
+        desc: 要读取的真实绝对路径
+      offset:
+        type: integer
+        min: 1
+        default: 1
+        desc: 起始行号（从 1 数起）；省略即从第 1 行开始。超过总行数时核心会告诉你总行数
+      limit:
+        type: integer
+        min: 1
+        max: 2000
+        default: 2000
+        desc: 本次最多返回的行数；省略即尽量多读
+  write:
+    capability: fs-write        # 权限收口依据：碰文件系统的系统工具照样受沙箱/围栏约束
+    desc: 整份写入文本文件（UTF-8）：文件不存在则新建；已存在则整份覆盖，但**要求你在本次会话里先完整读过它**（只改一处请用 edit）。
+    params:
+      path:
+        type: string
+        required: true
+        desc: 要写入的真实绝对路径
+      content:
+        type: string
+        required: true
+        desc: 要写入的**完整**内容（会整份覆盖，不是追加、不是局部修改）
+  edit:
+    capability: fs-write        # 权限收口依据：碰文件系统的系统工具照样受沙箱/围栏约束
+    desc: 对已存在的文本文件做一处精确替换（按字面匹配，不动别处）。
+    params:
+      path:
+        type: string
+        required: true
+        desc: 要修改的真实绝对路径
+      old_string:
+        type: string
+        required: true
+        non_empty: true
+        desc: 要被替换掉的原文（按字面匹配，含缩进与换行；默认必须唯一命中）
+      new_string:
+        type: string
+        required: true
+        desc: 替换成的新文本（空串 = 把这一段删掉）
+      replace_all:
+        type: boolean
+        desc: 是否替换全部命中；省略 = 要求唯一命中（多处命中会报错并列出位置）
+  patch:
+    capability: fs-write        # 权限收口依据：碰文件系统的系统工具照样受沙箱/围栏约束
+    desc: 用一段**自由格式**的补丁文本改文件（信封之后原样跟补丁；大段内容不要塞进 JSON）。语法见 patch_guide。
+  list:
+    capability: fs-read        # 权限收口依据：碰文件系统的系统工具照样受沙箱/围栏约束
+    desc: 列一个目录（名字 / 是否目录 / 字节数，按名字排序）。**确认资料齐不齐、脚本在不在就用它**；read 只读文件，遇到目录会引导你用 list。
+    parallel: true                    # 只读、无副作用
+    params:
+      path:
+        type: string
+        required: true
+        desc: 要列的目录的真实绝对路径
+  search:
+    capability: fs-read        # 权限收口依据：碰文件系统的系统工具照样受沙箱/围栏约束
+    desc: 在文本文件里查关键词，返回带行号的命中行。
+    parallel: true                    # 只读、无副作用
+    params:
+      path:
+        type: string
+        required: true
+        desc: 要搜索的真实绝对路径
+      keyword:
+        type: string
+        required: true
+        non_empty: true
+        desc: 要查找的文本
+      ignore_case:
+        type: boolean
+        desc: 是否忽略大小写；省略即区分大小写
+
+  # —— 工具调用约定：两套**互斥**（一个通道只用一套，不能同时教，否则模型在正文里讲解参数会被当成调用）——
+
+  # —— 核心操作：核心 AI 的产出（驱动核心走下一步）必须走工具调用，不在正文里手写 JSON ——
+  plan:
+    capability: none
+    desc: 交出方案与任务链：总结讨论，把它拆成一张有向无环图。
+    params:
+      plan:
+        type: string
+        required: true
+        non_empty: true
+        desc: 给用户看的方案说明
+      nodes:
+        type: array
+        required: true
+        desc: 节点数组，每项 {"id","title","objective","assignee","deps"}；assignee 必须从名单里选，deps 必须在这张图里且不得成环。id 只用来表达依赖——**落库的序号由核心按阶段派生**（n1-1 / n1-2 / n2-1 …），界面上显示的是派生后的号。
+      advice:
+        type: string
+        desc: 给用户的**建议**（推荐现在开工还是先改方案 + 一句理由）；会显示在裁决卡片上。
+
+  node_verdict:
+    capability: none
+    desc: |
+      交出这一阶段的验收结论：逐节点核对产出够不够它的**当前目标**。
+      后果（核心据此动作）：ok=false 的节点会被**退回待办**——用户点「继续」后**只重派这些**（同阶段其余节点保持"已通过"，不整阶段重来）；整阶段全部 ok 才解锁下一阶段。
+      node 必须取提示词里那张"节点 id — 负责人"表里的 id（核心按它校验；填错会被要求重填）。
+    params:
+      verdicts:
+        type: array
+        required: true
+        desc: 结论数组，每项 {"node","ok","note"}；node 取表里的节点 id；ok=false 时 note 要说清差在哪（这段会随返工一起发回给负责它的 agent）。
+      advice:
+        type: string
+        desc: 给用户的**返工建议**（放行还是返工 + 一句理由）；会显示在裁决卡片上。
+
+  checklist:
+    capability: none
+    desc: |
+      交出总验收清单：按方案逐条核对各节点的回报。
+      后果（核心据此动作）：status=fail 的条目**必须**填 rework = 要返工的**节点 id**（从提示词里那张"节点 id — 负责人"表里选）——
+      核心只把这些节点退回待办，用户点「继续」后只重派它们；全部 pass 才交付。
+      填了表里没有的 id 或漏填 = 这次判定不算，核心会要求重填。
+    params:
+      items:
+        type: array
+        required: true
+        desc: 清单数组，每项 {"item","status":"pass|fail","evidence","reason","rework"}；fail 时 reason 说清差距、rework 填要返工的**节点 id**（没有它这次判定不算）。
+
+  verdict:
+    capability: none
+    desc: 判定用户对裁决的回应是否**明确到可以开工 / 放行**。
+    params:
+      clear:
+        type: boolean
+        required: true
+        desc: 他的意图是否明确（明确 = 可以照他说的开工/放行；含糊、只是表态、还要再想想、在反问 = false）。
+          后果：true = 核心按他说的**开工 / 放行**（不再追问）；false = 核心**不开工**，请他再补一句。
+      why:
+        type: string
+        required: true
+        non_empty: true
+        desc: 一句话说清判定：明确时说"照他说的做什么"；不明确时说清还差什么。
+
+  slate:
+    capability: none
+    desc: 交出这次协作的发言名单（代拟）。
+    params:
+      picks:
+        type: array
+        required: true
+        desc: 名单数组，每项要么 {"agent":"已存agent名","why":...}，要么 {"name","modules","model","why"}；模块与模型必须从清单里选。
+
+  suggest:
+    capability: none
+    desc: 交出为这次工作推荐的 agent 名单。
+    params:
+      agents:
+        type: array
+        required: true
+        desc: 与 slate 同形（每项复用已存 agent 或组装新的）；按编排模式的约束组织。
+  submit_report:
+    capability: none              # 不碰文件：承载"这个节点做完了什么"
+    desc: 回报这个节点的产出：做完了什么、动了什么、还留什么问题。**收尾时用它**——它就是这一轮的最终答复。
+    params:
+      summary:
+        type: string
+        required: true
+        non_empty: true
+        desc: 做了什么
+      changes:
+        type: string
+        required: true
+        non_empty: true
+        desc: 动了什么（产物路径、改了哪些文件）
+      open:
+        type: string
+        desc: 遗留问题；没有就留空
+
+  compact:
+    capability: none              # 不碰文件：改的是"发给模型什么"，不是"留下什么"
+    desc: 压缩上下文：把此前的内容写成一份 summary（此后不再发给模型，但用户仍可查看）。**只在压缩回合由系统发起时使用**。
+    params:
+      summary:
+        type: string
+        required: true
+        non_empty: true
+        desc: 要留下的摘要：结论、决定、待办、关键路径——丢掉细节，留下"以后还要用的"。
+
+  # —— 协作动词：讨论阶段的表态（声明式工具，不再是"从正文里解析手写信封"）——
+  say:
+    capability: none
+    desc: 发表意见、提方案（讨论阶段的正常发言）。
+    params:
+      text:
+        type: string
+        required: true
+        desc: 要说的话
+  agree:
+    capability: none
+    desc: 同意当前方案：认为方案没有缺口、你可以开工时用它。发过之后不再被追问，直到在场者全部同意。
+    params:
+      text:
+        type: string
+        required: true
+        desc: 附一句同意理由（可短）
+  leave:
+    capability: none
+    desc: 退出讨论：你的模块与这件事无关时用它（离开的人不计入"在场者全部同意"）。
+    params:
+      text:
+        type: string
+        required: true
+        desc: 为什么不再参与
+  ask:
+    capability: none
+    desc: 需要用户决定时用它（缺参数、需求有歧义、要在几条路线里选）：讨论暂停，等用户回答后继续。
+    params:
+      text:
+        type: string
+        required: true
+        desc: 要问用户什么
+

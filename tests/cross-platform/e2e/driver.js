@@ -3,9 +3,11 @@
 //       → 协作（非代拟）跑完交付 → 代拟（复用+组装）确认后名单写回 meta 并建出沙箱
 //       → 外部工具 cwd / 绝对路径 / 自由格式补丁 / 正文+信封 / 原生多调用（协议形状由假供应商核对）。
 const BASE = process.env.E2E_BASE || 'http://127.0.0.1:3099';
+// 假供应商端口由编排器指定：本机可能残留上一次的进程，固定端口会让驱动打到旧的那个。
+const MOCK_BASE = process.env.E2E_MOCK_BASE || 'http://127.0.0.1:8397';
 const fs = require('fs');
 const path = require('path');
-// 夹具根：本目录下的 root/（隔离根：prompts.yaml、.home、modules 都在里面）。
+// 夹具根：本目录下的 root/（隔离根：prompts/、.home、modules 都在里面）。
 const ROOT = path.join(__dirname, 'root');
 
 async function api(method, p, body) {
@@ -28,7 +30,7 @@ const dir = (name) => path.join(ROOT, 'session', name);
 /** 假供应商那一侧看到的最后一条请求（它记下了消息形状）：原生通道的协议形状只能在这里验。 */
 async function mockSeen() {
   try {
-    const r = await fetch('http://127.0.0.1:8397/__seen');
+    const r = await fetch(MOCK_BASE + '/__seen');
     return await r.json();
   } catch {
     return null;
@@ -53,7 +55,7 @@ async function lines(sid) {
   assert(st.status === 200 && Array.isArray(st.json.agents), 'GET /api/state 带 agents', st.text.slice(0, 120));
 
   // 登记处：一个供应商 + 两个模型
-  assert((await api('POST', '/api/providers', { id: 'mock', base_url: 'http://127.0.0.1:8397/v1', api_key: 'k' })).status === 200, '登记供应商');
+  assert((await api('POST', '/api/providers', { id: 'mock', base_url: MOCK_BASE + '/v1', api_key: 'k' })).status === 200, '登记供应商');
   assert((await api('POST', '/api/models', { id: 'm1', name: 'M1', api_model: 'm1', provider: 'mock', note: '' })).status === 200, '登记模型 m1');
   assert((await api('POST', '/api/models', { id: 'm2', name: 'M2', api_model: 'm2', provider: 'mock', note: '' })).status === 200, '登记模型 m2');
   assert((await api('POST', '/api/models/m1/core')).status === 200, '设核心默认 m1');
@@ -138,14 +140,14 @@ async function lines(sid) {
   const saidRef = await api('POST', '/api/sessions/' + encodeURIComponent(name1) + '/say', { text: '@work:f.txt 看一下' });
   assert(saidRef.status === 200, '@ 引用发言', saidRef.text.slice(0, 200));
   const lr = await lines(name1);
-  const ul = lr.filter((x) => String(x.line).startsWith('[用户')).pop() || {};
+  const ul = lr.filter((x) => x.speaker === '用户').pop() || {};
   assert(!/@work:/.test(String(ul.line)) && /work[\\/]+f\.txt/.test(String(ul.line)), '核心把 @work:… 改写成真实绝对路径', String(ul.line).slice(0, 200));
 
   // 句读标点不进路径：@work:f.txt，看一下 → work:/f.txt，看一下
   const saidPunct = await api('POST', '/api/sessions/' + encodeURIComponent(name1) + '/say', { text: '@work:f.txt，看一下' });
   assert(saidPunct.status === 200, '带句读的引用发言', saidPunct.text.slice(0, 200));
   const lp = await lines(name1);
-  const upl = lp.filter((x) => String(x.line).startsWith('[用户')).pop() || {};
+  const upl = lp.filter((x) => x.speaker === '用户').pop() || {};
   assert(/work[\\/]+f\.txt，看一下/.test(String(upl.line)), '句读标点不入路径（留在正文里）', String(upl.line).slice(0, 200));
 
   // 文件名含空格：引用用引号包住路径 → 仍能改写成正确路径
@@ -155,7 +157,7 @@ async function lines(sid) {
   const saidSpace = await api('POST', '/api/sessions/' + encodeURIComponent(name1) + '/say', { text: '@work:"' + spaced + '" 看一下' });
   assert(saidSpace.status === 200, '引用含空格文件名', saidSpace.text.slice(0, 200));
   const ls = await lines(name1);
-  const usl = ls.filter((x) => String(x.line).startsWith('[用户')).pop() || {};
+  const usl = ls.filter((x) => x.speaker === '用户').pop() || {};
   assert(new RegExp('项目 说明\\.md').test(String(usl.line)) && !/@work:/.test(String(usl.line)), '引号内的空格路径被完整改写（真实路径）', String(usl.line).slice(0, 240));
 
   // 非法工具信封：必须记成一条失败的工具行，且 JSON 绝不上屏（真实 bug 的回归）
@@ -239,7 +241,7 @@ async function lines(sid) {
   });
   assert(c1e.status === 200, '建引用私沙的协作工作', c1e.text.slice(0, 200));
   const le = await lines(name1e);
-  const demand = le.filter((x) => String(x.line).includes('需求')).pop() || {};
+  const demand = le.filter((x) => x.speaker === '用户' && x.verb === '需求').pop() || {};
   assert(String(demand.line).includes('秘密.md') && String(demand.line).includes('能读') && !/@sandbox:/.test(String(demand.line)), '协作里引用私沙 → 改写并如实说明只有该 agent 能读', String(demand.line).slice(0, 200));
   assert(!String(demand.line).includes('）.md') && !String(demand.line).includes(') .md'), '改写后不残留路径尾巴（扩展名没被句读切断）', String(demand.line).slice(0, 200));
 
@@ -270,7 +272,35 @@ async function lines(sid) {
   assert(c2.status === 200, '建协作工作（2 个 agent）', c2.text.slice(0, 200));
   const begin = await api('POST', '/api/sessions/' + encodeURIComponent(name2) + '/begin', { text: 'yes,allow' });
   assert(begin.status === 200, '确认开始讨论', begin.text.slice(0, 200));
-  const ev2 = JSON.stringify((begin.json && begin.json.events) || []);
+  // 子会话的**事件台**要有它自己的权威行与运行态（不能只落在盘上）：否则打开它的标签页，
+  // 流式块永远等不到替换它的那一行——光标一直挂着、按钮永远停在「停止」（真机反馈过）。
+  const childBus = await api('GET', '/api/events?sid=' + encodeURIComponent(name2 + '--甲') + '&since=0');
+  const childJson = JSON.stringify((childBus.json && childBus.json.lines) || []);
+  assert(
+    childJson.includes('"speaker":"甲"') && childJson.includes('"verb":"say"'),
+    '子会话事件台带它自己的权威发言行（说话人与动词是结构化字段）',
+    childJson.slice(0, 200)
+  );
+  assert(childJson.includes('"working"'), '子会话事件台带运行态（在跑/收尾）', childJson.slice(0, 200));
+  // 裁决卡上的**建议由核心 AI 给**（随 plan 那一次调用一起产出，不额外花调用）。
+  const stPlan = await api('GET', '/api/state');
+  const viewPlan = ((stPlan.json && stPlan.json.sessions) || []).find((v) => v.sid === name2);
+  const pendPlan = (viewPlan && viewPlan.pending) || null;
+  // 待裁决是**快照字段**（与推的 Decision 同源）：刷新页面照样画得出那张卡。
+  // 卡片里的"建议"由核心 AI 随 plan 那一次调用一起给（契约见单测 plan_review_carries_the_core_advice）。
+  // 卡片上那句"建议"**由核心 AI 给**（随 plan 那一次调用一起产出），快照里必须带上它。
+  assert(
+    pendPlan && pendPlan.kind === 'plan_review' && !!pendPlan.question
+      && String(pendPlan.advice || '').length > 0,
+    '方案待审：快照里带核心 AI 的建议',
+    JSON.stringify(pendPlan).slice(0, 220),
+  );
+  // 整理完停在**待审**：用户回一句明确的开工才推进；开工后节点在子会话里跑，交付是异步产生的。
+  await approvePlan(name2);
+  // 命令回包不再携带事实：协作的转录与交付从**落盘重放**取（快照）。
+  const ev2 = JSON.stringify(await waitForDelivery(name2));
+  // 用户回一句之后，**由核心 AI 判"明确了吗"**：明确才开工（这句是判定通过后核心说的话）。
+  assert(ev2.includes('照你说的开工'), '用户回应后由核心 AI 判定"明确"并开工', ev2.slice(-300));
   assert(ev2.includes('甲') && ev2.includes('乙'), '协作转录以 agent 名为说话人', ev2.slice(0, 240));
   assert(ev2.includes('delivery') || ev2.includes('交付'), '协作跑完并交付', ev2.slice(-240));
   assert(fs.existsSync(path.join(dir(name2), '甲')) && fs.existsSync(path.join(dir(name2), '乙')), '两个 agent 各自沙箱目录已建');
@@ -279,7 +309,11 @@ async function lines(sid) {
   const name3 = 'e2e-delegate-' + Date.now();
   const c3 = await api('POST', '/api/sessions', { name: name3, mode: 'collab', agents: [], task: '调研一下再总结', delegate: true });
   assert(c3.status === 200, '建代拟工作（无名单）', c3.text.slice(0, 200));
-  assert(JSON.stringify((c3.json && c3.json.events) || []).includes('代拟'), '核心已代拟名单', JSON.stringify((c3.json && c3.json.events) || []).slice(0, 240));
+  // 开场事实在**事件台**上（回包只给 head）：按会话过滤取它自己的流。
+  const c3Bus = JSON.stringify(
+    ((await api('GET', '/api/events?sid=' + encodeURIComponent(name3) + '&since=0')).json || {}).lines || [],
+  );
+  assert(c3Bus.includes('代拟'), '核心已代拟名单', c3Bus.slice(0, 240));
   const slate = await api('POST', '/api/sessions/' + encodeURIComponent(name3) + '/slate', { text: 'yes' });
   assert(slate.status === 200, '确认代拟名单', slate.text.slice(0, 200));
   const meta3 = fs.readFileSync(path.join(dir(name3), 'meta.yaml'), 'utf8');
@@ -289,8 +323,223 @@ async function lines(sid) {
   assert(fs.existsSync(path.join(dir(name3), '单兵')) && fs.existsSync(path.join(dir(name3), '新助手')), '确认名单后按 agent 名建出沙箱目录');
   const begun3 = await api('POST', '/api/sessions/' + encodeURIComponent(name3) + '/begin', { text: 'yes,allow' });
   assert(begun3.status === 200, '代拟名单后开始讨论', begun3.text.slice(0, 200));
-  const ev3 = JSON.stringify((begun3.json && begun3.json.events) || []);
+  await approvePlan(name3);
+  const ev3 = JSON.stringify(await waitForDelivery(name3));
   assert(ev3.includes('单兵'), '代拟出来的 agent 真的在发言', ev3.slice(0, 240));
+
+
+  /** 走完审查关卡：整理完停在待审，用户回一句**明确的开工**才推进（协作的必经一步）。 */
+async function approvePlan(name) {
+  const r = await api('POST', '/api/sessions/' + encodeURIComponent(name) + '/decide', { text: '同意开工，按方案推进。' });
+  assert(r.status === 200, '审查关卡：明确开工', r.text.slice(0, 200));
+  return [];
+}
+
+/* ---------- 协作状态机的六条判据（L4） ----------
+   * 现有用例只断言"跑完并交付"；这里把状态机的承诺逐条钉住：
+   * agree 收敛 / leave 不可逆 / 轮次上限 / 返工闭环 / 撤回同意 / ask 中止。
+   * 信封走向由 mock.js 按转录事实路由（夹具不改产品行为）。
+   */
+  const all = (sid) => lines(sid);
+  /** 一行 → 文本：**行身份在结构化字段里**（speaker / verb / kind），正文里没有标签——
+   * 与 core 的 LineView::render 同一拼法（断言因此读"人看到的文本"）。 */
+  function renderLine(l) {
+    const text = String(l.line || '');
+    const speaker = String(l.speaker || '');
+    const verb = String(l.verb || '');
+    if (l.kind === 'round') return '[' + speaker + ' ' + text + ']';
+    const label = speaker ? (verb ? speaker + ':' + verb : speaker) : '';
+    if (!label) return text;
+    return text ? '[' + label + '] ' + text : '[' + label + ']';
+  }
+  const joined = (ls) => ls.map(renderLine).join('\n');
+  /** 全部事件（notice / delivery / ended 这些不是转录行，得从这里看）。 */
+  async function eventsOf(sid) {
+    const r = await api('GET', '/api/history/' + encodeURIComponent(sid));
+    return (r.json && r.json.events) || [];
+  }
+
+  /** 等一张**推来**的裁决（Decision：短暂事件，只在**事件台**上、不落盘）：驱动据此点「继续」。 */
+  async function waitForDecision(sid, kind, ms = 60000) {
+    const until = Date.now() + ms;
+    for (;;) {
+      const r = await api('GET', '/api/events?sid=' + encodeURIComponent(sid) + '&since=0');
+      const ev = JSON.stringify((r.json && r.json.lines) || []);
+      if (ev.includes('"kind":"' + kind + '"')) return ev;
+      if (Date.now() > until) return ev;
+      await new Promise((res) => setTimeout(res, 500));
+    }
+  }
+
+  /** 等链驱动跑完：节点在**自己的子会话**里跑，父会话的交付是异步产生的。 */
+  async function waitForDelivery(sid, ms = 90000) {
+    const until = Date.now() + ms;
+    for (;;) {
+      const ev = await eventsOf(sid);
+      if (JSON.stringify(ev).includes('delivery')) return ev;
+      if (Date.now() > until) return ev;
+      await new Promise((r) => setTimeout(r, 500));
+    }
+  }
+
+  // ① agree 收敛：只有一个人同意时不该收敛（要出现下一轮），两人都同意才收敛。
+  const nA = 'e2e-collab-noconv-' + Date.now();
+  assert((await api('POST', '/api/sessions', {
+    name: nA, mode: 'collab', task: '不收敛：先各说各的',
+    agents: [
+      { name: '甲', transient: true, modules: ['summarizer'], model: 'm1' },
+      { name: '乙', transient: true, modules: ['reviewer'], model: 'm1' },
+    ],
+  })).status === 200, '建「不收敛」协作工作');
+  assert((await api('POST', '/api/sessions/' + encodeURIComponent(nA) + '/begin', { text: 'yes,allow' })).status === 200, '「不收敛」开始讨论');
+  const tA = joined(await all(nA));
+  assert(/\[轮次 2\]/.test(tA), '有人同意、有人没同意 → 不收敛，进入下一轮', tA.slice(-300));
+  assert(!tA.includes('delivery'), '未收敛时不交付', tA.slice(-200));
+
+  // ② leave 不可逆：退场后不再被询问；留下的那个人同意即收敛（退场者不算收敛门槛）。
+  const nB = 'e2e-collab-leave-' + Date.now();
+  assert((await api('POST', '/api/sessions', {
+    name: nB, mode: 'collab', task: '退场：甲先撤',
+    agents: [
+      { name: '甲', transient: true, modules: ['summarizer'], model: 'm1' },
+      { name: '乙', transient: true, modules: ['reviewer'], model: 'm1' },
+    ],
+  })).status === 200, '建「退场」协作工作');
+  assert((await api('POST', '/api/sessions/' + encodeURIComponent(nB) + '/begin', { text: 'yes,allow' })).status === 200, '「退场」开始讨论');
+  await approvePlan(nB);
+  const tB = joined(await all(nB));
+  const evB = JSON.stringify(await waitForDelivery(nB));
+  assert(tB.includes('甲:leave'), '甲发了 leave', tB.slice(-300));
+  // leave 之后不该再出现甲的发言：取 leave 之后那一段来断言。
+  const afterLeave = tB.slice(tB.indexOf('甲:leave'));
+  assert(!/\[甲:(say|agree|ask)/.test(afterLeave), 'leave 不可逆：退场之后甲不再发言', afterLeave.slice(0, 300));
+  assert(evB.includes('delivery'), '退场者不算门槛：剩下的人同意即收敛并交付', evB.slice(-240));
+
+  // ③ 轮次上限：谁都不同意 → 触上限并交用户裁决。
+  const nC = 'e2e-collab-cap-' + Date.now();
+  assert((await api('POST', '/api/sessions', {
+    name: nC, mode: 'collab', task: '上限：一直议下去',
+    agents: [
+      { name: '甲', transient: true, modules: ['summarizer'], model: 'm1' },
+      { name: '乙', transient: true, modules: ['reviewer'], model: 'm1' },
+    ],
+  })).status === 200, '建「上限」协作工作');
+  assert((await api('POST', '/api/sessions/' + encodeURIComponent(nC) + '/begin', { text: 'yes,allow' })).status === 200, '「上限」开始讨论');
+  const evC = JSON.stringify(await eventsOf(nC));
+  assert(evC.includes('讨论轮次超限'), '触上限要如实说明并交用户裁决', evC.slice(-300));
+
+  // ④ 返工闭环：验收先 fail → 定向返工 → 重验 → 交付。
+  const nD = 'e2e-collab-rework-' + Date.now();
+  assert((await api('POST', '/api/sessions', {
+    name: nD, mode: 'collab', task: '返工：第一次验收不过',
+    agents: [
+      { name: '甲', transient: true, modules: ['summarizer'], model: 'm1' },
+      { name: '乙', transient: true, modules: ['reviewer'], model: 'm1' },
+    ],
+  })).status === 200, '建「返工」协作工作');
+  assert((await api('POST', '/api/sessions/' + encodeURIComponent(nD) + '/begin', { text: 'yes,allow' })).status === 200, '「返工」开始讨论');
+  await approvePlan(nD);
+  // 没过 = 暂停并**指名要返工的节点**（结构化字段），而不是整条链重来。
+  // 总验收没过 → **指名要返工的节点**（结构化 rework 字段）→ 暂停等你定 → 点「继续」只重派它 → 重验交付。
+  // 夹具按"这一次方案"记失败轮次（mock.js），所以首次必 fail、重派后必过。
+  const evPause = await waitForDecision(nD, 'node_blocked');
+  assert(
+    evPause.includes('"nodes":["n1-1"]'),
+    '总验收没过要指名要返工的节点 id（结构化字段，不是自由文本）',
+    evPause.slice(-300),
+  );
+  assert(
+    (await api('POST', '/api/sessions/' + encodeURIComponent(nD) + '/continue', {})).status === 200,
+    '点「继续」重派指名的节点',
+  );
+  const evD = JSON.stringify(await waitForDelivery(nD));
+  assert(evD.includes('返工'), '验收 fail → 触发返工', evD.slice(-400));
+  assert(evD.includes('delivery'), '返工后重验通过并交付', evD.slice(-240));
+
+  // ⑤ 撤回同意：撤回行进转录，讨论重新打开并继续轮转。
+  const nE = 'e2e-collab-withdraw-' + Date.now();
+  assert((await api('POST', '/api/sessions', {
+    name: nE, mode: 'collab', task: '不收敛：撤回后重议',
+    agents: [
+      { name: '甲', transient: true, modules: ['summarizer'], model: 'm1' },
+      { name: '乙', transient: true, modules: ['reviewer'], model: 'm1' },
+    ],
+  })).status === 200, '建「撤回」协作工作');
+  assert((await api('POST', '/api/sessions/' + encodeURIComponent(nE) + '/begin', { text: 'yes,allow' })).status === 200, '「撤回」开始讨论');
+  const w = await api('POST', '/api/sessions/' + encodeURIComponent(nE) + '/withdraw', { agent: '乙' });
+  assert(w.status === 200, '撤回乙的同意', w.text.slice(0, 200));
+  const wBus = JSON.stringify(
+    ((await api('GET', '/api/events?sid=' + encodeURIComponent(nE) + '&since=0')).json || {}).lines || [],
+  );
+  assert(
+    wBus.includes('"speaker":"用户"') && wBus.includes('"verb":"撤回"') && wBus.includes('"line":"乙"'),
+    '撤回如实进转录（说话人/动词/正文都是结构化字段）',
+    wBus.slice(0, 240)
+  );
+
+  // ⑥ ask 中止：agent 提问 → 轮转中止并呈给用户；回答后继续。
+  const nF = 'e2e-collab-ask-' + Date.now();
+  assert((await api('POST', '/api/sessions', {
+    name: nF, mode: 'collab', task: '提问：需要用户决定',
+    agents: [
+      { name: '甲', transient: true, modules: ['summarizer'], model: 'm1' },
+      { name: '乙', transient: true, modules: ['reviewer'], model: 'm1' },
+    ],
+  })).status === 200, '建「提问」协作工作');
+  // 不给 allow：授权自裁（yes,allow）会让 ask 留档不中止——这正是 allow 的语义分界，所以这里要验"不授权"那一侧。
+  const beginF = await api('POST', '/api/sessions/' + encodeURIComponent(nF) + '/begin', { text: 'yes' });
+  assert(beginF.status === 200, '「提问」开始讨论（不授权自裁）', beginF.text.slice(0, 200));
+  // 待裁决是**快照字段**（与推的 Decision 同源）：从 /api/state 的会话视图读。
+  const stF = await api('GET', '/api/state');
+  const viewF = ((stF.json && stF.json.sessions) || []).find((v) => v.sid === nF);
+  const pendF = (viewF && viewF.pending) || null;
+  assert(pendF && pendF.kind === 'ask', 'ask 中止轮转并把问题呈给用户（快照里带待裁决）', JSON.stringify(pendF).slice(0, 300));
+  const ansF = await api('POST', '/api/sessions/' + encodeURIComponent(nF) + '/decide', { text: '用第一个方案' });
+  assert(ansF.status === 200, '回答 ask 后继续', ansF.text.slice(0, 200));
+  const tF = joined(await all(nF));
+  assert(tF.includes('用第一个方案'), '用户回答并入转录（进上下文）', tF.slice(-300));
+
+
+  /* ---------- 真工具链路（L4）：三个真模块里的两个，真的在真进程里跑 ----------
+   * harvest（python）扫夹具共享区 → corpus.jsonl；indexer（C++，CI 里现编）建索引 → 检索有命中。
+   * 这一段证明的是"三种语言的模块在真进程里真的能用"，与上面的信封/状态机验收互补。
+   * 工具用真进程，所以路径必须是**提示词里给出的真实绝对路径**（相对路径会被围栏拒绝）。
+   */
+  const nameR = 'e2e-realtools-' + Date.now();
+  const workDir = path.join(ROOT, 'session', nameR, 'work');
+  const cR = await api('POST', '/api/sessions', {
+    name: nameR, mode: 'single',
+    agents: [{ name: '资料手', transient: true, modules: ['harvest', 'indexer'], model: 'm1' }],
+  });
+  assert(cR.status === 200, '建「真工具」工作（harvest + indexer）', cR.text.slice(0, 200));
+  // 投喂两份材料（走产品的上传能力面，落进本次工作的共享区）。
+  assert((await api('POST', '/api/sessions/' + encodeURIComponent(nameR) + '/upload', {
+    name: '甲.md', data_base64: Buffer.from('# 甲\n\n本地优先的检索：索引建好之后可以离线查。\n', 'utf8').toString('base64'),
+  })).status === 200, '投喂甲.md');
+  assert((await api('POST', '/api/sessions/' + encodeURIComponent(nameR) + '/upload', {
+    name: '乙.md', data_base64: Buffer.from('# 乙\n\n本地优先的检索：离线查更稳。\n', 'utf8').toString('base64'),
+  })).status === 200, '投喂乙.md');
+  const corpusPath = path.join(workDir, 'corpus.jsonl');
+  const indexPath = path.join(workDir, 'index.bin');
+  // 直接经产品能力面驱动一次发言：假供应商会按提示词分支发出 harvest.scan 与 indexer.build/query。
+  const sayR = await api('POST', '/api/sessions/' + encodeURIComponent(nameR) + '/say', { text: '真工具链路：先抽语料，再建索引并检索' });
+  assert(sayR.status === 200, '「真工具」发言', sayR.text.slice(0, 200));
+  const rowsR = (await all(nameR)).filter((x) => x.tool).map((x) => x.tool);
+  // 失败时把工具原文打出来：真机围栏开着时（CI）只有它能说清是哪一层拦住了。
+  for (const r of rowsR) {
+    console.log('   工具 ' + (r.module || '') + '.' + r.name + (r.ok ? ' 成功' : ' 失败') + ' → '
+      + String(r.output || '').replace(/\s+/g, ' ').slice(0, 1500));
+  }
+  // 失败时要能一眼分清"目录不在"与"在但没权限"——两者的修法完全不同。
+  console.log('   共享区存在吗：' + fs.existsSync(workDir) + '（' + workDir + '）');
+  assert(rowsR.some((r) => r.name === 'scan'), 'harvest.scan 真的跑了（python 工具进程）', JSON.stringify(rowsR.map((r) => r.name)));
+  assert(fs.existsSync(corpusPath), 'corpus.jsonl 真的落地', corpusPath);
+  assert(rowsR.some((r) => r.name === 'build'), 'indexer.build 真的跑了（C++ 工具进程）', JSON.stringify(rowsR.map((r) => r.name)));
+  assert(fs.existsSync(indexPath), 'index.bin 真的落地', indexPath);
+  assert(rowsR.some((r) => r.name === 'query' && r.ok), 'indexer.query 真的跑了并成功', JSON.stringify(rowsR.map((r) => [r.name, r.ok])));
+  // 检索结果里要有命中（不是空结果兜底）：语料里两份材料都含「检索」。
+  const q = rowsR.filter((r) => r.name === 'query').pop();
+  assert(q && /检索/.test(String(q.output || '')), 'query 有命中（不是空结果兜底）', String((q && q.output) || '').slice(0, 300));
 
   // 原生工具调用（真实二进制 + 真 HTTP）：先实测这条通道支持（探测把 tools 写回 native），
   // 再跑一次"一次回复两个调用"，并核对**发给供应商的历史就是协议形状**。

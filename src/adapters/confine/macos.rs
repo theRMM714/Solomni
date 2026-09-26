@@ -4,7 +4,7 @@
 //! spec.net 为假时连网络一起拒。装不上时如实降级（打印说明后照常执行），启动时已报告能力等级；
 //! 降级原因分两类并各自带标记：「本机 ABI 失效」是环境结论，「profile 被拒」是 profile 写错（探针硬失败）。
 
-use super::{shell_command, Capability, FENCE_FAILED};
+use super::{shell_command, Capability, FenceVerdict, FENCE_FAILED};
 use crate::core::fence::FenceSpec;
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int};
@@ -62,12 +62,17 @@ pub fn capability() -> Capability {
 /// 这是**唯一**能分辨「机制在本机失效」与「我们的 profile 写错」的办法：
 /// 前者如实降级，后者由探针响亮失败（见 tests/macos/probes/fence.rs）。
 fn seatbelt_confines() -> bool {
+    // 测试专用的注入：探针要能确定性地走「本机不允许」这一路（见 confine::SELFCHECK_FAIL_FLAG）。
+    if super::selfcheck_forced_unavailable() {
+        return false;
+    }
     static EFFECTIVE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *EFFECTIVE.get_or_init(seatbelt_confines_probe)
 }
 
 fn seatbelt_confines_probe() -> bool {
-    let canary = std::env::temp_dir().join(format!("solomni-seatbelt-selfcheck-{}", std::process::id()));
+    let canary =
+        std::env::temp_dir().join(format!("solomni-seatbelt-selfcheck-{}", std::process::id()));
     if std::fs::write(&canary, "canary").is_err() {
         return false;
     }
@@ -99,7 +104,14 @@ fn seatbelt_confines_probe() -> bool {
     verdict == 1
 }
 
-pub fn run_fenced(spec: &FenceSpec, command: &str) -> i32 {
+/// `_prepared`（外层是否已完成本机授权）与 `_home`（容器 profile 的台账落点）只有 Windows 的容器围栏用得上：
+/// macOS 的 seatbelt 在守门进程里自足，也没有容器 profile 这一步。
+pub fn run_fenced(
+    spec: &FenceSpec,
+    _prepared: bool,
+    _home: Option<&std::path::Path>,
+    command: &str,
+) -> i32 {
     match install(spec, command) {
         Ok(()) => {}
         Err(e) => {
@@ -132,11 +144,32 @@ pub fn run_fenced(spec: &FenceSpec, command: &str) -> i32 {
     }
 }
 
-fn install(spec: &FenceSpec, command: &str) -> Result<(), String> {
-    // 先自检：本机 sandbox_init 是否真的产生约束。不产生就别假装装上了（探针据此如实跳过）。
+/// 装围栏并**如实分类**结果：自检不过 = 本机环境结论（降级照跑）；自检过了还装不上 = 我们写错了。
+/// 探针早就按这两类分别处理（前者如实跳过、后者响亮失败），运行期在未授权时段也照这一份结论走。
+pub fn verify(spec: &FenceSpec, command: &str) -> FenceVerdict {
     if !seatbelt_confines() {
-        return Err("本机 sandbox_init 不产生实际约束（该私有 ABI 在新版 macOS 上已失效）".to_string());
+        return FenceVerdict::EnvUnavailable(
+            "本机 sandbox_init 不产生实际约束（该私有 ABI 在新版 macOS 上已失效）".to_string(),
+        );
     }
+    match install_profile(spec, command) {
+        Ok(()) => FenceVerdict::Enforced,
+        Err(e) => FenceVerdict::Broken(e),
+    }
+}
+
+/// 守门进程路径：装围栏（自检不过与 profile 被拒都如实降级照跑——能力等级已在启动报告里说过）。
+fn install(spec: &FenceSpec, command: &str) -> Result<(), String> {
+    if !seatbelt_confines() {
+        return Err(
+            "本机 sandbox_init 不产生实际约束（该私有 ABI 在新版 macOS 上已失效）".to_string(),
+        );
+    }
+    install_profile(spec, command)
+}
+
+/// 生成并装上 profile（自检由调用方先做）：走到这里才失败 = profile 写错，一律带稳定标记。
+fn install_profile(spec: &FenceSpec, command: &str) -> Result<(), String> {
     let profile = profile_text(spec, command);
     // 规则规模如实报一行：失败时（探针/端到端日志）能据此判断"是不是规则太宽/太窄"。
     eprintln!(
@@ -199,6 +232,12 @@ fn profile_text(spec: &FenceSpec, command: &str) -> String {
     for dir in super::interpreter_dirs(command) {
         ro_paths.push(dir.to_string_lossy().replace('\\', "/"));
     }
+    // 用户显式授权的只读根（`fence_read`）：只放 `file-read*`，不碰 `file-write*`。
+    for root in &spec.ro {
+        if !root.as_os_str().is_empty() {
+            ro_paths.push(root.to_string_lossy().replace('\\', "/"));
+        }
+    }
     ro_paths.sort();
     ro_paths.dedup();
     for p in &ro_paths {
@@ -231,7 +270,10 @@ fn profile_text(spec: &FenceSpec, command: &str) -> String {
     for m in &metas {
         // literal 而不是 subpath：穿过祖先只需要对**祖先本身**取元数据；
         // 用 subpath 会把整棵子树的元数据都放行，等于把围栏开成筛子。
-        out.push_str(&format!("(allow file-read-metadata (literal \"{}\"))\n", escape(m)));
+        out.push_str(&format!(
+            "(allow file-read-metadata (literal \"{}\"))\n",
+            escape(m)
+        ));
     }
     if !spec.net {
         out.push_str("(deny network*)\n");
@@ -243,4 +285,3 @@ fn profile_text(spec: &FenceSpec, command: &str) -> String {
 fn escape(s: &str) -> String {
     s.replace('\\', "\\\\").replace('"', "\\\"")
 }
-

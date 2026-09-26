@@ -6,7 +6,7 @@
 
 use crate::core::api::{Ops, Output};
 use crate::core::providers::AppSettings;
-use crate::core::{CollabStep, Pending, SessionEdit, SessionEvent, WorkMode, WorkSpec};
+use crate::core::{CollabStep, SessionEdit, SessionEvent, WorkMode, WorkSpec};
 use crate::presentation::{intent, routes};
 use serde_json::json;
 use std::sync::Arc;
@@ -19,10 +19,22 @@ pub const DEFAULT_PORT: u16 = 3081;
 /// 本机工具围栏能力（由组合根注入；呈现层如实显示，不假装）。
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct FenceInfo {
+    /// 本机能力：这台机器**能不能**强制文件系统围栏。
     pub fs: bool,
+    /// 本机能力：这台机器**能不能**断网。
     pub net: bool,
+    /// 本机能力：进程树围栏（未授权时段同样生效）。
     pub tree: bool,
+    /// 如实说明（机制名 + 限制）。
     pub note: String,
+    /// **本次实际**生效的文件系统围栏（未授权本机写权限时为假：路径级围栏要写目录 ACL 才装得上）。
+    pub effective_fs: bool,
+    /// **本次实际**生效的断网。
+    pub effective_net: bool,
+    /// 用户有没有授权在本机写权限项。
+    pub write_allowed: bool,
+    /// 用户显式授权的只读根个数（`settings.yaml` 的 `fence_read`）；0 = 一个都没授。
+    pub read_only_roots: usize,
 }
 
 /// 启动转录中心服务器（阻塞直至出错）。端口可指定，默认 3081，只绑本机回环。
@@ -195,7 +207,9 @@ pub(crate) fn route(
             for pair in q.split('&') {
                 let mut kv = pair.splitn(2, '=');
                 match (kv.next(), kv.next()) {
-                    (Some("sid"), Some(v)) if !v.is_empty() => sid = Some(v.to_string()),
+                    // 查询参数和路径段一样是百分号编码的：会话名常带中文（<工作>--<agent>），
+                    // 不解回来就永远匹配不到任何事件（真机 sid 就是中文）。
+                    (Some("sid"), Some(v)) if !v.is_empty() => sid = Some(routes::url_decode(v)),
                     (Some("since"), v) => {
                         since = v.and_then(|x| x.parse::<u64>().ok()).unwrap_or(0)
                     }
@@ -205,7 +219,7 @@ pub(crate) fn route(
             let deadline = Instant::now() + POLL_WAIT;
             loop {
                 // 同一把锁里取「批 + 头部」：客户端据头部推进游标不会漏事件。
-                let (lines, head) = ops.events.snapshot(sid.as_deref(), since);
+                let (lines, head, oldest) = ops.events.snapshot(sid.as_deref(), since);
                 if !lines.is_empty() || Instant::now() >= deadline {
                     let snap: Vec<serde_json::Value> = lines
                         .iter()
@@ -213,7 +227,8 @@ pub(crate) fn route(
                             |l| json!({ "seq": l.seq, "sid": l.sid, "events": ev_json(&l.events) }),
                         )
                         .collect();
-                    return ok_json(json!({ "lines": snap, "head": head }));
+                    // oldest = 事件台里还留着的最老序号：客户端发现"since 之后那段已裁掉"时据此重新对齐。
+                    return ok_json(json!({ "lines": snap, "head": head, "oldest": oldest }));
                 }
                 std::thread::sleep(POLL_TICK);
             }
@@ -281,9 +296,7 @@ pub(crate) fn route(
                     .unwrap_or(false),
             };
             match ops.sessions.create_work(spec) {
-                Ok(o) => ok_json(
-                    json!({ "sid": o.sid, "agents": o.agents, "events": ev_json(&o.events) }),
-                ),
+                Ok((o, head)) => ok_json(json!({ "sid": o.sid, "agents": o.agents, "head": head })),
                 Err(e) => {
                     log.error("web::create_work", &format!("创建工作失败：{}", e));
                     complaint(400, e)
@@ -338,13 +351,7 @@ pub(crate) fn route(
                     Err(e) => complaint(400, e),
                 };
             }
-            // 名单状态：前端据此决定下一个动作（这一问不产出事件）。
-            if action == "pending" {
-                return match ops.sessions.pending(&sid) {
-                    Ok(p) => ok_json(json!({ "sid": sid, "pending": pending_json(&p) })),
-                    Err(e) => complaint(400, e),
-                };
-            }
+
             // 生成类动作：流式与否是**显示**的选择，归呈现层（取自设置）。
             let out = match ops.registry.settings() {
                 Ok(s) if s.streaming => Output::Stream,
@@ -357,8 +364,11 @@ pub(crate) fn route(
                 "task" => intent::Action::Step(CollabStep::SetTask, &text),
                 "slate" => intent::Action::Step(CollabStep::ConfirmSlate, &text),
                 "begin" => intent::Action::Step(CollabStep::Begin, &text),
-                "answer" => intent::Action::Step(CollabStep::Answer, &text),
+                // 用户对裁决的回应：自然语言一句话。核心 AI 判定意图是否明确，明确了才开工/放行。
+                "decide" => intent::Action::Step(CollabStep::Decide, &text),
                 "withdraw" => intent::Action::Withdraw(&agent),
+                // 压缩上下文：AI 自己压成摘要（此后此前内容不再发给模型，用户仍可查看）。
+                "compact" => intent::Action::Compact,
                 "rewind" => intent::Action::Rewind(
                     req.get("id").and_then(|v| v.as_u64()).unwrap_or(u64::MAX),
                 ),
@@ -366,10 +376,9 @@ pub(crate) fn route(
                 _ => return complaint(400, format!("未知动作：{}", action)),
             };
             match intent::act(ops, &sid, what, out) {
-                // 动作回包即时返回本批事件与事件台序号；同批也早已入台供其它端增量取。
-                // 客户端按 seq 去重，避免「动作回包 + 长轮询」把同一批事件派发两次。
+                // 命令回包只给**事件台头部序号**：事实由长轮询按 since 订阅（不在这里捎带）。
                 Ok(intent::Acted::Advanced(adv)) => {
-                    ok_json(json!({ "sid": sid, "events": ev_json(&adv.events), "seq": adv.seq }))
+                    ok_json(json!({ "sid": sid, "head": adv.head }))
                 }
                 // 回档 / 改需求返回完整重放（前端整体重建）。
                 Ok(intent::Acted::Replayed(events)) => {
@@ -441,6 +450,7 @@ pub(crate) fn route(
                 &str_field(&req, "api_model"),
                 &str_field(&req, "provider"),
                 &str_field(&req, "note"),
+                req.get("context").and_then(|v| v.as_u64()).unwrap_or(0),
             ) {
                 Ok(()) => ok_json(json!({ "ok": true })),
                 Err(e) => complaint(400, e),
@@ -527,6 +537,23 @@ pub(crate) fn route(
                 // 执行档位与围栏写权限：界面暂未暴露（后续阶段），改设置只保留现有值。
                 tier: current.tier,
                 fence_write: current.fence_write,
+                fence_read: current.fence_read.clone(),
+                qemu_path: current.qemu_path.clone(),
+                llm_timeout_secs: req
+                    .get("llm_timeout_secs")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(current.llm_timeout_secs),
+                // 压缩阈值可由界面调；缺省沿用现值。
+                compact_at_percent: req
+                    .get("compact_at_percent")
+                    .and_then(|v| v.as_u64())
+                    .map(|v| v as u8)
+                    .unwrap_or(current.compact_at_percent),
+                discuss_remind_cap: req
+                    .get("discuss_remind_cap")
+                    .and_then(|v| v.as_u64())
+                    .map(|v| v as u32)
+                    .unwrap_or(current.discuss_remind_cap),
             };
             match ops.registry.set_settings(settings) {
                 Ok(()) => ok_json(json!({ "ok": true })),
@@ -539,8 +566,14 @@ pub(crate) fn route(
             Ok(sessions) => ok_json(json!({ "sessions": sessions })),
             Err(e) => complaint(400, e),
         },
+        // 历史与实时**一次给全**：盘上转录 + 事件台上**它之外**的实时尾巴 + 合流时的头部序号。
+        // 前端因此只有一条带序号的流（只按序 append），不靠自己合并两个来源——
+        // 刷新后整段重复（任务行 / [建议] / yes 各两遍）正是在那个合并里出的。
         "history.open" => match ops.history.open(&name) {
-            Ok((meta, events)) => ok_json(json!({ "meta": meta, "events": events })),
+            Ok((meta, events)) => {
+                let (live, head) = ops.events.tail_excluding(&name, &events);
+                ok_json(json!({ "meta": meta, "events": events, "live": live, "head": head }))
+            }
             Err(e) => complaint(404, e),
         },
         "history.delete" => match ops.history.delete(&name) {
@@ -627,16 +660,4 @@ fn state_json(ops: &Ops, fence: &FenceInfo) -> Result<serde_json::Value, String>
 /// 事件 → JSON（线格式唯一定义在 core::events::SessionEvent::to_json）。
 fn ev_json(events: &[SessionEvent]) -> serde_json::Value {
     serde_json::Value::Array(events.iter().map(|e| e.to_json()).collect())
-}
-
-/// Pending 的 JSON 形态（前端决定下一个动作）。
-pub fn pending_json(p: &Option<Pending>) -> serde_json::Value {
-    match p {
-        None => json!(null),
-        Some(Pending::Ask { member, question }) => {
-            json!({ "type": "ask", "member": member, "question": question })
-        }
-        Some(Pending::ConfirmSlate) => json!({ "type": "confirm_slate" }),
-        Some(Pending::ConfirmBegin) => json!({ "type": "confirm_begin" }),
-    }
 }
