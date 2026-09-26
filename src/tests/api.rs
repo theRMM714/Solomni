@@ -6,7 +6,7 @@ use super::{gated_ops, ops_with, single_work, slow_ops};
 use crate::core::api::{CoreHandle, Ops, Output};
 use crate::core::exec::Tier;
 use crate::core::module::Module;
-use crate::core::SessionEvent;
+use crate::core::{SessionEvent, WorkMode};
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -88,6 +88,44 @@ fn generation_pushes_facts_to_the_event_bus_with_sequence_numbers() {
     assert!(
         bus.snapshot(Some("别的会话"), 0).0.is_empty(),
         "按会话取，不串台"
+    );
+}
+
+/// 核心操作没有会话也**照推**：推荐落在系统会话上（只推不留）。
+/// 推是底层收发消息的统一定律（与会话种类无关），留不留才是各会话自己的策略。
+#[test]
+fn suggest_models_pushes_on_a_system_session_and_leaves_no_trace() {
+    let handle = spawn(
+        vec![module_of("a")],
+        vec![
+            "{\"type\":\"tool\",\"name\":\"suggest\",\"args\":{\"agents\":[{\"name\":\"甲\",\"modules\":[\"a\"],\"model\":\"m\",\"why\":\"对口\"}]}}",
+        ],
+    );
+    let ops = Ops::from_handle(&handle);
+    let agents = ops
+        .discovery
+        .suggest_models("做个东西", WorkMode::Collab)
+        .expect("核心推荐");
+    assert_eq!(agents.len(), 1, "回包只给名单（渲染那一步的契约不变）");
+    let (batches, _head, _oldest) = handle
+        .events()
+        .snapshot(Some(crate::core::SYSTEM_SID_SUGGEST), 0);
+    assert!(
+        !batches.is_empty(),
+        "核心这一趟的行必须推出来（系统会话也是推的落脚点）"
+    );
+    let _: Vec<&SessionEvent> = batches.iter().flat_map(|l| l.events.iter()).collect();
+    assert!(
+        ops.history.list().expect("历史").is_empty(),
+        "系统会话只推不留：推荐没有工作区，不该落盘"
+    );
+    assert!(
+        !ops.history
+            .session_views(&[])
+            .expect("会话视图")
+            .iter()
+            .any(|v| v.sid == crate::core::SYSTEM_SID_SUGGEST),
+        "系统会话不进会话列表（前端因此不会为它建标签页）"
     );
 }
 

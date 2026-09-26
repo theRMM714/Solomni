@@ -12,8 +12,9 @@ let eventPolls = 0;
 // 应用侧异常一律走 console.error（app.js 的 eventError）：这里记下来，当成硬失败。
 // 为什么必须有它：连接状态已经不看应用异常了，没有这一条，"渲染里抛异常"就会悄悄溜过去。
 const consoleErrors = [];
-// /api/state 的桩：默认没有进行中的会话；运行态那条用例会临时塞一条进去。
-const stateStub = { sessions: [] };
+// /api/state 的桩：**在跑的会话由后端会话表给**（前端不再从事件流里造会话）。
+// smoke-w 一开始就在跑：启动时的状态刷新据此建标签页并补盘上转录，随后轮询把实时行接上。
+const stateStub = { sessions: [{ sid: "smoke-w", running: true }] };
 function el() {
   const node = {
     textContent: "", innerHTML: "", value: "", className: "", dataset: {},

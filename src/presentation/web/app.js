@@ -57,6 +57,25 @@ async function refreshState() {
       (state.history || []).filter((h) => h.running).map((h) => h.name),
     ),
   );
+  // **会话表由后端给**：这里只为"后端说在跑"的会话建标签页。前端绝不为事件流里冒出来的 sid
+  // 造会话状态——那是前端自己造会话（系统会话就是这么长出多余标签页的）。
+  let opened = false;
+  for (const v of state.views.values()) {
+    if (state.sessions.has(v.sid) || !state.running.has(v.sid)) continue;
+    const h = (state.history || []).find((x) => x.name === v.sid);
+    const s = {
+      sid: v.sid, mode: v.mode || 'single', title: (h && h.name) || v.sid,
+      lines: [], live: [], pending: v.pending || null, sending: false,
+      running: false, working: null, running_known: false,
+      can_update_task: !!v.can_update_task,
+      done: !!(h && h.done), awaiting: null, fold: {}, scroll: {},
+      readonly: false, hydrated: false, buffer: [],
+    };
+    state.sessions.set(v.sid, s);
+    // 盘上转录是这条会话的**前缀**：补上它，之后的实时事件按 seq 接上（同 id 的行不重复）。
+    hydrateHistory(s);
+    opened = true;
+  }
   // 已打开的标签页跟着快照对齐（增量事件到达时会覆盖成同一份）。
   for (const cur of state.sessions.values()) {
     const v = state.views.get(cur.sid);
@@ -74,6 +93,7 @@ async function refreshState() {
   state.settings = s.settings || { streaming: true, show_reasoning: true, llm_timeout_secs: 300, discuss_remind_cap: 3, compact_at_percent: 70 };
   renderSidebar();
   renderHistory();
+  if (opened) renderTabs();
   const cur = activeSession();
   if (cur) { syncTyping(cur); syncSendButton(cur); }
 }
@@ -369,9 +389,8 @@ function warnIfTierUnavailable(name) {
   );
 }
 
-/** **按落盘转录补水**：会话对象可能是"事件到达时就地建出来"的（刷新页面后正在跑的工作就是这样），
- * 那样只有刷新之后的新行——看着像记录丢了。这里按盘上事件回放补齐；回放期间到达的实时事件先入
- * buffer，回放完按序接上（同 id 的行不重复）。 */
+/** **按落盘转录补水**：刚建出来的会话（页面刚打开时正在跑的那些）手上只有实时行，
+ * 盘上的前缀要读出来接在前面；回放期间到达的实时事件先入 buffer，回放完按序接上（同 id 的行不重复）。 */
 async function hydrateHistory(s) {
   if (!s || s.hydrating || s.hydrated) return;
   s.hydrating = true;
@@ -401,41 +420,6 @@ async function hydrateHistory(s) {
   for (const item of buffered) for (const ev of item) apply(ev);
   s.hydrating = false;
   s.hydrated = true;
-  renderAll();
-}
-
-/** 打开的标签页与当前标签**跨刷新保留**（否则刷新后记录看着像丢了）。 */
-function saveTabs() {
-  try {
-    localStorage.setItem('dsh.tabs', JSON.stringify({
-      open: Array.from(state.sessions.keys()),
-      active: state.activeSid || null,
-    }));
-  } catch { /* 无 localStorage（冒烟桩）就不记 */ }
-}
-async function restoreTabs() {
-  let saved = null;
-  try { saved = JSON.parse(localStorage.getItem('dsh.tabs') || 'null'); } catch { saved = null; }
-  if (!saved || !Array.isArray(saved.open)) return;
-  for (const sid of saved.open) {
-    if (state.sessions.has(sid)) continue;
-    try {
-      const r = await api('GET', '/api/history/' + encodeURIComponent(sid));
-      const v = (state.views || new Map()).get(sid);
-      const s = {
-        sid, mode: (r.meta && r.meta.mode) || 'single', title: sid,
-        lines: [], live: [], pending: (v && v.pending) || null, sending: false,
-        running: false, working: null, running_known: false,
-        done: !!(r.meta && r.meta.done), awaiting: null,
-        // 核心表里还在 = 活动会话（可以接着操作）；不在 = 历史回放（只读，点「继续」才转为活动）。
-        readonly: !v, hydrated: true, fold: {}, scroll: {},
-      };
-      for (const ev of (r.events || [])) absorb(s, ev);
-      state.sessions.set(sid, s);
-    } catch { /* 单个标签拿不到就跳过，不拖垮整页 */ }
-  }
-  if (saved.active && state.sessions.has(saved.active)) state.activeSid = saved.active;
-  else if (state.sessions.size) state.activeSid = state.sessions.keys().next().value;
   renderAll();
 }
 
@@ -1829,7 +1813,6 @@ async function startSession(body) {
 function setActive(sid) {
   atClose(); // 换会话 = 换一份文件清单，菜单先收起来
   state.activeSid = sid;
-  saveTabs(); // 当前标签也记住：刷新后回到同一条会话
   // 换会话先清掉上一份根（免得拿别人的根去缩）；缓存里有就同步先缩，避免先长后短的闪烁。
   shortPathRoots = null;
   const cached = filesCache.get(sid);
@@ -2034,7 +2017,6 @@ function renderTabs() {
       if (state.activeSid === s.sid) {
         state.activeSid = state.sessions.keys().next().done ? null : state.sessions.keys().next().value;
       }
-      saveTabs();
       renderAll();
     };
     tabs.appendChild(el);
@@ -2393,25 +2375,14 @@ async function resyncActive() {
 /** 收一批事件并应用。返回 'full' | 'live' | 'none'（渲染粒度）。 */
 function applyBatch(seq, sid, events) {
   if (typeof seq === 'number') appliedSeq = Math.max(appliedSeq, seq);
-  let s = state.sessions.get(sid);
+  const s = state.sessions.get(sid);
+  // **前端不认识的会话一律不动**（系统会话如核心推荐的 `#suggest` 也在内）：会话表只由
+  // /api/state 给，前端只渲染它知道的会话。为事件里冒出来的 sid 就地建会话 = 前端自己造会话
+  // 状态，非会话（系统会话）会因此长出多余标签页，而真会话的记录又会被建重一遍。
+  // 别的客户端建的**真**会话由下一次状态刷新带进来（refreshState 建 + 补盘上转录）。
   if (!s) {
-    // 未知会话 = 有**别的客户端**建了会话（演示脚本、另一个标签页）。
-    // **必须就地建出会话状态**再吸收事件：否则它的事件（含流式 delta）会被永久丢掉，
-    // 只有手动点开时才靠历史回放补上——那正是"流式没起效、别人的会话不更新"的来源。
-    const h = (state.history || []).find((x) => x.name === sid);
-    const v = (state.views || new Map()).get(sid);
-    s = {
-      sid, mode: (h && h.mode) || 'single', title: sid,
-      lines: [], live: [], pending: (v && v.pending) || null, sending: false,
-      running: false, working: null, running_known: false,
-      can_update_task: !!(v && v.can_update_task),
-      done: !!(h && h.done), awaiting: null, fold: {}, scroll: {},
-      // 这个对象是"事件到了就地建出来"的：盘上转录还没回放，先按盘补上（见 hydrateHistory）。
-      hydrated: false, buffer: [],
-    };
-    state.sessions.set(sid, s);
-    needState = true; // 侧栏也顺手对齐
-    hydrateHistory(s);
+    needState = true;
+    return 'none';
   }
   // 补水期间到达的实时事件先攒着：回放完按序接上（同 id 的行不重复）。
   if (s.hydrating) {
@@ -2835,6 +2806,5 @@ $('#btn-upload').onclick = pickUploadFile;
 
 /* ---------- 启动 ---------- */
 refreshState()
-  .then(restoreTabs) // 打开的标签页跨刷新保留（记录不因刷新看着像丢了）
   .then(pollLoop)
   .catch((err) => notice('初始化失败', err.message, 'err'));

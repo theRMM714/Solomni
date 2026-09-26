@@ -1214,7 +1214,13 @@ impl DiscoveryOps for CoreHandle {
     }
     fn suggest_models(&self, task: &str, mode: WorkMode) -> Result<Vec<AgentSuggestion>, String> {
         let task = task.to_string();
-        self.call(move |core| core.suggest_models(&task, mode))
+        let (agents, rows) = self.call(move |core| core.suggest_models(&task, mode))?;
+        // 核心的行**照推**（推是底层收发消息的统一定律，一次推荐也不例外），推到系统会话：
+        // 它不在任何会话表里，前端因此不会为它建标签页；落盘策略是 Drop（只推不留）。
+        if !rows.is_empty() {
+            self.bus.push(crate::core::SYSTEM_SID_SUGGEST, &rows);
+        }
+        Ok(agents)
     }
 }
 

@@ -682,7 +682,8 @@ pub(crate) fn suggest_models_recommends_agents() {
         gw(BTreeMap::new(), vec![script.clone()]),
     );
     // 协作：两个独立 agent，各带自己的模块与模型。
-    let collab = core.suggest_models("做个东西", WorkMode::Collab).unwrap();
+    let (collab, rows) = core.suggest_models("做个东西", WorkMode::Collab).unwrap();
+    assert!(!rows.is_empty(), "核心这一趟的行必须交出来（推给系统会话）");
     assert_eq!(collab.len(), 2);
     assert_eq!(collab[0].name, "甲");
     assert_eq!(collab[0].modules, vec!["a".to_string()]);
@@ -690,7 +691,7 @@ pub(crate) fn suggest_models_recommends_agents() {
     assert_eq!(collab[0].model, "m");
     assert_eq!(collab[0].why, "对口");
     // 单 agent：多条推荐 → 并成一个临时 agent（并过的不是任何单个已存 agent，故 reuse=false）。
-    let merged = core.suggest_models("做个东西", WorkMode::Single).unwrap();
+    let (merged, _rows) = core.suggest_models("做个东西", WorkMode::Single).unwrap();
     assert_eq!(merged.len(), 1);
     assert_eq!(merged[0].modules, vec!["a".to_string(), "b".to_string()]);
     assert!(!merged[0].reuse, "并出来的 agent 不是复用项");
@@ -702,7 +703,7 @@ pub(crate) fn suggest_models_single_mode_keeps_lone_pick_as_is() {
     let core = core_with(vec![module_of("a"), module_of("b")], gw(BTreeMap::new(), vec![
         "{\"type\":\"tool\",\"name\":\"suggest\",\"args\":{\"agents\":[{\"name\":\"全能\",\"modules\":[\"a\",\"b\"],\"model\":\"m\",\"why\":\"一个 AI 全包\"}]}}".to_string(),
     ]));
-    let out = core.suggest_models("做个东西", WorkMode::Single).unwrap();
+    let (out, _rows) = core.suggest_models("做个东西", WorkMode::Single).unwrap();
     assert_eq!(out.len(), 1);
     assert_eq!(out[0].name, "全能");
     assert_eq!(
@@ -725,7 +726,7 @@ pub(crate) fn suggest_models_single_mode_keeps_lone_pick_as_is() {
     reuse
         .agent_upsert("调研", &["a".to_string()], "m", "")
         .unwrap();
-    let got = reuse.suggest_models("做个东西", WorkMode::Single).unwrap();
+    let (got, _rows) = reuse.suggest_models("做个东西", WorkMode::Single).unwrap();
     assert_eq!(got.len(), 1);
     assert!(got[0].reuse, "一条复用项必须保留 reuse");
     assert_eq!(got[0].model, "m");
@@ -739,7 +740,7 @@ pub(crate) fn suggest_models_reuses_stored_agent_without_suggesting_model() {
     ]));
     core.agent_upsert("调研", &["a".to_string()], "m", "说明")
         .unwrap();
-    let out = core.suggest_models("做个东西", WorkMode::Collab).unwrap();
+    let (out, _rows) = core.suggest_models("做个东西", WorkMode::Collab).unwrap();
     assert_eq!(out.len(), 1, "非法的复用项必须被拒收");
     assert!(out[0].reuse, "复用项要如实标记");
     assert_eq!(out[0].name, "调研");

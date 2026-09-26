@@ -228,6 +228,10 @@ pub(crate) fn is_system_session(sid: &str) -> bool {
     sid.starts_with('#')
 }
 
+/// 核心推荐（suggest_models）的系统会话 sid：一次性的推荐动作**没有工作区**，
+/// 它的行只推给在场的前端看（推荐是弹窗里的一次问答），不落盘，也不进会话列表。
+pub(crate) const SYSTEM_SID_SUGGEST: &str = "#suggest";
+
 /// 这个会话的落盘策略（**判定只有这一处**：会话种类 → 策略）。
 fn persist_policy_for(sid: &str) -> PersistPolicy {
     if is_system_session(sid) {
@@ -2074,7 +2078,7 @@ impl Core {
         &self,
         task: &str,
         mode: WorkMode,
-    ) -> Result<Vec<AgentSuggestion>, String> {
+    ) -> Result<(Vec<AgentSuggestion>, Vec<SessionEvent>), String> {
         if self.settings.models.is_empty() {
             return Err("登记处还没有任何模型，请先到「模型登记」添加".to_string());
         }
@@ -2108,6 +2112,9 @@ impl Core {
             ],
         );
         let (mut chat, _) = self.gateway.core_channel(Some(&channel));
+        // 核心这一趟的行（工具行、发言行、思维链）**一律外送**：核心没有会话、写不了盘，
+        // 它只把行交出来；推到哪个 sid、落不落盘由调用方按会话种类定（这里给系统会话）。
+        let mut rows: Vec<SessionEvent> = Vec::new();
         // 核心操作走工具调用：推荐名单由 suggest 工具承载。
         let payload = crate::core::engine::core_operation(
             &self.prompts.systools,
@@ -2123,8 +2130,7 @@ impl Core {
             &mut |_| true,
             // 推荐是**一次性建议**（用户点了才生成、没有工作区可核实）：不接核实回路。
             None,
-            // 推荐名字是**一次性动作**（系统会话：只推不留）——这里没有会话可接，给一个空出口。
-            &mut |_e: crate::core::events::SessionEvent| {},
+            &mut |e: SessionEvent| rows.push(e),
         )?;
         // 载荷里就是名单**数组**本身（工具参数 agents 的值）。
         let parsed: Vec<agents::RosterPick> = payload
@@ -2172,7 +2178,7 @@ impl Core {
         if out.is_empty() {
             return Err("核心推荐没有可用结果".to_string());
         }
-        Ok(out)
+        Ok((out, rows))
     }
 
     // ---- 会话收发（前端永不接触会话本体） ----
