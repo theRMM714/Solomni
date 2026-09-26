@@ -105,7 +105,7 @@ pub fn agent_system(
     agent: &str,
     modules: &[(String, String)],
     env: &str,
-    mode: crate::core::providers::ToolMode,
+    mode: crate::capabilities::registry::api::ToolMode,
 ) -> String {
     let parts = modules
         .iter()
@@ -124,10 +124,10 @@ pub fn agent_system(
             (
                 "tool_calling",
                 match mode {
-                    crate::core::providers::ToolMode::Native => {
+                    crate::capabilities::registry::api::ToolMode::Native => {
                         prompts.core.tool_calling_native.clone()
                     }
-                    crate::core::providers::ToolMode::Envelope => {
+                    crate::capabilities::registry::api::ToolMode::Envelope => {
                         prompts.core.tool_calling_envelope.clone()
                     }
                 },

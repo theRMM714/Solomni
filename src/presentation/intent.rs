@@ -7,7 +7,7 @@
 //!
 //! 这一层**只编排**：不做业务决策（那是 core 的），也不碰 HTTP/argv（那是各呈现自己的传输）。
 
-use crate::core::agents::AgentView;
+use crate::capabilities::registry::api::AgentView;
 use crate::core::api::{Ops, Output};
 use crate::core::{AgentInstance, CollabStep, SessionEdit, WorkOpened, WorkSpec};
 

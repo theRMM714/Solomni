@@ -6,9 +6,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-/// 探测结论就住在登记处这一层（它是"关于通道的事实"，不是某个适配器的细节）。
-pub use crate::core::ports::ProbeOutcome;
-
 /// 一种"回放形状"的探测结论：**收了没有**（HTTP 层）+ **看懂了没有**（回答里带回了工具结果里的编号）
 /// + 供应商原话或回答片段。事实，不是猜测。
 #[derive(Debug, Clone, serde::Serialize)]
@@ -113,7 +110,7 @@ fn default_compact_percent() -> u8 {
 }
 
 fn default_llm_timeout_secs() -> u64 {
-    crate::core::ports::DEFAULT_LLM_TIMEOUT_SECS
+    crate::kernel::types::DEFAULT_LLM_TIMEOUT_SECS
 }
 
 fn default_true() -> bool {
@@ -129,7 +126,7 @@ impl Default for AppSettings {
             fence_write: false,
             fence_read: Vec::new(),
             qemu_path: String::new(),
-            llm_timeout_secs: crate::core::ports::DEFAULT_LLM_TIMEOUT_SECS,
+            llm_timeout_secs: crate::kernel::types::DEFAULT_LLM_TIMEOUT_SECS,
             compact_at_percent: 70,
             discuss_remind_cap: 3,
         }
@@ -146,7 +143,7 @@ pub struct Settings {
     /// 基本设置。
     pub app: AppSettings,
     /// 用户配置的具名 agent。
-    pub agents: crate::core::agents::Agents,
+    pub agents: crate::capabilities::registry::domain::agents::Agents,
 }
 
 /// 成品通道：core 解析后交适配层建会话；适配层不再做任何选择。

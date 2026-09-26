@@ -3,13 +3,13 @@
 //! 真实传输由 L4 端到端覆盖（真二进制 + 真 HTTP）。
 //! 假能力面顺带证明一件事：「按角色切分」的能力接口真能被替换——新增一种呈现不必认识 `Core`。
 
-use crate::core::agents::AgentView;
+use crate::capabilities::registry::api::AgentView;
+use crate::capabilities::registry::api::{AppSettings, ModelView, ProviderView};
 use crate::core::api::{
     Advance, DiscoveryOps, EventBus, HistoryOps, Ops, Output, RegistryOps, SessionOps,
 };
 use crate::core::history::{AgentMeta, HistoryView, SessionMeta};
 use crate::core::module::Roster;
-use crate::core::providers::{AppSettings, ModelView, ProviderView};
 use crate::core::{
     AgentSuggestion, ConfigAgent, FilesAgentView, FilesRootsView, FilesView, Pending,
     RuntimeReport, SessionConfig, SessionEdit, SessionView, WorkMode, WorkOpened, WorkSpec,
@@ -245,7 +245,7 @@ impl RegistryOps for FakeOps {
             api_model: "m".to_string(),
             provider: "p1".to_string(),
             note: String::new(),
-            tools: crate::core::providers::ToolMode::Envelope,
+            tools: crate::capabilities::registry::api::ToolMode::Envelope,
             context: 32_000,
             is_core: true,
         }])
@@ -309,17 +309,17 @@ impl RegistryOps for FakeOps {
     fn probe_replay_shape(
         &self,
         _id: &str,
-    ) -> Result<crate::core::providers::ReplayReport, String> {
+    ) -> Result<crate::capabilities::registry::api::ReplayReport, String> {
         self.guard()?;
-        Ok(crate::core::providers::ReplayReport {
+        Ok(crate::capabilities::registry::api::ReplayReport {
             shapes: vec![
-                crate::core::providers::ReplayShape {
+                crate::capabilities::registry::api::ReplayShape {
                     name: "baseline-text".to_string(),
                     accepted: true,
                     understood: true,
                     detail: "finish_reason=stop".to_string(),
                 },
-                crate::core::providers::ReplayShape {
+                crate::capabilities::registry::api::ReplayShape {
                     name: "content-empty".to_string(),
                     accepted: false,
                     understood: false,

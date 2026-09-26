@@ -2,8 +2,8 @@
 //! 双用途：核心回落演示（无可用模型通道时，如实告知）+ 单元测试脚本回放。
 //! 只实现 core 的 Chat/ChatGateway 端口，不做装配决策。
 
+use crate::capabilities::registry::api::Channel;
 use crate::core::ports::{BoxedChat, Chat, ChatGateway, Chunk, CompleteOpts, Completion, Msg};
-use crate::core::providers::Channel;
 
 /// 脚本假模型：按调用次序回放脚本（最后一个条目重复兜底）；记录调用供测试断言。
 pub struct FakeChat {

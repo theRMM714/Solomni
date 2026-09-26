@@ -8,3 +8,4 @@
 //! 迁移期：能力逐个从 `core` 里搬出来；搬空的 `core` 最终消失。
 
 pub mod prompt;
+pub mod registry;

@@ -23,5 +23,9 @@ impl Tier {
     }
 }
 
+/// 单次模型调用的默认总预算（秒）。见 `AppSettings::llm_timeout_secs`。
+/// 登记处（设置项）与 `llm` 的出站调用参数共享它，所以放内核。
+pub const DEFAULT_LLM_TIMEOUT_SECS: u64 = 300;
+
 /// 前端唯一的会话标识 = 工作名（用户的命名，也是落盘目录名）。
 pub type SessionId = String;

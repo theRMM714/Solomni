@@ -145,7 +145,7 @@ capabilities/<name>/
 | **llm** | 领域 | `core/providers.rs` 的 Channel 侧、`ports.rs` 的通道族 | 选型解析 | `Chat` `ChatGateway` `ModelCatalog` | 未开始 |
 | **tools** | 领域 | `core/systool.rs`、`patch.rs`、`schema.rs`、`roles.rs`、`fence.rs`、`workspace.rs` | 观察账本、围栏策略、工具面 | `SysIo` `ToolRunner` `FenceHost` `Workspace` | 未开始 |
 | **prompt** | 领域 | `core/prompt.rs`、`refs.rs` | 提示词册 | `PromptSource` | 未开始 |
-| **registry** | 领域 | `core/agents.rs`、`providers.rs` 的登记处侧 | 四份 yaml 的内存形态 | `SettingsStore` | 未开始 |
+| **registry** | 领域 | **已落位** `capabilities/registry/`（`providers` + `agents`） | 四份 yaml 的内存形态 | `SettingsStore` | **已完成**（批次 8） |
 | **workspace** | 领域 | `core/module.rs`、`packages.rs`、`exec.rs` | 清单快照、执行计划 | `ModuleSource` `PackageSource` | 未开始 |
 | **rewind** | 协调 | 散布 5 处（见 §3.6） | 只持自己的日志，**不持会话数据** | — | 未开始 |
 | **collab** | 协调 | `core/collab.rs`、`collab_state.rs`、`engine.rs`（任务链的**数据与图算法**已落位 `kernel/chain.rs`，见批次 5） | 讨论游标、任务链、待裁决 | — | 未开始 |
@@ -178,7 +178,7 @@ capabilities/<name>/
 | 能力 | 边界要点 |
 | --- | --- |
 | **session** | 只管"一个会话的对话与转录"：`SessionParams`、`AgentSession`、行 id/turn/reply 簿记、`build_round_lines`、`collab_state` 派生、`events` 线格式，**以及上下文压缩（compact）**——压缩改的是本会话的**发送视图**，属 session 的状态所有权（见 §3.5）。**不负责回档**（那是 `rewind`），**不负责编排**（那是 `collab`） |
-| **llm** | `providers.rs` 必须先拆：`Channel`/模型解析归 `llm`，`Settings`/`AppSettings`/`ModelEntry`/`Provider` 归 `registry`。这是 `llm` 的前置 |
+| **llm** | `providers.rs` 已拆：登记处侧（`Settings`/`AppSettings`/`ModelEntry`/`Provider`/`ToolMode`/`Channel`/视图）已在 `capabilities/registry/`；`llm` 剩通道端口族与 `envelope`。`Channel` 暂留 registry（它是「解析结果」这一事实），`llm` 经 `registry::api` 用它 |
 | **tools** | 见 §3.4：工具声明/目录/按角色发放/参数校验/寻址/账本/调度/回执**全锁在内部**；机制（`SysIo`/`ToolRunner`/`FenceHost`）留端口后；**故障文案**（`arg_fault_text`/`refuse`/`patch_fault`/`edit_fault_reason`/`block_fault`）归 `prompt` |
 | **workspace** | `module`/`packages`/`exec`。**迁移要点**：`exec.rs` 的宿主探测（`PATH`/`SystemRoot`/`is_file`）是机制，下沉为端口 |
 | **registry** | 四份 yaml 的内存形态与 CRUD 编排；`SettingsStore` 端口 |
@@ -434,7 +434,7 @@ kernel       ──▶ （无）
 | 批次 | 目标 | 前置 | 状态 |
 | --- | --- | --- | --- |
 | **7** | **prompt 能力落位**：`capabilities/prompt/`（`api` / `ports` / `domain`）；`PromptSource` 随能力迁出 `core/ports.rs` | 4, 5 | **已完成**（门禁已认 `capabilities/` 层、`kernel` 不依赖能力、以及「业务之间只经对方的 `::api`」；`ports.rs` 枢纽 8 → 7 条边；1 条反向边 `→ core::envelope` 记入基线，随 `envelope` 落位清零） |
-| **8** | **registry**（含拆 `providers.rs`） | 5 | 未开始 |
+| **8** | **registry 能力落位**：`capabilities/registry/`（`api` / `ports` / `domain`），`providers.rs` + `agents.rs` 一起搬出；`SettingsStore` 与 `DEFAULT_LLM_TIMEOUT_SECS` 随之下沉 | 5 | **已完成**（**呈现层 3 条豁免自动过期**——它现在走 `registry::api`；`registry` 进环，环 12 → 11；2 条反向边 `→ core::{history, module}` 记入基线） |
 | **9** | **llm**：`Channel` 解析 + 通道端口族 | 8 | 未开始 |
 | **10** | **workspace**：`module` / `packages` / `exec` | 6, 9 | 未开始 |
 | **11** | **tools**（钉死 §3.4：实现锁内部、机制留端口、工具调用发一对短暂事件、**产出事实不落盘**）：`systool` / `patch` / `schema` / `roles` / `fence` | 10 | 未开始 |

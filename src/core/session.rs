@@ -71,7 +71,7 @@ impl SessionParams {
     pub fn identity(
         &self,
         prompts: &crate::capabilities::prompt::api::Prompts,
-        mode: crate::core::providers::ToolMode,
+        mode: crate::capabilities::registry::api::ToolMode,
     ) -> String {
         let env = crate::core::systool::env_block(prompts, self);
         crate::core::module::agent_system(prompts, &self.agent, &self.modules, &env, mode)
@@ -213,12 +213,12 @@ impl AgentSession {
     }
 
     /// 这条会话**正在用**的工具调用形态（身份块里的调用约定按它现渲染）。
-    pub fn tool_mode(&self) -> crate::core::providers::ToolMode {
+    pub fn tool_mode(&self) -> crate::capabilities::registry::api::ToolMode {
         self.tools.as_ref().map(|t| t.mode).unwrap_or_default()
     }
 
     /// 改形态：**只改这一格**（登记处派生出来的参数），不重建会话。
-    pub fn set_tool_mode(&mut self, mode: crate::core::providers::ToolMode) {
+    pub fn set_tool_mode(&mut self, mode: crate::capabilities::registry::api::ToolMode) {
         if let Some(t) = self.tools.as_mut() {
             t.mode = mode;
         }

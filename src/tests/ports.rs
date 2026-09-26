@@ -10,14 +10,15 @@ use super::doubles::{
     TestPrompts, VecSource,
 };
 use crate::capabilities::prompt::ports::PromptSource;
+use crate::capabilities::registry::api::{Provider, Settings};
+use crate::capabilities::registry::ports::SettingsStore;
 use crate::core::exec::ExecSpec;
 use crate::core::fence::FenceSpec;
 use crate::core::history::{AgentMeta, SessionMeta};
 use crate::core::ports::{
     Chat, ChatGateway, CompleteOpts, FenceHost, HistoryStore, ModelCatalog, ModuleSource, Msg,
-    PackageSource, SettingsStore, SysIo, ToolRunner, Workspace,
+    PackageSource, SysIo, ToolRunner, Workspace,
 };
-use crate::core::providers::{Provider, Settings};
 use crate::kernel::log::{Log, NoopLog};
 use std::collections::BTreeMap;
 use std::path::PathBuf;

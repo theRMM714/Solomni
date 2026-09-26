@@ -11,11 +11,11 @@
 //! 这里**不出现 HTTP / JSON 封装 / 路由**：那些是呈现层的传输事（见 presentation/routes.rs）。
 //! 事件与读模型（`SessionEvent`、`*View`）是**事实**的线格式，仍归 core。
 
-use crate::core::agents::AgentView;
+use crate::capabilities::registry::api::AgentView;
+use crate::capabilities::registry::api::{AppSettings, ModelView, ProviderView};
 use crate::core::events::{Live, SessionEvent};
 use crate::core::history::{HistoryView, SessionMeta};
 use crate::core::module::Roster;
-use crate::core::providers::{AppSettings, ModelView, ProviderView};
 use crate::core::Prepared;
 use crate::core::{
     AgentMeta, AgentSuggestion, CollabStep, Core, FilesView, Pending, RuntimeReport, SessionConfig,
@@ -247,7 +247,10 @@ pub trait RegistryOps: Send + Sync {
     /// 只把**确定**的结论写回登记处 —— 这条规则在 core，不在呈现层）。
     fn probe_model_tools(&self, id: &str) -> Result<crate::core::ports::ProbeOutcome, String>;
     /// 实测这种"回放形状"供应商收不收、模型有没有真的读懂（要真实网络；**不改登记处**）。
-    fn probe_replay_shape(&self, id: &str) -> Result<crate::core::providers::ReplayReport, String>;
+    fn probe_replay_shape(
+        &self,
+        id: &str,
+    ) -> Result<crate::capabilities::registry::api::ReplayReport, String>;
 }
 
 /// 历史能力：落盘会话的列表 / 打开 / 删除，以及在世会话与历史合并后的总览。
@@ -1192,7 +1195,10 @@ impl RegistryOps for CoreHandle {
         let id = id.to_string();
         self.call(move |core| core.probe_model_tools(&id))
     }
-    fn probe_replay_shape(&self, id: &str) -> Result<crate::core::providers::ReplayReport, String> {
+    fn probe_replay_shape(
+        &self,
+        id: &str,
+    ) -> Result<crate::capabilities::registry::api::ReplayReport, String> {
         let id = id.to_string();
         self.call(move |core| core.probe_replay_shape(&id))
     }

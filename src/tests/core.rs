@@ -4,6 +4,7 @@
 use super::doubles::*;
 use crate::adapters::fake_chat::FakeChat;
 use crate::capabilities::prompt::domain::prompt::render;
+use crate::capabilities::registry::api::{Channel, ModelEntry, Provider, Settings};
 use crate::core::engine::{Discussion, Member, MemberTools, ModuleTools, TurnOut, MAX_ROUNDS};
 use crate::core::events::Live;
 use crate::core::exec::{self, Diagnosis, ExecSpec};
@@ -14,7 +15,6 @@ use crate::core::ports::{
     BoxedChat, Chat, ChatGateway, Chunk, CompleteOpts, Completion, HistoryStore, ModuleSource, Msg,
     ToolOutcome, ToolRunner, Workspace,
 };
-use crate::core::providers::{Channel, ModelEntry, Provider, Settings};
 use crate::core::{
     AgentInstance, CollabStep, ConfigAgent, Core, Pending, SessionEdit, SessionEvent, WorkMode,
     WorkSpec,
@@ -123,7 +123,7 @@ pub(crate) fn settings_resolves_model_to_channel() {
             api_model: "real-model".into(),
             provider: "p".into(),
             note: String::new(),
-            tools: crate::core::providers::ToolMode::Native,
+            tools: crate::capabilities::registry::api::ToolMode::Native,
             context: 32_000,
         },
     );
@@ -152,7 +152,7 @@ pub(crate) fn settings_resolves_model_to_channel() {
             .iter()
             .find(|v| v.id == "m")
             .map(|v| v.tools),
-        Some(crate::core::providers::ToolMode::Native),
+        Some(crate::capabilities::registry::api::ToolMode::Native),
         "模型视图要带上形态（前端显示与探测结果都靠它）"
     );
     assert!(s.resolve("ghost").is_err(), "未知模型必须报错");
@@ -1256,7 +1256,7 @@ fn opts_discussion(
     let members = vec![Member::new(
         "m0",
         crate::tests::doubles::test_params("m0"),
-        crate::core::providers::ToolMode::Envelope,
+        crate::capabilities::registry::api::ToolMode::Envelope,
         Box::new(OptsChat {
             seen: Arc::clone(&seen),
             results,
@@ -1360,7 +1360,7 @@ pub(crate) fn scripted_discussion(scripts: Vec<Vec<String>>, allow: bool) -> Dis
             Member::new(
                 &id,
                 crate::tests::doubles::test_params(&id),
-                crate::core::providers::ToolMode::Envelope,
+                crate::capabilities::registry::api::ToolMode::Envelope,
                 scripted(s),
             )
         })
@@ -2041,7 +2041,7 @@ pub(crate) fn prose_without_an_envelope_is_not_a_statement() {
     let members = vec![Member::new(
         "m0",
         crate::tests::doubles::test_params("m0"),
-        crate::core::providers::ToolMode::Envelope,
+        crate::capabilities::registry::api::ToolMode::Envelope,
         scripted(vec!["我觉得可以".into()]),
     )];
     let mut disc = Discussion::new(
@@ -2106,7 +2106,7 @@ pub(crate) fn execution_review_pass_and_fail_paths() {
     let mut members = vec![Member::new(
         "m0",
         crate::tests::doubles::test_params("m0"),
-        crate::core::providers::ToolMode::Envelope,
+        crate::capabilities::registry::api::ToolMode::Envelope,
         scripted(vec!["{\"type\":\"say\",\"text\":\"汇报内容\"}".into()]),
     )];
     let ran = run_execution(members.as_mut_slice(), "任务A", &prompts);
@@ -2160,7 +2160,7 @@ pub(crate) fn review_parse_failure_is_conservative_fail() {
     let mut members = vec![Member::new(
         "m0",
         crate::tests::doubles::test_params("m0"),
-        crate::core::providers::ToolMode::Envelope,
+        crate::capabilities::registry::api::ToolMode::Envelope,
         scripted(vec!["{\"type\":\"say\",\"text\":\"x\"}".into()]),
     )];
     let mut exec = crate::core::engine::Execution::new();
@@ -3126,12 +3126,12 @@ pub(crate) fn member_with_tools(
     let mut m = Member::new(
         id,
         crate::tests::doubles::test_params(id),
-        crate::core::providers::ToolMode::Envelope,
+        crate::capabilities::registry::api::ToolMode::Envelope,
         scripted(script),
     );
     // 该路径走模块声明的外部命令（grep）：空沙箱 + 内存 IO，内置工具不参与。
     m.tools = Some(MemberTools {
-        mode: crate::core::providers::ToolMode::Envelope,
+        mode: crate::capabilities::registry::api::ToolMode::Envelope,
         modules,
         observations: crate::core::systool::Observations::default(),
         repair: Arc::new(NoRepair),
@@ -4616,7 +4616,7 @@ pub(crate) fn module_tool_params_are_declared_in_the_manifest_and_enforced_by_co
         "m0",
         &[(mod_m0.manifest.id.clone(), mod_m0.manifest.system.clone())],
         "工具说明",
-        crate::core::providers::ToolMode::Envelope,
+        crate::capabilities::registry::api::ToolMode::Envelope,
     );
     // 模块工具清单与参数**不进系统提示**：随回合注入（能不能用模块工具由角色表的 module_tools 决定）。
     assert!(
@@ -5534,7 +5534,7 @@ pub(crate) fn a_truncated_output_is_reported_as_truncation_not_as_a_bad_envelope
 
 /// 固定探测结论的网关：专测"结论怎么落到登记处"这一层策略（事实本身由适配器测）。
 pub(crate) struct ProbeGateway {
-    pub(crate) outcome: Arc<Mutex<crate::core::providers::ProbeOutcome>>,
+    pub(crate) outcome: Arc<Mutex<crate::core::api::ProbeOutcome>>,
 }
 
 impl ChatGateway for ProbeGateway {
@@ -5554,7 +5554,8 @@ impl ChatGateway for ProbeGateway {
 
 #[test]
 pub(crate) fn a_probe_writes_back_only_conclusive_results() {
-    use crate::core::providers::{ProbeOutcome, ToolMode};
+    use crate::capabilities::registry::api::ToolMode;
+    use crate::core::api::ProbeOutcome;
     let fresh = |outcome: ProbeOutcome| {
         let mut core = core_with_gateway(
             vec![],
@@ -5690,7 +5691,7 @@ pub(crate) fn native_member(
     let mut m = Member::new(
         id,
         crate::tests::doubles::test_params(id),
-        crate::core::providers::ToolMode::Native,
+        crate::capabilities::registry::api::ToolMode::Native,
         chat,
     );
     let mut modules = BTreeMap::new();
@@ -5705,7 +5706,7 @@ pub(crate) fn native_member(
     );
     let sb = test_sandbox(id, &[]);
     m.tools = Some(MemberTools {
-        mode: crate::core::providers::ToolMode::Native,
+        mode: crate::capabilities::registry::api::ToolMode::Native,
         modules,
         observations: crate::core::systool::Observations::default(),
         repair: Arc::new(NoRepair),
@@ -6294,7 +6295,7 @@ pub(crate) fn module_tools_are_concurrent_only_when_declared() {
 
 #[test]
 pub(crate) fn changing_the_declared_mode_takes_effect_on_the_next_generation() {
-    use crate::core::providers::ProbeOutcome;
+    use crate::core::api::ProbeOutcome;
     // 一开始登记处说"不支持原生"：会话按手写信封装配（系统提示也就教信封）
     let outcome = Arc::new(Mutex::new(ProbeOutcome::Unsupported {
         detail: "先不支持".to_string(),
@@ -8409,7 +8410,7 @@ pub(crate) fn core_operation_runs_readonly_verification_before_the_op() {
     let sb = test_sandbox("核心", &[]);
     let io_port: Arc<dyn crate::core::ports::SysIo + Send + Sync> = io.clone();
     let mut verify = MemberTools {
-        mode: crate::core::providers::ToolMode::Envelope,
+        mode: crate::capabilities::registry::api::ToolMode::Envelope,
         modules: BTreeMap::new(),
         observations: crate::core::systool::Observations::default(),
         repair: Arc::new(NoRepair),
@@ -8442,7 +8443,7 @@ pub(crate) fn core_operation_runs_readonly_verification_before_the_op() {
         &test_systools(),
         "planner",
         "plan",
-        crate::core::providers::ToolMode::Envelope,
+        crate::capabilities::registry::api::ToolMode::Envelope,
         &mut chat,
         &[crate::core::ports::Msg::user("出方案")],
         crate::core::ports::CompleteOpts::plain(false),
@@ -8477,7 +8478,7 @@ pub(crate) fn body_json_is_not_a_core_operation() {
         &test_systools(),
         "planner",
         "plan",
-        crate::core::providers::ToolMode::Envelope,
+        crate::capabilities::registry::api::ToolMode::Envelope,
         chat.as_mut(),
         &[crate::core::ports::Msg::user("出方案")],
         crate::core::ports::CompleteOpts::plain(false),

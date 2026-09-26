@@ -3,9 +3,9 @@
 //! 落盘在 .home/agents.yaml（与 providers/models/settings 同处用户私有区）。
 
 use crate::capabilities::prompt::api::Prompts;
+use crate::capabilities::registry::domain::providers::ModelEntry;
 use crate::core::history::AgentMeta;
 use crate::core::module::Roster;
-use crate::core::providers::ModelEntry;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 

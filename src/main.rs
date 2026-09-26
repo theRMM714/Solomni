@@ -174,17 +174,17 @@ fn main() {
             std::process::exit(2);
         };
         match core.probe_model_tools(id) {
-            Ok(core::providers::ProbeOutcome::Supported { detail }) => {
+            Ok(core::api::ProbeOutcome::Supported { detail }) => {
                 println!("[探测] 模型 {}：支持原生工具调用（{}）", id, detail);
                 println!("[探测] 已把 models.yaml 的 tools 写成 native");
                 std::process::exit(0);
             }
-            Ok(core::providers::ProbeOutcome::Unsupported { detail }) => {
+            Ok(core::api::ProbeOutcome::Unsupported { detail }) => {
                 println!("[探测] 模型 {}：**不支持**原生工具调用（{}）", id, detail);
                 println!("[探测] 已把 models.yaml 的 tools 写成 envelope（手写信封照旧可用，能力没有任何损失）");
                 std::process::exit(0);
             }
-            Ok(core::providers::ProbeOutcome::Unknown { detail }) => {
+            Ok(core::api::ProbeOutcome::Unknown { detail }) => {
                 println!("[探测] 模型 {}：无法判定（{}）", id, detail);
                 println!("[探测] 登记处**没有改动**：请自行决定填 native 还是 envelope");
                 std::process::exit(0);
@@ -216,19 +216,20 @@ fn main() {
                     };
                     println!("  {}  {:<16} {}", verdict, s.name, s.detail);
                 }
-                let names = |want: fn(&core::providers::ReplayShape) -> bool| -> String {
-                    let got: Vec<&str> = report
-                        .shapes
-                        .iter()
-                        .filter(|s| want(s))
-                        .map(|s| s.name.as_str())
-                        .collect();
-                    if got.is_empty() {
-                        "（无）".to_string()
-                    } else {
-                        got.join(" / ")
-                    }
-                };
+                let names =
+                    |want: fn(&capabilities::registry::api::ReplayShape) -> bool| -> String {
+                        let got: Vec<&str> = report
+                            .shapes
+                            .iter()
+                            .filter(|s| want(s))
+                            .map(|s| s.name.as_str())
+                            .collect();
+                        if got.is_empty() {
+                            "（无）".to_string()
+                        } else {
+                            got.join(" / ")
+                        }
+                    };
                 println!("[回放形状] 被接受的写法：{}", names(|s| s.accepted));
                 println!(
                     "[回放形状] 模型真的读到了历史（回答里带回本次编号）的写法：{}",

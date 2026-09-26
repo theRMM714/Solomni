@@ -6,11 +6,11 @@
 use super::endpoint::{chat_candidates, memo_get, memo_set, resolve_candidates, Attempt, Memo};
 use super::fake_chat::DemoGateway;
 use super::http_agent::{finish_request, redact};
+use crate::capabilities::registry::api::Channel;
 use crate::core::ports::{
     BoxedChat, Chat, ChatGateway, Chunk, CompleteOpts, Completion, Msg, ProbeOutcome, ToolCall,
     ToolDecl,
 };
-use crate::core::providers::Channel;
 
 /// 真实会话通道：拥有通道副本（含密钥；密钥不出适配层）。
 /// resolved = 本会话首次命中的有效端点，后续轮次直接复用，不再重复探测。
@@ -83,7 +83,7 @@ pub(crate) fn attempt_raw(
         url,
         key,
         &body,
-        crate::core::ports::DEFAULT_LLM_TIMEOUT_SECS,
+        crate::kernel::types::DEFAULT_LLM_TIMEOUT_SECS,
     )
 }
 
@@ -394,7 +394,7 @@ pub(crate) fn attempt_with_tools(
         url,
         key,
         &body.to_string(),
-        crate::core::ports::DEFAULT_LLM_TIMEOUT_SECS,
+        crate::kernel::types::DEFAULT_LLM_TIMEOUT_SECS,
     )
 }
 
@@ -531,7 +531,7 @@ impl ChatGateway for HttpGateway {
     fn probe_replay(
         &self,
         channel: &Channel,
-    ) -> Result<crate::core::providers::ReplayReport, String> {
+    ) -> Result<crate::capabilities::registry::api::ReplayReport, String> {
         crate::adapters::http_probe::probe_replay(channel, &self.log)
     }
 

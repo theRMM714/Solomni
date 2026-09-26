@@ -2,7 +2,6 @@
 //! 分层纪律：本层不出现文件读、ureq、stdin/stdout——机制全部在 adapters，
 //! 装配（new 适配器）只发生在 main 组合根。前端只见 Core 门面、会话句柄与 SessionEvent 流。
 
-pub mod agents;
 pub mod api;
 pub mod collab;
 pub mod collab_state;
@@ -16,7 +15,6 @@ pub mod module;
 pub mod packages;
 pub mod patch;
 pub mod ports;
-pub mod providers;
 pub mod roles;
 pub mod schema;
 pub mod session;
@@ -26,20 +24,21 @@ pub mod workspace;
 pub use events::{Pending, SessionEvent};
 // 测试用同步入口的签名要它；生产路径的 Live 构造在 api.rs（那里直接引 events::Live）。
 pub use crate::capabilities::prompt::ports::PromptSource;
+pub use crate::capabilities::registry::ports::SettingsStore;
 #[cfg(test)]
 pub(crate) use events::Live;
 pub use ports::{
-    ChatGateway, HistoryStore, ModelCatalog, ModuleSource, PackageSource, SettingsStore, SysIo,
-    ToolRunner, Workspace,
+    ChatGateway, HistoryStore, ModelCatalog, ModuleSource, PackageSource, SysIo, ToolRunner,
+    Workspace,
 };
 
 use crate::capabilities::prompt::api::Prompts;
+use crate::capabilities::registry::api::{AppSettings, Channel, Settings};
 use crate::core::collab::CollabSession;
 use crate::core::engine::AfterTurn;
 use crate::core::history::{AgentMeta, HistoryView, SessionMeta};
 use crate::core::module::Module;
 use crate::core::ports::Msg;
-use crate::core::providers::{AppSettings, Channel, Settings};
 use crate::core::roles::SystemTools;
 use crate::kernel::log::Log;
 use crate::kernel::types::SessionId;
@@ -1138,7 +1137,7 @@ impl Core {
         let mut seen: Vec<String> = Vec::new();
         let mut metas: Vec<AgentMeta> = Vec::new();
         for a in &edit.agents {
-            agents::validate_name(&a.name)?;
+            crate::capabilities::registry::api::validate_name(&a.name)?;
             if a.modules.is_empty() {
                 return Err(format!("agent {} 至少要有一个模块", a.name));
             }
@@ -1259,7 +1258,7 @@ impl Core {
     // ---- 登记处：供应商（密钥只在此层进出；前端只见 id 与端点） ----
 
     /// 结构化供应商视图（不含密钥；Web 用）。
-    pub fn provider_views(&self) -> Vec<providers::ProviderView> {
+    pub fn provider_views(&self) -> Vec<crate::capabilities::registry::api::ProviderView> {
         self.settings.provider_views()
     }
 
@@ -1284,7 +1283,7 @@ impl Core {
         };
         self.settings.providers.insert(
             id.to_string(),
-            providers::Provider {
+            crate::capabilities::registry::api::Provider {
                 base_url: base_url.to_string(),
                 api_key: key,
             },
@@ -1318,7 +1317,7 @@ impl Core {
     // ---- 登记处：模型（独立实体，引用供应商；两者分开保存） ----
 
     /// 结构化模型视图（Web 用）。
-    pub fn model_views(&self) -> Vec<providers::ModelView> {
+    pub fn model_views(&self) -> Vec<crate::capabilities::registry::api::ModelView> {
         self.settings.model_views()
     }
 
@@ -1330,13 +1329,20 @@ impl Core {
     /// 实测一条通道支不支持原生工具调用，并把**结论写回登记处**（只写确定的结论）：
     /// 支持 → `tools: native`；明确不支持 → `tools: envelope`；无法判定 → 不改，只把事实报回去。
     /// 事实由适配层实测（两条最小请求对比），core 只做"要不要落盘"这一层策略。
-    pub fn probe_model_tools(&mut self, id: &str) -> Result<providers::ProbeOutcome, String> {
+    pub fn probe_model_tools(
+        &mut self,
+        id: &str,
+    ) -> Result<crate::core::api::ProbeOutcome, String> {
         let channel = self.settings.resolve(id)?;
         let outcome = self.gateway.probe_tools(&channel)?;
         let want = match &outcome {
-            providers::ProbeOutcome::Supported { .. } => Some(providers::ToolMode::Native),
-            providers::ProbeOutcome::Unsupported { .. } => Some(providers::ToolMode::Envelope),
-            providers::ProbeOutcome::Unknown { .. } => None,
+            crate::core::api::ProbeOutcome::Supported { .. } => {
+                Some(crate::capabilities::registry::api::ToolMode::Native)
+            }
+            crate::core::api::ProbeOutcome::Unsupported { .. } => {
+                Some(crate::capabilities::registry::api::ToolMode::Envelope)
+            }
+            crate::core::api::ProbeOutcome::Unknown { .. } => None,
         };
         if let Some(mode) = want {
             if let Some(m) = self.settings.models.get_mut(id) {
@@ -1351,7 +1357,10 @@ impl Core {
 
     /// 实测一条通道的**回放形状**（工具调用历史怎么发回去才收）：解析 id → 交给适配层实测。
     /// 只报事实、**不写登记处**——采不采用由人定（与 probe_model_tools 的写回策略不同）。
-    pub fn probe_replay_shape(&self, id: &str) -> Result<providers::ReplayReport, String> {
+    pub fn probe_replay_shape(
+        &self,
+        id: &str,
+    ) -> Result<crate::capabilities::registry::api::ReplayReport, String> {
         let channel = self.settings.resolve(id)?;
         self.gateway.probe_replay(&channel)
     }
@@ -1383,7 +1392,7 @@ impl Core {
         let context = if context == 0 { old_ctx } else { context };
         self.settings.models.insert(
             id.to_string(),
-            providers::ModelEntry {
+            crate::capabilities::registry::api::ModelEntry {
                 name: name.to_string(),
                 api_model: api_model.to_string(),
                 provider: provider.to_string(),
@@ -1421,11 +1430,11 @@ impl Core {
 
     // ---- agent（用户配置的具名能力组合） ----
 
-    pub fn agent_views(&self) -> Vec<agents::AgentView> {
+    pub fn agent_views(&self) -> Vec<crate::capabilities::registry::api::AgentView> {
         self.settings
             .agents
             .iter()
-            .map(|(name, a)| agents::AgentView {
+            .map(|(name, a)| crate::capabilities::registry::api::AgentView {
                 name: name.clone(),
                 modules: a.modules.clone(),
                 model: a.model.clone(),
@@ -1442,7 +1451,7 @@ impl Core {
         model: &str,
         note: &str,
     ) -> Result<(), String> {
-        agents::validate_name(name)?;
+        crate::capabilities::registry::api::validate_name(name)?;
         if module_ids.is_empty() {
             return Err("agent 至少要有一个模块".to_string());
         }
@@ -1457,7 +1466,7 @@ impl Core {
         }
         self.settings.agents.insert(
             name.to_string(),
-            agents::Agent {
+            crate::capabilities::registry::api::Agent {
                 modules: module_ids.to_vec(),
                 model: if model.is_empty() {
                     None
@@ -1632,7 +1641,7 @@ impl Core {
         // 校验 agent：名字合法、模块与模型真实存在；同一模块不得同时属于两个 agent（沙箱会歧义）
         let mut seen_modules: Vec<String> = Vec::new();
         for a in &spec.agents {
-            agents::validate_name(&a.name)?;
+            crate::capabilities::registry::api::validate_name(&a.name)?;
             if a.modules.is_empty() {
                 return Err(format!("agent {} 至少要有一个模块", a.name));
             }
@@ -1672,7 +1681,7 @@ impl Core {
         let mut taken: Vec<String> = Vec::new();
         let mut metas: Vec<AgentMeta> = Vec::new();
         for a in &spec.agents {
-            let name = agents::unique_instance_name(&a.name, &taken);
+            let name = crate::capabilities::registry::api::unique_instance_name(&a.name, &taken);
             taken.push(name.clone());
             metas.push(AgentMeta {
                 name,
@@ -1906,7 +1915,7 @@ impl Core {
         sb: &workspace::Sandbox,
         unavailable: BTreeMap<String, Vec<String>>,
         net: bool,
-        mode: providers::ToolMode,
+        mode: crate::capabilities::registry::api::ToolMode,
     ) -> engine::MemberTools {
         engine::MemberTools {
             mode,
@@ -1978,7 +1987,7 @@ impl Core {
         let mode = if channel.is_some() {
             self.settings.tool_mode_for(a.model.as_deref())
         } else {
-            providers::ToolMode::Envelope
+            crate::capabilities::registry::api::ToolMode::Envelope
         };
         self.log.info(
             "core::build_single",
@@ -2088,7 +2097,7 @@ impl Core {
     }
 
     /// 核心推荐：按本次需求推荐 agent 名单（优先复用登记处的 agent，否则组装新的并给出模型）。
-    /// 核心只建议、不代选；非法条目一律拒收（规则与代拟共用 agents::resolve_picks）。
+    /// 核心只建议、不代选；非法条目一律拒收（规则与代拟共用 crate::capabilities::registry::api::resolve_picks）。
     pub fn suggest_models(
         &self,
         task: &str,
@@ -2113,7 +2122,10 @@ impl Core {
                 ("mode", mode_text.to_string()),
                 (
                     "agents",
-                    agents::listing(&self.prompts, &self.settings.agents),
+                    crate::capabilities::registry::api::listing(
+                        &self.prompts,
+                        &self.settings.agents,
+                    ),
                 ),
                 (
                     "modules",
@@ -2121,7 +2133,10 @@ impl Core {
                 ),
                 (
                     "models",
-                    agents::model_listing(&self.settings.models, &self.prompts.core.tool_texts),
+                    crate::capabilities::registry::api::model_listing(
+                        &self.settings.models,
+                        &self.prompts.core.tool_texts,
+                    ),
                 ),
                 ("task", task.to_string()),
             ],
@@ -2148,7 +2163,7 @@ impl Core {
             &mut |e: SessionEvent| rows.push(e),
         )?;
         // 载荷里就是名单**数组**本身（工具参数 agents 的值）。
-        let parsed: Vec<agents::RosterPick> = payload
+        let parsed: Vec<crate::capabilities::registry::api::RosterPick> = payload
             .get("agents")
             .cloned()
             .and_then(|v| serde_json::from_value(v).ok())
@@ -2158,7 +2173,7 @@ impl Core {
                     payload.to_string().chars().take(200).collect::<String>()
                 )
             })?;
-        let (picks, rejected) = agents::resolve_picks(
+        let (picks, rejected) = crate::capabilities::registry::api::resolve_picks(
             parsed,
             &self.settings.agents,
             &roster,
@@ -2220,7 +2235,7 @@ impl Core {
         let want = if channel.is_some() {
             self.settings.tool_mode_for(a.model.as_deref())
         } else {
-            providers::ToolMode::Envelope
+            crate::capabilities::registry::api::ToolMode::Envelope
         };
         let cur = match self.sessions.get(sid) {
             Some(Session::Single(s)) => s.tool_mode(),
@@ -2236,10 +2251,10 @@ impl Core {
             s.set_tool_mode(want);
         }
         Ok(Some(match want {
-            providers::ToolMode::Native => {
+            crate::capabilities::registry::api::ToolMode::Native => {
                 "工具调用形态已按登记处改为**原生工具调用**（本条起生效）".to_string()
             }
-            providers::ToolMode::Envelope => {
+            crate::capabilities::registry::api::ToolMode::Envelope => {
                 "工具调用形态已按登记处改为**手写信封**（本条起生效）".to_string()
             }
         }))
@@ -2661,7 +2676,7 @@ impl Core {
                 let mode = if channel.is_some() {
                     self.settings.tool_mode_for(a.model.as_deref())
                 } else {
-                    providers::ToolMode::Envelope
+                    crate::capabilities::registry::api::ToolMode::Envelope
                 };
                 // **会话参数**：与建立时同一个口径（身份块每回合现渲染，不进消息列表）。
                 let params = session::SessionParams::from_workspace(&a.name, &sb, &modules);

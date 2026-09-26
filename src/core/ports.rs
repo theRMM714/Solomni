@@ -7,9 +7,10 @@
 //! - ChatGateway：通道工厂（怎么建通道在适配层；「用哪条通道」由 core 解析后传入）。
 //! - PromptSource：提示词册加载（文件机制在适配层；渲染纯逻辑在 core/prompt.rs）。
 
+use crate::capabilities::registry::api::{Channel, Provider};
 use crate::core::history::{HistoryView, SessionMeta};
 use crate::core::module::Roster;
-use crate::core::providers::{Channel, Provider, Settings};
+use crate::kernel::types::DEFAULT_LLM_TIMEOUT_SECS;
 use std::path::Path;
 
 /// 流式片段：一次调用的起点 / 正文 / 思维链。
@@ -33,9 +34,6 @@ pub struct ToolDecl {
     /// JSON Schema（由 core::schema 的声明渲染；模块没声明参数时是"不收参数"的空对象结构）。
     pub parameters: serde_json::Value,
 }
-
-/// 单次模型调用的默认总预算（秒）。见 `AppSettings::llm_timeout_secs`。
-pub const DEFAULT_LLM_TIMEOUT_SECS: u64 = 300;
 
 /// 一次模型调用的通道参数：**策略在 core 定**（都来自全局设置），机制在适配器。
 /// 一个值一路传下去，而不是把 stream / 预算分别塞进各个函数的参数表——两处各传一份迟早会漏。
@@ -212,12 +210,6 @@ pub fn truncated(finish: &str) -> bool {
     matches!(finish, "length" | "max_tokens" | "max_output_tokens")
 }
 
-/// 登记处持久化端口：供应商与模型分开保存（机制/文件名在适配层）。
-pub trait SettingsStore {
-    fn load(&self) -> Result<Settings, String>;
-    fn save(&self, settings: &Settings) -> Result<(), String>;
-}
-
 /// 供应商模型目录端口：列出一条通道当前可用的模型名（发现机制在适配层）。
 pub trait ModelCatalog {
     fn list_models(&self, provider: &Provider) -> Result<Vec<String>, String>;
@@ -323,7 +315,7 @@ pub trait ChatGateway {
     fn probe_replay(
         &self,
         _channel: &Channel,
-    ) -> Result<crate::core::providers::ReplayReport, String> {
+    ) -> Result<crate::capabilities::registry::api::ReplayReport, String> {
         Err("这条通道没有真实供应商，测不了回放形状".to_string())
     }
 }

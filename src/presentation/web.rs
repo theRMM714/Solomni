@@ -4,8 +4,8 @@
 //! 核心状态在核心自己的线程上：这里拿不到它、也拿不到任何核心锁，「停止」直接说给核心听。
 //! 安全底线：只绑 127.0.0.1；密钥永不进任何响应（能力面只给 id）。
 
+use crate::capabilities::registry::api::AppSettings;
 use crate::core::api::{Ops, Output};
-use crate::core::providers::AppSettings;
 use crate::core::{CollabStep, SessionEdit, SessionEvent, WorkMode, WorkSpec};
 use crate::presentation::{intent, routes};
 use serde_json::json;

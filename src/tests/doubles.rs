@@ -10,15 +10,16 @@ use super::core::SilentRunner;
 use crate::adapters::fake_chat::FakeChat;
 use crate::capabilities::prompt::api::Prompts;
 use crate::capabilities::prompt::ports::PromptSource;
+use crate::capabilities::registry::api::{Channel, ModelEntry, Provider, Settings};
+use crate::capabilities::registry::ports::SettingsStore;
 use crate::core::events::Live;
 use crate::core::history::{HistoryView, SessionMeta};
 use crate::core::module::{Module, ModuleManifest};
 use crate::core::packages::{Library, PackageManifest};
 use crate::core::ports::{
     BoxedChat, Chat, ChatGateway, Chunk, CompleteOpts, Completion, FileRead, HistoryStore,
-    ModelCatalog, ModuleSource, Msg, PackageSource, SettingsStore, SysIo, ToolRunner, Workspace,
+    ModelCatalog, ModuleSource, Msg, PackageSource, SysIo, ToolRunner, Workspace,
 };
-use crate::core::providers::{Channel, ModelEntry, Provider, Settings};
 use crate::core::{AgentInstance, Core, SessionEvent, WorkMode, WorkSpec};
 use crate::kernel::types::Tier;
 use std::collections::BTreeMap;
@@ -52,7 +53,7 @@ impl InMemorySettings {
                 api_model: "m".to_string(),
                 provider: "p".to_string(),
                 note: String::new(),
-                tools: crate::core::providers::ToolMode::Envelope,
+                tools: crate::capabilities::registry::api::ToolMode::Envelope,
                 context: 32_000,
             },
         );

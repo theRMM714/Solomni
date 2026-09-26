@@ -31,8 +31,6 @@
 | `workspace.rs` | 工作区与沙箱的纯数据定义、寻址与越界判定。路径的**对外书写形式**在 `kernel::path`（纯机制）；**不持工具册**——内置工具的参数契约归工具面（`MemberTools`），沙箱只管路径 |
 | `systool.rs` | 内置工具 `read` / `write` / `edit` / `patch` / `search` 的放行、寻址、**按声明校验参数**、改动前的"读过"证据（`Observations`）、自由格式补丁的原子应用与回执文案 |
 | `patch.rs` | 补丁通道的**纯逻辑**：解析自由格式补丁（Add / Update / SEARCH / REPLACE / End File）与整行应用（逐行匹配、行尾风格保持、失败点名第几处） |
-| `providers.rs` | 供应商/模型登记处内存形态与「模型 → 通道」解析 |
-| `agents.rs` | agent 登记处、代拟名单落地与名字校验 |
 | `history.rs` | 会话元信息与历史视图的内存形态 |
 | `envelope.rs` | 发言信封解析（`ToolInvoke.body` = 信封之后的正文，自由格式工具的输入从这里取；含「像工具信封但不合法」的独立信号，并判定**未闭合 / 裸控制字符 / 语法错 / 字段不合法**四类；未闭合带上 EOF 状态：还差哪些收尾字符、是否断在字符串中间、这一段里起了几段信封） |
 | `collab_state.rs` | 「转录即状态」的协作状态派生（纯函数、可回放） |
@@ -72,6 +70,10 @@
 | `prompt/ports.rs` | `PromptSource`：提示词册加载（从 `core/ports.rs` 随能力搬出） |
 | `prompt/domain/prompt.rs` | 册子的内存形态与 `{{key}}` 渲染（从 `core/prompt.rs` 搬来，纯逻辑） |
 | `prompt/domain/refs.rs` | 用户 `@` 引用改写成真实绝对路径（从 `core/refs.rs` 搬来，纯逻辑） |
+| `registry/api.rs` | **入站能力面**：`Settings` / `Provider` / `ModelEntry` / `ToolMode` / `AppSettings` / `Channel` / 各视图 / `ReplayReport` 的对外名字 |
+| `registry/ports.rs` | `SettingsStore`：登记处四份 yaml 的持久化（从 `core/ports.rs` 随能力搬出） |
+| `registry/domain/providers.rs` | 供应商/模型登记处内存形态与「模型 → 通道」解析（从 `core/providers.rs` 搬来） |
+| `registry/domain/agents.rs` | agent 登记处、代拟名单落地与名字校验（从 `core/agents.rs` 搬来） |
 
 ## 五、`presentation/`（呈现）
 

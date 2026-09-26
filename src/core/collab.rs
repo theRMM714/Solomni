@@ -6,7 +6,8 @@
 //! 依赖全部为端口与核心数据；无 IO，无具体适配器。
 
 use crate::capabilities::prompt::api::Prompts;
-use crate::core::agents::{self, RosterPick};
+use crate::capabilities::registry::api::RosterPick;
+use crate::capabilities::registry::api::Settings;
 use crate::core::engine::{Discussion, Execution, Member, MemberTools, TurnOut, MAX_ROUNDS};
 use crate::core::events::{CheckView, LineView, Pending, SessionEvent};
 use crate::core::exec::{self, ExecSpec};
@@ -15,7 +16,6 @@ use crate::core::module::{self, Module};
 use crate::core::ports::{
     Chat, ChatGateway, CompleteOpts, ModuleSource, Msg, PackageSource, SysIo, ToolRunner,
 };
-use crate::core::providers::Settings;
 use crate::core::workspace::Sandboxes;
 use std::sync::Arc;
 
@@ -83,7 +83,9 @@ impl CollabSession {
 
 /// 用户显式授权的只读根（`settings.yaml` 的 `fence_read`）：空 = 一个都不放行。
 /// 与 `Core::fence_read_roots` 同义——两处都在 core 内，读的是同一份设置事实。
-fn read_only_roots(app: &crate::core::providers::AppSettings) -> Vec<std::path::PathBuf> {
+fn read_only_roots(
+    app: &crate::capabilities::registry::api::AppSettings,
+) -> Vec<std::path::PathBuf> {
     app.fence_read
         .iter()
         .map(|s| s.trim())
@@ -127,7 +129,7 @@ pub struct CollabSession {
     core_chat: crate::core::ports::BoxedChat,
     core_is_demo: bool,
     /// 核心通道的工具调用形态（原生才声明工具；信封通道看提示词里的说明）。
-    core_mode: crate::core::providers::ToolMode,
+    core_mode: crate::capabilities::registry::api::ToolMode,
     prompts: Prompts,
     /// 工具总表与角色表：**不挂在册子上**（两者互不依赖）。
     systools: crate::core::roles::SystemTools,
@@ -313,7 +315,7 @@ impl CollabSession {
         systools: &crate::core::roles::SystemTools,
         cancel: &std::sync::Arc<std::sync::atomic::AtomicBool>,
         opts: crate::core::ports::CompleteOpts<'static>,
-        mode: crate::core::providers::ToolMode,
+        mode: crate::capabilities::registry::api::ToolMode,
         core_chat: &mut dyn Chat,
         verify: Option<&mut crate::core::engine::MemberTools>,
         kind: &str,
@@ -367,7 +369,7 @@ impl CollabSession {
         cancel: &std::sync::Arc<std::sync::atomic::AtomicBool>,
         chain: Option<&crate::kernel::chain::TaskChain>,
         opts: crate::core::ports::CompleteOpts<'static>,
-        mode: crate::core::providers::ToolMode,
+        mode: crate::capabilities::registry::api::ToolMode,
         core_chat: &mut dyn Chat,
         verify: Option<&mut crate::core::engine::MemberTools>,
         // 上一次填错了要它重填的话（核心据此**一直重填**到合法，不设次数上限）。
@@ -561,9 +563,12 @@ impl CollabSession {
     /// 拟名单给模型看的三份清单（已存 agent / 模块公地 / 可用模型）。
     fn briefing(&self, roster: &module::Roster) -> (String, String, String) {
         (
-            agents::listing(&self.prompts, &self.settings.agents),
+            crate::capabilities::registry::api::listing(&self.prompts, &self.settings.agents),
             module::listing(roster, &self.prompts.core.tool_texts),
-            agents::model_listing(&self.settings.models, &self.prompts.core.tool_texts),
+            crate::capabilities::registry::api::model_listing(
+                &self.settings.models,
+                &self.prompts.core.tool_texts,
+            ),
         )
     }
 
@@ -647,8 +652,12 @@ impl CollabSession {
             return;
         };
         // 逐条校验（存在性、模型真实、整份名单内模块不重复）；拒收项如实告知。
-        let (picks, rejected) =
-            agents::resolve_picks(picks, &self.settings.agents, &roster, &self.settings.models);
+        let (picks, rejected) = crate::capabilities::registry::api::resolve_picks(
+            picks,
+            &self.settings.agents,
+            &roster,
+            &self.settings.models,
+        );
         for r in rejected {
             sink(SessionEvent::Notice(format!("[代拟] {}，拒收", r)));
         }
@@ -1438,7 +1447,7 @@ impl CollabSession {
             let mode = if channel.is_some() {
                 self.settings.tool_mode_for(a.model.as_deref())
             } else {
-                crate::core::providers::ToolMode::Envelope
+                crate::capabilities::registry::api::ToolMode::Envelope
             };
             // **会话参数**：身份块每回合由它现渲染，不存进任何人的消息列表。
             let params =

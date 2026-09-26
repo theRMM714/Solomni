@@ -15,13 +15,14 @@ use crate::adapters::sys_io::FsSysIo;
 use crate::adapters::yaml_prompts::YamlPrompts;
 use crate::adapters::yaml_settings::YamlSettingsStore;
 use crate::capabilities::prompt::ports::PromptSource;
+use crate::capabilities::registry::api::{Channel, Provider, Settings};
+use crate::capabilities::registry::ports::SettingsStore;
 use crate::core::exec::ExecSpec;
 use crate::core::history::{AgentMeta, SessionMeta};
 use crate::core::ports::{
     ChatGateway, Chunk, CompleteOpts, HistoryStore, ModelCatalog, ModuleSource, Msg, PackageSource,
-    ProbeOutcome, SettingsStore, SysIo, Workspace,
+    ProbeOutcome, SysIo, Workspace,
 };
-use crate::core::providers::{Channel, Provider, Settings};
 use crate::kernel::log::{Log, NoopLog};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -222,12 +223,12 @@ fn yaml_settings_store_defaults_saves_and_reports_malformed_files() {
     );
     want.models.insert(
         "m".to_string(),
-        crate::core::providers::ModelEntry {
+        crate::capabilities::registry::api::ModelEntry {
             name: "M".to_string(),
             api_model: "m".to_string(),
             provider: "p".to_string(),
             note: String::new(),
-            tools: crate::core::providers::ToolMode::Envelope,
+            tools: crate::capabilities::registry::api::ToolMode::Envelope,
             context: 32_000,
         },
     );
@@ -235,7 +236,7 @@ fn yaml_settings_store_defaults_saves_and_reports_malformed_files() {
     want.app.streaming = false;
     want.agents.insert(
         "甲".to_string(),
-        crate::core::agents::Agent {
+        crate::capabilities::registry::api::Agent {
             modules: vec!["a".to_string()],
             model: None,
             note: "n".to_string(),
@@ -294,7 +295,7 @@ fn yaml_settings_store_defaults_saves_and_reports_malformed_files() {
     let back = store.load().expect("合法形态必须能读回");
     assert_eq!(
         back.models.get("m").map(|m| m.tools),
-        Some(crate::core::providers::ToolMode::Native),
+        Some(crate::capabilities::registry::api::ToolMode::Native),
         "注册表里的形态要原样读回"
     );
     let _ = std::fs::remove_dir_all(&root);

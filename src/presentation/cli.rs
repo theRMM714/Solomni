@@ -1,8 +1,8 @@
 //! 终端转录中心：解析命令 → 用入站能力面 → 渲染事件流。
 //! 只做解析与渲染，不做业务决策；Web 前端与它并列，共用同一能力面与事件词汇。
 
+use crate::capabilities::registry::api::{ModelView, ProviderView};
 use crate::core::api::{Ops, Output};
-use crate::core::providers::{ModelView, ProviderView};
 use crate::core::{AgentInstance, CollabStep, Pending, SessionEvent, WorkMode};
 use crate::presentation::intent;
 use crate::presentation::web::DEFAULT_PORT;

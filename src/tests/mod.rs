@@ -158,13 +158,13 @@ pub(crate) struct RecordingGateway {
 impl crate::core::ports::ChatGateway for RecordingGateway {
     fn probe_tools(
         &self,
-        c: &crate::core::providers::Channel,
+        c: &crate::capabilities::registry::api::Channel,
     ) -> Result<crate::core::ports::ProbeOutcome, String> {
         self.inner.probe_tools(c)
     }
     fn member_channel(
         &self,
-        c: Option<&crate::core::providers::Channel>,
+        c: Option<&crate::capabilities::registry::api::Channel>,
         id: &str,
     ) -> (crate::core::ports::BoxedChat, Option<String>) {
         let (chat, note) = self.inner.member_channel(c, id);
@@ -178,7 +178,7 @@ impl crate::core::ports::ChatGateway for RecordingGateway {
     }
     fn core_channel(
         &self,
-        c: Option<&crate::core::providers::Channel>,
+        c: Option<&crate::capabilities::registry::api::Channel>,
     ) -> (crate::core::ports::BoxedChat, bool) {
         self.inner.core_channel(c)
     }
@@ -187,13 +187,13 @@ impl crate::core::ports::ChatGateway for RecordingGateway {
 impl crate::core::ports::ChatGateway for GatedGateway {
     fn probe_tools(
         &self,
-        _c: &crate::core::providers::Channel,
+        _c: &crate::capabilities::registry::api::Channel,
     ) -> Result<crate::core::ports::ProbeOutcome, String> {
         Err("脚本替身没有真实供应商，测不了工具调用支持".to_string())
     }
     fn member_channel(
         &self,
-        _c: Option<&crate::core::providers::Channel>,
+        _c: Option<&crate::capabilities::registry::api::Channel>,
         _id: &str,
     ) -> (crate::core::ports::BoxedChat, Option<String>) {
         (
@@ -206,7 +206,7 @@ impl crate::core::ports::ChatGateway for GatedGateway {
     }
     fn core_channel(
         &self,
-        _c: Option<&crate::core::providers::Channel>,
+        _c: Option<&crate::capabilities::registry::api::Channel>,
     ) -> (crate::core::ports::BoxedChat, bool) {
         (
             Box::new(GatedChat {
@@ -247,13 +247,13 @@ pub(crate) struct SlowGateway {
 impl crate::core::ports::ChatGateway for SlowGateway {
     fn probe_tools(
         &self,
-        _c: &crate::core::providers::Channel,
+        _c: &crate::capabilities::registry::api::Channel,
     ) -> Result<crate::core::ports::ProbeOutcome, String> {
         Err("脚本替身没有真实供应商，测不了工具调用支持".to_string())
     }
     fn member_channel(
         &self,
-        _c: Option<&crate::core::providers::Channel>,
+        _c: Option<&crate::capabilities::registry::api::Channel>,
         _id: &str,
     ) -> (crate::core::ports::BoxedChat, Option<String>) {
         (
@@ -265,7 +265,7 @@ impl crate::core::ports::ChatGateway for SlowGateway {
     }
     fn core_channel(
         &self,
-        _c: Option<&crate::core::providers::Channel>,
+        _c: Option<&crate::capabilities::registry::api::Channel>,
     ) -> (crate::core::ports::BoxedChat, bool) {
         (
             Box::new(SlowChat {
