@@ -25,7 +25,7 @@ pub struct ProcTools {
     #[cfg(windows)]
     pub disclosed: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// 工具回执里那些收尾标记的文案（来自提示词册：它们随 [工具结果] 进模型上下文，所以不硬编码）。
-    pub texts: crate::core::prompt::ToolTexts,
+    pub texts: crate::capabilities::prompt::api::ToolTexts,
     /// 单次工具执行的超时（到时连根杀掉整棵树，ok = false）。
     pub timeout: Duration,
     /// 回传给模型/轨迹的输出上限（字符数）。
@@ -39,7 +39,7 @@ impl ProcTools {
     /// 组合根注入：当前可执行文件（守门进程就是它自己）、提示词册里的收尾标记、产品私有区与写权限开关。
     pub fn new(
         exe: PathBuf,
-        texts: crate::core::prompt::ToolTexts,
+        texts: crate::capabilities::prompt::api::ToolTexts,
         home: PathBuf,
         write_allowed: std::sync::Arc<std::sync::atomic::AtomicBool>,
     ) -> ProcTools {
@@ -173,7 +173,7 @@ impl ToolRunner for ProcTools {
 /// 所以拒绝执行（命令不落进程），回执用提示词册里的固定说法（它随工具结果进模型上下文）。
 #[cfg(windows)]
 fn refuse_when_broken(
-    texts: &crate::core::prompt::ToolTexts,
+    texts: &crate::capabilities::prompt::api::ToolTexts,
     verdict: confine::FenceVerdict,
 ) -> Option<ToolOutcome> {
     match verdict {
@@ -331,7 +331,7 @@ mod tests {
     /// 回执里的标记文案必须来自提示词册（它们随 [工具结果] 进模型上下文，所以不能在代码里另写一份）。
     #[test]
     fn receipt_markers_come_from_the_prompt_book() {
-        use crate::core::ports::PromptSource;
+        use crate::capabilities::prompt::ports::PromptSource;
         let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         let prompts =
             crate::adapters::YamlPrompts::new(root.join("prompts"), root.join("systools"))
@@ -450,8 +450,8 @@ mod tests {
         None
     }
 
-    fn prompt_texts() -> crate::core::prompt::ToolTexts {
-        use crate::core::ports::PromptSource;
+    fn prompt_texts() -> crate::capabilities::prompt::api::ToolTexts {
+        use crate::capabilities::prompt::ports::PromptSource;
         let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         let prompts =
             crate::adapters::YamlPrompts::new(root.join("prompts"), root.join("systools"))

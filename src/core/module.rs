@@ -101,7 +101,7 @@ pub struct Module {
 /// env 由 core::systool 按该 agent 的沙箱渲染后传入。
 /// **工具清单不在这里**：本回合能用哪些工具随回合注入（见 core::engine::tools_block）。
 pub fn agent_system(
-    prompts: &crate::core::prompt::Prompts,
+    prompts: &crate::capabilities::prompt::api::Prompts,
     agent: &str,
     modules: &[(String, String)],
     env: &str,
@@ -137,7 +137,10 @@ pub fn agent_system(
 }
 
 /// 模块工具的参数契约（只列**声明了**参数的）：模型据此写信封里的 args；没声明的照旧不校验。
-pub fn module_tool_params(prompts: &crate::core::prompt::Prompts, modules: &[Module]) -> String {
+pub fn module_tool_params(
+    prompts: &crate::capabilities::prompt::api::Prompts,
+    modules: &[Module],
+) -> String {
     let texts = &prompts.core.tool_texts;
     let mut sections: Vec<String> = Vec::new();
     for m in modules {
@@ -166,7 +169,10 @@ pub fn module_tool_params(prompts: &crate::core::prompt::Prompts, modules: &[Mod
 
 /// 该 agent 的外部工具清单：**按模块分组，每行一个模块**（模块 id：工具名、…）。
 /// 模型据此在信封里写 module；都没有声明工具时用册子里的说法（用法不变）。
-pub fn module_tools(prompts: &crate::core::prompt::Prompts, modules: &[Module]) -> String {
+pub fn module_tools(
+    prompts: &crate::capabilities::prompt::api::Prompts,
+    modules: &[Module],
+) -> String {
     let texts = &prompts.core.tool_texts;
     let lines: Vec<String> = modules
         .iter()
@@ -199,7 +205,7 @@ pub struct Roster {
 }
 
 /// 模块公地清单（拟名单时给模型看）：id / 简述。
-pub fn listing(roster: &Roster, texts: &crate::core::prompt::ToolTexts) -> String {
+pub fn listing(roster: &Roster, texts: &crate::capabilities::prompt::api::ToolTexts) -> String {
     roster
         .modules
         .iter()

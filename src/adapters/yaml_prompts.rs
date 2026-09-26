@@ -1,12 +1,12 @@
-//! 装配输入加载：`prompts/` 目录 → core::prompt::Prompts（**只有提示词文本**），
+//! 装配输入加载：`prompts/` 目录 → capabilities::prompt::api::Prompts（**只有提示词文本**），
 //! `systools/` 两张表 → core::roles::SystemTools（工具是什么 + 身份有什么）。
 //! 缺目录/缺文件 = 装配错误（如实报错，不静默造默认文案）。
 //!
 //! **两者不合并**：工具总表与角色表不是提示词；挂进册子会让提示词能力反过来依赖工具能力，
 //! 两边成环（见 docs/architecture/refactor-plan.md §三）。
 
-use crate::core::ports::PromptSource;
-use crate::core::prompt::Prompts;
+use crate::capabilities::prompt::api::Prompts;
+use crate::capabilities::prompt::ports::PromptSource;
 use crate::core::roles::{RoleTable, SystemTools};
 use crate::core::schema::ToolBook;
 use serde::Deserialize;
@@ -38,7 +38,7 @@ impl YamlPrompts {
 
 impl PromptSource for YamlPrompts {
     fn load(&self) -> Result<Prompts, String> {
-        crate::core::prompt::merge_book(&self.read_docs()?)
+        crate::capabilities::prompt::api::merge_book(&self.read_docs()?)
     }
 }
 

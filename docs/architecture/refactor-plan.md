@@ -427,13 +427,13 @@ kernel       ──▶ （无）
 | **3** | **切边 A1 + A2**：`slash` → `kernel::path`（纯机制）；**拆册子**——`Prompts` 只留提示词文本，`SystemTools` / `ToolBook` 由 `Core`、协作会话与讨论直接持有 | `refs → workspace`；`prompt → roles`；`prompt → schema`；**并解开 `prompt ⇄ tools` 本质环** | **已完成**（核心环 16 → 14 个模块） |
 | **4** | **切 `workspace → schema`**：`builtin_tools` 从 `Sandbox` 移到 `MemberTools`（`Sandbox` 从未读它，是死重） | `workspace → schema` | **已完成**（核心环 14 → 12；`workspace` 只剩 `→ prompt`，属**合法业务间依赖**，不必切） |
 | **5** | **其余三条数据聚合**：① `chain.rs` → `kernel`（**一次切断 `events → chain` 与 `collab_state → chain`**，即未来的 `session ⇄ collab`）；② `Tier` → `kernel/types`（切断 `providers → exec`，即 `registry ⇄ workspace`）；③ `history → exec` **判定为合法业务依赖，不切**（会话元信息本来就要记执行选型） | `events → chain`、`collab_state → chain`、`providers → exec` | **已完成**（核心环仍是 12——`chain` 本就是叶子，切掉的是**未来的能力级环**） |
-| **6** | **拆 `ports.rs`**：它的 trait 签名引用了 **8 个**模块的类型（`envelope` / `fence` / `history` / `module` / `packages` / `prompt` / `providers` / `workspace`）——按 §1.2 让每个能力有自己的 `ports.rs` | `ports → …`（最大枢纽） | 未开始 |
+| **6** | ~~拆 `ports.rs`~~ **作废**：实测每条 trait 引用的类型**恰好都是它自己能力的**（`FenceHost`/`ToolRunner`→`fence`、`PackageSource`/`Workspace`→`workspace`、`ChatGateway`→`providers`、`EnvelopeRepair`→`envelope`、`HistoryStore`→`history`、`ModuleSource`→`module`、`PromptSource`→`prompt`、`SettingsStore`→`providers`）。所以**拆文件不切边**——枢纽是**被搬空的**，随各能力一起走 | — | **作废**（并入阶段 B） |
 
 **阶段 B：搬能力（按切边后的图重排）**
 
 | 批次 | 目标 | 前置 | 状态 |
 | --- | --- | --- | --- |
-| **7** | **prompt**（此时只剩 `→ envelope` 一条出边，无环） | 4, 5 | 未开始 |
+| **7** | **prompt 能力落位**：`capabilities/prompt/`（`api` / `ports` / `domain`）；`PromptSource` 随能力迁出 `core/ports.rs` | 4, 5 | **已完成**（门禁已认 `capabilities/` 层、`kernel` 不依赖能力、以及「业务之间只经对方的 `::api`」；`ports.rs` 枢纽 8 → 7 条边；1 条反向边 `→ core::envelope` 记入基线，随 `envelope` 落位清零） |
 | **8** | **registry**（含拆 `providers.rs`） | 5 | 未开始 |
 | **9** | **llm**：`Channel` 解析 + 通道端口族 | 8 | 未开始 |
 | **10** | **workspace**：`module` / `packages` / `exec` | 6, 9 | 未开始 |

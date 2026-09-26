@@ -2,9 +2,9 @@
 //! 只是"用户编排选择的存档"，不是能力注册表——能力仍在 modules/ 公地里。
 //! 落盘在 .home/agents.yaml（与 providers/models/settings 同处用户私有区）。
 
+use crate::capabilities::prompt::api::Prompts;
 use crate::core::history::AgentMeta;
 use crate::core::module::Roster;
-use crate::core::prompt::Prompts;
 use crate::core::providers::ModelEntry;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -96,7 +96,7 @@ pub fn listing(prompts: &Prompts, known: &Agents) -> String {
 /// 可用模型清单（拟名单时给模型看）：id / 名称 / api_model / 说明。
 pub fn model_listing(
     models: &BTreeMap<String, ModelEntry>,
-    texts: &crate::core::prompt::ToolTexts,
+    texts: &crate::capabilities::prompt::api::ToolTexts,
 ) -> String {
     models
         .iter()

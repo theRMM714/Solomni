@@ -3,6 +3,7 @@
 
 use super::doubles::*;
 use crate::adapters::fake_chat::FakeChat;
+use crate::capabilities::prompt::domain::prompt::render;
 use crate::core::engine::{Discussion, Member, MemberTools, ModuleTools, TurnOut, MAX_ROUNDS};
 use crate::core::events::Live;
 use crate::core::exec::{self, Diagnosis, ExecSpec};
@@ -13,7 +14,6 @@ use crate::core::ports::{
     BoxedChat, Chat, ChatGateway, Chunk, CompleteOpts, Completion, HistoryStore, ModuleSource, Msg,
     ToolOutcome, ToolRunner, Workspace,
 };
-use crate::core::prompt::render;
 use crate::core::providers::{Channel, ModelEntry, Provider, Settings};
 use crate::core::{
     AgentInstance, CollabStep, ConfigAgent, Core, Pending, SessionEdit, SessionEvent, WorkMode,
@@ -1167,7 +1167,7 @@ pub(crate) struct ExecLike {
 pub(crate) fn run_execution(
     members: &mut [crate::core::engine::Member],
     tasks: &str,
-    prompts: &crate::core::prompt::Prompts,
+    prompts: &crate::capabilities::prompt::api::Prompts,
 ) -> ExecLike {
     let mut out = ExecLike {
         reports: BTreeMap::new(),
@@ -3347,18 +3347,18 @@ pub(crate) fn tool_call_event_is_emitted_before_the_next_round() {
 
 #[test]
 pub(crate) fn refs_rewrite_covers_prefixes_speakers_and_punctuation() {
-    use crate::core::refs::{rewrite, RefRoots};
+    use crate::capabilities::prompt::api::{rewrite, RefRoots};
     // 文案来自提示词册：期望值也用册子渲染出来，代码里不复制那两句中文。
     let t = test_prompts().core.refs;
     let foreign = |path: &str, agent: &str| {
-        crate::core::prompt::render(
+        crate::capabilities::prompt::domain::prompt::render(
             &t.foreign_sandbox,
             &[("agent", agent.to_string()), ("path", path.to_string())],
         )
         .expect("册子变量齐全")
     };
     let collab = |path: &str, agent: &str| {
-        crate::core::prompt::render(
+        crate::capabilities::prompt::domain::prompt::render(
             &t.collab_sandbox,
             &[("path", path.to_string()), ("agent", agent.to_string())],
         )

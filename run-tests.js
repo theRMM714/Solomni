@@ -363,14 +363,20 @@ function structuralAudit() {
       }
       return out.join("\n");
     };
-    // 引用归一到「层 + 模块」两级：crate::core::exec::diagnose_text → crate::core::exec。
+    // 归一深度：core 取「层 + 模块」两级；capabilities 取「层 + 能力 + 子模块」三级
+    // ——后者要能区分 ::api（唯一合法入口）与 ::domain / ::ports（内部）。
     // 归一只为让基线稳定：同一依赖换个更细的写法不该让账本跳动。
-    const normTarget = (full) => "crate::" + full.split("::").slice(0, 2).join("::");
+    const normTarget = (full) => {
+      const parts = full.split("::");
+      const depth = parts[0] === "capabilities" ? 3 : 2;
+      return "crate::" + parts.slice(0, Math.min(depth, parts.length)).join("::");
+    };
     const LAYER_OF = (r) => {
       if (r.startsWith("src/core/")) return "core";
       if (r.startsWith("src/adapters/")) return "adapters";
       if (r.startsWith("src/presentation/")) return "presentation";
       if (r.startsWith("src/kernel/")) return "kernel";
+      if (r.startsWith("src/capabilities/")) return "capabilities";
       if (r.startsWith("src/tests/")) return "tests";
       if (r === "src/main.rs") return "main";
       return null;
@@ -378,7 +384,9 @@ function structuralAudit() {
     // 层 → 它不得引用的层。core 不引用 adapters（端口由 core 定义、适配层实现，永不反向）。
     const FORBIDDEN = {
       // kernel 在最底层：无领域语义的机制，**不依赖任何人**。
-      kernel: ["core", "adapters", "presentation"],
+      kernel: ["core", "capabilities", "adapters", "presentation"],
+      // 能力是最高的业务层：不反向依赖旧巨石、适配层或呈现层。
+      capabilities: ["core", "adapters", "presentation"],
       core: ["adapters", "presentation"],
       adapters: ["presentation"],
     };
@@ -395,6 +403,7 @@ function structuralAudit() {
 
     const reverse = new Set();
     const presentation = new Set();
+    const apiOnly = new Set();
     const coreGraph = {};
     for (const abs of rsFiles) {
       const f = rel(abs);
@@ -410,13 +419,36 @@ function structuralAudit() {
         const t = normTarget(m[1]);
         const targetLayer = t.split("::")[1];
         if ((FORBIDDEN[layer] || []).includes(targetLayer)) reverse.add(f + " -> " + t);
-        if (layer === "presentation" && t !== "crate::core::api" && targetLayer !== "presentation") {
+        // 呈现层只认入站能力面：core::api，或某个能力的 ::api。
+        const presOk =
+          t === "crate::core::api" ||
+          (t.startsWith("crate::capabilities::") && t.endsWith("::api"));
+        if (layer === "presentation" && !presOk && targetLayer !== "presentation") {
           presentation.add(f + " -> " + t);
         }
-        if (layer === "core" && targetLayer === "core") {
-          const self = path.basename(f).replace(/\.rs$/, "");
-          const other = t.split("::")[2];
-          if (other && other !== self) (coreGraph[self] = coreGraph[self] || new Set()).add(other);
+        // 业务之间只经对方的 api：能力引用**另一个**能力时，目标必须是对方的 ::api。
+        // （能力内部 api ↔ domain ↔ ports 的互相引用不算"业务之间"，不在此列。）
+        if (layer === "capabilities" && targetLayer === "capabilities") {
+          const selfCap = f.split("/")[2];
+          const otherCap = t.split("::")[2];
+          if (otherCap && otherCap !== selfCap && !t.endsWith("::api")) {
+            apiOnly.add(f + " -> " + t);
+          }
+        }
+        // 环的节点：core 模块用短名（保持与既有基线兼容），能力用 capabilities/<名字>。
+        // 两者同处一张图，所以"能力级环"与"模块级环"一起被判定。
+        const selfNode =
+          layer === "core"
+            ? path.basename(f).replace(/\.rs$/, "")
+            : "capabilities/" + f.split("/")[2];
+        const otherNode =
+          targetLayer === "core"
+            ? t.split("::")[2]
+            : targetLayer === "capabilities"
+              ? "capabilities/" + t.split("::")[2]
+              : null;
+        if (otherNode && otherNode !== selfNode) {
+          (coreGraph[selfNode] = coreGraph[selfNode] || new Set()).add(otherNode);
         }
       }
     }
@@ -456,8 +488,9 @@ function structuralAudit() {
         }
       }
     };
-    compare("reverse", [...reverse].sort(), depBaseline.reverse || [], "业务/机制层不得反向依赖 adapters / presentation");
-    compare("presentation", [...presentation].sort(), depBaseline.presentation || [], "presentation 只能经 crate::core::api 驱动");
+    compare("reverse", [...reverse].sort(), depBaseline.reverse || [], "业务层不得反向依赖旧巨石 core / adapters / presentation");
+    compare("presentation", [...presentation].sort(), depBaseline.presentation || [], "presentation 只能经入站能力面（core::api 或各能力的 ::api）驱动");
+    compare("apiOnly", [...apiOnly].sort(), depBaseline.apiOnly || [], "业务之间只能经对方的 ::api");
 
     const actualCycles = sortSccs(coreSccs);
     const baselineCycles = sortSccs(depBaseline.coreCycles || []);

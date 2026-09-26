@@ -16,9 +16,7 @@ pub mod module;
 pub mod packages;
 pub mod patch;
 pub mod ports;
-pub mod prompt;
 pub mod providers;
-pub mod refs;
 pub mod roles;
 pub mod schema;
 pub mod session;
@@ -27,19 +25,20 @@ pub mod workspace;
 
 pub use events::{Pending, SessionEvent};
 // 测试用同步入口的签名要它；生产路径的 Live 构造在 api.rs（那里直接引 events::Live）。
+pub use crate::capabilities::prompt::ports::PromptSource;
 #[cfg(test)]
 pub(crate) use events::Live;
 pub use ports::{
-    ChatGateway, HistoryStore, ModelCatalog, ModuleSource, PackageSource, PromptSource,
-    SettingsStore, SysIo, ToolRunner, Workspace,
+    ChatGateway, HistoryStore, ModelCatalog, ModuleSource, PackageSource, SettingsStore, SysIo,
+    ToolRunner, Workspace,
 };
 
+use crate::capabilities::prompt::api::Prompts;
 use crate::core::collab::CollabSession;
 use crate::core::engine::AfterTurn;
 use crate::core::history::{AgentMeta, HistoryView, SessionMeta};
 use crate::core::module::Module;
 use crate::core::ports::Msg;
-use crate::core::prompt::Prompts;
 use crate::core::providers::{AppSettings, Channel, Settings};
 use crate::core::roles::SystemTools;
 use crate::kernel::log::Log;

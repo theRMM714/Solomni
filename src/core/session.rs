@@ -70,7 +70,7 @@ impl SessionParams {
     /// 身份块：**每次调用现渲染**（模板与文案取当前提示词册，通道形态取当前登记处）。
     pub fn identity(
         &self,
-        prompts: &crate::core::prompt::Prompts,
+        prompts: &crate::capabilities::prompt::api::Prompts,
         mode: crate::core::providers::ToolMode,
     ) -> String {
         let env = crate::core::systool::env_block(prompts, self);
@@ -108,9 +108,9 @@ pub struct AgentSession {
     /// 工具环境：内置文件工具按该 agent 的沙箱放行 + 该 agent 模块声明的外部工具。
     tools: Option<MemberTools>,
     /// @ 引用的说明文案（提示词册）；改写在入历史与转录之前做。
-    refs: crate::core::prompt::RefsPrompts,
+    refs: crate::capabilities::prompt::api::RefsPrompts,
     /// 模型侧运行时文案（提示词册）；本会话要用的那几条。
-    tool_texts: crate::core::prompt::ToolTexts,
+    tool_texts: crate::capabilities::prompt::api::ToolTexts,
     /// 下一条转录行的 id。
     next_line: u64,
     /// 每行 id 对应「该行完成时的历史长度」，回档按它截断历史。
@@ -141,8 +141,8 @@ impl AgentSession {
     }
 
     /// @ 改写要用的真实根：由参数派生，不另存一份。
-    fn roots(&self) -> crate::core::refs::RefRoots {
-        crate::core::refs::RefRoots {
+    fn roots(&self) -> crate::capabilities::prompt::api::RefRoots {
+        crate::capabilities::prompt::api::RefRoots {
             work: self.params.shared.clone(),
             private: Some(self.params.private.clone()),
         }
@@ -157,8 +157,8 @@ impl AgentSession {
         chat: BoxedChat,
         note: Option<String>,
         tools: Option<MemberTools>,
-        refs: crate::core::prompt::RefsPrompts,
-        tool_texts: crate::core::prompt::ToolTexts,
+        refs: crate::capabilities::prompt::api::RefsPrompts,
+        tool_texts: crate::capabilities::prompt::api::ToolTexts,
     ) -> AgentSession {
         AgentSession {
             cur_turn: 0,
@@ -191,8 +191,8 @@ impl AgentSession {
         chat: BoxedChat,
         note: Option<String>,
         tools: Option<MemberTools>,
-        refs: crate::core::prompt::RefsPrompts,
-        tool_texts: crate::core::prompt::ToolTexts,
+        refs: crate::capabilities::prompt::api::RefsPrompts,
+        tool_texts: crate::capabilities::prompt::api::ToolTexts,
     ) -> AgentSession {
         AgentSession {
             cur_turn: 0,
@@ -445,7 +445,12 @@ impl AgentSession {
     ) {
         // 到点先压一次：**同一个工作线程内**跑，不阻塞核心。
         self.maybe_compact(identity, sink);
-        let text = crate::core::refs::rewrite(text, Some(&self.id), &self.roots(), &self.refs);
+        let text = crate::capabilities::prompt::api::rewrite(
+            text,
+            Some(&self.id),
+            &self.roots(),
+            &self.refs,
+        );
         self.dialogue.push(Msg::user(text.clone()));
         // 用户行不属于任何模型回复：给它**自己的行号**当回复号（与重建时的规则一致），
         // 否则它会继承上一轮的回复号，回档时与上一轮误并成一组。
@@ -713,7 +718,7 @@ impl AgentSession {
 /// **行格式只有这一处定义**：单 agent 与讨论席的行都从这里出（回档按同一口径解析回发言）。
 pub(crate) fn build_round_lines(
     id: &str,
-    texts: &crate::core::prompt::ToolTexts,
+    texts: &crate::capabilities::prompt::api::ToolTexts,
     round: &Round,
     stopped: bool,
     next_line: &std::cell::Cell<u64>,

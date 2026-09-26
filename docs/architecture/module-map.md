@@ -19,10 +19,9 @@
 | 文件 | 职责 |
 | --- | --- |
 | `mod.rs` | 核心层入口与 `Core` 门面：会话中心、登记处编排、运行包报告 |
-| `ports.rs` | 出站端口 trait 与跨层数据结构（依赖倒置的边界；core 需要什么，由适配器实现）。**无领域语义的机制端口在 `kernel/`** |
+| `ports.rs` | 出站端口 trait 与跨层数据结构（依赖倒置的边界；core 需要什么，由适配器实现）。**无领域语义的机制端口在 `kernel/`；已搬出的能力端口在 `capabilities/<能力>/ports.rs`** |
 | `api.rs` | **入站契约**：五个按角色的能力接口（`SessionOps` / `RegistryOps` / `HistoryOps` / `DiscoveryOps` / `LogOps`）+ `CoreHandle`（核心自有线程、命令/事件）+ `EventBus`；单 agent 与协作长步骤的生成都在**工作线程**上跑（队列只占"取/交"两步） |
 | `events.rs` | 呈现侧契约：`SessionEvent` 与介入请求的词汇（**事实**的线格式定义在这）；转录行 `LineView` 带 `speaker` / `verb` / `kind`，`render()` 是"字段 → 文本"的唯一拼法 |
-| `prompt.rs` | 提示词渲染：`{{key}}` 占位替换，缺键/缺变量报错。**只有提示词文本**——工具总表与角色表不挂在这里（否则与工具能力成环） |
 | `schema.rs` | 工具参数契约（**声明在文本层**）：解析/校验/两种渲染（模型侧说明、JSON Schema） |
 | `roles.rs` | 系统工具与**角色**表（`systools/tools.yaml` + `roles.yaml`）：按角色组装工具面、按表校验调用；"哪个角色能调哪个工具"只有这一份（见 [tools-and-roles.md](tools-and-roles.md)） |
 | `module.rs` | `module.yaml` 契约、扫描结果 `Roster`、`runtimes`/`tools` 校验、agent system 合成 |
@@ -32,7 +31,6 @@
 | `workspace.rs` | 工作区与沙箱的纯数据定义、寻址与越界判定。路径的**对外书写形式**在 `kernel::path`（纯机制）；**不持工具册**——内置工具的参数契约归工具面（`MemberTools`），沙箱只管路径 |
 | `systool.rs` | 内置工具 `read` / `write` / `edit` / `patch` / `search` 的放行、寻址、**按声明校验参数**、改动前的"读过"证据（`Observations`）、自由格式补丁的原子应用与回执文案 |
 | `patch.rs` | 补丁通道的**纯逻辑**：解析自由格式补丁（Add / Update / SEARCH / REPLACE / End File）与整行应用（逐行匹配、行尾风格保持、失败点名第几处） |
-| `refs.rs` | 用户 `@` 引用改写成真实绝对路径 |
 | `providers.rs` | 供应商/模型登记处内存形态与「模型 → 通道」解析 |
 | `agents.rs` | agent 登记处、代拟名单落地与名字校验 |
 | `history.rs` | 会话元信息与历史视图的内存形态 |
@@ -66,7 +64,16 @@
 | `fake_chat.rs` | 演示/测试通道：`FakeChat`（脚本回放）+ `DemoGateway`（无模型时回落） |
 | `log.rs` | `Log`：`logs/` 下按时间戳一份文件 |
 
-## 四、`presentation/`（呈现）
+## 四、`capabilities/`（业务能力）
+
+| 文件 | 职责 |
+| --- | --- |
+| `prompt/api.rs` | **入站能力面**：其它能力与呈现层只准用这里（`Prompts` / `ToolTexts` / `RefsPrompts` / `render` 的对外名字） |
+| `prompt/ports.rs` | `PromptSource`：提示词册加载（从 `core/ports.rs` 随能力搬出） |
+| `prompt/domain/prompt.rs` | 册子的内存形态与 `{{key}}` 渲染（从 `core/prompt.rs` 搬来，纯逻辑） |
+| `prompt/domain/refs.rs` | 用户 `@` 引用改写成真实绝对路径（从 `core/refs.rs` 搬来，纯逻辑） |
+
+## 五、`presentation/`（呈现）
 
 | 文件 | 职责 |
 | --- | --- |

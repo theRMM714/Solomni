@@ -12,6 +12,7 @@
 ```text
 presentation ──▶ core ◀── adapters
                    │
+                   ├──▶ capabilities ──▶ kernel
                    ▼
                  kernel
 （main = 组合根，装配全部）
@@ -22,6 +23,7 @@ presentation ──▶ core ◀── adapters
 | `core/` | 定义抽象（`ports.rs`、`api.rs`）+ 编排业务（会话、协作状态机、引擎、信封解析） | 不读文件（`std::fs`）、不发网络（ureq）、不碰 stdin/stdout——一切机制下沉适配层 |
 | `adapters/` | 实现 core 的端口；可引用外部库（ureq / serde_yaml / windows-sys / libc） | 只依赖 core，**永不反向**；不做装配决策 |
 | `presentation/` | 渲染事件、收集输入（CLI 与 Web 并列） | 只依赖 **core 的入站能力面**（`core::api`）；**永不接触端口对象，也拿不到 `Core` 本身** |
+| `capabilities/` | **业务能力**：按业务功能垂直切分。每个能力有 `api`（入站契约）/ `ports`（出站端口）/ `domain`（纯逻辑）/ `detail`（细节实现） | **业务之间只经对方的 `api`**；不反向依赖 `core` / `adapters` / `presentation`（迁移期残留记为基线豁免，见 [docs/architecture/refactor-plan.md](docs/architecture/refactor-plan.md) §四） |
 | `kernel/` | **机制型内核**：无领域语义、无领域状态的机制（运行日志端口、生成中作业的取消表、跨业务共享的事实类型） | **不依赖任何人**（不认识 core / adapters / presentation）；不放有领域语义的类型 |
 | `main.rs` | 组合根：`new` 出所有适配器并注入 | 除装配外无业务 |
 
@@ -48,7 +50,7 @@ presentation ──▶ core ◀── adapters
 | `Workspace` | 一次工作的 work 目录、各 agent 沙箱、文件清单与寻址根 | `FsWorkspace` |
 | `SysIo` | 内置文件工具的读写机制（读严格 UTF-8、非法字节如实标注；写一律 UTF-8） | `FsSysIo` |
 | `HistoryStore` | 会话历史：一个会话一个目录（meta + 事件流水） | `FsHistory` |
-| `PromptSource` | 提示词册加载（`prompts/`） | `YamlPrompts` |
+| `PromptSource` | 提示词册加载（`prompts/`）。**已随能力搬出 core**：定义在 `capabilities/prompt/ports.rs` | `YamlPrompts` |
 | `ToolRunner` | 外部工具进程（围栏安装、拉起、stdin 送参、超时杀树、截断） | `ProcTools`（守门进程 = 本程序的 `--fence-run` 模式） |
 | `EnvelopeRepair` | 手写信封不合法时的**无歧义**补救（改了字段含义就是错；拿不准就返回不修） | `UnambiguousRepair`（转义字符串里的裸控制字符 + 补上扫描器算出的收尾括号；断在字符串中间不修，一段回复里起了两段信封不修——补哪一段都是猜；调用方中止的生成一律不修） |
 | `FenceHost` | 围栏授权的释放（删除会话时请求一次撤销） | `confine::FenceHostAdapter`（本平台无该机制时为空操作） |
@@ -83,7 +85,7 @@ presentation ──▶ core ◀── adapters
 ## 五、提示词册（prompts/）
 
 - **所有发给 LLM 的提示词一律写入 `prompts/`**，禁止硬编码进代码；改文案只改册子。
-- 占位符 `{{key}}`；渲染器在 `core/prompt.rs`（纯逻辑）；文件加载经 `PromptSource` 端口在适配层。
+- 占位符 `{{key}}`；渲染器在 `capabilities/prompt/domain/prompt.rs`（纯逻辑）；文件加载经 `PromptSource` 端口在适配层。
 - **缺文件 / 缺键 / 缺变量 = 报错暴露**，禁止静默兜底文案。
 - 文案的注入方式与端口一致：随环境对象传入（沙箱/工具环境/引用改写器），而不是让纯逻辑自己去读文件。
 - 路径类占位符（`{{work_root}}` 等）由 core 在运行时替换成**真实根目录**后才交给 AI——仓库里永远不出现机器路径。

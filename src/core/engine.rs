@@ -5,12 +5,12 @@
 //! 一次回复里的多个原生调用按**声明**调度：声明可并发的只读类并发跑，其余（含写入类）独占并按原序生效；
 //! 结果与工具行一律按原始顺序回填——并发只影响执行，不影响上下文里的顺序。
 
+use crate::capabilities::prompt::api::Prompts;
 use crate::core::envelope::{self, ToolInvoke, Verb};
 use crate::core::events::{LineView, SessionEvent, ToolCallView};
 #[cfg(test)]
 use crate::core::ports::BoxedChat;
 use crate::core::ports::{Chat, Chunk, CompleteOpts, Msg, ToolOutcome, ToolRunner};
-use crate::core::prompt::Prompts;
 use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
@@ -726,7 +726,7 @@ impl Discussion {
         mut tools: Option<&mut MemberTools>,
         turn: Vec<Msg>,
         // 模型侧运行时文案（行尾的"降级/截断"说明按它现渲染）。
-        texts: &crate::core::prompt::ToolTexts,
+        texts: &crate::capabilities::prompt::api::ToolTexts,
         sink: &mut dyn FnMut(SessionEvent),
     ) -> Result<MemberTurn, String> {
         // 工具面**由角色表发放**（动词 + 只读核实工具）：表是唯一真相，代码里不另写一份名单。
@@ -1777,7 +1777,7 @@ pub(crate) fn reply_msgs(
     mode: crate::core::providers::ToolMode,
     raw: &str,
     calls: &[ToolCallView],
-    texts: &crate::core::prompt::ToolTexts,
+    texts: &crate::capabilities::prompt::api::ToolTexts,
 ) -> Vec<Msg> {
     let protocol = mode == crate::core::providers::ToolMode::Native
         && !calls.is_empty()

@@ -4,7 +4,7 @@
 //! 终止符**留在原文里不消费**，所以改写只替换「前缀 + 路径」这一段。
 //! 改写结果 = 真实根目录 + 相对路径（用 Path 组件拼，输出统一 / 分隔：JSON 里反斜杠是转义符）；绝不泄漏别人的沙箱路径。
 
-use crate::core::prompt::RefsPrompts;
+use crate::capabilities::prompt::domain::prompt::RefsPrompts;
 use std::path::{Path, PathBuf};
 
 /// @ 改写需要的真实根：work = 本工作共享区；private = 发言席自己的私有沙箱（协作时 None）。
@@ -88,7 +88,7 @@ fn sandbox_note(agent: &str, rel: &str, speaker: Option<&str>, texts: &RefsPromp
     } else {
         &texts.foreign_sandbox
     };
-    crate::core::prompt::render(
+    crate::capabilities::prompt::domain::prompt::render(
         template,
         &[("agent", agent.to_string()), ("path", rel.to_string())],
     )

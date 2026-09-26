@@ -14,11 +14,12 @@ use crate::adapters::model_catalog::HttpModelCatalog;
 use crate::adapters::sys_io::FsSysIo;
 use crate::adapters::yaml_prompts::YamlPrompts;
 use crate::adapters::yaml_settings::YamlSettingsStore;
+use crate::capabilities::prompt::ports::PromptSource;
 use crate::core::exec::ExecSpec;
 use crate::core::history::{AgentMeta, SessionMeta};
 use crate::core::ports::{
     ChatGateway, Chunk, CompleteOpts, HistoryStore, ModelCatalog, ModuleSource, Msg, PackageSource,
-    ProbeOutcome, PromptSource, SettingsStore, SysIo, Workspace,
+    ProbeOutcome, SettingsStore, SysIo, Workspace,
 };
 use crate::core::providers::{Channel, Provider, Settings};
 use crate::kernel::log::{Log, NoopLog};

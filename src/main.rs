@@ -3,6 +3,7 @@
 //! 依赖方向：main → adapters / core / presentation；core 不知道后两者存在。
 
 mod adapters;
+mod capabilities;
 mod core;
 mod kernel;
 mod presentation;
@@ -102,7 +103,7 @@ fn main() {
     );
     let prompts = adapters::YamlPrompts::new(root.join("prompts"), root.join("systools"));
     // 册子只读一次：core 与适配层（工具回执里的那些收尾标记）共用同一份。
-    let book = match core::ports::PromptSource::load(&prompts) {
+    let book = match capabilities::prompt::ports::PromptSource::load(&prompts) {
         Ok(b) => b,
         Err(e) => {
             eprintln!("[装配失败] {}", e);
@@ -423,10 +424,10 @@ fn find_exe(name: &str) -> Option<String> {
 }
 
 /// 装配期已经读好的册子（同一份事实不再读第二遍）。
-struct LoadedPrompts(core::prompt::Prompts);
+struct LoadedPrompts(capabilities::prompt::api::Prompts);
 
-impl core::ports::PromptSource for LoadedPrompts {
-    fn load(&self) -> Result<core::prompt::Prompts, String> {
+impl capabilities::prompt::ports::PromptSource for LoadedPrompts {
+    fn load(&self) -> Result<capabilities::prompt::api::Prompts, String> {
         Ok(self.0.clone())
     }
 }

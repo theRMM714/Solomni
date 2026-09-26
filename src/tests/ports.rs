@@ -9,12 +9,13 @@ use super::doubles::{
     InMemorySysIo, InMemoryWorkspace, NoFenceHost, RecordingFence, ScriptGateway, SharedScript,
     TestPrompts, VecSource,
 };
+use crate::capabilities::prompt::ports::PromptSource;
 use crate::core::exec::ExecSpec;
 use crate::core::fence::FenceSpec;
 use crate::core::history::{AgentMeta, SessionMeta};
 use crate::core::ports::{
     Chat, ChatGateway, CompleteOpts, FenceHost, HistoryStore, ModelCatalog, ModuleSource, Msg,
-    PackageSource, PromptSource, SettingsStore, SysIo, ToolRunner, Workspace,
+    PackageSource, SettingsStore, SysIo, ToolRunner, Workspace,
 };
 use crate::core::providers::{Provider, Settings};
 use crate::kernel::log::{Log, NoopLog};

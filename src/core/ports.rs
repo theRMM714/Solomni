@@ -9,7 +9,6 @@
 
 use crate::core::history::{HistoryView, SessionMeta};
 use crate::core::module::Roster;
-use crate::core::prompt::Prompts;
 use crate::core::providers::{Channel, Provider, Settings};
 use std::path::Path;
 
@@ -339,11 +338,6 @@ pub trait HistoryStore {
     fn list(&self) -> Result<Vec<HistoryView>, String>;
     fn load(&self, name: &str) -> Result<(SessionMeta, Vec<serde_json::Value>), String>;
     fn delete(&self, name: &str) -> Result<bool, String>;
-}
-
-/// 提示词册加载端口。
-pub trait PromptSource {
-    fn load(&self) -> Result<Prompts, String>;
 }
 
 /// 一次工具执行结果：ok = 退出码成功；output 已截断（截断规则在适配层）。

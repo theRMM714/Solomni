@@ -8,16 +8,16 @@
 
 use super::core::SilentRunner;
 use crate::adapters::fake_chat::FakeChat;
+use crate::capabilities::prompt::api::Prompts;
+use crate::capabilities::prompt::ports::PromptSource;
 use crate::core::events::Live;
 use crate::core::history::{HistoryView, SessionMeta};
 use crate::core::module::{Module, ModuleManifest};
 use crate::core::packages::{Library, PackageManifest};
 use crate::core::ports::{
     BoxedChat, Chat, ChatGateway, Chunk, CompleteOpts, Completion, FileRead, HistoryStore,
-    ModelCatalog, ModuleSource, Msg, PackageSource, PromptSource, SettingsStore, SysIo, ToolRunner,
-    Workspace,
+    ModelCatalog, ModuleSource, Msg, PackageSource, SettingsStore, SysIo, ToolRunner, Workspace,
 };
-use crate::core::prompt::Prompts;
 use crate::core::providers::{Channel, ModelEntry, Provider, Settings};
 use crate::core::{AgentInstance, Core, SessionEvent, WorkMode, WorkSpec};
 use crate::kernel::types::Tier;

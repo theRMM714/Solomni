@@ -5,6 +5,7 @@
 //! 名单的权威来源是会话 meta.agents（代拟确认后由 Core 写回 meta）；转录只用来恢复讨论进度。
 //! 依赖全部为端口与核心数据；无 IO，无具体适配器。
 
+use crate::capabilities::prompt::api::Prompts;
 use crate::core::agents::{self, RosterPick};
 use crate::core::engine::{Discussion, Execution, Member, MemberTools, TurnOut, MAX_ROUNDS};
 use crate::core::events::{CheckView, LineView, Pending, SessionEvent};
@@ -14,7 +15,6 @@ use crate::core::module::{self, Module};
 use crate::core::ports::{
     Chat, ChatGateway, CompleteOpts, ModuleSource, Msg, PackageSource, SysIo, ToolRunner,
 };
-use crate::core::prompt::Prompts;
 use crate::core::providers::Settings;
 use crate::core::workspace::Sandboxes;
 use std::sync::Arc;
@@ -570,11 +570,12 @@ impl CollabSession {
     /// 提交需求（总是第一步）。需求入转录（用户看到的与进上下文的一致）。
     /// 协作里用户不属任何 agent 的沙箱：@ 引用按 speaker = None 改写（共读同一段文字）。
     pub fn set_task(&mut self, task: &str, sink: &mut dyn FnMut(SessionEvent)) {
-        let roots = crate::core::refs::RefRoots {
+        let roots = crate::capabilities::prompt::api::RefRoots {
             work: self.sandboxes.shared.clone(),
             private: None,
         };
-        let task = crate::core::refs::rewrite(task, None, &roots, &self.prompts.core.refs);
+        let task =
+            crate::capabilities::prompt::api::rewrite(task, None, &roots, &self.prompts.core.refs);
         if task.trim().is_empty() {
             sink(SessionEvent::Notice("[取消] 需求为空".into()));
             sink(SessionEvent::Ended);
@@ -866,11 +867,16 @@ impl CollabSession {
         if matches!(self.pending, Some(Pending::Ask { .. })) {
             self.pending = None;
             self.gate_advice.clear();
-            let roots = crate::core::refs::RefRoots {
+            let roots = crate::capabilities::prompt::api::RefRoots {
                 work: self.sandboxes.shared.clone(),
                 private: None,
             };
-            let text = crate::core::refs::rewrite(text, None, &roots, &self.prompts.core.refs);
+            let text = crate::capabilities::prompt::api::rewrite(
+                text,
+                None,
+                &roots,
+                &self.prompts.core.refs,
+            );
             if let Some(disc) = self.disc.as_mut() {
                 disc.pending_user_answers.push(text);
             }
@@ -968,11 +974,12 @@ impl CollabSession {
         if text.is_empty() {
             return;
         }
-        let roots = crate::core::refs::RefRoots {
+        let roots = crate::capabilities::prompt::api::RefRoots {
             work: self.sandboxes.shared.clone(),
             private: None,
         };
-        let text = crate::core::refs::rewrite(text, None, &roots, &self.prompts.core.refs);
+        let text =
+            crate::capabilities::prompt::api::rewrite(text, None, &roots, &self.prompts.core.refs);
         let line = self.view(LineView::user("", text));
         sink(SessionEvent::Transcript(vec![line]));
     }

@@ -4,8 +4,8 @@
 //! 存在的理由：读盘落盘不经过任何外部进程，编码问题不进本程序——模型自己看内容自己决定。
 //! 路径一律是真实绝对路径（根目录经提示词册如实告知）；模块声明的外部工具与内置工具用同一套路径。
 
+use crate::capabilities::prompt::api::{Prompts, ToolTexts};
 use crate::core::ports::{SysIo, ToolOutcome};
-use crate::core::prompt::{Prompts, ToolTexts};
 use crate::core::schema::{ArgFault, ToolSchema};
 use crate::core::workspace::{Place, Sandbox};
 use std::collections::BTreeMap;
