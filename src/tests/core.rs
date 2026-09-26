@@ -19,10 +19,10 @@ use crate::capabilities::workspace::api::Module;
 use crate::capabilities::workspace::api::{self as exec, Diagnosis, ExecSpec};
 use crate::capabilities::workspace::api::{Library, PackageManifest};
 use crate::capabilities::workspace::ports::{ModuleSource, Workspace};
-use crate::core::{
-    AgentInstance, CollabStep, ConfigAgent, Core, Pending, SessionEdit, SessionEvent, WorkMode,
-    WorkSpec,
+use crate::core::api::{
+    AgentInstance, CollabStep, ConfigAgent, Pending, SessionEdit, SessionEvent, WorkMode, WorkSpec,
 };
+use crate::core::Core;
 use crate::kernel::types::Tier;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;

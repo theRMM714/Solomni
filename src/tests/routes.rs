@@ -10,7 +10,7 @@ use crate::capabilities::workspace::api::Roster;
 use crate::core::api::{
     Advance, DiscoveryOps, EventBus, HistoryOps, Ops, Output, RegistryOps, SessionOps,
 };
-use crate::core::{
+use crate::core::api::{
     AgentSuggestion, ConfigAgent, FilesAgentView, FilesRootsView, FilesView, Pending,
     RuntimeReport, SessionConfig, SessionEdit, SessionView, WorkMode, WorkOpened, WorkSpec,
 };
@@ -112,7 +112,7 @@ impl SessionOps for FakeOps {
             WorkOpened {
                 sid: "w1".to_string(),
                 agents: vec!["甲".to_string()],
-                facts: vec![crate::core::SessionEvent::Notice("开好了".to_string())],
+                facts: vec![crate::core::api::SessionEvent::Notice("开好了".to_string())],
             },
             7,
         ))
@@ -129,7 +129,7 @@ impl SessionOps for FakeOps {
     fn collab_step(
         &self,
         _sid: &str,
-        _step: crate::core::CollabStep,
+        _step: crate::core::api::CollabStep,
         _text: &str,
     ) -> Result<Advance, String> {
         self.guard()?;

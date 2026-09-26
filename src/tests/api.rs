@@ -5,7 +5,7 @@ use super::doubles::{collab_work, module_of};
 use super::{gated_ops, ops_with, single_work, slow_ops};
 use crate::capabilities::workspace::api::Module;
 use crate::core::api::{CoreHandle, Ops, Output};
-use crate::core::{SessionEvent, WorkMode};
+use crate::core::api::{SessionEvent, WorkMode};
 use crate::kernel::types::Tier;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -297,7 +297,7 @@ fn reads_are_not_queued_behind_a_collab_discussion() {
         let sessions = Arc::clone(&ops.sessions);
         let sid = sid.clone();
         std::thread::spawn(move || {
-            sessions.collab_step(&sid, crate::core::CollabStep::Begin, "yes")
+            sessions.collab_step(&sid, crate::core::api::CollabStep::Begin, "yes")
         })
     };
     // 等讨论真的开始（通道已被调用并卡在那里）。
@@ -350,7 +350,7 @@ fn stopping_a_collab_discussion_is_prompt_and_keeps_the_session() {
         let sessions = Arc::clone(&ops.sessions);
         let sid = sid.clone();
         std::thread::spawn(move || {
-            sessions.collab_step(&sid, crate::core::CollabStep::Begin, "yes")
+            sessions.collab_step(&sid, crate::core::api::CollabStep::Begin, "yes")
         })
     };
     let deadline = Instant::now() + Duration::from_secs(5);
@@ -447,7 +447,7 @@ fn collab_transcript_lands_on_disk_while_the_discussion_runs() {
         let sessions = Arc::clone(&ops.sessions);
         let sid = sid.clone();
         std::thread::spawn(move || {
-            sessions.collab_step(&sid, crate::core::CollabStep::Begin, "yes")
+            sessions.collab_step(&sid, crate::core::api::CollabStep::Begin, "yes")
         })
     };
     // 等第二个成员卡在调用里：此时第一个成员的发言已经定稿。
@@ -485,7 +485,7 @@ fn collab_discussion_emits_each_member_line_as_it_speaks() {
         let sessions = Arc::clone(&ops.sessions);
         let sid = sid.clone();
         std::thread::spawn(move || {
-            sessions.collab_step(&sid, crate::core::CollabStep::Begin, "yes")
+            sessions.collab_step(&sid, crate::core::api::CollabStep::Begin, "yes")
         })
     };
     // 等第二个成员卡住：说明第一个成员已经说完，但**整轮还没结束**。

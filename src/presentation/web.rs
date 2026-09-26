@@ -5,8 +5,8 @@
 //! 安全底线：只绑 127.0.0.1；密钥永不进任何响应（能力面只给 id）。
 
 use crate::capabilities::registry::api::AppSettings;
+use crate::core::api::{CollabStep, SessionEdit, SessionEvent, WorkMode, WorkSpec};
 use crate::core::api::{Ops, Output};
-use crate::core::{CollabStep, SessionEdit, SessionEvent, WorkMode, WorkSpec};
 use crate::presentation::{intent, routes};
 use serde_json::json;
 use std::sync::Arc;
@@ -246,12 +246,12 @@ pub(crate) fn route(
                 Ok(m) => m,
                 Err(e) => return complaint(400, e),
             };
-            let agents: Vec<crate::core::AgentInstance> = req
+            let agents: Vec<crate::core::api::AgentInstance> = req
                 .get("agents")
                 .and_then(|t| t.as_array())
                 .map(|arr| {
                     arr.iter()
-                        .map(|x| crate::core::AgentInstance {
+                        .map(|x| crate::core::api::AgentInstance {
                             name: x
                                 .get("name")
                                 .and_then(|v| v.as_str())

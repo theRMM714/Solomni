@@ -348,7 +348,7 @@ tools 自持一个就等于绕过状态所有权——**直接写别人的文件
 | `capabilities/session/domain/session.rs` | `AgentSession::rewind`、`keep_whole_replies`，及 `marks` / `line_reply` / `next_line` 与簿记 |
 | `capabilities/collab/domain/collab_state.rs` | `tool_runs()`——算"删掉了几次工具执行"（经 `collab::api`） |
 | `capabilities/session/domain/history.rs` | append-only 的 `rewind` 记录协议 |
-| `core/mod.rs`（**门面，保留**） | `rewind` 编排、`rewind_children`（撤子会话）、`rebuild_session`（整段重建）——要装配端口、走历史流水、驱动多个会话，是组合根职责 |
+| `core/mod.rs`（**应用服务，保留**） | `rewind` 编排、`rewind_children`（撤子会话）、`rebuild_session`（整段重建）——要装配端口、走历史流水、驱动多个会话。**注意**：装配（造适配器）在 `main.rs`，这里只收注入的端口 |
 
 **越界耦合已消**：`AgentSession::rewind` 里 `t.observations.clear()` 伸手改工具账本——`MemberTools` 已在批次 12a 归 `session`，所以这不再是跨能力越界。
 
@@ -443,7 +443,7 @@ kernel       ──▶ （无）
 | **12** | **session 能力落位**：`capabilities/session/`（`session` + `history` + `events`）+ `HistoryStore`。**12a** 循环反转切掉 `engine ⇄ session`；**12b** 提取能力 | 11 | **已完成**（**反向边基线清空**——没有任何能力再依赖 `core`；环 7 → **5**，且 5 个节点全是能力、`core` 完全脱环；`core/ports.rs` 消失） |
 | **13** | **rewind 归位**：纯行 / 事件算术进 `capabilities/session/domain/rewind.rs`；`Core` 保留编排（`rewind` / `rewind_children` / `rebuild_session`） | 12 | **已完成**（`marks` 归属方案 A 照旧；无新增依赖边） |
 | **14** | **collab 能力落位**：`capabilities/collab/`（`collab` + `collab_state` + `engine`）。**执行顺序调整**：先做 14 再做 13——`rewind` 的回档重建要同时碰 `session` 与 `collab` 两侧，两边就位后才切得干净（已获用户同意） | 12 | **已完成**（环不变——`capabilities/collab` **不在环里**：没有任何它依赖的能力反过来依赖它；`core/` 只剩 `api.rs` + `mod.rs`） |
-| **15** | **断环（已完成）**：`ToolMode`/回放结论与 `Channel` 归 `llm`、`env_block` 归 `session`、「清单→工具面」归 `tools` → **能力图零环**；**presentation 收口 + 前端分区**（未开始）：只 `use` 各业务 `api`；`app.js` 分区 | 14 | 断环 **已完成**；收口未开始 |
+| **15** | **断环（已完成）** → 能力图零环；**收口第 1 步（已完成）**：`Core` 的入站词汇从 `core/mod.rs` 移到 `core/api.rs`，呈现层只经 `core::api` → **依赖方向基线全空**；**后续（未开始）**：`intent.rs` 规则下沉（registry/session/core）、`presentation/` 拆成 `web/` + `cli/`、`main.rs` 拆四件事 | 14 | 断环 ✓、收口第 1 步 ✓；其余未开始 |
 
 **豁免清零判据**：`tests/dependency-baseline.json` 的**三个数组全部清空**（`reverse` / `presentation` / `coreCycles`），
 且 `Core` 这个类型不再存在。门禁对**新增**与**过期**都报失败，所以销账不靠自觉——
@@ -473,7 +473,7 @@ kernel       ──▶ （无）
 
 ## 五、验收标准
 
-1. `core/` 消失，替换为 `capabilities/` + `kernel/`；每个能力有 `api.rs` / `ports.rs` / `domain/` / `detail/`。
+1. `core/` **只留应用服务与入站契约**（`api.rs` + `mod.rs`）——业务全在 `capabilities/`，机制在 `kernel/` 与 `adapters/`；每个能力有 `api.rs` / `ports.rs` / `domain/` / `detail/`。
 2. 依赖图为**无环**，由 T0 门禁机器判定，**零豁免**。
 3. `Core` 这个类型不存在；任一能力文件 ≤ 800 行，`api.rs` ≤ 20 个方法。
 4. `presentation` 只 `use` 各业务的 `api`：**零** `use ...::ports::`、零 `use ...::domain::`。

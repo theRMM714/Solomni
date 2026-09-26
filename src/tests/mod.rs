@@ -43,11 +43,11 @@ pub(crate) fn ops_with(
 }
 
 /// 一次单 agent 工作的规格（契约测试共用）。
-pub(crate) fn single_work(name: &str, modules: &[&str]) -> crate::core::WorkSpec {
-    crate::core::WorkSpec {
+pub(crate) fn single_work(name: &str, modules: &[&str]) -> crate::core::api::WorkSpec {
+    crate::core::api::WorkSpec {
         name: name.to_string(),
-        mode: crate::core::WorkMode::Single,
-        agents: vec![crate::core::AgentInstance {
+        mode: crate::core::api::WorkMode::Single,
+        agents: vec![crate::core::api::AgentInstance {
             name: modules[0].to_string(),
             transient: true,
             modules: modules.iter().map(|s| s.to_string()).collect(),

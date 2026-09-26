@@ -13,17 +13,16 @@
 
 use crate::capabilities::registry::api::AgentView;
 use crate::capabilities::registry::api::{AppSettings, ModelView, ProviderView};
+use crate::capabilities::session::api::Live;
 use crate::capabilities::session::api::{HistoryView, SessionMeta};
-use crate::capabilities::session::api::{Live, SessionEvent};
+pub use crate::capabilities::session::api::{Pending, SessionEvent};
 use crate::capabilities::workspace::api::Roster;
 use crate::core::Prepared;
-use crate::core::{
-    AgentMeta, AgentSuggestion, CollabStep, Core, FilesView, Pending, RuntimeReport, SessionConfig,
-    SessionEdit, SessionView, WorkMode, WorkOpened, WorkSpec,
-};
+use crate::core::{AgentMeta, Core};
 use crate::kernel::jobs::JobRegistry;
 use crate::kernel::types::SessionId;
 pub use crate::kernel::types::Tier;
+use std::collections::BTreeMap;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
 // 入站契约返回的词汇：能力接口的返回类型在这里有一份**正式名字**。
@@ -1289,4 +1288,199 @@ impl Ops {
             log: Arc::new(h.clone()),
         }
     }
+}
+
+// ---------- 入站词汇（呈现层与核心共用的形状） ----------
+//
+// 定义在**能力面**：呈现层只认这里，不再经 `core::` 根转一手。
+// 批次 15 收口从 `core/mod.rs` 搬来（见 docs/architecture/refactor-plan.md §4.2）。
+/// 协作推进阶段：由前端按 pending 决定。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CollabStep {
+    SetTask,
+    ConfirmSlate,
+    Begin,
+    /// **用户对裁决的自由文本回应**：核心 AI 判定意图是否明确，明确了才开工/放行。
+    Decide,
+}
+
+/// 工作形态：单 agent（模块数不限）/ 协作（多 agent 分权协商）。
+/// 形态只用于校验与界面标签：会话实现只有「单 agent」与「协作」两种。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorkMode {
+    Single,
+    Collab,
+}
+
+/// 一次工作里的一个 agent 实例（用户选定，或核心代拟的临时组合）。
+/// agent = 一个 AI 实例 + N 份模块能力 + 一个模型 + 一个沙箱。
+#[derive(Debug, Clone)]
+pub struct AgentInstance {
+    pub name: String,
+    /// 是否临时 agent（不来自 .home/agents.yaml，只随本次工作落档）。
+    pub transient: bool,
+    pub modules: Vec<String>,
+    /// 该 agent 的模型（模型 id）；None = 核心默认。
+    pub model: Option<String>,
+}
+
+/// 创建工作的全部用户决定（形态 + 参与的 agent；模型按 agent 指定）。
+#[derive(Debug, Clone)]
+pub struct WorkSpec {
+    pub name: String,
+    pub mode: WorkMode,
+    pub agents: Vec<AgentInstance>,
+    /// 协作：本次需求（必填）。
+    pub task: Option<String>,
+    /// 保留：委托核心代拟名单（协作且未给 agent 时）。
+    pub delegate: bool,
+}
+
+/// 创建工作后的结果：最终实例名（重名已加尾号）、名单，以及**开场事实**。
+/// 事实由 api 层发布进事件台（核心不持有事件台）；**不上回包**——
+/// 回包只给事件台头部序号，谁要看谁按 `since` 订阅。
+#[derive(Debug, Clone)]
+pub struct WorkOpened {
+    pub sid: SessionId,
+    pub agents: Vec<String>,
+    pub facts: Vec<SessionEvent>,
+}
+
+/// 核心推荐的 agent 草案（名字 + 模块 + 模型 + 理由；用户可改，核心不代选）。
+/// reuse = 直接复用登记处已存的 agent（模块与模型都取它自己的，核心不代拟模型）。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct AgentSuggestion {
+    pub name: String,
+    pub modules: Vec<String>,
+    pub model: String,
+    pub why: String,
+    pub reuse: bool,
+}
+
+/// 运行能力报告（呈现与日志用）：声明了什么、包库里有什么、缺什么、虚拟机档的诊断。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct RuntimeReport {
+    pub tier: String,
+    /// 模块 id → 它声明的运行能力（升序）。
+    pub declared: BTreeMap<String, Vec<String>>,
+    /// 能力名 → 包库里的可用版本（升序）。
+    pub available: BTreeMap<String, Vec<String>>,
+    /// 模块 id → 包库里没有的能力（档位无关的事实）。
+    pub missing: BTreeMap<String, Vec<String>>,
+    /// 虚拟机档下不能成立的诊断；本机档为空。
+    pub diagnoses: Vec<crate::capabilities::workspace::api::Diagnosis>,
+    /// 本机能不能承载**当前档位**（虚拟机档的前置条件；本机档恒为可）。
+    /// 界面据此决定虚拟机档能不能选，并与「开始」/编辑的校验同源（`crate::capabilities::workspace::api::tier_readiness`）。
+    pub tier_ready: bool,
+    /// 承载不了时缺什么（空 = 齐了）。
+    pub tier_missing: Vec<String>,
+    /// 被拒收的模块（原因如实）。
+    pub rejected: Vec<String>,
+    /// 被拒收的运行包（原因如实）。
+    pub rejected_packages: Vec<String>,
+}
+
+/// 配置界面里的一个 agent（名字冻结时仍要显示）。
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ConfigAgent {
+    pub name: String,
+    #[serde(default)]
+    pub modules: Vec<String>,
+    #[serde(default)]
+    pub model: String,
+}
+
+/// 会话配置视图（配置界面用）：身份与冻结标记 + 可改项 + 运行能力事实。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct SessionConfig {
+    pub sid: String,
+    pub mode: String,
+    /// 会话已经开过（流水里有内容）= agent 名单与形态冻结。
+    pub started: bool,
+    pub agents: Vec<ConfigAgent>,
+    pub tier: String,
+    pub base: Option<String>,
+    pub net: bool,
+    pub pins: BTreeMap<String, String>,
+    /// 本机能不能承载**当前档位**（虚拟机档的前置条件）：界面据此决定虚拟机档能不能选。
+    pub tier_ready: bool,
+    /// 承载不了时缺什么（空 = 齐了）。
+    pub tier_missing: Vec<String>,
+    /// **虚拟机档**能不能选（与当前档位无关）：为假时界面禁用虚拟机档，编辑与「开始」也会拒绝。
+    pub vm_available: bool,
+    /// 虚拟机档为什么不能选（`vm_available` 为真时为空）。
+    pub vm_unavailable_reason: String,
+    /// 虚拟机档的**逐项前置**（缺哪几项、每项怎么补）：界面照抄，不自己编话。
+    pub vm_requirements: Vec<crate::capabilities::workspace::api::VmRequirement>,
+    /// 运行能力报告（模块声明 / 包库可用 / 缺包 / 虚拟机档诊断 / 拒收原因）。
+    pub runtime: RuntimeReport,
+    /// 依赖文件夹（把运行包放进这里；真实路径，给用户看）。
+    pub runtimes_dir: String,
+}
+
+/// 编辑提交（配置界面用）：改模块、模型、档位、定版与网络。
+/// 名字与形态不在这里——会话一旦开过（流水有内容）它们就冻结了。
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct SessionEdit {
+    pub agents: Vec<ConfigAgent>,
+    pub tier: String,
+    #[serde(default)]
+    pub base: Option<String>,
+    #[serde(default)]
+    pub pins: BTreeMap<String, String>,
+    #[serde(default)]
+    pub net: bool,
+}
+
+/// 会话列表视图。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct SessionView {
+    pub sid: String,
+    pub mode: String,
+    pub done: bool,
+    /// 这条会话记的执行档位（`host` / `vm`）：打开时据此提示"环境已变"。
+    pub tier: String,
+    /// 记的档位**现在还能不能承载**（本机档恒真）。为假时前端打开前给提示，但不拦打开。
+    pub tier_ready: bool,
+    /// 承载不了时缺什么（空 = 齐了）。
+    pub tier_missing: Vec<String>,
+    /// **这条会话此刻在跑吗**（生成中）：界面据此把「发送/继续」换成「停止」并显示占位动画。
+    /// 它是**对账副本**：运行态的唯一真相是推的 `SessionEvent::Working`（短暂、不落盘）；
+    /// 这份快照供界面在"本页对这条会话还没有实时知识"时对齐——刚刷新页面、事件台裁掉一段后
+    /// 重连、别人建的会话（见 docs/architecture/session-model.md 二之二）。
+    pub running: bool,
+    /// **这条工作有「本次需求」吗**：前端据此决定要不要渲染「改需求」按钮——
+    /// 没有就**根本不渲染**（不是灰着）。这是领域事实（有没有需求行），不是"模式"。
+    pub can_update_task: bool,
+    /// 当前等用户裁决的事（None = 没有）：**快照形态**，与推的 `SessionEvent::Decision` 同源。
+    /// 刷新页面时界面照样画得出那张卡；推的那条只是增量。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pending: Option<serde_json::Value>,
+}
+
+/// 会话文件清单视图（前端 @ 菜单与「长路径缩写」用）：相对清单 + 真实根。
+/// 根一律是 slash() 书写形式（/ 分隔、无扩展长度前缀）；拿不到根就给空串（前端原样显示，不猜）。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct FilesView {
+    pub work: Vec<String>,
+    pub agents: Vec<FilesAgentView>,
+    pub roots: FilesRootsView,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct FilesAgentView {
+    pub name: String,
+    pub files: Vec<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct FilesRootsView {
+    pub work: String,
+    pub agents: Vec<FilesAgentRootView>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct FilesAgentRootView {
+    pub name: String,
+    pub root: String,
 }

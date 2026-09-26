@@ -3,8 +3,8 @@
 
 use super::doubles::module_of;
 use super::{ops_with, single_work, slow_ops};
+use crate::core::api::AgentInstance;
 use crate::core::api::Output;
-use crate::core::AgentInstance;
 use crate::presentation::intent;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -157,7 +157,7 @@ fn editing_is_refused_while_a_session_is_generating() {
 #[test]
 fn edit_session_reports_core_errors_verbatim() {
     let (_h, ops) = ops_with(vec![module_of("a")], Vec::new());
-    let edit = serde_json::from_value::<crate::core::SessionEdit>(serde_json::json!({
+    let edit = serde_json::from_value::<crate::core::api::SessionEdit>(serde_json::json!({
         "agents": [], "tier": "host", "base": null, "pins": {}, "net": false
     }))
     .expect("编辑体");

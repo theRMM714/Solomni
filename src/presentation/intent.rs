@@ -8,8 +8,8 @@
 //! 这一层**只编排**：不做业务决策（那是 core 的），也不碰 HTTP/argv（那是各呈现自己的传输）。
 
 use crate::capabilities::registry::api::AgentView;
+use crate::core::api::{AgentInstance, CollabStep, SessionEdit, WorkOpened, WorkSpec};
 use crate::core::api::{Ops, Output};
-use crate::core::{AgentInstance, CollabStep, SessionEdit, WorkOpened, WorkSpec};
 
 /// 登记处为空时的引导文案（CLI 与 Web 同源）。
 pub const NO_AGENTS: &str = "登记处还没有 agent：请先到 Web 界面「设置 → agent 管理」建一个";
@@ -117,7 +117,7 @@ pub fn unique_work_name(ops: &Ops, base: &str, fallback: &str) -> Result<String,
 pub fn open_work(
     ops: &Ops,
     name: String,
-    mode: crate::core::WorkMode,
+    mode: crate::core::api::WorkMode,
     agents: Vec<AgentInstance>,
     task: Option<String>,
     delegate: bool,
