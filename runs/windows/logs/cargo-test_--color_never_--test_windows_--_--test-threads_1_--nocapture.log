@@ -1,0 +1,16 @@
+   Compiling solomni v0.1.0 (D:\a\Solomni\Solomni)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.73s
+     Running tests\windows\main.rs (target\debug\deps\windows-0b4c99e0aea876ac.exe)
+
+running 7 tests
+test probes::container::container_cannot_read_outside_its_roots ... ok
+test probes::container::container_cannot_write_outside_its_roots ... ok
+test probes::container::container_has_no_network ... ok
+test probes::container::container_starts_and_passes_stdio_through ... ok
+test probes::container::env_unavailable_degrades_and_still_runs_the_command ... ok
+test probes::container::verify_separates_env_unavailable_from_broken_container_steps ... ok
+test probes::https::https_reaches_a_public_endpoint_through_the_product_chain ... [HTTPS] ok 200 native-tls https://example.com/
+ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.38s
+
