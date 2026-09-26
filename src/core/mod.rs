@@ -195,7 +195,49 @@ pub struct SessionEdit {
     pub net: bool,
 }
 
-/// 事件落盘（短暂事件不落盘）：失败如实告知，返回要外送的警告（None = 一切正常）。
+/// **这个会话要不要留档**：由**会话种类**定，不由调用点定。
+/// - `Keep`：定稿事件落盘（单 agent 会话与协作会话都要回放——前者是模型上下文的一部分，
+///   后者是派生状态的来源）；
+/// - `Drop`：只推不留（**系统会话**：一次性动作，如"让核心推荐 agent"，重启后本来就该是空的）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PersistPolicy {
+    Keep,
+    Drop,
+}
+
+impl PersistPolicy {
+    /// 一条事件该不该留：`Drop` 一条都不留；`Keep` 也不留**短暂事件**
+    /// （流式增量 / 运行态 / 实时工具卡 / 裁决卡——它们只给在场的前端看）。
+    pub(crate) fn keeps(&self, ev: &SessionEvent) -> bool {
+        if *self == PersistPolicy::Drop {
+            return false;
+        }
+        !matches!(
+            ev,
+            SessionEvent::Delta { .. }
+                | SessionEvent::Working { .. }
+                | SessionEvent::ToolCall(_)
+                | SessionEvent::Decision { .. }
+        )
+    }
+}
+
+/// **系统会话的 sid 约定**：以 `#` 开头的是"没有地方落盘"的一次性动作（只推不留）。
+/// 见 docs/architecture/session-model.md 二（会话种类 × 推 / 落）。
+pub(crate) fn is_system_session(sid: &str) -> bool {
+    sid.starts_with('#')
+}
+
+/// 这个会话的落盘策略（**判定只有这一处**：会话种类 → 策略）。
+fn persist_policy_for(sid: &str) -> PersistPolicy {
+    if is_system_session(sid) {
+        PersistPolicy::Drop
+    } else {
+        PersistPolicy::Keep
+    }
+}
+
+/// 事件落盘（按该会话的策略；短暂事件不落盘）：失败如实告知，返回要外送的警告（None = 一切正常）。
 ///
 /// 为什么抽成自由函数：工作线程按**一次模型调用**的粒度增量落盘，必须与核心走同一段逻辑——
 /// 两条路径各写一份的话，"什么算定稿、什么不落盘"迟早会不一致。
@@ -205,18 +247,11 @@ pub(crate) fn persist_events(
     sid: &str,
     events: &[SessionEvent],
 ) -> Option<String> {
-    // 流式增量与工具调用实时事件都是短暂事件，不落盘；历史只记定稿后的行。
+    // 留不留由**这个会话的策略**说了算（会话种类 → 策略，见 persist_policy_for）。
+    let policy = persist_policy_for(sid);
     let jsons: Vec<serde_json::Value> = events
         .iter()
-        .filter(|e| {
-            !matches!(
-                e,
-                SessionEvent::Delta { .. }
-                    | SessionEvent::Working { .. }
-                    | SessionEvent::ToolCall(_)
-                    | SessionEvent::Decision { .. }
-            )
-        })
+        .filter(|e| policy.keeps(e))
         .map(|e| e.to_json())
         .collect();
     if jsons.is_empty() {

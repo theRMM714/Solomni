@@ -2370,6 +2370,29 @@ pub(crate) fn same_agent_nodes_serialize_but_different_agents_run_together() {
     );
 }
 
+/// **落盘策略由会话种类定、判定只有一处**：短暂事件任何会话都不留；系统会话（`#` 开头）一条都不留。
+#[test]
+pub(crate) fn persist_policy_is_decided_by_the_session_kind() {
+    use crate::core::events::SessionEvent;
+    use crate::core::{is_system_session, PersistPolicy};
+    let line = SessionEvent::Transcript(vec![crate::core::events::LineView::system(
+        "",
+        "x".to_string(),
+    )]);
+    let delta = SessionEvent::Delta {
+        speaker: "a".to_string(),
+        kind: "text".to_string(),
+        text: "x".to_string(),
+    };
+    assert!(PersistPolicy::Keep.keeps(&line), "定稿行要留");
+    assert!(!PersistPolicy::Keep.keeps(&delta), "短暂事件不留");
+    assert!(!PersistPolicy::Drop.keeps(&line), "系统会话一条都不留");
+    assert!(
+        is_system_session("#suggest") && !is_system_session("w"),
+        "# 开头 = 系统会话"
+    );
+}
+
 /// 返工定向的**字段契约**：fail 必须指名节点 id（核心只把那些节点退回待办重派）；
 /// 表里没有的 id / 漏填 = 这次判定用不了 → 核心据此要求重填，不静默丢掉一条判定。
 #[test]
