@@ -767,6 +767,45 @@ pub(crate) fn suggest_models_reuses_stored_agent_without_suggesting_model() {
 }
 
 #[test]
+pub(crate) fn core_operation_streams_its_text_to_the_facts_outlet() {
+    // 核心操作的正文也**逐片上屏**（与成员、单 agent 同一条规则，见 engine::core_operation）：
+    // 替身只发一片正文，出口必须收到 start + text 两条 Delta——从前核心是一次性蹦出来的（真机反馈）。
+    // 同时钉住"信封不当正文流"：正文片以 { 开头，外送的那片必须是空的。
+    let raw = "{\"type\":\"tool\",\"name\":\"suggest\",\"args\":{\"agents\":[{\"name\":\"甲\",\"modules\":[\"a\"],\"model\":\"m\",\"why\":\"对口\"}]}}";
+    let core = core_with_gateway(
+        vec![module_of("a")],
+        AbortGateway {
+            raw: raw.to_string(),
+        },
+    );
+    let (_picks, rows) = core
+        .suggest_models("做个东西", WorkMode::Collab)
+        .expect("核心推荐");
+    let deltas: Vec<(String, String)> = rows
+        .iter()
+        .filter_map(|e| match e {
+            SessionEvent::Delta { kind, text, .. } => Some((kind.clone(), text.clone())),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        deltas.iter().any(|(k, _)| k == "start"),
+        "核心要按轮起片：{:?}",
+        deltas
+    );
+    assert!(
+        deltas.iter().any(|(k, _)| k == "text"),
+        "核心的正文要逐片上屏：{:?}",
+        deltas
+    );
+    assert!(
+        deltas.iter().all(|(k, t)| k != "text" || t.is_empty()),
+        "工具信封绝不当正文流上屏：{:?}",
+        deltas
+    );
+}
+
+#[test]
 pub(crate) fn same_named_tools_across_modules_are_no_longer_a_conflict() {
     let mut a = module_of("a");
     a.manifest

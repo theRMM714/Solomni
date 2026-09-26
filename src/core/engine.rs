@@ -1569,8 +1569,38 @@ pub(crate) fn core_operation(
     // 没有这条，模型一想核实就被判"没调用 X"→整步中断（真机上就是这么卡死的）。
     let mut msgs = msgs.to_vec();
     let mut verify = verify;
+    // **核心的正文/思维链也逐片上屏**：与成员、单 agent 同一条规则（信封之前照常外送，见 session::stream_piece），
+    // 不再整块蹦出来。取消仍由调用方的 keep 说了算——这里只是把它包一层，顺手把片段推出去。
+    let mut acc = String::new();
     loop {
-        let done = chat.complete(&msgs, opts, keep);
+        let done = {
+            let mut on = |chunk: crate::core::ports::Chunk| {
+                let mut kind = "text";
+                let mut piece = String::new();
+                match &chunk {
+                    crate::core::ports::Chunk::Start => {
+                        acc.clear();
+                        kind = "start";
+                    }
+                    crate::core::ports::Chunk::Text(t) => {
+                        let (send, next) = crate::core::session::stream_piece(&acc, t);
+                        piece = send;
+                        acc = next;
+                    }
+                    crate::core::ports::Chunk::Reasoning(r) => {
+                        kind = "reasoning";
+                        piece = r.clone();
+                    }
+                }
+                sink(SessionEvent::Delta {
+                    speaker: "核心".to_string(),
+                    kind: kind.to_string(),
+                    text: piece,
+                });
+                keep(chunk)
+            };
+            chat.complete(&msgs, opts, &mut on)
+        };
         if let Some(err) = done.error {
             return Err(err);
         }

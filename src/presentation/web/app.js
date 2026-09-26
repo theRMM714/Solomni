@@ -2090,6 +2090,34 @@ function buildStreamBoxes(sid) {
   domOwner = sid;
 }
 
+/// **唯一的建块函数**：一行（渲染部件）→ 一个节点。身份在上、思维链次之、正文按 kind；工具行走卡片。
+/// 定稿行与实时块都从这里出——"两处各建一次"正是身份时有时无、空块漏出来的来源。
+function lineBlock(p, s, key, live) {
+  if (p.tool) {
+    const card = toolCard(p.tool, s, key, p.who || p.speaker);
+    if (p.reasoning && state.settings.show_reasoning) card.appendChild(reasoningBlock(p.reasoning, s, key));
+    return { node: card, txt: null, cot: null };
+  }
+  const cls = p.cls || 'line';
+  const el = document.createElement('div');
+  el.className = 'line ' + cls + (live ? ' streaming' : '');
+  if (p.who) {
+    const w = document.createElement('span'); w.className = 'who'; w.textContent = p.who; el.appendChild(w);
+  }
+  // 思维链在回答之上（先想后说）；默认折叠，展开状态由 fold store 记住（键 = 行/块的稳定键）。
+  let cot = null;
+  if (p.reasoning && state.settings.show_reasoning) {
+    cot = reasoningBlock(p.reasoning, s, key);
+    el.appendChild(cot);
+  }
+  let txt = null;
+  if (String(p.text == null ? '' : p.text).length) {
+    appendBody(el, cls, p.text);
+    txt = el.children[el.children.length - 1] || null;
+  }
+  return { node: el, txt: txt, cot: cot };
+}
+
 /// 定稿行渲染到容器里（每次全量重建这个容器；折叠与 <pre> 滚动状态由 store 恢复）。
 function renderDone(s) {
   if (!doneBox) return;
@@ -2099,25 +2127,20 @@ function renderDone(s) {
   for (const l of s.lines) {
     // 工具行（含"正文就是工具信封"的兜底行）：渲染成卡片，而不是当消息发出来。
     if (l.tool || l.rawTool) {
-      const card = l.tool ? toolCard(l.tool, s, 'T' + toolSeq, (l.tool && l.tool.speaker) || l.speaker) : rawToolCard(l.text, s, 'L' + l.id, l.speaker);
+      const b = l.tool
+        ? lineBlock({ cls: 'tool', tool: l.tool, who: (l.tool && l.tool.speaker) || l.speaker, reasoning: l.reasoning }, s, 'T' + toolSeq, false)
+        : { node: rawToolCard(l.text, s, 'L' + l.id, l.speaker) };
       if (l.tool) toolSeq += 1;
-      if (l.reasoning && state.settings.show_reasoning) card.appendChild(reasoningBlock(l.reasoning, s, 'L' + l.id));
-      if (typeof l.id === 'number') card.appendChild(rewindButton(l.id));
-      doneBox.appendChild(card);
+      if (typeof l.id === 'number') b.node.appendChild(rewindButton(l.id));
+      doneBox.appendChild(b.node);
       continue;
     }
     // **空正文行不画空盒子**：一轮只有思维链、没有正文也没有工具调用时，落下来的行正文就是空的；
     // 照常画说话人 + 空正文出来，就是一个空的"谁在说"框（真机上看到的空块）。这种行只画思维链。
     const bodyless = !String(l.text == null ? '' : l.text).trim();
     if (bodyless && !l.reasoning) continue;
-    const el = document.createElement('div');
-    el.className = 'line ' + l.cls;
-    if (l.who) {
-      const w = document.createElement('span'); w.className = 'who'; w.textContent = l.who; el.appendChild(w);
-    }
-    // 思维链在回答之上（先想后说）；默认折叠，点开状态会被记住（键 = L<行 id>）。
-    if (l.reasoning && state.settings.show_reasoning) el.appendChild(reasoningBlock(l.reasoning, s, 'L' + l.id));
-    if (!bodyless) appendBody(el, l.cls, l.text);
+    // 建块只有一处（lineBlock）：身份 → 思维链 → 正文；定稿行与实时块同一套画法。
+    const el = lineBlock(l, s, 'L' + l.id, false).node;
     // 删除：删掉这一行和它之后的所有消息（服务端按行 id 重建，前端整体替换）。
     if (typeof l.id === 'number') el.appendChild(rewindButton(l.id));
     // 撤回该同意：转录追加一条撤回行，继续时按剩余转录重新判定。
@@ -2146,7 +2169,8 @@ function renderLive(s, full) {
     const blk = live[bi];
     if (blk.kind === 'tool') {
       if (!blk._node) {
-        blk._node = toolCard(blk.tool, s, 'T' + (toolLines + liveTool), (blk.tool && blk.tool.speaker) || blk.speaker);
+        // 实时工具块与定稿工具行**同一处建块**（身份也随之带上）：这里从前直接调 toolCard，卡片没有身份。
+        blk._node = lineBlock({ cls: 'tool', tool: blk.tool, who: (blk.tool && blk.tool.speaker) || blk.speaker }, s, 'T' + (toolLines + liveTool), true).node;
         liveBox.appendChild(blk._node);
       }
       liveTool += 1;
@@ -2154,14 +2178,11 @@ function renderLive(s, full) {
     }
     const segs = blk.segments || [];
     if (!blk._node) {
-      const el = document.createElement('div');
-      el.className = 'line line streaming';
-      const w = document.createElement('span'); w.className = 'who'; w.textContent = blk.speaker;
-      el.appendChild(w);
-      blk._node = el;
+      // 实时块同样经 lineBlock：身份先立，思维链/正文随后往这一块里追加（见下面的增量更新）。
+      blk._node = lineBlock({ cls: 'line', who: blk.speaker, text: '', reasoning: null }, s, 'V' + bi, true).node;
       blk._cot = null;
       blk._txt = null;
-      liveBox.appendChild(el);
+      liveBox.appendChild(blk._node);
     }
     // 先把这一轮的所有片段按 kind 归并（顺序无关紧要：思维链永远在正文之上，与定稿行一致）
     let cot = '';
@@ -2216,7 +2237,10 @@ function renderLive(s, full) {
   for (let bi = 0; bi < live.length; bi++) {
     const b = live[bi];
     if (b.kind !== 'msg' || !b._node || !b._node.className) continue;
-    b._node.className = bi === lastMsg ? 'line line streaming' : 'line line';
+    // 保留 empty 类（它由上面按"有没有可见内容"加/去）：整块重写 className 会把它抹掉，
+    // 空块就再也藏不住了。流式光标只挂在**正在传的那一块**上。
+    const blank = String(b._node.className).indexOf('empty') >= 0;
+    b._node.className = 'line line' + (blank ? ' empty' : '') + (bi === lastMsg ? ' streaming' : '');
   }
   flushScroll(s);
 }
