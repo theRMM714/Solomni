@@ -4,10 +4,11 @@
 //! 密钥只在出站调用里使用，永不落提示词/转录/日志；错误信息经脱敏（红线）。
 
 use super::endpoint::{chat_candidates, memo_get, memo_set, resolve_candidates, Attempt, Memo};
-use super::http_agent::{finish_request, redact};
 use super::fake_chat::DemoGateway;
+use super::http_agent::{finish_request, redact};
 use crate::core::ports::{
-    BoxedChat, Chat, ChatGateway, Chunk, CompleteOpts, Completion, Msg, ProbeOutcome, ToolCall, ToolDecl,
+    BoxedChat, Chat, ChatGateway, Chunk, CompleteOpts, Completion, Msg, ProbeOutcome, ToolCall,
+    ToolDecl,
 };
 use crate::core::providers::Channel;
 
@@ -77,20 +78,42 @@ pub(crate) fn attempt_raw(
     tools: Option<&[ToolDecl]>,
 ) -> Attempt<Completion> {
     let body = request_body(model, false, messages, tools).to_string();
-    attempt(url, key, &body)
+    // 探针是一次性诊断，用默认预算（它不参与真实会话的设置）。
+    attempt(
+        url,
+        key,
+        &body,
+        crate::core::ports::DEFAULT_LLM_TIMEOUT_SECS,
+    )
 }
 
 impl HttpChat {
     /// 组合根/网关内部构造：通道 + 日志 + 共享端点记忆。
-    fn new(channel: Channel, log: std::sync::Arc<dyn crate::core::ports::Log + Send + Sync>, memo: Memo) -> HttpChat {
+    fn new(
+        channel: Channel,
+        log: std::sync::Arc<dyn crate::core::ports::Log + Send + Sync>,
+        memo: Memo,
+    ) -> HttpChat {
         let memo_key = format!("{}|chat", channel.provider.base_url);
         let resolved = memo_get(&memo, &memo_key);
-        HttpChat { provider_id: channel.provider.base_url.clone(), channel, log, resolved, memo, memo_key }
+        HttpChat {
+            provider_id: channel.provider.base_url.clone(),
+            channel,
+            log,
+            resolved,
+            memo,
+            memo_key,
+        }
     }
 }
 
 impl Chat for HttpChat {
-    fn complete(&mut self, messages: &[Msg], opts: CompleteOpts<'_>, on: &mut dyn FnMut(Chunk) -> bool) -> Completion {
+    fn complete(
+        &mut self,
+        messages: &[Msg],
+        opts: CompleteOpts<'_>,
+        on: &mut dyn FnMut(Chunk) -> bool,
+    ) -> Completion {
         let stream = opts.stream;
         let wire: Vec<serde_json::Value> = messages.iter().map(msg_json).collect();
         let body = request_body(
@@ -105,20 +128,27 @@ impl Chat for HttpChat {
             None => chat_candidates(&self.channel.provider.base_url),
         };
         let key = self.channel.provider.api_key.clone();
+        let timeout_secs = opts.timeout_secs;
         let outcome = if stream {
             resolve_candidates(
                 &candidates,
-                |url| stream_once(url, &key, &body, on),
+                |url| stream_once(url, &key, &body, timeout_secs, on),
                 |url, err, next| {
-                    self.log.warn("http_chat::stream", &format!("端点 {} 不可用（{}），改试 {}", url, err, next));
+                    self.log.warn(
+                        "http_chat::stream",
+                        &format!("端点 {} 不可用（{}），改试 {}", url, err, next),
+                    );
                 },
             )
         } else {
             resolve_candidates(
                 &candidates,
-                |url| attempt(url, &key, &body),
+                |url| attempt(url, &key, &body, timeout_secs),
                 |url, err, next| {
-                    self.log.warn("http_chat::complete", &format!("端点 {} 不可用（{}），改试 {}", url, err, next));
+                    self.log.warn(
+                        "http_chat::complete",
+                        &format!("端点 {} 不可用（{}），改试 {}", url, err, next),
+                    );
                 },
             )
         };
@@ -130,8 +160,12 @@ impl Chat for HttpChat {
                 text
             }
             Err(e) => {
-                self.log.error("http_chat::complete", &format!("通道 {} 调用失败：{}", self.provider_id, e));
-                Completion::text(format!("模型调用失败：{}", e))
+                self.log.error(
+                    "http_chat::complete",
+                    &format!("通道 {} 调用失败：{}", self.provider_id, e),
+                );
+                // 失败**不是**模型的回复：带上原因、不带正文，由核心如实告知并中断这一轮。
+                Completion::failure(format!("模型调用失败：{}", e))
             }
         }
     }
@@ -141,9 +175,15 @@ impl Chat for HttpChat {
 /// 已经吐出过内容后不再换候选（避免重复输出）。
 /// 兼容两类供应商：发「增量」的、以及发「累积快照」的（此处统一归一成增量）。
 /// 中止与容积双保险：on 返回 false、或正文/思维链超过上限，立即停止读取。
-fn stream_once(url: &str, key: &str, body: &str, on: &mut dyn FnMut(Chunk) -> bool) -> Attempt<Completion> {
+fn stream_once(
+    url: &str,
+    key: &str,
+    body: &str,
+    timeout_secs: u64,
+    on: &mut dyn FnMut(Chunk) -> bool,
+) -> Attempt<Completion> {
     use std::io::BufRead;
-    let agent = super::http_agent::agent(10, 300);
+    let agent = super::http_agent::agent_for_llm(timeout_secs);
     let resp = match finish_request(
         agent
             .post(url)
@@ -174,10 +214,16 @@ fn stream_once(url: &str, key: &str, body: &str, on: &mut dyn FnMut(Chunk) -> bo
             Ok(l) => l,
             Err(e) => {
                 let msg = redact(format!("读取流失败：{}", e), key);
-                return if got_any { Attempt::Fatal(msg) } else { Attempt::Retry(msg) };
+                return if got_any {
+                    Attempt::Fatal(msg)
+                } else {
+                    Attempt::Retry(msg)
+                };
             }
         };
-        let Some(data) = line.strip_prefix("data:") else { continue };
+        let Some(data) = line.strip_prefix("data:") else {
+            continue;
+        };
         let data = data.trim();
         if data == "[DONE]" {
             break;
@@ -185,20 +231,38 @@ fn stream_once(url: &str, key: &str, body: &str, on: &mut dyn FnMut(Chunk) -> bo
         if data.is_empty() {
             continue;
         }
-        let Ok(v) = serde_json::from_str::<serde_json::Value>(data) else { continue };
-        let Some(choice) = v.get("choices").and_then(|c| c.get(0)) else { continue };
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(data) else {
+            continue;
+        };
+        let Some(choice) = v.get("choices").and_then(|c| c.get(0)) else {
+            continue;
+        };
         if let Some(f) = choice.get("finish_reason").and_then(|f| f.as_str()) {
             if !f.is_empty() {
                 finish = f.to_string();
             }
         }
-        let Some(delta) = choice.get("delta") else { continue };
+        let Some(delta) = choice.get("delta") else {
+            continue;
+        };
         // 原生工具调用的分片：按 index 归位，name/id 出现即记，arguments 追加
         if let Some(arr) = delta.get("tool_calls").and_then(|t| t.as_array()) {
+            // **工具调用也算"有内容"**：只有工具调用、没有正文的流是**正常回执**（模型决定调工具），
+            // 不能当成"流式响应没有正文内容"——那会把整段工具调用丢掉（真机上就是这么丢的）。
+            if !arr.is_empty() {
+                got_any = true;
+            }
             for item in arr {
-                let idx = item.get("index").and_then(|i| i.as_u64()).unwrap_or(calls.len() as u64) as usize;
+                let idx = item
+                    .get("index")
+                    .and_then(|i| i.as_u64())
+                    .unwrap_or(calls.len() as u64) as usize;
                 while calls.len() <= idx {
-                    calls.push(ToolCall { id: String::new(), name: String::new(), args_json: String::new() });
+                    calls.push(ToolCall {
+                        id: String::new(),
+                        name: String::new(),
+                        args_json: String::new(),
+                    });
                 }
                 let slot = &mut calls[idx];
                 if let Some(id) = item.get("id").and_then(|i| i.as_str()) {
@@ -229,7 +293,11 @@ fn stream_once(url: &str, key: &str, body: &str, on: &mut dyn FnMut(Chunk) -> bo
                 } else {
                     t.to_string()
                 };
-                content = if piece.is_empty() { content } else { format!("{}{}", content, piece) };
+                content = if piece.is_empty() {
+                    content
+                } else {
+                    format!("{}{}", content, piece)
+                };
                 if !piece.is_empty() && !on(Chunk::Text(piece)) {
                     cancelled = true;
                     break;
@@ -244,12 +312,17 @@ fn stream_once(url: &str, key: &str, body: &str, on: &mut dyn FnMut(Chunk) -> bo
         if let Some(r) = reasoning {
             if !r.is_empty() {
                 got_any = true;
-                let piece = if r.len() > reasoning_acc.len() && r.starts_with(reasoning_acc.as_str()) {
-                    r[reasoning_acc.len()..].to_string()
+                let piece =
+                    if r.len() > reasoning_acc.len() && r.starts_with(reasoning_acc.as_str()) {
+                        r[reasoning_acc.len()..].to_string()
+                    } else {
+                        r.to_string()
+                    };
+                reasoning_acc = if piece.is_empty() {
+                    reasoning_acc
                 } else {
-                    r.to_string()
+                    format!("{}{}", reasoning_acc, piece)
                 };
-                reasoning_acc = if piece.is_empty() { reasoning_acc } else { format!("{}{}", reasoning_acc, piece) };
                 if !piece.is_empty() && !on(Chunk::Reasoning(piece)) {
                     cancelled = true;
                     break;
@@ -263,13 +336,25 @@ fn stream_once(url: &str, key: &str, body: &str, on: &mut dyn FnMut(Chunk) -> bo
     }
     // 用户主动中止：原样收尾，绝不换候选重开（否则「停止」会把流重新拉起来）
     if cancelled {
-        return Attempt::Ok(Completion { raw: content, finish, calls });
+        return Attempt::Ok(Completion {
+            raw: content,
+            reasoning: reasoning_acc,
+            finish,
+            calls,
+            error: None,
+        });
     }
     // 纯工具调用轮的正文是空的：这不算"没内容"，不能因此换候选重试。
     if content.is_empty() && reasoning_acc.is_empty() && calls.is_empty() {
         return Attempt::Retry("流式响应没有正文内容".to_string());
     }
-    Attempt::Ok(Completion { raw: content, finish, calls })
+    Attempt::Ok(Completion {
+        raw: content,
+        reasoning: reasoning_acc,
+        finish,
+        calls,
+        error: None,
+    })
 }
 
 /// 工具声明 → OpenAI 兼容的 function 形状（唯一一处映射，探测与正式请求共用）。
@@ -304,12 +389,18 @@ pub(crate) fn attempt_with_tools(
             body["tool_choice"] = serde_json::json!("auto");
         }
     }
-    attempt(url, key, &body.to_string())
+    // 探针是一次性诊断，用默认预算（它不参与真实会话的设置）。
+    attempt(
+        url,
+        key,
+        &body.to_string(),
+        crate::core::ports::DEFAULT_LLM_TIMEOUT_SECS,
+    )
 }
 
 /// 单次 POST：请求与解析都在此；失败按「可换候选 / 立即报」归类。
-fn attempt(url: &str, key: &str, body: &str) -> Attempt<Completion> {
-    let agent = super::http_agent::agent(10, 120);
+fn attempt(url: &str, key: &str, body: &str, timeout_secs: u64) -> Attempt<Completion> {
+    let agent = super::http_agent::agent_for_llm(timeout_secs);
     // 红线：ureq 部分错误会回显请求头，密钥在 finish_request/redact 里统一脱敏后才出适配层。
     let resp = match finish_request(
         agent
@@ -337,13 +428,20 @@ fn attempt(url: &str, key: &str, body: &str) -> Attempt<Completion> {
 
 /// 解析补全响应：取 choices[0].message.content、finish_reason 与原生 tool_calls（后两者可能没有）。
 fn parse_content(text: &str) -> Result<Completion, String> {
-    let v: serde_json::Value = serde_json::from_str(text).map_err(|e| format!("响应不是 JSON：{}", e))?;
+    let v: serde_json::Value =
+        serde_json::from_str(text).map_err(|e| format!("响应不是 JSON：{}", e))?;
     let choice = v.get("choices").and_then(|c| c.get(0));
     // 有些供应商在纯工具调用时 content 是 null（不是缺字段）：按空串处理，不算错。
     let raw = choice
         .and_then(|c| c.get("message"))
         .and_then(|m| m.get("content"))
         .and_then(|c| c.as_str())
+        .unwrap_or_default()
+        .to_string();
+    let reasoning = choice
+        .and_then(|c| c.get("message"))
+        .and_then(|m| m.get("reasoning_content").or_else(|| m.get("reasoning")))
+        .and_then(|r| r.as_str())
         .unwrap_or_default()
         .to_string();
     let finish = choice
@@ -357,10 +455,16 @@ fn parse_content(text: &str) -> Result<Completion, String> {
         .and_then(|t| t.as_array())
         .map(|arr| arr.iter().filter_map(native_call).collect::<Vec<_>>())
         .unwrap_or_default();
-    if raw.is_empty() && calls.is_empty() {
+    if raw.is_empty() && reasoning.is_empty() && calls.is_empty() {
         return Err("响应缺少 choices[0].message.content（也没有 tool_calls）".to_string());
     }
-    Ok(Completion { raw, finish, calls })
+    Ok(Completion {
+        raw,
+        reasoning,
+        finish,
+        calls,
+        error: None,
+    })
 }
 
 /// 从一段 OpenAI 形状的 tool_calls 元素里取（id, name, arguments）。
@@ -368,14 +472,37 @@ fn parse_content(text: &str) -> Result<Completion, String> {
 fn native_call(v: &serde_json::Value) -> Option<ToolCall> {
     let f = v.get("function")?;
     let name = f.get("name").and_then(|n| n.as_str())?.to_string();
-    let id = v.get("id").and_then(|i| i.as_str()).unwrap_or_default().to_string();
-    let args_json = f.get("arguments").and_then(|a| a.as_str()).unwrap_or("{}").to_string();
-    Some(ToolCall { id, name, args_json })
+    let id = v
+        .get("id")
+        .and_then(|i| i.as_str())
+        .unwrap_or_default()
+        .to_string();
+    let args_json = f
+        .get("arguments")
+        .and_then(|a| a.as_str())
+        .unwrap_or("{}")
+        .to_string();
+    Some(ToolCall {
+        id,
+        name,
+        args_json,
+    })
 }
 
-fn real_or_demo(channel: Option<&Channel>, log: &std::sync::Arc<dyn crate::core::ports::Log + Send + Sync>, memo: &Memo) -> (BoxedChat, bool) {
+fn real_or_demo(
+    channel: Option<&Channel>,
+    log: &std::sync::Arc<dyn crate::core::ports::Log + Send + Sync>,
+    memo: &Memo,
+) -> (BoxedChat, bool) {
     match channel {
-        Some(c) => (Box::new(HttpChat::new(c.clone(), std::sync::Arc::clone(log), std::sync::Arc::clone(memo))), false),
+        Some(c) => (
+            Box::new(HttpChat::new(
+                c.clone(),
+                std::sync::Arc::clone(log),
+                std::sync::Arc::clone(memo),
+            )),
+            false,
+        ),
         None => {
             let (chat, demo) = DemoGateway.core_channel(None);
             (chat, demo)
@@ -391,7 +518,10 @@ pub struct HttpGateway {
 
 impl HttpGateway {
     /// 组合根注入日志端口（异常路径落盘）与共享端点记忆。
-    pub fn with_log(log: std::sync::Arc<dyn crate::core::ports::Log + Send + Sync>, memo: Memo) -> HttpGateway {
+    pub fn with_log(
+        log: std::sync::Arc<dyn crate::core::ports::Log + Send + Sync>,
+        memo: Memo,
+    ) -> HttpGateway {
         HttpGateway { log, memo }
     }
 }
@@ -409,18 +539,35 @@ impl ChatGateway for HttpGateway {
         crate::adapters::http_probe::probe(channel, &self.log)
     }
 
-    fn member_channel(&self, channel: Option<&Channel>, module_id: &str) -> (BoxedChat, Option<String>) {
+    fn member_channel(
+        &self,
+        channel: Option<&Channel>,
+        module_id: &str,
+    ) -> (BoxedChat, Option<String>) {
         match channel {
             Some(c) => {
                 self.log.info(
                     "gateway::member_channel",
-                    &format!("模块 {} → 供应商 {}（模型 {}）", module_id, c.provider.base_url, c.model),
+                    &format!(
+                        "模块 {} → 供应商 {}（模型 {}）",
+                        module_id, c.provider.base_url, c.model
+                    ),
                 );
-                (Box::new(HttpChat::new(c.clone(), std::sync::Arc::clone(&self.log), std::sync::Arc::clone(&self.memo))), None)
+                (
+                    Box::new(HttpChat::new(
+                        c.clone(),
+                        std::sync::Arc::clone(&self.log),
+                        std::sync::Arc::clone(&self.memo),
+                    )),
+                    None,
+                )
             }
             // 回落告知（含模块 id）复用演示网关的话术。
             None => {
-                self.log.warn("gateway::member_channel", &format!("模块 {} 无可用模型通道，回落演示通道", module_id));
+                self.log.warn(
+                    "gateway::member_channel",
+                    &format!("模块 {} 无可用模型通道，回落演示通道", module_id),
+                );
                 DemoGateway.member_channel(None, module_id)
             }
         }
@@ -429,9 +576,11 @@ impl ChatGateway for HttpGateway {
     fn core_channel(&self, channel: Option<&Channel>) -> (BoxedChat, bool) {
         let (chat, demo) = real_or_demo(channel, &self.log, &self.memo);
         if demo {
-            self.log.warn("gateway::core_channel", "核心通道未配置模型，使用演示通道");
+            self.log
+                .warn("gateway::core_channel", "核心通道未配置模型，使用演示通道");
         } else {
-            self.log.info("gateway::core_channel", "核心通道建立（真实供应商）");
+            self.log
+                .info("gateway::core_channel", "核心通道建立（真实供应商）");
         }
         (chat, demo)
     }

@@ -1,9 +1,14 @@
 # 端到端跑出来的东西不入库（夹具本身入库）：
-# prompts.yaml 是产品的一部分，每次运行从产品根复制；.home 与 session/logs/userdata 都是运行期状态。
-root/prompts.yaml
+# 提示词册是产品的一部分，每次运行从产品根整份复制（它已按角色分成目录）；.home 与 session/logs/userdata 都是运行期状态。
+root/prompts/
+root/systools/
 root/.home
 root/modules/toolbox/module.yaml
 root/session/
 root/logs/
-root/logs/
 root/modules/*/userdata/
+# 真模块（harvest / render / indexer）由编排器**每次从仓库源码重新复制**进夹具：
+# 它们是生成的副本，不是第二个真相；入库反而会与真模块漂移。构建产物同理。
+root/modules/harvest/
+root/modules/render/
+root/modules/indexer/

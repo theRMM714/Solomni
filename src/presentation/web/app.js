@@ -13,8 +13,8 @@ const $ = (s) => document.querySelector(s);
 const state = {
   modules: [], providers: [], models: [], core: null, rejected: [], agents: [],
   history: [],           // 会话历史（名字/mode/时间）
-  settings: { streaming: true, show_reasoning: true }, // 基本设置
-  sessions: new Map(),   // sid -> { sid, mode, title, lines, pending, busy, done, awaiting, readonly }
+  settings: { streaming: true, show_reasoning: true, llm_timeout_secs: 300, discuss_remind_cap: 3, compact_at_percent: 70 }, // 基本设置
+  sessions: new Map(),   // sid -> { sid, mode, title, lines, pending, sending, running, working, done, awaiting, readonly }
   activeSid: null,
   settingsOpen: false,
 };
@@ -46,9 +46,56 @@ async function refreshState() {
   state.rejected = s.rejected || [];
   state.agents = s.agents || [];
   state.history = s.history || [];
-  state.settings = s.settings || { streaming: true, show_reasoning: true };
+  // 服务端的**权威会话视图**：有没有"本次需求" / 有没有等裁决。
+  // 事件流给增量（推），这里是刷新后照样成立的快照（拉）——两面同一个事实。
+  state.views = new Map((s.sessions || []).map((v) => [v.sid, v]));
+  // 运行态的**对账副本**：事件是唯一真相（见 isBusy）；这份快照只在"本页对这条会话还没有实时
+  // 知识"时用——刚刷新页面、事件台有缺口、别人建的会话。
+  state.running = new Set(
+    [].concat(
+      (s.sessions || []).filter((v) => v.running).map((v) => v.sid),
+      (state.history || []).filter((h) => h.running).map((h) => h.name),
+    ),
+  );
+  // **会话表由后端给**：这里只为"后端说在跑"的会话建标签页。前端绝不为事件流里冒出来的 sid
+  // 造会话状态——那是前端自己造会话（系统会话就是这么长出多余标签页的）。
+  let opened = false;
+  for (const v of state.views.values()) {
+    if (state.sessions.has(v.sid) || !state.running.has(v.sid)) continue;
+    const h = (state.history || []).find((x) => x.name === v.sid);
+    const s = {
+      sid: v.sid, mode: v.mode || 'single', title: (h && h.name) || v.sid,
+      lines: [], live: [], pending: v.pending || null, sending: false,
+      running: false, working: null, running_known: false,
+      can_update_task: !!v.can_update_task,
+      done: !!(h && h.done), awaiting: null, fold: {}, scroll: {},
+      readonly: false, hydrated: false, buffer: [],
+    };
+    state.sessions.set(v.sid, s);
+    // 盘上转录是这条会话的**前缀**：补上它，之后的实时事件按 seq 接上（同 id 的行不重复）。
+    hydrateHistory(s);
+    opened = true;
+  }
+  // 已打开的标签页跟着快照对齐（增量事件到达时会覆盖成同一份）。
+  for (const cur of state.sessions.values()) {
+    const v = state.views.get(cur.sid);
+    if (!v) continue;
+    cur.can_update_task = !!v.can_update_task;
+    cur.pending = v.pending || null;
+    // 运行态**只对账、不覆盖**：这条会话已经有实时知识（事件就是真相）时，快照比它滞后——
+    // 一次迟到的轮询不能把已经收尾的回合标回"在跑"。没有实时知识时按快照补齐，并清掉本地遗留
+    // （快照说没跑就是没跑）；谁在跑未知时照旧显示"正在工作…"。
+    if (!cur.running_known) {
+      cur.running = snapshotRunning(cur.sid);
+      if (!cur.running) cur.working = null;
+    }
+  }
+  state.settings = s.settings || { streaming: true, show_reasoning: true, llm_timeout_secs: 300, discuss_remind_cap: 3, compact_at_percent: 70 };
   renderSidebar();
   renderHistory();
+  if (opened) renderTabs();
+  const cur = activeSession();
+  if (cur) { syncTyping(cur); syncSendButton(cur); }
 }
 
 /// 思维链块：永远默认折叠，点击（原生 details）才展开。
@@ -63,8 +110,16 @@ function mdNode(text) {
 
 /// 正文：AI/用户发言按 Markdown 渲染，系统提示保持纯文本。
 function appendBody(el, cls, text) {
-  if (cls === 'line' || cls === 'plan' || cls === 'user') el.appendChild(mdNode(text));
-  else el.innerHTML = shortPath(escHtml(text)); // 系统/验收等行：纯文本转义后同样缩写长路径
+  // 正文必须**追加**，不能 el.innerHTML = …：那会把上面刚挂的身份标题（.who）一起抹掉，
+  // 于是 agree（绿框）这类非 line 类的消息就"没了说话人"——用户不知道这句来自谁。
+  if (cls === 'line' || cls === 'plan' || cls === 'user') {
+    el.appendChild(mdNode(text));
+    return;
+  }
+  const body = document.createElement('div');
+  body.className = 'body';
+  body.innerHTML = shortPath(escHtml(text)); // 系统/验收等行：纯文本转义后同样缩写长路径
+  el.appendChild(body);
 }
 
 /// 纯文本转义：工具卡片的原始 JSON 一律按字面显示（<pre> 里不解释 HTML）。
@@ -144,11 +199,16 @@ function rawToolCard(text, sess, key, speaker) {
 
 /// 工具调用卡片：头部只写「模块.工具名」+ 成败；参数与结果折叠在里面（折叠状态走 fold store）。
 /// 流式 tool_call 与权威 transcript 的 tool 行共用这一个渲染函数，也共用同一个折叠键。
-function toolCard(t, sess, key) {
+function toolCard(t, sess, key, who) {
   const info = t || {};
   const el = document.createElement('div');
   el.className = 'line tool-card ' + (info.ok ? 'ok' : 'bad');
   el.title = info.speaker ? info.speaker + ' 调用工具' : '工具调用';
+  // 左上角先标出**是谁**在调工具：与其它行同一条规则（每个 kind 都带身份）。
+  const speaker = who || info.speaker || '';
+  if (speaker) {
+    const w = document.createElement('span'); w.className = 'who'; w.textContent = speaker; el.appendChild(w);
+  }
   const head = document.createElement('div'); head.className = 'tool-head';
   const name = document.createElement('span'); name.className = 'tool-name';
   name.textContent = (info.module ? info.module + '.' : '') + (info.name || '工具');
@@ -242,10 +302,14 @@ function renderHistory() {
   if (!items.length) { box.textContent = '（还没有历史会话）'; return; }
   for (const h of items) {
     const el = document.createElement('div');
-    el.className = 'history-item';
-    const name = document.createElement('span'); name.className = 'hname'; name.textContent = h.name;
+    // 子会话（parent 指向另一个会话）在侧栏里**缩进**挂在父会话下。
+    el.className = 'history-item' + (h.parent ? ' history-child' : '');
+    const name = document.createElement('span'); name.className = 'hname';
+    name.textContent = (h.parent ? '└ ' : '') + h.name;
     const mode = document.createElement('span'); mode.className = 'hmode';
-    mode.textContent = (h.done ? '' : '·进行中 ') + h.mode;
+    mode.textContent =
+      (h.done ? '' : '·进行中 ') + h.mode +
+      (h.tier === 'vm' && h.tier_ready === false ? '·虚拟机档不可用' : '');
     const acts = document.createElement('div'); acts.className = 'history-acts';
 
     const open = btn('打开', 'hbtn');
@@ -271,30 +335,125 @@ function renderHistory() {
   }
 }
 
-/// 本标签页里该会话是否正在生成（前端自有的状态；后端对照同一件事再拦一次）。
+/// 快照（/api/state）说这条会话、或它的任一子会话在跑吗。
+/// **对账副本的唯一读法**：只在 isBusy 的第三档（本页没有实时知识）用。
+function snapshotRunning(sid) {
+  const run = state.running;
+  if (!run || !sid) return false;
+  if (run.has(sid)) return true;
+  const pre = sid + '--';
+  for (const k of run) if (k.indexOf(pre) === 0) return true;
+  return false;
+}
+
+/// 这条会话此刻在不在干活。**运行态的唯一真相是事件**（每个生产者在起止各推一条 `Working`；
+/// 刷新页面或事件台有缺口时用快照对账）——三个来源各司其职，不是三份互相打架的真话：
+/// 1. `s.sending`：本页发起的命令还在途（本地事实，与服务端运行态无关）；
+/// 2. `s.running` + `s.running_known`：收到过它的运行态事件 → 以事件为准，快照不得覆盖；
+/// 3. 没有实时知识：用快照对账——成员回合跑在它自己的会话里，主会话整回合收不到事件，
+///    只靠"有增量"猜就永远切不出「停止」按钮、也没有占位动画。
+function isBusy(s) {
+  if (!s) return false;
+  if (s.sending) return true;
+  // ① 这条会话**自己**的运行态：有实时知识（收过它的 Working）就以事件为准，否则用快照对账。
+  if (s.running_known ? s.running : snapshotRunning(s.sid)) return true;
+  // ② 它的**子会话**在跑也算——成员回合、节点执行都跑在各自的子会话里，主会话整回合收不到事件，
+  //    所以子会话的运行态只有快照说得清；子会话标签页开着时，它自己的实时知识比快照新，优先用它。
+  const pre = s.sid + '--';
+  for (const k of state.running || []) {
+    if (k.indexOf(pre) !== 0) continue;
+    const child = state.sessions.get(k);
+    if (child && child.running_known) {
+      if (child.running) return true;
+      continue;
+    }
+    return true;
+  }
+  return false;
+}
+
 function generating(sid) {
   const s = state.sessions.get(sid);
-  return !!(s && s.busy);
+  return isBusy(s);
+}
+
+/* 记的是虚拟机档、但本机现在承载不了：**不拦打开**（记录是用户的），只主动把原因与出路说清。
+ * 为什么必须提示：虚拟机档的 guest 本体尚未接入，此刻选它只会得到一个更差的本机档——
+ * 用户有权知道这一点，也有权知道怎么才能用上。 */
+function warnIfTierUnavailable(name) {
+  const view = (state.history || []).find((h) => h.name === name);
+  if (!view || view.tier !== 'vm' || view.tier_ready !== false) return;
+  const missing = (view.tier_missing || []).join('；') || '本机不具备虚拟机档的前置条件';
+  notice(
+    '这条会话的虚拟机档当前不可用',
+    '原因：' + missing +
+      '。\n\n本次仍会打开（历史记录不受影响），但它实际按本机档执行。' +
+      '\n要真正用上虚拟机档：先在本机启用虚拟化（Windows「虚拟机平台」/ Linux 的 /dev/kvm / macOS 11+），' +
+      '并在「编辑」里确认执行档位与基础根；暂时不需要就在「编辑」里改回本机档。',
+    'warn'
+  );
+}
+
+/** **历史与实时合流**：后端把盘上转录与"事件台上它之外的尾巴"一次给全，这里只**按序 append**。
+ * 合流时的头部序号 = 这条会话的**水位**：水位以下的批次已经在这份合流里给过了，之后收到的一律丢掉。
+ * 为什么必须这样：从前前端自己合并「盘上转录」与「事件台重放」两个来源，而行没有共同身份
+ * （notice/node_started 这类行根本没有 id），只要补水先于重放完成，整段记录就会重复一遍（真机症状）。 */
+async function hydrateHistory(s) {
+  if (!s || s.hydrating || s.hydrated) return;
+  s.hydrating = true;
+  let got = null;
+  try {
+    got = await api('GET', '/api/history/' + encodeURIComponent(s.sid));
+  } catch (err) { eventError(err); }
+  if (got) {
+    for (const ev of (got.events || [])) absorb(s, ev);
+    for (const ev of (got.live || [])) absorb(s, ev);
+    if (typeof got.head === 'number') s.floor = got.head;
+  }
+  // 合流期间到达的实时批次先攒着；水位定好后按同一把尺子接上（水位及以上的才接）。
+  const buffered = s.buffer || [];
+  s.buffer = [];
+  for (const item of buffered) {
+    if (item && (typeof s.floor !== 'number' || item.seq > s.floor)) {
+      absorbEvents(s, item.events || []);
+    }
+  }
+  s.hydrating = false;
+  s.hydrated = true;
+  renderAll();
 }
 
 async function openHistory(name) {
   const existing = state.sessions.get(name);
-  if (existing && !existing.readonly) { setActive(name); return; }
+  if (existing && !existing.readonly) {
+    // 事件建出来的会话还没补过盘上转录：先补，再显示（否则只有刷新之后的新行）。
+    hydrateHistory(existing);
+    setActive(name);
+    warnIfTierUnavailable(name);
+    return;
+  }
   try {
     const r = await api('GET', '/api/history/' + encodeURIComponent(name));
     const s = {
       sid: name, mode: (r.meta && r.meta.mode) || 'single', title: name,
-      lines: [], live: [], pending: null, busy: false, done: true, awaiting: null, readonly: true, fold: {}, scroll: {},
+      lines: [], live: [], pending: null, sending: false,
+      running: false, working: null, running_known: false,
+      done: true, awaiting: null, readonly: true, fold: {}, scroll: {},
     };
+    s.hydrated = true;
+    // 合流：盘上转录 + 事件台尾巴一次给全；水位 = 合流时的头部（之后的实时批次照收）。
+    if (typeof r.head === 'number') s.floor = r.head;
     state.sessions.set(name, s);
     for (const ev of (r.events || [])) absorb(s, ev);
+    for (const ev of (r.live || [])) absorb(s, ev);
     setActive(name);
     renderAll();
-  } catch (err) { alert(err.message); }
+    warnIfTierUnavailable(name);
+  } catch (err) { notice('操作失败', err.message, 'err'); }
 }
 
 async function deleteHistory(name) {
-  if (!confirm('删除会话「' + name + '」？该会话的记录将被永久删除。')) return;
+  if (!(await confirmBox('删除会话', '删除会话「' + name + '」？该会话的记录将被永久删除。', '删除'))) return;
   try {
     await api('POST', '/api/history/' + encodeURIComponent(name) + '/delete', {});
     if (state.sessions.has(name)) {
@@ -306,7 +465,7 @@ async function deleteHistory(name) {
     }
     await refreshState();
     renderAll();
-  } catch (err) { alert(err.message); }
+  } catch (err) { notice('操作失败', err.message, 'err'); }
 }
 
 /* ---------- 配置视图（会话列表的「编辑」）：名单 / 模块 / 模型 / 档位 / 运行能力 / 定版 ----------
@@ -324,11 +483,11 @@ function cfgDiv(cls, text) {
 function cfgHint(text, kind) {
   return cfgDiv('cfg-hint' + (kind ? ' ' + kind : ''), text);
 }
-/// 执行档位二选一：原生 radio（同名即互斥）。
-function cfgRadio(labelText, checked, group) {
+/// 执行档位二选一：原生 radio（同名即互斥）。disabled = 本机承载不了（例如虚拟机档的前置条件不具备）。
+function cfgRadio(labelText, checked, group, disabled) {
   const wrap = document.createElement('label'); wrap.className = 'chk';
   const box = document.createElement('input');
-  box.type = 'radio'; box.name = group; box.checked = !!checked;
+  box.type = 'radio'; box.name = group; box.checked = !!checked; box.disabled = !!disabled;
   const span = document.createElement('span'); span.textContent = labelText;
   wrap.appendChild(box); wrap.appendChild(span);
   return { wrap, box };
@@ -438,8 +597,11 @@ function buildConfigForm(sid, cfg, c, box) {
   // 执行档位：本机 / 虚拟机（如实说明各自是什么）
   const secT = cfgDiv('cfg-sec');
   secT.appendChild(cfgDiv('cfg-sec-title', '执行档位'));
+  // 虚拟机档的**承载**由后端判定（与「开始」/保存同一把尺子）：前置条件不具备时禁用，不让选。
+  // 与「未接入」是两回事：guest 本体尚未接入这一点写在下面的提示里，两条都如实说。
+  const vmOk = cfg.vm_available !== false;
   const hostR = cfgRadio('本机档 —— 脚本直接在宿主上跑：宿主自备解释器，不装载运行包；隔离就是宿主本身（快，但风险也在宿主上）。', draft.tier === 'host', 'cfg-tier');
-  const vmR = cfgRadio('虚拟机档 —— 一整套 guest，脚本在 guest 里跑：按模块声明的运行能力装载运行包；隔离更强，代价是更重、依赖运行包。', draft.tier === 'vm', 'cfg-tier');
+  const vmR = cfgRadio('虚拟机档 —— 一整套 guest，脚本在 guest 里跑：按模块声明的运行能力装载运行包；隔离更强，代价是更重、依赖运行包。', draft.tier === 'vm', 'cfg-tier', !vmOk);
   const baseIn = textInput('base（可选）：虚拟机的基础根（发行版基底名或目录）');
   baseIn.value = draft.base;
   baseIn.addEventListener('input', () => { draft.base = baseIn.value; });
@@ -453,6 +615,23 @@ function buildConfigForm(sid, cfg, c, box) {
   hostR.box.addEventListener('change', () => { if (hostR.box.checked) { draft.tier = 'host'; syncTier(); } });
   vmR.box.addEventListener('change', () => { if (vmR.box.checked) { draft.tier = 'vm'; syncTier(); } });
   secT.appendChild(hostR.wrap); secT.appendChild(vmR.wrap);
+  // 前置逐项照抄后端（缺哪几项、每项怎么补），界面不自己编话、也不笼统说"前置条件不具备"。
+  const reqs = cfg.vm_requirements || [];
+  if (!vmOk) {
+    secT.appendChild(cfgHint('虚拟机档现在不能选：' + (cfg.vm_unavailable_reason || '前置条件不具备'), 'err'));
+    if (reqs.length) {
+      const box2 = cfgDiv('cfg-sec');
+      box2.appendChild(cfgDiv('cfg-sec-title', '虚拟机档前置（' + reqs.filter((r) => !r.met).length + ' 项未满足）'));
+      for (const r of reqs) {
+        const line = document.createElement('div');
+        line.className = 'cfg-hint' + (r.met ? '' : ' err');
+        line.textContent =
+          (r.met ? '✓ ' : '✗ ') + r.detail + (r.met ? '' : '　怎么补：' + r.how);
+        box2.appendChild(line);
+      }
+      secT.appendChild(box2);
+    }
+  }
   secT.appendChild(baseWrap); secT.appendChild(baseHint);
   box.appendChild(secT);
   syncTier();
@@ -660,6 +839,13 @@ function textInput(placeholder, type) {
   if (type) i.type = type;
   return i;
 }
+/** 数字输入 + 标签 + 边界（设置里的"秒"这类：不许留空、不许越界）。 */
+function numberInput(labelText, value, min, max) {
+  const input = textInput('', 'number');
+  input.min = String(min); input.max = String(max);
+  input.value = String(value === undefined || value === null ? '' : value);
+  return { input, wrap: field(labelText, input) };
+}
 function areaInput(placeholder) {
   const t = document.createElement('textarea');
   t.className = 'field-input'; t.rows = 3; t.placeholder = placeholder || '';
@@ -685,6 +871,58 @@ function field(labelText, input) {
 function emptyHint(text) {
   const e = document.createElement('div'); e.className = 'reg-empty'; e.textContent = text;
   return e;
+}
+
+
+/* ---------- 屏幕居中的提示弹窗（自研，顶替原生 alert/confirm） ----------
+ * 为什么自己做：原生弹窗样式不可控、会阻塞主线程、在受限环境（内嵌浏览器 / 移动端 webview）里表现不一。
+ * 与主区弹层（openModal）分开：那个在主区里、靠上对齐；这个固定在视口正中，任何布局下都在屏幕中间。
+ * 三档 kind：info / warn / err（只影响配色），都只给一个「知道了」；confirmBox 返回 Promise<boolean>。
+ */
+function notice(title, text, kind) {
+  const root = $("#notice-root");
+  root.innerHTML = "";
+  root.className = "notice-root open";
+  const overlay = document.createElement("div"); overlay.className = "notice-overlay";
+  const panel = document.createElement("div"); panel.className = "notice-panel notice-" + (kind || "info");
+  const head = document.createElement("div"); head.className = "notice-title"; head.textContent = title || "";
+  const body = document.createElement("div"); body.className = "notice-text"; body.textContent = text || "";
+  const row = document.createElement("div"); row.className = "notice-actions";
+  const ok = btn("知道了", "btn btn-primary");
+  const close = () => { root.innerHTML = ""; root.className = "notice-root"; document.removeEventListener("keydown", onKey); };
+  const onKey = (e) => { if (e.key === "Escape") close(); };
+  ok.onclick = close;
+  row.appendChild(ok);
+  panel.appendChild(head); panel.appendChild(body); panel.appendChild(row);
+  overlay.appendChild(panel);
+  overlay.onclick = (e) => { if (e.target === overlay) close(); };
+  document.addEventListener("keydown", onKey);
+  root.appendChild(overlay);
+  return close;
+}
+
+/// 需要用户二选一的确认（顶替原生 confirm）：返回 Promise<boolean>，只认"确认"或"取消"。
+function confirmBox(title, text, confirmLabel) {
+  return new Promise((resolve) => {
+    const root = $("#notice-root");
+    root.innerHTML = "";
+    root.className = "notice-root open";
+    const overlay = document.createElement("div"); overlay.className = "notice-overlay";
+    const panel = document.createElement("div"); panel.className = "notice-panel notice-warn";
+    const head = document.createElement("div"); head.className = "notice-title"; head.textContent = title || "";
+    const body = document.createElement("div"); body.className = "notice-text"; body.textContent = text || "";
+    const row = document.createElement("div"); row.className = "notice-actions";
+    const done = (v) => { root.innerHTML = ""; root.className = "notice-root"; document.removeEventListener("keydown", onKey); resolve(v); };
+    const onKey = (e) => { if (e.key === "Escape") done(false); };
+    const no = btn("取消", "btn"); no.onclick = () => done(false);
+    const yes = btn(confirmLabel || "确认", "btn btn-primary"); yes.onclick = () => done(true);
+    row.appendChild(no); row.appendChild(yes);
+    panel.appendChild(head); panel.appendChild(body); panel.appendChild(row);
+    overlay.appendChild(panel);
+    overlay.onclick = (e) => { if (e.target === overlay) done(false); };
+    document.addEventListener("keydown", onKey);
+    root.appendChild(overlay);
+  });
 }
 
 /* ---------- 主区弹层（清空一律 innerHTML=''） ---------- */
@@ -789,6 +1027,8 @@ function openModelsModal() {
     const apiIn = textInput('api_model（真正发给供应商的串）');
     const providerSel = selectInput(state.providers.map((p) => ({ value: p.id, label: p.id })), null);
     const noteIn = textInput('note（能力说明）');
+    // 上下文窗口：自动压缩按它 × 设置里的百分比触发；填 0/留空 = 保留现值（新建缺省 32k）。
+    const ctxIn = numberInput('上下文窗口（tokens）', 0, 0, 2000000);
     const save = btn('登记 / 更新', 'btn btn-primary btn-block');
 
     function rebuild() {
@@ -804,7 +1044,8 @@ function openModelsModal() {
         }
         const sub = document.createElement('div'); sub.className = 'reg-sub';
         sub.textContent = m.name + ' · ' + m.api_model + ' · 供应商 ' + m.provider +
-          ' · 工具调用 ' + (m.tools === 'native' ? '原生' : '手写信封');
+          ' · 工具调用 ' + (m.tools === 'native' ? '原生' : '手写信封') +
+          ' · 窗口 ' + (m.context || 0) + ' tokens';
         const note = document.createElement('div'); note.className = 'reg-note'; note.textContent = m.note || '';
         main.appendChild(id); main.appendChild(sub); main.appendChild(note);
         const acts = document.createElement('div'); acts.className = 'reg-acts';
@@ -812,6 +1053,7 @@ function openModelsModal() {
         edit.onclick = () => {
           idIn.value = m.id; nameIn.value = m.name; apiIn.value = m.api_model;
           providerSel.value = m.provider; noteIn.value = m.note || '';
+          ctxIn.input.value = m.context || 0;
           c.setMsg('编辑 ' + m.id);
         };
         const del = btn('删除', 'link-btn danger');
@@ -892,6 +1134,7 @@ function openModelsModal() {
       const body = {
         id: idIn.value.trim(), name: nameIn.value.trim(), api_model: apiIn.value.trim(),
         provider: providerSel.value, note: noteIn.value.trim(),
+        context: Number(ctxIn.input.value) || 0,
       };
       if (!body.id || !body.name || !body.api_model || !body.provider) {
         c.setMsg('id / 名字 / api_model / 供应商 均不能为空', true); return;
@@ -911,6 +1154,9 @@ function openModelsModal() {
     form.appendChild(field('api_model', apiIn));
     form.appendChild(field('供应商', providerSel));
     form.appendChild(field('note', noteIn));
+    // numberInput 返回 { input, wrap }，而 wrap **已经带标签**——直接把 wrap 挂上去
+    //（传对象给 field 会让 appendChild 抛异常，整个表单就建不起来）。
+    form.appendChild(ctxIn.wrap);
     form.appendChild(save);
     c.body.appendChild(form);
     const discTitle = document.createElement('div'); discTitle.className = 'wf-label'; discTitle.textContent = '从供应商获取模型（点选填入 api_model）';
@@ -945,16 +1191,36 @@ function openSettingsModal() {
   openModal('基本设置', (c) => {
     const stream = checkbox('流式传输（供应商逐片返回，边收边显示）', state.settings.streaming);
     const cot = checkbox('思维链显示（每条回答下的思维链，永远默认折叠、点击展开）', state.settings.show_reasoning);
+    // 单次模型调用的总预算（全局：讨论 / 执行 / 验收 / 单 agent 共用）。
+    const to = numberInput('单次模型调用的超时（秒）', state.settings.llm_timeout_secs, 10, 3600);
+    // 讨论阶段的提醒次数（用户可调）：一轮内对同一个成员最多提醒几次。
+    // **调用次数没有上限**：模型继续核实就继续跑，直到它给出表态（或用户点停止）。
+    const remind = numberInput('一轮内最多提醒几次', state.settings.discuss_remind_cap, 0, 20);
+    // 上下文用到多少就该压（占模型窗口的百分比）。
+    const pct = numberInput('上下文用到百分之多少就压缩', state.settings.compact_at_percent, 0, 100);
     const save = btn('保存', 'btn btn-primary btn-block');
     save.onclick = async () => {
       try {
-        await api('POST', '/api/settings', { streaming: stream.box.checked, show_reasoning: cot.box.checked });
+        await api('POST', '/api/settings', {
+          streaming: stream.box.checked,
+          show_reasoning: cot.box.checked,
+          llm_timeout_secs: Number(to.input.value) || 300,
+          discuss_remind_cap: Number(remind.input.value) || 0,
+          compact_at_percent: Number(pct.input.value) || 0,
+        });
         await refreshState();
         c.setMsg('已保存');
       } catch (e) { c.setMsg(e.message, true); }
     };
     c.body.appendChild(stream.wrap);
     c.body.appendChild(cot.wrap);
+    c.body.appendChild(to.wrap);
+    c.body.appendChild(cfgHint('超时是全局的：讨论、执行、验收与单 agent 共用这一份预算。用尽时会中断本轮并提示，点「继续」可重试（会话不会作废）。'));
+    c.body.appendChild(remind.wrap);
+    c.body.appendChild(cfgHint('调用次数没有上限：模型继续核实就继续跑，直到它给出表态（你可以随时点「停止」）。'));
+    c.body.appendChild(cfgHint('一轮内提醒到顶就记一行「未回应」放过它，整轮继续（不阻塞）。'));
+    c.body.appendChild(pct.wrap);
+    c.body.appendChild(cfgHint('压缩由 AI 自己做：到点自动压一次；也可以随时手动 /compact。填 0 = 不自动压。'));
     c.body.appendChild(save);
   });
 }
@@ -1077,17 +1343,17 @@ uploadPicker.addEventListener('change', () => {
   const f = uploadPicker.files && uploadPicker.files[0];
   if (!f) return;
   const s = activeSession();
-  if (!s) { alert('先打开或新建一个工作，再上传文件到它的 work/'); uploadPicker.value = ''; return; }
+  if (!s) { notice('还不能上传', '先打开或新建一个工作，再上传文件到它的 work/。'); uploadPicker.value = ''; return; }
   const reader = new FileReader();
   reader.onload = async () => {
     const b64 = String(reader.result || '').split(',')[1] || '';
     try {
       await api('POST', '/api/sessions/' + encodeURIComponent(s.sid) + '/upload', { name: f.name, data_base64: b64 });
       filesCache.delete(s.sid); // 文件清单变了，@ 菜单下次重拉
-      alert('已上传到本次工作的 work/：' + f.name);
+      notice('已上传', '已上传到本次工作的 work/：' + f.name);
     } catch (err) {
       if (err.status === 409) conflictUpload(s.sid, f.name, b64);
-      else alert(err.message);
+      else notice('操作失败', err.message, 'err');
     }
     uploadPicker.value = '';
   };
@@ -1109,8 +1375,8 @@ async function sendUpload(sid, name, b64, overwrite) {
     if (overwrite) body.overwrite = true;
     await api('POST', '/api/sessions/' + encodeURIComponent(sid) + '/upload', body);
     filesCache.delete(sid); // 文件清单变了，@ 菜单下次重拉
-    alert('已上传：' + name);
-  } catch (e) { alert(e.message); }
+    notice('已上传', '已上传：' + name);
+  } catch (e) { notice('操作失败', e.message, 'err'); }
 }
 
 function conflictUpload(sid, name, b64) {
@@ -1132,7 +1398,7 @@ function renameUpload(sid, name, b64, alt) {
       try {
         await api('POST', '/api/sessions/' + encodeURIComponent(sid) + '/upload', { name: v, data_base64: b64 });
         filesCache.delete(sid); // 文件清单变了，@ 菜单下次重拉
-        closeModal(); alert('已上传：' + v);
+        closeModal(); notice('已上传', '已上传：' + v);
       } catch (e) {
         if (e.status === 409) { c.setMsg('还是同名，请换一个名字', true); return; }
         c.setMsg(e.message, true);
@@ -1469,7 +1735,7 @@ function openWizard() {
 
     // 真正下发（重名时先经 choiceModal 让用户裁决，绝不用原生 confirm）
     async function submit(body) {
-      try { await startSession(body); closeModal(); } catch (e) { alert(e.message); }
+      try { await startSession(body); closeModal(); } catch (e) { notice('操作失败', e.message, 'err'); }
     }
 
     createBtn.onclick = async () => {
@@ -1533,12 +1799,18 @@ async function startSession(body) {
   const sid = r.sid;
   const s = {
     sid, mode: body.mode, title: body.name || sid,
-    lines: [], live: [], pending: null, busy: false, done: false, awaiting: null, fold: {}, scroll: {},
+    lines: [], live: [], pending: null, sending: false,
+    running: false, working: null, running_known: false,
+    done: false, awaiting: null, fold: {}, scroll: {},
   };
+  // 开场事实由 /api/sessions 那一刻就推给事件台了（回包只给头部序号），所以这里**合流**一次：
+  // 盘上转录 + 事件台尾巴一次给全，水位也随之下定（此后的批次按水位筛）。
+  s.hydrated = false;
+  s.buffer = [];
   state.sessions.set(sid, s);
-  for (const ev of (r.events || [])) absorb(s, ev);
+  hydrateHistory(s);
+  // 开场事实不随回包走：它们已经在事件台上，长轮询会照 seq 补进来。
   setActive(sid);
-  if (body.mode === 'collab') await refreshPending(s);
   renderAll();
   await refreshState(); // 会话历史随建随现
   return s;
@@ -1579,16 +1851,35 @@ function activeSession() { return state.sessions.get(state.activeSid); }
 function absorb(s, ev) {
   switch (ev.type) {
     case 'notice': s.lines.push({ cls: 'sys', who: '', text: ev.text }); break;
+    // 压缩：显示**分界 + 摘要**（旧内容仍在上方可查——它只是不再发给模型）。
+    case 'compacted':
+      s.lines.push({
+        cls: 'sys compacted',
+        who: '',
+        text: '[压缩] 此前内容已压成摘要（不再发给模型，仍可查看）：\n' + ev.summary,
+      });
+      break;
+    // 任务链的进展：节点开工/回报/验收/交付——主会话也要看得到，不必点进子会话。
+    case 'node_started':
+      s.lines.push({ cls: 'sys system', who: '', text: '[节点] 开工：' + (ev.assignee || '') + ' · ' + (ev.node || '') });
+      break;
+    // 节点回报 = **它把活交回来了**：主会话记一行"完成"（摘要取首行，正文在子会话里看）。
+    // 失败的节点由核心的验收结论另行如实说明（这里只显示"交回"这个事实，不替验收下判）。
+    case 'report':
+      s.lines.push({
+        cls: 'sys system',
+        who: '',
+        text: '[节点] 完成：' + (ev.id || '') + (ev.rework ? '（第 ' + ev.rework + ' 轮返工）' : '')
+          + (ev.text ? ' —— ' + String(ev.text).split('\n')[0].slice(0, 80) : ''),
+      });
+      break;
     case 'transcript':
       // 服务端权威转录：每行带会话内稳定 id（回档按 id 定位）。
       // 权威行到达：撤掉乐观回显与流式块，改用服务端的行；带 tool 的行渲染成工具卡片。
       s.lines = s.lines.filter((x) => !x.pending);
       for (const l of ev.lines) {
-        if (l.tool) {
-          s.lines.push({ cls: 'tool', id: l.id, tool: l.tool, reasoning: l.reasoning || null, who: '', text: '', speaker: l.tool.speaker || '' });
-          continue;
-        }
-        const parts = parseLine(l.line, l.degraded);
+        // 身份与样式**全读结构化字段**（种类 / 说话人 / 动词），不再从正文里抠标签（见 lineParts）。
+        const parts = lineParts(l);
         for (const p of parts) { p.id = l.id; if (l.reasoning) p.reasoning = l.reasoning; }
         s.lines.push(...parts);
       }
@@ -1607,6 +1898,19 @@ function absorb(s, ev) {
       else segs.push({ kind: ev.kind, text: ev.text });
       return true; // 短暂流式事件：只走增量渲染，不整帧重建
     }
+    case 'working':
+      // **权威运行态**：核心开始问某个 agent = 忙（带名字），agent=null = 这一回合收尾了。
+      // 它不进转录（短暂事件）：用户看到的是占位动画与按钮切换，不是一条消息。
+      // 事件即真相：agent 有名字 = 忙，null = 这一回合收尾（此后不再听快照的）。
+      s.running = !!ev.agent;
+      s.working = ev.agent || null;
+      s.running_known = true;
+      if (!ev.agent) {
+        // 回合收尾却没有权威行（停止 / 错误）：未定稿的分片不得继续闪光标或冒充转录。
+        s.live = [];
+        return false;
+      }
+      return true;
     case 'tool_call':
       // 工具调用发生在轮与轮之间：按到达顺序插进流式块里（module 为空 = 内置 read/write）。
       s.live.push({ kind: 'tool', tool: ev });
@@ -1615,7 +1919,6 @@ function absorb(s, ev) {
       if (ev.over_cap) s.lines.push({ cls: 'sys', who: '', text: '讨论超轮次上限，进入裁决。' });
       break;
     case 'plan': s.lines.push({ cls: 'plan', who: '核心整理', text: ev.text }); break;
-    case 'report': s.lines.push({ cls: 'line', who: ev.rework > 0 ? '执行·返工' + ev.rework + ' · ' + ev.id : '执行 · ' + ev.id, text: ev.text }); break;
     case 'review':
       if (!ev.items || ev.items.length === 0) {
         s.lines.push({ cls: 'bad', who: '验收', text: '清单解析失败，原文：\n' + ev.raw });
@@ -1628,7 +1931,18 @@ function absorb(s, ev) {
       s.lines.push(ev.ok ? { cls: 'ok', who: '交付', text: '全部通过，交付用户。' }
         : { cls: 'bad', who: '裁决', text: '返工超限仍未通过，交用户裁决。' });
       break;
-    case 'ended': s.done = true; break;
+    case 'decision':
+      // 请用户裁决（短暂）：与快照里的 pending 是同一个事实，只是到达得更快。
+      s.pending = ev;
+      return false; // 门要整帧重画
+    case 'ended':
+      // 整场工作结束：运行态也是"没在跑"（事件给的事实，不靠快照）。
+      s.done = true;
+      s.live = [];
+      s.running = false;
+      s.working = null;
+      s.running_known = true;
+      break;
   }
   return false; // 定稿事件：需要整帧重建
 }
@@ -1656,31 +1970,39 @@ function envelopeLine(text, speaker) {
   return { cls: 'line', who: '', text: text, speaker: speaker || '', rawTool: true };
 }
 
-function parseLine(l, degraded) {
-  const m = l.match(/^\[([^\]]+):([a-z]+)\]([\s\S]*)$/);
-  if (m) {
-    const cls = m[2] === 'agree' ? 'ok' : m[2] === 'leave' ? 'sys' : m[2] === 'ask' ? 'plan' : 'line';
-    // 降级标记来自服务端的**结构化字段**（行上的 degraded），不靠匹配行文本里的说明文案。
-    const deg = degraded === true;
-    const text = m[3].trim();
-    // 自由发言（say）的正文若整段就是工具信封，按卡片渲染，而不是当消息
-    if (cls === 'line' && looksLikeToolEnvelope(text)) return [envelopeLine(text, m[1])];
-    return [{ cls: deg ? 'sys' : cls, who: m[1] + ' · ' + m[2] + (deg ? ' · 信封缺失' : ''), text, speaker: m[1], verb: m[2], degraded: deg }];
+/// 一行 → 渲染对象：**全读结构化字段**（种类 / 说话人 / 动词 / 正文），不从正文里抠标签。
+/// 服务端在落行时就把身份写进字段（见 core/events.rs 的 LineView）——
+/// 这里只做"种类 → 样式"的映射：系统行、用户行、轮次分隔行、模型发言、工具卡片。
+function lineParts(l) {
+  const text = l.line || '';
+  const speaker = l.speaker || '';
+  const verb = l.verb || '';
+  const kind = l.kind || '';
+  const reasoning = l.reasoning || null;
+  // 工具行：按调用视图渲染成卡片（说话人取自视图）。
+  if (l.tool || kind === 'tool') {
+    // 工具行同样要有身份（卡片左上角标出是谁在调工具）——身份是这一行的，不是正文的附属。
+    return [{ cls: 'tool', tool: l.tool || null, reasoning: reasoning, who: (l.tool && l.tool.speaker) || speaker, text: '', speaker: (l.tool && l.tool.speaker) || speaker }];
   }
-  if (l.startsWith('[用户')) return [{ cls: 'user', who: '用户', text: l.replace(/^\[[^\]]+\]\s*/, '') }];
-  if (l.startsWith('[代拟]')) return [{ cls: 'sys', who: '核心代拟', text: l.slice(4) }];
-  // 单 agent 的文本行：[说话人] 正文（协作的 [名字:动词] 上面已认）。
-  // 正文**可能为空**：那一轮只思考、或只发了工具信封（思维链在 reasoning 里，正文没有）。
-  // 核心自己的标签（[轮次 2] 这类）方括号里以「轮次」开头，保持系统行原样，不当成说话人。
-  const sp = l.match(/^\[([^\]]+)\]\s*([\s\S]*)$/);
-  if (sp) {
-    const tag = sp[1];
-    const text = sp[2].trim();
-    if (!text && /^轮次/.test(tag)) return [{ cls: 'line', who: '', text: l }];
-    if (looksLikeToolEnvelope(text)) return [envelopeLine(text, tag)];
-    return [{ cls: 'line', who: tag, text }];
-  }
-  return [{ cls: 'line', who: '', text: l }];
+  // 系统行：系统注入的提醒/边界（没有说话人），或核心自己的行（代拟…）。
+  if (kind === 'system' || l.system) return [{ cls: 'sys system', who: speaker, text: text }];
+  // 讨论的轮次分隔行：标签是"轮次 + 号"（号在正文里，结构化）。
+  if (kind === 'round') return [{ cls: 'sys system', who: '', text: '[' + speaker + ' ' + text + ']' }];
+  // 用户说的行：标签在字段里（需求/开始/撤回/名单…），界面上就是"用户 + 那句话"。
+  if (kind === 'user') return [{ cls: 'user', who: '用户', text: text }];
+  // 模型发言：动词决定样式；"降级"是结构化信号（不在正文里找说明文案）。
+  const cls = verb === 'agree' ? 'ok' : verb === 'leave' ? 'sys' : verb === 'ask' ? 'plan' : 'line';
+  const deg = l.degraded === true;
+  // 自由发言（say）的正文若整段就是工具信封，按卡片渲染，而不是当消息
+  if (cls === 'line' && looksLikeToolEnvelope(text)) return [envelopeLine(text, speaker)];
+  return [{
+    cls: deg ? 'sys' : cls,
+    who: speaker + (verb ? ' · ' + verb : '') + (deg ? ' · 信封缺失' : ''),
+    text: text,
+    speaker: speaker,
+    verb: verb,
+    degraded: deg,
+  }];
 }
 
 /* ---------- 渲染 ---------- */
@@ -1721,14 +2043,28 @@ function syncTyping(s) {
   if (!typingNode) return;
   const live = s.live || [];
   const hasLive = live.some((b) => b.kind === 'tool' || (b.segments && b.segments.length));
-  typingNode.className = s.busy && !hasLive ? 'typing' : 'typing hidden';
+  const busy = isBusy(s);
+  typingNode.textContent = s.working ? '正在工作：' + s.working : '正在工作…';
+  typingNode.className = busy && !hasLive ? 'typing' : 'typing hidden';
 }
 
 function syncSendButton(s) {
   const sendBtn = $('#btn-send');
   if (!sendBtn) return;
-  sendBtn.textContent = s.busy ? '停止' : '发送';
-  sendBtn.className = s.busy ? 'btn btn-danger' : 'btn btn-primary';
+  // 忙碌时只留一个「停止」：用户一眼就知道这个会话在跑，而不是拿「继续/发送」去试探。
+  const busy = isBusy(s);
+  sendBtn.textContent = busy ? '停止' : '发送';
+  sendBtn.className = busy ? 'btn btn-danger' : 'btn btn-primary';
+  const cont = $('#btn-continue');
+  if (cont) cont.className = busy ? 'btn hidden' : 'btn';
+  // 「改需求」是**用户的动作**（不是核心推的门）：没有"本次需求"就**根本不渲染**（不是灰着）；
+  // 会话正在工作时不可点。
+  const up = $('#btn-update-task');
+  if (up) {
+    const can = !!(s && s.can_update_task);
+    up.className = can ? 'btn' : 'btn hidden';
+    up.disabled = busy;
+  }
 }
 
 /// 只有本来就在底部才自动跟随；用户往上滚时保持原位置（流式刷新不抢滚动条）。
@@ -1754,6 +2090,34 @@ function buildStreamBoxes(sid) {
   domOwner = sid;
 }
 
+/// **唯一的建块函数**：一行（渲染部件）→ 一个节点。身份在上、思维链次之、正文按 kind；工具行走卡片。
+/// 定稿行与实时块都从这里出——"两处各建一次"正是身份时有时无、空块漏出来的来源。
+function lineBlock(p, s, key, live) {
+  if (p.tool) {
+    const card = toolCard(p.tool, s, key, p.who || p.speaker);
+    if (p.reasoning && state.settings.show_reasoning) card.appendChild(reasoningBlock(p.reasoning, s, key));
+    return { node: card, txt: null, cot: null };
+  }
+  const cls = p.cls || 'line';
+  const el = document.createElement('div');
+  el.className = 'line ' + cls + (live ? ' streaming' : '');
+  if (p.who) {
+    const w = document.createElement('span'); w.className = 'who'; w.textContent = p.who; el.appendChild(w);
+  }
+  // 思维链在回答之上（先想后说）；默认折叠，展开状态由 fold store 记住（键 = 行/块的稳定键）。
+  let cot = null;
+  if (p.reasoning && state.settings.show_reasoning) {
+    cot = reasoningBlock(p.reasoning, s, key);
+    el.appendChild(cot);
+  }
+  let txt = null;
+  if (String(p.text == null ? '' : p.text).length) {
+    appendBody(el, cls, p.text);
+    txt = el.children[el.children.length - 1] || null;
+  }
+  return { node: el, txt: txt, cot: cot };
+}
+
 /// 定稿行渲染到容器里（每次全量重建这个容器；折叠与 <pre> 滚动状态由 store 恢复）。
 function renderDone(s) {
   if (!doneBox) return;
@@ -1763,20 +2127,20 @@ function renderDone(s) {
   for (const l of s.lines) {
     // 工具行（含"正文就是工具信封"的兜底行）：渲染成卡片，而不是当消息发出来。
     if (l.tool || l.rawTool) {
-      const card = l.tool ? toolCard(l.tool, s, 'T' + toolSeq) : rawToolCard(l.text, s, 'L' + l.id, l.speaker);
+      const b = l.tool
+        ? lineBlock({ cls: 'tool', tool: l.tool, who: (l.tool && l.tool.speaker) || l.speaker, reasoning: l.reasoning }, s, 'T' + toolSeq, false)
+        : { node: rawToolCard(l.text, s, 'L' + l.id, l.speaker) };
       if (l.tool) toolSeq += 1;
-      if (typeof l.id === 'number') card.appendChild(rewindButton(l.id));
-      doneBox.appendChild(card);
+      if (typeof l.id === 'number') b.node.appendChild(rewindButton(l.id));
+      doneBox.appendChild(b.node);
       continue;
     }
-    const el = document.createElement('div');
-    el.className = 'line ' + l.cls;
-    if (l.who) {
-      const w = document.createElement('span'); w.className = 'who'; w.textContent = l.who; el.appendChild(w);
-    }
-    // 思维链在回答之上（先想后说）；默认折叠，点开状态会被记住（键 = L<行 id>）。
-    if (l.reasoning && state.settings.show_reasoning) el.appendChild(reasoningBlock(l.reasoning, s, 'L' + l.id));
-    appendBody(el, l.cls, l.text);
+    // **空正文行不画空盒子**：一轮只有思维链、没有正文也没有工具调用时，落下来的行正文就是空的；
+    // 照常画说话人 + 空正文出来，就是一个空的"谁在说"框（真机上看到的空块）。这种行只画思维链。
+    const bodyless = !String(l.text == null ? '' : l.text).trim();
+    if (bodyless && !l.reasoning) continue;
+    // 建块只有一处（lineBlock）：身份 → 思维链 → 正文；定稿行与实时块同一套画法。
+    const el = lineBlock(l, s, 'L' + l.id, false).node;
     // 删除：删掉这一行和它之后的所有消息（服务端按行 id 重建，前端整体替换）。
     if (typeof l.id === 'number') el.appendChild(rewindButton(l.id));
     // 撤回该同意：转录追加一条撤回行，继续时按剩余转录重新判定。
@@ -1805,7 +2169,8 @@ function renderLive(s, full) {
     const blk = live[bi];
     if (blk.kind === 'tool') {
       if (!blk._node) {
-        blk._node = toolCard(blk.tool, s, 'T' + (toolLines + liveTool));
+        // 实时工具块与定稿工具行**同一处建块**（身份也随之带上）：这里从前直接调 toolCard，卡片没有身份。
+        blk._node = lineBlock({ cls: 'tool', tool: blk.tool, who: (blk.tool && blk.tool.speaker) || blk.speaker }, s, 'T' + (toolLines + liveTool), true).node;
         liveBox.appendChild(blk._node);
       }
       liveTool += 1;
@@ -1813,14 +2178,11 @@ function renderLive(s, full) {
     }
     const segs = blk.segments || [];
     if (!blk._node) {
-      const el = document.createElement('div');
-      el.className = 'line line streaming';
-      const w = document.createElement('span'); w.className = 'who'; w.textContent = blk.speaker;
-      el.appendChild(w);
-      blk._node = el;
+      // 实时块同样经 lineBlock：身份先立，思维链/正文随后往这一块里追加（见下面的增量更新）。
+      blk._node = lineBlock({ cls: 'line', who: blk.speaker, text: '', reasoning: null }, s, 'V' + bi, true).node;
       blk._cot = null;
       blk._txt = null;
-      liveBox.appendChild(el);
+      liveBox.appendChild(blk._node);
     }
     // 先把这一轮的所有片段按 kind 归并（顺序无关紧要：思维链永远在正文之上，与定稿行一致）
     let cot = '';
@@ -1867,6 +2229,19 @@ function renderLive(s, full) {
     if (visible) blk._node.classList.remove('empty');
     else blk._node.classList.add('empty');
   }
+  // **只有正在传的那一块**是"流式观感"：一轮开始（新块）之后，前一块就已经讲完了
+  // （后面跟着它那一轮的工具卡），不该再挂着光标——块的正文要等整个回合定稿才被权威行替换，
+  // 期间前几块挂着光标，看起来就是"已经落盘的东西还在流"（真机反馈）。
+  let lastMsg = -1;
+  for (let bi = 0; bi < live.length; bi++) if (live[bi].kind === 'msg') lastMsg = bi;
+  for (let bi = 0; bi < live.length; bi++) {
+    const b = live[bi];
+    if (b.kind !== 'msg' || !b._node || !b._node.className) continue;
+    // 保留 empty 类（它由上面按"有没有可见内容"加/去）：整块重写 className 会把它抹掉，
+    // 空块就再也藏不住了。流式光标只挂在**正在传的那一块**上。
+    const blank = String(b._node.className).indexOf('empty') >= 0;
+    b._node.className = 'line line' + (blank ? ' empty' : '') + (bi === lastMsg ? ' streaming' : '');
+  }
   flushScroll(s);
 }
 
@@ -1906,55 +2281,85 @@ function renderLiveTick(s) {
   syncSendButton(s);
 }
 
-/* 裁决门：确认名单 / 确认开始 / 请教回答 */
+/* 裁决门：核心请用户定的事。二选一的（名单/开始）给按钮；其余给**自由文本**。
+   改需求**不是**门——它是会话级按钮（见 syncSendButton / updateTaskFlow）。 */
 function renderGate(s) {
   const gate = $('#gate');
   gate.innerHTML = '';
-  if (!s || s.busy || s.done || s.readonly) return;
+  if (!s || isBusy(s) || s.done || s.readonly) return;
   if (s.awaiting === 'task') {
     gate.appendChild(gateCard('请提交本次协作需求：', [
       ['提交', async () => { const v = takeInput(); if (v) await act('task', v); }],
     ]));
-  } else if (s.pending) {
-    if (s.pending.type === 'confirm_slate') {
-      gate.appendChild(gateCard('核心已代拟名单（见转录），是否按此建组？', [
-        ['确认建组', () => act('slate', 'yes')],
-        ['取消', () => act('slate', 'no')],
-      ]));
-    } else if (s.pending.type === 'confirm_begin') {
-      gate.appendChild(gateCard('名单已定，开始讨论？', [
-        ['开始', () => act('begin', 'yes')],
-        ['开始（授权小组自裁细节）', () => act('begin', 'yes,allow')],
-        ['暂不', () => {}],
-      ]));
-    } else if (s.pending.type === 'ask') {
-      gate.appendChild(gateCard(s.pending.member + ' 请教：' + s.pending.question, [
-        ['回答', async () => { const v = takeInput(); if (v !== null) await act('answer', v); }],
-      ]));
-    }
+    return;
   }
-  // 协作：随时可改本次需求（回到需求行、追加新需求，核心按最后一条判定）。
-  if (s.mode === 'collab') {
-    gate.appendChild(gateCard('需要修改本次需求？', [
-      ['改需求', async () => {
-        const v = window.prompt('新的本次需求：', '');
-        if (v !== null && v.trim()) await updateTask(v.trim());
-      }],
+  const p = s.pending;
+  if (!p) return;
+  if (p.kind === 'confirm_slate') {
+    gate.appendChild(gateCard('核心已代拟名单（见转录），是否按此建组？', [
+      ['确认建组', () => act('slate', 'yes')],
+      ['取消', () => act('slate', 'no')],
     ]));
+  } else if (p.kind === 'confirm_begin') {
+    gate.appendChild(gateCard('名单已定，开始讨论？', [
+      ['开始', () => act('begin', 'yes')],
+      ['开始（授权小组自裁细节）', () => act('begin', 'yes,allow')],
+      ['暂不', () => {}],
+    ]));
+  } else {
+    gate.appendChild(decisionCard(p));
   }
 }
 
-/* 改需求：服务端回到需求行并追加新需求，返回完整重放，前端整体重建。 */
+/// 裁决卡：**核心的说明 + 建议 + 要你回答的那句 + 自由文本**。
+/// 用户写自己的想法即可（"马上做"这种自然语言就算明确）；核心 AI 判定意图是否明确，明确了才开工/放行。
+function decisionCard(p) {
+  const el = document.createElement('div');
+  el.className = 'gate-card';
+  const q = document.createElement('div'); q.className = 'q'; q.textContent = p.summary || ''; el.appendChild(q);
+  if (p.advice) {
+    const a = document.createElement('div'); a.className = 'advice'; a.textContent = '建议：' + p.advice; el.appendChild(a);
+  }
+  if (p.question) {
+    const qq = document.createElement('div'); qq.className = 'ask'; qq.textContent = p.question; el.appendChild(qq);
+  }
+  const hint = document.createElement('div');
+  hint.className = 'hint';
+  hint.textContent = '用你自己的话说一句——它会进主会话，所有成员都看得到。';
+  el.appendChild(hint);
+  const inp = document.createElement('input');
+  inp.className = 'decision-input';
+  inp.placeholder = '你的想法…';
+  el.appendChild(inp);
+  const bs = document.createElement('div'); bs.className = 'btns';
+  const b = document.createElement('button'); b.className = 'btn btn-primary'; b.textContent = '提交';
+  b.onclick = async () => { const v = inp.value && inp.value.trim(); if (v) await act('decide', v); };
+  bs.appendChild(b); el.appendChild(bs);
+  return el;
+}
+
+/* 改需求：**用户自己点的动作**（不是核心推的门）。
+   服务端回到需求行并追加新需求，返回完整重放，前端整体重建。 */
+async function updateTaskFlow() {
+  const s = activeSession();
+  if (!s || isBusy(s) || !s.can_update_task) return;
+  const v = takeInput();
+  if (!v) {
+    notice('改需求', '先在输入框写下新的本次需求，再点「改需求」。', 'info');
+    return;
+  }
+  await updateTask(v);
+}
+
 async function updateTask(text) {
   const s = activeSession();
-  if (!s || s.busy) return;
+  if (!s || isBusy(s)) return;
   try {
     const r = await api('POST', '/api/sessions/' + encodeURIComponent(s.sid) + '/update-task', { text });
     s.lines = []; s.pending = null; s.readonly = false; s.done = false;
     for (const ev of (r.events || [])) absorb(s, ev);
-    await refreshPending(s);
     renderAll();
-  } catch (err) { alert(err.message); }
+  } catch (err) { notice('操作失败', err.message, 'err'); }
 }
 
 function gateCard(q, btns) {
@@ -1964,7 +2369,7 @@ function gateCard(q, btns) {
   const bs = document.createElement('div'); bs.className = 'btns';
   for (const [label, fn] of btns) {
     const b = document.createElement('button'); b.className = 'btn'; b.textContent = label;
-    b.onclick = () => fn().catch((err) => alert(err.message));
+    b.onclick = () => fn().catch((err) => notice('操作失败', err.message, 'err'));
     bs.appendChild(b);
   }
   el.appendChild(bs);
@@ -1980,37 +2385,79 @@ function takeInput() {
   return v;
 }
 
-/* 动作回包与长轮询可能携带同一批事件：按发件箱序号去重，保证只派发一次。 */
-function applyActionEvents(s, r) {
-  const evs = r.events || [];
-  if (typeof r.seq === 'number') {
-    if (r.seq <= appliedSeq) return; // 长轮询已派发过这一批
-    appliedSeq = r.seq;
-  }
-  for (const ev of evs) absorb(s, ev);
+/* 已应用到的批序号（**单调游标**）。
+   事实只有一条来路（事件台）：批次按 seq 到达，游标只前进；服务端裁剪造成跳号时由
+   `oldest` 触发一次历史重放重新对齐（见 pollLoop）。 */
+let appliedSeq = 0;
+/* 状态（侧栏/历史）可能被**别的客户端**改了：置位后由轮询统一拉一次。 */
+let needState = false;
+let lastStateAt = Date.now();
+/** 事件流出现**补不齐的缺口**（服务端裁剪）后，按历史重放一次当前会话。
+ * 为什么：spinner 与按钮都靠事件流，干等会让界面停在旧状态；重放比"攒着不显示"诚实。 */
+async function resyncActive() {
+  const s = activeSession();
+  if (!s || s.readonly) return;
+  try {
+    const r = await api('GET', '/api/history/' + encodeURIComponent(s.sid));
+    s.lines = []; s.live = [];
+    // 重放的是**转录**（运行态是短暂事件，不在盘上）：这条会话的实时知识同样作废，按快照对账。
+    s.running_known = false;
+    // 重新合流：水位跟着刷新，之后的批次仍然只收水位之上的。
+    if (typeof r.head === 'number') s.floor = r.head;
+    for (const ev of (r.events || [])) absorb(s, ev);
+    for (const ev of (r.live || [])) absorb(s, ev);
+    renderStream(true);
+  } catch { /* 拿不到就等下一次状态刷新 */ }
 }
 
+/** 收一批事件并应用。返回 'full' | 'live' | 'none'（渲染粒度）。 */
+function applyBatch(seq, sid, events) {
+  if (typeof seq === 'number') appliedSeq = Math.max(appliedSeq, seq);
+  const s = state.sessions.get(sid);
+  // **前端不认识的会话一律不动**（系统会话如核心推荐的 `#suggest` 也在内）：会话表只由
+  // /api/state 给，前端只渲染它知道的会话。为事件里冒出来的 sid 就地建会话 = 前端自己造会话
+  // 状态，非会话（系统会话）会因此长出多余标签页，而真会话的记录又会被建重一遍。
+  // 别的客户端建的**真**会话由下一次状态刷新带进来（refreshState 建 + 合流补齐）。
+  if (!s) {
+    needState = true;
+    return 'none';
+  }
+  // 水位以下的批次已经在**合流**里给过（/api/history 一次给全）：丢掉，不是"没收到"。
+  if (typeof seq === 'number' && typeof s.floor === 'number' && seq <= s.floor) return 'none';
+  // 合流还没落定：先攒着，等水位出来再按水位筛（见 hydrateHistory）。
+  if (s.hydrating) {
+    if (!s.buffer) s.buffer = [];
+    s.buffer.push({ seq, events });
+    return 'none';
+  }
+  // 运行态**不从增量猜**：核心在起止各推一条 `working`（同一个批次里就在 events 里），
+  // 事件按序吸收，运行态因此自己就对了——猜"有增量=在跑"只会与事件打架。
+  return absorbEvents(s, events);
+}
 async function act(action, text) {
   const s = activeSession();
-  if (!s || s.busy || s.readonly) return;
-  s.busy = true;
+  if (!s || isBusy(s) || s.readonly) return;
+  // 本地事实：我的命令在途（不是服务端运行态）——按钮立刻切「停止」，避免重复提交。
+  s.sending = true;
   // 乐观回显：自己的发言立刻可见；服务端权威行到达时自动替换（见 absorb）。
   if (text && (action === 'say' || action === 'task' || action === 'answer')) {
     s.lines.push({ cls: 'user', who: '用户', text, pending: true });
   }
   renderStream();
   try {
-    const r = await api('POST', '/api/sessions/' + encodeURIComponent(s.sid) + '/' + action, { text });
-    applyActionEvents(s, r);
+    // 命令回包只有头部序号：事实（含自己那条发言的权威行）由事件流补进来。
+    await api('POST', '/api/sessions/' + encodeURIComponent(s.sid) + '/' + action, { text });
     s.awaiting = null;
-    await refreshPending(s);
     renderAll();
   } catch (err) {
     s.lines = s.lines.filter((x) => !x.pending);
     s.lines.push({ cls: 'bad', who: '错误', text: err.message });
     renderAll();
   } finally {
-    s.busy = false;
+    s.sending = false;
+    // 回包只给头部序号；事实由事件流补进来。顺手要一次快照**对账**：命令已结束但它的
+    // 收尾事件可能还在路上，运行态由事件（或这轮快照）说了算，不由"我在不在途"说了算。
+    needState = true;
     renderAll();
   }
 }
@@ -2018,7 +2465,7 @@ async function act(action, text) {
 /* 删除：删掉这一行和它之后的所有消息；服务端返回重放后的完整事件流，前端整体重建。 */
 function rewindTo(id) {
   const s = activeSession();
-  if (!s || s.busy) return;
+  if (!s || isBusy(s)) return;
   choiceModal('删除消息', '删除这一行和之后的所有消息？此操作不可撤销。', [
     ['删除', 'btn btn-danger', async () => {
       try {
@@ -2030,9 +2477,11 @@ function rewindTo(id) {
         s.pending = null;
         s.done = false;
         s.readonly = false; // 历史回放会话一旦删除即转为活动会话
+        if (typeof r.head === 'number') s.floor = r.head;
         for (const ev of (r.events || [])) absorb(s, ev);
+        for (const ev of (r.live || [])) absorb(s, ev);
         renderAll();
-      } catch (err) { alert(err.message); }
+      } catch (err) { notice('操作失败', err.message, 'err'); }
     }],
     ['取消', 'btn btn-ghost', () => {}],
   ]);
@@ -2041,14 +2490,13 @@ function rewindTo(id) {
 /* 撤回某 agent 的同意（转录追加撤回行，协作才有意义）；值 = agent 实例名。 */
 function withdrawAgree(agent) {
   const s = activeSession();
-  if (!s || s.busy) return;
+  if (!s || isBusy(s)) return;
   choiceModal('撤回同意', '撤回「' + agent + '」的同意？继续时会按剩余转录重新判定。', [
     ['撤回', 'btn btn-danger', async () => {
       try {
-        const r = await api('POST', '/api/sessions/' + encodeURIComponent(s.sid) + '/withdraw', { agent });
-        applyActionEvents(s, r);
+        await api('POST', '/api/sessions/' + encodeURIComponent(s.sid) + '/withdraw', { agent });
         renderAll();
-      } catch (err) { alert(err.message); }
+      } catch (err) { notice('操作失败', err.message, 'err'); }
     }],
     ['取消', 'btn btn-ghost', () => {}],
   ]);
@@ -2057,32 +2505,20 @@ function withdrawAgree(agent) {
 /* 继续：由用户点击授权核心往下走。单 agent 若末条是 AI，服务端只回提醒、不发请求。 */
 async function continueFlow() {
   const s = activeSession();
-  if (!s || s.busy) return;
-  s.busy = true;
+  if (!s || isBusy(s)) return;
+  s.sending = true;
   renderStream();
   try {
-    const r = await api('POST', '/api/sessions/' + encodeURIComponent(s.sid) + '/continue', {});
+    await api('POST', '/api/sessions/' + encodeURIComponent(s.sid) + '/continue', {});
     s.readonly = false; // 历史回放会话一旦继续即转为活动会话（跨重启续跑）
-    applyActionEvents(s, r);
-    await refreshPending(s);
     renderAll();
   } catch (err) {
     s.lines.push({ cls: 'bad', who: '错误', text: err.message });
     renderAll();
   } finally {
-    s.busy = false;
+    s.sending = false;
+    needState = true; // 同上：运行态以事件为准，快照只对账
     renderAll();
-  }
-}
-
-async function refreshPending(s) {
-  // 服务端在 Ended 后回收会话：查询报「无此会话」即视为已终结。
-  if (s.done) return;
-  try {
-    const r = await api('POST', '/api/sessions/' + encodeURIComponent(s.sid) + '/pending', {});
-    s.pending = r.pending || null;
-  } catch (err) {
-    if (String(err.message).includes('无此会话')) { s.done = true; s.pending = null; }
   }
 }
 
@@ -2256,8 +2692,8 @@ function atKey(e) {
 async function atOnInput() {
   const tok = atToken();
   const s = activeSession();
-  // busy（生成中）仍拒绝，避免与「停止」抢键盘；readonly（历史只读会话）允许——插入文本无害。
-  if (!tok || !s || s.busy) { atClose(); return; }
+  // 忙碌（生成中）仍拒绝，避免与「停止」抢键盘；readonly（历史只读会话）允许——插入文本无害。
+  if (!tok || !s || isBusy(s)) { atClose(); return; }
   // 同步先开菜单：/files 还没有回来，↑↓/Enter 也必须已经被菜单接管，
   // 否则这期间按 Enter 会把消息直接发出去。
   atState.open = true;
@@ -2279,6 +2715,7 @@ async function atOnInput() {
 /* ---------- 发送 ---------- */
 $('#btn-send').onclick = onSend;
 $('#btn-continue').onclick = continueFlow;
+$('#btn-update-task').onclick = updateTaskFlow;
 $('#input').addEventListener('keydown', (e) => {
   if (atKey(e)) return; // 菜单打开时 ↑/↓/Enter/Esc 归菜单
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); onSend(); }
@@ -2290,7 +2727,7 @@ function autoGrow() {
 /* 停止生成：只置位服务端的中止开关；in-flight 的 say/continue 会立刻收尾返回。 */
 async function stopGeneration() {
   const s = activeSession();
-  if (!s || !s.busy) return;
+  if (!s || !isBusy(s)) return;
   try {
     await api('POST', '/api/sessions/' + encodeURIComponent(s.sid) + '/stop', {});
   } catch (e) { /* 停止失败不吵用户；按钮仍是停止，可再点一次 */ }
@@ -2299,54 +2736,100 @@ async function stopGeneration() {
 function onSend() {
   const s = activeSession();
   if (!s || s.readonly) return;
-  if (s.busy) { stopGeneration(); return; } // 生成中：同一个键变成「停止」
+  if (isBusy(s)) { stopGeneration(); return; } // 生成中：同一个键变成「停止」
   if (s.awaiting === 'task') { const v = takeInput(); if (v) act('task', v); return; }
-  if (s.pending && s.pending.type === 'ask') { const v = takeInput(); if (v) act('answer', v); return; }
+  // 裁决是自由文本：把输入框里的话作为回应提交（核心 AI 判定意图是否明确）。
+  if (s.pending && s.pending.kind !== 'confirm_slate' && s.pending.kind !== 'confirm_begin') {
+    const v = takeInput();
+    if (v) act('decide', v);
+    return;
+  }
   if (s.mode !== 'collab') { const v = takeInput(); if (v) act('say', v); return; } // 单 agent 形态可以自由发言
   // 协作无挂起时忽略发送（避免打断泵）。
 }
 
 /* ---------- 长轮询：增量事件 + 连接状态 ---------- */
 let pollSince = 0;
-/* 已派发到的事件批序号：动作回包与长轮询共用，保证同一批只 absorb 一次。 */
-let appliedSeq = 0;
 let pollActive = false;
 async function pollLoop() {
   if (pollActive) return;
   pollActive = true;
   while (true) {
+    // ① 取事件：**只有这一步失败才算断线**（服务没起来 / 连接断了）。
+    let data;
     try {
       const r = await fetch('/api/events?sid=&since=' + pollSince);
       if (!r.ok) throw new Error('轮询失败 ' + r.status);
-      const data = await r.json();
-      setConn(true);
-      pollSince = data.head != null ? data.head : pollSince;
+      data = await r.json();
+    } catch (err) {
+      setConn(false, err);
+      await new Promise((res) => setTimeout(res, 3000));
+      continue;
+    }
+    setConn(true);
+    // ② 应用事件：出错是**界面自己的问题**，不能说成断线（连接明明好着），也不能吞掉。
+    // 为什么必须分开：渲染里的一个异常曾被当成"网络断了"，于是状态点一直红着、
+    // 而真正的异常连一行日志都没有——用户只看到"重连中"，服务其实好好的。
+    try {
+      const head = data.head != null ? data.head : pollSince;
+      const oldest = typeof data.oldest === 'number' ? data.oldest : 0;
+      // 事件台裁剪过：since 之后有一段**永久丢了**。按 seq 干等会让后续批次全部滞留
+      // （只有刷新页面才恢复）——所以这里重新对齐：丢掉滞留，跳到还留着的起点，
+      // 并把当前会话按历史重放一次。
+      if (oldest > 0 && oldest > appliedSeq + 1) {
+        appliedSeq = oldest - 1;
+        // 事件台裁掉了一段：**运行态的实时知识作废**（收尾那条可能就在丢掉的那段里），
+        // 退回"用快照对账"，直到事件重新告诉我们为止。
+        for (const cur of state.sessions.values()) cur.running_known = false;
+        needState = true;
+        await resyncActive();
+      }
+      pollSince = head;
       let mode = 'none';
       for (const item of data.lines) {
         try {
-          if (item.seq <= appliedSeq) continue; // 动作回包已派发过这一批
-          appliedSeq = item.seq;
-          const s = state.sessions.get(item.sid);
-          if (!s) continue;
-          const m = absorbEvents(s, item.events);
+          const m = applyBatch(item.seq, item.sid, item.events);
           if (m === 'full') mode = 'full';
           else if (m === 'live' && mode !== 'full') mode = 'live';
-          // 不在这里改 busy：流式增量到达时会把「停止」按钮误翻回「发送」。
+          // 运行态只在 applyBatch 里由事件改（`working`）——
+    // 这里碰它，一个迟到的流式增量就会把「停止」按钮误翻回「发送」。
         } catch { /* 单行损坏不拖垮轮询 */ }
+      }
+      // 状态对齐：别的客户端（演示脚本、另一个标签页）建/删/改会话时，侧栏自己跟上——
+      // 不需要用户刷新浏览器；未知会话会立刻置 needState，其余靠 3 秒兜底。
+      if (needState || Date.now() - lastStateAt > 3000) {
+        needState = false;
+        lastStateAt = Date.now();
+        // refreshState 自己会把侧栏与历史重画；agent 登记弹窗里的列表归那个弹窗自己管。
+        // refreshState 自己会把侧栏与历史重画；agent 登记弹窗里的列表归那个弹窗自己管。
+        // 曾经这里调了弹窗内部的 `renderList`——那个名字在顶层作用域根本不存在，
+        // 于是每次刷新都抛一次 ReferenceError，被轮询的 catch 当成"断线"，状态点一直红着。
+        await refreshState();
       }
       // 纯流式增量：只 append 新节点（折叠、<pre> 滚动、外层滚动都不被打断）。
       if (mode === 'full') renderAll();
       else if (mode === 'live') renderLiveTick(activeSession());
       // 有会话动作在等回包时，让动作回包自己刷新 pending；轮询只补漏。
-    } catch {
-      setConn(false);
-      await new Promise((res) => setTimeout(res, 3000));
+    } catch (err) {
+      eventError(err);
     }
   }
 }
-function setConn(ok) {
+function setConn(ok, err) {
   $('#conn-state .dot').className = 'dot ' + (ok ? 'dot-ok' : 'dot-bad');
   $('#conn-text').textContent = ok ? '已连接' : '重连中…';
+  if (!ok) console.warn('事件流连接失败：', err || '');
+}
+
+/// 事件应用/渲染出错：**不是断线**（连接好着，是界面自己没处理对）。
+/// 同一个错只弹一次（否则每 3 秒一次会刷屏），但绝不静默吞掉——先落控制台，再如实告诉用户。
+let lastEventError = '';
+function eventError(err) {
+  console.error('事件处理出错：', err);
+  const msg = String((err && err.message) || err);
+  if (msg === lastEventError) return;
+  lastEventError = msg;
+  try { notice('界面处理事件出错', msg, 'err'); } catch { /* 弹窗本身出问题就只剩控制台 */ }
 }
 
 /* ---------- 抽屉（移动端） ---------- */
@@ -2364,4 +2847,6 @@ $('#btn-agents').onclick = openAgentsModal;
 $('#btn-upload').onclick = pickUploadFile;
 
 /* ---------- 启动 ---------- */
-refreshState().then(pollLoop).catch((err) => alert('初始化失败：' + err.message));
+refreshState()
+  .then(pollLoop)
+  .catch((err) => notice('初始化失败', err.message, 'err'));

@@ -3,7 +3,7 @@
 > 改代码前必读。本文是**分层的唯一权威**：谁依赖谁、端口画在哪、机制放哪一层、日志与提示词册怎么用、落盘契约长什么样。
 > 理念见 [PHILOSOPHY.md](PHILOSOPHY.md)，产品行为见 [PRODUCT.md](PRODUCT.md)，模块作者契约见 [MODULE_SPEC.md](MODULE_SPEC.md)，
 > 运行包契约见 [RUNTIME_SPEC.md](RUNTIME_SPEC.md)，登记处契约见 [REGISTRY_SPEC.md](REGISTRY_SPEC.md)，
-> 测试规范见 [TESTING.md](TESTING.md)，仓库协作规则见 [AGENTS.md](AGENTS.md)。
+> 测试规范见 [TESTING.md](TESTING.md)（门户与路由），仓库协作规则见 [AGENTS.md](AGENTS.md)。
 
 ## 一、分层与依赖方向
 
@@ -45,7 +45,7 @@ presentation ──▶ core ◀── adapters
 | `Workspace` | 一次工作的 work 目录、各 agent 沙箱、文件清单与寻址根 | `FsWorkspace` |
 | `SysIo` | 内置文件工具的读写机制（读严格 UTF-8、非法字节如实标注；写一律 UTF-8） | `FsSysIo` |
 | `HistoryStore` | 会话历史：一个会话一个目录（meta + 事件流水） | `FsHistory` |
-| `PromptSource` | 提示词册加载（`prompts.yaml`） | `YamlPrompts` |
+| `PromptSource` | 提示词册加载（`prompts/`） | `YamlPrompts` |
 | `ToolRunner` | 外部工具进程（围栏安装、拉起、stdin 送参、超时杀树、截断） | `ProcTools`（守门进程 = 本程序的 `--fence-run` 模式） |
 | `EnvelopeRepair` | 手写信封不合法时的**无歧义**补救（改了字段含义就是错；拿不准就返回不修） | `UnambiguousRepair`（转义字符串里的裸控制字符 + 补上扫描器算出的收尾括号；断在字符串中间不修，一段回复里起了两段信封不修——补哪一段都是猜；调用方中止的生成一律不修） |
 | `FenceHost` | 围栏授权的释放（删除会话时请求一次撤销） | `confine::FenceHostAdapter`（本平台无该机制时为空操作） |
@@ -53,124 +53,21 @@ presentation ──▶ core ◀── adapters
 
 新增端口前先问一句：**这是 IO 或可替换点吗**？不是就别加 trait。
 
-## 三、模块地图
 
-### 3.1 `core/`（抽象与业务，无 IO）
+## 三、模块地图与入站契约
 
-| 文件 | 职责 |
-| --- | --- |
-| `mod.rs` | 核心层入口与 `Core` 门面：会话中心、登记处编排、运行包报告 |
-| `ports.rs` | 出站端口 trait 与跨层数据结构（依赖倒置的边界；core 需要什么，由适配器实现） |
-| `api.rs` | **入站契约**：四个按角色的能力接口 + `CoreHandle`（核心自有线程、命令/事件）+ `EventBus` + `JobRegistry` |
-| `events.rs` | 呈现侧契约：`SessionEvent` 与介入请求的词汇（**事实**的线格式定义在这） |
-| `prompt.rs` | 提示词渲染：`{{key}}` 占位替换，缺键/缺变量报错 |
-| `schema.rs` | 工具参数契约（**声明在文本层**）：解析/校验/两种渲染（模型侧说明、JSON Schema） |
-| `module.rs` | `module.yaml` 契约、扫描结果 `Roster`、`runtimes`/`tools` 校验、agent system 合成 |
-| `packages.rs` | `package.yaml` 契约与包库事实（校验、去重、系统路径冲突预检） |
-| `exec.rs` | 执行档位（`ExecSpec`）与执行计划（`ExecPlan`）派生、虚拟机档诊断 |
-| `fence.rs` | 一次工具执行的围栏策略（纯数据：可达根、断网、工作目录） |
-| `workspace.rs` | 工作区与沙箱的纯数据定义、寻址与越界判定 |
-| `systool.rs` | 内置工具 `read` / `write` / `edit` / `patch` / `search` 的放行、寻址、**按声明校验参数**、改动前的"读过"证据（`Observations`）、自由格式补丁的原子应用与回执文案 |
-| `patch.rs` | 补丁通道的**纯逻辑**：解析自由格式补丁（Add / Update / SEARCH / REPLACE / End File）与整行应用（逐行匹配、行尾风格保持、失败点名第几处） |
-| `refs.rs` | 用户 `@` 引用改写成真实绝对路径 |
-| `providers.rs` | 供应商/模型登记处内存形态与「模型 → 通道」解析 |
-| `agents.rs` | agent 登记处、代拟名单落地与名字校验 |
-| `history.rs` | 会话元信息与历史视图的内存形态 |
-| `envelope.rs` | 发言信封解析（`ToolInvoke.body` = 信封之后的正文，自由格式工具的输入从这里取；含「像工具信封但不合法」的独立信号，并判定**未闭合 / 裸控制字符 / 语法错 / 字段不合法**四类；未闭合带上 EOF 状态：还差哪些收尾字符、是否断在字符串中间、这一段里起了几段信封） |
-| `collab_state.rs` | 「转录即状态」的协作状态派生（纯函数、可回放） |
-| `collab.rs` | 协作会话状态机与前端拉模式驱动 |
-| `engine.rs` | 讨论/执行/验收的引擎循环与工具循环（含按声明调度的并发：可并发声明成批并发跑、其余独占，结果按原序回填） |
-| `session.rs` | 单 agent 会话（历史自有、转录行稳定 id） |
+这两块是**查阅型细则**，拆出去只有一份：
 
-### 3.2 `adapters/`（机制，实现 core 端口）
+- 逐个文件讲 `core/` / `adapters/` / `presentation/` 各干什么：[docs/architecture/module-map.md](docs/architecture/module-map.md)。
+- 呈现层入站契约（能力接口、事件台、命令/事件规则）与机器可读的 HTTP 路由目录：[docs/architecture/contracts.md](docs/architecture/contracts.md)。
+- 系统工具总表、角色表与"谁能用哪些工具"（含越权校验与提示词按角色分配）：[docs/architecture/tools-and-roles.md](docs/architecture/tools-and-roles.md)。
+- 协作如何从讨论走到交付（审查关卡、任务链、子会话、验收）：[docs/architecture/task-chain.md](docs/architecture/task-chain.md)。
+- 提示词册（`prompts/`）的结构与键清单：[docs/architecture/prompts.md](docs/architecture/prompts.md)。
 
-| 文件 | 职责 |
-| --- | --- |
-| `mod.rs` | 适配层出口与统一 re-export |
-| `confine/` | 守门进程与平台围栏后端：`mod.rs` 装配与能力自报，`linux.rs` / `macos.rs` / `windows.rs` / `other.rs` 各平台机制 |
-| `proc_tools.rs` | `ToolRunner`：守门进程拉起、stdin 送参、超时杀树、输出截断 |
-| `sys_io.rs` | `SysIo`：内置工具的读写机制（UTF-8 解码、非法字节 `lossy` 标注） |
-| `repair.rs` | `EnvelopeRepair`：信封修复（默认只做两类可判定的修补——转义裸控制字符、补上缺的收尾括号；断在字符串中间与其余类别一律不猜） |
-| `fs_modules.rs` | `ModuleSource`：扫描 `modules/` |
-| `fs_packages.rs` | `PackageSource`：扫描 `runtimes/` |
-| `fs_workspace.rs` | `Workspace`：`session/<工作名>/` 下的 work 与各 agent 沙箱 |
-| `fs_history.rs` | `HistoryStore`：`meta.yaml` + `transcript.jsonl` |
-| `yaml_settings.rs` | `SettingsStore`：登记处四份 yaml 的读写（见 [REGISTRY_SPEC.md](REGISTRY_SPEC.md)） |
-| `yaml_prompts.rs` | `PromptSource`：加载 `prompts.yaml` |
-| `endpoint.rs` | 端点补全/回落规则与进程内端点记忆（纯逻辑） |
-| `http_agent.rs` | 出站 HTTP 代理构建（TLS 后端选择与超时的单点） |
-| `http_chat.rs` | `Chat` / `ChatGateway`：OpenAI 兼容 `/chat/completions`（请求体形状的唯一定义：真实会话与探针共用） |
-| `http_probe.rs` | 两条诊断探针（只报事实）：工具调用支持探测（`--probe-tools`）、回放形状探测（`--probe-replay`） |
-| `model_catalog.rs` | `ModelCatalog`：OpenAI 兼容 `GET /models` |
-| `fake_chat.rs` | 演示/测试通道：`FakeChat`（脚本回放）+ `DemoGateway`（无模型时回落） |
-| `log.rs` | `Log`：`logs/` 下按时间戳一份文件 |
+**路由表由契约测试机器比对**（`src/tests/routes.rs` 直接读 `docs/architecture/contracts.md`）：
+表与 `presentation/routes.rs` 的 `ROUTES` 对不上就是测试失败。
 
-### 3.3 `presentation/`（呈现）
-
-| 文件 | 职责 |
-| --- | --- |
-| `mod.rs` | 呈现层出口 |
-| `cli.rs` | 终端转录中心：解析命令 → 用能力面 → 渲染事件流 |
-| `web.rs` | Web 转录中心：tiny_http + 长轮询增量推送（只绑 `127.0.0.1`），分发由路由目录驱动 |
-| `intent.rs` | **共享意图层**：CLI 与 Web 的「意图 → 能力调用」规则只此一份（点名、归并、唯一名、动作分发） |
-| `routes.rs` | **HTTP 入站契约的唯一定义**：`ROUTES` 目录 + 匹配器（下文 §四 的表与它机器比对） |
-| `web/` | 浏览器端：`app.js` / `md.js` / `style.css` / `index.html`，以及 `*.smoke.cjs` 冒烟 |
-
-## 四、呈现层入站契约（命令/事件 + 路由目录）
-
-**核心常驻自己的执行线程、独占全部状态**：呈现层拿不到 `Core`、也拿不到任何核心锁。两侧只通过两样东西来往：
-
-| 东西 | 定义在 | 形态 |
-| --- | --- | --- |
-| 能力接口 | `core/api.rs` | `SessionOps` / `RegistryOps` / `HistoryOps` / `DiscoveryOps`（全 `&self`，可替换成假实现） |
-| 事件台 | `core/api.rs` | `EventBus`：核心独占生产，任意数量的消费者按序号增量取 |
-
-规则：
-
-- **命令**：呈现层调能力接口 → 核心在自己的线程上执行 → 同步回包（`Advance`：本批事件 + 事件台序号）。
-- **事件**：生成过程中的短暂事件与最终事件都进事件台；Web 长轮询按 `since` 取，客户端按 `seq` 去重。
-- **并发归核心**：`stop` 直接置位核心内部的取消标志，**不进命令队列**，所以生成期间照样立刻生效；
-  呈现层不需要知道「生成时核心状态被占用」这类内部事实。
-- **一次命令 panic 不带垮核心**：接住并继续服务（回包通道断开，调用方得到「无回应」）。
-- **传输的线格式归呈现层**：请求形状、路由、错误码在 `routes.rs`；**事实**的线格式（`SessionEvent`、`*View`）
-  仍在 core。两者不混——混在一起就是「到处内联 JSON 拼装」的成因。
-
-### 4.1 HTTP 路由目录（机器可读）
-
-`presentation/routes.rs` 的 `ROUTES` 是路由的**唯一定义**：`web.rs` 的匹配与分发都由它驱动
-（匹配由目录做、分支按 `id`），所以「代码里有路由但目录里没有」在结构上不可能发生。
-`solomni --print-routes` 输出它的 JSON（含能力、请求/响应形状、状态码与说明）。
-
-下面这张表由契约测试与 `ROUTES` 机器比对——对不上就是测试失败，不是靠人记得改文档：
-
-<!-- ROUTES:BEGIN -->
-| 方法 | 路径 | 能力 | 请求 | 响应 | 状态码 |
-| --- | --- | --- | --- | --- | --- |
-| GET | `/` | 静态资源 | — | `index.html` | 200 |
-| GET | `/style.css` | 静态资源 | — | `style.css` | 200 |
-| GET | `/app.js` | 静态资源 | — | `app.js` | 200 |
-| GET | `/md.js` | 静态资源 | — | `md.js` | 200 |
-| GET | `/api/events` | 事件台（`EventBus`） | 查询 `sid` / `since` | `{lines:[{seq,sid,events}],head}` | 200 |
-| GET | `/api/state` | `DiscoveryOps` + `RegistryOps` + `HistoryOps` | — | `{modules,rejected,fence,providers,models,core,agents,settings,sessions,history}` | 200, 400 |
-| POST | `/api/sessions` | `SessionOps::create_work` | `{name,mode,agents[],task?,delegate?}` | `{sid,agents,events}` | 200, 400 |
-| POST | `/api/sessions/{sid}/{action}` | `SessionOps` + `intent::act` | `{text?,agent?,id?,overwrite?,data_base64?,编辑体}` | `{sid,events,seq}` 等 | 200, 400, 404, 409 |
-| GET | `/api/sessions/{sid}/config` | `SessionOps::config` | — | `{config}` | 200, 400 |
-| GET | `/api/sessions/{sid}/files` | `SessionOps::files` | — | `{work,agents,roots}` | 200, 404 |
-| POST | `/api/providers` | `RegistryOps::upsert_provider` | `{id,base_url,api_key}` | `{ok}` | 200, 400 |
-| POST | `/api/providers/{id}/{action}` | `RegistryOps::remove_provider` / `discover_models` | — | `{ok}` / `{ok,models}` | 200, 400, 404 |
-| POST | `/api/models` | `RegistryOps::upsert_model` | `{id,name,api_model,provider,note?}` | `{ok}` | 200, 400 |
-| POST | `/api/models/{id}/{action}` | `RegistryOps::remove_model` / `set_core_model` / `probe_model_tools` / `probe_replay_shape` | — | `{ok}` / `{ok,outcome,detail,mode}` / `{ok,shapes}` | 200, 400, 404 |
-| POST | `/api/agents` | `RegistryOps::upsert_agent` | `{name,modules[],model?,note?}` | `{ok}` | 200, 400 |
-| POST | `/api/agents/{name}/{action}` | `RegistryOps::remove_agent` | — | `{ok}` | 200, 400, 404 |
-| GET | `/api/settings` | `RegistryOps::settings` | — | `{settings}` | 200, 400 |
-| POST | `/api/settings` | `RegistryOps::set_settings` | `{streaming?,show_reasoning?}` | `{ok}` | 200, 400 |
-| GET | `/api/history` | `HistoryOps::list` | — | `{sessions}` | 200, 400 |
-| GET | `/api/history/{name}` | `HistoryOps::open` | — | `{meta,events}` | 200, 404 |
-| POST | `/api/history/{name}/delete` | `HistoryOps::delete` | — | `{ok}` | 200, 400 |
-| POST | `/api/suggest-models` | `DiscoveryOps::suggest_models` | `{task,mode}` | `{ok,agents}` | 200, 400 |
-<!-- ROUTES:END -->
-
-## 五、运行日志（Log 端口）
+## 四、运行日志（Log 端口）
 
 - core 定义 `Log`（`info`/`warn`/`error`），**只调用**；文件、时间戳、目录机制在 adapters。
 - 关键节点必须埋点：通道降级、HTTP 失败、会话动作失败、装配失败、工具执行异常。
@@ -178,41 +75,25 @@ presentation ──▶ core ◀── adapters
 - 组合根创建唯一的 `FileLog` 并注入 core 与呈现层；测试用 `NoopLog`。
 - 目的：出问题时**看日志定因**，不靠推理猜。
 
-## 六、提示词册（prompts.yaml）
+## 五、提示词册（prompts/）
 
-- **所有发给 LLM 的提示词一律写入 `prompts.yaml`**，禁止硬编码进代码；改文案只改册子。
+- **所有发给 LLM 的提示词一律写入 `prompts/`**，禁止硬编码进代码；改文案只改册子。
 - 占位符 `{{key}}`；渲染器在 `core/prompt.rs`（纯逻辑）；文件加载经 `PromptSource` 端口在适配层。
 - **缺文件 / 缺键 / 缺变量 = 报错暴露**，禁止静默兜底文案。
 - 文案的注入方式与端口一致：随环境对象传入（沙箱/工具环境/引用改写器），而不是让纯逻辑自己去读文件。
 - 路径类占位符（`{{work_root}}` 等）由 core 在运行时替换成**真实根目录**后才交给 AI——仓库里永远不出现机器路径。
 
-册子结构（`prompts.yaml`）：
-
-| 段 | 键 | 用途 |
-| --- | --- | --- |
-| `core` | `chat_protocol` | 讨论约定（随首轮提示词注入，可自由演化） |
-| | `refs.foreign_sandbox` / `refs.collab_sandbox` | `@` 引用越权与协作场景的如实说明 |
-| | `discuss.opener` / `discuss.step` / `discuss.autonomy_note` | 讨论首轮、轮转、小组自裁说明 |
-| | `synthesize.system` / `synthesize.user` | 整理方案 |
-| | `execute.user` | 执行任务 |
-| | `review.system` / `review.user` | 验收 |
-| | `rerun.user` | 返工 |
-| | `slate.system` / `slate.user` | 代拟名单 |
-| | `suggest_models.*` | 模型推荐（单 agent / 协作两种说法） |
-| | `agent.system` | agent 职责提示词骨架（模块 `system` 合成 + 内置工具说明 + 外部工具清单 + 模块工具参数段） |
-| | `sys_tools` | 内置工具说明块（含本 agent 的真实根目录、模块目录、`{{tool_params}}` 参数签名与 `{{patch_guide}}`） |
-| | `patch_guide` | 自由格式补丁的写法（每块以 `*** End File` 收尾、SEARCH 要整行一致、一次可多块、整体原子） |
-| | `tool_calling_envelope` / `tool_calling_native` | 工具调用约定**两套，互斥**：一个通道只用一套，由通道形态决定注入哪套（同时教会让模型在正文里讲解参数而被误判成调用） |
-| | `builtin_tools` | 内置三件套的**参数契约**：模型侧说明与调用校验的唯一来源（不写进代码） |
-| | `no_agents` / `no_model` / `no_module_dirs` / `no_module_tools` / `no_module_tool_params` | 空态说法 |
-| | `module_tool_params_header` | 模块工具参数段的小标题（模块在 `module.yaml` 里声明了 `params` 时出现） |
-| | `tool_texts.*` | **运行时回执**：路径校验、参数不符（说事实 + 回发工具签名）、内置四件套回执与行区间/截断/编码标注、edit 的找不到（含"只差空白"提示）与多处命中、patch 的解析失败（缺 End File / 缺路径 / 空 SEARCH…）与"第几块为什么、整体没写"、write 的"没读过/读后又被改/只读到一部分"三种拒绝、外部工具分派的三类失败、工具超限、**信封不合法四类**（未闭合"还差什么"/"起了两段" / 裸控制字符 / 语法错 / 字段不合法）与"已修复后执行"/"输出被长度截断"的如实标注、给模型看的清单骨架、追加在回复行末尾的 `（已停止）` / `（本段被输出长度截断）` |
+提示词册的**文件与键清单**（每份文件里有什么键、每个键干什么）只有一份：
+[docs/architecture/prompts.md](docs/architecture/prompts.md)。
 
 - **界面通知**（`[建组]`、`[上限]` 这类）是呈现层文案，**不属于**提示词册。
-- **不进册子的两类**（有意留在代码里）：①**会被解析的转录锚点**（`[轮次 N]`、`[用户:需求]`、`[代拟] …`、`[id:tag]` 等，`collab_state` 与回档定位要读它们，改文案等于改状态机）；②**只给用户看的呈现层文案**（各类 `SessionEvent::Notice`、工具轨迹行的成败字样、面向界面/CLI 的 `Err`）。
+- **不进册子的两类**（有意留在代码里）：①**行身份是结构化字段**（`LineView` 的 `speaker` / `verb` / `kind`）：
+  转录行不靠"标签写成什么样"来认，`LineView::render()` 是"字段 → 文本"的唯一拼法——`collab_state` 派生与
+  回档定位都读字段，改文案不再等于改状态机；②**只给用户看的呈现层文案**（各类 `SessionEvent::Notice`、
+  工具轨迹行的成败字样、面向界面/CLI 的 `Err`）。
 - 运行时回执之所以进册子：它们会成为模型下一轮的输入，属于提示词。
 
-## 七、状态与落盘契约
+## 六、状态与落盘契约
 
 **布局**（机制口径）：
 
@@ -231,8 +112,8 @@ session/<工作名>/
   **不钉在会话里**：每次生成前按登记处重新解析——变了就按重建路径就地刷新系统提示并给用户一句通知，没变什么都不做。
   **两套形态互斥**：envelope 不声明工具、只解析正文里的信封；native 只把工具声明发给供应商、不解析信封
   （正文里出现信封时**不执行**，但如实记一条失败工具行）。系统提示始终与实际协议一致，
-  回放按同一规则派生（与"改 prompts.yaml 后重建"同源）。
-- **工具声明里的 `parallel` 决定并发**（内置工具在 `prompts.yaml` 的 `builtin_tools`，模块工具在 `module.yaml` 的 `tools.<名字>`；
+  回放按同一规则派生（与"改 prompts/ 后重建"同源）。
+- **工具声明里的 `parallel` 决定并发**（内置工具在 `systools/tools.yaml` 的 `tools`，模块工具在 `module.yaml` 的 `tools.<名字>`；
   缺省 false = 独占）：一次回复里的**连续**可并发调用合成一批并发跑，其余各自独占（写入类因此是批次之间的屏障）；
   工具行、结果消息与账本合并**一律按原始调用顺序**——并发只影响执行，不影响上下文里的顺序。
 - **观察账本**（`systool::Observations`）是**进程内状态，不落盘**：记"本次会话完整读过 / 由核心写过哪些文件、当时的内容指纹"，
@@ -244,38 +125,67 @@ session/<工作名>/
   （手写信封也能一次发多个调用：写在同一个信封的 `calls` 数组里，两种形态互斥）。
   **两种形状由唯一的构造函数（`engine::reply_msgs`）按当前形态产出**，实时与回放都只走它——
   所以"重建上下文必须与实时逐条一致"是结构保证，不靠两边各自小心；形态切换时旧消息自动被表达成新形状（事实留在转录里，切回去还能还原）。
+- **会话参数与对话分开**：身份、工作环境（真实根目录）、调用约定是**参数**（`session::SessionParams`），
+  与登记处/提示词册一起在**每次调用**现场渲染；对话（`dialogue`）里只有真正发生过的事——用户说了什么、
+  模型答了什么、调了什么工具。请求由**唯一一处**装配（`engine::assemble`）：`[身份][本回合工具面][对话…][本回合提示]`。
+  参数因此不冒充对话：回档只截对话、压缩只算对话，改一个参数（例如登记处里的工具形态）也只改那一格，不必重建会话。
 - **转录行带 `reply`**（= 该回复第一行的稳定 id）：重建按它把同一次回复的工具行归成一组，回档也按它**原子**截断
-  （截在一次回复中间会留下"孤儿工具结果"，而协议要求结果紧跟发起它的助手消息）。行分组因此不靠"相邻行猜"——
-  那正是曾经把实时与重建拆开的地方。
+  （截在一次回复中间会留下"孤儿工具结果"，而协议要求结果紧跟发起它的助手消息）。行分组因此不靠"相邻行猜"——那正是把实时与重建拆开的做法。
 - `meta.yaml` 的 `agents` 是名单的**唯一真相**（代拟路径在用户确认名单那一刻写回）。
 - `meta.yaml` 的 `exec` 段是**执行选型**的唯一真相：档位（`tier` = 本机 / 虚拟机）、虚拟机基础根、能力定版（`pins`）、是否放行出站网络；
   缺这段的 `meta.yaml` 按默认读回（本机档、不定版、不联网）。执行计划本身（`core/exec.rs` 的 `ExecPlan`）**从不落盘**——它含真实路径，只在运行时派生。
 - 会话的**旁路配置记录**（`{"type":"config"}`）只在编辑提交时追加：供呈现与审计，**不进模型上下文**，回放与状态派生都跳过它。
-- `core/fence.rs` 是工具进程围栏的**策略**（可达范围 = 共享区 + 自己的私有沙箱 + 自己的模块目录、断网、工作目录），
+- 出站模型调用的参数由**核心**决定、随端口传下去：`core::ports::LlmOpts{stream, timeout_secs}` 与 `CompleteOpts` 的对应字段，
+  取值来自**全局设置**（`streaming` / `llm_timeout_secs`），讨论、执行、验收与单 agent 共用同一份判据（`Core::llm_opts`）。
+  `Output` 只管回包形状：设置是流式的**上限**，调用方可在本次放弃流式。
+  调用失败**不是**模型的回复：`Completion.error` 与正文分离，上层据此发 `Notice` 并**中断本轮**（不落任何转录行），
+  会话保持可继续——错误文本若被当成发言吸收，按转录派生的「轮到谁」就歪了。
+- `core/fence.rs` 是工具进程围栏的**策略**（可达范围 = 共享区 + 自己的私有沙箱 + 自己的模块目录 + 用户显式授权的只读根 `ro`、断网、工作目录），
+  `ro` 来自 `.home/settings.yaml` 的 `fence_read`（默认空）：**只读位由各平台机制落实**（Landlock 只读位 /
+  seatbelt `file-read*` / Windows `RIGHTS_RO`），且只授给该 agent 自己的容器身份——不能像解释器基线那样授给共享组。
   机制在 `adapters/confine/`：外层拉起的**守门进程**（本程序 `--fence-run` 模式）按平台把围栏装进真正的工具进程
   ——Linux Landlock、macOS seatbelt、Windows AppContainer（先建容器 profile，再按 agent 派生容器 SID 与目录 ACL 授权，
   不给 capability 即断网）+ Job Object（进程树）；Windows 的目录授权由外层进程一次性做好（`confine::prepare_fence`）并记在内存台账里。
   装不上就**如实降级**（启动时自检并报告能力等级，绝不假装有）。命令行是守门进程的内部协议，模块作者与用户都不接触。
+  **未授权不等于无围栏**：授权与否只决定"路径级围栏装不装"（要写目录 ACL），进程树围栏、资源上限与
+  环境白名单在两种时段都生效；启动报告因此把**本机能力**与**本次实际**分两行说清，不让人误读。
+  机制验证分三态（`confine::verify` / `FenceVerdict`；`--fence-verify` 是它的机器可读入口，探针据此驱动）：
+  `Enforced`（装上了）/ `EnvUnavailable`（本机不允许：内核不支持、私有 ABI 失效、系统拒绝建容器）/
+  `Broken`（自检已确认机制有效却仍装不上 = 我们写错了）。前两态如实降级照跑，**`Broken` 在未授权时段拒绝执行**
+  （命令不落进程，回执用册子里的固定说法）——把"我们写错了"当成降级吞掉，等于用户以为有围栏、实际什么都没有。
+  入参是**扁平 JSON**（`confine::FenceJob`）= 围栏策略字段 + `prepared`：后者说清外层有没有做完本机授权。
+  Windows 的容器要先有读放行与落点才可能真跑起来，所以没授权时守门进程直接按无围栏执行——不去试一个注定
+  读不到模块目录与解释器的容器；容器起不来也一样如实报出原因再降级。
+  Windows 的目录授权除数据边界叶子外，还给**叶子的直接父目录**一条只读属性位（`RIGHTS_STAT`，不递归不继承）：
+  容器里对中间目录没有它时，`exists()` 会对一个**确实存在**的目录返回假，模块"父目录不存在就先建"的逻辑
+  会一路建到盘卷根才报 `WinError 5`（真机 CI 抓到的就是 Python 的 `os.makedirs`）。只授属性位：
+  能判断存在性，读不到内容、列不了目录；落点清单由 `confine::grant_targets` 统一给出，授权与撤权共用同一份。
+  工具进程的环境走**白名单**（`confine::fence_env`，外层滤好后传下去）：不继承父进程环境（密钥与无关凭据不进工具进程），
+  `HOME` / `TEMP` / `USERPROFILE` / `LOCALAPPDATA` 一律落到该 agent 的私有沙箱；Windows 建 AppContainer 进程
+  需要 `LOCALAPPDATA` 在场（缺了它 `CreateProcessW` 报 `os error 203`，容器会静默降级成无围栏）。
+  容器 profile **一个 agent 一个**（跨会话复用，数量有界）：守门进程是唯一建它的地方，建成即写进
+  `.home/fence-grants.json` 台账；`--fence-clean` 先按台账精确回收（撤 ACE + 删 profile），再按
+  `Solomni.Agent.` 前缀扫掉整族遗留 profile（探针、台账被删、旧版本建的都在这一扫里）。
 - `core/packages.rs` 是运行包契约与包库事实（校验、去重、系统路径冲突预检、能力索引），
   `core/exec.rs` 是执行档位与执行计划派生；两者都是纯逻辑，目录遍历在 `PackageSource` 适配层。契约见 [RUNTIME_SPEC.md](RUNTIME_SPEC.md)。
 - 登记处四份 yaml 的字段与读写规则见 [REGISTRY_SPEC.md](REGISTRY_SPEC.md)。
 - 内存与落盘不一致时**以流水为准**（可回放、可重建）。
 
-## 八、可测性（架构约束）
+## 七、可测性（架构约束）
 
-测试的层级、替身语义、端口契约矩阵、质量门禁、缺口账与执行入口全部由 [TESTING.md](TESTING.md) 规定；
-本节只列架构对可测性的硬约束，不重复测试规范。
+测试的层级、替身语义、端口契约矩阵、质量门禁、缺口账与执行入口全部由 [TESTING.md](TESTING.md)（门户与路由）
+与 `docs/testing/` 下的细则规定；本节只列架构对可测性的硬约束，不重复测试规范。
 
 - 任意需要 IO 或存在可替换实现的机制必须通过 `core/ports.rs` 中的端口注入；core 不直接依赖真实模型、网络、文件系统、时钟、随机数或外部进程。
 - 纯逻辑（信封解析、协作状态派生、提示词渲染、路径寻址等）不为测试强行增加 trait，直接以纯函数测试；端口只放在真实边界和确有替换价值的点上。
 - 端口的输入、输出、错误、取消、超时、重复调用和资源清理语义属于架构契约：生产适配器与测试替身必须遵守同一份契约。
 - 端口不能为了方便测试暴露生产实现的内部状态；需要观察交互时，通过测试替身的记录能力或公开的行为结果观察。
-- 组合根测试当前使用的内存装配（`InMemory*`、`VecSource`、`ScriptGateway`、`NoopLog` 等）集中在 `src/tests.rs`；
+- 组合根测试当前使用的内存装配（`InMemory*`、`VecSource`、`ScriptGateway`、`NoopLog` 等）集中在 `src/tests/doubles.rs`；
   新增替身用能表达职责的名称，并在测试基础设施中集中维护。
 - 质量门禁（格式、编译、Clippy、依赖重复、测试结构冗余）与业务测试是两类事实，分别记录，质量失败不能被业务测试通过抵消。
 - 代码冗余检查不改变分层与端口设计，也不以增加 trait、包装层或测试用例为目标；发现重复时先判断是否同一职责，再决定合并、保留或记录原因。
 
-## 九、跨平台机制
+## 八、跨平台机制
 
 - 路径一律用 `PathBuf`/`Path` 组件拼接：**禁止把 `/` 或 `\` 写进字符串再拼**（分隔符交给运行环境）。
 - **对外**（提示词、工具参数、回执、API）一律用 `/` 书写形式：Windows 的反斜杠在 JSON 字符串里是**非法转义**（`\A`、`\S` 之类），模型据此拼出的参数会直接解析失败。

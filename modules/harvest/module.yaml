@@ -1,0 +1,28 @@
+id: harvest
+brief: >-
+  把工作共享区里的资料扫成一份可复用的语料清单：抽取正文、标题层级与链接，并统计字节、字符与行数。
+system: >-
+  你负责「把共享区的资料变成语料」：用 scan 把一个目录扫成 corpus.jsonl（每份资料一条记录：
+  相对路径、正文、标题层级、链接、字节/字符/行数）。只读原件，只写你指定的产物路径（共享区或你自己的沙箱），
+  不要写进模块的 userdata/（那是模块自己的跨任务私有状态）。
+  scan 的回执只有统计与产物路径——语料正文不会回显，别把资料内容抄进你的发言。
+  args 里的路径必须写提示词里给出的真实绝对路径（共享区/沙箱），相对路径会被围栏拒绝。
+runtimes: [python]
+tools:
+  scan:
+    command: python tools/scan.py
+    desc: 扫描一个目录，把里面的文本资料抽成语料清单 corpus.jsonl（只读原件；产物写到 out）。
+    params:
+      root:
+        type: string
+        required: true
+        non_empty: true
+        desc: 要扫描的根目录（真实绝对路径，例如本次工作的共享区）
+      out:
+        type: string
+        required: true
+        non_empty: true
+        desc: 语料清单写到哪个文件（真实绝对路径；共享区或你自己的沙箱均可）
+      include:
+        type: string
+        desc: 逗号分隔的扩展名白名单，缺省 md,txt,html,json

@@ -94,5 +94,5 @@ fn candidates(base_url: &str, suffix: &str) -> Vec<String> {
 fn ends_with_version(base: &str) -> bool {
     let seg = base.rsplit('/').next().unwrap_or("");
     let mut chars = seg.chars();
-    matches!(chars.next(), Some('v')) && chars.next().map_or(false, |c| c.is_ascii_digit())
+    matches!(chars.next(), Some('v')) && chars.next().is_some_and(|c| c.is_ascii_digit())
 }

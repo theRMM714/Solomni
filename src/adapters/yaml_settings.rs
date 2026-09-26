@@ -39,8 +39,18 @@ struct ModelsFile {
 }
 
 impl YamlSettingsStore {
-    pub fn new(providers_path: PathBuf, models_path: PathBuf, settings_path: PathBuf, agents_path: PathBuf) -> YamlSettingsStore {
-        YamlSettingsStore { providers_path, models_path, settings_path, agents_path }
+    pub fn new(
+        providers_path: PathBuf,
+        models_path: PathBuf,
+        settings_path: PathBuf,
+        agents_path: PathBuf,
+    ) -> YamlSettingsStore {
+        YamlSettingsStore {
+            providers_path,
+            models_path,
+            settings_path,
+            agents_path,
+        }
     }
 
     /// 写一个 yaml 文件：建目录 → 写盘 → unix 下 0600。
@@ -61,46 +71,67 @@ impl YamlSettingsStore {
 impl SettingsStore for YamlSettingsStore {
     fn load(&self) -> Result<Settings, String> {
         let providers = match std::fs::read_to_string(&self.providers_path) {
-            Ok(t) => serde_yaml::from_str::<ProvidersFile>(&t)
-                .map_err(|e| format!("providers.yaml 非法：{}", e))?
-                .providers,
+            Ok(t) => {
+                serde_yaml::from_str::<ProvidersFile>(&t)
+                    .map_err(|e| format!("providers.yaml 非法：{}", e))?
+                    .providers
+            }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => BTreeMap::new(),
             Err(e) => return Err(e.to_string()),
         };
         let (models, core) = match std::fs::read_to_string(&self.models_path) {
             Ok(t) => {
-                let f: ModelsFile = serde_yaml::from_str(&t).map_err(|e| format!("models.yaml 非法：{}", e))?;
+                let f: ModelsFile =
+                    serde_yaml::from_str(&t).map_err(|e| format!("models.yaml 非法：{}", e))?;
                 (f.models, f.core)
             }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => (BTreeMap::new(), None),
             Err(e) => return Err(e.to_string()),
         };
         let app = match std::fs::read_to_string(&self.settings_path) {
-            Ok(t) => serde_yaml::from_str::<AppSettings>(&t).map_err(|e| format!("settings.yaml 非法：{}", e))?,
+            Ok(t) => serde_yaml::from_str::<AppSettings>(&t)
+                .map_err(|e| format!("settings.yaml 非法：{}", e))?,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => AppSettings::default(),
             Err(e) => return Err(e.to_string()),
         };
         let agents = match std::fs::read_to_string(&self.agents_path) {
-            Ok(t) => serde_yaml::from_str::<AgentsFile>(&t).map_err(|e| format!("agents.yaml 非法：{}", e))?.agents,
+            Ok(t) => {
+                serde_yaml::from_str::<AgentsFile>(&t)
+                    .map_err(|e| format!("agents.yaml 非法：{}", e))?
+                    .agents
+            }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Agents::new(),
             Err(e) => return Err(e.to_string()),
         };
-        Ok(Settings { providers, models, core, app, agents })
+        Ok(Settings {
+            providers,
+            models,
+            core,
+            app,
+            agents,
+        })
     }
 
     fn save(&self, settings: &Settings) -> Result<(), String> {
-        let providers = ProvidersFile { providers: settings.providers.clone() };
+        let providers = ProvidersFile {
+            providers: settings.providers.clone(),
+        };
         let text = serde_yaml::to_string(&providers).map_err(|e| e.to_string())?;
         Self::write(&self.providers_path, &text)?;
 
-        let models = ModelsFile { models: settings.models.clone(), core: settings.core.clone() };
+        let models = ModelsFile {
+            models: settings.models.clone(),
+            core: settings.core.clone(),
+        };
         let text = serde_yaml::to_string(&models).map_err(|e| e.to_string())?;
         Self::write(&self.models_path, &text)?;
 
         let text = serde_yaml::to_string(&settings.app).map_err(|e| e.to_string())?;
         Self::write(&self.settings_path, &text)?;
 
-        let agents = AgentsFile { agents: settings.agents.clone() };
+        let agents = AgentsFile {
+            agents: settings.agents.clone(),
+        };
         let text = serde_yaml::to_string(&agents).map_err(|e| e.to_string())?;
         Self::write(&self.agents_path, &text)?;
         Ok(())

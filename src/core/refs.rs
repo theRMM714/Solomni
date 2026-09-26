@@ -42,7 +42,9 @@ pub fn rewrite(text: &str, speaker: Option<&str>, roots: &RefRoots, texts: &Refs
             if let Some((agent, rel, consumed)) = take_sandbox_ref(body) {
                 // 自己的沙箱：用真实根；别人的/协作：给册子里的说明（不泄漏真实路径）。
                 let own = match speaker {
-                    Some(me) if me == agent => roots.private.as_ref().and_then(|p| full_path(p, rel)),
+                    Some(me) if me == agent => {
+                        roots.private.as_ref().and_then(|p| full_path(p, rel))
+                    }
                     _ => None,
                 };
                 let rendered = match own {
@@ -81,9 +83,16 @@ fn full_path(root: &Path, rel: &str) -> Option<String> {
 /// 引用别人（或协作）的沙箱：用册子文案如实说明谁能读，不给出真实路径。
 /// 单 agent 形态（speaker 是别人）用 foreign_sandbox；协作（speaker = None）用 collab_sandbox。
 fn sandbox_note(agent: &str, rel: &str, speaker: Option<&str>, texts: &RefsPrompts) -> String {
-    let template = if speaker.is_none() { &texts.collab_sandbox } else { &texts.foreign_sandbox };
-    crate::core::prompt::render(template, &[("agent", agent.to_string()), ("path", rel.to_string())])
-        .expect("refs 文案变量由调用方保证（缺变量属于装配错误）")
+    let template = if speaker.is_none() {
+        &texts.collab_sandbox
+    } else {
+        &texts.foreign_sandbox
+    };
+    crate::core::prompt::render(
+        template,
+        &[("agent", agent.to_string()), ("path", rel.to_string())],
+    )
+    .expect("refs 文案变量由调用方保证（缺变量属于装配错误）")
 }
 
 /// 取一段引用路径：带引号（"…"）时取到下一个引号为止（引号本身不进结果）；
@@ -141,6 +150,22 @@ fn is_terminator(c: char) -> bool {
     c.is_whitespace()
         || matches!(
             c,
-            '，' | '。' | '；' | '、' | '！' | '？' | '：' | ',' | ';' | '!' | '?' | ':' | '）' | ')' | '」' | '』' | '】' | '》'
+            '，' | '。'
+                | '；'
+                | '、'
+                | '！'
+                | '？'
+                | '：'
+                | ','
+                | ';'
+                | '!'
+                | '?'
+                | ':'
+                | '）'
+                | ')'
+                | '」'
+                | '』'
+                | '】'
+                | '》'
         )
 }

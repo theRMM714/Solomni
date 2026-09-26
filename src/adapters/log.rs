@@ -19,7 +19,9 @@ impl FileLog {
         let dir = root.join("logs");
         fs::create_dir_all(&dir).map_err(|e| format!("建日志目录失败：{}", e))?;
         // 时间戳：本地可读 + 毫秒（防同秒重启覆盖）。
-        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default();
         let secs = now.as_secs();
         let ms = now.subsec_millis();
         // 简单 UTC+8 折算（本地环境）；日志仅为对账用，不追求时区完美。
@@ -36,15 +38,29 @@ impl FileLog {
             .map_err(|e| format!("建日志文件失败：{}", e))?;
         let mut file = file;
         let _ = writeln!(file, "=== {}（{}）===", origin, path.display());
-        Ok(FileLog { file: Mutex::new(file), _origin: String::new() })
+        Ok(FileLog {
+            file: Mutex::new(file),
+            _origin: String::new(),
+        })
     }
 
     fn write(&self, level: &str, at: &str, msg: &str) {
-        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default();
         let (y, mo, d, h, mi, s) = stamp(now.as_secs() + 8 * 3600);
         let line = format!(
             "{:04}-{:02}-{:02} {:02}:{:02}:{:02}.{:03} [{}] {}: {}\n",
-            y, mo, d, h, mi, s, now.subsec_millis(), level, at, msg
+            y,
+            mo,
+            d,
+            h,
+            mi,
+            s,
+            now.subsec_millis(),
+            level,
+            at,
+            msg
         );
         if let Ok(mut f) = self.file.lock() {
             let _ = f.write_all(line.as_bytes());

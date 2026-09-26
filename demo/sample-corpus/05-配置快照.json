@@ -1,0 +1,7 @@
+{
+  "workbench": "solomni",
+  "modules": ["harvest", "render", "indexer"],
+  "runtimes": { "python": "3.14", "node": "24", "cc": "16.2" },
+  "offline": true,
+  "roots": { "work": "本次工作的共享区", "sandbox": "该 agent 的私有沙箱" }
+}

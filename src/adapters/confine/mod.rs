@@ -31,6 +31,44 @@ pub const FENCE_FLAG: &str = "--fence-run";
 /// 围栏装不上时守门进程的退出码（工具执行据此如实报错，不静默）。
 pub const FENCE_FAILED: i32 = 111;
 
+/// 本机能不能强制住这次执行的围栏——**机制层的验证结论**，与"外层授权了没有"无关。
+/// 三态的理由：把"本机不允许"与"我们的机制写错了"分开。
+/// 前者是环境结论，如实降级照跑（能力等级已在启动报告里说过）；后者绝不能静默降级——
+/// 那等于用户以为有围栏、实际什么都没有。探针早就按这两类分别处理，运行期也必须一样。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FenceVerdict {
+    /// 机制真装上了，强制生效。
+    Enforced,
+    /// 本机环境不允许装（内核不支持、私有 ABI 失效、系统拒绝建容器）——降级照跑，不是我们的错。
+    EnvUnavailable(String),
+    /// 自检已确认机制有效，但我们的规则/步骤装不上 = 我们写错了。未授权时据此**拒绝执行**。
+    Broken(String),
+}
+
+/// 测试专用的注入开关：让探针能确定性地构造「本机不允许」这一态。
+/// 为什么需要：`EnvUnavailable` 在真机上要靠老内核 / 失效的私有 ABI / 被环境拒绝建容器才会出现，
+/// 正常 runner 上碰不到——没有这条开关，那一路分支就只被偶然验证过。
+/// **只在测试里打开**（探针自己给守门进程带这个环境变量），运行期永不设置它。
+pub const SELFCHECK_FAIL_FLAG: &str = "SOLOMNI_FENCE_SELFCHECK_FAIL";
+
+/// 自检该不该按「本机不允许」处理：测试专用注入优先，否则问真实自检。
+/// 三平台的自检入口共用这一份判断，避免各写一遍导致探针在某平台上失效。
+pub(crate) fn selfcheck_forced_unavailable() -> bool {
+    std::env::var_os(SELFCHECK_FAIL_FLAG).is_some()
+}
+
+/// 本机能不能强制住这次执行的围栏（机制层自检，**不写本机任何权限项**）。
+/// 未授权时段靠它把「环境不允许」与「我们写错了」分开——后者绝不能被当成降级吞掉。
+pub fn verify(spec: &FenceSpec, command: &str) -> FenceVerdict {
+    if selfcheck_forced_unavailable() {
+        return FenceVerdict::EnvUnavailable(format!(
+            "{}（测试注入：按本机不允许处理）",
+            SELFCHECK_FAIL_FLAG
+        ));
+    }
+    backend::verify(spec, command)
+}
+
 /// 围栏授权释放的适配器（实现 core 的 FenceHost 端口）：core 只说「这个会话的围栏撤掉」。
 pub struct FenceHostAdapter;
 
@@ -58,16 +96,84 @@ pub fn capability() -> Capability {
     backend::capability()
 }
 
+/// 守门进程的入参：core 的围栏策略 + **外层是否已把本机授权做完** + 产品私有区（台账落点）。
+/// 授权是改本机目录 ACL 的动作（只有 Windows 的容器围栏需要），所以它不进 core 的 `FenceSpec`，
+/// 由适配层随这次执行一起交给守门进程。JSON 是**扁平**的：FenceSpec 的字段同层再加 `prepared` 与 `home`。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FenceJob {
+    pub spec: FenceSpec,
+    pub prepared: bool,
+    /// 产品私有区（`.home/`）：守门进程把**它建过的容器 profile** 记进这里的台账，供 `--fence-clean` 精确回收。
+    /// 守门进程是唯一真正建 profile 的地方，外层只知道"该建"、不知道"建成了"。
+    /// 没有台账的调用方（探针）给 `None`：那类 profile 由 `--fence-clean` 的前缀清扫兜底。
+    pub home: Option<PathBuf>,
+}
+
+impl FenceJob {
+    pub fn to_json(&self) -> String {
+        let mut fields = match serde_json::to_value(&self.spec) {
+            Ok(serde_json::Value::Object(o)) => o,
+            _ => serde_json::Map::new(),
+        };
+        fields.insert(
+            "prepared".to_string(),
+            serde_json::Value::Bool(self.prepared),
+        );
+        fields.insert(
+            "home".to_string(),
+            serde_json::to_value(&self.home).unwrap_or(serde_json::Value::Null),
+        );
+        serde_json::Value::Object(fields).to_string()
+    }
+
+    pub fn from_json(text: &str) -> Result<FenceJob, String> {
+        #[derive(serde::Deserialize)]
+        struct Raw {
+            #[serde(flatten)]
+            spec: FenceSpec,
+            /// 缺了这一项 = 调用方没说清有没有授权，如实报错（不默认成"有"）。
+            prepared: bool,
+            /// 缺省 = 没有台账可落（探针、别的调用方）；这不是"忘记传"，所以允许缺省。
+            #[serde(default)]
+            home: Option<PathBuf>,
+        }
+        serde_json::from_str::<Raw>(text)
+            .map(|raw| FenceJob {
+                spec: raw.spec,
+                prepared: raw.prepared,
+                home: raw.home,
+            })
+            .map_err(|e| format!("围栏参数非法：{}", e))
+    }
+}
+
 /// 组装守门进程的命令行：工具命令作为**数据**传递（不拼进 shell 字符串，杜绝注入）。
-pub fn launcher(exe: &Path, spec: &FenceSpec, command: &str) -> Command {
+pub fn launcher(exe: &Path, job: &FenceJob, command: &str) -> Command {
     let mut cmd = Command::new(exe);
-    cmd.arg(FENCE_FLAG).arg(spec.to_json()).arg("--").arg(command);
+    cmd.arg(FENCE_FLAG)
+        .arg(job.to_json())
+        .arg("--")
+        .arg(command);
     cmd
 }
 
 /// 守门进程内：装围栏 → 跑命令 → 返回退出码。失败必须报错（stderr）并用 FENCE_FAILED 退出。
-pub fn run_fenced(spec: &FenceSpec, command: &str) -> i32 {
-    backend::run_fenced(spec, command)
+pub fn run_fenced(job: &FenceJob, command: &str) -> i32 {
+    backend::run_fenced(&job.spec, job.prepared, job.home.as_deref(), command)
+}
+
+/// 扫掉本程序建过的整族容器 profile：台账只记"我们知道写过什么"，而 profile 可能来自没有台账的路径
+/// （探针、夹具的台账被删、旧版本）。名字前缀是本程序独有的，所以按它扫。返回扫掉的个数。
+pub fn sweep_profiles() -> Result<usize, String> {
+    #[cfg(windows)]
+    {
+        windows::sweep_profiles()
+    }
+    #[cfg(not(windows))]
+    {
+        // 其它平台没有容器 profile 这一步。
+        Ok(0)
+    }
 }
 
 /// 外层进程调用：把围栏要用的授权一次性做好（写目录 ACL）；prepared 是"已经授权过"的台账，
@@ -113,11 +219,56 @@ pub fn release_fence(spec: &FenceSpec) -> Result<(), String> {
 /// 命令里可能出现的外部程序：按 PATH 解析出真实路径（解析不出的跳过，不猜）。
 /// 它们的**安装目录**必须放行（只读+执行），否则受限进程连解释器都起不来——Windows 的目录 ACL 与 macOS 的 seatbelt 都靠它。
 pub(crate) fn interpreter_dirs(command: &str) -> Vec<std::path::PathBuf> {
+    let path_var = std::env::var_os("PATH").unwrap_or_default();
+    let pathext = std::env::var("PATHEXT").ok();
+    interpreter_dirs_in(command, &path_var, pathext.as_deref())
+}
+
+/// 可执行扩展名：PATHEXT（若在场）**加**一份标准兜底，按小写去重。
+/// 兜底不是装饰：真机上见过 PATHEXT 缺席的进程环境（CI 的 runner 起 node 再起产品），
+/// 那时只按 PATHEXT 找扩展名会一个解释器都解析不出来——容器里的工具连 python 都找不到。
+fn exec_extensions(pathext: Option<&str>) -> Vec<String> {
+    let mut exts: Vec<String> = Vec::new();
+    let mut push = |ext: &str| {
+        let ext = ext.trim().to_ascii_lowercase();
+        if !ext.is_empty() && !exts.contains(&ext) {
+            exts.push(ext);
+        }
+    };
+    for ext in [".exe", ".cmd", ".bat", ".com"] {
+        push(ext);
+    }
+    if let Some(text) = pathext {
+        for ext in text.split(';') {
+            push(ext);
+        }
+    }
+    exts
+}
+
+/// 去掉 Windows 规范化路径的 `\\?\` 前缀：安全描述符接口不认这个前缀，带上就是白写一条授权。
+fn strip_verbatim_prefix(path: &std::path::Path) -> std::path::PathBuf {
+    match path.to_string_lossy().strip_prefix(r"\\?\") {
+        Some(rest) => std::path::PathBuf::from(rest),
+        None => path.to_path_buf(),
+    }
+}
+
+/// 解析规则由调用方把环境形状喂进来：**不能假设 PATH / PATHEXT 一定在场或一定干净**。
+fn interpreter_dirs_in(
+    command: &str,
+    path_var: &std::ffi::OsStr,
+    pathext: Option<&str>,
+) -> Vec<std::path::PathBuf> {
     let mut dirs: Vec<std::path::PathBuf> = Vec::new();
     let mut candidates: Vec<String> = Vec::new();
     for raw in command.split([' ', '\t', '&', '|', ';', '\n']) {
         let token = raw.trim_matches(|c| c == '"' || c == '\'' || c == '(' || c == ')');
-        if token.is_empty() || token.starts_with('-') || token.starts_with('/') || token.starts_with('%') {
+        if token.is_empty()
+            || token.starts_with('-')
+            || token.starts_with('/')
+            || token.starts_with('%')
+        {
             continue;
         }
         // 绝对路径：只有「可执行文件」才算程序（命令里的数据文件路径不是解释器——
@@ -131,18 +282,19 @@ pub(crate) fn interpreter_dirs(command: &str) -> Vec<std::path::PathBuf> {
         }
         candidates.push(token.to_string());
     }
-    let path_var = std::env::var_os("PATH").unwrap_or_default();
-    let exts: Vec<String> = std::env::var("PATHEXT")
-        .unwrap_or_else(|_| String::new())
-        .split(';')
-        .filter(|s| !s.is_empty())
-        .map(|s| s.to_string())
-        .collect();
+    let exts = exec_extensions(pathext);
     for name in candidates {
-        for dir in std::env::split_paths(&path_var) {
+        for entry in std::env::split_paths(path_var) {
+            // PATH 项可能带外层引号（手写的 PATH 常见）：带引号去 join 就永远找不到。
+            let text = entry.to_string_lossy();
+            let unquoted = text.trim_matches('"');
+            let dir = if unquoted.len() == text.len() {
+                entry
+            } else {
+                std::path::PathBuf::from(unquoted.to_string())
+            };
             let mut tries: Vec<std::path::PathBuf> = vec![dir.join(&name)];
             for e in &exts {
-                tries.push(dir.join(format!("{}{}", name, e.to_lowercase())));
                 tries.push(dir.join(format!("{}{}", name, e)));
             }
             if let Some(hit) = tries.into_iter().find(|p| p.is_file() && is_executable(p)) {
@@ -153,6 +305,7 @@ pub(crate) fn interpreter_dirs(command: &str) -> Vec<std::path::PathBuf> {
                 // 符号链接要把**真身**的安装目录也放行：macOS 上 python3 常常是链接，动态库在真身旁边——
                 // 只放行链接所在目录会让加载器取不到库（进程直接 SIGABRT）。
                 if let Ok(real) = std::fs::canonicalize(&hit) {
+                    let real = strip_verbatim_prefix(&real);
                     if real != hit {
                         if let Some(parent) = real.parent() {
                             dirs.push(install_dir(parent));
@@ -200,24 +353,24 @@ fn is_executable(_path: &std::path::Path) -> bool {
     true
 }
 
-/// 祖先目录（不含自己）：受限进程要按名穿过它们才能到达被放行的根。
-/// 只有 Windows 的目录 ACL 需要逐个授 FILE_TRAVERSE（macOS 的 seatbelt 用子路径规则，不需要）。
+/// 交给 cmd 解释前，把**程序名**里的正斜杠换成反斜杠。
+/// cmd 只把程序名里的 `\` 当路径分隔符：`build/indexer build` 会被它读成「命令 build + 开关 /indexer」，
+/// 报 `'build' is not recognized`。程序名之后的参数原样保留（`node tools/report.js` 这类命令靠参数里的正斜杠）。
+/// 程序名 = 第一个空白前的字段；模块作者若用引号包住程序名，只改引号内那一段。
 #[cfg(windows)]
-pub(crate) fn ancestors_of(path: &std::path::Path) -> Vec<std::path::PathBuf> {
-    let mut out: Vec<std::path::PathBuf> = Vec::new();
-    let mut cur = path.parent();
-    while let Some(p) = cur {
-        out.push(p.to_path_buf());
-        cur = p.parent();
-    }
-    out
+pub(crate) fn windows_program_separators(command: &str) -> String {
+    let end = match command.strip_prefix('"') {
+        Some(rest) => rest.find('"').map(|i| i + 2).unwrap_or(command.len()),
+        None => command.find(char::is_whitespace).unwrap_or(command.len()),
+    };
+    command[..end].replace('/', "\\") + &command[end..]
 }
 
 /// 工具进程的启动命令：命令行由**模块作者**写在 module.yaml 里，交系统 shell 解释（与既有语义一致）。
 #[cfg(windows)]
 pub fn shell_command(command: &str) -> Command {
     let mut c = Command::new("cmd");
-    c.arg("/C").arg(command);
+    c.arg("/C").arg(windows_program_separators(command));
     c
 }
 
@@ -232,8 +385,16 @@ pub fn shell_command(command: &str) -> Command {
 /// 解释器需要 HOME/TEMP 这类落点：全部指到该 agent 的私有沙箱里（缓存与临时文件落在工作区内）。
 pub fn fence_env(spec: &FenceSpec) -> Vec<(OsString, OsString)> {
     let keep = [
-        "PATH", "PATHEXT", "SystemRoot", "WINDIR", "COMSPEC", "ComSpec", "SYSTEMDRIVE",
-        "LANG", "LC_ALL", "TZ",
+        "PATH",
+        "PATHEXT",
+        "SystemRoot",
+        "WINDIR",
+        "COMSPEC",
+        "ComSpec",
+        "SYSTEMDRIVE",
+        "LANG",
+        "LC_ALL",
+        "TZ",
     ];
     let mut out: Vec<(OsString, OsString)> = Vec::new();
     for k in keep {
@@ -247,6 +408,12 @@ pub fn fence_env(spec: &FenceSpec) -> Vec<(OsString, OsString)> {
     // 工作区内的落点：私有沙箱作为 HOME / TEMP（缓存与临时文件不出工作区）。
     let home = spec.private_or_cwd();
     out.push((OsString::from("HOME"), home.clone().into_os_string()));
+    // Windows 建 AppContainer 进程要读它：白名单里没有它就 CreateProcessW 直接失败（os error 203），
+    // 容器整条路会静默降级成无围栏执行。落点同样指进该 agent 的私有沙箱。
+    out.push((
+        OsString::from("LOCALAPPDATA"),
+        home.clone().into_os_string(),
+    ));
     out.push((OsString::from("USERPROFILE"), home.clone().into_os_string()));
     out.push((OsString::from("TEMP"), home.clone().into_os_string()));
     out.push((OsString::from("TMP"), home.clone().into_os_string()));
@@ -255,29 +422,212 @@ pub fn fence_env(spec: &FenceSpec) -> Vec<(OsString, OsString)> {
     out
 }
 
+impl FenceSpec {
+    /// 该 agent 的私有沙箱（没有就退回工作目录）——环境里的 HOME / TEMP 落点。
+    pub fn private_or_cwd(&self) -> PathBuf {
+        self.rw.get(1).cloned().unwrap_or_else(|| self.cwd.clone())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    /// 测试专用注入开关：打开它，机制验证必须确定性地报「本机不允许」。
+    /// 这是覆盖 EnvUnavailable 那一路的唯一确定性手段——三平台探针都靠它。
+    ///
+    /// **不能在进程内调未注入的真实后端**：unix 上 Landlock 与 seatbelt 都是**进程级且不可逆**的
+    /// ——装了它，测试进程此后连 `target/` 都写不了（macOS CI 上真抓到过：后续 123 个用例全挂在
+    /// "建契约测试隔离根：Operation not permitted"）。真实后端的行为由平台探针（子进程里）验收，
+    /// 这里只钉注入开关本身的语义。
+    #[test]
+    fn selfcheck_injection_switch_reports_env_unavailable() {
+        let spec = FenceSpec {
+            agent: "a".to_string(),
+            rw: vec![PathBuf::from("demo").join("work")],
+            cwd: PathBuf::from("mods").join("m0"),
+            ro: Vec::new(),
+            net: false,
+        };
+        // 运行期不该有这个开关（探针自己给守门进程带）。
+        assert!(!selfcheck_forced_unavailable(), "运行期不该有这个开关");
+        // 注入后：必须在触到后端之前就返回「本机不允许」，且带得出注入标记
+        // （探针据此把"环境结论"与"我们写错了"分开）。
+        std::env::set_var(SELFCHECK_FAIL_FLAG, "1");
+        let injected = verify(&spec, "true");
+        std::env::remove_var(SELFCHECK_FAIL_FLAG);
+        match injected {
+            FenceVerdict::EnvUnavailable(why) => assert!(
+                why.contains(SELFCHECK_FAIL_FLAG),
+                "理由要带得出注入标记：{}",
+                why
+            ),
+            other => panic!("注入后必须是本机不允许，实际 {:?}", other),
+        }
+        // 开关关掉之后必须回到真实判定入口（不被上一次注入粘住）。
+        assert!(
+            !selfcheck_forced_unavailable(),
+            "注入是一次性的，不该留下状态"
+        );
+    }
     /// 安装目录上溯**绝不能停在文件系统根**：/bin 的父目录就是 /，
     /// 一旦返回 / 就等于把整盘放行（macOS 的 seatbelt 会因此形同虚设，真机上已抓到过一次）。
     #[test]
     fn install_dir_never_climbs_to_the_filesystem_root() {
-        let root = if cfg!(windows) { PathBuf::from("C:\\") } else { PathBuf::from("/") };
-        assert_eq!(install_dir(&root.join("bin")), root.join("bin"), "根下的 bin 不再上溯");
+        let root = if cfg!(windows) {
+            PathBuf::from("C:\\")
+        } else {
+            PathBuf::from("/")
+        };
+        assert_eq!(
+            install_dir(&root.join("bin")),
+            root.join("bin"),
+            "根下的 bin 不再上溯"
+        );
         assert_eq!(install_dir(&root), root, "根就是根");
         let deep = root.join("home").join("u").join(".venv").join("bin");
-        assert_eq!(install_dir(&deep), root.join("home").join("u").join(".venv"), "普通布局上溯一层");
+        assert_eq!(
+            install_dir(&deep),
+            root.join("home").join("u").join(".venv"),
+            "普通布局上溯一层"
+        );
         let scripts = root.join("home").join("u").join("env").join("Scripts");
-        assert_eq!(install_dir(&scripts), root.join("home").join("u").join("env"), "Scripts 布局同样上溯");
-        assert_eq!(install_dir(&root.join("usr").join("local").join("bin")), root.join("usr").join("local"), "usr/local/bin 上溯到 usr/local");
+        assert_eq!(
+            install_dir(&scripts),
+            root.join("home").join("u").join("env"),
+            "Scripts 布局同样上溯"
+        );
+        assert_eq!(
+            install_dir(&root.join("usr").join("local").join("bin")),
+            root.join("usr").join("local"),
+            "usr/local/bin 上溯到 usr/local"
+        );
+    }
+
+    /// cmd 只认程序名里的反斜杠：`build/indexer build` 会被读成命令 build + 开关 /indexer（真机上模块工具因此跑不起来）。
+    /// 参数里的正斜杠必须原样保留——`node tools/report.js` 正是靠它。
+    #[cfg(windows)]
+    #[test]
+    fn windows_program_separators_rewrites_only_the_program_name() {
+        assert_eq!(
+            windows_program_separators("build/indexer build"),
+            "build\\indexer build"
+        );
+        assert_eq!(
+            windows_program_separators("node tools/report.js"),
+            "node tools/report.js"
+        );
+        assert_eq!(
+            windows_program_separators("python tools/scan.py extra"),
+            "python tools/scan.py extra"
+        );
+        assert_eq!(
+            windows_program_separators(".tools/mingw64/bin/g++.exe -O2"),
+            ".tools\\mingw64\\bin\\g++.exe -O2"
+        );
+        assert_eq!(
+            windows_program_separators("build\\indexer build"),
+            "build\\indexer build"
+        );
+        assert_eq!(windows_program_separators("\"a/b\" rest"), "\"a\\b\" rest");
+        assert_eq!(windows_program_separators("plain"), "plain");
+    }
+
+    /// 守门进程的入参是**扁平** JSON：FenceSpec 的字段同层再加一个 prepared；
+    /// 缺字段一律报错（不默认成"有授权"——那会把容器送进一个读不到东西的环境）。
+    #[test]
+    fn fence_job_round_trips_and_rejects_incomplete_json() {
+        let spec = FenceSpec {
+            agent: "a".to_string(),
+            rw: vec![PathBuf::from("demo").join("work")],
+            cwd: PathBuf::from("mods").join("m0"),
+            ro: Vec::new(),
+            net: false,
+        };
+        let job = FenceJob {
+            spec,
+            prepared: true,
+            home: Some(PathBuf::from("home")),
+        };
+        let text = job.to_json();
+        assert!(text.contains("\"prepared\":true"), "{}", text);
+        assert_eq!(FenceJob::from_json(&text).expect("回读守门进程入参"), job);
+        // 没有台账可落是合法形态（探针），所以 home 允许缺省；prepared 缺了才报错。
+        let bare = FenceSpec {
+            agent: "b".to_string(),
+            rw: vec![PathBuf::from("demo").join("work")],
+            cwd: PathBuf::from("mods").join("m1"),
+            ro: Vec::new(),
+            net: true,
+        };
+        let no_home = FenceJob {
+            spec: bare,
+            prepared: false,
+            home: None,
+        };
+        assert_eq!(
+            FenceJob::from_json(&no_home.to_json()).expect("回读"),
+            no_home
+        );
+        assert!(FenceJob::from_json("{}").is_err(), "缺字段必须报错，不猜");
+        assert!(FenceJob::from_json("这不是 JSON").is_err());
+    }
+
+    /// 解析解释器不能假设环境形状：PATHEXT 缺席（真机 CI 上见过）时靠标准兜底扩展名照样找到 .exe，
+    /// 带引号的 PATH 项照样能用——否则容器里的工具连解释器都找不到（真机上就是这么挂的）。
+    #[test]
+    fn interpreter_dirs_resolves_without_pathext_and_with_quoted_path_entries() {
+        let root = crate::tests::scratch("interpreter-dirs");
+        let pydir = root.join("pydir");
+        std::fs::create_dir_all(&pydir).expect("建解释器目录");
+        let exe = pydir.join(if cfg!(windows) {
+            "python.exe"
+        } else {
+            "python"
+        });
+        std::fs::write(&exe, b"#!/bin/sh\nexit 0\n").expect("放一个假解释器");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perm = std::fs::metadata(&exe).expect("读权限位").permissions();
+            perm.set_mode(0o755);
+            std::fs::set_permissions(&exe, perm).expect("加执行位");
+        }
+        let path = pydir.as_os_str();
+        assert_eq!(
+            interpreter_dirs_in("python tools/x.py", path, None),
+            vec![pydir.clone()],
+            "PATHEXT 缺席也要解析出解释器目录"
+        );
+        assert_eq!(
+            interpreter_dirs_in("python tools/x.py", path, Some(".EXE;.BAT")),
+            vec![pydir.clone()],
+            "PATHEXT 在场照走 PATHEXT"
+        );
+        let quoted = std::ffi::OsString::from(format!("\"{}\"", pydir.display()));
+        assert_eq!(
+            interpreter_dirs_in("python tools/x.py", &quoted, None),
+            vec![pydir.clone()],
+            "带引号的 PATH 项也要能解析"
+        );
+        assert!(
+            interpreter_dirs_in(&format!("cat {}", exe.display()), path, None)
+                .iter()
+                .all(|d| d != &pydir),
+            "数据文件路径不算解释器（否则等于给围栏开洞）"
+        );
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     /// 命令里的解释器要按 PATH 解析出真实路径，并给出它的安装目录；
     /// 数据文件路径不算解释器（否则会把那个文件放行，等于开洞）。
     #[test]
     fn interpreter_dirs_resolves_programs_but_not_data_files() {
-        let cmd = if cfg!(windows) { "cmd /C echo hi" } else { "sh -c 'echo hi'" };
+        let cmd = if cfg!(windows) {
+            "cmd /C echo hi"
+        } else {
+            "sh -c 'echo hi'"
+        };
         let dirs = interpreter_dirs(cmd);
         assert!(!dirs.is_empty(), "系统 shell 应当能被解析出来：{:?}", dirs);
         for d in &dirs {
@@ -285,17 +635,16 @@ mod tests {
             assert!(d.parent().is_some(), "绝不报文件系统根：{:?}", d);
         }
         // 明确的非程序路径（一个不存在的文件）不该被当成解释器。
-        let missing = if cfg!(windows) { "C:\\nope\\nope.exe" } else { "/nope/nope" };
+        let missing = if cfg!(windows) {
+            "C:\\nope\\nope.exe"
+        } else {
+            "/nope/nope"
+        };
         assert!(
-            interpreter_dirs(&format!("cat {}", missing)).iter().all(|d| !d.ends_with("nope")),
+            interpreter_dirs(&format!("cat {}", missing))
+                .iter()
+                .all(|d| !d.ends_with("nope")),
             "数据/缺失路径不该被当成解释器"
         );
-    }
-}
-
-impl FenceSpec {
-    /// 该 agent 的私有沙箱（没有就退回工作目录）——环境里的 HOME / TEMP 落点。
-    pub fn private_or_cwd(&self) -> PathBuf {
-        self.rw.get(1).cloned().unwrap_or_else(|| self.cwd.clone())
     }
 }

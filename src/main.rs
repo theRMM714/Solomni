@@ -7,8 +7,6 @@ mod core;
 mod presentation;
 
 #[cfg(test)]
-mod contract_tests;
-#[cfg(test)]
 mod tests;
 
 use std::path::PathBuf;
@@ -29,7 +27,17 @@ fn main() {
     if let Some(i) = args.iter().position(|a| a == "--https-check") {
         std::process::exit(https_check(&args, i));
     }
-    // 入站契约（机器可读）：HTTP 路由目录的唯一定义（见 ARCHITECTURE.md「呈现层入站契约」）。
+    // 环境白名单（机器可读）：把运行期交给工具进程的环境逐行交出来——探针据此在**同一个环境**里驱动
+    // 守门进程，不另抄一份（抄一份会漂移，也会漏掉只有真实环境才暴露的问题）。
+    if let Some(i) = args.iter().position(|a| a == "--print-fence-env") {
+        std::process::exit(print_fence_env(&args, i));
+    }
+    // 机制验证（机器可读，探针与测试驱动）：不装围栏、不写任何权限项，只如实报"这次能不能强制住"。
+    // 未授权时段的拒绝执行（见 adapters/proc_tools.rs）就靠这一份结论。
+    if let Some(i) = args.iter().position(|a| a == "--fence-verify") {
+        std::process::exit(fence_verify(&args, i));
+    }
+    // 入站契约（机器可读）：HTTP 路由目录的唯一定义（见 docs/architecture/contracts.md）。
     if args.iter().any(|a| a == "--print-routes") {
         println!("{}", presentation::routes::catalog_json());
         std::process::exit(0);
@@ -50,13 +58,14 @@ fn main() {
     }
 
     // 组合根：唯一允许 new 具体适配器的地方（依赖注入）。
-    let log: std::sync::Arc<dyn core::ports::Log + Send + Sync> = match adapters::FileLog::new(&root, "Solomni 运行日志") {
-        Ok(l) => std::sync::Arc::new(l),
-        Err(e) => {
-            eprintln!("[日志系统异常] {}（进程继续，日志降级为 stderr）", e);
-            std::sync::Arc::new(core::ports::NoopLog)
-        }
-    };
+    let log: std::sync::Arc<dyn core::ports::Log + Send + Sync> =
+        match adapters::FileLog::new(&root, "Solomni 运行日志") {
+            Ok(l) => std::sync::Arc::new(l),
+            Err(e) => {
+                eprintln!("[日志系统异常] {}（进程继续，日志降级为 stderr）", e);
+                std::sync::Arc::new(core::ports::NoopLog)
+            }
+        };
     if let Some(note) = &root_note {
         eprintln!("[根目录] {}", note);
         log.warn("main::root", note);
@@ -65,7 +74,10 @@ fn main() {
     let fence_cap = adapters::confine::capability();
     log.info(
         "main::fence",
-        &format!("围栏能力：文件系统={} 断网={} 进程树={}；{}", fence_cap.fs, fence_cap.net, fence_cap.tree, fence_cap.note),
+        &format!(
+            "围栏能力：文件系统={} 断网={} 进程树={}；{}",
+            fence_cap.fs, fence_cap.net, fence_cap.tree, fence_cap.note
+        ),
     );
     println!("[围栏] {}", fence_cap.note);
     let store = adapters::YamlSettingsStore::new(
@@ -81,9 +93,13 @@ fn main() {
     let packages = adapters::FsPackages::new(root.join("runtimes"));
     // 端点记忆：谁先通了就固定谁，后续会话不再反复探测候选。
     let memo = adapters::endpoint::memo_new();
-    let gateway = adapters::HttpGateway::with_log(std::sync::Arc::clone(&log), std::sync::Arc::clone(&memo));
-    let catalog = adapters::HttpModelCatalog::with_log(std::sync::Arc::clone(&log), std::sync::Arc::clone(&memo));
-    let prompts = adapters::YamlPrompts::new(root.join("prompts.yaml"));
+    let gateway =
+        adapters::HttpGateway::with_log(std::sync::Arc::clone(&log), std::sync::Arc::clone(&memo));
+    let catalog = adapters::HttpModelCatalog::with_log(
+        std::sync::Arc::clone(&log),
+        std::sync::Arc::clone(&memo),
+    );
+    let prompts = adapters::YamlPrompts::new(root.join("prompts"), root.join("systools"));
     // 册子只读一次：core 与适配层（工具回执里的那些收尾标记）共用同一份。
     let book = match core::ports::PromptSource::load(&prompts) {
         Ok(b) => b,
@@ -92,10 +108,27 @@ fn main() {
             std::process::exit(1);
         }
     };
+    // 工具总表与角色表必须自洽（悬空引用 / 缺能力都是装配错误）：装配期就挡下，不拖到运行期。
+    match prompts.system_tools() {
+        Ok(st) if st.problems().is_empty() => {}
+        Ok(st) => {
+            eprintln!(
+                "[装配失败] 系统工具与角色表不自洽：{}",
+                st.problems().join("；")
+            );
+            std::process::exit(1);
+        }
+        Err(e) => {
+            eprintln!("[装配失败] {}", e);
+            std::process::exit(1);
+        }
+    }
     // 围栏是否允许在本机写权限：设置里授权过、或环境变量显式指定（SOLOMNI_FENCE_WRITE=1/0 可取反）。
     // 默认不准——没经过用户同意，本程序不动本机任何权限项。
     let home = root.join(".home");
     let write_allowed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    // 启动报告已经算过的同一个事实：Web 概览要按它区分"本机能力"与"本次实际"（下面那块必定赋值）。
+    let allow_fence_write;
     // 工具执行：外层拉起的守门进程就是本程序自己（围栏在它里面装）。
     let tools = adapters::ProcTools::new(
         std::env::current_exe().unwrap_or_default(),
@@ -186,7 +219,11 @@ fn main() {
                         .filter(|s| want(s))
                         .map(|s| s.name.as_str())
                         .collect();
-                    if got.is_empty() { "（无）".to_string() } else { got.join(" / ") }
+                    if got.is_empty() {
+                        "（无）".to_string()
+                    } else {
+                        got.join(" / ")
+                    }
                 };
                 println!("[回放形状] 被接受的写法：{}", names(|s| s.accepted));
                 println!(
@@ -211,14 +248,31 @@ fn main() {
             _ => core.app_settings().fence_write,
         };
         write_allowed.store(allow, std::sync::atomic::Ordering::Relaxed);
+        allow_fence_write = allow;
         let cap = adapters::confine::capability();
+        // 能力与本次实际**分开报**：授权与否决定路径级围栏装不装，但进程树围栏、资源上限与环境白名单
+        // 在两种时段都生效（未授权不等于无围栏）。只说"本机能力"会让用户以为未授权时什么都没有。
+        let usable = |ok: bool| if ok { "可用" } else { "不可用" };
+        let (fs, net) = if allow {
+            (cap.fs, cap.net)
+        } else {
+            (false, false)
+        };
         println!(
-            "[围栏] 本机能力：文件系统={} 断网={} 进程树={}；写权限={}（{}）",
-            cap.fs,
-            cap.net,
-            cap.tree,
+            "[围栏] 本机能力：文件系统={} 断网={} 进程树={}（{}）",
+            usable(cap.fs),
+            usable(cap.net),
+            usable(cap.tree),
+            cap.note
+        );
+        let ro = core.app_settings().fence_read.len();
+        println!(
+            "[围栏] 本次实际：文件系统={} 断网={} 进程树={}；容器授权={}；只读根={} 个（未授权时只放行进程树与资源上限，不写本机任何权限项；要启用：设置里打开，或 .home/settings.yaml 写 fence_write: true / fence_read: [路径…]）",
+            usable(fs),
+            usable(net),
+            usable(cap.tree),
             if allow { "已授权" } else { "未授权" },
-            if allow { cap.note.as_str() } else { "未授权时段：外部工具按无围栏执行；要启用请设 fence_write: true" }
+            ro
         );
     }
 
@@ -241,33 +295,63 @@ fn main() {
     let ops = core::api::Ops::from_handle(&handle);
 
     if web {
-        serve_web(ops, port_flag(&args), std::sync::Arc::clone(&log));
+        serve_web(
+            ops,
+            port_flag(&args),
+            std::sync::Arc::clone(&log),
+            allow_fence_write,
+        );
     } else {
         // CLI 里输入 webui 可直接转入 Web，无需重启进程（能力面可克隆，两份呈现共用同一个核心）。
         if let presentation::cli::CliExit::Web(port) = presentation::cli::run(ops.clone()) {
-            serve_web(ops, port, std::sync::Arc::clone(&log));
+            serve_web(ops, port, std::sync::Arc::clone(&log), allow_fence_write);
         }
     }
 }
 
-/// 精确回收：按台账撤掉围栏写过的权限项、删掉建过的容器 profile（隐藏模式，用户经文档知道它）。
+/// 精确回收：按台账撤掉围栏写过的权限项、删掉建过的容器 profile，再按名字前缀扫掉整族遗留 profile
+/// （台账可能不存在：探针、夹具的台账被删、旧版本建的）——隐藏模式，用户经文档知道它。
 fn fence_clean(root: &std::path::Path) -> i32 {
     let home = root.join(".home");
+    let mut lines: Vec<String> = Vec::new();
+    let mut failed = false;
     match adapters::confine::clean(&home) {
-        Ok(msg) => {
-            println!("[围栏] 清理完成：{}", msg);
-            0
-        }
+        Ok(msg) => lines.push(msg),
         Err(e) => {
-            eprintln!("[围栏] 清理失败：{}", e);
-            1
+            lines.push(format!("台账回收未完成：{}", e));
+            failed = true;
         }
+    }
+    match adapters::confine::sweep_profiles() {
+        Ok(n) => lines.push(format!("扫掉 {} 个本程序建过的容器 profile", n)),
+        Err(e) => {
+            lines.push(format!("容器 profile 清扫未完成：{}", e));
+            failed = true;
+        }
+    }
+    for line in &lines {
+        if failed {
+            eprintln!("[围栏] 清理未完成：{}", line);
+        } else {
+            println!("[围栏] 清理完成：{}", line);
+        }
+    }
+    if failed {
+        1
+    } else {
+        0
     }
 }
 
 /// 自检：本机事实（平台 + 围栏能力 + 外部解释器）。只报事实，不猜、不改任何东西（围栏自检那个临时目录除外）。
 fn doctor() -> i32 {
     let cap = adapters::confine::capability();
+    // 虚拟机档的逐项前置（**只读事实**）：这里按"没登记 QEMU、没指定基础根"问一次，
+    // 也就是最朴素的情形——登记过的路径以会话配置界面为准（那里按会话选型问同一份清单）。
+    let vm = core::exec::vm_requirements(&core::exec::VmInputs {
+        base: None,
+        qemu: None,
+    });
     let doc = serde_json::json!({
         "platform": std::env::consts::OS,
         "arch": std::env::consts::ARCH,
@@ -277,13 +361,20 @@ fn doctor() -> i32 {
             "node": find_exe("node"),
             "curl": find_exe("curl"),
         },
+        "vm_tier": {
+            "available": vm.iter().all(|r| r.met),
+            "requirements": vm.iter().map(|r| serde_json::json!({
+                "id": r.id, "met": r.met, "detail": r.detail, "how": r.how,
+            })).collect::<Vec<_>>(),
+        },
     });
     println!("{}", doc);
     0
 }
 
 /// 隐藏模式：用**产品自己的出站代理**（含按平台装配的 TLS）打一次最小 HTTPS 请求，如实报结论。
-/// 三态机器可读：ok（通）/ no-net（环境连不上外网）/ tls-fail|fail（我们链路坏了）。
+/// 四态机器可读：ok（通）/ no-net（环境连不上外网）/ env-tls（本进程取不到系统 TLS 凭证，如沙箱挡住凭证存储）/
+/// tls-fail|fail（我们链路坏了）。
 /// 退出码恒 0：判定归调用方（测试按性质决定 env-skip 还是失败），这里只报事实。
 fn https_check(args: &[String], i: usize) -> i32 {
     let url = args.get(i + 1).cloned().unwrap_or_default();
@@ -299,7 +390,12 @@ fn https_check(args: &[String], i: usize) -> i32 {
             0
         }
         Err(e) => {
-            println!("[HTTPS] {} {} {}", adapters::http_agent::classify(&e), backend, e);
+            println!(
+                "[HTTPS] {} {} {}",
+                adapters::http_agent::classify(&e),
+                backend,
+                e
+            );
             0
         }
     }
@@ -309,7 +405,12 @@ fn https_check(args: &[String], i: usize) -> i32 {
 fn find_exe(name: &str) -> Option<String> {
     let path_var = std::env::var_os("PATH")?;
     let exts: Vec<String> = std::env::var("PATHEXT")
-        .map(|v| v.split(';').filter(|s| !s.is_empty()).map(|s| s.to_string()).collect())
+        .map(|v| {
+            v.split(';')
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string())
+                .collect()
+        })
         .unwrap_or_else(|_| vec![String::new()]);
     for dir in std::env::split_paths(&path_var) {
         for ext in &exts {
@@ -331,15 +432,63 @@ impl core::ports::PromptSource for LoadedPrompts {
     }
 }
 
-/// 守门模式：读回围栏参数与命令，装围栏 → 跑命令 → 以工具退出码收场（失败如实报错，不静默）。
-fn fence_run(args: &[String], flag: usize) -> i32 {
-    let spec_json = args.get(flag + 1).cloned().unwrap_or_default();
+/// 隐藏模式：按 KEY=VALUE 逐行打出运行期给工具进程的环境白名单（入参 = 守门进程那份 JSON）。
+fn print_fence_env(args: &[String], flag: usize) -> i32 {
+    let raw = args.get(flag + 1).cloned().unwrap_or_default();
+    match adapters::confine::FenceJob::from_json(&raw) {
+        Ok(job) => {
+            for (k, v) in adapters::confine::fence_env(&job.spec) {
+                println!("{}={}", k.to_string_lossy(), v.to_string_lossy());
+            }
+            0
+        }
+        Err(e) => {
+            eprintln!("[围栏] {}", e);
+            adapters::confine::FENCE_FAILED
+        }
+    }
+}
+
+/// 隐藏模式：只做机制验证，如实报三态（enforced / env-unavailable / broken），恒退出 0——
+/// 判定归调用方（探针按性质决定 env-skip 还是失败）。入参 = 守门进程那份 JSON，`--` 之后是命令。
+fn fence_verify(args: &[String], flag: usize) -> i32 {
+    let raw = args.get(flag + 1).cloned().unwrap_or_default();
     let command = match args.iter().position(|a| a == "--") {
         Some(j) => args.get(j + 1).cloned().unwrap_or_default(),
         None => String::new(),
     };
-    match core::fence::FenceSpec::from_json(&spec_json) {
-        Ok(spec) => adapters::confine::run_fenced(&spec, &command),
+    let job = match adapters::confine::FenceJob::from_json(&raw) {
+        Ok(j) => j,
+        Err(e) => {
+            eprintln!("[围栏] {}", e);
+            return adapters::confine::FENCE_FAILED;
+        }
+    };
+    match adapters::confine::verify(&job.spec, &command) {
+        adapters::confine::FenceVerdict::Enforced => {
+            println!("enforced");
+            0
+        }
+        adapters::confine::FenceVerdict::EnvUnavailable(why) => {
+            println!("env-unavailable {}", why);
+            0
+        }
+        adapters::confine::FenceVerdict::Broken(why) => {
+            println!("broken {}", why);
+            0
+        }
+    }
+}
+
+/// 守门模式：读回围栏参数与命令，装围栏 → 跑命令 → 以工具退出码收场（失败如实报错，不静默）。
+fn fence_run(args: &[String], flag: usize) -> i32 {
+    let raw_job = args.get(flag + 1).cloned().unwrap_or_default();
+    let command = match args.iter().position(|a| a == "--") {
+        Some(j) => args.get(j + 1).cloned().unwrap_or_default(),
+        None => String::new(),
+    };
+    match adapters::confine::FenceJob::from_json(&raw_job) {
+        Ok(job) => adapters::confine::run_fenced(&job, &command),
         Err(e) => {
             eprintln!("[围栏] {}", e);
             adapters::confine::FENCE_FAILED
@@ -352,17 +501,27 @@ fn fence_run(args: &[String], flag: usize) -> i32 {
 fn resolve_root(raw: &std::path::Path) -> (PathBuf, Option<String>) {
     match std::env::current_dir() {
         Ok(cwd) => {
-            let joined = if raw.is_absolute() { raw.to_path_buf() } else { cwd.join(raw) };
+            let joined = if raw.is_absolute() {
+                raw.to_path_buf()
+            } else {
+                cwd.join(raw)
+            };
             (lexical_abs(&joined), None)
         }
         Err(e) => match std::fs::canonicalize(raw) {
             Ok(p) => (
                 strip_unc_prefix(p),
-                Some(format!("取不到当前目录（{}）：改用 canonicalize 规范化产品根", e)),
+                Some(format!(
+                    "取不到当前目录（{}）：改用 canonicalize 规范化产品根",
+                    e
+                )),
             ),
             Err(e2) => (
                 lexical_abs(raw),
-                Some(format!("取不到当前目录（{}），canonicalize 也失败（{}）：产品根可能不是绝对路径", e, e2)),
+                Some(format!(
+                    "取不到当前目录（{}），canonicalize 也失败（{}）：产品根可能不是绝对路径",
+                    e, e2
+                )),
             ),
         },
     }
@@ -373,7 +532,9 @@ fn lexical_abs(p: &std::path::Path) -> PathBuf {
     let mut out = PathBuf::new();
     for c in p.components() {
         match c {
-            std::path::Component::Prefix(_) | std::path::Component::RootDir => out.push(c.as_os_str()),
+            std::path::Component::Prefix(_) | std::path::Component::RootDir => {
+                out.push(c.as_os_str())
+            }
             std::path::Component::Normal(s) => out.push(s),
             std::path::Component::CurDir => {}
             std::path::Component::ParentDir => out.push(".."),
@@ -397,9 +558,34 @@ fn strip_unc_prefix(p: PathBuf) -> PathBuf {
     p
 }
 
-fn serve_web(ops: core::api::Ops, port: u16, log: std::sync::Arc<dyn core::ports::Log + Send + Sync>) {
+fn serve_web(
+    ops: core::api::Ops,
+    port: u16,
+    log: std::sync::Arc<dyn core::ports::Log + Send + Sync>,
+    write_allowed: bool,
+) {
     let cap = adapters::confine::capability();
-    let fence = presentation::web::FenceInfo { fs: cap.fs, net: cap.net, tree: cap.tree, note: cap.note };
+    // 能力与本次实际**分开报**（与启动报告同一套说法）：未授权时路径级围栏是关的，
+    // 但进程树与资源上限照旧生效——概览里必须让用户看到这个区别，不能只看"本机能力"。
+    let (fs, net) = if write_allowed {
+        (cap.fs, cap.net)
+    } else {
+        (false, false)
+    };
+    let fence = presentation::web::FenceInfo {
+        fs: cap.fs,
+        net: cap.net,
+        tree: cap.tree,
+        note: cap.note,
+        effective_fs: fs,
+        effective_net: net,
+        write_allowed,
+        read_only_roots: ops
+            .registry
+            .settings()
+            .map(|s| s.fence_read.len())
+            .unwrap_or(0),
+    };
     if let Err(e) = presentation::web::serve(ops, port, log, fence) {
         eprintln!("[Web 服务异常] {}", e);
         std::process::exit(1);

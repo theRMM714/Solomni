@@ -2,13 +2,15 @@
 //! 这些断言不需要写目录 ACL（ACL 授权由产品在真实会话里做），但要**建一个 AppContainer profile**——
 //! 那是改本机状态的动作，所以默认不跑：必须显式开启（node run-tests.js --fence-live 会把它传进来）。
 
-use crate::probe::{env_blocks_container, run_launcher, scratch, spec_json};
+use crate::probe::{env_blocks_container, job_json, run_launcher, scratch};
 use std::path::PathBuf;
 use std::process::Command;
 
 /// 是否允许跑"会改本机状态"的探针（默认否：测试不该在真机上留下痕迹）。
 fn live_enabled() -> bool {
-    std::env::var("SOLOMNI_FENCE_LIVE").map(|v| v == "1").unwrap_or(false)
+    std::env::var("SOLOMNI_FENCE_LIVE")
+        .map(|v| v == "1")
+        .unwrap_or(false)
 }
 
 /// 未开启就如实跳过（不静默算过，并说清为什么与怎么开）。
@@ -23,10 +25,14 @@ fn skip_unless_live(name: &str) -> bool {
     true
 }
 
-
 /// 探针用的围栏：rw 给一个落点；cwd 用系统目录（容器默认可读，避免把"CWD 能不能读"混进断言）。
 fn spec_for(rw: &PathBuf) -> String {
-    spec_json(std::slice::from_ref(rw), &PathBuf::from("C:\\Windows\\System32"))
+    // prepared = true：这些探针就是要验容器机制本身；ACL 授权由产品在真实会话里做。
+    job_json(
+        std::slice::from_ref(rw),
+        &PathBuf::from("C:\\Windows\\System32"),
+        true,
+    )
 }
 
 #[test]
@@ -37,11 +43,19 @@ fn container_starts_and_passes_stdio_through() {
     let dir = scratch("container-ok");
     let (code, out, err) = run_launcher(&spec_for(&dir), "echo container-ok");
     if env_blocks_container(&err) {
-        eprintln!("[探针] 本环境不允许容器围栏：{}（请在普通 shell 里重跑本探针）", err.trim());
+        eprintln!(
+            "[探针] 本环境不允许容器围栏：{}（请在普通 shell 里重跑本探针）",
+            err.trim()
+        );
         return;
     }
     assert!(!err.contains("容器围栏未生效"), "本机应能建起容器：{}", err);
-    assert!(out.contains("container-ok"), "stdout 要透传：{} / {}", out, err);
+    assert!(
+        out.contains("container-ok"),
+        "stdout 要透传：{} / {}",
+        out,
+        err
+    );
     assert_eq!(code, Some(0));
 }
 
@@ -55,10 +69,18 @@ fn container_cannot_read_outside_its_roots() {
     std::fs::write(&secret, "SECRET-DO-NOT-LEAK").unwrap();
     let (code, out, err) = run_launcher(&spec_for(&dir), &format!("type {}", secret.display()));
     if env_blocks_container(&err) {
-        eprintln!("[探针] 本环境不允许容器围栏，跳过越界读断言：{}", err.trim());
+        eprintln!(
+            "[探针] 本环境不允许容器围栏，跳过越界读断言：{}",
+            err.trim()
+        );
         return;
     }
-    assert!(!out.contains("SECRET-DO-NOT-LEAK"), "越界读必须拿不到：{} / {}", out, err);
+    assert!(
+        !out.contains("SECRET-DO-NOT-LEAK"),
+        "越界读必须拿不到：{} / {}",
+        out,
+        err
+    );
     assert_ne!(code, Some(0), "越界读应以非零退出：{} / {}", out, err);
 }
 
@@ -71,7 +93,10 @@ fn container_cannot_write_outside_its_roots() {
     let target = dir.join("should-not-exist.txt");
     let (code, out, err) = run_launcher(&spec_for(&dir), &format!("echo x> {}", target.display()));
     if env_blocks_container(&err) {
-        eprintln!("[探针] 本环境不允许容器围栏，跳过越界写断言：{}", err.trim());
+        eprintln!(
+            "[探针] 本环境不允许容器围栏，跳过越界写断言：{}",
+            err.trim()
+        );
         return;
     }
     assert!(!target.exists(), "越界写不该落盘：{} / {}", out, err);
@@ -86,7 +111,11 @@ fn container_has_no_network() {
     // 先在本机（容器外）证明那个监听确实连得上，再在容器里证明连不上——否则这条断言没有意义。
     // 用外网（IP 直连，避开 DNS）而不是回环：AppContainer 的回环本来就可能可连，拿它当断网证据不成立。
     let cmd = "curl -s -m 4 -o NUL -w %{http_code} http://1.1.1.1/".to_string();
-    let outside = Command::new("cmd").arg("/C").arg(&cmd).output().expect("容器外跑一遍");
+    let outside = Command::new("cmd")
+        .arg("/C")
+        .arg(&cmd)
+        .output()
+        .expect("容器外跑一遍");
     let outside_code = String::from_utf8_lossy(&outside.stdout).trim().to_string();
     if outside_code.is_empty() || outside_code == "000" {
         eprintln!(
@@ -108,5 +137,87 @@ fn container_has_no_network() {
         outside_code,
         inside_code,
         err
+    );
+}
+
+/// 未授权时段（`prepared = false`）的机制验证：把"本环境不允许建容器"与"我们的步骤写错了"分开。
+/// 与上面几条探针的尺子相反——那些要的是**跑起来**，这条只要**结论**（不写任何 ACL）。
+/// 这条不改本机状态（不写权限项），但会建一次容器 profile，所以仍归真机开关管。
+/// **三态都要认**：runner 上容器建得起来（真机 CI 就是这一态，断言要照它过）也走这一条；
+/// 只有既不是建起来了、也不是本环境不允许的结论才该响亮失败（那才是"步骤写错"）。
+#[test]
+fn verify_separates_env_unavailable_from_broken_container_steps() {
+    use crate::probe::{job_json, verdict_is_broken, verdict_is_env_unavailable, verify_fence};
+    if skip_unless_live("verify_separates_env_unavailable_from_broken_container_steps") {
+        return;
+    }
+    let dir = scratch("container-verify");
+    // prepared = false：这正是未授权机器上的真实形态（外层不写 ACL，只问机制能不能用）。
+    let spec = job_json(
+        std::slice::from_ref(&dir),
+        &PathBuf::from("C:\\Windows\\System32"),
+        false,
+    );
+    let verdict = verify_fence(&spec, "cmd");
+    if verdict_is_env_unavailable(&verdict) {
+        eprintln!(
+            "[探针] 本环境不允许建容器 profile（环境结论，如实跳过）：{}",
+            verdict
+        );
+        return;
+    }
+    assert!(
+        !verdict_is_broken(&verdict),
+        "本机能建容器时步骤就该走得通，走不通就是步骤写错：{}",
+        verdict
+    );
+}
+/// 未授权时段 + **本环境不允许建容器**这一路（测试专用注入）：结论必须是 env-unavailable（不是 broken），
+/// 而且守门进程要**照常执行命令**（如实降级，不是拒绝执行）——这条分支真机上要靠环境恰好不允许才会出现。
+/// 注入不改本机状态（不写 ACL、不建 profile），所以不归 --fence-live 管。
+#[test]
+fn env_unavailable_degrades_and_still_runs_the_command() {
+    use crate::probe::{
+        degraded_by_env, job_json, run_launcher_env, verdict_is_broken, verdict_is_env_unavailable,
+        verify_fence_with, SELFCHECK_FAIL_FLAG,
+    };
+    let dir = scratch("container-env-unavailable");
+    let spec = job_json(
+        std::slice::from_ref(&dir),
+        &PathBuf::from("C:\\Windows\\System32"),
+        false,
+    );
+    let injected: &[(&str, &str)] = &[(SELFCHECK_FAIL_FLAG, "1")];
+
+    let verdict = verify_fence_with(&spec, "cmd", injected);
+    assert!(
+        verdict_is_env_unavailable(&verdict),
+        "注入后必须报本环境不允许：{}",
+        verdict
+    );
+    assert!(
+        !verdict_is_broken(&verdict),
+        "本环境不允许不是我们写错了：{}",
+        verdict
+    );
+
+    let mark = dir.join("ran.txt");
+    let (code, _out, err) =
+        run_launcher_env(&spec, &format!("echo ok> {}", mark.display()), injected);
+    assert_eq!(code, Some(0), "本环境不允许时应降级照跑：{}", err);
+    assert!(mark.exists(), "命令要真的执行了：{}", err);
+    assert!(
+        degraded_by_env(&err),
+        "stderr 要如实说明容器围栏未生效：{}",
+        err
+    );
+    // 这一路**不写**本机任何权限项：与「我们写错了」那条拒绝执行的路径形成对照，
+    // 也让"降级照跑"不等于"偷偷动了本机状态"这一点可判。
+    assert!(
+        !dir.join("fence-grants.json").exists() && !dir.join("ledger").exists(),
+        "本机不允许这一路不该留下任何授权台账：{:?}",
+        std::fs::read_dir(&dir)
+            .map(|d| d.flatten().map(|e| e.file_name()).collect::<Vec<_>>())
+            .unwrap_or_default()
     );
 }

@@ -1,6 +1,6 @@
 //! 提示词渲染层：{{key}} 占位替换，纯逻辑。
 //! 册子文本来自 PromptSource（文件机制在适配层）；缺键/缺变量报错，不静默。
-//! 提示词是最不稳定的文本：改文案只动 prompts.yaml，不改代码。
+//! 提示词是最不稳定的文本：改文案只动 prompts/，不改代码。
 
 use serde::Deserialize;
 
@@ -27,29 +27,73 @@ pub fn render(template: &str, vars: Vars) -> Result<String, String> {
             }
         }
         // 字面 {{（非占位）按原样保留；JSON 示例中的花括号不受影响（单括号）。
-        let ch_len = template[i..].chars().next().map(|c| c.len_utf8()).unwrap_or(1);
+        let ch_len = template[i..]
+            .chars()
+            .next()
+            .map(|c| c.len_utf8())
+            .unwrap_or(1);
         out.push_str(&template[i..i + ch_len]);
         i += ch_len;
     }
     Ok(out)
 }
 
-/// 提示词册（prompts.yaml 的内存形态）。
+/// 装配输入的**内存形态**：册子（`prompts/`）+ 系统工具与角色（`systools/`）。
+/// 为什么放一起：它们同一次装配、同一个注入点（core 只拿这一份）；分开注入只是多一条通道。
 #[derive(Debug, Clone, Deserialize)]
 pub struct Prompts {
     pub core: CorePrompts,
+    /// 工具总表与角色表（不是提示词，但和册子一起装配）。
+    #[serde(skip)]
+    pub systools: crate::core::roles::SystemTools,
+}
+
+/// 把册子的多个文件合并成内存形态：各文件的**顶层键**合并后就是 `core:` 的内容。
+///
+/// 为什么合并而不是把结构也拆开：册子的内存形态是**契约**——core 各处按 `prompts.core.x` 引用，
+/// 文件怎么分是组织问题，不该让每个引用点跟着改。所以"拆分"只动文件与加载器。
+///
+/// 两条如实报错（不静默）：**键在两个文件里重复**（拆分时最可能犯的错）、**缺键或类型不对**。
+pub fn merge_book(docs: &[String]) -> Result<Prompts, String> {
+    let mut merged = serde_yaml::Mapping::new();
+    for doc in docs {
+        let value: serde_yaml::Value =
+            serde_yaml::from_str(doc).map_err(|e| format!("提示词册非法：{}", e))?;
+        let map = match value {
+            serde_yaml::Value::Mapping(m) => m,
+            _ => return Err("提示词册非法：每个文件的最外层必须是一张键表".to_string()),
+        };
+        for (key, value) in map {
+            if merged.insert(key.clone(), value).is_some() {
+                return Err(format!("提示词册非法：键 {:?} 在两个文件里重复", key));
+            }
+        }
+    }
+    let mut root = serde_yaml::Mapping::new();
+    root.insert(
+        serde_yaml::Value::String("core".to_string()),
+        serde_yaml::Value::Mapping(merged),
+    );
+    serde_yaml::from_value(serde_yaml::Value::Mapping(root))
+        .map_err(|e| format!("提示词册缺键或类型不对：{}", e))
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct CorePrompts {
+    /// 机制说明（这个系统怎么运转、一个 agent 一个会话、表态只能用动词）。
+    /// 讨论席与执行席**都**拿它——AI 不知道机制，就只会写散文。
+    pub mechanism: String,
     pub chat_protocol: String,
     pub discuss: DiscussPrompts,
     pub synthesize: SynthPrompts,
     pub execute: ExecutePrompts,
     pub review: ReviewPrompts,
-    pub rerun: RerunPrompts,
+    /// 节点级验收（任务链：逐节点核对当前目标）。
+    pub node_review: NodeReviewPrompts,
     pub slate: SlatePrompts,
     pub suggest_models: SuggestPrompts,
+    /// 判定用户对裁决的回应是否明确到可以开工/放行。
+    pub verdict: VerdictPrompts,
     /// 一个 agent 的职责提示词（由它的模块合成为一份能力包）。
     pub agent: AgentPrompts,
     /// @ 引用的两句说明文案。
@@ -60,11 +104,15 @@ pub struct CorePrompts {
     pub tool_calling_native: String,
     /// 工具与路径相关的**模型侧文案**（回执、失败说明、清单行）；改文案只改册子。
     pub tool_texts: ToolTexts,
-    /// 内置文件工具说明块；变量：work_name, agent, work_root, sandbox_root, module_roots, tool_params, patch_guide
-    pub sys_tools: String,
+    /// **工作环境块**：真实根目录与路径规矩。变量：work_name, agent, work_root, sandbox_root, module_roots。
+    /// 这里**不列工具**——能用哪些工具由核心按这一回合的身份从角色表现渲染、随回合注入。
+    pub env: String,
     /// patch 通道的写法说明（模型侧）；变量：work_root, sandbox_root
     pub patch_guide: String,
-    /// 内置工具的参数契约（prompts.yaml 的 builtin_tools）：模型说明与调用校验的唯一来源。
+    /// 内置工具的参数契约：模型说明与调用校验的唯一来源。
+    /// **它不是册子的内容**——声明在 `systools/tools.yaml`（工具总表），由装配期填进来；
+    /// 所以这里允许缺省（册子里没有这一段），但装配器读不到总表就报错，不会静默留空。
+    #[serde(default)]
     pub builtin_tools: crate::core::schema::ToolBook,
     /// 登记处还没有 agent 时的说明（拟名单的 {{agents}} 取值）。
     pub no_agents: String,
@@ -125,8 +173,25 @@ pub struct ToolTexts {
     pub arg_unknown: String,
     /// 变量：name
     pub unknown_builtin: String,
+    /// 变量：name
+    pub tool_not_allowed: String,
+    /// 本回合可用工具块的标题行；变量：tools（由核心按该回合的角色表现渲染）。
+    pub tools_this_turn: String,
+    /// 压缩回合的提示词（无变量）：让 AI 自己压，并调 compact 工具写下摘要。
+    pub compact_prompt: String,
+    /// 轮次边界给"上一轮没表态"的成员的提醒（无变量）。
+    pub discuss_reminder: String,
     /// 变量：path, bytes, text
     pub read_header: String,
+    /// read 遇到目录时的如实引导。变量：path
+    pub read_is_dir: String,
+    // —— list：列目录 ——
+    /// 变量：path, count
+    pub list_header: String,
+    /// 变量：name, dir_mark, bytes
+    pub list_row: String,
+    pub list_dir_mark: String,
+    pub list_empty: String,
     /// 变量：path, chars
     pub write_header: String,
     // —— edit：精确替换与"没找到/多处命中"的如实回报（第二层）——
@@ -237,8 +302,6 @@ pub struct ToolTexts {
     // —— 工具循环与讨论（engine）——
     /// 变量：label, output
     pub tool_result_wrapper: String,
-    /// 变量：n
-    pub tool_cap: String,
     // 工具信封不合法：按判定出的类别给各自改法
     /// 变量：what（修好并执行时如实标注在工具回执最前面）
     pub envelope_repaired: String,
@@ -309,13 +372,19 @@ impl ToolTexts {
         if tail.envelopes > 1 {
             return self.render(
                 &self.malformed_multi,
-                &[("n", tail.envelopes.to_string()), ("missing", tail.missing.clone())],
+                &[
+                    ("n", tail.envelopes.to_string()),
+                    ("missing", tail.missing.clone()),
+                ],
             );
         }
         if tail.in_string {
             self.malformed_unclosed_string.clone()
         } else {
-            self.render(&self.malformed_unclosed_brace, &[("missing", tail.missing.clone())])
+            self.render(
+                &self.malformed_unclosed_brace,
+                &[("missing", tail.missing.clone())],
+            )
         }
     }
 
@@ -324,7 +393,10 @@ impl ToolTexts {
         if tail.in_string {
             self.malformed_cut_string.clone()
         } else {
-            self.render(&self.malformed_missing_tail, &[("missing", tail.missing.clone())])
+            self.render(
+                &self.malformed_missing_tail,
+                &[("missing", tail.missing.clone())],
+            )
         }
     }
 
@@ -337,9 +409,15 @@ impl ToolTexts {
                     '\n' => self.control_lf.clone(),
                     '\r' => self.control_cr.clone(),
                     '\t' => self.control_tab.clone(),
-                    other => self.render(&self.control_other, &[("code", format!("{:04X}", *other as u32))]),
+                    other => self.render(
+                        &self.control_other,
+                        &[("code", format!("{:04X}", *other as u32))],
+                    ),
                 };
-                let mut out = self.render(&self.malformed_control, &[("what", what), ("line", line.to_string())]);
+                let mut out = self.render(
+                    &self.malformed_control,
+                    &[("what", what), ("line", line.to_string())],
+                );
                 // 同时还没闭合就一并说清（只说一处会让模型改错方向）
                 if let Some(t) = tail {
                     out.push('\n');
@@ -375,6 +453,13 @@ pub struct DiscussPrompts {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+pub struct VerdictPrompts {
+    pub system: String,
+    /// user 变量：kind, payload, text
+    pub user: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 pub struct SynthPrompts {
     pub system: String,
     /// user 变量：transcript
@@ -395,8 +480,9 @@ pub struct ReviewPrompts {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct RerunPrompts {
-    /// user 变量：tasks, review, report
+pub struct NodeReviewPrompts {
+    pub system: String,
+    /// user 变量：nodes
     pub user: String,
 }
 
@@ -420,12 +506,13 @@ pub struct SuggestPrompts {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct AgentPrompts {
-    /// system 变量：agent, modules, sys_tools, module_tools, module_tool_params
+    /// system 变量：agent, modules, mechanism, env, tool_calling
     pub system: String,
 }
 
 impl Prompts {
     pub fn render<'a>(&self, template: &str, vars: Vars<'a>) -> String {
-        render(template, vars).expect("提示词渲染失败：变量缺失属于装配错误，须修复 prompts.yaml 或调用方")
+        render(template, vars)
+            .expect("提示词渲染失败：变量缺失属于装配错误，须修复 prompts/ 或调用方")
     }
 }

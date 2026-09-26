@@ -70,8 +70,15 @@ pub fn listing(prompts: &Prompts, known: &Agents) -> String {
     known
         .iter()
         .map(|(name, a)| {
-            let model = a.model.clone().unwrap_or_else(|| prompts.core.no_model.clone());
-            let note = if a.note.trim().is_empty() { String::new() } else { format!("；{}", a.note.trim()) };
+            let model = a
+                .model
+                .clone()
+                .unwrap_or_else(|| prompts.core.no_model.clone());
+            let note = if a.note.trim().is_empty() {
+                String::new()
+            } else {
+                format!("；{}", a.note.trim())
+            };
             texts.render(
                 &texts.agent_listing_line,
                 &[
@@ -87,14 +94,26 @@ pub fn listing(prompts: &Prompts, known: &Agents) -> String {
 }
 
 /// 可用模型清单（拟名单时给模型看）：id / 名称 / api_model / 说明。
-pub fn model_listing(models: &BTreeMap<String, ModelEntry>, texts: &crate::core::prompt::ToolTexts) -> String {
+pub fn model_listing(
+    models: &BTreeMap<String, ModelEntry>,
+    texts: &crate::core::prompt::ToolTexts,
+) -> String {
     models
         .iter()
         .map(|(id, m)| {
-            let note = if m.note.trim().is_empty() { String::new() } else { format!("；{}", m.note) };
+            let note = if m.note.trim().is_empty() {
+                String::new()
+            } else {
+                format!("；{}", m.note)
+            };
             texts.render(
                 &texts.model_listing_line,
-                &[("id", id.clone()), ("name", m.name.clone()), ("api_model", m.api_model.clone()), ("note", note)],
+                &[
+                    ("id", id.clone()),
+                    ("name", m.name.clone()),
+                    ("api_model", m.api_model.clone()),
+                    ("note", note),
+                ],
             )
         })
         .collect::<Vec<_>>()
@@ -106,7 +125,11 @@ pub fn model_listing(models: &BTreeMap<String, ModelEntry>, texts: &crate::core:
 #[serde(untagged)]
 pub enum RosterPick {
     /// 复用：只报登记处里的 agent 名。
-    Reuse { agent: String, #[serde(default)] why: String },
+    Reuse {
+        agent: String,
+        #[serde(default)]
+        why: String,
+    },
     /// 组装：给出新实例的名字、模块与模型。
     Build {
         #[serde(default)]
@@ -144,14 +167,28 @@ pub fn resolve_picks(
         // 复用项以登记处为准（模块与模型都取它自己的，核心不代拟模型）。
         let (base, modules, model, transient) = match p {
             RosterPick::Reuse { agent, .. } => match known.get(agent.trim()) {
-                Some(a) => (agent.trim().to_string(), a.modules.clone(), a.model.clone(), false),
+                Some(a) => (
+                    agent.trim().to_string(),
+                    a.modules.clone(),
+                    a.model.clone(),
+                    false,
+                ),
                 None => {
                     rejected.push(format!("agent {} 不在登记处", agent.trim()));
                     continue;
                 }
             },
-            RosterPick::Build { name, modules, model, .. } => {
-                let label = if name.trim().is_empty() { "组装项".to_string() } else { name.trim().to_string() };
+            RosterPick::Build {
+                name,
+                modules,
+                model,
+                ..
+            } => {
+                let label = if name.trim().is_empty() {
+                    "组装项".to_string()
+                } else {
+                    name.trim().to_string()
+                };
                 if !models.contains_key(&model) {
                     rejected.push(format!("{} 指定的模型 {} 不存在", label, model));
                     continue;
@@ -183,11 +220,23 @@ pub fn resolve_picks(
             continue;
         }
         // 名字不合法就用首个模块 id 兜底；同名单内重名追加尾号。
-        let name = if validate_name(&base).is_ok() { base } else { local[0].clone() };
+        let name = if validate_name(&base).is_ok() {
+            base
+        } else {
+            local[0].clone()
+        };
         let name = unique_instance_name(&name, &names);
         names.push(name.clone());
         used.extend(local.iter().cloned());
-        out.push((AgentMeta { name, transient, modules: local, model }, why));
+        out.push((
+            AgentMeta {
+                name,
+                transient,
+                modules: local,
+                model,
+            },
+            why,
+        ));
     }
     (out, rejected)
 }

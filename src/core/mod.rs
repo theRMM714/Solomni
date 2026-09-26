@@ -4,6 +4,7 @@
 
 pub mod agents;
 pub mod api;
+pub mod chain;
 pub mod collab;
 pub mod collab_state;
 pub mod engine;
@@ -19,18 +20,23 @@ pub mod ports;
 pub mod prompt;
 pub mod providers;
 pub mod refs;
+pub mod roles;
 pub mod schema;
 pub mod session;
 pub mod systool;
 pub mod workspace;
 
-pub use events::{Live, Pending, SessionEvent};
+pub use events::{Pending, SessionEvent};
+// 测试用同步入口的签名要它；生产路径的 Live 构造在 api.rs（那里直接引 events::Live）。
+#[cfg(test)]
+pub(crate) use events::Live;
 pub use ports::{
-    ChatGateway, HistoryStore, ModelCatalog, ModuleSource, PackageSource, PromptSource, SettingsStore, SysIo, ToolRunner,
-    Workspace,
+    ChatGateway, HistoryStore, ModelCatalog, ModuleSource, PackageSource, PromptSource,
+    SettingsStore, SysIo, ToolRunner, Workspace,
 };
 
 use crate::core::collab::CollabSession;
+use crate::core::engine::AfterTurn;
 use crate::core::history::{AgentMeta, HistoryView, SessionMeta};
 use crate::core::module::Module;
 use crate::core::ports::Msg;
@@ -43,6 +49,9 @@ use std::sync::Arc;
 pub type SessionId = String;
 
 /// 会话实例：单 agent 会话或协作会话（本体自带端口，可跨线程移动）。
+/// 两变体大小差得远（协作会话带整份讨论状态），装箱只换来一次间接寻址、
+/// 却把"会话本体可直接移动"这个形状改掉——有意不装箱（见 docs/testing/quality-isolation.md 的 allow 清单）。
+#[allow(clippy::large_enum_variant)]
 pub enum Session {
     Single(session::AgentSession),
     Collab(CollabSession),
@@ -54,7 +63,8 @@ pub enum CollabStep {
     SetTask,
     ConfirmSlate,
     Begin,
-    Answer,
+    /// **用户对裁决的自由文本回应**：核心 AI 判定意图是否明确，明确了才开工/放行。
+    Decide,
 }
 
 /// 工作形态：单 agent（模块数不限）/ 协作（多 agent 分权协商）。
@@ -89,12 +99,14 @@ pub struct WorkSpec {
     pub delegate: bool,
 }
 
-/// 创建工作后的结果：最终实例名（重名已加尾号）与开场事件。
+/// 创建工作后的结果：最终实例名（重名已加尾号）、名单，以及**开场事实**。
+/// 事实由 api 层发布进事件台（核心不持有事件台）；**不上回包**——
+/// 回包只给事件台头部序号，谁要看谁按 `since` 订阅。
 #[derive(Debug, Clone)]
 pub struct WorkOpened {
     pub sid: SessionId,
     pub agents: Vec<String>,
-    pub events: Vec<SessionEvent>,
+    pub facts: Vec<SessionEvent>,
 }
 
 /// 核心推荐的 agent 草案（名字 + 模块 + 模型 + 理由；用户可改，核心不代选）。
@@ -120,6 +132,11 @@ pub struct RuntimeReport {
     pub missing: BTreeMap<String, Vec<String>>,
     /// 虚拟机档下不能成立的诊断；本机档为空。
     pub diagnoses: Vec<exec::Diagnosis>,
+    /// 本机能不能承载**当前档位**（虚拟机档的前置条件；本机档恒为可）。
+    /// 界面据此决定虚拟机档能不能选，并与「开始」/编辑的校验同源（`exec::tier_readiness`）。
+    pub tier_ready: bool,
+    /// 承载不了时缺什么（空 = 齐了）。
+    pub tier_missing: Vec<String>,
     /// 被拒收的模块（原因如实）。
     pub rejected: Vec<String>,
     /// 被拒收的运行包（原因如实）。
@@ -148,6 +165,16 @@ pub struct SessionConfig {
     pub base: Option<String>,
     pub net: bool,
     pub pins: BTreeMap<String, String>,
+    /// 本机能不能承载**当前档位**（虚拟机档的前置条件）：界面据此决定虚拟机档能不能选。
+    pub tier_ready: bool,
+    /// 承载不了时缺什么（空 = 齐了）。
+    pub tier_missing: Vec<String>,
+    /// **虚拟机档**能不能选（与当前档位无关）：为假时界面禁用虚拟机档，编辑与「开始」也会拒绝。
+    pub vm_available: bool,
+    /// 虚拟机档为什么不能选（`vm_available` 为真时为空）。
+    pub vm_unavailable_reason: String,
+    /// 虚拟机档的**逐项前置**（缺哪几项、每项怎么补）：界面照抄，不自己编话。
+    pub vm_requirements: Vec<crate::core::exec::VmRequirement>,
     /// 运行能力报告（模块声明 / 包库可用 / 缺包 / 虚拟机档诊断 / 拒收原因）。
     pub runtime: RuntimeReport,
     /// 依赖文件夹（把运行包放进这里；真实路径，给用户看）。
@@ -168,12 +195,144 @@ pub struct SessionEdit {
     pub net: bool,
 }
 
+/// **这个会话要不要留档**：由**会话种类**定，不由调用点定。
+/// - `Keep`：定稿事件落盘（单 agent 会话与协作会话都要回放——前者是模型上下文的一部分，
+///   后者是派生状态的来源）；
+/// - `Drop`：只推不留（**系统会话**：一次性动作，如"让核心推荐 agent"，重启后本来就该是空的）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PersistPolicy {
+    Keep,
+    Drop,
+}
+
+impl PersistPolicy {
+    /// 一条事件该不该留：`Drop` 一条都不留；`Keep` 也不留**短暂事件**
+    /// （流式增量 / 运行态 / 实时工具卡 / 裁决卡——它们只给在场的前端看）。
+    pub(crate) fn keeps(&self, ev: &SessionEvent) -> bool {
+        if *self == PersistPolicy::Drop {
+            return false;
+        }
+        !matches!(
+            ev,
+            SessionEvent::Delta { .. }
+                | SessionEvent::Working { .. }
+                | SessionEvent::ToolCall(_)
+                | SessionEvent::Decision { .. }
+        )
+    }
+}
+
+/// **系统会话的 sid 约定**：以 `#` 开头的是"没有地方落盘"的一次性动作（只推不留）。
+/// 见 docs/architecture/session-model.md 二（会话种类 × 推 / 落）。
+pub(crate) fn is_system_session(sid: &str) -> bool {
+    sid.starts_with('#')
+}
+
+/// 核心推荐（suggest_models）的系统会话 sid：一次性的推荐动作**没有工作区**，
+/// 它的行只推给在场的前端看（推荐是弹窗里的一次问答），不落盘，也不进会话列表。
+pub(crate) const SYSTEM_SID_SUGGEST: &str = "#suggest";
+
+/// 这个会话的落盘策略（**判定只有这一处**：会话种类 → 策略）。
+fn persist_policy_for(sid: &str) -> PersistPolicy {
+    if is_system_session(sid) {
+        PersistPolicy::Drop
+    } else {
+        PersistPolicy::Keep
+    }
+}
+
+/// 事件落盘（按该会话的策略；短暂事件不落盘）：失败如实告知，返回要外送的警告（None = 一切正常）。
+///
+/// 为什么抽成自由函数：工作线程按**一次模型调用**的粒度增量落盘，必须与核心走同一段逻辑——
+/// 两条路径各写一份的话，"什么算定稿、什么不落盘"迟早会不一致。
+pub(crate) fn persist_events(
+    history: &dyn HistoryStore,
+    log: &dyn ports::Log,
+    sid: &str,
+    events: &[SessionEvent],
+) -> Option<String> {
+    // 留不留由**这个会话的策略**说了算（会话种类 → 策略，见 persist_policy_for）。
+    let policy = persist_policy_for(sid);
+    let jsons: Vec<serde_json::Value> = events
+        .iter()
+        .filter(|e| policy.keeps(e))
+        .map(|e| e.to_json())
+        .collect();
+    if jsons.is_empty() {
+        return None;
+    }
+    match history.append(sid, &jsons) {
+        Ok(()) => None,
+        Err(e) => {
+            log.error(
+                "core::history_append",
+                &format!("会话 {} 落盘失败：{}", sid, e),
+            );
+            Some(format!("[警告] 会话记录落盘失败：{}", e))
+        }
+    }
+}
+
+/// 增量落盘手柄：工作线程按"一次模型调用"的粒度把定稿事件落盘。
+/// 为什么要它：以前整段生成跑完才落一次盘，中途刷新页面看不到已经产生的部分。
+#[derive(Clone)]
+pub(crate) struct Persister {
+    history: Arc<dyn HistoryStore + Send + Sync>,
+    log: Arc<dyn ports::Log + Send + Sync>,
+    sid: String,
+}
+
+impl Persister {
+    /// 落盘这一批；返回要外送给用户的警告（None = 正常）。
+    pub(crate) fn persist(&self, events: &[SessionEvent]) -> Option<String> {
+        persist_events(self.history.as_ref(), self.log.as_ref(), &self.sid, events)
+    }
+}
+
+/// 一次单 agent 生成的**准备结果**（核心线程上只算到这里，模型调用在工作线程上）。
+pub(crate) enum Prepared {
+    /// 可以跑：会话已从核心表取出，由工作线程独占。
+    Run {
+        /// 装箱：这个变体比其它两个大得多（会话本体），而它本来就是**一次性移交**给工作线程的。
+        session: Box<session::AgentSession>,
+        /// 本回合的**身份块**：按当前提示词册与登记处现渲染（不进会话的消息列表）。
+        identity: String,
+        /// 生成前要先给用户的事件（例如工具形态变更的提示）。
+        prefix: Vec<SessionEvent>,
+        llm: ports::LlmOpts,
+        /// 增量落盘手柄：逐轮外送的同时就落盘（中途刷新页面因此看得到已产生的部分）。
+        persister: Persister,
+    },
+    /// 不用跑模型：直接把这批事件回给调用方（例如"末条是 AI 发言"）。
+    Immediate(Vec<SessionEvent>),
+    /// 不是单 agent 会话：交回调用方走它自己那条路（协作）。
+    NotSingle,
+}
+
 /// 会话列表视图。
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct SessionView {
     pub sid: String,
     pub mode: String,
     pub done: bool,
+    /// 这条会话记的执行档位（`host` / `vm`）：打开时据此提示"环境已变"。
+    pub tier: String,
+    /// 记的档位**现在还能不能承载**（本机档恒真）。为假时前端打开前给提示，但不拦打开。
+    pub tier_ready: bool,
+    /// 承载不了时缺什么（空 = 齐了）。
+    pub tier_missing: Vec<String>,
+    /// **这条会话此刻在跑吗**（生成中）：界面据此把「发送/继续」换成「停止」并显示占位动画。
+    /// 它是**对账副本**：运行态的唯一真相是推的 `SessionEvent::Working`（短暂、不落盘）；
+    /// 这份快照供界面在"本页对这条会话还没有实时知识"时对齐——刚刷新页面、事件台裁掉一段后
+    /// 重连、别人建的会话（见 docs/architecture/session-model.md 二之二）。
+    pub running: bool,
+    /// **这条工作有「本次需求」吗**：前端据此决定要不要渲染「改需求」按钮——
+    /// 没有就**根本不渲染**（不是灰着）。这是领域事实（有没有需求行），不是"模式"。
+    pub can_update_task: bool,
+    /// 当前等用户裁决的事（None = 没有）：**快照形态**，与推的 `SessionEvent::Decision` 同源。
+    /// 刷新页面时界面照样画得出那张卡；推的那条只是增量。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pending: Option<serde_json::Value>,
 }
 
 /// 会话文件清单视图（前端 @ 菜单与「长路径缩写」用）：相对清单 + 真实根。
@@ -203,11 +362,6 @@ pub struct FilesAgentRootView {
     pub root: String,
 }
 
-#[derive(serde::Deserialize)]
-struct SuggestReply {
-    agents: Vec<agents::RosterPick>,
-}
-
 /// 核心门面：持有注入的端口与会话中心；前端只经此操作。
 /// 线程共享形态：组合根把它放进 Arc 加 Mutex（Web 多连接/多会话所需）。
 pub struct Core {
@@ -230,10 +384,18 @@ pub struct Core {
     settings: Settings,
     prompts: Prompts,
     sessions: HashMap<SessionId, Session>,
+    /// 正在生成的会话：对象被工作线程**取走**了，核心表里暂时没有它。
+    /// 为什么取出而不是就地生成：生成要跑几十秒到几分钟，占着唯一的命令队列会让
+    /// 读接口（历史列表、状态）与其它会话的命令全排在它后面——界面因此"假死"。
+    /// 这一态只表示"不在表里是因为在生成"，不是"不存在"。
+    running: std::collections::BTreeSet<SessionId>,
 }
 
 impl Core {
     /// 组合根专用：main 负责创建适配器并注入；core 不自建任何具体实现。
+    // 组合根注入的构造函数：参数天然多，收口成参数对象只是把参数挪个地方、并让装配更难读。
+    // 这是有意的设计取舍（见 docs/testing/quality-isolation.md 的 allow 清单），不是没修。
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         store: Arc<dyn SettingsStore + Send + Sync>,
         history: Arc<dyn HistoryStore + Send + Sync>,
@@ -253,7 +415,24 @@ impl Core {
         let outcome = (|| -> Result<Core, String> {
             let settings = store.load()?;
             let prompts = prompt_source.load()?;
-            Ok(Core { store, history, workspace, source, packages, fence, gateway, catalog, tools, io, repair, log: log_for_core, settings, prompts, sessions: HashMap::new() })
+            Ok(Core {
+                store,
+                history,
+                workspace,
+                source,
+                packages,
+                fence,
+                gateway,
+                catalog,
+                tools,
+                io,
+                repair,
+                log: log_for_core,
+                settings,
+                prompts,
+                sessions: HashMap::new(),
+                running: std::collections::BTreeSet::new(),
+            })
         })();
         if let Err(e) = &outcome {
             log.error("core::new", &format!("装配失败：{}", e)); // 仅错误时借用，不与闭包 move 冲突
@@ -266,6 +445,570 @@ impl Core {
         Arc::clone(&self.log)
     }
 
+    /// 生成期间"会话不在表里"的三种进入点共用这一句（错误文案要一致，别处不再各写一份）。
+    fn running_refusal(sid: &str) -> String {
+        format!("会话 {} 正在生成中：先「停止」或等它结束，再做这一步", sid)
+    }
+
+    /// 把单 agent 会话**交给工作线程**（核心表里留"生成中"）。
+    /// 取出的窗口内，核心队列是空的——读接口与其它会话的命令因此照常。
+    pub(crate) fn take_single(&mut self, sid: &str) -> Result<session::AgentSession, String> {
+        if self.running.contains(sid) {
+            return Err(Self::running_refusal(sid));
+        }
+        match self.sessions.remove(sid) {
+            Some(Session::Single(s)) => {
+                self.running.insert(sid.to_string());
+                Ok(s)
+            }
+            Some(other) => {
+                // 不是单 agent：原样放回，交给协作那条路（B-1 只搬单 agent）。
+                self.sessions.insert(sid.to_string(), other);
+                Err("该会话不是单 agent 模式".to_string())
+            }
+            None => Err("无此会话".to_string()),
+        }
+    }
+
+    /// 把协作会话**交给工作线程**（核心表里留"生成中"）。
+    /// 会话还没装进内存时先从落盘重建：协作的"继续"可能先于"打开"到达。
+    pub(crate) fn take_collab(&mut self, sid: &str) -> Result<CollabSession, String> {
+        if self.running.contains(sid) {
+            return Err(Self::running_refusal(sid));
+        }
+        if !self.sessions.contains_key(sid) {
+            self.ensure_session(sid)?;
+        }
+        match self.sessions.remove(sid) {
+            Some(Session::Collab(c)) => {
+                self.running.insert(sid.to_string());
+                Ok(c)
+            }
+            Some(other) => {
+                self.sessions.insert(sid.to_string(), other);
+                Err("该会话不是协作模式".to_string())
+            }
+            None => Err("无此会话".to_string()),
+        }
+    }
+
+    /// 协作生成结束**交回**：重新插入 + 解除"生成中"，并**为就绪节点派发子会话**。
+    /// 转录已由工作线程按"一次模型调用"的粒度增量落盘（见 `Persister`），这里不重复落。
+    /// 返回值：派发产生的事件（调用方负责入台）。
+    pub(crate) fn put_collab(
+        &mut self,
+        sid: &str,
+        c: CollabSession,
+    ) -> (Vec<SessionEvent>, Vec<(String, String, String)>) {
+        self.running.remove(sid);
+        self.sessions.insert(sid.to_string(), Session::Collab(c));
+        self.spawn_ready_nodes(sid)
+    }
+
+    /// 方案过审后：链里**就绪且还没有子会话**的节点各建一个子会话，并如实外送。
+    /// 为什么在这里：会话表只有核心能碰（泵不建会话）；派发是核心的职责。
+    /// 子会话的产出 = 它**用 submit_report 工具交的回报**（核心操作走工具调用，不认正文里的 JSON）。
+    /// 没交回报就退回"最后一条转录行"（如实取到的东西），仍取不到就说"没有产出"。
+    fn node_note(&self, child: &str) -> String {
+        let evs = match self.history.load(child) {
+            Ok((_, evs)) => evs,
+            Err(_) => Vec::new(),
+        };
+        let mut lines: Vec<String> = Vec::new();
+        let mut reported: Option<String> = None;
+        for ev in &evs {
+            let Some(ls) = ev.get("lines").and_then(|l| l.as_array()) else {
+                continue;
+            };
+            for l in ls {
+                if let Some(t) = l.get("line").and_then(|x| x.as_str()) {
+                    lines.push(t.to_string());
+                }
+                let Some(tool) = l.get("tool") else { continue };
+                let name = tool.get("name").and_then(|x| x.as_str()).unwrap_or("");
+                if name != crate::core::systool::REPORT {
+                    continue;
+                }
+                let out = tool
+                    .get("output")
+                    .and_then(|x| x.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                if !out.trim().is_empty() {
+                    reported = Some(out);
+                }
+            }
+        }
+        reported
+            .or_else(|| lines.last().cloned())
+            .unwrap_or_else(|| "（该节点没有产出）".to_string())
+    }
+
+    /// 标记节点完成（记下它的产出），供父会话做总验收。
+    fn mark_node_done(&mut self, sid: &str, node: &str, note: &str) {
+        if let Some(Session::Collab(c)) = self.sessions.get_mut(sid) {
+            c.mark_node_done(node, note);
+        }
+    }
+
+    /// 压缩一个会话的上下文：**让 AI 自己压**（核心只给 compact 工具），不是系统替它总结。
+    /// 返回（提示词, compact 的声明, 压缩点, 本回合的身份块）——模型调用由调用方在工作线程上跑（界面不被阻塞）。
+    pub fn compact_plan(
+        &self,
+        sid: &str,
+    ) -> (String, Option<crate::core::ports::ToolDecl>, u64, String) {
+        let prompt = self.prompts.core.tool_texts.compact_prompt.clone();
+        let decl = self
+            .prompts
+            .core
+            .builtin_tools
+            .get("compact")
+            .map(|t| t.decl("compact"));
+        let (up_to, identity) = match self.sessions.get(sid) {
+            Some(Session::Single(s)) => (
+                s.next_line_id(),
+                s.params().identity(&self.prompts, s.tool_mode()),
+            ),
+            _ => (0, String::new()),
+        };
+        (prompt, decl, up_to, identity)
+    }
+
+    /// 往某个会话注入一条**系统消息**（讨论的提醒走这条；见 session-model.md 二"系统消息"）。
+    /// 返回要外送/落盘的事件。
+    pub fn note_system(&mut self, sid: &str, text: &str) -> Result<Vec<SessionEvent>, String> {
+        let mut s = self.take_single(sid)?;
+        let events = s.note_system(text);
+        self.put_single(sid, s);
+        self.persister(sid).persist(&events);
+        Ok(events)
+    }
+
+    /// 给某个会话接下来的行打上**整场工作的下一个回合 id**（节点执行也用同一套编号）。
+    /// 一个 agent 一个会话：它的回合计数来自父会话——回档同步靠两边同一套编号。
+    fn bump_turn_of_child(&mut self, child: &str) -> u64 {
+        let parent = self
+            .history
+            .load(child)
+            .ok()
+            .and_then(|(m, _)| m.parent.clone());
+        let Some(parent) = parent else {
+            return 0;
+        };
+        let tid = match self.sessions.get_mut(&parent) {
+            Some(Session::Collab(c)) => c.next_turn_id(),
+            _ => 0,
+        };
+        if let Some(Session::Single(s)) = self.sessions.get_mut(child) {
+            s.set_turn(tid);
+        }
+        tid
+    }
+
+    /// **同步**跑一个节点的子会话（CLI 与测试走这条；Web 生产路径由 CoreHandle 起工作线程）。
+    fn drive_node(&mut self, child: &str, objective: &str) -> Vec<SessionEvent> {
+        self.bump_turn_of_child(child);
+        match self.prepare_single(child, Some(objective), true) {
+            Ok(Prepared::Run {
+                session,
+                prefix,
+                llm,
+                ..
+            }) => {
+                let mut session = *session;
+                let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+                // 两个出口（流式短暂事件 / 定稿事件）都要收进同一份事件流：用 RefCell 共享。
+                let out = std::cell::RefCell::new(prefix);
+                {
+                    let mut live = crate::core::events::Live {
+                        llm,
+                        cancel,
+                        emit: &mut |ev: SessionEvent| out.borrow_mut().push(ev),
+                    };
+                    let mut sink = |ev: SessionEvent| out.borrow_mut().push(ev);
+                    // 执行提示词是**核心派的活**（派发行）：界面系统行、上下文 user 角色。
+                    let identity = session
+                        .params()
+                        .identity(&self.prompts, session.tool_mode());
+                    session.dispatch_task(objective, &identity, &mut live, &mut sink);
+                }
+                let events = out.into_inner();
+                self.put_single_recorded(child, session, &events);
+                events
+            }
+            _ => Vec::new(),
+        }
+    }
+
+    /// 推进协作（**核心驱动**）：泵只决定"该问谁"，核心取该 agent 的会话跑这一回合再交回。
+    /// 契约见 docs/architecture/session-model.md 二之二。事件由调用方统一落档。
+    pub fn collab_advance(&mut self, sid: &str) -> Result<Vec<SessionEvent>, String> {
+        let mut out = Vec::new();
+        // 安全网计数（见循环尾）：提醒/重问必须有终点，不能让驱动空转。
+        let mut guard = 0usize;
+        loop {
+            // ① 泵推一步：协作会话**裸搬**（不碰任务链派发那套副作用）。
+            let (ask, systools, cancel, opts, member, turn_id) = {
+                let mut c = self.take_collab_raw(sid)?;
+                c.start_if_needed();
+                c.pump_with(&mut |e| out.push(e));
+                let ask = c.take_ask();
+                let member = ask.as_ref().and_then(|(i, _, _)| c.member_id(*i));
+                // 角色表按值带出来（小表）：驱动要它来发放工具面与校验越权。
+                let systools = c.systools().clone();
+                let cancel = c.disc_cancel();
+                let opts = c.disc_opts();
+                let turn_id = if ask.is_some() { c.next_turn_id() } else { 0 };
+                self.sessions.insert(sid.to_string(), Session::Collab(c));
+                (ask, systools, cancel, opts, member, turn_id)
+            };
+            let (Some((i, identity, turn)), Some(agent), turn_id) = (ask, member, turn_id) else {
+                break;
+            };
+            // ② 该 agent 的会话：没有就按需建（名单确认时已建，这里兜底）。
+            let child = format!("{}--{}", sid, agent);
+            if self.history.load(&child).is_err() {
+                self.spawn_agent_session(sid, &agent)?;
+            }
+            // ③ 跑这一回合：**与单 agent 同一条轮循环**（身份块 + 本回合工具面 + 对话 + 本回合提示 + 表态）。
+            // 工具面由角色表发放（讨论席 = 动词 + 只读核实）；产出逐轮落进**它自己的会话**。
+            let mut s = self.take_single(&child)?;
+            let round = match self.sessions.get(sid) {
+                Some(Session::Collab(c)) => c.round(),
+                _ => 0,
+            };
+            let (ran, notes) = {
+                // 两个出口（流式短暂事件 / 定稿事件）都收进同一份事件流。
+                let notes = std::cell::RefCell::new(Vec::new());
+                let mut live = crate::core::events::Live {
+                    llm: crate::core::ports::LlmOpts {
+                        stream: opts.stream,
+                        timeout_secs: opts.timeout_secs,
+                    },
+                    cancel: std::sync::Arc::clone(&cancel),
+                    emit: &mut |e: SessionEvent| notes.borrow_mut().push(e),
+                };
+                let mut sink = |e: SessionEvent| notes.borrow_mut().push(e);
+                let face = systools.role_face("discussant");
+                let t =
+                    s.discussion_turn(&identity, face, turn, turn_id, round, &mut live, &mut sink);
+                (t, notes.into_inner())
+            };
+            // 落盘到**它自己的目录**（讨论的核实痕迹随会话一起重启后还在）。
+            self.persister(&child).persist(&notes);
+            out.extend(notes);
+            self.put_single(&child, s);
+            let turn = match ran {
+                Ok(t) => t,
+                Err(err) => {
+                    let note = if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+                        crate::core::events::stopped_note()
+                    } else {
+                        crate::core::events::interrupted_note(&err)
+                    };
+                    out.push(SessionEvent::Notice(note));
+                    break;
+                }
+            };
+            // ④ **核心只提醒、不强制**（见 session-model.md 二）：没表态时按计数决定提醒还是放过。
+            let user_stopped = cancel.load(std::sync::atomic::Ordering::Relaxed);
+            let (after, reminder) = {
+                let mut c = self.take_collab_raw(sid)?;
+                let a = c.after_member_turn(
+                    i,
+                    turn.verb.is_some(),
+                    user_stopped,
+                    self.settings.app.discuss_remind_cap,
+                );
+                let text = c.reminder_text();
+                self.sessions.insert(sid.to_string(), Session::Collab(c));
+                (a, text)
+            };
+            match after {
+                AfterTurn::Done => {
+                    let mut c = self.take_collab_raw(sid)?;
+                    c.feed_with(i, turn, turn_id, &mut |e| out.push(e));
+                    self.sessions.insert(sid.to_string(), Session::Collab(c));
+                }
+                AfterTurn::Remind => {
+                    // 提醒注入**它自己的会话**（系统消息：用户看到的是系统行），然后**不 feed**——
+                    // 泵会重问同一个人（提醒后调用计数自然重来）。
+                    let evs = {
+                        let mut s = self.take_single(&child)?;
+                        let e = s.note_system(&reminder);
+                        self.put_single(&child, s);
+                        e
+                    };
+                    self.persister(&child).persist(&evs);
+                    out.extend(evs);
+                }
+                AfterTurn::Unanswered => {
+                    // 提醒到顶：主会话记一行"未回应"（系统消息），本轮放过它，整轮继续。
+                    let mut c = self.take_collab_raw(sid)?;
+                    c.pass_over(i, &mut |e| out.push(e));
+                    self.sessions.insert(sid.to_string(), Session::Collab(c));
+                }
+            }
+            // 安全网：提醒/重问必须有终点（计数有上限，这里再兜一层，防实现走偏时空转）。
+            guard += 1;
+            if guard > 500 {
+                out.push(SessionEvent::Notice(
+                    "[警告] 讨论推进次数异常（已到安全上限），已停下等用户处理".to_string(),
+                ));
+                break;
+            }
+        }
+        Ok(out)
+    }
+
+    /// 裸搬协作会话（不触发任务链派发那套副作用）：驱动循环每步都要搬一次。
+    fn take_collab_raw(&mut self, sid: &str) -> Result<CollabSession, String> {
+        match self.sessions.remove(sid) {
+            Some(Session::Collab(c)) => Ok(c),
+            Some(other) => {
+                self.sessions.insert(sid.to_string(), other);
+                Err("该会话不是协作模式".to_string())
+            }
+            None => Err("无此会话".to_string()),
+        }
+    }
+
+    /// 继续一次协作（同步版，CLI 与测试走这条）：**先让泵处理**（它可能把验收没过的节点退回待办），
+    /// 再派发/跑完就绪节点，最后再让泵做节点验收与总验收。
+    /// 生产路径是"工作线程跑泵 + put_collab 派发 + 子会话完成叫醒"，判定完全一致。
+    pub fn collab_resume(&mut self, sid: &str) -> Result<Vec<SessionEvent>, String> {
+        let mut out = Vec::new();
+        // **用户那一步**先做：重派核心指名没过的节点（唤醒不会替用户做这个决定，见 pump_with 的闸）。
+        {
+            let mut c = self.take_collab_raw(sid)?;
+            c.resume(&mut |e| out.push(e));
+            self.sessions.insert(sid.to_string(), Session::Collab(c));
+        }
+        // 泵（讨论回合 / 总验收）→ 派发并跑完就绪节点 → 再泵一步（总验收 → 交付）。
+        out.extend(self.collab_advance(sid)?);
+        out.extend(self.advance_chain(sid));
+        out.extend(self.collab_advance(sid)?);
+        self.record_events(sid, &mut out);
+        Ok(out)
+    }
+
+    /// 推进任务链：反复「派发就绪节点 → 同步跑完 → 标记完成」，直到没有可推进的。
+    /// 与 Web 生产路径（CoreHandle 起工作线程）**同一套判定**，只是这里同步做（CLI 与测试走这条）。
+    fn advance_chain(&mut self, sid: &str) -> Vec<SessionEvent> {
+        let mut out = Vec::new();
+        loop {
+            let (events, todo) = self.spawn_ready_nodes(sid);
+            out.extend(events);
+            if todo.is_empty() {
+                break;
+            }
+            for (node, child, objective) in todo {
+                out.extend(self.drive_node(&child, &objective));
+                let note = self.node_note(&child);
+                self.mark_node_done(sid, &node, &note);
+            }
+        }
+        out
+    }
+
+    /// 为链里"就绪且还没有子会话"的节点建子会话并标记派发。
+    /// 返回（要外送的事件, 要起生成的节点：(节点, 子会话, 任务提示词)）——
+    /// 生成怎么跑由调用方决定：测试路径同步跑，生产路径交给工作线程。
+    fn spawn_ready_nodes(
+        &mut self,
+        sid: &str,
+    ) -> (Vec<SessionEvent>, Vec<(String, String, String)>) {
+        let (ready, busy): (Vec<(String, String)>, Vec<String>) = match self.sessions.get(sid) {
+            Some(Session::Collab(c)) if c.plan_approved() => {
+                let chain = c.chain();
+                let busy = chain
+                    .map(|ch| {
+                        ch.nodes
+                            .iter()
+                            .filter(|n| matches!(n.status, chain::NodeStatus::Running))
+                            .map(|n| n.assignee.clone())
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                // **只派当前阶段**：同一阶段的节点并发跑，下一阶段要等本阶段整体验收通过。
+                let ready = chain
+                    .map(|ch| {
+                        let stage = ch.current_stage().unwrap_or(1);
+                        ch.stage_ready(stage)
+                            .into_iter()
+                            .filter(|n| n.sub_session.is_none())
+                            .map(|n| (n.id.clone(), n.assignee.clone()))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                (ready, busy)
+            }
+            _ => return (Vec::new(), Vec::new()),
+        };
+        let mut out = Vec::new();
+        let mut todo = Vec::new();
+        // 资源约束：**一个 agent 的会话一次只能跑一轮**——它已有在跑的节点（或本轮已派的）就跳过，
+        // 下一轮推进时再派。不同 agent 不受影响，照旧并发。
+        let mut taken: Vec<String> = Vec::new();
+        for (node, assignee) in ready {
+            if busy.contains(&assignee) || taken.contains(&assignee) {
+                continue;
+            }
+            taken.push(assignee.clone());
+            match self.spawn_sub_session(sid, &node) {
+                Ok(child) => {
+                    // 派发文案用册子里的执行提示词模板渲染（objective 是核心 AI 写的那段任务提示词）。
+                    // 上一次的验收结论（没有 = 首轮）：**返工必须知道上次错在哪**，
+                    // 否则它只能把同一件事原样再做一遍（真机上就是这样白跑一轮的）。
+                    let (raw, rework) = self
+                        .sessions
+                        .get(sid)
+                        .and_then(|s| match s {
+                            Session::Collab(c) => c.chain().and_then(|ch| {
+                                ch.nodes.iter().find(|n| n.id == node).map(|n| {
+                                    let note = n
+                                        .acceptance
+                                        .as_ref()
+                                        .map(|a| a.note.clone())
+                                        .unwrap_or_default();
+                                    let rework = if note.trim().is_empty() {
+                                        String::new()
+                                    } else {
+                                        format!(
+                                            "\n== 上次没通过的原因 ==\n{}\n这次请针对上面的原因返工。\n",
+                                            note
+                                        )
+                                    };
+                                    (n.objective.clone(), rework)
+                                })
+                            }),
+                            _ => None,
+                        })
+                        .unwrap_or_default();
+                    let objective = self.prompts.render(
+                        &self.prompts.core.execute.user,
+                        &[("tasks", raw), ("rework", rework)],
+                    );
+                    if let Some(Session::Collab(c)) = self.sessions.get_mut(sid) {
+                        c.mark_node_started(&node, &child);
+                    }
+                    out.push(SessionEvent::NodeStarted {
+                        node: node.clone(),
+                        sid: child.clone(),
+                        assignee,
+                    });
+                    todo.push((node, child, objective));
+                }
+                Err(e) => out.push(SessionEvent::Notice(format!(
+                    "[错误] 节点 {} 派发失败：{}",
+                    node, e
+                ))),
+            }
+        }
+        (out, todo)
+    }
+
+    /// 为一个 agent 建它的会话（名单确认时建）：节点执行与讨论回合**共用同一个**会话。
+    /// 复用"按 meta 重建"的整条装配路径——子会话与用户建的会话**没有第二种实现**。
+    pub(crate) fn spawn_agent_session(
+        &mut self,
+        parent: &str,
+        agent: &str,
+    ) -> Result<String, String> {
+        let (pmeta, _) = self.history.load(parent)?;
+        let a = pmeta
+            .agents
+            .iter()
+            .find(|x| x.name == agent)
+            .cloned()
+            .ok_or_else(|| format!("名单里没有 {}", agent))?;
+        // **一个 agent 一个会话**（不是一节点一会话）：它在这场工作里的完整经历，
+        // 讨论与执行不分家（见 docs/architecture/session-model.md）。同名即复用，幂等。
+        let child = format!("{}--{}", parent, agent);
+        if self.history.load(&child).is_ok() {
+            return Ok(child);
+        }
+        let meta = SessionMeta {
+            name: child.clone(),
+            mode: "single".to_string(),
+            delegate: false,
+            modules: a.modules.clone(),
+            // 会话跨整场工作，所以记**工作的需求**（节点目标由链记着，随回合下发）。
+            task: pmeta.task.clone(),
+            ts: now_ts(),
+            agents: vec![a.clone()],
+            exec: pmeta.exec.clone(),
+            parent: Some(parent.to_string()),
+            node: None,
+        };
+        // 沙箱锚在父会话上：该 agent 的目录在父会话里已经建好。
+        self.workspace
+            .prepare(meta.work(), std::slice::from_ref(&a.name))?;
+        self.history.create(&meta)?;
+        self.ensure_session(&child)?;
+        Ok(child)
+    }
+
+    /// 为任务链的一个节点建**子会话**：它就是该节点负责人的 agent 会话（一个 agent 一个会话）。
+    pub(crate) fn spawn_sub_session(&mut self, parent: &str, node: &str) -> Result<String, String> {
+        let (pmeta, _) = self.history.load(parent)?;
+        let assignee = {
+            let c = match self.sessions.get(parent) {
+                Some(Session::Collab(c)) => c,
+                _ => return Err("无此协作会话".to_string()),
+            };
+            let n = c
+                .chain()
+                .and_then(|ch| ch.nodes.iter().find(|n| n.id == node))
+                .ok_or_else(|| format!("链里没有节点 {}", node))?;
+            n.assignee.clone()
+        };
+        // 节点的会话**就是它负责人的 agent 会话**（一个 agent 一个会话，讨论与执行不分家）。
+        // 节点本身不再记在 meta 里——哪个节点正跑在这个会话里，由链的 sub_session 认。
+        let _ = pmeta;
+        self.spawn_agent_session(parent, &assignee)
+    }
+
+    /// 生成结束**交回**：重新插入 + 解除"生成中"。
+    /// 转录**已由工作线程按"一轮一次"的粒度增量落盘**（见 `Persister`），这里不重复落。
+    /// 返回：若这是个**子会话**，返回它的父会话（调用方据此**叫醒父会话**推进任务链）。
+    pub(crate) fn put_single(&mut self, sid: &str, s: session::AgentSession) -> Option<String> {
+        self.running.remove(sid);
+        self.sessions.insert(sid.to_string(), Session::Single(s));
+        // 子会话完成 = 它的节点交付了：标记**正跑在这个会话里的那个节点**（产出即交付物），并交回父会话。
+        // 一个 agent 一个会话（可能依次服务多个节点），所以按 sub_session 认节点，不靠 meta.node。
+        let (meta, _) = self.history.load(sid).ok()?;
+        let parent = meta.parent.clone()?;
+        let note = self.node_note(sid);
+        let node = match self.sessions.get_mut(&parent) {
+            Some(Session::Collab(c)) => c.running_node_of(sid),
+            _ => None,
+        };
+        if let Some(node) = node {
+            self.mark_node_done(&parent, &node, &note);
+        }
+        Some(parent)
+    }
+
+    /// 同步路径的交回：整段落盘（同步跑不经过工作线程，所以没有逐轮增量落盘那一步）。
+    pub(crate) fn put_single_recorded(
+        &mut self,
+        sid: &str,
+        s: session::AgentSession,
+        events: &[SessionEvent],
+    ) {
+        self.running.remove(sid);
+        self.sessions.insert(sid.to_string(), Session::Single(s));
+        let mut ev = events.to_vec();
+        self.record_events(sid, &mut ev);
+    }
+
+    /// 生成线程崩溃：会话对象随线程一起没了，但**转录在盘上**。
+    /// 只解除"生成中"，下次访问按落盘转录重建——绝不把会话卡在"生成中"。
+    pub(crate) fn abort_running(&mut self, sid: &str) {
+        self.running.remove(sid);
+    }
+
     /// 清单即事实：每次调用重扫（策略在 core，机制在 ModuleSource）。
     pub fn scan(&self) -> module::Roster {
         self.source.scan()
@@ -276,25 +1019,35 @@ impl Core {
     pub fn runtime_report(&self, tier: exec::Tier) -> RuntimeReport {
         let roster = self.source.scan();
         let lib = self.packages.scan();
-        let spec = exec::ExecSpec { tier, ..exec::ExecSpec::default() };
+        let spec = exec::ExecSpec {
+            tier,
+            ..exec::ExecSpec::default()
+        };
         let diagnoses = if tier == exec::Tier::Vm {
             exec::vm_diagnoses(&roster.modules, &lib, &spec)
         } else {
             Vec::new()
         };
+        let readiness = exec::tier_readiness(&spec, self.qemu_path());
         RuntimeReport {
             tier: tier.as_str().to_string(),
             declared: exec::declared(&roster.modules),
             available: lib.capability_versions(),
             missing: exec::absent(&roster.modules, &lib),
             diagnoses,
+            tier_ready: readiness.ready(),
+            tier_missing: readiness.missing().iter().map(|s| s.to_string()).collect(),
             rejected: roster.rejected.clone(),
             rejected_packages: lib.rejected.clone(),
         }
     }
 
     /// 本档位下不能执行工具的模块（模块 id → 缺的能力名）：建会话与重建时收口给工具环境。
-    fn unavailable_modules(&self, spec: &exec::ExecSpec, modules: &[Module]) -> BTreeMap<String, Vec<String>> {
+    fn unavailable_modules(
+        &self,
+        spec: &exec::ExecSpec,
+        modules: &[Module],
+    ) -> BTreeMap<String, Vec<String>> {
         exec::unavailable(spec, modules, &self.packages.scan())
     }
 
@@ -302,6 +1055,12 @@ impl Core {
     pub fn session_config(&self, sid: &str) -> Result<SessionConfig, String> {
         let (meta, events) = self.history_open(sid)?;
         let tier = meta.exec.tier;
+        // 虚拟机档的承载探针：用用户填的基础根（若有），否则问"裸虚拟机档"能不能成立。
+        let vm_probe = exec::ExecSpec {
+            tier: exec::Tier::Vm,
+            base: meta.exec.base.clone(),
+            ..exec::ExecSpec::default()
+        };
         Ok(SessionConfig {
             sid: meta.name.clone(),
             mode: meta.mode.clone(),
@@ -321,6 +1080,21 @@ impl Core {
             pins: meta.exec.pins.clone(),
             runtime: self.runtime_report(tier),
             runtimes_dir: workspace::slash(&self.packages.dir()),
+            tier_ready: exec::tier_readiness(&meta.exec, self.qemu_path()).ready(),
+            tier_missing: exec::tier_readiness(&meta.exec, self.qemu_path())
+                .missing()
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
+            // 虚拟机档能不能选**与当前档位无关**：本机档会话也要如实告诉用户 vm 现在不可用（界面据此禁用）。
+            // 逐项清单一起给出：界面照抄"缺哪几项、每项怎么补"，不自己编话。
+            vm_available: exec::tier_readiness(&vm_probe, self.qemu_path()).ready(),
+            vm_unavailable_reason: exec::tier_refusal(&vm_probe, self.qemu_path())
+                .unwrap_or_default(),
+            vm_requirements: exec::vm_requirements(&exec::VmInputs {
+                base: vm_probe.base.as_deref(),
+                qemu: self.qemu_path(),
+            }),
         })
     }
 
@@ -328,6 +1102,9 @@ impl Core {
     /// 生效点：下一次访问按新配置从转录重建会话对象（所以改完不必重开会话）。
     /// 冻结：流水里有内容（会话已经开过）时，agent 名单与形态不可改——换人请新建会话。
     pub fn edit_session(&mut self, sid: &str, edit: SessionEdit) -> Result<(), String> {
+        if self.running.contains(sid) {
+            return Err(Self::running_refusal(sid));
+        }
         let (meta, events) = self.history_open(sid)?;
         match meta.mode.as_str() {
             "single" | "collab" => {}
@@ -337,7 +1114,9 @@ impl Core {
             let old: Vec<String> = meta.agents.iter().map(|a| a.name.clone()).collect();
             let new: Vec<String> = edit.agents.iter().map(|a| a.name.clone()).collect();
             if old != new {
-                return Err("这轮会话已经开过：agent 名单与形态冻结（要换人请新建会话）".to_string());
+                return Err(
+                    "这轮会话已经开过：agent 名单与形态冻结（要换人请新建会话）".to_string()
+                );
             }
         }
         // 校验：模块与模型真实存在；同一模块不得同属两个 agent（沙箱与发言归属会歧义）。
@@ -354,7 +1133,10 @@ impl Core {
                     return Err(format!("无此模块：{}", id));
                 }
                 if seen.iter().any(|x| x == id) {
-                    return Err(format!("模块 {} 被多个 agent 同时使用；同一模块只能属于一个 agent", id));
+                    return Err(format!(
+                        "模块 {} 被多个 agent 同时使用；同一模块只能属于一个 agent",
+                        id
+                    ));
                 }
                 seen.push(id.clone());
             }
@@ -368,7 +1150,11 @@ impl Core {
                 name: a.name.clone(),
                 transient: !self.settings.agents.contains_key(&a.name),
                 modules: a.modules.clone(),
-                model: if a.model.is_empty() { None } else { Some(a.model.clone()) },
+                model: if a.model.is_empty() {
+                    None
+                } else {
+                    Some(a.model.clone())
+                },
             });
         }
         if metas.is_empty() {
@@ -383,15 +1169,44 @@ impl Core {
             "vm" => exec::Tier::Vm,
             other => return Err(format!("未知执行档位：{}（只认 host / vm）", other)),
         };
-        let spec = exec::ExecSpec { tier, base: edit.base.clone(), pins: edit.pins.clone(), net: edit.net };
+        let spec = exec::ExecSpec {
+            tier,
+            base: edit.base.clone(),
+            pins: edit.pins.clone(),
+            net: edit.net,
+        };
+        // 承载校验：前置条件不具备时**不允许改入虚拟机档**（用户环境问题，不是选型问题）。
+        // 界面上的"能不能选"由 SessionConfig 的 tier_ready 说同一件事，两处不会各说各话。
+        // 已经在虚拟机档上的会话只校验**它自己那几项**（基础根等）：改模块、改模型、定版、开网络都不该被拦住——
+        // 一条已存在的会话连改都不让改，是拿用户自己的记录当人质。
+        let staying_vm = meta.exec.tier == exec::Tier::Vm && tier == exec::Tier::Vm;
+        if staying_vm {
+            // 留在 vm 档：只校验用户这次填的基础根（填错路径就是填错路径），
+            // 不拿"本机能不能提供 vm 档"去拦一条已经存在的会话。
+            let base_item = exec::tier_readiness(&spec, self.qemu_path())
+                .requirements
+                .into_iter()
+                .find(|r| r.id == "base");
+            if let Some(item) = base_item {
+                if !item.met {
+                    return Err(format!("{}：{}", item.detail, item.how));
+                }
+            }
+        } else if let Some(why) = exec::tier_refusal(&spec, self.qemu_path()) {
+            return Err(why);
+        }
         let session_modules: Vec<Module> = roster
             .modules
             .iter()
             .filter(|m| seen.iter().any(|id| id == &m.manifest.id))
             .cloned()
             .collect();
-        let plan = exec::plan(&spec, &session_modules, &self.packages.scan()).map_err(|diags| exec::diagnose_text(&diags))?;
-        self.log.info("core::edit_session", &format!("sid={}；{}", sid, exec::plan_summary(&plan)));
+        let plan = exec::plan(&spec, &session_modules, &self.packages.scan())
+            .map_err(|diags| exec::diagnose_text(&diags))?;
+        self.log.info(
+            "core::edit_session",
+            &format!("sid={}；{}", sid, exec::plan_summary(&plan)),
+        );
 
         let mut new_meta = meta.clone();
         new_meta.modules = metas.iter().flat_map(|a| a.modules.clone()).collect();
@@ -421,7 +1236,8 @@ impl Core {
             })).collect::<Vec<_>>(),
         });
         if let Err(e) = self.history.append(sid, &[ev]) {
-            self.log.warn("core::record_config", &format!("配置记录落盘失败：{}", e));
+            self.log
+                .warn("core::record_config", &format!("配置记录落盘失败：{}", e));
         }
     }
 
@@ -433,7 +1249,12 @@ impl Core {
     }
 
     /// 新建/更新供应商。更新时 api_key 留空 = 保留原密钥（界面从不回显密钥）。
-    pub fn provider_upsert(&mut self, id: &str, base_url: &str, api_key: &str) -> Result<(), String> {
+    pub fn provider_upsert(
+        &mut self,
+        id: &str,
+        base_url: &str,
+        api_key: &str,
+    ) -> Result<(), String> {
         if id.is_empty() || base_url.is_empty() {
             return Err("id / base_url 不能为空".to_string());
         }
@@ -448,7 +1269,10 @@ impl Core {
         };
         self.settings.providers.insert(
             id.to_string(),
-            providers::Provider { base_url: base_url.to_string(), api_key: key },
+            providers::Provider {
+                base_url: base_url.to_string(),
+                api_key: key,
+            },
         );
         self.save_settings("core::provider_upsert")
     }
@@ -463,7 +1287,11 @@ impl Core {
             .map(|(mid, _)| mid.clone())
             .collect();
         if !referenced.is_empty() {
-            return Err(format!("供应商 {} 仍被模型引用：{}；请先删除这些模型", id, referenced.join("、")));
+            return Err(format!(
+                "供应商 {} 仍被模型引用：{}；请先删除这些模型",
+                id,
+                referenced.join("、")
+            ));
         }
         let removed = self.settings.providers.remove(id).is_some();
         if removed {
@@ -508,15 +1336,20 @@ impl Core {
 
     /// 实测一条通道的**回放形状**（工具调用历史怎么发回去才收）：解析 id → 交给适配层实测。
     /// 只报事实、**不写登记处**——采不采用由人定（与 probe_model_tools 的写回策略不同）。
-    pub fn probe_replay_shape(
-        &self,
-        id: &str,
-    ) -> Result<providers::ReplayReport, String> {
+    pub fn probe_replay_shape(&self, id: &str) -> Result<providers::ReplayReport, String> {
         let channel = self.settings.resolve(id)?;
         self.gateway.probe_replay(&channel)
     }
 
-    pub fn model_upsert(&mut self, id: &str, name: &str, api_model: &str, provider: &str, note: &str) -> Result<(), String> {
+    pub fn model_upsert(
+        &mut self,
+        id: &str,
+        name: &str,
+        api_model: &str,
+        provider: &str,
+        note: &str,
+        context: u64,
+    ) -> Result<(), String> {
         if id.is_empty() || name.is_empty() || api_model.is_empty() || provider.is_empty() {
             return Err("id / name / api_model / provider 均不能为空".to_string());
         }
@@ -525,7 +1358,14 @@ impl Core {
         }
         // 工具调用形态：编辑时**保留原值**（登记表单暂不带这个字段，不能因为没带就重置成缺省），
         // 新建缺省 envelope（任何供应商都能用的手写信封）。
-        let tools = self.settings.models.get(id).map(|m| m.tools).unwrap_or_default();
+        let (tools, old_ctx) = self
+            .settings
+            .models
+            .get(id)
+            .map(|m| (m.tools, m.context))
+            .unwrap_or_default();
+        // 上下文窗口：表单没带（0）就保留现值（新建缺省 32k）——编辑别的字段不该顺手重置它。
+        let context = if context == 0 { old_ctx } else { context };
         self.settings.models.insert(
             id.to_string(),
             providers::ModelEntry {
@@ -534,6 +1374,7 @@ impl Core {
                 provider: provider.to_string(),
                 note: note.to_string(),
                 tools,
+                context,
             },
         );
         self.save_settings("core::model_upsert")
@@ -542,7 +1383,10 @@ impl Core {
     /// 删除模型；是核心默认模型时拒绝（先改默认再删）。
     pub fn model_remove(&mut self, id: &str) -> Result<bool, String> {
         if self.settings.core.as_deref() == Some(id) {
-            return Err(format!("{} 是核心默认模型；请先把核心默认模型改成别的再删", id));
+            return Err(format!(
+                "{} 是核心默认模型；请先把核心默认模型改成别的再删",
+                id
+            ));
         }
         let removed = self.settings.models.remove(id).is_some();
         if removed {
@@ -576,7 +1420,13 @@ impl Core {
     }
 
     /// 新建/覆盖一个 agent（校验模块与模型都真实存在；不静默）。
-    pub fn agent_upsert(&mut self, name: &str, module_ids: &[String], model: &str, note: &str) -> Result<(), String> {
+    pub fn agent_upsert(
+        &mut self,
+        name: &str,
+        module_ids: &[String],
+        model: &str,
+        note: &str,
+    ) -> Result<(), String> {
         agents::validate_name(name)?;
         if module_ids.is_empty() {
             return Err("agent 至少要有一个模块".to_string());
@@ -594,7 +1444,11 @@ impl Core {
             name.to_string(),
             agents::Agent {
                 modules: module_ids.to_vec(),
-                model: if model.is_empty() { None } else { Some(model.to_string()) },
+                model: if model.is_empty() {
+                    None
+                } else {
+                    Some(model.to_string())
+                },
                 note: note.to_string(),
             },
         );
@@ -614,6 +1468,40 @@ impl Core {
         self.settings.app.clone()
     }
 
+    /// 用户显式授权的只读根（`settings.yaml` 的 `fence_read`）。
+    /// 策略层只带事实：哪些目录只读可达由用户定，只读位怎么落由适配层定。
+    /// 空 = 一个都不放行（默认不动本机任何权限项）。
+    /// 本次模型调用的通道参数：**预算与"能不能流式"都取全局设置**（讨论、执行、验收、单 agent 共用一份）。
+    /// `want_stream` 是调用方这一次的意愿（呈现层按回包形状给）：**设置是上限，调用方可以在本次放弃流式**；
+    /// 设置关掉时一律非流式。两处各判一次迟早会打架，所以判据只在这里。
+    pub(crate) fn llm_opts(&self, want_stream: bool) -> crate::core::ports::LlmOpts {
+        crate::core::ports::LlmOpts {
+            stream: self.settings.app.streaming && want_stream,
+            timeout_secs: self.settings.app.llm_timeout_secs,
+        }
+    }
+
+    /// 设置里登记的 QEMU 可执行文件路径（默认空 = 兜底看 PATH）。产品不自带、不下载 QEMU。
+    fn qemu_path(&self) -> Option<&str> {
+        let p = self.settings.app.qemu_path.trim();
+        if p.is_empty() {
+            None
+        } else {
+            Some(p)
+        }
+    }
+
+    fn fence_read_roots(&self) -> Vec<std::path::PathBuf> {
+        self.settings
+            .app
+            .fence_read
+            .iter()
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .map(std::path::PathBuf::from)
+            .collect()
+    }
+
     pub fn set_app_settings(&mut self, app: AppSettings) -> Result<(), String> {
         self.settings.app = app;
         self.save_settings("core::set_app_settings")
@@ -621,11 +1509,21 @@ impl Core {
 
     /// 用登记处已存的供应商去拉取其可用模型名（发现机制在适配层）。
     pub fn discover_models(&self, provider_id: &str) -> Result<Vec<String>, String> {
-        let provider = self.settings.providers.get(provider_id).ok_or_else(|| format!("无此供应商：{}", provider_id))?;
+        let provider = self
+            .settings
+            .providers
+            .get(provider_id)
+            .ok_or_else(|| format!("无此供应商：{}", provider_id))?;
         let outcome = self.catalog.list_models(provider);
         match &outcome {
-            Ok(models) => self.log.info("core::discover_models", &format!("供应商 {} 拉取模型 {} 个", provider_id, models.len())),
-            Err(e) => self.log.error("core::discover_models", &format!("供应商 {} 拉取模型失败：{}", provider_id, e)),
+            Ok(models) => self.log.info(
+                "core::discover_models",
+                &format!("供应商 {} 拉取模型 {} 个", provider_id, models.len()),
+            ),
+            Err(e) => self.log.error(
+                "core::discover_models",
+                &format!("供应商 {} 拉取模型失败：{}", provider_id, e),
+            ),
         }
         outcome
     }
@@ -642,15 +1540,60 @@ impl Core {
 
     /// 会话列表视图（进行中的工作）。形态取落盘 meta（单一真相，不在内存里留影子状态）。
     pub fn session_views(&self, history: &[HistoryView]) -> Vec<SessionView> {
-        self.sessions
+        // 在表里的会话 + **正在生成的会话**（后者对象在工作线程上，但它确实存在、也确实在跑）。
+        // 漏掉它们会让界面以为会话不见了。
+        let running: Vec<(String, bool)> = self
+            .running
+            .iter()
+            .map(|sid| (sid.clone(), false))
+            .collect();
+        let running_now: std::collections::BTreeSet<String> =
+            self.running.iter().cloned().collect();
+        let listed: Vec<(String, bool)> = self
+            .sessions
             .iter()
             .map(|(sid, s)| {
                 let done = match s {
                     Session::Collab(c) => c.is_done(),
                     Session::Single(_) => false,
                 };
-                let mode = history.iter().find(|h| &h.name == sid).map(|h| h.mode.clone()).unwrap_or_default();
-                SessionView { sid: sid.clone(), mode, done }
+                (sid.clone(), done)
+            })
+            .chain(running)
+            .collect();
+        listed
+            .into_iter()
+            .map(|(sid, done)| {
+                let entry = history.iter().find(|h| h.name == sid);
+                let mode = entry.map(|h| h.mode.clone()).unwrap_or_default();
+                // 记的档位来自落盘 meta（权威）：环境后来变了也要如实提示——**不拦打开**（记录是用户的）。
+                let exec = entry.map(|h| h.exec.clone()).unwrap_or_default();
+                let readiness = exec::tier_readiness(&exec, self.qemu_path());
+                // 「改需求」能力位：有本次需求行才给。在表里看会话种类；不在表里（生成中/未打开）
+                // 看落盘 meta 的形态（那是名单与形态的单一真相）。
+                let can_update_task = match self.sessions.get(&sid) {
+                    Some(Session::Collab(_)) => true,
+                    Some(Session::Single(_)) => false,
+                    None => mode == "collab",
+                };
+                // 待裁决：对象不在表里（正在生成）时拿不到，如实给 None（推的 Decision 事件会补上）。
+                let pending = match self.sessions.get(&sid) {
+                    Some(Session::Collab(c)) => {
+                        c.pending.as_ref().map(|p| p.to_json(c.gate_advice()))
+                    }
+                    _ => None,
+                };
+                SessionView {
+                    running: running_now.contains(&sid),
+                    sid,
+                    mode,
+                    done,
+                    tier: exec.tier.as_str().to_string(),
+                    tier_ready: readiness.ready(),
+                    tier_missing: readiness.missing().iter().map(|s| s.to_string()).collect(),
+                    can_update_task,
+                    pending,
+                }
             })
             .collect()
     }
@@ -683,7 +1626,10 @@ impl Core {
                     return Err(format!("无此模块：{}", id));
                 }
                 if seen_modules.iter().any(|x| x == id) {
-                    return Err(format!("模块 {} 被多个 agent 同时使用；同一模块只能属于一个 agent", id));
+                    return Err(format!(
+                        "模块 {} 被多个 agent 同时使用；同一模块只能属于一个 agent",
+                        id
+                    ));
                 }
                 seen_modules.push(id.clone());
             }
@@ -713,7 +1659,12 @@ impl Core {
         for a in &spec.agents {
             let name = agents::unique_instance_name(&a.name, &taken);
             taken.push(name.clone());
-            metas.push(AgentMeta { name, transient: a.transient, modules: a.modules.clone(), model: a.model.clone() });
+            metas.push(AgentMeta {
+                name,
+                transient: a.transient,
+                modules: a.modules.clone(),
+                model: a.model.clone(),
+            });
         }
         // 模块扁平清单（展示用；顺序按 agent 名单展开）
         let module_ids: Vec<String> = metas.iter().flat_map(|m| m.modules.clone()).collect();
@@ -730,8 +1681,19 @@ impl Core {
             task: spec.task.clone(),
             ts: now_ts(),
             agents: metas.clone(),
-            exec: exec::ExecSpec { tier: self.settings.app.tier, ..exec::ExecSpec::default() },
+            // 顶层会话：没有编排者，也没有节点（子会话由 spawn_sub_session 建）。
+            parent: None,
+            node: None,
+            exec: exec::ExecSpec {
+                tier: self.settings.app.tier,
+                ..exec::ExecSpec::default()
+            },
         };
+        // 承载校验：默认档位的前置条件不具备时**不允许创建虚拟机档会话**（用户环境问题，不是选型问题）。
+        // 必须在建工作区之前收口——拒绝就该什么都不留下。
+        if let Some(why) = exec::tier_refusal(&meta.exec, self.qemu_path()) {
+            return Err(why);
+        }
         // 工作区：work + 各 agent 沙箱（失败即失败，不假装已建）。代拟确认名单时再补建。
         self.workspace.prepare(&name, &agent_names)?;
         let sandboxes = self.sandboxes(&meta, &roster)?;
@@ -743,27 +1705,41 @@ impl Core {
             .cloned()
             .collect();
         for (id, caps) in exec::absent(&session_modules, &self.packages.scan()) {
-            self.log.warn("core::create_work", &format!("模块 {} 声明的运行包不在包库：{}", id, caps.join("、")));
+            self.log.warn(
+                "core::create_work",
+                &format!("模块 {} 声明的运行包不在包库：{}", id, caps.join("、")),
+            );
         }
         // 执行选型的完整性检查（「开始」即冻结）：虚拟机档的选型不成立（多版本未定版 / 定版不存在 /
         // 路径冲突）如实拒绝；只是缺包的照常开始——那是该模块的工具不可用（降级而非崩溃）。装配阶段按同一份计划取包。
         let plan = exec::plan(&meta.exec, &session_modules, &self.packages.scan())
             .map_err(|diags| exec::diagnose_text(&diags))?;
-        self.log.info("core::create_work", &exec::plan_summary(&plan));
+        self.log
+            .info("core::create_work", &exec::plan_summary(&plan));
 
         let (session, mut events) = match spec.mode {
             // 单 agent（模块数不限）。
             WorkMode::Single => {
                 let a = metas.first().ok_or("至少要有一个 agent")?;
-                let sb = sandboxes.for_agent(&a.name).cloned().ok_or_else(|| format!("缺少 agent {} 的沙箱", a.name))?;
+                let sb = sandboxes
+                    .for_agent(&a.name)
+                    .cloned()
+                    .ok_or_else(|| format!("缺少 agent {} 的沙箱", a.name))?;
                 let chosen: Vec<Module> = a
                     .modules
                     .iter()
-                    .filter_map(|id| roster.modules.iter().find(|m| &m.manifest.id == id).cloned())
+                    .filter_map(|id| {
+                        roster
+                            .modules
+                            .iter()
+                            .find(|m| &m.manifest.id == id)
+                            .cloned()
+                    })
                     .collect();
                 let channel = self.channel_of(a.model.as_deref());
                 let unavailable = self.unavailable_modules(&meta.exec, &chosen);
-                let (s, opened) = self.build_single(a, &chosen, channel, &sb, unavailable, meta.exec.net);
+                let (s, opened) =
+                    self.build_single(a, &chosen, channel, &sb, unavailable, meta.exec.net);
                 (Session::Single(s), opened)
             }
             WorkMode::Collab => {
@@ -792,12 +1768,23 @@ impl Core {
         self.history.create(&meta)?;
         self.sessions.insert(name.clone(), session);
         self.record_events(&name, &mut events);
-        Ok(WorkOpened { sid: name, agents: agent_names, events })
+        // 事实（开场转录 + 提示）随结果交出：核心不持有事件台，发布是 api 层的职责。
+        Ok(WorkOpened {
+            sid: name,
+            agents: agent_names,
+            facts: events,
+        })
     }
 
     /// 界面投喂：把文件写进本次工作的 work/。
     /// 返回 Ok(false) = 同名文件已存在且未选择覆盖（交前端让用户决定：覆盖/改名/取消）。
-    pub fn work_upload(&mut self, sid: &str, name: &str, bytes: &[u8], overwrite: bool) -> Result<bool, String> {
+    pub fn work_upload(
+        &mut self,
+        sid: &str,
+        name: &str,
+        bytes: &[u8],
+        overwrite: bool,
+    ) -> Result<bool, String> {
         // 策略在 core：先净化文件名，再交给工作区端口（机制只看已净化的名字）。
         let name = workspace::safe_file_name(name)?;
         if !self.sessions.contains_key(sid) && self.history.load(sid).is_err() {
@@ -814,7 +1801,10 @@ impl Core {
     /// 名单取自会话 meta（活动会话与历史会话都以 meta.agents 为权威）；列目录的机制在 Workspace 端口，
     /// 根取自沙箱（与文件清单同源）：agents 与 roots.agents 同序同名。
     pub fn files_view(&self, sid: &str) -> Result<FilesView, String> {
-        let (meta, _) = self.history.load(sid).map_err(|_| format!("无此会话：{}", sid))?;
+        let (meta, _) = self
+            .history
+            .load(sid)
+            .map_err(|_| format!("无此会话：{}", sid))?;
         let names: Vec<String> = meta.agents.iter().map(|a| a.name.clone()).collect();
         let files = self.workspace.list(sid, &names)?;
         let roster = self.scan();
@@ -837,7 +1827,10 @@ impl Core {
         Ok(FilesView {
             work: files.work,
             agents,
-            roots: FilesRootsView { work: workspace::slash(&sandboxes.shared), agents: agent_roots },
+            roots: FilesRootsView {
+                work: workspace::slash(&sandboxes.shared),
+                agents: agent_roots,
+            },
         })
     }
 
@@ -852,9 +1845,14 @@ impl Core {
     /// 组装本次工作的沙箱清单：工作根来自 Workspace 端口，模块目录来自清单。
     /// 权限策略在此收口：模块目录只对其所属 agent 可达（同一模块不会同属两个 agent，创建时已校验）。
     /// 每个 agent 的沙箱按 meta.agents 建；共享区根任何时候都有（代拟还没名单时也有，@ 改写要用）。
-    fn sandboxes(&self, meta: &SessionMeta, roster: &module::Roster) -> Result<workspace::Sandboxes, String> {
+    fn sandboxes(
+        &self,
+        meta: &SessionMeta,
+        roster: &module::Roster,
+    ) -> Result<workspace::Sandboxes, String> {
         let names: Vec<String> = meta.agents.iter().map(|a| a.name.clone()).collect();
-        let roots = self.workspace.roots(&meta.name, &names)?;
+        // 沙箱锚在**工作**上：子会话与父会话共用一套工作区（见 SessionMeta::work）。
+        let roots = self.workspace.roots(meta.work(), &names)?;
         let mut list: Vec<workspace::Sandbox> = Vec::new();
         for a in &meta.agents {
             let private = roots
@@ -869,7 +1867,7 @@ impl Core {
                 }
             }
             list.push(workspace::Sandbox {
-                work_name: meta.name.clone(),
+                work_name: meta.work().to_string(),
                 agent: a.name.clone(),
                 shared: roots.shared.clone(),
                 private,
@@ -878,7 +1876,10 @@ impl Core {
                 builtin_tools: self.prompts.core.builtin_tools.clone(),
             });
         }
-        Ok(workspace::Sandboxes { shared: roots.shared, list })
+        Ok(workspace::Sandboxes {
+            shared: roots.shared,
+            list,
+        })
     }
 
     /// 工具环境：内置文件工具永远可用；外部工具按模块分组放行（模块 id → 目录 + 工具表）。
@@ -902,11 +1903,49 @@ impl Core {
             sandbox: sb.clone(),
             io: Arc::clone(&self.io),
             unavailable,
-            // 围栏：可达范围 + 断网 + 环境白名单的落点，全部由该 agent 的沙箱派生（机制在 adapters）。
-            fence: crate::core::fence::FenceSpec::from_sandbox(sb, net),
+            // 围栏：可达范围 + 断网 + 环境白名单的落点，全部由该 agent 的沙箱派生（机制在 adapters）；
+            // 只读根来自用户显式授权（`fence_read`），默认空。
+            fence: crate::core::fence::FenceSpec::from_sandbox(sb, net)
+                .with_read_only(self.fence_read_roots()),
             // 从零开始；按落盘转录重建时由调用方按转录里的最大值续号（见 rebuild_session）。
             reply_seq: 0,
+            // 执行席的系统工具面**由角色表发放**（越权校验的唯一判据）。
+            allowed: self.role_tools("executor"),
+            // 能不能用自己模块的工具、以及工具说明块的素材：都按角色表与这个 agent 的模块装配期算好。
+            with_modules: self.prompts.systools.allows_module_tools("executor"),
+            notes: systool::tool_notes(&self.prompts, sb, modules),
         }
+    }
+
+    /// 一轮内对同一个成员最多提醒几次（用户可设，见 session-model.md 二）。
+    pub fn discuss_remind_cap(&self) -> u32 {
+        self.settings.app.discuss_remind_cap
+    }
+
+    /// 自动压缩的**字符预算** = 该模型的上下文窗口 × 设置百分比 × 4（≈ 字符/token 的粗估）。
+    /// 百分比为 0 = 关。见 docs/architecture/session-model.md 六。
+    fn compact_budget(&self, model: Option<&str>) -> usize {
+        let pct = self.settings.app.compact_at_percent as u64;
+        if pct == 0 {
+            return 0;
+        }
+        let id = model
+            .map(|s| s.to_string())
+            .or_else(|| self.settings.core.clone());
+        let ctx = id
+            .and_then(|i| self.settings.models.get(&i).map(|m| m.context))
+            .unwrap_or(32_000);
+        (ctx * pct / 100 * 4) as usize
+    }
+
+    /// 角色表发放的系统工具 id 清单（工具面的名字部分）。
+    /// 为什么不留第二份名单：代码里出现"哪个角色能调哪个工具"必然与表漂。
+    fn role_tools(&self, role: &str) -> Vec<String> {
+        self.prompts
+            .systools
+            .tool_face(role)
+            .map(|f| f.into_iter().map(|(id, _)| id.to_string()).collect())
+            .unwrap_or_default()
     }
 
     /// 装配单 agent 会话（不插入会话中心；插入与落盘由 create_work 统一做）。
@@ -932,34 +1971,41 @@ impl Core {
                 "单 agent 工作：agent {}，模块 {}，模型 {}",
                 a.name,
                 a.modules.join("+"),
-                channel.as_ref().map(|c| c.model.as_str()).unwrap_or("无（演示）")
+                channel
+                    .as_ref()
+                    .map(|c| c.model.as_str())
+                    .unwrap_or("无（演示）")
             ),
         );
-        let system = module::agent_system(&self.prompts, &a.name, modules, &systool::guide(&self.prompts, sb), mode);
+        // **会话参数**：身份块每回合由它现渲染（不存进消息列表）。
+        let params = session::SessionParams::from_workspace(&a.name, sb, modules);
         let tools = self.tools_env(modules, sb, unavailable, net, mode);
-        let roots = crate::core::refs::RefRoots { work: sb.shared.clone(), private: Some(sb.private.clone()) };
-        let s = session::AgentSession::new(
+        let mut s = session::AgentSession::new(
             &a.name,
-            system,
+            params,
             chat,
             note,
             Some(tools),
             self.prompts.core.refs.clone(),
-            roots,
             self.prompts.core.tool_texts.clone(),
         );
+        // 自动压缩的预算按**这个 agent 的模型**窗口算（见 session-model.md 六）。
+        s.set_compact_budget(self.compact_budget(a.model.as_deref()));
         let opened = s.open();
         (s, opened)
     }
 
     // ---- 会话历史 ----
 
-    /// 历史列表（读盘失败如实记日志，返回空表）。
+    /// 历史列表：**树序**（每个父会话紧跟它的子会话）——侧栏据此缩进，
+    /// 顺序与缩进同源，不会再出现"子会话排到父会话上面"的错位（见 session-model.md 一）。
+    /// 读盘失败如实记日志，返回空表。
     pub fn history_list(&self) -> Vec<HistoryView> {
         match self.history.list() {
-            Ok(v) => v,
+            Ok(v) => tree_order(v),
             Err(e) => {
-                self.log.error("core::history_list", &format!("会话列表失败：{}", e));
+                self.log
+                    .error("core::history_list", &format!("会话列表失败：{}", e));
                 Vec::new()
             }
         }
@@ -967,7 +2013,10 @@ impl Core {
 
     /// 打开历史会话：返回元信息与事件流（只读回放；是否续跑由用户点「继续」授权）。
     /// 回放同样应用 rewind 截断——流水保留审计，会话内容以截断后为准。
-    pub fn history_open(&self, name: &str) -> Result<(SessionMeta, Vec<serde_json::Value>), String> {
+    pub fn history_open(
+        &self,
+        name: &str,
+    ) -> Result<(SessionMeta, Vec<serde_json::Value>), String> {
         let (meta, events) = self.history.load(name)?;
         Ok((meta, truncate_events(&events)))
     }
@@ -975,18 +2024,29 @@ impl Core {
     /// 删除会话（= 删目录）。内存中的同名会话一并移除，避免内存与磁盘不一致。
     /// 删之前先请适配层撤销该会话各 agent 的围栏授权：痕迹与会话同生共死，不随会话数量堆积。
     pub fn history_delete(&mut self, name: &str) -> Result<bool, String> {
+        if self.running.contains(name) {
+            return Err(Self::running_refusal(name));
+        }
         if let Ok((meta, _)) = self.history.load(name) {
             let roster = self.source.scan();
             match self.sandboxes(&meta, &roster) {
                 Ok(sandboxes) => {
                     for sb in &sandboxes.list {
-                        let spec = fence::FenceSpec::from_sandbox(sb, meta.exec.net);
+                        // 撤销要覆盖同一次授权写下的全部条目：读写根 + 用户授权的只读根。
+                        let spec = fence::FenceSpec::from_sandbox(sb, meta.exec.net)
+                            .with_read_only(self.fence_read_roots());
                         if let Err(e) = self.fence.release(&spec) {
-                            self.log.warn("core::history_delete", &format!("撤销围栏授权未完成：{}", e));
+                            self.log.warn(
+                                "core::history_delete",
+                                &format!("撤销围栏授权未完成：{}", e),
+                            );
                         }
                     }
                 }
-                Err(e) => self.log.warn("core::history_delete", &format!("取沙箱失败，未撤销授权：{}", e)),
+                Err(e) => self.log.warn(
+                    "core::history_delete",
+                    &format!("取沙箱失败，未撤销授权：{}", e),
+                ),
             }
         }
         self.sessions.remove(name);
@@ -998,28 +2058,34 @@ impl Core {
         if events.is_empty() {
             return;
         }
-        // 流式增量与工具调用实时事件都是短暂事件，不落盘；历史只记定稿后的行。
-        let jsons: Vec<serde_json::Value> = events
-            .iter()
-            .filter(|e| !matches!(e, SessionEvent::Delta { .. } | SessionEvent::ToolCall(_)))
-            .map(|e| e.to_json())
-            .collect();
-        if let Err(e) = self.history.append(sid, &jsons) {
-            self.log.error("core::history_append", &format!("会话 {} 落盘失败：{}", sid, e));
-            events.push(SessionEvent::Notice(format!("[警告] 会话记录落盘失败：{}", e)));
+        if let Some(warn) = persist_events(self.history.as_ref(), self.log.as_ref(), sid, events) {
+            events.push(SessionEvent::Notice(warn));
+        }
+    }
+
+    /// 增量落盘手柄：交给工作线程，按"一次模型调用"的粒度落盘（见 `Persister`）。
+    pub(crate) fn persister(&self, sid: &str) -> Persister {
+        Persister {
+            history: Arc::clone(&self.history),
+            log: Arc::clone(&self.log),
+            sid: sid.to_string(),
         }
     }
 
     /// 核心推荐：按本次需求推荐 agent 名单（优先复用登记处的 agent，否则组装新的并给出模型）。
     /// 核心只建议、不代选；非法条目一律拒收（规则与代拟共用 agents::resolve_picks）。
-    pub fn suggest_models(&self, task: &str, mode: WorkMode) -> Result<Vec<AgentSuggestion>, String> {
+    pub fn suggest_models(
+        &self,
+        task: &str,
+        mode: WorkMode,
+    ) -> Result<(Vec<AgentSuggestion>, Vec<SessionEvent>), String> {
         if self.settings.models.is_empty() {
             return Err("登记处还没有任何模型，请先到「模型登记」添加".to_string());
         }
-        let channel = self
-            .settings
-            .core_channel()
-            .ok_or_else(|| "核心未设定默认模型（或它引用的供应商不存在），请先到「核心 AI 默认模型」设定".to_string())?;
+        let channel = self.settings.core_channel().ok_or_else(|| {
+            "核心未设定默认模型（或它引用的供应商不存在），请先到「核心 AI 默认模型」设定"
+                .to_string()
+        })?;
         let roster = self.scan();
         // 形态描述文案在提示词册里（代码不硬编码给模型的说明）。
         let mode_text = match mode {
@@ -1030,26 +2096,62 @@ impl Core {
             &self.prompts.core.suggest_models.user,
             &[
                 ("mode", mode_text.to_string()),
-                ("agents", agents::listing(&self.prompts, &self.settings.agents)),
-                ("modules", module::listing(&roster, &self.prompts.core.tool_texts)),
-                ("models", agents::model_listing(&self.settings.models, &self.prompts.core.tool_texts)),
+                (
+                    "agents",
+                    agents::listing(&self.prompts, &self.settings.agents),
+                ),
+                (
+                    "modules",
+                    module::listing(&roster, &self.prompts.core.tool_texts),
+                ),
+                (
+                    "models",
+                    agents::model_listing(&self.settings.models, &self.prompts.core.tool_texts),
+                ),
                 ("task", task.to_string()),
             ],
         );
         let (mut chat, _) = self.gateway.core_channel(Some(&channel));
-        let raw = chat
-            .complete(
-                &[Msg::system(self.prompts.core.suggest_models.system.clone()), Msg::user(user)],
-                crate::core::ports::CompleteOpts::plain(false),
-                &mut |_| true,
-            )
-            .raw;
-        let parsed = envelope::extract_json_object(&raw)
-            .and_then(|obj| serde_json::from_str::<SuggestReply>(&obj).ok())
-            .ok_or_else(|| format!("核心推荐失败（响应不是约定的 JSON）：{}", raw.chars().take(200).collect::<String>()))?;
-        let (picks, rejected) = agents::resolve_picks(parsed.agents, &self.settings.agents, &roster, &self.settings.models);
+        // 核心这一趟的行（工具行、发言行、思维链）**一律外送**：核心没有会话、写不了盘，
+        // 它只把行交出来；推到哪个 sid、落不落盘由调用方按会话种类定（这里给系统会话）。
+        let mut rows: Vec<SessionEvent> = Vec::new();
+        // 核心操作走工具调用：推荐名单由 suggest 工具承载。
+        let payload = crate::core::engine::core_operation(
+            &self.prompts.systools,
+            "planner",
+            "suggest",
+            self.settings.tool_mode_for(None),
+            chat.as_mut(),
+            &[
+                Msg::system(self.prompts.core.suggest_models.system.clone()),
+                Msg::user(user),
+            ],
+            crate::core::ports::CompleteOpts::plain(false),
+            &mut |_| true,
+            // 推荐是**一次性建议**（用户点了才生成、没有工作区可核实）：不接核实回路。
+            None,
+            &mut |e: SessionEvent| rows.push(e),
+        )?;
+        // 载荷里就是名单**数组**本身（工具参数 agents 的值）。
+        let parsed: Vec<agents::RosterPick> = payload
+            .get("agents")
+            .cloned()
+            .and_then(|v| serde_json::from_value(v).ok())
+            .ok_or_else(|| {
+                format!(
+                    "核心推荐的载荷没有 agents 数组：{}",
+                    payload.to_string().chars().take(200).collect::<String>()
+                )
+            })?;
+        let (picks, rejected) = agents::resolve_picks(
+            parsed,
+            &self.settings.agents,
+            &roster,
+            &self.settings.models,
+        );
         for r in &rejected {
-            self.log.warn("core::suggest_models", &format!("推荐条目拒收：{}", r));
+            self.log
+                .warn("core::suggest_models", &format!("推荐条目拒收：{}", r));
         }
         let core_default = self.settings.core.clone();
         let drafts: Vec<AgentSuggestion> = picks
@@ -1076,19 +2178,24 @@ impl Core {
         if out.is_empty() {
             return Err("核心推荐没有可用结果".to_string());
         }
-        Ok(out)
+        Ok((out, rows))
     }
 
     // ---- 会话收发（前端永不接触会话本体） ----
 
     /// 形态**不钉在会话里**：每次生成前按登记处重新解析。
-    /// 变了 → 走现有的重建路径刷新（系统提示随之换成另一套调用约定）并给用户一句通知；没变 → 什么都不做。
-    /// 这样"用户改了登记处就重新查、没改就不管"，同时系统提示与实际协议始终一致（回放也按同一规则派生）。
+    /// 变了 → 只改会话参数里的那一格并给用户一句通知（身份块下次调用就按新约定渲染）；没变 → 什么都不做。
+    /// 这样"用户改了登记处就重新查、没改就不管"，同时身份块里的约定与实际协议始终一致。
     fn refresh_tool_mode(&mut self, sid: &str) -> Result<Option<String>, String> {
-        let (meta, raw) = self.history.load(sid)?;
-        let after = truncate_events(&raw);
-        let Some(a) = meta.agents.first() else {
-            return Ok(None);
+        let a = match self.sessions.get(sid) {
+            Some(Session::Single(_)) => {
+                let (meta, _) = self.history.load(sid)?;
+                match meta.agents.first().cloned() {
+                    Some(a) => a,
+                    None => return Ok(None),
+                }
+            }
+            _ => return Ok(None),
         };
         let channel = a
             .model
@@ -1101,44 +2208,151 @@ impl Core {
             providers::ToolMode::Envelope
         };
         let cur = match self.sessions.get(sid) {
-            // 还没装进内存的会话：交给 ensure_session 按当前形态建，这里不动
             Some(Session::Single(s)) => s.tool_mode(),
-            Some(_) => return Ok(None),
-            None => want,
+            // 还没装进内存的会话：交给 ensure_session 按当前形态建，这里不动
+            _ => want,
         };
         if cur == want {
             return Ok(None);
         }
-        let rebuilt = self.rebuild_session(&meta, &after)?;
-        self.sessions.insert(sid.to_string(), rebuilt);
+        // **只改这一格**：形态是登记处派生出来的参数，没必要把整个会话从盘上重建一遍
+        //（身份块每次调用现渲染，改完这一格下一回合就生效）。
+        if let Some(Session::Single(s)) = self.sessions.get_mut(sid) {
+            s.set_tool_mode(want);
+        }
         Ok(Some(match want {
-            providers::ToolMode::Native => "工具调用形态已按登记处改为**原生工具调用**（本条起生效）".to_string(),
-            providers::ToolMode::Envelope => "工具调用形态已按登记处改为**手写信封**（本条起生效）".to_string(),
+            providers::ToolMode::Native => {
+                "工具调用形态已按登记处改为**原生工具调用**（本条起生效）".to_string()
+            }
+            providers::ToolMode::Envelope => {
+                "工具调用形态已按登记处改为**手写信封**（本条起生效）".to_string()
+            }
         }))
     }
 
-    /// 单 agent 会话发言。
-    pub fn single_say(&mut self, sid: &str, text: &str, live: &mut Live) -> Result<Vec<SessionEvent>, String> {
-        let notice = self.refresh_tool_mode(sid)?;
-        let mut events = match self.sessions.get_mut(sid) {
-            Some(Session::Single(s)) => s.say(text, live),
-            Some(_) => return Err("该会话不是单 agent 模式".to_string()),
-            None => return Err("无此会话".to_string()),
+    /// 生成前的**准备**（短命令：只做检查与取出会话，不跑模型）。
+    /// 语义与原来的 single_say / continue_flow 一致：工具形态变了先给一句提示；
+    /// 继续时末条必须是用户发言（否则只提醒，不替用户发言）。
+    pub(crate) fn prepare_single(
+        &mut self,
+        sid: &str,
+        text: Option<&str>,
+        want_stream: bool,
+    ) -> Result<Prepared, String> {
+        let llm = self.llm_opts(want_stream);
+        // 还没装进内存的会话先从落盘重建（"继续"可能先于"打开"到达；真没这个会话仍然报无此会话）。
+        self.ensure_session(sid)?;
+        if matches!(self.sessions.get(sid), Some(Session::Collab(_))) {
+            return Ok(Prepared::NotSingle);
+        }
+        let mut prefix: Vec<SessionEvent> = Vec::new();
+        if let Some(n) = self.refresh_tool_mode(sid)? {
+            prefix.push(SessionEvent::Notice(n));
+        }
+        if text.is_none() {
+            let last_is_user =
+                matches!(self.sessions.get(sid), Some(Session::Single(s)) if s.last_is_user());
+            if !last_is_user {
+                prefix.push(SessionEvent::Notice(NEED_USER.to_string()));
+                return Ok(Prepared::Immediate(prefix));
+            }
+        }
+        // 身份块**现渲染**（形态刚在上一步对齐过，所以这里读到的就是本回合的形态）。
+        let identity = match self.sessions.get(sid) {
+            Some(Session::Single(s)) => s.params().identity(&self.prompts, s.tool_mode()),
+            _ => return Ok(Prepared::NotSingle),
         };
-        if let Some(n) = notice {
-            events.insert(0, SessionEvent::Notice(n));
+        let session = self.take_single(sid)?;
+        let persister = self.persister(sid);
+        Ok(Prepared::Run {
+            session: Box::new(session),
+            identity,
+            prefix,
+            llm,
+            persister,
+        })
+    }
+
+    /// 起一个节点的执行回合（Web 生产路径）：**核心注入派发任务**（界面系统行、上下文 user 角色），
+    /// 再把会话交给工作线程继续生成。CLI 的 `drive_node` 与本条是同一条语义——
+    /// 各前端只做各自的界面，节点派发只有这一条管道。
+    /// 界面的身份与进上下文的角色是两件事：界面上它是核心说的话（不得显示成"用户"），
+    /// 而上下文里必须有一条 user 回合，否则请求被供应商整条拒收（见 session-model.md 四之二）。
+    pub(crate) fn prepare_node(
+        &mut self,
+        child: &str,
+        objective: &str,
+    ) -> Result<Prepared, String> {
+        // 节点的生成跟随设置里的流式开关（此前写死非流式，节点执行在界面上永远不逐字出）。
+        let llm = self.llm_opts(true);
+        self.ensure_session(child)?;
+        if matches!(self.sessions.get(child), Some(Session::Collab(_))) {
+            return Ok(Prepared::NotSingle);
         }
-        if live.cancelled() {
-            self.log.warn("core::single_say", "生成被用户中止");
+        let mut prefix: Vec<SessionEvent> = Vec::new();
+        if let Some(n) = self.refresh_tool_mode(child)? {
+            prefix.push(SessionEvent::Notice(n));
         }
-        self.record_events(sid, &mut events);
-        Ok(events)
+        let mut session = self.take_single(child)?;
+        // 核心注入：派发行（界面系统行、上下文 user 角色），这里只记录、不跑模型——
+        // 生成交给工作线程（与 CLI 的 `drive_node` 同一段语义，见 session-model.md 四之二）。
+        prefix.extend(session.note_task(objective));
+        let identity = session
+            .params()
+            .identity(&self.prompts, session.tool_mode());
+        let persister = self.persister(child);
+        Ok(Prepared::Run {
+            session: Box::new(session),
+            identity,
+            prefix,
+            llm,
+            persister,
+        })
+    }
+
+    /// 测试用同步入口：与工作线程那条路**同一段语义**（准备 → 生成 → 交回落盘）。
+    /// 生产路径不再走它——那里的生成在工作线程上（见 `CoreHandle::single_generation`）。
+    #[cfg(test)]
+    pub fn single_say(
+        &mut self,
+        sid: &str,
+        text: &str,
+        live: &mut Live,
+    ) -> Result<Vec<SessionEvent>, String> {
+        match self.prepare_single(sid, Some(text), live.llm.stream)? {
+            Prepared::Immediate(events) => Ok(events),
+            Prepared::NotSingle => Err("该会话不是单 agent 模式".to_string()),
+            Prepared::Run {
+                session,
+                identity,
+                prefix,
+                ..
+            } => {
+                let mut session = *session;
+                let mut events = prefix;
+                {
+                    let mut sink = |ev: SessionEvent| events.push(ev);
+                    session.say(text, &identity, live, &mut sink);
+                }
+                if live.cancelled() {
+                    self.log.warn("core::single_say", "生成被用户中止");
+                }
+                self.put_single_recorded(sid, session, &events);
+                Ok(events)
+            }
+        }
     }
 
     /// 协作推进一步：由前端按 pending 驱动；返回期间产生的全部事件。
-    pub fn collab_continue(&mut self, sid: &str, step: CollabStep, text: &str) -> Result<Vec<SessionEvent>, String> {
+    pub fn collab_continue(
+        &mut self,
+        sid: &str,
+        step: CollabStep,
+        text: &str,
+    ) -> Result<Vec<SessionEvent>, String> {
         let mut out = Vec::new();
         let mut confirmed: Option<Vec<AgentMeta>> = None;
+        let mut approve = false;
         {
             let s = self.sessions.get_mut(sid).ok_or("无此会话")?;
             let collab = match s {
@@ -1154,8 +2368,25 @@ impl Core {
                     }
                 }
                 CollabStep::Begin => collab.begin(text.contains("allow"), &mut |e| out.push(e)),
-                CollabStep::Answer => collab.answer(text, &mut |e| out.push(e)),
+                // 自由文本回应：请教 = 他的话进主会话；待审 = 记他的话 + 过审开工；
+                // 节点没过 = 记他的话 + 重派。过审后要**同步推进链**（借 self 的动作在块外做）。
+                CollabStep::Decide => {
+                    let before = collab.plan_approved();
+                    collab.decide(text, &mut |e| out.push(e));
+                    if !before && collab.plan_approved() {
+                        approve = true;
+                    }
+                }
             }
+        }
+        if approve {
+            if let Some(Session::Collab(c)) = self.sessions.get_mut(sid) {
+                c.approve_plan(&mut |e| out.push(e));
+            }
+            out.extend(self.collab_resume(sid)?);
+        } else {
+            // 泵让出了"该问谁"：由核心取该 agent 的会话跑这一回合（契约 8 步）。
+            out.extend(self.collab_advance(sid)?);
         }
         // 名单刚定下来：落档 meta（重启/回档后 rebuild_session 从这里拿名单与沙箱归属）并建沙箱目录。
         if let Some(roster) = confirmed {
@@ -1171,6 +2402,11 @@ impl Core {
                 c.set_sandboxes(sandboxes);
             }
         }
+        // 方案过审后：就绪节点各建一个子会话——**与生产路径同一处置**，
+        // 只在一边接会漏（上一版 ApprovePlan 就是这么漏的，靠 e2e 才逮到）。
+        // 必须在"终结后移出中心"之前做：会话一移出，链就找不到了。
+        let (spawned, _) = self.spawn_ready_nodes(sid);
+        out.extend(spawned);
         // 会话终结后移出中心（前端据 Ended 回收）。
         if let Some(Session::Collab(c)) = self.sessions.get(sid) {
             if c.is_done() {
@@ -1195,6 +2431,9 @@ impl Core {
     /// 返回重放后的完整事件流，供前端整体重建（不用前端自己推算截断）。
     /// 单 agent 的活动会话按历史精确回退；协作与历史会话按转录重建（状态全部派生）。
     pub fn rewind(&mut self, sid: &str, keep_id: u64) -> Result<Vec<serde_json::Value>, String> {
+        if self.running.contains(sid) {
+            return Err(Self::running_refusal(sid));
+        }
         let precise = matches!(self.sessions.get(sid), Some(Session::Single(_)));
         if !precise {
             self.ensure_session(sid)?;
@@ -1202,18 +2441,26 @@ impl Core {
         let (meta, raw_before) = self.history.load(sid)?;
         let before = truncate_events(&raw_before);
         self.history
-            .append(sid, &[serde_json::json!({ "type": "rewind", "keep": keep_id })])
+            .append(
+                sid,
+                &[serde_json::json!({ "type": "rewind", "keep": keep_id })],
+            )
             .map_err(|e| format!("回档落盘失败：{}", e))?;
         let (_, raw_after) = self.history.load(sid)?;
         let after = truncate_events(&raw_after);
         if precise {
-            match self.sessions.get_mut(sid) {
-                Some(Session::Single(s)) => s.rewind(keep_id),
-                _ => {}
+            if let Some(Session::Single(s)) = self.sessions.get_mut(sid) {
+                s.rewind(keep_id);
             }
         } else {
             let rebuilt = self.rebuild_session(&meta, &after)?;
             self.sessions.insert(sid.to_string(), rebuilt);
+        }
+        // **回档同步**：主会话回到第 keep_id 行，各 agent 会话按同一个**回合 id** 同步截断
+        // （见 docs/architecture/session-model.md 五）——子会话不在主会话的流水里，得各自回档。
+        if !precise {
+            let keep_turn = Self::turn_of_line(&before, keep_id);
+            self.rewind_children(sid, keep_turn)?;
         }
         let dropped = crate::core::collab_state::tool_runs(&before)
             .saturating_sub(crate::core::collab_state::tool_runs(&after));
@@ -1227,6 +2474,67 @@ impl Core {
         Ok(out)
     }
 
+    /// 主会话第 keep_id 行所属的**回合**（没有 = 0）。
+    fn turn_of_line(events: &[serde_json::Value], keep_id: u64) -> u64 {
+        for ev in events {
+            if let Some(lines) = ev.get("lines").and_then(|l| l.as_array()) {
+                for l in lines {
+                    if l.get("id").and_then(|i| i.as_u64()) == Some(keep_id) {
+                        return l.get("turn").and_then(|t| t.as_u64()).unwrap_or(0);
+                    }
+                }
+            }
+        }
+        0
+    }
+
+    /// 最后一个 `turn ≤ keep_turn` 的行的 id（没有 = 0 = 该会话全部截掉）。
+    fn last_line_within(events: &[serde_json::Value], keep_turn: u64) -> u64 {
+        // 规则：**从第一行超出保留点的行开始全截掉**（turn = 0 的行不属于任何回合，
+        // 跟着它前面那一回合走——用户插话、需求这类行因此不会被误删）。
+        let mut cut = 0u64;
+        for ev in events {
+            if let Some(lines) = ev.get("lines").and_then(|l| l.as_array()) {
+                for l in lines {
+                    let t = l.get("turn").and_then(|t| t.as_u64()).unwrap_or(0);
+                    if t > keep_turn {
+                        return l.get("id").and_then(|i| i.as_u64()).unwrap_or(0);
+                    }
+                    cut = l.get("id").and_then(|i| i.as_u64()).unwrap_or(cut) + 1;
+                }
+            }
+        }
+        cut
+    }
+
+    /// 主会话回档后，把各 agent 会话**同步**截断到"最后一个回合 ≤ T 的行"。
+    /// 正在跑的会话跳过（它自己的收尾会落盘，硬截会留下半截）。
+    fn rewind_children(&mut self, sid: &str, keep_turn: u64) -> Result<(), String> {
+        let kids: Vec<String> = self
+            .history_list()
+            .into_iter()
+            .filter(|h| h.parent.as_deref() == Some(sid))
+            .map(|h| h.name)
+            .collect();
+        for kid in kids {
+            if self.running.contains(&kid) {
+                continue;
+            }
+            let (_, events) = self.history.load(&kid)?;
+            let keep = Self::last_line_within(&truncate_events(&events), keep_turn);
+            self.history
+                .append(
+                    &kid,
+                    &[serde_json::json!({ "type": "rewind", "keep": keep })],
+                )
+                .map_err(|e| format!("子会话 {} 回档落盘失败：{}", kid, e))?;
+            if let Some(Session::Single(s)) = self.sessions.get_mut(&kid) {
+                s.rewind(keep);
+            }
+        }
+        Ok(())
+    }
+
     /// 协作中途改需求：回到需求行并追加一条新需求（旧需求留在流水里，派生以最后一条为准）。
     /// 返回重放后的完整事件流（前端整体重建，再吸收新产生的门事件）。
     pub fn update_task(&mut self, sid: &str, text: &str) -> Result<Vec<serde_json::Value>, String> {
@@ -1236,7 +2544,9 @@ impl Core {
         }
         self.ensure_session(sid)?;
         let (_, events) = self.history_open(sid)?;
-        let keep = find_line_id(&events, "[用户:需求]").ok_or("该会话没有需求行")?;
+        // 需求行按**结构化字段**认（种类=user、动词=需求），不匹配正文。
+        let keep = find_line_id(&events, |l| l.kind == "user" && l.verb == "需求")
+            .ok_or("该会话没有需求行")?;
         // 回档语义是「保留 id < keep」：需求行本身要留下（旧需求留在流水里），所以传 keep + 1。
         let mut out = self.rewind(sid, keep + 1)?;
         let mut fresh = Vec::new();
@@ -1270,6 +2580,10 @@ impl Core {
         if self.sessions.contains_key(sid) {
             return Ok(());
         }
+        // 会话对象在工作线程上（生成中）：**不能**从盘上再建一份（会变成两个实例）。
+        if self.running.contains(sid) {
+            return Err(Self::running_refusal(sid));
+        }
         let (meta, events) = self.history_open(sid)?;
         let rebuilt = self.rebuild_session(&meta, &events)?;
         self.sessions.insert(sid.to_string(), rebuilt);
@@ -1277,7 +2591,11 @@ impl Core {
     }
 
     /// 按会话元信息 + 转录事件重建会话对象（通道是机制，按记录的选择重新装配）。
-    fn rebuild_session(&self, meta: &SessionMeta, events: &[serde_json::Value]) -> Result<Session, String> {
+    fn rebuild_session(
+        &self,
+        meta: &SessionMeta,
+        events: &[serde_json::Value],
+    ) -> Result<Session, String> {
         let roster = self.source.scan();
         let sandboxes = self.sandboxes(meta, &roster)?;
         match meta.mode.as_str() {
@@ -1297,19 +2615,27 @@ impl Core {
             )?)),
             // 单 agent：按 meta.agents[0] 重建（名单是唯一真相；模块数不限）。
             "single" => {
-                let a = meta.agents.first().ok_or_else(|| format!("会话 {} 缺少 agent 名单", meta.name))?;
+                let a = meta
+                    .agents
+                    .first()
+                    .ok_or_else(|| format!("会话 {} 缺少 agent 名单", meta.name))?;
                 let modules: Vec<Module> = a
                     .modules
                     .iter()
-                    .filter_map(|id| roster.modules.iter().find(|m| &m.manifest.id == id).cloned())
+                    .filter_map(|id| {
+                        roster
+                            .modules
+                            .iter()
+                            .find(|m| &m.manifest.id == id)
+                            .cloned()
+                    })
                     .collect();
                 if modules.len() != a.modules.len() {
                     return Err(format!("agent {} 的模块已不在清单", a.name));
                 }
-                let sb = sandboxes
-                    .for_agent(&a.name)
-                    .cloned()
-                    .ok_or_else(|| format!("会话 {} 缺少 agent {} 的沙箱信息", meta.name, a.name))?;
+                let sb = sandboxes.for_agent(&a.name).cloned().ok_or_else(|| {
+                    format!("会话 {} 缺少 agent {} 的沙箱信息", meta.name, a.name)
+                })?;
                 let channel = a
                     .model
                     .as_deref()
@@ -1321,8 +2647,8 @@ impl Core {
                 } else {
                     providers::ToolMode::Envelope
                 };
-                let guide = systool::guide(&self.prompts, &sb);
-                let system = module::agent_system(&self.prompts, &a.name, &modules, &guide, mode);
+                // **会话参数**：与建立时同一个口径（身份块每回合现渲染，不进消息列表）。
+                let params = session::SessionParams::from_workspace(&a.name, &sb, &modules);
                 let (chat, note) = self.gateway.member_channel(channel.as_ref(), &a.name);
                 // 先把转录行按顺序摊平：分组判断要看「下一行是不是 tool 行」。
                 let mut rows: Vec<&serde_json::Value> = Vec::new();
@@ -1334,17 +2660,36 @@ impl Core {
                         rows.extend(lines.iter());
                     }
                 }
-                let mut history = vec![Msg::system(system)];
+                // 对话里**只有**真正发生过的事；身份与环境由 params 现渲染。
+                let mut history: Vec<Msg> = Vec::new();
                 let mut marks: Vec<usize> = Vec::new();
                 let mut line_reply: Vec<u64> = Vec::new();
                 let texts = &self.prompts.core.tool_texts;
-                let reply_of = |v: &serde_json::Value| v.get("reply").and_then(|x| x.as_u64()).unwrap_or(0);
+                let reply_of =
+                    |v: &serde_json::Value| v.get("reply").and_then(|x| x.as_u64()).unwrap_or(0);
                 let mut i = 0usize;
                 while i < rows.len() {
                     let l = rows[i];
                     let line = l.get("line").and_then(|x| x.as_str()).unwrap_or("");
-                    if let Some(t) = line.strip_prefix("[用户] ") {
-                        history.push(Msg::user(t.to_string()));
+                    // **读结构化字段**（种类 / 系统标记 / 正文），不从正文里抠 [标签]。
+                    let kind = l.get("kind").and_then(|x| x.as_str()).unwrap_or("");
+                    // 系统注入的行按它该有的角色还原：提醒/边界是 system，
+                    // **派发行**（`task`）是 user——否则重建出来的请求又变成一条 user 都没有，供应商照样拒收。
+                    if kind == "system"
+                        || l.get("system").and_then(|x| x.as_bool()).unwrap_or(false)
+                    {
+                        let is_task = l.get("task").and_then(|x| x.as_bool()).unwrap_or(false);
+                        history.push(if is_task {
+                            Msg::user(line.to_string())
+                        } else {
+                            Msg::system(line.to_string())
+                        });
+                        line_reply.push(l.get("id").and_then(|x| x.as_u64()).unwrap_or(0));
+                        marks.push(history.len());
+                        i += 1;
+                    } else if kind == "user" {
+                        // 用户说的行：正文就是用户那句话（[用户] / [用户:需求] 这类标签在字段里）。
+                        history.push(Msg::user(line.to_string()));
                         // 用户行不属于任何回复：给它自己的行号，回档时才不会与相邻行误并成一组。
                         line_reply.push(l.get("id").and_then(|x| x.as_u64()).unwrap_or(0));
                         marks.push(history.len());
@@ -1354,14 +2699,22 @@ impl Core {
                         // 落行时写入）；整组一起翻译成消息，靠的正是这个号——不靠"相邻行猜分组"。
                         let reply = reply_of(l.get("tool").expect("已判存在"));
                         let mut group: Vec<&serde_json::Value> = Vec::new();
-                        while i < rows.len() && reply_of(rows[i].get("tool").unwrap_or(&serde_json::Value::Null)) == reply {
+                        while i < rows.len()
+                            && reply_of(rows[i].get("tool").unwrap_or(&serde_json::Value::Null))
+                                == reply
+                        {
                             group.push(rows[i]);
                             i += 1;
                         }
                         // 这一回复的助手消息正文（空正文的回复不带 raw；组内取一份即可）。
                         let raw = group
                             .iter()
-                            .find_map(|t| t.get("tool").and_then(|x| x.get("raw")).and_then(|x| x.as_str()).filter(|s| !s.is_empty()))
+                            .find_map(|t| {
+                                t.get("tool")
+                                    .and_then(|x| x.get("raw"))
+                                    .and_then(|x| x.as_str())
+                                    .filter(|s| !s.is_empty())
+                            })
                             .unwrap_or_default();
                         let views: Vec<crate::core::events::ToolCallView> = group
                             .iter()
@@ -1378,10 +2731,13 @@ impl Core {
                     } else {
                         // 文本行：它紧跟 tool 行时属于同一次回复（历史由那组 tool 行统一推进，这里不推）；
                         // 否则这一行自己就是一条回复，推 assistant(该行文本)。
-                        let next_is_tool = rows.get(i + 1).map(|n| n.get("tool").is_some()).unwrap_or(false);
+                        let next_is_tool = rows
+                            .get(i + 1)
+                            .map(|n| n.get("tool").is_some())
+                            .unwrap_or(false);
                         if !next_is_tool {
-                            let text = line.split_once("] ").map(|(_, t)| t).unwrap_or(line).to_string();
-                            history.push(Msg::assistant(text));
+                            // 正文本身就是内容（说话人/动词在字段里），直接进助手消息。
+                            history.push(Msg::assistant(line.to_string()));
                         }
                         line_reply.push(reply_of(l));
                         marks.push(history.len());
@@ -1392,9 +2748,9 @@ impl Core {
                 let mut tools = self.tools_env(&modules, &sb, unavailable, meta.exec.net, mode);
                 // 回复 id 跨重启单调：从转录里的最大值续号，否则新回复会与旧回复并成一组。
                 tools.reply_seq = crate::core::engine::max_reply(events);
-                let roots = crate::core::refs::RefRoots { work: sb.shared.clone(), private: Some(sb.private.clone()) };
                 Ok(Session::Single(session::AgentSession::restore(
                     &a.name,
+                    params,
                     history,
                     marks,
                     line_reply,
@@ -1402,7 +2758,6 @@ impl Core {
                     note,
                     Some(tools),
                     self.prompts.core.refs.clone(),
-                    roots,
                     self.prompts.core.tool_texts.clone(),
                 )))
             }
@@ -1412,14 +2767,26 @@ impl Core {
 
     /// 继续：由用户点击授权。单 agent 会话需要轮到用户（末条是 AI 就只提醒、不发请求）；
     /// 协作不需要用户发言，继续 = 从断点推进流水线。
-    pub fn continue_flow(&mut self, sid: &str, live: &mut Live) -> Result<Vec<SessionEvent>, String> {
+    /// **测试用同步入口**：生产路径的两条（单 agent / 协作）都在工作线程上跑（见 CoreHandle）。
+    #[cfg(test)]
+    pub fn continue_flow(
+        &mut self,
+        sid: &str,
+        live: &mut Live,
+    ) -> Result<Vec<SessionEvent>, String> {
         self.ensure_session(sid)?;
         let mut events = {
             let s = self.sessions.get_mut(sid).ok_or("无此活动会话")?;
             match s {
                 Session::Single(s) => {
                     if s.last_is_user() {
-                        s.continue_reply(live)
+                        let mut out = Vec::new();
+                        {
+                            let mut sink = |ev: SessionEvent| out.push(ev);
+                            let identity = s.params().identity(&self.prompts, s.tool_mode());
+                            s.continue_reply(&identity, live, &mut sink);
+                        }
+                        out
                     } else {
                         vec![SessionEvent::Notice(NEED_USER.to_string())]
                     }
@@ -1451,7 +2818,15 @@ impl Core {
 impl Core {
     pub fn single_history(&self, sid: &str) -> Option<Vec<Msg>> {
         match self.sessions.get(sid) {
-            Some(Session::Single(s)) => Some(s.history().to_vec()),
+            Some(Session::Single(s)) => Some(s.dialogue().to_vec()),
+            _ => None,
+        }
+    }
+
+    /// 该会话此刻的**身份块**（按当前提示词册与形态现渲染）：测试用它断言"它被告诉了什么"。
+    pub fn single_identity(&self, sid: &str) -> Option<String> {
+        match self.sessions.get(sid) {
+            Some(Session::Single(s)) => Some(s.params().identity(&self.prompts, s.tool_mode())),
             _ => None,
         }
     }
@@ -1477,6 +2852,39 @@ fn truncate_events(events: &[serde_json::Value]) -> Vec<serde_json::Value> {
     content
 }
 
+/// 会话列表按**树序**排：顶层保持后端给的时间倒序，每个会话后面**紧跟**它的子会话
+/// （子会话内部同样按时间倒序），深度优先。
+/// 为什么必须在后端做：顺序与缩进是同一件事的两面——前端各排各的，就会出现子会话排在父会话上面。
+pub(crate) fn tree_order(list: Vec<HistoryView>) -> Vec<HistoryView> {
+    let mut kids: std::collections::BTreeMap<String, Vec<HistoryView>> =
+        std::collections::BTreeMap::new();
+    let mut roots: Vec<HistoryView> = Vec::new();
+    for h in list {
+        match h.parent.clone() {
+            Some(p) => kids.entry(p).or_default().push(h),
+            None => roots.push(h),
+        }
+    }
+    let mut out: Vec<HistoryView> = Vec::new();
+    for r in roots {
+        let mut stack = vec![r];
+        while let Some(cur) = stack.pop() {
+            let mut mine = kids.remove(&cur.name).unwrap_or_default();
+            mine.sort_by_key(|h| std::cmp::Reverse(h.ts));
+            // 逆序压栈 → 弹出时按时间倒序（与顶层同一口径）。
+            for k in mine.into_iter().rev() {
+                stack.push(k);
+            }
+            out.push(cur);
+        }
+    }
+    // 父会话已不在（被删）的子会话：如实列在最后，不能凭空消失。
+    for (_, v) in kids {
+        out.extend(v);
+    }
+    out
+}
+
 /// 只保留「转录行 id < keep」的行（回档 = 删除该行及其后；keep = 0 → 转录清空）。
 /// 一旦某条事件里的行被截掉，其后的事件一并丢弃（事件流是时序的）。
 fn cut_before_line(events: &[serde_json::Value], keep: u64) -> Vec<serde_json::Value> {
@@ -1487,7 +2895,12 @@ fn cut_before_line(events: &[serde_json::Value], keep: u64) -> Vec<serde_json::V
             if let Some(lines) = ev.get("lines").and_then(|l| l.as_array()) {
                 let kept: Vec<serde_json::Value> = lines
                     .iter()
-                    .take_while(|l| l.get("id").and_then(|i| i.as_u64()).map(|i| i < keep).unwrap_or(false))
+                    .take_while(|l| {
+                        l.get("id")
+                            .and_then(|i| i.as_u64())
+                            .map(|i| i < keep)
+                            .unwrap_or(false)
+                    })
                     .cloned()
                     .collect();
                 let done = kept.len() < lines.len();
@@ -1543,17 +2956,24 @@ fn line_reply_of(l: &serde_json::Value) -> u64 {
     stored.filter(|r| *r != 0).unwrap_or(own)
 }
 
-/// 找最后一条以 prefix 开头的转录行的 id。
-fn find_line_id(events: &[serde_json::Value], prefix: &str) -> Option<u64> {
+/// 找最后一条满足条件的转录行的 id（按**结构化字段**判，不匹配正文）。
+fn find_line_id(
+    events: &[serde_json::Value],
+    pick: impl Fn(&crate::core::events::LineView) -> bool,
+) -> Option<u64> {
     let mut found = None;
     for ev in events {
         if ev.get("type").and_then(|t| t.as_str()) != Some("transcript") {
             continue;
         }
-        let Some(lines) = ev.get("lines").and_then(|l| l.as_array()) else { continue };
+        let Some(lines) = ev.get("lines").and_then(|l| l.as_array()) else {
+            continue;
+        };
         for l in lines {
-            if l.get("line").and_then(|x| x.as_str()).map(|s| s.starts_with(prefix)).unwrap_or(false) {
-                found = l.get("id").and_then(|i| i.as_u64());
+            if let Ok(v) = serde_json::from_value::<crate::core::events::LineView>(l.clone()) {
+                if pick(&v) {
+                    found = Some(v.id);
+                }
             }
         }
     }
@@ -1562,12 +2982,18 @@ fn find_line_id(events: &[serde_json::Value], prefix: &str) -> Option<u64> {
 
 /// 会话是否「已经开过」（流水里有内容）：agent 名单与形态据此冻结。配置记录与回档记录不算内容。
 fn session_started(events: &[serde_json::Value]) -> bool {
-    events.iter().any(|ev| match ev.get("type").and_then(|t| t.as_str()) {
-        Some("config") | Some("rewind") => false,
-        Some("transcript") => ev.get("lines").and_then(|l| l.as_array()).map(|l| !l.is_empty()).unwrap_or(false),
-        Some(_) => true,
-        None => false,
-    })
+    events
+        .iter()
+        .any(|ev| match ev.get("type").and_then(|t| t.as_str()) {
+            Some("config") | Some("rewind") => false,
+            Some("transcript") => ev
+                .get("lines")
+                .and_then(|l| l.as_array())
+                .map(|l| !l.is_empty())
+                .unwrap_or(false),
+            Some(_) => true,
+            None => false,
+        })
 }
 
 /// 工作形态 → 会话元信息里的标识。
@@ -1597,7 +3023,13 @@ fn merged_suggestion(drafts: Vec<AgentSuggestion>) -> AgentSuggestion {
             why.push(a.why);
         }
     }
-    AgentSuggestion { name: "组合".to_string(), modules, model, why: why.join("；"), reuse: false }
+    AgentSuggestion {
+        name: "组合".to_string(),
+        modules,
+        model,
+        why: why.join("；"),
+        reuse: false,
+    }
 }
 
 /// 当前时间戳（秒）。

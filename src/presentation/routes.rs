@@ -2,7 +2,7 @@
 //!
 //! web.rs 的分发由这份目录驱动，所以「代码里有路由但目录里没有」在结构上不可能发生；
 //! 反过来「目录里有路由但没有处理器」由契约测试逐条点名叫出来（见 contract_tests/routes.rs）。
-//! 文档表（ARCHITECTURE.md 的 ROUTES 段落）也由契约测试与这里比对，杜绝文档过期。
+//! 文档表（docs/architecture/contracts.md 的 ROUTES 段落）也由契约测试与这里比对，杜绝文档过期。
 
 use serde_json::json;
 
@@ -68,7 +68,7 @@ pub const ROUTES: &[Route] = &[
         pattern: "/api/events",
         capability: "事件台（core::api::EventBus）",
         request: "查询 sid / since",
-        response: "{lines:[{seq,sid,events}],head}",
+        response: "{lines:[{seq,sid,events}],head,oldest}",
         statuses: &[200],
         note: "长轮询：有新事件立刻回，否则最多等 20s",
     },
@@ -88,7 +88,7 @@ pub const ROUTES: &[Route] = &[
         pattern: "/api/sessions",
         capability: "SessionOps::create_work",
         request: "{name,mode,agents[],task?,delegate?}",
-        response: "{sid,agents,events}",
+        response: "{sid,agents,head}",
         statuses: &[200, 400],
         note: "创建工作（形态与名单由用户给定）",
     },
@@ -98,9 +98,9 @@ pub const ROUTES: &[Route] = &[
         pattern: "/api/sessions/{sid}/{action}",
         capability: "SessionOps + intent::act",
         request: "{text?,agent?,id?,overwrite?,data_base64?,编辑体}",
-        response: "{sid,events,seq} / {sid,events} / {ok} / {sid,pending}",
+        response: "{sid,head} / {sid,events}（重放快照） / {ok} / {sid,pending}",
         statuses: &[200, 400, 404, 409],
-        note: "动作：say / task / slate / begin / answer / continue / withdraw / stop / rewind / update-task / edit / upload / pending",
+        note: "动作：say / task / slate / begin / decide / continue / withdraw / stop / rewind / update-task / edit / upload / pending",
     },
     Route {
         id: "session.config",
@@ -218,9 +218,9 @@ pub const ROUTES: &[Route] = &[
         pattern: "/api/history/{name}",
         capability: "HistoryOps::open",
         request: "—",
-        response: "{meta,events}",
+        response: "{meta,events,live,head}",
         statuses: &[200, 404],
-        note: "读回历史（转录即内容）",
+        note: "读回历史：盘上转录 + 事件台上它之外的实时尾巴 + 合流时的头部序号（水位）",
     },
     Route {
         id: "history.delete",

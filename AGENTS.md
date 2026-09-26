@@ -11,16 +11,18 @@
 
 ## 二、项目不变量
 
+- 使用简体中文与用户交流。
 - 项目始终是 GREEN FIELD，只维护当前唯一实现。
 - 不为旧版本、已删除实现或假设中的其它仓库保留兼容层、废代码或历史说明。
 - 不擅自引入版本迁移、版本号规划或兼容策略。
 - 项目内工具链和环境应该始终使用最新稳定版，如版本落后应向用户说明，获得授权后进行更新。
 - 默认同时支持 Windows、macOS、Linux；设计和实现必须先确认跨平台成立。
 - 项目理念和当前契约优先于兼容旧行为。
+- git推送前进行检查和脱敏，文档，代码，注释中不允许出现任何用户相关信息，和项目无关的一律算用户信息
 
 ## 三、路径硬约束
 
-- 代码和文档中的项目内路径一律以产品根（`Cargo.toml` 所在目录）为基准，使用相对路径。
+- 代码和文档中的项目内路径一律以仓库根为基准，使用相对路径。
 - 禁止写入带盘符的 Windows 路径、Unix 用户目录等机器相关绝对路径。
 - 代码必须使用路径组件拼接，例如 `root.join(".home").join("providers.yaml")`；禁止把 `/` 或 `\` 写进字符串后拼接文件路径。
 - 仓库内文件引用使用 `README.md`、`modules/<id>/module.yaml` 等相对形式。
@@ -34,12 +36,36 @@
 
 ## 四、代码与文档约束
 
+### 核心约束
+
 - 遵守 DIP，保持高内聚、低耦合，按业务功能垂直切分。
 - 业务之间通过 API 契约协作，不直接依赖其它业务的内部实现。
 - 任意行为和实现必须通过 `TESTING.md` 规定的适用测试；不可测试的行为属于设计或测试缺口，必须如实记录。
 - 注释只描述当前代码的功能、约束和联动模块。
 - 长期文档只保留当前状态，不写过程、旧实现复盘或变更历史；历史由 Git、PR、issue 和 CI 报告承载。
 - 不生产无实际约束、行为或使用价值的文档。
+
+### 文档分层与同步
+
+**两层**：仓库根是**门户**（定位、引用、最小必要契约），`docs/` 是**细则**。
+
+- 根门户只写「这份文档管什么、要做事时读哪一份」，**不复述细则正文**；同一个事实只有一份权威。
+- 细则按领域进 `docs/<领域>/`（现有 `docs/testing/`、`docs/architecture/`）；新增领域时建新目录，不往门户里堆。
+- 细则之间用相对路径互引；门户用 `docs/<领域>/<文件>.md` 引用细则。
+
+**改文档必须同步**——下列任一处改动，都要在同一次提交里把相关方一起改掉，不得留下过期引用或两处说法：
+
+| 改了什么 | 必须同时检查 |
+| --- | --- |
+| 细则正文（`docs/**`） | 该领域的门户（根文档）、`AGENTS.md` 文档路由表、其它文档里指向该节的引用 |
+| 门户的节标题或结构 | 该领域细则里的回引、`AGENTS.md` 文档路由表、`README.md` 文档表 |
+| 新增/删除/改名文档 | `AGENTS.md` 文档路由表、`README.md` 文档表、所有引用它的文档与代码注释 |
+| 代码里被文档机器比对的段落 | 该文档与比对它的测试（例如路由表 ↔ `src/tests/routes.rs`） |
+| `tests/gaps.yaml` 的条目 | `TESTING.md` 门户与 `docs/testing/gaps-acceptance.md` 的现状描述 |
+
+- 引用一律用**相对仓库根的路径**（`docs/testing/levels.md`），不写机器路径、不写绝对路径。
+- 文档里的当前状态必须与代码一致；未实现的内容写进缺口账，不写成当前能力。
+- 门户与细则都只保留当前状态，不写变更历史。
 
 ## 五、请求分类
 
@@ -90,14 +116,21 @@
 - 完成修改和适用测试后创建本地提交。
 - 只有需要真机或 GitHub Actions 验证，或用户明确授权时，才允许推送；其它情况不得擅自 `git push`。
 - actions的ci-report直接用git或git cli拉取，禁止轮询查网页。无法确认时机时委托用户拉取。
+- 拉取节奏（推荐）：push 后先等 5 分钟；`meta.json` 的 `sha` 还对不上（run 没结束）就每次再等 2 分钟重拉，
+  直到三平台 `sha` 都对得上，或确认 run 已失败/取消（判据见 `docs/testing/execution-ci.md`）。
 
 ## 八、文档路由
 
 专项要求具有强制性；工作涉及多个领域时，必读文档累加。
 
-| 工作内容 | 必须阅读并遵照 |
+**先读门户，再按需要读细则**（门户在仓库根，细则在 `docs/` 下；同一事实只有一份权威）。
+
+### 门户
+
+| 工作内容 | 门户 |
 | --- | --- |
 | 项目概括和快速开始 | `README.md` |
+| 项目概括和快速开始（English） | `README_EN.md` |
 | 任意代码、架构、分层、端口、日志、提示词或落盘修改 | `ARCHITECTURE.md` |
 | 产品行为、运行流程和用户旅程 | `PRODUCT.md` |
 | 理念、角色和不变量判断 | `PHILOSOPHY.md` |
@@ -105,3 +138,21 @@
 | 运行包开发或修改 | `RUNTIME_SPEC.md` |
 | providers、models、agents、settings 登记处 | `REGISTRY_SPEC.md` |
 | 任意测试、测试替身、质量门禁、缺口账或测试报告 | `TESTING.md` |
+
+### 细则（`docs/`）
+
+| 工作内容 | 细则 |
+| --- | --- |
+| 判断测试属于哪层、放哪、怎么判定 | `docs/testing/levels.md` |
+| 写或改替身（Stub / Fake / Mock / Spy / Fixture）、验收 Fake | `docs/testing/doubles.md` |
+| 新增端口或替身、核对真实适配器覆盖范围 | `docs/testing/doubles.md`（端口矩阵在 §三） |
+| 声明测试资源边界、清理副作用、质量门禁 | `docs/testing/quality-isolation.md` |
+| 跑本地入口、读报告、认成功标记、CI 与报告发布 | `docs/testing/execution-ci.md` |
+| 记缺口、目录与命名、按验收清单收口 | `docs/testing/gaps-acceptance.md` |
+| 交付模块（模块作者要交什么测试证据） | `docs/testing/module-delivery.md` |
+| 逐个文件看 `core/` / `adapters/` / `presentation/` 各干什么 | `docs/architecture/module-map.md` |
+| 呈现层入站契约、HTTP 路由目录 | `docs/architecture/contracts.md` |
+| 系统工具、角色（身份）与"谁能用哪些工具" | `docs/architecture/tools-and-roles.md` |
+| 审查关卡、任务链（依赖图）、子会话与验收 | `docs/architecture/task-chain.md` |
+| 会话模型（主/子会话、回合、发言标记、回档同步、上下文压缩） | `docs/architecture/session-model.md` |
+| 提示词册（`prompts/`）的结构与键清单 | `docs/architecture/prompts.md` |

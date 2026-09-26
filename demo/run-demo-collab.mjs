@@ -1,0 +1,267 @@
+#!/usr/bin/env node
+/**
+ * 协作演示（L4 演示脚本，**在真机上跑**）：三个 agent 各持一个模块，走完整协作六阶段，
+ * 把共享区里的资料变成"语料 + 报告 + 离线索引"三件产物。
+ *
+ * 与 demo/run-demo.mjs 的区别：那个是**组合式**（一个 agent 装三个模块），这个走**小组协作**
+ * （N 个 agent 分权协商：讨论 → 整理出任务链 → **审查关卡** → 链驱动（子会话）→ 节点验收 → 总验收）。
+ * 三个模块仍是三种语言：harvest=python、render=node、indexer=C++。
+ * 细则见 docs/architecture/task-chain.md。
+ *
+ * 用法：
+ *   1) 先起产品：node start.js -webUI            （默认网页端口 3081）
+ *   2) 另开一个终端：node demo/run-demo-collab.mjs
+ * 环境变量：
+ *   SOLOMNI_DEMO_BASE   转录中心地址（默认 http://127.0.0.1:3081）
+ *   SOLOMNI_DEMO_MODEL  指定模型 id（默认不指定 = 用核心默认模型）
+ *
+ * 为什么这个脚本**不进 CI**：它要真实供应商（CI 上没有 .home/，会回落到内置假模型，
+ * 那样验的就不是协作能力而是假脚本）。协作状态机的机器判据在 tests/cross-platform/e2e/。
+ * 只走产品自己的 HTTP 能力面（与前端同一条路）；产物落在本次工作的共享区里。
+ */
+import { readFileSync, existsSync, readdirSync, statSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { request } from "node:http";
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const BASE = process.env.SOLOMNI_DEMO_BASE || "http://127.0.0.1:3081";
+const MODEL = process.env.SOLOMNI_DEMO_MODEL || "";
+const WORK = "demo-collab-" + Date.now();
+const SAMPLE = join(HERE, "sample-corpus");
+const URL_BASE = new URL(BASE);
+
+let failed = 0;
+const ok = (cond, label, extra) => {
+  if (!cond) failed++;
+  console.log((cond ? "PASS " : "FAIL ") + label + (cond || extra === undefined ? "" : " :: " + String(extra).slice(0, 400)));
+};
+
+/** 一次能力面调用：不设客户端超时（一轮可能跑几分钟），等它自己返回。
+    长请求被网络层重置（ECONNRESET）是常态——**重试**，而不是让整个演示崩掉。 */
+async function api(method, path, body, tries = 3) {
+  for (let i = 1; ; i++) {
+    try {
+      return await once(method, path, body);
+    } catch (e) {
+      if (i >= tries) throw e;
+      console.log("   [重试 " + i + "] " + path + "：" + (e.code || e.message));
+      await new Promise((r) => setTimeout(r, 2000 * i));
+    }
+  }
+}
+
+/** 真正发一次请求（api 负责重试）。 */
+function once(method, path, body) {
+  return new Promise((resolve, reject) => {
+    const payload = body === undefined ? null : Buffer.from(JSON.stringify(body), "utf8");
+    const headers = payload ? { "Content-Type": "application/json", "Content-Length": payload.length } : undefined;
+    const req = request(
+      { hostname: URL_BASE.hostname, port: URL_BASE.port, path, method, headers },
+      (res) => {
+        const chunks = [];
+        res.on("data", (c) => chunks.push(c));
+        res.on("end", () => {
+          const text = Buffer.concat(chunks).toString("utf8");
+          let json = null;
+          try { json = JSON.parse(text); } catch {}
+          resolve({ status: res.statusCode, json, text });
+        });
+      },
+    );
+    req.setTimeout(0);
+    req.on("error", reject);
+    if (payload) req.write(payload);
+    req.end();
+  });
+}
+
+async function waitReady() {
+  for (let i = 0; i < 60; i++) {
+    try { const s = await api("GET", "/api/state"); if (s.status === 200) return true; } catch {}
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  return false;
+}
+
+/** 该工作的全部事件（转录行 + 通知 + 交付）。 */
+async function events(sid) {
+  const r = await api("GET", "/api/history/" + encodeURIComponent(sid));
+  return (r.json && r.json.events) || [];
+}
+
+/** 转录行（已应用回档截断）。 */
+async function lines(sid) {
+  const out = [];
+  for (const ev of await events(sid)) {
+    if (ev.type === "transcript") for (const l of ev.lines || []) out.push(l);
+  }
+  return out;
+}
+
+const toolRows = (ls) => ls.filter((l) => l.tool).map((l) => l.tool);
+
+/** 本工作 + 它**子会话**的全部转录行：节点跑在自己的子会话里，工具调用落在那边。 */
+async function allLines(sid) {
+  const out = await lines(sid);
+  const st = await api("GET", "/api/state");
+  const kids = ((st.json && st.json.history) || []).filter((h) => h.parent === sid);
+  for (const k of kids) out.push(...(await lines(k.name)));
+  return out;
+}
+
+/** 本工作共享区/沙箱里找产物（成品可以落在共享区，也可以落在某个 agent 的私有沙箱）。 */
+function artifacts(work) {
+  const root = join(process.cwd(), "session", work);
+  const found = new Map();
+  const walk = (dir) => {
+    for (const ent of readdirSync(dir, { withFileTypes: true })) {
+      const p = join(dir, ent.name);
+      if (ent.isDirectory()) walk(p);
+      else if (!found.has(ent.name)) found.set(ent.name, p);
+    }
+  };
+  if (existsSync(root)) walk(root);
+  return found;
+}
+
+async function main() {
+  if (!existsSync(SAMPLE)) {
+    console.error("找不到示例语料：" + SAMPLE);
+    return 1;
+  }
+  if (!(await waitReady())) {
+    console.error("转录中心没起来：" + BASE + "（先跑 solomni -webUI）");
+    return 1;
+  }
+
+  // ① 建协作工作：三个 agent 各持一个模块（三种语言），需求一句话。
+  const task = "把共享区里的资料变成一份能给同事看的报告，再做一个能离线检索的索引包。"
+    + "分工：先把资料抽成语料，再出 HTML 报告，最后建索引并当场检索一次证明可用；"
+    + "做完把三件产物（语料、报告、索引）的真实绝对路径念给我。";
+  const agents = [
+    { name: "资料手", modules: ["harvest"] },
+    { name: "呈现手", modules: ["render"] },
+    { name: "检索手", modules: ["indexer"] },
+  ];
+  if (MODEL) for (const a of agents) a.model = MODEL;
+  const created = await api("POST", "/api/sessions", { name: WORK, mode: "collab", agents, task });
+  ok(created.status === 200, "建协作工作 " + WORK + "（3 个 agent / 3 个模块 / 3 种语言）", created.text);
+  const sid = (created.json && created.json.sid) || WORK;
+
+  // ② 投喂示例语料。
+  const files = readdirSync(SAMPLE).sort();
+  ok(files.length > 0, "示例语料非空", files.join(" "));
+  for (const name of files) {
+    const up = await api("POST", "/api/sessions/" + encodeURIComponent(sid) + "/upload", {
+      name,
+      data_base64: readFileSync(join(SAMPLE, name)).toString("base64"),
+    });
+    ok(up.status === 200, "投喂 " + name, up.text);
+  }
+
+  // ③ 开始讨论（不带 allow：需要用户裁决时如实停下来问你，而不是替你决定）。
+  console.log("（协作一轮要等模型跑完，可能要几分钟）");
+  const begin = await api("POST", "/api/sessions/" + encodeURIComponent(sid) + "/begin", { text: "yes" });
+  ok(begin.status === 200, "开始讨论", begin.text);
+
+  // ④ 轮询：协作是拉模式——有 pending 就回答，没 pending 就继续推进，直到交付。
+  // **每一步之间必须等**：/pending 与 /continue 都是"问一次就回"，连打会在几毫秒内把配额用完，
+  // 于是断言在任务真正跑完之前就执行——真机上就因此报过 6 个假 FAIL（其实全部成功）。
+  // 所以这里按**时间**兜底，并且每次问完都等一会儿。
+  const DEADLINE = Date.now() + 25 * 60 * 1000;
+  let delivered = false;
+  while (Date.now() < DEADLINE) {
+    await new Promise((r) => setTimeout(r, 2000));
+    // 待裁决是**快照字段**（与推的 Decision 同源）：从 /api/state 的会话视图读。
+    const st = await api("GET", "/api/state");
+    const view = ((st.json && st.json.sessions) || []).find((v) => v.sid === sid);
+    const pending = view && view.pending;
+    if (pending && pending.kind === "ask") {
+      console.log("   [裁决] " + String(pending.summary || "") + " 提问：" + String(pending.question || "").slice(0, 200));
+      const ans = await api("POST", "/api/sessions/" + encodeURIComponent(sid) + "/decide", { text: "按你的判断做" });
+      ok(ans.status === 200, "回应 agent 的请教（自由文本）", ans.text);
+      continue;
+    }
+    // **审查关卡**：整理完不自动开工——方案与任务链先给用户看，用户回一句明确的"开工"才推进。
+    if (pending && pending.kind === "plan_review") {
+      console.log("   [裁决] " + String(pending.summary || "") + " → 回一句明确的开工");
+      const a = await api("POST", "/api/sessions/" + encodeURIComponent(sid) + "/decide", { text: "同意开工，按方案推进。" });
+      ok(a.status === 200, "审查关卡：明确开工", a.text);
+      continue;
+    }
+    // **节点验收没过**：如实报告是哪几个节点，然后点「继续」重派它们。
+    if (pending && pending.kind === "node_blocked") {
+      console.log("   [节点验收] 没通过：" + JSON.stringify((pending.payload && pending.payload.nodes) || []));
+      const c = await api("POST", "/api/sessions/" + encodeURIComponent(sid) + "/continue", {});
+      ok(c.status === 200, "重派没通过的节点", c.text);
+      continue;
+    }
+    const ev = await events(sid);
+    if (ev.some((e) => e.type === "ended")) { delivered = true; break; }
+    const c = await api("POST", "/api/sessions/" + encodeURIComponent(sid) + "/continue", {});
+    // 「正在生成中」是**正常**的：协作在跑，此刻不该推进——等下一轮再问，别当失败更别 break
+    //（之前就是这样提前退出，于是断言在任务跑完之前执行，报出一串假 FAIL）。
+    if (c.status !== 200 && !/正在生成中/.test(c.text || "")) {
+      ok(false, "推进协作", c.text);
+      break;
+    }
+  }
+
+  // ⑤ 复核：不靠模型自述——阶段事件、产物、报告的自包含性都自己查一遍。
+  if (!delivered) {
+    ok(false, "协作在时限内交付（ended）", "超时 " + Math.round((Date.now() - (DEADLINE - 25 * 60 * 1000)) / 1000) + "s");
+  }
+  const ev = await events(sid);
+  const kinds = ev.map((e) => e.type);
+  ok(kinds.includes("discussion_done"), "讨论收敛（discussion_done）", kinds.join(","));
+  ok(kinds.includes("plan"), "整理出方案（plan）", kinds.join(","));
+  ok(kinds.includes("plan_review"), "审查关卡：整理完停在待审（plan_review）", kinds.join(","));
+  ok(kinds.includes("node_started"), "就绪节点各起了子会话（node_started）", kinds.join(","));
+  ok(kinds.includes("report"), "各 agent 交了回报（report）", kinds.join(","));
+  ok(kinds.includes("review"), "核心逐项验收（review）", kinds.join(","));
+  const delivery = ev.filter((e) => e.type === "delivery").pop();
+  ok(!!delivery, "交付（delivery）", JSON.stringify(delivery || {}));
+  if (delivery) console.log("   交付结论：ok=" + delivery.ok + " over_rework=" + delivery.over_rework);
+
+  const made = artifacts(WORK);
+  // 产物的**文件名由方案定**（这次是 work/资料报告.html，不是 report.html），所以按**角色**认，
+  // 不能钉死文件名——否则方案换个名字就被当成"产物不存在"（真机上就是这么误报的）。
+  const fixtures = new Set(readdirSync(SAMPLE));
+  const pick = (re) => {
+    for (const [name, p] of made) if (!fixtures.has(name) && re.test(name)) return p;
+    return null;
+  };
+  const roles = [
+    ["语料", pick(/\.jsonl$/i)],
+    ["报告", pick(/\.html?$/i)],
+    ["索引", pick(/^index\.|\.bin$/i)],
+  ];
+  for (const [role, p] of roles) {
+    console.log("   产物 " + role + " → " + (p ? p + "（" + statSync(p).size + " 字节）" : "（没有）"));
+  }
+  ok(roles.every((r) => !!r[1]), "三件产物都真的存在", roles.filter((r) => !r[1]).map((r) => r[0]).join("、") || "");
+
+  // 报告必须自包含：离线打开不许引用任何外部资源。
+  if (roles[1][1]) {
+    const html = readFileSync(roles[1][1], "utf8");
+    const external = /(?:src|href)\s*=\s*["']https?:/i.test(html) || /<script[^>]+src=/i.test(html);
+    ok(!external, "报告自包含（无外部 src/href、无外部 script）", html.slice(0, 200));
+  }
+
+  // 检索真的可用：至少有一次成功的 query，且结果里有命中。
+  // 子会话真的建出来了：侧栏据此把子会话缩进挂在父会话下（history.parent）。
+  const st = await api("GET", "/api/state");
+  const kids = ((st.json && st.json.history) || []).filter((h) => h.parent === sid);
+  ok(kids.length > 0, "子会话挂在父会话下（history.parent）", JSON.stringify(kids.map((k) => k.name)));
+
+  const rows = toolRows(await allLines(sid));
+  console.log("   工具调用：" + (rows.map((r) => (r.label || r.name) + (r.ok ? "✓" : "✗")).join("、") || "（没有）"));
+  const q = rows.filter((r) => /query/.test(r.name) && r.ok).pop();
+  ok(!!q, "索引建好后当场检索过", JSON.stringify(rows.map((r) => [r.name, r.ok])));
+
+  console.log(failed ? "DEMO-FAILED failed=" + failed : "DEMO-OK（工作 " + WORK + "，三 agent 协作）");
+  return failed ? 1 : 0;
+}
+
+process.exit(await main());

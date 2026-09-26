@@ -2,7 +2,7 @@
 //!
 //! 为什么单独一层：参数 schema 不该埋在 Rust 代码里——它是**模块与产品对模型的承诺**，
 //! 要能像文案一样被看到、被修改、被复核。所以：
-//! - 内置工具的参数声明在 `prompts.yaml` 的 `core.builtin_tools`；
+//! - 内置工具的参数声明在 `systools/tools.yaml` 的 `tools`；
 //! - 模块工具的参数声明在 `module.yaml` 的 `tools.<名字>.params`（**可选**：不写就照旧工作）。
 //!
 //! 同一份声明同时驱动两件事：模型侧说明（`render_for_prompt`）与调用校验（`check`），
@@ -19,6 +19,10 @@ pub enum ParamType {
     Integer,
     Number,
     Boolean,
+    /// 数组：核心操作的**结构化载荷**（节点表 / 结论表 / 验收清单 / 名单）用它承载。
+    /// 为什么需要：这种嵌套结构标量类型表达不了；它照样是一次**工具调用**（名字、存在性、
+    /// 载荷形状都校验，且进工具台账），语义校验（负责人在不在名单、依赖成不成环）由代码在做完调用后照旧执行。
+    Array,
 }
 
 impl ParamType {
@@ -29,6 +33,7 @@ impl ParamType {
             ParamType::Integer => "integer",
             ParamType::Number => "number",
             ParamType::Boolean => "boolean",
+            ParamType::Array => "array",
         }
     }
 
@@ -39,6 +44,8 @@ impl ParamType {
             ParamType::Integer => v.is_i64() || v.is_u64(),
             ParamType::Number => v.is_number(),
             ParamType::Boolean => v.is_boolean(),
+            // 结构化载荷一律是数组（标量走 string/integer 那几种）。
+            ParamType::Array => v.is_array(),
         }
     }
 }
@@ -85,6 +92,10 @@ pub struct ToolSchema {
     /// 未声明的（含写入类）独占执行，并作为并发批次之间的屏障。
     #[serde(default)]
     pub parallel: bool,
+    /// **权限收口依据**（如 `fs-read` / `fs-write`）：决定这个工具要不要沙箱与围栏约束。
+    /// 为什么挂在能力上而不是"系统工具就免检"：`read`/`write` 也是系统工具，但它们碰文件系统。
+    #[serde(default)]
+    pub capability: String,
 }
 
 impl ToolSchema {
@@ -139,6 +150,14 @@ impl ToolSchema {
                 "type".to_string(),
                 serde_json::Value::String(p.ty.name().to_string()),
             );
+            // 数组参数带 items：JSON Schema 里数组成员形状由它给，缺了会被有些供应商按 schema 非法拒掉。
+            // 成员形状写成空 schema（不限制）——真正的形状校验按语义在做完调用后做。
+            if p.ty == ParamType::Array {
+                node.insert(
+                    "items".to_string(),
+                    serde_json::Value::Object(serde_json::Map::new()),
+                );
+            }
             if !p.desc.trim().is_empty() {
                 node.insert(
                     "description".to_string(),
@@ -278,14 +297,6 @@ pub enum ArgFault {
     TooBig { name: String, max: String },
     /// 声明里没有这个键。
     Unknown(String),
-}
-
-/// 一本书的模型侧说明：每个工具一段（工具名 + 签名），给模型读。
-pub fn render_book(book: &ToolBook) -> String {
-    book.iter()
-        .map(|(name, s)| format!("{}\n{}", name, s.render_for_prompt()))
-        .collect::<Vec<_>>()
-        .join("\n")
 }
 
 /// 数值的 JSON 写法：整数就写整数（2000 而不是 2000.0）。
@@ -459,5 +470,50 @@ params:
             s.check(&serde_json::json!({"任意": 1})),
             Err(ArgFault::Unknown("任意".to_string()))
         );
+    }
+
+    /// 数组载荷（核心操作的结构化参数）：只认数组，且声明形态必须是**供应商认的 JSON Schema**。
+    /// 为什么单独立一条：`type: json` 不是合法 JSON Schema 类型，整条请求会被供应商按"schema 非法"拒掉——
+    /// 这种错夹具看不见（假供应商不校验 schema），只在真机上暴露。
+    #[test]
+    fn array_payload_renders_a_valid_json_schema() {
+        let s: ToolSchema = serde_yaml::from_str(
+            "desc: 交出方案与任务链\nparams:\n  nodes: { type: array, required: true, desc: 节点数组 }\n",
+        )
+        .unwrap();
+        assert!(s.check(&serde_json::json!({"nodes": []})).is_ok());
+        for bad in [
+            serde_json::json!({}),
+            serde_json::json!("n"),
+            serde_json::json!(1),
+        ] {
+            assert_eq!(
+                s.check(&serde_json::json!({"nodes": bad})),
+                Err(ArgFault::WrongType {
+                    name: "nodes".to_string(),
+                    want: "array"
+                })
+            );
+        }
+        let js = s.to_json_schema();
+        assert_eq!(
+            js["properties"]["nodes"]["type"],
+            serde_json::json!("array")
+        );
+        assert!(
+            js["properties"]["nodes"]["items"].is_object(),
+            "数组参数要在声明里带 items：{}",
+            js
+        );
+        // 声明里出现的类型名必须是 JSON Schema 认的（供应商先校验 schema 本身，再执行调用）。
+        for (name, p) in js["properties"].as_object().expect("properties 是对象") {
+            let t = p["type"].as_str().unwrap_or("");
+            assert!(
+                ["string", "integer", "number", "boolean", "array", "object"].contains(&t),
+                "参数 {} 的类型 {} 不是合法 JSON Schema 类型",
+                name,
+                t
+            );
+        }
     }
 }

@@ -54,6 +54,15 @@ pub struct ModelEntry {
     /// 工具调用形态（缺省 envelope；填 native 前应当用探测确认真实支持，见 REGISTRY_SPEC）。
     #[serde(default)]
     pub tools: ToolMode,
+    /// 这个模型的**上下文窗口**（tokens）。缺省给保守值：宁可早压，也别撑爆。
+    /// 自动压缩按它 × 设置的百分比触发（见 docs/architecture/session-model.md 六）。
+    #[serde(default = "default_context_tokens")]
+    pub context: u64,
+}
+
+/// 保守的上下文窗口缺省值（模型没声明时用）。
+fn default_context_tokens() -> u64 {
+    32_000
 }
 
 /// 基本设置（settings.yaml）：一般 agent 都有的开关。
@@ -72,6 +81,39 @@ pub struct AppSettings {
     /// 默认否：没经过用户显式授权，本程序不动本机任何权限项。
     #[serde(default)]
     pub fence_write: bool,
+    /// 用户显式授权的**只读根**（工具进程只读可达，不继承写）。默认空 = 一个都不放行。
+    /// 授权落在用户自己的目录上；本程序只加只读 ACE，不给写权限。
+    #[serde(default)]
+    pub fence_read: Vec<String>,
+    /// 虚拟机档用的 QEMU 可执行文件路径（用户自备；默认空 = 兜底看 PATH）。
+    /// 产品不自带、不下载 QEMU，只检测与指路。
+    #[serde(default)]
+    pub qemu_path: String,
+    /// **单次模型调用的总预算（秒）**，全局通用（讨论、执行、验收、单 agent 都用它）。
+    /// 默认给得比较宽：非流式下供应商要等整段生成完才发响应头，长回复本来就要几十秒；
+    /// 预算用尽 = 中断这一轮并如实告知（用户可以点「继续」重试），不是把会话作废。
+    #[serde(default = "default_llm_timeout_secs")]
+    pub llm_timeout_secs: u64,
+    /// **上下文用到多少就该压**（占模型窗口的百分比）。到点自动压一次；用户也可以手动 /compact。
+    /// 默认 70：留三成余量给"这一轮还要生成的内容"，免得刚压完又爆。
+    #[serde(default = "default_compact_percent")]
+    pub compact_at_percent: u8,
+    /// **一轮内对同一个成员最多提醒几次**（提醒 = 系统注入"你还没用讨论动词表态"）。
+    /// 到顶就放它过去：主会话如实记一行"未回应"，整轮继续（不阻塞）。
+    #[serde(default = "default_discuss_remind_cap")]
+    pub discuss_remind_cap: u32,
+}
+
+fn default_discuss_remind_cap() -> u32 {
+    3
+}
+
+fn default_compact_percent() -> u8 {
+    70
+}
+
+fn default_llm_timeout_secs() -> u64 {
+    crate::core::ports::DEFAULT_LLM_TIMEOUT_SECS
 }
 
 fn default_true() -> bool {
@@ -80,7 +122,17 @@ fn default_true() -> bool {
 
 impl Default for AppSettings {
     fn default() -> Self {
-        AppSettings { streaming: true, show_reasoning: true, tier: crate::core::exec::Tier::Host, fence_write: false }
+        AppSettings {
+            streaming: true,
+            show_reasoning: true,
+            tier: crate::core::exec::Tier::Host,
+            fence_write: false,
+            fence_read: Vec::new(),
+            qemu_path: String::new(),
+            llm_timeout_secs: crate::core::ports::DEFAULT_LLM_TIMEOUT_SECS,
+            compact_at_percent: 70,
+            discuss_remind_cap: 3,
+        }
     }
 }
 
@@ -107,12 +159,18 @@ pub struct Channel {
 impl Settings {
     /// 模型 id → 成品通道；模型或供应商缺失 = 报错（不猜测回退）。
     pub fn resolve(&self, model_id: &str) -> Result<Channel, String> {
-        let m = self.models.get(model_id).ok_or_else(|| format!("无此模型：{}", model_id))?;
+        let m = self
+            .models
+            .get(model_id)
+            .ok_or_else(|| format!("无此模型：{}", model_id))?;
         let p = self
             .providers
             .get(&m.provider)
             .ok_or_else(|| format!("模型 {} 引用的供应商不存在：{}", model_id, m.provider))?;
-        Ok(Channel { provider: p.clone(), model: m.api_model.clone() })
+        Ok(Channel {
+            provider: p.clone(),
+            model: m.api_model.clone(),
+        })
     }
 
     /// 某 agent 的工具调用形态：它自己的模型优先，其次核心默认；两者都没有 = envelope（兜底，任何供应商都能用）。
@@ -133,7 +191,10 @@ impl Settings {
     pub fn provider_views(&self) -> Vec<ProviderView> {
         self.providers
             .iter()
-            .map(|(id, p)| ProviderView { id: id.clone(), base_url: p.base_url.clone() })
+            .map(|(id, p)| ProviderView {
+                id: id.clone(),
+                base_url: p.base_url.clone(),
+            })
             .collect()
     }
 
@@ -148,11 +209,11 @@ impl Settings {
                 provider: m.provider.clone(),
                 note: m.note.clone(),
                 tools: m.tools,
+                context: m.context,
                 is_core: self.core.as_deref() == Some(id.as_str()),
             })
             .collect()
     }
-
 }
 
 /// 供应商展示视图（不含密钥）。
@@ -172,5 +233,7 @@ pub struct ModelView {
     pub note: String,
     /// 工具调用形态（envelope / native）——前端据此显示，也让用户知道当前走哪套协议。
     pub tools: ToolMode,
+    /// 上下文窗口（tokens）：自动压缩按它 × 设置里的百分比触发；前端显示并可改。
+    pub context: u64,
     pub is_core: bool,
 }

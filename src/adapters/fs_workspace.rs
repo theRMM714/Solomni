@@ -11,7 +11,9 @@ const MAX_LISTED: usize = 300;
 
 /// 递归列文件（只列文件，不列目录）；相对路径统一用 / 分隔，逐层按名字排序保证稳定。
 fn collect_files(root: &Path, out: &mut Vec<String>, prefix: &str) {
-    let Ok(entries) = std::fs::read_dir(root) else { return };
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return;
+    };
     let mut items: Vec<(String, PathBuf, bool)> = entries
         .flatten()
         .map(|e| {
@@ -26,7 +28,11 @@ fn collect_files(root: &Path, out: &mut Vec<String>, prefix: &str) {
         if out.len() >= MAX_LISTED {
             return;
         }
-        let rel = if prefix.is_empty() { name.clone() } else { format!("{}/{}", prefix, name) };
+        let rel = if prefix.is_empty() {
+            name.clone()
+        } else {
+            format!("{}/{}", prefix, name)
+        };
         if is_dir {
             collect_files(&path, out, &rel);
         } else {
@@ -53,9 +59,11 @@ impl FsWorkspace {
 impl Workspace for FsWorkspace {
     fn prepare(&self, session: &str, agents: &[String]) -> Result<(), String> {
         let dir = self.session_dir(session);
-        std::fs::create_dir_all(dir.join("work")).map_err(|e| format!("建 work 目录失败：{}", e))?;
+        std::fs::create_dir_all(dir.join("work"))
+            .map_err(|e| format!("建 work 目录失败：{}", e))?;
         for a in agents {
-            std::fs::create_dir_all(dir.join(a)).map_err(|e| format!("建 agent 沙箱失败：{}", e))?;
+            std::fs::create_dir_all(dir.join(a))
+                .map_err(|e| format!("建 agent 沙箱失败：{}", e))?;
         }
         Ok(())
     }
@@ -66,7 +74,10 @@ impl Workspace for FsWorkspace {
         for a in agents {
             map.insert(a.clone(), dir.join(a));
         }
-        Ok(WorkRoots { shared: dir.join("work"), agents: map })
+        Ok(WorkRoots {
+            shared: dir.join("work"),
+            agents: map,
+        })
     }
 
     fn write_work(&self, session: &str, name: &str, bytes: &[u8]) -> Result<(), String> {

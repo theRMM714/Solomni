@@ -62,21 +62,36 @@ impl HistoryStore for FsHistory {
             if !p.is_dir() {
                 continue;
             }
-            let Ok(text) = std::fs::read_to_string(p.join("meta.yaml")) else { continue };
-            let Ok(meta) = serde_yaml::from_str::<SessionMeta>(&text) else { continue };
+            let Ok(text) = std::fs::read_to_string(p.join("meta.yaml")) else {
+                continue;
+            };
+            let Ok(meta) = serde_yaml::from_str::<SessionMeta>(&text) else {
+                continue;
+            };
             let done = std::fs::read_to_string(p.join("transcript.jsonl"))
                 .map(|t| t.contains("\"type\":\"ended\""))
                 .unwrap_or(false);
-            out.push(HistoryView { name: meta.name, mode: meta.mode, ts: meta.ts, done });
+            out.push(HistoryView {
+                name: meta.name,
+                mode: meta.mode,
+                ts: meta.ts,
+                done,
+                // 档位来自 meta 的 exec 段：列表视图据此提示"环境已变"，不拦打开。
+                exec: meta.exec,
+                // 编排者：子会话在侧栏里缩进挂在父会话下。
+                parent: meta.parent,
+            });
         }
-        out.sort_by(|a, b| b.ts.cmp(&a.ts));
+        out.sort_by_key(|a| std::cmp::Reverse(a.ts));
         Ok(out)
     }
 
     fn load(&self, name: &str) -> Result<(SessionMeta, Vec<serde_json::Value>), String> {
         let d = self.session_dir(name);
-        let text = std::fs::read_to_string(d.join("meta.yaml")).map_err(|_| format!("无此会话：{}", name))?;
-        let meta: SessionMeta = serde_yaml::from_str(&text).map_err(|e| format!("会话 meta.yaml 非法：{}", e))?;
+        let text = std::fs::read_to_string(d.join("meta.yaml"))
+            .map_err(|_| format!("无此会话：{}", name))?;
+        let meta: SessionMeta =
+            serde_yaml::from_str(&text).map_err(|e| format!("会话 meta.yaml 非法：{}", e))?;
         let mut events = Vec::new();
         if let Ok(t) = std::fs::read_to_string(d.join("transcript.jsonl")) {
             for line in t.lines() {
