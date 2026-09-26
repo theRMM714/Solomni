@@ -9,14 +9,14 @@ use crate::capabilities::llm::api::{Chat, ChatGateway, CompleteOpts, Msg};
 use crate::capabilities::prompt::api::Prompts;
 use crate::capabilities::registry::api::RosterPick;
 use crate::capabilities::registry::api::Settings;
+use crate::capabilities::session::api::MemberTools;
+use crate::capabilities::session::api::{AgentMeta, SessionMeta};
+use crate::capabilities::session::api::{CheckView, LineView, Pending, SessionEvent};
 use crate::capabilities::tools::ports::{SysIo, ToolRunner};
 use crate::capabilities::workspace::api::Sandboxes;
 use crate::capabilities::workspace::api::{ExecSpec, Module};
 use crate::capabilities::workspace::ports::{ModuleSource, PackageSource};
 use crate::core::engine::{Discussion, Execution, Member, TurnOut, MAX_ROUNDS};
-use crate::core::events::{CheckView, LineView, Pending, SessionEvent};
-use crate::core::history::{AgentMeta, SessionMeta};
-use crate::core::session::MemberTools;
 use std::sync::Arc;
 
 /// 节点验收的结论：逐节点 (node, ok, note)。
@@ -250,11 +250,11 @@ impl CollabSession {
     /// 两者都如实收尾并保持会话可继续，但用户看到的话不一样——混成一句会让用户以为出了故障。
     fn exec_note(&self, exec: &Execution) -> Option<String> {
         if exec.stopped || self.cancelled() {
-            return Some(crate::core::events::stopped_note());
+            return Some(crate::capabilities::session::api::stopped_note());
         }
         exec.error
             .clone()
-            .map(|err| crate::core::events::interrupted_note(&err))
+            .map(|err| crate::capabilities::session::api::interrupted_note(&err))
     }
 
     /// 任务链（未整理 = None）。
@@ -317,7 +317,7 @@ impl CollabSession {
         opts: crate::capabilities::llm::api::CompleteOpts<'static>,
         mode: crate::capabilities::registry::api::ToolMode,
         core_chat: &mut dyn Chat,
-        verify: Option<&mut crate::core::session::MemberTools>,
+        verify: Option<&mut crate::capabilities::session::api::MemberTools>,
         kind: &str,
         payload: &str,
         text: &str,
@@ -372,7 +372,7 @@ impl CollabSession {
         opts: crate::capabilities::llm::api::CompleteOpts<'static>,
         mode: crate::capabilities::registry::api::ToolMode,
         core_chat: &mut dyn Chat,
-        verify: Option<&mut crate::core::session::MemberTools>,
+        verify: Option<&mut crate::capabilities::session::api::MemberTools>,
         // 上一次填错了要它重填的话（核心据此**一直重填**到合法，不设次数上限）。
         retry: Option<&str>,
         // 核心这一轮的行推给谁。
@@ -474,7 +474,7 @@ impl CollabSession {
         // 建议是核心 AI 给的（随方案/验收那一次调用）：关卡挂着期间一直有效（快照也要它），
         // 解除挂起时（见各 pending = None 处）清掉，别漏到下一关。
         // 等用户 = 这一刻没人在干活（否则界面一直显示上一个成员的名字）。
-        sink(crate::core::events::idle());
+        sink(crate::capabilities::session::api::idle());
         let ev = p.decision(&self.gate_advice);
         self.pending = Some(p);
         sink(ev);
@@ -624,7 +624,7 @@ impl CollabSession {
             Msg::user(user),
         ];
         // 核心操作走工具调用：代拟名单由 slate 工具承载（带只读核实回路）。
-        sink(crate::core::events::working("核心"));
+        sink(crate::capabilities::session::api::working("核心"));
         let mut verify = self.core_verify_tools("planner");
         let parsed = crate::core::engine::core_operation(
             &self.systools,
@@ -647,7 +647,7 @@ impl CollabSession {
                 .and_then(|v| serde_json::from_value::<Vec<RosterPick>>(v).ok())
         });
         // 核心这一次调用结束了：交回"谁在干活"——下一棒（泵的下一步 / 等用户）会再推。
-        sink(crate::core::events::idle());
+        sink(crate::capabilities::session::api::idle());
         let Some(picks) = parsed else {
             sink(SessionEvent::Notice(
                 "[错误] 代拟失败（模型无响应格式）。请直接点名 agent。".into(),
@@ -819,7 +819,10 @@ impl CollabSession {
     /// 为什么要它：核心操作（出方案 / 节点验收…）也常需要"先看看现场再下结论"，
     /// 而核心不是 member、手里没有工具环境——没有它，模型一想核实就被判"没调用 X"而整步中断。
     /// 工具面只发**该角色的只读核实工具**（按声明里的 capability = fs-read 判定），写类一律不发。
-    fn core_verify_tools(&self, role: &str) -> Option<crate::core::session::MemberTools> {
+    fn core_verify_tools(
+        &self,
+        role: &str,
+    ) -> Option<crate::capabilities::session::api::MemberTools> {
         let mut sb = self.sandboxes.list.first()?.clone();
         sb.agent = "核心".to_string();
         sb.private = sb.shared.clone();
@@ -829,7 +832,7 @@ impl CollabSession {
             .tool_face(role)
             .map(|f| f.into_iter().map(|(id, _)| id.to_string()).collect())
             .unwrap_or_default();
-        Some(crate::core::session::MemberTools {
+        Some(crate::capabilities::session::api::MemberTools {
             mode: self.core_mode,
             modules: std::collections::BTreeMap::new(),
             observations: crate::capabilities::tools::api::Observations::default(),
@@ -917,7 +920,7 @@ impl CollabSession {
                 let brief = self.decision_brief(&p);
                 let text_owned = text.to_string();
                 let mut verify = self.core_verify_tools("planner");
-                sink(crate::core::events::working("核心"));
+                sink(crate::capabilities::session::api::working("核心"));
                 let judged = Self::judge_clear(
                     &self.prompts,
                     &self.systools,
@@ -932,7 +935,7 @@ impl CollabSession {
                     &text_owned,
                     sink,
                 );
-                sink(crate::core::events::idle());
+                sink(crate::capabilities::session::api::idle());
                 match judged {
                     Ok((true, why)) => {
                         self.note_user(text, sink);
@@ -962,12 +965,12 @@ impl CollabSession {
                     }
                     Err(err) => {
                         self.note_user(text, sink);
-                        sink(SessionEvent::Notice(crate::core::events::interrupted_note(
-                            &format!(
+                        sink(SessionEvent::Notice(
+                            crate::capabilities::session::api::interrupted_note(&format!(
                                 "判定你的意思时没能问模型（{}）；为稳妥先不开工，请再说一句。",
                                 err
-                            ),
-                        )));
+                            )),
+                        ));
                     }
                 }
             }
@@ -1034,9 +1037,9 @@ impl CollabSession {
                         // 讨论中调用失败 / 被停：**不**把它当发言吸收，如实告知并中断本轮。
                         // 停止与失败用不同文案（用户看得到"是我停的"还是"它断了"）。
                         let note = if self.cancelled() {
-                            crate::core::events::stopped_note()
+                            crate::capabilities::session::api::stopped_note()
                         } else {
-                            crate::core::events::interrupted_note(&err)
+                            crate::capabilities::session::api::interrupted_note(&err)
                         };
                         sink(SessionEvent::Notice(note));
                         return;
@@ -1044,7 +1047,9 @@ impl CollabSession {
                     TurnOut::Stopped => {
                         // 用户点了「停止」：被中断的那条发言没有吸收（半截 say/agree 会把状态算歪），
                         // 讨论保持可继续——点「继续」从断点接着推进。
-                        sink(SessionEvent::Notice(crate::core::events::stopped_note()));
+                        sink(SessionEvent::Notice(
+                            crate::capabilities::session::api::stopped_note(),
+                        ));
                         return;
                     }
                     TurnOut::AskUser { member, question } => {
@@ -1067,7 +1072,7 @@ impl CollabSession {
         }
         // 整理：只在还没有方案（或没有链）时做——回档/重启后沿用已记的，不重复花钱。
         if self.plan.is_none() || self.chain.is_none() {
-            sink(crate::core::events::working("核心"));
+            sink(crate::capabilities::session::api::working("核心"));
             let mut verify = self.core_verify_tools("planner");
             let made = self.disc.as_ref().expect("disc 存在").synthesize(
                 self.core_chat.as_mut(),
@@ -1075,7 +1080,7 @@ impl CollabSession {
                 verify.as_mut(),
                 sink,
             );
-            sink(crate::core::events::idle());
+            sink(crate::capabilities::session::api::idle());
             match made {
                 Ok((plan, chain, advice)) => {
                     // 核心 AI 的建议随方案一起来（同一批产出，不额外花一次调用）。
@@ -1110,9 +1115,9 @@ impl CollabSession {
                 // 整理被停止 / 失败 / 回执不合法：都不落方案、不往下走，如实告知并交回用户。
                 Err(err) => {
                     let note = if self.cancelled() {
-                        crate::core::events::stopped_note()
+                        crate::capabilities::session::api::stopped_note()
                     } else {
-                        crate::core::events::interrupted_note(&err)
+                        crate::capabilities::session::api::interrupted_note(&err)
                     };
                     sink(SessionEvent::Notice(note));
                     return;
@@ -1166,7 +1171,7 @@ impl CollabSession {
         // 别的客户端动作）也不能替用户点「继续」，否则"暂停"形同虚设（真机上演过：总验收没过、
         // 本该停下等用户，节点子会话一完成就把那些节点又派了一遍）。重派在**用户那一步**做（见 resume）。
         if self.awaiting_user() {
-            sink(crate::core::events::idle());
+            sink(crate::capabilities::session::api::idle());
             return;
         }
         // **阶段驱动**：同一阶段（依赖图里同一层）的节点并发跑，跨阶段串行。
@@ -1183,7 +1188,7 @@ impl CollabSession {
             {
                 // 节点跑在各自的子会话里：主会话这一刻没有"谁在干活"，
                 // 但**子会话在跑**要照实显示（前端按运行态快照把主会话标成在跑）。
-                sink(crate::core::events::idle());
+                sink(crate::capabilities::session::api::idle());
                 return;
             }
             // 这一阶段的节点逐个判（核心 AI 给结论，也由它决定重派哪些）。
@@ -1200,7 +1205,7 @@ impl CollabSession {
                 let reviewed = crate::kernel::chain::TaskChain {
                     nodes: stage_nodes.clone(),
                 };
-                sink(crate::core::events::working("核心"));
+                sink(crate::capabilities::session::api::working("核心"));
                 let mut verify = self.core_verify_tools("orchestrator");
                 let made = Self::review_nodes(
                     &self.prompts,
@@ -1215,13 +1220,13 @@ impl CollabSession {
                     retry.as_deref(),
                     sink,
                 );
-                sink(crate::core::events::idle());
+                sink(crate::capabilities::session::api::idle());
                 let (verdicts, advice) = match made {
                     Ok(v) => v,
                     Err(err) => {
-                        sink(SessionEvent::Notice(crate::core::events::interrupted_note(
-                            &err,
-                        )));
+                        sink(SessionEvent::Notice(
+                            crate::capabilities::session::api::interrupted_note(&err),
+                        ));
                         return;
                     }
                 };
@@ -1251,7 +1256,9 @@ impl CollabSession {
                     what.join("；")
                 )));
                 if self.cancelled() {
-                    sink(SessionEvent::Notice(crate::core::events::stopped_note()));
+                    sink(SessionEvent::Notice(
+                        crate::capabilities::session::api::stopped_note(),
+                    ));
                     return;
                 }
                 retry = Some(format!(
@@ -1332,7 +1339,7 @@ impl CollabSession {
         // 要返工的节点，且只能取上面那张表里的 id——退错了节点等于让错的人白跑一遍。
         let mut retry: Option<String> = None;
         loop {
-            sink(crate::core::events::working("核心"));
+            sink(crate::capabilities::session::api::working("核心"));
             let mut verify = self.core_verify_tools("orchestrator");
             exec.review(
                 self.core_chat.as_mut(),
@@ -1346,7 +1353,7 @@ impl CollabSession {
                 verify.as_mut(),
                 sink,
             );
-            sink(crate::core::events::idle());
+            sink(crate::capabilities::session::api::idle());
             if let Some(note) = self.exec_note(&exec) {
                 sink(SessionEvent::Notice(note));
                 return;
@@ -1360,7 +1367,9 @@ impl CollabSession {
                 problems.join("；")
             )));
             if self.cancelled() {
-                sink(SessionEvent::Notice(crate::core::events::stopped_note()));
+                sink(SessionEvent::Notice(
+                    crate::capabilities::session::api::stopped_note(),
+                ));
                 return;
             }
             retry = Some(format!(
@@ -1455,8 +1464,9 @@ impl CollabSession {
                 crate::capabilities::registry::api::ToolMode::Envelope
             };
             // **会话参数**：身份块每回合由它现渲染，不存进任何人的消息列表。
-            let params =
-                crate::core::session::SessionParams::from_workspace(&a.name, &sandbox, &modules);
+            let params = crate::capabilities::session::api::SessionParams::from_workspace(
+                &a.name, &sandbox, &modules,
+            );
             let mut member = Member::plain(&a.name, params, mode);
             // 围栏：可达范围 + 断网，由该 agent 的沙箱与 exec 段派生（机制在 adapters）；
             // 只读根来自用户显式授权（`fence_read`），默认空。

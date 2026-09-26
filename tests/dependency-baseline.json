@@ -1,9 +1,6 @@
 {
   "_comment": "依赖方向门禁的迁移期基线（规则与销账口径见 docs/architecture/refactor-plan.md §一 / §四）。条目存在 = 尚未拆掉；拆掉后必须删除，否则门禁报「基线豁免已过期」。全部清空 = 重构完成。",
-  "reverse": [
-    "src/capabilities/registry/domain/agents.rs -> crate::core::history",
-    "src/capabilities/tools/domain/systool.rs -> crate::core::session"
-  ],
+  "reverse": [],
   "presentation": [
     "src/presentation/cli.rs -> crate::core",
     "src/presentation/intent.rs -> crate::core",
@@ -13,11 +10,9 @@
     [
       "capabilities/llm",
       "capabilities/registry",
+      "capabilities/session",
       "capabilities/tools",
-      "capabilities/workspace",
-      "events",
-      "history",
-      "session"
+      "capabilities/workspace"
     ]
   ]
 }

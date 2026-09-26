@@ -20,11 +20,11 @@ use crate::capabilities::llm::api::{
 use crate::capabilities::prompt::ports::PromptSource;
 use crate::capabilities::registry::api::{Channel, Provider, Settings};
 use crate::capabilities::registry::ports::SettingsStore;
+use crate::capabilities::session::api::{AgentMeta, SessionMeta};
+use crate::capabilities::session::ports::HistoryStore;
 use crate::capabilities::tools::ports::SysIo;
 use crate::capabilities::workspace::api::ExecSpec;
 use crate::capabilities::workspace::ports::{ModuleSource, PackageSource, Workspace};
-use crate::core::history::{AgentMeta, SessionMeta};
-use crate::core::ports::HistoryStore;
 use crate::kernel::log::{Log, NoopLog};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};

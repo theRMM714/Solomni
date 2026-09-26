@@ -4,8 +4,8 @@
 
 use crate::capabilities::prompt::api::Prompts;
 use crate::capabilities::registry::domain::providers::ModelEntry;
+use crate::capabilities::session::api::AgentMeta;
 use crate::capabilities::workspace::api::Roster;
-use crate::core::history::AgentMeta;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 

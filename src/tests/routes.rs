@@ -5,11 +5,11 @@
 
 use crate::capabilities::registry::api::AgentView;
 use crate::capabilities::registry::api::{AppSettings, ModelView, ProviderView};
+use crate::capabilities::session::api::{AgentMeta, HistoryView, SessionMeta};
 use crate::capabilities::workspace::api::Roster;
 use crate::core::api::{
     Advance, DiscoveryOps, EventBus, HistoryOps, Ops, Output, RegistryOps, SessionOps,
 };
-use crate::core::history::{AgentMeta, HistoryView, SessionMeta};
 use crate::core::{
     AgentSuggestion, ConfigAgent, FilesAgentView, FilesRootsView, FilesView, Pending,
     RuntimeReport, SessionConfig, SessionEdit, SessionView, WorkMode, WorkOpened, WorkSpec,

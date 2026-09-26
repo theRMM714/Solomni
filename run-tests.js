@@ -426,12 +426,13 @@ function structuralAudit() {
         if (layer === "presentation" && !presOk && targetLayer !== "presentation") {
           presentation.add(f + " -> " + t);
         }
-        // 业务之间只经对方的 api：能力引用**另一个**能力时，目标必须是对方的 ::api。
-        // （能力内部 api ↔ domain ↔ ports 的互相引用不算"业务之间"，不在此列。）
+        // 业务之间只经对方的**声明面**：::api（入站契约）或 ::ports（出站端口，是接口不是实现）。
+        // 不许碰 ::domain —— 那是实现细节。能力内部的互相引用不算"业务之间"。
         if (layer === "capabilities" && targetLayer === "capabilities") {
           const selfCap = f.split("/")[2];
           const otherCap = t.split("::")[2];
-          if (otherCap && otherCap !== selfCap && !t.endsWith("::api")) {
+          const declared = t.endsWith("::api") || t.endsWith("::ports");
+          if (otherCap && otherCap !== selfCap && !declared) {
             apiOnly.add(f + " -> " + t);
           }
         }
@@ -490,7 +491,7 @@ function structuralAudit() {
     };
     compare("reverse", [...reverse].sort(), depBaseline.reverse || [], "业务层不得反向依赖旧巨石 core / adapters / presentation");
     compare("presentation", [...presentation].sort(), depBaseline.presentation || [], "presentation 只能经入站能力面（core::api 或各能力的 ::api）驱动");
-    compare("apiOnly", [...apiOnly].sort(), depBaseline.apiOnly || [], "业务之间只能经对方的 ::api");
+    compare("apiOnly", [...apiOnly].sort(), depBaseline.apiOnly || [], "业务之间只能经对方的声明面（::api / ::ports），不得碰 ::domain");
 
     const actualCycles = sortSccs(coreSccs);
     const baselineCycles = sortSccs(depBaseline.coreCycles || []);

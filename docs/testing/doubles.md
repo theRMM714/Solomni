@@ -130,7 +130,7 @@ Fixture 必须：
 | `Log` | `NoopLog` | 不记录（Stub） | 不适用 | 不适用 | `FileLog`（三个级别都落盘） | 已验收 |
 | `HostProbe` | `FixedProbe`（只按声明回答） | 不适用 | 不适用 | 不适用 | `HostProbeAdapter`（真实路径事实；PATH 上不存在的名字如实说没有） | 已验收 |
 
-`Log` 是唯一**不在 `core/ports.rs`** 的端口：它在 `kernel/log.rs`（机制型内核，无领域语义）。
+`Log` 是唯一**不在某个能力 `ports.rs`** 的端口：它在 `kernel/log.rs`（机制型内核，无领域语义）。
 见 [../architecture/module-map.md](../architecture/module-map.md) 一。
 
 "已验收"指该端口在 `src/tests/` 与 `src/adapters/*` 的契约测试里有成功、失败、空/边界与交互记录的断言；

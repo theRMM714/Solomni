@@ -87,7 +87,10 @@ pub fn is_freeform(name: &str) -> bool {
 
 /// **工作环境块**：提示词册 env 渲染（真实根目录 + 路径规矩）。**不含任何工具清单**——
 /// 能用哪些工具由核心按这一回合的身份现渲染后随回合注入（见 core::engine 的 MemberTools::tools_block）。
-pub fn env_block(prompts: &Prompts, p: &crate::core::session::SessionParams) -> String {
+pub fn env_block(
+    prompts: &Prompts,
+    p: &crate::capabilities::session::api::SessionParams,
+) -> String {
     let texts = &prompts.core.tool_texts;
     let module_roots = if p.module_dirs.is_empty() {
         prompts.core.no_module_dirs.clone()

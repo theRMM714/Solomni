@@ -4,8 +4,8 @@
 //! 并记录每行对应的历史长度，供回档精确回退。
 
 use crate::capabilities::llm::api::{BoxedChat, Msg};
+use crate::capabilities::session::domain::events::{LineView, SessionEvent, ToolCallView};
 use crate::capabilities::tools::ports::ToolRunner;
-use crate::core::events::{LineView, SessionEvent, ToolCallView};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -65,7 +65,7 @@ pub struct MemberTools {
 /// 为什么必须对齐：一次回复的消息是「一条助手消息 + N 条结果」，截在中间会留下孤儿结果
 /// （协议要求结果紧跟发起它的助手消息）。转录的截断与内存历史的截断**必须用同一个函数**，
 /// 否则前端看到的事件流与模型上下文会不一致。
-pub(crate) fn keep_whole_replies(line_reply: &[u64], keep: usize) -> usize {
+pub fn keep_whole_replies(line_reply: &[u64], keep: usize) -> usize {
     let mut keep = keep.min(line_reply.len());
     if keep > 0 && keep < line_reply.len() {
         let losing = line_reply[keep];
@@ -155,34 +155,34 @@ pub struct TurnRun<'a> {
 /// 一个 agent 的会话：模块数不限（形态只在校验与界面标签上区分）。
 pub struct AgentSession {
     /// agent 实例名（说话人标签；重建时也按它命名）。
-    pub(super) id: String,
+    pub(crate) id: String,
     /// 会话参数（派生的前提）：不占对话的位置，每次调用现渲染。
     params: SessionParams,
     /// **只有对话**：user / assistant / tool（+ 核心注入的系统消息）。
     /// 身份与环境不在这里——它们由 params 现渲染（见 docs/architecture/tools-and-roles.md 二）。
-    pub(super) dialogue: Vec<Msg>,
-    pub(super) chat: BoxedChat,
+    pub(crate) dialogue: Vec<Msg>,
+    pub(crate) chat: BoxedChat,
     note: Option<String>,
     /// 工具环境：内置文件工具按该 agent 的沙箱放行 + 该 agent 模块声明的外部工具。
-    pub(super) tools: Option<MemberTools>,
+    pub(crate) tools: Option<MemberTools>,
     /// @ 引用的说明文案（提示词册）；改写在入历史与转录之前做。
-    pub(super) refs: crate::capabilities::prompt::api::RefsPrompts,
+    pub(crate) refs: crate::capabilities::prompt::api::RefsPrompts,
     /// 模型侧运行时文案（提示词册）；本会话要用的那几条。
-    pub(super) tool_texts: crate::capabilities::prompt::api::ToolTexts,
+    pub(crate) tool_texts: crate::capabilities::prompt::api::ToolTexts,
     /// 下一条转录行的 id。
-    pub(super) next_line: u64,
+    pub(crate) next_line: u64,
     /// 每行 id 对应「该行完成时的历史长度」，回档按它截断历史。
-    pub(super) marks: Vec<usize>,
+    pub(crate) marks: Vec<usize>,
     /// 每行属于哪次模型回复（id 相同 = 同一次回复）。回档**按回复原子**截断靠它：
     /// 截在一次回复中间会留下"孤儿工具结果"，而协议要求结果紧跟发起它的那条助手消息。
-    pub(super) line_reply: Vec<u64>,
+    pub(crate) line_reply: Vec<u64>,
     /// 正在落行的回复 id（每轮开始时设置；line() 用它，免得每个调用点都传一遍）。
-    pub(super) cur_reply: u64,
+    pub(crate) cur_reply: u64,
     /// 正在落行的**回合 id**（讨论的回合标记用它；单 agent 回合为 0）。
     cur_turn: u64,
     /// 自动压缩的**字符预算**（≈ 模型窗口 × 设置百分比 × 4）；0 = 关。
     /// 到点就在这一轮开始前先压一次（见 docs/architecture/session-model.md 六）。
-    pub(super) compact_at: usize,
+    pub(crate) compact_at: usize,
 }
 
 impl AgentSession {
@@ -199,7 +199,7 @@ impl AgentSession {
     }
 
     /// @ 改写要用的真实根：由参数派生，不另存一份。
-    pub(super) fn roots(&self) -> crate::capabilities::prompt::api::RefRoots {
+    pub(crate) fn roots(&self) -> crate::capabilities::prompt::api::RefRoots {
         crate::capabilities::prompt::api::RefRoots {
             work: self.params.shared.clone(),
             private: Some(self.params.private.clone()),
@@ -349,7 +349,7 @@ impl AgentSession {
     }
 
     /// 生成一条转录行，并记下它完成时的历史长度（回档按 marks 逐行精确回退）与它属于哪次回复。
-    pub(super) fn line(
+    pub(crate) fn line(
         &mut self,
         line: String,
         kind: &str,
@@ -410,7 +410,7 @@ impl AgentSession {
 /// 流式外送规则：信封之前照常外送，一旦累积文本里出现 "{" 就不再外送后续片段
 /// （模型可能在同一轮里先写正文再发 tool 信封——信封绝不能当正文流上屏）。
 /// 返回（本片可外送的部分, 新的累积文本）。纯函数，便于单测。
-pub(crate) fn stream_piece(acc: &str, piece: &str) -> (String, String) {
+pub fn stream_piece(acc: &str, piece: &str) -> (String, String) {
     let send = if acc.contains('{') {
         String::new()
     } else {

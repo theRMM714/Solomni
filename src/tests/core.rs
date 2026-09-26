@@ -8,16 +8,16 @@ use crate::capabilities::llm::api::{
 };
 use crate::capabilities::prompt::domain::prompt::render;
 use crate::capabilities::registry::api::{Channel, ModelEntry, Provider, Settings};
+use crate::capabilities::session::api::Live;
+use crate::capabilities::session::api::{AgentMeta, SessionMeta};
+use crate::capabilities::session::api::{MemberTools, ModuleTools};
+use crate::capabilities::session::ports::HistoryStore;
 use crate::capabilities::tools::ports::{ToolOutcome, ToolRunner};
 use crate::capabilities::workspace::api::Module;
 use crate::capabilities::workspace::api::{self as exec, Diagnosis, ExecSpec};
 use crate::capabilities::workspace::api::{Library, PackageManifest};
 use crate::capabilities::workspace::ports::{ModuleSource, Workspace};
 use crate::core::engine::{Discussion, Member, TurnOut, MAX_ROUNDS};
-use crate::core::events::Live;
-use crate::core::history::{AgentMeta, SessionMeta};
-use crate::core::ports::HistoryStore;
-use crate::core::session::{MemberTools, ModuleTools};
 use crate::core::{
     AgentInstance, CollabStep, ConfigAgent, Core, Pending, SessionEdit, SessionEvent, WorkMode,
     WorkSpec,
@@ -353,7 +353,10 @@ pub(crate) fn replay_lines(events: &[serde_json::Value]) -> Vec<String> {
                 .cloned()
                 .unwrap_or_default()
         })
-        .map(|l| serde_json::from_value::<crate::core::events::LineView>(l).map(|v| v.render()))
+        .map(|l| {
+            serde_json::from_value::<crate::capabilities::session::api::LineView>(l)
+                .map(|v| v.render())
+        })
         .filter_map(Result::ok)
         .collect()
 }
@@ -373,7 +376,9 @@ pub(crate) fn transcript_rows(events: &[SessionEvent]) -> Vec<(u64, String, bool
 }
 
 /// 事件流里的工具调用视图（tool 行携带的那个）。
-pub(crate) fn tool_views(events: &[SessionEvent]) -> Vec<crate::core::events::ToolCallView> {
+pub(crate) fn tool_views(
+    events: &[SessionEvent],
+) -> Vec<crate::capabilities::session::api::ToolCallView> {
     events
         .iter()
         .flat_map(|e| match e {
@@ -581,7 +586,7 @@ pub(crate) fn collab_rewind_rebuilds_from_transcript_and_resume_waits_at_gate() 
 #[test]
 pub(crate) fn tool_round_reasoning_lands_on_the_tool_line() {
     let prompts = test_prompts();
-    let tool = crate::core::events::ToolCallView {
+    let tool = crate::capabilities::session::api::ToolCallView {
         speaker: "a".to_string(),
         module: String::new(),
         name: "read".to_string(),
@@ -1168,7 +1173,7 @@ pub(crate) fn roster_lists_modules() {
 /// 只是执行阶段的入口从平铺的 Execution::run 换成了链驱动）。
 pub(crate) struct ExecLike {
     pub reports: BTreeMap<String, String>,
-    pub traces: BTreeMap<String, Vec<crate::core::events::ToolCallView>>,
+    pub traces: BTreeMap<String, Vec<crate::capabilities::session::api::ToolCallView>>,
 }
 
 pub(crate) fn run_execution(
@@ -1192,7 +1197,7 @@ pub(crate) fn run_execution(
         );
         let mut views = Vec::new();
         let mut noop = |_c: crate::capabilities::llm::api::Chunk| true;
-        let mut sink = |_e: crate::core::events::SessionEvent| {};
+        let mut sink = |_e: crate::capabilities::session::api::SessionEvent| {};
         let rounds = crate::core::engine::converse_with(
             m.chat.as_mut().expect("测试通道").as_mut(),
             m.tools.as_mut(),
@@ -1201,9 +1206,9 @@ pub(crate) fn run_execution(
             Default::default(),
             &id,
             &mut noop,
-            &mut |v: &crate::core::events::ToolCallView| views.push(v.clone()),
+            &mut |v: &crate::capabilities::session::api::ToolCallView| views.push(v.clone()),
             &mut |_r: &crate::core::engine::Round,
-                  _s: &mut dyn FnMut(crate::core::events::SessionEvent)| {},
+                  _s: &mut dyn FnMut(crate::capabilities::session::api::SessionEvent)| {},
             &mut sink,
             &[],
             false,
@@ -1710,8 +1715,9 @@ pub(crate) fn rewinding_the_main_session_truncates_agent_sessions_by_turn() {
         for ev in evs {
             if let Some(ls) = ev.get("lines").and_then(|l| l.as_array()) {
                 for l in ls {
-                    if let Ok(v) =
-                        serde_json::from_value::<crate::core::events::LineView>(l.clone())
+                    if let Ok(v) = serde_json::from_value::<
+                        crate::capabilities::session::api::LineView,
+                    >(l.clone())
                     {
                         out.push((v.id, v.render(), v.turn));
                     }
@@ -2025,7 +2031,7 @@ pub(crate) fn discussion_member_turn_finalizes_by_round_and_rebuilds_the_same_di
     );
     assert_eq!(tool_turn, said_turn, "同一个回合的行带同一个回合号");
     // ② 实时与重建同口径：把会话从表里丢掉，再取一次 = 按落盘转录重建。
-    let shown = |s: &crate::core::session::AgentSession| {
+    let shown = |s: &crate::capabilities::session::api::AgentSession| {
         s.dialogue()
             .iter()
             .map(|m| format!("{}:{}", m.role, m.content))
@@ -2088,7 +2094,7 @@ pub(crate) fn prose_without_an_envelope_is_not_a_statement() {
     );
 
     // 线格式：只在为真时写出这两个字段
-    let yes = SessionEvent::Transcript(vec![crate::core::events::LineView {
+    let yes = SessionEvent::Transcript(vec![crate::capabilities::session::api::LineView {
         id: 0,
         line: "x".into(),
         system: true,
@@ -2098,7 +2104,7 @@ pub(crate) fn prose_without_an_envelope_is_not_a_statement() {
     .to_json();
     assert_eq!(yes["lines"][0]["system"], serde_json::Value::Bool(true));
     assert_eq!(yes["lines"][0]["degraded"], serde_json::Value::Bool(true));
-    let no = SessionEvent::Transcript(vec![crate::core::events::LineView {
+    let no = SessionEvent::Transcript(vec![crate::capabilities::session::api::LineView {
         id: 0,
         line: "x".into(),
         ..Default::default()
@@ -2140,7 +2146,7 @@ pub(crate) fn execution_review_pass_and_fail_paths() {
         Default::default(),
         Default::default(),
         None,
-        &mut |_e: crate::core::events::SessionEvent| {},
+        &mut |_e: crate::capabilities::session::api::SessionEvent| {},
     );
     assert!(!exec.all_pass(), "有 fail 项就不通过");
 
@@ -2161,7 +2167,7 @@ pub(crate) fn execution_review_pass_and_fail_paths() {
         Default::default(),
         Default::default(),
         None,
-        &mut |_e: crate::core::events::SessionEvent| {},
+        &mut |_e: crate::capabilities::session::api::SessionEvent| {},
     );
     assert!(exec2.all_pass());
 }
@@ -2188,7 +2194,7 @@ pub(crate) fn review_parse_failure_is_conservative_fail() {
         Default::default(),
         Default::default(),
         None,
-        &mut |_e: crate::core::events::SessionEvent| {},
+        &mut |_e: crate::capabilities::session::api::SessionEvent| {},
     );
     assert!(exec.items.is_empty());
     assert!(!exec.all_pass(), "解析失败必须保守判否");
@@ -2432,9 +2438,9 @@ pub(crate) fn same_agent_nodes_serialize_but_different_agents_run_together() {
 /// **落盘策略由会话种类定、判定只有一处**：短暂事件任何会话都不留；系统会话（`#` 开头）一条都不留。
 #[test]
 pub(crate) fn persist_policy_is_decided_by_the_session_kind() {
-    use crate::core::events::SessionEvent;
+    use crate::capabilities::session::api::SessionEvent;
     use crate::core::{is_system_session, PersistPolicy};
-    let line = SessionEvent::Transcript(vec![crate::core::events::LineView::system(
+    let line = SessionEvent::Transcript(vec![crate::capabilities::session::api::LineView::system(
         "",
         "x".to_string(),
     )]);
@@ -4323,7 +4329,7 @@ pub(crate) fn envelope_tool_parses_name_and_args() {
 #[test]
 pub(crate) fn streaming_stops_at_the_envelope_brace() {
     // 正文开头照常流；一旦出现 "{"（信封开始）就不再外送后续片段。
-    use crate::core::session::stream_piece;
+    use crate::capabilities::session::api::stream_piece;
     let (send, acc) = stream_piece("", "我先看看。");
     assert_eq!(send, "我先看看。");
     let (send, acc) = stream_piece(&acc, "{\"type\":\"tool\"}");
@@ -5519,8 +5525,8 @@ pub(crate) fn an_aborted_generation_never_executes_a_repairable_envelope() {
     // 不再发起下一次调用（此前靠工具调用上限兜底，上限删掉后必须自己站住）。
     let events = {
         let cancel = Arc::new(std::sync::atomic::AtomicBool::new(true));
-        let mut noop = |_e: crate::core::events::SessionEvent| {};
-        let mut live = crate::core::events::Live {
+        let mut noop = |_e: crate::capabilities::session::api::SessionEvent| {};
+        let mut live = crate::capabilities::session::api::Live {
             llm: Default::default(),
             cancel,
             emit: &mut noop,
@@ -5798,7 +5804,7 @@ pub(crate) fn discussion_turn_streams_deltas_and_never_leaks_the_envelope() {
         ]),
         seen: Arc::clone(&seen),
     };
-    let mut events: Vec<crate::core::events::SessionEvent> = Vec::new();
+    let mut events: Vec<crate::capabilities::session::api::SessionEvent> = Vec::new();
     let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let prompts = test_prompts();
     let _ = crate::core::engine::Discussion::turn_with(
@@ -5819,7 +5825,9 @@ pub(crate) fn discussion_turn_streams_deltas_and_never_leaks_the_envelope() {
     let kinds: Vec<String> = events
         .iter()
         .filter_map(|e| match e {
-            crate::core::events::SessionEvent::Delta { kind, .. } => Some(kind.clone()),
+            crate::capabilities::session::api::SessionEvent::Delta { kind, .. } => {
+                Some(kind.clone())
+            }
             _ => None,
         })
         .collect();
@@ -5832,7 +5840,9 @@ pub(crate) fn discussion_turn_streams_deltas_and_never_leaks_the_envelope() {
     let text: String = events
         .iter()
         .filter_map(|e| match e {
-            crate::core::events::SessionEvent::Delta { kind, text, .. } if kind == "text" => {
+            crate::capabilities::session::api::SessionEvent::Delta { kind, text, .. }
+                if kind == "text" =>
+            {
                 Some(text.clone())
             }
             _ => None,
@@ -5887,7 +5897,7 @@ pub(crate) fn node_task_is_a_system_line_but_a_user_message() {
     assert!(
         prefix.iter().any(|e| matches!(
             e,
-            crate::core::events::SessionEvent::Transcript(lines)
+            crate::capabilities::session::api::SessionEvent::Transcript(lines)
                 if lines.iter().any(|l| l.system && l.task && l.line.contains("把事做完"))
         )),
         "转录行要带 system + task 标记（界面是系统行，不是用户行）"
@@ -6901,7 +6911,7 @@ pub(crate) fn builtin_tool_book_is_the_one_source_of_names_and_paths() {
     let sb = test_sandbox("a1", &[]);
     let env = crate::capabilities::tools::api::env_block(
         &prompts,
-        &crate::core::session::SessionParams::from_workspace("a1", &sb, &[]),
+        &crate::capabilities::session::api::SessionParams::from_workspace("a1", &sb, &[]),
     );
     assert!(env.contains("【工作环境】"), "{}", env);
     assert!(
@@ -7997,7 +8007,8 @@ pub(crate) fn deleting_a_session_asks_the_fence_to_release_its_grants() {
     );
     let mut core = Core::new(
         Arc::new(InMemorySettings::new()),
-        Arc::clone(&hist) as Arc<dyn crate::core::ports::HistoryStore + Send + Sync>,
+        Arc::clone(&hist)
+            as Arc<dyn crate::capabilities::session::ports::HistoryStore + Send + Sync>,
         Arc::new(InMemoryWorkspace::new()),
         Arc::new(VecSource(vec![module_of("a")])),
         Arc::new(InMemoryPackages::empty()),
@@ -8398,13 +8409,15 @@ pub(crate) fn rewind_never_splits_a_reply() {
 /// 侧栏顺序 = **树序**：父会话紧跟它的子会话（顺序与缩进同源，不会再错位）。
 #[test]
 pub(crate) fn history_list_is_ordered_as_a_tree() {
-    let hv = |name: &str, parent: Option<&str>, ts: i64| crate::core::history::HistoryView {
-        name: name.to_string(),
-        mode: "collab".to_string(),
-        ts,
-        done: false,
-        exec: Default::default(),
-        parent: parent.map(|s| s.to_string()),
+    let hv = |name: &str, parent: Option<&str>, ts: i64| {
+        crate::capabilities::session::api::HistoryView {
+            name: name.to_string(),
+            mode: "collab".to_string(),
+            ts,
+            done: false,
+            exec: Default::default(),
+            parent: parent.map(|s| s.to_string()),
+        }
     };
     // 顶层 A(10) 比 B(5) 新；A 下两个子会话（甲=9 比 乙=8 新）。
     let got = crate::core::tree_order(vec![
@@ -8513,7 +8526,7 @@ pub(crate) fn core_operation_runs_readonly_verification_before_the_op() {
         crate::capabilities::llm::api::CompleteOpts::plain(false),
         &mut |_| true,
         Some(&mut verify),
-        &mut |_e: crate::core::events::SessionEvent| {},
+        &mut |_e: crate::capabilities::session::api::SessionEvent| {},
     )
     .expect("核实之后要能交出方案");
     assert_eq!(out["plan"], "方案");
@@ -8548,7 +8561,7 @@ pub(crate) fn body_json_is_not_a_core_operation() {
         crate::capabilities::llm::api::CompleteOpts::plain(false),
         &mut |_| true,
         None,
-        &mut |_e: crate::core::events::SessionEvent| {},
+        &mut |_e: crate::capabilities::session::api::SessionEvent| {},
     );
     let err = out.expect_err("正文 JSON 不是工具调用，该如实报错");
     assert!(err.contains("没有调用 plan"), "{}", err);

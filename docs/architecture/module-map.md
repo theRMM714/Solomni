@@ -15,19 +15,15 @@
 | `chain.rs` | 任务链的**纯数据 + 纯图算法**（节点、依赖、阶段、就绪与验收判定）。被三个能力共享（`collab` 驱动 / `session` 的线格式携带 / 呈现层渲染），自己零出边（见 [task-chain.md](task-chain.md)） |
 | `jobs.rs` | 生成中作业的**取消表**：核心登记，呈现层只能说「停哪个会话」；「停止」不排队、不碰核心状态，所以生成期间立刻生效 |
 
-## 二、`core/`（抽象与业务，无 IO）
+## 二、`core/`（抽象与业务，无 IO；**正在被搬空**，端口已全部随能力搬出）
 
 | 文件 | 职责 |
 | --- | --- |
 | `mod.rs` | 核心层入口与 `Core` 门面：会话中心、登记处编排、运行包报告 |
-| `ports.rs` | 出站端口 trait 与跨层数据结构（依赖倒置的边界；core 需要什么，由适配器实现）。**无领域语义的机制端口在 `kernel/`；已搬出的能力端口在 `capabilities/<能力>/ports.rs`** |
 | `api.rs` | **入站契约**：五个按角色的能力接口（`SessionOps` / `RegistryOps` / `HistoryOps` / `DiscoveryOps` / `LogOps`）+ `CoreHandle`（核心自有线程、命令/事件）+ `EventBus`；单 agent 与协作长步骤的生成都在**工作线程**上跑（队列只占"取/交"两步） |
-| `events.rs` | 呈现侧契约：`SessionEvent` 与介入请求的词汇（**事实**的线格式定义在这）；转录行 `LineView` 带 `speaker` / `verb` / `kind`，`render()` 是"字段 → 文本"的唯一拼法 |
-| `history.rs` | 会话元信息与历史视图的内存形态 |
 | `collab_state.rs` | 「转录即状态」的协作状态派生（纯函数、可回放） |
 | `collab.rs` | 协作会话状态机与讨论泵（泵只决定"该问谁"、核心驱动成员回合；发言投影、待裁决与工具面发放） |
 | `engine.rs` | 讨论/执行/验收的引擎；**唯一的轮循环** `converse_with`（单 agent / 节点 / 讨论席共用：表态与工具形态、按声明调度的并发、逐轮外送）；**唯一的请求装配点** `assemble`；**回合驱动**（`say` / `dispatch_task` / `discussion_turn` / `continue_reply` / `compact_turn` / `run_rounds` / `run`——批次 12a 从 `session.rs` 搬来，依赖方向才是 `engine → session`）；`build_round_lines`（**唯一的行构造点**） |
-| `session.rs` | 单 agent 会话的**状态与簿记**：**会话参数**（`SessionParams`：身份与环境，每次调用现渲染）与**对话**（`dialogue`：只有发生过的事）分开；转录行带稳定 id；`TurnRun`；**工具面** `MemberTools` / `ModuleTools`（批次 12a 从 `engine.rs` 搬来）；`stream_piece`（流式外送规则）。回合驱动与行构造在 `engine.rs`）；`discussion_turn` = 讨论席那一回合（同一条循环 + 表态 + 逐轮落进它自己的会话） |
 
 ## 三、`adapters/`（机制，实现 core 端口）
 
@@ -80,6 +76,11 @@
 | `tools/domain/schema.rs` | 工具参数契约（**声明在文本层**）：解析/校验/两种渲染 |
 | `tools/domain/roles.rs` | 系统工具与**角色**表（`systools/` 两张表） |
 | `tools/domain/fence.rs` | 一次工具执行的围栏策略（纯数据） |
+| `session/api.rs` | **入站能力面**：`SessionParams` / `AgentSession` / `TurnRun` / 行与事件词汇 / 历史视图的对外名字 |
+| `session/ports.rs` | `HistoryStore`：会话历史的持久化（从 `core/ports.rs` 随能力搬出；`core/ports.rs` 随之消失） |
+| `session/domain/session.rs` | 会话状态与簿记 + 工具面 `MemberTools` / `ModuleTools`（从 `core/session.rs` 搬来） |
+| `session/domain/history.rs` | 会话元信息与历史视图的内存形态（从 `core/history.rs` 搬来） |
+| `session/domain/events.rs` | 呈现侧契约：`SessionEvent` 与介入请求的词汇、转录行 `LineView`（从 `core/events.rs` 搬来） |
 | `llm/domain/envelope.rs` | 发言信封解析（从 `core/envelope.rs` 搬来，纯逻辑）：`ToolInvoke.body` = 信封之后的正文；判定**未闭合 / 裸控制字符 / 语法错 / 字段不合法**四类；未闭合带上 EOF 状态 |
 
 ## 五、`presentation/`（呈现）

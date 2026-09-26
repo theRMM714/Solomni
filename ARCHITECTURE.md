@@ -20,7 +20,7 @@ presentation ──▶ core ◀── adapters
 
 | 层 | 干什么 | 禁令 |
 | --- | --- | --- |
-| `core/` | 定义抽象（`ports.rs`、`api.rs`）+ 编排业务（会话、协作状态机、引擎、信封解析） | 不读文件（`std::fs`）、不发网络（ureq）、不碰 stdin/stdout——一切机制下沉适配层 |
+| `core/` | 定义抽象（`api.rs`）+ 编排业务（协作状态机、引擎）；**正在被搬空**——端口与各能力都已落位 `capabilities/` | 不读文件（`std::fs`）、不发网络（ureq）、不碰 stdin/stdout——一切机制下沉适配层 |
 | `adapters/` | 实现 core 的端口；可引用外部库（ureq / serde_yaml / windows-sys / libc） | 只依赖 core，**永不反向**；不做装配决策 |
 | `presentation/` | 渲染事件、收集输入（CLI 与 Web 并列） | 只依赖 **core 的入站能力面**（`core::api`）；**永不接触端口对象，也拿不到 `Core` 本身** |
 | `capabilities/` | **业务能力**：按业务功能垂直切分。每个能力有 `api`（入站契约）/ `ports`（出站端口）/ `domain`（纯逻辑）/ `detail`（细节实现） | **业务之间只经对方的 `api`**；不反向依赖 `core` / `adapters` / `presentation`（迁移期残留记为基线豁免，见 [docs/architecture/refactor-plan.md](docs/architecture/refactor-plan.md) §四） |
@@ -36,7 +36,7 @@ presentation ──▶ core ◀── adapters
 
 ## 二、端口：只画在 IO 与可替换点上
 
-端口 = `core/ports.rs`（业务/机制边界）与 `kernel/log.rs`（无领域语义的机制）里的 trait。判据只有一条：**这里有 IO，或者这里有可替换的实现**。
+端口 = 各能力的 `capabilities/<能力>/ports.rs`（业务/机制边界）与 `kernel/`（无领域语义的机制）里的 trait。判据只有一条：**这里有 IO，或者这里有可替换的实现**。
 纯逻辑（信封解析、引擎循环、协作状态派生、提示词渲染）**刻意不抽象**——它们没有 trait。
 
 | 端口 | 职责 | 适配层实现 |
@@ -49,7 +49,7 @@ presentation ──▶ core ◀── adapters
 | `PackageSource` | 运行包库来源（扫描依赖文件夹 `runtimes/`）。**已随能力搬出**：`capabilities/workspace/ports.rs` | `FsPackages` |
 | `Workspace` | 一次工作的 work 目录、各 agent 沙箱、文件清单与寻址根。**已随能力搬出**：`capabilities/workspace/ports.rs` | `FsWorkspace` |
 | `SysIo` | 内置文件工具的读写机制（读严格 UTF-8、非法字节如实标注；写一律 UTF-8）。**已随能力搬出**：`capabilities/tools/ports.rs` | `FsSysIo` |
-| `HistoryStore` | 会话历史：一个会话一个目录（meta + 事件流水） | `FsHistory` |
+| `HistoryStore` | 会话历史：一个会话一个目录（meta + 事件流水）。**已随能力搬出**：`capabilities/session/ports.rs` | `FsHistory` |
 | `PromptSource` | 提示词册加载（`prompts/`）。**已随能力搬出 core**：定义在 `capabilities/prompt/ports.rs` | `YamlPrompts` |
 | `ToolRunner` | 外部工具进程（围栏安装、拉起、stdin 送参、超时杀树、截断）。**已随能力搬出**：`capabilities/tools/ports.rs` | `ProcTools`（守门进程 = 本程序的 `--fence-run` 模式） |
 | `EnvelopeRepair`（`capabilities/llm/ports.rs`） | 手写信封不合法时的**无歧义**补救（改了字段含义就是错；拿不准就返回不修） | `UnambiguousRepair`（转义字符串里的裸控制字符 + 补上扫描器算出的收尾括号；断在字符串中间不修，一段回复里起了两段信封不修——补哪一段都是猜；调用方中止的生成一律不修） |
@@ -183,7 +183,7 @@ session/<工作名>/
 测试的层级、替身语义、端口契约矩阵、质量门禁、缺口账与执行入口全部由 [TESTING.md](TESTING.md)（门户与路由）
 与 `docs/testing/` 下的细则规定；本节只列架构对可测性的硬约束，不重复测试规范。
 
-- 任意需要 IO 或存在可替换实现的机制必须通过 `core/ports.rs`（**无领域语义的机制端口在 `kernel/`**）中的端口注入；core 不直接依赖真实模型、网络、文件系统、时钟、随机数或外部进程。
+- 任意需要 IO 或存在可替换实现的机制必须通过 `capabilities/<能力>/ports.rs`（**无领域语义的机制端口在 `kernel/`**）中的端口注入；core 不直接依赖真实模型、网络、文件系统、时钟、随机数或外部进程。
 - 纯逻辑（信封解析、协作状态派生、提示词渲染、路径寻址等）不为测试强行增加 trait，直接以纯函数测试；端口只放在真实边界和确有替换价值的点上。
 - 端口的输入、输出、错误、取消、超时、重复调用和资源清理语义属于架构契约：生产适配器与测试替身必须遵守同一份契约。
 - 端口不能为了方便测试暴露生产实现的内部状态；需要观察交互时，通过测试替身的记录能力或公开的行为结果观察。

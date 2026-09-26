@@ -6,30 +6,26 @@ pub mod api;
 pub mod collab;
 pub mod collab_state;
 pub mod engine;
-pub mod events;
-pub mod history;
-pub mod ports;
-pub mod session;
 
-pub use events::{Pending, SessionEvent};
-// 测试用同步入口的签名要它；生产路径的 Live 构造在 api.rs（那里直接引 events::Live）。
+pub use crate::capabilities::session::api::{Pending, SessionEvent};
+// 测试用同步入口的签名要它；生产路径的 Live 构造在 api.rs（那里直接引 crate::capabilities::session::api::Live）。
 pub use crate::capabilities::llm::api::{ChatGateway, ModelCatalog};
 pub use crate::capabilities::prompt::ports::PromptSource;
 pub use crate::capabilities::registry::ports::SettingsStore;
+#[cfg(test)]
+pub(crate) use crate::capabilities::session::api::Live;
+pub use crate::capabilities::session::ports::HistoryStore;
 pub use crate::capabilities::tools::ports::{SysIo, ToolRunner};
 pub use crate::capabilities::workspace::ports::{ModuleSource, PackageSource, Workspace};
-#[cfg(test)]
-pub(crate) use events::Live;
-pub use ports::HistoryStore;
 
 use crate::capabilities::llm::api::Msg;
 use crate::capabilities::prompt::api::Prompts;
 use crate::capabilities::registry::api::{AppSettings, Channel, Settings};
+use crate::capabilities::session::api::{AgentMeta, HistoryView, SessionMeta};
 use crate::capabilities::tools::api::SystemTools;
 use crate::capabilities::workspace::api::Module;
 use crate::core::collab::CollabSession;
 use crate::core::engine::AfterTurn;
-use crate::core::history::{AgentMeta, HistoryView, SessionMeta};
 use crate::kernel::log::Log;
 use crate::kernel::types::SessionId;
 use std::collections::{BTreeMap, HashMap};
@@ -40,7 +36,7 @@ use std::sync::Arc;
 /// 却把"会话本体可直接移动"这个形状改掉——有意不装箱（见 docs/testing/quality-isolation.md 的 allow 清单）。
 #[allow(clippy::large_enum_variant)]
 pub enum Session {
-    Single(session::AgentSession),
+    Single(crate::capabilities::session::api::AgentSession),
     Collab(CollabSession),
 }
 
@@ -281,7 +277,7 @@ pub(crate) enum Prepared {
     /// 可以跑：会话已从核心表取出，由工作线程独占。
     Run {
         /// 装箱：这个变体比其它两个大得多（会话本体），而它本来就是**一次性移交**给工作线程的。
-        session: Box<session::AgentSession>,
+        session: Box<crate::capabilities::session::api::AgentSession>,
         /// 本回合的**身份块**：按当前提示词册与登记处现渲染（不进会话的消息列表）。
         identity: String,
         /// 生成前要先给用户的事件（例如工具形态变更的提示）。
@@ -447,7 +443,10 @@ impl Core {
 
     /// 把单 agent 会话**交给工作线程**（核心表里留"生成中"）。
     /// 取出的窗口内，核心队列是空的——读接口与其它会话的命令因此照常。
-    pub(crate) fn take_single(&mut self, sid: &str) -> Result<session::AgentSession, String> {
+    pub(crate) fn take_single(
+        &mut self,
+        sid: &str,
+    ) -> Result<crate::capabilities::session::api::AgentSession, String> {
         if self.running.contains(sid) {
             return Err(Self::running_refusal(sid));
         }
@@ -619,7 +618,7 @@ impl Core {
                 // 两个出口（流式短暂事件 / 定稿事件）都要收进同一份事件流：用 RefCell 共享。
                 let out = std::cell::RefCell::new(prefix);
                 {
-                    let mut live = crate::core::events::Live {
+                    let mut live = crate::capabilities::session::api::Live {
                         llm,
                         cancel,
                         emit: &mut |ev: SessionEvent| out.borrow_mut().push(ev),
@@ -679,7 +678,7 @@ impl Core {
             let (ran, notes) = {
                 // 两个出口（流式短暂事件 / 定稿事件）都收进同一份事件流。
                 let notes = std::cell::RefCell::new(Vec::new());
-                let mut live = crate::core::events::Live {
+                let mut live = crate::capabilities::session::api::Live {
                     llm: crate::capabilities::llm::api::LlmOpts {
                         stream: opts.stream,
                         timeout_secs: opts.timeout_secs,
@@ -701,9 +700,9 @@ impl Core {
                 Ok(t) => t,
                 Err(err) => {
                     let note = if cancel.load(std::sync::atomic::Ordering::Relaxed) {
-                        crate::core::events::stopped_note()
+                        crate::capabilities::session::api::stopped_note()
                     } else {
-                        crate::core::events::interrupted_note(&err)
+                        crate::capabilities::session::api::interrupted_note(&err)
                     };
                     out.push(SessionEvent::Notice(note));
                     break;
@@ -973,7 +972,11 @@ impl Core {
     /// 生成结束**交回**：重新插入 + 解除"生成中"。
     /// 转录**已由工作线程按"一轮一次"的粒度增量落盘**（见 `Persister`），这里不重复落。
     /// 返回：若这是个**子会话**，返回它的父会话（调用方据此**叫醒父会话**推进任务链）。
-    pub(crate) fn put_single(&mut self, sid: &str, s: session::AgentSession) -> Option<String> {
+    pub(crate) fn put_single(
+        &mut self,
+        sid: &str,
+        s: crate::capabilities::session::api::AgentSession,
+    ) -> Option<String> {
         self.running.remove(sid);
         self.sessions.insert(sid.to_string(), Session::Single(s));
         // 子会话完成 = 它的节点交付了：标记**正跑在这个会话里的那个节点**（产出即交付物），并交回父会话。
@@ -995,7 +998,7 @@ impl Core {
     pub(crate) fn put_single_recorded(
         &mut self,
         sid: &str,
-        s: session::AgentSession,
+        s: crate::capabilities::session::api::AgentSession,
         events: &[SessionEvent],
     ) {
         self.running.remove(sid);
@@ -1961,8 +1964,8 @@ impl Core {
         unavailable: BTreeMap<String, Vec<String>>,
         net: bool,
         mode: crate::capabilities::registry::api::ToolMode,
-    ) -> crate::core::session::MemberTools {
-        crate::core::session::MemberTools {
+    ) -> crate::capabilities::session::api::MemberTools {
+        crate::capabilities::session::api::MemberTools {
             mode,
             modules: engine::tool_table(modules),
             observations: crate::capabilities::tools::api::Observations::default(),
@@ -2026,7 +2029,10 @@ impl Core {
         sb: &crate::capabilities::workspace::api::Sandbox,
         unavailable: BTreeMap<String, Vec<String>>,
         net: bool,
-    ) -> (session::AgentSession, Vec<SessionEvent>) {
+    ) -> (
+        crate::capabilities::session::api::AgentSession,
+        Vec<SessionEvent>,
+    ) {
         let (chat, note) = self.gateway.member_channel(channel.as_ref(), &a.name);
         // 形态按登记处解析；没有真实通道（演示回落）只能是手写信封——演示通道不会原生调用。
         let mode = if channel.is_some() {
@@ -2047,9 +2053,10 @@ impl Core {
             ),
         );
         // **会话参数**：身份块每回合由它现渲染（不存进消息列表）。
-        let params = session::SessionParams::from_workspace(&a.name, sb, modules);
+        let params =
+            crate::capabilities::session::api::SessionParams::from_workspace(&a.name, sb, modules);
         let tools = self.tools_env(modules, sb, unavailable, net, mode);
-        let mut s = session::AgentSession::new(
+        let mut s = crate::capabilities::session::api::AgentSession::new(
             &a.name,
             params,
             chat,
@@ -2730,7 +2737,9 @@ impl Core {
                     crate::capabilities::registry::api::ToolMode::Envelope
                 };
                 // **会话参数**：与建立时同一个口径（身份块每回合现渲染，不进消息列表）。
-                let params = session::SessionParams::from_workspace(&a.name, &sb, &modules);
+                let params = crate::capabilities::session::api::SessionParams::from_workspace(
+                    &a.name, &sb, &modules,
+                );
                 let (chat, note) = self.gateway.member_channel(channel.as_ref(), &a.name);
                 // 先把转录行按顺序摊平：分组判断要看「下一行是不是 tool 行」。
                 let mut rows: Vec<&serde_json::Value> = Vec::new();
@@ -2798,7 +2807,7 @@ impl Core {
                                     .filter(|s| !s.is_empty())
                             })
                             .unwrap_or_default();
-                        let views: Vec<crate::core::events::ToolCallView> = group
+                        let views: Vec<crate::capabilities::session::api::ToolCallView> = group
                             .iter()
                             .filter_map(|t| t.get("tool").cloned())
                             .filter_map(|t| serde_json::from_value(t).ok())
@@ -2830,18 +2839,20 @@ impl Core {
                 let mut tools = self.tools_env(&modules, &sb, unavailable, meta.exec.net, mode);
                 // 回复 id 跨重启单调：从转录里的最大值续号，否则新回复会与旧回复并成一组。
                 tools.reply_seq = crate::core::engine::max_reply(events);
-                Ok(Session::Single(session::AgentSession::restore(
-                    &a.name,
-                    params,
-                    history,
-                    marks,
-                    line_reply,
-                    chat,
-                    note,
-                    Some(tools),
-                    self.prompts.core.refs.clone(),
-                    self.prompts.core.tool_texts.clone(),
-                )))
+                Ok(Session::Single(
+                    crate::capabilities::session::api::AgentSession::restore(
+                        &a.name,
+                        params,
+                        history,
+                        marks,
+                        line_reply,
+                        chat,
+                        note,
+                        Some(tools),
+                        self.prompts.core.refs.clone(),
+                        self.prompts.core.tool_texts.clone(),
+                    ),
+                ))
             }
             other => Err(format!("未知会话形态：{}（只认 single / collab）", other)),
         }
@@ -3002,7 +3013,7 @@ fn cut_before_line(events: &[serde_json::Value], keep: u64) -> Vec<serde_json::V
     out
 }
 
-/// 把"保留 id < keep"对齐到**回复边界**（见 session::keep_whole_replies）：
+/// 把"保留 id < keep"对齐到**回复边界**（见 crate::capabilities::session::api::keep_whole_replies）：
 /// keep 落在某次回复内部时退到该回复第一行之前，返回新的 keep（没有这样的行 = u64::MAX，即不截）。
 fn align_keep(events: &[serde_json::Value], keep: u64) -> u64 {
     let rows: Vec<&serde_json::Value> = events
@@ -3021,7 +3032,7 @@ fn align_keep(events: &[serde_json::Value], keep: u64) -> u64 {
         })
         .unwrap_or(rows.len());
     let replies: Vec<u64> = rows.iter().map(|l| line_reply_of(l)).collect();
-    let aligned = crate::core::session::keep_whole_replies(&replies, idx);
+    let aligned = crate::capabilities::session::api::keep_whole_replies(&replies, idx);
     rows.get(aligned)
         .and_then(|l| l.get("id").and_then(|i| i.as_u64()))
         .unwrap_or(u64::MAX)
@@ -3041,7 +3052,7 @@ fn line_reply_of(l: &serde_json::Value) -> u64 {
 /// 找最后一条满足条件的转录行的 id（按**结构化字段**判，不匹配正文）。
 fn find_line_id(
     events: &[serde_json::Value],
-    pick: impl Fn(&crate::core::events::LineView) -> bool,
+    pick: impl Fn(&crate::capabilities::session::api::LineView) -> bool,
 ) -> Option<u64> {
     let mut found = None;
     for ev in events {
@@ -3052,7 +3063,9 @@ fn find_line_id(
             continue;
         };
         for l in lines {
-            if let Ok(v) = serde_json::from_value::<crate::core::events::LineView>(l.clone()) {
+            if let Ok(v) =
+                serde_json::from_value::<crate::capabilities::session::api::LineView>(l.clone())
+            {
                 if pick(&v) {
                     found = Some(v.id);
                 }

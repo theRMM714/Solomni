@@ -10,5 +10,6 @@
 pub mod llm;
 pub mod prompt;
 pub mod registry;
+pub mod session;
 pub mod tools;
 pub mod workspace;

@@ -10,9 +10,11 @@ use crate::capabilities::llm::api::BoxedChat;
 use crate::capabilities::llm::api::{self as envelope, ToolInvoke, Verb};
 use crate::capabilities::llm::api::{Chat, Chunk, CompleteOpts, Msg};
 use crate::capabilities::prompt::api::Prompts;
+use crate::capabilities::session::api::{
+    stream_piece, AgentSession, MemberTools, ModuleTools, TurnRun,
+};
+use crate::capabilities::session::api::{LineView, Live, SessionEvent, ToolCallView};
 use crate::capabilities::tools::ports::ToolOutcome;
-use crate::core::events::{LineView, Live, SessionEvent, ToolCallView};
-use crate::core::session::{stream_piece, AgentSession, MemberTools, ModuleTools, TurnRun};
 use serde::Deserialize;
 use std::collections::BTreeMap;
 
@@ -71,7 +73,7 @@ pub fn tool_table(
         .collect()
 }
 
-impl crate::core::session::MemberTools {
+impl crate::capabilities::session::api::MemberTools {
     /// 取下一个回复 id（一次模型回复调用一次）。
     fn next_reply(&mut self) -> u64 {
         self.reply_seq += 1;
@@ -474,7 +476,7 @@ fn dispatch_external(ctx: &MemberTools, inv: &ToolInvoke) -> (String, ToolOutcom
 pub struct Member {
     pub id: String,
     /// 会话参数：身份块由它**每回合现渲染**（不给成员存一份渲染好的文本）。
-    pub params: crate::core::session::SessionParams,
+    pub params: crate::capabilities::session::api::SessionParams,
     /// 该席位的通道形态（登记处派生）：身份块里的调用约定按它渲染。
     pub mode: crate::capabilities::registry::api::ToolMode,
     /// 内存通道：**只有测试用**（生产里回合跑在各自的 agent 会话里，见 session-model.md 二之二）。
@@ -490,7 +492,7 @@ impl Member {
     /// 生产构造：成员不持有通道（驱动权在核心，回合在各自的会话里跑）。
     pub fn plain(
         id: &str,
-        params: crate::core::session::SessionParams,
+        params: crate::capabilities::session::api::SessionParams,
         mode: crate::capabilities::registry::api::ToolMode,
     ) -> Member {
         Member {
@@ -509,7 +511,7 @@ impl Member {
     #[cfg(test)]
     pub fn new(
         id: &str,
-        params: crate::core::session::SessionParams,
+        params: crate::capabilities::session::api::SessionParams,
         mode: crate::capabilities::registry::api::ToolMode,
         chat: BoxedChat,
     ) -> Member {
@@ -674,7 +676,7 @@ impl Discussion {
     /// 一个成员回合（**关联函数**：chat/tools 由调用方给）：**薄适配**——把本席位自己的通道交给
     /// 单 agent / 节点 / 讨论席**共用的那一条轮循环**（engine::converse_with），装配前把这一回合的
     /// 工具面（角色表发放）装进工具环境，跑完从末轮取表态。
-    /// 生产里成员回合跑在各自的 agent 会话里（session::AgentSession::discussion_turn）——两条路同一条循环。
+    /// 生产里成员回合跑在各自的 agent 会话里（crate::capabilities::session::api::AgentSession::discussion_turn）——两条路同一条循环。
     /// 允许**先核实**（只读工具），最后用**动词**表态；其余工具一律**如实拒绝**（讨论回合拿不到干活的手段）。
     #[cfg(test)]
     #[allow(clippy::too_many_arguments)]
@@ -725,7 +727,7 @@ impl Discussion {
                 speaker, texts, round, false, &next_line, None,
             ));
         };
-        // **逐片外送**：讨论席的发言也要能看到"正在生成"（信封不能当正文流上屏，见 session::stream_piece）。
+        // **逐片外送**：讨论席的发言也要能看到"正在生成"（信封不能当正文流上屏，见 crate::capabilities::session::api::stream_piece）。
         let mut acc = String::new();
         let mut on_chunk = |chunk: Chunk| {
             let mut kind = "text";
@@ -736,7 +738,7 @@ impl Discussion {
                     kind = "start";
                 }
                 Chunk::Text(t) => {
-                    let (send, next) = crate::core::session::stream_piece(&acc, t);
+                    let (send, next) = crate::capabilities::session::api::stream_piece(&acc, t);
                     piece = send;
                     acc = next;
                 }
@@ -1472,10 +1474,10 @@ fn core_rows(
     view: ToolCallView,
     reasoning: &str,
     text: &str,
-) -> Vec<crate::core::events::LineView> {
+) -> Vec<crate::capabilities::session::api::LineView> {
     let mut rows = Vec::new();
     if !text.trim().is_empty() {
-        rows.push(crate::core::events::LineView {
+        rows.push(crate::capabilities::session::api::LineView {
             speaker: "核心".to_string(),
             verb: String::new(),
             kind: "msg".to_string(),
@@ -1483,7 +1485,7 @@ fn core_rows(
             ..Default::default()
         });
     }
-    rows.push(crate::core::events::LineView {
+    rows.push(crate::capabilities::session::api::LineView {
         speaker: "核心".to_string(),
         verb: tool.to_string(),
         kind: "tool".to_string(),
@@ -1545,7 +1547,7 @@ pub(crate) fn core_operation(
     // 没有这条，模型一想核实就被判"没调用 X"→整步中断（真机上就是这么卡死的）。
     let mut msgs = msgs.to_vec();
     let mut verify = verify;
-    // **核心的正文/思维链也逐片上屏**：与成员、单 agent 同一条规则（信封之前照常外送，见 session::stream_piece），
+    // **核心的正文/思维链也逐片上屏**：与成员、单 agent 同一条规则（信封之前照常外送，见 crate::capabilities::session::api::stream_piece），
     // 不再整块蹦出来。取消仍由调用方的 keep 说了算——这里只是把它包一层，顺手把片段推出去。
     let mut acc = String::new();
     loop {
@@ -1559,7 +1561,7 @@ pub(crate) fn core_operation(
                         kind = "start";
                     }
                     crate::capabilities::llm::api::Chunk::Text(t) => {
-                        let (send, next) = crate::core::session::stream_piece(&acc, t);
+                        let (send, next) = crate::capabilities::session::api::stream_piece(&acc, t);
                         piece = send;
                         acc = next;
                     }
@@ -1878,7 +1880,7 @@ pub(crate) fn converse_with(
     verbs: bool,
 ) -> Vec<Round> {
     // 身份 + 本回合工具 + 对话 + 本回合提示：**唯一的装配点**。
-    // 工具面取自这一席位（执行席的表现 + 它自己模块的工具）；讨论席的动词面也在这里（见 session::TurnRun）。
+    // 工具面取自这一席位（执行席的表现 + 它自己模块的工具）；讨论席的动词面也在这里（见 crate::capabilities::session::api::TurnRun）。
     let (ids, with_modules) = match tools.as_ref() {
         Some(ctx) => (ctx.allowed.clone(), ctx.with_modules),
         None => (Vec::new(), false),
@@ -2375,7 +2377,7 @@ pub(crate) fn converse_with(
 // 会话本身只留状态与簿记。反过来（会话驱动引擎）会形成 `engine ⇄ session` 环。
 // 字段以 `pub(super)` 开放：两者同在 `core` 之下，这是有意的取舍——驱动必须能读写会话状态。
 // 见 docs/architecture/refactor-plan.md §4.2 批次 12。
-impl crate::core::session::AgentSession {
+impl crate::capabilities::session::api::AgentSession {
     /// 压缩回合：把提示词追加到历史之后、**只声明 compact 工具**，跑一次模型；拿到摘要就返回。
     /// 两条通道都认：native 从结构化槽位取，信封通道从正文里的信封取（与讨论回合同口径）。
     pub fn compact_turn(
@@ -2647,9 +2649,9 @@ impl crate::core::session::AgentSession {
             }
         }
         if let Some(err) = error.borrow().as_ref() {
-            sink(SessionEvent::Notice(crate::core::events::interrupted_note(
-                err,
-            )));
+            sink(SessionEvent::Notice(
+                crate::capabilities::session::api::interrupted_note(err),
+            ));
         }
         if stopped {
             sink(SessionEvent::Notice(

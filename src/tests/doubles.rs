@@ -15,13 +15,13 @@ use crate::capabilities::prompt::api::Prompts;
 use crate::capabilities::prompt::ports::PromptSource;
 use crate::capabilities::registry::api::{Channel, ModelEntry, Provider, Settings};
 use crate::capabilities::registry::ports::SettingsStore;
+use crate::capabilities::session::api::Live;
+use crate::capabilities::session::api::{HistoryView, SessionMeta};
+use crate::capabilities::session::ports::HistoryStore;
 use crate::capabilities::tools::ports::{FileRead, SysIo, ToolRunner};
 use crate::capabilities::workspace::api::{Library, PackageManifest};
 use crate::capabilities::workspace::api::{Module, ModuleManifest};
 use crate::capabilities::workspace::ports::{ModuleSource, PackageSource, Workspace};
-use crate::core::events::Live;
-use crate::core::history::{HistoryView, SessionMeta};
-use crate::core::ports::HistoryStore;
 use crate::core::{AgentInstance, Core, SessionEvent, WorkMode, WorkSpec};
 use crate::kernel::types::Tier;
 use std::collections::BTreeMap;
@@ -450,8 +450,12 @@ pub(crate) fn test_sandbox(
 }
 
 /// 测试用会话参数：agent 名 + 该 agent 的沙箱（无模块）。身份块由它现渲染。
-pub(crate) fn test_params(agent: &str) -> crate::core::session::SessionParams {
-    crate::core::session::SessionParams::from_workspace(agent, &test_sandbox(agent, &[]), &[])
+pub(crate) fn test_params(agent: &str) -> crate::capabilities::session::api::SessionParams {
+    crate::capabilities::session::api::SessionParams::from_workspace(
+        agent,
+        &test_sandbox(agent, &[]),
+        &[],
+    )
 }
 
 /// 测试用工具说明块素材（patch 语法 + 给定的模块工具）。

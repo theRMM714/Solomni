@@ -13,9 +13,9 @@
 
 use crate::capabilities::registry::api::AgentView;
 use crate::capabilities::registry::api::{AppSettings, ModelView, ProviderView};
+use crate::capabilities::session::api::{HistoryView, SessionMeta};
+use crate::capabilities::session::api::{Live, SessionEvent};
 use crate::capabilities::workspace::api::Roster;
-use crate::core::events::{Live, SessionEvent};
-use crate::core::history::{HistoryView, SessionMeta};
 use crate::core::Prepared;
 use crate::core::{
     AgentMeta, AgentSuggestion, CollabStep, Core, FilesView, Pending, RuntimeReport, SessionConfig,
@@ -578,17 +578,17 @@ impl CoreHandle {
                 let mut emit = {
                     let bus = Arc::clone(&bus);
                     let sid = child_sid.clone();
-                    move |ev: crate::core::events::SessionEvent| {
+                    move |ev: crate::capabilities::session::api::SessionEvent| {
                         bus.push(&sid, std::slice::from_ref(&ev));
                     }
                 };
-                let mut live = crate::core::events::Live {
+                let mut live = crate::capabilities::session::api::Live {
                     llm,
                     cancel: Arc::clone(&cancel),
                     emit: &mut emit,
                 };
                 // 权威行与通知也进它自己的台，并在产出的当下落盘（重建与实时同源）。
-                let mut sink = |ev: crate::core::events::SessionEvent| {
+                let mut sink = |ev: crate::capabilities::session::api::SessionEvent| {
                     bus.push(&child_sid, std::slice::from_ref(&ev));
                     if let Some(warn) = persister.persist(std::slice::from_ref(&ev)) {
                         bus.push(
@@ -620,9 +620,9 @@ impl CoreHandle {
                 child_bus.push(&child, &[SessionEvent::Working { agent: None }]);
                 child_bus.push(
                     &child,
-                    &[SessionEvent::Notice(crate::core::events::interrupted_note(
-                        "成员线程崩溃",
-                    ))],
+                    &[SessionEvent::Notice(
+                        crate::capabilities::session::api::interrupted_note("成员线程崩溃"),
+                    )],
                 );
                 return Err("成员线程崩溃：该会话已按落盘转录保留".to_string());
             }
@@ -641,9 +641,9 @@ impl CoreHandle {
                 // 否则那个标签页的光标一直挂着、按钮一直停在「停止」。
                 let stopped = req.cancel.load(std::sync::atomic::Ordering::Relaxed);
                 let why = if stopped {
-                    crate::core::events::stopped_note()
+                    crate::capabilities::session::api::stopped_note()
                 } else {
-                    crate::core::events::interrupted_note(&err)
+                    crate::capabilities::session::api::interrupted_note(&err)
                 };
                 child_bus.push(&child, &[SessionEvent::Working { agent: None }]);
                 child_bus.push(&child, &[SessionEvent::Notice(why)]);
@@ -655,7 +655,7 @@ impl CoreHandle {
         // "正在工作"、按钮一直停在「停止」。
         child_bus.push(
             &child,
-            &[crate::core::events::SessionEvent::Working { agent: None }],
+            &[crate::capabilities::session::api::SessionEvent::Working { agent: None }],
         );
         self.call({
             let name = child.clone();
@@ -715,10 +715,10 @@ impl CoreHandle {
                         Ok(())
                     }
                 })?;
-                let note = SessionEvent::Notice(crate::core::events::interrupted_note(&format!(
-                    "压缩没成功：{}",
-                    err
-                )));
+                let note =
+                    SessionEvent::Notice(crate::capabilities::session::api::interrupted_note(
+                        &format!("压缩没成功：{}", err),
+                    ));
                 let head = bus.push(sid, std::slice::from_ref(&note));
                 return Ok(Advance { head });
             }
@@ -857,7 +857,7 @@ impl CoreHandle {
                             // 主会话据此显示"某某正在工作"（按钮切换与占位动画都读它）。
                             bus.push(
                                 &sid,
-                                &[crate::core::events::SessionEvent::Working {
+                                &[crate::capabilities::session::api::SessionEvent::Working {
                                     agent: Some(agent_name.clone()),
                                 }],
                             );
@@ -865,7 +865,7 @@ impl CoreHandle {
                             // （或者按钮一直停在「停止」）。收尾那条在成员回合的收尾处推。
                             bus.push(
                                 &format!("{}--{}", sid, agent_name),
-                                &[crate::core::events::SessionEvent::Working {
+                                &[crate::capabilities::session::api::SessionEvent::Working {
                                     agent: Some(agent_name.clone()),
                                 }],
                             );
@@ -941,7 +941,7 @@ impl CoreHandle {
                         // 下一次问谁时会再推一条带名字的，所以这里只需要收尾这一条。
                         bus.push(
                             &sid,
-                            &[crate::core::events::SessionEvent::Working { agent: None }],
+                            &[crate::capabilities::session::api::SessionEvent::Working { agent: None }],
                         );
                     }
                     (c, seq)
