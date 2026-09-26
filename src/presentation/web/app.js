@@ -2100,14 +2100,18 @@ function renderDone(s) {
       doneBox.appendChild(card);
       continue;
     }
+    // **空正文行不画空盒子**：一轮只有思维链、没有正文也没有工具调用时，落下来的行正文就是空的；
+    // 照常画说话人 + 空正文出来，就是一个空的"谁在说"框（真机上看到的空块）。这种行只画思维链。
+    const bodyless = !String(l.text == null ? '' : l.text).trim();
+    if (bodyless && !l.reasoning) continue;
     const el = document.createElement('div');
     el.className = 'line ' + l.cls;
-    if (l.who) {
+    if (l.who && !bodyless) {
       const w = document.createElement('span'); w.className = 'who'; w.textContent = l.who; el.appendChild(w);
     }
     // 思维链在回答之上（先想后说）；默认折叠，点开状态会被记住（键 = L<行 id>）。
     if (l.reasoning && state.settings.show_reasoning) el.appendChild(reasoningBlock(l.reasoning, s, 'L' + l.id));
-    appendBody(el, l.cls, l.text);
+    if (!bodyless) appendBody(el, l.cls, l.text);
     // 删除：删掉这一行和它之后的所有消息（服务端按行 id 重建，前端整体替换）。
     if (typeof l.id === 'number') el.appendChild(rewindButton(l.id));
     // 撤回该同意：转录追加一条撤回行，继续时按剩余转录重新判定。
