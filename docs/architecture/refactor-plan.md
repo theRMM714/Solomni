@@ -148,7 +148,7 @@ capabilities/<name>/
 | **registry** | 领域 | **已落位** `capabilities/registry/`（`providers` + `agents`） | 四份 yaml 的内存形态 | `SettingsStore` | **已完成**（批次 8） |
 | **workspace** | 领域 | **已落位** `capabilities/workspace/`（`module` + `packages` + `exec` + `workspace` 沙箱数据） | 清单快照、执行计划、沙箱寻址 | `ModuleSource` `PackageSource` `Workspace` | **已完成**（批次 10） |
 | **rewind** | 协调 | 散布 5 处（见 §3.6） | 只持自己的日志，**不持会话数据** | — | 未开始 |
-| **collab** | 协调 | `core/collab.rs`、`collab_state.rs`、`engine.rs`（任务链的**数据与图算法**已落位 `kernel/chain.rs`，见批次 5） | 讨论游标、任务链、待裁决 | — | 未开始 |
+| **collab** | 协调 | **已落位** `capabilities/collab/`（`collab` + `collab_state` + `engine`）（任务链的**数据与图算法**已落位 `kernel/chain.rs`，见批次 5） | 讨论游标、任务链、待裁决 | — | **已完成**（批次 14） |
 | **presentation** | 呈现 | `presentation/` | 界面状态 | — | 未开始 |
 
 ### 3.2 kernel（机制型内核）
@@ -348,7 +348,7 @@ tools 自持一个就等于绕过状态所有权——**直接写别人的文件
 | --- | --- |
 | `core/mod.rs` | `rewind`、`turn_of_line`、`last_line_within`、`rewind_children`、`truncate_events`、`cut_before_line`、`align_keep`、`line_reply_of`、`find_line_id`（≈250 行） |
 | `capabilities/session/domain/session.rs` | `rewind`、`keep_whole_replies`，及 `marks`/`line_reply`/`next_line` 字段与 15 处簿记 |
-| `core/collab_state.rs` | `tool_runs()`——算"删掉了几次工具执行" |
+| `capabilities/collab/domain/collab_state.rs` | `tool_runs()`——算"删掉了几次工具执行" |
 | `capabilities/session/domain/history.rs` | append-only 的 `rewind` 记录协议 |
 | `core/mod.rs` | `rebuild_session`（177 行）——协作会话回档走整段重建 |
 
@@ -439,7 +439,7 @@ kernel       ──▶ （无）
 | **11** | **tools 能力落位**：`capabilities/tools/`（`systool` / `patch` / `schema` / `roles` / `fence`）+ 三个端口；钉死 §3.4（实现锁内部、机制留端口、产出事实不落盘） | 10 | **已完成**（环 12 → **8**；批次 10 的两条反向边自动清零；1 条新反向边 `→ core::session`；`core/ports.rs` 只剩 `HistoryStore`） |
 | **12** | **session 能力落位**：`capabilities/session/`（`session` + `history` + `events`）+ `HistoryStore`。**12a** 循环反转切掉 `engine ⇄ session`；**12b** 提取能力 | 11 | **已完成**（**反向边基线清空**——没有任何能力再依赖 `core`；环 7 → **5**，且 5 个节点全是能力、`core` 完全脱环；`core/ports.rs` 消失） |
 | **13** | **rewind**（协调型；`marks` 归属方案 A） | 12 | 未开始 |
-| **14** | **collab** | 13 | 未开始 |
+| **14** | **collab 能力落位**：`capabilities/collab/`（`collab` + `collab_state` + `engine`）。**执行顺序调整**：先做 14 再做 13——`rewind` 的回档重建要同时碰 `session` 与 `collab` 两侧，两边就位后才切得干净（已获用户同意） | 12 | **已完成**（环不变——`capabilities/collab` **不在环里**：没有任何它依赖的能力反过来依赖它；`core/` 只剩 `api.rs` + `mod.rs`） |
 | **15** | **presentation 收口 + 前端分区**：只 `use` 各业务 `api`；`app.js` 分区 | 14 | 未开始 |
 
 **豁免清零判据**：`tests/dependency-baseline.json` 的**三个数组全部清空**（`reverse` / `presentation` / `coreCycles`），

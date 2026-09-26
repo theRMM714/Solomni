@@ -3,6 +3,7 @@
 
 use super::doubles::*;
 use crate::adapters::fake_chat::FakeChat;
+use crate::capabilities::collab::domain::engine::{Discussion, Member, TurnOut, MAX_ROUNDS};
 use crate::capabilities::llm::api::{
     BoxedChat, Chat, ChatGateway, Chunk, CompleteOpts, Completion, Msg,
 };
@@ -17,7 +18,6 @@ use crate::capabilities::workspace::api::Module;
 use crate::capabilities::workspace::api::{self as exec, Diagnosis, ExecSpec};
 use crate::capabilities::workspace::api::{Library, PackageManifest};
 use crate::capabilities::workspace::ports::{ModuleSource, Workspace};
-use crate::core::engine::{Discussion, Member, TurnOut, MAX_ROUNDS};
 use crate::core::{
     AgentInstance, CollabStep, ConfigAgent, Core, Pending, SessionEdit, SessionEvent, WorkMode,
     WorkSpec,
@@ -512,7 +512,7 @@ pub(crate) fn rebuilt_context_keeps_tool_result() {
 
 #[test]
 pub(crate) fn collab_state_derive_and_withdraw() {
-    use crate::core::collab_state::derive;
+    use crate::capabilities::collab::domain::collab_state::derive;
     // 行按**结构化字段**造（种类 / 说话人 / 动词 / 正文），与生产写的线格式同源。
     let ev = |id: u64, kind: &str, speaker: &str, verb: &str, line: &str| serde_json::json!({"type":"transcript","lines":[{"id":id,"kind":kind,"speaker":speaker,"verb":verb,"line":line}]});
     let events = vec![
@@ -597,13 +597,13 @@ pub(crate) fn tool_round_reasoning_lands_on_the_tool_line() {
         call_id: String::new(),
         reply: 0,
     };
-    let round = crate::core::engine::Round {
+    let round = crate::capabilities::collab::domain::engine::Round {
         reply: 1,
         // 工具轮没有正文：思维链不能另造一条空回答行，只能挂到工具行上。
         text: String::new(),
         reasoning: "先思考".to_string(),
         text_msgs: Vec::new(),
-        tool: Some(crate::core::engine::ToolRun {
+        tool: Some(crate::capabilities::collab::domain::engine::ToolRun {
             view: tool,
             msgs: Vec::new(),
         }),
@@ -613,7 +613,7 @@ pub(crate) fn tool_round_reasoning_lands_on_the_tool_line() {
         degraded: false,
     };
     let next = std::cell::Cell::new(0u64);
-    let lines = crate::core::engine::build_round_lines(
+    let lines = crate::capabilities::collab::domain::engine::build_round_lines(
         "a",
         &prompts.core.tool_texts,
         &round,
@@ -682,7 +682,7 @@ pub(crate) fn collab_update_task_rewinds_and_latest_wins() {
     );
     // 派生以最后一条需求为准
     let (_, events) = core.history_open("c").unwrap();
-    let st = crate::core::collab_state::derive(&events, &["a".to_string()]);
+    let st = crate::capabilities::collab::domain::collab_state::derive(&events, &["a".to_string()]);
     assert_eq!(st.task.as_deref(), Some("新需求"));
 }
 
@@ -1177,7 +1177,7 @@ pub(crate) struct ExecLike {
 }
 
 pub(crate) fn run_execution(
-    members: &mut [crate::core::engine::Member],
+    members: &mut [crate::capabilities::collab::domain::engine::Member],
     tasks: &str,
     prompts: &crate::capabilities::prompt::api::Prompts,
 ) -> ExecLike {
@@ -1198,7 +1198,7 @@ pub(crate) fn run_execution(
         let mut views = Vec::new();
         let mut noop = |_c: crate::capabilities::llm::api::Chunk| true;
         let mut sink = |_e: crate::capabilities::session::api::SessionEvent| {};
-        let rounds = crate::core::engine::converse_with(
+        let rounds = crate::capabilities::collab::domain::engine::converse_with(
             m.chat.as_mut().expect("测试通道").as_mut(),
             m.tools.as_mut(),
             &identity,
@@ -1207,7 +1207,7 @@ pub(crate) fn run_execution(
             &id,
             &mut noop,
             &mut |v: &crate::capabilities::session::api::ToolCallView| views.push(v.clone()),
-            &mut |_r: &crate::core::engine::Round,
+            &mut |_r: &crate::capabilities::collab::domain::engine::Round,
                   _s: &mut dyn FnMut(crate::capabilities::session::api::SessionEvent)| {},
             &mut sink,
             &[],
@@ -1404,7 +1404,7 @@ pub(crate) fn collab_state_derives_the_task_chain_from_plan_review() {
             } ] }
         }),
     ];
-    let st = crate::core::collab_state::derive(&events, &["a".to_string()]);
+    let st = crate::capabilities::collab::domain::collab_state::derive(&events, &["a".to_string()]);
     assert_eq!(st.plan.as_deref(), Some("方案：A 做 X"));
     assert_eq!(st.chain.nodes.len(), 1, "链该从 plan_review 派生出来");
     assert_eq!(st.chain.nodes[0].assignee, "a");
@@ -1549,8 +1549,8 @@ pub(crate) fn chain_finished_needs_every_node_settled() {
 /// 原生通道：供应商的结构化槽位 → 讨论动词；不认识的工具名 = 不认识（调用点据此**如实拒绝**）。
 #[test]
 pub(crate) fn native_tool_names_map_to_discussion_verbs() {
+    use crate::capabilities::collab::domain::engine::{arg_text, verb_of};
     use crate::capabilities::llm::api::Verb;
-    use crate::core::engine::{arg_text, verb_of};
     assert_eq!(verb_of("say"), Some(Verb::Say));
     assert_eq!(verb_of("agree"), Some(Verb::Agree));
     assert_eq!(verb_of("leave"), Some(Verb::Leave));
@@ -1800,7 +1800,7 @@ pub(crate) fn discussion_turn_carries_the_agent_sessions_own_history() {
     };
     let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let prompts = test_prompts();
-    let turn = crate::core::engine::Discussion::turn_with(
+    let turn = crate::capabilities::collab::domain::engine::Discussion::turn_with(
         &test_systools(),
         "discussant",
         &cancel,
@@ -2131,7 +2131,7 @@ pub(crate) fn execution_review_pass_and_fail_paths() {
     assert_eq!(ran.reports.get("m0").map(|s| s.as_str()), Some("汇报内容"));
 
     // 验收：核心对照方案逐项核对（总验收用的就是这条）。
-    let mut exec = crate::core::engine::Execution::new();
+    let mut exec = crate::capabilities::collab::domain::engine::Execution::new();
     exec.reports = ran.reports.clone();
     let mut core_chat = scripted(vec![
         "{\"type\":\"tool\",\"name\":\"checklist\",\"args\":{\"items\":[{\"item\":\"A\",\"status\":\"fail\",\"reason\":\"没做完\"}]}}".into(),
@@ -2151,7 +2151,7 @@ pub(crate) fn execution_review_pass_and_fail_paths() {
     assert!(!exec.all_pass(), "有 fail 项就不通过");
 
     // 再验一次：这次全 pass。
-    let mut exec2 = crate::core::engine::Execution::new();
+    let mut exec2 = crate::capabilities::collab::domain::engine::Execution::new();
     exec2.reports = ran.reports.clone();
     let mut core_chat2 = scripted(vec![
         "{\"type\":\"tool\",\"name\":\"checklist\",\"args\":{\"items\":[{\"item\":\"A\",\"status\":\"pass\"}]}}"
@@ -2181,7 +2181,7 @@ pub(crate) fn review_parse_failure_is_conservative_fail() {
         crate::capabilities::registry::api::ToolMode::Envelope,
         scripted(vec!["{\"type\":\"say\",\"text\":\"x\"}".into()]),
     )];
-    let mut exec = crate::core::engine::Execution::new();
+    let mut exec = crate::capabilities::collab::domain::engine::Execution::new();
     exec.reports = run_execution(members.as_mut_slice(), "任务", &prompts).reports;
     let mut core_chat = scripted(vec!["完全不是清单".to_string()]);
     exec.review(
@@ -2463,14 +2463,16 @@ pub(crate) fn persist_policy_is_decided_by_the_session_kind() {
 #[test]
 pub(crate) fn checklist_rework_is_a_validated_node_id() {
     let known = vec!["n1-1".to_string(), "n2-1".to_string()];
-    let item = |status: &str, rework: Option<&str>| crate::core::engine::CheckItem {
-        item: "方案条目".to_string(),
-        status: status.to_string(),
-        evidence: None,
-        reason: Some("还差一步".to_string()),
-        rework: rework.map(|r| r.to_string()),
+    let item = |status: &str, rework: Option<&str>| {
+        crate::capabilities::collab::domain::engine::CheckItem {
+            item: "方案条目".to_string(),
+            status: status.to_string(),
+            evidence: None,
+            reason: Some("还差一步".to_string()),
+            rework: rework.map(|r| r.to_string()),
+        }
     };
-    let mut exec = crate::core::engine::Execution::new();
+    let mut exec = crate::capabilities::collab::domain::engine::Execution::new();
     exec.items = vec![item("fail", Some("n2-1")), item("pass", None)];
     assert_eq!(exec.rework_targets(), vec!["n2-1".to_string()]);
     assert!(
@@ -4706,7 +4708,8 @@ pub(crate) fn module_tool_params_are_declared_in_the_manifest_and_enforced_by_co
         pair.module_tools
     );
 
-    let table = crate::core::engine::tool_table(std::slice::from_ref(&mod_m0));
+    let table =
+        crate::capabilities::collab::domain::engine::tool_table(std::slice::from_ref(&mod_m0));
     let books = table.get("m0").expect("放行表").books.clone();
     assert_eq!(books.len(), 1, "只给声明了参数的工具建契约");
 
@@ -4777,7 +4780,8 @@ pub(crate) fn module_tool_params_are_declared_in_the_manifest_and_enforced_by_co
 
     // 没声明参数的工具照旧不校验（不给模块开发者添门槛）。
     let plain = module_of("m0");
-    let plain_table = crate::core::engine::tool_table(std::slice::from_ref(&plain));
+    let plain_table =
+        crate::capabilities::collab::domain::engine::tool_table(std::slice::from_ref(&plain));
     assert!(
         plain_table.get("m0").expect("放行表").books.is_empty(),
         "没声明参数 = 没有契约"
@@ -5807,7 +5811,7 @@ pub(crate) fn discussion_turn_streams_deltas_and_never_leaks_the_envelope() {
     let mut events: Vec<crate::capabilities::session::api::SessionEvent> = Vec::new();
     let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let prompts = test_prompts();
-    let _ = crate::core::engine::Discussion::turn_with(
+    let _ = crate::capabilities::collab::domain::engine::Discussion::turn_with(
         &test_systools(),
         "discussant",
         &cancel,
@@ -5903,7 +5907,14 @@ pub(crate) fn node_task_is_a_system_line_but_a_user_message() {
         "转录行要带 system + task 标记（界面是系统行，不是用户行）"
     );
     // 唯一装配点发出去的请求里至少有一条 user 消息（协议要求）。
-    let msgs = crate::core::engine::assemble("身份", None, &[], false, session.dialogue(), &[]);
+    let msgs = crate::capabilities::collab::domain::engine::assemble(
+        "身份",
+        None,
+        &[],
+        false,
+        session.dialogue(),
+        &[],
+    );
     assert!(
         msgs.iter().any(|m| m.role == "user"),
         "请求里必须有 user 消息：{:?}",
@@ -8516,7 +8527,7 @@ pub(crate) fn core_operation_runs_readonly_verification_before_the_op() {
         ]),
         seen: Arc::clone(&seen),
     };
-    let out = crate::core::engine::core_operation(
+    let out = crate::capabilities::collab::domain::engine::core_operation(
         &test_systools(),
         "planner",
         "plan",
@@ -8551,7 +8562,7 @@ pub(crate) fn body_json_is_not_a_core_operation() {
         "{\"plan\":\"方案\",\"nodes\":[{\"id\":\"n1\",\"title\":\"做\",\"objective\":\"做\",\"assignee\":\"a\",\"deps\":[]}]}"
             .to_string(),
     ]);
-    let out = crate::core::engine::core_operation(
+    let out = crate::capabilities::collab::domain::engine::core_operation(
         &test_systools(),
         "planner",
         "plan",

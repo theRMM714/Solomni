@@ -5,6 +5,9 @@
 //! 名单的权威来源是会话 meta.agents（代拟确认后由 Core 写回 meta）；转录只用来恢复讨论进度。
 //! 依赖全部为端口与核心数据；无 IO，无具体适配器。
 
+use crate::capabilities::collab::domain::engine::{
+    Discussion, Execution, Member, TurnOut, MAX_ROUNDS,
+};
 use crate::capabilities::llm::api::{Chat, ChatGateway, CompleteOpts, Msg};
 use crate::capabilities::prompt::api::Prompts;
 use crate::capabilities::registry::api::RosterPick;
@@ -16,7 +19,6 @@ use crate::capabilities::tools::ports::{SysIo, ToolRunner};
 use crate::capabilities::workspace::api::Sandboxes;
 use crate::capabilities::workspace::api::{ExecSpec, Module};
 use crate::capabilities::workspace::ports::{ModuleSource, PackageSource};
-use crate::core::engine::{Discussion, Execution, Member, TurnOut, MAX_ROUNDS};
 use std::sync::Arc;
 
 /// 节点验收的结论：逐节点 (node, ok, note)。
@@ -50,7 +52,7 @@ impl CollabSession {
         has_verb: bool,
         user_stopped: bool,
         remind_cap: u32,
-    ) -> crate::core::engine::AfterTurn {
+    ) -> crate::capabilities::collab::domain::engine::AfterTurn {
         self.disc.as_mut().expect("disc 已确认存在").after_turn(
             i,
             has_verb,
@@ -343,7 +345,7 @@ impl CollabSession {
         let mut keep = move |_c: crate::capabilities::llm::api::Chunk| {
             !stop.load(std::sync::atomic::Ordering::Relaxed)
         };
-        let payload = crate::core::engine::core_operation(
+        let payload = crate::capabilities::collab::domain::engine::core_operation(
             systools, "planner", "verdict", mode, core_chat, &msgs, opts, &mut keep, verify, sink,
         )?;
         let clear = payload
@@ -412,7 +414,7 @@ impl CollabSession {
         };
         // 核心操作走工具调用：节点验收结论由 node_verdict 工具承载。
         // 带核实回路：模型想先读/查落盘物时，核心执行只读工具再回灌（不再直接判"没调用"）。
-        let payload = crate::core::engine::core_operation(
+        let payload = crate::capabilities::collab::domain::engine::core_operation(
             systools,
             "orchestrator",
             "node_verdict",
@@ -626,7 +628,7 @@ impl CollabSession {
         // 核心操作走工具调用：代拟名单由 slate 工具承载（带只读核实回路）。
         sink(crate::capabilities::session::api::working("核心"));
         let mut verify = self.core_verify_tools("planner");
-        let parsed = crate::core::engine::core_operation(
+        let parsed = crate::capabilities::collab::domain::engine::core_operation(
             &self.systools,
             "planner",
             "slate",
@@ -776,7 +778,7 @@ impl CollabSession {
     pub fn feed_with(
         &mut self,
         i: usize,
-        turn: crate::core::engine::MemberTurn,
+        turn: crate::capabilities::collab::domain::engine::MemberTurn,
         turn_id: u64,
         sink: &mut dyn FnMut(SessionEvent),
     ) {
@@ -1022,13 +1024,17 @@ impl CollabSession {
                 } else {
                     // 泵只推**一步**：该问谁就存下并让出——驱动权在核心（它同时看得到协作会话与各 agent 的会话）。
                     match self.disc.as_mut().expect("disc 已确认存在").advance() {
-                        crate::core::engine::Adv::Ask { i, identity, turn } => {
+                        crate::capabilities::collab::domain::engine::Adv::Ask {
+                            i,
+                            identity,
+                            turn,
+                        } => {
                             self.pending_ask = Some((i, identity, turn));
                             return;
                         }
                         // 开场刚问完：接着进轮次。
-                        crate::core::engine::Adv::Opened => continue,
-                        crate::core::engine::Adv::Out(out) => out,
+                        crate::capabilities::collab::domain::engine::Adv::Opened => continue,
+                        crate::capabilities::collab::domain::engine::Adv::Out(out) => out,
                     }
                 };
                 match outcome {
@@ -1479,7 +1485,7 @@ impl CollabSession {
             member.tools = Some(MemberTools {
                 mode,
                 // 模块 id → 该模块的（目录, 工具表）：多模块 agent 靠信封里的 module 消歧。
-                modules: crate::core::engine::tool_table(&modules),
+                modules: crate::capabilities::collab::domain::engine::tool_table(&modules),
                 observations: crate::capabilities::tools::api::Observations::default(),
                 repair: Arc::clone(&self.repair),
                 log: Arc::clone(&self.log),
@@ -1570,7 +1576,7 @@ impl CollabSession {
         sandboxes: Sandboxes,
     ) -> Result<CollabSession, String> {
         let names: Vec<String> = meta.agents.iter().map(|a| a.name.clone()).collect();
-        let st = crate::core::collab_state::derive(events, &names);
+        let st = crate::capabilities::collab::domain::collab_state::derive(events, &names);
         // 全部已发出的转录行（按 id 顺序），连降级标记一起读回（样式靠它，不靠文案）。
         let mut all_lines: Vec<LineView> = Vec::new();
         for ev in events {
@@ -1611,7 +1617,7 @@ impl CollabSession {
             pending_ask: None,
             emitted: 0,
             next_line: total,
-            reply_seq: crate::core::engine::max_reply(events),
+            reply_seq: crate::capabilities::collab::domain::engine::max_reply(events),
             core_chat,
             core_is_demo,
             core_mode,
@@ -1693,7 +1699,9 @@ fn slate_item(a: &AgentMeta, why: &str) -> String {
 }
 
 /// 从派生状态推出当前挂起（None = 没有待用户处理的门）。
-fn derive_pending(st: &crate::core::collab_state::CollabState) -> Option<Pending> {
+fn derive_pending(
+    st: &crate::capabilities::collab::domain::collab_state::CollabState,
+) -> Option<Pending> {
     if st.ended {
         return None;
     }

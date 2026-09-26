@@ -1515,7 +1515,7 @@ fn core_rows(
 // 与 turn_with / converse_with 同一组参数（工具面 / 通道 / 消息 / 出口）：不是随手堆参数，
 // 收口成参数对象只会把参数挪个地方、并让"谁拿到什么"更难读。有意取舍（见 docs/testing/quality-isolation.md）。
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn core_operation(
+pub fn core_operation(
     systools: &crate::capabilities::tools::api::SystemTools,
     role: &str,
     tool: &str,
@@ -1715,7 +1715,7 @@ pub(crate) fn core_operation(
 /// 为什么只有这一处：身份与工具块都是**派生**的（登记处 + 提示词册 + 这一回合的身份），
 /// 它们不占对话的位置——对话里只有真正发生过的事（谁说了什么、调了什么工具）。
 /// 实时与重建都从这里拼，所以"回放与实时产出同样的消息"只约束对话本身。
-pub(crate) fn assemble(
+pub fn assemble(
     identity: &str,
     tools: Option<&MemberTools>,
     ids: &[String],
@@ -1745,7 +1745,7 @@ pub(crate) fn assemble(
 /// 形状按**当前形态**决定，所以形态切换时旧消息会被自动表达成新形状（切回去也能还原——事实留在转录里）：
 /// - 这条回复的调用都带合法原生 id 且当前走原生通道 → assistant(正文 + tool_calls) + 每条调用一条 role=tool；
 /// - 其余（手写信封、原生通道里写坏的调用、切换形态后的旧消息）→ assistant(正文) + 结果当用户消息。
-pub(crate) fn reply_msgs(
+pub fn reply_msgs(
     mode: crate::capabilities::registry::api::ToolMode,
     raw: &str,
     calls: &[ToolCallView],
@@ -1804,7 +1804,7 @@ pub(crate) fn verb_tag(v: Verb) -> &'static str {
 }
 
 /// 原生通道的工具名 → 讨论动词：**只认协作动词**，其余一律不认识（不认识 = 越权，如实拒绝）。
-pub(crate) fn verb_of(name: &str) -> Option<Verb> {
+pub fn verb_of(name: &str) -> Option<Verb> {
     match name {
         "say" => Some(Verb::Say),
         "agree" => Some(Verb::Agree),
@@ -1815,7 +1815,7 @@ pub(crate) fn verb_of(name: &str) -> Option<Verb> {
 }
 
 /// 原生调用的参数里取正文（供应商给的是一段 JSON 文本；取不到就是空串——不猜）。
-pub(crate) fn arg_text(args_json: &str) -> String {
+pub fn arg_text(args_json: &str) -> String {
     serde_json::from_str::<serde_json::Value>(args_json)
         .ok()
         .and_then(|v| {
@@ -1863,7 +1863,7 @@ impl Round {
 // 逐轮外送要的四个出口（分片 / 工具 / 逐轮 / 提示词）都是回调，收口成参数对象只是把参数挪个地方、
 // 并让"谁在什么时候拿到什么"更难读。这是有意的设计取舍（同 docs/testing/quality-isolation.md 的 allow 清单）。
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn converse_with(
+pub fn converse_with(
     chat: &mut dyn Chat,
     mut tools: Option<&mut MemberTools>,
     identity: &str,
@@ -2387,7 +2387,7 @@ impl crate::capabilities::session::api::AgentSession {
         identity: &str,
     ) -> Result<String, String> {
         // 整条消息**只有这一处装配**：身份 + 本回合工具（只有 compact）+ 对话 + 压缩提示。
-        let msgs = crate::core::engine::assemble(
+        let msgs = crate::capabilities::collab::domain::engine::assemble(
             identity,
             self.tools.as_ref(),
             &["compact".to_string()],
@@ -2667,7 +2667,7 @@ impl crate::capabilities::session::api::AgentSession {
         &mut self,
         spec: &TurnRun<'_>,
         live: &mut Live,
-        on_round: &mut crate::core::engine::RoundSink<'_>,
+        on_round: &mut crate::capabilities::collab::domain::engine::RoundSink<'_>,
         sink: &mut dyn FnMut(SessionEvent),
     ) -> Vec<Round> {
         let label = self.id.clone();
@@ -2692,7 +2692,7 @@ impl crate::capabilities::session::api::AgentSession {
                 tools,
                 ..
             } = self;
-            crate::core::engine::converse_with(
+            crate::capabilities::collab::domain::engine::converse_with(
                 chat.as_mut(),
                 tools.as_mut(),
                 spec.identity,
@@ -2750,7 +2750,7 @@ impl crate::capabilities::session::api::AgentSession {
 /// 行号从 `next_line` 递增（回调里记不了账，所以由调用方在回合收尾时按同一批行补 marks）。
 /// `turn` = 这一行属于哪个回合（讨论席的回合号）；None = 用该轮自己的回复号（单 agent 每轮各成回合）。
 /// **行格式只有这一处定义**：单 agent 与讨论席的行都从这里出（回档按同一口径解析回发言）。
-pub(crate) fn build_round_lines(
+pub fn build_round_lines(
     id: &str,
     texts: &crate::capabilities::prompt::api::ToolTexts,
     round: &Round,
@@ -2772,7 +2772,7 @@ pub(crate) fn build_round_lines(
     let speaker = id.to_string();
     let verb = round
         .verb
-        .map(crate::core::engine::verb_tag)
+        .map(crate::capabilities::collab::domain::engine::verb_tag)
         .unwrap_or_default();
     let make = |line: String,
                 verb: &str,

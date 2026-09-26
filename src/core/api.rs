@@ -534,7 +534,7 @@ impl CoreHandle {
         &self,
         sid: &str,
         req: &AskReq,
-    ) -> Result<crate::core::engine::MemberTurn, String> {
+    ) -> Result<crate::capabilities::collab::api::MemberTurn, String> {
         let child = format!("{}--{}", sid, req.agent);
         // 会话不存在就按需建（名单确认时已建，这里兜底）。
         {
@@ -809,8 +809,9 @@ impl CoreHandle {
         let handle = self.clone();
         // 握手通道：泵 → 主线程（要一个成员回合）；主线程 → 泵（回合结果）。
         let (ask_tx, ask_rx) = std::sync::mpsc::channel::<AskReq>();
-        let (turn_tx, turn_rx) =
-            std::sync::mpsc::channel::<Result<crate::core::engine::MemberTurn, String>>();
+        let (turn_tx, turn_rx) = std::sync::mpsc::channel::<
+            Result<crate::capabilities::collab::api::MemberTurn, String>,
+        >();
         let worker = {
             let sid = sid.to_string();
             let bus = Arc::clone(&bus);
@@ -896,10 +897,10 @@ impl CoreHandle {
                                         remind_cap,
                                     );
                                     match after {
-                                        crate::core::engine::AfterTurn::Done => {
+                                        crate::capabilities::collab::api::AfterTurn::Done => {
                                             c.feed_with(i, turn, turn_id, &mut sink)
                                         }
-                                        crate::core::engine::AfterTurn::Remind => {
+                                        crate::capabilities::collab::api::AfterTurn::Remind => {
                                             // 提醒进**它自己的会话**（系统消息）；不 feed——泵重问同一个人。
                                             let text = c.reminder_text();
                                             let child =
@@ -915,7 +916,7 @@ impl CoreHandle {
                                                 }
                                             }
                                         }
-                                        crate::core::engine::AfterTurn::Unanswered => {
+                                        crate::capabilities::collab::api::AfterTurn::Unanswered => {
                                             c.pass_over(i, &mut sink)
                                         }
                                     }

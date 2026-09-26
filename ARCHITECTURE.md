@@ -20,7 +20,7 @@ presentation ──▶ core ◀── adapters
 
 | 层 | 干什么 | 禁令 |
 | --- | --- | --- |
-| `core/` | 定义抽象（`api.rs`）+ 编排业务（协作状态机、引擎）；**正在被搬空**——端口与各能力都已落位 `capabilities/` | 不读文件（`std::fs`）、不发网络（ureq）、不碰 stdin/stdout——一切机制下沉适配层 |
+| `core/` | 只剩**门面**（`Core`：会话中心与命令队列）与回档；**正在被搬空**——端口与全部业务能力都已落位 `capabilities/` | 不读文件（`std::fs`）、不发网络（ureq）、不碰 stdin/stdout——一切机制下沉适配层 |
 | `adapters/` | 实现 core 的端口；可引用外部库（ureq / serde_yaml / windows-sys / libc） | 只依赖 core，**永不反向**；不做装配决策 |
 | `presentation/` | 渲染事件、收集输入（CLI 与 Web 并列） | 只依赖 **core 的入站能力面**（`core::api`）；**永不接触端口对象，也拿不到 `Core` 本身** |
 | `capabilities/` | **业务能力**：按业务功能垂直切分。每个能力有 `api`（入站契约）/ `ports`（出站端口）/ `domain`（纯逻辑）/ `detail`（细节实现） | **业务之间只经对方的 `api`**；不反向依赖 `core` / `adapters` / `presentation`（迁移期残留记为基线豁免，见 [docs/architecture/refactor-plan.md](docs/architecture/refactor-plan.md) §四） |

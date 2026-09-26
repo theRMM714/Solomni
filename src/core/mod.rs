@@ -3,9 +3,6 @@
 //! 装配（new 适配器）只发生在 main 组合根。前端只见 Core 门面、会话句柄与 SessionEvent 流。
 
 pub mod api;
-pub mod collab;
-pub mod collab_state;
-pub mod engine;
 
 pub use crate::capabilities::session::api::{Pending, SessionEvent};
 // 测试用同步入口的签名要它；生产路径的 Live 构造在 api.rs（那里直接引 crate::capabilities::session::api::Live）。
@@ -18,14 +15,14 @@ pub use crate::capabilities::session::ports::HistoryStore;
 pub use crate::capabilities::tools::ports::{SysIo, ToolRunner};
 pub use crate::capabilities::workspace::ports::{ModuleSource, PackageSource, Workspace};
 
+use crate::capabilities::collab::api::AfterTurn;
+use crate::capabilities::collab::api::CollabSession;
 use crate::capabilities::llm::api::Msg;
 use crate::capabilities::prompt::api::Prompts;
 use crate::capabilities::registry::api::{AppSettings, Channel, Settings};
 use crate::capabilities::session::api::{AgentMeta, HistoryView, SessionMeta};
 use crate::capabilities::tools::api::SystemTools;
 use crate::capabilities::workspace::api::Module;
-use crate::core::collab::CollabSession;
-use crate::core::engine::AfterTurn;
 use crate::kernel::log::Log;
 use crate::kernel::types::SessionId;
 use std::collections::{BTreeMap, HashMap};
@@ -1967,7 +1964,7 @@ impl Core {
     ) -> crate::capabilities::session::api::MemberTools {
         crate::capabilities::session::api::MemberTools {
             mode,
-            modules: engine::tool_table(modules),
+            modules: crate::capabilities::collab::api::tool_table(modules),
             observations: crate::capabilities::tools::api::Observations::default(),
             repair: Arc::clone(&self.repair),
             log: Arc::clone(&self.log),
@@ -2204,7 +2201,7 @@ impl Core {
         // 它只把行交出来；推到哪个 sid、落不落盘由调用方按会话种类定（这里给系统会话）。
         let mut rows: Vec<SessionEvent> = Vec::new();
         // 核心操作走工具调用：推荐名单由 suggest 工具承载。
-        let payload = crate::core::engine::core_operation(
+        let payload = crate::capabilities::collab::api::core_operation(
             &self.systools,
             "planner",
             "suggest",
@@ -2550,8 +2547,8 @@ impl Core {
             let keep_turn = Self::turn_of_line(&before, keep_id);
             self.rewind_children(sid, keep_turn)?;
         }
-        let dropped = crate::core::collab_state::tool_runs(&before)
-            .saturating_sub(crate::core::collab_state::tool_runs(&after));
+        let dropped = crate::capabilities::collab::api::tool_runs(&before)
+            .saturating_sub(crate::capabilities::collab::api::tool_runs(&after));
         let mut out = after;
         if dropped > 0 {
             out.push(serde_json::json!({
@@ -2812,7 +2809,9 @@ impl Core {
                             .filter_map(|t| t.get("tool").cloned())
                             .filter_map(|t| serde_json::from_value(t).ok())
                             .collect();
-                        for m in crate::core::engine::reply_msgs(mode, raw, &views, texts) {
+                        for m in
+                            crate::capabilities::collab::api::reply_msgs(mode, raw, &views, texts)
+                        {
                             history.push(m);
                         }
                         for _ in 0..group.len() {
@@ -2838,7 +2837,7 @@ impl Core {
                 let unavailable = self.unavailable_modules(&meta.exec, &modules);
                 let mut tools = self.tools_env(&modules, &sb, unavailable, meta.exec.net, mode);
                 // 回复 id 跨重启单调：从转录里的最大值续号，否则新回复会与旧回复并成一组。
-                tools.reply_seq = crate::core::engine::max_reply(events);
+                tools.reply_seq = crate::capabilities::collab::api::max_reply(events);
                 Ok(Session::Single(
                     crate::capabilities::session::api::AgentSession::restore(
                         &a.name,
