@@ -428,3 +428,47 @@ fn noop_log_is_silent_and_shareable_across_threads() {
         .join()
         .expect("跨线程可用（核心与 Web 泵线程共用同一个日志端口）");
 }
+
+// ---------- HostProbe ----------
+
+/// 真实适配器：路径事实按真实文件系统回答（scratch 里真建一个目录与一个文件）。
+#[test]
+fn host_probe_adapter_reports_real_path_facts_and_absent_exes() {
+    use crate::core::ports::HostProbe;
+    let real = crate::adapters::HostProbeAdapter;
+    let dir = crate::tests::scratch("host-probe");
+    let file = dir.join("a.txt");
+    std::fs::write(&file, b"x").unwrap();
+    assert!(real.is_dir(&dir), "真目录要认得");
+    assert!(real.is_file(&file), "真文件要认得");
+    assert!(!real.is_file(&dir), "目录不是文件");
+    assert!(!real.is_dir(&file), "文件不是目录");
+    assert!(!real.is_file(&dir.join("nope")), "不存在的路径一律不算");
+    assert!(
+        !real.has_exe("definitely-not-an-exe-solomni"),
+        "PATH 上没有的可执行文件要如实说没有"
+    );
+}
+
+/// 替身：**只按给定答案回答**，不读真实环境（用例要确定性）。
+#[test]
+fn fixed_probe_answers_only_what_was_declared() {
+    use crate::core::ports::HostProbe;
+    use crate::tests::doubles::FixedProbe;
+    let dir = std::path::PathBuf::from("some-dir");
+    let file = std::path::PathBuf::from("some-file");
+    let p = FixedProbe {
+        files: vec![file.clone()],
+        dirs: vec![dir.clone()],
+        exes: vec!["qemu-system-x86_64".to_string()],
+        hypervisor: true,
+    };
+    assert!(p.is_dir(&dir) && !p.is_dir(&file), "声明之外的目录一律不算");
+    assert!(
+        p.is_file(&file) && !p.is_file(&dir),
+        "声明之外的文件一律不算"
+    );
+    assert!(p.has_exe("qemu-system-x86_64") && !p.has_exe("other"));
+    assert!(p.hypervisor_available(), "虚拟化按声明回答");
+    assert!(!FixedProbe::default().hypervisor_available(), "缺省一律否");
+}

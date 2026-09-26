@@ -380,6 +380,8 @@ pub struct Core {
     /// 信封修复端口（手写信封不合法时的无歧义补救；默认真现在 adapters，可整体替换）。
     repair: Arc<dyn ports::EnvelopeRepair + Send + Sync>,
     log: Arc<dyn crate::kernel::log::Log + Send + Sync>,
+    /// 宿主能力探测（读环境、查路径存在性都在它后面；core 因此不碰 std::env 与文件系统）。
+    probe: Arc<dyn ports::HostProbe + Send + Sync>,
     settings: Settings,
     prompts: Prompts,
     sessions: HashMap<SessionId, Session>,
@@ -409,6 +411,7 @@ impl Core {
         repair: Arc<dyn ports::EnvelopeRepair + Send + Sync>,
         prompt_source: Box<dyn PromptSource>,
         log: Arc<dyn crate::kernel::log::Log + Send + Sync>,
+        probe: Arc<dyn ports::HostProbe + Send + Sync>,
     ) -> Result<Core, String> {
         let log_for_core = Arc::clone(&log);
         let outcome = (|| -> Result<Core, String> {
@@ -427,6 +430,7 @@ impl Core {
                 io,
                 repair,
                 log: log_for_core,
+                probe,
                 settings,
                 prompts,
                 sessions: HashMap::new(),
@@ -1027,7 +1031,7 @@ impl Core {
         } else {
             Vec::new()
         };
-        let readiness = exec::tier_readiness(&spec, self.qemu_path());
+        let readiness = exec::tier_readiness(&spec, self.qemu_path(), self.probe.as_ref());
         RuntimeReport {
             tier: tier.as_str().to_string(),
             declared: exec::declared(&roster.modules),
@@ -1079,20 +1083,27 @@ impl Core {
             pins: meta.exec.pins.clone(),
             runtime: self.runtime_report(tier),
             runtimes_dir: workspace::slash(&self.packages.dir()),
-            tier_ready: exec::tier_readiness(&meta.exec, self.qemu_path()).ready(),
-            tier_missing: exec::tier_readiness(&meta.exec, self.qemu_path())
+            tier_ready: exec::tier_readiness(&meta.exec, self.qemu_path(), self.probe.as_ref())
+                .ready(),
+            tier_missing: exec::tier_readiness(&meta.exec, self.qemu_path(), self.probe.as_ref())
                 .missing()
                 .iter()
                 .map(|s| s.to_string())
                 .collect(),
             // 虚拟机档能不能选**与当前档位无关**：本机档会话也要如实告诉用户 vm 现在不可用（界面据此禁用）。
             // 逐项清单一起给出：界面照抄"缺哪几项、每项怎么补"，不自己编话。
-            vm_available: exec::tier_readiness(&vm_probe, self.qemu_path()).ready(),
-            vm_unavailable_reason: exec::tier_refusal(&vm_probe, self.qemu_path())
-                .unwrap_or_default(),
+            vm_available: exec::tier_readiness(&vm_probe, self.qemu_path(), self.probe.as_ref())
+                .ready(),
+            vm_unavailable_reason: exec::tier_refusal(
+                &vm_probe,
+                self.qemu_path(),
+                self.probe.as_ref(),
+            )
+            .unwrap_or_default(),
             vm_requirements: exec::vm_requirements(&exec::VmInputs {
                 base: vm_probe.base.as_deref(),
                 qemu: self.qemu_path(),
+                probe: self.probe.as_ref(),
             }),
         })
     }
@@ -1182,7 +1193,7 @@ impl Core {
         if staying_vm {
             // 留在 vm 档：只校验用户这次填的基础根（填错路径就是填错路径），
             // 不拿"本机能不能提供 vm 档"去拦一条已经存在的会话。
-            let base_item = exec::tier_readiness(&spec, self.qemu_path())
+            let base_item = exec::tier_readiness(&spec, self.qemu_path(), self.probe.as_ref())
                 .requirements
                 .into_iter()
                 .find(|r| r.id == "base");
@@ -1191,7 +1202,7 @@ impl Core {
                     return Err(format!("{}：{}", item.detail, item.how));
                 }
             }
-        } else if let Some(why) = exec::tier_refusal(&spec, self.qemu_path()) {
+        } else if let Some(why) = exec::tier_refusal(&spec, self.qemu_path(), self.probe.as_ref()) {
             return Err(why);
         }
         let session_modules: Vec<Module> = roster
@@ -1567,7 +1578,7 @@ impl Core {
                 let mode = entry.map(|h| h.mode.clone()).unwrap_or_default();
                 // 记的档位来自落盘 meta（权威）：环境后来变了也要如实提示——**不拦打开**（记录是用户的）。
                 let exec = entry.map(|h| h.exec.clone()).unwrap_or_default();
-                let readiness = exec::tier_readiness(&exec, self.qemu_path());
+                let readiness = exec::tier_readiness(&exec, self.qemu_path(), self.probe.as_ref());
                 // 「改需求」能力位：有本次需求行才给。在表里看会话种类；不在表里（生成中/未打开）
                 // 看落盘 meta 的形态（那是名单与形态的单一真相）。
                 let can_update_task = match self.sessions.get(&sid) {
@@ -1690,7 +1701,7 @@ impl Core {
         };
         // 承载校验：默认档位的前置条件不具备时**不允许创建虚拟机档会话**（用户环境问题，不是选型问题）。
         // 必须在建工作区之前收口——拒绝就该什么都不留下。
-        if let Some(why) = exec::tier_refusal(&meta.exec, self.qemu_path()) {
+        if let Some(why) = exec::tier_refusal(&meta.exec, self.qemu_path(), self.probe.as_ref()) {
             return Err(why);
         }
         // 工作区：work + 各 agent 沙箱（失败即失败，不假装已建）。代拟确认名单时再补建。

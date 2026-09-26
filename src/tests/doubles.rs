@@ -851,6 +851,38 @@ pub(crate) fn test_prompts() -> Prompts {
         .expect("内置提示词册必须合法")
 }
 
+/// 宿主探测替身：**只按给定答案回答**，不读真实环境（测试要确定性）。
+/// 事实由用例显式声明；真实适配器的契约另有 T2 用例（见 docs/testing/doubles.md 端口矩阵）。
+#[derive(Default)]
+pub(crate) struct FixedProbe {
+    pub files: Vec<std::path::PathBuf>,
+    pub dirs: Vec<std::path::PathBuf>,
+    pub exes: Vec<String>,
+    pub hypervisor: bool,
+}
+
+impl crate::core::ports::HostProbe for FixedProbe {
+    fn is_file(&self, path: &std::path::Path) -> bool {
+        self.files.iter().any(|p| p == path)
+    }
+    fn is_dir(&self, path: &std::path::Path) -> bool {
+        self.dirs.iter().any(|p| p == path)
+    }
+    fn has_exe(&self, name: &str) -> bool {
+        self.exes.iter().any(|n| n == name)
+    }
+    fn hypervisor_available(&self) -> bool {
+        self.hypervisor
+    }
+}
+
+/// 日志能力替身：什么都不做（呈现层的埋点不参与任何判定）。
+pub(crate) struct NoopLogOps;
+impl crate::core::api::LogOps for NoopLogOps {
+    fn info(&self, _at: &str, _msg: &str) {}
+    fn warn(&self, _at: &str, _msg: &str) {}
+    fn error(&self, _at: &str, _msg: &str) {}
+}
 pub(crate) fn core_with(modules: Vec<Module>, gateway: ScriptGateway) -> Core {
     core_with_runner(modules, gateway, Arc::new(SilentRunner))
 }
@@ -875,6 +907,7 @@ pub(crate) fn core_with_workspace(
         Arc::new(NoRepair),
         Box::new(TestPrompts::ok()),
         Arc::new(crate::kernel::log::NoopLog),
+        Arc::new(crate::adapters::HostProbeAdapter),
     )
     .expect("内存装配不应失败")
 }
@@ -969,6 +1002,7 @@ pub(crate) fn core_with_pkgs(
         Arc::new(NoRepair),
         Box::new(TestPrompts::ok()),
         Arc::new(crate::kernel::log::NoopLog),
+        Arc::new(crate::adapters::HostProbeAdapter),
     )
     .expect("内存装配不应失败")
 }
@@ -989,6 +1023,7 @@ pub(crate) fn core_with_settings(store: InMemorySettings) -> Core {
         Arc::new(NoRepair),
         Box::new(TestPrompts::ok()),
         Arc::new(crate::kernel::log::NoopLog),
+        Arc::new(crate::adapters::HostProbeAdapter),
     )
     .expect("内存装配不应失败")
 }
@@ -1020,6 +1055,7 @@ pub(crate) fn core_with_io_gateway(
         Arc::new(NoRepair),
         Box::new(TestPrompts::ok()),
         Arc::new(crate::kernel::log::NoopLog),
+        Arc::new(crate::adapters::HostProbeAdapter),
     )
     .expect("内存装配不应失败")
 }
@@ -1043,6 +1079,7 @@ pub(crate) fn core_with_gateway(
         Arc::new(NoRepair),
         Box::new(TestPrompts::ok()),
         Arc::new(crate::kernel::log::NoopLog),
+        Arc::new(crate::adapters::HostProbeAdapter),
     )
     .expect("内存装配不应失败")
 }

@@ -416,7 +416,7 @@ kernel       ──▶ （无）
 | --- | --- | --- | --- | --- |
 | **0** | **依赖方向门禁**：T0 加 `use` 边检查 + 基线豁免清单 | 无门禁 | — | **已完成**（`run-tests.js` 的 T0 结构审查 + `tests/dependency-baseline.json`） |
 | **1** | **kernel**：`jobs` / `log` / `types`（`bus` 与运行态合并按 §3.2 推迟到批次 9） | `api.rs` 的 JobRegistry；`ports.rs` 的 Log；`core/mod.rs` 的 SessionId | 0 | **已完成**（`src/kernel/`） |
-| **2** | **修两处违约**：`exec.rs` 宿主探测下沉为端口；`presentation` 不再持 `Log`/`ProbeOutcome` | `exec.rs:357-384`；`web.rs:44,611` | 0 | 未开始 |
+| **2** | **修两处违约**：`exec.rs` 宿主探测下沉为 `HostProbe` 端口（4 处 IO）；`presentation` 不再持 `Log`/`ProbeOutcome`（改经入站能力面 `LogOps`） | `exec.rs` 的 `std::env`/`is_file`/`is_dir`；`web.rs` 的 `Log`/`ProbeOutcome` | 0 | **已完成**（基线 9 → 7 条） |
 | **3** | **prompt** | `prompt.rs` `refs.rs` | 1 | 未开始 |
 | **4** | **workspace**：`module` / `packages` / `exec` | `module.rs` `packages.rs` `exec.rs` | 2,3 | 未开始 |
 | **5** | **registry**（含拆 `providers.rs`） | `agents.rs`；`providers.rs` 登记处侧 | 1 | 未开始 |

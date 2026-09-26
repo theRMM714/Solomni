@@ -15,7 +15,6 @@ use crate::core::{
     AgentSuggestion, ConfigAgent, FilesAgentView, FilesRootsView, FilesView, Pending,
     RuntimeReport, SessionConfig, SessionEdit, SessionView, WorkMode, WorkOpened, WorkSpec,
 };
-use crate::kernel::log::NoopLog;
 use crate::presentation::routes::{self, ROUTES};
 use crate::presentation::web::{self, FenceInfo};
 use serde_json::json;
@@ -61,6 +60,7 @@ fn fake_ops_probe(fail: Option<&str>, probe: crate::core::ports::ProbeOutcome) -
         history: f.clone(),
         discovery: f.clone(),
         events: EventBus::new(),
+        log: Arc::new(super::doubles::NoopLogOps),
     }
 }
 
@@ -72,6 +72,7 @@ fn fake_ops(fail: Option<&str>) -> Ops {
         history: f.clone(),
         discovery: f.clone(),
         events: EventBus::new(),
+        log: Arc::new(super::doubles::NoopLogOps),
     }
 }
 
@@ -417,7 +418,7 @@ fn fence() -> FenceInfo {
 }
 
 fn call(ops: &Ops, method: &str, url: &str, body: &str) -> (u16, String) {
-    let log: Arc<dyn crate::kernel::log::Log + Send + Sync> = Arc::new(NoopLog);
+    let log: Arc<dyn crate::core::api::LogOps + Send + Sync> = Arc::new(super::doubles::NoopLogOps);
     let (code, _headers, text) = web::route(ops, &fence(), &log, method, url, body);
     (code, text)
 }

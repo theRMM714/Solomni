@@ -38,12 +38,9 @@ pub struct FenceInfo {
 }
 
 /// 启动转录中心服务器（阻塞直至出错）。端口可指定，默认 3081，只绑本机回环。
-pub fn serve(
-    ops: Ops,
-    port: u16,
-    log: Arc<dyn crate::kernel::log::Log + Send + Sync>,
-    fence: FenceInfo,
-) -> Result<(), String> {
+pub fn serve(ops: Ops, port: u16, fence: FenceInfo) -> Result<(), String> {
+    // 日志经**入站能力面**（ops.log）取——呈现层不持有端口对象。
+    let log = Arc::clone(&ops.log);
     log.info("web::serve", &format!("转录中心启动，端口 {}", port));
     let addr = format!("127.0.0.1:{}", port);
     let server = Server::http(addr.as_str()).map_err(|e| e.to_string())?;
@@ -163,7 +160,7 @@ const POLL_TICK: Duration = Duration::from_millis(300);
 pub(crate) fn route(
     ops: &Ops,
     fence: &FenceInfo,
-    log: &Arc<dyn crate::kernel::log::Log + Send + Sync>,
+    log: &Arc<dyn crate::core::api::LogOps + Send + Sync>,
     method: &str,
     url: &str,
     body: &str,
@@ -605,12 +602,8 @@ pub(crate) fn route(
 
 /// 探测结论 → 响应 JSON。三种结论如实给出（不猜）；`mode` 是探测后登记处里的**实际**形态，
 /// 也就是下一次生成会走的那套协议（无法判定时登记处不变，它就是原样）。
-fn probe_json(
-    ops: &Ops,
-    id: &str,
-    outcome: &crate::core::ports::ProbeOutcome,
-) -> serde_json::Value {
-    use crate::core::ports::ProbeOutcome;
+fn probe_json(ops: &Ops, id: &str, outcome: &crate::core::api::ProbeOutcome) -> serde_json::Value {
+    use crate::core::api::ProbeOutcome;
     let (kind, detail) = match outcome {
         ProbeOutcome::Supported { detail } => ("supported", detail.clone()),
         ProbeOutcome::Unsupported { detail } => ("unsupported", detail.clone()),

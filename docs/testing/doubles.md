@@ -43,6 +43,8 @@ Fake 必须：
 | `src/tests/doubles.rs:NoFenceHost` | 围栏释放空操作 Stub | 已被核心测试使用 |
 | `src/tests/doubles.rs:RecordingFence` | 围栏释放记录型 Spy | 已钉住"删会话即请求撤销授权" |
 | `src/kernel/log.rs:NoopLog` | 无声日志 Stub | 已存在；不用于验证日志内容 |
+| `src/tests/doubles.rs:FixedProbe` | 宿主探测 Fake（按声明回答路径 / 可执行文件 / 虚拟化） | 已用于 T2 契约用例；Core 级装配用真实 `HostProbeAdapter`（要 scratch 目录的真实存在性） |
+| `src/tests/doubles.rs:NoopLogOps` | 日志能力 Stub（入站能力面） | 已用于路由契约测试（呈现层不需要它做判定） |
 | `tests/cross-platform/e2e/mock.js` | 本地假供应商服务 | 已用于 T5；应覆盖协议错误、断开、延迟等场景 |
 
 ### 1.3 Mock
@@ -126,6 +128,7 @@ Fixture 必须：
 | `EnvelopeRepair` | `NoRepair` | 不适用 | 不适用（修复器遇不确定一律不修） | 不适用 | `UnambiguousRepair`（转义裸控制字符 + 补上缺的收尾括号；断在字符串中间、起了两段信封一律不修） | 已验收 |
 | `FenceHost` | `RecordingFence`、`NoFenceHost` | `released` | `fail_with` | 不适用 | `confine::FenceHostAdapter`（真机撤权在 `tests/windows/`） | 已验收 |
 | `Log` | `NoopLog` | 不记录（Stub） | 不适用 | 不适用 | `FileLog`（三个级别都落盘） | 已验收 |
+| `HostProbe` | `FixedProbe`（只按声明回答） | 不适用 | 不适用 | 不适用 | `HostProbeAdapter`（真实路径事实；PATH 上不存在的名字如实说没有） | 已验收 |
 
 `Log` 是唯一**不在 `core/ports.rs`** 的端口：它在 `kernel/log.rs`（机制型内核，无领域语义）。
 见 [../architecture/module-map.md](../architecture/module-map.md) 一。

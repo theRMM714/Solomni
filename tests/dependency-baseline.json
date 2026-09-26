@@ -8,9 +8,7 @@
     "src/presentation/intent.rs -> crate::core",
     "src/presentation/intent.rs -> crate::core::agents",
     "src/presentation/web.rs -> crate::core",
-    "src/presentation/web.rs -> crate::core::ports",
-    "src/presentation/web.rs -> crate::core::providers",
-    "src/presentation/web.rs -> crate::kernel::log"
+    "src/presentation/web.rs -> crate::core::providers"
   ],
   "coreCycles": [
     [

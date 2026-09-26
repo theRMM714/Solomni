@@ -5,6 +5,7 @@
 
 use crate::core::module::Module;
 use crate::core::packages::{Library, PackageManifest, KIND_SYSTEM};
+use crate::core::ports::HostProbe;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -223,24 +224,22 @@ pub struct VmRequirement {
     pub how: String,
 }
 
-/// 虚拟机档检测的入参：会话选型 + 设置里登记的路径（None = 没登记，兜底看 PATH）。
+/// 虚拟机档检测的入参：会话选型 + 设置里登记的路径（None = 没登记，兜底看 PATH）+ 宿主探测端口。
 pub struct VmInputs<'a> {
     pub base: Option<&'a str>,
     pub qemu: Option<&'a str>,
+    /// 本机事实探测（读环境、查路径存在性都在它后面，见 ports::HostProbe）。
+    pub probe: &'a dyn HostProbe,
 }
 
-/// QEMU 可执行文件名（各平台同名，扩展名按平台）。
+/// QEMU 可执行文件名（各平台同名；平台扩展名由适配层的探测实现处理）。
 const QEMU_BIN: &str = "qemu-system-x86_64";
-#[cfg(windows)]
-const EXE_SUFFIX: &str = ".exe";
-#[cfg(not(windows))]
-const EXE_SUFFIX: &str = "";
 
 /// 虚拟机档的全部前置要求（**只读事实，不起任何虚拟机**）。
 /// 为什么做成清单：用户看到的必须是"缺哪几项、每项怎么补"，而不是一句笼统的"前置条件不具备"。
 /// base 与会话选型有关，qemu 登记在设置里（见 providers::AppSettings）。
 pub fn vm_requirements(vm: &VmInputs<'_>) -> Vec<VmRequirement> {
-    let hyper = hypervisor_available();
+    let hyper = vm.probe.hypervisor_available();
     vec![
         VmRequirement {
             id: "hypervisor",
@@ -268,9 +267,9 @@ pub fn vm_requirements(vm: &VmInputs<'_>) -> Vec<VmRequirement> {
                     .to_string(),
         },
         // QEMU：用户自备。没登记就看 PATH——检测的是"起得来 guest 的那件东西在不在"。
-        qemu_requirement(vm.qemu),
+        qemu_requirement(vm.qemu, vm.probe),
         // 基础根：用户自备（发行版基底 + 内核所在目录）。本机档为空 = 不适用。
-        base_requirement(vm.base),
+        base_requirement(vm.base, vm.probe),
     ]
 }
 
@@ -301,24 +300,18 @@ fn hypervisor_how() -> &'static str {
 }
 
 /// QEMU 检测：登记了就用登记的路径，没登记就看 PATH（产品不自带 QEMU，也不下载）。
-fn qemu_requirement(registered: Option<&str>) -> VmRequirement {
+fn qemu_requirement(registered: Option<&str>, probe: &dyn HostProbe) -> VmRequirement {
     let (found, where_from) = match registered.map(str::trim) {
-        Some(p) if !p.is_empty() => (Path::new(p).is_file(), "设置里登记的路径"),
-        _ => (which_on_path(QEMU_BIN), "PATH"),
+        Some(p) if !p.is_empty() => (probe.is_file(Path::new(p)), "设置里登记的路径"),
+        _ => (probe.has_exe(QEMU_BIN), "PATH"),
     };
     VmRequirement {
         id: "qemu",
         met: found,
         detail: if found {
-            format!(
-                "QEMU 可用（按{}找到 {}{}）",
-                where_from, QEMU_BIN, EXE_SUFFIX
-            )
+            format!("QEMU 可用（按{}找到 {}）", where_from, QEMU_BIN)
         } else {
-            format!(
-                "没有找到 {}{}（按{}找过）",
-                QEMU_BIN, EXE_SUFFIX, where_from
-            )
+            format!("没有找到 {}（按{}找过）", QEMU_BIN, where_from)
         },
         how: if found {
             String::new()
@@ -330,10 +323,10 @@ fn qemu_requirement(registered: Option<&str>) -> VmRequirement {
 }
 
 /// 基础根检测：用户自备的最小系统所在目录（运行包之外的那一层）。
-fn base_requirement(base: Option<&str>) -> VmRequirement {
+fn base_requirement(base: Option<&str>, probe: &dyn HostProbe) -> VmRequirement {
     let met = match base.map(str::trim) {
         None | Some("") => false,
-        Some(p) => Path::new(p).is_dir(),
+        Some(p) => probe.is_dir(Path::new(p)),
     };
     VmRequirement {
         id: "base",
@@ -352,19 +345,11 @@ fn base_requirement(base: Option<&str>) -> VmRequirement {
     }
 }
 
-/// 在 PATH 里找可执行文件（只问事实，不执行它）。
-fn which_on_path(name: &str) -> bool {
-    let Some(paths) = std::env::var_os("PATH") else {
-        return false;
-    };
-    std::env::split_paths(&paths).any(|dir| dir.join(format!("{}{}", name, EXE_SUFFIX)).is_file())
-}
-
 /// 本机能不能承载这个档位（**只读事实，不碰任何东西**）。
 /// 虚拟机档的前置条件不具备时，虚拟机档**不允许创建或改入**——这是用户环境问题，不是选型问题；
 /// 界面的"能不能点"与「开始」的校验走同一个函数，两处不会各说各话。
 /// 判据**只有一份**：就是 vm_requirements 那份清单，逐项都满足才算承载得了。
-pub fn tier_readiness(spec: &ExecSpec, qemu: Option<&str>) -> TierReadiness {
+pub fn tier_readiness(spec: &ExecSpec, qemu: Option<&str>, probe: &dyn HostProbe) -> TierReadiness {
     if spec.tier != Tier::Vm {
         return TierReadiness {
             requirements: Vec::new(),
@@ -374,32 +359,14 @@ pub fn tier_readiness(spec: &ExecSpec, qemu: Option<&str>) -> TierReadiness {
         requirements: vm_requirements(&VmInputs {
             base: spec.base.as_deref(),
             qemu,
+            probe,
         }),
     }
 }
 
-/// 虚拟机监视器在场吗（只问事实，不起任何虚拟机）。
-fn hypervisor_available() -> bool {
-    if cfg!(windows) {
-        std::env::var_os("SystemRoot")
-            .map(|root| {
-                Path::new(&root)
-                    .join("System32")
-                    .join("WinHvPlatform.dll")
-                    .is_file()
-            })
-            .unwrap_or(false)
-    } else if cfg!(target_os = "linux") {
-        Path::new("/dev/kvm").exists()
-    } else {
-        // macOS（11+ 都能起虚拟机）与其它平台：只问事实，不起任何虚拟机。
-        cfg!(target_os = "macos")
-    }
-}
-
 /// 虚拟机档的可读拒绝理由（创建与编辑共用同一把尺子）。
-pub fn tier_refusal(spec: &ExecSpec, qemu: Option<&str>) -> Option<String> {
-    let readiness = tier_readiness(spec, qemu);
+pub fn tier_refusal(spec: &ExecSpec, qemu: Option<&str>, probe: &dyn HostProbe) -> Option<String> {
+    let readiness = tier_readiness(spec, qemu, probe);
     if readiness.ready() {
         return None;
     }

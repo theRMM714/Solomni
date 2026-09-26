@@ -11,6 +11,7 @@ use crate::core::history::{HistoryView, SessionMeta};
 use crate::core::module::Roster;
 use crate::core::prompt::Prompts;
 use crate::core::providers::{Channel, Provider, Settings};
+use std::path::Path;
 
 /// 流式片段：一次调用的起点 / 正文 / 思维链。
 #[derive(Debug, Clone)]
@@ -380,4 +381,18 @@ pub struct RepairOutcome {
 /// 默认真现在 adapters（只做控制字符转义）；第三方实现满足本契约即可整体替换。
 pub trait EnvelopeRepair: Send + Sync {
     fn repair(&self, raw: &str, kind: &crate::core::envelope::Malformed) -> RepairOutcome;
+}
+
+/// 宿主能力探测：**只问事实**——不执行任何程序、不安装、不写任何东西。
+/// 机制（读环境变量、查路径存在性、按平台判定虚拟化能力）在适配层；
+/// core 只按结论做判断，因此 core 里不出现 std::env 与 is_file / is_dir。
+pub trait HostProbe: Send + Sync {
+    /// 这个路径存在且是文件。
+    fn is_file(&self, path: &Path) -> bool;
+    /// 这个路径存在且是目录。
+    fn is_dir(&self, path: &Path) -> bool;
+    /// PATH 上有没有这个可执行文件（只查存在性，不执行它；平台扩展名由适配层处理）。
+    fn has_exe(&self, name: &str) -> bool;
+    /// 本机能不能起硬件虚拟化（只问事实，不起任何虚拟机）。
+    fn hypervisor_available(&self) -> bool;
 }

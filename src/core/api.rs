@@ -25,6 +25,10 @@ use crate::core::{
 use crate::kernel::jobs::JobRegistry;
 use crate::kernel::types::SessionId;
 use std::panic::{catch_unwind, AssertUnwindSafe};
+
+// 入站契约返回的词汇：能力接口的返回类型在这里有一份**正式名字**。
+// 呈现层只认这里，不直接碰 ports / providers 的内部路径。
+pub use crate::core::ports::ProbeOutcome;
 use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, Mutex};
 
@@ -261,6 +265,13 @@ pub trait DiscoveryOps: Send + Sync {
     /// 核心按任务推荐的 agent 草案（带理由；用户可改）。
     fn suggest_models(&self, task: &str, mode: WorkMode) -> Result<Vec<AgentSuggestion>, String>;
 }
+/// 日志能力：呈现层与 CLI 的埋点入口（**只转发，不做任何判定**）。
+/// 呈现层因此拿不到端口对象、也不依赖 kernel（见 ARCHITECTURE.md §一）。
+pub trait LogOps: Send + Sync {
+    fn info(&self, at: &str, msg: &str);
+    fn warn(&self, at: &str, msg: &str);
+    fn error(&self, at: &str, msg: &str);
+}
 
 // ---------- 核心手柄（命令通道） ----------
 
@@ -282,6 +293,8 @@ pub struct CoreHandle {
     tx: Sender<Job>,
     jobs: Arc<JobRegistry>,
     bus: Arc<EventBus>,
+    /// 日志句柄：呈现层经 LogOps 能力写日志，拿不到这个端口对象本身。
+    log: Arc<dyn crate::kernel::log::Log + Send + Sync>,
 }
 
 /// 一次"要一个成员回合"的请求：泵在工作线程上让出，回头找主线程驱动（它才拿得到各 agent 的会话）。
@@ -309,7 +322,12 @@ impl CoreHandle {
         let jobs = JobRegistry::new();
         let bus = EventBus::new();
         let (tx, rx) = mpsc::channel::<Job>();
-        let handle = CoreHandle { tx, jobs, bus };
+        let handle = CoreHandle {
+            tx,
+            jobs,
+            bus,
+            log: Arc::clone(&worker_log),
+        };
         // 注意：工作线程**绝不能**捕获取手柄（那会持有一个 Sender，通道永不闭合、线程永不退出）。
         std::thread::Builder::new()
             .name("solomni-core".to_string())
@@ -1217,6 +1235,20 @@ impl DiscoveryOps for CoreHandle {
     }
 }
 
+// ---------- 日志能力 ----------
+
+impl LogOps for CoreHandle {
+    fn info(&self, at: &str, msg: &str) {
+        self.log.info(at, msg)
+    }
+    fn warn(&self, at: &str, msg: &str) {
+        self.log.warn(at, msg)
+    }
+    fn error(&self, at: &str, msg: &str) {
+        self.log.error(at, msg)
+    }
+}
+
 // ---------- 入站能力面（组合根装配一次，按需交给呈现层） ----------
 
 /// 入站能力面：四个角色接口 + 事件台。克隆廉价；呈现层只依赖它需要的字段。
@@ -1228,6 +1260,8 @@ pub struct Ops {
     pub history: Arc<dyn HistoryOps + Send + Sync>,
     pub discovery: Arc<dyn DiscoveryOps + Send + Sync>,
     pub events: Arc<EventBus>,
+    /// 日志能力：呈现层只经它埋点（**不持有端口对象**）。
+    pub log: Arc<dyn LogOps + Send + Sync>,
 }
 
 impl Ops {
@@ -1239,6 +1273,7 @@ impl Ops {
             history: Arc::new(h.clone()),
             discovery: Arc::new(h.clone()),
             events: h.events(),
+            log: Arc::new(h.clone()),
         }
     }
 }

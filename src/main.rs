@@ -156,6 +156,7 @@ fn main() {
         Arc::new(repair),
         Box::new(LoadedPrompts(book)),
         std::sync::Arc::clone(&log),
+        std::sync::Arc::new(adapters::HostProbeAdapter),
     ) {
         Ok(c) => c,
         Err(e) => {
@@ -296,16 +297,11 @@ fn main() {
     let ops = core::api::Ops::from_handle(&handle);
 
     if web {
-        serve_web(
-            ops,
-            port_flag(&args),
-            std::sync::Arc::clone(&log),
-            allow_fence_write,
-        );
+        serve_web(ops, port_flag(&args), allow_fence_write);
     } else {
         // CLI 里输入 webui 可直接转入 Web，无需重启进程（能力面可克隆，两份呈现共用同一个核心）。
         if let presentation::cli::CliExit::Web(port) = presentation::cli::run(ops.clone()) {
-            serve_web(ops, port, std::sync::Arc::clone(&log), allow_fence_write);
+            serve_web(ops, port, allow_fence_write);
         }
     }
 }
@@ -352,6 +348,7 @@ fn doctor() -> i32 {
     let vm = core::exec::vm_requirements(&core::exec::VmInputs {
         base: None,
         qemu: None,
+        probe: &adapters::HostProbeAdapter,
     });
     let doc = serde_json::json!({
         "platform": std::env::consts::OS,
@@ -559,12 +556,7 @@ fn strip_unc_prefix(p: PathBuf) -> PathBuf {
     p
 }
 
-fn serve_web(
-    ops: core::api::Ops,
-    port: u16,
-    log: std::sync::Arc<dyn kernel::log::Log + Send + Sync>,
-    write_allowed: bool,
-) {
+fn serve_web(ops: core::api::Ops, port: u16, write_allowed: bool) {
     let cap = adapters::confine::capability();
     // 能力与本次实际**分开报**（与启动报告同一套说法）：未授权时路径级围栏是关的，
     // 但进程树与资源上限照旧生效——概览里必须让用户看到这个区别，不能只看"本机能力"。
@@ -587,7 +579,7 @@ fn serve_web(
             .map(|s| s.fence_read.len())
             .unwrap_or(0),
     };
-    if let Err(e) = presentation::web::serve(ops, port, log, fence) {
+    if let Err(e) = presentation::web::serve(ops, port, fence) {
         eprintln!("[Web 服务异常] {}", e);
         std::process::exit(1);
     }
