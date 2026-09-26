@@ -314,7 +314,9 @@ tools 自持一个就等于绕过状态所有权——**直接写别人的文件
   `engine.rs:939-940` 原文："没表态时由 after_turn 计数（提醒 → 放过），否则假模型瞬间返回
   会把这里变成紧凑死循环（真烧过 CPU）"。
 
-处理方式待定：立即修，或按 `AGENTS.md` 记入 `tests/gaps.yaml`。
+**处理方式（已定）**：按 `AGENTS.md` 记入 [tests/gaps.yaml](../../tests/gaps.yaml)——
+`session.compaction-send-view-not-truncated`（F1+F2）与 `session.compaction-not-replayed`（F3），
+**与批次 9（`session`）一并修**，不单独改两遍。
 
 ### 3.6 rewind（协调型业务）
 
