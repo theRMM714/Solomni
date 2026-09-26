@@ -3,7 +3,7 @@
 > 本文是**测试执行入口、报告状态、成功标记与 CI 流程的唯一权威**。
 > 质量门禁见 [quality-isolation.md](quality-isolation.md)，验收清单见 [gaps-acceptance.md](gaps-acceptance.md)。
 
-## 九、执行入口与报告
+## 一、执行入口与报告
 
 ### 快速开发检查
 
@@ -111,7 +111,7 @@ git show origin/ci-report:runs/windows/logs/<某一步>.log  # 失败证据原�
 `gaps`（平台缺口账）、`globalGaps`（`tests/gaps.yaml` 的长期目标）、`failed`（硬失败数）。
 `test-fail` 与 `blocked` 这两个更细的状态当前没有实现，也不在计划内——`fail` 与 `gap` 已能如实表达。
 
-## 十、成功标记
+## 二、成功标记
 
 固定标记只增不删，改动含义必须同步更新测试设计：
 
