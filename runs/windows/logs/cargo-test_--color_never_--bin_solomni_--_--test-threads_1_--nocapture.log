@@ -1,0 +1,309 @@
+   Compiling solomni v0.1.0 (D:\a\Solomni\Solomni)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 22.68s
+     Running unittests src\main.rs (target\debug\deps\solomni-d51312a9192f55c5.exe)
+
+running 285 tests
+test adapters::confine::tests::fence_job_round_trips_and_rejects_incomplete_json ... ok
+test adapters::confine::tests::install_dir_never_climbs_to_the_filesystem_root ... ok
+test adapters::confine::tests::interpreter_dirs_resolves_programs_but_not_data_files ... ok
+test adapters::confine::tests::interpreter_dirs_resolves_without_pathext_and_with_quoted_path_entries ... ok
+test adapters::confine::tests::selfcheck_injection_switch_reports_env_unavailable ... ok
+test adapters::confine::tests::windows_program_separators_rewrites_only_the_program_name ... ok
+test adapters::confine::windows::tests::container_profile_is_one_per_agent ... ok
+test adapters::confine::windows::tests::existing_ace_must_cover_the_rights_we_need ... ok
+test adapters::confine::windows::tests::grant_targets_include_parents_with_stat_only ... ok
+test adapters::confine::windows::tests::grants_are_written_when_the_environment_allows_it ... [围栏] 已写权限 2 处：S-1-15-2-3651922426-3691107298-3869512587-1891665460-495275378-2852202728-1152131817 → C:\Users\RUNNER~1\AppData\Local\Temp；S-1-15-2-3651922426-3691107298-3869512587-1891665460-495275378-2852202728-1152131817 → C:\Users\RUNNER~1\AppData\Local\Temp\solomni-grant-probe-1412
+ok
+test adapters::confine::windows::tests::profile_sweep_only_matches_our_prefix ... ok
+test adapters::confine::windows::tests::read_only_grants_write_ro_aces_and_revoke_removes_them ... [围栏] 已写权限 3 处：S-1-15-2-2161921721-1979015856-905389020-4225462077-3823900902-3789645190-3617330159 → C:\Users\RUNNER~1\AppData\Local\Temp；S-1-15-2-2161921721-1979015856-905389020-4225462077-3823900902-3789645190-3617330159 → C:\Users\RUNNER~1\AppData\Local\Temp\solomni-ro-probe-1412；S-1-15-2-2161921721-1979015856-905389020-4225462077-3823900902-3789645190-3617330159 → C:\Users\RUNNER~1\AppData\Local\Temp\solomni-ro-target-1412
+ok
+test adapters::confine::windows::tests::revoke_removes_the_container_ace_from_the_given_roots ... [围栏] 已写权限 2 处：S-1-15-2-3651922426-3691107298-3869512587-1891665460-495275378-2852202728-1152131817 → C:\Users\RUNNER~1\AppData\Local\Temp；S-1-15-2-3651922426-3691107298-3869512587-1891665460-495275378-2852202728-1152131817 → C:\Users\RUNNER~1\AppData\Local\Temp\solomni-revoke-probe-1412
+ok
+test adapters::http_probe::tests::replay_shapes_are_complete_histories_covering_the_writable_differences ... ok
+test adapters::proc_tools::tests::broken_mechanism_refuses_execution_instead_of_degrading ... [围栏] 容器围栏机制装不上（profile 写错）：本次拒绝执行，不按无围栏跑
+ok
+test adapters::proc_tools::tests::env_whitelist_drops_foreign_vars_and_moves_home_into_the_sandbox ... ok
+test adapters::proc_tools::tests::missing_launcher_binary_is_reported_honestly ... [围栏] 容器围栏未启用（没有授权在本机写权限）：外部工具按无围栏执行。要启用：在设置里打开，或在 .home/settings.yaml 写 fence_write: true
+ok
+test adapters::proc_tools::tests::real_tool_process_does_not_inherit_foreign_env ... [围栏] 容器围栏未启用（没有授权在本机写权限）：外部工具按无围栏执行。要启用：在设置里打开，或在 .home/settings.yaml 写 fence_write: true
+ok
+test adapters::proc_tools::tests::real_tool_process_is_killed_on_timeout_and_reported ... [围栏] 容器围栏未启用（没有授权在本机写权限）：外部工具按无围栏执行。要启用：在设置里打开，或在 .home/settings.yaml 写 fence_write: true
+ok
+test adapters::proc_tools::tests::real_tool_process_receives_stdin_json_and_reports_success ... [围栏] 容器围栏未启用（没有授权在本机写权限）：外部工具按无围栏执行。要启用：在设置里打开，或在 .home/settings.yaml 写 fence_write: true
+ok
+test adapters::proc_tools::tests::real_tool_process_runs_a_relative_program_path ... [围栏] 容器围栏未启用（没有授权在本机写权限）：外部工具按无围栏执行。要启用：在设置里打开，或在 .home/settings.yaml 写 fence_write: true
+ok
+test adapters::proc_tools::tests::receipt_markers_come_from_the_prompt_book ... ok
+test adapters::repair::tests::a_cut_in_the_middle_of_a_string_is_never_patched ... ok
+test adapters::repair::tests::a_missing_closing_brace_is_filled_in_when_the_content_is_complete ... ok
+test adapters::repair::tests::other_kinds_are_left_to_the_model ... ok
+test adapters::repair::tests::raw_controls_inside_strings_are_escaped ... ok
+test adapters::repair::tests::two_envelopes_in_one_reply_are_never_patched ... ok
+test core::patch::tests::a_multiline_search_must_match_contiguously ... ok
+test core::patch::tests::deleting_a_span_is_an_empty_replace ... ok
+test core::patch::tests::every_block_must_be_closed_by_end_file ... ok
+test core::patch::tests::failures_name_the_edit_and_the_fact ... ok
+test core::patch::tests::faults_are_specific_facts ... ok
+test core::patch::tests::line_endings_and_missing_final_newline_are_preserved ... ok
+test core::patch::tests::marker_names_ignore_case ... ok
+test core::patch::tests::parses_multiple_blocks_with_prose_around ... ok
+test core::patch::tests::searches_are_matched_by_whole_lines_and_applied_in_order ... ok
+test core::schema::tests::array_payload_renders_a_valid_json_schema ... ok
+test core::schema::tests::check_reports_the_fact_not_a_guess ... ok
+test core::schema::tests::declared_empty_params_rejects_every_key ... ok
+test core::schema::tests::defaults_are_applied_without_overwriting ... ok
+test core::schema::tests::renders_both_shapes_from_one_declaration ... ok
+test core::schema::tests::undeclared_params_means_no_validation ... ok
+test tests::adapters::file_log_writes_every_level_into_a_timestamped_file_under_logs ... ok
+test tests::adapters::finish_reason_is_carried_back_from_both_paths ... ok
+test tests::adapters::fs_history_roundtrips_lists_deletes_and_rejects_broken_meta ... ok
+test tests::adapters::fs_modules_accepts_valid_folders_and_rejects_each_illegal_form_with_a_reason ... ok
+test tests::adapters::fs_packages_scans_the_dependency_folder_and_reports_each_rejection ... ok
+test tests::adapters::fs_sys_io_reads_utf8_flags_lossy_and_truncation_and_creates_parents ... ok
+test tests::adapters::fs_workspace_builds_the_real_layout_and_lists_only_files ... ok
+test tests::adapters::http_chat_assembles_streaming_tool_calls_by_index ... ok
+test tests::adapters::http_chat_reads_native_tool_calls ... ok
+test tests::adapters::http_chat_reads_non_stream_reasoning ... ok
+test tests::adapters::http_chat_streams_chunks_and_stops_when_the_caller_aborts ... ok
+test tests::adapters::http_errors_come_back_honestly_and_never_carry_the_api_key ... ok
+test tests::adapters::http_gateway_falls_back_to_demo_only_when_there_is_no_channel ... ok
+test tests::adapters::http_gateway_talks_to_a_real_endpoint_on_loopback ... ok
+test tests::adapters::http_model_catalog_lists_models_and_rejects_broken_shapes ... ok
+test tests::adapters::native_history_goes_out_in_protocol_shape ... ok
+test tests::adapters::outbound_error_classification_keeps_environment_and_our_bug_apart ... ok
+test tests::adapters::replay_shape_probe_reports_which_writings_the_supplier_accepts ... ok
+test tests::adapters::role_face_comes_from_the_role_table ... ok
+test tests::adapters::system_tools_and_roles_are_self_consistent ... ok
+test tests::adapters::tool_probe_tells_supported_unsupported_and_unknown_apart ... ok
+test tests::adapters::yaml_prompts_loads_the_shipped_book_and_reports_missing_or_broken_files ... ok
+test tests::adapters::yaml_settings_store_defaults_saves_and_reports_malformed_files ... ok
+test tests::api::a_panicking_command_does_not_take_the_core_down ... 
+thread 'solomni-core' (7732) panicked at src\core\api.rs:415:51:
+入站契约测试注入的 panic
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+ok
+test tests::api::auto_compaction_kicks_in_when_the_history_exceeds_the_budget ... ok
+test tests::api::collab_discussion_emits_each_member_line_as_it_speaks ... ok
+test tests::api::collab_transcript_lands_on_disk_while_the_discussion_runs ... ok
+test tests::api::commands_run_on_the_core_thread_and_changes_are_visible ... ok
+test tests::api::compacting_replaces_the_send_view_with_one_rolling_summary ... ok
+test tests::api::generation_pushes_facts_to_the_event_bus_with_sequence_numbers ... ok
+test tests::api::history_merge_is_the_transcript_plus_the_bus_tail_without_repeats ... ok
+test tests::api::missing_sessions_and_bad_inputs_come_back_as_errors ... ok
+test tests::api::reads_are_not_queued_behind_a_collab_discussion ... ok
+test tests::api::reads_are_not_queued_behind_a_long_generation ... ok
+test tests::api::stop_takes_effect_while_generation_is_still_running ... ok
+test tests::api::stopping_a_collab_discussion_is_prompt_and_keeps_the_session ... ok
+test tests::api::suggest_models_pushes_on_a_system_session_and_leaves_no_trace ... ok
+test tests::core::a_failing_patch_block_writes_nothing_at_all ... ok
+test tests::core::a_freeform_envelope_is_never_repaired ... ok
+test tests::core::a_malformed_envelope_is_repaired_when_the_fix_is_unambiguous ... ok
+test tests::core::a_patch_without_end_marker_is_refused_with_the_line ... ok
+test tests::core::a_probe_writes_back_only_conclusive_results ... ok
+test tests::core::a_truncated_output_is_reported_as_truncation_not_as_a_bad_envelope ... ok
+test tests::core::a_writing_call_is_a_barrier_and_sees_the_merged_ledger ... ok
+test tests::core::agent_crud_and_work_with_agents ... ok
+test tests::core::agent_system_carries_the_real_roots ... ok
+test tests::core::agreement_is_sticky_so_agreed_members_are_not_asked_again ... ok
+test tests::core::an_aborted_generation_never_executes_a_repairable_envelope ... ok
+test tests::core::approved_plan_spawns_a_sub_session_per_ready_node ... ok
+test tests::core::body_json_is_not_a_core_operation ... ok
+test tests::core::builtin_arg_mistakes_are_named_and_the_signature_comes_back ... ok
+test tests::core::builtin_edit_refuses_files_it_cannot_see_whole ... ok
+test tests::core::builtin_edit_replaces_the_requested_span_and_reports_what_it_did ... ok
+test tests::core::builtin_file_tools_run_in_direct_session ... ok
+test tests::core::builtin_list_shows_a_directory_and_read_guides_to_it ... ok
+test tests::core::builtin_read_range_numbers_lines_and_points_at_the_next_offset ... ok
+test tests::core::builtin_read_reports_errors_verbatim ... ok
+test tests::core::builtin_search_reports_line_numbers_and_respects_case ... ok
+test tests::core::builtin_tool_book_is_the_one_source_of_names_and_paths ... ok
+test tests::core::builtin_write_into_module_dir_is_allowed_with_notice ... ok
+test tests::core::builtin_write_needs_a_complete_prior_read_of_an_existing_file ... ok
+test tests::core::chain_finished_needs_every_node_settled ... ok
+test tests::core::chain_ids_are_derived_from_stages ... ok
+test tests::core::chain_problems_reject_cycles_and_bad_refs ... ok
+test tests::core::chain_stages_lay_out_along_the_dependency_graph ... ok
+test tests::core::changing_the_declared_mode_takes_effect_on_the_next_generation ... ok
+test tests::core::checklist_rework_is_a_validated_node_id ... ok
+test tests::core::collab_delegated_roster_written_back_and_rebuilt_from_meta ... ok
+test tests::core::collab_pauses_for_plan_review_until_the_user_approves ... ok
+test tests::core::collab_rewind_rebuilds_from_transcript_and_resume_waits_at_gate ... ok
+test tests::core::collab_state_derive_and_withdraw ... ok
+test tests::core::collab_state_derives_the_task_chain_from_plan_review ... ok
+test tests::core::collab_update_task_rewinds_and_latest_wins ... ok
+test tests::core::core_collab_delegated_slate_flow ... ok
+test tests::core::core_collab_demo_runs_full_five_stages ... ok
+test tests::core::core_collab_slate_rejects_invalid_picks ... ok
+test tests::core::core_collab_tool_modules_run_in_execution ... ok
+test tests::core::core_direct_seeds_system_prompt ... ok
+test tests::core::core_direct_tool_flow_injects_result_into_history ... ok
+test tests::core::core_files_view_carries_lists_and_real_roots ... ok
+test tests::core::core_operation_runs_readonly_verification_before_the_op ... ok
+test tests::core::core_operation_streams_its_text_to_the_facts_outlet ... ok
+test tests::core::core_operations_require_a_tool_call_not_body_json ... ok
+test tests::core::create_work_persists_and_history_replays ... ok
+test tests::core::create_work_validates_user_choices ... ok
+test tests::core::declared_parallel_reads_overlap_and_results_keep_the_call_order ... ok
+test tests::core::deleting_a_session_asks_the_fence_to_release_its_grants ... ok
+test tests::core::diagnose_text_spells_out_every_reason ... ok
+test tests::core::direct_rewind_drops_tail_then_continue_allows_user_turn ... ok
+test tests::core::discussion_ask_pauses ... ok
+test tests::core::discussion_autonomy_archives_ask ... ok
+test tests::core::discussion_call_failure_interrupts_without_absorbing_a_line ... ok
+test tests::core::discussion_calls_carry_the_global_streaming_and_budget ... ok
+test tests::core::discussion_full_agreement ... ok
+test tests::core::discussion_leave_shrinks ... ok
+test tests::core::discussion_member_can_inspect_before_speaking ... ok
+test tests::core::discussion_member_cannot_call_a_builtin_outside_its_role_face ... ok
+test tests::core::discussion_member_cannot_use_module_tools ... ok
+test tests::core::discussion_member_turn_finalizes_by_round_and_rebuilds_the_same_dialogue ... ok
+test tests::core::discussion_round_cap_enforced ... ok
+test tests::core::discussion_turn_carries_the_agent_sessions_own_history ... ok
+test tests::core::discussion_turn_streams_deltas_and_never_leaks_the_envelope ... ok
+test tests::core::edit_session_enforces_the_same_rules_as_creation ... ok
+test tests::core::edit_session_freezes_names_only_after_content ... ok
+test tests::core::edit_session_writes_meta_appends_config_record_and_rebuilds ... ok
+test tests::core::endpoint_candidates_complete_and_fall_back ... ok
+test tests::core::endpoint_resolve_candidates_retries_shape_mismatch_and_stops_on_fatal ... ok
+test tests::core::envelope_degraded_keeps_raw ... ok
+test tests::core::envelope_multi_call_runs_every_call_and_rebuilds_identically ... ok
+test tests::core::envelope_only_round_produces_only_a_tool_line ... ok
+test tests::core::envelope_parse_clean ... ok
+test tests::core::envelope_rejects_mixing_the_single_and_calls_shapes ... ok
+test tests::core::envelope_text_may_be_omitted ... ok
+test tests::core::envelope_tool_parses_name_and_args ... ok
+test tests::core::envelope_wrapped_json_still_parses ... ok
+test tests::core::exec_host_tier_ignores_packages ... ok
+test tests::core::exec_vm_plan_pins_versions_and_orders_prefix_before_system ... ok
+test tests::core::exec_vm_tier_reports_missing_ambiguous_and_unavailable ... ok
+test tests::core::execution_review_pass_and_fail_paths ... ok
+test tests::core::executor_reports_through_a_tool_call ... ok
+test tests::core::external_tool_without_module_is_refused_when_agent_has_many_modules ... ok
+test tests::core::extract_balanced_object ... ok
+test tests::core::failed_node_acceptance_pauses_then_continue_redispatches ... ok
+test tests::core::history_list_is_ordered_as_a_tree ... ok
+test tests::core::library_keeps_versions_and_rejects_duplicates ... ok
+test tests::core::malformed_envelopes_are_classified_so_the_model_gets_the_right_fix ... ok
+test tests::core::malformed_tool_envelope_becomes_a_failed_tool_line ... ok
+test tests::core::malformed_tool_without_salvageable_name_still_records_a_line ... ok
+test tests::core::mode_vocabulary_is_single_or_collab_only ... ok
+test tests::core::model_catalog_parses_openai_shape_and_rejects_bad ... ok
+test tests::core::model_context_is_kept_when_the_form_omits_it ... ok
+test tests::core::model_guards_core_default_and_discovery_uses_stored_provider ... ok
+test tests::core::module_runtimes_are_validated ... ok
+test tests::core::module_tool_params_are_declared_in_the_manifest_and_enforced_by_core ... ok
+test tests::core::module_tools_are_concurrent_only_when_declared ... ok
+test tests::core::module_tools_may_not_take_builtin_names ... ok
+test tests::core::module_without_runtime_is_denied_with_reason ... ok
+test tests::core::native_mode_declares_tools_and_runs_multiple_structured_calls ... ok
+test tests::core::native_mode_refuses_a_hand_written_envelope ... ok
+test tests::core::native_multi_call_rebuilds_identically_to_live ... ok
+test tests::core::native_tool_names_map_to_discussion_verbs ... ok
+test tests::core::node_task_is_a_system_line_but_a_user_message ... ok
+test tests::core::only_this_turns_tools_are_advertised ... ok
+test tests::core::package_conflicts_flag_overlapping_paths ... ok
+test tests::core::package_manifest_check_rejects_illegal_forms ... ok
+test tests::core::patch_channel_writes_files_without_json_escaping ... ok
+test tests::core::persist_policy_is_decided_by_the_session_kind ... ok
+test tests::core::plan_review_carries_the_core_advice ... ok
+test tests::core::prompt_book_loads_from_yaml ... ok
+test tests::core::prompt_render_keeps_single_braces ... ok
+test tests::core::prompt_render_replaces_and_rejects_missing ... ok
+test tests::core::prose_then_tool_envelope_keeps_prose_line_and_rebuilds_identically ... ok
+test tests::core::prose_then_unclosed_tool_envelope_is_malformed_and_keeps_prose ... ok
+test tests::core::prose_without_an_envelope_is_not_a_statement ... ok
+test tests::core::provider_lifecycle_and_key_never_leaks_to_view ... ok
+test tests::core::reasoning_is_kept_on_final_transcript_lines ... ok
+test tests::core::rebuilt_context_keeps_tool_result ... ok
+test tests::core::refs_rewrite_covers_prefixes_speakers_and_punctuation ... ok
+test tests::core::repeated_malformed_envelopes_each_get_a_failed_row ... ok
+test tests::core::review_parse_failure_is_conservative_fail ... ok
+test tests::core::rewind_clears_the_read_ledger_so_overwrite_needs_a_fresh_read ... ok
+test tests::core::rewind_keeps_only_lines_before_the_mark ... ok
+test tests::core::rewind_never_splits_a_reply ... ok
+test tests::core::rewinding_the_main_session_truncates_agent_sessions_by_turn ... ok
+test tests::core::rework_prompt_carries_the_acceptance_note ... ok
+test tests::core::roster_lists_modules ... ok
+test tests::core::runtime_report_is_tier_aware ... ok
+test tests::core::same_agent_nodes_serialize_but_different_agents_run_together ... ok
+test tests::core::same_named_tools_across_modules_are_no_longer_a_conflict ... ok
+test tests::core::same_named_tools_in_two_modules_run_in_their_own_root ... ok
+test tests::core::sandbox_resolve_accepts_only_absolute_paths_inside_roots ... ok
+test tests::core::sandboxes_lookup_is_by_agent ... ok
+test tests::core::session_config_reports_tier_missing_and_runtimes_dir ... ok
+test tests::core::session_meta_exec_section_roundtrips_and_reads_legacy_meta ... ok
+test tests::core::settings_resolves_model_to_channel ... ok
+test tests::core::shipped_modules_scan_clean ... ok
+test tests::core::single_mode_accepts_multi_module_agent_and_converses ... ok
+test tests::core::stage_review_refills_until_the_ids_are_valid ... ok
+test tests::core::streaming_setting_is_the_ceiling_for_every_call ... ok
+test tests::core::streaming_stops_at_the_envelope_brace ... ok
+test tests::core::suggest_models_recommends_agents ... ok
+test tests::core::suggest_models_reuses_stored_agent_without_suggesting_model ... ok
+test tests::core::suggest_models_single_mode_keeps_lone_pick_as_is ... ok
+test tests::core::tool_call_event_is_emitted_before_the_next_round ... ok
+test tests::core::tool_envelope_after_prose_runs_and_json_never_shows ... ok
+test tests::core::tool_loop_has_no_call_cap ... ok
+test tests::core::tool_loop_rejects_undeclared_tool ... ok
+test tests::core::tool_loop_runs_declared_tool ... ok
+test tests::core::tool_mode_change_needs_no_session_rebuild ... ok
+test tests::core::tool_round_reasoning_lands_on_the_tool_line ... ok
+test tests::core::tool_type_mention_in_plain_speech_is_not_misjudged ... ok
+test tests::core::total_review_rework_names_the_nodes_and_only_they_are_redispatched ... ok
+test tests::core::user_at_reference_is_rewritten_in_transcript_and_history ... ok
+test tests::core::vm_requirements_report_qemu_registration ... ok
+test tests::core::vm_tier_is_refused_when_the_machine_cannot_carry_it ... ok
+test tests::core::vm_tier_readiness_gates_creation_and_editing ... ok
+test tests::core::work_upload_conflict_and_safe_name ... ok
+test tests::core::workspace_list_reports_work_and_agent_files ... ok
+test tests::fakes::demo_gateway_core_channel_is_marked_demo_and_replies ... ok
+test tests::fakes::demo_gateway_member_channel_discloses_the_fallback_and_names_the_module ... ok
+test tests::fakes::demo_gateway_needs_no_provider_and_does_not_dial_out ... ok
+test tests::fakes::demo_gateway_scripts_are_valid_envelopes ... ok
+test tests::fakes::fake_chat_abort_at_start_returns_empty_and_emits_nothing_more ... ok
+test tests::fakes::fake_chat_abort_at_text_keeps_the_produced_text ... ok
+test tests::fakes::fake_chat_empty_script_is_an_empty_answer ... ok
+test tests::fakes::fake_chat_records_every_call_verbatim ... ok
+test tests::fakes::fake_chat_replays_in_order_then_repeats_the_last ... ok
+test tests::fakes::fake_chat_streaming_emits_start_then_one_text_chunk ... ok
+test tests::fakes::fake_chat_without_stream_never_calls_back ... ok
+test tests::intent::act_dispatches_to_the_two_result_shapes ... ok
+test tests::intent::edit_session_reports_core_errors_verbatim ... ok
+test tests::intent::editing_is_refused_while_a_session_is_generating ... ok
+test tests::intent::merge_into_one_dedups_modules_and_keeps_order ... ok
+test tests::intent::pick_agents_guides_on_empty_registry_and_names_the_unknown ... ok
+test tests::intent::split_names_accepts_commas_and_whitespace ... ok
+test tests::intent::unique_work_name_falls_back_and_appends_a_suffix ... ok
+test tests::ports::chat_double_shared_script_replays_in_order_and_is_explicitly_non_streaming ... ok
+test tests::ports::chat_gateway_double_scripts_member_and_core_channels_separately ... ok
+test tests::ports::fence_host_doubles_release_record_and_propagate_failure ... ok
+test tests::ports::history_store_double_roundtrips_lists_deletes_and_propagates_failure ... ok
+test tests::ports::model_catalog_double_lists_records_and_propagates_failure ... ok
+test tests::ports::module_source_double_scans_a_pure_function_of_the_given_list ... ok
+test tests::ports::noop_log_is_silent_and_shareable_across_threads ... ok
+test tests::ports::package_source_double_builds_a_library_and_reports_its_dir ... ok
+test tests::ports::prompt_source_double_loads_the_builtin_book_and_propagates_failure ... ok
+test tests::ports::settings_store_double_roundtrips_and_propagates_failure ... ok
+test tests::ports::silent_runner_double_fails_loudly_on_any_call - should panic ... 
+thread 'tests::ports::silent_runner_double_fails_loudly_on_any_call' (3484) panicked at src\tests\core.rs:3018:9:
+不应调用工具
+ok
+test tests::ports::sys_io_double_reads_writes_and_propagates_failure ... ok
+test tests::ports::tool_runner_double_records_the_call_site_and_reports_failure_honestly ... ok
+test tests::ports::workspace_double_prepares_writes_lists_and_propagates_failure ... ok
+test tests::routes::catalog_is_free_of_duplicates_and_routes_do_not_overlap ... ok
+test tests::routes::catalog_json_covers_every_route ... ok
+test tests::routes::documented_route_table_matches_the_catalog ... ok
+test tests::routes::events_sid_filter_decodes_percent_escapes ... ok
+test tests::routes::every_api_route_reports_capability_failure_as_4xx ... ok
+test tests::routes::every_catalogued_route_has_a_handler ... ok
+test tests::routes::frontend_only_calls_catalogued_paths ... ok
+test tests::routes::model_probe_passes_the_verdict_through_verbatim ... ok
+test tests::routes::replay_probe_passes_every_shape_through_verbatim ... ok
+test tests::routes::request_bodies_are_validated_before_anything_else ... ok
+test tests::routes::session_action_boundaries_are_explicit ... ok
+test tests::routes::success_shapes_are_pinned_per_route ... ok
+test tests::routes::unknown_route_is_reported_as_404 ... ok
+
+test result: ok. 285 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 6.93s
+
