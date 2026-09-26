@@ -13,9 +13,10 @@ use crate::capabilities::tools::ports::{SysIo, ToolRunner};
 use crate::capabilities::workspace::api::Sandboxes;
 use crate::capabilities::workspace::api::{ExecSpec, Module};
 use crate::capabilities::workspace::ports::{ModuleSource, PackageSource};
-use crate::core::engine::{Discussion, Execution, Member, MemberTools, TurnOut, MAX_ROUNDS};
+use crate::core::engine::{Discussion, Execution, Member, TurnOut, MAX_ROUNDS};
 use crate::core::events::{CheckView, LineView, Pending, SessionEvent};
 use crate::core::history::{AgentMeta, SessionMeta};
+use crate::core::session::MemberTools;
 use std::sync::Arc;
 
 /// 节点验收的结论：逐节点 (node, ok, note)。
@@ -316,7 +317,7 @@ impl CollabSession {
         opts: crate::capabilities::llm::api::CompleteOpts<'static>,
         mode: crate::capabilities::registry::api::ToolMode,
         core_chat: &mut dyn Chat,
-        verify: Option<&mut crate::core::engine::MemberTools>,
+        verify: Option<&mut crate::core::session::MemberTools>,
         kind: &str,
         payload: &str,
         text: &str,
@@ -371,7 +372,7 @@ impl CollabSession {
         opts: crate::capabilities::llm::api::CompleteOpts<'static>,
         mode: crate::capabilities::registry::api::ToolMode,
         core_chat: &mut dyn Chat,
-        verify: Option<&mut crate::core::engine::MemberTools>,
+        verify: Option<&mut crate::core::session::MemberTools>,
         // 上一次填错了要它重填的话（核心据此**一直重填**到合法，不设次数上限）。
         retry: Option<&str>,
         // 核心这一轮的行推给谁。
@@ -818,7 +819,7 @@ impl CollabSession {
     /// 为什么要它：核心操作（出方案 / 节点验收…）也常需要"先看看现场再下结论"，
     /// 而核心不是 member、手里没有工具环境——没有它，模型一想核实就被判"没调用 X"而整步中断。
     /// 工具面只发**该角色的只读核实工具**（按声明里的 capability = fs-read 判定），写类一律不发。
-    fn core_verify_tools(&self, role: &str) -> Option<crate::core::engine::MemberTools> {
+    fn core_verify_tools(&self, role: &str) -> Option<crate::core::session::MemberTools> {
         let mut sb = self.sandboxes.list.first()?.clone();
         sb.agent = "核心".to_string();
         sb.private = sb.shared.clone();
@@ -828,7 +829,7 @@ impl CollabSession {
             .tool_face(role)
             .map(|f| f.into_iter().map(|(id, _)| id.to_string()).collect())
             .unwrap_or_default();
-        Some(crate::core::engine::MemberTools {
+        Some(crate::core::session::MemberTools {
             mode: self.core_mode,
             modules: std::collections::BTreeMap::new(),
             observations: crate::capabilities::tools::api::Observations::default(),

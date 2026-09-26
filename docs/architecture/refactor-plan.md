@@ -196,7 +196,7 @@ capabilities/<name>/
 | `say` `agree` `leave` `ask` | `envelope::Verb` + `collab_state.rs:111-117` + `engine.rs:1099-1117` | **collab** |
 | `compact` | `session::compact_turn`（`session.rs:237`） | **session** |
 
-两处硬耦合：**工具面 `MemberTools` 定义在 `engine.rs:86-117`**（还直接持 `repair`/`log`/`runner`/`io` 四个端口）；
+两处硬耦合：**工具面 `MemberTools`**（批次 12a 已从 `engine.rs` 搬到 `core/session.rs`，它的**行为**仍留在引擎；仍直接持 `repair`/`log`/`runner`/`io` 四个端口）；
 **`session.rs:421-423` 伸手改工具内部状态**（`t.observations.clear()`）。
 
 **目标边界**：
@@ -376,8 +376,7 @@ tools 自持一个就等于绕过状态所有权——**直接写别人的文件
 ### 3.7 collab（协调型业务）
 
 协作状态机、讨论泵、任务链、审查关卡、节点验收、总验收。它是依赖最多的能力，**最后迁**。
-前置：`engine ⇄ session` 的环必须先解（`engine` 引 `session::build_round_lines`/`stream_piece`；
-`session` 引 `engine::assemble`/`converse_with`/`Round`）。
+前置（**批次 12a 已完成**）：`engine ⇄ session` 的环已解——做法是**循环反转**：把回合驱动（`say`/`dispatch_task`/`discussion_turn`/`continue_reply`/`compact_turn`/`run_rounds`/`run`）与行构造从 `session.rs` 搬进 `engine.rs`（以 `impl AgentSession` 写在引擎里，调用点零改动），并把回合词汇（`MemberTools`/`ModuleTools`）搬进 `session.rs`。依赖方向因此是单向 `engine → session`。
 
 ### 3.8 目标依赖图（必须无环）
 
@@ -438,7 +437,7 @@ kernel       ──▶ （无）
 | **9** | **llm 能力落位**：`capabilities/llm/`（`api` / `ports` / `domain/envelope`）；`envelope.rs` 随能力搬出 | 8 | **已完成**（`prompt → core::envelope` 那条基线豁免**自动清零**；⚠️ 环从 11 涨到 15——见批次 10 的前置项） |
 | **10** | **workspace 能力落位**：`module` / `packages` / `exec` / `workspace`（沙箱数据）+ 三个端口；**前置（批次 9 暴露的桥）已先切**：把协议→文案的映射移进 `llm`（模板仍留 `prompt`） | 6, 9 | **已完成**（`prompt` 零外部依赖、彻底脱环；环 15 → **12**；两处自动清零：`registry → core::module`、`presentation → core::exec`；`HostProbe` 下沉 `kernel/host.rs`） |
 | **11** | **tools 能力落位**：`capabilities/tools/`（`systool` / `patch` / `schema` / `roles` / `fence`）+ 三个端口；钉死 §3.4（实现锁内部、机制留端口、产出事实不落盘） | 10 | **已完成**（环 12 → **8**；批次 10 的两条反向边自动清零；1 条新反向边 `→ core::session`；`core/ports.rs` 只剩 `HistoryStore`） |
-| **12** | **session**（含压缩 `compact`：钉死 §3.5 的五条不变式与压缩×回档边界；并合并运行态的两份真相、落位 `bus`） | 11 | 未开始 |
+| **12** | **session 能力落位**（含压缩 `compact`：钉死 §3.5 的五条不变式与压缩×回档边界；并合并运行态的两份真相、落位 `bus`）。**12a 已完成**：循环反转切掉 `engine ⇄ session`（环 8 → **7**，`engine` 脱环） | 11 | 12a 完成；**12b（提取能力）未开始** |
 | **13** | **rewind**（协调型；`marks` 归属方案 A） | 12 | 未开始 |
 | **14** | **collab** | 13 | 未开始 |
 | **15** | **presentation 收口 + 前端分区**：只 `use` 各业务 `api`；`app.js` 分区 | 14 | 未开始 |

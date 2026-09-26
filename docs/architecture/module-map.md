@@ -26,8 +26,8 @@
 | `history.rs` | 会话元信息与历史视图的内存形态 |
 | `collab_state.rs` | 「转录即状态」的协作状态派生（纯函数、可回放） |
 | `collab.rs` | 协作会话状态机与讨论泵（泵只决定"该问谁"、核心驱动成员回合；发言投影、待裁决与工具面发放） |
-| `engine.rs` | 讨论/执行/验收的引擎；**唯一的轮循环** `converse_with`（单 agent / 节点 / 讨论席共用：表态与工具两套形态、按声明调度的并发、逐轮外送）；**唯一的请求装配点** `assemble`（身份 + 本回合工具面 + 对话 + 本回合提示） |
-| `session.rs` | 单 agent 会话：**会话参数**（`SessionParams`：身份与环境，每次调用现渲染）与**对话**（`dialogue`：只有发生过的事）分开；转录行带稳定 id；`TurnRun` + `build_round_lines`（**唯一的行构造点**）；`discussion_turn` = 讨论席那一回合（同一条循环 + 表态 + 逐轮落进它自己的会话） |
+| `engine.rs` | 讨论/执行/验收的引擎；**唯一的轮循环** `converse_with`（单 agent / 节点 / 讨论席共用：表态与工具形态、按声明调度的并发、逐轮外送）；**唯一的请求装配点** `assemble`；**回合驱动**（`say` / `dispatch_task` / `discussion_turn` / `continue_reply` / `compact_turn` / `run_rounds` / `run`——批次 12a 从 `session.rs` 搬来，依赖方向才是 `engine → session`）；`build_round_lines`（**唯一的行构造点**） |
+| `session.rs` | 单 agent 会话的**状态与簿记**：**会话参数**（`SessionParams`：身份与环境，每次调用现渲染）与**对话**（`dialogue`：只有发生过的事）分开；转录行带稳定 id；`TurnRun`；**工具面** `MemberTools` / `ModuleTools`（批次 12a 从 `engine.rs` 搬来）；`stream_piece`（流式外送规则）。回合驱动与行构造在 `engine.rs`）；`discussion_turn` = 讨论席那一回合（同一条循环 + 表态 + 逐轮落进它自己的会话） |
 
 ## 三、`adapters/`（机制，实现 core 端口）
 

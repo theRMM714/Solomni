@@ -13,10 +13,11 @@ use crate::capabilities::workspace::api::Module;
 use crate::capabilities::workspace::api::{self as exec, Diagnosis, ExecSpec};
 use crate::capabilities::workspace::api::{Library, PackageManifest};
 use crate::capabilities::workspace::ports::{ModuleSource, Workspace};
-use crate::core::engine::{Discussion, Member, MemberTools, ModuleTools, TurnOut, MAX_ROUNDS};
+use crate::core::engine::{Discussion, Member, TurnOut, MAX_ROUNDS};
 use crate::core::events::Live;
 use crate::core::history::{AgentMeta, SessionMeta};
 use crate::core::ports::HistoryStore;
+use crate::core::session::{MemberTools, ModuleTools};
 use crate::core::{
     AgentInstance, CollabStep, ConfigAgent, Core, Pending, SessionEdit, SessionEvent, WorkMode,
     WorkSpec,
@@ -607,7 +608,7 @@ pub(crate) fn tool_round_reasoning_lands_on_the_tool_line() {
         degraded: false,
     };
     let next = std::cell::Cell::new(0u64);
-    let lines = crate::core::session::build_round_lines(
+    let lines = crate::core::engine::build_round_lines(
         "a",
         &prompts.core.tool_texts,
         &round,

@@ -1961,8 +1961,8 @@ impl Core {
         unavailable: BTreeMap<String, Vec<String>>,
         net: bool,
         mode: crate::capabilities::registry::api::ToolMode,
-    ) -> engine::MemberTools {
-        engine::MemberTools {
+    ) -> crate::core::session::MemberTools {
+        crate::core::session::MemberTools {
             mode,
             modules: engine::tool_table(modules),
             observations: crate::capabilities::tools::api::Observations::default(),
