@@ -1,0 +1,151 @@
+{
+  "platform": "darwin",
+  "arch": "arm64",
+  "osKey": "macos",
+  "profile": "debug",
+  "fenceLive": true,
+  "doctor": {
+    "arch": "aarch64",
+    "externals": {
+      "curl": "/usr/bin/curl",
+      "node": "/Users/runner/hostedtoolcache/node/24.20.0/arm64/bin/node",
+      "python": "/Library/Frameworks/Python.framework/Versions/Current/bin/python"
+    },
+    "fence": {
+      "fs": true,
+      "net": true,
+      "note": "macOS：seatbelt（sandbox_init，私有且已弃用的 ABI）强制可达范围并按档位断网",
+      "tree": true
+    },
+    "platform": "macos",
+    "vm_tier": {
+      "available": false,
+      "requirements": [
+        {
+          "detail": "本机虚拟机监视器可用（macOS 虚拟化框架）",
+          "how": "",
+          "id": "hypervisor",
+          "met": true
+        },
+        {
+          "detail": "guest 本体尚未接入（工具进程仍在宿主上跑，没有真正的 guest）",
+          "how": "等产品的 guest 接入（方向：平台原生虚拟化；QEMU 与镜像用户自备，产品只检测与指路）",
+          "id": "guest",
+          "met": false
+        },
+        {
+          "detail": "没有找到 qemu-system-x86_64（按PATH找过）",
+          "how": "自行安装 QEMU 并放进 PATH，或在设置里登记它的完整路径（本产品不自带、不下载 QEMU）",
+          "id": "qemu",
+          "met": false
+        },
+        {
+          "detail": "没有指定基础根",
+          "how": "自备一份最小系统（发行版基底 + 内核），把目录填进设置或会话的 base（本产品不预置、不下载镜像）",
+          "id": "base",
+          "met": false
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "step": "cargo build",
+      "status": "pass",
+      "detail": "",
+      "ms": 31943
+    },
+    {
+      "step": "T0 编译（--all-targets）",
+      "status": "pass",
+      "detail": "",
+      "ms": 10251
+    },
+    {
+      "step": "T0 结构审查",
+      "status": "pass",
+      "detail": "",
+      "ms": 37
+    },
+    {
+      "step": "T0 格式（fmt --check）",
+      "status": "pass",
+      "detail": "",
+      "ms": 634
+    },
+    {
+      "step": "T0 静态检查（clippy）",
+      "status": "pass",
+      "detail": "",
+      "ms": 6764
+    },
+    {
+      "step": "T0 编译告警",
+      "status": "pass",
+      "detail": "",
+      "ms": 1
+    },
+    {
+      "step": "T0 依赖重复（cargo tree）",
+      "status": "pass",
+      "detail": "",
+      "ms": 130
+    },
+    {
+      "step": "L1 单元（--bin solomni）",
+      "status": "pass",
+      "detail": "276 passed / 0 failed",
+      "ms": 22427
+    },
+    {
+      "step": "目标 cross-platform",
+      "status": "pass",
+      "detail": "4 passed / 0 failed",
+      "ms": 9667
+    },
+    {
+      "step": "目标 windows",
+      "status": "skip-platform",
+      "detail": "0 passed / 0 failed（本平台不适用）",
+      "ms": 407
+    },
+    {
+      "step": "目标 linux",
+      "status": "skip-platform",
+      "detail": "0 passed / 0 failed（本平台不适用）",
+      "ms": 311
+    },
+    {
+      "step": "目标 macos",
+      "status": "pass",
+      "detail": "5 passed / 0 failed",
+      "ms": 748
+    },
+    {
+      "step": "前端冒烟",
+      "status": "pass",
+      "detail": "前端冒烟：4 个全部通过（app.smoke.cjs、config.smoke.cjs、md.smoke.cjs、modals.smoke.cjs） / FRONTEND-SMOKE-OK",
+      "ms": 1211
+    },
+    {
+      "step": "L4 端到端",
+      "status": "pass",
+      "detail": "E2E-OK / [e2e] 围栏回收（退出码 0）：[围栏] 清理完成：本平台的围栏不留权限项，无需清理 | [围栏] 清理完成：扫掉 0 个本程序建过的容器 profile",
+      "ms": 9636
+    }
+  ],
+  "envSkips": [],
+  "quality": {
+    "failed": 0,
+    "steps": []
+  },
+  "globalGaps": [
+    "fence.guest-tier-not-wired",
+    "web.external-file-delete-not-reflected",
+    "session.delete-without-file-check",
+    "session.create-has-no-tier-choice",
+    "cli.webui-ctrl-c-exits-process"
+  ],
+  "gaps": [],
+  "failed": 0
+}
