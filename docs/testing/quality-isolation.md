@@ -43,8 +43,8 @@
 - 重复代码检查不得诱导新增抽象。先判断重复是否属于同一职责，再决定合并、保留或记录原因。
 
 当前 `node run-tests.js` 已执行上述全部 T0 检查，且**全是零容忍硬失败**：
-编译、结构审查、格式、clippy、编译告警、依赖重复——任何一项不过即 `quality-fail`，**没有存量基线**
-（`tests/quality-baseline.yaml` 已删除）。清单与判定见 [levels.md](levels.md) 的 T0 一节。
+编译、结构审查、格式、clippy、编译告警、依赖重复——任何一项不过即 `quality-fail`，**没有存量基线**。
+清单与判定见 [levels.md](levels.md) 的 T0 一节。
 
 三平台各自跑同一套检查：clippy 只编译当前平台的 `#[cfg]` 代码（Windows 的容器围栏在 unix 上不存在，
 反之亦然），依赖上 Windows 走 native-tls、unix 走 rustls——所以**任一项都必须在三平台 CI 上分别成立**。
