@@ -59,6 +59,7 @@
 | --- | --- | --- |
 | `too_many_arguments` | `core/collab.rs` 的 `start` / `restore`、`core/session.rs` 的 `new` / `restore`、`core/mod.rs` 的 `Core::new` | 全是**组合根注入的构造函数**：参数天然多，收口成参数对象只是把参数挪个地方、并让装配更难读 |
 | `too_many_arguments` | `core/engine.rs` 的 `core_operation` / `converse_with` / `turn_with` / `Execution::review`、`core/session.rs` 的 `discussion_turn`、`core/collab.rs` 的 `judge_clear` / `review_nodes` | 同一组参数（身份 / 工具面 / 通道 / 消息 / 出口 / 对照表 / 重填说明）：它们必须一路透传，收口成参数对象只是把参数挪个地方（`turn_with` 只服务内存测试通道） |
+| `dead_code` | `core/events.rs` 的 `enum SessionEvent` | 事件词汇里的字段**不全在生产路径被读**（例如 `DiscussionDone` 的 `round` / `over_cap` 供呈现层做裁决确认页）；词汇就是线格式，字段随契约保留，删掉会让呈现侧拿不到事实 |
 | `large_enum_variant` | `core/mod.rs` 的 `enum Session` | 两变体大小差得远，但装箱只换来一次间接寻址，却把"会话本体可直接移动"这个形状改掉 |
 
 新增 allow 必须同时更新本表；理由说不清的就不该 allow。
