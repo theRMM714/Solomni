@@ -167,14 +167,45 @@ capabilities/<name>/
 
 | 能力 | 边界要点 |
 | --- | --- |
-| **session** | 只管"一个会话的对话与转录"：`SessionParams`、`AgentSession`、行 id/turn/reply 簿记、`build_round_lines`、`collab_state` 派生、`events` 线格式。**不负责回档**（那是 `rewind`），**不负责编排**（那是 `collab`） |
+| **session** | 只管"一个会话的对话与转录"：`SessionParams`、`AgentSession`、行 id/turn/reply 簿记、`build_round_lines`、`collab_state` 派生、`events` 线格式，**以及上下文压缩（compact）**——压缩改的是本会话的**发送视图**，属 session 的状态所有权（见 §3.4）。**不负责回档**（那是 `rewind`），**不负责编排**（那是 `collab`） |
 | **llm** | `providers.rs` 必须先拆：`Channel`/模型解析归 `llm`，`Settings`/`AppSettings`/`ModelEntry`/`Provider` 归 `registry`。这是 `llm` 的前置 |
 | **tools** | 放行/寻址/账本/参数校验/补丁纯逻辑归此；**故障文案**（`arg_fault_text`/`refuse`/`patch_fault`/`edit_fault_reason`/`block_fault`）归 `prompt` |
 | **workspace** | `module`/`packages`/`exec`。**迁移要点**：`exec.rs` 的宿主探测（`PATH`/`SystemRoot`/`is_file`）是机制，下沉为端口 |
 | **registry** | 四份 yaml 的内存形态与 CRUD 编排；`SettingsStore` 端口 |
 | **prompt** | 渲染、引用改写、工具文案；缺键/缺变量**报错暴露**，不静默兜底 |
 
-### 3.4 rewind（协调型业务）
+### 3.4 会话内的上下文压缩（compact）
+
+**`compact` 不是业务，是 `session` 的一部分**：它改的是**本会话的发送视图**（发给模型的消息列表），
+属于 `session` 的状态所有权。`compact` 本身只是 `systools/tools.yaml` 里声明的一个**系统工具**
+（`capability: none`），给模型一个"写下摘要"的出口；`compact_turn` 是一次特殊的会话回合
+（身份 + **只声明 `compact`** + 对话 + 压缩提示）。
+
+**不变式（`session` 批次必须钉死）**：
+
+1. **改的是"发给模型什么"，不是"留下什么"**——转录永远完整，旧内容用户照样能查看；
+2. **发送视图 = `[身份][本回合工具面][最新一份摘要][压缩点之后的内容]`**；
+3. **摘要永远只有一份**（多次压缩 = 滚动摘要：第二次的输入是"上一份摘要 + 之后的新内容"）；
+4. **触发只有两条**：系统阈值（模型窗口 × `compact_at_percent`）与用户 `/compact`；
+   **AI 不能在普通回合自助调 `compact`**（行为可预测）；
+5. **压不动就如实说**：没给出摘要 → 记一条通知 + **继续用完整上下文**，不静默降级、不假装压过。
+
+**`marks` 的双消费者（这是 §3.5 方案 A 的关键理由）**：`marks`（"行 → 该行完成时的历史长度"）
+不只服务回档——`compact` 也要按它找截断点，并在插入摘要后把整份索引整体 +1。
+**两个消费者用不同的变异规则**（回档是 `truncate`，压缩是 `insert` + 整体偏移），
+**所以索引不能归任何一个消费者**，必须留在 `session`，作为"行 ↔ 历史长度"映射对外只读暴露。
+
+**压缩 × 回档 的交互（`session` 批次必须定清的边界语义）**：回档到压缩点**之前**时，摘要怎么办？
+摘要位于对话最前面，而它总结的内容已被回档截掉——**发送视图里会留下一份描述"已不存在内容"的摘要**。
+两个候选：①回档跨越压缩点时丢弃摘要并恢复完整对话；②把压缩点视作不可回退的边界。
+无论选哪个都必须**显式定义并测试**，不能依赖"截断长度越界时 `Vec::truncate` 是 no-op"这类实现副作用。
+
+**当前实现的偏差（`session` 批次收口前必须清零）**：自动压缩未把被总结的内容移出发送视图；
+手动 `/compact` 的压缩回合身份块为空、压缩点恒为 0；`compacted` 事件落盘后没有任何读取方
+（重启/回档后压缩丢失，而 [session-model.md](session-model.md) §六 声称会按它重建发送视图）。
+处理方式待定：立即修，或按 `AGENTS.md` 记入 `tests/gaps.yaml`。
+
+### 3.5 rewind（协调型业务）
 
 **它拥有的不变式（没有任何参与方单独拥有）**：
 
@@ -214,16 +245,18 @@ capabilities/<name>/
 | **A（采用）** | 索引留 `session`，暴露只读的 `lines()`（id/turn/reply/history_len）；`rewind` 算完再调 `session.truncate_to(hist_len)` | `rewind` 是**读改写**，中间有窗口 |
 | B | 索引归 `rewind`，`session` 通过行事件喂它 | `rewind` 复制了 `session` 的内部账，两边会漂移 |
 
-理由：`marks` 是"行 → 该行完成时的历史长度"，而**历史长度只有 `session` 知道**；搬出去等于让 `rewind` 维护一份镜像。
+理由有两条：①`marks` 是"行 → 该行完成时的历史长度"，而**历史长度只有 `session` 知道**，
+搬出去等于让 `rewind` 维护一份镜像；②它**已被 `compact` 共用**（见 §3.4），
+两个消费者用不同的变异规则，索引归谁都会让另一方失去一致性。
 方案 A 的安全性**完全依赖 R5**（单线程命令队列 ⇒ 读改写无交错）。
 
-### 3.5 collab（协调型业务）
+### 3.6 collab（协调型业务）
 
 协作状态机、讨论泵、任务链、审查关卡、节点验收、总验收。它是依赖最多的能力，**最后迁**。
 前置：`engine ⇄ session` 的环必须先解（`engine` 引 `session::build_round_lines`/`stream_piece`；
 `session` 引 `engine::assemble`/`converse_with`/`Round`）。
 
-### 3.6 目标依赖图（必须无环）
+### 3.7 目标依赖图（必须无环）
 
 ```text
 presentation ──▶ {session, llm, tools, prompt, registry, workspace, rewind, collab, kernel} 的 api
@@ -267,7 +300,7 @@ kernel       ──▶ （无）
 | **6** | **llm**：`Channel` 解析 + 通道端口族 | `providers.rs` 的 Channel 侧；`ports.rs` 通道族 | 5 | 未开始 |
 | **7** | **tools**：`systool`/`patch`/`schema`/`roles`/`fence`/`workspace`；文案归 `prompt` | 6 个文件 | 3,4 | 未开始 |
 | **8** | **解 `engine ⇄ session` 环**：定清 `build_round_lines`/`stream_piece`/`assemble`/`converse_with` 的归属 | 双向依赖 | 7 | 未开始 |
-| **9** | **session** | `session.rs` `history.rs` `collab_state.rs` `events.rs` | 8 | 未开始 |
+| **9** | **session**（含压缩 `compact`：钉死 §3.4 的五条不变式与压缩×回档边界） | `session.rs` `history.rs` `collab_state.rs` `events.rs` | 8 | 未开始 |
 | **10** | **rewind**（协调型；方案 A） | 散布 5 处 | 9 | 未开始 |
 | **11** | **collab** | `collab.rs` `chain.rs` `engine.rs` | 10 | 未开始 |
 | **12** | **presentation 收口 + 前端分区**：只 `use` 各业务 `api`；`app.js` 分区 | `cli.rs` `web.rs` `intent.rs`；`app.js` 2697 行 | 11 | 未开始 |
