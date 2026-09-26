@@ -11,6 +11,7 @@
 | `types.rs` | 跨业务共享的**事实类型**：只放没有领域逻辑的（`SessionId`） |
 | `log.rs` | `Log` 端口（三级）与测试用的 `NoopLog`；文件/时间戳/目录机制在适配层 |
 | `path.rs` | 路径的**对外书写形式**（一律 `/`）：跨平台机制，与任何业务无关 |
+| `chain.rs` | 任务链的**纯数据 + 纯图算法**（节点、依赖、阶段、就绪与验收判定）。被三个能力共享（`collab` 驱动 / `session` 的线格式携带 / 呈现层渲染），自己零出边（见 [task-chain.md](task-chain.md)） |
 | `jobs.rs` | 生成中作业的**取消表**：核心登记，呈现层只能说「停哪个会话」；「停止」不排队、不碰核心状态，所以生成期间立刻生效 |
 
 ## 二、`core/`（抽象与业务，无 IO）
@@ -26,7 +27,7 @@
 | `roles.rs` | 系统工具与**角色**表（`systools/tools.yaml` + `roles.yaml`）：按角色组装工具面、按表校验调用；"哪个角色能调哪个工具"只有这一份（见 [tools-and-roles.md](tools-and-roles.md)） |
 | `module.rs` | `module.yaml` 契约、扫描结果 `Roster`、`runtimes`/`tools` 校验、agent system 合成 |
 | `packages.rs` | `package.yaml` 契约与包库事实（校验、去重、系统路径冲突预检） |
-| `exec.rs` | 执行档位（`ExecSpec`）与执行计划（`ExecPlan`）派生、虚拟机档诊断、档位承载（`TierReadiness`：本机能不能承载这个档位）。宿主事实（路径存在性 / PATH 可执行文件 / 虚拟化能力）**经 `ports::HostProbe` 问**，本文件不碰环境变量与文件系统 |
+| `exec.rs` | 执行档位（`ExecSpec`）与执行计划（`ExecPlan`）派生、虚拟机档诊断、档位承载（`TierReadiness`：本机能不能承载这个档位）。宿主事实（路径存在性 / PATH 可执行文件 / 虚拟化能力）**经 `ports::HostProbe` 问**，本文件不碰环境变量与文件系统；档位枚举 `Tier` 在 `kernel/types`（登记处也要用它，留在本文件会让登记处反向依赖执行能力） |
 | `fence.rs` | 一次工具执行的围栏策略（纯数据：可达根、断网、工作目录） |
 | `workspace.rs` | 工作区与沙箱的纯数据定义、寻址与越界判定。路径的**对外书写形式**在 `kernel::path`（纯机制）；**不持工具册**——内置工具的参数契约归工具面（`MemberTools`），沙箱只管路径 |
 | `systool.rs` | 内置工具 `read` / `write` / `edit` / `patch` / `search` 的放行、寻址、**按声明校验参数**、改动前的"读过"证据（`Observations`）、自由格式补丁的原子应用与回执文案 |
@@ -37,7 +38,6 @@
 | `history.rs` | 会话元信息与历史视图的内存形态 |
 | `envelope.rs` | 发言信封解析（`ToolInvoke.body` = 信封之后的正文，自由格式工具的输入从这里取；含「像工具信封但不合法」的独立信号，并判定**未闭合 / 裸控制字符 / 语法错 / 字段不合法**四类；未闭合带上 EOF 状态：还差哪些收尾字符、是否断在字符串中间、这一段里起了几段信封） |
 | `collab_state.rs` | 「转录即状态」的协作状态派生（纯函数、可回放） |
-| `chain.rs` | 任务链：依赖图 → **阶段**、节点 id 派生、就绪/验收/返工与阶段推进（见 [task-chain.md](task-chain.md)） |
 | `collab.rs` | 协作会话状态机与讨论泵（泵只决定"该问谁"、核心驱动成员回合；发言投影、待裁决与工具面发放） |
 | `engine.rs` | 讨论/执行/验收的引擎；**唯一的轮循环** `converse_with`（单 agent / 节点 / 讨论席共用：表态与工具两套形态、按声明调度的并发、逐轮外送）；**唯一的请求装配点** `assemble`（身份 + 本回合工具面 + 对话 + 本回合提示） |
 | `session.rs` | 单 agent 会话：**会话参数**（`SessionParams`：身份与环境，每次调用现渲染）与**对话**（`dialogue`：只有发生过的事）分开；转录行带稳定 id；`TurnRun` + `build_round_lines`（**唯一的行构造点**）；`discussion_turn` = 讨论席那一回合（同一条循环 + 表态 + 逐轮落进它自己的会话） |

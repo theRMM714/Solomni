@@ -4,7 +4,6 @@
 
 pub mod agents;
 pub mod api;
-pub mod chain;
 pub mod collab;
 pub mod collab_state;
 pub mod engine;
@@ -832,7 +831,9 @@ impl Core {
                     .map(|ch| {
                         ch.nodes
                             .iter()
-                            .filter(|n| matches!(n.status, chain::NodeStatus::Running))
+                            .filter(|n| {
+                                matches!(n.status, crate::kernel::chain::NodeStatus::Running)
+                            })
                             .map(|n| n.assignee.clone())
                             .collect()
                     })
@@ -1023,14 +1024,14 @@ impl Core {
 
     /// 运行能力报告：模块声明的能力、包库里的可用版本、缺失清单与虚拟机档诊断。
     /// 「清单即事实」：每次调用重扫模块清单与包库；本机档不装载运行包，missing 只作事实呈现。
-    pub fn runtime_report(&self, tier: exec::Tier) -> RuntimeReport {
+    pub fn runtime_report(&self, tier: crate::kernel::types::Tier) -> RuntimeReport {
         let roster = self.source.scan();
         let lib = self.packages.scan();
         let spec = exec::ExecSpec {
             tier,
             ..exec::ExecSpec::default()
         };
-        let diagnoses = if tier == exec::Tier::Vm {
+        let diagnoses = if tier == crate::kernel::types::Tier::Vm {
             exec::vm_diagnoses(&roster.modules, &lib, &spec)
         } else {
             Vec::new()
@@ -1064,7 +1065,7 @@ impl Core {
         let tier = meta.exec.tier;
         // 虚拟机档的承载探针：用用户填的基础根（若有），否则问"裸虚拟机档"能不能成立。
         let vm_probe = exec::ExecSpec {
-            tier: exec::Tier::Vm,
+            tier: crate::kernel::types::Tier::Vm,
             base: meta.exec.base.clone(),
             ..exec::ExecSpec::default()
         };
@@ -1179,8 +1180,8 @@ impl Core {
         }
         // 档位：与「开始」同一把尺子——虚拟机档的选型不成立（多版本未定版 / 定版不存在 / 路径冲突）如实拒绝。
         let tier = match edit.tier.as_str() {
-            "host" => exec::Tier::Host,
-            "vm" => exec::Tier::Vm,
+            "host" => crate::kernel::types::Tier::Host,
+            "vm" => crate::kernel::types::Tier::Vm,
             other => return Err(format!("未知执行档位：{}（只认 host / vm）", other)),
         };
         let spec = exec::ExecSpec {
@@ -1193,7 +1194,8 @@ impl Core {
         // 界面上的"能不能选"由 SessionConfig 的 tier_ready 说同一件事，两处不会各说各话。
         // 已经在虚拟机档上的会话只校验**它自己那几项**（基础根等）：改模块、改模型、定版、开网络都不该被拦住——
         // 一条已存在的会话连改都不让改，是拿用户自己的记录当人质。
-        let staying_vm = meta.exec.tier == exec::Tier::Vm && tier == exec::Tier::Vm;
+        let staying_vm = meta.exec.tier == crate::kernel::types::Tier::Vm
+            && tier == crate::kernel::types::Tier::Vm;
         if staying_vm {
             // 留在 vm 档：只校验用户这次填的基础根（填错路径就是填错路径），
             // 不拿"本机能不能提供 vm 档"去拦一条已经存在的会话。

@@ -13,7 +13,6 @@
 
 use crate::core::agents::AgentView;
 use crate::core::events::{Live, SessionEvent};
-use crate::core::exec::Tier;
 use crate::core::history::{HistoryView, SessionMeta};
 use crate::core::module::Roster;
 use crate::core::providers::{AppSettings, ModelView, ProviderView};
@@ -24,6 +23,7 @@ use crate::core::{
 };
 use crate::kernel::jobs::JobRegistry;
 use crate::kernel::types::SessionId;
+pub use crate::kernel::types::Tier;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
 // 入站契约返回的词汇：能力接口的返回类型在这里有一份**正式名字**。

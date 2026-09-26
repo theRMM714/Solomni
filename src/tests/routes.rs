@@ -7,7 +7,6 @@ use crate::core::agents::AgentView;
 use crate::core::api::{
     Advance, DiscoveryOps, EventBus, HistoryOps, Ops, Output, RegistryOps, SessionOps,
 };
-use crate::core::exec::Tier;
 use crate::core::history::{AgentMeta, HistoryView, SessionMeta};
 use crate::core::module::Roster;
 use crate::core::providers::{AppSettings, ModelView, ProviderView};
@@ -15,6 +14,7 @@ use crate::core::{
     AgentSuggestion, ConfigAgent, FilesAgentView, FilesRootsView, FilesView, Pending,
     RuntimeReport, SessionConfig, SessionEdit, SessionView, WorkMode, WorkOpened, WorkSpec,
 };
+use crate::kernel::types::Tier;
 use crate::presentation::routes::{self, ROUTES};
 use crate::presentation::web::{self, FenceInfo};
 use serde_json::json;

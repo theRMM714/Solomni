@@ -4,9 +4,9 @@
 use super::doubles::{collab_work, module_of};
 use super::{gated_ops, ops_with, single_work, slow_ops};
 use crate::core::api::{CoreHandle, Ops, Output};
-use crate::core::exec::Tier;
 use crate::core::module::Module;
 use crate::core::{SessionEvent, WorkMode};
+use crate::kernel::types::Tier;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::{Duration, Instant};

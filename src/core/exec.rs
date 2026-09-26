@@ -6,27 +6,10 @@
 use crate::core::module::Module;
 use crate::core::packages::{Library, PackageManifest, KIND_SYSTEM};
 use crate::core::ports::HostProbe;
+use crate::kernel::types::Tier;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
-
-/// 执行档位：本机 = 直接在宿主上跑；虚拟机 = 整台 guest（不信任 AI 时的可选档）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Tier {
-    #[default]
-    Host,
-    Vm,
-}
-
-impl Tier {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Tier::Host => "host",
-            Tier::Vm => "vm",
-        }
-    }
-}
 
 /// 会话的执行选型：档位 + 虚拟机基础根 + 能力定版 + 是否放行出站网络（默认否）。
 /// 进 meta.yaml 的 exec 段（缺字段的旧会话按默认 = 本机档读回）。

@@ -76,7 +76,7 @@ pub struct AppSettings {
     pub show_reasoning: bool,
     /// 默认执行档位：新建会话未单独选定时用它（本机 = 在宿主上跑；虚拟机 = 整台 guest）。
     #[serde(default)]
-    pub tier: crate::core::exec::Tier,
+    pub tier: crate::kernel::types::Tier,
     /// 是否允许工具围栏在本机写权限（Windows 上要给会话/模块目录与解释器安装目录加目录 ACL）。
     /// 默认否：没经过用户显式授权，本程序不动本机任何权限项。
     #[serde(default)]
@@ -125,7 +125,7 @@ impl Default for AppSettings {
         AppSettings {
             streaming: true,
             show_reasoning: true,
-            tier: crate::core::exec::Tier::Host,
+            tier: crate::kernel::types::Tier::Host,
             fence_write: false,
             fence_read: Vec::new(),
             qemu_path: String::new(),

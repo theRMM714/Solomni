@@ -141,14 +141,14 @@ capabilities/<name>/
 | 能力 | 类型 | 现有文件 | 状态所有权 | 端口 | 状态 |
 | --- | --- | --- | --- | --- | --- |
 | **kernel** | 内核 | **已落位** `src/kernel/`（`jobs` / `log` / `types`） | 生成中作业表（取消标志） | — | **已完成**（批次 1；`bus` 与运行态合并推迟到批次 9，见 §3.2） |
-| **session** | 领域 | `core/session.rs`、`history.rs`、`collab_state.rs`、`events.rs` | 对话、转录行、行索引 | `HistoryStore` | 未开始 |
+| **session** | 领域 | `core/session.rs`、`history.rs`、`events.rs`（`collab_state.rs` 已改判归 `collab`——它派生的是**协作**状态） | 对话、转录行、行索引 | `HistoryStore` | 未开始 |
 | **llm** | 领域 | `core/providers.rs` 的 Channel 侧、`ports.rs` 的通道族 | 选型解析 | `Chat` `ChatGateway` `ModelCatalog` | 未开始 |
 | **tools** | 领域 | `core/systool.rs`、`patch.rs`、`schema.rs`、`roles.rs`、`fence.rs`、`workspace.rs` | 观察账本、围栏策略、工具面 | `SysIo` `ToolRunner` `FenceHost` `Workspace` | 未开始 |
 | **prompt** | 领域 | `core/prompt.rs`、`refs.rs` | 提示词册 | `PromptSource` | 未开始 |
 | **registry** | 领域 | `core/agents.rs`、`providers.rs` 的登记处侧 | 四份 yaml 的内存形态 | `SettingsStore` | 未开始 |
 | **workspace** | 领域 | `core/module.rs`、`packages.rs`、`exec.rs` | 清单快照、执行计划 | `ModuleSource` `PackageSource` | 未开始 |
 | **rewind** | 协调 | 散布 5 处（见 §3.6） | 只持自己的日志，**不持会话数据** | — | 未开始 |
-| **collab** | 协调 | `core/collab.rs`、`chain.rs`、`engine.rs` | 讨论游标、任务链、待裁决 | — | 未开始 |
+| **collab** | 协调 | `core/collab.rs`、`collab_state.rs`、`engine.rs`（任务链的**数据与图算法**已落位 `kernel/chain.rs`，见批次 5） | 讨论游标、任务链、待裁决 | — | 未开始 |
 | **presentation** | 呈现 | `presentation/` | 界面状态 | — | 未开始 |
 
 ### 3.2 kernel（机制型内核）
@@ -426,7 +426,7 @@ kernel       ──▶ （无）
 | **2** | **修两处违约**：`exec.rs` 宿主探测下沉为 `HostProbe` 端口（4 处 IO）；`presentation` 改经入站能力面 `LogOps` | `core` 里的环境变量与文件系统调用；`presentation → ports` / `presentation → kernel` | **已完成**（基线 9 → 7 条） |
 | **3** | **切边 A1 + A2**：`slash` → `kernel::path`（纯机制）；**拆册子**——`Prompts` 只留提示词文本，`SystemTools` / `ToolBook` 由 `Core`、协作会话与讨论直接持有 | `refs → workspace`；`prompt → roles`；`prompt → schema`；**并解开 `prompt ⇄ tools` 本质环** | **已完成**（核心环 16 → 14 个模块） |
 | **4** | **切 `workspace → schema`**：`builtin_tools` 从 `Sandbox` 移到 `MemberTools`（`Sandbox` 从未读它，是死重） | `workspace → schema` | **已完成**（核心环 14 → 12；`workspace` 只剩 `→ prompt`，属**合法业务间依赖**，不必切） |
-| **5** | **其余三条数据聚合**（逐个定"这个类型归谁"）：`SessionMeta.exec`（`history → exec`）、`SessionEvent::PlanReview.chain`（`events → chain`，**与 `collab → session` 成环，必须切**）、`Settings` 里的 agents 与 exec（`providers → agents, exec`） | 见左 | 未开始 |
+| **5** | **其余三条数据聚合**：① `chain.rs` → `kernel`（**一次切断 `events → chain` 与 `collab_state → chain`**，即未来的 `session ⇄ collab`）；② `Tier` → `kernel/types`（切断 `providers → exec`，即 `registry ⇄ workspace`）；③ `history → exec` **判定为合法业务依赖，不切**（会话元信息本来就要记执行选型） | `events → chain`、`collab_state → chain`、`providers → exec` | **已完成**（核心环仍是 12——`chain` 本就是叶子，切掉的是**未来的能力级环**） |
 | **6** | **拆 `ports.rs`**：它的 trait 签名引用了 **8 个**模块的类型（`envelope` / `fence` / `history` / `module` / `packages` / `prompt` / `providers` / `workspace`）——按 §1.2 让每个能力有自己的 `ports.rs` | `ports → …`（最大枢纽） | 未开始 |
 
 **阶段 B：搬能力（按切边后的图重排）**

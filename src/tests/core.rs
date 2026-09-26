@@ -5,7 +5,7 @@ use super::doubles::*;
 use crate::adapters::fake_chat::FakeChat;
 use crate::core::engine::{Discussion, Member, MemberTools, ModuleTools, TurnOut, MAX_ROUNDS};
 use crate::core::events::Live;
-use crate::core::exec::{self, Diagnosis, ExecSpec, Tier};
+use crate::core::exec::{self, Diagnosis, ExecSpec};
 use crate::core::history::{AgentMeta, SessionMeta};
 use crate::core::module::Module;
 use crate::core::packages::{Library, PackageManifest};
@@ -19,6 +19,7 @@ use crate::core::{
     AgentInstance, CollabStep, ConfigAgent, Core, Pending, SessionEdit, SessionEvent, WorkMode,
     WorkSpec,
 };
+use crate::kernel::types::Tier;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -1398,14 +1399,14 @@ pub(crate) fn collab_state_derives_the_task_chain_from_plan_review() {
 
 // ---------- 任务链（依赖图） ----------
 
-fn chain_node(id: &str, deps: &[&str]) -> crate::core::chain::TaskNode {
-    crate::core::chain::TaskNode {
+fn chain_node(id: &str, deps: &[&str]) -> crate::kernel::chain::TaskNode {
+    crate::kernel::chain::TaskNode {
         id: id.to_string(),
         title: format!("节点{}", id),
         objective: format!("把 {} 做完", id),
         assignee: "甲".to_string(),
         deps: deps.iter().map(|d| d.to_string()).collect(),
-        status: crate::core::chain::NodeStatus::Pending,
+        status: crate::kernel::chain::NodeStatus::Pending,
         sub_session: None,
         report: None,
         acceptance: None,
@@ -1421,7 +1422,7 @@ fn roster() -> Vec<String> {
 /// **阶段**由依赖图派生（最长路径分层）：串行链一个节点一阶段；并 + 混合的两条并行同阶段、汇合点下一阶段。
 #[test]
 pub(crate) fn chain_stages_lay_out_along_the_dependency_graph() {
-    let serial = crate::core::chain::TaskChain {
+    let serial = crate::kernel::chain::TaskChain {
         nodes: vec![
             chain_node("a", &[]),
             chain_node("b", &["a"]),
@@ -1431,7 +1432,7 @@ pub(crate) fn chain_stages_lay_out_along_the_dependency_graph() {
     assert_eq!(serial.stages(), vec![1, 2, 3]);
     assert_eq!(serial.stage_nodes(1).len(), 1);
     assert_eq!(serial.current_stage(), Some(1));
-    let mut parallel = crate::core::chain::TaskChain {
+    let mut parallel = crate::kernel::chain::TaskChain {
         nodes: vec![
             chain_node("a", &[]),
             chain_node("b", &[]),
@@ -1450,8 +1451,8 @@ pub(crate) fn chain_stages_lay_out_along_the_dependency_graph() {
     assert!(parallel.current_stage() == Some(1));
     // 阶段一的两个节点都结束并通过 → 阶段一过了，当前阶段前进到二。
     for i in [0, 1] {
-        parallel.nodes[i].status = crate::core::chain::NodeStatus::Done;
-        parallel.nodes[i].acceptance = Some(crate::core::chain::Acceptance {
+        parallel.nodes[i].status = crate::kernel::chain::NodeStatus::Done;
+        parallel.nodes[i].acceptance = Some(crate::kernel::chain::Acceptance {
             ok: true,
             note: String::new(),
         });
@@ -1464,7 +1465,7 @@ pub(crate) fn chain_stages_lay_out_along_the_dependency_graph() {
 /// 序号**由核心按阶段派生**：n1-1 / n1-2（同阶段并行）→ n2-1（下一阶段），依赖整体重映射。
 #[test]
 pub(crate) fn chain_ids_are_derived_from_stages() {
-    let mut chain = crate::core::chain::TaskChain {
+    let mut chain = crate::kernel::chain::TaskChain {
         nodes: vec![
             chain_node("x", &[]),
             chain_node("y", &[]),
@@ -1482,7 +1483,7 @@ pub(crate) fn chain_ids_are_derived_from_stages() {
 /// 装配期自洽：环、悬空依赖、重复 id、空目标、未知负责人——逐条如实列出。
 #[test]
 pub(crate) fn chain_problems_reject_cycles_and_bad_refs() {
-    use crate::core::chain::TaskChain;
+    use crate::kernel::chain::TaskChain;
     let good = TaskChain {
         nodes: vec![chain_node("a", &[]), chain_node("b", &["a"])],
     };
@@ -1518,7 +1519,7 @@ pub(crate) fn chain_problems_reject_cycles_and_bad_refs() {
 /// 结束判定：链非空、且每个节点都落定（Done / Failed）——空链不算结束。
 #[test]
 pub(crate) fn chain_finished_needs_every_node_settled() {
-    use crate::core::chain::{NodeStatus, TaskChain};
+    use crate::kernel::chain::{NodeStatus, TaskChain};
     let mut chain = TaskChain {
         nodes: vec![chain_node("a", &[]), chain_node("b", &["a"])],
     };
