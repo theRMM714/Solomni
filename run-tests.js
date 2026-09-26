@@ -307,7 +307,7 @@ function structuralAudit() {
     walkMarks(abs);
   }
 
-  const portalFiles = ["README.md", "AGENTS.md", "ARCHITECTURE.md", "PRODUCT.md", "MODULE_SPEC.md", "RUNTIME_SPEC.md", "REGISTRY_SPEC.md", "TESTING.md"];
+  const portalFiles = ["README.md", "README_EN.md", "AGENTS.md", "ARCHITECTURE.md", "PRODUCT.md", "MODULE_SPEC.md", "RUNTIME_SPEC.md", "REGISTRY_SPEC.md", "TESTING.md"];
   for (const p of portalFiles) {
     const abs = path.join(ROOT, p);
     if (!fs.existsSync(abs)) { problems.push("缺门户文档：" + p); continue; }

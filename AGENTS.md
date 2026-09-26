@@ -130,6 +130,7 @@
 | 工作内容 | 门户 |
 | --- | --- |
 | 项目概括和快速开始 | `README.md` |
+| 项目概括和快速开始（English） | `README_EN.md` |
 | 任意代码、架构、分层、端口、日志、提示词或落盘修改 | `ARCHITECTURE.md` |
 | 产品行为、运行流程和用户旅程 | `PRODUCT.md` |
 | 理念、角色和不变量判断 | `PHILOSOPHY.md` |
