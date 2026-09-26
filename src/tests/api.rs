@@ -150,7 +150,14 @@ fn history_merge_is_the_transcript_plus_the_bus_tail_without_repeats() {
     let (tail, head) = handle.events().tail_excluding(&opened.sid, &transcript);
     assert!(head > 0, "合流顺带给出头部序号（水位）");
     assert!(!tail.is_empty(), "事件台上还有它之外的实时行（短暂事件）");
-    // **逐条互补**：每条事实在「盘上 + 尾巴」里出现的次数，正好等于它在事件台上出现的次数。
+    // **过时的短暂事件不许进尾巴**：开跑那条运行态（agent 有名字）已经被盘上的定稿行取代，
+    // 它要是跟着尾巴下去，前端会先画定稿行、再画一个填不上的空"谁正在说"块（真机上的空块）。
+    let opening = tail.iter().any(|v| {
+        v.get("type").and_then(|t| t.as_str()) == Some("working")
+            && v.get("agent").is_some_and(|a| !a.is_null())
+    });
+    assert!(!opening, "开跑那条运行态已过时，不许再进尾巴");
+    // **逐条互补**：尾巴里的每条事实，都得是事件台上**转录没用掉**的那份（不重复、不凭空造）。
     let key = |v: &serde_json::Value| serde_json::to_string(v).expect("序列化");
     let mut bus: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
     let (lines, _h, _o) = handle.events().snapshot(Some(&opened.sid), 0);
@@ -159,11 +166,19 @@ fn history_merge_is_the_transcript_plus_the_bus_tail_without_repeats() {
             *bus.entry(key(&ev.to_json())).or_insert(0) += 1;
         }
     }
-    let mut merged: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
-    for ev in transcript.iter().chain(tail.iter()) {
-        *merged.entry(key(ev)).or_insert(0) += 1;
+    let mut tail_cnt: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for ev in &tail {
+        *tail_cnt.entry(key(ev)).or_insert(0) += 1;
     }
-    assert_eq!(merged, bus, "合流 = 事件台上这条会话的全部事实，逐条互补");
+    for (k, n) in &tail_cnt {
+        let on_bus = bus.get(k).copied().unwrap_or(0);
+        let on_disk = transcript.iter().filter(|v| key(v) == *k).count();
+        assert!(
+            *n <= on_bus.saturating_sub(on_disk),
+            "尾巴不许重复盘上已有的事实（也不许凭空造）：{}",
+            k.chars().take(120).collect::<String>()
+        );
+    }
 }
 
 // ---------- 停止：生成期间也立刻生效（并发归核心） ----------

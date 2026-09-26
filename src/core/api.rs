@@ -126,7 +126,10 @@ impl EventBus {
 
     /// 盘上转录**之外**的实时尾巴 + 事件台当前头部：给「历史和实时一次给全」用（见呈现层的 history.open）。
     ///
-    /// 判据是**结构化相等**（两边的 JSON 出自同一套序列化器，就是同一个值），不是按行 id 猜——
+    /// 只取「**转录在事件台里的最后一个位置之后**」的事实：转录是事件台的**前缀**，
+    /// 它之前/之中的短暂事件（流式增量、开跑那条运行态）已经被盘上的定稿行取代了；
+    /// 把它们也塞进尾巴，前端会先画定稿行、再画一个永远填不上的空"谁正在说"块。
+    /// 判据是**结构化相等**（两边 JSON 出自同一套序列化器，就是同一个值），不是按行 id 猜：
     /// `notice`/`node_started` 这类行本来就没有 id，按 id 去重正是刷新后整段重复的来源。
     /// 返回的尾巴按事件台顺序展开，前端因此**只按序 append**，不自己合并两个来源。
     pub fn tail_excluding(
@@ -141,21 +144,32 @@ impl EventBus {
             }
         }
         let (lines, head, _oldest) = self.snapshot(Some(sid), 0);
+        let mut on_bus: Vec<serde_json::Value> = lines
+            .into_iter()
+            .flat_map(|l| l.events.into_iter().map(|e| e.to_json()))
+            .collect();
+        let mut start = 0usize;
+        for (i, v) in on_bus.iter().enumerate() {
+            if let Ok(k) = serde_json::to_string(v) {
+                if let Some(n) = left.get_mut(&k) {
+                    if *n > 0 {
+                        *n -= 1;
+                        start = i + 1;
+                    }
+                }
+            }
+        }
         let mut tail = Vec::new();
-        for line in lines {
-            for ev in &line.events {
-                let v = ev.to_json();
-                let Ok(k) = serde_json::to_string(&v) else {
-                    continue;
-                };
+        for v in on_bus.drain(..).skip(start) {
+            if let Ok(k) = serde_json::to_string(&v) {
                 if let Some(n) = left.get_mut(&k) {
                     if *n > 0 {
                         *n -= 1;
                         continue;
                     }
                 }
-                tail.push(v);
             }
+            tail.push(v);
         }
         (tail, head)
     }
