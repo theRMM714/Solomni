@@ -1,0 +1,24 @@
+[1/4] app.smoke.cjs
+FRONTEND-INIT-OK
+  → 通过
+[2/4] config.smoke.cjs
+事件流连接失败： Error: poll-not-stubbed
+    at fetch (/home/runner/work/Solomni/Solomni/src/presentation/web/config.smoke.cjs:124:57)
+    at pollLoop (app.js:2761:23)
+config.smoke: 58/58 断言通过
+CONFIG-SMOKE-OK
+  → 通过
+[3/4] md.smoke.cjs
+MD-OK
+  → 通过
+[4/4] modals.smoke.cjs
+PASS 模型登记弹窗建得起来且含窗口输入
+PASS 基本设置弹窗含超时、提醒与压缩三项
+PASS 回合分隔行解析成系统行
+PASS 轮次分隔行解析成系统行
+PASS 批次按 seq 应用，游标只前进
+PASS 节点回报显示成完成行
+FRONTEND-MODALS-OK
+  → 通过
+前端冒烟：4 个全部通过（app.smoke.cjs、config.smoke.cjs、md.smoke.cjs、modals.smoke.cjs）
+FRONTEND-SMOKE-OK
