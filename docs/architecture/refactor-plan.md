@@ -21,8 +21,11 @@
 | `core/session.rs` | 773 | 单 agent 会话 |
 
 `Core` 一个结构体 ≈68 个方法、持 12 个端口；`sessions` 用"搬进搬出"管理（`remove`/`insert` 共 23 处）；
-`engine ⇄ session` 是模块级双向依赖；`presentation` 直接持有 `core::ports::Log`；
-`core/exec.rs` 里有 `std::env` + `is_file` 的宿主探测。
+`presentation` 直接持有 `core::ports::Log`；`core/exec.rs` 里有 `std::env` + `is_file` 的宿主探测。
+**`core` 内部的依赖几乎是一团环**：20 个有出边的核心模块里 **16 个构成同一个强连通分量**
+（`agents engine events exec fence history module ports prompt providers refs roles schema session systool workspace`）；
+`engine ⇄ session`、`session ⇄ systool`、`module ⇄ systool`、`agents ⇄ providers`、`ports ⇄ providers`
+这 5 对互环只是它的局部表现。以上由 T0 依赖方向门禁机器判定，基线见 `tests/dependency-baseline.json`。
 
 重构范围因此可以精确锁定：**`core/` 内部拆开 + 一处呈现层违约 + 一条缺失的门禁**。
 
@@ -404,7 +407,7 @@ kernel       ──▶ （无）
 
 | 批次 | 目标 | 现状 | 前置 | 状态 |
 | --- | --- | --- | --- | --- |
-| **0** | **依赖方向门禁**：T0 加 `use` 边检查 + 基线豁免清单 | 无门禁 | — | 未开始 |
+| **0** | **依赖方向门禁**：T0 加 `use` 边检查 + 基线豁免清单 | 无门禁 | — | **已完成**（`run-tests.js` 的 T0 结构审查 + `tests/dependency-baseline.json`） |
 | **1** | **kernel**：`jobs` / `bus` / `log` / `types`；运行态合成一份 | `api.rs` 的 EventBus+JobRegistry+线程；`ports.rs` 的 Log | 0 | 未开始 |
 | **2** | **修两处违约**：`exec.rs` 宿主探测下沉为端口；`presentation` 不再持 `Log`/`ProbeOutcome` | `exec.rs:357-384`；`web.rs:44,611` | 0 | 未开始 |
 | **3** | **prompt** | `prompt.rs` `refs.rs` | 1 | 未开始 |
@@ -418,7 +421,9 @@ kernel       ──▶ （无）
 | **11** | **collab** | `collab.rs` `chain.rs` `engine.rs` | 10 | 未开始 |
 | **12** | **presentation 收口 + 前端分区**：只 `use` 各业务 `api`；`app.js` 分区 | `cli.rs` `web.rs` `intent.rs`；`app.js` 2697 行 | 11 | 未开始 |
 
-**豁免清零判据**：批次 0 建立的基线豁免清单**全部删除**，且 `Core` 这个类型不再存在。
+**豁免清零判据**：`tests/dependency-baseline.json` 的**三个数组全部清空**（`reverse` / `presentation` / `coreCycles`），
+且 `Core` 这个类型不再存在。门禁对**新增**与**过期**都报失败，所以销账不靠自觉——
+拆掉一条边不删条目，构建就红。
 
 ### 4.3 每个批次的完成定义（DoD）
 

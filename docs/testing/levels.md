@@ -31,6 +31,9 @@ cargo tree --duplicates
 - 测试标记是否存在、稳定且没有被重复伪造；
 - 报告 JSON 是否符合约定；
 - `gaps.yaml` 是否可解析、字段完整；
+- **依赖方向是否仍然成立**：层间不反向、`presentation` 只经入站能力面驱动、业务层内部不成环。
+  迁移期的基线在 `tests/dependency-baseline.json`，**条目一旦不再成立即失败**（强制销账）——
+  规则与口径见 [../architecture/refactor-plan.md](../architecture/refactor-plan.md) §一 / §四；
 - 测试是否写入项目外绝对路径或真实用户目录；
 - 测试结束后是否遗留子进程、端口、临时目录、权限或句柄；
 - 是否存在重复测试、重复 Fixture、重复测试替身或无理由的跨层重复断言。

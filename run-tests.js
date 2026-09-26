@@ -326,6 +326,145 @@ function structuralAudit() {
     walkDocs(docsDir);
   }
 
+  // ---------- 依赖方向门禁 ----------
+  // 权威：AGENTS.md「核心约束」（按业务功能垂直切分、业务之间通过 API 契约协作）与
+  // ARCHITECTURE.md §一「分层与依赖方向」；目标分区与销账口径见 docs/architecture/refactor-plan.md §一 / §四。
+  // 三条规则：① 业务/机制层不得反向依赖 adapters / presentation；
+  //          ② presentation 只经入站能力面（core::api）驱动，不碰端口与内部模块；
+  //          ③ 业务层内部不得成环（按强连通分量判定）。
+  // 迁移期允许的现状违规进 tests/dependency-baseline.json；**条目一旦不再成立必须删除**（过期即失败）——
+  // 这是"每拆一个分区就销一次账"的机器判据，不靠人看。
+  const depBaselineFile = path.join(ROOT, "tests", "dependency-baseline.json");
+  let depBaseline = null;
+  try {
+    depBaseline = JSON.parse(fs.readFileSync(depBaselineFile, "utf8"));
+  } catch (e) {
+    problems.push("依赖方向：基线不可读或不是合法 JSON：" + rel(depBaselineFile) + "（" + e.message + "）");
+  }
+
+  if (depBaseline) {
+    // 模块级 `#[cfg(test)] mod tests { … }` 不是生产依赖边，剔除；
+    // `#[cfg(test)]` 加在函数上的保留（它是这个文件里真实存在的一处代码）。
+    const stripTestModules = (text) => {
+      const lines = text.split(/\r?\n/);
+      const out = [];
+      for (let i = 0; i < lines.length; i++) {
+        if (/^\s*#\[cfg\(test\)\]\s*$/.test(lines[i])) {
+          let j = i + 1;
+          while (j < lines.length && lines[j].trim() === "") j++;
+          if (j < lines.length && /^\s*(pub\s+)?mod\s+\w+/.test(lines[j])) {
+            let k = j;
+            while (k < lines.length && !/^\}/.test(lines[k])) k++;
+            i = k;
+            continue;
+          }
+        }
+        out.push(lines[i]);
+      }
+      return out.join("\n");
+    };
+    // 引用归一到「层 + 模块」两级：crate::core::exec::diagnose_text → crate::core::exec。
+    // 归一只为让基线稳定：同一依赖换个更细的写法不该让账本跳动。
+    const normTarget = (full) => "crate::" + full.split("::").slice(0, 2).join("::");
+    const LAYER_OF = (r) => {
+      if (r.startsWith("src/core/")) return "core";
+      if (r.startsWith("src/adapters/")) return "adapters";
+      if (r.startsWith("src/presentation/")) return "presentation";
+      if (r.startsWith("src/tests/")) return "tests";
+      if (r === "src/main.rs") return "main";
+      return null;
+    };
+    // 层 → 它不得引用的层。core 不引用 adapters（端口由 core 定义、适配层实现，永不反向）。
+    const FORBIDDEN = { core: ["adapters", "presentation"], adapters: ["presentation"] };
+
+    const rsFiles = [];
+    const collectRs = (d) => {
+      for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+        const p = path.join(d, e.name);
+        if (e.isDirectory()) collectRs(p);
+        else if (e.name.endsWith(".rs")) rsFiles.push(p);
+      }
+    };
+    collectRs(path.join(ROOT, "src"));
+
+    const reverse = new Set();
+    const presentation = new Set();
+    const coreGraph = {};
+    for (const abs of rsFiles) {
+      const f = rel(abs);
+      const layer = LAYER_OF(f);
+      if (layer === null) {
+        // 新分区建目录时必须先归层，否则它会绕过门禁——**不留静默空洞**。
+        problems.push("依赖方向：未分类的源码目录（门禁需要先把它归层）：" + f);
+        continue;
+      }
+      if (layer === "tests" || layer === "main") continue;
+      const text = stripTestModules(fs.readFileSync(abs, "utf8"));
+      for (const m of text.matchAll(/crate::([a-z_][a-z0-9_]*(?:::[a-z_][a-z0-9_]*)*)/g)) {
+        const t = normTarget(m[1]);
+        const targetLayer = t.split("::")[1];
+        if ((FORBIDDEN[layer] || []).includes(targetLayer)) reverse.add(f + " -> " + t);
+        if (layer === "presentation" && t !== "crate::core::api" && targetLayer !== "presentation") {
+          presentation.add(f + " -> " + t);
+        }
+        if (layer === "core" && targetLayer === "core") {
+          const self = path.basename(f).replace(/\.rs$/, "");
+          const other = t.split("::")[2];
+          if (other && other !== self) (coreGraph[self] = coreGraph[self] || new Set()).add(other);
+        }
+      }
+    }
+
+    // 强连通分量：> 1 个模块的分量 = 一个环。
+    const coreSccs = [];
+    {
+      const idx = {}, low = {}, on = {}, stack = [];
+      let counter = 0;
+      const visit = (v) => {
+        idx[v] = low[v] = counter++;
+        stack.push(v);
+        on[v] = true;
+        for (const w of coreGraph[v] || []) {
+          if (!(w in idx)) { visit(w); low[v] = Math.min(low[v], low[w]); }
+          else if (on[w]) low[v] = Math.min(low[v], idx[w]);
+        }
+        if (low[v] === idx[v]) {
+          const comp = [];
+          let w;
+          do { w = stack.pop(); on[w] = false; comp.push(w); } while (w !== v);
+          if (comp.length > 1) coreSccs.push(comp.sort());
+        }
+      };
+      for (const v of Object.keys(coreGraph)) if (!(v in idx)) visit(v);
+    }
+    const sortSccs = (list) => list.map((s) => s.slice().sort()).sort((a, b) => a.join(",").localeCompare(b.join(",")));
+
+    // 每条规则比两次：**新增 = 失败；基线里已不成立 = 也失败**（强制销账）。
+    const compare = (name, actualList, baselineList, hint) => {
+      for (const a of actualList) {
+        if (!baselineList.includes(a)) problems.push("依赖方向：" + hint + "：" + a);
+      }
+      for (const b of baselineList) {
+        if (!actualList.includes(b)) {
+          problems.push("依赖方向：基线豁免已过期，请从 " + rel(depBaselineFile) + " 的 " + name + " 删除：" + b);
+        }
+      }
+    };
+    compare("reverse", [...reverse].sort(), depBaseline.reverse || [], "业务/机制层不得反向依赖 adapters / presentation");
+    compare("presentation", [...presentation].sort(), depBaseline.presentation || [], "presentation 只能经 crate::core::api 驱动");
+
+    const actualCycles = sortSccs(coreSccs);
+    const baselineCycles = sortSccs(depBaseline.coreCycles || []);
+    const fmtCycles = (l) => (l.length ? l.map((s) => "[" + s.length + "] " + s.join(", ")).join("；") : "（无）");
+    if (JSON.stringify(actualCycles) !== JSON.stringify(baselineCycles)) {
+      problems.push(
+        "依赖方向：业务层内部的环与基线不一致（分区拆出后请同步更新 " + rel(depBaselineFile) + " 的 coreCycles）：" +
+        "\n    实际：" + fmtCycles(actualCycles) +
+        "\n    基线：" + fmtCycles(baselineCycles)
+      );
+    }
+  }
+
   return { problems, targets: targets.map((t) => t.name), testFiles: allTestFiles.length };
 }
 
