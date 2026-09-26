@@ -1000,7 +1000,7 @@ pub(crate) fn create_work_validates_user_choices() {
         .create_work(work("x", WorkMode::Single, &[]))
         .unwrap_err()
         .contains("至少要有一个模块"));
-    // 单 agent 形态只接受一个 agent（模块数不限，多模块合法，见 single_mode_accepts_multi_module_agent）
+    // 单模式的**组合语义**：点名多个 = 并成一个临时组合（模块去重、保序；模型取核心默认）。
     let two_agents = WorkSpec {
         name: "x".to_string(),
         mode: WorkMode::Single,
@@ -1021,10 +1021,17 @@ pub(crate) fn create_work_validates_user_choices() {
         task: None,
         delegate: false,
     };
-    assert!(core
+    let opened = core
         .create_work(two_agents)
-        .unwrap_err()
-        .contains("只接受一个 agent"));
+        .expect("单模式点名多个应并成一个，不是报错");
+    assert_eq!(opened.agents, vec!["x".to_string()], "并出来的组合用工作名");
+    let meta = core.history_open("x").expect("读 meta").0;
+    assert_eq!(
+        meta.agents[0].modules,
+        vec!["a".to_string(), "b".to_string()]
+    );
+    assert!(meta.agents[0].transient, "并出来的是临时 agent");
+    let _ = core.history_delete("x");
     assert!(core
         .create_work(collab_work("x", &["a"], false, "  "))
         .unwrap_err()

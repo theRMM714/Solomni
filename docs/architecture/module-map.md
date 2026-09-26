@@ -94,7 +94,7 @@
 | `mod.rs` | 呈现层出口 |
 | `cli.rs` | 终端转录中心：解析命令 → 用能力面 → 渲染事件流 |
 | `web.rs` | Web 转录中心：tiny_http + 长轮询增量推送（只绑 `127.0.0.1`），分发由路由目录驱动 |
-| `intent.rs` | **共享意图层**：CLI 与 Web 的「意图 → 能力调用」规则只此一份（点名、归并、唯一名、动作分发） |
+| `intent.rs` | **呈现层的共享件**（不是业务规则层）：输入解析（`split_names`）、空登记处的引导文案、动作分发（`Action` / `act`）。**规则不在这里**——点名归 `registry::pick_agents`、命名归 `session::unique_work_name`、「生成中禁改」归 `Core::edit_session`、单模式的组合语义归 `Core::create_work`（批次 15 收口第 2 步） |
 | `routes.rs` | **HTTP 入站契约的唯一定义**：`ROUTES` 目录 + 匹配器（[contracts.md](contracts.md) 的表与它机器比对） |
 | `web/` | 浏览器端：`app.js` / `md.js` / `style.css` / `index.html`，以及 `*.smoke.cjs` 冒烟 |
 

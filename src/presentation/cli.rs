@@ -2,7 +2,7 @@
 //! 只做解析与渲染，不做业务决策；Web 前端与它并列，共用同一能力面与事件词汇。
 
 use crate::capabilities::registry::api::{ModelView, ProviderView};
-use crate::core::api::{AgentInstance, CollabStep, Pending, SessionEvent, WorkMode};
+use crate::core::api::{AgentInstance, CollabStep, Pending, SessionEvent, WorkMode, WorkSpec};
 use crate::core::api::{Ops, Output};
 use crate::presentation::intent;
 use crate::presentation::web::DEFAULT_PORT;
@@ -298,7 +298,7 @@ fn follow(ops: &Ops, sid: &str, cursor: &mut u64, acted: intent::Acted) {
 // ---------- 形态一：单 agent（模块数不限） ----------
 
 fn single_flow(ops: &Ops, arg: &str) {
-    let views = match intent::all_views(ops) {
+    let views = match ops.registry.agents() {
         Ok(v) => v,
         Err(e) => {
             println!("[错误] {}", e);
@@ -309,9 +309,10 @@ fn single_flow(ops: &Ops, arg: &str) {
         println!("[错误] {}（CLI 不再直接点模块）", intent::NO_AGENTS);
         return;
     }
-    // 点名 1 个 = 直接用该 agent（模块数不限）；点名多个 = 把那几个的模块并成一个；无参 = 把登记处全部并成一个。
-    let picked = if arg.trim().is_empty() {
-        intent::as_instances(&views)
+    // 点名 1 个 = 直接用该 agent（模块数不限）；点名多个 / 无参 = 全部。
+    // **「多个并成一个临时组合」的组合语义由核心在建工作时收口**（前端只交点名结果）。
+    let picked: Vec<AgentInstance> = if arg.trim().is_empty() {
+        views.iter().map(AgentInstance::from_view).collect()
     } else {
         match intent::pick_agents(ops, &intent::split_names(arg)) {
             Ok(l) => l,
@@ -321,12 +322,7 @@ fn single_flow(ops: &Ops, arg: &str) {
             }
         }
     };
-    let agent = if picked.len() == 1 {
-        picked.into_iter().next().expect("刚判过长度")
-    } else {
-        intent::merge_into_one(&picked, "组合")
-    };
-    let work_name = match intent::unique_work_name(ops, "single", "single") {
+    let work_name = match ops.sessions.unique_work_name("single", "single") {
         Ok(n) => n,
         Err(e) => {
             println!("[错误] {}", e);
@@ -335,9 +331,14 @@ fn single_flow(ops: &Ops, arg: &str) {
     };
     // 订阅起点：命令回包只给头部序号，事实一律从事件台按 since 取。
     let mut cursor = ops.events.head();
-    let opened = match intent::open_work(ops, work_name, WorkMode::Single, vec![agent], None, false)
-    {
-        Ok(o) => o,
+    let opened = match ops.sessions.create_work(WorkSpec {
+        name: work_name,
+        mode: WorkMode::Single,
+        agents: picked,
+        task: None,
+        delegate: false,
+    }) {
+        Ok(o) => o.0,
         Err(e) => {
             println!("[错误] {}", e);
             return;
@@ -380,7 +381,7 @@ fn collab_flow(ops: &Ops, arg: &str) {
             }
         }
     };
-    let work_name = match intent::unique_work_name(ops, "collab", "collab") {
+    let work_name = match ops.sessions.unique_work_name("collab", "collab") {
         Ok(n) => n,
         Err(e) => {
             println!("[错误] {}", e);
@@ -388,15 +389,14 @@ fn collab_flow(ops: &Ops, arg: &str) {
         }
     };
     let mut cursor = ops.events.head();
-    let sid = match intent::open_work(
-        ops,
-        work_name,
-        WorkMode::Collab,
+    let sid = match ops.sessions.create_work(WorkSpec {
+        name: work_name,
+        mode: WorkMode::Collab,
         agents,
-        Some(task),
+        task: Some(task),
         delegate,
-    ) {
-        Ok(o) => {
+    }) {
+        Ok((o, _)) => {
             cursor = drain(ops, &o.sid, cursor);
             o.sid
         }

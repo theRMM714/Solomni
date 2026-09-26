@@ -255,3 +255,41 @@ pub fn unique_instance_name(base: &str, taken: &[String]) -> String {
         n += 1;
     }
 }
+/// 登记处全部 agent 的视图（空登记处不是错误——调用方据此给引导）。
+pub fn views(agents: &Agents) -> Vec<AgentView> {
+    agents
+        .iter()
+        .map(|(name, a)| AgentView {
+            name: name.clone(),
+            modules: a.modules.clone(),
+            model: a.model.clone(),
+            note: a.note.clone(),
+        })
+        .collect()
+}
+
+/// 按名字取 agent 视图：**不猜、不代选**——名字不在登记处就如实报错，并列出现有的。
+/// 归属：点名是**登记处的查询**（它拥有 agent 身份），不是前端的便利函数。
+pub fn pick(agents: &Agents, names: &[String]) -> Result<Vec<AgentView>, String> {
+    let all = views(agents);
+    if names.is_empty() {
+        return Err("没有点名任何 agent".to_string());
+    }
+    let mut out = Vec::new();
+    for n in names {
+        match all.iter().find(|a| &a.name == n) {
+            Some(a) => out.push(a.clone()),
+            None => {
+                return Err(format!(
+                    "无此 agent：{}（现有：{}）",
+                    n,
+                    all.iter()
+                        .map(|a| a.name.as_str())
+                        .collect::<Vec<_>>()
+                        .join(" · ")
+                ))
+            }
+        }
+    }
+    Ok(out)
+}

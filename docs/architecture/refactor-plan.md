@@ -443,7 +443,7 @@ kernel       ──▶ （无）
 | **12** | **session 能力落位**：`capabilities/session/`（`session` + `history` + `events`）+ `HistoryStore`。**12a** 循环反转切掉 `engine ⇄ session`；**12b** 提取能力 | 11 | **已完成**（**反向边基线清空**——没有任何能力再依赖 `core`；环 7 → **5**，且 5 个节点全是能力、`core` 完全脱环；`core/ports.rs` 消失） |
 | **13** | **rewind 归位**：纯行 / 事件算术进 `capabilities/session/domain/rewind.rs`；`Core` 保留编排（`rewind` / `rewind_children` / `rebuild_session`） | 12 | **已完成**（`marks` 归属方案 A 照旧；无新增依赖边） |
 | **14** | **collab 能力落位**：`capabilities/collab/`（`collab` + `collab_state` + `engine`）。**执行顺序调整**：先做 14 再做 13——`rewind` 的回档重建要同时碰 `session` 与 `collab` 两侧，两边就位后才切得干净（已获用户同意） | 12 | **已完成**（环不变——`capabilities/collab` **不在环里**：没有任何它依赖的能力反过来依赖它；`core/` 只剩 `api.rs` + `mod.rs`） |
-| **15** | **断环（已完成）** → 能力图零环；**收口第 1 步（已完成）**：`Core` 的入站词汇从 `core/mod.rs` 移到 `core/api.rs`，呈现层只经 `core::api` → **依赖方向基线全空**；**后续（未开始）**：`intent.rs` 规则下沉（registry/session/core）、`presentation/` 拆成 `web/` + `cli/`、`main.rs` 拆四件事 | 14 | 断环 ✓、收口第 1 步 ✓；其余未开始 |
+| **15** | **断环（已完成）** → 能力图零环；**收口第 1 步（已完成）**：入站词汇归 `core/api.rs` → 基线全空；**收口第 2 步（已完成）**：`intent.rs` 的规则下沉——点名归 `registry::pick_agents`、命名归 `session::unique_work_name`、「生成中禁改」由 `Core::edit_session` 收口（`ensure_editable` 是重复守卫，删）、单模式组合语义归 `Core::create_work`（前端不再自己拼）；**后续（未开始）**：`Action`/`act` 进 `core::api`、`presentation/` 拆成 `web/` + `cli/`、`main.rs` 拆四件事 | 14 | 断环 ✓、收口 1 ✓、收口 2 ✓；其余未开始 |
 
 **豁免清零判据**：`tests/dependency-baseline.json` 的**三个数组全部清空**（`reverse` / `presentation` / `coreCycles`），
 且 `Core` 这个类型不再存在。门禁对**新增**与**过期**都报失败，所以销账不靠自觉——

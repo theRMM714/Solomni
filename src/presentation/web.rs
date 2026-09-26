@@ -317,13 +317,13 @@ pub(crate) fn route(
             };
             let text = str_field(&req, "text");
             let agent = str_field(&req, "agent");
-            // 配置界面：提交编辑（「生成中不许改」的规则在共享意图层收口一次）。
+            // 配置界面：提交编辑（「生成中不许改」的守卫在 `Core::edit_session` 里）。
             if action == "edit" {
                 let edit = match serde_json::from_value::<SessionEdit>(req.clone()) {
                     Ok(e) => e,
                     Err(e) => return complaint(400, format!("编辑内容非法：{}", e)),
                 };
-                return match intent::edit_session(ops, &sid, edit) {
+                return match ops.sessions.edit(&sid, edit) {
                     Ok(()) => ok_json(json!({ "ok": true })),
                     Err(e) => {
                         log.warn("web::edit_session", &format!("sid={} 编辑被拒：{}", sid, e));

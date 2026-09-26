@@ -210,6 +210,10 @@ impl SessionOps for FakeOps {
             },
         })
     }
+    fn unique_work_name(&self, _base: &str, fallback: &str) -> Result<String, String> {
+        Ok(fallback.to_string())
+    }
+
     fn exists(&self, _sid: &str) -> Result<bool, String> {
         self.guard()?;
         Ok(true)
@@ -223,6 +227,19 @@ impl SessionOps for FakeOps {
 }
 
 impl RegistryOps for FakeOps {
+    fn pick_agents(&self, names: &[String]) -> Result<Vec<AgentView>, String> {
+        self.guard()?;
+        Ok(names
+            .iter()
+            .map(|n| AgentView {
+                name: n.clone(),
+                modules: vec!["m".to_string()],
+                model: None,
+                note: String::new(),
+            })
+            .collect())
+    }
+
     fn providers(&self) -> Result<Vec<ProviderView>, String> {
         self.guard()?;
         Ok(vec![ProviderView {

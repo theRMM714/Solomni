@@ -205,9 +205,15 @@ pub trait SessionOps: Send + Sync {
     /// 投喂文件进本次工作的 work/；返回 false = 同名已存在（由用户决定覆盖或改名）。
     fn upload(&self, sid: &str, name: &str, bytes: &[u8], overwrite: bool) -> Result<bool, String>;
     fn files(&self, sid: &str) -> Result<FilesView, String>;
+    // 入站契约是**发布给前端的接口面**：二进制 crate 里暂时没有调用点的接口方法会被 dead_code 误报
+    // （见 docs/testing/quality-isolation.md 的 allow 清单）。
+    #[allow(dead_code)]
     fn exists(&self, sid: &str) -> Result<bool, String>;
+    /// 工作名的缺省与唯一化（命名策略归 `session`）：`base` 去空白、为空用 `fallback`、重名加尾号。
+    fn unique_work_name(&self, base: &str, fallback: &str) -> Result<String, String>;
     /// 请求停止该会话在跑的生成；返回是否确实有一个在跑。
     fn stop(&self, sid: &str) -> bool;
+    #[allow(dead_code)]
     fn is_running(&self, sid: &str) -> bool;
 }
 
@@ -231,6 +237,8 @@ pub trait RegistryOps: Send + Sync {
     fn remove_model(&self, id: &str) -> Result<bool, String>;
     fn set_core_model(&self, id: &str) -> Result<bool, String>;
     fn agents(&self) -> Result<Vec<AgentView>, String>;
+    /// 点名：按名字取 agent 视图；**不猜、不代选**——名字不在登记处就如实报错。
+    fn pick_agents(&self, names: &[String]) -> Result<Vec<AgentView>, String>;
     fn upsert_agent(
         &self,
         name: &str,
@@ -1108,6 +1116,11 @@ impl SessionOps for CoreHandle {
         self.call(move |core| Ok(core.session_exists(&sid)))
     }
 
+    fn unique_work_name(&self, base: &str, fallback: &str) -> Result<String, String> {
+        let (base, fallback) = (base.to_string(), fallback.to_string());
+        self.call(move |core| Ok(core.unique_work_name(&base, &fallback)))
+    }
+
     /// 停止**不走命令队列**：直接置位取消标志，所以生成期间照样立刻生效。
     fn stop(&self, sid: &str) -> bool {
         self.jobs.stop(sid)
@@ -1164,6 +1177,11 @@ impl RegistryOps for CoreHandle {
     }
     fn agents(&self) -> Result<Vec<AgentView>, String> {
         self.call(|core| Ok(core.agent_views()))
+    }
+
+    fn pick_agents(&self, names: &[String]) -> Result<Vec<AgentView>, String> {
+        let names = names.to_vec();
+        self.call(move |core| core.pick_agents(&names))
     }
     fn upsert_agent(
         &self,
@@ -1322,6 +1340,18 @@ pub struct AgentInstance {
     pub modules: Vec<String>,
     /// 该 agent 的模型（模型 id）；None = 核心默认。
     pub model: Option<String>,
+}
+
+impl AgentInstance {
+    /// 登记处视图 → 用例输入。**唯一**的转换口径（点名与「无参 = 全部」两条路共用）。
+    pub fn from_view(v: &AgentView) -> AgentInstance {
+        AgentInstance {
+            name: v.name.clone(),
+            transient: false,
+            modules: v.modules.clone(),
+            model: v.model.clone(),
+        }
+    }
 }
 
 /// 创建工作的全部用户决定（形态 + 参与的 agent；模型按 agent 指定）。

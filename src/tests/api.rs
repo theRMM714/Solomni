@@ -4,8 +4,8 @@
 use super::doubles::{collab_work, module_of};
 use super::{gated_ops, ops_with, single_work, slow_ops};
 use crate::capabilities::workspace::api::Module;
+use crate::core::api::{AgentInstance, SessionEdit, SessionEvent, WorkMode, WorkSpec};
 use crate::core::api::{CoreHandle, Ops, Output};
-use crate::core::api::{SessionEvent, WorkMode};
 use crate::kernel::types::Tier;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -670,5 +670,143 @@ fn auto_compaction_kicks_in_when_the_history_exceeds_the_budget() {
         all.iter()
             .any(|msgs| msgs.iter().any(|c| c.contains("自动摘要"))),
         "超过预算时该自动压一次（发送视图里出现摘要）：{all:?}"
+    );
+}
+
+// ---------- 从「共享意图层」搬来的规则测试（规则跟着归属走） ----------
+
+#[test]
+fn pick_agents_names_the_unknown_and_lists_the_rest() {
+    let (_h, ops) = ops_with(vec![module_of("a")], Vec::new());
+    ops.registry
+        .upsert_agent("甲", &["a".to_string()], "", "")
+        .expect("建 agent");
+    let picked = ops.registry.pick_agents(&["甲".to_string()]).expect("点名");
+    assert_eq!(picked.len(), 1);
+    assert_eq!(picked[0].name, "甲");
+    let err = ops.registry.pick_agents(&["乙".to_string()]).unwrap_err();
+    assert!(
+        err.contains("无此 agent：乙") && err.contains("甲"),
+        "{err}"
+    );
+    assert!(ops.registry.pick_agents(&[]).is_err(), "没点名 = 报错");
+    let views = ops.registry.agents().expect("读登记处");
+    assert_eq!(
+        views.iter().map(AgentInstance::from_view).count(),
+        1,
+        "视图 → 实例不丢项"
+    );
+}
+
+#[test]
+fn unique_work_name_falls_back_and_appends_a_suffix() {
+    let (_h, ops) = ops_with(vec![module_of("a")], Vec::new());
+    assert_eq!(
+        ops.sessions.unique_work_name("", "single").expect("缺省名"),
+        "single"
+    );
+    assert_eq!(
+        ops.sessions
+            .unique_work_name("  取名  ", "single")
+            .expect("去空白"),
+        "取名"
+    );
+    ops.sessions
+        .create_work(single_work("w", &["a"]))
+        .expect("建会话");
+    assert_eq!(
+        ops.sessions.unique_work_name("w", "x").expect("重名加尾号"),
+        "w-2"
+    );
+    ops.sessions
+        .create_work(single_work("w-2", &["a"]))
+        .expect("建会话");
+    assert_eq!(
+        ops.sessions.unique_work_name("w", "x").expect("再重名"),
+        "w-3"
+    );
+}
+
+#[test]
+fn single_mode_merges_multiple_agents_into_one_transient() {
+    let (_h, ops) = ops_with(vec![module_of("a"), module_of("b")], Vec::new());
+    ops.registry
+        .upsert_agent("甲", &["a".to_string(), "b".to_string()], "", "")
+        .expect("建 agent");
+    ops.registry
+        .upsert_agent("乙", &["b".to_string()], "", "")
+        .expect("建 agent");
+    let picked: Vec<AgentInstance> = ops
+        .registry
+        .agents()
+        .expect("读登记处")
+        .iter()
+        .map(AgentInstance::from_view)
+        .collect();
+    let (opened, _) = ops
+        .sessions
+        .create_work(WorkSpec {
+            name: "组合".to_string(),
+            mode: WorkMode::Single,
+            agents: picked,
+            task: None,
+            delegate: false,
+        })
+        .expect("建工作");
+    assert_eq!(
+        opened.agents,
+        vec!["组合".to_string()],
+        "多个点名并成一个临时组合"
+    );
+    let (meta, _) = ops.history.open("组合").expect("读 meta");
+    let mut modules = meta.agents[0].modules.clone();
+    modules.sort();
+    assert_eq!(
+        modules,
+        vec!["a".to_string(), "b".to_string()],
+        "模块去重（顺序随登记处遍历序，不额外断言）"
+    );
+    assert!(meta.agents[0].transient, "并出来的「组合」是临时 agent");
+}
+
+#[test]
+fn editing_is_refused_while_a_session_is_generating() {
+    let (_h, ops, _ticks) = slow_ops(vec![module_of("a")]);
+    let sid = ops
+        .sessions
+        .create_work(single_work("w", &["a"]))
+        .expect("建会话")
+        .0
+        .sid;
+    // 编辑体照抄当前配置（空名单会被"至少要有一个 agent"挡掉，那是另一条规则）。
+    let cfg = ops.sessions.config(&sid).expect("读配置");
+    let edit = || SessionEdit {
+        agents: cfg.agents.clone(),
+        tier: "host".to_string(),
+        base: None,
+        pins: std::collections::BTreeMap::new(),
+        net: false,
+    };
+    ops.sessions.edit(&sid, edit()).expect("没在生成时可以改");
+
+    let worker = {
+        let sessions = Arc::clone(&ops.sessions);
+        let sid = sid.clone();
+        std::thread::spawn(move || sessions.say(&sid, "慢慢来", Output::Stream))
+    };
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !ops.sessions.is_running(&sid) {
+        assert!(Instant::now() < deadline, "生成没有启动");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let err = ops.sessions.edit(&sid, edit()).unwrap_err();
+    assert!(err.contains("正在生成中"), "生成中必须拒绝改配置：{err}");
+
+    assert!(ops.sessions.stop(&sid), "停掉它");
+    let _ = worker.join();
+    ops.sessions.edit(&sid, edit()).expect("收尾后可以改");
+    assert!(
+        ops.sessions.edit("没这个会话", edit()).is_err(),
+        "无此会话要如实报错"
     );
 }

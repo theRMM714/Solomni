@@ -6,9 +6,9 @@ pub mod api;
 
 use crate::capabilities::session::api::{Pending, SessionEvent};
 use crate::core::api::{
-    AgentSuggestion, CollabStep, ConfigAgent, FilesAgentRootView, FilesAgentView, FilesRootsView,
-    FilesView, RuntimeReport, SessionConfig, SessionEdit, SessionView, WorkMode, WorkOpened,
-    WorkSpec,
+    AgentInstance, AgentSuggestion, CollabStep, ConfigAgent, FilesAgentRootView, FilesAgentView,
+    FilesRootsView, FilesView, RuntimeReport, SessionConfig, SessionEdit, SessionView, WorkMode,
+    WorkOpened, WorkSpec,
 };
 // 测试用同步入口的签名要它；生产路径的 Live 构造在 api.rs（那里直接引 crate::capabilities::session::api::Live）。
 pub use crate::capabilities::llm::api::{ChatGateway, ModelCatalog};
@@ -41,6 +41,24 @@ use std::sync::Arc;
 pub enum Session {
     Single(crate::capabilities::session::api::AgentSession),
     Collab(CollabSession),
+}
+
+/// 单模式的组合语义：多个 agent 的模块并成一个**临时组合**实例（去重、保序；模型取核心默认）。
+fn merge_into_one(picked: &[AgentInstance], name: &str) -> AgentInstance {
+    let mut merged: Vec<String> = Vec::new();
+    for a in picked {
+        for id in &a.modules {
+            if !merged.contains(id) {
+                merged.push(id.clone());
+            }
+        }
+    }
+    AgentInstance {
+        name: name.to_string(),
+        transient: true,
+        modules: merged,
+        model: None,
+    }
 }
 
 /// **这个会话要不要留档**：由**会话种类**定，不由调用点定。
@@ -1275,16 +1293,22 @@ impl Core {
     // ---- agent（用户配置的具名能力组合） ----
 
     pub fn agent_views(&self) -> Vec<crate::capabilities::registry::api::AgentView> {
-        self.settings
-            .agents
-            .iter()
-            .map(|(name, a)| crate::capabilities::registry::api::AgentView {
-                name: name.clone(),
-                modules: a.modules.clone(),
-                model: a.model.clone(),
-                note: a.note.clone(),
-            })
-            .collect()
+        crate::capabilities::registry::api::views(&self.settings.agents)
+    }
+
+    /// 按名字取 agent 视图（点名）：**不猜、不代选**——名字不在登记处就如实报错。
+    pub fn pick_agents(
+        &self,
+        names: &[String],
+    ) -> Result<Vec<crate::capabilities::registry::api::AgentView>, String> {
+        crate::capabilities::registry::api::pick(&self.settings.agents, names)
+    }
+
+    /// 工作名的缺省与唯一化（命名策略在 `session`；这里只提供"存在吗"）。
+    pub fn unique_work_name(&self, base: &str, fallback: &str) -> String {
+        crate::capabilities::session::api::unique_work_name(base, fallback, |n| {
+            self.sessions.contains_key(n) || self.history.load(n).is_ok()
+        })
     }
 
     /// 新建/覆盖一个 agent（校验模块与模型都真实存在；不静默）。
@@ -1486,6 +1510,12 @@ impl Core {
         // 代拟路径（协作、未给 agent）允许先空着，由核心按需求拟名单；其余形态必须有 agent。
         if spec.agents.is_empty() && !spec.delegate {
             return Err("至少要有一个 agent".to_string());
+        }
+        // **单模式的组合语义**：点名了多个 agent = 把它们的模块并成一个**临时组合**（去重、保序；
+        // 模型取核心默认）。规则只有这一处——前端不再自己拼（见 refactor-plan §4.2 批次 15 收口）。
+        let mut spec = spec;
+        if spec.mode == WorkMode::Single && spec.agents.len() > 1 {
+            spec.agents = vec![merge_into_one(&spec.agents, &spec.name)];
         }
         let roster = self.scan();
         // 校验 agent：名字合法、模块与模型真实存在；同一模块不得同时属于两个 agent（沙箱会歧义）
