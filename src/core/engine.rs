@@ -581,6 +581,8 @@ pub struct Discussion {
     pub allow_autonomy: bool,
     /// 提示词册（讨论文案来源）。
     prompts: Prompts,
+    /// 工具总表与角色表：**不挂在册子上**（两者互不依赖）。
+    systools: crate::core::roles::SystemTools,
     /// 本次调用的通道参数（流式 + 预算）：**全局设置**，与单 agent 共用同一份。
     llm: crate::core::ports::LlmOpts,
     /// 讨论席的**机制说明 + 讨论约定**（开场与轮转都带它）：只说约定不说机制，AI 会空转。
@@ -682,7 +684,7 @@ impl Discussion {
             let Member { chat, tools, .. } = m;
             let chat = chat.as_mut().expect("测试通道");
             Self::turn_with(
-                &self.prompts.systools,
+                &self.systools,
                 "discussant",
                 &self.cancel,
                 opts,
@@ -825,6 +827,7 @@ impl Discussion {
         members: Vec<Member>,
         allow_autonomy: bool,
         prompts: Prompts,
+        systools: crate::core::roles::SystemTools,
         llm: crate::core::ports::LlmOpts,
         cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
         protocol: String,
@@ -837,6 +840,7 @@ impl Discussion {
             closed: false,
             allow_autonomy,
             prompts,
+            systools,
             llm,
             cancel,
             protocol,
@@ -1240,7 +1244,7 @@ impl Discussion {
             move |_c: crate::core::ports::Chunk| !cancel.load(std::sync::atomic::Ordering::Relaxed);
         // 核心操作走工具调用：载荷形状与从前一致（plan + nodes），只是入口变成 plan 工具。
         let payload = core_operation(
-            &self.prompts.systools,
+            &self.systools,
             "planner",
             "plan",
             mode,
@@ -1368,6 +1372,7 @@ impl Execution {
         nodes: &str,
         retry: Option<&str>,
         prompts: &Prompts,
+        systools: &crate::core::roles::SystemTools,
         llm: crate::core::ports::LlmOpts,
         mode: crate::core::providers::ToolMode,
         verify: Option<&mut MemberTools>,
@@ -1405,7 +1410,7 @@ impl Execution {
         let mut keep = move |_c: Chunk| !cancel.load(std::sync::atomic::Ordering::Relaxed);
         // 核心操作走工具调用：总验收清单由 checklist 工具承载。
         let made = core_operation(
-            &prompts.systools,
+            systools,
             "orchestrator",
             "checklist",
             mode,

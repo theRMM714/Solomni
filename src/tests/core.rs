@@ -1266,6 +1266,7 @@ fn opts_discussion(
             members,
             false,
             test_prompts(),
+            test_systools(),
             llm,
             Default::default(),
             String::new(),
@@ -1367,6 +1368,7 @@ pub(crate) fn scripted_discussion(scripts: Vec<Vec<String>>, allow: bool) -> Dis
         members,
         allow,
         test_prompts(),
+        test_systools(),
         Default::default(),
         Default::default(),
         String::new(),
@@ -1783,7 +1785,7 @@ pub(crate) fn discussion_turn_carries_the_agent_sessions_own_history() {
     let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let prompts = test_prompts();
     let turn = crate::core::engine::Discussion::turn_with(
-        &prompts.systools,
+        &test_systools(),
         "discussant",
         &cancel,
         crate::core::ports::CompleteOpts::plain(false),
@@ -2045,6 +2047,7 @@ pub(crate) fn prose_without_an_envelope_is_not_a_statement() {
         members,
         true,
         test_prompts(),
+        test_systools(),
         Default::default(),
         Default::default(),
         String::new(),
@@ -2120,6 +2123,7 @@ pub(crate) fn execution_review_pass_and_fail_paths() {
         "",
         None,
         &prompts,
+        &test_systools(),
         Default::default(),
         Default::default(),
         None,
@@ -2140,6 +2144,7 @@ pub(crate) fn execution_review_pass_and_fail_paths() {
         "",
         None,
         &prompts,
+        &test_systools(),
         Default::default(),
         Default::default(),
         None,
@@ -2166,6 +2171,7 @@ pub(crate) fn review_parse_failure_is_conservative_fail() {
         "",
         None,
         &prompts,
+        &test_systools(),
         Default::default(),
         Default::default(),
         None,
@@ -5724,7 +5730,7 @@ pub(crate) fn discussion_turn_streams_deltas_and_never_leaks_the_envelope() {
     let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let prompts = test_prompts();
     let _ = crate::core::engine::Discussion::turn_with(
-        &prompts.systools,
+        &test_systools(),
         "discussant",
         &cancel,
         crate::core::ports::CompleteOpts::plain(true), // 开流式
@@ -6782,7 +6788,8 @@ pub(crate) fn builtin_tool_book_is_the_one_source_of_names_and_paths() {
     // 保留名（代码里的常量）**必须都有声明**，否则模型看到的工具与放行的工具会走偏。
     // 反过来不成立：总表里还有协作动词（say/agree/leave/ask），它们的实现不在 systool。
     let prompts = test_prompts();
-    let book = &prompts.core.builtin_tools;
+    let systools = test_systools();
+    let book = &systools.tools;
     for name in crate::core::systool::names() {
         assert!(
             book.contains_key(&name),
@@ -7359,6 +7366,7 @@ pub(crate) fn vm_tier_is_refused_when_the_machine_cannot_carry_it() {
         Arc::new(InMemorySysIo::new()),
         Arc::new(NoRepair),
         Box::new(TestPrompts::ok()),
+        test_systools(),
         Arc::new(crate::kernel::log::NoopLog),
         Arc::new(crate::adapters::HostProbeAdapter),
     )
@@ -7392,6 +7400,7 @@ pub(crate) fn vm_tier_is_refused_when_the_machine_cannot_carry_it() {
         Arc::new(InMemorySysIo::new()),
         Arc::new(NoRepair),
         Box::new(TestPrompts::ok()),
+        test_systools(),
         Arc::new(crate::kernel::log::NoopLog),
         Arc::new(crate::adapters::HostProbeAdapter),
     )
@@ -7510,6 +7519,7 @@ pub(crate) fn module_without_runtime_is_denied_with_reason() {
         Arc::new(InMemorySysIo::new()),
         Arc::new(NoRepair),
         Box::new(TestPrompts::ok()),
+        test_systools(),
         Arc::new(crate::kernel::log::NoopLog),
         Arc::new(crate::adapters::HostProbeAdapter),
     )
@@ -7926,6 +7936,7 @@ pub(crate) fn deleting_a_session_asks_the_fence_to_release_its_grants() {
         Arc::new(InMemorySysIo::new()),
         Arc::new(NoRepair),
         Box::new(TestPrompts::ok()),
+        test_systools(),
         Arc::new(crate::kernel::log::NoopLog),
         Arc::new(crate::adapters::HostProbeAdapter),
     )
@@ -8150,6 +8161,7 @@ pub(crate) fn native_core(
         io,
         Arc::new(NoRepair),
         Box::new(TestPrompts::ok()),
+        test_systools(),
         Arc::new(crate::kernel::log::NoopLog),
         Arc::new(crate::adapters::HostProbeAdapter),
     )
@@ -8337,7 +8349,7 @@ pub(crate) fn history_list_is_ordered_as_a_tree() {
 /// 核心操作必须走**工具调用**：正文里手写 JSON 不再被接受（真机上它既无 schema 校验也不进工具台账）。
 #[test]
 pub(crate) fn core_operations_require_a_tool_call_not_body_json() {
-    let prompts = test_prompts();
+    let systools = test_systools();
     // 角色表把核心操作发给对应的核心身份（越权校验与工具面的判据都是它）。
     for (role, tool) in [
         ("planner", "plan"),
@@ -8347,32 +8359,28 @@ pub(crate) fn core_operations_require_a_tool_call_not_body_json() {
         ("orchestrator", "checklist"),
     ] {
         assert!(
-            prompts.systools.role_face(role).0.iter().any(|t| t == tool),
+            systools.role_face(role).0.iter().any(|t| t == tool),
             "{} 该拿到 {} 工具",
             role,
             tool
         );
     }
     // 讨论席与执行席不拿核心操作（越权会被如实拒绝）。
-    let face = |role: &str| prompts.systools.role_face(role).0;
+    let face = |role: &str| systools.role_face(role).0;
     assert!(!face("discussant").iter().any(|t| t == "plan"));
     assert!(!face("executor").iter().any(|t| t == "checklist"));
     // 谁能用"自己模块的工具"也由角色表说了算：只有干活的那一席发（讨论席列出来等于请它去撞墙）。
     assert!(
-        prompts.systools.allows_module_tools("executor"),
+        systools.allows_module_tools("executor"),
         "执行席要能用自己模块的工具"
     );
     assert!(
-        !prompts.systools.allows_module_tools("discussant"),
+        !systools.allows_module_tools("discussant"),
         "讨论席不发模块工具"
     );
-    assert!(!prompts.systools.allows_module_tools("planner"));
+    assert!(!systools.allows_module_tools("planner"));
     // 载荷是**数组**参数（嵌套结构），不是标量。
-    let schema = prompts
-        .core
-        .builtin_tools
-        .get("plan")
-        .expect("plan 该在工具总表里");
+    let schema = systools.tools.get("plan").expect("plan 该在工具总表里");
     assert_eq!(
         schema.params.as_ref().expect("有参数")["nodes"].ty,
         crate::core::schema::ParamType::Array,
@@ -8385,7 +8393,6 @@ pub(crate) fn core_operations_require_a_tool_call_not_body_json() {
 /// 整步中断（真机上核心就是这么卡在多轮 `[中断] 没有调用 node_verdict` 上的）。
 #[test]
 pub(crate) fn core_operation_runs_readonly_verification_before_the_op() {
-    let prompts = test_prompts();
     let io = Arc::new(InMemorySysIo::new());
     let note = s(&["demo", "work", "note.txt"]);
     io.seed(&["demo", "work", "note.txt"], "现场：一切正常\n");
@@ -8421,7 +8428,7 @@ pub(crate) fn core_operation_runs_readonly_verification_before_the_op() {
         seen: Arc::clone(&seen),
     };
     let out = crate::core::engine::core_operation(
-        &prompts.systools,
+        &test_systools(),
         "planner",
         "plan",
         crate::core::providers::ToolMode::Envelope,
@@ -8451,13 +8458,12 @@ pub(crate) fn core_operation_runs_readonly_verification_before_the_op() {
 /// 正文里手写 JSON 不再被当成核心操作：**如实报错**，不把原文糊成方案。
 #[test]
 pub(crate) fn body_json_is_not_a_core_operation() {
-    let prompts = test_prompts();
     let mut chat = scripted(vec![
         "{\"plan\":\"方案\",\"nodes\":[{\"id\":\"n1\",\"title\":\"做\",\"objective\":\"做\",\"assignee\":\"a\",\"deps\":[]}]}"
             .to_string(),
     ]);
     let out = crate::core::engine::core_operation(
-        &prompts.systools,
+        &test_systools(),
         "planner",
         "plan",
         crate::core::providers::ToolMode::Envelope,
@@ -8474,9 +8480,8 @@ pub(crate) fn body_json_is_not_a_core_operation() {
 /// 回报走**工具调用**（不是正文 JSON）：执行席拿得到它，调用它不碰文件、回执带出回报内容。
 #[test]
 pub(crate) fn executor_reports_through_a_tool_call() {
-    let prompts = test_prompts();
     // 角色表把 report 发给执行席（越权校验的判据就是它）。
-    let face = |role: &str| prompts.systools.role_face(role).0;
+    let face = |role: &str| test_systools().role_face(role).0;
     assert!(
         face("executor").iter().any(|t| t == "submit_report"),
         "执行席该拿到回报工具"

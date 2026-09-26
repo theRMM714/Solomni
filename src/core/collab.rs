@@ -129,6 +129,8 @@ pub struct CollabSession {
     /// 核心通道的工具调用形态（原生才声明工具；信封通道看提示词里的说明）。
     core_mode: crate::core::providers::ToolMode,
     prompts: Prompts,
+    /// 工具总表与角色表：**不挂在册子上**（两者互不依赖）。
+    systools: crate::core::roles::SystemTools,
     gateway: Arc<dyn ChatGateway + Send + Sync>,
     source: Arc<dyn ModuleSource + Send + Sync>,
     /// 外部工具执行端口（策略在核心按模块清单放行，机制在适配层）。
@@ -165,6 +167,7 @@ impl CollabSession {
         source: Arc<dyn ModuleSource + Send + Sync>,
         settings: Settings,
         prompts: Prompts,
+        systools: crate::core::roles::SystemTools,
         tools: Arc<dyn ToolRunner + Send + Sync>,
         io: Arc<dyn SysIo + Send + Sync>,
         repair: Arc<dyn crate::core::ports::EnvelopeRepair + Send + Sync>,
@@ -199,6 +202,7 @@ impl CollabSession {
             core_chat,
             core_is_demo,
             prompts,
+            systools,
             gateway,
             source,
             tools,
@@ -306,6 +310,7 @@ impl CollabSession {
     #[allow(clippy::too_many_arguments)]
     fn judge_clear(
         prompts: &Prompts,
+        systools: &crate::core::roles::SystemTools,
         cancel: &std::sync::Arc<std::sync::atomic::AtomicBool>,
         opts: crate::core::ports::CompleteOpts<'static>,
         mode: crate::core::providers::ToolMode,
@@ -336,16 +341,7 @@ impl CollabSession {
         let mut keep =
             move |_c: crate::core::ports::Chunk| !stop.load(std::sync::atomic::Ordering::Relaxed);
         let payload = crate::core::engine::core_operation(
-            &prompts.systools,
-            "planner",
-            "verdict",
-            mode,
-            core_chat,
-            &msgs,
-            opts,
-            &mut keep,
-            verify,
-            sink,
+            systools, "planner", "verdict", mode, core_chat, &msgs, opts, &mut keep, verify, sink,
         )?;
         let clear = payload
             .get("clear")
@@ -367,6 +363,7 @@ impl CollabSession {
     #[allow(clippy::too_many_arguments)]
     fn review_nodes(
         prompts: &Prompts,
+        systools: &crate::core::roles::SystemTools,
         cancel: &std::sync::Arc<std::sync::atomic::AtomicBool>,
         chain: Option<&crate::core::chain::TaskChain>,
         opts: crate::core::ports::CompleteOpts<'static>,
@@ -412,7 +409,7 @@ impl CollabSession {
         // 核心操作走工具调用：节点验收结论由 node_verdict 工具承载。
         // 带核实回路：模型想先读/查落盘物时，核心执行只读工具再回灌（不再直接判"没调用"）。
         let payload = crate::core::engine::core_operation(
-            &prompts.systools,
+            systools,
             "orchestrator",
             "node_verdict",
             mode,
@@ -619,7 +616,7 @@ impl CollabSession {
         sink(crate::core::events::working("核心"));
         let mut verify = self.core_verify_tools("planner");
         let parsed = crate::core::engine::core_operation(
-            &self.prompts.systools,
+            &self.systools,
             "planner",
             "slate",
             self.core_mode,
@@ -747,6 +744,7 @@ impl CollabSession {
             members,
             self.allow,
             prompts,
+            self.systools.clone(),
             llm,
             std::sync::Arc::clone(&self.cancel),
             protocol,
@@ -812,7 +810,6 @@ impl CollabSession {
         sb.private = sb.shared.clone();
         sb.modules.clear();
         let allowed: Vec<String> = self
-            .prompts
             .systools
             .tool_face(role)
             .map(|f| f.into_iter().map(|(id, _)| id.to_string()).collect())
@@ -837,7 +834,7 @@ impl CollabSession {
 
     /// 讨论回合的**工具面**（动词 + 只读核实）：核心驱动时交给 turn_with。
     pub fn systools(&self) -> &crate::core::roles::SystemTools {
-        &self.prompts.systools
+        &self.systools
     }
 
     /// 「停止」标志：与核心共享同一个（停止能在一个模型调用内收尾）。
@@ -902,6 +899,7 @@ impl CollabSession {
                 sink(crate::core::events::working("核心"));
                 let judged = Self::judge_clear(
                     &self.prompts,
+                    &self.systools,
                     &self.cancel,
                     crate::core::ports::CompleteOpts::plain(self.settings.app.streaming)
                         .with_timeout(self.settings.app.llm_timeout_secs),
@@ -1184,6 +1182,7 @@ impl CollabSession {
                 let mut verify = self.core_verify_tools("orchestrator");
                 let made = Self::review_nodes(
                     &self.prompts,
+                    &self.systools,
                     &self.cancel,
                     Some(&reviewed),
                     crate::core::ports::CompleteOpts::plain(self.settings.app.streaming)
@@ -1319,6 +1318,7 @@ impl CollabSession {
                 &table,
                 retry.as_deref(),
                 &prompts,
+                &self.systools,
                 llm,
                 self.core_mode,
                 verify.as_mut(),
@@ -1458,13 +1458,12 @@ impl CollabSession {
                 fence,
                 // 讨论席的系统工具面**由角色表发放**（越权校验的唯一判据）。
                 allowed: self
-                    .prompts
                     .systools
                     .tool_face("discussant")
                     .map(|f| f.into_iter().map(|(id, _)| id.to_string()).collect())
                     .unwrap_or_default(),
                 // 讨论席不干活：拿不到自己模块的工具（角色表的 module_tools）。
-                with_modules: self.prompts.systools.allows_module_tools("discussant"),
+                with_modules: self.systools.allows_module_tools("discussant"),
                 notes: tool_notes,
             });
             members.push(member);
@@ -1523,6 +1522,7 @@ impl CollabSession {
         source: Arc<dyn ModuleSource + Send + Sync>,
         settings: Settings,
         prompts: Prompts,
+        systools: crate::core::roles::SystemTools,
         tools: Arc<dyn ToolRunner + Send + Sync>,
         io: Arc<dyn SysIo + Send + Sync>,
         repair: Arc<dyn crate::core::ports::EnvelopeRepair + Send + Sync>,
@@ -1579,6 +1579,7 @@ impl CollabSession {
             core_is_demo,
             core_mode,
             prompts: prompts.clone(),
+            systools: systools.clone(),
             gateway,
             source,
             tools,
@@ -1614,6 +1615,7 @@ impl CollabSession {
                 members,
                 st.allow,
                 prompts,
+                systools.clone(),
                 llm,
                 std::sync::Arc::clone(&s.cancel),
                 protocol,

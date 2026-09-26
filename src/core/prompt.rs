@@ -38,14 +38,12 @@ pub fn render(template: &str, vars: Vars) -> Result<String, String> {
     Ok(out)
 }
 
-/// 装配输入的**内存形态**：册子（`prompts/`）+ 系统工具与角色（`systools/`）。
-/// 为什么放一起：它们同一次装配、同一个注入点（core 只拿这一份）；分开注入只是多一条通道。
+/// 装配输入的**内存形态**：**只有提示词文本**（`prompts/`）。
+/// 工具总表与角色表是**另一个能力的东西**（`systools/`，见 `core::roles::SystemTools`）：
+/// 挂进这里就等于让提示词能力反过来依赖工具能力，两边成环。
 #[derive(Debug, Clone, Deserialize)]
 pub struct Prompts {
     pub core: CorePrompts,
-    /// 工具总表与角色表（不是提示词，但和册子一起装配）。
-    #[serde(skip)]
-    pub systools: crate::core::roles::SystemTools,
 }
 
 /// 把册子的多个文件合并成内存形态：各文件的**顶层键**合并后就是 `core:` 的内容。
@@ -109,11 +107,6 @@ pub struct CorePrompts {
     pub env: String,
     /// patch 通道的写法说明（模型侧）；变量：work_root, sandbox_root
     pub patch_guide: String,
-    /// 内置工具的参数契约：模型说明与调用校验的唯一来源。
-    /// **它不是册子的内容**——声明在 `systools/tools.yaml`（工具总表），由装配期填进来；
-    /// 所以这里允许缺省（册子里没有这一段），但装配器读不到总表就报错，不会静默留空。
-    #[serde(default)]
-    pub builtin_tools: crate::core::schema::ToolBook,
     /// 登记处还没有 agent 时的说明（拟名单的 {{agents}} 取值）。
     pub no_agents: String,
     /// agent 没有指定模型时的说明（拟名单清单里用）。

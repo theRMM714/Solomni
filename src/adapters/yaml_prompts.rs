@@ -1,9 +1,9 @@
-//! 装配输入加载：`prompts/` 目录 → core::prompt::Prompts，`systools/tools.yaml` → 内置工具声明。
+//! 装配输入加载：`prompts/` 目录 → core::prompt::Prompts（**只有提示词文本**），
+//! `systools/` 两张表 → core::roles::SystemTools（工具是什么 + 身份有什么）。
 //! 缺目录/缺文件 = 装配错误（如实报错，不静默造默认文案）。
 //!
-//! 为什么工具声明单独一个文件：它是**工具总表**的内容（工具是什么），不是提示词。
-//! 但内存形态仍挂在册子上（`Prompts.core.builtin_tools`）——消费点因此不用改，
-//! 只是"这一份声明的家"从册子搬到了总表。
+//! **两者不合并**：工具总表与角色表不是提示词；挂进册子会让提示词能力反过来依赖工具能力，
+//! 两边成环（见 docs/architecture/refactor-plan.md §三）。
 
 use crate::core::ports::PromptSource;
 use crate::core::prompt::Prompts;
@@ -38,12 +38,7 @@ impl YamlPrompts {
 
 impl PromptSource for YamlPrompts {
     fn load(&self) -> Result<Prompts, String> {
-        let mut book = crate::core::prompt::merge_book(&self.read_docs()?)?;
-        // 工具声明与角色来自**两张表**（唯一真相）：册子里不再有这些。
-        let st = self.system_tools()?;
-        book.core.builtin_tools = st.tools.clone();
-        book.systools = st;
-        Ok(book)
+        crate::core::prompt::merge_book(&self.read_docs()?)
     }
 }
 

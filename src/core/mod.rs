@@ -42,6 +42,7 @@ use crate::core::module::Module;
 use crate::core::ports::Msg;
 use crate::core::prompt::Prompts;
 use crate::core::providers::{AppSettings, Channel, Settings};
+use crate::core::roles::SystemTools;
 use crate::kernel::log::Log;
 use crate::kernel::types::SessionId;
 use std::collections::{BTreeMap, HashMap};
@@ -384,6 +385,8 @@ pub struct Core {
     probe: Arc<dyn ports::HostProbe + Send + Sync>,
     settings: Settings,
     prompts: Prompts,
+    /// 工具总表与角色表（`systools/` 两张表）：**不挂在册子上**，两者互不依赖（见 prompt.rs）。
+    systools: SystemTools,
     sessions: HashMap<SessionId, Session>,
     /// 正在生成的会话：对象被工作线程**取走**了，核心表里暂时没有它。
     /// 为什么取出而不是就地生成：生成要跑几十秒到几分钟，占着唯一的命令队列会让
@@ -410,6 +413,7 @@ impl Core {
         io: Arc<dyn SysIo + Send + Sync>,
         repair: Arc<dyn ports::EnvelopeRepair + Send + Sync>,
         prompt_source: Box<dyn PromptSource>,
+        systools: SystemTools,
         log: Arc<dyn crate::kernel::log::Log + Send + Sync>,
         probe: Arc<dyn ports::HostProbe + Send + Sync>,
     ) -> Result<Core, String> {
@@ -433,6 +437,7 @@ impl Core {
                 probe,
                 settings,
                 prompts,
+                systools,
                 sessions: HashMap::new(),
                 running: std::collections::BTreeSet::new(),
             })
@@ -562,9 +567,8 @@ impl Core {
     ) -> (String, Option<crate::core::ports::ToolDecl>, u64, String) {
         let prompt = self.prompts.core.tool_texts.compact_prompt.clone();
         let decl = self
-            .prompts
-            .core
-            .builtin_tools
+            .systools
+            .tools
             .get("compact")
             .map(|t| t.decl("compact"));
         let (up_to, identity) = match self.sessions.get(sid) {
@@ -1082,7 +1086,7 @@ impl Core {
             net: meta.exec.net,
             pins: meta.exec.pins.clone(),
             runtime: self.runtime_report(tier),
-            runtimes_dir: workspace::slash(&self.packages.dir()),
+            runtimes_dir: crate::kernel::path::slash(&self.packages.dir()),
             tier_ready: exec::tier_readiness(&meta.exec, self.qemu_path(), self.probe.as_ref())
                 .ready(),
             tier_missing: exec::tier_readiness(&meta.exec, self.qemu_path(), self.probe.as_ref())
@@ -1759,6 +1763,7 @@ impl Core {
                     Arc::clone(&self.source),
                     self.settings.clone(),
                     self.prompts.clone(),
+                    self.systools.clone(),
                     Arc::clone(&self.tools),
                     Arc::clone(&self.io),
                     Arc::clone(&self.repair),
@@ -1830,7 +1835,7 @@ impl Core {
                 name: a.name.clone(),
                 root: sandboxes
                     .for_agent(&a.name)
-                    .map(|s| workspace::slash(&s.private))
+                    .map(|s| crate::kernel::path::slash(&s.private))
                     .unwrap_or_default(),
             });
         }
@@ -1838,7 +1843,7 @@ impl Core {
             work: files.work,
             agents,
             roots: FilesRootsView {
-                work: workspace::slash(&sandboxes.shared),
+                work: crate::kernel::path::slash(&sandboxes.shared),
                 agents: agent_roots,
             },
         })
@@ -1883,7 +1888,7 @@ impl Core {
                 private,
                 modules,
                 texts: self.prompts.core.tool_texts.clone(),
-                builtin_tools: self.prompts.core.builtin_tools.clone(),
+                builtin_tools: self.systools.tools.clone(),
             });
         }
         Ok(workspace::Sandboxes {
@@ -1922,7 +1927,7 @@ impl Core {
             // 执行席的系统工具面**由角色表发放**（越权校验的唯一判据）。
             allowed: self.role_tools("executor"),
             // 能不能用自己模块的工具、以及工具说明块的素材：都按角色表与这个 agent 的模块装配期算好。
-            with_modules: self.prompts.systools.allows_module_tools("executor"),
+            with_modules: self.systools.allows_module_tools("executor"),
             notes: systool::tool_notes(&self.prompts, sb, modules),
         }
     }
@@ -1951,8 +1956,7 @@ impl Core {
     /// 角色表发放的系统工具 id 清单（工具面的名字部分）。
     /// 为什么不留第二份名单：代码里出现"哪个角色能调哪个工具"必然与表漂。
     fn role_tools(&self, role: &str) -> Vec<String> {
-        self.prompts
-            .systools
+        self.systools
             .tool_face(role)
             .map(|f| f.into_iter().map(|(id, _)| id.to_string()).collect())
             .unwrap_or_default()
@@ -2127,7 +2131,7 @@ impl Core {
         let mut rows: Vec<SessionEvent> = Vec::new();
         // 核心操作走工具调用：推荐名单由 suggest 工具承载。
         let payload = crate::core::engine::core_operation(
-            &self.prompts.systools,
+            &self.systools,
             "planner",
             "suggest",
             self.settings.tool_mode_for(None),
@@ -2614,6 +2618,7 @@ impl Core {
                 Arc::clone(&self.source),
                 self.settings.clone(),
                 self.prompts.clone(),
+                self.systools.clone(),
                 Arc::clone(&self.tools),
                 Arc::clone(&self.io),
                 Arc::clone(&self.repair),

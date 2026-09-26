@@ -409,24 +409,38 @@ kernel       ──▶ （无）
 4. **每个批次完成即销账**：把 §4.2 表里的状态改为「已完成」，并同步文档（R8）。
 5. **测试跟着走**：每个批次把该业务的测试从 `src/tests/core.rs` 拆到同构文件（§4.4）。
 6. **不留兼容层**（R7）：旧路径**删除**，不做 `pub use` 转发。
+7. **先切边，再搬能力**（批次 3 的实测结论）：`core` 的 20 个有出边的模块里 **16 个同属一个强连通分量**，
+   **没有任何一个能力是叶子**——每个能力都被至少一条 `core` 依赖挡住。所以顺序不是"挑叶子先搬"，
+   而是**先切掉那些数据依赖，再搬**。切边的判据只有两条：
+   ① **数据聚合**（把两个能力的册子/表焊在一个结构体里，例如 `Prompts` 曾同时装文本与工具总表）；
+   ② **机制错位**（纯机制住在某个业务里，例如 `slash` 曾住在 `workspace`）。
 
 ### 4.2 批次表（销账表）
 
-| 批次 | 目标 | 现状 | 前置 | 状态 |
-| --- | --- | --- | --- | --- |
-| **0** | **依赖方向门禁**：T0 加 `use` 边检查 + 基线豁免清单 | 无门禁 | — | **已完成**（`run-tests.js` 的 T0 结构审查 + `tests/dependency-baseline.json`） |
-| **1** | **kernel**：`jobs` / `log` / `types`（`bus` 与运行态合并按 §3.2 推迟到批次 9） | `api.rs` 的 JobRegistry；`ports.rs` 的 Log；`core/mod.rs` 的 SessionId | 0 | **已完成**（`src/kernel/`） |
-| **2** | **修两处违约**：`exec.rs` 宿主探测下沉为 `HostProbe` 端口（4 处 IO）；`presentation` 不再持 `Log`/`ProbeOutcome`（改经入站能力面 `LogOps`） | `exec.rs` 的 `std::env`/`is_file`/`is_dir`；`web.rs` 的 `Log`/`ProbeOutcome` | 0 | **已完成**（基线 9 → 7 条） |
-| **3** | **prompt** | `prompt.rs` `refs.rs` | 1 | 未开始 |
-| **4** | **workspace**：`module` / `packages` / `exec` | `module.rs` `packages.rs` `exec.rs` | 2,3 | 未开始 |
-| **5** | **registry**（含拆 `providers.rs`） | `agents.rs`；`providers.rs` 登记处侧 | 1 | 未开始 |
-| **6** | **llm**：`Channel` 解析 + 通道端口族 | `providers.rs` 的 Channel 侧；`ports.rs` 通道族 | 5 | 未开始 |
-| **7** | **tools**（钉死 §3.4：实现锁内部、机制留端口、工具调用发一对短暂事件、**产出事实不落盘**）：`systool`/`patch`/`schema`/`roles`/`fence`/`workspace`；文案归 `prompt` | 6 个文件 | 3,4 | 未开始 |
-| **8** | **解 `engine ⇄ session` 环**：定清 `build_round_lines`/`stream_piece`/`assemble`/`converse_with` 的归属 | 双向依赖 | 7 | 未开始 |
-| **9** | **session**（含压缩 `compact`：钉死 §3.5 的五条不变式与压缩×回档边界） | `session.rs` `history.rs` `collab_state.rs` `events.rs` | 8 | 未开始 |
-| **10** | **rewind**（协调型；方案 A） | 散布 5 处 | 9 | 未开始 |
-| **11** | **collab** | `collab.rs` `chain.rs` `engine.rs` | 10 | 未开始 |
-| **12** | **presentation 收口 + 前端分区**：只 `use` 各业务 `api`；`app.js` 分区 | `cli.rs` `web.rs` `intent.rs`；`app.js` 2697 行 | 11 | 未开始 |
+**阶段 A：切边（行为不变，只搬家 / 拆类型）**
+
+| 批次 | 目标 | 切掉的边 | 状态 |
+| --- | --- | --- | --- |
+| **0** | **依赖方向门禁** + 基线账本 | — | **已完成**（`run-tests.js` 的 T0 结构审查 + `tests/dependency-baseline.json`） |
+| **1** | **kernel**：`jobs` / `log` / `types`（`bus` 与运行态合并按 §3.2 推迟到阶段 B 的 session） | — | **已完成**（`src/kernel/`） |
+| **2** | **修两处违约**：`exec.rs` 宿主探测下沉为 `HostProbe` 端口（4 处 IO）；`presentation` 改经入站能力面 `LogOps` | `core` 里的环境变量与文件系统调用；`presentation → ports` / `presentation → kernel` | **已完成**（基线 9 → 7 条） |
+| **3** | **切边 A1 + A2**：`slash` → `kernel::path`（纯机制）；**拆册子**——`Prompts` 只留提示词文本，`SystemTools` / `ToolBook` 由 `Core`、协作会话与讨论直接持有 | `refs → workspace`；`prompt → roles`；`prompt → schema`；**并解开 `prompt ⇄ tools` 本质环** | **已完成**（核心环 16 → 14 个模块） |
+| **4** | **其余数据依赖**（逐个定"这个类型归谁"）：`SessionMeta.exec`（`history → exec`）、`SessionEvent::PlanReview.chain`（`events → chain`）、`Sandbox` 里的 `ToolBook` + `ToolTexts`（`workspace → prompt, schema`）、`Settings` 里的 agents 与 exec（`providers → agents, exec`） | 见左 | 未开始 |
+| **5** | **拆 `ports.rs`**：它的 trait 签名引用了 **8 个**模块的类型（`envelope` / `fence` / `history` / `module` / `packages` / `prompt` / `providers` / `workspace`）——按 §1.2 让每个能力有自己的 `ports.rs` | `ports → …`（最大枢纽） | 未开始 |
+
+**阶段 B：搬能力（按切边后的图重排）**
+
+| 批次 | 目标 | 前置 | 状态 |
+| --- | --- | --- | --- |
+| **6** | **prompt**（此时只剩 `→ envelope` 一条出边，无环） | 3, 4 | 未开始 |
+| **7** | **registry**（含拆 `providers.rs`） | 4 | 未开始 |
+| **8** | **llm**：`Channel` 解析 + 通道端口族 | 7 | 未开始 |
+| **9** | **workspace**：`module` / `packages` / `exec` | 5, 8 | 未开始 |
+| **10** | **tools**（钉死 §3.4：实现锁内部、机制留端口、工具调用发一对短暂事件、**产出事实不落盘**）：`systool` / `patch` / `schema` / `roles` / `fence` / `workspace` | 9 | 未开始 |
+| **11** | **session**（含压缩 `compact`：钉死 §3.5 的五条不变式与压缩×回档边界；并合并运行态的两份真相、落位 `bus`） | 10 | 未开始 |
+| **12** | **rewind**（协调型；`marks` 归属方案 A） | 11 | 未开始 |
+| **13** | **collab** | 12 | 未开始 |
+| **14** | **presentation 收口 + 前端分区**：只 `use` 各业务 `api`；`app.js` 分区 | 13 | 未开始 |
 
 **豁免清零判据**：`tests/dependency-baseline.json` 的**三个数组全部清空**（`reverse` / `presentation` / `coreCycles`），
 且 `Core` 这个类型不再存在。门禁对**新增**与**过期**都报失败，所以销账不靠自觉——

@@ -10,6 +10,7 @@
 | `mod.rs` | 内核入口：只声明模块，不放逻辑 |
 | `types.rs` | 跨业务共享的**事实类型**：只放没有领域逻辑的（`SessionId`） |
 | `log.rs` | `Log` 端口（三级）与测试用的 `NoopLog`；文件/时间戳/目录机制在适配层 |
+| `path.rs` | 路径的**对外书写形式**（一律 `/`）：跨平台机制，与任何业务无关 |
 | `jobs.rs` | 生成中作业的**取消表**：核心登记，呈现层只能说「停哪个会话」；「停止」不排队、不碰核心状态，所以生成期间立刻生效 |
 
 ## 二、`core/`（抽象与业务，无 IO）
@@ -20,14 +21,14 @@
 | `ports.rs` | 出站端口 trait 与跨层数据结构（依赖倒置的边界；core 需要什么，由适配器实现）。**无领域语义的机制端口在 `kernel/`** |
 | `api.rs` | **入站契约**：五个按角色的能力接口（`SessionOps` / `RegistryOps` / `HistoryOps` / `DiscoveryOps` / `LogOps`）+ `CoreHandle`（核心自有线程、命令/事件）+ `EventBus`；单 agent 与协作长步骤的生成都在**工作线程**上跑（队列只占"取/交"两步） |
 | `events.rs` | 呈现侧契约：`SessionEvent` 与介入请求的词汇（**事实**的线格式定义在这）；转录行 `LineView` 带 `speaker` / `verb` / `kind`，`render()` 是"字段 → 文本"的唯一拼法 |
-| `prompt.rs` | 提示词渲染：`{{key}}` 占位替换，缺键/缺变量报错 |
+| `prompt.rs` | 提示词渲染：`{{key}}` 占位替换，缺键/缺变量报错。**只有提示词文本**——工具总表与角色表不挂在这里（否则与工具能力成环） |
 | `schema.rs` | 工具参数契约（**声明在文本层**）：解析/校验/两种渲染（模型侧说明、JSON Schema） |
 | `roles.rs` | 系统工具与**角色**表（`systools/tools.yaml` + `roles.yaml`）：按角色组装工具面、按表校验调用；"哪个角色能调哪个工具"只有这一份（见 [tools-and-roles.md](tools-and-roles.md)） |
 | `module.rs` | `module.yaml` 契约、扫描结果 `Roster`、`runtimes`/`tools` 校验、agent system 合成 |
 | `packages.rs` | `package.yaml` 契约与包库事实（校验、去重、系统路径冲突预检） |
 | `exec.rs` | 执行档位（`ExecSpec`）与执行计划（`ExecPlan`）派生、虚拟机档诊断、档位承载（`TierReadiness`：本机能不能承载这个档位）。宿主事实（路径存在性 / PATH 可执行文件 / 虚拟化能力）**经 `ports::HostProbe` 问**，本文件不碰环境变量与文件系统 |
 | `fence.rs` | 一次工具执行的围栏策略（纯数据：可达根、断网、工作目录） |
-| `workspace.rs` | 工作区与沙箱的纯数据定义、寻址与越界判定 |
+| `workspace.rs` | 工作区与沙箱的纯数据定义、寻址与越界判定。路径的**对外书写形式**在 `kernel::path`（纯机制） |
 | `systool.rs` | 内置工具 `read` / `write` / `edit` / `patch` / `search` 的放行、寻址、**按声明校验参数**、改动前的"读过"证据（`Observations`）、自由格式补丁的原子应用与回执文案 |
 | `patch.rs` | 补丁通道的**纯逻辑**：解析自由格式补丁（Add / Update / SEARCH / REPLACE / End File）与整行应用（逐行匹配、行尾风格保持、失败点名第几处） |
 | `refs.rs` | 用户 `@` 引用改写成真实绝对路径 |
@@ -56,7 +57,7 @@
 | `fs_history.rs` | `HistoryStore`：`meta.yaml` + `transcript.jsonl` |
 | `host_probe.rs` | `HostProbe`：宿主能力探测（路径存在性、PATH 上的可执行文件、本机虚拟化能力）——**只读事实**，不执行、不安装、不写 |
 | `yaml_settings.rs` | `SettingsStore`：登记处四份 yaml 的读写（见 [REGISTRY_SPEC.md](../../REGISTRY_SPEC.md)） |
-| `yaml_prompts.rs` | `PromptSource`：加载 `prompts/` |
+| `yaml_prompts.rs` | `PromptSource`：加载 `prompts/`（**只有文本**）；`system_tools()` 另行装配 `systools/` 两张表 |
 | `endpoint.rs` | 端点补全/回落规则与进程内端点记忆（纯逻辑） |
 | `http_agent.rs` | 出站 HTTP 代理构建（TLS 后端选择与超时的单点） |
 | `http_chat.rs` | `Chat` / `ChatGateway`：OpenAI 兼容 `/chat/completions`（请求体形状的唯一定义：真实会话与探针共用） |

@@ -427,7 +427,7 @@ pub(crate) fn test_sandbox(agent: &str, modules: &[&str]) -> crate::core::worksp
         private: abs(&["demo", agent]),
         modules: map,
         texts: test_prompts().core.tool_texts,
-        builtin_tools: test_prompts().core.builtin_tools,
+        builtin_tools: test_systools().tools,
     }
 }
 
@@ -851,6 +851,14 @@ pub(crate) fn test_prompts() -> Prompts {
         .expect("内置提示词册必须合法")
 }
 
+/// 测试用工具总表与角色表（走**与产品同一条**装配路径）。
+/// 它与提示词册**分开**装配：两者互不依赖（见 core/prompt.rs 的 Prompts）。
+pub(crate) fn test_systools() -> crate::core::roles::SystemTools {
+    let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    crate::adapters::YamlPrompts::new(root.join("prompts"), root.join("systools"))
+        .system_tools()
+        .expect("内置工具总表必须合法")
+}
 /// 宿主探测替身：**只按给定答案回答**，不读真实环境（测试要确定性）。
 /// 事实由用例显式声明；真实适配器的契约另有 T2 用例（见 docs/testing/doubles.md 端口矩阵）。
 #[derive(Default)]
@@ -906,6 +914,7 @@ pub(crate) fn core_with_workspace(
         Arc::new(InMemorySysIo::new()),
         Arc::new(NoRepair),
         Box::new(TestPrompts::ok()),
+        test_systools(),
         Arc::new(crate::kernel::log::NoopLog),
         Arc::new(crate::adapters::HostProbeAdapter),
     )
@@ -1001,6 +1010,7 @@ pub(crate) fn core_with_pkgs(
         io,
         Arc::new(NoRepair),
         Box::new(TestPrompts::ok()),
+        test_systools(),
         Arc::new(crate::kernel::log::NoopLog),
         Arc::new(crate::adapters::HostProbeAdapter),
     )
@@ -1022,6 +1032,7 @@ pub(crate) fn core_with_settings(store: InMemorySettings) -> Core {
         Arc::new(InMemorySysIo::new()),
         Arc::new(NoRepair),
         Box::new(TestPrompts::ok()),
+        test_systools(),
         Arc::new(crate::kernel::log::NoopLog),
         Arc::new(crate::adapters::HostProbeAdapter),
     )
@@ -1054,6 +1065,7 @@ pub(crate) fn core_with_io_gateway(
         io,
         Arc::new(NoRepair),
         Box::new(TestPrompts::ok()),
+        test_systools(),
         Arc::new(crate::kernel::log::NoopLog),
         Arc::new(crate::adapters::HostProbeAdapter),
     )
@@ -1078,6 +1090,7 @@ pub(crate) fn core_with_gateway(
         Arc::new(InMemorySysIo::new()),
         Arc::new(NoRepair),
         Box::new(TestPrompts::ok()),
+        test_systools(),
         Arc::new(crate::kernel::log::NoopLog),
         Arc::new(crate::adapters::HostProbeAdapter),
     )

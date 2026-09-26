@@ -99,7 +99,7 @@ pub fn env_block(prompts: &Prompts, p: &crate::core::session::SessionParams) -> 
                     &texts.module_root_line,
                     &[
                         ("id", id.clone()),
-                        ("root", crate::core::workspace::slash(root)),
+                        ("root", crate::kernel::path::slash(root)),
                     ],
                 )
             })
@@ -111,8 +111,8 @@ pub fn env_block(prompts: &Prompts, p: &crate::core::session::SessionParams) -> 
         &[
             ("work_name", p.work_name.clone()),
             ("agent", p.agent.clone()),
-            ("work_root", crate::core::workspace::slash(&p.shared)),
-            ("sandbox_root", crate::core::workspace::slash(&p.private)),
+            ("work_root", crate::kernel::path::slash(&p.shared)),
+            ("sandbox_root", crate::kernel::path::slash(&p.private)),
             ("module_roots", module_roots),
         ],
     )
@@ -136,8 +136,8 @@ pub fn tool_notes(
         patch_guide: prompts.render(
             &prompts.core.patch_guide,
             &[
-                ("work_root", crate::core::workspace::slash(&sb.shared)),
-                ("sandbox_root", crate::core::workspace::slash(&sb.private)),
+                ("work_root", crate::kernel::path::slash(&sb.shared)),
+                ("sandbox_root", crate::kernel::path::slash(&sb.private)),
             ],
         ),
         module_tools: crate::core::module::module_tools(prompts, modules),

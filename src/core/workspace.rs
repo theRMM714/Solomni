@@ -7,14 +7,9 @@
 //! 越界、相对路径、空段一律拒绝，并把允许的根目录列回去（如实报错，不纠正）。
 
 use crate::core::prompt::ToolTexts;
+use crate::kernel::path::slash;
 use std::collections::BTreeMap;
 use std::path::{Component, Path, PathBuf};
-
-/// 路径的**书写形式**（给模型看、进提示词与 JSON 的）：一律用 / 分隔。
-/// Windows 的反斜杠在 JSON 字符串里是转义符（"D:\a" 会解析失败），所以对外只给 /——两边系统都认。
-pub fn slash(p: &std::path::Path) -> String {
-    p.to_string_lossy().replace('\\', "/")
-}
 
 /// 投喂文件名净化（策略在 core）：只允许单个文件名，挡掉路径分隔符与上级跳转。
 pub fn safe_file_name(name: &str) -> Result<String, String> {

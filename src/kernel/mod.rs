@@ -6,4 +6,5 @@
 
 pub mod jobs;
 pub mod log;
+pub mod path;
 pub mod types;

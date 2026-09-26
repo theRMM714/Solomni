@@ -77,7 +77,7 @@ fn full_path(root: &Path, rel: &str) -> Option<String> {
         }
     }
     // 对外一律 / 分隔：Windows 反斜杠在 JSON 字符串里是转义符，模型照抄会写出非法 JSON。
-    Some(crate::core::workspace::slash(&p))
+    Some(crate::kernel::path::slash(&p))
 }
 
 /// 引用别人（或协作）的沙箱：用册子文案如实说明谁能读，不给出真实路径。

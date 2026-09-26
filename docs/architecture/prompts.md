@@ -17,7 +17,6 @@
 | `shared/tools.yaml` | `env` | **工作环境块**：本 agent 的真实根目录（共享区 / 沙箱 / 模块目录）与路径规矩 |
 | | `patch_guide` | 自由格式补丁的写法（每块以 `*** End File` 收尾、SEARCH 要整行一致、一次可多块、整体原子） |
 | | `tool_calling_envelope` / `tool_calling_native` | 工具调用约定**两套，互斥**：一个通道只用一套，由通道形态决定注入哪套 |
-| | `builtin_tools` | 内置工具的**参数契约**：模型侧说明与调用校验的唯一来源（不写进代码） |
 | `shared/texts.yaml` | `no_agents` / `no_model` / `no_module_dirs` / `no_module_tools` / `no_module_tool_params` | 空态说法 |
 | | `module_tool_params_header` | 模块工具参数段的小标题（模块在 `module.yaml` 里声明了 `params` 时出现） |
 | | `tool_texts.*` | **运行时回执**：路径校验、参数不符（说事实 + 回发工具签名）、内置工具回执与行区间/截断/编码标注、edit 的找不到（含"只差空白"提示）与多处命中、patch 的解析失败与"第几块为什么、整体没写"、write 的"没读过/读后又被改/只读到一部分"三种拒绝、外部工具分派的三类失败、**信封不合法四类**与"已修复后执行"/"输出被长度截断"的如实标注、给模型看的清单骨架、追加在回复行末尾的 `（已停止）` / `（本段被输出长度截断）` |
@@ -33,5 +32,8 @@
 ## 二、怎么被装载
 
 - `PromptSource` 端口（`adapters/yaml_prompts.rs`）按文件装配成 `Prompts`（`core/prompt.rs` 的结构体，字段与键同名）；
+- **工具总表与角色表不在这份册子里**：`systools/tools.yaml`（工具是什么）与 `systools/roles.yaml`（身份有什么）
+  由 `YamlPrompts::system_tools()` 装配成 `core::roles::SystemTools`，**与册子分开注入**——
+  挂进册子会让提示词反过来依赖工具，两边成环（见 [refactor-plan.md](refactor-plan.md) §三）；
 - `core/prompt.rs` 只做 `{{key}}` 渲染与"缺键/缺变量即报错"（纯逻辑）；
 - 文案的注入方式与端口一致：随环境对象传入（沙箱 / 工具环境 / 引用改写器），不让纯逻辑自己去读文件。
