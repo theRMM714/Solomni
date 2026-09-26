@@ -2,7 +2,7 @@
 //! 读：按 UTF-8 解码；含非法字节时按替换字符呈现并置 lossy（编码猜测不是本程序的事）。
 //! 写：一律 UTF-8，需要时建父目录，覆盖同名文件。
 
-use crate::core::ports::{DirEntry, FileRead, SysIo};
+use crate::capabilities::tools::ports::{DirEntry, FileRead, SysIo};
 use std::path::Path;
 
 pub struct FsSysIo {

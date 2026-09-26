@@ -1,7 +1,7 @@
 //! 其他平台后端：没有原生围栏机制可用——如实降级（只保证进程树与超时），绝不假装有文件系统围栏。
 
 use super::{shell_command, Capability, FenceVerdict, FENCE_FAILED};
-use crate::core::fence::FenceSpec;
+use crate::capabilities::tools::api::FenceSpec;
 
 pub fn capability() -> Capability {
     Capability {

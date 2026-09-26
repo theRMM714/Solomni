@@ -23,12 +23,6 @@
 | `ports.rs` | 出站端口 trait 与跨层数据结构（依赖倒置的边界；core 需要什么，由适配器实现）。**无领域语义的机制端口在 `kernel/`；已搬出的能力端口在 `capabilities/<能力>/ports.rs`** |
 | `api.rs` | **入站契约**：五个按角色的能力接口（`SessionOps` / `RegistryOps` / `HistoryOps` / `DiscoveryOps` / `LogOps`）+ `CoreHandle`（核心自有线程、命令/事件）+ `EventBus`；单 agent 与协作长步骤的生成都在**工作线程**上跑（队列只占"取/交"两步） |
 | `events.rs` | 呈现侧契约：`SessionEvent` 与介入请求的词汇（**事实**的线格式定义在这）；转录行 `LineView` 带 `speaker` / `verb` / `kind`，`render()` 是"字段 → 文本"的唯一拼法 |
-| `schema.rs` | 工具参数契约（**声明在文本层**）：解析/校验/两种渲染（模型侧说明、JSON Schema） |
-| `roles.rs` | 系统工具与**角色**表（`systools/tools.yaml` + `roles.yaml`）：按角色组装工具面、按表校验调用；"哪个角色能调哪个工具"只有这一份（见 [tools-and-roles.md](tools-and-roles.md)） |
-| `exec.rs` | 执行档位（`ExecSpec`）与执行计划（`ExecPlan`）派生、虚拟机档诊断、档位承载（`TierReadiness`：本机能不能承载这个档位）。宿主事实（路径存在性 / PATH 可执行文件 / 虚拟化能力）**经 `ports::HostProbe` 问**，本文件不碰环境变量与文件系统；档位枚举 `Tier` 在 `kernel/types`（登记处也要用它，留在本文件会让登记处反向依赖执行能力） |
-| `fence.rs` | 一次工具执行的围栏策略（纯数据：可达根、断网、工作目录） |
-| `systool.rs` | 内置工具 `read` / `write` / `edit` / `patch` / `search` 的放行、寻址、**按声明校验参数**、改动前的"读过"证据（`Observations`）、自由格式补丁的原子应用与回执文案 |
-| `patch.rs` | 补丁通道的**纯逻辑**：解析自由格式补丁（Add / Update / SEARCH / REPLACE / End File）与整行应用（逐行匹配、行尾风格保持、失败点名第几处） |
 | `history.rs` | 会话元信息与历史视图的内存形态 |
 | `collab_state.rs` | 「转录即状态」的协作状态派生（纯函数、可回放） |
 | `collab.rs` | 协作会话状态机与讨论泵（泵只决定"该问谁"、核心驱动成员回合；发言投影、待裁决与工具面发放） |
@@ -79,6 +73,13 @@
 | `workspace/domain/packages.rs` | `package.yaml` 契约与包库事实（从 `core/packages.rs` 搬来） |
 | `workspace/domain/exec.rs` | 执行档位（`ExecSpec`）与执行计划（`ExecPlan`）派生、虚拟机档诊断与承载判定（从 `core/exec.rs` 搬来） |
 | `workspace/domain/workspace.rs` | 工作区与沙箱的纯数据定义、寻址与越界判定（从 `core/workspace.rs` 搬来） |
+| `tools/api.rs` | **入站能力面**：工具清单 / 角色工具面 / 参数契约 / 补丁与应用 / 围栏策略的对外名字 |
+| `tools/ports.rs` | `SysIo` / `ToolRunner` / `FenceHost`（从 `core/ports.rs` 随能力搬出） |
+| `tools/domain/systool.rs` | 内置工具的放行、寻址、**按声明校验参数**、改动前的"读过"证据（`Observations`）、自由格式补丁的原子应用与回执文案 |
+| `tools/domain/patch.rs` | 补丁通道的**纯逻辑**：解析自由格式补丁与整行应用 |
+| `tools/domain/schema.rs` | 工具参数契约（**声明在文本层**）：解析/校验/两种渲染 |
+| `tools/domain/roles.rs` | 系统工具与**角色**表（`systools/` 两张表） |
+| `tools/domain/fence.rs` | 一次工具执行的围栏策略（纯数据） |
 | `llm/domain/envelope.rs` | 发言信封解析（从 `core/envelope.rs` 搬来，纯逻辑）：`ToolInvoke.body` = 信封之后的正文；判定**未闭合 / 裸控制字符 / 语法错 / 字段不合法**四类；未闭合带上 EOF 状态 |
 
 ## 五、`presentation/`（呈现）

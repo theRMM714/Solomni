@@ -10,8 +10,8 @@ use crate::capabilities::llm::api::BoxedChat;
 use crate::capabilities::llm::api::{self as envelope, ToolInvoke, Verb};
 use crate::capabilities::llm::api::{Chat, Chunk, CompleteOpts, Msg};
 use crate::capabilities::prompt::api::Prompts;
+use crate::capabilities::tools::ports::{ToolOutcome, ToolRunner};
 use crate::core::events::{LineView, SessionEvent, ToolCallView};
-use crate::core::ports::{ToolOutcome, ToolRunner};
 use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
@@ -42,7 +42,7 @@ pub struct ModuleTools {
     /// 工具名 → 启动命令（模块作者在 module.yaml 的 tools.<名字>.command 里声明）。
     pub commands: BTreeMap<String, String>,
     /// 工具名 → 参数契约（只含**声明了** params 的工具；没声明的工具不校验、不进提示词）。
-    pub books: BTreeMap<String, crate::core::schema::ToolSchema>,
+    pub books: BTreeMap<String, crate::capabilities::tools::api::ToolSchema>,
     /// 声明了 parallel 的工具名（只读、无副作用；同一回复里的多个可并发调用会真的并发跑）。
     pub parallel: BTreeSet<String>,
 }
@@ -92,8 +92,8 @@ pub struct MemberTools {
     pub mode: crate::capabilities::registry::api::ToolMode,
     /// 模块 id → 该模块的（目录, 工具表）；内置 read/write 不走这里。
     pub modules: BTreeMap<String, ModuleTools>,
-    /// 本次会话的观察账本（哪些文件完整读过 / 由核心写过）：改动前的证据（见 systool::Observations）。
-    pub observations: crate::core::systool::Observations,
+    /// 本次会话的观察账本（哪些文件完整读过 / 由核心写过）：改动前的证据（见 crate::capabilities::tools::api::Observations）。
+    pub observations: crate::capabilities::tools::api::Observations,
     /// 信封修复端口：手写信封不合法时先问它能不能按无歧义的写法修好（默认只转义裸控制字符）。
     pub repair: Arc<dyn crate::capabilities::llm::api::EnvelopeRepair + Send + Sync>,
     /// 运行日志：模型输出被长度截断这类"看不见的事实"要落盘，供事后确定问题。
@@ -103,13 +103,13 @@ pub struct MemberTools {
     pub sandbox: crate::capabilities::workspace::api::Sandbox,
     /// 内置工具的参数契约（来自 `systools/tools.yaml` 的 tools）：说明与校验都按它来。
     /// 它属于**工具面**，不属于沙箱——沙箱只管路径。
-    pub builtin_tools: crate::core::schema::ToolBook,
+    pub builtin_tools: crate::capabilities::tools::api::ToolBook,
     /// 内置文件工具的读写端口。
-    pub io: Arc<dyn crate::core::ports::SysIo + Send + Sync>,
+    pub io: Arc<dyn crate::capabilities::tools::ports::SysIo + Send + Sync>,
     /// 模块 id → 它缺的运行包能力（本档位下该模块的工具不执行；空表 = 都能执行）。
     pub unavailable: BTreeMap<String, Vec<String>>,
     /// 本成员工具进程的围栏（可达范围 + 断网）：策略在 core 派生，机制在 ToolRunner 适配层安装。
-    pub fence: crate::core::fence::FenceSpec,
+    pub fence: crate::capabilities::tools::api::FenceSpec,
     /// **回复 id 计数器**：一次模型回复一个号，跨重启单调（重建时按转录里的最大值续号）。
     /// 转录行靠它分组（哪几行属于同一次回复），会话靠它按回复原子回档。
     pub reply_seq: u64,
@@ -119,7 +119,7 @@ pub struct MemberTools {
     /// 这个席位**能不能用它自己模块的工具**（角色表的 module_tools；执行席是，讨论席不是）。
     pub with_modules: bool,
     /// 工具说明块的素材（patch 语法 / 模块工具 / 模块工具参数）：装配期算一次，随回合注入。
-    pub notes: crate::core::systool::ToolNotes,
+    pub notes: crate::capabilities::tools::api::ToolNotes,
 }
 
 impl MemberTools {
@@ -143,7 +143,10 @@ impl MemberTools {
             }
         }
         // patch 是自由格式工具：它不在参数清单里，写法跟一段补丁正文（只有拿到它的席位才给）。
-        if ids.iter().any(|i| i == crate::core::systool::PATCH) {
+        if ids
+            .iter()
+            .any(|i| i == crate::capabilities::tools::api::PATCH)
+        {
             parts.push(self.notes.patch_guide.clone());
         }
         if with_modules {
@@ -217,24 +220,28 @@ fn run_one(
 
 /// 一次调用的执行体（**不碰本成员的账本**）：分支各持账本副本，由调用方按原始顺序合并/接管。
 /// 为什么这样：并发批次里多个调用同时跑，而账本是可变状态；只读类调用的结果不依赖账本，
-/// 所以"副本 + 按原序提交"与串行执行的结果完全相同（见 systool::Observations::absorb）。
+/// 所以"副本 + 按原序提交"与串行执行的结果完全相同（见 crate::capabilities::tools::api::Observations::absorb）。
 fn run_branch(
     ctx: &MemberTools,
     module: Option<&str>,
     name: &str,
     args_json: &str,
-) -> (String, ToolOutcome, crate::core::systool::Observations) {
+) -> (
+    String,
+    ToolOutcome,
+    crate::capabilities::tools::api::Observations,
+) {
     let mut branch = ctx.observations.clone();
     let (label, outcome) = if !face_has(ctx, module, name) {
         // **按这一回合的工具面校验**：不在面里的调用一律如实拒绝（不静默执行、也不当表态）。
         (
             String::new(),
-            crate::core::systool::refuse(&ctx.sandbox.texts, name),
+            crate::capabilities::tools::api::refuse(&ctx.sandbox.texts, name),
         )
-    } else if crate::core::systool::is_builtin(name) {
+    } else if crate::capabilities::tools::api::is_builtin(name) {
         (
             String::new(),
-            crate::core::systool::execute(
+            crate::capabilities::tools::api::execute(
                 &ctx.sandbox,
                 &ctx.builtin_tools,
                 ctx.io.as_ref(),
@@ -260,7 +267,7 @@ fn run_branch(
 /// 这次调用在**本回合的工具面**里吗：内置按角色表发放的 id 清单，外部工具按"这一回合给不给模块工具"
 /// 与模块归属（判据只有这一处——执行侧与"如实说一句越权"都读它）。
 fn face_has(ctx: &MemberTools, module: Option<&str>, name: &str) -> bool {
-    if crate::core::systool::is_builtin(name) {
+    if crate::capabilities::tools::api::is_builtin(name) {
         ctx.allowed.iter().any(|t| t == name)
     } else {
         // 没写 module 不算越权：那是"派发时消歧"的事，由 dispatch_external 如实说清（多模块下不猜）。
@@ -295,7 +302,7 @@ fn is_parallel(ctx: &MemberTools, module: Option<&str>, name: &str) -> bool {
             .map(|m| m.parallel.contains(name))
             .unwrap_or(false),
         None => {
-            crate::core::systool::is_builtin(name)
+            crate::capabilities::tools::api::is_builtin(name)
                 && ctx
                     .builtin_tools
                     .get(name)
@@ -307,7 +314,7 @@ fn is_parallel(ctx: &MemberTools, module: Option<&str>, name: &str) -> bool {
 
 /// 执行一批调用：**连续**声明可并发的合成一批并发跑，其余各自独占；结果按**原始下标**返回。
 /// 原生通道与手写信封通道共用这一处调度——并发策略只有一份，两个通道不会各写一套。
-/// 账本走分支副本 + 按原序合并（与串行执行等价，见 systool::Observations::absorb）。
+/// 账本走分支副本 + 按原序合并（与串行执行等价，见 crate::capabilities::tools::api::Observations::absorb）。
 fn run_batch(
     ctx: &mut MemberTools,
     plan: &[(Option<String>, String, String)],
@@ -320,19 +327,22 @@ fn run_batch(
             while j < plan.len() && is_parallel(ctx, plan[j].0.as_deref(), &plan[j].1) {
                 j += 1;
             }
-            let batch: Vec<(String, ToolOutcome, crate::core::systool::Observations)> =
-                std::thread::scope(|s| {
-                    let handles: Vec<_> = plan[i..j]
-                        .iter()
-                        .map(|(module, tool, args)| {
-                            s.spawn(|| run_branch(ctx, module.as_deref(), tool, args))
-                        })
-                        .collect();
-                    handles
-                        .into_iter()
-                        .map(|h| h.join().unwrap_or_else(|e| std::panic::resume_unwind(e)))
-                        .collect()
-                });
+            let batch: Vec<(
+                String,
+                ToolOutcome,
+                crate::capabilities::tools::api::Observations,
+            )> = std::thread::scope(|s| {
+                let handles: Vec<_> = plan[i..j]
+                    .iter()
+                    .map(|(module, tool, args)| {
+                        s.spawn(|| run_branch(ctx, module.as_deref(), tool, args))
+                    })
+                    .collect();
+                handles
+                    .into_iter()
+                    .map(|h| h.join().unwrap_or_else(|e| std::panic::resume_unwind(e)))
+                    .collect()
+            });
             for (k, (label, outcome, branch)) in batch.into_iter().enumerate() {
                 ctx.observations.absorb(&branch);
                 done[i + k] = Some((label, outcome));
@@ -362,19 +372,23 @@ fn tool_decls(ctx: &MemberTools) -> ToolDecls {
             continue;
         }
         // patch 是自由格式：它的声明单独写（参数是 body 字符串，不是 JSON 信封的 args）
-        if crate::core::systool::is_freeform(name) {
+        if crate::capabilities::tools::api::is_freeform(name) {
             continue;
         }
         decls.list.push(schema.decl(name));
         taken.push(name.clone());
         decls.wire.insert(name.clone(), (None, name.clone()));
     }
-    if ctx.allowed.iter().any(|t| t == crate::core::systool::PATCH) {
-        let patch = crate::core::systool::patch_decl();
+    if ctx
+        .allowed
+        .iter()
+        .any(|t| t == crate::capabilities::tools::api::PATCH)
+    {
+        let patch = crate::capabilities::tools::api::patch_decl();
         taken.push(patch.name.clone());
         decls.wire.insert(
             patch.name.clone(),
-            (None, crate::core::systool::PATCH.to_string()),
+            (None, crate::capabilities::tools::api::PATCH.to_string()),
         );
         decls.list.push(patch);
     }
@@ -415,7 +429,7 @@ fn available_tools(ctx: &MemberTools) -> String {
             list.push(format!("{}.{}", id, name));
         }
     }
-    list.extend(crate::core::systool::names());
+    list.extend(crate::capabilities::tools::api::names());
     list.join(&ctx.sandbox.texts.tool_list_separator)
 }
 
@@ -474,7 +488,7 @@ fn dispatch_external(ctx: &MemberTools, inv: &ToolInvoke) -> (String, ToolOutcom
                 match serde_json::from_str::<serde_json::Value>(&inv.args_json) {
                     Ok(args) => {
                         if let Err(fault) = book.check(&args) {
-                            let why = crate::core::systool::arg_fault_text(
+                            let why = crate::capabilities::tools::api::arg_fault_text(
                                 &ctx.sandbox.texts,
                                 &full,
                                 book,
@@ -588,7 +602,7 @@ pub struct Discussion {
     /// 提示词册（讨论文案来源）。
     prompts: Prompts,
     /// 工具总表与角色表：**不挂在册子上**（两者互不依赖）。
-    systools: crate::core::roles::SystemTools,
+    systools: crate::capabilities::tools::api::SystemTools,
     /// 本次调用的通道参数（流式 + 预算）：**全局设置**，与单 agent 共用同一份。
     llm: crate::capabilities::llm::api::LlmOpts,
     /// 讨论席的**机制说明 + 讨论约定**（开场与轮转都带它）：只说约定不说机制，AI 会空转。
@@ -716,7 +730,7 @@ impl Discussion {
     #[cfg(test)]
     #[allow(clippy::too_many_arguments)]
     pub fn turn_with(
-        systools: &crate::core::roles::SystemTools,
+        systools: &crate::capabilities::tools::api::SystemTools,
         role: &str,
         cancel: &std::sync::Arc<std::sync::atomic::AtomicBool>,
         opts: crate::capabilities::llm::api::CompleteOpts<'static>,
@@ -833,7 +847,7 @@ impl Discussion {
         members: Vec<Member>,
         allow_autonomy: bool,
         prompts: Prompts,
-        systools: crate::core::roles::SystemTools,
+        systools: crate::capabilities::tools::api::SystemTools,
         llm: crate::capabilities::llm::api::LlmOpts,
         cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
         protocol: String,
@@ -1380,7 +1394,7 @@ impl Execution {
         nodes: &str,
         retry: Option<&str>,
         prompts: &Prompts,
-        systools: &crate::core::roles::SystemTools,
+        systools: &crate::capabilities::tools::api::SystemTools,
         llm: crate::capabilities::llm::api::LlmOpts,
         mode: crate::capabilities::registry::api::ToolMode,
         verify: Option<&mut MemberTools>,
@@ -1551,7 +1565,7 @@ fn core_rows(
 // 收口成参数对象只会把参数挪个地方、并让"谁拿到什么"更难读。有意取舍（见 docs/testing/quality-isolation.md）。
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn core_operation(
-    systools: &crate::core::roles::SystemTools,
+    systools: &crate::capabilities::tools::api::SystemTools,
     role: &str,
     tool: &str,
     mode: crate::capabilities::registry::api::ToolMode,
@@ -1564,7 +1578,7 @@ pub(crate) fn core_operation(
     sink: &mut dyn FnMut(SessionEvent),
 ) -> Result<serde_json::Value, String> {
     // 声明面按**通道形态**给：原生通道才声明（信封通道的模型看提示词里的工具说明）。
-    let face_rows: Vec<(&str, &crate::core::schema::ToolSchema)> =
+    let face_rows: Vec<(&str, &crate::capabilities::tools::api::ToolSchema)> =
         systools.tool_face(role).unwrap_or_default();
     let face_ids: Vec<String> = face_rows.iter().map(|(id, _)| id.to_string()).collect();
     let mut opts = opts;
@@ -1713,7 +1727,7 @@ pub(crate) fn core_operation(
         }
         let mut views: Vec<ToolCallView> = Vec::new();
         for (call_id, name, args) in readonly {
-            let out = crate::core::systool::execute(
+            let out = crate::capabilities::tools::api::execute(
                 &ctx.sandbox,
                 &ctx.builtin_tools,
                 ctx.io.as_ref(),
@@ -2045,7 +2059,7 @@ pub(crate) fn converse_with(
         let freeform_tool = reply
             .tools
             .iter()
-            .any(|t| crate::core::systool::is_freeform(&t.name));
+            .any(|t| crate::capabilities::tools::api::is_freeform(&t.name));
         let mut repaired: Option<String> = None;
         if !aborted && !freeform_tool {
             if let Some(kind) = reply.tools.first().and_then(|t| t.malformed.clone()) {
@@ -2119,7 +2133,7 @@ pub(crate) fn converse_with(
                                 .get(&c.name)
                                 .cloned()
                                 .unwrap_or((None, c.name.clone()));
-                            let args = if crate::core::systool::is_freeform(&tool) {
+                            let args = if crate::capabilities::tools::api::is_freeform(&tool) {
                                 serde_json::from_str::<serde_json::Value>(&c.args_json)
                                     .ok()
                                     .and_then(|v| {
@@ -2289,13 +2303,15 @@ pub(crate) fn converse_with(
                 let invokes = reply.tools.clone();
                 // 自由格式工具（patch）只能单发：它的输入是**信封之后的那段正文**（不必转义），
                 // 显示正文只认信封**之前**那段——补丁内容不该被当成 AI 发言渲染出来。
-                if invokes.len() == 1 && crate::core::systool::is_freeform(&invokes[0].name) {
+                if invokes.len() == 1
+                    && crate::capabilities::tools::api::is_freeform(&invokes[0].name)
+                {
                     reply.text = invokes[0].lead.clone();
                 }
                 let plan: Vec<(Option<String>, String, String)> = invokes
                     .iter()
                     .map(|t| {
-                        let freeform = crate::core::systool::is_freeform(&t.name);
+                        let freeform = crate::capabilities::tools::api::is_freeform(&t.name);
                         let args = if freeform {
                             t.body.clone()
                         } else {

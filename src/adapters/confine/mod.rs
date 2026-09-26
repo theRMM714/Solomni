@@ -4,7 +4,7 @@
 //! 平台实现分文件：linux.rs（Landlock）/ macos.rs（seatbelt）/ windows.rs（Job Object + 容器）/ other.rs（如实降级）。
 //! 能力不足时如实上报（capability），降级而非崩溃——绝不静默假装有围栏。
 
-use crate::core::fence::FenceSpec;
+use crate::capabilities::tools::api::FenceSpec;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -72,7 +72,7 @@ pub fn verify(spec: &FenceSpec, command: &str) -> FenceVerdict {
 /// 围栏授权释放的适配器（实现 core 的 FenceHost 端口）：core 只说「这个会话的围栏撤掉」。
 pub struct FenceHostAdapter;
 
-impl crate::core::ports::FenceHost for FenceHostAdapter {
+impl crate::capabilities::tools::ports::FenceHost for FenceHostAdapter {
     fn release(&self, spec: &FenceSpec) -> Result<(), String> {
         release_fence(spec)
     }

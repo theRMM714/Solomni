@@ -33,7 +33,7 @@
 
 - `PromptSource` 端口（`adapters/yaml_prompts.rs`）按文件装配成 `Prompts`（`core/prompt.rs` 的结构体，字段与键同名）；
 - **工具总表与角色表不在这份册子里**：`systools/tools.yaml`（工具是什么）与 `systools/roles.yaml`（身份有什么）
-  由 `YamlPrompts::system_tools()` 装配成 `core::roles::SystemTools`，**与册子分开注入**——
+  由 `YamlPrompts::system_tools()` 装配成 `capabilities::tools::api::SystemTools`，**与册子分开注入**——
   挂进册子会让提示词反过来依赖工具，两边成环（见 [refactor-plan.md](refactor-plan.md) §三）；
 - `core/prompt.rs` 只做 `{{key}}` 渲染与"缺键/缺变量即报错"（纯逻辑）；
 - 文案的注入方式与端口一致：随环境对象传入（沙箱 / 工具环境 / 引用改写器），不让纯逻辑自己去读文件。

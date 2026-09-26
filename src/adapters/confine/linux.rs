@@ -4,7 +4,7 @@
 //! 只做文件系统；网络在 spec.net 为假时靠调用方（虚拟机档）断网，本档不承诺。
 
 use super::{shell_command, Capability, FenceVerdict, FENCE_FAILED};
-use crate::core::fence::FenceSpec;
+use crate::capabilities::tools::api::FenceSpec;
 use std::ffi::CString;
 use std::os::raw::c_int;
 use std::os::unix::process::CommandExt;

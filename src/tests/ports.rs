@@ -13,11 +13,12 @@ use crate::capabilities::llm::api::{Chat, ChatGateway, CompleteOpts, ModelCatalo
 use crate::capabilities::prompt::ports::PromptSource;
 use crate::capabilities::registry::api::{Provider, Settings};
 use crate::capabilities::registry::ports::SettingsStore;
+use crate::capabilities::tools::api::FenceSpec;
+use crate::capabilities::tools::ports::{FenceHost, SysIo, ToolRunner};
 use crate::capabilities::workspace::api::ExecSpec;
 use crate::capabilities::workspace::ports::{ModuleSource, PackageSource, Workspace};
-use crate::core::fence::FenceSpec;
 use crate::core::history::{AgentMeta, SessionMeta};
-use crate::core::ports::{FenceHost, HistoryStore, SysIo, ToolRunner};
+use crate::core::ports::HistoryStore;
 use crate::kernel::log::{Log, NoopLog};
 use std::collections::BTreeMap;
 use std::path::PathBuf;

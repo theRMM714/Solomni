@@ -73,7 +73,7 @@ impl SessionParams {
         prompts: &crate::capabilities::prompt::api::Prompts,
         mode: crate::capabilities::registry::api::ToolMode,
     ) -> String {
-        let env = crate::core::systool::env_block(prompts, self);
+        let env = crate::capabilities::tools::api::env_block(prompts, self);
         crate::capabilities::workspace::api::agent_system(
             prompts,
             &self.agent,

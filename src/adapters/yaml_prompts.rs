@@ -7,8 +7,8 @@
 
 use crate::capabilities::prompt::api::Prompts;
 use crate::capabilities::prompt::ports::PromptSource;
-use crate::core::roles::{RoleTable, SystemTools};
-use crate::core::schema::ToolBook;
+use crate::capabilities::tools::api::ToolBook;
+use crate::capabilities::tools::api::{RoleTable, SystemTools};
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 

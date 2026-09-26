@@ -4,8 +4,8 @@
 //! 截获 stdout/stderr、超时连根杀掉整棵树、输出截断。
 
 use crate::adapters::confine;
-use crate::core::fence::FenceSpec;
-use crate::core::ports::{ToolOutcome, ToolRunner};
+use crate::capabilities::tools::api::FenceSpec;
+use crate::capabilities::tools::ports::{ToolOutcome, ToolRunner};
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::thread;
@@ -272,7 +272,7 @@ impl ProcTools {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::fence::FenceSpec;
+    use crate::capabilities::tools::api::FenceSpec;
     // 测试夹具按 &Path 收参（clippy 的 ptr_arg）：Path 显式写在测试模块里，
     // 顶层只按需导入 PathBuf——否则顶层会多出一次"只被 glob 用到"的导入。
     use std::path::{Path, PathBuf};

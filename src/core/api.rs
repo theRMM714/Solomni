@@ -311,7 +311,7 @@ struct AskReq {
     /// 本回合的提示（开场词 / 轮转词）。
     turn: Vec<crate::capabilities::llm::api::Msg>,
     /// 角色表（按值带一份小表）：发放工具面与校验越权都用它。
-    systools: crate::core::roles::SystemTools,
+    systools: crate::capabilities::tools::api::SystemTools,
     cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
     opts: crate::capabilities::llm::api::CompleteOpts<'static>,
     /// 这一回合属于第几轮（写进 agent 会话的回合标记）。

@@ -9,7 +9,7 @@
 //! 机制不可用时一律如实降级（stderr 说明 + 启动报告 fs/net=false），绝不假装有围栏。
 
 use super::{shell_command, Capability, FenceVerdict, FENCE_FAILED};
-use crate::core::fence::FenceSpec;
+use crate::capabilities::tools::api::FenceSpec;
 use std::collections::BTreeSet;
 use std::ffi::c_void;
 use std::os::windows::ffi::OsStrExt;

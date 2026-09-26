@@ -33,7 +33,7 @@ pub struct ToolDecl {
     pub desc: String,
     /// 参数契约（可选）：参数名 → 声明。
     #[serde(default)]
-    pub params: Option<BTreeMap<String, crate::core::schema::Param>>,
+    pub params: Option<BTreeMap<String, crate::capabilities::tools::api::Param>>,
     /// 这个工具**可并发执行**（缺省 false = 独占串行）：只读、无副作用的工具才该声明 true，
     /// 同一回复里的多个可并发调用会真的并发跑（结果仍按调用顺序回填）。
     #[serde(default)]
@@ -42,10 +42,10 @@ pub struct ToolDecl {
 
 impl ToolDecl {
     /// 参数契约的声明形态（校验与渲染共用）；没声明参数 = None = 不校验。
-    pub fn schema(&self) -> Option<crate::core::schema::ToolSchema> {
+    pub fn schema(&self) -> Option<crate::capabilities::tools::api::ToolSchema> {
         self.params
             .as_ref()
-            .map(|p| crate::core::schema::ToolSchema {
+            .map(|p| crate::capabilities::tools::api::ToolSchema {
                 desc: self.desc.clone(),
                 params: Some(p.clone()),
                 parallel: self.parallel,
@@ -76,7 +76,7 @@ pub fn check_runtimes(m: &ModuleManifest) -> Result<(), String> {
 /// 外部工具表的校验（纯逻辑；扫描模块时由适配层调用）：内置工具名是保留名，占用 = 拒收并说明原因。
 pub fn check_tools(m: &ModuleManifest) -> Result<(), String> {
     for (name, decl) in &m.tools {
-        if crate::core::systool::is_builtin(name) {
+        if crate::capabilities::tools::api::is_builtin(name) {
             return Err(format!(
                 "tools 里的 {} 是核心内置工具名（保留名），模块不得占用",
                 name

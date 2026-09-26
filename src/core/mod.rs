@@ -7,33 +7,29 @@ pub mod collab;
 pub mod collab_state;
 pub mod engine;
 pub mod events;
-pub mod fence;
 pub mod history;
-pub mod patch;
 pub mod ports;
-pub mod roles;
-pub mod schema;
 pub mod session;
-pub mod systool;
 
 pub use events::{Pending, SessionEvent};
 // 测试用同步入口的签名要它；生产路径的 Live 构造在 api.rs（那里直接引 events::Live）。
 pub use crate::capabilities::llm::api::{ChatGateway, ModelCatalog};
 pub use crate::capabilities::prompt::ports::PromptSource;
 pub use crate::capabilities::registry::ports::SettingsStore;
+pub use crate::capabilities::tools::ports::{SysIo, ToolRunner};
 pub use crate::capabilities::workspace::ports::{ModuleSource, PackageSource, Workspace};
 #[cfg(test)]
 pub(crate) use events::Live;
-pub use ports::{HistoryStore, SysIo, ToolRunner};
+pub use ports::HistoryStore;
 
 use crate::capabilities::llm::api::Msg;
 use crate::capabilities::prompt::api::Prompts;
 use crate::capabilities::registry::api::{AppSettings, Channel, Settings};
+use crate::capabilities::tools::api::SystemTools;
 use crate::capabilities::workspace::api::Module;
 use crate::core::collab::CollabSession;
 use crate::core::engine::AfterTurn;
 use crate::core::history::{AgentMeta, HistoryView, SessionMeta};
-use crate::core::roles::SystemTools;
 use crate::kernel::log::Log;
 use crate::kernel::types::SessionId;
 use std::collections::{BTreeMap, HashMap};
@@ -363,7 +359,7 @@ pub struct Core {
     /// 运行包库来源（依赖文件夹的扫描事实；校验与诊断在 core）。
     packages: Arc<dyn PackageSource + Send + Sync>,
     /// 围栏授权释放（会话删除时请求一次；机制在适配层）。
-    fence: Arc<dyn ports::FenceHost + Send + Sync>,
+    fence: Arc<dyn crate::capabilities::tools::ports::FenceHost + Send + Sync>,
     gateway: Arc<dyn ChatGateway + Send + Sync>,
     catalog: Arc<dyn ModelCatalog + Send + Sync>,
     tools: Arc<dyn ToolRunner + Send + Sync>,
@@ -397,7 +393,7 @@ impl Core {
         workspace: Arc<dyn Workspace + Send + Sync>,
         source: Arc<dyn ModuleSource + Send + Sync>,
         packages: Arc<dyn PackageSource + Send + Sync>,
-        fence: Arc<dyn ports::FenceHost + Send + Sync>,
+        fence: Arc<dyn crate::capabilities::tools::ports::FenceHost + Send + Sync>,
         gateway: Arc<dyn ChatGateway + Send + Sync>,
         catalog: Arc<dyn ModelCatalog + Send + Sync>,
         tools: Arc<dyn ToolRunner + Send + Sync>,
@@ -525,7 +521,7 @@ impl Core {
                 }
                 let Some(tool) = l.get("tool") else { continue };
                 let name = tool.get("name").and_then(|x| x.as_str()).unwrap_or("");
-                if name != crate::core::systool::REPORT {
+                if name != crate::capabilities::tools::api::REPORT {
                     continue;
                 }
                 let out = tool
@@ -1969,7 +1965,7 @@ impl Core {
         engine::MemberTools {
             mode,
             modules: engine::tool_table(modules),
-            observations: systool::Observations::default(),
+            observations: crate::capabilities::tools::api::Observations::default(),
             repair: Arc::clone(&self.repair),
             log: Arc::clone(&self.log),
             runner: Arc::clone(&self.tools),
@@ -1979,7 +1975,7 @@ impl Core {
             unavailable,
             // 围栏：可达范围 + 断网 + 环境白名单的落点，全部由该 agent 的沙箱派生（机制在 adapters）；
             // 只读根来自用户显式授权（`fence_read`），默认空。
-            fence: crate::core::fence::FenceSpec::from_sandbox(sb, net)
+            fence: crate::capabilities::tools::api::FenceSpec::from_sandbox(sb, net)
                 .with_read_only(self.fence_read_roots()),
             // 从零开始；按落盘转录重建时由调用方按转录里的最大值续号（见 rebuild_session）。
             reply_seq: 0,
@@ -1987,7 +1983,7 @@ impl Core {
             allowed: self.role_tools("executor"),
             // 能不能用自己模块的工具、以及工具说明块的素材：都按角色表与这个 agent 的模块装配期算好。
             with_modules: self.systools.allows_module_tools("executor"),
-            notes: systool::tool_notes(&self.prompts, sb, modules),
+            notes: crate::capabilities::tools::api::tool_notes(&self.prompts, sb, modules),
         }
     }
 
@@ -2106,8 +2102,11 @@ impl Core {
                 Ok(sandboxes) => {
                     for sb in &sandboxes.list {
                         // 撤销要覆盖同一次授权写下的全部条目：读写根 + 用户授权的只读根。
-                        let spec = fence::FenceSpec::from_sandbox(sb, meta.exec.net)
-                            .with_read_only(self.fence_read_roots());
+                        let spec = crate::capabilities::tools::api::FenceSpec::from_sandbox(
+                            sb,
+                            meta.exec.net,
+                        )
+                        .with_read_only(self.fence_read_roots());
                         if let Err(e) = self.fence.release(&spec) {
                             self.log.warn(
                                 "core::history_delete",

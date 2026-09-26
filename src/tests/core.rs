@@ -8,6 +8,7 @@ use crate::capabilities::llm::api::{
 };
 use crate::capabilities::prompt::domain::prompt::render;
 use crate::capabilities::registry::api::{Channel, ModelEntry, Provider, Settings};
+use crate::capabilities::tools::ports::{ToolOutcome, ToolRunner};
 use crate::capabilities::workspace::api::Module;
 use crate::capabilities::workspace::api::{self as exec, Diagnosis, ExecSpec};
 use crate::capabilities::workspace::api::{Library, PackageManifest};
@@ -15,7 +16,7 @@ use crate::capabilities::workspace::ports::{ModuleSource, Workspace};
 use crate::core::engine::{Discussion, Member, MemberTools, ModuleTools, TurnOut, MAX_ROUNDS};
 use crate::core::events::Live;
 use crate::core::history::{AgentMeta, SessionMeta};
-use crate::core::ports::{HistoryStore, ToolOutcome, ToolRunner};
+use crate::core::ports::HistoryStore;
 use crate::core::{
     AgentInstance, CollabStep, ConfigAgent, Core, Pending, SessionEdit, SessionEvent, WorkMode,
     WorkSpec,
@@ -3029,7 +3030,7 @@ pub(crate) struct SilentRunner;
 impl ToolRunner for SilentRunner {
     fn run(
         &self,
-        _fence: &crate::core::fence::FenceSpec,
+        _fence: &crate::capabilities::tools::api::FenceSpec,
         _command: &str,
         _args: &str,
     ) -> ToolOutcome {
@@ -3055,7 +3056,7 @@ impl RecordingRunner {
 impl ToolRunner for RecordingRunner {
     fn run(
         &self,
-        fence: &crate::core::fence::FenceSpec,
+        fence: &crate::capabilities::tools::api::FenceSpec,
         command: &str,
         args_json: &str,
     ) -> ToolOutcome {
@@ -3097,7 +3098,7 @@ impl ParallelRunner {
 impl ToolRunner for ParallelRunner {
     fn run(
         &self,
-        _fence: &crate::core::fence::FenceSpec,
+        _fence: &crate::capabilities::tools::api::FenceSpec,
         command: &str,
         args_json: &str,
     ) -> ToolOutcome {
@@ -3144,7 +3145,7 @@ pub(crate) fn member_with_tools(
     m.tools = Some(MemberTools {
         mode: crate::capabilities::registry::api::ToolMode::Envelope,
         modules,
-        observations: crate::core::systool::Observations::default(),
+        observations: crate::capabilities::tools::api::Observations::default(),
         repair: Arc::new(NoRepair),
         log: Arc::new(crate::kernel::log::NoopLog),
         runner,
@@ -3152,10 +3153,13 @@ pub(crate) fn member_with_tools(
         builtin_tools: test_systools().tools,
         io: Arc::new(InMemorySysIo::new()),
         unavailable: BTreeMap::new(),
-        fence: crate::core::fence::FenceSpec::from_sandbox(&test_sandbox("m0", &[]), false),
+        fence: crate::capabilities::tools::api::FenceSpec::from_sandbox(
+            &test_sandbox("m0", &[]),
+            false,
+        ),
         reply_seq: 0,
         // 测试替身按"执行席"发放全部内置工具（角色表的越权校验另有专门用例）。
-        allowed: crate::core::systool::names(),
+        allowed: crate::capabilities::tools::api::names(),
         with_modules: true,
         notes: crate::tests::doubles::test_notes(&test_sandbox("m0", &[]), &[]),
     });
@@ -5151,7 +5155,8 @@ pub(crate) fn builtin_write_into_module_dir_is_allowed_with_notice() {
         out.output
     );
     assert!(
-        out.output.contains(crate::core::systool::MODULE_WRITE_MARK),
+        out.output
+            .contains(crate::capabilities::tools::domain::systool::MODULE_WRITE_MARK),
         "要有可供轨迹识别的标记：{}",
         out.output
     );
@@ -5176,10 +5181,17 @@ pub(crate) fn builtin_edit_replaces_the_requested_span_and_reports_what_it_did()
         &["demo", "work", "note.txt"],
         "第一段\n要改的句子\n第三段\n",
     );
-    let mut obs = crate::core::systool::Observations::default();
-    let edit = |obs: &mut crate::core::systool::Observations, args: &str| {
+    let mut obs = crate::capabilities::tools::api::Observations::default();
+    let edit = |obs: &mut crate::capabilities::tools::api::Observations, args: &str| {
         let full = format!("{{\"path\":\"{}\",{}}}", note, args);
-        crate::core::systool::execute(&sb, &test_systools().tools, &io, obs, "edit", &full)
+        crate::capabilities::tools::api::execute(
+            &sb,
+            &test_systools().tools,
+            &io,
+            obs,
+            "edit",
+            &full,
+        )
     };
     // 唯一命中：只改那一处，别处一字不动
     let ok = edit(
@@ -5266,8 +5278,8 @@ pub(crate) fn builtin_edit_refuses_files_it_cannot_see_whole() {
         (InMemorySysIo::new().marked(true, false), "非法 UTF-8"),
     ] {
         io.seed(&["demo", "work", "note.txt"], "abc");
-        let mut obs = crate::core::systool::Observations::default();
-        let out = crate::core::systool::execute(
+        let mut obs = crate::capabilities::tools::api::Observations::default();
+        let out = crate::capabilities::tools::api::execute(
             &sb,
             &test_systools().tools,
             &io,
@@ -5289,10 +5301,12 @@ pub(crate) fn builtin_write_needs_a_complete_prior_read_of_an_existing_file() {
     let io = InMemorySysIo::new();
     let sb = test_sandbox("a1", &[]);
     let note = s(&["demo", "work", "note.txt"]);
-    let run = |obs: &mut crate::core::systool::Observations, tool: &str, args: String| {
-        crate::core::systool::execute(&sb, &test_systools().tools, &io, obs, tool, &args)
+    let run = |obs: &mut crate::capabilities::tools::api::Observations,
+               tool: &str,
+               args: String| {
+        crate::capabilities::tools::api::execute(&sb, &test_systools().tools, &io, obs, tool, &args)
     };
-    let mut obs = crate::core::systool::Observations::default();
+    let mut obs = crate::capabilities::tools::api::Observations::default();
     // 新建文件：不需要"读过"什么
     let made = run(
         &mut obs,
@@ -5311,7 +5325,7 @@ pub(crate) fn builtin_write_needs_a_complete_prior_read_of_an_existing_file() {
     );
     assert!(again.ok, "{}", again.output);
     // 只读到一段 = 证据不足：整份覆盖被拒，并指出改法
-    let mut obs2 = crate::core::systool::Observations::default();
+    let mut obs2 = crate::capabilities::tools::api::Observations::default();
     let partial = run(
         &mut obs2,
         "read",
@@ -5356,7 +5370,7 @@ pub(crate) fn builtin_write_needs_a_complete_prior_read_of_an_existing_file() {
     );
     assert!(ok.ok, "{}", ok.output);
     // 读过之后文件被别人改过：指纹不符 → 拒绝凭记忆覆盖
-    let mut obs3 = crate::core::systool::Observations::default();
+    let mut obs3 = crate::capabilities::tools::api::Observations::default();
     run(&mut obs3, "read", format!("{{\"path\":\"{}\"}}", note));
     io.seed(&["demo", "work", "note.txt"], "别人改过的内容");
     let stale = run(
@@ -5754,7 +5768,7 @@ pub(crate) fn native_member(
     m.tools = Some(MemberTools {
         mode: crate::capabilities::registry::api::ToolMode::Native,
         modules,
-        observations: crate::core::systool::Observations::default(),
+        observations: crate::capabilities::tools::api::Observations::default(),
         repair: Arc::new(NoRepair),
         log: Arc::new(crate::kernel::log::NoopLog),
         runner: Arc::new(SilentRunner),
@@ -5762,10 +5776,10 @@ pub(crate) fn native_member(
         builtin_tools: test_systools().tools,
         io,
         unavailable: BTreeMap::new(),
-        fence: crate::core::fence::FenceSpec::from_sandbox(&sb, false),
+        fence: crate::capabilities::tools::api::FenceSpec::from_sandbox(&sb, false),
         reply_seq: 0,
         // 测试替身按"执行席"发放全部内置工具（角色表的越权校验另有专门用例）。
-        allowed: crate::core::systool::names(),
+        allowed: crate::capabilities::tools::api::names(),
         with_modules: true,
         notes: crate::tests::doubles::test_notes(&sb, &[]),
     });
@@ -6847,7 +6861,7 @@ pub(crate) fn builtin_tool_book_is_the_one_source_of_names_and_paths() {
     let prompts = test_prompts();
     let systools = test_systools();
     let book = &systools.tools;
-    for name in crate::core::systool::names() {
+    for name in crate::capabilities::tools::api::names() {
         assert!(
             book.contains_key(&name),
             "保留名 {} 必须在工具总表里有声明",
@@ -6867,7 +6881,7 @@ pub(crate) fn builtin_tool_book_is_the_one_source_of_names_and_paths() {
         if schema.capability == "none" {
             continue;
         }
-        if crate::core::systool::is_freeform(name) {
+        if crate::capabilities::tools::api::is_freeform(name) {
             assert!(
                 schema.params.is_none(),
                 "自由格式工具不声明 JSON 参数：{}",
@@ -6884,7 +6898,7 @@ pub(crate) fn builtin_tool_book_is_the_one_source_of_names_and_paths() {
     }
     // 工作环境块：**只有路径与规矩，没有工具清单**（总表只留在核心手里当判据）。
     let sb = test_sandbox("a1", &[]);
-    let env = crate::core::systool::env_block(
+    let env = crate::capabilities::tools::api::env_block(
         &prompts,
         &crate::core::session::SessionParams::from_workspace("a1", &sb, &[]),
     );
@@ -6901,7 +6915,7 @@ pub(crate) fn builtin_tool_book_is_the_one_source_of_names_and_paths() {
         .tools
         .as_ref()
         .expect("工具环境")
-        .tools_block(&crate::core::systool::names(), true);
+        .tools_block(&crate::capabilities::tools::api::names(), true);
     assert!(block.contains("【本回合可用的工具】"), "{}", block);
     assert!(
         block.contains("- offset（integer，缺省 1，不小于 1）"),
@@ -7986,7 +8000,7 @@ pub(crate) fn deleting_a_session_asks_the_fence_to_release_its_grants() {
         Arc::new(InMemoryWorkspace::new()),
         Arc::new(VecSource(vec![module_of("a")])),
         Arc::new(InMemoryPackages::empty()),
-        Arc::clone(&fence) as Arc<dyn crate::core::ports::FenceHost + Send + Sync>,
+        Arc::clone(&fence) as Arc<dyn crate::capabilities::tools::ports::FenceHost + Send + Sync>,
         Arc::new(gw(BTreeMap::new(), vec!["[]".into()])),
         Arc::new(FakeCatalog::new(vec!["m".to_string()])),
         Arc::new(SilentRunner),
@@ -8443,7 +8457,7 @@ pub(crate) fn core_operations_require_a_tool_call_not_body_json() {
     let schema = systools.tools.get("plan").expect("plan 该在工具总表里");
     assert_eq!(
         schema.params.as_ref().expect("有参数")["nodes"].ty,
-        crate::core::schema::ParamType::Array,
+        crate::capabilities::tools::domain::schema::ParamType::Array,
         "任务链节点表是数组载荷"
     );
 }
@@ -8457,11 +8471,11 @@ pub(crate) fn core_operation_runs_readonly_verification_before_the_op() {
     let note = s(&["demo", "work", "note.txt"]);
     io.seed(&["demo", "work", "note.txt"], "现场：一切正常\n");
     let sb = test_sandbox("核心", &[]);
-    let io_port: Arc<dyn crate::core::ports::SysIo + Send + Sync> = io.clone();
+    let io_port: Arc<dyn crate::capabilities::tools::ports::SysIo + Send + Sync> = io.clone();
     let mut verify = MemberTools {
         mode: crate::capabilities::registry::api::ToolMode::Envelope,
         modules: BTreeMap::new(),
-        observations: crate::core::systool::Observations::default(),
+        observations: crate::capabilities::tools::api::Observations::default(),
         repair: Arc::new(NoRepair),
         log: Arc::new(crate::kernel::log::NoopLog),
         runner: Arc::new(SilentRunner),
@@ -8469,11 +8483,11 @@ pub(crate) fn core_operation_runs_readonly_verification_before_the_op() {
         builtin_tools: test_systools().tools,
         io: io_port,
         unavailable: BTreeMap::new(),
-        fence: crate::core::fence::FenceSpec::from_sandbox(&sb, false),
+        fence: crate::capabilities::tools::api::FenceSpec::from_sandbox(&sb, false),
         reply_seq: 0,
         allowed: vec!["read".to_string(), "plan".to_string()],
         with_modules: false,
-        notes: crate::core::systool::ToolNotes::default(),
+        notes: crate::capabilities::tools::api::ToolNotes::default(),
     };
     // 第一轮：先核实（read）；第二轮：交出 plan。
     let seen = Arc::new(Mutex::new(Vec::new()));
@@ -8554,8 +8568,8 @@ pub(crate) fn executor_reports_through_a_tool_call() {
     // 它不是文件域工具：没有 path 也照跑，回执把三个字段带出来。
     let io = InMemorySysIo::new();
     let sb = test_sandbox("a1", &[]);
-    let mut obs = crate::core::systool::Observations::default();
-    let out = crate::core::systool::execute(
+    let mut obs = crate::capabilities::tools::api::Observations::default();
+    let out = crate::capabilities::tools::api::execute(
         &sb,
         &test_systools().tools,
         &io,

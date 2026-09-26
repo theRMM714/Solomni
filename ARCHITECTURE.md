@@ -48,12 +48,12 @@ presentation ──▶ core ◀── adapters
 | `ModuleSource` | 模块清单来源（扫描 `modules/`）。**已随能力搬出**：`capabilities/workspace/ports.rs` | `FsModules` |
 | `PackageSource` | 运行包库来源（扫描依赖文件夹 `runtimes/`）。**已随能力搬出**：`capabilities/workspace/ports.rs` | `FsPackages` |
 | `Workspace` | 一次工作的 work 目录、各 agent 沙箱、文件清单与寻址根。**已随能力搬出**：`capabilities/workspace/ports.rs` | `FsWorkspace` |
-| `SysIo` | 内置文件工具的读写机制（读严格 UTF-8、非法字节如实标注；写一律 UTF-8） | `FsSysIo` |
+| `SysIo` | 内置文件工具的读写机制（读严格 UTF-8、非法字节如实标注；写一律 UTF-8）。**已随能力搬出**：`capabilities/tools/ports.rs` | `FsSysIo` |
 | `HistoryStore` | 会话历史：一个会话一个目录（meta + 事件流水） | `FsHistory` |
 | `PromptSource` | 提示词册加载（`prompts/`）。**已随能力搬出 core**：定义在 `capabilities/prompt/ports.rs` | `YamlPrompts` |
-| `ToolRunner` | 外部工具进程（围栏安装、拉起、stdin 送参、超时杀树、截断） | `ProcTools`（守门进程 = 本程序的 `--fence-run` 模式） |
+| `ToolRunner` | 外部工具进程（围栏安装、拉起、stdin 送参、超时杀树、截断）。**已随能力搬出**：`capabilities/tools/ports.rs` | `ProcTools`（守门进程 = 本程序的 `--fence-run` 模式） |
 | `EnvelopeRepair`（`capabilities/llm/ports.rs`） | 手写信封不合法时的**无歧义**补救（改了字段含义就是错；拿不准就返回不修） | `UnambiguousRepair`（转义字符串里的裸控制字符 + 补上扫描器算出的收尾括号；断在字符串中间不修，一段回复里起了两段信封不修——补哪一段都是猜；调用方中止的生成一律不修） |
-| `FenceHost` | 围栏授权的释放（删除会话时请求一次撤销） | `confine::FenceHostAdapter`（本平台无该机制时为空操作） |
+| `FenceHost` | 围栏授权的释放（删除会话时请求一次撤销）。**已随能力搬出**：`capabilities/tools/ports.rs` | `confine::FenceHostAdapter`（本平台无该机制时为空操作） |
 | `Log` | 运行日志（三级） | `FileLog`（测试 `NoopLog`） |
 | `HostProbe` | 宿主能力探测（**只问事实**：路径存在性、PATH 上的可执行文件、本机虚拟化能力；不执行、不安装、不写）。**在 `kernel/host.rs`**（无领域语义，执行档位与自检共用） | `HostProbeAdapter`（测试 `FixedProbe`） |
 
@@ -147,7 +147,7 @@ session/<工作名>/
   `Output` 只管回包形状：设置是流式的**上限**，调用方可在本次放弃流式。
   调用失败**不是**模型的回复：`Completion.error` 与正文分离，上层据此发 `Notice` 并**中断本轮**（不落任何转录行），
   会话保持可继续——错误文本若被当成发言吸收，按转录派生的「轮到谁」就歪了。
-- `core/fence.rs` 是工具进程围栏的**策略**（可达范围 = 共享区 + 自己的私有沙箱 + 自己的模块目录 + 用户显式授权的只读根 `ro`、断网、工作目录），
+- `capabilities/tools/` 里的 `fence` 是工具进程围栏的**策略**（可达范围 = 共享区 + 自己的私有沙箱 + 自己的模块目录 + 用户显式授权的只读根 `ro`、断网、工作目录），
   `ro` 来自 `.home/settings.yaml` 的 `fence_read`（默认空）：**只读位由各平台机制落实**（Landlock 只读位 /
   seatbelt `file-read*` / Windows `RIGHTS_RO`），且只授给该 agent 自己的容器身份——不能像解释器基线那样授给共享组。
   机制在 `adapters/confine/`：外层拉起的**守门进程**（本程序 `--fence-run` 模式）按平台把围栏装进真正的工具进程

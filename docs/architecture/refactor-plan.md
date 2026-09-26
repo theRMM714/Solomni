@@ -6,7 +6,7 @@
 > 分层规则见 [ARCHITECTURE.md](../../ARCHITECTURE.md)，逐文件职责见 [module-map.md](module-map.md)，
 > 入站契约见 [contracts.md](contracts.md)，测试规范见 [TESTING.md](../../TESTING.md)。
 
-## 零、现状与动机
+## 零、现状与动机（**批次 0 时的起点快照**，不是当前状态；当前状态见 §4.2 销账表）
 
 层与层之间**当前是干净的**：`core` 不引用 `adapters` / `presentation`，`adapters` 不引用 `presentation`，主箭头没有破。
 问题全部在 `core` 内部——它名义上是一层，实际是 7 个业务能力挤在一个包里：
@@ -143,7 +143,7 @@ capabilities/<name>/
 | **kernel** | 内核 | **已落位** `src/kernel/`（`jobs` / `log` / `types`） | 生成中作业表（取消标志） | — | **已完成**（批次 1；`bus` 与运行态合并推迟到批次 9，见 §3.2） |
 | **session** | 领域 | `core/session.rs`、`history.rs`、`events.rs`（`collab_state.rs` 已改判归 `collab`——它派生的是**协作**状态） | 对话、转录行、行索引 | `HistoryStore` | 未开始 |
 | **llm** | 领域 | **已落位** `capabilities/llm/`（`ports` 的通道族 + `domain/envelope`） | 通道协议与回复解析 | `Chat` `ChatGateway` `ModelCatalog` `EnvelopeRepair` | **已完成**（批次 9） |
-| **tools** | 领域 | `core/systool.rs`、`patch.rs`、`schema.rs`、`roles.rs`、`fence.rs`（`workspace.rs` 的沙箱数据已随批次 10 归 `workspace`） | 观察账本、围栏策略、工具面 | `SysIo` `ToolRunner` `FenceHost` | 未开始 |
+| **tools** | 领域 | **已落位** `capabilities/tools/`（`systool` + `patch` + `schema` + `roles` + `fence`） | 观察账本、围栏策略、工具面 | `SysIo` `ToolRunner` `FenceHost` | **已完成**（批次 11） |
 | **prompt** | 领域 | `core/prompt.rs`、`refs.rs` | 提示词册 | `PromptSource` | 未开始 |
 | **registry** | 领域 | **已落位** `capabilities/registry/`（`providers` + `agents`） | 四份 yaml 的内存形态 | `SettingsStore` | **已完成**（批次 8） |
 | **workspace** | 领域 | **已落位** `capabilities/workspace/`（`module` + `packages` + `exec` + `workspace` 沙箱数据） | 清单快照、执行计划、沙箱寻址 | `ModuleSource` `PackageSource` `Workspace` | **已完成**（批次 10） |
@@ -437,7 +437,7 @@ kernel       ──▶ （无）
 | **8** | **registry 能力落位**：`capabilities/registry/`（`api` / `ports` / `domain`），`providers.rs` + `agents.rs` 一起搬出；`SettingsStore` 与 `DEFAULT_LLM_TIMEOUT_SECS` 随之下沉 | 5 | **已完成**（**呈现层 3 条豁免自动过期**——它现在走 `registry::api`；`registry` 进环，环 12 → 11；2 条反向边 `→ core::{history, module}` 记入基线） |
 | **9** | **llm 能力落位**：`capabilities/llm/`（`api` / `ports` / `domain/envelope`）；`envelope.rs` 随能力搬出 | 8 | **已完成**（`prompt → core::envelope` 那条基线豁免**自动清零**；⚠️ 环从 11 涨到 15——见批次 10 的前置项） |
 | **10** | **workspace 能力落位**：`module` / `packages` / `exec` / `workspace`（沙箱数据）+ 三个端口；**前置（批次 9 暴露的桥）已先切**：把协议→文案的映射移进 `llm`（模板仍留 `prompt`） | 6, 9 | **已完成**（`prompt` 零外部依赖、彻底脱环；环 15 → **12**；两处自动清零：`registry → core::module`、`presentation → core::exec`；`HostProbe` 下沉 `kernel/host.rs`） |
-| **11** | **tools**（钉死 §3.4：实现锁内部、机制留端口、工具调用发一对短暂事件、**产出事实不落盘**）：`systool` / `patch` / `schema` / `roles` / `fence` | 10 | 未开始 |
+| **11** | **tools 能力落位**：`capabilities/tools/`（`systool` / `patch` / `schema` / `roles` / `fence`）+ 三个端口；钉死 §3.4（实现锁内部、机制留端口、产出事实不落盘） | 10 | **已完成**（环 12 → **8**；批次 10 的两条反向边自动清零；1 条新反向边 `→ core::session`；`core/ports.rs` 只剩 `HistoryStore`） |
 | **12** | **session**（含压缩 `compact`：钉死 §3.5 的五条不变式与压缩×回档边界；并合并运行态的两份真相、落位 `bus`） | 11 | 未开始 |
 | **13** | **rewind**（协调型；`marks` 归属方案 A） | 12 | 未开始 |
 | **14** | **collab** | 13 | 未开始 |

@@ -5,7 +5,7 @@
 //! 降级原因分两类并各自带标记：「本机 ABI 失效」是环境结论，「profile 被拒」是 profile 写错（探针硬失败）。
 
 use super::{shell_command, Capability, FenceVerdict, FENCE_FAILED};
-use crate::core::fence::FenceSpec;
+use crate::capabilities::tools::api::FenceSpec;
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int};
 use std::path::Path;

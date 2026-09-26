@@ -15,12 +15,13 @@ use crate::capabilities::prompt::api::Prompts;
 use crate::capabilities::prompt::ports::PromptSource;
 use crate::capabilities::registry::api::{Channel, ModelEntry, Provider, Settings};
 use crate::capabilities::registry::ports::SettingsStore;
+use crate::capabilities::tools::ports::{FileRead, SysIo, ToolRunner};
 use crate::capabilities::workspace::api::{Library, PackageManifest};
 use crate::capabilities::workspace::api::{Module, ModuleManifest};
 use crate::capabilities::workspace::ports::{ModuleSource, PackageSource, Workspace};
 use crate::core::events::Live;
 use crate::core::history::{HistoryView, SessionMeta};
-use crate::core::ports::{FileRead, HistoryStore, SysIo, ToolRunner};
+use crate::core::ports::HistoryStore;
 use crate::core::{AgentInstance, Core, SessionEvent, WorkMode, WorkSpec};
 use crate::kernel::types::Tier;
 use std::collections::BTreeMap;
@@ -312,14 +313,17 @@ impl SysIo for InMemorySysIo {
             cut: self.cut,
         })
     }
-    fn list(&self, path: &std::path::Path) -> Result<Vec<crate::core::ports::DirEntry>, String> {
+    fn list(
+        &self,
+        path: &std::path::Path,
+    ) -> Result<Vec<crate::capabilities::tools::ports::DirEntry>, String> {
         if let Some(m) = &self.fail {
             return Err(m.clone());
         }
         // 内存替身：把已 seed 的路径按"父目录等于该目录"筛出来（只报直接子项）。
         let dir = path.to_string_lossy().into_owned();
         let files = self.files.lock().expect("锁");
-        let mut out: Vec<crate::core::ports::DirEntry> = Vec::new();
+        let mut out: Vec<crate::capabilities::tools::ports::DirEntry> = Vec::new();
         for (k, v) in files.iter() {
             let Some((parent, name)) = k.rsplit_once(['/', '\\']) else {
                 continue;
@@ -327,7 +331,7 @@ impl SysIo for InMemorySysIo {
             if parent != dir.trim_end_matches(['/', '\\']) {
                 continue;
             }
-            out.push(crate::core::ports::DirEntry {
+            out.push(crate::capabilities::tools::ports::DirEntry {
                 name: name.to_string(),
                 is_dir: false,
                 bytes: v.len() as u64,
@@ -391,12 +395,19 @@ impl crate::capabilities::llm::api::EnvelopeRepair for NoRepair {
 /// 关心"改动前有没有读过"的用例直接用 systool::execute 并自带 Observations。
 pub(crate) fn run_builtin(
     sb: &crate::capabilities::workspace::api::Sandbox,
-    io: &dyn crate::core::ports::SysIo,
+    io: &dyn crate::capabilities::tools::ports::SysIo,
     name: &str,
     args_json: &str,
-) -> crate::core::ports::ToolOutcome {
-    let mut obs = crate::core::systool::Observations::default();
-    crate::core::systool::execute(sb, &test_systools().tools, io, &mut obs, name, args_json)
+) -> crate::capabilities::tools::ports::ToolOutcome {
+    let mut obs = crate::capabilities::tools::api::Observations::default();
+    crate::capabilities::tools::api::execute(
+        sb,
+        &test_systools().tools,
+        io,
+        &mut obs,
+        name,
+        args_json,
+    )
 }
 
 /// 测试用模块工具声明：只给启动命令（参数契约在需要的用例里另行声明）。
@@ -447,8 +458,8 @@ pub(crate) fn test_params(agent: &str) -> crate::core::session::SessionParams {
 pub(crate) fn test_notes(
     sb: &crate::capabilities::workspace::api::Sandbox,
     modules: &[crate::capabilities::workspace::api::Module],
-) -> crate::core::systool::ToolNotes {
-    crate::core::systool::tool_notes(&test_prompts(), sb, modules)
+) -> crate::capabilities::tools::api::ToolNotes {
+    crate::capabilities::tools::api::tool_notes(&test_prompts(), sb, modules)
 }
 
 /// 内存会话历史：供测试断言落盘与回放。
@@ -612,8 +623,8 @@ impl ModuleSource for VecSource {
 
 /// 无声围栏端口：测试里不碰任何 ACL（真实实现在 adapters/confine）。
 pub(crate) struct NoFenceHost;
-impl crate::core::ports::FenceHost for NoFenceHost {
-    fn release(&self, _spec: &crate::core::fence::FenceSpec) -> Result<(), String> {
+impl crate::capabilities::tools::ports::FenceHost for NoFenceHost {
+    fn release(&self, _spec: &crate::capabilities::tools::api::FenceSpec) -> Result<(), String> {
         Ok(())
     }
 }
@@ -636,8 +647,8 @@ impl RecordingFence {
         self
     }
 }
-impl crate::core::ports::FenceHost for RecordingFence {
-    fn release(&self, spec: &crate::core::fence::FenceSpec) -> Result<(), String> {
+impl crate::capabilities::tools::ports::FenceHost for RecordingFence {
+    fn release(&self, spec: &crate::capabilities::tools::api::FenceSpec) -> Result<(), String> {
         if let Some(m) = &self.fail {
             return Err(m.clone());
         }
@@ -863,7 +874,7 @@ pub(crate) fn test_prompts() -> Prompts {
 
 /// 测试用工具总表与角色表（走**与产品同一条**装配路径）。
 /// 它与提示词册**分开**装配：两者互不依赖（见 core/prompt.rs 的 Prompts）。
-pub(crate) fn test_systools() -> crate::core::roles::SystemTools {
+pub(crate) fn test_systools() -> crate::capabilities::tools::api::SystemTools {
     let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     crate::adapters::YamlPrompts::new(root.join("prompts"), root.join("systools"))
         .system_tools()

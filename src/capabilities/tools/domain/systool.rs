@@ -5,9 +5,9 @@
 //! 路径一律是真实绝对路径（根目录经提示词册如实告知）；模块声明的外部工具与内置工具用同一套路径。
 
 use crate::capabilities::prompt::api::{Prompts, ToolTexts};
+use crate::capabilities::tools::api::{ArgFault, ToolSchema};
+use crate::capabilities::tools::ports::{SysIo, ToolOutcome};
 use crate::capabilities::workspace::api::{Place, Sandbox};
-use crate::core::ports::{SysIo, ToolOutcome};
-use crate::core::schema::{ArgFault, ToolSchema};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -276,7 +276,7 @@ fn near_match(hay: &str, old: &str) -> Option<(usize, String)> {
 /// 顺序：解析 JSON → 认工具 → 按声明校验参数 → 补缺省 → 寻址（内置工具一律需要一个 path）。
 pub fn execute(
     sb: &Sandbox,
-    book: &crate::core::schema::ToolBook,
+    book: &crate::capabilities::tools::api::ToolBook,
     io: &dyn SysIo,
     obs: &mut Observations,
     name: &str,
@@ -765,9 +765,9 @@ fn search(
 /// 原子性：先解析 + 寻址 + 读入 + 在内存里算出全部新内容；任何一块不成立就**一个文件都不写**，
 /// 回执点名第几块、为什么。同一个文件被多块改到时，后一块看到前一块的结果。
 fn apply_patch(sb: &Sandbox, io: &dyn SysIo, obs: &mut Observations, body: &str) -> ToolOutcome {
-    use crate::core::patch::Block;
+    use crate::capabilities::tools::api::Block;
     let texts = &sb.texts;
-    let blocks = match crate::core::patch::parse(body) {
+    let blocks = match crate::capabilities::tools::api::parse(body) {
         Ok(b) => b,
         Err(f) => return fail(patch_fault(texts, &f)),
     };
@@ -831,7 +831,7 @@ fn apply_patch(sb: &Sandbox, io: &dyn SysIo, obs: &mut Observations, body: &str)
                     let why = texts.render(&texts.edit_file_lossy, &[("path", spec.clone())]);
                     return fail(block_fault(texts, n, why));
                 }
-                match crate::core::patch::apply_edits(&cur, edits) {
+                match crate::capabilities::tools::api::apply_edits(&cur, edits) {
                     Ok(new) => {
                         lines.push(texts.render(
                             &texts.patch_block_update,
@@ -914,8 +914,8 @@ fn block_fault(texts: &ToolTexts, n: usize, why: String) -> String {
 }
 
 /// patch 解析失败的回执（每一类都说清事实）。
-fn patch_fault(texts: &ToolTexts, f: &crate::core::patch::Fault) -> String {
-    use crate::core::patch::Fault as F;
+fn patch_fault(texts: &ToolTexts, f: &crate::capabilities::tools::api::Fault) -> String {
+    use crate::capabilities::tools::api::Fault as F;
     match f {
         F::NoBlocks => texts.patch_no_blocks.clone(),
         F::UnknownMarker { line, text } => texts.render(
@@ -948,8 +948,8 @@ fn patch_fault(texts: &ToolTexts, f: &crate::core::patch::Fault) -> String {
 }
 
 /// 一处改动失败的原因句（外面再套"第 N 块第 k 处"）。
-fn edit_fault_reason(texts: &ToolTexts, f: &crate::core::patch::EditFault) -> String {
-    use crate::core::patch::EditFault as E;
+fn edit_fault_reason(texts: &ToolTexts, f: &crate::capabilities::tools::api::EditFault) -> String {
+    use crate::capabilities::tools::api::EditFault as E;
     match f {
         E::NotFound { total } => {
             texts.render(&texts.patch_not_found, &[("total", total.to_string())])

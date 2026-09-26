@@ -33,7 +33,7 @@ pub type RoleTable = BTreeMap<String, RoleDecl>;
 /// 系统工具与角色（装配期读 `systools/` 得来）。
 #[derive(Debug, Clone, Default)]
 pub struct SystemTools {
-    pub tools: crate::core::schema::ToolBook,
+    pub tools: crate::capabilities::tools::api::ToolBook,
     pub roles: RoleTable,
 }
 
@@ -44,7 +44,7 @@ impl SystemTools {
     pub fn tool_face(
         &self,
         role: &str,
-    ) -> Result<Vec<(&str, &crate::core::schema::ToolSchema)>, String> {
+    ) -> Result<Vec<(&str, &crate::capabilities::tools::api::ToolSchema)>, String> {
         let decl = self
             .roles
             .get(role)

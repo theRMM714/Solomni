@@ -9,13 +9,13 @@ use crate::capabilities::llm::api::{Chat, ChatGateway, CompleteOpts, Msg};
 use crate::capabilities::prompt::api::Prompts;
 use crate::capabilities::registry::api::RosterPick;
 use crate::capabilities::registry::api::Settings;
+use crate::capabilities::tools::ports::{SysIo, ToolRunner};
 use crate::capabilities::workspace::api::Sandboxes;
 use crate::capabilities::workspace::api::{ExecSpec, Module};
 use crate::capabilities::workspace::ports::{ModuleSource, PackageSource};
 use crate::core::engine::{Discussion, Execution, Member, MemberTools, TurnOut, MAX_ROUNDS};
 use crate::core::events::{CheckView, LineView, Pending, SessionEvent};
 use crate::core::history::{AgentMeta, SessionMeta};
-use crate::core::ports::{SysIo, ToolRunner};
 use std::sync::Arc;
 
 /// 节点验收的结论：逐节点 (node, ok, note)。
@@ -131,7 +131,7 @@ pub struct CollabSession {
     core_mode: crate::capabilities::registry::api::ToolMode,
     prompts: Prompts,
     /// 工具总表与角色表：**不挂在册子上**（两者互不依赖）。
-    systools: crate::core::roles::SystemTools,
+    systools: crate::capabilities::tools::api::SystemTools,
     gateway: Arc<dyn ChatGateway + Send + Sync>,
     source: Arc<dyn ModuleSource + Send + Sync>,
     /// 外部工具执行端口（策略在核心按模块清单放行，机制在适配层）。
@@ -168,7 +168,7 @@ impl CollabSession {
         source: Arc<dyn ModuleSource + Send + Sync>,
         settings: Settings,
         prompts: Prompts,
-        systools: crate::core::roles::SystemTools,
+        systools: crate::capabilities::tools::api::SystemTools,
         tools: Arc<dyn ToolRunner + Send + Sync>,
         io: Arc<dyn SysIo + Send + Sync>,
         repair: Arc<dyn crate::capabilities::llm::api::EnvelopeRepair + Send + Sync>,
@@ -311,7 +311,7 @@ impl CollabSession {
     #[allow(clippy::too_many_arguments)]
     fn judge_clear(
         prompts: &Prompts,
-        systools: &crate::core::roles::SystemTools,
+        systools: &crate::capabilities::tools::api::SystemTools,
         cancel: &std::sync::Arc<std::sync::atomic::AtomicBool>,
         opts: crate::capabilities::llm::api::CompleteOpts<'static>,
         mode: crate::capabilities::registry::api::ToolMode,
@@ -365,7 +365,7 @@ impl CollabSession {
     #[allow(clippy::too_many_arguments)]
     fn review_nodes(
         prompts: &Prompts,
-        systools: &crate::core::roles::SystemTools,
+        systools: &crate::capabilities::tools::api::SystemTools,
         cancel: &std::sync::Arc<std::sync::atomic::AtomicBool>,
         chain: Option<&crate::kernel::chain::TaskChain>,
         opts: crate::capabilities::llm::api::CompleteOpts<'static>,
@@ -831,7 +831,7 @@ impl CollabSession {
         Some(crate::core::engine::MemberTools {
             mode: self.core_mode,
             modules: std::collections::BTreeMap::new(),
-            observations: crate::core::systool::Observations::default(),
+            observations: crate::capabilities::tools::api::Observations::default(),
             repair: Arc::clone(&self.repair),
             log: Arc::clone(&self.log),
             runner: Arc::clone(&self.tools),
@@ -839,16 +839,16 @@ impl CollabSession {
             builtin_tools: self.systools.tools.clone(),
             io: Arc::clone(&self.io),
             unavailable: std::collections::BTreeMap::new(),
-            fence: crate::core::fence::FenceSpec::from_sandbox(&sb, false),
+            fence: crate::capabilities::tools::api::FenceSpec::from_sandbox(&sb, false),
             reply_seq: 0,
             allowed,
             with_modules: false,
-            notes: crate::core::systool::ToolNotes::default(),
+            notes: crate::capabilities::tools::api::ToolNotes::default(),
         })
     }
 
     /// 讨论回合的**工具面**（动词 + 只读核实）：核心驱动时交给 turn_with。
-    pub fn systools(&self) -> &crate::core::roles::SystemTools {
+    pub fn systools(&self) -> &crate::capabilities::tools::api::SystemTools {
         &self.systools
     }
 
@@ -1459,15 +1459,17 @@ impl CollabSession {
             let mut member = Member::plain(&a.name, params, mode);
             // 围栏：可达范围 + 断网，由该 agent 的沙箱与 exec 段派生（机制在 adapters）；
             // 只读根来自用户显式授权（`fence_read`），默认空。
-            let fence = crate::core::fence::FenceSpec::from_sandbox(&sandbox, self.spec.net)
-                .with_read_only(read_only_roots(&self.settings.app));
+            let fence =
+                crate::capabilities::tools::api::FenceSpec::from_sandbox(&sandbox, self.spec.net)
+                    .with_read_only(read_only_roots(&self.settings.app));
             // 工具说明块的素材（patch 语法 / 模块工具 / 模块参数）：装配期按这个 agent 的沙箱与模块算一次。
-            let tool_notes = crate::core::systool::tool_notes(&prompts, &sandbox, &modules);
+            let tool_notes =
+                crate::capabilities::tools::api::tool_notes(&prompts, &sandbox, &modules);
             member.tools = Some(MemberTools {
                 mode,
                 // 模块 id → 该模块的（目录, 工具表）：多模块 agent 靠信封里的 module 消歧。
                 modules: crate::core::engine::tool_table(&modules),
-                observations: crate::core::systool::Observations::default(),
+                observations: crate::capabilities::tools::api::Observations::default(),
                 repair: Arc::clone(&self.repair),
                 log: Arc::clone(&self.log),
                 runner: Arc::clone(&self.tools),
@@ -1546,7 +1548,7 @@ impl CollabSession {
         source: Arc<dyn ModuleSource + Send + Sync>,
         settings: Settings,
         prompts: Prompts,
-        systools: crate::core::roles::SystemTools,
+        systools: crate::capabilities::tools::api::SystemTools,
         tools: Arc<dyn ToolRunner + Send + Sync>,
         io: Arc<dyn SysIo + Send + Sync>,
         repair: Arc<dyn crate::capabilities::llm::api::EnvelopeRepair + Send + Sync>,
