@@ -16,7 +16,6 @@
       "engine",
       "events",
       "exec",
-      "fence",
       "history",
       "module",
       "ports",
@@ -24,8 +23,7 @@
       "roles",
       "schema",
       "session",
-      "systool",
-      "workspace"
+      "systool"
     ]
   ]
 }

@@ -274,6 +274,7 @@ fn near_match(hay: &str, old: &str) -> Option<(usize, String)> {
 /// 顺序：解析 JSON → 认工具 → 按声明校验参数 → 补缺省 → 寻址（内置工具一律需要一个 path）。
 pub fn execute(
     sb: &Sandbox,
+    book: &crate::core::schema::ToolBook,
     io: &dyn SysIo,
     obs: &mut Observations,
     name: &str,
@@ -282,7 +283,7 @@ pub fn execute(
     let texts = &sb.texts;
     // 自由格式工具：输入是一段原样文本（不是 JSON），也不吃参数校验——认工具后就交给它自己解释。
     if is_freeform(name) {
-        if !sb.builtin_tools.contains_key(name) {
+        if !book.contains_key(name) {
             return fail(texts.render(&texts.unknown_builtin, &[("name", name.to_string())]));
         }
         return match name {
@@ -294,7 +295,7 @@ pub fn execute(
         Ok(v) => v,
         Err(e) => return fail(texts.render(&texts.bad_args_json, &[("error", e.to_string())])),
     };
-    let Some(schema) = sb.builtin_tools.get(name) else {
+    let Some(schema) = book.get(name) else {
         return fail(texts.render(&texts.unknown_builtin, &[("name", name.to_string())]));
     };
     if let Err(fault) = schema.check(&args) {

@@ -98,6 +98,9 @@ pub struct MemberTools {
     pub runner: Arc<dyn ToolRunner + Send + Sync>,
     /// 本成员的沙箱：内置文件工具的寻址与越界依据（权限收口在 core）。
     pub sandbox: crate::core::workspace::Sandbox,
+    /// 内置工具的参数契约（来自 `systools/tools.yaml` 的 tools）：说明与校验都按它来。
+    /// 它属于**工具面**，不属于沙箱——沙箱只管路径。
+    pub builtin_tools: crate::core::schema::ToolBook,
     /// 内置文件工具的读写端口。
     pub io: Arc<dyn crate::core::ports::SysIo + Send + Sync>,
     /// 模块 id → 它缺的运行包能力（本档位下该模块的工具不执行；空表 = 都能执行）。
@@ -132,7 +135,7 @@ impl MemberTools {
     pub(crate) fn tools_block(&self, ids: &[String], with_modules: bool) -> String {
         let mut parts: Vec<String> = Vec::new();
         for id in ids {
-            if let Some(schema) = self.sandbox.builtin_tools.get(id) {
+            if let Some(schema) = self.builtin_tools.get(id) {
                 parts.push(format!("{}\n{}", id, schema.render_for_prompt()));
             }
         }
@@ -230,6 +233,7 @@ fn run_branch(
             String::new(),
             crate::core::systool::execute(
                 &ctx.sandbox,
+                &ctx.builtin_tools,
                 ctx.io.as_ref(),
                 &mut branch,
                 name,
@@ -290,7 +294,6 @@ fn is_parallel(ctx: &MemberTools, module: Option<&str>, name: &str) -> bool {
         None => {
             crate::core::systool::is_builtin(name)
                 && ctx
-                    .sandbox
                     .builtin_tools
                     .get(name)
                     .map(|s| s.parallel)
@@ -351,7 +354,7 @@ fn tool_decls(ctx: &MemberTools) -> ToolDecls {
     let mut taken: Vec<String> = Vec::new();
     // **只声明这个席位拿到的工具**（判据与执行时校验同一份 allowed）：声明了却调不动没有意义，
     // 模型会照着声明去调，被拒一次就白烧一轮（见 docs/architecture/tools-and-roles.md 二）。
-    for (name, schema) in &ctx.sandbox.builtin_tools {
+    for (name, schema) in &ctx.builtin_tools {
         if !ctx.allowed.iter().any(|t| t == name) {
             continue;
         }
@@ -1688,7 +1691,6 @@ pub(crate) fn core_operation(
             .filter(|(_, n, _)| {
                 face_ids.iter().any(|f| f == n)
                     && ctx
-                        .sandbox
                         .builtin_tools
                         .get(n)
                         .map(|s| s.capability == "fs-read")
@@ -1706,6 +1708,7 @@ pub(crate) fn core_operation(
         for (call_id, name, args) in readonly {
             let out = crate::core::systool::execute(
                 &ctx.sandbox,
+                &ctx.builtin_tools,
                 ctx.io.as_ref(),
                 &mut ctx.observations,
                 &name,

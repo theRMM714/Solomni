@@ -3137,6 +3137,7 @@ pub(crate) fn member_with_tools(
         log: Arc::new(crate::kernel::log::NoopLog),
         runner,
         sandbox: test_sandbox("m0", &[]),
+        builtin_tools: test_systools().tools,
         io: Arc::new(InMemorySysIo::new()),
         unavailable: BTreeMap::new(),
         fence: crate::core::fence::FenceSpec::from_sandbox(&test_sandbox("m0", &[]), false),
@@ -5140,7 +5141,7 @@ pub(crate) fn builtin_edit_replaces_the_requested_span_and_reports_what_it_did()
     let mut obs = crate::core::systool::Observations::default();
     let edit = |obs: &mut crate::core::systool::Observations, args: &str| {
         let full = format!("{{\"path\":\"{}\",{}}}", note, args);
-        crate::core::systool::execute(&sb, &io, obs, "edit", &full)
+        crate::core::systool::execute(&sb, &test_systools().tools, &io, obs, "edit", &full)
     };
     // 唯一命中：只改那一处，别处一字不动
     let ok = edit(
@@ -5228,7 +5229,14 @@ pub(crate) fn builtin_edit_refuses_files_it_cannot_see_whole() {
     ] {
         io.seed(&["demo", "work", "note.txt"], "abc");
         let mut obs = crate::core::systool::Observations::default();
-        let out = crate::core::systool::execute(&sb, &io, &mut obs, "edit", &args);
+        let out = crate::core::systool::execute(
+            &sb,
+            &test_systools().tools,
+            &io,
+            &mut obs,
+            "edit",
+            &args,
+        );
         assert!(!out.ok && out.output.contains(want), "{}", out.output);
         assert_eq!(
             io.get(&["demo", "work", "note.txt"]).as_deref(),
@@ -5244,7 +5252,7 @@ pub(crate) fn builtin_write_needs_a_complete_prior_read_of_an_existing_file() {
     let sb = test_sandbox("a1", &[]);
     let note = s(&["demo", "work", "note.txt"]);
     let run = |obs: &mut crate::core::systool::Observations, tool: &str, args: String| {
-        crate::core::systool::execute(&sb, &io, obs, tool, &args)
+        crate::core::systool::execute(&sb, &test_systools().tools, &io, obs, tool, &args)
     };
     let mut obs = crate::core::systool::Observations::default();
     // 新建文件：不需要"读过"什么
@@ -5703,6 +5711,7 @@ pub(crate) fn native_member(
         log: Arc::new(crate::kernel::log::NoopLog),
         runner: Arc::new(SilentRunner),
         sandbox: sb.clone(),
+        builtin_tools: test_systools().tools,
         io,
         unavailable: BTreeMap::new(),
         fence: crate::core::fence::FenceSpec::from_sandbox(&sb, false),
@@ -8406,6 +8415,7 @@ pub(crate) fn core_operation_runs_readonly_verification_before_the_op() {
         log: Arc::new(crate::kernel::log::NoopLog),
         runner: Arc::new(SilentRunner),
         sandbox: sb.clone(),
+        builtin_tools: test_systools().tools,
         io: io_port,
         unavailable: BTreeMap::new(),
         fence: crate::core::fence::FenceSpec::from_sandbox(&sb, false),
@@ -8496,6 +8506,7 @@ pub(crate) fn executor_reports_through_a_tool_call() {
     let mut obs = crate::core::systool::Observations::default();
     let out = crate::core::systool::execute(
         &sb,
+        &test_systools().tools,
         &io,
         &mut obs,
         "submit_report",

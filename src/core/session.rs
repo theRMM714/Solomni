@@ -328,7 +328,7 @@ impl AgentSession {
         let decl = self
             .tools
             .as_ref()
-            .and_then(|t| t.sandbox.builtin_tools.get("compact"))
+            .and_then(|t| t.builtin_tools.get("compact"))
             .map(|s| s.decl("compact"));
         let prompt = self.tool_texts.compact_prompt.clone();
         let up_to = self.next_line;

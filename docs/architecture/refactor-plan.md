@@ -425,22 +425,23 @@ kernel       ──▶ （无）
 | **1** | **kernel**：`jobs` / `log` / `types`（`bus` 与运行态合并按 §3.2 推迟到阶段 B 的 session） | — | **已完成**（`src/kernel/`） |
 | **2** | **修两处违约**：`exec.rs` 宿主探测下沉为 `HostProbe` 端口（4 处 IO）；`presentation` 改经入站能力面 `LogOps` | `core` 里的环境变量与文件系统调用；`presentation → ports` / `presentation → kernel` | **已完成**（基线 9 → 7 条） |
 | **3** | **切边 A1 + A2**：`slash` → `kernel::path`（纯机制）；**拆册子**——`Prompts` 只留提示词文本，`SystemTools` / `ToolBook` 由 `Core`、协作会话与讨论直接持有 | `refs → workspace`；`prompt → roles`；`prompt → schema`；**并解开 `prompt ⇄ tools` 本质环** | **已完成**（核心环 16 → 14 个模块） |
-| **4** | **其余数据依赖**（逐个定"这个类型归谁"）：`SessionMeta.exec`（`history → exec`）、`SessionEvent::PlanReview.chain`（`events → chain`）、`Sandbox` 里的 `ToolBook` + `ToolTexts`（`workspace → prompt, schema`）、`Settings` 里的 agents 与 exec（`providers → agents, exec`） | 见左 | 未开始 |
-| **5** | **拆 `ports.rs`**：它的 trait 签名引用了 **8 个**模块的类型（`envelope` / `fence` / `history` / `module` / `packages` / `prompt` / `providers` / `workspace`）——按 §1.2 让每个能力有自己的 `ports.rs` | `ports → …`（最大枢纽） | 未开始 |
+| **4** | **切 `workspace → schema`**：`builtin_tools` 从 `Sandbox` 移到 `MemberTools`（`Sandbox` 从未读它，是死重） | `workspace → schema` | **已完成**（核心环 14 → 12；`workspace` 只剩 `→ prompt`，属**合法业务间依赖**，不必切） |
+| **5** | **其余三条数据聚合**（逐个定"这个类型归谁"）：`SessionMeta.exec`（`history → exec`）、`SessionEvent::PlanReview.chain`（`events → chain`，**与 `collab → session` 成环，必须切**）、`Settings` 里的 agents 与 exec（`providers → agents, exec`） | 见左 | 未开始 |
+| **6** | **拆 `ports.rs`**：它的 trait 签名引用了 **8 个**模块的类型（`envelope` / `fence` / `history` / `module` / `packages` / `prompt` / `providers` / `workspace`）——按 §1.2 让每个能力有自己的 `ports.rs` | `ports → …`（最大枢纽） | 未开始 |
 
 **阶段 B：搬能力（按切边后的图重排）**
 
 | 批次 | 目标 | 前置 | 状态 |
 | --- | --- | --- | --- |
-| **6** | **prompt**（此时只剩 `→ envelope` 一条出边，无环） | 3, 4 | 未开始 |
-| **7** | **registry**（含拆 `providers.rs`） | 4 | 未开始 |
-| **8** | **llm**：`Channel` 解析 + 通道端口族 | 7 | 未开始 |
-| **9** | **workspace**：`module` / `packages` / `exec` | 5, 8 | 未开始 |
-| **10** | **tools**（钉死 §3.4：实现锁内部、机制留端口、工具调用发一对短暂事件、**产出事实不落盘**）：`systool` / `patch` / `schema` / `roles` / `fence` / `workspace` | 9 | 未开始 |
-| **11** | **session**（含压缩 `compact`：钉死 §3.5 的五条不变式与压缩×回档边界；并合并运行态的两份真相、落位 `bus`） | 10 | 未开始 |
-| **12** | **rewind**（协调型；`marks` 归属方案 A） | 11 | 未开始 |
-| **13** | **collab** | 12 | 未开始 |
-| **14** | **presentation 收口 + 前端分区**：只 `use` 各业务 `api`；`app.js` 分区 | 13 | 未开始 |
+| **7** | **prompt**（此时只剩 `→ envelope` 一条出边，无环） | 4, 5 | 未开始 |
+| **8** | **registry**（含拆 `providers.rs`） | 5 | 未开始 |
+| **9** | **llm**：`Channel` 解析 + 通道端口族 | 8 | 未开始 |
+| **10** | **workspace**：`module` / `packages` / `exec` | 6, 9 | 未开始 |
+| **11** | **tools**（钉死 §3.4：实现锁内部、机制留端口、工具调用发一对短暂事件、**产出事实不落盘**）：`systool` / `patch` / `schema` / `roles` / `fence` | 10 | 未开始 |
+| **12** | **session**（含压缩 `compact`：钉死 §3.5 的五条不变式与压缩×回档边界；并合并运行态的两份真相、落位 `bus`） | 11 | 未开始 |
+| **13** | **rewind**（协调型；`marks` 归属方案 A） | 12 | 未开始 |
+| **14** | **collab** | 13 | 未开始 |
+| **15** | **presentation 收口 + 前端分区**：只 `use` 各业务 `api`；`app.js` 分区 | 14 | 未开始 |
 
 **豁免清零判据**：`tests/dependency-baseline.json` 的**三个数组全部清空**（`reverse` / `presentation` / `coreCycles`），
 且 `Core` 这个类型不再存在。门禁对**新增**与**过期**都报失败，所以销账不靠自觉——

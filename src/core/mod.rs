@@ -1888,7 +1888,6 @@ impl Core {
                 private,
                 modules,
                 texts: self.prompts.core.tool_texts.clone(),
-                builtin_tools: self.systools.tools.clone(),
             });
         }
         Ok(workspace::Sandboxes {
@@ -1916,6 +1915,7 @@ impl Core {
             log: Arc::clone(&self.log),
             runner: Arc::clone(&self.tools),
             sandbox: sb.clone(),
+            builtin_tools: self.systools.tools.clone(),
             io: Arc::clone(&self.io),
             unavailable,
             // 围栏：可达范围 + 断网 + 环境白名单的落点，全部由该 agent 的沙箱派生（机制在 adapters）；

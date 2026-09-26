@@ -28,7 +28,7 @@
 | `packages.rs` | `package.yaml` 契约与包库事实（校验、去重、系统路径冲突预检） |
 | `exec.rs` | 执行档位（`ExecSpec`）与执行计划（`ExecPlan`）派生、虚拟机档诊断、档位承载（`TierReadiness`：本机能不能承载这个档位）。宿主事实（路径存在性 / PATH 可执行文件 / 虚拟化能力）**经 `ports::HostProbe` 问**，本文件不碰环境变量与文件系统 |
 | `fence.rs` | 一次工具执行的围栏策略（纯数据：可达根、断网、工作目录） |
-| `workspace.rs` | 工作区与沙箱的纯数据定义、寻址与越界判定。路径的**对外书写形式**在 `kernel::path`（纯机制） |
+| `workspace.rs` | 工作区与沙箱的纯数据定义、寻址与越界判定。路径的**对外书写形式**在 `kernel::path`（纯机制）；**不持工具册**——内置工具的参数契约归工具面（`MemberTools`），沙箱只管路径 |
 | `systool.rs` | 内置工具 `read` / `write` / `edit` / `patch` / `search` 的放行、寻址、**按声明校验参数**、改动前的"读过"证据（`Observations`）、自由格式补丁的原子应用与回执文案 |
 | `patch.rs` | 补丁通道的**纯逻辑**：解析自由格式补丁（Add / Update / SEARCH / REPLACE / End File）与整行应用（逐行匹配、行尾风格保持、失败点名第几处） |
 | `refs.rs` | 用户 `@` 引用改写成真实绝对路径 |

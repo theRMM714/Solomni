@@ -822,6 +822,7 @@ impl CollabSession {
             log: Arc::clone(&self.log),
             runner: Arc::clone(&self.tools),
             sandbox: sb.clone(),
+            builtin_tools: self.systools.tools.clone(),
             io: Arc::clone(&self.io),
             unavailable: std::collections::BTreeMap::new(),
             fence: crate::core::fence::FenceSpec::from_sandbox(&sb, false),
@@ -1451,6 +1452,7 @@ impl CollabSession {
                 log: Arc::clone(&self.log),
                 runner: Arc::clone(&self.tools),
                 sandbox,
+                builtin_tools: self.systools.tools.clone(),
                 io: Arc::clone(&self.io),
                 reply_seq: self.reply_seq,
                 // 本档位下不能执行工具的模块（缺运行包）：机制侧据此拒绝执行。

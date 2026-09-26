@@ -52,9 +52,8 @@ pub struct Sandbox {
     /// 成员模块：模块 id → 模块目录。
     pub modules: BTreeMap<String, PathBuf>,
     /// 模型侧文案（来自 prompts/）：随沙箱注入，不是状态。
+    /// 路径拒绝文案由**本模块自己**渲染，所以这条是正常的业务间依赖（经 prompt 的能力面）。
     pub texts: ToolTexts,
-    /// 内置工具的参数契约（来自 systools/tools.yaml 的 tools）：说明与校验都按它来。
-    pub builtin_tools: crate::core::schema::ToolBook,
 }
 
 impl Sandbox {

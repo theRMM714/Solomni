@@ -394,7 +394,7 @@ pub(crate) fn run_builtin(
     args_json: &str,
 ) -> crate::core::ports::ToolOutcome {
     let mut obs = crate::core::systool::Observations::default();
-    crate::core::systool::execute(sb, io, &mut obs, name, args_json)
+    crate::core::systool::execute(sb, &test_systools().tools, io, &mut obs, name, args_json)
 }
 
 /// 测试用模块工具声明：只给启动命令（参数契约在需要的用例里另行声明）。
@@ -427,7 +427,6 @@ pub(crate) fn test_sandbox(agent: &str, modules: &[&str]) -> crate::core::worksp
         private: abs(&["demo", agent]),
         modules: map,
         texts: test_prompts().core.tool_texts,
-        builtin_tools: test_systools().tools,
     }
 }
 
