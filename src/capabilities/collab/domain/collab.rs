@@ -131,7 +131,7 @@ pub struct CollabSession {
     core_chat: crate::capabilities::llm::api::BoxedChat,
     core_is_demo: bool,
     /// 核心通道的工具调用形态（原生才声明工具；信封通道看提示词里的说明）。
-    core_mode: crate::capabilities::registry::api::ToolMode,
+    core_mode: crate::capabilities::llm::api::ToolMode,
     prompts: Prompts,
     /// 工具总表与角色表：**不挂在册子上**（两者互不依赖）。
     systools: crate::capabilities::tools::api::SystemTools,
@@ -317,7 +317,7 @@ impl CollabSession {
         systools: &crate::capabilities::tools::api::SystemTools,
         cancel: &std::sync::Arc<std::sync::atomic::AtomicBool>,
         opts: crate::capabilities::llm::api::CompleteOpts<'static>,
-        mode: crate::capabilities::registry::api::ToolMode,
+        mode: crate::capabilities::llm::api::ToolMode,
         core_chat: &mut dyn Chat,
         verify: Option<&mut crate::capabilities::session::api::MemberTools>,
         kind: &str,
@@ -372,7 +372,7 @@ impl CollabSession {
         cancel: &std::sync::Arc<std::sync::atomic::AtomicBool>,
         chain: Option<&crate::kernel::chain::TaskChain>,
         opts: crate::capabilities::llm::api::CompleteOpts<'static>,
-        mode: crate::capabilities::registry::api::ToolMode,
+        mode: crate::capabilities::llm::api::ToolMode,
         core_chat: &mut dyn Chat,
         verify: Option<&mut crate::capabilities::session::api::MemberTools>,
         // 上一次填错了要它重填的话（核心据此**一直重填**到合法，不设次数上限）。
@@ -1467,7 +1467,7 @@ impl CollabSession {
             let mode = if channel.is_some() {
                 self.settings.tool_mode_for(a.model.as_deref())
             } else {
-                crate::capabilities::registry::api::ToolMode::Envelope
+                crate::capabilities::llm::api::ToolMode::Envelope
             };
             // **会话参数**：身份块每回合由它现渲染，不存进任何人的消息列表。
             let params = crate::capabilities::session::api::SessionParams::from_workspace(

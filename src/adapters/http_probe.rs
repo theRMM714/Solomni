@@ -4,8 +4,10 @@
 //! 三种结论都如实回报（支持 / 明确不支持 / 无法判定），绝不替用户拍板。
 
 use crate::adapters::endpoint::{chat_candidates, resolve_candidates, Attempt};
-use crate::capabilities::llm::api::{Completion, ProbeOutcome, ToolDecl};
-use crate::capabilities::registry::api::{Channel, ReplayReport, ReplayShape};
+use crate::capabilities::llm::api::Channel;
+use crate::capabilities::llm::api::{
+    Completion, ProbeOutcome, ReplayReport, ReplayShape, ToolDecl,
+};
 use crate::kernel::log::Log;
 
 /// 探针工具：无参数、只有说明——目的是让模型有东西可调。
@@ -141,8 +143,8 @@ pub(crate) fn probe_replay_with(
     log: &std::sync::Arc<dyn Log + Send + Sync>,
     nonce: &str,
 ) -> Result<ReplayReport, String> {
-    let key = channel.provider.api_key.clone();
-    let candidates = chat_candidates(&channel.provider.base_url);
+    let key = channel.api_key.clone();
+    let candidates = chat_candidates(&channel.base_url);
     let decl = ping_decl();
     let tools = Some(std::slice::from_ref(&decl));
     // 判据取编号里最独特的那一段（前缀 '-' 之后）：实测模型会直接把前缀省掉，
@@ -204,8 +206,8 @@ pub fn probe(
     channel: &Channel,
     log: &std::sync::Arc<dyn Log + Send + Sync>,
 ) -> Result<ProbeOutcome, String> {
-    let key = channel.provider.api_key.clone();
-    let candidates = chat_candidates(&channel.provider.base_url);
+    let key = channel.api_key.clone();
+    let candidates = chat_candidates(&channel.base_url);
     // 第一条：不带 tools（证明通道本身通不通）
     let base = resolve_candidates(
         &candidates,

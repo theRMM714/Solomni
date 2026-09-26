@@ -6,11 +6,11 @@
 use super::endpoint::{chat_candidates, memo_get, memo_set, resolve_candidates, Attempt, Memo};
 use super::fake_chat::DemoGateway;
 use super::http_agent::{finish_request, redact};
+use crate::capabilities::llm::api::Channel;
 use crate::capabilities::llm::api::{
     BoxedChat, Chat, ChatGateway, Chunk, CompleteOpts, Completion, Msg, ProbeOutcome, ToolCall,
     ToolDecl,
 };
-use crate::capabilities::registry::api::Channel;
 
 /// 真实会话通道：拥有通道副本（含密钥；密钥不出适配层）。
 /// resolved = 本会话首次命中的有效端点，后续轮次直接复用，不再重复探测。
@@ -94,10 +94,10 @@ impl HttpChat {
         log: std::sync::Arc<dyn crate::kernel::log::Log + Send + Sync>,
         memo: Memo,
     ) -> HttpChat {
-        let memo_key = format!("{}|chat", channel.provider.base_url);
+        let memo_key = format!("{}|chat", channel.base_url);
         let resolved = memo_get(&memo, &memo_key);
         HttpChat {
-            provider_id: channel.provider.base_url.clone(),
+            provider_id: channel.base_url.clone(),
             channel,
             log,
             resolved,
@@ -125,9 +125,9 @@ impl Chat for HttpChat {
         .to_string();
         let candidates: Vec<String> = match &self.resolved {
             Some(url) => vec![url.clone()],
-            None => chat_candidates(&self.channel.provider.base_url),
+            None => chat_candidates(&self.channel.base_url),
         };
-        let key = self.channel.provider.api_key.clone();
+        let key = self.channel.api_key.clone();
         let timeout_secs = opts.timeout_secs;
         let outcome = if stream {
             resolve_candidates(
@@ -531,7 +531,7 @@ impl ChatGateway for HttpGateway {
     fn probe_replay(
         &self,
         channel: &Channel,
-    ) -> Result<crate::capabilities::registry::api::ReplayReport, String> {
+    ) -> Result<crate::capabilities::llm::api::ReplayReport, String> {
         crate::adapters::http_probe::probe_replay(channel, &self.log)
     }
 
@@ -550,7 +550,7 @@ impl ChatGateway for HttpGateway {
                     "gateway::member_channel",
                     &format!(
                         "模块 {} → 供应商 {}（模型 {}）",
-                        module_id, c.provider.base_url, c.model
+                        module_id, c.base_url, c.model
                     ),
                 );
                 (

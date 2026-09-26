@@ -17,9 +17,10 @@ pub use crate::capabilities::workspace::ports::{ModuleSource, PackageSource, Wor
 
 use crate::capabilities::collab::api::AfterTurn;
 use crate::capabilities::collab::api::CollabSession;
+use crate::capabilities::llm::api::Channel;
 use crate::capabilities::llm::api::Msg;
 use crate::capabilities::prompt::api::Prompts;
-use crate::capabilities::registry::api::{AppSettings, Channel, Settings};
+use crate::capabilities::registry::api::{AppSettings, Settings};
 use crate::capabilities::session::api::{AgentMeta, HistoryView, SessionMeta};
 use crate::capabilities::tools::api::SystemTools;
 use crate::capabilities::workspace::api::Module;
@@ -1366,10 +1367,10 @@ impl Core {
         let outcome = self.gateway.probe_tools(&channel)?;
         let want = match &outcome {
             crate::core::api::ProbeOutcome::Supported { .. } => {
-                Some(crate::capabilities::registry::api::ToolMode::Native)
+                Some(crate::capabilities::llm::api::ToolMode::Native)
             }
             crate::core::api::ProbeOutcome::Unsupported { .. } => {
-                Some(crate::capabilities::registry::api::ToolMode::Envelope)
+                Some(crate::capabilities::llm::api::ToolMode::Envelope)
             }
             crate::core::api::ProbeOutcome::Unknown { .. } => None,
         };
@@ -1389,7 +1390,7 @@ impl Core {
     pub fn probe_replay_shape(
         &self,
         id: &str,
-    ) -> Result<crate::capabilities::registry::api::ReplayReport, String> {
+    ) -> Result<crate::capabilities::llm::api::ReplayReport, String> {
         let channel = self.settings.resolve(id)?;
         self.gateway.probe_replay(&channel)
     }
@@ -1567,7 +1568,9 @@ impl Core {
             .providers
             .get(provider_id)
             .ok_or_else(|| format!("无此供应商：{}", provider_id))?;
-        let outcome = self.catalog.list_models(provider);
+        let outcome = self
+            .catalog
+            .list_models(&provider.base_url, &provider.api_key);
         match &outcome {
             Ok(models) => self.log.info(
                 "core::discover_models",
@@ -1960,7 +1963,7 @@ impl Core {
         sb: &crate::capabilities::workspace::api::Sandbox,
         unavailable: BTreeMap<String, Vec<String>>,
         net: bool,
-        mode: crate::capabilities::registry::api::ToolMode,
+        mode: crate::capabilities::llm::api::ToolMode,
     ) -> crate::capabilities::session::api::MemberTools {
         crate::capabilities::session::api::MemberTools {
             mode,
@@ -2035,7 +2038,7 @@ impl Core {
         let mode = if channel.is_some() {
             self.settings.tool_mode_for(a.model.as_deref())
         } else {
-            crate::capabilities::registry::api::ToolMode::Envelope
+            crate::capabilities::llm::api::ToolMode::Envelope
         };
         self.log.info(
             "core::build_single",
@@ -2293,7 +2296,7 @@ impl Core {
         let want = if channel.is_some() {
             self.settings.tool_mode_for(a.model.as_deref())
         } else {
-            crate::capabilities::registry::api::ToolMode::Envelope
+            crate::capabilities::llm::api::ToolMode::Envelope
         };
         let cur = match self.sessions.get(sid) {
             Some(Session::Single(s)) => s.tool_mode(),
@@ -2309,10 +2312,10 @@ impl Core {
             s.set_tool_mode(want);
         }
         Ok(Some(match want {
-            crate::capabilities::registry::api::ToolMode::Native => {
+            crate::capabilities::llm::api::ToolMode::Native => {
                 "工具调用形态已按登记处改为**原生工具调用**（本条起生效）".to_string()
             }
-            crate::capabilities::registry::api::ToolMode::Envelope => {
+            crate::capabilities::llm::api::ToolMode::Envelope => {
                 "工具调用形态已按登记处改为**手写信封**（本条起生效）".to_string()
             }
         }))
@@ -2706,7 +2709,7 @@ impl Core {
                 let mode = if channel.is_some() {
                     self.settings.tool_mode_for(a.model.as_deref())
                 } else {
-                    crate::capabilities::registry::api::ToolMode::Envelope
+                    crate::capabilities::llm::api::ToolMode::Envelope
                 };
                 // **会话参数**：与建立时同一个口径（身份块每回合现渲染，不进消息列表）。
                 let params = crate::capabilities::session::api::SessionParams::from_workspace(

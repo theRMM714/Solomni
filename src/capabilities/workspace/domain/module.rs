@@ -3,6 +3,71 @@
 //! 模型选择是会话级决定（记录在会话里），模块清单不再承载模型/供应商偏好。
 
 use serde::Deserialize;
+/// 参数类型（只支持机器能判定的最小集合；不猜、不做隐式转换）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ParamType {
+    String,
+    Integer,
+    Number,
+    Boolean,
+    /// 数组：核心操作的**结构化载荷**（节点表 / 结论表 / 验收清单 / 名单）用它承载。
+    /// 为什么需要：这种嵌套结构标量类型表达不了；它照样是一次**工具调用**（名字、存在性、
+    /// 载荷形状都校验，且进工具台账），语义校验（负责人在不在名单、依赖成不成环）由代码在做完调用后照旧执行。
+    Array,
+}
+
+impl ParamType {
+    /// 模型侧与 JSON Schema 共用的类型名。
+    pub fn name(self) -> &'static str {
+        match self {
+            ParamType::String => "string",
+            ParamType::Integer => "integer",
+            ParamType::Number => "number",
+            ParamType::Boolean => "boolean",
+            ParamType::Array => "array",
+        }
+    }
+
+    /// 该值是否属于这个类型（整数与数字分开判定，不做 1 == 1.0 的宽容）。
+    pub fn accepts(self, v: &serde_json::Value) -> bool {
+        match self {
+            ParamType::String => v.is_string(),
+            ParamType::Integer => v.is_i64() || v.is_u64(),
+            ParamType::Number => v.is_number(),
+            ParamType::Boolean => v.is_boolean(),
+            // 结构化载荷一律是数组（标量走 string/integer 那几种）。
+            ParamType::Array => v.is_array(),
+        }
+    }
+}
+
+/// 一个参数的声明。
+#[derive(Debug, Clone, Deserialize)]
+pub struct Param {
+    /// YAML 里的 `type`。
+    #[serde(rename = "type")]
+    pub ty: ParamType,
+    /// 必填（缺省 false）。
+    #[serde(default)]
+    pub required: bool,
+    /// 字符串参数不允许是空串（缺省 false）。
+    #[serde(default)]
+    pub non_empty: bool,
+    /// 给模型看的一句话说明。
+    #[serde(default)]
+    pub desc: String,
+    /// 缺省值（模型不写时用；也写进模型侧说明）。
+    #[serde(default)]
+    pub default: Option<serde_json::Value>,
+    /// 数值下界（含）。
+    #[serde(default)]
+    pub min: Option<f64>,
+    /// 数值上界（含）。
+    #[serde(default)]
+    pub max: Option<f64>,
+}
+
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
@@ -33,26 +98,11 @@ pub struct ToolDecl {
     pub desc: String,
     /// 参数契约（可选）：参数名 → 声明。
     #[serde(default)]
-    pub params: Option<BTreeMap<String, crate::capabilities::tools::api::Param>>,
+    pub params: Option<BTreeMap<String, Param>>,
     /// 这个工具**可并发执行**（缺省 false = 独占串行）：只读、无副作用的工具才该声明 true，
     /// 同一回复里的多个可并发调用会真的并发跑（结果仍按调用顺序回填）。
     #[serde(default)]
     pub parallel: bool,
-}
-
-impl ToolDecl {
-    /// 参数契约的声明形态（校验与渲染共用）；没声明参数 = None = 不校验。
-    pub fn schema(&self) -> Option<crate::capabilities::tools::api::ToolSchema> {
-        self.params
-            .as_ref()
-            .map(|p| crate::capabilities::tools::api::ToolSchema {
-                desc: self.desc.clone(),
-                params: Some(p.clone()),
-                parallel: self.parallel,
-                // 模块工具的能力由它的运行方式决定（外部命令），不在这一层声明。
-                capability: String::new(),
-            })
-    }
 }
 
 /// 运行能力声明的校验（纯逻辑；扫描模块时由适配层调用）：非法或重复 = 拒收并说明原因，不纠正。
@@ -73,22 +123,6 @@ pub fn check_runtimes(m: &ModuleManifest) -> Result<(), String> {
     Ok(())
 }
 
-/// 外部工具表的校验（纯逻辑；扫描模块时由适配层调用）：内置工具名是保留名，占用 = 拒收并说明原因。
-pub fn check_tools(m: &ModuleManifest) -> Result<(), String> {
-    for (name, decl) in &m.tools {
-        if crate::capabilities::tools::api::is_builtin(name) {
-            return Err(format!(
-                "tools 里的 {} 是核心内置工具名（保留名），模块不得占用",
-                name
-            ));
-        }
-        if decl.command.trim().is_empty() {
-            return Err(format!("tools 里的 {} 没写 command（启动命令）", name));
-        }
-    }
-    Ok(())
-}
-
 /// 一个已发现的模块 = 文件夹 + 清单。
 #[derive(Debug, Clone)]
 pub struct Module {
@@ -105,7 +139,7 @@ pub fn agent_system(
     agent: &str,
     modules: &[(String, String)],
     env: &str,
-    mode: crate::capabilities::registry::api::ToolMode,
+    mode: crate::capabilities::llm::api::ToolMode,
 ) -> String {
     let parts = modules
         .iter()
@@ -124,78 +158,16 @@ pub fn agent_system(
             (
                 "tool_calling",
                 match mode {
-                    crate::capabilities::registry::api::ToolMode::Native => {
+                    crate::capabilities::llm::api::ToolMode::Native => {
                         prompts.core.tool_calling_native.clone()
                     }
-                    crate::capabilities::registry::api::ToolMode::Envelope => {
+                    crate::capabilities::llm::api::ToolMode::Envelope => {
                         prompts.core.tool_calling_envelope.clone()
                     }
                 },
             ),
         ],
     )
-}
-
-/// 模块工具的参数契约（只列**声明了**参数的）：模型据此写信封里的 args；没声明的照旧不校验。
-pub fn module_tool_params(
-    prompts: &crate::capabilities::prompt::api::Prompts,
-    modules: &[Module],
-) -> String {
-    let texts = &prompts.core.tool_texts;
-    let mut sections: Vec<String> = Vec::new();
-    for m in modules {
-        for (name, decl) in &m.manifest.tools {
-            if let Some(schema) = decl.schema() {
-                sections.push(texts.render(
-                    &texts.module_tool_params_line,
-                    &[
-                        ("module", m.manifest.id.clone()),
-                        ("tool", name.clone()),
-                        ("signature", schema.render_for_prompt()),
-                    ],
-                ));
-            }
-        }
-    }
-    if sections.is_empty() {
-        return prompts.core.no_module_tool_params.clone();
-    }
-    format!(
-        "{}\n{}",
-        prompts.core.module_tool_params_header,
-        sections.join("\n")
-    )
-}
-
-/// 该 agent 的外部工具清单：**按模块分组，每行一个模块**（模块 id：工具名、…）。
-/// 模型据此在信封里写 module；都没有声明工具时用册子里的说法（用法不变）。
-pub fn module_tools(
-    prompts: &crate::capabilities::prompt::api::Prompts,
-    modules: &[Module],
-) -> String {
-    let texts = &prompts.core.tool_texts;
-    let lines: Vec<String> = modules
-        .iter()
-        .filter(|m| !m.manifest.tools.is_empty())
-        .map(|m| {
-            let names = m
-                .manifest
-                .tools
-                .keys()
-                .cloned()
-                .collect::<Vec<_>>()
-                .join(&texts.tool_list_separator);
-            texts.render(
-                &texts.module_tools_line,
-                &[("id", m.manifest.id.clone()), ("tools", names)],
-            )
-        })
-        .collect();
-    if lines.is_empty() {
-        prompts.core.no_module_tools.clone()
-    } else {
-        lines.join("\n")
-    }
 }
 
 /// 扫描结果：合法模块 + 拒收原因（校验，不是挑选——如实呈现）。

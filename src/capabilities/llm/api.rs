@@ -5,6 +5,7 @@ pub use crate::capabilities::llm::domain::envelope::{
 };
 pub use crate::capabilities::llm::domain::malformed::malformed_report;
 pub use crate::capabilities::llm::ports::{
-    truncated, BoxedChat, Chat, ChatGateway, Chunk, CompleteOpts, Completion, EnvelopeRepair,
-    LlmOpts, ModelCatalog, Msg, ProbeOutcome, RepairOutcome, ToolCall, ToolDecl,
+    truncated, BoxedChat, Channel, Chat, ChatGateway, Chunk, CompleteOpts, Completion,
+    EnvelopeRepair, LlmOpts, ModelCatalog, Msg, ProbeOutcome, RepairOutcome, ReplayReport,
+    ReplayShape, ToolCall, ToolDecl, ToolMode,
 };

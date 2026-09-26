@@ -60,10 +60,10 @@
 | `registry/domain/providers.rs` | 供应商/模型登记处内存形态与「模型 → 通道」解析（从 `core/providers.rs` 搬来） |
 | `registry/domain/agents.rs` | agent 登记处、代拟名单落地与名字校验（从 `core/agents.rs` 搬来） |
 | `llm/api.rs` | **入站能力面**：`Chat` / `ChatGateway` / `ModelCatalog` / `EnvelopeRepair` 与协议类型（`Msg` / `Completion` / `Chunk` / `ToolCall` / …）的对外名字 |
-| `llm/ports.rs` | 模型通道的端口族与协议类型（从 `core/ports.rs` 随能力搬出） |
+| `llm/ports.rs` | 模型通道的端口族与协议类型（从 `core/ports.rs` 随能力搬出）；**通道事实**：`Channel`（摊平的解析结果）、`ToolMode`、`ReplayShape` / `ReplayReport`（批次 15 从 `registry` 移来） |
 | `workspace/api.rs` | **入站能力面**：模块清单 / 运行包库 / 执行档位与计划 / 沙箱寻址的对外名字 |
 | `workspace/ports.rs` | `ModuleSource` / `PackageSource` / `Workspace`（从 `core/ports.rs` 随能力搬出） |
-| `workspace/domain/module.rs` | `module.yaml` 契约、`Roster`、`runtimes`/`tools` 校验、agent system 合成（从 `core/module.rs` 搬来） |
+| `workspace/domain/module.rs` | `module.yaml` 契约、`Roster`、`runtimes` 校验、agent system 合成、**参数声明形态** `Param` / `ParamType`（从 `core/module.rs` 搬来；批次 15 从 `tools` 移来） |
 | `workspace/domain/packages.rs` | `package.yaml` 契约与包库事实（从 `core/packages.rs` 搬来） |
 | `workspace/domain/exec.rs` | 执行档位（`ExecSpec`）与执行计划（`ExecPlan`）派生、虚拟机档诊断与承载判定（从 `core/exec.rs` 搬来） |
 | `workspace/domain/workspace.rs` | 工作区与沙箱的纯数据定义、寻址与越界判定（从 `core/workspace.rs` 搬来） |
@@ -72,11 +72,12 @@
 | `tools/domain/systool.rs` | 内置工具的放行、寻址、**按声明校验参数**、改动前的"读过"证据（`Observations`）、自由格式补丁的原子应用与回执文案 |
 | `tools/domain/patch.rs` | 补丁通道的**纯逻辑**：解析自由格式补丁与整行应用 |
 | `tools/domain/schema.rs` | 工具参数契约（**声明在文本层**）：解析/校验/两种渲染 |
+| `tools/domain/module_tools.rs` | **清单 → 工具面**：`ToolDecl::schema` / `check_tools` / `module_tools` / `module_tool_params`（批次 15 从 `workspace` 移来） |
 | `tools/domain/roles.rs` | 系统工具与**角色**表（`systools/` 两张表） |
 | `tools/domain/fence.rs` | 一次工具执行的围栏策略（纯数据） |
 | `session/api.rs` | **入站能力面**：`SessionParams` / `AgentSession` / `TurnRun` / 行与事件词汇 / 历史视图的对外名字 |
 | `session/ports.rs` | `HistoryStore`：会话历史的持久化（从 `core/ports.rs` 随能力搬出；`core/ports.rs` 随之消失） |
-| `session/domain/session.rs` | 会话状态与簿记 + 工具面 `MemberTools` / `ModuleTools`（从 `core/session.rs` 搬来） |
+| `session/domain/session.rs` | 会话状态与簿记 + 工具面 `MemberTools` / `ModuleTools`（从 `core/session.rs` 搬来）+ `env_block`（批次 15 从 `tools` 移来） |
 | `session/domain/history.rs` | 会话元信息与历史视图的内存形态（从 `core/history.rs` 搬来） |
 | `session/domain/events.rs` | 呈现侧契约：`SessionEvent` 与介入请求的词汇、转录行 `LineView`（从 `core/events.rs` 搬来） |
 | `session/domain/rewind.rs` | 回档的**纯行 / 事件算术**：`turn_of_line` / `last_line_within` / `truncate_events` / `cut_before_line` / `align_keep` / `line_reply_of` / `find_line_id`（从 `core/mod.rs` 搬来；**编排留在门面**） |

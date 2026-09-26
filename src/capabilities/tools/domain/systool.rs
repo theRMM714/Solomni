@@ -85,42 +85,6 @@ pub fn is_freeform(name: &str) -> bool {
     name == PATCH
 }
 
-/// **工作环境块**：提示词册 env 渲染（真实根目录 + 路径规矩）。**不含任何工具清单**——
-/// 能用哪些工具由核心按这一回合的身份现渲染后随回合注入（见 core::engine 的 MemberTools::tools_block）。
-pub fn env_block(
-    prompts: &Prompts,
-    p: &crate::capabilities::session::api::SessionParams,
-) -> String {
-    let texts = &prompts.core.tool_texts;
-    let module_roots = if p.module_dirs.is_empty() {
-        prompts.core.no_module_dirs.clone()
-    } else {
-        p.module_dirs
-            .iter()
-            .map(|(id, root)| {
-                texts.render(
-                    &texts.module_root_line,
-                    &[
-                        ("id", id.clone()),
-                        ("root", crate::kernel::path::slash(root)),
-                    ],
-                )
-            })
-            .collect::<Vec<_>>()
-            .join("\n")
-    };
-    prompts.render(
-        &prompts.core.env,
-        &[
-            ("work_name", p.work_name.clone()),
-            ("agent", p.agent.clone()),
-            ("work_root", crate::kernel::path::slash(&p.shared)),
-            ("sandbox_root", crate::kernel::path::slash(&p.private)),
-            ("module_roots", module_roots),
-        ],
-    )
-}
-
 /// 工具说明块的**素材**（装配期算一次，随回合注入）：patch 语法、模块工具清单、模块工具参数。
 /// 为什么在这里算：它们只与这个 agent 的沙箱与模块有关、与回合无关；而回合执行路径上拿不到提示词册。
 #[derive(Debug, Clone, Default)]
@@ -143,8 +107,10 @@ pub fn tool_notes(
                 ("sandbox_root", crate::kernel::path::slash(&sb.private)),
             ],
         ),
-        module_tools: crate::capabilities::workspace::api::module_tools(prompts, modules),
-        module_tool_params: crate::capabilities::workspace::api::module_tool_params(
+        module_tools: crate::capabilities::tools::domain::module_tools::module_tools(
+            prompts, modules,
+        ),
+        module_tool_params: crate::capabilities::tools::domain::module_tools::module_tool_params(
             prompts, modules,
         ),
     }

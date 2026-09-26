@@ -216,20 +216,19 @@ fn main() {
                     };
                     println!("  {}  {:<16} {}", verdict, s.name, s.detail);
                 }
-                let names =
-                    |want: fn(&capabilities::registry::api::ReplayShape) -> bool| -> String {
-                        let got: Vec<&str> = report
-                            .shapes
-                            .iter()
-                            .filter(|s| want(s))
-                            .map(|s| s.name.as_str())
-                            .collect();
-                        if got.is_empty() {
-                            "（无）".to_string()
-                        } else {
-                            got.join(" / ")
-                        }
-                    };
+                let names = |want: fn(&capabilities::llm::api::ReplayShape) -> bool| -> String {
+                    let got: Vec<&str> = report
+                        .shapes
+                        .iter()
+                        .filter(|s| want(s))
+                        .map(|s| s.name.as_str())
+                        .collect();
+                    if got.is_empty() {
+                        "（无）".to_string()
+                    } else {
+                        got.join(" / ")
+                    }
+                };
                 println!("[回放形状] 被接受的写法：{}", names(|s| s.accepted));
                 println!(
                     "[回放形状] 模型真的读到了历史（回答里带回本次编号）的写法：{}",

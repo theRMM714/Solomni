@@ -174,9 +174,12 @@ fn settings_store_double_roundtrips_and_propagates_failure() {
 fn model_catalog_double_lists_records_and_propagates_failure() {
     let c = FakeCatalog::new(vec!["m1".to_string(), "m2".to_string()]);
     let p = provider();
-    assert_eq!(c.list_models(&p).unwrap(), vec!["m1", "m2"]);
     assert_eq!(
-        c.list_models(&p).unwrap(),
+        c.list_models(&p.base_url, &p.api_key).unwrap(),
+        vec!["m1", "m2"]
+    );
+    assert_eq!(
+        c.list_models(&p.base_url, &p.api_key).unwrap(),
         vec!["m1", "m2"],
         "重复调用结果稳定"
     );
@@ -185,16 +188,19 @@ fn model_catalog_double_lists_records_and_propagates_failure() {
         2,
         "每次调用都要记录收到的通道"
     );
-    assert_eq!(c.seen.lock().expect("锁")[0].base_url, "http://test");
+    assert_eq!(c.seen.lock().expect("锁")[0], "http://test");
     assert!(
         FakeCatalog::new(Vec::new())
-            .list_models(&p)
+            .list_models(&p.base_url, &p.api_key)
             .unwrap()
             .is_empty(),
         "空结果不是错误"
     );
     let bad = FakeCatalog::new(vec!["m1".to_string()]).fail_with("发现失败");
-    assert_eq!(bad.list_models(&p).unwrap_err(), "发现失败");
+    assert_eq!(
+        bad.list_models(&p.base_url, &p.api_key).unwrap_err(),
+        "发现失败"
+    );
     assert!(
         bad.seen.lock().expect("锁").is_empty(),
         "失败路径不该留下'已发现'的假记录"

@@ -5,6 +5,5 @@ pub use crate::capabilities::registry::domain::agents::{
     Agents, RosterPick,
 };
 pub use crate::capabilities::registry::domain::providers::{
-    AppSettings, Channel, ModelEntry, ModelView, Provider, ProviderView, ReplayReport, ReplayShape,
-    Settings, ToolMode,
+    AppSettings, ModelEntry, ModelView, Provider, ProviderView, Settings,
 };

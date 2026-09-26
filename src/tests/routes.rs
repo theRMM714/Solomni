@@ -245,7 +245,7 @@ impl RegistryOps for FakeOps {
             api_model: "m".to_string(),
             provider: "p1".to_string(),
             note: String::new(),
-            tools: crate::capabilities::registry::api::ToolMode::Envelope,
+            tools: crate::capabilities::llm::api::ToolMode::Envelope,
             context: 32_000,
             is_core: true,
         }])
@@ -309,17 +309,17 @@ impl RegistryOps for FakeOps {
     fn probe_replay_shape(
         &self,
         _id: &str,
-    ) -> Result<crate::capabilities::registry::api::ReplayReport, String> {
+    ) -> Result<crate::capabilities::llm::api::ReplayReport, String> {
         self.guard()?;
-        Ok(crate::capabilities::registry::api::ReplayReport {
+        Ok(crate::capabilities::llm::api::ReplayReport {
             shapes: vec![
-                crate::capabilities::registry::api::ReplayShape {
+                crate::capabilities::llm::api::ReplayShape {
                     name: "baseline-text".to_string(),
                     accepted: true,
                     understood: true,
                     detail: "finish_reason=stop".to_string(),
                 },
-                crate::capabilities::registry::api::ReplayShape {
+                crate::capabilities::llm::api::ReplayShape {
                     name: "content-empty".to_string(),
                     accepted: false,
                     understood: false,

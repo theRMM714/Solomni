@@ -6,13 +6,5 @@
     "src/presentation/intent.rs -> crate::core",
     "src/presentation/web.rs -> crate::core"
   ],
-  "coreCycles": [
-    [
-      "capabilities/llm",
-      "capabilities/registry",
-      "capabilities/session",
-      "capabilities/tools",
-      "capabilities/workspace"
-    ]
-  ]
+  "coreCycles": []
 }

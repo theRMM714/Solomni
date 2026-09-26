@@ -385,10 +385,16 @@ prompt       ──▶ kernel
 kernel       ──▶ （无）
 ```
 
-**现状（批次 14 结束时）**：还差一处真环 `llm → registry → session → llm`——
-`llm` 要 `registry::api::Channel`（解析结果），`registry` 要 `session::api::AgentMeta`（代拟名单），
-`session` 要 `llm::api::BoxedChat`（对话通道）。**批次 15 的收口项**：把 `Channel` 从 `registry` 移到 `llm`
-（它是通道的配置事实），三条边随即变成 `registry → llm` + `session → llm`，环消。
+**现状（批次 15 结束时）：零环** ✔。四处切法：
+
+1. `ToolMode`（通道的工具调用形态）与回放探测结论（`ReplayShape` / `ReplayReport`）从 `registry` 移到 `llm`——
+   它们是「关于通道的事实」，随通道走；切掉 `session → registry` 与 `workspace → registry`；
+2. `Channel` 从 `registry` 移到 `llm` 并**摊平**（`base_url` + `api_key` + `model`，不再嵌 `registry::Provider`）；
+   `ModelCatalog::list_models` 改为收端点与密钥——切掉 `llm → registry`；
+3. `env_block`（渲染 `SessionParams`）从 `tools` 移到 `session`——切掉 `tools → session`；
+4. 「清单 → 工具面」的逻辑（`ToolDecl::schema` / `check_tools` / `module_tools` / `module_tool_params`）
+   从 `workspace` 移到 `tools`；参数**声明形态**（`Param` / `ParamType`）留在 `workspace`（它是 `module.yaml` 的字段）
+   ——切掉 `workspace → tools`。
 
 `rewind` 不再是能力（见 §3.6），`collab` 的改需求复用回档改为经 `core` 门面。
 
@@ -437,7 +443,7 @@ kernel       ──▶ （无）
 | **12** | **session 能力落位**：`capabilities/session/`（`session` + `history` + `events`）+ `HistoryStore`。**12a** 循环反转切掉 `engine ⇄ session`；**12b** 提取能力 | 11 | **已完成**（**反向边基线清空**——没有任何能力再依赖 `core`；环 7 → **5**，且 5 个节点全是能力、`core` 完全脱环；`core/ports.rs` 消失） |
 | **13** | **rewind 归位**：纯行 / 事件算术进 `capabilities/session/domain/rewind.rs`；`Core` 保留编排（`rewind` / `rewind_children` / `rebuild_session`） | 12 | **已完成**（`marks` 归属方案 A 照旧；无新增依赖边） |
 | **14** | **collab 能力落位**：`capabilities/collab/`（`collab` + `collab_state` + `engine`）。**执行顺序调整**：先做 14 再做 13——`rewind` 的回档重建要同时碰 `session` 与 `collab` 两侧，两边就位后才切得干净（已获用户同意） | 12 | **已完成**（环不变——`capabilities/collab` **不在环里**：没有任何它依赖的能力反过来依赖它；`core/` 只剩 `api.rs` + `mod.rs`） |
-| **15** | **presentation 收口 + 前端分区**：只 `use` 各业务 `api`；`app.js` 分区 | 14 | 未开始 |
+| **15** | **断环（已完成）**：`ToolMode`/回放结论与 `Channel` 归 `llm`、`env_block` 归 `session`、「清单→工具面」归 `tools` → **能力图零环**；**presentation 收口 + 前端分区**（未开始）：只 `use` 各业务 `api`；`app.js` 分区 | 14 | 断环 **已完成**；收口未开始 |
 
 **豁免清零判据**：`tests/dependency-baseline.json` 的**三个数组全部清空**（`reverse` / `presentation` / `coreCycles`），
 且 `Core` 这个类型不再存在。门禁对**新增**与**过期**都报失败，所以销账不靠自觉——

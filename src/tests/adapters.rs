@@ -14,11 +14,12 @@ use crate::adapters::model_catalog::HttpModelCatalog;
 use crate::adapters::sys_io::FsSysIo;
 use crate::adapters::yaml_prompts::YamlPrompts;
 use crate::adapters::yaml_settings::YamlSettingsStore;
+use crate::capabilities::llm::api::Channel;
 use crate::capabilities::llm::api::{
     ChatGateway, Chunk, CompleteOpts, ModelCatalog, Msg, ProbeOutcome,
 };
 use crate::capabilities::prompt::ports::PromptSource;
-use crate::capabilities::registry::api::{Channel, Provider, Settings};
+use crate::capabilities::registry::api::{Provider, Settings};
 use crate::capabilities::registry::ports::SettingsStore;
 use crate::capabilities::session::api::{AgentMeta, SessionMeta};
 use crate::capabilities::session::ports::HistoryStore;
@@ -230,7 +231,7 @@ fn yaml_settings_store_defaults_saves_and_reports_malformed_files() {
             api_model: "m".to_string(),
             provider: "p".to_string(),
             note: String::new(),
-            tools: crate::capabilities::registry::api::ToolMode::Envelope,
+            tools: crate::capabilities::llm::api::ToolMode::Envelope,
             context: 32_000,
         },
     );
@@ -297,7 +298,7 @@ fn yaml_settings_store_defaults_saves_and_reports_malformed_files() {
     let back = store.load().expect("合法形态必须能读回");
     assert_eq!(
         back.models.get("m").map(|m| m.tools),
-        Some(crate::capabilities::registry::api::ToolMode::Native),
+        Some(crate::capabilities::llm::api::ToolMode::Native),
         "注册表里的形态要原样读回"
     );
     let _ = std::fs::remove_dir_all(&root);
@@ -640,10 +641,8 @@ impl Mock {
 
     fn channel(&self, key: &str) -> Channel {
         Channel {
-            provider: Provider {
-                base_url: self.base.clone(),
-                api_key: key.to_string(),
-            },
+            base_url: self.base.clone(),
+            api_key: key.to_string(),
             model: "m".to_string(),
         }
     }
@@ -1144,9 +1143,9 @@ fn http_model_catalog_lists_models_and_rejects_broken_shapes() {
         "application/json",
         serde_json::json!({"data": [{"id": "m-a"}, {"id": "m-b"}]}).to_string(),
     )]);
-    let p = ok.channel("k").provider;
+    let c = ok.channel("k");
     let got = HttpModelCatalog::with_log(Arc::new(NoopLog), memo_new())
-        .list_models(&p)
+        .list_models(&c.base_url, &c.api_key)
         .expect("发现成功");
     assert_eq!(got, vec!["m-a", "m-b"]);
     assert!(ok.requests()[0].contains("/models"), "{:?}", ok.requests());
@@ -1156,9 +1155,9 @@ fn http_model_catalog_lists_models_and_rejects_broken_shapes() {
         (200, "application/json", "{\"foo\": 1}".to_string()),
         (200, "application/json", "{\"foo\": 1}".to_string()),
     ]);
-    let p2 = bad.channel("k").provider;
+    let c2 = bad.channel("k");
     let err = HttpModelCatalog::with_log(Arc::new(NoopLog), memo_new())
-        .list_models(&p2)
+        .list_models(&c2.base_url, &c2.api_key)
         .unwrap_err();
     assert!(!err.is_empty(), "形状不符必须报错：{}", err);
 
@@ -1167,9 +1166,9 @@ fn http_model_catalog_lists_models_and_rejects_broken_shapes() {
         (400, "application/json", "no".to_string()),
         (400, "application/json", "no".to_string()),
     ]);
-    let p3 = boom.channel("k").provider;
+    let c3 = boom.channel("k");
     let err2 = HttpModelCatalog::with_log(Arc::new(NoopLog), memo_new())
-        .list_models(&p3)
+        .list_models(&c3.base_url, &c3.api_key)
         .unwrap_err();
     assert!(err2.contains("400"), "{}", err2);
 }

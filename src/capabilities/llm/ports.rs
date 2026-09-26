@@ -1,8 +1,47 @@
 //! 模型通道的端口族：一次会话（`Chat`）、通道工厂（`ChatGateway`）、模型目录（`ModelCatalog`）、
 //! 信封修复（`EnvelopeRepair`），以及它们共用的协议类型（`Msg` / `Completion` / `Chunk` / …）。
 //! 策略（用哪条通道、要不要流式、给多少预算、声明哪些工具）在核心定；机制（HTTP、TLS、重试）在适配层。
+//!
+//! **归属**：`ToolMode`（通道的工具调用形态）与回放探测结论（`ReplayShape` / `ReplayReport`）都是
+//! 「关于通道的事实」——它们随通道走，不随登记处走（见 docs/architecture/refactor-plan.md §3.8）。
 
-use crate::capabilities::registry::api::{Channel, Provider};
+use serde::{Deserialize, Serialize};
+
+/// 一种"回放形状"的探测结论：**收了没有**（HTTP 层）+ **看懂了没有**（回答里带回了工具结果里的编号）
+/// + 供应商原话或回答片段。事实，不是猜测。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ReplayShape {
+    pub name: String,
+    pub accepted: bool,
+    pub understood: bool,
+    pub detail: String,
+}
+
+/// 回放形状探测报告：形状按探测顺序排列，第一项是基线（现在线上真在用的形状）。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ReplayReport {
+    pub shapes: Vec<ReplayShape>,
+}
+
+/// 该通道的工具调用形态（登记处里的事实；**缺省 envelope** = 任何供应商都能用的手写信封）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum ToolMode {
+    /// 手写信封：模型在正文里写 {"type":"tool",…}，核心解析。任何供应商都支持。
+    #[default]
+    Envelope,
+    /// 原生工具调用：参数走供应商的结构化槽位（需要该通道确实支持 function calling）。
+    Native,
+}
+
+/// 成品通道：登记处**解析后的结果**（端点 + 密钥 + 实际模型串），交给通道层建会话；
+/// 适配层不再做任何选择。**刻意摊平**（不嵌 `registry::Provider`）：嵌回去会让 `llm → registry` 成环。
+#[derive(Debug, Clone)]
+pub struct Channel {
+    pub base_url: String,
+    pub api_key: String,
+    pub model: String,
+}
 use crate::kernel::types::DEFAULT_LLM_TIMEOUT_SECS;
 
 /// 流式片段：一次调用的起点 / 正文 / 思维链。
@@ -204,7 +243,8 @@ pub fn truncated(finish: &str) -> bool {
 
 /// 供应商模型目录端口：列出一条通道当前可用的模型名（发现机制在适配层）。
 pub trait ModelCatalog {
-    fn list_models(&self, provider: &Provider) -> Result<Vec<String>, String>;
+    /// 按**端点与密钥**列一条通道当前可用的模型名（不需要已选定的模型）。
+    fn list_models(&self, base_url: &str, api_key: &str) -> Result<Vec<String>, String>;
 }
 
 /// 探测结论：这条通道到底支不支持原生工具调用（**事实**，不是猜测；三种都如实回报）。
@@ -237,7 +277,7 @@ pub trait ChatGateway {
     fn probe_replay(
         &self,
         _channel: &Channel,
-    ) -> Result<crate::capabilities::registry::api::ReplayReport, String> {
+    ) -> Result<crate::capabilities::llm::api::ReplayReport, String> {
         Err("这条通道没有真实供应商，测不了回放形状".to_string())
     }
 }

@@ -253,7 +253,7 @@ pub trait RegistryOps: Send + Sync {
     fn probe_replay_shape(
         &self,
         id: &str,
-    ) -> Result<crate::capabilities::registry::api::ReplayReport, String>;
+    ) -> Result<crate::capabilities::llm::api::ReplayReport, String>;
 }
 
 /// 历史能力：落盘会话的列表 / 打开 / 删除，以及在世会话与历史合并后的总览。
@@ -1205,7 +1205,7 @@ impl RegistryOps for CoreHandle {
     fn probe_replay_shape(
         &self,
         id: &str,
-    ) -> Result<crate::capabilities::registry::api::ReplayReport, String> {
+    ) -> Result<crate::capabilities::llm::api::ReplayReport, String> {
         let id = id.to_string();
         self.call(move |core| core.probe_replay_shape(&id))
     }

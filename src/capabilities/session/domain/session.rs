@@ -27,7 +27,7 @@ pub struct ModuleTools {
 pub struct MemberTools {
     /// 这条通道的工具调用形态：envelope = 手写信封（任何供应商都能用）；native = 供应商结构化槽位。
     /// **两套互斥**：native 就不解析信封、正文里的信封也不执行（但如实记失败行）。
-    pub mode: crate::capabilities::registry::api::ToolMode,
+    pub mode: crate::capabilities::llm::api::ToolMode,
     /// 模块 id → 该模块的（目录, 工具表）；内置 read/write 不走这里。
     pub modules: BTreeMap<String, ModuleTools>,
     /// 本次会话的观察账本（哪些文件完整读过 / 由核心写过）：改动前的证据（见 crate::capabilities::tools::api::Observations）。
@@ -123,9 +123,9 @@ impl SessionParams {
     pub fn identity(
         &self,
         prompts: &crate::capabilities::prompt::api::Prompts,
-        mode: crate::capabilities::registry::api::ToolMode,
+        mode: crate::capabilities::llm::api::ToolMode,
     ) -> String {
-        let env = crate::capabilities::tools::api::env_block(prompts, self);
+        let env = env_block(prompts, self);
         crate::capabilities::workspace::api::agent_system(
             prompts,
             &self.agent,
@@ -134,6 +134,41 @@ impl SessionParams {
             mode,
         )
     }
+}
+
+/// **工作环境块**：提示词册 env 渲染（真实根目录 + 路径规矩）。**不含任何工具清单**——
+/// 能用哪些工具由核心按这一回合的身份现渲染后随回合注入（见 collab 的 `MemberTools::tools_block`）。
+///
+/// 归属：它渲染的就是 `SessionParams`，所以随会话走（留在 `tools` 会让 `tools → session` 成环）。
+pub fn env_block(prompts: &crate::capabilities::prompt::api::Prompts, p: &SessionParams) -> String {
+    let texts = &prompts.core.tool_texts;
+    let module_roots = if p.module_dirs.is_empty() {
+        prompts.core.no_module_dirs.clone()
+    } else {
+        p.module_dirs
+            .iter()
+            .map(|(id, root)| {
+                texts.render(
+                    &texts.module_root_line,
+                    &[
+                        ("id", id.clone()),
+                        ("root", crate::kernel::path::slash(root)),
+                    ],
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    prompts.render(
+        &prompts.core.env,
+        &[
+            ("work_name", p.work_name.clone()),
+            ("agent", p.agent.clone()),
+            ("work_root", crate::kernel::path::slash(&p.shared)),
+            ("sandbox_root", crate::kernel::path::slash(&p.private)),
+            ("module_roots", module_roots),
+        ],
+    )
 }
 
 /// 跑**一个回合**要的那几样（单 agent / 节点 / 讨论成员共用同一条轮循环，差别只在这里）：
@@ -271,12 +306,12 @@ impl AgentSession {
     }
 
     /// 这条会话**正在用**的工具调用形态（身份块里的调用约定按它现渲染）。
-    pub fn tool_mode(&self) -> crate::capabilities::registry::api::ToolMode {
+    pub fn tool_mode(&self) -> crate::capabilities::llm::api::ToolMode {
         self.tools.as_ref().map(|t| t.mode).unwrap_or_default()
     }
 
     /// 改形态：**只改这一格**（登记处派生出来的参数），不重建会话。
-    pub fn set_tool_mode(&mut self, mode: crate::capabilities::registry::api::ToolMode) {
+    pub fn set_tool_mode(&mut self, mode: crate::capabilities::llm::api::ToolMode) {
         if let Some(t) = self.tools.as_mut() {
             t.mode = mode;
         }

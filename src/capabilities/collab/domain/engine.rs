@@ -478,7 +478,7 @@ pub struct Member {
     /// 会话参数：身份块由它**每回合现渲染**（不给成员存一份渲染好的文本）。
     pub params: crate::capabilities::session::api::SessionParams,
     /// 该席位的通道形态（登记处派生）：身份块里的调用约定按它渲染。
-    pub mode: crate::capabilities::registry::api::ToolMode,
+    pub mode: crate::capabilities::llm::api::ToolMode,
     /// 内存通道：**只有测试用**（生产里回合跑在各自的 agent 会话里，见 session-model.md 二之二）。
     #[cfg(test)]
     pub chat: Option<BoxedChat>,
@@ -493,7 +493,7 @@ impl Member {
     pub fn plain(
         id: &str,
         params: crate::capabilities::session::api::SessionParams,
-        mode: crate::capabilities::registry::api::ToolMode,
+        mode: crate::capabilities::llm::api::ToolMode,
     ) -> Member {
         Member {
             id: id.to_string(),
@@ -512,7 +512,7 @@ impl Member {
     pub fn new(
         id: &str,
         params: crate::capabilities::session::api::SessionParams,
-        mode: crate::capabilities::registry::api::ToolMode,
+        mode: crate::capabilities::llm::api::ToolMode,
         chat: BoxedChat,
     ) -> Member {
         Member {
@@ -1178,7 +1178,7 @@ impl Discussion {
     pub fn synthesize(
         &self,
         core_chat: &mut dyn Chat,
-        mode: crate::capabilities::registry::api::ToolMode,
+        mode: crate::capabilities::llm::api::ToolMode,
         verify: Option<&mut MemberTools>,
         // 核心这一轮的行（工具行 + 思维链 + 正文）推给谁：落不落由那个会话模块定。
         sink: &mut dyn FnMut(SessionEvent),
@@ -1347,7 +1347,7 @@ impl Execution {
         prompts: &Prompts,
         systools: &crate::capabilities::tools::api::SystemTools,
         llm: crate::capabilities::llm::api::LlmOpts,
-        mode: crate::capabilities::registry::api::ToolMode,
+        mode: crate::capabilities::llm::api::ToolMode,
         verify: Option<&mut MemberTools>,
         // 核心这一轮的行推给谁（总验收也要能看到它在核对什么）。
         sink: &mut dyn FnMut(SessionEvent),
@@ -1519,7 +1519,7 @@ pub fn core_operation(
     systools: &crate::capabilities::tools::api::SystemTools,
     role: &str,
     tool: &str,
-    mode: crate::capabilities::registry::api::ToolMode,
+    mode: crate::capabilities::llm::api::ToolMode,
     chat: &mut dyn Chat,
     msgs: &[Msg],
     opts: crate::capabilities::llm::api::CompleteOpts<'static>,
@@ -1534,7 +1534,7 @@ pub fn core_operation(
     let face_ids: Vec<String> = face_rows.iter().map(|(id, _)| id.to_string()).collect();
     let mut opts = opts;
     let decls: Vec<crate::capabilities::llm::api::ToolDecl> =
-        if mode == crate::capabilities::registry::api::ToolMode::Native {
+        if mode == crate::capabilities::llm::api::ToolMode::Native {
             face_rows.iter().map(|(id, s)| s.decl(id)).collect()
         } else {
             Vec::new()
@@ -1633,21 +1633,19 @@ pub fn core_operation(
             return Ok(payload);
         }
         // 没有目标调用：看它请求的是不是**该角色拿得到的只读核实工具**（read / search）。
-        let calls: Vec<(String, String, String)> = if mode
-            == crate::capabilities::registry::api::ToolMode::Native
-            && !done.calls.is_empty()
-        {
-            done.calls
-                .iter()
-                .map(|c| (c.id.clone(), c.name.clone(), c.args_json.clone()))
-                .collect()
-        } else {
-            parsed
-                .tools
-                .iter()
-                .map(|t| (String::new(), t.name.clone(), t.args_json.clone()))
-                .collect()
-        };
+        let calls: Vec<(String, String, String)> =
+            if mode == crate::capabilities::llm::api::ToolMode::Native && !done.calls.is_empty() {
+                done.calls
+                    .iter()
+                    .map(|c| (c.id.clone(), c.name.clone(), c.args_json.clone()))
+                    .collect()
+            } else {
+                parsed
+                    .tools
+                    .iter()
+                    .map(|t| (String::new(), t.name.clone(), t.args_json.clone()))
+                    .collect()
+            };
         let ctx = match verify.as_deref_mut() {
             Some(c) => c,
             None => {
@@ -1746,12 +1744,12 @@ pub fn assemble(
 /// - 这条回复的调用都带合法原生 id 且当前走原生通道 → assistant(正文 + tool_calls) + 每条调用一条 role=tool；
 /// - 其余（手写信封、原生通道里写坏的调用、切换形态后的旧消息）→ assistant(正文) + 结果当用户消息。
 pub fn reply_msgs(
-    mode: crate::capabilities::registry::api::ToolMode,
+    mode: crate::capabilities::llm::api::ToolMode,
     raw: &str,
     calls: &[ToolCallView],
     texts: &crate::capabilities::prompt::api::ToolTexts,
 ) -> Vec<Msg> {
-    let protocol = mode == crate::capabilities::registry::api::ToolMode::Native
+    let protocol = mode == crate::capabilities::llm::api::ToolMode::Native
         && !calls.is_empty()
         && calls.iter().all(|c| !c.call_id.is_empty());
     let mut out: Vec<Msg> = Vec::with_capacity(calls.len() + 1);
@@ -1926,13 +1924,13 @@ pub fn converse_with(
         };
         // 形态与工具声明面：由本成员的通道形态决定（envelope = 不声明，走手写信封；native = 声明本成员的工具）
         let (mode, decls) = match tools.as_deref_mut() {
-            Some(ctx) if ctx.mode == crate::capabilities::registry::api::ToolMode::Native => {
+            Some(ctx) if ctx.mode == crate::capabilities::llm::api::ToolMode::Native => {
                 let mode = ctx.mode;
                 (mode, tool_decls(ctx))
             }
             Some(ctx) => (ctx.mode, ToolDecls::default()),
             None => (
-                crate::capabilities::registry::api::ToolMode::Envelope,
+                crate::capabilities::llm::api::ToolMode::Envelope,
                 ToolDecls::default(),
             ),
         };
@@ -2040,7 +2038,7 @@ pub fn converse_with(
                 }
             };
             let said: Option<(Verb, String, bool)> =
-                if mode == crate::capabilities::registry::api::ToolMode::Native {
+                if mode == crate::capabilities::llm::api::ToolMode::Native {
                     calls
                         .iter()
                         .find_map(|c| verb_of(&c.name).map(|v| (v, arg_text(&c.args_json), false)))
@@ -2070,7 +2068,7 @@ pub fn converse_with(
             }
         }
         // ── 原生通道：工具调用来自供应商的结构化槽位（不解析信封）──
-        if mode == crate::capabilities::registry::api::ToolMode::Native {
+        if mode == crate::capabilities::llm::api::ToolMode::Native {
             if let Some(ctx) = tools.as_deref_mut() {
                 // ① 有原生调用：逐个执行，各成一条工具行；助手消息如实记下"它调了什么"（回放与下一轮都看得到）
                 if !calls.is_empty() {

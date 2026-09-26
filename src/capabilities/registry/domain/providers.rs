@@ -3,41 +3,15 @@
 //! 两者分开保存（机制在适配层的两个文件）；密钥只存在于登记处与核心发起的出站调用。
 //! 「模型 → 供应商」的绑定只对本产品可见；模块与会话只持模型 id 引用。
 
+use crate::capabilities::llm::api::{Channel, ToolMode};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-
-/// 一种"回放形状"的探测结论：**收了没有**（HTTP 层）+ **看懂了没有**（回答里带回了工具结果里的编号）
-/// + 供应商原话或回答片段。事实，不是猜测。
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct ReplayShape {
-    pub name: String,
-    pub accepted: bool,
-    pub understood: bool,
-    pub detail: String,
-}
-
-/// 回放形状探测报告：形状按探测顺序排列，第一项是基线（现在线上真在用的形状）。
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct ReplayReport {
-    pub shapes: Vec<ReplayShape>,
-}
 
 /// 一条供应商通道（端点 + 密钥）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Provider {
     pub base_url: String,
     pub api_key: String,
-}
-
-/// 该通道的工具调用形态（登记处里的事实；**缺省 envelope** = 任何供应商都能用的手写信封）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "lowercase")]
-pub enum ToolMode {
-    /// 手写信封：模型在正文里写 {"type":"tool",…}，核心解析。任何供应商都支持。
-    #[default]
-    Envelope,
-    /// 原生工具调用：参数走供应商的结构化槽位（需要该通道确实支持 function calling）。
-    Native,
 }
 
 /// 一条可用模型：展示名 + 实际模型串 + 所属供应商 + 能力说明 + 工具调用形态。
@@ -146,13 +120,6 @@ pub struct Settings {
     pub agents: crate::capabilities::registry::domain::agents::Agents,
 }
 
-/// 成品通道：core 解析后交适配层建会话；适配层不再做任何选择。
-#[derive(Debug, Clone)]
-pub struct Channel {
-    pub provider: Provider,
-    pub model: String,
-}
-
 impl Settings {
     /// 模型 id → 成品通道；模型或供应商缺失 = 报错（不猜测回退）。
     pub fn resolve(&self, model_id: &str) -> Result<Channel, String> {
@@ -164,8 +131,11 @@ impl Settings {
             .providers
             .get(&m.provider)
             .ok_or_else(|| format!("模型 {} 引用的供应商不存在：{}", model_id, m.provider))?;
+        // 摊平成通道层的形态（见 `capabilities/llm/ports.rs` 的 `Channel`）：
+        // 它是**解析结果**，不再嵌 `Provider`——嵌回去会让 `llm → registry` 成环。
         Ok(Channel {
-            provider: p.clone(),
+            base_url: p.base_url.clone(),
+            api_key: p.api_key.clone(),
             model: m.api_model.clone(),
         })
     }

@@ -4,11 +4,12 @@
 use super::doubles::*;
 use crate::adapters::fake_chat::FakeChat;
 use crate::capabilities::collab::domain::engine::{Discussion, Member, TurnOut, MAX_ROUNDS};
+use crate::capabilities::llm::api::Channel;
 use crate::capabilities::llm::api::{
     BoxedChat, Chat, ChatGateway, Chunk, CompleteOpts, Completion, Msg,
 };
 use crate::capabilities::prompt::domain::prompt::render;
-use crate::capabilities::registry::api::{Channel, ModelEntry, Provider, Settings};
+use crate::capabilities::registry::api::{ModelEntry, Provider, Settings};
 use crate::capabilities::session::api::Live;
 use crate::capabilities::session::api::{AgentMeta, SessionMeta};
 use crate::capabilities::session::api::{MemberTools, ModuleTools};
@@ -130,7 +131,7 @@ pub(crate) fn settings_resolves_model_to_channel() {
             api_model: "real-model".into(),
             provider: "p".into(),
             note: String::new(),
-            tools: crate::capabilities::registry::api::ToolMode::Native,
+            tools: crate::capabilities::llm::api::ToolMode::Native,
             context: 32_000,
         },
     );
@@ -140,7 +141,7 @@ pub(crate) fn settings_resolves_model_to_channel() {
         ch.model, "real-model",
         "发给供应商的是 api_model，不是展示名"
     );
-    assert_eq!(ch.provider.base_url, "http://x");
+    assert_eq!(ch.base_url, "http://x");
     // 缺省 = envelope（手写信封：任何供应商都能用）；模型视图也如实带出来
     s.models.insert(
         "d".into(),
@@ -159,7 +160,7 @@ pub(crate) fn settings_resolves_model_to_channel() {
             .iter()
             .find(|v| v.id == "m")
             .map(|v| v.tools),
-        Some(crate::capabilities::registry::api::ToolMode::Native),
+        Some(crate::capabilities::llm::api::ToolMode::Native),
         "模型视图要带上形态（前端显示与探测结果都靠它）"
     );
     assert!(s.resolve("ghost").is_err(), "未知模型必须报错");
@@ -223,7 +224,7 @@ pub(crate) fn model_guards_core_default_and_discovery_uses_stored_provider() {
         core.discover_models("p2").unwrap(),
         vec!["m-a".to_string(), "m-b".to_string()]
     );
-    assert_eq!(catalog.seen.lock().expect("锁")[0].base_url, "http://x");
+    assert_eq!(catalog.seen.lock().expect("锁")[0], "http://x");
     assert!(core
         .discover_models("ghost")
         .unwrap_err()
@@ -1270,7 +1271,7 @@ fn opts_discussion(
     let members = vec![Member::new(
         "m0",
         crate::tests::doubles::test_params("m0"),
-        crate::capabilities::registry::api::ToolMode::Envelope,
+        crate::capabilities::llm::api::ToolMode::Envelope,
         Box::new(OptsChat {
             seen: Arc::clone(&seen),
             results,
@@ -1374,7 +1375,7 @@ pub(crate) fn scripted_discussion(scripts: Vec<Vec<String>>, allow: bool) -> Dis
             Member::new(
                 &id,
                 crate::tests::doubles::test_params(&id),
-                crate::capabilities::registry::api::ToolMode::Envelope,
+                crate::capabilities::llm::api::ToolMode::Envelope,
                 scripted(s),
             )
         })
@@ -2059,7 +2060,7 @@ pub(crate) fn prose_without_an_envelope_is_not_a_statement() {
     let members = vec![Member::new(
         "m0",
         crate::tests::doubles::test_params("m0"),
-        crate::capabilities::registry::api::ToolMode::Envelope,
+        crate::capabilities::llm::api::ToolMode::Envelope,
         scripted(vec!["我觉得可以".into()]),
     )];
     let mut disc = Discussion::new(
@@ -2124,7 +2125,7 @@ pub(crate) fn execution_review_pass_and_fail_paths() {
     let mut members = vec![Member::new(
         "m0",
         crate::tests::doubles::test_params("m0"),
-        crate::capabilities::registry::api::ToolMode::Envelope,
+        crate::capabilities::llm::api::ToolMode::Envelope,
         scripted(vec!["{\"type\":\"say\",\"text\":\"汇报内容\"}".into()]),
     )];
     let ran = run_execution(members.as_mut_slice(), "任务A", &prompts);
@@ -2178,7 +2179,7 @@ pub(crate) fn review_parse_failure_is_conservative_fail() {
     let mut members = vec![Member::new(
         "m0",
         crate::tests::doubles::test_params("m0"),
-        crate::capabilities::registry::api::ToolMode::Envelope,
+        crate::capabilities::llm::api::ToolMode::Envelope,
         scripted(vec!["{\"type\":\"say\",\"text\":\"x\"}".into()]),
     )];
     let mut exec = crate::capabilities::collab::domain::engine::Execution::new();
@@ -3147,12 +3148,12 @@ pub(crate) fn member_with_tools(
     let mut m = Member::new(
         id,
         crate::tests::doubles::test_params(id),
-        crate::capabilities::registry::api::ToolMode::Envelope,
+        crate::capabilities::llm::api::ToolMode::Envelope,
         scripted(script),
     );
     // 该路径走模块声明的外部命令（grep）：空沙箱 + 内存 IO，内置工具不参与。
     m.tools = Some(MemberTools {
-        mode: crate::capabilities::registry::api::ToolMode::Envelope,
+        mode: crate::capabilities::llm::api::ToolMode::Envelope,
         modules,
         observations: crate::capabilities::tools::api::Observations::default(),
         repair: Arc::new(NoRepair),
@@ -4666,7 +4667,7 @@ pub(crate) fn module_tool_params_are_declared_in_the_manifest_and_enforced_by_co
         "m0",
         &[(mod_m0.manifest.id.clone(), mod_m0.manifest.system.clone())],
         "工具说明",
-        crate::capabilities::registry::api::ToolMode::Envelope,
+        crate::capabilities::llm::api::ToolMode::Envelope,
     );
     // 模块工具清单与参数**不进系统提示**：随回合注入（能不能用模块工具由角色表的 module_tools 决定）。
     assert!(
@@ -5625,7 +5626,7 @@ impl ChatGateway for ProbeGateway {
 
 #[test]
 pub(crate) fn a_probe_writes_back_only_conclusive_results() {
-    use crate::capabilities::registry::api::ToolMode;
+    use crate::capabilities::llm::api::ToolMode;
     use crate::core::api::ProbeOutcome;
     let fresh = |outcome: ProbeOutcome| {
         let mut core = core_with_gateway(
@@ -5762,7 +5763,7 @@ pub(crate) fn native_member(
     let mut m = Member::new(
         id,
         crate::tests::doubles::test_params(id),
-        crate::capabilities::registry::api::ToolMode::Native,
+        crate::capabilities::llm::api::ToolMode::Native,
         chat,
     );
     let mut modules = BTreeMap::new();
@@ -5777,7 +5778,7 @@ pub(crate) fn native_member(
     );
     let sb = test_sandbox(id, &[]);
     m.tools = Some(MemberTools {
-        mode: crate::capabilities::registry::api::ToolMode::Native,
+        mode: crate::capabilities::llm::api::ToolMode::Native,
         modules,
         observations: crate::capabilities::tools::api::Observations::default(),
         repair: Arc::new(NoRepair),
@@ -6920,7 +6921,7 @@ pub(crate) fn builtin_tool_book_is_the_one_source_of_names_and_paths() {
     }
     // 工作环境块：**只有路径与规矩，没有工具清单**（总表只留在核心手里当判据）。
     let sb = test_sandbox("a1", &[]);
-    let env = crate::capabilities::tools::api::env_block(
+    let env = crate::capabilities::session::domain::session::env_block(
         &prompts,
         &crate::capabilities::session::api::SessionParams::from_workspace("a1", &sb, &[]),
     );
@@ -7100,14 +7101,14 @@ pub(crate) fn module_tools_may_not_take_builtin_names() {
         .tools
         .insert("read_txt".to_string(), decl("python tools/read_txt.py"));
     assert!(
-        crate::capabilities::workspace::api::check_tools(&m.manifest).is_ok(),
+        crate::capabilities::tools::api::check_tools(&m.manifest).is_ok(),
         "普通工具名可用"
     );
     for name in ["read", "write", "search"] {
         m.manifest
             .tools
             .insert(name.to_string(), decl("python tools/x.py"));
-        let why = crate::capabilities::workspace::api::check_tools(&m.manifest).unwrap_err();
+        let why = crate::capabilities::tools::api::check_tools(&m.manifest).unwrap_err();
         assert!(why.contains("保留名"), "内置工具名要拒收：{}", why);
         m.manifest.tools.remove(name);
     }
@@ -8482,7 +8483,7 @@ pub(crate) fn core_operations_require_a_tool_call_not_body_json() {
     let schema = systools.tools.get("plan").expect("plan 该在工具总表里");
     assert_eq!(
         schema.params.as_ref().expect("有参数")["nodes"].ty,
-        crate::capabilities::tools::domain::schema::ParamType::Array,
+        crate::capabilities::workspace::api::ParamType::Array,
         "任务链节点表是数组载荷"
     );
 }
@@ -8498,7 +8499,7 @@ pub(crate) fn core_operation_runs_readonly_verification_before_the_op() {
     let sb = test_sandbox("核心", &[]);
     let io_port: Arc<dyn crate::capabilities::tools::ports::SysIo + Send + Sync> = io.clone();
     let mut verify = MemberTools {
-        mode: crate::capabilities::registry::api::ToolMode::Envelope,
+        mode: crate::capabilities::llm::api::ToolMode::Envelope,
         modules: BTreeMap::new(),
         observations: crate::capabilities::tools::api::Observations::default(),
         repair: Arc::new(NoRepair),
@@ -8531,7 +8532,7 @@ pub(crate) fn core_operation_runs_readonly_verification_before_the_op() {
         &test_systools(),
         "planner",
         "plan",
-        crate::capabilities::registry::api::ToolMode::Envelope,
+        crate::capabilities::llm::api::ToolMode::Envelope,
         &mut chat,
         &[crate::capabilities::llm::api::Msg::user("出方案")],
         crate::capabilities::llm::api::CompleteOpts::plain(false),
@@ -8566,7 +8567,7 @@ pub(crate) fn body_json_is_not_a_core_operation() {
         &test_systools(),
         "planner",
         "plan",
-        crate::capabilities::registry::api::ToolMode::Envelope,
+        crate::capabilities::llm::api::ToolMode::Envelope,
         chat.as_mut(),
         &[crate::capabilities::llm::api::Msg::user("出方案")],
         crate::capabilities::llm::api::CompleteOpts::plain(false),

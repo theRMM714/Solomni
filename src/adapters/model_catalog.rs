@@ -5,7 +5,6 @@
 use super::endpoint::{memo_get, memo_set, models_candidates, resolve_candidates, Attempt, Memo};
 use super::http_agent::{finish_request, redact};
 use crate::capabilities::llm::api::ModelCatalog;
-use crate::capabilities::registry::api::Provider;
 use crate::kernel::log::Log;
 use std::sync::Arc;
 
@@ -22,14 +21,14 @@ impl HttpModelCatalog {
     }
 
     /// 单次 GET：请求与解析都在此；失败按「可换候选 / 立即报」归类。
-    fn fetch(&self, url: &str, provider: &Provider) -> Attempt<Vec<String>> {
+    fn fetch(&self, url: &str, api_key: &str) -> Attempt<Vec<String>> {
         let agent = super::http_agent::agent(10, 30);
         let resp = match finish_request(
             agent
                 .get(url)
-                .header("Authorization", &format!("Bearer {}", provider.api_key))
+                .header("Authorization", &format!("Bearer {}", api_key))
                 .call(),
-            &provider.api_key,
+            api_key,
         ) {
             Ok(r) => r,
             Err((msg, true)) => return Attempt::Retry(msg),
@@ -38,7 +37,7 @@ impl HttpModelCatalog {
         let mut got = resp.into_body();
         let body = match got.read_to_string() {
             Ok(t) => t,
-            Err(e) => return Attempt::Retry(redact(e.to_string(), &provider.api_key)),
+            Err(e) => return Attempt::Retry(redact(e.to_string(), api_key)),
         };
         match parse_models(&body) {
             Ok(models) => Attempt::Ok(models),
@@ -49,15 +48,15 @@ impl HttpModelCatalog {
 }
 
 impl ModelCatalog for HttpModelCatalog {
-    fn list_models(&self, provider: &Provider) -> Result<Vec<String>, String> {
-        let memo_key = format!("{}|models", provider.base_url);
+    fn list_models(&self, base_url: &str, api_key: &str) -> Result<Vec<String>, String> {
+        let memo_key = format!("{}|models", base_url);
         let candidates = match memo_get(&self.memo, &memo_key) {
             Some(url) => vec![url],
-            None => models_candidates(&provider.base_url),
+            None => models_candidates(base_url),
         };
         let outcome = resolve_candidates(
             &candidates,
-            |url| self.fetch(url, provider),
+            |url| self.fetch(url, api_key),
             |url, err, next| {
                 self.log.warn(
                     "model_catalog::list_models",
@@ -73,7 +72,7 @@ impl ModelCatalog for HttpModelCatalog {
             Err(e) => {
                 self.log.error(
                     "model_catalog::list_models",
-                    &format!("供应商 {} 全部候选端点失败：{}", provider.base_url, e),
+                    &format!("供应商 {} 全部候选端点失败：{}", base_url, e),
                 );
                 Err(e)
             }

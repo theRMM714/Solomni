@@ -8,12 +8,13 @@
 
 use super::core::SilentRunner;
 use crate::adapters::fake_chat::FakeChat;
+use crate::capabilities::llm::api::Channel;
 use crate::capabilities::llm::api::{
     BoxedChat, Chat, ChatGateway, Chunk, CompleteOpts, Completion, ModelCatalog, Msg,
 };
 use crate::capabilities::prompt::api::Prompts;
 use crate::capabilities::prompt::ports::PromptSource;
-use crate::capabilities::registry::api::{Channel, ModelEntry, Provider, Settings};
+use crate::capabilities::registry::api::{ModelEntry, Provider, Settings};
 use crate::capabilities::registry::ports::SettingsStore;
 use crate::capabilities::session::api::Live;
 use crate::capabilities::session::api::{HistoryView, SessionMeta};
@@ -55,7 +56,7 @@ impl InMemorySettings {
                 api_model: "m".to_string(),
                 provider: "p".to_string(),
                 note: String::new(),
-                tools: crate::capabilities::registry::api::ToolMode::Envelope,
+                tools: crate::capabilities::llm::api::ToolMode::Envelope,
                 context: 32_000,
             },
         );
@@ -584,7 +585,7 @@ impl HistoryStore for InMemoryHistory {
 /// 内存模型目录：回放固定模型名，并记录收到的 Provider（断言编辑期密钥复用）。
 pub(crate) struct FakeCatalog {
     models: Vec<String>,
-    pub(crate) seen: Mutex<Vec<Provider>>,
+    pub(crate) seen: Mutex<Vec<String>>,
     fail: Option<String>,
 }
 
@@ -605,11 +606,11 @@ impl FakeCatalog {
 }
 
 impl ModelCatalog for FakeCatalog {
-    fn list_models(&self, provider: &Provider) -> Result<Vec<String>, String> {
+    fn list_models(&self, base_url: &str, _api_key: &str) -> Result<Vec<String>, String> {
         if let Some(m) = &self.fail {
             return Err(m.clone());
         }
-        self.seen.lock().expect("锁").push(provider.clone());
+        self.seen.lock().expect("锁").push(base_url.to_string());
         Ok(self.models.clone())
     }
 }

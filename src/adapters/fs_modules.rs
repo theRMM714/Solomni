@@ -61,7 +61,7 @@ fn scan_dir(modules_dir: &Path) -> Roster {
                     rejected.push(format!("{}: {}", dir_name, why));
                     continue;
                 }
-                if let Err(why) = crate::capabilities::workspace::api::check_tools(&m) {
+                if let Err(why) = crate::capabilities::tools::api::check_tools(&m) {
                     rejected.push(format!("{}: {}", dir_name, why));
                     continue;
                 }

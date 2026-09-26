@@ -44,7 +44,7 @@ presentation ──▶ core ◀── adapters
 | `Chat`（`capabilities/llm/ports.rs`） | 一次模型会话：收消息列表（可带**工具声明**）回 `Completion`（正文 + 结束原因 + 原生工具调用）；`on` 逐片回调，返回 `false` 即要求中止 | `HttpChat`（测试 `FakeChat`） |
 | `ChatGateway` | 建通道（含核心通道与回落告知）；**不选择**模型；实测一条通道支不支持原生工具调用。**已随能力搬出**：定义在 `capabilities/llm/ports.rs` | `HttpGateway`（无可用模型时回落 `DemoGateway`；探测发两条最小请求对比） |
 | `SettingsStore` | 登记处持久化（providers / models / settings / agents 四个 yaml）。**已随能力搬出 core**：定义在 `capabilities/registry/ports.rs` | `YamlSettingsStore` |
-| `ModelCatalog` | 列出一条通道当前可用的模型名。**已随能力搬出**：`capabilities/llm/ports.rs` | `HttpModelCatalog` |
+| `ModelCatalog` | 按**端点与密钥**列出一条通道当前可用的模型名。**已随能力搬出**：`capabilities/llm/ports.rs` | `HttpModelCatalog` |
 | `ModuleSource` | 模块清单来源（扫描 `modules/`）。**已随能力搬出**：`capabilities/workspace/ports.rs` | `FsModules` |
 | `PackageSource` | 运行包库来源（扫描依赖文件夹 `runtimes/`）。**已随能力搬出**：`capabilities/workspace/ports.rs` | `FsPackages` |
 | `Workspace` | 一次工作的 work 目录、各 agent 沙箱、文件清单与寻址根。**已随能力搬出**：`capabilities/workspace/ports.rs` | `FsWorkspace` |

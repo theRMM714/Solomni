@@ -8,73 +8,9 @@
 //! 同一份声明同时驱动两件事：模型侧说明（`render_for_prompt`）与调用校验（`check`），
 //! 所以"缺少 path / limit 不能大于 2000"这类文案不再硬编码在代码里。
 
+use crate::capabilities::workspace::api::{Param, ParamType};
 use serde::Deserialize;
 use std::collections::BTreeMap;
-
-/// 参数类型（只支持机器能判定的最小集合；不猜、不做隐式转换）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum ParamType {
-    String,
-    Integer,
-    Number,
-    Boolean,
-    /// 数组：核心操作的**结构化载荷**（节点表 / 结论表 / 验收清单 / 名单）用它承载。
-    /// 为什么需要：这种嵌套结构标量类型表达不了；它照样是一次**工具调用**（名字、存在性、
-    /// 载荷形状都校验，且进工具台账），语义校验（负责人在不在名单、依赖成不成环）由代码在做完调用后照旧执行。
-    Array,
-}
-
-impl ParamType {
-    /// 模型侧与 JSON Schema 共用的类型名。
-    pub fn name(self) -> &'static str {
-        match self {
-            ParamType::String => "string",
-            ParamType::Integer => "integer",
-            ParamType::Number => "number",
-            ParamType::Boolean => "boolean",
-            ParamType::Array => "array",
-        }
-    }
-
-    /// 该值是否属于这个类型（整数与数字分开判定，不做 1 == 1.0 的宽容）。
-    fn accepts(self, v: &serde_json::Value) -> bool {
-        match self {
-            ParamType::String => v.is_string(),
-            ParamType::Integer => v.is_i64() || v.is_u64(),
-            ParamType::Number => v.is_number(),
-            ParamType::Boolean => v.is_boolean(),
-            // 结构化载荷一律是数组（标量走 string/integer 那几种）。
-            ParamType::Array => v.is_array(),
-        }
-    }
-}
-
-/// 一个参数的声明。
-#[derive(Debug, Clone, Deserialize)]
-pub struct Param {
-    /// YAML 里的 `type`。
-    #[serde(rename = "type")]
-    pub ty: ParamType,
-    /// 必填（缺省 false）。
-    #[serde(default)]
-    pub required: bool,
-    /// 字符串参数不允许是空串（缺省 false）。
-    #[serde(default)]
-    pub non_empty: bool,
-    /// 给模型看的一句话说明。
-    #[serde(default)]
-    pub desc: String,
-    /// 缺省值（模型不写时用；也写进模型侧说明）。
-    #[serde(default)]
-    pub default: Option<serde_json::Value>,
-    /// 数值下界（含）。
-    #[serde(default)]
-    pub min: Option<f64>,
-    /// 数值上界（含）。
-    #[serde(default)]
-    pub max: Option<f64>,
-}
 
 /// 一个工具的参数契约。
 #[derive(Debug, Clone, Deserialize)]
