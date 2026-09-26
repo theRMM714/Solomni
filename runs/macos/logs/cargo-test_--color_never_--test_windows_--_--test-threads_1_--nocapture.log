@@ -1,0 +1,8 @@
+   Compiling solomni v0.1.0 (/Users/runner/work/Solomni/Solomni)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.36s
+     Running tests/windows/main.rs (target/debug/deps/windows-9f73d829d176da36)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
