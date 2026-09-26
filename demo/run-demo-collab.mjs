@@ -225,16 +225,26 @@ async function main() {
   if (delivery) console.log("   交付结论：ok=" + delivery.ok + " over_rework=" + delivery.over_rework);
 
   const made = artifacts(WORK);
-  const want = ["corpus.jsonl", "report.html", "index.bin"];
-  for (const f of want) {
-    const p = made.get(f);
-    console.log("   产物 " + f + " → " + (p ? p + "（" + statSync(p).size + " 字节）" : "（没有）"));
+  // 产物的**文件名由方案定**（这次是 work/资料报告.html，不是 report.html），所以按**角色**认，
+  // 不能钉死文件名——否则方案换个名字就被当成"产物不存在"（真机上就是这么误报的）。
+  const fixtures = new Set(readdirSync(SAMPLE));
+  const pick = (re) => {
+    for (const [name, p] of made) if (!fixtures.has(name) && re.test(name)) return p;
+    return null;
+  };
+  const roles = [
+    ["语料", pick(/\.jsonl$/i)],
+    ["报告", pick(/\.html?$/i)],
+    ["索引", pick(/^index\.|\.bin$/i)],
+  ];
+  for (const [role, p] of roles) {
+    console.log("   产物 " + role + " → " + (p ? p + "（" + statSync(p).size + " 字节）" : "（没有）"));
   }
-  ok(want.every((f) => made.has(f)), "三件产物都真的存在", want.filter((f) => !made.has(f)).join("、") || "");
+  ok(roles.every((r) => !!r[1]), "三件产物都真的存在", roles.filter((r) => !r[1]).map((r) => r[0]).join("、") || "");
 
   // 报告必须自包含：离线打开不许引用任何外部资源。
-  if (made.has("report.html")) {
-    const html = readFileSync(made.get("report.html"), "utf8");
+  if (roles[1][1]) {
+    const html = readFileSync(roles[1][1], "utf8");
     const external = /(?:src|href)\s*=\s*["']https?:/i.test(html) || /<script[^>]+src=/i.test(html);
     ok(!external, "报告自包含（无外部 src/href、无外部 script）", html.slice(0, 200));
   }
