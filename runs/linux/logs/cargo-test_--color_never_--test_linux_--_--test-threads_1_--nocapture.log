@@ -1,0 +1,14 @@
+   Compiling solomni v0.1.0 (/home/runner/work/Solomni/Solomni)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.30s
+     Running tests/linux/main.rs (target/debug/deps/linux-f3b989f79dd7d10d)
+
+running 5 tests
+test probes::fence::env_unavailable_degrades_and_still_runs_the_command ... ok
+test probes::fence::fence_denies_outside_paths_and_allows_the_given_roots ... ok
+test probes::fence::read_only_roots_are_readable_but_not_writable ... ok
+test probes::fence::verify_separates_env_unavailable_from_broken_rules ... ok
+test probes::https::https_reaches_a_public_endpoint_through_the_product_chain ... [HTTPS] ok 200 rustls https://example.com/
+ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s
+
