@@ -62,6 +62,7 @@ presentation ──▶ core ◀── adapters
 - 呈现层入站契约（能力接口、事件台、命令/事件规则）与机器可读的 HTTP 路由目录：[docs/architecture/contracts.md](docs/architecture/contracts.md)。
 - 系统工具总表、角色表与"谁能用哪些工具"（含越权校验与提示词按角色分配）：[docs/architecture/tools-and-roles.md](docs/architecture/tools-and-roles.md)。
 - 协作如何从讨论走到交付（审查关卡、任务链、子会话、验收）：[docs/architecture/task-chain.md](docs/architecture/task-chain.md)。
+- 提示词册（`prompts/`）的结构与键清单：[docs/architecture/prompts.md](docs/architecture/prompts.md)。
 
 **路由表由契约测试机器比对**（`src/tests/routes.rs` 直接读 `docs/architecture/contracts.md`）：
 表与 `presentation/routes.rs` 的 `ROUTES` 对不上就是测试失败。
@@ -82,27 +83,8 @@ presentation ──▶ core ◀── adapters
 - 文案的注入方式与端口一致：随环境对象传入（沙箱/工具环境/引用改写器），而不是让纯逻辑自己去读文件。
 - 路径类占位符（`{{work_root}}` 等）由 core 在运行时替换成**真实根目录**后才交给 AI——仓库里永远不出现机器路径。
 
-册子结构（`prompts/`，按**共享 / 角色**两个目录切分；键的完整清单只在这里）：
-
-| 文件 | 键 | 用途 |
-| --- | --- | --- |
-| `shared/protocol.yaml` | `mechanism` / `chat_protocol` | 工具调用机制的说明 + 讨论约定（两者一起注入，可自由演化） |
-| | `refs.foreign_sandbox` / `refs.collab_sandbox` | `@` 引用越权与协作场景的如实说明 |
-| `shared/tools.yaml` | `env` | **工作环境块**：本 agent 的真实根目录（共享区 / 沙箱 / 模块目录）与路径规矩 |
-| | `patch_guide` | 自由格式补丁的写法（每块以 `*** End File` 收尾、SEARCH 要整行一致、一次可多块、整体原子） |
-| | `tool_calling_envelope` / `tool_calling_native` | 工具调用约定**两套，互斥**：一个通道只用一套，由通道形态决定注入哪套（同时教会让模型在正文里讲解参数而被误判成调用） |
-| | `builtin_tools` | 内置工具的**参数契约**：模型侧说明与调用校验的唯一来源（不写进代码） |
-| `shared/texts.yaml` | `no_agents` / `no_model` / `no_module_dirs` / `no_module_tools` / `no_module_tool_params` | 空态说法 |
-| | `module_tool_params_header` | 模块工具参数段的小标题（模块在 `module.yaml` 里声明了 `params` 时出现） |
-| `shared/agent.yaml` | `agent.system` | agent 职责提示词骨架（模块 `system` 合成 + 工作环境 + 调用约定；**工具清单不在这里**，随回合注入） |
-| `roles/discussant.yaml` | `discuss.opener` / `discuss.step` / `discuss.autonomy_note` | 讨论首轮、轮转、小组自裁说明 |
-| `roles/planner.yaml` | `synthesize.*` | 整理方案 |
-| | `node_review.*` | 节点验收（产出"节点 id — 负责人"表与结论） |
-| | `slate.*` / `suggest_models.*` | 代拟名单 / 模型推荐（单 agent、协作两种说法） |
-| | `verdict.*` | 判定用户那一句是否明确（明确才开工 / 放行，`collab::judge_clear`） |
-| `roles/executor.yaml` | `execute.user` | 执行任务 |
-| `roles/orchestrator.yaml` | `review.system` / `review.user` | 总验收与推进 |
-| | `tool_texts.*` | **运行时回执**：路径校验、参数不符（说事实 + 回发工具签名）、内置工具回执与行区间/截断/编码标注、edit 的找不到（含"只差空白"提示）与多处命中、patch 的解析失败（缺 End File / 缺路径 / 空 SEARCH…）与"第几块为什么、整体没写"、write 的"没读过/读后又被改/只读到一部分"三种拒绝、外部工具分派的三类失败、**信封不合法四类**（未闭合"还差什么"/"起了两段" / 裸控制字符 / 语法错 / 字段不合法）与"已修复后执行"/"输出被长度截断"的如实标注、给模型看的清单骨架、追加在回复行末尾的 `（已停止）` / `（本段被输出长度截断）` |
+提示词册的**文件与键清单**（每份文件里有什么键、每个键干什么）只有一份：
+[docs/architecture/prompts.md](docs/architecture/prompts.md)。
 
 - **界面通知**（`[建组]`、`[上限]` 这类）是呈现层文案，**不属于**提示词册。
 - **不进册子的两类**（有意留在代码里）：①**行身份是结构化字段**（`LineView` 的 `speaker` / `verb` / `kind`）：

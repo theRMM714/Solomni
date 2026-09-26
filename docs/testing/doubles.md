@@ -2,7 +2,7 @@
 
 > 本文是**替身语义的唯一权威**：[ARCHITECTURE.md](../../ARCHITECTURE.md) 只规定"端口必须可注入"，
 > [MODULE_SPEC.md](../../MODULE_SPEC.md) 只规定"模块作者要交付什么"，两者都不复述替身语义。
-> 层级与判定见 [levels.md](levels.md)，端口矩阵见 [port-matrix.md](port-matrix.md)。
+> 层级与判定见 [levels.md](levels.md)；**端口 × 替身 × 真实适配器**的矩阵就在本文 §三。
 
 ## 一、测试替身规范
 
@@ -30,12 +30,12 @@ Fake 必须：
 | --- | --- | --- |
 | `src/adapters/fake_chat.rs:FakeChat` | 脚本模型，同时记录 `calls`，兼具 Fake + Spy | 契约已就位（成功 / 空 / 流式 / 中止 / 记录） |
 | `src/adapters/fake_chat.rs:DemoGateway` | 演示/回落网关 | 契约已就位（两类通道 / 回落告知 / 无网络无密钥） |
-| `src/tests/doubles.rs:InMemorySettings`、`InMemoryHistory`、`InMemoryWorkspace`、`InMemorySysIo` | 内存 Fake | 已被核心测试装配使用；端口矩阵已登记（`port-matrix.md`，已验收） |
-| `src/tests/doubles.rs:InMemoryPackages` | 包库 Fake | 已被核心测试使用；端口矩阵已登记（`port-matrix.md`，已验收） |
-| `src/tests/doubles.rs:FakeCatalog` | 模型目录 Fake + 调用记录（`seen`） | 已被核心测试使用；端口矩阵已登记（`port-matrix.md`，已验收） |
-| `src/tests/doubles.rs:VecSource` | 模块清单 Fake | 已被核心测试使用；端口矩阵已登记（`port-matrix.md`，已验收） |
+| `src/tests/doubles.rs:InMemorySettings`、`InMemoryHistory`、`InMemoryWorkspace`、`InMemorySysIo` | 内存 Fake | 已被核心测试装配使用；端口矩阵已登记（见 §三，已验收） |
+| `src/tests/doubles.rs:InMemoryPackages` | 包库 Fake | 已被核心测试使用；端口矩阵已登记（见 §三，已验收） |
+| `src/tests/doubles.rs:FakeCatalog` | 模型目录 Fake + 调用记录（`seen`） | 已被核心测试使用；端口矩阵已登记（见 §三，已验收） |
+| `src/tests/doubles.rs:VecSource` | 模块清单 Fake | 已被核心测试使用；端口矩阵已登记（见 §三，已验收） |
 | `src/tests/doubles.rs:ScriptGateway`、`SharedScript` | 脚本网关 Fake | 已被核心测试使用；端口矩阵已登记（失败注入：无通道回落如实告知） |
-| `src/tests/doubles.rs:TestPrompts` | 提示词册 Fake（返回内存册子） | 已被核心测试使用；端口矩阵已登记（`port-matrix.md`，已验收） |
+| `src/tests/doubles.rs:TestPrompts` | 提示词册 Fake（返回内存册子） | 已被核心测试使用；端口矩阵已登记（见 §三，已验收） |
 | `src/tests/core.rs:RecordingRunner` | 工具执行 Fake + 记录 `calls` | 已被核心测试使用；端口矩阵已登记（失败注入：`ok=false` 回执；超时杀树在 `ProcTools`） |
 | `src/tests/core.rs:ParallelRunner` | 工具执行 Spy：记录**同时在跑**的峰值 | 已钉住"声明可并发才并发、未声明一律串行" |
 | `src/tests/core.rs:NativeGateway`、`NativeChat` | 原生通道替身：按脚本发结构化调用，并记录每次请求的声明与消息 | 已钉住协议形状与"实时/重建逐条一致" |
@@ -107,4 +107,26 @@ Fixture 必须：
 - 流式响应；
 - 多次运行隔离；
 - 端口、子进程和临时目录清理。
+
+## 三、端口测试矩阵
+
+| 端口 | 当前/计划替身 | 交互记录 | 失败注入 | 取消/超时 | 真实适配器 | 当前状态 |
+| --- | --- | --- | --- | --- | --- | --- |
+| `Chat` | `FakeChat`、`SharedScript`、`TruncChat`、`AbortChat` | `FakeChat.calls` | 脚本回放非法信封 | `on` 返回 false 中止（FakeChat / HttpChat） | `HttpChat`：结束原因（非流式 `stop` / 流式 `length`）、原生 `tool_calls`（非流式 + 流式按 index 拼分片）都在环回假供应商上验 | 已验收 |
+| `ChatGateway` | `ScriptGateway`、`DemoGateway`、`ProbeGateway` | 通道脚本可观察 | 无通道回落（如实告知） | 不适用 | `HttpGateway`：探测的三种结论（支持 / 明确不支持 / 无法判定）与"通道本身不通"都在环回假供应商上验；结论写回登记处只写确凿的；回放形状探测逐项验"收了没有 / 真的读懂没有"（替身没真实供应商时默认如实说测不了） | 已验收 |
+| `SettingsStore` | `InMemorySettings` | 内存状态可观察 | `fail_with` | 不适用 | `YamlSettingsStore` | 已验收 |
+| `ModelCatalog` | `FakeCatalog` | `seen` | `fail_with` | 不适用 | `HttpModelCatalog` | 已验收 |
+| `ModuleSource` | `VecSource` | 不适用 | 不适用（错误进 `rejected`） | 不适用 | `FsModules` | 已验收 |
+| `PackageSource` | `InMemoryPackages` | 不适用 | 不适用（错误进 `rejected`） | 不适用 | `FsPackages` | 已验收 |
+| `Workspace` | `InMemoryWorkspace` | 内存布局可观察 | `fail_with` | 不适用 | `FsWorkspace` | 已验收 |
+| `SysIo` | `InMemorySysIo`（含并发峰值与按文件延时） | 内存内容 + 同时在读的峰值 | `fail_with` | 不适用 | `FsSysIo`（含 lossy / cut） | 已验收 |
+| `HistoryStore` | `InMemoryHistory` | 内存流水可观察 | `fail_with` | 不适用 | `FsHistory` | 已验收 |
+| `PromptSource` | `TestPrompts` | 不适用 | `fail_with` | 不适用 | `YamlPrompts` | 已验收 |
+| `ToolRunner` | `RecordingRunner`、`SilentRunner`、`ParallelRunner` | `calls`（cwd / 命令 / 参数）、并发峰值 | `ok = false` 回执 | 真进程超时杀树（`ProcTools`） | `ProcTools` | 已验收 |
+| `EnvelopeRepair` | `NoRepair` | 不适用 | 不适用（修复器遇不确定一律不修） | 不适用 | `UnambiguousRepair`（转义裸控制字符 + 补上缺的收尾括号；断在字符串中间、起了两段信封一律不修） | 已验收 |
+| `FenceHost` | `RecordingFence`、`NoFenceHost` | `released` | `fail_with` | 不适用 | `confine::FenceHostAdapter`（真机撤权在 `tests/windows/`） | 已验收 |
+| `Log` | `NoopLog` | 不记录（Stub） | 不适用 | 不适用 | `FileLog`（三个级别都落盘） | 已验收 |
+
+"已验收"指该端口在 `src/tests/` 与 `src/adapters/*` 的契约测试里有成功、失败、空/边界与交互记录的断言；
+
 

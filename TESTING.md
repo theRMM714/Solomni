@@ -59,7 +59,7 @@
 | --- | --- |
 | 判断一个测试属于哪层、放哪、允许与禁止什么、怎么判定 | [docs/testing/levels.md](docs/testing/levels.md) |
 | 写或改 Stub / Fake / Mock / Spy / Fixture，或验收 Fake | [docs/testing/doubles.md](docs/testing/doubles.md) |
-| 新增端口、新增替身，或核对真实适配器的覆盖范围 | [docs/testing/port-matrix.md](docs/testing/port-matrix.md) |
+| 新增端口、新增替身，或核对真实适配器的覆盖范围 | [docs/testing/doubles.md](docs/testing/doubles.md)（端口矩阵在 §三） |
 | 声明测试的资源边界、清理副作用，或处理质量门禁 | [docs/testing/quality-isolation.md](docs/testing/quality-isolation.md) |
 | 跑本地入口、读报告、认成功标记，或处理 CI 与报告发布 | [docs/testing/execution-ci.md](docs/testing/execution-ci.md) |
 | 记缺口、看目录与命名、按验收清单收口 | [docs/testing/gaps-acceptance.md](docs/testing/gaps-acceptance.md) |

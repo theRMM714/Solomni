@@ -1,7 +1,7 @@
 # 测试层级与判定（T0-T5）
 
 > 本文是**测试层级的唯一权威**：每一层验证什么、放在哪、允许与禁止什么、怎么判定。
-> 门户与路由见 [TESTING.md](../../TESTING.md)；替身语义见 [doubles.md](doubles.md)，端口矩阵见 [port-matrix.md](port-matrix.md)，
+> 门户与路由见 [TESTING.md](../../TESTING.md)；替身语义见 [doubles.md](doubles.md)，端口矩阵见 [doubles.md](doubles.md) 三，
 > 质量与隔离见 [quality-isolation.md](quality-isolation.md)，入口与 CI 见 [execution-ci.md](execution-ci.md)，
 > 缺口账与验收见 [gaps-acceptance.md](gaps-acceptance.md)，模块作者要交付什么见 [module-delivery.md](module-delivery.md)。
 
