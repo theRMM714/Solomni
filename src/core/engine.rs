@@ -1204,6 +1204,8 @@ impl Discussion {
         core_chat: &mut dyn Chat,
         mode: crate::core::providers::ToolMode,
         verify: Option<&mut MemberTools>,
+        // 核心这一轮的行（工具行 + 思维链 + 正文）推给谁：落不落由那个会话模块定。
+        sink: &mut dyn FnMut(SessionEvent),
     ) -> Result<(String, crate::core::chain::TaskChain, String), String> {
         let roster = self
             .members
@@ -1247,6 +1249,7 @@ impl Discussion {
             self.opts(),
             &mut keep,
             verify,
+            sink,
         )?;
         if self.cancelled() {
             return Err("已停止".to_string());
@@ -1368,6 +1371,8 @@ impl Execution {
         llm: crate::core::ports::LlmOpts,
         mode: crate::core::providers::ToolMode,
         verify: Option<&mut MemberTools>,
+        // 核心这一轮的行推给谁（总验收也要能看到它在核对什么）。
+        sink: &mut dyn FnMut(SessionEvent),
     ) {
         let reports = self
             .reports
@@ -1409,6 +1414,7 @@ impl Execution {
             opts,
             &mut keep,
             verify,
+            sink,
         );
         if self.cancelled() {
             self.stopped = true;
@@ -1482,6 +1488,45 @@ pub struct ToolRun {
     pub msgs: Vec<Msg>,
 }
 
+/// 核心这一轮的**行**：工具行（谁=核心、动词=工具名、带调用视图）+ 正文/思维链行。
+/// 核心操作**没有 agent 会话**，所以这些行必须推给调用方（协作会话 / 系统会话）：
+/// 落不落盘由那个会话模块自己定（协作要留档，系统会话只推不留）。
+fn core_rows(
+    tool: &str,
+    view: ToolCallView,
+    reasoning: &str,
+    text: &str,
+) -> Vec<crate::core::events::LineView> {
+    let mut rows = Vec::new();
+    if !text.trim().is_empty() {
+        rows.push(crate::core::events::LineView {
+            speaker: "核心".to_string(),
+            verb: String::new(),
+            kind: "msg".to_string(),
+            line: text.trim().to_string(),
+            ..Default::default()
+        });
+    }
+    rows.push(crate::core::events::LineView {
+        speaker: "核心".to_string(),
+        verb: tool.to_string(),
+        kind: "tool".to_string(),
+        line: format!(
+            "工具 {} → {}",
+            view.label(),
+            if view.ok { "成功" } else { "失败" }
+        ),
+        reasoning: if reasoning.trim().is_empty() {
+            None
+        } else {
+            Some(reasoning.to_string())
+        },
+        tool: Some(view),
+        ..Default::default()
+    });
+    rows
+}
+
 /// 核心 AI 的一次**操作**：声明该角色的工具面、跑一次模型、从**工具调用参数**里取载荷。
 ///
 /// 为什么必须走工具调用（见 docs/architecture/tools-and-roles.md）：核心操作会驱动核心走下一步
@@ -1502,6 +1547,8 @@ pub(crate) fn core_operation(
     opts: crate::core::ports::CompleteOpts<'static>,
     keep: &mut dyn FnMut(crate::core::ports::Chunk) -> bool,
     verify: Option<&mut MemberTools>,
+    // 核心这一轮的**事实出口**（推；落盘与否由会话模块决定）。
+    sink: &mut dyn FnMut(SessionEvent),
 ) -> Result<serde_json::Value, String> {
     // 声明面按**通道形态**给：原生通道才声明（信封通道的模型看提示词里的工具说明）。
     let face_rows: Vec<(&str, &crate::core::schema::ToolSchema)> =
@@ -1527,16 +1574,55 @@ pub(crate) fn core_operation(
         if let Some(err) = done.error {
             return Err(err);
         }
+        let parsed = crate::core::envelope::parse(&done.raw);
         // native：结构化槽位里找这个名字的调用。
         if let Some(c) = done.calls.iter().find(|c| c.name == tool) {
-            return serde_json::from_str(&c.args_json)
-                .map_err(|e| format!("{} 的参数不是合法 JSON（{}）：{}", tool, e, c.args_json));
+            let payload: serde_json::Value = serde_json::from_str(&c.args_json)
+                .map_err(|e| format!("{} 的参数不是合法 JSON（{}）：{}", tool, e, c.args_json))?;
+            // **推这一轮的事实**：它调了什么、带了什么参数、模型怎么想的。
+            for row in core_rows(
+                tool,
+                ToolCallView {
+                    speaker: "核心".to_string(),
+                    module: String::new(),
+                    name: tool.to_string(),
+                    ok: true,
+                    args: c.args_json.clone(),
+                    output: head_chars(&payload.to_string(), 400),
+                    raw: done.raw.clone(),
+                    call_id: c.id.clone(),
+                    reply: 0,
+                },
+                &done.reasoning,
+                &parsed.text,
+            ) {
+                sink(SessionEvent::Transcript(vec![row]));
+            }
+            return Ok(payload);
         }
         // 手写信封：正文里的信封里找。
-        let parsed = crate::core::envelope::parse(&done.raw);
         if let Some(t) = parsed.tools.iter().find(|t| t.name == tool) {
-            return serde_json::from_str(&t.args_json)
-                .map_err(|e| format!("{} 的参数不是合法 JSON（{}）：{}", tool, e, t.args_json));
+            let payload: serde_json::Value = serde_json::from_str(&t.args_json)
+                .map_err(|e| format!("{} 的参数不是合法 JSON（{}）：{}", tool, e, t.args_json))?;
+            for row in core_rows(
+                tool,
+                ToolCallView {
+                    speaker: "核心".to_string(),
+                    module: String::new(),
+                    name: tool.to_string(),
+                    ok: true,
+                    args: t.args_json.clone(),
+                    output: head_chars(&payload.to_string(), 400),
+                    raw: done.raw.clone(),
+                    call_id: String::new(),
+                    reply: 0,
+                },
+                &done.reasoning,
+                &parsed.text,
+            ) {
+                sink(SessionEvent::Transcript(vec![row]));
+            }
+            return Ok(payload);
         }
         // 没有目标调用：看它请求的是不是**该角色拿得到的只读核实工具**（read / search）。
         let calls: Vec<(String, String, String)> =
@@ -1590,7 +1676,7 @@ pub(crate) fn core_operation(
                 &name,
                 &args,
             );
-            views.push(ToolCallView {
+            let view = ToolCallView {
                 speaker: "核心".to_string(),
                 module: String::new(),
                 name,
@@ -1600,7 +1686,12 @@ pub(crate) fn core_operation(
                 raw: done.raw.clone(),
                 call_id,
                 reply: 0,
-            });
+            };
+            // 核心"先核实"这一步也如实推出去（用户看得到它在读什么、查什么）。
+            for row in core_rows(&view.name, view.clone(), "", "") {
+                sink(SessionEvent::Transcript(vec![row]));
+            }
+            views.push(view);
         }
         // 按通道形态把结果回灌（原生：一条助手消息带 tool_calls + 每条结果 role=tool）。
         for m in reply_msgs(mode, &done.raw, &views, &ctx.sandbox.texts) {

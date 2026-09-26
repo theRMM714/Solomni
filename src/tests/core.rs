@@ -2083,6 +2083,7 @@ pub(crate) fn execution_review_pass_and_fail_paths() {
         Default::default(),
         Default::default(),
         None,
+        &mut |_e: crate::core::events::SessionEvent| {},
     );
     assert!(!exec.all_pass(), "有 fail 项就不通过");
 
@@ -2102,6 +2103,7 @@ pub(crate) fn execution_review_pass_and_fail_paths() {
         Default::default(),
         Default::default(),
         None,
+        &mut |_e: crate::core::events::SessionEvent| {},
     );
     assert!(exec2.all_pass());
 }
@@ -2127,6 +2129,7 @@ pub(crate) fn review_parse_failure_is_conservative_fail() {
         Default::default(),
         Default::default(),
         None,
+        &mut |_e: crate::core::events::SessionEvent| {},
     );
     assert!(exec.items.is_empty());
     assert!(!exec.all_pass(), "解析失败必须保守判否");
@@ -2546,6 +2549,24 @@ pub(crate) fn total_review_rework_names_the_nodes_and_only_they_are_redispatched
         "挂着等用户时，唤醒不能自己重派：{:?}",
         wake
     );
+    // **核心在干什么要落档**（它没有 agent 会话，所以它的行由协作会话接住并落盘）。
+    let (_, hist) = core.history_open("w").unwrap();
+    let rows = replay_lines(&hist);
+    for want in [
+        "[核心:plan]",
+        "[核心:verdict]",
+        "[核心:node_verdict]",
+        "[核心:checklist]",
+    ] {
+        assert!(
+            rows.iter().any(|r| r.starts_with(want)),
+            "核心的操作该有落档的行 {}：{:?}",
+            want,
+            rows.iter()
+                .filter(|r| r.starts_with("[核心"))
+                .collect::<Vec<_>>()
+        );
+    }
     let second = core.collab_resume(&sid).unwrap();
     let redispatch: Vec<&String> = second
         .iter()
@@ -8323,6 +8344,7 @@ pub(crate) fn core_operation_runs_readonly_verification_before_the_op() {
         crate::core::ports::CompleteOpts::plain(false),
         &mut |_| true,
         Some(&mut verify),
+        &mut |_e: crate::core::events::SessionEvent| {},
     )
     .expect("核实之后要能交出方案");
     assert_eq!(out["plan"], "方案");
@@ -8358,6 +8380,7 @@ pub(crate) fn body_json_is_not_a_core_operation() {
         crate::core::ports::CompleteOpts::plain(false),
         &mut |_| true,
         None,
+        &mut |_e: crate::core::events::SessionEvent| {},
     );
     let err = out.expect_err("正文 JSON 不是工具调用，该如实报错");
     assert!(err.contains("没有调用 plan"), "{}", err);

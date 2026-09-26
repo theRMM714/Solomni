@@ -2088,6 +2088,8 @@ impl Core {
             &mut |_| true,
             // 推荐是**一次性建议**（用户点了才生成、没有工作区可核实）：不接核实回路。
             None,
+            // 推荐名字是**一次性动作**（系统会话：只推不留）——这里没有会话可接，给一个空出口。
+            &mut |_e: crate::core::events::SessionEvent| {},
         )?;
         // 载荷里就是名单**数组**本身（工具参数 agents 的值）。
         let parsed: Vec<agents::RosterPick> = payload

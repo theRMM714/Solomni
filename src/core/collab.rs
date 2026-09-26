@@ -314,6 +314,8 @@ impl CollabSession {
         kind: &str,
         payload: &str,
         text: &str,
+        // 核心这一轮的行推给谁（落不落由协作会话定）。
+        sink: &mut dyn FnMut(SessionEvent),
     ) -> Result<(bool, String), String> {
         let user = prompts.render(
             &prompts.core.verdict.user,
@@ -343,6 +345,7 @@ impl CollabSession {
             opts,
             &mut keep,
             verify,
+            sink,
         )?;
         let clear = payload
             .get("clear")
@@ -372,6 +375,8 @@ impl CollabSession {
         verify: Option<&mut crate::core::engine::MemberTools>,
         // 上一次填错了要它重填的话（核心据此**一直重填**到合法，不设次数上限）。
         retry: Option<&str>,
+        // 核心这一轮的行推给谁。
+        sink: &mut dyn FnMut(SessionEvent),
     ) -> Result<(NodeVerdicts, String), String> {
         let nodes = chain.map(|c| c.nodes.clone()).unwrap_or_default();
         let listed = nodes
@@ -416,6 +421,7 @@ impl CollabSession {
             opts,
             &mut keep,
             verify,
+            sink,
         )?;
         let parsed: Vec<NodeVerdict> = payload
             .get("verdicts")
@@ -622,6 +628,7 @@ impl CollabSession {
             CompleteOpts::plain(false),
             &mut |_| true,
             verify.as_mut(),
+            sink,
         )
         .ok()
         .and_then(|payload| {
@@ -904,6 +911,7 @@ impl CollabSession {
                     kind,
                     &brief,
                     &text_owned,
+                    sink,
                 );
                 sink(crate::core::events::idle());
                 match judged {
@@ -1045,6 +1053,7 @@ impl CollabSession {
                 self.core_chat.as_mut(),
                 self.core_mode,
                 verify.as_mut(),
+                sink,
             );
             sink(crate::core::events::idle());
             match made {
@@ -1183,6 +1192,7 @@ impl CollabSession {
                     self.core_chat.as_mut(),
                     verify.as_mut(),
                     retry.as_deref(),
+                    sink,
                 );
                 sink(crate::core::events::idle());
                 let (verdicts, advice) = match made {
@@ -1312,6 +1322,7 @@ impl CollabSession {
                 llm,
                 self.core_mode,
                 verify.as_mut(),
+                sink,
             );
             sink(crate::core::events::idle());
             if let Some(note) = self.exec_note(&exec) {
