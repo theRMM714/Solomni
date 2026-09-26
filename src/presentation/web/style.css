@@ -439,7 +439,9 @@ select.field-input { cursor: pointer; }
 .line.streaming::after { content: "▍"; animation: blink 1s infinite; }
 /* 流式块尚无可见内容（例如那一轮只发了信封、正文不外泄）：整块藏起来，
    否则会留下一张"只有说话人名字 + 一根闪烁光标"的空卡片（工具轮尤其明显）。 */
-.line.streaming.empty { display: none; }
+/* 没有任何可见内容的行块一律不占位（信封轮、正文还没到的流式块都算）。
+   从前只隐藏 .streaming.empty：一块讲完后类名变回 line line，空卡片就又冒出来了。 */
+.line.empty { display: none; }
 .cot { margin: 4px 0 0; font-size: 12px; color: var(--fg-dim); }
 .cot summary { cursor: pointer; color: var(--fg-dim); font-size: 11px; }
 .cot-body {

@@ -225,25 +225,35 @@ setTimeout(async () => {
       toolReasoningRendered = r.reasoning === '过程说明' && r.show === true;
     } catch (e) { loadErrors.push("定稿思维链检查失败：" + e.message); }
   }
-  // **空正文行不画空盒子**：一轮只有思维链、没有正文也没有工具调用时，落下来的行正文是空的；
-  // 照常画出来就是一个空的"谁在说"框（真机上的空块）。这种行只画思维链。
-  let bodylessLineRule = false;
+  // **一行的画法只有一处**：身份在上（每个 kind 都有）、思维链次之、正文按 kind。
+  //  ① 只有思维链的行照画（身份 + 思维链），但不留空正文；②完全没内容的行不占位；③工具卡片带身份。
+  let lineRule = false;
   if (!loadErrors.length) {
     try {
       const r = vm.runInNewContext(
         "(function () {" +
-          " const s = { sid: 'bl', lines: [{ id: 9, cls: 'line', who: '资料手', text: '', reasoning: '只有思维链' }], live: [], fold: {}, scroll: {} };" +
+          " const s = { sid: 'bl', lines: [" +
+          "   { id: 9, cls: 'line', who: '资料手', text: '', reasoning: '只有思维链' }," +
+          "   { id: 10, cls: 'line', who: '资料手', text: '', reasoning: null }," +
+          "   { id: 11, cls: 'tool', who: '检索手', text: '', tool: { speaker: '检索手', name: 'read', ok: true, args: '{}', output: 'ok' } }" +
+          " ], live: [], fold: {}, scroll: {} };" +
           " state.sessions.set('bl', s); state.activeSid = 'bl';" +
           " const box = document.querySelector('#stream'); box.children.length = 0; renderStream(true);" +
-          " const line = ((box.children[0] || {}).children || [])[0] || { children: [] };" +
-          " const kinds = (line.children || []).map(function (c) { return String(c.className); });" +
-          " return { kids: kinds.length, who: kinds.filter(function (c) { return c.indexOf('who') >= 0; }).length };" +
+          " const all = []; (function walk(n) { for (const c of (n.children || [])) { all.push(c); walk(c); } })(box);" +
+          " const cls = function (n) { return (n.children || []).map(function (c) { return String(c.className); }); };" +
+          " const has = function (n, s) { return cls(n).some(function (c) { return c.indexOf(s) >= 0; }); };" +
+          " const cotLines = all.filter(function (n) { return has(n, 'who') && has(n, 'cot'); });" +
+          " const withBody = cotLines.filter(function (n) { return cls(n).some(function (c) { return c.indexOf('md') === 0; }); });" +
+          " const toolWho = all.filter(function (n) { return String(n.className).indexOf('tool-card') >= 0 && has(n, 'who'); });" +
+          " const emptyBoxes = all.filter(function (n) { return String(n.className).indexOf('line') === 0 && (n.children || []).length === 0; });" +
+          " return { cot: cotLines.length, body: withBody.length, toolWho: toolWho.length, empty: emptyBoxes.length };" +
           "})()",
         sandbox
       );
-      bodylessLineRule = r.kids > 0 && r.who === 0;
-      if (!bodylessLineRule) loadErrors.push("空正文行检查：" + JSON.stringify(r));
-    } catch (e) { loadErrors.push("空正文行检查失败：" + e.message); }
+      // 空块由 `.line.empty { display: none }` 兜住（CSS 在冒烟里没有样式表可比），这里只管行本身的画法。
+      lineRule = r.cot >= 1 && r.body === 0 && r.toolWho >= 1;
+      if (!lineRule) loadErrors.push('行画法检查：' + JSON.stringify(r));
+    } catch (e) { loadErrors.push('行画法检查失败：' + e.message); }
   }
   // **改需求按钮**：没有能力位就根本不渲染（不是灰着）；会话工作时不可点。
   let taskButtonRule = false;
@@ -349,7 +359,7 @@ setTimeout(async () => {
   }
   const ok = alerts.length === 0 && loadErrors.length === 0 && rendered && tierWarned && identityKept
     && pollConn === "已连接" && pollApplied && hydratedHistory && liveReplaced && liveClearedOnIdle && toolReasoningRendered
-    && taskButtonRule && decisionCardRule && onlyLastStreams && bodylessLineRule && runningRules && consoleErrors.length === 0;
+    && taskButtonRule && decisionCardRule && onlyLastStreams && lineRule && runningRules && consoleErrors.length === 0;
   if (!ok) {
     console.log("alerts（原生弹窗被调用的次数，应为 0）:", JSON.stringify(alerts));
     console.log("notice 渲染:", rendered, "| 虚拟机档不可用提示:", tierWarned, "| 身份标题保留:", identityKept);

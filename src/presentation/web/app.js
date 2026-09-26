@@ -199,11 +199,16 @@ function rawToolCard(text, sess, key, speaker) {
 
 /// 工具调用卡片：头部只写「模块.工具名」+ 成败；参数与结果折叠在里面（折叠状态走 fold store）。
 /// 流式 tool_call 与权威 transcript 的 tool 行共用这一个渲染函数，也共用同一个折叠键。
-function toolCard(t, sess, key) {
+function toolCard(t, sess, key, who) {
   const info = t || {};
   const el = document.createElement('div');
   el.className = 'line tool-card ' + (info.ok ? 'ok' : 'bad');
   el.title = info.speaker ? info.speaker + ' 调用工具' : '工具调用';
+  // 左上角先标出**是谁**在调工具：与其它行同一条规则（每个 kind 都带身份）。
+  const speaker = who || info.speaker || '';
+  if (speaker) {
+    const w = document.createElement('span'); w.className = 'who'; w.textContent = speaker; el.appendChild(w);
+  }
   const head = document.createElement('div'); head.className = 'tool-head';
   const name = document.createElement('span'); name.className = 'tool-name';
   name.textContent = (info.module ? info.module + '.' : '') + (info.name || '工具');
@@ -1976,7 +1981,8 @@ function lineParts(l) {
   const reasoning = l.reasoning || null;
   // 工具行：按调用视图渲染成卡片（说话人取自视图）。
   if (l.tool || kind === 'tool') {
-    return [{ cls: 'tool', tool: l.tool || null, reasoning: reasoning, who: '', text: '', speaker: (l.tool && l.tool.speaker) || speaker }];
+    // 工具行同样要有身份（卡片左上角标出是谁在调工具）——身份是这一行的，不是正文的附属。
+    return [{ cls: 'tool', tool: l.tool || null, reasoning: reasoning, who: (l.tool && l.tool.speaker) || speaker, text: '', speaker: (l.tool && l.tool.speaker) || speaker }];
   }
   // 系统行：系统注入的提醒/边界（没有说话人），或核心自己的行（代拟…）。
   if (kind === 'system' || l.system) return [{ cls: 'sys system', who: speaker, text: text }];
@@ -2093,7 +2099,7 @@ function renderDone(s) {
   for (const l of s.lines) {
     // 工具行（含"正文就是工具信封"的兜底行）：渲染成卡片，而不是当消息发出来。
     if (l.tool || l.rawTool) {
-      const card = l.tool ? toolCard(l.tool, s, 'T' + toolSeq) : rawToolCard(l.text, s, 'L' + l.id, l.speaker);
+      const card = l.tool ? toolCard(l.tool, s, 'T' + toolSeq, (l.tool && l.tool.speaker) || l.speaker) : rawToolCard(l.text, s, 'L' + l.id, l.speaker);
       if (l.tool) toolSeq += 1;
       if (l.reasoning && state.settings.show_reasoning) card.appendChild(reasoningBlock(l.reasoning, s, 'L' + l.id));
       if (typeof l.id === 'number') card.appendChild(rewindButton(l.id));
@@ -2106,7 +2112,7 @@ function renderDone(s) {
     if (bodyless && !l.reasoning) continue;
     const el = document.createElement('div');
     el.className = 'line ' + l.cls;
-    if (l.who && !bodyless) {
+    if (l.who) {
       const w = document.createElement('span'); w.className = 'who'; w.textContent = l.who; el.appendChild(w);
     }
     // 思维链在回答之上（先想后说）；默认折叠，点开状态会被记住（键 = L<行 id>）。
@@ -2140,7 +2146,7 @@ function renderLive(s, full) {
     const blk = live[bi];
     if (blk.kind === 'tool') {
       if (!blk._node) {
-        blk._node = toolCard(blk.tool, s, 'T' + (toolLines + liveTool));
+        blk._node = toolCard(blk.tool, s, 'T' + (toolLines + liveTool), (blk.tool && blk.tool.speaker) || blk.speaker);
         liveBox.appendChild(blk._node);
       }
       liveTool += 1;
