@@ -218,9 +218,9 @@ pub const ROUTES: &[Route] = &[
         pattern: "/api/history/{name}",
         capability: "HistoryOps::open",
         request: "—",
-        response: "{meta,events}",
+        response: "{meta,events,live,head}",
         statuses: &[200, 404],
-        note: "读回历史（转录即内容）",
+        note: "读回历史：盘上转录 + 事件台上它之外的实时尾巴 + 合流时的头部序号（水位）",
     },
     Route {
         id: "history.delete",

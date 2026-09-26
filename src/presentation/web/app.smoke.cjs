@@ -64,7 +64,7 @@ const sandbox = {
       };
     }
     if (u.indexOf("/api/history/") === 0) {
-      // 盘上转录：**比实时新行更早**的一条（刷新后靠它把记录补齐）。
+      // **合流**：盘上转录 + 事件台上它之外的尾巴 + 合流时的头部序号（水位）。
       return {
         ok: true,
         json: async () => ({
@@ -72,18 +72,33 @@ const sandbox = {
           events: [
             { type: "transcript", lines: [{ id: 0, kind: "user", speaker: "用户", line: "刷新前的一句" }] },
           ],
+          live: [{ type: "notice", text: "[建组] 甲" }],
+          head: 2,
         }),
       };
     }
     if (u.indexOf("/api/events") === 0) {
       eventPolls += 1;
       if (eventPolls === 1) {
-        // 一批**定稿**事件：轮询要能应用它，并且仍然显示"已连接"。
+        // **水位（head=2）以下的重放**：与合流给出的内容逐条相同——必须一条都不重复应用。
         return {
           ok: true,
           json: async () => ({
-            lines: [{ seq: 1, sid: "smoke-w", events: [{ type: "transcript", lines: [{ id: 1, kind: "msg", speaker: "甲", verb: "say", line: "完整一句" }] }] }],
-            head: 1, oldest: 0,
+            lines: [
+              { seq: 1, sid: "smoke-w", events: [{ type: "transcript", lines: [{ id: 0, kind: "user", speaker: "用户", line: "刷新前的一句" }] }] },
+              { seq: 2, sid: "smoke-w", events: [{ type: "notice", text: "[建组] 甲" }] },
+            ],
+            head: 2, oldest: 1,
+          }),
+        };
+      }
+      if (eventPolls === 2) {
+        // 水位**之上**的实时行：照收（并且仍然显示"已连接"）。
+        return {
+          ok: true,
+          json: async () => ({
+            lines: [{ seq: 3, sid: "smoke-w", events: [{ type: "transcript", lines: [{ id: 1, kind: "msg", speaker: "甲", verb: "say", line: "完整一句" }] }] }],
+            head: 3, oldest: 1,
           }),
         };
       }
@@ -153,14 +168,19 @@ setTimeout(async () => {
       pollConn = String(els.get("#conn-text").textContent || "");
       const r = vm.runInNewContext(
         "(function () { const s = state.sessions.get('smoke-w') || { lines: [] };" +
-          " return { n: s.lines.length, first: (s.lines[0] || {}).text, last: (s.lines[s.lines.length - 1] || {}).text };" +
+          " const texts = s.lines.map(function (l) { return l.text; });" +
+          " const count = function (t) { return texts.filter(function (x) { return x === t; }).length; };" +
+          " return { n: s.lines.length, first: (s.lines[0] || {}).text, last: (s.lines[s.lines.length - 1] || {}).text," +
+          "          dup: count('刷新前的一句'), notice: count('[建组] 甲'), floor: s.floor };" +
           "})()",
         sandbox
       );
       pollApplied = r.n > 0;
-      // 刷新后"事件就地建出来的会话"必须先把**盘上转录**补上（否则看着像记录丢了）。
-      hydratedHistory = String(r.first || "").indexOf("刷新前的一句") >= 0 && String(r.last || "").indexOf("完整一句") >= 0;
-      if (!hydratedHistory) loadErrors.push("补水检查：" + JSON.stringify(r));
+      // **合流 + 水位**（刷新后整段重复的回归钉）：盘上转录与事件台尾巴各出现一次，
+      // 水位（head=2）以下的重放批次一条都不许再应用，水位之上的实时行照收。
+      hydratedHistory = r.n === 3 && String(r.first || "").indexOf("刷新前的一句") >= 0
+        && r.dup === 1 && r.notice === 1 && r.floor === 2 && String(r.last || "").indexOf("完整一句") >= 0;
+      if (!hydratedHistory) loadErrors.push("合流/水位检查：" + JSON.stringify(r));
     } catch (e) { loadErrors.push("轮询检查失败：" + e.message); }
   }
   // **权威行到达后流式块必须被替换**：否则那一行会一直挂着闪烁光标（"已落盘的还在流式"）。

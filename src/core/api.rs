@@ -123,6 +123,42 @@ impl EventBus {
         let oldest = g.lines.first().map(|l| l.seq).unwrap_or(g.seq + 1);
         (lines, g.seq, oldest)
     }
+
+    /// 盘上转录**之外**的实时尾巴 + 事件台当前头部：给「历史和实时一次给全」用（见呈现层的 history.open）。
+    ///
+    /// 判据是**结构化相等**（两边的 JSON 出自同一套序列化器，就是同一个值），不是按行 id 猜——
+    /// `notice`/`node_started` 这类行本来就没有 id，按 id 去重正是刷新后整段重复的来源。
+    /// 返回的尾巴按事件台顺序展开，前端因此**只按序 append**，不自己合并两个来源。
+    pub fn tail_excluding(
+        &self,
+        sid: &str,
+        transcript: &[serde_json::Value],
+    ) -> (Vec<serde_json::Value>, u64) {
+        let mut left: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+        for ev in transcript {
+            if let Ok(k) = serde_json::to_string(ev) {
+                *left.entry(k).or_insert(0) += 1;
+            }
+        }
+        let (lines, head, _oldest) = self.snapshot(Some(sid), 0);
+        let mut tail = Vec::new();
+        for line in lines {
+            for ev in &line.events {
+                let v = ev.to_json();
+                let Ok(k) = serde_json::to_string(&v) else {
+                    continue;
+                };
+                if let Some(n) = left.get_mut(&k) {
+                    if *n > 0 {
+                        *n -= 1;
+                        continue;
+                    }
+                }
+                tail.push(v);
+            }
+        }
+        (tail, head)
+    }
 }
 
 // ---------- 取消注册表（并发归核心） ----------

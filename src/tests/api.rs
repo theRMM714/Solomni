@@ -129,6 +129,43 @@ fn suggest_models_pushes_on_a_system_session_and_leaves_no_trace() {
     );
 }
 
+/// 历史与实时**合流**：盘上转录 + 事件台上"它之外"的尾巴，逐条互补（不重不漏）。
+/// 前端因此只按序 append；从前它自己合并两个来源，刷新后整段重复就是在那里出的。
+#[test]
+fn history_merge_is_the_transcript_plus_the_bus_tail_without_repeats() {
+    let handle = spawn(
+        vec![module_of("a")],
+        vec!["{\"type\":\"say\",\"text\":\"第一句\"}"],
+    );
+    let ops = Ops::from_handle(&handle);
+    let (opened, _base) = ops
+        .sessions
+        .create_work(single_work("w", &["a"]))
+        .expect("建会话");
+    ops.sessions
+        .say(&opened.sid, "你好", Output::Final)
+        .expect("说一句");
+    let (_meta, transcript) = ops.history.open(&opened.sid).expect("读转录");
+    assert!(!transcript.is_empty(), "这一趟有转录");
+    let (tail, head) = handle.events().tail_excluding(&opened.sid, &transcript);
+    assert!(head > 0, "合流顺带给出头部序号（水位）");
+    assert!(!tail.is_empty(), "事件台上还有它之外的实时行（短暂事件）");
+    // **逐条互补**：每条事实在「盘上 + 尾巴」里出现的次数，正好等于它在事件台上出现的次数。
+    let key = |v: &serde_json::Value| serde_json::to_string(v).expect("序列化");
+    let mut bus: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    let (lines, _h, _o) = handle.events().snapshot(Some(&opened.sid), 0);
+    for l in &lines {
+        for ev in &l.events {
+            *bus.entry(key(&ev.to_json())).or_insert(0) += 1;
+        }
+    }
+    let mut merged: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for ev in transcript.iter().chain(tail.iter()) {
+        *merged.entry(key(ev)).or_insert(0) += 1;
+    }
+    assert_eq!(merged, bus, "合流 = 事件台上这条会话的全部事实，逐条互补");
+}
+
 // ---------- 停止：生成期间也立刻生效（并发归核心） ----------
 
 #[test]

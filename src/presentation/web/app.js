@@ -389,35 +389,30 @@ function warnIfTierUnavailable(name) {
   );
 }
 
-/** **按落盘转录补水**：刚建出来的会话（页面刚打开时正在跑的那些）手上只有实时行，
- * 盘上的前缀要读出来接在前面；回放期间到达的实时事件先入 buffer，回放完按序接上（同 id 的行不重复）。 */
+/** **历史与实时合流**：后端把盘上转录与"事件台上它之外的尾巴"一次给全，这里只**按序 append**。
+ * 合流时的头部序号 = 这条会话的**水位**：水位以下的批次已经在这份合流里给过了，之后收到的一律丢掉。
+ * 为什么必须这样：从前前端自己合并「盘上转录」与「事件台重放」两个来源，而行没有共同身份
+ * （notice/node_started 这类行根本没有 id），只要补水先于重放完成，整段记录就会重复一遍（真机症状）。 */
 async function hydrateHistory(s) {
   if (!s || s.hydrating || s.hydrated) return;
   s.hydrating = true;
-  let events = [];
+  let got = null;
   try {
-    const r = await api('GET', '/api/history/' + encodeURIComponent(s.sid));
-    events = r.events || [];
+    got = await api('GET', '/api/history/' + encodeURIComponent(s.sid));
   } catch (err) { eventError(err); }
-  // 去重要把**本页已经收过的行**算进来：新页面是 since=0 从事件台重放起来的，那些行已经在 s.lines 里，
-  // 落盘历史只是补齐它们——不能整批再插一遍（否则刷新后记录翻倍：需求行、"yes" 各出现两次）。
-  const seen = new Set(
-    (s.lines || []).map((x) => x.id).filter((v) => typeof v === 'number')
-  );
-  const apply = (ev) => {
-    if (ev && ev.type === 'transcript') {
-      const fresh = (ev.lines || []).filter((l) => !seen.has(l.id));
-      if (!fresh.length) return;
-      for (const l of fresh) seen.add(l.id);
-      absorb(s, { type: 'transcript', lines: fresh });
-      return;
-    }
-    if (ev) absorb(s, ev);
-  };
-  for (const ev of events) apply(ev);
+  if (got) {
+    for (const ev of (got.events || [])) absorb(s, ev);
+    for (const ev of (got.live || [])) absorb(s, ev);
+    if (typeof got.head === 'number') s.floor = got.head;
+  }
+  // 合流期间到达的实时批次先攒着；水位定好后按同一把尺子接上（水位及以上的才接）。
   const buffered = s.buffer || [];
-  s.buffer = null;
-  for (const item of buffered) for (const ev of item) apply(ev);
+  s.buffer = [];
+  for (const item of buffered) {
+    if (item && (typeof s.floor !== 'number' || item.seq > s.floor)) {
+      absorbEvents(s, item.events || []);
+    }
+  }
   s.hydrating = false;
   s.hydrated = true;
   renderAll();
@@ -441,8 +436,11 @@ async function openHistory(name) {
       done: true, awaiting: null, readonly: true, fold: {}, scroll: {},
     };
     s.hydrated = true;
+    // 合流：盘上转录 + 事件台尾巴一次给全；水位 = 合流时的头部（之后的实时批次照收）。
+    if (typeof r.head === 'number') s.floor = r.head;
     state.sessions.set(name, s);
     for (const ev of (r.events || [])) absorb(s, ev);
+    for (const ev of (r.live || [])) absorb(s, ev);
     setActive(name);
     renderAll();
     warnIfTierUnavailable(name);
@@ -1800,9 +1798,12 @@ async function startSession(body) {
     running: false, working: null, running_known: false,
     done: false, awaiting: null, fold: {}, scroll: {},
   };
-  // 新建的会话：盘上只有建组那几条，不再补历史（避免多一次读）。
-  s.hydrated = true;
+  // 开场事实由 /api/sessions 那一刻就推给事件台了（回包只给头部序号），所以这里**合流**一次：
+  // 盘上转录 + 事件台尾巴一次给全，水位也随之下定（此后的批次按水位筛）。
+  s.hydrated = false;
+  s.buffer = [];
   state.sessions.set(sid, s);
+  hydrateHistory(s);
   // 开场事实不随回包走：它们已经在事件台上，长轮询会照 seq 补进来。
   setActive(sid);
   renderAll();
@@ -2367,7 +2368,10 @@ async function resyncActive() {
     s.lines = []; s.live = [];
     // 重放的是**转录**（运行态是短暂事件，不在盘上）：这条会话的实时知识同样作废，按快照对账。
     s.running_known = false;
+    // 重新合流：水位跟着刷新，之后的批次仍然只收水位之上的。
+    if (typeof r.head === 'number') s.floor = r.head;
     for (const ev of (r.events || [])) absorb(s, ev);
+    for (const ev of (r.live || [])) absorb(s, ev);
     renderStream(true);
   } catch { /* 拿不到就等下一次状态刷新 */ }
 }
@@ -2379,15 +2383,17 @@ function applyBatch(seq, sid, events) {
   // **前端不认识的会话一律不动**（系统会话如核心推荐的 `#suggest` 也在内）：会话表只由
   // /api/state 给，前端只渲染它知道的会话。为事件里冒出来的 sid 就地建会话 = 前端自己造会话
   // 状态，非会话（系统会话）会因此长出多余标签页，而真会话的记录又会被建重一遍。
-  // 别的客户端建的**真**会话由下一次状态刷新带进来（refreshState 建 + 补盘上转录）。
+  // 别的客户端建的**真**会话由下一次状态刷新带进来（refreshState 建 + 合流补齐）。
   if (!s) {
     needState = true;
     return 'none';
   }
-  // 补水期间到达的实时事件先攒着：回放完按序接上（同 id 的行不重复）。
+  // 水位以下的批次已经在**合流**里给过（/api/history 一次给全）：丢掉，不是"没收到"。
+  if (typeof seq === 'number' && typeof s.floor === 'number' && seq <= s.floor) return 'none';
+  // 合流还没落定：先攒着，等水位出来再按水位筛（见 hydrateHistory）。
   if (s.hydrating) {
     if (!s.buffer) s.buffer = [];
-    s.buffer.push(events);
+    s.buffer.push({ seq, events });
     return 'none';
   }
   // 运行态**不从增量猜**：核心在起止各推一条 `working`（同一个批次里就在 events 里），
@@ -2437,7 +2443,9 @@ function rewindTo(id) {
         s.pending = null;
         s.done = false;
         s.readonly = false; // 历史回放会话一旦删除即转为活动会话
+        if (typeof r.head === 'number') s.floor = r.head;
         for (const ev of (r.events || [])) absorb(s, ev);
+        for (const ev of (r.live || [])) absorb(s, ev);
         renderAll();
       } catch (err) { notice('操作失败', err.message, 'err'); }
     }],

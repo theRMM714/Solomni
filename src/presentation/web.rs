@@ -566,8 +566,14 @@ pub(crate) fn route(
             Ok(sessions) => ok_json(json!({ "sessions": sessions })),
             Err(e) => complaint(400, e),
         },
+        // 历史与实时**一次给全**：盘上转录 + 事件台上**它之外**的实时尾巴 + 合流时的头部序号。
+        // 前端因此只有一条带序号的流（只按序 append），不靠自己合并两个来源——
+        // 刷新后整段重复（任务行 / [建议] / yes 各两遍）正是在那个合并里出的。
         "history.open" => match ops.history.open(&name) {
-            Ok((meta, events)) => ok_json(json!({ "meta": meta, "events": events })),
+            Ok((meta, events)) => {
+                let (live, head) = ops.events.tail_excluding(&name, &events);
+                ok_json(json!({ "meta": meta, "events": events, "live": live, "head": head }))
+            }
             Err(e) => complaint(404, e),
         },
         "history.delete" => match ops.history.delete(&name) {

@@ -66,6 +66,13 @@
 （从前回包也带事件，两股流可能乱序，客户端得排序/补洞——那条复杂度随这次契约收紧一起消失。）
 **会话表也只由服务端给**：客户端的会话来自 `/api/state` 的 `sessions`，只把事件应用到它已有的会话；
 收到**不认识的 sid**（典型是系统会话，见 [session-model.md](session-model.md) 的推/落表）一律不动。
+
+**历史与实时只有一条流（客户端不再合并两个来源）**：`GET /api/history/{name}` 一次给全——
+盘上转录 `events` + 事件台上**它之外**的尾巴 `live` + 合流时的头部序号 `head`。
+判据是**结构化相等**（两边的 JSON 出自同一套序列化器，就是同一个值），**不是按行 id 猜**：
+`notice`/`node_started` 这类行本来就没有 id，按 id 去重正是"刷新后整段重复"的来源。
+客户端把 `head` 记成这条会话的**水位**，此后 `seq ≤ 水位` 的批次一律丢掉（合流里已经给过），
+只按序 append 水位之上的实时批次。
 ## 二、HTTP 路由目录（机器可读）
 
 `presentation/routes.rs` 的 `ROUTES` 是路由的**唯一定义**：`web.rs` 的匹配与分发都由它驱动
@@ -96,7 +103,7 @@
 | GET | `/api/settings` | `RegistryOps::settings` | — | `{settings}` | 200, 400 |
 | POST | `/api/settings` | `RegistryOps::set_settings` | `{streaming?,show_reasoning?}` | `{ok}` | 200, 400 |
 | GET | `/api/history` | `HistoryOps::list` | — | `{sessions}` | 200, 400 |
-| GET | `/api/history/{name}` | `HistoryOps::open` | — | `{meta,events}` | 200, 404 |
+| GET | `/api/history/{name}` | `HistoryOps::open` | — | `{meta,events,live,head}` | 200, 404 |
 | POST | `/api/history/{name}/delete` | `HistoryOps::delete` | — | `{ok}` | 200, 400 |
 | POST | `/api/suggest-models` | `DiscoveryOps::suggest_models` | `{task,mode}` | `{ok,agents}` | 200, 400 |
 <!-- ROUTES:END -->
