@@ -35,7 +35,7 @@
 - `src/adapters/fake_chat.rs` 中的 `FakeChat` 与 `DemoGateway`；
 - `src/tests/doubles.rs` 与 `src/tests/core.rs` 中的 `InMemory*`、`FakeCatalog`、`VecSource`、`ScriptGateway`、`RecordingRunner`、`RecordingFence`、`TestPrompts`、`NoopLog` 等测试装配（替身支持失败注入，供 T2 复用）；
 - `src/tests/` 中的契约测试（T2）：
-  - `ports.rs`（13 个端口的替身语义）、`fakes.rs`（FakeChat / DemoGateway 的独立契约）；
+  - `ports.rs`（14 个端口的替身语义）、`fakes.rs`（FakeChat / DemoGateway 的独立契约）；
   - `adapters.rs`（8 个文件系统适配器的真实边界 + 本机环回 HTTP 适配器）；
   - `api.rs`（入站契约：命令与事件、生成期间停止立刻生效、错误如实传播、单条命令 panic 不带垮核心）；
   - `intent.rs`（共享意图层：点名 / 归并 / 唯一名 / 动作分发 / 生成中拒绝改配置）；

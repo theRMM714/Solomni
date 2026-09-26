@@ -3,10 +3,6 @@
 > 端口矩阵是测试设计账：不允许只写"有 mock"而不说明 Fake 的能力。
 > 替身语义见 [doubles.md](doubles.md)，层级与判定见 [levels.md](levels.md)。
 
-## 六、端口测试矩阵
-
-端口矩阵是测试设计账，不允许只写"有 mock"而不说明 Fake 的能力。
-
 | 端口 | 当前/计划替身 | 交互记录 | 失败注入 | 取消/超时 | 真实适配器 | 当前状态 |
 | --- | --- | --- | --- | --- | --- | --- |
 | `Chat` | `FakeChat`、`SharedScript`、`TruncChat`、`AbortChat` | `FakeChat.calls` | 脚本回放非法信封 | `on` 返回 false 中止（FakeChat / HttpChat） | `HttpChat`：结束原因（非流式 `stop` / 流式 `length`）、原生 `tool_calls`（非流式 + 流式按 index 拼分片）都在环回假供应商上验 | 已验收 |
@@ -20,6 +16,7 @@
 | `HistoryStore` | `InMemoryHistory` | 内存流水可观察 | `fail_with` | 不适用 | `FsHistory` | 已验收 |
 | `PromptSource` | `TestPrompts` | 不适用 | `fail_with` | 不适用 | `YamlPrompts` | 已验收 |
 | `ToolRunner` | `RecordingRunner`、`SilentRunner`、`ParallelRunner` | `calls`（cwd / 命令 / 参数）、并发峰值 | `ok = false` 回执 | 真进程超时杀树（`ProcTools`） | `ProcTools` | 已验收 |
+| `EnvelopeRepair` | `NoRepair` | 不适用 | 不适用（修复器遇不确定一律不修） | 不适用 | `UnambiguousRepair`（转义裸控制字符 + 补上缺的收尾括号；断在字符串中间、起了两段信封一律不修） | 已验收 |
 | `FenceHost` | `RecordingFence`、`NoFenceHost` | `released` | `fail_with` | 不适用 | `confine::FenceHostAdapter`（真机撤权在 `tests/windows/`） | 已验收 |
 | `Log` | `NoopLog` | 不记录（Stub） | 不适用 | 不适用 | `FileLog`（三个级别都落盘） | 已验收 |
 
