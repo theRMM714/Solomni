@@ -10,7 +10,7 @@
 依赖箭头只有一种画法（每层只指向它的下层）：
 
 ```text
-presentation ──▶ core ◀── adapters
+cli / web ──▶ core ◀── adapters
                    │
                    ├──▶ capabilities ──▶ kernel
                    ▼
@@ -22,7 +22,7 @@ presentation ──▶ core ◀── adapters
 | --- | --- | --- |
 | `core/` | 只剩**门面**（`Core`：会话中心与命令队列）与回档；**正在被搬空**——端口与全部业务能力都已落位 `capabilities/` | 不读文件（`std::fs`）、不发网络（ureq）、不碰 stdin/stdout——一切机制下沉适配层 |
 | `adapters/` | 实现 core 的端口；可引用外部库（ureq / serde_yaml / windows-sys / libc） | 只依赖 core，**永不反向**；不做装配决策 |
-| `presentation/` | 渲染事件、收集输入（CLI 与 Web 并列） | 只依赖 **core 的入站能力面**（`core::api`）；**永不接触端口对象，也拿不到 `Core` 本身** |
+| `cli/` + `web/` | **前端（交付机制）**：各渠道一个顶层目录，完全分开——传输（argv/stdout vs HTTP/SSE）、路由、**纯渲染**。**不是业务能力**（无状态、无不变式） | 只依赖 **入站能力面**（`core::api` 或各能力的 `::api`）；**永不接触端口对象，也拿不到 `Core` 本身**；**两者之间互不依赖** |
 | `capabilities/` | **业务能力**：按业务功能垂直切分。每个能力有 `api`（入站契约）/ `ports`（出站端口）/ `domain`（纯逻辑）/ `detail`（细节实现） | **业务之间只经对方的 `api`**；不反向依赖 `core` / `adapters` / `presentation`（迁移期残留记为基线豁免，见 [docs/architecture/refactor-plan.md](docs/architecture/refactor-plan.md) §四） |
 | `kernel/` | **机制型内核**：无领域语义、无领域状态的机制（运行日志端口、生成中作业的取消表、跨业务共享的事实类型） | **不依赖任何人**（不认识 core / adapters / presentation）；不放有领域语义的类型 |
 | `main.rs` | 组合根：`new` 出所有适配器并注入 | 除装配外无业务 |
@@ -64,7 +64,7 @@ presentation ──▶ core ◀── adapters
 
 这两块是**查阅型细则**，拆出去只有一份：
 
-- 逐个文件讲 `core/` / `adapters/` / `presentation/` 各干什么：[docs/architecture/module-map.md](docs/architecture/module-map.md)。
+- 逐个文件讲 `core/` / `adapters/` / `cli/` / `web/` 各干什么：[docs/architecture/module-map.md](docs/architecture/module-map.md)。
 - 呈现层入站契约（能力接口、事件台、命令/事件规则）与机器可读的 HTTP 路由目录：[docs/architecture/contracts.md](docs/architecture/contracts.md)。
 - 系统工具总表、角色表与"谁能用哪些工具"（含越权校验与提示词按角色分配）：[docs/architecture/tools-and-roles.md](docs/architecture/tools-and-roles.md)。
 - 协作如何从讨论走到交付（审查关卡、任务链、子会话、验收）：[docs/architecture/task-chain.md](docs/architecture/task-chain.md)。
@@ -72,7 +72,7 @@ presentation ──▶ core ◀── adapters
 - 重构的迁移账（业务边界判据、能力清单、批次与销账）：[docs/architecture/refactor-plan.md](docs/architecture/refactor-plan.md)。
 
 **路由表由契约测试机器比对**（`src/tests/routes.rs` 直接读 `docs/architecture/contracts.md`）：
-表与 `presentation/routes.rs` 的 `ROUTES` 对不上就是测试失败。
+表与 `web/routes.rs` 的 `ROUTES` 对不上就是测试失败。
 
 ## 四、运行日志（Log 端口）
 

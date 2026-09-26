@@ -5,9 +5,10 @@
 //! 安全底线：只绑 127.0.0.1；密钥永不进任何响应（能力面只给 id）。
 
 use crate::capabilities::registry::api::AppSettings;
+use crate::core::api::{Acted, Action};
 use crate::core::api::{CollabStep, SessionEdit, SessionEvent, WorkMode, WorkSpec};
 use crate::core::api::{Ops, Output};
-use crate::presentation::{intent, routes};
+pub mod routes;
 use serde_json::json;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -178,22 +179,22 @@ pub(crate) fn route(
         "index" => (
             200,
             static_head("text/html"),
-            include_str!("web/index.html").to_string(),
+            include_str!("assets/index.html").to_string(),
         ),
         "style" => (
             200,
             static_head("text/css"),
-            include_str!("web/style.css").to_string(),
+            include_str!("assets/style.css").to_string(),
         ),
         "app" => (
             200,
             static_head("application/javascript"),
-            include_str!("web/app.js").to_string(),
+            include_str!("assets/app.js").to_string(),
         ),
         "md" => (
             200,
             static_head("application/javascript"),
-            include_str!("web/md.js").to_string(),
+            include_str!("assets/md.js").to_string(),
         ),
 
         "events" => {
@@ -356,31 +357,27 @@ pub(crate) fn route(
             };
             // 其余动作走共享意图层：分发只写一份（新增动作只改 intent::Action）。
             let what = match action.as_str() {
-                "say" => intent::Action::Say(&text),
-                "continue" => intent::Action::Continue,
-                "task" => intent::Action::Step(CollabStep::SetTask, &text),
-                "slate" => intent::Action::Step(CollabStep::ConfirmSlate, &text),
-                "begin" => intent::Action::Step(CollabStep::Begin, &text),
+                "say" => Action::Say(&text),
+                "continue" => Action::Continue,
+                "task" => Action::Step(CollabStep::SetTask, &text),
+                "slate" => Action::Step(CollabStep::ConfirmSlate, &text),
+                "begin" => Action::Step(CollabStep::Begin, &text),
                 // 用户对裁决的回应：自然语言一句话。核心 AI 判定意图是否明确，明确了才开工/放行。
-                "decide" => intent::Action::Step(CollabStep::Decide, &text),
-                "withdraw" => intent::Action::Withdraw(&agent),
+                "decide" => Action::Step(CollabStep::Decide, &text),
+                "withdraw" => Action::Withdraw(&agent),
                 // 压缩上下文：AI 自己压成摘要（此后此前内容不再发给模型，用户仍可查看）。
-                "compact" => intent::Action::Compact,
-                "rewind" => intent::Action::Rewind(
-                    req.get("id").and_then(|v| v.as_u64()).unwrap_or(u64::MAX),
-                ),
-                "update-task" => intent::Action::UpdateTask(&text),
+                "compact" => Action::Compact,
+                "rewind" => {
+                    Action::Rewind(req.get("id").and_then(|v| v.as_u64()).unwrap_or(u64::MAX))
+                }
+                "update-task" => Action::UpdateTask(&text),
                 _ => return complaint(400, format!("未知动作：{}", action)),
             };
-            match intent::act(ops, &sid, what, out) {
+            match ops.sessions.act(&sid, what, out) {
                 // 命令回包只给**事件台头部序号**：事实由长轮询按 since 订阅（不在这里捎带）。
-                Ok(intent::Acted::Advanced(adv)) => {
-                    ok_json(json!({ "sid": sid, "head": adv.head }))
-                }
+                Ok(Acted::Advanced(adv)) => ok_json(json!({ "sid": sid, "head": adv.head })),
                 // 回档 / 改需求返回完整重放（前端整体重建）。
-                Ok(intent::Acted::Replayed(events)) => {
-                    ok_json(json!({ "sid": sid, "events": events }))
-                }
+                Ok(Acted::Replayed(events)) => ok_json(json!({ "sid": sid, "events": events })),
                 Err(e) => {
                     log.error(
                         "web::session_action",

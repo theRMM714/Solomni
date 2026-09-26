@@ -150,7 +150,7 @@
 | 跑本地入口、读报告、认成功标记、CI 与报告发布 | `docs/testing/execution-ci.md` |
 | 记缺口、目录与命名、按验收清单收口 | `docs/testing/gaps-acceptance.md` |
 | 交付模块（模块作者要交什么测试证据） | `docs/testing/module-delivery.md` |
-| 逐个文件看 `core/` / `adapters/` / `presentation/` 各干什么 | `docs/architecture/module-map.md` |
+| 逐个文件看 `core/` / `adapters/` / `cli/` / `web/` 各干什么 | `docs/architecture/module-map.md` |
 | 呈现层入站契约、HTTP 路由目录 | `docs/architecture/contracts.md` |
 | 系统工具、角色（身份）与"谁能用哪些工具" | `docs/architecture/tools-and-roles.md` |
 | 审查关卡、任务链（依赖图）、子会话与验收 | `docs/architecture/task-chain.md` |

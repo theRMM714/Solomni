@@ -87,14 +87,15 @@
 | `collab/domain/collab_state.rs` | 「转录即状态」的协作状态派生（从 `core/collab_state.rs` 搬来，纯函数、可回放） |
 | `llm/domain/envelope.rs` | 发言信封解析（从 `core/envelope.rs` 搬来，纯逻辑）：`ToolInvoke.body` = 信封之后的正文；判定**未闭合 / 裸控制字符 / 语法错 / 字段不合法**四类；未闭合带上 EOF 状态 |
 
-## 五、`presentation/`（呈现）
+## 五、`cli/` + `web/`（前端，交付机制）
+
+**两者完全分开**：各渠道一个顶层目录，**互不依赖**，也**没有共享层**（唯一共享的是各能力的 `api`）。
+它们**不是业务能力**——没有自己的状态、没有独立不变式；只做三件事：传输、路由、**纯渲染**。
 
 | 文件 | 职责 |
 | --- | --- |
-| `mod.rs` | 呈现层出口 |
-| `cli.rs` | 终端转录中心：解析命令 → 用能力面 → 渲染事件流 |
-| `web.rs` | Web 转录中心：tiny_http + 长轮询增量推送（只绑 `127.0.0.1`），分发由路由目录驱动 |
-| `intent.rs` | **呈现层的共享件**（不是业务规则层）：输入解析（`split_names`）、空登记处的引导文案、动作分发（`Action` / `act`）。**规则不在这里**——点名归 `registry::pick_agents`、命名归 `session::unique_work_name`、「生成中禁改」归 `Core::edit_session`、单模式的组合语义归 `Core::create_work`（批次 15 收口第 2 步） |
-| `routes.rs` | **HTTP 入站契约的唯一定义**：`ROUTES` 目录 + 匹配器（[contracts.md](contracts.md) 的表与它机器比对） |
-| `web/` | 浏览器端：`app.js` / `md.js` / `style.css` / `index.html`，以及 `*.smoke.cjs` 冒烟 |
+| `cli/mod.rs` | 终端转录中心：argv → 入站能力面 → 渲染事件流。`split_names` 与空登记处的引导文案是**它自己的传输侧**的事 |
+| `web/mod.rs` | Web 转录中心：tiny_http + 长轮询增量推送（只绑 `127.0.0.1`），分发由路由目录驱动 |
+| `web/routes.rs` | **HTTP 入站契约的唯一定义**：`ROUTES` 目录 + 匹配器（[contracts.md](contracts.md) 的表与它机器比对） |
+| `web/assets/` | 浏览器端：`app.js` / `md.js` / `style.css` / `index.html`，以及 `*.smoke.cjs` 冒烟 |
 

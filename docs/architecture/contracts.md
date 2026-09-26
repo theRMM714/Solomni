@@ -3,7 +3,7 @@
 > 本文是**呈现层入站契约的唯一权威**：能力接口、事件台、命令/事件规则，以及机器可读的 HTTP 路由目录。
 > 分层与端口见 [ARCHITECTURE.md](../../ARCHITECTURE.md)，模块地图见 [module-map.md](module-map.md)。
 > **下面的路由表由契约测试机器比对**（`src/tests/routes.rs` 直接读本文件）：表与
-> `presentation/routes.rs` 的 `ROUTES` 对不上就是测试失败，不靠人记得改文档。
+> `web/routes.rs` 的 `ROUTES` 对不上就是测试失败，不靠人记得改文档。
 
 ## 一、能力接口与事件台
 
@@ -76,14 +76,14 @@
 已被盘上定稿行取代，跟下去只会画出一个填不上的空块。
 ## 二、HTTP 路由目录（机器可读）
 
-`presentation/routes.rs` 的 `ROUTES` 是路由的**唯一定义**：`web.rs` 的匹配与分发都由它驱动
+`web/routes.rs` 的 `ROUTES` 是路由的**唯一定义**：`web/mod.rs` 的匹配与分发都由它驱动
 （匹配由目录做、分支按 `id`），所以「代码里有路由但目录里没有」在结构上不可能发生。
 `solomni --print-routes` 输出它的 JSON（含能力、请求/响应形状、状态码与说明）。
 
 下面这张表由契约测试与 `ROUTES` 机器比对——对不上就是测试失败，不是靠人记得改文档：
 
 静态资源（`/`、`style.css`、`app.js`、`md.js`）一律 `Cache-Control: no-store`：改了前端**刷新即生效**，
-不需要硬刷新（`presentation/web.rs` 的 `static_head`）。
+不需要硬刷新（`web/mod.rs` 的 `static_head`）。
 
 <!-- ROUTES:BEGIN -->
 | 方法 | 路径 | 能力 | 请求 | 响应 | 状态码 |

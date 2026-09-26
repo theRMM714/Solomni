@@ -4,7 +4,9 @@
 use super::doubles::{collab_work, module_of};
 use super::{gated_ops, ops_with, single_work, slow_ops};
 use crate::capabilities::workspace::api::Module;
-use crate::core::api::{AgentInstance, SessionEdit, SessionEvent, WorkMode, WorkSpec};
+use crate::core::api::{
+    Acted, Action, AgentInstance, SessionEdit, SessionEvent, WorkMode, WorkSpec,
+};
 use crate::core::api::{CoreHandle, Ops, Output};
 use crate::kernel::types::Tier;
 use std::sync::atomic::Ordering;
@@ -808,5 +810,41 @@ fn editing_is_refused_while_a_session_is_generating() {
     assert!(
         ops.sessions.edit("没这个会话", edit()).is_err(),
         "无此会话要如实报错"
+    );
+}
+
+#[test]
+fn act_dispatches_to_the_two_result_shapes() {
+    let (_h, ops) = ops_with(vec![module_of("a")], Vec::new());
+    let sid = ops
+        .sessions
+        .create_work(single_work("w", &["a"]))
+        .expect("建会话")
+        .0
+        .sid;
+
+    match ops
+        .sessions
+        .act(&sid, Action::Say("你好"), Output::Final)
+        .expect("说一句")
+    {
+        Acted::Advanced(adv) => assert!(adv.head > 0, "生成类只回事件台头部序号"),
+        Acted::Replayed(_) => panic!("说一句不该给重放"),
+    }
+    match ops
+        .sessions
+        .act(&sid, Action::Rewind(0), Output::Final)
+        .expect("回档")
+    {
+        Acted::Replayed(events) => {
+            assert!(events.iter().all(|e| e.is_object()), "重放是线格式事件数组")
+        }
+        Acted::Advanced(_) => panic!("回档不该给事件批"),
+    }
+    assert!(
+        ops.sessions
+            .act("没这个会话", Action::Say("x"), Output::Final)
+            .is_err(),
+        "无此会话如实报错"
     );
 }

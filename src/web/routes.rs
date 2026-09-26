@@ -96,7 +96,7 @@ pub const ROUTES: &[Route] = &[
         id: "session.act",
         method: "POST",
         pattern: "/api/sessions/{sid}/{action}",
-        capability: "SessionOps + intent::act",
+        capability: "SessionOps::act",
         request: "{text?,agent?,id?,overwrite?,data_base64?,编辑体}",
         response: "{sid,head} / {sid,events}（重放快照） / {ok} / {sid,pending}",
         statuses: &[200, 400, 404, 409],

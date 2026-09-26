@@ -5,10 +5,10 @@
 
 mod adapters;
 mod api;
+mod cli;
 mod core;
 mod doubles;
 mod fakes;
-mod intent;
 mod ports;
 mod routes;
 

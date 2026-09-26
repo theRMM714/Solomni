@@ -215,6 +215,19 @@ pub trait SessionOps: Send + Sync {
     fn stop(&self, sid: &str) -> bool;
     #[allow(dead_code)]
     fn is_running(&self, sid: &str) -> bool;
+
+    /// **动作分发**：一次动作 → 一次能力调用。CLI 与 Web 共用这一份（新增动作只改这里）。
+    fn act(&self, sid: &str, action: Action<'_>, out: Output) -> Result<Acted, String> {
+        match action {
+            Action::Say(text) => self.say(sid, text, out).map(Acted::Advanced),
+            Action::Continue => self.continue_flow(sid, out).map(Acted::Advanced),
+            Action::Step(step, text) => self.collab_step(sid, step, text).map(Acted::Advanced),
+            Action::Withdraw(agent) => self.withdraw_agree(sid, agent).map(Acted::Advanced),
+            Action::Rewind(keep_id) => self.rewind(sid, keep_id).map(Acted::Replayed),
+            Action::UpdateTask(text) => self.update_task(sid, text).map(Acted::Replayed),
+            Action::Compact => self.compact(sid).map(Acted::Advanced),
+        }
+    }
 }
 
 /// 登记处能力：供应商 / 模型 / agent / 基本设置，以及通道上的模型发现。
@@ -1309,6 +1322,33 @@ impl Ops {
 }
 
 // ---------- 入站词汇（呈现层与核心共用的形状） ----------
+
+/// 一次会话动作（**用例词汇**）：CLI 与 Web 共用同一分发（新增动作只改这里）。
+#[derive(Debug, Clone, Copy)]
+pub enum Action<'a> {
+    /// 单 agent 说一句。
+    Say(&'a str),
+    /// 继续一次会话。
+    Continue,
+    /// 协作推进到下一阶段。
+    Step(CollabStep, &'a str),
+    /// 撤回同意。
+    Withdraw(&'a str),
+    /// 回档到某行之前。
+    Rewind(u64),
+    /// 改需求。
+    UpdateTask(&'a str),
+    /// 压缩上下文（AI 自己压成摘要；此后此前内容不再发给模型，用户仍可查看）。
+    Compact,
+}
+
+/// 动作结果：生成类只回**事件台头部序号**（事实在事件台上，订阅者自己按 since 取）；
+/// 回档/改需求给完整重放（那是快照，不是增量事实）。
+pub enum Acted {
+    Advanced(Advance),
+    Replayed(Vec<serde_json::Value>),
+}
+
 //
 // 定义在**能力面**：呈现层只认这里，不再经 `core::` 根转一手。
 // 批次 15 收口从 `core/mod.rs` 搬来（见 docs/architecture/refactor-plan.md §4.2）。

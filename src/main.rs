@@ -4,9 +4,10 @@
 
 mod adapters;
 mod capabilities;
+mod cli;
 mod core;
 mod kernel;
-mod presentation;
+mod web;
 
 #[cfg(test)]
 mod tests;
@@ -41,7 +42,7 @@ fn main() {
     }
     // 入站契约（机器可读）：HTTP 路由目录的唯一定义（见 docs/architecture/contracts.md）。
     if args.iter().any(|a| a == "--print-routes") {
-        println!("{}", presentation::routes::catalog_json());
+        println!("{}", web::routes::catalog_json());
         std::process::exit(0);
     }
     // 启动形态：无参数 = CLI（默认）；-webUI = Web 转录中心。
@@ -285,7 +286,7 @@ fn main() {
             .position(|a| a == "--web-port")
             .and_then(|i| args.get(i + 1))
             .and_then(|v| v.parse::<u16>().ok())
-            .unwrap_or(presentation::web::DEFAULT_PORT)
+            .unwrap_or(web::DEFAULT_PORT)
     };
 
     // 核心搬到它自己的执行线程：此后呈现层只持有**入站能力面**——拿不到 Core，也拿不到任何核心锁。
@@ -302,7 +303,7 @@ fn main() {
         serve_web(ops, port_flag(&args), allow_fence_write);
     } else {
         // CLI 里输入 webui 可直接转入 Web，无需重启进程（能力面可克隆，两份呈现共用同一个核心）。
-        if let presentation::cli::CliExit::Web(port) = presentation::cli::run(ops.clone()) {
+        if let cli::CliExit::Web(port) = cli::run(ops.clone()) {
             serve_web(ops, port, allow_fence_write);
         }
     }
@@ -568,7 +569,7 @@ fn serve_web(ops: core::api::Ops, port: u16, write_allowed: bool) {
     } else {
         (false, false)
     };
-    let fence = presentation::web::FenceInfo {
+    let fence = web::FenceInfo {
         fs: cap.fs,
         net: cap.net,
         tree: cap.tree,
@@ -582,7 +583,7 @@ fn serve_web(ops: core::api::Ops, port: u16, write_allowed: bool) {
             .map(|s| s.fence_read.len())
             .unwrap_or(0),
     };
-    if let Err(e) = presentation::web::serve(ops, port, fence) {
+    if let Err(e) = web::serve(ops, port, fence) {
         eprintln!("[Web 服务异常] {}", e);
         std::process::exit(1);
     }

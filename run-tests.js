@@ -374,7 +374,8 @@ function structuralAudit() {
     const LAYER_OF = (r) => {
       if (r.startsWith("src/core/")) return "core";
       if (r.startsWith("src/adapters/")) return "adapters";
-      if (r.startsWith("src/presentation/")) return "presentation";
+      // 前端（交付机制）：各渠道一个顶层目录，与 adapters 平级；不是业务能力。
+      if (r.startsWith("src/cli/") || r.startsWith("src/web/")) return "presentation";
       if (r.startsWith("src/kernel/")) return "kernel";
       if (r.startsWith("src/capabilities/")) return "capabilities";
       if (r.startsWith("src/tests/")) return "tests";
@@ -417,7 +418,9 @@ function structuralAudit() {
       const text = stripTestModules(fs.readFileSync(abs, "utf8"));
       for (const m of text.matchAll(/crate::([a-z_][a-z0-9_]*(?:::[a-z_][a-z0-9_]*)*)/g)) {
         const t = normTarget(m[1]);
-        const targetLayer = t.split("::")[1];
+        // 前端是两个顶层目录（cli / web），它们同属呈现层。
+      const targetLayer =
+        t === "crate::cli" || t === "crate::web" ? "presentation" : t.split("::")[1];
         if ((FORBIDDEN[layer] || []).includes(targetLayer)) reverse.add(f + " -> " + t);
         // 呈现层只认入站能力面：core::api，或某个能力的 ::api。
         const presOk =
@@ -663,7 +666,7 @@ function pushStep(obj) {
 
   // 前端冒烟（自动发现同目录 *.smoke.cjs）
   announce("前端冒烟");
-  const fe = sh(process.execPath, [path.join("src", "presentation", "web", "smoke.cjs")]);
+  const fe = sh(process.execPath, [path.join("src", "web", "assets", "smoke.cjs")]);
   announceDone(fe.code === 0 ? "完成" : "失败", "");
   pushStep({
     step: "前端冒烟",

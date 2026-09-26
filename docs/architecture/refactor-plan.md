@@ -149,7 +149,7 @@ capabilities/<name>/
 | **workspace** | 领域 | **已落位** `capabilities/workspace/`（`module` + `packages` + `exec` + `workspace` 沙箱数据） | 清单快照、执行计划、沙箱寻址 | `ModuleSource` `PackageSource` `Workspace` | **已完成**（批次 10） |
 | ~~**rewind**~~ | ~~协调~~ | **改判：不是独立能力**——无独立状态所有权，归 `session`（见 §3.6） | — | — | **已并入批次 13** |
 | **collab** | 协调 | **已落位** `capabilities/collab/`（`collab` + `collab_state` + `engine`）（任务链的**数据与图算法**已落位 `kernel/chain.rs`，见批次 5） | 讨论游标、任务链、待裁决 | — | **已完成**（批次 14） |
-| **presentation** | 呈现 | `presentation/` | 界面状态 | — | 未开始 |
+| **presentation** | 交付机制（**不是能力**：无状态所有权、无独立不变式） | **已落位** `cli/` + `web/`（各自独立、无共享层） | — | — | **已完成**（批次 15 收口第 3 步） |
 
 ### 3.2 kernel（机制型内核）
 
@@ -443,7 +443,7 @@ kernel       ──▶ （无）
 | **12** | **session 能力落位**：`capabilities/session/`（`session` + `history` + `events`）+ `HistoryStore`。**12a** 循环反转切掉 `engine ⇄ session`；**12b** 提取能力 | 11 | **已完成**（**反向边基线清空**——没有任何能力再依赖 `core`；环 7 → **5**，且 5 个节点全是能力、`core` 完全脱环；`core/ports.rs` 消失） |
 | **13** | **rewind 归位**：纯行 / 事件算术进 `capabilities/session/domain/rewind.rs`；`Core` 保留编排（`rewind` / `rewind_children` / `rebuild_session`） | 12 | **已完成**（`marks` 归属方案 A 照旧；无新增依赖边） |
 | **14** | **collab 能力落位**：`capabilities/collab/`（`collab` + `collab_state` + `engine`）。**执行顺序调整**：先做 14 再做 13——`rewind` 的回档重建要同时碰 `session` 与 `collab` 两侧，两边就位后才切得干净（已获用户同意） | 12 | **已完成**（环不变——`capabilities/collab` **不在环里**：没有任何它依赖的能力反过来依赖它；`core/` 只剩 `api.rs` + `mod.rs`） |
-| **15** | **断环（已完成）** → 能力图零环；**收口第 1 步（已完成）**：入站词汇归 `core/api.rs` → 基线全空；**收口第 2 步（已完成）**：`intent.rs` 的规则下沉——点名归 `registry::pick_agents`、命名归 `session::unique_work_name`、「生成中禁改」由 `Core::edit_session` 收口（`ensure_editable` 是重复守卫，删）、单模式组合语义归 `Core::create_work`（前端不再自己拼）；**后续（未开始）**：`Action`/`act` 进 `core::api`、`presentation/` 拆成 `web/` + `cli/`、`main.rs` 拆四件事 | 14 | 断环 ✓、收口 1 ✓、收口 2 ✓；其余未开始 |
+| **15** | **断环（已完成）** → 能力图零环；**收口 1（已完成）**：入站词汇归 `core/api.rs` → 基线全空；**收口 2（已完成）**：`intent.rs` 规则下沉；**收口 3（已完成）**：`Action`/`Acted` 与分发收进 `core::api`（`SessionOps::act` 默认方法）、`split_names`/`NO_AGENTS` 归 CLI、**`intent.rs` 删除**、`presentation/` 拆成 **`cli/` + `web/`** 两个独立顶层目录（静态资源随 `web/assets/`）；**后续（未开始）**：`main.rs` 拆四件事 | 14 | 断环 ✓、收口 1/2/3 ✓；`main.rs` 未开始 |
 
 **豁免清零判据**：`tests/dependency-baseline.json` 的**三个数组全部清空**（`reverse` / `presentation` / `coreCycles`），
 且 `Core` 这个类型不再存在。门禁对**新增**与**过期**都报失败，所以销账不靠自觉——

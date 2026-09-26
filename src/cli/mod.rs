@@ -2,10 +2,10 @@
 //! 只做解析与渲染，不做业务决策；Web 前端与它并列，共用同一能力面与事件词汇。
 
 use crate::capabilities::registry::api::{ModelView, ProviderView};
+use crate::core::api::{Acted, Action};
 use crate::core::api::{AgentInstance, CollabStep, Pending, SessionEvent, WorkMode, WorkSpec};
 use crate::core::api::{Ops, Output};
-use crate::presentation::intent;
-use crate::presentation::web::DEFAULT_PORT;
+use crate::web::DEFAULT_PORT;
 use std::io::Write;
 
 /// 离开转录中心时的去向：退出，或转入 Web 转录中心（端口）。
@@ -287,12 +287,34 @@ fn drain(ops: &Ops, sid: &str, from: u64) -> u64 {
 
 /// 一次命令之后的订阅。回档/改需求给的是**重放快照**（不是增量事实）：终端不重复打，
 /// 只把游标推到当前头部（与从前"只渲生成类结果"的行为一致）。
-fn follow(ops: &Ops, sid: &str, cursor: &mut u64, acted: intent::Acted) {
-    if matches!(acted, intent::Acted::Replayed(_)) {
+fn follow(ops: &Ops, sid: &str, cursor: &mut u64, acted: Acted) {
+    if matches!(acted, Acted::Replayed(_)) {
         *cursor = ops.events.head();
         return;
     }
     *cursor = drain(ops, sid, *cursor);
+}
+
+/// 登记处为空时的引导文案（**CLI 的说法**：它不再直接点模块）。
+pub(crate) const NO_AGENTS: &str = "登记处还没有 agent：请先到 Web 界面「设置 → agent 管理」建一个";
+
+/// 把用户输入的名字串切成名字列表（逗号 / 中文逗号 / 空白分隔）。
+/// 这是**传输侧**的解析（argv 怎么分隔是 CLI 的事），不是业务规则。
+pub(crate) fn split_names(arg: &str) -> Vec<String> {
+    arg.split(|c: char| c == ',' || c == '，' || c.is_whitespace())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .collect()
+}
+
+/// 点名：按名字取登记处存档 → 用例输入；空登记处给引导（文案见 `NO_AGENTS`）。
+pub(crate) fn pick_agents(ops: &Ops, names: &[String]) -> Result<Vec<AgentInstance>, String> {
+    if ops.registry.agents()?.is_empty() {
+        return Err(NO_AGENTS.to_string());
+    }
+    let views = ops.registry.pick_agents(names)?;
+    Ok(views.iter().map(AgentInstance::from_view).collect())
 }
 
 // ---------- 形态一：单 agent（模块数不限） ----------
@@ -306,7 +328,7 @@ fn single_flow(ops: &Ops, arg: &str) {
         }
     };
     if views.is_empty() {
-        println!("[错误] {}（CLI 不再直接点模块）", intent::NO_AGENTS);
+        println!("[错误] {}（CLI 不再直接点模块）", NO_AGENTS);
         return;
     }
     // 点名 1 个 = 直接用该 agent（模块数不限）；点名多个 / 无参 = 全部。
@@ -314,7 +336,7 @@ fn single_flow(ops: &Ops, arg: &str) {
     let picked: Vec<AgentInstance> = if arg.trim().is_empty() {
         views.iter().map(AgentInstance::from_view).collect()
     } else {
-        match intent::pick_agents(ops, &intent::split_names(arg)) {
+        match pick_agents(ops, &split_names(arg)) {
             Ok(l) => l,
             Err(e) => {
                 println!("[错误] {}", e);
@@ -353,7 +375,7 @@ fn single_flow(ops: &Ops, arg: &str) {
             break;
         }
         // 终端只在最终结果上渲染，不要流式（怎么显示是呈现层的事）。
-        match intent::act(ops, &sid, intent::Action::Say(&say), Output::Final) {
+        match ops.sessions.act(&sid, Action::Say(&say), Output::Final) {
             Ok(acted) => follow(ops, &sid, &mut cursor, acted),
             Err(e) => {
                 println!("[错误] {}", e);
@@ -373,7 +395,7 @@ fn collab_flow(ops: &Ops, arg: &str) {
     let agents: Vec<AgentInstance> = if delegate {
         Vec::new()
     } else {
-        match intent::pick_agents(ops, &intent::split_names(trimmed)) {
+        match pick_agents(ops, &split_names(trimmed)) {
             Ok(l) => l,
             Err(e) => {
                 println!("[错误] {}", e);
@@ -428,10 +450,9 @@ fn collab_flow(ops: &Ops, arg: &str) {
             Err(e) => println!("[提示] 取名单失败：{}", e),
         }
         let ok = prompt("确认名单？（yes 开始 / 其他取消）");
-        match intent::act(
-            ops,
+        match ops.sessions.act(
             &sid,
-            intent::Action::Step(CollabStep::ConfirmSlate, &ok),
+            Action::Step(CollabStep::ConfirmSlate, &ok),
             Output::Final,
         ) {
             Ok(acted) => follow(ops, &sid, &mut cursor, acted),
@@ -441,12 +462,10 @@ fn collab_flow(ops: &Ops, arg: &str) {
     // 开始确认。
     if matches!(ops.sessions.pending(&sid), Ok(Some(Pending::ConfirmBegin))) {
         let ans = prompt("开始讨论？（yes / yes,allow：授权小组自裁细节）");
-        match intent::act(
-            ops,
-            &sid,
-            intent::Action::Step(CollabStep::Begin, &ans),
-            Output::Final,
-        ) {
+        match ops
+            .sessions
+            .act(&sid, Action::Step(CollabStep::Begin, &ans), Output::Final)
+        {
             Ok(acted) => follow(ops, &sid, &mut cursor, acted),
             Err(e) => println!("[错误] {}", e),
         }
@@ -456,12 +475,10 @@ fn collab_flow(ops: &Ops, arg: &str) {
         if let Ok(Some(Pending::Ask { member, question })) = ops.sessions.pending(&sid) {
             println!("[请教] {}：{}", member, question);
             let ans = prompt("你的回答（回车 = 无补充，继续）>");
-            match intent::act(
-                ops,
-                &sid,
-                intent::Action::Step(CollabStep::Decide, &ans),
-                Output::Final,
-            ) {
+            match ops
+                .sessions
+                .act(&sid, Action::Step(CollabStep::Decide, &ans), Output::Final)
+            {
                 Ok(acted) => follow(ops, &sid, &mut cursor, acted),
                 Err(e) => {
                     println!("[错误] {}", e);

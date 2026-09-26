@@ -15,8 +15,8 @@ use crate::core::api::{
     RuntimeReport, SessionConfig, SessionEdit, SessionView, WorkMode, WorkOpened, WorkSpec,
 };
 use crate::kernel::types::Tier;
-use crate::presentation::routes::{self, ROUTES};
-use crate::presentation::web::{self, FenceInfo};
+use crate::web::routes::{self, ROUTES};
+use crate::web::{self, FenceInfo};
 use serde_json::json;
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -623,7 +623,7 @@ fn documented_route_table_matches_the_catalog() {
 
 #[test]
 fn frontend_only_calls_catalogued_paths() {
-    let src = include_str!("../presentation/web/app.js");
+    let src = include_str!("../web/assets/app.js");
     let mut hits: Vec<String> = Vec::new();
     let mut from = 0;
     while let Some(pos) = src[from..].find("/api/") {

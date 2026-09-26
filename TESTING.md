@@ -29,7 +29,7 @@
 - `src/tests/` 中的测试层：`core.rs`（T1 用例，全内存装配）、`doubles.rs`（替身与装配辅助）；
 - `tests/cross-platform/` 跨平台集成与端到端测试；
 - `tests/windows/`、`tests/linux/`、`tests/macos/` 平台探针（`tests/helpers/probe.rs` 提供共用探针设施）；
-- `src/presentation/web/*.smoke.cjs` 前端冒烟测试；
+- `src/web/assets/*.smoke.cjs` 前端冒烟测试；
 - `tests/gaps.yaml` 与 `tests/<平台>/gaps.yaml` 缺口账；
 - `node run-tests.js` 测试汇总入口（`node start.js -test` 是备好环境后的同一入口）；
 - `src/adapters/fake_chat.rs` 中的 `FakeChat` 与 `DemoGateway`；
