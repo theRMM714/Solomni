@@ -1,0 +1,12 @@
+   Compiling solomni v0.1.0 (/home/runner/work/Solomni/Solomni)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.30s
+     Running tests/cross-platform/main.rs (target/debug/deps/cross_platform-c975e990b3f6a3e9)
+
+running 4 tests
+test integration::fence_launcher::fence_failure_is_reported_honestly ... ok
+test integration::fence_launcher::fence_verify_always_reports_one_of_three_verdicts ... ok
+test integration::fence_launcher::killing_the_guarded_process_takes_the_whole_tree_with_it ... ok
+test integration::fence_launcher::launcher_runs_the_command_and_passes_its_exit_code ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 8.53s
+
