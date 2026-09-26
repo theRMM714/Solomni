@@ -1,0 +1,309 @@
+# 重构方案：按业务能力垂直切分
+
+> 本文是**重构的迁移账**：目标形态、业务边界判据、能力清单与迁移批次。
+> **未实施的条目一律记「未开始」，不得写成当前能力**（见 [AGENTS.md](../../AGENTS.md) 文档分层）。
+> 全部分区完成后**删除本文**，把当时的当前状态收回 [ARCHITECTURE.md](../../ARCHITECTURE.md)。
+> 分层规则见 [ARCHITECTURE.md](../../ARCHITECTURE.md)，逐文件职责见 [module-map.md](module-map.md)，
+> 入站契约见 [contracts.md](contracts.md)，测试规范见 [TESTING.md](../../TESTING.md)。
+
+## 零、现状与动机
+
+层与层之间**当前是干净的**：`core` 不引用 `adapters` / `presentation`，`adapters` 不引用 `presentation`，主箭头没有破。
+问题全部在 `core` 内部——它名义上是一层，实际是 7 个业务能力挤在一个包里：
+
+| 文件 | 行数 | 实际承担 |
+| --- | --- | --- |
+| `core/mod.rs` | 2933 | 门面 + 会话中心 + 登记处 CRUD + 发现 + 文件视图 + 历史 + 回档压缩 + 协作驱动 + 任务链派发 + 重建 |
+| `core/engine.rs` | 2314 | 讨论/执行/验收引擎 + 轮循环 + 工具调度 |
+| `core/collab.rs` | 1685 | 协作状态机 + 讨论泵 + 节点验收 |
+| `core/api.rs` | 1234 | 入站契约 + 线程 + 事件台 + 任务登记处 |
+| `core/systool.rs` | 990 | 内置工具策略 + 寻址 + 观察账本 + 故障文案拼装 |
+| `core/session.rs` | 773 | 单 agent 会话 |
+
+`Core` 一个结构体 ≈68 个方法、持 12 个端口；`sessions` 用"搬进搬出"管理（`remove`/`insert` 共 23 处）；
+`engine ⇄ session` 是模块级双向依赖；`presentation` 直接持有 `core::ports::Log`；
+`core/exec.rs` 里有 `std::env` + `is_file` 的宿主探测。
+
+重构范围因此可以精确锁定：**`core/` 内部拆开 + 一处呈现层违约 + 一条缺失的门禁**。
+
+---
+
+## 一、基本硬要求
+
+### 1.1 目标形态：三层，不是两层
+
+```text
+presentation ──▶ 各业务的 api
+                      ▲
+   协调型业务（rewind / collab） ──▶ 领域型业务（session / llm / tools / registry / workspace / prompt）
+                      ▲                                   ▲
+                      └──────────────  kernel  ───────────┘
+                          （jobs / bus / log；只被依赖，不依赖任何人）
+```
+
+| 层 | 判据 | 允许的依赖 |
+| --- | --- | --- |
+| **协调型业务** | 拥有跨参与方的不变式 | 向下调领域型业务的 `api`；同层协调型业务之间可互相调 `api` |
+| **领域型业务** | 拥有自己的状态与端口 | 向下调 `kernel`；**不调协调型业务** |
+| **kernel** | 无领域语义、无领域状态 | **不依赖任何人** |
+| **adapters** | 实现各业务 `ports` | 只依赖 `kernel` + 各业务 `ports`/`api` |
+| **presentation** | 只经 `api` 驱动 | 只依赖各业务 `api` |
+| **main** | 组合根 | 装配全部 |
+
+### 1.2 每个能力的内部形态
+
+```text
+capabilities/<name>/
+  api.rs       入站能力面：trait + DTO。其它能力与呈现层只准用这个
+  ports.rs     出站端口：本能力定义的抽象，由 adapters 或别的能力实现
+  domain/      纯逻辑：状态机、解析、派生。不加 trait
+  detail/      细节实现：含"用别的能力的 api 来实现本能力的端口"
+```
+
+### 1.3 硬要求清单
+
+| 编号 | 要求 | 依据 / 落地判据 |
+| --- | --- | --- |
+| **R1** | 业务之间**只经对方的 `api`** 交流；禁止 `use` 别人的 `domain` / `detail` / `ports` | 门禁按 `use` 边判定 |
+| **R2** | 依赖图**必须无环**，由 T0 门禁机器判定 | 白名单外的边 = 测试失败；迁移期允许的边进**基线豁免清单**，拆完即删 |
+| **R3** | DIP **只画在 IO 或可替换点上**；纯逻辑刻意不抽象 | 判据：这里有 IO，或这里有可替换实现。不满足就不加 trait |
+| **R4** | **状态所有权排他**：一块状态只有一个能力写，别人只读它的 `api` | 跨能力读改写必须经 `api`，不得 `pub` 字段 |
+| **R5** | **并发模型不变式**：单线程命令队列 + 能力间同步调用，**核心状态不加锁** | 这是跨能力读改写天然原子的前提（见 §3.4）；不得改成每能力一线程 |
+| **R6** | **共享内核唯一归属**：事实类型只属于 `kernel`，禁止各业务复制 DTO | 见 §3.1 的 `kernel` 清单 |
+| **R7** | **不保留兼容层**：项目是 GREEN FIELD，迁移是**搬家 + 删旧**，不留转发壳 | 同 `AGENTS.md` 项目不变量 |
+| **R8** | **文档同步**：改结构必须同一次改 `ARCHITECTURE.md` / `module-map.md` / 相关细则 / `AGENTS.md` 路由表 | 同 `AGENTS.md` 文档分层与同步 |
+| **R9** | **跨平台与路径**：一律 `PathBuf` 组件拼接；对外用 `/`；不假设平台 | 同 `ARCHITECTURE.md` §八 |
+| **R10** | **测试跟着业务分区走**：测试目录与业务目录同构，单文件 ≤ 2000 行 | 见 §四.4 |
+| **R11** | **测试入口 = 生产入口**：禁止 `#[cfg(test)]` 专用语义入口 | 现状 `Core::single_say` 是反例 |
+
+---
+
+## 二、怎么区分业务边界
+
+### 2.1 三个必要条件（必须同时成立）
+
+一个候选只有同时满足这三条，才配独立成一个能力：
+
+1. **有自己的状态所有权**——这块数据只归它写，别人只经它的 `api` 读；
+2. **可独立替换**——换掉它不影响别的能力的内部；
+3. **可独立测试**——不需要拉起别的能力的真实实现。
+
+只满足 1、2 不满足 3（或反之）→ 它还是某个能力的一部分，不是能力。
+
+### 2.2 两个判据测试
+
+**① 不变式测试**（决定"是不是业务"）
+
+> 这个横切关注点，有没有一个**没有任何参与方拥有**的不变式？
+
+- 有 → 它是**业务**（协调型）。判据还包括：有自己的协议/落盘形态、有用户可见后果、`api` 用**领域词**表达。
+- 没有，只是"按这个顺序调那 5 个" → 它是**脚本**，收进唯一的协调者，不配独立。
+- 完全没有领域语义 → 它是**内核**。
+
+**② 领域词测试**（决定"业务还是内核"）
+
+> 这个东西会不会需要知道"什么是回合、什么是回复、什么是工具执行"？
+
+- 会 → **业务**。
+- 不会 → **内核**。
+
+### 2.3 三分法
+
+| 类型 | 判据 | 归属 | 依赖方向 |
+| --- | --- | --- | --- |
+| **协调型业务** | 拥有跨参与方的不变式 + 自己的协议 + 用户可见后果 + 领域词 API | 独立业务（与领域型平级） | 向下调参与方 `api`；**参与方不得反向调它** |
+| **领域型业务** | 拥有自己的状态与端口 | 独立业务 | 向下调 `kernel` |
+| **机制型内核** | 无领域语义、无领域状态、API 不含领域词 | `kernel/` | 只被依赖 |
+| **伪横切（脚本）** | API 就是"按顺序调这几个" | 收进**唯一**协调者 | 否则五个"管理业务" = `Core` 换马甲 |
+
+### 2.4 反例：什么不配切成业务
+
+- **纯机制**：线程、锁、定时、文件句柄、HTTP 客户端 → 内核或 `adapters`。
+- **纯逻辑**：解析器、状态派生、提示词渲染 → 所属业务的 `domain/`，**不加 trait**。
+- **脚本**：只有调用顺序、没有自己不变式的编排 → 归唯一的协调者，不新增业务。
+- **DTO 中转站**：把两个能力的类型拼一起的"适配业务" → 这是新的水平层，禁止。
+
+### 2.5 粒度上限
+
+- 一个能力下任一文件 ≤ **800 行**；
+- 一个能力的 `api.rs` ≤ **20 个方法**（超过说明它其实是两个能力）；
+- 一个能力只允许依赖**数量有界**的其它能力，超出即重新审视边界。
+
+---
+
+## 三、业务能力清单与大体方案
+
+### 3.1 全景表
+
+| 能力 | 类型 | 现有文件 | 状态所有权 | 端口 | 状态 |
+| --- | --- | --- | --- | --- | --- |
+| **kernel** | 内核 | `core/api.rs` 的 EventBus/JobRegistry/线程、`core/ports.rs` 的 Log、`adapters/log.rs` | 运行态（唯一真相）、事件台序号 | — | 未开始 |
+| **session** | 领域 | `core/session.rs`、`history.rs`、`collab_state.rs`、`events.rs` | 对话、转录行、行索引 | `HistoryStore` | 未开始 |
+| **llm** | 领域 | `core/providers.rs` 的 Channel 侧、`ports.rs` 的通道族 | 选型解析 | `Chat` `ChatGateway` `ModelCatalog` | 未开始 |
+| **tools** | 领域 | `core/systool.rs`、`patch.rs`、`schema.rs`、`roles.rs`、`fence.rs`、`workspace.rs` | 观察账本、围栏策略、工具面 | `SysIo` `ToolRunner` `FenceHost` `Workspace` | 未开始 |
+| **prompt** | 领域 | `core/prompt.rs`、`refs.rs` | 提示词册 | `PromptSource` | 未开始 |
+| **registry** | 领域 | `core/agents.rs`、`providers.rs` 的登记处侧 | 四份 yaml 的内存形态 | `SettingsStore` | 未开始 |
+| **workspace** | 领域 | `core/module.rs`、`packages.rs`、`exec.rs` | 清单快照、执行计划 | `ModuleSource` `PackageSource` | 未开始 |
+| **rewind** | 协调 | 散布 5 处（见 §3.4） | 只持自己的日志，**不持会话数据** | — | 未开始 |
+| **collab** | 协调 | `core/collab.rs`、`chain.rs`、`engine.rs` | 讨论游标、任务链、待裁决 | — | 未开始 |
+| **presentation** | 呈现 | `presentation/` | 界面状态 | — | 未开始 |
+
+### 3.2 kernel（机制型内核）
+
+只放**窄**接口，**不做通用"并发管理器"**：
+
+- `kernel/jobs`：`JobRegistry`——取消标志 + **运行态的唯一真相**；
+- `kernel/bus`：`EventBus`——事实发布，多消费者按 `since` 增量取；
+- `kernel/log`：`Log` trait + `NoopLog`；
+- `kernel/types`：`SessionId`、`Msg`、`Completion`、`Chunk`、`LlmOpts`、`CompleteOpts` 等**事实类型**（R6）。
+
+**命令队列不进内核的 trait**：它是 R5 的**不变式**，一旦做成可替换点，跨能力读改写的原子性就没了。
+
+**顺带修掉的重复真相**：今天 `Core.running: BTreeSet`（`mod.rs:391`）与
+`JobRegistry.running: Mutex<HashMap<_, Arc<AtomicBool>>>`（`api.rs:184`）是**两份运行态**，
+由两条路径各自维护、靠约定同步。收进 `kernel/jobs` 后合成一份。
+
+### 3.3 领域型业务
+
+| 能力 | 边界要点 |
+| --- | --- |
+| **session** | 只管"一个会话的对话与转录"：`SessionParams`、`AgentSession`、行 id/turn/reply 簿记、`build_round_lines`、`collab_state` 派生、`events` 线格式。**不负责回档**（那是 `rewind`），**不负责编排**（那是 `collab`） |
+| **llm** | `providers.rs` 必须先拆：`Channel`/模型解析归 `llm`，`Settings`/`AppSettings`/`ModelEntry`/`Provider` 归 `registry`。这是 `llm` 的前置 |
+| **tools** | 放行/寻址/账本/参数校验/补丁纯逻辑归此；**故障文案**（`arg_fault_text`/`refuse`/`patch_fault`/`edit_fault_reason`/`block_fault`）归 `prompt` |
+| **workspace** | `module`/`packages`/`exec`。**迁移要点**：`exec.rs` 的宿主探测（`PATH`/`SystemRoot`/`is_file`）是机制，下沉为端口 |
+| **registry** | 四份 yaml 的内存形态与 CRUD 编排；`SettingsStore` 端口 |
+| **prompt** | 渲染、引用改写、工具文案；缺键/缺变量**报错暴露**，不静默兜底 |
+
+### 3.4 rewind（协调型业务）
+
+**它拥有的不变式（没有任何参与方单独拥有）**：
+
+1. **按 reply 原子截断**——截在一次回复内部会留下"孤儿工具结果"，协议要求结果紧跟发起它的助手消息；
+2. **主/子会话按 turn 同步截断**——子会话不在主会话流水里，得各自回档；
+3. **落盘只追加一条 `{"type":"rewind"}`，不物理删行**——转录即内容；
+4. **回档后工具账本作废**——宁可让模型重读一遍；
+5. **用户可见后果**——"回档删掉了其后 N 次工具执行，副作用不会回滚"。
+
+**为什么它是业务而不是脚本**：这 5 条跨越 `session` / `tools` / `history` / `collab_state` 四方，
+但没有一条属于其中任何一个；且它**已被当作原语复用**——`Core::update_task`（改需求）的实现就是
+"回档到需求行 + 追加新需求"（`mod.rs:2551`）。
+
+**现状散布（5 处）**：
+
+| 位置 | 内容 |
+| --- | --- |
+| `core/mod.rs` | `rewind`、`turn_of_line`、`last_line_within`、`rewind_children`、`truncate_events`、`cut_before_line`、`align_keep`、`line_reply_of`、`find_line_id`（≈250 行） |
+| `core/session.rs` | `rewind`、`keep_whole_replies`，及 `marks`/`line_reply`/`next_line` 字段与 15 处簿记 |
+| `core/collab_state.rs` | `tool_runs()`——算"删掉了几次工具执行" |
+| `core/history.rs` | append-only 的 `rewind` 记录协议 |
+| `core/mod.rs` | `rebuild_session`（177 行）——协作会话回档走整段重建 |
+
+**越界耦合（切出来正好消掉）**：`AgentSession::rewind` 里 `t.observations.clear()`
+（`session.rs:421-423`）——会话的回档操作伸手改了**工具能力**的内部状态。
+
+**约束**：
+
+- `api` 必须是领域词：`rewind(sid, keep_id)` ✔；`set_dialogue_length(sid, n)` ✘；
+- **无状态**（或只持自己的日志），不得持有会话数据；
+- 参与方**不得反向调用它**——现状的边是干净的（调用点只有 `api.rs:1103` 入站与 `mod.rs:2551` 内部复用），切分不会引入环 ✔。
+
+**待决：`marks`/`line_reply` 归谁**（方案 A 为准）
+
+| 方案 | 做法 | 代价 |
+| --- | --- | --- |
+| **A（采用）** | 索引留 `session`，暴露只读的 `lines()`（id/turn/reply/history_len）；`rewind` 算完再调 `session.truncate_to(hist_len)` | `rewind` 是**读改写**，中间有窗口 |
+| B | 索引归 `rewind`，`session` 通过行事件喂它 | `rewind` 复制了 `session` 的内部账，两边会漂移 |
+
+理由：`marks` 是"行 → 该行完成时的历史长度"，而**历史长度只有 `session` 知道**；搬出去等于让 `rewind` 维护一份镜像。
+方案 A 的安全性**完全依赖 R5**（单线程命令队列 ⇒ 读改写无交错）。
+
+### 3.5 collab（协调型业务）
+
+协作状态机、讨论泵、任务链、审查关卡、节点验收、总验收。它是依赖最多的能力，**最后迁**。
+前置：`engine ⇄ session` 的环必须先解（`engine` 引 `session::build_round_lines`/`stream_piece`；
+`session` 引 `engine::assemble`/`converse_with`/`Round`）。
+
+### 3.6 目标依赖图（必须无环）
+
+```text
+presentation ──▶ {session, llm, tools, prompt, registry, workspace, rewind, collab, kernel} 的 api
+rewind       ──▶ session, tools
+collab       ──▶ session, llm, tools, prompt, registry, workspace
+tools        ──▶ prompt, workspace, kernel
+session      ──▶ kernel
+llm          ──▶ kernel
+registry     ──▶ kernel
+workspace    ──▶ kernel
+prompt       ──▶ kernel
+kernel       ──▶ （无）
+```
+
+`rewind` 与 `collab` 同层，允许 `collab → rewind`（改需求复用回档），但**禁止反向**。
+
+---
+
+## 四、迁移流程（绞杀模式）
+
+### 4.1 总则
+
+1. **一次只绞杀一个能力**。每个批次独立可验收、结束后仓库全绿，**不允许跨批次半成品共存**。
+2. **门禁先行**：批次 0 先立依赖方向门禁，把现状的违规边记为**基线豁免**；之后每拆一个能力就删掉对应豁免，
+   **豁免清零 = 重构完成**。这样"禁止耦合"从第一天起就是机器判定的，而不是靠自觉。
+3. **搬家不改语义**：批次内只允许"移动 + 改可见性 + 删旧路径"。任何行为变更**另开批次**。
+4. **每个批次完成即销账**：把 §4.2 表里的状态改为「已完成」，并同步文档（R8）。
+5. **测试跟着走**：每个批次把该业务的测试从 `src/tests/core.rs` 拆到同构文件（§4.4）。
+6. **不留兼容层**（R7）：旧路径**删除**，不做 `pub use` 转发。
+
+### 4.2 批次表（销账表）
+
+| 批次 | 目标 | 现状 | 前置 | 状态 |
+| --- | --- | --- | --- | --- |
+| **0** | **依赖方向门禁**：T0 加 `use` 边检查 + 基线豁免清单 | 无门禁 | — | 未开始 |
+| **1** | **kernel**：`jobs` / `bus` / `log` / `types`；运行态合成一份 | `api.rs` 的 EventBus+JobRegistry+线程；`ports.rs` 的 Log | 0 | 未开始 |
+| **2** | **修两处违约**：`exec.rs` 宿主探测下沉为端口；`presentation` 不再持 `Log`/`ProbeOutcome` | `exec.rs:357-384`；`web.rs:44,611` | 0 | 未开始 |
+| **3** | **prompt** | `prompt.rs` `refs.rs` | 1 | 未开始 |
+| **4** | **workspace**：`module` / `packages` / `exec` | `module.rs` `packages.rs` `exec.rs` | 2,3 | 未开始 |
+| **5** | **registry**（含拆 `providers.rs`） | `agents.rs`；`providers.rs` 登记处侧 | 1 | 未开始 |
+| **6** | **llm**：`Channel` 解析 + 通道端口族 | `providers.rs` 的 Channel 侧；`ports.rs` 通道族 | 5 | 未开始 |
+| **7** | **tools**：`systool`/`patch`/`schema`/`roles`/`fence`/`workspace`；文案归 `prompt` | 6 个文件 | 3,4 | 未开始 |
+| **8** | **解 `engine ⇄ session` 环**：定清 `build_round_lines`/`stream_piece`/`assemble`/`converse_with` 的归属 | 双向依赖 | 7 | 未开始 |
+| **9** | **session** | `session.rs` `history.rs` `collab_state.rs` `events.rs` | 8 | 未开始 |
+| **10** | **rewind**（协调型；方案 A） | 散布 5 处 | 9 | 未开始 |
+| **11** | **collab** | `collab.rs` `chain.rs` `engine.rs` | 10 | 未开始 |
+| **12** | **presentation 收口 + 前端分区**：只 `use` 各业务 `api`；`app.js` 分区 | `cli.rs` `web.rs` `intent.rs`；`app.js` 2697 行 | 11 | 未开始 |
+
+**豁免清零判据**：批次 0 建立的基线豁免清单**全部删除**，且 `Core` 这个类型不再存在。
+
+### 4.3 每个批次的完成定义（DoD）
+
+一个批次只有**全部满足**才可销账：
+
+1. 新目录建立，代码迁入，**旧路径已删除**（不留转发壳）；
+2. `cargo test` 与 `node run-tests.js` 全绿（T0 质量门禁 + 业务测试都过）；
+3. 依赖方向门禁通过，**该批次的基线豁免已删除**；
+4. 该能力的测试已按 §4.4 拆到同构文件，单文件 ≤ 2000 行；
+5. 文档同步：`module-map.md` 对应行已改；受影响的门户/细则已改（R8）；
+6. §4.2 表状态改为「已完成」，并写明批次号。
+
+### 4.4 测试迁移规则
+
+- **目录同构**：业务 `capabilities/<name>/` ↔ 测试 `src/tests/<name>/`；`src/tests/core.rs`（8222 行）按能力拆空后删除。
+- **搬家不改断言**：拆分批次内只移动测试与改路径，**不动断言**。要改断言语义 → 另开批次并写明理由。
+- **消除测试专用入口**（R11）：`Core::single_say`（`#[cfg(test)]`）这类"测试路径 ≠ 生产路径"的双轨，
+  在 `session` / `collab` 批次里改为走生产入口（`CoreHandle`）。
+- **替身跟着端口走**：`src/tests/doubles.rs` 按端口归属拆到各能力，端口的真实适配器覆盖范围见 [doubles.md](../testing/doubles.md) 三。
+- **每批次保留一条行为不变验收**：至少一条端到端用例证明该批次"只搬家、没改行为"。
+
+---
+
+## 五、验收标准
+
+1. `core/` 消失，替换为 `capabilities/` + `kernel/`；每个能力有 `api.rs` / `ports.rs` / `domain/` / `detail/`。
+2. 依赖图为**无环**，由 T0 门禁机器判定，**零豁免**。
+3. `Core` 这个类型不存在；任一能力文件 ≤ 800 行，`api.rs` ≤ 20 个方法。
+4. `presentation` 只 `use` 各业务的 `api`：**零** `use ...::ports::`、零 `use ...::domain::`。
+5. 端口对象在**恰好一处**被持有（组合根），不再手工穿层。
+6. 运行态**只有一份真相**（`kernel/jobs`）。
+7. 测试按能力分文件，单文件 ≤ 2000 行；**测试入口 = 生产入口**。
+8. 架构文档（`ARCHITECTURE.md` + `module-map.md` + 相关细则 + `AGENTS.md` 路由表）与代码一致，无过期描述。
+9. 本文删除。

@@ -63,6 +63,7 @@ presentation ──▶ core ◀── adapters
 - 系统工具总表、角色表与"谁能用哪些工具"（含越权校验与提示词按角色分配）：[docs/architecture/tools-and-roles.md](docs/architecture/tools-and-roles.md)。
 - 协作如何从讨论走到交付（审查关卡、任务链、子会话、验收）：[docs/architecture/task-chain.md](docs/architecture/task-chain.md)。
 - 提示词册（`prompts/`）的结构与键清单：[docs/architecture/prompts.md](docs/architecture/prompts.md)。
+- 重构的迁移账（业务边界判据、能力清单、批次与销账）：[docs/architecture/refactor-plan.md](docs/architecture/refactor-plan.md)。
 
 **路由表由契约测试机器比对**（`src/tests/routes.rs` 直接读 `docs/architecture/contracts.md`）：
 表与 `presentation/routes.rs` 的 `ROUTES` 对不上就是测试失败。

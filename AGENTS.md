@@ -156,3 +156,4 @@
 | 审查关卡、任务链（依赖图）、子会话与验收 | `docs/architecture/task-chain.md` |
 | 会话模型（主/子会话、回合、发言标记、回档同步、上下文压缩） | `docs/architecture/session-model.md` |
 | 提示词册（`prompts/`）的结构与键清单 | `docs/architecture/prompts.md` |
+| 重构分区、业务边界判据、迁移批次与销账 | `docs/architecture/refactor-plan.md` |
