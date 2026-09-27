@@ -57,12 +57,18 @@ presentation ──▶ 各业务的 api
 
 ```text
 capabilities/<name>/
-  api.rs       入站能力面：trait + DTO。其它能力与呈现层只准用这个
-  ports.rs     出站端口：本能力定义的抽象，由 adapters 或别的能力实现
+  api.rs       **入站能力面 = 本能力的 trait + DTO**（**不含状态**）。其它能力与呈现层只准用这个
+  service.rs   **本能力的状态与用例**：持有自己的状态与端口，实现 api 的 trait。
+               `core` 只持有 `Arc<dyn …>`（按 trait 用），**看不见它的字段**（R4 的落地处）
+  ports.rs     出站端口：本能力定义的抽象，由 detail 或别的能力实现
   domain/      纯逻辑：状态机、解析、派生。不加 trait
   detail/      **细节实现 = 该能力自己的适配器**：文件读写、HTTP/TLS、拉进程、平台围栏…
-               也含"用别的能力的 api 来实现本能力的端口"。**组合根（入口层）是唯一构造它的地方。**
+               **组合根（入口层）是唯一构造它的地方**，它在这里 new 出 service 并注入 core
 ```
+
+**状态归属的判据（R4 的落地）**：一块状态（登记处的四份 yaml、会话历史、模块清单…）**只由一个能力写**。
+写它的操作跟着状态走，放在那个能力的 `service.rs`；`core` 只按 `api` 的 trait 调用，拿不到字段。
+**例外**：`core` 自己的状态（会话中心：会话表、命令队列、运行态）由 `core` 持有——它是应用服务，不是能力。
 
 ### 1.3 硬要求清单
 
@@ -463,7 +469,7 @@ kernel       ──▶ （无）
 | **15** | **断环（已完成）** → 能力图零环；**收口 1（已完成）**：入站词汇归 `core/api.rs` → 基线全空；**收口 2（已完成）**：`intent.rs` 规则下沉；**收口 3（已完成）**：`Action`/`Acted` 与分发收进 `core::api`（`SessionOps::act` 默认方法）、`split_names`/`NO_AGENTS` 归 CLI、**`intent.rs` 删除**、`presentation/` 拆成 **`cli/` + `web/`** 两个独立顶层目录（静态资源随 `web/assets/`）；**收口 4（已完成）**：`main.rs` 拆四件事——组合根留 `main.rs`、机器可读探针进 `diagnostics/`、围栏守门进程进 `guard/`（**第二个程序入口**）、路径机制下沉 `adapters/root.rs`；门禁新增**入口层**并禁止任何人依赖它 | 14 | **全部完成** |
 
 | **16** | **适配器归位**：`adapters/` 里**能力私有**的 20 个实现 → 各能力 `detail/`；`adapters/` 只剩 `log` / `host_probe`（内核端口）与 `root`（入口层） | 15 | **已完成**。**重要发现**：搬进能力后暴露出一处被"适配层"挡住的真环 `tools ⇄ workspace`——`fs_modules` 校验清单时反向问了 `tools` 的保留名。解法：**校验归清单主人（workspace）、名字空间归工具（tools），保留名表由组合根装配期注入** |
-| **17** | **`core` 的编排归位**：登记处 17 个方法 → `registry`；工作区 4 → `workspace`；历史与回档 8 → `session`；代拟 1 → `collab`。`core` 只剩**会话中心 + 生成驱动 + 跨能力用例** | 16 | 未开始 |
+| **17** | **编排与状态归位（能力服务化）**：每块状态连同写它的操作一起搬进该能力的 `service.rs`——登记处（`Settings` + 17 个方法 + `SettingsStore`/`ModelCatalog`/`ChatGateway`）→ `registry` 打头；工作区、历史与回档、代拟随后。`core` 只持有 `Arc<dyn …>`，**不再有别人的字段** | 16 | **进行中**：先做 `registry` 立样板 |
 | **18** | **入站接口归位**：`core::api` 的五个能力接口 → 各能力 `api`；`cli` / `web` 改经各能力的**声明面**；`contracts.md` 的路由表与 `tests/api.rs` 跟着改 | 17 | 未开始 |
 | **19** | **测试按业务分区（R10）**：`tests/core.rs`（8500+ 行）拆开，目录与 `capabilities/` 对齐 | 18 | 未开始 |
 
