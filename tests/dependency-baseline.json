@@ -1,23 +1,20 @@
 {
-  "_comment": "依赖方向门禁的迁移期基线（规则与销账口径见 docs/architecture/refactor-plan.md §一 / §四）。条目存在 = 尚未拆掉；拆掉后必须删除，否则门禁报「基线豁免已过期」。**全部清空 = 重构完成。** reverse / presentation / coreCycles 已清空（批次 0–19）；批次 20a 新增的四类判据在此记账，按 20b–20f 逐条清零。",
+  "_comment": "依赖方向门禁的迁移期基线（规则与销账口径见 docs/architecture/refactor-plan.md §一 / §四）。条目存在 = 尚未拆掉；拆掉后必须删除，否则门禁报「基线豁免已过期」。**全部清空 = 重构完成。** reverse / presentation / coreCycles 已清空（批次 0–19）；批次 20a 新增的四类判据在此记账，按 20b–20f 逐条清零——apiPorts 已随 20b(llm) 清零，workspace 那三条随 20b(workspace) 清零。",
   "reverse": [],
   "presentation": [],
   "coreCycles": [],
   "apiOnly": [
     "src/capabilities/collab/domain/collab.rs -> crate::capabilities::tools::ports",
-    "src/capabilities/collab/domain/collab.rs -> crate::capabilities::workspace::ports",
     "src/capabilities/collab/domain/engine.rs -> crate::capabilities::tools::ports",
     "src/capabilities/session/domain/session.rs -> crate::capabilities::tools::ports",
     "src/core/mod.rs -> crate::capabilities::session::ports",
-    "src/core/mod.rs -> crate::capabilities::tools::ports",
-    "src/core/mod.rs -> crate::capabilities::workspace::ports"
+    "src/core/mod.rs -> crate::capabilities::tools::ports"
   ],
   "foreignImpl": [
     "src/capabilities/collab/domain/engine.rs -> crate::capabilities::session::api"
   ],
   "domainPorts": [
     "src/capabilities/collab/domain/collab.rs -> crate::capabilities::tools::ports",
-    "src/capabilities/collab/domain/collab.rs -> crate::capabilities::workspace::ports",
     "src/capabilities/collab/domain/engine.rs -> crate::capabilities::tools::ports",
     "src/capabilities/session/domain/session.rs -> crate::capabilities::tools::ports",
     "src/capabilities/tools/domain/systool.rs -> crate::capabilities::tools::ports"

@@ -177,12 +177,18 @@ fn main() {
     // 内置文件工具：纯 Rust 直接读写，不经过外部进程（编码问题不进本程序）。
     let io = capabilities::tools::detail::FsSysIo::default();
 
+    // **工作区能力**：三个出站端口（清单 / 运行包库 / 目录布局）只由它的 service 持有（R12）。
+    let workspace: Arc<dyn capabilities::workspace::api::Workspace + Send + Sync> =
+        Arc::new(capabilities::workspace::service::WorkspaceService::new(
+            Arc::new(source),
+            Arc::new(packages),
+            Arc::new(workspace),
+        ));
+
     let mut core = core::Core::new(
         Box::new(registry),
         Arc::new(history),
-        Arc::new(workspace),
-        Arc::new(source),
-        Arc::new(packages),
+        workspace,
         Arc::new(capabilities::tools::detail::confine::FenceHostAdapter),
         Arc::clone(&llm),
         Arc::new(tools),

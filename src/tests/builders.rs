@@ -764,9 +764,11 @@ pub(crate) fn native_core(
     Core::new(
         registry_service(InMemorySettings::new(), Arc::clone(&llm)),
         history,
-        Arc::new(InMemoryWorkspace::new()),
-        Arc::new(VecSource(vec![module_of("a")])),
-        Arc::new(InMemoryPackages::empty()),
+        test_workspace(
+            Arc::new(VecSource(vec![module_of("a")])),
+            Arc::new(InMemoryPackages::empty()),
+            Arc::new(InMemoryWorkspace::new()),
+        ),
         Arc::new(NoFenceHost),
         llm,
         Arc::new(SilentRunner),

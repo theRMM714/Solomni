@@ -52,8 +52,9 @@
 | `llm/api.rs` | **入站能力面**：**通道与协议词汇**（`Chat` / `BoxedChat` / `Msg` / `Completion` / `Chunk` / `ToolCall` / `ToolDecl` / `Channel` / `ToolMode` / `LlmOpts` / `CompleteOpts` / 探测结论 → 它们是**对外契约**，`Chat` 的调用方是别的能力所以我在这里）+ **`Llm` 用例面**（造通道 / 探测 / 发现 / 修信封）。**出站端口不进 api**（R12）。原行余下：协议类型（`Msg` / `Completion` / `Chunk` / `ToolCall` / …）的对外名字 |
 | `llm/service.rs` | **本能力的用例与端口持有者**：持 `ChatGateway` / `ModelCatalog` / `EnvelopeRepair`（**唯一持有者**，R12），实现 `api::Llm`（批次 20b） |
 | `llm/ports.rs` | **出站端口**（只有 `service.rs` 持有）：`ChatGateway` / `ModelCatalog` / `EnvelopeRepair`。协议词汇已随批次 20b 归 `api`；**通道事实**：`Channel`（摊平的解析结果）、`ToolMode`、`ReplayShape` / `ReplayReport`（批次 15 从 `registry` 移来） |
-| `workspace/api.rs` | **入站能力面**：`WorkspaceOps`（清单事实）+ 模块清单 / 运行包库 / 执行档位与计划 / 沙箱寻址的对外名字 |
-| `workspace/ports.rs` | `ModuleSource` / `PackageSource` / `Workspace`（从 `core/ports.rs` 随能力搬出） |
+| `workspace/api.rs` | **入站能力面**：`WorkspaceOps`（呈现层的清单事实）+ **`Workspace` 用例面**（roster / library / runtimes_dir / prepare / write_work / work_has / files / roots）+ 模块清单 / 运行包库 / 执行档位与计划 / 沙箱寻址的对外名字 |
+| `workspace/service.rs` | **本能力的用例与端口持有者**：持 `ModuleSource` / `PackageSource` / `Workdirs`（**唯一持有者**，R12），实现 `api::Workspace`（批次 20b） |
+| `workspace/ports.rs` | **出站端口**（只有 `service.rs` 持有）：`ModuleSource` / `PackageSource` / `Workdirs`（目录布局；原名 `Workspace`，批次 20b 改名，把 `Workspace` 让给能力面） |
 | `workspace/domain/module.rs` | `module.yaml` 契约、`Roster`、`runtimes` 校验、agent system 合成、**参数声明形态** `Param` / `ParamType`（从 `core/module.rs` 搬来；批次 15 从 `tools` 移来） |
 | `workspace/domain/packages.rs` | `package.yaml` 契约与包库事实（从 `core/packages.rs` 搬来） |
 | `workspace/domain/exec.rs` | 执行档位（`ExecSpec`）与执行计划（`ExecPlan`）派生、虚拟机档诊断与承载判定（从 `core/exec.rs` 搬来） |
@@ -72,7 +73,7 @@
 | `session/detail/fs_history.rs` | `HistoryStore`：`meta.yaml` + `transcript.jsonl` |
 | `workspace/detail/fs_modules.rs` | `ModuleSource`：扫描 `modules/`（**保留名表由组合根注入**——清单校验归 workspace，名字空间归 tools） |
 | `workspace/detail/fs_packages.rs` | `PackageSource`：扫描 `runtimes/` |
-| `workspace/detail/fs_workspace.rs` | `Workspace`：`session/<工作名>/` 下的 work 与各 agent 沙箱 |
+| `workspace/detail/fs_workspace.rs` | `Workdirs`：`session/<工作名>/` 下的 work 与各 agent 沙箱 |
 | `llm/detail/http_chat.rs` | `Chat` / `ChatGateway`：OpenAI 兼容 `/chat/completions`（请求体形状的唯一定义：真实会话与探针共用） |
 | `llm/detail/http_probe.rs` | 两条诊断探针（只报事实）：工具调用支持探测、回放形状探测 |
 | `llm/detail/repair.rs` | `EnvelopeRepair`：信封修复（默认只做两类可判定的修补） |

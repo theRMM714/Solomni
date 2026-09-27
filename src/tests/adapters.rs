@@ -26,7 +26,7 @@ use crate::capabilities::workspace::api::ExecSpec;
 use crate::capabilities::workspace::detail::fs_modules::FsModules;
 use crate::capabilities::workspace::detail::fs_packages::FsPackages;
 use crate::capabilities::workspace::detail::fs_workspace::FsWorkspace;
-use crate::capabilities::workspace::ports::{ModuleSource, PackageSource, Workspace};
+use crate::capabilities::workspace::ports::{ModuleSource, PackageSource, Workdirs};
 use crate::kernel::log::{Log, NoopLog};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};

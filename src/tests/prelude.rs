@@ -35,7 +35,7 @@ pub use crate::capabilities::workspace::api::{self as exec, Diagnosis, ExecSpec}
 
 pub use crate::capabilities::workspace::api::{Library, PackageManifest};
 
-pub use crate::capabilities::workspace::ports::{ModuleSource, Workspace};
+pub use crate::capabilities::workspace::ports::{ModuleSource, Workdirs};
 
 pub use crate::core::api::{
     AgentInstance, CollabStep, ConfigAgent, Pending, SessionEdit, SessionEvent, WorkMode, WorkSpec,

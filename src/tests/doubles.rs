@@ -23,7 +23,7 @@ use crate::capabilities::tools::ports::SystoolsSource;
 use crate::capabilities::tools::ports::{FileRead, SysIo, ToolRunner};
 use crate::capabilities::workspace::api::{Library, PackageManifest};
 use crate::capabilities::workspace::api::{Module, ModuleManifest};
-use crate::capabilities::workspace::ports::{ModuleSource, PackageSource, Workspace};
+use crate::capabilities::workspace::ports::{ModuleSource, PackageSource, Workdirs};
 use crate::core::api::{AgentInstance, SessionEvent, WorkMode, WorkSpec};
 use crate::core::Core;
 use crate::kernel::types::Tier;
@@ -138,7 +138,7 @@ impl InMemoryWorkspace {
     }
 }
 
-impl Workspace for InMemoryWorkspace {
+impl Workdirs for InMemoryWorkspace {
     fn prepare(&self, _session: &str, _agents: &[String]) -> Result<(), String> {
         if let Some(m) = &self.fail {
             return Err(m.clone());
@@ -974,6 +974,15 @@ pub(crate) fn test_llm_demo() -> Arc<dyn crate::capabilities::llm::api::Llm + Se
     test_llm_with_repair(Arc::new(NoRepair))
 }
 
+/// 测试用的 **workspace 能力面**：把三个端口装进 `WorkspaceService`（与生产同一条路，R12）。
+pub(crate) fn test_workspace(
+    source: Arc<dyn ModuleSource + Send + Sync>,
+    packages: Arc<dyn PackageSource + Send + Sync>,
+    dirs: Arc<dyn Workdirs + Send + Sync>,
+) -> Arc<dyn crate::capabilities::workspace::api::Workspace + Send + Sync> {
+    Arc::new(crate::capabilities::workspace::service::WorkspaceService::new(source, packages, dirs))
+}
+
 /// 登记一个 agent（测试装配用）：**校验用的模块清单由调用方取一份**交给登记处——
 /// 清单归 workspace，登记处只认事实（见 docs/architecture/refactor-plan.md §3.1）。
 pub(crate) fn agent_upsert(
@@ -1008,9 +1017,11 @@ pub(crate) fn core_with_workspace(
     Core::new(
         registry_service(InMemorySettings::new(), Arc::clone(&llm)),
         Arc::new(InMemoryHistory::new()),
-        ws,
-        Arc::new(VecSource(modules)),
-        Arc::new(InMemoryPackages::empty()),
+        test_workspace(
+            Arc::new(VecSource(modules)),
+            Arc::new(InMemoryPackages::empty()),
+            ws,
+        ),
         Arc::new(NoFenceHost),
         llm,
         Arc::new(SilentRunner),
@@ -1104,9 +1115,11 @@ pub(crate) fn core_with_pkgs(
     Core::new(
         registry_service(InMemorySettings::new(), Arc::clone(&llm)),
         history,
-        Arc::new(InMemoryWorkspace::new()),
-        Arc::new(VecSource(modules)),
-        packages,
+        test_workspace(
+            Arc::new(VecSource(modules)),
+            packages,
+            Arc::new(InMemoryWorkspace::new()),
+        ),
         Arc::new(NoFenceHost),
         llm,
         runner,
@@ -1129,9 +1142,11 @@ pub(crate) fn core_with_settings(store: InMemorySettings) -> Core {
     Core::new(
         registry_service(store, Arc::clone(&llm)),
         Arc::new(InMemoryHistory::new()),
-        Arc::new(InMemoryWorkspace::new()),
-        Arc::new(VecSource(Vec::new())),
-        Arc::new(InMemoryPackages::empty()),
+        test_workspace(
+            Arc::new(VecSource(Vec::new())),
+            Arc::new(InMemoryPackages::empty()),
+            Arc::new(InMemoryWorkspace::new()),
+        ),
         Arc::new(NoFenceHost),
         llm,
         Arc::new(SilentRunner),
@@ -1165,9 +1180,11 @@ pub(crate) fn core_with_io_gateway(
     Core::new(
         registry_service(InMemorySettings::new(), Arc::clone(&llm)),
         Arc::new(InMemoryHistory::new()),
-        Arc::new(InMemoryWorkspace::new()),
-        Arc::new(VecSource(modules)),
-        Arc::new(InMemoryPackages::empty()),
+        test_workspace(
+            Arc::new(VecSource(modules)),
+            Arc::new(InMemoryPackages::empty()),
+            Arc::new(InMemoryWorkspace::new()),
+        ),
         Arc::new(NoFenceHost),
         llm,
         Arc::new(SilentRunner),
@@ -1193,9 +1210,11 @@ pub(crate) fn core_with_gateway(
     Core::new(
         registry_service(InMemorySettings::new(), Arc::clone(&llm)),
         Arc::new(InMemoryHistory::new()),
-        Arc::new(InMemoryWorkspace::new()),
-        Arc::new(VecSource(modules)),
-        Arc::new(InMemoryPackages::empty()),
+        test_workspace(
+            Arc::new(VecSource(modules)),
+            Arc::new(InMemoryPackages::empty()),
+            Arc::new(InMemoryWorkspace::new()),
+        ),
         Arc::new(NoFenceHost),
         llm,
         Arc::new(SilentRunner),

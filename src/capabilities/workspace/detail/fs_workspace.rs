@@ -1,8 +1,8 @@
-//! 工作区落盘：session/<工作名>/ 下的 work 与各 agent 沙箱（实现 core 的 Workspace 端口）。
+//! 工作区落盘：session/<工作名>/ 下的 work 与各 agent 沙箱（实现本能力的 `Workdirs` 端口）。
 //! 目录布局机制集中在这里；路径一律用路径组件拼接（交给运行环境）。
 
 use crate::capabilities::workspace::api::{WorkFiles, WorkRoots};
-use crate::capabilities::workspace::ports::Workspace;
+use crate::capabilities::workspace::ports::Workdirs;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -56,7 +56,7 @@ impl FsWorkspace {
     }
 }
 
-impl Workspace for FsWorkspace {
+impl Workdirs for FsWorkspace {
     fn prepare(&self, session: &str, agents: &[String]) -> Result<(), String> {
         let dir = self.session_dir(session);
         std::fs::create_dir_all(dir.join("work"))

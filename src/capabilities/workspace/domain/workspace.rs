@@ -178,7 +178,7 @@ pub struct WorkFiles {
     pub agents: BTreeMap<String, Vec<String>>,
 }
 
-/// 工作区寻址根（由 Workspace 端口如实给出；core 据此拼装沙箱）。
+/// 工作区寻址根（由 `Workdirs` 端口如实给出；本能力的 service 据此拼装沙箱）。
 #[derive(Debug, Clone)]
 pub struct WorkRoots {
     /// 本工作共享区。

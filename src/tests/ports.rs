@@ -19,7 +19,7 @@ use crate::capabilities::session::ports::HistoryStore;
 use crate::capabilities::tools::api::FenceSpec;
 use crate::capabilities::tools::ports::{FenceHost, SysIo, ToolRunner};
 use crate::capabilities::workspace::api::ExecSpec;
-use crate::capabilities::workspace::ports::{ModuleSource, PackageSource, Workspace};
+use crate::capabilities::workspace::ports::{ModuleSource, PackageSource, Workdirs};
 use crate::kernel::log::{Log, NoopLog};
 use std::collections::BTreeMap;
 use std::path::PathBuf;

@@ -18,9 +18,9 @@ pub trait PackageSource {
     fn dir(&self) -> std::path::PathBuf;
 }
 
-/// 工作区端口：一次工作的 work 目录与各 agent 沙箱（目录布局机制在适配层）。
-/// 本能力只说"哪次工作、哪些 agent"，不碰路径拼接细节。
-pub trait Workspace {
+/// 工作区**目录布局**端口：一次工作的 work 目录与各 agent 沙箱（机制在适配层）。
+/// 本能力只说"哪次工作、哪些 agent"，不碰路径拼接细节。**只有 `service.rs` 持有它**（R12）。
+pub trait Workdirs {
     /// 准备工作区：建 session/<工作名>/work 与每个 agent 的沙箱目录。
     fn prepare(&self, session: &str, agents: &[String]) -> Result<(), String>;
     /// 界面投喂：把文件写进本工作的 work/（文件名由调用方净化）。

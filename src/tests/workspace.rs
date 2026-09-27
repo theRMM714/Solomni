@@ -564,9 +564,11 @@ pub(crate) fn vm_tier_is_refused_when_the_machine_cannot_carry_it() {
     let mut core = Core::new(
         registry_service(InMemorySettings::with_tier(Tier::Vm), Arc::clone(&llm)),
         Arc::new(InMemoryHistory::new()),
-        Arc::new(InMemoryWorkspace::new()),
-        Arc::new(VecSource(vec![module_of("a")])),
-        Arc::new(InMemoryPackages::empty()),
+        test_workspace(
+            Arc::new(VecSource(vec![module_of("a")])),
+            Arc::new(InMemoryPackages::empty()),
+            Arc::new(InMemoryWorkspace::new()),
+        ),
         Arc::new(NoFenceHost),
         llm,
         Arc::new(SilentRunner),
@@ -600,9 +602,11 @@ pub(crate) fn vm_tier_is_refused_when_the_machine_cannot_carry_it() {
     let mut core2 = Core::new(
         registry_service(InMemorySettings::new(), Arc::clone(&llm2)),
         Arc::new(InMemoryHistory::new()),
-        Arc::new(InMemoryWorkspace::new()),
-        Arc::new(VecSource(vec![module_of("a")])),
-        Arc::new(InMemoryPackages::empty()),
+        test_workspace(
+            Arc::new(VecSource(vec![module_of("a")])),
+            Arc::new(InMemoryPackages::empty()),
+            Arc::new(InMemoryWorkspace::new()),
+        ),
         Arc::new(NoFenceHost),
         llm2,
         Arc::new(SilentRunner),
@@ -721,9 +725,11 @@ pub(crate) fn module_without_runtime_is_denied_with_reason() {
     let mut core = Core::new(
         registry_service(InMemorySettings::with_tier(Tier::Host), Arc::clone(&llm)),
         Arc::clone(&hist) as Arc<dyn HistoryStore + Send + Sync>,
-        Arc::new(InMemoryWorkspace::new()),
-        Arc::new(VecSource(vec![mod_a])),
-        Arc::new(InMemoryPackages::empty()),
+        test_workspace(
+            Arc::new(VecSource(vec![mod_a])),
+            Arc::new(InMemoryPackages::empty()),
+            Arc::new(InMemoryWorkspace::new()),
+        ),
         Arc::new(NoFenceHost),
         llm,
         Arc::clone(&runner) as Arc<dyn ToolRunner + Send + Sync>,

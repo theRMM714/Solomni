@@ -892,9 +892,11 @@ pub(crate) fn deleting_a_session_asks_the_fence_to_release_its_grants() {
         registry_service(InMemorySettings::new(), Arc::clone(&llm)),
         Arc::clone(&hist)
             as Arc<dyn crate::capabilities::session::ports::HistoryStore + Send + Sync>,
-        Arc::new(InMemoryWorkspace::new()),
-        Arc::new(VecSource(vec![module_of("a")])),
-        Arc::new(InMemoryPackages::empty()),
+        test_workspace(
+            Arc::new(VecSource(vec![module_of("a")])),
+            Arc::new(InMemoryPackages::empty()),
+            Arc::new(InMemoryWorkspace::new()),
+        ),
         Arc::clone(&fence) as Arc<dyn crate::capabilities::tools::ports::FenceHost + Send + Sync>,
         llm,
         Arc::new(SilentRunner),

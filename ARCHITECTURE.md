@@ -43,7 +43,7 @@ cli / web ──▶ core ──▶ capabilities ──▶ kernel
 | `ModelCatalog` | 按**端点与密钥**列出一条通道当前可用的模型名。`capabilities/llm/ports.rs`，**只由 llm 的 `service.rs` 持有**（R12） | `HttpModelCatalog` |
 | `ModuleSource` | 模块清单来源（扫描 `modules/`）。**已随能力搬出**：`capabilities/workspace/ports.rs` | `FsModules` |
 | `PackageSource` | 运行包库来源（扫描依赖文件夹 `runtimes/`）。**已随能力搬出**：`capabilities/workspace/ports.rs` | `FsPackages` |
-| `Workspace` | 一次工作的 work 目录、各 agent 沙箱、文件清单与寻址根。**已随能力搬出**：`capabilities/workspace/ports.rs` | `FsWorkspace` |
+| `Workdirs` | 一次工作的 work 目录、各 agent 沙箱、文件清单与寻址根。`capabilities/workspace/ports.rs`，**只由 workspace 的 `service.rs` 持有**（R12） | `FsWorkspace` |
 | `SysIo` | 内置文件工具的读写机制（读严格 UTF-8、非法字节如实标注；写一律 UTF-8）。**已随能力搬出**：`capabilities/tools/ports.rs` | `FsSysIo` |
 | `HistoryStore` | 会话历史：一个会话一个目录（meta + 事件流水）。**已随能力搬出**：`capabilities/session/ports.rs` | `FsHistory` |
 | `PromptSource` | 提示词册加载（`prompts/`）。**已随能力搬出 core**：定义在 `capabilities/prompt/ports.rs` | `YamlPrompts` |

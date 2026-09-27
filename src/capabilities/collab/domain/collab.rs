@@ -17,8 +17,8 @@ use crate::capabilities::session::api::{AgentMeta, SessionMeta};
 use crate::capabilities::session::api::{CheckView, LineView, Pending, SessionEvent};
 use crate::capabilities::tools::ports::{SysIo, ToolRunner};
 use crate::capabilities::workspace::api::Sandboxes;
+use crate::capabilities::workspace::api::Workspace;
 use crate::capabilities::workspace::api::{ExecSpec, Module};
-use crate::capabilities::workspace::ports::{ModuleSource, PackageSource};
 use std::sync::Arc;
 
 /// 节点验收的结论：逐节点 (node, ok, note)。
@@ -138,15 +138,14 @@ pub struct CollabSession {
     systools: Arc<dyn crate::capabilities::tools::api::Tools>,
     /// llm 用例面（**不持它的端口**，R12）：按通道造句柄、修信封都走它。
     llm: Arc<dyn Llm + Send + Sync>,
-    source: Arc<dyn ModuleSource + Send + Sync>,
+    /// 工作区用例面（**不持它的端口**，R12）：清单、运行包库与工作区目录都走它。
+    workspace: Arc<dyn Workspace + Send + Sync>,
     /// 外部工具执行端口（策略在核心按模块清单放行，机制在适配层）。
     tools: Arc<dyn ToolRunner + Send + Sync>,
     /// 内置文件工具读写端口。
     io: Arc<dyn SysIo + Send + Sync>,
     /// 运行日志（工具循环里"输出被长度截断"这类事实落盘）。
     log: Arc<dyn crate::kernel::log::Log + Send + Sync>,
-    /// 运行包库来源（工具可用性按它判定）。
-    packages: Arc<dyn PackageSource + Send + Sync>,
     /// 本会话的执行选型（档位 + 运行包定版）。
     spec: ExecSpec,
     /// 本工作的沙箱清单（按 agent 实例名取）。
@@ -168,14 +167,13 @@ impl CollabSession {
     #[allow(clippy::too_many_arguments)]
     pub fn start(
         llm: Arc<dyn Llm + Send + Sync>,
-        source: Arc<dyn ModuleSource + Send + Sync>,
+        workspace: Arc<dyn Workspace + Send + Sync>,
         settings: Settings,
         prompts: Arc<dyn Prompt>,
         systools: Arc<dyn crate::capabilities::tools::api::Tools>,
         tools: Arc<dyn ToolRunner + Send + Sync>,
         io: Arc<dyn SysIo + Send + Sync>,
         log: Arc<dyn crate::kernel::log::Log + Send + Sync>,
-        packages: Arc<dyn PackageSource + Send + Sync>,
         spec: ExecSpec,
         roster: Vec<AgentMeta>,
         delegated: bool,
@@ -207,11 +205,10 @@ impl CollabSession {
             prompts,
             systools,
             llm,
-            source,
+            workspace,
             tools,
             io,
             log,
-            packages,
             spec,
             sandboxes,
             done: false,
@@ -608,7 +605,7 @@ impl CollabSession {
 
     /// 委托代拟：核心拟发言名单（优先复用登记处的 agent，否则组装新的并给出模型），交用户确认。
     fn draft_slate(&mut self, sink: &mut dyn FnMut(SessionEvent)) {
-        let roster = self.source.scan();
+        let roster = self.workspace.roster();
         let (agent_listing, module_listing, model_listing) = self.briefing(&roster);
         let user = self.prompts.render(
             Segment::SlateUser,
@@ -1415,8 +1412,8 @@ impl CollabSession {
     /// 一个 agent = 一个成员：system 由它全部模块合成，工具 = 各模块外部工具的并集。
     fn assemble_members(&self) -> Result<(Vec<Member>, Vec<String>), String> {
         let prompts = self.prompts.clone();
-        let roster = self.source.scan();
-        let library = self.packages.scan();
+        let roster = self.workspace.roster();
+        let library = self.workspace.library();
         let mut members = Vec::new();
         let mut notes = Vec::new();
         for a in &self.roster {
@@ -1557,14 +1554,13 @@ impl CollabSession {
     #[allow(clippy::too_many_arguments)]
     pub fn restore(
         llm: Arc<dyn Llm + Send + Sync>,
-        source: Arc<dyn ModuleSource + Send + Sync>,
+        workspace: Arc<dyn Workspace + Send + Sync>,
         settings: Settings,
         prompts: Arc<dyn Prompt>,
         systools: Arc<dyn crate::capabilities::tools::api::Tools>,
         tools: Arc<dyn ToolRunner + Send + Sync>,
         io: Arc<dyn SysIo + Send + Sync>,
         log: Arc<dyn crate::kernel::log::Log + Send + Sync>,
-        packages: Arc<dyn PackageSource + Send + Sync>,
         meta: &SessionMeta,
         events: &[serde_json::Value],
         sandboxes: Sandboxes,
@@ -1618,11 +1614,10 @@ impl CollabSession {
             prompts: prompts.clone(),
             systools: systools.clone(),
             llm,
-            source,
+            workspace,
             tools,
             io,
             log,
-            packages,
             spec: meta.exec.clone(),
             sandboxes,
             done: st.ended,

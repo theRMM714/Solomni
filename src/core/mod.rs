@@ -10,7 +10,7 @@ pub(crate) use crate::capabilities::session::api::Live;
 use crate::capabilities::session::api::{Pending, SessionEvent};
 use crate::capabilities::session::ports::HistoryStore;
 use crate::capabilities::tools::ports::{SysIo, ToolRunner};
-use crate::capabilities::workspace::ports::{ModuleSource, PackageSource, Workspace};
+use crate::capabilities::workspace::api::Workspace;
 use crate::core::api::{
     AgentInstance, AgentSuggestion, CollabStep, ConfigAgent, FilesAgentRootView, FilesAgentView,
     FilesRootsView, FilesView, RuntimeReport, SessionConfig, SessionEdit, SessionView, WorkMode,
@@ -179,10 +179,8 @@ pub struct Core {
     /// 登记处能力：**四份 yaml 的状态在它里面**，core 只按 `Registry` 调用（看不见它的字段）。
     registry: Box<dyn Registry>,
     history: Arc<dyn HistoryStore + Send + Sync>,
+    /// 工作区用例面（**不持它的端口**，R12）：清单事实、运行包库与工作区目录都走它。
     workspace: Arc<dyn Workspace + Send + Sync>,
-    source: Arc<dyn ModuleSource + Send + Sync>,
-    /// 运行包库来源（依赖文件夹的扫描事实；校验与诊断在 core）。
-    packages: Arc<dyn PackageSource + Send + Sync>,
     /// 围栏授权释放（会话删除时请求一次；机制在适配层）。
     fence: Arc<dyn crate::capabilities::tools::ports::FenceHost + Send + Sync>,
     /// llm 用例面：按解析出来的通道造收发句柄 + 信封的无歧义修复（通道的**解析**在登记处能力）。
@@ -215,8 +213,6 @@ impl Core {
         registry: Box<dyn Registry>,
         history: Arc<dyn HistoryStore + Send + Sync>,
         workspace: Arc<dyn Workspace + Send + Sync>,
-        source: Arc<dyn ModuleSource + Send + Sync>,
-        packages: Arc<dyn PackageSource + Send + Sync>,
         fence: Arc<dyn crate::capabilities::tools::ports::FenceHost + Send + Sync>,
         llm: Arc<dyn Llm + Send + Sync>,
         tools: Arc<dyn ToolRunner + Send + Sync>,
@@ -230,8 +226,6 @@ impl Core {
             registry,
             history,
             workspace,
-            source,
-            packages,
             fence,
             llm,
             tools,
@@ -838,14 +832,14 @@ impl Core {
 
     /// 清单即事实：每次调用重扫（策略在 core，机制在 ModuleSource）。
     pub fn scan(&self) -> crate::capabilities::workspace::api::Roster {
-        self.source.scan()
+        self.workspace.roster()
     }
 
     /// 运行能力报告：模块声明的能力、包库里的可用版本、缺失清单与虚拟机档诊断。
     /// 「清单即事实」：每次调用重扫模块清单与包库；本机档不装载运行包，missing 只作事实呈现。
     pub fn runtime_report(&self, tier: crate::kernel::types::Tier) -> RuntimeReport {
-        let roster = self.source.scan();
-        let lib = self.packages.scan();
+        let roster = self.workspace.roster();
+        let lib = self.workspace.library();
         let spec = crate::capabilities::workspace::api::ExecSpec {
             tier,
             ..crate::capabilities::workspace::api::ExecSpec::default()
@@ -879,7 +873,7 @@ impl Core {
         spec: &crate::capabilities::workspace::api::ExecSpec,
         modules: &[Module],
     ) -> BTreeMap<String, Vec<String>> {
-        crate::capabilities::workspace::api::unavailable(spec, modules, &self.packages.scan())
+        crate::capabilities::workspace::api::unavailable(spec, modules, &self.workspace.library())
     }
 
     /// 配置视图：把「能改什么、现在是什么、缺什么」如实给出（每次读取都重扫模块清单与包库）。
@@ -910,7 +904,7 @@ impl Core {
             net: meta.exec.net,
             pins: meta.exec.pins.clone(),
             runtime: self.runtime_report(tier),
-            runtimes_dir: crate::kernel::path::slash(&self.packages.dir()),
+            runtimes_dir: crate::kernel::path::slash(&self.workspace.runtimes_dir()),
             tier_ready: crate::capabilities::workspace::api::tier_readiness(
                 &meta.exec,
                 self.qemu_path(),
@@ -1065,7 +1059,7 @@ impl Core {
         let plan = crate::capabilities::workspace::api::plan(
             &spec,
             &session_modules,
-            &self.packages.scan(),
+            &self.workspace.library(),
         )
         .map_err(|diags| crate::capabilities::workspace::api::diagnose_text(&diags))?;
         self.log.info(
@@ -1335,7 +1329,7 @@ impl Core {
             .cloned()
             .collect();
         for (id, caps) in
-            crate::capabilities::workspace::api::absent(&session_modules, &self.packages.scan())
+            crate::capabilities::workspace::api::absent(&session_modules, &self.workspace.library())
         {
             self.log.warn(
                 "core::create_work",
@@ -1347,7 +1341,7 @@ impl Core {
         let plan = crate::capabilities::workspace::api::plan(
             &meta.exec,
             &session_modules,
-            &self.packages.scan(),
+            &self.workspace.library(),
         )
         .map_err(|diags| crate::capabilities::workspace::api::diagnose_text(&diags))?;
         self.log.info(
@@ -1384,14 +1378,13 @@ impl Core {
                 let task = spec.task.as_deref().unwrap_or("").trim().to_string();
                 let mut cs = CollabSession::start(
                     Arc::clone(&self.llm),
-                    Arc::clone(&self.source),
+                    Arc::clone(&self.workspace),
                     self.registry.snapshot(),
                     Arc::clone(&self.prompt),
                     Arc::clone(&self.systools),
                     Arc::clone(&self.tools),
                     Arc::clone(&self.io),
                     Arc::clone(&self.log),
-                    Arc::clone(&self.packages),
                     meta.exec.clone(),
                     metas.clone(),
                     delegate,
@@ -1444,7 +1437,7 @@ impl Core {
             .load(sid)
             .map_err(|_| format!("无此会话：{}", sid))?;
         let names: Vec<String> = meta.agents.iter().map(|a| a.name.clone()).collect();
-        let files = self.workspace.list(sid, &names)?;
+        let files = self.workspace.files(sid, &names)?;
         let roster = self.scan();
         let sandboxes = self.sandboxes(&meta, &roster)?;
         let mut agents: Vec<FilesAgentView> = Vec::new();
@@ -1665,7 +1658,7 @@ impl Core {
             return Err(Self::running_refusal(name));
         }
         if let Ok((meta, _)) = self.history.load(name) {
-            let roster = self.source.scan();
+            let roster = self.workspace.roster();
             match self.sandboxes(&meta, &roster) {
                 Ok(sandboxes) => {
                     for sb in &sandboxes.list {
@@ -2193,19 +2186,18 @@ impl Core {
         meta: &SessionMeta,
         events: &[serde_json::Value],
     ) -> Result<Session, String> {
-        let roster = self.source.scan();
+        let roster = self.workspace.roster();
         let sandboxes = self.sandboxes(meta, &roster)?;
         match meta.mode.as_str() {
             "collab" => Ok(Session::Collab(CollabSession::restore(
                 Arc::clone(&self.llm),
-                Arc::clone(&self.source),
+                Arc::clone(&self.workspace),
                 self.registry.snapshot(),
                 Arc::clone(&self.prompt),
                 Arc::clone(&self.systools),
                 Arc::clone(&self.tools),
                 Arc::clone(&self.io),
                 Arc::clone(&self.log),
-                Arc::clone(&self.packages),
                 meta,
                 events,
                 sandboxes,
