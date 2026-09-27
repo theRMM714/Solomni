@@ -12,7 +12,8 @@ use crate::capabilities::llm::api::{
     BoxedChat, Chat, ChatGateway, Chunk, CompleteOpts, Completion, ModelCatalog, Msg,
 };
 use crate::capabilities::llm::detail::fake_chat::FakeChat;
-use crate::capabilities::prompt::api::Prompts;
+use crate::capabilities::prompt::api::Prompt;
+use crate::capabilities::prompt::domain::prompt::Prompts;
 use crate::capabilities::prompt::ports::PromptSource;
 use crate::capabilities::registry::api::{ModelEntry, Provider, Settings};
 use crate::capabilities::registry::ports::SettingsStore;
@@ -447,7 +448,7 @@ pub(crate) fn test_sandbox(
         shared: abs(&["demo", "work"]),
         private: abs(&["demo", agent]),
         modules: map,
-        texts: test_prompts().core.tool_texts,
+        texts: test_prompts().tools(),
     }
 }
 
@@ -918,6 +919,11 @@ impl crate::core::api::LogOps for NoopLogOps {
     fn warn(&self, _at: &str, _msg: &str) {}
     fn error(&self, _at: &str, _msg: &str) {}
 }
+/// 测试用的提示词册能力：替身装载器 → 真实册子 → 能力面（与生产同一条路）。
+pub(crate) fn test_prompt() -> std::sync::Arc<dyn crate::capabilities::prompt::api::Prompt> {
+    crate::capabilities::prompt::service::load(&TestPrompts::ok()).expect("内置提示词册必须合法")
+}
+
 /// 登记处能力的测试装配：内存登记处 + 指定模型目录 + 指定通道 + 空日志。
 /// 生产里这些端口由组合根注入，测试这里用替身顶。
 pub(crate) fn registry_service(
@@ -978,12 +984,11 @@ pub(crate) fn core_with_workspace(
         Arc::new(SilentRunner),
         Arc::new(InMemorySysIo::new()),
         Arc::new(NoRepair),
-        Box::new(TestPrompts::ok()),
+        test_prompt(),
         test_systools(),
         Arc::new(crate::kernel::log::NoopLog),
         Arc::new(crate::adapters::HostProbeAdapter),
     )
-    .expect("内存装配不应失败")
 }
 
 /// 注入指定内存文件系统的装配（断言内置文件工具真正落盘）。
@@ -1075,12 +1080,11 @@ pub(crate) fn core_with_pkgs(
         runner,
         io,
         Arc::new(NoRepair),
-        Box::new(TestPrompts::ok()),
+        test_prompt(),
         test_systools(),
         Arc::new(crate::kernel::log::NoopLog),
         Arc::new(crate::adapters::HostProbeAdapter),
     )
-    .expect("内存装配不应失败")
 }
 
 /// 用**指定登记处**装配（断言"全局设置是流式的上限、预算全局通用"这类判据）。
@@ -1102,12 +1106,11 @@ pub(crate) fn core_with_settings(store: InMemorySettings) -> Core {
         Arc::new(SilentRunner),
         Arc::new(InMemorySysIo::new()),
         Arc::new(NoRepair),
-        Box::new(TestPrompts::ok()),
+        test_prompt(),
         test_systools(),
         Arc::new(crate::kernel::log::NoopLog),
         Arc::new(crate::adapters::HostProbeAdapter),
     )
-    .expect("内存装配不应失败")
 }
 
 pub(crate) fn gw(member: BTreeMap<String, Vec<String>>, core: Vec<String>) -> ScriptGateway {
@@ -1140,12 +1143,11 @@ pub(crate) fn core_with_io_gateway(
         Arc::new(SilentRunner),
         io,
         Arc::new(NoRepair),
-        Box::new(TestPrompts::ok()),
+        test_prompt(),
         test_systools(),
         Arc::new(crate::kernel::log::NoopLog),
         Arc::new(crate::adapters::HostProbeAdapter),
     )
-    .expect("内存装配不应失败")
 }
 
 /// 指定任意网关的装配（入站契约测试用：需要自定义时序的通道）。
@@ -1170,10 +1172,9 @@ pub(crate) fn core_with_gateway(
         Arc::new(SilentRunner),
         Arc::new(InMemorySysIo::new()),
         Arc::new(NoRepair),
-        Box::new(TestPrompts::ok()),
+        test_prompt(),
         test_systools(),
         Arc::new(crate::kernel::log::NoopLog),
         Arc::new(crate::adapters::HostProbeAdapter),
     )
-    .expect("内存装配不应失败")
 }

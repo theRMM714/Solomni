@@ -2,6 +2,7 @@
 //! 册子文本来自 PromptSource（文件机制在适配层）；缺键/缺变量报错，不静默。
 //! 提示词是最不稳定的文本：改文案只动 prompts/，不改代码。
 
+use serde::de::DeserializeOwned;
 use serde::Deserialize;
 
 /// 渲染时的变量表。
@@ -41,17 +42,65 @@ pub fn render(template: &str, vars: Vars) -> Result<String, String> {
 /// 装配输入的**内存形态**：**只有提示词文本**（`prompts/`）。
 /// 工具总表与角色表是**另一个能力的东西**（`systools/`，见 `core::roles::SystemTools`）：
 /// 挂进这里就等于让提示词能力反过来依赖工具能力，两边成环。
-#[derive(Debug, Clone, Deserialize)]
+///
+/// **持有者只有本能力**（`service.rs` 一处，R4）。两块"被到处要的记录"（工具文案、`@` 文案）
+/// 以 `Arc` 共享出去：留在册子里再逐处克隆，等于凭空多出几份深拷贝（批次 17 收口）。
+#[derive(Debug, Clone)]
 pub struct Prompts {
-    pub core: CorePrompts,
+    /// 按名字取的那些段（工具文案与 `@` 文案单独拎出来了）。**布局只有本能力知道**。
+    pub(crate) core: CoreTexts,
+    /// 工具与路径的模型侧文案（~100 条模板）：最常被 tools / workspace / collab 要。
+    pub(crate) tools: std::sync::Arc<ToolTexts>,
+    /// `@` 引用的两句说明文案。
+    pub(crate) refs: std::sync::Arc<RefsPrompts>,
+}
+
+/// **一段核心提示词的名字**：别的能力按名字取段，不点册子内部结构。
+///
+/// 加/改一段提示词的步骤因此固定成两步：`prompts/` 里加键 → 这里加一个变体（缺了编译不过）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Segment {
+    /// 机制说明（这个系统怎么运转、一个 agent 一个会话、表态只能用动词）。
+    Mechanism,
+    ChatProtocol,
+    DiscussOpener,
+    DiscussStep,
+    DiscussAutonomyNote,
+    SynthesizeSystem,
+    SynthesizeUser,
+    ExecuteUser,
+    ReviewSystem,
+    ReviewUser,
+    NodeReviewSystem,
+    NodeReviewUser,
+    SlateSystem,
+    SlateUser,
+    SuggestSystem,
+    SuggestUser,
+    SuggestModeSingle,
+    SuggestModeCollab,
+    VerdictSystem,
+    VerdictUser,
+    AgentSystem,
+    ToolCallingEnvelope,
+    ToolCallingNative,
+    Env,
+    PatchGuide,
+    NoAgents,
+    NoModel,
+    NoModuleDirs,
+    NoModuleTools,
+    ModuleToolParamsHeader,
+    NoModuleToolParams,
 }
 
 /// 把册子的多个文件合并成内存形态：各文件的**顶层键**合并后就是 `core:` 的内容。
 ///
-/// 为什么合并而不是把结构也拆开：册子的内存形态是**契约**——core 各处按 `prompts.core.x` 引用，
-/// 文件怎么分是组织问题，不该让每个引用点跟着改。所以"拆分"只动文件与加载器。
+/// **别的能力不按字段路径读册子**（批次 17 的收口）：它们要么按名字取一段
+/// （`Prompt::text` / `Prompt::render`），要么拿走 `tools()` / `refs()` 那两块**共享记录**。
+/// 所以"文件怎么分"与"某一段落在结构体的哪一格"都只有本能力知道——改版式不再牵动别的能力。
 ///
-/// 两条如实报错（不静默）：**键在两个文件里重复**（拆分时最可能犯的错）、**缺键或类型不对**。
+/// 三条如实报错（不静默）：**键在两个文件里重复**（拆分时最可能犯的错）、**缺键**、**类型不对**。
 pub fn merge_book(docs: &[String]) -> Result<Prompts, String> {
     let mut merged = serde_yaml::Mapping::new();
     for doc in docs {
@@ -67,17 +116,32 @@ pub fn merge_book(docs: &[String]) -> Result<Prompts, String> {
             }
         }
     }
-    let mut root = serde_yaml::Mapping::new();
-    root.insert(
-        serde_yaml::Value::String("core".to_string()),
-        serde_yaml::Value::Mapping(merged),
-    );
-    serde_yaml::from_value(serde_yaml::Value::Mapping(root))
-        .map_err(|e| format!("提示词册缺键或类型不对：{}", e))
+    // 两块**被到处要的记录**单独拎出来共享（一个 Arc 走遍全进程，不再逐处深拷贝）。
+    let tools = take_section::<ToolTexts>(&mut merged, "tool_texts")?;
+    let refs = take_section::<RefsPrompts>(&mut merged, "refs")?;
+    // 剩下的键就是"核心段"（`core:` 的内容）。
+    let core: CoreTexts = serde_yaml::from_value(serde_yaml::Value::Mapping(merged))
+        .map_err(|e| format!("提示词册缺键或类型不对：{}", e))?;
+    Ok(Prompts {
+        core,
+        tools: std::sync::Arc::new(tools),
+        refs: std::sync::Arc::new(refs),
+    })
+}
+
+/// 从合并后的键表里取出一段反序列化（缺键 / 类型不对 = 装配错误，报出键名）。
+fn take_section<T: DeserializeOwned>(
+    merged: &mut serde_yaml::Mapping,
+    key: &str,
+) -> Result<T, String> {
+    let value = merged
+        .remove(serde_yaml::Value::String(key.to_string()))
+        .ok_or_else(|| format!("提示词册缺键：{}", key))?;
+    serde_yaml::from_value(value).map_err(|e| format!("提示词册的 {} 类型不对：{}", key, e))
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct CorePrompts {
+pub struct CoreTexts {
     /// 机制说明（这个系统怎么运转、一个 agent 一个会话、表态只能用动词）。
     /// 讨论席与执行席**都**拿它——AI 不知道机制，就只会写散文。
     pub mechanism: String,
@@ -94,14 +158,10 @@ pub struct CorePrompts {
     pub verdict: VerdictPrompts,
     /// 一个 agent 的职责提示词（由它的模块合成为一份能力包）。
     pub agent: AgentPrompts,
-    /// @ 引用的两句说明文案。
-    pub refs: RefsPrompts,
     /// 工具调用约定：手写信封（envelope 形态）。
     pub tool_calling_envelope: String,
     /// 工具调用约定：原生工具调用（native 形态）；与上一条**互斥**，一个通道只用一套。
     pub tool_calling_native: String,
-    /// 工具与路径相关的**模型侧文案**（回执、失败说明、清单行）；改文案只改册子。
-    pub tool_texts: ToolTexts,
     /// **工作环境块**：真实根目录与路径规矩。变量：work_name, agent, work_root, sandbox_root, module_roots。
     /// 这里**不列工具**——能用哪些工具由核心按这一回合的身份从角色表现渲染、随回合注入。
     pub env: String,
@@ -434,9 +494,41 @@ pub struct AgentPrompts {
     pub system: String,
 }
 
-impl Prompts {
-    pub fn render<'a>(&self, template: &str, vars: Vars<'a>) -> String {
-        render(template, vars)
-            .expect("提示词渲染失败：变量缺失属于装配错误，须修复 prompts/ 或调用方")
+impl CoreTexts {
+    /// **按名字取一段原文**：册子的布局只在这里露面（新加一段 = 这里加一支 match）。
+    pub fn segment(&self, seg: Segment) -> &str {
+        match seg {
+            Segment::Mechanism => &self.mechanism,
+            Segment::ChatProtocol => &self.chat_protocol,
+            Segment::DiscussOpener => &self.discuss.opener,
+            Segment::DiscussStep => &self.discuss.step,
+            Segment::DiscussAutonomyNote => &self.discuss.autonomy_note,
+            Segment::SynthesizeSystem => &self.synthesize.system,
+            Segment::SynthesizeUser => &self.synthesize.user,
+            Segment::ExecuteUser => &self.execute.user,
+            Segment::ReviewSystem => &self.review.system,
+            Segment::ReviewUser => &self.review.user,
+            Segment::NodeReviewSystem => &self.node_review.system,
+            Segment::NodeReviewUser => &self.node_review.user,
+            Segment::SlateSystem => &self.slate.system,
+            Segment::SlateUser => &self.slate.user,
+            Segment::SuggestSystem => &self.suggest_models.system,
+            Segment::SuggestUser => &self.suggest_models.user,
+            Segment::SuggestModeSingle => &self.suggest_models.mode_single,
+            Segment::SuggestModeCollab => &self.suggest_models.mode_collab,
+            Segment::VerdictSystem => &self.verdict.system,
+            Segment::VerdictUser => &self.verdict.user,
+            Segment::AgentSystem => &self.agent.system,
+            Segment::ToolCallingEnvelope => &self.tool_calling_envelope,
+            Segment::ToolCallingNative => &self.tool_calling_native,
+            Segment::Env => &self.env,
+            Segment::PatchGuide => &self.patch_guide,
+            Segment::NoAgents => &self.no_agents,
+            Segment::NoModel => &self.no_model,
+            Segment::NoModuleDirs => &self.no_module_dirs,
+            Segment::NoModuleTools => &self.no_module_tools,
+            Segment::ModuleToolParamsHeader => &self.module_tool_params_header,
+            Segment::NoModuleToolParams => &self.no_module_tool_params,
+        }
     }
 }

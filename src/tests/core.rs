@@ -8,6 +8,7 @@ use crate::capabilities::llm::api::{
     BoxedChat, Chat, ChatGateway, Chunk, CompleteOpts, Completion, Msg,
 };
 use crate::capabilities::llm::detail::fake_chat::FakeChat;
+use crate::capabilities::prompt::api::{Prompt, Segment};
 use crate::capabilities::prompt::domain::prompt::render;
 use crate::capabilities::registry::api::{ModelEntry, Provider, Settings};
 use crate::capabilities::session::api::Live;
@@ -633,7 +634,7 @@ pub(crate) fn tool_round_reasoning_lands_on_the_tool_line() {
     let next = std::cell::Cell::new(0u64);
     let lines = crate::capabilities::collab::domain::engine::build_round_lines(
         "a",
-        &prompts.core.tool_texts,
+        &prompts.tools(),
         &round,
         false,
         &next,
@@ -1196,7 +1197,7 @@ pub(crate) struct ExecLike {
 pub(crate) fn run_execution(
     members: &mut [crate::capabilities::collab::domain::engine::Member],
     tasks: &str,
-    prompts: &crate::capabilities::prompt::api::Prompts,
+    prompt: &dyn Prompt,
 ) -> ExecLike {
     let mut out = ExecLike {
         reports: BTreeMap::new(),
@@ -1206,10 +1207,10 @@ pub(crate) fn run_execution(
         if !m.present {
             continue;
         }
-        let identity = m.params.identity(prompts, m.mode);
+        let identity = m.params.identity(prompt, m.mode);
         let id = m.id.clone();
-        let user = prompts.render(
-            &prompts.core.execute.user,
+        let user = prompt.render(
+            Segment::ExecuteUser,
             &[("tasks", tasks.to_string()), ("rework", String::new())],
         );
         let mut views = Vec::new();
@@ -1297,7 +1298,7 @@ fn opts_discussion(
         Discussion::new(
             members,
             false,
-            test_prompts(),
+            std::sync::Arc::new(test_prompts()),
             test_systools(),
             llm,
             Default::default(),
@@ -1399,7 +1400,7 @@ pub(crate) fn scripted_discussion(scripts: Vec<Vec<String>>, allow: bool) -> Dis
     Discussion::new(
         members,
         allow,
-        test_prompts(),
+        std::sync::Arc::new(test_prompts()),
         test_systools(),
         Default::default(),
         Default::default(),
@@ -1828,7 +1829,7 @@ pub(crate) fn discussion_turn_carries_the_agent_sessions_own_history() {
         &mut chat,
         None,
         vec![crate::capabilities::llm::api::Msg::user("讨论上下文")],
-        &prompts.core.tool_texts,
+        &prompts.tools(),
         &mut |_| {},
     )
     .expect("跑一个回合");
@@ -2082,7 +2083,7 @@ pub(crate) fn prose_without_an_envelope_is_not_a_statement() {
     let mut disc = Discussion::new(
         members,
         true,
-        test_prompts(),
+        std::sync::Arc::new(test_prompts()),
         test_systools(),
         Default::default(),
         Default::default(),
@@ -3390,7 +3391,7 @@ pub(crate) fn tool_call_event_is_emitted_before_the_next_round() {
 pub(crate) fn refs_rewrite_covers_prefixes_speakers_and_punctuation() {
     use crate::capabilities::prompt::api::{rewrite, RefRoots};
     // 文案来自提示词册：期望值也用册子渲染出来，代码里不复制那两句中文。
-    let t = test_prompts().core.refs;
+    let t = test_prompts().refs();
     let foreign = |path: &str, agent: &str| {
         crate::capabilities::prompt::domain::prompt::render(
             &t.foreign_sandbox,
@@ -4181,7 +4182,7 @@ pub(crate) fn malformed_envelopes_are_classified_so_the_model_gets_the_right_fix
         other => panic!("应判为语法错：{:?}", other),
     }
     // 四类各有各的修法（不是同一条笼统提示）
-    let texts = test_prompts().core.tool_texts;
+    let texts = test_prompts().tools();
     let control = crate::capabilities::llm::api::malformed_report(
         &texts,
         &Malformed::RawControl {
@@ -5849,7 +5850,7 @@ pub(crate) fn discussion_turn_streams_deltas_and_never_leaks_the_envelope() {
         &mut chat,
         None,
         vec![crate::capabilities::llm::api::Msg::user("说说")],
-        &prompts.core.tool_texts,
+        &prompts.tools(),
         &mut |e| events.push(e),
     )
     .expect("跑一个回合");
@@ -6232,7 +6233,8 @@ pub(crate) fn native_mode_refuses_a_hand_written_envelope() {
     assert_eq!(trace.len(), 1);
     assert!(!trace[0].ok, "原生模式下信封不执行");
     assert_eq!(
-        trace[0].output, prompts.core.tool_texts.native_no_envelope,
+        trace[0].output,
+        prompts.tools().native_no_envelope,
         "要如实说清本通道用原生调用"
     );
     assert_eq!(io.get(&["demo", "work", "out.md"]), None, "绝不落盘");
@@ -7500,12 +7502,11 @@ pub(crate) fn vm_tier_is_refused_when_the_machine_cannot_carry_it() {
         Arc::new(SilentRunner),
         Arc::new(InMemorySysIo::new()),
         Arc::new(NoRepair),
-        Box::new(TestPrompts::ok()),
+        test_prompt(),
         test_systools(),
         Arc::new(crate::kernel::log::NoopLog),
         Arc::new(crate::adapters::HostProbeAdapter),
-    )
-    .expect("内存装配不应失败");
+    );
     // 创建路径的档位来自设置（基础根留空）：成立与否随本机而定，这里钉的是**接线**——
     // 机器承载不了就必须拒绝，且什么都不留下。
     let default_vm = ExecSpec {
@@ -7538,12 +7539,11 @@ pub(crate) fn vm_tier_is_refused_when_the_machine_cannot_carry_it() {
         Arc::new(SilentRunner),
         Arc::new(InMemorySysIo::new()),
         Arc::new(NoRepair),
-        Box::new(TestPrompts::ok()),
+        test_prompt(),
         test_systools(),
         Arc::new(crate::kernel::log::NoopLog),
         Arc::new(crate::adapters::HostProbeAdapter),
-    )
-    .expect("内存装配不应失败");
+    );
     let sid = core2
         .create_work(work("w", WorkMode::Single, &["a"]))
         .unwrap()
@@ -7661,12 +7661,11 @@ pub(crate) fn module_without_runtime_is_denied_with_reason() {
         Arc::clone(&runner) as Arc<dyn ToolRunner + Send + Sync>,
         Arc::new(InMemorySysIo::new()),
         Arc::new(NoRepair),
-        Box::new(TestPrompts::ok()),
+        test_prompt(),
         test_systools(),
         Arc::new(crate::kernel::log::NoopLog),
         Arc::new(crate::adapters::HostProbeAdapter),
-    )
-    .expect("内存装配不应失败");
+    );
     // 虚拟机档现在一律不可选（guest 本体尚未接入），所以**创建**走本机档；
     // 建好之后把落盘档位改成 vm——这正是"档位承载检查"与"缺包不拦会话"两件事的交界：
     // 已存在的会话照常打开、按 vm 档判工具可用性。
@@ -7689,7 +7688,7 @@ pub(crate) fn module_without_runtime_is_denied_with_reason() {
         runner.calls.lock().expect("锁").is_empty(),
         "缺运行包时不落进程"
     );
-    let texts = test_prompts().core.tool_texts;
+    let texts = test_prompts().tools();
     let expect = texts.render(
         &texts.module_unavailable,
         &[
@@ -8084,12 +8083,11 @@ pub(crate) fn deleting_a_session_asks_the_fence_to_release_its_grants() {
         Arc::new(SilentRunner),
         Arc::new(InMemorySysIo::new()),
         Arc::new(NoRepair),
-        Box::new(TestPrompts::ok()),
+        test_prompt(),
         test_systools(),
         Arc::new(crate::kernel::log::NoopLog),
         Arc::new(crate::adapters::HostProbeAdapter),
-    )
-    .expect("内存装配不应失败");
+    );
     assert!(core.history_delete("w").unwrap(), "会话目录该被删掉");
     assert_eq!(
         fence.released.lock().expect("锁").as_slice(),
@@ -8316,12 +8314,11 @@ pub(crate) fn native_core(
         Arc::new(SilentRunner),
         io,
         Arc::new(NoRepair),
-        Box::new(TestPrompts::ok()),
+        test_prompt(),
         test_systools(),
         Arc::new(crate::kernel::log::NoopLog),
         Arc::new(crate::adapters::HostProbeAdapter),
     )
-    .expect("内存装配不应失败")
 }
 
 /// 一次回复里的**多个**原生调用：实时历史与重建历史必须逐条一致（含 tool_calls 与 tool_call_id）。
@@ -8686,12 +8683,12 @@ pub(crate) fn rework_prompt_carries_the_acceptance_note() {
         note
     );
     let out = p.render(
-        &p.core.execute.user,
+        Segment::ExecuteUser,
         &[("tasks", "把语料抽出来".to_string()), ("rework", rework)],
     );
     assert!(out.contains(note), "返工提示词要带上次的原因：{out}");
     let first = p.render(
-        &p.core.execute.user,
+        Segment::ExecuteUser,
         &[("tasks", "x".to_string()), ("rework", String::new())],
     );
     assert!(!first.contains("上次没通过"), "首轮不该出现返工段：{first}");

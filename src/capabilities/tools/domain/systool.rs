@@ -4,7 +4,7 @@
 //! 存在的理由：读盘落盘不经过任何外部进程，编码问题不进本程序——模型自己看内容自己决定。
 //! 路径一律是真实绝对路径（根目录经提示词册如实告知）；模块声明的外部工具与内置工具用同一套路径。
 
-use crate::capabilities::prompt::api::{Prompts, ToolTexts};
+use crate::capabilities::prompt::api::{Prompt, Segment, ToolTexts};
 use crate::capabilities::tools::api::{ArgFault, ToolSchema};
 use crate::capabilities::tools::ports::{SysIo, ToolOutcome};
 use crate::capabilities::workspace::api::{Place, Sandbox};
@@ -95,23 +95,23 @@ pub struct ToolNotes {
 }
 
 pub fn tool_notes(
-    prompts: &Prompts,
+    prompt: &dyn Prompt,
     sb: &Sandbox,
     modules: &[crate::capabilities::workspace::api::Module],
 ) -> ToolNotes {
     ToolNotes {
-        patch_guide: prompts.render(
-            &prompts.core.patch_guide,
+        patch_guide: prompt.render(
+            Segment::PatchGuide,
             &[
                 ("work_root", crate::kernel::path::slash(&sb.shared)),
                 ("sandbox_root", crate::kernel::path::slash(&sb.private)),
             ],
         ),
         module_tools: crate::capabilities::tools::domain::module_tools::module_tools(
-            prompts, modules,
+            prompt, modules,
         ),
         module_tool_params: crate::capabilities::tools::domain::module_tools::module_tool_params(
-            prompts, modules,
+            prompt, modules,
         ),
     }
 }

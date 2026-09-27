@@ -4,7 +4,7 @@
 //! **工具总表与角色表不在这里**：它们是工具侧的事实，加载器在 `capabilities/tools/detail/`——
 //! 挂进来会让 `prompt → tools` 成环（见 docs/architecture/refactor-plan.md §3.1）。
 
-use crate::capabilities::prompt::api::Prompts;
+use crate::capabilities::prompt::domain::prompt::{merge_book, Prompts};
 use crate::capabilities::prompt::ports::PromptSource;
 use std::path::{Path, PathBuf};
 
@@ -21,7 +21,7 @@ impl YamlPrompts {
 
 impl PromptSource for YamlPrompts {
     fn load(&self) -> Result<Prompts, String> {
-        crate::capabilities::prompt::api::merge_book(&self.read_docs()?)
+        merge_book(&self.read_docs()?)
     }
 }
 

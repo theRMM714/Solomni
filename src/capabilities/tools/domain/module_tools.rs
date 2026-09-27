@@ -4,6 +4,7 @@
 //! 留在 `workspace` 会让 `workspace → tools` 成环（见 docs/architecture/refactor-plan.md §3.8）。
 //! 参数**声明形态**（`Param` / `ParamType`）仍归 `workspace`（它是 `module.yaml` 的字段）。
 
+use crate::capabilities::prompt::api::{Prompt, Segment};
 use crate::capabilities::tools::domain::schema::ToolSchema;
 use crate::capabilities::workspace::api::{Module, ToolDecl};
 
@@ -23,11 +24,8 @@ impl ToolDecl {
 }
 
 /// 模块工具的参数契约（只列**声明了**参数的）：模型据此写信封里的 args；没声明的照旧不校验。
-pub fn module_tool_params(
-    prompts: &crate::capabilities::prompt::api::Prompts,
-    modules: &[Module],
-) -> String {
-    let texts = &prompts.core.tool_texts;
+pub fn module_tool_params(prompt: &dyn Prompt, modules: &[Module]) -> String {
+    let texts = prompt.tools();
     let mut sections: Vec<String> = Vec::new();
     for m in modules {
         for (name, decl) in &m.manifest.tools {
@@ -44,22 +42,19 @@ pub fn module_tool_params(
         }
     }
     if sections.is_empty() {
-        return prompts.core.no_module_tool_params.clone();
+        return prompt.text(Segment::NoModuleToolParams).to_string();
     }
     format!(
         "{}\n{}",
-        prompts.core.module_tool_params_header,
+        prompt.text(Segment::ModuleToolParamsHeader),
         sections.join("\n")
     )
 }
 
 /// 该 agent 的外部工具清单：**按模块分组，每行一个模块**（模块 id：工具名、…）。
 /// 模型据此在信封里写 module；都没有声明工具时用册子里的说法（用法不变）。
-pub fn module_tools(
-    prompts: &crate::capabilities::prompt::api::Prompts,
-    modules: &[Module],
-) -> String {
-    let texts = &prompts.core.tool_texts;
+pub fn module_tools(prompt: &dyn Prompt, modules: &[Module]) -> String {
+    let texts = prompt.tools();
     let lines: Vec<String> = modules
         .iter()
         .filter(|m| !m.manifest.tools.is_empty())
@@ -78,7 +73,7 @@ pub fn module_tools(
         })
         .collect();
     if lines.is_empty() {
-        prompts.core.no_module_tools.clone()
+        prompt.text(Segment::NoModuleTools).to_string()
     } else {
         lines.join("\n")
     }

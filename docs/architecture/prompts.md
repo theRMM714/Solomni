@@ -29,11 +29,21 @@
 | `roles/executor.yaml` | `execute.user` | 执行任务 |
 | `roles/orchestrator.yaml` | `review.system` / `review.user` | 总验收与推进 |
 
-## 二、怎么被装载
+## 二、怎么被装载、怎么被取用
 
-- `PromptSource` 端口（`capabilities/prompt/detail/yaml_prompts.rs`）按文件装配成 `Prompts`（字段与键同名）；
+- `PromptSource` 端口（`capabilities/prompt/ports.rs`，实现在 `detail/yaml_prompts.rs`）按文件装配成
+  `Prompts`：各文件的**顶层键合并**成 `core:` 的内容（键在两份文件里重复 = 装配错误，不静默覆盖）；
+- **册子只由提示词能力持有一次**（`capabilities/prompt/service.rs`）：组合根 `prompt::service::load()` 得到
+  `Arc<dyn Prompt>`，core 持它、协作会话与它**共享同一份**；
+- **别的能力不点字段路径**，取用只有两条路：
+  1. **按名字取一段**：`Prompt::text(Segment::…)`（原文）或 `Prompt::render(Segment::…, vars)`（渲染）；
+     名字表是 `capabilities/prompt/domain/prompt.rs` 的 `Segment`——**加一段提示词 = 册子加键 + 这里加变体**
+     （缺了编译不过）；
+  2. **拿走两块共享记录**：`Prompt::tools()`（`tool_texts`，~100 条模型侧文案）与 `Prompt::refs()`，
+     它们是 `Arc`：沙箱、工具环境、会话一律共享同一份，**不再逐处深拷贝**；
+- 渲染（`{{key}}` 替换、缺键 / 缺变量即报错）在 `capabilities/prompt/domain/prompt.rs`（纯逻辑，不读文件）；
 - **工具总表与角色表不在这份册子里**：`systools/tools.yaml`（工具是什么）与 `systools/roles.yaml`（身份有什么）
-  由 `YamlPrompts::system_tools()` 装配成 `capabilities::tools::api::SystemTools`，**与册子分开注入**——
+  由 `capabilities/tools/detail/yaml_systools.rs` 的 `YamlSystools` 装配成 `SystemTools`，**与册子分开注入**——
   挂进册子会让提示词反过来依赖工具，两边成环（见 [refactor-plan.md](refactor-plan.md) §三）；
-- `core/prompt.rs` 只做 `{{key}}` 渲染与"缺键/缺变量即报错"（纯逻辑）；
-- 文案的注入方式与端口一致：随环境对象传入（沙箱 / 工具环境 / 引用改写器），不让纯逻辑自己去读文件。
+- **组装（哪一回合发哪几段）留在各业务**：身份块归 `session`、工具说明归 `tools`、清单文本归 `registry` / `workspace`
+  ——prompt 只给"段"，不替它们拼（否则它反过来要认识会话与工具）。

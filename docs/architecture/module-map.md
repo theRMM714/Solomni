@@ -19,7 +19,7 @@
 
 | 文件 | 职责 |
 | --- | --- |
-| `mod.rs` | 核心层入口与 `Core` 应用服务：会话中心（会话表、命令队列、运行态）、生成驱动、运行包报告、**回档编排**（`rewind` / `rewind_children` / `rebuild_session`——纯算术在 `capabilities/session/domain/rewind.rs`）。登记处**只按能力面用**：`registry: Box<dyn Registry>`（`registry()` 读、`registry_mut()` 写），**看不见它的字段、也不替它落盘** |
+| `mod.rs` | 核心层入口与 `Core` 应用服务：会话中心（会话表、命令队列、运行态）、生成驱动、运行包报告、**回档编排**（`rewind` / `rewind_children` / `rebuild_session`——纯算术在 `capabilities/session/domain/rewind.rs`）。登记处与提示词册**只按能力面用**：`registry: Box<dyn Registry>`（`registry()` 读、`registry_mut()` 写）与 `prompt: Arc<dyn Prompt>`（按名字取段），**看不见它们的字段、也不替它们落盘/存册子** |
 | `api.rs` | **入站契约 + 入站词汇**：五个按角色的能力接口（`SessionOps` / `RegistryOps` / `HistoryOps` / `DiscoveryOps` / `LogOps`）+ `CoreHandle`（核心自有线程、命令/事件）+ **用例词汇与视图**（`WorkMode` / `WorkSpec` / `AgentInstance` / `WorkOpened` / `SessionEdit` / `CollabStep` / `SessionView` / `RuntimeReport` / `FilesView` 等，批次 15 收口从 `mod.rs` 搬来）+ `EventBus`；单 agent 与协作长步骤的生成都在**工作线程**上跑（队列只占"取/交"两步） |
 
 ## 三、`adapters/`（机制，实现**内核**端口）
@@ -37,7 +37,8 @@
 
 | 文件 | 职责 |
 | --- | --- |
-| `prompt/api.rs` | **入站能力面**：其它能力与呈现层只准用这里（`Prompts` / `ToolTexts` / `RefsPrompts` / `render` 的对外名字） |
+| `prompt/api.rs` | **入站能力面**：`Prompt` 能力面（按名字取段 `text` / `render` + 两块共享记录 `tools()` / `refs()`）与它要用的词汇（`Segment` / `ToolTexts` / `RefsPrompts` / `RefRoots` / `rewrite` / `Vars`） |
+| `prompt/service.rs` | **本能力的状态与用例**：把 `api::Prompt` 挂在 `domain` 的 `Prompts` 上（册子纯数据、无端口），并给组合根一个装载入口 `load()`。**册子只被这里（`Arc<dyn Prompt>` 的持有者）持有**（批次 17） |
 | `prompt/ports.rs` | `PromptSource`：提示词册加载（从 `core/ports.rs` 随能力搬出） |
 | `prompt/domain/prompt.rs` | 册子的内存形态与 `{{key}}` 渲染（从 `core/prompt.rs` 搬来，纯逻辑） |
 | `prompt/domain/refs.rs` | 用户 `@` 引用改写成真实绝对路径（从 `core/refs.rs` 搬来，纯逻辑） |

@@ -122,12 +122,12 @@ impl SessionParams {
     /// 身份块：**每次调用现渲染**（模板与文案取当前提示词册，通道形态取当前登记处）。
     pub fn identity(
         &self,
-        prompts: &crate::capabilities::prompt::api::Prompts,
+        prompt: &dyn crate::capabilities::prompt::api::Prompt,
         mode: crate::capabilities::llm::api::ToolMode,
     ) -> String {
-        let env = env_block(prompts, self);
+        let env = env_block(prompt, self);
         crate::capabilities::workspace::api::agent_system(
-            prompts,
+            prompt,
             &self.agent,
             &self.modules,
             &env,
@@ -140,10 +140,14 @@ impl SessionParams {
 /// 能用哪些工具由核心按这一回合的身份现渲染后随回合注入（见 collab 的 `MemberTools::tools_block`）。
 ///
 /// 归属：它渲染的就是 `SessionParams`，所以随会话走（留在 `tools` 会让 `tools → session` 成环）。
-pub fn env_block(prompts: &crate::capabilities::prompt::api::Prompts, p: &SessionParams) -> String {
-    let texts = &prompts.core.tool_texts;
+pub fn env_block(
+    prompt: &dyn crate::capabilities::prompt::api::Prompt,
+    p: &SessionParams,
+) -> String {
+    use crate::capabilities::prompt::api::Segment;
+    let texts = prompt.tools();
     let module_roots = if p.module_dirs.is_empty() {
-        prompts.core.no_module_dirs.clone()
+        prompt.text(Segment::NoModuleDirs).to_string()
     } else {
         p.module_dirs
             .iter()
@@ -159,8 +163,8 @@ pub fn env_block(prompts: &crate::capabilities::prompt::api::Prompts, p: &Sessio
             .collect::<Vec<_>>()
             .join("\n")
     };
-    prompts.render(
-        &prompts.core.env,
+    prompt.render(
+        Segment::Env,
         &[
             ("work_name", p.work_name.clone()),
             ("agent", p.agent.clone()),
@@ -200,10 +204,10 @@ pub struct AgentSession {
     note: Option<String>,
     /// 工具环境：内置文件工具按该 agent 的沙箱放行 + 该 agent 模块声明的外部工具。
     pub(crate) tools: Option<MemberTools>,
-    /// @ 引用的说明文案（提示词册）；改写在入历史与转录之前做。
-    pub(crate) refs: crate::capabilities::prompt::api::RefsPrompts,
-    /// 模型侧运行时文案（提示词册）；本会话要用的那几条。
-    pub(crate) tool_texts: crate::capabilities::prompt::api::ToolTexts,
+    /// @ 引用的说明文案（提示词册）；改写在入历史与转录之前做。**共享一份**（不再每会话深拷贝）。
+    pub(crate) refs: std::sync::Arc<crate::capabilities::prompt::api::RefsPrompts>,
+    /// 模型侧运行时文案（提示词册）；**共享一份**。
+    pub(crate) tool_texts: std::sync::Arc<crate::capabilities::prompt::api::ToolTexts>,
     /// 下一条转录行的 id。
     pub(crate) next_line: u64,
     /// 每行 id 对应「该行完成时的历史长度」，回档按它截断历史。
@@ -250,8 +254,8 @@ impl AgentSession {
         chat: BoxedChat,
         note: Option<String>,
         tools: Option<MemberTools>,
-        refs: crate::capabilities::prompt::api::RefsPrompts,
-        tool_texts: crate::capabilities::prompt::api::ToolTexts,
+        refs: std::sync::Arc<crate::capabilities::prompt::api::RefsPrompts>,
+        tool_texts: std::sync::Arc<crate::capabilities::prompt::api::ToolTexts>,
     ) -> AgentSession {
         AgentSession {
             cur_turn: 0,
@@ -284,8 +288,8 @@ impl AgentSession {
         chat: BoxedChat,
         note: Option<String>,
         tools: Option<MemberTools>,
-        refs: crate::capabilities::prompt::api::RefsPrompts,
-        tool_texts: crate::capabilities::prompt::api::ToolTexts,
+        refs: std::sync::Arc<crate::capabilities::prompt::api::RefsPrompts>,
+        tool_texts: std::sync::Arc<crate::capabilities::prompt::api::ToolTexts>,
     ) -> AgentSession {
         AgentSession {
             cur_turn: 0,

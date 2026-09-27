@@ -9,7 +9,7 @@ use crate::capabilities::collab::domain::engine::{
     Discussion, Execution, Member, TurnOut, MAX_ROUNDS,
 };
 use crate::capabilities::llm::api::{Chat, ChatGateway, CompleteOpts, Msg};
-use crate::capabilities::prompt::api::Prompts;
+use crate::capabilities::prompt::api::{Prompt, Segment};
 use crate::capabilities::registry::api::RosterPick;
 use crate::capabilities::registry::api::Settings;
 use crate::capabilities::session::api::MemberTools;
@@ -79,7 +79,7 @@ impl CollabSession {
 
     /// 注入到该成员会话里的提醒文案（核心在轮次边界注入；用户主动中止时不注入）。
     pub fn reminder_text(&self) -> String {
-        self.prompts.core.tool_texts.discuss_reminder.clone()
+        self.prompts.tools().discuss_reminder.clone()
     }
 }
 
@@ -132,7 +132,8 @@ pub struct CollabSession {
     core_is_demo: bool,
     /// 核心通道的工具调用形态（原生才声明工具；信封通道看提示词里的说明）。
     core_mode: crate::capabilities::llm::api::ToolMode,
-    prompts: Prompts,
+    /// 提示词册能力面：**不是册子本体**（持有者只有提示词能力一处），这里只按名字取段。
+    prompts: Arc<dyn Prompt>,
     /// 工具总表与角色表：**不挂在册子上**（两者互不依赖）。
     systools: crate::capabilities::tools::api::SystemTools,
     gateway: Arc<dyn ChatGateway + Send + Sync>,
@@ -170,7 +171,7 @@ impl CollabSession {
         gateway: Arc<dyn ChatGateway + Send + Sync>,
         source: Arc<dyn ModuleSource + Send + Sync>,
         settings: Settings,
-        prompts: Prompts,
+        prompts: Arc<dyn Prompt>,
         systools: crate::capabilities::tools::api::SystemTools,
         tools: Arc<dyn ToolRunner + Send + Sync>,
         io: Arc<dyn SysIo + Send + Sync>,
@@ -313,7 +314,7 @@ impl CollabSession {
     // 收口成参数对象只会把它们藏起来、让"谁读什么"更难看清（同 engine::converse_with 的取舍）。
     #[allow(clippy::too_many_arguments)]
     fn judge_clear(
-        prompts: &Prompts,
+        prompt: &dyn Prompt,
         systools: &crate::capabilities::tools::api::SystemTools,
         cancel: &std::sync::Arc<std::sync::atomic::AtomicBool>,
         opts: crate::capabilities::llm::api::CompleteOpts<'static>,
@@ -326,8 +327,8 @@ impl CollabSession {
         // 核心这一轮的行推给谁（落不落由协作会话定）。
         sink: &mut dyn FnMut(SessionEvent),
     ) -> Result<(bool, String), String> {
-        let user = prompts.render(
-            &prompts.core.verdict.user,
+        let user = prompt.render(
+            Segment::VerdictUser,
             &[
                 ("kind", kind.to_string()),
                 ("payload", payload.to_string()),
@@ -335,7 +336,7 @@ impl CollabSession {
             ],
         );
         let msgs = vec![
-            Msg::system(prompts.core.verdict.system.clone()),
+            Msg::system(prompt.text(Segment::VerdictSystem).to_string()),
             Msg::user(user),
         ];
         if cancel.load(std::sync::atomic::Ordering::Relaxed) {
@@ -367,7 +368,7 @@ impl CollabSession {
     // 与 judge_clear / Execution::review 同一取舍（见 docs/testing/quality-isolation.md）。
     #[allow(clippy::too_many_arguments)]
     fn review_nodes(
-        prompts: &Prompts,
+        prompt: &dyn Prompt,
         systools: &crate::capabilities::tools::api::SystemTools,
         cancel: &std::sync::Arc<std::sync::atomic::AtomicBool>,
         chain: Option<&crate::kernel::chain::TaskChain>,
@@ -397,9 +398,9 @@ impl CollabSession {
             })
             .collect::<Vec<_>>()
             .join("\n");
-        let user = prompts.render(&prompts.core.node_review.user, &[("nodes", listed)]);
+        let user = prompt.render(Segment::NodeReviewUser, &[("nodes", listed)]);
         let mut msgs = vec![
-            Msg::system(prompts.core.node_review.system.clone()),
+            Msg::system(prompt.text(Segment::NodeReviewSystem).to_string()),
             Msg::user(user),
         ];
         if let Some(again) = retry {
@@ -570,11 +571,11 @@ impl CollabSession {
         roster: &crate::capabilities::workspace::api::Roster,
     ) -> (String, String, String) {
         (
-            crate::capabilities::registry::api::listing(&self.prompts, &self.settings.agents),
-            crate::capabilities::workspace::api::listing(roster, &self.prompts.core.tool_texts),
+            crate::capabilities::registry::api::listing(&*self.prompts, &self.settings.agents),
+            crate::capabilities::workspace::api::listing(roster, &self.prompts.tools()),
             crate::capabilities::registry::api::model_listing(
                 &self.settings.models,
-                &self.prompts.core.tool_texts,
+                &self.prompts.tools(),
             ),
         )
     }
@@ -587,7 +588,7 @@ impl CollabSession {
             private: None,
         };
         let task =
-            crate::capabilities::prompt::api::rewrite(task, None, &roots, &self.prompts.core.refs);
+            crate::capabilities::prompt::api::rewrite(task, None, &roots, &self.prompts.refs());
         if task.trim().is_empty() {
             sink(SessionEvent::Notice("[取消] 需求为空".into()));
             sink(SessionEvent::Ended);
@@ -613,7 +614,7 @@ impl CollabSession {
         let roster = self.source.scan();
         let (agent_listing, module_listing, model_listing) = self.briefing(&roster);
         let user = self.prompts.render(
-            &self.prompts.core.slate.user,
+            Segment::SlateUser,
             &[
                 ("agents", agent_listing),
                 ("modules", module_listing),
@@ -622,7 +623,7 @@ impl CollabSession {
             ],
         );
         let msgs = vec![
-            Msg::system(self.prompts.core.slate.system.clone()),
+            Msg::system(self.prompts.text(Segment::SlateSystem).to_string()),
             Msg::user(user),
         ];
         // 核心操作走工具调用：代拟名单由 slate 工具承载（带只读核实回路）。
@@ -755,7 +756,8 @@ impl CollabSession {
         // 清单与越权校验同源——同一份清单在提示词里再列一遍只会多一个会漂的地方。
         let protocol = format!(
             "{}\n{}",
-            self.prompts.core.mechanism, self.prompts.core.chat_protocol
+            self.prompts.text(Segment::Mechanism),
+            self.prompts.text(Segment::ChatProtocol)
         );
         let mut disc = Discussion::new(
             members,
@@ -890,12 +892,8 @@ impl CollabSession {
                 work: self.sandboxes.shared.clone(),
                 private: None,
             };
-            let text = crate::capabilities::prompt::api::rewrite(
-                text,
-                None,
-                &roots,
-                &self.prompts.core.refs,
-            );
+            let text =
+                crate::capabilities::prompt::api::rewrite(text, None, &roots, &self.prompts.refs());
             if let Some(disc) = self.disc.as_mut() {
                 disc.pending_user_answers.push(text);
             }
@@ -924,7 +922,7 @@ impl CollabSession {
                 let mut verify = self.core_verify_tools("planner");
                 sink(crate::capabilities::session::api::working("核心"));
                 let judged = Self::judge_clear(
-                    &self.prompts,
+                    &*self.prompts,
                     &self.systools,
                     &self.cancel,
                     crate::capabilities::llm::api::CompleteOpts::plain(self.settings.app.streaming)
@@ -998,7 +996,7 @@ impl CollabSession {
             private: None,
         };
         let text =
-            crate::capabilities::prompt::api::rewrite(text, None, &roots, &self.prompts.core.refs);
+            crate::capabilities::prompt::api::rewrite(text, None, &roots, &self.prompts.refs());
         let line = self.view(LineView::user("", text));
         sink(SessionEvent::Transcript(vec![line]));
     }
@@ -1214,7 +1212,7 @@ impl CollabSession {
                 sink(crate::capabilities::session::api::working("核心"));
                 let mut verify = self.core_verify_tools("orchestrator");
                 let made = Self::review_nodes(
-                    &self.prompts,
+                    &*self.prompts,
                     &self.systools,
                     &self.cancel,
                     Some(&reviewed),
@@ -1352,7 +1350,7 @@ impl CollabSession {
                 &plan,
                 &table,
                 retry.as_deref(),
-                &prompts,
+                &*prompts,
                 &self.systools,
                 llm,
                 self.core_mode,
@@ -1481,7 +1479,7 @@ impl CollabSession {
                     .with_read_only(read_only_roots(&self.settings.app));
             // 工具说明块的素材（patch 语法 / 模块工具 / 模块参数）：装配期按这个 agent 的沙箱与模块算一次。
             let tool_notes =
-                crate::capabilities::tools::api::tool_notes(&prompts, &sandbox, &modules);
+                crate::capabilities::tools::api::tool_notes(&*prompts, &sandbox, &modules);
             member.tools = Some(MemberTools {
                 mode,
                 // 模块 id → 该模块的（目录, 工具表）：多模块 agent 靠信封里的 module 消歧。
@@ -1564,7 +1562,7 @@ impl CollabSession {
         gateway: Arc<dyn ChatGateway + Send + Sync>,
         source: Arc<dyn ModuleSource + Send + Sync>,
         settings: Settings,
-        prompts: Prompts,
+        prompts: Arc<dyn Prompt>,
         systools: crate::capabilities::tools::api::SystemTools,
         tools: Arc<dyn ToolRunner + Send + Sync>,
         io: Arc<dyn SysIo + Send + Sync>,
@@ -1651,7 +1649,8 @@ impl CollabSession {
             // 恢复时与实时同一句：只有机制与约定，工具面随回合注入（见 tools_block）。
             let protocol = format!(
                 "{}\n{}",
-                s.prompts.core.mechanism, s.prompts.core.chat_protocol
+                s.prompts.text(Segment::Mechanism),
+                s.prompts.text(Segment::ChatProtocol)
             );
 
             let mut disc = Discussion::new(

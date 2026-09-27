@@ -152,34 +152,35 @@ pub struct Module {
 /// env 由 core::systool 按该 agent 的沙箱渲染后传入。
 /// **工具清单不在这里**：本回合能用哪些工具随回合注入（见 core::engine::tools_block）。
 pub fn agent_system(
-    prompts: &crate::capabilities::prompt::api::Prompts,
+    prompt: &dyn crate::capabilities::prompt::api::Prompt,
     agent: &str,
     modules: &[(String, String)],
     env: &str,
     mode: crate::capabilities::llm::api::ToolMode,
 ) -> String {
+    use crate::capabilities::prompt::api::Segment;
     let parts = modules
         .iter()
         .map(|(id, system)| format!("\n== {} ==\n{}", id, system.trim()))
         .collect::<Vec<_>>()
         .join("");
-    prompts.render(
-        &prompts.core.agent.system,
+    prompt.render(
+        Segment::AgentSystem,
         &[
             ("agent", agent.to_string()),
             ("modules", parts),
             // 机制说明：AI 不知道机制就只会写散文（真机上就是这样空转的）。
-            ("mechanism", prompts.core.mechanism.clone()),
+            ("mechanism", prompt.text(Segment::Mechanism).to_string()),
             ("env", env.to_string()),
             // 两套调用约定**互斥**：一个通道只用一套（同时教会让模型在正文里讲解参数而被误判成调用）
             (
                 "tool_calling",
                 match mode {
                     crate::capabilities::llm::api::ToolMode::Native => {
-                        prompts.core.tool_calling_native.clone()
+                        prompt.text(Segment::ToolCallingNative).to_string()
                     }
                     crate::capabilities::llm::api::ToolMode::Envelope => {
-                        prompts.core.tool_calling_envelope.clone()
+                        prompt.text(Segment::ToolCallingEnvelope).to_string()
                     }
                 },
             ),

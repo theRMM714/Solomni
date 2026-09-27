@@ -6,7 +6,7 @@
 use crate::capabilities::llm::api::{
     Channel, ChatGateway, ModelCatalog, ProbeOutcome, ReplayReport, ToolMode,
 };
-use crate::capabilities::prompt::api::{Prompts, ToolTexts};
+use crate::capabilities::prompt::api::{Prompt, ToolTexts};
 use crate::capabilities::registry::api::{
     AgentView, ModelView, ProviderView, Registry, RosterPick,
 };
@@ -136,8 +136,8 @@ impl Registry for RegistryService {
         self.settings.clone()
     }
 
-    fn agent_listing(&self, prompts: &Prompts) -> String {
-        agents::listing(prompts, &self.settings.agents)
+    fn agent_listing(&self, prompt: &dyn Prompt) -> String {
+        agents::listing(prompt, &self.settings.agents)
     }
 
     fn model_listing(&self, texts: &ToolTexts) -> String {

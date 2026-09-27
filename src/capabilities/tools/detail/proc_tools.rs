@@ -25,7 +25,8 @@ pub struct ProcTools {
     #[cfg(windows)]
     pub disclosed: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// 工具回执里那些收尾标记的文案（来自提示词册：它们随 [工具结果] 进模型上下文，所以不硬编码）。
-    pub texts: crate::capabilities::prompt::api::ToolTexts,
+    /// **共享一份**（提示词能力给出的 `Arc`）：这里不再各存一份深拷贝。
+    pub texts: std::sync::Arc<crate::capabilities::prompt::api::ToolTexts>,
     /// 单次工具执行的超时（到时连根杀掉整棵树，ok = false）。
     pub timeout: Duration,
     /// 回传给模型/轨迹的输出上限（字符数）。
@@ -39,7 +40,7 @@ impl ProcTools {
     /// 组合根注入：当前可执行文件（守门进程就是它自己）、提示词册里的收尾标记、产品私有区与写权限开关。
     pub fn new(
         exe: PathBuf,
-        texts: crate::capabilities::prompt::api::ToolTexts,
+        texts: std::sync::Arc<crate::capabilities::prompt::api::ToolTexts>,
         home: PathBuf,
         write_allowed: std::sync::Arc<std::sync::atomic::AtomicBool>,
     ) -> ProcTools {
@@ -332,6 +333,7 @@ mod tests {
     /// 回执里的标记文案必须来自提示词册（它们随 [工具结果] 进模型上下文，所以不能在代码里另写一份）。
     #[test]
     fn receipt_markers_come_from_the_prompt_book() {
+        use crate::capabilities::prompt::api::Prompt;
         use crate::capabilities::prompt::ports::PromptSource;
         let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         let prompts = crate::capabilities::prompt::detail::yaml_prompts::YamlPrompts::new(
@@ -339,10 +341,10 @@ mod tests {
         )
         .load()
         .expect("内置提示词册必须合法");
-        let texts = prompts.core.tool_texts;
+        let texts = prompts.tools();
         let tools = ProcTools::new(
             PathBuf::from("solomni"),
-            texts.clone(),
+            std::sync::Arc::clone(&texts),
             PathBuf::from("target").join("test-scratch"),
             std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         );
@@ -452,7 +454,8 @@ mod tests {
         None
     }
 
-    fn prompt_texts() -> crate::capabilities::prompt::api::ToolTexts {
+    fn prompt_texts() -> std::sync::Arc<crate::capabilities::prompt::api::ToolTexts> {
+        use crate::capabilities::prompt::api::Prompt;
         use crate::capabilities::prompt::ports::PromptSource;
         let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         let prompts = crate::capabilities::prompt::detail::yaml_prompts::YamlPrompts::new(
@@ -460,7 +463,7 @@ mod tests {
         )
         .load()
         .expect("内置提示词册必须合法");
-        prompts.core.tool_texts
+        prompts.tools()
     }
 
     /// 造一个按「cwd = 隔离根」跑真工具的 runner（命令用裸文件名，避免命令行里出现引号）。

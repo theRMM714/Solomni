@@ -5,7 +5,6 @@
 pub mod api;
 
 use crate::capabilities::llm::api::ChatGateway;
-use crate::capabilities::prompt::ports::PromptSource;
 #[cfg(test)]
 pub(crate) use crate::capabilities::session::api::Live;
 use crate::capabilities::session::api::{Pending, SessionEvent};
@@ -22,7 +21,7 @@ use crate::capabilities::collab::api::AfterTurn;
 use crate::capabilities::collab::api::CollabSession;
 use crate::capabilities::llm::api::Channel;
 use crate::capabilities::llm::api::Msg;
-use crate::capabilities::prompt::api::Prompts;
+use crate::capabilities::prompt::api::{Prompt, Segment};
 use crate::capabilities::registry::api::Registry;
 use crate::capabilities::session::api::{AgentMeta, HistoryView, SessionMeta};
 use crate::capabilities::tools::api::SystemTools;
@@ -196,7 +195,9 @@ pub struct Core {
     log: Arc<dyn crate::kernel::log::Log + Send + Sync>,
     /// 宿主能力探测（读环境、查路径存在性都在它后面；core 因此不碰 std::env 与文件系统）。
     probe: Arc<dyn crate::kernel::host::HostProbe + Send + Sync>,
-    prompts: Prompts,
+    /// 提示词册能力：**册子本体在它里面**（只有一处），core 只按名字取段。
+    /// 用 `Arc`：协作会话要与核心**共享**这一份（各自克隆整本册子是旧的浪费）。
+    prompt: Arc<dyn Prompt>,
     /// 工具总表与角色表（`systools/` 两张表）：**不挂在册子上**，两者互不依赖（见 prompt.rs）。
     systools: SystemTools,
     sessions: HashMap<SessionId, Session>,
@@ -223,37 +224,29 @@ impl Core {
         tools: Arc<dyn ToolRunner + Send + Sync>,
         io: Arc<dyn SysIo + Send + Sync>,
         repair: Arc<dyn crate::capabilities::llm::api::EnvelopeRepair + Send + Sync>,
-        prompt_source: Box<dyn PromptSource>,
+        prompt: Arc<dyn Prompt>,
         systools: SystemTools,
         log: Arc<dyn crate::kernel::log::Log + Send + Sync>,
         probe: Arc<dyn crate::kernel::host::HostProbe + Send + Sync>,
-    ) -> Result<Core, String> {
-        let log_for_core = Arc::clone(&log);
-        let outcome = (|| -> Result<Core, String> {
-            let prompts = prompt_source.load()?;
-            Ok(Core {
-                registry,
-                history,
-                workspace,
-                source,
-                packages,
-                fence,
-                gateway,
-                tools,
-                io,
-                repair,
-                log: log_for_core,
-                probe,
-                prompts,
-                systools,
-                sessions: HashMap::new(),
-                running: std::collections::BTreeSet::new(),
-            })
-        })();
-        if let Err(e) = &outcome {
-            log.error("core::new", &format!("装配失败：{}", e)); // 仅错误时借用，不与闭包 move 冲突
+    ) -> Core {
+        Core {
+            registry,
+            history,
+            workspace,
+            source,
+            packages,
+            fence,
+            gateway,
+            tools,
+            io,
+            repair,
+            log,
+            probe,
+            prompt,
+            systools,
+            sessions: HashMap::new(),
+            running: std::collections::BTreeSet::new(),
         }
-        outcome
     }
 
     /// 日志端口句柄：入站手柄（core::api）与组合根共用同一份事实记录。
@@ -391,7 +384,7 @@ impl Core {
         u64,
         String,
     ) {
-        let prompt = self.prompts.core.tool_texts.compact_prompt.clone();
+        let compact_prompt = self.prompt.tools().compact_prompt.clone();
         let decl = self
             .systools
             .tools
@@ -400,11 +393,11 @@ impl Core {
         let (up_to, identity) = match self.sessions.get(sid) {
             Some(Session::Single(s)) => (
                 s.next_line_id(),
-                s.params().identity(&self.prompts, s.tool_mode()),
+                s.params().identity(&*self.prompt, s.tool_mode()),
             ),
             _ => (0, String::new()),
         };
-        (prompt, decl, up_to, identity)
+        (compact_prompt, decl, up_to, identity)
     }
 
     /// 往某个会话注入一条**系统消息**（讨论的提醒走这条；见 session-model.md 二"系统消息"）。
@@ -462,7 +455,7 @@ impl Core {
                     // 执行提示词是**核心派的活**（派发行）：界面系统行、上下文 user 角色。
                     let identity = session
                         .params()
-                        .identity(&self.prompts, session.tool_mode());
+                        .identity(&*self.prompt, session.tool_mode());
                     session.dispatch_task(objective, &identity, &mut live, &mut sink);
                 }
                 let events = out.into_inner();
@@ -720,10 +713,9 @@ impl Core {
                             _ => None,
                         })
                         .unwrap_or_default();
-                    let objective = self.prompts.render(
-                        &self.prompts.core.execute.user,
-                        &[("tasks", raw), ("rework", rework)],
-                    );
+                    let objective = self
+                        .prompt
+                        .render(Segment::ExecuteUser, &[("tasks", raw), ("rework", rework)]);
                     if let Some(Session::Collab(c)) = self.sessions.get_mut(sid) {
                         c.mark_node_started(&node, &child);
                     }
@@ -1398,7 +1390,7 @@ impl Core {
                     Arc::clone(&self.gateway),
                     Arc::clone(&self.source),
                     self.registry.snapshot(),
-                    self.prompts.clone(),
+                    Arc::clone(&self.prompt),
                     self.systools.clone(),
                     Arc::clone(&self.tools),
                     Arc::clone(&self.io),
@@ -1520,7 +1512,7 @@ impl Core {
                 shared: roots.shared.clone(),
                 private,
                 modules,
-                texts: self.prompts.core.tool_texts.clone(),
+                texts: self.prompt.tools(),
             });
         }
         Ok(crate::capabilities::workspace::api::Sandboxes {
@@ -1561,7 +1553,7 @@ impl Core {
             allowed: self.role_tools("executor"),
             // 能不能用自己模块的工具、以及工具说明块的素材：都按角色表与这个 agent 的模块装配期算好。
             with_modules: self.systools.allows_module_tools("executor"),
-            notes: crate::capabilities::tools::api::tool_notes(&self.prompts, sb, modules),
+            notes: crate::capabilities::tools::api::tool_notes(&*self.prompt, sb, modules),
         }
     }
 
@@ -1633,8 +1625,8 @@ impl Core {
             chat,
             note,
             Some(tools),
-            self.prompts.core.refs.clone(),
-            self.prompts.core.tool_texts.clone(),
+            self.prompt.refs(),
+            self.prompt.tools(),
         );
         // 自动压缩的预算按**这个 agent 的模型**窗口算（见 session-model.md 六）。
         s.set_compact_budget(self.compact_budget(a.model.as_deref()));
@@ -1742,25 +1734,19 @@ impl Core {
         let roster = self.scan();
         // 形态描述文案在提示词册里（代码不硬编码给模型的说明）。
         let mode_text = match mode {
-            WorkMode::Single => self.prompts.core.suggest_models.mode_single.clone(),
-            WorkMode::Collab => self.prompts.core.suggest_models.mode_collab.clone(),
+            WorkMode::Single => self.prompt.text(Segment::SuggestModeSingle).to_string(),
+            WorkMode::Collab => self.prompt.text(Segment::SuggestModeCollab).to_string(),
         };
-        let user = self.prompts.render(
-            &self.prompts.core.suggest_models.user,
+        let user = self.prompt.render(
+            Segment::SuggestUser,
             &[
                 ("mode", mode_text.to_string()),
-                ("agents", self.registry.agent_listing(&self.prompts)),
+                ("agents", self.registry.agent_listing(&*self.prompt)),
                 (
                     "modules",
-                    crate::capabilities::workspace::api::listing(
-                        &roster,
-                        &self.prompts.core.tool_texts,
-                    ),
+                    crate::capabilities::workspace::api::listing(&roster, &self.prompt.tools()),
                 ),
-                (
-                    "models",
-                    self.registry.model_listing(&self.prompts.core.tool_texts),
-                ),
+                ("models", self.registry.model_listing(&self.prompt.tools())),
                 ("task", task.to_string()),
             ],
         );
@@ -1776,7 +1762,7 @@ impl Core {
             self.registry.tool_mode(None),
             chat.as_mut(),
             &[
-                Msg::system(self.prompts.core.suggest_models.system.clone()),
+                Msg::system(self.prompt.text(Segment::SuggestSystem).to_string()),
                 Msg::user(user),
             ],
             crate::capabilities::llm::api::CompleteOpts::plain(false),
@@ -1903,7 +1889,7 @@ impl Core {
         }
         // 身份块**现渲染**（形态刚在上一步对齐过，所以这里读到的就是本回合的形态）。
         let identity = match self.sessions.get(sid) {
-            Some(Session::Single(s)) => s.params().identity(&self.prompts, s.tool_mode()),
+            Some(Session::Single(s)) => s.params().identity(&*self.prompt, s.tool_mode()),
             _ => return Ok(Prepared::NotSingle),
         };
         let session = self.take_single(sid)?;
@@ -1943,7 +1929,7 @@ impl Core {
         prefix.extend(session.note_task(objective));
         let identity = session
             .params()
-            .identity(&self.prompts, session.tool_mode());
+            .identity(&*self.prompt, session.tool_mode());
         let persister = self.persister(child);
         Ok(Prepared::Run {
             session: Box::new(session),
@@ -2219,7 +2205,7 @@ impl Core {
                 Arc::clone(&self.gateway),
                 Arc::clone(&self.source),
                 self.registry.snapshot(),
-                self.prompts.clone(),
+                Arc::clone(&self.prompt),
                 self.systools.clone(),
                 Arc::clone(&self.tools),
                 Arc::clone(&self.io),
@@ -2279,7 +2265,7 @@ impl Core {
                 let mut history: Vec<Msg> = Vec::new();
                 let mut marks: Vec<usize> = Vec::new();
                 let mut line_reply: Vec<u64> = Vec::new();
-                let texts = &self.prompts.core.tool_texts;
+                let texts = self.prompt.tools();
                 let reply_of =
                     |v: &serde_json::Value| v.get("reply").and_then(|x| x.as_u64()).unwrap_or(0);
                 let mut i = 0usize;
@@ -2337,7 +2323,7 @@ impl Core {
                             .filter_map(|t| serde_json::from_value(t).ok())
                             .collect();
                         for m in
-                            crate::capabilities::collab::api::reply_msgs(mode, raw, &views, texts)
+                            crate::capabilities::collab::api::reply_msgs(mode, raw, &views, &texts)
                         {
                             history.push(m);
                         }
@@ -2375,8 +2361,8 @@ impl Core {
                         chat,
                         note,
                         Some(tools),
-                        self.prompts.core.refs.clone(),
-                        self.prompts.core.tool_texts.clone(),
+                        self.prompt.refs(),
+                        self.prompt.tools(),
                     ),
                 ))
             }
@@ -2402,7 +2388,7 @@ impl Core {
                         let mut out = Vec::new();
                         {
                             let mut sink = |ev: SessionEvent| out.push(ev);
-                            let identity = s.params().identity(&self.prompts, s.tool_mode());
+                            let identity = s.params().identity(&*self.prompt, s.tool_mode());
                             s.continue_reply(&identity, live, &mut sink);
                         }
                         out
@@ -2445,7 +2431,7 @@ impl Core {
     /// 该会话此刻的**身份块**（按当前提示词册与形态现渲染）：测试用它断言"它被告诉了什么"。
     pub fn single_identity(&self, sid: &str) -> Option<String> {
         match self.sessions.get(sid) {
-            Some(Session::Single(s)) => Some(s.params().identity(&self.prompts, s.tool_mode())),
+            Some(Session::Single(s)) => Some(s.params().identity(&*self.prompt, s.tool_mode())),
             _ => None,
         }
     }

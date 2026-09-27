@@ -83,7 +83,12 @@ cli / web ──▶ core ──▶ capabilities ──▶ kernel
 - **所有发给 LLM 的提示词一律写入 `prompts/`**，禁止硬编码进代码；改文案只改册子。
 - 占位符 `{{key}}`；渲染器在 `capabilities/prompt/domain/prompt.rs`（纯逻辑）；文件加载经 `PromptSource` 端口在适配层。
 - **缺文件 / 缺键 / 缺变量 = 报错暴露**，禁止静默兜底文案。
-- 文案的注入方式与端口一致：随环境对象传入（沙箱/工具环境/引用改写器），而不是让纯逻辑自己去读文件。
+- **册子只由提示词能力持有一次**（`capabilities/prompt/service.rs`）：组合根装载后把 `Arc<dyn Prompt>` 注入 core，
+  协作会话与它**共享同一份**（不再每个会话克隆整本册子）。
+- **别的能力不点字段路径**：按名字取段（`Prompt::text` / `Prompt::render` + `Segment`），
+  或拿走两块**共享记录**（`Prompt::tools()` 的 `tool_texts` / `Prompt::refs()`，都是 `Arc`）。
+  "哪个回合发哪几段"的**组装留在各业务**（身份块归 `session`、工具说明归 `tools`、清单文本归 `registry` / `workspace`）
+  ——prompt 只给"段"，不替它们拼。
 - 路径类占位符（`{{work_root}}` 等）由 core 在运行时替换成**真实根目录**后才交给 AI——仓库里永远不出现机器路径。
 
 提示词册的**文件与键清单**（每份文件里有什么键、每个键干什么）只有一份：

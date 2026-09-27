@@ -2,7 +2,7 @@
 //! 只是"用户编排选择的存档"，不是能力注册表——能力仍在 modules/ 公地里。
 //! 落盘在 .home/agents.yaml（与 providers/models/settings 同处用户私有区）。
 
-use crate::capabilities::prompt::api::Prompts;
+use crate::capabilities::prompt::api::{Prompt, Segment};
 use crate::capabilities::registry::domain::providers::ModelEntry;
 use crate::capabilities::session::api::AgentMeta;
 use crate::capabilities::workspace::api::Roster;
@@ -62,18 +62,18 @@ pub fn validate_name(name: &str) -> Result<(), String> {
 }
 
 /// 已存 agent 清单（拟名单时给模型看）：名字 / 模块 / 模型 / 说明；空登记处用册子里的说法。
-pub fn listing(prompts: &Prompts, known: &Agents) -> String {
+pub fn listing(prompt: &dyn Prompt, known: &Agents) -> String {
     if known.is_empty() {
-        return prompts.core.no_agents.clone();
+        return prompt.text(Segment::NoAgents).to_string();
     }
-    let texts = &prompts.core.tool_texts;
+    let texts = prompt.tools();
     known
         .iter()
         .map(|(name, a)| {
             let model = a
                 .model
                 .clone()
-                .unwrap_or_else(|| prompts.core.no_model.clone());
+                .unwrap_or_else(|| prompt.text(Segment::NoModel).to_string());
             let note = if a.note.trim().is_empty() {
                 String::new()
             } else {

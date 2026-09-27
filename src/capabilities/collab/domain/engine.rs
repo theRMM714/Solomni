@@ -9,7 +9,7 @@
 use crate::capabilities::llm::api::BoxedChat;
 use crate::capabilities::llm::api::{self as envelope, ToolInvoke, Verb};
 use crate::capabilities::llm::api::{Chat, Chunk, CompleteOpts, Msg};
-use crate::capabilities::prompt::api::Prompts;
+use crate::capabilities::prompt::api::{Prompt, Segment};
 use crate::capabilities::session::api::{
     stream_piece, AgentSession, MemberTools, ModuleTools, TurnRun,
 };
@@ -17,6 +17,7 @@ use crate::capabilities::session::api::{LineView, Live, SessionEvent, ToolCallVi
 use crate::capabilities::tools::ports::ToolOutcome;
 use serde::Deserialize;
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 /// 讨论轮次上限（超限交用户裁决——上限必生效）。
 pub const MAX_ROUNDS: usize = 6;
@@ -550,8 +551,8 @@ pub struct Discussion {
     pub closed: bool,
     /// yes,allow：授权小组自裁——ask 不中止轮转，留档待办。
     pub allow_autonomy: bool,
-    /// 提示词册（讨论文案来源）。
-    prompts: Prompts,
+    /// 提示词册能力面：**不是册子本体**（持有者只有提示词能力一处），这里只按名字取段。
+    prompts: Arc<dyn Prompt>,
     /// 工具总表与角色表：**不挂在册子上**（两者互不依赖）。
     systools: crate::capabilities::tools::api::SystemTools,
     /// 本次调用的通道参数（流式 + 预算）：**全局设置**，与单 agent 共用同一份。
@@ -648,7 +649,7 @@ impl Discussion {
         sink: &mut dyn FnMut(SessionEvent),
     ) -> Result<MemberTurn, String> {
         let opts = self.opts();
-        let texts = self.prompts.core.tool_texts.clone();
+        let texts = self.prompts.tools();
         let speaker = self.members[i].id.clone();
         let turn = {
             let m = &mut self.members[i];
@@ -797,7 +798,7 @@ impl Discussion {
     pub fn new(
         members: Vec<Member>,
         allow_autonomy: bool,
-        prompts: Prompts,
+        prompts: Arc<dyn Prompt>,
         systools: crate::capabilities::tools::api::SystemTools,
         llm: crate::capabilities::llm::api::LlmOpts,
         cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
@@ -827,7 +828,7 @@ impl Discussion {
     /// 与 advance/feed 一起构成可暂停的状态机——**驱动权在核心**（见 session-model.md 二之二）。
     pub fn start(&mut self, task: &str) {
         self.opener = self.prompts.render(
-            &self.prompts.core.discuss.opener,
+            Segment::DiscussOpener,
             &[
                 ("protocol", self.protocol.clone()),
                 ("task", task.to_string()),
@@ -1012,7 +1013,7 @@ impl Discussion {
         self.cursor = Cursor::At(i);
         let identity = self.member_identity(i);
         let step_prompt = self.prompts.render(
-            &self.prompts.core.discuss.step,
+            Segment::DiscussStep,
             &[(
                 "transcript",
                 self.transcript
@@ -1032,7 +1033,7 @@ impl Discussion {
     /// 这个席位的身份块：**每回合现渲染**（成员的参数 + 当前提示词册 + 登记处给的形态）。
     fn member_identity(&self, i: usize) -> String {
         let m = &self.members[i];
-        m.params.identity(&self.prompts, m.mode)
+        m.params.identity(&*self.prompts, m.mode)
     }
 
     /// 收下一个成员回合的结果（状态机的一步）：吸收、外送它那一批行、按动词改状态。
@@ -1080,7 +1081,7 @@ impl Discussion {
                     return None;
                 }
                 if self.allow_autonomy {
-                    let note = self.prompts.core.discuss.autonomy_note.clone();
+                    let note = self.prompts.text(Segment::DiscussAutonomyNote).to_string();
                     // 这是**系统**给的自主说明，不是用户说的。
                     self.transcript.push(LineView::system("", note));
                     return None;
@@ -1110,7 +1111,8 @@ impl Discussion {
             line.push_str(
                 &self
                     .prompts
-                    .render(&self.prompts.core.tool_texts.discuss_degraded, &[]),
+                    .tools()
+                    .render(&self.prompts.tools().discuss_degraded, &[]),
             );
         }
         // 被长度截断：如实写在行尾（与"降级"同一套做法）——模型与用户都看得到
@@ -1118,7 +1120,8 @@ impl Discussion {
             line.push_str(
                 &self
                     .prompts
-                    .render(&self.prompts.core.tool_texts.truncated_suffix, &[]),
+                    .tools()
+                    .render(&self.prompts.tools().truncated_suffix, &[]),
             );
         }
         let mut v = LineView::speech(id, verb_tag(verb), line);
@@ -1191,7 +1194,7 @@ impl Discussion {
             .collect::<Vec<_>>()
             .join("、");
         let user = self.prompts.render(
-            &self.prompts.core.synthesize.user,
+            Segment::SynthesizeUser,
             &[
                 ("roster", roster),
                 (
@@ -1205,7 +1208,7 @@ impl Discussion {
             ],
         );
         let msgs = vec![
-            Msg::system(self.prompts.core.synthesize.system.clone()),
+            Msg::system(self.prompts.text(Segment::SynthesizeSystem).to_string()),
             Msg::user(user),
         ];
         if self.cancelled() {
@@ -1344,7 +1347,7 @@ impl Execution {
         plan: &str,
         nodes: &str,
         retry: Option<&str>,
-        prompts: &Prompts,
+        prompt: &dyn Prompt,
         systools: &crate::capabilities::tools::api::SystemTools,
         llm: crate::capabilities::llm::api::LlmOpts,
         mode: crate::capabilities::llm::api::ToolMode,
@@ -1358,8 +1361,8 @@ impl Execution {
             .map(|(id, r)| format!("[{}] {}\n", id, r))
             .collect::<Vec<_>>()
             .join("");
-        let user = prompts.render(
-            &prompts.core.review.user,
+        let user = prompt.render(
+            Segment::ReviewUser,
             &[
                 ("plan", plan.to_string()),
                 ("reports", reports),
@@ -1367,7 +1370,7 @@ impl Execution {
             ],
         );
         let mut msgs = vec![
-            Msg::system(prompts.core.review.system.clone()),
+            Msg::system(prompt.text(Segment::ReviewSystem).to_string()),
             Msg::user(user),
         ];
         if let Some(again) = retry {

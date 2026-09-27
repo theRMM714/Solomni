@@ -17,7 +17,7 @@ pub use crate::capabilities::registry::domain::providers::{
 };
 
 use crate::capabilities::llm::api::{Channel, ProbeOutcome, ReplayReport, ToolMode};
-use crate::capabilities::prompt::api::{Prompts, ToolTexts};
+use crate::capabilities::prompt::api::{Prompt, ToolTexts};
 use crate::capabilities::session::api::AgentMeta;
 use crate::capabilities::workspace::api::Roster;
 
@@ -67,7 +67,7 @@ pub trait Registry: Send + Sync {
     /// 登记处**快照**：协作会话自持一份（与今日 `settings.clone()` 同义，语义不变）。
     fn snapshot(&self) -> Settings;
     /// 给模型看的 agent 清单文本（提示词册出模板，登记处出条目）。
-    fn agent_listing(&self, prompts: &Prompts) -> String;
+    fn agent_listing(&self, prompt: &dyn Prompt) -> String;
     /// 给模型看的模型清单文本。
     fn model_listing(&self, texts: &ToolTexts) -> String;
     /// 核心拟的名单 → 逐条校验后的实例；非法条目整条拒收（不静默改写）。

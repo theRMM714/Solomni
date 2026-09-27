@@ -70,11 +70,16 @@ capabilities/<name>/
 写它的操作跟着状态走，放在那个能力的 `service.rs`；`core` 只按 `api` 的 trait 调用，拿不到字段。
 **例外**：`core` 自己的状态（会话中心：会话表、命令队列、运行态）由 `core` 持有——它是应用服务，不是能力。
 
-**已落地的样板是 `registry`（批次 17）**：`capabilities/registry/service.rs` 持四份 yaml 与
-`SettingsStore` / `ChatGateway` / `ModelCatalog`，实现 `api.rs` 的 `Registry`；
-`core` 只剩一个 `registry: Box<dyn Registry>` 字段（`registry()` 读、`registry_mut()` 写），
-`settings` 字段与那 17 个方法已删。读事实用 `app()`（借用，不复制）、`resolve()` / `tool_mode()` /
-`context_of()` / `channel()` / `snapshot()`；**写只有 `RegistryService` 一处**。
+**已落地的两块样板（批次 17）**：
+
+- **`registry`（有端口的状态）**：`service.rs` 持四份 yaml 与 `SettingsStore` / `ChatGateway` / `ModelCatalog`，
+  实现 `api.rs` 的 `Registry`；`core` 只剩 `registry: Box<dyn Registry>`（`registry()` 读、`registry_mut()` 写），
+  `settings` 字段与那 17 个方法已删。读事实用 `app()`（借用，不复制）、`resolve()` / `tool_mode()` /
+  `context_of()` / `channel()` / `snapshot()`；**写只有 `RegistryService` 一处**。
+- **`prompt`（纯数据的状态）**：状态就是 `domain` 的 `Prompts`（无端口），`service.rs` 把 `Prompt` 能力面挂在它身上、
+  并给组合根一个装载入口；`core` 只剩 `prompt: Arc<dyn Prompt>`。**别的能力不点字段路径**：
+  按名字取段（`text` / `render` + `Segment`）或拿走两块共享记录（`tools()` / `refs()`，都是 `Arc`）。
+  这一条同时清掉了 `prompts.core.*` 的 `42` 条跨能力路径与每会话一份的深拷贝。
 
 ### 1.3 硬要求清单
 
@@ -160,7 +165,7 @@ capabilities/<name>/
 | **session** | 领域 | **已落位** `capabilities/session/`（`session` + `history` + `events`）（`collab_state.rs` 已改判归 `collab`——它派生的是**协作**状态） | 对话、转录行、行索引 | `HistoryStore` | **已完成**（批次 12） |
 | **llm** | 领域 | **已落位** `capabilities/llm/`（`ports` 的通道族 + `domain/envelope`） | 通道协议与回复解析 | `Chat` `ChatGateway` `ModelCatalog` `EnvelopeRepair` | **已完成**（批次 9） |
 | **tools** | 领域 | **已落位** `capabilities/tools/`（`systool` + `patch` + `schema` + `roles` + `fence`） | 观察账本、围栏策略、工具面 | `SysIo` `ToolRunner` `FenceHost` | **已完成**（批次 11） |
-| **prompt** | 领域 | **已落位** `capabilities/prompt/`（`prompt` + `refs` + `detail/yaml_prompts`） | 提示词册 | `PromptSource` | **已完成**（批次 7；适配器见批次 16） |
+| **prompt** | 领域 | **已落位** `capabilities/prompt/`（`api` + `service` + `domain/prompt` + `domain/refs` + `detail/yaml_prompts`） | 提示词册（**只由 `service.rs` 持有**） | `PromptSource` | **已完成**（批次 7；适配器见批次 16；状态与取用面随批次 17 归位 `service.rs` + `Segment`） |
 | **registry** | 领域 | **已落位** `capabilities/registry/`（`api` + `service` + `domain/providers` + `domain/agents`） | 四份 yaml 的内存形态（**只由 `service.rs` 写**） | `SettingsStore`（自己的）；另经 `llm::api` 的 `ChatGateway` / `ModelCatalog` 做探测与发现 | **已完成**（批次 8；状态与用例随批次 17 归位 `service.rs`） |
 | **workspace** | 领域 | **已落位** `capabilities/workspace/`（`module` + `packages` + `exec` + `workspace` 沙箱数据） | 清单快照、执行计划、沙箱寻址 | `ModuleSource` `PackageSource` `Workspace` | **已完成**（批次 10） |
 | ~~**rewind**~~ | ~~协调~~ | **改判：不是独立能力**——无独立状态所有权，归 `session`（见 §3.6） | — | — | **已并入批次 13** |
@@ -478,8 +483,8 @@ kernel       ──▶ （无）
 | **15** | **断环（已完成）** → 能力图零环；**收口 1（已完成）**：入站词汇归 `core/api.rs` → 基线全空；**收口 2（已完成）**：`intent.rs` 规则下沉；**收口 3（已完成）**：`Action`/`Acted` 与分发收进 `core::api`（`SessionOps::act` 默认方法）、`split_names`/`NO_AGENTS` 归 CLI、**`intent.rs` 删除**、`presentation/` 拆成 **`cli/` + `web/`** 两个独立顶层目录（静态资源随 `web/assets/`）；**收口 4（已完成）**：`main.rs` 拆四件事——组合根留 `main.rs`、机器可读探针进 `diagnostics/`、围栏守门进程进 `guard/`（**第二个程序入口**）、路径机制下沉 `adapters/root.rs`；门禁新增**入口层**并禁止任何人依赖它 | 14 | **全部完成** |
 
 | **16** | **适配器归位**：`adapters/` 里**能力私有**的 20 个实现 → 各能力 `detail/`；`adapters/` 只剩 `log` / `host_probe`（内核端口）与 `root`（入口层） | 15 | **已完成**。**重要发现**：搬进能力后暴露出一处被"适配层"挡住的真环 `tools ⇄ workspace`——`fs_modules` 校验清单时反向问了 `tools` 的保留名。解法：**校验归清单主人（workspace）、名字空间归工具（tools），保留名表由组合根装配期注入** |
-| **17** | **编排与状态归位（能力服务化）**：每块状态连同写它的操作一起搬进该能力的 `service.rs`——登记处（`Settings` + 17 个方法 + `SettingsStore`/`ModelCatalog`/`ChatGateway`）→ `registry` 打头；工作区、历史与回档、代拟随后。`core` 只持有 `Arc<dyn …>`，**不再有别人的字段** | 16 | **进行中**。**`registry` 已完成**：`service.rs` 持四份 yaml 与三个端口，`api.rs` 立 `Registry` 能力面；`core` 删掉 `settings` 字段与 17 个方法，只剩 `Box<dyn Registry>` + `registry()`/`registry_mut()`。**未开始**：workspace（清单快照与执行计划）、session（历史与回档）、collab（代拟） |
-| **18** | **入站接口归位**：`core::api` 的五个能力接口 → 各能力 `api`；`cli` / `web` 改经各能力的**声明面**；`contracts.md` 的路由表与 `tests/api.rs` 跟着改 | 17 | 未开始。**批次 17 留下的两件事要在这一批收口**：①`core::api::RegistryOps`（呈现层命令面，全 `&self`，经命令队列）与 `registry::api::Registry`（能力面，写取 `&mut self`）现在各有一份同名用例声明，归位时要收成一处——判据是**谁能拥有 `&mut`**：状态住在核心执行线程上，所以呈现层要的是**队列代理**，不是能力自身；②`ChatGateway` 由 `core` 与 `RegistryService` 各持一份 `Arc`（同一个对象、组合根注入两次），§五.5「端口对象恰好一处被持有」尚未达成 |
+| **17** | **编排与状态归位（能力服务化）**：每块状态连同写它的操作一起搬进该能力的 `service.rs`。**只搬"状态 + 写它的操作"，不搬脚本**（§2.4） | 16 | **进行中**。**`registry` 已完成**：`service.rs` 持四份 yaml 与三个端口，`api.rs` 立 `Registry` 能力面；`core` 删掉 `settings` 与 17 个方法。**`prompt` 已完成**：`service.rs` 把 `Prompt` 面挂在册子上并给组合根 `load()`；`core` 只剩 `Arc<dyn Prompt>`，`collab` 改为共享（不再各持一份克隆），`Sandbox`/`ProcTools`/`AgentSession` 的三处深拷贝改为共享 `Arc`。**未开始**：`tools` 的两张表（`systools`）。**核过、无状态可搬**：`workspace`（core 持的是三个**端口**，状态是按次派生的局部量）、`session`（transcripts 在 `HistoryStore` 后面；回档编排 §3.6 已定留在应用服务）、代拟（是**脚本**，§2.4 归唯一协调者） |
+| **18** | **入站接口归位**：`core::api` 的五个能力接口 → 各能力 `api`；`cli` / `web` 改经各能力的**声明面**；`contracts.md` 的路由表与 `tests/api.rs` 跟着改 | 17 | 未开始。**批次 17 留下的两件事要在这一批收口**：①`core::api::RegistryOps`（呈现层命令面，全 `&self`，经命令队列）与 `registry::api::Registry`（能力面，写取 `&mut self`）现在各有一份同名用例声明，归位时要收成一处——判据是**谁能拥有 `&mut`**：状态住在核心执行线程上，所以呈现层要的是**队列代理**，不是能力自身；②`ChatGateway` 由 `core` 与 `RegistryService` 各持一份 `Arc`（同一个对象、组合根注入两次），§五.5「端口对象恰好一处被持有」尚未达成；③`tools` 的两张表（`SystemTools`）仍以字段形式住在 `core` 并整份 `clone` 进协作会话（batch 17 的最后一片） |
 | **19** | **测试按业务分区（R10）**：`tests/core.rs`（8500+ 行）拆开，目录与 `capabilities/` 对齐 | 18 | 未开始 |
 
 **规模不是硬验收**：拆到「能安全验证」为止。`core/mod.rs`（2870）与 `collab/domain/engine.rs`（2831）的进一步拆分随批次 16–19 暴露的接缝走，不为凑行数而拆。

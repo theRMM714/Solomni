@@ -126,11 +126,12 @@ fn main() {
             std::process::exit(1);
         }
     };
-    let prompts =
+    let prompt_source =
         capabilities::prompt::detail::yaml_prompts::YamlPrompts::new(root.join("prompts"));
-    // 册子只读一次：core 与适配层（工具回执里的那些收尾标记）共用同一份。
-    let book = match capabilities::prompt::ports::PromptSource::load(&prompts) {
-        Ok(b) => b,
+    // **提示词册能力**：册子只在这里装载一次、也只被它持有；core 与工具执行
+    // （回执里的那些收尾标记）要的"段"都经它的能力面拿——不再各存一份拷贝。
+    let prompt = match capabilities::prompt::service::load(&prompt_source) {
+        Ok(p) => p,
         Err(e) => {
             eprintln!("[装配失败] {}", e);
             std::process::exit(1);
@@ -164,7 +165,7 @@ fn main() {
     // 工具执行：外层拉起的守门进程就是本程序自己（围栏在它里面装）。
     let tools = capabilities::tools::detail::ProcTools::new(
         std::env::current_exe().unwrap_or_default(),
-        book.core.tool_texts.clone(),
+        prompt.tools(),
         home.clone(),
         std::sync::Arc::clone(&write_allowed),
     );
@@ -173,7 +174,7 @@ fn main() {
     // 信封修复：只把字符串里的裸控制字符转义（无歧义才修，其余交给模型重发）。
     let repair = capabilities::llm::detail::UnambiguousRepair;
 
-    let mut core = match core::Core::new(
+    let mut core = core::Core::new(
         Box::new(registry),
         Arc::new(history),
         Arc::new(workspace),
@@ -184,17 +185,11 @@ fn main() {
         Arc::new(tools),
         Arc::new(io),
         Arc::new(repair),
-        Box::new(LoadedPrompts(book)),
+        prompt,
         systools,
         std::sync::Arc::clone(&log),
-        std::sync::Arc::new(adapters::HostProbeAdapter),
-    ) {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("[装配失败] {}", e);
-            std::process::exit(1);
-        }
-    };
+        Arc::new(adapters::HostProbeAdapter),
+    );
 
     // 隐藏模式：实测一条通道支不支持原生工具调用，并把确定结论写回 models.yaml（要真实网络）。
     if let Some(i) = args.iter().position(|a| a == "--probe-tools") {
@@ -334,15 +329,6 @@ fn main() {
         if let cli::CliExit::Web(port) = cli::run(ops.clone()) {
             serve_web(ops, port, allow_fence_write);
         }
-    }
-}
-
-/// 装配期已经读好的册子（同一份事实不再读第二遍）。
-struct LoadedPrompts(capabilities::prompt::api::Prompts);
-
-impl capabilities::prompt::ports::PromptSource for LoadedPrompts {
-    fn load(&self) -> Result<capabilities::prompt::api::Prompts, String> {
-        Ok(self.0.clone())
     }
 }
 
