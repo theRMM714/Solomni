@@ -136,3 +136,21 @@
   blocked_by: |
     与 session 分区重构同一批处理（摘要变成转录行 + rebuild 认标记 + 回档按压缩点分流）。
     见 docs/architecture/session-model.md。
+
+- id: deps.serde-yaml-unmaintained
+  scope: global
+  level: T1
+  why: |
+    `serde_yaml 0.9.34+deprecated` 的上游已归档（RUSTSEC 的「unmaintained」结论），本仓用它的完整 API
+    （`from_str` / `to_string` / `from_value` / `Value` / `Mapping`，35 处）。它功能完备、当前没有已知漏洞，
+    但长期不再收修复。
+  how: |
+    换成 yaml-serde 0.10（The YAML Organization 接手的 serde_yaml 续作：MIT OR Apache-2.0、纯 Rust、
+    只多 indexmap / itoa / libyaml-rs / ryu）。步骤：① 在能联网的 shell 里 `cargo fetch`（本仓当前环境取不到
+    crates.io）；② `Cargo.toml` 的 `serde_yaml = "0.9"` 改成 `yaml-serde = "0.10"`；③ 代码里 35 处
+    `serde_yaml::` 改成 `yaml_serde::`；④ 跑 `node run-tests.js`。
+  accept: |
+    `cargo tree` 里不再有 serde_yaml；yaml-serde 进入依赖树且 `cargo tree --duplicates` 仍为空；
+    全量门禁绿；届时删除本条。
+  blocked_by: |
+    只有一件事：拉取新 crate 需要网络（本仓的开发环境里 cargo 取不到 crates.io，TLS 凭证不可用）。
