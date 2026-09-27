@@ -33,7 +33,11 @@ tests/
   ci-publish.mjs                # CI 报告发布脚本（把三平台报告写入 ci-report 分支）
 ```
 
-单元层的契约测试与替身**同处 `src/tests/`**（契约：`ports.rs` / `fakes.rs` / `adapters.rs` / `api.rs` / `cli.rs` / `routes.rs`；替身：`doubles.rs`；T1 用例：`core.rs`）。
+单元层与 `capabilities/` **同构**（批次 19）：T1 用例按业务分文件——`kernel.rs` / `prompt.rs` / `registry.rs` /
+`llm.rs` / `workspace.rs` / `tools.rs` / `session.rs` / `collab.rs`，加**应用服务**自己的 `core.rs`
+（会话中心与跨能力编排）；契约测试 `ports.rs` / `fakes.rs` / `adapters.rs` / `api.rs` / `cli.rs` / `routes.rs`；
+共享支撑 `doubles.rs`（端口替身）/ `builders.rs`（测试装配脚手架）/ `prelude.rs`（公共前置重导出）。
+**判据**：用例落到"它钉住的那个不变式"所属的文件；顺手经过别的能力只是路径，不是归属。
 
 四个平台目标在 `Cargo.toml` 中显式登记。新增测试目标、Fixture 或脚本必须能从入口追溯到执行位置，否则属于结构质量问题。
 

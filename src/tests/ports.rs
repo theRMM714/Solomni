@@ -3,7 +3,7 @@
 //! 真实适配器的对应边界在 adapters.rs，进程与 HTTP 的真实路径在 tests/cross-platform/。
 //! 替身统一复用 super::doubles 的 `InMemory*` / `Fake*` / `Recording*`——契约测试不另造一份。
 
-use super::core::{RecordingRunner, SilentRunner};
+use super::builders::{RecordingRunner, SilentRunner};
 use super::doubles::{
     abs, module_of, FakeCatalog, InMemoryHistory, InMemoryPackages, InMemorySettings,
     InMemorySysIo, InMemoryWorkspace, NoFenceHost, RecordingFence, ScriptGateway, SharedScript,

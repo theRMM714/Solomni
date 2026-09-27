@@ -5,12 +5,22 @@
 
 mod adapters;
 mod api;
+mod builders;
 mod cli;
+mod collab;
 mod core;
 mod doubles;
 mod fakes;
+mod kernel;
+mod llm;
 mod ports;
+mod prelude;
+mod prompt;
+mod registry;
 mod routes;
+mod session;
+mod tools;
+mod workspace;
 
 /// 隔离落点：`target/test-scratch/contract/<name>`（target/ 不入库）。每次先清空再建。
 pub(crate) fn scratch(name: &str) -> std::path::PathBuf {

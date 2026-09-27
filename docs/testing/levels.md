@@ -54,7 +54,8 @@ cargo tree --duplicates
 
 ### T1：单元测试
 
-位置：实现模块内部的 `#[cfg(test)] mod tests`，以及 `src/tests/core.rs`（全内存装配的用例）。
+位置：实现模块内部的 `#[cfg(test)] mod tests`，以及 `src/tests/` 下**按业务分文件**的全内存装配用例
+（一个能力一个文件，见 [gaps-acceptance.md](gaps-acceptance.md) 的目录与命名）。
 
 验证：
 

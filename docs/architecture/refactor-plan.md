@@ -278,7 +278,8 @@ tools 自持一个就等于绕过状态所有权——**直接写别人的文件
 | 摘要落盘（发送视图 + `compacted` 事件） | `session` |
 
 **连带更新**：`docs/architecture/tools-and-roles.md` 的工具总表说明必须同步——
-今天 `src/tests/core.rs:6783` 的注释把"实现不在 systool"写成**预期**，重构后这条注释与测试都要改。
+原 `src/tests/core.rs` 里那条"实现不在 systool"的注释把偏差写成**预期**（批次 19 拆到 `src/tests/tools.rs` |
+    `session.rs`），重构后这条注释与测试都要改。
 
 ### 3.5 会话内的上下文压缩（compact）
 
@@ -487,7 +488,7 @@ kernel       ──▶ （无）
 | **16** | **适配器归位**：`adapters/` 里**能力私有**的 20 个实现 → 各能力 `detail/`；`adapters/` 只剩 `log` / `host_probe`（内核端口）与 `root`（入口层） | 15 | **已完成**。**重要发现**：搬进能力后暴露出一处被"适配层"挡住的真环 `tools ⇄ workspace`——`fs_modules` 校验清单时反向问了 `tools` 的保留名。解法：**校验归清单主人（workspace）、名字空间归工具（tools），保留名表由组合根装配期注入** |
 | **17** | **编排与状态归位（能力服务化）**：每块状态连同写它的操作一起搬进该能力的 `service.rs`。**只搬"状态 + 写它的操作"，不搬脚本**（§2.4） | 16 | **已完成**。`registry`：`service.rs` 持四份 yaml 与三个端口，`core` 删掉 `settings` 与 17 个方法。`prompt`：`service.rs` 把 `Prompt` 面挂在册子上，`core` 只剩 `Arc<dyn Prompt>`，`collab`/`Sandbox`/`ProcTools`/`AgentSession` 的深拷贝改共享 `Arc`。`tools`：`Tools` 面 + `SystoolsSource` 端口，`core` 只剩 `Arc<dyn Tools>`。`core` 至此**不再有别人的状态字段**（剩下的是端口与它自己的会话中心）。**核过、无状态可搬**：`workspace`（core 持的是三个**端口**，状态是按次派生的局部量）、`session`（transcripts 在 `HistoryStore` 后面；回档编排 §3.6 已定留在应用服务）、代拟（是**脚本**，§2.4 归唯一协调者） |
 | **18** | **入站接口归位**：`core::api` 的能力接口 → 各能力 `api`；`cli` / `web` 改经各能力的**声明面**；`contracts.md` 的路由表与 `tests/api.rs` 跟着改 | 17 | **已完成**。`RegistryOps` → `registry::api`、`HistoryOps` → `session::api`、`WorkspaceOps` → `workspace::api`（新，收 `roster`）；**留在 core 的三个各归其位**：`SessionOps`（会话中心：会话生命周期 + 动作分发 + 文件视图 + **`session_views`**——"在世会话 × 历史的并集"只有它两个都知道）、`CoreOps`（`runtime_report` / `suggest_models`：**编排脚本**，§2.4）、`LogOps`（埋点门面；门禁只许 `core::api` 或能力 `::api`）。`DiscoveryOps` 因此解散。**①已收口**：`RegistryOps`（队列面，全 `&self`）与 `Registry`（能力面，写取 `&mut self`）**保持两个 trait**，理由写进 `registry/api.rs`——单写者是编译期事实（`&mut self`），而呈现层持的是可克隆句柄、队列独占在核心线程那一侧（R4/R5）；收口判据不是"并成一个"，是"**定义归位**"。**②仍未达成**：`ChatGateway` 由 `core` 与 `RegistryService` 各持一份 `Arc`，§五.5「端口对象恰好一处被持有」 |
-| **19** | **测试按业务分区（R10）**：`tests/core.rs`（8500+ 行）拆开，目录与 `capabilities/` 对齐 | 18 | 未开始 |
+| **19** | **测试按业务分区（R10）**：`tests/core.rs`（8408 行）拆开，分区与 `capabilities/` 对齐 | 18 | **已完成**。`src/tests/core.rs`（161 个用例）按**用例钉住的不变式归属**切成 `kernel` / `prompt` / `registry` / `llm` / `workspace` / `tools` / `session` / `collab` + 留在 `core.rs` 的**应用服务**用例（会话中心与编排）；非测试脚手架（替身 + 造会话/造名单辅助）搬进 `builders.rs`，原 imports 集中成 `prelude.rs`。**最大文件 1877 行**（`tools.rs`），全部 ≤ 2000；用例数不变（287 passed）|
 
 **规模不是硬验收**：拆到「能安全验证」为止。`core/mod.rs`（2870）与 `collab/domain/engine.rs`（2831）的进一步拆分随批次 16–19 暴露的接缝走，不为凑行数而拆。
 
@@ -502,17 +503,17 @@ kernel       ──▶ （无）
 1. 新目录建立，代码迁入，**旧路径已删除**（不留转发壳）；
 2. `cargo test` 与 `node run-tests.js` 全绿（T0 质量门禁 + 业务测试都过）；
 3. 依赖方向门禁通过，**该批次的基线豁免已删除**；
-4. 该能力的测试已按 §4.4 拆到同构文件，单文件 ≤ 2000 行；
+4. 该能力的测试已按 §4.4 落到同构文件，单文件 ≤ 2000 行；
 5. 文档同步：`module-map.md` 对应行已改；受影响的门户/细则已改（R8）；
 6. §4.2 表状态改为「已完成」，并写明批次号。
 
 ### 4.4 测试迁移规则
 
-- **目录同构**：业务 `capabilities/<name>/` ↔ 测试 `src/tests/<name>/`；`src/tests/core.rs`（8222 行）按能力拆空后删除。
+- **分区同构**：业务 `capabilities/<name>/` ↔ 测试 `src/tests/<name>.rs`（一个能力一个文件；超 2000 行再拆目录）；`src/tests/core.rs` 只留**应用服务自己的**用例（会话中心与跨能力编排），其余按能力搬走（批次 19 已完成）。
 - **搬家不改断言**：拆分批次内只移动测试与改路径，**不动断言**。要改断言语义 → 另开批次并写明理由。
 - **消除测试专用入口**（R11）：`Core::single_say`（`#[cfg(test)]`）这类"测试路径 ≠ 生产路径"的双轨，
   在 `session` / `collab` 批次里改为走生产入口（`CoreHandle`）。
-- **替身跟着端口走**：`src/tests/doubles.rs` 按端口归属拆到各能力，端口的真实适配器覆盖范围见 [doubles.md](../testing/doubles.md) 三。
+- ~~**替身跟着端口走**：`src/tests/doubles.rs` 按端口归属拆到各能力~~ —— **实测改判（批次 19）**：替身与装配脚手架**留在共享文件**（`doubles.rs` 端口替身 + `builders.rs` 测试装配）。理由：它们本来就不属于某个能力（同一份内存装配被多个能力的用例复用），按端口拆散只会把同一份装配复制若干份、并把"改一处替身要改几处"引回来。端口的真实适配器覆盖范围见 [doubles.md](../testing/doubles.md) 三。
 - **每批次保留一条行为不变验收**：至少一条端到端用例证明该批次"只搬家、没改行为"。
 
 ---
@@ -525,6 +526,6 @@ kernel       ──▶ （无）
 4. 前端（`cli/` + `web/`）只 `use` 各业务的**声明面**：零 `use ...::ports::`、零 `use ...::domain::`、零 `use ...::detail::`。
 5. 端口对象在**恰好一处**被持有（入口层的组合根），不再手工穿层；`::detail` 只有它碰。
 6. 运行态**只有一份真相**（`kernel/jobs`）。
-7. 测试按能力分文件，单文件 ≤ 2000 行；**测试入口 = 生产入口**。
+7. 测试按能力分文件（`src/tests/<能力>.rs`），单文件 ≤ 2000 行；**测试入口 = 生产入口**。
 8. 架构文档（`ARCHITECTURE.md` + `module-map.md` + 相关细则 + `AGENTS.md` 路由表）与代码一致，无过期描述。
 9. 本文删除。

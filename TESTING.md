@@ -26,22 +26,21 @@
 
 当前仓库已经具备：
 
-- `src/tests/` 中的测试层：`core.rs`（T1 用例，全内存装配）、`doubles.rs`（替身与装配辅助）；
+- `src/tests/` 中的测试层：**与 `capabilities/` 同构的一个能力一个文件**（`prompt.rs` / `registry.rs` / `llm.rs` / `workspace.rs` / `tools.rs` / `session.rs` / `collab.rs` / `kernel.rs`）+ `core.rs`（应用服务自己的用例：会话中心与跨能力编排）、`doubles.rs`（端口替身）与 `builders.rs`（测试装配脚手架）；
 - `tests/cross-platform/` 跨平台集成与端到端测试；
 - `tests/windows/`、`tests/linux/`、`tests/macos/` 平台探针（`tests/helpers/probe.rs` 提供共用探针设施）；
 - `src/web/assets/*.smoke.cjs` 前端冒烟测试；
 - `tests/gaps.yaml` 与 `tests/<平台>/gaps.yaml` 缺口账；
 - `node run-tests.js` 测试汇总入口（`node start.js -test` 是备好环境后的同一入口）；
 - `src/capabilities/llm/detail/fake_chat.rs` 中的 `FakeChat` 与 `DemoGateway`；
-- `src/tests/doubles.rs` 与 `src/tests/core.rs` 中的 `InMemory*`、`FakeCatalog`、`VecSource`、`ScriptGateway`、`RecordingRunner`、`RecordingFence`、`TestPrompts`、`NoopLog` 等测试装配（替身支持失败注入，供 T2 复用）；
+- `src/tests/doubles.rs`（`InMemory*` / `FakeCatalog` / `VecSource` / `ScriptGateway` / `RecordingFence` / `TestPrompts` / `NoopLog`）与 `src/tests/builders.rs`（`RecordingRunner` / `ParallelRunner` / `SilentRunner` / 原生与截断通道替身 / 造会话与造名单的辅助）里的测试装配（替身支持失败注入，供 T2 复用）；
 - `src/tests/` 中的契约测试（T2）：
   - `ports.rs`（14 个端口的替身语义；`Log` 在 `kernel/log.rs`，见 [docs/architecture/module-map.md](docs/architecture/module-map.md) 一）、
     `fakes.rs`（FakeChat / DemoGateway 的独立契约）；
   - `adapters.rs`（8 个文件系统适配器的真实边界 + 本机环回 HTTP 适配器）；
   - `api.rs`（入站契约：命令与事件、生成期间停止立刻生效、错误如实传播、单条命令 panic 不带垮核心）；
-  - `intent.rs`（呈现层共享件：输入解析 / 点名 / 动作分发；规则测试已随归属移到 `api.rs`）；
   - `routes.rs`（HTTP 路由目录 ↔ 处理器 ↔ 文档 ↔ 前端调用四者机器比对；假能力面逐条验成功 / 错误 / 空 / 边界）；
-- **入站契约也是契约**：呈现层只依赖 `core::api` 的四个角色接口与事件台（拿不到 `Core`、拿不到任何核心锁），
+- **入站契约也是契约**：呈现层只依赖各能力的能力接口（归位见 [docs/architecture/contracts.md](docs/architecture/contracts.md)）与事件台（拿不到 `Core`、拿不到任何核心锁），
   所以它能被假实现整体替换——`routes.rs` 的 `FakeOps` 就是这么逐条测路由的。
 - T0 质量门禁已并入同一入口，且**全部是零容忍硬失败**：编译、结构审查、格式、clippy、编译告警、依赖重复。
 

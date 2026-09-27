@@ -36,10 +36,10 @@ Fake 必须：
 | `src/tests/doubles.rs:VecSource` | 模块清单 Fake | 已被核心测试使用；端口矩阵已登记（见 §三，已验收） |
 | `src/tests/doubles.rs:ScriptGateway`、`SharedScript` | 脚本网关 Fake | 已被核心测试使用；端口矩阵已登记（失败注入：无通道回落如实告知） |
 | `src/tests/doubles.rs:TestPrompts` | 提示词册 Fake（返回内存册子） | 已被核心测试使用；端口矩阵已登记（见 §三，已验收） |
-| `src/tests/core.rs:RecordingRunner` | 工具执行 Fake + 记录 `calls` | 已被核心测试使用；端口矩阵已登记（失败注入：`ok=false` 回执；超时杀树在 `ProcTools`） |
-| `src/tests/core.rs:ParallelRunner` | 工具执行 Spy：记录**同时在跑**的峰值 | 已钉住"声明可并发才并发、未声明一律串行" |
-| `src/tests/core.rs:NativeGateway`、`NativeChat` | 原生通道替身：按脚本发结构化调用，并记录每次请求的声明与消息 | 已钉住协议形状与"实时/重建逐条一致" |
-| `src/tests/core.rs:SilentRunner` | 守护 Stub：任何调用即 panic | 用于"不该用工具"的路径 |
+| `src/tests/builders.rs:RecordingRunner` | 工具执行 Fake + 记录 `calls` | 已被核心测试使用；端口矩阵已登记（失败注入：`ok=false` 回执；超时杀树在 `ProcTools`） |
+| `src/tests/builders.rs:ParallelRunner` | 工具执行 Spy：记录**同时在跑**的峰值 | 已钉住"声明可并发才并发、未声明一律串行" |
+| `src/tests/builders.rs:NativeGateway`、`NativeChat` | 原生通道替身：按脚本发结构化调用，并记录每次请求的声明与消息 | 已钉住协议形状与"实时/重建逐条一致" |
+| `src/tests/builders.rs:SilentRunner` | 守护 Stub：任何调用即 panic | 用于"不该用工具"的路径 |
 | `src/tests/doubles.rs:NoFenceHost` | 围栏释放空操作 Stub | 已被核心测试使用 |
 | `src/tests/doubles.rs:RecordingFence` | 围栏释放记录型 Spy | 已钉住"删会话即请求撤销授权" |
 | `src/kernel/log.rs:NoopLog` | 无声日志 Stub | 已存在；不用于验证日志内容 |

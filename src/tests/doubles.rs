@@ -2,11 +2,11 @@
 //! 语义规范见 docs/testing/doubles.md；端口契约测试与它同处一层（src/tests/）。
 //! 测试里的组合根 = 内存适配器；core 的可测性正是端口化的直接收益。
 //!
-//! 本模块只放**替身与装配辅助**；用它们的用例在 `super::core`（T1）。所以这里对"只有用例才用到"的项
-//! 放行 dead_code（替身与夹具是给别的模块用的，不在本文件里被调用是正常的）。
+//! 本模块只放**替身与装配辅助**；用它们的用例在各业务测试文件（T1，见 `src/tests/`）。所以这里对
+//! "只有用例才用到"的项放行 dead_code（替身与夹具是给别的模块用的，不在本文件里被调用是正常的）。
 #![allow(dead_code)]
 
-use super::core::SilentRunner;
+use super::builders::SilentRunner;
 use crate::capabilities::llm::api::Channel;
 use crate::capabilities::llm::api::{
     BoxedChat, Chat, ChatGateway, Chunk, CompleteOpts, Completion, ModelCatalog, Msg,
