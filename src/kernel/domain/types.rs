@@ -1,5 +1,5 @@
 //! 跨业务共享的**事实类型**：只放没有领域逻辑的。
-//! 见 docs/architecture/refactor-plan.md §1.3 R6：事实类型只属于 kernel，禁止各业务复制 DTO。
+//! 见 ARCHITECTURE.md §九.6 R6：事实类型只属于 kernel，禁止各业务复制 DTO。
 
 use serde::{Deserialize, Serialize};
 

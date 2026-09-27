@@ -2,7 +2,7 @@
 //! 缺目录/缺文件 = 装配错误（如实报错，不静默造默认文案）。
 //!
 //! **工具总表与角色表不在这里**：它们是工具侧的事实，加载器在 `capabilities/tools/detail/`——
-//! 挂进来会让 `prompt → tools` 成环（见 docs/architecture/refactor-plan.md §3.1）。
+//! 挂进来会让 `prompt → tools` 成环（见 ARCHITECTURE.md §一）。
 
 use crate::capabilities::prompt::domain::prompt::{merge_book, Prompts};
 use crate::capabilities::prompt::ports::PromptSource;

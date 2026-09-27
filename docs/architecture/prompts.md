@@ -44,6 +44,6 @@
 - 渲染（`{{key}}` 替换、缺键 / 缺变量即报错）在 `capabilities/prompt/domain/prompt.rs`（纯逻辑，不读文件）；
 - **工具总表与角色表不在这份册子里**：`systools/tools.yaml`（工具是什么）与 `systools/roles.yaml`（身份有什么）
   由 `capabilities/tools/detail/yaml_systools.rs` 的 `YamlSystools` 装配成 `SystemTools`，**与册子分开注入**——
-  挂进册子会让提示词反过来依赖工具，两边成环（见 [refactor-plan.md](refactor-plan.md) §三）；
+  挂进册子会让提示词反过来依赖工具，两边成环（见 [ARCHITECTURE.md](../../ARCHITECTURE.md) §一）；
 - **组装（哪一回合发哪几段）留在各业务**：身份块归 `session`、工具说明归 `tools`、清单文本归 `registry` / `workspace`
   ——prompt 只给"段"，不替它们拼（否则它反过来要认识会话与工具）。

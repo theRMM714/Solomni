@@ -2,7 +2,7 @@
 //!
 //! **为什么在 llm 而不是 prompt**：这是「协议形状 → 文案」的映射，必须认识 `Malformed` / `Tail` 的结构；
 //! 模板本身仍住在 `prompt`（`ToolTexts`），这里只做选择与拼装。放在 `prompt` 会让提示词能力
-//! 反过来依赖模型通道能力，把 `prompt` 拉进环（见 docs/architecture/refactor-plan.md §4.2 批次 10）。
+//! 反过来依赖模型通道能力，把 `prompt` 拉进环（见 ARCHITECTURE.md §一）。
 
 use crate::capabilities::llm::domain::envelope::{Malformed, Tail};
 use crate::capabilities::prompt::api::ToolTexts;

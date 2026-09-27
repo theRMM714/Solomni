@@ -629,7 +629,7 @@ impl ModuleSource for VecSource {
     }
 }
 
-/// 无声围栏端口：测试里不碰任何 ACL（真实实现在 adapters/confine）。
+/// 无声围栏端口：测试里不碰任何 ACL（真实实现在 capabilities/tools/detail/confine）。
 pub(crate) struct NoFenceHost;
 impl crate::capabilities::tools::ports::FenceHost for NoFenceHost {
     fn release(&self, _spec: &crate::capabilities::tools::api::FenceSpec) -> Result<(), String> {
@@ -1019,7 +1019,7 @@ pub(crate) fn test_workspace(
 }
 
 /// 登记一个 agent（测试装配用）：**校验用的模块清单由调用方取一份**交给登记处——
-/// 清单归 workspace，登记处只认事实（见 docs/architecture/refactor-plan.md §3.1）。
+/// 清单归 workspace，登记处只认事实（见 ARCHITECTURE.md §九.3）。
 pub(crate) fn agent_upsert(
     core: &mut Conductor,
     name: &str,

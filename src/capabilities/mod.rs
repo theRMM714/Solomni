@@ -1,6 +1,6 @@
 //! 业务能力：按业务功能垂直切分的一等公民。每个能力有自己的 `api` / `ports` / `domain` / `detail`。
 //!
-//! 规则（见 docs/architecture/refactor-plan.md §一）：
+//! 规则（见 ARCHITECTURE.md §九）：
 //! - **业务之间只经对方的 `api`**（不许碰 `domain` / `ports`）；
 //! - 能力不反向依赖适配层或呈现层；
 //! - 依赖方向由 T0 结构审查的**依赖方向门禁**机器判定（tests/dependency-baseline.json）。

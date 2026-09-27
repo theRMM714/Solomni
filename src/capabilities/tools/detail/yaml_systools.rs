@@ -1,6 +1,6 @@
 //! 系统工具与角色的装配输入：`systools/tools.yaml`（工具是什么）+ `systools/roles.yaml`（身份有什么）。
 //! **它属于工具能力**（工具总表与角色表是工具侧的事实，不是提示词）：
-//! 放在提示词能力里会让 `prompt → tools` 成环（见 docs/architecture/refactor-plan.md §3.1）。
+//! 放在提示词能力里会让 `prompt → tools` 成环（见 ARCHITECTURE.md §一）。
 //! 缺目录/缺文件 = 装配错误（如实报错，不静默造默认）。
 
 use crate::capabilities::tools::api::{RoleTable, SystemTools, ToolBook};

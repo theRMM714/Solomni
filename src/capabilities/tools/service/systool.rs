@@ -1,7 +1,7 @@
 //! 内置工具的**执行编排**：驱动 `SysIo` 读写盘上的文件（read / write / edit / patch / list / search）。
 //!
 //! 纯规则在 `domain/systool.rs`（参数校验、回执文案、观察账本、`ToolOutcome`）——本文件只调用它们；
-//! 因此这里引 `ports`（IO 机制），`domain/` 不引（见 refactor-plan §2.3）。
+//! 因此这里引 `ports`（IO 机制），`domain/` 不引（见 ARCHITECTURE.md §九.3）。
 
 use crate::capabilities::tools::domain::systool::*;
 use crate::capabilities::tools::ports::SysIo;

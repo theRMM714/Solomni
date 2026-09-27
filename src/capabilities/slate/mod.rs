@@ -1,6 +1,6 @@
 //! **拟名单**（协调型业务）：给一句需求，让核心提一份**可直接开工**的 agent 名单。
 //!
-//! 边界判据（docs/architecture/refactor-plan.md §2.1）：
+//! 边界判据（ARCHITECTURE.md §九.1）：
 //! - **有自己的用例与协议**：`slate` 工具的载荷（`picks`，形状 = `registry::api::RosterPick`）
 //!   与提示词段（`slate.*`）归它；用户可见后果是「推荐名单」（一次性建议）与
 //!   「代拟名单」（协作会话里待用户确认）；

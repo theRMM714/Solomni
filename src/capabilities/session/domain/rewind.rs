@@ -3,7 +3,7 @@
 //! **为什么归 session 而不是独立能力**：它们读写的全部状态（转录行、`marks` / `line_reply` /
 //! `next_line`）都归会话所有，它们自己没有状态——不满足「独立状态所有权」这条必要判据。
 //! `Conductor` 里的回档**编排**（撤子会话、截事件流水、重建会话）是门面职责，留在 `conductor`。
-//! 见 docs/architecture/refactor-plan.md §4.2 批次 13。
+//! 见 ARCHITECTURE.md §六。
 
 /// 主会话第 keep_id 行所属的**回合**（没有 = 0）。
 pub fn turn_of_line(events: &[serde_json::Value], keep_id: u64) -> u64 {

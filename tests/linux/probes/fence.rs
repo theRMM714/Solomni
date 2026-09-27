@@ -3,7 +3,7 @@
 
 use crate::probe::{job_json, run_launcher, scratch};
 
-/// 与 src/adapters/confine/linux.rs 的 RULES_REJECTED_MARK 一致（集成测试看不到 crate 内部）。
+/// 与 src/capabilities/tools/detail/confine/linux.rs 的 RULES_REJECTED_MARK 一致（集成测试看不到 crate 内部）。
 /// 自检已确认本机 Landlock 有效，却仍装不上 = 我们的规则写错了；
 /// 那种情况**必须响亮失败**，否则「绿」等于围栏根本没验收。
 const RULES_REJECTED_MARK: &str = "landlock 规则被拒绝";

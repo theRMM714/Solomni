@@ -1,7 +1,7 @@
 //! **模块清单 → 工具面**：把 `module.yaml` 声明的工具与参数契约转成工具能力认识的形态。
 //!
 //! 归属：这些都是**工具侧**的知识（保留名、参数契约、模型侧说明），
-//! 留在 `workspace` 会让 `workspace → tools` 成环（见 docs/architecture/refactor-plan.md §3.8）。
+//! 留在 `workspace` 会让 `workspace → tools` 成环（见 ARCHITECTURE.md §一）。
 //! 参数**声明形态**（`Param` / `ParamType`）仍归 `workspace`（它是 `module.yaml` 的字段）。
 
 use crate::capabilities::prompt::api::{Prompt, Segment};

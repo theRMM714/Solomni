@@ -403,7 +403,7 @@ impl Conductor {
             return Err("至少要有一个 agent".to_string());
         }
         // **单模式的组合语义**：点名了多个 agent = 把它们的模块并成一个**临时组合**（去重、保序；
-        // 模型取核心默认）。规则只有这一处——前端不再自己拼（见 refactor-plan §4.2 批次 15 收口）。
+        // 模型取核心默认）。规则只有这一处——前端不再自己拼（见 ARCHITECTURE.md §一）。
         let mut spec = spec;
         if spec.mode == WorkMode::Single && spec.agents.len() > 1 {
             spec.agents = vec![merge_into_one(&spec.agents, &spec.name)];

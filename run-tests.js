@@ -328,7 +328,7 @@ function structuralAudit() {
 
   // ---------- 依赖方向门禁 ----------
   // 权威：AGENTS.md「核心约束」（按业务功能垂直切分、业务之间通过 API 契约协作）与
-  // ARCHITECTURE.md §一「分层与依赖方向」；目标分区与销账口径见 docs/architecture/refactor-plan.md §一 / §四。
+  // 判据：ARCHITECTURE.md §一「分层与依赖方向」与 §九.7「依赖方向门禁」；豁免清单在 tests/dependency-baseline.json。
   // 三条规则：① 业务/机制层不得反向依赖 adapters / presentation；
   //          ② presentation 只经入站能力面（core::api）驱动，不碰端口与内部模块；
   //          ③ 业务层内部不得成环（按强连通分量判定）。

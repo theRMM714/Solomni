@@ -104,13 +104,13 @@
     ③ 两条触发点必须**同时**成立——只修一半必然坏事：只修①会让手动也退化成"只加摘要不删内容"，
        只修②会让手动 up_to=0 变成"什么都不移出"；
     ④ 补一条断言"被总结的内容确实消失"的测试（现有自动压缩测试只断言摘要出现）。
-    方案与批次见 docs/architecture/refactor-plan.md §3.5 与批次 9（session）。
+    方案与批次见 docs/architecture/session-model.md。
   accept: |
     手动 /compact 与自动阈值两条触发点都成立：压缩后发送视图里**只有一份摘要**、被总结的内容不再出现；
     压缩回合的身份块非空且等于该会话的身份块；连压两次后发送视图仍只有一份摘要。
   blocked_by: |
     与 session 分区重构同一批处理：压缩的落档与回放要一起改（摘要改成真正的转录行），
-    现在单独修等于改两遍。见 docs/architecture/refactor-plan.md §3.5。
+    现在单独修等于改两遍。见 docs/architecture/session-model.md。
 
 - id: session.compaction-not-replayed
   scope: global
@@ -124,7 +124,7 @@
     **摘要与被压掉的内容都会回来**，等于没压过。
     而 docs/architecture/session-model.md §六 写着"重启/回档按 compacted 事件重建发送视图"，与实现不一致。
   how: |
-    按 docs/architecture/refactor-plan.md §3.5 的结论一起改：
+    按 docs/architecture/session-model.md 的结论一起改：
     ① 摘要按 note_task 的形状落档——**转录里是系统行、发给模型的上下文里是 user 角色**
        （新增结构化标记，不复用 task: true，它的语义是"派发行"）；
     ② rebuild_session 认这个标记：重建出 Msg::user(摘要)，并且它之前的对话不再重建；
@@ -135,4 +135,4 @@
     回档跨越压缩点时发送视图回到压缩前；实时与重建逐条相同。
   blocked_by: |
     与 session 分区重构同一批处理（摘要变成转录行 + rebuild 认标记 + 回档按压缩点分流）。
-    见 docs/architecture/refactor-plan.md §3.5 与批次 9。
+    见 docs/architecture/session-model.md。

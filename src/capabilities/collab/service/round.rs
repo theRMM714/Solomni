@@ -638,7 +638,7 @@ pub fn converse_with(
 // **为什么这些方法定义在引擎里**：它们是「驱动」（问模型 → 解析信封 → 调工具 → 落行），
 // 会话本身只留状态与簿记。反过来（会话驱动引擎）会形成 `engine ⇄ session` 环。
 // 字段以 `pub(super)` 开放：两者同在 `capabilities` 之下（驱动与它会话状态都归会话能力），这是有意的取舍。
-// 见 docs/architecture/refactor-plan.md §4.2 批次 12。
+// 见 ARCHITECTURE.md §一。
 
 // —— 转录行构造：**行格式只有这一处定义** ——
 //

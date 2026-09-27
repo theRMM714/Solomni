@@ -4,7 +4,7 @@
 //! 状态是 `domain` 里的值对象（`TaskChain`），规则全在 `domain`，
 //! `api` 只导出"查询与派生"（阶段、就绪、验收判定、rework 合法性）。
 //! 三个消费者都经 `api`：`collab` 驱动它、`session` 的线格式携带它、呈现层渲染它
-//! （见 docs/architecture/task-chain.md 与 refactor-plan §2.3「纯领域业务」）。
+//! （见 docs/architecture/task-chain.md 与 ARCHITECTURE.md §九.3「领域型业务」）。
 
 pub mod api;
 pub mod domain;

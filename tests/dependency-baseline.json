@@ -1,5 +1,5 @@
 {
-  "_comment": "依赖方向门禁的迁移期基线（规则与销账口径见 docs/architecture/refactor-plan.md §一 / §四）。条目存在 = 尚未拆掉；拆掉后必须删除，否则门禁报「基线豁免已过期」。**全部清空 = 重构完成。** reverse / presentation / coreCycles 已清空（批次 0–19）；批次 20a 的四类判据里 apiPorts 与 apiOnly **已随 20b 全部清零**；六类判据**全部清空**（批次 20f-2 收官）。",
+  "_comment": "依赖方向门禁的迁移期基线（判据见 ARCHITECTURE.md §九.7）。条目存在 = 尚未拆掉；拆掉后必须删除，否则门禁报「基线豁免已过期」。**全部清空 = 重构完成。** reverse / presentation / coreCycles 已清空（批次 0–19）；批次 20a 的四类判据里 apiPorts 与 apiOnly **已随 20b 全部清零**；六类判据**全部清空**（批次 20f-2 收官）。",
   "reverse": [],
   "presentation": [],
   "coreCycles": [],

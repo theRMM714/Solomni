@@ -131,7 +131,7 @@
 | --- | --- |
 | 项目概括和快速开始 | `README.md` |
 | 项目概括和快速开始（English） | `README_EN.md` |
-| 任意代码、架构、分层、端口、日志、提示词或落盘修改 | `ARCHITECTURE.md` |
+| 任意代码、架构、分层、端口、业务边界判据（§九）、硬要求（R1–R13）、日志、提示词或落盘修改 | `ARCHITECTURE.md` |
 | 产品行为、运行流程和用户旅程 | `PRODUCT.md` |
 | 理念、角色和不变量判断 | `PHILOSOPHY.md` |
 | 模块开发或修改 | `MODULE_SPEC.md` |
@@ -150,10 +150,9 @@
 | 跑本地入口、读报告、认成功标记、CI 与报告发布 | `docs/testing/execution-ci.md` |
 | 记缺口、目录与命名、按验收清单收口 | `docs/testing/gaps-acceptance.md` |
 | 交付模块（模块作者要交什么测试证据） | `docs/testing/module-delivery.md` |
-| 逐个文件看 `capabilities/`（含 `conductor/`）/ `adapters/` / `cli/` / `web/` 各干什么 | `docs/architecture/module-map.md` |
+| 逐个文件看 `capabilities/`（含 `conductor/` 与 `slate/`）/ `kernel/` / `entry/` / `cli/` / `web/` 各干什么 | `docs/architecture/module-map.md` |
 | 呈现层入站契约、HTTP 路由目录 | `docs/architecture/contracts.md` |
 | 系统工具、角色（身份）与"谁能用哪些工具" | `docs/architecture/tools-and-roles.md` |
 | 审查关卡、任务链（依赖图）、子会话与验收 | `docs/architecture/task-chain.md` |
 | 会话模型（主/子会话、回合、发言标记、回档同步、上下文压缩） | `docs/architecture/session-model.md` |
 | 提示词册（`prompts/`）的结构与键清单 | `docs/architecture/prompts.md` |
-| 重构分区、业务边界判据、迁移批次与销账 | `docs/architecture/refactor-plan.md` |

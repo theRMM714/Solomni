@@ -1346,7 +1346,7 @@ pub enum Acted {
 
 //
 // 定义在**能力面**：呈现层只认这里，不再经 `conductor::` 根转一手。
-// 批次 15 收口从协调业务的 service 搬来（见 docs/architecture/refactor-plan.md §4.2）。
+// 批次 15 收口从协调业务的 service 搬来（见 ARCHITECTURE.md §一）。
 /// 协作推进阶段：由前端按 pending 决定。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CollabStep {

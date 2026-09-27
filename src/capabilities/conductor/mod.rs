@@ -6,7 +6,7 @@
 //! - `api` 里的 `Ops` / 事件台 / `ConductorHandle`（队列代理）。
 //!
 //! 它与别的能力**平级**：只经各能力的 `api` 编排，**不持任何别人的端口**（R12）；
-//! 各能力也不反向调它（依赖方向见 docs/architecture/refactor-plan.md §3.8）。
+//! 各能力也不反向调它（依赖方向见 ARCHITECTURE.md §一）。
 
 pub mod api;
 pub mod service;

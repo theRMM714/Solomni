@@ -124,7 +124,7 @@ pub fn check_runtimes(m: &ModuleManifest) -> Result<(), String> {
 }
 
 /// 外部工具表的校验（纯逻辑；扫描模块时由适配层调用）：**保留名由调用方给**
-/// （工具名空间归工具能力，清单主人不反向依赖它——见 refactor-plan §3.1）。
+/// （工具名空间归工具能力，清单主人不反向依赖它——见 ARCHITECTURE.md §九.3）。
 pub fn check_tools(m: &ModuleManifest, reserved: &[String]) -> Result<(), String> {
     for (name, decl) in &m.tools {
         if reserved.iter().any(|r| r == name) {
