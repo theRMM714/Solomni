@@ -6,6 +6,9 @@
 pub mod collab;
 pub mod discussion;
 pub mod driver;
+pub mod pump;
 pub mod round;
+pub mod slate;
 pub mod synthesis;
 pub mod tool_loop;
+pub mod turn_io;
