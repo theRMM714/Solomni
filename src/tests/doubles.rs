@@ -430,7 +430,7 @@ pub(crate) fn decl_with(
     params_yaml: &str,
 ) -> crate::capabilities::workspace::domain::module::ToolDecl {
     let mut d = decl(command);
-    d.params = Some(serde_yaml::from_str(params_yaml).expect("测试参数声明要能解析"));
+    d.params = Some(yaml_serde::from_str(params_yaml).expect("测试参数声明要能解析"));
     d
 }
 
@@ -689,7 +689,7 @@ impl PackageSource for InMemoryPackages {
 
 /// 用 yaml 造一份包清单（顺带覆盖清单解析）。
 pub(crate) fn pkg_yaml(y: &str) -> PackageManifest {
-    serde_yaml::from_str(y).expect("包清单必须能解析")
+    yaml_serde::from_str(y).expect("包清单必须能解析")
 }
 
 /// 造一个 prefix 类包（独立前缀 opt/rt/&lt;id&gt;-&lt;version&gt;）。

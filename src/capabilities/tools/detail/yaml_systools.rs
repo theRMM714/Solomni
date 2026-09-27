@@ -36,7 +36,7 @@ impl SystoolsSource for YamlSystools {
         let path = self.dir.join("tools.yaml");
         let text = std::fs::read_to_string(&path)
             .map_err(|e| format!("工具总表读不了（systools/tools.yaml）：{}", e))?;
-        let tools: ToolFile = serde_yaml::from_str(&text)
+        let tools: ToolFile = yaml_serde::from_str(&text)
             .map_err(|e| format!("工具总表非法（systools/tools.yaml）：{}", e))?;
         if tools.tools.is_empty() {
             return Err("工具总表里一个工具都没有（systools/tools.yaml）".to_string());
@@ -44,7 +44,7 @@ impl SystoolsSource for YamlSystools {
         let path = self.dir.join("roles.yaml");
         let text = std::fs::read_to_string(&path)
             .map_err(|e| format!("角色表读不了（systools/roles.yaml）：{}", e))?;
-        let roles: RoleFile = serde_yaml::from_str(&text)
+        let roles: RoleFile = yaml_serde::from_str(&text)
             .map_err(|e| format!("角色表非法（systools/roles.yaml）：{}", e))?;
         Ok(SystemTools {
             tools: tools.tools,

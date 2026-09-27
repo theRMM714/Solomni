@@ -72,7 +72,7 @@ impl SettingsStore for YamlSettingsStore {
     fn load(&self) -> Result<Settings, String> {
         let providers = match std::fs::read_to_string(&self.providers_path) {
             Ok(t) => {
-                serde_yaml::from_str::<ProvidersFile>(&t)
+                yaml_serde::from_str::<ProvidersFile>(&t)
                     .map_err(|e| format!("providers.yaml 非法：{}", e))?
                     .providers
             }
@@ -82,21 +82,21 @@ impl SettingsStore for YamlSettingsStore {
         let (models, core) = match std::fs::read_to_string(&self.models_path) {
             Ok(t) => {
                 let f: ModelsFile =
-                    serde_yaml::from_str(&t).map_err(|e| format!("models.yaml 非法：{}", e))?;
+                    yaml_serde::from_str(&t).map_err(|e| format!("models.yaml 非法：{}", e))?;
                 (f.models, f.core)
             }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => (BTreeMap::new(), None),
             Err(e) => return Err(e.to_string()),
         };
         let app = match std::fs::read_to_string(&self.settings_path) {
-            Ok(t) => serde_yaml::from_str::<AppSettings>(&t)
+            Ok(t) => yaml_serde::from_str::<AppSettings>(&t)
                 .map_err(|e| format!("settings.yaml 非法：{}", e))?,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => AppSettings::default(),
             Err(e) => return Err(e.to_string()),
         };
         let agents = match std::fs::read_to_string(&self.agents_path) {
             Ok(t) => {
-                serde_yaml::from_str::<AgentsFile>(&t)
+                yaml_serde::from_str::<AgentsFile>(&t)
                     .map_err(|e| format!("agents.yaml 非法：{}", e))?
                     .agents
             }
@@ -116,23 +116,23 @@ impl SettingsStore for YamlSettingsStore {
         let providers = ProvidersFile {
             providers: settings.providers.clone(),
         };
-        let text = serde_yaml::to_string(&providers).map_err(|e| e.to_string())?;
+        let text = yaml_serde::to_string(&providers).map_err(|e| e.to_string())?;
         Self::write(&self.providers_path, &text)?;
 
         let models = ModelsFile {
             models: settings.models.clone(),
             core: settings.core.clone(),
         };
-        let text = serde_yaml::to_string(&models).map_err(|e| e.to_string())?;
+        let text = yaml_serde::to_string(&models).map_err(|e| e.to_string())?;
         Self::write(&self.models_path, &text)?;
 
-        let text = serde_yaml::to_string(&settings.app).map_err(|e| e.to_string())?;
+        let text = yaml_serde::to_string(&settings.app).map_err(|e| e.to_string())?;
         Self::write(&self.settings_path, &text)?;
 
         let agents = AgentsFile {
             agents: settings.agents.clone(),
         };
-        let text = serde_yaml::to_string(&agents).map_err(|e| e.to_string())?;
+        let text = yaml_serde::to_string(&agents).map_err(|e| e.to_string())?;
         Self::write(&self.agents_path, &text)?;
         Ok(())
     }

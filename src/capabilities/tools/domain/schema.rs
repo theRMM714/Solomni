@@ -273,7 +273,7 @@ params:
   offset: { type: integer, desc: 起始行, default: 1, min: 1 }
   limit: { type: integer, desc: 最多返回行数, max: 2000 }
 "#;
-        serde_yaml::from_str(yaml).expect("声明必须能解析")
+        yaml_serde::from_str(yaml).expect("声明必须能解析")
     }
 
     #[test]
@@ -312,7 +312,7 @@ params:
             s.check(&serde_json::json!({"path": "p"})).is_ok(),
             "只给必填项就是合法调用"
         );
-        let k: ToolSchema = serde_yaml::from_str(
+        let k: ToolSchema = yaml_serde::from_str(
             "params:
   keyword: { type: string, required: true, non_empty: true }
 ",
@@ -383,7 +383,7 @@ params:
 
     #[test]
     fn undeclared_params_means_no_validation() {
-        let s: ToolSchema = serde_yaml::from_str("desc: 没有声明参数的工具").unwrap();
+        let s: ToolSchema = yaml_serde::from_str("desc: 没有声明参数的工具").unwrap();
         assert!(
             s.check(&serde_json::json!({})).is_ok(),
             "没声明参数 = 不校验"
@@ -400,7 +400,7 @@ params:
 
     #[test]
     fn declared_empty_params_rejects_every_key() {
-        let s: ToolSchema = serde_yaml::from_str("params: {}").unwrap();
+        let s: ToolSchema = yaml_serde::from_str("params: {}").unwrap();
         assert!(s.check(&serde_json::json!({})).is_ok());
         assert_eq!(
             s.check(&serde_json::json!({"任意": 1})),
@@ -413,7 +413,7 @@ params:
     /// 这种错夹具看不见（假供应商不校验 schema），只在真机上暴露。
     #[test]
     fn array_payload_renders_a_valid_json_schema() {
-        let s: ToolSchema = serde_yaml::from_str(
+        let s: ToolSchema = yaml_serde::from_str(
             "desc: 交出方案与任务链\nparams:\n  nodes: { type: array, required: true, desc: 节点数组 }\n",
         )
         .unwrap();

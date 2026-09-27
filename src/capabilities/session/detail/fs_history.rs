@@ -24,14 +24,14 @@ impl HistoryStore for FsHistory {
     fn create(&self, meta: &SessionMeta) -> Result<(), String> {
         let d = self.session_dir(&meta.name);
         std::fs::create_dir_all(&d).map_err(|e| format!("建会话目录失败：{}", e))?;
-        let text = serde_yaml::to_string(meta).map_err(|e| e.to_string())?;
+        let text = yaml_serde::to_string(meta).map_err(|e| e.to_string())?;
         std::fs::write(d.join("meta.yaml"), text).map_err(|e| format!("写会话元信息失败：{}", e))
     }
 
     fn save_meta(&self, meta: &SessionMeta) -> Result<(), String> {
         let d = self.session_dir(&meta.name);
         std::fs::create_dir_all(&d).map_err(|e| format!("建会话目录失败：{}", e))?;
-        let text = serde_yaml::to_string(meta).map_err(|e| e.to_string())?;
+        let text = yaml_serde::to_string(meta).map_err(|e| e.to_string())?;
         std::fs::write(d.join("meta.yaml"), text).map_err(|e| format!("写会话元信息失败：{}", e))
     }
 
@@ -65,7 +65,7 @@ impl HistoryStore for FsHistory {
             let Ok(text) = std::fs::read_to_string(p.join("meta.yaml")) else {
                 continue;
             };
-            let Ok(meta) = serde_yaml::from_str::<SessionMeta>(&text) else {
+            let Ok(meta) = yaml_serde::from_str::<SessionMeta>(&text) else {
                 continue;
             };
             let done = std::fs::read_to_string(p.join("transcript.jsonl"))
@@ -91,7 +91,7 @@ impl HistoryStore for FsHistory {
         let text = std::fs::read_to_string(d.join("meta.yaml"))
             .map_err(|_| format!("无此会话：{}", name))?;
         let meta: SessionMeta =
-            serde_yaml::from_str(&text).map_err(|e| format!("会话 meta.yaml 非法：{}", e))?;
+            yaml_serde::from_str(&text).map_err(|e| format!("会话 meta.yaml 非法：{}", e))?;
         let mut events = Vec::new();
         if let Ok(t) = std::fs::read_to_string(d.join("transcript.jsonl")) {
             for line in t.lines() {

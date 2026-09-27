@@ -100,12 +100,12 @@ pub enum Segment {
 ///
 /// 三条如实报错（不静默）：**键在两个文件里重复**（拆分时最可能犯的错）、**缺键**、**类型不对**。
 pub fn merge_book(docs: &[String]) -> Result<Prompts, String> {
-    let mut merged = serde_yaml::Mapping::new();
+    let mut merged = yaml_serde::Mapping::new();
     for doc in docs {
-        let value: serde_yaml::Value =
-            serde_yaml::from_str(doc).map_err(|e| format!("提示词册非法：{}", e))?;
+        let value: yaml_serde::Value =
+            yaml_serde::from_str(doc).map_err(|e| format!("提示词册非法：{}", e))?;
         let map = match value {
-            serde_yaml::Value::Mapping(m) => m,
+            yaml_serde::Value::Mapping(m) => m,
             _ => return Err("提示词册非法：每个文件的最外层必须是一张键表".to_string()),
         };
         for (key, value) in map {
@@ -118,7 +118,7 @@ pub fn merge_book(docs: &[String]) -> Result<Prompts, String> {
     let tools = take_section::<ToolTexts>(&mut merged, "tool_texts")?;
     let refs = take_section::<RefsPrompts>(&mut merged, "refs")?;
     // 剩下的键就是"核心段"（`core:` 的内容）。
-    let core: CoreTexts = serde_yaml::from_value(serde_yaml::Value::Mapping(merged))
+    let core: CoreTexts = yaml_serde::from_value(yaml_serde::Value::Mapping(merged))
         .map_err(|e| format!("提示词册缺键或类型不对：{}", e))?;
     Ok(Prompts {
         core,
@@ -129,13 +129,13 @@ pub fn merge_book(docs: &[String]) -> Result<Prompts, String> {
 
 /// 从合并后的键表里取出一段反序列化（缺键 / 类型不对 = 装配错误，报出键名）。
 fn take_section<T: DeserializeOwned>(
-    merged: &mut serde_yaml::Mapping,
+    merged: &mut yaml_serde::Mapping,
     key: &str,
 ) -> Result<T, String> {
     let value = merged
-        .remove(serde_yaml::Value::String(key.to_string()))
+        .remove(yaml_serde::Value::String(key.to_string()))
         .ok_or_else(|| format!("提示词册缺键：{}", key))?;
-    serde_yaml::from_value(value).map_err(|e| format!("提示词册的 {} 类型不对：{}", key, e))
+    yaml_serde::from_value(value).map_err(|e| format!("提示词册的 {} 类型不对：{}", key, e))
 }
 
 #[derive(Debug, Clone, Deserialize)]

@@ -935,8 +935,8 @@ pub(crate) fn session_meta_exec_section_roundtrips_and_reads_legacy_meta() {
         parent: None,
         node: None,
     };
-    let text = serde_yaml::to_string(&meta).expect("序列化");
-    let back: SessionMeta = serde_yaml::from_str(&text).expect("反序列化");
+    let text = yaml_serde::to_string(&meta).expect("序列化");
+    let back: SessionMeta = yaml_serde::from_str(&text).expect("反序列化");
     assert_eq!(back.exec.tier, Tier::Vm);
     assert_eq!(back.exec.base.as_deref(), Some("base-linux"));
     assert_eq!(
@@ -946,7 +946,7 @@ pub(crate) fn session_meta_exec_section_roundtrips_and_reads_legacy_meta() {
     assert!(!back.exec.net);
     // 缺 exec 段的旧会话照旧可读（默认 = 本机档、不联网、不定版）。
     let legacy: SessionMeta =
-        serde_yaml::from_str("name: old\nmode: single\nmodules: [a]\nts: 1\n")
+        yaml_serde::from_str("name: old\nmode: single\nmodules: [a]\nts: 1\n")
             .expect("旧 meta.yaml 必须可读");
     assert_eq!(legacy.exec.tier, Tier::Host);
     assert!(legacy.exec.base.is_none());

@@ -49,7 +49,7 @@ fn scan_dir(modules_dir: &Path, reserved: &[String]) -> Roster {
                 continue;
             }
         };
-        match serde_yaml::from_str::<ModuleManifest>(&yaml_text) {
+        match yaml_serde::from_str::<ModuleManifest>(&yaml_text) {
             Ok(m) => {
                 let dir_name = path
                     .file_name()

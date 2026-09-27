@@ -46,7 +46,7 @@ impl PackageSource for FsPackages {
                     continue;
                 }
             };
-            match serde_yaml::from_str::<PackageManifest>(&text) {
+            match yaml_serde::from_str::<PackageManifest>(&text) {
                 Ok(m) => found.push(m),
                 Err(e) => rejected.push(format!("{}：package.yaml 非法（{}）", folder, e)),
             }
