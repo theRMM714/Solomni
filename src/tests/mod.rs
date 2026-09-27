@@ -1,6 +1,6 @@
 //! 测试层（T1 单元 + T2 端口与适配器契约）——替身与契约测试同处一层。
 //! 目录与命名见 docs/testing/gaps-acceptance.md，替身语义见 docs/testing/doubles.md，
-//! 层级与判定见 docs/testing/levels.md，端口矩阵见 docs/testing/port-matrix.md。
+//! 层级与判定见 docs/testing/levels.md，端口矩阵见 docs/testing/doubles.md §三。
 //! 硬规矩：不碰真实 `.home/`、真实 `session/`、真实权限或外部网络；只绑本地环回。
 
 mod api;

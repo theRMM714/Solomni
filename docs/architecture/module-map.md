@@ -12,9 +12,7 @@
 | 文件 | 职责 |
 | --- | --- |
 | `mod.rs` | 机制入口：只声明模块，不放逻辑 |
-| `conductor/api/mod.rs` | **对外面**：共享事实与纯机制——`SessionId` / `Tier` / `DEFAULT_LLM_TIMEOUT_SECS`（跨业务共享且无领域逻辑）、`slash`（路径对外书写形式）、`JobRegistry`（生成中作业的**取消表**：谁都能登记与取消，「停止」不排队、不碰核心状态，所以生成期间立刻生效） |
-| `conductor/api/handle.rs` | `ConductorHandle`：把核心搬到它自己的执行线程（命令队列与事件台）、单 agent 与协作的生成驱动、`call` 的取/交两步（队列代理的实现面在 `proxy.rs`） |
-| `conductor/api/proxy.rs` | **队列代理**：`ConductorHandle` 对 `SessionOps` / `ConductorOps` / `RegistryOps` / `HistoryOps` / `WorkspaceOps` / `LogOps` 的实现（只转发，不做业务判断） |
+| `api.rs` | **对外面**：共享事实与纯机制——`SessionId` / `Tier` / `DEFAULT_LLM_TIMEOUT_SECS`（跨业务共享且无领域逻辑）、`slash`（路径对外书写形式）、`JobRegistry`（生成中作业的**取消表**：谁都能登记与取消，「停止」不排队、不碰核心状态，所以生成期间立刻生效） |
 | `ports.rs` | **机制端口**：`Log`（三级）与 `NoopLog`、`HostProbe`（宿主能力探测：路径存在性 / PATH 可执行文件 / 本机虚拟化——**只读事实**） |
 | `domain/types.rs` | 跨业务共享的**事实类型**：只放没有领域逻辑的 |
 | `domain/path.rs` | 路径的**对外书写形式**（一律 `/`）：跨平台机制，与任何业务无关 |
@@ -30,8 +28,18 @@
 | 文件 | 职责 |
 | --- | --- |
 | `mod.rs` | 能力入口：只声明模块，不放逻辑 |
-| `api.rs` | **入站契约**：协调业务自己的两个接口（`SessionOps` 会话中心 / `ConductorOps` 协调用例）+ `LogOps`（埋点门面）+ **`Ops` 的组装**（其余接口归各能力，见 §四）+ `ConductorHandle`（自持线程、命令/事件；各能力接口的**队列代理**也在这里实现）+ **用例词汇与视图**（`WorkMode` / `WorkSpec` / `AgentInstance` / `WorkOpened` / `SessionEdit` / `CollabStep` / `SessionView` / `RuntimeReport` / `FilesView` 等）+ `EventBus`；单 agent 与协作长步骤的生成都在**工作线程**上跑（队列只占"取/交"两步） |
-| `service.rs` | `Conductor`（协调业务的状态与用例）：会话在世表（会话表、命令队列、运行态）、生成驱动、运行包报告、**跨会话回档编排**（`rewind` / `rewind_children` / `rebuild_session`——纯行/事件算术在 `capabilities/session/domain/rewind.rs`）+ `Persister`（增量落盘）。`suggest_models` 只做队列分发：名单由 `slate` 拟，它把回包映射成呈现层的 `AgentSuggestion` 并把核心的行推给系统会话。登记处、会话历史、提示词册、工具面**只按能力面用**（`Box<dyn Registry>` / `Arc<dyn History>` / `Arc<dyn Prompt>` / `Arc<dyn Tools>` …），看不见它们的字段、也不替它们落盘 |
+| `conductor/api/mod.rs` | **入站契约**：协调业务自己的两个接口（`SessionOps` 会话中心 / `ConductorOps` 协调用例）+ `LogOps`（埋点门面）+ **`Ops` 的组装**（其余接口归各能力，见 §四）+ `ConductorHandle`（自持线程、命令/事件；各能力接口的**队列代理**也在这里实现）+ **用例词汇与视图**（`WorkMode` / `WorkSpec` / `AgentInstance` / `WorkOpened` / `SessionEdit` / `CollabStep` / `SessionView` / `RuntimeReport` / `FilesView` 等）+ `EventBus`；单 agent 与协作长步骤的生成都在**工作线程**上跑（队列只占"取/交"两步） |
+| `conductor/api/handle.rs` | `ConductorHandle`：把核心搬到它自己的执行线程（命令队列与事件台）、单 agent 与协作的生成驱动、`call` 的取/交两步（队列代理的实现面在 `proxy.rs`） |
+| `conductor/api/proxy.rs` | **队列代理**：`ConductorHandle` 对 `SessionOps` / `ConductorOps` / `RegistryOps` / `HistoryOps` / `WorkspaceOps` / `LogOps` 的实现（只转发，不做业务判断） |
+| `conductor/service/mod.rs` | `Conductor` 本体：会话在世表（会话表、命令队列、运行态）、会话取放与生成驱动、`scan`、测试访问器与基础状态 |
+| `conductor/service/work.rs` | **工作与会话配置**：运行包报告、会话配置读改、建工作与上传、文件视图、会话视图（在世会话 × 历史） |
+| `conductor/service/turn.rs` | **回合收发与协作动作**：拟名单分发、单 agent 的话与准备、协作推进入口、会话生命周期（`ensure_session`） |
+| `conductor/service/flow.rs` | **协作流水线推进**：链推进、节点派发与子会话生成、协作步与恢复（取对象 / 推进 / 放回） |
+| `conductor/service/rewind.rs` | **跨会话回档编排**：`rewind` / `rewind_children` / `rebuild_session`（纯行算术在 session 的 `domain/rewind.rs`） |
+| `conductor/service/env.rs` | **装配材料**：成员通道、沙箱清单、工具环境、预算与角色工具面、单 agent 会话对象 |
+| `conductor/service/history.rs` | **历史与落盘**：历史列出 / 打开 / 删除、事件收编与增量落盘手柄（`Persister`） |
+
+| 族文件都在同一份 `impl Conductor` 的语义下：与 `mod.rs` 同在 `service` 模块（子模块看得见私有字段），方法取 `pub(crate)`。 |
 
 ## 三、`entry/`（**入口层共用机制**）
 
