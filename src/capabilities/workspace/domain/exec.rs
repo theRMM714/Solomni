@@ -5,8 +5,8 @@
 
 use crate::capabilities::workspace::domain::module::Module;
 use crate::capabilities::workspace::domain::packages::{Library, PackageManifest, KIND_SYSTEM};
-use crate::kernel::host::HostProbe;
-use crate::kernel::types::Tier;
+use crate::kernel::api::Tier;
+use crate::kernel::ports::HostProbe;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;

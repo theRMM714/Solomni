@@ -33,9 +33,9 @@ tests/
   ci-publish.mjs                # CI 报告发布脚本（把三平台报告写入 ci-report 分支）
 ```
 
-单元层与 `capabilities/` **同构**（批次 19）：T1 用例按业务分文件——`kernel.rs` / `prompt.rs` / `registry.rs` /
+单元层与 `capabilities/` **同构**（批次 19）：T1 用例按业务分文件——`taskchain.rs` / `prompt.rs` / `registry.rs` /
 `llm.rs` / `workspace.rs` / `tools.rs` / `session.rs` / `collab.rs`，加**协调业务**自己的 `conductor.rs`
-（会话中心与跨能力编排）；契约测试 `ports.rs` / `fakes.rs` / `adapters.rs` / `api.rs` / `cli.rs` / `routes.rs`；
+（会话中心与跨能力编排）；契约测试 `ports.rs` / `fakes.rs` / `detail.rs` / `api.rs` / `cli.rs` / `routes.rs`；
 共享支撑 `doubles.rs`（端口替身）/ `builders.rs`（测试装配脚手架）/ `prelude.rs`（公共前置重导出）。
 **判据**：用例落到"它钉住的那个不变式"所属的文件；顺手经过别的能力只是路径，不是归属。
 

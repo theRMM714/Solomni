@@ -1,5 +1,5 @@
 //! 核心层：定义抽象（ports）、编排业务（会话/引擎）、会话中心。
-//! 分层纪律：本层不出现文件读、ureq、stdin/stdout——机制全部在 adapters，
+//! 分层纪律：本文件不出现文件读、ureq、stdin/stdout——机制全在各能力的 `detail` 与 `kernel/detail`，
 //! 装配（new 适配器）只发生在 main 组合根。前端只见 Conductor 门面、会话句柄与 SessionEvent 流。
 
 use crate::capabilities::conductor::api::{
@@ -23,8 +23,8 @@ use crate::capabilities::registry::api::Registry;
 use crate::capabilities::session::api::{AgentMeta, HistoryView, SessionMeta};
 use crate::capabilities::tools::api::{ToolExec, Tools};
 use crate::capabilities::workspace::api::Module;
-use crate::kernel::log::Log;
-use crate::kernel::types::SessionId;
+use crate::kernel::api::SessionId;
+use crate::kernel::ports::Log;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
@@ -183,9 +183,9 @@ pub struct Conductor {
     llm: Arc<dyn Llm + Send + Sync>,
     /// 工具执行面（**不持它的端口**，R12）：跑外部/内置工具、释放围栏授权都走它。
     tools: Arc<dyn ToolExec + Send + Sync>,
-    log: Arc<dyn crate::kernel::log::Log + Send + Sync>,
+    log: Arc<dyn crate::kernel::ports::Log + Send + Sync>,
     /// 宿主能力探测（读环境、查路径存在性都在它后面；conductor 因此不碰 std::env 与文件系统）。
-    probe: Arc<dyn crate::kernel::host::HostProbe + Send + Sync>,
+    probe: Arc<dyn crate::kernel::ports::HostProbe + Send + Sync>,
     /// 提示词册能力：**册子本体在它里面**（只有一处），conductor 只按名字取段。
     /// 用 `Arc`：协作会话要与核心**共享**这一份（各自克隆整本册子是旧的浪费）。
     prompt: Arc<dyn Prompt>,
@@ -212,8 +212,8 @@ impl Conductor {
         tools: Arc<dyn ToolExec + Send + Sync>,
         prompt: Arc<dyn Prompt>,
         systools: Arc<dyn Tools>,
-        log: Arc<dyn crate::kernel::log::Log + Send + Sync>,
-        probe: Arc<dyn crate::kernel::host::HostProbe + Send + Sync>,
+        log: Arc<dyn crate::kernel::ports::Log + Send + Sync>,
+        probe: Arc<dyn crate::kernel::ports::HostProbe + Send + Sync>,
     ) -> Conductor {
         Conductor {
             registry,
@@ -231,7 +231,7 @@ impl Conductor {
     }
 
     /// 日志端口句柄：入站手柄（conductor::api）与组合根共用同一份事实记录。
-    pub fn log_handle(&self) -> Arc<dyn crate::kernel::log::Log + Send + Sync> {
+    pub fn log_handle(&self) -> Arc<dyn crate::kernel::ports::Log + Send + Sync> {
         Arc::clone(&self.log)
     }
 
@@ -633,7 +633,10 @@ impl Conductor {
                         ch.nodes
                             .iter()
                             .filter(|n| {
-                                matches!(n.status, crate::kernel::chain::NodeStatus::Running)
+                                matches!(
+                                    n.status,
+                                    crate::capabilities::taskchain::api::NodeStatus::Running
+                                )
                             })
                             .map(|n| n.assignee.clone())
                             .collect()
@@ -828,14 +831,14 @@ impl Conductor {
 
     /// 运行能力报告：模块声明的能力、包库里的可用版本、缺失清单与虚拟机档诊断。
     /// 「清单即事实」：每次调用重扫模块清单与包库；本机档不装载运行包，missing 只作事实呈现。
-    pub fn runtime_report(&self, tier: crate::kernel::types::Tier) -> RuntimeReport {
+    pub fn runtime_report(&self, tier: crate::kernel::api::Tier) -> RuntimeReport {
         let roster = self.workspace.roster();
         let lib = self.workspace.library();
         let spec = crate::capabilities::workspace::api::ExecSpec {
             tier,
             ..crate::capabilities::workspace::api::ExecSpec::default()
         };
-        let diagnoses = if tier == crate::kernel::types::Tier::Vm {
+        let diagnoses = if tier == crate::kernel::api::Tier::Vm {
             crate::capabilities::workspace::api::vm_diagnoses(&roster.modules, &lib, &spec)
         } else {
             Vec::new()
@@ -873,7 +876,7 @@ impl Conductor {
         let tier = meta.exec.tier;
         // 虚拟机档的承载探针：用用户填的基础根（若有），否则问"裸虚拟机档"能不能成立。
         let vm_probe = crate::capabilities::workspace::api::ExecSpec {
-            tier: crate::kernel::types::Tier::Vm,
+            tier: crate::kernel::api::Tier::Vm,
             base: meta.exec.base.clone(),
             ..crate::capabilities::workspace::api::ExecSpec::default()
         };
@@ -895,7 +898,7 @@ impl Conductor {
             net: meta.exec.net,
             pins: meta.exec.pins.clone(),
             runtime: self.runtime_report(tier),
-            runtimes_dir: crate::kernel::path::slash(&self.workspace.runtimes_dir()),
+            runtimes_dir: crate::kernel::api::slash(&self.workspace.runtimes_dir()),
             tier_ready: crate::capabilities::workspace::api::tier_readiness(
                 &meta.exec,
                 self.qemu_path(),
@@ -1002,8 +1005,8 @@ impl Conductor {
         }
         // 档位：与「开始」同一把尺子——虚拟机档的选型不成立（多版本未定版 / 定版不存在 / 路径冲突）如实拒绝。
         let tier = match edit.tier.as_str() {
-            "host" => crate::kernel::types::Tier::Host,
-            "vm" => crate::kernel::types::Tier::Vm,
+            "host" => crate::kernel::api::Tier::Host,
+            "vm" => crate::kernel::api::Tier::Vm,
             other => return Err(format!("未知执行档位：{}（只认 host / vm）", other)),
         };
         let spec = crate::capabilities::workspace::api::ExecSpec {
@@ -1016,8 +1019,8 @@ impl Conductor {
         // 界面上的"能不能选"由 SessionConfig 的 tier_ready 说同一件事，两处不会各说各话。
         // 已经在虚拟机档上的会话只校验**它自己那几项**（基础根等）：改模块、改模型、定版、开网络都不该被拦住——
         // 一条已存在的会话连改都不让改，是拿用户自己的记录当人质。
-        let staying_vm = meta.exec.tier == crate::kernel::types::Tier::Vm
-            && tier == crate::kernel::types::Tier::Vm;
+        let staying_vm =
+            meta.exec.tier == crate::kernel::api::Tier::Vm && tier == crate::kernel::api::Tier::Vm;
         if staying_vm {
             // 留在 vm 档：只校验用户这次填的基础根（填错路径就是填错路径），
             // 不拿"本机能不能提供 vm 档"去拦一条已经存在的会话。
@@ -1443,7 +1446,7 @@ impl Conductor {
                 name: a.name.clone(),
                 root: sandboxes
                     .for_agent(&a.name)
-                    .map(|s| crate::kernel::path::slash(&s.private))
+                    .map(|s| crate::kernel::api::slash(&s.private))
                     .unwrap_or_default(),
             });
         }
@@ -1451,7 +1454,7 @@ impl Conductor {
             work: files.work,
             agents,
             roots: FilesRootsView {
-                work: crate::kernel::path::slash(&sandboxes.shared),
+                work: crate::kernel::api::slash(&sandboxes.shared),
                 agents: agent_roots,
             },
         })

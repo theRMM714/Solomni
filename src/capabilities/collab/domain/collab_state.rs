@@ -29,7 +29,7 @@ pub struct CollabState {
     pub plan_approved: bool,
     pub plan: Option<String>,
     /// 核心给出的任务链（从 plan_review 事件派生）。
-    pub chain: crate::kernel::chain::TaskChain,
+    pub chain: crate::capabilities::taskchain::api::TaskChain,
     pub reports: BTreeMap<String, String>,
     pub review_raw: Option<String>,
     pub review_pass: bool,
@@ -130,8 +130,9 @@ pub fn derive(events: &[serde_json::Value], roster_names: &[String]) -> CollabSt
             // 任务链随"方案待审"事件落档：重启/回档后按它重建，**不重新整理**（省一次模型调用）。
             "plan_review" => {
                 if let Some(chain) = ev.get("chain") {
-                    if let Ok(parsed) =
-                        serde_json::from_value::<crate::kernel::chain::TaskChain>(chain.clone())
+                    if let Ok(parsed) = serde_json::from_value::<
+                        crate::capabilities::taskchain::api::TaskChain,
+                    >(chain.clone())
                     {
                         st.chain = parsed;
                     }

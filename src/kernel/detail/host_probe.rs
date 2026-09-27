@@ -1,7 +1,7 @@
 //! HostProbe 的机制实现：读环境变量、查路径存在性、按平台判定虚拟化能力。
 //! **只读事实**：不执行任何程序、不安装、不写任何东西。
 
-use crate::kernel::host::HostProbe;
+use crate::kernel::ports::HostProbe;
 use std::path::Path;
 
 #[cfg(windows)]

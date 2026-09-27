@@ -19,7 +19,7 @@ pub enum SessionEvent {
     PlanReview {
         plan: String,
         /// 核心给出的任务链（审查关卡要连同链一起给用户看）。
-        chain: crate::kernel::chain::TaskChain,
+        chain: crate::capabilities::taskchain::api::TaskChain,
     },
     /// 上下文压缩：`up_to` 之前的转录**不再发给模型**（转录本身完整保留、用户仍可查看），
     /// 由一份 summary 代替（见 docs/architecture/session-model.md 六）。

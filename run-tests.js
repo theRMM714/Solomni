@@ -372,12 +372,16 @@ function structuralAudit() {
       return "crate::" + parts.slice(0, Math.min(depth, parts.length)).join("::");
     };
     const LAYER_OF = (r) => {
-      if (r.startsWith("src/adapters/")) return "adapters";
-      // 前端（交付机制）：各渠道一个顶层目录，与 adapters 平级；不是业务能力。
+      // 前端（交付机制）：各渠道一个顶层目录；不是业务能力。
       if (r.startsWith("src/cli/") || r.startsWith("src/web/")) return "presentation";
-      // 程序入口层：组合根 + 机器可读探针 + 围栏守门进程（第二个程序入口）。
+      // 程序入口层：组合根 + 机器可读探针 + 围栏守门进程（第二个程序入口）+ 入口层共用机制。
       // 它依赖所有人，**任何人都不许依赖它**。
-      if (r === "src/main.rs" || r.startsWith("src/diagnostics/") || r.startsWith("src/guard/"))
+      if (
+        r === "src/main.rs" ||
+        r.startsWith("src/entry/") ||
+        r.startsWith("src/diagnostics/") ||
+        r.startsWith("src/guard/")
+      )
         return "entry";
       if (r.startsWith("src/kernel/")) return "kernel";
       if (r.startsWith("src/capabilities/")) return "capabilities";
@@ -385,13 +389,12 @@ function structuralAudit() {
       if (r === "src/main.rs") return "main";
       return null;
     };
-    // 层 → 它不得引用的层。端口由能力定义、适配层实现，永不反向。
+    // 层 → 它不得引用的层。端口由能力定义、它的 detail（与 kernel 的机制实现）实现，永不反向。
     const FORBIDDEN = {
-      // kernel 在最底层：无领域语义的机制，**不依赖任何人**。
-      kernel: ["capabilities", "adapters", "presentation", "entry"],
-      // 能力（含协调业务 conductor）是业务层：不反向依赖适配层或呈现层。
-      capabilities: ["adapters", "presentation", "entry"],
-      adapters: ["presentation", "entry"],
+      // kernel 在最底层：无领域语义的机制，**不依赖任何人**（它的实现住在自己的 detail/）。
+      kernel: ["capabilities", "presentation", "entry"],
+      // 能力（含协调业务 conductor）是业务层：不反向依赖呈现层或入口层。
+      capabilities: ["presentation", "entry"],
     };
 
     const rsFiles = [];
@@ -440,8 +443,10 @@ function structuralAudit() {
           const otherCap = t.split("::")[2];
           if (otherCap && otherCap !== selfCap && !t.endsWith("::api")) apiOnly.add(f + " -> " + t);
         }
-        // `domain/` 是**纯逻辑**（批次 20a）：不得引用任何 `ports`——自己的也不行，引了就不是纯的了。
-        if (f.includes("/domain/") && t.endsWith("::ports")) domainPorts.add(f + " -> " + t);
+        // `domain/` 是**纯逻辑**（批次 20a）：不得引用任何**能力端口**（自己的也不行，引了就不是纯的了）。
+        // kernel 的机制端口（`Log` / `HostProbe`）是全项目共享的机制接口（R12 例外），不在此列。
+        if (f.includes("/domain/") && t.startsWith("crate::capabilities::") && t.endsWith("::ports"))
+          domainPorts.add(f + " -> " + t);
         // **端口只由定义它的能力持有**（R12，批次 20a）：任何非入口层引用别的能力的 `ports` 都是违规——
         // 协调业务 `conductor` 也算，它不该拿着别人的端口替别人做 IO。
         if (
@@ -452,8 +457,10 @@ function structuralAudit() {
         ) {
           apiOnly.add(f + " -> " + t);
         }
-        // `api.rs` 是**入站用例面**：不得把本能力的 `ports` 再导出去（批次 20b 清掉 llm 这处）。
-        if (f.endsWith("/api.rs") && t.endsWith("::ports")) apiPorts.add(f + " -> " + t);
+        // `api.rs` 是**入站用例面**：不得把**能力端口**再导出去（批次 20b 清掉 llm 那处）。
+        // kernel 的机制端口（`Log` / `HostProbe`）是全项目共享的机制接口（R12 例外），不在此列。
+        if (f.endsWith("/api.rs") && t.startsWith("crate::capabilities::") && t.endsWith("::ports"))
+          apiPorts.add(f + " -> " + t);
         // `::detail` 是**实现**：跨能力引用一律不许，只有入口层的组合根能构造它。
         if (
           layer !== "entry" &&

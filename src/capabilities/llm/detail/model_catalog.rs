@@ -5,7 +5,7 @@
 use super::endpoint::{memo_get, memo_set, models_candidates, resolve_candidates, Attempt, Memo};
 use super::http_agent::{finish_request, redact};
 use crate::capabilities::llm::ports::ModelCatalog;
-use crate::kernel::log::Log;
+use crate::kernel::ports::Log;
 use std::sync::Arc;
 
 /// 真实模型目录：ureq 出站，独立超时（比对话短，配置期等待）。

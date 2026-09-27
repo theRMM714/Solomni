@@ -16,7 +16,7 @@ use crate::capabilities::registry::domain::providers::{
 use crate::capabilities::registry::ports::SettingsStore;
 use crate::capabilities::session::api::AgentMeta;
 use crate::capabilities::workspace::api::Roster;
-use crate::kernel::log::Log;
+use crate::kernel::ports::Log;
 use std::sync::Arc;
 
 /// 登记处能力：持四份 yaml 的内存形态，按用例读写、改完即落盘。

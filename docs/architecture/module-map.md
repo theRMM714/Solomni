@@ -1,19 +1,24 @@
 # 模块地图
 
-> 本文是**模块地图的唯一权威**：`kernel/`、`capabilities/`（含 `conductor/`）、`adapters/`、`presentation/` 各文件职责一览。
+> 本文是**模块地图的唯一权威**：`kernel/`、`capabilities/`（含 `conductor/`）、`entry/`、`presentation/` 各文件职责一览。
 > 分层规则与依赖方向见 [ARCHITECTURE.md](../../ARCHITECTURE.md)，呈现层入站契约见 [contracts.md](contracts.md)。
 
-## 一、`kernel/`（机制型内核）
+## 一、`kernel/`（机制型业务）
+
+> **无领域语义、无领域状态**的机制；形状与别的业务一致（`api` / `ports` / `domain` / `detail`），
+> 但它在依赖图的最底层：**不认识任何能力**。
+> `Log` / `HostProbe` 是**全项目共享**的机制端口（R12 的例外）：谁都可以持有它们。
 
 | 文件 | 职责 |
 | --- | --- |
-| `mod.rs` | 内核入口：只声明模块，不放逻辑 |
-| `types.rs` | 跨业务共享的**事实类型**：只放没有领域逻辑的（`SessionId`） |
-| `log.rs` | `Log` 端口（三级）与测试用的 `NoopLog`；文件/时间戳/目录机制在适配层 |
-| `path.rs` | 路径的**对外书写形式**（一律 `/`）：跨平台机制，与任何业务无关 |
-| `host.rs` | `HostProbe`：宿主能力探测（路径存在性 / PATH 可执行文件 / 本机虚拟化）——**只读事实** |
-| `chain.rs` | 任务链的**纯数据 + 纯图算法**（节点、依赖、阶段、就绪与验收判定）。被三个能力共享（`collab` 驱动 / `session` 的线格式携带 / 呈现层渲染），自己零出边（见 [task-chain.md](task-chain.md)） |
-| `jobs.rs` | 生成中作业的**取消表**：核心登记，呈现层只能说「停哪个会话」；「停止」不排队、不碰核心状态，所以生成期间立刻生效 |
+| `mod.rs` | 机制入口：只声明模块，不放逻辑 |
+| `api.rs` | **对外面**：共享事实与纯机制——`SessionId` / `Tier` / `DEFAULT_LLM_TIMEOUT_SECS`（跨业务共享且无领域逻辑）、`slash`（路径对外书写形式）、`JobRegistry`（生成中作业的**取消表**：谁都能登记与取消，「停止」不排队、不碰核心状态，所以生成期间立刻生效） |
+| `ports.rs` | **机制端口**：`Log`（三级）与 `NoopLog`、`HostProbe`（宿主能力探测：路径存在性 / PATH 可执行文件 / 本机虚拟化——**只读事实**） |
+| `domain/types.rs` | 跨业务共享的**事实类型**：只放没有领域逻辑的 |
+| `domain/path.rs` | 路径的**对外书写形式**（一律 `/`）：跨平台机制，与任何业务无关 |
+| `domain/jobs.rs` | 取消表的实现（原子标志 + 表；无领域语义） |
+| `detail/file_log.rs` | `Log`：`logs/` 下按时间戳一份文件 |
+| `detail/host_probe.rs` | `HostProbe`：本机实现。`find_exe` 是**可执行文件查找的唯一一份**（`has_exe` 与自检报告共用） |
 
 ## 二、`capabilities/conductor/`（**协调业务**：跨参与方的状态与编排）
 
@@ -26,16 +31,14 @@
 | `api.rs` | **入站契约**：协调业务自己的两个接口（`SessionOps` 会话中心 / `CoreOps` 协调用例）+ `LogOps`（埋点门面）+ **`Ops` 的组装**（其余接口归各能力，见 §四）+ `ConductorHandle`（自持线程、命令/事件；各能力接口的**队列代理**也在这里实现）+ **用例词汇与视图**（`WorkMode` / `WorkSpec` / `AgentInstance` / `WorkOpened` / `SessionEdit` / `CollabStep` / `SessionView` / `RuntimeReport` / `FilesView` 等）+ `EventBus`；单 agent 与协作长步骤的生成都在**工作线程**上跑（队列只占"取/交"两步） |
 | `service.rs` | `Conductor`（协调业务的状态与用例）：会话在世表（会话表、命令队列、运行态）、生成驱动、运行包报告、**跨会话回档编排**（`rewind` / `rewind_children` / `rebuild_session`——纯行/事件算术在 `capabilities/session/domain/rewind.rs`）+ `Persister`（增量落盘）。登记处、会话历史、提示词册、工具面**只按能力面用**（`Box<dyn Registry>` / `Arc<dyn History>` / `Arc<dyn Prompt>` / `Arc<dyn Tools>` …），看不见它们的字段、也不替它们落盘 |
 
-## 三、`adapters/`（机制，实现**内核**端口）
+## 三、`entry/`（**入口层共用机制**）
 
-> **本目录正在搬空**：能力私有的实现已按批次 16 归各能力 `detail/`；这里只剩实现 **kernel** 端口的部分（`Log` / `HostProbe`）与入口层用的 `root`。
+> 只有程序入口能用它（组合根 / `diagnostics` / `guard`）；**任何能力都不许依赖它**（门禁判定）。
 
 | 文件 | 职责 |
 | --- | --- |
-| `mod.rs` | 适配层出口（只剩下面这些**内核端口**的实现与入口层用的机制） |
-| `host_probe.rs` | `HostProbe`：宿主能力探测（路径存在性、PATH 上的可执行文件、本机虚拟化能力）——**只读事实**，不执行、不安装、不写。`find_exe` 是**可执行文件查找的唯一一份**（`has_exe` 与自检报告共用） |
+| `mod.rs` | 入口层机制出口 |
 | `root.rs` | 产品根规范化：传入的根 → 干净的绝对路径（词法拼接优先；取不到当前目录才 canonicalize，并剥掉 Windows 的扩展长度前缀） |
-| `log.rs` | `Log`：`logs/` 下按时间戳一份文件 |
 
 ## 四、`capabilities/`（业务能力）
 
@@ -63,6 +66,8 @@
 | `workspace/domain/packages.rs` | `package.yaml` 契约与包库事实 |
 | `workspace/domain/exec.rs` | 执行档位（`ExecSpec`）与执行计划（`ExecPlan`）派生、虚拟机档诊断与承载判定 |
 | `workspace/domain/workspace.rs` | 工作区与沙箱的纯数据定义、寻址与越界判定 |
+| `taskchain/api.rs` | **入站能力面**（**纯领域业务**：有不变式、无端口、无 `service`）：任务链的事实与派生（`TaskChain` / `TaskNode` / `NodeStatus` / `Acceptance` + 阶段 / 就绪 / 验收判定）。三个消费者都经它：`collab` 驱动、`session` 线格式携带、呈现层渲染 |
+| `taskchain/domain/chain.rs` | 任务链的**纯数据 + 纯图算法**（节点、依赖、阶段派生、就绪、验收判定与装配错误上报）——不做 IO、不碰会话（见 [task-chain.md](task-chain.md)） |
 | `tools/api.rs` | **入站能力面**：`Tools` 能力面（按角色发放工具面 `tool_face` / `role_face` / `allows_module_tools`、总表 `book()` / 自检 `problems()`）+ **`ToolExec` 执行面**（`run_module` / `run_builtin` / `release_fence`）；`ToolOutcome` 从 ports 归到这里（批次 20b）。原行余下：`Tools` 能力面（按角色发放工具面 `tool_face` / `role_face` / `allows_module_tools`、总表 `book()`、自检 `problems()`）+ 工具清单 / 参数契约 / 补丁与应用 / 围栏策略的对外名字 |
 | `tools/service.rs` | **本能力的状态、用例与端口持有者**：持两张表（`SystemTools`）与三个出站端口（`ToolRunner` / `SysIo` / `FenceHost`，**唯一持有者**，R12），实现 `api::Tools` 与 `api::ToolExec`；组合根用 `ToolsService::new(加载器, 三个端口)` 装配（批次 17 + 20b） |
 | `tools/ports.rs` | **出站端口**（只有 `service.rs` 持有，R12）：`SysIo` / `ToolRunner` / `FenceHost` / `SystoolsSource`（后者的真实实现在 `detail/yaml_systools.rs`） |

@@ -20,7 +20,7 @@ use crate::capabilities::tools::api::FenceSpec;
 use crate::capabilities::tools::ports::{FenceHost, SysIo, ToolRunner};
 use crate::capabilities::workspace::api::ExecSpec;
 use crate::capabilities::workspace::ports::{ModuleSource, PackageSource, Workdirs};
-use crate::kernel::log::{Log, NoopLog};
+use crate::kernel::ports::{Log, NoopLog};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -443,8 +443,8 @@ fn noop_log_is_silent_and_shareable_across_threads() {
 /// 真实适配器：路径事实按真实文件系统回答（scratch 里真建一个目录与一个文件）。
 #[test]
 fn host_probe_adapter_reports_real_path_facts_and_absent_exes() {
-    use crate::kernel::host::HostProbe;
-    let real = crate::adapters::HostProbeAdapter;
+    use crate::kernel::ports::HostProbe;
+    let real = crate::kernel::detail::HostProbeAdapter;
     let dir = crate::tests::scratch("host-probe");
     let file = dir.join("a.txt");
     std::fs::write(&file, b"x").unwrap();
@@ -462,7 +462,7 @@ fn host_probe_adapter_reports_real_path_facts_and_absent_exes() {
 /// 替身：**只按给定答案回答**，不读真实环境（用例要确定性）。
 #[test]
 fn fixed_probe_answers_only_what_was_declared() {
-    use crate::kernel::host::HostProbe;
+    use crate::kernel::ports::HostProbe;
     use crate::tests::doubles::FixedProbe;
     let dir = std::path::PathBuf::from("some-dir");
     let file = std::path::PathBuf::from("some-file");

@@ -15,7 +15,7 @@ use crate::capabilities::registry::api::RegistryOps;
 use crate::capabilities::registry::api::{AppSettings, ModelView, ProviderView};
 use crate::capabilities::session::api::{AgentMeta, HistoryOps, HistoryView, SessionMeta};
 use crate::capabilities::workspace::api::{Roster, WorkspaceOps};
-use crate::kernel::types::Tier;
+use crate::kernel::api::Tier;
 use crate::web::routes::{self, ROUTES};
 use crate::web::{self, FenceInfo};
 use serde_json::json;

@@ -8,7 +8,7 @@ use crate::capabilities::llm::api::{
     Completion, ProbeOutcome, ReplayReport, ReplayShape, ToolDecl,
 };
 use crate::capabilities::llm::detail::endpoint::{chat_candidates, resolve_candidates, Attempt};
-use crate::kernel::log::Log;
+use crate::kernel::ports::Log;
 
 /// 探针工具：无参数、只有说明——目的是让模型有东西可调。
 fn ping_decl() -> ToolDecl {

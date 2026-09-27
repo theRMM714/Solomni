@@ -7,7 +7,7 @@
 //! 越界、相对路径、空段一律拒绝，并把允许的根目录列回去（如实报错，不纠正）。
 
 use crate::capabilities::prompt::api::ToolTexts;
-use crate::kernel::path::slash;
+use crate::kernel::api::slash;
 use std::collections::BTreeMap;
 use std::path::{Component, Path, PathBuf};
 

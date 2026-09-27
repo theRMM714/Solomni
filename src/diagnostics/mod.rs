@@ -11,7 +11,7 @@ pub fn doctor() -> i32 {
         &crate::capabilities::workspace::api::VmInputs {
             base: None,
             qemu: None,
-            probe: &crate::adapters::HostProbeAdapter,
+            probe: &crate::kernel::detail::HostProbeAdapter,
         },
     );
     let doc = serde_json::json!({
@@ -19,9 +19,9 @@ pub fn doctor() -> i32 {
         "arch": std::env::consts::ARCH,
         "fence": { "fs": cap.fs, "net": cap.net, "tree": cap.tree, "note": cap.note },
         "externals": {
-            "python": crate::adapters::host_probe::find_exe("python").map(|p| p.to_string_lossy().into_owned()),
-            "node": crate::adapters::host_probe::find_exe("node").map(|p| p.to_string_lossy().into_owned()),
-            "curl": crate::adapters::host_probe::find_exe("curl").map(|p| p.to_string_lossy().into_owned()),
+            "python": crate::kernel::detail::host_probe::find_exe("python").map(|p| p.to_string_lossy().into_owned()),
+            "node": crate::kernel::detail::host_probe::find_exe("node").map(|p| p.to_string_lossy().into_owned()),
+            "curl": crate::kernel::detail::host_probe::find_exe("curl").map(|p| p.to_string_lossy().into_owned()),
         },
         "vm_tier": {
             "available": vm.iter().all(|r| r.met),

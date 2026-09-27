@@ -1,8 +1,9 @@
 //! 任务链：协作从讨论走到交付的那张图（**纯数据 + 纯函数**，不做 IO、不碰会话）。
 //!
-//! **为什么在 kernel**：它被三个能力共享——`collab` 驱动它、`session` 的线格式（`PlanReview`）携带它、
-//! 呈现层渲染它；而它自己**零出边**（纯数据 + 纯图算法）。按 R6「事实类型只属于 kernel」，
-//! 放这里一次切断 `session ⇄ collab` 的两条边（见 docs/architecture/refactor-plan.md §4.2 批次 5）。
+//! **为什么独立成一个业务**：它被三个消费者共享——`collab` 驱动它、`session` 的线格式（`PlanReview`）携带它、
+//! 呈现层渲染它——而这套不变式（阶段派生 / 就绪 / 验收判定）**没有任何参与方拥有**；
+//! 它又是**自足**的（`api` 输入 → 自己算得出），所以按 §2.2 ①' 它是**纯领域业务**：
+//! 有 `api` 与不变式，**无端口、无 `service`**（见 docs/architecture/refactor-plan.md §3.1 / 批次 20d）。
 //!
 //! 契约见 docs/architecture/task-chain.md：
 //! - 串并混合是**同一张依赖图的形状**，不是两种模式；

@@ -112,7 +112,7 @@ pub struct CollabSession {
     /// 已记录在案的执行方案（回档/重启后沿用，未整理则为 None）。
     plan: Option<String>,
     /// 核心给出的**任务链**（与方案一起出；审查关卡把它交用户看）。
-    chain: Option<crate::kernel::chain::TaskChain>,
+    chain: Option<crate::capabilities::taskchain::api::TaskChain>,
     disc: Option<Discussion>,
     /// 回合 id 计数器（整场工作单调递增）：agent 会话的回合标记用它。
     turns: u64,
@@ -143,7 +143,7 @@ pub struct CollabSession {
     /// 工具执行面（**不持它的端口**，R12）：跑外部/内置工具都走它。
     tools: Arc<dyn ToolExec + Send + Sync>,
     /// 运行日志（工具循环里"输出被长度截断"这类事实落盘）。
-    log: Arc<dyn crate::kernel::log::Log + Send + Sync>,
+    log: Arc<dyn crate::kernel::ports::Log + Send + Sync>,
     /// 本会话的执行选型（档位 + 运行包定版）。
     spec: ExecSpec,
     /// 本工作的沙箱清单（按 agent 实例名取）。
@@ -170,7 +170,7 @@ impl CollabSession {
         prompts: Arc<dyn Prompt>,
         systools: Arc<dyn crate::capabilities::tools::api::Tools>,
         tools: Arc<dyn ToolExec + Send + Sync>,
-        log: Arc<dyn crate::kernel::log::Log + Send + Sync>,
+        log: Arc<dyn crate::kernel::ports::Log + Send + Sync>,
         spec: ExecSpec,
         roster: Vec<AgentMeta>,
         delegated: bool,
@@ -251,7 +251,7 @@ impl CollabSession {
     }
 
     /// 任务链（未整理 = None）。
-    pub fn chain(&self) -> Option<&crate::kernel::chain::TaskChain> {
+    pub fn chain(&self) -> Option<&crate::capabilities::taskchain::api::TaskChain> {
         self.chain.as_ref()
     }
 
@@ -265,7 +265,7 @@ impl CollabSession {
         if let Some(chain) = self.chain.as_mut() {
             if let Some(n) = chain.nodes.iter_mut().find(|n| n.id == node) {
                 n.sub_session = Some(sub.to_string());
-                n.status = crate::kernel::chain::NodeStatus::Running;
+                n.status = crate::capabilities::taskchain::api::NodeStatus::Running;
             }
         }
     }
@@ -361,7 +361,7 @@ impl CollabSession {
         prompt: &dyn Prompt,
         systools: &dyn crate::capabilities::tools::api::Tools,
         cancel: &std::sync::Arc<std::sync::atomic::AtomicBool>,
-        chain: Option<&crate::kernel::chain::TaskChain>,
+        chain: Option<&crate::capabilities::taskchain::api::TaskChain>,
         opts: crate::capabilities::llm::api::CompleteOpts<'static>,
         mode: crate::capabilities::llm::api::ToolMode,
         core_chat: &mut dyn Chat,
@@ -437,7 +437,7 @@ impl CollabSession {
     pub fn mark_node_done(&mut self, node: &str, report: &str) {
         if let Some(chain) = self.chain.as_mut() {
             if let Some(n) = chain.nodes.iter_mut().find(|n| n.id == node) {
-                n.status = crate::kernel::chain::NodeStatus::Done;
+                n.status = crate::capabilities::taskchain::api::NodeStatus::Done;
                 n.report = Some(report.to_string());
             }
         }
@@ -447,7 +447,7 @@ impl CollabSession {
     pub fn set_node_acceptance(&mut self, node: &str, ok: bool, note: &str) {
         if let Some(chain) = self.chain.as_mut() {
             if let Some(n) = chain.nodes.iter_mut().find(|n| n.id == node) {
-                n.acceptance = Some(crate::kernel::chain::Acceptance {
+                n.acceptance = Some(crate::capabilities::taskchain::api::Acceptance {
                     ok,
                     note: note.to_string(),
                 });
@@ -507,7 +507,10 @@ impl CollabSession {
             .iter()
             .find(|n| {
                 n.sub_session.as_deref() == Some(sub)
-                    && matches!(n.status, crate::kernel::chain::NodeStatus::Running)
+                    && matches!(
+                        n.status,
+                        crate::capabilities::taskchain::api::NodeStatus::Running
+                    )
             })
             .map(|n| n.id.clone())
     }
@@ -516,7 +519,7 @@ impl CollabSession {
     pub fn reset_node(&mut self, node: &str) {
         if let Some(chain) = self.chain.as_mut() {
             if let Some(n) = chain.nodes.iter_mut().find(|n| n.id == node) {
-                n.status = crate::kernel::chain::NodeStatus::Pending;
+                n.status = crate::capabilities::taskchain::api::NodeStatus::Pending;
                 n.sub_session = None;
                 n.report = None;
                 n.acceptance = None;
@@ -1136,7 +1139,10 @@ impl CollabSession {
             .map(|c| {
                 c.nodes
                     .iter()
-                    .filter(|n| n.status == crate::kernel::chain::NodeStatus::Done && !n.reported)
+                    .filter(|n| {
+                        n.status == crate::capabilities::taskchain::api::NodeStatus::Done
+                            && !n.reported
+                    })
                     .map(|n| {
                         (
                             n.id.clone(),
@@ -1185,7 +1191,7 @@ impl CollabSession {
                 return;
             }
             // 这一阶段的节点逐个判（核心 AI 给结论，也由它决定重派哪些）。
-            let stage_nodes: Vec<crate::kernel::chain::TaskNode> = self
+            let stage_nodes: Vec<crate::capabilities::taskchain::api::TaskNode> = self
                 .chain
                 .as_ref()
                 .map(|c| c.stage_nodes(stage).into_iter().cloned().collect())
@@ -1195,7 +1201,7 @@ impl CollabSession {
             // 节点上，否则"退回待办并重派"的名单就是错的。
             let mut retry: Option<String> = None;
             let (verdicts, advice) = loop {
-                let reviewed = crate::kernel::chain::TaskChain {
+                let reviewed = crate::capabilities::taskchain::api::TaskChain {
                     nodes: stage_nodes.clone(),
                 };
                 sink(crate::capabilities::session::api::working("核心"));
@@ -1553,7 +1559,7 @@ impl CollabSession {
         prompts: Arc<dyn Prompt>,
         systools: Arc<dyn crate::capabilities::tools::api::Tools>,
         tools: Arc<dyn ToolExec + Send + Sync>,
-        log: Arc<dyn crate::kernel::log::Log + Send + Sync>,
+        log: Arc<dyn crate::kernel::ports::Log + Send + Sync>,
         meta: &SessionMeta,
         events: &[serde_json::Value],
         sandboxes: Sandboxes,

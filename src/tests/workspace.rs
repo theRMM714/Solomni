@@ -301,14 +301,14 @@ pub(crate) fn vm_tier_readiness_gates_creation_and_editing() {
     let host = exec::tier_readiness(
         &ExecSpec::default(),
         None,
-        &crate::adapters::HostProbeAdapter,
+        &crate::kernel::detail::HostProbeAdapter,
     );
     assert!(host.ready(), "本机档没有前置条件");
     assert!(host.requirements.is_empty(), "本机档不该有虚拟机前置清单");
     assert!(exec::tier_refusal(
         &ExecSpec::default(),
         None,
-        &crate::adapters::HostProbeAdapter
+        &crate::kernel::detail::HostProbeAdapter
     )
     .is_none());
 
@@ -318,7 +318,7 @@ pub(crate) fn vm_tier_readiness_gates_creation_and_editing() {
         base: Some("definitely-not-a-real-base-root".to_string()),
         ..Default::default()
     };
-    let r = exec::tier_readiness(&ghost, None, &crate::adapters::HostProbeAdapter);
+    let r = exec::tier_readiness(&ghost, None, &crate::kernel::detail::HostProbeAdapter);
     assert!(!r.ready(), "前置不齐就不成立：{:?}", r);
     let unmet: Vec<&str> = r.unmet().iter().map(|x| x.id).collect();
     assert!(
@@ -339,7 +339,7 @@ pub(crate) fn vm_tier_readiness_gates_creation_and_editing() {
         );
         assert!(!item.detail.is_empty(), "每一项都要有现状描述：{:?}", item);
     }
-    let why = exec::tier_refusal(&ghost, None, &crate::adapters::HostProbeAdapter)
+    let why = exec::tier_refusal(&ghost, None, &crate::kernel::detail::HostProbeAdapter)
         .expect("不成立就要给可读理由");
     assert!(why.contains("虚拟机档现在不可用"), "{}", why);
 
@@ -350,7 +350,7 @@ pub(crate) fn vm_tier_readiness_gates_creation_and_editing() {
         base: Some(dir.to_string_lossy().into_owned()),
         ..Default::default()
     };
-    let r2 = exec::tier_readiness(&real, None, &crate::adapters::HostProbeAdapter);
+    let r2 = exec::tier_readiness(&real, None, &crate::kernel::detail::HostProbeAdapter);
     let base_item = r2
         .requirements
         .iter()
@@ -377,7 +377,7 @@ pub(crate) fn vm_requirements_report_qemu_registration() {
     let r = exec::tier_readiness(
         &spec,
         Some("definitely-not-qemu.exe"),
-        &crate::adapters::HostProbeAdapter,
+        &crate::kernel::detail::HostProbeAdapter,
     );
     let qemu = r
         .requirements
@@ -393,7 +393,7 @@ pub(crate) fn vm_requirements_report_qemu_registration() {
     let r2 = exec::tier_readiness(
         &spec,
         Some(fake.to_string_lossy().as_ref()),
-        &crate::adapters::HostProbeAdapter,
+        &crate::kernel::detail::HostProbeAdapter,
     );
     let qemu2 = r2
         .requirements
@@ -577,8 +577,8 @@ pub(crate) fn vm_tier_is_refused_when_the_machine_cannot_carry_it() {
         ),
         test_prompt(),
         test_tools_svc(),
-        Arc::new(crate::kernel::log::NoopLog),
-        Arc::new(crate::adapters::HostProbeAdapter),
+        Arc::new(crate::kernel::ports::NoopLog),
+        Arc::new(crate::kernel::detail::HostProbeAdapter),
     );
     // 创建路径的档位来自设置（基础根留空）：成立与否随本机而定，这里钉的是**接线**——
     // 机器承载不了就必须拒绝，且什么都不留下。
@@ -587,7 +587,7 @@ pub(crate) fn vm_tier_is_refused_when_the_machine_cannot_carry_it() {
         ..ExecSpec::default()
     };
     let opened = core.create_work(work("vm-default", WorkMode::Single, &["a"]));
-    if exec::tier_readiness(&default_vm, None, &crate::adapters::HostProbeAdapter).ready() {
+    if exec::tier_readiness(&default_vm, None, &crate::kernel::detail::HostProbeAdapter).ready() {
         opened.expect("本机能承载虚拟机档时不该拒绝");
     } else {
         let err = opened.expect_err("本机承载不了虚拟机档就不许建");
@@ -617,8 +617,8 @@ pub(crate) fn vm_tier_is_refused_when_the_machine_cannot_carry_it() {
         ),
         test_prompt(),
         test_tools_svc(),
-        Arc::new(crate::kernel::log::NoopLog),
-        Arc::new(crate::adapters::HostProbeAdapter),
+        Arc::new(crate::kernel::ports::NoopLog),
+        Arc::new(crate::kernel::detail::HostProbeAdapter),
     );
     let sid = core2
         .create_work(work("w", WorkMode::Single, &["a"]))
@@ -742,8 +742,8 @@ pub(crate) fn module_without_runtime_is_denied_with_reason() {
         ),
         test_prompt(),
         test_tools_svc(),
-        Arc::new(crate::kernel::log::NoopLog),
-        Arc::new(crate::adapters::HostProbeAdapter),
+        Arc::new(crate::kernel::ports::NoopLog),
+        Arc::new(crate::kernel::detail::HostProbeAdapter),
     );
     // 虚拟机档现在一律不可选（guest 本体尚未接入），所以**创建**走本机档；
     // 建好之后把落盘档位改成 vm——这正是"档位承载检查"与"缺包不拦会话"两件事的交界：

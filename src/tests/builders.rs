@@ -211,14 +211,14 @@ pub(crate) fn scripted_discussion(scripts: Vec<Vec<String>>, allow: bool) -> Dis
     )
 }
 
-pub(crate) fn chain_node(id: &str, deps: &[&str]) -> crate::kernel::chain::TaskNode {
-    crate::kernel::chain::TaskNode {
+pub(crate) fn chain_node(id: &str, deps: &[&str]) -> crate::capabilities::taskchain::api::TaskNode {
+    crate::capabilities::taskchain::api::TaskNode {
         id: id.to_string(),
         title: format!("节点{}", id),
         objective: format!("把 {} 做完", id),
         assignee: "甲".to_string(),
         deps: deps.iter().map(|d| d.to_string()).collect(),
-        status: crate::kernel::chain::NodeStatus::Pending,
+        status: crate::capabilities::taskchain::api::NodeStatus::Pending,
         sub_session: None,
         report: None,
         acceptance: None,
@@ -356,7 +356,7 @@ pub(crate) fn member_with_tools(
         modules,
         observations: crate::capabilities::tools::api::Observations::default(),
         llm: test_llm_demo(),
-        log: Arc::new(crate::kernel::log::NoopLog),
+        log: Arc::new(crate::kernel::ports::NoopLog),
         tools: test_tools_svc_with(
             runner,
             Arc::new(InMemorySysIo::new()),
@@ -646,7 +646,7 @@ pub(crate) fn native_member(
         modules,
         observations: crate::capabilities::tools::api::Observations::default(),
         llm: test_llm_demo(),
-        log: Arc::new(crate::kernel::log::NoopLog),
+        log: Arc::new(crate::kernel::ports::NoopLog),
         tools: test_tools_svc_with(Arc::new(SilentRunner), io, Arc::new(NoFenceHost)),
         sandbox: sb.clone(),
         builtin_tools: test_systools().tools,
@@ -775,7 +775,7 @@ pub(crate) fn native_core(
         test_tools_svc_with(Arc::new(SilentRunner), io, Arc::new(NoFenceHost)),
         test_prompt(),
         test_tools_svc(),
-        Arc::new(crate::kernel::log::NoopLog),
-        Arc::new(crate::adapters::HostProbeAdapter),
+        Arc::new(crate::kernel::ports::NoopLog),
+        Arc::new(crate::kernel::detail::HostProbeAdapter),
     )
 }

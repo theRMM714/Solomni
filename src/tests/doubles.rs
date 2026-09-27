@@ -26,7 +26,7 @@ use crate::capabilities::tools::ports::{FileRead, SysIo, ToolRunner};
 use crate::capabilities::workspace::api::{Library, PackageManifest};
 use crate::capabilities::workspace::api::{Module, ModuleManifest};
 use crate::capabilities::workspace::ports::{ModuleSource, PackageSource, Workdirs};
-use crate::kernel::types::Tier;
+use crate::kernel::api::Tier;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -494,7 +494,7 @@ impl InMemoryHistory {
 
     /// 直接改掉某条会话已落盘的 meta（测试夹具）：用来构造"落盘档位与当前判据不一致"的情形。
     /// 例如虚拟机档现在一律不可选，但**已存在的**虚拟机档会话必须还能打开（记录是用户的）。
-    pub(crate) fn force_tier(&self, name: &str, tier: crate::kernel::types::Tier) {
+    pub(crate) fn force_tier(&self, name: &str, tier: crate::kernel::api::Tier) {
         let mut metas = self.metas.lock().expect("锁");
         if let Some(m) = metas.get_mut(name) {
             m.exec.tier = tier;
@@ -937,7 +937,7 @@ pub(crate) struct FixedProbe {
     pub hypervisor: bool,
 }
 
-impl crate::kernel::host::HostProbe for FixedProbe {
+impl crate::kernel::ports::HostProbe for FixedProbe {
     fn is_file(&self, path: &std::path::Path) -> bool {
         self.files.iter().any(|p| p == path)
     }
@@ -974,7 +974,7 @@ pub(crate) fn registry_service(
         crate::capabilities::registry::service::RegistryService::new(
             Arc::new(store),
             llm,
-            Arc::new(crate::kernel::log::NoopLog),
+            Arc::new(crate::kernel::ports::NoopLog),
         )
         .expect("内存登记处装配不应失败"),
     )
@@ -1065,8 +1065,8 @@ pub(crate) fn core_with_workspace(
         ),
         test_prompt(),
         test_tools_svc(),
-        Arc::new(crate::kernel::log::NoopLog),
-        Arc::new(crate::adapters::HostProbeAdapter),
+        Arc::new(crate::kernel::ports::NoopLog),
+        Arc::new(crate::kernel::detail::HostProbeAdapter),
     )
 }
 
@@ -1161,8 +1161,8 @@ pub(crate) fn core_with_pkgs(
         test_tools_svc_with(runner, io, Arc::new(NoFenceHost)),
         test_prompt(),
         test_tools_svc(),
-        Arc::new(crate::kernel::log::NoopLog),
-        Arc::new(crate::adapters::HostProbeAdapter),
+        Arc::new(crate::kernel::ports::NoopLog),
+        Arc::new(crate::kernel::detail::HostProbeAdapter),
     )
 }
 
@@ -1190,8 +1190,8 @@ pub(crate) fn core_with_settings(store: InMemorySettings) -> Conductor {
         ),
         test_prompt(),
         test_tools_svc(),
-        Arc::new(crate::kernel::log::NoopLog),
-        Arc::new(crate::adapters::HostProbeAdapter),
+        Arc::new(crate::kernel::ports::NoopLog),
+        Arc::new(crate::kernel::detail::HostProbeAdapter),
     )
 }
 
@@ -1226,8 +1226,8 @@ pub(crate) fn core_with_io_gateway(
         test_tools_svc_with(Arc::new(SilentRunner), io, Arc::new(NoFenceHost)),
         test_prompt(),
         test_tools_svc(),
-        Arc::new(crate::kernel::log::NoopLog),
-        Arc::new(crate::adapters::HostProbeAdapter),
+        Arc::new(crate::kernel::ports::NoopLog),
+        Arc::new(crate::kernel::detail::HostProbeAdapter),
     )
 }
 
@@ -1258,7 +1258,7 @@ pub(crate) fn core_with_gateway(
         ),
         test_prompt(),
         test_tools_svc(),
-        Arc::new(crate::kernel::log::NoopLog),
-        Arc::new(crate::adapters::HostProbeAdapter),
+        Arc::new(crate::kernel::ports::NoopLog),
+        Arc::new(crate::kernel::detail::HostProbeAdapter),
     )
 }

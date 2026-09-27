@@ -44,7 +44,7 @@ pub use crate::capabilities::conductor::api::{
 
 pub use crate::capabilities::conductor::service::Conductor;
 
-pub use crate::kernel::types::Tier;
+pub use crate::kernel::api::Tier;
 
 pub use std::collections::{BTreeMap, BTreeSet};
 

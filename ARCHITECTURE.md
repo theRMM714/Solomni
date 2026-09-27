@@ -11,22 +11,22 @@
 
 ```text
 cli / web ──▶ capabilities（含协调业务 conductor）──▶ kernel
-（main = 组合根，装配全部；adapters 实现各能力的 ports 与 kernel 端口，不认识业务编排）
+（main = 组合根，装配全部；各能力的 `detail` 与 kernel 的实现只在这里被 new 出来，它们不认识业务编排）
 ```
 
 | 层 | 干什么 | 禁令 |
 | --- | --- | --- |
 | `capabilities/conductor/` | **协调业务**：会话中心（会话在世表、命令队列、运行态）、生成驱动、跨能力用例与跨会话回档编排。它与别的能力**平级**，只经各能力的 `api` 编排，不持任何别人的端口 | 不读文件（`std::fs`）、不发网络（ureq）、不碰 stdin/stdout——一切机制下沉各能力的 `detail/` |
-| `adapters/` | **内核端口的实现**（`Log` / `HostProbe`）与入口层用的机制；能力私有的实现已归各能力 `detail/` | 属于机制层；不做装配决策 |
+| `entry/` | **入口层共用机制**（产品根规范化）；只有组合根 / `diagnostics` / `guard` 能用 | 属于入口层；**任何能力都不许依赖它** |
 | `cli/` + `web/` | **前端（交付机制）**：各渠道一个顶层目录，完全分开——传输（argv/stdout vs HTTP/SSE）、路由、**纯渲染**。**不是业务能力**（无状态、无不变式） | 只依赖 **入站能力面**（各能力的 `::api`）；**永不接触端口对象，也拿不到 `Core` 本身**；**两者之间互不依赖** |
 | `capabilities/` | **业务能力**：按业务功能垂直切分。每个能力有 `api`（入站契约：trait + DTO）/ `service`（**本能力的状态与用例**，实现 `api` 的 trait；别处只持 `dyn` 面）/ `ports`（出站端口，**只由定义它的能力持有**）/ `domain`（纯逻辑）/ `detail`（细节实现，**只有组合根能构造**） | **业务之间只经对方的 `api`**；不反向依赖 `core` / `adapters` / `presentation`（迁移期残留记为基线豁免，见 [docs/architecture/refactor-plan.md](docs/architecture/refactor-plan.md) §四） |
-| `kernel/` | **机制型内核**：无领域语义、无领域状态的机制（运行日志端口、生成中作业的取消表、跨业务共享的事实类型） | **不依赖任何人**（不认识能力 / adapters / presentation）；不放有领域语义的类型 |
+| `kernel/` | **机制型业务**：无领域语义、无领域状态的机制（运行日志端口、宿主探测、生成中作业的取消表、跨业务共享的事实类型、路径书写）；形状与别的能力一致（`api` / `ports` / `domain` / `detail`） | **不依赖任何人**（不认识能力 / presentation / entry）；不放有领域语义的类型 |
 | 入口层（`main.rs` + `diagnostics/` + `guard/`） | **组合根**（`main.rs`：`new` 出所有适配器并注入）+ **机器可读探针**（`diagnostics/`：`--doctor` / `--https-check` / `--print-routes` / `--print-fence-env` / `--fence-verify`）+ **围栏守门进程**（`guard/`：`--fence-run` / `--fence-clean`，**第二个程序入口**） | 它依赖所有人，**任何人都不许依赖它**（门禁判定）。除装配与探针外无业务 |
 
 推论：
 
-- 「用哪个供应商/模型」是**策略**，在 `registry`（登记处能力）的解析链里决定；「怎么建通道」是**机制**，在 adapters。两者不互换。
-- 出站依赖由**各能力定义端口**（`capabilities/<能力>/ports.rs`）、**adapters 实现**；入站依赖由**各能力定义能力接口**（`<能力>::api`）——协调业务的 `api::Ops` 只把它们与它自己的两个契约**组装**成一份交给呈现层（批次 18）。
+- 「用哪个供应商/模型」是**策略**，在 `registry`（登记处能力）的解析链里决定；「怎么建通道」是**机制**，在 llm 的 `detail`。两者不互换。
+- 出站依赖由**各能力定义端口**（`capabilities/<能力>/ports.rs`）、**各能力（与 kernel）的 `detail` 实现**；入站依赖由**各能力定义能力接口**（`<能力>::api`）——协调业务的 `api::Ops` 只把它们与它自己的两个契约**组装**成一份交给呈现层（批次 18）。
   两侧都是依赖倒置，只是箭头方向不同——**能力不定义"前端接口让别人实现"**。
 - 呈现层拿到的是 `Ops`（各能力的能力接口 + 核心自己的两个 + 事件台），不是 `Core`，也不是任何锁。
 
@@ -52,7 +52,7 @@ cli / web ──▶ capabilities（含协调业务 conductor）──▶ kernel
 | `EnvelopeRepair`（`capabilities/llm/ports.rs`） | 手写信封不合法时的**无歧义**补救（改了字段含义就是错；拿不准就返回不修） | `UnambiguousRepair`（转义字符串里的裸控制字符 + 补上扫描器算出的收尾括号；断在字符串中间不修，一段回复里起了两段信封不修——补哪一段都是猜；调用方中止的生成一律不修） |
 | `FenceHost` | 围栏授权的释放（删除会话时请求一次撤销）。`capabilities/tools/ports.rs`，**只由 tools 的 `service.rs` 持有**（R12） | `confine::FenceHostAdapter`（本平台无该机制时为空操作） |
 | `Log` | 运行日志（三级） | `FileLog`（测试 `NoopLog`） |
-| `HostProbe` | 宿主能力探测（**只问事实**：路径存在性、PATH 上的可执行文件、本机虚拟化能力；不执行、不安装、不写）。**在 `kernel/host.rs`**（无领域语义，执行档位与自检共用） | `HostProbeAdapter`（测试 `FixedProbe`） |
+| `HostProbe` | 宿主能力探测（**只问事实**：路径存在性、PATH 上的可执行文件、本机虚拟化能力；不执行、不安装、不写）。**在 `kernel/ports.rs`**（无领域语义，执行档位与自检共用；实现在 `kernel/detail/host_probe.rs`） | `HostProbeAdapter`（测试 `FixedProbe`） |
 
 新增端口前先问一句：**这是 IO 或可替换点吗**？不是就别加 trait。
 
@@ -61,7 +61,7 @@ cli / web ──▶ capabilities（含协调业务 conductor）──▶ kernel
 
 这两块是**查阅型细则**，拆出去只有一份：
 
-- 逐个文件讲 `capabilities/`（含 `conductor/`）/ `adapters/` / `cli/` / `web/` 各干什么：[docs/architecture/module-map.md](docs/architecture/module-map.md)。
+- 逐个文件讲 `capabilities/`（含 `conductor/`）/ `kernel/` / `entry/` / `cli/` / `web/` 各干什么：[docs/architecture/module-map.md](docs/architecture/module-map.md)。
 - 呈现层入站契约（能力接口、事件台、命令/事件规则）与机器可读的 HTTP 路由目录：[docs/architecture/contracts.md](docs/architecture/contracts.md)。
 - 系统工具总表、角色表与"谁能用哪些工具"（含越权校验与提示词按角色分配）：[docs/architecture/tools-and-roles.md](docs/architecture/tools-and-roles.md)。
 - 协作如何从讨论走到交付（审查关卡、任务链、子会话、验收）：[docs/architecture/task-chain.md](docs/architecture/task-chain.md)。
@@ -73,9 +73,9 @@ cli / web ──▶ capabilities（含协调业务 conductor）──▶ kernel
 
 ## 四、运行日志（Log 端口）
 
-- `kernel/log.rs` 定义 `Log`（`info`/`warn`/`error`），**只调用**；文件、时间戳、目录机制在 adapters。
+- `kernel/ports.rs` 定义 `Log`（`info`/`warn`/`error`），**只调用**；文件、时间戳、目录机制在 `kernel/detail/file_log.rs`。
 - 关键节点必须埋点：通道降级、HTTP 失败、会话动作失败、装配失败、工具执行异常。
-- 适配层实现（`adapters/log.rs`）：每次运行在根目录 `logs/` 下按时间戳建一个 `.log` 文件；`logs/` 不入库。
+- 机制实现（`kernel/detail/file_log.rs`）：每次运行在根目录 `logs/` 下按时间戳建一个 `.log` 文件；`logs/` 不入库。
 - 组合根创建唯一的 `FileLog` 并注入协调业务与呈现层；测试用 `NoopLog`。
 - 目的：出问题时**看日志定因**，不靠推理猜。
 

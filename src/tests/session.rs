@@ -905,8 +905,8 @@ pub(crate) fn deleting_a_session_asks_the_fence_to_release_its_grants() {
         ),
         test_prompt(),
         test_tools_svc(),
-        Arc::new(crate::kernel::log::NoopLog),
-        Arc::new(crate::adapters::HostProbeAdapter),
+        Arc::new(crate::kernel::ports::NoopLog),
+        Arc::new(crate::kernel::detail::HostProbeAdapter),
     );
     assert!(core.history_delete("w").unwrap(), "会话目录该被删掉");
     assert_eq!(

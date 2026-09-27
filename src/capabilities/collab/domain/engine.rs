@@ -1184,7 +1184,14 @@ impl Discussion {
         verify: Option<&mut MemberTools>,
         // 核心这一轮的行（工具行 + 思维链 + 正文）推给谁：落不落由那个会话模块定。
         sink: &mut dyn FnMut(SessionEvent),
-    ) -> Result<(String, crate::kernel::chain::TaskChain, String), String> {
+    ) -> Result<
+        (
+            String,
+            crate::capabilities::taskchain::api::TaskChain,
+            String,
+        ),
+        String,
+    > {
         let roster = self
             .members
             .iter()
@@ -1235,17 +1242,17 @@ impl Discussion {
         }
         let parsed: SynthReply = serde_json::from_value(payload)
             .map_err(|e| format!("plan 工具的载荷不合法（{}）", e))?;
-        let chain = crate::kernel::chain::TaskChain {
+        let chain = crate::capabilities::taskchain::api::TaskChain {
             nodes: parsed
                 .nodes
                 .into_iter()
-                .map(|n| crate::kernel::chain::TaskNode {
+                .map(|n| crate::capabilities::taskchain::api::TaskNode {
                     id: n.id,
                     title: n.title,
                     objective: n.objective,
                     assignee: n.assignee,
                     deps: n.deps,
-                    status: crate::kernel::chain::NodeStatus::Pending,
+                    status: crate::capabilities::taskchain::api::NodeStatus::Pending,
                     sub_session: None,
                     report: None,
                     acceptance: None,

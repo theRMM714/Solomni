@@ -35,9 +35,9 @@
 - `src/capabilities/llm/detail/fake_chat.rs` 中的 `FakeChat` 与 `DemoGateway`；
 - `src/tests/doubles.rs`（`InMemory*` / `FakeCatalog` / `VecSource` / `ScriptGateway` / `RecordingFence` / `TestPrompts` / `NoopLog`）与 `src/tests/builders.rs`（`RecordingRunner` / `ParallelRunner` / `SilentRunner` / 原生与截断通道替身 / 造会话与造名单的辅助）里的测试装配（替身支持失败注入，供 T2 复用）；
 - `src/tests/` 中的契约测试（T2）：
-  - `ports.rs`（14 个端口的替身语义；`Log` 在 `kernel/log.rs`，见 [docs/architecture/module-map.md](docs/architecture/module-map.md) 一）、
+  - `ports.rs`（14 个端口的替身语义；`Log` 在 `kernel/ports.rs`，见 [docs/architecture/module-map.md](docs/architecture/module-map.md) 一）、
     `fakes.rs`（FakeChat / DemoGateway 的独立契约）；
-  - `adapters.rs`（8 个文件系统适配器的真实边界 + 本机环回 HTTP 适配器）；
+  - `detail.rs`（8 个文件系统实现的真实边界 + 本机环回 HTTP 适配器）；
   - `api.rs`（入站契约：命令与事件、生成期间停止立刻生效、错误如实传播、单条命令 panic 不带垮核心）；
   - `routes.rs`（HTTP 路由目录 ↔ 处理器 ↔ 文档 ↔ 前端调用四者机器比对；假能力面逐条验成功 / 错误 / 空 / 边界）；
 - **入站契约也是契约**：呈现层只依赖各能力的能力接口（归位见 [docs/architecture/contracts.md](docs/architecture/contracts.md)）与事件台（拿不到 `Core`、拿不到任何核心锁），

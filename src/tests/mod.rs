@@ -3,15 +3,14 @@
 //! 层级与判定见 docs/testing/levels.md，端口矩阵见 docs/testing/port-matrix.md。
 //! 硬规矩：不碰真实 `.home/`、真实 `session/`、真实权限或外部网络；只绑本地环回。
 
-mod adapters;
 mod api;
 mod builders;
 mod cli;
 mod collab;
 mod conductor;
+mod detail;
 mod doubles;
 mod fakes;
-mod kernel;
 mod llm;
 mod ports;
 mod prelude;
@@ -19,6 +18,7 @@ mod prompt;
 mod registry;
 mod routes;
 mod session;
+mod taskchain;
 mod tools;
 mod workspace;
 

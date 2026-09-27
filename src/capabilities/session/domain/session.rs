@@ -35,7 +35,7 @@ pub struct MemberTools {
     /// llm 用例面（**不持它的端口**，R12）：手写信封不合法时问它能不能按无歧义的写法修好。
     pub llm: Arc<dyn crate::capabilities::llm::api::Llm + Send + Sync>,
     /// 运行日志：模型输出被长度截断这类"看不见的事实"要落盘，供事后确定问题。
-    pub log: Arc<dyn crate::kernel::log::Log + Send + Sync>,
+    pub log: Arc<dyn crate::kernel::ports::Log + Send + Sync>,
     /// 工具执行面（**不持它的端口**，R12）：跑外部/内置工具都走它。
     pub tools: Arc<dyn ToolExec + Send + Sync>,
     /// 本成员的沙箱：内置文件工具的寻址与越界依据（权限收口在 conductor）。
@@ -155,7 +155,7 @@ pub fn env_block(
                     &texts.module_root_line,
                     &[
                         ("id", id.clone()),
-                        ("root", crate::kernel::path::slash(root)),
+                        ("root", crate::kernel::api::slash(root)),
                     ],
                 )
             })
@@ -167,8 +167,8 @@ pub fn env_block(
         &[
             ("work_name", p.work_name.clone()),
             ("agent", p.agent.clone()),
-            ("work_root", crate::kernel::path::slash(&p.shared)),
-            ("sandbox_root", crate::kernel::path::slash(&p.private)),
+            ("work_root", crate::kernel::api::slash(&p.shared)),
+            ("sandbox_root", crate::kernel::api::slash(&p.private)),
             ("module_roots", module_roots),
         ],
     )

@@ -1,7 +1,7 @@
 //! 生成中作业的取消表：**机制**，不认识任何业务概念。
 //! 「停止」不排队、不碰核心状态，所以生成期间也能立刻生效——这是它存在的全部理由。
 
-use crate::kernel::types::SessionId;
+use crate::kernel::api::SessionId;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};

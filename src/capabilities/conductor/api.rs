@@ -20,9 +20,9 @@ use crate::capabilities::session::api::Live;
 use crate::capabilities::session::api::{HistoryView, SessionMeta};
 pub use crate::capabilities::session::api::{Pending, SessionEvent};
 use crate::capabilities::workspace::api::Roster;
-use crate::kernel::jobs::JobRegistry;
-use crate::kernel::types::SessionId;
-pub use crate::kernel::types::Tier;
+use crate::kernel::api::JobRegistry;
+use crate::kernel::api::SessionId;
+pub use crate::kernel::api::Tier;
 use std::collections::BTreeMap;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
@@ -274,7 +274,7 @@ pub struct ConductorHandle {
     jobs: Arc<JobRegistry>,
     bus: Arc<EventBus>,
     /// 日志句柄：呈现层经 LogOps 能力写日志，拿不到这个端口对象本身。
-    log: Arc<dyn crate::kernel::log::Log + Send + Sync>,
+    log: Arc<dyn crate::kernel::ports::Log + Send + Sync>,
 }
 
 /// 一次"要一个成员回合"的请求：泵在工作线程上让出，回头找主线程驱动（它才拿得到各 agent 的会话）。

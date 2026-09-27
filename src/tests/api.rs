@@ -8,7 +8,7 @@ use crate::capabilities::conductor::api::{
 };
 use crate::capabilities::conductor::api::{ConductorHandle, Ops, Output};
 use crate::capabilities::workspace::api::Module;
-use crate::kernel::types::Tier;
+use crate::kernel::api::Tier;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::{Duration, Instant};

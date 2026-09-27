@@ -3,7 +3,6 @@
 //! 不碰真实 `.home/` 与 `session/`。HTTP 适配器只对本机环回假供应商说话（无外网、无真实密钥）。
 
 use super::scratch;
-use crate::adapters::log::FileLog;
 use crate::capabilities::llm::api::Channel;
 use crate::capabilities::llm::api::{Chunk, CompleteOpts, Msg, ProbeOutcome};
 use crate::capabilities::llm::detail::endpoint::memo_new;
@@ -27,7 +26,8 @@ use crate::capabilities::workspace::detail::fs_modules::FsModules;
 use crate::capabilities::workspace::detail::fs_packages::FsPackages;
 use crate::capabilities::workspace::detail::fs_workspace::FsWorkspace;
 use crate::capabilities::workspace::ports::{ModuleSource, PackageSource, Workdirs};
-use crate::kernel::log::{Log, NoopLog};
+use crate::kernel::detail::file_log::FileLog;
+use crate::kernel::ports::{Log, NoopLog};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;

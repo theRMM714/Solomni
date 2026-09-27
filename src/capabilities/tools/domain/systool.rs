@@ -111,8 +111,8 @@ pub fn tool_notes(
         patch_guide: prompt.render(
             Segment::PatchGuide,
             &[
-                ("work_root", crate::kernel::path::slash(&sb.shared)),
-                ("sandbox_root", crate::kernel::path::slash(&sb.private)),
+                ("work_root", crate::kernel::api::slash(&sb.shared)),
+                ("sandbox_root", crate::kernel::api::slash(&sb.private)),
             ],
         ),
         module_tools: crate::capabilities::tools::domain::module_tools::module_tools(

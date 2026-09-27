@@ -2,10 +2,10 @@
 //! 组合根职责：创建各适配器实例 → 装配各能力（含协调业务 `conductor`）→ 交给呈现层（CLI 或 Web）。
 //! 依赖方向：main → adapters / capabilities / presentation；协调业务不知道后两者存在。
 
-mod adapters;
 mod capabilities;
 mod cli;
 mod diagnostics;
+mod entry;
 mod guard;
 mod kernel;
 mod web;
@@ -58,19 +58,19 @@ fn main() {
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("."));
     // 产品根规范化成**干净的绝对路径**：提示词里给 AI 的、以及各适配器给出的根都是它。
-    let (root, root_note) = adapters::root::resolve_root(&raw_root);
+    let (root, root_note) = entry::root::resolve_root(&raw_root);
     // 隐藏模式：精确回收围栏写过的权限项（不需要装配核心，也就不需要提示词册）。
     if args.iter().any(|a| a == "--fence-clean") {
         std::process::exit(guard::fence_clean(&root));
     }
 
     // 组合根：唯一允许 new 具体适配器的地方（依赖注入）。
-    let log: std::sync::Arc<dyn kernel::log::Log + Send + Sync> =
-        match adapters::FileLog::new(&root, "Solomni 运行日志") {
+    let log: std::sync::Arc<dyn kernel::ports::Log + Send + Sync> =
+        match kernel::detail::FileLog::new(&root, "Solomni 运行日志") {
             Ok(l) => std::sync::Arc::new(l),
             Err(e) => {
                 eprintln!("[日志系统异常] {}（进程继续，日志降级为 stderr）", e);
-                std::sync::Arc::new(kernel::log::NoopLog)
+                std::sync::Arc::new(kernel::ports::NoopLog)
             }
         };
     if let Some(note) = &root_note {
@@ -205,7 +205,7 @@ fn main() {
         prompt,
         systools,
         std::sync::Arc::clone(&log),
-        Arc::new(adapters::HostProbeAdapter),
+        Arc::new(kernel::detail::HostProbeAdapter),
     );
 
     // 隐藏模式：实测一条通道支不支持原生工具调用，并把确定结论写回 models.yaml（要真实网络）。

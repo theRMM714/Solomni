@@ -13,7 +13,7 @@ pub use crate::capabilities::llm::domain::envelope::{
 };
 pub use crate::capabilities::llm::domain::malformed::malformed_report;
 
-use crate::kernel::types::DEFAULT_LLM_TIMEOUT_SECS;
+use crate::kernel::api::DEFAULT_LLM_TIMEOUT_SECS;
 use serde::{Deserialize, Serialize};
 
 /// 一种"回放形状"的探测结论：**收了没有**（HTTP 层）+ **看懂了没有**（回答里带回了工具结果里的编号）
