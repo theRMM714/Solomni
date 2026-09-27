@@ -223,7 +223,7 @@ pub(crate) fn collab_state_derives_the_task_chain_from_plan_review() {
 /// 原生通道：供应商的结构化槽位 → 讨论动词；不认识的工具名 = 不认识（调用点据此**如实拒绝**）。
 #[test]
 pub(crate) fn native_tool_names_map_to_discussion_verbs() {
-    use crate::capabilities::collab::service::engine::{arg_text, verb_of};
+    use crate::capabilities::collab::service::round::{arg_text, verb_of};
     use crate::capabilities::llm::api::Verb;
     assert_eq!(verb_of("say"), Some(Verb::Say));
     assert_eq!(verb_of("agree"), Some(Verb::Agree));
@@ -679,7 +679,7 @@ pub(crate) fn execution_review_pass_and_fail_paths() {
     assert_eq!(ran.reports.get("m0").map(|s| s.as_str()), Some("汇报内容"));
 
     // 验收：核心对照方案逐项核对（总验收用的就是这条）。
-    let mut exec = crate::capabilities::collab::service::engine::Execution::new();
+    let mut exec = crate::capabilities::collab::service::synthesis::Execution::new();
     exec.reports = ran.reports.clone();
     let mut core_chat = scripted(vec![
         "{\"type\":\"tool\",\"name\":\"checklist\",\"args\":{\"items\":[{\"item\":\"A\",\"status\":\"fail\",\"reason\":\"没做完\"}]}}".into(),
@@ -699,7 +699,7 @@ pub(crate) fn execution_review_pass_and_fail_paths() {
     assert!(!exec.all_pass(), "有 fail 项就不通过");
 
     // 再验一次：这次全 pass。
-    let mut exec2 = crate::capabilities::collab::service::engine::Execution::new();
+    let mut exec2 = crate::capabilities::collab::service::synthesis::Execution::new();
     exec2.reports = ran.reports.clone();
     let mut core_chat2 = scripted(vec![
         "{\"type\":\"tool\",\"name\":\"checklist\",\"args\":{\"items\":[{\"item\":\"A\",\"status\":\"pass\"}]}}"
@@ -729,7 +729,7 @@ pub(crate) fn review_parse_failure_is_conservative_fail() {
         crate::capabilities::llm::api::ToolMode::Envelope,
         scripted(vec!["{\"type\":\"say\",\"text\":\"x\"}".into()]),
     )];
-    let mut exec = crate::capabilities::collab::service::engine::Execution::new();
+    let mut exec = crate::capabilities::collab::service::synthesis::Execution::new();
     exec.reports = run_execution(members.as_mut_slice(), "任务", &prompts).reports;
     let mut core_chat = scripted(vec!["完全不是清单".to_string()]);
     exec.review(
@@ -916,7 +916,7 @@ pub(crate) fn same_agent_nodes_serialize_but_different_agents_run_together() {
 pub(crate) fn checklist_rework_is_a_validated_node_id() {
     let known = vec!["n1-1".to_string(), "n2-1".to_string()];
     let item = |status: &str, rework: Option<&str>| {
-        crate::capabilities::collab::service::engine::CheckItem {
+        crate::capabilities::collab::service::synthesis::CheckItem {
             item: "方案条目".to_string(),
             status: status.to_string(),
             evidence: None,
@@ -924,7 +924,7 @@ pub(crate) fn checklist_rework_is_a_validated_node_id() {
             rework: rework.map(|r| r.to_string()),
         }
     };
-    let mut exec = crate::capabilities::collab::service::engine::Execution::new();
+    let mut exec = crate::capabilities::collab::service::synthesis::Execution::new();
     exec.items = vec![item("fail", Some("n2-1")), item("pass", None)];
     assert_eq!(exec.rework_targets(), vec!["n2-1".to_string()]);
     assert!(
@@ -1490,7 +1490,7 @@ pub(crate) fn discussion_turn_streams_deltas_and_never_leaks_the_envelope() {
     let mut events: Vec<crate::capabilities::session::api::SessionEvent> = Vec::new();
     let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let prompts = test_prompts();
-    let _ = crate::capabilities::collab::service::engine::Discussion::turn_with(
+    let _ = crate::capabilities::collab::service::discussion::Discussion::turn_with(
         &*test_tools_svc(),
         "discussant",
         &cancel,

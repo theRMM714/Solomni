@@ -2,7 +2,7 @@
 //!
 //! 它只认 `MemberTools`（这一回合的工具面与观察账本），策略在这里，机制在 `tools` 的端口后面。
 
-use super::engine::*;
+use super::discussion::*;
 use crate::capabilities::llm::api::ToolInvoke;
 use crate::capabilities::session::api::{MemberTools, SessionEvent};
 use crate::capabilities::tools::api::ToolOutcome;

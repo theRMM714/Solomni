@@ -3,7 +3,8 @@
 //! 为什么是**自由函数**而不是 `impl AgentSession`：会话类型归会话能力、引擎归协作能力——
 //! 给别人的类型写 `impl` 是另一种互相引入（R1），所以驱动以「会话当参数」的形式写在这里。
 
-use super::engine::*;
+use super::discussion::*;
+use super::round::*;
 use crate::capabilities::llm::api::{Chunk, Msg};
 use crate::capabilities::session::api::{
     stream_piece, AgentSession, LineView, Live, SessionEvent, ToolCallView, TurnRun,
@@ -17,7 +18,7 @@ pub fn compact_turn(
     identity: &str,
 ) -> Result<String, String> {
     // 整条消息**只有这一处装配**：身份 + 本回合工具（只有 compact）+ 对话 + 压缩提示。
-    let msgs = crate::capabilities::collab::service::engine::assemble(
+    let msgs = crate::capabilities::collab::service::round::assemble(
         identity,
         s.tools.as_ref(),
         &["compact".to_string()],
@@ -288,7 +289,7 @@ fn run(
     s: &mut AgentSession,
     spec: &TurnRun<'_>,
     live: &mut Live,
-    on_round: &mut crate::capabilities::collab::service::engine::RoundSink<'_>,
+    on_round: &mut crate::capabilities::collab::service::round::RoundSink<'_>,
     sink: &mut dyn FnMut(SessionEvent),
 ) -> Vec<Round> {
     let label = s.id.clone();
@@ -313,7 +314,7 @@ fn run(
             tools,
             ..
         } = s;
-        crate::capabilities::collab::service::engine::converse_with(
+        crate::capabilities::collab::service::round::converse_with(
             chat.as_mut(),
             tools.as_mut(),
             spec.identity,

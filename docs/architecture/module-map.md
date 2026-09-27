@@ -112,7 +112,9 @@
 | `session/domain/rewind.rs` | 回档的**纯行 / 事件算术**：`turn_of_line` / `last_line_within` / `truncate_events` / `cut_before_line` / `align_keep` / `line_reply_of` / `find_line_id` / `max_reply`（转录里用过的最大回复号，重建时续号）（**编排在协调业务**） |
 | `collab/api.rs` | **入站能力面**：`CollabSession` / 讨论与执行引擎 / 回合与验收词汇 / 协作状态派生的对外名字 |
 | `collab/service/collab.rs` | 协作会话状态机与讨论泵（批次 20f-1 从 `domain/` 归位） |
-| `collab/service/engine.rs` | 讨论/执行/验收引擎 + **唯一的轮循环** `converse_with` + **唯一的请求装配点** `assemble` + 行构造（核心操作回路与行回灌归 `session`，`20e-1`） |
+| `collab/service/discussion.rs` | **讨论状态机**：建组 → 轮转发言 → 表态判定 → 全员同意后交整理（`Member` / `Discussion` / `MemberTurn` / `Adv` / `AfterTurn`） |
+| `collab/service/synthesis.rs` | **整理与审查**：核心整理讨论出方案与任务链（`synthesize`，走 plan 工具）+ 总验收清单与返工判定（`Execution` / `CheckItem`） |
+| `collab/service/round.rs` | **轮循环与行构造**：一次成员回复的完整翻译（`converse_with`）、请求装配（`assemble`）、行构造（`build_round_lines`）、轮与动词词汇 |
 | `collab/service/tool_loop.rs` | 成员回合里的**工具循环**：声明面 → 放行判定 → 并发调度 → 执行（内置 / 模块外部）→ 回填（`run_one` / `run_batch` / `dispatch_external` / `tool_decls`…） |
 | `collab/service/driver.rs` | **回合驱动**（自由函数，会话当参数）：`say` / `dispatch_task` / `discussion_turn` / `continue_reply` / `compact_turn` / `maybe_compact` / `run_rounds` / `rounds_events` / `run`。为什么不是 `impl AgentSession`：给别人的类型写 impl 是另一种互相引入（R1），批次 20f-2 改判 |
 | `collab/domain/collab_state.rs` | 「转录即状态」的协作状态派生（纯函数、可回放） |

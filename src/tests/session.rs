@@ -308,7 +308,7 @@ pub(crate) fn discussion_turn_carries_the_agent_sessions_own_history() {
     };
     let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let prompts = test_prompts();
-    let turn = crate::capabilities::collab::service::engine::Discussion::turn_with(
+    let turn = crate::capabilities::collab::service::discussion::Discussion::turn_with(
         &*test_tools_svc(),
         "discussant",
         &cancel,
@@ -626,7 +626,7 @@ pub(crate) fn node_task_is_a_system_line_but_a_user_message() {
         "转录行要带 system + task 标记（界面是系统行，不是用户行）"
     );
     // 唯一装配点发出去的请求里至少有一条 user 消息（协议要求）。
-    let msgs = crate::capabilities::collab::service::engine::assemble(
+    let msgs = crate::capabilities::collab::service::round::assemble(
         "身份",
         None,
         &[],
