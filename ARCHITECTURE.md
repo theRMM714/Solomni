@@ -280,5 +280,6 @@ session/<工作名>/
 - **foreignImpl**：不得给别的能力的类型写 `impl`；
 - **coreCycles**：能力节点图无环；
 - **reverse** / **presentation**：能力不反向依赖入口层或呈现层。
+- **moduleMap** / **docRefs**：`docs/architecture/module-map.md` 与磁盘**双向一致**（表里的路径都存在、`src/` 下的实现文件都有行）；文档里的文档链接与代码注释里的 `docs/**.md` 引用都存在。
 
 **当前基线为空（零豁免）**：任一判据不成立即报错；豁免条目一旦不再成立，门禁报「基线豁免已过期」强制销账。

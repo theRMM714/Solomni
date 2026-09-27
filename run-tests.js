@@ -184,6 +184,7 @@ function toolAvailable(sub) {
 /** 结构审查（纯文件分析，不起进程）：目标登记、孤儿测试文件、缺口账格式。 */
 function structuralAudit() {
   const problems = [];
+  const BT = String.fromCharCode(96);
   const toml = fs.readFileSync(path.join(ROOT, "Cargo.toml"), "utf8");
   const targets = [];
   for (const block of toml.split(/\[\[test\]\]/).slice(1)) {
@@ -240,6 +241,44 @@ function structuralAudit() {
     });
   }
 
+  // 模块地图与磁盘**双向一致**（docs/architecture/module-map.md 是模块地图的唯一权威）：
+  // ① 每行第一格是仓库根相对路径（src/…），必须存在；② src/ 下每个 .rs 都要有一行
+  // （src/tests/** 归测试分区、纯 mod 声明的目录入口不要求逐行列出）。
+  // 为什么机器查：这张表逐文件写着职责，人手维护必然漂移（曾出现表错位与整族文件漏记）。
+  const mapText = fs.readFileSync(path.join(ROOT, "docs", "architecture", "module-map.md"), "utf8");
+  const mapRows = [...mapText.matchAll(new RegExp("^\\| " + BT + "([^" + BT + "]+)" + BT + " \\|", "gm"))].map((m) => m[1]);
+  const seenRows = new Set();
+  for (const r of mapRows) {
+    if (seenRows.has(r)) problems.push("模块地图有重复行：" + r);
+    seenRows.add(r);
+    if (!fs.existsSync(path.join(ROOT, r))) problems.push("模块地图引用的文件不存在：" + r);
+  }
+  // 目录入口：只声明模块 / 重导出（不定义任何条目）的文件不必逐行入册。
+  const isBarrel = (abs) => !/^(pub(\([^)]*\))? )?(fn|struct|enum|impl|trait|const|static|type|macro_rules!) /m.test(fs.readFileSync(abs, "utf8"));
+  const collectSrc = (d) => {
+    for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+      const p = path.join(d, e.name);
+      if (e.isDirectory()) { collectSrc(p); continue; }
+      if (!e.name.endsWith(".rs")) continue;
+      const r = rel(p);
+      if (r.startsWith("src/tests/")) continue;
+      if (e.name === "mod.rs" && isBarrel(p)) continue;
+      if (!seenRows.has(r)) problems.push("src 下的文件没进模块地图：" + r);
+    }
+  };
+  collectSrc(path.join(ROOT, "src"));
+  // 代码注释里的文档引用（docs/**.md）必须存在：注释也是长期文档的一部分（AGENTS.md 四）。
+  const checkCodeDocRefs = (d) => {
+    for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+      const p = path.join(d, e.name);
+      if (e.isDirectory()) { checkCodeDocRefs(p); continue; }
+      if (!e.name.endsWith(".rs")) continue;
+      for (const m of fs.readFileSync(p, "utf8").matchAll(/docs\/[A-Za-z0-9_./-]+\.md/g)) {
+        if (!fs.existsSync(path.join(ROOT, m[0]))) problems.push(rel(p) + " 注释引用的文档不存在：" + m[0]);
+      }
+    }
+  };
+  checkCodeDocRefs(path.join(ROOT, "src"));
   // 文档分层（AGENTS.md「文档分层与同步」）：门户引用 docs/ 下的细则，细则引用彼此——
   // 两边都要真实存在。只查引用不查正文，避免把文档写法变成门禁。
   // **相对解析**：链接按所在文件的目录解析（门户在根、细则在 docs/<领域>/），所以 docs/ 内部写错的同级引用也会被抓到。
