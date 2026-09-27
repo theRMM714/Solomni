@@ -97,7 +97,7 @@ pub(crate) fn collab_update_task_rewinds_and_latest_wins() {
 
 #[test]
 pub(crate) fn core_operation_streams_its_text_to_the_facts_outlet() {
-    // 核心操作的正文也**逐片上屏**（与成员、单 agent 同一条规则，见 engine::core_operation）：
+    // 核心操作的正文也**逐片上屏**（与成员、单 agent 同一条规则，见 session::api::core_operation）：
     // 替身只发一片正文，出口必须收到 start + text 两条 Delta——从前核心是一次性蹦出来的（真机反馈）。
     // 同时钉住"信封不当正文流"：正文片以 { 开头，外送的那片必须是空的。
     let raw = "{\"type\":\"tool\",\"name\":\"suggest\",\"args\":{\"agents\":[{\"name\":\"甲\",\"modules\":[\"a\"],\"model\":\"m\",\"why\":\"对口\"}]}}";
@@ -1686,7 +1686,7 @@ pub(crate) fn core_operation_runs_readonly_verification_before_the_op() {
         ]),
         seen: Arc::clone(&seen),
     };
-    let out = crate::capabilities::collab::domain::engine::core_operation(
+    let out = crate::capabilities::session::api::core_operation(
         &*test_tools_svc(),
         "planner",
         "plan",
@@ -1694,7 +1694,7 @@ pub(crate) fn core_operation_runs_readonly_verification_before_the_op() {
         &mut chat,
         &[crate::capabilities::llm::api::Msg::user("出方案")],
         crate::capabilities::llm::api::CompleteOpts::plain(false),
-        &mut |_| true,
+        None,
         Some(&mut verify),
         &mut |_e: crate::capabilities::session::api::SessionEvent| {},
     )
@@ -1721,7 +1721,7 @@ pub(crate) fn body_json_is_not_a_core_operation() {
         "{\"plan\":\"方案\",\"nodes\":[{\"id\":\"n1\",\"title\":\"做\",\"objective\":\"做\",\"assignee\":\"a\",\"deps\":[]}]}"
             .to_string(),
     ]);
-    let out = crate::capabilities::collab::domain::engine::core_operation(
+    let out = crate::capabilities::session::api::core_operation(
         &*test_tools_svc(),
         "planner",
         "plan",
@@ -1729,7 +1729,7 @@ pub(crate) fn body_json_is_not_a_core_operation() {
         chat.as_mut(),
         &[crate::capabilities::llm::api::Msg::user("出方案")],
         crate::capabilities::llm::api::CompleteOpts::plain(false),
-        &mut |_| true,
+        None,
         None,
         &mut |_e: crate::capabilities::session::api::SessionEvent| {},
     );

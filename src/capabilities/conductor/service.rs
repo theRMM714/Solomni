@@ -1738,7 +1738,7 @@ impl Conductor {
         // 它只把行交出来；推到哪个 sid、落不落盘由调用方按会话种类定（这里给系统会话）。
         let mut rows: Vec<SessionEvent> = Vec::new();
         // 核心操作走工具调用：推荐名单由 suggest 工具承载。
-        let payload = crate::capabilities::collab::api::core_operation(
+        let payload = crate::capabilities::session::api::core_operation(
             &*self.systools,
             "planner",
             "suggest",
@@ -1749,7 +1749,7 @@ impl Conductor {
                 Msg::user(user),
             ],
             crate::capabilities::llm::api::CompleteOpts::plain(false),
-            &mut |_| true,
+            None,
             // 推荐是**一次性建议**（用户点了才生成、没有工作区可核实）：不接核实回路。
             None,
             &mut |e: SessionEvent| rows.push(e),
@@ -2303,7 +2303,7 @@ impl Conductor {
                             .filter_map(|t| serde_json::from_value(t).ok())
                             .collect();
                         for m in
-                            crate::capabilities::collab::api::reply_msgs(mode, raw, &views, &texts)
+                            crate::capabilities::session::api::reply_msgs(mode, raw, &views, &texts)
                         {
                             history.push(m);
                         }

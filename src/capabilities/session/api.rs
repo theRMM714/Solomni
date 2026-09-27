@@ -13,6 +13,9 @@ pub use crate::capabilities::session::domain::session::{
     SessionParams, TurnRun,
 };
 
+// 核心操作回路 + 原生回灌消息：`service.rs` 实现（它驱动 IO，不是纯派生）。
+pub use crate::capabilities::session::service::{core_operation, reply_msgs};
+
 /// 落盘会话的**队列面**：呈现层经 conductor 的队列代理调它（列表 / 打开 / 删除）。
 ///
 /// "在世会话 × 历史的并集"（`SessionView`）**不在本面里**：那要同时认识会话中心与历史，

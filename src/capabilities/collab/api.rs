@@ -3,5 +3,5 @@
 pub use crate::capabilities::collab::domain::collab::CollabSession;
 pub use crate::capabilities::collab::domain::collab_state::tool_runs;
 pub use crate::capabilities::collab::domain::engine::{
-    core_operation, max_reply, reply_msgs, tool_table, AfterTurn, MemberTurn,
+    max_reply, tool_table, AfterTurn, MemberTurn,
 };

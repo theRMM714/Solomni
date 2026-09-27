@@ -149,7 +149,7 @@ pub type BoxedChat = Box<dyn Chat + Send>;
 ///
 /// 后两个字段是**原生工具调用**的协议字段（手写信封通道恒为空，也就不进 wire）：
 /// 一次回复可以有**多个**调用，所以调用是数组挂在助手消息上；结果消息靠 tool_call_id 回应它们。
-/// 回放（重启/回档后重建上下文）与实时必须产出同样的消息——唯一的构造函数见 engine::reply_msgs。
+/// 回放（重启/回档后重建上下文）与实时必须产出同样的消息——唯一的构造函数见 session::api::reply_msgs。
 #[derive(Debug, Clone)]
 pub struct Msg {
     pub role: String,

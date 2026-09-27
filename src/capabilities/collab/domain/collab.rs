@@ -332,12 +332,17 @@ impl CollabSession {
         if cancel.load(std::sync::atomic::Ordering::Relaxed) {
             return Err("已停止".to_string());
         }
-        let stop = std::sync::Arc::clone(cancel);
-        let mut keep = move |_c: crate::capabilities::llm::api::Chunk| {
-            !stop.load(std::sync::atomic::Ordering::Relaxed)
-        };
-        let payload = crate::capabilities::collab::domain::engine::core_operation(
-            systools, "planner", "verdict", mode, core_chat, &msgs, opts, &mut keep, verify, sink,
+        let payload = crate::capabilities::session::api::core_operation(
+            systools,
+            "planner",
+            "verdict",
+            mode,
+            core_chat,
+            &msgs,
+            opts,
+            Some(cancel),
+            verify,
+            sink,
         )?;
         let clear = payload
             .get("clear")
@@ -399,13 +404,9 @@ impl CollabSession {
         if cancel.load(std::sync::atomic::Ordering::Relaxed) {
             return Err("已停止".to_string());
         }
-        let stop = std::sync::Arc::clone(cancel);
-        let mut keep = move |_c: crate::capabilities::llm::api::Chunk| {
-            !stop.load(std::sync::atomic::Ordering::Relaxed)
-        };
         // 核心操作走工具调用：节点验收结论由 node_verdict 工具承载。
         // 带核实回路：模型想先读/查落盘物时，核心执行只读工具再回灌（不再直接判"没调用"）。
-        let payload = crate::capabilities::collab::domain::engine::core_operation(
+        let payload = crate::capabilities::session::api::core_operation(
             systools,
             "orchestrator",
             "node_verdict",
@@ -413,7 +414,7 @@ impl CollabSession {
             core_chat,
             &msgs,
             opts,
-            &mut keep,
+            Some(cancel),
             verify,
             sink,
         )?;
@@ -622,7 +623,7 @@ impl CollabSession {
         // 核心操作走工具调用：代拟名单由 slate 工具承载（带只读核实回路）。
         sink(crate::capabilities::session::api::working("核心"));
         let mut verify = self.core_verify_tools("planner");
-        let parsed = crate::capabilities::collab::domain::engine::core_operation(
+        let parsed = crate::capabilities::session::api::core_operation(
             &*self.systools,
             "planner",
             "slate",
@@ -630,7 +631,7 @@ impl CollabSession {
             self.core_chat.as_mut(),
             &msgs,
             CompleteOpts::plain(false),
-            &mut |_| true,
+            None,
             verify.as_mut(),
             sink,
         )
