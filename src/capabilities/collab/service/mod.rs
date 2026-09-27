@@ -6,3 +6,4 @@
 pub mod collab;
 pub mod driver;
 pub mod engine;
+pub mod tool_loop;

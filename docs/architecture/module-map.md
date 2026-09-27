@@ -113,6 +113,7 @@
 | `collab/api.rs` | **入站能力面**：`CollabSession` / 讨论与执行引擎 / 回合与验收词汇 / 协作状态派生的对外名字 |
 | `collab/service/collab.rs` | 协作会话状态机与讨论泵（批次 20f-1 从 `domain/` 归位） |
 | `collab/service/engine.rs` | 讨论/执行/验收引擎 + **唯一的轮循环** `converse_with` + **唯一的请求装配点** `assemble` + 行构造（核心操作回路与行回灌归 `session`，`20e-1`） |
+| `collab/service/tool_loop.rs` | 成员回合里的**工具循环**：声明面 → 放行判定 → 并发调度 → 执行（内置 / 模块外部）→ 回填（`run_one` / `run_batch` / `dispatch_external` / `tool_decls`…） |
 | `collab/service/driver.rs` | **回合驱动**（自由函数，会话当参数）：`say` / `dispatch_task` / `discussion_turn` / `continue_reply` / `compact_turn` / `maybe_compact` / `run_rounds` / `rounds_events` / `run`。为什么不是 `impl AgentSession`：给别人的类型写 impl 是另一种互相引入（R1），批次 20f-2 改判 |
 | `collab/domain/collab_state.rs` | 「转录即状态」的协作状态派生（纯函数、可回放） |
 | `llm/domain/envelope.rs` | 发言信封解析（纯逻辑）：`ToolInvoke.body` = 信封之后的正文；判定**未闭合 / 裸控制字符 / 语法错 / 字段不合法**四类；未闭合带上 EOF 状态 |
