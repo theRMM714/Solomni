@@ -85,5 +85,45 @@
   blocked_by: |
     待排期：要把 Web 服务器从"阻塞到出错"改成可中断等待（收 SIGINT 后正常关闭再回 CLI 主循环）。
 
+- id: session.children-not-deleted-with-parent
+  scope: global
+  level: T1
+  why: |
+    删主会话只删它自己（`Conductor::history_delete` 只处理一个目录），子会话（`<父>--<agent>`）留在盘上
+    变成孤儿：用户得一个个删。反过来，子会话本来就不该由用户单独删（它是核心按节点派生的），
+    但界面给每个子会话都渲染了删除按钮，删除它会让父子关系断掉。**既漏删又错开**。
+  how: |
+    ① 面向用户的删除面（`HistoryOps::delete` → `Conductor::history_delete`）**拒绝子会话**：
+    `meta.parent` 非空即报错，理由说清（"由核心管理，删父会话会一起删掉"）；
+    ② 删主会话时按 `meta.parent` 收集整棵子树（后序：先子后父），逐个撤围栏授权 → 移出内存 → 删目录；
+    ③ 子树里任一节点在生成中就整体拒绝（不能删到一半留下半个状态）；
+    ④ 前端：子会话不渲染删除按钮，父会话的删除按钮 title 写明"连子会话一起删"。
+    内部的 `session::History::delete`（纯存储机制）不受影响——系统路径还需要它。
+  accept: |
+    删主会话后：它的所有子会话一并消失（列表与目录都不再有）；直接删子会话被拒、理由明确且子会话仍在；
+    子树里有会话在生成时删除被拒；前端冒烟断言"子会话没有删除按钮、父会话的按钮接线"。
+  blocked_by: |
+    与 `session.children-stored-as-siblings` 同一批做（落盘位置改到主会话目录内部之后，"连带删除"
+    就是"删一个目录"；两处分开做等于改两遍）。删除口径还要与 `session.delete-without-file-check`
+    对齐（记录与文件分开删）。
 
-
+- id: session.children-stored-as-siblings
+  scope: global
+  level: T1
+  why: |
+    子会话现在是 `sessions/` 下**与主会话并列**的独立目录（名为 `<父>--<agent>`），父子关系只靠
+    `meta.parent` 这个字段维系。这让"删父带子"必须自己走一遍树，也让目录布局与语义脱节：
+    子会话在主会话目录之外，任何按目录做的操作（清理、统计、迁移、删父）都得先读全部 meta 才知道谁是谁的儿子。
+  how: |
+    子会话放进**主会话目录内部**（例如 `sessions/<主会话>/children/<agent>/`），`meta.parent` 保留为
+    事实与校验（看位置就知道归属）。落到代码：
+    ① session 的 `HistoryStore` 端口（`detail/fs_history.rs`）改布局与"名字 → 路径"的解析；
+    ② 列出 / 打开 / 删除按新布局递归，`history_list` 的树序与 `meta.parent` 保持一致（位置与字段同源）；
+    ③ 重建会话（`rebuild_session` / `ensure_session`）按新路径取子会话流水；
+    ④ GREEN FIELD，不留旧布局的读兼容：旧目录按"未迁移"对待，不静默当成新布局。
+  accept: |
+    建一个会派生节点的协作会话后：磁盘上只有 `sessions/<主会话>/children/<agent>/`（`sessions/` 下不再
+    与主会话并列出现子会话目录）；打开 / 列表 / 回档照常；删主会话 = 删一个目录，子会话随之消失。
+  blocked_by: |
+    与 `session.children-not-deleted-with-parent` 同一批（这条是它的前提）。等用户把问题说完再定实现细节
+    （sid 命名是否仍用 `<父>--<agent>`、children 的目录名取 agent 名还是节点名）。
