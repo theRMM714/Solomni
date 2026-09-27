@@ -3,8 +3,9 @@
 
 use crate::capabilities::llm::api::Channel;
 use crate::capabilities::llm::api::{parse, Verb};
-use crate::capabilities::llm::api::{Chat, ChatGateway, Chunk, CompleteOpts, Msg};
+use crate::capabilities::llm::api::{Chat, Chunk, CompleteOpts, Msg};
 use crate::capabilities::llm::detail::fake_chat::{DemoGateway, FakeChat};
+use crate::capabilities::llm::ports::ChatGateway;
 
 /// 故意指向不可路由地址（TEST-NET-1）：任何真实拨号都会失败或超时——「没有网络依赖」因此可观察。
 fn unreachable_channel() -> Channel {

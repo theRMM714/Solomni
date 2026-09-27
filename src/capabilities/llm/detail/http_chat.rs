@@ -8,9 +8,9 @@ use super::fake_chat::DemoGateway;
 use super::http_agent::{finish_request, redact};
 use crate::capabilities::llm::api::Channel;
 use crate::capabilities::llm::api::{
-    BoxedChat, Chat, ChatGateway, Chunk, CompleteOpts, Completion, Msg, ProbeOutcome, ToolCall,
-    ToolDecl,
+    BoxedChat, Chat, Chunk, CompleteOpts, Completion, Msg, ProbeOutcome, ToolCall, ToolDecl,
 };
+use crate::capabilities::llm::ports::ChatGateway;
 
 /// 真实会话通道：拥有通道副本（含密钥；密钥不出适配层）。
 /// resolved = 本会话首次命中的有效端点，后续轮次直接复用，不再重复探测。

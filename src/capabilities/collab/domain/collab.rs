@@ -8,7 +8,7 @@
 use crate::capabilities::collab::domain::engine::{
     Discussion, Execution, Member, TurnOut, MAX_ROUNDS,
 };
-use crate::capabilities::llm::api::{Chat, ChatGateway, CompleteOpts, Msg};
+use crate::capabilities::llm::api::{Chat, CompleteOpts, Llm, Msg};
 use crate::capabilities::prompt::api::{Prompt, Segment};
 use crate::capabilities::registry::api::RosterPick;
 use crate::capabilities::registry::api::Settings;
@@ -136,14 +136,13 @@ pub struct CollabSession {
     prompts: Arc<dyn Prompt>,
     /// 工具总表与角色表的能力面（**表本体在工具能力里**，与册子互不依赖）。
     systools: Arc<dyn crate::capabilities::tools::api::Tools>,
-    gateway: Arc<dyn ChatGateway + Send + Sync>,
+    /// llm 用例面（**不持它的端口**，R12）：按通道造句柄、修信封都走它。
+    llm: Arc<dyn Llm + Send + Sync>,
     source: Arc<dyn ModuleSource + Send + Sync>,
     /// 外部工具执行端口（策略在核心按模块清单放行，机制在适配层）。
     tools: Arc<dyn ToolRunner + Send + Sync>,
     /// 内置文件工具读写端口。
     io: Arc<dyn SysIo + Send + Sync>,
-    /// 信封修复端口（手写信封不合法时的无歧义补救）。
-    repair: Arc<dyn crate::capabilities::llm::api::EnvelopeRepair + Send + Sync>,
     /// 运行日志（工具循环里"输出被长度截断"这类事实落盘）。
     log: Arc<dyn crate::kernel::log::Log + Send + Sync>,
     /// 运行包库来源（工具可用性按它判定）。
@@ -168,14 +167,13 @@ impl CollabSession {
     // 这是有意的设计取舍（见 docs/testing/quality-isolation.md 的 allow 清单），不是没修。
     #[allow(clippy::too_many_arguments)]
     pub fn start(
-        gateway: Arc<dyn ChatGateway + Send + Sync>,
+        llm: Arc<dyn Llm + Send + Sync>,
         source: Arc<dyn ModuleSource + Send + Sync>,
         settings: Settings,
         prompts: Arc<dyn Prompt>,
         systools: Arc<dyn crate::capabilities::tools::api::Tools>,
         tools: Arc<dyn ToolRunner + Send + Sync>,
         io: Arc<dyn SysIo + Send + Sync>,
-        repair: Arc<dyn crate::capabilities::llm::api::EnvelopeRepair + Send + Sync>,
         log: Arc<dyn crate::kernel::log::Log + Send + Sync>,
         packages: Arc<dyn PackageSource + Send + Sync>,
         spec: ExecSpec,
@@ -184,7 +182,7 @@ impl CollabSession {
         sandboxes: Sandboxes,
     ) -> Result<CollabSession, String> {
         let core_channel = settings.core_channel();
-        let (core_chat, core_is_demo) = gateway.core_channel(core_channel.as_ref());
+        let (core_chat, core_is_demo) = llm.core_channel(core_channel.as_ref());
         let core_mode = settings.tool_mode_for(None);
         Ok(CollabSession {
             core_mode,
@@ -208,11 +206,10 @@ impl CollabSession {
             core_is_demo,
             prompts,
             systools,
-            gateway,
+            llm,
             source,
             tools,
             io,
-            repair,
             log,
             packages,
             spec,
@@ -840,7 +837,7 @@ impl CollabSession {
             mode: self.core_mode,
             modules: std::collections::BTreeMap::new(),
             observations: crate::capabilities::tools::api::Observations::default(),
-            repair: Arc::clone(&self.repair),
+            llm: Arc::clone(&self.llm),
             log: Arc::clone(&self.log),
             runner: Arc::clone(&self.tools),
             sandbox: sb.clone(),
@@ -1454,7 +1451,7 @@ impl CollabSession {
                 .and_then(|id| self.settings.resolve(id).ok())
                 .or_else(|| self.settings.core_channel());
             // 通道本身不再由成员持有（回合跑在各自的 agent 会话里）；这里只取它的如实告知。
-            let (_chat, note) = self.gateway.member_channel(channel.as_ref(), &a.name);
+            let (_chat, note) = self.llm.member_channel(channel.as_ref(), &a.name);
             if let Some(n) = note {
                 notes.push(n);
             }
@@ -1485,7 +1482,7 @@ impl CollabSession {
                 // 模块 id → 该模块的（目录, 工具表）：多模块 agent 靠信封里的 module 消歧。
                 modules: crate::capabilities::collab::domain::engine::tool_table(&modules),
                 observations: crate::capabilities::tools::api::Observations::default(),
-                repair: Arc::clone(&self.repair),
+                llm: Arc::clone(&self.llm),
                 log: Arc::clone(&self.log),
                 runner: Arc::clone(&self.tools),
                 sandbox,
@@ -1559,14 +1556,13 @@ impl CollabSession {
     // 这是有意的设计取舍（见 docs/testing/quality-isolation.md 的 allow 清单），不是没修。
     #[allow(clippy::too_many_arguments)]
     pub fn restore(
-        gateway: Arc<dyn ChatGateway + Send + Sync>,
+        llm: Arc<dyn Llm + Send + Sync>,
         source: Arc<dyn ModuleSource + Send + Sync>,
         settings: Settings,
         prompts: Arc<dyn Prompt>,
         systools: Arc<dyn crate::capabilities::tools::api::Tools>,
         tools: Arc<dyn ToolRunner + Send + Sync>,
         io: Arc<dyn SysIo + Send + Sync>,
-        repair: Arc<dyn crate::capabilities::llm::api::EnvelopeRepair + Send + Sync>,
         log: Arc<dyn crate::kernel::log::Log + Send + Sync>,
         packages: Arc<dyn PackageSource + Send + Sync>,
         meta: &SessionMeta,
@@ -1591,7 +1587,7 @@ impl CollabSession {
         }
         let total = all_lines.len() as u64;
         let core_channel = settings.core_channel();
-        let (core_chat, core_is_demo) = gateway.core_channel(core_channel.as_ref());
+        let (core_chat, core_is_demo) = llm.core_channel(core_channel.as_ref());
         // 形态要在 settings 被移进结构体之前算出来。
         let core_mode = settings.tool_mode_for(None);
         let mut s = CollabSession {
@@ -1621,11 +1617,10 @@ impl CollabSession {
             core_mode,
             prompts: prompts.clone(),
             systools: systools.clone(),
-            gateway,
+            llm,
             source,
             tools,
             io,
-            repair,
             log,
             packages,
             spec: meta.exec.clone(),

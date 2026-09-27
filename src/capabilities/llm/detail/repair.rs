@@ -12,8 +12,9 @@
 //!
 //! 机制在适配层：任何满足 capabilities::llm::ports::EnvelopeRepair 契约的实现都能整体替换本实现。
 
-use crate::capabilities::llm::api::{EnvelopeRepair, RepairOutcome};
+use crate::capabilities::llm::api::RepairOutcome;
 use crate::capabilities::llm::api::{Malformed, Tail};
+use crate::capabilities::llm::ports::EnvelopeRepair;
 
 /// 只做上述两类无歧义修补。
 pub struct UnambiguousRepair;

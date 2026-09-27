@@ -106,18 +106,24 @@ fn main() {
     let packages = capabilities::workspace::detail::FsPackages::new(root.join("runtimes"));
     // 端点记忆：谁先通了就固定谁，后续会话不再反复探测候选。
     let memo = capabilities::llm::detail::endpoint::memo_new();
-    let gateway: Arc<dyn capabilities::llm::api::ChatGateway + Send + Sync> = Arc::new(
+    // **llm 能力**：三个出站端口（通道工厂 / 模型目录 / 信封修复）只由它的 service 持有（R12）；
+    // 别人（登记处、协调业务、协作会话）只拿它的 `api::Llm` 面。
+    let gateway: Arc<dyn capabilities::llm::ports::ChatGateway + Send + Sync> = Arc::new(
         capabilities::llm::detail::HttpGateway::with_log(Arc::clone(&log), Arc::clone(&memo)),
     );
-    let catalog: Arc<dyn capabilities::llm::api::ModelCatalog + Send + Sync> = Arc::new(
+    let catalog: Arc<dyn capabilities::llm::ports::ModelCatalog + Send + Sync> = Arc::new(
         capabilities::llm::detail::HttpModelCatalog::with_log(Arc::clone(&log), Arc::clone(&memo)),
     );
+    let llm: Arc<dyn capabilities::llm::api::Llm + Send + Sync> =
+        Arc::new(capabilities::llm::service::LlmService::new(
+            gateway,
+            catalog,
+            Arc::new(capabilities::llm::detail::UnambiguousRepair),
+        ));
     // **登记处能力**：四份 yaml 的状态与用例都在它里面（core 只按 `Registry` 用它，看不见字段）。
-    // 通道探测与模型发现都经它，所以 gateway / catalog 由组合根同时交给它与 core（同一个 Arc）。
     let registry = match capabilities::registry::service::RegistryService::new(
         Arc::new(store),
-        catalog,
-        Arc::clone(&gateway),
+        Arc::clone(&llm),
         Arc::clone(&log),
     ) {
         Ok(r) => r,
@@ -170,8 +176,6 @@ fn main() {
     );
     // 内置文件工具：纯 Rust 直接读写，不经过外部进程（编码问题不进本程序）。
     let io = capabilities::tools::detail::FsSysIo::default();
-    // 信封修复：只把字符串里的裸控制字符转义（无歧义才修，其余交给模型重发）。
-    let repair = capabilities::llm::detail::UnambiguousRepair;
 
     let mut core = core::Core::new(
         Box::new(registry),
@@ -180,10 +184,9 @@ fn main() {
         Arc::new(source),
         Arc::new(packages),
         Arc::new(capabilities::tools::detail::confine::FenceHostAdapter),
-        Arc::clone(&gateway),
+        Arc::clone(&llm),
         Arc::new(tools),
         Arc::new(io),
-        Arc::new(repair),
         prompt,
         systools,
         std::sync::Arc::clone(&log),

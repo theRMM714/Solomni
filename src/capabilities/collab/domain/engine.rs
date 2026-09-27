@@ -2016,7 +2016,7 @@ pub fn converse_with(
         if !aborted && !freeform_tool {
             if let Some(kind) = reply.tools.first().and_then(|t| t.malformed.clone()) {
                 if let Some(ctx) = tools.as_deref_mut() {
-                    let out = ctx.repair.repair(&raw, &kind);
+                    let out = ctx.llm.repair(&raw, &kind);
                     if let Some(text) = out.repaired.as_deref() {
                         let again = envelope::parse(text);
                         if !again.tools.is_empty()

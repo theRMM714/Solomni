@@ -8,10 +8,9 @@
 
 use super::builders::SilentRunner;
 use crate::capabilities::llm::api::Channel;
-use crate::capabilities::llm::api::{
-    BoxedChat, Chat, ChatGateway, Chunk, CompleteOpts, Completion, ModelCatalog, Msg,
-};
+use crate::capabilities::llm::api::{BoxedChat, Chat, Chunk, CompleteOpts, Completion, Msg};
 use crate::capabilities::llm::detail::fake_chat::FakeChat;
+use crate::capabilities::llm::ports::{ChatGateway, ModelCatalog};
 use crate::capabilities::prompt::api::Prompt;
 use crate::capabilities::prompt::domain::prompt::Prompts;
 use crate::capabilities::prompt::ports::PromptSource;
@@ -382,7 +381,7 @@ pub(crate) fn s(parts: &[&str]) -> String {
 /// 什么都不修的修复端口（严格要求合法信封）：测试基线，也是"宁缺毋滥"部署的对照实现。
 pub(crate) struct NoRepair;
 
-impl crate::capabilities::llm::api::EnvelopeRepair for NoRepair {
+impl crate::capabilities::llm::ports::EnvelopeRepair for NoRepair {
     fn repair(
         &self,
         _raw: &str,
@@ -934,18 +933,45 @@ pub(crate) fn test_prompt() -> std::sync::Arc<dyn crate::capabilities::prompt::a
 /// 生产里这些端口由组合根注入，测试这里用替身顶。
 pub(crate) fn registry_service(
     store: InMemorySettings,
-    catalog: Arc<FakeCatalog>,
-    gateway: Arc<dyn crate::capabilities::llm::api::ChatGateway + Send + Sync>,
+    llm: Arc<dyn crate::capabilities::llm::api::Llm + Send + Sync>,
 ) -> Box<dyn crate::capabilities::registry::api::Registry> {
     Box::new(
         crate::capabilities::registry::service::RegistryService::new(
             Arc::new(store),
-            catalog,
-            gateway,
+            llm,
             Arc::new(crate::kernel::log::NoopLog),
         )
         .expect("内存登记处装配不应失败"),
     )
+}
+
+/// 测试用的 **llm 能力面**：把通道工厂 + 模型目录装进 `LlmService`（修信封用 `NoRepair`）。
+/// 与生产同一条路——组合根装 service，别人只拿 `api::Llm` 面（R12）。
+pub(crate) fn test_llm(
+    gateway: Arc<dyn crate::capabilities::llm::ports::ChatGateway + Send + Sync>,
+    catalog: Arc<FakeCatalog>,
+) -> Arc<dyn crate::capabilities::llm::api::Llm + Send + Sync> {
+    Arc::new(crate::capabilities::llm::service::LlmService::new(
+        gateway,
+        catalog,
+        Arc::new(NoRepair),
+    ))
+}
+
+/// 同上，但指定信封修复器（"修信封"路径的用例用真修复器）。
+pub(crate) fn test_llm_with_repair(
+    repair: Arc<dyn crate::capabilities::llm::ports::EnvelopeRepair + Send + Sync>,
+) -> Arc<dyn crate::capabilities::llm::api::Llm + Send + Sync> {
+    Arc::new(crate::capabilities::llm::service::LlmService::new(
+        Arc::new(crate::capabilities::llm::detail::fake_chat::DemoGateway),
+        Arc::new(FakeCatalog::new(vec!["m".to_string()])),
+        repair,
+    ))
+}
+
+/// 只要一个 llm 面（不关心通道与修复）的用例用它：演示通道 + 不修。
+pub(crate) fn test_llm_demo() -> Arc<dyn crate::capabilities::llm::api::Llm + Send + Sync> {
+    test_llm_with_repair(Arc::new(NoRepair))
 }
 
 /// 登记一个 agent（测试装配用）：**校验用的模块清单由调用方取一份**交给登记处——
@@ -973,23 +999,22 @@ pub(crate) fn core_with_workspace(
     gateway: ScriptGateway,
     ws: Arc<InMemoryWorkspace>,
 ) -> Core {
-    let gateway: Arc<dyn crate::capabilities::llm::api::ChatGateway + Send + Sync> =
+    let gateway: Arc<dyn crate::capabilities::llm::ports::ChatGateway + Send + Sync> =
         Arc::new(gateway);
+    let llm = test_llm(
+        Arc::clone(&gateway),
+        Arc::new(FakeCatalog::new(vec!["m".to_string()])),
+    );
     Core::new(
-        registry_service(
-            InMemorySettings::new(),
-            Arc::new(FakeCatalog::new(vec!["m".to_string()])),
-            Arc::clone(&gateway),
-        ),
+        registry_service(InMemorySettings::new(), Arc::clone(&llm)),
         Arc::new(InMemoryHistory::new()),
         ws,
         Arc::new(VecSource(modules)),
         Arc::new(InMemoryPackages::empty()),
         Arc::new(NoFenceHost),
-        gateway,
+        llm,
         Arc::new(SilentRunner),
         Arc::new(InMemorySysIo::new()),
-        Arc::new(NoRepair),
         test_prompt(),
         test_tools(),
         Arc::new(crate::kernel::log::NoopLog),
@@ -1073,19 +1098,19 @@ pub(crate) fn core_with_pkgs(
     io: Arc<InMemorySysIo>,
     packages: Arc<InMemoryPackages>,
 ) -> Core {
-    let gateway: Arc<dyn crate::capabilities::llm::api::ChatGateway + Send + Sync> =
+    let gateway: Arc<dyn crate::capabilities::llm::ports::ChatGateway + Send + Sync> =
         Arc::new(gateway);
+    let llm = test_llm(Arc::clone(&gateway), catalog);
     Core::new(
-        registry_service(InMemorySettings::new(), catalog, Arc::clone(&gateway)),
+        registry_service(InMemorySettings::new(), Arc::clone(&llm)),
         history,
         Arc::new(InMemoryWorkspace::new()),
         Arc::new(VecSource(modules)),
         packages,
         Arc::new(NoFenceHost),
-        gateway,
+        llm,
         runner,
         io,
-        Arc::new(NoRepair),
         test_prompt(),
         test_tools(),
         Arc::new(crate::kernel::log::NoopLog),
@@ -1095,23 +1120,22 @@ pub(crate) fn core_with_pkgs(
 
 /// 用**指定登记处**装配（断言"全局设置是流式的上限、预算全局通用"这类判据）。
 pub(crate) fn core_with_settings(store: InMemorySettings) -> Core {
-    let gateway: Arc<dyn crate::capabilities::llm::api::ChatGateway + Send + Sync> =
+    let gateway: Arc<dyn crate::capabilities::llm::ports::ChatGateway + Send + Sync> =
         Arc::new(gw(BTreeMap::new(), Vec::new()));
+    let llm = test_llm(
+        Arc::clone(&gateway),
+        Arc::new(FakeCatalog::new(vec!["m".to_string()])),
+    );
     Core::new(
-        registry_service(
-            store,
-            Arc::new(FakeCatalog::new(vec!["m".to_string()])),
-            Arc::clone(&gateway),
-        ),
+        registry_service(store, Arc::clone(&llm)),
         Arc::new(InMemoryHistory::new()),
         Arc::new(InMemoryWorkspace::new()),
         Arc::new(VecSource(Vec::new())),
         Arc::new(InMemoryPackages::empty()),
         Arc::new(NoFenceHost),
-        gateway,
+        llm,
         Arc::new(SilentRunner),
         Arc::new(InMemorySysIo::new()),
-        Arc::new(NoRepair),
         test_prompt(),
         test_tools(),
         Arc::new(crate::kernel::log::NoopLog),
@@ -1132,23 +1156,22 @@ pub(crate) fn core_with_io_gateway(
     gateway: impl ChatGateway + Send + Sync + 'static,
     io: Arc<InMemorySysIo>,
 ) -> Core {
-    let gateway: Arc<dyn crate::capabilities::llm::api::ChatGateway + Send + Sync> =
+    let gateway: Arc<dyn crate::capabilities::llm::ports::ChatGateway + Send + Sync> =
         Arc::new(gateway);
+    let llm = test_llm(
+        Arc::clone(&gateway),
+        Arc::new(FakeCatalog::new(vec!["m".to_string()])),
+    );
     Core::new(
-        registry_service(
-            InMemorySettings::new(),
-            Arc::new(FakeCatalog::new(vec!["m".to_string()])),
-            Arc::clone(&gateway),
-        ),
+        registry_service(InMemorySettings::new(), Arc::clone(&llm)),
         Arc::new(InMemoryHistory::new()),
         Arc::new(InMemoryWorkspace::new()),
         Arc::new(VecSource(modules)),
         Arc::new(InMemoryPackages::empty()),
         Arc::new(NoFenceHost),
-        gateway,
+        llm,
         Arc::new(SilentRunner),
         io,
-        Arc::new(NoRepair),
         test_prompt(),
         test_tools(),
         Arc::new(crate::kernel::log::NoopLog),
@@ -1161,23 +1184,22 @@ pub(crate) fn core_with_gateway(
     modules: Vec<Module>,
     gateway: impl ChatGateway + Send + Sync + 'static,
 ) -> Core {
-    let gateway: Arc<dyn crate::capabilities::llm::api::ChatGateway + Send + Sync> =
+    let gateway: Arc<dyn crate::capabilities::llm::ports::ChatGateway + Send + Sync> =
         Arc::new(gateway);
+    let llm = test_llm(
+        Arc::clone(&gateway),
+        Arc::new(FakeCatalog::new(vec!["m".to_string()])),
+    );
     Core::new(
-        registry_service(
-            InMemorySettings::new(),
-            Arc::new(FakeCatalog::new(vec!["m".to_string()])),
-            Arc::clone(&gateway),
-        ),
+        registry_service(InMemorySettings::new(), Arc::clone(&llm)),
         Arc::new(InMemoryHistory::new()),
         Arc::new(InMemoryWorkspace::new()),
         Arc::new(VecSource(modules)),
         Arc::new(InMemoryPackages::empty()),
         Arc::new(NoFenceHost),
-        gateway,
+        llm,
         Arc::new(SilentRunner),
         Arc::new(InMemorySysIo::new()),
-        Arc::new(NoRepair),
         test_prompt(),
         test_tools(),
         Arc::new(crate::kernel::log::NoopLog),

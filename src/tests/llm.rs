@@ -212,7 +212,7 @@ pub(crate) fn a_malformed_envelope_is_repaired_when_the_fix_is_unambiguous() {
         .tools
         .as_ref()
         .expect("工具环境")
-        .repair
+        .llm
         .repair(
             "x",
             &crate::capabilities::llm::api::Malformed::Syntax("x".into())
@@ -231,8 +231,9 @@ pub(crate) fn a_malformed_envelope_is_repaired_when_the_fix_is_unambiguous() {
         ],
         Arc::clone(&runner),
     );
-    m2.tools.as_mut().expect("工具环境").repair =
-        Arc::new(crate::capabilities::llm::detail::UnambiguousRepair);
+    m2.tools.as_mut().expect("工具环境").llm = test_llm_with_repair(Arc::new(
+        crate::capabilities::llm::detail::UnambiguousRepair,
+    ));
     let exec2 = run_execution(std::slice::from_mut(&mut m2), "任务", &prompts);
     let trace2 = exec2.traces.get("m0").expect("工具行");
     assert!(trace2[0].ok, "修好即执行：{}", trace2[0].output);
@@ -261,8 +262,9 @@ pub(crate) fn a_malformed_envelope_is_repaired_when_the_fix_is_unambiguous() {
         ],
         Arc::clone(&runner),
     );
-    m3.tools.as_mut().expect("工具环境").repair =
-        Arc::new(crate::capabilities::llm::detail::UnambiguousRepair);
+    m3.tools.as_mut().expect("工具环境").llm = test_llm_with_repair(Arc::new(
+        crate::capabilities::llm::detail::UnambiguousRepair,
+    ));
     let exec3 = run_execution(std::slice::from_mut(&mut m3), "任务", &prompts);
     let trace3 = exec3.traces.get("m0").expect("工具行");
     assert!(trace3[0].ok, "补上收尾括号后照常执行：{}", trace3[0].output);
@@ -281,8 +283,9 @@ pub(crate) fn a_malformed_envelope_is_repaired_when_the_fix_is_unambiguous() {
         ],
         Arc::clone(&runner),
     );
-    m4.tools.as_mut().expect("工具环境").repair =
-        Arc::new(crate::capabilities::llm::detail::UnambiguousRepair);
+    m4.tools.as_mut().expect("工具环境").llm = test_llm_with_repair(Arc::new(
+        crate::capabilities::llm::detail::UnambiguousRepair,
+    ));
     let exec4 = run_execution(std::slice::from_mut(&mut m4), "任务", &prompts);
     let trace4 = exec4.traces.get("m0").expect("工具行");
     assert!(

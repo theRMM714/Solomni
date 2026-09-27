@@ -22,7 +22,5 @@
     "src/capabilities/session/domain/session.rs -> crate::capabilities::tools::ports",
     "src/capabilities/tools/domain/systool.rs -> crate::capabilities::tools::ports"
   ],
-  "apiPorts": [
-    "src/capabilities/llm/api.rs -> crate::capabilities::llm::ports"
-  ]
+  "apiPorts": []
 }

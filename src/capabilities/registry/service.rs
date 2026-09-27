@@ -1,11 +1,10 @@
 //! 登记处的**状态与用例**：四份 yaml 的内存形态（`Settings`）只由这里写。
 //!
-//! 端口（持久化 / 模型发现 / 通道探测）由**组合根**注入；本文件不 new 任何适配器。
+//! 端口（持久化）与**别能力的 api 面**（通道探测 / 模型发现 → `llm::api::Llm`）由**组合根**注入；
+//! 本文件不 new 任何适配器、也**不持别人的端口**（R12）。
 //! 对外只经 `registry::api::Registry`：`core` 与呈现层拿不到 `settings` 字段。
 
-use crate::capabilities::llm::api::{
-    Channel, ChatGateway, ModelCatalog, ProbeOutcome, ReplayReport, ToolMode,
-};
+use crate::capabilities::llm::api::{Channel, Llm, ProbeOutcome, ReplayReport, ToolMode};
 use crate::capabilities::prompt::api::{Prompt, ToolTexts};
 use crate::capabilities::registry::api::{
     AgentView, ModelView, ProviderView, Registry, RosterPick,
@@ -25,10 +24,8 @@ pub struct RegistryService {
     /// **状态**：登记处的内存形态。私有——别的能力只经 `Registry` 读。
     settings: Settings,
     store: Arc<dyn SettingsStore + Send + Sync>,
-    /// 模型发现（供应商的 `/models`）；机制在适配层。
-    catalog: Arc<dyn ModelCatalog + Send + Sync>,
-    /// 通道探测（原生工具调用 / 回放形状）；机制在适配层。
-    gateway: Arc<dyn ChatGateway + Send + Sync>,
+    /// 通道探测（原生工具调用 / 回放形状）与模型发现：**调 llm 的用例面**，不持它的端口（R12）。
+    llm: Arc<dyn Llm + Send + Sync>,
     log: Arc<dyn Log + Send + Sync>,
 }
 
@@ -36,16 +33,14 @@ impl RegistryService {
     /// 组合根专用：注入端口，并把四份 yaml 读进内存。
     pub fn new(
         store: Arc<dyn SettingsStore + Send + Sync>,
-        catalog: Arc<dyn ModelCatalog + Send + Sync>,
-        gateway: Arc<dyn ChatGateway + Send + Sync>,
+        llm: Arc<dyn Llm + Send + Sync>,
         log: Arc<dyn Log + Send + Sync>,
     ) -> Result<RegistryService, String> {
         let settings = store.load()?;
         Ok(RegistryService {
             settings,
             store,
-            catalog,
-            gateway,
+            llm,
             log,
         })
     }
@@ -311,7 +306,7 @@ impl Registry for RegistryService {
 
     fn probe_model_tools(&mut self, id: &str) -> Result<ProbeOutcome, String> {
         let channel = self.settings.resolve(id)?;
-        let outcome = self.gateway.probe_tools(&channel)?;
+        let outcome = self.llm.probe_tools(&channel)?;
         let want = match &outcome {
             ProbeOutcome::Supported { .. } => Some(ToolMode::Native),
             ProbeOutcome::Unsupported { .. } => Some(ToolMode::Envelope),
@@ -330,7 +325,7 @@ impl Registry for RegistryService {
 
     fn probe_replay_shape(&self, id: &str) -> Result<ReplayReport, String> {
         let channel = self.settings.resolve(id)?;
-        self.gateway.probe_replay(&channel)
+        self.llm.probe_replay(&channel)
     }
 
     fn discover_models(&self, provider_id: &str) -> Result<Vec<String>, String> {
@@ -339,9 +334,7 @@ impl Registry for RegistryService {
             .providers
             .get(provider_id)
             .ok_or_else(|| format!("无此供应商：{}", provider_id))?;
-        let outcome = self
-            .catalog
-            .list_models(&provider.base_url, &provider.api_key);
+        let outcome = self.llm.list_models(&provider.base_url, &provider.api_key);
         match &outcome {
             Ok(models) => self.log.info(
                 "registry::discover_models",

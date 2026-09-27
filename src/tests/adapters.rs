@@ -5,12 +5,11 @@
 use super::scratch;
 use crate::adapters::log::FileLog;
 use crate::capabilities::llm::api::Channel;
-use crate::capabilities::llm::api::{
-    ChatGateway, Chunk, CompleteOpts, ModelCatalog, Msg, ProbeOutcome,
-};
+use crate::capabilities::llm::api::{Chunk, CompleteOpts, Msg, ProbeOutcome};
 use crate::capabilities::llm::detail::endpoint::memo_new;
 use crate::capabilities::llm::detail::http_chat::HttpGateway;
 use crate::capabilities::llm::detail::model_catalog::HttpModelCatalog;
+use crate::capabilities::llm::ports::{ChatGateway, ModelCatalog};
 use crate::capabilities::prompt::detail::yaml_prompts::YamlPrompts;
 use crate::capabilities::prompt::ports::PromptSource;
 use crate::capabilities::registry::api::{Provider, Settings};

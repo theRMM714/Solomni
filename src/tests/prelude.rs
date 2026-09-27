@@ -7,11 +7,11 @@ pub use crate::capabilities::collab::domain::engine::{Discussion, Member, TurnOu
 
 pub use crate::capabilities::llm::api::Channel;
 
-pub use crate::capabilities::llm::api::{
-    BoxedChat, Chat, ChatGateway, Chunk, CompleteOpts, Completion, Msg,
-};
+pub use crate::capabilities::llm::api::{BoxedChat, Chat, Chunk, CompleteOpts, Completion, Msg};
 
 pub use crate::capabilities::llm::detail::fake_chat::FakeChat;
+
+pub use crate::capabilities::llm::ports::ChatGateway;
 
 pub use crate::capabilities::prompt::api::{Prompt, Segment};
 

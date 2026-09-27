@@ -9,7 +9,8 @@ use super::doubles::{
     InMemorySysIo, InMemoryWorkspace, NoFenceHost, RecordingFence, ScriptGateway, SharedScript,
     TestPrompts, VecSource,
 };
-use crate::capabilities::llm::api::{Chat, ChatGateway, CompleteOpts, ModelCatalog, Msg};
+use crate::capabilities::llm::api::{Chat, CompleteOpts, Msg};
+use crate::capabilities::llm::ports::{ChatGateway, ModelCatalog};
 use crate::capabilities::prompt::ports::PromptSource;
 use crate::capabilities::registry::api::{Provider, Settings};
 use crate::capabilities::registry::ports::SettingsStore;

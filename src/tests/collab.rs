@@ -1662,7 +1662,7 @@ pub(crate) fn core_operation_runs_readonly_verification_before_the_op() {
         mode: crate::capabilities::llm::api::ToolMode::Envelope,
         modules: BTreeMap::new(),
         observations: crate::capabilities::tools::api::Observations::default(),
-        repair: Arc::new(NoRepair),
+        llm: test_llm_demo(),
         log: Arc::new(crate::kernel::log::NoopLog),
         runner: Arc::new(SilentRunner),
         sandbox: sb.clone(),

@@ -169,7 +169,7 @@ pub(crate) struct RecordingGateway {
     pub seen: std::sync::Arc<std::sync::Mutex<Vec<Vec<String>>>>,
 }
 
-impl crate::capabilities::llm::api::ChatGateway for RecordingGateway {
+impl crate::capabilities::llm::ports::ChatGateway for RecordingGateway {
     fn probe_tools(
         &self,
         c: &crate::capabilities::llm::api::Channel,
@@ -198,7 +198,7 @@ impl crate::capabilities::llm::api::ChatGateway for RecordingGateway {
     }
 }
 
-impl crate::capabilities::llm::api::ChatGateway for GatedGateway {
+impl crate::capabilities::llm::ports::ChatGateway for GatedGateway {
     fn probe_tools(
         &self,
         _c: &crate::capabilities::llm::api::Channel,
@@ -258,7 +258,7 @@ pub(crate) struct SlowGateway {
     pub ticks: std::sync::Arc<std::sync::atomic::AtomicUsize>,
 }
 
-impl crate::capabilities::llm::api::ChatGateway for SlowGateway {
+impl crate::capabilities::llm::ports::ChatGateway for SlowGateway {
     fn probe_tools(
         &self,
         _c: &crate::capabilities::llm::api::Channel,

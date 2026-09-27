@@ -4,7 +4,7 @@
 
 pub mod api;
 
-use crate::capabilities::llm::api::ChatGateway;
+use crate::capabilities::llm::api::Llm;
 #[cfg(test)]
 pub(crate) use crate::capabilities::session::api::Live;
 use crate::capabilities::session::api::{Pending, SessionEvent};
@@ -185,13 +185,11 @@ pub struct Core {
     packages: Arc<dyn PackageSource + Send + Sync>,
     /// 围栏授权释放（会话删除时请求一次；机制在适配层）。
     fence: Arc<dyn crate::capabilities::tools::ports::FenceHost + Send + Sync>,
-    /// 通道工厂：会话按解析出来的通道造收发句柄（通道的**解析**在登记处能力）。
-    gateway: Arc<dyn ChatGateway + Send + Sync>,
+    /// llm 用例面：按解析出来的通道造收发句柄 + 信封的无歧义修复（通道的**解析**在登记处能力）。
+    llm: Arc<dyn Llm + Send + Sync>,
     tools: Arc<dyn ToolRunner + Send + Sync>,
     /// 内置文件工具读写端口（策略在 core：寻址与越界校验）。
     io: Arc<dyn SysIo + Send + Sync>,
-    /// 信封修复端口（手写信封不合法时的无歧义补救；默认真现在 adapters，可整体替换）。
-    repair: Arc<dyn crate::capabilities::llm::api::EnvelopeRepair + Send + Sync>,
     log: Arc<dyn crate::kernel::log::Log + Send + Sync>,
     /// 宿主能力探测（读环境、查路径存在性都在它后面；core 因此不碰 std::env 与文件系统）。
     probe: Arc<dyn crate::kernel::host::HostProbe + Send + Sync>,
@@ -220,10 +218,9 @@ impl Core {
         source: Arc<dyn ModuleSource + Send + Sync>,
         packages: Arc<dyn PackageSource + Send + Sync>,
         fence: Arc<dyn crate::capabilities::tools::ports::FenceHost + Send + Sync>,
-        gateway: Arc<dyn ChatGateway + Send + Sync>,
+        llm: Arc<dyn Llm + Send + Sync>,
         tools: Arc<dyn ToolRunner + Send + Sync>,
         io: Arc<dyn SysIo + Send + Sync>,
-        repair: Arc<dyn crate::capabilities::llm::api::EnvelopeRepair + Send + Sync>,
         prompt: Arc<dyn Prompt>,
         systools: Arc<dyn Tools>,
         log: Arc<dyn crate::kernel::log::Log + Send + Sync>,
@@ -236,10 +233,9 @@ impl Core {
             source,
             packages,
             fence,
-            gateway,
+            llm,
             tools,
             io,
-            repair,
             log,
             probe,
             prompt,
@@ -1387,14 +1383,13 @@ impl Core {
             WorkMode::Collab => {
                 let task = spec.task.as_deref().unwrap_or("").trim().to_string();
                 let mut cs = CollabSession::start(
-                    Arc::clone(&self.gateway),
+                    Arc::clone(&self.llm),
                     Arc::clone(&self.source),
                     self.registry.snapshot(),
                     Arc::clone(&self.prompt),
                     Arc::clone(&self.systools),
                     Arc::clone(&self.tools),
                     Arc::clone(&self.io),
-                    Arc::clone(&self.repair),
                     Arc::clone(&self.log),
                     Arc::clone(&self.packages),
                     meta.exec.clone(),
@@ -1536,7 +1531,7 @@ impl Core {
             mode,
             modules: crate::capabilities::collab::api::tool_table(modules),
             observations: crate::capabilities::tools::api::Observations::default(),
-            repair: Arc::clone(&self.repair),
+            llm: Arc::clone(&self.llm),
             log: Arc::clone(&self.log),
             runner: Arc::clone(&self.tools),
             sandbox: sb.clone(),
@@ -1596,7 +1591,7 @@ impl Core {
         crate::capabilities::session::api::AgentSession,
         Vec<SessionEvent>,
     ) {
-        let (chat, note) = self.gateway.member_channel(channel.as_ref(), &a.name);
+        let (chat, note) = self.llm.member_channel(channel.as_ref(), &a.name);
         // 形态按登记处解析；没有真实通道（演示回落）只能是手写信封——演示通道不会原生调用。
         let mode = if channel.is_some() {
             self.registry.tool_mode(a.model.as_deref())
@@ -1750,7 +1745,7 @@ impl Core {
                 ("task", task.to_string()),
             ],
         );
-        let (mut chat, _) = self.gateway.core_channel(Some(&channel));
+        let (mut chat, _) = self.llm.core_channel(Some(&channel));
         // 核心这一趟的行（工具行、发言行、思维链）**一律外送**：核心没有会话、写不了盘，
         // 它只把行交出来；推到哪个 sid、落不落盘由调用方按会话种类定（这里给系统会话）。
         let mut rows: Vec<SessionEvent> = Vec::new();
@@ -2202,14 +2197,13 @@ impl Core {
         let sandboxes = self.sandboxes(meta, &roster)?;
         match meta.mode.as_str() {
             "collab" => Ok(Session::Collab(CollabSession::restore(
-                Arc::clone(&self.gateway),
+                Arc::clone(&self.llm),
                 Arc::clone(&self.source),
                 self.registry.snapshot(),
                 Arc::clone(&self.prompt),
                 Arc::clone(&self.systools),
                 Arc::clone(&self.tools),
                 Arc::clone(&self.io),
-                Arc::clone(&self.repair),
                 Arc::clone(&self.log),
                 Arc::clone(&self.packages),
                 meta,
@@ -2250,7 +2244,7 @@ impl Core {
                 let params = crate::capabilities::session::api::SessionParams::from_workspace(
                     &a.name, &sb, &modules,
                 );
-                let (chat, note) = self.gateway.member_channel(channel.as_ref(), &a.name);
+                let (chat, note) = self.llm.member_channel(channel.as_ref(), &a.name);
                 // 先把转录行按顺序摊平：分组判断要看「下一行是不是 tool 行」。
                 let mut rows: Vec<&serde_json::Value> = Vec::new();
                 for ev in events {

@@ -1,11 +1,10 @@
 //! 演示/测试通道：脚本假模型（无网络、无密钥）。
 //! 双用途：核心回落演示（无可用模型通道时，如实告知）+ 单元测试脚本回放。
-//! 只实现 core 的 Chat/ChatGateway 端口，不做装配决策。
+//! 它同时是"对话通道"（`api::Chat`）与"通道工厂"（`ports::ChatGateway`）的实现，不做装配决策。
 
 use crate::capabilities::llm::api::Channel;
-use crate::capabilities::llm::api::{
-    BoxedChat, Chat, ChatGateway, Chunk, CompleteOpts, Completion, Msg,
-};
+use crate::capabilities::llm::api::{BoxedChat, Chat, Chunk, CompleteOpts, Completion, Msg};
+use crate::capabilities::llm::ports::ChatGateway;
 
 /// 脚本假模型：按调用次序回放脚本（最后一个条目重复兜底）；记录调用供测试断言。
 pub struct FakeChat {

@@ -355,7 +355,7 @@ pub(crate) fn member_with_tools(
         mode: crate::capabilities::llm::api::ToolMode::Envelope,
         modules,
         observations: crate::capabilities::tools::api::Observations::default(),
-        repair: Arc::new(NoRepair),
+        llm: test_llm_demo(),
         log: Arc::new(crate::kernel::log::NoopLog),
         runner,
         sandbox: test_sandbox("m0", &[]),
@@ -642,7 +642,7 @@ pub(crate) fn native_member(
         mode: crate::capabilities::llm::api::ToolMode::Native,
         modules,
         observations: crate::capabilities::tools::api::Observations::default(),
-        repair: Arc::new(NoRepair),
+        llm: test_llm_demo(),
         log: Arc::new(crate::kernel::log::NoopLog),
         runner: Arc::new(SilentRunner),
         sandbox: sb.clone(),
@@ -757,21 +757,20 @@ pub(crate) fn native_core(
     io: Arc<InMemorySysIo>,
 ) -> Core {
     let gateway: Arc<dyn ChatGateway + Send + Sync> = Arc::new(gateway);
+    let llm = test_llm(
+        Arc::clone(&gateway),
+        Arc::new(FakeCatalog::new(vec!["m".to_string()])),
+    );
     Core::new(
-        registry_service(
-            InMemorySettings::new(),
-            Arc::new(FakeCatalog::new(vec!["m".to_string()])),
-            Arc::clone(&gateway),
-        ),
+        registry_service(InMemorySettings::new(), Arc::clone(&llm)),
         history,
         Arc::new(InMemoryWorkspace::new()),
         Arc::new(VecSource(vec![module_of("a")])),
         Arc::new(InMemoryPackages::empty()),
         Arc::new(NoFenceHost),
-        gateway,
+        llm,
         Arc::new(SilentRunner),
         io,
-        Arc::new(NoRepair),
         test_prompt(),
         test_tools(),
         Arc::new(crate::kernel::log::NoopLog),

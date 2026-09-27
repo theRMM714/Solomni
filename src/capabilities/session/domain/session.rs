@@ -32,8 +32,8 @@ pub struct MemberTools {
     pub modules: BTreeMap<String, ModuleTools>,
     /// 本次会话的观察账本（哪些文件完整读过 / 由核心写过）：改动前的证据（见 crate::capabilities::tools::api::Observations）。
     pub observations: crate::capabilities::tools::api::Observations,
-    /// 信封修复端口：手写信封不合法时先问它能不能按无歧义的写法修好（默认只转义裸控制字符）。
-    pub repair: Arc<dyn crate::capabilities::llm::api::EnvelopeRepair + Send + Sync>,
+    /// llm 用例面（**不持它的端口**，R12）：手写信封不合法时问它能不能按无歧义的写法修好。
+    pub llm: Arc<dyn crate::capabilities::llm::api::Llm + Send + Sync>,
     /// 运行日志：模型输出被长度截断这类"看不见的事实"要落盘，供事后确定问题。
     pub log: Arc<dyn crate::kernel::log::Log + Send + Sync>,
     pub runner: Arc<dyn ToolRunner + Send + Sync>,

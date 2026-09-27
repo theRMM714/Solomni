@@ -49,8 +49,9 @@
 | `registry/domain/providers.rs` | 供应商/模型登记处内存形态与「模型 → 通道」解析（从 `core/providers.rs` 搬来） |
 | `registry/domain/agents.rs` | agent 登记处、代拟名单落地与名字校验（从 `core/agents.rs` 搬来） |
 | `registry/detail/yaml_settings.rs` | `SettingsStore`：登记处四份 yaml 的读写（见 [REGISTRY_SPEC.md](../../REGISTRY_SPEC.md)） |
-| `llm/api.rs` | **入站能力面**：`Chat` / `ChatGateway` / `ModelCatalog` / `EnvelopeRepair` 与协议类型（`Msg` / `Completion` / `Chunk` / `ToolCall` / …）的对外名字 |
-| `llm/ports.rs` | 模型通道的端口族与协议类型（从 `core/ports.rs` 随能力搬出）；**通道事实**：`Channel`（摊平的解析结果）、`ToolMode`、`ReplayShape` / `ReplayReport`（批次 15 从 `registry` 移来） |
+| `llm/api.rs` | **入站能力面**：**通道与协议词汇**（`Chat` / `BoxedChat` / `Msg` / `Completion` / `Chunk` / `ToolCall` / `ToolDecl` / `Channel` / `ToolMode` / `LlmOpts` / `CompleteOpts` / 探测结论 → 它们是**对外契约**，`Chat` 的调用方是别的能力所以我在这里）+ **`Llm` 用例面**（造通道 / 探测 / 发现 / 修信封）。**出站端口不进 api**（R12）。原行余下：协议类型（`Msg` / `Completion` / `Chunk` / `ToolCall` / …）的对外名字 |
+| `llm/service.rs` | **本能力的用例与端口持有者**：持 `ChatGateway` / `ModelCatalog` / `EnvelopeRepair`（**唯一持有者**，R12），实现 `api::Llm`（批次 20b） |
+| `llm/ports.rs` | **出站端口**（只有 `service.rs` 持有）：`ChatGateway` / `ModelCatalog` / `EnvelopeRepair`。协议词汇已随批次 20b 归 `api`；**通道事实**：`Channel`（摊平的解析结果）、`ToolMode`、`ReplayShape` / `ReplayReport`（批次 15 从 `registry` 移来） |
 | `workspace/api.rs` | **入站能力面**：`WorkspaceOps`（清单事实）+ 模块清单 / 运行包库 / 执行档位与计划 / 沙箱寻址的对外名字 |
 | `workspace/ports.rs` | `ModuleSource` / `PackageSource` / `Workspace`（从 `core/ports.rs` 随能力搬出） |
 | `workspace/domain/module.rs` | `module.yaml` 契约、`Roster`、`runtimes` 校验、agent system 合成、**参数声明形态** `Param` / `ParamType`（从 `core/module.rs` 搬来；批次 15 从 `tools` 移来） |

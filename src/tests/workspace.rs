@@ -557,21 +557,20 @@ pub(crate) fn vm_tier_is_refused_when_the_machine_cannot_carry_it() {
     member.insert("a".to_string(), vec!["[]".into()]);
     let gateway: Arc<dyn ChatGateway + Send + Sync> =
         Arc::new(gw(member.clone(), vec!["[]".into()]));
+    let llm = test_llm(
+        Arc::clone(&gateway),
+        Arc::new(FakeCatalog::new(vec!["m".to_string()])),
+    );
     let mut core = Core::new(
-        registry_service(
-            InMemorySettings::with_tier(Tier::Vm),
-            Arc::new(FakeCatalog::new(vec!["m".to_string()])),
-            Arc::clone(&gateway),
-        ),
+        registry_service(InMemorySettings::with_tier(Tier::Vm), Arc::clone(&llm)),
         Arc::new(InMemoryHistory::new()),
         Arc::new(InMemoryWorkspace::new()),
         Arc::new(VecSource(vec![module_of("a")])),
         Arc::new(InMemoryPackages::empty()),
         Arc::new(NoFenceHost),
-        gateway,
+        llm,
         Arc::new(SilentRunner),
         Arc::new(InMemorySysIo::new()),
-        Arc::new(NoRepair),
         test_prompt(),
         test_tools(),
         Arc::new(crate::kernel::log::NoopLog),
@@ -594,21 +593,20 @@ pub(crate) fn vm_tier_is_refused_when_the_machine_cannot_carry_it() {
 
     // 编辑路径：基础根由用户给定（这里给一个不存在的），所以这一条不随机器变——必须拒绝、档位保持原样。
     let gateway2: Arc<dyn ChatGateway + Send + Sync> = Arc::new(gw(member, vec!["[]".into()]));
+    let llm2 = test_llm(
+        Arc::clone(&gateway2),
+        Arc::new(FakeCatalog::new(vec!["m".to_string()])),
+    );
     let mut core2 = Core::new(
-        registry_service(
-            InMemorySettings::new(),
-            Arc::new(FakeCatalog::new(vec!["m".to_string()])),
-            Arc::clone(&gateway2),
-        ),
+        registry_service(InMemorySettings::new(), Arc::clone(&llm2)),
         Arc::new(InMemoryHistory::new()),
         Arc::new(InMemoryWorkspace::new()),
         Arc::new(VecSource(vec![module_of("a")])),
         Arc::new(InMemoryPackages::empty()),
         Arc::new(NoFenceHost),
-        gateway2,
+        llm2,
         Arc::new(SilentRunner),
         Arc::new(InMemorySysIo::new()),
-        Arc::new(NoRepair),
         test_prompt(),
         test_tools(),
         Arc::new(crate::kernel::log::NoopLog),
@@ -716,21 +714,20 @@ pub(crate) fn module_without_runtime_is_denied_with_reason() {
     // 建好之后再把这条件裁成"已存在的虚拟机档会话"。
     let hist = Arc::new(InMemoryHistory::new());
     let gateway: Arc<dyn ChatGateway + Send + Sync> = Arc::new(gw(member, vec!["[]".into()]));
+    let llm = test_llm(
+        Arc::clone(&gateway),
+        Arc::new(FakeCatalog::new(vec!["m".to_string()])),
+    );
     let mut core = Core::new(
-        registry_service(
-            InMemorySettings::with_tier(Tier::Host),
-            Arc::new(FakeCatalog::new(vec!["m".to_string()])),
-            Arc::clone(&gateway),
-        ),
+        registry_service(InMemorySettings::with_tier(Tier::Host), Arc::clone(&llm)),
         Arc::clone(&hist) as Arc<dyn HistoryStore + Send + Sync>,
         Arc::new(InMemoryWorkspace::new()),
         Arc::new(VecSource(vec![mod_a])),
         Arc::new(InMemoryPackages::empty()),
         Arc::new(NoFenceHost),
-        gateway,
+        llm,
         Arc::clone(&runner) as Arc<dyn ToolRunner + Send + Sync>,
         Arc::new(InMemorySysIo::new()),
-        Arc::new(NoRepair),
         test_prompt(),
         test_tools(),
         Arc::new(crate::kernel::log::NoopLog),

@@ -884,22 +884,21 @@ pub(crate) fn deleting_a_session_asks_the_fence_to_release_its_grants() {
     );
     let gateway: Arc<dyn ChatGateway + Send + Sync> =
         Arc::new(gw(BTreeMap::new(), vec!["[]".into()]));
+    let llm = test_llm(
+        Arc::clone(&gateway),
+        Arc::new(FakeCatalog::new(vec!["m".to_string()])),
+    );
     let mut core = Core::new(
-        registry_service(
-            InMemorySettings::new(),
-            Arc::new(FakeCatalog::new(vec!["m".to_string()])),
-            Arc::clone(&gateway),
-        ),
+        registry_service(InMemorySettings::new(), Arc::clone(&llm)),
         Arc::clone(&hist)
             as Arc<dyn crate::capabilities::session::ports::HistoryStore + Send + Sync>,
         Arc::new(InMemoryWorkspace::new()),
         Arc::new(VecSource(vec![module_of("a")])),
         Arc::new(InMemoryPackages::empty()),
         Arc::clone(&fence) as Arc<dyn crate::capabilities::tools::ports::FenceHost + Send + Sync>,
-        gateway,
+        llm,
         Arc::new(SilentRunner),
         Arc::new(InMemorySysIo::new()),
-        Arc::new(NoRepair),
         test_prompt(),
         test_tools(),
         Arc::new(crate::kernel::log::NoopLog),
