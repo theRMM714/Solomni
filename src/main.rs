@@ -85,13 +85,13 @@ fn main() {
         ),
     );
     println!("[围栏] {}", fence_cap.note);
-    let store = adapters::YamlSettingsStore::new(
+    let store = capabilities::registry::detail::yaml_settings::YamlSettingsStore::new(
         root.join(".home").join("providers.yaml"),
         root.join(".home").join("models.yaml"),
         root.join(".home").join("settings.yaml"),
         root.join(".home").join("agents.yaml"),
     );
-    let history = adapters::FsHistory::new(root.join("session"));
+    let history = capabilities::session::detail::fs_history::FsHistory::new(root.join("session"));
     let workspace = adapters::FsWorkspace::new(root.join("session"));
     let source = adapters::FsModules::new(root.join("modules"));
     // 运行包库：依赖文件夹 runtimes/（一个包 = 一个文件夹 + package.yaml）。
@@ -104,7 +104,8 @@ fn main() {
         std::sync::Arc::clone(&log),
         std::sync::Arc::clone(&memo),
     );
-    let prompts = adapters::YamlPrompts::new(root.join("prompts"), root.join("systools"));
+    let prompts =
+        capabilities::prompt::detail::yaml_prompts::YamlPrompts::new(root.join("prompts"));
     // 册子只读一次：core 与适配层（工具回执里的那些收尾标记）共用同一份。
     let book = match capabilities::prompt::ports::PromptSource::load(&prompts) {
         Ok(b) => b,
@@ -114,20 +115,24 @@ fn main() {
         }
     };
     // 工具总表与角色表必须自洽（悬空引用 / 缺能力都是装配错误）：装配期就挡下，不拖到运行期。
-    let systools = match prompts.system_tools() {
-        Ok(st) if st.problems().is_empty() => st,
-        Ok(st) => {
-            eprintln!(
-                "[装配失败] 系统工具与角色表不自洽：{}",
-                st.problems().join("；")
-            );
-            std::process::exit(1);
-        }
-        Err(e) => {
-            eprintln!("[装配失败] {}", e);
-            std::process::exit(1);
-        }
-    };
+    // 工具总表与角色表归**工具能力**（加载器在它自己的 detail 里）。
+    let systools =
+        match capabilities::tools::detail::yaml_systools::YamlSystools::new(root.join("systools"))
+            .load()
+        {
+            Ok(st) if st.problems().is_empty() => st,
+            Ok(st) => {
+                eprintln!(
+                    "[装配失败] 系统工具与角色表不自洽：{}",
+                    st.problems().join("；")
+                );
+                std::process::exit(1);
+            }
+            Err(e) => {
+                eprintln!("[装配失败] {}", e);
+                std::process::exit(1);
+            }
+        };
     // 围栏是否允许在本机写权限：设置里授权过、或环境变量显式指定（SOLOMNI_FENCE_WRITE=1/0 可取反）。
     // 默认不准——没经过用户同意，本程序不动本机任何权限项。
     let home = root.join(".home");

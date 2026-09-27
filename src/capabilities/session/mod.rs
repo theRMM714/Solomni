@@ -5,5 +5,6 @@
 //! 落盘机制在适配层（`ports::HistoryStore`）。
 
 pub mod api;
+pub mod detail;
 pub mod domain;
 pub mod ports;

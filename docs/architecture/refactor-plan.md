@@ -60,14 +60,15 @@ capabilities/<name>/
   api.rs       入站能力面：trait + DTO。其它能力与呈现层只准用这个
   ports.rs     出站端口：本能力定义的抽象，由 adapters 或别的能力实现
   domain/      纯逻辑：状态机、解析、派生。不加 trait
-  detail/      细节实现：含"用别的能力的 api 来实现本能力的端口"
+  detail/      **细节实现 = 该能力自己的适配器**：文件读写、HTTP/TLS、拉进程、平台围栏…
+               也含"用别的能力的 api 来实现本能力的端口"。**组合根（入口层）是唯一构造它的地方。**
 ```
 
 ### 1.3 硬要求清单
 
 | 编号 | 要求 | 依据 / 落地判据 |
 | --- | --- | --- |
-| **R1** | 业务之间**只经对方的声明面**交流：`api`（入站契约）或 `ports`（出站端口——它是接口，不是实现）；**禁止 `use` 别人的 `domain` / `detail`** | 门禁按 `use` 边判定 |
+| **R1** | 业务之间**只经对方的声明面**交流：`api`（入站契约）或 `ports`（出站端口——它是接口，不是实现）；**禁止 `use` 别人的 `domain` / `detail`**。`::detail` **只有入口层（组合根）能碰** | 门禁按 `use` 边判定 |
 | **R2** | 依赖图**必须无环**，由 T0 门禁机器判定 | 白名单外的边 = 测试失败；迁移期允许的边进**基线豁免清单**，拆完即删 |
 | **R3** | DIP **只画在 IO 或可替换点上**；纯逻辑刻意不抽象 | 判据：这里有 IO，或这里有可替换实现。不满足就不加 trait |
 | **R4** | **状态所有权排他**：一块状态只有一个能力写，别人只读它的 `api` | 跨能力读改写必须经 `api`，不得 `pub` 字段 |
@@ -151,6 +152,22 @@ capabilities/<name>/
 | **collab** | 协调 | **已落位** `capabilities/collab/`（`collab` + `collab_state` + `engine`）（任务链的**数据与图算法**已落位 `kernel/chain.rs`，见批次 5） | 讨论游标、任务链、待裁决 | — | **已完成**（批次 14） |
 | **presentation** | 交付机制（**不是能力**：无状态所有权、无独立不变式） | **已落位** `cli/` + `web/`（各自独立、无共享层） | — | — | **已完成**（批次 15 收口第 3 步） |
 
+
+**`detail/` 归谁（本批次的依据）**："细节实现"就是**该能力自己的适配器**。证据是逐条可判——
+`adapters/` 现有 24 个文件里，**20 个恰好只实现一个能力的端口**：
+
+| 能力 | 它的 `detail/`（现在散在 `adapters/`） |
+| --- | --- |
+| **prompt** | `yaml_prompts.rs` |
+| **registry** | `yaml_settings.rs` |
+| **session** | `fs_history.rs` |
+| **llm** | `http_chat.rs` / `http_probe.rs` / `repair.rs` / `http_agent.rs` / `endpoint.rs` / `model_catalog.rs` / `fake_chat.rs` |
+| **workspace** | `fs_modules.rs` / `fs_packages.rs` / `fs_workspace.rs` |
+| **tools** | `confine/*`（5 个平台文件）/ `proc_tools.rs` / `sys_io.rs` |
+
+**留在 `adapters/` 的只有 4 个**：`log.rs` / `host_probe.rs`（实现 **kernel** 的端口，内核是机制层、没有业务可归）、
+`root.rs`（入口层用的路径规范化）、`mod.rs`（模块清单）。所以 `adapters/` 不是"一层"，而是**内核端口的实现**。
+
 ### 3.2 kernel（机制型内核）
 
 只放**窄**接口，**不做通用"并发管理器"**。**实际落位（批次 1 已完成）**：
@@ -224,7 +241,7 @@ capabilities/<name>/
 **落盘归属（已定）：tools 产出事实，`session` 落盘。**
 `session/<名>/transcript.jsonl` 与 `meta.yaml` 是 `session` 的状态，转录行的 `id`/`turn`/`reply` 由 `session`
 单调分配（`next_line`/`cur_turn`/`cur_reply`）；tools 不知道这些，直接写就会造出没有这些字段的行，
-回放与回档立刻歪。落盘经 `HistoryStore` 端口（唯一实现 `adapters/fs_history.rs`），
+回放与回档立刻歪。落盘经 `HistoryStore` 端口（唯一实现 `capabilities/session/detail/fs_history.rs`），
 tools 自持一个就等于绕过状态所有权——**直接写别人的文件是最典型的耦合（共享可变状态），不是解耦**。
 项目已有先例：`Core::persister(sid).persist(&events)` 统一落盘，工具行也由 `session::line()` 造出后统一 persist。
 
@@ -445,6 +462,13 @@ kernel       ──▶ （无）
 | **14** | **collab 能力落位**：`capabilities/collab/`（`collab` + `collab_state` + `engine`）。**执行顺序调整**：先做 14 再做 13——`rewind` 的回档重建要同时碰 `session` 与 `collab` 两侧，两边就位后才切得干净（已获用户同意） | 12 | **已完成**（环不变——`capabilities/collab` **不在环里**：没有任何它依赖的能力反过来依赖它；`core/` 只剩 `api.rs` + `mod.rs`） |
 | **15** | **断环（已完成）** → 能力图零环；**收口 1（已完成）**：入站词汇归 `core/api.rs` → 基线全空；**收口 2（已完成）**：`intent.rs` 规则下沉；**收口 3（已完成）**：`Action`/`Acted` 与分发收进 `core::api`（`SessionOps::act` 默认方法）、`split_names`/`NO_AGENTS` 归 CLI、**`intent.rs` 删除**、`presentation/` 拆成 **`cli/` + `web/`** 两个独立顶层目录（静态资源随 `web/assets/`）；**收口 4（已完成）**：`main.rs` 拆四件事——组合根留 `main.rs`、机器可读探针进 `diagnostics/`、围栏守门进程进 `guard/`（**第二个程序入口**）、路径机制下沉 `adapters/root.rs`；门禁新增**入口层**并禁止任何人依赖它 | 14 | **全部完成** |
 
+| **16** | **适配器归位**：`adapters/` 里**能力私有**的 20 个实现 → 各能力 `detail/`；`adapters/` 只留 `log` / `host_probe`（内核端口）与 `root`（入口层） | 15 | **进行中**：prompt / registry / session / tools（部分）已归位（批次 16a）；llm / workspace / tools 其余待做 |
+| **17** | **`core` 的编排归位**：登记处 17 个方法 → `registry`；工作区 4 → `workspace`；历史与回档 8 → `session`；代拟 1 → `collab`。`core` 只剩**会话中心 + 生成驱动 + 跨能力用例** | 16 | 未开始 |
+| **18** | **入站接口归位**：`core::api` 的五个能力接口 → 各能力 `api`；`cli` / `web` 改经各能力的**声明面**；`contracts.md` 的路由表与 `tests/api.rs` 跟着改 | 17 | 未开始 |
+| **19** | **测试按业务分区（R10）**：`tests/core.rs`（8500+ 行）拆开，目录与 `capabilities/` 对齐 | 18 | 未开始 |
+
+**规模不是硬验收**：拆到「能安全验证」为止。`core/mod.rs`（2870）与 `collab/domain/engine.rs`（2831）的进一步拆分随批次 16–19 暴露的接缝走，不为凑行数而拆。
+
 **豁免清零判据**：`tests/dependency-baseline.json` 的**三个数组全部清空**（`reverse` / `presentation` / `coreCycles`），
 且 `Core` 这个类型不再存在。门禁对**新增**与**过期**都报失败，所以销账不靠自觉——
 拆掉一条边不删条目，构建就红。
@@ -473,11 +497,11 @@ kernel       ──▶ （无）
 
 ## 五、验收标准
 
-1. `core/` **只留应用服务与入站契约**（`api.rs` + `mod.rs`）——业务全在 `capabilities/`，机制在 `kernel/` 与 `adapters/`；每个能力有 `api.rs` / `ports.rs` / `domain/` / `detail/`。
+1. **业务全在 `capabilities/`**：每个能力有 `api.rs` / `ports.rs` / `domain/` / **`detail/`（它自己的适配器）**；`adapters/` 只剩**内核端口的实现**（`Log` / `HostProbe`）与入口层用的机制。
 2. 依赖图为**无环**，由 T0 门禁机器判定，**零豁免**。
-3. `Core` 这个类型不存在；任一能力文件 ≤ 800 行，`api.rs` ≤ 20 个方法。
-4. `presentation` 只 `use` 各业务的 `api`：**零** `use ...::ports::`、零 `use ...::domain::`。
-5. 端口对象在**恰好一处**被持有（组合根），不再手工穿层。
+3. `core/` 只剩**应用服务**：会话中心（工作线程 + 命令队列）、生成驱动、跨能力用例。登记处 / 工作区 / 历史 / 回档 / 代拟的**编排都归各自能力**；`core::api` 的五个能力接口随之归位（前端直接经各能力的 `api`）。
+4. 前端（`cli/` + `web/`）只 `use` 各业务的**声明面**：零 `use ...::ports::`、零 `use ...::domain::`、零 `use ...::detail::`。
+5. 端口对象在**恰好一处**被持有（入口层的组合根），不再手工穿层；`::detail` 只有它碰。
 6. 运行态**只有一份真相**（`kernel/jobs`）。
 7. 测试按能力分文件，单文件 ≤ 2000 行；**测试入口 = 生产入口**。
 8. 架构文档（`ARCHITECTURE.md` + `module-map.md` + 相关细则 + `AGENTS.md` 路由表）与代码一致，无过期描述。

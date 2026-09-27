@@ -5,7 +5,6 @@
 pub mod confine;
 pub mod endpoint;
 pub mod fake_chat;
-pub mod fs_history;
 pub mod fs_modules;
 pub mod fs_packages;
 pub mod fs_workspace;
@@ -19,10 +18,7 @@ pub mod proc_tools;
 pub mod repair;
 pub mod root;
 pub mod sys_io;
-pub mod yaml_prompts;
-pub mod yaml_settings;
 
-pub use fs_history::FsHistory;
 pub use fs_modules::FsModules;
 pub use fs_packages::FsPackages;
 pub use fs_workspace::FsWorkspace;
@@ -33,5 +29,3 @@ pub use model_catalog::HttpModelCatalog;
 pub use proc_tools::ProcTools;
 pub use repair::UnambiguousRepair;
 pub use sys_io::FsSysIo;
-pub use yaml_prompts::YamlPrompts;
-pub use yaml_settings::YamlSettingsStore;

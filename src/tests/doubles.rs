@@ -873,7 +873,7 @@ impl PromptSource for TestPrompts {
 pub(crate) fn test_prompts() -> Prompts {
     // 走**与产品同一条**装配路径（目录 + 合并）：替身与真机装配出同一册子，测试才有意义。
     let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    crate::adapters::YamlPrompts::new(root.join("prompts"), root.join("systools"))
+    crate::capabilities::prompt::detail::yaml_prompts::YamlPrompts::new(root.join("prompts"))
         .load()
         .expect("内置提示词册必须合法")
 }
@@ -882,8 +882,8 @@ pub(crate) fn test_prompts() -> Prompts {
 /// 它与提示词册**分开**装配：两者互不依赖（见 core/prompt.rs 的 Prompts）。
 pub(crate) fn test_systools() -> crate::capabilities::tools::api::SystemTools {
     let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    crate::adapters::YamlPrompts::new(root.join("prompts"), root.join("systools"))
-        .system_tools()
+    crate::capabilities::tools::detail::yaml_systools::YamlSystools::new(root.join("systools"))
+        .load()
         .expect("内置工具总表必须合法")
 }
 /// 宿主探测替身：**只按给定答案回答**，不读真实环境（测试要确定性）。

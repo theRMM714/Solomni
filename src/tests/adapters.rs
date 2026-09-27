@@ -4,7 +4,6 @@
 
 use super::scratch;
 use crate::adapters::endpoint::memo_new;
-use crate::adapters::fs_history::FsHistory;
 use crate::adapters::fs_modules::FsModules;
 use crate::adapters::fs_packages::FsPackages;
 use crate::adapters::fs_workspace::FsWorkspace;
@@ -12,17 +11,19 @@ use crate::adapters::http_chat::HttpGateway;
 use crate::adapters::log::FileLog;
 use crate::adapters::model_catalog::HttpModelCatalog;
 use crate::adapters::sys_io::FsSysIo;
-use crate::adapters::yaml_prompts::YamlPrompts;
-use crate::adapters::yaml_settings::YamlSettingsStore;
 use crate::capabilities::llm::api::Channel;
 use crate::capabilities::llm::api::{
     ChatGateway, Chunk, CompleteOpts, ModelCatalog, Msg, ProbeOutcome,
 };
+use crate::capabilities::prompt::detail::yaml_prompts::YamlPrompts;
 use crate::capabilities::prompt::ports::PromptSource;
 use crate::capabilities::registry::api::{Provider, Settings};
+use crate::capabilities::registry::detail::yaml_settings::YamlSettingsStore;
 use crate::capabilities::registry::ports::SettingsStore;
 use crate::capabilities::session::api::{AgentMeta, SessionMeta};
+use crate::capabilities::session::detail::fs_history::FsHistory;
 use crate::capabilities::session::ports::HistoryStore;
+use crate::capabilities::tools::detail::yaml_systools::YamlSystools;
 use crate::capabilities::tools::ports::SysIo;
 use crate::capabilities::workspace::api::ExecSpec;
 use crate::capabilities::workspace::ports::{ModuleSource, PackageSource, Workspace};
@@ -419,8 +420,8 @@ fn fs_packages_scans_the_dependency_folder_and_reports_each_rejection() {
 #[test]
 fn role_face_comes_from_the_role_table() {
     let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let st = YamlPrompts::new(root.join("prompts"), root.join("systools"))
-        .system_tools()
+    let st = YamlSystools::new(root.join("systools"))
+        .load()
         .expect("读两张表");
     let ids = |role: &str| -> Vec<String> {
         st.tool_face(role)
@@ -470,8 +471,8 @@ fn role_face_comes_from_the_role_table() {
 #[test]
 fn system_tools_and_roles_are_self_consistent() {
     let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let st = YamlPrompts::new(root.join("prompts"), root.join("systools"))
-        .system_tools()
+    let st = YamlSystools::new(root.join("systools"))
+        .load()
         .expect("读系统工具与角色");
     assert!(
         st.problems().is_empty(),
@@ -507,22 +508,20 @@ fn yaml_prompts_loads_the_shipped_book_and_reports_missing_or_broken_files() {
     let root = scratch("yaml-prompts");
     let root_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let real = root_dir.join("prompts");
-    let ok = YamlPrompts::new(real, root_dir.join("systools"))
+    let ok = YamlPrompts::new(real)
         .load()
         .expect("产品自带提示词册必须合法");
     assert!(!ok.core.no_agents.is_empty());
 
     // 目录不存在 = 装配错误（如实报，不静默造默认文案）。
-    let missing = YamlPrompts::new(root.join("nope"), root.join("systools"))
-        .load()
-        .unwrap_err();
+    let missing = YamlPrompts::new(root.join("nope")).load().unwrap_err();
     assert!(missing.contains("提示词册目录读不了"), "{}", missing);
 
     // 空目录 = 一个 .yaml 都没有，同样是装配错误。
     let empty = root.join("empty");
     std::fs::create_dir_all(&empty).expect("造空目录");
     assert!(
-        YamlPrompts::new(empty, root.join("systools"))
+        YamlPrompts::new(empty)
             .load()
             .unwrap_err()
             .contains("一个 .yaml 都没有"),
@@ -533,7 +532,7 @@ fn yaml_prompts_loads_the_shipped_book_and_reports_missing_or_broken_files() {
     let broken = root.join("broken");
     std::fs::create_dir_all(&broken).expect("造坏目录");
     std::fs::write(broken.join("a.yaml"), "core: [不是映射").expect("造坏册子");
-    assert!(YamlPrompts::new(broken.clone(), root.join("systools"))
+    assert!(YamlPrompts::new(broken.clone())
         .load()
         .unwrap_err()
         .contains("提示词册非法"));
@@ -542,7 +541,7 @@ fn yaml_prompts_loads_the_shipped_book_and_reports_missing_or_broken_files() {
     std::fs::write(broken.join("a.yaml"), "no_model: \"甲\"").expect("造册子");
     std::fs::write(broken.join("b.yaml"), "no_model: \"乙\"").expect("造重复键");
     assert!(
-        YamlPrompts::new(broken, root.join("systools"))
+        YamlPrompts::new(broken)
             .load()
             .unwrap_err()
             .contains("重复"),

@@ -5,7 +5,7 @@
 > "哪个角色用哪份提示词、拿哪些工具"见 [tools-and-roles.md](tools-and-roles.md) 四；
 > 模块自己的职责提示词（`module.yaml` 的 `system`）见 [MODULE_SPEC.md](../../MODULE_SPEC.md)。
 
-**当前状态：已落地。** 册子按**共享 / 角色**两个目录切分；加载经 `PromptSource` 端口（`capabilities/prompt/ports.rs`，实现在 `adapters/yaml_prompts.rs`），
+**当前状态：已落地。** 册子按**共享 / 角色**两个目录切分；加载经 `PromptSource` 端口（`capabilities/prompt/ports.rs`，实现在 `capabilities/prompt/detail/yaml_prompts.rs`），
 `{{key}}` 渲染与"缺键即报错"在 `capabilities/prompt/domain/prompt.rs`（纯逻辑，不读文件）。键的完整清单就是下面这张表。
 
 ## 一、结构与键
@@ -31,7 +31,7 @@
 
 ## 二、怎么被装载
 
-- `PromptSource` 端口（`adapters/yaml_prompts.rs`）按文件装配成 `Prompts`（`core/prompt.rs` 的结构体，字段与键同名）；
+- `PromptSource` 端口（`capabilities/prompt/detail/yaml_prompts.rs`）按文件装配成 `Prompts`（字段与键同名）；
 - **工具总表与角色表不在这份册子里**：`systools/tools.yaml`（工具是什么）与 `systools/roles.yaml`（身份有什么）
   由 `YamlPrompts::system_tools()` 装配成 `capabilities::tools::api::SystemTools`，**与册子分开注入**——
   挂进册子会让提示词反过来依赖工具，两边成环（见 [refactor-plan.md](refactor-plan.md) §三）；

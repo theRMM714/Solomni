@@ -5,5 +5,6 @@
 //! 机制（文件读写、拉进程、释放授权）在 `ports` 后面由适配层实现。
 
 pub mod api;
+pub mod detail;
 pub mod domain;
 pub mod ports;

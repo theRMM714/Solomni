@@ -4,5 +4,6 @@
 //! 对外只有 `api`；`domain` 与 `ports` 是本能力内部（门禁会拦越界引用）。
 
 pub mod api;
+pub mod detail;
 pub mod domain;
 pub mod ports;

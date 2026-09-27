@@ -433,6 +433,15 @@ function structuralAudit() {
         if (layer === "presentation" && !presOk && targetLayer !== "presentation") {
           presentation.add(f + " -> " + t);
         }
+        // `::detail` 是**实现**：只有入口层的组合根能构造它（内核自己的 detail 不在此列）。
+        if (
+          layer !== "entry" &&
+          layer !== "kernel" &&
+          targetLayer === "capabilities" &&
+          t.endsWith("::detail")
+        ) {
+          apiOnly.add(f + " -> " + t);
+        }
         // 业务之间只经对方的**声明面**：::api（入站契约）或 ::ports（出站端口，是接口不是实现）。
         // 不许碰 ::domain —— 那是实现细节。能力内部的互相引用不算"业务之间"。
         if (layer === "capabilities" && targetLayer === "capabilities") {

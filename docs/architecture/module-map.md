@@ -23,7 +23,9 @@
 | `api.rs` | **入站契约 + 入站词汇**：五个按角色的能力接口（`SessionOps` / `RegistryOps` / `HistoryOps` / `DiscoveryOps` / `LogOps`）+ `CoreHandle`（核心自有线程、命令/事件）+ **用例词汇与视图**（`WorkMode` / `WorkSpec` / `AgentInstance` / `WorkOpened` / `SessionEdit` / `CollabStep` / `SessionView` / `RuntimeReport` / `FilesView` 等，批次 15 收口从 `mod.rs` 搬来）+ `EventBus`；单 agent 与协作长步骤的生成都在**工作线程**上跑（队列只占"取/交"两步） |
 | `engine.rs` | 讨论/执行/验收的引擎；**唯一的轮循环** `converse_with`（单 agent / 节点 / 讨论席共用：表态与工具形态、按声明调度的并发、逐轮外送）；**唯一的请求装配点** `assemble`；**回合驱动**（`say` / `dispatch_task` / `discussion_turn` / `continue_reply` / `compact_turn` / `run_rounds` / `run`——批次 12a 从 `session.rs` 搬来，依赖方向才是 `engine → session`）；`build_round_lines`（**唯一的行构造点**） |
 
-## 三、`adapters/`（机制，实现 core 端口）
+## 三、`adapters/`（机制，实现**内核**端口）
+
+> **本目录正在搬空**：能力私有的实现已按批次 16 归各能力 `detail/`；这里只剩实现 **kernel** 端口的部分（`Log` / `HostProbe`）与入口层用的 `root`。
 
 | 文件 | 职责 |
 | --- | --- |
@@ -35,11 +37,8 @@
 | `fs_modules.rs` | `ModuleSource`：扫描 `modules/` |
 | `fs_packages.rs` | `PackageSource`：扫描 `runtimes/` |
 | `fs_workspace.rs` | `Workspace`：`session/<工作名>/` 下的 work 与各 agent 沙箱 |
-| `fs_history.rs` | `HistoryStore`：`meta.yaml` + `transcript.jsonl` |
 | `host_probe.rs` | `HostProbe`：宿主能力探测（路径存在性、PATH 上的可执行文件、本机虚拟化能力）——**只读事实**，不执行、不安装、不写。`find_exe` 是**可执行文件查找的唯一一份**（`has_exe` 与自检报告共用） |
 | `root.rs` | 产品根规范化：传入的根 → 干净的绝对路径（词法拼接优先；取不到当前目录才 canonicalize，并剥掉 Windows 的扩展长度前缀） |
-| `yaml_settings.rs` | `SettingsStore`：登记处四份 yaml 的读写（见 [REGISTRY_SPEC.md](../../REGISTRY_SPEC.md)） |
-| `yaml_prompts.rs` | `PromptSource`：加载 `prompts/`（**只有文本**）；`system_tools()` 另行装配 `systools/` 两张表 |
 | `endpoint.rs` | 端点补全/回落规则与进程内端点记忆（纯逻辑） |
 | `http_agent.rs` | 出站 HTTP 代理构建（TLS 后端选择与超时的单点） |
 | `http_chat.rs` | `Chat` / `ChatGateway`：OpenAI 兼容 `/chat/completions`（请求体形状的唯一定义：真实会话与探针共用） |
@@ -56,10 +55,12 @@
 | `prompt/ports.rs` | `PromptSource`：提示词册加载（从 `core/ports.rs` 随能力搬出） |
 | `prompt/domain/prompt.rs` | 册子的内存形态与 `{{key}}` 渲染（从 `core/prompt.rs` 搬来，纯逻辑） |
 | `prompt/domain/refs.rs` | 用户 `@` 引用改写成真实绝对路径（从 `core/refs.rs` 搬来，纯逻辑） |
+| `prompt/detail/yaml_prompts.rs` | `PromptSource`：加载 `prompts/`（**只有文本**） |
 | `registry/api.rs` | **入站能力面**：`Settings` / `Provider` / `ModelEntry` / `ToolMode` / `AppSettings` / `Channel` / 各视图 / `ReplayReport` 的对外名字 |
 | `registry/ports.rs` | `SettingsStore`：登记处四份 yaml 的持久化（从 `core/ports.rs` 随能力搬出） |
 | `registry/domain/providers.rs` | 供应商/模型登记处内存形态与「模型 → 通道」解析（从 `core/providers.rs` 搬来） |
 | `registry/domain/agents.rs` | agent 登记处、代拟名单落地与名字校验（从 `core/agents.rs` 搬来） |
+| `registry/detail/yaml_settings.rs` | `SettingsStore`：登记处四份 yaml 的读写（见 [REGISTRY_SPEC.md](../../REGISTRY_SPEC.md)） |
 | `llm/api.rs` | **入站能力面**：`Chat` / `ChatGateway` / `ModelCatalog` / `EnvelopeRepair` 与协议类型（`Msg` / `Completion` / `Chunk` / `ToolCall` / …）的对外名字 |
 | `llm/ports.rs` | 模型通道的端口族与协议类型（从 `core/ports.rs` 随能力搬出）；**通道事实**：`Channel`（摊平的解析结果）、`ToolMode`、`ReplayShape` / `ReplayReport`（批次 15 从 `registry` 移来） |
 | `workspace/api.rs` | **入站能力面**：模块清单 / 运行包库 / 执行档位与计划 / 沙箱寻址的对外名字 |
@@ -76,11 +77,13 @@
 | `tools/domain/module_tools.rs` | **清单 → 工具面**：`ToolDecl::schema` / `check_tools` / `module_tools` / `module_tool_params`（批次 15 从 `workspace` 移来） |
 | `tools/domain/roles.rs` | 系统工具与**角色**表（`systools/` 两张表） |
 | `tools/domain/fence.rs` | 一次工具执行的围栏策略（纯数据） |
+| `tools/detail/yaml_systools.rs` | `systools/tools.yaml` + `roles.yaml` → `SystemTools`（**工具总表与角色表是工具侧的事实**，不是提示词） |
 | `session/api.rs` | **入站能力面**：`SessionParams` / `AgentSession` / `TurnRun` / 行与事件词汇 / 历史视图的对外名字 |
 | `session/ports.rs` | `HistoryStore`：会话历史的持久化（从 `core/ports.rs` 随能力搬出；`core/ports.rs` 随之消失） |
 | `session/domain/session.rs` | 会话状态与簿记 + 工具面 `MemberTools` / `ModuleTools`（从 `core/session.rs` 搬来）+ `env_block`（批次 15 从 `tools` 移来） |
 | `session/domain/history.rs` | 会话元信息与历史视图的内存形态（从 `core/history.rs` 搬来） |
 | `session/domain/events.rs` | 呈现侧契约：`SessionEvent` 与介入请求的词汇、转录行 `LineView`（从 `core/events.rs` 搬来） |
+| `session/detail/fs_history.rs` | `HistoryStore`：`meta.yaml` + `transcript.jsonl` |
 | `session/domain/rewind.rs` | 回档的**纯行 / 事件算术**：`turn_of_line` / `last_line_within` / `truncate_events` / `cut_before_line` / `align_keep` / `line_reply_of` / `find_line_id`（从 `core/mod.rs` 搬来；**编排留在门面**） |
 | `collab/api.rs` | **入站能力面**：`CollabSession` / 讨论与执行引擎 / 回合与验收词汇 / 协作状态派生的对外名字 |
 | `collab/domain/collab.rs` | 协作会话状态机与讨论泵（从 `core/collab.rs` 搬来） |

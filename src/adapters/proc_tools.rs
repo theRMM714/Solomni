@@ -333,10 +333,11 @@ mod tests {
     fn receipt_markers_come_from_the_prompt_book() {
         use crate::capabilities::prompt::ports::PromptSource;
         let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        let prompts =
-            crate::adapters::YamlPrompts::new(root.join("prompts"), root.join("systools"))
-                .load()
-                .expect("内置提示词册必须合法");
+        let prompts = crate::capabilities::prompt::detail::yaml_prompts::YamlPrompts::new(
+            root.join("prompts"),
+        )
+        .load()
+        .expect("内置提示词册必须合法");
         let texts = prompts.core.tool_texts;
         let tools = ProcTools::new(
             PathBuf::from("solomni"),
@@ -453,10 +454,11 @@ mod tests {
     fn prompt_texts() -> crate::capabilities::prompt::api::ToolTexts {
         use crate::capabilities::prompt::ports::PromptSource;
         let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        let prompts =
-            crate::adapters::YamlPrompts::new(root.join("prompts"), root.join("systools"))
-                .load()
-                .expect("内置提示词册必须合法");
+        let prompts = crate::capabilities::prompt::detail::yaml_prompts::YamlPrompts::new(
+            root.join("prompts"),
+        )
+        .load()
+        .expect("内置提示词册必须合法");
         prompts.core.tool_texts
     }
 

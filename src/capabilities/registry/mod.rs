@@ -4,5 +4,6 @@
 //! 持久化机制在适配层（`ports::SettingsStore`）。
 
 pub mod api;
+pub mod detail;
 pub mod domain;
 pub mod ports;

@@ -11,7 +11,7 @@
 - 四份 yaml 都由用户经界面（终端或本地网页的设置）管理，落在 `.home/`——用户私有区、git 忽略。
 - 模块与工具**只持 id 引用**，永不接触通道与密钥（见 [MODULE_SPEC.md](MODULE_SPEC.md)「供应商与密钥」）。
 - 登记处是**内存事实的落盘形态**：结构定义在 `capabilities/registry/domain/`（`providers.rs` 与 `agents.rs`），
-  读写机制在 `adapters/yaml_settings.rs`（`SettingsStore` 端口）。
+  读写机制在 `capabilities/registry/detail/yaml_settings.rs`（`SettingsStore` 端口）。
 - 核心只校验，不纠正：解析失败 = 如实报错（装配失败），不静默兜底。
 
 ## 一、文件与职责
