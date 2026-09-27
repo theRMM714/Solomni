@@ -459,8 +459,19 @@ impl ConductorHandle {
                         sink(ev);
                     }
                     match &text {
-                        Some(t) => session.say(t, &identity, &mut live, &mut sink),
-                        None => session.continue_reply(&identity, &mut live, &mut sink),
+                        Some(t) => crate::capabilities::collab::api::say(
+                            &mut session,
+                            t,
+                            &identity,
+                            &mut live,
+                            &mut sink,
+                        ),
+                        None => crate::capabilities::collab::api::continue_reply(
+                            &mut session,
+                            &identity,
+                            &mut live,
+                            &mut sink,
+                        ),
                     }
                     (session, seq)
                 })
@@ -574,8 +585,9 @@ impl ConductorHandle {
                 // 这一回合的工具面**由角色表发放**（讨论席：动词 + 只读核实工具）。
                 let face = systools.role_face("discussant");
                 // 这一回合：身份块（现渲染）+ 本回合工具面 + 该会话的**对话** + 开场/轮转词 + 表态。
-                let ran =
-                    s.discussion_turn(&identity, face, turn, turn_id, round, &mut live, &mut sink);
+                let ran = crate::capabilities::collab::api::discussion_turn(
+                    &mut s, &identity, face, turn, turn_id, round, &mut live, &mut sink,
+                );
                 (s, ran)
             })
             .map_err(|e| format!("起成员线程失败：{}", e))?
@@ -658,7 +670,12 @@ impl ConductorHandle {
             .name("solomni-compact".to_string())
             .spawn(move || {
                 let mut s = session;
-                let made = s.compact_turn(&prompt, decl.as_ref(), &identity);
+                let made = crate::capabilities::collab::api::compact_turn(
+                    &mut s,
+                    &prompt,
+                    decl.as_ref(),
+                    &identity,
+                );
                 if let Ok(summary) = &made {
                     s.compact(up_to, summary);
                 }

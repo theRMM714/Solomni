@@ -437,7 +437,13 @@ impl Conductor {
                     let identity = session
                         .params()
                         .identity(&*self.prompt, session.tool_mode());
-                    session.dispatch_task(objective, &identity, &mut live, &mut sink);
+                    crate::capabilities::collab::api::dispatch_task(
+                        &mut session,
+                        objective,
+                        &identity,
+                        &mut live,
+                        &mut sink,
+                    );
                 }
                 let events = out.into_inner();
                 self.put_single_recorded(child, session, &events);
@@ -497,8 +503,9 @@ impl Conductor {
                 };
                 let mut sink = |e: SessionEvent| notes.borrow_mut().push(e);
                 let face = systools.role_face("discussant");
-                let t =
-                    s.discussion_turn(&identity, face, turn, turn_id, round, &mut live, &mut sink);
+                let t = crate::capabilities::collab::api::discussion_turn(
+                    &mut s, &identity, face, turn, turn_id, round, &mut live, &mut sink,
+                );
                 (t, notes.into_inner())
             };
             // 落盘到**它自己的目录**（讨论的核实痕迹随会话一起重启后还在）。
@@ -1921,7 +1928,13 @@ impl Conductor {
                 let mut events = prefix;
                 {
                     let mut sink = |ev: SessionEvent| events.push(ev);
-                    session.say(text, &identity, live, &mut sink);
+                    crate::capabilities::collab::api::say(
+                        &mut session,
+                        text,
+                        &identity,
+                        live,
+                        &mut sink,
+                    );
                 }
                 if live.cancelled() {
                     self.log.warn("conductor::single_say", "生成被用户中止");
@@ -2345,7 +2358,9 @@ impl Conductor {
                         {
                             let mut sink = |ev: SessionEvent| out.push(ev);
                             let identity = s.params().identity(&*self.prompt, s.tool_mode());
-                            s.continue_reply(&identity, live, &mut sink);
+                            crate::capabilities::collab::api::continue_reply(
+                                s, &identity, live, &mut sink,
+                            );
                         }
                         out
                     } else {

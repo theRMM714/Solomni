@@ -4,4 +4,5 @@
 //! `domain/` 只留纯派生（`collab_state`）。对外仍然只经 `api`。
 
 pub mod collab;
+pub mod driver;
 pub mod engine;

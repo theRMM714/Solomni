@@ -112,7 +112,8 @@
 | `session/domain/rewind.rs` | 回档的**纯行 / 事件算术**：`turn_of_line` / `last_line_within` / `truncate_events` / `cut_before_line` / `align_keep` / `line_reply_of` / `find_line_id` / `max_reply`（转录里用过的最大回复号，重建时续号）（**编排在协调业务**） |
 | `collab/api.rs` | **入站能力面**：`CollabSession` / 讨论与执行引擎 / 回合与验收词汇 / 协作状态派生的对外名字 |
 | `collab/service/collab.rs` | 协作会话状态机与讨论泵（批次 20f-1 从 `domain/` 归位） |
-| `collab/service/engine.rs` | 讨论/执行/验收引擎 + **唯一的轮循环** `converse_with` + **唯一的请求装配点** `assemble` + 回合驱动 + 行构造（核心操作回路与行回灌已归 `session`，`20e-1`） |
+| `collab/service/engine.rs` | 讨论/执行/验收引擎 + **唯一的轮循环** `converse_with` + **唯一的请求装配点** `assemble` + 行构造（核心操作回路与行回灌归 `session`，`20e-1`） |
+| `collab/service/driver.rs` | **回合驱动**（自由函数，会话当参数）：`say` / `dispatch_task` / `discussion_turn` / `continue_reply` / `compact_turn` / `maybe_compact` / `run_rounds` / `rounds_events` / `run`。为什么不是 `impl AgentSession`：给别人的类型写 impl 是另一种互相引入（R1），批次 20f-2 改判 |
 | `collab/domain/collab_state.rs` | 「转录即状态」的协作状态派生（纯函数、可回放） |
 | `llm/domain/envelope.rs` | 发言信封解析（纯逻辑）：`ToolInvoke.body` = 信封之后的正文；判定**未闭合 / 裸控制字符 / 语法错 / 字段不合法**四类；未闭合带上 EOF 状态 |
 
