@@ -240,7 +240,7 @@ fn yaml_settings_store_defaults_saves_and_reports_malformed_files() {
     want.app.streaming = false;
     want.agents.insert(
         "甲".to_string(),
-        crate::capabilities::registry::api::Agent {
+        crate::capabilities::registry::domain::agents::Agent {
             modules: vec!["a".to_string()],
             model: None,
             note: "n".to_string(),

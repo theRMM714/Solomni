@@ -1146,21 +1146,24 @@ impl SessionOps for CoreHandle {
 
 impl RegistryOps for CoreHandle {
     fn providers(&self) -> Result<Vec<ProviderView>, String> {
-        self.call(|core| Ok(core.provider_views()))
+        self.call(|core| Ok(core.registry().provider_views()))
     }
     fn upsert_provider(&self, id: &str, base_url: &str, api_key: &str) -> Result<(), String> {
         let (id, base_url, api_key) = (id.to_string(), base_url.to_string(), api_key.to_string());
-        self.call(move |core| core.provider_upsert(&id, &base_url, &api_key))
+        self.call(move |core| {
+            core.registry_mut()
+                .provider_upsert(&id, &base_url, &api_key)
+        })
     }
     fn remove_provider(&self, id: &str) -> Result<bool, String> {
         let id = id.to_string();
-        self.call(move |core| core.provider_remove(&id))
+        self.call(move |core| core.registry_mut().provider_remove(&id))
     }
     fn models(&self) -> Result<Vec<ModelView>, String> {
-        self.call(|core| Ok(core.model_views()))
+        self.call(|core| Ok(core.registry().model_views()))
     }
     fn core_model(&self) -> Result<Option<String>, String> {
-        self.call(|core| Ok(core.core_model()))
+        self.call(|core| Ok(core.registry().core_model()))
     }
     fn upsert_model(
         &self,
@@ -1178,23 +1181,26 @@ impl RegistryOps for CoreHandle {
             provider.to_string(),
             note.to_string(),
         );
-        self.call(move |core| core.model_upsert(&id, &name, &api_model, &provider, &note, context))
+        self.call(move |core| {
+            core.registry_mut()
+                .model_upsert(&id, &name, &api_model, &provider, &note, context)
+        })
     }
     fn remove_model(&self, id: &str) -> Result<bool, String> {
         let id = id.to_string();
-        self.call(move |core| core.model_remove(&id))
+        self.call(move |core| core.registry_mut().model_remove(&id))
     }
     fn set_core_model(&self, id: &str) -> Result<bool, String> {
         let id = id.to_string();
-        self.call(move |core| core.core_set_model(&id))
+        self.call(move |core| core.registry_mut().core_set_model(&id))
     }
     fn agents(&self) -> Result<Vec<AgentView>, String> {
-        self.call(|core| Ok(core.agent_views()))
+        self.call(|core| Ok(core.registry().agent_views()))
     }
 
     fn pick_agents(&self, names: &[String]) -> Result<Vec<AgentView>, String> {
         let names = names.to_vec();
-        self.call(move |core| core.pick_agents(&names))
+        self.call(move |core| core.registry().pick_agents(&names))
     }
     fn upsert_agent(
         &self,
@@ -1209,35 +1215,40 @@ impl RegistryOps for CoreHandle {
             model.to_string(),
             note.to_string(),
         );
-        self.call(move |core| core.agent_upsert(&name, &modules, &model, &note))
+        // 模块存在性按**清单**校验：清单归 workspace，登记处只认事实，所以清单由这里取一份给它。
+        self.call(move |core| {
+            let roster = core.scan();
+            core.registry_mut()
+                .agent_upsert(&name, &modules, &model, &note, &roster)
+        })
     }
     fn remove_agent(&self, name: &str) -> Result<bool, String> {
         let name = name.to_string();
-        self.call(move |core| core.agent_remove(&name))
+        self.call(move |core| core.registry_mut().agent_remove(&name))
     }
     fn settings(&self) -> Result<AppSettings, String> {
-        self.call(|core| Ok(core.app_settings()))
+        self.call(|core| Ok(core.registry().app_settings()))
     }
     fn set_settings(&self, app: AppSettings) -> Result<(), String> {
-        self.call(move |core| core.set_app_settings(app))
+        self.call(move |core| core.registry_mut().set_app_settings(app))
     }
     fn discover_models(&self, provider_id: &str) -> Result<Vec<String>, String> {
         let provider_id = provider_id.to_string();
-        self.call(move |core| core.discover_models(&provider_id))
+        self.call(move |core| core.registry().discover_models(&provider_id))
     }
     fn probe_model_tools(
         &self,
         id: &str,
     ) -> Result<crate::capabilities::llm::api::ProbeOutcome, String> {
         let id = id.to_string();
-        self.call(move |core| core.probe_model_tools(&id))
+        self.call(move |core| core.registry_mut().probe_model_tools(&id))
     }
     fn probe_replay_shape(
         &self,
         id: &str,
     ) -> Result<crate::capabilities::llm::api::ReplayReport, String> {
         let id = id.to_string();
-        self.call(move |core| core.probe_replay_shape(&id))
+        self.call(move |core| core.registry().probe_replay_shape(&id))
     }
 }
 

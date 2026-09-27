@@ -106,14 +106,26 @@ fn main() {
     let packages = capabilities::workspace::detail::FsPackages::new(root.join("runtimes"));
     // 端点记忆：谁先通了就固定谁，后续会话不再反复探测候选。
     let memo = capabilities::llm::detail::endpoint::memo_new();
-    let gateway = capabilities::llm::detail::HttpGateway::with_log(
-        std::sync::Arc::clone(&log),
-        std::sync::Arc::clone(&memo),
+    let gateway: Arc<dyn capabilities::llm::api::ChatGateway + Send + Sync> = Arc::new(
+        capabilities::llm::detail::HttpGateway::with_log(Arc::clone(&log), Arc::clone(&memo)),
     );
-    let catalog = capabilities::llm::detail::HttpModelCatalog::with_log(
-        std::sync::Arc::clone(&log),
-        std::sync::Arc::clone(&memo),
+    let catalog: Arc<dyn capabilities::llm::api::ModelCatalog + Send + Sync> = Arc::new(
+        capabilities::llm::detail::HttpModelCatalog::with_log(Arc::clone(&log), Arc::clone(&memo)),
     );
+    // **登记处能力**：四份 yaml 的状态与用例都在它里面（core 只按 `Registry` 用它，看不见字段）。
+    // 通道探测与模型发现都经它，所以 gateway / catalog 由组合根同时交给它与 core（同一个 Arc）。
+    let registry = match capabilities::registry::service::RegistryService::new(
+        Arc::new(store),
+        catalog,
+        Arc::clone(&gateway),
+        Arc::clone(&log),
+    ) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("[装配失败] {}", e);
+            std::process::exit(1);
+        }
+    };
     let prompts =
         capabilities::prompt::detail::yaml_prompts::YamlPrompts::new(root.join("prompts"));
     // 册子只读一次：core 与适配层（工具回执里的那些收尾标记）共用同一份。
@@ -162,14 +174,13 @@ fn main() {
     let repair = capabilities::llm::detail::UnambiguousRepair;
 
     let mut core = match core::Core::new(
-        Arc::new(store),
+        Box::new(registry),
         Arc::new(history),
         Arc::new(workspace),
         Arc::new(source),
         Arc::new(packages),
         Arc::new(capabilities::tools::detail::confine::FenceHostAdapter),
-        Arc::new(gateway),
-        Arc::new(catalog),
+        Arc::clone(&gateway),
         Arc::new(tools),
         Arc::new(io),
         Arc::new(repair),
@@ -191,7 +202,7 @@ fn main() {
             eprintln!("用法：solomni --probe-tools <模型 id>");
             std::process::exit(2);
         };
-        match core.probe_model_tools(id) {
+        match core.registry_mut().probe_model_tools(id) {
             Ok(core::api::ProbeOutcome::Supported { detail }) => {
                 println!("[探测] 模型 {}：支持原生工具调用（{}）", id, detail);
                 println!("[探测] 已把 models.yaml 的 tools 写成 native");
@@ -221,7 +232,7 @@ fn main() {
             eprintln!("用法：solomni --probe-replay <模型 id>");
             std::process::exit(2);
         };
-        match core.probe_replay_shape(id) {
+        match core.registry().probe_replay_shape(id) {
             Ok(report) => {
                 println!("[回放形状] 模型 {}（只报事实，不改登记处）：", id);
                 for s in &report.shapes {
@@ -267,7 +278,7 @@ fn main() {
         let allow = match env_flag.as_deref() {
             Some("1") => true,
             Some("0") => false,
-            _ => core.app_settings().fence_write,
+            _ => core.registry().app_settings().fence_write,
         };
         write_allowed.store(allow, std::sync::atomic::Ordering::Relaxed);
         allow_fence_write = allow;
@@ -287,7 +298,7 @@ fn main() {
             usable(cap.tree),
             cap.note
         );
-        let ro = core.app_settings().fence_read.len();
+        let ro = core.registry().app_settings().fence_read.len();
         println!(
             "[围栏] 本次实际：文件系统={} 断网={} 进程树={}；容器授权={}；只读根={} 个（未授权时只放行进程树与资源上限，不写本机任何权限项；要启用：设置里打开，或 .home/settings.yaml 写 fence_write: true / fence_read: [路径…]）",
             usable(fs),

@@ -170,34 +170,41 @@ pub(crate) fn settings_resolves_model_to_channel() {
 #[test]
 pub(crate) fn provider_lifecycle_and_key_never_leaks_to_view() {
     let mut core = core_with(vec![module_of("a")], gw(BTreeMap::new(), vec!["[]".into()]));
-    core.provider_upsert("p1", "http://x", "sk-密钥XYZ")
+    core.registry_mut()
+        .provider_upsert("p1", "http://x", "sk-密钥XYZ")
         .unwrap();
-    for v in core.provider_views() {
+    for v in core.registry().provider_views() {
         // 展示文案由呈现层拼（core 不再提供 CLI 行），"密钥永不出现"这条红线两处都要成立。
         let shown = format!("{}  {}", v.id, v.base_url);
         assert!(!shown.contains("sk-密钥XYZ"), "视图出现密钥：{}", shown);
         assert!(!format!("{:?}", v).contains("sk-密钥XYZ"));
     }
     // 仍被模型引用时拒绝删除供应商（不静默级联）
-    core.model_upsert("m1", "M", "api-m", "p1", "快", 0)
+    core.registry_mut()
+        .model_upsert("m1", "M", "api-m", "p1", "快", 0)
         .unwrap();
     assert!(core
+        .registry_mut()
         .provider_remove("p1")
         .unwrap_err()
         .contains("仍被模型引用"));
-    assert!(core.model_remove("m1").unwrap());
-    assert!(core.provider_remove("p1").unwrap());
+    assert!(core.registry_mut().model_remove("m1").unwrap());
+    assert!(core.registry_mut().provider_remove("p1").unwrap());
 }
 
 /// 模型的上下文窗口：给了就改；表单没带（0）时**保留现值**——编辑别的字段不该顺手重置它。
 #[test]
 pub(crate) fn model_context_is_kept_when_the_form_omits_it() {
     let mut core = core_with(vec![module_of("a")], gw(BTreeMap::new(), vec!["[]".into()]));
-    core.provider_upsert("p1", "http://x", "k").unwrap();
-    core.model_upsert("m", "M", "api-m", "p1", "", 64_000)
+    core.registry_mut()
+        .provider_upsert("p1", "http://x", "k")
+        .unwrap();
+    core.registry_mut()
+        .model_upsert("m", "M", "api-m", "p1", "", 64_000)
         .unwrap();
     let stored = |c: &crate::core::Core| {
-        c.model_views()
+        c.registry()
+            .model_views()
             .iter()
             .find(|v| v.id == "m")
             .map(|v| v.context)
@@ -205,7 +212,8 @@ pub(crate) fn model_context_is_kept_when_the_form_omits_it() {
     };
     assert_eq!(stored(&core), 64_000, "给了窗口就按它存");
     // 再存一次（比如只改说明），不带窗口 → 保留 64000，而不是被重置成缺省。
-    core.model_upsert("m", "M2", "api-m", "p1", "改了说明", 0)
+    core.registry_mut()
+        .model_upsert("m", "M2", "api-m", "p1", "改了说明", 0)
         .unwrap();
     assert_eq!(stored(&core), 64_000, "表单没带窗口时保留现值");
 }
@@ -219,27 +227,36 @@ pub(crate) fn model_guards_core_default_and_discovery_uses_stored_provider() {
         Arc::new(SilentRunner),
         Arc::clone(&catalog),
     );
-    core.provider_upsert("p2", "http://x", "k").unwrap();
+    core.registry_mut()
+        .provider_upsert("p2", "http://x", "k")
+        .unwrap();
     assert_eq!(
-        core.discover_models("p2").unwrap(),
+        core.registry().discover_models("p2").unwrap(),
         vec!["m-a".to_string(), "m-b".to_string()]
     );
     assert_eq!(catalog.seen.lock().expect("锁")[0], "http://x");
     assert!(core
+        .registry()
         .discover_models("ghost")
         .unwrap_err()
         .contains("无此供应商"));
     // 引用了不存在的供应商 → 拒绝登记
     assert!(core
+        .registry_mut()
         .model_upsert("bad", "B", "b", "ghost", "", 0)
         .unwrap_err()
         .contains("无此供应商"));
     // 核心默认模型不可删；换默认后旧的可删
-    assert!(core.model_remove("m").unwrap_err().contains("核心默认模型"));
-    core.model_upsert("m2", "M2", "api-m2", "p2", "", 0)
+    assert!(core
+        .registry_mut()
+        .model_remove("m")
+        .unwrap_err()
+        .contains("核心默认模型"));
+    core.registry_mut()
+        .model_upsert("m2", "M2", "api-m2", "p2", "", 0)
         .unwrap();
-    assert!(core.core_set_model("m2").unwrap());
-    assert!(core.model_remove("m").unwrap());
+    assert!(core.registry_mut().core_set_model("m2").unwrap());
+    assert!(core.registry_mut().model_remove("m").unwrap());
 }
 
 #[test]
@@ -737,9 +754,7 @@ pub(crate) fn suggest_models_single_mode_keeps_lone_pick_as_is() {
             ],
         ),
     );
-    reuse
-        .agent_upsert("调研", &["a".to_string()], "m", "")
-        .unwrap();
+    agent_upsert(&mut reuse, "调研", &["a"], "m", "").unwrap();
     let (got, _rows) = reuse.suggest_models("做个东西", WorkMode::Single).unwrap();
     assert_eq!(got.len(), 1);
     assert!(got[0].reuse, "一条复用项必须保留 reuse");
@@ -752,8 +767,7 @@ pub(crate) fn suggest_models_reuses_stored_agent_without_suggesting_model() {
         // 只有复用项（模型与模块都取登记处自己的）；幽灵项应被拒收。
         "{\"type\":\"tool\",\"name\":\"suggest\",\"args\":{\"agents\":[{\"agent\":\"调研\",\"why\":\"正好用得上\"},{\"agent\":\"幽灵\",\"why\":\"不在登记处\"}]}}".to_string(),
     ]));
-    core.agent_upsert("调研", &["a".to_string()], "m", "说明")
-        .unwrap();
+    agent_upsert(&mut core, "调研", &["a"], "m", "说明").unwrap();
     let (out, _rows) = core.suggest_models("做个东西", WorkMode::Collab).unwrap();
     assert_eq!(out.len(), 1, "非法的复用项必须被拒收");
     assert!(out[0].reuse, "复用项要如实标记");
@@ -771,9 +785,7 @@ pub(crate) fn suggest_models_reuses_stored_agent_without_suggesting_model() {
             ],
         ),
     );
-    empty
-        .agent_upsert("调研", &["a".to_string()], "m", "")
-        .unwrap();
+    agent_upsert(&mut empty, "调研", &["a"], "m", "").unwrap();
     assert!(empty
         .suggest_models("做个东西", WorkMode::Collab)
         .unwrap_err()
@@ -880,26 +892,21 @@ pub(crate) fn agent_crud_and_work_with_agents() {
         vec![module_of("a"), module_of("b")],
         gw(BTreeMap::new(), vec!["[]".into()]),
     );
-    assert!(core
-        .agent_upsert("", &["a".to_string()], "", "")
+    assert!(agent_upsert(&mut core, "", &["a"], "", "")
         .unwrap_err()
         .contains("不能为空"));
-    assert!(core
-        .agent_upsert("x", &[], "", "")
+    assert!(agent_upsert(&mut core, "x", &[], "", "")
         .unwrap_err()
         .contains("至少要有一个模块"));
-    assert!(core
-        .agent_upsert("x", &["ghost".to_string()], "", "")
+    assert!(agent_upsert(&mut core, "x", &["ghost"], "", "")
         .unwrap_err()
         .contains("无此模块"));
-    assert!(core
-        .agent_upsert("x", &["a".to_string()], "nope", "")
+    assert!(agent_upsert(&mut core, "x", &["a"], "nope", "")
         .unwrap_err()
         .contains("无此模型"));
-    core.agent_upsert("调研", &["a".to_string(), "b".to_string()], "m", "说明")
-        .unwrap();
-    assert_eq!(core.agent_views().len(), 1);
-    assert_eq!(core.agent_views()[0].modules.len(), 2);
+    agent_upsert(&mut core, "调研", &["a", "b"], "m", "说明").unwrap();
+    assert_eq!(core.registry().agent_views().len(), 1);
+    assert_eq!(core.registry().agent_views()[0].modules.len(), 2);
 
     // 组合：一个 agent（多模块合并）
     let spec = WorkSpec {
@@ -952,8 +959,8 @@ pub(crate) fn agent_crud_and_work_with_agents() {
         .unwrap_err()
         .contains("被多个 agent"));
 
-    assert!(core.agent_remove("调研").unwrap());
-    assert!(core.agent_views().is_empty());
+    assert!(core.registry_mut().agent_remove("调研").unwrap());
+    assert!(core.registry().agent_views().is_empty());
 }
 
 #[test]
@@ -5651,14 +5658,17 @@ pub(crate) fn a_probe_writes_back_only_conclusive_results() {
                 outcome: Arc::new(Mutex::new(outcome)),
             },
         );
-        core.provider_upsert("p", "http://x", "k")
+        core.registry_mut()
+            .provider_upsert("p", "http://x", "k")
             .expect("登记供应商");
-        core.model_upsert("m", "M", "api-m", "p", "", 0)
+        core.registry_mut()
+            .model_upsert("m", "M", "api-m", "p", "", 0)
             .expect("登记模型");
         core
     };
     let mode_of = |core: &Core| {
-        core.model_views()
+        core.registry()
+            .model_views()
             .iter()
             .find(|v| v.id == "m")
             .map(|v| v.tools)
@@ -5674,7 +5684,7 @@ pub(crate) fn a_probe_writes_back_only_conclusive_results() {
         "探测前是缺省 envelope"
     );
     assert!(matches!(
-        core.probe_model_tools("m"),
+        core.registry_mut().probe_model_tools("m"),
         Ok(ProbeOutcome::Supported { .. })
     ));
     assert_eq!(mode_of(&core), Some(ToolMode::Native), "支持就写回 native");
@@ -5684,7 +5694,7 @@ pub(crate) fn a_probe_writes_back_only_conclusive_results() {
         detail: "供应商说 tools 不认识".to_string(),
     });
     assert!(matches!(
-        core.probe_model_tools("m"),
+        core.registry_mut().probe_model_tools("m"),
         Ok(ProbeOutcome::Unsupported { .. })
     ));
     assert_eq!(
@@ -5698,7 +5708,7 @@ pub(crate) fn a_probe_writes_back_only_conclusive_results() {
         detail: "没发起调用".to_string(),
     });
     assert!(matches!(
-        core.probe_model_tools("m"),
+        core.registry_mut().probe_model_tools("m"),
         Ok(ProbeOutcome::Unknown { .. })
     ));
     assert_eq!(
@@ -5708,7 +5718,7 @@ pub(crate) fn a_probe_writes_back_only_conclusive_results() {
     );
 
     // 无此模型 → 如实报错
-    assert!(core.probe_model_tools("ghost").is_err());
+    assert!(core.registry_mut().probe_model_tools("ghost").is_err());
 }
 
 /// 原生通道的脚本替身：一步 = 一次"原生工具调用"或一段文本；
@@ -5991,7 +6001,7 @@ pub(crate) fn tool_mode_change_needs_no_session_rebuild() {
     );
 
     // 登记处把模型判成原生（产品里就是「测工具调用」那一下）：形态不钉在会话里。
-    core.probe_model_tools("m").expect("探测");
+    core.registry_mut().probe_model_tools("m").expect("探测");
     with_live(|l| core.single_say(&sid, "问二", l)).unwrap();
     let after = core.single_identity(&sid).expect("身份块");
     assert!(
@@ -6405,9 +6415,11 @@ pub(crate) fn changing_the_declared_mode_takes_effect_on_the_next_generation() {
             outcome: Arc::clone(&outcome),
         },
     );
-    core.provider_upsert("p", "http://x", "k")
+    core.registry_mut()
+        .provider_upsert("p", "http://x", "k")
         .expect("登记供应商");
-    core.model_upsert("m", "M", "api-m", "p", "", 0)
+    core.registry_mut()
+        .model_upsert("m", "M", "api-m", "p", "", 0)
         .expect("登记模型");
     let sid = core
         .create_work(WorkSpec {
@@ -6443,7 +6455,7 @@ pub(crate) fn changing_the_declared_mode_takes_effect_on_the_next_generation() {
     *outcome.lock().expect("锁") = ProbeOutcome::Supported {
         detail: "支持".to_string(),
     };
-    core.probe_model_tools("m").expect("探测");
+    core.registry_mut().probe_model_tools("m").expect("探测");
     let e2 = with_live(|l| core.single_say(&sid, "再问", l)).expect("发言");
     assert!(
         notes(&e2).iter().any(|n| n.contains("原生工具调用")),
@@ -7471,15 +7483,20 @@ pub(crate) fn diagnose_text_spells_out_every_reason() {
 pub(crate) fn vm_tier_is_refused_when_the_machine_cannot_carry_it() {
     let mut member = BTreeMap::new();
     member.insert("a".to_string(), vec!["[]".into()]);
+    let gateway: Arc<dyn ChatGateway + Send + Sync> =
+        Arc::new(gw(member.clone(), vec!["[]".into()]));
     let mut core = Core::new(
-        Arc::new(InMemorySettings::with_tier(Tier::Vm)),
+        registry_service(
+            InMemorySettings::with_tier(Tier::Vm),
+            Arc::new(FakeCatalog::new(vec!["m".to_string()])),
+            Arc::clone(&gateway),
+        ),
         Arc::new(InMemoryHistory::new()),
         Arc::new(InMemoryWorkspace::new()),
         Arc::new(VecSource(vec![module_of("a")])),
         Arc::new(InMemoryPackages::empty()),
         Arc::new(NoFenceHost),
-        Arc::new(gw(member.clone(), vec!["[]".into()])),
-        Arc::new(FakeCatalog::new(vec!["m".to_string()])),
+        gateway,
         Arc::new(SilentRunner),
         Arc::new(InMemorySysIo::new()),
         Arc::new(NoRepair),
@@ -7505,15 +7522,19 @@ pub(crate) fn vm_tier_is_refused_when_the_machine_cannot_carry_it() {
     }
 
     // 编辑路径：基础根由用户给定（这里给一个不存在的），所以这一条不随机器变——必须拒绝、档位保持原样。
+    let gateway2: Arc<dyn ChatGateway + Send + Sync> = Arc::new(gw(member, vec!["[]".into()]));
     let mut core2 = Core::new(
-        Arc::new(InMemorySettings::new()),
+        registry_service(
+            InMemorySettings::new(),
+            Arc::new(FakeCatalog::new(vec!["m".to_string()])),
+            Arc::clone(&gateway2),
+        ),
         Arc::new(InMemoryHistory::new()),
         Arc::new(InMemoryWorkspace::new()),
         Arc::new(VecSource(vec![module_of("a")])),
         Arc::new(InMemoryPackages::empty()),
         Arc::new(NoFenceHost),
-        Arc::new(gw(member, vec!["[]".into()])),
-        Arc::new(FakeCatalog::new(vec!["m".to_string()])),
+        gateway2,
         Arc::new(SilentRunner),
         Arc::new(InMemorySysIo::new()),
         Arc::new(NoRepair),
@@ -7624,15 +7645,19 @@ pub(crate) fn module_without_runtime_is_denied_with_reason() {
     // 设置里的默认档位是**创建**时的档位来源：这里用本机档建（虚拟机档现在一律不可选），
     // 建好之后再把这条件裁成"已存在的虚拟机档会话"。
     let hist = Arc::new(InMemoryHistory::new());
+    let gateway: Arc<dyn ChatGateway + Send + Sync> = Arc::new(gw(member, vec!["[]".into()]));
     let mut core = Core::new(
-        Arc::new(InMemorySettings::with_tier(Tier::Host)),
+        registry_service(
+            InMemorySettings::with_tier(Tier::Host),
+            Arc::new(FakeCatalog::new(vec!["m".to_string()])),
+            Arc::clone(&gateway),
+        ),
         Arc::clone(&hist) as Arc<dyn HistoryStore + Send + Sync>,
         Arc::new(InMemoryWorkspace::new()),
         Arc::new(VecSource(vec![mod_a])),
         Arc::new(InMemoryPackages::empty()),
         Arc::new(NoFenceHost),
-        Arc::new(gw(member, vec!["[]".into()])),
-        Arc::new(FakeCatalog::new(vec!["m".to_string()])),
+        gateway,
         Arc::clone(&runner) as Arc<dyn ToolRunner + Send + Sync>,
         Arc::new(InMemorySysIo::new()),
         Arc::new(NoRepair),
@@ -8041,16 +8066,21 @@ pub(crate) fn deleting_a_session_asks_the_fence_to_release_its_grants() {
         vec![agent_meta("甲", &["a"], None)],
         ExecSpec::default(),
     );
+    let gateway: Arc<dyn ChatGateway + Send + Sync> =
+        Arc::new(gw(BTreeMap::new(), vec!["[]".into()]));
     let mut core = Core::new(
-        Arc::new(InMemorySettings::new()),
+        registry_service(
+            InMemorySettings::new(),
+            Arc::new(FakeCatalog::new(vec!["m".to_string()])),
+            Arc::clone(&gateway),
+        ),
         Arc::clone(&hist)
             as Arc<dyn crate::capabilities::session::ports::HistoryStore + Send + Sync>,
         Arc::new(InMemoryWorkspace::new()),
         Arc::new(VecSource(vec![module_of("a")])),
         Arc::new(InMemoryPackages::empty()),
         Arc::clone(&fence) as Arc<dyn crate::capabilities::tools::ports::FenceHost + Send + Sync>,
-        Arc::new(gw(BTreeMap::new(), vec!["[]".into()])),
-        Arc::new(FakeCatalog::new(vec!["m".to_string()])),
+        gateway,
         Arc::new(SilentRunner),
         Arc::new(InMemorySysIo::new()),
         Arc::new(NoRepair),
@@ -8270,15 +8300,19 @@ pub(crate) fn native_core(
     history: Arc<InMemoryHistory>,
     io: Arc<InMemorySysIo>,
 ) -> Core {
+    let gateway: Arc<dyn ChatGateway + Send + Sync> = Arc::new(gateway);
     Core::new(
-        Arc::new(InMemorySettings::new()),
+        registry_service(
+            InMemorySettings::new(),
+            Arc::new(FakeCatalog::new(vec!["m".to_string()])),
+            Arc::clone(&gateway),
+        ),
         history,
         Arc::new(InMemoryWorkspace::new()),
         Arc::new(VecSource(vec![module_of("a")])),
         Arc::new(InMemoryPackages::empty()),
         Arc::new(NoFenceHost),
-        Arc::new(gateway),
-        Arc::new(FakeCatalog::new(vec!["m".to_string()])),
+        gateway,
         Arc::new(SilentRunner),
         io,
         Arc::new(NoRepair),
@@ -8325,7 +8359,8 @@ pub(crate) fn native_multi_call_rebuilds_identically_to_live() {
         Arc::clone(&hist),
         Arc::clone(&io),
     );
-    core.probe_model_tools("m")
+    core.registry_mut()
+        .probe_model_tools("m")
         .expect("探测（把这条通道判成原生）");
     let sid = core
         .create_work(work("w", WorkMode::Single, &["a"]))
@@ -8353,7 +8388,7 @@ pub(crate) fn native_multi_call_rebuilds_identically_to_live() {
         Arc::clone(&hist),
         Arc::clone(&io),
     );
-    core2.probe_model_tools("m").expect("探测");
+    core2.registry_mut().probe_model_tools("m").expect("探测");
     let rows = transcript_rows(&events).len() as u64;
     core2.rewind(&sid, rows).unwrap();
     let rebuilt = core2.single_history(&sid).unwrap();
@@ -8413,7 +8448,7 @@ pub(crate) fn rewind_never_splits_a_reply() {
         Arc::clone(&hist),
         Arc::clone(&io),
     );
-    core.probe_model_tools("m").expect("探测");
+    core.registry_mut().probe_model_tools("m").expect("探测");
     let sid = core
         .create_work(work("w", WorkMode::Single, &["a"]))
         .unwrap()

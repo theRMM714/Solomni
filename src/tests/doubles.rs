@@ -918,6 +918,39 @@ impl crate::core::api::LogOps for NoopLogOps {
     fn warn(&self, _at: &str, _msg: &str) {}
     fn error(&self, _at: &str, _msg: &str) {}
 }
+/// 登记处能力的测试装配：内存登记处 + 指定模型目录 + 指定通道 + 空日志。
+/// 生产里这些端口由组合根注入，测试这里用替身顶。
+pub(crate) fn registry_service(
+    store: InMemorySettings,
+    catalog: Arc<FakeCatalog>,
+    gateway: Arc<dyn crate::capabilities::llm::api::ChatGateway + Send + Sync>,
+) -> Box<dyn crate::capabilities::registry::api::Registry> {
+    Box::new(
+        crate::capabilities::registry::service::RegistryService::new(
+            Arc::new(store),
+            catalog,
+            gateway,
+            Arc::new(crate::kernel::log::NoopLog),
+        )
+        .expect("内存登记处装配不应失败"),
+    )
+}
+
+/// 登记一个 agent（测试装配用）：**校验用的模块清单由调用方取一份**交给登记处——
+/// 清单归 workspace，登记处只认事实（见 docs/architecture/refactor-plan.md §3.1）。
+pub(crate) fn agent_upsert(
+    core: &mut Core,
+    name: &str,
+    modules: &[&str],
+    model: &str,
+    note: &str,
+) -> Result<(), String> {
+    let roster = core.scan();
+    let modules: Vec<String> = modules.iter().map(|m| m.to_string()).collect();
+    core.registry_mut()
+        .agent_upsert(name, &modules, model, note, &roster)
+}
+
 pub(crate) fn core_with(modules: Vec<Module>, gateway: ScriptGateway) -> Core {
     core_with_runner(modules, gateway, Arc::new(SilentRunner))
 }
@@ -928,15 +961,20 @@ pub(crate) fn core_with_workspace(
     gateway: ScriptGateway,
     ws: Arc<InMemoryWorkspace>,
 ) -> Core {
+    let gateway: Arc<dyn crate::capabilities::llm::api::ChatGateway + Send + Sync> =
+        Arc::new(gateway);
     Core::new(
-        Arc::new(InMemorySettings::new()),
+        registry_service(
+            InMemorySettings::new(),
+            Arc::new(FakeCatalog::new(vec!["m".to_string()])),
+            Arc::clone(&gateway),
+        ),
         Arc::new(InMemoryHistory::new()),
         ws,
         Arc::new(VecSource(modules)),
         Arc::new(InMemoryPackages::empty()),
         Arc::new(NoFenceHost),
-        Arc::new(gateway),
-        Arc::new(FakeCatalog::new(vec!["m".to_string()])),
+        gateway,
         Arc::new(SilentRunner),
         Arc::new(InMemorySysIo::new()),
         Arc::new(NoRepair),
@@ -1024,15 +1062,16 @@ pub(crate) fn core_with_pkgs(
     io: Arc<InMemorySysIo>,
     packages: Arc<InMemoryPackages>,
 ) -> Core {
+    let gateway: Arc<dyn crate::capabilities::llm::api::ChatGateway + Send + Sync> =
+        Arc::new(gateway);
     Core::new(
-        Arc::new(InMemorySettings::new()),
+        registry_service(InMemorySettings::new(), catalog, Arc::clone(&gateway)),
         history,
         Arc::new(InMemoryWorkspace::new()),
         Arc::new(VecSource(modules)),
         packages,
         Arc::new(NoFenceHost),
-        Arc::new(gateway),
-        catalog,
+        gateway,
         runner,
         io,
         Arc::new(NoRepair),
@@ -1046,15 +1085,20 @@ pub(crate) fn core_with_pkgs(
 
 /// 用**指定登记处**装配（断言"全局设置是流式的上限、预算全局通用"这类判据）。
 pub(crate) fn core_with_settings(store: InMemorySettings) -> Core {
+    let gateway: Arc<dyn crate::capabilities::llm::api::ChatGateway + Send + Sync> =
+        Arc::new(gw(BTreeMap::new(), Vec::new()));
     Core::new(
-        Arc::new(store),
+        registry_service(
+            store,
+            Arc::new(FakeCatalog::new(vec!["m".to_string()])),
+            Arc::clone(&gateway),
+        ),
         Arc::new(InMemoryHistory::new()),
         Arc::new(InMemoryWorkspace::new()),
         Arc::new(VecSource(Vec::new())),
         Arc::new(InMemoryPackages::empty()),
         Arc::new(NoFenceHost),
-        Arc::new(gw(BTreeMap::new(), Vec::new())),
-        Arc::new(FakeCatalog::new(vec!["m".to_string()])),
+        gateway,
         Arc::new(SilentRunner),
         Arc::new(InMemorySysIo::new()),
         Arc::new(NoRepair),
@@ -1079,15 +1123,20 @@ pub(crate) fn core_with_io_gateway(
     gateway: impl ChatGateway + Send + Sync + 'static,
     io: Arc<InMemorySysIo>,
 ) -> Core {
+    let gateway: Arc<dyn crate::capabilities::llm::api::ChatGateway + Send + Sync> =
+        Arc::new(gateway);
     Core::new(
-        Arc::new(InMemorySettings::new()),
+        registry_service(
+            InMemorySettings::new(),
+            Arc::new(FakeCatalog::new(vec!["m".to_string()])),
+            Arc::clone(&gateway),
+        ),
         Arc::new(InMemoryHistory::new()),
         Arc::new(InMemoryWorkspace::new()),
         Arc::new(VecSource(modules)),
         Arc::new(InMemoryPackages::empty()),
         Arc::new(NoFenceHost),
-        Arc::new(gateway),
-        Arc::new(FakeCatalog::new(vec!["m".to_string()])),
+        gateway,
         Arc::new(SilentRunner),
         io,
         Arc::new(NoRepair),
@@ -1104,15 +1153,20 @@ pub(crate) fn core_with_gateway(
     modules: Vec<Module>,
     gateway: impl ChatGateway + Send + Sync + 'static,
 ) -> Core {
+    let gateway: Arc<dyn crate::capabilities::llm::api::ChatGateway + Send + Sync> =
+        Arc::new(gateway);
     Core::new(
-        Arc::new(InMemorySettings::new()),
+        registry_service(
+            InMemorySettings::new(),
+            Arc::new(FakeCatalog::new(vec!["m".to_string()])),
+            Arc::clone(&gateway),
+        ),
         Arc::new(InMemoryHistory::new()),
         Arc::new(InMemoryWorkspace::new()),
         Arc::new(VecSource(modules)),
         Arc::new(InMemoryPackages::empty()),
         Arc::new(NoFenceHost),
-        Arc::new(gateway),
-        Arc::new(FakeCatalog::new(vec!["m".to_string()])),
+        gateway,
         Arc::new(SilentRunner),
         Arc::new(InMemorySysIo::new()),
         Arc::new(NoRepair),

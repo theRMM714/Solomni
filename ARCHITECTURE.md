@@ -10,28 +10,24 @@
 依赖箭头只有一种画法（每层只指向它的下层）：
 
 ```text
-cli / web ──▶ core ◀── adapters
-                   │
-                   ├──▶ capabilities ──▶ kernel
-                   ▼
-                 kernel
-（main = 组合根，装配全部）
+cli / web ──▶ core ──▶ capabilities ──▶ kernel
+（main = 组合根，装配全部；adapters 实现各能力的 ports 与 kernel 端口，不认识 core）
 ```
 
 | 层 | 干什么 | 禁令 |
 | --- | --- | --- |
-| `core/` | 只剩**门面**（`Core`：会话中心与命令队列）与回档；**正在被搬空**——端口与全部业务能力都已落位 `capabilities/` | 不读文件（`std::fs`）、不发网络（ureq）、不碰 stdin/stdout——一切机制下沉适配层 |
+| `core/` | **应用服务**：会话中心（会话表、命令队列、运行态）、生成驱动、跨能力用例与回档编排；**正在被搬空**——端口、全部业务能力与它们的业务状态都已在 `capabilities/`（登记处随批次 17 归位 `registry/service.rs`） | 不读文件（`std::fs`）、不发网络（ureq）、不碰 stdin/stdout——一切机制下沉各能力的 `detail/` |
 | `adapters/` | **内核端口的实现**（`Log` / `HostProbe`）与入口层用的机制；能力私有的实现已归各能力 `detail/` | 属于机制层；不做装配决策 |
 | `cli/` + `web/` | **前端（交付机制）**：各渠道一个顶层目录，完全分开——传输（argv/stdout vs HTTP/SSE）、路由、**纯渲染**。**不是业务能力**（无状态、无不变式） | 只依赖 **入站能力面**（`core::api` 或各能力的 `::api`）；**永不接触端口对象，也拿不到 `Core` 本身**；**两者之间互不依赖** |
-| `capabilities/` | **业务能力**：按业务功能垂直切分。每个能力有 `api`（入站契约）/ `ports`（出站端口）/ `domain`（纯逻辑）/ `detail`（细节实现） | **业务之间只经对方的 `api`**；不反向依赖 `core` / `adapters` / `presentation`（迁移期残留记为基线豁免，见 [docs/architecture/refactor-plan.md](docs/architecture/refactor-plan.md) §四） |
+| `capabilities/` | **业务能力**：按业务功能垂直切分。每个能力有 `api`（入站契约：trait + DTO）/ `service`（**本能力的状态与用例**，实现 `api` 的 trait；别处只持 `dyn` 面）/ `ports`（出站端口）/ `domain`（纯逻辑）/ `detail`（细节实现，**只有组合根能构造**） | **业务之间只经对方的 `api`**；不反向依赖 `core` / `adapters` / `presentation`（迁移期残留记为基线豁免，见 [docs/architecture/refactor-plan.md](docs/architecture/refactor-plan.md) §四） |
 | `kernel/` | **机制型内核**：无领域语义、无领域状态的机制（运行日志端口、生成中作业的取消表、跨业务共享的事实类型） | **不依赖任何人**（不认识 core / adapters / presentation）；不放有领域语义的类型 |
 | 入口层（`main.rs` + `diagnostics/` + `guard/`） | **组合根**（`main.rs`：`new` 出所有适配器并注入）+ **机器可读探针**（`diagnostics/`：`--doctor` / `--https-check` / `--print-routes` / `--print-fence-env` / `--fence-verify`）+ **围栏守门进程**（`guard/`：`--fence-run` / `--fence-clean`，**第二个程序入口**） | 它依赖所有人，**任何人都不许依赖它**（门禁判定）。除装配与探针外无业务 |
 
 推论：
 
-- 「用哪个供应商/模型」是**策略**，在 core 的解析链里决定；「怎么建通道」是**机制**，在 adapters。两者不互换。
-- 出站依赖由 **core 定义端口、adapters 实现**；入站依赖由 **core 定义能力接口（`core::api`）、呈现层依赖**。
-  两侧都是依赖倒置，只是箭头方向不同——**核心不定义"前端接口让别人实现"**。
+- 「用哪个供应商/模型」是**策略**，在 `registry`（登记处能力）的解析链里决定；「怎么建通道」是**机制**，在 adapters。两者不互换。
+- 出站依赖由**各能力定义端口**（`capabilities/<能力>/ports.rs`）、**adapters 实现**；入站依赖由**各能力定义能力接口**（`<能力>::api`，呈现层经 `core::api` 的入站契约驱动）。
+  两侧都是依赖倒置，只是箭头方向不同——**能力不定义"前端接口让别人实现"**。
 - 呈现层拿到的是 `Ops`（四个按角色的能力接口 + 事件台），不是 `Core`，也不是任何锁。
 
 ## 二、端口：只画在 IO 与可替换点上

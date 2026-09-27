@@ -31,9 +31,11 @@ pub struct ModelEntry {
     pub context: u64,
 }
 
-/// 保守的上下文窗口缺省值（模型没声明时用）。
+/// 保守的上下文窗口缺省值（模型没声明、或登记处里查不到时用）。
+pub const DEFAULT_CONTEXT_TOKENS: u64 = 32_000;
+
 fn default_context_tokens() -> u64 {
-    32_000
+    DEFAULT_CONTEXT_TOKENS
 }
 
 /// 基本设置（settings.yaml）：一般 agent 都有的开关。

@@ -15,13 +15,12 @@
 | `chain.rs` | 任务链的**纯数据 + 纯图算法**（节点、依赖、阶段、就绪与验收判定）。被三个能力共享（`collab` 驱动 / `session` 的线格式携带 / 呈现层渲染），自己零出边（见 [task-chain.md](task-chain.md)） |
 | `jobs.rs` | 生成中作业的**取消表**：核心登记，呈现层只能说「停哪个会话」；「停止」不排队、不碰核心状态，所以生成期间立刻生效 |
 
-## 二、`core/`（抽象与业务，无 IO；**正在被搬空**——端口与全部业务能力已落位 `capabilities/`，这里只剩门面与回档）
+## 二、`core/`（**应用服务**，无 IO；**正在被搬空**——端口与全部业务能力已落位 `capabilities/`，业务状态也随批次 17 起回到各能力，这里只剩会话中心、生成驱动与跨能力用例）
 
 | 文件 | 职责 |
 | --- | --- |
-| `mod.rs` | 核心层入口与 `Core` 门面：会话中心、登记处编排、运行包报告、**回档编排**（`rewind` / `rewind_children` / `rebuild_session`——纯算术在 `capabilities/session/domain/rewind.rs`） |
+| `mod.rs` | 核心层入口与 `Core` 应用服务：会话中心（会话表、命令队列、运行态）、生成驱动、运行包报告、**回档编排**（`rewind` / `rewind_children` / `rebuild_session`——纯算术在 `capabilities/session/domain/rewind.rs`）。登记处**只按能力面用**：`registry: Box<dyn Registry>`（`registry()` 读、`registry_mut()` 写），**看不见它的字段、也不替它落盘** |
 | `api.rs` | **入站契约 + 入站词汇**：五个按角色的能力接口（`SessionOps` / `RegistryOps` / `HistoryOps` / `DiscoveryOps` / `LogOps`）+ `CoreHandle`（核心自有线程、命令/事件）+ **用例词汇与视图**（`WorkMode` / `WorkSpec` / `AgentInstance` / `WorkOpened` / `SessionEdit` / `CollabStep` / `SessionView` / `RuntimeReport` / `FilesView` 等，批次 15 收口从 `mod.rs` 搬来）+ `EventBus`；单 agent 与协作长步骤的生成都在**工作线程**上跑（队列只占"取/交"两步） |
-| `engine.rs` | 讨论/执行/验收的引擎；**唯一的轮循环** `converse_with`（单 agent / 节点 / 讨论席共用：表态与工具形态、按声明调度的并发、逐轮外送）；**唯一的请求装配点** `assemble`；**回合驱动**（`say` / `dispatch_task` / `discussion_turn` / `continue_reply` / `compact_turn` / `run_rounds` / `run`——批次 12a 从 `session.rs` 搬来，依赖方向才是 `engine → session`）；`build_round_lines`（**唯一的行构造点**） |
 
 ## 三、`adapters/`（机制，实现**内核**端口）
 
@@ -43,7 +42,8 @@
 | `prompt/domain/prompt.rs` | 册子的内存形态与 `{{key}}` 渲染（从 `core/prompt.rs` 搬来，纯逻辑） |
 | `prompt/domain/refs.rs` | 用户 `@` 引用改写成真实绝对路径（从 `core/refs.rs` 搬来，纯逻辑） |
 | `prompt/detail/yaml_prompts.rs` | `PromptSource`：加载 `prompts/`（**只有文本**） |
-| `registry/api.rs` | **入站能力面**：`Settings` / `Provider` / `ModelEntry` / `ToolMode` / `AppSettings` / `Channel` / 各视图 / `ReplayReport` 的对外名字 |
+| `registry/api.rs` | **入站能力面**：登记处词汇（`Settings` / `Provider` / `ModelEntry` / `AppSettings` / 各视图 / `RosterPick`）的对外名字 + **`Registry` 能力面**（读取 `&self`、写取 `&mut self`：状态住在 core 的执行线程上，靠单线程命令队列互斥，**不额外上锁**） |
+| `registry/service.rs` | **本能力的状态与用例**：四份 yaml 的内存形态（`Settings`，私有字段）只由这里写；持 `SettingsStore` / `ChatGateway` / `ModelCatalog` / `Log`；装配只在组合根（批次 17） |
 | `registry/ports.rs` | `SettingsStore`：登记处四份 yaml 的持久化（从 `core/ports.rs` 随能力搬出） |
 | `registry/domain/providers.rs` | 供应商/模型登记处内存形态与「模型 → 通道」解析（从 `core/providers.rs` 搬来） |
 | `registry/domain/agents.rs` | agent 登记处、代拟名单落地与名字校验（从 `core/agents.rs` 搬来） |

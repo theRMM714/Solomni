@@ -4,28 +4,26 @@
 
 pub mod api;
 
+use crate::capabilities::llm::api::ChatGateway;
+use crate::capabilities::prompt::ports::PromptSource;
+#[cfg(test)]
+pub(crate) use crate::capabilities::session::api::Live;
 use crate::capabilities::session::api::{Pending, SessionEvent};
+use crate::capabilities::session::ports::HistoryStore;
+use crate::capabilities::tools::ports::{SysIo, ToolRunner};
+use crate::capabilities::workspace::ports::{ModuleSource, PackageSource, Workspace};
 use crate::core::api::{
     AgentInstance, AgentSuggestion, CollabStep, ConfigAgent, FilesAgentRootView, FilesAgentView,
     FilesRootsView, FilesView, RuntimeReport, SessionConfig, SessionEdit, SessionView, WorkMode,
     WorkOpened, WorkSpec,
 };
-// 测试用同步入口的签名要它；生产路径的 Live 构造在 api.rs（那里直接引 crate::capabilities::session::api::Live）。
-pub use crate::capabilities::llm::api::{ChatGateway, ModelCatalog};
-pub use crate::capabilities::prompt::ports::PromptSource;
-pub use crate::capabilities::registry::ports::SettingsStore;
-#[cfg(test)]
-pub(crate) use crate::capabilities::session::api::Live;
-pub use crate::capabilities::session::ports::HistoryStore;
-pub use crate::capabilities::tools::ports::{SysIo, ToolRunner};
-pub use crate::capabilities::workspace::ports::{ModuleSource, PackageSource, Workspace};
 
 use crate::capabilities::collab::api::AfterTurn;
 use crate::capabilities::collab::api::CollabSession;
 use crate::capabilities::llm::api::Channel;
 use crate::capabilities::llm::api::Msg;
 use crate::capabilities::prompt::api::Prompts;
-use crate::capabilities::registry::api::{AppSettings, Settings};
+use crate::capabilities::registry::api::Registry;
 use crate::capabilities::session::api::{AgentMeta, HistoryView, SessionMeta};
 use crate::capabilities::tools::api::SystemTools;
 use crate::capabilities::workspace::api::Module;
@@ -175,10 +173,12 @@ pub(crate) enum Prepared {
     NotSingle,
 }
 
-/// 核心门面：持有注入的端口与会话中心；前端只经此操作。
-/// 线程共享形态：组合根把它放进 Arc 加 Mutex（Web 多连接/多会话所需）。
+/// **应用服务**：持有注入的端口、能力面与会话中心；前端拿不到它（只拿 `core::api::Ops`）。
+/// 组合根在 `CoreHandle::spawn` 里把它**移进核心自己的执行线程**——此后状态只被那一个线程碰，
+/// 所以这里不加任何锁（并发不变式见 ARCHITECTURE.md §一）。
 pub struct Core {
-    store: Arc<dyn SettingsStore + Send + Sync>,
+    /// 登记处能力：**四份 yaml 的状态在它里面**，core 只按 `Registry` 调用（看不见它的字段）。
+    registry: Box<dyn Registry>,
     history: Arc<dyn HistoryStore + Send + Sync>,
     workspace: Arc<dyn Workspace + Send + Sync>,
     source: Arc<dyn ModuleSource + Send + Sync>,
@@ -186,8 +186,8 @@ pub struct Core {
     packages: Arc<dyn PackageSource + Send + Sync>,
     /// 围栏授权释放（会话删除时请求一次；机制在适配层）。
     fence: Arc<dyn crate::capabilities::tools::ports::FenceHost + Send + Sync>,
+    /// 通道工厂：会话按解析出来的通道造收发句柄（通道的**解析**在登记处能力）。
     gateway: Arc<dyn ChatGateway + Send + Sync>,
-    catalog: Arc<dyn ModelCatalog + Send + Sync>,
     tools: Arc<dyn ToolRunner + Send + Sync>,
     /// 内置文件工具读写端口（策略在 core：寻址与越界校验）。
     io: Arc<dyn SysIo + Send + Sync>,
@@ -196,7 +196,6 @@ pub struct Core {
     log: Arc<dyn crate::kernel::log::Log + Send + Sync>,
     /// 宿主能力探测（读环境、查路径存在性都在它后面；core 因此不碰 std::env 与文件系统）。
     probe: Arc<dyn crate::kernel::host::HostProbe + Send + Sync>,
-    settings: Settings,
     prompts: Prompts,
     /// 工具总表与角色表（`systools/` 两张表）：**不挂在册子上**，两者互不依赖（见 prompt.rs）。
     systools: SystemTools,
@@ -214,14 +213,13 @@ impl Core {
     // 这是有意的设计取舍（见 docs/testing/quality-isolation.md 的 allow 清单），不是没修。
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        store: Arc<dyn SettingsStore + Send + Sync>,
+        registry: Box<dyn Registry>,
         history: Arc<dyn HistoryStore + Send + Sync>,
         workspace: Arc<dyn Workspace + Send + Sync>,
         source: Arc<dyn ModuleSource + Send + Sync>,
         packages: Arc<dyn PackageSource + Send + Sync>,
         fence: Arc<dyn crate::capabilities::tools::ports::FenceHost + Send + Sync>,
         gateway: Arc<dyn ChatGateway + Send + Sync>,
-        catalog: Arc<dyn ModelCatalog + Send + Sync>,
         tools: Arc<dyn ToolRunner + Send + Sync>,
         io: Arc<dyn SysIo + Send + Sync>,
         repair: Arc<dyn crate::capabilities::llm::api::EnvelopeRepair + Send + Sync>,
@@ -232,23 +230,20 @@ impl Core {
     ) -> Result<Core, String> {
         let log_for_core = Arc::clone(&log);
         let outcome = (|| -> Result<Core, String> {
-            let settings = store.load()?;
             let prompts = prompt_source.load()?;
             Ok(Core {
-                store,
+                registry,
                 history,
                 workspace,
                 source,
                 packages,
                 fence,
                 gateway,
-                catalog,
                 tools,
                 io,
                 repair,
                 log: log_for_core,
                 probe,
-                settings,
                 prompts,
                 systools,
                 sessions: HashMap::new(),
@@ -264,6 +259,16 @@ impl Core {
     /// 日志端口句柄：入站手柄（core::api）与组合根共用同一份事实记录。
     pub fn log_handle(&self) -> Arc<dyn crate::kernel::log::Log + Send + Sync> {
         Arc::clone(&self.log)
+    }
+
+    /// 登记处能力面（只读）：组合根与测试读登记处的事实走这里。
+    pub fn registry(&self) -> &dyn Registry {
+        self.registry.as_ref()
+    }
+
+    /// 登记处能力面（可写）：登记处的用例只经它调用。
+    pub fn registry_mut(&mut self) -> &mut dyn Registry {
+        self.registry.as_mut()
     }
 
     /// 生成期间"会话不在表里"的三种进入点共用这一句（错误文案要一致，别处不再各写一份）。
@@ -546,7 +551,7 @@ impl Core {
                     i,
                     turn.verb.is_some(),
                     user_stopped,
-                    self.settings.app.discuss_remind_cap,
+                    self.registry.app().discuss_remind_cap,
                 );
                 let text = c.reminder_text();
                 self.sessions.insert(sid.to_string(), Session::Collab(c));
@@ -1000,14 +1005,14 @@ impl Core {
                 seen.push(id.clone());
             }
             if !a.model.is_empty() {
-                if !self.settings.models.contains_key(&a.model) {
+                if !self.registry.has_model(&a.model) {
                     return Err(format!("无此模型：{}", a.model));
                 }
-                self.settings.resolve(&a.model)?;
+                self.registry.resolve(&a.model)?;
             }
             metas.push(AgentMeta {
                 name: a.name.clone(),
-                transient: !self.settings.agents.contains_key(&a.name),
+                transient: !self.registry.has_agent(&a.name),
                 modules: a.modules.clone(),
                 model: if a.model.is_empty() {
                     None
@@ -1117,193 +1122,6 @@ impl Core {
         }
     }
 
-    // ---- 登记处：供应商（密钥只在此层进出；前端只见 id 与端点） ----
-
-    /// 结构化供应商视图（不含密钥；Web 用）。
-    pub fn provider_views(&self) -> Vec<crate::capabilities::registry::api::ProviderView> {
-        self.settings.provider_views()
-    }
-
-    /// 新建/更新供应商。更新时 api_key 留空 = 保留原密钥（界面从不回显密钥）。
-    pub fn provider_upsert(
-        &mut self,
-        id: &str,
-        base_url: &str,
-        api_key: &str,
-    ) -> Result<(), String> {
-        if id.is_empty() || base_url.is_empty() {
-            return Err("id / base_url 不能为空".to_string());
-        }
-        let key = if api_key.is_empty() {
-            self.settings
-                .providers
-                .get(id)
-                .map(|p| p.api_key.clone())
-                .ok_or_else(|| "api_key 不能为空".to_string())?
-        } else {
-            api_key.to_string()
-        };
-        self.settings.providers.insert(
-            id.to_string(),
-            crate::capabilities::registry::api::Provider {
-                base_url: base_url.to_string(),
-                api_key: key,
-            },
-        );
-        self.save_settings("core::provider_upsert")
-    }
-
-    /// 删除供应商；仍被模型引用时拒绝（不静默级联删除）。
-    pub fn provider_remove(&mut self, id: &str) -> Result<bool, String> {
-        let referenced: Vec<String> = self
-            .settings
-            .models
-            .iter()
-            .filter(|(_, m)| m.provider == id)
-            .map(|(mid, _)| mid.clone())
-            .collect();
-        if !referenced.is_empty() {
-            return Err(format!(
-                "供应商 {} 仍被模型引用：{}；请先删除这些模型",
-                id,
-                referenced.join("、")
-            ));
-        }
-        let removed = self.settings.providers.remove(id).is_some();
-        if removed {
-            self.save_settings("core::provider_remove")?;
-        }
-        Ok(removed)
-    }
-
-    // ---- 登记处：模型（独立实体，引用供应商；两者分开保存） ----
-
-    /// 结构化模型视图（Web 用）。
-    pub fn model_views(&self) -> Vec<crate::capabilities::registry::api::ModelView> {
-        self.settings.model_views()
-    }
-
-    /// 核心 AI 默认模型 id。
-    pub fn core_model(&self) -> Option<String> {
-        self.settings.core.clone()
-    }
-
-    /// 实测一条通道支不支持原生工具调用，并把**结论写回登记处**（只写确定的结论）：
-    /// 支持 → `tools: native`；明确不支持 → `tools: envelope`；无法判定 → 不改，只把事实报回去。
-    /// 事实由适配层实测（两条最小请求对比），core 只做"要不要落盘"这一层策略。
-    pub fn probe_model_tools(
-        &mut self,
-        id: &str,
-    ) -> Result<crate::core::api::ProbeOutcome, String> {
-        let channel = self.settings.resolve(id)?;
-        let outcome = self.gateway.probe_tools(&channel)?;
-        let want = match &outcome {
-            crate::core::api::ProbeOutcome::Supported { .. } => {
-                Some(crate::capabilities::llm::api::ToolMode::Native)
-            }
-            crate::core::api::ProbeOutcome::Unsupported { .. } => {
-                Some(crate::capabilities::llm::api::ToolMode::Envelope)
-            }
-            crate::core::api::ProbeOutcome::Unknown { .. } => None,
-        };
-        if let Some(mode) = want {
-            if let Some(m) = self.settings.models.get_mut(id) {
-                if m.tools != mode {
-                    m.tools = mode;
-                    self.save_settings("core::probe_model_tools")?;
-                }
-            }
-        }
-        Ok(outcome)
-    }
-
-    /// 实测一条通道的**回放形状**（工具调用历史怎么发回去才收）：解析 id → 交给适配层实测。
-    /// 只报事实、**不写登记处**——采不采用由人定（与 probe_model_tools 的写回策略不同）。
-    pub fn probe_replay_shape(
-        &self,
-        id: &str,
-    ) -> Result<crate::capabilities::llm::api::ReplayReport, String> {
-        let channel = self.settings.resolve(id)?;
-        self.gateway.probe_replay(&channel)
-    }
-
-    pub fn model_upsert(
-        &mut self,
-        id: &str,
-        name: &str,
-        api_model: &str,
-        provider: &str,
-        note: &str,
-        context: u64,
-    ) -> Result<(), String> {
-        if id.is_empty() || name.is_empty() || api_model.is_empty() || provider.is_empty() {
-            return Err("id / name / api_model / provider 均不能为空".to_string());
-        }
-        if !self.settings.providers.contains_key(provider) {
-            return Err(format!("无此供应商：{}", provider));
-        }
-        // 工具调用形态：编辑时**保留原值**（登记表单暂不带这个字段，不能因为没带就重置成缺省），
-        // 新建缺省 envelope（任何供应商都能用的手写信封）。
-        let (tools, old_ctx) = self
-            .settings
-            .models
-            .get(id)
-            .map(|m| (m.tools, m.context))
-            .unwrap_or_default();
-        // 上下文窗口：表单没带（0）就保留现值（新建缺省 32k）——编辑别的字段不该顺手重置它。
-        let context = if context == 0 { old_ctx } else { context };
-        self.settings.models.insert(
-            id.to_string(),
-            crate::capabilities::registry::api::ModelEntry {
-                name: name.to_string(),
-                api_model: api_model.to_string(),
-                provider: provider.to_string(),
-                note: note.to_string(),
-                tools,
-                context,
-            },
-        );
-        self.save_settings("core::model_upsert")
-    }
-
-    /// 删除模型；是核心默认模型时拒绝（先改默认再删）。
-    pub fn model_remove(&mut self, id: &str) -> Result<bool, String> {
-        if self.settings.core.as_deref() == Some(id) {
-            return Err(format!(
-                "{} 是核心默认模型；请先把核心默认模型改成别的再删",
-                id
-            ));
-        }
-        let removed = self.settings.models.remove(id).is_some();
-        if removed {
-            self.save_settings("core::model_remove")?;
-        }
-        Ok(removed)
-    }
-
-    pub fn core_set_model(&mut self, id: &str) -> Result<bool, String> {
-        if !self.settings.models.contains_key(id) {
-            return Ok(false);
-        }
-        self.settings.core = Some(id.to_string());
-        self.save_settings("core::core_set_model")?;
-        Ok(true)
-    }
-
-    // ---- agent（用户配置的具名能力组合） ----
-
-    pub fn agent_views(&self) -> Vec<crate::capabilities::registry::api::AgentView> {
-        crate::capabilities::registry::api::views(&self.settings.agents)
-    }
-
-    /// 按名字取 agent 视图（点名）：**不猜、不代选**——名字不在登记处就如实报错。
-    pub fn pick_agents(
-        &self,
-        names: &[String],
-    ) -> Result<Vec<crate::capabilities::registry::api::AgentView>, String> {
-        crate::capabilities::registry::api::pick(&self.settings.agents, names)
-    }
-
     /// 工作名的缺省与唯一化（命名策略在 `session`；这里只提供"存在吗"）。
     pub fn unique_work_name(&self, base: &str, fallback: &str) -> String {
         crate::capabilities::session::api::unique_work_name(base, fallback, |n| {
@@ -1311,71 +1129,20 @@ impl Core {
         })
     }
 
-    /// 新建/覆盖一个 agent（校验模块与模型都真实存在；不静默）。
-    pub fn agent_upsert(
-        &mut self,
-        name: &str,
-        module_ids: &[String],
-        model: &str,
-        note: &str,
-    ) -> Result<(), String> {
-        crate::capabilities::registry::api::validate_name(name)?;
-        if module_ids.is_empty() {
-            return Err("agent 至少要有一个模块".to_string());
-        }
-        let roster = self.scan();
-        for id in module_ids {
-            if !roster.modules.iter().any(|m| &m.manifest.id == id) {
-                return Err(format!("无此模块：{}", id));
-            }
-        }
-        if !model.is_empty() && !self.settings.models.contains_key(model) {
-            return Err(format!("无此模型：{}", model));
-        }
-        self.settings.agents.insert(
-            name.to_string(),
-            crate::capabilities::registry::api::Agent {
-                modules: module_ids.to_vec(),
-                model: if model.is_empty() {
-                    None
-                } else {
-                    Some(model.to_string())
-                },
-                note: note.to_string(),
-            },
-        );
-        self.save_settings("core::agent_upsert")
-    }
-
-    pub fn agent_remove(&mut self, name: &str) -> Result<bool, String> {
-        let removed = self.settings.agents.remove(name).is_some();
-        if removed {
-            self.save_settings("core::agent_remove")?;
-        }
-        Ok(removed)
-    }
-
-    /// 基本设置。
-    pub fn app_settings(&self) -> AppSettings {
-        self.settings.app.clone()
-    }
-
-    /// 用户显式授权的只读根（`settings.yaml` 的 `fence_read`）。
-    /// 策略层只带事实：哪些目录只读可达由用户定，只读位怎么落由适配层定。
-    /// 空 = 一个都不放行（默认不动本机任何权限项）。
     /// 本次模型调用的通道参数：**预算与"能不能流式"都取全局设置**（讨论、执行、验收、单 agent 共用一份）。
     /// `want_stream` 是调用方这一次的意愿（呈现层按回包形状给）：**设置是上限，调用方可以在本次放弃流式**；
     /// 设置关掉时一律非流式。两处各判一次迟早会打架，所以判据只在这里。
     pub(crate) fn llm_opts(&self, want_stream: bool) -> crate::capabilities::llm::api::LlmOpts {
+        let app = self.registry.app();
         crate::capabilities::llm::api::LlmOpts {
-            stream: self.settings.app.streaming && want_stream,
-            timeout_secs: self.settings.app.llm_timeout_secs,
+            stream: app.streaming && want_stream,
+            timeout_secs: app.llm_timeout_secs,
         }
     }
 
     /// 设置里登记的 QEMU 可执行文件路径（默认空 = 兜底看 PATH）。产品不自带、不下载 QEMU。
     fn qemu_path(&self) -> Option<&str> {
-        let p = self.settings.app.qemu_path.trim();
+        let p = self.registry.app().qemu_path.trim();
         if p.is_empty() {
             None
         } else {
@@ -1383,51 +1150,18 @@ impl Core {
         }
     }
 
+    /// 用户显式授权的只读根（`settings.yaml` 的 `fence_read`）。
+    /// 策略层只带事实：哪些目录只读可达由用户定，只读位怎么落由适配层定。
+    /// 空 = 一个都不放行（默认不动本机任何权限项）。
     fn fence_read_roots(&self) -> Vec<std::path::PathBuf> {
-        self.settings
-            .app
+        self.registry
+            .app()
             .fence_read
             .iter()
             .map(|s| s.trim())
             .filter(|s| !s.is_empty())
             .map(std::path::PathBuf::from)
             .collect()
-    }
-
-    pub fn set_app_settings(&mut self, app: AppSettings) -> Result<(), String> {
-        self.settings.app = app;
-        self.save_settings("core::set_app_settings")
-    }
-
-    /// 用登记处已存的供应商去拉取其可用模型名（发现机制在适配层）。
-    pub fn discover_models(&self, provider_id: &str) -> Result<Vec<String>, String> {
-        let provider = self
-            .settings
-            .providers
-            .get(provider_id)
-            .ok_or_else(|| format!("无此供应商：{}", provider_id))?;
-        let outcome = self
-            .catalog
-            .list_models(&provider.base_url, &provider.api_key);
-        match &outcome {
-            Ok(models) => self.log.info(
-                "core::discover_models",
-                &format!("供应商 {} 拉取模型 {} 个", provider_id, models.len()),
-            ),
-            Err(e) => self.log.error(
-                "core::discover_models",
-                &format!("供应商 {} 拉取模型失败：{}", provider_id, e),
-            ),
-        }
-        outcome
-    }
-
-    fn save_settings(&self, at: &str) -> Result<(), String> {
-        let r = self.store.save(&self.settings);
-        if let Err(e) = &r {
-            self.log.error(at, &format!("登记处持久化失败：{}", e));
-        }
-        r
     }
 
     // ---- 会话中心（前端只持 id） ----
@@ -1538,10 +1272,10 @@ impl Core {
                 seen_modules.push(id.clone());
             }
             if let Some(mid) = &a.model {
-                if !self.settings.models.contains_key(mid) {
+                if !self.registry.has_model(mid) {
                     return Err(format!("无此模型：{}", mid));
                 }
-                self.settings.resolve(mid)?;
+                self.registry.resolve(mid)?;
             }
         }
         // 形态约束（每个 agent ≥1 个模块已在上面的循环里校验）
@@ -1589,7 +1323,7 @@ impl Core {
             parent: None,
             node: None,
             exec: crate::capabilities::workspace::api::ExecSpec {
-                tier: self.settings.app.tier,
+                tier: self.registry.app().tier,
                 ..crate::capabilities::workspace::api::ExecSpec::default()
             },
         };
@@ -1663,7 +1397,7 @@ impl Core {
                 let mut cs = CollabSession::start(
                     Arc::clone(&self.gateway),
                     Arc::clone(&self.source),
-                    self.settings.clone(),
+                    self.registry.snapshot(),
                     self.prompts.clone(),
                     self.systools.clone(),
                     Arc::clone(&self.tools),
@@ -1753,10 +1487,7 @@ impl Core {
 
     /// 核心按用户选择解析模型通道；缺省用核心默认；都缺 = None（网关回落演示并告知）。
     fn channel_of(&self, model: Option<&str>) -> Option<Channel> {
-        match model {
-            Some(id) => self.settings.resolve(id).ok(),
-            None => self.settings.core_channel(),
-        }
+        self.registry.channel(model)
     }
 
     /// 组装本次工作的沙箱清单：工作根来自 Workspace 端口，模块目录来自清单。
@@ -1836,22 +1567,18 @@ impl Core {
 
     /// 一轮内对同一个成员最多提醒几次（用户可设，见 session-model.md 二）。
     pub fn discuss_remind_cap(&self) -> u32 {
-        self.settings.app.discuss_remind_cap
+        self.registry.app().discuss_remind_cap
     }
 
     /// 自动压缩的**字符预算** = 该模型的上下文窗口 × 设置百分比 × 4（≈ 字符/token 的粗估）。
     /// 百分比为 0 = 关。见 docs/architecture/session-model.md 六。
     fn compact_budget(&self, model: Option<&str>) -> usize {
-        let pct = self.settings.app.compact_at_percent as u64;
+        let pct = self.registry.app().compact_at_percent as u64;
         if pct == 0 {
             return 0;
         }
-        let id = model
-            .map(|s| s.to_string())
-            .or_else(|| self.settings.core.clone());
-        let ctx = id
-            .and_then(|i| self.settings.models.get(&i).map(|m| m.context))
-            .unwrap_or(32_000);
+        // 窗口按模型现算（缺省用核心默认；查不到就是保守缺省）——这是登记处的事实，不在这里另存一份。
+        let ctx = self.registry.context_of(model);
         (ctx * pct / 100 * 4) as usize
     }
 
@@ -1880,7 +1607,7 @@ impl Core {
         let (chat, note) = self.gateway.member_channel(channel.as_ref(), &a.name);
         // 形态按登记处解析；没有真实通道（演示回落）只能是手写信封——演示通道不会原生调用。
         let mode = if channel.is_some() {
-            self.settings.tool_mode_for(a.model.as_deref())
+            self.registry.tool_mode(a.model.as_deref())
         } else {
             crate::capabilities::llm::api::ToolMode::Envelope
         };
@@ -2005,10 +1732,10 @@ impl Core {
         task: &str,
         mode: WorkMode,
     ) -> Result<(Vec<AgentSuggestion>, Vec<SessionEvent>), String> {
-        if self.settings.models.is_empty() {
+        if !self.registry.any_models() {
             return Err("登记处还没有任何模型，请先到「模型登记」添加".to_string());
         }
-        let channel = self.settings.core_channel().ok_or_else(|| {
+        let channel = self.registry.core_channel().ok_or_else(|| {
             "核心未设定默认模型（或它引用的供应商不存在），请先到「核心 AI 默认模型」设定"
                 .to_string()
         })?;
@@ -2022,13 +1749,7 @@ impl Core {
             &self.prompts.core.suggest_models.user,
             &[
                 ("mode", mode_text.to_string()),
-                (
-                    "agents",
-                    crate::capabilities::registry::api::listing(
-                        &self.prompts,
-                        &self.settings.agents,
-                    ),
-                ),
+                ("agents", self.registry.agent_listing(&self.prompts)),
                 (
                     "modules",
                     crate::capabilities::workspace::api::listing(
@@ -2038,10 +1759,7 @@ impl Core {
                 ),
                 (
                     "models",
-                    crate::capabilities::registry::api::model_listing(
-                        &self.settings.models,
-                        &self.prompts.core.tool_texts,
-                    ),
+                    self.registry.model_listing(&self.prompts.core.tool_texts),
                 ),
                 ("task", task.to_string()),
             ],
@@ -2055,7 +1773,7 @@ impl Core {
             &self.systools,
             "planner",
             "suggest",
-            self.settings.tool_mode_for(None),
+            self.registry.tool_mode(None),
             chat.as_mut(),
             &[
                 Msg::system(self.prompts.core.suggest_models.system.clone()),
@@ -2078,17 +1796,12 @@ impl Core {
                     payload.to_string().chars().take(200).collect::<String>()
                 )
             })?;
-        let (picks, rejected) = crate::capabilities::registry::api::resolve_picks(
-            parsed,
-            &self.settings.agents,
-            &roster,
-            &self.settings.models,
-        );
+        let (picks, rejected) = self.registry.resolve_picks(parsed, &roster);
         for r in &rejected {
             self.log
                 .warn("core::suggest_models", &format!("推荐条目拒收：{}", r));
         }
-        let core_default = self.settings.core.clone();
+        let core_default = self.registry.core_model();
         let drafts: Vec<AgentSuggestion> = picks
             .into_iter()
             .map(|(m, why)| AgentSuggestion {
@@ -2132,13 +1845,9 @@ impl Core {
             }
             _ => return Ok(None),
         };
-        let channel = a
-            .model
-            .as_deref()
-            .and_then(|id| self.settings.resolve(id).ok())
-            .or_else(|| self.settings.core_channel());
+        let channel = self.registry.channel(a.model.as_deref());
         let want = if channel.is_some() {
-            self.settings.tool_mode_for(a.model.as_deref())
+            self.registry.tool_mode(a.model.as_deref())
         } else {
             crate::capabilities::llm::api::ToolMode::Envelope
         };
@@ -2509,7 +2218,7 @@ impl Core {
             "collab" => Ok(Session::Collab(CollabSession::restore(
                 Arc::clone(&self.gateway),
                 Arc::clone(&self.source),
-                self.settings.clone(),
+                self.registry.snapshot(),
                 self.prompts.clone(),
                 self.systools.clone(),
                 Arc::clone(&self.tools),
@@ -2544,14 +2253,10 @@ impl Core {
                 let sb = sandboxes.for_agent(&a.name).cloned().ok_or_else(|| {
                     format!("会话 {} 缺少 agent {} 的沙箱信息", meta.name, a.name)
                 })?;
-                let channel = a
-                    .model
-                    .as_deref()
-                    .and_then(|id| self.settings.resolve(id).ok())
-                    .or_else(|| self.settings.core_channel());
+                let channel = self.registry.channel(a.model.as_deref());
                 // 重建时同样按登记处派生形态：系统提示与实际协议必须一致（回放才与实时一致）
                 let mode = if channel.is_some() {
-                    self.settings.tool_mode_for(a.model.as_deref())
+                    self.registry.tool_mode(a.model.as_deref())
                 } else {
                     crate::capabilities::llm::api::ToolMode::Envelope
                 };
