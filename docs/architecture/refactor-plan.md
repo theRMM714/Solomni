@@ -151,7 +151,7 @@ capabilities/<name>/
 | **session** | 领域 | **已落位** `capabilities/session/`（`session` + `history` + `events`）（`collab_state.rs` 已改判归 `collab`——它派生的是**协作**状态） | 对话、转录行、行索引 | `HistoryStore` | **已完成**（批次 12） |
 | **llm** | 领域 | **已落位** `capabilities/llm/`（`ports` 的通道族 + `domain/envelope`） | 通道协议与回复解析 | `Chat` `ChatGateway` `ModelCatalog` `EnvelopeRepair` | **已完成**（批次 9） |
 | **tools** | 领域 | **已落位** `capabilities/tools/`（`systool` + `patch` + `schema` + `roles` + `fence`） | 观察账本、围栏策略、工具面 | `SysIo` `ToolRunner` `FenceHost` | **已完成**（批次 11） |
-| **prompt** | 领域 | `core/prompt.rs`、`refs.rs` | 提示词册 | `PromptSource` | 未开始 |
+| **prompt** | 领域 | **已落位** `capabilities/prompt/`（`prompt` + `refs` + `detail/yaml_prompts`） | 提示词册 | `PromptSource` | **已完成**（批次 7；适配器见批次 16） |
 | **registry** | 领域 | **已落位** `capabilities/registry/`（`providers` + `agents`） | 四份 yaml 的内存形态 | `SettingsStore` | **已完成**（批次 8） |
 | **workspace** | 领域 | **已落位** `capabilities/workspace/`（`module` + `packages` + `exec` + `workspace` 沙箱数据） | 清单快照、执行计划、沙箱寻址 | `ModuleSource` `PackageSource` `Workspace` | **已完成**（批次 10） |
 | ~~**rewind**~~ | ~~协调~~ | **改判：不是独立能力**——无独立状态所有权，归 `session`（见 §3.6） | — | — | **已并入批次 13** |
