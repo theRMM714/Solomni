@@ -3,7 +3,7 @@
 
 pub(crate) use super::doubles::*;
 
-pub use crate::capabilities::collab::domain::engine::{Discussion, Member, TurnOut, MAX_ROUNDS};
+pub use crate::capabilities::collab::service::engine::{Discussion, Member, TurnOut, MAX_ROUNDS};
 
 pub use crate::capabilities::llm::api::Channel;
 
@@ -24,7 +24,7 @@ pub use crate::capabilities::session::api::Live;
 pub use crate::capabilities::session::api::{AgentMeta, SessionMeta};
 
 pub use crate::capabilities::session::api::MemberTools;
-pub use crate::capabilities::session::domain::session::ModuleTools;
+pub use crate::capabilities::session::domain::tools::ModuleTools;
 
 pub use crate::capabilities::session::ports::HistoryStore;
 

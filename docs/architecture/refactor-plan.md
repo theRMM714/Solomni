@@ -406,7 +406,7 @@ tools 自持一个就等于绕过状态所有权——**直接写别人的文件
 协作状态机、讨论泵、审查关卡、节点验收、总验收。它是依赖最多的能力，**最后迁**。
 
 **批次 20 的两条修正**：① **任务链搬去 `taskchain`**（它是自足的纯领域业务，见 §3.1；三个消费者都要经它的 `api`）；
-② `domain/{engine,collab}.rs` 是**编排**（持 7 个端口、驱动 IO）⇒ 按 R12/R1 落 `service/`，`domain/` 只留纯派生（`collab_state`）；③ **代拟交出**：名单的协议与核验归 `slate`（§3.1），`draft_slate` 只做「推 working / 落代拟行 / 等确认」；`tool_table` / `max_reply` 归 `session`（它们说的是会话的成员工具面与行簿记）。
+② `domain/{engine,collab}.rs` 是**编排**（持端口、驱动 IO）⇒ 已按 R12/R1 落 `service/`（批次 20f-1），`domain/` 只留纯派生（`collab_state`）；③ **代拟交出**：名单的协议与核验归 `slate`（§3.1），`draft_slate` 只做「推 working / 落代拟行 / 等确认」；`tool_table` / `max_reply` 归 `session`（它们说的是会话的成员工具面与行簿记）。
 前置（**批次 12a 已完成**）：`engine ⇄ session` 的环已解——做法是**循环反转**：把回合驱动（`say`/`dispatch_task`/`discussion_turn`/`continue_reply`/`compact_turn`/`run_rounds`/`run`）与行构造从 `session.rs` 搬进 `engine.rs`（以 `impl AgentSession` 写在引擎里，调用点零改动），并把回合词汇（`MemberTools`/`ModuleTools`）搬进 `session.rs`。依赖方向因此是单向 `engine → session`。
 
 ### 3.8 目标依赖图（必须无环）
@@ -507,7 +507,8 @@ kernel       ──▶ （无）
 | **20d** | **kernel 业务化 + `adapters/` 归零 + 任务链独立**：`kernel` 重排为 `api`（共享事实与纯机制）/ `ports`（`Log` / `HostProbe`）/ `domain`（`types` / `path` / `jobs`）/ `detail`（`file_log` / `host_probe`）；`root.rs` → `entry/`（入口层共用机制，门禁新增该层）；**`chain` → `capabilities/taskchain/`**（纯领域业务：`api` + `domain`，无端口、无 `service`） | 20c | **已完成**：`adapters/` 目录消失；门禁新增 `entry` 层、`domainPorts` 与 `apiPorts` 只查**能力端口**（kernel 机制端口是 R12 文档化的例外）；测试 `kernel.rs` → `taskchain.rs`、`adapters.rs` → `detail.rs` |
 | **20e-1** | **"核心操作回路"收进一处 `api`**（R13 的反例之一）：`core_operation` 与 `reply_msgs`（一次回复 → 消息的**唯一构造函数**）从 `collab/domain/engine.rs` 归 `session`——原料全是会话自己的（`MemberTools` / 行格式 / `stream_piece`）；取消与分片的包装折进实现，5 处调用点不再各拼 `keep` 闭包；`collab::api` 不再转发它 | 20d | **已完成**。`session::api::{core_operation, reply_msgs}`（实现在 `session/service.rs`——它驱动 IO）；`conductor` / `collab` 的 5 处调用改经它，`ARCHITECTURE.md` / `module-map.md` / `quality-isolation.md` 同步。**余量**：`conductor → collab` 仍为 `tool_table` / `max_reply` 两个错位机制，随 20e-2 一起归位 |
 | **20e-2** | **抽跨能力同形重复（剩余）**：**拟名单**独立成业务——`conductor::suggest_models` 与 `collab::draft_slate` 两条合并成一处（形态与业务名在实施时写进 §3.1 / §3.8）；**协议也随之合一**（`suggest` 工具与 `suggest_models` 提示词段是 `slate` 的同形副本，删副本）；顺带归位 `tool_table` / `max_reply`，消掉 `conductor → collab` | 20e-1 | **已完成**：`slate` 独立成业务（`api` 用例面 + `domain` 收束规则 + `service` 实现）；协议合一（删 `suggest` 工具与 `suggest_models` 提示词段，`planner` 角色表跟着改）；`conductor` 只做队列分发与呈现映射、`collab` 只做代拟行与确认；`tool_table` / `max_reply` 归 `session`（`conductor → collab` 这条边随之消失）；`registry` 删掉与事实式用例重复的三条句柄方法；测试落 `src/tests/slate.rs`，e2e 桩跟着改 |
-| **20f** | **内部水平分层收口**：`collab/{engine,collab}.rs` → `service/`；`session/domain/session.rs` 拆"纯簿记"与"回合驱动"；`tools/domain/systool.rs` 拆"纯规则"与"执行编排"；**全能力统一 `domain/` = 纯逻辑（不持端口、不做 IO）** | 20e | 未开始 |
+| **20f-1** | **能力内部水平分层（第一刀）**：`collab/{engine,collab}.rs` → `service/`（`domain/` 只留纯派生 `collab_state`）；`session/domain/session.rs` 拆出成员工具面 → `domain/tools.rs`，并把协作引擎里的 `impl MemberTools` 归位；`tools/domain/systool.rs` 拆出执行编排 → `service/systool.rs`（`domain/` 只留纯规则） | 20e-2 | **已完成**：`domainPorts` 基线**清零**（tools 的 `domain → ports` 消失）；`collab/service/`、`session/domain/tools.rs`、`tools/service/systool.rs` 落位；L1 287 全绿。余量见 20f-2 |
+| **20f-2** | **能力内部水平分层（第二刀）**：清掉 `foreignImpl` 最后一条——协作引擎里的 `impl AgentSession`（回合驱动）改成自由函数（调用点在协调业务与测试）；并按 §2.5 上限（800 行）把 `conductor/service.rs`（2489 行）与 `collab/service/engine.rs`（2410 行）按关注点分块 | 20f-1 | 未开始 |
 | **20g** | **收口**：删本文，把当前状态收回 [ARCHITECTURE.md](../../ARCHITECTURE.md) | 20f | 未开始 |
 
 **规模不是硬验收**：拆到「能安全验证」为止。`core/mod.rs` 与 `collab/domain/engine.rs` 的进一步拆分随批次 20 暴露的接缝走，不为凑行数而拆。

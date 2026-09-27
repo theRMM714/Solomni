@@ -73,7 +73,7 @@ pub(crate) struct ExecLike {
 }
 
 pub(crate) fn run_execution(
-    members: &mut [crate::capabilities::collab::domain::engine::Member],
+    members: &mut [crate::capabilities::collab::service::engine::Member],
     tasks: &str,
     prompt: &dyn Prompt,
 ) -> ExecLike {
@@ -94,7 +94,7 @@ pub(crate) fn run_execution(
         let mut views = Vec::new();
         let mut noop = |_c: crate::capabilities::llm::api::Chunk| true;
         let mut sink = |_e: crate::capabilities::session::api::SessionEvent| {};
-        let rounds = crate::capabilities::collab::domain::engine::converse_with(
+        let rounds = crate::capabilities::collab::service::engine::converse_with(
             m.chat.as_mut().expect("测试通道").as_mut(),
             m.tools.as_mut(),
             &identity,
@@ -103,7 +103,7 @@ pub(crate) fn run_execution(
             &id,
             &mut noop,
             &mut |v: &crate::capabilities::session::api::ToolCallView| views.push(v.clone()),
-            &mut |_r: &crate::capabilities::collab::domain::engine::Round,
+            &mut |_r: &crate::capabilities::collab::service::engine::Round,
                   _s: &mut dyn FnMut(crate::capabilities::session::api::SessionEvent)| {},
             &mut sink,
             &[],

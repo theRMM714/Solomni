@@ -9,9 +9,9 @@ pub use crate::capabilities::session::domain::rewind::{
     find_line_id, last_line_within, max_reply, truncate_events, turn_of_line,
 };
 pub use crate::capabilities::session::domain::session::{
-    keep_whole_replies, stream_piece, tool_table, unique_work_name, AgentSession, MemberTools,
-    SessionParams, TurnRun,
+    keep_whole_replies, stream_piece, unique_work_name, AgentSession, SessionParams, TurnRun,
 };
+pub use crate::capabilities::session::domain::tools::{tool_table, MemberTools};
 
 // 核心操作回路 + 原生回灌消息：`service.rs` 实现（它驱动 IO，不是纯派生）。
 pub use crate::capabilities::session::service::{core_operation, reply_msgs};

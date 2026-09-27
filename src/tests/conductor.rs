@@ -19,13 +19,13 @@ pub(crate) fn tool_round_reasoning_lands_on_the_tool_line() {
         call_id: String::new(),
         reply: 0,
     };
-    let round = crate::capabilities::collab::domain::engine::Round {
+    let round = crate::capabilities::collab::service::engine::Round {
         reply: 1,
         // 工具轮没有正文：思维链不能另造一条空回答行，只能挂到工具行上。
         text: String::new(),
         reasoning: "先思考".to_string(),
         text_msgs: Vec::new(),
-        tool: Some(crate::capabilities::collab::domain::engine::ToolRun {
+        tool: Some(crate::capabilities::collab::service::engine::ToolRun {
             view: tool,
             msgs: Vec::new(),
         }),
@@ -35,7 +35,7 @@ pub(crate) fn tool_round_reasoning_lands_on_the_tool_line() {
         degraded: false,
     };
     let next = std::cell::Cell::new(0u64);
-    let lines = crate::capabilities::collab::domain::engine::build_round_lines(
+    let lines = crate::capabilities::collab::service::engine::build_round_lines(
         "a",
         &prompts.tools(),
         &round,

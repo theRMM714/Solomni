@@ -5,7 +5,7 @@
 //! 名单的权威来源是会话 meta.agents（代拟确认后由 Conductor 写回 meta）；转录只用来恢复讨论进度。
 //! 依赖全部为端口与核心数据；无 IO，无具体适配器。
 
-use crate::capabilities::collab::domain::engine::{
+use crate::capabilities::collab::service::engine::{
     Discussion, Execution, Member, TurnOut, MAX_ROUNDS,
 };
 use crate::capabilities::llm::api::{Chat, CompleteOpts, Llm, Msg};
@@ -51,7 +51,7 @@ impl CollabSession {
         has_verb: bool,
         user_stopped: bool,
         remind_cap: u32,
-    ) -> crate::capabilities::collab::domain::engine::AfterTurn {
+    ) -> crate::capabilities::collab::service::engine::AfterTurn {
         self.disc.as_mut().expect("disc 已确认存在").after_turn(
             i,
             has_verb,
@@ -737,7 +737,7 @@ impl CollabSession {
     pub fn feed_with(
         &mut self,
         i: usize,
-        turn: crate::capabilities::collab::domain::engine::MemberTurn,
+        turn: crate::capabilities::collab::service::engine::MemberTurn,
         turn_id: u64,
         sink: &mut dyn FnMut(SessionEvent),
     ) {
@@ -978,7 +978,7 @@ impl CollabSession {
                 } else {
                     // 泵只推**一步**：该问谁就存下并让出——驱动权在核心（它同时看得到协作会话与各 agent 的会话）。
                     match self.disc.as_mut().expect("disc 已确认存在").advance() {
-                        crate::capabilities::collab::domain::engine::Adv::Ask {
+                        crate::capabilities::collab::service::engine::Adv::Ask {
                             i,
                             identity,
                             turn,
@@ -987,8 +987,8 @@ impl CollabSession {
                             return;
                         }
                         // 开场刚问完：接着进轮次。
-                        crate::capabilities::collab::domain::engine::Adv::Opened => continue,
-                        crate::capabilities::collab::domain::engine::Adv::Out(out) => out,
+                        crate::capabilities::collab::service::engine::Adv::Opened => continue,
+                        crate::capabilities::collab::service::engine::Adv::Out(out) => out,
                     }
                 };
                 match outcome {

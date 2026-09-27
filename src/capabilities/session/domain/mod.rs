@@ -4,3 +4,4 @@ pub mod events;
 pub mod history;
 pub mod rewind;
 pub mod session;
+pub mod tools;

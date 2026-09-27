@@ -75,9 +75,10 @@
 | `taskchain/api.rs` | **入站能力面**（**纯领域业务**：有不变式、无端口、无 `service`）：任务链的事实与派生（`TaskChain` / `TaskNode` / `NodeStatus` / `Acceptance` + 阶段 / 就绪 / 验收判定）。三个消费者都经它：`collab` 驱动、`session` 线格式携带、呈现层渲染 |
 | `taskchain/domain/chain.rs` | 任务链的**纯数据 + 纯图算法**（节点、依赖、阶段派生、就绪、验收判定与装配错误上报）——不做 IO、不碰会话（见 [task-chain.md](task-chain.md)） |
 | `tools/api.rs` | **入站能力面**：`Tools` 能力面（按角色发放工具面 `tool_face` / `role_face` / `allows_module_tools`、总表 `book()` / 自检 `problems()`）+ **`ToolExec` 执行面**（`run_module` / `run_builtin` / `release_fence`）；`ToolOutcome` 从 ports 归到这里（批次 20b）。原行余下：`Tools` 能力面（按角色发放工具面 `tool_face` / `role_face` / `allows_module_tools`、总表 `book()`、自检 `problems()`）+ 工具清单 / 参数契约 / 补丁与应用 / 围栏策略的对外名字 |
-| `tools/service.rs` | **本能力的状态、用例与端口持有者**：持两张表（`SystemTools`）与三个出站端口（`ToolRunner` / `SysIo` / `FenceHost`，**唯一持有者**，R12），实现 `api::Tools` 与 `api::ToolExec`；组合根用 `ToolsService::new(加载器, 三个端口)` 装配（批次 17 + 20b） |
+| `tools/service/mod.rs` | **本能力的状态、用例与端口持有者**：持两张表（`SystemTools`）与三个出站端口（`ToolRunner` / `SysIo` / `FenceHost`，**唯一持有者**，R12），实现 `api::Tools` 与 `api::ToolExec`；组合根用 `ToolsService::new(加载器, 三个端口)` 装配（批次 17 + 20b） |
 | `tools/ports.rs` | **出站端口**（只有 `service.rs` 持有，R12）：`SysIo` / `ToolRunner` / `FenceHost` / `SystoolsSource`（后者的真实实现在 `detail/yaml_systools.rs`） |
-| `tools/domain/systool.rs` | 内置工具的放行、寻址、**按声明校验参数**、改动前的"读过"证据（`Observations`）、自由格式补丁的原子应用与回执文案 |
+| `tools/service/systool.rs` | 内置工具的**执行编排**：驱动 `SysIo` 读写盘（`read` / `write` / `edit` / `patch` / `list` / `search`）。纯规则在 `domain/systool.rs`——所以只有这里引 `ports`（批次 20f-1） |
+| `tools/domain/systool.rs` | 内置工具的**纯规则**：放行、寻址、按声明校验参数、改动前的"读过"证据（`Observations`）、回执与失败文案、`ToolOutcome`（不引 `ports`） |
 | `tools/domain/patch.rs` | 补丁通道的**纯逻辑**：解析自由格式补丁与整行应用 |
 | `tools/domain/schema.rs` | 工具参数契约（**声明在文本层**）：解析/校验/两种渲染 |
 | `tools/domain/module_tools.rs` | **清单 → 工具面**：`ToolDecl::schema` / `check_tools` / `module_tools` / `module_tool_params`（批次 15 从 `workspace` 移来） |
@@ -103,14 +104,15 @@
 | `session/api.rs` | **入站能力面**：`HistoryOps`（呈现层的队列面：列表 / 打开 / 删除）+ **`History` 直连面**（别的能力用：造会话 / 写元信息 / 追流水 / 列出 / 读回 / 删除；与端口一一对应，价值在 R12 的唯一持有者）+ `SessionParams` / `AgentSession` / `TurnRun` / 行与事件词汇 / 历史视图的对外名字 |
 | `session/service.rs` | **本能力的用例与端口持有者**：持 `HistoryStore`（**唯一持有者**，R12），实现 `api::History`（造会话 / 追流水 / 读元信息 / 删会话）。呈现层的列表/打开/删除仍走 `api::HistoryOps`（队列代理实现）；**核心操作回路** `core_operation`（声明角色工具面 → 跑一次模型 → 从工具调用参数取载荷 → 只读核实回路；取消与分片的包装只有这一处）与 `reply_msgs`（一次模型回复 → 发给模型的消息，**唯一构造函数**）也在这里 |
 | `session/ports.rs` | **出站端口**（只有 `service.rs` 持有，R12）：`HistoryStore`——会话历史的持久化（meta + append-only 流水） |
-| `session/domain/session.rs` | 会话状态与簿记 + 工具面 `MemberTools` / `ModuleTools` + `env_block`；**`tool_table`**（模块清单 → 按模块索引的成员工具面，`20e-2` 从协作引擎归位） |
+| `session/domain/session.rs` | 会话状态与簿记（`AgentSession`、行/回合/回复簿记）+ `SessionParams` / `env_block` + 分片与命名（`stream_piece` / `keep_whole_replies` / `unique_work_name`） |
+| `session/domain/tools.rs` | **成员工具面**：`ModuleTools` / `MemberTools`（含 `next_reply` / `tools_block`，批次 20f-1 从协作引擎归位）+ `tool_table`（模块清单 → 按模块索引的工具面） |
 | `session/domain/history.rs` | 会话元信息与历史视图的内存形态 |
 | `session/domain/events.rs` | 呈现侧契约：`SessionEvent` 与介入请求的词汇、转录行 `LineView` |
 | `session/detail/fs_history.rs` | `HistoryStore`：`meta.yaml` + `transcript.jsonl` |
 | `session/domain/rewind.rs` | 回档的**纯行 / 事件算术**：`turn_of_line` / `last_line_within` / `truncate_events` / `cut_before_line` / `align_keep` / `line_reply_of` / `find_line_id` / `max_reply`（转录里用过的最大回复号，重建时续号）（**编排在协调业务**） |
 | `collab/api.rs` | **入站能力面**：`CollabSession` / 讨论与执行引擎 / 回合与验收词汇 / 协作状态派生的对外名字 |
-| `collab/domain/collab.rs` | 协作会话状态机与讨论泵 |
-| `collab/domain/engine.rs` | 讨论/执行/验收引擎 + **唯一的轮循环** `converse_with` + **唯一的请求装配点** `assemble` + 回合驱动 + 行构造（核心操作回路与行回灌已归 `session`，`20e-1`） |
+| `collab/service/collab.rs` | 协作会话状态机与讨论泵（批次 20f-1 从 `domain/` 归位） |
+| `collab/service/engine.rs` | 讨论/执行/验收引擎 + **唯一的轮循环** `converse_with` + **唯一的请求装配点** `assemble` + 回合驱动 + 行构造（核心操作回路与行回灌已归 `session`，`20e-1`） |
 | `collab/domain/collab_state.rs` | 「转录即状态」的协作状态派生（纯函数、可回放） |
 | `llm/domain/envelope.rs` | 发言信封解析（纯逻辑）：`ToolInvoke.body` = 信封之后的正文；判定**未闭合 / 裸控制字符 / 语法错 / 字段不合法**四类；未闭合带上 EOF 状态 |
 

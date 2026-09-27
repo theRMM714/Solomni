@@ -6,6 +6,8 @@
 //!
 //! 加载机制（`systools/` 两份 yaml）在 `detail/yaml_systools.rs`；本文件不碰文件系统。
 
+pub mod systool;
+
 use crate::capabilities::tools::api::{
     Observations, ToolBook, ToolExec, ToolOutcome, ToolSchema, Tools,
 };
@@ -79,7 +81,7 @@ impl ToolExec for ToolsService {
         name: &str,
         args_json: &str,
     ) -> ToolOutcome {
-        crate::capabilities::tools::domain::systool::execute(
+        crate::capabilities::tools::service::systool::execute(
             sb,
             builtin_tools,
             self.io.as_ref(),

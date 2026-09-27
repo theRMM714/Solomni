@@ -34,47 +34,6 @@ pub enum AfterTurn {
     Unanswered,
 }
 
-impl crate::capabilities::session::api::MemberTools {
-    /// 取下一个回复 id（一次模型回复调用一次）。
-    fn next_reply(&mut self) -> u64 {
-        self.reply_seq += 1;
-        self.reply_seq
-    }
-
-    /// **本回合的工具说明块**：核心按这一回合的身份（ids）现渲染，只列这一回合真能调的。
-    ///
-    /// 为什么不是系统提示里的整本总表：模型会照着给的清单去调工具，列出必然被拒的等于请它去撞墙；
-    /// 总表只该留在核心手里当校验判据（见 docs/architecture/tools-and-roles.md 二、三之二）。
-    /// 为什么随回合：同一个 agent 会话会用两种身份干活（说话 / 干活），能用的工具随回合变。
-    /// 空串 = 这一回合没有可用工具（调用方不注入空块）。
-    pub(crate) fn tools_block(&self, ids: &[String], with_modules: bool) -> String {
-        let mut parts: Vec<String> = Vec::new();
-        for id in ids {
-            if let Some(schema) = self.builtin_tools.get(id) {
-                parts.push(format!("{}\n{}", id, schema.render_for_prompt()));
-            }
-        }
-        // patch 是自由格式工具：它不在参数清单里，写法跟一段补丁正文（只有拿到它的席位才给）。
-        if ids
-            .iter()
-            .any(|i| i == crate::capabilities::tools::api::PATCH)
-        {
-            parts.push(self.notes.patch_guide.clone());
-        }
-        if with_modules {
-            parts.push(self.notes.module_tools.clone());
-            parts.push(self.notes.module_tool_params.clone());
-        }
-        if parts.is_empty() {
-            return String::new();
-        }
-        self.sandbox.texts.render(
-            &self.sandbox.texts.tools_this_turn,
-            &[("tools", parts.join("\n"))],
-        )
-    }
-}
-
 /// 线上名 → (模块 id, 工具名)：原生协议里没有 module 字段，跨模块同名工具靠它消歧。
 pub type WireTools = BTreeMap<String, (Option<String>, String)>;
 
@@ -2026,7 +1985,7 @@ impl crate::capabilities::session::api::AgentSession {
         identity: &str,
     ) -> Result<String, String> {
         // 整条消息**只有这一处装配**：身份 + 本回合工具（只有 compact）+ 对话 + 压缩提示。
-        let msgs = crate::capabilities::collab::domain::engine::assemble(
+        let msgs = crate::capabilities::collab::service::engine::assemble(
             identity,
             self.tools.as_ref(),
             &["compact".to_string()],
@@ -2306,7 +2265,7 @@ impl crate::capabilities::session::api::AgentSession {
         &mut self,
         spec: &TurnRun<'_>,
         live: &mut Live,
-        on_round: &mut crate::capabilities::collab::domain::engine::RoundSink<'_>,
+        on_round: &mut crate::capabilities::collab::service::engine::RoundSink<'_>,
         sink: &mut dyn FnMut(SessionEvent),
     ) -> Vec<Round> {
         let label = self.id.clone();
@@ -2331,7 +2290,7 @@ impl crate::capabilities::session::api::AgentSession {
                 tools,
                 ..
             } = self;
-            crate::capabilities::collab::domain::engine::converse_with(
+            crate::capabilities::collab::service::engine::converse_with(
                 chat.as_mut(),
                 tools.as_mut(),
                 spec.identity,
@@ -2411,7 +2370,7 @@ pub fn build_round_lines(
     let speaker = id.to_string();
     let verb = round
         .verb
-        .map(crate::capabilities::collab::domain::engine::verb_tag)
+        .map(crate::capabilities::collab::service::engine::verb_tag)
         .unwrap_or_default();
     let make = |line: String,
                 verb: &str,

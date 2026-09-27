@@ -1,14 +1,12 @@
 {
-  "_comment": "依赖方向门禁的迁移期基线（规则与销账口径见 docs/architecture/refactor-plan.md §一 / §四）。条目存在 = 尚未拆掉；拆掉后必须删除，否则门禁报「基线豁免已过期」。**全部清空 = 重构完成。** reverse / presentation / coreCycles 已清空（批次 0–19）；批次 20a 的四类判据里 apiPorts 与 apiOnly **已随 20b 全部清零**；余下两条随 20f（能力内部水平分层）清零。",
+  "_comment": "依赖方向门禁的迁移期基线（规则与销账口径见 docs/architecture/refactor-plan.md §一 / §四）。条目存在 = 尚未拆掉；拆掉后必须删除，否则门禁报「基线豁免已过期」。**全部清空 = 重构完成。** reverse / presentation / coreCycles 已清空（批次 0–19）；批次 20a 的四类判据里 apiPorts 与 apiOnly **已随 20b 全部清零**；domainPorts 已随 20f-1 清零；余下 foreignImpl 一条随 20f-2（回合驱动改自由函数）清零。",
   "reverse": [],
   "presentation": [],
   "coreCycles": [],
   "apiOnly": [],
   "foreignImpl": [
-    "src/capabilities/collab/domain/engine.rs -> crate::capabilities::session::api"
+    "src/capabilities/collab/service/engine.rs -> crate::capabilities::session::api"
   ],
-  "domainPorts": [
-    "src/capabilities/tools/domain/systool.rs -> crate::capabilities::tools::ports"
-  ],
+  "domainPorts": [],
   "apiPorts": []
 }
