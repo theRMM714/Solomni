@@ -12,7 +12,9 @@
 | 文件 | 职责 |
 | --- | --- |
 | `mod.rs` | 机制入口：只声明模块，不放逻辑 |
-| `api.rs` | **对外面**：共享事实与纯机制——`SessionId` / `Tier` / `DEFAULT_LLM_TIMEOUT_SECS`（跨业务共享且无领域逻辑）、`slash`（路径对外书写形式）、`JobRegistry`（生成中作业的**取消表**：谁都能登记与取消，「停止」不排队、不碰核心状态，所以生成期间立刻生效） |
+| `conductor/api/mod.rs` | **对外面**：共享事实与纯机制——`SessionId` / `Tier` / `DEFAULT_LLM_TIMEOUT_SECS`（跨业务共享且无领域逻辑）、`slash`（路径对外书写形式）、`JobRegistry`（生成中作业的**取消表**：谁都能登记与取消，「停止」不排队、不碰核心状态，所以生成期间立刻生效） |
+| `conductor/api/handle.rs` | `ConductorHandle`：把核心搬到它自己的执行线程（命令队列与事件台）、单 agent 与协作的生成驱动、`call` 的取/交两步（队列代理的实现面在 `proxy.rs`） |
+| `conductor/api/proxy.rs` | **队列代理**：`ConductorHandle` 对 `SessionOps` / `ConductorOps` / `RegistryOps` / `HistoryOps` / `WorkspaceOps` / `LogOps` 的实现（只转发，不做业务判断） |
 | `ports.rs` | **机制端口**：`Log`（三级）与 `NoopLog`、`HostProbe`（宿主能力探测：路径存在性 / PATH 可执行文件 / 本机虚拟化——**只读事实**） |
 | `domain/types.rs` | 跨业务共享的**事实类型**：只放没有领域逻辑的 |
 | `domain/path.rs` | 路径的**对外书写形式**（一律 `/`）：跨平台机制，与任何业务无关 |
