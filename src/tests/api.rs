@@ -39,9 +39,9 @@ fn commands_run_on_the_core_thread_and_changes_are_visible() {
         providers.len()
     );
 
-    assert_eq!(ops.discovery.roster().expect("清单").modules.len(), 1);
+    assert_eq!(ops.workspace.roster().expect("清单").modules.len(), 1);
     assert!(ops
-        .discovery
+        .core
         .runtime_report(Tier::Host)
         .expect("能力报告")
         .diagnoses
@@ -105,7 +105,7 @@ fn suggest_models_pushes_on_a_system_session_and_leaves_no_trace() {
     );
     let ops = Ops::from_handle(&handle);
     let agents = ops
-        .discovery
+        .core
         .suggest_models("做个东西", WorkMode::Collab)
         .expect("核心推荐");
     assert_eq!(agents.len(), 1, "回包只给名单（渲染那一步的契约不变）");
@@ -122,7 +122,7 @@ fn suggest_models_pushes_on_a_system_session_and_leaves_no_trace() {
         "系统会话只推不留：推荐没有工作区，不该落盘"
     );
     assert!(
-        !ops.history
+        !ops.sessions
             .session_views(&[])
             .expect("会话视图")
             .iter()
@@ -254,7 +254,7 @@ fn reads_are_not_queued_behind_a_long_generation() {
     let read = t0.elapsed();
     let t1 = Instant::now();
     let views = ops
-        .history
+        .sessions
         .session_views(&history)
         .expect("生成期间读会话视图");
     let view = t1.elapsed();
@@ -314,7 +314,7 @@ fn reads_are_not_queued_behind_a_collab_discussion() {
     let read = t0.elapsed();
     let t1 = Instant::now();
     let _ = ops
-        .history
+        .sessions
         .session_views(&history)
         .expect("讨论期间读会话视图");
     let view = t1.elapsed();
@@ -556,7 +556,7 @@ fn a_panicking_command_does_not_take_the_core_down() {
     );
     // 核心仍然活着并且能继续服务（这才是接住 panic 的意义）。
     assert!(ops.registry.settings().is_ok(), "panic 之后必须还能服务");
-    assert!(ops.discovery.roster().is_ok());
+    assert!(ops.workspace.roster().is_ok());
 }
 
 /// 压缩：发送视图变成「摘要 + 之后的内容」（转录完整）；压两次只有**一份**摘要（滚动）。

@@ -12,3 +12,9 @@ pub use crate::capabilities::workspace::domain::packages::{Library, PackageManif
 pub use crate::capabilities::workspace::domain::workspace::{
     safe_file_name, Place, Sandbox, Sandboxes, WorkFiles, WorkRoots,
 };
+
+/// 工作区的**队列面**：呈现层要的清单事实（模块公地 + 拒收原因）。
+/// 只报事实、不做选择——"挑哪些模块组合成一个 agent"是用户与核心的事。
+pub trait WorkspaceOps: Send + Sync {
+    fn roster(&self) -> Result<Roster, String>;
+}

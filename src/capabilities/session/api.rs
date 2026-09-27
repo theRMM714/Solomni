@@ -12,3 +12,13 @@ pub use crate::capabilities::session::domain::session::{
     keep_whole_replies, stream_piece, unique_work_name, AgentSession, MemberTools, ModuleTools,
     SessionParams, TurnRun,
 };
+
+/// 落盘会话的**队列面**：呈现层经 core 的队列代理调它（列表 / 打开 / 删除）。
+///
+/// "在世会话 × 历史的并集"（`SessionView`）**不在本面里**：那要同时认识会话中心与历史，
+/// 归会话中心（`core::api::SessionOps::session_views`）。
+pub trait HistoryOps: Send + Sync {
+    fn list(&self) -> Result<Vec<HistoryView>, String>;
+    fn open(&self, name: &str) -> Result<(SessionMeta, Vec<serde_json::Value>), String>;
+    fn delete(&self, name: &str) -> Result<bool, String>;
+}

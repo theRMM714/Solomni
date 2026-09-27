@@ -52,7 +52,7 @@ pub fn run(ops: Ops) -> CliExit {
 }
 
 fn print_roster(ops: &Ops) {
-    let roster = match ops.discovery.roster() {
+    let roster = match ops.workspace.roster() {
         Ok(r) => r,
         Err(e) => {
             println!("[错误] {}", e);
@@ -67,7 +67,7 @@ fn print_roster(ops: &Ops) {
         }
     };
     // 运行能力报告与模块清单同源：按默认执行档位如实报（缺包不是崩溃，工具按档位不可用）。
-    let report = match ops.discovery.runtime_report(tier) {
+    let report = match ops.core.runtime_report(tier) {
         Ok(r) => r,
         Err(e) => {
             println!("[错误] {}", e);

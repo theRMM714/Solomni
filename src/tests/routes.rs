@@ -4,12 +4,11 @@
 //! 假能力面顺带证明一件事：「按角色切分」的能力接口真能被替换——新增一种呈现不必认识 `Core`。
 
 use crate::capabilities::registry::api::AgentView;
+use crate::capabilities::registry::api::RegistryOps;
 use crate::capabilities::registry::api::{AppSettings, ModelView, ProviderView};
-use crate::capabilities::session::api::{AgentMeta, HistoryView, SessionMeta};
-use crate::capabilities::workspace::api::Roster;
-use crate::core::api::{
-    Advance, DiscoveryOps, EventBus, HistoryOps, Ops, Output, RegistryOps, SessionOps,
-};
+use crate::capabilities::session::api::{AgentMeta, HistoryOps, HistoryView, SessionMeta};
+use crate::capabilities::workspace::api::{Roster, WorkspaceOps};
+use crate::core::api::{Advance, CoreOps, EventBus, Ops, Output, SessionOps};
 use crate::core::api::{
     AgentSuggestion, ConfigAgent, FilesAgentView, FilesRootsView, FilesView, Pending,
     RuntimeReport, SessionConfig, SessionEdit, SessionView, WorkMode, WorkOpened, WorkSpec,
@@ -58,7 +57,8 @@ fn fake_ops_probe(fail: Option<&str>, probe: crate::capabilities::llm::api::Prob
         sessions: f.clone(),
         registry: f.clone(),
         history: f.clone(),
-        discovery: f.clone(),
+        core: f.clone(),
+        workspace: f.clone(),
         events: EventBus::new(),
         log: Arc::new(super::doubles::NoopLogOps),
     }
@@ -70,7 +70,8 @@ fn fake_ops(fail: Option<&str>) -> Ops {
         sessions: f.clone(),
         registry: f.clone(),
         history: f.clone(),
-        discovery: f.clone(),
+        core: f.clone(),
+        workspace: f.clone(),
         events: EventBus::new(),
         log: Arc::new(super::doubles::NoopLogOps),
     }
@@ -223,6 +224,24 @@ impl SessionOps for FakeOps {
     }
     fn is_running(&self, _sid: &str) -> bool {
         self.running.load(Ordering::Relaxed)
+    }
+
+    fn session_views(&self, history: &[HistoryView]) -> Result<Vec<SessionView>, String> {
+        self.guard()?;
+        Ok(history
+            .iter()
+            .map(|h| SessionView {
+                sid: h.name.clone(),
+                mode: h.mode.clone(),
+                done: h.done,
+                tier: h.exec.tier.as_str().to_string(),
+                tier_ready: true,
+                tier_missing: Vec::new(),
+                running: false,
+                can_update_task: h.mode == "collab",
+                pending: None,
+            })
+            .collect())
     }
 }
 
@@ -379,26 +398,9 @@ impl HistoryOps for FakeOps {
         self.guard()?;
         Ok(true)
     }
-    fn session_views(&self, history: &[HistoryView]) -> Result<Vec<SessionView>, String> {
-        self.guard()?;
-        Ok(history
-            .iter()
-            .map(|h| SessionView {
-                sid: h.name.clone(),
-                mode: h.mode.clone(),
-                done: h.done,
-                tier: h.exec.tier.as_str().to_string(),
-                tier_ready: true,
-                tier_missing: Vec::new(),
-                running: false,
-                can_update_task: h.mode == "collab",
-                pending: None,
-            })
-            .collect())
-    }
 }
 
-impl DiscoveryOps for FakeOps {
+impl WorkspaceOps for FakeOps {
     fn roster(&self) -> Result<Roster, String> {
         self.guard()?;
         Ok(Roster {
@@ -406,6 +408,9 @@ impl DiscoveryOps for FakeOps {
             rejected: Vec::new(),
         })
     }
+}
+
+impl CoreOps for FakeOps {
     fn runtime_report(&self, _tier: Tier) -> Result<RuntimeReport, String> {
         self.guard()?;
         Ok(report())

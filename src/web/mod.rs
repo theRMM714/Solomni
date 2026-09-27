@@ -586,7 +586,7 @@ pub(crate) fn route(
                 Ok(m) => m,
                 Err(e) => return complaint(400, e),
             };
-            match ops.discovery.suggest_models(&task, mode) {
+            match ops.core.suggest_models(&task, mode) {
                 Ok(agents) => ok_json(json!({ "ok": true, "agents": agents })),
                 Err(e) => complaint(400, e),
             }
@@ -626,7 +626,7 @@ pub fn parse_mode(s: &str) -> Result<WorkMode, String> {
 
 /// 概览状态：模块清单 + 供应商/模型视图 + 核心默认 + 进行中会话（均无密钥）。
 fn state_json(ops: &Ops, fence: &FenceInfo) -> Result<serde_json::Value, String> {
-    let roster = ops.discovery.roster()?;
+    let roster = ops.workspace.roster()?;
     // 会话形态取落盘 meta（单一真相）：只读一次盘，sessions 与 history 共用。
     let history = ops.history.list()?;
     Ok(json!({
@@ -642,7 +642,7 @@ fn state_json(ops: &Ops, fence: &FenceInfo) -> Result<serde_json::Value, String>
         "core": ops.registry.core_model()?,
         "agents": ops.registry.agents()?,
         "settings": ops.registry.settings()?,
-        "sessions": ops.history.session_views(&history)?,
+        "sessions": ops.sessions.session_views(&history)?,
         "history": history,
     }))
 }

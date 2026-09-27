@@ -11,8 +11,9 @@
 //! 这里**不出现 HTTP / JSON 封装 / 路由**：那些是呈现层的传输事（见 presentation/routes.rs）。
 //! 事件与读模型（`SessionEvent`、`*View`）是**事实**的线格式，仍归 core。
 
-use crate::capabilities::registry::api::AgentView;
-use crate::capabilities::registry::api::{AppSettings, ModelView, ProviderView};
+// 登记处的入站契约归登记处自己（批次 18）：这里只用它的面（实现队列代理），不定义。
+use crate::capabilities::registry::api::RegistryOps;
+use crate::capabilities::registry::api::{AgentView, AppSettings, ModelView, ProviderView};
 use crate::capabilities::session::api::Live;
 use crate::capabilities::session::api::{HistoryView, SessionMeta};
 pub use crate::capabilities::session::api::{Pending, SessionEvent};
@@ -215,6 +216,9 @@ pub trait SessionOps: Send + Sync {
     fn stop(&self, sid: &str) -> bool;
     #[allow(dead_code)]
     fn is_running(&self, sid: &str) -> bool;
+    /// **在世会话 × 历史的并集**（界面上的会话列表）：只有会话中心同时知道两边，所以归这里。
+    /// 落盘历史的列表 / 打开 / 删除归 `session::api::HistoryOps`。
+    fn session_views(&self, history: &[HistoryView]) -> Result<Vec<SessionView>, String>;
 
     /// **动作分发**：一次动作 → 一次能力调用。CLI 与 Web 共用这一份（新增动作只改这里）。
     fn act(&self, sid: &str, action: Action<'_>, out: Output) -> Result<Acted, String> {
@@ -230,67 +234,17 @@ pub trait SessionOps: Send + Sync {
     }
 }
 
-/// 登记处能力：供应商 / 模型 / agent / 基本设置，以及通道上的模型发现。
-pub trait RegistryOps: Send + Sync {
-    fn providers(&self) -> Result<Vec<ProviderView>, String>;
-    fn upsert_provider(&self, id: &str, base_url: &str, api_key: &str) -> Result<(), String>;
-    fn remove_provider(&self, id: &str) -> Result<bool, String>;
-    fn models(&self) -> Result<Vec<ModelView>, String>;
-    fn core_model(&self) -> Result<Option<String>, String>;
-    fn upsert_model(
-        &self,
-        id: &str,
-        name: &str,
-        api_model: &str,
-        provider: &str,
-        note: &str,
-        // 上下文窗口（tokens）；0 = 保留现值（新建缺省 32k）。
-        context: u64,
-    ) -> Result<(), String>;
-    fn remove_model(&self, id: &str) -> Result<bool, String>;
-    fn set_core_model(&self, id: &str) -> Result<bool, String>;
-    fn agents(&self) -> Result<Vec<AgentView>, String>;
-    /// 点名：按名字取 agent 视图；**不猜、不代选**——名字不在登记处就如实报错。
-    fn pick_agents(&self, names: &[String]) -> Result<Vec<AgentView>, String>;
-    fn upsert_agent(
-        &self,
-        name: &str,
-        modules: &[String],
-        model: &str,
-        note: &str,
-    ) -> Result<(), String>;
-    fn remove_agent(&self, name: &str) -> Result<bool, String>;
-    fn settings(&self) -> Result<AppSettings, String>;
-    fn set_settings(&self, app: AppSettings) -> Result<(), String>;
-    fn discover_models(&self, provider_id: &str) -> Result<Vec<String>, String>;
-    /// 实测一条通道支不支持原生工具调用（要真实网络；三种结论都如实回报，
-    /// 只把**确定**的结论写回登记处 —— 这条规则在 core，不在呈现层）。
-    fn probe_model_tools(
-        &self,
-        id: &str,
-    ) -> Result<crate::capabilities::llm::api::ProbeOutcome, String>;
-    /// 实测这种"回放形状"供应商收不收、模型有没有真的读懂（要真实网络；**不改登记处**）。
-    fn probe_replay_shape(
-        &self,
-        id: &str,
-    ) -> Result<crate::capabilities::llm::api::ReplayReport, String>;
-}
-
-/// 历史能力：落盘会话的列表 / 打开 / 删除，以及在世会话与历史合并后的总览。
-pub trait HistoryOps: Send + Sync {
-    fn list(&self) -> Result<Vec<HistoryView>, String>;
-    fn open(&self, name: &str) -> Result<(SessionMeta, Vec<serde_json::Value>), String>;
-    fn delete(&self, name: &str) -> Result<bool, String>;
-    fn session_views(&self, history: &[HistoryView]) -> Result<Vec<SessionView>, String>;
-}
-
-/// 发现能力：清单与能力事实（都只报事实，不做选择）。
-pub trait DiscoveryOps: Send + Sync {
-    fn roster(&self) -> Result<Roster, String>;
+/// 核心自己的用例（会话中心之外的那些）：运行报告与核心推荐。
+///
+/// 它们留在 core 是因为**只有 core 同时拿着**清单、包库、宿主探测与各能力的面——它们是编排
+/// （§2.4 的脚本），没有独立状态，所以不配一个"能力"。清单事实本身归 `workspace::api::WorkspaceOps`。
+pub trait CoreOps: Send + Sync {
+    /// 运行包与档位的运行报告（只报事实）。
     fn runtime_report(&self, tier: Tier) -> Result<RuntimeReport, String>;
     /// 核心按任务推荐的 agent 草案（带理由；用户可改）。
     fn suggest_models(&self, task: &str, mode: WorkMode) -> Result<Vec<AgentSuggestion>, String>;
 }
+
 /// 日志能力：呈现层与 CLI 的埋点入口（**只转发，不做任何判定**）。
 /// 呈现层因此拿不到端口对象、也不依赖 kernel（见 ARCHITECTURE.md §一）。
 pub trait LogOps: Send + Sync {
@@ -1142,6 +1096,11 @@ impl SessionOps for CoreHandle {
     fn is_running(&self, sid: &str) -> bool {
         self.jobs.is_running(sid)
     }
+
+    fn session_views(&self, history: &[HistoryView]) -> Result<Vec<SessionView>, String> {
+        let history = history.to_vec();
+        self.call(move |core| Ok(core.session_views(&history)))
+    }
 }
 
 impl RegistryOps for CoreHandle {
@@ -1252,7 +1211,9 @@ impl RegistryOps for CoreHandle {
     }
 }
 
-impl HistoryOps for CoreHandle {
+// ---------- 归各能力自己的入站契约（本文件只实现队列代理） ----------
+
+impl crate::capabilities::session::api::HistoryOps for CoreHandle {
     fn list(&self) -> Result<Vec<HistoryView>, String> {
         self.call(|core| Ok(core.history_list()))
     }
@@ -1264,16 +1225,15 @@ impl HistoryOps for CoreHandle {
         let name = name.to_string();
         self.call(move |core| core.history_delete(&name))
     }
-    fn session_views(&self, history: &[HistoryView]) -> Result<Vec<SessionView>, String> {
-        let history = history.to_vec();
-        self.call(move |core| Ok(core.session_views(&history)))
-    }
 }
 
-impl DiscoveryOps for CoreHandle {
+impl crate::capabilities::workspace::api::WorkspaceOps for CoreHandle {
     fn roster(&self) -> Result<Roster, String> {
         self.call(|core| Ok(core.scan()))
     }
+}
+
+impl CoreOps for CoreHandle {
     fn runtime_report(&self, tier: Tier) -> Result<RuntimeReport, String> {
         self.call(move |core| Ok(core.runtime_report(tier)))
     }
@@ -1305,27 +1265,31 @@ impl LogOps for CoreHandle {
 
 // ---------- 入站能力面（组合根装配一次，按需交给呈现层） ----------
 
-/// 入站能力面：四个角色接口 + 事件台。克隆廉价；呈现层只依赖它需要的字段。
-/// 契约测试可以用假实现替换任意一个字段——这正是「按角色切分」换来的可测性。
+/// 入站能力面：**各能力自己的契约**（归位见批次 18）+ 核心自己的两个 + 事件台。
+/// 克隆廉价；呈现层只依赖它需要的字段，契约测试可以用假实现替换任意一个字段。
 #[derive(Clone)]
 pub struct Ops {
+    /// 会话中心（core 自己的状态）：会话生命周期、动作分发、文件视图、会话总览。
     pub sessions: Arc<dyn SessionOps + Send + Sync>,
-    pub registry: Arc<dyn RegistryOps + Send + Sync>,
-    pub history: Arc<dyn HistoryOps + Send + Sync>,
-    pub discovery: Arc<dyn DiscoveryOps + Send + Sync>,
+    /// 核心自己的用例：运行报告与核心推荐。
+    pub core: Arc<dyn CoreOps + Send + Sync>,
+    pub registry: Arc<dyn crate::capabilities::registry::api::RegistryOps + Send + Sync>,
+    pub history: Arc<dyn crate::capabilities::session::api::HistoryOps + Send + Sync>,
+    pub workspace: Arc<dyn crate::capabilities::workspace::api::WorkspaceOps + Send + Sync>,
     pub events: Arc<EventBus>,
     /// 日志能力：呈现层只经它埋点（**不持有端口对象**）。
     pub log: Arc<dyn LogOps + Send + Sync>,
 }
 
 impl Ops {
-    /// 组合根用：把同一个核心手柄按角色拆成四个接口（同一个执行线程、同一个事件台）。
+    /// 组合根用：把同一个核心手柄按角色拆开（同一个执行线程、同一个事件台）。
     pub fn from_handle(h: &CoreHandle) -> Ops {
         Ops {
             sessions: Arc::new(h.clone()),
+            core: Arc::new(h.clone()),
             registry: Arc::new(h.clone()),
             history: Arc::new(h.clone()),
-            discovery: Arc::new(h.clone()),
+            workspace: Arc::new(h.clone()),
             events: h.events(),
             log: Arc::new(h.clone()),
         }

@@ -21,13 +21,62 @@ use crate::capabilities::prompt::api::{Prompt, ToolTexts};
 use crate::capabilities::session::api::AgentMeta;
 use crate::capabilities::workspace::api::Roster;
 
+/// 登记处的**队列面**：呈现层经 `CoreHandle`（核心自己的线程 + 命令队列）调它。
+///
+/// 与 `Registry`（能力面）的分工是**有意的不对称**，不是重复：
+/// - `Registry` 的写方法取 `&mut self`——只有那样"单写者"才是**编译期事实**（R4/R5）；
+/// - 本 trait 全取 `&self`——呈现层持有的是可克隆的句柄（多连接共用），队列独占在**线程那一侧**，
+///   不是靠类型系统在调用点表达。
+///
+/// 两者因此**不能收成一个 trait**（接收者不同）；收口判据见 docs/architecture/refactor-plan.md §4.2 批次 18。
+pub trait RegistryOps: Send + Sync {
+    fn providers(&self) -> Result<Vec<ProviderView>, String>;
+    fn upsert_provider(&self, id: &str, base_url: &str, api_key: &str) -> Result<(), String>;
+    fn remove_provider(&self, id: &str) -> Result<bool, String>;
+    fn models(&self) -> Result<Vec<ModelView>, String>;
+    fn core_model(&self) -> Result<Option<String>, String>;
+    fn upsert_model(
+        &self,
+        id: &str,
+        name: &str,
+        api_model: &str,
+        provider: &str,
+        note: &str,
+        // 上下文窗口（tokens）；0 = 保留现值（新建缺省 32k）。
+        context: u64,
+    ) -> Result<(), String>;
+    fn remove_model(&self, id: &str) -> Result<bool, String>;
+    fn set_core_model(&self, id: &str) -> Result<bool, String>;
+    fn agents(&self) -> Result<Vec<AgentView>, String>;
+    /// 点名：按名字取 agent 视图；**不猜、不代选**——名字不在登记处就如实报错。
+    fn pick_agents(&self, names: &[String]) -> Result<Vec<AgentView>, String>;
+    fn upsert_agent(
+        &self,
+        name: &str,
+        modules: &[String],
+        model: &str,
+        note: &str,
+    ) -> Result<(), String>;
+    fn remove_agent(&self, name: &str) -> Result<bool, String>;
+    fn settings(&self) -> Result<AppSettings, String>;
+    fn set_settings(&self, app: AppSettings) -> Result<(), String>;
+    fn discover_models(&self, provider_id: &str) -> Result<Vec<String>, String>;
+    /// 实测一条通道支不支持原生工具调用（要真实网络；三种结论都如实回报，
+    /// 只把**确定**的结论写回登记处 —— 这条规则在能力里，不在呈现层）。
+    fn probe_model_tools(&self, id: &str) -> Result<ProbeOutcome, String>;
+    /// 实测这种"回放形状"供应商收不收、模型有没有真的读懂（要真实网络；**不改登记处**）。
+    fn probe_replay_shape(&self, id: &str) -> Result<ReplayReport, String>;
+}
+
 /// 登记处能力面：供应商 / 模型 / agent / 基本设置，以及通道上的模型发现与探测。
 ///
 /// 两类方法对应两类调用方：
 /// - **呈现层要的**（`provider_views` / `model_views` / `agent_views` / `app_settings` …）——
-///   它经 `core::api::RegistryOps` 走命令队列进来（见 `core/api.rs`）；
+///   它经 `RegistryOps`（本文件）走命令队列进来（见 `core/api.rs`）；
 /// - **其它能力与 core 要的只读事实**（`resolve` / `tool_mode` / `context_of` / `snapshot` …）——
 ///   谁是登记处的主人就由谁答，调用方不自己维护一份镜像。
+///
+/// 实现者是 `service.rs` 的 `RegistryService`（**状态在它里面**，core 只持 `Box<dyn Registry>`）。
 pub trait Registry: Send + Sync {
     // ---- 视图：给呈现层与别的能力看的登记处（**永不携带密钥**） ----
 
