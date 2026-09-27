@@ -11,7 +11,11 @@ impl Conductor {
     /// 回档：保留到转录行 id 为止（含该行），其后记录一并删除；流水只追加 rewind 记录。
     /// 返回重放后的完整事件流，供前端整体重建（不用前端自己推算截断）。
     /// 单 agent 的活动会话按历史精确回退；协作与历史会话按转录重建（状态全部派生）。
-    pub(crate) fn rewind(&mut self, sid: &str, keep_id: u64) -> Result<Vec<serde_json::Value>, String> {
+    pub(crate) fn rewind(
+        &mut self,
+        sid: &str,
+        keep_id: u64,
+    ) -> Result<Vec<serde_json::Value>, String> {
         if self.running.contains(sid) {
             return Err(Self::running_refusal(sid));
         }
