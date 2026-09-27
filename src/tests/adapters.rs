@@ -3,18 +3,14 @@
 //! 不碰真实 `.home/` 与 `session/`。HTTP 适配器只对本机环回假供应商说话（无外网、无真实密钥）。
 
 use super::scratch;
-use crate::adapters::endpoint::memo_new;
-use crate::adapters::fs_modules::FsModules;
-use crate::adapters::fs_packages::FsPackages;
-use crate::adapters::fs_workspace::FsWorkspace;
-use crate::adapters::http_chat::HttpGateway;
 use crate::adapters::log::FileLog;
-use crate::adapters::model_catalog::HttpModelCatalog;
-use crate::adapters::sys_io::FsSysIo;
 use crate::capabilities::llm::api::Channel;
 use crate::capabilities::llm::api::{
     ChatGateway, Chunk, CompleteOpts, ModelCatalog, Msg, ProbeOutcome,
 };
+use crate::capabilities::llm::detail::endpoint::memo_new;
+use crate::capabilities::llm::detail::http_chat::HttpGateway;
+use crate::capabilities::llm::detail::model_catalog::HttpModelCatalog;
 use crate::capabilities::prompt::detail::yaml_prompts::YamlPrompts;
 use crate::capabilities::prompt::ports::PromptSource;
 use crate::capabilities::registry::api::{Provider, Settings};
@@ -23,9 +19,13 @@ use crate::capabilities::registry::ports::SettingsStore;
 use crate::capabilities::session::api::{AgentMeta, SessionMeta};
 use crate::capabilities::session::detail::fs_history::FsHistory;
 use crate::capabilities::session::ports::HistoryStore;
+use crate::capabilities::tools::detail::sys_io::FsSysIo;
 use crate::capabilities::tools::detail::yaml_systools::YamlSystools;
 use crate::capabilities::tools::ports::SysIo;
 use crate::capabilities::workspace::api::ExecSpec;
+use crate::capabilities::workspace::detail::fs_modules::FsModules;
+use crate::capabilities::workspace::detail::fs_packages::FsPackages;
+use crate::capabilities::workspace::detail::fs_workspace::FsWorkspace;
 use crate::capabilities::workspace::ports::{ModuleSource, PackageSource, Workspace};
 use crate::kernel::log::{Log, NoopLog};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -334,7 +334,7 @@ fn fs_modules_accepts_valid_folders_and_rejects_each_illegal_form_with_a_reason(
     );
     put("broken", "id: broken\nbrief: [不是字符串\n");
 
-    let roster = FsModules::new(dir).scan();
+    let roster = FsModules::new(dir, crate::capabilities::tools::api::names()).scan();
     let ids: Vec<&str> = roster
         .modules
         .iter()
@@ -355,7 +355,7 @@ fn fs_modules_accepts_valid_folders_and_rejects_each_illegal_form_with_a_reason(
     assert!(all.contains("非法"), "坏 yaml 要拒收：{}", all);
 
     // 目录整个不存在 = 空清单（放入即出现，移出即消失）。
-    let gone = FsModules::new(root.join("没有这个目录")).scan();
+    let gone = FsModules::new(root.join("没有这个目录"), Vec::new()).scan();
     assert!(gone.modules.is_empty() && gone.rejected.is_empty());
     let _ = std::fs::remove_dir_all(&root);
 }
@@ -1033,8 +1033,12 @@ fn replay_shape_probe_reports_which_writings_the_supplier_accepts() {
         (200, "application/json", completion_body("我看不到任何编号")),
         (200, "application/json", completion_body("solomni-7f3a91c2")),
     ]);
-    let report = crate::adapters::http_probe::probe_replay_with(&mock.channel("k"), &log, nonce)
-        .expect("基线通过就该拿到报告");
+    let report = crate::capabilities::llm::detail::http_probe::probe_replay_with(
+        &mock.channel("k"),
+        &log,
+        nonce,
+    )
+    .expect("基线通过就该拿到报告");
     let got: Vec<(&str, bool, bool)> = report
         .shapes
         .iter()
@@ -1091,7 +1095,7 @@ fn replay_shape_probe_reports_which_writings_the_supplier_accepts() {
         "application/json",
         "{\"error\":{\"message\":\"bad key\"}}".to_string(),
     )]);
-    let err = crate::adapters::http_probe::probe_replay(&bad.channel("bad"), &log)
+    let err = crate::capabilities::llm::detail::http_probe::probe_replay(&bad.channel("bad"), &log)
         .expect_err("通道不通就是 Err");
     assert!(err.contains("通道本身就没打通"), "{}", err);
 }
@@ -1178,7 +1182,7 @@ fn http_model_catalog_lists_models_and_rejects_broken_shapes() {
 /// 这条测试钉的就是「绝不把 TLS 坏了说成环境不允许」这条红线，同时不把环境结论误报成失败。
 #[test]
 fn outbound_error_classification_keeps_environment_and_our_bug_apart() {
-    use crate::adapters::http_agent::classify;
+    use crate::capabilities::llm::detail::http_agent::classify;
     // 网络类：环境结论。
     assert_eq!(classify(&ureq::Error::HostNotFound), "no-net");
     assert_eq!(classify(&ureq::Error::ConnectionFailed), "no-net");
@@ -1202,7 +1206,7 @@ fn outbound_error_classification_keeps_environment_and_our_bug_apart() {
     // 判据本身：只认那一码的两种写法，别的原文一律不算（"环境"不能是个筐）。
     // Windows 上 native-tls 的错误走 NativeTls 变体（不是通用 Tls 壳），那个变体构造不出来，
     // 所以由真机探针（--https-check → env-tls）验接线，这里把判据本身钉死。
-    use crate::adapters::http_agent::lacks_system_credentials;
+    use crate::capabilities::llm::detail::http_agent::lacks_system_credentials;
     assert!(
         lacks_system_credentials("(os error -2146893042)"),
         "有符号十进制要认"

@@ -20,7 +20,10 @@ use std::sync::Arc;
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     // 守门模式（内部协议，用户不用）：把围栏装好再跑模块声明的命令，退出码即工具退出码。
-    if let Some(i) = args.iter().position(|a| a == adapters::confine::FENCE_FLAG) {
+    if let Some(i) = args
+        .iter()
+        .position(|a| a == capabilities::tools::detail::confine::FENCE_FLAG)
+    {
         std::process::exit(guard::fence_run(&args, i));
     }
     // 自检（机器可读）：把"这台机器能承载哪些测试"如实交出来——测试入口据此判定，不靠猜（见 TESTING.md）。
@@ -76,7 +79,7 @@ fn main() {
         log.warn("main::root", note);
     }
     // 围栏能力如实告知（不强于实际：机制缺什么就说缺什么）。
-    let fence_cap = adapters::confine::capability();
+    let fence_cap = capabilities::tools::detail::confine::capability();
     log.info(
         "main::fence",
         &format!(
@@ -92,15 +95,22 @@ fn main() {
         root.join(".home").join("agents.yaml"),
     );
     let history = capabilities::session::detail::fs_history::FsHistory::new(root.join("session"));
-    let workspace = adapters::FsWorkspace::new(root.join("session"));
-    let source = adapters::FsModules::new(root.join("modules"));
+    let workspace = capabilities::workspace::detail::FsWorkspace::new(root.join("session"));
+    // 保留名表（内置工具名）由**组合根**问一次工具能力后交进去：清单校验归 workspace，
+    // 名字空间归 tools，两边不互相依赖。
+    let source = capabilities::workspace::detail::FsModules::new(
+        root.join("modules"),
+        capabilities::tools::api::names(),
+    );
     // 运行包库：依赖文件夹 runtimes/（一个包 = 一个文件夹 + package.yaml）。
-    let packages = adapters::FsPackages::new(root.join("runtimes"));
+    let packages = capabilities::workspace::detail::FsPackages::new(root.join("runtimes"));
     // 端点记忆：谁先通了就固定谁，后续会话不再反复探测候选。
-    let memo = adapters::endpoint::memo_new();
-    let gateway =
-        adapters::HttpGateway::with_log(std::sync::Arc::clone(&log), std::sync::Arc::clone(&memo));
-    let catalog = adapters::HttpModelCatalog::with_log(
+    let memo = capabilities::llm::detail::endpoint::memo_new();
+    let gateway = capabilities::llm::detail::HttpGateway::with_log(
+        std::sync::Arc::clone(&log),
+        std::sync::Arc::clone(&memo),
+    );
+    let catalog = capabilities::llm::detail::HttpModelCatalog::with_log(
         std::sync::Arc::clone(&log),
         std::sync::Arc::clone(&memo),
     );
@@ -140,16 +150,16 @@ fn main() {
     // 启动报告已经算过的同一个事实：Web 概览要按它区分"本机能力"与"本次实际"（下面那块必定赋值）。
     let allow_fence_write;
     // 工具执行：外层拉起的守门进程就是本程序自己（围栏在它里面装）。
-    let tools = adapters::ProcTools::new(
+    let tools = capabilities::tools::detail::ProcTools::new(
         std::env::current_exe().unwrap_or_default(),
         book.core.tool_texts.clone(),
         home.clone(),
         std::sync::Arc::clone(&write_allowed),
     );
     // 内置文件工具：纯 Rust 直接读写，不经过外部进程（编码问题不进本程序）。
-    let io = adapters::FsSysIo::default();
+    let io = capabilities::tools::detail::FsSysIo::default();
     // 信封修复：只把字符串里的裸控制字符转义（无歧义才修，其余交给模型重发）。
-    let repair = adapters::UnambiguousRepair;
+    let repair = capabilities::llm::detail::UnambiguousRepair;
 
     let mut core = match core::Core::new(
         Arc::new(store),
@@ -157,7 +167,7 @@ fn main() {
         Arc::new(workspace),
         Arc::new(source),
         Arc::new(packages),
-        Arc::new(adapters::confine::FenceHostAdapter),
+        Arc::new(capabilities::tools::detail::confine::FenceHostAdapter),
         Arc::new(gateway),
         Arc::new(catalog),
         Arc::new(tools),
@@ -261,7 +271,7 @@ fn main() {
         };
         write_allowed.store(allow, std::sync::atomic::Ordering::Relaxed);
         allow_fence_write = allow;
-        let cap = adapters::confine::capability();
+        let cap = capabilities::tools::detail::confine::capability();
         // 能力与本次实际**分开报**：授权与否决定路径级围栏装不装，但进程树围栏、资源上限与环境白名单
         // 在两种时段都生效（未授权不等于无围栏）。只说"本机能力"会让用户以为未授权时什么都没有。
         let usable = |ok: bool| if ok { "可用" } else { "不可用" };
@@ -326,7 +336,7 @@ impl capabilities::prompt::ports::PromptSource for LoadedPrompts {
 }
 
 fn serve_web(ops: core::api::Ops, port: u16, write_allowed: bool) {
-    let cap = adapters::confine::capability();
+    let cap = capabilities::tools::detail::confine::capability();
     // 能力与本次实际**分开报**（与启动报告同一套说法）：未授权时路径级围栏是关的，
     // 但进程树与资源上限照旧生效——概览里必须让用户看到这个区别，不能只看"本机能力"。
     let (fs, net) = if write_allowed {

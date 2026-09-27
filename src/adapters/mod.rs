@@ -2,30 +2,9 @@
 //! 依赖方向：adapters → core（只依赖端口与数据结构），可引用外部库（ureq/serde_yaml）。
 //! 本层不做装配决策；new 出来的实例由 main 组合根注入 Core。
 
-pub mod confine;
-pub mod endpoint;
-pub mod fake_chat;
-pub mod fs_modules;
-pub mod fs_packages;
-pub mod fs_workspace;
 pub mod host_probe;
-pub mod http_agent;
-pub mod http_chat;
-pub mod http_probe;
 pub mod log;
-pub mod model_catalog;
-pub mod proc_tools;
-pub mod repair;
 pub mod root;
-pub mod sys_io;
 
-pub use fs_modules::FsModules;
-pub use fs_packages::FsPackages;
-pub use fs_workspace::FsWorkspace;
 pub use host_probe::HostProbeAdapter;
-pub use http_chat::HttpGateway;
 pub use log::FileLog;
-pub use model_catalog::HttpModelCatalog;
-pub use proc_tools::ProcTools;
-pub use repair::UnambiguousRepair;
-pub use sys_io::FsSysIo;

@@ -4,5 +4,6 @@
 //! **能碰到哪儿**（work 共享区与各 agent 私有沙箱）。目录布局与扫描机制在适配层。
 
 pub mod api;
+pub mod detail;
 pub mod domain;
 pub mod ports;

@@ -21,7 +21,7 @@ cli / web ──▶ core ◀── adapters
 | 层 | 干什么 | 禁令 |
 | --- | --- | --- |
 | `core/` | 只剩**门面**（`Core`：会话中心与命令队列）与回档；**正在被搬空**——端口与全部业务能力都已落位 `capabilities/` | 不读文件（`std::fs`）、不发网络（ureq）、不碰 stdin/stdout——一切机制下沉适配层 |
-| `adapters/` | 实现 core 的端口；可引用外部库（ureq / serde_yaml / windows-sys / libc） | 只依赖 core，**永不反向**；不做装配决策 |
+| `adapters/` | **内核端口的实现**（`Log` / `HostProbe`）与入口层用的机制；能力私有的实现已归各能力 `detail/` | 属于机制层；不做装配决策 |
 | `cli/` + `web/` | **前端（交付机制）**：各渠道一个顶层目录，完全分开——传输（argv/stdout vs HTTP/SSE）、路由、**纯渲染**。**不是业务能力**（无状态、无不变式） | 只依赖 **入站能力面**（`core::api` 或各能力的 `::api`）；**永不接触端口对象，也拿不到 `Core` 本身**；**两者之间互不依赖** |
 | `capabilities/` | **业务能力**：按业务功能垂直切分。每个能力有 `api`（入站契约）/ `ports`（出站端口）/ `domain`（纯逻辑）/ `detail`（细节实现） | **业务之间只经对方的 `api`**；不反向依赖 `core` / `adapters` / `presentation`（迁移期残留记为基线豁免，见 [docs/architecture/refactor-plan.md](docs/architecture/refactor-plan.md) §四） |
 | `kernel/` | **机制型内核**：无领域语义、无领域状态的机制（运行日志端口、生成中作业的取消表、跨业务共享的事实类型） | **不依赖任何人**（不认识 core / adapters / presentation）；不放有领域语义的类型 |
@@ -150,7 +150,7 @@ session/<工作名>/
 - `capabilities/tools/` 里的 `fence` 是工具进程围栏的**策略**（可达范围 = 共享区 + 自己的私有沙箱 + 自己的模块目录 + 用户显式授权的只读根 `ro`、断网、工作目录），
   `ro` 来自 `.home/settings.yaml` 的 `fence_read`（默认空）：**只读位由各平台机制落实**（Landlock 只读位 /
   seatbelt `file-read*` / Windows `RIGHTS_RO`），且只授给该 agent 自己的容器身份——不能像解释器基线那样授给共享组。
-  机制在 `adapters/confine/`：外层拉起的**守门进程**（本程序 `--fence-run` 模式）按平台把围栏装进真正的工具进程
+  机制在 `capabilities/tools/detail/confine/`：外层拉起的**守门进程**（本程序 `--fence-run` 模式）按平台把围栏装进真正的工具进程
   ——Linux Landlock、macOS seatbelt、Windows AppContainer（先建容器 profile，再按 agent 派生容器 SID 与目录 ACL 授权，
   不给 capability 即断网）+ Job Object（进程树）；Windows 的目录授权由外层进程一次性做好（`confine::prepare_fence`）并记在内存台账里。
   装不上就**如实降级**（启动时自检并报告能力等级，绝不假装有）。命令行是守门进程的内部协议，模块作者与用户都不接触。
@@ -201,4 +201,4 @@ session/<工作名>/
   书写形式由 `kernel::path::slash` 统一给出（纯机制，与任何业务无关）。
 - 编码：读严格 UTF-8、非法字节如实标注（**不猜编码**）；写一律 UTF-8；为工具子进程强制 UTF-8 环境。
 - 不假设平台：不写死盘符、不假设 shell（工具命令由模块作者声明）。
-- 围栏按平台给不同机制（`adapters/confine/` 一个平台一个文件），能力等级如实上报；某平台没有接入的部分**就是没有**——文档与界面都照实说，不用夸张的措辞补齐。
+- 围栏按平台给不同机制（`capabilities/tools/detail/confine/` 一个平台一个文件），能力等级如实上报；某平台没有接入的部分**就是没有**——文档与界面都照实说，不用夸张的措辞补齐。

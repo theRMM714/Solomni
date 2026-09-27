@@ -7,11 +7,11 @@
 #![allow(dead_code)]
 
 use super::core::SilentRunner;
-use crate::adapters::fake_chat::FakeChat;
 use crate::capabilities::llm::api::Channel;
 use crate::capabilities::llm::api::{
     BoxedChat, Chat, ChatGateway, Chunk, CompleteOpts, Completion, ModelCatalog, Msg,
 };
+use crate::capabilities::llm::detail::fake_chat::FakeChat;
 use crate::capabilities::prompt::api::Prompts;
 use crate::capabilities::prompt::ports::PromptSource;
 use crate::capabilities::registry::api::{ModelEntry, Provider, Settings};

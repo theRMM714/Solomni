@@ -28,8 +28,8 @@ Fake 必须：
 
 | 实现 | 当前角色 | 当前状态 |
 | --- | --- | --- |
-| `src/adapters/fake_chat.rs:FakeChat` | 脚本模型，同时记录 `calls`，兼具 Fake + Spy | 契约已就位（成功 / 空 / 流式 / 中止 / 记录） |
-| `src/adapters/fake_chat.rs:DemoGateway` | 演示/回落网关 | 契约已就位（两类通道 / 回落告知 / 无网络无密钥） |
+| `src/capabilities/llm/detail/fake_chat.rs:FakeChat` | 脚本模型，同时记录 `calls`，兼具 Fake + Spy | 契约已就位（成功 / 空 / 流式 / 中止 / 记录） |
+| `src/capabilities/llm/detail/fake_chat.rs:DemoGateway` | 演示/回落网关 | 契约已就位（两类通道 / 回落告知 / 无网络无密钥） |
 | `src/tests/doubles.rs:InMemorySettings`、`InMemoryHistory`、`InMemoryWorkspace`、`InMemorySysIo` | 内存 Fake | 已被核心测试装配使用；端口矩阵已登记（见 §三，已验收） |
 | `src/tests/doubles.rs:InMemoryPackages` | 包库 Fake | 已被核心测试使用；端口矩阵已登记（见 §三，已验收） |
 | `src/tests/doubles.rs:FakeCatalog` | 模型目录 Fake + 调用记录（`seen`） | 已被核心测试使用；端口矩阵已登记（见 §三，已验收） |

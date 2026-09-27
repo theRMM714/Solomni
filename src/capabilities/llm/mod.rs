@@ -4,5 +4,6 @@
 //! 信封解析（`domain/envelope`）是纯逻辑——把模型回复的最外层结构认出来（发言 / 表态 / 工具调用）。
 
 pub mod api;
+pub mod detail;
 pub mod domain;
 pub mod ports;

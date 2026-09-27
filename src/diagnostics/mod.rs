@@ -4,7 +4,7 @@
 
 /// 自检：本机事实（平台 + 围栏能力 + 外部解释器）。只报事实，不猜、不改任何东西（围栏自检那个临时目录除外）。
 pub fn doctor() -> i32 {
-    let cap = crate::adapters::confine::capability();
+    let cap = crate::capabilities::tools::detail::confine::capability();
     // 虚拟机档的逐项前置（**只读事实**）：这里按"没登记 QEMU、没指定基础根"问一次，
     // 也就是最朴素的情形——登记过的路径以会话配置界面为准（那里按会话选型问同一份清单）。
     let vm = crate::capabilities::workspace::api::vm_requirements(
@@ -44,8 +44,8 @@ pub fn https_check(args: &[String], i: usize) -> i32 {
         eprintln!("用法：solomni --https-check <https url>");
         return 2;
     }
-    let backend = crate::adapters::http_agent::tls_backend();
-    let agent = crate::adapters::http_agent::agent(10, 20);
+    let backend = crate::capabilities::llm::detail::http_agent::tls_backend();
+    let agent = crate::capabilities::llm::detail::http_agent::agent(10, 20);
     match agent.get(&url).call() {
         Ok(resp) => {
             println!("[HTTPS] ok {} {} {}", resp.status().as_u16(), backend, url);
@@ -54,7 +54,7 @@ pub fn https_check(args: &[String], i: usize) -> i32 {
         Err(e) => {
             println!(
                 "[HTTPS] {} {} {}",
-                crate::adapters::http_agent::classify(&e),
+                crate::capabilities::llm::detail::http_agent::classify(&e),
                 backend,
                 e
             );
@@ -66,16 +66,16 @@ pub fn https_check(args: &[String], i: usize) -> i32 {
 /// 隐藏模式：按 KEY=VALUE 逐行打出运行期给工具进程的环境白名单（入参 = 守门进程那份 JSON）。
 pub fn print_fence_env(args: &[String], flag: usize) -> i32 {
     let raw = args.get(flag + 1).cloned().unwrap_or_default();
-    match crate::adapters::confine::FenceJob::from_json(&raw) {
+    match crate::capabilities::tools::detail::confine::FenceJob::from_json(&raw) {
         Ok(job) => {
-            for (k, v) in crate::adapters::confine::fence_env(&job.spec) {
+            for (k, v) in crate::capabilities::tools::detail::confine::fence_env(&job.spec) {
                 println!("{}={}", k.to_string_lossy(), v.to_string_lossy());
             }
             0
         }
         Err(e) => {
             eprintln!("[围栏] {}", e);
-            crate::adapters::confine::FENCE_FAILED
+            crate::capabilities::tools::detail::confine::FENCE_FAILED
         }
     }
 }
@@ -88,23 +88,23 @@ pub fn fence_verify(args: &[String], flag: usize) -> i32 {
         Some(j) => args.get(j + 1).cloned().unwrap_or_default(),
         None => String::new(),
     };
-    let job = match crate::adapters::confine::FenceJob::from_json(&raw) {
+    let job = match crate::capabilities::tools::detail::confine::FenceJob::from_json(&raw) {
         Ok(j) => j,
         Err(e) => {
             eprintln!("[围栏] {}", e);
-            return crate::adapters::confine::FENCE_FAILED;
+            return crate::capabilities::tools::detail::confine::FENCE_FAILED;
         }
     };
-    match crate::adapters::confine::verify(&job.spec, &command) {
-        crate::adapters::confine::FenceVerdict::Enforced => {
+    match crate::capabilities::tools::detail::confine::verify(&job.spec, &command) {
+        crate::capabilities::tools::detail::confine::FenceVerdict::Enforced => {
             println!("enforced");
             0
         }
-        crate::adapters::confine::FenceVerdict::EnvUnavailable(why) => {
+        crate::capabilities::tools::detail::confine::FenceVerdict::EnvUnavailable(why) => {
             println!("env-unavailable {}", why);
             0
         }
-        crate::adapters::confine::FenceVerdict::Broken(why) => {
+        crate::capabilities::tools::detail::confine::FenceVerdict::Broken(why) => {
             println!("broken {}", why);
             0
         }

@@ -29,22 +29,9 @@
 
 | 文件 | 职责 |
 | --- | --- |
-| `mod.rs` | 适配层出口与统一 re-export |
-| `confine/` | 守门进程与平台围栏后端：`mod.rs` 装配与能力自报，`linux.rs` / `macos.rs` / `windows.rs` / `other.rs` 各平台机制 |
-| `proc_tools.rs` | `ToolRunner`：守门进程拉起、stdin 送参、超时杀树、输出截断 |
-| `sys_io.rs` | `SysIo`：内置工具的读写机制（UTF-8 解码、非法字节 `lossy` 标注） |
-| `repair.rs` | `EnvelopeRepair`：信封修复（默认只做两类可判定的修补——转义裸控制字符、补上缺的收尾括号；断在字符串中间与其余类别一律不猜） |
-| `fs_modules.rs` | `ModuleSource`：扫描 `modules/` |
-| `fs_packages.rs` | `PackageSource`：扫描 `runtimes/` |
-| `fs_workspace.rs` | `Workspace`：`session/<工作名>/` 下的 work 与各 agent 沙箱 |
+| `mod.rs` | 适配层出口（只剩下面这些**内核端口**的实现与入口层用的机制） |
 | `host_probe.rs` | `HostProbe`：宿主能力探测（路径存在性、PATH 上的可执行文件、本机虚拟化能力）——**只读事实**，不执行、不安装、不写。`find_exe` 是**可执行文件查找的唯一一份**（`has_exe` 与自检报告共用） |
 | `root.rs` | 产品根规范化：传入的根 → 干净的绝对路径（词法拼接优先；取不到当前目录才 canonicalize，并剥掉 Windows 的扩展长度前缀） |
-| `endpoint.rs` | 端点补全/回落规则与进程内端点记忆（纯逻辑） |
-| `http_agent.rs` | 出站 HTTP 代理构建（TLS 后端选择与超时的单点） |
-| `http_chat.rs` | `Chat` / `ChatGateway`：OpenAI 兼容 `/chat/completions`（请求体形状的唯一定义：真实会话与探针共用） |
-| `http_probe.rs` | 两条诊断探针（只报事实）：工具调用支持探测（`--probe-tools`）、回放形状探测（`--probe-replay`） |
-| `model_catalog.rs` | `ModelCatalog`：OpenAI 兼容 `GET /models` |
-| `fake_chat.rs` | 演示/测试通道：`FakeChat`（脚本回放）+ `DemoGateway`（无模型时回落） |
 | `log.rs` | `Log`：`logs/` 下按时间戳一份文件 |
 
 ## 四、`capabilities/`（业务能力）
@@ -77,6 +64,22 @@
 | `tools/domain/module_tools.rs` | **清单 → 工具面**：`ToolDecl::schema` / `check_tools` / `module_tools` / `module_tool_params`（批次 15 从 `workspace` 移来） |
 | `tools/domain/roles.rs` | 系统工具与**角色**表（`systools/` 两张表） |
 | `tools/domain/fence.rs` | 一次工具执行的围栏策略（纯数据） |
+| `prompt/detail/yaml_prompts.rs` | `PromptSource`：加载 `prompts/`（**只有文本**） |
+| `registry/detail/yaml_settings.rs` | `SettingsStore`：登记处四份 yaml 的读写 |
+| `session/detail/fs_history.rs` | `HistoryStore`：`meta.yaml` + `transcript.jsonl` |
+| `workspace/detail/fs_modules.rs` | `ModuleSource`：扫描 `modules/`（**保留名表由组合根注入**——清单校验归 workspace，名字空间归 tools） |
+| `workspace/detail/fs_packages.rs` | `PackageSource`：扫描 `runtimes/` |
+| `workspace/detail/fs_workspace.rs` | `Workspace`：`session/<工作名>/` 下的 work 与各 agent 沙箱 |
+| `llm/detail/http_chat.rs` | `Chat` / `ChatGateway`：OpenAI 兼容 `/chat/completions`（请求体形状的唯一定义：真实会话与探针共用） |
+| `llm/detail/http_probe.rs` | 两条诊断探针（只报事实）：工具调用支持探测、回放形状探测 |
+| `llm/detail/repair.rs` | `EnvelopeRepair`：信封修复（默认只做两类可判定的修补） |
+| `llm/detail/http_agent.rs` | 出站 HTTP 代理构建（TLS 后端选择与超时的单点） |
+| `llm/detail/endpoint.rs` | 端点补全/回落规则与进程内端点记忆（纯逻辑） |
+| `llm/detail/model_catalog.rs` | `ModelCatalog`：OpenAI 兼容 `GET /models` |
+| `llm/detail/fake_chat.rs` | 演示/测试通道：`FakeChat`（脚本回放）+ `DemoGateway`（无模型时回落） |
+| `tools/detail/confine/` | 守门进程与平台围栏后端（一个平台一个文件） |
+| `tools/detail/proc_tools.rs` | `ToolRunner`：守门进程拉起、stdin 送参、超时杀树、输出截断 |
+| `tools/detail/sys_io.rs` | `SysIo`：内置工具的读写机制（UTF-8 解码、非法字节 `lossy` 标注） |
 | `tools/detail/yaml_systools.rs` | `systools/tools.yaml` + `roles.yaml` → `SystemTools`（**工具总表与角色表是工具侧的事实**，不是提示词） |
 | `session/api.rs` | **入站能力面**：`SessionParams` / `AgentSession` / `TurnRun` / 行与事件词汇 / 历史视图的对外名字 |
 | `session/ports.rs` | `HistoryStore`：会话历史的持久化（从 `core/ports.rs` 随能力搬出；`core/ports.rs` 随之消失） |

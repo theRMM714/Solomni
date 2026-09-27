@@ -433,24 +433,24 @@ function structuralAudit() {
         if (layer === "presentation" && !presOk && targetLayer !== "presentation") {
           presentation.add(f + " -> " + t);
         }
-        // `::detail` 是**实现**：只有入口层的组合根能构造它（内核自己的 detail 不在此列）。
-        if (
-          layer !== "entry" &&
-          layer !== "kernel" &&
-          targetLayer === "capabilities" &&
-          t.endsWith("::detail")
-        ) {
-          apiOnly.add(f + " -> " + t);
-        }
         // 业务之间只经对方的**声明面**：::api（入站契约）或 ::ports（出站端口，是接口不是实现）。
         // 不许碰 ::domain —— 那是实现细节。能力内部的互相引用不算"业务之间"。
         if (layer === "capabilities" && targetLayer === "capabilities") {
           const selfCap = f.split("/")[2];
           const otherCap = t.split("::")[2];
           const declared = t.endsWith("::api") || t.endsWith("::ports");
-          if (otherCap && otherCap !== selfCap && !declared) {
-            apiOnly.add(f + " -> " + t);
-          }
+          // ① 跨能力：只准碰对方的声明面（::api / ::ports）——::domain 与 ::detail 都是实现。
+          if (otherCap && otherCap !== selfCap && !declared) apiOnly.add(f + " -> " + t);
+          // ② 同能力：自己的 domain / detail 随便用；`::detail` 只准自己用。
+        }
+        // `::detail` 是**实现**：跨能力引用一律不许，只有入口层的组合根能构造它。
+        if (
+          layer !== "entry" &&
+          t.startsWith("crate::capabilities::") &&
+          t.endsWith("::detail") &&
+          t.split("::")[2] !== f.split("/")[2]
+        ) {
+          apiOnly.add(f + " -> " + t);
         }
         // 环的节点：core 模块用短名（保持与既有基线兼容），能力用 capabilities/<名字>。
         // 两者同处一张图，所以"能力级环"与"模块级环"一起被判定。
@@ -507,7 +507,7 @@ function structuralAudit() {
     };
     compare("reverse", [...reverse].sort(), depBaseline.reverse || [], "业务层不得反向依赖旧巨石 core / adapters / presentation");
     compare("presentation", [...presentation].sort(), depBaseline.presentation || [], "presentation 只能经入站能力面（core::api 或各能力的 ::api）驱动");
-    compare("apiOnly", [...apiOnly].sort(), depBaseline.apiOnly || [], "业务之间只能经对方的声明面（::api / ::ports），不得碰 ::domain");
+    compare("apiOnly", [...apiOnly].sort(), depBaseline.apiOnly || [], "业务之间只能经对方的声明面（::api / ::ports）；::domain / ::detail 是实现，跨能力一律不许碰");
 
     const actualCycles = sortSccs(coreSccs);
     const baselineCycles = sortSccs(depBaseline.coreCycles || []);

@@ -1,6 +1,6 @@
 //! **围栏守门进程**：它是**第二个程序入口**，由工具进程按 `--fence-run` 拉起。
 //! 与「启动应用」分开的理由：它跑的是**模块作者写的命令**，生命周期与退出码都属于那次工具调用。
-//! 机制全在 `crate::adapters::confine`；这里只做 argv → 机制的分发。
+//! 机制全在 `crate::capabilities::tools::detail::confine`；这里只做 argv → 机制的分发。
 
 /// 守门模式：读回围栏参数与命令，装围栏 → 跑命令 → 以工具退出码收场（失败如实报错，不静默）。
 pub fn fence_run(args: &[String], flag: usize) -> i32 {
@@ -9,11 +9,11 @@ pub fn fence_run(args: &[String], flag: usize) -> i32 {
         Some(j) => args.get(j + 1).cloned().unwrap_or_default(),
         None => String::new(),
     };
-    match crate::adapters::confine::FenceJob::from_json(&raw_job) {
-        Ok(job) => crate::adapters::confine::run_fenced(&job, &command),
+    match crate::capabilities::tools::detail::confine::FenceJob::from_json(&raw_job) {
+        Ok(job) => crate::capabilities::tools::detail::confine::run_fenced(&job, &command),
         Err(e) => {
             eprintln!("[围栏] {}", e);
-            crate::adapters::confine::FENCE_FAILED
+            crate::capabilities::tools::detail::confine::FENCE_FAILED
         }
     }
 }
@@ -23,14 +23,14 @@ pub fn fence_clean(root: &std::path::Path) -> i32 {
     let home = root.join(".home");
     let mut lines: Vec<String> = Vec::new();
     let mut failed = false;
-    match crate::adapters::confine::clean(&home) {
+    match crate::capabilities::tools::detail::confine::clean(&home) {
         Ok(msg) => lines.push(msg),
         Err(e) => {
             lines.push(format!("台账回收未完成：{}", e));
             failed = true;
         }
     }
-    match crate::adapters::confine::sweep_profiles() {
+    match crate::capabilities::tools::detail::confine::sweep_profiles() {
         Ok(n) => lines.push(format!("扫掉 {} 个本程序建过的容器 profile", n)),
         Err(e) => {
             lines.push(format!("容器 profile 清扫未完成：{}", e));

@@ -123,6 +123,23 @@ pub fn check_runtimes(m: &ModuleManifest) -> Result<(), String> {
     Ok(())
 }
 
+/// 外部工具表的校验（纯逻辑；扫描模块时由适配层调用）：**保留名由调用方给**
+/// （工具名空间归工具能力，清单主人不反向依赖它——见 refactor-plan §3.1）。
+pub fn check_tools(m: &ModuleManifest, reserved: &[String]) -> Result<(), String> {
+    for (name, decl) in &m.tools {
+        if reserved.iter().any(|r| r == name) {
+            return Err(format!(
+                "tools 里的 {} 是核心内置工具名（保留名），模块不得占用",
+                name
+            ));
+        }
+        if decl.command.trim().is_empty() {
+            return Err(format!("tools 里的 {} 没写 command（启动命令）", name));
+        }
+    }
+    Ok(())
+}
+
 /// 一个已发现的模块 = 文件夹 + 清单。
 #[derive(Debug, Clone)]
 pub struct Module {

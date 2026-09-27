@@ -5,7 +5,7 @@
 //! 参数**声明形态**（`Param` / `ParamType`）仍归 `workspace`（它是 `module.yaml` 的字段）。
 
 use crate::capabilities::tools::domain::schema::ToolSchema;
-use crate::capabilities::workspace::api::{Module, ModuleManifest, ToolDecl};
+use crate::capabilities::workspace::api::{Module, ToolDecl};
 
 impl ToolDecl {
     /// 参数契约的声明形态（校验与渲染共用）；没声明参数 = None = 不校验。
@@ -20,22 +20,6 @@ impl ToolDecl {
                 capability: String::new(),
             })
     }
-}
-
-/// 外部工具表的校验（纯逻辑；扫描模块时由适配层调用）：内置工具名是保留名，占用 = 拒收并说明原因。
-pub fn check_tools(m: &ModuleManifest) -> Result<(), String> {
-    for (name, decl) in &m.tools {
-        if crate::capabilities::tools::api::is_builtin(name) {
-            return Err(format!(
-                "tools 里的 {} 是核心内置工具名（保留名），模块不得占用",
-                name
-            ));
-        }
-        if decl.command.trim().is_empty() {
-            return Err(format!("tools 里的 {} 没写 command（启动命令）", name));
-        }
-    }
-    Ok(())
 }
 
 /// 模块工具的参数契约（只列**声明了**参数的）：模型据此写信封里的 args；没声明的照旧不校验。

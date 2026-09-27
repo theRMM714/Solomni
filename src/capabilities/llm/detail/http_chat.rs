@@ -532,11 +532,11 @@ impl ChatGateway for HttpGateway {
         &self,
         channel: &Channel,
     ) -> Result<crate::capabilities::llm::api::ReplayReport, String> {
-        crate::adapters::http_probe::probe_replay(channel, &self.log)
+        crate::capabilities::llm::detail::http_probe::probe_replay(channel, &self.log)
     }
 
     fn probe_tools(&self, channel: &Channel) -> Result<ProbeOutcome, String> {
-        crate::adapters::http_probe::probe(channel, &self.log)
+        crate::capabilities::llm::detail::http_probe::probe(channel, &self.log)
     }
 
     fn member_channel(

@@ -3,8 +3,8 @@
 //! 环境白名单）由守门进程装进真正的工具进程；命令行来自 module.yaml，JSON 参数走 stdin（不进命令行，杜绝注入）；
 //! 截获 stdout/stderr、超时连根杀掉整棵树、输出截断。
 
-use crate::adapters::confine;
 use crate::capabilities::tools::api::FenceSpec;
+use crate::capabilities::tools::detail::confine;
 use crate::capabilities::tools::ports::{ToolOutcome, ToolRunner};
 use std::path::PathBuf;
 use std::process::Stdio;
@@ -289,15 +289,16 @@ mod tests {
             ro: Vec::new(),
             net: false,
         };
-        let env: Vec<(String, String)> = crate::adapters::confine::fence_env(&spec)
-            .into_iter()
-            .map(|(k, v)| {
-                (
-                    k.to_string_lossy().into_owned(),
-                    v.to_string_lossy().into_owned(),
-                )
-            })
-            .collect();
+        let env: Vec<(String, String)> =
+            crate::capabilities::tools::detail::confine::fence_env(&spec)
+                .into_iter()
+                .map(|(k, v)| {
+                    (
+                        k.to_string_lossy().into_owned(),
+                        v.to_string_lossy().into_owned(),
+                    )
+                })
+                .collect();
         let get = |key: &str| env.iter().find(|(k, _)| k == key).map(|(_, v)| v.clone());
         assert!(
             !env.iter().any(|(_, v)| v.contains("leak-me")),
@@ -607,7 +608,7 @@ mod tests {
             eprintln!("[探针] 本机没有可用的 python，跳过超时杀树契约");
             return;
         };
-        if !crate::adapters::confine::capability().tree {
+        if !crate::capabilities::tools::detail::confine::capability().tree {
             eprintln!("[探针] 本机进程树围栏不可用，跳过超时杀树契约");
             return;
         }

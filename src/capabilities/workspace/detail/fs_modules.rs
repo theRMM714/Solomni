@@ -6,24 +6,27 @@ use crate::capabilities::workspace::ports::ModuleSource;
 use std::path::{Path, PathBuf};
 
 pub struct FsModules {
+    /// **保留名表**（内置工具名）：由组合根在装配期问一次 `tools` 交进来——
+    /// 清单校验归本能力，名字空间归工具能力，两边不互相依赖。
+    reserved: Vec<String>,
     dir: PathBuf,
 }
 
 impl FsModules {
-    pub fn new(dir: PathBuf) -> FsModules {
-        FsModules { dir }
+    pub fn new(dir: PathBuf, reserved: Vec<String>) -> FsModules {
+        FsModules { dir, reserved }
     }
 }
 
 impl ModuleSource for FsModules {
     fn scan(&self) -> Roster {
-        scan_dir(&self.dir)
+        scan_dir(&self.dir, &self.reserved)
     }
 }
 
 /// 列出 modules/ 下每个含合法 module.yaml 的文件夹。
 /// 放入即出现，移出即消失；id 与文件夹名不一致 = 非法，拒收并说明原因。
-fn scan_dir(modules_dir: &Path) -> Roster {
+fn scan_dir(modules_dir: &Path, reserved: &[String]) -> Roster {
     let mut modules = Vec::new();
     let mut rejected = Vec::new();
     let entries = match std::fs::read_dir(modules_dir) {
@@ -61,7 +64,7 @@ fn scan_dir(modules_dir: &Path) -> Roster {
                     rejected.push(format!("{}: {}", dir_name, why));
                     continue;
                 }
-                if let Err(why) = crate::capabilities::tools::api::check_tools(&m) {
+                if let Err(why) = crate::capabilities::workspace::api::check_tools(&m, reserved) {
                     rejected.push(format!("{}: {}", dir_name, why));
                     continue;
                 }

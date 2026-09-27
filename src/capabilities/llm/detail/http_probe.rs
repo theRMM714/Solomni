@@ -3,11 +3,11 @@
 //! 这样"带上 tools 才失败"才能归因到 tools 上——否则 401 之类的错误会被误判成"不支持工具调用"。
 //! 三种结论都如实回报（支持 / 明确不支持 / 无法判定），绝不替用户拍板。
 
-use crate::adapters::endpoint::{chat_candidates, resolve_candidates, Attempt};
 use crate::capabilities::llm::api::Channel;
 use crate::capabilities::llm::api::{
     Completion, ProbeOutcome, ReplayReport, ReplayShape, ToolDecl,
 };
+use crate::capabilities::llm::detail::endpoint::{chat_candidates, resolve_candidates, Attempt};
 use crate::kernel::log::Log;
 
 /// 探针工具：无参数、只有说明——目的是让模型有东西可调。
@@ -32,7 +32,7 @@ fn once(url: &str, key: &str, channel: &Channel, with_tools: bool) -> Attempt<Co
     } else {
         None
     };
-    crate::adapters::http_chat::attempt_with_tools(
+    crate::capabilities::llm::detail::http_chat::attempt_with_tools(
         url,
         key,
         &channel.model,
@@ -155,7 +155,7 @@ pub(crate) fn probe_replay_with(
         let got = resolve_candidates(
             &candidates,
             |url| {
-                crate::adapters::http_chat::attempt_raw(
+                crate::capabilities::llm::detail::http_chat::attempt_raw(
                     url,
                     &key,
                     &channel.model,

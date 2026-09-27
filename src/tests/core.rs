@@ -2,12 +2,12 @@
 //! 替身与装配辅助见 super::doubles；层级与判定见 docs/testing/levels.md。
 
 use super::doubles::*;
-use crate::adapters::fake_chat::FakeChat;
 use crate::capabilities::collab::domain::engine::{Discussion, Member, TurnOut, MAX_ROUNDS};
 use crate::capabilities::llm::api::Channel;
 use crate::capabilities::llm::api::{
     BoxedChat, Chat, ChatGateway, Chunk, CompleteOpts, Completion, Msg,
 };
+use crate::capabilities::llm::detail::fake_chat::FakeChat;
 use crate::capabilities::prompt::domain::prompt::render;
 use crate::capabilities::registry::api::{ModelEntry, Provider, Settings};
 use crate::capabilities::session::api::Live;
@@ -1059,7 +1059,7 @@ pub(crate) fn create_work_validates_user_choices() {
 
 #[test]
 pub(crate) fn model_catalog_parses_openai_shape_and_rejects_bad() {
-    use crate::adapters::model_catalog::parse_models;
+    use crate::capabilities::llm::detail::model_catalog::parse_models;
     assert_eq!(
         parse_models(r#"{"data":[{"id":"gpt-4o"},{"id":"o3"},{"id":"gpt-4o"}]}"#).unwrap(),
         vec!["gpt-4o".to_string(), "o3".to_string()]
@@ -1074,7 +1074,9 @@ pub(crate) fn model_catalog_parses_openai_shape_and_rejects_bad() {
 
 #[test]
 pub(crate) fn endpoint_candidates_complete_and_fall_back() {
-    use crate::adapters::endpoint::{chat_candidates, models_candidates, retryable_status};
+    use crate::capabilities::llm::detail::endpoint::{
+        chat_candidates, models_candidates, retryable_status,
+    };
     // 已带版本段：只补后缀（含尾斜杠）
     assert_eq!(
         chat_candidates("https://api.x/v1"),
@@ -1125,7 +1127,7 @@ pub(crate) fn endpoint_candidates_complete_and_fall_back() {
 
 #[test]
 pub(crate) fn endpoint_resolve_candidates_retries_shape_mismatch_and_stops_on_fatal() {
-    use crate::adapters::endpoint::{resolve_candidates, Attempt};
+    use crate::capabilities::llm::detail::endpoint::{resolve_candidates, Attempt};
     let cands = vec!["a".to_string(), "b".to_string(), "c".to_string()];
 
     // 回归：SPA catch-all 返回 200 HTML（形状不符=Retry）时必须换到下一个候选，而不是立即报错。
@@ -4034,7 +4036,8 @@ pub(crate) fn a_malformed_envelope_is_repaired_when_the_fix_is_unambiguous() {
         ],
         Arc::clone(&runner),
     );
-    m2.tools.as_mut().expect("工具环境").repair = Arc::new(crate::adapters::UnambiguousRepair);
+    m2.tools.as_mut().expect("工具环境").repair =
+        Arc::new(crate::capabilities::llm::detail::UnambiguousRepair);
     let exec2 = run_execution(std::slice::from_mut(&mut m2), "任务", &prompts);
     let trace2 = exec2.traces.get("m0").expect("工具行");
     assert!(trace2[0].ok, "修好即执行：{}", trace2[0].output);
@@ -4063,7 +4066,8 @@ pub(crate) fn a_malformed_envelope_is_repaired_when_the_fix_is_unambiguous() {
         ],
         Arc::clone(&runner),
     );
-    m3.tools.as_mut().expect("工具环境").repair = Arc::new(crate::adapters::UnambiguousRepair);
+    m3.tools.as_mut().expect("工具环境").repair =
+        Arc::new(crate::capabilities::llm::detail::UnambiguousRepair);
     let exec3 = run_execution(std::slice::from_mut(&mut m3), "任务", &prompts);
     let trace3 = exec3.traces.get("m0").expect("工具行");
     assert!(trace3[0].ok, "补上收尾括号后照常执行：{}", trace3[0].output);
@@ -4082,7 +4086,8 @@ pub(crate) fn a_malformed_envelope_is_repaired_when_the_fix_is_unambiguous() {
         ],
         Arc::clone(&runner),
     );
-    m4.tools.as_mut().expect("工具环境").repair = Arc::new(crate::adapters::UnambiguousRepair);
+    m4.tools.as_mut().expect("工具环境").repair =
+        Arc::new(crate::capabilities::llm::detail::UnambiguousRepair);
     let exec4 = run_execution(std::slice::from_mut(&mut m4), "任务", &prompts);
     let trace4 = exec4.traces.get("m0").expect("工具行");
     assert!(
@@ -4829,7 +4834,11 @@ pub(crate) fn tool_loop_rejects_undeclared_tool() {
 #[test]
 pub(crate) fn shipped_modules_scan_clean() {
     // 随仓模块（modules/）是产品内容的一部分：清单必须全部合法、id 与目录一致。
-    let roster = crate::adapters::FsModules::new(PathBuf::from("modules")).scan();
+    let roster = crate::capabilities::workspace::detail::FsModules::new(
+        PathBuf::from("modules"),
+        crate::capabilities::tools::api::names(),
+    )
+    .scan();
     assert!(!roster.modules.is_empty(), "仓库应自带模块");
     assert!(
         roster.rejected.is_empty(),
@@ -7108,14 +7117,22 @@ pub(crate) fn module_tools_may_not_take_builtin_names() {
         .tools
         .insert("read_txt".to_string(), decl("python tools/read_txt.py"));
     assert!(
-        crate::capabilities::tools::api::check_tools(&m.manifest).is_ok(),
+        crate::capabilities::workspace::api::check_tools(
+            &m.manifest,
+            &crate::capabilities::tools::api::names(),
+        )
+        .is_ok(),
         "普通工具名可用"
     );
     for name in ["read", "write", "search"] {
         m.manifest
             .tools
             .insert(name.to_string(), decl("python tools/x.py"));
-        let why = crate::capabilities::tools::api::check_tools(&m.manifest).unwrap_err();
+        let why = crate::capabilities::workspace::api::check_tools(
+            &m.manifest,
+            &crate::capabilities::tools::api::names(),
+        )
+        .unwrap_err();
         assert!(why.contains("保留名"), "内置工具名要拒收：{}", why);
         m.manifest.tools.remove(name);
     }

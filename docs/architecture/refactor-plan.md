@@ -462,7 +462,7 @@ kernel       ──▶ （无）
 | **14** | **collab 能力落位**：`capabilities/collab/`（`collab` + `collab_state` + `engine`）。**执行顺序调整**：先做 14 再做 13——`rewind` 的回档重建要同时碰 `session` 与 `collab` 两侧，两边就位后才切得干净（已获用户同意） | 12 | **已完成**（环不变——`capabilities/collab` **不在环里**：没有任何它依赖的能力反过来依赖它；`core/` 只剩 `api.rs` + `mod.rs`） |
 | **15** | **断环（已完成）** → 能力图零环；**收口 1（已完成）**：入站词汇归 `core/api.rs` → 基线全空；**收口 2（已完成）**：`intent.rs` 规则下沉；**收口 3（已完成）**：`Action`/`Acted` 与分发收进 `core::api`（`SessionOps::act` 默认方法）、`split_names`/`NO_AGENTS` 归 CLI、**`intent.rs` 删除**、`presentation/` 拆成 **`cli/` + `web/`** 两个独立顶层目录（静态资源随 `web/assets/`）；**收口 4（已完成）**：`main.rs` 拆四件事——组合根留 `main.rs`、机器可读探针进 `diagnostics/`、围栏守门进程进 `guard/`（**第二个程序入口**）、路径机制下沉 `adapters/root.rs`；门禁新增**入口层**并禁止任何人依赖它 | 14 | **全部完成** |
 
-| **16** | **适配器归位**：`adapters/` 里**能力私有**的 20 个实现 → 各能力 `detail/`；`adapters/` 只留 `log` / `host_probe`（内核端口）与 `root`（入口层） | 15 | **进行中**：prompt / registry / session / tools（部分）已归位（批次 16a）；llm / workspace / tools 其余待做 |
+| **16** | **适配器归位**：`adapters/` 里**能力私有**的 20 个实现 → 各能力 `detail/`；`adapters/` 只剩 `log` / `host_probe`（内核端口）与 `root`（入口层） | 15 | **已完成**。**重要发现**：搬进能力后暴露出一处被"适配层"挡住的真环 `tools ⇄ workspace`——`fs_modules` 校验清单时反向问了 `tools` 的保留名。解法：**校验归清单主人（workspace）、名字空间归工具（tools），保留名表由组合根装配期注入** |
 | **17** | **`core` 的编排归位**：登记处 17 个方法 → `registry`；工作区 4 → `workspace`；历史与回档 8 → `session`；代拟 1 → `collab`。`core` 只剩**会话中心 + 生成驱动 + 跨能力用例** | 16 | 未开始 |
 | **18** | **入站接口归位**：`core::api` 的五个能力接口 → 各能力 `api`；`cli` / `web` 改经各能力的**声明面**；`contracts.md` 的路由表与 `tests/api.rs` 跟着改 | 17 | 未开始 |
 | **19** | **测试按业务分区（R10）**：`tests/core.rs`（8500+ 行）拆开，目录与 `capabilities/` 对齐 | 18 | 未开始 |

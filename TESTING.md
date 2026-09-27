@@ -32,7 +32,7 @@
 - `src/web/assets/*.smoke.cjs` 前端冒烟测试；
 - `tests/gaps.yaml` 与 `tests/<平台>/gaps.yaml` 缺口账；
 - `node run-tests.js` 测试汇总入口（`node start.js -test` 是备好环境后的同一入口）；
-- `src/adapters/fake_chat.rs` 中的 `FakeChat` 与 `DemoGateway`；
+- `src/capabilities/llm/detail/fake_chat.rs` 中的 `FakeChat` 与 `DemoGateway`；
 - `src/tests/doubles.rs` 与 `src/tests/core.rs` 中的 `InMemory*`、`FakeCatalog`、`VecSource`、`ScriptGateway`、`RecordingRunner`、`RecordingFence`、`TestPrompts`、`NoopLog` 等测试装配（替身支持失败注入，供 T2 复用）；
 - `src/tests/` 中的契约测试（T2）：
   - `ports.rs`（14 个端口的替身语义；`Log` 在 `kernel/log.rs`，见 [docs/architecture/module-map.md](docs/architecture/module-map.md) 一）、
