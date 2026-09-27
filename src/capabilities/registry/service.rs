@@ -2,7 +2,7 @@
 //!
 //! 端口（持久化）与**别能力的 api 面**（通道探测 / 模型发现 → `llm::api::Llm`）由**组合根**注入；
 //! 本文件不 new 任何适配器、也**不持别人的端口**（R12）。
-//! 对外只经 `registry::api::Registry`：`core` 与呈现层拿不到 `settings` 字段。
+//! 对外只经 `registry::api::Registry`：`conductor` 与呈现层拿不到 `settings` 字段。
 
 use crate::capabilities::llm::api::{Channel, Llm, ProbeOutcome, ReplayReport, ToolMode};
 use crate::capabilities::prompt::api::{Prompt, ToolTexts};

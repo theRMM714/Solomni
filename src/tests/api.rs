@@ -1,20 +1,20 @@
-//! 入站契约（`core::api`）的契约测试：命令/事件模型、能力分面、停止语义、panic 隔离。
+//! 入站契约（`conductor::api`）的契约测试：命令/事件模型、能力分面、停止语义、panic 隔离。
 //! 这一层不碰 HTTP；HTTP 侧（路由目录与逐路由契约）另见本目录的 routes。
 
 use super::doubles::{collab_work, module_of};
 use super::{gated_ops, ops_with, single_work, slow_ops};
-use crate::capabilities::workspace::api::Module;
-use crate::core::api::{
+use crate::capabilities::conductor::api::{
     Acted, Action, AgentInstance, SessionEdit, SessionEvent, WorkMode, WorkSpec,
 };
-use crate::core::api::{CoreHandle, Ops, Output};
+use crate::capabilities::conductor::api::{ConductorHandle, Ops, Output};
+use crate::capabilities::workspace::api::Module;
 use crate::kernel::types::Tier;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 /// 用内存装配起一个核心手柄（核心从此有自己的线程、自己的状态）。
-fn spawn(modules: Vec<Module>, core_script: Vec<&str>) -> CoreHandle {
+fn spawn(modules: Vec<Module>, core_script: Vec<&str>) -> ConductorHandle {
     ops_with(modules, core_script).0
 }
 
@@ -109,9 +109,10 @@ fn suggest_models_pushes_on_a_system_session_and_leaves_no_trace() {
         .suggest_models("做个东西", WorkMode::Collab)
         .expect("核心推荐");
     assert_eq!(agents.len(), 1, "回包只给名单（渲染那一步的契约不变）");
-    let (batches, _head, _oldest) = handle
-        .events()
-        .snapshot(Some(crate::core::SYSTEM_SID_SUGGEST), 0);
+    let (batches, _head, _oldest) = handle.events().snapshot(
+        Some(crate::capabilities::conductor::service::SYSTEM_SID_SUGGEST),
+        0,
+    );
     assert!(
         !batches.is_empty(),
         "核心这一趟的行必须推出来（系统会话也是推的落脚点）"
@@ -126,7 +127,7 @@ fn suggest_models_pushes_on_a_system_session_and_leaves_no_trace() {
             .session_views(&[])
             .expect("会话视图")
             .iter()
-            .any(|v| v.sid == crate::core::SYSTEM_SID_SUGGEST),
+            .any(|v| v.sid == crate::capabilities::conductor::service::SYSTEM_SID_SUGGEST),
         "系统会话不进会话列表（前端因此不会为它建标签页）"
     );
 }
@@ -299,7 +300,11 @@ fn reads_are_not_queued_behind_a_collab_discussion() {
         let sessions = Arc::clone(&ops.sessions);
         let sid = sid.clone();
         std::thread::spawn(move || {
-            sessions.collab_step(&sid, crate::core::api::CollabStep::Begin, "yes")
+            sessions.collab_step(
+                &sid,
+                crate::capabilities::conductor::api::CollabStep::Begin,
+                "yes",
+            )
         })
     };
     // 等讨论真的开始（通道已被调用并卡在那里）。
@@ -352,7 +357,11 @@ fn stopping_a_collab_discussion_is_prompt_and_keeps_the_session() {
         let sessions = Arc::clone(&ops.sessions);
         let sid = sid.clone();
         std::thread::spawn(move || {
-            sessions.collab_step(&sid, crate::core::api::CollabStep::Begin, "yes")
+            sessions.collab_step(
+                &sid,
+                crate::capabilities::conductor::api::CollabStep::Begin,
+                "yes",
+            )
         })
     };
     let deadline = Instant::now() + Duration::from_secs(5);
@@ -449,7 +458,11 @@ fn collab_transcript_lands_on_disk_while_the_discussion_runs() {
         let sessions = Arc::clone(&ops.sessions);
         let sid = sid.clone();
         std::thread::spawn(move || {
-            sessions.collab_step(&sid, crate::core::api::CollabStep::Begin, "yes")
+            sessions.collab_step(
+                &sid,
+                crate::capabilities::conductor::api::CollabStep::Begin,
+                "yes",
+            )
         })
     };
     // 等第二个成员卡在调用里：此时第一个成员的发言已经定稿。
@@ -487,7 +500,11 @@ fn collab_discussion_emits_each_member_line_as_it_speaks() {
         let sessions = Arc::clone(&ops.sessions);
         let sid = sid.clone();
         std::thread::spawn(move || {
-            sessions.collab_step(&sid, crate::core::api::CollabStep::Begin, "yes")
+            sessions.collab_step(
+                &sid,
+                crate::capabilities::conductor::api::CollabStep::Begin,
+                "yes",
+            )
         })
     };
     // 等第二个成员卡住：说明第一个成员已经说完，但**整轮还没结束**。
@@ -578,12 +595,11 @@ fn compacting_replaces_the_send_view_with_one_rolling_summary() {
         inner: super::doubles::ScriptGateway::new(member, vec![]),
         seen: Arc::clone(&seen),
     };
-    let handle = crate::core::api::CoreHandle::spawn(super::doubles::core_with_gateway(
-        vec![module_of("a")],
-        gateway,
-    ))
+    let handle = crate::capabilities::conductor::api::ConductorHandle::spawn(
+        super::doubles::core_with_gateway(vec![module_of("a")], gateway),
+    )
     .expect("起核心线程");
-    let ops = crate::core::api::Ops::from_handle(&handle);
+    let ops = crate::capabilities::conductor::api::Ops::from_handle(&handle);
     let sid = ops
         .sessions
         .create_work(single_work("w", &["a"]))
@@ -591,7 +607,11 @@ fn compacting_replaces_the_send_view_with_one_rolling_summary() {
         .0
         .sid;
     ops.sessions
-        .say(&sid, "先做第一件事", crate::core::api::Output::Final)
+        .say(
+            &sid,
+            "先做第一件事",
+            crate::capabilities::conductor::api::Output::Final,
+        )
         .expect("说一句");
 
     let first = ops.sessions.compact(&sid).expect("第一次压缩");
@@ -644,12 +664,11 @@ fn auto_compaction_kicks_in_when_the_history_exceeds_the_budget() {
         inner: super::doubles::ScriptGateway::new(member, vec![]),
         seen: Arc::clone(&seen),
     };
-    let handle = crate::core::api::CoreHandle::spawn(super::doubles::core_with_gateway(
-        vec![module_of("a")],
-        gateway,
-    ))
+    let handle = crate::capabilities::conductor::api::ConductorHandle::spawn(
+        super::doubles::core_with_gateway(vec![module_of("a")], gateway),
+    )
     .expect("起核心线程");
-    let ops = crate::core::api::Ops::from_handle(&handle);
+    let ops = crate::capabilities::conductor::api::Ops::from_handle(&handle);
     // 阈值调到 1%：预算 = 32000 × 1% × 4 ≈ 1280 字符，上面那条长回复会超。
     let mut st = ops.registry.settings().expect("读设置");
     st.compact_at_percent = 1;
@@ -661,10 +680,18 @@ fn auto_compaction_kicks_in_when_the_history_exceeds_the_budget() {
         .0
         .sid;
     ops.sessions
-        .say(&sid, "先做第一件事", crate::core::api::Output::Final)
+        .say(
+            &sid,
+            "先做第一件事",
+            crate::capabilities::conductor::api::Output::Final,
+        )
         .expect("第一轮");
     ops.sessions
-        .say(&sid, "接着做", crate::core::api::Output::Final)
+        .say(
+            &sid,
+            "接着做",
+            crate::capabilities::conductor::api::Output::Final,
+        )
         .expect("第二轮（开头该自动压一次）");
 
     let all = seen.lock().expect("锁").clone();

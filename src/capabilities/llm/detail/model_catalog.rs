@@ -1,4 +1,4 @@
-//! 模型目录适配器：OpenAI 兼容 GET {base_url}/models（实现 core 的 ModelCatalog 端口）。
+//! 模型目录适配器：OpenAI 兼容 GET {base_url}/models（实现 llm 自己的 ModelCatalog 端口）。
 //! 端点补全/回落规则见 endpoint 模块：无版本段先直连，404/405 再试 /v1。
 //! 机制only：密钥只用于出站请求头；错误信息先脱敏再出适配层；响应形状不符即报错，不猜测兜底。
 

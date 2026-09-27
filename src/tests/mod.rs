@@ -8,7 +8,7 @@ mod api;
 mod builders;
 mod cli;
 mod collab;
-mod core;
+mod conductor;
 mod doubles;
 mod fakes;
 mod kernel;
@@ -39,25 +39,33 @@ pub(crate) fn scratch(name: &str) -> std::path::PathBuf {
 pub(crate) fn ops_with(
     modules: Vec<crate::capabilities::workspace::api::Module>,
     core_script: Vec<&str>,
-) -> (crate::core::api::CoreHandle, crate::core::api::Ops) {
+) -> (
+    crate::capabilities::conductor::api::ConductorHandle,
+    crate::capabilities::conductor::api::Ops,
+) {
     let mut member = std::collections::BTreeMap::new();
     member.insert(
         "a".to_string(),
         vec!["{\"type\":\"say\",\"text\":\"好\"}".to_string()],
     );
     let gateway = doubles::gw(member, core_script.into_iter().map(String::from).collect());
-    let handle = crate::core::api::CoreHandle::spawn(doubles::core_with_gateway(modules, gateway))
-        .expect("起核心线程");
-    let ops = crate::core::api::Ops::from_handle(&handle);
+    let handle = crate::capabilities::conductor::api::ConductorHandle::spawn(
+        doubles::core_with_gateway(modules, gateway),
+    )
+    .expect("起核心线程");
+    let ops = crate::capabilities::conductor::api::Ops::from_handle(&handle);
     (handle, ops)
 }
 
 /// 一次单 agent 工作的规格（契约测试共用）。
-pub(crate) fn single_work(name: &str, modules: &[&str]) -> crate::core::api::WorkSpec {
-    crate::core::api::WorkSpec {
+pub(crate) fn single_work(
+    name: &str,
+    modules: &[&str],
+) -> crate::capabilities::conductor::api::WorkSpec {
+    crate::capabilities::conductor::api::WorkSpec {
         name: name.to_string(),
-        mode: crate::core::api::WorkMode::Single,
-        agents: vec![crate::core::api::AgentInstance {
+        mode: crate::capabilities::conductor::api::WorkMode::Single,
+        agents: vec![crate::capabilities::conductor::api::AgentInstance {
             name: modules[0].to_string(),
             transient: true,
             modules: modules.iter().map(|s| s.to_string()).collect(),
@@ -236,8 +244,8 @@ impl crate::capabilities::llm::ports::ChatGateway for GatedGateway {
 pub(crate) fn gated_ops(
     modules: Vec<crate::capabilities::workspace::api::Module>,
 ) -> (
-    crate::core::api::CoreHandle,
-    crate::core::api::Ops,
+    crate::capabilities::conductor::api::ConductorHandle,
+    crate::capabilities::conductor::api::Ops,
     std::sync::Arc<std::sync::atomic::AtomicUsize>,
     std::sync::Arc<std::sync::atomic::AtomicBool>,
 ) {
@@ -247,9 +255,11 @@ pub(crate) fn gated_ops(
     };
     let started = std::sync::Arc::clone(&gateway.started);
     let release = std::sync::Arc::clone(&gateway.release);
-    let handle = crate::core::api::CoreHandle::spawn(doubles::core_with_gateway(modules, gateway))
-        .expect("起核心线程");
-    let ops = crate::core::api::Ops::from_handle(&handle);
+    let handle = crate::capabilities::conductor::api::ConductorHandle::spawn(
+        doubles::core_with_gateway(modules, gateway),
+    )
+    .expect("起核心线程");
+    let ops = crate::capabilities::conductor::api::Ops::from_handle(&handle);
     (handle, ops, started, release)
 }
 
@@ -294,16 +304,18 @@ impl crate::capabilities::llm::ports::ChatGateway for SlowGateway {
 pub(crate) fn slow_ops(
     modules: Vec<crate::capabilities::workspace::api::Module>,
 ) -> (
-    crate::core::api::CoreHandle,
-    crate::core::api::Ops,
+    crate::capabilities::conductor::api::ConductorHandle,
+    crate::capabilities::conductor::api::Ops,
     std::sync::Arc<std::sync::atomic::AtomicUsize>,
 ) {
     let gateway = SlowGateway {
         ticks: std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
     };
     let ticks = std::sync::Arc::clone(&gateway.ticks);
-    let handle = crate::core::api::CoreHandle::spawn(doubles::core_with_gateway(modules, gateway))
-        .expect("起核心线程");
-    let ops = crate::core::api::Ops::from_handle(&handle);
+    let handle = crate::capabilities::conductor::api::ConductorHandle::spawn(
+        doubles::core_with_gateway(modules, gateway),
+    )
+    .expect("起核心线程");
+    let ops = crate::capabilities::conductor::api::Ops::from_handle(&handle);
     (handle, ops, ticks)
 }

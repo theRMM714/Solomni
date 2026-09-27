@@ -538,7 +538,7 @@ impl ChatGateway for AbortGateway {
 
 /// 固定探测结论的网关：专测"结论怎么落到登记处"这一层策略（事实本身由适配器测）。
 pub(crate) struct ProbeGateway {
-    pub(crate) outcome: Arc<Mutex<crate::core::api::ProbeOutcome>>,
+    pub(crate) outcome: Arc<Mutex<crate::capabilities::conductor::api::ProbeOutcome>>,
 }
 
 impl ChatGateway for ProbeGateway {
@@ -757,13 +757,13 @@ pub(crate) fn native_core(
     gateway: NativeGateway,
     history: Arc<InMemoryHistory>,
     io: Arc<InMemorySysIo>,
-) -> Core {
+) -> Conductor {
     let gateway: Arc<dyn ChatGateway + Send + Sync> = Arc::new(gateway);
     let llm = test_llm(
         Arc::clone(&gateway),
         Arc::new(FakeCatalog::new(vec!["m".to_string()])),
     );
-    Core::new(
+    Conductor::new(
         registry_service(InMemorySettings::new(), Arc::clone(&llm)),
         test_history_of(history),
         test_workspace(

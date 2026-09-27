@@ -1,6 +1,6 @@
 //! CLI 前端（`cli`）的测试：**传输侧**的输入解析与点名包装。
-//! **业务规则不在这里**：点名归 `registry`、命名与「生成中禁改」归 `session`/`core`、
-//! 组合语义归 `core::create_work`、动作分发归 `SessionOps::act`——它们的测试在 `tests/api.rs`。
+//! **业务规则不在这里**：点名归 `registry`、命名与「生成中禁改」归 `session`/`conductor`、
+//! 组合语义归 `conductor::create_work`、动作分发归 `SessionOps::act`——它们的测试在 `tests/api.rs`。
 
 use super::doubles::module_of;
 use super::ops_with;

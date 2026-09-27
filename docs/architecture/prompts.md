@@ -34,7 +34,7 @@
 - `PromptSource` 端口（`capabilities/prompt/ports.rs`，实现在 `detail/yaml_prompts.rs`）按文件装配成
   `Prompts`：各文件的**顶层键合并**成 `core:` 的内容（键在两份文件里重复 = 装配错误，不静默覆盖）；
 - **册子只由提示词能力持有一次**（`capabilities/prompt/service.rs`）：组合根 `prompt::service::load()` 得到
-  `Arc<dyn Prompt>`，core 持它、协作会话与它**共享同一份**；
+  `Arc<dyn Prompt>`，协调业务持它、协作会话与它**共享同一份**；
 - **别的能力不点字段路径**，取用只有两条路：
   1. **按名字取一段**：`Prompt::text(Segment::…)`（原文）或 `Prompt::render(Segment::…, vars)`（渲染）；
      名字表是 `capabilities/prompt/domain/prompt.rs` 的 `Segment`——**加一段提示词 = 册子加键 + 这里加变体**

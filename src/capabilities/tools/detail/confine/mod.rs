@@ -1,6 +1,6 @@
-//! 守门进程：把围栏装进工具进程，然后才跑模块声明的命令（实现 core/fence.rs 的策略）。
+//! 守门进程：把围栏装进工具进程，然后才跑模块声明的命令（实现 tools 的围栏策略）。
 //! 机制边界：本层只做机制——按平台把围栏（可读可写的根、断网、进程树围栏、资源上限）装好，
-//! 策略（哪些根可达、放不放网）由 core 派生后经命令行传入。
+//! 策略（哪些根可达、放不放网）由 conductor 派生后经命令行传入。
 //! 平台实现分文件：linux.rs（Landlock）/ macos.rs（seatbelt）/ windows.rs（Job Object + 容器）/ other.rs（如实降级）。
 //! 能力不足时如实上报（capability），降级而非崩溃——绝不静默假装有围栏。
 
@@ -69,7 +69,7 @@ pub fn verify(spec: &FenceSpec, command: &str) -> FenceVerdict {
     backend::verify(spec, command)
 }
 
-/// 围栏授权释放的适配器（实现 core 的 FenceHost 端口）：core 只说「这个会话的围栏撤掉」。
+/// 围栏授权释放的适配器（实现 conductor 的 FenceHost 端口）：conductor 只说「这个会话的围栏撤掉」。
 pub struct FenceHostAdapter;
 
 impl crate::capabilities::tools::ports::FenceHost for FenceHostAdapter {
@@ -96,8 +96,8 @@ pub fn capability() -> Capability {
     backend::capability()
 }
 
-/// 守门进程的入参：core 的围栏策略 + **外层是否已把本机授权做完** + 产品私有区（台账落点）。
-/// 授权是改本机目录 ACL 的动作（只有 Windows 的容器围栏需要），所以它不进 core 的 `FenceSpec`，
+/// 守门进程的入参：conductor 的围栏策略 + **外层是否已把本机授权做完** + 产品私有区（台账落点）。
+/// 授权是改本机目录 ACL 的动作（只有 Windows 的容器围栏需要），所以它不进 conductor 的 `FenceSpec`，
 /// 由适配层随这次执行一起交给守门进程。JSON 是**扁平**的：FenceSpec 的字段同层再加 `prepared` 与 `home`。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FenceJob {

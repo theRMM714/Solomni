@@ -1,7 +1,7 @@
 //! 入站契约：呈现层（CLI / Web）与核心之间的唯一通道（见 docs/architecture/contracts.md）。
 //!
 //! 形态：**命令 + 事件**。
-//! - 核心常驻自己的执行线程、独占全部状态：呈现层拿不到 `Core`，也拿不到任何核心锁。
+//! - 核心常驻自己的执行线程、独占全部状态：呈现层拿不到 `Conductor`，也拿不到任何核心锁。
 //! - 呈现层只持有 `Ops`：四个**按角色切分**的能力接口 + 一个可订阅的事件台。
 //! - 每条命令一次同步回复（std mpsc）：呈现层仍是「调用即拿结果」，不必改写成异步。
 //! - **并发归核心**：停止/取消由 `JobRegistry` 承担，不进命令队列——所以生成期间照样立刻生效；
@@ -9,17 +9,17 @@
 //! - 事件台由核心独占生产：任何数量的消费者按 `since` 增量取，序号供客户端去重。
 //!
 //! 这里**不出现 HTTP / JSON 封装 / 路由**：那些是呈现层的传输事（见 presentation/routes.rs）。
-//! 事件与读模型（`SessionEvent`、`*View`）是**事实**的线格式，仍归 core。
+//! 事件与读模型（`SessionEvent`、`*View`）是**事实**的线格式，仍归 conductor。
 
 // 登记处的入站契约归登记处自己（批次 18）：这里只用它的面（实现队列代理），不定义。
+use crate::capabilities::conductor::service::{Conductor, Prepared};
 use crate::capabilities::registry::api::RegistryOps;
 use crate::capabilities::registry::api::{AgentView, AppSettings, ModelView, ProviderView};
+use crate::capabilities::session::api::AgentMeta;
 use crate::capabilities::session::api::Live;
 use crate::capabilities::session::api::{HistoryView, SessionMeta};
 pub use crate::capabilities::session::api::{Pending, SessionEvent};
 use crate::capabilities::workspace::api::Roster;
-use crate::core::Prepared;
-use crate::core::{AgentMeta, Core};
 use crate::kernel::jobs::JobRegistry;
 use crate::kernel::types::SessionId;
 pub use crate::kernel::types::Tier;
@@ -236,9 +236,9 @@ pub trait SessionOps: Send + Sync {
 
 /// 核心自己的用例（会话中心之外的那些）：运行报告与核心推荐。
 ///
-/// 它们留在 core 是因为**只有 core 同时拿着**清单、包库、宿主探测与各能力的面——它们是编排
+/// 它们留在 conductor 是因为**只有 conductor 同时拿着**清单、包库、宿主探测与各能力的面——它们是编排
 /// （§2.4 的脚本），没有独立状态，所以不配一个"能力"。清单事实本身归 `workspace::api::WorkspaceOps`。
-pub trait CoreOps: Send + Sync {
+pub trait ConductorOps: Send + Sync {
     /// 运行包与档位的运行报告（只报事实）。
     fn runtime_report(&self, tier: Tier) -> Result<RuntimeReport, String>;
     /// 核心按任务推荐的 agent 草案（带理由；用户可改）。
@@ -265,11 +265,11 @@ enum CollabWork {
 }
 
 /// 一次命令：在核心自己的线程上执行（因此核心状态不需要任何锁）。
-type Job = Box<dyn FnOnce(&mut Core) + Send>;
+type Job = Box<dyn FnOnce(&mut Conductor) + Send>;
 
 /// 核心手柄：呈现层用它发命令。克隆廉价（内部只是通道 + 两个共享句柄）。
 #[derive(Clone)]
-pub struct CoreHandle {
+pub struct ConductorHandle {
     tx: Sender<Job>,
     jobs: Arc<JobRegistry>,
     bus: Arc<EventBus>,
@@ -294,15 +294,15 @@ struct AskReq {
     turn_id: u64,
 }
 
-impl CoreHandle {
+impl ConductorHandle {
     /// 把核心搬到它自己的执行线程：此后所有核心状态只被这一个线程碰。
     /// 全部手柄丢弃后线程自然结束（通道断开即退出）。
-    pub fn spawn(core: Core) -> Result<CoreHandle, String> {
+    pub fn spawn(core: Conductor) -> Result<ConductorHandle, String> {
         let worker_log = core.log_handle();
         let jobs = JobRegistry::new();
         let bus = EventBus::new();
         let (tx, rx) = mpsc::channel::<Job>();
-        let handle = CoreHandle {
+        let handle = ConductorHandle {
             tx,
             jobs,
             bus,
@@ -317,12 +317,12 @@ impl CoreHandle {
                     // 一条命令 panic 不该带走整个核心：接住并继续（回包通道随闭包销毁，调用方会看到「无回应」）。
                     if catch_unwind(AssertUnwindSafe(|| job(&mut core))).is_err() {
                         worker_log.error(
-                            "core::api",
+                            "conductor::api",
                             "核心命令 panic：已接住，核心继续服务（请查上面的 panic 现场）",
                         );
                     }
                 }
-                worker_log.info("core::api", "核心线程退出：全部手柄已释放");
+                worker_log.info("conductor::api", "核心线程退出：全部手柄已释放");
             })
             .map_err(|e| format!("启动核心线程失败：{}", e))?;
         Ok(handle)
@@ -332,10 +332,10 @@ impl CoreHandle {
     fn call<T, F>(&self, f: F) -> Result<T, String>
     where
         T: Send + 'static,
-        F: FnOnce(&mut Core) -> Result<T, String> + Send + 'static,
+        F: FnOnce(&mut Conductor) -> Result<T, String> + Send + 'static,
     {
         let (tx, rx) = mpsc::channel();
-        let job: Job = Box::new(move |core: &mut Core| {
+        let job: Job = Box::new(move |core: &mut Conductor| {
             let _ = tx.send(f(core));
         });
         self.tx
@@ -376,7 +376,7 @@ impl CoreHandle {
     }
 
     /// 一个节点的执行回合：**核心把任务提示词作为系统消息注入**（不是用户发言），再生成。
-    /// 与 CLI 的 `Core::drive_node` 同一条语义——各前端只做各自的界面，管道只有这一条。
+    /// 与 CLI 的 `Conductor::drive_node` 同一条语义——各前端只做各自的界面，管道只有这一条。
     fn node_generation(&self, child: &str, objective: &str) -> Result<Advance, String> {
         let prepared = self.call({
             let (child, objective) = (child.to_string(), objective.to_string());
@@ -981,7 +981,7 @@ impl CoreHandle {
     }
 }
 
-impl SessionOps for CoreHandle {
+impl SessionOps for ConductorHandle {
     fn create_work(&self, spec: WorkSpec) -> Result<(WorkOpened, u64), String> {
         let bus = Arc::clone(&self.bus);
         self.call(move |core| {
@@ -1037,7 +1037,7 @@ impl SessionOps for CoreHandle {
     }
 
     fn compact(&self, sid: &str) -> Result<Advance, String> {
-        CoreHandle::compact(self, sid)
+        ConductorHandle::compact(self, sid)
     }
 
     fn rewind(&self, sid: &str, keep_id: u64) -> Result<Vec<serde_json::Value>, String> {
@@ -1103,7 +1103,7 @@ impl SessionOps for CoreHandle {
     }
 }
 
-impl RegistryOps for CoreHandle {
+impl RegistryOps for ConductorHandle {
     fn providers(&self) -> Result<Vec<ProviderView>, String> {
         self.call(|core| Ok(core.registry().provider_views()))
     }
@@ -1213,7 +1213,7 @@ impl RegistryOps for CoreHandle {
 
 // ---------- 归各能力自己的入站契约（本文件只实现队列代理） ----------
 
-impl crate::capabilities::session::api::HistoryOps for CoreHandle {
+impl crate::capabilities::session::api::HistoryOps for ConductorHandle {
     fn list(&self) -> Result<Vec<HistoryView>, String> {
         self.call(|core| Ok(core.history_list()))
     }
@@ -1227,13 +1227,13 @@ impl crate::capabilities::session::api::HistoryOps for CoreHandle {
     }
 }
 
-impl crate::capabilities::workspace::api::WorkspaceOps for CoreHandle {
+impl crate::capabilities::workspace::api::WorkspaceOps for ConductorHandle {
     fn roster(&self) -> Result<Roster, String> {
         self.call(|core| Ok(core.scan()))
     }
 }
 
-impl CoreOps for CoreHandle {
+impl ConductorOps for ConductorHandle {
     fn runtime_report(&self, tier: Tier) -> Result<RuntimeReport, String> {
         self.call(move |core| Ok(core.runtime_report(tier)))
     }
@@ -1243,7 +1243,10 @@ impl CoreOps for CoreHandle {
         // 核心的行**照推**（推是底层收发消息的统一定律，一次推荐也不例外），推到系统会话：
         // 它不在任何会话表里，前端因此不会为它建标签页；落盘策略是 Drop（只推不留）。
         if !rows.is_empty() {
-            self.bus.push(crate::core::SYSTEM_SID_SUGGEST, &rows);
+            self.bus.push(
+                crate::capabilities::conductor::service::SYSTEM_SID_SUGGEST,
+                &rows,
+            );
         }
         Ok(agents)
     }
@@ -1251,7 +1254,7 @@ impl CoreOps for CoreHandle {
 
 // ---------- 日志能力 ----------
 
-impl LogOps for CoreHandle {
+impl LogOps for ConductorHandle {
     fn info(&self, at: &str, msg: &str) {
         self.log.info(at, msg)
     }
@@ -1269,10 +1272,10 @@ impl LogOps for CoreHandle {
 /// 克隆廉价；呈现层只依赖它需要的字段，契约测试可以用假实现替换任意一个字段。
 #[derive(Clone)]
 pub struct Ops {
-    /// 会话中心（core 自己的状态）：会话生命周期、动作分发、文件视图、会话总览。
+    /// 会话中心（conductor 自己的状态）：会话生命周期、动作分发、文件视图、会话总览。
     pub sessions: Arc<dyn SessionOps + Send + Sync>,
     /// 核心自己的用例：运行报告与核心推荐。
-    pub core: Arc<dyn CoreOps + Send + Sync>,
+    pub core: Arc<dyn ConductorOps + Send + Sync>,
     pub registry: Arc<dyn crate::capabilities::registry::api::RegistryOps + Send + Sync>,
     pub history: Arc<dyn crate::capabilities::session::api::HistoryOps + Send + Sync>,
     pub workspace: Arc<dyn crate::capabilities::workspace::api::WorkspaceOps + Send + Sync>,
@@ -1283,7 +1286,7 @@ pub struct Ops {
 
 impl Ops {
     /// 组合根用：把同一个核心手柄按角色拆开（同一个执行线程、同一个事件台）。
-    pub fn from_handle(h: &CoreHandle) -> Ops {
+    pub fn from_handle(h: &ConductorHandle) -> Ops {
         Ops {
             sessions: Arc::new(h.clone()),
             core: Arc::new(h.clone()),
@@ -1325,8 +1328,8 @@ pub enum Acted {
 }
 
 //
-// 定义在**能力面**：呈现层只认这里，不再经 `core::` 根转一手。
-// 批次 15 收口从 `core/mod.rs` 搬来（见 docs/architecture/refactor-plan.md §4.2）。
+// 定义在**能力面**：呈现层只认这里，不再经 `conductor::` 根转一手。
+// 批次 15 收口从协调业务的 service 搬来（见 docs/architecture/refactor-plan.md §4.2）。
 /// 协作推进阶段：由前端按 pending 决定。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CollabStep {

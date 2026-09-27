@@ -26,7 +26,7 @@
 
 当前仓库已经具备：
 
-- `src/tests/` 中的测试层：**与 `capabilities/` 同构的一个能力一个文件**（`prompt.rs` / `registry.rs` / `llm.rs` / `workspace.rs` / `tools.rs` / `session.rs` / `collab.rs` / `kernel.rs`）+ `core.rs`（应用服务自己的用例：会话中心与跨能力编排）、`doubles.rs`（端口替身）与 `builders.rs`（测试装配脚手架）；
+- `src/tests/` 中的测试层：**与 `capabilities/` 同构的一个能力一个文件**（`prompt.rs` / `registry.rs` / `llm.rs` / `workspace.rs` / `tools.rs` / `session.rs` / `collab.rs` / `kernel.rs`）+ `conductor.rs`（协调业务自己的用例：会话中心与跨能力编排）、`doubles.rs`（端口替身）与 `builders.rs`（测试装配脚手架）；
 - `tests/cross-platform/` 跨平台集成与端到端测试；
 - `tests/windows/`、`tests/linux/`、`tests/macos/` 平台探针（`tests/helpers/probe.rs` 提供共用探针设施）；
 - `src/web/assets/*.smoke.cjs` 前端冒烟测试；

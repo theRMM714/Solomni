@@ -11,8 +11,8 @@
 
 | 东西 | 定义在 | 形态 |
 | --- | --- | --- |
-| 能力接口 | **各能力自己的 `api.rs`**（批次 18 归位） | `SessionOps` / `CoreOps` / `LogOps` 定义在 `core/api.rs`（会话中心与核心自己的用例）；`RegistryOps` 在 `capabilities/registry/api.rs`、`HistoryOps` 在 `capabilities/session/api.rs`、`WorkspaceOps` 在 `capabilities/workspace/api.rs`。**全 `&self`、可替换成假实现**；实现都是 `core/api.rs` 里的队列代理（`CoreHandle`）|
-| 事件台 | `core/api.rs` | `EventBus`：核心独占生产，任意数量的消费者按序号增量取 |
+| 能力接口 | **各能力自己的 `api.rs`**（批次 18 归位） | `SessionOps` / `CoreOps` / `LogOps` 定义在 `capabilities/conductor/api.rs`（会话中心与核心自己的用例）；`RegistryOps` 在 `capabilities/registry/api.rs`、`HistoryOps` 在 `capabilities/session/api.rs`、`WorkspaceOps` 在 `capabilities/workspace/api.rs`。**全 `&self`、可替换成假实现**；实现都是 `core/api.rs` 里的队列代理（`CoreHandle`）|
+| 事件台 | `capabilities/conductor/api.rs` | `EventBus`：核心独占生产，任意数量的消费者按序号增量取 |
 
 规则：
 
@@ -41,7 +41,7 @@
   会话保持可继续（点「继续」从断点推进），停止与失败用**两句不同的话**如实告知。
 - **一次命令 panic 不带垮核心**：接住并继续服务（回包通道断开，调用方得到「无回应」）。
 - **传输的线格式归呈现层**：请求形状、路由、错误码在 `routes.rs`；**事实**的线格式（`SessionEvent`、`*View`）
-  仍在 core。两者不混——混在一起就是「到处内联 JSON 拼装」的成因。
+  仍在协调业务。两者不混——混在一起就是「到处内联 JSON 拼装」的成因。
 
 ### 传输选择：长轮询（当前），何时重估 SSE
 

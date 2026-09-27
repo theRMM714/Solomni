@@ -4,10 +4,12 @@
 //! 核心状态在核心自己的线程上：这里拿不到它、也拿不到任何核心锁，「停止」直接说给核心听。
 //! 安全底线：只绑 127.0.0.1；密钥永不进任何响应（能力面只给 id）。
 
+use crate::capabilities::conductor::api::{Acted, Action};
+use crate::capabilities::conductor::api::{
+    CollabStep, SessionEdit, SessionEvent, WorkMode, WorkSpec,
+};
+use crate::capabilities::conductor::api::{Ops, Output};
 use crate::capabilities::registry::api::AppSettings;
-use crate::core::api::{Acted, Action};
-use crate::core::api::{CollabStep, SessionEdit, SessionEvent, WorkMode, WorkSpec};
-use crate::core::api::{Ops, Output};
 pub mod routes;
 use serde_json::json;
 use std::sync::Arc;
@@ -161,7 +163,7 @@ const POLL_TICK: Duration = Duration::from_millis(300);
 pub(crate) fn route(
     ops: &Ops,
     fence: &FenceInfo,
-    log: &Arc<dyn crate::core::api::LogOps + Send + Sync>,
+    log: &Arc<dyn crate::capabilities::conductor::api::LogOps + Send + Sync>,
     method: &str,
     url: &str,
     body: &str,
@@ -247,12 +249,12 @@ pub(crate) fn route(
                 Ok(m) => m,
                 Err(e) => return complaint(400, e),
             };
-            let agents: Vec<crate::core::api::AgentInstance> = req
+            let agents: Vec<crate::capabilities::conductor::api::AgentInstance> = req
                 .get("agents")
                 .and_then(|t| t.as_array())
                 .map(|arr| {
                     arr.iter()
-                        .map(|x| crate::core::api::AgentInstance {
+                        .map(|x| crate::capabilities::conductor::api::AgentInstance {
                             name: x
                                 .get("name")
                                 .and_then(|v| v.as_str())
@@ -318,7 +320,7 @@ pub(crate) fn route(
             };
             let text = str_field(&req, "text");
             let agent = str_field(&req, "agent");
-            // 配置界面：提交编辑（「生成中不许改」的守卫在 `Core::edit_session` 里）。
+            // 配置界面：提交编辑（「生成中不许改」的守卫在 `Conductor::edit_session` 里）。
             if action == "edit" {
                 let edit = match serde_json::from_value::<SessionEdit>(req.clone()) {
                     Ok(e) => e,
@@ -457,7 +459,7 @@ pub(crate) fn route(
                     .registry
                     .set_core_model(&id)
                     .map(|ok| json!({ "ok": ok })),
-                // 探测要真实网络（两条最小请求），结论由 core 按三种如实回报并只写确定的结论。
+                // 探测要真实网络（两条最小请求），结论由 conductor 按三种如实回报并只写确定的结论。
                 "probe" => ops
                     .registry
                     .probe_model_tools(&id)
@@ -599,8 +601,12 @@ pub(crate) fn route(
 
 /// 探测结论 → 响应 JSON。三种结论如实给出（不猜）；`mode` 是探测后登记处里的**实际**形态，
 /// 也就是下一次生成会走的那套协议（无法判定时登记处不变，它就是原样）。
-fn probe_json(ops: &Ops, id: &str, outcome: &crate::core::api::ProbeOutcome) -> serde_json::Value {
-    use crate::core::api::ProbeOutcome;
+fn probe_json(
+    ops: &Ops,
+    id: &str,
+    outcome: &crate::capabilities::conductor::api::ProbeOutcome,
+) -> serde_json::Value {
+    use crate::capabilities::conductor::api::ProbeOutcome;
     let (kind, detail) = match outcome {
         ProbeOutcome::Supported { detail } => ("supported", detail.clone()),
         ProbeOutcome::Unsupported { detail } => ("unsupported", detail.clone()),
@@ -647,7 +653,7 @@ fn state_json(ops: &Ops, fence: &FenceInfo) -> Result<serde_json::Value, String>
     }))
 }
 
-/// 事件 → JSON（线格式唯一定义在 core::events::SessionEvent::to_json）。
+/// 事件 → JSON（线格式唯一定义在 session 的 SessionEvent::to_json）。
 fn ev_json(events: &[SessionEvent]) -> serde_json::Value {
     serde_json::Value::Array(events.iter().map(|e| e.to_json()).collect())
 }

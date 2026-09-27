@@ -182,7 +182,7 @@ pub struct CoreTexts {
 }
 
 /// 工具与路径的模型侧文案：核心拼回执、失败说明与清单行时从这里取。
-/// 随沙箱/工具环境注入 core 的纯逻辑（与 RefsPrompts 同一套做法），本身不是状态。
+/// 随沙箱/工具环境注入 conductor 的纯逻辑（与 RefsPrompts 同一套做法），本身不是状态。
 #[derive(Debug, Clone, Deserialize)]
 pub struct ToolTexts {
     // —— 路径校验（workspace::resolve）——

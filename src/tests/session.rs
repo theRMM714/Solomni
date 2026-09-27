@@ -152,7 +152,7 @@ pub(crate) fn rewind_keeps_only_lines_before_the_mark() {
 
 #[test]
 pub(crate) fn rebuilt_context_keeps_tool_result() {
-    // 同一份落盘历史 + 新的 Core 模拟「重启」：重建上下文时工具子轮不能丢。
+    // 同一份落盘历史 + 新的 Conductor 模拟「重启」：重建上下文时工具子轮不能丢。
     let hist = Arc::new(InMemoryHistory::new());
     let io = Arc::new(InMemorySysIo::new());
     let note = s(&["w", "a", "note.txt"]);
@@ -416,8 +416,8 @@ pub(crate) fn single_mode_accepts_multi_module_agent_and_converses() {
 /// **落盘策略由会话种类定、判定只有一处**：短暂事件任何会话都不留；系统会话（`#` 开头）一条都不留。
 #[test]
 pub(crate) fn persist_policy_is_decided_by_the_session_kind() {
+    use crate::capabilities::conductor::service::{is_system_session, PersistPolicy};
     use crate::capabilities::session::api::SessionEvent;
-    use crate::core::{is_system_session, PersistPolicy};
     let line = SessionEvent::Transcript(vec![crate::capabilities::session::api::LineView::system(
         "",
         "x".to_string(),
@@ -602,7 +602,7 @@ pub(crate) fn node_task_is_a_system_line_but_a_user_message() {
     let prepared = core
         .prepare_node(&sid, "== 你的任务 ==\n把事做完")
         .expect("准备节点回合");
-    let crate::core::Prepared::Run {
+    let crate::capabilities::conductor::service::Prepared::Run {
         session,
         prefix,
         llm,
@@ -888,7 +888,7 @@ pub(crate) fn deleting_a_session_asks_the_fence_to_release_its_grants() {
         Arc::clone(&gateway),
         Arc::new(FakeCatalog::new(vec!["m".to_string()])),
     );
-    let mut core = Core::new(
+    let mut core = Conductor::new(
         registry_service(InMemorySettings::new(), Arc::clone(&llm)),
         test_history_of(Arc::clone(&hist)),
         test_workspace(
@@ -1029,7 +1029,7 @@ pub(crate) fn history_list_is_ordered_as_a_tree() {
         }
     };
     // 顶层 A(10) 比 B(5) 新；A 下两个子会话（甲=9 比 乙=8 新）。
-    let got = crate::core::tree_order(vec![
+    let got = crate::capabilities::conductor::service::tree_order(vec![
         hv("A", None, 10),
         hv("B", None, 5),
         hv("A--甲", Some("A"), 9),

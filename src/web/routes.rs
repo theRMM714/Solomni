@@ -236,7 +236,7 @@ pub const ROUTES: &[Route] = &[
         id: "suggest",
         method: "POST",
         pattern: "/api/suggest-models",
-        capability: "CoreOps::suggest_models",
+        capability: "ConductorOps::suggest_models",
         request: "{task,mode}",
         response: "{ok,agents}",
         statuses: &[200, 400],

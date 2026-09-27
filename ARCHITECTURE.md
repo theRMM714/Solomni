@@ -10,23 +10,23 @@
 依赖箭头只有一种画法（每层只指向它的下层）：
 
 ```text
-cli / web ──▶ core ──▶ capabilities ──▶ kernel
-（main = 组合根，装配全部；adapters 实现各能力的 ports 与 kernel 端口，不认识 core）
+cli / web ──▶ capabilities（含协调业务 conductor）──▶ kernel
+（main = 组合根，装配全部；adapters 实现各能力的 ports 与 kernel 端口，不认识业务编排）
 ```
 
 | 层 | 干什么 | 禁令 |
 | --- | --- | --- |
-| `core/` | **应用服务**：会话中心（会话表、命令队列、运行态）、生成驱动、跨能力用例与回档编排；**正在被搬空**——端口、全部业务能力与它们的业务状态都已在 `capabilities/`（登记处随批次 17 归位 `registry/service.rs`） | 不读文件（`std::fs`）、不发网络（ureq）、不碰 stdin/stdout——一切机制下沉各能力的 `detail/` |
+| `capabilities/conductor/` | **协调业务**：会话中心（会话在世表、命令队列、运行态）、生成驱动、跨能力用例与跨会话回档编排。它与别的能力**平级**，只经各能力的 `api` 编排，不持任何别人的端口 | 不读文件（`std::fs`）、不发网络（ureq）、不碰 stdin/stdout——一切机制下沉各能力的 `detail/` |
 | `adapters/` | **内核端口的实现**（`Log` / `HostProbe`）与入口层用的机制；能力私有的实现已归各能力 `detail/` | 属于机制层；不做装配决策 |
-| `cli/` + `web/` | **前端（交付机制）**：各渠道一个顶层目录，完全分开——传输（argv/stdout vs HTTP/SSE）、路由、**纯渲染**。**不是业务能力**（无状态、无不变式） | 只依赖 **入站能力面**（`core::api` 或各能力的 `::api`）；**永不接触端口对象，也拿不到 `Core` 本身**；**两者之间互不依赖** |
+| `cli/` + `web/` | **前端（交付机制）**：各渠道一个顶层目录，完全分开——传输（argv/stdout vs HTTP/SSE）、路由、**纯渲染**。**不是业务能力**（无状态、无不变式） | 只依赖 **入站能力面**（各能力的 `::api`）；**永不接触端口对象，也拿不到 `Core` 本身**；**两者之间互不依赖** |
 | `capabilities/` | **业务能力**：按业务功能垂直切分。每个能力有 `api`（入站契约：trait + DTO）/ `service`（**本能力的状态与用例**，实现 `api` 的 trait；别处只持 `dyn` 面）/ `ports`（出站端口，**只由定义它的能力持有**）/ `domain`（纯逻辑）/ `detail`（细节实现，**只有组合根能构造**） | **业务之间只经对方的 `api`**；不反向依赖 `core` / `adapters` / `presentation`（迁移期残留记为基线豁免，见 [docs/architecture/refactor-plan.md](docs/architecture/refactor-plan.md) §四） |
-| `kernel/` | **机制型内核**：无领域语义、无领域状态的机制（运行日志端口、生成中作业的取消表、跨业务共享的事实类型） | **不依赖任何人**（不认识 core / adapters / presentation）；不放有领域语义的类型 |
+| `kernel/` | **机制型内核**：无领域语义、无领域状态的机制（运行日志端口、生成中作业的取消表、跨业务共享的事实类型） | **不依赖任何人**（不认识能力 / adapters / presentation）；不放有领域语义的类型 |
 | 入口层（`main.rs` + `diagnostics/` + `guard/`） | **组合根**（`main.rs`：`new` 出所有适配器并注入）+ **机器可读探针**（`diagnostics/`：`--doctor` / `--https-check` / `--print-routes` / `--print-fence-env` / `--fence-verify`）+ **围栏守门进程**（`guard/`：`--fence-run` / `--fence-clean`，**第二个程序入口**） | 它依赖所有人，**任何人都不许依赖它**（门禁判定）。除装配与探针外无业务 |
 
 推论：
 
 - 「用哪个供应商/模型」是**策略**，在 `registry`（登记处能力）的解析链里决定；「怎么建通道」是**机制**，在 adapters。两者不互换。
-- 出站依赖由**各能力定义端口**（`capabilities/<能力>/ports.rs`）、**adapters 实现**；入站依赖由**各能力定义能力接口**（`<能力>::api`）——`core::api::Ops` 只把它们与核心自己的两个契约**组装**成一份交给呈现层（批次 18）。
+- 出站依赖由**各能力定义端口**（`capabilities/<能力>/ports.rs`）、**adapters 实现**；入站依赖由**各能力定义能力接口**（`<能力>::api`）——协调业务的 `api::Ops` 只把它们与它自己的两个契约**组装**成一份交给呈现层（批次 18）。
   两侧都是依赖倒置，只是箭头方向不同——**能力不定义"前端接口让别人实现"**。
 - 呈现层拿到的是 `Ops`（各能力的能力接口 + 核心自己的两个 + 事件台），不是 `Core`，也不是任何锁。
 
@@ -39,14 +39,14 @@ cli / web ──▶ core ──▶ capabilities ──▶ kernel
 | --- | --- | --- |
 | `Chat`（`capabilities/llm/ports.rs`） | 一次模型会话：收消息列表（可带**工具声明**）回 `Completion`（正文 + 结束原因 + 原生工具调用）；`on` 逐片回调，返回 `false` 即要求中止 | `HttpChat`（测试 `FakeChat`） |
 | `ChatGateway` | 建通道（含核心通道与回落告知）；**不选择**模型；实测一条通道支不支持原生工具调用。定义在 `capabilities/llm/ports.rs`，**只由 llm 的 `service.rs` 持有**（R12）；别人经 `llm::api::Llm` 要通道 | `HttpGateway`（无可用模型时回落 `DemoGateway`；探测发两条最小请求对比） |
-| `SettingsStore` | 登记处持久化（providers / models / settings / agents 四个 yaml）。**已随能力搬出 core**：定义在 `capabilities/registry/ports.rs` | `YamlSettingsStore` |
+| `SettingsStore` | 登记处持久化（providers / models / settings / agents 四个 yaml）。定义在 `capabilities/registry/ports.rs` | `YamlSettingsStore` |
 | `ModelCatalog` | 按**端点与密钥**列出一条通道当前可用的模型名。`capabilities/llm/ports.rs`，**只由 llm 的 `service.rs` 持有**（R12） | `HttpModelCatalog` |
 | `ModuleSource` | 模块清单来源（扫描 `modules/`）。**已随能力搬出**：`capabilities/workspace/ports.rs` | `FsModules` |
 | `PackageSource` | 运行包库来源（扫描依赖文件夹 `runtimes/`）。**已随能力搬出**：`capabilities/workspace/ports.rs` | `FsPackages` |
 | `Workdirs` | 一次工作的 work 目录、各 agent 沙箱、文件清单与寻址根。`capabilities/workspace/ports.rs`，**只由 workspace 的 `service.rs` 持有**（R12） | `FsWorkspace` |
 | `SysIo` | 内置文件工具的读写机制（读严格 UTF-8、非法字节如实标注；写一律 UTF-8）。`capabilities/tools/ports.rs`，**只由 tools 的 `service.rs` 持有**（R12） | `FsSysIo` |
 | `HistoryStore` | 会话历史：一个会话一个目录（meta + 事件流水）。`capabilities/session/ports.rs`，**只由 session 的 `service.rs` 持有**（R12）；别人经 `session::api::History` 读写 | `FsHistory` |
-| `PromptSource` | 提示词册加载（`prompts/`）。**已随能力搬出 core**：定义在 `capabilities/prompt/ports.rs` | `YamlPrompts` |
+| `PromptSource` | 提示词册加载（`prompts/`）。定义在 `capabilities/prompt/ports.rs` | `YamlPrompts` |
 | `SystoolsSource` | 工具总表与角色表的加载（`systools/tools.yaml` + `roles.yaml`）。定义在 `capabilities/tools/ports.rs` | `YamlSystools` |
 | `ToolRunner` | 外部工具进程（围栏安装、拉起、stdin 送参、超时杀树、截断）。`capabilities/tools/ports.rs`，**只由 tools 的 `service.rs` 持有**（R12）；别人经 `tools::api::ToolExec` 跑工具 | `ProcTools`（守门进程 = 本程序的 `--fence-run` 模式） |
 | `EnvelopeRepair`（`capabilities/llm/ports.rs`） | 手写信封不合法时的**无歧义**补救（改了字段含义就是错；拿不准就返回不修） | `UnambiguousRepair`（转义字符串里的裸控制字符 + 补上扫描器算出的收尾括号；断在字符串中间不修，一段回复里起了两段信封不修——补哪一段都是猜；调用方中止的生成一律不修） |
@@ -61,7 +61,7 @@ cli / web ──▶ core ──▶ capabilities ──▶ kernel
 
 这两块是**查阅型细则**，拆出去只有一份：
 
-- 逐个文件讲 `core/` / `adapters/` / `cli/` / `web/` 各干什么：[docs/architecture/module-map.md](docs/architecture/module-map.md)。
+- 逐个文件讲 `capabilities/`（含 `conductor/`）/ `adapters/` / `cli/` / `web/` 各干什么：[docs/architecture/module-map.md](docs/architecture/module-map.md)。
 - 呈现层入站契约（能力接口、事件台、命令/事件规则）与机器可读的 HTTP 路由目录：[docs/architecture/contracts.md](docs/architecture/contracts.md)。
 - 系统工具总表、角色表与"谁能用哪些工具"（含越权校验与提示词按角色分配）：[docs/architecture/tools-and-roles.md](docs/architecture/tools-and-roles.md)。
 - 协作如何从讨论走到交付（审查关卡、任务链、子会话、验收）：[docs/architecture/task-chain.md](docs/architecture/task-chain.md)。
@@ -76,7 +76,7 @@ cli / web ──▶ core ──▶ capabilities ──▶ kernel
 - `kernel/log.rs` 定义 `Log`（`info`/`warn`/`error`），**只调用**；文件、时间戳、目录机制在 adapters。
 - 关键节点必须埋点：通道降级、HTTP 失败、会话动作失败、装配失败、工具执行异常。
 - 适配层实现（`adapters/log.rs`）：每次运行在根目录 `logs/` 下按时间戳建一个 `.log` 文件；`logs/` 不入库。
-- 组合根创建唯一的 `FileLog` 并注入 core 与呈现层；测试用 `NoopLog`。
+- 组合根创建唯一的 `FileLog` 并注入协调业务与呈现层；测试用 `NoopLog`。
 - 目的：出问题时**看日志定因**，不靠推理猜。
 
 ## 五、提示词册（prompts/）
@@ -84,13 +84,13 @@ cli / web ──▶ core ──▶ capabilities ──▶ kernel
 - **所有发给 LLM 的提示词一律写入 `prompts/`**，禁止硬编码进代码；改文案只改册子。
 - 占位符 `{{key}}`；渲染器在 `capabilities/prompt/domain/prompt.rs`（纯逻辑）；文件加载经 `PromptSource` 端口在适配层。
 - **缺文件 / 缺键 / 缺变量 = 报错暴露**，禁止静默兜底文案。
-- **册子只由提示词能力持有一次**（`capabilities/prompt/service.rs`）：组合根装载后把 `Arc<dyn Prompt>` 注入 core，
+- **册子只由提示词能力持有一次**（`capabilities/prompt/service.rs`）：组合根装载后把 `Arc<dyn Prompt>` 注入协调业务，
   协作会话与它**共享同一份**（不再每个会话克隆整本册子）。
 - **别的能力不点字段路径**：按名字取段（`Prompt::text` / `Prompt::render` + `Segment`），
   或拿走两块**共享记录**（`Prompt::tools()` 的 `tool_texts` / `Prompt::refs()`，都是 `Arc`）。
   "哪个回合发哪几段"的**组装留在各业务**（身份块归 `session`、工具说明归 `tools`、清单文本归 `registry` / `workspace`）
   ——prompt 只给"段"，不替它们拼。
-- 路径类占位符（`{{work_root}}` 等）由 core 在运行时替换成**真实根目录**后才交给 AI——仓库里永远不出现机器路径。
+- 路径类占位符（`{{work_root}}` 等）由协调业务在运行时替换成**真实根目录**后才交给 AI——仓库里永远不出现机器路径。
 
 提示词册的**文件与键清单**（每份文件里有什么键、每个键干什么）只有一份：
 [docs/architecture/prompts.md](docs/architecture/prompts.md)。
@@ -144,7 +144,7 @@ session/<工作名>/
 - `meta.yaml` 的 `exec` 段是**执行选型**的唯一真相：档位（`tier` = 本机 / 虚拟机）、虚拟机基础根、能力定版（`pins`）、是否放行出站网络；
   缺这段的 `meta.yaml` 按默认读回（本机档、不定版、不联网）。执行计划本身（`capabilities/workspace/` 的 `ExecPlan`）**从不落盘**——它含真实路径，只在运行时派生。
 - 会话的**旁路配置记录**（`{"type":"config"}`）只在编辑提交时追加：供呈现与审计，**不进模型上下文**，回放与状态派生都跳过它。
-- 出站模型调用的参数由**核心**决定、随端口传下去：`core::ports::LlmOpts{stream, timeout_secs}` 与 `CompleteOpts` 的对应字段，
+- 出站模型调用的参数由**核心**决定、随端口传下去：`llm::api::LlmOpts{stream, timeout_secs}` 与 `CompleteOpts` 的对应字段，
   取值来自**全局设置**（`streaming` / `llm_timeout_secs`），讨论、执行、验收与单 agent 共用同一份判据（`Core::llm_opts`）。
   `Output` 只管回包形状：设置是流式的**上限**，调用方可在本次放弃流式。
   调用失败**不是**模型的回复：`Completion.error` 与正文分离，上层据此发 `Notice` 并**中断本轮**（不落任何转录行），
@@ -185,7 +185,7 @@ session/<工作名>/
 测试的层级、替身语义、端口契约矩阵、质量门禁、缺口账与执行入口全部由 [TESTING.md](TESTING.md)（门户与路由）
 与 `docs/testing/` 下的细则规定；本节只列架构对可测性的硬约束，不重复测试规范。
 
-- 任意需要 IO 或存在可替换实现的机制必须通过 `capabilities/<能力>/ports.rs`（**无领域语义的机制端口在 `kernel/`**）中的端口注入；core 不直接依赖真实模型、网络、文件系统、时钟、随机数或外部进程。
+- 任意需要 IO 或存在可替换实现的机制必须通过 `capabilities/<能力>/ports.rs`（**无领域语义的机制端口在 `kernel/`**）中的端口注入；能力不直接依赖真实模型、网络、文件系统、时钟、随机数或外部进程。
 - 纯逻辑（信封解析、协作状态派生、提示词渲染、路径寻址等）不为测试强行增加 trait，直接以纯函数测试；端口只放在真实边界和确有替换价值的点上。
 - 端口的输入、输出、错误、取消、超时、重复调用和资源清理语义属于架构契约：生产适配器与测试替身必须遵守同一份契约。
 - 端口不能为了方便测试暴露生产实现的内部状态；需要观察交互时，通过测试替身的记录能力或公开的行为结果观察。

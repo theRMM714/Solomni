@@ -1,5 +1,5 @@
 //! 模块打包契约（module.yaml）与扫描结果。
-//! 目录遍历机制在 adapters（ModuleSource 端口）；「清单即事实」的重扫策略由 core 执行。
+//! 目录遍历机制在本能力的 detail（ModuleSource 端口）；「清单即事实」的重扫策略由 service 执行。
 //! 模型选择是会话级决定（记录在会话里），模块清单不再承载模型/供应商偏好。
 
 use serde::Deserialize;
@@ -78,7 +78,7 @@ pub struct ModuleManifest {
     pub brief: String,
     pub system: String,
     /// 运行能力声明：本模块的工具需要哪些运行包能力（如 python / node / bash / c-c++）。
-    /// 只声明能力名，不写版本——版本由用户在会话的执行档位里定（见 core/exec.rs 与 RUNTIME_SPEC.md）。
+    /// 只声明能力名，不写版本——版本由用户在会话的执行档位里定（见 capabilities/workspace/domain/exec.rs 与 RUNTIME_SPEC.md）。
     #[serde(default)]
     pub runtimes: Vec<String>,
     /// 外部工具表：工具名 → 该工具的声明（启动命令 + 可选的参数契约）。
@@ -149,8 +149,8 @@ pub struct Module {
 
 /// 一个 agent 的职责提示词：把它的模块 system 合成一份能力包，再挂工作环境与调用约定。
 /// 模块只是能力包（没有"发言"这回事）；发言席是 agent，所以这份 system 按 agent 成文。
-/// env 由 core::systool 按该 agent 的沙箱渲染后传入。
-/// **工具清单不在这里**：本回合能用哪些工具随回合注入（见 core::engine::tools_block）。
+/// env 由 tools 的 systool 按该 agent 的沙箱渲染后传入。
+/// **工具清单不在这里**：本回合能用哪些工具随回合注入（见 collab 的 engine::tools_block）。
 pub fn agent_system(
     prompt: &dyn crate::capabilities::prompt::api::Prompt,
     agent: &str,

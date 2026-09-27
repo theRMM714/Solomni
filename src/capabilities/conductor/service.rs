@@ -1,20 +1,18 @@
 //! 核心层：定义抽象（ports）、编排业务（会话/引擎）、会话中心。
 //! 分层纪律：本层不出现文件读、ureq、stdin/stdout——机制全部在 adapters，
-//! 装配（new 适配器）只发生在 main 组合根。前端只见 Core 门面、会话句柄与 SessionEvent 流。
+//! 装配（new 适配器）只发生在 main 组合根。前端只见 Conductor 门面、会话句柄与 SessionEvent 流。
 
-pub mod api;
-
+use crate::capabilities::conductor::api::{
+    AgentInstance, AgentSuggestion, CollabStep, ConfigAgent, FilesAgentRootView, FilesAgentView,
+    FilesRootsView, FilesView, RuntimeReport, SessionConfig, SessionEdit, SessionView, WorkMode,
+    WorkOpened, WorkSpec,
+};
 use crate::capabilities::llm::api::Llm;
 use crate::capabilities::session::api::History;
 #[cfg(test)]
 pub(crate) use crate::capabilities::session::api::Live;
 use crate::capabilities::session::api::{Pending, SessionEvent};
 use crate::capabilities::workspace::api::Workspace;
-use crate::core::api::{
-    AgentInstance, AgentSuggestion, CollabStep, ConfigAgent, FilesAgentRootView, FilesAgentView,
-    FilesRootsView, FilesView, RuntimeReport, SessionConfig, SessionEdit, SessionView, WorkMode,
-    WorkOpened, WorkSpec,
-};
 
 use crate::capabilities::collab::api::AfterTurn;
 use crate::capabilities::collab::api::CollabSession;
@@ -127,7 +125,7 @@ pub(crate) fn persist_events(
         Ok(()) => None,
         Err(e) => {
             log.error(
-                "core::history_append",
+                "conductor::history_append",
                 &format!("会话 {} 落盘失败：{}", sid, e),
             );
             Some(format!("[警告] 会话记录落盘失败：{}", e))
@@ -171,11 +169,11 @@ pub(crate) enum Prepared {
     NotSingle,
 }
 
-/// **应用服务**：持有注入的端口、能力面与会话中心；前端拿不到它（只拿 `core::api::Ops`）。
-/// 组合根在 `CoreHandle::spawn` 里把它**移进核心自己的执行线程**——此后状态只被那一个线程碰，
+/// **应用服务**：持有注入的端口、能力面与会话中心；前端拿不到它（只拿 `conductor::api::Ops`）。
+/// 组合根在 `ConductorHandle::spawn` 里把它**移进核心自己的执行线程**——此后状态只被那一个线程碰，
 /// 所以这里不加任何锁（并发不变式见 ARCHITECTURE.md §一）。
-pub struct Core {
-    /// 登记处能力：**四份 yaml 的状态在它里面**，core 只按 `Registry` 调用（看不见它的字段）。
+pub struct Conductor {
+    /// 登记处能力：**四份 yaml 的状态在它里面**，conductor 只按 `Registry` 调用（看不见它的字段）。
     registry: Box<dyn Registry>,
     /// 会话历史直连面（**不持它的端口**，R12）：造/读/写/删会话都走它。
     history: Arc<dyn History + Send + Sync>,
@@ -186,9 +184,9 @@ pub struct Core {
     /// 工具执行面（**不持它的端口**，R12）：跑外部/内置工具、释放围栏授权都走它。
     tools: Arc<dyn ToolExec + Send + Sync>,
     log: Arc<dyn crate::kernel::log::Log + Send + Sync>,
-    /// 宿主能力探测（读环境、查路径存在性都在它后面；core 因此不碰 std::env 与文件系统）。
+    /// 宿主能力探测（读环境、查路径存在性都在它后面；conductor 因此不碰 std::env 与文件系统）。
     probe: Arc<dyn crate::kernel::host::HostProbe + Send + Sync>,
-    /// 提示词册能力：**册子本体在它里面**（只有一处），core 只按名字取段。
+    /// 提示词册能力：**册子本体在它里面**（只有一处），conductor 只按名字取段。
     /// 用 `Arc`：协作会话要与核心**共享**这一份（各自克隆整本册子是旧的浪费）。
     prompt: Arc<dyn Prompt>,
     /// 工具总表与角色表的能力面（`systools/` 两张表）：**表本体在工具能力里**，与册子互不依赖。
@@ -201,8 +199,8 @@ pub struct Core {
     running: std::collections::BTreeSet<SessionId>,
 }
 
-impl Core {
-    /// 组合根专用：main 负责创建适配器并注入；core 不自建任何具体实现。
+impl Conductor {
+    /// 组合根专用：main 负责创建适配器并注入；conductor 不自建任何具体实现。
     // 组合根注入的构造函数：参数天然多，收口成参数对象只是把参数挪个地方、并让装配更难读。
     // 这是有意的设计取舍（见 docs/testing/quality-isolation.md 的 allow 清单），不是没修。
     #[allow(clippy::too_many_arguments)]
@@ -216,8 +214,8 @@ impl Core {
         systools: Arc<dyn Tools>,
         log: Arc<dyn crate::kernel::log::Log + Send + Sync>,
         probe: Arc<dyn crate::kernel::host::HostProbe + Send + Sync>,
-    ) -> Core {
-        Core {
+    ) -> Conductor {
+        Conductor {
             registry,
             history,
             workspace,
@@ -232,7 +230,7 @@ impl Core {
         }
     }
 
-    /// 日志端口句柄：入站手柄（core::api）与组合根共用同一份事实记录。
+    /// 日志端口句柄：入站手柄（conductor::api）与组合根共用同一份事实记录。
     pub fn log_handle(&self) -> Arc<dyn crate::kernel::log::Log + Send + Sync> {
         Arc::clone(&self.log)
     }
@@ -395,7 +393,7 @@ impl Core {
 
     /// 给某个会话接下来的行打上**整场工作的下一个回合 id**（节点执行也用同一套编号）。
     /// 一个 agent 一个会话：它的回合计数来自父会话——回档同步靠两边同一套编号。
-    fn bump_turn_of_child(&mut self, child: &str) -> u64 {
+    pub(crate) fn bump_turn_of_child(&mut self, child: &str) -> u64 {
         let parent = self
             .history
             .load(child)
@@ -414,7 +412,7 @@ impl Core {
         tid
     }
 
-    /// **同步**跑一个节点的子会话（CLI 与测试走这条；Web 生产路径由 CoreHandle 起工作线程）。
+    /// **同步**跑一个节点的子会话（CLI 与测试走这条；Web 生产路径由 ConductorHandle 起工作线程）。
     fn drive_node(&mut self, child: &str, objective: &str) -> Vec<SessionEvent> {
         self.bump_turn_of_child(child);
         match self.prepare_single(child, Some(objective), true) {
@@ -602,7 +600,7 @@ impl Core {
     }
 
     /// 推进任务链：反复「派发就绪节点 → 同步跑完 → 标记完成」，直到没有可推进的。
-    /// 与 Web 生产路径（CoreHandle 起工作线程）**同一套判定**，只是这里同步做（CLI 与测试走这条）。
+    /// 与 Web 生产路径（ConductorHandle 起工作线程）**同一套判定**，只是这里同步做（CLI 与测试走这条）。
     fn advance_chain(&mut self, sid: &str) -> Vec<SessionEvent> {
         let mut out = Vec::new();
         loop {
@@ -823,7 +821,7 @@ impl Core {
         self.running.remove(sid);
     }
 
-    /// 清单即事实：每次调用重扫（策略在 core，机制在 ModuleSource）。
+    /// 清单即事实：每次调用重扫（策略在 conductor，机制在 ModuleSource）。
     pub fn scan(&self) -> crate::capabilities::workspace::api::Roster {
         self.workspace.roster()
     }
@@ -1056,7 +1054,7 @@ impl Core {
         )
         .map_err(|diags| crate::capabilities::workspace::api::diagnose_text(&diags))?;
         self.log.info(
-            "core::edit_session",
+            "conductor::edit_session",
             &format!(
                 "sid={}；{}",
                 sid,
@@ -1092,8 +1090,10 @@ impl Core {
             })).collect::<Vec<_>>(),
         });
         if let Err(e) = self.history.append(sid, &[ev]) {
-            self.log
-                .warn("core::record_config", &format!("配置记录落盘失败：{}", e));
+            self.log.warn(
+                "conductor::record_config",
+                &format!("配置记录落盘失败：{}", e),
+            );
         }
     }
 
@@ -1325,7 +1325,7 @@ impl Core {
             crate::capabilities::workspace::api::absent(&session_modules, &self.workspace.library())
         {
             self.log.warn(
-                "core::create_work",
+                "conductor::create_work",
                 &format!("模块 {} 声明的运行包不在包库：{}", id, caps.join("、")),
             );
         }
@@ -1338,7 +1338,7 @@ impl Core {
         )
         .map_err(|diags| crate::capabilities::workspace::api::diagnose_text(&diags))?;
         self.log.info(
-            "core::create_work",
+            "conductor::create_work",
             &crate::capabilities::workspace::api::plan_summary(&plan),
         );
 
@@ -1408,7 +1408,7 @@ impl Core {
         bytes: &[u8],
         overwrite: bool,
     ) -> Result<bool, String> {
-        // 策略在 core：先净化文件名，再交给工作区端口（机制只看已净化的名字）。
+        // 策略在 conductor：先净化文件名，再交给工作区端口（机制只看已净化的名字）。
         let name = crate::capabilities::workspace::api::safe_file_name(name)?;
         if !self.sessions.contains_key(sid) && self.history.load(sid).is_err() {
             return Err(format!("无此会话：{}", sid));
@@ -1584,7 +1584,7 @@ impl Core {
             crate::capabilities::llm::api::ToolMode::Envelope
         };
         self.log.info(
-            "core::build_single",
+            "conductor::build_single",
             &format!(
                 "单 agent 工作：agent {}，模块 {}，模型 {}",
                 a.name,
@@ -1624,7 +1624,7 @@ impl Core {
             Ok(v) => tree_order(v),
             Err(e) => {
                 self.log
-                    .error("core::history_list", &format!("会话列表失败：{}", e));
+                    .error("conductor::history_list", &format!("会话列表失败：{}", e));
                 Vec::new()
             }
         }
@@ -1662,14 +1662,14 @@ impl Core {
                         .with_read_only(self.fence_read_roots());
                         if let Err(e) = self.tools.release_fence(&spec) {
                             self.log.warn(
-                                "core::history_delete",
+                                "conductor::history_delete",
                                 &format!("撤销围栏授权未完成：{}", e),
                             );
                         }
                     }
                 }
                 Err(e) => self.log.warn(
-                    "core::history_delete",
+                    "conductor::history_delete",
                     &format!("取沙箱失败，未撤销授权：{}", e),
                 ),
             }
@@ -1765,7 +1765,7 @@ impl Core {
         let (picks, rejected) = self.registry.resolve_picks(parsed, &roster);
         for r in &rejected {
             self.log
-                .warn("core::suggest_models", &format!("推荐条目拒收：{}", r));
+                .warn("conductor::suggest_models", &format!("推荐条目拒收：{}", r));
         }
         let core_default = self.registry.core_model();
         let drafts: Vec<AgentSuggestion> = picks
@@ -1921,7 +1921,7 @@ impl Core {
     }
 
     /// 测试用同步入口：与工作线程那条路**同一段语义**（准备 → 生成 → 交回落盘）。
-    /// 生产路径不再走它——那里的生成在工作线程上（见 `CoreHandle::single_generation`）。
+    /// 生产路径不再走它——那里的生成在工作线程上（见 `ConductorHandle::single_generation`）。
     #[cfg(test)]
     pub fn single_say(
         &mut self,
@@ -1945,7 +1945,7 @@ impl Core {
                     session.say(text, &identity, live, &mut sink);
                 }
                 if live.cancelled() {
-                    self.log.warn("core::single_say", "生成被用户中止");
+                    self.log.warn("conductor::single_say", "生成被用户中止");
                 }
                 self.put_single_recorded(sid, session, &events);
                 Ok(events)
@@ -2349,7 +2349,7 @@ impl Core {
 
     /// 继续：由用户点击授权。单 agent 会话需要轮到用户（末条是 AI 就只提醒、不发请求）；
     /// 协作不需要用户发言，继续 = 从断点推进流水线。
-    /// **测试用同步入口**：生产路径的两条（单 agent / 协作）都在工作线程上跑（见 CoreHandle）。
+    /// **测试用同步入口**：生产路径的两条（单 agent / 协作）都在工作线程上跑（见 ConductorHandle）。
     #[cfg(test)]
     pub fn continue_flow(
         &mut self,
@@ -2397,7 +2397,7 @@ impl Core {
 
 // 测试访问器：验证职责提示词已种入历史首条（回归：会话曾丢失 system 提示词）。
 #[cfg(test)]
-impl Core {
+impl Conductor {
     pub fn single_history(&self, sid: &str) -> Option<Vec<Msg>> {
         match self.sessions.get(sid) {
             Some(Session::Single(s)) => Some(s.dialogue().to_vec()),

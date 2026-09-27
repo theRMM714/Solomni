@@ -1,5 +1,5 @@
-//! 测试公共前置：从 `core.rs` 拆出来的业务测试一律 `use super::prelude::*;`。
-//! 这里只做**重导出**（原 `core.rs` 顶部的 imports 集中一处），不放逻辑。
+//! 测试公共前置：从原 `tests/core.rs` 拆出来的业务测试一律 `use super::prelude::*;`。
+//! 这里只做**重导出**（原 `tests/core.rs` 顶部的 imports 集中一处），不放逻辑。
 
 pub(crate) use super::doubles::*;
 
@@ -38,11 +38,11 @@ pub use crate::capabilities::workspace::api::{Library, PackageManifest};
 
 pub use crate::capabilities::workspace::ports::{ModuleSource, Workdirs};
 
-pub use crate::core::api::{
+pub use crate::capabilities::conductor::api::{
     AgentInstance, CollabStep, ConfigAgent, Pending, SessionEdit, SessionEvent, WorkMode, WorkSpec,
 };
 
-pub use crate::core::Core;
+pub use crate::capabilities::conductor::service::Conductor;
 
 pub use crate::kernel::types::Tier;
 

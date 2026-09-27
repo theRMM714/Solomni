@@ -38,14 +38,14 @@ pub struct MemberTools {
     pub log: Arc<dyn crate::kernel::log::Log + Send + Sync>,
     /// 工具执行面（**不持它的端口**，R12）：跑外部/内置工具都走它。
     pub tools: Arc<dyn ToolExec + Send + Sync>,
-    /// 本成员的沙箱：内置文件工具的寻址与越界依据（权限收口在 core）。
+    /// 本成员的沙箱：内置文件工具的寻址与越界依据（权限收口在 conductor）。
     pub sandbox: crate::capabilities::workspace::api::Sandbox,
     /// 内置工具的参数契约（来自 `systools/tools.yaml` 的 tools）：说明与校验都按它来。
     /// 它属于**工具面**，不属于沙箱——沙箱只管路径。
     pub builtin_tools: crate::capabilities::tools::api::ToolBook,
     /// 模块 id → 它缺的运行包能力（本档位下该模块的工具不执行；空表 = 都能执行）。
     pub unavailable: BTreeMap<String, Vec<String>>,
-    /// 本成员工具进程的围栏（可达范围 + 断网）：策略在 core 派生，机制在 ToolRunner 适配层安装。
+    /// 本成员工具进程的围栏（可达范围 + 断网）：策略在 conductor 派生，机制在 ToolRunner 适配层安装。
     pub fence: crate::capabilities::tools::api::FenceSpec,
     /// **回复 id 计数器**：一次模型回复一个号，跨重启单调（重建时按转录里的最大值续号）。
     /// 转录行靠它分组（哪几行属于同一次回复），会话靠它按回复原子回档。

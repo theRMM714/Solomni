@@ -1,4 +1,4 @@
-//! 登记处持久化：providers.yaml 与 models.yaml 分开读写（实现 core 的 SettingsStore 端口）。
+//! 登记处持久化：providers.yaml 与 models.yaml 分开读写（实现登记处自己的 SettingsStore 端口）。
 //! 密钥只落 providers.yaml（unix 下 0600）；drvfs/NTFS 上 chmod 无效属平台限制，如实告知不隐瞒。
 
 use crate::capabilities::registry::api::Agents;

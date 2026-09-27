@@ -1,5 +1,5 @@
-//! 模块清单来源：扫描 modules/ 目录（实现 core 的 ModuleSource 端口）。
-//! 目录遍历与 yaml 解析是机制；「清单即事实」的重扫策略由 core 决定。
+//! 模块清单来源：扫描 modules/ 目录（实现 workspace 自己的 ModuleSource 端口）。
+//! 目录遍历与 yaml 解析是机制；「清单即事实」的重扫策略由本能力的 service 决定。
 
 use crate::capabilities::workspace::api::{Module, ModuleManifest, Roster};
 use crate::capabilities::workspace::ports::ModuleSource;

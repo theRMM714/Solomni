@@ -45,7 +45,7 @@ pub struct PackageManifest {
     /// kind = system 时它写进去的系统路径（同上书写形式）。
     #[serde(default)]
     pub provides_paths: Vec<String>,
-    /// 该包自己需要的能力名（传递依赖由 core 求闭包）。
+    /// 该包自己需要的能力名（传递依赖由本能力求闭包）。
     #[serde(default)]
     pub requires: Vec<String>,
     /// 再分发要随包带上。

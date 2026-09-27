@@ -71,7 +71,7 @@ pub struct ToolDecl {
     pub parameters: serde_json::Value,
 }
 
-/// 一次模型调用的通道参数：**策略在 core 定**（都来自全局设置），机制在适配器。
+/// 一次模型调用的通道参数：**策略在 conductor 定**（都来自全局设置），机制在适配器。
 /// 一个值一路传下去，而不是把 stream / 预算分别塞进各个函数的参数表——两处各传一份迟早会漏。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LlmOpts {
@@ -90,7 +90,7 @@ impl Default for LlmOpts {
     }
 }
 
-/// 一次补全的请求选项：策略在 core（要不要流式、要不要声明工具、给多少预算），机制在适配器。
+/// 一次补全的请求选项：策略在 conductor（要不要流式、要不要声明工具、给多少预算），机制在适配器。
 /// Copy：讨论回合的工具循环每轮都要一份（只换 tools 槽位，其余照旧）。
 #[derive(Clone, Copy)]
 pub struct CompleteOpts<'a> {

@@ -182,7 +182,7 @@ capabilities/<name>/
 | --- | --- | --- | --- | --- | --- |
 | **kernel** | **业务（机制型）**——它有状态（取消表）、有端口（`Log`/`HostProbe`）、有机制（路径）、有事实类型，按 §2.1 三条够格当一个能力；只是它的领域词最少 | **已落位** `src/kernel/`（`jobs` / `log` / `types` / `path` / `host`） | 生成中作业表（取消标志） | `Log` `HostProbe` | 批次 1 落位；**批次 20 补齐能力形状**（`api`/`ports`/`domain`/`detail`，**适配器从 `adapters/` 归位**，`chain` 搬出） |
 | **taskchain** | 领域（**纯**：有不变式、无端口） | 现 `kernel/chain.rs`（232 行，批次 5 为断环搬入 kernel） | **任务链本身**（值对象 + 派生规则：阶段、就绪、验收） | — | **批次 20 独立成业务**：`collab` 触发、`session` 线格式携带、呈现层渲染，三方都要经它的 `api`；留在 kernel 里等于"环只是藏进了一个叫内核的地方" |
-| **conductor**（协调业务，名字待定） | 协调 | 现 `src/core/`（`mod.rs` 约 2600 行 + `api.rs`） | **会话在世表 + 命令队列 + 运行态**（跨参与方的状态，没有任何参与方拥有它的不变式 ⇒ 按 §2.2 ①' 归协调业务） | — | **批次 20 从 `core` 独立成业务**：只持各能力的 **`api` 面**；`Ops` 组装、事件台、队列代理随它；**它和其他能力受同一条 R1/R12 约束** |
+| **conductor**（协调业务） | 协调 | **已落位** `capabilities/conductor/`（`api.rs` + `service.rs`） | **会话在世表 + 命令队列 + 运行态**（跨参与方的状态，没有任何参与方拥有它的不变式 ⇒ 按 §2.2 ①' 归协调业务） | — | **批次 20 从 `core` 独立成业务**：只持各能力的 **`api` 面**；`Ops` 组装、事件台、队列代理随它；**它和其他能力受同一条 R1/R12 约束** |
 | **session** | 领域 | **已落位** `capabilities/session/`（`session` + `history` + `events`）（`collab_state.rs` 已改判归 `collab`——它派生的是**协作**状态） | 对话、转录行、行索引 | `HistoryStore` | **已完成**（批次 12） |
 | **llm** | 领域 | **已落位** `capabilities/llm/`（`ports` 的通道族 + `domain/envelope`） | 通道协议与回复解析 | `Chat` `ChatGateway` `ModelCatalog` `EnvelopeRepair` | **已完成**（批次 9） |
 | **tools** | 领域 | **已落位** `capabilities/tools/`（`api` + `service` + `domain/{systool,patch,schema,roles,fence}` + `detail`） | 观察账本、围栏策略、工具面；**工具总表与角色表只由 `service.rs` 持有** | `SysIo` `ToolRunner` `FenceHost` `SystoolsSource` | **已完成**（批次 11；两张表随批次 17 归位 `service.rs`） |
@@ -465,7 +465,7 @@ kernel       ──▶ （无）
    从 `workspace` 移到 `tools`；参数**声明形态**（`Param` / `ParamType`）留在 `workspace`（它是 `module.yaml` 的字段）
    ——切掉 `workspace → tools`。
 
-`rewind` 不再是能力（见 §3.6），`collab` 的改需求复用回档改为经 `core` 门面。
+`rewind` 不再是能力（见 §3.6），`collab` 的改需求复用回档改为经协调业务的门面。
 
 ---
 
@@ -478,7 +478,7 @@ kernel       ──▶ （无）
    **豁免清零 = 重构完成**。这样"禁止耦合"从第一天起就是机器判定的，而不是靠自觉。
 3. **搬家不改语义**：批次内只允许"移动 + 改可见性 + 删旧路径"。任何行为变更**另开批次**。
 4. **每个批次完成即销账**：把 §4.2 表里的状态改为「已完成」，并同步文档（R8）。
-5. **测试跟着走**：每个批次把该业务的测试从 `src/tests/core.rs` 拆到同构文件（§4.4）。
+5. **测试跟着走**：每个批次把该业务的测试拆到同构文件 `src/tests/<能力>.rs`（§4.4）。
 6. **不留兼容层**（R7）：旧路径**删除**，不做 `pub use` 转发。
 7. **先切边，再搬能力**（批次 3 的实测结论）：`core` 的 20 个有出边的模块里 **16 个同属一个强连通分量**，
    **没有任何一个能力是叶子**——每个能力都被至少一条 `core` 依赖挡住。所以顺序不是"挑叶子先搬"，
@@ -525,7 +525,7 @@ kernel       ──▶ （无）
 | --- | --- | --- | --- |
 | **20a** | **门禁改判据**：① 跨能力**只准引用 `::api`**（`::ports` 不再允许，**任何非入口层**引用别人的端口都算违规——`core` 同样受限，R12）；② **不得给别的能力的类型写 `impl`**（`impl Trait for Type` 只看 `Type`，实现别人的 **api trait** 是正当的队列代理）；③ `capabilities/<c>/domain/**` **不得引用任何 `ports`**；④ `api.rs` **不得把本能力的 `ports` 再导出去**（入站用例面，R12） | 19 | **已完成**：四条判据已进 T0 结构审查（`apiOnly` 收紧 + 新增 `apiPorts` / `foreignImpl` / `domainPorts`），现状 **14 条**违规进基线：`apiOnly` 7（collab 3 / session 1 / core 3）、`domainPorts` 5、`apiPorts` 1（`llm/api.rs` 的重导出壳）、`foreignImpl` 1（collab 给 session 的类型写 impl） |
 | **20b** | **每个能力补 `service.rs`，成为自己端口的唯一持有者**（R12）：先 `llm`（它的端口现在被 `registry`/`conductor`/`collab` 拿），再 `workspace` / `tools` / `session`；`api` 从"重导出壳"变成**入站用例面**（端口 trait 不再进 `api`） | 20a | **进行中**。**`llm` 已完成**：`api` 收下通道与协议词汇（`Chat` / `BoxedChat` / `Msg` / …）+ **`Llm` 用例面**；`ports` 只剩 `ChatGateway` / `ModelCatalog` / `EnvelopeRepair` 三条出站端口；新增 `llm/service.rs`（`LlmService`，唯一持有者）；`registry` / `conductor` / `collab` / `session` 全部改经 `llm::api::Llm`（`MemberTools.repair` → `MemberTools.llm`）；**基线 `apiPorts` 清零**。**`workspace` 已完成**：三个出站端口（`ModuleSource` / `PackageSource` / `Workdirs`——原名 `Workspace` 让给能力面）收归 `workspace/service.rs`；`api::Workspace` 立用例面；`conductor` / `collab` 改经它；基线里 workspace 的三条（apiOnly 2 + domainPorts 1）清零。**`tools` 已完成**：三个出站端口（`ToolRunner` / `SysIo` / `FenceHost`）收归 `tools/service.rs`（`ToolsService`，同时实现 `Tools` 与 `ToolExec`）；`ToolOutcome` 从 ports 归 `domain`（它是事实不是端口）、由 api 导出；`conductor` / `collab` 的 `tools`+`io` 两个字段 → 一个 `Arc<dyn ToolExec>`；`MemberTools.runner`/`io` → `MemberTools.tools`；引擎三处调用改经执行面。**`session` 已完成**：`HistoryStore` 收归 `session/service.rs`（`SessionService`）；`api::History` 立直连面（与端口一一对应——会话落盘没有别的不变式可编排，这一面的价值是唯一持有者）；导体的 25 处 `self.history.*` 零改动改道（方法名一致，只换字段类型）。**20b 四家（llm / workspace / tools / session）全部完成，基线 `apiOnly` 与 `apiPorts` 清零**；余下 `domainPorts` 1 条与 `foreignImpl` 1 条留 20f |
-| **20c** | **协调业务独立**：`core` → `capabilities/conductor/`（会话在世表 + 命令队列 + 运行态 + 生成驱动 + 跨会话回档 + 审查关卡推进）；**只持各能力的 `api` 面**；`Ops` / 事件台 / 队列代理随它 | 20b | 未开始 |
+| **20c** | **协调业务独立**：`core` → `capabilities/conductor/`（会话在世表 + 命令队列 + 运行态 + 生成驱动 + 跨会话回档）；**只持各能力的 `api` 面**；`Ops` / 事件台 / 队列代理随它 | 20b | **已完成**：`Core` → `Conductor`、`CoreHandle` → `ConductorHandle`、`CoreOps` → `ConductorOps`；门禁的 `core` 层与节点退休（呈现层只认各能力的 `::api`）；**`Core` 这个类型不再存在** |
 | **20d** | **kernel 业务化 + `adapters/` 归零**：`kernel` 补齐 `api`/`ports`/`domain`/`detail`；`log.rs`/`host_probe.rs` → `kernel/detail/`、`root.rs` → 入口层；**`chain` 搬出** → 独立业务 `taskchain`（纯领域：`api` + `domain`，无端口、无 `service`） | 20c | 未开始 |
 | **20e** | **抽跨能力同形重复**（R13）：**拟名单**独立成业务（`core::suggest_models` 与 `collab::draft_slate` 两条合并）；**核心操作回路**的 5 处调用侧包装收进一处 `api` | 20d | 未开始 |
 | **20f** | **内部水平分层收口**：`collab/{engine,collab}.rs` → `service/`；`session/domain/session.rs` 拆"纯簿记"与"回合驱动"；`tools/domain/systool.rs` 拆"纯规则"与"执行编排"；**全能力统一 `domain/` = 纯逻辑（不持端口、不做 IO）** | 20e | 未开始 |
@@ -550,7 +550,7 @@ kernel       ──▶ （无）
 
 ### 4.4 测试迁移规则
 
-- **分区同构**：业务 `capabilities/<name>/` ↔ 测试 `src/tests/<name>.rs`（一个能力一个文件；超 2000 行再拆目录）；`src/tests/core.rs` 只留**应用服务自己的**用例（会话中心与跨能力编排），其余按能力搬走（批次 19 已完成）。
+- **分区同构**：业务 `capabilities/<name>/` ↔ 测试 `src/tests/<name>.rs`（一个能力一个文件；超 2000 行再拆目录）；`src/tests/conductor.rs` 只留**协调业务自己的**用例（会话中心与跨能力编排），其余按能力搬走（批次 19 已完成）。
 - **搬家不改断言**：拆分批次内只移动测试与改路径，**不动断言**。要改断言语义 → 另开批次并写明理由。
 - **消除测试专用入口**（R11）：`Core::single_say`（`#[cfg(test)]`）这类"测试路径 ≠ 生产路径"的双轨，
   在 `session` / `collab` 批次里改为走生产入口（`CoreHandle`）。

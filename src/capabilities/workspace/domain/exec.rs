@@ -470,7 +470,7 @@ pub fn unavailable(
     out
 }
 
-/// 诊断的可读说法（面向界面/CLI 的 Err，与 core 其它 Err 同一做法）。
+/// 诊断的可读说法（面向界面/CLI 的 Err，与 conductor 其它 Err 同一做法）。
 pub fn diagnose_text(diags: &[Diagnosis]) -> String {
     let lines: Vec<String> = diags
         .iter()

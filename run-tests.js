@@ -363,7 +363,7 @@ function structuralAudit() {
       }
       return out.join("\n");
     };
-    // 归一深度：core 取「层 + 模块」两级；capabilities 取「层 + 能力 + 子模块」三级
+    // 归一深度：能力取「层 + 能力 + 子模块」三级
     // ——后者要能区分 ::api（唯一合法入口）与 ::domain / ::ports（内部）。
     // 归一只为让基线稳定：同一依赖换个更细的写法不该让账本跳动。
     const normTarget = (full) => {
@@ -372,7 +372,6 @@ function structuralAudit() {
       return "crate::" + parts.slice(0, Math.min(depth, parts.length)).join("::");
     };
     const LAYER_OF = (r) => {
-      if (r.startsWith("src/core/")) return "core";
       if (r.startsWith("src/adapters/")) return "adapters";
       // 前端（交付机制）：各渠道一个顶层目录，与 adapters 平级；不是业务能力。
       if (r.startsWith("src/cli/") || r.startsWith("src/web/")) return "presentation";
@@ -386,13 +385,12 @@ function structuralAudit() {
       if (r === "src/main.rs") return "main";
       return null;
     };
-    // 层 → 它不得引用的层。core 不引用 adapters（端口由 core 定义、适配层实现，永不反向）。
+    // 层 → 它不得引用的层。端口由能力定义、适配层实现，永不反向。
     const FORBIDDEN = {
       // kernel 在最底层：无领域语义的机制，**不依赖任何人**。
-      kernel: ["core", "capabilities", "adapters", "presentation", "entry"],
-      // 能力是最高的业务层：不反向依赖旧巨石、适配层或呈现层。
-      capabilities: ["core", "adapters", "presentation", "entry"],
-      core: ["adapters", "presentation", "entry"],
+      kernel: ["capabilities", "adapters", "presentation", "entry"],
+      // 能力（含协调业务 conductor）是业务层：不反向依赖适配层或呈现层。
+      capabilities: ["adapters", "presentation", "entry"],
       adapters: ["presentation", "entry"],
     };
 
@@ -430,10 +428,8 @@ function structuralAudit() {
       const targetLayer =
         t === "crate::cli" || t === "crate::web" ? "presentation" : t.split("::")[1];
         if ((FORBIDDEN[layer] || []).includes(targetLayer)) reverse.add(f + " -> " + t);
-        // 呈现层只认入站能力面：core::api，或某个能力的 ::api。
-        const presOk =
-          t === "crate::core::api" ||
-          (t.startsWith("crate::capabilities::") && t.endsWith("::api"));
+        // 呈现层只认入站能力面：某个能力的 ::api（协调业务 conductor 也不例外）。
+        const presOk = t.startsWith("crate::capabilities::") && t.endsWith("::api");
         if (layer === "presentation" && !presOk && targetLayer !== "presentation") {
           presentation.add(f + " -> " + t);
         }
@@ -447,7 +443,7 @@ function structuralAudit() {
         // `domain/` 是**纯逻辑**（批次 20a）：不得引用任何 `ports`——自己的也不行，引了就不是纯的了。
         if (f.includes("/domain/") && t.endsWith("::ports")) domainPorts.add(f + " -> " + t);
         // **端口只由定义它的能力持有**（R12，批次 20a）：任何非入口层引用别的能力的 `ports` 都是违规——
-        // `core`（协调业务）也算，它不该拿着别人的端口替别人做 IO。
+        // 协调业务 `conductor` 也算，它不该拿着别人的端口替别人做 IO。
         if (
           layer !== "entry" &&
           t.startsWith("crate::capabilities::") &&
@@ -467,18 +463,11 @@ function structuralAudit() {
         ) {
           apiOnly.add(f + " -> " + t);
         }
-        // 环的节点：core 模块用短名（保持与既有基线兼容），能力用 capabilities/<名字>。
+        // 环的节点：能力用 capabilities/<名字>（协调业务与别的能力同处一张图）。
         // 两者同处一张图，所以"能力级环"与"模块级环"一起被判定。
-        const selfNode =
-          layer === "core"
-            ? path.basename(f).replace(/\.rs$/, "")
-            : "capabilities/" + f.split("/")[2];
+        const selfNode = "capabilities/" + f.split("/")[2];
         const otherNode =
-          targetLayer === "core"
-            ? t.split("::")[2]
-            : targetLayer === "capabilities"
-              ? "capabilities/" + t.split("::")[2]
-              : null;
+          targetLayer === "capabilities" ? "capabilities/" + t.split("::")[2] : null;
         if (otherNode && otherNode !== selfNode) {
           (coreGraph[selfNode] = coreGraph[selfNode] || new Set()).add(otherNode);
         }
@@ -543,7 +532,7 @@ function structuralAudit() {
       }
     };
     compare("reverse", [...reverse].sort(), depBaseline.reverse || [], "业务层不得反向依赖旧巨石 core / adapters / presentation");
-    compare("presentation", [...presentation].sort(), depBaseline.presentation || [], "presentation 只能经入站能力面（core::api 或各能力的 ::api）驱动");
+    compare("presentation", [...presentation].sort(), depBaseline.presentation || [], "presentation 只能经各能力的 ::api 驱动");
     compare("apiOnly", [...apiOnly].sort(), depBaseline.apiOnly || [], "业务之间只能经对方的 ::api（R1，批次 20a 起不再允许 ::ports）；::domain / ::detail 是实现，跨能力一律不许碰");
     compare("foreignImpl", [...foreignImpl].sort(), depBaseline.foreignImpl || [], "不得给别的能力的类型写 impl（R1：另一种互相引入）");
     compare("domainPorts", [...domainPorts].sort(), depBaseline.domainPorts || [], "domain 是纯逻辑（批次 20a）：不得引用任何 ports");

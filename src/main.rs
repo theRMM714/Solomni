@@ -1,11 +1,10 @@
 //! Solomni 组合根 + 入口。
-//! 组合根职责：创建各适配器实例 → 注入 Core 门面 → 交给呈现层（CLI 或 Web）。
-//! 依赖方向：main → adapters / core / presentation；core 不知道后两者存在。
+//! 组合根职责：创建各适配器实例 → 装配各能力（含协调业务 `conductor`）→ 交给呈现层（CLI 或 Web）。
+//! 依赖方向：main → adapters / capabilities / presentation；协调业务不知道后两者存在。
 
 mod adapters;
 mod capabilities;
 mod cli;
-mod core;
 mod diagnostics;
 mod guard;
 mod kernel;
@@ -120,7 +119,7 @@ fn main() {
             catalog,
             Arc::new(capabilities::llm::detail::UnambiguousRepair),
         ));
-    // **登记处能力**：四份 yaml 的状态与用例都在它里面（core 只按 `Registry` 用它，看不见字段）。
+    // **登记处能力**：四份 yaml 的状态与用例都在它里面（conductor 只按 `Registry` 用它，看不见字段）。
     let registry = match capabilities::registry::service::RegistryService::new(
         Arc::new(store),
         Arc::clone(&llm),
@@ -134,7 +133,7 @@ fn main() {
     };
     let prompt_source =
         capabilities::prompt::detail::yaml_prompts::YamlPrompts::new(root.join("prompts"));
-    // **提示词册能力**：册子只在这里装载一次、也只被它持有；core 与工具执行
+    // **提示词册能力**：册子只在这里装载一次、也只被它持有；conductor 与工具执行
     // （回执里的那些收尾标记）要的"段"都经它的能力面拿——不再各存一份拷贝。
     let prompt = match capabilities::prompt::service::load(&prompt_source) {
         Ok(p) => p,
@@ -195,7 +194,7 @@ fn main() {
             Arc::new(workspace),
         ));
 
-    let mut core = core::Core::new(
+    let mut conductor = capabilities::conductor::service::Conductor::new(
         Box::new(registry),
         Arc::new(capabilities::session::service::SessionService::new(
             Arc::new(history),
@@ -215,18 +214,18 @@ fn main() {
             eprintln!("用法：solomni --probe-tools <模型 id>");
             std::process::exit(2);
         };
-        match core.registry_mut().probe_model_tools(id) {
-            Ok(core::api::ProbeOutcome::Supported { detail }) => {
+        match conductor.registry_mut().probe_model_tools(id) {
+            Ok(capabilities::conductor::api::ProbeOutcome::Supported { detail }) => {
                 println!("[探测] 模型 {}：支持原生工具调用（{}）", id, detail);
                 println!("[探测] 已把 models.yaml 的 tools 写成 native");
                 std::process::exit(0);
             }
-            Ok(core::api::ProbeOutcome::Unsupported { detail }) => {
+            Ok(capabilities::conductor::api::ProbeOutcome::Unsupported { detail }) => {
                 println!("[探测] 模型 {}：**不支持**原生工具调用（{}）", id, detail);
                 println!("[探测] 已把 models.yaml 的 tools 写成 envelope（手写信封照旧可用，能力没有任何损失）");
                 std::process::exit(0);
             }
-            Ok(core::api::ProbeOutcome::Unknown { detail }) => {
+            Ok(capabilities::conductor::api::ProbeOutcome::Unknown { detail }) => {
                 println!("[探测] 模型 {}：无法判定（{}）", id, detail);
                 println!("[探测] 登记处**没有改动**：请自行决定填 native 还是 envelope");
                 std::process::exit(0);
@@ -245,7 +244,7 @@ fn main() {
             eprintln!("用法：solomni --probe-replay <模型 id>");
             std::process::exit(2);
         };
-        match core.registry().probe_replay_shape(id) {
+        match conductor.registry().probe_replay_shape(id) {
             Ok(report) => {
                 println!("[回放形状] 模型 {}（只报事实，不改登记处）：", id);
                 for s in &report.shapes {
@@ -291,7 +290,7 @@ fn main() {
         let allow = match env_flag.as_deref() {
             Some("1") => true,
             Some("0") => false,
-            _ => core.registry().app_settings().fence_write,
+            _ => conductor.registry().app_settings().fence_write,
         };
         write_allowed.store(allow, std::sync::atomic::Ordering::Relaxed);
         allow_fence_write = allow;
@@ -311,7 +310,7 @@ fn main() {
             usable(cap.tree),
             cap.note
         );
-        let ro = core.registry().app_settings().fence_read.len();
+        let ro = conductor.registry().app_settings().fence_read.len();
         println!(
             "[围栏] 本次实际：文件系统={} 断网={} 进程树={}；容器授权={}；只读根={} 个（未授权时只放行进程树与资源上限，不写本机任何权限项；要启用：设置里打开，或 .home/settings.yaml 写 fence_write: true / fence_read: [路径…]）",
             usable(fs),
@@ -330,15 +329,15 @@ fn main() {
             .unwrap_or(web::DEFAULT_PORT)
     };
 
-    // 核心搬到它自己的执行线程：此后呈现层只持有**入站能力面**——拿不到 Core，也拿不到任何核心锁。
-    let handle = match core::api::CoreHandle::spawn(core) {
+    // 核心搬到它自己的执行线程：此后呈现层只持有**入站能力面**——拿不到 Conductor，也拿不到任何核心锁。
+    let handle = match capabilities::conductor::api::ConductorHandle::spawn(conductor) {
         Ok(h) => h,
         Err(e) => {
             eprintln!("[装配失败] {}", e);
             std::process::exit(1);
         }
     };
-    let ops = core::api::Ops::from_handle(&handle);
+    let ops = capabilities::conductor::api::Ops::from_handle(&handle);
 
     if web {
         serve_web(ops, port_flag(&args), allow_fence_write);
@@ -350,7 +349,7 @@ fn main() {
     }
 }
 
-fn serve_web(ops: core::api::Ops, port: u16, write_allowed: bool) {
+fn serve_web(ops: capabilities::conductor::api::Ops, port: u16, write_allowed: bool) {
     let cap = capabilities::tools::detail::confine::capability();
     // 能力与本次实际**分开报**（与启动报告同一套说法）：未授权时路径级围栏是关的，
     // 但进程树与资源上限照旧生效——概览里必须让用户看到这个区别，不能只看"本机能力"。

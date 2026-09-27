@@ -1,5 +1,5 @@
-//! 会话历史落盘：session/<名字>/meta.yaml + transcript.jsonl（实现 core 的 HistoryStore 端口）。
-//! 名字即目录名（core 已校验）；流水只追加，回档将来以 rewind 记录追加，不物理删行。
+//! 会话历史落盘：session/<名字>/meta.yaml + transcript.jsonl（实现本能力的 HistoryStore 端口）。
+//! 名字即目录名（conductor 已校验）；流水只追加，回档将来以 rewind 记录追加，不物理删行。
 
 use crate::capabilities::session::api::{HistoryView, SessionMeta};
 use crate::capabilities::session::ports::HistoryStore;

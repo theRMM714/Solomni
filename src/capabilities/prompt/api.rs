@@ -1,11 +1,11 @@
-//! 入站能力面：**其它能力、core 与呈现层只准用这里**（不许碰 `domain` / `ports`）。
+//! 入站能力面：**其它能力、conductor 与呈现层只准用这里**（不许碰 `domain` / `ports`）。
 //!
 //! 两样东西在这里：
 //! - **能力面 `Prompt`**：按名字取段（`Segment`），或拿走两块**共享记录**（`tools()` / `refs()`）。
 //!   **册子的布局只有本能力知道**——别的能力不点字段路径（批次 17 的收口）。
 //! - **工具文案与引用文案的 DTO**：它们在 tools / workspace / collab 的签名里当家。
 //!
-//! 持有者只有 `service.rs` 一处；组合根装一次，core 只持 `Box<dyn Prompt>`。
+//! 持有者只有 `service.rs` 一处；组合根装一次，conductor 只持 `Box<dyn Prompt>`。
 
 pub use crate::capabilities::prompt::domain::prompt::{RefsPrompts, Segment, ToolTexts, Vars};
 pub use crate::capabilities::prompt::domain::refs::{rewrite, RefRoots};

@@ -1,11 +1,11 @@
-//! 入站能力面：**其它能力、core 与呈现层只准用这里**（不许碰 `domain` / `ports`）。
+//! 入站能力面：**其它能力、conductor 与呈现层只准用这里**（不许碰 `domain` / `ports`）。
 //!
 //! 两样东西在这里：
 //! - **DTO 的重导出**：登记处的词汇（供应商 / 模型 / agent / 设置）只有一份定义，在 `domain`。
-//! - **`Registry` 能力面**：登记处的状态与用例（`service.rs` 实现它）。`core` 只持有
+//! - **`Registry` 能力面**：登记处的状态与用例（`service.rs` 实现它）。`conductor` 只持有
 //!   `Box<dyn Registry>`，看不见它的字段——**四份 yaml 的内存形态只由 `service.rs` 写**。
 //!
-//! 读方法取 `&self`、写方法取 `&mut self`：状态住在 core 的执行线程上，靠单线程命令队列
+//! 读方法取 `&self`、写方法取 `&mut self`：状态住在 conductor 的执行线程上，靠单线程命令队列
 //! 保证互斥，因此**不额外上锁**（见 ARCHITECTURE.md §一 的并发不变式）。
 
 pub use crate::capabilities::registry::domain::agents::{
@@ -21,7 +21,7 @@ use crate::capabilities::prompt::api::{Prompt, ToolTexts};
 use crate::capabilities::session::api::AgentMeta;
 use crate::capabilities::workspace::api::Roster;
 
-/// 登记处的**队列面**：呈现层经 `CoreHandle`（核心自己的线程 + 命令队列）调它。
+/// 登记处的**队列面**：呈现层经 `ConductorHandle`（核心自己的线程 + 命令队列）调它。
 ///
 /// 与 `Registry`（能力面）的分工是**有意的不对称**，不是重复：
 /// - `Registry` 的写方法取 `&mut self`——只有那样"单写者"才是**编译期事实**（R4/R5）；
@@ -72,11 +72,11 @@ pub trait RegistryOps: Send + Sync {
 ///
 /// 两类方法对应两类调用方：
 /// - **呈现层要的**（`provider_views` / `model_views` / `agent_views` / `app_settings` …）——
-///   它经 `RegistryOps`（本文件）走命令队列进来（见 `core/api.rs`）；
-/// - **其它能力与 core 要的只读事实**（`resolve` / `tool_mode` / `context_of` / `snapshot` …）——
+///   它经 `RegistryOps`（本文件）走命令队列进来（见 `conductor/api.rs`）；
+/// - **其它能力与 conductor 要的只读事实**（`resolve` / `tool_mode` / `context_of` / `snapshot` …）——
 ///   谁是登记处的主人就由谁答，调用方不自己维护一份镜像。
 ///
-/// 实现者是 `service.rs` 的 `RegistryService`（**状态在它里面**，core 只持 `Box<dyn Registry>`）。
+/// 实现者是 `service.rs` 的 `RegistryService`（**状态在它里面**，conductor 只持 `Box<dyn Registry>`）。
 pub trait Registry: Send + Sync {
     // ---- 视图：给呈现层与别的能力看的登记处（**永不携带密钥**） ----
 
@@ -88,7 +88,7 @@ pub trait Registry: Send + Sync {
     fn agent_views(&self) -> Vec<AgentView>;
     /// 点名：按名字取 agent 视图；不猜、不代选，名字不在册就如实报错。
     fn pick_agents(&self, names: &[String]) -> Result<Vec<AgentView>, String>;
-    /// 基本设置（**借用**：core 在自己进程里读设置项用它，不复制一份）。
+    /// 基本设置（**借用**：conductor 在自己进程里读设置项用它，不复制一份）。
     fn app(&self) -> &AppSettings;
     /// 基本设置（**自持一份**：经命令队列回给呈现层时必须拥有所有权）。
     fn app_settings(&self) -> AppSettings;

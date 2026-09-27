@@ -448,7 +448,7 @@ pub(crate) fn prose_then_tool_envelope_keeps_prose_line_and_rebuilds_identically
         live_h
     );
 
-    // 「重启」：同一份落盘历史交给新的 Core，重建后必须与实时历史逐条一致。
+    // 「重启」：同一份落盘历史交给新的 Conductor，重建后必须与实时历史逐条一致。
     drop(core);
     let mut core2 = core_with_all(
         vec![module_of("a")],

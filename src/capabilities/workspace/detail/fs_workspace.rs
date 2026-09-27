@@ -81,7 +81,7 @@ impl Workdirs for FsWorkspace {
     }
 
     fn write_work(&self, session: &str, name: &str, bytes: &[u8]) -> Result<(), String> {
-        // name 已由 core 净化（策略在 core）；这里只负责落盘。
+        // name 已由 conductor 净化（策略在 conductor）；这里只负责落盘。
         let dir = self.session_dir(session).join("work");
         std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
         std::fs::write(dir.join(name), bytes).map_err(|e| format!("写入 work 失败：{}", e))

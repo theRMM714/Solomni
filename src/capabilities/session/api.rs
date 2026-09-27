@@ -13,10 +13,10 @@ pub use crate::capabilities::session::domain::session::{
     SessionParams, TurnRun,
 };
 
-/// 落盘会话的**队列面**：呈现层经 core 的队列代理调它（列表 / 打开 / 删除）。
+/// 落盘会话的**队列面**：呈现层经 conductor 的队列代理调它（列表 / 打开 / 删除）。
 ///
 /// "在世会话 × 历史的并集"（`SessionView`）**不在本面里**：那要同时认识会话中心与历史，
-/// 归会话中心（`core::api::SessionOps::session_views`）。
+/// 归会话中心（`conductor::api::SessionOps::session_views`）。
 pub trait HistoryOps: Send + Sync {
     fn list(&self) -> Result<Vec<HistoryView>, String>;
     fn open(&self, name: &str) -> Result<(SessionMeta, Vec<serde_json::Value>), String>;
@@ -26,7 +26,7 @@ pub trait HistoryOps: Send + Sync {
 /// 会话的**直连面**（`service.rs` 实现）：别的能力要造会话、追流水、读元信息、删会话，走这里；
 /// 出站端口 `HistoryStore`（目录布局与 append-only 文件格式）**只由它持有**（R12）。
 ///
-/// 它与 `HistoryOps` 的分工是**接收者不同**，不是重复：`HistoryOps` 由队列代理（`CoreHandle`）实现、
+/// 它与 `HistoryOps` 的分工是**接收者不同**，不是重复：`HistoryOps` 由队列代理（`ConductorHandle`）实现、
 /// 面向呈现层；`History` 由能力自己实现、面向别的能力。这里的四个写操作（create / save_meta /
 /// append / delete）**不开放给呈现层**——呈现层要写就经协调业务的用例。
 ///

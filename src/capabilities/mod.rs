@@ -2,12 +2,14 @@
 //!
 //! 规则（见 docs/architecture/refactor-plan.md §一）：
 //! - **业务之间只经对方的 `api`**（不许碰 `domain` / `ports`）；
-//! - 能力不反向依赖旧巨石 `core`、适配层或呈现层；
+//! - 能力不反向依赖适配层或呈现层；
 //! - 依赖方向由 T0 结构审查的**依赖方向门禁**机器判定（tests/dependency-baseline.json）。
 //!
-//! 迁移期：能力逐个从 `core` 里搬出来；搬空的 `core` 最终消失。
+//! `conductor`（协调业务）与其它能力**平级**：它持会话在世表、命令队列与运行态，
+//! 只经各能力的 `api` 编排，别人不反向调它。
 
 pub mod collab;
+pub mod conductor;
 pub mod llm;
 pub mod prompt;
 pub mod registry;

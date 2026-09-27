@@ -1,5 +1,5 @@
-//! 运行包库来源：扫描 runtimes/ 下每个含 package.yaml 的文件夹（实现 core 的 PackageSource 端口）。
-//! 目录遍历与 yaml 解析是机制；清单校验、去重、冲突预检在 core（packages::Library::build）。
+//! 运行包库来源：扫描 runtimes/ 下每个含 package.yaml 的文件夹（实现 workspace 自己的 PackageSource 端口）。
+//! 目录遍历与 yaml 解析是机制；清单校验、去重、冲突预检在本能力的 domain（packages::Library::build）。
 //! 「清单即事实」：放在依赖文件夹里即出现，移出即消失——没有注册仪式。
 
 use crate::capabilities::workspace::api::{Library, PackageManifest};

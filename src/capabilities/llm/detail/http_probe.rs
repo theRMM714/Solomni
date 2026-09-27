@@ -201,7 +201,7 @@ pub(crate) fn probe_replay_with(
     Ok(ReplayReport { shapes })
 }
 
-/// 探测一条通道（机制；策略在 core）。
+/// 探测一条通道（机制；策略在 conductor）。
 pub fn probe(
     channel: &Channel,
     log: &std::sync::Arc<dyn Log + Send + Sync>,

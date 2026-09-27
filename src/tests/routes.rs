@@ -1,18 +1,20 @@
 //! HTTP 入站契约的契约测试：路由目录 ↔ 处理器 ↔ 文档 ↔ 前端调用，四者机器比对。
 //! 用**假能力面**（FakeOps）直接调 `web::route`（不经过 socket），逐条路由验成功/错误/空/边界；
 //! 真实传输由 L4 端到端覆盖（真二进制 + 真 HTTP）。
-//! 假能力面顺带证明一件事：「按角色切分」的能力接口真能被替换——新增一种呈现不必认识 `Core`。
+//! 假能力面顺带证明一件事：「按角色切分」的能力接口真能被替换——新增一种呈现不必认识 `Conductor`。
 
+use crate::capabilities::conductor::api::{
+    Advance, ConductorOps, EventBus, Ops, Output, SessionOps,
+};
+use crate::capabilities::conductor::api::{
+    AgentSuggestion, ConfigAgent, FilesAgentView, FilesRootsView, FilesView, Pending,
+    RuntimeReport, SessionConfig, SessionEdit, SessionView, WorkMode, WorkOpened, WorkSpec,
+};
 use crate::capabilities::registry::api::AgentView;
 use crate::capabilities::registry::api::RegistryOps;
 use crate::capabilities::registry::api::{AppSettings, ModelView, ProviderView};
 use crate::capabilities::session::api::{AgentMeta, HistoryOps, HistoryView, SessionMeta};
 use crate::capabilities::workspace::api::{Roster, WorkspaceOps};
-use crate::core::api::{Advance, CoreOps, EventBus, Ops, Output, SessionOps};
-use crate::core::api::{
-    AgentSuggestion, ConfigAgent, FilesAgentView, FilesRootsView, FilesView, Pending,
-    RuntimeReport, SessionConfig, SessionEdit, SessionView, WorkMode, WorkOpened, WorkSpec,
-};
 use crate::kernel::types::Tier;
 use crate::web::routes::{self, ROUTES};
 use crate::web::{self, FenceInfo};
@@ -113,7 +115,9 @@ impl SessionOps for FakeOps {
             WorkOpened {
                 sid: "w1".to_string(),
                 agents: vec!["甲".to_string()],
-                facts: vec![crate::core::api::SessionEvent::Notice("开好了".to_string())],
+                facts: vec![crate::capabilities::conductor::api::SessionEvent::Notice(
+                    "开好了".to_string(),
+                )],
             },
             7,
         ))
@@ -130,7 +134,7 @@ impl SessionOps for FakeOps {
     fn collab_step(
         &self,
         _sid: &str,
-        _step: crate::core::api::CollabStep,
+        _step: crate::capabilities::conductor::api::CollabStep,
         _text: &str,
     ) -> Result<Advance, String> {
         self.guard()?;
@@ -144,9 +148,9 @@ impl SessionOps for FakeOps {
         self.guard()?;
         Ok(Vec::new())
     }
-    fn compact(&self, _sid: &str) -> Result<crate::core::api::Advance, String> {
+    fn compact(&self, _sid: &str) -> Result<crate::capabilities::conductor::api::Advance, String> {
         self.guard()?;
-        Ok(crate::core::api::Advance { head: 0 })
+        Ok(crate::capabilities::conductor::api::Advance { head: 0 })
     }
     fn rewind(&self, _sid: &str, _keep_id: u64) -> Result<Vec<serde_json::Value>, String> {
         self.guard()?;
@@ -410,7 +414,7 @@ impl WorkspaceOps for FakeOps {
     }
 }
 
-impl CoreOps for FakeOps {
+impl ConductorOps for FakeOps {
     fn runtime_report(&self, _tier: Tier) -> Result<RuntimeReport, String> {
         self.guard()?;
         Ok(report())
@@ -443,7 +447,8 @@ fn fence() -> FenceInfo {
 }
 
 fn call(ops: &Ops, method: &str, url: &str, body: &str) -> (u16, String) {
-    let log: Arc<dyn crate::core::api::LogOps + Send + Sync> = Arc::new(super::doubles::NoopLogOps);
+    let log: Arc<dyn crate::capabilities::conductor::api::LogOps + Send + Sync> =
+        Arc::new(super::doubles::NoopLogOps);
     let (code, _headers, text) = web::route(ops, &fence(), &log, method, url, body);
     (code, text)
 }

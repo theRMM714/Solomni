@@ -1,6 +1,6 @@
 # 模块地图
 
-> 本文是**模块地图的唯一权威**：`kernel/`、`core/`、`adapters/`、`presentation/` 各文件职责一览。
+> 本文是**模块地图的唯一权威**：`kernel/`、`capabilities/`（含 `conductor/`）、`adapters/`、`presentation/` 各文件职责一览。
 > 分层规则与依赖方向见 [ARCHITECTURE.md](../../ARCHITECTURE.md)，呈现层入站契约见 [contracts.md](contracts.md)。
 
 ## 一、`kernel/`（机制型内核）
@@ -15,12 +15,16 @@
 | `chain.rs` | 任务链的**纯数据 + 纯图算法**（节点、依赖、阶段、就绪与验收判定）。被三个能力共享（`collab` 驱动 / `session` 的线格式携带 / 呈现层渲染），自己零出边（见 [task-chain.md](task-chain.md)） |
 | `jobs.rs` | 生成中作业的**取消表**：核心登记，呈现层只能说「停哪个会话」；「停止」不排队、不碰核心状态，所以生成期间立刻生效 |
 
-## 二、`core/`（**应用服务**，无 IO；**正在被搬空**——端口与全部业务能力已落位 `capabilities/`，业务状态也随批次 17 起回到各能力，这里只剩会话中心、生成驱动与跨能力用例）
+## 二、`capabilities/conductor/`（**协调业务**：跨参与方的状态与编排）
+
+> 它与别的能力**平级**：只经各能力的 `api` 编排，**不持任何别人的端口**（R12）。
+> 它拥有的是**没有任何参与方拥有**的那部分不变式：会话在世表、命令队列、运行态与跨会话编排。
 
 | 文件 | 职责 |
 | --- | --- |
-| `mod.rs` | 核心层入口与 `Core` 应用服务：会话中心（会话表、命令队列、运行态）、生成驱动、运行包报告、**回档编排**（`rewind` / `rewind_children` / `rebuild_session`——纯算术在 `capabilities/session/domain/rewind.rs`）。登记处与提示词册**只按能力面用**：`registry: Box<dyn Registry>`（`registry()` 读、`registry_mut()` 写）、`prompt: Arc<dyn Prompt>`（按名字取段）与 `systools: Arc<dyn Tools>`（按角色发放工具面），**看不见它们的字段、也不替它们落盘/存册子/存表** |
-| `api.rs` | **入站契约 + 入站词汇**：核心自己的两个接口（`SessionOps` 会话中心 / `CoreOps` 核心用例）+ `LogOps`（埋点门面）+ **`Ops` 的组装**（其余接口归各能力，见 §四）+ `CoreHandle`（核心自有线程、命令/事件；各能力接口的**队列代理**也在这里实现）+ **用例词汇与视图**（`WorkMode` / `WorkSpec` / `AgentInstance` / `WorkOpened` / `SessionEdit` / `CollabStep` / `SessionView` / `RuntimeReport` / `FilesView` 等，批次 15 收口从 `mod.rs` 搬来）+ `EventBus`；单 agent 与协作长步骤的生成都在**工作线程**上跑（队列只占"取/交"两步） |
+| `mod.rs` | 能力入口：只声明模块，不放逻辑 |
+| `api.rs` | **入站契约**：协调业务自己的两个接口（`SessionOps` 会话中心 / `CoreOps` 协调用例）+ `LogOps`（埋点门面）+ **`Ops` 的组装**（其余接口归各能力，见 §四）+ `ConductorHandle`（自持线程、命令/事件；各能力接口的**队列代理**也在这里实现）+ **用例词汇与视图**（`WorkMode` / `WorkSpec` / `AgentInstance` / `WorkOpened` / `SessionEdit` / `CollabStep` / `SessionView` / `RuntimeReport` / `FilesView` 等）+ `EventBus`；单 agent 与协作长步骤的生成都在**工作线程**上跑（队列只占"取/交"两步） |
+| `service.rs` | `Conductor`（协调业务的状态与用例）：会话在世表（会话表、命令队列、运行态）、生成驱动、运行包报告、**跨会话回档编排**（`rewind` / `rewind_children` / `rebuild_session`——纯行/事件算术在 `capabilities/session/domain/rewind.rs`）+ `Persister`（增量落盘）。登记处、会话历史、提示词册、工具面**只按能力面用**（`Box<dyn Registry>` / `Arc<dyn History>` / `Arc<dyn Prompt>` / `Arc<dyn Tools>` …），看不见它们的字段、也不替它们落盘 |
 
 ## 三、`adapters/`（机制，实现**内核**端口）
 
@@ -39,15 +43,15 @@
 | --- | --- |
 | `prompt/api.rs` | **入站能力面**：`Prompt` 能力面（按名字取段 `text` / `render` + 两块共享记录 `tools()` / `refs()`）与它要用的词汇（`Segment` / `ToolTexts` / `RefsPrompts` / `RefRoots` / `rewrite` / `Vars`） |
 | `prompt/service.rs` | **本能力的状态与用例**：把 `api::Prompt` 挂在 `domain` 的 `Prompts` 上（册子纯数据、无端口），并给组合根一个装载入口 `load()`。**册子只被这里（`Arc<dyn Prompt>` 的持有者）持有**（批次 17） |
-| `prompt/ports.rs` | `PromptSource`：提示词册加载（从 `core/ports.rs` 随能力搬出） |
-| `prompt/domain/prompt.rs` | 册子的内存形态与 `{{key}}` 渲染（从 `core/prompt.rs` 搬来，纯逻辑） |
-| `prompt/domain/refs.rs` | 用户 `@` 引用改写成真实绝对路径（从 `core/refs.rs` 搬来，纯逻辑） |
+| `prompt/ports.rs` | `PromptSource`：提示词册加载 |
+| `prompt/domain/prompt.rs` | 册子的内存形态与 `{{key}}` 渲染（纯逻辑） |
+| `prompt/domain/refs.rs` | 用户 `@` 引用改写成真实绝对路径（纯逻辑） |
 | `prompt/detail/yaml_prompts.rs` | `PromptSource`：加载 `prompts/`（**只有文本**） |
-| `registry/api.rs` | **入站能力面**：`RegistryOps`（呈现层的队列面）+ `Registry`（能力面）+ 登记处词汇（`Settings` / `Provider` / `ModelEntry` / `AppSettings` / 各视图 / `RosterPick`）的对外名字 + **`Registry` 能力面**（读取 `&self`、写取 `&mut self`：状态住在 core 的执行线程上，靠单线程命令队列互斥，**不额外上锁**） |
+| `registry/api.rs` | **入站能力面**：`RegistryOps`（呈现层的队列面）+ `Registry`（能力面）+ 登记处词汇（`Settings` / `Provider` / `ModelEntry` / `AppSettings` / 各视图 / `RosterPick`）的对外名字 + **`Registry` 能力面**（读取 `&self`、写取 `&mut self`：状态住在协调业务的执行线程上，靠单线程命令队列互斥，**不额外上锁**） |
 | `registry/service.rs` | **本能力的状态与用例**：四份 yaml 的内存形态（`Settings`，私有字段）只由这里写；持 `SettingsStore` / `ChatGateway` / `ModelCatalog` / `Log`；装配只在组合根（批次 17） |
-| `registry/ports.rs` | `SettingsStore`：登记处四份 yaml 的持久化（从 `core/ports.rs` 随能力搬出） |
-| `registry/domain/providers.rs` | 供应商/模型登记处内存形态与「模型 → 通道」解析（从 `core/providers.rs` 搬来） |
-| `registry/domain/agents.rs` | agent 登记处、代拟名单落地与名字校验（从 `core/agents.rs` 搬来） |
+| `registry/ports.rs` | `SettingsStore`：登记处四份 yaml 的持久化 |
+| `registry/domain/providers.rs` | 供应商/模型登记处内存形态与「模型 → 通道」解析 |
+| `registry/domain/agents.rs` | agent 登记处、代拟名单落地与名字校验 |
 | `registry/detail/yaml_settings.rs` | `SettingsStore`：登记处四份 yaml 的读写（见 [REGISTRY_SPEC.md](../../REGISTRY_SPEC.md)） |
 | `llm/api.rs` | **入站能力面**：**通道与协议词汇**（`Chat` / `BoxedChat` / `Msg` / `Completion` / `Chunk` / `ToolCall` / `ToolDecl` / `Channel` / `ToolMode` / `LlmOpts` / `CompleteOpts` / 探测结论 → 它们是**对外契约**，`Chat` 的调用方是别的能力所以我在这里）+ **`Llm` 用例面**（造通道 / 探测 / 发现 / 修信封）。**出站端口不进 api**（R12）。原行余下：协议类型（`Msg` / `Completion` / `Chunk` / `ToolCall` / …）的对外名字 |
 | `llm/service.rs` | **本能力的用例与端口持有者**：持 `ChatGateway` / `ModelCatalog` / `EnvelopeRepair`（**唯一持有者**，R12），实现 `api::Llm`（批次 20b） |
@@ -55,10 +59,10 @@
 | `workspace/api.rs` | **入站能力面**：`WorkspaceOps`（呈现层的清单事实）+ **`Workspace` 用例面**（roster / library / runtimes_dir / prepare / write_work / work_has / files / roots）+ 模块清单 / 运行包库 / 执行档位与计划 / 沙箱寻址的对外名字 |
 | `workspace/service.rs` | **本能力的用例与端口持有者**：持 `ModuleSource` / `PackageSource` / `Workdirs`（**唯一持有者**，R12），实现 `api::Workspace`（批次 20b） |
 | `workspace/ports.rs` | **出站端口**（只有 `service.rs` 持有）：`ModuleSource` / `PackageSource` / `Workdirs`（目录布局；原名 `Workspace`，批次 20b 改名，把 `Workspace` 让给能力面） |
-| `workspace/domain/module.rs` | `module.yaml` 契约、`Roster`、`runtimes` 校验、agent system 合成、**参数声明形态** `Param` / `ParamType`（从 `core/module.rs` 搬来；批次 15 从 `tools` 移来） |
-| `workspace/domain/packages.rs` | `package.yaml` 契约与包库事实（从 `core/packages.rs` 搬来） |
-| `workspace/domain/exec.rs` | 执行档位（`ExecSpec`）与执行计划（`ExecPlan`）派生、虚拟机档诊断与承载判定（从 `core/exec.rs` 搬来） |
-| `workspace/domain/workspace.rs` | 工作区与沙箱的纯数据定义、寻址与越界判定（从 `core/workspace.rs` 搬来） |
+| `workspace/domain/module.rs` | `module.yaml` 契约、`Roster`、`runtimes` 校验、agent system 合成、**参数声明形态** `Param` / `ParamType`（批次 15 从 `tools` 移来） |
+| `workspace/domain/packages.rs` | `package.yaml` 契约与包库事实 |
+| `workspace/domain/exec.rs` | 执行档位（`ExecSpec`）与执行计划（`ExecPlan`）派生、虚拟机档诊断与承载判定 |
+| `workspace/domain/workspace.rs` | 工作区与沙箱的纯数据定义、寻址与越界判定 |
 | `tools/api.rs` | **入站能力面**：`Tools` 能力面（按角色发放工具面 `tool_face` / `role_face` / `allows_module_tools`、总表 `book()` / 自检 `problems()`）+ **`ToolExec` 执行面**（`run_module` / `run_builtin` / `release_fence`）；`ToolOutcome` 从 ports 归到这里（批次 20b）。原行余下：`Tools` 能力面（按角色发放工具面 `tool_face` / `role_face` / `allows_module_tools`、总表 `book()`、自检 `problems()`）+ 工具清单 / 参数契约 / 补丁与应用 / 围栏策略的对外名字 |
 | `tools/service.rs` | **本能力的状态、用例与端口持有者**：持两张表（`SystemTools`）与三个出站端口（`ToolRunner` / `SysIo` / `FenceHost`，**唯一持有者**，R12），实现 `api::Tools` 与 `api::ToolExec`；组合根用 `ToolsService::new(加载器, 三个端口)` 装配（批次 17 + 20b） |
 | `tools/ports.rs` | **出站端口**（只有 `service.rs` 持有，R12）：`SysIo` / `ToolRunner` / `FenceHost` / `SystoolsSource`（后者的真实实现在 `detail/yaml_systools.rs`） |
@@ -88,16 +92,16 @@
 | `session/api.rs` | **入站能力面**：`HistoryOps`（呈现层的队列面：列表 / 打开 / 删除）+ **`History` 直连面**（别的能力用：造会话 / 写元信息 / 追流水 / 列出 / 读回 / 删除；与端口一一对应，价值在 R12 的唯一持有者）+ `SessionParams` / `AgentSession` / `TurnRun` / 行与事件词汇 / 历史视图的对外名字 |
 | `session/service.rs` | **本能力的用例与端口持有者**：持 `HistoryStore`（**唯一持有者**，R12），实现 `api::History`（造会话 / 追流水 / 读元信息 / 删会话）。呈现层的列表/打开/删除仍走 `api::HistoryOps`（队列代理实现）（批次 20b） |
 | `session/ports.rs` | **出站端口**（只有 `service.rs` 持有，R12）：`HistoryStore`——会话历史的持久化（meta + append-only 流水） |
-| `session/domain/session.rs` | 会话状态与簿记 + 工具面 `MemberTools` / `ModuleTools`（从 `core/session.rs` 搬来）+ `env_block`（批次 15 从 `tools` 移来） |
-| `session/domain/history.rs` | 会话元信息与历史视图的内存形态（从 `core/history.rs` 搬来） |
-| `session/domain/events.rs` | 呈现侧契约：`SessionEvent` 与介入请求的词汇、转录行 `LineView`（从 `core/events.rs` 搬来） |
+| `session/domain/session.rs` | 会话状态与簿记 + 工具面 `MemberTools` / `ModuleTools`+ `env_block`（批次 15 从 `tools` 移来） |
+| `session/domain/history.rs` | 会话元信息与历史视图的内存形态 |
+| `session/domain/events.rs` | 呈现侧契约：`SessionEvent` 与介入请求的词汇、转录行 `LineView` |
 | `session/detail/fs_history.rs` | `HistoryStore`：`meta.yaml` + `transcript.jsonl` |
-| `session/domain/rewind.rs` | 回档的**纯行 / 事件算术**：`turn_of_line` / `last_line_within` / `truncate_events` / `cut_before_line` / `align_keep` / `line_reply_of` / `find_line_id`（从 `core/mod.rs` 搬来；**编排留在门面**） |
+| `session/domain/rewind.rs` | 回档的**纯行 / 事件算术**：`turn_of_line` / `last_line_within` / `truncate_events` / `cut_before_line` / `align_keep` / `line_reply_of` / `find_line_id`（**编排在协调业务**） |
 | `collab/api.rs` | **入站能力面**：`CollabSession` / 讨论与执行引擎 / 回合与验收词汇 / 协作状态派生的对外名字 |
-| `collab/domain/collab.rs` | 协作会话状态机与讨论泵（从 `core/collab.rs` 搬来） |
-| `collab/domain/engine.rs` | 讨论/执行/验收引擎 + **唯一的轮循环** `converse_with` + **唯一的请求装配点** `assemble` + 回合驱动 + 行构造（从 `core/engine.rs` 搬来） |
-| `collab/domain/collab_state.rs` | 「转录即状态」的协作状态派生（从 `core/collab_state.rs` 搬来，纯函数、可回放） |
-| `llm/domain/envelope.rs` | 发言信封解析（从 `core/envelope.rs` 搬来，纯逻辑）：`ToolInvoke.body` = 信封之后的正文；判定**未闭合 / 裸控制字符 / 语法错 / 字段不合法**四类；未闭合带上 EOF 状态 |
+| `collab/domain/collab.rs` | 协作会话状态机与讨论泵 |
+| `collab/domain/engine.rs` | 讨论/执行/验收引擎 + **唯一的轮循环** `converse_with` + **唯一的请求装配点** `assemble` + 回合驱动 + 行构造 |
+| `collab/domain/collab_state.rs` | 「转录即状态」的协作状态派生（纯函数、可回放） |
+| `llm/domain/envelope.rs` | 发言信封解析（纯逻辑）：`ToolInvoke.body` = 信封之后的正文；判定**未闭合 / 裸控制字符 / 语法错 / 字段不合法**四类；未闭合带上 EOF 状态 |
 
 ## 五、`cli/` + `web/`（前端，交付机制）
 

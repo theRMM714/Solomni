@@ -1,12 +1,14 @@
 //! 测试替身与测试组合根（doubles）：内存适配器 + 共享夹具 + 装配辅助。
 //! 语义规范见 docs/testing/doubles.md；端口契约测试与它同处一层（src/tests/）。
-//! 测试里的组合根 = 内存适配器；core 的可测性正是端口化的直接收益。
+//! 测试里的组合根 = 内存适配器；conductor 的可测性正是端口化的直接收益。
 //!
 //! 本模块只放**替身与装配辅助**；用它们的用例在各业务测试文件（T1，见 `src/tests/`）。所以这里对
 //! "只有用例才用到"的项放行 dead_code（替身与夹具是给别的模块用的，不在本文件里被调用是正常的）。
 #![allow(dead_code)]
 
 use super::builders::SilentRunner;
+use crate::capabilities::conductor::api::{AgentInstance, SessionEvent, WorkMode, WorkSpec};
+use crate::capabilities::conductor::service::Conductor;
 use crate::capabilities::llm::api::Channel;
 use crate::capabilities::llm::api::{BoxedChat, Chat, Chunk, CompleteOpts, Completion, Msg};
 use crate::capabilities::llm::detail::fake_chat::FakeChat;
@@ -24,8 +26,6 @@ use crate::capabilities::tools::ports::{FileRead, SysIo, ToolRunner};
 use crate::capabilities::workspace::api::{Library, PackageManifest};
 use crate::capabilities::workspace::api::{Module, ModuleManifest};
 use crate::capabilities::workspace::ports::{ModuleSource, PackageSource, Workdirs};
-use crate::core::api::{AgentInstance, SessionEvent, WorkMode, WorkSpec};
-use crate::core::Core;
 use crate::kernel::types::Tier;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -881,7 +881,7 @@ pub(crate) fn test_prompts() -> Prompts {
 }
 
 /// 测试用工具总表与角色表（走**与产品同一条**装配路径）。
-/// 它与提示词册**分开**装配：两者互不依赖（见 core/prompt.rs 的 Prompts）。
+/// 它与提示词册**分开**装配：两者互不依赖（见 capabilities/prompt 的 Prompts）。
 /// 测试用的**会话历史面**（与生产同一条路：端口装进 `SessionService`）。
 pub(crate) fn test_history() -> Arc<dyn crate::capabilities::session::api::History + Send + Sync> {
     test_history_of(Arc::new(InMemoryHistory::new()))
@@ -954,7 +954,7 @@ impl crate::kernel::host::HostProbe for FixedProbe {
 
 /// 日志能力替身：什么都不做（呈现层的埋点不参与任何判定）。
 pub(crate) struct NoopLogOps;
-impl crate::core::api::LogOps for NoopLogOps {
+impl crate::capabilities::conductor::api::LogOps for NoopLogOps {
     fn info(&self, _at: &str, _msg: &str) {}
     fn warn(&self, _at: &str, _msg: &str) {}
     fn error(&self, _at: &str, _msg: &str) {}
@@ -1021,7 +1021,7 @@ pub(crate) fn test_workspace(
 /// 登记一个 agent（测试装配用）：**校验用的模块清单由调用方取一份**交给登记处——
 /// 清单归 workspace，登记处只认事实（见 docs/architecture/refactor-plan.md §3.1）。
 pub(crate) fn agent_upsert(
-    core: &mut Core,
+    core: &mut Conductor,
     name: &str,
     modules: &[&str],
     model: &str,
@@ -1033,7 +1033,7 @@ pub(crate) fn agent_upsert(
         .agent_upsert(name, &modules, model, note, &roster)
 }
 
-pub(crate) fn core_with(modules: Vec<Module>, gateway: ScriptGateway) -> Core {
+pub(crate) fn core_with(modules: Vec<Module>, gateway: ScriptGateway) -> Conductor {
     core_with_runner(modules, gateway, Arc::new(SilentRunner))
 }
 
@@ -1042,14 +1042,14 @@ pub(crate) fn core_with_workspace(
     modules: Vec<Module>,
     gateway: ScriptGateway,
     ws: Arc<InMemoryWorkspace>,
-) -> Core {
+) -> Conductor {
     let gateway: Arc<dyn crate::capabilities::llm::ports::ChatGateway + Send + Sync> =
         Arc::new(gateway);
     let llm = test_llm(
         Arc::clone(&gateway),
         Arc::new(FakeCatalog::new(vec!["m".to_string()])),
     );
-    Core::new(
+    Conductor::new(
         registry_service(InMemorySettings::new(), Arc::clone(&llm)),
         test_history(),
         test_workspace(
@@ -1075,7 +1075,7 @@ pub(crate) fn core_with_io(
     modules: Vec<Module>,
     gateway: ScriptGateway,
     io: Arc<InMemorySysIo>,
-) -> Core {
+) -> Conductor {
     core_with_all(
         modules,
         gateway,
@@ -1090,7 +1090,7 @@ pub(crate) fn core_with_runner(
     modules: Vec<Module>,
     gateway: ScriptGateway,
     runner: Arc<impl ToolRunner + Send + Sync + 'static>,
-) -> Core {
+) -> Conductor {
     core_with_catalog(
         modules,
         gateway,
@@ -1105,7 +1105,7 @@ pub(crate) fn core_with_catalog(
     gateway: ScriptGateway,
     runner: Arc<impl ToolRunner + Send + Sync + 'static>,
     catalog: Arc<FakeCatalog>,
-) -> Core {
+) -> Conductor {
     core_with_all(
         modules,
         gateway,
@@ -1124,7 +1124,7 @@ pub(crate) fn core_with_all(
     catalog: Arc<FakeCatalog>,
     history: Arc<InMemoryHistory>,
     io: Arc<InMemorySysIo>,
-) -> Core {
+) -> Conductor {
     core_with_pkgs(
         modules,
         gateway,
@@ -1145,11 +1145,11 @@ pub(crate) fn core_with_pkgs(
     history: Arc<InMemoryHistory>,
     io: Arc<InMemorySysIo>,
     packages: Arc<InMemoryPackages>,
-) -> Core {
+) -> Conductor {
     let gateway: Arc<dyn crate::capabilities::llm::ports::ChatGateway + Send + Sync> =
         Arc::new(gateway);
     let llm = test_llm(Arc::clone(&gateway), catalog);
-    Core::new(
+    Conductor::new(
         registry_service(InMemorySettings::new(), Arc::clone(&llm)),
         test_history_of(history),
         test_workspace(
@@ -1167,14 +1167,14 @@ pub(crate) fn core_with_pkgs(
 }
 
 /// 用**指定登记处**装配（断言"全局设置是流式的上限、预算全局通用"这类判据）。
-pub(crate) fn core_with_settings(store: InMemorySettings) -> Core {
+pub(crate) fn core_with_settings(store: InMemorySettings) -> Conductor {
     let gateway: Arc<dyn crate::capabilities::llm::ports::ChatGateway + Send + Sync> =
         Arc::new(gw(BTreeMap::new(), Vec::new()));
     let llm = test_llm(
         Arc::clone(&gateway),
         Arc::new(FakeCatalog::new(vec!["m".to_string()])),
     );
-    Core::new(
+    Conductor::new(
         registry_service(store, Arc::clone(&llm)),
         test_history(),
         test_workspace(
@@ -1207,14 +1207,14 @@ pub(crate) fn core_with_io_gateway(
     modules: Vec<Module>,
     gateway: impl ChatGateway + Send + Sync + 'static,
     io: Arc<InMemorySysIo>,
-) -> Core {
+) -> Conductor {
     let gateway: Arc<dyn crate::capabilities::llm::ports::ChatGateway + Send + Sync> =
         Arc::new(gateway);
     let llm = test_llm(
         Arc::clone(&gateway),
         Arc::new(FakeCatalog::new(vec!["m".to_string()])),
     );
-    Core::new(
+    Conductor::new(
         registry_service(InMemorySettings::new(), Arc::clone(&llm)),
         test_history(),
         test_workspace(
@@ -1235,14 +1235,14 @@ pub(crate) fn core_with_io_gateway(
 pub(crate) fn core_with_gateway(
     modules: Vec<Module>,
     gateway: impl ChatGateway + Send + Sync + 'static,
-) -> Core {
+) -> Conductor {
     let gateway: Arc<dyn crate::capabilities::llm::ports::ChatGateway + Send + Sync> =
         Arc::new(gateway);
     let llm = test_llm(
         Arc::clone(&gateway),
         Arc::new(FakeCatalog::new(vec!["m".to_string()])),
     );
-    Core::new(
+    Conductor::new(
         registry_service(InMemorySettings::new(), Arc::clone(&llm)),
         test_history(),
         test_workspace(

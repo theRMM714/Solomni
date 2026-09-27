@@ -11,7 +11,7 @@ use crate::kernel::path::slash;
 use std::collections::BTreeMap;
 use std::path::{Component, Path, PathBuf};
 
-/// 投喂文件名净化（策略在 core）：只允许单个文件名，挡掉路径分隔符与上级跳转。
+/// 投喂文件名净化（策略在 conductor）：只允许单个文件名，挡掉路径分隔符与上级跳转。
 pub fn safe_file_name(name: &str) -> Result<String, String> {
     let n = name.trim();
     if n.is_empty() {

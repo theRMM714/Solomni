@@ -2,7 +2,7 @@
 //! 通道工厂（`ChatGateway`）、模型目录（`ModelCatalog`）、信封修复（`EnvelopeRepair`）。
 //!
 //! 协议词汇（`Chat` / `Msg` / `Completion` / `Channel` …）在 `api`：它们是对外契约，
-//! 而这里只放"本能力要请人做的事"。策略（用哪条通道、要不要流式、声明哪些工具）在 core 定；机制在适配层。
+//! 而这里只放"本能力要请人做的事"。策略（用哪条通道、要不要流式、声明哪些工具）在 conductor 定；机制在适配层。
 
 use crate::capabilities::llm::api::{
     BoxedChat, Channel, Malformed, ProbeOutcome, RepairOutcome, ReplayReport,

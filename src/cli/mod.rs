@@ -1,10 +1,12 @@
 //! 终端转录中心：解析命令 → 用入站能力面 → 渲染事件流。
 //! 只做解析与渲染，不做业务决策；Web 前端与它并列，共用同一能力面与事件词汇。
 
+use crate::capabilities::conductor::api::{Acted, Action};
+use crate::capabilities::conductor::api::{
+    AgentInstance, CollabStep, Pending, SessionEvent, WorkMode, WorkSpec,
+};
+use crate::capabilities::conductor::api::{Ops, Output};
 use crate::capabilities::registry::api::{ModelView, ProviderView};
-use crate::core::api::{Acted, Action};
-use crate::core::api::{AgentInstance, CollabStep, Pending, SessionEvent, WorkMode, WorkSpec};
-use crate::core::api::{Ops, Output};
 use crate::web::DEFAULT_PORT;
 use std::io::Write;
 
@@ -165,7 +167,7 @@ fn model_label(model: Option<&str>) -> String {
         .unwrap_or_else(|| "（核心默认）".to_string())
 }
 
-/// 展示文案归呈现层：core 只给结构化事实（视图），怎么排版是这里的事。
+/// 展示文案归呈现层：conductor 只给结构化事实（视图），怎么排版是这里的事。
 fn provider_line(p: &ProviderView) -> String {
     format!("{}  {}", p.id, p.base_url)
 }

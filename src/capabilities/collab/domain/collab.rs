@@ -1,8 +1,8 @@
 //! 协作会话状态机：建组 → 讨论 → 整理（出任务链）→ **审查关卡** → 链驱动（节点各跑在子会话里）
 //! → 节点验收 → 总验收（拉模式）。见 docs/architecture/task-chain.md。
-//! 前端经 Core 门面按 pending 驱动（set_task → confirm_slate? → begin → answer…），泵式收事件。
+//! 前端经 Conductor 门面按 pending 驱动（set_task → confirm_slate? → begin → answer…），泵式收事件。
 //! 发言席只有 agent：名单是 Vec<AgentMeta>（名字 / 模块 / 模型），member id = agent 实例名。
-//! 名单的权威来源是会话 meta.agents（代拟确认后由 Core 写回 meta）；转录只用来恢复讨论进度。
+//! 名单的权威来源是会话 meta.agents（代拟确认后由 Conductor 写回 meta）；转录只用来恢复讨论进度。
 //! 依赖全部为端口与核心数据；无 IO，无具体适配器。
 
 use crate::capabilities::collab::domain::engine::{
@@ -84,7 +84,7 @@ impl CollabSession {
 }
 
 /// 用户显式授权的只读根（`settings.yaml` 的 `fence_read`）：空 = 一个都不放行。
-/// 与 `Core::fence_read_roots` 同义——两处都在 core 内，读的是同一份设置事实。
+/// 与 `Conductor::fence_read_roots` 同义——两处都读同一份设置事实（协调业务与协作会话各有一份派生）。
 fn read_only_roots(
     app: &crate::capabilities::registry::api::AppSettings,
 ) -> Vec<std::path::PathBuf> {
@@ -104,7 +104,7 @@ pub struct CollabSession {
     task: String,
     /// 代拟拟好的名单（已逐条校验），确认后落到 roster。
     slate_picks: Vec<AgentMeta>,
-    /// 登记处快照：agent 的模型解析与核心通道在此进行（策略在 core）。
+    /// 登记处快照：agent 的模型解析与核心通道在此进行（策略在 conductor）。
     settings: Settings,
     /// 当前用户介入请求。
     pub pending: Option<Pending>,
@@ -149,7 +149,7 @@ pub struct CollabSession {
     /// 本工作的沙箱清单（按 agent 实例名取）。
     sandboxes: Sandboxes,
     done: bool,
-    /// 「停止」标志：由 CoreHandle 在派发时把任务登记处的取消标志注入（见 set_cancel）。
+    /// 「停止」标志：由 ConductorHandle 在派发时把任务登记处的取消标志注入（见 set_cancel）。
     cancel: Arc<std::sync::atomic::AtomicBool>,
     /// 方案是否已过审（审查关卡）：没过审不开工。由转录里的 [用户:同意方案] 派生。
     plan_approved: bool,
@@ -224,7 +224,7 @@ impl CollabSession {
         self.gate_advice.clear(); // 这一关解除了，建议不再属于任何挂起的事
     }
 
-    /// 接上「停止」：CoreHandle 在派发时注入任务登记处的取消标志。
+    /// 接上「停止」：ConductorHandle 在派发时注入任务登记处的取消标志。
     /// 注入后泵在每次模型调用前与**调用中途**都看它，所以「停止」能在一个调用内收尾。
     pub fn set_cancel(&mut self, cancel: Arc<std::sync::atomic::AtomicBool>) {
         if let Some(d) = self.disc.as_mut() {
@@ -535,7 +535,7 @@ impl CollabSession {
         self.slate_picks.clone()
     }
 
-    /// 代拟确认后由 Core 补上沙箱清单（名单刚定下来时才有）。
+    /// 代拟确认后由 Conductor 补上沙箱清单（名单刚定下来时才有）。
     pub fn set_sandboxes(&mut self, sandboxes: Sandboxes) {
         self.sandboxes = sandboxes;
     }
@@ -1403,7 +1403,7 @@ impl CollabSession {
         self.done = true;
     }
 
-    /// 从在组名单装配成员通道（带回落告知；策略在 core：该 agent 的模型 > 核心默认）。
+    /// 从在组名单装配成员通道（带回落告知；策略在 conductor：该 agent 的模型 > 核心默认）。
     /// 一个 agent = 一个成员：system 由它全部模块合成，工具 = 各模块外部工具的并集。
     fn assemble_members(&self) -> Result<(Vec<Member>, Vec<String>), String> {
         let prompts = self.prompts.clone();
