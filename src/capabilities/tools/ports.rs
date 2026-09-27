@@ -1,6 +1,12 @@
 //! 工具能力的**出站端口**：文件读写、外部进程、围栏授权的释放（机制在适配层）。
 
 use crate::capabilities::tools::domain::fence::FenceSpec;
+use crate::capabilities::tools::domain::roles::SystemTools;
+
+/// 工具总表与角色表的加载端口：读 `systools/tools.yaml` + `systools/roles.yaml`（机制在适配层）。
+pub trait SystoolsSource {
+    fn load(&self) -> Result<SystemTools, String>;
+}
 
 /// 围栏授权的释放端口：会话删除时由核心请求一次，把该会话各 agent 的围栏授权撤掉。
 /// 机制在适配层（confine）；本平台没有该机制时实现为空操作。调用方只提出请求，不碰任何 ACL。

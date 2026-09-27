@@ -124,6 +124,7 @@ Fixture 必须：
 | `SysIo` | `InMemorySysIo`（含并发峰值与按文件延时） | 内存内容 + 同时在读的峰值 | `fail_with` | 不适用 | `FsSysIo`（含 lossy / cut） | 已验收 |
 | `HistoryStore` | `InMemoryHistory` | 内存流水可观察 | `fail_with` | 不适用 | `FsHistory` | 已验收 |
 | `PromptSource` | `TestPrompts` | 不适用 | `fail_with` | 不适用 | `YamlPrompts` | 已验收 |
+| `SystoolsSource` | 不适用（**直接用真实加载器**：读的就是仓库自己的两份 yaml，确定性足够） | 不适用 | 缺文件 / 缺键由真实加载器如实报错（`tests/adapters.rs`） | 不适用 | `YamlSystools` | 已验收 |
 | `ToolRunner` | `RecordingRunner`、`SilentRunner`、`ParallelRunner` | `calls`（cwd / 命令 / 参数）、并发峰值 | `ok = false` 回执 | 真进程超时杀树（`ProcTools`） | `ProcTools` | 已验收 |
 | `EnvelopeRepair` | `NoRepair` | 不适用 | 不适用（修复器遇不确定一律不修） | 不适用 | `UnambiguousRepair`（转义裸控制字符 + 补上缺的收尾括号；断在字符串中间、起了两段信封一律不修） | 已验收 |
 | `FenceHost` | `RecordingFence`、`NoFenceHost` | `released` | `fail_with` | 不适用 | `confine::FenceHostAdapter`（真机撤权在 `tests/windows/`） | 已验收 |

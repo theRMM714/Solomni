@@ -20,6 +20,7 @@ use crate::capabilities::registry::ports::SettingsStore;
 use crate::capabilities::session::api::Live;
 use crate::capabilities::session::api::{HistoryView, SessionMeta};
 use crate::capabilities::session::ports::HistoryStore;
+use crate::capabilities::tools::ports::SystoolsSource;
 use crate::capabilities::tools::ports::{FileRead, SysIo, ToolRunner};
 use crate::capabilities::workspace::api::{Library, PackageManifest};
 use crate::capabilities::workspace::api::{Module, ModuleManifest};
@@ -881,6 +882,11 @@ pub(crate) fn test_prompts() -> Prompts {
 
 /// 测试用工具总表与角色表（走**与产品同一条**装配路径）。
 /// 它与提示词册**分开**装配：两者互不依赖（见 core/prompt.rs 的 Prompts）。
+/// 测试用的工具表能力面：与生产同一条路（`Arc::new(表)`），供 `Core::new` / 协作会话装配。
+pub(crate) fn test_tools() -> std::sync::Arc<dyn crate::capabilities::tools::api::Tools> {
+    std::sync::Arc::new(test_systools())
+}
+
 pub(crate) fn test_systools() -> crate::capabilities::tools::api::SystemTools {
     let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     crate::capabilities::tools::detail::yaml_systools::YamlSystools::new(root.join("systools"))
@@ -985,7 +991,7 @@ pub(crate) fn core_with_workspace(
         Arc::new(InMemorySysIo::new()),
         Arc::new(NoRepair),
         test_prompt(),
-        test_systools(),
+        test_tools(),
         Arc::new(crate::kernel::log::NoopLog),
         Arc::new(crate::adapters::HostProbeAdapter),
     )
@@ -1081,7 +1087,7 @@ pub(crate) fn core_with_pkgs(
         io,
         Arc::new(NoRepair),
         test_prompt(),
-        test_systools(),
+        test_tools(),
         Arc::new(crate::kernel::log::NoopLog),
         Arc::new(crate::adapters::HostProbeAdapter),
     )
@@ -1107,7 +1113,7 @@ pub(crate) fn core_with_settings(store: InMemorySettings) -> Core {
         Arc::new(InMemorySysIo::new()),
         Arc::new(NoRepair),
         test_prompt(),
-        test_systools(),
+        test_tools(),
         Arc::new(crate::kernel::log::NoopLog),
         Arc::new(crate::adapters::HostProbeAdapter),
     )
@@ -1144,7 +1150,7 @@ pub(crate) fn core_with_io_gateway(
         io,
         Arc::new(NoRepair),
         test_prompt(),
-        test_systools(),
+        test_tools(),
         Arc::new(crate::kernel::log::NoopLog),
         Arc::new(crate::adapters::HostProbeAdapter),
     )
@@ -1173,7 +1179,7 @@ pub(crate) fn core_with_gateway(
         Arc::new(InMemorySysIo::new()),
         Arc::new(NoRepair),
         test_prompt(),
-        test_systools(),
+        test_tools(),
         Arc::new(crate::kernel::log::NoopLog),
         Arc::new(crate::adapters::HostProbeAdapter),
     )

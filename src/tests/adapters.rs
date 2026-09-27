@@ -22,6 +22,7 @@ use crate::capabilities::session::ports::HistoryStore;
 use crate::capabilities::tools::detail::sys_io::FsSysIo;
 use crate::capabilities::tools::detail::yaml_systools::YamlSystools;
 use crate::capabilities::tools::ports::SysIo;
+use crate::capabilities::tools::ports::SystoolsSource;
 use crate::capabilities::workspace::api::ExecSpec;
 use crate::capabilities::workspace::detail::fs_modules::FsModules;
 use crate::capabilities::workspace::detail::fs_packages::FsPackages;

@@ -40,7 +40,7 @@ pub fn render(template: &str, vars: Vars) -> Result<String, String> {
 }
 
 /// 装配输入的**内存形态**：**只有提示词文本**（`prompts/`）。
-/// 工具总表与角色表是**另一个能力的东西**（`systools/`，见 `core::roles::SystemTools`）：
+/// 工具总表与角色表是**另一个能力的东西**（`systools/`，见 `capabilities/tools/`）：
 /// 挂进这里就等于让提示词能力反过来依赖工具能力，两边成环。
 ///
 /// **持有者只有本能力**（`service.rs` 一处，R4）。两块"被到处要的记录"（工具文案、`@` 文案）

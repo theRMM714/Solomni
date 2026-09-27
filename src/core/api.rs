@@ -330,8 +330,8 @@ struct AskReq {
     identity: String,
     /// 本回合的提示（开场词 / 轮转词）。
     turn: Vec<crate::capabilities::llm::api::Msg>,
-    /// 角色表（按值带一份小表）：发放工具面与校验越权都用它。
-    systools: crate::capabilities::tools::api::SystemTools,
+    /// 工具总表与角色表的能力面（**共享一份**）：发放工具面与校验越权都用它。
+    systools: std::sync::Arc<dyn crate::capabilities::tools::api::Tools>,
     cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
     opts: crate::capabilities::llm::api::CompleteOpts<'static>,
     /// 这一回合属于第几轮（写进 agent 会话的回合标记）。
@@ -894,7 +894,7 @@ impl CoreHandle {
                                 agent,
                                 identity,
                                 turn,
-                                systools: c.systools().clone(),
+                                systools: c.systools(),
                                 cancel: c.disc_cancel(),
                                 opts: c.disc_opts(),
                                 round: c.round(),

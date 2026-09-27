@@ -134,8 +134,8 @@ pub struct CollabSession {
     core_mode: crate::capabilities::llm::api::ToolMode,
     /// 提示词册能力面：**不是册子本体**（持有者只有提示词能力一处），这里只按名字取段。
     prompts: Arc<dyn Prompt>,
-    /// 工具总表与角色表：**不挂在册子上**（两者互不依赖）。
-    systools: crate::capabilities::tools::api::SystemTools,
+    /// 工具总表与角色表的能力面（**表本体在工具能力里**，与册子互不依赖）。
+    systools: Arc<dyn crate::capabilities::tools::api::Tools>,
     gateway: Arc<dyn ChatGateway + Send + Sync>,
     source: Arc<dyn ModuleSource + Send + Sync>,
     /// 外部工具执行端口（策略在核心按模块清单放行，机制在适配层）。
@@ -172,7 +172,7 @@ impl CollabSession {
         source: Arc<dyn ModuleSource + Send + Sync>,
         settings: Settings,
         prompts: Arc<dyn Prompt>,
-        systools: crate::capabilities::tools::api::SystemTools,
+        systools: Arc<dyn crate::capabilities::tools::api::Tools>,
         tools: Arc<dyn ToolRunner + Send + Sync>,
         io: Arc<dyn SysIo + Send + Sync>,
         repair: Arc<dyn crate::capabilities::llm::api::EnvelopeRepair + Send + Sync>,
@@ -315,7 +315,7 @@ impl CollabSession {
     #[allow(clippy::too_many_arguments)]
     fn judge_clear(
         prompt: &dyn Prompt,
-        systools: &crate::capabilities::tools::api::SystemTools,
+        systools: &dyn crate::capabilities::tools::api::Tools,
         cancel: &std::sync::Arc<std::sync::atomic::AtomicBool>,
         opts: crate::capabilities::llm::api::CompleteOpts<'static>,
         mode: crate::capabilities::llm::api::ToolMode,
@@ -369,7 +369,7 @@ impl CollabSession {
     #[allow(clippy::too_many_arguments)]
     fn review_nodes(
         prompt: &dyn Prompt,
-        systools: &crate::capabilities::tools::api::SystemTools,
+        systools: &dyn crate::capabilities::tools::api::Tools,
         cancel: &std::sync::Arc<std::sync::atomic::AtomicBool>,
         chain: Option<&crate::kernel::chain::TaskChain>,
         opts: crate::capabilities::llm::api::CompleteOpts<'static>,
@@ -630,7 +630,7 @@ impl CollabSession {
         sink(crate::capabilities::session::api::working("核心"));
         let mut verify = self.core_verify_tools("planner");
         let parsed = crate::capabilities::collab::domain::engine::core_operation(
-            &self.systools,
+            &*self.systools,
             "planner",
             "slate",
             self.core_mode,
@@ -763,7 +763,7 @@ impl CollabSession {
             members,
             self.allow,
             prompts,
-            self.systools.clone(),
+            Arc::clone(&self.systools),
             llm,
             std::sync::Arc::clone(&self.cancel),
             protocol,
@@ -844,7 +844,7 @@ impl CollabSession {
             log: Arc::clone(&self.log),
             runner: Arc::clone(&self.tools),
             sandbox: sb.clone(),
-            builtin_tools: self.systools.tools.clone(),
+            builtin_tools: self.systools.book(),
             io: Arc::clone(&self.io),
             unavailable: std::collections::BTreeMap::new(),
             fence: crate::capabilities::tools::api::FenceSpec::from_sandbox(&sb, false),
@@ -856,8 +856,8 @@ impl CollabSession {
     }
 
     /// 讨论回合的**工具面**（动词 + 只读核实）：核心驱动时交给 turn_with。
-    pub fn systools(&self) -> &crate::capabilities::tools::api::SystemTools {
-        &self.systools
+    pub fn systools(&self) -> Arc<dyn crate::capabilities::tools::api::Tools> {
+        Arc::clone(&self.systools)
     }
 
     /// 「停止」标志：与核心共享同一个（停止能在一个模型调用内收尾）。
@@ -923,7 +923,7 @@ impl CollabSession {
                 sink(crate::capabilities::session::api::working("核心"));
                 let judged = Self::judge_clear(
                     &*self.prompts,
-                    &self.systools,
+                    &*self.systools,
                     &self.cancel,
                     crate::capabilities::llm::api::CompleteOpts::plain(self.settings.app.streaming)
                         .with_timeout(self.settings.app.llm_timeout_secs),
@@ -1213,7 +1213,7 @@ impl CollabSession {
                 let mut verify = self.core_verify_tools("orchestrator");
                 let made = Self::review_nodes(
                     &*self.prompts,
-                    &self.systools,
+                    &*self.systools,
                     &self.cancel,
                     Some(&reviewed),
                     crate::capabilities::llm::api::CompleteOpts::plain(self.settings.app.streaming)
@@ -1351,7 +1351,7 @@ impl CollabSession {
                 &table,
                 retry.as_deref(),
                 &*prompts,
-                &self.systools,
+                &*self.systools,
                 llm,
                 self.core_mode,
                 verify.as_mut(),
@@ -1489,7 +1489,7 @@ impl CollabSession {
                 log: Arc::clone(&self.log),
                 runner: Arc::clone(&self.tools),
                 sandbox,
-                builtin_tools: self.systools.tools.clone(),
+                builtin_tools: self.systools.book(),
                 io: Arc::clone(&self.io),
                 reply_seq: self.reply_seq,
                 // 本档位下不能执行工具的模块（缺运行包）：机制侧据此拒绝执行。
@@ -1563,7 +1563,7 @@ impl CollabSession {
         source: Arc<dyn ModuleSource + Send + Sync>,
         settings: Settings,
         prompts: Arc<dyn Prompt>,
-        systools: crate::capabilities::tools::api::SystemTools,
+        systools: Arc<dyn crate::capabilities::tools::api::Tools>,
         tools: Arc<dyn ToolRunner + Send + Sync>,
         io: Arc<dyn SysIo + Send + Sync>,
         repair: Arc<dyn crate::capabilities::llm::api::EnvelopeRepair + Send + Sync>,

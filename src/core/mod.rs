@@ -24,7 +24,7 @@ use crate::capabilities::llm::api::Msg;
 use crate::capabilities::prompt::api::{Prompt, Segment};
 use crate::capabilities::registry::api::Registry;
 use crate::capabilities::session::api::{AgentMeta, HistoryView, SessionMeta};
-use crate::capabilities::tools::api::SystemTools;
+use crate::capabilities::tools::api::Tools;
 use crate::capabilities::workspace::api::Module;
 use crate::kernel::log::Log;
 use crate::kernel::types::SessionId;
@@ -198,8 +198,8 @@ pub struct Core {
     /// 提示词册能力：**册子本体在它里面**（只有一处），core 只按名字取段。
     /// 用 `Arc`：协作会话要与核心**共享**这一份（各自克隆整本册子是旧的浪费）。
     prompt: Arc<dyn Prompt>,
-    /// 工具总表与角色表（`systools/` 两张表）：**不挂在册子上**，两者互不依赖（见 prompt.rs）。
-    systools: SystemTools,
+    /// 工具总表与角色表的能力面（`systools/` 两张表）：**表本体在工具能力里**，与册子互不依赖。
+    systools: Arc<dyn Tools>,
     sessions: HashMap<SessionId, Session>,
     /// 正在生成的会话：对象被工作线程**取走**了，核心表里暂时没有它。
     /// 为什么取出而不是就地生成：生成要跑几十秒到几分钟，占着唯一的命令队列会让
@@ -225,7 +225,7 @@ impl Core {
         io: Arc<dyn SysIo + Send + Sync>,
         repair: Arc<dyn crate::capabilities::llm::api::EnvelopeRepair + Send + Sync>,
         prompt: Arc<dyn Prompt>,
-        systools: SystemTools,
+        systools: Arc<dyn Tools>,
         log: Arc<dyn crate::kernel::log::Log + Send + Sync>,
         probe: Arc<dyn crate::kernel::host::HostProbe + Send + Sync>,
     ) -> Core {
@@ -387,7 +387,7 @@ impl Core {
         let compact_prompt = self.prompt.tools().compact_prompt.clone();
         let decl = self
             .systools
-            .tools
+            .book()
             .get("compact")
             .map(|t| t.decl("compact"));
         let (up_to, identity) = match self.sessions.get(sid) {
@@ -481,7 +481,7 @@ impl Core {
                 let ask = c.take_ask();
                 let member = ask.as_ref().and_then(|(i, _, _)| c.member_id(*i));
                 // 角色表按值带出来（小表）：驱动要它来发放工具面与校验越权。
-                let systools = c.systools().clone();
+                let systools = c.systools();
                 let cancel = c.disc_cancel();
                 let opts = c.disc_opts();
                 let turn_id = if ask.is_some() { c.next_turn_id() } else { 0 };
@@ -1391,7 +1391,7 @@ impl Core {
                     Arc::clone(&self.source),
                     self.registry.snapshot(),
                     Arc::clone(&self.prompt),
-                    self.systools.clone(),
+                    Arc::clone(&self.systools),
                     Arc::clone(&self.tools),
                     Arc::clone(&self.io),
                     Arc::clone(&self.repair),
@@ -1540,7 +1540,7 @@ impl Core {
             log: Arc::clone(&self.log),
             runner: Arc::clone(&self.tools),
             sandbox: sb.clone(),
-            builtin_tools: self.systools.tools.clone(),
+            builtin_tools: self.systools.book(),
             io: Arc::clone(&self.io),
             unavailable,
             // 围栏：可达范围 + 断网 + 环境白名单的落点，全部由该 agent 的沙箱派生（机制在 adapters）；
@@ -1756,7 +1756,7 @@ impl Core {
         let mut rows: Vec<SessionEvent> = Vec::new();
         // 核心操作走工具调用：推荐名单由 suggest 工具承载。
         let payload = crate::capabilities::collab::api::core_operation(
-            &self.systools,
+            &*self.systools,
             "planner",
             "suggest",
             self.registry.tool_mode(None),
@@ -2206,7 +2206,7 @@ impl Core {
                 Arc::clone(&self.source),
                 self.registry.snapshot(),
                 Arc::clone(&self.prompt),
-                self.systools.clone(),
+                Arc::clone(&self.systools),
                 Arc::clone(&self.tools),
                 Arc::clone(&self.io),
                 Arc::clone(&self.repair),

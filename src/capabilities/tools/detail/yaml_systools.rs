@@ -4,6 +4,7 @@
 //! 缺目录/缺文件 = 装配错误（如实报错，不静默造默认）。
 
 use crate::capabilities::tools::api::{RoleTable, SystemTools, ToolBook};
+use crate::capabilities::tools::ports::SystoolsSource;
 use serde::Deserialize;
 use std::path::PathBuf;
 
@@ -27,9 +28,11 @@ impl YamlSystools {
     pub fn new(dir: PathBuf) -> YamlSystools {
         YamlSystools { dir }
     }
+}
 
+impl SystoolsSource for YamlSystools {
     /// 系统工具与角色：读 `tools.yaml`（工具是什么）与 `roles.yaml`（身份有什么）。
-    pub fn load(&self) -> Result<SystemTools, String> {
+    fn load(&self) -> Result<SystemTools, String> {
         let path = self.dir.join("tools.yaml");
         let text = std::fs::read_to_string(&path)
             .map_err(|e| format!("工具总表读不了（systools/tools.yaml）：{}", e))?;

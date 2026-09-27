@@ -553,8 +553,8 @@ pub struct Discussion {
     pub allow_autonomy: bool,
     /// 提示词册能力面：**不是册子本体**（持有者只有提示词能力一处），这里只按名字取段。
     prompts: Arc<dyn Prompt>,
-    /// 工具总表与角色表：**不挂在册子上**（两者互不依赖）。
-    systools: crate::capabilities::tools::api::SystemTools,
+    /// 工具总表与角色表的能力面（**表本体在工具能力里**）。
+    systools: Arc<dyn crate::capabilities::tools::api::Tools>,
     /// 本次调用的通道参数（流式 + 预算）：**全局设置**，与单 agent 共用同一份。
     llm: crate::capabilities::llm::api::LlmOpts,
     /// 讨论席的**机制说明 + 讨论约定**（开场与轮转都带它）：只说约定不说机制，AI 会空转。
@@ -656,7 +656,7 @@ impl Discussion {
             let Member { chat, tools, .. } = m;
             let chat = chat.as_mut().expect("测试通道");
             Self::turn_with(
-                &self.systools,
+                &*self.systools,
                 "discussant",
                 &self.cancel,
                 opts,
@@ -682,7 +682,7 @@ impl Discussion {
     #[cfg(test)]
     #[allow(clippy::too_many_arguments)]
     pub fn turn_with(
-        systools: &crate::capabilities::tools::api::SystemTools,
+        systools: &dyn crate::capabilities::tools::api::Tools,
         role: &str,
         cancel: &std::sync::Arc<std::sync::atomic::AtomicBool>,
         opts: crate::capabilities::llm::api::CompleteOpts<'static>,
@@ -799,7 +799,7 @@ impl Discussion {
         members: Vec<Member>,
         allow_autonomy: bool,
         prompts: Arc<dyn Prompt>,
-        systools: crate::capabilities::tools::api::SystemTools,
+        systools: Arc<dyn crate::capabilities::tools::api::Tools>,
         llm: crate::capabilities::llm::api::LlmOpts,
         cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
         protocol: String,
@@ -1220,7 +1220,7 @@ impl Discussion {
         };
         // 核心操作走工具调用：载荷形状与从前一致（plan + nodes），只是入口变成 plan 工具。
         let payload = core_operation(
-            &self.systools,
+            &*self.systools,
             "planner",
             "plan",
             mode,
@@ -1348,7 +1348,7 @@ impl Execution {
         nodes: &str,
         retry: Option<&str>,
         prompt: &dyn Prompt,
-        systools: &crate::capabilities::tools::api::SystemTools,
+        systools: &dyn crate::capabilities::tools::api::Tools,
         llm: crate::capabilities::llm::api::LlmOpts,
         mode: crate::capabilities::llm::api::ToolMode,
         verify: Option<&mut MemberTools>,
@@ -1519,7 +1519,7 @@ fn core_rows(
 // 收口成参数对象只会把参数挪个地方、并让"谁拿到什么"更难读。有意取舍（见 docs/testing/quality-isolation.md）。
 #[allow(clippy::too_many_arguments)]
 pub fn core_operation(
-    systools: &crate::capabilities::tools::api::SystemTools,
+    systools: &dyn crate::capabilities::tools::api::Tools,
     role: &str,
     tool: &str,
     mode: crate::capabilities::llm::api::ToolMode,
