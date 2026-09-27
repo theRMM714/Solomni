@@ -59,9 +59,9 @@
 | `workspace/domain/packages.rs` | `package.yaml` 契约与包库事实（从 `core/packages.rs` 搬来） |
 | `workspace/domain/exec.rs` | 执行档位（`ExecSpec`）与执行计划（`ExecPlan`）派生、虚拟机档诊断与承载判定（从 `core/exec.rs` 搬来） |
 | `workspace/domain/workspace.rs` | 工作区与沙箱的纯数据定义、寻址与越界判定（从 `core/workspace.rs` 搬来） |
-| `tools/api.rs` | **入站能力面**：`Tools` 能力面（按角色发放工具面 `tool_face` / `role_face` / `allows_module_tools`、总表 `book()`、自检 `problems()`）+ 工具清单 / 参数契约 / 补丁与应用 / 围栏策略的对外名字 |
-| `tools/service.rs` | **本能力的状态与用例**：把 `api::Tools` 挂在 `domain` 的 `SystemTools` 上（两张表是纯数据、无端口），并给组合根一个装载入口 `load()`。**两张表只被这里（`Arc<dyn Tools>` 的持有者）持有**（批次 17） |
-| `tools/ports.rs` | `SysIo` / `ToolRunner` / `FenceHost` / `SystoolsSource`（后者的真实实现在 `detail/yaml_systools.rs`） |
+| `tools/api.rs` | **入站能力面**：`Tools` 能力面（按角色发放工具面 `tool_face` / `role_face` / `allows_module_tools`、总表 `book()` / 自检 `problems()`）+ **`ToolExec` 执行面**（`run_module` / `run_builtin` / `release_fence`）；`ToolOutcome` 从 ports 归到这里（批次 20b）。原行余下：`Tools` 能力面（按角色发放工具面 `tool_face` / `role_face` / `allows_module_tools`、总表 `book()`、自检 `problems()`）+ 工具清单 / 参数契约 / 补丁与应用 / 围栏策略的对外名字 |
+| `tools/service.rs` | **本能力的状态、用例与端口持有者**：持两张表（`SystemTools`）与三个出站端口（`ToolRunner` / `SysIo` / `FenceHost`，**唯一持有者**，R12），实现 `api::Tools` 与 `api::ToolExec`；组合根用 `ToolsService::new(加载器, 三个端口)` 装配（批次 17 + 20b） |
+| `tools/ports.rs` | **出站端口**（只有 `service.rs` 持有，R12）：`SysIo` / `ToolRunner` / `FenceHost` / `SystoolsSource`（后者的真实实现在 `detail/yaml_systools.rs`） |
 | `tools/domain/systool.rs` | 内置工具的放行、寻址、**按声明校验参数**、改动前的"读过"证据（`Observations`）、自由格式补丁的原子应用与回执文案 |
 | `tools/domain/patch.rs` | 补丁通道的**纯逻辑**：解析自由格式补丁与整行应用 |
 | `tools/domain/schema.rs` | 工具参数契约（**声明在文本层**）：解析/校验/两种渲染 |

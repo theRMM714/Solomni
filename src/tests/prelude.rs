@@ -27,7 +27,8 @@ pub use crate::capabilities::session::api::{MemberTools, ModuleTools};
 
 pub use crate::capabilities::session::ports::HistoryStore;
 
-pub use crate::capabilities::tools::ports::{ToolOutcome, ToolRunner};
+pub use crate::capabilities::tools::api::{ToolExec, ToolOutcome};
+pub use crate::capabilities::tools::ports::ToolRunner;
 
 pub use crate::capabilities::workspace::api::Module;
 

@@ -4,8 +4,9 @@
 //! 截获 stdout/stderr、超时连根杀掉整棵树、输出截断。
 
 use crate::capabilities::tools::api::FenceSpec;
+use crate::capabilities::tools::api::ToolOutcome;
 use crate::capabilities::tools::detail::confine;
-use crate::capabilities::tools::ports::{ToolOutcome, ToolRunner};
+use crate::capabilities::tools::ports::ToolRunner;
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::thread;

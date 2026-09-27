@@ -5,7 +5,7 @@
 
 use crate::capabilities::llm::api::{BoxedChat, Msg};
 use crate::capabilities::session::domain::events::{LineView, SessionEvent, ToolCallView};
-use crate::capabilities::tools::ports::ToolRunner;
+use crate::capabilities::tools::api::ToolExec;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -36,14 +36,13 @@ pub struct MemberTools {
     pub llm: Arc<dyn crate::capabilities::llm::api::Llm + Send + Sync>,
     /// 运行日志：模型输出被长度截断这类"看不见的事实"要落盘，供事后确定问题。
     pub log: Arc<dyn crate::kernel::log::Log + Send + Sync>,
-    pub runner: Arc<dyn ToolRunner + Send + Sync>,
+    /// 工具执行面（**不持它的端口**，R12）：跑外部/内置工具都走它。
+    pub tools: Arc<dyn ToolExec + Send + Sync>,
     /// 本成员的沙箱：内置文件工具的寻址与越界依据（权限收口在 core）。
     pub sandbox: crate::capabilities::workspace::api::Sandbox,
     /// 内置工具的参数契约（来自 `systools/tools.yaml` 的 tools）：说明与校验都按它来。
     /// 它属于**工具面**，不属于沙箱——沙箱只管路径。
     pub builtin_tools: crate::capabilities::tools::api::ToolBook,
-    /// 内置文件工具的读写端口。
-    pub io: Arc<dyn crate::capabilities::tools::ports::SysIo + Send + Sync>,
     /// 模块 id → 它缺的运行包能力（本档位下该模块的工具不执行；空表 = 都能执行）。
     pub unavailable: BTreeMap<String, Vec<String>>,
     /// 本成员工具进程的围栏（可达范围 + 断网）：策略在 core 派生，机制在 ToolRunner 适配层安装。

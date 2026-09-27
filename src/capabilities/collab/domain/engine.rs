@@ -14,7 +14,7 @@ use crate::capabilities::session::api::{
     stream_piece, AgentSession, MemberTools, ModuleTools, TurnRun,
 };
 use crate::capabilities::session::api::{LineView, Live, SessionEvent, ToolCallView};
-use crate::capabilities::tools::ports::ToolOutcome;
+use crate::capabilities::tools::api::ToolOutcome;
 use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -193,10 +193,9 @@ fn run_branch(
     } else if crate::capabilities::tools::api::is_builtin(name) {
         (
             String::new(),
-            crate::capabilities::tools::api::execute(
+            ctx.tools.run_builtin(
                 &ctx.sandbox,
                 &ctx.builtin_tools,
-                ctx.io.as_ref(),
                 &mut branch,
                 name,
                 args_json,
@@ -460,8 +459,8 @@ fn dispatch_external(ctx: &MemberTools, inv: &ToolInvoke) -> (String, ToolOutcom
             }
             (
                 module,
-                ctx.runner
-                    .run(&ctx.fence.at(&mt.root), command, &inv.args_json),
+                ctx.tools
+                    .run_module(&ctx.fence.at(&mt.root), command, &inv.args_json),
             )
         }
         None => {
@@ -1679,10 +1678,9 @@ pub fn core_operation(
         }
         let mut views: Vec<ToolCallView> = Vec::new();
         for (call_id, name, args) in readonly {
-            let out = crate::capabilities::tools::api::execute(
+            let out = ctx.tools.run_builtin(
                 &ctx.sandbox,
                 &ctx.builtin_tools,
-                ctx.io.as_ref(),
                 &mut ctx.observations,
                 &name,
                 &args,

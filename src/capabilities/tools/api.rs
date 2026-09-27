@@ -5,8 +5,8 @@ pub use crate::capabilities::tools::domain::patch::{apply_edits, parse, Block, E
 pub use crate::capabilities::tools::domain::roles::{RoleTable, SystemTools};
 pub use crate::capabilities::tools::domain::schema::{ArgFault, ToolBook, ToolSchema};
 pub use crate::capabilities::tools::domain::systool::{
-    arg_fault_text, execute, is_builtin, is_freeform, names, patch_decl, refuse, tool_notes,
-    Observations, ToolNotes, PATCH, REPORT,
+    arg_fault_text, is_builtin, is_freeform, names, patch_decl, refuse, tool_notes, Observations,
+    ToolNotes, ToolOutcome, PATCH, REPORT,
 };
 
 /// 工具总表与角色表的**能力面**：别的能力只问"这一席能用哪些工具"，**看不见两张表的字段**。
@@ -29,4 +29,35 @@ pub trait Tools: Send + Sync {
 
     /// 悬空引用与缺能力（空 = 一切正常）：装配期自检与测试门禁读它。
     fn problems(&self) -> Vec<String>;
+}
+
+/// 工具能力的**执行面**（`service.rs` 实现）：别的能力要执行工具、要释放围栏授权，走这里；
+/// 三个出站端口（`ToolRunner` / `SysIo` / `FenceHost`）**只由它持有**（R12）。
+///
+/// 为什么 `SysIo` 的读写不在这里：它只被本能力自己的 domain（内置工具实现）用，
+/// 别人要的是"跑一个工具"，不是"按路径读写文件"。
+pub trait ToolExec: Send + Sync {
+    /// 执行一次**外部工具**（模块声明的那种）：围栏安装、守门进程、超时杀树、截断都在端口后面。
+    fn run_module(
+        &self,
+        fence: &crate::capabilities::tools::api::FenceSpec,
+        command: &str,
+        args_json: &str,
+    ) -> ToolOutcome;
+
+    /// 执行一次**内置工具**：放行、寻址、参数校验在本能力的 domain，机制在 `SysIo` 后面。
+    fn run_builtin(
+        &self,
+        sb: &crate::capabilities::workspace::api::Sandbox,
+        builtin_tools: &ToolBook,
+        observations: &mut Observations,
+        name: &str,
+        args_json: &str,
+    ) -> ToolOutcome;
+
+    /// 会话删除时请求一次：把该会话各 agent 的围栏授权撤掉（调用方只提出请求，不碰任何 ACL）。
+    fn release_fence(
+        &self,
+        spec: &crate::capabilities::tools::api::FenceSpec,
+    ) -> Result<(), String>;
 }

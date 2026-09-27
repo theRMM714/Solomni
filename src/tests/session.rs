@@ -309,7 +309,7 @@ pub(crate) fn discussion_turn_carries_the_agent_sessions_own_history() {
     let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let prompts = test_prompts();
     let turn = crate::capabilities::collab::domain::engine::Discussion::turn_with(
-        &test_systools(),
+        &*test_tools_svc(),
         "discussant",
         &cancel,
         crate::capabilities::llm::api::CompleteOpts::plain(false),
@@ -897,12 +897,15 @@ pub(crate) fn deleting_a_session_asks_the_fence_to_release_its_grants() {
             Arc::new(InMemoryPackages::empty()),
             Arc::new(InMemoryWorkspace::new()),
         ),
-        Arc::clone(&fence) as Arc<dyn crate::capabilities::tools::ports::FenceHost + Send + Sync>,
         llm,
-        Arc::new(SilentRunner),
-        Arc::new(InMemorySysIo::new()),
+        test_tools_svc_with(
+            Arc::new(SilentRunner),
+            Arc::new(InMemorySysIo::new()),
+            Arc::clone(&fence)
+                as Arc<dyn crate::capabilities::tools::ports::FenceHost + Send + Sync>,
+        ),
         test_prompt(),
-        test_tools(),
+        test_tools_svc(),
         Arc::new(crate::kernel::log::NoopLog),
         Arc::new(crate::adapters::HostProbeAdapter),
     );

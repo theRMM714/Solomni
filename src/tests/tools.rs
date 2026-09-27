@@ -714,7 +714,7 @@ pub(crate) fn builtin_write_into_module_dir_is_allowed_with_notice() {
 
 #[test]
 pub(crate) fn builtin_edit_replaces_the_requested_span_and_reports_what_it_did() {
-    let io = InMemorySysIo::new();
+    let io = Arc::new(InMemorySysIo::new());
     let sb = test_sandbox("a1", &[]);
     let note = s(&["demo", "work", "note.txt"]);
     io.seed(
@@ -722,16 +722,14 @@ pub(crate) fn builtin_edit_replaces_the_requested_span_and_reports_what_it_did()
         "第一段\n要改的句子\n第三段\n",
     );
     let mut obs = crate::capabilities::tools::api::Observations::default();
+    let exec = test_tools_svc_with(
+        Arc::new(SilentRunner),
+        Arc::clone(&io),
+        Arc::new(NoFenceHost),
+    );
     let edit = |obs: &mut crate::capabilities::tools::api::Observations, args: &str| {
         let full = format!("{{\"path\":\"{}\",{}}}", note, args);
-        crate::capabilities::tools::api::execute(
-            &sb,
-            &test_systools().tools,
-            &io,
-            obs,
-            "edit",
-            &full,
-        )
+        exec.run_builtin(&sb, &test_systools().tools, obs, "edit", &full)
     };
     // 唯一命中：只改那一处，别处一字不动
     let ok = edit(
@@ -814,19 +812,23 @@ pub(crate) fn builtin_edit_refuses_files_it_cannot_see_whole() {
     );
     let sb = test_sandbox("a1", &[]);
     for (io, want) in [
-        (InMemorySysIo::new().marked(false, true), "超过单次读取上限"),
-        (InMemorySysIo::new().marked(true, false), "非法 UTF-8"),
+        (
+            Arc::new(InMemorySysIo::new().marked(false, true)),
+            "超过单次读取上限",
+        ),
+        (
+            Arc::new(InMemorySysIo::new().marked(true, false)),
+            "非法 UTF-8",
+        ),
     ] {
         io.seed(&["demo", "work", "note.txt"], "abc");
         let mut obs = crate::capabilities::tools::api::Observations::default();
-        let out = crate::capabilities::tools::api::execute(
-            &sb,
-            &test_systools().tools,
-            &io,
-            &mut obs,
-            "edit",
-            &args,
+        let exec = test_tools_svc_with(
+            Arc::new(SilentRunner),
+            Arc::clone(&io),
+            Arc::new(NoFenceHost),
         );
+        let out = exec.run_builtin(&sb, &test_systools().tools, &mut obs, "edit", &args);
         assert!(!out.ok && out.output.contains(want), "{}", out.output);
         assert_eq!(
             io.get(&["demo", "work", "note.txt"]).as_deref(),
@@ -838,14 +840,18 @@ pub(crate) fn builtin_edit_refuses_files_it_cannot_see_whole() {
 
 #[test]
 pub(crate) fn builtin_write_needs_a_complete_prior_read_of_an_existing_file() {
-    let io = InMemorySysIo::new();
+    let io = Arc::new(InMemorySysIo::new());
     let sb = test_sandbox("a1", &[]);
     let note = s(&["demo", "work", "note.txt"]);
-    let run = |obs: &mut crate::capabilities::tools::api::Observations,
-               tool: &str,
-               args: String| {
-        crate::capabilities::tools::api::execute(&sb, &test_systools().tools, &io, obs, tool, &args)
-    };
+    let exec = test_tools_svc_with(
+        Arc::new(SilentRunner),
+        Arc::clone(&io),
+        Arc::new(NoFenceHost),
+    );
+    let run =
+        |obs: &mut crate::capabilities::tools::api::Observations, tool: &str, args: String| {
+            exec.run_builtin(&sb, &test_systools().tools, obs, tool, &args)
+        };
     let mut obs = crate::capabilities::tools::api::Observations::default();
     // 新建文件：不需要"读过"什么
     let made = run(
@@ -1334,7 +1340,11 @@ pub(crate) fn module_tools_are_concurrent_only_when_declared() {
         if parallel {
             mt.parallel.insert("grep".to_string());
         }
-        t.runner = runner;
+        t.tools = test_tools_svc_with(
+            runner,
+            Arc::new(InMemorySysIo::new()),
+            Arc::new(NoFenceHost),
+        );
         m
     }
     let prompts = test_prompts();

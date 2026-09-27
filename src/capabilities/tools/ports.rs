@@ -2,6 +2,7 @@
 
 use crate::capabilities::tools::domain::fence::FenceSpec;
 use crate::capabilities::tools::domain::roles::SystemTools;
+use crate::capabilities::tools::domain::systool::ToolOutcome;
 
 /// 工具总表与角色表的加载端口：读 `systools/tools.yaml` + `systools/roles.yaml`（机制在适配层）。
 pub trait SystoolsSource {
@@ -39,13 +40,6 @@ pub trait SysIo: Send + Sync {
     fn write(&self, path: &std::path::Path, content: &str) -> Result<(), String>;
     /// 列一个目录（按名字排序）。路径不是目录时如实报错——调用方据此把 read 的失败引导到 list。
     fn list(&self, path: &std::path::Path) -> Result<Vec<DirEntry>, String>;
-}
-
-/// 一次工具执行结果：ok = 退出码成功；output 已截断（截断规则在适配层）。
-#[derive(Debug, Clone, PartialEq)]
-pub struct ToolOutcome {
-    pub ok: bool,
-    pub output: String,
 }
 
 /// 工具执行端口：机制（围栏安装/进程拉起/stdin 送参/超时杀树/截断）在适配层。

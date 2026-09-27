@@ -614,7 +614,7 @@ pub(crate) fn prose_without_an_envelope_is_not_a_statement() {
         members,
         true,
         std::sync::Arc::new(test_prompts()),
-        test_tools(),
+        test_tools_svc(),
         Default::default(),
         Default::default(),
         String::new(),
@@ -690,7 +690,7 @@ pub(crate) fn execution_review_pass_and_fail_paths() {
         "",
         None,
         &prompts,
-        &test_systools(),
+        &*test_tools_svc(),
         Default::default(),
         Default::default(),
         None,
@@ -711,7 +711,7 @@ pub(crate) fn execution_review_pass_and_fail_paths() {
         "",
         None,
         &prompts,
-        &test_systools(),
+        &*test_tools_svc(),
         Default::default(),
         Default::default(),
         None,
@@ -738,7 +738,7 @@ pub(crate) fn review_parse_failure_is_conservative_fail() {
         "",
         None,
         &prompts,
-        &test_systools(),
+        &*test_tools_svc(),
         Default::default(),
         Default::default(),
         None,
@@ -1491,7 +1491,7 @@ pub(crate) fn discussion_turn_streams_deltas_and_never_leaks_the_envelope() {
     let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let prompts = test_prompts();
     let _ = crate::capabilities::collab::domain::engine::Discussion::turn_with(
-        &test_systools(),
+        &*test_tools_svc(),
         "discussant",
         &cancel,
         crate::capabilities::llm::api::CompleteOpts::plain(true), // 开流式
@@ -1657,17 +1657,15 @@ pub(crate) fn core_operation_runs_readonly_verification_before_the_op() {
     let note = s(&["demo", "work", "note.txt"]);
     io.seed(&["demo", "work", "note.txt"], "现场：一切正常\n");
     let sb = test_sandbox("核心", &[]);
-    let io_port: Arc<dyn crate::capabilities::tools::ports::SysIo + Send + Sync> = io.clone();
     let mut verify = MemberTools {
         mode: crate::capabilities::llm::api::ToolMode::Envelope,
         modules: BTreeMap::new(),
         observations: crate::capabilities::tools::api::Observations::default(),
         llm: test_llm_demo(),
         log: Arc::new(crate::kernel::log::NoopLog),
-        runner: Arc::new(SilentRunner),
+        tools: test_tools_svc_with(Arc::new(SilentRunner), io, Arc::new(NoFenceHost)),
         sandbox: sb.clone(),
         builtin_tools: test_systools().tools,
-        io: io_port,
         unavailable: BTreeMap::new(),
         fence: crate::capabilities::tools::api::FenceSpec::from_sandbox(&sb, false),
         reply_seq: 0,
@@ -1689,7 +1687,7 @@ pub(crate) fn core_operation_runs_readonly_verification_before_the_op() {
         seen: Arc::clone(&seen),
     };
     let out = crate::capabilities::collab::domain::engine::core_operation(
-        &test_systools(),
+        &*test_tools_svc(),
         "planner",
         "plan",
         crate::capabilities::llm::api::ToolMode::Envelope,
@@ -1724,7 +1722,7 @@ pub(crate) fn body_json_is_not_a_core_operation() {
             .to_string(),
     ]);
     let out = crate::capabilities::collab::domain::engine::core_operation(
-        &test_systools(),
+        &*test_tools_svc(),
         "planner",
         "plan",
         crate::capabilities::llm::api::ToolMode::Envelope,
@@ -1756,7 +1754,7 @@ pub(crate) fn executor_reports_through_a_tool_call() {
     let io = InMemorySysIo::new();
     let sb = test_sandbox("a1", &[]);
     let mut obs = crate::capabilities::tools::api::Observations::default();
-    let out = crate::capabilities::tools::api::execute(
+    let out = crate::capabilities::tools::domain::systool::execute(
         &sb,
         &test_systools().tools,
         &io,

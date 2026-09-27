@@ -147,20 +147,7 @@ fn main() {
     // 两张表归**工具能力**（加载器在它自己的 detail 里；装载后由它的 service 持有）。
     let systools_source =
         capabilities::tools::detail::yaml_systools::YamlSystools::new(root.join("systools"));
-    let systools = match capabilities::tools::service::load(&systools_source) {
-        Ok(st) if st.problems().is_empty() => st,
-        Ok(st) => {
-            eprintln!(
-                "[装配失败] 系统工具与角色表不自洽：{}",
-                st.problems().join("；")
-            );
-            std::process::exit(1);
-        }
-        Err(e) => {
-            eprintln!("[装配失败] {}", e);
-            std::process::exit(1);
-        }
-    };
+
     // 围栏是否允许在本机写权限：设置里授权过、或环境变量显式指定（SOLOMNI_FENCE_WRITE=1/0 可取反）。
     // 默认不准——没经过用户同意，本程序不动本机任何权限项。
     let home = root.join(".home");
@@ -176,6 +163,29 @@ fn main() {
     );
     // 内置文件工具：纯 Rust 直接读写，不经过外部进程（编码问题不进本程序）。
     let io = capabilities::tools::detail::FsSysIo::default();
+    // **工具能力**：两张表由加载器读进来，三个出站端口（外部执行 / 内置读写 / 围栏释放）
+    // 只由它的 service 持有（R12）。装配期就挡下"悬空引用 / 缺能力"。
+    let tools_svc = match capabilities::tools::service::ToolsService::new(
+        &systools_source,
+        Arc::new(tools),
+        Arc::new(io),
+        Arc::new(capabilities::tools::detail::confine::FenceHostAdapter),
+    ) {
+        Ok(svc) if capabilities::tools::api::Tools::problems(&svc).is_empty() => Arc::new(svc),
+        Ok(svc) => {
+            eprintln!(
+                "[装配失败] 系统工具与角色表不自洽：{}",
+                capabilities::tools::api::Tools::problems(&svc).join("；")
+            );
+            std::process::exit(1);
+        }
+        Err(e) => {
+            eprintln!("[装配失败] {}", e);
+            std::process::exit(1);
+        }
+    };
+    let toolexec: Arc<dyn capabilities::tools::api::ToolExec + Send + Sync> = tools_svc.clone();
+    let systools: Arc<dyn capabilities::tools::api::Tools + Send + Sync> = tools_svc;
 
     // **工作区能力**：三个出站端口（清单 / 运行包库 / 目录布局）只由它的 service 持有（R12）。
     let workspace: Arc<dyn capabilities::workspace::api::Workspace + Send + Sync> =
@@ -189,10 +199,8 @@ fn main() {
         Box::new(registry),
         Arc::new(history),
         workspace,
-        Arc::new(capabilities::tools::detail::confine::FenceHostAdapter),
         Arc::clone(&llm),
-        Arc::new(tools),
-        Arc::new(io),
+        toolexec,
         prompt,
         systools,
         std::sync::Arc::clone(&log),

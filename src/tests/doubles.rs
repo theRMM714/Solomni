@@ -395,15 +395,16 @@ impl crate::capabilities::llm::ports::EnvelopeRepair for NoRepair {
 }
 
 /// 一次内置工具调用（空账本）：只关心工具行为本身的用例用它；
-/// 关心"改动前有没有读过"的用例直接用 systool::execute 并自带 Observations。
+/// 关心"改动前有没有读过"的用例自带 Observations 再调它。
+/// 这里直接走 tools 的 domain（测试层允许）：生产路径是 `ToolExec::run_builtin`。
 pub(crate) fn run_builtin(
     sb: &crate::capabilities::workspace::api::Sandbox,
     io: &dyn crate::capabilities::tools::ports::SysIo,
     name: &str,
     args_json: &str,
-) -> crate::capabilities::tools::ports::ToolOutcome {
+) -> crate::capabilities::tools::api::ToolOutcome {
     let mut obs = crate::capabilities::tools::api::Observations::default();
-    crate::capabilities::tools::api::execute(
+    crate::capabilities::tools::domain::systool::execute(
         sb,
         &test_systools().tools,
         io,
@@ -881,9 +882,29 @@ pub(crate) fn test_prompts() -> Prompts {
 
 /// 测试用工具总表与角色表（走**与产品同一条**装配路径）。
 /// 它与提示词册**分开**装配：两者互不依赖（见 core/prompt.rs 的 Prompts）。
-/// 测试用的工具表能力面：与生产同一条路（`Arc::new(表)`），供 `Core::new` / 协作会话装配。
-pub(crate) fn test_tools() -> std::sync::Arc<dyn crate::capabilities::tools::api::Tools> {
-    std::sync::Arc::new(test_systools())
+/// 测试用的 **tools 能力**：两张表 + 三个替身端口（与生产同一条路，R12）。
+/// 两个面都从这里出：`Arc<dyn Tools>`（表）与 `Arc<dyn ToolExec>`（执行）。
+pub(crate) fn test_tools_svc() -> Arc<crate::capabilities::tools::service::ToolsService> {
+    test_tools_svc_with(
+        Arc::new(SilentRunner),
+        Arc::new(InMemorySysIo::new()),
+        Arc::new(NoFenceHost),
+    )
+}
+
+/// 同上，但指定三个端口（断言并发/落盘/撤权的那几条用例用）。
+pub(crate) fn test_tools_svc_with(
+    runner: Arc<dyn crate::capabilities::tools::ports::ToolRunner + Send + Sync>,
+    io: Arc<InMemorySysIo>,
+    fence: Arc<dyn crate::capabilities::tools::ports::FenceHost + Send + Sync>,
+) -> Arc<crate::capabilities::tools::service::ToolsService> {
+    let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let source =
+        crate::capabilities::tools::detail::yaml_systools::YamlSystools::new(root.join("systools"));
+    Arc::new(
+        crate::capabilities::tools::service::ToolsService::new(&source, runner, io, fence)
+            .expect("内置工具总表必须合法"),
+    )
 }
 
 pub(crate) fn test_systools() -> crate::capabilities::tools::api::SystemTools {
@@ -1022,12 +1043,14 @@ pub(crate) fn core_with_workspace(
             Arc::new(InMemoryPackages::empty()),
             ws,
         ),
-        Arc::new(NoFenceHost),
         llm,
-        Arc::new(SilentRunner),
-        Arc::new(InMemorySysIo::new()),
+        test_tools_svc_with(
+            Arc::new(SilentRunner),
+            Arc::new(InMemorySysIo::new()),
+            Arc::new(NoFenceHost),
+        ),
         test_prompt(),
-        test_tools(),
+        test_tools_svc(),
         Arc::new(crate::kernel::log::NoopLog),
         Arc::new(crate::adapters::HostProbeAdapter),
     )
@@ -1120,12 +1143,10 @@ pub(crate) fn core_with_pkgs(
             packages,
             Arc::new(InMemoryWorkspace::new()),
         ),
-        Arc::new(NoFenceHost),
         llm,
-        runner,
-        io,
+        test_tools_svc_with(runner, io, Arc::new(NoFenceHost)),
         test_prompt(),
-        test_tools(),
+        test_tools_svc(),
         Arc::new(crate::kernel::log::NoopLog),
         Arc::new(crate::adapters::HostProbeAdapter),
     )
@@ -1147,12 +1168,14 @@ pub(crate) fn core_with_settings(store: InMemorySettings) -> Core {
             Arc::new(InMemoryPackages::empty()),
             Arc::new(InMemoryWorkspace::new()),
         ),
-        Arc::new(NoFenceHost),
         llm,
-        Arc::new(SilentRunner),
-        Arc::new(InMemorySysIo::new()),
+        test_tools_svc_with(
+            Arc::new(SilentRunner),
+            Arc::new(InMemorySysIo::new()),
+            Arc::new(NoFenceHost),
+        ),
         test_prompt(),
-        test_tools(),
+        test_tools_svc(),
         Arc::new(crate::kernel::log::NoopLog),
         Arc::new(crate::adapters::HostProbeAdapter),
     )
@@ -1185,12 +1208,10 @@ pub(crate) fn core_with_io_gateway(
             Arc::new(InMemoryPackages::empty()),
             Arc::new(InMemoryWorkspace::new()),
         ),
-        Arc::new(NoFenceHost),
         llm,
-        Arc::new(SilentRunner),
-        io,
+        test_tools_svc_with(Arc::new(SilentRunner), io, Arc::new(NoFenceHost)),
         test_prompt(),
-        test_tools(),
+        test_tools_svc(),
         Arc::new(crate::kernel::log::NoopLog),
         Arc::new(crate::adapters::HostProbeAdapter),
     )
@@ -1215,12 +1236,14 @@ pub(crate) fn core_with_gateway(
             Arc::new(InMemoryPackages::empty()),
             Arc::new(InMemoryWorkspace::new()),
         ),
-        Arc::new(NoFenceHost),
         llm,
-        Arc::new(SilentRunner),
-        Arc::new(InMemorySysIo::new()),
+        test_tools_svc_with(
+            Arc::new(SilentRunner),
+            Arc::new(InMemorySysIo::new()),
+            Arc::new(NoFenceHost),
+        ),
         test_prompt(),
-        test_tools(),
+        test_tools_svc(),
         Arc::new(crate::kernel::log::NoopLog),
         Arc::new(crate::adapters::HostProbeAdapter),
     )

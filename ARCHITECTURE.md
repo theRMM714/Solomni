@@ -44,13 +44,13 @@ cli / web ──▶ core ──▶ capabilities ──▶ kernel
 | `ModuleSource` | 模块清单来源（扫描 `modules/`）。**已随能力搬出**：`capabilities/workspace/ports.rs` | `FsModules` |
 | `PackageSource` | 运行包库来源（扫描依赖文件夹 `runtimes/`）。**已随能力搬出**：`capabilities/workspace/ports.rs` | `FsPackages` |
 | `Workdirs` | 一次工作的 work 目录、各 agent 沙箱、文件清单与寻址根。`capabilities/workspace/ports.rs`，**只由 workspace 的 `service.rs` 持有**（R12） | `FsWorkspace` |
-| `SysIo` | 内置文件工具的读写机制（读严格 UTF-8、非法字节如实标注；写一律 UTF-8）。**已随能力搬出**：`capabilities/tools/ports.rs` | `FsSysIo` |
+| `SysIo` | 内置文件工具的读写机制（读严格 UTF-8、非法字节如实标注；写一律 UTF-8）。`capabilities/tools/ports.rs`，**只由 tools 的 `service.rs` 持有**（R12） | `FsSysIo` |
 | `HistoryStore` | 会话历史：一个会话一个目录（meta + 事件流水）。**已随能力搬出**：`capabilities/session/ports.rs` | `FsHistory` |
 | `PromptSource` | 提示词册加载（`prompts/`）。**已随能力搬出 core**：定义在 `capabilities/prompt/ports.rs` | `YamlPrompts` |
 | `SystoolsSource` | 工具总表与角色表的加载（`systools/tools.yaml` + `roles.yaml`）。定义在 `capabilities/tools/ports.rs` | `YamlSystools` |
-| `ToolRunner` | 外部工具进程（围栏安装、拉起、stdin 送参、超时杀树、截断）。**已随能力搬出**：`capabilities/tools/ports.rs` | `ProcTools`（守门进程 = 本程序的 `--fence-run` 模式） |
+| `ToolRunner` | 外部工具进程（围栏安装、拉起、stdin 送参、超时杀树、截断）。`capabilities/tools/ports.rs`，**只由 tools 的 `service.rs` 持有**（R12）；别人经 `tools::api::ToolExec` 跑工具 | `ProcTools`（守门进程 = 本程序的 `--fence-run` 模式） |
 | `EnvelopeRepair`（`capabilities/llm/ports.rs`） | 手写信封不合法时的**无歧义**补救（改了字段含义就是错；拿不准就返回不修） | `UnambiguousRepair`（转义字符串里的裸控制字符 + 补上扫描器算出的收尾括号；断在字符串中间不修，一段回复里起了两段信封不修——补哪一段都是猜；调用方中止的生成一律不修） |
-| `FenceHost` | 围栏授权的释放（删除会话时请求一次撤销）。**已随能力搬出**：`capabilities/tools/ports.rs` | `confine::FenceHostAdapter`（本平台无该机制时为空操作） |
+| `FenceHost` | 围栏授权的释放（删除会话时请求一次撤销）。`capabilities/tools/ports.rs`，**只由 tools 的 `service.rs` 持有**（R12） | `confine::FenceHostAdapter`（本平台无该机制时为空操作） |
 | `Log` | 运行日志（三级） | `FileLog`（测试 `NoopLog`） |
 | `HostProbe` | 宿主能力探测（**只问事实**：路径存在性、PATH 上的可执行文件、本机虚拟化能力；不执行、不安装、不写）。**在 `kernel/host.rs`**（无领域语义，执行档位与自检共用） | `HostProbeAdapter`（测试 `FixedProbe`） |
 

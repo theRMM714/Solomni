@@ -9,7 +9,6 @@ use crate::capabilities::llm::api::Llm;
 pub(crate) use crate::capabilities::session::api::Live;
 use crate::capabilities::session::api::{Pending, SessionEvent};
 use crate::capabilities::session::ports::HistoryStore;
-use crate::capabilities::tools::ports::{SysIo, ToolRunner};
 use crate::capabilities::workspace::api::Workspace;
 use crate::core::api::{
     AgentInstance, AgentSuggestion, CollabStep, ConfigAgent, FilesAgentRootView, FilesAgentView,
@@ -24,7 +23,7 @@ use crate::capabilities::llm::api::Msg;
 use crate::capabilities::prompt::api::{Prompt, Segment};
 use crate::capabilities::registry::api::Registry;
 use crate::capabilities::session::api::{AgentMeta, HistoryView, SessionMeta};
-use crate::capabilities::tools::api::Tools;
+use crate::capabilities::tools::api::{ToolExec, Tools};
 use crate::capabilities::workspace::api::Module;
 use crate::kernel::log::Log;
 use crate::kernel::types::SessionId;
@@ -181,13 +180,10 @@ pub struct Core {
     history: Arc<dyn HistoryStore + Send + Sync>,
     /// 工作区用例面（**不持它的端口**，R12）：清单事实、运行包库与工作区目录都走它。
     workspace: Arc<dyn Workspace + Send + Sync>,
-    /// 围栏授权释放（会话删除时请求一次；机制在适配层）。
-    fence: Arc<dyn crate::capabilities::tools::ports::FenceHost + Send + Sync>,
     /// llm 用例面：按解析出来的通道造收发句柄 + 信封的无歧义修复（通道的**解析**在登记处能力）。
     llm: Arc<dyn Llm + Send + Sync>,
-    tools: Arc<dyn ToolRunner + Send + Sync>,
-    /// 内置文件工具读写端口（策略在 core：寻址与越界校验）。
-    io: Arc<dyn SysIo + Send + Sync>,
+    /// 工具执行面（**不持它的端口**，R12）：跑外部/内置工具、释放围栏授权都走它。
+    tools: Arc<dyn ToolExec + Send + Sync>,
     log: Arc<dyn crate::kernel::log::Log + Send + Sync>,
     /// 宿主能力探测（读环境、查路径存在性都在它后面；core 因此不碰 std::env 与文件系统）。
     probe: Arc<dyn crate::kernel::host::HostProbe + Send + Sync>,
@@ -213,10 +209,8 @@ impl Core {
         registry: Box<dyn Registry>,
         history: Arc<dyn HistoryStore + Send + Sync>,
         workspace: Arc<dyn Workspace + Send + Sync>,
-        fence: Arc<dyn crate::capabilities::tools::ports::FenceHost + Send + Sync>,
         llm: Arc<dyn Llm + Send + Sync>,
-        tools: Arc<dyn ToolRunner + Send + Sync>,
-        io: Arc<dyn SysIo + Send + Sync>,
+        tools: Arc<dyn ToolExec + Send + Sync>,
         prompt: Arc<dyn Prompt>,
         systools: Arc<dyn Tools>,
         log: Arc<dyn crate::kernel::log::Log + Send + Sync>,
@@ -226,10 +220,8 @@ impl Core {
             registry,
             history,
             workspace,
-            fence,
             llm,
             tools,
-            io,
             log,
             probe,
             prompt,
@@ -1383,7 +1375,6 @@ impl Core {
                     Arc::clone(&self.prompt),
                     Arc::clone(&self.systools),
                     Arc::clone(&self.tools),
-                    Arc::clone(&self.io),
                     Arc::clone(&self.log),
                     meta.exec.clone(),
                     metas.clone(),
@@ -1526,10 +1517,10 @@ impl Core {
             observations: crate::capabilities::tools::api::Observations::default(),
             llm: Arc::clone(&self.llm),
             log: Arc::clone(&self.log),
-            runner: Arc::clone(&self.tools),
+            tools: Arc::clone(&self.tools),
             sandbox: sb.clone(),
             builtin_tools: self.systools.book(),
-            io: Arc::clone(&self.io),
+
             unavailable,
             // 围栏：可达范围 + 断网 + 环境白名单的落点，全部由该 agent 的沙箱派生（机制在 adapters）；
             // 只读根来自用户显式授权（`fence_read`），默认空。
@@ -1668,7 +1659,7 @@ impl Core {
                             meta.exec.net,
                         )
                         .with_read_only(self.fence_read_roots());
-                        if let Err(e) = self.fence.release(&spec) {
+                        if let Err(e) = self.tools.release_fence(&spec) {
                             self.log.warn(
                                 "core::history_delete",
                                 &format!("撤销围栏授权未完成：{}", e),
@@ -2196,7 +2187,6 @@ impl Core {
                 Arc::clone(&self.prompt),
                 Arc::clone(&self.systools),
                 Arc::clone(&self.tools),
-                Arc::clone(&self.io),
                 Arc::clone(&self.log),
                 meta,
                 events,

@@ -15,7 +15,7 @@ use crate::capabilities::registry::api::Settings;
 use crate::capabilities::session::api::MemberTools;
 use crate::capabilities::session::api::{AgentMeta, SessionMeta};
 use crate::capabilities::session::api::{CheckView, LineView, Pending, SessionEvent};
-use crate::capabilities::tools::ports::{SysIo, ToolRunner};
+use crate::capabilities::tools::api::ToolExec;
 use crate::capabilities::workspace::api::Sandboxes;
 use crate::capabilities::workspace::api::Workspace;
 use crate::capabilities::workspace::api::{ExecSpec, Module};
@@ -140,10 +140,8 @@ pub struct CollabSession {
     llm: Arc<dyn Llm + Send + Sync>,
     /// 工作区用例面（**不持它的端口**，R12）：清单、运行包库与工作区目录都走它。
     workspace: Arc<dyn Workspace + Send + Sync>,
-    /// 外部工具执行端口（策略在核心按模块清单放行，机制在适配层）。
-    tools: Arc<dyn ToolRunner + Send + Sync>,
-    /// 内置文件工具读写端口。
-    io: Arc<dyn SysIo + Send + Sync>,
+    /// 工具执行面（**不持它的端口**，R12）：跑外部/内置工具都走它。
+    tools: Arc<dyn ToolExec + Send + Sync>,
     /// 运行日志（工具循环里"输出被长度截断"这类事实落盘）。
     log: Arc<dyn crate::kernel::log::Log + Send + Sync>,
     /// 本会话的执行选型（档位 + 运行包定版）。
@@ -171,8 +169,7 @@ impl CollabSession {
         settings: Settings,
         prompts: Arc<dyn Prompt>,
         systools: Arc<dyn crate::capabilities::tools::api::Tools>,
-        tools: Arc<dyn ToolRunner + Send + Sync>,
-        io: Arc<dyn SysIo + Send + Sync>,
+        tools: Arc<dyn ToolExec + Send + Sync>,
         log: Arc<dyn crate::kernel::log::Log + Send + Sync>,
         spec: ExecSpec,
         roster: Vec<AgentMeta>,
@@ -207,7 +204,6 @@ impl CollabSession {
             llm,
             workspace,
             tools,
-            io,
             log,
             spec,
             sandboxes,
@@ -836,10 +832,9 @@ impl CollabSession {
             observations: crate::capabilities::tools::api::Observations::default(),
             llm: Arc::clone(&self.llm),
             log: Arc::clone(&self.log),
-            runner: Arc::clone(&self.tools),
+            tools: Arc::clone(&self.tools),
             sandbox: sb.clone(),
             builtin_tools: self.systools.book(),
-            io: Arc::clone(&self.io),
             unavailable: std::collections::BTreeMap::new(),
             fence: crate::capabilities::tools::api::FenceSpec::from_sandbox(&sb, false),
             reply_seq: 0,
@@ -1481,10 +1476,9 @@ impl CollabSession {
                 observations: crate::capabilities::tools::api::Observations::default(),
                 llm: Arc::clone(&self.llm),
                 log: Arc::clone(&self.log),
-                runner: Arc::clone(&self.tools),
+                tools: Arc::clone(&self.tools),
                 sandbox,
                 builtin_tools: self.systools.book(),
-                io: Arc::clone(&self.io),
                 reply_seq: self.reply_seq,
                 // 本档位下不能执行工具的模块（缺运行包）：机制侧据此拒绝执行。
                 unavailable: crate::capabilities::workspace::api::unavailable(
@@ -1558,8 +1552,7 @@ impl CollabSession {
         settings: Settings,
         prompts: Arc<dyn Prompt>,
         systools: Arc<dyn crate::capabilities::tools::api::Tools>,
-        tools: Arc<dyn ToolRunner + Send + Sync>,
-        io: Arc<dyn SysIo + Send + Sync>,
+        tools: Arc<dyn ToolExec + Send + Sync>,
         log: Arc<dyn crate::kernel::log::Log + Send + Sync>,
         meta: &SessionMeta,
         events: &[serde_json::Value],
@@ -1616,7 +1609,6 @@ impl CollabSession {
             llm,
             workspace,
             tools,
-            io,
             log,
             spec: meta.exec.clone(),
             sandboxes,
