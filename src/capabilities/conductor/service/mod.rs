@@ -134,7 +134,7 @@ pub(crate) fn persist_events(
 }
 
 /// 增量落盘手柄：工作线程按"一次模型调用"的粒度把定稿事件落盘。
-/// 为什么要它：以前整段生成跑完才落一次盘，中途刷新页面看不到已经产生的部分。
+/// 为什么要它：整段生成跑完才落一次盘，会让中途刷新看不到已经产生的部分。
 #[derive(Clone)]
 pub(crate) struct Persister {
     history: Arc<dyn History + Send + Sync>,
@@ -187,7 +187,7 @@ pub struct Conductor {
     /// 宿主能力探测（读环境、查路径存在性都在它后面；conductor 因此不碰 std::env 与文件系统）。
     probe: Arc<dyn crate::kernel::ports::HostProbe + Send + Sync>,
     /// 提示词册能力：**册子本体在它里面**（只有一处），conductor 只按名字取段。
-    /// 用 `Arc`：协作会话要与核心**共享**这一份（各自克隆整本册子是旧的浪费）。
+    /// 用 `Arc`：协作会话要与核心**共享**这一份（逐处克隆整本册子是白费）。
     prompt: Arc<dyn Prompt>,
     /// 工具总表与角色表的能力面（`systools/` 两张表）：**表本体在工具能力里**，与册子互不依赖。
     systools: Arc<dyn Tools>,

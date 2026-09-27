@@ -11,7 +11,7 @@
 //! 这里**不出现 HTTP / JSON 封装 / 路由**：那些是呈现层的传输事（见 presentation/routes.rs）。
 //! 事件与读模型（`SessionEvent`、`*View`）是**事实**的线格式，仍归 conductor。
 
-// 登记处的入站契约归登记处自己（批次 18）：这里只用它的面（实现队列代理），不定义。
+// 登记处的入站契约归登记处自己：这里只用它的面（实现队列代理），不定义。
 use crate::capabilities::conductor::service::Conductor;
 use crate::capabilities::registry::api::AgentView;
 use crate::capabilities::session::api::AgentMeta;
@@ -292,7 +292,7 @@ pub(crate) struct AskReq {
 mod handle;
 mod proxy;
 
-/// 入站能力面：**各能力自己的契约**（归位见批次 18）+ 核心自己的两个 + 事件台。
+/// 入站能力面：**各能力自己的契约**+ 核心自己的两个 + 事件台。
 /// 克隆廉价；呈现层只依赖它需要的字段，契约测试可以用假实现替换任意一个字段。
 #[derive(Clone)]
 pub struct Ops {
@@ -353,7 +353,7 @@ pub enum Acted {
 
 //
 // 定义在**能力面**：呈现层只认这里，不再经 `conductor::` 根转一手。
-// 批次 15 收口从协调业务的 service 搬来（见 ARCHITECTURE.md §一）。
+// 队列代理：只把命令交给核心线程（依赖方向见 ARCHITECTURE.md §一）。
 /// 协作推进阶段：由前端按 pending 决定。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CollabStep {

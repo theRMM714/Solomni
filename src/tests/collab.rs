@@ -98,7 +98,7 @@ pub(crate) fn collab_update_task_rewinds_and_latest_wins() {
 #[test]
 pub(crate) fn core_operation_streams_its_text_to_the_facts_outlet() {
     // 核心操作的正文也**逐片上屏**（与成员、单 agent 同一条规则，见 session::api::core_operation）：
-    // 替身只发一片正文，出口必须收到 start + text 两条 Delta——从前核心是一次性蹦出来的（真机反馈）。
+    // 替身只发一片正文，出口必须收到 start + text 两条 Delta：核心的正文逐片上屏、不整块蹦出。
     // 同时钉住"信封不当正文流"：正文片以 { 开头，外送的那片必须是空的。
     let raw = "{\"type\":\"tool\",\"name\":\"slate\",\"args\":{\"picks\":[{\"name\":\"甲\",\"modules\":[\"a\"],\"model\":\"m\",\"why\":\"对口\"}]}}";
     let core = core_with_gateway(
@@ -134,7 +134,7 @@ pub(crate) fn core_operation_streams_its_text_to_the_facts_outlet() {
     );
 }
 
-/// 讨论的调用参数**必须来自全局设置**（以前这里写死非流式，正是协作卡住的成因之一）。
+/// 讨论的调用参数**必须来自全局设置**（写死非流式会让协作卡住）。
 #[test]
 pub(crate) fn discussion_calls_carry_the_global_streaming_and_budget() {
     let llm = crate::capabilities::llm::api::LlmOpts {
@@ -238,7 +238,7 @@ pub(crate) fn native_tool_names_map_to_discussion_verbs() {
     assert_eq!(arg_text("不是 JSON"), "");
 }
 
-/// 同意是**粘住**的：发过 agree 的人不再被追问（以前每轮重置，等于每轮把所有人问一遍）。
+/// 同意是**粘住**的：发过 agree 的人不再被追问（每轮重置等于每轮把所有人问一遍）。
 #[test]
 pub(crate) fn agreement_is_sticky_so_agreed_members_are_not_asked_again() {
     let mut d = scripted_discussion(
@@ -270,7 +270,7 @@ pub(crate) fn agreement_is_sticky_so_agreed_members_are_not_asked_again() {
             TurnOut::Stopped => panic!("不该停止"),
         }
     }
-    // m0 在开场就同意了：之后每一轮都该跳过它（以前每轮重置同意，会把它反复问一遍）。
+    // m0 在开场就同意了：之后每一轮都该跳过它（每轮重置同意会把它反复问一遍）。
     let asked_m0 = d.transcript.iter().filter(|l| l.speaker == "m0").count();
     assert_eq!(
         asked_m0,

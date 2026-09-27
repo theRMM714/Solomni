@@ -59,7 +59,7 @@ impl Discussion {
         if self.cancelled() {
             return Err("已停止".to_string());
         }
-        // 核心操作走工具调用：载荷形状与从前一致（plan + nodes），只是入口变成 plan 工具。
+        // 核心操作走工具调用：载荷形状是 plan + nodes，入口是 plan 工具。
         let payload = crate::capabilities::session::api::core_operation(
             &*self.systools,
             "planner",

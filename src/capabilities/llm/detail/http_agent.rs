@@ -30,7 +30,7 @@ pub fn agent(connect_secs: u64, total_secs: u64) -> ureq::Agent {
 
 /// 一次模型调用的出站代理：连接 10 秒；**等响应头 / 读响应体 / 整体预算**都用同一个预算。
 /// 为什么三项共用一个预算：**非流式**下供应商要等整段生成完才发响应头，
-/// 把"等响应头"单独设小（曾经写死 60 秒）会把几十秒的正常长回复误判成不通——真机上就是这么炸的。
+/// 把"等响应头"单独设小会把几十秒的正常长回复误判成不通——真机上就是这么炸的。
 pub fn agent_for_llm(timeout_secs: u64) -> ureq::Agent {
     let budget = Some(Duration::from_secs(timeout_secs.max(1)));
     let builder = ureq::Agent::config_builder()

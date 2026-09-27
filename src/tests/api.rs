@@ -75,7 +75,7 @@ fn generation_pushes_facts_to_the_event_bus_with_sequence_numbers() {
     // 命令回包只给**事件台头部序号**：事实只有一条来路，不再随回包返回。
     assert!(adv.head > base, "回包给的是事件台头部序号");
     let (lines, head, _oldest) = bus.snapshot(Some(&opened.sid), base);
-    // 逐轮外送：事件按"一轮一批"进台，所以这里是多批（以前是整回合一批）。
+    // 逐轮外送：事件按"一轮一批"进台，所以这里是多批（不攒到整回合结束）。
     assert!(!lines.is_empty(), "生成期间就该有事件进台");
     assert_eq!(head, adv.head, "回包头部 = 事件台头部");
     assert_eq!(
@@ -133,7 +133,7 @@ fn suggest_models_pushes_on_a_system_session_and_leaves_no_trace() {
 }
 
 /// 历史与实时**合流**：盘上转录 + 事件台上"它之外"的尾巴，逐条互补（不重不漏）。
-/// 前端因此只按序 append；从前它自己合并两个来源，刷新后整段重复就是在那里出的。
+/// 前端因此只按序 append：两个来源的合流只在一处做，刷新后不会整段重复。
 #[test]
 fn history_merge_is_the_transcript_plus_the_bus_tail_without_repeats() {
     let handle = spawn(
@@ -227,7 +227,7 @@ fn stop_takes_effect_while_generation_is_still_running() {
     );
 }
 
-/// 生成期间，**只读命令不再排队**：以前生成占着唯一的命令队列，读接口（历史列表 / 会话视图）
+/// 生成期间，**只读命令不再排队**：生成不占用命令队列，读接口（历史列表 / 会话视图）
 /// 会一直等到生成结束——界面因此"假死"。现在生成在工作线程上，队列只占"取/交"两步。
 #[test]
 fn reads_are_not_queued_behind_a_long_generation() {
@@ -444,7 +444,7 @@ fn stopping_a_collab_discussion_is_prompt_and_keeps_the_session() {
     );
 }
 
-/// 协作生成**中途**就已经落盘：中途刷新页面能看到已产生的部分（以前整段跑完才落一次）。
+/// 协作生成**中途**就已经落盘：中途刷新页面能看到已产生的部分（按轮增量落盘）。
 #[test]
 fn collab_transcript_lands_on_disk_while_the_discussion_runs() {
     let (_handle, ops, started, release) = gated_ops(vec![module_of("a"), module_of("b")]);
@@ -475,7 +475,7 @@ fn collab_transcript_lands_on_disk_while_the_discussion_runs() {
         ops.sessions.is_running(&sid),
         "讨论必须仍在进行，这条断言才有意义"
     );
-    // 生成**还在跑**：盘上已经该有定稿的行（以前是整段跑完才落一次）。
+    // 生成**还在跑**：盘上已经该有定稿的行（按轮增量落盘）。
     let (_, events) = ops.history.open(&sid).expect("中途读转录");
     assert!(
         !events.is_empty(),
@@ -486,7 +486,7 @@ fn collab_transcript_lands_on_disk_while_the_discussion_runs() {
     let _ = worker.join().expect("协作线程");
 }
 
-/// 协作逐成员外送：一个成员说完，它那一行**立刻**进事件台（以前整轮问完才一次性出）。
+/// 协作逐成员外送：一个成员说完，它那一行**立刻**进事件台（不攒到整轮结束）。
 #[test]
 fn collab_discussion_emits_each_member_line_as_it_speaks() {
     let (handle, ops, started, release) = gated_ops(vec![module_of("a"), module_of("b")]);

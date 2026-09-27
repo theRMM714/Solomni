@@ -199,7 +199,7 @@ pub(crate) fn rewinding_the_main_session_truncates_agent_sessions_by_turn() {
 #[test]
 pub(crate) fn repeated_malformed_envelopes_each_get_a_failed_row() {
     // 非法信封**没有次数上限**了：每个都各记一条失败行回注给模型，直到它不再发信封（或用户停）。
-    const N: usize = 12; // 比原来的上限 8 多：证明"超过旧上限照跑"
+    const N: usize = 12; // 远大于任何合理上限：证明"超过旧上限照跑"
     let broken = broken_tool(&s(&["w", "work", "README.md"]));
     let mut script: Vec<String> = (0..N).map(|_| broken.clone()).collect();
     script.push("到此为止。".to_string());
@@ -392,7 +392,7 @@ pub(crate) fn tool_envelope_after_prose_runs_and_json_never_shows() {
         out: "ok".into(),
         ok: true,
     });
-    const N: usize = 10; // 比原来的上限 8 多：证明没有调用次数上限
+    const N: usize = 10; // 远大于任何合理上限：证明没有调用次数上限
     let mut script: Vec<String> = (0..N).map(|_| TOOL_CALL.to_string()).collect();
     script.push("到此为止。{\"type\":\"tool\",\"name\":\"grep\",\"args\":{}}".to_string());
     // 脚本替身会**重复最后一条**：末条必须是"不再发起工具调用"的正文，否则就是死循环。

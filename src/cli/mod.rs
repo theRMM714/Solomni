@@ -288,7 +288,7 @@ fn drain(ops: &Ops, sid: &str, from: u64) -> u64 {
 }
 
 /// 一次命令之后的订阅。回档/改需求给的是**重放快照**（不是增量事实）：终端不重复打，
-/// 只把游标推到当前头部（与从前"只渲生成类结果"的行为一致）。
+/// 只把游标推到当前头部（不重渲已有的行）。
 fn follow(ops: &Ops, sid: &str, cursor: &mut u64, acted: Acted) {
     if matches!(acted, Acted::Replayed(_)) {
         *cursor = ops.events.head();

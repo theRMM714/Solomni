@@ -26,7 +26,7 @@ impl CollabSession {
                 if self.awaiting_user() {
                     return;
                 }
-                // 逐成员外送：一个成员说完就出它那一行（以前是整轮问完才一次性出，界面因此整轮不动）。
+                // 逐成员外送：一个成员说完就出它那一行（整轮问完才一次性出会让界面整轮不动）。
                 // 回调里不能借 self（disc 正被可变借用），所以用 Cell/RefCell 暂存，调用后并回会话。
                 // 上一个成员回合失败 / 被停：如实交回（不静默吞掉，也不当发言吸收）。
                 let outcome = if let Some(err) = self.turn_error.take() {

@@ -142,7 +142,7 @@ pub fn prepare_fence(
         }
     }
     // **祖先链不用授**：容器的令牌里有 SeChangeNotifyPrivilege（Bypass traverse checking，真机 whoami /priv
-    // 确认 Enabled），按名走到被放行的根不需要祖先上的 FILE_TRAVERSE。以前那一趟"给祖先授穿过"只在改写
+    // 确认 Enabled），按名走到被放行的根不需要祖先上的 FILE_TRAVERSE。"给祖先授穿过"那一趟只在改写
     // C:\、C:\Users 这种巨型目录的 DACL 时付出代价——Windows 会顺着整棵树重算继承，真机实测 ~90 s/条
     // （CI 上两条 ACL 契约测试各 95 s，就是它）。删掉这一趟：授权面更小，也不再碰产品目录之外的系统目录。
     free_sid(base);

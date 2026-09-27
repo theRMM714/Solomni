@@ -212,7 +212,7 @@ pub(crate) fn interpreter_dirs(command: &str) -> Vec<PathBuf> {
 ///
 /// 只授"读属性"、**不递归、不继承**：容器能判断存在性，但读不到内容、列不了目录。
 /// 只到**直接父目录**为止（不是整条祖先链）：再往上就是产品根之外，而 stat 到直接父目录已足够让
-/// "父目录在不在"这个判断成立。当年那趟"给祖先链授穿过"要改写 `C:\` 这种巨型目录的 DACL
+/// "父目录在不在"这个判断成立。给祖先链授"穿过"要改写 `C:\` 这种巨型目录的 DACL
 /// （顺整棵树重算继承，真机 ~90 s/条），这里授的是产品内的小目录，各一条 ACE。
 pub(crate) fn grant_targets(spec: &FenceSpec) -> Vec<(PathBuf, u32, bool)> {
     let mut todo: Vec<(PathBuf, u32, bool)> = Vec::new();

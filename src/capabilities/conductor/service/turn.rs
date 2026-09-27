@@ -128,7 +128,7 @@ impl Conductor {
     }
 
     /// 生成前的**准备**（短命令：只做检查与取出会话，不跑模型）。
-    /// 语义与原来的 single_say / continue_flow 一致：工具形态变了先给一句提示；
+    /// 语义：工具形态变了先给一句提示；
     /// 继续时末条必须是用户发言（否则只提醒，不替用户发言）。
     pub(crate) fn prepare_single(
         &mut self,

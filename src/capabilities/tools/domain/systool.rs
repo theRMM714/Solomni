@@ -11,7 +11,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 /// 一次工具执行结果：ok = 退出码成功；output 已截断（截断规则在适配层）。
-/// **事实，不是端口**——所以它住在 domain，由 `api` 导出（批次 20b）。
+/// **事实，不是端口**——所以它住在 domain，由 `api` 导出。
 #[derive(Debug, Clone, PartialEq)]
 pub struct ToolOutcome {
     pub ok: bool,

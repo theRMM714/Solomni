@@ -25,7 +25,7 @@ pub struct HttpChat {
 }
 
 /// 一条消息 → wire 形态。**协议字段按需出现**：手写信封通道的消息没有调用，
-/// 所以它的请求体与从前逐字节相同；只有原生通道的助手/工具消息才带上 tool_calls 与 tool_call_id。
+/// 所以它的请求体按信封协议逐字节构造；只有原生通道的助手/工具消息才带上 tool_calls 与 tool_call_id。
 fn msg_json(m: &Msg) -> serde_json::Value {
     let mut v = serde_json::json!({ "role": m.role, "content": m.content });
     if !m.tool_calls.is_empty() {

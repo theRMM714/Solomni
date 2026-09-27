@@ -542,7 +542,7 @@ pub(crate) fn tool_loop_has_no_call_cap() {
         out: "r".into(),
         ok: true,
     });
-    const N: usize = 10; // 比原来的上限 8 多：证明没有调用次数上限
+    const N: usize = 10; // 远大于任何合理上限：证明没有调用次数上限
     let mut script: Vec<String> = (0..N).map(|_| TOOL_CALL.to_string()).collect();
     script.push("{\"type\":\"say\",\"text\":\"最终回报\"}".into());
     let mut m = member_with_tools("m0", script, Arc::clone(&runner));
