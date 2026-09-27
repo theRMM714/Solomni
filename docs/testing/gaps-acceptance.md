@@ -33,7 +33,7 @@ tests/
   ci-publish.mjs                # CI 报告发布脚本（把三平台报告写入 ci-report 分支）
 ```
 
-单元层与 `capabilities/` **同构**（批次 19）：T1 用例按业务分文件——`taskchain.rs` / `prompt.rs` / `registry.rs` /
+单元层与 `capabilities/` **同构**：T1 用例按业务分文件——`taskchain.rs` / `prompt.rs` / `registry.rs` /
 `llm.rs` / `workspace.rs` / `tools.rs` / `session.rs` / `slate.rs` / `collab.rs`，加**协调业务**自己的 `conductor.rs`
 （会话中心与跨能力编排）；契约测试 `ports.rs` / `fakes.rs` / `detail.rs` / `api.rs` / `cli.rs` / `routes.rs`；
 共享支撑 `doubles.rs`（端口替身）/ `builders.rs`（测试装配脚手架）/ `prelude.rs`（公共前置重导出）。
@@ -54,7 +54,7 @@ tests/
 
 ### 全局缺口
 
-`tests/gaps.yaml` 记录 T0、T2、T5 和测试基础设施的跨平台缺口、**长期目标**（存量收敛、目录迁移），
+`tests/gaps.yaml` 记录 T0、T2、T5 和测试基础设施的跨平台缺口、**长期目标**（存量收敛），
 以及**已确认但尚未实施的产品/机制缺口**（例如虚拟机档的 guest 本体）。
 **条目要能判定**：写清现状、怎么补、验收标准与为什么还没做；只有"大方向已定但推迟"也要把方向和推迟理由写进去，
 否则它只是一句没有验收路径的待办。

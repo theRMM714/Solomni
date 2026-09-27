@@ -40,7 +40,7 @@
   - `detail.rs`（8 个文件系统实现的真实边界 + 本机环回 HTTP 适配器）；
   - `api.rs`（入站契约：命令与事件、生成期间停止立刻生效、错误如实传播、单条命令 panic 不带垮核心）；
   - `routes.rs`（HTTP 路由目录 ↔ 处理器 ↔ 文档 ↔ 前端调用四者机器比对；假能力面逐条验成功 / 错误 / 空 / 边界）；
-- **入站契约也是契约**：呈现层只依赖各能力的能力接口（归位见 [docs/architecture/contracts.md](docs/architecture/contracts.md)）与事件台（拿不到 `Core`、拿不到任何核心锁），
+- **入站契约也是契约**：呈现层只依赖各能力的能力接口（见 [docs/architecture/contracts.md](docs/architecture/contracts.md)）与事件台（拿不到 `Core`、拿不到任何核心锁），
   所以它能被假实现整体替换——`routes.rs` 的 `FakeOps` 就是这么逐条测路由的。
 - T0 质量门禁已并入同一入口，且**全部是零容忍硬失败**：编译、结构审查、格式、clippy、编译告警、依赖重复。
 

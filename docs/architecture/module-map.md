@@ -47,24 +47,24 @@
 | 文件 | 职责 |
 | --- | --- |
 | `prompt/api.rs` | **入站能力面**：`Prompt` 能力面（按名字取段 `text` / `render` + 两块共享记录 `tools()` / `refs()`）与它要用的词汇（`Segment` / `ToolTexts` / `RefsPrompts` / `RefRoots` / `rewrite` / `Vars`） |
-| `prompt/service.rs` | **本能力的状态与用例**：把 `api::Prompt` 挂在 `domain` 的 `Prompts` 上（册子纯数据、无端口），并给组合根一个装载入口 `load()`。**册子只被这里（`Arc<dyn Prompt>` 的持有者）持有**（批次 17） |
+| `prompt/service.rs` | **本能力的状态与用例**：把 `api::Prompt` 挂在 `domain` 的 `Prompts` 上（册子纯数据、无端口），并给组合根一个装载入口 `load()`。**册子只被这里（`Arc<dyn Prompt>` 的持有者）持有** |
 | `prompt/ports.rs` | `PromptSource`：提示词册加载 |
 | `prompt/domain/prompt.rs` | 册子的内存形态与 `{{key}}` 渲染（纯逻辑） |
 | `prompt/domain/refs.rs` | 用户 `@` 引用改写成真实绝对路径（纯逻辑） |
 | `prompt/detail/yaml_prompts.rs` | `PromptSource`：加载 `prompts/`（**只有文本**） |
 | `registry/api.rs` | **入站能力面**：`RegistryOps`（呈现层的队列面）+ `Registry`（能力面）+ 登记处词汇（`Settings` / `Provider` / `ModelEntry` / `AppSettings` / 各视图 / `RosterPick`）的对外名字 + **`Registry` 能力面**（读取 `&self`、写取 `&mut self`：状态住在协调业务的执行线程上，靠单线程命令队列互斥，**不额外上锁**） |
-| `registry/service.rs` | **本能力的状态与用例**：四份 yaml 的内存形态（`Settings`，私有字段）只由这里写；持 `SettingsStore` / `ChatGateway` / `ModelCatalog` / `Log`；装配只在组合根（批次 17） |
+| `registry/service.rs` | **本能力的状态与用例**：四份 yaml 的内存形态（`Settings`，私有字段）只由这里写；持 `SettingsStore` / `ChatGateway` / `ModelCatalog` / `Log`；装配只在组合根 |
 | `registry/ports.rs` | `SettingsStore`：登记处四份 yaml 的持久化 |
 | `registry/domain/providers.rs` | 供应商/模型登记处内存形态与「模型 → 通道」解析 |
 | `registry/domain/agents.rs` | agent 登记处、代拟名单落地与名字校验 |
 | `registry/detail/yaml_settings.rs` | `SettingsStore`：登记处四份 yaml 的读写（见 [REGISTRY_SPEC.md](../../REGISTRY_SPEC.md)） |
 | `llm/api.rs` | **入站能力面**：**通道与协议词汇**（`Chat` / `BoxedChat` / `Msg` / `Completion` / `Chunk` / `ToolCall` / `ToolDecl` / `Channel` / `ToolMode` / `LlmOpts` / `CompleteOpts` / 探测结论 → 它们是**对外契约**，`Chat` 的调用方是别的能力所以我在这里）+ **`Llm` 用例面**（造通道 / 探测 / 发现 / 修信封）。**出站端口不进 api**（R12）。原行余下：协议类型（`Msg` / `Completion` / `Chunk` / `ToolCall` / …）的对外名字 |
-| `llm/service.rs` | **本能力的用例与端口持有者**：持 `ChatGateway` / `ModelCatalog` / `EnvelopeRepair`（**唯一持有者**，R12），实现 `api::Llm`（批次 20b） |
-| `llm/ports.rs` | **出站端口**（只有 `service.rs` 持有）：`ChatGateway` / `ModelCatalog` / `EnvelopeRepair`。协议词汇已随批次 20b 归 `api`；**通道事实**：`Channel`（摊平的解析结果）、`ToolMode`、`ReplayShape` / `ReplayReport`（批次 15 从 `registry` 移来） |
+| `llm/service.rs` | **本能力的用例与端口持有者**：持 `ChatGateway` / `ModelCatalog` / `EnvelopeRepair`（**唯一持有者**，R12），实现 `api::Llm` |
+| `llm/ports.rs` | **出站端口**（只有 `service.rs` 持有）：`ChatGateway` / `ModelCatalog` / `EnvelopeRepair`。**通道事实**：`Channel`（摊平的解析结果）、`ToolMode`、`ReplayShape` / `ReplayReport` |
 | `workspace/api.rs` | **入站能力面**：`WorkspaceOps`（呈现层的清单事实）+ **`Workspace` 用例面**（roster / library / runtimes_dir / prepare / write_work / work_has / files / roots）+ 模块清单 / 运行包库 / 执行档位与计划 / 沙箱寻址的对外名字 |
-| `workspace/service.rs` | **本能力的用例与端口持有者**：持 `ModuleSource` / `PackageSource` / `Workdirs`（**唯一持有者**，R12），实现 `api::Workspace`（批次 20b） |
-| `workspace/ports.rs` | **出站端口**（只有 `service.rs` 持有）：`ModuleSource` / `PackageSource` / `Workdirs`（目录布局；原名 `Workspace`，批次 20b 改名，把 `Workspace` 让给能力面） |
-| `workspace/domain/module.rs` | `module.yaml` 契约、`Roster`、`runtimes` 校验、agent system 合成、**参数声明形态** `Param` / `ParamType`（批次 15 从 `tools` 移来） |
+| `workspace/service.rs` | **本能力的用例与端口持有者**：持 `ModuleSource` / `PackageSource` / `Workdirs`（**唯一持有者**，R12），实现 `api::Workspace` |
+| `workspace/ports.rs` | **出站端口**（只有 `service.rs` 持有）：`ModuleSource` / `PackageSource` / `Workdirs`（目录布局；能力面叫 `Workspace`） |
+| `workspace/domain/module.rs` | `module.yaml` 契约、`Roster`、`runtimes` 校验、agent system 合成、**参数声明形态** `Param` / `ParamType` |
 | `workspace/domain/packages.rs` | `package.yaml` 契约与包库事实 |
 | `workspace/domain/exec.rs` | 执行档位（`ExecSpec`）与执行计划（`ExecPlan`）派生、虚拟机档诊断与承载判定 |
 | `workspace/domain/workspace.rs` | 工作区与沙箱的纯数据定义、寻址与越界判定 |
@@ -76,14 +76,14 @@
 
 | `taskchain/api.rs` | **入站能力面**（**纯领域业务**：有不变式、无端口、无 `service`）：任务链的事实与派生（`TaskChain` / `TaskNode` / `NodeStatus` / `Acceptance` + 阶段 / 就绪 / 验收判定）。三个消费者都经它：`collab` 驱动、`session` 线格式携带、呈现层渲染 |
 | `taskchain/domain/chain.rs` | 任务链的**纯数据 + 纯图算法**（节点、依赖、阶段派生、就绪、验收判定与装配错误上报）——不做 IO、不碰会话（见 [task-chain.md](task-chain.md)） |
-| `tools/api.rs` | **入站能力面**：`Tools` 能力面（按角色发放工具面 `tool_face` / `role_face` / `allows_module_tools`、总表 `book()` / 自检 `problems()`）+ **`ToolExec` 执行面**（`run_module` / `run_builtin` / `release_fence`）；`ToolOutcome` 从 ports 归到这里（批次 20b）。原行余下：`Tools` 能力面（按角色发放工具面 `tool_face` / `role_face` / `allows_module_tools`、总表 `book()`、自检 `problems()`）+ 工具清单 / 参数契约 / 补丁与应用 / 围栏策略的对外名字 |
-| `tools/service/mod.rs` | **本能力的状态、用例与端口持有者**：持两张表（`SystemTools`）与三个出站端口（`ToolRunner` / `SysIo` / `FenceHost`，**唯一持有者**，R12），实现 `api::Tools` 与 `api::ToolExec`；组合根用 `ToolsService::new(加载器, 三个端口)` 装配（批次 17 + 20b） |
+| `tools/api.rs` | **入站能力面**：`Tools` 能力面（按角色发放工具面 `tool_face` / `role_face` / `allows_module_tools`、总表 `book()` / 自检 `problems()`）+ **`ToolExec` 执行面**（`run_module` / `run_builtin` / `release_fence`）；`ToolOutcome` 从 ports 归到这里。原行余下：`Tools` 能力面（按角色发放工具面 `tool_face` / `role_face` / `allows_module_tools`、总表 `book()`、自检 `problems()`）+ 工具清单 / 参数契约 / 补丁与应用 / 围栏策略的对外名字 |
+| `tools/service/mod.rs` | **本能力的状态、用例与端口持有者**：持两张表（`SystemTools`）与三个出站端口（`ToolRunner` / `SysIo` / `FenceHost`，**唯一持有者**，R12），实现 `api::Tools` 与 `api::ToolExec`；组合根用 `ToolsService::new(加载器, 三个端口)` 装配 |
 | `tools/ports.rs` | **出站端口**（只有 `service.rs` 持有，R12）：`SysIo` / `ToolRunner` / `FenceHost` / `SystoolsSource`（后者的真实实现在 `detail/yaml_systools.rs`） |
-| `tools/service/systool.rs` | 内置工具的**执行编排**：驱动 `SysIo` 读写盘（`read` / `write` / `edit` / `patch` / `list` / `search`）。纯规则在 `domain/systool.rs`——所以只有这里引 `ports`（批次 20f-1） |
+| `tools/service/systool.rs` | 内置工具的**执行编排**：驱动 `SysIo` 读写盘（`read` / `write` / `edit` / `patch` / `list` / `search`）。纯规则在 `domain/systool.rs`——所以只有这里引 `ports` |
 | `tools/domain/systool.rs` | 内置工具的**纯规则**：放行、寻址、按声明校验参数、改动前的"读过"证据（`Observations`）、回执与失败文案、`ToolOutcome`（不引 `ports`） |
 | `tools/domain/patch.rs` | 补丁通道的**纯逻辑**：解析自由格式补丁与整行应用 |
 | `tools/domain/schema.rs` | 工具参数契约（**声明在文本层**）：解析/校验/两种渲染 |
-| `tools/domain/module_tools.rs` | **清单 → 工具面**：`ToolDecl::schema` / `check_tools` / `module_tools` / `module_tool_params`（批次 15 从 `workspace` 移来） |
+| `tools/domain/module_tools.rs` | **清单 → 工具面**：`ToolDecl::schema` / `check_tools` / `module_tools` / `module_tool_params` |
 | `tools/domain/roles.rs` | 系统工具与**角色**表（`systools/` 两张表） |
 | `tools/domain/fence.rs` | 一次工具执行的围栏策略（纯数据） |
 | `prompt/detail/yaml_prompts.rs` | `PromptSource`：加载 `prompts/`（**只有文本**） |
@@ -109,7 +109,7 @@
 | `session/service.rs` | **本能力的用例与端口持有者**：持 `HistoryStore`（**唯一持有者**，R12），实现 `api::History`（造会话 / 追流水 / 读元信息 / 删会话）。呈现层的列表/打开/删除仍走 `api::HistoryOps`（队列代理实现）；**核心操作回路** `core_operation`（声明角色工具面 → 跑一次模型 → 从工具调用参数取载荷 → 只读核实回路；取消与分片的包装只有这一处）与 `reply_msgs`（一次模型回复 → 发给模型的消息，**唯一构造函数**）也在这里 |
 | `session/ports.rs` | **出站端口**（只有 `service.rs` 持有，R12）：`HistoryStore`——会话历史的持久化（meta + append-only 流水） |
 | `session/domain/session.rs` | 会话状态与簿记（`AgentSession`、行/回合/回复簿记）+ `SessionParams` / `env_block` + 分片与命名（`stream_piece` / `keep_whole_replies` / `unique_work_name`） |
-| `session/domain/tools.rs` | **成员工具面**：`ModuleTools` / `MemberTools`（含 `next_reply` / `tools_block`，批次 20f-1 从协作引擎归位）+ `tool_table`（模块清单 → 按模块索引的工具面） |
+| `session/domain/tools.rs` | **成员工具面**：`ModuleTools` / `MemberTools`（含 `next_reply` / `tools_block`）+ `tool_table`（模块清单 → 按模块索引的工具面） |
 | `session/domain/history.rs` | 会话元信息与历史视图的内存形态 |
 | `session/domain/events.rs` | 呈现侧契约：`SessionEvent` 与介入请求的词汇、转录行 `LineView` |
 | `session/detail/fs_history.rs` | `HistoryStore`：`meta.yaml` + `transcript.jsonl` |
@@ -123,7 +123,7 @@
 | `collab/service/synthesis.rs` | **整理与审查**：核心整理讨论出方案与任务链（`synthesize`，走 plan 工具）+ 总验收清单与返工判定（`Execution` / `CheckItem`） |
 | `collab/service/round.rs` | **轮循环与行构造**：一次成员回复的完整翻译（`converse_with`）、请求装配（`assemble`）、行构造（`build_round_lines`）、轮与动词词汇 |
 | `collab/service/tool_loop.rs` | 成员回合里的**工具循环**：声明面 → 放行判定 → 并发调度 → 执行（内置 / 模块外部）→ 回填（`run_one` / `run_batch` / `dispatch_external` / `tool_decls`…） |
-| `collab/service/driver.rs` | **回合驱动**（自由函数，会话当参数）：`say` / `dispatch_task` / `discussion_turn` / `continue_reply` / `compact_turn` / `maybe_compact` / `run_rounds` / `rounds_events` / `run`。为什么不是 `impl AgentSession`：给别人的类型写 impl 是另一种互相引入（R1），批次 20f-2 改判 |
+| `collab/service/driver.rs` | **回合驱动**（自由函数，会话当参数）：`say` / `dispatch_task` / `discussion_turn` / `continue_reply` / `compact_turn` / `maybe_compact` / `run_rounds` / `rounds_events` / `run`。为什么不是 `impl AgentSession`：给别人的类型写 impl 是另一种互相引入（R1） |
 | `collab/domain/collab_state.rs` | 「转录即状态」的协作状态派生（纯函数、可回放） |
 | `llm/domain/envelope.rs` | 发言信封解析（纯逻辑）：`ToolInvoke.body` = 信封之后的正文；判定**未闭合 / 裸控制字符 / 语法错 / 字段不合法**四类；未闭合带上 EOF 状态 |
 

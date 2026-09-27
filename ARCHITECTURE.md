@@ -19,14 +19,14 @@ cli / web ──▶ capabilities（含协调业务 conductor）──▶ kernel
 | `capabilities/conductor/` | **协调业务**：会话中心（会话在世表、命令队列、运行态）、生成驱动、跨能力用例与跨会话回档编排。它与别的能力**平级**，只经各能力的 `api` 编排，不持任何别人的端口 | 不读文件（`std::fs`）、不发网络（ureq）、不碰 stdin/stdout——一切机制下沉各能力的 `detail/` |
 | `entry/` | **入口层共用机制**（产品根规范化）；只有组合根 / `diagnostics` / `guard` 能用 | 属于入口层；**任何能力都不许依赖它** |
 | `cli/` + `web/` | **前端（交付机制）**：各渠道一个顶层目录，完全分开——传输（argv/stdout vs HTTP/SSE）、路由、**纯渲染**。**不是业务能力**（无状态、无不变式） | 只依赖 **入站能力面**（各能力的 `::api`）；**永不接触端口对象，也拿不到 `Core` 本身**；**两者之间互不依赖** |
-| `capabilities/` | **业务能力**：按业务功能垂直切分。每个能力有 `api`（入站契约：trait + DTO）/ `service`（**本能力的状态与用例**，实现 `api` 的 trait；别处只持 `dyn` 面）/ `ports`（出站端口，**只由定义它的能力持有**）/ `domain`（纯逻辑）/ `detail`（细节实现，**只有组合根能构造**） | **业务之间只经对方的 `api`**；不反向依赖 `core` / `adapters` / `presentation`（迁移期残留记为基线豁免，见 §九（业务边界与硬要求） §四） |
+| `capabilities/` | **业务能力**：按业务功能垂直切分。每个能力有 `api`（入站契约：trait + DTO）/ `service`（**本能力的状态与用例**，实现 `api` 的 trait；别处只持 `dyn` 面）/ `ports`（出站端口，**只由定义它的能力持有**）/ `domain`（纯逻辑）/ `detail`（细节实现，**只有组合根能构造**） | **业务之间只经对方的 `api`**；不反向依赖 `entry` / `presentation`（由 T0 结构审查机器判定，见 §九.7） |
 | `kernel/` | **机制型业务**：无领域语义、无领域状态的机制（运行日志端口、宿主探测、生成中作业的取消表、跨业务共享的事实类型、路径书写）；形状与别的能力一致（`api` / `ports` / `domain` / `detail`） | **不依赖任何人**（不认识能力 / presentation / entry）；不放有领域语义的类型 |
 | 入口层（`main.rs` + `diagnostics/` + `guard/`） | **组合根**（`main.rs`：`new` 出所有适配器并注入）+ **机器可读探针**（`diagnostics/`：`--doctor` / `--https-check` / `--print-routes` / `--print-fence-env` / `--fence-verify`）+ **围栏守门进程**（`guard/`：`--fence-run` / `--fence-clean`，**第二个程序入口**） | 它依赖所有人，**任何人都不许依赖它**（门禁判定）。除装配与探针外无业务 |
 
 推论：
 
 - 「用哪个供应商/模型」是**策略**，在 `registry`（登记处能力）的解析链里决定；「怎么建通道」是**机制**，在 llm 的 `detail`。两者不互换。
-- 出站依赖由**各能力定义端口**（`capabilities/<能力>/ports.rs`）、**各能力（与 kernel）的 `detail` 实现**；入站依赖由**各能力定义能力接口**（`<能力>::api`）——协调业务的 `api::Ops` 只把它们与它自己的两个契约**组装**成一份交给呈现层（批次 18）。
+- 出站依赖由**各能力定义端口**（`capabilities/<能力>/ports.rs`）、**各能力（与 kernel）的 `detail` 实现**；入站依赖由**各能力定义能力接口**（`<能力>::api`）——协调业务的 `api::Ops` 只把它们与它自己的两个契约**组装**成一份交给呈现层。
   两侧都是依赖倒置，只是箭头方向不同——**能力不定义"前端接口让别人实现"**。
 - 呈现层拿到的是 `Ops`（各能力的能力接口 + 核心自己的两个 + 事件台），不是 `Core`，也不是任何锁。
 
@@ -41,8 +41,8 @@ cli / web ──▶ capabilities（含协调业务 conductor）──▶ kernel
 | `ChatGateway` | 建通道（含核心通道与回落告知）；**不选择**模型；实测一条通道支不支持原生工具调用。定义在 `capabilities/llm/ports.rs`，**只由 llm 的 `service.rs` 持有**（R12）；别人经 `llm::api::Llm` 要通道 | `HttpGateway`（无可用模型时回落 `DemoGateway`；探测发两条最小请求对比） |
 | `SettingsStore` | 登记处持久化（providers / models / settings / agents 四个 yaml）。定义在 `capabilities/registry/ports.rs` | `YamlSettingsStore` |
 | `ModelCatalog` | 按**端点与密钥**列出一条通道当前可用的模型名。`capabilities/llm/ports.rs`，**只由 llm 的 `service.rs` 持有**（R12） | `HttpModelCatalog` |
-| `ModuleSource` | 模块清单来源（扫描 `modules/`）。**已随能力搬出**：`capabilities/workspace/ports.rs` | `FsModules` |
-| `PackageSource` | 运行包库来源（扫描依赖文件夹 `runtimes/`）。**已随能力搬出**：`capabilities/workspace/ports.rs` | `FsPackages` |
+| `ModuleSource` | 模块清单来源（扫描 `modules/`）。定义在`capabilities/workspace/ports.rs` | `FsModules` |
+| `PackageSource` | 运行包库来源（扫描依赖文件夹 `runtimes/`）。定义在`capabilities/workspace/ports.rs` | `FsPackages` |
 | `Workdirs` | 一次工作的 work 目录、各 agent 沙箱、文件清单与寻址根。`capabilities/workspace/ports.rs`，**只由 workspace 的 `service.rs` 持有**（R12） | `FsWorkspace` |
 | `SysIo` | 内置文件工具的读写机制（读严格 UTF-8、非法字节如实标注；写一律 UTF-8）。`capabilities/tools/ports.rs`，**只由 tools 的 `service.rs` 持有**（R12） | `FsSysIo` |
 | `HistoryStore` | 会话历史：一个会话一个目录（meta + 事件流水）。`capabilities/session/ports.rs`，**只由 session 的 `service.rs` 持有**（R12）；别人经 `session::api::History` 读写 | `FsHistory` |
@@ -66,7 +66,7 @@ cli / web ──▶ capabilities（含协调业务 conductor）──▶ kernel
 - 系统工具总表、角色表与"谁能用哪些工具"（含越权校验与提示词按角色分配）：[docs/architecture/tools-and-roles.md](docs/architecture/tools-and-roles.md)。
 - 协作如何从讨论走到交付（审查关卡、任务链、子会话、验收）：[docs/architecture/task-chain.md](docs/architecture/task-chain.md)。
 - 提示词册（`prompts/`）的结构与键清单：[docs/architecture/prompts.md](docs/architecture/prompts.md)。
-- 重构的迁移账（业务边界判据、能力清单、批次与销账）：§九（业务边界与硬要求）。
+- 业务边界判据与硬要求（R1–R13）：见 §九；逐文件的能力清单见 [docs/architecture/module-map.md](docs/architecture/module-map.md)。
 
 **路由表由契约测试机器比对**（`src/tests/routes.rs` 直接读 `docs/architecture/contracts.md`）：
 表与 `web/routes.rs` 的 `ROUTES` 对不上就是测试失败。
@@ -192,7 +192,7 @@ session/<工作名>/
 - 组合根测试当前使用的内存装配（`InMemory*`、`VecSource`、`ScriptGateway`、`NoopLog` 等）集中在 `src/tests/doubles.rs`；
   新增替身用能表达职责的名称，并在测试基础设施中集中维护。
 - **分层与依赖方向由 T0 结构审查机器判定**：层间不反向、`presentation` 只经入站能力面驱动、业务层内部不成环。
-  迁移期的基线在 `tests/dependency-baseline.json`，**条目一旦不再成立即失败**（强制销账）。
+  依赖方向门禁的豁免清单在 `tests/dependency-baseline.json`（当前为空 = 零豁免），**条目一旦不再成立即失败**。
 - 质量门禁（格式、编译、Clippy、依赖重复、测试结构冗余）与业务测试是两类事实，分别记录，质量失败不能被业务测试通过抵消。
 - 代码冗余检查不改变分层与端口设计，也不以增加 trait、包装层或测试用例为目标；发现重复时先判断是否同一职责，再决定合并、保留或记录原因。
 
@@ -216,7 +216,7 @@ session/<工作名>/
    **它说的概念属于某个参与方 → 就归那个参与方**（`resolve_picks` 说的是登记处自己的数据，被两处调用也不升级成业务）；
    不属于任何参与方的概念（名单、任务链）才自成业务。
 2. **能指名 ≥2 个调用方**：不抽出来，这两个（或更多）能力就会各写一遍。**已实测的重复是最强证据**
-   （`slate` 就是这么独立的：`conductor` 与 `collab` 从前各写一遍）；**只有一个调用方的编排不抽**，留在它自己的 `service.rs`。
+   （`slate` 就是这么立的：`conductor` 与 `collab` 两个调用方共用它）；**只有一个调用方的编排不抽**，留在它自己的 `service.rs`。
 
 **状态不参与这条判据**——它只在 §九.2 回答「这块状态归谁」。
 
@@ -263,7 +263,7 @@ session/<工作名>/
 | **R4** | **状态所有权排他**：一块状态只有一个能力写，别人只经 `api` 读改 |
 | **R5** | **并发模型不变式**：单线程命令队列 + 能力间同步调用，**核心状态不加锁** |
 | **R6** | **共享事实类型只属于 `kernel`**，禁止各业务复制 DTO |
-| **R7** | **不留兼容层**：项目是 GREEN FIELD，迁移是搬家 + 删旧 |
+| **R7** | **不留兼容层**：项目是 GREEN FIELD，**只维护当前唯一实现**——旧实现直接删，不留转发壳或历史说明 |
 | **R8** | **文档同步**：改结构必须同一次改 `ARCHITECTURE.md` / `docs/architecture/module-map.md` / 相关细则 / `AGENTS.md` 路由表 |
 | **R9** | **跨平台与路径**：一律 `PathBuf` 组件拼接；对外用 `/`；不假设平台 |
 | **R10** | **测试跟着业务分区走**：`capabilities/<名称>/` ↔ `src/tests/<名称>.rs`，单文件 ≤ 2000 行 |

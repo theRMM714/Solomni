@@ -121,9 +121,9 @@ Fixture 必须：
 | `ModuleSource` | `VecSource` | 不适用 | 不适用（错误进 `rejected`） | 不适用 | `FsModules` | 已验收 |
 | `PackageSource` | `InMemoryPackages` | 不适用 | 不适用（错误进 `rejected`） | 不适用 | `FsPackages` | 已验收 |
 | `Workdirs` | `InMemoryWorkspace` | 内存布局可观察 | `fail_with` | 不适用 | `FsWorkspace` | 已验收 |
-| `ModuleSource` / `PackageSource` / `Workdirs` 的持有者 | ——（三个端口在批次 20b 起**只由 `workspace::service.rs` 持有**；别的能力经 `workspace::api::Workspace` 要清单与目录） | 不适用 | 不适用 | 不适用 | 不适用 | 已收口 |
-| `SysIo` | `InMemorySysIo`（含并发峰值与按文件延时） | 内存内容 + 同时在读的峰值 | `fail_with` | 不适用 | `FsSysIo`（含 lossy / cut） | 已验收；**持有者只有 `tools::service.rs`**（批次 20b，R12） |
-| `HistoryStore` | `InMemoryHistory` | 内存流水可观察 | `fail_with` | 不适用 | `FsHistory` | 已验收；**持有者只有 `session::service.rs`**（批次 20b，R12） |
+| `ModuleSource` / `PackageSource` / `Workdirs` 的持有者 | ——（三个端口**只由 `workspace::service.rs` 持有**；别的能力经 `workspace::api::Workspace` 要清单与目录） | 不适用 | 不适用 | 不适用 | 不适用 | 已收口 |
+| `SysIo` | `InMemorySysIo`（含并发峰值与按文件延时） | 内存内容 + 同时在读的峰值 | `fail_with` | 不适用 | `FsSysIo`（含 lossy / cut） | 已验收；**持有者只有 `tools::service.rs`**（R12） |
+| `HistoryStore` | `InMemoryHistory` | 内存流水可观察 | `fail_with` | 不适用 | `FsHistory` | 已验收；**持有者只有 `session::service.rs`**（R12） |
 | `PromptSource` | `TestPrompts` | 不适用 | `fail_with` | 不适用 | `YamlPrompts` | 已验收 |
 | `SystoolsSource` | 不适用（**直接用真实加载器**：读的就是仓库自己的两份 yaml，确定性足够） | 不适用 | 缺文件 / 缺键由真实加载器如实报错（`tests/detail.rs`） | 不适用 | `YamlSystools` | 已验收 |
 | `ToolRunner` | `RecordingRunner`、`SilentRunner`、`ParallelRunner` | `calls`（cwd / 命令 / 参数）、并发峰值 | `ok = false` 回执 | 真进程超时杀树（`ProcTools`） | `ProcTools` | 已验收 |

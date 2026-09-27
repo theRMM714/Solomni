@@ -32,7 +32,7 @@ cargo tree --duplicates
 - 报告 JSON 是否符合约定；
 - `gaps.yaml` 是否可解析、字段完整；
 - **依赖方向是否仍然成立**：层间不反向、`presentation` 只经入站能力面驱动、业务层内部不成环。
-  迁移期的基线在 `tests/dependency-baseline.json`，**条目一旦不再成立即失败**（强制销账）——
+  依赖方向门禁的豁免清单在 `tests/dependency-baseline.json`（当前为空 = 零豁免），**条目一旦不再成立即失败**——
   规则与口径见 [../../ARCHITECTURE.md](../../ARCHITECTURE.md) §九.7；
 - 测试是否写入项目外绝对路径或真实用户目录；
 - 测试结束后是否遗留子进程、端口、临时目录、权限或句柄；
