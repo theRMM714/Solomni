@@ -85,8 +85,9 @@
 | `tools/detail/proc_tools.rs` | `ToolRunner`：守门进程拉起、stdin 送参、超时杀树、输出截断 |
 | `tools/detail/sys_io.rs` | `SysIo`：内置工具的读写机制（UTF-8 解码、非法字节 `lossy` 标注） |
 | `tools/detail/yaml_systools.rs` | `systools/tools.yaml` + `roles.yaml` → `SystemTools`（**工具总表与角色表是工具侧的事实**，不是提示词） |
-| `session/api.rs` | **入站能力面**：`HistoryOps`（落盘会话的列表 / 打开 / 删除）+ `SessionParams` / `AgentSession` / `TurnRun` / 行与事件词汇 / 历史视图的对外名字 |
-| `session/ports.rs` | `HistoryStore`：会话历史的持久化（从 `core/ports.rs` 随能力搬出；`core/ports.rs` 随之消失） |
+| `session/api.rs` | **入站能力面**：`HistoryOps`（呈现层的队列面：列表 / 打开 / 删除）+ **`History` 直连面**（别的能力用：造会话 / 写元信息 / 追流水 / 列出 / 读回 / 删除；与端口一一对应，价值在 R12 的唯一持有者）+ `SessionParams` / `AgentSession` / `TurnRun` / 行与事件词汇 / 历史视图的对外名字 |
+| `session/service.rs` | **本能力的用例与端口持有者**：持 `HistoryStore`（**唯一持有者**，R12），实现 `api::History`（造会话 / 追流水 / 读元信息 / 删会话）。呈现层的列表/打开/删除仍走 `api::HistoryOps`（队列代理实现）（批次 20b） |
+| `session/ports.rs` | **出站端口**（只有 `service.rs` 持有，R12）：`HistoryStore`——会话历史的持久化（meta + append-only 流水） |
 | `session/domain/session.rs` | 会话状态与簿记 + 工具面 `MemberTools` / `ModuleTools`（从 `core/session.rs` 搬来）+ `env_block`（批次 15 从 `tools` 移来） |
 | `session/domain/history.rs` | 会话元信息与历史视图的内存形态（从 `core/history.rs` 搬来） |
 | `session/domain/events.rs` | 呈现侧契约：`SessionEvent` 与介入请求的词汇、转录行 `LineView`（从 `core/events.rs` 搬来） |

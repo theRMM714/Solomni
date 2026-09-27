@@ -563,7 +563,7 @@ pub(crate) fn vm_tier_is_refused_when_the_machine_cannot_carry_it() {
     );
     let mut core = Core::new(
         registry_service(InMemorySettings::with_tier(Tier::Vm), Arc::clone(&llm)),
-        Arc::new(InMemoryHistory::new()),
+        test_history(),
         test_workspace(
             Arc::new(VecSource(vec![module_of("a")])),
             Arc::new(InMemoryPackages::empty()),
@@ -603,7 +603,7 @@ pub(crate) fn vm_tier_is_refused_when_the_machine_cannot_carry_it() {
     );
     let mut core2 = Core::new(
         registry_service(InMemorySettings::new(), Arc::clone(&llm2)),
-        Arc::new(InMemoryHistory::new()),
+        test_history(),
         test_workspace(
             Arc::new(VecSource(vec![module_of("a")])),
             Arc::new(InMemoryPackages::empty()),
@@ -728,7 +728,7 @@ pub(crate) fn module_without_runtime_is_denied_with_reason() {
     );
     let mut core = Core::new(
         registry_service(InMemorySettings::with_tier(Tier::Host), Arc::clone(&llm)),
-        Arc::clone(&hist) as Arc<dyn HistoryStore + Send + Sync>,
+        test_history_of(Arc::clone(&hist)),
         test_workspace(
             Arc::new(VecSource(vec![mod_a])),
             Arc::new(InMemoryPackages::empty()),

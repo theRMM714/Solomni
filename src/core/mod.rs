@@ -5,10 +5,10 @@
 pub mod api;
 
 use crate::capabilities::llm::api::Llm;
+use crate::capabilities::session::api::History;
 #[cfg(test)]
 pub(crate) use crate::capabilities::session::api::Live;
 use crate::capabilities::session::api::{Pending, SessionEvent};
-use crate::capabilities::session::ports::HistoryStore;
 use crate::capabilities::workspace::api::Workspace;
 use crate::core::api::{
     AgentInstance, AgentSuggestion, CollabStep, ConfigAgent, FilesAgentRootView, FilesAgentView,
@@ -108,7 +108,7 @@ fn persist_policy_for(sid: &str) -> PersistPolicy {
 /// 为什么抽成自由函数：工作线程按**一次模型调用**的粒度增量落盘，必须与核心走同一段逻辑——
 /// 两条路径各写一份的话，"什么算定稿、什么不落盘"迟早会不一致。
 pub(crate) fn persist_events(
-    history: &dyn HistoryStore,
+    history: &dyn History,
     log: &dyn Log,
     sid: &str,
     events: &[SessionEvent],
@@ -139,7 +139,7 @@ pub(crate) fn persist_events(
 /// 为什么要它：以前整段生成跑完才落一次盘，中途刷新页面看不到已经产生的部分。
 #[derive(Clone)]
 pub(crate) struct Persister {
-    history: Arc<dyn HistoryStore + Send + Sync>,
+    history: Arc<dyn History + Send + Sync>,
     log: Arc<dyn Log + Send + Sync>,
     sid: String,
 }
@@ -177,7 +177,8 @@ pub(crate) enum Prepared {
 pub struct Core {
     /// 登记处能力：**四份 yaml 的状态在它里面**，core 只按 `Registry` 调用（看不见它的字段）。
     registry: Box<dyn Registry>,
-    history: Arc<dyn HistoryStore + Send + Sync>,
+    /// 会话历史直连面（**不持它的端口**，R12）：造/读/写/删会话都走它。
+    history: Arc<dyn History + Send + Sync>,
     /// 工作区用例面（**不持它的端口**，R12）：清单事实、运行包库与工作区目录都走它。
     workspace: Arc<dyn Workspace + Send + Sync>,
     /// llm 用例面：按解析出来的通道造收发句柄 + 信封的无歧义修复（通道的**解析**在登记处能力）。
@@ -207,7 +208,7 @@ impl Core {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         registry: Box<dyn Registry>,
-        history: Arc<dyn HistoryStore + Send + Sync>,
+        history: Arc<dyn History + Send + Sync>,
         workspace: Arc<dyn Workspace + Send + Sync>,
         llm: Arc<dyn Llm + Send + Sync>,
         tools: Arc<dyn ToolExec + Send + Sync>,

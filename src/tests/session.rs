@@ -890,8 +890,7 @@ pub(crate) fn deleting_a_session_asks_the_fence_to_release_its_grants() {
     );
     let mut core = Core::new(
         registry_service(InMemorySettings::new(), Arc::clone(&llm)),
-        Arc::clone(&hist)
-            as Arc<dyn crate::capabilities::session::ports::HistoryStore + Send + Sync>,
+        test_history_of(Arc::clone(&hist)),
         test_workspace(
             Arc::new(VecSource(vec![module_of("a")])),
             Arc::new(InMemoryPackages::empty()),

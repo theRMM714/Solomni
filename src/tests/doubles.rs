@@ -882,6 +882,20 @@ pub(crate) fn test_prompts() -> Prompts {
 
 /// 测试用工具总表与角色表（走**与产品同一条**装配路径）。
 /// 它与提示词册**分开**装配：两者互不依赖（见 core/prompt.rs 的 Prompts）。
+/// 测试用的**会话历史面**（与生产同一条路：端口装进 `SessionService`）。
+pub(crate) fn test_history() -> Arc<dyn crate::capabilities::session::api::History + Send + Sync> {
+    test_history_of(Arc::new(InMemoryHistory::new()))
+}
+
+/// 同上，但用调用方给的替身（要在断言里看落盘内容的用例用它——同一份状态）。
+pub(crate) fn test_history_of(
+    store: Arc<InMemoryHistory>,
+) -> Arc<dyn crate::capabilities::session::api::History + Send + Sync> {
+    Arc::new(crate::capabilities::session::service::SessionService::new(
+        store,
+    ))
+}
+
 /// 测试用的 **tools 能力**：两张表 + 三个替身端口（与生产同一条路，R12）。
 /// 两个面都从这里出：`Arc<dyn Tools>`（表）与 `Arc<dyn ToolExec>`（执行）。
 pub(crate) fn test_tools_svc() -> Arc<crate::capabilities::tools::service::ToolsService> {
@@ -1037,7 +1051,7 @@ pub(crate) fn core_with_workspace(
     );
     Core::new(
         registry_service(InMemorySettings::new(), Arc::clone(&llm)),
-        Arc::new(InMemoryHistory::new()),
+        test_history(),
         test_workspace(
             Arc::new(VecSource(modules)),
             Arc::new(InMemoryPackages::empty()),
@@ -1137,7 +1151,7 @@ pub(crate) fn core_with_pkgs(
     let llm = test_llm(Arc::clone(&gateway), catalog);
     Core::new(
         registry_service(InMemorySettings::new(), Arc::clone(&llm)),
-        history,
+        test_history_of(history),
         test_workspace(
             Arc::new(VecSource(modules)),
             packages,
@@ -1162,7 +1176,7 @@ pub(crate) fn core_with_settings(store: InMemorySettings) -> Core {
     );
     Core::new(
         registry_service(store, Arc::clone(&llm)),
-        Arc::new(InMemoryHistory::new()),
+        test_history(),
         test_workspace(
             Arc::new(VecSource(Vec::new())),
             Arc::new(InMemoryPackages::empty()),
@@ -1202,7 +1216,7 @@ pub(crate) fn core_with_io_gateway(
     );
     Core::new(
         registry_service(InMemorySettings::new(), Arc::clone(&llm)),
-        Arc::new(InMemoryHistory::new()),
+        test_history(),
         test_workspace(
             Arc::new(VecSource(modules)),
             Arc::new(InMemoryPackages::empty()),
@@ -1230,7 +1244,7 @@ pub(crate) fn core_with_gateway(
     );
     Core::new(
         registry_service(InMemorySettings::new(), Arc::clone(&llm)),
-        Arc::new(InMemoryHistory::new()),
+        test_history(),
         test_workspace(
             Arc::new(VecSource(modules)),
             Arc::new(InMemoryPackages::empty()),

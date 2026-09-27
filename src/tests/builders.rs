@@ -765,7 +765,7 @@ pub(crate) fn native_core(
     );
     Core::new(
         registry_service(InMemorySettings::new(), Arc::clone(&llm)),
-        history,
+        test_history_of(history),
         test_workspace(
             Arc::new(VecSource(vec![module_of("a")])),
             Arc::new(InMemoryPackages::empty()),

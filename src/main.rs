@@ -197,7 +197,9 @@ fn main() {
 
     let mut core = core::Core::new(
         Box::new(registry),
-        Arc::new(history),
+        Arc::new(capabilities::session::service::SessionService::new(
+            Arc::new(history),
+        )),
         workspace,
         Arc::clone(&llm),
         toolexec,
