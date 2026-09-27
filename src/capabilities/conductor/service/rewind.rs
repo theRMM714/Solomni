@@ -161,8 +161,17 @@ impl Conductor {
                         rows.extend(lines.iter());
                     }
                 }
+                // **压缩过**的会话：按 `compacted` 事件重建发送视图（见 session-model.md 六）——
+                // `up_to` 之前的行不再进对话，由一份摘要代替（转录本身完整保留，用户照样能查）。
+                // 回档到压缩点之前时这条事件已随转录被截掉，所以「没有它」就是「回到压缩前」。
+                let compacted = crate::capabilities::session::api::last_compaction(events);
+                let compacted_upto = compacted.as_ref().map(|(up_to, _)| *up_to).unwrap_or(0);
                 // 对话里**只有**真正发生过的事；身份与环境由 params 现渲染。
-                let mut history: Vec<Msg> = Vec::new();
+                let mut history: Vec<Msg> = compacted
+                    .as_ref()
+                    .map(|(_, summary)| crate::capabilities::session::api::summary_message(summary))
+                    .into_iter()
+                    .collect();
                 let mut marks: Vec<usize> = Vec::new();
                 let mut line_reply: Vec<u64> = Vec::new();
                 let texts = self.prompt.tools();
@@ -171,6 +180,28 @@ impl Conductor {
                 let mut i = 0usize;
                 while i < rows.len() {
                     let l = rows[i];
+                    // 被总结掉的行：不进对话，但仍占一行（marks / line_reply 与转录行一一对应）。
+                    if compacted_upto > 0
+                        && l.get("id").and_then(|x| x.as_u64()).unwrap_or(0) < compacted_upto
+                    {
+                        if l.get("tool").is_some() {
+                            // 同一次回复的 tool 行连续同号：整组一起跳，别从中间切开。
+                            let reply = reply_of(l.get("tool").expect("已判存在"));
+                            while i < rows.len()
+                                && reply_of(rows[i].get("tool").unwrap_or(&serde_json::Value::Null))
+                                    == reply
+                            {
+                                line_reply.push(reply);
+                                marks.push(history.len().max(1));
+                                i += 1;
+                            }
+                        } else {
+                            line_reply.push(reply_of(l));
+                            marks.push(history.len().max(1));
+                            i += 1;
+                        }
+                        continue;
+                    }
                     let line = l.get("line").and_then(|x| x.as_str()).unwrap_or("");
                     // **读结构化字段**（种类 / 系统标记 / 正文），不从正文里抠 [标签]。
                     let kind = l.get("kind").and_then(|x| x.as_str()).unwrap_or("");
@@ -258,6 +289,7 @@ impl Conductor {
                         history,
                         marks,
                         line_reply,
+                        compacted_upto,
                         chat,
                         note,
                         Some(tools),

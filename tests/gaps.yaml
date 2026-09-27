@@ -86,28 +86,4 @@
     待排期：要把 Web 服务器从"阻塞到出错"改成可中断等待（收 SIGINT 后正常关闭再回 CLI 主循环）。
 
 
-- id: session.compaction-not-replayed
-  scope: global
-  level: T1
-  why: |
-    压缩只在当前这次运行内有效。压缩落了两样东西：内存里把摘要插进对话，转录里落一条
-    {"type":"compacted", up_to, summary} 事件；但**摘要本身不是转录行**（compact() 只改 dialogue，
-    不调 line()）。而 rebuild_session 重放时只读 type == "transcript" 的事件，**跳过 compacted**，
-    全仓再无第二个读取方（Compacted 不在短暂事件名单里，所以它确实写进了 transcript.jsonl——写了没人读）。
-    后果：重启程序或回档触发重建后，发送视图从转录重放，只看得见原始的用户/助手/工具行，
-    **摘要与被压掉的内容都会回来**，等于没压过。
-    而 docs/architecture/session-model.md §六 写着"重启/回档按 compacted 事件重建发送视图"，与实现不一致。
-  how: |
-    按 docs/architecture/session-model.md 的结论一起改：
-    ① 摘要按 note_task 的形状落档——**转录里是系统行、发给模型的上下文里是 user 角色**
-       （新增结构化标记，不复用 task: true，它的语义是"派发行"）；
-    ② rebuild_session 认这个标记：重建出 Msg::user(摘要)，并且它之前的对话不再重建；
-    ③ 回档**跨越压缩点**时走重建路径（rebuild_session），不走内存精确截断（AgentSession::rewind）
-       ——压缩已经把对话内容销毁，内存里补不回来。
-  accept: |
-    压缩后重启程序（或回档到压缩点之后），发送视图仍是"摘要 + 之后的行"，摘要不丢、被压掉的内容不回来；
-    回档跨越压缩点时发送视图回到压缩前；实时与重建逐条相同。
-  blocked_by: |
-    与 session 分区重构同一批处理（摘要变成转录行 + rebuild 认标记 + 回档按压缩点分流）。
-    见 docs/architecture/session-model.md。
 

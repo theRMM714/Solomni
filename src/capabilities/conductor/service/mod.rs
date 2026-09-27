@@ -437,7 +437,17 @@ impl Conductor {
         }
     }
 
+    /// 测试用：往某个会话的流水追加事件（造「压过之后再重启」这类历史）。
+    pub fn history_append(
+        &mut self,
+        sid: &str,
+        events: &[serde_json::Value],
+    ) -> Result<(), String> {
+        self.history.append(sid, events)
+    }
+
     /// 该会话此刻的**身份块**（按当前提示词册与形态现渲染）：测试用它断言"它被告诉了什么"。
+    /// 该会话当前的压缩点（测试断言「重建也恢复压缩点」）。
     pub fn single_identity(&self, sid: &str) -> Option<String> {
         match self.sessions.get(sid) {
             Some(Session::Single(s)) => Some(s.params().identity(&*self.prompt, s.tool_mode())),

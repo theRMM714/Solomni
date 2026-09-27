@@ -1,15 +1,16 @@
 //! 入站能力面：**其它能力与呈现层只准用这里**（不许碰 `domain` / `ports`）。
 
 pub use crate::capabilities::session::domain::events::{
-    idle, interrupted_note, stopped_note, working, CheckView, LineView, Live, Pending,
-    SessionEvent, ToolCallView,
+    idle, interrupted_note, last_compaction, stopped_note, working, CheckView, LineView, Live,
+    Pending, SessionEvent, ToolCallView,
 };
 pub use crate::capabilities::session::domain::history::{AgentMeta, HistoryView, SessionMeta};
 pub use crate::capabilities::session::domain::rewind::{
     find_line_id, last_line_within, max_reply, truncate_events, turn_of_line,
 };
 pub use crate::capabilities::session::domain::session::{
-    keep_whole_replies, stream_piece, unique_work_name, AgentSession, SessionParams, TurnRun,
+    keep_whole_replies, stream_piece, summary_message, unique_work_name, AgentSession,
+    SessionParams, TurnRun,
 };
 pub use crate::capabilities::session::domain::tools::{tool_table, MemberTools};
 

@@ -289,6 +289,23 @@ pub struct CheckView {
     pub note: String,
 }
 
+/// 流水里**最后一次**压缩（`compacted` 事件）：重建发送视图时按它把 `up_to` 之前的行换成摘要。
+/// 回档到压缩点之前时这条事件已随转录被截掉，所以「没有它」就是「回到压缩前」。
+pub fn last_compaction(events: &[serde_json::Value]) -> Option<(u64, String)> {
+    let mut found = None;
+    for ev in events {
+        if ev.get("type").and_then(|t| t.as_str()) != Some("compacted") {
+            continue;
+        }
+        let up_to = ev.get("up_to").and_then(|u| u.as_u64()).unwrap_or(0);
+        let summary = ev.get("summary").and_then(|s| s.as_str()).unwrap_or("");
+        if up_to > 0 && !summary.is_empty() {
+            found = Some((up_to, summary.to_string()));
+        }
+    }
+    found
+}
+
 impl SessionEvent {
     /// 线格式：Web 长轮询与会话历史落盘共用同一形态（转录即内容，落盘即回放）。
     pub fn to_json(&self) -> serde_json::Value {

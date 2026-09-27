@@ -731,6 +731,94 @@ fn auto_compaction_kicks_in_when_the_history_exceeds_the_budget() {
         "被总结掉的内容该移出发送视图（不是只加摘要）：{last:?}"
     );
 }
+/// 压缩能扛住重启：按落盘转录重建时，发送视图仍是「一份摘要 + 之后的行」。
+/// 回档跨越压缩点（`Conductor::rewind` 命中分流）→ 回到压缩前。
+#[test]
+fn compaction_survives_a_restart_and_rewinds_back_through_the_point() {
+    let mut core = super::doubles::core_with(
+        vec![module_of("a")],
+        super::doubles::gw(std::collections::BTreeMap::new(), Vec::new()),
+    );
+    let sid = core
+        .create_work(single_work("w", &["a"]))
+        .expect("建会话")
+        .sid;
+    // 与**真实流水**对齐起号：建会话时已经种了一条系统提示词行，不能重号。
+    let (_, existing) = core.history_open(&sid).expect("读流水");
+    let next = existing
+        .iter()
+        .filter(|e| e.get("type").and_then(|t| t.as_str()) == Some("transcript"))
+        .filter_map(|e| e.get("lines").and_then(|l| l.as_array()))
+        .flatten()
+        .filter_map(|l| l.get("id").and_then(|i| i.as_u64()))
+        .max()
+        .map(|m| m + 1)
+        .unwrap_or(0);
+    let line = |id: u64, kind: &str, text: &str| serde_json::json!({"id": id, "reply": id, "line": text, "kind": kind, "speaker": "", "verb": "", "turn": 0});
+    // 两份行 + 一次压缩（覆盖到 next+2）+ 之后的一行：模拟「压过之后再重启」的落盘历史。
+    for (id, kind, text) in [
+        (next, "user", "第一句话"),
+        (next + 1, "assistant", "第一句的回复"),
+    ] {
+        core.history_append(
+            &sid,
+            &[serde_json::json!({"type": "transcript", "lines": [line(id, kind, text)]})],
+        )
+        .expect("落行");
+    }
+    core.history_append(
+        &sid,
+        &[serde_json::json!({"type": "compacted", "up_to": next + 2, "summary": "前两句的摘要"})],
+    )
+    .expect("落压缩事件");
+    core.history_append(
+        &sid,
+        &[serde_json::json!({"type": "transcript", "lines": [line(next + 2, "user", "之后的新内容")]})],
+    )
+    .expect("落之后的新行");
+    let shown = |msgs: &[crate::capabilities::llm::api::Msg]| {
+        msgs.iter()
+            .map(|m| format!("{}:{}", m.role, m.content))
+            .collect::<Vec<_>>()
+    };
+
+    // ① 重建（重启：会话不在内存里 → 按落盘转录重建）：摘要替代被压的行，之后的行照常。
+    // `prepare_single` 把会话交给工作线程，重建出来的对象就在它返回的这一轮里。
+    let live = core.take_single(&sid).expect("会话在表里");
+    drop(live);
+    core.abort_running(&sid);
+    let rebuilt = match core.prepare_single(&sid, None, false) {
+        Ok(crate::capabilities::conductor::service::Prepared::Run { session, .. }) => session,
+        Ok(_) => panic!("重建后该是可直接跑的一轮"),
+        Err(e) => panic!("重建失败：{e}"),
+    };
+    assert_eq!(
+        shown(rebuilt.dialogue()),
+        vec![
+            "user:[此前内容摘要]\n前两句的摘要".to_string(),
+            "user:之后的新内容".to_string(),
+        ],
+        "重建后的发送视图该是「摘要 + 之后的行」，被压掉的内容不回来"
+    );
+    assert_eq!(
+        rebuilt.compacted_upto(),
+        next + 2,
+        "重建也要恢复压缩点（回档分流靠它）"
+    );
+    drop(rebuilt);
+    core.abort_running(&sid);
+
+    // ② 回档跨越压缩点：会话在表里且压缩点 > 目标 → `rewind` 走重建，摘要不再生效。
+    core.ensure_session(&sid).expect("把重建结果装回表里");
+    core.rewind(&sid, next).expect("回档到压缩点之前");
+    let back = core.take_single(&sid).expect("取回回档后的会话");
+    let shown_back = shown(back.dialogue());
+    assert!(
+        !shown_back.iter().any(|c| c.contains("此前内容摘要")),
+        "回档到压缩点之前：摘要该消失（内容回到压缩前）：{shown_back:?}"
+    );
+    assert_eq!(back.compacted_upto(), 0, "压缩点该一起回退掉");
+}
 
 // ---------- 从「共享意图层」搬来的规则测试（规则跟着归属走） ----------
 

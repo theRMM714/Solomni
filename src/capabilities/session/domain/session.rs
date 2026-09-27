@@ -173,6 +173,11 @@ pub struct AgentSession {
     pub(crate) compacted_upto: u64,
 }
 
+/// 摘要消息（发送视图里是 **user 角色**）：`compact` 与重建共用一份口径，实时与回放才逐条相同。
+pub fn summary_message(summary: &str) -> Msg {
+    Msg::user(format!("[此前内容摘要]\n{}", summary))
+}
+
 impl AgentSession {
     /// 本会话的**对话**（测试据此断言"用户说过的话，下一回合带上了"）。
     /// 身份与环境不在里面——它们由 params 现渲染（见 SessionParams::identity）。
@@ -235,6 +240,7 @@ impl AgentSession {
         dialogue: Vec<Msg>,
         marks: Vec<usize>,
         line_reply: Vec<u64>,
+        compacted_upto: u64,
         chat: BoxedChat,
         note: Option<String>,
         tools: Option<MemberTools>,
@@ -244,7 +250,7 @@ impl AgentSession {
         AgentSession {
             cur_turn: 0,
             compact_at: 0,
-            compacted_upto: 0,
+            compacted_upto,
             id: id.to_string(),
             next_line: marks.len() as u64,
             params,
@@ -331,8 +337,7 @@ impl AgentSession {
         self.dialogue.drain(0..cut);
         // 摘要放在**对话最前面**（身份与环境由参数现渲染，不占对话的位置）：
         // 此后模型只看到"身份 + 摘要 + 之后的内容"。
-        self.dialogue
-            .insert(0, Msg::user(format!("[此前内容摘要]\n{}", summary)));
+        self.dialogue.insert(0, summary_message(summary));
         // 移出 cut 条、又插入一条：marks 整体前移 cut、再后移一格。
         for m in self.marks.iter_mut() {
             *m = m.saturating_sub(cut) + 1;
