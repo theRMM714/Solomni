@@ -1,0 +1,348 @@
+//! **安全描述符操作**：逐路径改 DACL（授予 / 撤销）、解析 ACE 与 SID、展开泛型掩码。
+//!
+//! 这些本该由内核替调用方算——Windows 上要自己算（`windows-sys` 未暴露 `TreeSetNamedSecurityInfoW`，ACE / ACL 结构也要自己认）。
+
+use crate::capabilities::tools::api::FenceSpec;
+use std::ffi::c_void;
+use std::os::windows::ffi::OsStrExt;
+use std::path::{Path, PathBuf};
+use windows_sys::Win32::Foundation::LocalFree;
+use windows_sys::Win32::Security::Authorization::{
+    ConvertStringSidToSidW, GetNamedSecurityInfoW, SetEntriesInAclW, SetNamedSecurityInfoW,
+    EXPLICIT_ACCESS_W, GRANT_ACCESS, REVOKE_ACCESS, TRUSTEE_IS_SID, TRUSTEE_IS_UNKNOWN, TRUSTEE_W,
+};
+use windows_sys::Win32::Security::{
+    EqualSid, GetAce, GetAclInformation, ACL, ACL_SIZE_INFORMATION, CONTAINER_INHERIT_ACE,
+    DACL_SECURITY_INFORMATION, OBJECT_INHERIT_ACE, PSID,
+};
+
+/// 文件对象（SetNamedSecurityInfoW / GetNamedSecurityInfoW 的对象类型）。
+use super::*;
+/// 给一个对象授一条 ACE。`recursive` = 连**已有**子项一起设成这个 ACL（TreeSet）；`inherit` = 这条 ACE 被**新建**子项继承。
+/// 两者都要有明确理由：`inherit` 会牵动整棵子树的继承计算（真机实测：2000 个子项的可继承 ACE 写入是空目录的
+/// 20 倍），`recursive` 更是会把整棵树设一遍 ACL——所以只对**真的需要被子项继承**的落点（解释器目录、数据边界）用。
+pub(crate) fn grant_one(
+    sid: PSID,
+    path: &Path,
+    rights: u32,
+    recursive: bool,
+    inherit: bool,
+) -> Result<(), String> {
+    let mut old_dacl: *mut ACL = std::ptr::null_mut();
+    let mut sd: PSID = std::ptr::null_mut();
+    let w = wide(path);
+    let rc = unsafe {
+        GetNamedSecurityInfoW(
+            w.as_ptr(),
+            SE_FILE_OBJECT,
+            DACL_SECURITY_INFORMATION,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            &mut old_dacl,
+            std::ptr::null_mut(),
+            &mut sd,
+        )
+    };
+    if rc != 0 {
+        return Err(format!("读 DACL 失败（{}）：错误码 {}", path.display(), rc));
+    }
+    let ea = EXPLICIT_ACCESS_W {
+        grfAccessPermissions: rights,
+        grfAccessMode: GRANT_ACCESS,
+        grfInheritance: if inherit {
+            OBJECT_INHERIT_ACE | CONTAINER_INHERIT_ACE
+        } else {
+            0
+        },
+        Trustee: TRUSTEE_W {
+            pMultipleTrustee: std::ptr::null_mut(),
+            MultipleTrusteeOperation: 0,
+            TrusteeForm: TRUSTEE_IS_SID,
+            TrusteeType: TRUSTEE_IS_UNKNOWN,
+            ptstrName: sid as *mut u16,
+        },
+    };
+    let mut new_dacl: *mut ACL = std::ptr::null_mut();
+    let rc = unsafe { SetEntriesInAclW(1, &ea, old_dacl as *const ACL, &mut new_dacl) };
+    if rc != 0 || new_dacl.is_null() {
+        unsafe {
+            LocalFree(sd);
+        }
+        return Err(format!("拼 ACL 失败（{}）：错误码 {}", path.display(), rc));
+    }
+    let rc = if recursive {
+        unsafe {
+            TreeSetNamedSecurityInfoW(
+                w.as_ptr(),
+                SE_FILE_OBJECT as u32,
+                DACL_SECURITY_INFORMATION,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                new_dacl,
+                std::ptr::null_mut(),
+                TREE_SEC_INFO_SET,
+                std::ptr::null_mut(),
+                PROGRESS_INVOKE_NEVER,
+                std::ptr::null_mut(),
+            )
+        }
+    } else {
+        unsafe {
+            SetNamedSecurityInfoW(
+                w.as_ptr(),
+                SE_FILE_OBJECT,
+                DACL_SECURITY_INFORMATION,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                new_dacl as *const ACL,
+                std::ptr::null(),
+            )
+        }
+    };
+    unsafe {
+        LocalFree(new_dacl as *mut c_void);
+        LocalFree(sd);
+    }
+    if rc != 0 {
+        return Err(format!("写 DACL 失败（{}）：错误码 {}", path.display(), rc));
+    }
+    Ok(())
+}
+
+/// 把该 SID 的 ACE 从对象上撤掉（会话删除时清理用）。
+pub(crate) fn revoke_one(sid: PSID, path: &Path, recursive: bool) -> Result<(), String> {
+    let mut old_dacl: *mut ACL = std::ptr::null_mut();
+    let mut sd: PSID = std::ptr::null_mut();
+    let w = wide(path);
+    let rc = unsafe {
+        GetNamedSecurityInfoW(
+            w.as_ptr(),
+            SE_FILE_OBJECT,
+            DACL_SECURITY_INFORMATION,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            &mut old_dacl,
+            std::ptr::null_mut(),
+            &mut sd,
+        )
+    };
+    if rc != 0 {
+        return Err(format!("读 DACL 失败（{}）：错误码 {}", path.display(), rc));
+    }
+    let ea = EXPLICIT_ACCESS_W {
+        grfAccessPermissions: 0,
+        grfAccessMode: REVOKE_ACCESS,
+        grfInheritance: 0,
+        Trustee: TRUSTEE_W {
+            pMultipleTrustee: std::ptr::null_mut(),
+            MultipleTrusteeOperation: 0,
+            TrusteeForm: TRUSTEE_IS_SID,
+            TrusteeType: TRUSTEE_IS_UNKNOWN,
+            ptstrName: sid as *mut u16,
+        },
+    };
+    let mut new_dacl: *mut ACL = std::ptr::null_mut();
+    let rc = unsafe { SetEntriesInAclW(1, &ea, old_dacl as *const ACL, &mut new_dacl) };
+    if rc != 0 {
+        unsafe {
+            LocalFree(sd);
+        }
+        return Err(format!(
+            "拼撤销后的 ACL 失败（{}）：错误码 {}",
+            path.display(),
+            rc
+        ));
+    }
+    let rc = if recursive {
+        unsafe {
+            TreeSetNamedSecurityInfoW(
+                w.as_ptr(),
+                SE_FILE_OBJECT as u32,
+                DACL_SECURITY_INFORMATION,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                new_dacl,
+                std::ptr::null_mut(),
+                TREE_SEC_INFO_SET,
+                std::ptr::null_mut(),
+                PROGRESS_INVOKE_NEVER,
+                std::ptr::null_mut(),
+            )
+        }
+    } else {
+        unsafe {
+            SetNamedSecurityInfoW(
+                w.as_ptr(),
+                SE_FILE_OBJECT,
+                DACL_SECURITY_INFORMATION,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                new_dacl as *const ACL,
+                std::ptr::null(),
+            )
+        }
+    };
+    unsafe {
+        if !new_dacl.is_null() {
+            LocalFree(new_dacl as *mut c_void);
+        }
+        LocalFree(sd);
+    }
+    if rc != 0 {
+        return Err(format!(
+            "写撤权后的 DACL 失败（{}）：错误码 {}",
+            path.display(),
+            rc
+        ));
+    }
+    Ok(())
+}
+
+/// 命令里解释器的安装目录：共用实现在 confine/mod.rs（Windows 的目录 ACL 与 macOS 的 seatbelt 同一套语义）。
+pub(crate) fn interpreter_dirs(command: &str) -> Vec<PathBuf> {
+    super::super::interpreter_dirs(command)
+}
+
+/// 围栏要授权的全部落点：数据边界叶子（读写 / 用户授权的只读）+ **它们的父目录**（只读属性）。
+///
+/// 父目录为什么要授：容器里对**中间目录**没有 FILE_READ_ATTRIBUTES 时，`exists()` / `stat()` 这类
+/// 常规判断会对一个**确实存在**的目录返回假。后果不是"读不到"，而是模块的"父目录不存在就先建"逻辑
+/// 以为整条链都不存在，一路向上建到盘卷根，撞出 `WinError 5 Access is denied: 'D:\'`
+/// （真机 CI 上抓到的：Python 的 `os.makedirs(parent, exist_ok=True)`）。
+///
+/// 只授"读属性"、**不递归、不继承**：容器能判断存在性，但读不到内容、列不了目录。
+/// 只到**直接父目录**为止（不是整条祖先链）：再往上就是产品根之外，而 stat 到直接父目录已足够让
+/// "父目录在不在"这个判断成立。当年那趟"给祖先链授穿过"要改写 `C:\` 这种巨型目录的 DACL
+/// （顺整棵树重算继承，真机 ~90 s/条），这里授的是产品内的小目录，各一条 ACE。
+pub(crate) fn grant_targets(spec: &FenceSpec) -> Vec<(PathBuf, u32, bool)> {
+    let mut todo: Vec<(PathBuf, u32, bool)> = Vec::new();
+    let mut leaves: Vec<(PathBuf, u32, bool)> = Vec::new();
+    for root in spec.rw.iter().chain(std::iter::once(&spec.cwd)) {
+        if !root.as_os_str().is_empty() {
+            leaves.push((root.clone(), RIGHTS_RW, true));
+        }
+    }
+    // 用户显式授权的只读根（`fence_read`）：只写只读 ACE，**授给该 agent 自己的容器 SID**。
+    // 不能像解释器基线那样授给共享组（S-1-15-2-1）——那等于把用户数据开放给机器上任意容器程序。
+    // 只读根不递归：用户可能授一个很大的目录（例如项目根），递归会改整棵树的 DACL。
+    for root in &spec.ro {
+        if !root.as_os_str().is_empty() {
+            leaves.push((root.clone(), RIGHTS_RO, false));
+        }
+    }
+    // 父目录：只读属性、不递归、不继承。同一个父目录被多个叶子共用时靠调用方的去重表收口。
+    for (leaf, _, _) in &leaves {
+        if let Some(parent) = leaf.parent() {
+            if !parent.as_os_str().is_empty() {
+                todo.push((parent.to_path_buf(), RIGHTS_STAT, false));
+            }
+        }
+    }
+    todo.extend(leaves);
+    todo
+}
+
+/// 只读运行基线的授权对象：ALL APPLICATION PACKAGES（S-1-15-2-1）。
+/// 我们的容器令牌本来就带这个组，所以「解释器与系统只读区」这类基线只授一次、与 agent 身份无关；
+/// 每 agent 一个的容器 SID 只用来圈**数据边界**（会话目录、模块目录）。
+pub(crate) fn baseline_sid() -> Result<PSID, String> {
+    let s: Vec<u16> = std::ffi::OsStr::new("S-1-15-2-1")
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+    let mut sid: PSID = std::ptr::null_mut();
+    if unsafe { ConvertStringSidToSidW(s.as_ptr(), &mut sid) } == 0 || sid.is_null() {
+        return Err("取不到 ALL APPLICATION PACKAGES 的 SID".to_string());
+    }
+    Ok(sid)
+}
+
+/// 把通用位展开成具体位：ACL 里存的是哪一套，覆盖关系比较都要等价成立。
+pub(crate) fn expand_generics(mask: u32) -> u32 {
+    let mut out = mask;
+    if mask & GENERIC_READ != 0 {
+        out |= FILE_GENERIC_READ;
+    }
+    if mask & GENERIC_WRITE != 0 {
+        out |= FILE_GENERIC_WRITE;
+    }
+    if mask & GENERIC_EXECUTE != 0 {
+        out |= FILE_GENERIC_EXECUTE;
+    }
+    if mask & GENERIC_ALL != 0 {
+        out |= FILE_ALL_ACCESS;
+    }
+    out
+}
+
+/// 已有 ACE 的权限位是不是覆盖得住我们需要的权限位。
+pub(crate) fn rights_covered(mask: u32, rights: u32) -> bool {
+    expand_generics(rights) & !expand_generics(mask) == 0
+}
+
+/// 该对象上是不是已经有给这个 SID 的允许 ACE，**且权限位覆盖得住**。
+/// 用途：基线授权只以递归方式写过一次，所以根上已有"够用"的 ACE 就跳过整棵树——否则每来一个 agent 都要重走几万文件。
+/// 只看"有没有该 SID 的 ACE"不够：真机上解释器目录继承了只有 SYNCHRONIZE 的 ALL APPLICATION PACKAGES ACE，
+/// 基线因此被整条跳过，容器里连解释器都读不到（工具报 python is not recognized）。
+pub(crate) fn has_ace_for(sid: PSID, path: &Path, rights: u32) -> bool {
+    const ACCESS_ALLOWED_ACE_TYPE: u8 = 0;
+    const ACL_SIZE_INFORMATION_CLASS: i32 = 2;
+    let mut dacl: *mut ACL = std::ptr::null_mut();
+    let mut sd: PSID = std::ptr::null_mut();
+    let w = wide(path);
+    let rc = unsafe {
+        GetNamedSecurityInfoW(
+            w.as_ptr(),
+            SE_FILE_OBJECT,
+            DACL_SECURITY_INFORMATION,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            &mut dacl,
+            std::ptr::null_mut(),
+            &mut sd,
+        )
+    };
+    if rc != 0 || dacl.is_null() {
+        return false;
+    }
+    let mut info: ACL_SIZE_INFORMATION = unsafe { std::mem::zeroed() };
+    let ok = unsafe {
+        GetAclInformation(
+            dacl,
+            &mut info as *mut _ as *mut c_void,
+            std::mem::size_of::<ACL_SIZE_INFORMATION>() as u32,
+            ACL_SIZE_INFORMATION_CLASS,
+        )
+    };
+    let mut found = false;
+    if ok != 0 {
+        for i in 0..info.AceCount {
+            let mut ace: *mut c_void = std::ptr::null_mut();
+            if unsafe { GetAce(dacl, i, &mut ace) } == 0 || ace.is_null() {
+                continue;
+            }
+            let base = ace as *const u8;
+            // ACCESS_ALLOWED_ACE：AceType(1) + AceFlags(1) + AceSize(2) + Mask(4) → SID 从第 8 字节开始。
+            if unsafe { *base } != ACCESS_ALLOWED_ACE_TYPE {
+                continue;
+            }
+            // 只继承给子项的 ACE 不作用于本对象，不算数。
+            const INHERIT_ONLY_ACE: u8 = 0x08;
+            if unsafe { *base.add(1) } & INHERIT_ONLY_ACE != 0 {
+                continue;
+            }
+            let mask = unsafe { std::ptr::read_unaligned(base.add(4) as *const u32) };
+            if !rights_covered(mask, rights) {
+                continue;
+            }
+            if unsafe { EqualSid(base.add(8) as PSID, sid) } != 0 {
+                found = true;
+                break;
+            }
+        }
+    }
+    unsafe {
+        LocalFree(sd);
+    }
+    found
+}

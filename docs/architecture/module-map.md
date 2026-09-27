@@ -99,7 +99,9 @@
 | `llm/detail/endpoint.rs` | 端点补全/回落规则与进程内端点记忆（纯逻辑） |
 | `llm/detail/model_catalog.rs` | `ModelCatalog`：OpenAI 兼容 `GET /models` |
 | `llm/detail/fake_chat.rs` | 演示/测试通道：`FakeChat`（脚本回放）+ `DemoGateway`（无模型时回落） |
-| `tools/detail/confine/` | 守门进程与平台围栏后端（一个平台一个文件） |
+| `tools/detail/confine/mod.rs` | 守门进程与平台围栏的**调度面**：选平台后端、共享的目录与命令分隔符推导（`windows_program_separators` / `interpreter_dirs` 的共用实现） |
+| `tools/detail/confine/linux.rs` / `macos.rs` | **进程级围栏**（landlock / seatbelt）：装规则再 exec，规则随进程消失——不需要记账或撤销 |
+| `tools/detail/confine/windows/` | **AppContainer 围栏**（Windows 独有）：`mod.rs` 平台入口 · `acl.rs` 改 DACL 与 ACE / SID 解析 · `record.rs` 授权记录与撤销清扫 · `container.rs` 容器内启动 · `tests.rs` ACL 语义的内联测试（改动在盘上持久，所以要记账） |
 | `tools/detail/proc_tools.rs` | `ToolRunner`：守门进程拉起、stdin 送参、超时杀树、输出截断 |
 | `tools/detail/sys_io.rs` | `SysIo`：内置工具的读写机制（UTF-8 解码、非法字节 `lossy` 标注） |
 | `tools/detail/yaml_systools.rs` | `systools/tools.yaml` + `roles.yaml` → `SystemTools`（**工具总表与角色表是工具侧的事实**，不是提示词） |
