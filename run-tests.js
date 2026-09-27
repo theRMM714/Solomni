@@ -409,6 +409,10 @@ function structuralAudit() {
     const reverse = new Set();
     const presentation = new Set();
     const apiOnly = new Set();
+    // 批次 20a 新增：给别能力的类型写 impl、domain 里引端口。
+    const foreignImpl = new Set();
+    const domainPorts = new Set();
+    const apiPorts = new Set();
     const coreGraph = {};
     for (const abs of rsFiles) {
       const f = rel(abs);
@@ -433,16 +437,27 @@ function structuralAudit() {
         if (layer === "presentation" && !presOk && targetLayer !== "presentation") {
           presentation.add(f + " -> " + t);
         }
-        // 业务之间只经对方的**声明面**：::api（入站契约）或 ::ports（出站端口，是接口不是实现）。
-        // 不许碰 ::domain —— 那是实现细节。能力内部的互相引用不算"业务之间"。
+        // 业务之间**只经对方的 `api`** 交流（R1，批次 20a 收紧）：`::ports` 是"对方与它自己 detail 之间的事"（R12），
+        // 跨能力引用一律不许；`::domain` / `::detail` 同样是实现。能力内部的互相引用不算"业务之间"。
         if (layer === "capabilities" && targetLayer === "capabilities") {
           const selfCap = f.split("/")[2];
           const otherCap = t.split("::")[2];
-          const declared = t.endsWith("::api") || t.endsWith("::ports");
-          // ① 跨能力：只准碰对方的声明面（::api / ::ports）——::domain 与 ::detail 都是实现。
-          if (otherCap && otherCap !== selfCap && !declared) apiOnly.add(f + " -> " + t);
-          // ② 同能力：自己的 domain / detail 随便用；`::detail` 只准自己用。
+          if (otherCap && otherCap !== selfCap && !t.endsWith("::api")) apiOnly.add(f + " -> " + t);
         }
+        // `domain/` 是**纯逻辑**（批次 20a）：不得引用任何 `ports`——自己的也不行，引了就不是纯的了。
+        if (f.includes("/domain/") && t.endsWith("::ports")) domainPorts.add(f + " -> " + t);
+        // **端口只由定义它的能力持有**（R12，批次 20a）：任何非入口层引用别的能力的 `ports` 都是违规——
+        // `core`（协调业务）也算，它不该拿着别人的端口替别人做 IO。
+        if (
+          layer !== "entry" &&
+          t.startsWith("crate::capabilities::") &&
+          t.endsWith("::ports") &&
+          t.split("::")[2] !== (layer === "capabilities" ? f.split("/")[2] : null)
+        ) {
+          apiOnly.add(f + " -> " + t);
+        }
+        // `api.rs` 是**入站用例面**：不得把本能力的 `ports` 再导出去（批次 20b 清掉 llm 这处）。
+        if (f.endsWith("/api.rs") && t.endsWith("::ports")) apiPorts.add(f + " -> " + t);
         // `::detail` 是**实现**：跨能力引用一律不许，只有入口层的组合根能构造它。
         if (
           layer !== "entry" &&
@@ -466,6 +481,28 @@ function structuralAudit() {
               : null;
         if (otherNode && otherNode !== selfNode) {
           (coreGraph[selfNode] = coreGraph[selfNode] || new Set()).add(otherNode);
+        }
+      }
+      // 不许给**别的能力**的类型写 impl（R1）：这是另一种"互相引入"，`use` 边看不见它。
+      // 只认"路径直接写在 impl 行上"的形式（引用后写短名的情况由评审兜底）。
+      if (layer !== "entry") {
+        const selfCap = layer === "capabilities" ? f.split("/")[2] : null;
+        const foreignPaths = (s) =>
+          [...s.matchAll(/crate::([a-z_][a-z0-9_]*(?:::[a-z_][a-z0-9_]*)*)/g)]
+            .map((m) => normTarget(m[1]))
+            .filter((t2) => t2.startsWith("crate::capabilities::") && t2.split("::")[2] !== selfCap);
+        for (const line of text.split("\n")) {
+          if (!/^impl\b/.test(line)) continue;
+          // `impl Trait for Type` → 只看 **Type**（实现别人的 api trait 是正当的队列代理）；
+          // `impl Type` → 看 Type。
+          const forIdx = line.indexOf(" for ");
+          const traitPart = forIdx >= 0 ? line.slice(4, forIdx) : "";
+          const typePart = forIdx >= 0 ? line.slice(forIdx + 5) : line.slice(4);
+          for (const t2 of foreignPaths(typePart)) foreignImpl.add(f + " -> " + t2);
+          // trait 侧只在**显式引用了别人的 ports** 时才算违规（那是替别人实现端口，R12 不许）。
+          for (const t2 of foreignPaths(traitPart)) {
+            if (t2.endsWith("::ports")) foreignImpl.add(f + " -> " + t2);
+          }
         }
       }
     }
@@ -507,7 +544,10 @@ function structuralAudit() {
     };
     compare("reverse", [...reverse].sort(), depBaseline.reverse || [], "业务层不得反向依赖旧巨石 core / adapters / presentation");
     compare("presentation", [...presentation].sort(), depBaseline.presentation || [], "presentation 只能经入站能力面（core::api 或各能力的 ::api）驱动");
-    compare("apiOnly", [...apiOnly].sort(), depBaseline.apiOnly || [], "业务之间只能经对方的声明面（::api / ::ports）；::domain / ::detail 是实现，跨能力一律不许碰");
+    compare("apiOnly", [...apiOnly].sort(), depBaseline.apiOnly || [], "业务之间只能经对方的 ::api（R1，批次 20a 起不再允许 ::ports）；::domain / ::detail 是实现，跨能力一律不许碰");
+    compare("foreignImpl", [...foreignImpl].sort(), depBaseline.foreignImpl || [], "不得给别的能力的类型写 impl（R1：另一种互相引入）");
+    compare("domainPorts", [...domainPorts].sort(), depBaseline.domainPorts || [], "domain 是纯逻辑（批次 20a）：不得引用任何 ports");
+    compare("apiPorts", [...apiPorts].sort(), depBaseline.apiPorts || [], "api 是入站用例面：不得把本能力的 ports 再导出去（R12）");
 
     const actualCycles = sortSccs(coreSccs);
     const baselineCycles = sortSccs(depBaseline.coreCycles || []);

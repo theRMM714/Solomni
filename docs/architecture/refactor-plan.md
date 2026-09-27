@@ -87,7 +87,7 @@ capabilities/<name>/
 
 | 编号 | 要求 | 依据 / 落地判据 |
 | --- | --- | --- |
-| **R1** | 业务之间**只经对方的声明面**交流：`api`（入站契约）或 `ports`（出站端口——它是接口，不是实现）；**禁止 `use` 别人的 `domain` / `detail`**。`::detail` **只有入口层（组合根）能碰** | 门禁按 `use` 边判定 |
+| **R1** | 业务之间**只经对方的 `api` 交流**（入站契约：trait + DTO）。**不准引 `ports`**——端口是"对方与它自己 `detail` 之间的事"，只能由**定义它的能力**持有；**禁止 `use` 别人的 `domain` / `detail`**；**禁止给别的能力的类型写 `impl`**（那是另一种"互相引入"，门禁原来只看 `use` 边，漏了）。`::detail` **只有入口层（组合根）能碰** | 门禁按 `use` 边 + **`impl` 边**判定；迁移期仍引 `ports` 的点先记基线，批次 20 清零 |
 | **R2** | 依赖图**必须无环**，由 T0 门禁机器判定 | 白名单外的边 = 测试失败；迁移期允许的边进**基线豁免清单**，拆完即删 |
 | **R3** | DIP **只画在 IO 或可替换点上**；纯逻辑刻意不抽象 | 判据：这里有 IO，或这里有可替换实现。不满足就不加 trait |
 | **R4** | **状态所有权排他**：一块状态只有一个能力写，别人只读它的 `api` | 跨能力读改写必须经 `api`，不得 `pub` 字段 |
@@ -98,6 +98,8 @@ capabilities/<name>/
 | **R9** | **跨平台与路径**：一律 `PathBuf` 组件拼接；对外用 `/`；不假设平台 | 同 `ARCHITECTURE.md` §八 |
 | **R10** | **测试跟着业务分区走**：测试目录与业务目录同构，单文件 ≤ 2000 行 | 见 §四.4 |
 | **R11** | **测试入口 = 生产入口**：禁止 `#[cfg(test)]` 专用语义入口 | 现状 `Core::single_say` 是反例 |
+| **R12** | **端口只有一个持有者：定义它的那个能力**（它的 `service.rs`）。别人只拿 `api` 面；组合根只注入"每个能力**自己的**端口 + 别人的 **`api` 面**" | R1 的推论；§五.5"端口一处持有"据此改写成可判定的口径 |
+| **R13** | **跨能力的同形重复不许存在**：同一形状在 ≥2 个能力里各自实现 ⇒ 要么收进唯一所有者，要么**独立成一个业务**（有 `api`、有主人、门禁同样对待） | 审查判据。已知反例：拟名单（`core::suggest_models` 与 `collab::draft_slate` 各写一遍）、"核心操作回路"调用侧包装 5 处 |
 
 ---
 
@@ -123,6 +125,18 @@ capabilities/<name>/
 - 没有，只是"按这个顺序调那 5 个" → 它是**脚本**，收进唯一的协调者，不配独立。
 - 完全没有领域语义 → 它是**内核**。
 
+**①' 状态归属测试**（决定"这块状态归谁"）——回答"是不是所有状态都该抽进协调业务"：
+
+> 这块状态，**有没有任何一个参与方拥有它的不变式**？
+
+- **有** → 归**那个业务**（它的 `service.rs` 持有、别人只经 `api` 读改）；
+- **没有，且多个参与方共同依赖** → 归**协调业务**（跨参与方的状态与编排）；
+- **只被一个参与方用、自己又没有不变式** → 它不是状态，是**派生值**（留在 owner 的 `domain/`，现算）。
+
+**反例警告（这是旧 `Core` 长成巨石的机制）**：不能因为"这块状态看起来能抽出来"就抽进协调业务。
+判据是**不变式归属**，不是"能不能抽"。抽出来却没有跨参与方不变式的，就是 §2.4 的"脚本 / DTO 中转站"，
+只会把协调业务喂成新的巨石。**协调业务自己也要满足 §2.1 三条**（它有不属于任何参与方的不变式）。
+
 **② 领域词测试**（决定"业务还是内核"）
 
 > 这个东西会不会需要知道"什么是回合、什么是回复、什么是工具执行"？
@@ -138,6 +152,9 @@ capabilities/<name>/
 | **领域型业务** | 拥有自己的状态与端口 | 独立业务 | 向下调 `kernel` |
 | **机制型内核** | 无领域语义、无领域状态、API 不含领域词 | `kernel/` | 只被依赖 |
 | **伪横切（脚本）** | API 就是"按顺序调这几个" | 收进**唯一**协调者 | 否则五个"管理业务" = `Core` 换马甲 |
+
+**第三种形态：纯领域业务**（批次 20 新增）：**有不变式、没有端口**——状态是一个**值对象**，规则全在 `domain/`，
+`api` 只导出"查询与派生"；**不需要 `service.rs`**（没有 IO 可编排）。样板：**任务链**（阶段派生 / 就绪 / 验收判定）。
 
 ### 2.4 反例：什么不配切成业务
 
@@ -163,7 +180,9 @@ capabilities/<name>/
 
 | 能力 | 类型 | 现有文件 | 状态所有权 | 端口 | 状态 |
 | --- | --- | --- | --- | --- | --- |
-| **kernel** | 内核 | **已落位** `src/kernel/`（`jobs` / `log` / `types`） | 生成中作业表（取消标志） | — | **已完成**（批次 1；`bus` 与运行态合并推迟到批次 9，见 §3.2） |
+| **kernel** | **业务（机制型）**——它有状态（取消表）、有端口（`Log`/`HostProbe`）、有机制（路径）、有事实类型，按 §2.1 三条够格当一个能力；只是它的领域词最少 | **已落位** `src/kernel/`（`jobs` / `log` / `types` / `path` / `host`） | 生成中作业表（取消标志） | `Log` `HostProbe` | 批次 1 落位；**批次 20 补齐能力形状**（`api`/`ports`/`domain`/`detail`，**适配器从 `adapters/` 归位**，`chain` 搬出） |
+| **taskchain** | 领域（**纯**：有不变式、无端口） | 现 `kernel/chain.rs`（232 行，批次 5 为断环搬入 kernel） | **任务链本身**（值对象 + 派生规则：阶段、就绪、验收） | — | **批次 20 独立成业务**：`collab` 触发、`session` 线格式携带、呈现层渲染，三方都要经它的 `api`；留在 kernel 里等于"环只是藏进了一个叫内核的地方" |
+| **conductor**（协调业务，名字待定） | 协调 | 现 `src/core/`（`mod.rs` 约 2600 行 + `api.rs`） | **会话在世表 + 命令队列 + 运行态**（跨参与方的状态，没有任何参与方拥有它的不变式 ⇒ 按 §2.2 ①' 归协调业务） | — | **批次 20 从 `core` 独立成业务**：只持各能力的 **`api` 面**；`Ops` 组装、事件台、队列代理随它；**它和其他能力受同一条 R1/R12 约束** |
 | **session** | 领域 | **已落位** `capabilities/session/`（`session` + `history` + `events`）（`collab_state.rs` 已改判归 `collab`——它派生的是**协作**状态） | 对话、转录行、行索引 | `HistoryStore` | **已完成**（批次 12） |
 | **llm** | 领域 | **已落位** `capabilities/llm/`（`ports` 的通道族 + `domain/envelope`） | 通道协议与回复解析 | `Chat` `ChatGateway` `ModelCatalog` `EnvelopeRepair` | **已完成**（批次 9） |
 | **tools** | 领域 | **已落位** `capabilities/tools/`（`api` + `service` + `domain/{systool,patch,schema,roles,fence}` + `detail`） | 观察账本、围栏策略、工具面；**工具总表与角色表只由 `service.rs` 持有** | `SysIo` `ToolRunner` `FenceHost` `SystoolsSource` | **已完成**（批次 11；两张表随批次 17 归位 `service.rs`） |
@@ -171,7 +190,7 @@ capabilities/<name>/
 | **registry** | 领域 | **已落位** `capabilities/registry/`（`api` + `service` + `domain/providers` + `domain/agents`） | 四份 yaml 的内存形态（**只由 `service.rs` 写**） | `SettingsStore`（自己的）；另经 `llm::api` 的 `ChatGateway` / `ModelCatalog` 做探测与发现 | **已完成**（批次 8；状态与用例随批次 17 归位 `service.rs`） |
 | **workspace** | 领域 | **已落位** `capabilities/workspace/`（`module` + `packages` + `exec` + `workspace` 沙箱数据） | 清单快照、执行计划、沙箱寻址 | `ModuleSource` `PackageSource` `Workspace` | **已完成**（批次 10） |
 | ~~**rewind**~~ | ~~协调~~ | **改判：不是独立能力**——无独立状态所有权，归 `session`（见 §3.6） | — | — | **已并入批次 13** |
-| **collab** | 协调 | **已落位** `capabilities/collab/`（`collab` + `collab_state` + `engine`）（任务链的**数据与图算法**已落位 `kernel/chain.rs`，见批次 5） | 讨论游标、任务链、待裁决 | — | **已完成**（批次 14） |
+| **collab** | 协调 | **已落位** `capabilities/collab/`（`collab` + `collab_state` + `engine`）（任务链**待批次 20 搬去 `taskchain`**） | 讨论游标、待裁决（~~任务链~~ → 批次 20 归 `taskchain`） | — | **已完成**（批次 14）；**批次 20 补内部层次**（`engine`/`collab` 是编排，要落 `service/`） |
 | **presentation** | 交付机制（**不是能力**：无状态所有权、无独立不变式） | **已落位** `cli/` + `web/`（各自独立、无共享层） | — | — | **已完成**（批次 15 收口第 3 步） |
 
 
@@ -187,8 +206,9 @@ capabilities/<name>/
 | **workspace** | `fs_modules.rs` / `fs_packages.rs` / `fs_workspace.rs` |
 | **tools** | `confine/*`（5 个平台文件）/ `proc_tools.rs` / `sys_io.rs` |
 
-**留在 `adapters/` 的只有 4 个**：`log.rs` / `host_probe.rs`（实现 **kernel** 的端口，内核是机制层、没有业务可归）、
-`root.rs`（入口层用的路径规范化）、`mod.rs`（模块清单）。所以 `adapters/` 不是"一层"，而是**内核端口的实现**。
+**留在 `adapters/` 的 4 个（批次 20 归位后目录归零）**：`log.rs` / `host_probe.rs` → **`kernel/detail/`**
+（kernel 业务化后它有自己的 `detail`）；`root.rs` → **入口层**（`main.rs` / `diagnostics` / `guard` 共用）；
+`mod.rs` 随目录消失。**归零后"谁能碰 `::detail`"只剩入口层一档**，门禁少一个特例。
 
 ### 3.2 kernel（机制型内核）
 
@@ -388,7 +408,7 @@ tools 自持一个就等于绕过状态所有权——**直接写别人的文件
 | `capabilities/session/domain/session.rs` | `AgentSession::rewind`、`keep_whole_replies`，及 `marks` / `line_reply` / `next_line` 与簿记 |
 | `capabilities/collab/domain/collab_state.rs` | `tool_runs()`——算"删掉了几次工具执行"（经 `collab::api`） |
 | `capabilities/session/domain/history.rs` | append-only 的 `rewind` 记录协议 |
-| `core/mod.rs`（**应用服务，保留**） | `rewind` 编排、`rewind_children`（撤子会话）、`rebuild_session`（整段重建）——要装配端口、走历史流水、驱动多个会话。**注意**：装配（造适配器）在 `main.rs`，这里只收注入的端口 |
+| 协调业务（`conductor`，批次 20 从 `core` 独立） | `rewind` 编排、`rewind_children`（撤子会话）、`rebuild_session`（整段重建）——**跨会话**所以归协调（§2.2 ①'：这块不变式不属于任何单个会话）。**它只经 `session::api` 调**，不再自己持 `HistoryStore`（R12）；装配（造适配器）在 `main.rs` |
 
 **越界耦合已消**：`AgentSession::rewind` 里 `t.observations.clear()` 伸手改工具账本——`MemberTools` 已在批次 12a 归 `session`，所以这不再是跨能力越界。
 
@@ -406,24 +426,33 @@ tools 自持一个就等于绕过状态所有权——**直接写别人的文件
 
 ### 3.7 collab（协调型业务）
 
-协作状态机、讨论泵、任务链、审查关卡、节点验收、总验收。它是依赖最多的能力，**最后迁**。
+协作状态机、讨论泵、审查关卡、节点验收、总验收。它是依赖最多的能力，**最后迁**。
+
+**批次 20 的两条修正**：① **任务链搬去 `taskchain`**（它是自足的纯领域业务，见 §3.1；三个消费者都要经它的 `api`）；
+② `domain/{engine,collab}.rs` 是**编排**（持 7 个端口、驱动 IO）⇒ 按 R12/R1 落 `service/`，`domain/` 只留纯派生（`collab_state`）。
 前置（**批次 12a 已完成**）：`engine ⇄ session` 的环已解——做法是**循环反转**：把回合驱动（`say`/`dispatch_task`/`discussion_turn`/`continue_reply`/`compact_turn`/`run_rounds`/`run`）与行构造从 `session.rs` 搬进 `engine.rs`（以 `impl AgentSession` 写在引擎里，调用点零改动），并把回合词汇（`MemberTools`/`ModuleTools`）搬进 `session.rs`。依赖方向因此是单向 `engine → session`。
 
 ### 3.8 目标依赖图（必须无环）
 
 **目标**：
 
+**批次 20 起，边只可能是 `api`**（R1）：`A ──▶ B` 读作"A 调 B 的 `api`"，**不表示 A 持 B 的端口**（R12）。
+
 ```text
-presentation ──▶ {session, llm, tools, prompt, registry, workspace, collab, kernel} 的声明面
-collab       ──▶ session, llm, tools, prompt, registry, workspace
-session      ──▶ llm, tools, prompt, kernel
-registry     ──▶ session, prompt, workspace, kernel
+presentation ──▶ {conductor, session, llm, tools, prompt, registry, workspace, collab, taskchain, kernel} 的 api
+conductor    ──▶ 其余能力的 api（跨会话/跨能力编排；**不持任何别人的端口**）
+collab       ──▶ conductor, session, llm, tools, prompt, registry, workspace, taskchain
+session      ──▶ llm, tools, prompt, taskchain, kernel
+registry     ──▶ llm, prompt, workspace, kernel      # 探测/发现改为调 llm::api 的用例
 tools        ──▶ llm, prompt, workspace, kernel
-llm          ──▶ kernel
 workspace    ──▶ prompt, kernel
+llm          ──▶ kernel
 prompt       ──▶ kernel
+taskchain    ──▶ kernel                              # 纯领域：无端口、无 service
 kernel       ──▶ （无）
 ```
+
+**端口**（`ports`）不出现在这张图里：它是**各能力与自己 `detail` 之间的事**，跨能力引用一律不许（R1/R12）。
 
 **现状（批次 15 结束时）：零环** ✔。四处切法：
 
@@ -486,15 +515,27 @@ kernel       ──▶ （无）
 | **15** | **断环（已完成）** → 能力图零环；**收口 1（已完成）**：入站词汇归 `core/api.rs` → 基线全空；**收口 2（已完成）**：`intent.rs` 规则下沉；**收口 3（已完成）**：`Action`/`Acted` 与分发收进 `core::api`（`SessionOps::act` 默认方法）、`split_names`/`NO_AGENTS` 归 CLI、**`intent.rs` 删除**、`presentation/` 拆成 **`cli/` + `web/`** 两个独立顶层目录（静态资源随 `web/assets/`）；**收口 4（已完成）**：`main.rs` 拆四件事——组合根留 `main.rs`、机器可读探针进 `diagnostics/`、围栏守门进程进 `guard/`（**第二个程序入口**）、路径机制下沉 `adapters/root.rs`；门禁新增**入口层**并禁止任何人依赖它 | 14 | **全部完成** |
 
 | **16** | **适配器归位**：`adapters/` 里**能力私有**的 20 个实现 → 各能力 `detail/`；`adapters/` 只剩 `log` / `host_probe`（内核端口）与 `root`（入口层） | 15 | **已完成**。**重要发现**：搬进能力后暴露出一处被"适配层"挡住的真环 `tools ⇄ workspace`——`fs_modules` 校验清单时反向问了 `tools` 的保留名。解法：**校验归清单主人（workspace）、名字空间归工具（tools），保留名表由组合根装配期注入** |
-| **17** | **编排与状态归位（能力服务化）**：每块状态连同写它的操作一起搬进该能力的 `service.rs`。**只搬"状态 + 写它的操作"，不搬脚本**（§2.4） | 16 | **已完成**。`registry`：`service.rs` 持四份 yaml 与三个端口，`core` 删掉 `settings` 与 17 个方法。`prompt`：`service.rs` 把 `Prompt` 面挂在册子上，`core` 只剩 `Arc<dyn Prompt>`，`collab`/`Sandbox`/`ProcTools`/`AgentSession` 的深拷贝改共享 `Arc`。`tools`：`Tools` 面 + `SystoolsSource` 端口，`core` 只剩 `Arc<dyn Tools>`。`core` 至此**不再有别人的状态字段**（剩下的是端口与它自己的会话中心）。**核过、无状态可搬**：`workspace`（core 持的是三个**端口**，状态是按次派生的局部量）、`session`（transcripts 在 `HistoryStore` 后面；回档编排 §3.6 已定留在应用服务）、代拟（是**脚本**，§2.4 归唯一协调者） |
+| **17** | **编排与状态归位（能力服务化）**：每块状态连同写它的操作一起搬进该能力的 `service.rs`。**只搬"状态 + 写它的操作"，不搬脚本**（§2.4） | 16 | **已完成**。`registry`：`service.rs` 持四份 yaml 与三个端口，`core` 删掉 `settings` 与 17 个方法。`prompt`：`service.rs` 把 `Prompt` 面挂在册子上，`core` 只剩 `Arc<dyn Prompt>`，`collab`/`Sandbox`/`ProcTools`/`AgentSession` 的深拷贝改共享 `Arc`。`tools`：`Tools` 面 + `SystoolsSource` 端口，`core` 只剩 `Arc<dyn Tools>`。`core` 至此**不再有别人的状态字段**（剩下的是端口与它自己的会话中心）。**留下的判断失误（批次 20 修正）**：当时只按"状态 + 写它的操作"找，把 `workspace` / `session` / 代拟记成"无状态可搬"——**漏了"不写状态、但要用状态与端口去编排"的那一层**（工作区扫描/沙箱/报告/文件视图、历史 CRUD、回档的会话内部分、代拟、工具环境装配）。这些用例仍留在 `core`，批次 20b/20f 按 R1/R12 归位 |
 | **18** | **入站接口归位**：`core::api` 的能力接口 → 各能力 `api`；`cli` / `web` 改经各能力的**声明面**；`contracts.md` 的路由表与 `tests/api.rs` 跟着改 | 17 | **已完成**。`RegistryOps` → `registry::api`、`HistoryOps` → `session::api`、`WorkspaceOps` → `workspace::api`（新，收 `roster`）；**留在 core 的三个各归其位**：`SessionOps`（会话中心：会话生命周期 + 动作分发 + 文件视图 + **`session_views`**——"在世会话 × 历史的并集"只有它两个都知道）、`CoreOps`（`runtime_report` / `suggest_models`：**编排脚本**，§2.4）、`LogOps`（埋点门面；门禁只许 `core::api` 或能力 `::api`）。`DiscoveryOps` 因此解散。**①已收口**：`RegistryOps`（队列面，全 `&self`）与 `Registry`（能力面，写取 `&mut self`）**保持两个 trait**，理由写进 `registry/api.rs`——单写者是编译期事实（`&mut self`），而呈现层持的是可克隆句柄、队列独占在核心线程那一侧（R4/R5）；收口判据不是"并成一个"，是"**定义归位**"。**②仍未达成**：`ChatGateway` 由 `core` 与 `RegistryService` 各持一份 `Arc`，§五.5「端口对象恰好一处被持有」 |
 | **19** | **测试按业务分区（R10）**：`tests/core.rs`（8408 行）拆开，分区与 `capabilities/` 对齐 | 18 | **已完成**。`src/tests/core.rs`（161 个用例）按**用例钉住的不变式归属**切成 `kernel` / `prompt` / `registry` / `llm` / `workspace` / `tools` / `session` / `collab` + 留在 `core.rs` 的**应用服务**用例（会话中心与编排）；非测试脚手架（替身 + 造会话/造名单辅助）搬进 `builders.rs`，原 imports 集中成 `prelude.rs`。**最大文件 1877 行**（`tools.rs`），全部 ≤ 2000；用例数不变（287 passed）|
 
-**规模不是硬验收**：拆到「能安全验证」为止。`core/mod.rs`（2870）与 `collab/domain/engine.rs`（2831）的进一步拆分随批次 16–19 暴露的接缝走，不为凑行数而拆。
+**阶段 C：边重新划线（只准 `api` + 能力内部水平分层）**
 
-**豁免清零判据**：`tests/dependency-baseline.json` 的**三个数组全部清空**（`reverse` / `presentation` / `coreCycles`），
-且 `Core` 这个类型不再存在。门禁对**新增**与**过期**都报失败，所以销账不靠自觉——
-拆掉一条边不删条目，构建就红。
+| 批次 | 目标 | 前置 | 状态 |
+| --- | --- | --- | --- |
+| **20a** | **门禁改判据**：① 跨能力**只准引用 `::api`**（`::ports` 不再允许，**任何非入口层**引用别人的端口都算违规——`core` 同样受限，R12）；② **不得给别的能力的类型写 `impl`**（`impl Trait for Type` 只看 `Type`，实现别人的 **api trait** 是正当的队列代理）；③ `capabilities/<c>/domain/**` **不得引用任何 `ports`**；④ `api.rs` **不得把本能力的 `ports` 再导出去**（入站用例面，R12） | 19 | **已完成**：四条判据已进 T0 结构审查（`apiOnly` 收紧 + 新增 `apiPorts` / `foreignImpl` / `domainPorts`），现状 **14 条**违规进基线：`apiOnly` 7（collab 3 / session 1 / core 3）、`domainPorts` 5、`apiPorts` 1（`llm/api.rs` 的重导出壳）、`foreignImpl` 1（collab 给 session 的类型写 impl） |
+| **20b** | **每个能力补 `service.rs`，成为自己端口的唯一持有者**（R12）：先 `llm`（它的端口现在被 `registry`/`conductor`/`collab` 拿），再 `workspace` / `tools` / `session`；`api` 从"重导出壳"变成**入站用例面**（端口 trait 不再进 `api`） | 20a | 未开始 |
+| **20c** | **协调业务独立**：`core` → `capabilities/conductor/`（会话在世表 + 命令队列 + 运行态 + 生成驱动 + 跨会话回档 + 审查关卡推进）；**只持各能力的 `api` 面**；`Ops` / 事件台 / 队列代理随它 | 20b | 未开始 |
+| **20d** | **kernel 业务化 + `adapters/` 归零**：`kernel` 补齐 `api`/`ports`/`domain`/`detail`；`log.rs`/`host_probe.rs` → `kernel/detail/`、`root.rs` → 入口层；**`chain` 搬出** → 独立业务 `taskchain`（纯领域：`api` + `domain`，无端口、无 `service`） | 20c | 未开始 |
+| **20e** | **抽跨能力同形重复**（R13）：**拟名单**独立成业务（`core::suggest_models` 与 `collab::draft_slate` 两条合并）；**核心操作回路**的 5 处调用侧包装收进一处 `api` | 20d | 未开始 |
+| **20f** | **内部水平分层收口**：`collab/{engine,collab}.rs` → `service/`；`session/domain/session.rs` 拆"纯簿记"与"回合驱动"；`tools/domain/systool.rs` 拆"纯规则"与"执行编排"；**全能力统一 `domain/` = 纯逻辑（不持端口、不做 IO）** | 20e | 未开始 |
+| **20g** | **收口**：删本文，把当前状态收回 [ARCHITECTURE.md](../../ARCHITECTURE.md) | 20f | 未开始 |
+
+**规模不是硬验收**：拆到「能安全验证」为止。`core/mod.rs` 与 `collab/domain/engine.rs` 的进一步拆分随批次 20 暴露的接缝走，不为凑行数而拆。
+
+**豁免清零判据**：`tests/dependency-baseline.json` 的**全部数组清空**（`reverse` / `presentation` / `coreCycles` /
+批次 20a 收紧的 `apiOnly` 与新增的 `apiPorts` / `foreignImpl` / `domainPorts`），且 `Core` 这个类型不再存在（→ `conductor`）。
+门禁对**新增**与**过期**都报失败，所以销账不靠自觉——拆掉一条边不删条目，构建就红。
 
 ### 4.3 每个批次的完成定义（DoD）
 
@@ -520,11 +561,15 @@ kernel       ──▶ （无）
 
 ## 五、验收标准
 
-1. **业务全在 `capabilities/`**：每个能力有 `api.rs` / `ports.rs` / `domain/` / **`detail/`（它自己的适配器）**；`adapters/` 只剩**内核端口的实现**（`Log` / `HostProbe`）与入口层用的机制。
+1. **业务全在 `capabilities/`**：每个能力有 `api.rs` / `domain/` /（有 IO 或可替换点的才有 `ports.rs` / `detail/` / `service.rs`）；
+   **纯领域业务**（如 `taskchain`）只需 `api` + `domain`；**`adapters/` 目录消失**（内核端口实现进 `kernel/detail/`，入口层机制留入口层）。
 2. 依赖图为**无环**，由 T0 门禁机器判定，**零豁免**。
-3. `core/` 只剩**应用服务**：会话中心（工作线程 + 命令队列）、生成驱动、跨能力用例。登记处 / 工作区 / 历史 / 回档 / 代拟的**编排都归各自能力**；`core::api` 的五个能力接口随之归位（前端直接经各能力的 `api`）。
+3. **协调业务 `conductor`**（不是特权层）：持"会话在世表 + 命令队列 + 运行态 + 生成驱动 + 跨会话回档 + 审查关卡推进"，
+   **只经各能力 `api` 编排**；登记处 / 工作区 / 历史 / 回档的会话内部分 / 代拟 / 工具环境的**用例都归各自能力**。
+   协调业务与其它能力受**同一条** R1/R12 约束（门禁同等对待）。
 4. 前端（`cli/` + `web/`）只 `use` 各业务的**声明面**：零 `use ...::ports::`、零 `use ...::domain::`、零 `use ...::detail::`。
-5. 端口对象在**恰好一处**被持有（入口层的组合根），不再手工穿层；`::detail` 只有它碰。
+5. **端口只由定义它的能力持有**（R12）：跨能力一律不引 `ports`；会话对象也只带 `api` 面与已解析的纯数据。
+   组合根只做两件事：`new` 出各能力的适配器并注入**它自己**的端口、以及把各能力的 **`api` 面**交给 `conductor`。`::detail` 只有入口层碰。
 6. 运行态**只有一份真相**（`kernel/jobs`）。
 7. 测试按能力分文件（`src/tests/<能力>.rs`），单文件 ≤ 2000 行；**测试入口 = 生产入口**。
 8. 架构文档（`ARCHITECTURE.md` + `module-map.md` + 相关细则 + `AGENTS.md` 路由表）与代码一致，无过期描述。
