@@ -1,5 +1,5 @@
 {
-  "_comment": "依赖方向门禁的迁移期基线（判据见 ARCHITECTURE.md §九.7）。条目存在 = 尚未拆掉；拆掉后必须删除，否则门禁报「基线豁免已过期」。**全部清空 = 重构完成。** reverse / presentation / coreCycles 已清空（批次 0–19）；批次 20a 的四类判据里 apiPorts 与 apiOnly **已随 20b 全部清零**；六类判据**全部清空**（批次 20f-2 收官）。",
+  "_comment": "依赖方向门禁的豁免清单（判据见 ARCHITECTURE.md §九.7）。条目存在 = 该判据还有一处豁免；条目一旦不再成立，门禁报「基线豁免已过期」强制销账。**当前六类判据全部为空 = 零豁免**。",
   "reverse": [],
   "presentation": [],
   "coreCycles": [],
