@@ -589,6 +589,7 @@ fn compacting_replaces_the_send_view_with_one_rolling_summary() {
                 .to_string(),
             "{\"type\":\"tool\",\"name\":\"compact\",\"args\":{\"summary\":\"摘要二\"}}"
                 .to_string(),
+            "收尾".to_string(),
         ],
     );
     let gateway = super::RecordingGateway {
@@ -642,6 +643,25 @@ fn compacting_replaces_the_send_view_with_one_rolling_summary() {
     assert!(
         !last.iter().any(|c| c.contains("第一件事")),
         "原始内容该已移出发送视图：{last:?}"
+    );
+
+    // 再走一轮：发送视图里**只剩一份摘要**（第二次那份），上一份已被取代。
+    ops.sessions
+        .say(
+            &sid,
+            "继续",
+            crate::capabilities::conductor::api::Output::Final,
+        )
+        .expect("压完再走一轮");
+    let after = seen.lock().expect("锁").clone();
+    let last = after.last().expect("至少问过一次").clone();
+    assert!(
+        last.iter().any(|c| c.contains("摘要二")),
+        "第二次压缩后的发送视图该是第二份摘要：{last:?}"
+    );
+    assert!(
+        !last.iter().any(|c| c.contains("摘要一")),
+        "上一份摘要该已被取代（同一时刻只有一份）：{last:?}"
     );
 }
 
@@ -699,6 +719,16 @@ fn auto_compaction_kicks_in_when_the_history_exceeds_the_budget() {
         all.iter()
             .any(|msgs| msgs.iter().any(|c| c.contains("自动摘要"))),
         "超过预算时该自动压一次（发送视图里出现摘要）：{all:?}"
+    );
+
+    let last = all.last().expect("至少问过一次").clone();
+    assert!(
+        last.iter().any(|c| c.contains("自动摘要")),
+        "压缩后的发送视图该带上摘要：{last:?}"
+    );
+    assert!(
+        !last.iter().any(|c| c.contains(&long)),
+        "被总结掉的内容该移出发送视图（不是只加摘要）：{last:?}"
     );
 }
 

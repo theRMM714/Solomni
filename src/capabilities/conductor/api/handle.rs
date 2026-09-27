@@ -375,13 +375,14 @@ impl ConductorHandle {
     /// 压不动就**如实说**（通知 + 继续用完整上下文），不静默降级、不假装压过。
     pub fn compact(&self, sid: &str) -> Result<Advance, String> {
         let bus = Arc::clone(&self.bus);
+        // 计划必须在**取走会话之前**读：compact_plan 要现读会话的身份块与压缩点。
+        let (prompt, decl, up_to, identity) = self.call({
+            let sid = sid.to_string();
+            move |core| core.compact_plan(&sid)
+        })?;
         let session = self.call({
             let sid = sid.to_string();
             move |core| core.take_single(&sid)
-        })?;
-        let (prompt, decl, up_to, identity) = self.call({
-            let sid = sid.to_string();
-            move |core| Ok(core.compact_plan(&sid))
         })?;
         let joined = std::thread::Builder::new()
             .name("solomni-compact".to_string())

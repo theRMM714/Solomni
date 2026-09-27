@@ -365,26 +365,32 @@ impl Conductor {
     pub fn compact_plan(
         &self,
         sid: &str,
-    ) -> (
+    ) -> Result<
+        (
+            String,
+            Option<crate::capabilities::llm::api::ToolDecl>,
+            u64,
+            String,
+        ),
         String,
-        Option<crate::capabilities::llm::api::ToolDecl>,
-        u64,
-        String,
-    ) {
+    > {
         let compact_prompt = self.prompt.tools().compact_prompt.clone();
         let decl = self
             .systools
             .book()
             .get("compact")
             .map(|t| t.decl("compact"));
-        let (up_to, identity) = match self.sessions.get(sid) {
-            Some(Session::Single(s)) => (
-                s.next_line_id(),
-                s.params().identity(&*self.prompt, s.tool_mode()),
-            ),
-            _ => (0, String::new()),
+        // 会话不在世或不是单 agent：**报错**，不给出"空身份块 + 压缩点 0"这种假计划
+        // （压缩只对单 agent 会话成立；协作会话由各成员会话按阈值自己压）。
+        let Some(Session::Single(s)) = self.sessions.get(sid) else {
+            return Err(format!(
+                "压缩只支持单 agent 会话（{} 不在世或不是单 agent）",
+                sid
+            ));
         };
-        (compact_prompt, decl, up_to, identity)
+        let up_to = s.next_line_id();
+        let identity = s.params().identity(&*self.prompt, s.tool_mode());
+        Ok((compact_prompt, decl, up_to, identity))
     }
 
     /// 往某个会话注入一条**系统消息**（讨论的提醒走这条；见 session-model.md 二"系统消息"）。

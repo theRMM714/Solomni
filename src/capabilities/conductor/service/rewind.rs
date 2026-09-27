@@ -19,7 +19,12 @@ impl Conductor {
         if self.running.contains(sid) {
             return Err(Self::running_refusal(sid));
         }
-        let precise = matches!(self.sessions.get(sid), Some(Session::Single(_)));
+        // 单 agent 活动会话可按历史精确回退；但**压缩点之前**的对话已被摘要取代、内存里补不回来，
+        // 那时只能按转录重建（重建出来的是压缩前的内容，正是回档该有的语义）。
+        let precise = match self.sessions.get(sid) {
+            Some(Session::Single(s)) => s.compacted_upto() == 0 || keep_id >= s.compacted_upto(),
+            _ => false,
+        };
         if !precise {
             self.ensure_session(sid)?;
         }

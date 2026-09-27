@@ -169,6 +169,8 @@ pub struct AgentSession {
     /// 自动压缩的**字符预算**（≈ 模型窗口 × 设置百分比 × 4）；0 = 关。
     /// 到点就在这一轮开始前先压一次（见 docs/architecture/session-model.md 六）。
     pub(crate) compact_at: usize,
+    /// 压缩点（转录行 id）：0 = 没压过。此前的内容已被摘要取代，对话里补不回来。
+    pub(crate) compacted_upto: u64,
 }
 
 impl AgentSession {
@@ -207,6 +209,7 @@ impl AgentSession {
         AgentSession {
             cur_turn: 0,
             compact_at: 0,
+            compacted_upto: 0,
             id: id.to_string(),
             params,
             dialogue: Vec::new(),
@@ -241,6 +244,7 @@ impl AgentSession {
         AgentSession {
             cur_turn: 0,
             compact_at: 0,
+            compacted_upto: 0,
             id: id.to_string(),
             next_line: marks.len() as u64,
             params,
@@ -302,6 +306,11 @@ impl AgentSession {
         self.compact_at = chars;
     }
 
+    /// 压缩点（转录行 id）：0 = 没压过。回档到它之前，被销毁的对话在内存里补不回来。
+    pub fn compacted_upto(&self) -> u64 {
+        self.compacted_upto
+    }
+
     /// 当前下一条转录行的 id（压缩点用它：把此前的行全部移出发送视图）。
     pub fn next_line_id(&self) -> u64 {
         self.next_line
@@ -317,16 +326,19 @@ impl AgentSession {
             .enumerate()
             .filter(|(i, _)| (*i as u64) < up_to)
             .count();
-        let hist = if keep == 0 { 0 } else { self.marks[keep - 1] };
-        self.dialogue.truncate(hist);
+        // 被总结掉的那一段要**移出**发送视图——不是保留前缀（保留前缀会把新内容丢掉）。
+        let cut = if keep == 0 { 0 } else { self.marks[keep - 1] };
+        self.dialogue.drain(0..cut);
         // 摘要放在**对话最前面**（身份与环境由参数现渲染，不占对话的位置）：
         // 此后模型只看到"身份 + 摘要 + 之后的内容"。
         self.dialogue
             .insert(0, Msg::user(format!("[此前内容摘要]\n{}", summary)));
-        // 插了一条消息，marks 里"行完成时的历史长度"整体后移一格。
+        // 移出 cut 条、又插入一条：marks 整体前移 cut、再后移一格。
         for m in self.marks.iter_mut() {
-            *m += 1;
+            *m = m.saturating_sub(cut) + 1;
         }
+        // 记下压缩点：回档到它之前，被销毁的对话在内存里补不回来（编排改走重建）。
+        self.compacted_upto = up_to;
     }
 
     /// 给接下来的行打上回合 id（节点执行也用整场工作的同一套计数：回档才对得上）。
