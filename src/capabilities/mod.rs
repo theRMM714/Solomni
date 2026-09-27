@@ -14,6 +14,7 @@ pub mod llm;
 pub mod prompt;
 pub mod registry;
 pub mod session;
+pub mod slate;
 pub mod taskchain;
 pub mod tools;
 pub mod workspace;

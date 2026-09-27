@@ -18,6 +18,7 @@ mod prompt;
 mod registry;
 mod routes;
 mod session;
+mod slate;
 mod taskchain;
 mod tools;
 mod workspace;

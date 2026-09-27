@@ -23,7 +23,8 @@ pub use crate::capabilities::session::api::Live;
 
 pub use crate::capabilities::session::api::{AgentMeta, SessionMeta};
 
-pub use crate::capabilities::session::api::{MemberTools, ModuleTools};
+pub use crate::capabilities::session::api::MemberTools;
+pub use crate::capabilities::session::domain::session::ModuleTools;
 
 pub use crate::capabilities::session::ports::HistoryStore;
 

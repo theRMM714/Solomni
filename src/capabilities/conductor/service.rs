@@ -1517,7 +1517,7 @@ impl Conductor {
     ) -> crate::capabilities::session::api::MemberTools {
         crate::capabilities::session::api::MemberTools {
             mode,
-            modules: crate::capabilities::collab::api::tool_table(modules),
+            modules: crate::capabilities::session::api::tool_table(modules),
             observations: crate::capabilities::tools::api::Observations::default(),
             llm: Arc::clone(&self.llm),
             log: Arc::clone(&self.log),
@@ -1700,8 +1700,8 @@ impl Conductor {
         }
     }
 
-    /// 核心推荐：按本次需求推荐 agent 名单（优先复用登记处的 agent，否则组装新的并给出模型）。
-    /// 核心只建议、不代选；非法条目一律拒收（规则与代拟共用 crate::capabilities::registry::api::resolve_picks）。
+    /// 核心推荐：按本次需求推荐 agent 名单（**拟名单业务**的用例；这里只做队列分发、把行收出来）。
+    /// 前置判据（登记处有没有模型 / 核心默认设没设）放在这里：它是对用户的提示，不是名单的合法性。
     pub fn suggest_models(
         &self,
         task: &str,
@@ -1715,83 +1715,59 @@ impl Conductor {
                 .to_string()
         })?;
         let roster = self.scan();
-        // 形态描述文案在提示词册里（代码不硬编码给模型的说明）。
-        let mode_text = match mode {
-            WorkMode::Single => self.prompt.text(Segment::SuggestModeSingle).to_string(),
-            WorkMode::Collab => self.prompt.text(Segment::SuggestModeCollab).to_string(),
-        };
-        let user = self.prompt.render(
-            Segment::SuggestUser,
-            &[
-                ("mode", mode_text.to_string()),
-                ("agents", self.registry.agent_listing(&*self.prompt)),
-                (
-                    "modules",
-                    crate::capabilities::workspace::api::listing(&roster, &self.prompt.tools()),
-                ),
-                ("models", self.registry.model_listing(&self.prompt.tools())),
-                ("task", task.to_string()),
-            ],
-        );
         let (mut chat, _) = self.llm.core_channel(Some(&channel));
+        // 登记处事实：**自持一份快照**（拟名单只读；一次用户动作、代价可忽略，
+        // 与协作会话自持一份同义——写面是 `Box<dyn Registry>`，不可能共享出去）。
+        let facts = self.registry.snapshot();
         // 核心这一趟的行（工具行、发言行、思维链）**一律外送**：核心没有会话、写不了盘，
         // 它只把行交出来；推到哪个 sid、落不落盘由调用方按会话种类定（这里给系统会话）。
         let mut rows: Vec<SessionEvent> = Vec::new();
-        // 核心操作走工具调用：推荐名单由 suggest 工具承载。
-        let payload = crate::capabilities::session::api::core_operation(
-            &*self.systools,
-            "planner",
-            "suggest",
-            self.registry.tool_mode(None),
-            chat.as_mut(),
-            &[
-                Msg::system(self.prompt.text(Segment::SuggestSystem).to_string()),
-                Msg::user(user),
-            ],
-            crate::capabilities::llm::api::CompleteOpts::plain(false),
-            None,
-            // 推荐是**一次性建议**（用户点了才生成、没有工作区可核实）：不接核实回路。
-            None,
-            &mut |e: SessionEvent| rows.push(e),
+        let proposal = crate::capabilities::slate::api::propose(
+            &crate::capabilities::slate::api::Parties {
+                prompt: &*self.prompt,
+                tools: &*self.systools,
+                roster: &roster,
+                agents: &facts.agents,
+                models: &facts.models,
+            },
+            &mut crate::capabilities::slate::api::Request {
+                task,
+                mode: match mode {
+                    WorkMode::Single => crate::capabilities::slate::api::Mode::Single,
+                    WorkMode::Collab => crate::capabilities::slate::api::Mode::Collab,
+                },
+                chat: chat.as_mut(),
+                tool_mode: self.registry.tool_mode(None),
+                opts: crate::capabilities::llm::api::CompleteOpts::plain(false),
+                cancel: None,
+                // 推荐是**一次性建议**（用户点了才生成、没有工作区可核实）：不接核实回路。
+                verify: None,
+                sink: &mut |e: SessionEvent| rows.push(e),
+            },
         )?;
-        // 载荷里就是名单**数组**本身（工具参数 agents 的值）。
-        let parsed: Vec<crate::capabilities::registry::api::RosterPick> = payload
-            .get("agents")
-            .cloned()
-            .and_then(|v| serde_json::from_value(v).ok())
-            .ok_or_else(|| {
-                format!(
-                    "核心推荐的载荷没有 agents 数组：{}",
-                    payload.to_string().chars().take(200).collect::<String>()
-                )
-            })?;
-        let (picks, rejected) = self.registry.resolve_picks(parsed, &roster);
-        for r in &rejected {
-            self.log
-                .warn("conductor::suggest_models", &format!("推荐条目拒收：{}", r));
+        for r in &proposal.rejected {
+            self.log.warn(
+                "conductor::suggest_models",
+                &format!("拟名单条目拒收：{}", r),
+            );
         }
-        let core_default = self.registry.core_model();
-        let drafts: Vec<AgentSuggestion> = picks
+        // 核心只建议、不代选：名单里的每一项都逐条核验过（存在性 / 模型真实 / 模块不重复）。
+        let out: Vec<AgentSuggestion> = proposal
+            .picks
             .into_iter()
-            .map(|(m, why)| AgentSuggestion {
-                reuse: !m.transient,
-                name: m.name,
+            .map(|p| AgentSuggestion {
+                reuse: !p.agent.transient,
+                name: p.agent.name,
                 // 复用项没有自己的模型时，落到核心默认（前端仍可改）。
-                model: m.model.or_else(|| core_default.clone()).unwrap_or_default(),
-                modules: m.modules,
-                why,
+                model: p
+                    .agent
+                    .model
+                    .or_else(|| facts.core.clone())
+                    .unwrap_or_default(),
+                modules: p.agent.modules,
+                why: p.why,
             })
             .collect();
-        let out: Vec<AgentSuggestion> = match mode {
-            // 单 agent：核心只给一条就原样采纳（模块数与 reuse 都保持它自己的）；
-            // 给多条就把它们的模块并成一个临时 agent（并过的不是任何单个已存 agent，故 reuse=false）。
-            WorkMode::Single => match drafts.len() {
-                0 | 1 => drafts,
-                _ => vec![merged_suggestion(drafts)],
-            },
-            // 协作 = N 个独立 agent，各带自己的模块与模型。
-            WorkMode::Collab => drafts,
-        };
         if out.is_empty() {
             return Err("核心推荐没有可用结果".to_string());
         }
@@ -2330,7 +2306,7 @@ impl Conductor {
                 let unavailable = self.unavailable_modules(&meta.exec, &modules);
                 let mut tools = self.tools_env(&modules, &sb, unavailable, meta.exec.net, mode);
                 // 回复 id 跨重启单调：从转录里的最大值续号，否则新回复会与旧回复并成一组。
-                tools.reply_seq = crate::capabilities::collab::api::max_reply(events);
+                tools.reply_seq = crate::capabilities::session::api::max_reply(events);
                 Ok(Session::Single(
                     crate::capabilities::session::api::AgentSession::restore(
                         &a.name,
@@ -2474,34 +2450,6 @@ fn mode_str(mode: WorkMode) -> &'static str {
     match mode {
         WorkMode::Single => "single",
         WorkMode::Collab => "collab",
-    }
-}
-
-/// 把多条推荐项并成一个临时 agent（模块按出现顺序去重、模型取首项、理由合并）。
-/// 单 agent 形态拿到多条推荐时用它收口：并过的不是任何单个已存 agent，故 reuse = false。
-fn merged_suggestion(drafts: Vec<AgentSuggestion>) -> AgentSuggestion {
-    let mut modules: Vec<String> = Vec::new();
-    let mut model = String::new();
-    let mut why: Vec<String> = Vec::new();
-    for a in drafts {
-        if model.is_empty() {
-            model = a.model;
-        }
-        for id in a.modules {
-            if !modules.contains(&id) {
-                modules.push(id);
-            }
-        }
-        if !a.why.trim().is_empty() {
-            why.push(a.why);
-        }
-    }
-    AgentSuggestion {
-        name: "组合".to_string(),
-        modules,
-        model,
-        why: why.join("；"),
-        reuse: false,
     }
 }
 

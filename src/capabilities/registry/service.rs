@@ -5,16 +5,12 @@
 //! 对外只经 `registry::api::Registry`：`conductor` 与呈现层拿不到 `settings` 字段。
 
 use crate::capabilities::llm::api::{Channel, Llm, ProbeOutcome, ReplayReport, ToolMode};
-use crate::capabilities::prompt::api::{Prompt, ToolTexts};
-use crate::capabilities::registry::api::{
-    AgentView, ModelView, ProviderView, Registry, RosterPick,
-};
+use crate::capabilities::registry::api::{AgentView, ModelView, ProviderView, Registry};
 use crate::capabilities::registry::domain::agents;
 use crate::capabilities::registry::domain::providers::{
     AppSettings, ModelEntry, Provider, Settings, DEFAULT_CONTEXT_TOKENS,
 };
 use crate::capabilities::registry::ports::SettingsStore;
-use crate::capabilities::session::api::AgentMeta;
 use crate::capabilities::workspace::api::Roster;
 use crate::kernel::ports::Log;
 use std::sync::Arc;
@@ -129,22 +125,6 @@ impl Registry for RegistryService {
 
     fn snapshot(&self) -> Settings {
         self.settings.clone()
-    }
-
-    fn agent_listing(&self, prompt: &dyn Prompt) -> String {
-        agents::listing(prompt, &self.settings.agents)
-    }
-
-    fn model_listing(&self, texts: &ToolTexts) -> String {
-        agents::model_listing(&self.settings.models, texts)
-    }
-
-    fn resolve_picks(
-        &self,
-        picks: Vec<RosterPick>,
-        roster: &Roster,
-    ) -> (Vec<(AgentMeta, String)>, Vec<String>) {
-        agents::resolve_picks(picks, &self.settings.agents, roster, &self.settings.models)
     }
 
     // ---- 写 ----

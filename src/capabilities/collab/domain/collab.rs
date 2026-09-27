@@ -10,7 +10,6 @@ use crate::capabilities::collab::domain::engine::{
 };
 use crate::capabilities::llm::api::{Chat, CompleteOpts, Llm, Msg};
 use crate::capabilities::prompt::api::{Prompt, Segment};
-use crate::capabilities::registry::api::RosterPick;
 use crate::capabilities::registry::api::Settings;
 use crate::capabilities::session::api::MemberTools;
 use crate::capabilities::session::api::{AgentMeta, SessionMeta};
@@ -559,21 +558,6 @@ impl CollabSession {
         self.roster.iter().map(|a| a.name.clone()).collect()
     }
 
-    /// 拟名单给模型看的三份清单（已存 agent / 模块公地 / 可用模型）。
-    fn briefing(
-        &self,
-        roster: &crate::capabilities::workspace::api::Roster,
-    ) -> (String, String, String) {
-        (
-            crate::capabilities::registry::api::listing(&*self.prompts, &self.settings.agents),
-            crate::capabilities::workspace::api::listing(roster, &self.prompts.tools()),
-            crate::capabilities::registry::api::model_listing(
-                &self.settings.models,
-                &self.prompts.tools(),
-            ),
-        )
-    }
-
     /// 提交需求（总是第一步）。需求入转录（用户看到的与进上下文的一致）。
     /// 协作里用户不属任何 agent 的沙箱：@ 引用按 speaker = None 改写（共读同一段文字）。
     pub fn set_task(&mut self, task: &str, sink: &mut dyn FnMut(SessionEvent)) {
@@ -603,49 +587,33 @@ impl CollabSession {
         }
     }
 
-    /// 委托代拟：核心拟发言名单（优先复用登记处的 agent，否则组装新的并给出模型），交用户确认。
+    /// 委托代拟：核心拟发言名单（**拟名单业务**的用例，与「推荐模型」同一条 `slate` 协议），交用户确认。
     fn draft_slate(&mut self, sink: &mut dyn FnMut(SessionEvent)) {
         let roster = self.workspace.roster();
-        let (agent_listing, module_listing, model_listing) = self.briefing(&roster);
-        let user = self.prompts.render(
-            Segment::SlateUser,
-            &[
-                ("agents", agent_listing),
-                ("modules", module_listing),
-                ("models", model_listing),
-                ("task", self.task.clone()),
-            ],
-        );
-        let msgs = vec![
-            Msg::system(self.prompts.text(Segment::SlateSystem).to_string()),
-            Msg::user(user),
-        ];
-        // 核心操作走工具调用：代拟名单由 slate 工具承载（带只读核实回路）。
-        sink(crate::capabilities::session::api::working("核心"));
         let mut verify = self.core_verify_tools("planner");
-        let parsed = crate::capabilities::session::api::core_operation(
-            &*self.systools,
-            "planner",
-            "slate",
-            self.core_mode,
-            self.core_chat.as_mut(),
-            &msgs,
-            CompleteOpts::plain(false),
-            None,
-            verify.as_mut(),
-            sink,
-        )
-        .ok()
-        .and_then(|payload| {
-            // 载荷里就是名单**数组**本身（工具参数 picks 的值）。
-            payload
-                .get("picks")
-                .cloned()
-                .and_then(|v| serde_json::from_value::<Vec<RosterPick>>(v).ok())
-        });
+        sink(crate::capabilities::session::api::working("核心"));
+        let proposal = crate::capabilities::slate::api::propose(
+            &crate::capabilities::slate::api::Parties {
+                prompt: &*self.prompts,
+                tools: &*self.systools,
+                roster: &roster,
+                agents: &self.settings.agents,
+                models: &self.settings.models,
+            },
+            &mut crate::capabilities::slate::api::Request {
+                task: &self.task,
+                mode: crate::capabilities::slate::api::Mode::Collab,
+                chat: self.core_chat.as_mut(),
+                tool_mode: self.core_mode,
+                opts: CompleteOpts::plain(false),
+                cancel: None,
+                verify: verify.as_mut(),
+                sink,
+            },
+        );
         // 核心这一次调用结束了：交回"谁在干活"——下一棒（泵的下一步 / 等用户）会再推。
         sink(crate::capabilities::session::api::idle());
-        let Some(picks) = parsed else {
+        let Ok(proposal) = proposal else {
             sink(SessionEvent::Notice(
                 "[错误] 代拟失败（模型无响应格式）。请直接点名 agent。".into(),
             ));
@@ -653,17 +621,11 @@ impl CollabSession {
             self.done = true;
             return;
         };
-        // 逐条校验（存在性、模型真实、整份名单内模块不重复）；拒收项如实告知。
-        let (picks, rejected) = crate::capabilities::registry::api::resolve_picks(
-            picks,
-            &self.settings.agents,
-            &roster,
-            &self.settings.models,
-        );
-        for r in rejected {
+        // 拒收项如实告知（合法性由拟名单业务判，这里只转述）。
+        for r in proposal.rejected {
             sink(SessionEvent::Notice(format!("[代拟] {}，拒收", r)));
         }
-        if picks.is_empty() {
+        if proposal.picks.is_empty() {
             sink(SessionEvent::Notice("[错误] 代拟名单无可用 agent".into()));
             sink(SessionEvent::Ended);
             self.done = true;
@@ -671,14 +633,15 @@ impl CollabSession {
         }
         let line = self.view(LineView::system(
             "代拟",
-            picks
+            proposal
+                .picks
                 .iter()
-                .map(|(a, why)| slate_item(a, why))
+                .map(|p| slate_item(&p.agent, &p.why))
                 .collect::<Vec<_>>()
                 .join("；"),
         ));
         sink(SessionEvent::Transcript(vec![line]));
-        self.slate_picks = picks.into_iter().map(|(a, _)| a).collect();
+        self.slate_picks = proposal.picks.into_iter().map(|p| p.agent).collect();
         self.ask_user(Pending::ConfirmSlate, sink);
     }
 
@@ -1479,7 +1442,7 @@ impl CollabSession {
             member.tools = Some(MemberTools {
                 mode,
                 // 模块 id → 该模块的（目录, 工具表）：多模块 agent 靠信封里的 module 消歧。
-                modules: crate::capabilities::collab::domain::engine::tool_table(&modules),
+                modules: crate::capabilities::session::api::tool_table(&modules),
                 observations: crate::capabilities::tools::api::Observations::default(),
                 llm: Arc::clone(&self.llm),
                 log: Arc::clone(&self.log),
@@ -1607,7 +1570,7 @@ impl CollabSession {
             pending_ask: None,
             emitted: 0,
             next_line: total,
-            reply_seq: crate::capabilities::collab::domain::engine::max_reply(events),
+            reply_seq: crate::capabilities::session::api::max_reply(events),
             core_chat,
             core_is_demo,
             core_mode,

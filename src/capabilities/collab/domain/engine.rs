@@ -11,9 +11,7 @@ use crate::capabilities::llm::api::{self as envelope, ToolInvoke, Verb};
 use crate::capabilities::llm::api::{Chat, Chunk, CompleteOpts, Msg};
 use crate::capabilities::prompt::api::{Prompt, Segment};
 use crate::capabilities::session::api::{reply_msgs, LineView, Live, SessionEvent, ToolCallView};
-use crate::capabilities::session::api::{
-    stream_piece, AgentSession, MemberTools, ModuleTools, TurnRun,
-};
+use crate::capabilities::session::api::{stream_piece, AgentSession, MemberTools, TurnRun};
 use crate::capabilities::tools::api::ToolOutcome;
 use serde::Deserialize;
 use std::collections::BTreeMap;
@@ -34,44 +32,6 @@ pub enum AfterTurn {
     Remind,
     /// 没表态且提醒到顶：主会话记一行"未回应"，本轮放过它（**不阻塞整轮**）。
     Unanswered,
-}
-
-/// 放行表：模块 id → 该模块的（目录, 工具表）。
-/// **包含没有声明任何工具的模块**（命令表为空）——这样报错能区分「没有这个模块」与「这个模块没有这个工具」。
-/// 跨模块同名工具不再冲突：模块内名字唯一由 map 保证，跨模块由信封里的 module 消歧。
-pub fn tool_table(
-    modules: &[crate::capabilities::workspace::api::Module],
-) -> BTreeMap<String, ModuleTools> {
-    modules
-        .iter()
-        .map(|m| {
-            (
-                m.manifest.id.clone(),
-                ModuleTools {
-                    root: m.root.clone(),
-                    commands: m
-                        .manifest
-                        .tools
-                        .iter()
-                        .map(|(name, decl)| (name.clone(), decl.command.clone()))
-                        .collect(),
-                    books: m
-                        .manifest
-                        .tools
-                        .iter()
-                        .filter_map(|(name, decl)| decl.schema().map(|s| (name.clone(), s)))
-                        .collect(),
-                    parallel: m
-                        .manifest
-                        .tools
-                        .iter()
-                        .filter(|(_, decl)| decl.parallel)
-                        .map(|(name, _)| name.clone())
-                        .collect(),
-                },
-            )
-        })
-        .collect()
 }
 
 impl crate::capabilities::session::api::MemberTools {
@@ -113,33 +73,6 @@ impl crate::capabilities::session::api::MemberTools {
             &[("tools", parts.join("\n"))],
         )
     }
-}
-
-/// 转录流水里用过的最大回复 id：重建时据此续号。
-/// 为什么必须续号：回复 id 是分组依据，重复就会把新回复与旧回复并成一组。
-pub fn max_reply(events: &[serde_json::Value]) -> u64 {
-    let mut max = 0u64;
-    for ev in events {
-        if ev.get("type").and_then(|t| t.as_str()) != Some("transcript") {
-            continue;
-        }
-        let Some(lines) = ev.get("lines").and_then(|l| l.as_array()) else {
-            continue;
-        };
-        for l in lines {
-            if let Some(r) = l.get("reply").and_then(|x| x.as_u64()) {
-                max = max.max(r);
-            }
-            if let Some(r) = l
-                .get("tool")
-                .and_then(|t| t.get("reply"))
-                .and_then(|x| x.as_u64())
-            {
-                max = max.max(r);
-            }
-        }
-    }
-    max
 }
 
 /// 线上名 → (模块 id, 工具名)：原生协议里没有 module 字段，跨模块同名工具靠它消歧。

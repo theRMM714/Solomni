@@ -75,10 +75,8 @@ pub enum Segment {
     NodeReviewUser,
     SlateSystem,
     SlateUser,
-    SuggestSystem,
-    SuggestUser,
-    SuggestModeSingle,
-    SuggestModeCollab,
+    SlateModeSingle,
+    SlateModeCollab,
     VerdictSystem,
     VerdictUser,
     AgentSystem,
@@ -153,7 +151,6 @@ pub struct CoreTexts {
     /// 节点级验收（任务链：逐节点核对当前目标）。
     pub node_review: NodeReviewPrompts,
     pub slate: SlatePrompts,
-    pub suggest_models: SuggestPrompts,
     /// 判定用户对裁决的回应是否明确到可以开工/放行。
     pub verdict: VerdictPrompts,
     /// 一个 agent 的职责提示词（由它的模块合成为一份能力包）。
@@ -473,13 +470,6 @@ pub struct NodeReviewPrompts {
 #[derive(Debug, Clone, Deserialize)]
 pub struct SlatePrompts {
     pub system: String,
-    /// user 变量：agents, modules, models, task
-    pub user: String,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct SuggestPrompts {
-    pub system: String,
     /// user 变量：mode, agents, modules, models, task
     pub user: String,
     /// 形态描述（{{mode}} 的取值）：单 agent。
@@ -512,10 +502,8 @@ impl CoreTexts {
             Segment::NodeReviewUser => &self.node_review.user,
             Segment::SlateSystem => &self.slate.system,
             Segment::SlateUser => &self.slate.user,
-            Segment::SuggestSystem => &self.suggest_models.system,
-            Segment::SuggestUser => &self.suggest_models.user,
-            Segment::SuggestModeSingle => &self.suggest_models.mode_single,
-            Segment::SuggestModeCollab => &self.suggest_models.mode_collab,
+            Segment::SlateModeSingle => &self.slate.mode_single,
+            Segment::SlateModeCollab => &self.slate.mode_collab,
             Segment::VerdictSystem => &self.verdict.system,
             Segment::VerdictUser => &self.verdict.user,
             Segment::AgentSystem => &self.agent.system,

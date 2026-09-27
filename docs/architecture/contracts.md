@@ -11,7 +11,7 @@
 
 | 东西 | 定义在 | 形态 |
 | --- | --- | --- |
-| 能力接口 | **各能力自己的 `api.rs`**（批次 18 归位） | `SessionOps` / `CoreOps` / `LogOps` 定义在 `capabilities/conductor/api.rs`（会话中心与核心自己的用例）；`RegistryOps` 在 `capabilities/registry/api.rs`、`HistoryOps` 在 `capabilities/session/api.rs`、`WorkspaceOps` 在 `capabilities/workspace/api.rs`。**全 `&self`、可替换成假实现**；实现都是 `core/api.rs` 里的队列代理（`CoreHandle`）|
+| 能力接口 | **各能力自己的 `api.rs`**（批次 18 归位） | `SessionOps` / `ConductorOps` / `LogOps` 定义在 `capabilities/conductor/api.rs`（会话中心与核心自己的用例）；`RegistryOps` 在 `capabilities/registry/api.rs`、`HistoryOps` 在 `capabilities/session/api.rs`、`WorkspaceOps` 在 `capabilities/workspace/api.rs`。**全 `&self`、可替换成假实现**；实现都是 `core/api.rs` 里的队列代理（`CoreHandle`）|
 | 事件台 | `capabilities/conductor/api.rs` | `EventBus`：核心独占生产，任意数量的消费者按序号增量取 |
 
 规则：
@@ -109,6 +109,6 @@
 | GET | `/api/history` | `HistoryOps::list` | — | `{sessions}` | 200, 400 |
 | GET | `/api/history/{name}` | `HistoryOps::open` | — | `{meta,events,live,head}` | 200, 404 |
 | POST | `/api/history/{name}/delete` | `HistoryOps::delete` | — | `{ok}` | 200, 400 |
-| POST | `/api/suggest-models` | `CoreOps::suggest_models` | `{task,mode}` | `{ok,agents}` | 200, 400 |
+| POST | `/api/suggest-models` | `ConductorOps::suggest_models` | `{task,mode}` | `{ok,agents}` | 200, 400 |
 <!-- ROUTES:END -->
 

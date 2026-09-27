@@ -6,10 +6,10 @@ pub use crate::capabilities::session::domain::events::{
 };
 pub use crate::capabilities::session::domain::history::{AgentMeta, HistoryView, SessionMeta};
 pub use crate::capabilities::session::domain::rewind::{
-    find_line_id, last_line_within, truncate_events, turn_of_line,
+    find_line_id, last_line_within, max_reply, truncate_events, turn_of_line,
 };
 pub use crate::capabilities::session::domain::session::{
-    keep_whole_replies, stream_piece, unique_work_name, AgentSession, MemberTools, ModuleTools,
+    keep_whole_replies, stream_piece, tool_table, unique_work_name, AgentSession, MemberTools,
     SessionParams, TurnRun,
 };
 

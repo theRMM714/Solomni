@@ -103,7 +103,7 @@ roles:
   既没有 schema 校验、也不进工具台账，写坏就整轮失败；工具调用把"形状对不对"交给机制。
 - **普通说话仍可以是正文**：不驱动核心的发言（讨论里的意见、执行席的收尾话）不必包成工具——
   这两者就是"说话"与"操作"的分界。
-- **工具与载荷形状**在 `systools/tools.yaml`：`plan`（方案 + 任务链）、`node_verdict`（逐节点结论）、`checklist`（总验收清单）、`slate` / `suggest`（名单）、`submit_report`（执行席回报）。
+- **工具与载荷形状**在 `systools/tools.yaml`：`plan`（方案 + 任务链）、`node_verdict`（逐节点结论）、`checklist`（总验收清单）、`slate`（名单：推荐与代拟同一条协议）、`submit_report`（执行席回报）。
 - **载荷不合法 → 如实失败并中止这一步**（不猜、不回落正文 JSON）。
 - **核心可以先核实**：核心操作带一个**只读核实回路**——模型先请求 `read` / `search` 时，
   核心执行并把结果回灌，然后再要那一次核心操作调用。核心不是 member、手里本来没有工具环境，
@@ -131,7 +131,7 @@ prompts/
 | --- | --- | --- |
 | `discussant` | 讨论阶段 | `say` `agree` `leave` `ask` `read` `list` `search` |
 | `executor` | 任务链节点（agent 子会话） | `read` `list` `write` `edit` `patch` `search` `submit_report` + 该 agent 的模块工具 |
-| `planner` | 核心整理派发 | `read` `search` `plan` `slate` `suggest` `verdict` |
+| `planner` | 核心整理派发 | `read` `search` `plan` `slate` `verdict` |
 | `orchestrator` | 核心链中推进 | `read` `search` `node_verdict` `checklist` |
 
 **验收不是独立角色**：它是 `orchestrator` 的一个工具/一步（"根据验收情况推进任务"本就是同一个循环）。

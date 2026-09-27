@@ -100,7 +100,7 @@ pub(crate) fn core_operation_streams_its_text_to_the_facts_outlet() {
     // 核心操作的正文也**逐片上屏**（与成员、单 agent 同一条规则，见 session::api::core_operation）：
     // 替身只发一片正文，出口必须收到 start + text 两条 Delta——从前核心是一次性蹦出来的（真机反馈）。
     // 同时钉住"信封不当正文流"：正文片以 { 开头，外送的那片必须是空的。
-    let raw = "{\"type\":\"tool\",\"name\":\"suggest\",\"args\":{\"agents\":[{\"name\":\"甲\",\"modules\":[\"a\"],\"model\":\"m\",\"why\":\"对口\"}]}}";
+    let raw = "{\"type\":\"tool\",\"name\":\"slate\",\"args\":{\"picks\":[{\"name\":\"甲\",\"modules\":[\"a\"],\"model\":\"m\",\"why\":\"对口\"}]}}";
     let core = core_with_gateway(
         vec![module_of("a")],
         AbortGateway {
@@ -1614,7 +1614,6 @@ pub(crate) fn core_operations_require_a_tool_call_not_body_json() {
     for (role, tool) in [
         ("planner", "plan"),
         ("planner", "slate"),
-        ("planner", "suggest"),
         ("orchestrator", "node_verdict"),
         ("orchestrator", "checklist"),
     ] {

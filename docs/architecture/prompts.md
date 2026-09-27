@@ -24,7 +24,7 @@
 | `roles/discussant.yaml` | `discuss.opener` / `discuss.step` / `discuss.autonomy_note` | 讨论首轮、轮转、小组自裁说明 |
 | `roles/planner.yaml` | `synthesize.*` | 整理方案 |
 | | `node_review.*` | 节点验收（产出"节点 id — 负责人"表与结论） |
-| | `slate.*` / `suggest_models.*` | 代拟名单 / 模型推荐（单 agent、协作两种说法） |
+| | `slate.*` | 名单（推荐 / 代拟同一条协议）：`mode_single` / `mode_collab` 是编排模式的两种说法，`system` / `user` 是载荷说明与清单 |
 | | `verdict.*` | 判定用户那一句是否明确（明确才开工 / 放行，`collab::judge_clear`） |
 | `roles/executor.yaml` | `execute.user` | 执行任务 |
 | `roles/orchestrator.yaml` | `review.system` / `review.user` | 总验收与推进 |

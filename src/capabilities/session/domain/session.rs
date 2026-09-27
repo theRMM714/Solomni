@@ -480,3 +480,41 @@ pub fn unique_work_name(base: &str, fallback: &str, exists: impl Fn(&str) -> boo
         n += 1;
     }
 }
+
+/// 放行表：模块 id → 该模块的（目录, 工具表）。
+/// **包含没有声明任何工具的模块**（命令表为空）——这样报错能区分「没有这个模块」与「这个模块没有这个工具」。
+/// 跨模块同名工具不再冲突：模块内名字唯一由 map 保证，跨模块由信封里的 module 消歧。
+pub fn tool_table(
+    modules: &[crate::capabilities::workspace::api::Module],
+) -> BTreeMap<String, ModuleTools> {
+    modules
+        .iter()
+        .map(|m| {
+            (
+                m.manifest.id.clone(),
+                ModuleTools {
+                    root: m.root.clone(),
+                    commands: m
+                        .manifest
+                        .tools
+                        .iter()
+                        .map(|(name, decl)| (name.clone(), decl.command.clone()))
+                        .collect(),
+                    books: m
+                        .manifest
+                        .tools
+                        .iter()
+                        .filter_map(|(name, decl)| decl.schema().map(|s| (name.clone(), s)))
+                        .collect(),
+                    parallel: m
+                        .manifest
+                        .tools
+                        .iter()
+                        .filter(|(_, decl)| decl.parallel)
+                        .map(|(name, _)| name.clone())
+                        .collect(),
+                },
+            )
+        })
+        .collect()
+}

@@ -28,8 +28,8 @@
 | 文件 | 职责 |
 | --- | --- |
 | `mod.rs` | 能力入口：只声明模块，不放逻辑 |
-| `api.rs` | **入站契约**：协调业务自己的两个接口（`SessionOps` 会话中心 / `CoreOps` 协调用例）+ `LogOps`（埋点门面）+ **`Ops` 的组装**（其余接口归各能力，见 §四）+ `ConductorHandle`（自持线程、命令/事件；各能力接口的**队列代理**也在这里实现）+ **用例词汇与视图**（`WorkMode` / `WorkSpec` / `AgentInstance` / `WorkOpened` / `SessionEdit` / `CollabStep` / `SessionView` / `RuntimeReport` / `FilesView` 等）+ `EventBus`；单 agent 与协作长步骤的生成都在**工作线程**上跑（队列只占"取/交"两步） |
-| `service.rs` | `Conductor`（协调业务的状态与用例）：会话在世表（会话表、命令队列、运行态）、生成驱动、运行包报告、**跨会话回档编排**（`rewind` / `rewind_children` / `rebuild_session`——纯行/事件算术在 `capabilities/session/domain/rewind.rs`）+ `Persister`（增量落盘）。登记处、会话历史、提示词册、工具面**只按能力面用**（`Box<dyn Registry>` / `Arc<dyn History>` / `Arc<dyn Prompt>` / `Arc<dyn Tools>` …），看不见它们的字段、也不替它们落盘 |
+| `api.rs` | **入站契约**：协调业务自己的两个接口（`SessionOps` 会话中心 / `ConductorOps` 协调用例）+ `LogOps`（埋点门面）+ **`Ops` 的组装**（其余接口归各能力，见 §四）+ `ConductorHandle`（自持线程、命令/事件；各能力接口的**队列代理**也在这里实现）+ **用例词汇与视图**（`WorkMode` / `WorkSpec` / `AgentInstance` / `WorkOpened` / `SessionEdit` / `CollabStep` / `SessionView` / `RuntimeReport` / `FilesView` 等）+ `EventBus`；单 agent 与协作长步骤的生成都在**工作线程**上跑（队列只占"取/交"两步） |
+| `service.rs` | `Conductor`（协调业务的状态与用例）：会话在世表（会话表、命令队列、运行态）、生成驱动、运行包报告、**跨会话回档编排**（`rewind` / `rewind_children` / `rebuild_session`——纯行/事件算术在 `capabilities/session/domain/rewind.rs`）+ `Persister`（增量落盘）。`suggest_models` 只做队列分发：名单由 `slate` 拟，它把回包映射成呈现层的 `AgentSuggestion` 并把核心的行推给系统会话。登记处、会话历史、提示词册、工具面**只按能力面用**（`Box<dyn Registry>` / `Arc<dyn History>` / `Arc<dyn Prompt>` / `Arc<dyn Tools>` …），看不见它们的字段、也不替它们落盘 |
 
 ## 三、`entry/`（**入口层共用机制**）
 
@@ -66,6 +66,12 @@
 | `workspace/domain/packages.rs` | `package.yaml` 契约与包库事实 |
 | `workspace/domain/exec.rs` | 执行档位（`ExecSpec`）与执行计划（`ExecPlan`）派生、虚拟机档诊断与承载判定 |
 | `workspace/domain/workspace.rs` | 工作区与沙箱的纯数据定义、寻址与越界判定 |
+| `slate/api.rs` | **入站能力面**：`slate` 的用例面（`propose`）+ DTO（`Mode` / `Pick` / `Proposal` / `Parties` / `Request`）。**没有端口、也没有状态**——名单是在飞的值（归提出方），参与方事实由调用方传入（`collab` 只持登记处快照） |
+
+| `slate/service.rs` | 用例实现：请核心按需求报名单（`slate` 工具的 `picks` 载荷）→ 按登记处与工作区核验 → 按模式收束。两个调用方共用它：`conductor`（一次性推荐，经 `ConductorOps::suggest_models`）与 `collab`（代拟，待用户确认） |
+
+| `slate/domain/proposal.rs` | 名单的**纯收束规则**：协作 = 原样；单 agent = 最多一条（多条并成一个临时 agent：模块去重、模型取首项、理由合并） |
+
 | `taskchain/api.rs` | **入站能力面**（**纯领域业务**：有不变式、无端口、无 `service`）：任务链的事实与派生（`TaskChain` / `TaskNode` / `NodeStatus` / `Acceptance` + 阶段 / 就绪 / 验收判定）。三个消费者都经它：`collab` 驱动、`session` 线格式携带、呈现层渲染 |
 | `taskchain/domain/chain.rs` | 任务链的**纯数据 + 纯图算法**（节点、依赖、阶段派生、就绪、验收判定与装配错误上报）——不做 IO、不碰会话（见 [task-chain.md](task-chain.md)） |
 | `tools/api.rs` | **入站能力面**：`Tools` 能力面（按角色发放工具面 `tool_face` / `role_face` / `allows_module_tools`、总表 `book()` / 自检 `problems()`）+ **`ToolExec` 执行面**（`run_module` / `run_builtin` / `release_fence`）；`ToolOutcome` 从 ports 归到这里（批次 20b）。原行余下：`Tools` 能力面（按角色发放工具面 `tool_face` / `role_face` / `allows_module_tools`、总表 `book()`、自检 `problems()`）+ 工具清单 / 参数契约 / 补丁与应用 / 围栏策略的对外名字 |
@@ -97,14 +103,14 @@
 | `session/api.rs` | **入站能力面**：`HistoryOps`（呈现层的队列面：列表 / 打开 / 删除）+ **`History` 直连面**（别的能力用：造会话 / 写元信息 / 追流水 / 列出 / 读回 / 删除；与端口一一对应，价值在 R12 的唯一持有者）+ `SessionParams` / `AgentSession` / `TurnRun` / 行与事件词汇 / 历史视图的对外名字 |
 | `session/service.rs` | **本能力的用例与端口持有者**：持 `HistoryStore`（**唯一持有者**，R12），实现 `api::History`（造会话 / 追流水 / 读元信息 / 删会话）。呈现层的列表/打开/删除仍走 `api::HistoryOps`（队列代理实现）；**核心操作回路** `core_operation`（声明角色工具面 → 跑一次模型 → 从工具调用参数取载荷 → 只读核实回路；取消与分片的包装只有这一处）与 `reply_msgs`（一次模型回复 → 发给模型的消息，**唯一构造函数**）也在这里 |
 | `session/ports.rs` | **出站端口**（只有 `service.rs` 持有，R12）：`HistoryStore`——会话历史的持久化（meta + append-only 流水） |
-| `session/domain/session.rs` | 会话状态与簿记 + 工具面 `MemberTools` / `ModuleTools`+ `env_block`（批次 15 从 `tools` 移来） |
+| `session/domain/session.rs` | 会话状态与簿记 + 工具面 `MemberTools` / `ModuleTools` + `env_block`；**`tool_table`**（模块清单 → 按模块索引的成员工具面，`20e-2` 从协作引擎归位） |
 | `session/domain/history.rs` | 会话元信息与历史视图的内存形态 |
 | `session/domain/events.rs` | 呈现侧契约：`SessionEvent` 与介入请求的词汇、转录行 `LineView` |
 | `session/detail/fs_history.rs` | `HistoryStore`：`meta.yaml` + `transcript.jsonl` |
-| `session/domain/rewind.rs` | 回档的**纯行 / 事件算术**：`turn_of_line` / `last_line_within` / `truncate_events` / `cut_before_line` / `align_keep` / `line_reply_of` / `find_line_id`（**编排在协调业务**） |
+| `session/domain/rewind.rs` | 回档的**纯行 / 事件算术**：`turn_of_line` / `last_line_within` / `truncate_events` / `cut_before_line` / `align_keep` / `line_reply_of` / `find_line_id` / `max_reply`（转录里用过的最大回复号，重建时续号）（**编排在协调业务**） |
 | `collab/api.rs` | **入站能力面**：`CollabSession` / 讨论与执行引擎 / 回合与验收词汇 / 协作状态派生的对外名字 |
 | `collab/domain/collab.rs` | 协作会话状态机与讨论泵 |
-| `collab/domain/engine.rs` | 讨论/执行/验收引擎 + **唯一的轮循环** `converse_with` + **唯一的请求装配点** `assemble` + 回合驱动 + 行构造 |
+| `collab/domain/engine.rs` | 讨论/执行/验收引擎 + **唯一的轮循环** `converse_with` + **唯一的请求装配点** `assemble` + 回合驱动 + 行构造（核心操作回路与行回灌已归 `session`，`20e-1`） |
 | `collab/domain/collab_state.rs` | 「转录即状态」的协作状态派生（纯函数、可回放） |
 | `llm/domain/envelope.rs` | 发言信封解析（纯逻辑）：`ToolInvoke.body` = 信封之后的正文；判定**未闭合 / 裸控制字符 / 语法错 / 字段不合法**四类；未闭合带上 EOF 状态 |
 

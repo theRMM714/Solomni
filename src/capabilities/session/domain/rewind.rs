@@ -151,3 +151,30 @@ pub fn find_line_id(
     }
     found
 }
+
+/// 转录流水里用过的最大回复 id：重建时据此续号。
+/// 为什么必须续号：回复 id 是分组依据，重复就会把新回复与旧回复并成一组。
+pub fn max_reply(events: &[serde_json::Value]) -> u64 {
+    let mut max = 0u64;
+    for ev in events {
+        if ev.get("type").and_then(|t| t.as_str()) != Some("transcript") {
+            continue;
+        }
+        let Some(lines) = ev.get("lines").and_then(|l| l.as_array()) else {
+            continue;
+        };
+        for l in lines {
+            if let Some(r) = l.get("reply").and_then(|x| x.as_u64()) {
+                max = max.max(r);
+            }
+            if let Some(r) = l
+                .get("tool")
+                .and_then(|t| t.get("reply"))
+                .and_then(|x| x.as_u64())
+            {
+                max = max.max(r);
+            }
+        }
+    }
+    max
+}

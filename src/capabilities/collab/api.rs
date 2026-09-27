@@ -2,6 +2,4 @@
 
 pub use crate::capabilities::collab::domain::collab::CollabSession;
 pub use crate::capabilities::collab::domain::collab_state::tool_runs;
-pub use crate::capabilities::collab::domain::engine::{
-    max_reply, tool_table, AfterTurn, MemberTurn,
-};
+pub use crate::capabilities::collab::domain::engine::{AfterTurn, MemberTurn};

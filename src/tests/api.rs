@@ -100,7 +100,7 @@ fn suggest_models_pushes_on_a_system_session_and_leaves_no_trace() {
     let handle = spawn(
         vec![module_of("a")],
         vec![
-            "{\"type\":\"tool\",\"name\":\"suggest\",\"args\":{\"agents\":[{\"name\":\"甲\",\"modules\":[\"a\"],\"model\":\"m\",\"why\":\"对口\"}]}}",
+            "{\"type\":\"tool\",\"name\":\"slate\",\"args\":{\"picks\":[{\"name\":\"甲\",\"modules\":[\"a\"],\"model\":\"m\",\"why\":\"对口\"}]}}",
         ],
     );
     let ops = Ops::from_handle(&handle);
