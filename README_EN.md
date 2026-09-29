@@ -88,8 +88,11 @@ you can Stop / Continue at any time, and speak inside any sub-session.
 
 ### Run the demo
 
-A real provider is required; without one the built-in fake model keeps the flow running but calls no tools
-and produces no artifacts.
+The demo is a **real-machine test**: it runs against a real model — it feeds real files, calls real tools and
+checks real artifacts. So it verifies the preconditions first: the three modules are in the roster, the indexer
+is built, and the registry holds a provider plus a usable model (`SOLOMNI_DEMO_MODEL`, or the core default).
+**When a precondition is missing it prints `DEMO-SKIPPED` with how to fix it and exits with code 2** — it never
+runs the flow on the built-in demo channel just to look successful.
 
 ```bash
 node start.js -webUI

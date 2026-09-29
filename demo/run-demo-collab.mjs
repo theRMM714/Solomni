@@ -23,6 +23,7 @@ import { readFileSync, existsSync, readdirSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { request } from "node:http";
+import { demoPreflight, refuseDemo } from "./preflight.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const BASE = process.env.SOLOMNI_DEMO_BASE || "http://127.0.0.1:3081";
@@ -134,6 +135,11 @@ async function main() {
     console.error("转录中心没起来：" + BASE + "（先跑 node start.js -webUI）");
     return 1;
   }
+
+  // 演示是**真机测试**：条件不齐就明说并退出（退出码 2），不用演示通道凑一遍。
+  const pre = await api("GET", "/api/state");
+  const block = demoPreflight(pre.json, MODEL);
+  if (block) return refuseDemo(block);
 
   // ① 建协作工作：三个 agent 各持一个模块（三种语言），需求一句话。
   const task = "把共享区里的资料变成一份能给同事看的报告，再做一个能离线检索的索引包。"

@@ -61,6 +61,7 @@ node start.js -webUI      # 直接进本地网页；或在终端菜单里输入 
 
 首次运行**不需要手工准备环境**：启动层序把工具链收敛在项目内（`platform/`、`.tools/`），
 缺 Rust 会先征求同意再装进去。**没有配供应商也能跑**：会用内置假模型把流程演示一遍，并如实告知。
+（`demo/` 下那两个脚本是**真机测试**，另算：没配供应商它们会直接拒跑并告诉你缺什么。）
 
 ### 2）登记通道与模型（可选）
 
@@ -73,7 +74,9 @@ node start.js -webUI      # 直接进本地网页；或在终端菜单里输入 
 
 ### 跑一遍演示
 
-需要真实供应商；没配会回落到内置假模型（流程照跑，但不调工具、不产生产物）。
+演示是**真机测试**：走真实模型，会真的投喂资料、调工具、核产物。所以脚本开工前先核对条件——
+三个模块在清单里、indexer 已构建、登记处有供应商与一个可用的模型（用 `SOLOMNI_DEMO_MODEL` 指定，或用核心默认）。
+**条件不齐就打印 `DEMO-SKIPPED` 与怎么补、以退出码 2 收场：不跑，也不用内置演示通道凑一遍。**
 
 ```bash
 node start.js -webUI
@@ -81,7 +84,7 @@ node demo/run-demo.mjs         # 组合式：一个 agent 装三个模块（pyth
 node demo/run-demo-collab.mjs  # 小组协作：三个 agent 各持一份能力协商，走完整条流程
 ```
 
-C++ 模块要先编译一次，命令与理由见 [modules/indexer/README.md](modules/indexer/README.md)。
+C++ 模块要先编译一次（产物不入库），命令与理由见 [modules/indexer/README.md](modules/indexer/README.md)——前置检查会替你确认这一步。
 
 ## 它不是什么
 
