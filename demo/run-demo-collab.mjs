@@ -119,7 +119,9 @@ function artifacts(work) {
     for (const ent of readdirSync(dir, { withFileTypes: true })) {
       const p = join(dir, ent.name);
       if (ent.isDirectory()) walk(p);
-      else if (!found.has(ent.name)) found.set(ent.name, p);
+      // 会话自己的元数据不是产物：不排除的话，会话根的 transcript.jsonl 会被"语料"那条正则抢先命中，
+      // 而真正缺产物时检查还会假通过（真机上就这么显示过一次）。
+      else if (ent.name !== "meta.yaml" && ent.name !== "transcript.jsonl" && !found.has(ent.name)) found.set(ent.name, p);
     }
   };
   if (existsSync(root)) walk(root);
