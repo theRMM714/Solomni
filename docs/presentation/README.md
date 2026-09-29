@@ -18,7 +18,7 @@
 
 ## 改动时必须同步
 
-- 增删路由 → 四处同改：`web/routes.rs` 的 `ROUTES`、前端调用点、[`contracts.md`](contracts.md) 的 ROUTES 段、`src/tests/routes.rs`（机器比对）。
+- 增删路由 → 五处同改：`src/presentation/web/routes.rs` 的 `ROUTES`、前端调用点、[`contracts.md`](contracts.md) 的 ROUTES 段、`src/tests/routes.rs`（机器比对） 与 `demo/*.mjs` 的调用点。
 - 入站契约（`Ops` 的方法与事件）一改 → 两个渠道的渲染、`src/tests/api.rs`、[`contracts.md`](contracts.md)。
 
 详见 [ARCHITECTURE.md](../../ARCHITECTURE.md) §一（`cli/` + `web/` 一行）。

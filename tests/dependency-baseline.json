@@ -6,5 +6,6 @@
   "apiOnly": [],
   "foreignImpl": [],
   "domainPorts": [],
-  "apiPorts": []
+  "apiPorts": [],
+  "channelCross": []
 }

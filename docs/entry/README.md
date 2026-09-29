@@ -22,7 +22,7 @@
 ## 四、改动本单元时必须同步
 
 - 新增端口 / 适配器 → 改 `main.rs` 装配；新增探针 → 同步 `docs/testing/execution-ci.md`；路由目录的机器比对在 `src/tests/routes.rs` ↔ `docs/presentation/contracts.md`。
-- 业务缺口账：`src/entry/testgaps.yaml`——业务 AI **只记缺口、不写测试**，由测试 AI 实现测试并销账；格式见 [docs/testing/gaps-acceptance.md](../../docs/testing/gaps-acceptance.md) §十二。
+- 测试缺口：本单元**不是业务能力**，没有独立的缺口账；缺口记在 `tests/gaps.yaml`；格式见 [docs/testing/gaps-acceptance.md](../../docs/testing/gaps-acceptance.md) §十二。
 
 ## 本目录
 

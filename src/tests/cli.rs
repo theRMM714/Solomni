@@ -4,7 +4,7 @@
 
 use super::doubles::module_of;
 use super::ops_with;
-use crate::cli;
+use crate::presentation::cli;
 
 #[test]
 fn split_names_accepts_commas_and_whitespace() {

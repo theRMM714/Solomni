@@ -21,8 +21,8 @@
 
 ## 四、改动本单元时必须同步
 
-- 增删路由 → 四处同改：本文件、`ROUTES`、前端调用点、`docs/presentation/contracts.md`；前端资源改动跑冒烟。
-- 业务缺口账：`src/web/testgaps.yaml`——业务 AI **只记缺口、不写测试**，由测试 AI 实现测试并销账；格式见 [docs/testing/gaps-acceptance.md](../../../docs/testing/gaps-acceptance.md) §十二。
+- 增删路由 → 五处同改：本文件、`ROUTES`、前端调用点、`docs/presentation/contracts.md`；前端资源改动跑冒烟 与 `demo/*.mjs` 的调用点。
+- 测试缺口：本单元**不是业务能力**，没有独立的缺口账；缺口记在 `tests/gaps.yaml`；格式见 [docs/testing/gaps-acceptance.md](../../../docs/testing/gaps-acceptance.md) §十二。
 
 ## 本目录
 

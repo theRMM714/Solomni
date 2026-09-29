@@ -7,7 +7,6 @@ use crate::capabilities::conductor::api::{
 };
 use crate::capabilities::conductor::api::{Ops, Output};
 use crate::capabilities::registry::api::{ModelView, ProviderView};
-use crate::web::DEFAULT_PORT;
 use std::io::Write;
 
 /// 离开转录中心时的去向：退出，或转入 Web 转录中心（端口）。
@@ -16,7 +15,7 @@ pub enum CliExit {
     Web(u16),
 }
 
-pub fn run(ops: Ops) -> CliExit {
+pub fn run(ops: Ops, web_default_port: u16) -> CliExit {
     println!("Solomni 核心编排者（转录中心）");
     print_roster(&ops);
 
@@ -41,7 +40,7 @@ pub fn run(ops: Ops) -> CliExit {
             "rescan" => print_roster(&ops),
             // 转入 Web 转录中心：接受 webui / -webUI（启动参数也这么写），可选端口。
             "webui" | "-webui" | "web" | "-web" => {
-                let port = arg.parse::<u16>().unwrap_or(DEFAULT_PORT);
+                let port = arg.parse::<u16>().unwrap_or(web_default_port);
                 return CliExit::Web(port);
             }
             "exit" => break,

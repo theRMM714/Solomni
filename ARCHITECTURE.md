@@ -10,7 +10,7 @@
 依赖箭头只有一种画法（每层只指向它的下层）：
 
 ```text
-cli / web ──▶ capabilities（含协调业务 conductor）──▶ kernel
+presentation/{cli,web} ──▶ capabilities（含协调业务 conductor）──▶ kernel
 （main = 组合根，装配全部；各能力的 `detail` 与 kernel 的实现只在这里被 new 出来，它们不认识业务编排）
 ```
 
@@ -18,7 +18,7 @@ cli / web ──▶ capabilities（含协调业务 conductor）──▶ kernel
 | --- | --- | --- |
 | `capabilities/conductor/` | **协调业务**：会话中心（会话在世表、命令队列、运行态）、生成驱动、跨能力用例与跨会话回档编排。它与别的能力**平级**，只经各能力的 `api` 编排，不持任何别人的端口 | 不读文件（`std::fs`）、不发网络（ureq）、不碰 stdin/stdout——一切机制下沉各能力的 `detail/` |
 | `entry/` | **入口层共用机制**（产品根规范化）；只有组合根 / `diagnostics` / `guard` 能用 | 属于入口层；**任何能力都不许依赖它** |
-| `cli/` + `web/` | **前端（交付机制）**：各渠道一个顶层目录，完全分开——传输（argv/stdout vs HTTP/SSE）、路由、**纯渲染**。**不是业务能力**（无状态、无不变式） | 只依赖 **入站能力面**（各能力的 `::api`）；**永不接触端口对象，也拿不到 `Core` 本身**；**两者之间互不依赖** |
+| `presentation/{cli,web}/` | **前端（交付机制）**：各渠道一个子目录，完全分开——传输（argv/stdout vs HTTP/SSE）、路由、**纯渲染**。**不是业务能力**（无状态、无不变式） | 只依赖 **入站能力面**（各能力的 `::api`）；**永不接触端口对象，也拿不到 `Core` 本身**；**两者之间互不依赖** |
 | `capabilities/` | **业务能力**：按业务功能垂直切分。每个能力有 `api`（入站契约：trait + DTO）/ `service`（**本能力的状态与用例**，实现 `api` 的 trait；别处只持 `dyn` 面）/ `ports`（出站端口，**只由定义它的能力持有**）/ `domain`（纯逻辑）/ `detail`（细节实现，**只有组合根能构造**） | **业务之间只经对方的 `api`**；不反向依赖 `entry` / `presentation`（由 T0 结构审查机器判定，见 §九.7） |
 | `kernel/` | **机制型业务**：无领域语义、无领域状态的机制（运行日志端口、宿主探测、生成中作业的取消表、跨业务共享的事实类型、路径书写）；形状与别的能力一致（`api` / `ports` / `domain` / `detail`） | **不依赖任何人**（不认识能力 / presentation / entry）；不放有领域语义的类型 |
 | 入口层（`main.rs` + `diagnostics/` + `guard/`） | **组合根**（`main.rs`：`new` 出所有适配器并注入）+ **机器可读探针**（`diagnostics/`：`--doctor` / `--https-check` / `--print-routes` / `--print-fence-env` / `--fence-verify`）+ **围栏守门进程**（`guard/`：`--fence-run` / `--fence-clean`，**第二个程序入口**） | 它依赖所有人，**任何人都不许依赖它**（门禁判定）。除装配与探针外无业务 |
@@ -69,7 +69,7 @@ cli / web ──▶ capabilities（含协调业务 conductor）──▶ kernel
 - 业务边界判据与硬要求（R1–R13）：见 §九；逐文件的能力清单见各单元的 `docs/<单元>/module-map.md`。
 
 **路由表由契约测试机器比对**（`src/tests/routes.rs` 直接读 `docs/presentation/contracts.md`）：
-表与 `web/routes.rs` 的 `ROUTES` 对不上就是测试失败。
+表与 `src/presentation/web/routes.rs` 的 `ROUTES` 对不上就是测试失败。
 
 ## 四、运行日志（Log 端口）
 
@@ -240,7 +240,7 @@ session/<工作名>/
 
 - **纯机制**（线程、锁、定时、文件句柄、HTTP 客户端）→ `kernel` 或所属能力的 `detail/`；
 - **纯逻辑 / 派生**（解析器、状态派生、提示词渲染）→ 所属业务的 `domain/`，**不加 trait**；
-- **纯交付**（HTTP 路由、终端渲染）→ `cli/` + `web/`，**不是能力**；
+- **纯交付**（HTTP 路由、终端渲染）→ `presentation/{cli,web}/`，**不是能力**；
 - **只服务单一调用方的脚本 / 编排** → 它自己的 `service.rs`；
 - **DTO 中转站**（把两个能力的类型拼一起的适配业务）→ 新的水平层，禁止。
 
@@ -279,7 +279,8 @@ session/<工作名>/
 - **apiPorts** / **domainPorts**：`api` 与 `domain` 都不引端口；
 - **foreignImpl**：不得给别的能力的类型写 `impl`；
 - **coreCycles**：能力节点图无环；
-- **reverse** / **presentation**：能力不反向依赖入口层或呈现层。
+- **reverse** / **presentation**：能力不反向依赖入口层或呈现层；
+- **channelCross**：呈现层的两个渠道（`cli` 与 `web`）互不依赖（各自一个子目录，没有共享层）。
 - **moduleMap** / **docRefs**：各单元的 `docs/<单元>/module-map.md` 合起来与磁盘**双向一致**（表里的路径都存在、`src/` 下的实现文件都有行）；文档里的文档链接与代码注释里的 `docs/**.md` 引用都存在。
 
 **当前基线为空（零豁免）**：任一判据不成立即报错；豁免条目一旦不再成立，门禁报「基线豁免已过期」强制销账。

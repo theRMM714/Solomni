@@ -6,4 +6,4 @@
 
 | 文件 | 职责 |
 | --- | --- |
-| `src/cli/mod.rs` |
+| `src/presentation/cli/mod.rs` |

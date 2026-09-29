@@ -1,4 +1,4 @@
-//! HTTP 入站契约的契约测试：路由目录 ↔ 处理器 ↔ 文档 ↔ 前端调用，四者机器比对。
+//! HTTP 入站契约的契约测试：路由目录 ↔ 处理器 ↔ 文档 ↔ 前端调用 ↔ 演示脚本，机器比对。
 //! 用**假能力面**（FakeOps）直接调 `web::route`（不经过 socket），逐条路由验成功/错误/空/边界；
 //! 真实传输由 L4 端到端覆盖（真二进制 + 真 HTTP）。
 //! 假能力面顺带证明一件事：「按角色切分」的能力接口真能被替换——新增一种呈现不必认识 `Conductor`。
@@ -16,10 +16,11 @@ use crate::capabilities::registry::api::{AppSettings, ModelView, ProviderView};
 use crate::capabilities::session::api::{AgentMeta, HistoryOps, HistoryView, SessionMeta};
 use crate::capabilities::workspace::api::{Roster, WorkspaceOps};
 use crate::kernel::api::Tier;
-use crate::web::routes::{self, ROUTES};
-use crate::web::{self, FenceInfo};
+use crate::presentation::web::routes::{self, ROUTES};
+use crate::presentation::web::{self, FenceInfo};
 use serde_json::json;
 use std::collections::BTreeMap;
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
@@ -633,7 +634,7 @@ fn documented_route_table_matches_the_catalog() {
 
 #[test]
 fn frontend_only_calls_catalogued_paths() {
-    let src = include_str!("../web/assets/app.js");
+    let src = include_str!("../presentation/web/assets/app.js");
     let mut hits: Vec<String> = Vec::new();
     let mut from = 0;
     while let Some(pos) = src[from..].find("/api/") {
@@ -661,6 +662,50 @@ fn frontend_only_calls_catalogued_paths() {
             .iter()
             .any(|r| r.pattern == p.as_str() || r.pattern.starts_with(p.as_str()));
         assert!(known, "前端调用了目录里没有的路径：{}", p);
+    }
+}
+
+/// 演示脚本（`demo/*.mjs`）也只走目录里的路径：**演示是产品对外的一张脸**，改路由不该让它静默失效。
+#[test]
+fn demo_scripts_only_call_catalogued_paths() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("demo");
+    let mut files = 0;
+    let mut hits: Vec<String> = Vec::new();
+    for entry in std::fs::read_dir(&dir).expect("demo/ 必须存在") {
+        let path = entry.expect("可读的目录项").path();
+        if path.extension().and_then(|e| e.to_str()) != Some("mjs") {
+            continue;
+        }
+        files += 1;
+        let src = std::fs::read_to_string(&path).expect("演示脚本必须可读");
+        let mut from = 0;
+        while let Some(pos) = src[from..].find("/api/") {
+            let start = from + pos;
+            let tail = &src[start..];
+            let end = tail
+                .find(|c: char| !(c.is_alphanumeric() || matches!(c, '/' | '_' | '-' | '.')))
+                .unwrap_or(tail.len());
+            let p = tail[..end].to_string();
+            if !hits.iter().any(|h| h == &p) {
+                hits.push(p);
+            }
+            from = start + 4;
+            if from >= src.len() {
+                break;
+            }
+        }
+    }
+    assert!(files > 0, "demo/ 下一个 .mjs 都没有（演示怎么跑？）");
+    assert!(
+        !hits.is_empty(),
+        "没从演示脚本里认出任何 /api/ 调用（提取逻辑失效了？）"
+    );
+    for p in &hits {
+        // 与前端同一条口径：字面前缀即可，动态段由脚本拼在后面。
+        let known = ROUTES
+            .iter()
+            .any(|r| r.pattern == p.as_str() || r.pattern.starts_with(p.as_str()));
+        assert!(known, "演示脚本调用了目录里没有的路径：{}", p);
     }
 }
 

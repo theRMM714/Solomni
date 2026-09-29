@@ -6,6 +6,6 @@
 
 | 文件 | 职责 |
 | --- | --- |
-| `src/web/mod.rs` |
-| `src/web/routes.rs` |
-| `src/web/assets/` |
+| `src/presentation/web/mod.rs` |
+| `src/presentation/web/routes.rs` |
+| `src/presentation/web/assets/` |

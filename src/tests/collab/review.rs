@@ -88,7 +88,7 @@ pub(crate) fn review_parse_failure_is_conservative_fail() {
 #[test]
 pub(crate) fn mode_vocabulary_is_single_or_collab_only() {
     // web 与 conductor 的形态词汇只有 single / collab；旧的 direct / compose 一概不认（GREEN FIELD，无兼容）。
-    use crate::web::parse_mode;
+    use crate::presentation::web::parse_mode;
     assert!(matches!(parse_mode("single"), Ok(WorkMode::Single)));
     assert!(matches!(parse_mode("collab"), Ok(WorkMode::Collab)));
     for bad in ["direct", "compose", "omni", ""] {

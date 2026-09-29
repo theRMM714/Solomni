@@ -88,7 +88,7 @@ async function main() {
     return 1;
   }
   if (!(await waitReady())) {
-    console.error("转录中心没起来：" + BASE + "（先跑 solomni -webUI）");
+    console.error("转录中心没起来：" + BASE + "（先跑 node start.js -webUI）");
     return 1;
   }
 

@@ -123,7 +123,7 @@ T2 不替代：
 - 工具 stdin/stdout、退出码和错误传播；
 - 进程树回收、超时和取消；
 - 日志、报告和路径编码；
-- 前端冒烟（由 `src/web/assets/smoke.cjs` 自动发现同目录 `*.smoke.cjs`）。
+- 前端冒烟（由 `src/presentation/web/assets/smoke.cjs` 自动发现同目录 `*.smoke.cjs`）。
 
 禁止依赖：外网、真实密钥、用户目录、已有后台服务、平台特权或本机偶然配置。
 

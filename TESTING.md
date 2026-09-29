@@ -29,7 +29,7 @@
 - `src/tests/` 中的测试层：**与 `capabilities/` 同构的一个能力一个文件**（`prompt.rs` / `registry.rs` / `llm.rs` / `workspace.rs` / `session.rs` / `slate.rs` / `taskchain.rs`）+ `conductor.rs`（协调业务自己的用例：会话中心与跨能力编排）、`tools/` 与 `collab/`（这两个能力的用例按域分成四个子模块）、`doubles.rs`（端口替身）与 `builders.rs`（测试装配脚手架）；
 - `tests/cross-platform/` 跨平台集成与端到端测试；
 - `tests/windows/`、`tests/linux/`、`tests/macos/` 平台探针（`tests/helpers/probe.rs` 提供共用探针设施）；
-- `src/web/assets/*.smoke.cjs` 前端冒烟测试；
+- `src/presentation/web/assets/*.smoke.cjs` 前端冒烟测试；
 - `tests/gaps.yaml`（全局）、`tests/<平台>/gaps.yaml`（平台）与每个业务/机制单元一份 `src/<单元>/testgaps.yaml`（业务）缺口账；
 - **写测试的是测试 AI**：业务 AI 只跑门禁证明没弄坏、把没盖住的缺口写进自己单元的 `testgaps.yaml`，由测试 AI 实现并销账（分工见 [AGENTS.md](AGENTS.md) 九）；
 - `node run-tests.js` 测试汇总入口（`node start.js -test` 是备好环境后的同一入口）；
@@ -40,7 +40,7 @@
     `fakes.rs`（FakeChat / DemoGateway 的独立契约）；
   - `detail.rs`（8 个文件系统实现的真实边界 + 本机环回 HTTP 适配器）；
   - `api.rs`（入站契约：命令与事件、生成期间停止立刻生效、错误如实传播、单条命令 panic 不带垮核心）；
-  - `routes.rs`（HTTP 路由目录 ↔ 处理器 ↔ 文档 ↔ 前端调用四者机器比对；假能力面逐条验成功 / 错误 / 空 / 边界）；
+  - `routes.rs`（HTTP 路由目录 ↔ 处理器 ↔ 文档 ↔ 前端调用 ↔ 演示脚本机器比对；假能力面逐条验成功 / 错误 / 空 / 边界）；
 - **入站契约也是契约**：呈现层只依赖各能力的能力接口（见 [docs/presentation/contracts.md](docs/presentation/contracts.md)）与事件台（拿不到 `Core`、拿不到任何核心锁），
   所以它能被假实现整体替换——`routes.rs` 的 `FakeOps` 就是这么逐条测路由的。
 - T0 质量门禁已并入同一入口，且**全部是零容忍硬失败**：编译、结构审查、格式、clippy、编译告警、依赖重复。

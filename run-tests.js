@@ -438,7 +438,7 @@ function structuralAudit() {
     };
     const LAYER_OF = (r) => {
       // 前端（交付机制）：各渠道一个顶层目录；不是业务能力。
-      if (r.startsWith("src/cli/") || r.startsWith("src/web/")) return "presentation";
+      if (r.startsWith("src/presentation/")) return "presentation";
       // 程序入口层：组合根 + 机器可读探针 + 围栏守门进程（第二个程序入口）+ 入口层共用机制。
       // 它依赖所有人，**任何人都不许依赖它**。
       if (
@@ -479,6 +479,8 @@ function structuralAudit() {
     const foreignImpl = new Set();
     const domainPorts = new Set();
     const apiPorts = new Set();
+    // 呈现层两个渠道（cli / web）互不依赖：有共享层就等于有隐式契约。
+    const channelCross = new Set();
     const coreGraph = {};
     for (const abs of rsFiles) {
       const f = rel(abs);
@@ -493,8 +495,13 @@ function structuralAudit() {
       for (const m of text.matchAll(/crate::([a-z_][a-z0-9_]*(?:::[a-z_][a-z0-9_]*)*)/g)) {
         const t = normTarget(m[1]);
         // 前端是两个顶层目录（cli / web），它们同属呈现层。
-      const targetLayer =
-        t === "crate::cli" || t === "crate::web" ? "presentation" : t.split("::")[1];
+      const targetLayer = t.split("::")[1];
+        // 渠道互不依赖：呈现层的文件不得引用**另一个渠道**（各自一个子目录，没有共享层）。
+        if (layer === "presentation" && t.startsWith("crate::presentation::")) {
+          const own = f.startsWith("src/presentation/cli/") ? "cli" : f.startsWith("src/presentation/web/") ? "web" : null;
+          const other = t.split("::")[2];
+          if (own && other && own !== other) channelCross.add(f + " -> " + t);
+        }
         if ((FORBIDDEN[layer] || []).includes(targetLayer)) reverse.add(f + " -> " + t);
         // 呈现层只认入站能力面：某个能力的 ::api（协调业务 conductor 也不例外）。
         const presOk = t.startsWith("crate::capabilities::") && t.endsWith("::api");
@@ -609,6 +616,7 @@ function structuralAudit() {
     compare("foreignImpl", [...foreignImpl].sort(), depBaseline.foreignImpl || [], "不得给别的能力的类型写 impl（R1：另一种互相引入）");
     compare("domainPorts", [...domainPorts].sort(), depBaseline.domainPorts || [], "domain 是纯逻辑（批次 20a）：不得引用任何 ports");
     compare("apiPorts", [...apiPorts].sort(), depBaseline.apiPorts || [], "api 是入站用例面：不得把本能力的 ports 再导出去（R12）");
+    compare("channelCross", [...channelCross].sort(), depBaseline.channelCross || [], "呈现层的两个渠道（cli / web）互不依赖：不得引用对方");
 
     const actualCycles = sortSccs(coreSccs);
     const baselineCycles = sortSccs(depBaseline.coreCycles || []);
@@ -780,7 +788,7 @@ function pushStep(obj) {
 
   // 前端冒烟（自动发现同目录 *.smoke.cjs）
   announce("前端冒烟");
-  const fe = sh(process.execPath, [path.join("src", "web", "assets", "smoke.cjs")]);
+  const fe = sh(process.execPath, [path.join("src", "presentation", "web", "assets", "smoke.cjs")]);
   announceDone(fe.code === 0 ? "完成" : "失败", "");
   pushStep({
     step: "前端冒烟",

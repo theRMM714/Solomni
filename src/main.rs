@@ -3,12 +3,11 @@
 //! 依赖方向：main → adapters / capabilities / presentation；协调业务不知道后两者存在。
 
 mod capabilities;
-mod cli;
 mod diagnostics;
 mod entry;
 mod guard;
 mod kernel;
-mod web;
+mod presentation;
 
 #[cfg(test)]
 mod tests;
@@ -326,7 +325,7 @@ fn main() {
             .position(|a| a == "--web-port")
             .and_then(|i| args.get(i + 1))
             .and_then(|v| v.parse::<u16>().ok())
-            .unwrap_or(web::DEFAULT_PORT)
+            .unwrap_or(presentation::web::DEFAULT_PORT)
     };
 
     // 核心搬到它自己的执行线程：此后呈现层只持有**入站能力面**——拿不到 Conductor，也拿不到任何核心锁。
@@ -343,7 +342,9 @@ fn main() {
         serve_web(ops, port_flag(&args), allow_fence_write);
     } else {
         // CLI 里输入 webui 可直接转入 Web，无需重启进程（能力面可克隆，两份呈现共用同一个核心）。
-        if let cli::CliExit::Web(port) = cli::run(ops.clone()) {
+        if let presentation::cli::CliExit::Web(port) =
+            presentation::cli::run(ops.clone(), presentation::web::DEFAULT_PORT)
+        {
             serve_web(ops, port, allow_fence_write);
         }
     }
@@ -358,7 +359,7 @@ fn serve_web(ops: capabilities::conductor::api::Ops, port: u16, write_allowed: b
     } else {
         (false, false)
     };
-    let fence = web::FenceInfo {
+    let fence = presentation::web::FenceInfo {
         fs: cap.fs,
         net: cap.net,
         tree: cap.tree,
@@ -372,7 +373,7 @@ fn serve_web(ops: capabilities::conductor::api::Ops, port: u16, write_allowed: b
             .map(|s| s.fence_read.len())
             .unwrap_or(0),
     };
-    if let Err(e) = web::serve(ops, port, fence) {
+    if let Err(e) = presentation::web::serve(ops, port, fence) {
         eprintln!("[Web 服务异常] {}", e);
         std::process::exit(1);
     }

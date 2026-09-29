@@ -113,5 +113,5 @@ pub fn fence_verify(args: &[String], flag: usize) -> i32 {
 
 /// 入站契约（机器可读）：HTTP 路由目录的唯一定义（见 docs/presentation/contracts.md）。
 pub fn print_routes() {
-    println!("{}", crate::web::routes::catalog_json());
+    println!("{}", crate::presentation::web::routes::catalog_json());
 }
