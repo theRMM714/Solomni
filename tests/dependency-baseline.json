@@ -1,0 +1,11 @@
+{
+  "_comment": "依赖方向门禁的豁免清单（判据见 ARCHITECTURE.md §九.7）。条目存在 = 该判据还有一处豁免；条目一旦不再成立，门禁报「基线豁免已过期」强制销账。**当前六类判据全部为空 = 零豁免**。",
+  "reverse": [],
+  "presentation": [],
+  "coreCycles": [],
+  "apiOnly": [],
+  "foreignImpl": [],
+  "domainPorts": [],
+  "apiPorts": [],
+  "channelCross": []
+}

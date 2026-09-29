@@ -84,3 +84,122 @@
     Ctrl+C 后回到 CLI 提示符、进程仍在；再输入 webui 能重新起服务器。
   blocked_by: |
     待排期：要把 Web 服务器从"阻塞到出错"改成可中断等待（收 SIGINT 后正常关闭再回 CLI 主循环）。
+
+- id: session.children-not-deleted-with-parent
+  scope: global
+  level: T1
+  why: |
+    删主会话只删它自己（`Conductor::history_delete` 只处理一个目录），子会话（`<父>--<agent>`）留在盘上
+    变成孤儿：用户得一个个删。反过来，子会话本来就不该由用户单独删（它是核心按节点派生的），
+    但界面给每个子会话都渲染了删除按钮，删除它会让父子关系断掉。**既漏删又错开**。
+  how: |
+    ① 面向用户的删除面（`HistoryOps::delete` → `Conductor::history_delete`）**拒绝子会话**：
+    `meta.parent` 非空即报错，理由说清（"由核心管理，删父会话会一起删掉"）；
+    ② 删主会话时按 `meta.parent` 收集整棵子树（后序：先子后父），逐个撤围栏授权 → 移出内存 → 删目录；
+    ③ 子树里任一节点在生成中就整体拒绝（不能删到一半留下半个状态）；
+    ④ 前端：子会话不渲染删除按钮，父会话的删除按钮 title 写明"连子会话一起删"。
+    内部的 `session::History::delete`（纯存储机制）不受影响——系统路径还需要它。
+  accept: |
+    删主会话后：它的所有子会话一并消失（列表与目录都不再有）；直接删子会话被拒、理由明确且子会话仍在；
+    子树里有会话在生成时删除被拒；前端冒烟断言"子会话没有删除按钮、父会话的按钮接线"。
+  blocked_by: |
+    与 `session.children-stored-as-siblings` 同一批做（落盘位置改到主会话目录内部之后，"连带删除"
+    就是"删一个目录"；两处分开做等于改两遍）。删除口径还要与 `session.delete-without-file-check`
+    对齐（记录与文件分开删）。
+
+- id: session.children-stored-as-siblings
+  scope: global
+  level: T1
+  why: |
+    子会话现在是 `sessions/` 下**与主会话并列**的独立目录（名为 `<父>--<agent>`），父子关系只靠
+    `meta.parent` 这个字段维系。这让"删父带子"必须自己走一遍树，也让目录布局与语义脱节：
+    子会话在主会话目录之外，任何按目录做的操作（清理、统计、迁移、删父）都得先读全部 meta 才知道谁是谁的儿子。
+  how: |
+    子会话放进**主会话目录内部**（例如 `sessions/<主会话>/children/<agent>/`），`meta.parent` 保留为
+    事实与校验（看位置就知道归属）。落到代码：
+    ① session 的 `HistoryStore` 端口（`detail/fs_history.rs`）改布局与"名字 → 路径"的解析；
+    ② 列出 / 打开 / 删除按新布局递归，`history_list` 的树序与 `meta.parent` 保持一致（位置与字段同源）；
+    ③ 重建会话（`rebuild_session` / `ensure_session`）按新路径取子会话流水；
+    ④ GREEN FIELD，不留旧布局的读兼容：旧目录按"未迁移"对待，不静默当成新布局。
+  accept: |
+    建一个会派生节点的协作会话后：磁盘上只有 `sessions/<主会话>/children/<agent>/`（`sessions/` 下不再
+    与主会话并列出现子会话目录）；打开 / 列表 / 回档照常；删主会话 = 删一个目录，子会话随之消失。
+  blocked_by: |
+    与 `session.children-not-deleted-with-parent` 同一批（这条是它的前提）。等用户把问题说完再定实现细节
+    （sid 命名是否仍用 `<父>--<agent>`、children 的目录名取 agent 名还是节点名）。
+
+- id: fence.per-agent-write-roots
+  scope: global
+  level: T4
+  why: |
+    「垂直分工开发」要求一个 agent 只写自己负责的目录，但当前围栏的可写范围是**整个本次工作共享区**
+    `work/`（加该 agent 的私有沙箱与它自己的模块目录），所有 agent 对共享区都可写——"谁改哪一块"
+    因此只是约定，不是机制保证。PRODUCT.md 已把它写成开发方向，所以需要可判定的验收路径。
+  how: |
+    1) `.home/settings.yaml` 为每个 agent 增加一组可写路径（缺省 = `work/`）；
+    2) 平台后端按这份清单授权（Windows 走 `confine::grant_targets` 的目录 ACL，Linux/macOS 走规则文本）；
+    3) `tests/windows/`、`tests/linux/`、`tests/macos/` 各加一条探针：A agent 写自己目录成功、
+       写 B 的目录**被机制拒绝**（不是工具层拒绝）。
+  accept: 三平台探针各一条"跨 agent 目录写被机制拒绝"通过；不给该清单时行为与今天一致。
+  blocked_by: 缺少实现
+
+- id: module.external-harness-fence-reach
+  scope: global
+  level: T3
+  why: |
+    MODULE_SPEC 允许把外部 harness 当模块的一个工具（`tools.<名>.command` 指向它的命令行）。
+    围栏目前只按运行包放行解释器目录，系统里已安装的 harness 可执行文件是否落在可达范围内
+    **没有验证过**；文档已按"开发方向"标注，不能停在"大概能跑"。
+  how: |
+    1) 写一个把外部命令行 harness 当工具的测试模块（命令落在模块目录内）；
+    2) 在授权围栏（`--fence-live`）下跑 T3 真实边界用例，记录可执行文件的可达性结论；
+    3) 若不可达，把可执行文件纳入运行包登记或围栏可达范围，再复跑。
+  accept: 授权围栏下该模块的工具跑通一次完整往返；或如实写明"必须把可执行文件放进模块目录"并落到文档与登记处。
+  blocked_by: 缺少观察面
+
+- id: fence.leftover-grant-hides-parent
+  scope: global
+  level: T4
+  why: |
+    围栏给"数据边界叶子的直接父目录"授只读属性位（RIGHTS_STAT）时用的是**显式、非继承**的 ACE。
+    实测：`tests/` 上留着一条 `S-1-15-2-1128246502-…:(OI)(CI)(S)`（rights = Synchronize，IsInherited=False），
+    后果是**整个 `tests/` 子树在受限（沙箱）进程里不可读**——列目录、stat 子项、读文件一律拒绝访问，
+    而普通用户身份读得到；`git status` 因此把 `tests/` 下所有已跟踪文件报成"已删除"。
+    一条"只为了让容器判断存在性"的残留授权，反过来把父目录对整个沙箱隐藏：撤权没带走它。
+  how: |
+    1) 复现：在 `--fence-live` 下跑一次会建数据边界叶子的用例（或直接调 `confine::prepare_fence`），
+       然后 `icacls <叶子父目录> /findsid <容器SID> /T` 应命中；受限进程读该父目录应失败。
+    2) 先查撤权路径为什么没带走它：`grant_targets` 与撤销共用一份落点清单（见 ARCHITECTURE 六），
+       父目录那条 RIGHTS_STAT 是否在那份清单里、`--fence-clean` 的扫描是否覆盖它——查清再改。
+    3) `tests/<平台>/` 加一条探针：授权→撤权后父目录不再留有该 SID 的显式 ACE，且受限进程能列该目录。
+  accept: 撤权后父目录 `/findsid` 无命中、受限进程能列目录、`git status` 不再出现幻影删除。
+  blocked_by: 缺少实现
+
+- id: core.agency-mode
+  scope: global
+  level: T5
+  why: |
+    PHILOSOPHY「谁来决定」把"把决定权整块托付给核心"写成开发方向：用户给一个范围，核心在范围内自行决定
+    （今天的"代拟→用户确认"只是它的退化形态）。它是产品行为变化，必须有可判定的验收路径，不能停在"以后会做"。
+  how: |
+    1) 定契约：委托的**范围**（哪些决定可委、哪些不可）、**期限**（一次任务 / 一直）、**撤销**（随时收回、回到点名）；
+    2) 会话参数里加上这份委托（登记处或建工作时选），落盘可回放；
+    3) 提示词与工具面按"有委托 / 无委托"组装（无委托时保持今天的口径：代拟也要用户确认）；
+    4) T5 走一遍：有委托时核心自己建组并开工，转录里如实记录每个决定的出处；撤销后回到点名。
+  accept: 无委托时行为与今天一致；有委托时核心在范围内自行决定且转录可查；撤销即时生效。
+  blocked_by: 缺少实现
+
+- id: module.standalone-entry
+  scope: global
+  level: T5
+  why: |
+    PHILOSOPHY「模块是给 AI 用的应用」把"模块可以独立运行"写成能力：模块自己就是能跑的东西时
+    （命令行工具 / 脚本 / GUI 应用），用户可以**完全不经过 AI** 直接用它。现在模块只经 agent 会话被使用，
+    这条路径没有入口、也没有验收判据。
+  how: |
+    1) 定契约：模块怎么声明自己的独立入口（`module.yaml` 加一节，例如命令行入口与参数；GUI 同理）；
+    2) CLI 加一条"直接用模块"的命令：列出可独立运行的模块并跑它的入口；
+    3) GUI 加对应入口（列表 + 运行 + 看回执），与 CLI 共用同一份事实（清单是目录扫描的纯函数）；
+    4) T5 走一遍：不开 AI 会话，直接用模块跑一次，产物落在用户指定目录。
+  accept: 声明了独立入口的模块能不经 AI 直接跑通一次；没声明的模块在列表里如实标注"只能经 AI 使用"。
+  blocked_by: 缺少实现

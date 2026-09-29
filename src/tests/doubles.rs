@@ -1,26 +1,32 @@
 //! 测试替身与测试组合根（doubles）：内存适配器 + 共享夹具 + 装配辅助。
 //! 语义规范见 docs/testing/doubles.md；端口契约测试与它同处一层（src/tests/）。
-//! 测试里的组合根 = 内存适配器；core 的可测性正是端口化的直接收益。
+//! 测试里的组合根 = 内存适配器；conductor 的可测性正是端口化的直接收益。
 //!
-//! 本模块只放**替身与装配辅助**；用它们的用例在 `super::core`（T1）。所以这里对"只有用例才用到"的项
-//! 放行 dead_code（替身与夹具是给别的模块用的，不在本文件里被调用是正常的）。
+//! 本模块只放**替身与装配辅助**；用它们的用例在各业务测试文件（T1，见 `src/tests/`）。所以这里对
+//! "只有用例才用到"的项放行 dead_code（替身与夹具是给别的模块用的，不在本文件里被调用是正常的）。
 #![allow(dead_code)]
 
-use super::core::SilentRunner;
-use crate::adapters::fake_chat::FakeChat;
-use crate::core::events::Live;
-use crate::core::exec::Tier;
-use crate::core::history::{HistoryView, SessionMeta};
-use crate::core::module::{Module, ModuleManifest};
-use crate::core::packages::{Library, PackageManifest};
-use crate::core::ports::{
-    BoxedChat, Chat, ChatGateway, Chunk, CompleteOpts, Completion, FileRead, HistoryStore,
-    ModelCatalog, ModuleSource, Msg, PackageSource, PromptSource, SettingsStore, SysIo, ToolRunner,
-    Workspace,
-};
-use crate::core::prompt::Prompts;
-use crate::core::providers::{Channel, ModelEntry, Provider, Settings};
-use crate::core::{AgentInstance, Core, SessionEvent, WorkMode, WorkSpec};
+use super::builders::SilentRunner;
+use crate::capabilities::conductor::api::{AgentInstance, SessionEvent, WorkMode, WorkSpec};
+use crate::capabilities::conductor::service::Conductor;
+use crate::capabilities::llm::api::Channel;
+use crate::capabilities::llm::api::{BoxedChat, Chat, Chunk, CompleteOpts, Completion, Msg};
+use crate::capabilities::llm::detail::fake_chat::FakeChat;
+use crate::capabilities::llm::ports::{ChatGateway, ModelCatalog};
+use crate::capabilities::prompt::api::Prompt;
+use crate::capabilities::prompt::domain::prompt::Prompts;
+use crate::capabilities::prompt::ports::PromptSource;
+use crate::capabilities::registry::api::{ModelEntry, Provider, Settings};
+use crate::capabilities::registry::ports::SettingsStore;
+use crate::capabilities::session::api::Live;
+use crate::capabilities::session::api::{HistoryView, SessionMeta};
+use crate::capabilities::session::ports::HistoryStore;
+use crate::capabilities::tools::ports::SystoolsSource;
+use crate::capabilities::tools::ports::{FileRead, SysIo, ToolRunner};
+use crate::capabilities::workspace::api::{Library, PackageManifest};
+use crate::capabilities::workspace::api::{Module, ModuleManifest};
+use crate::capabilities::workspace::ports::{ModuleSource, PackageSource, Workdirs};
+use crate::kernel::api::Tier;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -52,7 +58,7 @@ impl InMemorySettings {
                 api_model: "m".to_string(),
                 provider: "p".to_string(),
                 note: String::new(),
-                tools: crate::core::providers::ToolMode::Envelope,
+                tools: crate::capabilities::llm::api::ToolMode::Envelope,
                 context: 32_000,
             },
         );
@@ -132,7 +138,7 @@ impl InMemoryWorkspace {
     }
 }
 
-impl Workspace for InMemoryWorkspace {
+impl Workdirs for InMemoryWorkspace {
     fn prepare(&self, _session: &str, _agents: &[String]) -> Result<(), String> {
         if let Some(m) = &self.fail {
             return Err(m.clone());
@@ -143,7 +149,7 @@ impl Workspace for InMemoryWorkspace {
         &self,
         session: &str,
         agents: &[String],
-    ) -> Result<crate::core::workspace::WorkRoots, String> {
+    ) -> Result<crate::capabilities::workspace::api::WorkRoots, String> {
         if let Some(m) = &self.fail {
             return Err(m.clone());
         }
@@ -152,7 +158,7 @@ impl Workspace for InMemoryWorkspace {
         for a in agents {
             map.insert(a.clone(), abs(&[session, a]));
         }
-        Ok(crate::core::workspace::WorkRoots {
+        Ok(crate::capabilities::workspace::api::WorkRoots {
             shared: abs(&[session, "work"]),
             agents: map,
         })
@@ -177,7 +183,7 @@ impl Workspace for InMemoryWorkspace {
         &self,
         session: &str,
         agents: &[String],
-    ) -> Result<crate::core::workspace::WorkFiles, String> {
+    ) -> Result<crate::capabilities::workspace::api::WorkFiles, String> {
         if let Some(m) = &self.fail {
             return Err(m.clone());
         }
@@ -197,7 +203,7 @@ impl Workspace for InMemoryWorkspace {
             got.sort();
             map.insert(a.clone(), got);
         }
-        Ok(crate::core::workspace::WorkFiles { work, agents: map })
+        Ok(crate::capabilities::workspace::api::WorkFiles { work, agents: map })
     }
 }
 
@@ -310,14 +316,17 @@ impl SysIo for InMemorySysIo {
             cut: self.cut,
         })
     }
-    fn list(&self, path: &std::path::Path) -> Result<Vec<crate::core::ports::DirEntry>, String> {
+    fn list(
+        &self,
+        path: &std::path::Path,
+    ) -> Result<Vec<crate::capabilities::tools::ports::DirEntry>, String> {
         if let Some(m) = &self.fail {
             return Err(m.clone());
         }
         // 内存替身：把已 seed 的路径按"父目录等于该目录"筛出来（只报直接子项）。
         let dir = path.to_string_lossy().into_owned();
         let files = self.files.lock().expect("锁");
-        let mut out: Vec<crate::core::ports::DirEntry> = Vec::new();
+        let mut out: Vec<crate::capabilities::tools::ports::DirEntry> = Vec::new();
         for (k, v) in files.iter() {
             let Some((parent, name)) = k.rsplit_once(['/', '\\']) else {
                 continue;
@@ -325,7 +334,7 @@ impl SysIo for InMemorySysIo {
             if parent != dir.trim_end_matches(['/', '\\']) {
                 continue;
             }
-            out.push(crate::core::ports::DirEntry {
+            out.push(crate::capabilities::tools::ports::DirEntry {
                 name: name.to_string(),
                 is_dir: false,
                 bytes: v.len() as u64,
@@ -372,13 +381,13 @@ pub(crate) fn s(parts: &[&str]) -> String {
 /// 什么都不修的修复端口（严格要求合法信封）：测试基线，也是"宁缺毋滥"部署的对照实现。
 pub(crate) struct NoRepair;
 
-impl crate::core::ports::EnvelopeRepair for NoRepair {
+impl crate::capabilities::llm::ports::EnvelopeRepair for NoRepair {
     fn repair(
         &self,
         _raw: &str,
-        _kind: &crate::core::envelope::Malformed,
-    ) -> crate::core::ports::RepairOutcome {
-        crate::core::ports::RepairOutcome {
+        _kind: &crate::capabilities::llm::api::Malformed,
+    ) -> crate::capabilities::llm::api::RepairOutcome {
+        crate::capabilities::llm::api::RepairOutcome {
             repaired: None,
             what: Vec::new(),
         }
@@ -386,20 +395,28 @@ impl crate::core::ports::EnvelopeRepair for NoRepair {
 }
 
 /// 一次内置工具调用（空账本）：只关心工具行为本身的用例用它；
-/// 关心"改动前有没有读过"的用例直接用 systool::execute 并自带 Observations。
+/// 关心"改动前有没有读过"的用例自带 Observations 再调它。
+/// 这里直接走 tools 的 domain（测试层允许）：生产路径是 `ToolExec::run_builtin`。
 pub(crate) fn run_builtin(
-    sb: &crate::core::workspace::Sandbox,
-    io: &dyn crate::core::ports::SysIo,
+    sb: &crate::capabilities::workspace::api::Sandbox,
+    io: &dyn crate::capabilities::tools::ports::SysIo,
     name: &str,
     args_json: &str,
-) -> crate::core::ports::ToolOutcome {
-    let mut obs = crate::core::systool::Observations::default();
-    crate::core::systool::execute(sb, io, &mut obs, name, args_json)
+) -> crate::capabilities::tools::api::ToolOutcome {
+    let mut obs = crate::capabilities::tools::api::Observations::default();
+    crate::capabilities::tools::service::systool::execute(
+        sb,
+        &test_systools().tools,
+        io,
+        &mut obs,
+        name,
+        args_json,
+    )
 }
 
 /// 测试用模块工具声明：只给启动命令（参数契约在需要的用例里另行声明）。
-pub(crate) fn decl(command: &str) -> crate::core::module::ToolDecl {
-    crate::core::module::ToolDecl {
+pub(crate) fn decl(command: &str) -> crate::capabilities::workspace::domain::module::ToolDecl {
+    crate::capabilities::workspace::domain::module::ToolDecl {
         command: command.to_string(),
         desc: String::new(),
         params: None,
@@ -408,40 +425,49 @@ pub(crate) fn decl(command: &str) -> crate::core::module::ToolDecl {
 }
 
 /// 测试用模块工具声明：带参数契约（YAML 里的 params 段）。
-pub(crate) fn decl_with(command: &str, params_yaml: &str) -> crate::core::module::ToolDecl {
+pub(crate) fn decl_with(
+    command: &str,
+    params_yaml: &str,
+) -> crate::capabilities::workspace::domain::module::ToolDecl {
     let mut d = decl(command);
-    d.params = Some(serde_yaml::from_str(params_yaml).expect("测试参数声明要能解析"));
+    d.params = Some(yaml_serde::from_str(params_yaml).expect("测试参数声明要能解析"));
     d
 }
 
 /// 测试沙箱：work 共享区 + agent 私有区 + 指定模块目录（都是绝对路径）。
-pub(crate) fn test_sandbox(agent: &str, modules: &[&str]) -> crate::core::workspace::Sandbox {
+pub(crate) fn test_sandbox(
+    agent: &str,
+    modules: &[&str],
+) -> crate::capabilities::workspace::api::Sandbox {
     let mut map = BTreeMap::new();
     for id in modules {
         map.insert(id.to_string(), abs(&["mods", id]));
     }
-    crate::core::workspace::Sandbox {
+    crate::capabilities::workspace::api::Sandbox {
         work_name: "demo".to_string(),
         agent: agent.to_string(),
         shared: abs(&["demo", "work"]),
         private: abs(&["demo", agent]),
         modules: map,
-        texts: test_prompts().core.tool_texts,
-        builtin_tools: test_prompts().core.builtin_tools,
+        texts: test_prompts().tools(),
     }
 }
 
 /// 测试用会话参数：agent 名 + 该 agent 的沙箱（无模块）。身份块由它现渲染。
-pub(crate) fn test_params(agent: &str) -> crate::core::session::SessionParams {
-    crate::core::session::SessionParams::from_workspace(agent, &test_sandbox(agent, &[]), &[])
+pub(crate) fn test_params(agent: &str) -> crate::capabilities::session::api::SessionParams {
+    crate::capabilities::session::api::SessionParams::from_workspace(
+        agent,
+        &test_sandbox(agent, &[]),
+        &[],
+    )
 }
 
 /// 测试用工具说明块素材（patch 语法 + 给定的模块工具）。
 pub(crate) fn test_notes(
-    sb: &crate::core::workspace::Sandbox,
-    modules: &[crate::core::module::Module],
-) -> crate::core::systool::ToolNotes {
-    crate::core::systool::tool_notes(&test_prompts(), sb, modules)
+    sb: &crate::capabilities::workspace::api::Sandbox,
+    modules: &[crate::capabilities::workspace::api::Module],
+) -> crate::capabilities::tools::api::ToolNotes {
+    crate::capabilities::tools::api::tool_notes(&test_prompts(), sb, modules)
 }
 
 /// 内存会话历史：供测试断言落盘与回放。
@@ -468,7 +494,7 @@ impl InMemoryHistory {
 
     /// 直接改掉某条会话已落盘的 meta（测试夹具）：用来构造"落盘档位与当前判据不一致"的情形。
     /// 例如虚拟机档现在一律不可选，但**已存在的**虚拟机档会话必须还能打开（记录是用户的）。
-    pub(crate) fn force_tier(&self, name: &str, tier: crate::core::exec::Tier) {
+    pub(crate) fn force_tier(&self, name: &str, tier: crate::kernel::api::Tier) {
         let mut metas = self.metas.lock().expect("锁");
         if let Some(m) = metas.get_mut(name) {
             m.exec.tier = tier;
@@ -562,7 +588,7 @@ impl HistoryStore for InMemoryHistory {
 /// 内存模型目录：回放固定模型名，并记录收到的 Provider（断言编辑期密钥复用）。
 pub(crate) struct FakeCatalog {
     models: Vec<String>,
-    pub(crate) seen: Mutex<Vec<Provider>>,
+    pub(crate) seen: Mutex<Vec<String>>,
     fail: Option<String>,
 }
 
@@ -583,11 +609,11 @@ impl FakeCatalog {
 }
 
 impl ModelCatalog for FakeCatalog {
-    fn list_models(&self, provider: &Provider) -> Result<Vec<String>, String> {
+    fn list_models(&self, base_url: &str, _api_key: &str) -> Result<Vec<String>, String> {
         if let Some(m) = &self.fail {
             return Err(m.clone());
         }
-        self.seen.lock().expect("锁").push(provider.clone());
+        self.seen.lock().expect("锁").push(base_url.to_string());
         Ok(self.models.clone())
     }
 }
@@ -595,18 +621,18 @@ impl ModelCatalog for FakeCatalog {
 pub(crate) struct VecSource(pub(crate) Vec<Module>);
 
 impl ModuleSource for VecSource {
-    fn scan(&self) -> crate::core::module::Roster {
-        crate::core::module::Roster {
+    fn scan(&self) -> crate::capabilities::workspace::api::Roster {
+        crate::capabilities::workspace::api::Roster {
             modules: self.0.clone(),
             rejected: Vec::new(),
         }
     }
 }
 
-/// 无声围栏端口：测试里不碰任何 ACL（真实实现在 adapters/confine）。
+/// 无声围栏端口：测试里不碰任何 ACL（真实实现在 capabilities/tools/detail/confine）。
 pub(crate) struct NoFenceHost;
-impl crate::core::ports::FenceHost for NoFenceHost {
-    fn release(&self, _spec: &crate::core::fence::FenceSpec) -> Result<(), String> {
+impl crate::capabilities::tools::ports::FenceHost for NoFenceHost {
+    fn release(&self, _spec: &crate::capabilities::tools::api::FenceSpec) -> Result<(), String> {
         Ok(())
     }
 }
@@ -629,8 +655,8 @@ impl RecordingFence {
         self
     }
 }
-impl crate::core::ports::FenceHost for RecordingFence {
-    fn release(&self, spec: &crate::core::fence::FenceSpec) -> Result<(), String> {
+impl crate::capabilities::tools::ports::FenceHost for RecordingFence {
+    fn release(&self, spec: &crate::capabilities::tools::api::FenceSpec) -> Result<(), String> {
         if let Some(m) = &self.fail {
             return Err(m.clone());
         }
@@ -663,7 +689,7 @@ impl PackageSource for InMemoryPackages {
 
 /// 用 yaml 造一份包清单（顺带覆盖清单解析）。
 pub(crate) fn pkg_yaml(y: &str) -> PackageManifest {
-    serde_yaml::from_str(y).expect("包清单必须能解析")
+    yaml_serde::from_str(y).expect("包清单必须能解析")
 }
 
 /// 造一个 prefix 类包（独立前缀 opt/rt/&lt;id&gt;-&lt;version&gt;）。
@@ -799,7 +825,10 @@ impl ScriptGateway {
 }
 
 impl ChatGateway for ScriptGateway {
-    fn probe_tools(&self, _c: &Channel) -> Result<crate::core::ports::ProbeOutcome, String> {
+    fn probe_tools(
+        &self,
+        _c: &Channel,
+    ) -> Result<crate::capabilities::llm::api::ProbeOutcome, String> {
         Err("脚本替身没有真实供应商，测不了工具调用支持".to_string())
     }
     fn member_channel(&self, _c: Option<&Channel>, id: &str) -> (BoxedChat, Option<String>) {
@@ -846,12 +875,165 @@ impl PromptSource for TestPrompts {
 pub(crate) fn test_prompts() -> Prompts {
     // 走**与产品同一条**装配路径（目录 + 合并）：替身与真机装配出同一册子，测试才有意义。
     let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    crate::adapters::YamlPrompts::new(root.join("prompts"), root.join("systools"))
+    crate::capabilities::prompt::detail::yaml_prompts::YamlPrompts::new(root.join("prompts"))
         .load()
         .expect("内置提示词册必须合法")
 }
 
-pub(crate) fn core_with(modules: Vec<Module>, gateway: ScriptGateway) -> Core {
+/// 测试用工具总表与角色表（走**与产品同一条**装配路径）。
+/// 它与提示词册**分开**装配：两者互不依赖（见 capabilities/prompt 的 Prompts）。
+/// 测试用的**会话历史面**（与生产同一条路：端口装进 `SessionService`）。
+pub(crate) fn test_history() -> Arc<dyn crate::capabilities::session::api::History + Send + Sync> {
+    test_history_of(Arc::new(InMemoryHistory::new()))
+}
+
+/// 同上，但用调用方给的替身（要在断言里看落盘内容的用例用它——同一份状态）。
+pub(crate) fn test_history_of(
+    store: Arc<InMemoryHistory>,
+) -> Arc<dyn crate::capabilities::session::api::History + Send + Sync> {
+    Arc::new(crate::capabilities::session::service::SessionService::new(
+        store,
+    ))
+}
+
+/// 测试用的 **tools 能力**：两张表 + 三个替身端口（与生产同一条路，R12）。
+/// 两个面都从这里出：`Arc<dyn Tools>`（表）与 `Arc<dyn ToolExec>`（执行）。
+pub(crate) fn test_tools_svc() -> Arc<crate::capabilities::tools::service::ToolsService> {
+    test_tools_svc_with(
+        Arc::new(SilentRunner),
+        Arc::new(InMemorySysIo::new()),
+        Arc::new(NoFenceHost),
+    )
+}
+
+/// 同上，但指定三个端口（断言并发/落盘/撤权的那几条用例用）。
+pub(crate) fn test_tools_svc_with(
+    runner: Arc<dyn crate::capabilities::tools::ports::ToolRunner + Send + Sync>,
+    io: Arc<InMemorySysIo>,
+    fence: Arc<dyn crate::capabilities::tools::ports::FenceHost + Send + Sync>,
+) -> Arc<crate::capabilities::tools::service::ToolsService> {
+    let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let source =
+        crate::capabilities::tools::detail::yaml_systools::YamlSystools::new(root.join("systools"));
+    Arc::new(
+        crate::capabilities::tools::service::ToolsService::new(&source, runner, io, fence)
+            .expect("内置工具总表必须合法"),
+    )
+}
+
+pub(crate) fn test_systools() -> crate::capabilities::tools::api::SystemTools {
+    let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    crate::capabilities::tools::detail::yaml_systools::YamlSystools::new(root.join("systools"))
+        .load()
+        .expect("内置工具总表必须合法")
+}
+/// 宿主探测替身：**只按给定答案回答**，不读真实环境（测试要确定性）。
+/// 事实由用例显式声明；真实适配器的契约另有 T2 用例（见 docs/testing/doubles.md 端口矩阵）。
+#[derive(Default)]
+pub(crate) struct FixedProbe {
+    pub files: Vec<std::path::PathBuf>,
+    pub dirs: Vec<std::path::PathBuf>,
+    pub exes: Vec<String>,
+    pub hypervisor: bool,
+}
+
+impl crate::kernel::ports::HostProbe for FixedProbe {
+    fn is_file(&self, path: &std::path::Path) -> bool {
+        self.files.iter().any(|p| p == path)
+    }
+    fn is_dir(&self, path: &std::path::Path) -> bool {
+        self.dirs.iter().any(|p| p == path)
+    }
+    fn has_exe(&self, name: &str) -> bool {
+        self.exes.iter().any(|n| n == name)
+    }
+    fn hypervisor_available(&self) -> bool {
+        self.hypervisor
+    }
+}
+
+/// 日志能力替身：什么都不做（呈现层的埋点不参与任何判定）。
+pub(crate) struct NoopLogOps;
+impl crate::capabilities::conductor::api::LogOps for NoopLogOps {
+    fn info(&self, _at: &str, _msg: &str) {}
+    fn warn(&self, _at: &str, _msg: &str) {}
+    fn error(&self, _at: &str, _msg: &str) {}
+}
+/// 测试用的提示词册能力：替身装载器 → 真实册子 → 能力面（与生产同一条路）。
+pub(crate) fn test_prompt() -> std::sync::Arc<dyn crate::capabilities::prompt::api::Prompt> {
+    crate::capabilities::prompt::service::load(&TestPrompts::ok()).expect("内置提示词册必须合法")
+}
+
+/// 登记处能力的测试装配：内存登记处 + 指定模型目录 + 指定通道 + 空日志。
+/// 生产里这些端口由组合根注入，测试这里用替身顶。
+pub(crate) fn registry_service(
+    store: InMemorySettings,
+    llm: Arc<dyn crate::capabilities::llm::api::Llm + Send + Sync>,
+) -> Box<dyn crate::capabilities::registry::api::Registry> {
+    Box::new(
+        crate::capabilities::registry::service::RegistryService::new(
+            Arc::new(store),
+            llm,
+            Arc::new(crate::kernel::ports::NoopLog),
+        )
+        .expect("内存登记处装配不应失败"),
+    )
+}
+
+/// 测试用的 **llm 能力面**：把通道工厂 + 模型目录装进 `LlmService`（修信封用 `NoRepair`）。
+/// 与生产同一条路——组合根装 service，别人只拿 `api::Llm` 面（R12）。
+pub(crate) fn test_llm(
+    gateway: Arc<dyn crate::capabilities::llm::ports::ChatGateway + Send + Sync>,
+    catalog: Arc<FakeCatalog>,
+) -> Arc<dyn crate::capabilities::llm::api::Llm + Send + Sync> {
+    Arc::new(crate::capabilities::llm::service::LlmService::new(
+        gateway,
+        catalog,
+        Arc::new(NoRepair),
+    ))
+}
+
+/// 同上，但指定信封修复器（"修信封"路径的用例用真修复器）。
+pub(crate) fn test_llm_with_repair(
+    repair: Arc<dyn crate::capabilities::llm::ports::EnvelopeRepair + Send + Sync>,
+) -> Arc<dyn crate::capabilities::llm::api::Llm + Send + Sync> {
+    Arc::new(crate::capabilities::llm::service::LlmService::new(
+        Arc::new(crate::capabilities::llm::detail::fake_chat::DemoGateway),
+        Arc::new(FakeCatalog::new(vec!["m".to_string()])),
+        repair,
+    ))
+}
+
+/// 只要一个 llm 面（不关心通道与修复）的用例用它：演示通道 + 不修。
+pub(crate) fn test_llm_demo() -> Arc<dyn crate::capabilities::llm::api::Llm + Send + Sync> {
+    test_llm_with_repair(Arc::new(NoRepair))
+}
+
+/// 测试用的 **workspace 能力面**：把三个端口装进 `WorkspaceService`（与生产同一条路，R12）。
+pub(crate) fn test_workspace(
+    source: Arc<dyn ModuleSource + Send + Sync>,
+    packages: Arc<dyn PackageSource + Send + Sync>,
+    dirs: Arc<dyn Workdirs + Send + Sync>,
+) -> Arc<dyn crate::capabilities::workspace::api::Workspace + Send + Sync> {
+    Arc::new(crate::capabilities::workspace::service::WorkspaceService::new(source, packages, dirs))
+}
+
+/// 登记一个 agent（测试装配用）：**校验用的模块清单由调用方取一份**交给登记处——
+/// 清单归 workspace，登记处只认事实（见 ARCHITECTURE.md §九.3）。
+pub(crate) fn agent_upsert(
+    core: &mut Conductor,
+    name: &str,
+    modules: &[&str],
+    model: &str,
+    note: &str,
+) -> Result<(), String> {
+    let roster = core.scan();
+    let modules: Vec<String> = modules.iter().map(|m| m.to_string()).collect();
+    core.registry_mut()
+        .agent_upsert(name, &modules, model, note, &roster)
+}
+
+pub(crate) fn core_with(modules: Vec<Module>, gateway: ScriptGateway) -> Conductor {
     core_with_runner(modules, gateway, Arc::new(SilentRunner))
 }
 
@@ -860,23 +1042,32 @@ pub(crate) fn core_with_workspace(
     modules: Vec<Module>,
     gateway: ScriptGateway,
     ws: Arc<InMemoryWorkspace>,
-) -> Core {
-    Core::new(
-        Arc::new(InMemorySettings::new()),
-        Arc::new(InMemoryHistory::new()),
-        ws,
-        Arc::new(VecSource(modules)),
-        Arc::new(InMemoryPackages::empty()),
-        Arc::new(NoFenceHost),
-        Arc::new(gateway),
+) -> Conductor {
+    let gateway: Arc<dyn crate::capabilities::llm::ports::ChatGateway + Send + Sync> =
+        Arc::new(gateway);
+    let llm = test_llm(
+        Arc::clone(&gateway),
         Arc::new(FakeCatalog::new(vec!["m".to_string()])),
-        Arc::new(SilentRunner),
-        Arc::new(InMemorySysIo::new()),
-        Arc::new(NoRepair),
-        Box::new(TestPrompts::ok()),
-        Arc::new(crate::core::ports::NoopLog),
+    );
+    Conductor::new(
+        registry_service(InMemorySettings::new(), Arc::clone(&llm)),
+        test_history(),
+        test_workspace(
+            Arc::new(VecSource(modules)),
+            Arc::new(InMemoryPackages::empty()),
+            ws,
+        ),
+        llm,
+        test_tools_svc_with(
+            Arc::new(SilentRunner),
+            Arc::new(InMemorySysIo::new()),
+            Arc::new(NoFenceHost),
+        ),
+        test_prompt(),
+        test_tools_svc(),
+        Arc::new(crate::kernel::ports::NoopLog),
+        Arc::new(crate::kernel::detail::HostProbeAdapter),
     )
-    .expect("内存装配不应失败")
 }
 
 /// 注入指定内存文件系统的装配（断言内置文件工具真正落盘）。
@@ -884,7 +1075,7 @@ pub(crate) fn core_with_io(
     modules: Vec<Module>,
     gateway: ScriptGateway,
     io: Arc<InMemorySysIo>,
-) -> Core {
+) -> Conductor {
     core_with_all(
         modules,
         gateway,
@@ -899,7 +1090,7 @@ pub(crate) fn core_with_runner(
     modules: Vec<Module>,
     gateway: ScriptGateway,
     runner: Arc<impl ToolRunner + Send + Sync + 'static>,
-) -> Core {
+) -> Conductor {
     core_with_catalog(
         modules,
         gateway,
@@ -914,7 +1105,7 @@ pub(crate) fn core_with_catalog(
     gateway: ScriptGateway,
     runner: Arc<impl ToolRunner + Send + Sync + 'static>,
     catalog: Arc<FakeCatalog>,
-) -> Core {
+) -> Conductor {
     core_with_all(
         modules,
         gateway,
@@ -933,7 +1124,7 @@ pub(crate) fn core_with_all(
     catalog: Arc<FakeCatalog>,
     history: Arc<InMemoryHistory>,
     io: Arc<InMemorySysIo>,
-) -> Core {
+) -> Conductor {
     core_with_pkgs(
         modules,
         gateway,
@@ -954,43 +1145,54 @@ pub(crate) fn core_with_pkgs(
     history: Arc<InMemoryHistory>,
     io: Arc<InMemorySysIo>,
     packages: Arc<InMemoryPackages>,
-) -> Core {
-    Core::new(
-        Arc::new(InMemorySettings::new()),
-        history,
-        Arc::new(InMemoryWorkspace::new()),
-        Arc::new(VecSource(modules)),
-        packages,
-        Arc::new(NoFenceHost),
-        Arc::new(gateway),
-        catalog,
-        runner,
-        io,
-        Arc::new(NoRepair),
-        Box::new(TestPrompts::ok()),
-        Arc::new(crate::core::ports::NoopLog),
+) -> Conductor {
+    let gateway: Arc<dyn crate::capabilities::llm::ports::ChatGateway + Send + Sync> =
+        Arc::new(gateway);
+    let llm = test_llm(Arc::clone(&gateway), catalog);
+    Conductor::new(
+        registry_service(InMemorySettings::new(), Arc::clone(&llm)),
+        test_history_of(history),
+        test_workspace(
+            Arc::new(VecSource(modules)),
+            packages,
+            Arc::new(InMemoryWorkspace::new()),
+        ),
+        llm,
+        test_tools_svc_with(runner, io, Arc::new(NoFenceHost)),
+        test_prompt(),
+        test_tools_svc(),
+        Arc::new(crate::kernel::ports::NoopLog),
+        Arc::new(crate::kernel::detail::HostProbeAdapter),
     )
-    .expect("内存装配不应失败")
 }
 
 /// 用**指定登记处**装配（断言"全局设置是流式的上限、预算全局通用"这类判据）。
-pub(crate) fn core_with_settings(store: InMemorySettings) -> Core {
-    Core::new(
-        Arc::new(store),
-        Arc::new(InMemoryHistory::new()),
-        Arc::new(InMemoryWorkspace::new()),
-        Arc::new(VecSource(Vec::new())),
-        Arc::new(InMemoryPackages::empty()),
-        Arc::new(NoFenceHost),
-        Arc::new(gw(BTreeMap::new(), Vec::new())),
+pub(crate) fn core_with_settings(store: InMemorySettings) -> Conductor {
+    let gateway: Arc<dyn crate::capabilities::llm::ports::ChatGateway + Send + Sync> =
+        Arc::new(gw(BTreeMap::new(), Vec::new()));
+    let llm = test_llm(
+        Arc::clone(&gateway),
         Arc::new(FakeCatalog::new(vec!["m".to_string()])),
-        Arc::new(SilentRunner),
-        Arc::new(InMemorySysIo::new()),
-        Arc::new(NoRepair),
-        Box::new(TestPrompts::ok()),
-        Arc::new(crate::core::ports::NoopLog),
+    );
+    Conductor::new(
+        registry_service(store, Arc::clone(&llm)),
+        test_history(),
+        test_workspace(
+            Arc::new(VecSource(Vec::new())),
+            Arc::new(InMemoryPackages::empty()),
+            Arc::new(InMemoryWorkspace::new()),
+        ),
+        llm,
+        test_tools_svc_with(
+            Arc::new(SilentRunner),
+            Arc::new(InMemorySysIo::new()),
+            Arc::new(NoFenceHost),
+        ),
+        test_prompt(),
+        test_tools_svc(),
+        Arc::new(crate::kernel::ports::NoopLog),
+        Arc::new(crate::kernel::detail::HostProbeAdapter),
     )
-    .expect("内存装配不应失败")
 }
 
 pub(crate) fn gw(member: BTreeMap<String, Vec<String>>, core: Vec<String>) -> ScriptGateway {
@@ -1005,44 +1207,58 @@ pub(crate) fn core_with_io_gateway(
     modules: Vec<Module>,
     gateway: impl ChatGateway + Send + Sync + 'static,
     io: Arc<InMemorySysIo>,
-) -> Core {
-    Core::new(
-        Arc::new(InMemorySettings::new()),
-        Arc::new(InMemoryHistory::new()),
-        Arc::new(InMemoryWorkspace::new()),
-        Arc::new(VecSource(modules)),
-        Arc::new(InMemoryPackages::empty()),
-        Arc::new(NoFenceHost),
-        Arc::new(gateway),
+) -> Conductor {
+    let gateway: Arc<dyn crate::capabilities::llm::ports::ChatGateway + Send + Sync> =
+        Arc::new(gateway);
+    let llm = test_llm(
+        Arc::clone(&gateway),
         Arc::new(FakeCatalog::new(vec!["m".to_string()])),
-        Arc::new(SilentRunner),
-        io,
-        Arc::new(NoRepair),
-        Box::new(TestPrompts::ok()),
-        Arc::new(crate::core::ports::NoopLog),
+    );
+    Conductor::new(
+        registry_service(InMemorySettings::new(), Arc::clone(&llm)),
+        test_history(),
+        test_workspace(
+            Arc::new(VecSource(modules)),
+            Arc::new(InMemoryPackages::empty()),
+            Arc::new(InMemoryWorkspace::new()),
+        ),
+        llm,
+        test_tools_svc_with(Arc::new(SilentRunner), io, Arc::new(NoFenceHost)),
+        test_prompt(),
+        test_tools_svc(),
+        Arc::new(crate::kernel::ports::NoopLog),
+        Arc::new(crate::kernel::detail::HostProbeAdapter),
     )
-    .expect("内存装配不应失败")
 }
 
 /// 指定任意网关的装配（入站契约测试用：需要自定义时序的通道）。
 pub(crate) fn core_with_gateway(
     modules: Vec<Module>,
     gateway: impl ChatGateway + Send + Sync + 'static,
-) -> Core {
-    Core::new(
-        Arc::new(InMemorySettings::new()),
-        Arc::new(InMemoryHistory::new()),
-        Arc::new(InMemoryWorkspace::new()),
-        Arc::new(VecSource(modules)),
-        Arc::new(InMemoryPackages::empty()),
-        Arc::new(NoFenceHost),
-        Arc::new(gateway),
+) -> Conductor {
+    let gateway: Arc<dyn crate::capabilities::llm::ports::ChatGateway + Send + Sync> =
+        Arc::new(gateway);
+    let llm = test_llm(
+        Arc::clone(&gateway),
         Arc::new(FakeCatalog::new(vec!["m".to_string()])),
-        Arc::new(SilentRunner),
-        Arc::new(InMemorySysIo::new()),
-        Arc::new(NoRepair),
-        Box::new(TestPrompts::ok()),
-        Arc::new(crate::core::ports::NoopLog),
+    );
+    Conductor::new(
+        registry_service(InMemorySettings::new(), Arc::clone(&llm)),
+        test_history(),
+        test_workspace(
+            Arc::new(VecSource(modules)),
+            Arc::new(InMemoryPackages::empty()),
+            Arc::new(InMemoryWorkspace::new()),
+        ),
+        llm,
+        test_tools_svc_with(
+            Arc::new(SilentRunner),
+            Arc::new(InMemorySysIo::new()),
+            Arc::new(NoFenceHost),
+        ),
+        test_prompt(),
+        test_tools_svc(),
+        Arc::new(crate::kernel::ports::NoopLog),
+        Arc::new(crate::kernel::detail::HostProbeAdapter),
     )
-    .expect("内存装配不应失败")
 }

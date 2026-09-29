@@ -57,10 +57,26 @@
 
 | lint | 位置 | 为什么是取舍而不是缺陷 |
 | --- | --- | --- |
-| `too_many_arguments` | `core/collab.rs` 的 `start` / `restore`、`core/session.rs` 的 `new` / `restore`、`core/mod.rs` 的 `Core::new` | 全是**组合根注入的构造函数**：参数天然多，收口成参数对象只是把参数挪个地方、并让装配更难读 |
-| `too_many_arguments` | `core/engine.rs` 的 `core_operation` / `converse_with` / `turn_with` / `Execution::review`、`core/session.rs` 的 `discussion_turn`、`core/collab.rs` 的 `judge_clear` / `review_nodes` | 同一组参数（身份 / 工具面 / 通道 / 消息 / 出口 / 对照表 / 重填说明）：它们必须一路透传，收口成参数对象只是把参数挪个地方（`turn_with` 只服务内存测试通道） |
-| `dead_code` | `core/events.rs` 的 `enum SessionEvent` | 事件词汇里的字段**不全在生产路径被读**（例如 `DiscussionDone` 的 `round` / `over_cap` 供呈现层做裁决确认页）；词汇就是线格式，字段随契约保留，删掉会让呈现侧拿不到事实 |
-| `large_enum_variant` | `core/mod.rs` 的 `enum Session` | 两变体大小差得远，但装箱只换来一次间接寻址，却把"会话本体可直接移动"这个形状改掉 |
+| `too_many_arguments` | `capabilities/collab/service/collab.rs` 的 `start` / `restore`、`capabilities/session/domain/session.rs` 的 `new` / `restore`、`capabilities/conductor/service/mod.rs` 的 `Conductor::new` | 全是**组合根注入的构造函数**：参数天然多，收口成参数对象只是把参数挪个地方、并让装配更难读 |
+| `too_many_arguments` | `capabilities/session/service.rs` 的 `core_operation`、`capabilities/collab/service/round.rs` 的 `converse_with`、`capabilities/collab/service/discussion.rs` 的 `turn_with`、`capabilities/collab/service/synthesis.rs` 的 `Execution::review`、`capabilities/collab/service/driver.rs` 的 `discussion_turn`、`capabilities/collab/service/collab.rs` 的 `judge_clear` / `review_nodes` | 同一组参数（身份 / 工具面 / 通道 / 消息 / 出口 / 对照表 / 重填说明）：它们必须一路透传，收口成参数对象只是把参数挪个地方（`turn_with` 只服务内存测试通道） |
+| `dead_code` | `capabilities/conductor/api/mod.rs` 的 `SessionOps::exists` / `is_running` | **入站契约是发布给前端的接口面**：二进制 crate 里暂时没有生产调用点的接口方法会被 `dead_code` 误报（`is_running` 是运行态的**权威查询**——`SessionView.running` 只是事件台对账副本，最终一致） |
+| `dead_code` | `capabilities/session/domain/events.rs` 的 `enum SessionEvent` | 事件词汇里的字段**不全在生产路径被读**（例如 `DiscussionDone` 的 `round` / `over_cap` 供呈现层做裁决确认页）；词汇就是线格式，字段随契约保留，删掉会让呈现侧拿不到事实 |
+| `large_enum_variant` | `capabilities/conductor/service/mod.rs` 的 `enum Session` | 两变体大小差得远，但装箱只换来一次间接寻址，却把"会话本体可直接移动"这个形状改掉 |
 
 新增 allow 必须同时更新本表；理由说不清的就不该 allow。
 
+## 四、不变量断言账（生产代码里的 panic 面）
+
+生产代码（不含 `src/tests/**` 与 `#[cfg(test)]` 之后）共 **24 处** `expect` / `panic!`。它们只允许出现在
+**同一函数内可静态看出必然成立**的位置——判据就在上文，`expect` 只是把「已判」写进代码：
+
+| 位置 | 处数 | 为什么必然成立 |
+| --- | --- | --- |
+| `capabilities/collab/service/{collab,pump,turn_io,round}.rs`、`capabilities/conductor/service/rewind.rs` | 14 | 协作状态机的 `disc` / 任务链 / 工具上下文：进入这段之前刚判过存在，`expect("disc 已确认存在")` 与其后的 `expect("上臂已判存在")` 是同一判断的延续；`rewind.rs` 的两处（`l.get("tool")` 与其后跳过被总结行的同一判断）同理 |
+| `capabilities/prompt/{domain/prompt.rs,domain/refs.rs,service.rs}` | 3 | 模板变量缺失 = **装配错误**（`prompts/` 或调用方写错），不在用户输入路径上；启动即炸好过渲染出半截文案 |
+| `capabilities/tools/detail/proc_tools.rs` | 3 | `Command` 已声明 `Stdio::piped()`，`child.stdin` / `stdout` / `stderr` 的 `take()` 必为 `Some` |
+| `capabilities/tools/detail/confine/macos.rs` | 2 | `CString::new` 的两个入参是不含 NUL 的字面量与临时路径 |
+| `capabilities/tools/service/systool.rs` | 1 | `pending.get(path)` 的键由上一行同一函数算出 |
+| `capabilities/collab/service/tool_loop.rs` | 1 | 每个工具调用在上一行都被配对写入了执行结果 |
+
+新增 panic 面必须同时更新本表；说不清「判据在哪一行」的，改成 `Result`。

@@ -16,6 +16,7 @@ import { readFileSync, existsSync, readdirSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { request } from "node:http";
+import { demoPreflight, refuseDemo } from "./preflight.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const BASE = process.env.SOLOMNI_DEMO_BASE || "http://127.0.0.1:3081";
@@ -88,9 +89,14 @@ async function main() {
     return 1;
   }
   if (!(await waitReady())) {
-    console.error("转录中心没起来：" + BASE + "（先跑 solomni -webUI）");
+    console.error("转录中心没起来：" + BASE + "（先跑 node start.js -webUI）");
     return 1;
   }
+
+  // 演示是**真机测试**：条件不齐就明说并退出（退出码 2），不用演示通道凑一遍。
+  const pre = await api("GET", "/api/state");
+  const block = demoPreflight(pre.json, MODEL);
+  if (block) return refuseDemo(block);
 
   // ① 建工作：一个 agent、三个模块（抽取 / 呈现 / 检索各一个模块），模型用核心默认（也可用环境变量指定）。
   const agent = { name: "资料手", modules: ["harvest", "render", "indexer"] };

@@ -1,15 +1,17 @@
 # Solomni 核心编排者：产品里唯一的程序。
-# 依赖刻意保持最小：serde 解析三种文本锚点，rand 供假模型测试。
+# 依赖刻意保持最小：serde 解析三种文本锚点，yaml_serde 读写 yaml（serde_yaml 的官方续作，上游已归档）。
 [package]
 name = "solomni"
 version = "0.1.0"
 edition = "2021"
+# 最低工具链：跟随最新稳定版（CI 用 stable；本地用 platform/<os> 里的工具链）。
+rust-version = "1.98"
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
-serde_yaml = "0.9"
 serde_json = "1"
 tiny_http = "0.12"
+yaml_serde = "0.10"
 
 [target.'cfg(windows)'.dependencies]
 # Windows：TLS 走系统 schannel（native-tls），避开 ring 的 C 编译器依赖（GNU 工具链无 gcc 时构建失败）。

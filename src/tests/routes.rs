@@ -1,25 +1,26 @@
-//! HTTP 入站契约的契约测试：路由目录 ↔ 处理器 ↔ 文档 ↔ 前端调用，四者机器比对。
+//! HTTP 入站契约的契约测试：路由目录 ↔ 处理器 ↔ 文档 ↔ 前端调用 ↔ 演示脚本，机器比对。
 //! 用**假能力面**（FakeOps）直接调 `web::route`（不经过 socket），逐条路由验成功/错误/空/边界；
 //! 真实传输由 L4 端到端覆盖（真二进制 + 真 HTTP）。
-//! 假能力面顺带证明一件事：「按角色切分」的能力接口真能被替换——新增一种呈现不必认识 `Core`。
+//! 假能力面顺带证明一件事：「按角色切分」的能力接口真能被替换——新增一种呈现不必认识 `Conductor`。
 
-use crate::core::agents::AgentView;
-use crate::core::api::{
-    Advance, DiscoveryOps, EventBus, HistoryOps, Ops, Output, RegistryOps, SessionOps,
+use crate::capabilities::conductor::api::{
+    Advance, ConductorOps, EventBus, Ops, Output, SessionOps,
 };
-use crate::core::exec::Tier;
-use crate::core::history::{AgentMeta, HistoryView, SessionMeta};
-use crate::core::module::Roster;
-use crate::core::ports::NoopLog;
-use crate::core::providers::{AppSettings, ModelView, ProviderView};
-use crate::core::{
+use crate::capabilities::conductor::api::{
     AgentSuggestion, ConfigAgent, FilesAgentView, FilesRootsView, FilesView, Pending,
     RuntimeReport, SessionConfig, SessionEdit, SessionView, WorkMode, WorkOpened, WorkSpec,
 };
-use crate::presentation::routes::{self, ROUTES};
+use crate::capabilities::registry::api::AgentView;
+use crate::capabilities::registry::api::RegistryOps;
+use crate::capabilities::registry::api::{AppSettings, ModelView, ProviderView};
+use crate::capabilities::session::api::{AgentMeta, HistoryOps, HistoryView, SessionMeta};
+use crate::capabilities::workspace::api::{Roster, WorkspaceOps};
+use crate::kernel::api::Tier;
+use crate::presentation::web::routes::{self, ROUTES};
 use crate::presentation::web::{self, FenceInfo};
 use serde_json::json;
 use std::collections::BTreeMap;
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
@@ -31,7 +32,7 @@ struct FakeOps {
     fail: Option<String>,
     running: AtomicBool,
     /// 探测结论可换（缺省"支持"）：用来验三种结论都**原样**穿过呈现层、不被改写。
-    probe: Option<crate::core::ports::ProbeOutcome>,
+    probe: Option<crate::capabilities::llm::api::ProbeOutcome>,
 }
 
 impl FakeOps {
@@ -51,7 +52,7 @@ impl FakeOps {
     }
 }
 
-fn fake_ops_probe(fail: Option<&str>, probe: crate::core::ports::ProbeOutcome) -> Ops {
+fn fake_ops_probe(fail: Option<&str>, probe: crate::capabilities::llm::api::ProbeOutcome) -> Ops {
     let mut f = FakeOps::new(fail);
     f.probe = Some(probe);
     let f = Arc::new(f);
@@ -59,8 +60,10 @@ fn fake_ops_probe(fail: Option<&str>, probe: crate::core::ports::ProbeOutcome) -
         sessions: f.clone(),
         registry: f.clone(),
         history: f.clone(),
-        discovery: f.clone(),
+        core: f.clone(),
+        workspace: f.clone(),
         events: EventBus::new(),
+        log: Arc::new(super::doubles::NoopLogOps),
     }
 }
 
@@ -70,8 +73,10 @@ fn fake_ops(fail: Option<&str>) -> Ops {
         sessions: f.clone(),
         registry: f.clone(),
         history: f.clone(),
-        discovery: f.clone(),
+        core: f.clone(),
+        workspace: f.clone(),
         events: EventBus::new(),
+        log: Arc::new(super::doubles::NoopLogOps),
     }
 }
 
@@ -98,7 +103,7 @@ fn meta(name: &str) -> SessionMeta {
         task: None,
         ts: 1,
         agents: Vec::new(),
-        exec: crate::core::exec::ExecSpec::default(),
+        exec: crate::capabilities::workspace::api::ExecSpec::default(),
         parent: None,
         node: None,
     }
@@ -111,7 +116,9 @@ impl SessionOps for FakeOps {
             WorkOpened {
                 sid: "w1".to_string(),
                 agents: vec!["甲".to_string()],
-                facts: vec![crate::core::SessionEvent::Notice("开好了".to_string())],
+                facts: vec![crate::capabilities::conductor::api::SessionEvent::Notice(
+                    "开好了".to_string(),
+                )],
             },
             7,
         ))
@@ -128,7 +135,7 @@ impl SessionOps for FakeOps {
     fn collab_step(
         &self,
         _sid: &str,
-        _step: crate::core::CollabStep,
+        _step: crate::capabilities::conductor::api::CollabStep,
         _text: &str,
     ) -> Result<Advance, String> {
         self.guard()?;
@@ -142,9 +149,9 @@ impl SessionOps for FakeOps {
         self.guard()?;
         Ok(Vec::new())
     }
-    fn compact(&self, _sid: &str) -> Result<crate::core::api::Advance, String> {
+    fn compact(&self, _sid: &str) -> Result<crate::capabilities::conductor::api::Advance, String> {
         self.guard()?;
-        Ok(crate::core::api::Advance { head: 0 })
+        Ok(crate::capabilities::conductor::api::Advance { head: 0 })
     }
     fn rewind(&self, _sid: &str, _keep_id: u64) -> Result<Vec<serde_json::Value>, String> {
         self.guard()?;
@@ -209,6 +216,10 @@ impl SessionOps for FakeOps {
             },
         })
     }
+    fn unique_work_name(&self, _base: &str, fallback: &str) -> Result<String, String> {
+        Ok(fallback.to_string())
+    }
+
     fn exists(&self, _sid: &str) -> Result<bool, String> {
         self.guard()?;
         Ok(true)
@@ -219,9 +230,40 @@ impl SessionOps for FakeOps {
     fn is_running(&self, _sid: &str) -> bool {
         self.running.load(Ordering::Relaxed)
     }
+
+    fn session_views(&self, history: &[HistoryView]) -> Result<Vec<SessionView>, String> {
+        self.guard()?;
+        Ok(history
+            .iter()
+            .map(|h| SessionView {
+                sid: h.name.clone(),
+                mode: h.mode.clone(),
+                done: h.done,
+                tier: h.exec.tier.as_str().to_string(),
+                tier_ready: true,
+                tier_missing: Vec::new(),
+                running: false,
+                can_update_task: h.mode == "collab",
+                pending: None,
+            })
+            .collect())
+    }
 }
 
 impl RegistryOps for FakeOps {
+    fn pick_agents(&self, names: &[String]) -> Result<Vec<AgentView>, String> {
+        self.guard()?;
+        Ok(names
+            .iter()
+            .map(|n| AgentView {
+                name: n.clone(),
+                modules: vec!["m".to_string()],
+                model: None,
+                note: String::new(),
+            })
+            .collect())
+    }
+
     fn providers(&self) -> Result<Vec<ProviderView>, String> {
         self.guard()?;
         Ok(vec![ProviderView {
@@ -244,7 +286,7 @@ impl RegistryOps for FakeOps {
             api_model: "m".to_string(),
             provider: "p1".to_string(),
             note: String::new(),
-            tools: crate::core::providers::ToolMode::Envelope,
+            tools: crate::capabilities::llm::api::ToolMode::Envelope,
             context: 32_000,
             is_core: true,
         }])
@@ -308,17 +350,17 @@ impl RegistryOps for FakeOps {
     fn probe_replay_shape(
         &self,
         _id: &str,
-    ) -> Result<crate::core::providers::ReplayReport, String> {
+    ) -> Result<crate::capabilities::llm::api::ReplayReport, String> {
         self.guard()?;
-        Ok(crate::core::providers::ReplayReport {
+        Ok(crate::capabilities::llm::api::ReplayReport {
             shapes: vec![
-                crate::core::providers::ReplayShape {
+                crate::capabilities::llm::api::ReplayShape {
                     name: "baseline-text".to_string(),
                     accepted: true,
                     understood: true,
                     detail: "finish_reason=stop".to_string(),
                 },
-                crate::core::providers::ReplayShape {
+                crate::capabilities::llm::api::ReplayShape {
                     name: "content-empty".to_string(),
                     accepted: false,
                     understood: false,
@@ -327,12 +369,15 @@ impl RegistryOps for FakeOps {
             ],
         })
     }
-    fn probe_model_tools(&self, _id: &str) -> Result<crate::core::ports::ProbeOutcome, String> {
+    fn probe_model_tools(
+        &self,
+        _id: &str,
+    ) -> Result<crate::capabilities::llm::api::ProbeOutcome, String> {
         self.guard()?;
         Ok(self
             .probe
             .clone()
-            .unwrap_or(crate::core::ports::ProbeOutcome::Supported {
+            .unwrap_or(crate::capabilities::llm::api::ProbeOutcome::Supported {
                 detail: "替身说支持".to_string(),
             }))
     }
@@ -358,26 +403,9 @@ impl HistoryOps for FakeOps {
         self.guard()?;
         Ok(true)
     }
-    fn session_views(&self, history: &[HistoryView]) -> Result<Vec<SessionView>, String> {
-        self.guard()?;
-        Ok(history
-            .iter()
-            .map(|h| SessionView {
-                sid: h.name.clone(),
-                mode: h.mode.clone(),
-                done: h.done,
-                tier: h.exec.tier.as_str().to_string(),
-                tier_ready: true,
-                tier_missing: Vec::new(),
-                running: false,
-                can_update_task: h.mode == "collab",
-                pending: None,
-            })
-            .collect())
-    }
 }
 
-impl DiscoveryOps for FakeOps {
+impl WorkspaceOps for FakeOps {
     fn roster(&self) -> Result<Roster, String> {
         self.guard()?;
         Ok(Roster {
@@ -385,6 +413,9 @@ impl DiscoveryOps for FakeOps {
             rejected: Vec::new(),
         })
     }
+}
+
+impl ConductorOps for FakeOps {
     fn runtime_report(&self, _tier: Tier) -> Result<RuntimeReport, String> {
         self.guard()?;
         Ok(report())
@@ -417,7 +448,8 @@ fn fence() -> FenceInfo {
 }
 
 fn call(ops: &Ops, method: &str, url: &str, body: &str) -> (u16, String) {
-    let log: Arc<dyn crate::core::ports::Log + Send + Sync> = Arc::new(NoopLog);
+    let log: Arc<dyn crate::capabilities::conductor::api::LogOps + Send + Sync> =
+        Arc::new(super::doubles::NoopLogOps);
     let (code, _headers, text) = web::route(ops, &fence(), &log, method, url, body);
     (code, text)
 }
@@ -568,12 +600,12 @@ fn catalog_is_free_of_duplicates_and_routes_do_not_overlap() {
 #[test]
 fn documented_route_table_matches_the_catalog() {
     // 路由表本体在细则文件里（门户不复述细则正文，见 AGENTS.md「文档分层与同步」）。
-    let doc = include_str!("../../docs/architecture/contracts.md");
+    let doc = include_str!("../../docs/presentation/contracts.md");
     let body = doc
         .split_once("<!-- ROUTES:BEGIN -->")
         .and_then(|(_, rest)| rest.split_once("<!-- ROUTES:END -->"))
         .map(|(b, _)| b)
-        .expect("docs/architecture/contracts.md 必须有 ROUTES:BEGIN/END 包裹的路由表");
+        .expect("docs/presentation/contracts.md 必须有 ROUTES:BEGIN/END 包裹的路由表");
     let mut documented: Vec<(String, String)> = Vec::new();
     for line in body.lines() {
         let cells: Vec<&str> = line.split('|').map(str::trim).collect();
@@ -602,7 +634,7 @@ fn documented_route_table_matches_the_catalog() {
 
 #[test]
 fn frontend_only_calls_catalogued_paths() {
-    let src = include_str!("../presentation/web/app.js");
+    let src = include_str!("../presentation/web/assets/app.js");
     let mut hits: Vec<String> = Vec::new();
     let mut from = 0;
     while let Some(pos) = src[from..].find("/api/") {
@@ -630,6 +662,50 @@ fn frontend_only_calls_catalogued_paths() {
             .iter()
             .any(|r| r.pattern == p.as_str() || r.pattern.starts_with(p.as_str()));
         assert!(known, "前端调用了目录里没有的路径：{}", p);
+    }
+}
+
+/// 演示脚本（`demo/*.mjs`）也只走目录里的路径：**演示是产品对外的一张脸**，改路由不该让它静默失效。
+#[test]
+fn demo_scripts_only_call_catalogued_paths() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("demo");
+    let mut files = 0;
+    let mut hits: Vec<String> = Vec::new();
+    for entry in std::fs::read_dir(&dir).expect("demo/ 必须存在") {
+        let path = entry.expect("可读的目录项").path();
+        if path.extension().and_then(|e| e.to_str()) != Some("mjs") {
+            continue;
+        }
+        files += 1;
+        let src = std::fs::read_to_string(&path).expect("演示脚本必须可读");
+        let mut from = 0;
+        while let Some(pos) = src[from..].find("/api/") {
+            let start = from + pos;
+            let tail = &src[start..];
+            let end = tail
+                .find(|c: char| !(c.is_alphanumeric() || matches!(c, '/' | '_' | '-' | '.')))
+                .unwrap_or(tail.len());
+            let p = tail[..end].to_string();
+            if !hits.iter().any(|h| h == &p) {
+                hits.push(p);
+            }
+            from = start + 4;
+            if from >= src.len() {
+                break;
+            }
+        }
+    }
+    assert!(files > 0, "demo/ 下一个 .mjs 都没有（演示怎么跑？）");
+    assert!(
+        !hits.is_empty(),
+        "没从演示脚本里认出任何 /api/ 调用（提取逻辑失效了？）"
+    );
+    for p in &hits {
+        // 与前端同一条口径：字面前缀即可，动态段由脚本拼在后面。
+        let known = ROUTES
+            .iter()
+            .any(|r| r.pattern == p.as_str() || r.pattern.starts_with(p.as_str()));
+        assert!(known, "演示脚本调用了目录里没有的路径：{}", p);
     }
 }
 
@@ -727,7 +803,7 @@ fn session_action_boundaries_are_explicit() {
 /// 探测回包：三种结论**原样**穿过呈现层（不改写、不降级），`mode` 取自登记处（探测后的事实）。
 #[test]
 fn model_probe_passes_the_verdict_through_verbatim() {
-    use crate::core::ports::ProbeOutcome;
+    use crate::capabilities::llm::api::ProbeOutcome;
     let cases = [
         (
             ProbeOutcome::Supported {
