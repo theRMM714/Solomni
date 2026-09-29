@@ -156,3 +156,21 @@
     3) 若不可达，把可执行文件纳入运行包登记或围栏可达范围，再复跑。
   accept: 授权围栏下该模块的工具跑通一次完整往返；或如实写明"必须把可执行文件放进模块目录"并落到文档与登记处。
   blocked_by: 缺少观察面
+
+- id: fence.leftover-grant-hides-parent
+  scope: global
+  level: T4
+  why: |
+    围栏给"数据边界叶子的直接父目录"授只读属性位（RIGHTS_STAT）时用的是**显式、非继承**的 ACE。
+    实测：`tests/` 上留着一条 `S-1-15-2-1128246502-…:(OI)(CI)(S)`（rights = Synchronize，IsInherited=False），
+    后果是**整个 `tests/` 子树在受限（沙箱）进程里不可读**——列目录、stat 子项、读文件一律拒绝访问，
+    而普通用户身份读得到；`git status` 因此把 `tests/` 下所有已跟踪文件报成"已删除"。
+    一条"只为了让容器判断存在性"的残留授权，反过来把父目录对整个沙箱隐藏：撤权没带走它。
+  how: |
+    1) 复现：在 `--fence-live` 下跑一次会建数据边界叶子的用例（或直接调 `confine::prepare_fence`），
+       然后 `icacls <叶子父目录> /findsid <容器SID> /T` 应命中；受限进程读该父目录应失败。
+    2) 先查撤权路径为什么没带走它：`grant_targets` 与撤销共用一份落点清单（见 ARCHITECTURE 六），
+       父目录那条 RIGHTS_STAT 是否在那份清单里、`--fence-clean` 的扫描是否覆盖它——查清再改。
+    3) `tests/<平台>/` 加一条探针：授权→撤权后父目录不再留有该 SID 的显式 ACE，且受限进程能列该目录。
+  accept: 撤权后父目录 `/findsid` 无命中、受限进程能列目录、`git status` 不再出现幻影删除。
+  blocked_by: 缺少实现
