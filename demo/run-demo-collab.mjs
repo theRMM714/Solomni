@@ -6,7 +6,7 @@
  * 与 demo/run-demo.mjs 的区别：那个是**组合式**（一个 agent 装三个模块），这个走**小组协作**
  * （N 个 agent 分权协商：讨论 → 整理出任务链 → **审查关卡** → 链驱动（子会话）→ 节点验收 → 总验收）。
  * 三个模块仍是三种语言：harvest=python、render=node、indexer=C++。
- * 细则见 docs/architecture/task-chain.md。
+ * 细则见 docs/collab/task-chain.md。
  *
  * 用法：
  *   1) 先起产品：node start.js -webUI            （默认网页端口 3081）
@@ -23,6 +23,7 @@ import { readFileSync, existsSync, readdirSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { request } from "node:http";
+import { demoPreflight, refuseDemo } from "./preflight.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const BASE = process.env.SOLOMNI_DEMO_BASE || "http://127.0.0.1:3081";
@@ -118,7 +119,9 @@ function artifacts(work) {
     for (const ent of readdirSync(dir, { withFileTypes: true })) {
       const p = join(dir, ent.name);
       if (ent.isDirectory()) walk(p);
-      else if (!found.has(ent.name)) found.set(ent.name, p);
+      // 会话自己的元数据不是产物：不排除的话，会话根的 transcript.jsonl 会被"语料"那条正则抢先命中，
+      // 而真正缺产物时检查还会假通过（真机上就这么显示过一次）。
+      else if (ent.name !== "meta.yaml" && ent.name !== "transcript.jsonl" && !found.has(ent.name)) found.set(ent.name, p);
     }
   };
   if (existsSync(root)) walk(root);
@@ -131,9 +134,14 @@ async function main() {
     return 1;
   }
   if (!(await waitReady())) {
-    console.error("转录中心没起来：" + BASE + "（先跑 solomni -webUI）");
+    console.error("转录中心没起来：" + BASE + "（先跑 node start.js -webUI）");
     return 1;
   }
+
+  // 演示是**真机测试**：条件不齐就明说并退出（退出码 2），不用演示通道凑一遍。
+  const pre = await api("GET", "/api/state");
+  const block = demoPreflight(pre.json, MODEL);
+  if (block) return refuseDemo(block);
 
   // ① 建协作工作：三个 agent 各持一个模块（三种语言），需求一句话。
   const task = "把共享区里的资料变成一份能给同事看的报告，再做一个能离线检索的索引包。"

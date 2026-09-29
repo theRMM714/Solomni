@@ -21,10 +21,22 @@ const PLATFORM_TARGETS = ["cross-platform", "windows", "linux", "macos"];
 const FENCE_LIVE = process.argv.includes("--fence-live") || process.env.SOLOMNI_FENCE_LIVE === "1";
 const REPORT = path.join(ROOT, "target", "test-report.json");
 // 缺口账：唯一真相是这些文件。平台账决定 TEST-REPORT-ACCEPTED；全局账是长期目标（每条都进报告）。
+// 业务缺口账：每个业务/机制单元一份 src/<单元>/testgaps.yaml（业务 AI 记、测试 AI 销账）。
+const BUSINESS_GAP_FILES = (() => {
+  const out = [path.join(ROOT, "src", "kernel", "testgaps.yaml")];
+  const capDir = path.join(ROOT, "src", "capabilities");
+  if (fs.existsSync(capDir)) {
+    for (const e of fs.readdirSync(capDir, { withFileTypes: true })) {
+      if (e.isDirectory()) out.push(path.join(capDir, e.name, "testgaps.yaml"));
+    }
+  }
+  return out;
+})();
 const GAP_FILES = [
   path.join(ROOT, "tests", "gaps.yaml"),
   path.join(ROOT, "tests", "cross-platform", "gaps.yaml"),
   ...[IS_WIN ? "windows" : OS_KEY, "windows", "linux", "macos"].map((p) => path.join(ROOT, "tests", p, "gaps.yaml")),
+  ...BUSINESS_GAP_FILES,
 ];
 
 function buildEnv() {
@@ -101,12 +113,14 @@ function gapLedgers() {
 
 /** 全局缺口账（tests/gaps.yaml）：长期目标；每条都进报告，但不影响平台的 ACCEPTED 判定。 */
 function globalGaps() {
-  const f = path.join(ROOT, "tests", "gaps.yaml");
-  if (!fs.existsSync(f)) return [];
+  const files = [path.join(ROOT, "tests", "gaps.yaml"), ...BUSINESS_GAP_FILES];
   const ids = [];
-  for (const line of fs.readFileSync(f, "utf8").split(/\r?\n/)) {
-    const m = line.match(/^\s*-\s*id:\s*(\S+)/);
-    if (m) ids.push(m[1]);
+  for (const f of files) {
+    if (!fs.existsSync(f)) continue;
+    for (const line of fs.readFileSync(f, "utf8").split(/\r?\n/)) {
+      const m = line.match(/^\s*-\s*id:\s*(\S+)/);
+      if (m) ids.push(m[1]);
+    }
   }
   return ids;
 }
@@ -184,6 +198,7 @@ function toolAvailable(sub) {
 /** 结构审查（纯文件分析，不起进程）：目标登记、孤儿测试文件、缺口账格式。 */
 function structuralAudit() {
   const problems = [];
+  const BT = String.fromCharCode(96);
   const toml = fs.readFileSync(path.join(ROOT, "Cargo.toml"), "utf8");
   const targets = [];
   for (const block of toml.split(/\[\[test\]\]/).slice(1)) {
@@ -240,6 +255,56 @@ function structuralAudit() {
     });
   }
 
+  // 模块地图与磁盘**双向一致**（`docs/<单元>/module-map.md` 是各单元逐文件职责的唯一权威；
+  // 表现层两个渠道各一份。所有地图文件的行合成一张表，再与磁盘比对）：
+  // ① 每行第一格是仓库根相对路径（src/…），必须存在；② src/ 下每个 .rs 都要在**某一张**地图里有一行
+  // （src/tests/** 归测试分区、纯 mod 声明的目录入口不要求逐行列出）。
+  // 为什么机器查：这张表逐文件写着职责，人手维护必然漂移（曾出现表错位与整族文件漏记）。
+  const mapFiles = [];
+  (function collectMaps(d) {
+    for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+      const p = path.join(d, e.name);
+      if (e.isDirectory()) collectMaps(p);
+      else if (e.name === "module-map.md") mapFiles.push(p);
+    }
+  })(path.join(ROOT, "docs"));
+  if (!mapFiles.length) problems.push("找不到任何模块地图（docs/**/module-map.md）");
+  const mapRows = [];
+  for (const f of mapFiles) {
+    for (const m of fs.readFileSync(f, "utf8").matchAll(new RegExp("^\\| " + BT + "([^" + BT + "]+)" + BT + " \\|", "gm"))) mapRows.push(m[1]);
+  }
+  const seenRows = new Set();
+  for (const r of mapRows) {
+    if (seenRows.has(r)) problems.push("模块地图有重复行：" + r);
+    seenRows.add(r);
+    if (!fs.existsSync(path.join(ROOT, r))) problems.push("模块地图引用的文件不存在：" + r);
+  }
+  // 目录入口：只声明模块 / 重导出（不定义任何条目）的文件不必逐行入册。
+  const isBarrel = (abs) => !/^(pub(\([^)]*\))? )?(fn|struct|enum|impl|trait|const|static|type|macro_rules!) /m.test(fs.readFileSync(abs, "utf8"));
+  const collectSrc = (d) => {
+    for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+      const p = path.join(d, e.name);
+      if (e.isDirectory()) { collectSrc(p); continue; }
+      if (!e.name.endsWith(".rs")) continue;
+      const r = rel(p);
+      if (r.startsWith("src/tests/")) continue;
+      if (e.name === "mod.rs" && isBarrel(p)) continue;
+      if (!seenRows.has(r)) problems.push("src 下的文件没进模块地图：" + r);
+    }
+  };
+  collectSrc(path.join(ROOT, "src"));
+  // 代码注释里的文档引用（docs/**.md）必须存在：注释也是长期文档的一部分（AGENTS.md 四）。
+  const checkCodeDocRefs = (d) => {
+    for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+      const p = path.join(d, e.name);
+      if (e.isDirectory()) { checkCodeDocRefs(p); continue; }
+      if (!e.name.endsWith(".rs")) continue;
+      for (const m of fs.readFileSync(p, "utf8").matchAll(/docs\/[A-Za-z0-9_./-]+\.md/g)) {
+        if (!fs.existsSync(path.join(ROOT, m[0]))) problems.push(rel(p) + " 注释引用的文档不存在：" + m[0]);
+      }
+    }
+  };
+  checkCodeDocRefs(path.join(ROOT, "src"));
   // 文档分层（AGENTS.md「文档分层与同步」）：门户引用 docs/ 下的细则，细则引用彼此——
   // 两边都要真实存在。只查引用不查正文，避免把文档写法变成门禁。
   // **相对解析**：链接按所在文件的目录解析（门户在根、细则在 docs/<领域>/），所以 docs/ 内部写错的同级引用也会被抓到。
@@ -307,7 +372,7 @@ function structuralAudit() {
     walkMarks(abs);
   }
 
-  const portalFiles = ["README.md", "README_EN.md", "AGENTS.md", "ARCHITECTURE.md", "PRODUCT.md", "MODULE_SPEC.md", "RUNTIME_SPEC.md", "REGISTRY_SPEC.md", "TESTING.md"];
+  const portalFiles = ["README.md", "README_EN.md", "AGENTS.md", "ARCHITECTURE.md", "PRODUCT.md", "MODULE_SPEC.md", "SYSTOOL.md", "RUNTIME_SPEC.md", "REGISTRY_SPEC.md", "TESTING.md"];
   for (const p of portalFiles) {
     const abs = path.join(ROOT, p);
     if (!fs.existsSync(abs)) { problems.push("缺门户文档：" + p); continue; }
@@ -324,6 +389,245 @@ function structuralAudit() {
       }
     };
     walkDocs(docsDir);
+  }
+
+  // ---------- 依赖方向门禁 ----------
+  // 权威：AGENTS.md「核心约束」（按业务功能垂直切分、业务之间通过 API 契约协作）与
+  // 判据：ARCHITECTURE.md §一「分层与依赖方向」与 §九.7「依赖方向门禁」；豁免清单在 tests/dependency-baseline.json。
+  // 三条规则：① 业务/机制层不得反向依赖 adapters / presentation；
+  //          ② presentation 只经入站能力面（core::api）驱动，不碰端口与内部模块；
+  //          ③ 业务层内部不得成环（按强连通分量判定）。
+  // 迁移期允许的现状违规进 tests/dependency-baseline.json；**条目一旦不再成立必须删除**（过期即失败）——
+  // 这是"每拆一个分区就销一次账"的机器判据，不靠人看。
+  const depBaselineFile = path.join(ROOT, "tests", "dependency-baseline.json");
+  let depBaseline = null;
+  try {
+    depBaseline = JSON.parse(fs.readFileSync(depBaselineFile, "utf8"));
+  } catch (e) {
+    problems.push("依赖方向：基线不可读或不是合法 JSON：" + rel(depBaselineFile) + "（" + e.message + "）");
+  }
+
+  if (depBaseline) {
+    // 模块级 `#[cfg(test)] mod tests { … }` 不是生产依赖边，剔除；
+    // `#[cfg(test)]` 加在函数上的保留（它是这个文件里真实存在的一处代码）。
+    const stripTestModules = (text) => {
+      const lines = text.split(/\r?\n/);
+      const out = [];
+      for (let i = 0; i < lines.length; i++) {
+        if (/^\s*#\[cfg\(test\)\]\s*$/.test(lines[i])) {
+          let j = i + 1;
+          while (j < lines.length && lines[j].trim() === "") j++;
+          if (j < lines.length && /^\s*(pub\s+)?mod\s+\w+/.test(lines[j])) {
+            let k = j;
+            while (k < lines.length && !/^\}/.test(lines[k])) k++;
+            i = k;
+            continue;
+          }
+        }
+        out.push(lines[i]);
+      }
+      return out.join("\n");
+    };
+    // 归一深度：能力取「层 + 能力 + 子模块」三级
+    // ——后者要能区分 ::api（唯一合法入口）与 ::domain / ::ports（内部）。
+    // 归一只为让基线稳定：同一依赖换个更细的写法不该让账本跳动。
+    const normTarget = (full) => {
+      const parts = full.split("::");
+      const depth = parts[0] === "capabilities" ? 3 : 2;
+      return "crate::" + parts.slice(0, Math.min(depth, parts.length)).join("::");
+    };
+    const LAYER_OF = (r) => {
+      // 前端（交付机制）：各渠道一个顶层目录；不是业务能力。
+      if (r.startsWith("src/presentation/")) return "presentation";
+      // 程序入口层：组合根 + 机器可读探针 + 围栏守门进程（第二个程序入口）+ 入口层共用机制。
+      // 它依赖所有人，**任何人都不许依赖它**。
+      if (
+        r === "src/main.rs" ||
+        r.startsWith("src/entry/") ||
+        r.startsWith("src/diagnostics/") ||
+        r.startsWith("src/guard/")
+      )
+        return "entry";
+      if (r.startsWith("src/kernel/")) return "kernel";
+      if (r.startsWith("src/capabilities/")) return "capabilities";
+      if (r.startsWith("src/tests/")) return "tests";
+      if (r === "src/main.rs") return "main";
+      return null;
+    };
+    // 层 → 它不得引用的层。端口由能力定义、它的 detail（与 kernel 的机制实现）实现，永不反向。
+    const FORBIDDEN = {
+      // kernel 在最底层：无领域语义的机制，**不依赖任何人**（它的实现住在自己的 detail/）。
+      kernel: ["capabilities", "presentation", "entry"],
+      // 能力（含协调业务 conductor）是业务层：不反向依赖呈现层或入口层。
+      capabilities: ["presentation", "entry"],
+    };
+
+    const rsFiles = [];
+    const collectRs = (d) => {
+      for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+        const p = path.join(d, e.name);
+        if (e.isDirectory()) collectRs(p);
+        else if (e.name.endsWith(".rs")) rsFiles.push(p);
+      }
+    };
+    collectRs(path.join(ROOT, "src"));
+
+    const reverse = new Set();
+    const presentation = new Set();
+    const apiOnly = new Set();
+    // 批次 20a 新增：给别能力的类型写 impl、domain 里引端口。
+    const foreignImpl = new Set();
+    const domainPorts = new Set();
+    const apiPorts = new Set();
+    // 呈现层两个渠道（cli / web）互不依赖：有共享层就等于有隐式契约。
+    const channelCross = new Set();
+    const coreGraph = {};
+    for (const abs of rsFiles) {
+      const f = rel(abs);
+      const layer = LAYER_OF(f);
+      if (layer === null) {
+        // 新分区建目录时必须先归层，否则它会绕过门禁——**不留静默空洞**。
+        problems.push("依赖方向：未分类的源码目录（门禁需要先把它归层）：" + f);
+        continue;
+      }
+      if (layer === "tests" || layer === "main") continue;
+      const text = stripTestModules(fs.readFileSync(abs, "utf8"));
+      for (const m of text.matchAll(/crate::([a-z_][a-z0-9_]*(?:::[a-z_][a-z0-9_]*)*)/g)) {
+        const t = normTarget(m[1]);
+        // 前端是两个顶层目录（cli / web），它们同属呈现层。
+      const targetLayer = t.split("::")[1];
+        // 渠道互不依赖：呈现层的文件不得引用**另一个渠道**（各自一个子目录，没有共享层）。
+        if (layer === "presentation" && t.startsWith("crate::presentation::")) {
+          const own = f.startsWith("src/presentation/cli/") ? "cli" : f.startsWith("src/presentation/web/") ? "web" : null;
+          const other = t.split("::")[2];
+          if (own && other && own !== other) channelCross.add(f + " -> " + t);
+        }
+        if ((FORBIDDEN[layer] || []).includes(targetLayer)) reverse.add(f + " -> " + t);
+        // 呈现层只认入站能力面：某个能力的 ::api（协调业务 conductor 也不例外）。
+        const presOk = t.startsWith("crate::capabilities::") && t.endsWith("::api");
+        if (layer === "presentation" && !presOk && targetLayer !== "presentation") {
+          presentation.add(f + " -> " + t);
+        }
+        // 业务之间**只经对方的 `api`** 交流（R1，批次 20a 收紧）：`::ports` 是"对方与它自己 detail 之间的事"（R12），
+        // 跨能力引用一律不许；`::domain` / `::detail` 同样是实现。能力内部的互相引用不算"业务之间"。
+        if (layer === "capabilities" && targetLayer === "capabilities") {
+          const selfCap = f.split("/")[2];
+          const otherCap = t.split("::")[2];
+          if (otherCap && otherCap !== selfCap && !t.endsWith("::api")) apiOnly.add(f + " -> " + t);
+        }
+        // `domain/` 是**纯逻辑**（批次 20a）：不得引用任何**能力端口**（自己的也不行，引了就不是纯的了）。
+        // kernel 的机制端口（`Log` / `HostProbe`）是全项目共享的机制接口（R12 例外），不在此列。
+        if (f.includes("/domain/") && t.startsWith("crate::capabilities::") && t.endsWith("::ports"))
+          domainPorts.add(f + " -> " + t);
+        // **端口只由定义它的能力持有**（R12，批次 20a）：任何非入口层引用别的能力的 `ports` 都是违规——
+        // 协调业务 `conductor` 也算，它不该拿着别人的端口替别人做 IO。
+        if (
+          layer !== "entry" &&
+          t.startsWith("crate::capabilities::") &&
+          t.endsWith("::ports") &&
+          t.split("::")[2] !== (layer === "capabilities" ? f.split("/")[2] : null)
+        ) {
+          apiOnly.add(f + " -> " + t);
+        }
+        // `api.rs` 是**入站用例面**：不得把**能力端口**再导出去（批次 20b 清掉 llm 那处）。
+        // kernel 的机制端口（`Log` / `HostProbe`）是全项目共享的机制接口（R12 例外），不在此列。
+        if (f.endsWith("/api.rs") && t.startsWith("crate::capabilities::") && t.endsWith("::ports"))
+          apiPorts.add(f + " -> " + t);
+        // `::detail` 是**实现**：跨能力引用一律不许，只有入口层的组合根能构造它。
+        if (
+          layer !== "entry" &&
+          t.startsWith("crate::capabilities::") &&
+          t.endsWith("::detail") &&
+          t.split("::")[2] !== f.split("/")[2]
+        ) {
+          apiOnly.add(f + " -> " + t);
+        }
+        // 环的节点：能力用 capabilities/<名字>（协调业务与别的能力同处一张图）。
+        // 两者同处一张图，所以"能力级环"与"模块级环"一起被判定。
+        const selfNode = "capabilities/" + f.split("/")[2];
+        const otherNode =
+          targetLayer === "capabilities" ? "capabilities/" + t.split("::")[2] : null;
+        if (otherNode && otherNode !== selfNode) {
+          (coreGraph[selfNode] = coreGraph[selfNode] || new Set()).add(otherNode);
+        }
+      }
+      // 不许给**别的能力**的类型写 impl（R1）：这是另一种"互相引入"，`use` 边看不见它。
+      // 只认"路径直接写在 impl 行上"的形式（引用后写短名的情况由评审兜底）。
+      if (layer !== "entry") {
+        const selfCap = layer === "capabilities" ? f.split("/")[2] : null;
+        const foreignPaths = (s) =>
+          [...s.matchAll(/crate::([a-z_][a-z0-9_]*(?:::[a-z_][a-z0-9_]*)*)/g)]
+            .map((m) => normTarget(m[1]))
+            .filter((t2) => t2.startsWith("crate::capabilities::") && t2.split("::")[2] !== selfCap);
+        for (const line of text.split("\n")) {
+          if (!/^impl\b/.test(line)) continue;
+          // `impl Trait for Type` → 只看 **Type**（实现别人的 api trait 是正当的队列代理）；
+          // `impl Type` → 看 Type。
+          const forIdx = line.indexOf(" for ");
+          const traitPart = forIdx >= 0 ? line.slice(4, forIdx) : "";
+          const typePart = forIdx >= 0 ? line.slice(forIdx + 5) : line.slice(4);
+          for (const t2 of foreignPaths(typePart)) foreignImpl.add(f + " -> " + t2);
+          // trait 侧只在**显式引用了别人的 ports** 时才算违规（那是替别人实现端口，R12 不许）。
+          for (const t2 of foreignPaths(traitPart)) {
+            if (t2.endsWith("::ports")) foreignImpl.add(f + " -> " + t2);
+          }
+        }
+      }
+    }
+
+    // 强连通分量：> 1 个模块的分量 = 一个环。
+    const coreSccs = [];
+    {
+      const idx = {}, low = {}, on = {}, stack = [];
+      let counter = 0;
+      const visit = (v) => {
+        idx[v] = low[v] = counter++;
+        stack.push(v);
+        on[v] = true;
+        for (const w of coreGraph[v] || []) {
+          if (!(w in idx)) { visit(w); low[v] = Math.min(low[v], low[w]); }
+          else if (on[w]) low[v] = Math.min(low[v], idx[w]);
+        }
+        if (low[v] === idx[v]) {
+          const comp = [];
+          let w;
+          do { w = stack.pop(); on[w] = false; comp.push(w); } while (w !== v);
+          if (comp.length > 1) coreSccs.push(comp.sort());
+        }
+      };
+      for (const v of Object.keys(coreGraph)) if (!(v in idx)) visit(v);
+    }
+    const sortSccs = (list) => list.map((s) => s.slice().sort()).sort((a, b) => a.join(",").localeCompare(b.join(",")));
+
+    // 每条规则比两次：**新增 = 失败；基线里已不成立 = 也失败**（强制销账）。
+    const compare = (name, actualList, baselineList, hint) => {
+      for (const a of actualList) {
+        if (!baselineList.includes(a)) problems.push("依赖方向：" + hint + "：" + a);
+      }
+      for (const b of baselineList) {
+        if (!actualList.includes(b)) {
+          problems.push("依赖方向：基线豁免已过期，请从 " + rel(depBaselineFile) + " 的 " + name + " 删除：" + b);
+        }
+      }
+    };
+    compare("reverse", [...reverse].sort(), depBaseline.reverse || [], "业务层不得反向依赖旧巨石 core / adapters / presentation");
+    compare("presentation", [...presentation].sort(), depBaseline.presentation || [], "presentation 只能经各能力的 ::api 驱动");
+    compare("apiOnly", [...apiOnly].sort(), depBaseline.apiOnly || [], "业务之间只能经对方的 ::api（R1，批次 20a 起不再允许 ::ports）；::domain / ::detail 是实现，跨能力一律不许碰");
+    compare("foreignImpl", [...foreignImpl].sort(), depBaseline.foreignImpl || [], "不得给别的能力的类型写 impl（R1：另一种互相引入）");
+    compare("domainPorts", [...domainPorts].sort(), depBaseline.domainPorts || [], "domain 是纯逻辑（批次 20a）：不得引用任何 ports");
+    compare("apiPorts", [...apiPorts].sort(), depBaseline.apiPorts || [], "api 是入站用例面：不得把本能力的 ports 再导出去（R12）");
+    compare("channelCross", [...channelCross].sort(), depBaseline.channelCross || [], "呈现层的两个渠道（cli / web）互不依赖：不得引用对方");
+
+    const actualCycles = sortSccs(coreSccs);
+    const baselineCycles = sortSccs(depBaseline.coreCycles || []);
+    const fmtCycles = (l) => (l.length ? l.map((s) => "[" + s.length + "] " + s.join(", ")).join("；") : "（无）");
+    if (JSON.stringify(actualCycles) !== JSON.stringify(baselineCycles)) {
+      problems.push(
+        "依赖方向：业务层内部的环与基线不一致（分区拆出后请同步更新 " + rel(depBaselineFile) + " 的 coreCycles）：" +
+        "\n    实际：" + fmtCycles(actualCycles) +
+        "\n    基线：" + fmtCycles(baselineCycles)
+      );
+    }
   }
 
   return { problems, targets: targets.map((t) => t.name), testFiles: allTestFiles.length };
@@ -484,7 +788,7 @@ function pushStep(obj) {
 
   // 前端冒烟（自动发现同目录 *.smoke.cjs）
   announce("前端冒烟");
-  const fe = sh(process.execPath, [path.join("src", "presentation", "web", "smoke.cjs")]);
+  const fe = sh(process.execPath, [path.join("src", "presentation", "web", "assets", "smoke.cjs")]);
   announceDone(fe.code === 0 ? "完成" : "失败", "");
   pushStep({
     step: "前端冒烟",

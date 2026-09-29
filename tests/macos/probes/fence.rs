@@ -4,7 +4,7 @@
 
 use crate::probe::{job_json, run_launcher_env, scratch};
 
-/// 与 src/adapters/confine/macos.rs 的 PROFILE_REJECTED_MARK 一致（集成测试看不到 crate 内部）。
+/// 与 src/capabilities/tools/detail/confine/macos.rs 的 PROFILE_REJECTED_MARK 一致（集成测试看不到 crate 内部）。
 /// 自检已确认本机 seatbelt 有效，却仍装不上 = 我们生成的 profile 写错了；
 /// 那种情况**必须响亮失败**，否则「绿」等于围栏根本没验收。
 const PROFILE_REJECTED_MARK: &str = "seatbelt profile 被拒绝";

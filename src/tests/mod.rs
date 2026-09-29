@@ -1,16 +1,27 @@
 //! 测试层（T1 单元 + T2 端口与适配器契约）——替身与契约测试同处一层。
 //! 目录与命名见 docs/testing/gaps-acceptance.md，替身语义见 docs/testing/doubles.md，
-//! 层级与判定见 docs/testing/levels.md，端口矩阵见 docs/testing/port-matrix.md。
+//! 层级与判定见 docs/testing/levels.md，端口矩阵见 docs/testing/doubles.md §三。
 //! 硬规矩：不碰真实 `.home/`、真实 `session/`、真实权限或外部网络；只绑本地环回。
 
-mod adapters;
 mod api;
-mod core;
+mod builders;
+mod cli;
+mod collab;
+mod conductor;
+mod detail;
 mod doubles;
 mod fakes;
-mod intent;
+mod llm;
 mod ports;
+mod prelude;
+mod prompt;
+mod registry;
 mod routes;
+mod session;
+mod slate;
+mod taskchain;
+mod tools;
+mod workspace;
 
 /// 隔离落点：`target/test-scratch/contract/<name>`（target/ 不入库）。每次先清空再建。
 pub(crate) fn scratch(name: &str) -> std::path::PathBuf {
@@ -27,27 +38,35 @@ pub(crate) fn scratch(name: &str) -> std::path::PathBuf {
 /// 起一个内存装配的核心手柄并把能力面拆成 `Ops`（契约测试共用）。
 /// 返回手柄是为了能观察事件台与测试注入；只用能力面的用例可以忽略它。
 pub(crate) fn ops_with(
-    modules: Vec<crate::core::module::Module>,
+    modules: Vec<crate::capabilities::workspace::api::Module>,
     core_script: Vec<&str>,
-) -> (crate::core::api::CoreHandle, crate::core::api::Ops) {
+) -> (
+    crate::capabilities::conductor::api::ConductorHandle,
+    crate::capabilities::conductor::api::Ops,
+) {
     let mut member = std::collections::BTreeMap::new();
     member.insert(
         "a".to_string(),
         vec!["{\"type\":\"say\",\"text\":\"好\"}".to_string()],
     );
     let gateway = doubles::gw(member, core_script.into_iter().map(String::from).collect());
-    let handle = crate::core::api::CoreHandle::spawn(doubles::core_with_gateway(modules, gateway))
-        .expect("起核心线程");
-    let ops = crate::core::api::Ops::from_handle(&handle);
+    let handle = crate::capabilities::conductor::api::ConductorHandle::spawn(
+        doubles::core_with_gateway(modules, gateway),
+    )
+    .expect("起核心线程");
+    let ops = crate::capabilities::conductor::api::Ops::from_handle(&handle);
     (handle, ops)
 }
 
 /// 一次单 agent 工作的规格（契约测试共用）。
-pub(crate) fn single_work(name: &str, modules: &[&str]) -> crate::core::WorkSpec {
-    crate::core::WorkSpec {
+pub(crate) fn single_work(
+    name: &str,
+    modules: &[&str],
+) -> crate::capabilities::conductor::api::WorkSpec {
+    crate::capabilities::conductor::api::WorkSpec {
         name: name.to_string(),
-        mode: crate::core::WorkMode::Single,
-        agents: vec![crate::core::AgentInstance {
+        mode: crate::capabilities::conductor::api::WorkMode::Single,
+        agents: vec![crate::capabilities::conductor::api::AgentInstance {
             name: modules[0].to_string(),
             transient: true,
             modules: modules.iter().map(|s| s.to_string()).collect(),
@@ -64,25 +83,27 @@ pub(crate) struct SlowChat {
     pub ticks: std::sync::Arc<std::sync::atomic::AtomicUsize>,
 }
 
-impl crate::core::ports::Chat for SlowChat {
+impl crate::capabilities::llm::api::Chat for SlowChat {
     fn complete(
         &mut self,
-        _m: &[crate::core::ports::Msg],
-        _opts: crate::core::ports::CompleteOpts<'_>,
-        on: &mut dyn FnMut(crate::core::ports::Chunk) -> bool,
-    ) -> crate::core::ports::Completion {
+        _m: &[crate::capabilities::llm::api::Msg],
+        _opts: crate::capabilities::llm::api::CompleteOpts<'_>,
+        on: &mut dyn FnMut(crate::capabilities::llm::api::Chunk) -> bool,
+    ) -> crate::capabilities::llm::api::Completion {
         use std::sync::atomic::Ordering;
-        if !on(crate::core::ports::Chunk::Start) {
-            return crate::core::ports::Completion::text("");
+        if !on(crate::capabilities::llm::api::Chunk::Start) {
+            return crate::capabilities::llm::api::Completion::text("");
         }
         for _ in 0..6_000 {
             self.ticks.fetch_add(1, Ordering::Relaxed);
-            if !on(crate::core::ports::Chunk::Text("·".to_string())) {
+            if !on(crate::capabilities::llm::api::Chunk::Text("·".to_string())) {
                 break;
             }
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
-        crate::core::ports::Completion::text("{\"type\":\"say\",\"text\":\"（慢通道）收到停止\"}")
+        crate::capabilities::llm::api::Completion::text(
+            "{\"type\":\"say\",\"text\":\"（慢通道）收到停止\"}",
+        )
     }
 }
 
@@ -94,31 +115,33 @@ pub(crate) struct GatedChat {
     pub release: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
-impl crate::core::ports::Chat for GatedChat {
+impl crate::capabilities::llm::api::Chat for GatedChat {
     fn complete(
         &mut self,
-        _m: &[crate::core::ports::Msg],
-        _opts: crate::core::ports::CompleteOpts<'_>,
-        on: &mut dyn FnMut(crate::core::ports::Chunk) -> bool,
-    ) -> crate::core::ports::Completion {
+        _m: &[crate::capabilities::llm::api::Msg],
+        _opts: crate::capabilities::llm::api::CompleteOpts<'_>,
+        on: &mut dyn FnMut(crate::capabilities::llm::api::Chunk) -> bool,
+    ) -> crate::capabilities::llm::api::Completion {
         use std::sync::atomic::Ordering;
         let n = self.started.fetch_add(1, Ordering::Relaxed);
-        if !on(crate::core::ports::Chunk::Start) {
-            return crate::core::ports::Completion::text("");
+        if !on(crate::capabilities::llm::api::Chunk::Start) {
+            return crate::capabilities::llm::api::Completion::text("");
         }
         // 第一次调用立刻返回（让"已产生的行"真的落下来），之后才阻塞：
         // 这样既能观察"生成中途"的状态，又能靠放行结束。
         if n == 0 {
-            return crate::core::ports::Completion::text("{\"type\":\"say\",\"text\":\"我先说\"}");
+            return crate::capabilities::llm::api::Completion::text(
+                "{\"type\":\"say\",\"text\":\"我先说\"}",
+            );
         }
         // 等放行；但**也要尊重分片回调**——「停止」正是靠 on 返回 false 在调用中途生效的。
         while !self.release.load(Ordering::Relaxed) {
-            if !on(crate::core::ports::Chunk::Text("…".to_string())) {
+            if !on(crate::capabilities::llm::api::Chunk::Text("…".to_string())) {
                 break;
             }
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
-        crate::core::ports::Completion::text("{\"type\":\"agree\",\"text\":\"同意\"}")
+        crate::capabilities::llm::api::Completion::text("{\"type\":\"agree\",\"text\":\"同意\"}")
     }
 }
 
@@ -130,17 +153,17 @@ pub(crate) struct GatedGateway {
 
 /// 记录每次问询收到的消息，再转发给内层通道。
 pub(crate) struct RecordingChat {
-    pub inner: crate::core::ports::BoxedChat,
+    pub inner: crate::capabilities::llm::api::BoxedChat,
     pub seen: std::sync::Arc<std::sync::Mutex<Vec<Vec<String>>>>,
 }
 
-impl crate::core::ports::Chat for RecordingChat {
+impl crate::capabilities::llm::api::Chat for RecordingChat {
     fn complete(
         &mut self,
-        m: &[crate::core::ports::Msg],
-        o: crate::core::ports::CompleteOpts<'_>,
-        on: &mut dyn FnMut(crate::core::ports::Chunk) -> bool,
-    ) -> crate::core::ports::Completion {
+        m: &[crate::capabilities::llm::api::Msg],
+        o: crate::capabilities::llm::api::CompleteOpts<'_>,
+        on: &mut dyn FnMut(crate::capabilities::llm::api::Chunk) -> bool,
+    ) -> crate::capabilities::llm::api::Completion {
         self.seen
             .lock()
             .expect("锁")
@@ -155,18 +178,18 @@ pub(crate) struct RecordingGateway {
     pub seen: std::sync::Arc<std::sync::Mutex<Vec<Vec<String>>>>,
 }
 
-impl crate::core::ports::ChatGateway for RecordingGateway {
+impl crate::capabilities::llm::ports::ChatGateway for RecordingGateway {
     fn probe_tools(
         &self,
-        c: &crate::core::providers::Channel,
-    ) -> Result<crate::core::ports::ProbeOutcome, String> {
+        c: &crate::capabilities::llm::api::Channel,
+    ) -> Result<crate::capabilities::llm::api::ProbeOutcome, String> {
         self.inner.probe_tools(c)
     }
     fn member_channel(
         &self,
-        c: Option<&crate::core::providers::Channel>,
+        c: Option<&crate::capabilities::llm::api::Channel>,
         id: &str,
-    ) -> (crate::core::ports::BoxedChat, Option<String>) {
+    ) -> (crate::capabilities::llm::api::BoxedChat, Option<String>) {
         let (chat, note) = self.inner.member_channel(c, id);
         (
             Box::new(RecordingChat {
@@ -178,24 +201,24 @@ impl crate::core::ports::ChatGateway for RecordingGateway {
     }
     fn core_channel(
         &self,
-        c: Option<&crate::core::providers::Channel>,
-    ) -> (crate::core::ports::BoxedChat, bool) {
+        c: Option<&crate::capabilities::llm::api::Channel>,
+    ) -> (crate::capabilities::llm::api::BoxedChat, bool) {
         self.inner.core_channel(c)
     }
 }
 
-impl crate::core::ports::ChatGateway for GatedGateway {
+impl crate::capabilities::llm::ports::ChatGateway for GatedGateway {
     fn probe_tools(
         &self,
-        _c: &crate::core::providers::Channel,
-    ) -> Result<crate::core::ports::ProbeOutcome, String> {
+        _c: &crate::capabilities::llm::api::Channel,
+    ) -> Result<crate::capabilities::llm::api::ProbeOutcome, String> {
         Err("脚本替身没有真实供应商，测不了工具调用支持".to_string())
     }
     fn member_channel(
         &self,
-        _c: Option<&crate::core::providers::Channel>,
+        _c: Option<&crate::capabilities::llm::api::Channel>,
         _id: &str,
-    ) -> (crate::core::ports::BoxedChat, Option<String>) {
+    ) -> (crate::capabilities::llm::api::BoxedChat, Option<String>) {
         (
             Box::new(GatedChat {
                 started: std::sync::Arc::clone(&self.started),
@@ -206,8 +229,8 @@ impl crate::core::ports::ChatGateway for GatedGateway {
     }
     fn core_channel(
         &self,
-        _c: Option<&crate::core::providers::Channel>,
-    ) -> (crate::core::ports::BoxedChat, bool) {
+        _c: Option<&crate::capabilities::llm::api::Channel>,
+    ) -> (crate::capabilities::llm::api::BoxedChat, bool) {
         (
             Box::new(GatedChat {
                 started: std::sync::Arc::clone(&self.started),
@@ -220,10 +243,10 @@ impl crate::core::ports::ChatGateway for GatedGateway {
 
 /// 装配一个「生成阻塞到放行」的核心（观察"生成期间读接口不排队"）。
 pub(crate) fn gated_ops(
-    modules: Vec<crate::core::module::Module>,
+    modules: Vec<crate::capabilities::workspace::api::Module>,
 ) -> (
-    crate::core::api::CoreHandle,
-    crate::core::api::Ops,
+    crate::capabilities::conductor::api::ConductorHandle,
+    crate::capabilities::conductor::api::Ops,
     std::sync::Arc<std::sync::atomic::AtomicUsize>,
     std::sync::Arc<std::sync::atomic::AtomicBool>,
 ) {
@@ -233,9 +256,11 @@ pub(crate) fn gated_ops(
     };
     let started = std::sync::Arc::clone(&gateway.started);
     let release = std::sync::Arc::clone(&gateway.release);
-    let handle = crate::core::api::CoreHandle::spawn(doubles::core_with_gateway(modules, gateway))
-        .expect("起核心线程");
-    let ops = crate::core::api::Ops::from_handle(&handle);
+    let handle = crate::capabilities::conductor::api::ConductorHandle::spawn(
+        doubles::core_with_gateway(modules, gateway),
+    )
+    .expect("起核心线程");
+    let ops = crate::capabilities::conductor::api::Ops::from_handle(&handle);
     (handle, ops, started, release)
 }
 
@@ -244,18 +269,18 @@ pub(crate) struct SlowGateway {
     pub ticks: std::sync::Arc<std::sync::atomic::AtomicUsize>,
 }
 
-impl crate::core::ports::ChatGateway for SlowGateway {
+impl crate::capabilities::llm::ports::ChatGateway for SlowGateway {
     fn probe_tools(
         &self,
-        _c: &crate::core::providers::Channel,
-    ) -> Result<crate::core::ports::ProbeOutcome, String> {
+        _c: &crate::capabilities::llm::api::Channel,
+    ) -> Result<crate::capabilities::llm::api::ProbeOutcome, String> {
         Err("脚本替身没有真实供应商，测不了工具调用支持".to_string())
     }
     fn member_channel(
         &self,
-        _c: Option<&crate::core::providers::Channel>,
+        _c: Option<&crate::capabilities::llm::api::Channel>,
         _id: &str,
-    ) -> (crate::core::ports::BoxedChat, Option<String>) {
+    ) -> (crate::capabilities::llm::api::BoxedChat, Option<String>) {
         (
             Box::new(SlowChat {
                 ticks: std::sync::Arc::clone(&self.ticks),
@@ -265,8 +290,8 @@ impl crate::core::ports::ChatGateway for SlowGateway {
     }
     fn core_channel(
         &self,
-        _c: Option<&crate::core::providers::Channel>,
-    ) -> (crate::core::ports::BoxedChat, bool) {
+        _c: Option<&crate::capabilities::llm::api::Channel>,
+    ) -> (crate::capabilities::llm::api::BoxedChat, bool) {
         (
             Box::new(SlowChat {
                 ticks: std::sync::Arc::clone(&self.ticks),
@@ -278,18 +303,20 @@ impl crate::core::ports::ChatGateway for SlowGateway {
 
 /// 装配一个「生成会一直跑到被停止」的核心（观察 is_running / stop / 编辑禁令）。
 pub(crate) fn slow_ops(
-    modules: Vec<crate::core::module::Module>,
+    modules: Vec<crate::capabilities::workspace::api::Module>,
 ) -> (
-    crate::core::api::CoreHandle,
-    crate::core::api::Ops,
+    crate::capabilities::conductor::api::ConductorHandle,
+    crate::capabilities::conductor::api::Ops,
     std::sync::Arc<std::sync::atomic::AtomicUsize>,
 ) {
     let gateway = SlowGateway {
         ticks: std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
     };
     let ticks = std::sync::Arc::clone(&gateway.ticks);
-    let handle = crate::core::api::CoreHandle::spawn(doubles::core_with_gateway(modules, gateway))
-        .expect("起核心线程");
-    let ops = crate::core::api::Ops::from_handle(&handle);
+    let handle = crate::capabilities::conductor::api::ConductorHandle::spawn(
+        doubles::core_with_gateway(modules, gateway),
+    )
+    .expect("起核心线程");
+    let ops = crate::capabilities::conductor::api::Ops::from_handle(&handle);
     (handle, ops, ticks)
 }

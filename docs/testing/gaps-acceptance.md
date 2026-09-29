@@ -33,7 +33,11 @@ tests/
   ci-publish.mjs                # CI 报告发布脚本（把三平台报告写入 ci-report 分支）
 ```
 
-单元层的契约测试与替身**同处 `src/tests/`**（契约：`ports.rs` / `fakes.rs` / `adapters.rs` / `api.rs` / `intent.rs` / `routes.rs`；替身：`doubles.rs`；T1 用例：`core.rs`）。
+单元层与 `capabilities/` **同构**：T1 用例按业务分文件——`taskchain.rs` / `prompt.rs` / `registry.rs` /
+`llm.rs` / `workspace.rs` / `session.rs` / `slate.rs`，加**协调业务**自己的 `conductor.rs`；用例多的能力按域分目录（`tools/` 与 `collab/` 各四个子模块）
+（会话中心与跨能力编排）；契约测试 `ports.rs` / `fakes.rs` / `detail.rs` / `api.rs` / `cli.rs` / `routes.rs`；
+共享支撑 `doubles.rs`（端口替身）/ `builders.rs`（测试装配脚手架）/ `prelude.rs`（公共前置重导出）。
+**判据**：用例落到"它钉住的那个不变式"所属的文件；顺手经过别的能力只是路径，不是归属。
 
 四个平台目标在 `Cargo.toml` 中显式登记。新增测试目标、Fixture 或脚本必须能从入口追溯到执行位置，否则属于结构质量问题。
 
@@ -50,7 +54,7 @@ tests/
 
 ### 全局缺口
 
-`tests/gaps.yaml` 记录 T0、T2、T5 和测试基础设施的跨平台缺口、**长期目标**（存量收敛、目录迁移），
+`tests/gaps.yaml` 记录 T0、T2、T5 和测试基础设施的跨平台缺口、**长期目标**（存量收敛），
 以及**已确认但尚未实施的产品/机制缺口**（例如虚拟机档的 guest 本体）。
 **条目要能判定**：写清现状、怎么补、验收标准与为什么还没做；只有"大方向已定但推迟"也要把方向和推迟理由写进去，
 否则它只是一句没有验收路径的待办。
@@ -59,6 +63,11 @@ tests/
 ### 平台缺口
 
 `tests/<platform>/gaps.yaml` 只记录平台机制或平台专属验收缺口。条目存在表示当前未完成，不得留下"已完成"的残条。
+
+### 业务缺口
+
+`src/<单元>/testgaps.yaml` 是**每个业务/机制单元一份**的缺口账：业务 AI 只记不写测试，测试 AI 实现测试后销账。
+它用同一份六键格式（下面「缺口格式」），由 `node run-tests.js` 一起校验；条目存在 = 尚未完成，补齐即删。
 
 ### 缺口格式
 
@@ -107,6 +116,6 @@ tests/
 
 未能回答的问题不是"以后再说"，而是测试设计或观察面仍不完整，应进入缺口账。
 
-**需要 CI 才算验收的场景**（其余按 [execution-ci.md](execution-ci.md) 的 CI 表）：改了平台专属代码（`adapters/confine/` 或 `tests/<平台>/`）、
+**需要 CI 才算验收的场景**（其余按 [execution-ci.md](execution-ci.md) 的 CI 表）：改了平台专属代码（`capabilities/tools/detail/confine/` 或 `tests/<平台>/`）、
 改了平台围栏机制、改了 HTTPS/TLS 链路、改了只在其它平台编译的 `#[cfg]` 分支，
 或改了 T0 六项检查本身——这些本地跑不出结论，必须等 CI 并比对 `sha`。

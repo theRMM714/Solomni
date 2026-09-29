@@ -1,18 +1,20 @@
-//! 入站契约（`core::api`）的契约测试：命令/事件模型、能力分面、停止语义、panic 隔离。
+//! 入站契约（`conductor::api`）的契约测试：命令/事件模型、能力分面、停止语义、panic 隔离。
 //! 这一层不碰 HTTP；HTTP 侧（路由目录与逐路由契约）另见本目录的 routes。
 
 use super::doubles::{collab_work, module_of};
 use super::{gated_ops, ops_with, single_work, slow_ops};
-use crate::core::api::{CoreHandle, Ops, Output};
-use crate::core::exec::Tier;
-use crate::core::module::Module;
-use crate::core::{SessionEvent, WorkMode};
+use crate::capabilities::conductor::api::{
+    Acted, Action, AgentInstance, SessionEdit, SessionEvent, WorkMode, WorkSpec,
+};
+use crate::capabilities::conductor::api::{ConductorHandle, Ops, Output};
+use crate::capabilities::workspace::api::Module;
+use crate::kernel::api::Tier;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 /// 用内存装配起一个核心手柄（核心从此有自己的线程、自己的状态）。
-fn spawn(modules: Vec<Module>, core_script: Vec<&str>) -> CoreHandle {
+fn spawn(modules: Vec<Module>, core_script: Vec<&str>) -> ConductorHandle {
     ops_with(modules, core_script).0
 }
 
@@ -37,9 +39,9 @@ fn commands_run_on_the_core_thread_and_changes_are_visible() {
         providers.len()
     );
 
-    assert_eq!(ops.discovery.roster().expect("清单").modules.len(), 1);
+    assert_eq!(ops.workspace.roster().expect("清单").modules.len(), 1);
     assert!(ops
-        .discovery
+        .core
         .runtime_report(Tier::Host)
         .expect("能力报告")
         .diagnoses
@@ -73,7 +75,7 @@ fn generation_pushes_facts_to_the_event_bus_with_sequence_numbers() {
     // 命令回包只给**事件台头部序号**：事实只有一条来路，不再随回包返回。
     assert!(adv.head > base, "回包给的是事件台头部序号");
     let (lines, head, _oldest) = bus.snapshot(Some(&opened.sid), base);
-    // 逐轮外送：事件按"一轮一批"进台，所以这里是多批（以前是整回合一批）。
+    // 逐轮外送：事件按"一轮一批"进台，所以这里是多批（不攒到整回合结束）。
     assert!(!lines.is_empty(), "生成期间就该有事件进台");
     assert_eq!(head, adv.head, "回包头部 = 事件台头部");
     assert_eq!(
@@ -98,18 +100,19 @@ fn suggest_models_pushes_on_a_system_session_and_leaves_no_trace() {
     let handle = spawn(
         vec![module_of("a")],
         vec![
-            "{\"type\":\"tool\",\"name\":\"suggest\",\"args\":{\"agents\":[{\"name\":\"甲\",\"modules\":[\"a\"],\"model\":\"m\",\"why\":\"对口\"}]}}",
+            "{\"type\":\"tool\",\"name\":\"slate\",\"args\":{\"picks\":[{\"name\":\"甲\",\"modules\":[\"a\"],\"model\":\"m\",\"why\":\"对口\"}]}}",
         ],
     );
     let ops = Ops::from_handle(&handle);
     let agents = ops
-        .discovery
+        .core
         .suggest_models("做个东西", WorkMode::Collab)
         .expect("核心推荐");
     assert_eq!(agents.len(), 1, "回包只给名单（渲染那一步的契约不变）");
-    let (batches, _head, _oldest) = handle
-        .events()
-        .snapshot(Some(crate::core::SYSTEM_SID_SUGGEST), 0);
+    let (batches, _head, _oldest) = handle.events().snapshot(
+        Some(crate::capabilities::conductor::service::SYSTEM_SID_SUGGEST),
+        0,
+    );
     assert!(
         !batches.is_empty(),
         "核心这一趟的行必须推出来（系统会话也是推的落脚点）"
@@ -120,17 +123,17 @@ fn suggest_models_pushes_on_a_system_session_and_leaves_no_trace() {
         "系统会话只推不留：推荐没有工作区，不该落盘"
     );
     assert!(
-        !ops.history
+        !ops.sessions
             .session_views(&[])
             .expect("会话视图")
             .iter()
-            .any(|v| v.sid == crate::core::SYSTEM_SID_SUGGEST),
+            .any(|v| v.sid == crate::capabilities::conductor::service::SYSTEM_SID_SUGGEST),
         "系统会话不进会话列表（前端因此不会为它建标签页）"
     );
 }
 
 /// 历史与实时**合流**：盘上转录 + 事件台上"它之外"的尾巴，逐条互补（不重不漏）。
-/// 前端因此只按序 append；从前它自己合并两个来源，刷新后整段重复就是在那里出的。
+/// 前端因此只按序 append：两个来源的合流只在一处做，刷新后不会整段重复。
 #[test]
 fn history_merge_is_the_transcript_plus_the_bus_tail_without_repeats() {
     let handle = spawn(
@@ -224,7 +227,7 @@ fn stop_takes_effect_while_generation_is_still_running() {
     );
 }
 
-/// 生成期间，**只读命令不再排队**：以前生成占着唯一的命令队列，读接口（历史列表 / 会话视图）
+/// 生成期间，**只读命令不再排队**：生成不占用命令队列，读接口（历史列表 / 会话视图）
 /// 会一直等到生成结束——界面因此"假死"。现在生成在工作线程上，队列只占"取/交"两步。
 #[test]
 fn reads_are_not_queued_behind_a_long_generation() {
@@ -252,7 +255,7 @@ fn reads_are_not_queued_behind_a_long_generation() {
     let read = t0.elapsed();
     let t1 = Instant::now();
     let views = ops
-        .history
+        .sessions
         .session_views(&history)
         .expect("生成期间读会话视图");
     let view = t1.elapsed();
@@ -297,7 +300,11 @@ fn reads_are_not_queued_behind_a_collab_discussion() {
         let sessions = Arc::clone(&ops.sessions);
         let sid = sid.clone();
         std::thread::spawn(move || {
-            sessions.collab_step(&sid, crate::core::CollabStep::Begin, "yes")
+            sessions.collab_step(
+                &sid,
+                crate::capabilities::conductor::api::CollabStep::Begin,
+                "yes",
+            )
         })
     };
     // 等讨论真的开始（通道已被调用并卡在那里）。
@@ -312,7 +319,7 @@ fn reads_are_not_queued_behind_a_collab_discussion() {
     let read = t0.elapsed();
     let t1 = Instant::now();
     let _ = ops
-        .history
+        .sessions
         .session_views(&history)
         .expect("讨论期间读会话视图");
     let view = t1.elapsed();
@@ -350,7 +357,11 @@ fn stopping_a_collab_discussion_is_prompt_and_keeps_the_session() {
         let sessions = Arc::clone(&ops.sessions);
         let sid = sid.clone();
         std::thread::spawn(move || {
-            sessions.collab_step(&sid, crate::core::CollabStep::Begin, "yes")
+            sessions.collab_step(
+                &sid,
+                crate::capabilities::conductor::api::CollabStep::Begin,
+                "yes",
+            )
         })
     };
     let deadline = Instant::now() + Duration::from_secs(5);
@@ -433,7 +444,7 @@ fn stopping_a_collab_discussion_is_prompt_and_keeps_the_session() {
     );
 }
 
-/// 协作生成**中途**就已经落盘：中途刷新页面能看到已产生的部分（以前整段跑完才落一次）。
+/// 协作生成**中途**就已经落盘：中途刷新页面能看到已产生的部分（按轮增量落盘）。
 #[test]
 fn collab_transcript_lands_on_disk_while_the_discussion_runs() {
     let (_handle, ops, started, release) = gated_ops(vec![module_of("a"), module_of("b")]);
@@ -447,7 +458,11 @@ fn collab_transcript_lands_on_disk_while_the_discussion_runs() {
         let sessions = Arc::clone(&ops.sessions);
         let sid = sid.clone();
         std::thread::spawn(move || {
-            sessions.collab_step(&sid, crate::core::CollabStep::Begin, "yes")
+            sessions.collab_step(
+                &sid,
+                crate::capabilities::conductor::api::CollabStep::Begin,
+                "yes",
+            )
         })
     };
     // 等第二个成员卡在调用里：此时第一个成员的发言已经定稿。
@@ -460,7 +475,7 @@ fn collab_transcript_lands_on_disk_while_the_discussion_runs() {
         ops.sessions.is_running(&sid),
         "讨论必须仍在进行，这条断言才有意义"
     );
-    // 生成**还在跑**：盘上已经该有定稿的行（以前是整段跑完才落一次）。
+    // 生成**还在跑**：盘上已经该有定稿的行（按轮增量落盘）。
     let (_, events) = ops.history.open(&sid).expect("中途读转录");
     assert!(
         !events.is_empty(),
@@ -471,7 +486,7 @@ fn collab_transcript_lands_on_disk_while_the_discussion_runs() {
     let _ = worker.join().expect("协作线程");
 }
 
-/// 协作逐成员外送：一个成员说完，它那一行**立刻**进事件台（以前整轮问完才一次性出）。
+/// 协作逐成员外送：一个成员说完，它那一行**立刻**进事件台（不攒到整轮结束）。
 #[test]
 fn collab_discussion_emits_each_member_line_as_it_speaks() {
     let (handle, ops, started, release) = gated_ops(vec![module_of("a"), module_of("b")]);
@@ -485,7 +500,11 @@ fn collab_discussion_emits_each_member_line_as_it_speaks() {
         let sessions = Arc::clone(&ops.sessions);
         let sid = sid.clone();
         std::thread::spawn(move || {
-            sessions.collab_step(&sid, crate::core::CollabStep::Begin, "yes")
+            sessions.collab_step(
+                &sid,
+                crate::capabilities::conductor::api::CollabStep::Begin,
+                "yes",
+            )
         })
     };
     // 等第二个成员卡住：说明第一个成员已经说完，但**整轮还没结束**。
@@ -554,7 +573,7 @@ fn a_panicking_command_does_not_take_the_core_down() {
     );
     // 核心仍然活着并且能继续服务（这才是接住 panic 的意义）。
     assert!(ops.registry.settings().is_ok(), "panic 之后必须还能服务");
-    assert!(ops.discovery.roster().is_ok());
+    assert!(ops.workspace.roster().is_ok());
 }
 
 /// 压缩：发送视图变成「摘要 + 之后的内容」（转录完整）；压两次只有**一份**摘要（滚动）。
@@ -570,18 +589,18 @@ fn compacting_replaces_the_send_view_with_one_rolling_summary() {
                 .to_string(),
             "{\"type\":\"tool\",\"name\":\"compact\",\"args\":{\"summary\":\"摘要二\"}}"
                 .to_string(),
+            "收尾".to_string(),
         ],
     );
     let gateway = super::RecordingGateway {
         inner: super::doubles::ScriptGateway::new(member, vec![]),
         seen: Arc::clone(&seen),
     };
-    let handle = crate::core::api::CoreHandle::spawn(super::doubles::core_with_gateway(
-        vec![module_of("a")],
-        gateway,
-    ))
+    let handle = crate::capabilities::conductor::api::ConductorHandle::spawn(
+        super::doubles::core_with_gateway(vec![module_of("a")], gateway),
+    )
     .expect("起核心线程");
-    let ops = crate::core::api::Ops::from_handle(&handle);
+    let ops = crate::capabilities::conductor::api::Ops::from_handle(&handle);
     let sid = ops
         .sessions
         .create_work(single_work("w", &["a"]))
@@ -589,7 +608,11 @@ fn compacting_replaces_the_send_view_with_one_rolling_summary() {
         .0
         .sid;
     ops.sessions
-        .say(&sid, "先做第一件事", crate::core::api::Output::Final)
+        .say(
+            &sid,
+            "先做第一件事",
+            crate::capabilities::conductor::api::Output::Final,
+        )
         .expect("说一句");
 
     let first = ops.sessions.compact(&sid).expect("第一次压缩");
@@ -621,6 +644,25 @@ fn compacting_replaces_the_send_view_with_one_rolling_summary() {
         !last.iter().any(|c| c.contains("第一件事")),
         "原始内容该已移出发送视图：{last:?}"
     );
+
+    // 再走一轮：发送视图里**只剩一份摘要**（第二次那份），上一份已被取代。
+    ops.sessions
+        .say(
+            &sid,
+            "继续",
+            crate::capabilities::conductor::api::Output::Final,
+        )
+        .expect("压完再走一轮");
+    let after = seen.lock().expect("锁").clone();
+    let last = after.last().expect("至少问过一次").clone();
+    assert!(
+        last.iter().any(|c| c.contains("摘要二")),
+        "第二次压缩后的发送视图该是第二份摘要：{last:?}"
+    );
+    assert!(
+        !last.iter().any(|c| c.contains("摘要一")),
+        "上一份摘要该已被取代（同一时刻只有一份）：{last:?}"
+    );
 }
 
 /// 到点自动压一次：历史超过预算时，**这一轮开始前**先压（发送视图里出现摘要）。
@@ -642,12 +684,11 @@ fn auto_compaction_kicks_in_when_the_history_exceeds_the_budget() {
         inner: super::doubles::ScriptGateway::new(member, vec![]),
         seen: Arc::clone(&seen),
     };
-    let handle = crate::core::api::CoreHandle::spawn(super::doubles::core_with_gateway(
-        vec![module_of("a")],
-        gateway,
-    ))
+    let handle = crate::capabilities::conductor::api::ConductorHandle::spawn(
+        super::doubles::core_with_gateway(vec![module_of("a")], gateway),
+    )
     .expect("起核心线程");
-    let ops = crate::core::api::Ops::from_handle(&handle);
+    let ops = crate::capabilities::conductor::api::Ops::from_handle(&handle);
     // 阈值调到 1%：预算 = 32000 × 1% × 4 ≈ 1280 字符，上面那条长回复会超。
     let mut st = ops.registry.settings().expect("读设置");
     st.compact_at_percent = 1;
@@ -659,10 +700,18 @@ fn auto_compaction_kicks_in_when_the_history_exceeds_the_budget() {
         .0
         .sid;
     ops.sessions
-        .say(&sid, "先做第一件事", crate::core::api::Output::Final)
+        .say(
+            &sid,
+            "先做第一件事",
+            crate::capabilities::conductor::api::Output::Final,
+        )
         .expect("第一轮");
     ops.sessions
-        .say(&sid, "接着做", crate::core::api::Output::Final)
+        .say(
+            &sid,
+            "接着做",
+            crate::capabilities::conductor::api::Output::Final,
+        )
         .expect("第二轮（开头该自动压一次）");
 
     let all = seen.lock().expect("锁").clone();
@@ -670,5 +719,277 @@ fn auto_compaction_kicks_in_when_the_history_exceeds_the_budget() {
         all.iter()
             .any(|msgs| msgs.iter().any(|c| c.contains("自动摘要"))),
         "超过预算时该自动压一次（发送视图里出现摘要）：{all:?}"
+    );
+
+    let last = all.last().expect("至少问过一次").clone();
+    assert!(
+        last.iter().any(|c| c.contains("自动摘要")),
+        "压缩后的发送视图该带上摘要：{last:?}"
+    );
+    assert!(
+        !last.iter().any(|c| c.contains(&long)),
+        "被总结掉的内容该移出发送视图（不是只加摘要）：{last:?}"
+    );
+}
+/// 压缩能扛住重启：按落盘转录重建时，发送视图仍是「一份摘要 + 之后的行」。
+/// 回档跨越压缩点（`Conductor::rewind` 命中分流）→ 回到压缩前。
+#[test]
+fn compaction_survives_a_restart_and_rewinds_back_through_the_point() {
+    let mut core = super::doubles::core_with(
+        vec![module_of("a")],
+        super::doubles::gw(std::collections::BTreeMap::new(), Vec::new()),
+    );
+    let sid = core
+        .create_work(single_work("w", &["a"]))
+        .expect("建会话")
+        .sid;
+    // 与**真实流水**对齐起号：建会话时已经种了一条系统提示词行，不能重号。
+    let (_, existing) = core.history_open(&sid).expect("读流水");
+    let next = existing
+        .iter()
+        .filter(|e| e.get("type").and_then(|t| t.as_str()) == Some("transcript"))
+        .filter_map(|e| e.get("lines").and_then(|l| l.as_array()))
+        .flatten()
+        .filter_map(|l| l.get("id").and_then(|i| i.as_u64()))
+        .max()
+        .map(|m| m + 1)
+        .unwrap_or(0);
+    let line = |id: u64, kind: &str, text: &str| serde_json::json!({"id": id, "reply": id, "line": text, "kind": kind, "speaker": "", "verb": "", "turn": 0});
+    // 两份行 + 一次压缩（覆盖到 next+2）+ 之后的一行：模拟「压过之后再重启」的落盘历史。
+    for (id, kind, text) in [
+        (next, "user", "第一句话"),
+        (next + 1, "assistant", "第一句的回复"),
+    ] {
+        core.history_append(
+            &sid,
+            &[serde_json::json!({"type": "transcript", "lines": [line(id, kind, text)]})],
+        )
+        .expect("落行");
+    }
+    core.history_append(
+        &sid,
+        &[serde_json::json!({"type": "compacted", "up_to": next + 2, "summary": "前两句的摘要"})],
+    )
+    .expect("落压缩事件");
+    core.history_append(
+        &sid,
+        &[serde_json::json!({"type": "transcript", "lines": [line(next + 2, "user", "之后的新内容")]})],
+    )
+    .expect("落之后的新行");
+    let shown = |msgs: &[crate::capabilities::llm::api::Msg]| {
+        msgs.iter()
+            .map(|m| format!("{}:{}", m.role, m.content))
+            .collect::<Vec<_>>()
+    };
+
+    // ① 重建（重启：会话不在内存里 → 按落盘转录重建）：摘要替代被压的行，之后的行照常。
+    // `prepare_single` 把会话交给工作线程，重建出来的对象就在它返回的这一轮里。
+    let live = core.take_single(&sid).expect("会话在表里");
+    drop(live);
+    core.abort_running(&sid);
+    let rebuilt = match core.prepare_single(&sid, None, false) {
+        Ok(crate::capabilities::conductor::service::Prepared::Run { session, .. }) => session,
+        Ok(_) => panic!("重建后该是可直接跑的一轮"),
+        Err(e) => panic!("重建失败：{e}"),
+    };
+    assert_eq!(
+        shown(rebuilt.dialogue()),
+        vec![
+            "user:[此前内容摘要]\n前两句的摘要".to_string(),
+            "user:之后的新内容".to_string(),
+        ],
+        "重建后的发送视图该是「摘要 + 之后的行」，被压掉的内容不回来"
+    );
+    assert_eq!(
+        rebuilt.compacted_upto(),
+        next + 2,
+        "重建也要恢复压缩点（回档分流靠它）"
+    );
+    drop(rebuilt);
+    core.abort_running(&sid);
+
+    // ② 回档跨越压缩点：会话在表里且压缩点 > 目标 → `rewind` 走重建，摘要不再生效。
+    core.ensure_session(&sid).expect("把重建结果装回表里");
+    core.rewind(&sid, next).expect("回档到压缩点之前");
+    let back = core.take_single(&sid).expect("取回回档后的会话");
+    let shown_back = shown(back.dialogue());
+    assert!(
+        !shown_back.iter().any(|c| c.contains("此前内容摘要")),
+        "回档到压缩点之前：摘要该消失（内容回到压缩前）：{shown_back:?}"
+    );
+    assert_eq!(back.compacted_upto(), 0, "压缩点该一起回退掉");
+}
+
+// ---------- 从「共享意图层」搬来的规则测试（规则跟着归属走） ----------
+
+#[test]
+fn pick_agents_names_the_unknown_and_lists_the_rest() {
+    let (_h, ops) = ops_with(vec![module_of("a")], Vec::new());
+    ops.registry
+        .upsert_agent("甲", &["a".to_string()], "", "")
+        .expect("建 agent");
+    let picked = ops.registry.pick_agents(&["甲".to_string()]).expect("点名");
+    assert_eq!(picked.len(), 1);
+    assert_eq!(picked[0].name, "甲");
+    let err = ops.registry.pick_agents(&["乙".to_string()]).unwrap_err();
+    assert!(
+        err.contains("无此 agent：乙") && err.contains("甲"),
+        "{err}"
+    );
+    assert!(ops.registry.pick_agents(&[]).is_err(), "没点名 = 报错");
+    let views = ops.registry.agents().expect("读登记处");
+    assert_eq!(
+        views.iter().map(AgentInstance::from_view).count(),
+        1,
+        "视图 → 实例不丢项"
+    );
+}
+
+#[test]
+fn unique_work_name_falls_back_and_appends_a_suffix() {
+    let (_h, ops) = ops_with(vec![module_of("a")], Vec::new());
+    assert_eq!(
+        ops.sessions.unique_work_name("", "single").expect("缺省名"),
+        "single"
+    );
+    assert_eq!(
+        ops.sessions
+            .unique_work_name("  取名  ", "single")
+            .expect("去空白"),
+        "取名"
+    );
+    ops.sessions
+        .create_work(single_work("w", &["a"]))
+        .expect("建会话");
+    assert_eq!(
+        ops.sessions.unique_work_name("w", "x").expect("重名加尾号"),
+        "w-2"
+    );
+    ops.sessions
+        .create_work(single_work("w-2", &["a"]))
+        .expect("建会话");
+    assert_eq!(
+        ops.sessions.unique_work_name("w", "x").expect("再重名"),
+        "w-3"
+    );
+}
+
+#[test]
+fn single_mode_merges_multiple_agents_into_one_transient() {
+    let (_h, ops) = ops_with(vec![module_of("a"), module_of("b")], Vec::new());
+    ops.registry
+        .upsert_agent("甲", &["a".to_string(), "b".to_string()], "", "")
+        .expect("建 agent");
+    ops.registry
+        .upsert_agent("乙", &["b".to_string()], "", "")
+        .expect("建 agent");
+    let picked: Vec<AgentInstance> = ops
+        .registry
+        .agents()
+        .expect("读登记处")
+        .iter()
+        .map(AgentInstance::from_view)
+        .collect();
+    let (opened, _) = ops
+        .sessions
+        .create_work(WorkSpec {
+            name: "组合".to_string(),
+            mode: WorkMode::Single,
+            agents: picked,
+            task: None,
+            delegate: false,
+        })
+        .expect("建工作");
+    assert_eq!(
+        opened.agents,
+        vec!["组合".to_string()],
+        "多个点名并成一个临时组合"
+    );
+    let (meta, _) = ops.history.open("组合").expect("读 meta");
+    let mut modules = meta.agents[0].modules.clone();
+    modules.sort();
+    assert_eq!(
+        modules,
+        vec!["a".to_string(), "b".to_string()],
+        "模块去重（顺序随登记处遍历序，不额外断言）"
+    );
+    assert!(meta.agents[0].transient, "并出来的「组合」是临时 agent");
+}
+
+#[test]
+fn editing_is_refused_while_a_session_is_generating() {
+    let (_h, ops, _ticks) = slow_ops(vec![module_of("a")]);
+    let sid = ops
+        .sessions
+        .create_work(single_work("w", &["a"]))
+        .expect("建会话")
+        .0
+        .sid;
+    // 编辑体照抄当前配置（空名单会被"至少要有一个 agent"挡掉，那是另一条规则）。
+    let cfg = ops.sessions.config(&sid).expect("读配置");
+    let edit = || SessionEdit {
+        agents: cfg.agents.clone(),
+        tier: "host".to_string(),
+        base: None,
+        pins: std::collections::BTreeMap::new(),
+        net: false,
+    };
+    ops.sessions.edit(&sid, edit()).expect("没在生成时可以改");
+
+    let worker = {
+        let sessions = Arc::clone(&ops.sessions);
+        let sid = sid.clone();
+        std::thread::spawn(move || sessions.say(&sid, "慢慢来", Output::Stream))
+    };
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !ops.sessions.is_running(&sid) {
+        assert!(Instant::now() < deadline, "生成没有启动");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let err = ops.sessions.edit(&sid, edit()).unwrap_err();
+    assert!(err.contains("正在生成中"), "生成中必须拒绝改配置：{err}");
+
+    assert!(ops.sessions.stop(&sid), "停掉它");
+    let _ = worker.join();
+    ops.sessions.edit(&sid, edit()).expect("收尾后可以改");
+    assert!(
+        ops.sessions.edit("没这个会话", edit()).is_err(),
+        "无此会话要如实报错"
+    );
+}
+
+#[test]
+fn act_dispatches_to_the_two_result_shapes() {
+    let (_h, ops) = ops_with(vec![module_of("a")], Vec::new());
+    let sid = ops
+        .sessions
+        .create_work(single_work("w", &["a"]))
+        .expect("建会话")
+        .0
+        .sid;
+
+    match ops
+        .sessions
+        .act(&sid, Action::Say("你好"), Output::Final)
+        .expect("说一句")
+    {
+        Acted::Advanced(adv) => assert!(adv.head > 0, "生成类只回事件台头部序号"),
+        Acted::Replayed(_) => panic!("说一句不该给重放"),
+    }
+    match ops
+        .sessions
+        .act(&sid, Action::Rewind(0), Output::Final)
+        .expect("回档")
+    {
+        Acted::Replayed(events) => {
+            assert!(events.iter().all(|e| e.is_object()), "重放是线格式事件数组")
+        }
+        Acted::Advanced(_) => panic!("回档不该给事件批"),
+    }
+    assert!(
+        ops.sessions
+            .act("没这个会话", Action::Say("x"), Output::Final)
+            .is_err(),
+        "无此会话如实报错"
     );
 }

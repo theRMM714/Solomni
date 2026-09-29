@@ -1,22 +1,26 @@
-//! 端口替身契约（docs/testing/port-matrix.md 的逐端口验收）。
+//! 端口替身契约（docs/testing/doubles.md 的逐端口验收）。
 //! 每个端口都验同一组语义：成功、失败传播、空/边界、交互记录、重复调用；
 //! 真实适配器的对应边界在 adapters.rs，进程与 HTTP 的真实路径在 tests/cross-platform/。
 //! 替身统一复用 super::doubles 的 `InMemory*` / `Fake*` / `Recording*`——契约测试不另造一份。
 
-use super::core::{RecordingRunner, SilentRunner};
+use super::builders::{RecordingRunner, SilentRunner};
 use super::doubles::{
     abs, module_of, FakeCatalog, InMemoryHistory, InMemoryPackages, InMemorySettings,
     InMemorySysIo, InMemoryWorkspace, NoFenceHost, RecordingFence, ScriptGateway, SharedScript,
     TestPrompts, VecSource,
 };
-use crate::core::exec::ExecSpec;
-use crate::core::fence::FenceSpec;
-use crate::core::history::{AgentMeta, SessionMeta};
-use crate::core::ports::{
-    Chat, ChatGateway, CompleteOpts, FenceHost, HistoryStore, Log, ModelCatalog, ModuleSource, Msg,
-    NoopLog, PackageSource, PromptSource, SettingsStore, SysIo, ToolRunner, Workspace,
-};
-use crate::core::providers::{Provider, Settings};
+use crate::capabilities::llm::api::{Chat, CompleteOpts, Msg};
+use crate::capabilities::llm::ports::{ChatGateway, ModelCatalog};
+use crate::capabilities::prompt::ports::PromptSource;
+use crate::capabilities::registry::api::{Provider, Settings};
+use crate::capabilities::registry::ports::SettingsStore;
+use crate::capabilities::session::api::{AgentMeta, SessionMeta};
+use crate::capabilities::session::ports::HistoryStore;
+use crate::capabilities::tools::api::FenceSpec;
+use crate::capabilities::tools::ports::{FenceHost, SysIo, ToolRunner};
+use crate::capabilities::workspace::api::ExecSpec;
+use crate::capabilities::workspace::ports::{ModuleSource, PackageSource, Workdirs};
+use crate::kernel::ports::{Log, NoopLog};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -171,9 +175,12 @@ fn settings_store_double_roundtrips_and_propagates_failure() {
 fn model_catalog_double_lists_records_and_propagates_failure() {
     let c = FakeCatalog::new(vec!["m1".to_string(), "m2".to_string()]);
     let p = provider();
-    assert_eq!(c.list_models(&p).unwrap(), vec!["m1", "m2"]);
     assert_eq!(
-        c.list_models(&p).unwrap(),
+        c.list_models(&p.base_url, &p.api_key).unwrap(),
+        vec!["m1", "m2"]
+    );
+    assert_eq!(
+        c.list_models(&p.base_url, &p.api_key).unwrap(),
         vec!["m1", "m2"],
         "重复调用结果稳定"
     );
@@ -182,16 +189,19 @@ fn model_catalog_double_lists_records_and_propagates_failure() {
         2,
         "每次调用都要记录收到的通道"
     );
-    assert_eq!(c.seen.lock().expect("锁")[0].base_url, "http://test");
+    assert_eq!(c.seen.lock().expect("锁")[0], "http://test");
     assert!(
         FakeCatalog::new(Vec::new())
-            .list_models(&p)
+            .list_models(&p.base_url, &p.api_key)
             .unwrap()
             .is_empty(),
         "空结果不是错误"
     );
     let bad = FakeCatalog::new(vec!["m1".to_string()]).fail_with("发现失败");
-    assert_eq!(bad.list_models(&p).unwrap_err(), "发现失败");
+    assert_eq!(
+        bad.list_models(&p.base_url, &p.api_key).unwrap_err(),
+        "发现失败"
+    );
     assert!(
         bad.seen.lock().expect("锁").is_empty(),
         "失败路径不该留下'已发现'的假记录"
@@ -426,4 +436,48 @@ fn noop_log_is_silent_and_shareable_across_threads() {
     handle
         .join()
         .expect("跨线程可用（核心与 Web 泵线程共用同一个日志端口）");
+}
+
+// ---------- HostProbe ----------
+
+/// 真实适配器：路径事实按真实文件系统回答（scratch 里真建一个目录与一个文件）。
+#[test]
+fn host_probe_adapter_reports_real_path_facts_and_absent_exes() {
+    use crate::kernel::ports::HostProbe;
+    let real = crate::kernel::detail::HostProbeAdapter;
+    let dir = crate::tests::scratch("host-probe");
+    let file = dir.join("a.txt");
+    std::fs::write(&file, b"x").unwrap();
+    assert!(real.is_dir(&dir), "真目录要认得");
+    assert!(real.is_file(&file), "真文件要认得");
+    assert!(!real.is_file(&dir), "目录不是文件");
+    assert!(!real.is_dir(&file), "文件不是目录");
+    assert!(!real.is_file(&dir.join("nope")), "不存在的路径一律不算");
+    assert!(
+        !real.has_exe("definitely-not-an-exe-solomni"),
+        "PATH 上没有的可执行文件要如实说没有"
+    );
+}
+
+/// 替身：**只按给定答案回答**，不读真实环境（用例要确定性）。
+#[test]
+fn fixed_probe_answers_only_what_was_declared() {
+    use crate::kernel::ports::HostProbe;
+    use crate::tests::doubles::FixedProbe;
+    let dir = std::path::PathBuf::from("some-dir");
+    let file = std::path::PathBuf::from("some-file");
+    let p = FixedProbe {
+        files: vec![file.clone()],
+        dirs: vec![dir.clone()],
+        exes: vec!["qemu-system-x86_64".to_string()],
+        hypervisor: true,
+    };
+    assert!(p.is_dir(&dir) && !p.is_dir(&file), "声明之外的目录一律不算");
+    assert!(
+        p.is_file(&file) && !p.is_file(&dir),
+        "声明之外的文件一律不算"
+    );
+    assert!(p.has_exe("qemu-system-x86_64") && !p.has_exe("other"));
+    assert!(p.hypervisor_available(), "虚拟化按声明回答");
+    assert!(!FixedProbe::default().hypervisor_available(), "缺省一律否");
 }

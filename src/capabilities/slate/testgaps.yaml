@@ -1,0 +1,3 @@
+# slate 的业务缺口账。
+# 业务 AI 只记缺口、不写测试；测试 AI 负责实现测试并销账，补齐后删除条目，不保留完成历史。
+# 格式与判据见 docs/testing/gaps-acceptance.md §十二（id / scope / level / why / how / accept / blocked_by）。

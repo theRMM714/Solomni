@@ -60,9 +60,11 @@ http.createServer((req, res) => {
         { id: 'call_a', type: 'function', function: { name: 'write', arguments: JSON.stringify({ path: a, content: '第一个' }) } },
         { id: 'call_b', type: 'function', function: { name: 'write', arguments: JSON.stringify({ path: b, content: '第二个' }) } },
       ];
-    } else if (user.includes('== 编排模式 ==')) {
-      content = env('suggest', { agents: [{ agent: '双子', why: '它正合适' }] });
-    } else if (user.includes('== 已存 agent') && user.includes('== 需求 ==')) {
+    } else if (user.includes('单 agent（')) {
+      // 一次性推荐（单 agent 模式）与代拟共用 `slate` 协议；两者只差编排模式那一段。
+      content = env('slate', { picks: [{ agent: '双子', why: '它正合适' }] });
+    } else if (user.includes('协作（若干')) {
+      // 代拟（协作模式）：复用项 + 组装项各一条。
       content = env('slate', {
         picks: [
           { agent: '单兵', why: '单人够用' },

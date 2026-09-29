@@ -150,21 +150,13 @@ tools:
 
   slate:
     capability: none
-    desc: 交出这次协作的发言名单（代拟）。
+    desc: 交出这次工作的 agent 名单（推荐 / 代拟同一条协议）。
     params:
       picks:
         type: array
         required: true
         desc: 名单数组，每项要么 {"agent":"已存agent名","why":...}，要么 {"name","modules","model","why"}；模块与模型必须从清单里选。
 
-  suggest:
-    capability: none
-    desc: 交出为这次工作推荐的 agent 名单。
-    params:
-      agents:
-        type: array
-        required: true
-        desc: 与 slate 同形（每项复用已存 agent 或组装新的）；按编排模式的约束组织。
   submit_report:
     capability: none              # 不碰文件：承载"这个节点做完了什么"
     desc: 回报这个节点的产出：做完了什么、动了什么、还留什么问题。**收尾时用它**——它就是这一轮的最终答复。

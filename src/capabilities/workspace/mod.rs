@@ -1,0 +1,10 @@
+//! 工作区能力：模块清单、运行包库、执行档位与沙箱寻址。
+//!
+//! 它回答两个问题：**这次能跑什么**（模块声明的能力 + 依赖文件夹里的运行包）与
+//! **能碰到哪儿**（work 共享区与各 agent 私有沙箱）。目录布局与扫描机制在适配层。
+
+pub mod api;
+pub mod detail;
+pub mod domain;
+pub mod ports;
+pub mod service;

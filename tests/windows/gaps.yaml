@@ -1,7 +1,7 @@
 # Windows 平台的缺口账（当前状态：条目存在 = 这条测试还没有；补上就删条目）。
 #
 # 当前为空：授权与撤权的真效果都已在真机验收——
-# src/adapters/confine/windows.rs 的 grants_are_written_when_the_environment_allows_it
+# src/capabilities/tools/detail/confine/windows.rs 的 grants_are_written_when_the_environment_allows_it
 # 与 revoke_removes_the_container_ace_from_the_given_roots 在 windows-latest 上真跑
 # （写了真 ACE、撤权后 ACE 消失），且没有「本机不允许改目录 ACL」的跳过打印。
 # 环境性跳过会以 [探针] 进报告的 envSkips，因此"跳过"不再可能伪装成"验过"。
