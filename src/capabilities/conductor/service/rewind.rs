@@ -279,7 +279,15 @@ impl Conductor {
                     }
                 }
                 let unavailable = self.unavailable_modules(&meta.exec, &modules);
-                let mut tools = self.tools_env(&modules, &sb, unavailable, meta.exec.net, mode);
+                // 身份按**这个会话是不是协作子会话**定：有父会话 = 任务链节点（executor，拿得到回报工具）；
+                // 没有 = 用户建的单 agent 工作（solo，不拿回报工具——没有消费者，见 docs/tools/tools-and-roles.md）。
+                let role = if meta.parent.is_none() {
+                    "solo"
+                } else {
+                    "executor"
+                };
+                let mut tools =
+                    self.tools_env(&modules, &sb, unavailable, meta.exec.net, mode, role);
                 // 回复 id 跨重启单调：从转录里的最大值续号，否则新回复会与旧回复并成一组。
                 tools.reply_seq = crate::capabilities::session::api::max_reply(events);
                 Ok(Session::Single(

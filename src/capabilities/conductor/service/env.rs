@@ -62,6 +62,8 @@ impl Conductor {
         unavailable: BTreeMap<String, Vec<String>>,
         net: bool,
         mode: crate::capabilities::llm::api::ToolMode,
+        // 这一席的身份：用户建的单 agent 会话 = solo，协作子会话 = executor（见 systools/roles.yaml）。
+        role: &str,
     ) -> crate::capabilities::session::api::MemberTools {
         crate::capabilities::session::api::MemberTools {
             mode,
@@ -80,10 +82,10 @@ impl Conductor {
                 .with_read_only(self.fence_read_roots()),
             // 从零开始；按落盘转录重建时由调用方按转录里的最大值续号（见 rebuild_session）。
             reply_seq: 0,
-            // 执行席的系统工具面**由角色表发放**（越权校验的唯一判据）。
-            allowed: self.role_tools("executor"),
+            // 这一席的系统工具面**由角色表发放**（越权校验的唯一判据）：给什么写什么，代码里不留第二份名单。
+            allowed: self.role_tools(role),
             // 能不能用自己模块的工具、以及工具说明块的素材：都按角色表与这个 agent 的模块装配期算好。
-            with_modules: self.systools.allows_module_tools("executor"),
+            with_modules: self.systools.allows_module_tools(role),
             notes: crate::capabilities::tools::api::tool_notes(&*self.prompt, sb, modules),
         }
     }
@@ -149,7 +151,8 @@ impl Conductor {
         // **会话参数**：身份块每回合由它现渲染（不存进消息列表）。
         let params =
             crate::capabilities::session::api::SessionParams::from_workspace(&a.name, sb, modules);
-        let tools = self.tools_env(modules, sb, unavailable, net, mode);
+        // 单 agent 工作：用户自己开的那场对话（不是任务链的节点）——身份是 solo。
+        let tools = self.tools_env(modules, sb, unavailable, net, mode, "solo");
         let mut s = crate::capabilities::session::api::AgentSession::new(
             &a.name,
             params,

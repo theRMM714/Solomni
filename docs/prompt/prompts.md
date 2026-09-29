@@ -29,6 +29,9 @@
 | `roles/executor.yaml` | `execute.user` | 执行任务 |
 | `roles/orchestrator.yaml` | `review.system` / `review.user` | 总验收与推进 |
 
+> `solo`（用户建的单 agent 工作）的工具面**复用 `roles/executor.yaml`**：它不发回报工具，而 `execute.user` 那段
+> 只在协作的派发行上渲染——所以没有第二份文件，也没有复述。
+
 ## 二、怎么被装载、怎么被取用
 
 - `PromptSource` 端口（`capabilities/prompt/ports.rs`，实现在 `detail/yaml_prompts.rs`）按文件装配成

@@ -465,6 +465,29 @@ fn role_face_comes_from_the_role_table() {
         "agree 的参数契约来自 tools.yaml"
     );
     assert!(st.tool_face("不存在的角色").is_err(), "未知角色要如实报错");
+    // 单 agent 工作（solo）与任务链执行席（executor）差在**回报工具**：回报只有节点子会话有消费者。
+    let solo = ids("solo");
+    for tool in ["read", "list", "write", "edit", "patch", "search"] {
+        assert!(
+            solo.iter().any(|t| t == tool),
+            "solo 该能用 {}：{:?}",
+            tool,
+            solo
+        );
+    }
+    assert!(
+        !solo.iter().any(|t| t == "submit_report"),
+        "solo 不该拿到回报工具（单 agent 没有消费者）：{:?}",
+        solo
+    );
+    for verb in ["say", "agree", "leave", "ask"] {
+        assert!(
+            !solo.iter().any(|t| t == verb),
+            "solo 不做讨论，不该拿到 {}：{:?}",
+            verb,
+            solo
+        );
+    }
 }
 
 /// 两张表必须自洽：悬空引用 / 缺能力都会被挡下（不靠人看）。

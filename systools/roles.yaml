@@ -11,11 +11,19 @@ roles:
   discussant:
     prompt: roles/discussant
     tools: [say, agree, leave, ask, read, list, search]
-  # 任务执行（子会话）：文件域 + 提交验收；模块工具按成员归属自动获得（module_tools: true）。
+  # 任务执行（协作子会话）：文件域 + 提交回报；模块工具按成员归属自动获得（module_tools: true）。
   # 执行者不讨论：它不拿讨论动词（拿了也调不动——越权会被如实拒绝）。
   executor:
     prompt: roles/executor
     tools: [read, list, write, edit, patch, search, submit_report]
+    module_tools: true
+  # 单 agent 工作：与执行席同一份文件域与模块工具，但**不发回报工具**——
+  # submit_report 是给任务链节点用的（核心据它判节点完成，见 conductor 的 node_note），
+  # 用户建的单 agent 会话没有消费者：发了它只会多一次工具往返、把最终答复塞进工具参数。
+  # 提示词指向执行席同一份文件：solo 不派发节点，那条渲染只发生在协作的派发行上。
+  solo:
+    prompt: roles/executor
+    tools: [read, list, write, edit, patch, search]
     module_tools: true
   # 核心·整理派发：总结讨论、出方案与任务链（读类 + 写链）。
   planner:

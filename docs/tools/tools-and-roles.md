@@ -62,7 +62,8 @@ roles:
 | 回合 | 这一份是什么 |
 | --- | --- |
 | 讨论回合 | `discussant` 的面（发言动词 + 只读核实），**不含模块工具**（它不干活） |
-| 执行回合 | `executor` 的面 + 该 agent 的模块工具（角色表的 `module_tools: true`） |
+| 执行回合·单 agent 工作 | `solo` 的面 + 该 agent 的模块工具（用户自己开的那场对话） |
+| 执行回合·协作节点 | `executor` 的面 + 该 agent 的模块工具（任务链的子会话；比 `solo` 多一个回报工具） |
 
 发放与校验因此是**同一份判据**：列出来的就是这一刻真能调的，没拿到的既不在提示词里、也不在声明槽里；
 真去调它会被如实拒绝。发放只有一处：`SystemTools::role_face`（id 清单 + 是否给模块工具），它内部就是 `tool_face`（把 id 解析成声明；未知名如实报错——悬空引用在装配期就炸，不留到运行期）：
@@ -86,7 +87,8 @@ roles:
 ## 三、越权校验
 
 **已落地**：角色表不再只是渲染进提示词的清单——**工具面与越权校验都出自它**：
-讨论回合按 `discussant` 发放并校验（面里没有的一律拒绝），单 agent 执行回合按 `executor` 校验。
+讨论回合按 `discussant` 发放并校验（面里没有的一律拒绝）；执行回合**按身份**发——用户建的单 agent 会话用 `solo`，
+协作的节点子会话用 `executor`（两者只差回报工具 `submit_report`，判据是会话有没有父会话）。
 代码里**没有任何**"哪个角色能调哪个工具"的名单，加一个工具只改 `systools/tools.yaml` 与 `roles.yaml`。
 
 
@@ -116,7 +118,7 @@ roles:
 ```
 prompts/
   shared/    协议、信封约定、工具协议、文案兜底、refs
-  roles/     discussant / executor / planner / orchestrator
+  roles/     discussant / executor / solo / planner / orchestrator
 ```
 
 每份文件里**具体有哪些键、每个键干什么**：[prompts.md](../prompt/prompts.md)。
@@ -125,6 +127,8 @@ prompts/
 - **角色必须可派生**：提示词与工具面决定了上下文与转录，重启/回档后必须重建出**同样的角色与上下文**（回放与实时产出同样的消息，是既有硬要求）。所以角色**不能**是运行时内存里的临时状态。
 - **planner 与 orchestrator 分开**（上下文不同、工具面不同、指令互斥），只共享**背景知识**（链的语义、节点状态定义、信封协议）——共享的是背景，不是指令。
 - **executor 是全新上下文**：讨论内容只经任务提示词带入，不继承讨论转录。
+- **solo 与 executor 只差回报工具**：`submit_report` 的消费者只有协作的节点（核心据它判节点完成），
+  用户建的单 agent 会话没有消费者——发了它只会多一次工具往返、把最终答复塞进工具参数。
 
 ### 角色与工具面（当前）
 
@@ -132,6 +136,7 @@ prompts/
 | --- | --- | --- |
 | `discussant` | 讨论阶段 | `say` `agree` `leave` `ask` `read` `list` `search` |
 | `executor` | 任务链节点（agent 子会话） | `read` `list` `write` `edit` `patch` `search` `submit_report` + 该 agent 的模块工具 |
+| `solo` | 用户建的单 agent 工作 | `read` `list` `write` `edit` `patch` `search` + 该 agent 的模块工具（**不发** `submit_report`） |
 | `planner` | 核心整理派发 | `read` `search` `plan` `slate` `verdict` |
 | `orchestrator` | 核心链中推进 | `read` `search` `node_verdict` `checklist` |
 
