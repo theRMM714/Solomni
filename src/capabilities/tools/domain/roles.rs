@@ -1,6 +1,6 @@
 //! 角色（身份）：**场景绑定的身份**，带提示词与系统工具面。
 //!
-//! 两个真相源各一张表（见 docs/architecture/tools-and-roles.md）：
+//! 两个真相源各一张表（见 docs/tools/tools-and-roles.md）：
 //! - `systools/tools.yaml`：工具**是什么**（说明、参数契约、能否并发、能力）；
 //! - `systools/roles.yaml`：这个**身份有什么**（引用的系统工具 id + 提示词）。
 //!

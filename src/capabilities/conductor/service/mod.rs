@@ -83,7 +83,7 @@ impl PersistPolicy {
 }
 
 /// **系统会话的 sid 约定**：以 `#` 开头的是"没有地方落盘"的一次性动作（只推不留）。
-/// 见 docs/architecture/session-model.md 二（会话种类 × 推 / 落）。
+/// 见 docs/session/session-model.md 二（会话种类 × 推 / 落）。
 pub(crate) fn is_system_session(sid: &str) -> bool {
     sid.starts_with('#')
 }

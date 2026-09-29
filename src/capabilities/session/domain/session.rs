@@ -145,7 +145,7 @@ pub struct AgentSession {
     /// 会话参数（派生的前提）：不占对话的位置，每次调用现渲染。
     params: SessionParams,
     /// **只有对话**：user / assistant / tool（+ 核心注入的系统消息）。
-    /// 身份与环境不在这里——它们由 params 现渲染（见 docs/architecture/tools-and-roles.md 二）。
+    /// 身份与环境不在这里——它们由 params 现渲染（见 docs/tools/tools-and-roles.md 二）。
     pub(crate) dialogue: Vec<Msg>,
     pub(crate) chat: BoxedChat,
     note: Option<String>,
@@ -167,7 +167,7 @@ pub struct AgentSession {
     /// 正在落行的**回合 id**（讨论的回合标记用它；单 agent 回合为 0）。
     cur_turn: u64,
     /// 自动压缩的**字符预算**（≈ 模型窗口 × 设置百分比 × 4）；0 = 关。
-    /// 到点就在这一轮开始前先压一次（见 docs/architecture/session-model.md 六）。
+    /// 到点就在这一轮开始前先压一次（见 docs/session/session-model.md 六）。
     pub(crate) compact_at: usize,
     /// 压缩点（转录行 id）：0 = 没压过。此前的内容已被摘要取代，对话里补不回来。
     pub(crate) compacted_upto: u64,
@@ -323,7 +323,7 @@ impl AgentSession {
     }
 
     /// 上下文压缩：把 up_to 之前的行移出**发送视图**（转录不动、用户照样能看），用一份摘要代替。
-    /// 见 docs/architecture/session-model.md 六：改的是"发给模型什么"，不是"留下什么"。
+    /// 见 docs/session/session-model.md 六：改的是"发给模型什么"，不是"留下什么"。
     pub fn compact(&mut self, up_to: u64, summary: &str) {
         // 按行找到历史里的截断点（marks 就是"行 → 该行完成时的历史长度"）。
         let keep = self

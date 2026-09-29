@@ -30,17 +30,18 @@
 - `tests/cross-platform/` 跨平台集成与端到端测试；
 - `tests/windows/`、`tests/linux/`、`tests/macos/` 平台探针（`tests/helpers/probe.rs` 提供共用探针设施）；
 - `src/web/assets/*.smoke.cjs` 前端冒烟测试；
-- `tests/gaps.yaml` 与 `tests/<平台>/gaps.yaml` 缺口账；
+- `tests/gaps.yaml`（全局）、`tests/<平台>/gaps.yaml`（平台）与每个业务/机制单元一份 `src/<单元>/testgaps.yaml`（业务）缺口账；
+- **写测试的是测试 AI**：业务 AI 只跑门禁证明没弄坏、把没盖住的缺口写进自己单元的 `testgaps.yaml`，由测试 AI 实现并销账（分工见 [AGENTS.md](AGENTS.md) 九）；
 - `node run-tests.js` 测试汇总入口（`node start.js -test` 是备好环境后的同一入口）；
 - `src/capabilities/llm/detail/fake_chat.rs` 中的 `FakeChat` 与 `DemoGateway`；
 - `src/tests/doubles.rs`（`InMemory*` / `FakeCatalog` / `VecSource` / `ScriptGateway` / `RecordingFence` / `TestPrompts` / `NoopLog`）与 `src/tests/builders.rs`（`RecordingRunner` / `ParallelRunner` / `SilentRunner` / 原生与截断通道替身 / 造会话与造名单的辅助）里的测试装配（替身支持失败注入，供 T2 复用）；
 - `src/tests/` 中的契约测试（T2）：
-  - `ports.rs`（14 个端口的替身语义；`Log` 在 `kernel/ports.rs`，见 [docs/architecture/module-map.md](docs/architecture/module-map.md) 一）、
+  - `ports.rs`（14 个端口的替身语义；`Log` 在 `kernel/ports.rs`，见 [docs/kernel/module-map.md](docs/kernel/module-map.md)）、
     `fakes.rs`（FakeChat / DemoGateway 的独立契约）；
   - `detail.rs`（8 个文件系统实现的真实边界 + 本机环回 HTTP 适配器）；
   - `api.rs`（入站契约：命令与事件、生成期间停止立刻生效、错误如实传播、单条命令 panic 不带垮核心）；
   - `routes.rs`（HTTP 路由目录 ↔ 处理器 ↔ 文档 ↔ 前端调用四者机器比对；假能力面逐条验成功 / 错误 / 空 / 边界）；
-- **入站契约也是契约**：呈现层只依赖各能力的能力接口（见 [docs/architecture/contracts.md](docs/architecture/contracts.md)）与事件台（拿不到 `Core`、拿不到任何核心锁），
+- **入站契约也是契约**：呈现层只依赖各能力的能力接口（见 [docs/presentation/contracts.md](docs/presentation/contracts.md)）与事件台（拿不到 `Core`、拿不到任何核心锁），
   所以它能被假实现整体替换——`routes.rs` 的 `FakeOps` 就是这么逐条测路由的。
 - T0 质量门禁已并入同一入口，且**全部是零容忍硬失败**：编译、结构审查、格式、clippy、编译告警、依赖重复。
 
@@ -67,7 +68,7 @@
 
 ## 四、判据速查（细则为准）
 
-- **缺口的唯一真相**是 `tests/gaps.yaml`（全局）与 `tests/<平台>/gaps.yaml`（平台）；门户与细则都不复述条目内容。
+- **缺口的唯一真相**是 `tests/gaps.yaml`（全局）、`tests/<平台>/gaps.yaml`（平台）与 `src/<单元>/testgaps.yaml`（业务）；门户与细则都不复述条目内容。业务账由测试 AI 销账。
 - **成功标记**（`FRONTEND-SMOKE-OK` / `E2E-OK` / `TEST-REPORT-OK` / `TEST-REPORT-FAIL` / `TEST-REPORT-ACCEPTED`）
   的固定含义见 [docs/testing/execution-ci.md](docs/testing/execution-ci.md)。
 - **质量失败不能被业务测试通过抵消**：两边的结论分别记，判据见 [docs/testing/quality-isolation.md](docs/testing/quality-isolation.md)。

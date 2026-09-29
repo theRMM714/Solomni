@@ -1,7 +1,7 @@
 # 会话模型与上下文压缩
 
 > 本文是**"一次工作里有哪些会话、它们怎么对话、怎么同步、上下文怎么压"的唯一权威**。
-> 任务链（依赖图、审查关卡、验收）见 [task-chain.md](task-chain.md)；工具与角色见 [tools-and-roles.md](tools-and-roles.md)。
+> 任务链（依赖图、审查关卡、验收）见 [task-chain.md](../collab/task-chain.md)；工具与角色见 [tools-and-roles.md](../tools/tools-and-roles.md)。
 
 **当前状态：已落地。** **执行席按 agent 一会话**（含同 agent 串行）、**讨论回合开工具循环**
 （能只读核实、拿不到模块工具）、**讨论由核心驱动**（泵只决定"该问谁"，成员回合在它自己的会话里跑，
@@ -88,14 +88,14 @@
 于是系统会话推出来的行**没有任何前端动作**：它不在会话表里、也不落盘，就是底层那一次无条件的推。
 
 **历史与实时合流，前端不合并两个来源**：`GET /api/history/{sid}` 一次给全盘上转录 + 事件台上它之外的尾巴，
-并给出合流时的头部序号当**水位**；此后 `seq ≤ 水位` 的批次丢掉、之上的按序 append（见 [contracts.md](contracts.md)）。
+并给出合流时的头部序号当**水位**；此后 `seq ≤ 水位` 的批次丢掉、之上的按序 append（见 [contracts.md](../presentation/contracts.md)）。
 判据是结构化相等而不是行 id——行 id 只覆盖 `transcript` 行，`notice`/`node_started`/`report` 这些行没有 id。
 
 **行身份是结构化字段**：一行带 `speaker`（谁说的）/ `verb`（动词：say / agree / 需求 / 开始…）/
 `kind`（`msg` 模型发言 / `user` 用户说的 / `system` 系统注入或核心自己的行 / `tool` 工具行 /
 `round` 轮次分隔行），**正文里不带 `[谁:动词]` 标签**。`LineView::render()` 是"字段 → 文本"的**唯一**拼法：
 提示词里的转录（`{{transcript}}`）与回放比较都读它；呈现层按 `kind` 换样式、按 `speaker`/`verb` 显示身份，
-不解析文本（见 [contracts.md](contracts.md) 的推的事实）。
+不解析文本（见 [contracts.md](../presentation/contracts.md) 的推的事实）。
 
 ## 二之二、谁驱动谁（实现形态）
 
@@ -206,9 +206,9 @@
 - **模块工具只在执行回合给**：讨论回合拿不到"干活"的手段——不是"被拒绝"，是**没有**。
 - **这一份工具面是随回合注入的**：核心查"这一回合的身份能用的工具"，把那一份（说明 + 参数）作为一条
   系统消息放进该回合的上下文（原生通道同时用它做工具声明）。**整本工具总表不进提示词**——列了必然被拒
-  的工具等于请模型去撞墙（细则见 [tools-and-roles.md](tools-and-roles.md) 二）。
+  的工具等于请模型去撞墙（细则见 [tools-and-roles.md](../tools/tools-and-roles.md) 二）。
 - 角色表（`systools/roles.yaml`）声明的工具面**由机制执行**：发放（提示词块与原生声明槽）与越权校验
-  同出一份表，代码里不另写名单（见 [tools-and-roles.md](tools-and-roles.md) 三）。
+  同出一份表，代码里不另写名单（见 [tools-and-roles.md](../tools/tools-and-roles.md) 三）。
 
 ### 四之一、会话参数与对话分开
 
@@ -305,11 +305,11 @@ AI 没给出摘要（没调工具 / 调用失败）→ 记一条通知（"压缩
 ## 八、当前状态
 
 上面各节的形态都已落地并由测试钉住（验收清单不在这里重复：层级与判定见 [TESTING.md](../../TESTING.md)）：
-讨论席只发只读工具面（越权如实拒绝）、执行席**一个 agent 一个会话**且同 agent 串行（见 [task-chain.md](task-chain.md)）、
+讨论席只发只读工具面（越权如实拒绝）、执行席**一个 agent 一个会话**且同 agent 串行（见 [task-chain.md](../collab/task-chain.md)）、
 回档按回合 id 同步截断、压缩由 AI 自己做并可滚动多次（讨论阶段零落盘，产物只在执行回合出现）。
 
 ## 九、联动
 
-- 任务链、审查关卡、验收与边界：见 [task-chain.md](task-chain.md)
-- 系统工具与角色（谁能用哪些工具）：见 [tools-and-roles.md](tools-and-roles.md)
+- 任务链、审查关卡、验收与边界：见 [task-chain.md](../collab/task-chain.md)
+- 系统工具与角色（谁能用哪些工具）：见 [tools-and-roles.md](../tools/tools-and-roles.md)
 - 协作流程的产品视角：见 [PRODUCT.md](../../PRODUCT.md)

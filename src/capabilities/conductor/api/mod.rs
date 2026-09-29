@@ -1,4 +1,4 @@
-//! 入站契约：呈现层（CLI / Web）与核心之间的唯一通道（见 docs/architecture/contracts.md）。
+//! 入站契约：呈现层（CLI / Web）与核心之间的唯一通道（见 docs/presentation/contracts.md）。
 //!
 //! 形态：**命令 + 事件**。
 //! - 核心常驻自己的执行线程、独占全部状态：呈现层拿不到 `Conductor`，也拿不到任何核心锁。
@@ -519,7 +519,7 @@ pub struct SessionView {
     /// **这条会话此刻在跑吗**（生成中）：界面据此把「发送/继续」换成「停止」并显示占位动画。
     /// 它是**对账副本**：运行态的唯一真相是推的 `SessionEvent::Working`（短暂、不落盘）；
     /// 这份快照供界面在"本页对这条会话还没有实时知识"时对齐——刚刷新页面、事件台裁掉一段后
-    /// 重连、别人建的会话（见 docs/architecture/session-model.md 二之二）。
+    /// 重连、别人建的会话（见 docs/session/session-model.md 二之二）。
     pub running: bool,
     /// **这条工作有「本次需求」吗**：前端据此决定要不要渲染「改需求」按钮——
     /// 没有就**根本不渲染**（不是灰着）。这是领域事实（有没有需求行），不是"模式"。

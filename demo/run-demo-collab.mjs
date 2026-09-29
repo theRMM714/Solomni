@@ -6,7 +6,7 @@
  * 与 demo/run-demo.mjs 的区别：那个是**组合式**（一个 agent 装三个模块），这个走**小组协作**
  * （N 个 agent 分权协商：讨论 → 整理出任务链 → **审查关卡** → 链驱动（子会话）→ 节点验收 → 总验收）。
  * 三个模块仍是三种语言：harvest=python、render=node、indexer=C++。
- * 细则见 docs/architecture/task-chain.md。
+ * 细则见 docs/collab/task-chain.md。
  *
  * 用法：
  *   1) 先起产品：node start.js -webUI            （默认网页端口 3081）

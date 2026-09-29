@@ -529,7 +529,7 @@ pub(crate) fn failed_node_acceptance_pauses_then_continue_redispatches() {
     );
 }
 
-/// 审查关卡：整理完**不自动开工**——停在待审，点「同意」才推进（见 docs/architecture/task-chain.md）。
+/// 审查关卡：整理完**不自动开工**——停在待审，点「同意」才推进（见 docs/collab/task-chain.md）。
 #[test]
 pub(crate) fn collab_pauses_for_plan_review_until_the_user_approves() {
     let mut member = BTreeMap::new();

@@ -127,3 +127,32 @@
   blocked_by: |
     与 `session.children-not-deleted-with-parent` 同一批（这条是它的前提）。等用户把问题说完再定实现细节
     （sid 命名是否仍用 `<父>--<agent>`、children 的目录名取 agent 名还是节点名）。
+
+- id: fence.per-agent-write-roots
+  scope: global
+  level: T4
+  why: |
+    「垂直分工开发」要求一个 agent 只写自己负责的目录，但当前围栏的可写范围是**整个本次工作共享区**
+    `work/`（加该 agent 的私有沙箱与它自己的模块目录），所有 agent 对共享区都可写——"谁改哪一块"
+    因此只是约定，不是机制保证。PRODUCT.md 已把它写成开发方向，所以需要可判定的验收路径。
+  how: |
+    1) `.home/settings.yaml` 为每个 agent 增加一组可写路径（缺省 = `work/`）；
+    2) 平台后端按这份清单授权（Windows 走 `confine::grant_targets` 的目录 ACL，Linux/macOS 走规则文本）；
+    3) `tests/windows/`、`tests/linux/`、`tests/macos/` 各加一条探针：A agent 写自己目录成功、
+       写 B 的目录**被机制拒绝**（不是工具层拒绝）。
+  accept: 三平台探针各一条"跨 agent 目录写被机制拒绝"通过；不给该清单时行为与今天一致。
+  blocked_by: 缺少实现
+
+- id: module.external-harness-fence-reach
+  scope: global
+  level: T3
+  why: |
+    MODULE_SPEC 允许把外部 harness 当模块的一个工具（`tools.<名>.command` 指向它的命令行）。
+    围栏目前只按运行包放行解释器目录，系统里已安装的 harness 可执行文件是否落在可达范围内
+    **没有验证过**；文档已按"开发方向"标注，不能停在"大概能跑"。
+  how: |
+    1) 写一个把外部命令行 harness 当工具的测试模块（命令落在模块目录内）；
+    2) 在授权围栏（`--fence-live`）下跑 T3 真实边界用例，记录可执行文件的可达性结论；
+    3) 若不可达，把可执行文件纳入运行包登记或围栏可达范围，再复跑。
+  accept: 授权围栏下该模块的工具跑通一次完整往返；或如实写明"必须把可执行文件放进模块目录"并落到文档与登记处。
+  blocked_by: 缺少观察面

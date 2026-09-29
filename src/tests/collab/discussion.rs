@@ -233,7 +233,7 @@ pub(crate) fn discussion_member_cannot_use_module_tools() {
 
 /// 讨论席的一回合：**逐轮定稿**（核实行与发言行各是各的一条落档事件，不是攒到回合末一条），
 /// 并且**实时落的行与回档重建出的对话同口径**——重启后子会话的上下文不歪
-/// （回档按行截断历史，靠的就是这两边一致；见 docs/architecture/session-model.md 二之二、五）。
+/// （回档按行截断历史，靠的就是这两边一致；见 docs/session/session-model.md 二之二、五）。
 #[test]
 pub(crate) fn discussion_member_turn_finalizes_by_round_and_rebuilds_the_same_dialogue() {
     let mut member = BTreeMap::new();

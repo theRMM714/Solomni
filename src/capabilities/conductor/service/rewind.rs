@@ -47,7 +47,7 @@ impl Conductor {
             self.sessions.insert(sid.to_string(), rebuilt);
         }
         // **回档同步**：主会话回到第 keep_id 行，各 agent 会话按同一个**回合 id** 同步截断
-        // （见 docs/architecture/session-model.md 五）——子会话不在主会话的流水里，得各自回档。
+        // （见 docs/session/session-model.md 五）——子会话不在主会话的流水里，得各自回档。
         if !precise {
             let keep_turn = crate::capabilities::session::api::turn_of_line(&before, keep_id);
             self.rewind_children(sid, keep_turn)?;

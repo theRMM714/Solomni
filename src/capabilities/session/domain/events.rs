@@ -22,7 +22,7 @@ pub enum SessionEvent {
         chain: crate::capabilities::taskchain::api::TaskChain,
     },
     /// 上下文压缩：`up_to` 之前的转录**不再发给模型**（转录本身完整保留、用户仍可查看），
-    /// 由一份 summary 代替（见 docs/architecture/session-model.md 六）。
+    /// 由一份 summary 代替（见 docs/session/session-model.md 六）。
     Compacted { up_to: u64, summary: String },
     /// 任务链的一个节点开工：它跑在自己的**子会话**里（用户可进去干预）。
     NodeStarted {
@@ -90,7 +90,7 @@ pub fn stopped_note() -> String {
 }
 
 /// 运行态：**这一刻谁在干活**。它在每个干活的人开始前推一条（带名字），收尾推空闲——
-/// 前端据此显示"正在工作：某某"与「停止」按钮（见 docs/architecture/session-model.md 二之二）。
+/// 前端据此显示"正在工作：某某"与「停止」按钮（见 docs/session/session-model.md 二之二）。
 /// 为什么要有它：核心自己的模型调用（整理 / 裁决判定 / 验收）也在干活，不推的话界面显示的
 /// 就一直是上一个成员的名字，用户无法判断会话到底在不在跑。
 pub fn working(agent: &str) -> SessionEvent {
@@ -166,7 +166,7 @@ pub struct LineView {
     pub reply: u64,
     /// **正文**：这一行说的内容。**行首标签不在这里**——说话人与动词是结构化字段
     /// （`speaker` / `verb`），渲染时才拼回 `[谁:动词] 正文`（见 `render`）。
-    /// 为什么分开：呈现层与状态派生读字段，不再从正文里抠标签（见 docs/architecture/session-model.md 二）。
+    /// 为什么分开：呈现层与状态派生读字段，不再从正文里抠标签（见 docs/session/session-model.md 二）。
     pub line: String,
     /// **说话人**：agent 实例名 / `用户` / 核心自己的标签（`轮次` / `代拟` / `节点`…）；空 = 无标签。
     #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -197,12 +197,12 @@ pub struct LineView {
     /// 上下文里以 **user 角色**转发——派活是一次"回合"，而会话协议要求请求里至少有一条 user 消息
     /// （一条 user 都没有的请求会被供应商整条拒收，实测）。
     /// **结构化信号**：重建/回放据此产出发出去的那**同一条消息**，不靠匹配文本。
-    /// 见 docs/architecture/session-model.md 二"系统消息"与四之二"节点执行只有一条管道"。
+    /// 见 docs/session/session-model.md 二"系统消息"与四之二"节点执行只有一条管道"。
     #[serde(default, skip_serializing_if = "is_false")]
     pub task: bool,
     /// 这一行属于哪个**回合**（讨论的一次发言回合；0 = 不属任何回合，如需求/用户行）。
     /// 两边的转录行靠它对齐：回档主会话时，各 agent 会话按同一个回合 id 同步截断
-    /// （见 docs/architecture/session-model.md 五）。
+    /// （见 docs/session/session-model.md 五）。
     #[serde(default, skip_serializing_if = "is_zero")]
     pub turn: u64,
 }
@@ -393,7 +393,7 @@ pub enum Pending {
     ConfirmSlate,
     /// 名单已定，等用户确认开始讨论（可授权自裁）。
     ConfirmBegin,
-    /// 方案待审：整理完**不自动开工**，等用户点「同意」（见 docs/architecture/task-chain.md）。
+    /// 方案待审：整理完**不自动开工**，等用户点「同意」（见 docs/collab/task-chain.md）。
     PlanReview,
     /// 节点验收没过：等用户点「继续」重派这些节点。
     NodeBlocked { nodes: Vec<String> },

@@ -1,7 +1,7 @@
 # 呈现层入站契约（命令/事件 + 路由目录）
 
 > 本文是**呈现层入站契约的唯一权威**：能力接口、事件台、命令/事件规则，以及机器可读的 HTTP 路由目录。
-> 分层与端口见 [ARCHITECTURE.md](../../ARCHITECTURE.md)，模块地图见 [module-map.md](module-map.md)。
+> 分层与端口见 [ARCHITECTURE.md](../../ARCHITECTURE.md)，逐文件职责见 [cli/module-map.md](cli/module-map.md) 与 [web/module-map.md](web/module-map.md)。
 > **下面的路由表由契约测试机器比对**（`src/tests/routes.rs` 直接读本文件）：表与
 > `web/routes.rs` 的 `ROUTES` 对不上就是测试失败，不靠人记得改文档。
 
@@ -64,7 +64,7 @@
 客户端因此只需维护一个单调游标 `appliedSeq`：取到的批次按 `seq` 排序后应用；
 `oldest` 已经越过游标说明那段被裁剪了，就拉一次历史重放**重新对齐**。
 **会话表也只由服务端给**：客户端的会话来自 `/api/state` 的 `sessions`，只把事件应用到它已有的会话；
-收到**不认识的 sid**（典型是系统会话，见 [session-model.md](session-model.md) 的推/落表）一律不动。
+收到**不认识的 sid**（典型是系统会话，见 [session-model.md](../session/session-model.md) 的推/落表）一律不动。
 
 **历史与实时只有一条流（客户端不再合并两个来源）**：`GET /api/history/{name}` 一次给全——
 盘上转录 `events` + 事件台上**它之外**的尾巴 `live` + 合流时的头部序号 `head`。

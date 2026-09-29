@@ -24,7 +24,7 @@ pub const MAX_ROUNDS: usize = 6;
 #[cfg(test)]
 pub const MAX_DISCUSS_REMIND: u32 = 3;
 
-/// 一次成员回合之后的处置（核心据此决定，见 docs/architecture/session-model.md 二）。
+/// 一次成员回合之后的处置（核心据此决定，见 docs/session/session-model.md 二）。
 #[derive(Debug, PartialEq)]
 pub enum AfterTurn {
     /// 已表态：正常往下走。
@@ -152,7 +152,7 @@ pub struct Discussion {
 }
 
 /// 推进讨论的**一步**：该问谁（或终态）。
-/// 泵只决定"该问谁"，**不自己调模型**——驱动权归核心（见 docs/architecture/session-model.md 二之二）。
+/// 泵只决定"该问谁"，**不自己调模型**——驱动权归核心（见 docs/session/session-model.md 二之二）。
 pub enum Adv {
     /// 该问这个成员一回合：身份块 + 本回合提示交给驱动（它取会话、装配、跑模型）。
     /// 身份**每回合现渲染**（由成员的 params + 当前提示词册），不存在谁的会话里。
@@ -491,7 +491,7 @@ impl Discussion {
         // 这个循环**必须有前进条件**：没表态时由 after_turn 计数（提醒 → 放过），
         // 否则假模型瞬间返回会把这里变成紧凑死循环（真烧过 CPU）。
         // 状态机驱动：本函数只负责"问 → 收 → 再问"，判定全在 advance/feed 里。
-        // 驱动权将来归核心（见 docs/architecture/session-model.md 二之二）：那时把这一圈换成
+        // 驱动权将来归核心（见 docs/session/session-model.md 二之二）：那时把这一圈换成
         // 核心的 take/put 序列即可，判定一行不用改。
         loop {
             match self.advance() {
@@ -705,7 +705,7 @@ impl Discussion {
         self.transcript.push(v);
     }
 
-    /// 成员一轮之后的处置：**核心只提醒、不强制**（见 docs/architecture/session-model.md 二）。
+    /// 成员一轮之后的处置：**核心只提醒、不强制**（见 docs/session/session-model.md 二）。
     /// 用户主动中止时计数不再工作（不注入提醒）；每轮开始时提醒次数归零。
     pub fn after_turn(
         &mut self,
@@ -745,7 +745,7 @@ impl Discussion {
     }
 
     /// 记一行**系统消息**（提醒/边界这类不是谁说的内容）到主会话转录。
-    /// 见 docs/architecture/session-model.md 二"系统消息"。
+    /// 见 docs/session/session-model.md 二"系统消息"。
     pub fn note_system(&mut self, text: &str) {
         self.transcript.push(LineView::system("", text.to_string()));
     }

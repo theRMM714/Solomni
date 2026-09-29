@@ -2,7 +2,7 @@
 
 > 本文是**提示词册结构与键清单的唯一权威**：每份文件里有什么键、每个键干什么。
 > 规则（谁写、占位符、缺键报错、什么不进册子）见 [ARCHITECTURE.md](../../ARCHITECTURE.md) 的「五、提示词册」；
-> "哪个角色用哪份提示词、拿哪些工具"见 [tools-and-roles.md](tools-and-roles.md) 四；
+> "哪个角色用哪份提示词、拿哪些工具"见 [tools-and-roles.md](../tools/tools-and-roles.md) 四；
 > 模块自己的职责提示词（`module.yaml` 的 `system`）见 [MODULE_SPEC.md](../../MODULE_SPEC.md)。
 
 **当前状态：已落地。** 册子按**共享 / 角色**两个目录切分；加载经 `PromptSource` 端口（`capabilities/prompt/ports.rs`，实现在 `capabilities/prompt/detail/yaml_prompts.rs`），

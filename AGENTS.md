@@ -50,7 +50,7 @@
 **两层**：仓库根是**门户**（定位、引用、最小必要契约），`docs/` 是**细则**。
 
 - 根门户只写「这份文档管什么、要做事时读哪一份」，**不复述细则正文**；同一个事实只有一份权威。
-- 细则按领域进 `docs/<领域>/`（现有 `docs/testing/`、`docs/architecture/`）；新增领域时建新目录，不往门户里堆。
+- 细则按单元进 `docs/<单元>/`：业务与机制单元各一个目录（`kernel`、`entry`、各能力、`presentation/`）；不属任何单元的横向流程留在 `docs/testing/`。新增单元时建新目录，不往门户里堆。
 - 细则之间用相对路径互引；门户用 `docs/<领域>/<文件>.md` 引用细则。
 
 **改文档必须同步**——下列任一处改动，都要在同一次提交里把相关方一起改掉，不得留下过期引用或两处说法：
@@ -62,6 +62,7 @@
 | 新增/删除/改名文档 | `AGENTS.md` 文档路由表、`README.md` 文档表、所有引用它的文档与代码注释 |
 | 代码里被文档机器比对的段落 | 该文档与比对它的测试（例如路由表 ↔ `src/tests/routes.rs`） |
 | `tests/gaps.yaml` 的条目 | `TESTING.md` 门户与 `docs/testing/gaps-acceptance.md` 的现状描述 |
+| `src/<单元>/testgaps.yaml` 的条目 | 该单元的 `docs/<单元>/README.md` 与 `docs/testing/gaps-acceptance.md` 的现状描述 |
 
 - 引用一律用**相对仓库根的路径**（`docs/testing/levels.md`），不写机器路径、不写绝对路径。
 - 文档里的当前状态必须与代码一致；未实现的内容写进缺口账，不写成当前能力。
@@ -141,7 +142,27 @@
 
 ### 细则（`docs/`）
 
-| 工作内容 | 细则 |
+**先按单元找入口，再按事项找细则。** 每个业务与机制单元一个目录：目录里的 `README.md` 是它的唯一入口
+（管什么 / 不管什么、入站契约与状态归属、依赖图位置、改动时要同步什么），`module-map.md` 是逐文件职责（机器比对）。
+
+| 单元 | 入口 | 该单元还有 |
+| --- | --- | --- |
+| `conductor`（协调业务） | `docs/conductor/README.md` | `module-map.md` |
+| `collab`（协作会话） | `docs/collab/README.md` | `module-map.md`、`task-chain.md` |
+| `session`（会话） | `docs/session/README.md` | `module-map.md`、`session-model.md` |
+| `tools`（工具与围栏） | `docs/tools/README.md` | `module-map.md`、`tools-and-roles.md` |
+| `llm`（模型通道与协议） | `docs/llm/README.md` | `module-map.md` |
+| `registry`（登记处） | `docs/registry/README.md` | `module-map.md` |
+| `workspace`（工作区与运行包） | `docs/workspace/README.md` | `module-map.md` |
+| `prompt`（提示词册） | `docs/prompt/README.md` | `module-map.md`、`prompts.md` |
+| `slate`（名单） | `docs/slate/README.md` | `module-map.md` |
+| `taskchain`（任务链） | `docs/taskchain/README.md` | `module-map.md` |
+| `kernel`（机制型业务） | `docs/kernel/README.md` | `module-map.md` |
+| 入口层（组合根 / 探针 / 守门进程） | `docs/entry/README.md` | `module-map.md` |
+| 前端 / 交付机制（`cli` 与 `web`） | `docs/presentation/README.md` | `contracts.md`、`cli/`、`web/` |
+| 横向：测试与质量 | `TESTING.md`（门户） | `docs/testing/README.md` 与六份细则 |
+
+| 要做的事（横向） | 读这一份 |
 | --- | --- |
 | 判断测试属于哪层、放哪、怎么判定 | `docs/testing/levels.md` |
 | 写或改替身（Stub / Fake / Mock / Spy / Fixture）、验收 Fake | `docs/testing/doubles.md` |
@@ -150,9 +171,18 @@
 | 跑本地入口、读报告、认成功标记、CI 与报告发布 | `docs/testing/execution-ci.md` |
 | 记缺口、目录与命名、按验收清单收口 | `docs/testing/gaps-acceptance.md` |
 | 交付模块（模块作者要交什么测试证据） | `docs/testing/module-delivery.md` |
-| 逐个文件看 `capabilities/`（含 `conductor/` 与 `slate/`）/ `kernel/` / `entry/` / `cli/` / `web/` 各干什么 | `docs/architecture/module-map.md` |
-| 呈现层入站契约、HTTP 路由目录 | `docs/architecture/contracts.md` |
-| 系统工具、角色（身份）与"谁能用哪些工具" | `docs/architecture/tools-and-roles.md` |
-| 审查关卡、任务链（依赖图）、子会话与验收 | `docs/architecture/task-chain.md` |
-| 会话模型（主/子会话、回合、发言标记、回档同步、上下文压缩） | `docs/architecture/session-model.md` |
-| 提示词册（`prompts/`）的结构与键清单 | `docs/architecture/prompts.md` |
+
+## 九、开发分工与写权限
+
+垂直分工时，一个 AI 只负责一个单元；**谁能写哪些路径**按下表划定，越界由合入检查兜
+（沙箱能预防到哪一步，取决于该会话的工作区边界）。
+
+| 角色 | 可写 | 不写 | 交接物 |
+| --- | --- | --- | --- |
+| **业务 AI** | 自己那一个单元：`src/capabilities/<业务>/**`（或 `src/kernel/**`）；本单元文档 `docs/<单元>/**`；本单元 `testgaps.yaml` | **`src/tests/**` 一行都不写**、别的单元、共享面 | 变更 + `testgaps.yaml` 里的缺口条目 |
+| **测试 AI** | `src/tests/**`、`tests/**`、`docs/testing/**` | 业务实现（发现实现错误时报给业务 AI 或走 bug 流程） | 通过 / 失败 / `env-skip` / 缺口销账 |
+| **集成者（主线）** | 共享面：`kernel` 的共享事实类型、`conductor` 的 `Ops` 组装、`src/main.rs`、`entry/**`、`cli/` `web/`、根门户与 `AGENTS.md`、`prompts/`、`systools/`、`run-tests.js`、`tests/dependency-baseline.json`、`Cargo.toml` `Cargo.lock` | — | 装配、跨单元契约冻结、全量门禁 |
+
+- **业务 AI 不写测试**：它跑门禁证明"没弄坏"，把自己知道但没盖住的缺口写进 `src/<单元>/testgaps.yaml`；测试 AI 实现测试并销账。
+- **契约先行**：跨单元改动（`api` 的 trait / DTO、`kernel` 的共享类型、`Ops` 的组装）先由集成者冻结，业务 AI 只按冻结后的契约写实现。
+- **完成判据是门禁**：`node run-tests.js` 全绿（T0 + 全量测试），不是"我这块过了"。

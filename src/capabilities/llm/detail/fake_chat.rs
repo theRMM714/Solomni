@@ -85,7 +85,7 @@ impl ChatGateway for DemoGateway {
     }
 
     fn core_channel(&self, _channel: Option<&Channel>) -> (BoxedChat, bool) {
-        // 核心操作走**工具调用**（见 docs/architecture/tools-and-roles.md）：演示通道没有原生能力，
+        // 核心操作走**工具调用**（见 docs/tools/tools-and-roles.md）：演示通道没有原生能力，
         // 所以发手写信封——它是这条通道唯一能用的形态。载荷形状与真实通道完全一致。
         let env = |tool: &str, args: &str| {
             format!(

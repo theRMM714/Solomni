@@ -14,7 +14,7 @@ use std::collections::BTreeMap;
 
 impl Discussion {
     /// 全员同意后：核心整理——总结讨论，为每个留下的成员写执行任务提示词。
-    /// 整理：核心 AI 总结讨论并出**任务链**（见 docs/architecture/task-chain.md）。
+    /// 整理：核心 AI 总结讨论并出**任务链**（见 docs/collab/task-chain.md）。
     /// 产出走 **plan 工具调用**（核心操作不手写 JSON）；没调用或载荷不合法就**如实报错**。
     pub fn synthesize(
         &self,

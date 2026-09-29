@@ -21,10 +21,22 @@ const PLATFORM_TARGETS = ["cross-platform", "windows", "linux", "macos"];
 const FENCE_LIVE = process.argv.includes("--fence-live") || process.env.SOLOMNI_FENCE_LIVE === "1";
 const REPORT = path.join(ROOT, "target", "test-report.json");
 // 缺口账：唯一真相是这些文件。平台账决定 TEST-REPORT-ACCEPTED；全局账是长期目标（每条都进报告）。
+// 业务缺口账：每个业务/机制单元一份 src/<单元>/testgaps.yaml（业务 AI 记、测试 AI 销账）。
+const BUSINESS_GAP_FILES = (() => {
+  const out = [path.join(ROOT, "src", "kernel", "testgaps.yaml")];
+  const capDir = path.join(ROOT, "src", "capabilities");
+  if (fs.existsSync(capDir)) {
+    for (const e of fs.readdirSync(capDir, { withFileTypes: true })) {
+      if (e.isDirectory()) out.push(path.join(capDir, e.name, "testgaps.yaml"));
+    }
+  }
+  return out;
+})();
 const GAP_FILES = [
   path.join(ROOT, "tests", "gaps.yaml"),
   path.join(ROOT, "tests", "cross-platform", "gaps.yaml"),
   ...[IS_WIN ? "windows" : OS_KEY, "windows", "linux", "macos"].map((p) => path.join(ROOT, "tests", p, "gaps.yaml")),
+  ...BUSINESS_GAP_FILES,
 ];
 
 function buildEnv() {
@@ -101,12 +113,14 @@ function gapLedgers() {
 
 /** 全局缺口账（tests/gaps.yaml）：长期目标；每条都进报告，但不影响平台的 ACCEPTED 判定。 */
 function globalGaps() {
-  const f = path.join(ROOT, "tests", "gaps.yaml");
-  if (!fs.existsSync(f)) return [];
+  const files = [path.join(ROOT, "tests", "gaps.yaml"), ...BUSINESS_GAP_FILES];
   const ids = [];
-  for (const line of fs.readFileSync(f, "utf8").split(/\r?\n/)) {
-    const m = line.match(/^\s*-\s*id:\s*(\S+)/);
-    if (m) ids.push(m[1]);
+  for (const f of files) {
+    if (!fs.existsSync(f)) continue;
+    for (const line of fs.readFileSync(f, "utf8").split(/\r?\n/)) {
+      const m = line.match(/^\s*-\s*id:\s*(\S+)/);
+      if (m) ids.push(m[1]);
+    }
   }
   return ids;
 }
@@ -241,12 +255,24 @@ function structuralAudit() {
     });
   }
 
-  // 模块地图与磁盘**双向一致**（docs/architecture/module-map.md 是模块地图的唯一权威）：
-  // ① 每行第一格是仓库根相对路径（src/…），必须存在；② src/ 下每个 .rs 都要有一行
+  // 模块地图与磁盘**双向一致**（`docs/<单元>/module-map.md` 是各单元逐文件职责的唯一权威；
+  // 表现层两个渠道各一份。所有地图文件的行合成一张表，再与磁盘比对）：
+  // ① 每行第一格是仓库根相对路径（src/…），必须存在；② src/ 下每个 .rs 都要在**某一张**地图里有一行
   // （src/tests/** 归测试分区、纯 mod 声明的目录入口不要求逐行列出）。
   // 为什么机器查：这张表逐文件写着职责，人手维护必然漂移（曾出现表错位与整族文件漏记）。
-  const mapText = fs.readFileSync(path.join(ROOT, "docs", "architecture", "module-map.md"), "utf8");
-  const mapRows = [...mapText.matchAll(new RegExp("^\\| " + BT + "([^" + BT + "]+)" + BT + " \\|", "gm"))].map((m) => m[1]);
+  const mapFiles = [];
+  (function collectMaps(d) {
+    for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+      const p = path.join(d, e.name);
+      if (e.isDirectory()) collectMaps(p);
+      else if (e.name === "module-map.md") mapFiles.push(p);
+    }
+  })(path.join(ROOT, "docs"));
+  if (!mapFiles.length) problems.push("找不到任何模块地图（docs/**/module-map.md）");
+  const mapRows = [];
+  for (const f of mapFiles) {
+    for (const m of fs.readFileSync(f, "utf8").matchAll(new RegExp("^\\| " + BT + "([^" + BT + "]+)" + BT + " \\|", "gm"))) mapRows.push(m[1]);
+  }
   const seenRows = new Set();
   for (const r of mapRows) {
     if (seenRows.has(r)) problems.push("模块地图有重复行：" + r);

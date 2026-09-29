@@ -77,7 +77,7 @@ roles:
   判定里写了表里没有的 id / 漏填 = 这次判定用不了：核心**要求重填**（一直重填，用户用「停止」控制）。
 
 身份与环境同理：它们是**会话参数**（`session::SessionParams`），每次调用现渲染成系统消息，
-不占对话的位置（见 [session-model.md](session-model.md) 四之二）。
+不占对话的位置（见 [session-model.md](../session/session-model.md) 四之二）。
 
 核心自己的操作（`planner` / `orchestrator`）不走 agent 会话：原生通道由声明槽给出它们的面，
 信封通道由各自的角色提示词写清载荷形状——总表同样不进提示词。
@@ -118,7 +118,7 @@ prompts/
   roles/     discussant / executor / planner / orchestrator
 ```
 
-每份文件里**具体有哪些键、每个键干什么**：[prompts.md](prompts.md)。
+每份文件里**具体有哪些键、每个键干什么**：[prompts.md](../prompt/prompts.md)。
 
 - **角色声明 = 提示词 + 工具面 + 渲染规则，三者同处声明**。因为**信封模式**下，该角色能用的信封清单**要渲染进该回合的上下文**（原生通道则由声明槽给出）——提示词与工具面分开声明必然漂。
 - **角色必须可派生**：提示词与工具面决定了上下文与转录，重启/回档后必须重建出**同样的角色与上下文**（回放与实时产出同样的消息，是既有硬要求）。所以角色**不能**是运行时内存里的临时状态。
@@ -155,12 +155,12 @@ prompts/
 
 总表与角色表都已生效：工具面**按回合按身份注入**（总表不进提示词），越权调用如实拒绝并落工具行，
 角色表里的悬空引用由结构审查硬失败挡下；五个核心操作与执行席回报都从**工具参数**取载荷（见 §三之二）。
-链怎么从讨论走到交付见 [task-chain.md](task-chain.md)。
+链怎么从讨论走到交付见 [task-chain.md](../collab/task-chain.md)。
 
 ## 八、联动
 
 - 模块工具的声明与执行见 [MODULE_SPEC.md](../../MODULE_SPEC.md)；
 - 会话、围栏与并发模型见 [ARCHITECTURE.md](../../ARCHITECTURE.md)；
-- 呈现层入站契约见 [contracts.md](contracts.md)；
+- 呈现层入站契约见 [contracts.md](../presentation/contracts.md)；
 - 产品行为（讨论 / 审查关卡 / 任务链）见 [PRODUCT.md](../../PRODUCT.md)；
 - 测试层级与缺口账见 [TESTING.md](../../TESTING.md)。

@@ -167,7 +167,7 @@ pub(crate) fn tool_decls(ctx: &MemberTools) -> ToolDecls {
     let mut decls = ToolDecls::default();
     let mut taken: Vec<String> = Vec::new();
     // **只声明这个席位拿到的工具**（判据与执行时校验同一份 allowed）：声明了却调不动没有意义，
-    // 模型会照着声明去调，被拒一次就白烧一轮（见 docs/architecture/tools-and-roles.md 二）。
+    // 模型会照着声明去调，被拒一次就白烧一轮（见 docs/tools/tools-and-roles.md 二）。
     for (name, schema) in &ctx.builtin_tools {
         if !ctx.allowed.iter().any(|t| t == name) {
             continue;

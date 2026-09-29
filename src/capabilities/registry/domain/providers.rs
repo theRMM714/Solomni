@@ -26,7 +26,7 @@ pub struct ModelEntry {
     #[serde(default)]
     pub tools: ToolMode,
     /// 这个模型的**上下文窗口**（tokens）。缺省给保守值：宁可早压，也别撑爆。
-    /// 自动压缩按它 × 设置的百分比触发（见 docs/architecture/session-model.md 六）。
+    /// 自动压缩按它 × 设置的百分比触发（见 docs/session/session-model.md 六）。
     #[serde(default = "default_context_tokens")]
     pub context: u64,
 }

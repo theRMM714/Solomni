@@ -67,7 +67,7 @@ impl MemberTools {
     /// **本回合的工具说明块**：核心按这一回合的身份（ids）现渲染，只列这一回合真能调的。
     ///
     /// 为什么不是系统提示里的整本总表：模型会照着给的清单去调工具，列出必然被拒的等于请它去撞墙；
-    /// 总表只该留在核心手里当校验判据（见 docs/architecture/tools-and-roles.md 二、三之二）。
+    /// 总表只该留在核心手里当校验判据（见 docs/tools/tools-and-roles.md 二、三之二）。
     /// 为什么随回合：同一个 agent 会话会用两种身份干活（说话 / 干活），能用的工具随回合变。
     /// 空串 = 这一回合没有可用工具（调用方不注入空块）。
     pub(crate) fn tools_block(&self, ids: &[String], with_modules: bool) -> String {

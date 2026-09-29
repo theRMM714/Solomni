@@ -44,7 +44,7 @@ fn main() {
     if let Some(i) = args.iter().position(|a| a == "--fence-verify") {
         std::process::exit(diagnostics::fence_verify(&args, i));
     }
-    // 入站契约（机器可读）：HTTP 路由目录的唯一定义（见 docs/architecture/contracts.md）。
+    // 入站契约（机器可读）：HTTP 路由目录的唯一定义（见 docs/presentation/contracts.md）。
     if args.iter().any(|a| a == "--print-routes") {
         diagnostics::print_routes();
         std::process::exit(0);

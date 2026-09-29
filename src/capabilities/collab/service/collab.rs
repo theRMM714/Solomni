@@ -1,5 +1,5 @@
 //! 协作会话状态机：建组 → 讨论 → 整理（出任务链）→ **审查关卡** → 链驱动（节点各跑在子会话里）
-//! → 节点验收 → 总验收（拉模式）。见 docs/architecture/task-chain.md。
+//! → 节点验收 → 总验收（拉模式）。见 docs/collab/task-chain.md。
 //! 前端经 Conductor 门面按 pending 驱动（set_task → confirm_slate? → begin → answer…），泵式收事件。
 //! 发言席只有 agent：名单是 Vec<AgentMeta>（名字 / 模块 / 模型），member id = agent 实例名。
 //! 名单的权威来源是会话 meta.agents（代拟确认后由 Conductor 写回 meta）；转录只用来恢复讨论进度。
@@ -43,7 +43,7 @@ impl CollabSession {
 
 impl CollabSession {
     /// 成员一轮之后的处置：**策略在 Discussion**（两条驱动共用同一份判定，
-    /// 见 docs/architecture/session-model.md 二）。用户主动中止时计数不再工作。
+    /// 见 docs/session/session-model.md 二）。用户主动中止时计数不再工作。
     pub fn after_member_turn(
         &mut self,
         i: usize,

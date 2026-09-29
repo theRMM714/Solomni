@@ -19,7 +19,7 @@
 
 ## 二、子会话 = 单 agent 会话
 
-> **会话模型（主/子会话、回合、发言标记、回档同步、压缩）见 [session-model.md](session-model.md)。**
+> **会话模型（主/子会话、回合、发言标记、回档同步、压缩）见 [session-model.md](../session/session-model.md)。**
 > 该文档与本节是同一套实现的两面：主/子会话、回合、发言标记、回档同步与压缩都在那里定义。
 
 - 子会话是**普通单 agent 会话**（独立上下文、转录、围栏），复用全部既有机制；**不新增会话类型**。
@@ -94,6 +94,6 @@ TaskNode  { id, title, objective, assignee, deps, status, sub_session, acceptanc
 
 ## 八、联动
 
-- 工具与角色（planner 建链、orchestrator 推进）：[tools-and-roles.md](tools-and-roles.md)
+- 工具与角色（planner 建链、orchestrator 推进）：[tools-and-roles.md](../tools/tools-and-roles.md)
 - 产品行为：[PRODUCT.md](../../PRODUCT.md)；会话与并发模型：[ARCHITECTURE.md](../../ARCHITECTURE.md)
-- 呈现层入站契约：[contracts.md](contracts.md)
+- 呈现层入站契约：[contracts.md](../presentation/contracts.md)

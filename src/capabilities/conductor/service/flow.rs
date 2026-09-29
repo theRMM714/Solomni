@@ -50,7 +50,7 @@ impl Conductor {
     }
 
     /// 推进协作（**核心驱动**）：泵只决定"该问谁"，核心取该 agent 的会话跑这一回合再交回。
-    /// 契约见 docs/architecture/session-model.md 二之二。事件由调用方统一落档。
+    /// 契约见 docs/session/session-model.md 二之二。事件由调用方统一落档。
     pub fn collab_advance(&mut self, sid: &str) -> Result<Vec<SessionEvent>, String> {
         let mut out = Vec::new();
         // 安全网计数（见循环尾）：提醒/重问必须有终点，不能让驱动空转。
@@ -337,7 +337,7 @@ impl Conductor {
             .cloned()
             .ok_or_else(|| format!("名单里没有 {}", agent))?;
         // **一个 agent 一个会话**（不是一节点一会话）：它在这场工作里的完整经历，
-        // 讨论与执行不分家（见 docs/architecture/session-model.md）。同名即复用，幂等。
+        // 讨论与执行不分家（见 docs/session/session-model.md）。同名即复用，幂等。
         let child = format!("{}--{}", parent, agent);
         if self.history.load(&child).is_ok() {
             return Ok(child);

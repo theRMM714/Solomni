@@ -52,7 +52,7 @@ impl History for SessionService {
 // 事实外送用的是会话的行格式（`SessionEvent` / `LineView` / `ToolCallView`），
 // 正文分片用的是 `stream_piece`。所以它是"在会话的工具面上跑一次核心操作并产出会话行"的用例，
 // 归会话能力；**调用侧的取消/分片包装也只有这一处**（协作会话、核心推荐、单 agent 都走它）。
-// 语义见 docs/architecture/tools-and-roles.md（核心操作必须走工具调用 + 只读核实回路）。
+// 语义见 docs/tools/tools-and-roles.md（核心操作必须走工具调用 + 只读核实回路）。
 
 /// 原文前 n 个字符（如实报错时带上一点现场；按字符切，不切坏多字节）。
 fn head_chars(s: &str, n: usize) -> String {
@@ -148,7 +148,7 @@ pub fn reply_msgs(
 
 /// 核心 AI 的一次**操作**：声明该角色的工具面、跑一次模型、从**工具调用参数**里取载荷。
 ///
-/// 为什么必须走工具调用（见 docs/architecture/tools-and-roles.md）：核心操作会驱动核心走下一步
+/// 为什么必须走工具调用（见 docs/tools/tools-and-roles.md）：核心操作会驱动核心走下一步
 /// （建任务链、判交付、确认名单、推进状态机），属于"操作"而不是"说话"——
 /// 正文里手写 JSON 既没有 schema 校验、也不进工具台账，写坏就整轮失败。
 ///

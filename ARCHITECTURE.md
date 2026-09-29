@@ -61,14 +61,14 @@ cli / web ──▶ capabilities（含协调业务 conductor）──▶ kernel
 
 这两块是**查阅型细则**，拆出去只有一份：
 
-- 逐个文件讲 `capabilities/`（含 `conductor/`）/ `kernel/` / `entry/` / `cli/` / `web/` 各干什么：[docs/architecture/module-map.md](docs/architecture/module-map.md)。
-- 呈现层入站契约（能力接口、事件台、命令/事件规则）与机器可读的 HTTP 路由目录：[docs/architecture/contracts.md](docs/architecture/contracts.md)。
-- 系统工具总表、角色表与"谁能用哪些工具"（含越权校验与提示词按角色分配）：[docs/architecture/tools-and-roles.md](docs/architecture/tools-and-roles.md)。
-- 协作如何从讨论走到交付（审查关卡、任务链、子会话、验收）：[docs/architecture/task-chain.md](docs/architecture/task-chain.md)。
-- 提示词册（`prompts/`）的结构与键清单：[docs/architecture/prompts.md](docs/architecture/prompts.md)。
-- 业务边界判据与硬要求（R1–R13）：见 §九；逐文件的能力清单见 [docs/architecture/module-map.md](docs/architecture/module-map.md)。
+- 逐个文件讲某个单元（`capabilities/` 含 `conductor/`、`kernel/`、`entry/`、`presentation/`）各干什么：各单元自己的 `docs/<单元>/module-map.md`（单元划分与完整路由见 [AGENTS.md](AGENTS.md)「文档路由」）。
+- 呈现层入站契约（能力接口、事件台、命令/事件规则）与机器可读的 HTTP 路由目录：[docs/presentation/contracts.md](docs/presentation/contracts.md)。
+- 系统工具总表、角色表与"谁能用哪些工具"（含越权校验与提示词按角色分配）：[docs/tools/tools-and-roles.md](docs/tools/tools-and-roles.md)。
+- 协作如何从讨论走到交付（审查关卡、任务链、子会话、验收）：[docs/collab/task-chain.md](docs/collab/task-chain.md)。
+- 提示词册（`prompts/`）的结构与键清单：[docs/prompt/prompts.md](docs/prompt/prompts.md)。
+- 业务边界判据与硬要求（R1–R13）：见 §九；逐文件的能力清单见各单元的 `docs/<单元>/module-map.md`。
 
-**路由表由契约测试机器比对**（`src/tests/routes.rs` 直接读 `docs/architecture/contracts.md`）：
+**路由表由契约测试机器比对**（`src/tests/routes.rs` 直接读 `docs/presentation/contracts.md`）：
 表与 `web/routes.rs` 的 `ROUTES` 对不上就是测试失败。
 
 ## 四、运行日志（Log 端口）
@@ -93,7 +93,7 @@ cli / web ──▶ capabilities（含协调业务 conductor）──▶ kernel
 - 路径类占位符（`{{work_root}}` 等）由协调业务在运行时替换成**真实根目录**后才交给 AI——仓库里永远不出现机器路径。
 
 提示词册的**文件与键清单**（每份文件里有什么键、每个键干什么）只有一份：
-[docs/architecture/prompts.md](docs/architecture/prompts.md)。
+[docs/prompt/prompts.md](docs/prompt/prompts.md)。
 
 - **界面通知**（`[建组]`、`[上限]` 这类）是呈现层文案，**不属于**提示词册。
 - **不进册子的两类**（有意留在代码里）：①**行身份是结构化字段**（`LineView` 的 `speaker` / `verb` / `kind`）：
@@ -264,7 +264,7 @@ session/<工作名>/
 | **R5** | **并发模型不变式**：单线程命令队列 + 能力间同步调用，**核心状态不加锁** |
 | **R6** | **共享事实类型只属于 `kernel`**，禁止各业务复制 DTO |
 | **R7** | **不留兼容层**：项目是 GREEN FIELD，**只维护当前唯一实现**——旧实现直接删，不留转发壳或历史说明 |
-| **R8** | **文档同步**：改结构必须同一次改 `ARCHITECTURE.md` / `docs/architecture/module-map.md` / 相关细则 / `AGENTS.md` 路由表 |
+| **R8** | **文档同步**：改结构必须同一次改 `ARCHITECTURE.md` / `docs/<单元>/module-map.md` / 相关细则 / `AGENTS.md` 路由表 |
 | **R9** | **跨平台与路径**：一律 `PathBuf` 组件拼接；对外用 `/`；不假设平台 |
 | **R10** | **测试跟着业务分区走**：`capabilities/<名称>/` ↔ `src/tests/<名称>.rs`（用例多的能力按域分成 `src/tests/<名称>/` 子模块，如 `tools/` 与 `collab/`），单文件 ≤ 2000 行 |
 | **R11** | **测试入口 = 生产入口**：禁止 `#[cfg(test)]` 专用语义入口 |
@@ -280,6 +280,6 @@ session/<工作名>/
 - **foreignImpl**：不得给别的能力的类型写 `impl`；
 - **coreCycles**：能力节点图无环；
 - **reverse** / **presentation**：能力不反向依赖入口层或呈现层。
-- **moduleMap** / **docRefs**：`docs/architecture/module-map.md` 与磁盘**双向一致**（表里的路径都存在、`src/` 下的实现文件都有行）；文档里的文档链接与代码注释里的 `docs/**.md` 引用都存在。
+- **moduleMap** / **docRefs**：各单元的 `docs/<单元>/module-map.md` 合起来与磁盘**双向一致**（表里的路径都存在、`src/` 下的实现文件都有行）；文档里的文档链接与代码注释里的 `docs/**.md` 引用都存在。
 
 **当前基线为空（零豁免）**：任一判据不成立即报错；豁免条目一旦不再成立，门禁报「基线豁免已过期」强制销账。

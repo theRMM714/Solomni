@@ -1,6 +1,6 @@
 //! **核心手柄**：把 `Conductor` 搬到它自己的执行线程，命令与事件都经这里。
 //!
-//! 队列只占「取 / 交」两步：**长步骤生成在核心线程上跑**（见 docs/architecture/contracts.md）；
+//! 队列只占「取 / 交」两步：**长步骤生成在核心线程上跑**（见 docs/presentation/contracts.md）；
 //! 停止 / 取消由 `kernel::api::JobRegistry` 承担、不进队列，所以生成期间照样立刻生效。
 
 use super::*;
@@ -480,7 +480,7 @@ impl ConductorHandle {
     /// 协作的长步骤（开始讨论 / 回答 / 继续）：与单 agent 同一条 own-and-return——
     /// 队列只占"取/交"两步，泵在工作线程上跑；事件**边产边送**事件台，界面因此能看着讨论推进。
     ///
-    /// **核心驱动**（见 docs/architecture/session-model.md 二之二）：泵只决定"该问谁"，
+    /// **核心驱动**（见 docs/session/session-model.md 二之二）：泵只决定"该问谁"，
     /// 成员回合由主线程取该 agent 的会话去跑（它才拿得到那些会话）。所以泵线程与主线程**握手**：
     /// 泵让出 → 发 AskReq → 主线程跑完回 MemberTurn → 泵继续。
     pub(crate) fn collab_generation(

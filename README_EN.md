@@ -17,8 +17,8 @@ This project is **not about attaching tools to an agent — it gives a tool or s
   dependency from this project**. Your tools stay yours: without this product they still run.
 - **Agents speak, not modules**: an agent = a name + the modules it holds + its model + its own sandbox.
   Whichever agent a module is loaded into, that agent speaks in its name.
-- **The form follows the task**: the same commons of capabilities can project as one AI holding several
-  capabilities (single agent), or as several AIs negotiating with separate powers (collaboration).
+- **The form follows the task**: the same set of modules can be assembled as one AI holding several
+  capabilities (single agent) or as several AIs each holding one (collaboration); when the task ends the
   When the task ends the projection dissolves; the capabilities still belong to the modules.
 - **Local by design**: the web UI binds `127.0.0.1` only; keys live in the local registry and in outbound
   calls only, and never enter prompts, transcripts, logs or module workspaces.
@@ -104,7 +104,7 @@ The C++ module has to be compiled once; the command and the reason are in
 
 - Not a model or a provider: channels and keys are product resources, and models are replaceable.
 - Not a runtime that schedules resident processes: modules never sit around waiting; they work once per task.
-- It does not favour either extreme: centralised and decentralised live on one orchestration plane, and the
+- It is not a resident service: a module appears when you drop it in and disappears when you take it out.
   user picks the form.
 
 ## Document guide
@@ -123,8 +123,8 @@ The C++ module has to be compiled once; the command and the reason are in
 
 > **Two layers**: the repository root holds the **portals** (positioning and references) and `docs/` holds the
 > **details** — every fact has exactly one home. Details: `docs/testing/` (levels, doubles and the port matrix,
-> quality and isolation, entry points and CI, gaps and acceptance, module delivery) and `docs/architecture/`
-> (module map, inbound contract and route table, system tools and roles, task chain and sub-sessions, session
-> model, prompt booklet). The full routing table is in [AGENTS.md](AGENTS.md).
+> quality and isolation, entry points and CI, gaps and acceptance, module delivery); each business and
+> mechanism unit has its own directory under `docs/<unit>/` (with a per-file `module-map.md`). The full
+> routing table is in [AGENTS.md](AGENTS.md).
 
 Apache License 2.0 · see [LICENSE](LICENSE)

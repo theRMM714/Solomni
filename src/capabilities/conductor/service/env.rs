@@ -94,7 +94,7 @@ impl Conductor {
     }
 
     /// 自动压缩的**字符预算** = 该模型的上下文窗口 × 设置百分比 × 4（≈ 字符/token 的粗估）。
-    /// 百分比为 0 = 关。见 docs/architecture/session-model.md 六。
+    /// 百分比为 0 = 关。见 docs/session/session-model.md 六。
     pub(crate) fn compact_budget(&self, model: Option<&str>) -> usize {
         let pct = self.registry.app().compact_at_percent as u64;
         if pct == 0 {
