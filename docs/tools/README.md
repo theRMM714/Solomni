@@ -1,6 +1,7 @@
 # tools（工具与围栏）
 
 > 系统工具、角色表与一次工具执行的围栏。
+> 系统侧的门户是 [SYSTOOL.md](../../SYSTOOL.md)（工具、角色、路径模型、回报与验收）。
 > 本目录是该单元的唯一细则入口：本页 → [`module-map.md`](module-map.md)（逐文件职责，机器比对）→ 其它细则。
 > 分层与依赖方向见 [ARCHITECTURE.md](../../ARCHITECTURE.md) §一，业务边界判据见 §九；测试规范见 [TESTING.md](../../TESTING.md)。
 
