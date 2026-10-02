@@ -1,0 +1,200 @@
+2026-10-02 11:42:45.152 E  kernel[0:63d1] [com.apple.sandbox.reporting:violation] Sandbox: sh(7659) deny(1) file-read-data /dev/dtracehelper
+2026-10-02 11:42:45.156 E  kernel[0:63d2] [com.apple.sandbox.reporting:violation] Sandbox: bash(7659) deny(1) file-read-data /dev/dtracehelper
+2026-10-02 11:42:45.157 E  kernel[0:63d2] [com.apple.sandbox.reporting:violation] Sandbox: bash(7659) deny(1) file-read-data /dev/tty
+2026-10-02 11:42:45.161 E  kernel[0:63d2] [com.apple.sandbox.reporting:violation] Sandbox: bash(7659) deny(1) file-write-create /Users/runner/work/Solomni/Solomni/target/test-scratch/fence-ro-shared/should-not-exist.txt
+2026-10-02 11:42:45.189 E  kernel[0:63d5] [com.apple.sandbox.reporting:violation] Sandbox: solomni(7662) deny(1) file-read-data /Users/runner/work/Solomni/Solomni/target/test-scratch/fence-ro-inside/solomni-seatbelt-selfcheck-7661
+2026-10-02 11:42:45.207 E  kernel[0:63e7] [com.apple.sandbox.reporting:violation] Sandbox: sh(7680) deny(1) file-read-data /dev/dtracehelper
+2026-10-02 11:42:45.210 E  kernel[0:63e8] [com.apple.sandbox.reporting:violation] Sandbox: bash(7680) deny(1) file-read-data /dev/dtracehelper
+2026-10-02 11:42:45.211 E  kernel[0:63e8] [com.apple.sandbox.reporting:violation] Sandbox: bash(7680) deny(1) file-read-data /dev/tty
+2026-10-02 11:42:45.245 E  kernel[0:63ed] [com.apple.sandbox.reporting:violation] Sandbox: solomni(7683) deny(1) file-read-data /Users/runner/work/Solomni/Solomni/target/test-scratch/fence-verify/solomni-seatbelt-selfcheck-7682
+2026-10-02 11:42:46.286 E  kernel[0:6270] [com.apple.sandbox.reporting:violation] Sandbox: dasd(135) deny(1) user-preference-write com.apple.dasd.dailyperiodic
+2026-10-02 11:42:46.875 E  kernel[0:6468] [com.apple.sandbox.reporting:violation] 1 duplicate report for Sandbox: dasd(135) deny(1) user-preference-write com.apple.dasd.dailyperiodic
+2026-10-02 11:42:48.982 Df runningboardd[164:58b2] [com.apple.runningboard:job_oversize] '2650FD27-3CF3-4E82-914E-B3FD8EA3F63E' Submitting extension overlay (host PID 5998, path /System/Library/ExtensionKit/Extensions/ODDIExperimentationExtension.appex/Contents/MacOS/ODDIExperimentationExtension):
+<dictionary: 0x84aeca760> { count = 2, transaction: 0, voucher = 0x0, contents =
+	"XPCService" => <dictionary: 0x84aeca940> { count = 14, transaction: 0, voucher = 0x0, contents =
+		"_ManagedBy" => <string: 0x84b3a2820> { string cache = 0x0, length = 22, contents = "com.apple.runningboard" }
+		"RunLoopType" => <string: 0x84b3a2670> { string cache = 0x0, length = 9, contents = "NSRunLoop" }
+		"Platform" => <int64: 0xb8fb6dff5eca870f>: 1
+		"JoinExistingSession" => <bool: 0x1f3649cb0>: true
+		"_SandboxProfile" => <string: 0x84b3a28b0> { string cache = 0x0, length = 11, contents = "application" }
+		"_AdditionalSubServices" => <dictionary: 0x84aec87e0> { count = 1, transaction: 0, voucher = 0x0, contents =
+			"xpc-session" => <bool: 0x1f3649cb0>: true
+		}
+		"_AdditionalProperties" => <dictionary: 0x84aecb000> { count = 1, transaction: 0, voucher = 0x0, contents =
+			"RunningBoard" => <dictionary: 0x84aecb0c0> { count = 3, transaction: 0, voucher = 0x0, contents =
+				"RunningBoardLaunchedIdentity" => <dictionary: 0x84aec86c0> { count = 7, transaction: 0, voucher = 0x0, contents =
+					"e" => <int64: 0xb8fb6dff5eca88af>: 501
+					"TYPE" => <int64: 0xb8fb6dff5eca8727>: 4
+					"v" => <data: 0x84b1103c0>: { length = 207 bytes, contents = 0x7b226164646974696f6e616c456e7669726f6e6d656e7456... }
+					"h" => <int64: 0xb8fb6dff5eca3c77>: 5998
+					"i" => <string: 0x84b3a2a00> { string cache = 0x0, length = 43, contents = "com.apple.siri.ODDIExperimentationExtension" }
+					"r" => <int64: 0xb8fb6dff5eca8717>: 2
+					"H" => <dictionary: 0x84aecafa0> { count = 5, transaction: 0, voucher = 0x0, contents =
+						"l" => <string: 0x84b3a0060> { string cache = 0x0, length = 17, contents = "com.apple.mlhostd" }
+						"t" => <int64: 0xb8fb6dff5eca8717>: 2
+						"TYPE" => <int64: 0xb8fb6dff5eca8737>: 6
+						"a" => <int64: 0xb8fb6dff5eca88af>: 501
+						"p" => <int64: 0xb8fb6dff5eca8707>: 0
+					}
+				}
+				"RunningBoardLaunched" => <bool: 0x1f3649cb0>: true
+				"LaunchRequestEndpointIdentifiers" => <dictionary: 0x84aec8180> { count = 2, transaction: 0, voucher = 0x0, contents =
+					"com.apple.siri.ODDIExperimentationExtension.xpc-session" => <bool: 0x1f3649cb0>: true
+					"com.apple.siri.ODDIExperimentationExtension" => <bool: 0x1f3649cb0>: true
+				}
+			}
+		}
+		"EnvironmentVariables" => <dictionary: 0x84aecaf40> { count = 2, transaction: 0, voucher = 0x0, contents =
+			"EXTENSION_KIT_EXTENSION_TYPE" => <string: 0x84b3a2ac0> { string cache = 0x0, length = 1, contents = "1" }
+			"BSServiceDomains" => <string: 0x84b3a2220> { string cache = 0x0, length = 46, contents = "{"XPCService":{"Services":{"MainService":{}}}}" }
+		}
+		"_OmitSandboxParameters" => <bool: 0x1f3649cb0>: true
+		"_AbandonCoalition" => <bool: 0x1f3649cb0>: true
+		"_MultipleInstances" => <bool: 0x1f3649cb0>: true
+		"ServiceType" => <string: 0x84b3a25b0> { string cache = 0x0, length = 11, contents = "Application" }
+		"ProgramArguments" => <array: 0x84b3a2610> { count = 3, capacity = 8, contents =
+			0: <string: 0x84b3a1a10> { string cache = 0x0, length = 118, contents = "/System/Library/ExtensionKit/Extensions/ODDIExperimentationExtension.appex/Contents/MacOS/ODDIExperimentationExtension" }
+			1: <string: 0x84b3a29a0> { string cache = 0x0, length = 16, contents = "-LaunchArguments" }
+			2: <string: 0x84b3a2790> { string cache = 0x0, length = 128, contents = "eyJ0eXBlIjoxLCJzZXJ2aWNlTmFtZSI6ImNvbS5hcHBsZS5zaXJpLk9ERElFeHBlcmltZW50YXRpb25FeHRlbnNpb24iLCJlbmhhbmNlZFNlY3VyaXR5IjpmYWxzZX0=" }
+		}
+		"_ManagedBy_Services" => <array: 0x84b3a2520> { count = 2, capacity = 8, contents =
+			0: <string: 0x84b3a26a0> { string cache = 0x0, length = 43, contents = "com.apple.siri.ODDIExperimentationExtension" }
+			1: <string: 0x84b3a2ca0> { string cache = 0x0, length = 55, contents = "com.apple.siri.ODDIExperimentationExtension.xpc-session" }
+		}
+	}
+	"CFBundlePackageType" => <string: 0x84b3a3840> { string cache = 0x0, length = 4, contents = "XPC!" }
+}
+2026-10-02 11:42:49.025 A  ODDIExperimentationExtension[7823:6522] (libsystem_secinit.dylib) AppSandbox
+2026-10-02 11:42:49.315 Df secinitd[352:5368] ODDIExperimentationExtension[7823]: AppSandbox request successful
+2026-10-02 11:42:52.509 Df runningboardd[164:6532] [com.apple.runningboard:job_oversize] '2CC4E3B5-3BC9-4A17-8E63-84330A70F6FB' Submitting extension overlay (host PID 5998, path /System/Library/ExtensionKit/Extensions/ODDIMetricsExtension.appex/Contents/MacOS/ODDIMetricsExtension):
+<dictionary: 0x84af8e4c0> { count = 2, transaction: 0, voucher = 0x0, contents =
+	"XPCService" => <dictionary: 0x84af8fc00> { count = 14, transaction: 0, voucher = 0x0, contents =
+		"_ManagedBy" => <string: 0x84b3a1e90> { string cache = 0x0, length = 22, contents = "com.apple.runningboard" }
+		"RunLoopType" => <string: 0x84b3a0780> { string cache = 0x0, length = 9, contents = "NSRunLoop" }
+		"Platform" => <int64: 0xb8fb6dff5eca870f>: 1
+		"JoinExistingSession" => <bool: 0x1f3649cb0>: true
+		"_SandboxProfile" => <string: 0x84b3a1e60> { string cache = 0x0, length = 11, contents = "application" }
+		"_AdditionalSubServices" => <dictionary: 0x84af8fd80> { count = 1, transaction: 0, voucher = 0x0, contents =
+			"xpc-session" => <bool: 0x1f3649cb0>: true
+		}
+		"_AdditionalProperties" => <dictionary: 0x84af8f240> { count = 1, transaction: 0, voucher = 0x0, contents =
+			"RunningBoard" => <dictionary: 0x84af8d1a0> { count = 3, transaction: 0, voucher = 0x0, contents =
+				"RunningBoardLaunchedIdentity" => <dictionary: 0x84af8fae0> { count = 7, transaction: 0, voucher = 0x0, contents =
+					"e" => <int64: 0xb8fb6dff5eca88af>: 501
+					"TYPE" => <int64: 0xb8fb6dff5eca8727>: 4
+					"v" => <data: 0x84b113e80>: { length = 191 bytes, contents = 0x7b226164646974696f6e616c456e7669726f6e6d656e7456... }
+					"h" => <int64: 0xb8fb6dff5eca3c77>: 5998
+					"i" => <string: 0x84b3a0f60> { string cache = 0x0, length = 35, contents = "com.apple.siri.ODDIMetricsExtension" }
+					"r" => <int64: 0xb8fb6dff5eca8717>: 2
+					"H" => <dictionary: 0x84af8ff00> { count = 5, transaction: 0, voucher = 0x0, contents =
+						"l" => <string: 0x84b3a1d10> { string cache = 0x0, length = 17, contents = "com.apple.mlhostd" }
+						"t" => <int64: 0xb8fb6dff5eca8717>: 2
+						"TYPE" => <int64: 0xb8fb6dff5eca8737>: 6
+						"a" => <int64: 0xb8fb6dff5eca88af>: 501
+						"p" => <int64: 0xb8fb6dff5eca8707>: 0
+					}
+				}
+				"RunningBoardLaunched" => <bool: 0x1f3649cb0>: true
+				"LaunchRequestEndpointIdentifiers" => <dictionary: 0x84af8fb40> { count = 2, transaction: 0, voucher = 0x0, contents =
+					"com.apple.siri.ODDIMetricsExtension" => <bool: 0x1f3649cb0>: true
+					"com.apple.siri.ODDIMetricsExtension.xpc-session" => <bool: 0x1f3649cb0>: true
+				}
+			}
+		}
+		"EnvironmentVariables" => <dictionary: 0x84af8fa80> { count = 2, transaction: 0, voucher = 0x0, contents =
+			"EXTENSION_KIT_EXTENSION_TYPE" => <string: 0x84b3a0de0> { string cache = 0x0, length = 1, contents = "1" }
+			"BSServiceDomains" => <string: 0x84b3a1bf0> { string cache = 0x0, length = 46, contents = "{"XPCService":{"Services":{"MainService":{}}}}" }
+		}
+		"_OmitSandboxParameters" => <bool: 0x1f3649cb0>: true
+		"_AbandonCoalition" => <bool: 0x1f3649cb0>: true
+		"_MultipleInstances" => <bool: 0x1f3649cb0>: true
+		"ServiceType" => <string: 0x84b3a1680> { string cache = 0x0, length = 11, contents = "Application" }
+		"ProgramArguments" => <array: 0x84b3a0930> { count = 3, capacity = 8, contents =
+			0: <string: 0x84b3a2700> { string cache = 0x0, length = 102, contents = "/System/Library/ExtensionKit/Extensions/ODDIMetricsExtension.appex/Contents/MacOS/ODDIMetricsExtension" }
+			1: <string: 0x84b3a0f30> { string cache = 0x0, length = 16, contents = "-LaunchArguments" }
+			2: <string: 0x84b3a09c0> { string cache = 0x0, length = 116, contents = "eyJ0eXBlIjoxLCJzZXJ2aWNlTmFtZSI6ImNvbS5hcHBsZS5zaXJpLk9ERElNZXRyaWNzRXh0ZW5zaW9uIiwiZW5oYW5jZWRTZWN1cml0eSI6ZmFsc2V9" }
+		}
+		"_ManagedBy_Services" => <array: 0x84b3a04e0> { count = 2, capacity = 8, contents =
+			0: <string: 0x84b3a0f90> { string cache = 0x0, length = 35, contents = "com.apple.siri.ODDIMetricsExtension" }
+			1: <string: 0x84b3a1aa0> { string cache = 0x0, length = 47, contents = "com.apple.siri.ODDIMetricsExtension.xpc-session" }
+		}
+	}
+	"CFBundlePackageType" => <string: 0x84b3a1110> { string cache = 0x0, length = 4, contents = "XPC!" }
+}
+2026-10-02 11:42:52.562 A  ODDIMetricsExtension[7858:6577] (libsystem_secinit.dylib) AppSandbox
+2026-10-02 11:42:52.828 Df secinitd[352:5368] ODDIMetricsExtension[7858]: AppSandbox request successful
+2026-10-02 11:42:54.429 A  recentsd[7962:66ae] (libsystem_secinit.dylib) AppSandbox
+2026-10-02 11:42:54.513 E  kernel[0:5104] [com.apple.sandbox.reporting:violation] Sandbox: mobileassetd(177) deny(1) file-read-data /Library/Preferences/com.apple.networkextension.uuidcache.plist
+2026-10-02 11:42:55.738 Df secinitd[352:5368] recentsd[7962]: AppSandbox request successful
+2026-10-02 11:42:55.933 E  kernel[0:6607] [com.apple.sandbox.reporting:violation] Sandbox: parsec-fbf(7913) deny(1) file-read-data /Users/runner/Library/Caches/GeoServices/DirectReadConfigStore.plist
+2026-10-02 11:42:56.064 E  kernel[0:675d] [com.apple.sandbox.reporting:violation] Sandbox: solomni(8056) deny(1) file-read-metadata /var
+2026-10-02 11:42:56.609 E  kernel[0:678d] [com.apple.sandbox.reporting:violation] Sandbox: solomni(8061) deny(1) file-read-data /Users/runner/work/Solomni/Solomni/tests/cross-platform/e2e/root/session/e2e-multi-1790941376568/双子形/solomni-seatbelt-selfcheck-8060
+2026-10-02 11:42:56.626 E  kernel[0:679f] [com.apple.sandbox.reporting:violation] Sandbox: sh(8079) deny(1) file-read-data /dev/dtracehelper
+2026-10-02 11:42:56.637 E  kernel[0:67a0] [com.apple.sandbox.reporting:violation] Sandbox: bash(8079) deny(1) file-read-data /dev/dtracehelper
+2026-10-02 11:42:56.646 E  kernel[0:67a0] [com.apple.sandbox.reporting:violation] Sandbox: bash(8079) deny(1) file-read-data /dev/tty
+2026-10-02 11:42:56.666 E  kernel[0:67a1] [com.apple.sandbox.reporting:violation] Sandbox: python3.14(8079) deny(1) file-read-data /dev/dtracehelper
+2026-10-02 11:42:56.680 E  kernel[0:67a1] [com.apple.sandbox.reporting:violation] Sandbox: python3.14(8079) deny(1) file-read-data /dev/autofs_nowait
+2026-10-02 11:42:56.680 E  kernel[0:67a1] [com.apple.sandbox.reporting:violation] Sandbox: python3.14(8079) deny(1) file-read-data /Users/runner/.CFUserTextEncoding
+2026-10-02 11:42:56.680 E  kernel[0:67a1] [com.apple.sandbox.reporting:violation] Sandbox: python3.14(8079) deny(1) file-read-data /dev/autofs_nowait
+2026-10-02 11:42:56.680 E  kernel[0:67a1] [com.apple.sandbox.reporting:violation] Sandbox: python3.14(8079) deny(1) file-read-data /Users/runner/.CFUserTextEncoding
+2026-10-02 11:42:56.689 E  kernel[0:67a3] [com.apple.sandbox.reporting:violation] Sandbox: Python(8079) deny(1) file-read-data /dev/dtracehelper
+2026-10-02 11:42:56.838 E  kernel[0:500a] [com.apple.sandbox.reporting:violation] Sandbox: parsec-fbf(7913) deny(1) mach-lookup com.apple.coreservices.quarantine-resolver
+2026-10-02 11:42:56.838 Df launchd[1:500a] [gui/501 [100002]:] denied lookup: name = com.apple.coreservices.quarantine-resolver, requestor = parsec-fbf[7913], error = 159: Sandbox restriction
+2026-10-02 11:42:56.838 Df launchd[1:4a5e] [gui/501 [100002]:] denied lookup: name = com.apple.coreservices.quarantine-resolver, flags = 0x9, requestor = parsec-fbf[7913], error = 159: Sandbox restriction
+2026-10-02 11:42:56.844 Df launchd[1:4a5e] [gui/501 [100002]:] denied lookup: name = com.apple.coreservices.quarantine-resolver, requestor = parsec-fbf[7913], error = 159: Sandbox restriction
+2026-10-02 11:42:56.844 Df launchd[1:500a] [gui/501 [100002]:] denied lookup: name = com.apple.coreservices.quarantine-resolver, flags = 0x9, requestor = parsec-fbf[7913], error = 159: Sandbox restriction
+2026-10-02 11:42:56.850 E  kernel[0:6756] [com.apple.sandbox.reporting:violation] 3 duplicate reports for Sandbox: parsec-fbf(7913) deny(1) mach-lookup com.apple.coreservices.quarantine-resolver
+2026-10-02 11:42:56.850 E  kernel[0:6756] [com.apple.sandbox.reporting:violation] Sandbox: parsec-fbf(7913) deny(1) file-read-data /Users/runner/Library/Caches/GeoServices
+2026-10-02 11:42:57.037 E  kernel[0:67d6] [com.apple.sandbox.reporting:violation] Sandbox: solomni(8081) deny(1) file-read-data /Users/runner/work/Solomni/Solomni/tests/cross-platform/e2e/root/session/e2e-abspath-1790941376989/工具手/solomni-seatbelt-selfcheck-8080
+2026-10-02 11:42:57.056 E  kernel[0:67e8] [com.apple.sandbox.reporting:violation] Sandbox: sh(8099) deny(1) file-read-data /dev/dtracehelper
+2026-10-02 11:42:57.059 E  kernel[0:67e9] [com.apple.sandbox.reporting:violation] Sandbox: bash(8099) deny(1) file-read-data /dev/dtracehelper
+2026-10-02 11:42:57.060 E  kernel[0:67e9] [com.apple.sandbox.reporting:violation] Sandbox: bash(8099) deny(1) file-read-data /dev/tty
+2026-10-02 11:42:57.068 E  kernel[0:67ea] [com.apple.sandbox.reporting:violation] Sandbox: python3.14(8099) deny(1) file-read-data /dev/dtracehelper
+2026-10-02 11:42:57.071 E  kernel[0:67ea] [com.apple.sandbox.reporting:violation] Sandbox: python3.14(8099) deny(1) file-read-data /dev/autofs_nowait
+2026-10-02 11:42:57.071 E  kernel[0:67ea] [com.apple.sandbox.reporting:violation] Sandbox: python3.14(8099) deny(1) file-read-data /Users/runner/.CFUserTextEncoding
+2026-10-02 11:42:57.072 E  kernel[0:67ea] [com.apple.sandbox.reporting:violation] Sandbox: python3.14(8099) deny(1) file-read-data /dev/autofs_nowait
+2026-10-02 11:42:57.072 E  kernel[0:67ea] [com.apple.sandbox.reporting:violation] Sandbox: python3.14(8099) deny(1) file-read-data /Users/runner/.CFUserTextEncoding
+2026-10-02 11:42:57.078 E  kernel[0:67eb] [com.apple.sandbox.reporting:violation] Sandbox: Python(8099) deny(1) file-read-data /dev/dtracehelper
+2026-10-02 11:42:57.253 E  kernel[0:67ff] [com.apple.sandbox.reporting:violation] Sandbox: solomni(8101) deny(1) file-read-data /Users/runner/work/Solomni/Solomni/tests/cross-platform/e2e/root/session/e2e-prose-1790941377225/双子形2/solomni-seatbelt-selfcheck-8100
+2026-10-02 11:42:57.276 E  kernel[0:6811] [com.apple.sandbox.reporting:violation] Sandbox: sh(8119) deny(1) file-read-data /dev/dtracehelper
+2026-10-02 11:42:57.278 E  kernel[0:6812] [com.apple.sandbox.reporting:violation] Sandbox: bash(8119) deny(1) file-read-data /dev/dtracehelper
+2026-10-02 11:42:57.279 E  kernel[0:6812] [com.apple.sandbox.reporting:violation] Sandbox: bash(8119) deny(1) file-read-data /dev/tty
+2026-10-02 11:42:57.290 E  kernel[0:6813] [com.apple.sandbox.reporting:violation] Sandbox: python3.14(8119) deny(1) file-read-data /dev/dtracehelper
+2026-10-02 11:42:57.296 E  kernel[0:6813] [com.apple.sandbox.reporting:violation] Sandbox: python3.14(8119) deny(1) file-read-data /dev/autofs_nowait
+2026-10-02 11:42:57.297 E  kernel[0:6813] [com.apple.sandbox.reporting:violation] Sandbox: python3.14(8119) deny(1) file-read-data /Users/runner/.CFUserTextEncoding
+2026-10-02 11:42:57.297 E  kernel[0:6813] [com.apple.sandbox.reporting:violation] Sandbox: python3.14(8119) deny(1) file-read-data /dev/autofs_nowait
+2026-10-02 11:42:57.297 E  kernel[0:6813] [com.apple.sandbox.reporting:violation] Sandbox: python3.14(8119) deny(1) file-read-data /Users/runner/.CFUserTextEncoding
+2026-10-02 11:42:57.306 E  kernel[0:6814] [com.apple.sandbox.reporting:violation] Sandbox: Python(8119) deny(1) file-read-data /dev/dtracehelper
+2026-10-02 11:42:57.978 Df mobileassetd[177:5e97] [com.apple.mobileassetd:Auto] {MADAutoAssetAuthorizationPolicy}(issueSandboxExtensionForAuditToken) Set sandbox extension for audit token at path: /System/Library/AssetsV2/com_apple_MobileAsset_UAF_Siri_UnderstandingASRHammer/purpose_auto
+2026-10-02 11:42:57.978 Df mobileassetd[177:5e97] [com.apple.mobileassetd:AutoControl] [clientReqs:4|setJobs:0] {_updateSandboxExtensionForResponse} MADAutoAssetAuthorizationPolicy successfully set sandbox extension for response message | assetType=com.apple.MobileAsset.UAF.Siri.UnderstandingASRHammer, path=/System/Library/AssetsV2/com_apple_MobileAsset_UAF_Siri_UnderstandingASRHammer/purpose_auto, responseMessage:SUCoreConnectMessage(clientID:2C15952A-C898-4382-92B8-7A5FA723C8DF.<1005>.<177>|type:SERVER_MESSAGE|name:MA-AUTO-SET(REPLY):LOCK_ATOMIC), clientRequest:[clientID:2C15952A-C898-4382-92B8-7A5FA723C8DF.<1005>|requestUUID:6F77F8A6-1DF2-4525-B027-3B05C2BFEBA1|requestMessage:MA-AUTO-SET:LOCK_ATOMIC[instance:domainName:com.apple.UnifiedAssetFramework|clientName:manager|processName:assetsubscriptiond|pid:1005|setIdentifier:com.apple.siri.asr.hammer|atomicInstance:N|entries:N(WhenTargeting:N)][desire:clientAssetSetPolicy:user:N||lockInhibitsRemoval:N|supportingShortTermLocks:Y|allowCheckDownload(OnBattery:N,WhenBatteryLow:N,WhenCPUHigh:N,OverExpensive:N,OverCellular:N)|blockCheckDownload:N||desireReason:manager in com.apple.UnifiedAssetFramework locking latest version of com.apple.siri.asr.hammer|awaitDowload:Y|lockSecs:NO_WAIT,progressDesired:N]|progressProxy:Y|responseMessage:N|responseError:N|jobUUID:N|downloadProgress:N|autoAssetStatus:N|timedTracker:N|replyCompletion:Y]
+2026-10-02 11:42:58.049 Df assetsubscriptiond[1005:62bc] [com.apple.MobileAsset:Auto] {MAAutoAssetAuthorizationPolicy}(consumeSandboxExtensionFromMessage) consumed sandbox extension for path /System/Library/AssetsV2/com_apple_MobileAsset_UAF_Siri_UnderstandingASRHammer/purpose_auto
+2026-10-02 11:43:00.351 Df mobileassetd[177:6557] [com.apple.mobileassetd:Auto] {MADAutoAssetAuthorizationPolicy}(issueSandboxExtensionForAuditToken) Set sandbox extension for audit token at path: /System/Library/AssetsV2/com_apple_MobileAsset_UAF_Speech_AutomaticSpeechRecognition/purpose_auto
+2026-10-02 11:43:00.351 Df mobileassetd[177:6557] [com.apple.mobileassetd:AutoControl] [clientReqs:4|setJobs:0] {_updateSandboxExtensionForResponse} MADAutoAssetAuthorizationPolicy successfully set sandbox extension for response message | assetType=com.apple.MobileAsset.UAF.Speech.AutomaticSpeechRecognition, path=/System/Library/AssetsV2/com_apple_MobileAsset_UAF_Speech_AutomaticSpeechRecognition/purpose_auto, responseMessage:SUCoreConnectMessage(clientID:2C15952A-C898-4382-92B8-7A5FA723C8DF.<1005>.<177>|type:SERVER_MESSAGE|name:MA-AUTO-SET(REPLY):LOCK_ATOMIC), clientRequest:[clientID:2C15952A-C898-4382-92B8-7A5FA723C8DF.<1005>|requestUUID:41299E77-F8B4-4EF0-A6FB-B59FB54801FD|requestMessage:MA-AUTO-SET:LOCK_ATOMIC[instance:domainName:com.apple.UnifiedAssetFramework|clientName:manager|processName:assetsubscriptiond|pid:1005|setIdentifier:com.apple.speech.automaticspeechrecognition|atomicInstance:N|entries:N(WhenTargeting:N)][desire:clientAssetSetPolicy:user:N||lockInhibitsRemoval:N|supportingShortTermLocks:Y|allowCheckDownload(OnBattery:N,WhenBatteryLow:N,WhenCPUHigh:N,OverExpensive:N,OverCellular:N)|blockCheckDownload:N||desireReason:manager in com.apple.UnifiedAssetFramework locking latest version of com.apple.speech.automaticspeechrecognition|awaitDowload:Y|lockSecs:NO_WAIT,progressDesired:N]|progressProxy:Y|responseMessage:N|responseError:N|jobUUID:N|downloadProgress:N|autoAssetStatus:N|timedTracker:N|replyCompletion:Y]
+2026-10-02 11:43:00.367 Df assetsubscriptiond[1005:62bc] [com.apple.MobileAsset:Auto] {MAAutoAssetAuthorizationPolicy}(consumeSandboxExtensionFromMessage) consumed sandbox extension for path /System/Library/AssetsV2/com_apple_MobileAsset_UAF_Speech_AutomaticSpeechRecognition/purpose_auto
+2026-10-02 11:43:01.054 E  kernel[0:6982] [com.apple.sandbox.reporting:violation] Sandbox: solomni(8145) deny(1) file-read-data /Users/runner/work/Solomni/Solomni/tests/cross-platform/e2e/root/session/e2e-realtools-1790941381011/资料手/solomni-seatbelt-selfcheck-8144
+2026-10-02 11:43:01.090 E  kernel[0:6998] [com.apple.sandbox.reporting:violation] Sandbox: sh(8164) deny(1) file-read-data /dev/dtracehelper
+2026-10-02 11:43:01.101 E  kernel[0:6999] [com.apple.sandbox.reporting:violation] Sandbox: bash(8164) deny(1) file-read-data /dev/dtracehelper
+2026-10-02 11:43:01.101 E  kernel[0:6999] [com.apple.sandbox.reporting:violation] Sandbox: bash(8164) deny(1) file-read-data /dev/tty
+2026-10-02 11:43:01.121 E  kernel[0:699b] [com.apple.sandbox.reporting:violation] Sandbox: python3.14(8164) deny(1) file-read-data /dev/dtracehelper
+2026-10-02 11:43:01.126 E  kernel[0:699b] [com.apple.sandbox.reporting:violation] Sandbox: python3.14(8164) deny(1) file-read-data /dev/autofs_nowait
+2026-10-02 11:43:01.126 E  kernel[0:699b] [com.apple.sandbox.reporting:violation] Sandbox: python3.14(8164) deny(1) file-read-data /Users/runner/.CFUserTextEncoding
+2026-10-02 11:43:01.126 E  kernel[0:699b] [com.apple.sandbox.reporting:violation] Sandbox: python3.14(8164) deny(1) file-read-data /dev/autofs_nowait
+2026-10-02 11:43:01.126 E  kernel[0:699b] [com.apple.sandbox.reporting:violation] Sandbox: python3.14(8164) deny(1) file-read-data /Users/runner/.CFUserTextEncoding
+2026-10-02 11:43:01.133 E  kernel[0:699c] [com.apple.sandbox.reporting:violation] Sandbox: Python(8164) deny(1) file-read-data /dev/dtracehelper
+2026-10-02 11:43:01.354 E  kernel[0:69af] [com.apple.sandbox.reporting:violation] Sandbox: solomni(8166) deny(1) file-read-data /Users/runner/work/Solomni/Solomni/tests/cross-platform/e2e/root/session/e2e-realtools-1790941381011/资料手/solomni-seatbelt-selfcheck-8165
+2026-10-02 11:43:01.409 E  kernel[0:69c1] [com.apple.sandbox.reporting:violation] Sandbox: sh(8184) deny(1) file-read-data /dev/dtracehelper
+2026-10-02 11:43:01.412 E  kernel[0:69c2] [com.apple.sandbox.reporting:violation] Sandbox: bash(8184) deny(1) file-read-data /dev/dtracehelper
+2026-10-02 11:43:01.413 E  kernel[0:69c2] [com.apple.sandbox.reporting:violation] Sandbox: bash(8184) deny(1) file-read-data /dev/tty
+2026-10-02 11:43:01.424 E  kernel[0:69c3] [com.apple.sandbox.reporting:violation] Sandbox: indexer(8184) deny(1) file-read-data /dev/dtracehelper
+2026-10-02 11:43:01.571 E  kernel[0:69cb] [com.apple.sandbox.reporting:violation] Sandbox: solomni(8186) deny(1) file-read-data /Users/runner/work/Solomni/Solomni/tests/cross-platform/e2e/root/session/e2e-realtools-1790941381011/资料手/solomni-seatbelt-selfcheck-8185
+2026-10-02 11:43:01.625 E  kernel[0:69e1] [com.apple.sandbox.reporting:violation] Sandbox: sh(8206) deny(1) file-read-data /dev/dtracehelper
+2026-10-02 11:43:01.631 E  kernel[0:69e2] [com.apple.sandbox.reporting:violation] Sandbox: bash(8206) deny(1) file-read-data /dev/dtracehelper
+2026-10-02 11:43:01.632 E  kernel[0:69e2] [com.apple.sandbox.reporting:violation] Sandbox: bash(8206) deny(1) file-read-data /dev/tty
+2026-10-02 11:43:01.642 E  kernel[0:69e3] [com.apple.sandbox.reporting:violation] Sandbox: indexer(8206) deny(1) file-read-data /dev/dtracehelper
+2026-10-02 11:43:01.939 Df mobileassetd[177:6557] [com.apple.mobileassetd:Auto] {MADAutoAssetAuthorizationPolicy}(issueSandboxExtensionForAuditToken) Set sandbox extension for audit token at path: /System/Library/AssetsV2/com_apple_MobileAsset_UAF_TKModelMessages/purpose_auto
+2026-10-02 11:43:01.939 Df mobileassetd[177:6557] [com.apple.mobileassetd:AutoControl] [clientReqs:4|setJobs:0] {_updateSandboxExtensionForResponse} MADAutoAssetAuthorizationPolicy successfully set sandbox extension for response message | assetType=com.apple.MobileAsset.UAF.TKModelMessages, path=/System/Library/AssetsV2/com_apple_MobileAsset_UAF_TKModelMessages/purpose_auto, responseMessage:SUCoreConnectMessage(clientID:2C15952A-C898-4382-92B8-7A5FA723C8DF.<1005>.<177>|type:SERVER_MESSAGE|name:MA-AUTO-SET(REPLY):LOCK_ATOMIC), clientRequest:[clientID:2C15952A-C898-4382-92B8-7A5FA723C8DF.<1005>|requestUUID:7DDDB39B-5382-43F5-A5C7-6311476A4BA0|requestMessage:MA-AUTO-SET:LOCK_ATOMIC[instance:domainName:com.apple.UnifiedAssetFramework|clientName:manager|processName:assetsubscriptiond|pid:1005|setIdentifier:com.apple.TKModelMessages|atomicInstance:N|entries:N(WhenTargeting:N)][desire:clientAssetSetPolicy:user:N||lockInhibitsRemoval:N|supportingShortTermLocks:Y|allowCheckDownload(OnBattery:N,WhenBatteryLow:N,WhenCPUHigh:N,OverExpensive:N,OverCellular:N)|blockCheckDownload:N||desireReason:manager in com.apple.UnifiedAssetFramework locking latest version of com.apple.TKModelMessages|awaitDowload:Y|lockSecs:NO_WAIT,progressDesired:N]|progressProxy:Y|responseMessage:N|responseError:N|jobUUID:N|downloadProgress:N|autoAssetStatus:N|timedTracker:N|replyCompletion:Y]
+2026-10-02 11:43:01.941 Df assetsubscriptiond[1005:62bc] [com.apple.MobileAsset:Auto] {MAAutoAssetAuthorizationPolicy}(consumeSandboxExtensionFromMessage) consumed sandbox extension for path /System/Library/AssetsV2/com_apple_MobileAsset_UAF_TKModelMessages/purpose_auto
+2026-10-02 11:43:02.542 Df log[8219:6a29] [com.apple.log:] log run noninteractively, parent: 8217 (sudo), args: 'log' 'show' '--last' '10m' '--style' 'compact' '--predicate' 'eventMessage CONTAINS "Sandbox"'
+2026-10-02 11:43:03.001 Df mobileassetd[177:6557] [com.apple.mobileassetd:Auto] {MADAutoAssetAuthorizationPolicy}(issueSandboxExtensionForAuditToken) Set sandbox extension for audit token at path: /System/Library/AssetsV2/com_apple_MobileAsset_UAF_Siri_Understanding/purpose_auto
+2026-10-02 11:43:03.001 Df mobileassetd[177:6557] [com.apple.mobileassetd:AutoControl] [clientReqs:4|setJobs:0] {_updateSandboxExtensionForResponse} MADAutoAssetAuthorizationPolicy successfully set sandbox extension for response message | assetType=com.apple.MobileAsset.UAF.Siri.Understanding, path=/System/Library/AssetsV2/com_apple_MobileAsset_UAF_Siri_Understanding/purpose_auto, responseMessage:SUCoreConnectMessage(clientID:2C15952A-C898-4382-92B8-7A5FA723C8DF.<1005>.<177>|type:SERVER_MESSAGE|name:MA-AUTO-SET(REPLY):LOCK_ATOMIC), clientRequest:[clientID:2C15952A-C898-4382-92B8-7A5FA723C8DF.<1005>|requestUUID:448F7E6B-8F42-446C-A569-A283F948273B|requestMessage:MA-AUTO-SET:LOCK_ATOMIC[instance:domainName:com.apple.UnifiedAssetFramework|clientName:manager|processName:assetsubscriptiond|pid:1005|setIdentifier:com.apple.siri.understanding|atomicInstance:N|entries:N(WhenTargeting:N)][desire:clientAssetSetPolicy:user:N||lockInhibitsRemoval:N|supportingShortTermLocks:Y|allowCheckDownload(OnBattery:N,WhenBatteryLow:N,WhenCPUHigh:N,OverExpensive:N,OverCellular:N)|blockCheckDownload:N||desireReason:manager in com.apple.UnifiedAssetFramework locking latest version of com.apple.siri.understanding|awaitDowload:Y|lockSecs:NO_WAIT,progressDesired:N]|progressProxy:Y|responseMessage:N|responseError:N|jobUUID:N|downloadProgress:N|autoAssetStatus:N|timedTracker:N|replyCompletion:Y]
+2026-10-02 11:43:03.005 Df assetsubscriptiond[1005:62bc] [com.apple.MobileAsset:Auto] {MAAutoAssetAuthorizationPolicy}(consumeSandboxExtensionFromMessage) consumed sandbox extension for path /System/Library/AssetsV2/com_apple_MobileAsset_UAF_Siri_Understanding/purpose_auto
