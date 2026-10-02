@@ -154,7 +154,9 @@ mod interrupt {
 
         pub fn install(stop: Arc<AtomicBool>) -> Result<Guard, String> {
             let _ = super::FLAG.set(stop);
-            let prev = unsafe { libc::signal(libc::SIGINT, handler as libc::sighandler_t) };
+            // 函数项先转指针再转整数：直接转整数会被 clippy 判为 function_casts_as_integer。
+            let handler_ptr = handler as *const () as libc::sighandler_t;
+            let prev = unsafe { libc::signal(libc::SIGINT, handler_ptr) };
             if prev == libc::SIG_ERR {
                 return Err("安装 Ctrl+C 处理失败".to_string());
             }
