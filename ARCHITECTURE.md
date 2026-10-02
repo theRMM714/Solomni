@@ -43,11 +43,11 @@ presentation/{cli,web} ──▶ capabilities（含协调业务 conductor）─�
 | `ModelCatalog` | 按**端点与密钥**列出一条通道当前可用的模型名。`capabilities/llm/ports.rs`，**只由 llm 的 `service.rs` 持有**（R12） | `HttpModelCatalog` |
 | `ModuleSource` | 模块清单来源（扫描 `modules/`）。定义在`capabilities/workspace/ports.rs` | `FsModules` |
 | `PackageSource` | 运行包库来源（扫描依赖文件夹 `runtimes/`）。定义在`capabilities/workspace/ports.rs` | `FsPackages` |
-| `Workdirs` | 一次工作的 work 目录、各 agent 沙箱、文件清单与寻址根。`capabilities/workspace/ports.rs`，**只由 workspace 的 `service.rs` 持有**（R12） | `FsWorkspace` |
+| `Workdirs` | 一次工作的 work 目录、各 agent 沙箱、文件清单、工作区用量与寻址根。`capabilities/workspace/ports.rs`，**只由 workspace 的 `service.rs` 持有**（R12） | `FsWorkspace` |
 | `SysIo` | 内置文件工具的读写机制（读严格 UTF-8、非法字节如实标注；写一律 UTF-8）。`capabilities/tools/ports.rs`，**只由 tools 的 `service.rs` 持有**（R12） | `FsSysIo` |
-| `HistoryStore` | 会话历史：一个会话一个目录（meta + 事件流水）。`capabilities/session/ports.rs`，**只由 session 的 `service.rs` 持有**（R12）；别人经 `session::api::History` 读写 | `FsHistory` |
+| `HistoryStore` | 会话历史：顶层会话一个目录，子会话落在**父会话目录内部**（`session/<父>/children/<子>/`，meta + 事件流水）。`capabilities/session/ports.rs`，**只由 session 的 `service.rs` 持有**（R12）；别人经 `session::api::History` 读写 | `FsHistory` |
 | `PromptSource` | 提示词册加载（`prompts/`）。定义在 `capabilities/prompt/ports.rs` | `YamlPrompts` |
-| `SystoolsSource` | 工具总表与角色表的加载（`systools/tools.yaml` + `roles.yaml`）。定义在 `capabilities/tools/ports.rs` | `YamlSystools` |
+| `SystoolsSource` | 工具总表、角色表与目录保留名表的加载（`systools/tools.yaml` + `roles.yaml` + `names.yaml`）。定义在 `capabilities/tools/ports.rs` | `YamlSystools` |
 | `ToolRunner` | 外部工具进程（围栏安装、拉起、stdin 送参、超时杀树、截断）。`capabilities/tools/ports.rs`，**只由 tools 的 `service.rs` 持有**（R12）；别人经 `tools::api::ToolExec` 跑工具 | `ProcTools`（守门进程 = 本程序的 `--fence-run` 模式） |
 | `EnvelopeRepair`（`capabilities/llm/ports.rs`） | 手写信封不合法时的**无歧义**补救（改了字段含义就是错；拿不准就返回不修） | `UnambiguousRepair`（转义字符串里的裸控制字符 + 补上扫描器算出的收尾括号；断在字符串中间不修，一段回复里起了两段信封不修——补哪一段都是猜；调用方中止的生成一律不修） |
 | `FenceHost` | 围栏授权的释放（删除会话时请求一次撤销）。`capabilities/tools/ports.rs`，**只由 tools 的 `service.rs` 持有**（R12） | `confine::FenceHostAdapter`（本平台无该机制时为空操作） |
@@ -112,7 +112,11 @@ session/<工作名>/
   transcript.jsonl   # 只追加的事件流水
   work/              # 本次工作共享区（用户投喂与成品）
   <agent实例名>/      # 该 agent 的私有沙箱
+  children/          # 子会话（协作派生的执行席）：<工作名>--<agent>/，位置与 meta.parent 同源
 ```
+
+- **目录保留名**：`work` 与 `children` 由布局固定占用，agent 实例名不得占用；
+  名单在仓库自带的 `systools/names.yaml`（不在代码里硬编码，布局一改就改表）。
 
 - **转录即状态**：流水只追加；回档**只追加一条 `{"type":"rewind"}` 记录**，不物理删行；会话内容 = 回放到最后一个截断点。
 - **转录行的稳定 id**：一轮模型调用 = 一条行；工具调用自成一条行；id 在会话内单调、回放可复现（回档按 id 定位）。

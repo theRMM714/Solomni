@@ -580,13 +580,15 @@ pub(crate) fn vm_tier_is_refused_when_the_machine_cannot_carry_it() {
         Arc::new(crate::kernel::ports::NoopLog),
         Arc::new(crate::kernel::detail::HostProbeAdapter),
     );
-    // 创建路径的档位来自设置（基础根留空）：成立与否随本机而定，这里钉的是**接线**——
-    // 机器承载不了就必须拒绝，且什么都不留下。
+    // 创建路径的档位来自**用户的选择**（WorkSpec.tier；基础根留空）：成立与否随本机而定，
+    // 这里钉的是**接线**——机器承载不了就必须拒绝，且什么都不留下。
     let default_vm = ExecSpec {
         tier: Tier::Vm,
         ..ExecSpec::default()
     };
-    let opened = core.create_work(work("vm-default", WorkMode::Single, &["a"]));
+    let mut vm_spec = work("vm-default", WorkMode::Single, &["a"]);
+    vm_spec.tier = Tier::Vm;
+    let opened = core.create_work(vm_spec);
     if exec::tier_readiness(&default_vm, None, &crate::kernel::detail::HostProbeAdapter).ready() {
         opened.expect("本机能承载虚拟机档时不该拒绝");
     } else {

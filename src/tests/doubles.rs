@@ -136,6 +136,14 @@ impl InMemoryWorkspace {
             .expect("锁")
             .insert(format!("{}/{}/{}", session, area, rel), Vec::new());
     }
+
+    /// 放一个**指定大小**的文件（用量断言用）：键与真实布局同构。
+    pub(crate) fn seed_bytes(&self, session: &str, area: &str, rel: &str, bytes: usize) {
+        self.files
+            .lock()
+            .expect("锁")
+            .insert(format!("{}/{}/{}", session, area, rel), vec![0u8; bytes]);
+    }
 }
 
 impl Workdirs for InMemoryWorkspace {
@@ -204,6 +212,36 @@ impl Workdirs for InMemoryWorkspace {
             map.insert(a.clone(), got);
         }
         Ok(crate::capabilities::workspace::api::WorkFiles { work, agents: map })
+    }
+
+    fn usage(
+        &self,
+        session: &str,
+        agents: &[String],
+    ) -> Result<crate::capabilities::workspace::api::WorkUsage, String> {
+        if let Some(m) = &self.fail {
+            return Err(m.clone());
+        }
+        use crate::capabilities::workspace::api::AreaUsage;
+        let files = self.files.lock().expect("锁");
+        let area = |prefix: &str| -> AreaUsage {
+            let mut out = AreaUsage::default();
+            for (k, v) in files.iter() {
+                if k.starts_with(prefix) {
+                    out.files += 1;
+                    out.bytes += v.len() as u64;
+                }
+            }
+            out
+        };
+        let work = area(&format!("{}/work/", session));
+        let mut map = BTreeMap::new();
+        for a in agents {
+            map.insert(a.clone(), area(&format!("{}/{}/", session, a)));
+        }
+        Ok(crate::capabilities::workspace::api::WorkUsage::total(
+            work, map,
+        ))
     }
 }
 
@@ -771,6 +809,7 @@ pub(crate) fn work(name: &str, mode: WorkMode, modules: &[&str]) -> WorkSpec {
         agents,
         task: None,
         delegate: false,
+        tier: crate::kernel::api::Tier::Host,
     }
 }
 

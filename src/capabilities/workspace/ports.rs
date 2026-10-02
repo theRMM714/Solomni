@@ -2,7 +2,7 @@
 
 use crate::capabilities::workspace::domain::module::Roster;
 use crate::capabilities::workspace::domain::packages::Library;
-use crate::capabilities::workspace::domain::workspace::{WorkFiles, WorkRoots};
+use crate::capabilities::workspace::domain::workspace::{WorkFiles, WorkRoots, WorkUsage};
 
 /// 模块清单来源端口。
 pub trait ModuleSource {
@@ -31,4 +31,6 @@ pub trait Workdirs {
     fn roots(&self, session: &str, agents: &[String]) -> Result<WorkRoots, String>;
     /// 列出本工作可引用的文件（work/ 与各 agent 沙箱；相对路径、/ 分隔、排序稳定）。
     fn list(&self, session: &str, agents: &[String]) -> Result<WorkFiles, String>;
+    /// 统计工作区用量（共享区 + 各 agent 沙箱的文件数与总字节）：删除前如实交代用。
+    fn usage(&self, session: &str, agents: &[String]) -> Result<WorkUsage, String>;
 }

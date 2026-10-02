@@ -61,6 +61,19 @@ pub fn validate_name(name: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// 目录保留名校验：这些名字由工作区布局固定占用（`session/<工作>/work`、`session/<工作>/children`），
+/// agent 实例名不得占用。名单来自 `systools/names.yaml`，不硬编码在代码里。
+/// 大小写不敏感：Windows 的文件系统本来就不区分。
+pub fn check_reserved(name: &str, reserved: &[String]) -> Result<(), String> {
+    if reserved.iter().any(|r| r.eq_ignore_ascii_case(name)) {
+        return Err(format!(
+            "agent 名是目录保留名（{}）：换一个名字（它会与工作区固定目录撞路径）",
+            name
+        ));
+    }
+    Ok(())
+}
+
 /// 已存 agent 清单（拟名单时给模型看）：名字 / 模块 / 模型 / 说明；空登记处用册子里的说法。
 pub fn listing(prompt: &dyn Prompt, known: &Agents) -> String {
     if known.is_empty() {

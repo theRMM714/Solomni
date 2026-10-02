@@ -40,6 +40,39 @@ impl Conductor {
         }
     }
 
+    /// 新建工作的**档位选择**（默认档 + 虚拟机档可用性与逐项前置）：与「开始」的校验同源。
+    /// 为什么单独一条读面：创建向导还没有 sid，拿不到会话配置视图；而设置里的默认档与
+    /// 虚拟机档的承载探针是**与某条会话无关**的事实。
+    pub fn tier_choices(&self) -> TierChoices {
+        let default = self.registry.app().tier;
+        // 裸虚拟机档探针：基础根属于会话选型（在会话的 exec 段里），创建时还没填，按未指定探。
+        let vm_probe = crate::capabilities::workspace::api::ExecSpec {
+            tier: crate::kernel::api::Tier::Vm,
+            ..crate::capabilities::workspace::api::ExecSpec::default()
+        };
+        let inputs = crate::capabilities::workspace::api::VmInputs {
+            base: vm_probe.base.as_deref(),
+            qemu: self.qemu_path(),
+            probe: self.probe.as_ref(),
+        };
+        TierChoices {
+            default: default.as_str().to_string(),
+            vm_available: crate::capabilities::workspace::api::tier_readiness(
+                &vm_probe,
+                self.qemu_path(),
+                self.probe.as_ref(),
+            )
+            .ready(),
+            vm_unavailable_reason: crate::capabilities::workspace::api::tier_refusal(
+                &vm_probe,
+                self.qemu_path(),
+                self.probe.as_ref(),
+            )
+            .unwrap_or_default(),
+            vm_requirements: crate::capabilities::workspace::api::vm_requirements(&inputs),
+        }
+    }
+
     /// 本档位下不能执行工具的模块（模块 id → 缺的能力名）：建会话与重建时收口给工具环境。
     pub(crate) fn unavailable_modules(
         &self,
@@ -140,10 +173,12 @@ impl Conductor {
         }
         // 校验：模块与模型真实存在；同一模块不得同属两个 agent（沙箱与发言归属会歧义）。
         let roster = self.scan();
+        let reserved = self.reserved_names();
         let mut seen: Vec<String> = Vec::new();
         let mut metas: Vec<AgentMeta> = Vec::new();
         for a in &edit.agents {
             crate::capabilities::registry::api::validate_name(&a.name)?;
+            crate::capabilities::registry::api::check_reserved(&a.name, &reserved)?;
             if a.modules.is_empty() {
                 return Err(format!("agent {} 至少要有一个模块", a.name));
             }
@@ -409,10 +444,12 @@ impl Conductor {
             spec.agents = vec![merge_into_one(&spec.agents, &spec.name)];
         }
         let roster = self.scan();
+        let reserved = self.reserved_names();
         // 校验 agent：名字合法、模块与模型真实存在；同一模块不得同时属于两个 agent（沙箱会歧义）
         let mut seen_modules: Vec<String> = Vec::new();
         for a in &spec.agents {
             crate::capabilities::registry::api::validate_name(&a.name)?;
+            crate::capabilities::registry::api::check_reserved(&a.name, &reserved)?;
             if a.modules.is_empty() {
                 return Err(format!("agent {} 至少要有一个模块", a.name));
             }
@@ -479,8 +516,9 @@ impl Conductor {
             // 顶层会话：没有编排者，也没有节点（子会话由 spawn_sub_session 建）。
             parent: None,
             node: None,
+            // 档位来自**用户在创建向导里的选择**（默认 = 设置里的档位）；承载不了由下面如实拒绝。
             exec: crate::capabilities::workspace::api::ExecSpec {
-                tier: self.registry.app().tier,
+                tier: spec.tier,
                 ..crate::capabilities::workspace::api::ExecSpec::default()
             },
         };
@@ -612,6 +650,7 @@ impl Conductor {
             .map_err(|_| format!("无此会话：{}", sid))?;
         let names: Vec<String> = meta.agents.iter().map(|a| a.name.clone()).collect();
         let files = self.workspace.files(sid, &names)?;
+        let usage = self.workspace.usage(sid, &names)?;
         let roster = self.scan();
         let sandboxes = self.sandboxes(&meta, &roster)?;
         let mut agents: Vec<FilesAgentView> = Vec::new();
@@ -636,6 +675,7 @@ impl Conductor {
                 work: crate::kernel::api::slash(&sandboxes.shared),
                 agents: agent_roots,
             },
+            usage,
         })
     }
 }

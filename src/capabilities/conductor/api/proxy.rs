@@ -206,8 +206,11 @@ impl RegistryOps for ConductorHandle {
             note.to_string(),
         );
         // 模块存在性按**清单**校验：清单归 workspace，登记处只认事实，所以清单由这里取一份给它。
+        // 目录保留名（systools/names.yaml）也在这里收口：登记处不认识工作区布局，名单由 conductor 注入。
         self.call(move |core| {
             let roster = core.scan();
+            let reserved = core.reserved_names();
+            crate::capabilities::registry::api::check_reserved(&name, &reserved)?;
             core.registry_mut()
                 .agent_upsert(&name, &modules, &model, &note, &roster)
         })
@@ -267,6 +270,10 @@ impl crate::capabilities::workspace::api::WorkspaceOps for ConductorHandle {
 impl ConductorOps for ConductorHandle {
     fn runtime_report(&self, tier: Tier) -> Result<RuntimeReport, String> {
         self.call(move |core| Ok(core.runtime_report(tier)))
+    }
+
+    fn tier_choices(&self) -> Result<TierChoices, String> {
+        self.call(|core| Ok(core.tier_choices()))
     }
     fn suggest_models(&self, task: &str, mode: WorkMode) -> Result<Vec<AgentSuggestion>, String> {
         let task = task.to_string();

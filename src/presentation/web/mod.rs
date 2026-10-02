@@ -40,20 +40,43 @@ pub struct FenceInfo {
     pub read_only_roots: usize,
 }
 
-/// 启动转录中心服务器（阻塞直至出错）。端口可指定，默认 3081，只绑本机回环。
+/// 启动转录中心服务器：**可中断**——收到 Ctrl+C / SIGINT 就正常关闭回到 CLI（进程仍在）。
+/// 端口可指定，默认 3081，只绑本机回环。
+///
+/// 处理：进入前安装中断标志（Windows 控制台处理函数 / Unix SIGINT），返回前**恢复默认**，
+/// 所以回到 CLI 提示符后 Ctrl+C 仍按"退出产品"的既有语义生效。
 pub fn serve(ops: Ops, port: u16, fence: FenceInfo) -> Result<(), String> {
+    let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let guard = interrupt::install(Arc::clone(&stop))?;
+    let r = serve_until(&ops, port, &fence, &stop);
+    drop(guard);
+    r
+}
+
+/// 服务器主循环（可注入中断判据，便于测试）：每次最多等 200ms 就回来看一次标志。
+/// 每个请求仍是一线独立线程——长连接绝不阻塞其它请求（转录中心是多端并用的）。
+pub(crate) fn serve_until(
+    ops: &Ops,
+    port: u16,
+    fence: &FenceInfo,
+    stop: &std::sync::atomic::AtomicBool,
+) -> Result<(), String> {
     // 日志经**入站能力面**（ops.log）取——呈现层不持有端口对象。
     let log = Arc::clone(&ops.log);
     log.info("web::serve", &format!("转录中心启动，端口 {}", port));
     let addr = format!("127.0.0.1:{}", port);
     let server = Server::http(addr.as_str()).map_err(|e| e.to_string())?;
     println!("Solomni 转录中心：http://{}（只监听本机）", addr);
-    let fence = Arc::new(fence);
-    for request in server.incoming_requests() {
+    let fence = Arc::new(fence.clone());
+    while !stop.load(std::sync::atomic::Ordering::SeqCst) {
+        let request = match server.recv_timeout(Duration::from_millis(200)) {
+            Ok(Some(r)) => r,
+            Ok(None) => continue,
+            Err(e) => return Err(e.to_string()),
+        };
         let ops = ops.clone();
         let fence = Arc::clone(&fence);
         let log = Arc::clone(&log);
-        // 每请求一线程：长连接绝不阻塞其它请求（转录中心是多端并用的）。
         std::thread::spawn(move || {
             let mut request = request;
             let url = request.url().to_string();
@@ -72,7 +95,93 @@ pub fn serve(ops: Ops, port: u16, fence: FenceInfo) -> Result<(), String> {
             let _ = request.respond(response);
         });
     }
+    println!("[提示] 已离开转录中心，回到终端。");
     Ok(())
+}
+
+/// Ctrl+C / SIGINT 的中断标志安装：机制按平台分，返回的守卫一放就恢复默认。
+mod interrupt {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{Arc, OnceLock};
+
+    static FLAG: OnceLock<Arc<AtomicBool>> = OnceLock::new();
+
+    fn set() {
+        if let Some(f) = FLAG.get() {
+            f.store(true, Ordering::SeqCst);
+        }
+    }
+
+    #[cfg(windows)]
+    mod imp {
+        use super::{set, Arc, AtomicBool};
+        use windows_sys::Win32::System::Console::SetConsoleCtrlHandler;
+
+        unsafe extern "system" fn handler(_ctrl: u32) -> i32 {
+            set();
+            1 // TRUE = 已处理，进程继续（不按默认终止）
+        }
+
+        pub struct Guard;
+
+        pub fn install(stop: Arc<AtomicBool>) -> Result<Guard, String> {
+            let _ = super::FLAG.set(stop);
+            let ok = unsafe { SetConsoleCtrlHandler(Some(handler), 1) };
+            if ok == 0 {
+                return Err("安装 Ctrl+C 处理失败".to_string());
+            }
+            Ok(Guard)
+        }
+
+        impl Drop for Guard {
+            fn drop(&mut self) {
+                unsafe {
+                    SetConsoleCtrlHandler(Some(handler), 0);
+                }
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    mod imp {
+        use super::{set, Arc, AtomicBool};
+
+        extern "C" fn handler(_sig: libc::c_int) {
+            set();
+        }
+
+        pub struct Guard;
+
+        pub fn install(stop: Arc<AtomicBool>) -> Result<Guard, String> {
+            let _ = super::FLAG.set(stop);
+            let prev = unsafe { libc::signal(libc::SIGINT, handler as libc::sighandler_t) };
+            if prev == libc::SIG_ERR {
+                return Err("安装 Ctrl+C 处理失败".to_string());
+            }
+            Ok(Guard)
+        }
+
+        impl Drop for Guard {
+            fn drop(&mut self) {
+                unsafe {
+                    libc::signal(libc::SIGINT, libc::SIG_DFL);
+                }
+            }
+        }
+    }
+
+    #[cfg(not(any(windows, unix)))]
+    mod imp {
+        use super::{Arc, AtomicBool};
+
+        pub struct Guard;
+
+        pub fn install(_stop: Arc<AtomicBool>) -> Result<Guard, String> {
+            Ok(Guard)
+        }
+    }
+
+    pub use imp::install;
 }
 
 type Reply = (u16, Vec<(&'static str, String)>, String);
@@ -249,6 +358,11 @@ pub(crate) fn route(
                 Ok(m) => m,
                 Err(e) => return complaint(400, e),
             };
+            // 档位：缺省 = 本机档（旧调用点不传也照常工作）；未知值如实报错。
+            let tier = match parse_tier(&str_field(&req, "tier")) {
+                Ok(t) => t,
+                Err(e) => return complaint(400, e),
+            };
             let agents: Vec<crate::capabilities::conductor::api::AgentInstance> = req
                 .get("agents")
                 .and_then(|t| t.as_array())
@@ -294,6 +408,7 @@ pub(crate) fn route(
                     .get("delegate")
                     .and_then(|t| t.as_bool())
                     .unwrap_or(false),
+                tier,
             };
             match ops.sessions.create_work(spec) {
                 Ok((o, head)) => ok_json(json!({ "sid": o.sid, "agents": o.agents, "head": head })),
@@ -397,7 +512,9 @@ pub(crate) fn route(
         },
         // 会话文件清单 + 真实根（前端 @ 菜单与长路径缩写）。
         "session.files" => match ops.sessions.files(&sid) {
-            Ok(v) => ok_json(json!({ "work": v.work, "agents": v.agents, "roots": v.roots })),
+            Ok(v) => ok_json(
+                json!({ "work": v.work, "agents": v.agents, "roots": v.roots, "usage": v.usage }),
+            ),
             Err(e) => complaint(404, e),
         },
 
@@ -577,6 +694,12 @@ pub(crate) fn route(
             Err(e) => complaint(400, e),
         },
 
+        // ---- 新建工作的档位选择（创建向导用） ----
+        "tiers" => match ops.core.tier_choices() {
+            Ok(v) => ok_json(json!({ "tiers": v })),
+            Err(e) => complaint(400, e),
+        },
+
         // ---- 核心推荐模型 ----
         "suggest" => {
             let req = match parse_body(body) {
@@ -627,6 +750,15 @@ pub fn parse_mode(s: &str) -> Result<WorkMode, String> {
         "single" => Ok(WorkMode::Single),
         "collab" => Ok(WorkMode::Collab),
         other => Err(format!("未知模式：{}（只接受 single / collab）", other)),
+    }
+}
+
+/// 请求里的档位标识 → Tier：唯一解析处；缺省（空串）= 本机档，未知值如实报错。
+pub fn parse_tier(s: &str) -> Result<crate::capabilities::conductor::api::Tier, String> {
+    match s {
+        "" | "host" => Ok(crate::capabilities::conductor::api::Tier::Host),
+        "vm" => Ok(crate::capabilities::conductor::api::Tier::Vm),
+        other => Err(format!("未知执行档位：{}（只接受 host / vm）", other)),
     }
 }
 

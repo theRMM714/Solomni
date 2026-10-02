@@ -326,11 +326,14 @@ function renderHistory() {
     }
     acts.appendChild(open); acts.appendChild(edit);
 
-    const del = btn('✕', 'hdel');
-    del.title = '删除该会话（记录永久删除）';
-    del.onclick = (e) => { e.stopPropagation(); deleteHistory(h.name); };
-
-    el.appendChild(name); el.appendChild(mode); el.appendChild(acts); el.appendChild(del);
+    el.appendChild(name); el.appendChild(mode); el.appendChild(acts);
+    // 子会话由核心按节点派生，不单独删（删父会话会一起删掉它）：**不渲染**删除按钮。
+    if (!h.parent) {
+      const del = btn('✕', 'hdel');
+      del.title = '删除该会话（连同它的子会话与工作区文件一起删除）';
+      del.onclick = (e) => { e.stopPropagation(); deleteHistory(h.name); };
+      el.appendChild(del);
+    }
     box.appendChild(el);
   }
 }
@@ -453,7 +456,29 @@ async function openHistory(name) {
 }
 
 async function deleteHistory(name) {
-  if (!(await confirmBox('删除会话', '删除会话「' + name + '」？该会话的记录将被永久删除。', '删除'))) return;
+  // 删除前如实交代工作区：会被一起删掉的产物先列出来（数量 + 字节），避免"以为只删记录"。
+  // 一次 GET /files 拿到同一份清单与用量；拉不到（会话已不存在）就退回一步确认。
+  let usage = null;
+  try {
+    const r = await api('GET', '/api/sessions/' + encodeURIComponent(name) + '/files');
+    usage = (r && r.usage) || null;
+  } catch (e) { usage = null; }
+  if (usage && usage.files > 0) {
+    const areas = [];
+    if (usage.work && usage.work.files) {
+      areas.push('· 共享区 work/：' + usage.work.files + ' 个文件（' + usage.work.bytes + ' 字节）');
+    }
+    for (const a of Object.keys(usage.agents || {})) {
+      const u = usage.agents[a];
+      if (u && u.files) areas.push('· 沙箱 ' + a + '/：' + u.files + ' 个文件（' + u.bytes + ' 字节）');
+    }
+    const text = '会话「' + name + '」的记录将被永久删除，它的工作区里还有 ' + usage.files +
+      ' 个文件（共 ' + usage.bytes + ' 字节）：\n' + areas.join('\n') +
+      '\n这些文件也会一起删掉（子会话一并删除）。';
+    if (!(await confirmBox('删除会话与工作区文件', text, '一起删除'))) return;
+  } else if (!(await confirmBox('删除会话', '删除会话「' + name + '」？该会话的记录将被永久删除。', '删除'))) {
+    return;
+  }
   try {
     await api('POST', '/api/history/' + encodeURIComponent(name) + '/delete', {});
     if (state.sessions.has(name)) {
@@ -1409,11 +1434,33 @@ function renameUpload(sid, name, b64, alt) {
   });
 }
 /* ---------- 新建工作向导 ---------- */
-function openWizard() {
+async function openWizard() {
   // single 形态：w.modules = 勾选的模块；w.agentPick = 复用的登记处 agent
   // （null = 用勾选的模块组临时 agent，名字见 w.agentName）。
-  const w = { mode: 'single', modules: [], agentPick: null, agentName: '', agents: [], task: '' };
+  const w = { mode: 'single', modules: [], agentPick: null, agentName: '', agents: [], task: '', tier: 'host' };
   const ed = { open: false, name: '', modules: [], model: null, note: '' };
+  // 档位选择：默认档与虚拟机档可用性由后端给（GET /api/tiers，与「开始」的校验同源）。
+  let tiers = null;
+  try { const r = await api('GET', '/api/tiers'); tiers = (r && r.tiers) || null; } catch (e) { tiers = null; }
+  if (tiers && tiers.default) w.tier = tiers.default;
+  // 档位那一格：虚拟机档不可用时禁用，并逐项说明缺什么、怎么补（照抄后端事实，不自己编话）。
+  const tierField = document.createElement('div'); tierField.className = 'wf-field';
+  const tierLabel = document.createElement('div'); tierLabel.className = 'wf-label'; tierLabel.textContent = '执行档位';
+  const hostR = cfgRadio('本机档 —— 脚本直接在宿主上跑：宿主自备解释器；隔离就是宿主本身（默认）。', w.tier !== 'vm', 'wf-tier');
+  const vmOk = !!(tiers && tiers.vm_available);
+  const vmR = cfgRadio('虚拟机档 —— 一整套 guest，隔离更强；按模块声明装载运行包，依赖 guest 本体。', w.tier === 'vm', 'wf-tier', !vmOk);
+  hostR.box.addEventListener('change', () => { if (hostR.box.checked) w.tier = 'host'; });
+  vmR.box.addEventListener('change', () => { if (vmR.box.checked) w.tier = 'vm'; });
+  tierField.appendChild(tierLabel); tierField.appendChild(hostR.wrap); tierField.appendChild(vmR.wrap);
+  if (!vmOk) {
+    const reqs = (tiers && tiers.vm_requirements) || [];
+    const lines = reqs.filter((r) => !r.met).map((r) => '· ' + r.detail + (r.how ? '（' + r.how + '）' : ''));
+    tierField.appendChild(cfgHint(
+      '虚拟机档现在不能选：' + ((tiers && tiers.vm_unavailable_reason) || '本机不具备虚拟机档的前置条件') +
+      (lines.length ? '\n' + lines.join('\n') : ''),
+      'err'
+    ));
+  }
 
   openModal('新建工作', (c) => {
     const nameIn = textInput('工作名称（必填，会话落盘目录名）');
@@ -1767,7 +1814,7 @@ function openWizard() {
       }
       const names = agents.map((a) => a.name);
       const dup = names.filter((n, i) => names.indexOf(n) !== i)[0];
-      const body = { name, mode: w.mode, agents };
+      const body = { name, mode: w.mode, agents, tier: w.tier };
       if (task) body.task = task;
       if (dup) {
         choiceModal('agent 重名', '本次工作里有同名 agent「' + dup + '」。', [
@@ -1782,6 +1829,7 @@ function openWizard() {
     c.body.appendChild(field('工作名称', nameIn));
     c.body.appendChild(field('形态', modeSel));
     c.body.appendChild(modeHint);
+    c.body.appendChild(tierField);
     c.body.appendChild(partWrap);
     c.body.appendChild(modelWrap);
     c.body.appendChild(field('本次需求', taskIn));
@@ -2561,6 +2609,13 @@ function atHint(box) {
 
 async function atLoad(sid) {
   if (filesCache.has(sid)) return filesCache.get(sid);
+  return atFetch(sid);
+}
+
+/* **每次打开 @ 菜单都重拉一次**：文件可能在会外被手工删掉，或被 agent 的工具改过。
+ * 前端不引入目录 watcher（本机、跨平台，代价不值）；拉到的结果写回缓存，
+ * 供长路径缩写（setActive / loadPathRoots）快速复用。 */
+async function atFetch(sid) {
   try {
     const data = await api('GET', '/api/sessions/' + encodeURIComponent(sid) + '/files');
     filesCache.set(sid, data);
@@ -2701,7 +2756,7 @@ async function atOnInput() {
   atState.items = []; atState.all = []; atState.active = 0;
   atState.sid = s.sid; atState.start = tok.start;
   atRender();
-  const data = await atLoad(s.sid);
+  const data = await atFetch(s.sid); // 每次打开都重拉：不跨打开缓存（会外删除立刻可见）
   if (atState.sid !== s.sid || !atState.open) return; // 拉取期间切了会话 / 菜单已关
   if (!data) { atClose(); return; }                   // 拉不到：安静收起，之后 Enter 恢复为正常发送
   const tok2 = atToken(); // 拉取期间内容可能又变了，重新确认

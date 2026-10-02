@@ -5,14 +5,15 @@
 > **模块工具由模块自己的外部命令实现**（声明在 `module.yaml` 的 `tools`，见 [MODULE_SPEC.md](MODULE_SPEC.md)）。
 > 两张表的字段、工具面合成与越权校验的唯一细则：[docs/tools/tools-and-roles.md](docs/tools/tools-and-roles.md)。
 
-## 一、两个真相源
+## 一、真相源
 
 | 表 | 回答什么 | 位置 |
 | --- | --- | --- |
 | **工具总表** | 工具**是什么**：id / 说明 / 参数契约 / 能否并发 / 能力 | `systools/tools.yaml` |
 | **角色表** | 这个**身份有什么**：引用的系统工具 id + 提示词 | `systools/roles.yaml` |
+| **名字表** | 工作区布局**固定占用的目录名**（agent 实例名与它们撞路径，因此不得占用） | `systools/names.yaml` |
 
-代码里没有第三份名单；角色引用了表里不存在的 id = **结构审查硬失败**（不靠人看）。
+工具与角色的名单在代码里没有第二份：角色引用了表里不存在的 id = **结构审查硬失败**（不靠人看）。
 
 ## 二、三类系统工具
 
@@ -74,6 +75,7 @@
 
 - 加 / 改一个系统工具 → `systools/tools.yaml`（唯一真相）+ 它的实现 + 角色表按需引用 + 测试；
 - 改角色 → `systools/roles.yaml` + `prompts/roles/<角色>`（**提示词与工具面同处声明**，分开必然漂）；
+- 加 / 改保留目录名 → `systools/names.yaml`（唯一真相）+ 同步落盘布局文档（[PRODUCT.md](PRODUCT.md) 的「工作的落盘与沙箱」与 [docs/session/session-model.md](docs/session/session-model.md)）；
 - 改路径模型或围栏口径 → 本文 + [ARCHITECTURE.md](ARCHITECTURE.md)（§六 状态与落盘）+ [docs/tools/tools-and-roles.md](docs/tools/tools-and-roles.md)；
 - 悬空引用（角色引用表里没有的 id）由 `node run-tests.js` 的结构审查挡下。
 

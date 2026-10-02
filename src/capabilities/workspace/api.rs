@@ -10,7 +10,7 @@ pub use crate::capabilities::workspace::domain::module::{
 };
 pub use crate::capabilities::workspace::domain::packages::{Library, PackageManifest};
 pub use crate::capabilities::workspace::domain::workspace::{
-    safe_file_name, Place, Sandbox, Sandboxes, WorkFiles, WorkRoots,
+    safe_file_name, AreaUsage, Place, Sandbox, Sandboxes, WorkFiles, WorkRoots, WorkUsage,
 };
 
 /// 工作区的**队列面**：呈现层要的清单事实（模块公地 + 拒收原因）。
@@ -36,6 +36,8 @@ pub trait Workspace: Send + Sync {
     fn work_has(&self, session: &str, name: &str) -> bool;
     /// 列出本工作可引用的文件（work/ 与各 agent 沙箱；相对路径、/ 分隔、排序稳定）。
     fn files(&self, session: &str, agents: &[String]) -> Result<WorkFiles, String>;
+    /// 统计工作区用量（共享区 + 各 agent 沙箱的文件数与总字节）：删除前如实交代用。
+    fn usage(&self, session: &str, agents: &[String]) -> Result<WorkUsage, String>;
     /// 沙箱寻址根（work 与各 agent 私有区）：布局机制在适配层，拼接与越界校验在本能力。
     fn roots(&self, session: &str, agents: &[String]) -> Result<WorkRoots, String>;
 }

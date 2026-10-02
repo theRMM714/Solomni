@@ -3,7 +3,9 @@
 //!
 //! 装配（new 出适配器）在组合根；这里只收注入的端口。
 
-use crate::capabilities::workspace::api::{Library, Roster, WorkFiles, WorkRoots, Workspace};
+use crate::capabilities::workspace::api::{
+    Library, Roster, WorkFiles, WorkRoots, WorkUsage, Workspace,
+};
 use crate::capabilities::workspace::ports::{ModuleSource, PackageSource, Workdirs};
 use std::sync::Arc;
 
@@ -56,6 +58,10 @@ impl Workspace for WorkspaceService {
 
     fn files(&self, session: &str, agents: &[String]) -> Result<WorkFiles, String> {
         self.dirs.list(session, agents)
+    }
+
+    fn usage(&self, session: &str, agents: &[String]) -> Result<WorkUsage, String> {
+        self.dirs.usage(session, agents)
     }
 
     fn roots(&self, session: &str, agents: &[String]) -> Result<WorkRoots, String> {

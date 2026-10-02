@@ -4,8 +4,8 @@
 
 use crate::capabilities::conductor::api::{
     AgentInstance, AgentSuggestion, CollabStep, ConfigAgent, FilesAgentRootView, FilesAgentView,
-    FilesRootsView, FilesView, RuntimeReport, SessionConfig, SessionEdit, SessionView, WorkMode,
-    WorkOpened, WorkSpec,
+    FilesRootsView, FilesView, RuntimeReport, SessionConfig, SessionEdit, SessionView, TierChoices,
+    WorkMode, WorkOpened, WorkSpec,
 };
 use crate::capabilities::llm::api::Llm;
 use crate::capabilities::session::api::History;
@@ -249,6 +249,11 @@ impl Conductor {
     /// 登记处能力面（可写）：登记处的用例只经它调用。
     pub fn registry_mut(&mut self) -> &mut dyn Registry {
         self.registry.as_mut()
+    }
+
+    /// 目录保留名（`systools/names.yaml`）：agent 实例名不得占用（与工作区布局同源）。
+    pub(crate) fn reserved_names(&self) -> Vec<String> {
+        self.systools.reserved_names()
     }
 
     /// 生成期间"会话不在表里"的三种进入点共用这一句（错误文案要一致，别处不再各写一份）。

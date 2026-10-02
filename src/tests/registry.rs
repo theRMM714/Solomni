@@ -182,6 +182,7 @@ pub(crate) fn agent_crud_and_work_with_agents() {
         }],
         task: None,
         delegate: false,
+        tier: crate::kernel::api::Tier::Host,
     };
     let opened = core.create_work(spec).unwrap();
     assert_eq!(opened.agents, vec!["调研".to_string()]);
@@ -215,6 +216,7 @@ pub(crate) fn agent_crud_and_work_with_agents() {
         ],
         task: Some("需求".to_string()),
         delegate: false,
+        tier: crate::kernel::api::Tier::Host,
     };
     assert!(core
         .create_work(cross)
@@ -408,4 +410,16 @@ pub(crate) fn a_probe_writes_back_only_conclusive_results() {
 
     // 无此模型 → 如实报错
     assert!(core.registry_mut().probe_model_tools("ghost").is_err());
+}
+
+/// 目录保留名校验（名单从 `systools/names.yaml` 注入）：大小写不敏感，普通名字放行。
+#[test]
+pub(crate) fn reserved_directory_names_are_rejected_case_insensitively() {
+    let reserved = vec!["work".to_string(), "children".to_string()];
+    assert!(crate::capabilities::registry::api::check_reserved("children", &reserved).is_err());
+    assert!(
+        crate::capabilities::registry::api::check_reserved("CHILDREN", &reserved).is_err(),
+        "Windows 文件系统不区分大小写"
+    );
+    assert!(crate::capabilities::registry::api::check_reserved("甲", &reserved).is_ok());
 }

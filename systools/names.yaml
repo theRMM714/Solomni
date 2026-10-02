@@ -1,0 +1,6 @@
+# 系统侧名字表：`session/<工作>/` 下由布局固定占用的目录名。
+# agent 实例名不得占用这些名字（会与共享区 `work/` 或子会话容器 `children/` 撞路径）；
+# 目录布局一改，这里必须同步（见 docs/session/session-model.md 与 PRODUCT.md 的落盘布局）。
+reserved:
+  - work
+  - children

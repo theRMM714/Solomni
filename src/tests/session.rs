@@ -45,6 +45,84 @@ pub(crate) fn create_work_persists_and_history_replays() {
         .is_ok());
 }
 
+/// 删父带子：整个子树一起消失；子会话不允许单独删（它由核心按节点派生）。
+#[test]
+pub(crate) fn history_delete_cascades_to_children_and_refuses_child_delete() {
+    let hist = Arc::new(InMemoryHistory::new());
+    let mut core = core_with_all(
+        vec![module_of("a")],
+        gw(BTreeMap::new(), vec!["[]".into()]),
+        Arc::new(SilentRunner),
+        Arc::new(FakeCatalog::new(vec!["m".to_string()])),
+        Arc::clone(&hist),
+        Arc::new(InMemorySysIo::new()),
+    );
+    let parent = core
+        .create_work(collab_work("p", &["a"], false, "需求"))
+        .unwrap()
+        .sid;
+    let child = core.spawn_agent_session(&parent, "a").unwrap();
+    // 子会话不允许单独删，理由要明确，且拒绝后它仍在。
+    let err = core.history_delete(&child).unwrap_err();
+    assert!(err.contains("子会话"), "{}", err);
+    assert!(hist.load(&child).is_ok(), "拒绝删除后子会话仍在");
+    // 删父会话：子会话随之消失。
+    assert!(core.history_delete(&parent).unwrap());
+    assert!(hist.load(&parent).is_err());
+    assert!(hist.load(&child).is_err(), "子会话随父一起消失");
+}
+
+/// 子树里任一节点在生成中就**整体拒绝**：不能删到一半留下半个状态。
+#[test]
+pub(crate) fn history_delete_refuses_when_any_node_in_the_subtree_is_running() {
+    let hist = Arc::new(InMemoryHistory::new());
+    let mut core = core_with_all(
+        vec![module_of("a")],
+        gw(BTreeMap::new(), vec!["[]".into()]),
+        Arc::new(SilentRunner),
+        Arc::new(FakeCatalog::new(vec!["m".to_string()])),
+        Arc::clone(&hist),
+        Arc::new(InMemorySysIo::new()),
+    );
+    let parent = core
+        .create_work(collab_work("p", &["a"], false, "需求"))
+        .unwrap()
+        .sid;
+    let child = core.spawn_agent_session(&parent, "a").unwrap();
+    core.take_single(&child)
+        .expect("把子会话交给工作线程（标记生成中）");
+    let err = core.history_delete(&parent).unwrap_err();
+    assert!(err.contains("正在生成"), "{}", err);
+    assert!(
+        hist.load(&parent).is_ok() && hist.load(&child).is_ok(),
+        "整体拒绝：父与子都还在"
+    );
+}
+
+/// 创建工作的档位来自用户选择；承载不了的虚拟机档如实拒绝（与「开始」的校验同源）。
+#[test]
+pub(crate) fn create_work_uses_chosen_tier_and_rejects_unavailable_vm() {
+    let hist = Arc::new(InMemoryHistory::new());
+    let mut core = core_with_all(
+        vec![module_of("a")],
+        gw(BTreeMap::new(), vec!["[]".into()]),
+        Arc::new(SilentRunner),
+        Arc::new(FakeCatalog::new(vec!["m".to_string()])),
+        Arc::clone(&hist),
+        Arc::new(InMemorySysIo::new()),
+    );
+    let host = core
+        .create_work(work("h", WorkMode::Single, &["a"]))
+        .unwrap()
+        .sid;
+    assert_eq!(core.history_open(&host).unwrap().0.exec.tier, Tier::Host);
+    let mut vm = work("v", WorkMode::Single, &["a"]);
+    vm.tier = Tier::Vm;
+    let err = core.create_work(vm).unwrap_err();
+    assert!(err.contains("虚拟机档现在不可用"), "{}", err);
+    assert!(core.history_open("v").is_err(), "拒绝就该什么都不留下");
+}
+
 #[test]
 pub(crate) fn direct_rewind_drops_tail_then_continue_allows_user_turn() {
     let mut member = BTreeMap::new();
@@ -247,6 +325,7 @@ pub(crate) fn create_work_validates_user_choices() {
         ],
         task: None,
         delegate: false,
+        tier: crate::kernel::api::Tier::Host,
     };
     let opened = core
         .create_work(two_agents)

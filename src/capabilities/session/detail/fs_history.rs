@@ -1,5 +1,7 @@
 //! 会话历史落盘：session/<名字>/meta.yaml + transcript.jsonl（实现本能力的 HistoryStore 端口）。
-//! 名字即目录名（conductor 已校验）；流水只追加，回档将来以 rewind 记录追加，不物理删行。
+//! 布局：顶层会话 = session/<名字>/；子会话（meta.parent 非空）= session/<父>/children/<名字>/
+//! —— 位置本身就是归属，删父会话 = 删一个目录。名字即目录名（conductor 已校验）。
+//! 流水只追加，回档将来以 rewind 记录追加，不物理删行。
 
 use crate::capabilities::session::api::{HistoryView, SessionMeta};
 use crate::capabilities::session::ports::HistoryStore;
@@ -15,29 +17,84 @@ impl FsHistory {
         FsHistory { dir }
     }
 
-    fn session_dir(&self, name: &str) -> PathBuf {
+    /// 顶层会话目录里专放子会话的那一层。
+    const CHILDREN: &'static str = "children";
+
+    /// 顶层会话目录。
+    fn top_dir(&self, name: &str) -> PathBuf {
         self.dir.join(name)
+    }
+
+    /// 子会话目录：归属由父会话给出，不从名字里解析分隔符（工作名本身可以含 `-`）。
+    fn child_dir(&self, parent: &str, name: &str) -> PathBuf {
+        self.top_dir(parent).join(Self::CHILDREN).join(name)
+    }
+
+    /// 一个会话（顶层或子会话）的落点：`meta.parent` 有值就落在父会话目录内部。
+    fn dir_of(&self, meta: &SessionMeta) -> PathBuf {
+        match &meta.parent {
+            Some(p) => self.child_dir(p, &meta.name),
+            None => self.top_dir(&meta.name),
+        }
+    }
+
+    /// 只按名字定位（append / load / delete 用）：先当顶层找，再在各顶层会话的 children/ 下找。
+    /// 目录名就是会话名，所以不需要从名字里猜父会话。
+    fn find(&self, name: &str) -> Option<PathBuf> {
+        let top = self.top_dir(name);
+        if top.join("meta.yaml").is_file() {
+            return Some(top);
+        }
+        let entries = std::fs::read_dir(&self.dir).ok()?;
+        for e in entries.flatten() {
+            if !e.path().is_dir() {
+                continue;
+            }
+            let cand = e.path().join(Self::CHILDREN).join(name);
+            if cand.join("meta.yaml").is_file() {
+                return Some(cand);
+            }
+        }
+        None
+    }
+
+    /// 读一个会话目录的列表视图（meta 缺失或非法 = None）。
+    fn read_view(dir: &std::path::Path) -> Option<HistoryView> {
+        let text = std::fs::read_to_string(dir.join("meta.yaml")).ok()?;
+        let meta = yaml_serde::from_str::<SessionMeta>(&text).ok()?;
+        let done = std::fs::read_to_string(dir.join("transcript.jsonl"))
+            .map(|t| t.contains("\"type\":\"ended\""))
+            .unwrap_or(false);
+        Some(HistoryView {
+            name: meta.name,
+            mode: meta.mode,
+            ts: meta.ts,
+            done,
+            // 档位来自 meta 的 exec 段：列表视图据此提示"环境已变"，不拦打开。
+            exec: meta.exec,
+            // 编排者：子会话在侧栏里缩进挂在父会话下。
+            parent: meta.parent,
+        })
     }
 }
 
 impl HistoryStore for FsHistory {
     fn create(&self, meta: &SessionMeta) -> Result<(), String> {
-        let d = self.session_dir(&meta.name);
+        let d = self.dir_of(meta);
         std::fs::create_dir_all(&d).map_err(|e| format!("建会话目录失败：{}", e))?;
         let text = yaml_serde::to_string(meta).map_err(|e| e.to_string())?;
         std::fs::write(d.join("meta.yaml"), text).map_err(|e| format!("写会话元信息失败：{}", e))
     }
 
     fn save_meta(&self, meta: &SessionMeta) -> Result<(), String> {
-        let d = self.session_dir(&meta.name);
-        std::fs::create_dir_all(&d).map_err(|e| format!("建会话目录失败：{}", e))?;
-        let text = yaml_serde::to_string(meta).map_err(|e| e.to_string())?;
-        std::fs::write(d.join("meta.yaml"), text).map_err(|e| format!("写会话元信息失败：{}", e))
+        // 与 create 同一落点：meta.parent 是位置的唯一判据。
+        self.create(meta)
     }
 
     fn append(&self, name: &str, events: &[serde_json::Value]) -> Result<(), String> {
-        let d = self.session_dir(name);
-        std::fs::create_dir_all(&d).map_err(|e| e.to_string())?;
+        let d = self
+            .find(name)
+            .ok_or_else(|| format!("无此会话：{}", name))?;
         let mut f = std::fs::OpenOptions::new()
             .create(true)
             .append(true)
@@ -62,32 +119,30 @@ impl HistoryStore for FsHistory {
             if !p.is_dir() {
                 continue;
             }
-            let Ok(text) = std::fs::read_to_string(p.join("meta.yaml")) else {
-                continue;
-            };
-            let Ok(meta) = yaml_serde::from_str::<SessionMeta>(&text) else {
-                continue;
-            };
-            let done = std::fs::read_to_string(p.join("transcript.jsonl"))
-                .map(|t| t.contains("\"type\":\"ended\""))
-                .unwrap_or(false);
-            out.push(HistoryView {
-                name: meta.name,
-                mode: meta.mode,
-                ts: meta.ts,
-                done,
-                // 档位来自 meta 的 exec 段：列表视图据此提示"环境已变"，不拦打开。
-                exec: meta.exec,
-                // 编排者：子会话在侧栏里缩进挂在父会话下。
-                parent: meta.parent,
-            });
+            if let Some(v) = Self::read_view(&p) {
+                out.push(v);
+            }
+            // 子会话在 <顶层会话>/children/ 下：位置与 meta.parent 同源。
+            if let Ok(kids) = std::fs::read_dir(p.join(Self::CHILDREN)) {
+                for kid in kids.flatten() {
+                    let kp = kid.path();
+                    if !kp.is_dir() {
+                        continue;
+                    }
+                    if let Some(v) = Self::read_view(&kp) {
+                        out.push(v);
+                    }
+                }
+            }
         }
         out.sort_by_key(|a| std::cmp::Reverse(a.ts));
         Ok(out)
     }
 
     fn load(&self, name: &str) -> Result<(SessionMeta, Vec<serde_json::Value>), String> {
-        let d = self.session_dir(name);
+        let d = self
+            .find(name)
+            .ok_or_else(|| format!("无此会话：{}", name))?;
         let text = std::fs::read_to_string(d.join("meta.yaml"))
             .map_err(|_| format!("无此会话：{}", name))?;
         let meta: SessionMeta =
@@ -107,10 +162,9 @@ impl HistoryStore for FsHistory {
     }
 
     fn delete(&self, name: &str) -> Result<bool, String> {
-        let d = self.session_dir(name);
-        if !d.is_dir() {
+        let Some(d) = self.find(name) else {
             return Ok(false);
-        }
+        };
         std::fs::remove_dir_all(&d).map_err(|e| e.to_string())?;
         Ok(true)
     }

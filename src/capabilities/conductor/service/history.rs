@@ -35,21 +35,51 @@ impl Conductor {
         ))
     }
 
-    /// 删除会话（= 删目录）。内存中的同名会话一并移除，避免内存与磁盘不一致。
-    /// 删之前先请适配层撤销该会话各 agent 的围栏授权：痕迹与会话同生共死，不随会话数量堆积。
+    /// 删除会话（含它的整棵子树）。
+    ///
+    /// 口径（见 docs/session/session-model.md 七）：
+    /// - **子会话不允许单独删**：它由核心按节点派生，删父会话会一起删掉；单独删会让父子关系断掉。
+    /// - **删父带子**：按 `meta.parent` 收集整棵子树，**先子后父**逐个撤围栏授权 → 移出内存 → 删目录。
+    /// - **子树里任一节点在生成中就整体拒绝**：不能删到一半留下半个状态。
+    ///
+    /// 内部的 `session::History::delete`（纯存储）不受影响——系统路径还需要它。
     pub fn history_delete(&mut self, name: &str) -> Result<bool, String> {
-        if self.running.contains(name) {
-            return Err(Self::running_refusal(name));
+        // 不是落盘会话（或已不存在）：只清内存，交存储层如实回 false。
+        let Ok((meta, _)) = self.history.load(name) else {
+            self.sessions.remove(name);
+            return self.history.delete(name);
+        };
+        // 子会话由核心管理，不允许用户单独删。
+        if let Some(parent) = meta.parent.clone() {
+            return Err(format!(
+                "会话 {} 是核心管理的子会话（父会话 {}）：删父会话会一起删掉它，不能单独删",
+                name, parent
+            ));
         }
-        if let Ok((meta, _)) = self.history.load(name) {
-            let roster = self.workspace.roster();
-            match self.sandboxes(&meta, &roster) {
+        let subtree = self.subtree_of(name);
+        for sid in &subtree {
+            if self.running.contains(sid) {
+                return Err(Self::running_refusal(sid));
+            }
+        }
+        // 撤围栏授权：子会话与父会话共用工作区，按工作根去重，避免对同一套根重复撤销。
+        let roster = self.workspace.roster();
+        let mut released: Vec<String> = Vec::new();
+        for sid in &subtree {
+            let Ok((m, _)) = self.history.load(sid) else {
+                continue;
+            };
+            let work = m.work().to_string();
+            if released.iter().any(|w| w == &work) {
+                continue;
+            }
+            released.push(work);
+            match self.sandboxes(&m, &roster) {
                 Ok(sandboxes) => {
                     for sb in &sandboxes.list {
                         // 撤销要覆盖同一次授权写下的全部条目：读写根 + 用户授权的只读根。
                         let spec = crate::capabilities::tools::api::FenceSpec::from_sandbox(
-                            sb,
-                            meta.exec.net,
+                            sb, m.exec.net,
                         )
                         .with_read_only(self.fence_read_roots());
                         if let Err(e) = self.tools.release_fence(&spec) {
@@ -66,8 +96,35 @@ impl Conductor {
                 ),
             }
         }
-        self.sessions.remove(name);
-        self.history.delete(name)
+        for sid in &subtree {
+            self.sessions.remove(sid);
+        }
+        // 后序删除：先子后父。父会话目录被删时，落在它内部的子会话目录一起消失。
+        let mut target_deleted = false;
+        for sid in subtree.iter().rev() {
+            let ok = self.history.delete(sid)?;
+            if sid == name {
+                target_deleted = ok;
+            }
+        }
+        Ok(target_deleted)
+    }
+
+    /// 一个会话的整棵子树（含它自己，父在前、子在后）：父子关系以 `meta.parent` 为唯一判据。
+    fn subtree_of(&self, name: &str) -> Vec<String> {
+        let list = self.history_list();
+        let mut out = vec![name.to_string()];
+        let mut i = 0;
+        while i < out.len() {
+            let cur = out[i].clone();
+            for h in &list {
+                if h.parent.as_deref() == Some(cur.as_str()) && !out.iter().any(|x| x == &h.name) {
+                    out.push(h.name.clone());
+                }
+            }
+            i += 1;
+        }
+        out
     }
 
     /// 事件落盘；失败如实告知（追加一条警告事件），不静默丢历史。

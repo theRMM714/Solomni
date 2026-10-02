@@ -111,6 +111,28 @@ fn fs_workspace_builds_the_real_layout_and_lists_only_files() {
     let _ = std::fs::remove_dir_all(&root);
 }
 
+/// 用量按区统计：文件数与**真实字节**（删除前如实交代用），空工作区不是错误。
+#[test]
+fn fs_workspace_reports_usage_by_area() {
+    let root = scratch("fs-workspace-usage");
+    let sessions = root.join("session");
+    let ws = FsWorkspace::new(sessions.clone());
+    ws.prepare("w", &["a".to_string()]).expect("建目录");
+    ws.write_work("w", "note.txt", "你好".as_bytes())
+        .expect("投喂");
+    std::fs::write(sessions.join("w").join("a").join("out.bin"), [0u8; 5]).expect("写产物");
+    let u = ws.usage("w", &["a".to_string()]).expect("统计用量");
+    assert_eq!(u.files, 2);
+    assert_eq!(u.bytes, "你好".len() as u64 + 5);
+    assert_eq!(u.work.files, 1);
+    assert_eq!(u.work.bytes, "你好".len() as u64);
+    assert_eq!(u.agents["a"].files, 1);
+    assert_eq!(u.agents["a"].bytes, 5);
+    let empty = ws.usage("没这个会话", &[]).expect("统计不存在的会话不报错");
+    assert_eq!(empty.files, 0, "查询不该有副作用");
+    let _ = std::fs::remove_dir_all(&root);
+}
+
 // ---------- FsSysIo ----------
 
 #[test]
@@ -191,6 +213,40 @@ fn fs_history_roundtrips_lists_deletes_and_rejects_broken_meta() {
     assert!(h.delete("w1").expect("删除成功"), "删除已存在的会话 = true");
     assert!(!h.delete("w1").expect("再删"), "重复删除 = false，不是错误");
     assert!(h.load("w1").unwrap_err().contains("无此会话"));
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// 子会话落在**父会话目录内部**（`session/<父>/children/<子>`）：位置与 meta.parent 同源。
+#[test]
+fn fs_history_nests_children_inside_their_parent_dir() {
+    let root = scratch("fs-history-children");
+    let h = FsHistory::new(root.clone());
+    let mut parent = meta("p");
+    parent.mode = "collab".to_string();
+    h.create(&parent).expect("建父会话");
+    let mut child = meta("p--甲");
+    child.parent = Some("p".to_string());
+    h.create(&child).expect("建子会话");
+    h.append("p--甲", &[serde_json::json!({"type": "say", "text": "hi"})])
+        .expect("子会话流水");
+    assert!(
+        root.join("p")
+            .join("children")
+            .join("p--甲")
+            .join("meta.yaml")
+            .is_file(),
+        "子会话落在父会话目录内部"
+    );
+    assert!(!root.join("p--甲").exists(), "不再与父会话并列");
+    let listed = h.list().expect("列会话");
+    assert_eq!(listed.len(), 2, "父子都在清单里");
+    assert_eq!(
+        h.load("p--甲").expect("按名字读子会话").0.parent.as_deref(),
+        Some("p")
+    );
+    assert!(h.delete("p").expect("删父会话"), "删父 = 删一个目录");
+    assert!(!root.join("p").exists());
+    assert!(h.load("p--甲").is_err(), "子会话随父一起消失");
     let _ = std::fs::remove_dir_all(&root);
 }
 
@@ -486,6 +542,23 @@ fn role_face_comes_from_the_role_table() {
             "solo 不做讨论，不该拿到 {}：{:?}",
             verb,
             solo
+        );
+    }
+}
+
+/// 目录保留名来自仓库自带的名字表（不在代码里硬编码）：布局固定的目录都必须在册。
+#[test]
+fn names_table_lists_directory_reserved_names() {
+    let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let st = YamlSystools::new(root.join("systools"))
+        .load()
+        .expect("读三张表");
+    for want in ["work", "children"] {
+        assert!(
+            st.reserved_names.iter().any(|n| n == want),
+            "名字表里该有 {}：{:?}",
+            want,
+            st.reserved_names
         );
     }
 }

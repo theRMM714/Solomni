@@ -8,6 +8,7 @@
 
 use crate::capabilities::prompt::api::ToolTexts;
 use crate::kernel::api::slash;
+use serde::Serialize;
 use std::collections::BTreeMap;
 use std::path::{Component, Path, PathBuf};
 
@@ -185,4 +186,43 @@ pub struct WorkRoots {
     pub shared: PathBuf,
     /// agent 实例名 → 私有沙箱目录。
     pub agents: BTreeMap<String, PathBuf>,
+}
+
+/// 一个区的用量：文件数 + 总字节（真实 stat，不是清单条数）。
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct AreaUsage {
+    pub files: usize,
+    pub bytes: u64,
+}
+
+/// 一次工作的**工作区用量**（删除前如实交代）：总数 + 共享区/各 agent 沙箱的分项。
+/// 只数文件（目录不计），字节取文件真实大小。
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct WorkUsage {
+    /// 全部文件数（共享区 + 各 agent 沙箱）。
+    pub files: usize,
+    /// 全部总字节。
+    pub bytes: u64,
+    /// 共享区 `work/`。
+    pub work: AreaUsage,
+    /// agent 实例名 → 它的私有沙箱。
+    pub agents: BTreeMap<String, AreaUsage>,
+}
+
+impl WorkUsage {
+    /// 按分项汇总总数（调用方只填分项，避免两处各算一遍）。
+    pub fn total(work: AreaUsage, agents: BTreeMap<String, AreaUsage>) -> WorkUsage {
+        let mut files = work.files;
+        let mut bytes = work.bytes;
+        for a in agents.values() {
+            files += a.files;
+            bytes += a.bytes;
+        }
+        WorkUsage {
+            files,
+            bytes,
+            work,
+            agents,
+        }
+    }
 }

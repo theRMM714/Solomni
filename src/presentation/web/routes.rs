@@ -233,6 +233,16 @@ pub const ROUTES: &[Route] = &[
         note: "删除会话时核心会请求撤销该会话的围栏授权",
     },
     Route {
+        id: "tiers",
+        method: "GET",
+        pattern: "/api/tiers",
+        capability: "ConductorOps::tier_choices",
+        request: "—",
+        response: "{tiers:{default,vm_available,vm_unavailable_reason,vm_requirements}}",
+        statuses: &[200, 400],
+        note: "新建工作的档位选择：默认档 + 虚拟机档可用性与逐项前置",
+    },
+    Route {
         id: "suggest",
         method: "POST",
         pattern: "/api/suggest-models",

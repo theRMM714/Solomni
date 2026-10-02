@@ -1,7 +1,7 @@
 //! 工作区落盘：session/<工作名>/ 下的 work 与各 agent 沙箱（实现本能力的 `Workdirs` 端口）。
 //! 目录布局机制集中在这里；路径一律用路径组件拼接（交给运行环境）。
 
-use crate::capabilities::workspace::api::{WorkFiles, WorkRoots};
+use crate::capabilities::workspace::api::{AreaUsage, WorkFiles, WorkRoots, WorkUsage};
 use crate::capabilities::workspace::ports::Workdirs;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -39,6 +39,29 @@ fn collect_files(root: &Path, out: &mut Vec<String>, prefix: &str) {
             out.push(rel);
         }
     }
+}
+
+/// 递归累加一个区的文件数与字节（目录不计；单个文件 stat 失败按 0 计，不因此挡下整次统计）。
+fn collect_usage(root: &Path, files: &mut usize, bytes: &mut u64) {
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return;
+    };
+    for e in entries.flatten() {
+        let p = e.path();
+        if p.is_dir() {
+            collect_usage(&p, files, bytes);
+        } else {
+            *files += 1;
+            *bytes += std::fs::metadata(&p).map(|m| m.len()).unwrap_or(0);
+        }
+    }
+}
+
+fn area_usage(root: &Path) -> AreaUsage {
+    let mut files = 0usize;
+    let mut bytes = 0u64;
+    collect_usage(root, &mut files, &mut bytes);
+    AreaUsage { files, bytes }
 }
 
 pub struct FsWorkspace {
@@ -102,5 +125,15 @@ impl Workdirs for FsWorkspace {
             map.insert(a.clone(), files);
         }
         Ok(WorkFiles { work, agents: map })
+    }
+
+    fn usage(&self, session: &str, agents: &[String]) -> Result<WorkUsage, String> {
+        let dir = self.session_dir(session);
+        let work = area_usage(&dir.join("work"));
+        let mut map = BTreeMap::new();
+        for a in agents {
+            map.insert(a.clone(), area_usage(&dir.join(a)));
+        }
+        Ok(WorkUsage::total(work, map))
     }
 }

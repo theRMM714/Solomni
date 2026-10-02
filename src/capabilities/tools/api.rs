@@ -27,6 +27,10 @@ pub trait Tools: Send + Sync {
     /// 内置工具总表（工具**是什么**的声明书）：调用方要持有它时拿走一份。
     fn book(&self) -> ToolBook;
 
+    /// 目录保留名（`systools/names.yaml`）：`session/<工作>/` 下由布局固定占用的目录名，
+    /// agent 实例名不得占用。名单在表里，不在代码里。
+    fn reserved_names(&self) -> Vec<String>;
+
     /// 悬空引用与缺能力（空 = 一切正常）：装配期自检与测试门禁读它。
     fn problems(&self) -> Vec<String>;
 }

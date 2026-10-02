@@ -3,7 +3,7 @@
 
 use crate::capabilities::conductor::api::{Acted, Action};
 use crate::capabilities::conductor::api::{
-    AgentInstance, CollabStep, Pending, SessionEvent, WorkMode, WorkSpec,
+    AgentInstance, CollabStep, Pending, SessionEvent, Tier, WorkMode, WorkSpec,
 };
 use crate::capabilities::conductor::api::{Ops, Output};
 use crate::capabilities::registry::api::{ModelView, ProviderView};
@@ -352,6 +352,12 @@ fn single_flow(ops: &Ops, arg: &str) {
             return;
         }
     };
+    // 档位：CLI 不提供交互选择，用设置里的默认档（与 Web 向导的默认一致）。
+    let tier = ops
+        .registry
+        .settings()
+        .map(|s| s.tier)
+        .unwrap_or(Tier::Host);
     // 订阅起点：命令回包只给头部序号，事实一律从事件台按 since 取。
     let mut cursor = ops.events.head();
     let opened = match ops.sessions.create_work(WorkSpec {
@@ -360,6 +366,7 @@ fn single_flow(ops: &Ops, arg: &str) {
         agents: picked,
         task: None,
         delegate: false,
+        tier,
     }) {
         Ok(o) => o.0,
         Err(e) => {
@@ -411,6 +418,11 @@ fn collab_flow(ops: &Ops, arg: &str) {
             return;
         }
     };
+    let tier = ops
+        .registry
+        .settings()
+        .map(|s| s.tier)
+        .unwrap_or(Tier::Host);
     let mut cursor = ops.events.head();
     let sid = match ops.sessions.create_work(WorkSpec {
         name: work_name,
@@ -418,6 +430,7 @@ fn collab_flow(ops: &Ops, arg: &str) {
         agents,
         task: Some(task),
         delegate,
+        tier,
     }) {
         Ok((o, _)) => {
             cursor = drain(ops, &o.sid, cursor);

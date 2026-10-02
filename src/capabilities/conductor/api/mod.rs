@@ -237,6 +237,9 @@ pub trait SessionOps: Send + Sync {
 pub trait ConductorOps: Send + Sync {
     /// 运行包与档位的运行报告（只报事实）。
     fn runtime_report(&self, tier: Tier) -> Result<RuntimeReport, String>;
+    /// 新建工作时的**档位选择**（默认档 + 虚拟机档可用性与逐项前置）。
+    /// 与「开始」的校验同源（同一把 `tier_readiness` 尺子），界面照抄，不自己编话。
+    fn tier_choices(&self) -> Result<TierChoices, String>;
     /// 核心按任务推荐的 agent 草案（带理由；用户可改）。
     fn suggest_models(&self, task: &str, mode: WorkMode) -> Result<Vec<AgentSuggestion>, String>;
 }
@@ -406,6 +409,8 @@ pub struct WorkSpec {
     pub task: Option<String>,
     /// 保留：委托核心代拟名单（协作且未给 agent 时）。
     pub delegate: bool,
+    /// 执行档位（用户在创建向导里选的；默认 = 设置里的档位）。承载不了就由 create_work 如实拒绝。
+    pub tier: Tier,
 }
 
 /// 创建工作后的结果：最终实例名（重名已加尾号）、名单，以及**开场事实**。
@@ -450,6 +455,19 @@ pub struct RuntimeReport {
     pub rejected: Vec<String>,
     /// 被拒收的运行包（原因如实）。
     pub rejected_packages: Vec<String>,
+}
+
+/// 新建工作时的档位选择视图（创建向导用）：默认档 + 虚拟机档为什么不能选（逐项前置）。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct TierChoices {
+    /// 默认档位（设置里的 `tier`）。
+    pub default: String,
+    /// **虚拟机档**能不能选（与当前档位无关）。
+    pub vm_available: bool,
+    /// 不能选时的理由（能选 = 空）。
+    pub vm_unavailable_reason: String,
+    /// 虚拟机档的**逐项前置**（缺哪几项、每项怎么补）：界面照抄，不自己编话。
+    pub vm_requirements: Vec<crate::capabilities::workspace::api::VmRequirement>,
 }
 
 /// 配置界面里的一个 agent（名字冻结时仍要显示）。
@@ -537,6 +555,8 @@ pub struct FilesView {
     pub work: Vec<String>,
     pub agents: Vec<FilesAgentView>,
     pub roots: FilesRootsView,
+    /// 工作区用量（文件数与总字节）：删除前如实交代"还有多少东西会被一起删"。
+    pub usage: crate::capabilities::workspace::api::WorkUsage,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
