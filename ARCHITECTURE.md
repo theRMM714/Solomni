@@ -177,8 +177,13 @@ session/<工作名>/
   `HOME` / `TEMP` / `USERPROFILE` / `LOCALAPPDATA` 一律落到该 agent 的私有沙箱；Windows 建 AppContainer 进程
   需要 `LOCALAPPDATA` 在场（缺了它 `CreateProcessW` 报 `os error 203`，容器会静默降级成无围栏）。
   容器 profile **一个 agent 一个**（跨会话复用，数量有界）：守门进程是唯一建它的地方，建成即写进
-  `.home/fence-grants.json` 台账；`--fence-clean` 先按台账精确回收（撤 ACE + 删 profile），再按
-  `Solomni.Agent.` 前缀扫掉整族遗留 profile（探针、台账被删、旧版本建的都在这一扫里）。
+  `.home/fence-grants.json` 台账；`--fence-clean` 按三步收口：先按台账精确回收（撤 ACE + 删 profile），
+  再按容器 SID 族在**产品根内**扫掉台账外的孤儿授权——账会断（夹具重建、进程被杀、旧版本没记账），
+  断了账不等于没有残留：一条遗留的显式 ACE 就能把目录对受限进程整个藏住（真机在 `tests/` 上抓到过，
+  撤净判定看 SID 在不在场、不看权限位，见 `confine::has_any_ace_for` 与孤儿清扫 `confine::sweep_orphan_aces`），
+  最后按 `Solomni.Agent.` 前缀扫掉整族遗留 profile（探针、台账被删、旧版本建的都在这一扫里）。
+  父目录的只读属性位因此**不继承**（最坏残留面收敛到父目录本身），撤权是否干净由真机探针钉住
+  （授权→撤权后父目录与叶子都不得留有该容器 SID 的任何显式 ACE）。
 - `capabilities/workspace/` 里的 `packages` 是运行包契约与包库事实（校验、去重、系统路径冲突预检、能力索引），
   `exec` 是执行档位与执行计划派生；两者都是纯逻辑，目录遍历在 `PackageSource` 适配层。契约见 [RUNTIME_SPEC.md](RUNTIME_SPEC.md)。
 - 登记处四份 yaml 的字段与读写规则见 [REGISTRY_SPEC.md](REGISTRY_SPEC.md)。

@@ -130,7 +130,7 @@ agent 实例名不得占用布局保留的目录名（`work`、`children`）：�
   绝不按"无围栏"跑——否则用户以为有围栏、实际什么都没有。
   三平台围栏都已在各自平台的真机上跑过探针（Windows AppContainer + 目录 ACL、Linux Landlock、macOS seatbelt），
   探针在 `tests/windows/`、`tests/linux/`、`tests/macos/`，缺口账现状见 [TESTING.md](TESTING.md) 与 `docs/testing/`
-- **围栏要用就征得同意**：Windows 上的路径级围栏必须在本机目录上写权限项，所以本程序**默认不写**——只有显式授权（`.home/settings.yaml` 的 `fence_write: true`，或环境变量 `SOLOMNI_FENCE_WRITE=1`）才做；授权后每次写入都在 stderr 逐条列出并记进授权台账；`solomni --fence-clean` 按台账精确撤销并删掉建过的容器 profile（删除会话时也会撤销该会话的授权）
+- **围栏要用就征得同意**：Windows 上的路径级围栏必须在本机目录上写权限项，所以本程序**默认不写**——只有显式授权（`.home/settings.yaml` 的 `fence_write: true`，或环境变量 `SOLOMNI_FENCE_WRITE=1`）才做；授权后每次写入都在 stderr 逐条列出并记进授权台账；`solomni --fence-clean` 按台账精确撤销、扫掉台账外的孤儿授权并删掉建过的容器 profile（删除会话时也会撤销该会话的授权）
 - 上传同名文件绝不静默覆盖（弹出覆盖 / 改名 / 取消）
 
 ### 垂直分工开发（每个 agent 一格）

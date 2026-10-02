@@ -1,5 +1,75 @@
 use super::*;
 use std::sync::Mutex;
+use windows_sys::Win32::Foundation::LocalFree;
+use windows_sys::Win32::Security::Authorization::GetNamedSecurityInfoW;
+use windows_sys::Win32::Security::{
+    GetAce, GetAclInformation, ACL_SIZE_INFORMATION, DACL_SECURITY_INFORMATION,
+};
+
+/// 把对象 DACL 里的允许 ACE 逐条转储成可读文本（残留调查用：原始权限位 + 继承标志 + SID）。
+fn dump_aces(path: &Path) -> String {
+    const ACL_SIZE_INFORMATION_CLASS: i32 = 2;
+    let mut dacl: *mut ACL = std::ptr::null_mut();
+    let mut sd: PSID = std::ptr::null_mut();
+    let w = wide(path);
+    let rc = unsafe {
+        GetNamedSecurityInfoW(
+            w.as_ptr(),
+            SE_FILE_OBJECT,
+            DACL_SECURITY_INFORMATION,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            &mut dacl,
+            std::ptr::null_mut(),
+            &mut sd,
+        )
+    };
+    if rc != 0 {
+        return format!("{}：读 DACL 失败（{}）", path.display(), rc);
+    }
+    let mut out = format!(
+        "{}：
+",
+        path.display()
+    );
+    if !dacl.is_null() {
+        let mut info: ACL_SIZE_INFORMATION = unsafe { std::mem::zeroed() };
+        let ok = unsafe {
+            GetAclInformation(
+                dacl,
+                &mut info as *mut _ as *mut c_void,
+                std::mem::size_of::<ACL_SIZE_INFORMATION>() as u32,
+                ACL_SIZE_INFORMATION_CLASS,
+            )
+        };
+        if ok != 0 {
+            for i in 0..info.AceCount {
+                let mut ace: *mut c_void = std::ptr::null_mut();
+                if unsafe { GetAce(dacl, i, &mut ace) } == 0 || ace.is_null() {
+                    continue;
+                }
+                let base = ace as *const u8;
+                let ace_type = unsafe { *base };
+                let flags = unsafe { *base.add(1) };
+                let mask = unsafe { std::ptr::read_unaligned(base.add(4) as *const u32) };
+                let sid_text = sid_to_string(unsafe { base.add(8) as PSID });
+                out.push_str(&format!(
+                    "  type={} flags=0x{:02X} mask=0x{:08X} inherited={} sid={}
+",
+                    ace_type,
+                    flags,
+                    mask,
+                    flags & 0x10 != 0,
+                    sid_text
+                ));
+            }
+        }
+    }
+    unsafe {
+        LocalFree(sd);
+    }
+    out
+}
 
 /// 容器 profile **一个 agent 一个**：同名 agent 跨会话复用同一个容器身份（数量有界），换 agent 就换 profile。
 #[test]
@@ -91,11 +161,11 @@ fn grant_targets_include_parents_with_stat_only() {
         net: false,
     };
     let targets = grant_targets(&spec);
-    let find = |p: &std::path::Path| targets.iter().find(|(x, _, _)| x == p).cloned();
+    let find = |p: &std::path::Path| targets.iter().find(|(x, _, _, _)| x == p).cloned();
     // 叶子：读写根递归、只读根不递归。
     assert_eq!(
-        find(&dir).map(|(_, r, rec)| (r, rec)),
-        Some((RIGHTS_RW, true)),
+        find(&dir).map(|(_, r, rec, inh)| (r, rec, inh)),
+        Some((RIGHTS_RW, true, true)),
         "读写叶子要递归授权"
     );
     assert_eq!(
@@ -104,16 +174,18 @@ fn grant_targets_include_parents_with_stat_only() {
                 .join("solomni-grant-targets")
                 .join("shared")
         )
-        .map(|(_, r, rec)| (r, rec)),
-        Some((RIGHTS_RO, false)),
+        .map(|(_, r, rec, inh)| (r, rec, inh)),
+        Some((RIGHTS_RO, false, true)),
         "用户授权的只读根不递归"
     );
-    // 父目录：只读属性、不递归、不继承（grant_one 的 inherit 恒为 true，故这里看 rights 与 recursive）。
+    // 父目录：只读属性、不递归、**不继承**——继承会把 ACE 传播进整棵子树，
+    // 撤权断链时残留面就是整棵子树（fence.leftover-grant-hides-parent 的教训）。
     for leaf in [&dir, &module_root] {
         let parent = leaf.parent().expect("叶子有父目录").to_path_buf();
         let got = find(&parent).expect("父目录要在落点清单里");
         assert_eq!(got.1, RIGHTS_STAT, "父目录只授读属性：{:?}", parent);
         assert!(!got.2, "父目录不递归：{:?}", parent);
+        assert!(!got.3, "父目录不继承：{:?}", parent);
         assert!(
             !rights_covered(RIGHTS_STAT, FILE_GENERIC_READ),
             "读属性不等于能读内容（只够判断存在性）"
@@ -230,4 +302,155 @@ fn read_only_grants_write_ro_aces_and_revoke_removes_them() {
     clean(&home).expect("台账回收应当成功");
     let _ = std::fs::remove_dir_all(&dir);
     let _ = std::fs::remove_dir_all(&ro);
+}
+
+/// 【残留探针】授权（叶子读写 + 父目录只读属性）→ 撤权后，叶子与父目录上都不得留有该容器 SID
+/// 的**任何**显式 ACE。真机残留过一条只有 SYNCHRONIZE 的 (OI)(CI) ACE
+/// （tests/gaps.yaml 的 fence.leftover-grant-hides-parent：整棵 tests/ 子树因此在受限进程里不可读），
+/// 所以撤净判定不看权限位、只看 SID 在不在场（has_any_ace_for）。
+/// 现有撤权测试只盯叶子；这条把父目录一并盯住——grant_targets 的落点清单变了它会先红。
+#[test]
+fn revoke_leaves_no_container_ace_on_leaf_parents() {
+    if !capability().fs {
+        eprintln!(
+            "[探针] 本机不允许改目录 ACL（{}）：残留探针跳过（不静默当作通过）",
+            capability().note
+        );
+        return;
+    }
+    let base = std::env::temp_dir().join(format!("solomni-leftover-probe-{}", std::process::id()));
+    let leaf = base.join("leaf");
+    std::fs::create_dir_all(&leaf).expect("建探针目录");
+    std::fs::write(leaf.join("data.txt"), "x").expect("写探针文件");
+    let spec = FenceSpec {
+        agent: "probe-leftover".to_string(),
+        rw: vec![leaf.clone()],
+        cwd: leaf.clone(),
+        ro: Vec::new(),
+        net: false,
+    };
+    let home = base.join("ledger");
+    let prepared = Mutex::new(std::collections::BTreeSet::new());
+    prepare_fence(&spec, "cmd", &prepared, &home).expect("授权应当成功");
+    let sid = container_sid(&container_name(&spec)).expect("派生容器 SID");
+    eprintln!("[探针] 授权后父目录 {}", dump_aces(&base));
+    eprintln!("[探针] 授权后叶子 {}", dump_aces(&leaf));
+    assert!(
+        has_any_ace_for(sid, &base),
+        "授权后父目录上该容器 SID 的显式 ACE 应在场"
+    );
+    assert!(
+        has_ace_for(sid, &base, RIGHTS_STAT),
+        "授权后父目录上应有只读属性 ACE"
+    );
+    assert!(
+        has_ace_for(sid, &leaf, RIGHTS_RW),
+        "授权后叶子上应有读写 ACE"
+    );
+    release_fence_home(&spec, Some(&home)).expect("撤权应当成功");
+    eprintln!("[探针] 撤权后父目录 {}", dump_aces(&base));
+    eprintln!("[探针] 撤权后叶子 {}", dump_aces(&leaf));
+    let on_parent = has_any_ace_for(sid, &base);
+    let on_leaf = has_any_ace_for(sid, &leaf);
+    free_sid(sid);
+    clean(&home).expect("台账回收应当成功");
+    let _ = std::fs::remove_dir_all(&base);
+    assert!(
+        !on_parent,
+        "撤权后父目录不得残留该容器 SID 的任何 ACE（残留会把父目录对受限进程藏住）"
+    );
+    assert!(!on_leaf, "撤权后叶子不得残留该容器 SID 的任何 ACE");
+}
+
+/// 【真机往返探针】授权（叶子读写 + 父目录只读属性）→ 容器里：能列叶子、能判断"父目录下叶子在
+/// 不在"（RIGHTS_STAT 存在的全部理由）、列不了父目录的内容——口径端到端成立，不悄悄放宽。
+/// 会创建 AppContainer profile（改本机状态），按测试约定只在 --fence-live（SOLOMNI_FENCE_LIVE=1）下跑。
+#[test]
+fn container_roundtrip_sees_leaf_but_not_parent_content() {
+    if std::env::var("SOLOMNI_FENCE_LIVE")
+        .map(|v| v != "1")
+        .unwrap_or(true)
+    {
+        eprintln!(
+            "[探针] 未开启真机围栏测试：container_roundtrip_sees_leaf_but_not_parent_content 会创建 AppContainer profile（改本机状态），已跳过；要真跑加 --fence-live"
+        );
+        return;
+    }
+    if !capability().fs {
+        eprintln!(
+            "[探针] 本机不允许改目录 ACL（{}）：往返探针跳过（不静默当作通过）",
+            capability().note
+        );
+        return;
+    }
+    let base = std::env::temp_dir().join(format!("solomni-roundtrip-probe-{}", std::process::id()));
+    let leaf = base.join("leaf");
+    std::fs::create_dir_all(&leaf).expect("建探针目录");
+    std::fs::write(leaf.join("data.txt"), "x").expect("写探针文件");
+    let spec = FenceSpec {
+        agent: "probe-roundtrip".to_string(),
+        rw: vec![leaf.clone()],
+        cwd: leaf.clone(),
+        ro: Vec::new(),
+        net: false,
+    };
+    let container = container_name(&spec);
+    ensure_profile(&container).expect("建容器 profile");
+    let home = base.join("ledger");
+    let prepared = Mutex::new(std::collections::BTreeSet::new());
+    prepare_fence(&spec, "cmd", &prepared, &home).expect("授权应当成功");
+    let sid = container_sid(&container).expect("派生容器 SID");
+
+    // 先确认容器**真的**生效：某些受管环境里 AppContainer 会被静默降级（令牌里没有包 SID 组、
+    // 也没有 ALL APPLICATION PACKAGES），后续断言会拿环境结论冒充口径结论。没生效就如实跳过。
+    let _ = run_in_container(sid, &spec, "cmd /C whoami /groups > g.txt 2>&1");
+    let groups = std::fs::read_to_string(leaf.join("g.txt")).unwrap_or_default();
+    if !groups.contains("S-1-15-2-") {
+        eprintln!(
+            "[探针] 本环境没有真正把进程放进 AppContainer（容器内 whoami /groups 无包 SID 组）：往返探针跳过（不静默当作通过）——请在普通 shell 里重跑本探针"
+        );
+        free_sid(sid);
+        let _ = release_fence_home(&spec, Some(&home));
+        let _ = clean(&home);
+        let _ = delete_profile(&container);
+        let _ = std::fs::remove_dir_all(&base);
+        return;
+    }
+    // 1) 叶子能列：工具在自己的数据边界里看得见自己的产物。
+    let code =
+        run_in_container(sid, &spec, "cmd /C dir /b > out.txt 2>&1").expect("容器进程应当能启动");
+    let out = std::fs::read_to_string(leaf.join("out.txt")).unwrap_or_default();
+    assert_eq!(code, 0, "容器里列叶子应当成功：{}", out);
+    assert!(
+        out.contains("data.txt"),
+        "容器里应能看到叶子里的文件：{}",
+        out
+    );
+
+    // 2) 父目录能 stat：对"父目录下叶子在不在"的判断要成立（不是假不存在）。
+    let code = run_in_container(
+        sid,
+        &spec,
+        "cmd /C if exist ..\\leaf (echo STAT-OK> stat.txt) else (echo STAT-MISSING> stat.txt)",
+    )
+    .expect("容器进程应当能启动");
+    assert_eq!(code, 0, "容器里判断叶子的存在性应当成功");
+    let stat = std::fs::read_to_string(leaf.join("stat.txt")).unwrap_or_default();
+    assert!(
+        stat.contains("STAT-OK"),
+        "父目录下叶子应被判断为存在：{}",
+        stat
+    );
+
+    // 3) 父目录的内容读不到：只读属性不等于能读（口径不能悄悄放宽）。
+    let code = run_in_container(sid, &spec, "cmd /C dir .. > denied.txt 2>&1")
+        .expect("容器进程应当能启动");
+    assert_ne!(code, 0, "容器里列父目录的内容应当被拒");
+
+    free_sid(sid);
+    release_fence_home(&spec, Some(&home)).expect("撤权应当成功");
+    clean(&home).expect("台账回收应当成功");
+    // 探针建的容器 profile 也要带走：测试不在本机留痕。
+    assert!(delete_profile(&container), "探针的容器 profile 应当删得掉");
+    let _ = std::fs::remove_dir_all(&base);
 }

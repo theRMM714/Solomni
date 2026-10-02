@@ -151,12 +151,12 @@ pub fn prepare_fence(
     // 落点清单由 grant_targets 统一给出（叶子 + 父目录的只读属性），prepare 与 release 共用同一份。
     let sid = container_sid(&container_name(spec))?;
     let todo = grant_targets(spec);
-    for (path, rights, recursive) in todo {
+    for (path, rights, recursive, inherit) in todo {
         let key = format!("{:?}|{}|{}", sid, path.to_string_lossy(), rights);
         if prepared.lock().expect("授权表锁").contains(&key) {
             continue;
         }
-        match grant_one(sid, &path, rights, recursive, true) {
+        match grant_one(sid, &path, rights, recursive, inherit) {
             Ok(()) => {
                 prepared.lock().expect("授权表锁").insert(key);
                 written.push((sid_to_string(sid), path.clone(), rights));

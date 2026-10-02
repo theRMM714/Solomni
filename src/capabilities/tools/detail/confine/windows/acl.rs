@@ -214,12 +214,12 @@ pub(crate) fn interpreter_dirs(command: &str) -> Vec<PathBuf> {
 /// 只到**直接父目录**为止（不是整条祖先链）：再往上就是产品根之外，而 stat 到直接父目录已足够让
 /// "父目录在不在"这个判断成立。给祖先链授"穿过"要改写 `C:\` 这种巨型目录的 DACL
 /// （顺整棵树重算继承，真机 ~90 s/条），这里授的是产品内的小目录，各一条 ACE。
-pub(crate) fn grant_targets(spec: &FenceSpec) -> Vec<(PathBuf, u32, bool)> {
-    let mut todo: Vec<(PathBuf, u32, bool)> = Vec::new();
-    let mut leaves: Vec<(PathBuf, u32, bool)> = Vec::new();
+pub(crate) fn grant_targets(spec: &FenceSpec) -> Vec<(PathBuf, u32, bool, bool)> {
+    let mut todo: Vec<(PathBuf, u32, bool, bool)> = Vec::new();
+    let mut leaves: Vec<(PathBuf, u32, bool, bool)> = Vec::new();
     for root in spec.rw.iter().chain(std::iter::once(&spec.cwd)) {
         if !root.as_os_str().is_empty() {
-            leaves.push((root.clone(), RIGHTS_RW, true));
+            leaves.push((root.clone(), RIGHTS_RW, true, true));
         }
     }
     // 用户显式授权的只读根（`fence_read`）：只写只读 ACE，**授给该 agent 自己的容器 SID**。
@@ -227,14 +227,18 @@ pub(crate) fn grant_targets(spec: &FenceSpec) -> Vec<(PathBuf, u32, bool)> {
     // 只读根不递归：用户可能授一个很大的目录（例如项目根），递归会改整棵树的 DACL。
     for root in &spec.ro {
         if !root.as_os_str().is_empty() {
-            leaves.push((root.clone(), RIGHTS_RO, false));
+            leaves.push((root.clone(), RIGHTS_RO, false, true));
         }
     }
-    // 父目录：只读属性、不递归、不继承。同一个父目录被多个叶子共用时靠调用方的去重表收口。
-    for (leaf, _, _) in &leaves {
+    // 父目录：只读属性、不递归、**不继承**（元组末位是继承标志）。同一个父目录被多个叶子共用时
+    // 靠调用方的去重表收口。不继承是残留教训（fence.leftover-grant-hides-parent）：带 (OI)(CI)
+    // 的 ACE 会传播进已存在的子项、再传给之后新建的子项——一旦撤权断链（进程被杀、台账丢失），
+    // 受污染的就是整棵子树；不继承把最坏残留面收敛到父目录本身，而新建子项反正会拿到自己的
+    // 授权，不需要它。
+    for (leaf, _, _, _) in &leaves {
         if let Some(parent) = leaf.parent() {
             if !parent.as_os_str().is_empty() {
-                todo.push((parent.to_path_buf(), RIGHTS_STAT, false));
+                todo.push((parent.to_path_buf(), RIGHTS_STAT, false, false));
             }
         }
     }
@@ -278,6 +282,67 @@ pub(crate) fn expand_generics(mask: u32) -> u32 {
 /// 已有 ACE 的权限位是不是覆盖得住我们需要的权限位。
 pub(crate) fn rights_covered(mask: u32, rights: u32) -> bool {
     expand_generics(rights) & !expand_generics(mask) == 0
+}
+
+/// 该对象上有没有给这个 SID 的**任何**允许 ACE（不看权限位）。
+/// 用途：残留检查——撤权后哪怕只留一位（真机残留过一条只有 SYNCHRONIZE 的 (OI)(CI) ACE，
+/// 见 tests/gaps.yaml 的 fence.leftover-grant-hides-parent）也算没撤干净；
+/// has_ace_for 回答"够不够用"，这条回答"在不在场"。
+pub(crate) fn has_any_ace_for(sid: PSID, path: &Path) -> bool {
+    const ACCESS_ALLOWED_ACE_TYPE: u8 = 0;
+    const ACL_SIZE_INFORMATION_CLASS: i32 = 2;
+    let mut dacl: *mut ACL = std::ptr::null_mut();
+    let mut sd: PSID = std::ptr::null_mut();
+    let w = wide(path);
+    let rc = unsafe {
+        GetNamedSecurityInfoW(
+            w.as_ptr(),
+            SE_FILE_OBJECT,
+            DACL_SECURITY_INFORMATION,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            &mut dacl,
+            std::ptr::null_mut(),
+            &mut sd,
+        )
+    };
+    if rc != 0 || dacl.is_null() {
+        return false;
+    }
+    let mut info: ACL_SIZE_INFORMATION = unsafe { std::mem::zeroed() };
+    let ok = unsafe {
+        GetAclInformation(
+            dacl,
+            &mut info as *mut _ as *mut c_void,
+            std::mem::size_of::<ACL_SIZE_INFORMATION>() as u32,
+            ACL_SIZE_INFORMATION_CLASS,
+        )
+    };
+    let mut found = false;
+    if ok != 0 {
+        for i in 0..info.AceCount {
+            let mut ace: *mut c_void = std::ptr::null_mut();
+            if unsafe { GetAce(dacl, i, &mut ace) } == 0 || ace.is_null() {
+                continue;
+            }
+            let base = ace as *const u8;
+            if unsafe { *base } != ACCESS_ALLOWED_ACE_TYPE {
+                continue;
+            }
+            const INHERIT_ONLY_ACE: u8 = 0x08;
+            if unsafe { *base.add(1) } & INHERIT_ONLY_ACE != 0 {
+                continue;
+            }
+            if unsafe { EqualSid(base.add(8) as PSID, sid) } != 0 {
+                found = true;
+                break;
+            }
+        }
+    }
+    unsafe {
+        LocalFree(sd);
+    }
+    found
 }
 
 /// 该对象上是不是已经有给这个 SID 的允许 ACE，**且权限位覆盖得住**。

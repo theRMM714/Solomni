@@ -203,6 +203,13 @@ pub fn clean(home: &std::path::Path) -> Result<String, String> {
     }
 }
 
+/// 孤儿授权清扫：按容器 SID 族在产品根内撤掉台账之外的残留 ACE（`--fence-clean` 用）。
+/// 只有 Windows 写本机 ACL，其它平台没有这一步（而不是"存在但空转"）。
+#[cfg(windows)]
+pub fn sweep_orphan_aces(root: &std::path::Path) -> Result<usize, String> {
+    windows::sweep_orphan_aces(root)
+}
+
 /// 撤销一次会话的围栏授权（会话删除时由核心经 FenceHost 端口请求；其它平台是空操作）。
 pub fn release_fence(spec: &FenceSpec) -> Result<(), String> {
     #[cfg(windows)]
