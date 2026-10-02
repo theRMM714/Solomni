@@ -101,6 +101,7 @@ C++ 模块要先编译一次（产物不入库），命令与理由见 [modules/
 | 用产品 / 看用户旅程与交互面 | [PRODUCT.md](PRODUCT.md) |
 | 写一个模块（YAML 契约与模块工具） | [MODULE_SPEC.md](MODULE_SPEC.md) |
 | 系统工具、角色与路径模型（回报与验收也在工具里） | [SYSTOOL.md](SYSTOOL.md) |
+| 核心代理的待实现系统工具清单与方案 | [systool_gaps.yaml](systool_gaps.yaml)（规划，不代表当前能力） |
 | 做运行包（`package.yaml`） | [RUNTIME_SPEC.md](RUNTIME_SPEC.md) |
 | 管理供应商 / 模型 / agent / 设置（含密钥边界） | [REGISTRY_SPEC.md](REGISTRY_SPEC.md) |
 | 改代码（分层、端口、日志、提示词、落盘契约） | [ARCHITECTURE.md](ARCHITECTURE.md) |

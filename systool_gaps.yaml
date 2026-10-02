@@ -1,0 +1,151 @@
+# 核心代理所需的系统工具规划清单。
+# 领域门户：SYSTOOL.md；当前工具契约：docs/tools/tools-and-roles.md。
+# 代理模式的产品级总缺口仍以 tests/gaps.yaml 的 core.agency-mode 为准。
+#
+# 本文件只描述已确认但尚未实施的 systool 契约、实施顺序与验收条件，
+# 不代表这些工具当前已经可用，也不替代 tests/gaps.yaml 或业务 testgaps.yaml。
+# 实施任一条目时，必须同步系统工具总表、角色表、提示词、对应能力实现、
+# 测试与相关专项文档；完成并验收后删除对应条目，不保留完成历史。
+# 本文件未接入 run-tests.js 的报告或自动销账，本次仅冻结待实现目标与验收条件。
+# 实施顺序：授权与角色契约 → 发现能力 → 会话创建 → 消息转达与观察 → 生命周期 → 完整旅程。
+# 所有机制均通过业务 API 编排并使用路径组件拼接，Windows、macOS、Linux 必须成立；
+# 不引入机器路径、旧实现兼容层或独立于现有会话内核的第二套执行机制。
+
+- id: systool.core-proxy.catalog-agents
+  scope: global
+  level: T3
+  why: |
+    核心需要基于当前登记处和模块清单选择单 agent 或多 agent。
+    仅依赖提示词中的静态名单无法保证事实新鲜、可审计和可回放。
+  how: |
+    新增只读系统工具 catalog_agents，入参 scope 为 agents、modules、models 或 all；
+    返回当前有效的 agent、模块和模型的公开登记信息及稳定引用；
+    不返回密钥、真实私有路径、私有工作区内容或其它越权数据。
+    工具应通过现有登记处与工作区能力面取得事实，不直接读取配置文件。
+  accept: |
+    核心能读取当前有效的 agent、模块和模型清单；
+    不存在的对象、敏感字段和越权数据不会被返回；
+    返回结果可被记录并在重启后重建。
+  blocked_by: 缺少实现
+
+- id: systool.core-proxy.create-session
+  scope: global
+  level: T3
+  why: |
+    当前核心可以提出 slate 和任务链，但不能通过系统工具原子创建单 agent
+    或多 agent 代理会话，因而无法自行开始代理工作。
+  how: |
+    新增 create_session，入参包含 mode（single 或 multi）、agents、各 agent 的 objective、
+    工作区声明和请求幂等标识；授权与父会话由可信调用上下文提供，不接受模型自授。
+    agents 支持已登记 agent 引用或 name、modules、model 组成的临时 agent；
+    多 agent 创建的是一个协作工作，不另起一套独立于现有协作与节点会话的执行机制。
+    校验 agent、模块、模型、名称、父子关系、模块唯一归属和代理授权；
+    创建失败时不得留下半成品会话，并为成功创建返回稳定的会话引用。
+    创建操作必须写入可审计、可回放的工具记录，并具备幂等语义。
+  accept: |
+    在获得代理授权时，核心能成功创建一个单 agent 会话和一个多 agent 会话；
+    未授权、重复模块、未知 agent、未知模块、未知模型或非法名称时明确拒绝且无残留；
+    重放同一幂等请求不会重复创建会话。
+  blocked_by: 缺少实现
+
+- id: systool.core-proxy.send-session-message
+  scope: global
+  level: T3
+  why: |
+    核心需要代替用户向子会话发送任务、补充信息、问题回答、审查意见和返工要求。
+    当前已有节点派发语义，但没有面向核心代理闭环的统一转达工具契约。
+  how: |
+    新增 send_session_message，入参包含 targets、message、kind 和请求幂等标识；
+    kind 为 task、user_reply、follow_up、review 或 rework；支持单目标和多目标发送。
+    source 的真实来源由机制验证或填充，不能只信任模型传入的字段。
+    消息必须带 kind、source、关联工作、关联任务或回合以及幂等信息，
+    并进入目标会话的可回放转录。
+    核心转达的消息必须明确标记为 core_proxy；用户原话如需转达，应保留独立的来源引用，
+    不得把核心生成的内容伪装成用户原文。
+  accept: |
+    核心发送的每条消息都能被目标会话收到、审计和回放；
+    发送失败、目标不存在、会话已关闭或重复请求均有明确结果；
+    多目标发送的部分成功与部分失败可以分别观察，不产生未记录的隐式发送。
+  blocked_by: 缺少实现
+
+- id: systool.core-proxy.observe-session
+  scope: global
+  level: T3
+  why: |
+    核心需要读取子会话状态、最新回复、待决问题和产物索引，
+    不能通过直接读取会话文件绕过 session 和 conductor 的能力面。
+  how: |
+    新增 observe_session，入参包含 session_id、view（status、latest、pending、artifacts 或 full）
+    和可选 since 游标；返回状态、最新消息、待决问题、工具执行摘要、产物索引和下一游标。
+    观察只读取事实，不隐式启动下一轮；实现时基于现有事件台明确事件唤醒与等待语义，
+    避免核心重复轮询或在无新消息时持续消耗模型调用。
+    由会话能力面统一生成规范化视图，并使用游标避免每次重复读取完整转录。
+    返回内容不得泄漏密钥、真实路径或核心无权访问的私有内容。
+  accept: |
+    核心能根据观察结果继续、追问、返工、停止或验收；
+    增量观察不会重复消费或遗漏已记录的事件；
+    返回结果在重启、回放和父会话恢复后保持一致。
+  blocked_by: 缺少实现
+
+- id: systool.core-proxy.control-session
+  scope: global
+  level: T3
+  why: |
+    核心需要暂停、恢复、停止和关闭代理子会话，并在用户撤销代理权限或主会话停止时
+    及时停止所有相关工作。
+  how: |
+    新增 control_session，入参包含 session_id、action、reason 和请求幂等标识；
+    返回实际状态与控制结果，不把已提交的控制请求等同于已停止。
+    定义 pause、resume、stop、close 的状态转移、幂等行为、
+    级联行为和生成中控制语义。
+    stop 必须能够中断正在进行的模型生成；close 只允许在会话已完成或已停止时执行；
+    主会话停止和删除继续遵守现有父子会话级联规则。
+  accept: |
+    各状态转移符合定义且重复控制不会产生非法副作用；
+    stop 可中断生成并保留可回放记录；
+    删除父会话时子会话按现有级联规则处理；
+    用户撤销代理授权后核心不能继续派发或代答。
+  blocked_by: 缺少实现
+
+- id: systool.core-proxy.authorization-and-role
+  scope: global
+  level: T2
+  why: |
+    代理工具涉及核心代表用户做决定和发送消息，必须拥有独立角色、最小工具面
+    和明确的任务级授权，不能把权限隐含在 planner 或 orchestrator 中。
+  how: |
+    新增 core_proxy 角色和对应提示词，module_tools 为 false；
+    工具面只发只读核实、五项代理工具和适用验收工具，不把 core_proxy 当作可调用工具。
+    任务级授权由真实用户授予，明确决定范围、有效期、模型与资源边界及撤销方式；
+    核心不得自行授予或扩大授权，超范围或缺少关键信息时回主对话询问真实用户。
+    T2 验证授权契约和越权拒绝；只有平台机制本身的验证才归 T4。
+    在工具执行前校验代理授权、授权范围、调用者身份、当前主会话和目标子会话；
+    未授权或超出范围的调用只记录拒绝工具行，不降级为正文操作。
+    授权、撤销、范围和来源都必须进入可回放记录。
+  accept: |
+    有代理授权时工具只能在授权范围内运行；
+    无代理授权或越出授权范围时明确拒绝；
+    所有代理调用均可从转录和工具台账追溯；
+    核心不能通过 planner、orchestrator 或现有文件工具绕过代理授权。
+  blocked_by: 缺少实现
+
+- id: systool.core-proxy.end-to-end
+  scope: global
+  level: T5
+  why: |
+    单个工具分别通过并不能证明核心能够完成“对话—建会话—代答—验收—交付”的完整代理闭环。
+  how: |
+    按 TESTING.md 与 docs/testing/levels.md 增加完整旅程测试，覆盖：
+    单 agent、多 agent、子会话追问、核心代答、返工、并发观察、停止、恢复、
+    撤销授权、父子级联、重启和回放。
+    测试必须区分进行中、部分完成、等待用户决定、失败和已验收交付，
+    并确认总验收未通过时核心不会向用户宣称已完成。
+    复用 checklist 的真实证据与定向返工语义，补齐单 agent 与多 agent 的对应关系；
+    核心对用户的普通答复仍为正文，不另设无必要的最终答复工具。
+  accept: |
+    单 agent 和多 agent 代理任务均可完成；
+    核心能够代替用户完成必要转达；
+    总验收未通过时不会误报完成；
+    停止、恢复、撤销授权和父子级联行为符合契约；
+    重启和回放后状态、消息来源、授权和审计记录一致。
+  blocked_by: 缺少实现

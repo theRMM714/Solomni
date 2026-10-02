@@ -137,6 +137,7 @@
 | 理念、角色和不变量判断 | `PHILOSOPHY.md` |
 | 模块开发或修改 | `MODULE_SPEC.md` |
 | 系统工具、角色（谁能用哪些工具）、路径模型、回报与验收 | `SYSTOOL.md` |
+| 核心代理的待实现系统工具清单与方案（非测试缺口账） | `SYSTOOL.md` → `systool_gaps.yaml` |
 | 运行包开发或修改 | `RUNTIME_SPEC.md` |
 | providers、models、agents、settings 登记处 | `REGISTRY_SPEC.md` |
 | 任意测试、测试替身、质量门禁、缺口账或测试报告 | `TESTING.md` |

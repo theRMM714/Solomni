@@ -118,6 +118,7 @@ The C++ module has to be compiled once; the command and the reason are in
 | Understand *why* it is designed this way | [PHILOSOPHY.md](PHILOSOPHY.md) |
 | Use the product / follow the user journey | [PRODUCT.md](PRODUCT.md) |
 | Write a module (YAML contract, tools, path model) | [MODULE_SPEC.md](MODULE_SPEC.md) |
+| Core-proxy system-tool inventory and proposal | [systool_gaps.yaml](systool_gaps.yaml) (planned, not available capabilities) |
 | Build a runtime package (`package.yaml`) | [RUNTIME_SPEC.md](RUNTIME_SPEC.md) |
 | Manage providers / models / agents / settings (and key boundaries) | [REGISTRY_SPEC.md](REGISTRY_SPEC.md) |
 | Change the code (layering, ports, logging, prompts, persistence) | [ARCHITECTURE.md](ARCHITECTURE.md) |

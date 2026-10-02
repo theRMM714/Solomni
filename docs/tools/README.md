@@ -23,6 +23,7 @@
 ## 四、改动本单元时必须同步
 
 - 平台专属代码本地不编译——`FenceSpec` 字面量必须写全字段（跨平台字面量门禁）；改围栏 → `tests/<平台>/` 探针；改工具表 → `systools/` 与本目录 `tools-and-roles.md`。
+- 核心代理系统工具的待实现规划清单：`systool_gaps.yaml`（仓库根；不是当前工具表，也不替代测试缺口账）。
 - 业务缺口账：`src/capabilities/tools/testgaps.yaml`——业务 AI **只记缺口、不写测试**，由测试 AI 实现测试并销账；格式见 [docs/testing/gaps-acceptance.md](../../docs/testing/gaps-acceptance.md) §十二。
 
 ## 本目录
