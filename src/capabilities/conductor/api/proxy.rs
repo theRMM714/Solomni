@@ -120,7 +120,18 @@ impl SessionOps for ConductorHandle {
     }
 
     /// 停止**不走命令队列**：直接置位取消标志，所以生成期间照样立刻生效。
+    /// **代理会话是例外**：用户点的那一下停 = 相关会话一起停（按编排归属级联，
+    /// 见 docs/session/session-model.md 与 cursor 上那条"停止即全停"的决定）。
     fn stop(&self, sid: &str) -> bool {
+        let is_proxy = self
+            .call({
+                let s = sid.to_string();
+                move |core| Ok(core.session_mode_str(&s) == "proxy")
+            })
+            .unwrap_or(false);
+        if is_proxy {
+            return self.stop_tree(sid).map(|v| !v.is_empty()).unwrap_or(false);
+        }
         self.jobs.stop(sid)
     }
 

@@ -164,6 +164,31 @@ http.createServer((req, res) => {
       } else {
         content = '回报已经交了。';
       }
+    } else if (sys.includes('你是核心代理')) {
+      // 代理模式（T5 旅程）：核心代用户挑人 → 建子工作 → 转达，最后收尾。
+      // 本场景排在"探针判支持原生"之后，所以用**原生**工具调用槽位（不是正文里的手写信封）。
+      const nTools = msgs.filter((m) => m.role === 'tool').length;
+      const toolText = msgs.filter((m) => m.role === 'tool').map((m) => m.content || '').join('\n');
+      const child = (toolText.match(/"session":"([^"]+)"/) || [])[1];
+      const call = (name, args) => [{ id: 'agency_' + name, type: 'function', function: { name, arguments: JSON.stringify(args) } }];
+      if (nTools === 0) {
+        calls = call('catalog_agents', { scope: 'all' });
+      } else if (nTools === 1) {
+        calls = call('create_session', {
+          mode: 'single',
+          agents: [{ ref: '代甲', objective: '把这件事做完' }],
+          request_id: 'agency-1',
+        });
+      } else if (nTools === 2 && child) {
+        calls = call('send_session_message', {
+          targets: [child],
+          message: '开工：把这件事做完',
+          kind: 'task',
+          request_id: 'agency-2',
+        });
+      } else {
+        content = '子工作已经开工，我盯着它。';
+      }
     } else if (sys.includes('【工作环境】') && !sawToolResult) {
       if (/read_txt/.test(sys)) {
         // 该 agent 的某个模块声明了外部工具（夹具 toolbox）：用**相对路径**调用，专门验证 cwd = 它自己的模块目录。

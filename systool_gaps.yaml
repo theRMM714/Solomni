@@ -1,38 +1,9 @@
-# 核心代理所需的系统工具规划清单。
+# 核心代理所需的系统工具规划清单（当前为空）。
 # 领域门户：SYSTOOL.md；当前工具契约：docs/tools/tools-and-roles.md。
-# 代理模式的产品级总缺口仍以 tests/gaps.yaml 的 core.agency-mode 为准。
 #
-# 本文件只描述已确认但尚未实施的 systool 契约与验收条件，
-# 不代表这些工具当前已经可用，也不替代 tests/gaps.yaml 或业务 testgaps.yaml。
-# 实施任一条目时，必须同步系统工具总表、角色表、提示词、对应能力实现、
-# 测试与相关专项文档；完成并验收后删除对应条目，不保留完成历史。
-# 本文件未接入 run-tests.js 的报告或自动销账。
 # 六个代理工具（catalog_agents / create_session / send_session_message / observe_session /
-# read_session_messages / control_session）与 core_proxy 角色已实现并接上真实会话宿主，
-# 工具级条目已销账；剩余的完整旅程见下，产品入口与契约口径见
-# src/capabilities/conductor/testgaps.yaml。
-# 所有机制均通过业务 API 编排并使用路径组件拼接，Windows、macOS、Linux 必须成立；
-# 不引入机器路径、旧实现兼容层或独立于现有会话内核的第二套执行机制。
-
-- id: systool.core-proxy.end-to-end
-  scope: global
-  level: T5
-  why: |
-    各个工具分别通过并不能证明核心能完成「对话—建会话—代答—验收—交付」的完整代理闭环：
-    产品入口（从呈现层建代理会话、由真实用户授予）与角色提示词进身份块仍未落地，
-    端到端旅程因此还没有可跑的真实路径（见 src/capabilities/conductor/testgaps.yaml）。
-  how: |
-    按 TESTING.md 与 docs/testing/levels.md 增加完整旅程测试，覆盖：
-    单 agent、多 agent、子会话追问、核心代答、返工、并发观察、停止、恢复、父子级联、重启与回放。
-    决定粒度（完全代理 / 询问 / 将来可能的其它粒度）不在本轮（属独立的权限管理能力：见 tests/gaps.yaml 的 permission.management）。
-    测试必须区分进行中、部分完成、等待用户决定、失败与已验收交付，
-    并确认总验收未通过时核心不会向用户宣称已完成。
-    复用 checklist 的真实证据与定向返工语义，补齐单 agent 与多 agent 的对应关系；
-    核心对用户的普通答复仍为正文，不另设无必要的最终答复工具。
-  accept: |
-    单 agent 与多 agent 代理任务均可完成；
-    核心能够代替用户完成必要转达；
-    总验收未通过时不会误报完成；
-    停止、恢复与父子级联行为符合契约；
-    重启和回放后状态、消息来源、授权与审计记录一致。
-  blocked_by: 缺少产品入口与端到端旅程（呈现层）
+# read_session_messages / control_session）与 core_proxy 角色都已实现并接上真实会话宿主，
+# 端到端旅程也已进 L4（tests/cross-platform/e2e/driver.js 的代理场景），所以这里没有待实施条目。
+# 实施新条目时按同一格式补回：完成并验收后删除条目，不保留完成历史。
+# 本文件未接入 run-tests.js 的报告或自动销账。
+# 权限管理（决定粒度 / 额外路径权限）是独立能力，不在这里：见 tests/gaps.yaml 的 permission.management。
