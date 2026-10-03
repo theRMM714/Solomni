@@ -13,7 +13,6 @@
 ## 二、入站契约与状态归属
 
 `api::SessionOps`（会话中心）、`api::ConductorOps`（协调用例）、`api::LogOps`（埋点门面）、`Ops`（组装后交给呈现层）、`ConductorHandle`（自持线程 + 命令队列 + 事件台）与队列代理。状态：会话在世表、命令队列、运行态——**只有它写**。
-出站端口只有它自己的 `ports::ProxyHost`（核心代理工具的外部动作）；生产实现是 `service/proxy.rs` 的 `ProxyBridge`（**队列桥**：工具的每个动作回到核心线程执行，核心状态所有权不变），工具逻辑在 `domain/proxy.rs`（纯逻辑）与 `service/proxy.rs`（`ProxyTools` 校验 + 幂等账）。代理会话经通用成员循环挂 `ProxyHandler`（`kernel::ports::ToolHandler`），没有「代理专用」的循环分支。剩余缺口见 `testgaps.yaml`。
 
 ## 三、依赖图位置（由源码的 `::api` 引用推导）
 
@@ -23,7 +22,6 @@
 ## 四、改动本单元时必须同步
 
 - 动 `Ops`（增删方法、事件、视图字段）→ 同时改 `cli`、`web`、`src/tests/api.rs`、`docs/presentation/contracts.md`（路由表由 `src/tests/routes.rs` 机器比对）；跨会话回档的编排与 `session` 的纯行算术要一起改（见 `session-model.md` 五）。
-- 业务缺口账：`src/capabilities/conductor/testgaps.yaml`——业务 AI **只记缺口、不写测试**，由测试 AI 实现测试并销账；格式见 [docs/testing/gaps-acceptance.md](../../docs/testing/gaps-acceptance.md) §十二。
 
 ## 本目录
 

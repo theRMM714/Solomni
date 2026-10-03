@@ -20,15 +20,15 @@
 
 ```yaml
 tools:
-  read:
-    capability: fs-read        # 能力：决定收口（沙箱 / 围栏）
-    desc: 读取文本文件（UTF-8）。
-    parallel: true             # 同一回复里的多个调用能否真的并发跑
-    params:                    # 既用于生成声明，也用于校验调用参数
-      path:
-        type: string
-        required: true
-        desc: 要读取的真实绝对路径
+ read:
+ capability: fs-read # 能力：决定收口（沙箱 / 围栏）
+ desc: 读取文本文件（UTF-8）。
+ parallel: true # 同一回复里的多个调用能否真的并发跑
+ params: # 既用于生成声明，也用于校验调用参数
+ path:
+ type: string
+ required: true
+ desc: 要读取的真实绝对路径
 ```
 
 - **`capability` 决定收口，不按"系统/模块"一刀切**：`read`/`list`/`search`/`write`/`edit`/`patch` 虽然都是系统工具，但它们碰文件系统，**照样受沙箱与围栏约束**；`say`/`agree` 这类不碰文件。
@@ -39,9 +39,9 @@ tools:
 
 ```yaml
 roles:
-  discussant:
-    prompt: roles/discussant          # 提示词与工具面**同处声明**
-    tools: [say, agree, leave, ask, read, list, search]   # 讨论回合只做核实：读类 + 讨论动词
+ discussant:
+ prompt: roles/discussant # 提示词与工具面**同处声明**
+ tools: [say, agree, leave, ask, read, list, search] # 讨论回合只做核实：读类 + 讨论动词
 ```
 
 - **角色 = 场景绑定的身份**：`discussant` 只存在于讨论阶段，`orchestrator` 只存在于任务链推进阶段。**不再引入"阶段 → 工具"的第二张表**（否则两个真相源）。
@@ -51,7 +51,7 @@ roles:
 ## 二、可用工具面（运行时合成）
 
 ```
-本会话可用工具 = 系统工具表 ∩ 该角色表  +  该成员所属模块的工具
+本会话可用工具 = 系统工具表 ∩ 该角色表 + 该成员所属模块的工具
 ```
 
 越权防线因此分两段，缺一不可：系统工具查**角色表**；模块工具查**该成员有没有这个模块**（现状已有 module 消歧）。
@@ -73,11 +73,11 @@ roles:
 
 **两条硬口径**（`systools/tools.yaml` 是唯一真相）：
 - **AI 对系统的每个操作都要有对应工具 + 身份限制**：没有工具的操作 = 契约缺口（例如"要返工哪个节点"
-  必须是 `checklist.items[].rework` 这类**字段**，不能塞进自由文本让人去猜）。
+ 必须是 `checklist.items[].rework` 这类**字段**，不能塞进自由文本让人去猜）。
 - **工具的"后果"写进声明**：凡会驱动核心动作的工具都要写清"这个结论会让系统做什么"——
-  `node_verdict` 的 ok=false = 该节点退回待办、用户点「继续」后只重派它（整阶段全 ok 才解锁下一阶段）；
-  `checklist` 的 fail 必须填 rework = 要返工的节点 id；`verdict.clear` = true 才照用户说的开工/放行。
-  判定里写了表里没有的 id / 漏填 = 这次判定用不了：核心**要求重填**（一直重填，用户用「停止」控制）。
+ `node_verdict` 的 ok=false = 该节点退回待办、用户点「继续」后只重派它（整阶段全 ok 才解锁下一阶段）；
+ `checklist` 的 fail 必须填 rework = 要返工的节点 id；`verdict.clear` = true 才照用户说的开工/放行。
+ 判定里写了表里没有的 id / 漏填 = 这次判定用不了：核心**要求重填**（一直重填，用户用「停止」控制）。
 
 身份与环境同理：它们是**会话参数**（`session::SessionParams`），每次调用现渲染成系统消息，
 不占对话的位置（见 [session-model.md](../session/session-model.md) 四之二）。
@@ -93,7 +93,6 @@ roles:
 核心代理回合按 `core_proxy` 发放与校验（六项代理工具 + 只读核实，`module_tools: false`）。
 代码里**没有任何**"哪个角色能调哪个工具"的名单，加一个工具只改 `systools/tools.yaml` 与 `roles.yaml`。
 
-
 - **原生模式（供应商结构化槽位）与信封模式（正文里手写信封）走同一个校验点。** 两者在项目里是**互斥但等价**的；等价性一破，回放就与实时不一致。
 - 越权调用 → **如实拒绝 + 落工具行**（用户要能看到"它越权了"，而不是"AI 没反应"）。
 - **悬空引用**（角色引用了总表里不存在的工具 id）→ **结构审查硬失败**。这是两张表不漂的机制保证，不靠人看。
@@ -105,23 +104,23 @@ roles:
 核心只从**工具参数**里取载荷，正文里手写的同形 JSON **不当作载荷**。
 
 - **为什么**：这些载荷要被核心拿去驱动下一步（建 agent 会话、派发、推进或定向返工）。正文 JSON
-  既没有 schema 校验、也不进工具台账，写坏就整轮失败；工具调用把"形状对不对"交给机制。
+ 既没有 schema 校验、也不进工具台账，写坏就整轮失败；工具调用把"形状对不对"交给机制。
 - **普通说话仍可以是正文**：不驱动核心的发言（讨论里的意见、执行席的收尾话）不必包成工具——
-  这两者就是"说话"与"操作"的分界。
+ 这两者就是"说话"与"操作"的分界。
 - **工具与载荷形状**在 `systools/tools.yaml`：`plan`（方案 + 任务链）、`node_verdict`（逐节点结论）、`checklist`（总验收清单）、`slate`（名单：推荐与代拟同一条协议）、`submit_report`（执行席回报）。
-- **核心代理的六个工具**（`catalog_agents` / `create_session` / `send_session_message` / `observe_session` / `read_session_messages` / `control_session`）同样只从**工具参数**取载荷；它们的外部动作经 conductor 的 `ports::ProxyHost`，真实会话宿主尚未落地（见 §六）。子会话**不把整份转录推给核心**：门与意外停止由机制送达，正文经 `read_session_messages` 倒查。
+- **核心代理的六个工具**（`catalog_agents` / `create_session` / `send_session_message` / `observe_session` / `read_session_messages` / `control_session`）同样只从**工具参数**取载荷；它们的外部动作经 conductor 的 `ports::ProxyHost`，生产宿主是 `service/proxy.rs` 的队列桥（见 §六）。子会话**不把整份转录推给核心**：门与意外停止由机制送达，正文经 `read_session_messages` 倒查。
 - **载荷不合法 → 如实失败并中止这一步**（不猜、不回落正文 JSON）。
 - **核心可以先核实**：核心操作带一个**只读核实回路**——模型先请求 `read` / `search` 时，
-  核心执行并把结果回灌，然后再要那一次核心操作调用。核心不是 member、手里本来没有工具环境，
-  所以它用的是一个**只读**的小环境（根 = 本次工作的共享区，工具面只发声明里 `capability: fs-read` 的那些）。
-  没有这条回路，模型一想核实就会被判"没有调用 X"而整步中断（真机上就是这么卡死的）。
+ 核心执行并把结果回灌，然后再要那一次核心操作调用。核心不是 member、手里本来没有工具环境，
+ 所以它用的是一个**只读**的小环境（根 = 本次工作的共享区，工具面只发声明里 `capability: fs-read` 的那些）。
+ 没有这条回路，模型一想核实就会被判"没有调用 X"而整步中断（真机上就是这么卡死的）。
 
 ## 四、提示词按角色分配
 
 ```
 prompts/
-  shared/    协议、信封约定、工具协议、文案兜底、refs
-  roles/     discussant / executor / solo / planner / orchestrator / core_proxy
+ shared/ 协议、信封约定、工具协议、文案兜底、refs
+ roles/ discussant / executor / solo / planner / orchestrator / core_proxy
 ```
 
 每份文件里**具体有哪些键、每个键干什么**：[prompts.md](../prompt/prompts.md)。
@@ -131,7 +130,7 @@ prompts/
 - **planner 与 orchestrator 分开**（上下文不同、工具面不同、指令互斥），只共享**背景知识**（链的语义、节点状态定义、信封协议）——共享的是背景，不是指令。
 - **executor 是全新上下文**：讨论内容只经任务提示词带入，不继承讨论转录。
 - **solo 与 executor 只差回报工具**：`submit_report` 的消费者只有协作的节点（核心据它判节点完成），
-  用户建的单 agent 会话没有消费者——发了它只会多一次工具往返、把最终答复塞进工具参数。
+ 用户建的单 agent 会话没有消费者——发了它只会多一次工具往返、把最终答复塞进工具参数。
 
 ### 角色与工具面（当前）
 
@@ -173,7 +172,6 @@ prompts/
 没有「代理专用」分支），工具动作经队列桥回核心线程执行；身份是 `core_proxy` 的角色提示词（同一份
 环境与调用约定口径）。用户入口已通：`POST /api/sessions` 的 `mode=proxy` → `create_work(WorkMode::Proxy)`
 （没有名单，选它就是授予全权）。剩下的呈现面（前端向导与代理视图、CLI 入口）见
-`src/capabilities/conductor/testgaps.yaml`。
 链怎么从讨论走到交付见 [task-chain.md](../collab/task-chain.md)。
 
 ## 八、联动

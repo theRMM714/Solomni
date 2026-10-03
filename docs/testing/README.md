@@ -17,4 +17,3 @@
 ## 缺口账在哪
 
 - 全局与平台：`tests/gaps.yaml`（长期目标与尚未实施的产品/机制缺口）、`tests/cross-platform/gaps.yaml`、`tests/<平台>/gaps.yaml`。
-- 业务：每个业务/机制单元一份 `src/<单元>/testgaps.yaml`——业务 AI **只记缺口、不写测试**，由测试 AI 实现测试并销账。

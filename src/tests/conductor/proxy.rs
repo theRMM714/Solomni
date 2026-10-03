@@ -1,5 +1,5 @@
 //! 核心代理工具（core_proxy）的契约测试：声明、授权、幂等、部分成功与游标。
-//! 真实会话宿主尚未落地：动作经 conductor::ports::ProxyHost，测试用 FakeProxyHost 顶替。
+//! 动作经 conductor::ports::ProxyHost：单元测试用 FakeProxyHost，生产宿主是 service/proxy.rs 的 ProxyBridge。
 use super::super::prelude::*;
 
 use crate::capabilities::conductor::domain::proxy as d;

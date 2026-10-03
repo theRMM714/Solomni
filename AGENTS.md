@@ -63,7 +63,6 @@
 | 新增/删除/改名文档 | `AGENTS.md` 文档路由表、`README.md` 文档表、所有引用它的文档与代码注释 |
 | 代码里被文档机器比对的段落 | 该文档与比对它的测试（例如路由表 ↔ `src/tests/routes.rs`） |
 | `tests/gaps.yaml` 的条目 | `TESTING.md` 门户与 `docs/testing/gaps-acceptance.md` 的现状描述 |
-| `src/<单元>/testgaps.yaml` 的条目 | 该单元的 `docs/<单元>/README.md` 与 `docs/testing/gaps-acceptance.md` 的现状描述 |
 
 - 引用一律用**相对仓库根的路径**（`docs/testing/levels.md`），不写机器路径、不写绝对路径。
 - 文档里的当前状态必须与代码一致；未实现的内容写进缺口账，不写成当前能力。
@@ -175,17 +174,17 @@
 | 记缺口、目录与命名、按验收清单收口 | `docs/testing/gaps-acceptance.md` |
 | 交付模块（模块作者要交什么测试证据） | `docs/testing/module-delivery.md` |
 
-## 九、开发分工与写权限
+## 九、完成一件任务的规矩
 
-垂直分工时，一个 AI 只负责一个单元；**谁能写哪些路径**按下表划定，越界由合入检查兜
-（沙箱能预防到哪一步，取决于该会话的工作区边界）。
+**谁做这件事，谁就把它做完整**——实现、测试、文档同一双手走完。一次任务就三步：
 
-| 角色 | 可写 | 不写 | 交接物 |
-| --- | --- | --- | --- |
-| **业务 AI** | 自己那一个单元：`src/capabilities/<业务>/**`（或 `src/kernel/**`）；本单元文档 `docs/<单元>/**`；本单元 `testgaps.yaml` | **`src/tests/**` 一行都不写**、别的单元、共享面 | 变更 + `testgaps.yaml` 里的缺口条目 |
-| **测试 AI** | `src/tests/**`、`tests/**`、`docs/testing/**` | 业务实现（发现实现错误时报给业务 AI 或走 bug 流程） | 通过 / 失败 / `env-skip` / 缺口销账 |
-| **集成者（主线）** | 共享面：`kernel` 的共享事实类型、`conductor` 的 `Ops` 组装、`src/main.rs`、`entry/**`、`cli/` `web/`、根门户与 `AGENTS.md`、`prompts/`、`systools/`、`run-tests.js`、`tests/dependency-baseline.json`、`Cargo.toml` `Cargo.lock` | — | 装配、跨单元契约冻结、全量门禁 |
+1. **做任务**：按已批准的目标与范围实现（代码、契约、结构、文档一起算）；
+2. **补全测试**：为这次改动的行为补上对应层的测试（新能力 = 新用例；改了行为 = 改对应用例）；
+   不可测的行为属设计缺口，在文档里如实说明；
+3. **通过门禁**：以 `node run-tests.js` 全绿为准（T0 + 全量测试）；
+4. **写清文档**：把权威文档改成**实际当前状态**，同一次提交里把引用一起同步。
 
-- **业务 AI 不写测试**：它跑门禁证明"没弄坏"，把自己知道但没盖住的缺口写进 `src/<单元>/testgaps.yaml`；测试 AI 实现测试并销账。
-- **契约先行**：跨单元改动（`api` 的 trait / DTO、`kernel` 的共享类型、`Ops` 的组装）先由集成者冻结，业务 AI 只按冻结后的契约写实现。
-- **完成判据是门禁**：`node run-tests.js` 全绿（T0 + 全量测试），不是"我这块过了"。
+跨单元改动（`api` 的 trait / DTO、`kernel` 的共享类型、`Ops` 的组装）**先定契约再写实现**：
+先把要冻结的接口与数据面说清（必要时先问用户），再按它落地。
+
+历史由 Git、PR、issue 和 CI 报告承载；长期文档只写当前状态。

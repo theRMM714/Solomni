@@ -29,7 +29,7 @@ roles:
   # 观察与控制。module_tools: false——代理工具代用户做决定，但不替 agent 干活；
   # 只读核实（read/list/search）+ 六项代理工具就是它这一回合的完整工具面。
   # 子会话不把整份转录推给它：门的通知与意外停止由机制送达，正文经 read_session_messages 倒查。
-  # 真实会话宿主与生成循环尚未落地（见 src/capabilities/conductor/testgaps.yaml）。
+  # 真实会话宿主与生成循环都已落地（实现见 src/capabilities/conductor/service/proxy.rs）。
   core_proxy:
     prompt: roles/core_proxy
     tools: [catalog_agents, create_session, send_session_message, observe_session, read_session_messages, control_session, read, list, search]

@@ -54,7 +54,6 @@ impl Source {
 /// 代理工具面构造，`models`/`sessions` 留空 = 不限制，无有效期。
 /// 核心不得自行授予或扩大；`tools` 仍是硬条件（不在里面 = 越范围）。
 /// 细粒度范围、期限与**撤销**属独立的“会话权限状态”能力，本轮不做
-/// （见 src/capabilities/conductor/testgaps.yaml）。
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Grant {
     /// 允许调用的代理工具 id。

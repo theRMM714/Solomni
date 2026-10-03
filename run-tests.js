@@ -21,22 +21,10 @@ const PLATFORM_TARGETS = ["cross-platform", "windows", "linux", "macos"];
 const FENCE_LIVE = process.argv.includes("--fence-live") || process.env.SOLOMNI_FENCE_LIVE === "1";
 const REPORT = path.join(ROOT, "target", "test-report.json");
 // 缺口账：唯一真相是这些文件。平台账决定 TEST-REPORT-ACCEPTED；全局账是长期目标（每条都进报告）。
-// 业务缺口账：每个业务/机制单元一份 src/<单元>/testgaps.yaml（业务 AI 记、测试 AI 销账）。
-const BUSINESS_GAP_FILES = (() => {
-  const out = [path.join(ROOT, "src", "kernel", "testgaps.yaml")];
-  const capDir = path.join(ROOT, "src", "capabilities");
-  if (fs.existsSync(capDir)) {
-    for (const e of fs.readdirSync(capDir, { withFileTypes: true })) {
-      if (e.isDirectory()) out.push(path.join(capDir, e.name, "testgaps.yaml"));
-    }
-  }
-  return out;
-})();
 const GAP_FILES = [
   path.join(ROOT, "tests", "gaps.yaml"),
   path.join(ROOT, "tests", "cross-platform", "gaps.yaml"),
   ...[IS_WIN ? "windows" : OS_KEY, "windows", "linux", "macos"].map((p) => path.join(ROOT, "tests", p, "gaps.yaml")),
-  ...BUSINESS_GAP_FILES,
 ];
 
 function buildEnv() {
@@ -113,7 +101,7 @@ function gapLedgers() {
 
 /** 全局缺口账（tests/gaps.yaml）：长期目标；每条都进报告，但不影响平台的 ACCEPTED 判定。 */
 function globalGaps() {
-  const files = [path.join(ROOT, "tests", "gaps.yaml"), ...BUSINESS_GAP_FILES];
+  const files = [path.join(ROOT, "tests", "gaps.yaml")];
   const ids = [];
   for (const f of files) {
     if (!fs.existsSync(f)) continue;

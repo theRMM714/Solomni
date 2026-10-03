@@ -22,7 +22,6 @@
 ## 四、改动本单元时必须同步
 
 - `module.yaml` 契约 → `MODULE_SPEC.md`；`package.yaml` → `RUNTIME_SPEC.md`；`src/tests/workspace.rs`。
-- 业务缺口账：`src/capabilities/workspace/testgaps.yaml`——业务 AI **只记缺口、不写测试**，由测试 AI 实现测试并销账；格式见 [docs/testing/gaps-acceptance.md](../../docs/testing/gaps-acceptance.md) §十二。
 
 ## 本目录
 

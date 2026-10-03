@@ -9,28 +9,28 @@
 
 ```text
 tests/
-  helpers/
-    probe.rs                    # T4 共用探针设施
-    https_probe.rs              # T4 HTTPS/TLS 探针（三平台目标共用这一份正文）
-  cross-platform/
-    main.rs                     # T3 目标入口
-    integration/                # T3（含 fence_launcher.rs）
-    e2e/                        # T5：假供应商、驱动、编排与隔离根
-    gaps.yaml                   # T3 缺口账
-  windows/
-    main.rs                     # 平台目标入口
-    probes/                     # T4
-    gaps.yaml
-  linux/
-    main.rs
-    probes/
-    gaps.yaml
-  macos/
-    main.rs
-    probes/
-    gaps.yaml
-  gaps.yaml                     # 全局长期目标（不影响 TEST-REPORT-ACCEPTED）
-  ci-publish.mjs                # CI 报告发布脚本（把三平台报告写入 ci-report 分支）
+ helpers/
+ probe.rs # T4 共用探针设施
+ https_probe.rs # T4 HTTPS/TLS 探针（三平台目标共用这一份正文）
+ cross-platform/
+ main.rs # T3 目标入口
+ integration/ # T3（含 fence_launcher.rs）
+ e2e/ # T5：假供应商、驱动、编排与隔离根
+ gaps.yaml # T3 缺口账
+ windows/
+ main.rs # 平台目标入口
+ probes/ # T4
+ gaps.yaml
+ linux/
+ main.rs
+ probes/
+ gaps.yaml
+ macos/
+ main.rs
+ probes/
+ gaps.yaml
+ gaps.yaml # 全局长期目标（不影响 TEST-REPORT-ACCEPTED）
+ ci-publish.mjs # CI 报告发布脚本（把三平台报告写入 ci-report 分支）
 ```
 
 单元层与 `capabilities/` **同构**：T1 用例按业务分文件——`taskchain.rs` / `prompt.rs` / `registry.rs` /
@@ -64,22 +64,17 @@ tests/
 
 `tests/<platform>/gaps.yaml` 只记录平台机制或平台专属验收缺口。条目存在表示当前未完成，不得留下"已完成"的残条。
 
-### 业务缺口
-
-`src/<单元>/testgaps.yaml` 是**每个业务/机制单元一份**的缺口账：业务 AI 只记不写测试，测试 AI 实现测试后销账。
-它用同一份六键格式（下面「缺口格式」），由 `node run-tests.js` 一起校验；条目存在 = 尚未完成，补齐即删。
-
 ### 缺口格式
 
 ```yaml
 - id: fake-chat.contract-tests
-  scope: global
-  level: T2
-  why: 说明为什么该行为是必须验证的契约
-  how: |
-    写出可直接执行的命令或实现步骤
-  accept: 可判定的通过条件
-  blocked_by: 无 | 平台不可用 | 环境不允许 | 缺少观察面 | 缺少实现
+ scope: global
+ level: T2
+ why: 说明为什么该行为是必须验证的契约
+ how: |
+ 写出可直接执行的命令或实现步骤
+ accept: 可判定的通过条件
+ blocked_by: 无 | 平台不可用 | 环境不允许 | 缺少观察面 | 缺少实现
 ```
 
 每条缺口必须有：稳定 id、范围、层级、必要性、执行方法、验收条件和阻塞原因。补齐后删除条目，不保留完成历史。

@@ -186,8 +186,7 @@ tools:
         desc: 要留下的摘要：结论、决定、待办、关键路径——丢掉细节，留下"以后还要用的"。
 
   # —— 核心代理（core_proxy）：核心代用户建会话、转达、观察与控制 ——
-  # 真实会话宿主尚未落地：工具契约与逻辑已冻结，外部动作经 conductor 的 ProxyHost 端口
-  # （见 docs/tools/tools-and-roles.md 与 src/capabilities/conductor/testgaps.yaml）。
+  # 真实会话宿主已落地：外部动作经 conductor 的 ProxyHost 端口，生产实现是 service/proxy.rs 的队列桥
   catalog_agents:
     capability: none              # 不碰文件：只读登记处与模块清单
     desc: 读取当前有效的 agent、模块与模型的公开登记信息（只读）。不返回密钥、真实私有路径或无关内容。
@@ -353,4 +352,3 @@ tools:
         type: string
         required: true
         desc: 要问用户什么
-

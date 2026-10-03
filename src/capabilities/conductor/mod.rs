@@ -9,7 +9,7 @@
 //! 各能力也不反向调它（依赖方向见 ARCHITECTURE.md §一）。
 //!
 //! 它自己的出站端口只有一个：`ports::ProxyHost`——核心代理工具要做的外部动作
-//! （清单 / 建会话 / 转达 / 观察 / 生命周期）。真实会话宿主尚未落地，见 `ports.rs`。
+//! （清单 / 建会话 / 转达 / 观察 / 生命周期）。生产宿主是 `service/proxy.rs` 的队列桥，端口见 `ports.rs`。
 
 pub mod api;
 pub mod domain;

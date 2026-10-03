@@ -22,7 +22,6 @@
 ## 四、改动本单元时必须同步
 
 - 行与事件词汇（`domain/events.rs`、`LineView` 字段）一改 → `collab` 的状态派生、`conductor` 的视图、`cli`/`web` 渲染、`src/tests/session.rs` 全跟。
-- 业务缺口账：`src/capabilities/session/testgaps.yaml`——业务 AI **只记缺口、不写测试**，由测试 AI 实现测试并销账；格式见 [docs/testing/gaps-acceptance.md](../../docs/testing/gaps-acceptance.md) §十二。
 
 ## 本目录
 
