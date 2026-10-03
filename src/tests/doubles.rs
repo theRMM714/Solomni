@@ -1381,7 +1381,7 @@ impl FakeProxyHost {
         self.relayed.lock().expect("锁").clone()
     }
 
-    /// 预置一条观察事件（连上游标，增量观察的用例靠它）。
+    /// 预置一条消息（观察的计数与消息倒查都读它）。
     pub(crate) fn add_event(&self, text: &str) {
         self.events.lock().expect("锁").push(text.to_string());
     }
@@ -1457,19 +1457,48 @@ impl ProxyHost for FakeProxyHost {
             view.as_str(),
             since.unwrap_or("")
         ));
-        let events = self.events.lock().expect("锁").clone();
-        let from = since
-            .and_then(|s| s.parse::<usize>().ok())
-            .unwrap_or(0)
-            .min(events.len());
+        // 观察只回元信息：**不回消息正文**（正文走 messages 倒查）。
+        let count = self.events.lock().expect("锁").len();
         Ok(dproxy::Snapshot {
             session: session.to_string(),
             state: "running".to_string(),
-            latest: Some(events[from..].to_vec()),
             pending: None,
-            tools: None,
             artifacts: None,
-            cursor: Some(events.len().to_string()),
+            message_count: Some(count),
+            cursor: Some(count.to_string()),
+        })
+    }
+
+    fn messages(
+        &self,
+        session: &str,
+        from: usize,
+        count: usize,
+    ) -> Result<dproxy::MessagesPage, String> {
+        self.log
+            .lock()
+            .expect("锁")
+            .push(format!("messages:{}:{}:{}", session, from, count));
+        let events = self.events.lock().expect("锁").clone();
+        let total = events.len();
+        let mut out = Vec::new();
+        let mut i = from;
+        while i < total && out.len() < count {
+            let idx = total - 1 - i;
+            out.push(dproxy::MessageLine {
+                id: idx as u64 + 1,
+                speaker: "a".to_string(),
+                verb: String::new(),
+                kind: "msg".to_string(),
+                text: events[idx].clone(),
+            });
+            i += 1;
+        }
+        let next = if i < total { Some(i) } else { None };
+        Ok(dproxy::MessagesPage {
+            session: session.to_string(),
+            messages: out,
+            next,
         })
     }
 

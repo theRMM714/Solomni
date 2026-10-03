@@ -13,10 +13,17 @@ pub const CREATE: &str = "create_session";
 pub const SEND: &str = "send_session_message";
 pub const OBSERVE: &str = "observe_session";
 pub const CONTROL: &str = "control_session";
+/// 消息查询：按“最新→更早”倒查子会话的消息（不把整份转录推给代理）。
+pub const MESSAGES: &str = "read_session_messages";
 
-/// 这五个 id 就是“代理工具面”（角色表 core_proxy 引用它们）。
+/// 这六个 id 就是“代理工具面”（角色表 core_proxy 引用它们）。
 pub fn is_proxy_tool(name: &str) -> bool {
-    name == CATALOG || name == CREATE || name == SEND || name == OBSERVE || name == CONTROL
+    name == CATALOG
+        || name == CREATE
+        || name == SEND
+        || name == OBSERVE
+        || name == CONTROL
+        || name == MESSAGES
 }
 
 // ---------- 调用上下文（由机制提供，不从模型参数取） ----------
@@ -39,8 +46,11 @@ impl Source {
     }
 }
 
-/// 任务级授权（真实用户授予，机制注入）：范围、模型与资源边界、有效期。
-/// 核心不得自行授予或扩大；tools 是硬条件（不在里面 = 越范围）。
+/// 任务级授权（真实用户授予，机制注入）：本轮只做**全权**——`tools` 用角色表发放的整套
+/// 代理工具面构造，`models`/`sessions` 留空 = 不限制，无有效期。
+/// 核心不得自行授予或扩大；`tools` 仍是硬条件（不在里面 = 越范围）。
+/// 细粒度范围、期限与**撤销**属独立的“会话权限状态”能力，本轮不做
+/// （见 src/capabilities/conductor/testgaps.yaml）。
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Grant {
     /// 允许调用的代理工具 id。
@@ -191,11 +201,11 @@ impl MessageKind {
     }
 }
 
-/// observe_session 要看的那一面。
+/// observe_session 要看的那一面。**没有“最新消息”这一面**：正文一律经
+/// read_session_messages 主动倒查（子会话不把整份转录推给代理）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ObserveView {
     Status,
-    Latest,
     Pending,
     Artifacts,
     Full,
@@ -205,12 +215,11 @@ impl ObserveView {
     pub fn parse(s: &str) -> Result<Self, String> {
         match s {
             "status" => Ok(Self::Status),
-            "latest" => Ok(Self::Latest),
             "pending" => Ok(Self::Pending),
             "artifacts" => Ok(Self::Artifacts),
             "full" => Ok(Self::Full),
             other => Err(format!(
-                "view 只能是 status / latest / pending / artifacts / full：{}",
+                "view 只能是 status / pending / artifacts / full：{}",
                 other
             )),
         }
@@ -218,7 +227,6 @@ impl ObserveView {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Status => "status",
-            Self::Latest => "latest",
             Self::Pending => "pending",
             Self::Artifacts => "artifacts",
             Self::Full => "full",
@@ -297,21 +305,41 @@ pub struct Created {
     pub agents: Vec<String>,
 }
 
-/// 一次观察的规范化视图 + 下一游标（full 之外的字段可选）。
+/// 一次观察的规范化视图 + 下一游标（`full` 之外的字段可选）。
+/// **不回消息正文**：正文一律经 `read_session_messages` 主动倒查。
 #[derive(Debug, Clone, Serialize)]
 pub struct Snapshot {
     pub session: String,
     pub state: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub latest: Option<Vec<String>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub pending: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub tools: Option<Vec<String>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub artifacts: Option<Vec<String>>,
+    /// 该会话的消息总条数（`read_session_messages` 倒查的上界）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message_count: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cursor: Option<String>,
+}
+
+/// `read_session_messages` 回给代理的**一页消息**：`from` 是“距最新多少条”（0 = 最新一条），
+/// 消息按**新→旧**排列；`next` 是继续往更早翻的下一 `from`（到底了为 None）。
+#[derive(Debug, Clone, Serialize)]
+pub struct MessagesPage {
+    pub session: String,
+    pub messages: Vec<MessageLine>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next: Option<usize>,
+}
+
+/// 一条消息（转录行的对外形态）：稳定行 id + 结构化身份 + 正文。
+#[derive(Debug, Clone, Serialize)]
+pub struct MessageLine {
+    pub id: u64,
+    pub speaker: String,
+    pub verb: String,
+    pub kind: String,
+    pub text: String,
 }
 
 /// 一次控制之后会话的实际状态（不是“请求已提交”）。
@@ -391,6 +419,17 @@ pub struct ControlArgs {
     pub action: String,
     pub reason: String,
     pub request_id: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct MessagesArgs {
+    pub session_id: String,
+    /// 0 = 最新一条；1 = 倒数第二条；省略 = 0。
+    #[serde(default)]
+    pub from: Option<i64>,
+    /// 本次取几条（1..=50）；省略 = 10。
+    #[serde(default)]
+    pub count: Option<i64>,
 }
 
 /// 解析出来的一条 agent 声明（尚未与登记处事实核对）。
@@ -562,6 +601,23 @@ pub fn control_request(
         return Err("request_id 不能为空（幂等标识）".to_string());
     }
     Ok((session, action, reason, request_id))
+}
+
+/// read_session_messages：会话 id + 倒查起点/条数的语义校验（`from` 以最新为 0）。
+pub fn messages_request(args: &MessagesArgs) -> Result<(String, usize, usize), String> {
+    let session = args.session_id.trim().to_string();
+    if session.is_empty() {
+        return Err("session_id 不能为空".to_string());
+    }
+    let from = args.from.unwrap_or(0);
+    if from < 0 {
+        return Err("from 不能为负（0 = 最新一条）".to_string());
+    }
+    let count = args.count.unwrap_or(10);
+    if !(1..=50).contains(&count) {
+        return Err("count 只能是 1 到 50".to_string());
+    }
+    Ok((session, from as usize, count as usize))
 }
 
 /// 清单回执：只回请求的 scope（不给无关字段，也就不会顺手泄漏）。
@@ -866,5 +922,34 @@ mod tests {
         let all = render_catalog(CatalogScope::All, &c).unwrap();
         assert!(all.contains("modules"));
         assert!(all.contains("models"));
+    }
+
+    /// 消息倒查的边界：`from` 以最新为 0、`count` 有上下界、缺省是 0/10。
+    #[test]
+    fn messages_request_checks_from_and_count() {
+        let ok: MessagesArgs = serde_json::from_value(serde_json::json!({
+            "session_id": "s1", "from": 2, "count": 5
+        }))
+        .unwrap();
+        assert_eq!(messages_request(&ok).unwrap(), ("s1".to_string(), 2, 5));
+
+        let default: MessagesArgs =
+            serde_json::from_value(serde_json::json!({ "session_id": "s1" })).unwrap();
+        assert_eq!(
+            messages_request(&default).unwrap(),
+            ("s1".to_string(), 0, 10)
+        );
+
+        let bad: MessagesArgs = serde_json::from_value(serde_json::json!({
+            "session_id": "s1", "from": -1
+        }))
+        .unwrap();
+        assert!(messages_request(&bad).unwrap_err().contains("from"));
+
+        let big: MessagesArgs = serde_json::from_value(serde_json::json!({
+            "session_id": "s1", "count": 51
+        }))
+        .unwrap();
+        assert!(messages_request(&big).unwrap_err().contains("count"));
     }
 }

@@ -25,14 +25,14 @@ roles:
     prompt: roles/executor
     tools: [read, list, write, edit, patch, search]
     module_tools: true
-  # 核心·代理模式（前置契约）：核心在**用户授予的任务级授权**范围内代用户建会话、转达、
+  # 核心·代理模式：用户把决定权整块交给核心（全权），核心代用户挑人、建子工作、转达、
   # 观察与控制。module_tools: false——代理工具代用户做决定，但不替 agent 干活；
-  # 只读核实（read/list/search）+ 五项代理工具就是它这一回合的完整工具面。
-  # 真实会话宿主尚未落地：工具契约与逻辑已冻结，外部动作经 conductor 的 ProxyHost 端口
-  # （见 docs/tools/tools-and-roles.md 与 src/capabilities/conductor/testgaps.yaml）。
+  # 只读核实（read/list/search）+ 六项代理工具就是它这一回合的完整工具面。
+  # 子会话不把整份转录推给它：门的通知与意外停止由机制送达，正文经 read_session_messages 倒查。
+  # 真实会话宿主与生成循环尚未落地（见 src/capabilities/conductor/testgaps.yaml）。
   core_proxy:
     prompt: roles/core_proxy
-    tools: [catalog_agents, create_session, send_session_message, observe_session, control_session, read, list, search]
+    tools: [catalog_agents, create_session, send_session_message, observe_session, read_session_messages, control_session, read, list, search]
     module_tools: false
   # 核心·整理派发：总结讨论、出方案与任务链（读类 + 写链）。
   planner:

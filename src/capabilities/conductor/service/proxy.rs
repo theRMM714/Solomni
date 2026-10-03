@@ -60,6 +60,8 @@ impl ProxyTools {
             self.send(ctx, &value)
         } else if name == d::OBSERVE {
             self.observe(ctx, &value)
+        } else if name == d::MESSAGES {
+            self.messages(ctx, &value)
         } else {
             self.control(ctx, &value)
         }
@@ -188,6 +190,25 @@ impl ProxyTools {
         }
         match self.host.observe(&session, view, since.as_deref()) {
             Ok(s) => json_ok(&s),
+            Err(e) => deny(e),
+        }
+    }
+
+    /// 消息倒查：只读，不改任何状态，也不进幂等账。
+    fn messages(&self, ctx: &d::ProxyCall, value: &serde_json::Value) -> ToolOutcome {
+        let args: d::MessagesArgs = match parse_arg(d::MESSAGES, value) {
+            Ok(a) => a,
+            Err(e) => return deny(e),
+        };
+        let (session, from, count) = match d::messages_request(&args) {
+            Ok(x) => x,
+            Err(e) => return deny(e),
+        };
+        if let Err(e) = d::authorize(ctx, d::MESSAGES, None, Some(&session)) {
+            return deny(e);
+        }
+        match self.host.messages(&session, from, count) {
+            Ok(page) => json_ok(&page),
             Err(e) => deny(e),
         }
     }

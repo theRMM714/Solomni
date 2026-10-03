@@ -5,8 +5,8 @@
 #![allow(dead_code)] // 见 docs/testing/quality-isolation.md §三：契约已冻结，生产实现与调用点在下一步
 
 use crate::capabilities::conductor::domain::proxy::{
-    Catalog, CatalogScope, ControlAction, ControlState, Created, NewSession, ObserveView, Relayed,
-    Snapshot,
+    Catalog, CatalogScope, ControlAction, ControlState, Created, MessagesPage, NewSession,
+    ObserveView, Relayed, Snapshot,
 };
 
 /// 代理工具的宿主：把工具层的动作落到真实会话上。失败一律如实回报（不静默降级）。
@@ -31,4 +31,7 @@ pub trait ProxyHost: Send + Sync {
         action: ControlAction,
         reason: &str,
     ) -> Result<ControlState, String>;
+    /// 倒查一个会话的消息：`from` = 距最新多少条（0 = 最新一条），按新→旧取 `count` 条。
+    /// **只读**：不推进会话，也不把整份转录推给调用方。
+    fn messages(&self, session: &str, from: usize, count: usize) -> Result<MessagesPage, String>;
 }

@@ -6,33 +6,36 @@
   scope: global
   level: T3
   why: |
-    核心代理的五个工具（catalog_agents / create_session / send_session_message / observe_session /
-    control_session）的契约与工具逻辑已按 systool_gaps.yaml 落地，但搬运它们的外部动作的
-    ProxyHost 端口还没有真实实现：建会话、转达、观察与控制落到真实会话上的语义（尤其
-    pause / resume 与「close 只允许在已完成或已停止时执行」）尚未有任何生产代码。
+    核心代理的六个工具（catalog_agents / create_session / send_session_message / observe_session /
+    read_session_messages / control_session）的契约与工具逻辑已落地，但搬运它们的外部动作的
+    ProxyHost 端口还没有真实实现：建子工作、转达、观察、消息倒查与控制落到真实会话上的语义
+    （尤其 pause / resume 与「close 只允许在已完成或已停止时执行」）尚未有任何生产代码。
   how: |
     在 conductor 的 detail（或组合根）实现 ProxyHost：组合现有 session / collab / registry / workspace
-    能力面；create_session 复用 create_work 的校验与建库、失败不留半成品；send 走现有会话消息路径并
-    标注 core_proxy；observe 由会话能力面统一生成规范化视图与游标；control 定义 pause / resume / stop /
-    close 的状态转移与生成中控制语义，stop 必须能中断正在进行的模型生成。装配进主程序。
+    能力面；create_session 建**子工作**（single / collab，parent 指向代理会话、有自己的工作区）并保证
+    失败不留半成品；send 走现有会话消息路径并标注 core_proxy；observe 生成不含正文的规范化视图；
+    messages 按「0 = 最新」倒查；control 定义 pause / resume / stop / close 的状态转移与生成中控制语义，
+    stop 必须能中断正在进行的模型生成并级联到整棵子树。装配进主程序。
   accept: |
-    五个工具在真实会话上跑通：建会话成功、失败无残留、消息可审计回放、观察增量不重不漏、stop 生效、
-    close 只在允许的状态下执行；node run-tests.js 全绿。
+    六个工具在真实会话上跑通：建子工作成功、失败无残留、消息可审计回放、观察不泄正文、倒查顺序正确、
+    stop 级联生效、close 只在允许的状态下执行；node run-tests.js 全绿。
   blocked_by: 缺少实现
 
 - id: conductor.core-proxy-loop
   scope: global
   level: T3
   why: |
-    core_proxy 角色与它的五项代理工具已经能被测试直接驱动，但没有一个生产调用点：
+    core_proxy 角色与它的六个代理工具已经能被测试直接驱动，但没有一个生产调用点：
     核心代理的生成循环（模型调用 → 从工具参数取载荷 → 调 ProxyTools → 回灌结果）尚未落地，
-    所以目前模型还调不动这五个工具。
+    所以目前模型还调不动这六个工具，子会话的门也不会被投递到这里。
   how: |
     在 conductor 里加 core_proxy 的生成循环（与既有核心操作回路同源）：按角色发放工具面、跑模型、
-    把代理工具的调用交给 ProxyTools、把回执按通道形态回灌；授权、父会话与来源都由机制注入，
-    不接受模型自参。接上后删掉四处 dead_code allow（见 docs/testing/quality-isolation.md §三）。
+    把代理工具的调用交给 ProxyTools、把回执按通道形态回灌；代理工具会改核心状态（建会话/派发），
+    执行必须回到核心线程（握手），不破坏状态所有权。子会话的门与意外停止主动唤醒代理（不轮询），
+    且不把子会话整份转录灌进代理上下文。接上后删掉三处 dead_code allow（见 docs/testing/quality-isolation.md §三）。
   accept: |
-    真实模型（原生与手写信封两套通道）能连续调用五项代理工具完成一次代理流程；越权调用如实拒绝并落工具行。
+    真实模型（原生与手写信封两套通道）能连续调用六项代理工具完成一次代理流程；门由核心回答、
+    越权/无授权调用如实拒绝并落工具行、中途停止立即生效。
   blocked_by: 缺少实现
 
 - id: conductor.proxy-authorization-persistence
@@ -40,12 +43,25 @@
   level: T2
   why: |
     工具层已经要求「任务级授权 + 调用前校验 + 没有授权什么都不做」，但授权本身还没有来源：
-    谁授予、范围与有效期怎么落盘、怎么撤销与回放，都还没有实现（产品级总缺口见 tests/gaps.yaml 的 core.agency-mode）。
+    真实用户在哪里授予、怎么落盘、怎么回放，都还没有实现（产品级总缺口见 tests/gaps.yaml 的 core.agency-mode）。
+    范围口径已定为**全权**（不做细粒度范围/期限），所以这一条的剩余部分只是“授权事实的来源与持久化”。
   how: |
-    定义任务级授权（范围 / 有效期 / 模型与资源边界 / 撤销方式）的落盘形态与可回放记录；由真实用户在
-    主对话里授予与撤销；在工具执行前校验授权、范围、调用者身份、当前主会话与目标子会话；撤销后
-    核心不能继续派发或代答。撤销即回到点名。
+    在会话 meta 里落一个**全权委托标志 + 授予时间**，并追加一条可回放的 delegation 转录事件（授予）；
+    建工作时由真实用户授予（新建入口带上它）；在工具执行前从这份事实构造 Grant（tools = 角色表发放的
+    整套代理工具面）并校验；无委托一律拒绝。
   accept: |
-    有授权时工具只在范围内运行；无授权或越范围时明确拒绝且无副作用；授权、撤销、范围与来源都可从
-    转录与工具台账追溯。
+    有委托时六项工具在范围内运行；无委托时明确拒绝且无副作用；委托事实可从 meta 与转录追溯、重启后重建一致。
+  blocked_by: 缺少实现
+
+- id: conductor.proxy-permission-state
+  scope: global
+  level: T2
+  why: |
+    用户已决定：**撤销委托本轮不做**——它本质是“会话权限状态”（谁能对这条会话做什么），
+    与停止/暂停无关，要单独做。所以“撤销即时生效、撤销后回到点名”还没有实现路径。
+  how: |
+    定义会话权限状态（授予/撤销、范围与有效期、调用者身份、当前主会话与目标子会话），落盘且可回放；
+    撤销后核心不能继续派发或代答，回到点名。届时把 core.agency-mode 的撤销部分销账。
+  accept: |
+    权限状态可授予、可撤销、可从转录与工具台账追溯；撤销即时生效，之后代理工具一律拒绝。
   blocked_by: 缺少实现

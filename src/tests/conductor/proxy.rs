@@ -19,6 +19,7 @@ fn full_grant() -> d::Grant {
             d::SEND.to_string(),
             d::OBSERVE.to_string(),
             d::CONTROL.to_string(),
+            d::MESSAGES.to_string(),
         ],
         ..Default::default()
     }
@@ -33,11 +34,18 @@ fn ctx(grant: Option<d::Grant>) -> d::ProxyCall {
     }
 }
 
-/// 五个工具必须真的在总表里、且只发给 core_proxy（越权防线出自身份）。
+/// 六个工具必须真的在总表里、且只发给 core_proxy（越权防线出自身份）。
 #[test]
-pub(crate) fn the_five_tools_are_declared_and_granted_to_core_proxy() {
+pub(crate) fn the_six_tools_are_declared_and_granted_to_core_proxy() {
     let st = test_systools();
-    for name in [d::CATALOG, d::CREATE, d::SEND, d::OBSERVE, d::CONTROL] {
+    for name in [
+        d::CATALOG,
+        d::CREATE,
+        d::SEND,
+        d::OBSERVE,
+        d::CONTROL,
+        d::MESSAGES,
+    ] {
         let schema = st.tools.get(name).expect("代理工具必须在总表里");
         assert_eq!(
             schema.capability, "none",
@@ -53,6 +61,7 @@ pub(crate) fn the_five_tools_are_declared_and_granted_to_core_proxy() {
         d::SEND,
         d::OBSERVE,
         d::CONTROL,
+        d::MESSAGES,
         "read",
         "list",
         "search",
@@ -69,7 +78,14 @@ pub(crate) fn the_five_tools_are_declared_and_granted_to_core_proxy() {
     );
     for role in ["discussant", "solo", "executor", "planner", "orchestrator"] {
         let (rface, _) = st.role_face(role);
-        for name in [d::CATALOG, d::CREATE, d::SEND, d::OBSERVE, d::CONTROL] {
+        for name in [
+            d::CATALOG,
+            d::CREATE,
+            d::SEND,
+            d::OBSERVE,
+            d::CONTROL,
+            d::MESSAGES,
+        ] {
             assert!(
                 !rface.iter().any(|t| t == name),
                 "{} 不该拿到代理工具 {}",
@@ -96,6 +112,7 @@ pub(crate) fn without_a_grant_nothing_reaches_the_host() {
             r#"{"targets":["t1"],"message":"好","kind":"task","request_id":"r2"}"#,
         ),
         (d::OBSERVE, r#"{"session_id":"s1","view":"status"}"#),
+        (d::MESSAGES, r#"{"session_id":"s1","from":0,"count":5}"#),
         (
             d::CONTROL,
             r#"{"session_id":"s1","action":"stop","reason":"停","request_id":"r3"}"#,
@@ -317,44 +334,55 @@ pub(crate) fn send_marks_source_and_reports_partial_success() {
     assert_eq!(last.source_ref.as_deref(), Some("用户第 3 句"));
 }
 
-/// observe_session：只读、按游标增量、不推进；非法 view 不碰宿主。
+/// observe_session：只读、不回消息正文、不推进；非法 view 不碰宿主。
 #[test]
-pub(crate) fn observe_is_cursor_based_and_never_advances() {
+pub(crate) fn observe_reports_no_message_bodies() {
     let (host, mut tools) = rig();
     host.add_event("e1");
     host.add_event("e2");
     let c = ctx(Some(full_grant()));
-    let first = tools.call(&c, d::OBSERVE, r#"{"session_id":"s1","view":"latest"}"#);
-    assert!(first.ok, "{}", first.output);
+    let out = tools.call(&c, d::OBSERVE, r#"{"session_id":"s1","view":"status"}"#);
+    assert!(out.ok, "{}", out.output);
+    let v: serde_json::Value = serde_json::from_str(&out.output).expect("回执是 JSON");
+    assert_eq!(v["message_count"], 2, "{}", out.output);
     assert!(
-        first.output.contains("e1") && first.output.contains("e2"),
-        "{}",
-        first.output
+        !out.output.contains("e1") && !out.output.contains("e2"),
+        "观察不得回消息正文（正文走倒查）：{}",
+        out.output
     );
-    assert!(
-        first.output.contains("\"cursor\":\"2\""),
-        "{}",
-        first.output
-    );
-
-    host.add_event("e3");
-    let second = tools.call(
-        &c,
-        d::OBSERVE,
-        r#"{"session_id":"s1","view":"latest","since":"2"}"#,
-    );
-    assert!(second.ok, "{}", second.output);
-    assert!(second.output.contains("e3"), "{}", second.output);
-    assert!(
-        !second.output.contains("e1"),
-        "增量不得重复消费：{}",
-        second.output
-    );
-
+    // `latest` 这一面已取消：正文一律经 read_session_messages 倒查。
     let calls = host.calls().len();
+    let bad = tools.call(&c, d::OBSERVE, r#"{"session_id":"s1","view":"latest"}"#);
+    assert!(!bad.ok && bad.output.contains("view"), "{}", bad.output);
     let bad = tools.call(&c, d::OBSERVE, r#"{"session_id":"s1","view":"nope"}"#);
     assert!(!bad.ok && bad.output.contains("view"), "{}", bad.output);
     assert_eq!(host.calls().len(), calls, "非法 view 不得碰宿主");
+}
+
+/// read_session_messages：0 = 最新一条，按新→旧，可继续往更早翻。
+#[test]
+pub(crate) fn read_session_messages_pages_newest_first() {
+    let (host, mut tools) = rig();
+    host.add_event("e1");
+    host.add_event("e2");
+    host.add_event("e3");
+    let c = ctx(Some(full_grant()));
+    let first = tools.call(&c, d::MESSAGES, r#"{"session_id":"s1","from":0,"count":2}"#);
+    assert!(first.ok, "{}", first.output);
+    let v: serde_json::Value = serde_json::from_str(&first.output).expect("回执是 JSON");
+    assert_eq!(
+        v["messages"][0]["text"], "e3",
+        "最新一条在前：{}",
+        first.output
+    );
+    assert_eq!(v["messages"][1]["text"], "e2", "再往旧：{}", first.output);
+    assert_eq!(v["next"], 2, "还有更早的：{}", first.output);
+
+    let second = tools.call(&c, d::MESSAGES, r#"{"session_id":"s1","from":2,"count":2}"#);
+    assert!(second.ok, "{}", second.output);
+    let w: serde_json::Value = serde_json::from_str(&second.output).expect("回执是 JSON");
+    assert_eq!(w["messages"][0]["text"], "e1", "{}", second.output);
+    assert!(w["next"].is_null(), "到底了不该有 next：{}", second.output);
 }
 
 /// control_session：回执是实际状态、重放幂等、宿主拒绝照实回报。
