@@ -787,6 +787,13 @@ impl ConductorHandle {
             let sid = sid.to_string();
             move |core| Ok(core.put_collab(&sid, c))
         })?;
+        // 协作会话停下 / 交付时也通知代理父（顶层协作没有代理父：返回 None，什么都不做）。
+        if let Some(proxy) = self.call({
+            let sid = sid.to_string();
+            move |core| Ok(core.notify_proxy_of_child(&sid))
+        })? {
+            self.spawn_detached_proxy(&proxy);
+        }
         // 派发事件（"[节点] 开工"等）**也要落盘**：它们是在这里产生的，不经过上面那条 sink——
         // 只推不落的话，刷新后回放会少掉"节点开工"那几行（真机上就是这么发现的）。
         let persister = self.call({
