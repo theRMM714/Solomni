@@ -557,6 +557,17 @@ impl ConductorHandle {
                 let _ = me.single_generation(&sid, None, Output::Stream);
             });
     }
+    /// 起一次**脱离调用方**的协作阶段步（代理把消息转达到协作子会话用）：不等它跑完。
+    /// 与“叫醒父会话”的区别：这条带一个明确的阶段步（开工 / 代答），不是从断点继续。
+    pub(crate) fn spawn_detached_collab_step(&self, sid: &str, step: CollabStep, text: &str) {
+        let me = self.clone();
+        let (sid, text) = (sid.to_string(), text.to_string());
+        let _ = std::thread::Builder::new()
+            .name("solomni-proxy-collab".to_string())
+            .spawn(move || {
+                let _ = me.collab_generation(&sid, CollabWork::Step(step), &text);
+            });
+    }
     /// 起一次**脱离调用方**的协作推进（叫醒父会话用）：不等它跑完。
     pub(crate) fn spawn_detached_collab(&self, sid: &str) {
         let me = self.clone();

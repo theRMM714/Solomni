@@ -276,7 +276,9 @@ fn json_ok<T: serde::Serialize>(v: &T) -> ToolOutcome {
 // ---------- 真实宿主：Conductor 的代理方法族 + 队列桥 ----------
 
 use super::{now_ts, validate_work_name, Conductor, Session};
-use crate::capabilities::conductor::api::{AgentInstance, ConductorHandle, WorkMode, WorkSpec};
+use crate::capabilities::conductor::api::{
+    AgentInstance, CollabStep, ConductorHandle, WorkMode, WorkSpec,
+};
 use crate::capabilities::session::api::{AgentSession, Delegation, SessionMeta, SessionParams};
 use crate::capabilities::workspace::api::{ExecSpec, Sandbox};
 
@@ -633,9 +635,16 @@ impl ProxyHost for ProxyBridge {
             return Err(format!("无此会话：{}", target));
         }
         if mode == "collab" {
-            // 协作子会话的转达要落到它自己的阶段步（decide / begin）并等它推进，
-            // 需要“子会话的门 → 唤醒代理”那一段，先如实说明未落地。
-            return Err("协作子会话的转达尚未实现（下一步）".to_string());
+            // 协作子会话：按消息种类落到它的阶段步，**脱离调用方点火**（不等它跑完）。
+            // kind=task 视作“开工 / 继续”；其余（代答、审查、返工、补充）走 decide
+            // （由协作自己的核心 AI 判明确性）。
+            let step = if msg.kind == d::MessageKind::Task {
+                CollabStep::Begin
+            } else {
+                CollabStep::Decide
+            };
+            handle.spawn_detached_collab_step(&target, step, &msg.text);
+            return Ok(());
         }
         // 单 agent：以“核心派的活”注入（派发行是核心自己的行，**不冒充用户原话**），
         // 并**脱离调用方点火**——代理不等它跑完，靠 observe / messages 回头看。
