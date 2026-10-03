@@ -45,8 +45,13 @@
     并把 LOCALAPPDATA/USERPROFILE/HOME/TEMP 改指沙箱）直接复现：`cmd /c python -c …` 与 `where python` **都成功**，
     且 `python.exe` 是 591360 字节的 **HardLink（真二进制，不是依赖 LOCALAPPDATA 的 shim）**——
     所以"白名单 / shim 依赖"这两个假设**已被证伪**，真正原因**尚未定位**。
-    剩下两条待查方向：①产品启动工具进程的那条路（守门进程 / 网关）是否另有一套环境或工作目录；
-    ②工具进程是否落在受限令牌下（PATH 查找被目录 ACL 挡住，cmd 的报错与"找不到"同形）。
+    **最小复现（可直接跑）**：`solomni.exe --fence-run <扁平 FenceJob json> -- "where.exe python"`。
+    在**同一次 Medium 完整性**的执行里：shell 里 `python --version` → 3.14.7、`where python` 找到真身；
+    而经这条链的工具进程里 `where.exe python` → 找不到、python 的**绝对路径** → `Access is denied.`。
+    环境已排除：工具进程的 `set` 显示 PATH 里就有 `…\Python\bin`，且它跑的只是 `KILL_ON_JOB_CLOSE |
+    ACTIVE_PROCESS` 的 Job（没有安全限制），守门进程 `guard::fence_run` 也只做 argv 分发。
+    剩下两条待查方向：①工具进程启动时的**令牌**（是不是带着受限 SID）；②该目录上是否残留了
+    只对本程序令牌生效的 ACE（本项目自己的围栏会写/撤 ACL，"孤儿 ACE 把目录对受限进程藏住"正是已知形态）。
   how: |
     抓一次**真实工具进程**的环境与令牌（例如让工具打印 `set` 与 `whoami /groups`，或用 Process Monitor 类工具看
     它拿到什么 PATH），再对照本脚本的白名单复现；定位后修启动路或白名单，并补一条真进程用例。
