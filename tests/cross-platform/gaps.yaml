@@ -19,17 +19,35 @@
     受限环境下如实标注"环境不允许回收"（env-skip + 原因），不判成留下痕迹；
     普通环境与 CI 上回收失败仍然是硬失败。
   blocked_by: 缺少实现
-- id: harness.local-run-elevation-unverified
+- id: harness.acl-ops-denied-on-volume
   scope: global
   level: T4
   why: |
-    受限令牌会话（低完整性 / 文件沙箱）里跑门禁会拿到假失败（解释器不可达、改 DACL 被拒、管道 stdio EPERM）。
-    文档给了两条出路：换普通 shell（常规），或**对单次执行放宽沙箱（提权）**。后者在当前会话里试了两次，
-    都因**无人批准**而根本没有启动（无输出、无日志），所以"提权能拿到与普通 shell 同一种结论"这句话
-    **还没有被实际验证过**；它必须有人批准，批不到就一直等。
+    在普通 / 提权 shell（Medium 完整性）里，项目工作副本所在卷上的 DACL **读写都返回错误码 5**：
+    doctor 报「改不动目录 ACL（读 DACL 失败…错误码 5）」，而
+    grants_are_written_when_the_environment_allows_it 从「环境不允许、如实跳过」变成**真失败**
+    （授权应当成功：Some(写 DACL 失败（…\target\tmp）：错误码 5)）。
+    原因未定：卷不支持 ACL（exFAT / 网络盘之类）或权限不足——需要 fsutil fsinfo volumeinfo <盘符> 判定。
+    无论哪种，结论都是：**这份副本上容器围栏与 ACL 类验收不成立**，真机围栏结论只能在 CI / 一次性 runner 上取。
   how: |
-    在一次放宽沙箱的执行里跑 `node run-tests.js`，把 L4 的结论与普通 shell 的结果对照（同一种结论才算成立）；
-    验过之后把 docs/testing/execution-ci.md 里那条"尚未验证"的说明删掉、删本条目。
+    先判定卷是否支持 ACL；不支持就把它写成「本机不能验收 ACL 类探针」的**环境不满足**（像其它 env-skip 一样
+    如实标注），不让它以断言失败的形式出现（否则卷不支持会被读成产品缺陷）；支持则查权限来源并修。
   accept: |
-    放宽沙箱的一次执行里 L4 通过，且与普通 shell 的结论一致（或如实说明差异）；文档不再标"未验证"。
-  blocked_by: 缺少实现（需要人工批准的一次性提权执行）
+    卷不支持 ACL 时，ACL 类探针与 doctor 一致地报「环境不满足」且不判失败；支持 ACL 的环境上授权 / 撤权探针真跑并通过。
+  blocked_by: 缺少判定（卷能力）与实现（环境不满足的标注口径）
+
+- id: harness.tool-env-python-shim
+  scope: global
+  level: T3
+  why: |
+    Windows 新版 Python 安装管理器把解释器放在 %LOCALAPPDATA%\Python\bin。夹具编排能 where python 找到它、
+    写下的工具命令是 python tools/read_txt.py；但**产品给工具进程的环境白名单**（fence_env：保留 PATH / PATHEXT，
+    却把 LOCALAPPDATA / USERPROFILE / HOME / TEMP 改指 agent 私有沙箱）下，cmd 报 python is not recognized，
+    工具因此全链路失败（harvest.scan → corpus.jsonl 缺席 → indexer 全挂）。
+    最可疑的是那个 python.exe 是**依赖 %LOCALAPPDATA% 的 shim**（重定向后解析不到真身）；待证实。
+  how: |
+    用与 fence_env 相同的环境（env_clear + 白名单 + 改指的 LOCALAPPDATA）跑 cmd /c python -c print(1) 复现；
+    若确为 shim 依赖，白名单需保留解释器自举所需的变量（或把解释器真身与安装根一起放行），并补一条真进程用例。
+  accept: |
+    在这类 Python 安装（含安装管理器）下，模块的 python 工具能在白名单环境里跑通；白名单仍不泄漏无关凭据。
+  blocked_by: 缺少复现与实现

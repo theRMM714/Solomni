@@ -70,8 +70,11 @@ node run-tests.js --fence-live
    - **必须有人批准**：批准不到的会话会一直等着、根本不发车——所以它不是默认路径，也不该写进自动化；
    - 放宽只解决"环境不允许"，**不替代**真机围栏验收：`--fence-live` 仍然只在一次性环境里跑。
 
-> 这条提权路径**尚未在本项目里被实际验证过**（申请两次都因无人批准而未启动），所以按"过程而非既定能力"对待：
-> 现状与销账口径见 `tests/cross-platform/gaps.yaml` 的 `harness.local-run-elevation-unverified`。
+> **提权已实测可用**：同一次执行里完整性从 `Low` 变 `Medium`、`python` 可达（`…\Python\bin\python.exe`，3.14.7）、
+> 围栏回收退出码 0（"清理完成"，无残留）——之前那两条"没有 python / 围栏回收 null"确实是沙箱造成的。
+> 但**提权不等于本地全绿**，本机还挡着两关（见 `tests/cross-platform/gaps.yaml`）：
+> 工作副本所在的卷上**读写 DACL 都返回错误码 5**（容器围栏装不上，`grants_are_written_…` 这类 ACL 探针
+> 在能跑的环境里会**真失败**——不是 env-skip）；以及模块的 `python` 工具在**环境白名单**下解析不到解释器。
 
 ### CI（GitHub Actions）：跨平台与真机的唯一事实来源
 
