@@ -50,6 +50,18 @@ node run-tests.js --fence-live
 仅允许在一次性 runner、VM 或明确授权的环境使用：它会改本机状态（写目录 ACL、建容器 profile）并创建容器身份。
 普通开发机上**不要**开；本地默认安全模式（见 [quality-isolation.md](quality-isolation.md)）。
 
+**本地这条最后一行有个前提：门禁要在「普通 shell」里跑。** 如果本地 shell 本身是受限令牌
+（例如低完整性 / 文件沙箱的会话），三件事会同时不成立，而报错都指向错误的方向：
+
+- `%LOCALAPPDATA%\Python` 之类**用户目录下的解释器**访问被拒 → doctor 报"没有 python"、
+  L4 的真工具场景报 `'python' is not recognized`（看着像产品缺陷，其实是环境）；
+- **改目录 DACL 被拒**（错误码 5）→ 容器围栏装不上，探针只能 env-skip；
+- Node 的**管道 stdio 捕获被拒（EPERM）**→ L4 收尾的围栏回收 `status` 为 null、输出为空，
+  被判成"本机留下了没人管的痕迹"（见 `tests/cross-platform/gaps.yaml` 的 harness.fence-clean-under-restricted-token）。
+
+判据：`whoami /groups` 里出现 `Mandatory Label\Low Mandatory Level` 就是这种会话。要验真机结论，
+请在普通 PowerShell 窗口里跑 `node run-tests.js`（需要真机围栏时再加 `--fence-live`）。
+
 ### CI（GitHub Actions）：跨平台与真机的唯一事实来源
 
 工作流 `.github/workflows/test.yml`，矩阵 `windows-latest / ubuntu-latest / macos-latest`（`fail-fast: false`，

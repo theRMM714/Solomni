@@ -1,5 +1,21 @@
 # 跨平台层的缺口账（当前状态：条目存在 = 这条测试还没有；补上就删条目）。
 #
-# 当前为空：这一层的「删会话即请求撤销授权」接线已完成，并由 src/tests/core.rs 的
-# deleting_a_session_asks_the_fence_to_release_its_grants 钉住。
-# 真实撤权机制（Windows 上按 SID 移除 ACE）是否生效，另记在 tests/windows/gaps.yaml。
+# 「删会话即请求撤销授权」的接线已完成（由 src/tests/core.rs 的
+# deleting_a_session_asks_the_fence_to_release_its_grants 钉住）；真实撤权机制是否生效另记在
+# tests/windows/gaps.yaml。
+
+- id: harness.fence-clean-under-restricted-token
+  scope: global
+  level: T4
+  why: |
+    L4 收尾用 `spawnSync(BIN, ["--fence-clean", …], { encoding: "utf8" })` 回收围栏痕迹。在受限令牌
+    （低完整性 / 沙箱）下，Node 的**管道 stdio 捕获会被拒（EPERM）**：`status` 变成 null、输出为空，
+    编排把这一情形判成"本机留下了没人管的痕迹"（硬失败）——而实际是**环境不允许执行**。
+    真失败（回收真跑了但没撤干净）与环境不允许必须分开，否则受限 shell 里 L4 永远红，且红得指向错误的方向。
+  how: |
+    围栏回收改成 `stdio: "inherit"`（与 driver / mock 同一条口径，不抓管道），或按 `spawnSync` 的
+    `error` / `status === null` 分辨"没能执行"（如实标注环境不满足并打印原因）与"执行了但失败"（硬失败）。
+  accept: |
+    受限环境下如实标注"环境不允许回收"（env-skip + 原因），不判成留下痕迹；
+    普通环境与 CI 上回收失败仍然是硬失败。
+  blocked_by: 缺少实现
