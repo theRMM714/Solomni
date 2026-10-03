@@ -418,15 +418,72 @@ setTimeout(async () => {
       }
     } catch (e) { loadErrors.push("@ 菜单重拉检查失败：" + e.message); }
   }
+  // **向导的第三人形态**：形态选择里必须真有「代理」，且它的说明说清了"没有名单 + 全权 + 停止即全停"。
+  let wizardProxy = false;
+  if (!loadErrors.length) {
+    try {
+      await vm.runInNewContext("openWizard()", sandbox);
+      const root = els.get("#modal-root");
+      const all = [];
+      (function walk(n) { for (const c of (n.children || [])) { all.push(c); walk(c); } })(root);
+      const texts = all.map((n) => String(n.textContent || "")).join("|");
+      const sel = all.filter((n) => (n.children || []).length >= 3)
+        .find((n) => (n.children || []).some((o) => o.value === "proxy"));
+      wizardProxy = !!sel && texts.indexOf("代理（把决定权整块交给核心）") >= 0;
+      if (!wizardProxy) loadErrors.push("向导代理形态检查：没有找到 proxy 选项");
+    } catch (e) { loadErrors.push("向导代理形态检查失败：" + e.message); }
+  }
+  // **会话级说明**：代理身份与"已暂停 / 已关闭"都要说清（转录最上方一行，不冒充任何一方的发言）。
+  let sessionNoteRule = false;
+  if (!loadErrors.length) {
+    try {
+      const r = vm.runInNewContext(
+        "(function () { const a = sessionNote({ mode: 'proxy', run: 'active' });" +
+          " const b = sessionNote({ mode: 'single', run: 'paused' });" +
+          " const c = sessionNote({ mode: 'single', run: 'closed' });" +
+          " const d = sessionNote({ mode: 'single', run: 'active' });" +
+          " return { a: !!a, aCls: a && a.className, aText: a && a.textContent," +
+          "          bText: b && b.textContent, cText: c && c.textContent, d: d }; })()",
+        sandbox
+      );
+      sessionNoteRule = r.a && r.aCls === "agent-note" && String(r.aText).indexOf("代理模式") >= 0
+        && String(r.bText).indexOf("已暂停") >= 0 && String(r.cText).indexOf("已关闭") >= 0
+        && r.d === null;
+      if (!sessionNoteRule) loadErrors.push("会话级说明检查：" + JSON.stringify(r));
+    } catch (e) { loadErrors.push("会话级说明检查失败：" + e.message); }
+  }
+  // **侧栏的运行态**：暂停 / 关闭要一眼可辨（持久事实，不是"这一刻在不在跑"）。
+  let historyRunTag = false;
+  if (!loadErrors.length) {
+    try {
+      const r = vm.runInNewContext(
+        "(function () {" +
+          " state.history = [" +
+          "   { name: 'p', mode: 'proxy', ts: 1, done: false, run: 'paused', tier: 'host', parent: null }," +
+          "   { name: 'c', mode: 'single', ts: 2, done: false, run: 'closed', tier: 'host', parent: 'p' }," +
+          "   { name: 'a', mode: 'single', ts: 3, done: false, run: 'active', tier: 'host', parent: null }];" +
+          " const box = document.querySelector('#history-list'); box.children.length = 0; renderHistory();" +
+          " const tags = box.children.map(function (el) {" +
+          "   return (el.children || []).map(function (x) { return String(x.textContent); }).join('|'); });" +
+          " return { tags: tags }; })()",
+        sandbox
+      );
+      const j = JSON.stringify(r.tags);
+      historyRunTag = j.indexOf("已暂停") >= 0 && j.indexOf("已关闭") >= 0 && j.indexOf("进行中") >= 0;
+      if (!historyRunTag) loadErrors.push("侧栏运行态检查：" + j);
+    } catch (e) { loadErrors.push("侧栏运行态检查失败：" + e.message); }
+  }
   const ok = alerts.length === 0 && loadErrors.length === 0 && rendered && tierWarned && identityKept
     && pollConn === "已连接" && pollApplied && hydratedHistory && liveReplaced && liveClearedOnIdle && toolReasoningRendered
     && taskButtonRule && decisionCardRule && onlyLastStreams && lineRule && runningRules && atMenuRefetches
+    && wizardProxy && sessionNoteRule && historyRunTag
     && consoleErrors.length === 0;
   if (!ok) {
     console.log("alerts（原生弹窗被调用的次数，应为 0）:", JSON.stringify(alerts));
     console.log("notice 渲染:", rendered, "| 虚拟机档不可用提示:", tierWarned, "| 身份标题保留:", identityKept);
     console.log("轮询状态点:", JSON.stringify(pollConn), "| 事件已应用:", pollApplied, "| 盘上转录已补:", hydratedHistory, "| 流式被替换:", liveReplaced, "| 空闲清理:", liveClearedOnIdle, "| 思维链:", toolReasoningRendered);
     console.log("运行态归一（事件为准 / 快照只对账）:", runningRules, "| @ 菜单每次重拉:", atMenuRefetches);
+    console.log("向导代理形态:", wizardProxy, "| 会话级说明:", sessionNoteRule, "| 侧栏运行态:", historyRunTag);
     console.log("应用侧 console.error:", JSON.stringify(consoleErrors.slice(0, 3)));
     console.log("loadErrors:", JSON.stringify(loadErrors));
   }

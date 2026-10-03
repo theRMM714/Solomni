@@ -468,7 +468,7 @@ impl Conductor {
             if parent.is_some() {
                 return Err("子工作不能建成代理形态：代理不能往里套代理".to_string());
             }
-            let (sid, facts) = self.create_proxy_with_facts(&spec.name, now_ts())?;
+            let (sid, facts) = self.create_proxy_with_facts(&spec.name, now_ts(), spec.tier)?;
             return Ok(WorkOpened {
                 sid,
                 agents: Vec::new(),

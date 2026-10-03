@@ -1031,7 +1031,7 @@ pub(crate) fn create_work_with_proxy_mode_makes_a_delegated_session() {
     assert!(!v.can_update_task, "代理会话没有本次需求");
 
     // 与形态不符的载荷：整条拒绝，不留半成品。
-    let mut bad = spec;
+    let mut bad = spec.clone();
     bad.name = "w-user-proxy-2".to_string();
     bad.agents = vec![crate::capabilities::conductor::api::AgentInstance {
         name: "a".to_string(),
@@ -1048,4 +1048,22 @@ pub(crate) fn create_work_with_proxy_mode_makes_a_delegated_session() {
         ops.history.open("w-user-proxy-2").is_err(),
         "拒绝后不留半成品"
     );
+
+    // 档位与其余形态同一把尺子：用户选虚拟机档就按它建（承载不了则如实拒绝、什么都不留）。
+    let mut vm = spec;
+    vm.name = "w-user-proxy-vm".to_string();
+    vm.tier = Tier::Vm;
+    match ops.sessions.create_work(vm) {
+        Ok((o, _)) => {
+            let (m, _) = ops.history.open(&o.sid).expect("落盘");
+            assert_eq!(m.exec.tier, Tier::Vm, "用户选的档位要落盘（子工作继承它）");
+        }
+        Err(e) => {
+            assert!(!e.trim().is_empty(), "拒绝要把原因说清");
+            assert!(
+                ops.history.open("w-user-proxy-vm").is_err(),
+                "拒绝后不留半成品"
+            );
+        }
+    }
 }

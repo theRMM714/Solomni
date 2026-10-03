@@ -64,7 +64,7 @@ async function refreshState() {
     if (state.sessions.has(v.sid) || !state.running.has(v.sid)) continue;
     const h = (state.history || []).find((x) => x.name === v.sid);
     const s = {
-      sid: v.sid, mode: v.mode || 'single', title: (h && h.name) || v.sid,
+      sid: v.sid, mode: v.mode || 'single', title: (h && h.name) || v.sid, run: v.run || 'active',
       lines: [], live: [], pending: v.pending || null, sending: false,
       running: false, working: null, running_known: false,
       can_update_task: !!v.can_update_task,
@@ -81,6 +81,7 @@ async function refreshState() {
     const v = state.views.get(cur.sid);
     if (!v) continue;
     cur.can_update_task = !!v.can_update_task;
+    cur.run = v.run || 'active';
     cur.pending = v.pending || null;
     // 运行态**只对账、不覆盖**：这条会话已经有实时知识（事件就是真相）时，快照比它滞后——
     // 一次迟到的轮询不能把已经收尾的回合标回"在跑"。没有实时知识时按快照补齐，并清掉本地遗留
@@ -307,8 +308,12 @@ function renderHistory() {
     const name = document.createElement('span'); name.className = 'hname';
     name.textContent = (h.parent ? '└ ' : '') + h.name;
     const mode = document.createElement('span'); mode.className = 'hmode';
+    // 运行态是**持久事实**（暂停 / 关闭），与"这一刻在不在跑"分开：侧栏据此标出来。
+    const stateTag = h.run === 'paused' ? '·已暂停'
+      : h.run === 'closed' ? '·已关闭'
+        : (h.done ? '' : '·进行中 ');
     mode.textContent =
-      (h.done ? '' : '·进行中 ') + h.mode +
+      stateTag + h.mode +
       (h.tier === 'vm' && h.tier_ready === false ? '·虚拟机档不可用' : '');
     const acts = document.createElement('div'); acts.className = 'history-acts';
 
@@ -1467,14 +1472,26 @@ async function openWizard() {
     const modeSel = selectInput([
       { value: 'single', label: '单 agent（1 个或多个模块）' },
       { value: 'collab', label: '协作（多个 agent）' },
+      { value: 'proxy', label: '代理（把决定权整块交给核心）' },
     ], 'single');
-    // 形态预设标签保留：单 agent 里 1 个模块就是"直连式"，多个就是"组合式"。
+    // 形态说明随选择走（三种形态的差别就在这一句里说清）。
     const modeHint = document.createElement('div'); modeHint.className = 'wf-hint';
-    modeHint.textContent = '单 agent：选 1 个模块 = 直连式；选多个 = 组合式。';
+    function modeHintText() {
+      if (w.mode === 'proxy') {
+        return '代理：没有名单要选——核心自己挑人、建子工作并代你决定（选这个形态就是授予全权）。\n' +
+          '它的子会话不会把整份对话推给它；它靠观察与倒查消息决定下一步。想接管就按「停止」：相关的会话会一起停下。';
+      }
+      if (w.mode === 'collab') {
+        return '协作：多个 agent 各自独立沙箱，先分权协商、再按任务链执行，由核心统一验收。';
+      }
+      return '单 agent：选 1 个模块 = 直连式；选多个 = 组合式。';
+    }
     const partWrap = document.createElement('div'); partWrap.className = 'wf-field';
     const modelWrap = document.createElement('div'); modelWrap.className = 'wf-models';
     const editorWrap = document.createElement('div'); editorWrap.className = 'wf-field hidden';
     const taskIn = areaInput('本次需求（协作必填；也可写上，核心据此推荐）');
+    // 需求那一格与推荐按钮都是**非代理形态**才问的：形态一换就收起来（见 renderParts）。
+    const taskField = field('本次需求', taskIn);
     const recBtn = btn('让核心推荐', 'btn btn-block');
     const createBtn = btn('创建并开始', 'btn btn-primary btn-block');
     const cancelBtn = btn('取消', 'btn btn-block');
@@ -1684,6 +1701,18 @@ async function openWizard() {
 
     function renderParts() {
       partWrap.innerHTML = '';
+      modeHint.textContent = modeHintText();
+      // 代理形态没有名单也没有模型要选：把该说的说清，把不该问的收起来。
+      const proxy = w.mode === 'proxy';
+      taskField.className = proxy ? 'wf-field hidden' : 'wf-field';
+      recBtn.className = proxy ? 'btn btn-block hidden' : 'btn btn-block';
+      if (proxy) {
+        partWrap.appendChild(emptyHint(
+          '（代理形态不需要选人）核心会用登记处里当前有效的 agent 与模块自己组队，' +
+          '按你的目标建出一个或多个子工作，并代你回答它们的关卡。'
+        ));
+        return;
+      }
       const lab = document.createElement('div'); lab.className = 'wf-label';
       lab.textContent = w.mode === 'single' ? '单 agent：复用已有 agent，或勾选它的模块'
         : 'agent（协作：可多个，各自独立沙箱）';
@@ -1693,6 +1722,10 @@ async function openWizard() {
 
     function renderModels() {
       modelWrap.innerHTML = '';
+      if (w.mode === 'proxy') {
+        modelWrap.appendChild(emptyHint('（代理会话走核心默认通道：模型按登记处的核心默认）'));
+        return;
+      }
       const opts = modelOptions();
       if (w.mode === 'single') {
         const who = w.agentPick ? w.agentPick.name : ((w.agentName || '').trim() || pickedModules()[0] || '');
@@ -1732,6 +1765,7 @@ async function openWizard() {
     });
 
     recBtn.onclick = async () => {
+      if (w.mode === 'proxy') { c.setMsg('代理形态不需要名单：核心自己挑人', true); return; }
       const task = taskIn.value.trim();
       if (!task) { c.setMsg('先写下本次需求，核心才能据此推荐', true); return; }
       c.setMsg('核心根据需求推荐中…');
@@ -1790,6 +1824,11 @@ async function openWizard() {
       if (!name) { c.setMsg('工作名称必填', true); return; }
       const task = taskIn.value.trim();
       let agents;
+      if (w.mode === 'proxy') {
+        // 代理：没有名单、没有需求——选这个形态就是**授予全权**（后端建 mode=proxy 的会话）。
+        await submit({ name, mode: 'proxy', agents: [], tier: w.tier });
+        return;
+      }
       if (w.mode === 'single') {
         if (w.agentPick) {
           const mods = (w.agentPick.modules || []).slice();
@@ -1832,7 +1871,7 @@ async function openWizard() {
     c.body.appendChild(tierField);
     c.body.appendChild(partWrap);
     c.body.appendChild(modelWrap);
-    c.body.appendChild(field('本次需求', taskIn));
+    c.body.appendChild(taskField);
     c.body.appendChild(recBtn);
     c.body.appendChild(createBtn);
     c.body.appendChild(cancelBtn);
@@ -1846,7 +1885,7 @@ async function startSession(body) {
   const r = await api('POST', '/api/sessions', body);
   const sid = r.sid;
   const s = {
-    sid, mode: body.mode, title: body.name || sid,
+    sid, mode: body.mode, title: body.name || sid, run: 'active',
     lines: [], live: [], pending: null, sending: false,
     running: false, working: null, running_known: false,
     done: false, awaiting: null, fold: {}, scroll: {},
@@ -2167,9 +2206,29 @@ function lineBlock(p, s, key, live) {
 }
 
 /// 定稿行渲染到容器里（每次全量重建这个容器；折叠与 <pre> 滚动状态由 store 恢复）。
+/// 会话级说明（代理身份 / 已暂停 / 已关闭）：放转录最上方，**不冒充任何一方的发言**。
+/// 它只说这条会话是什么、还该不该被驱动——正文一律来自转录本身。
+function sessionNote(s) {
+  if (!s) return null;
+  const bits = [];
+  if (s.mode === 'proxy') {
+    bits.push('代理模式：核心代你挑人、建子工作并回答它们的关卡——这就是全权；' +
+      '按「停止」会让相关会话一起停下。');
+  }
+  if (s.run === 'paused') bits.push('这条会话已暂停：不会再被派发或唤醒，直到它被恢复。');
+  if (s.run === 'closed') bits.push('这条会话已关闭：终态，不会再被派发或唤醒。');
+  if (!bits.length) return null;
+  const d = document.createElement('div');
+  d.className = 'agent-note';
+  d.textContent = bits.join('\n');
+  return d;
+}
+
 function renderDone(s) {
   if (!doneBox) return;
   doneBox.innerHTML = '';
+  const note = sessionNote(s);
+  if (note) doneBox.appendChild(note);
   // tool 行的稳定序号：在 s.lines 里按出现顺序数（兜底的信封行不算，它用 L<行id>:raw）。
   let toolSeq = 0;
   for (const l of s.lines) {

@@ -585,20 +585,35 @@ impl Conductor {
     /// 测试便捷入口：只要引用（产品入口经 `create_work(WorkMode::Proxy)`）。
     #[cfg(test)]
     pub fn create_proxy(&mut self, name: &str, granted_at: i64) -> Result<String, String> {
-        self.create_proxy_with_facts(name, granted_at)
+        self.create_proxy_with_facts(name, granted_at, crate::kernel::api::Tier::Host)
             .map(|(sid, _)| sid)
     }
 
     /// 建代理会话的真身：返回（会话引用, **开场事实**）——事实交给 api 层发布到事件台
     /// （核心不持有事件台；与 `create_work` 同一条口径）。
+    /// `tier` 是用户在向导里选的档位：它既是这条会话自己的工作区档位，也是它**建子工作时的默认档位**
+    /// （`proxy_create` 取 `pmeta.exec.tier`）。承载不了就如实拒绝，不偷偷降级。
     pub(crate) fn create_proxy_with_facts(
         &mut self,
         name: &str,
         granted_at: i64,
+        tier: crate::kernel::api::Tier,
     ) -> Result<(String, Vec<SessionEvent>), String> {
         validate_work_name(name)?;
         if self.sessions.contains_key(name) || self.history.load(name).is_ok() {
             return Err(format!("工作名已存在：{}", name));
+        }
+        let exec = ExecSpec {
+            tier,
+            ..ExecSpec::default()
+        };
+        // 与其余形态同一把尺子：虚拟机档的承载不成立就不建（用户环境问题，不是选型问题）。
+        if let Some(why) = crate::capabilities::workspace::api::tier_refusal(
+            &exec,
+            self.qemu_path(),
+            self.probe.as_ref(),
+        ) {
+            return Err(why);
         }
         let meta = SessionMeta {
             name: name.to_string(),
@@ -608,7 +623,7 @@ impl Conductor {
             task: None,
             ts: now_ts(),
             agents: Vec::new(),
-            exec: ExecSpec::default(),
+            exec,
             parent: None,
             node: None,
             delegation: Some(Delegation { granted_at }),
@@ -618,6 +633,11 @@ impl Conductor {
         self.workspace.prepare(name, &[])?;
         let session = self.build_proxy(&meta)?;
         let mut events = session.open();
+        // 授予事实既是 meta 的 `delegation`（可重建），也留一条**可回放记录**：
+        // 打开这条会话的人应当看得见"决定权是整块交出去的"，而不是只能去读 meta。
+        events.push(SessionEvent::Notice(
+            "[授予] 用户选定了代理形态——决定权整块交给核心（全权）。".to_string(),
+        ));
         self.history.create(&meta)?;
         self.sessions
             .insert(name.to_string(), Session::Single(session));
