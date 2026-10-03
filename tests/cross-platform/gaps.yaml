@@ -36,18 +36,21 @@
     卷不支持 ACL 时，ACL 类探针与 doctor 一致地报「环境不满足」且不判失败；支持 ACL 的环境上授权 / 撤权探针真跑并通过。
   blocked_by: 缺少判定（卷能力）与实现（环境不满足的标注口径）
 
-- id: harness.tool-env-python-shim
+- id: harness.tool-python-unresolved
   scope: global
   level: T3
   why: |
-    Windows 新版 Python 安装管理器把解释器放在 %LOCALAPPDATA%\Python\bin。夹具编排能 where python 找到它、
-    写下的工具命令是 python tools/read_txt.py；但**产品给工具进程的环境白名单**（fence_env：保留 PATH / PATHEXT，
-    却把 LOCALAPPDATA / USERPROFILE / HOME / TEMP 改指 agent 私有沙箱）下，cmd 报 python is not recognized，
-    工具因此全链路失败（harvest.scan → corpus.jsonl 缺席 → indexer 全挂）。
-    最可疑的是那个 python.exe 是**依赖 %LOCALAPPDATA% 的 shim**（重定向后解析不到真身）；待证实。
+    L4 的真工具场景里，工具进程执行 `python …` 报 not recognized（harvest.scan → corpus.jsonl 缺席 → indexer 全挂）。
+    已在 Medium 完整性下用**与产品同一份环境白名单**（env_clear + PATH/PATHEXT/SystemRoot/COMSPEC/SYSTEMDRIVE，
+    并把 LOCALAPPDATA/USERPROFILE/HOME/TEMP 改指沙箱）直接复现：`cmd /c python -c …` 与 `where python` **都成功**，
+    且 `python.exe` 是 591360 字节的 **HardLink（真二进制，不是依赖 LOCALAPPDATA 的 shim）**——
+    所以"白名单 / shim 依赖"这两个假设**已被证伪**，真正原因**尚未定位**。
+    剩下两条待查方向：①产品启动工具进程的那条路（守门进程 / 网关）是否另有一套环境或工作目录；
+    ②工具进程是否落在受限令牌下（PATH 查找被目录 ACL 挡住，cmd 的报错与"找不到"同形）。
   how: |
-    用与 fence_env 相同的环境（env_clear + 白名单 + 改指的 LOCALAPPDATA）跑 cmd /c python -c print(1) 复现；
-    若确为 shim 依赖，白名单需保留解释器自举所需的变量（或把解释器真身与安装根一起放行），并补一条真进程用例。
+    抓一次**真实工具进程**的环境与令牌（例如让工具打印 `set` 与 `whoami /groups`，或用 Process Monitor 类工具看
+    它拿到什么 PATH），再对照本脚本的白名单复现；定位后修启动路或白名单，并补一条真进程用例。
   accept: |
-    在这类 Python 安装（含安装管理器）下，模块的 python 工具能在白名单环境里跑通；白名单仍不泄漏无关凭据。
-  blocked_by: 缺少复现与实现
+    在这台机器（新版 Python 安装管理器 + 普通 shell）上，模块的 python 工具在白名单环境里跑通；
+    白名单仍不泄漏无关凭据。
+  blocked_by: 缺少定位（真实工具进程的环境 / 令牌）
