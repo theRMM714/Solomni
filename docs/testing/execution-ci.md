@@ -70,13 +70,15 @@ node run-tests.js --fence-live
    - **必须有人批准**：批准不到的会话会一直等着、根本不发车——所以它不是默认路径，也不该写进自动化；
    - 放宽只解决"环境不允许"，**不替代**真机围栏验收：`--fence-live` 仍然只在一次性环境里跑。
 
-> **提权已实测可用**：同一次执行里完整性从 `Low` 变 `Medium`、`python` 可达（`…\Python\bin\python.exe`，3.14.7）、
-> 围栏回收退出码 0（"清理完成"，无残留）——之前那两条"没有 python / 围栏回收 null"确实是沙箱造成的。
-> 但**提权不等于本地全绿**，本机还挡着两关（见 `tests/cross-platform/gaps.yaml`）：
-> 工作副本所在的卷上**读写 DACL 都返回错误码 5**（容器围栏装不上，`grants_are_written_…` 这类 ACL 探针
-> 在能跑的环境里会**真失败**——不是 env-skip；`fsutil fsinfo volumeinfo <盘符>` 自己也是 Error 5）；
-> 以及工具进程执行 `python …` 报 not recognized——**直接用产品那份环境白名单复现却是成功的**
-> （`python.exe` 是真二进制），所以原因还不明，两条缺口见 `tests/cross-platform/gaps.yaml`。
+> **受限令牌会话里的一切围栏 / L4 结论都不可信**——实测（同一台机器、同一份代码）：
+> 在 `Mandatory Label\Low Mandatory Level` 的会话里，doctor 报容器围栏装不上（读写 DACL 都 Error 5）、
+> `python` 在工具进程里不可达（`where` 找不到、绝对路径 `Access is denied`）、围栏回收因 Node 管道 stdio
+> 被拒（EPERM，`status` 为 null）被判成"本机留下了没人管的痕迹"；
+> 换成**普通或提权（`High`）会话**后：`node run-tests.js` 直接 `TEST-REPORT-OK`，L4 `E2E-OK`，
+> doctor 报 `fs=true net=true tree=true`（AppContainer + Job Object 内核强制），python / node / C++ 真工具链全跑通。
+> **所以"卷不支持 ACL""python 装得不对"这类结论都是误判**——判据只有一个：
+> `whoami /groups` 里出现 `Mandatory Label\Low Mandatory Level`，就别信这次的门禁结论。
+> 提权与普通 shell 给出同一种结论；`--fence-live`（改本机状态）仍然只在一次性环境里做。
 
 ### CI（GitHub Actions）：跨平台与真机的唯一事实来源
 

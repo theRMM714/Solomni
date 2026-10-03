@@ -19,47 +19,22 @@
     受限环境下如实标注"环境不允许回收"（env-skip + 原因），不判成留下痕迹；
     普通环境与 CI 上回收失败仍然是硬失败。
   blocked_by: 缺少实现
-- id: harness.acl-ops-denied-on-volume
+- id: harness.restricted-token-causes-false-failures
   scope: global
   level: T4
   why: |
-    在普通 / 提权 shell（Medium 完整性）里，项目工作副本所在卷上的 DACL **读写都返回错误码 5**：
-    doctor 报「改不动目录 ACL（读 DACL 失败…错误码 5）」，而
-    grants_are_written_when_the_environment_allows_it 从「环境不允许、如实跳过」变成**真失败**
-    （授权应当成功：Some(写 DACL 失败（…\target\tmp）：错误码 5)）。
-    原因未定：卷不支持 ACL（exFAT / 网络盘之类）或权限不足——需要 fsutil fsinfo volumeinfo <盘符> 判定。
-    无论哪种，结论都是：**这份副本上容器围栏与 ACL 类验收不成立**，真机围栏结论只能在 CI / 一次性 runner 上取。
+    在受限令牌（低完整性）会话里跑门禁会得到**一连串假失败**，而且都指向错误的方向：doctor 报
+    「容器围栏装不上（读写 DACL 都 Error 5）」、L4 的真工具场景报 python 不可达（`where` 找不到、
+    绝对路径 `Access is denied`）、收尾的围栏回收因 Node 管道 stdio 被拒（EPERM，`status` 为 null）
+    被判成「本机留下了没人管的痕迹」。
+    实测（同机同代码）：换成普通 / 提权（`High`）会话后 `TEST-REPORT-OK`、L4 `E2E-OK`、
+    doctor `fs=true net=true tree=true`、真工具链全过——上面那些结论**全是误判**，与本产品无关。
+    现状由文档明规（门禁要在普通或提权会话里跑，判据是 `whoami /groups` 出现 `Low Mandatory Level`）；
+    这一条只记「要不要让编排自己分辨」。
   how: |
-    先判定卷是否支持 ACL；不支持就把它写成「本机不能验收 ACL 类探针」的**环境不满足**（像其它 env-skip 一样
-    如实标注），不让它以断言失败的形式出现（否则卷不支持会被读成产品缺陷）；支持则查权限来源并修。
+    让编排在受限令牌下如实标注环境不满足、而不是判失败：例如围栏回收改用 `stdio: inherit`，
+    或按 `spawnSync` 的 `error` / `status === null` 分辨「没能执行」，并在报告里带上令牌判据。
   accept: |
-    卷不支持 ACL 时，ACL 类探针与 doctor 一致地报「环境不满足」且不判失败；支持 ACL 的环境上授权 / 撤权探针真跑并通过。
-  blocked_by: 缺少判定（卷能力）与实现（环境不满足的标注口径）
-
-- id: harness.tool-python-unresolved
-  scope: global
-  level: T3
-  why: |
-    L4 的真工具场景里，工具进程执行 `python …` 报 not recognized（harvest.scan → corpus.jsonl 缺席 → indexer 全挂）。
-    已在 Medium 完整性下用**与产品同一份环境白名单**（env_clear + PATH/PATHEXT/SystemRoot/COMSPEC/SYSTEMDRIVE，
-    并把 LOCALAPPDATA/USERPROFILE/HOME/TEMP 改指沙箱）直接复现：`cmd /c python -c …` 与 `where python` **都成功**，
-    且 `python.exe` 是 591360 字节的 **HardLink（真二进制，不是依赖 LOCALAPPDATA 的 shim）**——
-    所以"白名单 / shim 依赖"这两个假设**已被证伪**，真正原因**尚未定位**。
-    **最小复现（可直接跑）**：`solomni.exe --fence-run <扁平 FenceJob json> -- "where.exe python"`。
-    在**同一次 Medium 完整性**的执行里：shell 里 `python --version` → 3.14.7、`where python` 找到真身；
-    而经这条链的工具进程里 `where.exe python` → 找不到、python 的**绝对路径** → `Access is denied.`。
-    环境已排除：工具进程的 `set` 显示 PATH 里就有 `…\Python\bin`，且它跑的只是 `KILL_ON_JOB_CLOSE |
-    ACTIVE_PROCESS` 的 Job（没有安全限制），守门进程 `guard::fence_run` 也只做 argv 分发。
-    **实测到了**：同一次执行里 shell 是 `Medium`，而经这条链的工具进程 `whoami /groups` 是
-    **`Mandatory Label\Low Mandatory Level`**——低完整性读不到 `%LOCALAPPDATA%\Python`（那是 MSIX / 包族目录：
-    ACE 给 `MYCP\96184` 与一个包族 SID 全权、给 `ALL APPLICATION PACKAGES` 只有 `(S,X)`，没有 Low 的读）。
-    产品 confine 代码里**没有任何完整性 / 令牌操作**（grep 不到 Integrity / SetTokenInformation /
-    CreateRestrictedToken），所以"低完整性从哪来"仍未定：要么是外层沙箱（提权只作用于直接子进程、
-    孙进程仍低），要么来自链路里别的东西。**这条不解决，用户目录里的解释器在工具进程里必然不可达。**
-  how: |
-    抓一次**真实工具进程**的环境与令牌（例如让工具打印 `set` 与 `whoami /groups`，或用 Process Monitor 类工具看
-    它拿到什么 PATH），再对照本脚本的白名单复现；定位后修启动路或白名单，并补一条真进程用例。
-  accept: |
-    在这台机器（新版 Python 安装管理器 + 普通 shell）上，模块的 python 工具在白名单环境里跑通；
-    白名单仍不泄漏无关凭据。
-  blocked_by: 缺少定位（真实工具进程的环境 / 令牌）
+    受限令牌下报告明确写出「本机令牌受限，本次结论不可信」并记入 env-skip；
+    普通 / 提权会话里的失败仍然是硬失败。
+  blocked_by: 缺少实现
