@@ -151,133 +151,9 @@ impl Conductor {
                     &a.name, &sb, &modules,
                 );
                 let (chat, note) = self.llm.member_channel(channel.as_ref(), &a.name);
-                // 先把转录行按顺序摊平：分组判断要看「下一行是不是 tool 行」。
-                let mut rows: Vec<&serde_json::Value> = Vec::new();
-                for ev in events {
-                    if ev.get("type").and_then(|t| t.as_str()) != Some("transcript") {
-                        continue;
-                    }
-                    if let Some(lines) = ev.get("lines").and_then(|l| l.as_array()) {
-                        rows.extend(lines.iter());
-                    }
-                }
-                // **压缩过**的会话：按 `compacted` 事件重建发送视图（见 session-model.md 六）——
-                // `up_to` 之前的行不再进对话，由一份摘要代替（转录本身完整保留，用户照样能查）。
-                // 回档到压缩点之前时这条事件已随转录被截掉，所以「没有它」就是「回到压缩前」。
-                let compacted = crate::capabilities::session::api::last_compaction(events);
-                let compacted_upto = compacted.as_ref().map(|(up_to, _)| *up_to).unwrap_or(0);
-                // 对话里**只有**真正发生过的事；身份与环境由 params 现渲染。
-                let mut history: Vec<Msg> = compacted
-                    .as_ref()
-                    .map(|(_, summary)| crate::capabilities::session::api::summary_message(summary))
-                    .into_iter()
-                    .collect();
-                let mut marks: Vec<usize> = Vec::new();
-                let mut line_reply: Vec<u64> = Vec::new();
                 let texts = self.prompt.tools();
-                let reply_of =
-                    |v: &serde_json::Value| v.get("reply").and_then(|x| x.as_u64()).unwrap_or(0);
-                let mut i = 0usize;
-                while i < rows.len() {
-                    let l = rows[i];
-                    // 被总结掉的行：不进对话，但仍占一行（marks / line_reply 与转录行一一对应）。
-                    if compacted_upto > 0
-                        && l.get("id").and_then(|x| x.as_u64()).unwrap_or(0) < compacted_upto
-                    {
-                        if l.get("tool").is_some() {
-                            // 同一次回复的 tool 行连续同号：整组一起跳，别从中间切开。
-                            let reply = reply_of(l.get("tool").expect("已判存在"));
-                            while i < rows.len()
-                                && reply_of(rows[i].get("tool").unwrap_or(&serde_json::Value::Null))
-                                    == reply
-                            {
-                                line_reply.push(reply);
-                                marks.push(history.len().max(1));
-                                i += 1;
-                            }
-                        } else {
-                            line_reply.push(reply_of(l));
-                            marks.push(history.len().max(1));
-                            i += 1;
-                        }
-                        continue;
-                    }
-                    let line = l.get("line").and_then(|x| x.as_str()).unwrap_or("");
-                    // **读结构化字段**（种类 / 系统标记 / 正文），不从正文里抠 [标签]。
-                    let kind = l.get("kind").and_then(|x| x.as_str()).unwrap_or("");
-                    // 系统注入的行按它该有的角色还原：提醒/边界是 system，
-                    // **派发行**（`task`）是 user——否则重建出来的请求又变成一条 user 都没有，供应商照样拒收。
-                    if kind == "system"
-                        || l.get("system").and_then(|x| x.as_bool()).unwrap_or(false)
-                    {
-                        let is_task = l.get("task").and_then(|x| x.as_bool()).unwrap_or(false);
-                        history.push(if is_task {
-                            Msg::user(line.to_string())
-                        } else {
-                            Msg::system(line.to_string())
-                        });
-                        line_reply.push(l.get("id").and_then(|x| x.as_u64()).unwrap_or(0));
-                        marks.push(history.len());
-                        i += 1;
-                    } else if kind == "user" {
-                        // 用户说的行：正文就是用户那句话（[用户] / [用户:需求] 这类标签在字段里）。
-                        history.push(Msg::user(line.to_string()));
-                        // 用户行不属于任何回复：给它自己的行号，回档时才不会与相邻行误并成一组。
-                        line_reply.push(l.get("id").and_then(|x| x.as_u64()).unwrap_or(0));
-                        marks.push(history.len());
-                        i += 1;
-                    } else if l.get("tool").is_some() {
-                        // 【回复分组 · 改动前务必读完】**同一次回复的 tool 行连续同号**（reply 由引擎给、
-                        // 落行时写入）；整组一起翻译成消息，靠的正是这个号——不靠"相邻行猜分组"。
-                        let reply = reply_of(l.get("tool").expect("已判存在"));
-                        let mut group: Vec<&serde_json::Value> = Vec::new();
-                        while i < rows.len()
-                            && reply_of(rows[i].get("tool").unwrap_or(&serde_json::Value::Null))
-                                == reply
-                        {
-                            group.push(rows[i]);
-                            i += 1;
-                        }
-                        // 这一回复的助手消息正文（空正文的回复不带 raw；组内取一份即可）。
-                        let raw = group
-                            .iter()
-                            .find_map(|t| {
-                                t.get("tool")
-                                    .and_then(|x| x.get("raw"))
-                                    .and_then(|x| x.as_str())
-                                    .filter(|s| !s.is_empty())
-                            })
-                            .unwrap_or_default();
-                        let views: Vec<crate::capabilities::session::api::ToolCallView> = group
-                            .iter()
-                            .filter_map(|t| t.get("tool").cloned())
-                            .filter_map(|t| serde_json::from_value(t).ok())
-                            .collect();
-                        for m in
-                            crate::capabilities::session::api::reply_msgs(mode, raw, &views, &texts)
-                        {
-                            history.push(m);
-                        }
-                        for _ in 0..group.len() {
-                            line_reply.push(reply);
-                            marks.push(history.len());
-                        }
-                    } else {
-                        // 文本行：它紧跟 tool 行时属于同一次回复（历史由那组 tool 行统一推进，这里不推）；
-                        // 否则这一行自己就是一条回复，推 assistant(该行文本)。
-                        let next_is_tool = rows
-                            .get(i + 1)
-                            .map(|n| n.get("tool").is_some())
-                            .unwrap_or(false);
-                        if !next_is_tool {
-                            // 正文本身就是内容（说话人/动词在字段里），直接进助手消息。
-                            history.push(Msg::assistant(line.to_string()));
-                        }
-                        line_reply.push(reply_of(l));
-                        marks.push(history.len());
-                        i += 1;
-                    }
-                }
+                let (history, marks, line_reply, compacted_upto) =
+                    replay_dialogue(events, mode, &texts);
                 let unavailable = self.unavailable_modules(&meta.exec, &modules);
                 // 身份按**这个会话是不是协作子会话**定：有父会话 = 任务链节点（executor，拿得到回报工具）；
                 // 没有 = 用户建的单 agent 工作（solo，不拿回报工具——没有消费者，见 docs/tools/tools-and-roles.md）。
@@ -306,7 +182,158 @@ impl Conductor {
                     ),
                 ))
             }
-            other => Err(format!("未知会话形态：{}（只认 single / collab）", other)),
+            // 代理会话：没有 agent（核心自己说话）；外壳由 build_proxy 装配，回放与单 agent 共用同一件。
+            "proxy" => {
+                let mut s = self.build_proxy(meta)?;
+                let texts = self.prompt.tools();
+                let (history, marks, line_reply, compacted_upto) =
+                    replay_dialogue(events, s.tool_mode(), &texts);
+                s.dialogue = history;
+                s.marks = marks;
+                s.line_reply = line_reply;
+                s.compacted_upto = compacted_upto;
+                s.next_line = s.marks.len() as u64;
+                if let Some(t) = s.tools.as_mut() {
+                    t.reply_seq = crate::capabilities::session::api::max_reply(events);
+                }
+                Ok(Session::Single(s))
+            }
+            other => Err(format!(
+                "未知会话形态：{}（只认 single / collab / proxy）",
+                other
+            )),
         }
     }
+}
+/// 把转录事件还原成（对话, 每行历史长度, 每行回复号, 压缩点）——单 agent 与代理会话**共用同一件**。
+/// 两处不各拼一遍：重建必须与实时逐条一致（见 `reply_msgs` 与 session-model.md）。
+fn replay_dialogue(
+    events: &[serde_json::Value],
+    mode: crate::capabilities::llm::api::ToolMode,
+    texts: &crate::capabilities::prompt::api::ToolTexts,
+) -> (
+    Vec<crate::capabilities::llm::api::Msg>,
+    Vec<usize>,
+    Vec<u64>,
+    u64,
+) {
+    // 先把转录行按顺序摊平：分组判断要看「下一行是不是 tool 行」。
+    let mut rows: Vec<&serde_json::Value> = Vec::new();
+    for ev in events {
+        if ev.get("type").and_then(|t| t.as_str()) != Some("transcript") {
+            continue;
+        }
+        if let Some(lines) = ev.get("lines").and_then(|l| l.as_array()) {
+            rows.extend(lines.iter());
+        }
+    }
+    // **压缩过**的会话：按 `compacted` 事件重建发送视图（见 session-model.md 六）——
+    // `up_to` 之前的行不再进对话，由一份摘要代替（转录本身完整保留，用户照样能查）。
+    // 回档到压缩点之前时这条事件已随转录被截掉，所以「没有它」就是「回到压缩前」。
+    let compacted = crate::capabilities::session::api::last_compaction(events);
+    let compacted_upto = compacted.as_ref().map(|(up_to, _)| *up_to).unwrap_or(0);
+    // 对话里**只有**真正发生过的事；身份与环境由 params 现渲染。
+    let mut history: Vec<Msg> = compacted
+        .as_ref()
+        .map(|(_, summary)| crate::capabilities::session::api::summary_message(summary))
+        .into_iter()
+        .collect();
+    let mut marks: Vec<usize> = Vec::new();
+    let mut line_reply: Vec<u64> = Vec::new();
+    let reply_of = |v: &serde_json::Value| v.get("reply").and_then(|x| x.as_u64()).unwrap_or(0);
+    let mut i = 0usize;
+    while i < rows.len() {
+        let l = rows[i];
+        // 被总结掉的行：不进对话，但仍占一行（marks / line_reply 与转录行一一对应）。
+        if compacted_upto > 0 && l.get("id").and_then(|x| x.as_u64()).unwrap_or(0) < compacted_upto
+        {
+            if l.get("tool").is_some() {
+                // 同一次回复的 tool 行连续同号：整组一起跳，别从中间切开。
+                let reply = reply_of(l.get("tool").expect("已判存在"));
+                while i < rows.len()
+                    && reply_of(rows[i].get("tool").unwrap_or(&serde_json::Value::Null)) == reply
+                {
+                    line_reply.push(reply);
+                    marks.push(history.len().max(1));
+                    i += 1;
+                }
+            } else {
+                line_reply.push(reply_of(l));
+                marks.push(history.len().max(1));
+                i += 1;
+            }
+            continue;
+        }
+        let line = l.get("line").and_then(|x| x.as_str()).unwrap_or("");
+        // **读结构化字段**（种类 / 系统标记 / 正文），不从正文里抠 [标签]。
+        let kind = l.get("kind").and_then(|x| x.as_str()).unwrap_or("");
+        // 系统注入的行按它该有的角色还原：提醒/边界是 system，
+        // **派发行**（`task`）是 user——否则重建出来的请求又变成一条 user 都没有，供应商照样拒收。
+        if kind == "system" || l.get("system").and_then(|x| x.as_bool()).unwrap_or(false) {
+            let is_task = l.get("task").and_then(|x| x.as_bool()).unwrap_or(false);
+            history.push(if is_task {
+                Msg::user(line.to_string())
+            } else {
+                Msg::system(line.to_string())
+            });
+            line_reply.push(l.get("id").and_then(|x| x.as_u64()).unwrap_or(0));
+            marks.push(history.len());
+            i += 1;
+        } else if kind == "user" {
+            // 用户说的行：正文就是用户那句话（[用户] / [用户:需求] 这类标签在字段里）。
+            history.push(Msg::user(line.to_string()));
+            // 用户行不属于任何回复：给它自己的行号，回档时才不会与相邻行误并成一组。
+            line_reply.push(l.get("id").and_then(|x| x.as_u64()).unwrap_or(0));
+            marks.push(history.len());
+            i += 1;
+        } else if l.get("tool").is_some() {
+            // 【回复分组 · 改动前务必读完】**同一次回复的 tool 行连续同号**（reply 由引擎给、
+            // 落行时写入）；整组一起翻译成消息，靠的正是这个号——不靠"相邻行猜分组"。
+            let reply = reply_of(l.get("tool").expect("已判存在"));
+            let mut group: Vec<&serde_json::Value> = Vec::new();
+            while i < rows.len()
+                && reply_of(rows[i].get("tool").unwrap_or(&serde_json::Value::Null)) == reply
+            {
+                group.push(rows[i]);
+                i += 1;
+            }
+            // 这一回复的助手消息正文（空正文的回复不带 raw；组内取一份即可）。
+            let raw = group
+                .iter()
+                .find_map(|t| {
+                    t.get("tool")
+                        .and_then(|x| x.get("raw"))
+                        .and_then(|x| x.as_str())
+                        .filter(|s| !s.is_empty())
+                })
+                .unwrap_or_default();
+            let views: Vec<crate::capabilities::session::api::ToolCallView> = group
+                .iter()
+                .filter_map(|t| t.get("tool").cloned())
+                .filter_map(|t| serde_json::from_value(t).ok())
+                .collect();
+            for m in crate::capabilities::session::api::reply_msgs(mode, raw, &views, texts) {
+                history.push(m);
+            }
+            for _ in 0..group.len() {
+                line_reply.push(reply);
+                marks.push(history.len());
+            }
+        } else {
+            // 文本行：它紧跟 tool 行时属于同一次回复（历史由那组 tool 行统一推进，这里不推）；
+            // 否则这一行自己就是一条回复，推 assistant(该行文本)。
+            let next_is_tool = rows
+                .get(i + 1)
+                .map(|n| n.get("tool").is_some())
+                .unwrap_or(false);
+            if !next_is_tool {
+                // 正文本身就是内容（说话人/动词在字段里），直接进助手消息。
+                history.push(Msg::assistant(line.to_string()));
+            }
+            line_reply.push(reply_of(l));
+            marks.push(history.len());
+            i += 1;
+        }
+    }
+    (history, marks, line_reply, compacted_upto)
 }

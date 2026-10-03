@@ -656,3 +656,28 @@ pub(crate) fn the_proxy_session_runs_a_turn_through_the_generic_loop() {
         text
     );
 }
+/// 代理会话能从落盘重建：`rebuild_session` 走 `mode="proxy"` 那一支，装回 core_proxy 面。
+#[test]
+pub(crate) fn the_proxy_session_rebuilds_from_disk() {
+    let (handle, ops) = super::super::ops_with(vec![], vec!["好"]);
+    let sid = handle
+        .call(|core| core.create_proxy("w-rebuild", 3))
+        .expect("建代理会话");
+    let (meta, events) = ops.history.open(&sid).expect("落盘");
+    assert_eq!(meta.mode, "proxy");
+    let session = handle
+        .call(move |core| core.rebuild_session(&meta, &events))
+        .expect("重建代理会话");
+    match session {
+        crate::capabilities::conductor::service::Session::Single(s) => {
+            let tools = s.tools.as_ref().expect("有工具环境");
+            assert!(
+                tools.allowed.iter().any(|t| t == d::CATALOG),
+                "重建后仍是 core_proxy 面：{:?}",
+                tools.allowed
+            );
+            assert!(!tools.with_modules);
+        }
+        _ => panic!("代理会话该重建为单会话形态"),
+    }
+}
