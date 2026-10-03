@@ -24,7 +24,7 @@
   how: |
     按 TESTING.md 与 docs/testing/levels.md 增加完整旅程测试，覆盖：
     单 agent、多 agent、子会话追问、核心代答、返工、并发观察、停止、恢复、父子级联、重启与回放。
-    撤销授权不在本轮（见 conductor.proxy-permission-state）。
+    决定粒度（完全代理 / 询问 / 将来可能的其它粒度）不在本轮（属独立的权限管理能力：见 tests/gaps.yaml 的 permission.management）。
     测试必须区分进行中、部分完成、等待用户决定、失败与已验收交付，
     并确认总验收未通过时核心不会向用户宣称已完成。
     复用 checklist 的真实证据与定向返工语义，补齐单 agent 与多 agent 的对应关系；

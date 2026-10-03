@@ -79,8 +79,8 @@ impl RunState {
 
 /// 任务级委托：代理模式下，真实用户把决定权**整块**交给核心（全权）。
 /// 本轮不做范围/期限/撤销——它只是一个存在标志与授予时间；
-/// 细粒度权限与撤销属独立的"会话权限状态"能力
-/// （见 src/capabilities/conductor/testgaps.yaml 的 conductor.proxy-permission-state）。
+/// 范围/期限/决定粒度与额外路径权限一起属独立的**权限管理**能力（与某个会话本身无关）
+/// （属独立的**权限管理**能力：见 tests/gaps.yaml 的 permission.management）。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Delegation {
     /// 授予时间（Unix 秒）：授予由真实用户在建工作时完成。

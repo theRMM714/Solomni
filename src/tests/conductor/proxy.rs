@@ -1067,3 +1067,121 @@ pub(crate) fn create_work_with_proxy_mode_makes_a_delegated_session() {
         }
     }
 }
+
+/// 观察的增量信号：`since` 给上次的游标就回「新增几条」；回执本身仍是幂等快照。
+#[test]
+pub(crate) fn observe_reports_new_messages_since_the_last_cursor() {
+    use crate::capabilities::conductor::ports::ProxyHost;
+    use crate::capabilities::conductor::service::proxy::ProxyBridge;
+    use crate::capabilities::workspace::api::ModuleManifest;
+
+    let module = Module {
+        manifest: ModuleManifest {
+            id: "m1".to_string(),
+            brief: "测试模块".to_string(),
+            system: "你负责测试。".to_string(),
+            runtimes: Vec::new(),
+            tools: BTreeMap::new(),
+        },
+        root: PathBuf::from("modules").join("m1"),
+    };
+    let (handle, ops) = super::super::ops_with(vec![module], vec![]);
+    let (work, _) = ops
+        .sessions
+        .create_work(super::super::single_work("w-cursor", &["m1"]))
+        .expect("建工作");
+    let sid = work.sid.clone();
+    let bridge: Arc<dyn ProxyHost + Send + Sync> = Arc::new(ProxyBridge::new(handle.clone()));
+    let append = |id: u64, text: &str| serde_json::json!({"type":"transcript","lines":[{"id":id,"line":text,"speaker":"用户","verb":"说","kind":"user"}]});
+    handle
+        .call({
+            let s = sid.clone();
+            let ev = append(1, "一");
+            move |core| core.history_append(&s, &[ev])
+        })
+        .expect("追一条");
+    let first = bridge
+        .observe(&sid, d::ObserveView::Status, None)
+        .expect("观察");
+    assert!(first.new_messages.is_none(), "没给 since 就没有增量信号");
+    let cursor = first.cursor.clone().expect("有游标");
+    handle
+        .call({
+            let s = sid.clone();
+            let ev = append(2, "二");
+            move |core| core.history_append(&s, &[ev])
+        })
+        .expect("再追一条");
+    let second = bridge
+        .observe(&sid, d::ObserveView::Status, Some(&cursor))
+        .expect("观察");
+    assert_eq!(
+        second.new_messages,
+        Some(1),
+        "自上次以来新增一条：{:?}",
+        second
+    );
+    // 幂等：同一个 since 再来一次仍是同一份快照（"新"不会被吃掉）。
+    let third = bridge
+        .observe(&sid, d::ObserveView::Status, Some(&cursor))
+        .expect("再观察");
+    assert_eq!(third.message_count, second.message_count);
+    assert_eq!(third.new_messages, second.new_messages);
+}
+
+/// 代理建子工作：开场事实**当场**进它的事件台（在场的前端不用等刷新）。
+#[test]
+pub(crate) fn the_proxy_created_child_publishes_its_opening_facts() {
+    use crate::capabilities::conductor::ports::ProxyHost;
+    use crate::capabilities::conductor::service::proxy::ProxyBridge;
+    use crate::capabilities::workspace::api::ModuleManifest;
+
+    let module = |id: &str| Module {
+        manifest: ModuleManifest {
+            id: id.to_string(),
+            brief: "测试模块".to_string(),
+            system: "你负责测试。".to_string(),
+            runtimes: Vec::new(),
+            tools: BTreeMap::new(),
+        },
+        root: PathBuf::from("modules").join(id),
+    };
+    let (handle, _ops) = super::super::ops_with(vec![module("m1"), module("m2")], vec![]);
+    let proxy = handle
+        .call(|core| core.create_proxy("w-pub", 1))
+        .expect("建代理会话");
+    let bridge: Arc<dyn ProxyHost + Send + Sync> = Arc::new(ProxyBridge::new(handle.clone()));
+    let spec = d::NewSession {
+        mode: d::SessionMode::Multi,
+        agents: vec![
+            d::NewAgent {
+                name: "c1".to_string(),
+                transient: true,
+                modules: vec!["m1".to_string()],
+                model: None,
+                objective: "一".to_string(),
+            },
+            d::NewAgent {
+                name: "c2".to_string(),
+                transient: true,
+                modules: vec!["m2".to_string()],
+                model: None,
+                objective: "二".to_string(),
+            },
+        ],
+        workspace: None,
+        request_id: "r1".to_string(),
+        parent: Some(proxy),
+    };
+    let created = bridge.create_session(&spec).expect("建协作子工作");
+    // 协作开工先落一条「本次需求」：它应当**已经在事件台上**，而不是只在盘上。
+    let (lines, _head, _oldest) = handle.events().snapshot(Some(&created.session), 0);
+    let events: Vec<SessionEvent> = lines.into_iter().flat_map(|l| l.events).collect();
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, SessionEvent::Transcript(_))),
+        "开场事实要在事件台上：{:?}",
+        events
+    );
+}

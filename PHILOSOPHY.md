@@ -49,8 +49,8 @@
 要求因此不是"决定权只能归谁"，而是**决定是谁作出的、转录里看得见**。
 
 > **已落地（第三人形态）**：把决定权整块托付给核心（代理模式，**全权**）——用户在建工作时选这个形态就是授予，
-> 事实落在会话 meta 并留一条可回放的授予记录。**撤销**属独立的「会话权限状态」能力，另行开发
-> （见 [tests/gaps.yaml](tests/gaps.yaml) 的 `core.agency-mode` 与 `src/capabilities/conductor/testgaps.yaml` 的 `proxy-permission-state`）。
+> 事实落在会话 meta 并留一条可回放的授予记录。决定粒度（完全代理 / 询问 / 将来可能的其它粒度）与额外路径权限一起属独立的**权限管理**能力，另行开发
+> （撤销属于独立的**权限管理**能力：见 [tests/gaps.yaml](tests/gaps.yaml) 的 `permission.management`。）
 > 其余形态仍是今天的口径：代拟也要用户确认。
 
 ## 核心理念
