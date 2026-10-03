@@ -374,6 +374,7 @@ pub(crate) fn member_with_tools(
         allowed: crate::capabilities::tools::api::names(),
         with_modules: true,
         notes: crate::tests::doubles::test_notes(&test_sandbox("m0", &[]), &[]),
+        handlers: Vec::new(),
     });
     m
 }
@@ -657,6 +658,7 @@ pub(crate) fn native_member(
         allowed: crate::capabilities::tools::api::names(),
         with_modules: true,
         notes: crate::tests::doubles::test_notes(&sb, &[]),
+        handlers: Vec::new(),
     });
     m
 }

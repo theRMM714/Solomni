@@ -213,6 +213,9 @@
   的工具等于请模型去撞墙（细则见 [tools-and-roles.md](../tools/tools-and-roles.md) 二）。
 - 角色表（`systools/roles.yaml`）声明的工具面**由机制执行**：发放（提示词块与原生声明槽）与越权校验
   同出一份表，代码里不另写名单（见 [tools-and-roles.md](../tools/tools-and-roles.md) 三）。
+- **派发不再分“内置 / 模块”两类**：这一回合的工具面里，内置走 `ToolExec::run_builtin`，模块走
+  `dispatch_external`，**核心自有工具**（代理工具等）问注入的 `ToolHandler` 谁认领它——三类同一条路径
+  （`kernel/ports.rs` 的 `ToolHandler`，见 [ARCHITECTURE.md](../../ARCHITECTURE.md) §二）。加一类工具只注册一个 handler，不改循环。
 
 ### 四之一、会话参数与对话分开
 

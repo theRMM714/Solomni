@@ -396,6 +396,7 @@ pub(crate) fn core_operation_runs_readonly_verification_before_the_op() {
         allowed: vec!["read".to_string(), "plan".to_string()],
         with_modules: false,
         notes: crate::capabilities::tools::api::ToolNotes::default(),
+        handlers: Vec::new(),
     };
     // 第一轮：先核实（read）；第二轮：交出 plan。
     let seen = Arc::new(Mutex::new(Vec::new()));

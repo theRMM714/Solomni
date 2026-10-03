@@ -55,6 +55,10 @@ pub struct MemberTools {
     pub with_modules: bool,
     /// 工具说明块的素材（patch 语法 / 模块工具 / 模块工具参数）：装配期算一次，随回合注入。
     pub notes: crate::capabilities::tools::api::ToolNotes,
+    /// **核心自有工具**的执行者（按名字认领）：内置与模块之外的第三类不再是特例——
+    /// 循环只问“这一回合的工具面里有没有它、谁认领它”（见 `kernel::ports::ToolHandler`）。
+    /// 空 = 这一席没有这类工具（讨论席与普通执行席都是空）。
+    pub handlers: Vec<Arc<dyn crate::kernel::ports::ToolHandler>>,
 }
 
 impl MemberTools {

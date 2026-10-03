@@ -84,6 +84,7 @@ impl CollabSession {
             allowed,
             with_modules: false,
             notes: crate::capabilities::tools::api::ToolNotes::default(),
+            handlers: Vec::new(),
         })
     }
 

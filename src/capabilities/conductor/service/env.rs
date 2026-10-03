@@ -87,6 +87,7 @@ impl Conductor {
             // 能不能用自己模块的工具、以及工具说明块的素材：都按角色表与这个 agent 的模块装配期算好。
             with_modules: self.systools.allows_module_tools(role),
             notes: crate::capabilities::tools::api::tool_notes(&*self.prompt, sb, modules),
+            handlers: Vec::new(),
         }
     }
 

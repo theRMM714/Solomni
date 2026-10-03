@@ -520,6 +520,7 @@ impl CollabSession {
                 // 讨论席不干活：拿不到自己模块的工具（角色表的 module_tools）。
                 with_modules: self.systools.allows_module_tools("discussant"),
                 notes: tool_notes,
+                handlers: Vec::new(),
             });
             members.push(member);
         }

@@ -54,6 +54,7 @@ presentation/{cli,web} ──▶ capabilities（含协调业务 conductor）─�
 | `FenceHost` | 围栏授权的释放（删除会话时请求一次撤销）。`capabilities/tools/ports.rs`，**只由 tools 的 `service.rs` 持有**（R12） | `confine::FenceHostAdapter`（本平台无该机制时为空操作） |
 | `Log` | 运行日志（三级） | `FileLog`（测试 `NoopLog`） |
 | `HostProbe` | 宿主能力探测（**只问事实**：路径存在性、PATH 上的可执行文件、本机虚拟化能力；不执行、不安装、不写）。**在 `kernel/ports.rs`**（无领域语义，执行档位与自检共用；实现在 `kernel/detail/host_probe.rs`） | `HostProbeAdapter`（测试 `FixedProbe`） |
+| `ToolHandler` | **一类工具的执行者**（按名字认领）：内置、模块与核心自有工具因此走**同一条派发路径**，加一类工具不改循环。定义在 `kernel/ports.rs`（全项目共享的机制接口，R12 例外） | 由各能力注入：工具能力管内置与模块；conductor 注入代理工具的那个（`capabilities/conductor/service/proxy.rs`） |
 
 新增端口前先问一句：**这是 IO 或可替换点吗**？不是就别加 trait。
 
