@@ -442,6 +442,13 @@ impl Conductor {
         })
     }
 
+    /// 一个会话的形态（single / collab）：落盘 meta 是唯一真相；取不到就回空串。
+    pub(crate) fn session_mode_str(&self, sid: &str) -> String {
+        self.history_open(sid)
+            .map(|(m, _)| m.mode)
+            .unwrap_or_default()
+    }
+
     /// 代理工具：建一个**子工作**（single / collab）：编排归属是父会话，
     /// 工作区与沙箱是它自己的（`own_work`）。
     pub fn proxy_create(&mut self, spec: &d::NewSession) -> Result<d::Created, String> {
@@ -497,11 +504,6 @@ impl Conductor {
         })
     }
 
-    /// 代理工具：转达（阶段 2 的下一步）。
-    pub fn proxy_send(&mut self, _target: &str, _msg: &d::Relayed) -> Result<(), String> {
-        Err("代理转达尚未实现（下一步）".to_string())
-    }
-
     /// 代理工具：控制（阶段 2 的下一步）。
     pub fn proxy_control(
         &mut self,
@@ -550,8 +552,24 @@ impl ProxyHost for ProxyBridge {
     }
 
     fn send(&self, target: &str, msg: &d::Relayed) -> Result<(), String> {
-        let (target, msg) = (target.to_string(), msg.clone());
-        self.call(move |core| core.proxy_send(&target, &msg))
+        let handle = self.handle.lock().unwrap_or_else(|e| e.into_inner());
+        let target = target.to_string();
+        let mode = handle.call({
+            let t = target.clone();
+            move |core| Ok(core.session_mode_str(&t))
+        })?;
+        if mode.is_empty() {
+            return Err(format!("无此会话：{}", target));
+        }
+        if mode == "collab" {
+            // 协作子会话的转达要落到它自己的阶段步（decide / begin）并等它推进，
+            // 需要“子会话的门 → 唤醒代理”那一段，先如实说明未落地。
+            return Err("协作子会话的转达尚未实现（下一步）".to_string());
+        }
+        // 单 agent：以“核心派的活”注入（派发行是核心自己的行，**不冒充用户原话**），
+        // 并**脱离调用方点火**——代理不等它跑完，靠 observe / messages 回头看。
+        handle.spawn_detached_node(&target, &msg.text);
+        Ok(())
     }
 
     fn observe(

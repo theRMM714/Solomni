@@ -9,15 +9,16 @@
     六个代理工具的宿主已接上真实会话：catalog（登记处 / 模块清单）、observe（不含正文的元信息）、
     messages（0 = 最新的倒查）、create_session（建**子工作**：parent 只表编排归属，own_work 让它有
     自己的 work/ 与沙箱）、control_session.stop（按 meta.parent **级联整棵子树**立即中断）。
-    仍缺：send_session_message 真正把消息投进子会话（按子会话形态映射到 say / 派发行 / 协作步），
-    pause / resume 的持久运行态，close 的在位语义，以及把建子工作的开场事实推给事件台。
+    仍缺：**协作子会话**的转达（要落到它自己的阶段步并等它推进，依赖“子会话的门 → 唤醒代理”那段）、
+    pause / resume 的持久运行态、close 的在位语义，以及把建子工作的开场事实推给事件台。
+    单 agent 子会话的转达已落地：以“核心派的活”注入（派发行是核心自己的行，不冒充用户原话）并脱离
+    调用方点火，代理靠 observe / messages 回头看——`source`/`source_ref` 的结构化落档仍缺。
   how: |
-    proxy_send：先按 target 判形态——单 agent 的 task/review/rework 走派发行（note_task + 生成），
-    user_reply/follow_up 走用户发言；协作子会话走它自己的阶段步与 decide；核心转达一律标注 core_proxy
-    并进目标会话的可回放转录。proxy_control 补 pause/resume（持久运行态：冻结派发、可恢复）与 close
-    （保留历史地停掉）。create 的开场事实经事件台外送。
+    proxy_send 补协作子会话：判 pending 后走 begin / decide 等阶段步；核心转达在目标会话留下可回放的
+    core_proxy 来源（结构化字段，不靠正文标签）。proxy_control 补 pause/resume（持久运行态：冻结派发、
+    可恢复）与 close（保留历史地停掉）。create 的开场事实经事件台外送。
   accept: |
-    六个工具在真实会话上跑通：转达进目标转录且来源可查、pause/resume 可恢复、close 只在允许时执行、
+    协作子会话也能收到核心转达、pause/resume 可恢复、close 只在允许时执行、
     建子工作的开场事实在事件台可见；node run-tests.js 全绿。
   blocked_by: 缺少实现
 

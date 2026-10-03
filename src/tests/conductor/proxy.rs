@@ -521,12 +521,13 @@ pub(crate) fn the_real_bridge_reads_catalog_and_session_messages() {
         r#"{"mode":"single","agents":[{"name":"x","modules":["m1"],"objective":"y"}],"request_id":"z"}"#,
     );
     assert!(!out.ok && out.output.contains("无此会话"), "{}", out.output);
+    // 转达：目标不存在时如实拒绝。
     let out = tools.call(
         &c,
         d::SEND,
         r#"{"targets":["s1"],"message":"好","kind":"task","request_id":"z2"}"#,
     );
-    assert!(!out.ok && out.output.contains("尚未实现"), "{}", out.output);
+    assert!(!out.ok && out.output.contains("无此会话"), "{}", out.output);
     // 级联停止已实现：即使没在跑也如实回执（不假装停了一个不存在的会话）。
     let out = tools.call(
         &c,
@@ -581,4 +582,12 @@ pub(crate) fn the_real_bridge_creates_a_child_work() {
 
     let out2 = tools.call(&c, d::CREATE, args);
     assert_eq!(out2, out, "重放同一个 request_id 不再建第二个");
+
+    // 转达：单 agent 子会话以“核心派的活”注入并点火（不等它跑完）。
+    let args = format!(
+        r#"{{"targets":["{}"],"message":"做这个","kind":"task","request_id":"s1"}}"#,
+        child
+    );
+    let out = tools.call(&c, d::SEND, &args);
+    assert!(out.ok, "{}", out.output);
 }
