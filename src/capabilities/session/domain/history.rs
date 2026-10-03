@@ -9,7 +9,8 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SessionMeta {
     pub name: String,
-    /// direct / compose / collab
+    /// 工作形态：`single` / `collab` / `proxy`（界面标签与 `rebuild_session` 的装配依据同源）。
+    /// 它是落盘事实（**不在内存里留影子状态**）：拿不到它就无法判断怎么重建这条会话。
     pub mode: String,
     /// 代拟（协作）时为 true：创建时没有名单，确认名单后才写回 agents。
     #[serde(default)]
@@ -145,4 +146,7 @@ pub struct HistoryView {
     /// 谁编排的（子会话 = 父会话名）：侧栏据此把子会话缩进挂在父会话下。
     #[serde(default)]
     pub parent: Option<String>,
+    /// 运行态（`active` / `paused` / `closed`）：侧栏据此标出已暂停 / 已关闭的会话
+    /// （"这一刻在不在跑"是另一回事，见 `SessionView.running`）。
+    pub run: RunState,
 }

@@ -1118,6 +1118,7 @@ pub(crate) fn history_list_is_ordered_as_a_tree() {
             done: false,
             exec: Default::default(),
             parent: parent.map(|s| s.to_string()),
+            run: RunState::Active,
         }
     };
     // 顶层 A(10) 比 B(5) 新；A 下两个子会话（甲=9 比 乙=8 新）。

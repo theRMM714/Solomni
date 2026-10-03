@@ -249,6 +249,7 @@ impl SessionOps for FakeOps {
                 tier_missing: Vec::new(),
                 running: false,
                 can_update_task: h.mode == "collab",
+                run: h.run.as_str().to_string(),
                 pending: None,
             })
             .collect())
@@ -398,6 +399,7 @@ impl HistoryOps for FakeOps {
             done: false,
             exec: Default::default(),
             parent: None,
+            run: crate::capabilities::session::api::RunState::Active,
         }])
     }
     fn open(&self, name: &str) -> Result<(SessionMeta, Vec<serde_json::Value>), String> {

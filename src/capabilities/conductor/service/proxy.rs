@@ -490,16 +490,18 @@ impl Conductor {
                 model: a.model.clone(),
             })
             .collect();
-        // 多 agent 是协作工作：把各 agent 的 objective 合成“本次需求”（协作必须有需求）。
-        let task = match mode {
-            WorkMode::Collab => Some(
+        // 多 agent 是协作工作：把各 agent 的 objective 合成"本次需求"（协作必须有需求）。
+        // 代理形态不会出现在这里：代理工具只能建 single / multi（代理不能往里套代理）。
+        let task = if mode == WorkMode::Collab {
+            Some(
                 spec.agents
                     .iter()
                     .map(|a| format!("{}：{}", a.name, a.objective))
                     .collect::<Vec<_>>()
                     .join("\n"),
-            ),
-            WorkMode::Single => None,
+            )
+        } else {
+            None
         };
         let work = WorkSpec {
             name,
@@ -580,10 +582,20 @@ impl Conductor {
 
     /// 建一个**代理会话**（`mode="proxy"` + 全权委托）：核心在这里跟用户对话，用代理工具代他决定。
     /// 没有 agent、没有模块工具；这一回合的工具面是 `core_proxy`（六项代理工具 + 只读核实）。
-    /// 产品入口（呈现层的第三种形态）在阶段 4，所以二进制里暂时只有测试与重建调用它
-    /// （见 docs/testing/quality-isolation.md §三）。
-    #[allow(dead_code)]
+    /// 测试便捷入口：只要引用（产品入口经 `create_work(WorkMode::Proxy)`）。
+    #[cfg(test)]
     pub fn create_proxy(&mut self, name: &str, granted_at: i64) -> Result<String, String> {
+        self.create_proxy_with_facts(name, granted_at)
+            .map(|(sid, _)| sid)
+    }
+
+    /// 建代理会话的真身：返回（会话引用, **开场事实**）——事实交给 api 层发布到事件台
+    /// （核心不持有事件台；与 `create_work` 同一条口径）。
+    pub(crate) fn create_proxy_with_facts(
+        &mut self,
+        name: &str,
+        granted_at: i64,
+    ) -> Result<(String, Vec<SessionEvent>), String> {
         validate_work_name(name)?;
         if self.sessions.contains_key(name) || self.history.load(name).is_ok() {
             return Err(format!("工作名已存在：{}", name));
@@ -610,7 +622,7 @@ impl Conductor {
         self.sessions
             .insert(name.to_string(), Session::Single(session));
         self.record_events(name, &mut events);
-        Ok(name.to_string())
+        Ok((name.to_string(), events))
     }
 
     /// 装配一个代理会话对象（创建与重建**共用同一处**，两处不各拼一遍）。

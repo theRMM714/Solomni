@@ -20,14 +20,16 @@
   scope: global
   level: T3
   why: |
-    create_session 建的**子工作**的开场事实只落了盘、没有经事件台外送：生产路径的 create_work 会把开场
-    事实 push 到事件台，proxy_create 直接走 create_work_inner，跳过了那一步。在场的前端因此不会立刻看到
+    `create_session`（代理工具）建的**子工作**的开场事实只落了盘、没有经事件台外送：用户入口的
+    `create_work` 会把开场事实随回包交出并由 api 层发布，而代理工具那条路（`proxy_create`）没有回包通道，
+    `ProxyHost::create_session` 回的是 `Created`（只有会话引用与名单）。在场的前端因此不会立刻看到
     新建的子会话行（刷新 / 重连后从历史读到）。
   how: |
-    让 proxy_create 的调用方把开场事实推到事件台（与 create_work 同一条路），并补一条断言事件台可见的用例。
+    给代理建会话的端口回执带上开场事实（或让宿主把事实推到事件台），与 create_work 同一条口径；
+    补一条断言事件台可见的用例。
   accept: |
     代理建出子工作后，事件台立刻有它的开场事实，且与历史重放一致；node run-tests.js 全绿。
-  blocked_by: 缺少实现
+  blocked_by: 缺少实现（涉及 ProxyHost 回执形状，与集成者确认）
 
 - id: conductor.proxy-observe-cursor
   scope: global
@@ -47,15 +49,17 @@
   scope: global
   level: T3
   why: |
-    核心代理的生成循环**已落地**：代理会话是普通成员会话（mode=proxy），轮循环里没有代理专用分支，
-    代理工具经 `ProxyHandler`（kernel::ports::ToolHandler）→ `ProxyBridge` 队列桥回核心线程执行；
-    子会话停下 / 到门会叫醒代理，且不转发它的转录。剩下的是**产品入口**：从呈现层创建代理会话
-    （第三种形态的路由 / 向导）还没有，`create_proxy` 目前只有测试与回档重建调用它。
+    核心代理的生成循环与**用户入口**都已落地：`create_work(WorkMode::Proxy)` 建出代理会话
+    （没有名单、带全权委托、身份是 core_proxy 角色提示词），`POST /api/sessions` 的 mode 已接受 proxy，
+    读模型给出形态与运行态。剩下的是**呈现**：前端向导的第三种形态与代理视图
+    （核心对话 + 子会话树，子工作按多 agent 向内嵌套），以及 CLI 的对应入口。
   how: |
-    在呈现层加第三种形态的入口（路由 + 向导），经 `Ops` 建代理会话；接上后删除 create_proxy 的窄 allow。
+    在 web 的建工作向导加第三种形态（选它就等于授予全权），并为代理会话做专属视图（核心转录 + 子工作树）+
+    侧栏标出暂停 / 关闭；CLI 加同一条入口。
   accept: |
-    用户能从界面建出代理会话并看到它的对话与子会话树；窄 allow 删除后 T0 零告警；node run-tests.js 全绿。
-  blocked_by: 缺少产品入口（呈现层）
+    用户能从界面建出代理会话、看着它代自己挑人建子工作、进子会话查看并干预；
+    已暂停 / 已关闭的会话在界面上一眼可辨；node run-tests.js 全绿。
+  blocked_by: 缺少呈现层实现
 
 - id: conductor.proxy-authorization-persistence
   scope: global

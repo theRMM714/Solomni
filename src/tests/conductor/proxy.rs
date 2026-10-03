@@ -987,3 +987,65 @@ pub(crate) fn the_proxy_identity_is_the_role_prompt() {
         plain
     );
 }
+
+/// 用户入口的第三人形态：`create_work(WorkMode::Proxy)` 建出**代理会话**——
+/// 没有名单、带全权委托、运行态正常；名单 / 需求与形态不符时整条拒绝、不留半成品。
+#[test]
+pub(crate) fn create_work_with_proxy_mode_makes_a_delegated_session() {
+    let (handle, ops) = super::super::ops_with(vec![], vec![]);
+    let spec = crate::capabilities::conductor::api::WorkSpec {
+        name: "w-user-proxy".to_string(),
+        mode: WorkMode::Proxy,
+        agents: Vec::new(),
+        task: None,
+        delegate: false,
+        tier: Tier::Host,
+    };
+    let (opened, _head) = ops.sessions.create_work(spec.clone()).expect("建代理会话");
+    assert!(opened.agents.is_empty(), "代理会话没有名单");
+    let (meta, _) = ops.history.open(&opened.sid).expect("落盘");
+    assert_eq!(meta.mode, "proxy");
+    assert!(meta.delegation.is_some(), "选代理形态 = 授予全权");
+    assert!(meta.agents.is_empty() && meta.parent.is_none());
+    assert_eq!(meta.run, RunState::Active);
+    // 代理会话在表里、身份是 core_proxy 面（与 create_proxy 同一条装配）。
+    let identity = handle
+        .call({
+            let s = opened.sid.clone();
+            move |core| Ok(core.single_identity(&s))
+        })
+        .expect("问身份")
+        .expect("代理会话在表里");
+    assert!(identity.contains("你是核心代理"), "{}", identity);
+    // 读模型：形态与运行态都如实给出（前端据此渲染代理会话、标出暂停 / 关闭）。
+    let views = ops
+        .sessions
+        .session_views(&ops.history.list().expect("列表"))
+        .expect("视图");
+    let v = views
+        .iter()
+        .find(|v| v.sid == opened.sid)
+        .expect("代理会话在列表里");
+    assert_eq!(v.mode, "proxy");
+    assert_eq!(v.run, "active");
+    assert!(!v.can_update_task, "代理会话没有本次需求");
+
+    // 与形态不符的载荷：整条拒绝，不留半成品。
+    let mut bad = spec;
+    bad.name = "w-user-proxy-2".to_string();
+    bad.agents = vec![crate::capabilities::conductor::api::AgentInstance {
+        name: "a".to_string(),
+        transient: true,
+        modules: vec!["m1".to_string()],
+        model: None,
+    }];
+    assert!(ops
+        .sessions
+        .create_work(bad)
+        .unwrap_err()
+        .contains("不接受 agent 名单"));
+    assert!(
+        ops.history.open("w-user-proxy-2").is_err(),
+        "拒绝后不留半成品"
+    );
+}

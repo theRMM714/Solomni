@@ -91,6 +91,9 @@ pub(crate) fn mode_vocabulary_is_single_or_collab_only() {
     use crate::presentation::web::parse_mode;
     assert!(matches!(parse_mode("single"), Ok(WorkMode::Single)));
     assert!(matches!(parse_mode("collab"), Ok(WorkMode::Collab)));
+    // 第三人形态：代理（没有名单，选它就是授予全权）。
+    assert!(matches!(parse_mode("proxy"), Ok(WorkMode::Proxy)));
+    assert!(parse_mode("nope").is_err());
     for bad in ["direct", "compose", "omni", ""] {
         let e = parse_mode(bad).unwrap_err();
         assert!(e.contains("未知模式"), "web 必须 400 并说明：{}", e);

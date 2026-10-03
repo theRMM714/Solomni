@@ -160,7 +160,14 @@ impl Conductor {
         let (meta, events) = self.history_open(sid)?;
         match meta.mode.as_str() {
             "single" | "collab" => {}
-            other => return Err(format!("未知会话形态：{}（只认 single / collab）", other)),
+            // 代理会话没有名单可编辑（决定权整块交给核心）：如实说明，不报"未知形态"。
+            "proxy" => return Err("代理会话没有可编辑的名单：它不是一个 agent 工作".to_string()),
+            other => {
+                return Err(format!(
+                    "未知会话形态：{}（只认 single / collab / proxy）",
+                    other
+                ))
+            }
         }
         if session_started(&events) {
             let old: Vec<String> = meta.agents.iter().map(|a| a.name.clone()).collect();
@@ -386,6 +393,11 @@ impl Conductor {
             .map(|(sid, done)| {
                 let entry = history.iter().find(|h| h.name == sid);
                 let mode = entry.map(|h| h.mode.clone()).unwrap_or_default();
+                // 运行态取落盘事实（不在内存里留影子状态）；拿不到（生成中 / 未落盘）按正常运行。
+                let run = entry
+                    .map(|h| h.run.as_str())
+                    .unwrap_or("active")
+                    .to_string();
                 // 记的档位来自落盘 meta（权威）：环境后来变了也要如实提示——**不拦打开**（记录是用户的）。
                 let exec = entry.map(|h| h.exec.clone()).unwrap_or_default();
                 let readiness = crate::capabilities::workspace::api::tier_readiness(
@@ -416,6 +428,7 @@ impl Conductor {
                     tier_ready: readiness.ready(),
                     tier_missing: readiness.missing().iter().map(|s| s.to_string()).collect(),
                     can_update_task,
+                    run,
                     pending,
                 }
             })
@@ -443,6 +456,24 @@ impl Conductor {
         validate_work_name(&spec.name)?;
         if self.sessions.contains_key(&spec.name) || self.history.load(&spec.name).is_ok() {
             return Err(format!("工作名已存在：{}", spec.name));
+        }
+        // **代理形态**（第三人形态）：没有名单、没有需求——用户选这一形态就是**授予全权**。
+        // 它不是一个 agent 工作，装配与其余形态没有共同点，所以在这里就地分岔、不往下走。
+        if spec.mode == WorkMode::Proxy {
+            if !spec.agents.is_empty() || spec.task.is_some() {
+                return Err(
+                    "代理形态不接受 agent 名单或本次需求：决定权是整块交给核心的".to_string(),
+                );
+            }
+            if parent.is_some() {
+                return Err("子工作不能建成代理形态：代理不能往里套代理".to_string());
+            }
+            let (sid, facts) = self.create_proxy_with_facts(&spec.name, now_ts())?;
+            return Ok(WorkOpened {
+                sid,
+                agents: Vec::new(),
+                facts,
+            });
         }
         // 代拟路径（协作、未给 agent）允许先空着，由核心按需求拟名单；其余形态必须有 agent。
         if spec.agents.is_empty() && !spec.delegate {
@@ -490,6 +521,8 @@ impl Conductor {
                     return Err("单 agent 形态只接受一个 agent（模块数不限）".to_string());
                 }
             }
+            // 代理形态在函数开头就返回了（它没有 agent 名单）；这里只为穷尽，不产生行为。
+            WorkMode::Proxy => {}
             WorkMode::Collab => {
                 if spec.task.as_deref().unwrap_or("").trim().is_empty() {
                     return Err("协作模式必须填写本次需求".to_string());
@@ -577,6 +610,8 @@ impl Conductor {
         );
 
         let (session, mut events) = match spec.mode {
+            // 代理形态在函数开头就建好返回了：它没有 agent 名单，不走这条装配路。
+            WorkMode::Proxy => return Err("代理形态没有 agent 名单，不经这条装配路".to_string()),
             // 单 agent（模块数不限）。
             WorkMode::Single => {
                 let a = metas.first().ok_or("至少要有一个 agent")?;

@@ -87,10 +87,10 @@ pub const ROUTES: &[Route] = &[
         method: "POST",
         pattern: "/api/sessions",
         capability: "SessionOps::create_work",
-        request: "{name,mode,agents[],task?,delegate?}",
+        request: "{name,mode,agents[],task?,delegate?,tier?}",
         response: "{sid,agents,head}",
         statuses: &[200, 400],
-        note: "创建工作（形态与名单由用户给定）",
+        note: "创建工作：mode = single / collab / proxy（proxy 没有名单，选它就是授予全权）",
     },
     Route {
         id: "session.act",

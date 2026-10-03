@@ -751,7 +751,12 @@ pub fn parse_mode(s: &str) -> Result<WorkMode, String> {
     match s {
         "single" => Ok(WorkMode::Single),
         "collab" => Ok(WorkMode::Collab),
-        other => Err(format!("未知模式：{}（只接受 single / collab）", other)),
+        // 代理形态：没有名单，用户选它就是**授予全权**（见 docs/conductor/README.md）。
+        "proxy" => Ok(WorkMode::Proxy),
+        other => Err(format!(
+            "未知模式：{}（只接受 single / collab / proxy）",
+            other
+        )),
     }
 }
 

@@ -534,6 +534,7 @@ fn mode_str(mode: WorkMode) -> &'static str {
     match mode {
         WorkMode::Single => "single",
         WorkMode::Collab => "collab",
+        WorkMode::Proxy => "proxy",
     }
 }
 

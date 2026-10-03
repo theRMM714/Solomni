@@ -43,6 +43,10 @@ impl Conductor {
                 mode: match mode {
                     WorkMode::Single => crate::capabilities::slate::api::Mode::Single,
                     WorkMode::Collab => crate::capabilities::slate::api::Mode::Collab,
+                    // 代理形态没有名单可拟（核心自己挑人）；如实拒绝，不拿单模式的清单糊弄。
+                    WorkMode::Proxy => {
+                        return Err("代理形态没有名单：决定权整块交给核心，由它自己挑人".to_string())
+                    }
                 },
                 chat: chat.as_mut(),
                 tool_mode: self.registry.tool_mode(None),

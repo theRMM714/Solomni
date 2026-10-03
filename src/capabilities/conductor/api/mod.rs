@@ -370,12 +370,15 @@ pub enum CollabStep {
     Decide,
 }
 
-/// 工作形态：单 agent（模块数不限）/ 协作（多 agent 分权协商）。
-/// 形态只用于校验与界面标签：会话实现只有「单 agent」与「协作」两种。
+/// 工作形态：单 agent（模块数不限）/ 协作（多 agent 分权协商）/ 代理（决定权整块交给核心）。
+/// 形态只用于校验与界面标签：会话实现只有「单 agent」与「协作」两种——
+/// 代理会话在实现上就是一个单会话（`mode="proxy"`），只是身份换成 `core_proxy` 角色。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WorkMode {
     Single,
     Collab,
+    /// 代理：**没有名单**；用户选这一形态就是在授予全权（见 `SessionMeta::delegation`）。
+    Proxy,
 }
 
 /// 一次工作里的一个 agent 实例（用户选定，或核心代拟的临时组合）。
@@ -545,6 +548,9 @@ pub struct SessionView {
     /// **这条工作有「本次需求」吗**：前端据此决定要不要渲染「改需求」按钮——
     /// 没有就**根本不渲染**（不是灰着）。这是领域事实（有没有需求行），不是"模式"。
     pub can_update_task: bool,
+    /// 运行态（`active` / `paused` / `closed`）：**持久事实**，与短暂的 `running` 分开。
+    /// 界面据此标出"已暂停 / 已关闭"（这类会话不会再被派发或唤醒）。
+    pub run: String,
     /// 当前等用户裁决的事（None = 没有）：**快照形态**，与推的 `SessionEvent::Decision` 同源。
     /// 刷新页面时界面照样画得出那张卡；推的那条只是增量。
     #[serde(skip_serializing_if = "Option::is_none")]

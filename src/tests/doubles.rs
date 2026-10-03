@@ -594,6 +594,7 @@ impl HistoryStore for InMemoryHistory {
                     .unwrap_or(false),
                 exec: m.exec.clone(),
                 parent: m.parent.clone(),
+                run: m.run,
             })
             .collect())
     }
