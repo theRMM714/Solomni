@@ -534,6 +534,7 @@ impl Conductor {
                 tier: spec.tier,
                 ..crate::capabilities::workspace::api::ExecSpec::default()
             },
+            run: RunState::Active,
         };
         // 承载校验：默认档位的前置条件不具备时**不允许创建虚拟机档会话**（用户环境问题，不是选型问题）。
         // 必须在建工作区之前收口——拒绝就该什么都不留下。

@@ -127,6 +127,29 @@ impl Conductor {
         out
     }
 
+    /// **运行态闸门**：派发 / 唤醒前过它，暂停与关闭都拒绝。
+    /// 拿不到 meta（系统会话等未落盘）就当正常运行——运行态是落盘事实，
+    /// 不存在的会话自有别的检查兜底（这里不替它报"无此会话"）。
+    pub(crate) fn dispatch_gate(&self, sid: &str) -> Result<(), String> {
+        match self.history.meta(sid) {
+            Ok(meta) => match meta.dispatch_refusal() {
+                Some(e) => Err(e),
+                None => Ok(()),
+            },
+            Err(_) => Ok(()),
+        }
+    }
+
+    /// 派发目标的形态 + 这一次派发放不放行（放行 = Ok(mode)）。
+    /// 代理转达与叫醒共用这一处，免得"看不看运行态"两处口径不一致。
+    pub(crate) fn dispatch_target(&self, sid: &str) -> Result<String, String> {
+        let meta = self.history.meta(sid)?;
+        match meta.dispatch_refusal() {
+            Some(e) => Err(e),
+            None => Ok(meta.mode),
+        }
+    }
+
     /// 事件落盘；失败如实告知（追加一条警告事件），不静默丢历史。
     pub(crate) fn record_events(&self, sid: &str, events: &mut Vec<SessionEvent>) {
         if events.is_empty() {

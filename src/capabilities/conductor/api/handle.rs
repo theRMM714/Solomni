@@ -546,6 +546,34 @@ impl ConductorHandle {
             });
     }
 
+    /// 机制往一个会话记一条**可回放通知**：落盘（它进历史重放）+ 推它的事件台（在场的前端立刻看到）。
+    /// 代理转达的来源记录与控制记录走这条——两条都要"既留得下、也看得见"。
+    pub(crate) fn record_notice(&self, sid: &str, ev: SessionEvent) {
+        let target = sid.to_string();
+        let mut batch = vec![ev.clone()];
+        let ok = self
+            .call(move |core| {
+                core.record_events(&target, &mut batch);
+                Ok(())
+            })
+            .is_ok();
+        if ok {
+            self.bus.push(sid, std::slice::from_ref(&ev));
+        }
+    }
+
+    /// 起一轮**脱离调用方**的"继续"（恢复被暂停的单 agent 会话用）：不等它跑完。
+    /// 与"派活"的区别：不注入新任务，接着上一次的断点走。
+    pub(crate) fn spawn_detached_continue(&self, sid: &str) {
+        let me = self.clone();
+        let sid = sid.to_string();
+        let _ = std::thread::Builder::new()
+            .name("solomni-resume".to_string())
+            .spawn(move || {
+                let _ = me.single_generation(&sid, None, Output::Stream);
+            });
+    }
+
     /// 起一次**脱离调用方**的代理回合（子会话停下后叫醒代理用）：不等它跑完。
     /// 代理那边是一轮普通成员会话生成；它自己决定继续观察、追问、返工还是收敛。
     pub(crate) fn spawn_detached_proxy(&self, sid: &str) {

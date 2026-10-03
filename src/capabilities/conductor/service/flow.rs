@@ -356,6 +356,7 @@ impl Conductor {
             node: None,
             delegation: None,
             own_work: false,
+            run: RunState::Active,
         };
         // 沙箱锚在父会话上：该 agent 的目录在父会话里已经建好。
         self.workspace

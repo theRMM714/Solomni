@@ -3,7 +3,9 @@
 
 use serde::{Deserialize, Serialize};
 
-/// 会话元信息：创建工作时由用户决定、此后不再改动的部分。
+/// 会话元信息：创建工作时由用户决定的身份（形态 / 名单 / 档位 / 归属），
+/// 加上**此后会被机制改写的运行态**（`run`：暂停 / 关闭）。两者都是落盘事实，
+/// 是"这条会话是什么、还该不该被驱动"的唯一真相（不在内存里留影子状态）。
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SessionMeta {
     pub name: String,
@@ -39,6 +41,39 @@ pub struct SessionMeta {
     /// 只有"谁编排的"仍是父会话。
     #[serde(default, skip_serializing_if = "is_false")]
     pub own_work: bool,
+    /// 运行态：暂停后不再被派发或唤醒；关闭是终态。缺省（active）= 正常运行。
+    /// 它与"这一刻在不在跑"（推的 `Working`，短暂不落盘）是两件事：**它是持久事实**，
+    /// 重启/回档后照样成立（见 docs/session/session-model.md 二）。
+    #[serde(default, skip_serializing_if = "RunState::is_active")]
+    pub run: RunState,
+}
+
+/// 会话运行态（**持久**事实，落在 meta.yaml）：派发与唤醒都要先过它。
+/// 它是"这段工作还该不该继续被驱动"的开关，与"此刻有没有一次生成在跑"分开。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RunState {
+    /// 正常：可以被派发与唤醒。
+    #[default]
+    Active,
+    /// 暂停：一切派发与唤醒都不再启动（在跑的那次已被停下）。可 resume 回到 Active。
+    Paused,
+    /// 关闭：终态，不能再被派发、唤醒或 resume。
+    Closed,
+}
+
+impl RunState {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            RunState::Active => "active",
+            RunState::Paused => "paused",
+            RunState::Closed => "closed",
+        }
+    }
+    /// serde 的 `skip_serializing_if` 用：缺省态不写进 meta.yaml。
+    pub fn is_active(&self) -> bool {
+        *self == RunState::Active
+    }
 }
 
 /// 任务级委托：代理模式下，真实用户把决定权**整块**交给核心（全权）。
@@ -63,6 +98,22 @@ impl SessionMeta {
             &self.name
         } else {
             self.parent.as_deref().unwrap_or(&self.name)
+        }
+    }
+
+    /// 允许被派发 / 唤醒吗？暂停与关闭都拒绝——**运行态的唯一判据只有这一处**
+    /// （派发入口、代理转达、叫醒都问它，不各写一份）。None = 放行。
+    pub fn dispatch_refusal(&self) -> Option<String> {
+        match self.run {
+            RunState::Active => None,
+            RunState::Paused => Some(format!(
+                "会话 {} 已暂停：先 resume 再派发（暂停期间不接受任何派发或唤醒）",
+                self.name
+            )),
+            RunState::Closed => Some(format!(
+                "会话 {} 已关闭：终态，不能再派发、唤醒或 resume",
+                self.name
+            )),
         }
     }
 }

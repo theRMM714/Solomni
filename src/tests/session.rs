@@ -1015,6 +1015,7 @@ pub(crate) fn session_meta_exec_section_roundtrips_and_reads_legacy_meta() {
         node: None,
         delegation: None,
         own_work: false,
+        run: RunState::Active,
     };
     let text = yaml_serde::to_string(&meta).expect("序列化");
     let back: SessionMeta = yaml_serde::from_str(&text).expect("反序列化");
@@ -1025,7 +1026,16 @@ pub(crate) fn session_meta_exec_section_roundtrips_and_reads_legacy_meta() {
         Some("3.12.4")
     );
     assert!(!back.exec.net);
-    // 缺 exec 段的旧会话照旧可读（默认 = 本机档、不联网、不定版）。
+    assert_eq!(back.run, RunState::Active, "缺省运行态 = 正常运行");
+    // 运行态是**持久事实**：暂停 / 关闭写进 meta 后重启照样成立。
+    let paused = SessionMeta {
+        run: RunState::Paused,
+        ..meta.clone()
+    };
+    let back: SessionMeta =
+        yaml_serde::from_str(&yaml_serde::to_string(&paused).expect("序列化")).expect("反序列化");
+    assert_eq!(back.run, RunState::Paused);
+    // 缺 exec 段的旧会话照旧可读（默认 = 本机档、不联网、不定版、正常运行）。
     let legacy: SessionMeta =
         yaml_serde::from_str("name: old\nmode: single\nmodules: [a]\nts: 1\n")
             .expect("旧 meta.yaml 必须可读");
@@ -1033,6 +1043,7 @@ pub(crate) fn session_meta_exec_section_roundtrips_and_reads_legacy_meta() {
     assert!(legacy.exec.base.is_none());
     assert!(!legacy.exec.net);
     assert!(legacy.exec.pins.is_empty());
+    assert_eq!(legacy.run, RunState::Active);
 }
 
 /// 回档**按回复原子**：截在一次回复中间时整条回复一起丢，绝不留下"孤儿工具结果"。

@@ -704,6 +704,7 @@ pub(crate) fn seed_session(
         node: None,
         delegation: None,
         own_work: false,
+        run: RunState::Active,
     })
     .unwrap();
 }

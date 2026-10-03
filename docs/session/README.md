@@ -12,7 +12,7 @@
 
 ## 二、入站契约与状态归属
 
-`api::HistoryOps`（呈现层队列面）+ `api::History`（别的能力的直连面：造会话 / 写元信息 / 追流水 / 读回 / 删除）+ 行与事件词汇。出站端口 `HistoryStore` **只由 `service.rs` 持有**（R12）。
+`api::HistoryOps`（呈现层队列面）+ `api::History`（别的能力的直连面：造会话 / 写元信息 / **只读元信息** / 追流水 / 读回 / 删除）+ 行与事件词汇与**运行态**（`RunState`：暂停 / 关闭，落盘在 `meta.run`）。出站端口 `HistoryStore` **只由 `service.rs` 持有**（R12）。
 
 ## 三、依赖图位置（由源码的 `::api` 引用推导）
 

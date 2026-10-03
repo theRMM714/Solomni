@@ -2,7 +2,6 @@
 //!
 //! 工具逻辑只到这里：它不碰会话机制。宿主是 `ProxyBridge`（队列桥：把 ProxyHost 的每个方法
 //! 交给核心线程执行）与 `Conductor` 的 `proxy_*` 方法族；代理会话那一回合挂的是 `ProxyHandler`。
-#![allow(dead_code)] // 见 docs/testing/quality-isolation.md §三：创建入口 `create_proxy`/`build_proxy` 的产品调用点在阶段 4（路由/向导）
 
 use crate::capabilities::conductor::domain::proxy as d;
 use crate::capabilities::conductor::ports::ProxyHost;
@@ -277,9 +276,11 @@ fn json_ok<T: serde::Serialize>(v: &T) -> ToolOutcome {
 
 use super::{now_ts, validate_work_name, Conductor, Session};
 use crate::capabilities::conductor::api::{
-    AgentInstance, CollabStep, ConductorHandle, WorkMode, WorkSpec,
+    AgentInstance, CollabStep, ConductorHandle, SessionOps, WorkMode, WorkSpec,
 };
-use crate::capabilities::session::api::{AgentSession, Delegation, SessionMeta, SessionParams};
+use crate::capabilities::session::api::{
+    AgentSession, Delegation, RunState, SessionEvent, SessionMeta, SessionParams,
+};
 use crate::capabilities::workspace::api::{ExecSpec, Sandbox};
 
 fn tool_mode_str(m: crate::capabilities::llm::api::ToolMode) -> String {
@@ -382,15 +383,22 @@ impl Conductor {
         view: d::ObserveView,
         _since: Option<&str>,
     ) -> Result<d::Snapshot, String> {
-        if self.history_open(sid).is_err() {
-            return Err(format!("无此会话：{}", sid));
-        }
+        // 存在性与运行态都取 meta（**不回放流水**）；"此刻在不在跑"再看会话中心。
+        let meta = self
+            .history
+            .meta(sid)
+            .map_err(|_| format!("无此会话：{}", sid))?;
         let list = self.history_list();
         let sv = self.session_views(&list).into_iter().find(|v| v.sid == sid);
-        let state = match &sv {
-            Some(v) if v.running => "running",
-            Some(v) if v.done => "done",
-            _ => "idle",
+        let state = match meta.run {
+            RunState::Active => match &sv {
+                Some(v) if v.running => "running",
+                Some(v) if v.done => "done",
+                _ => "idle",
+            }
+            .to_string(),
+            // 运行态（持久事实）优先：它比"此刻在不在跑"更能说明这条会话为什么不往前走。
+            other => other.as_str().to_string(),
         };
         let want = |w: d::ObserveView| view == d::ObserveView::Full || view == w;
         let pending = if want(d::ObserveView::Pending) {
@@ -508,18 +516,73 @@ impl Conductor {
         })
     }
 
-    /// 代理工具：控制（阶段 2 的下一步）。
+    /// 代理工具：控制（**只做运行态的状态转移**，不启动也不停止生成——停止要 JobRegistry，
+    /// 只有句柄拿得到，见 `ProxyBridge::control`）。可回放记录也由句柄那一侧写（它才推得到事件台）。
+    /// - pause：冻上（此后的派发与唤醒一律拒绝）；在跑的那次由句柄停；
+    /// - resume：解冻；随后由句柄按形态唤醒它接着走；
+    /// - close：终态。整棵子树里还有在生成的就拒绝（先 stop / pause），不留半个状态；
+    /// - stop：级联停止由句柄承担，不进这条。
     pub fn proxy_control(
-        &mut self,
-        _sid: &str,
-        _action: d::ControlAction,
-        _reason: &str,
+        &self,
+        sid: &str,
+        action: d::ControlAction,
     ) -> Result<d::ControlState, String> {
-        Err("代理控制尚未实现（下一步）".to_string())
+        let meta = self.history.meta(sid)?;
+        let target = meta.name.clone();
+        let set = |run: RunState| -> Result<(), String> {
+            let mut m = meta.clone();
+            m.run = run;
+            self.history.save_meta(&m)
+        };
+        // 先做状态转移（只改落盘运行态），回执状态在下面按动作给。
+        match action {
+            d::ControlAction::Stop => {
+                return Err("stop 不走这条：级联停止由句柄承担".to_string());
+            }
+            d::ControlAction::Pause => match meta.run {
+                RunState::Closed => {
+                    return Err(format!("会话 {} 已关闭：不能再暂停", target));
+                }
+                RunState::Paused => {}
+                RunState::Active => set(RunState::Paused)?,
+            },
+            d::ControlAction::Resume => match meta.run {
+                RunState::Closed => {
+                    return Err(format!("会话 {} 已关闭：终态，不能 resume", target));
+                }
+                RunState::Paused => set(RunState::Active)?,
+                RunState::Active => {}
+            },
+            d::ControlAction::Close => {
+                // “关闭已完成或已停止的会话”：子树里还有在生成的就整条拒绝。
+                for s in self.subtree_of(sid) {
+                    if self.running.contains(&s) {
+                        return Err(Self::running_refusal(&s));
+                    }
+                }
+                if meta.run != RunState::Closed {
+                    set(RunState::Closed)?;
+                }
+            }
+        };
+        let state = match action {
+            d::ControlAction::Pause => "paused",
+            d::ControlAction::Resume => "active",
+            d::ControlAction::Close => "closed",
+            d::ControlAction::Stop => "stopped",
+        };
+        Ok(d::ControlState {
+            session: target,
+            action,
+            state: state.to_string(),
+        })
     }
 
     /// 建一个**代理会话**（`mode="proxy"` + 全权委托）：核心在这里跟用户对话，用代理工具代他决定。
     /// 没有 agent、没有模块工具；这一回合的工具面是 `core_proxy`（六项代理工具 + 只读核实）。
+    /// 产品入口（呈现层的第三种形态）在阶段 4，所以二进制里暂时只有测试与重建调用它
+    /// （见 docs/testing/quality-isolation.md §三）。
+    #[allow(dead_code)]
     pub fn create_proxy(&mut self, name: &str, granted_at: i64) -> Result<String, String> {
         validate_work_name(name)?;
         if self.sessions.contains_key(name) || self.history.load(name).is_ok() {
@@ -538,6 +601,7 @@ impl Conductor {
             node: None,
             delegation: Some(Delegation { granted_at }),
             own_work: false,
+            run: RunState::Active,
         };
         self.workspace.prepare(name, &[])?;
         let session = self.build_proxy(&meta)?;
@@ -627,26 +691,37 @@ impl ProxyHost for ProxyBridge {
     fn send(&self, target: &str, msg: &d::Relayed) -> Result<(), String> {
         let handle = self.handle.lock().unwrap_or_else(|e| e.into_inner());
         let target = target.to_string();
+        // 运行态闸门 + 形态：**一次核心命令**问清（无此会话 / 已暂停 / 已关闭都如实拒绝，
+        // 不给模型一个"发出去了其实没跑"的假回执）。
         let mode = handle.call({
             let t = target.clone();
-            move |core| Ok(core.session_mode_str(&t))
+            move |core| core.dispatch_target(&t)
         })?;
-        if mode.is_empty() {
-            return Err(format!("无此会话：{}", target));
-        }
+        // 先记来源：这条不是用户原话这个事实要进目标会话的可回放记录（正文不伪装成用户发言）。
+        handle.record_notice(&target, SessionEvent::Notice(d::relay_note(msg)));
         if mode == "collab" {
-            // 协作子会话：按消息种类落到它的阶段步，**脱离调用方点火**（不等它跑完）。
-            // kind=task 视作“开工 / 继续”；其余（代答、审查、返工、补充）走 decide
-            // （由协作自己的核心 AI 判明确性）。
-            let step = if msg.kind == d::MessageKind::Task {
-                CollabStep::Begin
-            } else {
-                CollabStep::Decide
-            };
-            handle.spawn_detached_collab_step(&target, step, &msg.text);
+            // 协作子会话：**按它此刻等的是哪一关**落到对应的阶段步（与前端读 pending 同一口径）。
+            // 它自己的核心 AI 判明确性；这里只负责把话送到正确的门上。
+            let pending = handle.call({
+                let t = target.clone();
+                move |core| core.collab_pending(&t)
+            })?;
+            match d::gate_route(pending.as_ref().map(|p| p.decision_parts().0)) {
+                // 代拟名单这关是二选一，且是**短步骤**（不跑泵）：在核心线程上直接推进。
+                d::GateRoute::ConfirmSlate => {
+                    handle.collab_step(&target, CollabStep::ConfirmSlate, &msg.text)?;
+                }
+                d::GateRoute::Begin => {
+                    handle.spawn_detached_collab_step(&target, CollabStep::Begin, &msg.text);
+                }
+                d::GateRoute::Decide => {
+                    handle.spawn_detached_collab_step(&target, CollabStep::Decide, &msg.text);
+                }
+                d::GateRoute::Resume => handle.spawn_detached_collab(&target),
+            }
             return Ok(());
         }
-        // 单 agent：以“核心派的活”注入（派发行是核心自己的行，**不冒充用户原话**），
+        // 单 agent：以"核心派的活"注入（派发行是核心自己的行，**不冒充用户原话**），
         // 并**脱离调用方点火**——代理不等它跑完，靠 observe / messages 回头看。
         handle.spawn_detached_node(&target, &msg.text);
         Ok(())
@@ -670,17 +745,49 @@ impl ProxyHost for ProxyBridge {
         reason: &str,
     ) -> Result<d::ControlState, String> {
         let handle = self.handle.lock().unwrap_or_else(|e| e.into_inner());
+        let session = session.to_string();
         if action == d::ControlAction::Stop {
             // 级联停止：整棵子树（本会话 + 所有后代）正在跑的生成都立即中断。
-            let stopped = handle.stop_tree(session)?;
+            let stopped = handle.stop_tree(&session)?;
+            handle.record_notice(
+                &session,
+                SessionEvent::Notice(d::control_note(action, reason)),
+            );
             return Ok(d::ControlState {
-                session: session.to_string(),
+                session,
                 action,
                 state: format!("stopped:{}", stopped.len()),
             });
         }
-        let (session, reason) = (session.to_string(), reason.to_string());
-        handle.call(move |core| core.proxy_control(&session, action, &reason))
+        // 运行态转移在核心线程上（落盘 meta 是唯一真相）；启动 / 停止生成只有句柄做得了。
+        let state = handle.call({
+            let s = session.clone();
+            move |core| core.proxy_control(&s, action)
+        })?;
+        match action {
+            // 先冻上运行态，再停生成：此刻起任何派发与唤醒都被拒（顺序不能反）。
+            d::ControlAction::Pause => {
+                let _ = handle.stop_tree(&session);
+            }
+            // 解冻后按形态唤醒它接着走：协作继续推进链，代理自己再想一轮，单 agent 接着说完。
+            d::ControlAction::Resume => {
+                let mode = handle.call({
+                    let s = session.clone();
+                    move |core| core.dispatch_target(&s)
+                })?;
+                match mode.as_str() {
+                    "collab" => handle.spawn_detached_collab(&session),
+                    "proxy" => handle.spawn_detached_proxy(&session),
+                    _ => handle.spawn_detached_continue(&session),
+                }
+            }
+            _ => {}
+        }
+        handle.record_notice(
+            &session,
+            SessionEvent::Notice(d::control_note(action, reason)),
+        );
+        Ok(state)
     }
 
     fn messages(

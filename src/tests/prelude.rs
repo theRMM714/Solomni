@@ -23,7 +23,7 @@ pub use crate::capabilities::registry::api::{ModelEntry, Provider, Settings};
 
 pub use crate::capabilities::session::api::Live;
 
-pub use crate::capabilities::session::api::{AgentMeta, SessionMeta};
+pub use crate::capabilities::session::api::{AgentMeta, RunState, SessionMeta};
 
 pub use crate::capabilities::session::api::MemberTools;
 pub use crate::capabilities::session::domain::tools::ModuleTools;

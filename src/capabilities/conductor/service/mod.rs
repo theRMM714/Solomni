@@ -20,7 +20,7 @@ use crate::capabilities::llm::api::Channel;
 use crate::capabilities::llm::api::Msg;
 use crate::capabilities::prompt::api::{Prompt, Segment};
 use crate::capabilities::registry::api::Registry;
-use crate::capabilities::session::api::{AgentMeta, HistoryView, SessionMeta};
+use crate::capabilities::session::api::{AgentMeta, HistoryView, RunState, SessionMeta};
 use crate::capabilities::tools::api::{ToolExec, Tools};
 use crate::capabilities::workspace::api::Module;
 use crate::kernel::api::SessionId;
@@ -280,6 +280,8 @@ impl Conductor {
         &mut self,
         sid: &str,
     ) -> Result<crate::capabilities::session::api::AgentSession, String> {
+        // 运行态闸门：暂停 / 关闭的会话不启动任何生成（唤醒与派发都从这里过）。
+        self.dispatch_gate(sid)?;
         if self.running.contains(sid) {
             return Err(Self::running_refusal(sid));
         }
@@ -300,6 +302,8 @@ impl Conductor {
     /// 把协作会话**交给工作线程**（核心表里留"生成中"）。
     /// 会话还没装进内存时先从落盘重建：协作的"继续"可能先于"打开"到达。
     pub(crate) fn take_collab(&mut self, sid: &str) -> Result<CollabSession, String> {
+        // 同上：运行态闸门是第一道，先于"取出来"。
+        self.dispatch_gate(sid)?;
         if self.running.contains(sid) {
             return Err(Self::running_refusal(sid));
         }

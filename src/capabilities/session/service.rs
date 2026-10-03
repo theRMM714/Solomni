@@ -37,6 +37,10 @@ impl History for SessionService {
         self.store.list()
     }
 
+    fn meta(&self, name: &str) -> Result<SessionMeta, String> {
+        self.store.meta(name)
+    }
+
     fn load(&self, name: &str) -> Result<(SessionMeta, Vec<serde_json::Value>), String> {
         self.store.load(name)
     }

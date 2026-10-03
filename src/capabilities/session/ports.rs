@@ -10,6 +10,9 @@ pub trait HistoryStore {
     fn save_meta(&self, meta: &SessionMeta) -> Result<(), String>;
     fn append(&self, name: &str, events: &[serde_json::Value]) -> Result<(), String>;
     fn list(&self) -> Result<Vec<HistoryView>, String>;
+    /// **只读元信息**（不回放流水）：派发前的运行态判定等"只看身份与运行态"的场合用它，
+    /// 免得为查一个字段把整份转录读一遍。
+    fn meta(&self, name: &str) -> Result<SessionMeta, String>;
     fn load(&self, name: &str) -> Result<(SessionMeta, Vec<serde_json::Value>), String>;
     fn delete(&self, name: &str) -> Result<bool, String>;
 }

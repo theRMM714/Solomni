@@ -61,6 +61,13 @@ impl FsHistory {
         None
     }
 
+    /// 只读一个会话的 meta.yaml（不回放流水）：拿不到就如实报"无此会话"。
+    fn read_meta(dir: &std::path::Path, name: &str) -> Result<SessionMeta, String> {
+        let text = std::fs::read_to_string(dir.join("meta.yaml"))
+            .map_err(|_| format!("无此会话：{}", name))?;
+        yaml_serde::from_str(&text).map_err(|e| format!("会话 meta.yaml 非法：{}", e))
+    }
+
     /// 读一个会话目录的列表视图（meta 缺失或非法 = None）。
     fn read_view(dir: &std::path::Path) -> Option<HistoryView> {
         let text = std::fs::read_to_string(dir.join("meta.yaml")).ok()?;
@@ -142,14 +149,18 @@ impl HistoryStore for FsHistory {
         Ok(out)
     }
 
+    fn meta(&self, name: &str) -> Result<SessionMeta, String> {
+        let d = self
+            .find(name)
+            .ok_or_else(|| format!("无此会话：{}", name))?;
+        Self::read_meta(&d, name)
+    }
+
     fn load(&self, name: &str) -> Result<(SessionMeta, Vec<serde_json::Value>), String> {
         let d = self
             .find(name)
             .ok_or_else(|| format!("无此会话：{}", name))?;
-        let text = std::fs::read_to_string(d.join("meta.yaml"))
-            .map_err(|_| format!("无此会话：{}", name))?;
-        let meta: SessionMeta =
-            yaml_serde::from_str(&text).map_err(|e| format!("会话 meta.yaml 非法：{}", e))?;
+        let meta: SessionMeta = Self::read_meta(&d, name)?;
         let mut events = Vec::new();
         if let Ok(t) = std::fs::read_to_string(d.join("transcript.jsonl")) {
             for line in t.lines() {

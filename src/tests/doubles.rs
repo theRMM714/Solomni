@@ -597,6 +597,15 @@ impl HistoryStore for InMemoryHistory {
             })
             .collect())
     }
+    fn meta(&self, name: &str) -> Result<SessionMeta, String> {
+        self.guard()?;
+        self.metas
+            .lock()
+            .expect("锁")
+            .get(name)
+            .cloned()
+            .ok_or_else(|| format!("无此会话：{}", name))
+    }
     fn load(&self, name: &str) -> Result<(SessionMeta, Vec<serde_json::Value>), String> {
         self.guard()?;
         let meta = self
@@ -1452,9 +1461,9 @@ impl ProxyHost for FakeProxyHost {
         since: Option<&str>,
     ) -> Result<dproxy::Snapshot, String> {
         self.log.lock().expect("锁").push(format!(
-            "observe:{}:{}:{}",
+            "observe:{}:{:?}:{}",
             session,
-            view.as_str(),
+            view,
             since.unwrap_or("")
         ));
         // 观察只回元信息：**不回消息正文**（正文走 messages 倒查）。

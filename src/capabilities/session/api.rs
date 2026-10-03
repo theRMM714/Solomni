@@ -5,7 +5,7 @@ pub use crate::capabilities::session::domain::events::{
     Pending, SessionEvent, ToolCallView,
 };
 pub use crate::capabilities::session::domain::history::{
-    AgentMeta, Delegation, HistoryView, SessionMeta,
+    AgentMeta, Delegation, HistoryView, RunState, SessionMeta,
 };
 pub use crate::capabilities::session::domain::rewind::{
     find_line_id, last_line_within, max_reply, truncate_events, turn_of_line,
@@ -47,6 +47,8 @@ pub trait History: Send + Sync {
     fn append(&self, name: &str, events: &[serde_json::Value]) -> Result<(), String>;
     /// 列出全部落盘会话（列表页按它渲染）。
     fn list(&self) -> Result<Vec<HistoryView>, String>;
+    /// **只读元信息**（不回放流水）：运行态（暂停 / 关闭）判定走它，不为此读整份转录。
+    fn meta(&self, name: &str) -> Result<SessionMeta, String>;
     /// 打开一个会话：元信息 + 事件流水（调用方按它回放状态）。
     fn load(&self, name: &str) -> Result<(SessionMeta, Vec<serde_json::Value>), String>;
     /// 删除一个会话目录；false = 本来就不存在。

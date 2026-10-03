@@ -61,6 +61,7 @@ fn meta(name: &str) -> SessionMeta {
         node: None,
         delegation: None,
         own_work: false,
+        run: crate::capabilities::session::api::RunState::Active,
     }
 }
 
@@ -322,6 +323,8 @@ fn history_store_double_roundtrips_lists_deletes_and_propagates_failure() {
     let (m, events) = h.load("w1").expect("读回");
     assert_eq!(m.name, "w1");
     assert_eq!(events.len(), 2, "流水只追加，不丢行");
+    // 只读元信息：与 load 是同一份真相，但不回放流水。
+    assert_eq!(h.meta("w1").expect("读元信息").name, "w1");
     let listed = h.list().expect("列会话");
     assert_eq!(listed.len(), 1);
     assert!(listed[0].done, "ended 之后 done = true");
@@ -345,6 +348,7 @@ fn history_store_double_roundtrips_lists_deletes_and_propagates_failure() {
     assert_eq!(bad.save_meta(&meta("x")).unwrap_err(), "历史不可用");
     assert_eq!(bad.append("x", &[]).unwrap_err(), "历史不可用");
     assert_eq!(bad.list().unwrap_err(), "历史不可用");
+    assert_eq!(bad.meta("x").unwrap_err(), "历史不可用");
     assert_eq!(bad.load("x").unwrap_err(), "历史不可用");
     assert_eq!(bad.delete("x").unwrap_err(), "历史不可用");
 }

@@ -2,66 +2,98 @@
 # 业务 AI 只记缺口、不写测试；测试 AI 负责实现测试并销账，补齐后删除条目，不保留完成历史。
 # 格式与判据见 docs/testing/gaps-acceptance.md §十二（id / scope / level / why / how / accept / blocked_by）。
 
-- id: conductor.proxy-host-not-implemented
+- id: conductor.proxy-collab-gate-coverage
   scope: global
   level: T3
   why: |
-    六个代理工具的宿主已接上真实会话：catalog（登记处 / 模块清单）、observe（不含正文的元信息）、
-    messages（0 = 最新的倒查）、create_session（建**子工作**：parent 只表编排归属，own_work 让它有
-    自己的 work/ 与沙箱）、control_session.stop（按 meta.parent **级联整棵子树**立即中断）。
-    仍缺：**协作子会话**的转达（要落到它自己的阶段步并等它推进，依赖“子会话的门 → 唤醒代理”那段）、
-    pause / resume 的持久运行态、close 的在位语义，以及把建子工作的开场事实推给事件台。
-    单 agent 子会话的转达已落地：以“核心派的活”注入（派发行是核心自己的行，不冒充用户原话）并脱离
-    调用方点火，代理靠 observe / messages 回头看——`source`/`source_ref` 的结构化落档仍缺。
+    代理把消息转达到**协作子会话**的落门判定已落地（按它此刻等的是哪一关选 confirm_slate / begin /
+    decide / resume，判据是 domain/proxy.rs 的 gate_route，已有单测），但**没有一条真跑协作泵的端到端
+    用例**：转达是脱离调用方点火（fire-and-forget），断言推进效果要等泵跑完。
   how: |
-    proxy_send 补协作子会话：判 pending 后走 begin / decide 等阶段步；核心转达在目标会话留下可回放的
-    core_proxy 来源（结构化字段，不靠正文标签）。proxy_control 补 pause/resume（持久运行态：冻结派发、
-    可恢复）与 close（保留历史地停掉）。create 的开场事实经事件台外送。
+    建一个协作子工作（proxy_create mode=multi），发一条 task，断言它按当前门落在正确的阶段步并真的推进；
+    再补一条「暂停中的目标一律拒绝派发」的用例。
   accept: |
-    协作子会话也能收到核心转达、pause/resume 可恢复、close 只在允许时执行、
-    建子工作的开场事实在事件台可见；node run-tests.js 全绿。
+    协作子会话按 pending 落在正确的门并推进到下一关；暂停 / 关闭中的目标一律拒绝派发；node run-tests.js 全绿。
+  blocked_by: 缺少测试
+
+- id: conductor.proxy-role-prompt-not-wired
+  scope: global
+  level: T3
+  why: |
+    代理会话的身份块没有用上它的角色提示词：prompts/roles/core_proxy.yaml 的 proxy.system 渲染成
+    `Segment::ProxySystem`，但 `SessionParams::identity` 只渲染 agent 系统，该段目前只被 prompt.rs
+    自己引用。代理会话因此拿到一份普通核心身份，「全权、门交给你答、历史不转发」这些约定只靠工具说明传达。
+  how: |
+    让代理会话的身份块渲染 proxy.system（identity 支持一个角色提示词覆盖，或把 core_proxy 当它的能力包），
+    接上后删掉 Segment::ProxySystem 的窄 allow。涉及 session 的身份块契约，先与集成者确认。
+  accept: |
+    代理会话的系统提示里出现 core_proxy 的角色约定，single / agent 会话的身份块不受影响；node run-tests.js 全绿。
+  blocked_by: 缺少实现（跨 session 契约，待确认）
+
+- id: conductor.proxy-create-opening-facts
+  scope: global
+  level: T3
+  why: |
+    create_session 建的**子工作**的开场事实只落了盘、没有经事件台外送：生产路径的 create_work 会把开场
+    事实 push 到事件台，proxy_create 直接走 create_work_inner，跳过了那一步。在场的前端因此不会立刻看到
+    新建的子会话行（刷新 / 重连后从历史读到）。
+  how: |
+    让 proxy_create 的调用方把开场事实推到事件台（与 create_work 同一条路），并补一条断言事件台可见的用例。
+  accept: |
+    代理建出子工作后，事件台立刻有它的开场事实，且与历史重放一致；node run-tests.js 全绿。
   blocked_by: 缺少实现
 
-- id: conductor.core-proxy-loop
+- id: conductor.proxy-observe-cursor
   scope: global
   level: T3
   why: |
-    core_proxy 角色与它的六个代理工具已经能被测试直接驱动，但没有一个生产调用点：
-    核心代理的生成循环（模型调用 → 从工具参数取载荷 → 调 ProxyTools → 回灌结果）尚未落地，
-    所以目前模型还调不动这六个工具，子会话的门也不会被投递到这里。
+    observe_session 的 since 游标被忽略（`proxy_observe` 不用它，每次都重读整份转录算 message_count）。
+    回执是完整快照、可重复消费，所以不影响正确性，但与声明承诺的「给了游标就只取它之后的新事实」
+    （systools/tools.yaml）不一致，也让"观察不重读整份转录"这个意图落不了地。
   how: |
-    在 conductor 里加 core_proxy 的生成循环（与既有核心操作回路同源）：按角色发放工具面、跑模型、
-    把代理工具的调用交给 ProxyTools、把回执按通道形态回灌；代理工具会改核心状态（建会话/派发），
-    执行必须回到核心线程（握手），不破坏状态所有权。子会话的门与意外停止主动唤醒代理（不轮询），
-    且不把子会话整份转录灌进代理上下文。接上后删掉三处 dead_code allow（见 docs/testing/quality-isolation.md §三）。
+    给观察回执一个真正单调的游标（例如事件台序号或转录版本），since 命中"没有新事实"时走廉价路径；
+    若最终决定就只要"幂等完整快照"，同步改 tools.yaml 的 since 说明，不留下两处说法。
   accept: |
-    真实模型（原生与手写信封两套通道）能连续调用六项代理工具完成一次代理流程；门由核心回答、
-    越权/无授权调用如实拒绝并落工具行、中途停止立即生效。
-  blocked_by: 缺少实现
+    since 的语义与声明一致（要么真增量、要么明确写成幂等快照），且不为此重读整份转录；node run-tests.js 全绿。
+  blocked_by: 缺少实现（契约口径需和集成者确认）
+
+- id: conductor.proxy-product-entry
+  scope: global
+  level: T3
+  why: |
+    核心代理的生成循环**已落地**：代理会话是普通成员会话（mode=proxy），轮循环里没有代理专用分支，
+    代理工具经 `ProxyHandler`（kernel::ports::ToolHandler）→ `ProxyBridge` 队列桥回核心线程执行；
+    子会话停下 / 到门会叫醒代理，且不转发它的转录。剩下的是**产品入口**：从呈现层创建代理会话
+    （第三种形态的路由 / 向导）还没有，`create_proxy` 目前只有测试与回档重建调用它。
+  how: |
+    在呈现层加第三种形态的入口（路由 + 向导），经 `Ops` 建代理会话；接上后删除 create_proxy 的窄 allow。
+  accept: |
+    用户能从界面建出代理会话并看到它的对话与子会话树；窄 allow 删除后 T0 零告警；node run-tests.js 全绿。
+  blocked_by: 缺少产品入口（呈现层）
 
 - id: conductor.proxy-authorization-persistence
   scope: global
   level: T2
   why: |
-    工具层已经要求「任务级授权 + 调用前校验 + 没有授权什么都不做」，但授权本身还没有来源：
-    真实用户在哪里授予、怎么落盘、怎么回放，都还没有实现（产品级总缺口见 tests/gaps.yaml 的 core.agency-mode）。
-    范围口径已定为**全权**（不做细粒度范围/期限），所以这一条的剩余部分只是“授权事实的来源与持久化”。
+    工具层已经要求「任务级授权 + 调用前校验 + 没有授权什么都不做」，授权本身也有落点（会话 meta 的
+    `delegation` + 授予时间，代理会话由 `create_proxy` 写入），但**真实用户的授予入口**还没有：
+    授权只能在测试里注入（产品级总缺口见 tests/gaps.yaml 的 core.agency-mode）。
+    范围口径已定为**全权**（不做细粒度范围 / 期限），所以剩余部分是「授予事实的来源与产品入口」。
   how: |
-    在会话 meta 里落一个**全权委托标志 + 授予时间**，并追加一条可回放的 delegation 转录事件（授予）；
-    建工作时由真实用户授予（新建入口带上它）；在工具执行前从这份事实构造 Grant（tools = 角色表发放的
-    整套代理工具面）并校验；无委托一律拒绝。
+    建代理会话时由真实用户授予（呈现层入口带上它），并把授予作为一条可回放的 delegation 记录落档；
+    工具执行前从这份事实构造 Grant（tools = 角色表发放的整套代理工具面）并校验。
   accept: |
     有委托时六项工具在范围内运行；无委托时明确拒绝且无副作用；委托事实可从 meta 与转录追溯、重启后重建一致。
-  blocked_by: 缺少实现
+  blocked_by: 缺少实现（随产品入口一起）
 
 - id: conductor.proxy-permission-state
   scope: global
   level: T2
   why: |
-    用户已决定：**撤销委托本轮不做**——它本质是“会话权限状态”（谁能对这条会话做什么），
-    与停止/暂停无关，要单独做。所以“撤销即时生效、撤销后回到点名”还没有实现路径。
+    用户已决定：**撤销委托本轮不做**——它本质是「会话权限状态」（谁能对这条会话做什么），
+    与停止 / 暂停无关，要单独做。所以「撤销即时生效、撤销后回到点名」还没有实现路径。
   how: |
-    定义会话权限状态（授予/撤销、范围与有效期、调用者身份、当前主会话与目标子会话），落盘且可回放；
+    定义会话权限状态（授予 / 撤销、范围与有效期、调用者身份、当前主会话与目标子会话），落盘且可回放；
     撤销后核心不能继续派发或代答，回到点名。届时把 core.agency-mode 的撤销部分销账。
   accept: |
     权限状态可授予、可撤销、可从转录与工具台账追溯；撤销即时生效，之后代理工具一律拒绝。

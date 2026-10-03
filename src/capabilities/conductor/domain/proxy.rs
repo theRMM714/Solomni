@@ -1,7 +1,6 @@
 //! 核心代理（core_proxy）工具的纯逻辑：入参解析、授权校验、载荷规整与回执拼装。
 //!
 //! 它不认识会话、不碰任何端口：外部动作一律经 conductor::ports::ProxyHost（见 service/proxy.rs）。
-#![allow(dead_code)] // 见 docs/testing/quality-isolation.md §三：几个枚举辅助（Source::UserOriginal / as_str 系列）只被测试与 FakeProxyHost 用到
 
 use serde::{Deserialize, Serialize};
 
@@ -36,6 +35,9 @@ pub enum Source {
     /// 核心代用户做的（核心转达一律如此标记）。
     CoreProxy,
     /// 用户原话（保留独立来源引用，不伪装成核心生成的内容）。
+    /// 当前生产路径只构造 `CoreProxy`（核心代答）；这一支是工具契约的词汇
+    /// （见 docs/testing/quality-isolation.md §三），接入「用户原话原样转达」时用它。
+    #[allow(dead_code)]
     UserOriginal,
 }
 
@@ -159,12 +161,6 @@ impl SessionMode {
             other => Err(format!("mode 只能是 single 或 multi：{}", other)),
         }
     }
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Single => "single",
-            Self::Multi => "multi",
-        }
-    }
 }
 
 /// send_session_message 的消息种类。
@@ -226,14 +222,6 @@ impl ObserveView {
             )),
         }
     }
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Status => "status",
-            Self::Pending => "pending",
-            Self::Artifacts => "artifacts",
-            Self::Full => "full",
-        }
-    }
 }
 
 /// control_session 的动作。
@@ -266,6 +254,55 @@ impl ControlAction {
             Self::Stop => "stop",
             Self::Close => "close",
         }
+    }
+}
+
+/// 协作子会话的**落门方式**：代理转达一条消息时，按目标"此刻等的是哪一关"决定送到哪里。
+/// 与前端读 `pending.kind` 再选动作是同一口径（`Pending::decision_parts`）——
+/// 别处不许再按消息种类猜门（猜错就会把"开工"按到"请教"上）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GateRoute {
+    /// 二选一的关（代拟名单）：短步骤，不跑泵。
+    ConfirmSlate,
+    /// 二选一的关（开始讨论）：跑泵。
+    Begin,
+    /// 其余门（请教 / 方案待审 / 节点没过）：自由文本，由协作自己的核心 AI 判明确性。
+    Decide,
+    /// 没在等门（停在中途 / 已收敛）：把它推着接着走，而不是塞一句"没有等你定的事"。
+    Resume,
+}
+
+/// 从"等的是哪一关"（`Pending::decision_parts().0`；None = 没在等门）定落门方式。
+pub fn gate_route(pending: Option<&str>) -> GateRoute {
+    match pending {
+        Some("confirm_slate") => GateRoute::ConfirmSlate,
+        Some("confirm_begin") => GateRoute::Begin,
+        Some(_) => GateRoute::Decide,
+        None => GateRoute::Resume,
+    }
+}
+
+/// 一次控制动作写进目标会话的**可回放记录**文案（机制写，前端照同一条显示）。
+/// 记的是"谁、为什么动了这条会话"——不静默改运行态。
+pub fn control_note(action: ControlAction, reason: &str) -> String {
+    format!("[代理] {} 这条会话：{}", action.as_str(), reason)
+}
+
+/// 一次转达写进目标会话的**来源记录**文案：说清接下来这条**不是用户原话**。
+/// 核心生成的正文不能伪装成用户发言（见 `Source`）——这条记录是它的可回放凭据。
+pub fn relay_note(msg: &Relayed) -> String {
+    let who = match msg.source {
+        Source::CoreProxy => "核心代理转达",
+        Source::UserOriginal => "用户原话",
+    };
+    match msg.source_ref.as_deref() {
+        Some(r) => format!(
+            "[代理] 接下来这条由{}（{}；来源：{}）",
+            who,
+            msg.kind.as_str(),
+            r
+        ),
+        None => format!("[代理] 接下来这条由{}（{}）", who, msg.kind.as_str()),
     }
 }
 
@@ -929,6 +966,44 @@ mod tests {
         let all = render_catalog(CatalogScope::All, &c).unwrap();
         assert!(all.contains("modules"));
         assert!(all.contains("models"));
+    }
+
+    /// 落门方式只看"它此刻等的是哪一关"：二选一走确认，其余门走裁决，没在等门就接着推进。
+    #[test]
+    fn gate_route_follows_the_pending_kind() {
+        assert_eq!(gate_route(Some("confirm_slate")), GateRoute::ConfirmSlate);
+        assert_eq!(gate_route(Some("confirm_begin")), GateRoute::Begin);
+        for kind in ["ask", "plan_review", "node_blocked"] {
+            assert_eq!(gate_route(Some(kind)), GateRoute::Decide, "{}", kind);
+        }
+        assert_eq!(gate_route(None), GateRoute::Resume);
+    }
+
+    /// 转达与控制都要留下"谁、为什么"的可回放记录；核心代答要点明正文出自代理。
+    #[test]
+    fn notes_record_who_really_said_it() {
+        let msg = Relayed {
+            kind: MessageKind::UserReply,
+            source: Source::CoreProxy,
+            source_ref: Some("用户第 3 句".to_string()),
+            parent: None,
+            text: "好".to_string(),
+        };
+        let note = relay_note(&msg);
+        assert!(
+            note.contains("核心代理转达") && note.contains("用户第 3 句"),
+            "{}",
+            note
+        );
+        assert!(note.contains("user_reply"), "{}", note);
+        let no_ref = Relayed {
+            source_ref: None,
+            kind: MessageKind::Task,
+            ..msg.clone()
+        };
+        assert!(relay_note(&no_ref).contains("task"));
+        let ctl = control_note(ControlAction::Pause, "先冻上");
+        assert!(ctl.contains("pause") && ctl.contains("先冻上"), "{}", ctl);
     }
 
     /// 消息倒查的边界：`from` 以最新为 0、`count` 有上下界、缺省是 0/10。

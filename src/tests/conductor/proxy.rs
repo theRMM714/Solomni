@@ -446,7 +446,7 @@ pub(crate) fn declaration_shape_is_enforced_before_semantics() {
     );
 }
 /// 真实宿主（队列桥）：catalog 读登记处、observe 不回正文、messages 倒查到真实转录；
-/// 未实现的三个如实报错，不假装成功。
+/// 目标不存在 / 未实现的一律如实报错，不假装成功。
 #[test]
 pub(crate) fn the_real_bridge_reads_catalog_and_session_messages() {
     use crate::capabilities::conductor::ports::ProxyHost;
@@ -728,4 +728,197 @@ pub(crate) fn a_finished_child_notifies_the_proxy_without_dumping_its_transcript
     let text = serde_json::to_string(&events).expect("JSON");
     assert!(text.contains("子会话"), "通知行该落进代理会话：{}", text);
     assert!(!text.contains("做事"), "不得把子会话的转录灌进来：{}", text);
+}
+
+/// 运行态是**落盘事实**：暂停后派发与唤醒一律被拒，关闭是终态，resume 解冻后接着走。
+#[test]
+pub(crate) fn run_state_gates_dispatch_and_survives_pause_close() {
+    use crate::capabilities::conductor::ports::ProxyHost;
+    use crate::capabilities::conductor::service::proxy::ProxyBridge;
+    use crate::capabilities::workspace::api::ModuleManifest;
+
+    let module = Module {
+        manifest: ModuleManifest {
+            id: "m1".to_string(),
+            brief: "测试模块".to_string(),
+            system: "你负责测试。".to_string(),
+            runtimes: Vec::new(),
+            tools: BTreeMap::new(),
+        },
+        root: PathBuf::from("modules").join("m1"),
+    };
+    let (handle, ops) = super::super::ops_with(vec![module], vec![]);
+    let (work, _) = ops
+        .sessions
+        .create_work(super::super::single_work("w-run", &["m1"]))
+        .expect("建工作");
+    let sid = work.sid.clone();
+    let bridge: Arc<dyn ProxyHost + Send + Sync> = Arc::new(ProxyBridge::new(handle.clone()));
+    let msg = d::Relayed {
+        kind: d::MessageKind::Task,
+        source: d::Source::CoreProxy,
+        source_ref: None,
+        parent: None,
+        text: "做事".to_string(),
+    };
+
+    // 暂停：运行态落盘 + 回执如实；转达与"取会话去生成"两道闸都拒绝。
+    let st = bridge
+        .control(&sid, d::ControlAction::Pause, "先冻上")
+        .expect("暂停");
+    assert_eq!(st.state, "paused");
+    assert_eq!(
+        ops.history.open(&sid).expect("meta").0.run,
+        RunState::Paused,
+        "暂停是落盘事实，不是内存状态"
+    );
+    assert!(bridge.send(&sid, &msg).unwrap_err().contains("已暂停"));
+    let taken = handle.call({
+        let s = sid.clone();
+        move |core| core.take_single(&s).map(|_| ())
+    });
+    assert!(
+        taken.unwrap_err().contains("已暂停"),
+        "叫醒路径也要被拦：暂停的会话不许被取去生成"
+    );
+    assert_eq!(
+        bridge
+            .observe(&sid, d::ObserveView::Status, None)
+            .expect("观察")
+            .state,
+        "paused"
+    );
+    let replay = serde_json::to_string(&ops.history.open(&sid).expect("回放").1).expect("JSON");
+    assert!(
+        replay.contains("先冻上"),
+        "控制原因要进可回放记录：{}",
+        replay
+    );
+
+    // 关闭：终态（此刻没在跑，允许关）。
+    let st = bridge
+        .control(&sid, d::ControlAction::Close, "不做了")
+        .expect("关闭");
+    assert_eq!(st.state, "closed");
+    assert_eq!(
+        ops.history.open(&sid).expect("meta").0.run,
+        RunState::Closed
+    );
+    assert!(bridge.send(&sid, &msg).unwrap_err().contains("已关闭"));
+    assert!(bridge
+        .control(&sid, d::ControlAction::Resume, "想反悔")
+        .unwrap_err()
+        .contains("已关闭"));
+
+    // 恢复：解冻后派发放行（这条没在等门，接着走的是"继续"）。
+    let (w2, _) = ops
+        .sessions
+        .create_work(super::super::single_work("w-run-2", &["m1"]))
+        .expect("建工作");
+    let sid2 = w2.sid.clone();
+    bridge
+        .control(&sid2, d::ControlAction::Pause, "先冻上")
+        .expect("暂停");
+    let st = bridge
+        .control(&sid2, d::ControlAction::Resume, "接着做")
+        .expect("恢复");
+    assert_eq!(st.state, "active");
+    assert_eq!(
+        ops.history.open(&sid2).expect("meta").0.run,
+        RunState::Active
+    );
+}
+
+/// 转达的来源进目标会话的可回放记录：核心生成的内容不冒充用户原文。
+#[test]
+pub(crate) fn relay_records_its_source_on_the_target() {
+    use crate::capabilities::conductor::ports::ProxyHost;
+    use crate::capabilities::conductor::service::proxy::ProxyBridge;
+    use crate::capabilities::workspace::api::ModuleManifest;
+
+    let module = Module {
+        manifest: ModuleManifest {
+            id: "m1".to_string(),
+            brief: "测试模块".to_string(),
+            system: "你负责测试。".to_string(),
+            runtimes: Vec::new(),
+            tools: BTreeMap::new(),
+        },
+        root: PathBuf::from("modules").join("m1"),
+    };
+    let (handle, ops) = super::super::ops_with(vec![module], vec![]);
+    let (work, _) = ops
+        .sessions
+        .create_work(super::super::single_work("w-relay", &["m1"]))
+        .expect("建工作");
+    let sid = work.sid.clone();
+    let bridge: Arc<dyn ProxyHost + Send + Sync> = Arc::new(ProxyBridge::new(handle));
+    let msg = d::Relayed {
+        kind: d::MessageKind::UserReply,
+        source: d::Source::CoreProxy,
+        source_ref: Some("用户第 3 句".to_string()),
+        parent: None,
+        text: "照这个做".to_string(),
+    };
+    bridge.send(&sid, &msg).expect("转达");
+    let replay = serde_json::to_string(&ops.history.open(&sid).expect("回放").1).expect("JSON");
+    assert!(replay.contains("核心代理转达"), "{}", replay);
+    assert!(replay.contains("用户第 3 句"), "来源引用要落档：{}", replay);
+    assert!(replay.contains("user_reply"), "{}", replay);
+}
+
+/// 真实宿主：mode=multi 建的是**协作子工作**（复用既有协作与节点会话机制，不另起一套）。
+#[test]
+pub(crate) fn the_real_bridge_creates_a_multi_agent_child_work() {
+    use crate::capabilities::conductor::ports::ProxyHost;
+    use crate::capabilities::conductor::service::proxy::ProxyBridge;
+    use crate::capabilities::workspace::api::ModuleManifest;
+
+    let module = |id: &str| Module {
+        manifest: ModuleManifest {
+            id: id.to_string(),
+            brief: "测试模块".to_string(),
+            system: "你负责测试。".to_string(),
+            runtimes: Vec::new(),
+            tools: BTreeMap::new(),
+        },
+        root: PathBuf::from("modules").join(id),
+    };
+    let (handle, ops) = super::super::ops_with(vec![module("m1"), module("m2")], vec![]);
+    let (parent, _) = ops
+        .sessions
+        .create_work(super::super::single_work("w-parent-multi", &["m1"]))
+        .expect("建父工作");
+    let bridge: Arc<dyn ProxyHost + Send + Sync> = Arc::new(ProxyBridge::new(handle));
+    let mut tools = ProxyTools::new(bridge, test_systools().tools, test_prompts().tools());
+    let c = d::ProxyCall {
+        source: d::Source::CoreProxy,
+        grant: Some(full_grant()),
+        parent: Some(parent.sid.clone()),
+        now: 1000,
+    };
+    let args = r#"{"mode":"multi","agents":[{"name":"c1","modules":["m1"],"objective":"一"},{"name":"c2","modules":["m2"],"objective":"二"}],"request_id":"m1"}"#;
+    let out = tools.call(&c, d::CREATE, args);
+    assert!(out.ok, "{}", out.output);
+    let v: serde_json::Value = serde_json::from_str(&out.output).expect("JSON");
+    let child = v["session"].as_str().expect("有会话引用").to_string();
+    let agents: Vec<&str> = v["agents"]
+        .as_array()
+        .expect("有名单")
+        .iter()
+        .filter_map(|a| a.as_str())
+        .collect();
+    assert_eq!(agents, vec!["c1", "c2"], "{}", out.output);
+    let (meta, _) = ops.history.open(&child).expect("能打开子工作");
+    assert_eq!(meta.mode, "collab", "multi 建的是协作工作");
+    assert_eq!(meta.parent.as_deref(), Some(parent.sid.as_str()));
+    assert!(meta.own_work, "子工作有自己的 work/ 与沙箱");
+    assert!(
+        meta.task.is_some(),
+        "协作必须有本次需求（各 agent 的 objective 合成）"
+    );
+    // 同一模块不得同时属于两个 agent（登记处事实核对在调用前完成，不留半成品）。
+    let dup = r#"{"mode":"multi","agents":[{"name":"c1","modules":["m1"],"objective":"一"},{"name":"c2","modules":["m1"],"objective":"二"}],"request_id":"m2"}"#;
+    let out = tools.call(&c, d::CREATE, dup);
+    assert!(!out.ok && out.output.contains("同一模块"), "{}", out.output);
 }
