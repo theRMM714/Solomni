@@ -369,13 +369,14 @@ pub struct NewAgent {
     pub objective: String,
 }
 
-/// 一条要转达的消息的元信息（正文由调用方另给）。
+/// 一条要转达的消息（元信息 + 正文）：正文由工具层从参数取，宿主据此真正投递。
 #[derive(Debug, Clone, PartialEq)]
 pub struct Relayed {
     pub kind: MessageKind,
     pub source: Source,
     pub source_ref: Option<String>,
     pub parent: Option<String>,
+    pub text: String,
 }
 
 // ---------- 入参（形状由 systools/tools.yaml 声明驱动；这里做语义校验） ----------
@@ -562,6 +563,7 @@ pub fn relay(args: &SendArgs, call: &ProxyCall) -> Result<(Vec<String>, Relayed)
             source: call.source,
             source_ref,
             parent: call.parent.clone(),
+            text: args.message.trim().to_string(),
         },
     ))
 }

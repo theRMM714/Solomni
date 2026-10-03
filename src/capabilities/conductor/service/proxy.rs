@@ -271,3 +271,265 @@ fn json_ok<T: serde::Serialize>(v: &T) -> ToolOutcome {
         Err(e) => deny(format!("回执序列化失败：{}", e)),
     }
 }
+// ---------- 真实宿主：Conductor 的代理方法族 + 队列桥 ----------
+
+use super::Conductor;
+use crate::capabilities::conductor::api::ConductorHandle;
+
+fn tool_mode_str(m: crate::capabilities::llm::api::ToolMode) -> String {
+    match m {
+        crate::capabilities::llm::api::ToolMode::Native => "native".to_string(),
+        crate::capabilities::llm::api::ToolMode::Envelope => "envelope".to_string(),
+    }
+}
+
+impl Conductor {
+    /// 一个会话的转录行（回放口径）：观察计数与消息倒查共用，避免两处各解析一遍。
+    fn proxy_lines(
+        &self,
+        sid: &str,
+    ) -> Result<Vec<crate::capabilities::session::api::LineView>, String> {
+        let (_, events) = self.history_open(sid)?;
+        let mut out = Vec::new();
+        for ev in &events {
+            if ev.get("type").and_then(|t| t.as_str()) != Some("transcript") {
+                continue;
+            }
+            let Some(arr) = ev.get("lines").and_then(|l| l.as_array()) else {
+                continue;
+            };
+            for l in arr {
+                if let Ok(v) =
+                    serde_json::from_value::<crate::capabilities::session::api::LineView>(l.clone())
+                {
+                    out.push(v);
+                }
+            }
+        }
+        Ok(out)
+    }
+
+    /// 产物索引：共享区与各 agent 沙箱里的**相对路径**（不泄漏真实私有路径）。
+    fn proxy_artifacts(&self, sid: &str) -> Result<Vec<String>, String> {
+        let files = self.files_view(sid)?;
+        let mut out: Vec<String> = files.work.iter().map(|p| format!("work/{}", p)).collect();
+        for a in &files.agents {
+            for p in &a.files {
+                out.push(format!("{}/{}", a.name, p));
+            }
+        }
+        Ok(out)
+    }
+
+    /// 代理工具：只读清单（agent / 模块 / 模型），只回公开事实，不碰密钥与私有路径。
+    pub fn proxy_catalog(&self, scope: d::CatalogScope) -> Result<d::Catalog, String> {
+        let agents = if scope.covers_agents() {
+            self.registry()
+                .agent_views()
+                .into_iter()
+                .map(|v| d::AgentFact {
+                    name: v.name,
+                    modules: v.modules,
+                    model: v.model,
+                    note: v.note,
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let modules = if scope.covers_modules() {
+            self.scan()
+                .modules
+                .iter()
+                .map(|m| d::ModuleFact {
+                    id: m.manifest.id.clone(),
+                    tools: m.manifest.tools.keys().cloned().collect(),
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let models = if scope.covers_models() {
+            self.registry()
+                .model_views()
+                .into_iter()
+                .map(|v| d::ModelFact {
+                    id: v.id,
+                    name: v.name,
+                    tools: tool_mode_str(v.tools),
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+        Ok(d::Catalog {
+            agents,
+            modules,
+            models,
+        })
+    }
+
+    /// 代理工具：观察（元信息；**不回消息正文**）。
+    pub fn proxy_observe(
+        &self,
+        sid: &str,
+        view: d::ObserveView,
+        _since: Option<&str>,
+    ) -> Result<d::Snapshot, String> {
+        if self.history_open(sid).is_err() {
+            return Err(format!("无此会话：{}", sid));
+        }
+        let list = self.history_list();
+        let sv = self.session_views(&list).into_iter().find(|v| v.sid == sid);
+        let state = match &sv {
+            Some(v) if v.running => "running",
+            Some(v) if v.done => "done",
+            _ => "idle",
+        };
+        let want = |w: d::ObserveView| view == d::ObserveView::Full || view == w;
+        let pending = if want(d::ObserveView::Pending) {
+            sv.as_ref()
+                .and_then(|v| v.pending.clone())
+                .map(|p| vec![p.to_string()])
+        } else {
+            None
+        };
+        let artifacts = if want(d::ObserveView::Artifacts) {
+            Some(self.proxy_artifacts(sid)?)
+        } else {
+            None
+        };
+        let message_count = Some(self.proxy_lines(sid)?.len());
+        Ok(d::Snapshot {
+            session: sid.to_string(),
+            state: state.to_string(),
+            pending,
+            artifacts,
+            message_count,
+            cursor: message_count.map(|n| n.to_string()),
+        })
+    }
+
+    /// 代理工具：消息倒查（0 = 最新一条，按新→旧）。
+    pub fn proxy_messages(
+        &self,
+        sid: &str,
+        from: usize,
+        count: usize,
+    ) -> Result<d::MessagesPage, String> {
+        let lines = self.proxy_lines(sid)?;
+        let total = lines.len();
+        let mut out = Vec::new();
+        let mut i = from;
+        while i < total && out.len() < count {
+            let l = &lines[total - 1 - i];
+            out.push(d::MessageLine {
+                id: l.id,
+                speaker: l.speaker.clone(),
+                verb: l.verb.clone(),
+                kind: l.kind.clone(),
+                text: l.line.clone(),
+            });
+            i += 1;
+        }
+        let next = if i < total { Some(i) } else { None };
+        Ok(d::MessagesPage {
+            session: sid.to_string(),
+            messages: out,
+            next,
+        })
+    }
+
+    /// 代理工具：建**子工作**（阶段 2 的下一步）。
+    pub fn proxy_create(&mut self, _spec: &d::NewSession) -> Result<d::Created, String> {
+        Err("代理建子工作尚未实现（下一步）".to_string())
+    }
+
+    /// 代理工具：转达（阶段 2 的下一步）。
+    pub fn proxy_send(&mut self, _target: &str, _msg: &d::Relayed) -> Result<(), String> {
+        Err("代理转达尚未实现（下一步）".to_string())
+    }
+
+    /// 代理工具：控制（阶段 2 的下一步）。
+    pub fn proxy_control(
+        &mut self,
+        _sid: &str,
+        _action: d::ControlAction,
+        _reason: &str,
+    ) -> Result<d::ControlState, String> {
+        Err("代理控制尚未实现（下一步）".to_string())
+    }
+}
+
+/// 代理工具的**队列宿主**：把 ProxyHost 的每个方法交给核心线程执行。
+///
+/// 为什么需要它：代理工具会改核心状态（建会话 / 派发），而模型循环跑在工作线程上——
+/// 状态所有权不变（只有核心线程写），这里只做“发一条命令并等回包”。
+/// `mpsc::Sender` 不是 `Sync`，所以用一把锁串行化入队；入队本身不参与任何业务判定。
+pub struct ProxyBridge {
+    handle: std::sync::Mutex<ConductorHandle>,
+}
+
+impl ProxyBridge {
+    pub fn new(handle: ConductorHandle) -> ProxyBridge {
+        ProxyBridge {
+            handle: std::sync::Mutex::new(handle),
+        }
+    }
+
+    fn call<T, F>(&self, f: F) -> Result<T, String>
+    where
+        T: Send + 'static,
+        F: FnOnce(&mut Conductor) -> Result<T, String> + Send + 'static,
+    {
+        let handle = self.handle.lock().unwrap_or_else(|e| e.into_inner());
+        handle.call(f)
+    }
+}
+
+impl ProxyHost for ProxyBridge {
+    fn catalog(&self, scope: d::CatalogScope) -> Result<d::Catalog, String> {
+        self.call(move |core| core.proxy_catalog(scope))
+    }
+
+    fn create_session(&self, spec: &d::NewSession) -> Result<d::Created, String> {
+        let spec = spec.clone();
+        self.call(move |core| core.proxy_create(&spec))
+    }
+
+    fn send(&self, target: &str, msg: &d::Relayed) -> Result<(), String> {
+        let (target, msg) = (target.to_string(), msg.clone());
+        self.call(move |core| core.proxy_send(&target, &msg))
+    }
+
+    fn observe(
+        &self,
+        session: &str,
+        view: d::ObserveView,
+        since: Option<&str>,
+    ) -> Result<d::Snapshot, String> {
+        let session = session.to_string();
+        let since = since.map(|s| s.to_string());
+        self.call(move |core| core.proxy_observe(&session, view, since.as_deref()))
+    }
+
+    fn control(
+        &self,
+        session: &str,
+        action: d::ControlAction,
+        reason: &str,
+    ) -> Result<d::ControlState, String> {
+        let (session, reason) = (session.to_string(), reason.to_string());
+        self.call(move |core| core.proxy_control(&session, action, &reason))
+    }
+
+    fn messages(
+        &self,
+        session: &str,
+        from: usize,
+        count: usize,
+    ) -> Result<d::MessagesPage, String> {
+        let session = session.to_string();
+        self.call(move |core| core.proxy_messages(&session, from, count))
+    }
+}

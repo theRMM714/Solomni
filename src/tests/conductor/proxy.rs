@@ -445,3 +445,92 @@ pub(crate) fn declaration_shape_is_enforced_before_semantics() {
         host.calls()
     );
 }
+/// 真实宿主（队列桥）：catalog 读登记处、observe 不回正文、messages 倒查到真实转录；
+/// 未实现的三个如实报错，不假装成功。
+#[test]
+pub(crate) fn the_real_bridge_reads_catalog_and_session_messages() {
+    use crate::capabilities::conductor::ports::ProxyHost;
+    use crate::capabilities::conductor::service::proxy::ProxyBridge;
+    use crate::capabilities::workspace::api::ModuleManifest;
+
+    let module = Module {
+        manifest: ModuleManifest {
+            id: "m1".to_string(),
+            brief: "测试模块".to_string(),
+            system: "你负责测试。".to_string(),
+            runtimes: Vec::new(),
+            tools: BTreeMap::new(),
+        },
+        root: PathBuf::from("modules").join("m1"),
+    };
+    let (handle, ops) = super::super::ops_with(vec![module], vec![]);
+    let (opened, _head) = ops
+        .sessions
+        .create_work(super::super::single_work("w-real", &["m1"]))
+        .expect("建工作");
+    let sid = opened.sid.clone();
+    // 直接追一条转录行：倒查的确定性不依赖模型通道。
+    let ev = serde_json::json!({
+        "type": "transcript",
+        "lines": [{"id": 7, "line": "第一条", "speaker": "用户", "verb": "说", "kind": "user"}]
+    });
+    {
+        let sid = sid.clone();
+        handle
+            .call(move |core| core.history_append(&sid, &[ev]))
+            .expect("追一条转录");
+    }
+
+    let bridge: Arc<dyn ProxyHost + Send + Sync> = Arc::new(ProxyBridge::new(handle.clone()));
+    let mut tools = ProxyTools::new(bridge, test_systools().tools, test_prompts().tools());
+    let c = ctx(Some(full_grant()));
+
+    // 清单：只回公开事实（模型视图里没有密钥字段）。
+    let out = tools.call(&c, d::CATALOG, r#"{"scope":"all"}"#);
+    assert!(out.ok, "{}", out.output);
+    assert!(out.output.contains("m1"), "{}", out.output);
+    assert!(!out.output.contains("api_key"), "{}", out.output);
+
+    // 观察：回元信息（含消息条数），不回正文。
+    let args = format!(r#"{{"session_id":"{}","view":"status"}}"#, sid);
+    let out = tools.call(&c, d::OBSERVE, &args);
+    assert!(out.ok, "{}", out.output);
+    let v: serde_json::Value = serde_json::from_str(&out.output).expect("JSON");
+    assert!(
+        v["message_count"].as_u64().unwrap_or(0) >= 1,
+        "{}",
+        out.output
+    );
+    assert!(
+        !out.output.contains("第一条"),
+        "观察不得回正文：{}",
+        out.output
+    );
+
+    // 倒查：0 = 最新一条。
+    let args = format!(r#"{{"session_id":"{}","from":0,"count":1}}"#, sid);
+    let out = tools.call(&c, d::MESSAGES, &args);
+    assert!(out.ok, "{}", out.output);
+    let w: serde_json::Value = serde_json::from_str(&out.output).expect("JSON");
+    assert_eq!(w["messages"][0]["text"], "第一条", "{}", out.output);
+
+    // 未实现的三个：如实报错，不假装成功。
+    let out = tools.call(
+        &c,
+        d::CREATE,
+        r#"{"mode":"single","agents":[{"name":"x","modules":["m1"],"objective":"y"}],"request_id":"z"}"#,
+    );
+    assert!(!out.ok && out.output.contains("尚未实现"), "{}", out.output);
+    let out = tools.call(
+        &c,
+        d::SEND,
+        r#"{"targets":["s1"],"message":"好","kind":"task","request_id":"z2"}"#,
+    );
+    assert!(!out.ok && out.output.contains("尚未实现"), "{}", out.output);
+    let out = tools.call(
+        &c,
+        d::CONTROL,
+        r#"{"session_id":"s1","action":"stop","reason":"停","request_id":"z3"}"#,
+    );
+    assert!(!out.ok && out.output.contains("尚未实现"), "{}", out.output);
+}

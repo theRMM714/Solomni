@@ -59,6 +59,8 @@ fn meta(name: &str) -> SessionMeta {
         exec: ExecSpec::default(),
         parent: None,
         node: None,
+        delegation: None,
+        own_work: false,
     }
 }
 

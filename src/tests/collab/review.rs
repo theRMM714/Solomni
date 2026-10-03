@@ -121,6 +121,8 @@ pub(crate) fn mode_vocabulary_is_single_or_collab_only() {
         exec: ExecSpec::default(),
         parent: None,
         node: None,
+        delegation: None,
+        own_work: false,
     })
     .unwrap();
     // 内存里没有这个会话 → 走 rebuild_session，对未知形态如实报错。

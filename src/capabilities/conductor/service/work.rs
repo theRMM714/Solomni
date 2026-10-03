@@ -516,6 +516,8 @@ impl Conductor {
             // 顶层会话：没有编排者，也没有节点（子会话由 spawn_sub_session 建）。
             parent: None,
             node: None,
+            delegation: None,
+            own_work: false,
             // 档位来自**用户在创建向导里的选择**（默认 = 设置里的档位）；承载不了由下面如实拒绝。
             exec: crate::capabilities::workspace::api::ExecSpec {
                 tier: spec.tier,

@@ -1013,6 +1013,8 @@ pub(crate) fn session_meta_exec_section_roundtrips_and_reads_legacy_meta() {
         },
         parent: None,
         node: None,
+        delegation: None,
+        own_work: false,
     };
     let text = yaml_serde::to_string(&meta).expect("序列化");
     let back: SessionMeta = yaml_serde::from_str(&text).expect("反序列化");

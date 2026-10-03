@@ -25,18 +25,45 @@ pub struct SessionMeta {
     #[serde(default)]
     pub exec: crate::capabilities::workspace::api::ExecSpec,
     /// 谁编排的（子会话 = 父会话名；顶层会话为空）。
-    /// 也是**沙箱锚点**：子会话与父会话共用一套工作区（协作的产物要在一起）。
+    /// 也是**沙箱锚点**（协作的节点子会话与父会话共用一套工作区，产物要在一起）。
     #[serde(default)]
     pub parent: Option<String>,
     /// 这个子会话服务任务链里的哪个节点（顶层会话为空）。
     #[serde(default)]
     pub node: Option<String>,
+    /// 任务级委托（全权）：`Some` = 这条会话的核心可以用代理工具代用户决定。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delegation: Option<Delegation>,
+    /// 工作区锚点：`false`（缺省）= 与父会话**共用**一套工作区（协作的节点子会话）；
+    /// `true` = 这是代理在父会话下建的**子工作**，有自己的 `work/` 与沙箱——
+    /// 只有"谁编排的"仍是父会话。
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub own_work: bool,
+}
+
+/// 任务级委托：代理模式下，真实用户把决定权**整块**交给核心（全权）。
+/// 本轮不做范围/期限/撤销——它只是一个存在标志与授予时间；
+/// 细粒度权限与撤销属独立的"会话权限状态"能力
+/// （见 src/capabilities/conductor/testgaps.yaml 的 conductor.proxy-permission-state）。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Delegation {
+    /// 授予时间（Unix 秒）：授予由真实用户在建工作时完成。
+    pub granted_at: i64,
+}
+
+fn is_false(b: &bool) -> bool {
+    !*b
 }
 
 impl SessionMeta {
-    /// 沙箱锚点：子会话锚在父会话上，顶层会话锚在自己身上。
+    /// 沙箱锚点：**子工作**锚在自己身上（自己的 work/ 与沙箱）；
+    /// 其余子会话（协作的节点会话）锚在父会话上；顶层会话锚在自己身上。
     pub fn work(&self) -> &str {
-        self.parent.as_deref().unwrap_or(&self.name)
+        if self.own_work {
+            &self.name
+        } else {
+            self.parent.as_deref().unwrap_or(&self.name)
+        }
     }
 }
 

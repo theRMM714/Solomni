@@ -700,6 +700,8 @@ pub(crate) fn seed_session(
         exec,
         parent: None,
         node: None,
+        delegation: None,
+        own_work: false,
     })
     .unwrap();
 }
