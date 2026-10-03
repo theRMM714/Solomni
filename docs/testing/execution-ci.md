@@ -59,8 +59,19 @@ node run-tests.js --fence-live
 - Node 的**管道 stdio 捕获被拒（EPERM）**→ L4 收尾的围栏回收 `status` 为 null、输出为空，
   被判成"本机留下了没人管的痕迹"（见 `tests/cross-platform/gaps.yaml` 的 harness.fence-clean-under-restricted-token）。
 
-判据：`whoami /groups` 里出现 `Mandatory Label\Low Mandatory Level` 就是这种会话。要验真机结论，
-请在普通 PowerShell 窗口里跑 `node run-tests.js`（需要真机围栏时再加 `--fence-live`）。
+判据：`whoami /groups` 里出现 `Mandatory Label\Low Mandatory Level` 就是这种会话。
+
+**这种会话里要拿到可信结论，只有两条路，按优先级：**
+
+1. **换普通 shell（推荐，也是唯一的常规路径）**：在不受限的 PowerShell 窗口里跑同一份门禁
+   （`node run-tests.js`；要验真机围栏再加 `--fence-live`，那会改本机状态，只在一次性 runner 或明确授权的机器上做）。
+2. **对这一次执行放宽沙箱（提权）**：只能在受限会话里跑时，可为**单次执行**申请放宽到不受限，
+   批准范围仅限该次、只用于本来被沙箱拒掉的动作用。两条硬约束：
+   - **必须有人批准**：批准不到的会话会一直等着、根本不发车——所以它不是默认路径，也不该写进自动化；
+   - 放宽只解决"环境不允许"，**不替代**真机围栏验收：`--fence-live` 仍然只在一次性环境里跑。
+
+> 这条提权路径**尚未在本项目里被实际验证过**（申请两次都因无人批准而未启动），所以按"过程而非既定能力"对待：
+> 现状与销账口径见 `tests/cross-platform/gaps.yaml` 的 `harness.local-run-elevation-unverified`。
 
 ### CI（GitHub Actions）：跨平台与真机的唯一事实来源
 
