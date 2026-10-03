@@ -49,17 +49,17 @@
   scope: global
   level: T3
   why: |
-    核心代理的生成循环与**用户入口**都已落地：`create_work(WorkMode::Proxy)` 建出代理会话
-    （没有名单、带全权委托、身份是 core_proxy 角色提示词），`POST /api/sessions` 的 mode 已接受 proxy，
-    读模型给出形态与运行态。剩下的是**呈现**：前端向导的第三种形态与代理视图
-    （核心对话 + 子会话树，子工作按多 agent 向内嵌套），以及 CLI 的对应入口。
+    核心代理的生成循环、**用户入口**与终端入口都已落地：`create_work(WorkMode::Proxy)` 建出代理会话
+    （没有名单、带全权委托、身份是 core_proxy 角色提示词），`POST /api/sessions` 的 mode 接受 proxy，
+    读模型给出形态与运行态并带 `run`，CLI 有 `proxy` 命令（与 single 同一条对话回路）。
+    剩下的是 **Web 前端**：建工作向导的第三种形态与代理视图（核心对话 + 子工作树，子工作按多 agent 向内嵌套）。
   how: |
     在 web 的建工作向导加第三种形态（选它就等于授予全权），并为代理会话做专属视图（核心转录 + 子工作树）+
-    侧栏标出暂停 / 关闭；CLI 加同一条入口。
+    侧栏标出已暂停 / 已关闭；补前端冒烟用例。
   accept: |
     用户能从界面建出代理会话、看着它代自己挑人建子工作、进子会话查看并干预；
-    已暂停 / 已关闭的会话在界面上一眼可辨；node run-tests.js 全绿。
-  blocked_by: 缺少呈现层实现
+    已暂停 / 已关闭的会话在界面上一眼可辨；node run-tests.js 全绿（含前端冒烟）。
+  blocked_by: 缺少前端实现（Web 向导与代理视图）
 
 - id: conductor.proxy-authorization-persistence
   scope: global

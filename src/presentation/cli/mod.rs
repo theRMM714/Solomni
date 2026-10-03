@@ -34,6 +34,7 @@ pub fn run(ops: Ops, web_default_port: u16) -> CliExit {
         match cmd.as_str() {
             "single" => single_flow(&ops, &arg),
             "collab" => collab_flow(&ops, &arg),
+            "proxy" => proxy_flow(&ops),
             "provider" => provider_flow(&ops, &arg),
             "model" => model_flow(&ops, &arg),
             "core" => core_flow(&ops, &arg),
@@ -156,7 +157,7 @@ fn print_menu(ops: &Ops) {
             model_label(a.model.as_deref())
         );
     }
-    println!("命令：single [agent名…] | collab [agent名…|?] | provider list|add|rm|discover | model list|add|rm | core <模型id> | rescan | webui | exit");
+    println!("命令：single [agent名…] | collab [agent名…|?] | proxy（决定权整块交给核心） | provider list|add|rm|discover | model list|add|rm | core <模型id> | rescan | webui | exit");
 }
 
 /// 模型标签（CLI 展示文案；核心默认是登记处的概念，不是提示词）。
@@ -393,7 +394,58 @@ fn single_flow(ops: &Ops, arg: &str) {
     }
 }
 
-// ---------- 模式三：协作（按核心 pending 驱动） ----------
+// ---------- 模式三：代理（决定权整块交给核心） ----------
+
+/// 把决定权整块交给核心：**没有名单**（核心自己挑人、建子工作），接着就是跟它对话。
+/// 选这一形态本身就是**授予全权**（`WorkMode::Proxy` → `meta.delegation`）。
+fn proxy_flow(ops: &Ops) {
+    let work_name = match ops.sessions.unique_work_name("proxy", "proxy") {
+        Ok(n) => n,
+        Err(e) => {
+            println!("[错误] {}", e);
+            return;
+        }
+    };
+    let tier = ops
+        .registry
+        .settings()
+        .map(|s| s.tier)
+        .unwrap_or(Tier::Host);
+    // 订阅起点：命令回包只给头部序号，事实一律从事件台按 since 取。
+    let mut cursor = ops.events.head();
+    let opened = match ops.sessions.create_work(WorkSpec {
+        name: work_name,
+        mode: WorkMode::Proxy,
+        agents: Vec::new(),
+        task: None,
+        delegate: false,
+        tier,
+    }) {
+        Ok(o) => o.0,
+        Err(e) => {
+            println!("[错误] {}", e);
+            return;
+        }
+    };
+    cursor = drain(ops, &opened.sid, cursor);
+    let sid = opened.sid;
+    println!("（核心代理 {} —— 输入消息，空行结束会话）", sid);
+    loop {
+        let say = prompt("你>");
+        if say.is_empty() {
+            break;
+        }
+        match ops.sessions.act(&sid, Action::Say(&say), Output::Final) {
+            Ok(acted) => follow(ops, &sid, &mut cursor, acted),
+            Err(e) => {
+                println!("[错误] {}", e);
+                break;
+            }
+        }
+    }
+}
+
+// ---------- 模式四：协作（按核心 pending 驱动） ----------
 
 fn collab_flow(ops: &Ops, arg: &str) {
     let trimmed = arg.trim();
