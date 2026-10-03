@@ -80,8 +80,6 @@ pub enum Segment {
     VerdictSystem,
     VerdictUser,
     /// 核心代理（core_proxy）的身份提示词：在用户授予的任务级授权范围内代用户决定与转达。
-    #[allow(dead_code)]
-    // 见 docs/testing/quality-isolation.md §三：代理生成循环尚未落地，生产调用点在下一步
     ProxySystem,
     AgentSystem,
     ToolCallingEnvelope,

@@ -922,3 +922,68 @@ pub(crate) fn the_real_bridge_creates_a_multi_agent_child_work() {
     let out = tools.call(&c, d::CREATE, dup);
     assert!(!out.ok && out.output.contains("同一模块"), "{}", out.output);
 }
+
+/// 代理会话的身份是**角色提示词**（core_proxy）+ 环境 + 调用约定，不是普通 agent 身份；
+/// 反过来，普通 agent 会话也不会沾上代理角色的话。
+#[test]
+pub(crate) fn the_proxy_identity_is_the_role_prompt() {
+    use crate::capabilities::workspace::api::ModuleManifest;
+
+    let module = Module {
+        manifest: ModuleManifest {
+            id: "m1".to_string(),
+            brief: "测试模块".to_string(),
+            system: "你负责测试。".to_string(),
+            runtimes: Vec::new(),
+            tools: BTreeMap::new(),
+        },
+        root: PathBuf::from("modules").join("m1"),
+    };
+    let (handle, ops) = super::super::ops_with(vec![module], vec![]);
+    let proxy = handle
+        .call(|core| core.create_proxy("w-role", 1))
+        .expect("建代理会话");
+    let identity = handle
+        .call({
+            let s = proxy.clone();
+            move |core| Ok(core.single_identity(&s))
+        })
+        .expect("问身份")
+        .expect("代理会话在表里");
+    assert!(
+        identity.contains("你是核心代理"),
+        "角色提示词没进去：{}",
+        identity
+    );
+    assert!(
+        identity.contains("catalog_agents"),
+        "角色提示词要说明它自己的工具：{}",
+        identity
+    );
+    assert!(identity.contains("w-role"), "环境块不能缺席：{}", identity);
+    assert!(
+        identity.contains("工具调用约定："),
+        "调用约定不能缺席（少了模型不知道能调工具）：{}",
+        identity
+    );
+
+    // 普通 agent 会话：环境与调用约定同一份口径，但不含代理角色的话。
+    let (work, _) = ops
+        .sessions
+        .create_work(super::super::single_work("w-role-plain", &["m1"]))
+        .expect("建工作");
+    let plain = handle
+        .call({
+            let s = work.sid.clone();
+            move |core| Ok(core.single_identity(&s))
+        })
+        .expect("问身份")
+        .expect("普通会话在表里");
+    assert!(plain.contains("w-role-plain"), "{}", plain);
+    assert!(plain.contains("工具调用约定："), "{}", plain);
+    assert!(
+        !plain.contains("你是核心代理"),
+        "普通会话不该有代理角色：{}",
+        plain
+    );
+}

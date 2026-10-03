@@ -16,20 +16,6 @@
     协作子会话按 pending 落在正确的门并推进到下一关；暂停 / 关闭中的目标一律拒绝派发；node run-tests.js 全绿。
   blocked_by: 缺少测试
 
-- id: conductor.proxy-role-prompt-not-wired
-  scope: global
-  level: T3
-  why: |
-    代理会话的身份块没有用上它的角色提示词：prompts/roles/core_proxy.yaml 的 proxy.system 渲染成
-    `Segment::ProxySystem`，但 `SessionParams::identity` 只渲染 agent 系统，该段目前只被 prompt.rs
-    自己引用。代理会话因此拿到一份普通核心身份，「全权、门交给你答、历史不转发」这些约定只靠工具说明传达。
-  how: |
-    让代理会话的身份块渲染 proxy.system（identity 支持一个角色提示词覆盖，或把 core_proxy 当它的能力包），
-    接上后删掉 Segment::ProxySystem 的窄 allow。涉及 session 的身份块契约，先与集成者确认。
-  accept: |
-    代理会话的系统提示里出现 core_proxy 的角色约定，single / agent 会话的身份块不受影响；node run-tests.js 全绿。
-  blocked_by: 缺少实现（跨 session 契约，待确认）
-
 - id: conductor.proxy-create-opening-facts
   scope: global
   level: T3

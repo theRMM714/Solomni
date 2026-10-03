@@ -469,7 +469,6 @@ impl Conductor {
     }
 
     /// 该会话此刻的**身份块**（按当前提示词册与形态现渲染）：测试用它断言"它被告诉了什么"。
-    /// 该会话当前的压缩点（测试断言「重建也恢复压缩点」）。
     pub fn single_identity(&self, sid: &str) -> Option<String> {
         match self.sessions.get(sid) {
             Some(Session::Single(s)) => Some(s.params().identity(&*self.prompt, s.tool_mode())),

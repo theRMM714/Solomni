@@ -62,7 +62,7 @@
 | `dead_code` | `capabilities/conductor/api/mod.rs` 的 `SessionOps::exists` / `is_running` | **入站契约是发布给前端的接口面**：二进制 crate 里暂时没有生产调用点的接口方法会被 `dead_code` 误报（`is_running` 是运行态的**权威查询**——`SessionView.running` 只是事件台对账副本，最终一致） |
 | `dead_code` | `capabilities/session/domain/events.rs` 的 `enum SessionEvent` | 事件词汇里的字段**不全在生产路径被读**（例如 `DiscussionDone` 的 `round` / `over_cap` 供呈现层做裁决确认页）；词汇就是线格式，字段随契约保留，删掉会让呈现侧拿不到事实 |
 | `large_enum_variant` | `capabilities/conductor/service/mod.rs` 的 `enum Session` | 两变体大小差得远，但装箱只换来一次间接寻址，却把"会话本体可直接移动"这个形状改掉 |
-| `dead_code` | `capabilities/conductor/domain/proxy.rs` 的 `Source::UserOriginal`、`capabilities/conductor/service/proxy.rs` 的 `create_proxy`、`capabilities/prompt/domain/prompt.rs` 的 `Segment::ProxySystem` | **契约词汇与产品面入口**：来源枚举的「用户原话」支由工具契约定义（`source_ref` 说明转达的是哪句用户原话），当前生产只构造核心代答；代理会话的创建入口（呈现层的第三种形态）尚未落地，角色提示词也还没进身份块。宿主与生成循环已落地（`ProxyBridge` + `ProxyHandler`，由 `src/tests/conductor/proxy.rs` 钉住）。接上后这几处 allow 必须一起删（见 `src/capabilities/conductor/testgaps.yaml` 的 `proxy-product-entry` / `proxy-role-prompt-not-wired`）。`ports.rs` 与 `service/proxy.rs` 的**文件级** allow 已收窄 / 删除 |
+| `dead_code` | `capabilities/conductor/domain/proxy.rs` 的 `Source::UserOriginal`、`capabilities/conductor/service/proxy.rs` 的 `create_proxy` | **契约词汇与产品面入口**：来源枚举的「用户原话」支由工具契约定义（`source_ref` 说明转达的是哪句用户原话），当前生产只构造核心代答；代理会话的创建入口（呈现层的第三种形态）尚未落地（见 `src/capabilities/conductor/testgaps.yaml` 的 `proxy-product-entry`）。角色提示词已进代理会话的身份块（`params.role_system` → `workspace::api::role_system`，由 `src/tests/conductor/proxy.rs` 钉住），所以 `Segment::ProxySystem` 不再需要 allow；`ports.rs` 与 `service/proxy.rs` 的**文件级** allow 也已收窄 / 删除 |
 
 新增 allow 必须同时更新本表；理由说不清的就不该 allow。
 

@@ -28,7 +28,7 @@
 | | `verdict.*` | 判定用户那一句是否明确（明确才开工 / 放行，`collab::judge_clear`） |
 | `roles/executor.yaml` | `execute.user` | 执行任务 |
 | `roles/orchestrator.yaml` | `review.system` / `review.user` | 总验收与推进 |
-| `roles/core_proxy.yaml` | `proxy.system` | 核心代理的身份提示词（在用户授予的任务级授权范围内代用户决定与转达；工具面由角色表按回合注入） |
+| `roles/core_proxy.yaml` | `proxy.system` | 核心代理的身份提示词（在用户授予的任务级授权范围内代用户决定与转达；工具面由角色表按回合注入）。代理会话**不是 agent**：它的身份块渲染这一段（同一份 `{{mechanism}}` / `{{env}}` / `{{tool_calling}}` 口径，见 `workspace::api::role_system`），不是模块能力包 |
 
 > `solo`（用户建的单 agent 工作）的工具面**复用 `roles/executor.yaml`**：它不发回报工具，而 `execute.user` 那段
 > 只在协作的派发行上渲染——所以没有第二份文件，也没有复述。

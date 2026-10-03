@@ -43,6 +43,10 @@ pub struct SessionParams {
     pub module_dirs: std::collections::BTreeMap<String, std::path::PathBuf>,
     /// 模块能力包：id + 模块 system（顺序即装配顺序）。
     pub modules: Vec<(String, String)>,
+    /// **角色提示词段**：`None` = 普通 agent（模块能力包 + `AgentSystem`）；
+    /// `Some(seg)` = 不是 agent 的核心身份（代理这类），身份块渲染 `seg` 那一段角色提示词。
+    /// 存段名而不是渲染好的文本：身份块**每回合现渲染**（册子一改，下一次调用就生效）。
+    pub role_system: Option<crate::capabilities::prompt::api::Segment>,
 }
 
 impl SessionParams {
@@ -63,6 +67,7 @@ impl SessionParams {
                 .iter()
                 .map(|m| (m.manifest.id.clone(), m.manifest.system.clone()))
                 .collect(),
+            role_system: None,
         }
     }
 
@@ -73,13 +78,23 @@ impl SessionParams {
         mode: crate::capabilities::llm::api::ToolMode,
     ) -> String {
         let env = env_block(prompt, self);
-        crate::capabilities::workspace::api::agent_system(
-            prompt,
-            &self.agent,
-            &self.modules,
-            &env,
-            mode,
-        )
+        match self.role_system {
+            // 角色身份（代理这类不是 agent 的核心）：同一份机制 / 环境 / 调用约定口径。
+            Some(seg) => crate::capabilities::workspace::api::role_system(
+                prompt,
+                seg,
+                &self.agent,
+                &env,
+                mode,
+            ),
+            None => crate::capabilities::workspace::api::agent_system(
+                prompt,
+                &self.agent,
+                &self.modules,
+                &env,
+                mode,
+            ),
+        }
     }
 }
 

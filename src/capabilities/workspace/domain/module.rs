@@ -147,12 +147,45 @@ pub struct Module {
     pub root: PathBuf,
 }
 
-/// 一个 agent 的职责提示词：把它的模块 system 合成一份能力包，再挂工作环境与调用约定。
+/// **身份块的系统提示**：把 `{{mechanism}}` / `{{env}}` / `{{tool_calling}}` 三件事按同一口径填进模板。
 /// 模块只是能力包（没有"发言"这回事）；发言席是 agent，所以这份 system 按 agent 成文。
 /// env 由 tools 的 systool 按该 agent 的沙箱渲染后传入。
 /// **工具清单不在这里**：本回合能用哪些工具随回合注入（见 collab 的 engine::tools_block）。
 pub fn agent_system(
     prompt: &dyn crate::capabilities::prompt::api::Prompt,
+    agent: &str,
+    modules: &[(String, String)],
+    env: &str,
+    mode: crate::capabilities::llm::api::ToolMode,
+) -> String {
+    render_system(
+        prompt,
+        crate::capabilities::prompt::api::Segment::AgentSystem,
+        agent,
+        modules,
+        env,
+        mode,
+    )
+}
+
+/// **角色身份块**（不是 agent 的核心身份）：渲染角色提示词段 + 环境 + 调用约定。
+/// 代理会话（core_proxy）用它：它的身份是角色提示词（`prompts/roles/core_proxy.yaml`），
+/// 不是"某个 agent 的模块能力包"；机制 / 环境 / 调用约定与 agent 身份同一份口径。
+pub fn role_system(
+    prompt: &dyn crate::capabilities::prompt::api::Prompt,
+    segment: crate::capabilities::prompt::api::Segment,
+    agent: &str,
+    env: &str,
+    mode: crate::capabilities::llm::api::ToolMode,
+) -> String {
+    render_system(prompt, segment, agent, &[], env, mode)
+}
+
+/// 两处身份（agent / 角色）**共用这一份装配**：模板不同，变量与取值口径完全相同——
+/// 各写一份必然漂移（真机上就是"角色提示词缺了调用约定，模型不知道能调工具"）。
+fn render_system(
+    prompt: &dyn crate::capabilities::prompt::api::Prompt,
+    segment: crate::capabilities::prompt::api::Segment,
     agent: &str,
     modules: &[(String, String)],
     env: &str,
@@ -165,7 +198,7 @@ pub fn agent_system(
         .collect::<Vec<_>>()
         .join("");
     prompt.render(
-        Segment::AgentSystem,
+        segment,
         &[
             ("agent", agent.to_string()),
             ("modules", parts),
