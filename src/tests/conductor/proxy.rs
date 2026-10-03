@@ -1185,3 +1185,69 @@ pub(crate) fn the_proxy_created_child_publishes_its_opening_facts() {
         events
     );
 }
+
+/// 协作子会话的落门：`send` 按它**此刻等的是哪一关**送到对应的阶段步。
+/// `ConfirmSlate` 是同步短步骤，所以这条可以确定性断言（不用等泵）。
+#[test]
+pub(crate) fn collab_child_send_lands_on_the_gate_it_awaits() {
+    use crate::capabilities::conductor::ports::ProxyHost;
+    use crate::capabilities::conductor::service::proxy::ProxyBridge;
+    use crate::capabilities::workspace::api::ModuleManifest;
+
+    let module = Module {
+        manifest: ModuleManifest {
+            id: "m1".to_string(),
+            brief: "测试模块".to_string(),
+            system: "你负责测试。".to_string(),
+            runtimes: Vec::new(),
+            tools: BTreeMap::new(),
+        },
+        root: PathBuf::from("modules").join("m1"),
+    };
+    let (handle, ops) = super::super::ops_with(
+        vec![module],
+        vec![
+            r#"{"type":"tool","name":"slate","args":{"picks":[{"name":"a","modules":["m1"],"model":"m","why":"对口"}]}}"#,
+            r#"{"type":"tool","name":"plan","args":{"plan":"方案：A 做 X","nodes":[{"id":"n1","title":"做 X","objective":"把 X 做完","assignee":"a","deps":[]}]}}"#,
+            r#"{"type":"tool","name":"verdict","args":{"clear":true,"why":"照他说的开工"}}"#,
+            r#"{"type":"tool","name":"node_verdict","args":{"verdicts":[{"node":"n1-1","ok":true,"note":"够用"}]}}"#,
+            r#"{"type":"tool","name":"checklist","args":{"items":[{"item":"做 X","status":"pass"}]}}"#,
+        ],
+    );
+    let (work, _) = ops
+        .sessions
+        .create_work(crate::capabilities::conductor::api::WorkSpec {
+            name: "w-gate".to_string(),
+            mode: WorkMode::Collab,
+            agents: Vec::new(),
+            task: Some("做事".to_string()),
+            delegate: true,
+            tier: Tier::Host,
+        })
+        .expect("建协作工作（代拟）");
+    let child = work.sid.clone();
+    let p = ops.sessions.pending(&child);
+    assert!(
+        matches!(p, Ok(Some(Pending::ConfirmSlate))),
+        "pending={:?}，回放：{}",
+        p,
+        serde_json::to_string(&ops.history.open(&child).expect("回放").1).expect("JSON")
+    );
+    let bridge: Arc<dyn ProxyHost + Send + Sync> = Arc::new(ProxyBridge::new(handle));
+    let msg = d::Relayed {
+        kind: d::MessageKind::UserReply,
+        source: d::Source::CoreProxy,
+        source_ref: Some("用户第 1 句".to_string()),
+        parent: None,
+        text: "yes".to_string(),
+    };
+    bridge.send(&child, &msg).expect("转达到协作子会话");
+    // 转达返回时这一关已经过了（ConfirmSlate 是同步短步骤）——落错门就不会有这一步。
+    assert!(
+        matches!(
+            ops.sessions.pending(&child),
+            Ok(Some(Pending::ConfirmBegin))
+        ),
+        "转达要落在它此刻等的那一关"
+    );
+}
