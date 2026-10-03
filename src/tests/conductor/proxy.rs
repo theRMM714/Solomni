@@ -591,3 +591,38 @@ pub(crate) fn the_real_bridge_creates_a_child_work() {
     let out = tools.call(&c, d::SEND, &args);
     assert!(out.ok, "{}", out.output);
 }
+/// 代理工具的执行者：按名字认领，执行经队列桥回核心线程——代理会话因此是普通成员会话。
+#[test]
+pub(crate) fn the_proxy_handler_owns_and_runs_proxy_tools() {
+    use crate::capabilities::conductor::ports::ProxyHost;
+    use crate::capabilities::conductor::service::proxy::{ProxyBridge, ProxyHandler};
+    use crate::capabilities::workspace::api::ModuleManifest;
+    use crate::kernel::ports::ToolHandler;
+
+    let module = Module {
+        manifest: ModuleManifest {
+            id: "m1".to_string(),
+            brief: "测试模块".to_string(),
+            system: "你负责测试。".to_string(),
+            runtimes: Vec::new(),
+            tools: BTreeMap::new(),
+        },
+        root: PathBuf::from("modules").join("m1"),
+    };
+    let (handle, _ops) = super::super::ops_with(vec![module], vec![]);
+    let host: Arc<dyn ProxyHost + Send + Sync> = Arc::new(ProxyBridge::new(handle));
+    let handler = ProxyHandler::new(
+        host,
+        test_systools().tools,
+        test_prompts().tools(),
+        ctx(Some(full_grant())),
+    );
+
+    assert!(handler.owns(d::CATALOG) && handler.owns(d::CREATE));
+    assert!(!handler.owns("read"), "内置工具不归它");
+    assert!(!handler.owns("say"), "讨论动词不归它");
+
+    let out = handler.run("w", d::CATALOG, r#"{"scope":"agents"}"#);
+    assert!(out.ok, "{}", out.output);
+    assert!(out.output.contains("agents"), "{}", out.output);
+}

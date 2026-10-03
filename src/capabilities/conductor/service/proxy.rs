@@ -613,3 +613,37 @@ impl ProxyHost for ProxyBridge {
         self.call(move |core| core.proxy_messages(&session, from, count))
     }
 }
+/// 代理工具的**成员侧执行者**：把 `core_proxy` 会话那一回合里的代理工具调用接到 `ProxyTools` 上。
+///
+/// 装配进代理会话的 `MemberTools.handlers` 之后，代理会话就是一个**普通成员会话**——
+/// `converse_with` / 转录 / 回档 / 压缩 / 停止全部复用，循环里没有任何“代理专用”分支。
+/// 执行经队列桥回核心线程（`ProxyHost`），核心状态的所有权不变。
+pub struct ProxyHandler {
+    tools: std::sync::Mutex<ProxyTools>,
+    ctx: d::ProxyCall,
+}
+
+impl ProxyHandler {
+    pub fn new(
+        host: Arc<dyn ProxyHost + Send + Sync>,
+        book: ToolBook,
+        texts: Arc<ToolTexts>,
+        ctx: d::ProxyCall,
+    ) -> ProxyHandler {
+        ProxyHandler {
+            tools: std::sync::Mutex::new(ProxyTools::new(host, book, texts)),
+            ctx,
+        }
+    }
+}
+
+impl crate::kernel::ports::ToolHandler for ProxyHandler {
+    fn owns(&self, name: &str) -> bool {
+        d::is_proxy_tool(name)
+    }
+
+    fn run(&self, _session: &str, name: &str, args_json: &str) -> ToolOutcome {
+        let mut tools = self.tools.lock().unwrap_or_else(|e| e.into_inner());
+        tools.call(&self.ctx, name, args_json)
+    }
+}
