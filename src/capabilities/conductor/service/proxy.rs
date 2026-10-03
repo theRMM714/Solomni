@@ -1,8 +1,8 @@
 //! 核心代理工具的**执行面**：按声明校验参数 → 判授权 → 查幂等账 → 把动作交给 ProxyHost。
 //!
-//! 工具逻辑只到这里：它不碰会话机制。真实会话宿主尚未落地（见
-//! src/capabilities/conductor/testgaps.yaml），当前由测试替身实现端口。
-#![allow(dead_code)] // 见 docs/testing/quality-isolation.md §三：契约已冻结，生产调用点在下一步
+//! 工具逻辑只到这里：它不碰会话机制。宿主是 `ProxyBridge`（队列桥：把 ProxyHost 的每个方法
+//! 交给核心线程执行）与 `Conductor` 的 `proxy_*` 方法族；代理会话那一回合挂的是 `ProxyHandler`。
+#![allow(dead_code)] // 见 docs/testing/quality-isolation.md §三：创建入口 `create_proxy`/`build_proxy` 的产品调用点在阶段 4（路由/向导）
 
 use crate::capabilities::conductor::domain::proxy as d;
 use crate::capabilities::conductor::ports::ProxyHost;

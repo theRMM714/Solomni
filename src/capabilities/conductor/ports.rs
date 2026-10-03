@@ -1,8 +1,7 @@
 //! 协调业务的**出站端口**：核心代理工具要做的外部动作（清单 / 建会话 / 转达 / 观察 / 生命周期）。
 //!
 //! 工具逻辑（`domain/proxy.rs`、`service/proxy.rs`）只依赖这一面，不认识会话机制；
-//! 真实会话宿主尚未落地——当前只有测试替身实现它（见 src/capabilities/conductor/testgaps.yaml）。
-#![allow(dead_code)] // 见 docs/testing/quality-isolation.md §三：契约已冻结，生产实现与调用点在下一步
+//! 生产实现是 `service/proxy.rs` 的 `ProxyBridge`（把调用交给核心线程的 `Conductor::proxy_*`）。
 
 use crate::capabilities::conductor::domain::proxy::{
     Catalog, CatalogScope, ControlAction, ControlState, Created, MessagesPage, NewSession,

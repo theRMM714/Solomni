@@ -1,8 +1,7 @@
 //! 核心代理（core_proxy）工具的纯逻辑：入参解析、授权校验、载荷规整与回执拼装。
 //!
 //! 它不认识会话、不碰任何端口：外部动作一律经 conductor::ports::ProxyHost（见 service/proxy.rs）。
-//! 真实会话宿主尚未落地（见 src/capabilities/conductor/testgaps.yaml）。
-#![allow(dead_code)] // 见 docs/testing/quality-isolation.md §三：契约已冻结，生产调用点在下一步
+#![allow(dead_code)] // 见 docs/testing/quality-isolation.md §三：几个枚举辅助（Source::UserOriginal / as_str 系列）只被测试与 FakeProxyHost 用到
 
 use serde::{Deserialize, Serialize};
 
