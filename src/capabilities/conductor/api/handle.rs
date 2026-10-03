@@ -295,7 +295,18 @@ impl ConductorHandle {
         })?;
         // 这是**子会话**完成：叫醒父会话推进任务链（脱离本次调用，不等它跑完）。
         if let Some(parent) = parent {
-            self.spawn_detached_collab(&parent);
+            // 代理模式的父：叫醒它去判断下一步（不替它决定）；协作的父：推进任务链。
+            let is_proxy = self
+                .call({
+                    let p = parent.clone();
+                    move |core| Ok(core.session_mode_str(&p) == "proxy")
+                })
+                .unwrap_or(false);
+            if is_proxy {
+                self.spawn_detached_proxy(&parent);
+            } else {
+                self.spawn_detached_collab(&parent);
+            }
         }
         Ok(Advance { head: seq })
     }
@@ -535,6 +546,17 @@ impl ConductorHandle {
             });
     }
 
+    /// 起一次**脱离调用方**的代理回合（子会话停下后叫醒代理用）：不等它跑完。
+    /// 代理那边是一轮普通成员会话生成；它自己决定继续观察、追问、返工还是收敛。
+    pub(crate) fn spawn_detached_proxy(&self, sid: &str) {
+        let me = self.clone();
+        let sid = sid.to_string();
+        let _ = std::thread::Builder::new()
+            .name("solomni-proxy".to_string())
+            .spawn(move || {
+                let _ = me.single_generation(&sid, None, Output::Stream);
+            });
+    }
     /// 起一次**脱离调用方**的协作推进（叫醒父会话用）：不等它跑完。
     pub(crate) fn spawn_detached_collab(&self, sid: &str) {
         let me = self.clone();

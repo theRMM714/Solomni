@@ -385,6 +385,24 @@ impl Conductor {
         self.spawn_agent_session(parent, &assignee)
     }
 
+    /// 代理模式：一个子会话停下了 → 往**代理会话**写一条通知行（只写这一条，不转发子会话转录）。
+    /// 返回被通知的代理会话名；父不是代理会话（协作节点等）就返回 None、什么都不做。
+    pub(crate) fn notify_proxy_of_child(&mut self, child: &str) -> Option<String> {
+        let (meta, _) = self.history.load(child).ok()?;
+        let parent = meta.parent.clone()?;
+        let (pm, _) = self.history.load(&parent).ok()?;
+        if pm.mode != "proxy" {
+            return None;
+        }
+        let mut ps = self.take_single(&parent).ok()?;
+        let mut evs = ps.note_task(&format!(
+            "[子会话] {} 这一轮结束。要看它说了什么用 read_session_messages（0 = 最新）；要它继续或返工用 send_session_message。",
+            child
+        ));
+        self.put_single(&parent, ps);
+        self.record_events(&parent, &mut evs);
+        Some(parent)
+    }
     /// 生成结束**交回**：重新插入 + 解除"生成中"。
     /// 转录**已由工作线程按"一轮一次"的粒度增量落盘**（见 `Persister`），这里不重复落。
     /// 返回：若这是个**子会话**，返回它的父会话（调用方据此**叫醒父会话**推进任务链）。
@@ -407,6 +425,9 @@ impl Conductor {
         if let Some(node) = node {
             self.mark_node_done(&parent, &node, &note);
         }
+        // 代理模式的父：把"这个子会话停下了"如实告诉它（**不转发子会话转录**），
+        // 由调用方按形态叫醒父会话。
+        let _ = self.notify_proxy_of_child(sid);
         Some(parent)
     }
 

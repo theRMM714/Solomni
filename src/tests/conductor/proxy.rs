@@ -681,3 +681,51 @@ pub(crate) fn the_proxy_session_rebuilds_from_disk() {
         _ => panic!("代理会话该重建为单会话形态"),
     }
 }
+/// 子会话停下 → 通知代理（只写一条通知行，**不转发子会话转录**）。
+#[test]
+pub(crate) fn a_finished_child_notifies_the_proxy_without_dumping_its_transcript() {
+    use crate::capabilities::workspace::api::ModuleManifest;
+    let module = Module {
+        manifest: ModuleManifest {
+            id: "m1".to_string(),
+            brief: "测试模块".to_string(),
+            system: "你负责测试。".to_string(),
+            runtimes: Vec::new(),
+            tools: BTreeMap::new(),
+        },
+        root: PathBuf::from("modules").join("m1"),
+    };
+    let (handle, ops) = super::super::ops_with(vec![module], vec![]);
+    let proxy = handle
+        .call(|core| core.create_proxy("w-notify", 1))
+        .expect("建代理会话");
+    let child = handle
+        .call(|core| {
+            let spec = d::NewSession {
+                mode: d::SessionMode::Single,
+                agents: vec![d::NewAgent {
+                    name: "c1".to_string(),
+                    transient: true,
+                    modules: vec!["m1".to_string()],
+                    model: None,
+                    objective: "做事".to_string(),
+                }],
+                workspace: None,
+                request_id: "r1".to_string(),
+                parent: Some("w-notify".to_string()),
+            };
+            Ok(core.proxy_create(&spec)?.session)
+        })
+        .expect("建子工作");
+    let notified = handle
+        .call({
+            let c = child.clone();
+            move |core| Ok(core.notify_proxy_of_child(&c))
+        })
+        .expect("通知");
+    assert_eq!(notified.as_deref(), Some(proxy.as_str()));
+    let (_, events) = ops.history.open(&proxy).expect("代理转录");
+    let text = serde_json::to_string(&events).expect("JSON");
+    assert!(text.contains("子会话"), "通知行该落进代理会话：{}", text);
+    assert!(!text.contains("做事"), "不得把子会话的转录灌进来：{}", text);
+}
