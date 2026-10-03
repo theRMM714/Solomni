@@ -626,3 +626,33 @@ pub(crate) fn the_proxy_handler_owns_and_runs_proxy_tools() {
     assert!(out.ok, "{}", out.output);
     assert!(out.output.contains("agents"), "{}", out.output);
 }
+/// 代理会话跑一轮真实生成：模型请求 `catalog_agents` → 经 handler / 队列桥在核心线程执行 →
+/// 工具行落进它自己的转录。这条钉住“代理会话就是普通成员会话 + 派发去特例”的整条链。
+#[test]
+pub(crate) fn the_proxy_session_runs_a_turn_through_the_generic_loop() {
+    use crate::capabilities::conductor::api::Output;
+
+    let (handle, ops) = super::super::ops_with(
+        vec![],
+        vec![
+            r#"{"type":"tool","name":"catalog_agents","args":{"scope":"agents"}}"#,
+            "好",
+        ],
+    );
+    let sid = handle
+        .call(|core| core.create_proxy("w-proxy", 7))
+        .expect("建代理会话");
+    ops.sessions
+        .say(&sid, "开始", Output::Final)
+        .expect("跑一轮");
+
+    let (meta, events) = ops.history.open(&sid).expect("打开代理会话");
+    assert_eq!(meta.mode, "proxy");
+    assert!(meta.delegation.is_some(), "代理会话带全权委托");
+    let text = serde_json::to_string(&events).expect("转录");
+    assert!(
+        text.contains("catalog_agents"),
+        "工具行该落进转录：{}",
+        text
+    );
+}

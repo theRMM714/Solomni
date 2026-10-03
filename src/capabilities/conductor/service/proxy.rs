@@ -275,8 +275,10 @@ fn json_ok<T: serde::Serialize>(v: &T) -> ToolOutcome {
 }
 // ---------- 真实宿主：Conductor 的代理方法族 + 队列桥 ----------
 
-use super::Conductor;
+use super::{now_ts, validate_work_name, Conductor, Session};
 use crate::capabilities::conductor::api::{AgentInstance, ConductorHandle, WorkMode, WorkSpec};
+use crate::capabilities::session::api::{AgentSession, Delegation, SessionMeta, SessionParams};
+use crate::capabilities::workspace::api::{ExecSpec, Sandbox};
 
 fn tool_mode_str(m: crate::capabilities::llm::api::ToolMode) -> String {
     match m {
@@ -512,6 +514,75 @@ impl Conductor {
         _reason: &str,
     ) -> Result<d::ControlState, String> {
         Err("代理控制尚未实现（下一步）".to_string())
+    }
+
+    /// 建一个**代理会话**（`mode="proxy"` + 全权委托）：核心在这里跟用户对话，用代理工具代他决定。
+    /// 没有 agent、没有模块工具；这一回合的工具面是 `core_proxy`（六项代理工具 + 只读核实）。
+    pub fn create_proxy(&mut self, name: &str, granted_at: i64) -> Result<String, String> {
+        validate_work_name(name)?;
+        if self.sessions.contains_key(name) || self.history.load(name).is_ok() {
+            return Err(format!("工作名已存在：{}", name));
+        }
+        let meta = SessionMeta {
+            name: name.to_string(),
+            mode: "proxy".to_string(),
+            delegate: false,
+            modules: Vec::new(),
+            task: None,
+            ts: now_ts(),
+            agents: Vec::new(),
+            exec: ExecSpec::default(),
+            parent: None,
+            node: None,
+            delegation: Some(Delegation { granted_at }),
+            own_work: false,
+        };
+        self.workspace.prepare(name, &[])?;
+        let session = self.build_proxy(&meta)?;
+        let mut events = session.open();
+        self.history.create(&meta)?;
+        self.sessions
+            .insert(name.to_string(), Session::Single(session));
+        self.record_events(name, &mut events);
+        Ok(name.to_string())
+    }
+
+    /// 装配一个代理会话对象（创建与重建**共用同一处**，两处不各拼一遍）。
+    pub(crate) fn build_proxy(&self, meta: &SessionMeta) -> Result<AgentSession, String> {
+        let roots = self.workspace.roots(&meta.name, &[])?;
+        let sb = Sandbox {
+            work_name: meta.name.clone(),
+            agent: d::SPEAKER.to_string(),
+            shared: roots.shared.clone(),
+            private: roots.shared.clone(),
+            modules: BTreeMap::new(),
+            texts: self.prompt.tools(),
+        };
+        let channel = self.registry.core_channel();
+        let tool_mode = if channel.is_some() {
+            self.registry.tool_mode(None)
+        } else {
+            crate::capabilities::llm::api::ToolMode::Envelope
+        };
+        let (chat, demo) = self.llm.core_channel(channel.as_ref());
+        let note = if demo {
+            Some("（无可用模型：本次走演示通道，不会原生调用工具）".to_string())
+        } else {
+            None
+        };
+        let params = SessionParams::from_workspace(d::SPEAKER, &sb, &[]);
+        let tools = self.tools_env(&[], &sb, BTreeMap::new(), false, tool_mode, "core_proxy");
+        let mut s = AgentSession::new(
+            d::SPEAKER,
+            params,
+            chat,
+            note,
+            Some(tools),
+            self.prompt.refs(),
+            self.prompt.tools(),
+        );
+        s.set_compact_budget(self.compact_budget(None));
+        Ok(s)
     }
 }
 

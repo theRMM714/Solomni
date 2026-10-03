@@ -274,6 +274,9 @@ pub struct ConductorHandle {
     bus: Arc<EventBus>,
     /// 日志句柄：呈现层经 LogOps 能力写日志，拿不到这个端口对象本身。
     log: Arc<dyn crate::kernel::ports::Log + Send + Sync>,
+    /// 代理会话注入成员侧执行者要的两份装配材料（与核心共享同一份，不在桥这一侧重装）。
+    book: crate::capabilities::tools::api::ToolBook,
+    texts: Arc<crate::capabilities::prompt::api::ToolTexts>,
 }
 
 /// 一次"要一个成员回合"的请求：泵在工作线程上让出，回头找主线程驱动（它才拿得到各 agent 的会话）。

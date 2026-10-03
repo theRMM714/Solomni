@@ -16,6 +16,9 @@ pub const CONTROL: &str = "control_session";
 /// 消息查询：按“最新→更早”倒查子会话的消息（不把整份转录推给代理）。
 pub const MESSAGES: &str = "read_session_messages";
 
+/// 代理会话里核心的说话人名（只此一处，重建与实时同源）。
+pub const SPEAKER: &str = "核心";
+
 /// 这六个 id 就是“代理工具面”（角色表 core_proxy 引用它们）。
 pub fn is_proxy_tool(name: &str) -> bool {
     name == CATALOG

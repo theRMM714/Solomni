@@ -4,7 +4,9 @@ pub use crate::capabilities::session::domain::events::{
     idle, interrupted_note, last_compaction, stopped_note, working, CheckView, LineView, Live,
     Pending, SessionEvent, ToolCallView,
 };
-pub use crate::capabilities::session::domain::history::{AgentMeta, HistoryView, SessionMeta};
+pub use crate::capabilities::session::domain::history::{
+    AgentMeta, Delegation, HistoryView, SessionMeta,
+};
 pub use crate::capabilities::session::domain::rewind::{
     find_line_id, last_line_within, max_reply, truncate_events, turn_of_line,
 };

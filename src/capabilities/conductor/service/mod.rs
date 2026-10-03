@@ -257,6 +257,18 @@ impl Conductor {
         self.systools.reserved_names()
     }
 
+    /// 工具总表的声明书（代理执行者在队列桥那一侧校验参数/拼回执要用）。
+    pub(crate) fn systools_book(&self) -> crate::capabilities::tools::api::ToolBook {
+        self.systools.book()
+    }
+
+    /// 模型侧工具文案（共享一份）：同上。
+    pub(crate) fn prompt_texts(
+        &self,
+    ) -> std::sync::Arc<crate::capabilities::prompt::api::ToolTexts> {
+        self.prompt.tools()
+    }
+
     /// 生成期间"会话不在表里"的三种进入点共用这一句（错误文案要一致，别处不再各写一份）。
     fn running_refusal(sid: &str) -> String {
         format!("会话 {} 正在生成中：先「停止」或等它结束，再做这一步", sid)

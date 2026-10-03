@@ -19,11 +19,15 @@ impl ConductorHandle {
         let jobs = JobRegistry::new();
         let bus = EventBus::new();
         let (tx, rx) = mpsc::channel::<Job>();
+        let book = core.systools_book();
+        let texts = core.prompt_texts();
         let handle = ConductorHandle {
             tx,
             jobs,
             bus,
             log: Arc::clone(&worker_log),
+            book,
+            texts,
         };
         // 注意：工作线程**绝不能**捕获取手柄（那会持有一个 Sender，通道永不闭合、线程永不退出）。
         std::thread::Builder::new()
@@ -82,6 +86,52 @@ impl ConductorHandle {
         Ok(stopped)
     }
 
+    /// 代理会话：把代理工具的成员侧执行面（`ProxyHandler`）装进这一回合的工具环境。
+    /// 执行经队列桥回到核心线程，核心状态的所有权不变。非代理会话、或已装过，什么都不做。
+    fn inject_proxy_handler(
+        &self,
+        sid: &str,
+        session: &mut crate::capabilities::session::api::AgentSession,
+    ) -> Result<(), String> {
+        use crate::capabilities::conductor::domain::proxy as dp;
+        let Some(tools) = session.tools.as_mut() else {
+            return Ok(());
+        };
+        if !tools.handlers.is_empty() || !tools.allowed.iter().any(|t| dp::is_proxy_tool(t)) {
+            return Ok(());
+        }
+        let face = tools.allowed.clone();
+        let granted = {
+            let sid = sid.to_string();
+            self.call(move |core| Ok(core.history_open(&sid)?.0.delegation.map(|d| d.granted_at)))?
+        };
+        let grant = granted.map(|_| dp::Grant {
+            tools: face,
+            ..Default::default()
+        });
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0);
+        let host: std::sync::Arc<
+            dyn crate::capabilities::conductor::ports::ProxyHost + Send + Sync,
+        > = std::sync::Arc::new(
+            crate::capabilities::conductor::service::proxy::ProxyBridge::new(self.clone()),
+        );
+        let handler = crate::capabilities::conductor::service::proxy::ProxyHandler::new(
+            host,
+            self.book.clone(),
+            std::sync::Arc::clone(&self.texts),
+            dp::ProxyCall {
+                source: dp::Source::CoreProxy,
+                grant,
+                parent: Some(sid.to_string()),
+                now,
+            },
+        );
+        tools.handlers = vec![std::sync::Arc::new(handler)];
+        Ok(())
+    }
     /// 测试专用：注入一条必定 panic 的命令，验证「一条命令 panic 不带垮整个核心」。
     #[cfg(test)]
     pub(crate) fn panic_probe(&self) -> Result<(), String> {
@@ -148,6 +198,10 @@ impl ConductorHandle {
                 persister,
             } => (*session, identity, prefix, llm, persister),
         };
+        let mut session = session;
+        // 代理会话：把代理工具的成员侧执行面装进这一回合（经队列桥回核心线程执行）。
+        self.inject_proxy_handler(sid, &mut session)?;
+        let session = session;
         // 取消标志在**派发时**就登记：生成一开始「停止」就能生效（它本来就不进队列）。
         let cancel = jobs.register(sid);
         // **运行态**：这条会话开始干活，推给它自己的事件台——节点执行、单 agent 发言、继续都走这里，
