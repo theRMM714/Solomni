@@ -33,6 +33,9 @@ impl FsHistory {
     /// 一个会话（顶层或子会话）的落点：`meta.parent` 有值就落在父会话目录内部。
     fn dir_of(&self, meta: &SessionMeta) -> PathBuf {
         match &meta.parent {
+            // 代理建的**子工作**有自己的目录（扁平放在 session/ 下）：
+            // 只有“谁编排的”是父会话，工作区与沙箱都是它自己的。
+            Some(_) if meta.own_work => self.top_dir(&meta.name),
             Some(p) => self.child_dir(p, &meta.name),
             None => self.top_dir(&meta.name),
         }

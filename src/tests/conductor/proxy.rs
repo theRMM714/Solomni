@@ -514,23 +514,71 @@ pub(crate) fn the_real_bridge_reads_catalog_and_session_messages() {
     let w: serde_json::Value = serde_json::from_str(&out.output).expect("JSON");
     assert_eq!(w["messages"][0]["text"], "第一条", "{}", out.output);
 
-    // 未实现的三个：如实报错，不假装成功。
+    // 父会话来自调用上下文（这里 = "main"，不存在）：如实拒绝，不接受模型自参。
     let out = tools.call(
         &c,
         d::CREATE,
         r#"{"mode":"single","agents":[{"name":"x","modules":["m1"],"objective":"y"}],"request_id":"z"}"#,
     );
-    assert!(!out.ok && out.output.contains("尚未实现"), "{}", out.output);
+    assert!(!out.ok && out.output.contains("无此会话"), "{}", out.output);
     let out = tools.call(
         &c,
         d::SEND,
         r#"{"targets":["s1"],"message":"好","kind":"task","request_id":"z2"}"#,
     );
     assert!(!out.ok && out.output.contains("尚未实现"), "{}", out.output);
+    // 级联停止已实现：即使没在跑也如实回执（不假装停了一个不存在的会话）。
     let out = tools.call(
         &c,
         d::CONTROL,
         r#"{"session_id":"s1","action":"stop","reason":"停","request_id":"z3"}"#,
     );
-    assert!(!out.ok && out.output.contains("尚未实现"), "{}", out.output);
+    assert!(out.ok && out.output.contains("stopped:0"), "{}", out.output);
+}
+/// 真实宿主：建**子工作**——编排归属是父会话，`own_work` 让它有自己的 work/ 与沙箱。
+#[test]
+pub(crate) fn the_real_bridge_creates_a_child_work() {
+    use crate::capabilities::conductor::ports::ProxyHost;
+    use crate::capabilities::conductor::service::proxy::ProxyBridge;
+    use crate::capabilities::workspace::api::ModuleManifest;
+
+    let module = Module {
+        manifest: ModuleManifest {
+            id: "m1".to_string(),
+            brief: "测试模块".to_string(),
+            system: "你负责测试。".to_string(),
+            runtimes: Vec::new(),
+            tools: BTreeMap::new(),
+        },
+        root: PathBuf::from("modules").join("m1"),
+    };
+    let (handle, ops) = super::super::ops_with(vec![module], vec![]);
+    let (parent, _head) = ops
+        .sessions
+        .create_work(super::super::single_work("w-parent", &["m1"]))
+        .expect("建父工作");
+    let parent_sid = parent.sid.clone();
+
+    let bridge: Arc<dyn ProxyHost + Send + Sync> = Arc::new(ProxyBridge::new(handle.clone()));
+    let mut tools = ProxyTools::new(bridge, test_systools().tools, test_prompts().tools());
+    let c = d::ProxyCall {
+        source: d::Source::CoreProxy,
+        grant: Some(full_grant()),
+        parent: Some(parent_sid.clone()),
+        now: 1000,
+    };
+    let args = r#"{"mode":"single","agents":[{"name":"c1","modules":["m1"],"objective":"做事"}],"workspace":"子活","request_id":"r1"}"#;
+    let out = tools.call(&c, d::CREATE, args);
+    assert!(out.ok, "{}", out.output);
+    let v: serde_json::Value = serde_json::from_str(&out.output).expect("JSON");
+    let child = v["session"].as_str().expect("有会话引用").to_string();
+    assert!(child.starts_with(&format!("{}--", parent_sid)), "{}", child);
+
+    let (meta, _) = ops.history.open(&child).expect("能打开子工作");
+    assert_eq!(meta.parent.as_deref(), Some(parent_sid.as_str()));
+    assert!(meta.own_work, "子工作有自己的 work/ 与沙箱");
+    assert_eq!(meta.mode, "single");
+
+    let out2 = tools.call(&c, d::CREATE, args);
+    assert_eq!(out2, out, "重放同一个 request_id 不再建第二个");
 }

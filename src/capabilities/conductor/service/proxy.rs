@@ -108,10 +108,12 @@ impl ProxyTools {
             Ok(c) => c,
             Err(e) => return deny(e),
         };
-        let spec = match d::resolve_new_session(&args, &catalog) {
+        let mut spec = match d::resolve_new_session(&args, &catalog) {
             Ok(s) => s,
             Err(e) => return deny(e),
         };
+        // 父会话由机制从调用上下文填，不接受模型自参。
+        spec.parent = ctx.parent.clone();
         for a in &spec.agents {
             if let Some(m) = &a.model {
                 if let Err(e) = d::authorize(ctx, d::CREATE, Some(m), None) {
@@ -274,7 +276,7 @@ fn json_ok<T: serde::Serialize>(v: &T) -> ToolOutcome {
 // ---------- 真实宿主：Conductor 的代理方法族 + 队列桥 ----------
 
 use super::Conductor;
-use crate::capabilities::conductor::api::ConductorHandle;
+use crate::capabilities::conductor::api::{AgentInstance, ConductorHandle, WorkMode, WorkSpec};
 
 fn tool_mode_str(m: crate::capabilities::llm::api::ToolMode) -> String {
     match m {
@@ -440,9 +442,59 @@ impl Conductor {
         })
     }
 
-    /// 代理工具：建**子工作**（阶段 2 的下一步）。
-    pub fn proxy_create(&mut self, _spec: &d::NewSession) -> Result<d::Created, String> {
-        Err("代理建子工作尚未实现（下一步）".to_string())
+    /// 代理工具：建一个**子工作**（single / collab）：编排归属是父会话，
+    /// 工作区与沙箱是它自己的（`own_work`）。
+    pub fn proxy_create(&mut self, spec: &d::NewSession) -> Result<d::Created, String> {
+        let parent = spec
+            .parent
+            .clone()
+            .ok_or_else(|| "代理建会话缺少父会话：它由机制提供，不接受模型自参".to_string())?;
+        let (pmeta, _) = self.history_open(&parent)?;
+        let base = spec
+            .workspace
+            .as_deref()
+            .filter(|s| !s.trim().is_empty())
+            .map(|s| s.trim().to_string())
+            .unwrap_or_else(|| format!("w-{}", spec.request_id));
+        let name = self.unique_work_name(&format!("{}--{}", parent, base), "work");
+        let mode = match spec.mode {
+            d::SessionMode::Single => WorkMode::Single,
+            d::SessionMode::Multi => WorkMode::Collab,
+        };
+        let agents: Vec<AgentInstance> = spec
+            .agents
+            .iter()
+            .map(|a| AgentInstance {
+                name: a.name.clone(),
+                transient: a.transient,
+                modules: a.modules.clone(),
+                model: a.model.clone(),
+            })
+            .collect();
+        // 多 agent 是协作工作：把各 agent 的 objective 合成“本次需求”（协作必须有需求）。
+        let task = match mode {
+            WorkMode::Collab => Some(
+                spec.agents
+                    .iter()
+                    .map(|a| format!("{}：{}", a.name, a.objective))
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+            ),
+            WorkMode::Single => None,
+        };
+        let work = WorkSpec {
+            name,
+            mode,
+            agents,
+            task,
+            delegate: false,
+            tier: pmeta.exec.tier,
+        };
+        let opened = self.create_work_inner(work, Some(&parent), true)?;
+        Ok(d::Created {
+            session: opened.sid,
+            agents: opened.agents,
+        })
     }
 
     /// 代理工具：转达（阶段 2 的下一步）。
@@ -519,8 +571,18 @@ impl ProxyHost for ProxyBridge {
         action: d::ControlAction,
         reason: &str,
     ) -> Result<d::ControlState, String> {
+        let handle = self.handle.lock().unwrap_or_else(|e| e.into_inner());
+        if action == d::ControlAction::Stop {
+            // 级联停止：整棵子树（本会话 + 所有后代）正在跑的生成都立即中断。
+            let stopped = handle.stop_tree(session)?;
+            return Ok(d::ControlState {
+                session: session.to_string(),
+                action,
+                state: format!("stopped:{}", stopped.len()),
+            });
+        }
         let (session, reason) = (session.to_string(), reason.to_string());
-        self.call(move |core| core.proxy_control(&session, action, &reason))
+        handle.call(move |core| core.proxy_control(&session, action, &reason))
     }
 
     fn messages(

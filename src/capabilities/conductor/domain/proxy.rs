@@ -357,6 +357,8 @@ pub struct NewSession {
     pub agents: Vec<NewAgent>,
     pub workspace: Option<String>,
     pub request_id: String,
+    /// 父会话：由**机制**从调用上下文填，不从模型参数取（模型不能自选父）。
+    pub parent: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -527,6 +529,7 @@ pub fn resolve_new_session(args: &CreateArgs, catalog: &Catalog) -> Result<NewSe
         agents: resolved,
         workspace,
         request_id,
+        parent: None,
     })
 }
 

@@ -6,19 +6,19 @@
   scope: global
   level: T3
   why: |
-    核心代理的六个工具（catalog_agents / create_session / send_session_message / observe_session /
-    read_session_messages / control_session）的契约与工具逻辑已落地，但搬运它们的外部动作的
-    ProxyHost 端口还没有真实实现：建子工作、转达、观察、消息倒查与控制落到真实会话上的语义
-    （尤其 pause / resume 与「close 只允许在已完成或已停止时执行」）尚未有任何生产代码。
+    六个代理工具的宿主已接上真实会话：catalog（登记处 / 模块清单）、observe（不含正文的元信息）、
+    messages（0 = 最新的倒查）、create_session（建**子工作**：parent 只表编排归属，own_work 让它有
+    自己的 work/ 与沙箱）、control_session.stop（按 meta.parent **级联整棵子树**立即中断）。
+    仍缺：send_session_message 真正把消息投进子会话（按子会话形态映射到 say / 派发行 / 协作步），
+    pause / resume 的持久运行态，close 的在位语义，以及把建子工作的开场事实推给事件台。
   how: |
-    在 conductor 的 detail（或组合根）实现 ProxyHost：组合现有 session / collab / registry / workspace
-    能力面；create_session 建**子工作**（single / collab，parent 指向代理会话、有自己的工作区）并保证
-    失败不留半成品；send 走现有会话消息路径并标注 core_proxy；observe 生成不含正文的规范化视图；
-    messages 按「0 = 最新」倒查；control 定义 pause / resume / stop / close 的状态转移与生成中控制语义，
-    stop 必须能中断正在进行的模型生成并级联到整棵子树。装配进主程序。
+    proxy_send：先按 target 判形态——单 agent 的 task/review/rework 走派发行（note_task + 生成），
+    user_reply/follow_up 走用户发言；协作子会话走它自己的阶段步与 decide；核心转达一律标注 core_proxy
+    并进目标会话的可回放转录。proxy_control 补 pause/resume（持久运行态：冻结派发、可恢复）与 close
+    （保留历史地停掉）。create 的开场事实经事件台外送。
   accept: |
-    六个工具在真实会话上跑通：建子工作成功、失败无残留、消息可审计回放、观察不泄正文、倒查顺序正确、
-    stop 级联生效、close 只在允许的状态下执行；node run-tests.js 全绿。
+    六个工具在真实会话上跑通：转达进目标转录且来源可查、pause/resume 可恢复、close 只在允许时执行、
+    建子工作的开场事实在事件台可见；node run-tests.js 全绿。
   blocked_by: 缺少实现
 
 - id: conductor.core-proxy-loop

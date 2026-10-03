@@ -67,6 +67,21 @@ impl ConductorHandle {
         Arc::clone(&self.bus)
     }
 
+    /// **级联停止**：把 root 及其整棵子树（按 `meta.parent`）里正在生成的会话都停下来。
+    /// 返回实际停下的会话 id——不假装“停止了一个本来就没在跑的会话”。
+    /// 代理核心的 `stop` 走这条：主会话停 = 所有相关工作一起停（用户看得见的那一下）。
+    pub(crate) fn stop_tree(&self, root: &str) -> Result<Vec<String>, String> {
+        let root_owned = root.to_string();
+        let tree = self.call(move |core| Ok(core.subtree_of(&root_owned)))?;
+        let mut stopped = Vec::new();
+        for sid in tree {
+            if self.jobs.stop(&sid) {
+                stopped.push(sid);
+            }
+        }
+        Ok(stopped)
+    }
+
     /// 测试专用：注入一条必定 panic 的命令，验证「一条命令 panic 不带垮整个核心」。
     #[cfg(test)]
     pub(crate) fn panic_probe(&self) -> Result<(), String> {

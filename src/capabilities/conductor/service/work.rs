@@ -429,6 +429,17 @@ impl Conductor {
     /// 创建工作：形态 + 参与的 agent（+ 协作需求）→ 建出会话、落盘身份、备好工作区。
     /// 一切选择来自用户；核心只做校验与机械装配，不替用户选。
     pub fn create_work(&mut self, spec: WorkSpec) -> Result<WorkOpened, String> {
+        self.create_work_inner(spec, None, false)
+    }
+
+    /// 建工作的唯一实现：`parent` = 编排归属（代理建的**子工作**），
+    /// `own_work` = 子工作有**自己的** `work/` 与沙箱（与协作的节点子会话相反）。
+    pub(crate) fn create_work_inner(
+        &mut self,
+        spec: WorkSpec,
+        parent: Option<&str>,
+        own_work: bool,
+    ) -> Result<WorkOpened, String> {
         validate_work_name(&spec.name)?;
         if self.sessions.contains_key(&spec.name) || self.history.load(&spec.name).is_ok() {
             return Err(format!("工作名已存在：{}", spec.name));
@@ -513,11 +524,11 @@ impl Conductor {
             task: spec.task.clone(),
             ts: now_ts(),
             agents: metas.clone(),
-            // 顶层会话：没有编排者，也没有节点（子会话由 spawn_sub_session 建）。
-            parent: None,
+            // 编排归属（代理建的子工作 = Some(父)）；节点子会话由 spawn_sub_session 另建。
+            parent: parent.map(|s| s.to_string()),
             node: None,
             delegation: None,
-            own_work: false,
+            own_work,
             // 档位来自**用户在创建向导里的选择**（默认 = 设置里的档位）；承载不了由下面如实拒绝。
             exec: crate::capabilities::workspace::api::ExecSpec {
                 tier: spec.tier,

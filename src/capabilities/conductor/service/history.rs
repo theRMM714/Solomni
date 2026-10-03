@@ -111,7 +111,7 @@ impl Conductor {
     }
 
     /// 一个会话的整棵子树（含它自己，父在前、子在后）：父子关系以 `meta.parent` 为唯一判据。
-    fn subtree_of(&self, name: &str) -> Vec<String> {
+    pub(crate) fn subtree_of(&self, name: &str) -> Vec<String> {
         let list = self.history_list();
         let mut out = vec![name.to_string()];
         let mut i = 0;
