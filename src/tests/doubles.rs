@@ -1476,6 +1476,7 @@ impl ProxyHost for FakeProxyHost {
             artifacts: None,
             message_count: Some(count),
             cursor: Some(count.to_string()),
+            new_messages: None,
         })
     }
 

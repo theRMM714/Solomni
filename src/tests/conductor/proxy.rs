@@ -714,7 +714,7 @@ pub(crate) fn a_finished_child_notifies_the_proxy_without_dumping_its_transcript
                 request_id: "r1".to_string(),
                 parent: Some("w-notify".to_string()),
             };
-            Ok(core.proxy_create(&spec)?.session)
+            Ok(core.proxy_create(&spec)?.0.session)
         })
         .expect("建子工作");
     let notified = handle

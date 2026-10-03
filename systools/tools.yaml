@@ -271,7 +271,7 @@ tools:
         desc: status（状态 + 消息条数）/ pending（待决问题）/ artifacts（产物索引）/ full（全部，仍不含消息正文）
       since:
         type: string
-        desc: 上次观察返回的游标；给了就只取它之后的新事实（避免重复消费或遗漏）
+        desc: 上次观察拿到的 cursor（= 那条会话的消息条数）；给了就多回一个 new_messages（自那次以来新增几条）。观察回执本身始终是**当前事实的幂等快照**，不会因为给了它而变增量
   read_session_messages:
     capability: none              # 不碰文件：只读会话消息
     desc: |

@@ -29,7 +29,9 @@
     补一条断言事件台可见的用例。
   accept: |
     代理建出子工作后，事件台立刻有它的开场事实，且与历史重放一致；node run-tests.js 全绿。
-  blocked_by: 缺少实现（涉及 ProxyHost 回执形状，与集成者确认）
+    现状：实现已落地（`proxy_create` 回开场事实、`ProxyBridge` 建完就 `publish` 到事件台，编译与既有用例通过），
+    但**还没有一条断言"事件台确实看见它"的用例**——那一条补上即可删本条目。
+  blocked_by: 缺少断言用例
 
 - id: conductor.proxy-observe-cursor
   scope: global
@@ -43,7 +45,9 @@
     若最终决定就只要"幂等完整快照"，同步改 tools.yaml 的 since 说明，不留下两处说法。
   accept: |
     since 的语义与声明一致（要么真增量、要么明确写成幂等快照），且不为此重读整份转录；node run-tests.js 全绿。
-  blocked_by: 缺少实现（契约口径需和集成者确认）
+    现状：实现已落地（`since` 的声明改成实话并真的用它算出 `new_messages`，编译与既有用例通过），
+    但**还没有一条断言 `new_messages` 语义的用例**——那一条补上即可删本条目。
+  blocked_by: 缺少断言用例
 
 - id: conductor.proxy-permission-state
   scope: global

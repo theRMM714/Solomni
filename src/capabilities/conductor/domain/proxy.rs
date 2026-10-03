@@ -357,8 +357,12 @@ pub struct Snapshot {
     /// 该会话的消息总条数（`read_session_messages` 倒查的上界）。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message_count: Option<usize>,
+    /// 游标 = 消息条数的字符串形式；下次观察把它当 `since` 传回来即可。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cursor: Option<String>,
+    /// 自 `since` 以来的新增消息条数（给了 `since` 才有；解不出数字就当没给）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub new_messages: Option<usize>,
 }
 
 /// `read_session_messages` 回给代理的**一页消息**：`from` 是“距最新多少条”（0 = 最新一条），
@@ -451,6 +455,7 @@ pub struct SendArgs {
 pub struct ObserveArgs {
     pub session_id: String,
     pub view: String,
+    /// 上次观察的游标（消息条数）；只用来算 `new_messages`，回执仍是幂等快照。
     #[serde(default)]
     pub since: Option<String>,
 }

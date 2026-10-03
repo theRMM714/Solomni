@@ -381,7 +381,7 @@ impl Conductor {
         &self,
         sid: &str,
         view: d::ObserveView,
-        _since: Option<&str>,
+        since: Option<&str>,
     ) -> Result<d::Snapshot, String> {
         // 存在性与运行态都取 meta（**不回放流水**）；"此刻在不在跑"再看会话中心。
         let meta = self
@@ -414,6 +414,15 @@ impl Conductor {
             None
         };
         let message_count = Some(self.proxy_lines(sid)?.len());
+        // 游标 = 消息条数。`since` 只用来给"自上次以来新增几条"这个增量信号；
+        // 回执其余部分是当前事实的**幂等快照**（调用方不因此漏读，也不因此重复读）。
+        let new_messages = match (
+            since.and_then(|s| s.trim().parse::<usize>().ok()),
+            message_count,
+        ) {
+            (Some(prev), Some(now)) => Some(now.saturating_sub(prev)),
+            _ => None,
+        };
         Ok(d::Snapshot {
             session: sid.to_string(),
             state: state.to_string(),
@@ -421,6 +430,7 @@ impl Conductor {
             artifacts,
             message_count,
             cursor: message_count.map(|n| n.to_string()),
+            new_messages,
         })
     }
 
@@ -463,7 +473,11 @@ impl Conductor {
 
     /// 代理工具：建一个**子工作**（single / collab）：编排归属是父会话，
     /// 工作区与沙箱是它自己的（`own_work`）。
-    pub fn proxy_create(&mut self, spec: &d::NewSession) -> Result<d::Created, String> {
+    /// 返回（稳定引用, **开场事实**）：事实交给 api 层发布到事件台（核心不持有事件台）。
+    pub fn proxy_create(
+        &mut self,
+        spec: &d::NewSession,
+    ) -> Result<(d::Created, Vec<SessionEvent>), String> {
         let parent = spec
             .parent
             .clone()
@@ -512,10 +526,13 @@ impl Conductor {
             tier: pmeta.exec.tier,
         };
         let opened = self.create_work_inner(work, Some(&parent), true)?;
-        Ok(d::Created {
-            session: opened.sid,
-            agents: opened.agents,
-        })
+        Ok((
+            d::Created {
+                session: opened.sid,
+                agents: opened.agents,
+            },
+            opened.facts,
+        ))
     }
 
     /// 代理工具：控制（**只做运行态的状态转移**，不启动也不停止生成——停止要 JobRegistry，
@@ -719,8 +736,12 @@ impl ProxyHost for ProxyBridge {
     }
 
     fn create_session(&self, spec: &d::NewSession) -> Result<d::Created, String> {
+        let handle = self.handle.lock().unwrap_or_else(|e| e.into_inner());
         let spec = spec.clone();
-        self.call(move |core| core.proxy_create(&spec))
+        let (created, facts) = handle.call(move |core| core.proxy_create(&spec))?;
+        // 开场事实（子会话开出来的那几条）推到事件台：在场的前端立刻看到它，不用等刷新。
+        handle.publish(&created.session, facts);
+        Ok(created)
     }
 
     fn send(&self, target: &str, msg: &d::Relayed) -> Result<(), String> {

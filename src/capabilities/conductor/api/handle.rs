@@ -546,6 +546,14 @@ impl ConductorHandle {
             });
     }
 
+    /// 把**已经落盘**的一批事实推到某个会话的事件台（不重复落盘）：代理建子工作的开场事实走这条。
+    pub(crate) fn publish(&self, sid: &str, events: Vec<SessionEvent>) {
+        if events.is_empty() {
+            return;
+        }
+        self.bus.push(sid, &events);
+    }
+
     /// 机制往一个会话记一条**可回放通知**：落盘（它进历史重放）+ 推它的事件台（在场的前端立刻看到）。
     /// 代理转达的来源记录与控制记录走这条——两条都要"既留得下、也看得见"。
     pub(crate) fn record_notice(&self, sid: &str, ev: SessionEvent) {
