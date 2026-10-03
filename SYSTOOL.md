@@ -23,6 +23,9 @@
 - **核心操作**：`plan`（方案 + 任务链）/ `node_verdict`（逐节点验收）/ `checklist`（总验收）/ `verdict`（裁决是否明确）/
   `slate`（名单）/ `submit_report`（执行席回报）/ `compact`（压缩上下文）——
   **凡会驱动核心的产出都必须是一次工具调用**，核心只从**工具参数**取载荷；正文里手写的同形 JSON 不作数。
+- **代理工具**（`core_proxy` 专属，代理模式的前置契约）：`catalog_agents`（只读清单）/ `create_session`（建单 agent 或
+  多 agent 代理会话）/ `send_session_message`（代用户转达）/ `observe_session`（只读观察）/ `control_session`（暂停、恢复、
+  停止、关闭）——工具逻辑已落地；真实会话宿主与核心代理生成循环尚未落地（见 `src/capabilities/conductor/testgaps.yaml`）。
 - **协作动词**：`say` / `agree` / `leave` / `ask`——讨论阶段的表态，是**声明式工具**：两套通道产出同语义，
   没有表态的纯正文 = 这一轮**没表态**（不降级成普通发言）。
 
@@ -35,7 +38,8 @@
 ```
 
 讨论席只做核实（读类 + 讨论动词）；执行席才动手，且**按身份分两种**：
-用户建的单 agent 工作用 `solo`（文件域 + 它自己的模块工具），协作的节点子会话用 `executor`（多一个回报工具 `submit_report`）。
+用户建的单 agent 工作用 `solo`（文件域 + 它自己的模块工具），协作的节点子会话用 `executor`（多一个回报工具 `submit_report`）；
+核心代理回合用 `core_proxy`（五项代理工具 + 只读核实，`module_tools: false`）。
 列出来的就是这一刻真能调的；真去调没拿到的会被**如实拒绝并落一条工具行**（不静默）。
 
 ## 四、路径模型：AI 只看到真实绝对路径

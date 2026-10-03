@@ -185,6 +185,116 @@ tools:
         non_empty: true
         desc: 要留下的摘要：结论、决定、待办、关键路径——丢掉细节，留下"以后还要用的"。
 
+  # —— 核心代理（core_proxy）：核心代用户建会话、转达、观察与控制 ——
+  # 真实会话宿主尚未落地：工具契约与逻辑已冻结，外部动作经 conductor 的 ProxyHost 端口
+  # （见 docs/tools/tools-and-roles.md 与 src/capabilities/conductor/testgaps.yaml）。
+  catalog_agents:
+    capability: none              # 不碰文件：只读登记处与模块清单
+    desc: 读取当前有效的 agent、模块与模型的公开登记信息（只读）。不返回密钥、真实私有路径或无关内容。
+    parallel: true                # 只读、无副作用：同一回复里的多个读取可以并发跑
+    params:
+      scope:
+        type: string
+        required: true
+        non_empty: true
+        desc: 要读的范围：agents（已存 agent）/ modules（模块公地）/ models（可用模型）/ all（全部）
+  create_session:
+    capability: none              # 不碰文件：建的是会话，不是路径
+    desc: |
+      建一个代理子会话（mode=single 单 agent / multi 多 agent 协作）。授权与父会话由机制提供，
+      不接受模型自授；创建失败不留半成品；同一个 request_id 重放不会重复创建。
+    params:
+      mode:
+        type: string
+        required: true
+        non_empty: true
+        desc: single（一个 agent）或 multi（多 agent 协作，至少两个）
+      agents:
+        type: array
+        required: true
+        desc: |-
+          agent 数组，每项要么 {"ref":"已存agent名","objective":"..."}，
+          要么 {"name":"新名字","modules":["模块id"],"model":"模型id","objective":"..."}；
+          objective 是写给这个 agent 的任务。同一模块不得出现在两个 agent 里。
+      workspace:
+        type: string
+        desc: 工作区声明（工作名）；省略即由宿主派生
+      request_id:
+        type: string
+        required: true
+        non_empty: true
+        desc: 幂等标识：同一个 request_id 重放不会重复创建
+  send_session_message:
+    capability: none              # 不碰文件：转达的是消息
+    desc: |
+      代替用户向子会话转达消息。核心转达的每一条都标记为 core_proxy；
+      用户原话要另带来源引用，不把核心生成的内容伪装成用户原文；多目标逐个回报成功与失败。
+    params:
+      targets:
+        type: array
+        required: true
+        desc: 目标会话 id 数组；多目标时逐个回报成功与失败，不产生未记录的隐式发送
+      message:
+        type: string
+        required: true
+        non_empty: true
+        desc: 要转达的内容
+      kind:
+        type: string
+        required: true
+        non_empty: true
+        desc: task（派任务）/ user_reply（代答）/ follow_up（补充）/ review（审查意见）/ rework（返工要求）
+      source_ref:
+        type: string
+        desc: 用户原话的来源引用（kind=user_reply 时必填）：说明这段转达的是哪句用户原话
+      request_id:
+        type: string
+        required: true
+        non_empty: true
+        desc: 幂等标识：同一个 request_id 重放不会重复发送
+  observe_session:
+    capability: none              # 不碰文件：只读会话事实
+    desc: 只读观察一个子会话（状态 / 最新消息 / 待决问题 / 工具摘要 / 产物索引），不隐式启动下一轮。
+    parallel: true                # 只读、无副作用
+    params:
+      session_id:
+        type: string
+        required: true
+        non_empty: true
+        desc: 要观察的会话 id
+      view:
+        type: string
+        required: true
+        non_empty: true
+        desc: status（状态）/ latest（最新消息）/ pending（待决问题）/ artifacts（产物索引）/ full（全部）
+      since:
+        type: string
+        desc: 上次观察返回的游标；给了就只取它之后的新事实（避免重复消费或遗漏）
+  control_session:
+    capability: none              # 不碰文件：改的是会话生命周期
+    desc: 控制一个代理子会话：pause（暂停）/ resume（恢复）/ stop（中断生成）/ close（关闭已完成或已停止的会话）。
+    params:
+      session_id:
+        type: string
+        required: true
+        non_empty: true
+        desc: 要控制的会话 id
+      action:
+        type: string
+        required: true
+        non_empty: true
+        desc: pause / resume / stop / close
+      reason:
+        type: string
+        required: true
+        non_empty: true
+        desc: 为什么做这个控制（会进可回放记录）
+      request_id:
+        type: string
+        required: true
+        non_empty: true
+        desc: 幂等标识：同一个 request_id 重放不会重复控制
+
   # —— 协作动词：讨论阶段的表态（声明式工具，不再是"从正文里解析手写信封"）——
   say:
     capability: none

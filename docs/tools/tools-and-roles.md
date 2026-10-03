@@ -64,6 +64,7 @@ roles:
 | 讨论回合 | `discussant` 的面（发言动词 + 只读核实），**不含模块工具**（它不干活） |
 | 执行回合·单 agent 工作 | `solo` 的面 + 该 agent 的模块工具（用户自己开的那场对话） |
 | 执行回合·协作节点 | `executor` 的面 + 该 agent 的模块工具（任务链的子会话；比 `solo` 多一个回报工具） |
+| 核心代理回合 | `core_proxy` 的面（五项代理工具 + 只读核实），**不含模块工具**（它代用户决定，不替 agent 干活） |
 
 发放与校验因此是**同一份判据**：列出来的就是这一刻真能调的，没拿到的既不在提示词里、也不在声明槽里；
 真去调它会被如实拒绝。发放只有一处：`SystemTools::role_face`（id 清单 + 是否给模块工具），它内部就是 `tool_face`（把 id 解析成声明；未知名如实报错——悬空引用在装配期就炸，不留到运行期）：
@@ -88,7 +89,8 @@ roles:
 
 **已落地**：角色表不再只是渲染进提示词的清单——**工具面与越权校验都出自它**：
 讨论回合按 `discussant` 发放并校验（面里没有的一律拒绝）；执行回合**按身份**发——用户建的单 agent 会话用 `solo`，
-协作的节点子会话用 `executor`（两者只差回报工具 `submit_report`，判据是会话有没有父会话）。
+协作的节点子会话用 `executor`（两者只差回报工具 `submit_report`，判据是会话有没有父会话）；
+核心代理回合按 `core_proxy` 发放与校验（五项代理工具 + 只读核实，`module_tools: false`）。
 代码里**没有任何**"哪个角色能调哪个工具"的名单，加一个工具只改 `systools/tools.yaml` 与 `roles.yaml`。
 
 
@@ -107,6 +109,7 @@ roles:
 - **普通说话仍可以是正文**：不驱动核心的发言（讨论里的意见、执行席的收尾话）不必包成工具——
   这两者就是"说话"与"操作"的分界。
 - **工具与载荷形状**在 `systools/tools.yaml`：`plan`（方案 + 任务链）、`node_verdict`（逐节点结论）、`checklist`（总验收清单）、`slate`（名单：推荐与代拟同一条协议）、`submit_report`（执行席回报）。
+- **核心代理的五个工具**（`catalog_agents` / `create_session` / `send_session_message` / `observe_session` / `control_session`）同样只从**工具参数**取载荷；它们的外部动作经 conductor 的 `ports::ProxyHost`，真实会话宿主尚未落地（见 §六）。
 - **载荷不合法 → 如实失败并中止这一步**（不猜、不回落正文 JSON）。
 - **核心可以先核实**：核心操作带一个**只读核实回路**——模型先请求 `read` / `search` 时，
   核心执行并把结果回灌，然后再要那一次核心操作调用。核心不是 member、手里本来没有工具环境，
@@ -139,6 +142,7 @@ prompts/
 | `solo` | 用户建的单 agent 工作 | `read` `list` `write` `edit` `patch` `search` + 该 agent 的模块工具（**不发** `submit_report`） |
 | `planner` | 核心整理派发 | `read` `search` `plan` `slate` `verdict` |
 | `orchestrator` | 核心链中推进 | `read` `search` `node_verdict` `checklist` |
+| `core_proxy` | 核心代理（在用户授予的任务级授权范围内代用户决定） | `catalog_agents` `create_session` `send_session_message` `observe_session` `control_session` `read` `list` `search`（**不发**模块工具） |
 
 **验收不是独立角色**：它是 `orchestrator` 的一个工具/一步（"根据验收情况推进任务"本就是同一个循环）。
 
@@ -152,7 +156,7 @@ prompts/
 
 | 场景 | 约定 |
 | --- | --- |
-| `create_session` | **当前不做**（以后的功能）：本表先不留它的席位 |
+| `create_session` 等代理工具 | **契约与工具逻辑已落地**（五个工具 + `core_proxy` 角色）；真实会话宿主与核心代理生成循环尚未落地，见 `src/capabilities/conductor/testgaps.yaml` |
 | 改任务目标 | 等于**改任务提示词**；改完**不作废**，让它跑完再由核心验收；链有问题则与用户在**主会话**讨论改链 |
 | 回档 | **级联删除**子会话 |
 | 系统工具调用 | 与模块工具同路径：工具行 + `[工具结果]`，可审计、可回放 |
@@ -161,6 +165,8 @@ prompts/
 
 总表与角色表都已生效：工具面**按回合按身份注入**（总表不进提示词），越权调用如实拒绝并落工具行，
 角色表里的悬空引用由结构审查硬失败挡下；五个核心操作与执行席回报都从**工具参数**取载荷（见 §三之二）。
+核心代理的五个工具与 `core_proxy` 角色同样已进两张表：工具逻辑（参数校验、授权、幂等、部分成功、游标）
+已落地并有契约测试；真实会话宿主与核心代理生成循环尚未落地（见 §六）。
 链怎么从讨论走到交付见 [task-chain.md](../collab/task-chain.md)。
 
 ## 八、联动

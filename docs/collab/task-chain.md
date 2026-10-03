@@ -74,7 +74,7 @@ TaskNode  { id, title, objective, assignee, deps, status, sub_session, acceptanc
 | 节点失败 / 超时 | 节点 Failed + 暂停 + 主会话通知（不自动重试） |
 | 停止父会话 | 不启新节点；已在跑的子会话各自停 |
 | 用户改子会话目标 | 旧产出**不作废**；核心验收按新目标 |
-| `create_session` | 当前不做（以后的功能） |
+| `create_session` 等代理工具 | 契约与工具逻辑已落地（`core_proxy` 角色 + 五项代理工具）；**真实会话宿主与核心代理生成循环尚未落地**，见 [tools-and-roles.md](../tools/tools-and-roles.md) 与 `src/capabilities/conductor/testgaps.yaml` |
 
 ## 七、当前状态
 

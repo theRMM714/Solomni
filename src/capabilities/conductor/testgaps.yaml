@@ -1,3 +1,51 @@
 # conductor 的业务缺口账。
 # 业务 AI 只记缺口、不写测试；测试 AI 负责实现测试并销账，补齐后删除条目，不保留完成历史。
 # 格式与判据见 docs/testing/gaps-acceptance.md §十二（id / scope / level / why / how / accept / blocked_by）。
+
+- id: conductor.proxy-host-not-implemented
+  scope: global
+  level: T3
+  why: |
+    核心代理的五个工具（catalog_agents / create_session / send_session_message / observe_session /
+    control_session）的契约与工具逻辑已按 systool_gaps.yaml 落地，但搬运它们的外部动作的
+    ProxyHost 端口还没有真实实现：建会话、转达、观察与控制落到真实会话上的语义（尤其
+    pause / resume 与「close 只允许在已完成或已停止时执行」）尚未有任何生产代码。
+  how: |
+    在 conductor 的 detail（或组合根）实现 ProxyHost：组合现有 session / collab / registry / workspace
+    能力面；create_session 复用 create_work 的校验与建库、失败不留半成品；send 走现有会话消息路径并
+    标注 core_proxy；observe 由会话能力面统一生成规范化视图与游标；control 定义 pause / resume / stop /
+    close 的状态转移与生成中控制语义，stop 必须能中断正在进行的模型生成。装配进主程序。
+  accept: |
+    五个工具在真实会话上跑通：建会话成功、失败无残留、消息可审计回放、观察增量不重不漏、stop 生效、
+    close 只在允许的状态下执行；node run-tests.js 全绿。
+  blocked_by: 缺少实现
+
+- id: conductor.core-proxy-loop
+  scope: global
+  level: T3
+  why: |
+    core_proxy 角色与它的五项代理工具已经能被测试直接驱动，但没有一个生产调用点：
+    核心代理的生成循环（模型调用 → 从工具参数取载荷 → 调 ProxyTools → 回灌结果）尚未落地，
+    所以目前模型还调不动这五个工具。
+  how: |
+    在 conductor 里加 core_proxy 的生成循环（与既有核心操作回路同源）：按角色发放工具面、跑模型、
+    把代理工具的调用交给 ProxyTools、把回执按通道形态回灌；授权、父会话与来源都由机制注入，
+    不接受模型自参。接上后删掉四处 dead_code allow（见 docs/testing/quality-isolation.md §三）。
+  accept: |
+    真实模型（原生与手写信封两套通道）能连续调用五项代理工具完成一次代理流程；越权调用如实拒绝并落工具行。
+  blocked_by: 缺少实现
+
+- id: conductor.proxy-authorization-persistence
+  scope: global
+  level: T2
+  why: |
+    工具层已经要求「任务级授权 + 调用前校验 + 没有授权什么都不做」，但授权本身还没有来源：
+    谁授予、范围与有效期怎么落盘、怎么撤销与回放，都还没有实现（产品级总缺口见 tests/gaps.yaml 的 core.agency-mode）。
+  how: |
+    定义任务级授权（范围 / 有效期 / 模型与资源边界 / 撤销方式）的落盘形态与可回放记录；由真实用户在
+    主对话里授予与撤销；在工具执行前校验授权、范围、调用者身份、当前主会话与目标子会话；撤销后
+    核心不能继续派发或代答。撤销即回到点名。
+  accept: |
+    有授权时工具只在范围内运行；无授权或越范围时明确拒绝且无副作用；授权、撤销、范围与来源都可从
+    转录与工具台账追溯。
+  blocked_by: 缺少实现

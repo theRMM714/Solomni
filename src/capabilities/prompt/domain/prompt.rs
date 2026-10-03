@@ -79,6 +79,10 @@ pub enum Segment {
     SlateModeCollab,
     VerdictSystem,
     VerdictUser,
+    /// 核心代理（core_proxy）的身份提示词：在用户授予的任务级授权范围内代用户决定与转达。
+    #[allow(dead_code)]
+    // 见 docs/testing/quality-isolation.md §三：代理生成循环尚未落地，生产调用点在下一步
+    ProxySystem,
     AgentSystem,
     ToolCallingEnvelope,
     ToolCallingNative,
@@ -153,6 +157,8 @@ pub struct CoreTexts {
     pub slate: SlatePrompts,
     /// 判定用户对裁决的回应是否明确到可以开工/放行。
     pub verdict: VerdictPrompts,
+    /// 核心代理（core_proxy）的身份提示词。
+    pub proxy: ProxyPrompts,
     /// 一个 agent 的职责提示词（由它的模块合成为一份能力包）。
     pub agent: AgentPrompts,
     /// 工具调用约定：手写信封（envelope 形态）。
@@ -448,6 +454,12 @@ pub struct SynthPrompts {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+pub struct ProxyPrompts {
+    /// 核心代理的身份提示词（能用哪些工具由角色表按回合注入，不在这里列清单）。
+    pub system: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 pub struct ExecutePrompts {
     /// user 变量：tasks
     pub user: String,
@@ -506,6 +518,7 @@ impl CoreTexts {
             Segment::SlateModeCollab => &self.slate.mode_collab,
             Segment::VerdictSystem => &self.verdict.system,
             Segment::VerdictUser => &self.verdict.user,
+            Segment::ProxySystem => &self.proxy.system,
             Segment::AgentSystem => &self.agent.system,
             Segment::ToolCallingEnvelope => &self.tool_calling_envelope,
             Segment::ToolCallingNative => &self.tool_calling_native,

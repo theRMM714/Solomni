@@ -48,6 +48,7 @@ presentation/{cli,web} ──▶ capabilities（含协调业务 conductor）─�
 | `HistoryStore` | 会话历史：顶层会话一个目录，子会话落在**父会话目录内部**（`session/<父>/children/<子>/`，meta + 事件流水）。`capabilities/session/ports.rs`，**只由 session 的 `service.rs` 持有**（R12）；别人经 `session::api::History` 读写 | `FsHistory` |
 | `PromptSource` | 提示词册加载（`prompts/`）。定义在 `capabilities/prompt/ports.rs` | `YamlPrompts` |
 | `SystoolsSource` | 工具总表、角色表与目录保留名表的加载（`systools/tools.yaml` + `roles.yaml` + `names.yaml`）。定义在 `capabilities/tools/ports.rs` | `YamlSystools` |
+| `ProxyHost` | 核心代理工具要做的外部动作（清单 / 建会话 / 转达 / 观察 / 生命周期）。定义在 `capabilities/conductor/ports.rs`，**只由 conductor 自己持有**（R12）；工具逻辑只依赖这一面 | **真实会话宿主尚未落地**：当前只有测试替身（`src/tests/doubles.rs` 的 `FakeProxyHost`），见 `src/capabilities/conductor/testgaps.yaml` |
 | `ToolRunner` | 外部工具进程（围栏安装、拉起、stdin 送参、超时杀树、截断）。`capabilities/tools/ports.rs`，**只由 tools 的 `service.rs` 持有**（R12）；别人经 `tools::api::ToolExec` 跑工具 | `ProcTools`（守门进程 = 本程序的 `--fence-run` 模式） |
 | `EnvelopeRepair`（`capabilities/llm/ports.rs`） | 手写信封不合法时的**无歧义**补救（改了字段含义就是错；拿不准就返回不修） | `UnambiguousRepair`（转义字符串里的裸控制字符 + 补上扫描器算出的收尾括号；断在字符串中间不修，一段回复里起了两段信封不修——补哪一段都是猜；调用方中止的生成一律不修） |
 | `FenceHost` | 围栏授权的释放（删除会话时请求一次撤销）。`capabilities/tools/ports.rs`，**只由 tools 的 `service.rs` 持有**（R12） | `confine::FenceHostAdapter`（本平台无该机制时为空操作） |

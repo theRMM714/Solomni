@@ -202,6 +202,7 @@ pub struct Conductor {
 mod env;
 mod flow;
 mod history;
+pub mod proxy;
 mod rewind;
 mod turn;
 mod work;

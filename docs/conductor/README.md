@@ -13,6 +13,7 @@
 ## 二、入站契约与状态归属
 
 `api::SessionOps`（会话中心）、`api::ConductorOps`（协调用例）、`api::LogOps`（埋点门面）、`Ops`（组装后交给呈现层）、`ConductorHandle`（自持线程 + 命令队列 + 事件台）与队列代理。状态：会话在世表、命令队列、运行态——**只有它写**。
+出站端口只有它自己的 `ports::ProxyHost`（核心代理工具的外部动作）；真实会话宿主尚未落地（见 `testgaps.yaml`）。
 
 ## 三、依赖图位置（由源码的 `::api` 引用推导）
 

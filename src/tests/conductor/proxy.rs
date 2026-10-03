@@ -1,0 +1,419 @@
+//! 核心代理工具（core_proxy）的契约测试：声明、授权、幂等、部分成功与游标。
+//! 真实会话宿主尚未落地：动作经 conductor::ports::ProxyHost，测试用 FakeProxyHost 顶替。
+use super::super::prelude::*;
+
+use crate::capabilities::conductor::domain::proxy as d;
+use crate::capabilities::conductor::service::proxy::ProxyTools;
+
+fn rig() -> (Arc<FakeProxyHost>, ProxyTools) {
+    let host = Arc::new(FakeProxyHost::new());
+    let tools = ProxyTools::new(host.clone(), test_systools().tools, test_prompts().tools());
+    (host, tools)
+}
+
+fn full_grant() -> d::Grant {
+    d::Grant {
+        tools: vec![
+            d::CATALOG.to_string(),
+            d::CREATE.to_string(),
+            d::SEND.to_string(),
+            d::OBSERVE.to_string(),
+            d::CONTROL.to_string(),
+        ],
+        ..Default::default()
+    }
+}
+
+fn ctx(grant: Option<d::Grant>) -> d::ProxyCall {
+    d::ProxyCall {
+        source: d::Source::CoreProxy,
+        grant,
+        parent: Some("main".to_string()),
+        now: 1000,
+    }
+}
+
+/// 五个工具必须真的在总表里、且只发给 core_proxy（越权防线出自身份）。
+#[test]
+pub(crate) fn the_five_tools_are_declared_and_granted_to_core_proxy() {
+    let st = test_systools();
+    for name in [d::CATALOG, d::CREATE, d::SEND, d::OBSERVE, d::CONTROL] {
+        let schema = st.tools.get(name).expect("代理工具必须在总表里");
+        assert_eq!(
+            schema.capability, "none",
+            "代理工具不碰文件，capability 必须是 none"
+        );
+        assert!(!schema.desc.trim().is_empty(), "{} 缺说明", name);
+        assert!(schema.params.is_some(), "{} 缺参数契约", name);
+    }
+    let (face, with_modules) = st.role_face("core_proxy");
+    for name in [
+        d::CATALOG,
+        d::CREATE,
+        d::SEND,
+        d::OBSERVE,
+        d::CONTROL,
+        "read",
+        "list",
+        "search",
+    ] {
+        assert!(face.iter().any(|t| t == name), "core_proxy 该能用 {}", name);
+    }
+    assert!(
+        !with_modules,
+        "代理工具代用户决定，但不替 agent 干活（module_tools=false）"
+    );
+    assert!(
+        !st.tools.contains_key("core_proxy"),
+        "core_proxy 是角色，不是工具"
+    );
+    for role in ["discussant", "solo", "executor", "planner", "orchestrator"] {
+        let (rface, _) = st.role_face(role);
+        for name in [d::CATALOG, d::CREATE, d::SEND, d::OBSERVE, d::CONTROL] {
+            assert!(
+                !rface.iter().any(|t| t == name),
+                "{} 不该拿到代理工具 {}",
+                role,
+                name
+            );
+        }
+    }
+}
+
+/// 没有授权就什么都不做：五个工具全部如实拒绝，且**根本没碰宿主**。
+#[test]
+pub(crate) fn without_a_grant_nothing_reaches_the_host() {
+    let (host, mut tools) = rig();
+    let c = ctx(None);
+    for (name, args) in [
+        (d::CATALOG, r#"{"scope":"all"}"#),
+        (
+            d::CREATE,
+            r#"{"mode":"single","agents":[{"ref":"a","objective":"做事"}],"request_id":"r1"}"#,
+        ),
+        (
+            d::SEND,
+            r#"{"targets":["t1"],"message":"好","kind":"task","request_id":"r2"}"#,
+        ),
+        (d::OBSERVE, r#"{"session_id":"s1","view":"status"}"#),
+        (
+            d::CONTROL,
+            r#"{"session_id":"s1","action":"stop","reason":"停","request_id":"r3"}"#,
+        ),
+    ] {
+        let out = tools.call(&c, name, args);
+        assert!(!out.ok, "{} 没有授权必须拒绝", name);
+        assert!(
+            out.output.contains("没有代理授权"),
+            "{}：{}",
+            name,
+            out.output
+        );
+    }
+    assert!(
+        host.calls().is_empty(),
+        "未授权不允许碰宿主：{:?}",
+        host.calls()
+    );
+}
+
+/// 授权边界：工具、有效期、模型与会话四道都算数。
+#[test]
+pub(crate) fn grant_scope_expiry_and_bounds_are_enforced() {
+    let (host, mut tools) = rig();
+    let c = ctx(Some(d::Grant {
+        tools: vec![d::CATALOG.to_string()],
+        ..Default::default()
+    }));
+    let out = tools.call(
+        &c,
+        d::CREATE,
+        r#"{"mode":"single","agents":[{"ref":"a","objective":"做事"}],"request_id":"r1"}"#,
+    );
+    assert!(
+        !out.ok && out.output.contains("不包含这个工具"),
+        "{}",
+        out.output
+    );
+    assert!(host.calls().is_empty(), "越范围不得碰宿主");
+
+    let expired = ctx(Some(d::Grant {
+        tools: vec![d::CATALOG.to_string()],
+        expires_at: Some(1),
+        ..Default::default()
+    }));
+    let out = tools.call(&expired, d::CATALOG, r#"{"scope":"all"}"#);
+    assert!(!out.ok && out.output.contains("已过期"), "{}", out.output);
+    assert!(host.calls().is_empty());
+
+    let model_scoped = ctx(Some(d::Grant {
+        tools: vec![d::CREATE.to_string()],
+        models: vec!["gpt".to_string()],
+        ..Default::default()
+    }));
+    let out = tools.call(
+        &model_scoped,
+        d::CREATE,
+        r#"{"mode":"single","agents":[{"name":"x","modules":["m1"],"model":"other","objective":"做事"}],"request_id":"r2"}"#,
+    );
+    assert!(
+        !out.ok && out.output.contains("不覆盖这个模型"),
+        "{}",
+        out.output
+    );
+    assert!(host.created().is_empty(), "模型越界不得建会话");
+
+    let sess_scoped = ctx(Some(d::Grant {
+        tools: vec![d::OBSERVE.to_string()],
+        sessions: vec!["s1".to_string()],
+        ..Default::default()
+    }));
+    let out = tools.call(
+        &sess_scoped,
+        d::OBSERVE,
+        r#"{"session_id":"s9","view":"status"}"#,
+    );
+    assert!(
+        !out.ok && out.output.contains("不覆盖这个会话"),
+        "{}",
+        out.output
+    );
+}
+
+/// create_session：先与登记处事实核对，再建立；失败不留半成品，重放不重复创建。
+#[test]
+pub(crate) fn create_session_validates_then_creates_once() {
+    let (host, mut tools) = rig();
+    let c = ctx(Some(full_grant()));
+    let args = r#"{"mode":"single","agents":[{"name":"x","modules":["m1"],"model":"gpt","objective":"做事"}],"workspace":"w1","request_id":"r1"}"#;
+    let out = tools.call(&c, d::CREATE, args);
+    assert!(out.ok, "{}", out.output);
+    assert!(out.output.contains("work-r1"), "{}", out.output);
+    let made = host.created();
+    assert_eq!(made.len(), 1);
+    assert_eq!(made[0].workspace.as_deref(), Some("w1"));
+    assert_eq!(made[0].agents[0].name, "x");
+    assert!(made[0].agents[0].transient, "新组装的 agent 是临时项");
+
+    let again = tools.call(&c, d::CREATE, args);
+    assert_eq!(again, out, "重放回同一结果");
+    assert_eq!(host.created().len(), 1, "重放不得重复创建");
+
+    for (bad, why) in [
+        (
+            r#"{"mode":"single","agents":[{"name":"x","modules":["nope"],"objective":"做事"}],"request_id":"b1"}"#,
+            "无此模块",
+        ),
+        (
+            r#"{"mode":"multi","agents":[{"name":"x","modules":["m1"],"objective":"一"},{"name":"y","modules":["m1"],"objective":"二"}],"request_id":"b2"}"#,
+            "同一模块只能属于一个 agent",
+        ),
+        (
+            r#"{"mode":"multi","agents":[{"name":"x","modules":["m1"],"objective":"一"}],"request_id":"b3"}"#,
+            "至少要两个 agent",
+        ),
+        (
+            r#"{"mode":"single","agents":[{"name":"x","modules":["m1"],"objective":"一"},{"name":"y","modules":["m2"],"objective":"二"}],"request_id":"b4"}"#,
+            "只接受一个 agent",
+        ),
+        (
+            r#"{"mode":"single","agents":[{"ref":"nope","objective":"做事"}],"request_id":"b5"}"#,
+            "不在登记处",
+        ),
+        (
+            r#"{"mode":"single","agents":[{"name":"a/b","modules":["m1"],"objective":"做事"}],"request_id":"b6"}"#,
+            "名字不合法",
+        ),
+        (
+            r#"{"mode":"single","agents":[{"name":"x","modules":["m1"],"objective":"做事","extra":1}],"request_id":"b7"}"#,
+            "不认识的键",
+        ),
+        (
+            r#"{"mode":"single","agents":[{"name":"x","modules":["m1"]}],"request_id":"b8"}"#,
+            "objective",
+        ),
+    ] {
+        let out = tools.call(&c, d::CREATE, bad);
+        assert!(!out.ok, "{} 必须被拒：{}", why, out.output);
+        assert!(
+            out.output.contains(why),
+            "{} 的理由要如实：{}",
+            why,
+            out.output
+        );
+    }
+    assert_eq!(host.created().len(), 1, "被拒的创建不得留下半成品");
+
+    // 宿主失败不记账：重放同一个 request_id 会再试，而不是把失败当成已完成。
+    host.fail_create("磁盘满");
+    let out = tools.call(
+        &c,
+        d::CREATE,
+        r#"{"mode":"single","agents":[{"ref":"a","objective":"做事"}],"request_id":"r9"}"#,
+    );
+    assert!(!out.ok && out.output.contains("磁盘满"), "{}", out.output);
+    assert_eq!(host.created().len(), 1);
+    host.clear_fail_create();
+    let out = tools.call(
+        &c,
+        d::CREATE,
+        r#"{"mode":"single","agents":[{"ref":"a","objective":"做事"}],"request_id":"r9"}"#,
+    );
+    assert!(out.ok, "失败不记账，重放要再试：{}", out.output);
+    assert_eq!(host.created().len(), 2);
+}
+
+/// send_session_message：来源如实标记、多目标部分成功、代答必须带独立引用。
+#[test]
+pub(crate) fn send_marks_source_and_reports_partial_success() {
+    let (host, mut tools) = rig();
+    host.fail_send("t2");
+    let c = ctx(Some(full_grant()));
+    let out = tools.call(
+        &c,
+        d::SEND,
+        r#"{"targets":["t1","t2"],"message":"继续","kind":"task","request_id":"r1"}"#,
+    );
+    assert!(!out.ok, "有目标失败就不能报成功：{}", out.output);
+    assert!(
+        out.output.contains("t1") && out.output.contains("t2"),
+        "成功与失败要分别可见：{}",
+        out.output
+    );
+    assert!(
+        out.output.contains("core_proxy"),
+        "来源必须如实标记：{}",
+        out.output
+    );
+
+    let calls = host.calls().len();
+    let again = tools.call(
+        &c,
+        d::SEND,
+        r#"{"targets":["t1","t2"],"message":"继续","kind":"task","request_id":"r1"}"#,
+    );
+    assert_eq!(again, out, "重放回同一结果（含部分失败）");
+    assert_eq!(host.calls().len(), calls, "重放不再动宿主");
+
+    let out = tools.call(
+        &c,
+        d::SEND,
+        r#"{"targets":["t1"],"message":"好","kind":"user_reply","request_id":"r2"}"#,
+    );
+    assert!(
+        !out.ok && out.output.contains("source_ref"),
+        "{}",
+        out.output
+    );
+
+    let out = tools.call(
+        &c,
+        d::SEND,
+        r#"{"targets":["t1"],"message":"好","kind":"user_reply","source_ref":"用户第 3 句","request_id":"r3"}"#,
+    );
+    assert!(out.ok, "{}", out.output);
+    let last = host.relayed().pop().expect("有转达记录");
+    assert_eq!(last.source, d::Source::CoreProxy);
+    assert_eq!(last.source_ref.as_deref(), Some("用户第 3 句"));
+}
+
+/// observe_session：只读、按游标增量、不推进；非法 view 不碰宿主。
+#[test]
+pub(crate) fn observe_is_cursor_based_and_never_advances() {
+    let (host, mut tools) = rig();
+    host.add_event("e1");
+    host.add_event("e2");
+    let c = ctx(Some(full_grant()));
+    let first = tools.call(&c, d::OBSERVE, r#"{"session_id":"s1","view":"latest"}"#);
+    assert!(first.ok, "{}", first.output);
+    assert!(
+        first.output.contains("e1") && first.output.contains("e2"),
+        "{}",
+        first.output
+    );
+    assert!(
+        first.output.contains("\"cursor\":\"2\""),
+        "{}",
+        first.output
+    );
+
+    host.add_event("e3");
+    let second = tools.call(
+        &c,
+        d::OBSERVE,
+        r#"{"session_id":"s1","view":"latest","since":"2"}"#,
+    );
+    assert!(second.ok, "{}", second.output);
+    assert!(second.output.contains("e3"), "{}", second.output);
+    assert!(
+        !second.output.contains("e1"),
+        "增量不得重复消费：{}",
+        second.output
+    );
+
+    let calls = host.calls().len();
+    let bad = tools.call(&c, d::OBSERVE, r#"{"session_id":"s1","view":"nope"}"#);
+    assert!(!bad.ok && bad.output.contains("view"), "{}", bad.output);
+    assert_eq!(host.calls().len(), calls, "非法 view 不得碰宿主");
+}
+
+/// control_session：回执是实际状态、重放幂等、宿主拒绝照实回报。
+#[test]
+pub(crate) fn control_is_idempotent_and_reports_the_actual_state() {
+    let (host, mut tools) = rig();
+    let c = ctx(Some(full_grant()));
+    let args = r#"{"session_id":"s1","action":"stop","reason":"用户要求","request_id":"r1"}"#;
+    let out = tools.call(&c, d::CONTROL, args);
+    assert!(out.ok, "{}", out.output);
+    assert!(
+        out.output.contains("\"state\":\"stopped\""),
+        "{}",
+        out.output
+    );
+
+    let calls = host.calls().len();
+    let again = tools.call(&c, d::CONTROL, args);
+    assert_eq!(again, out, "重放回同一结果");
+    assert_eq!(host.calls().len(), calls, "重放不再动宿主");
+
+    host.fail_control("close");
+    let bad = tools.call(
+        &c,
+        d::CONTROL,
+        r#"{"session_id":"s1","action":"close","reason":"收尾","request_id":"r2"}"#,
+    );
+    assert!(
+        !bad.ok && bad.output.contains("不能 close"),
+        "{}",
+        bad.output
+    );
+
+    let bad = tools.call(
+        &c,
+        d::CONTROL,
+        r#"{"session_id":"s1","action":"explode","reason":"x","request_id":"r3"}"#,
+    );
+    assert!(!bad.ok && bad.output.contains("action"), "{}", bad.output);
+}
+
+/// 声明层先挡形状（没写的键、类型不对），语义层再挡取值；都不是代理工具的直接拒绝。
+#[test]
+pub(crate) fn declaration_shape_is_enforced_before_semantics() {
+    let (host, mut tools) = rig();
+    let c = ctx(Some(full_grant()));
+    let out = tools.call(&c, d::CATALOG, r#"{"scope":"all","nope":1}"#);
+    assert!(!out.ok, "声明里没写的键必须拒收：{}", out.output);
+    let out = tools.call(&c, d::CATALOG, r#"{"scope":"everything"}"#);
+    assert!(!out.ok && out.output.contains("scope"), "{}", out.output);
+    let out = tools.call(&c, "read", r#"{"path":"/x"}"#);
+    assert!(
+        !out.ok && out.output.contains("不是代理工具"),
+        "{}",
+        out.output
+    );
+    assert!(
+        host.calls().is_empty(),
+        "形状/语义不过的调用不得碰宿主：{:?}",
+        host.calls()
+    );
+}
