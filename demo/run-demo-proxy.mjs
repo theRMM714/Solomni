@@ -269,7 +269,7 @@ async function main() {
   ok(names.every((n) => FACE.includes(n)), "只用它自己的工具面（模块工具一个也没发）", names.join("、"));
   ok(names.includes("catalog_agents"), "先核实清单再决定（catalog_agents）");
   ok(names.includes("create_session"), "自己建出子工作（create_session）");
-  ok(names.includes("send_session_message"), "自己把活转达出去（send_session_message）");
+  // 建会话自带开头（opening）就开工——"转达"不再是开工的必经一步（后续补充 / 返工 / 代答门才用它）。
 
   const st = await state();
   const kids = descendants(st, sid);
@@ -282,15 +282,18 @@ async function main() {
 
   const kidsLines = new Map();
   let worked = 0;
+  let seeded = 0;
   for (const k of kids) {
     const kl = await lines(k.name);
     kidsLines.set(k.name, kl);
     const kt = toolRows(kl);
     if (kt.length || kl.some((l) => l.kind === "msg")) worked++;
+    if (kl.some((l) => l.task === true)) seeded++;
     console.log("   " + k.name + "：工具 " + kt.length + " 次、发言 " + kl.filter((l) => l.kind === "msg").length + " 条");
     if (JSON.stringify(kl).includes("核心代理转达")) console.log("     ↳ 记录里有来源（核心代理转达，不冒充用户原话）");
   }
   ok(worked === kids.length && kids.length > 0, "每个子工作都真的跑过（有工具行或发言）", worked + "/" + kids.length);
+  ok(seeded === kids.length && kids.length > 0, "每个子会话都写进了开头（核心派的活 / 本次需求）", seeded + "/" + kids.length);
 
   // 关卡不落到用户头上：代理会话自己不待裁，子会话的门由核心代答（没人等用户点头）。
   const nameSet = new Set([sid, ...kids.map((k) => k.name)]);
