@@ -487,7 +487,8 @@ impl CollabSession {
                 &a.name,
                 &sandbox,
                 &modules,
-                vec![crate::capabilities::prompt::api::Segment::MechanismCollab],
+                "collab",
+                "discussant",
             );
             let mut member = Member::plain(&a.name, params, mode);
             // 围栏：可达范围 + 断网，由该 agent 的沙箱与 exec 段派生（机制在 adapters）；

@@ -95,25 +95,37 @@ pub(crate) fn work_root_walks_to_the_top_across_nested_sub_sessions() {
     assert_eq!(core.work_root(&low).unwrap(), top, "第三层也锚在顶");
 }
 
-/// 身份块里的机制说明按**这个会话的类别**取：单 agent / 协作 / 代理各拿自己那一份。
+/// 身份块里的机制说明按（**会话使用类型** × **角色**）取：对得上的拿，对不上的不拿。
 #[test]
-pub(crate) fn identity_takes_the_mechanism_of_its_session_kind() {
-    use crate::capabilities::prompt::api::Segment;
+pub(crate) fn identity_takes_the_mechanism_of_its_session_and_role() {
     let prompt = test_prompts();
     let mode = crate::capabilities::llm::api::ToolMode::Envelope;
-    let identity = |seg| {
+    let identity = |kind: &str, role: &str| {
         let mut p = test_params("a");
-        p.mechanisms = vec![seg];
+        p.session_kind = kind.to_string();
+        p.role = role.to_string();
         p.identity(&prompt, mode)
     };
-    let single = identity(Segment::MechanismSingle);
-    let collab = identity(Segment::MechanismCollab);
-    let proxy = identity(Segment::MechanismProxy);
-    assert!(single.contains("单 agent 工作"), "{}", single);
-    assert!(collab.contains("一个 agent = 一个会话"), "{}", collab);
+    let solo = identity("single", "solo");
+    let discussant = identity("collab", "discussant");
+    let executor = identity("collab", "executor");
+    let proxy = identity("proxy", "core_proxy");
+    let mismatch = identity("single", "core_proxy");
+    assert!(solo.contains("单 agent 工作"), "{}", solo);
+    assert!(
+        discussant.contains("一个 agent = 一个会话"),
+        "{}",
+        discussant
+    );
+    assert!(executor.contains("一个 agent = 一个会话"), "{}", executor);
     assert!(proxy.contains("派完活就让出回合"), "{}", proxy);
-    assert!(!single.contains("一个 agent = 一个会话"), "各拿自己那一份");
+    assert!(!solo.contains("一个 agent = 一个会话"), "各拿自己那一份");
     assert!(!proxy.contains("一个 agent = 一个会话"), "各拿自己那一份");
+    assert!(
+        !mismatch.contains("单 agent 工作"),
+        "类型对不上就不发：{}",
+        mismatch
+    );
 }
 
 /// 子树里任一节点在生成中就**整体拒绝**：不能删到一半留下半个状态。

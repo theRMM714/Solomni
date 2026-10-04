@@ -445,7 +445,8 @@ pub(crate) fn builtin_tool_book_is_the_one_source_of_names_and_paths() {
             "a1",
             &sb,
             &[],
-            vec![crate::capabilities::prompt::api::Segment::MechanismCollab],
+            "single",
+            "solo",
         ),
     );
     assert!(env.contains("【工作环境】"), "{}", env);

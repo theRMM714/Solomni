@@ -127,26 +127,40 @@ impl Conductor {
         out
     }
 
-    /// 这个会话属于**哪一类机制**：按落盘形态派生（重建后必须是同一份）。
-    /// - 协作会话本身、以及协作派生的成员 / 节点会话 → 协作机制；
-    /// - 代理会话本身 → 代理机制；代理建的子工作按它**自己**的形态（single / collab）；
-    /// - 其余（顶层单 agent 工作、代理建的单 agent 子工作）→ 单 agent 机制。
-    pub(crate) fn mechanism_for(
+    /// 这个会话的**使用类型**（机制册的第一把钥匙）：按落盘形态派生，重建后是同一份。
+    /// 协作派生的成员 / 节点会话算 **collab**（它属于那场协作），其余单 agent 会话算 single，代理算 proxy。
+    pub(crate) fn session_kind_of(
         &self,
         meta: &crate::capabilities::session::api::SessionMeta,
-    ) -> Result<crate::capabilities::prompt::api::Segment, String> {
-        use crate::capabilities::prompt::api::Segment;
+    ) -> Result<String, String> {
         match meta.mode.as_str() {
-            "collab" => return Ok(Segment::MechanismCollab),
-            "proxy" => return Ok(Segment::MechanismProxy),
-            _ => {}
+            "proxy" => Ok("proxy".to_string()),
+            "collab" => Ok("collab".to_string()),
+            _ => match meta.parent.as_deref() {
+                Some(p) => match self.history.meta(p) {
+                    Ok(pm) if pm.mode == "collab" => Ok("collab".to_string()),
+                    _ => Ok("single".to_string()),
+                },
+                None => Ok("single".to_string()),
+            },
+        }
+    }
+
+    /// 这一席的**角色**（机制册的第二把钥匙，也是工具面与提示词的角色名）。
+    /// 与实时建立同一把尺子：协作的成员 / 节点 = executor；代理 = core_proxy；其余单 agent 工作 = solo。
+    pub(crate) fn role_of(
+        &self,
+        meta: &crate::capabilities::session::api::SessionMeta,
+    ) -> Result<String, String> {
+        if meta.mode == "proxy" {
+            return Ok("core_proxy".to_string());
         }
         match meta.parent.as_deref() {
             Some(p) => match self.history.meta(p) {
-                Ok(pm) if pm.mode == "collab" => Ok(Segment::MechanismCollab),
-                _ => Ok(Segment::MechanismSingle),
+                Ok(pm) if pm.mode == "collab" => Ok("executor".to_string()),
+                _ => Ok("solo".to_string()),
             },
-            None => Ok(Segment::MechanismSingle),
+            None => Ok("solo".to_string()),
         }
     }
 

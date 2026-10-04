@@ -60,12 +60,6 @@ pub struct Prompts {
 /// 加/改一段提示词的步骤因此固定成两步：`prompts/` 里加键 → 这里加一个变体（缺了编译不过）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Segment {
-    /// 机制说明·单 agent 工作（这个系统怎么运转）。
-    MechanismSingle,
-    /// 机制说明·协作（讨论 → 任务链 → 节点执行 → 验收）。
-    MechanismCollab,
-    /// 机制说明·代理（全权、共用工作区、派完让出回合、停下叫醒）。
-    MechanismProxy,
     ChatProtocol,
     DiscussOpener,
     DiscussStep,
@@ -126,6 +120,15 @@ pub fn merge_book(docs: &[String]) -> Result<Prompts, String> {
     // 剩下的键就是"核心段"（`core:` 的内容）。
     let core: CoreTexts = yaml_serde::from_value(yaml_serde::Value::Mapping(merged))
         .map_err(|e| format!("提示词册缺键或类型不对：{}", e))?;
+    // 机制册自检：条目挂的**会话使用类型**必须在全表里——缺了就是装配错误，不静默漏发一份机制。
+    for m in &core.mechanisms {
+        if !core.session_kinds.iter().any(|k| k == &m.session) {
+            return Err(format!(
+                "机制册非法：会话使用类型不在 session_kinds 里：{}",
+                m.session
+            ));
+        }
+    }
     Ok(Prompts {
         core,
         tools: std::sync::Arc::new(tools),
@@ -146,9 +149,11 @@ fn take_section<T: DeserializeOwned>(
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct CoreTexts {
-    /// 机制说明**按会话类别各一份**：单 agent / 协作 / 代理。
-    /// 每个身份块只拿自己那一份——AI 不知道机制，就只会写散文。
-    pub mechanisms: MechanismTexts,
+    /// 会话使用类型的**全表**：机制册的校验口径之一（另一处是角色表）。
+    pub session_kinds: Vec<String>,
+    /// **机制说明册**：每条按（会话使用类型 × 适用角色）分发，见 `mechanisms_for`。
+    /// AI 不知道机制就只会写散文——所以哪一类会话由哪个角色拿哪一段，是**数据**，不是代码分支。
+    pub mechanisms: Vec<Mechanism>,
     pub chat_protocol: String,
     pub discuss: DiscussPrompts,
     pub synthesize: SynthPrompts,
@@ -492,13 +497,14 @@ pub struct SlatePrompts {
     pub mode_collab: String,
 }
 
-/// 三种会话类别的机制说明。每个身份块只取自己那一份
-/// （会话类别 → 这一份的绑定见 `SessionParams::mechanisms`，按落盘形态派生）。
+/// 一条机制说明：**会话使用类型与适用角色同时对上**才注入（见 `CoreTexts::mechanisms_for`）。
 #[derive(Debug, Clone, Deserialize)]
-pub struct MechanismTexts {
-    pub single: String,
-    pub collab: String,
-    pub proxy: String,
+pub struct Mechanism {
+    /// 会话使用类型（必须在 `session_kinds` 里）。
+    pub session: String,
+    /// 适用角色（必须在角色表里存在——悬空引用由测试门禁挡下）。
+    pub roles: Vec<String>,
+    pub text: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -508,12 +514,20 @@ pub struct AgentPrompts {
 }
 
 impl CoreTexts {
+    /// 按（**会话使用类型**，**角色**）取这个回合的机制说明：只拿**同时**匹配的条目，
+    /// 按册子里的声明顺序拼接（一条都没配 = 空串）。对应关系全部写在 YAML 里，这里只做匹配。
+    pub fn mechanisms_for(&self, session: &str, role: &str) -> String {
+        self.mechanisms
+            .iter()
+            .filter(|m| m.session == session && m.roles.iter().any(|r| r == role))
+            .map(|m| m.text.trim().to_string())
+            .collect::<Vec<_>>()
+            .join("\n\n")
+    }
+
     /// **按名字取一段原文**：册子的布局只在这里露面（新加一段 = 这里加一支 match）。
     pub fn segment(&self, seg: Segment) -> &str {
         match seg {
-            Segment::MechanismSingle => &self.mechanisms.single,
-            Segment::MechanismCollab => &self.mechanisms.collab,
-            Segment::MechanismProxy => &self.mechanisms.proxy,
             Segment::ChatProtocol => &self.chat_protocol,
             Segment::DiscussOpener => &self.discuss.opener,
             Segment::DiscussStep => &self.discuss.step,
