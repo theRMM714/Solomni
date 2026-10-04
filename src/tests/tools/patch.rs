@@ -441,7 +441,12 @@ pub(crate) fn builtin_tool_book_is_the_one_source_of_names_and_paths() {
     let sb = test_sandbox("a1", &[]);
     let env = crate::capabilities::session::domain::session::env_block(
         &prompts,
-        &crate::capabilities::session::api::SessionParams::from_workspace("a1", &sb, &[]),
+        &crate::capabilities::session::api::SessionParams::from_workspace(
+            "a1",
+            &sb,
+            &[],
+            vec![crate::capabilities::prompt::api::Segment::MechanismCollab],
+        ),
     );
     assert!(env.contains("【工作环境】"), "{}", env);
     assert!(

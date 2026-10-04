@@ -484,7 +484,10 @@ impl CollabSession {
             };
             // **会话参数**：身份块每回合由它现渲染，不存进任何人的消息列表。
             let params = crate::capabilities::session::api::SessionParams::from_workspace(
-                &a.name, &sandbox, &modules,
+                &a.name,
+                &sandbox,
+                &modules,
+                vec![crate::capabilities::prompt::api::Segment::MechanismCollab],
             );
             let mut member = Member::plain(&a.name, params, mode);
             // 围栏：可达范围 + 断网，由该 agent 的沙箱与 exec 段派生（机制在 adapters）；

@@ -148,7 +148,10 @@ impl Conductor {
                 };
                 // **会话参数**：与建立时同一个口径（身份块每回合现渲染，不进消息列表）。
                 let params = crate::capabilities::session::api::SessionParams::from_workspace(
-                    &a.name, &sb, &modules,
+                    &a.name,
+                    &sb,
+                    &modules,
+                    vec![self.mechanism_for(meta)?],
                 );
                 let (chat, note) = self.llm.member_channel(channel.as_ref(), &a.name);
                 let texts = self.prompt.tools();

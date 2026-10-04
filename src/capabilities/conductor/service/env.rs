@@ -151,8 +151,12 @@ impl Conductor {
             ),
         );
         // **会话参数**：身份块每回合由它现渲染（不存进消息列表）。
-        let params =
-            crate::capabilities::session::api::SessionParams::from_workspace(&a.name, sb, modules);
+        let params = crate::capabilities::session::api::SessionParams::from_workspace(
+            &a.name,
+            sb,
+            modules,
+            vec![crate::capabilities::prompt::api::Segment::MechanismSingle],
+        );
         // 单 agent 工作：用户自己开的那场对话（不是任务链的节点）——身份是 solo。
         let tools = self.tools_env(modules, sb, unavailable, net, mode, "solo");
         let mut s = crate::capabilities::session::api::AgentSession::new(

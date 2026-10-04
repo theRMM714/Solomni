@@ -47,6 +47,9 @@ pub struct SessionParams {
     /// `Some(seg)` = 不是 agent 的核心身份（代理这类），身份块渲染 `seg` 那一段角色提示词。
     /// 存段名而不是渲染好的文本：身份块**每回合现渲染**（册子一改，下一次调用就生效）。
     pub role_system: Option<crate::capabilities::prompt::api::Segment>,
+    /// **这个会话属于哪一类**（单 agent / 协作 / 代理）：身份块按顺序拼这些机制说明。
+    /// 与 `role_system` 同一口径——存段名、每回合现渲染、按落盘形态派生（重建后是同一份）。
+    pub mechanisms: Vec<crate::capabilities::prompt::api::Segment>,
 }
 
 impl SessionParams {
@@ -56,6 +59,7 @@ impl SessionParams {
         agent: &str,
         sb: &crate::capabilities::workspace::api::Sandbox,
         modules: &[crate::capabilities::workspace::api::Module],
+        mechanisms: Vec<crate::capabilities::prompt::api::Segment>,
     ) -> SessionParams {
         SessionParams {
             agent: agent.to_string(),
@@ -68,6 +72,7 @@ impl SessionParams {
                 .map(|m| (m.manifest.id.clone(), m.manifest.system.clone()))
                 .collect(),
             role_system: None,
+            mechanisms,
         }
     }
 
@@ -86,6 +91,7 @@ impl SessionParams {
                 &self.agent,
                 &env,
                 mode,
+                &self.mechanisms,
             ),
             None => crate::capabilities::workspace::api::agent_system(
                 prompt,
@@ -93,6 +99,7 @@ impl SessionParams {
                 &self.modules,
                 &env,
                 mode,
+                &self.mechanisms,
             ),
         }
     }

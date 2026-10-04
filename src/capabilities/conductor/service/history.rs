@@ -127,6 +127,29 @@ impl Conductor {
         out
     }
 
+    /// 这个会话属于**哪一类机制**：按落盘形态派生（重建后必须是同一份）。
+    /// - 协作会话本身、以及协作派生的成员 / 节点会话 → 协作机制；
+    /// - 代理会话本身 → 代理机制；代理建的子工作按它**自己**的形态（single / collab）；
+    /// - 其余（顶层单 agent 工作、代理建的单 agent 子工作）→ 单 agent 机制。
+    pub(crate) fn mechanism_for(
+        &self,
+        meta: &crate::capabilities::session::api::SessionMeta,
+    ) -> Result<crate::capabilities::prompt::api::Segment, String> {
+        use crate::capabilities::prompt::api::Segment;
+        match meta.mode.as_str() {
+            "collab" => return Ok(Segment::MechanismCollab),
+            "proxy" => return Ok(Segment::MechanismProxy),
+            _ => {}
+        }
+        match meta.parent.as_deref() {
+            Some(p) => match self.history.meta(p) {
+                Ok(pm) if pm.mode == "collab" => Ok(Segment::MechanismCollab),
+                _ => Ok(Segment::MechanismSingle),
+            },
+            None => Ok(Segment::MechanismSingle),
+        }
+    }
+
     /// 一个会话的**工作根**，从它自己的 meta 起算：`meta` 可能**还没落盘**
     /// （建工作区发生在落盘之前），所以有父就上溯、没有父就是它自己。
     pub(crate) fn work_root_of(&self, meta: &SessionMeta) -> Result<String, String> {

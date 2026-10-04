@@ -141,7 +141,7 @@ impl CollabSession {
         // 清单与越权校验同源——同一份清单在提示词里再列一遍只会多一个会漂的地方。
         let protocol = format!(
             "{}\n{}",
-            self.prompts.text(Segment::Mechanism),
+            self.prompts.text(Segment::MechanismCollab),
             self.prompts.text(Segment::ChatProtocol)
         );
         let mut disc = Discussion::new(
@@ -293,7 +293,7 @@ impl CollabSession {
             // 恢复时与实时同一句：只有机制与约定，工具面随回合注入（见 tools_block）。
             let protocol = format!(
                 "{}\n{}",
-                s.prompts.text(Segment::Mechanism),
+                s.prompts.text(Segment::MechanismCollab),
                 s.prompts.text(Segment::ChatProtocol)
             );
 

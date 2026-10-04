@@ -19,6 +19,7 @@ pub(crate) fn module_tool_params_are_declared_in_the_manifest_and_enforced_by_co
         &[(mod_m0.manifest.id.clone(), mod_m0.manifest.system.clone())],
         "工具说明",
         crate::capabilities::llm::api::ToolMode::Envelope,
+        &[crate::capabilities::prompt::api::Segment::MechanismCollab],
     );
     // 模块工具清单与参数**不进系统提示**：随回合注入（能不能用模块工具由角色表的 module_tools 决定）。
     assert!(

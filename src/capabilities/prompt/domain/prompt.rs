@@ -60,8 +60,12 @@ pub struct Prompts {
 /// 加/改一段提示词的步骤因此固定成两步：`prompts/` 里加键 → 这里加一个变体（缺了编译不过）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Segment {
-    /// 机制说明（这个系统怎么运转、一个 agent 一个会话、表态只能用动词）。
-    Mechanism,
+    /// 机制说明·单 agent 工作（这个系统怎么运转）。
+    MechanismSingle,
+    /// 机制说明·协作（讨论 → 任务链 → 节点执行 → 验收）。
+    MechanismCollab,
+    /// 机制说明·代理（全权、共用工作区、派完让出回合、停下叫醒）。
+    MechanismProxy,
     ChatProtocol,
     DiscussOpener,
     DiscussStep,
@@ -142,9 +146,9 @@ fn take_section<T: DeserializeOwned>(
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct CoreTexts {
-    /// 机制说明（这个系统怎么运转、一个 agent 一个会话、表态只能用动词）。
-    /// 讨论席与执行席**都**拿它——AI 不知道机制，就只会写散文。
-    pub mechanism: String,
+    /// 机制说明**按会话类别各一份**：单 agent / 协作 / 代理。
+    /// 每个身份块只拿自己那一份——AI 不知道机制，就只会写散文。
+    pub mechanisms: MechanismTexts,
     pub chat_protocol: String,
     pub discuss: DiscussPrompts,
     pub synthesize: SynthPrompts,
@@ -488,6 +492,15 @@ pub struct SlatePrompts {
     pub mode_collab: String,
 }
 
+/// 三种会话类别的机制说明。每个身份块只取自己那一份
+/// （会话类别 → 这一份的绑定见 `SessionParams::mechanisms`，按落盘形态派生）。
+#[derive(Debug, Clone, Deserialize)]
+pub struct MechanismTexts {
+    pub single: String,
+    pub collab: String,
+    pub proxy: String,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct AgentPrompts {
     /// system 变量：agent, modules, mechanism, env, tool_calling
@@ -498,7 +511,9 @@ impl CoreTexts {
     /// **按名字取一段原文**：册子的布局只在这里露面（新加一段 = 这里加一支 match）。
     pub fn segment(&self, seg: Segment) -> &str {
         match seg {
-            Segment::Mechanism => &self.mechanism,
+            Segment::MechanismSingle => &self.mechanisms.single,
+            Segment::MechanismCollab => &self.mechanisms.collab,
+            Segment::MechanismProxy => &self.mechanisms.proxy,
             Segment::ChatProtocol => &self.chat_protocol,
             Segment::DiscussOpener => &self.discuss.opener,
             Segment::DiscussStep => &self.discuss.step,

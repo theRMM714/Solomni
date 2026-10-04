@@ -15,16 +15,30 @@ pub(crate) fn prompt_book_loads_from_yaml() {
     let p = test_prompts();
     // 语气约定；**能用哪些表态由角色表渲染**（见 systools/roles.yaml），不在这句话里。
     assert!(!p.core.chat_protocol.trim().is_empty());
-    // 机制说明不能空：AI 不知道机制就只会写散文（真机上就是这么空转的）。
-    // 它同时进讨论席的协议块与执行席的系统提示。
-    assert!(!p.core.mechanism.trim().is_empty(), "机制说明不能为空");
+    // 机制说明**按会话类别各一份**，哪一份都不能空：AI 不知道机制就只会写散文。
     assert!(
-        p.core.mechanism.contains("一个 agent = 一个会话"),
-        "机制说明要讲清会话归属"
+        !p.core.mechanisms.single.trim().is_empty(),
+        "单 agent 机制不能为空"
     );
     assert!(
-        p.core.mechanism.contains("动词"),
-        "机制说明要讲清表态只能用动词"
+        !p.core.mechanisms.collab.trim().is_empty(),
+        "协作机制不能为空"
+    );
+    assert!(
+        !p.core.mechanisms.proxy.trim().is_empty(),
+        "代理机制不能为空"
+    );
+    assert!(
+        p.core.mechanisms.collab.contains("一个 agent = 一个会话"),
+        "协作机制要讲清会话归属"
+    );
+    assert!(
+        p.core.mechanisms.collab.contains("动词"),
+        "协作机制要讲清表态只能用动词"
+    );
+    assert!(
+        p.core.mechanisms.proxy.contains("派完活就让出回合"),
+        "代理机制要讲清派完让出回合"
     );
     assert!(p.core.discuss.opener.contains("{{protocol}}"));
 }

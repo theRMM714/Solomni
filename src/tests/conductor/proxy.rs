@@ -969,8 +969,8 @@ pub(crate) fn the_proxy_identity_is_the_role_prompt() {
         identity
     );
     assert!(
-        identity.contains("catalog_agents"),
-        "角色提示词要说明它自己的工具：{}",
+        identity.contains("派完活就让出回合"),
+        "代理这一类会话的机制说明要进身份块：{}",
         identity
     );
     assert!(identity.contains("w-role"), "环境块不能缺席：{}", identity);
@@ -999,6 +999,9 @@ pub(crate) fn the_proxy_identity_is_the_role_prompt() {
         "普通会话不该有代理角色：{}",
         plain
     );
+    // 机制说明按**这个会话的类别**取：单 agent 工作拿单 agent 那一份，不沾代理那份。
+    assert!(plain.contains("单 agent 工作"), "{}", plain);
+    assert!(!plain.contains("派完活就让出回合"), "{}", plain);
 }
 
 /// 用户入口的第三人形态：`create_work(WorkMode::Proxy)` 建出**代理会话**——

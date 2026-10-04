@@ -157,6 +157,7 @@ pub fn agent_system(
     modules: &[(String, String)],
     env: &str,
     mode: crate::capabilities::llm::api::ToolMode,
+    mechanisms: &[crate::capabilities::prompt::api::Segment],
 ) -> String {
     render_system(
         prompt,
@@ -165,24 +166,28 @@ pub fn agent_system(
         modules,
         env,
         mode,
+        mechanisms,
     )
 }
 
 /// **角色身份块**（不是 agent 的核心身份）：渲染角色提示词段 + 环境 + 调用约定。
 /// 代理会话（core_proxy）用它：它的身份是角色提示词（`prompts/roles/core_proxy.yaml`），
 /// 不是"某个 agent 的模块能力包"；机制 / 环境 / 调用约定与 agent 身份同一份口径。
+#[allow(clippy::too_many_arguments)]
 pub fn role_system(
     prompt: &dyn crate::capabilities::prompt::api::Prompt,
     segment: crate::capabilities::prompt::api::Segment,
     agent: &str,
     env: &str,
     mode: crate::capabilities::llm::api::ToolMode,
+    mechanisms: &[crate::capabilities::prompt::api::Segment],
 ) -> String {
-    render_system(prompt, segment, agent, &[], env, mode)
+    render_system(prompt, segment, agent, &[], env, mode, mechanisms)
 }
 
 /// 两处身份（agent / 角色）**共用这一份装配**：模板不同，变量与取值口径完全相同——
 /// 各写一份必然漂移（真机上就是"角色提示词缺了调用约定，模型不知道能调工具"）。
+#[allow(clippy::too_many_arguments)]
 fn render_system(
     prompt: &dyn crate::capabilities::prompt::api::Prompt,
     segment: crate::capabilities::prompt::api::Segment,
@@ -190,6 +195,7 @@ fn render_system(
     modules: &[(String, String)],
     env: &str,
     mode: crate::capabilities::llm::api::ToolMode,
+    mechanisms: &[crate::capabilities::prompt::api::Segment],
 ) -> String {
     use crate::capabilities::prompt::api::Segment;
     let parts = modules
@@ -197,13 +203,26 @@ fn render_system(
         .map(|(id, system)| format!("\n== {} ==\n{}", id, system.trim()))
         .collect::<Vec<_>>()
         .join("");
+    // 机制说明**按这个会话的类别**拼：声明顺序拼接、同一段不重复
+    //（AI 不知道机制就只会写散文；真机上就是这样空转的）。
+    let mut seen: Vec<Segment> = Vec::new();
+    let mut mechanism = String::new();
+    for seg in mechanisms {
+        if seen.contains(seg) {
+            continue;
+        }
+        seen.push(*seg);
+        if !mechanism.is_empty() {
+            mechanism.push_str("\n\n");
+        }
+        mechanism.push_str(prompt.text(*seg));
+    }
     prompt.render(
         segment,
         &[
             ("agent", agent.to_string()),
             ("modules", parts),
-            // 机制说明：AI 不知道机制就只会写散文（真机上就是这样空转的）。
-            ("mechanism", prompt.text(Segment::Mechanism).to_string()),
+            ("mechanism", mechanism),
             ("env", env.to_string()),
             // 两套调用约定**互斥**：一个通道只用一套（同时教会让模型在正文里讲解参数而被误判成调用）
             (

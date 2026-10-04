@@ -497,6 +497,7 @@ pub(crate) fn test_params(agent: &str) -> crate::capabilities::session::api::Ses
         agent,
         &test_sandbox(agent, &[]),
         &[],
+        vec![crate::capabilities::prompt::api::Segment::MechanismCollab],
     )
 }
 
