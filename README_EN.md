@@ -89,8 +89,10 @@ you can Stop / Continue at any time, and speak inside any sub-session.
 ### Run the demo
 
 The demo is a **real-machine test**: it runs against a real model — it feeds real files, calls real tools and
-checks real artifacts. So it verifies the preconditions first: the three modules are in the roster, the indexer
-is built, and the registry holds a provider plus a usable model (`SOLOMNI_DEMO_MODEL`, or the core default).
+checks real artifacts. So it verifies the preconditions first. The first two scripts need the three modules in
+the roster, the indexer built, and a provider plus a usable model (`SOLOMNI_DEMO_MODEL`, or the core default);
+the **proxy** script needs a provider, a model and a **core default model**, plus at least one module or a
+stored agent for the core to pick people from.
 **When a precondition is missing it prints `DEMO-SKIPPED` with how to fix it and exits with code 2** — it never
 runs the flow on the built-in demo channel just to look successful.
 
@@ -98,6 +100,7 @@ runs the flow on the built-in demo channel just to look successful.
 node start.js -webUI
 node demo/run-demo.mjs         # composite: one agent holding three modules (python / node / C++)
 node demo/run-demo-collab.mjs  # collaboration: three agents with separate powers, end to end
+node demo/run-demo-proxy.mjs   # proxy: talk to the core only; it picks people, one stop stops the tree
 ```
 
 The C++ module has to be compiled once; the command and the reason are in

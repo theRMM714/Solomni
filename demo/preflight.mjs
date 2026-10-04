@@ -73,6 +73,54 @@ export function demoPreflight(state, model) {
   return null;
 }
 
+/**
+ * 代理演示（`demo/run-demo-proxy.mjs`）的前置：与前两个演示不同，这里**不指定模块**——
+ * 挑人是核心自己的事；但核心要挑得出人，清单里至少要有一个模块或一个已存 agent。
+ *
+ * 代理会话跑在**核心默认模型**上（代理工具的执行者是核心自己）：没有核心默认模型就会回落到内置
+ * 演示通道——那条通道不会原生调工具，验不出代理能力，所以这里与其余前置一样**如实拒跑**。
+ * 也因此本演示**不认 `SOLOMNI_DEMO_MODEL`**（那是给 agent 指定模型用的）。
+ */
+export function proxyPreflight(state) {
+  const providers = (state && state.providers) || [];
+  const models = (state && state.models) || [];
+  const modules = (state && state.modules) || [];
+  const agents = (state && state.agents) || [];
+  const core = (state && state.core) || "";
+  if (!providers.length) {
+    return {
+      reason: "登记处里没有供应商",
+      hints: ["界面「设置 → 供应商」加一个端点 + 密钥（密钥只写进 .home/providers.yaml，不回显）"],
+    };
+  }
+  if (!models.length) {
+    return {
+      reason: "登记处里没有模型",
+      hints: ["界面「设置 → 模型」加一个模型（选供应商 + 写实际模型串）"],
+    };
+  }
+  const known = models.map((m) => m && m.id).filter(Boolean);
+  if (!core || !known.includes(core)) {
+    return {
+      reason: "没有可用的核心默认模型（核心代理跑在核心通道上）：" + (core || "（没设）"),
+      hints: [
+        "在界面「设置」里给核心选一个默认模型——代理会话与它临时挑出来的子会话都走这条通道",
+        "在册的模型：" + known.join("、"),
+      ],
+    };
+  }
+  if (!modules.length && !agents.length) {
+    return {
+      reason: "清单里既没有模块、也没有已存 agent：核心挑不出可以派活的人",
+      hints: [
+        "模块放进 modules/ 就出现（清单是目录扫描的纯函数）",
+        "或在界面「设置 → agent」先存一个 agent（名字 + 模块 + 模型）",
+      ],
+    };
+  }
+  return null;
+}
+
 /** 打印条件不足的原因与出路；退出码 2 = 条件不足（不是演示失败）。 */
 export function refuseDemo(block) {
   console.error("DEMO-SKIPPED：" + block.reason);
