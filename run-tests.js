@@ -379,6 +379,77 @@ function structuralAudit() {
     walkDocs(docsDir);
   }
 
+
+  // ---------- 文档与配置的真相源比对 ----------
+  // 为什么机器查：这些"某份文档列出另一处的清单"的段落，人一定会忘记同步（本轮手改过三次）。
+  // 三处比对：① 提示词键表 ↔ prompts/**；② systools/** ↔ 文档是否提到；③ 根 *.md ↔ AGENTS.md 路由表。
+
+  // ① 提示词键表 ↔ 册子：docs/prompt/prompts.md 的「结构与键」是"每份文件里有什么键"的唯一权威。
+  const promptsDoc = path.join(ROOT, "docs", "prompt", "prompts.md");
+  const promptsRoot = path.join(ROOT, "prompts");
+  if (fs.existsSync(promptsDoc) && fs.existsSync(promptsRoot)) {
+    const stated = new Map(); // 文件（相对 prompts/）→ 表里提到的顶层键
+    let tableFile = null;
+    for (const line of fs.readFileSync(promptsDoc, "utf8").split(/\r?\n/)) {
+      if (!line.trim().startsWith("|")) continue;
+      const cells = line.split("|").map((c) => c.trim());
+      if (cells.length < 4) continue;
+      if (/^[-: ]+$/.test(cells[1]) && /^[-: ]+$/.test(cells[2])) continue; // 分隔行
+      const cell = cells[1].replace(/`/g, "").trim();
+      if (cell) tableFile = cell;
+      if (!tableFile || !tableFile.endsWith(".yaml")) continue;
+      if (!stated.has(tableFile)) stated.set(tableFile, new Set());
+      for (const m of cells[2].matchAll(/`([A-Za-z_][A-Za-z0-9_]*)/g)) stated.get(tableFile).add(m[1]);
+    }
+    const topKeys = (abs) =>
+      new Set(
+        fs.readFileSync(abs, "utf8").split(/\r?\n/)
+          .map((l) => { const m = l.match(/^([A-Za-z_][A-Za-z0-9_]*):/); return m && m[1]; })
+          .filter(Boolean),
+      );
+    for (const [file, keys] of stated) {
+      const abs = path.join(promptsRoot, file);
+      if (!fs.existsSync(abs)) { problems.push("提示词键表列了不存在的文件：" + file); continue; }
+      const top = topKeys(abs);
+      for (const k of keys) if (!top.has(k)) problems.push("提示词键表里的键已不存在：" + file + " 的 " + k);
+      for (const k of top) if (!keys.has(k)) problems.push("提示词的键没进键表：" + file + " 的 " + k + "（docs/prompt/prompts.md「结构与键」）");
+    }
+    const walkPrompts = (d) => {
+      for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+        const p = path.join(d, e.name);
+        if (e.isDirectory()) { walkPrompts(p); continue; }
+        if (!e.name.endsWith(".yaml")) continue;
+        const relf = path.relative(promptsRoot, p).replace(/\\/g, "/");
+        if (!stated.has(relf)) problems.push("提示词册的文件没进键表：" + relf);
+      }
+    };
+    walkPrompts(promptsRoot);
+  }
+
+  // ② systools/** ↔ 文档：每张真相源表都要在门户或细则里被点名（新增表不能只落在盘上）。
+  const systoolsDir = path.join(ROOT, "systools");
+  if (fs.existsSync(systoolsDir)) {
+    const tablesDoc = ["SYSTOOL.md", "docs/tools/tools-and-roles.md"]
+      .map((f) => { const abs = path.join(ROOT, f); return fs.existsSync(abs) ? fs.readFileSync(abs, "utf8") : ""; })
+      .join("\n");
+    for (const e of fs.readdirSync(systoolsDir)) {
+      if (!e.endsWith(".yaml")) continue;
+      if (!tablesDoc.includes(e)) problems.push("systools/" + e + " 没被 SYSTOOL.md 或 docs/tools/tools-and-roles.md 提到（新增真相源表要进门户）");
+    }
+  }
+
+  // ③ 根 *.md ↔ AGENTS.md 路由表：新增根文档必须同时进路由表。
+  // 白名单只有这两类：AGENTS.md 自己（路由表不列它），以及不进路由表的临时工作清单（落地后删除）。
+  const rootDocAllow = ["AGENTS.md", "优化清单.md"];
+  const agentsDoc = path.join(ROOT, "AGENTS.md");
+  if (fs.existsSync(agentsDoc)) {
+    const agentsText = fs.readFileSync(agentsDoc, "utf8");
+    for (const e of fs.readdirSync(ROOT)) {
+      if (!e.endsWith(".md") || rootDocAllow.includes(e)) continue;
+      if (!agentsText.includes("`" + e + "`")) problems.push("根文档 " + e + " 没进 AGENTS.md 的文档路由表");
+    }
+  }
+
   // ---------- 依赖方向门禁 ----------
   // 权威：AGENTS.md「核心约束」（按业务功能垂直切分、业务之间通过 API 契约协作）与
   // 判据：ARCHITECTURE.md §一「分层与依赖方向」与 §九.7「依赖方向门禁」；豁免清单在 tests/dependency-baseline.json。

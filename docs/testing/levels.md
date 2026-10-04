@@ -36,14 +36,16 @@ cargo tree --duplicates
   规则与口径见 [../../ARCHITECTURE.md](../../ARCHITECTURE.md) §九.7；
 - 测试是否写入项目外绝对路径或真实用户目录；
 - 测试结束后是否遗留子进程、端口、临时目录、权限或句柄；
-- 是否存在重复测试、重复 Fixture、重复测试替身或无理由的跨层重复断言。
+- 是否存在重复测试、重复 Fixture、重复测试替身或无理由的跨层重复断言；
+- **"某份文档列出另一处清单"的段落是否还与盘上一致**：提示词键表 ↔ `prompts/**`（每份 yaml 的顶层键双向比对）、
+  `systools/**` 是否被门户或细则提到、根目录 `*.md` 是否都进了 `AGENTS.md` 的路由表。
 
 `cargo tree --duplicates` 只检查依赖树中的重复版本，不等于源码重复检查。`clippy` 也不能替代业务测试。三者的职责必须分开记录。
 
 当前状态：六项全部并入 `node run-tests.js`，且**全是零容忍硬失败**（没有存量基线）：
 
 - `cargo check --all-targets`；
-- 结构审查（测试目标登记、孤儿测试文件、缺口账格式、文档链接完整性）；
+- 结构审查（测试目标登记、孤儿测试文件、缺口账格式、模块地图双向一致、文档链接完整性、提示词键表与真相源表比对、根文档路由）；
 - `cargo fmt --all -- --check`；
 - `cargo clippy --all-targets --all-features --keep-going -- -D warnings`；
 - `cargo check` 的 rustc 告警数；
