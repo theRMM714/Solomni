@@ -123,7 +123,6 @@ impl ConductorHandle {
             self.book.clone(),
             std::sync::Arc::clone(&self.texts),
             dp::ProxyCall {
-                source: dp::Source::CoreProxy,
                 grant,
                 parent: Some(sid.to_string()),
                 now,
@@ -283,6 +282,13 @@ impl ConductorHandle {
                         Ok(())
                     }
                 })?;
+                // 崩了也要**叫醒父会话**：代理在"派完就等"之后，没有这条通知就会一直睡着。
+                if let Some(proxy) = self.call({
+                    let sid = sid.to_string();
+                    move |core| Ok(core.notify_proxy_of_child(&sid))
+                })? {
+                    self.spawn_detached_proxy(&proxy);
+                }
                 return Err("生成线程崩溃：会话已按落盘转录保留，可继续".to_string());
             }
         };

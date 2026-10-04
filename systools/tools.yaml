@@ -200,8 +200,10 @@ tools:
   create_session:
     capability: none              # 不碰文件：建的是会话，不是路径
     desc: |
-      建一个代理子会话（mode=single 单 agent / multi 多 agent 协作）。授权与父会话由机制提供，
-      不接受模型自授；创建失败不留半成品；同一个 request_id 重放不会重复创建。
+      建一个代理子会话并**写它的开头**（mode=single 单 agent / multi 多 agent 协作）：**建好就开工**——
+      single 立刻以这份开头干活（等于替用户说第一句），multi 以它作为**本次需求**并开始讨论。
+      会话落在父会话目录的 children/ 下、与父共用同一个 work/。授权与父会话由机制提供，不接受模型自授；
+      创建失败不留半成品；同一个 request_id 重放不会重复创建、也不会重复开工。
     params:
       mode:
         type: string
@@ -212,12 +214,16 @@ tools:
         type: array
         required: true
         desc: |-
-          agent 数组，每项要么 {"ref":"已存agent名","objective":"..."}，
-          要么 {"name":"新名字","modules":["模块id"],"model":"模型id","objective":"..."}；
-          objective 是写给这个 agent 的任务。同一模块不得出现在两个 agent 里。
-      workspace:
+          agent 数组（只写**身份**，不写任务）：复用登记处的 {"ref":"已存agent名"}，
+          或临时组装 {"name":"新名字","modules":["模块id"],"model":"模型id"}。
+          **model 填 catalog_agents 回的 `id`（不是 `name`）**；同一模块不得出现在两个 agent 里。
+      opening:
         type: string
-        desc: 工作区声明（工作名）；省略即由宿主派生
+        required: true
+        non_empty: true
+        desc: |-
+          这个会话的**开头**：single 是它的第一句（用户的需求 / 你代他派的那句话），multi 是本次需求。
+          写完就开工，不需要再发一次 send_session_message。
       request_id:
         type: string
         required: true
@@ -226,8 +232,8 @@ tools:
   send_session_message:
     capability: none              # 不碰文件：转达的是消息
     desc: |
-      代替用户向子会话转达消息。核心转达的每一条都标记为 core_proxy；
-      用户原话要另带来源引用，不把核心生成的内容伪装成用户原文；多目标逐个回报成功与失败。
+      代替用户向子会话转达消息（后续补充 / 返工 / 代答门）。核心转达的每一条都留一条
+      "由核心代理转达"的来源记录（不冒充用户原话）；多目标逐个回报成功与失败。
     params:
       targets:
         type: array
@@ -243,9 +249,6 @@ tools:
         required: true
         non_empty: true
         desc: task（派任务）/ user_reply（代答）/ follow_up（补充）/ review（审查意见）/ rework（返工要求）
-      source_ref:
-        type: string
-        desc: 用户原话的来源引用（kind=user_reply 时必填）：说明这段转达的是哪句用户原话
       request_id:
         type: string
         required: true

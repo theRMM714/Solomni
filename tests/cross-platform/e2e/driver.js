@@ -599,8 +599,7 @@ async function approvePlan(name) {
     const called = pl.filter((x) => x.tool).map((x) => x.tool.name);
     assert(called.indexOf('catalog_agents') >= 0, '代理先自己看清单（catalog_agents）', JSON.stringify(called));
     assert(called.indexOf('create_session') >= 0, '代理自己建出子工作（create_session）', JSON.stringify(called));
-    assert(called.indexOf('send_session_message') >= 0, '代理自己转达（send_session_message）', JSON.stringify(called));
-    assert(called.every((n) => ['catalog_agents', 'create_session', 'send_session_message'].indexOf(n) >= 0), '代理这一轮只用了它自己的工具面', JSON.stringify(called));
+    assert(called.every((n) => ['catalog_agents', 'create_session'].indexOf(n) >= 0), '代理这一轮只用了它自己的工具面', JSON.stringify(called));
     const st = await api('GET', '/api/state');
     const hist = (st.json && st.json.history) || [];
     const kid = hist.find((h) => h.parent === pName);
@@ -608,6 +607,8 @@ async function approvePlan(name) {
     if (kid) {
       const kr = await api('GET', '/api/history/' + encodeURIComponent(kid.name));
       assert(kr.text.indexOf('核心代理转达') >= 0, '子工作的记录里留下来源（核心的话不冒充用户原文）', kr.text.slice(0, 240));
+      // 建会话 = 写开头 + 开工：opening 已经是子会话的派发行，不用再发一条。
+      assert(kr.text.indexOf('把这件事做完') >= 0, '开头的派发已经点火（create_session 自带 opening）', kr.text.slice(0, 300));
     }
     const stopped = await api('POST', '/api/sessions/' + encodeURIComponent(pName) + '/stop', {});
     assert(stopped.status === 200, '点停止', stopped.text.slice(0, 160));

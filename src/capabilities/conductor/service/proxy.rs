@@ -167,7 +167,6 @@ impl ProxyTools {
         let out = ToolOutcome {
             ok: failed.is_empty(),
             output: serde_json::json!({
-                "source": relayed.source.as_str(),
                 "sent": sent,
                 "failed": failed,
             })
@@ -483,11 +482,12 @@ impl Conductor {
             .clone()
             .ok_or_else(|| "代理建会话缺少父会话：它由机制提供，不接受模型自参".to_string())?;
         let (pmeta, _) = self.history_open(&parent)?;
+        // 子工作名按**它的 agent 名**派生（沿用"一个 agent 一个会话"的口径）；
+        // 撞名由 unique_work_name 加尾号，绝不重名。
         let base = spec
-            .workspace
-            .as_deref()
-            .filter(|s| !s.trim().is_empty())
-            .map(|s| s.trim().to_string())
+            .agents
+            .first()
+            .map(|a| a.name.clone())
             .unwrap_or_else(|| format!("w-{}", spec.request_id));
         let name = self.unique_work_name(&format!("{}--{}", parent, base), "work");
         let mode = match spec.mode {
@@ -504,16 +504,10 @@ impl Conductor {
                 model: a.model.clone(),
             })
             .collect();
-        // 多 agent 是协作工作：把各 agent 的 objective 合成"本次需求"（协作必须有需求）。
+        // 多 agent 是协作工作：opening 就是**本次需求**（协作必须有需求）。
         // 代理形态不会出现在这里：代理工具只能建 single / multi（代理不能往里套代理）。
         let task = if mode == WorkMode::Collab {
-            Some(
-                spec.agents
-                    .iter()
-                    .map(|a| format!("{}：{}", a.name, a.objective))
-                    .collect::<Vec<_>>()
-                    .join("\n"),
-            )
+            Some(spec.opening.clone())
         } else {
             None
         };
@@ -742,9 +736,26 @@ impl ProxyHost for ProxyBridge {
     fn create_session(&self, spec: &d::NewSession) -> Result<d::Created, String> {
         let handle = self.handle.lock().unwrap_or_else(|e| e.into_inner());
         let spec = spec.clone();
+        let opening = spec.opening.clone();
         let (created, facts) = handle.call(move |core| core.proxy_create(&spec))?;
         // 开场事实（子会话开出来的那几条）推到事件台：在场的前端立刻看到它，不用等刷新。
         handle.publish(&created.session, facts);
+        // **会话的开头**：先记一条来源（这句不是用户原话），再**建成即开工**——
+        // single = 以"核心派的活"注入并点火；multi 的 opening 已是本次需求，替用户按下"开始讨论"。
+        handle.record_notice(
+            &created.session,
+            SessionEvent::Notice(d::relay_note(d::MessageKind::Task)),
+        );
+        let mode = handle.call({
+            let c = created.session.clone();
+            move |core| core.dispatch_target(&c)
+        })?;
+        if mode == "collab" {
+            // "开始讨论"这一步是二选一（文本里含 allow 才放行）；全权代理直接放行。
+            handle.spawn_detached_collab_step(&created.session, CollabStep::Begin, "allow");
+        } else {
+            handle.spawn_detached_node(&created.session, &opening);
+        }
         Ok(created)
     }
 
@@ -758,7 +769,7 @@ impl ProxyHost for ProxyBridge {
             move |core| core.dispatch_target(&t)
         })?;
         // 先记来源：这条不是用户原话这个事实要进目标会话的可回放记录（正文不伪装成用户发言）。
-        handle.record_notice(&target, SessionEvent::Notice(d::relay_note(msg)));
+        handle.record_notice(&target, SessionEvent::Notice(d::relay_note(msg.kind)));
         if mode == "collab" {
             // 协作子会话：**按它此刻等的是哪一关**落到对应的阶段步（与前端读 pending 同一口径）。
             // 它自己的核心 AI 判明确性；这里只负责把话送到正确的门上。

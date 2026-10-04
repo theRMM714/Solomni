@@ -62,7 +62,6 @@
 | `dead_code` | `capabilities/conductor/api/mod.rs` 的 `SessionOps::exists` / `is_running` | **入站契约是发布给前端的接口面**：二进制 crate 里暂时没有生产调用点的接口方法会被 `dead_code` 误报（`is_running` 是运行态的**权威查询**——`SessionView.running` 只是事件台对账副本，最终一致） |
 | `dead_code` | `capabilities/session/domain/events.rs` 的 `enum SessionEvent` | 事件词汇里的字段**不全在生产路径被读**（例如 `DiscussionDone` 的 `round` / `over_cap` 供呈现层做裁决确认页）；词汇就是线格式，字段随契约保留，删掉会让呈现侧拿不到事实 |
 | `large_enum_variant` | `capabilities/conductor/service/mod.rs` 的 `enum Session` | 两变体大小差得远，但装箱只换来一次间接寻址，却把"会话本体可直接移动"这个形状改掉 |
-| `dead_code` | `capabilities/conductor/domain/proxy.rs` 的 `Source::UserOriginal` | **契约词汇**：来源枚举的「用户原话」支由工具契约定义（`source_ref` 说明转达的是哪句用户原话），当前生产只构造核心代答（核心不把自己的话伪装成用户原文）。代理会话的身份块已用上角色提示词（`params.role_system` → `workspace::api::role_system`），用户入口已能建出代理会话（`create_work(WorkMode::Proxy)` → `create_proxy_with_facts`），所以 `Segment::ProxySystem` 与 `create_proxy` 都不再需要 allow——`create_proxy` 已收成 `#[cfg(test)]` 便捷入口；`ports.rs` 与 `service/proxy.rs` 的**文件级** allow 也早已收窄 / 删除 |
 
 新增 allow 必须同时更新本表；理由说不清的就不该 allow。
 

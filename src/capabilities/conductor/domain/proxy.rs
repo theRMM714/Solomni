@@ -27,29 +27,6 @@ pub fn is_proxy_tool(name: &str) -> bool {
         || name == MESSAGES
 }
 
-// ---------- 调用上下文（由机制提供，不从模型参数取） ----------
-
-/// 一条消息 / 一次动作的真实来源：由机制验证或填充，不能只信任模型传入的字段。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Source {
-    /// 核心代用户做的（核心转达一律如此标记）。
-    CoreProxy,
-    /// 用户原话（保留独立来源引用，不伪装成核心生成的内容）。
-    /// 当前生产路径只构造 `CoreProxy`（核心代答）；这一支是工具契约的词汇
-    /// （见 docs/testing/quality-isolation.md §三），接入「用户原话原样转达」时用它。
-    #[allow(dead_code)]
-    UserOriginal,
-}
-
-impl Source {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Source::CoreProxy => "core_proxy",
-            Source::UserOriginal => "user_original",
-        }
-    }
-}
-
 /// 任务级授权（真实用户授予，机制注入）：本轮只做**全权**——`tools` 用角色表发放的整套
 /// 代理工具面构造，`models`/`sessions` 留空 = 不限制，无有效期。
 /// 核心不得自行授予或扩大；`tools` 仍是硬条件（不在里面 = 越范围）。
@@ -66,10 +43,9 @@ pub struct Grant {
     pub expires_at: Option<i64>,
 }
 
-/// 一次代理调用的上下文：调用者身份、授权、父会话与当前时间。
+/// 一次代理调用的上下文：授权、父会话与当前时间。
 #[derive(Debug, Clone)]
 pub struct ProxyCall {
-    pub source: Source,
     pub grant: Option<Grant>,
     pub parent: Option<String>,
     pub now: i64,
@@ -287,22 +263,10 @@ pub fn control_note(action: ControlAction, reason: &str) -> String {
     format!("[代理] {} 这条会话：{}", action.as_str(), reason)
 }
 
-/// 一次转达写进目标会话的**来源记录**文案：说清接下来这条**不是用户原话**。
-/// 核心生成的正文不能伪装成用户发言（见 `Source`）——这条记录是它的可回放凭据。
-pub fn relay_note(msg: &Relayed) -> String {
-    let who = match msg.source {
-        Source::CoreProxy => "核心代理转达",
-        Source::UserOriginal => "用户原话",
-    };
-    match msg.source_ref.as_deref() {
-        Some(r) => format!(
-            "[代理] 接下来这条由{}（{}；来源：{}）",
-            who,
-            msg.kind.as_str(),
-            r
-        ),
-        None => format!("[代理] 接下来这条由{}（{}）", who, msg.kind.as_str()),
-    }
+/// 一次转达写进目标会话的**来源记录**文案：说清接下来这条**不是用户原话**，
+/// 而是核心代理转达的——这条记录是它的可回放凭据。
+pub fn relay_note(kind: MessageKind) -> String {
+    format!("[代理] 接下来这条由核心代理转达（{}）", kind.as_str())
 }
 
 // ---------- 事实与回执（宿主产出 / 工具回给模型） ----------
@@ -397,7 +361,9 @@ pub struct ControlState {
 pub struct NewSession {
     pub mode: SessionMode,
     pub agents: Vec<NewAgent>,
-    pub workspace: Option<String>,
+    /// **这个会话的开头**：single = 它的第一句（点火用的派发），multi = 本次需求。
+    /// 建好就开始——不是"给某个 agent 的任务"（见 `ProxyBridge::create_session`）。
+    pub opening: String,
     pub request_id: String,
     /// 父会话：由**机制**从调用上下文填，不从模型参数取（模型不能自选父）。
     pub parent: Option<String>,
@@ -410,15 +376,12 @@ pub struct NewAgent {
     pub transient: bool,
     pub modules: Vec<String>,
     pub model: Option<String>,
-    pub objective: String,
 }
 
 /// 一条要转达的消息（元信息 + 正文）：正文由工具层从参数取，宿主据此真正投递。
 #[derive(Debug, Clone, PartialEq)]
 pub struct Relayed {
     pub kind: MessageKind,
-    pub source: Source,
-    pub source_ref: Option<String>,
     pub parent: Option<String>,
     pub text: String,
 }
@@ -435,8 +398,7 @@ pub struct CreateArgs {
     pub mode: String,
     /// 每项是对象，形状在 parse_agents 里逐条校验（数组元素形状声明层表达不了）。
     pub agents: Vec<serde_json::Value>,
-    #[serde(default)]
-    pub workspace: Option<String>,
+    pub opening: String,
     pub request_id: String,
 }
 
@@ -445,8 +407,6 @@ pub struct SendArgs {
     pub targets: Vec<String>,
     pub message: String,
     pub kind: String,
-    #[serde(default)]
-    pub source_ref: Option<String>,
     pub request_id: String,
 }
 
@@ -484,7 +444,6 @@ struct ParsedAgent {
     reuse: bool,
     modules: Vec<String>,
     model: Option<String>,
-    objective: String,
 }
 
 // ---------- 语义校验 ----------
@@ -501,6 +460,12 @@ pub fn resolve_new_session(args: &CreateArgs, catalog: &Catalog) -> Result<NewSe
     let request_id = args.request_id.trim().to_string();
     if request_id.is_empty() {
         return Err("request_id 不能为空（幂等标识）".to_string());
+    }
+    let opening = args.opening.trim().to_string();
+    if opening.is_empty() {
+        return Err(
+            "opening 不能为空（这个会话的开头：single 是它的第一句，multi 是本次需求）".to_string(),
+        );
     }
     let agents = parse_agents(&args.agents)?;
     match mode {
@@ -533,12 +498,32 @@ pub fn resolve_new_session(args: &CreateArgs, catalog: &Catalog) -> Result<NewSe
             }
             for id in &a.modules {
                 if !catalog.modules.iter().any(|m| m.id == *id) {
-                    return Err(format!("agents[{}]：无此模块 {}", i, id));
+                    return Err(format!(
+                        "agents[{}]：无此模块 {}（在册的模块 id：{}）",
+                        i,
+                        id,
+                        catalog
+                            .modules
+                            .iter()
+                            .map(|m| m.id.as_str())
+                            .collect::<Vec<_>>()
+                            .join("、")
+                    ));
                 }
             }
             if let Some(m) = &a.model {
                 if !catalog.models.iter().any(|x| x.id == *m) {
-                    return Err(format!("agents[{}]：无此模型 {}", i, m));
+                    return Err(format!(
+                        "agents[{}]：无此模型 {}（在册的模型 id：{}）",
+                        i,
+                        m,
+                        catalog
+                            .models
+                            .iter()
+                            .map(|x| x.id.as_str())
+                            .collect::<Vec<_>>()
+                            .join("、")
+                    ));
                 }
             }
             (a.name.clone(), a.modules.clone(), a.model.clone(), true)
@@ -559,24 +544,18 @@ pub fn resolve_new_session(args: &CreateArgs, catalog: &Catalog) -> Result<NewSe
             transient,
             modules,
             model,
-            objective: a.objective.clone(),
         });
     }
-    let workspace = args
-        .workspace
-        .as_ref()
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty());
     Ok(NewSession {
         mode,
         agents: resolved,
-        workspace,
+        opening,
         request_id,
         parent: None,
     })
 }
 
-/// send_session_message：目标、种类与来源引用的语义校验；多目标在这里规整成一张表。
+/// send_session_message：目标与种类的语义校验；多目标在这里规整成一张表。
 pub fn relay(args: &SendArgs, call: &ProxyCall) -> Result<(Vec<String>, Relayed), String> {
     let targets: Vec<String> = args
         .targets
@@ -594,20 +573,10 @@ pub fn relay(args: &SendArgs, call: &ProxyCall) -> Result<(Vec<String>, Relayed)
         return Err("request_id 不能为空（幂等标识）".to_string());
     }
     let kind = MessageKind::parse(args.kind.trim())?;
-    let source_ref = args
-        .source_ref
-        .as_ref()
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty());
-    if kind == MessageKind::UserReply && source_ref.is_none() {
-        return Err("kind=user_reply 必须给 source_ref：核心不能把自己的话当用户原文".to_string());
-    }
     Ok((
         targets,
         Relayed {
             kind,
-            source: call.source,
-            source_ref,
             parent: call.parent.clone(),
             text: args.message.trim().to_string(),
         },
@@ -701,10 +670,6 @@ fn parse_agents(items: &[serde_json::Value]) -> Result<Vec<ParsedAgent>, String>
         let obj = item
             .as_object()
             .ok_or_else(|| format!("agents[{}] 必须是对象", i))?;
-        let objective = match obj.get("objective").and_then(|v| v.as_str()) {
-            Some(s) if !s.trim().is_empty() => s.trim().to_string(),
-            _ => return Err(format!("agents[{}] 缺少 objective（写给它的任务）", i)),
-        };
         if let Some(rv) = obj.get("ref") {
             let reference = rv
                 .as_str()
@@ -713,13 +678,12 @@ fn parse_agents(items: &[serde_json::Value]) -> Result<Vec<ParsedAgent>, String>
             if reference.is_empty() {
                 return Err(format!("agents[{}].ref 不能为空", i));
             }
-            reject_extra(obj, &["ref", "objective"], i)?;
+            reject_extra(obj, &["ref"], i)?;
             out.push(ParsedAgent {
                 name: reference.to_string(),
                 reuse: true,
                 modules: Vec::new(),
                 model: None,
-                objective,
             });
         } else {
             let name = match obj.get("name").and_then(|v| v.as_str()) {
@@ -748,13 +712,12 @@ fn parse_agents(items: &[serde_json::Value]) -> Result<Vec<ParsedAgent>, String>
                 .and_then(|v| v.as_str())
                 .map(|s| s.trim().to_string())
                 .filter(|s| !s.is_empty());
-            reject_extra(obj, &["name", "modules", "model", "objective"], i)?;
+            reject_extra(obj, &["name", "modules", "model"], i)?;
             out.push(ParsedAgent {
                 name,
                 reuse: false,
                 modules,
                 model,
-                objective,
             });
         }
     }
@@ -804,13 +767,15 @@ mod tests {
         }
     }
 
-    /// 名字/模块/模型与登记处事实核对：不符就整条拒绝。
+    /// 身份（名字 / 模块 / 模型）与登记处事实核对：不符就整条拒绝，并把**在册候选**列回给模型；
+    /// 任务不在 agent 上——它是会话级的 opening。
     #[test]
     fn resolve_new_session_checks_against_the_catalog() {
         let c = facts();
         let ok: CreateArgs = serde_json::from_value(serde_json::json!({
             "mode": "single",
-            "agents": [{"name": "a", "modules": ["m1"], "model": "gpt", "objective": "做事"}],
+            "agents": [{"name": "a", "modules": ["m1"], "model": "gpt"}],
+            "opening": "做事",
             "request_id": "r1"
         }))
         .unwrap();
@@ -818,23 +783,61 @@ mod tests {
         assert_eq!(spec.mode, SessionMode::Single);
         assert_eq!(spec.agents[0].modules, vec!["m1".to_string()]);
         assert!(spec.agents[0].transient);
+        assert_eq!(spec.opening, "做事");
 
         let unknown_module: CreateArgs = serde_json::from_value(serde_json::json!({
             "mode": "single",
-            "agents": [{"name": "a", "modules": ["nope"], "objective": "做事"}],
+            "agents": [{"name": "a", "modules": ["nope"]}],
+            "opening": "做事",
             "request_id": "r2"
         }))
         .unwrap();
-        assert!(resolve_new_session(&unknown_module, &c)
+        let err = resolve_new_session(&unknown_module, &c).unwrap_err();
+        assert!(err.contains("无此模块"), "{}", err);
+        assert!(err.contains("m1"), "失败要把在册模块列回去：{}", err);
+
+        // 模型名（display name）不是 id：如实拒绝，并列出在册 id。
+        let model_name: CreateArgs = serde_json::from_value(serde_json::json!({
+            "mode": "single",
+            "agents": [{"name": "a", "modules": ["m1"], "model": "GPT"}],
+            "opening": "做事",
+            "request_id": "r2b"
+        }))
+        .unwrap();
+        let err = resolve_new_session(&model_name, &c).unwrap_err();
+        assert!(err.contains("无此模型"), "{}", err);
+        assert!(err.contains("gpt"), "失败要把在册模型 id 列回去：{}", err);
+
+        let empty_opening: CreateArgs = serde_json::from_value(serde_json::json!({
+            "mode": "single",
+            "agents": [{"name": "a", "modules": ["m1"]}],
+            "opening": "   ",
+            "request_id": "r2c"
+        }))
+        .unwrap();
+        assert!(resolve_new_session(&empty_opening, &c)
             .unwrap_err()
-            .contains("无此模块"));
+            .contains("opening"));
+
+        // 身份项不接受任务字段（任务是会话级的 opening）。
+        let extra: CreateArgs = serde_json::from_value(serde_json::json!({
+            "mode": "single",
+            "agents": [{"ref": "a", "objective": "做事"}],
+            "opening": "做事",
+            "request_id": "r2d"
+        }))
+        .unwrap();
+        assert!(resolve_new_session(&extra, &c)
+            .unwrap_err()
+            .contains("不认识的键"));
 
         let dup: CreateArgs = serde_json::from_value(serde_json::json!({
             "mode": "multi",
             "agents": [
-                {"name": "a", "modules": ["m1"], "objective": "一"},
-                {"name": "b", "modules": ["m1"], "objective": "二"}
+                {"name": "a", "modules": ["m1"]},
+                {"name": "b", "modules": ["m1"]}
             ],
+            "opening": "一起做",
             "request_id": "r3"
         }))
         .unwrap();
@@ -844,7 +847,8 @@ mod tests {
 
         let one: CreateArgs = serde_json::from_value(serde_json::json!({
             "mode": "multi",
-            "agents": [{"name": "a", "modules": ["m1"], "objective": "一"}],
+            "agents": [{"name": "a", "modules": ["m1"]}],
+            "opening": "一起做",
             "request_id": "r4"
         }))
         .unwrap();
@@ -855,7 +859,8 @@ mod tests {
         // 复用登记处的 agent：模块与模型取它自己的，核心不代拟。
         let reuse: CreateArgs = serde_json::from_value(serde_json::json!({
             "mode": "single",
-            "agents": [{"ref": "a", "objective": "做事"}],
+            "agents": [{"ref": "a"}],
+            "opening": "做事",
             "request_id": "r5"
         }))
         .unwrap();
@@ -865,7 +870,8 @@ mod tests {
 
         let missing: CreateArgs = serde_json::from_value(serde_json::json!({
             "mode": "single",
-            "agents": [{"ref": "nope", "objective": "做事"}],
+            "agents": [{"ref": "nope"}],
+            "opening": "做事",
             "request_id": "r6"
         }))
         .unwrap();
@@ -878,7 +884,6 @@ mod tests {
     #[test]
     fn authorization_is_checked_before_anything_else() {
         let base = ProxyCall {
-            source: Source::CoreProxy,
             grant: None,
             parent: Some("main".to_string()),
             now: 100,
@@ -929,35 +934,35 @@ mod tests {
         assert!(authorize(&scoped, CREATE, Some("gpt"), Some("s1")).is_ok());
     }
 
-    /// 代答必须带独立来源引用：不把核心生成的内容伪装成用户原文。
+    /// 转达不再要求"来源引用"：只按 kind 记一条"由核心代理转达"的记录。
     #[test]
-    fn user_reply_requires_a_source_ref() {
+    fn relay_only_needs_targets_and_a_kind() {
         let call = ProxyCall {
-            source: Source::CoreProxy,
-            grant: Some(Grant {
-                tools: vec![SEND.to_string()],
-                ..Default::default()
-            }),
-            parent: None,
+            grant: None,
+            parent: Some("p".to_string()),
             now: 0,
         };
-        let bad: SendArgs = serde_json::from_value(serde_json::json!({
-            "targets": ["t1"], "message": "好", "kind": "user_reply", "request_id": "x"
+        let args: SendArgs = serde_json::from_value(serde_json::json!({
+            "targets": ["t1", "t1"], "message": "好", "kind": "user_reply", "request_id": "x"
         }))
         .unwrap();
-        assert!(relay(&bad, &call)
-            .unwrap_err()
-            .contains("必须给 source_ref"));
-
-        let good: SendArgs = serde_json::from_value(serde_json::json!({
-            "targets": ["t1", "t1"], "message": "好", "kind": "user_reply",
-            "source_ref": "用户第 3 句", "request_id": "x"
-        }))
-        .unwrap();
-        let (targets, relayed) = relay(&good, &call).unwrap();
+        let (targets, relayed) = relay(&args, &call).unwrap();
         assert_eq!(targets.len(), 2);
-        assert_eq!(relayed.source, Source::CoreProxy);
-        assert_eq!(relayed.source_ref.as_deref(), Some("用户第 3 句"));
+        assert_eq!(relayed.kind, MessageKind::UserReply);
+        assert_eq!(relayed.text, "好");
+        assert_eq!(relayed.parent.as_deref(), Some("p"));
+
+        let bad: SendArgs = serde_json::from_value(serde_json::json!({
+            "targets": [], "message": "好", "kind": "task", "request_id": "x"
+        }))
+        .unwrap();
+        assert!(relay(&bad, &call).unwrap_err().contains("targets"));
+
+        let bad_kind: SendArgs = serde_json::from_value(serde_json::json!({
+            "targets": ["t1"], "message": "好", "kind": "nope", "request_id": "x"
+        }))
+        .unwrap();
+        assert!(relay(&bad_kind, &call).unwrap_err().contains("kind"));
     }
 
     /// 清单回执只回请求的 scope。
@@ -983,29 +988,21 @@ mod tests {
         assert_eq!(gate_route(None), GateRoute::Resume);
     }
 
-    /// 转达与控制都要留下"谁、为什么"的可回放记录；核心代答要点明正文出自代理。
+    /// 转达与控制都要留下"谁、为什么"的可回放记录。
     #[test]
     fn notes_record_who_really_said_it() {
-        let msg = Relayed {
-            kind: MessageKind::UserReply,
-            source: Source::CoreProxy,
-            source_ref: Some("用户第 3 句".to_string()),
-            parent: None,
-            text: "好".to_string(),
-        };
-        let note = relay_note(&msg);
+        let note = relay_note(MessageKind::UserReply);
         assert!(
-            note.contains("核心代理转达") && note.contains("用户第 3 句"),
+            note.contains("核心代理转达") && note.contains("user_reply"),
             "{}",
             note
         );
-        assert!(note.contains("user_reply"), "{}", note);
-        let no_ref = Relayed {
-            source_ref: None,
-            kind: MessageKind::Task,
-            ..msg.clone()
-        };
-        assert!(relay_note(&no_ref).contains("task"));
+        let note = relay_note(MessageKind::Task);
+        assert!(
+            note.contains("核心代理转达") && note.contains("task"),
+            "{}",
+            note
+        );
         let ctl = control_note(ControlAction::Pause, "先冻上");
         assert!(ctl.contains("pause") && ctl.contains("先冻上"), "{}", ctl);
     }

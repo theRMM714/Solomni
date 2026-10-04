@@ -23,10 +23,10 @@
 - **核心操作**：`plan`（方案 + 任务链）/ `node_verdict`（逐节点验收）/ `checklist`（总验收）/ `verdict`（裁决是否明确）/
  `slate`（名单）/ `submit_report`（执行席回报）/ `compact`（压缩上下文）——
  **凡会驱动核心的产出都必须是一次工具调用**，核心只从**工具参数**取载荷；正文里手写的同形 JSON 不作数。
-- **代理工具**（`core_proxy` 专属）：`catalog_agents`（只读清单）/ `create_session`（建单 agent 或
- 多 agent 代理会话）/ `send_session_message`（代用户转达，也用来回答子会话的门）/ `observe_session`（只读观察元信息）/
+- **代理工具**（`core_proxy` 专属）：`catalog_agents`（只读清单）/ `create_session`（建一个**子会话并写它的开头**，建好就开工）
+ `send_session_message`（代用户转达：后续补充 / 返工 / 代答门）/ `observe_session`（只读观察元信息）/
  `read_session_messages`（消息倒查：0 = 最新一条）/ `control_session`（暂停、恢复、停止、关闭）——
- 委托是**全权**；子会话不把整份转录推给核心，门的通知与意外停止由机制送达，正文靠倒查。
+ 委托是**全权**；子会话与父会话**共用同一个 work/**，也不把整份转录推给核心：门的通知、意外停止与「子会话停下」由机制送达，正文靠倒查。
  六个代理工具、`core_proxy` 角色、真实会话宿主（队列桥）、核心代理生成循环都已落地，端到端旅程在 L4 里真跑（见 `docs/tools/tools-and-roles.md`）。
 - **协作动词**：`say` / `agree` / `leave` / `ask`——讨论阶段的表态，是**声明式工具**：两套通道产出同语义，
  没有表态的纯正文 = 这一轮**没表态**（不降级成普通发言）。
