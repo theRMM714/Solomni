@@ -1,7 +1,7 @@
 # 模块契约（MODULE_SPEC）
 
 > 模块与核心之间的全部约定。除此之外，双方互不依赖。
-> **本文只讲模块作者要遵守的契约**；系统工具、角色、路径模型与回报/验收在 [SYSTOOL.md](SYSTOOL.md)，
+> **本文只讲模块作者要遵守的契约**；系统工具、角色、路径模型与回报/验收在 [docs/tools/tools-and-roles.md](docs/tools/tools-and-roles.md)（门户 [SYSTOOL.md](SYSTOOL.md)），
 > 代码分层、端口、日志、提示词册这些开发规则见 [ARCHITECTURE.md](ARCHITECTURE.md)，
 > 登记处（供应商 / 模型 / agent / 设置）的字段见 [REGISTRY_SPEC.md](REGISTRY_SPEC.md)，
 > 运行包契约见 [RUNTIME_SPEC.md](RUNTIME_SPEC.md)，项目方向见 [PHILOSOPHY.md](PHILOSOPHY.md)，产品流程见 [PRODUCT.md](PRODUCT.md)，
@@ -94,7 +94,7 @@ tools:                  # 【可选】外部工具表：工具名 → 该工具�
 （模块内名字唯一由 `tools` 是映射表天然保证）。
 
 **讨论协议、发言动词、回报与验收都不在模块这边**——它们由核心按身份注入（角色面 + 提示词），
-所以 `system` 里**不要复述协议**：写了多余，协议改了还会跟着漂。详见 [SYSTOOL.md](SYSTOOL.md)。
+所以 `system` 里**不要复述协议**：写了多余，协议改了还会跟着漂。详见 [docs/tools/tools-and-roles.md](docs/tools/tools-and-roles.md)。
 
 
 ## 三、回报与验收
@@ -103,7 +103,7 @@ tools:                  # 【可选】外部工具表：工具名 → 该工具�
 节点与总验收由核心调 `node_verdict` / `checklist`，`fail` 必须点名要返工的**节点 id**。
 
 模块作者只需记住一件事：**回报不是要模块自己手写的 JSON 块**。工具怎么声明、谁能调、载荷什么形状，
-唯一权威在 [SYSTOOL.md](SYSTOOL.md) 与 [docs/tools/tools-and-roles.md](docs/tools/tools-and-roles.md)。
+唯一权威在 [docs/tools/tools-and-roles.md](docs/tools/tools-and-roles.md)（声明在 `systools/tools.yaml`）。
 
 
 ## 四、工具执行
@@ -136,7 +136,7 @@ tools:                  # 【可选】外部工具表：工具名 → 该工具�
 
 ### 内置工具与路径模型
 
-**属系统侧，见 [SYSTOOL.md](SYSTOOL.md)**：内置工具清单与参数契约、路径模型（占位符 → 真实绝对路径、越界拒绝、编码、`@` 引用）
+**属系统侧，见 [docs/tools/tools-and-roles.md](docs/tools/tools-and-roles.md) 的「路径模型」**：内置工具清单与参数契约、路径模型（占位符 → 真实绝对路径、越界拒绝、编码、`@` 引用）
 与围栏口径都在那里；模块作者只需知道——模块工具收到的是**真实绝对路径**，可达范围与系统工具同一套。
 
 

@@ -31,7 +31,7 @@
     4) 同一会话是替换还是多个、最小 / 最大时长、到点时会话正在生成怎么处理；
     5) 定时器是短暂还是持久——若持久，进程重启后要重新排程；
     6) 落地时同步 systools/tools.yaml、systools/roles.yaml（core_proxy 的面）、
-       docs/tools/tools-and-roles.md 的角色 / 工具表与 SYSTOOL.md 二，并按端口矩阵补替身与契约测试。
+       docs/tools/tools-and-roles.md 的角色 / 工具表，并按端口矩阵补替身与契约测试。
   accept: |
     代理设定定时器后当次回合立即结束（不阻塞）；到点确实起了新回合并带一条可回放通知；
     paused / closed 期间到点被拒；stop 会取消、rewind 会清掉；
