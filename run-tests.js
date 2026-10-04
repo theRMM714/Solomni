@@ -439,8 +439,8 @@ function structuralAudit() {
   }
 
   // ③ 根 *.md ↔ AGENTS.md 路由表：新增根文档必须同时进路由表。
-  // 白名单只有这两类：AGENTS.md 自己（路由表不列它），以及不进路由表的临时工作清单（落地后删除）。
-  const rootDocAllow = ["AGENTS.md", "优化清单.md"];
+  // 白名单只有 AGENTS.md 自己（路由表不列它）；出现不进路由表的临时工作清单时，在这里加名字并写明理由。
+  const rootDocAllow = ["AGENTS.md"];
   const agentsDoc = path.join(ROOT, "AGENTS.md");
   if (fs.existsSync(agentsDoc)) {
     const agentsText = fs.readFileSync(agentsDoc, "utf8");
