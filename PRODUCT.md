@@ -227,9 +227,8 @@ agent 在自己的子会话里按模块的工具清单干活、交付回报（�
 
 ```text
 > proxy                       # 没有名单：核心自己挑人、建子工作
-（你只跟核心对话：说清目标 → 它用 catalog_agents 看当前有效的 agent / 模块 / 模型，
-  用 create_session 建出一个或多个子工作，用 send_session_message 转达与代答，
-  用 observe_session / read_session_messages 回头看，用 control_session 暂停 / 恢复 / 停止 / 关闭；
+（你只跟核心对话：说清目标 → 它看当前有效的 agent / 模块 / 模型，建出子工作并写好它们的开头
+  （建好就开工），之后转达、代答关卡、回头看、暂停 / 恢复 / 停止 / 关闭；
   子会话不把整份转录推给它——到门或意外停下会叫醒它，正文由它主动倒查）
 ```
 

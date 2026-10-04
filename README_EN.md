@@ -19,9 +19,9 @@ This project is **not about attaching tools to an agent — it gives a tool or s
   Whichever agent a module is loaded into, that agent speaks in its name.
 - **The form follows the task**: the same set of modules can be assembled as one AI holding several
   capabilities (single agent) or as several AIs each holding one (collaboration); when the task ends the
-  When the task ends the projection dissolves; the capabilities still belong to the modules.
-- **Local by design**: the web UI binds `127.0.0.1` only; keys live in the local registry and in outbound
-  calls only, and never enter prompts, transcripts, logs or module workspaces.
+  projection dissolves; the capabilities still belong to the modules.
+- **Local by design**: the web UI binds `127.0.0.1` only; keys never leave the local registry
+  (boundaries in [PRODUCT.md](PRODUCT.md)).
 - **The transcript is the context**: what you see and what enters the model's context are the *same thing*;
   an agent's words are always data, never instructions.
 
@@ -31,11 +31,12 @@ For what this project is meant to become, read [PHILOSOPHY.md](PHILOSOPHY.md).
 
 **Working today**:
 
-- **Two forms**: single agent (direct / composite) and group collaboration — form-up → discussion →
+- **Three forms**: single agent (direct / composite) and group collaboration — form-up → discussion →
   a task chain is drafted → **review gate** (nothing starts until you approve) → execution per stage with
   concurrency inside a stage → **one acceptance pass per stage** → final acceptance → delivery. On failure,
   only the named nodes are sent back (nodes already passed in that stage stay passed); you control the flow
-  with Stop / Continue.
+  with Stop / Continue — plus **proxy**: hand the whole decision to the core, which picks people and creates
+  child work (entered from the API / scripts today).
 - **Two interfaces**: the terminal transcript center (default) and the local web UI (`-webUI`, binds
   `127.0.0.1` only, port 3081 by default).
 - **Sessions and history**: one directory per piece of work (`session/<name>/`), append-only records,
@@ -45,7 +46,7 @@ For what this project is meant to become, read [PHILOSOPHY.md](PHILOSOPHY.md).
   (Windows AppContainer, Linux Landlock, macOS seatbelt). If a mechanism cannot be installed, the startup
   report says so instead of pretending.
 - **Registry**: four YAML files for providers / models / agents / settings, all under `.home/`, managed
-  from the UI; keys are never echoed back.
+  from the UI (key boundaries in [REGISTRY_SPEC.md](REGISTRY_SPEC.md)).
 
 **Not wired up yet (stated plainly)**:
 
