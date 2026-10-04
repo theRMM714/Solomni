@@ -125,7 +125,7 @@ roles:
 - **普通说话仍可以是正文**：不驱动核心的发言（讨论里的意见、执行席的收尾话）不必包成工具——
  这两者就是"说话"与"操作"的分界。
 - **工具与载荷形状**在 `systools/tools.yaml`：`plan`（方案 + 任务链）、`node_verdict`（逐节点结论）、`checklist`（总验收清单）、`slate`（名单：推荐与代拟同一条协议）、`submit_report`（执行席回报）。
-- **核心代理的六个工具**（`catalog_agents` / `create_session` / `send_session_message` / `observe_session` / `read_session_messages` / `control_session`）同样只从**工具参数**取载荷；它们的外部动作经 conductor 的 `ports::ProxyHost`，生产宿主是 `service/proxy.rs` 的队列桥（见 §六）。子会话**不把整份转录推给核心**：门与意外停止由机制送达，正文经 `read_session_messages` 倒查。
+- **核心代理的工具面**（`core_proxy`，逐项见本文件「角色与工具面」表与 `systools/tools.yaml`）同样只从**工具参数**取载荷；它们的外部动作经 conductor 的 `ports::ProxyHost`，生产宿主是 `service/proxy.rs` 的队列桥（见 §六）。子会话**不把整份转录推给核心**：门与意外停止由机制送达，正文经 `read_session_messages` 倒查。
 - **载荷不合法 → 如实失败并中止这一步**（不猜、不回落正文 JSON）。
 - **核心可以先核实**：核心操作带一个**只读核实回路**——模型先请求 `read` / `search` 时，
  核心执行并把结果回灌，然后再要那一次核心操作调用。核心不是 member、手里本来没有工具环境，

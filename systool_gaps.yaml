@@ -9,8 +9,7 @@
 # 所有机制均通过业务 API 编排并使用路径组件拼接，Windows、macOS、Linux 必须成立；
 # 不引入机器路径、旧实现兼容层或独立于现有会话内核的第二套执行机制。
 #
-# 六个代理工具（catalog_agents / create_session / send_session_message / observe_session /
-# read_session_messages / control_session）与 core_proxy 角色已实现并接上真实会话宿主，
+# 核心代理的工具面（见 systools/tools.yaml 与 systools/roles.yaml 的 core_proxy）与真实会话宿主已落地，
 # 端到端旅程也已进 L4（tests/cross-platform/e2e/driver.js 的代理场景），所以这里没有它们的条目。
 
 - id: systool.core-proxy.timer

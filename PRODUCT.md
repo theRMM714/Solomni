@@ -96,14 +96,9 @@
 
 ### 工作的落盘与沙箱
 
-```text
-session/<工作名>/
-  meta.yaml          # 形态、agent 清单、模块与模型选择、需求、执行档位（exec 段）
-  transcript.jsonl   # 追加式事件流水（回档只追加一条 rewind 记录）
-  work/              # 本工作共享区：用户投喂的文件与成品
-  <agent 实例名>/     # 该 agent 的私有沙箱
-  children/          # 子会话（协作派生的执行席、代理建的子工作；可再嵌套）：<工作名>--<名字>/
-```
+每个工作一个目录 `session/<工作名>/`：`work/` 是本工作的共享区（用户投喂与成品），
+每个 agent 有自己的私有沙箱，子会话落在它的 `children/` 下（可再嵌套）。
+完整布局与命名规则见 [docs/session/session-model.md](docs/session/session-model.md)。
 
 agent 实例名不得占用布局保留的目录名（`work`、`children`）：名单在仓库自带的 `systools/names.yaml`，
 不在代码里硬编码——布局一改就改表。
