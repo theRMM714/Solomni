@@ -5,6 +5,33 @@
 Solomni is an **agent runtime environment (AgentOS) that runs on your own machine**: one executable plus a
 `modules/` folder is the whole product. No installer, no server, no account.
 
+## Why you need it
+
+**① You have a tool or a workflow, and you want AI to use it.**
+The usual route is to wrap it as a plugin for one specific product — and then it is tied to that product: switch agents
+or platforms and you wrap it again, while the tool itself grows a shell coupled to the host. Here you **adapt it to the
+contract once**: a folder plus a `module.yaml` (responsibility prompt + tool declarations), with the command it already
+had; some things need a small change on their own side (putting an executable inside the module folder, agreeing on how
+arguments are passed and how the receipt looks), but that change stays on their side — no restructuring, no SDK. Once
+adapted, **nothing is left behind**: **outside the contract the two sides depend on nothing from each other** — take the
+platform away and the tool still runs as it did; take the tool away and the platform keeps running. The same capability is
+used by people through the UI and by agents through the contract from a single declaration — no two entry points to maintain.
+
+**② Several agents working on one job.**
+A shared workspace has concrete problems by default: they overwrite each other, ownership of artifacts is unclear, and
+someone builds on another's unfinished output as if it were fact. Here every agent has **its own sandbox**
+(`session/<name>/<agent-instance>/`), the shared area is only `work/`, and the only two roads across agents are that
+shared area and the transcript that enters the context — artifacts land in their owner's cell, so rework can find the
+person; capabilities are isolated too, a module's directory belongs only to the agent that holds it.
+(`work/` is writable by all agents today, so "who writes which part" is still a convention — the gap is
+`fence.per-agent-write-roots` in [tests/gaps.yaml](tests/gaps.yaml).)
+
+**③ When something goes wrong, you need to know what it saw and why it decided that.**
+The transcript is **append-only**; rewinding appends one record instead of deleting lines; line ids are monotonic and
+replay is reproducible, so **a rebuild matches the live run line by line**; what you see is exactly what entered the
+model. A delivery can be replayed from disk — what the AI did is an auditable, reproducible engineering artifact, not a
+chat that is gone.
+
 ## What it is made of
 
 | Thing | What it is |
