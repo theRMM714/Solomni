@@ -184,7 +184,7 @@ impl Conductor {
         child: &str,
         objective: &str,
     ) -> Result<Prepared, String> {
-        // 节点的生成跟随设置里的流式开关（此前写死非流式，节点执行在界面上永远不逐字出）。
+        // 节点的生成跟随设置里的流式开关。
         let llm = self.llm_opts(true);
         self.ensure_session(child)?;
         if matches!(self.sessions.get(child), Some(Session::Collab(_))) {

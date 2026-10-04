@@ -189,7 +189,7 @@ pub fn role_system(
 }
 
 /// 两处身份（agent / 角色）**共用这一份装配**：模板不同，变量与取值口径完全相同——
-/// 各写一份必然漂移（真机上就是"角色提示词缺了调用约定，模型不知道能调工具"）。
+/// 各写一份必然漂移。
 #[allow(clippy::too_many_arguments)]
 fn render_system(
     prompt: &dyn crate::capabilities::prompt::api::Prompt,
@@ -208,7 +208,7 @@ fn render_system(
         .collect::<Vec<_>>()
         .join("");
     // 机制说明**按（会话使用类型 × 角色）**从册子里取：对应关系是数据，这里只做匹配。
-    //（AI 不知道机制就只会写散文；真机上就是这样空转的。）
+    //（AI 不知道机制就只会写散文。）
     let mechanism = prompt.mechanism(session_kind, role);
     prompt.render(
         segment,

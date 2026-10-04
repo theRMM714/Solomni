@@ -231,7 +231,7 @@ pub(crate) fn grant_targets(spec: &FenceSpec) -> Vec<(PathBuf, u32, bool, bool)>
         }
     }
     // 父目录：只读属性、不递归、**不继承**（元组末位是继承标志）。同一个父目录被多个叶子共用时
-    // 靠调用方的去重表收口。不继承是残留教训（fence.leftover-grant-hides-parent）：带 (OI)(CI)
+    // 靠调用方的去重表收口。不继承是为了把残留面收敛到父目录本身：带 (OI)(CI)
     // 的 ACE 会传播进已存在的子项、再传给之后新建的子项——一旦撤权断链（进程被杀、台账丢失），
     // 受污染的就是整棵子树；不继承把最坏残留面收敛到父目录本身，而新建子项反正会拿到自己的
     // 授权，不需要它。
@@ -347,7 +347,7 @@ pub(crate) fn has_any_ace_for(sid: PSID, path: &Path) -> bool {
 
 /// 该对象上是不是已经有给这个 SID 的允许 ACE，**且权限位覆盖得住**。
 /// 用途：基线授权只以递归方式写过一次，所以根上已有"够用"的 ACE 就跳过整棵树——否则每来一个 agent 都要重走几万文件。
-/// 只看"有没有该 SID 的 ACE"不够：真机上解释器目录继承了只有 SYNCHRONIZE 的 ALL APPLICATION PACKAGES ACE，
+/// 只看"有没有该 SID 的 ACE"不够：解释器目录会继承只有 SYNCHRONIZE 的 ALL APPLICATION PACKAGES ACE，
 /// 基线因此被整条跳过，容器里连解释器都读不到（工具报 python is not recognized）。
 pub(crate) fn has_ace_for(sid: PSID, path: &Path, rights: u32) -> bool {
     const ACCESS_ALLOWED_ACE_TYPE: u8 = 0;

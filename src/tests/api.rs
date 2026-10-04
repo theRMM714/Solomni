@@ -154,7 +154,7 @@ fn history_merge_is_the_transcript_plus_the_bus_tail_without_repeats() {
     assert!(head > 0, "合流顺带给出头部序号（水位）");
     assert!(!tail.is_empty(), "事件台上还有它之外的实时行（短暂事件）");
     // **过时的短暂事件不许进尾巴**：开跑那条运行态（agent 有名字）已经被盘上的定稿行取代，
-    // 它要是跟着尾巴下去，前端会先画定稿行、再画一个填不上的空"谁正在说"块（真机上的空块）。
+    // 它要是跟着尾巴下去，前端会先画定稿行、再画一个填不上的空"谁正在说"块。
     let opening = tail.iter().any(|v| {
         v.get("type").and_then(|t| t.as_str()) == Some("working")
             && v.get("agent").is_some_and(|a| !a.is_null())

@@ -327,7 +327,7 @@ pub(crate) fn builtin_arg_mistakes_are_named_and_the_signature_comes_back() {
     io.seed(&["demo", "work", "note.txt"], "内容\n");
     let note = s(&["demo", "work", "note.txt"]);
     let run = |tool: &str, args: &str| run_builtin(&sb, &io, tool, args);
-    // 上界由声明给出（不再是代码里的手写判断）
+    // 上界由声明给出（不是代码里的手写判断）
     let big = run("read", &format!("{{\"path\":\"{}\",\"limit\":3000}}", note));
     assert!(
         !big.ok && big.output.contains("参数 limit 不能大于 2000"),

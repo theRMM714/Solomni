@@ -442,7 +442,7 @@ pub(crate) fn tool_envelope_after_prose_runs_and_json_never_shows() {
 }
 
 /// 一次回复里的**多个**原生调用：实时历史与重建历史必须逐条一致（含 tool_calls 与 tool_call_id）。
-/// 这就是原先不一致的那条：实时只推第一条调用的回执、第二条起什么都不推，重建却每条都推。
+/// 钉住这一条：实时与重建都要**每条调用各推一条回执**，不能实时只推第一条、重建却每条都推。
 #[test]
 pub(crate) fn native_multi_call_rebuilds_identically_to_live() {
     use crate::capabilities::llm::api::ToolCall;

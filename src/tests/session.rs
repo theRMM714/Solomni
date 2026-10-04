@@ -495,7 +495,7 @@ pub(crate) fn core_direct_seeds_system_prompt() {
         "对话里只有真正发生过的事（此刻还没有）"
     );
     let events = with_live(|l| core.single_say(&sid, "在吗", l)).unwrap();
-    // 回归：用户发言必须入转录（此前只进历史、不进转录，历史回放会丢用户消息）。
+    // 用户发言必须入转录：只进历史不进转录的话，历史回放会丢用户消息。
     match &events[0] {
         SessionEvent::Transcript(lines) => {
             assert_eq!(lines[0].kind, "user");
@@ -746,7 +746,7 @@ pub(crate) fn node_task_is_a_system_line_but_a_user_message() {
     else {
         panic!("节点回合该是可以跑的");
     };
-    // 节点执行跟随设置里的流式开关（此前写死非流式，节点在界面上永远不逐字出）。
+    // 节点执行跟随设置里的流式开关。
     assert!(llm.stream, "默认设置下节点执行也要流式");
     let dialogue = session.dialogue();
     let last = dialogue.last().expect("注入过任务");

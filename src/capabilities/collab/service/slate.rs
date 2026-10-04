@@ -136,7 +136,7 @@ impl CollabSession {
             timeout_secs: self.settings.app.llm_timeout_secs,
         };
         // 讨论席的"协议"= **机制说明 + 讨论约定**：只说约定不说机制，AI 就不知道自己在什么流程里、
-        // 该干什么（真机上就是空转）。
+        // 该干什么。
         // **能用哪些表态不在这里列**：核心按这一回合的身份注入工具块（engine::MemberTools::tools_block），
         // 清单与越权校验同源——同一份清单在提示词里再列一遍只会多一个会漂的地方。
         let protocol = format!(

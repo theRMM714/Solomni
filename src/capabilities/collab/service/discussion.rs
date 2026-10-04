@@ -438,7 +438,7 @@ impl Discussion {
         self.cancel.load(std::sync::atomic::Ordering::Relaxed)
     }
 
-    /// 本轮的调用选项：流式与预算都取全局设置（讨论也走同一份，不再是写死的非流式）。
+    /// 本轮的调用选项：流式与预算都取全局设置（讨论也走同一份）。
     pub(crate) fn opts(&self) -> crate::capabilities::llm::api::CompleteOpts<'static> {
         crate::capabilities::llm::api::CompleteOpts::plain(self.llm.stream)
             .with_timeout(self.llm.timeout_secs)

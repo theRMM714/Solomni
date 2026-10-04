@@ -27,7 +27,7 @@ use windows_sys::Win32::Security::{ACL, PSID};
 /// 文件对象（SetNamedSecurityInfoW / GetNamedSecurityInfoW 的对象类型）。
 pub(crate) const SE_FILE_OBJECT: i32 = 1;
 // 权限位**只用具体位**：通用位（GENERIC_READ / WRITE / EXECUTE / ALL）的常量值极易记错，写错一个给出去的
-// 就是完全不同的权限。真机上抓到过：标着 GENERIC_READ 的是 0x4000_0000（其实是 GENERIC_WRITE）、
+// 就是完全不同的权限。注意：标着 GENERIC_READ 的是 0x4000_0000（其实是 GENERIC_WRITE）、
 // 标着 GENERIC_EXECUTE 的是 0x1000_0000（其实是 GENERIC_ALL）——于是"只读"的解释器基线实际授出了全权。
 pub(crate) const FILE_GENERIC_READ: u32 = 0x0012_0089;
 pub(crate) const FILE_GENERIC_WRITE: u32 = 0x0012_0116;

@@ -109,7 +109,7 @@ fn profile_sweep_only_matches_our_prefix() {
 }
 
 /// 已有 ACE 的权限位必须**覆盖得住**才算数：只看"SID 在场"会让基线被一个只有 SYNCHRONIZE 的继承 ACE
-/// 整条挡掉（真机上解释器目录就是这样，容器里连解释器都读不到）；通用位与展开后的具体位要等价看待。
+/// 整条挡掉（解释器目录就是这样：容器里连解释器都读不到）；通用位与展开后的具体位要等价看待。
 #[test]
 fn existing_ace_must_cover_the_rights_we_need() {
     assert!(
@@ -179,7 +179,7 @@ fn grant_targets_include_parents_with_stat_only() {
         "用户授权的只读根不递归"
     );
     // 父目录：只读属性、不递归、**不继承**——继承会把 ACE 传播进整棵子树，
-    // 撤权断链时残留面就是整棵子树（fence.leftover-grant-hides-parent 的教训）。
+    // 撤权断链时残留面就是整棵子树。
     for leaf in [&dir, &module_root] {
         let parent = leaf.parent().expect("叶子有父目录").to_path_buf();
         let got = find(&parent).expect("父目录要在落点清单里");

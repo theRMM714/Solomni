@@ -52,7 +52,7 @@ pub(crate) fn run_branch(
             ),
         )
     } else if let Some(h) = handler_for(ctx, name) {
-        // 核心自有工具：与内置、模块走**同一条派发路径**，不再是循环里的特例。
+        // 核心自有工具：与内置、模块走**同一条派发路径**，不是循环里的特例。
         let session = ctx.sandbox.work_name.clone();
         (String::new(), h.run(&session, name, args_json))
     } else {

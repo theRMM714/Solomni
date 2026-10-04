@@ -267,7 +267,7 @@ pub(crate) fn user_at_reference_is_rewritten_in_transcript_and_history() {
         .unwrap()
         .sid;
     let events = with_live(|l| core.single_say(&sid, "@work:a.txt 看一下", l)).unwrap();
-    // 转录的用户行已是确切寻址（不再是 @ 引用）
+    // 转录的用户行已是确切寻址（不是 @ 引用）
     let rows = transcript_rows(&events);
     let want = format!("[用户] {} 看一下", s(&["w", "work", "a.txt"]));
     assert_eq!(rows[0].1, want, "{:?}", rows);

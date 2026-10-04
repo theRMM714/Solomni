@@ -201,7 +201,7 @@ impl ConductorHandle {
         // 代理会话：把代理工具的成员侧执行面装进这一回合（经队列桥回核心线程执行）。
         self.inject_proxy_handler(sid, &mut session)?;
         let session = session;
-        // 取消标志在**派发时**就登记：生成一开始「停止」就能生效（它本来就不进队列）。
+        // 取消标志在**派发时**就登记：生成一开始「停止」就能生效（它不进命令队列）。
         let cancel = jobs.register(sid);
         // **运行态**：这条会话开始干活，推给它自己的事件台——节点执行、单 agent 发言、继续都走这里，
         // 打开它的标签页要立刻看到占位与「停止」按钮，而不是等 3 秒的状态轮询。
@@ -848,7 +848,7 @@ impl ConductorHandle {
             self.spawn_detached_proxy(&proxy);
         }
         // 派发事件（"[节点] 开工"等）**也要落盘**：它们是在这里产生的，不经过上面那条 sink——
-        // 只推不落的话，刷新后回放会少掉"节点开工"那几行（真机上就是这么发现的）。
+        // 只推不落的话，刷新后回放会少掉"节点开工"那几行。
         let persister = self.call({
             let sid = sid.to_string();
             move |core| Ok(core.persister(&sid))

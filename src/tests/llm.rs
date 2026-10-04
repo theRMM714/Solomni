@@ -644,7 +644,7 @@ pub(crate) fn an_aborted_generation_never_executes_a_repairable_envelope() {
         .unwrap()
         .sid;
     // 取消标志在生成开始前就已置位 = 用户按下了「停止」：引擎据此收尾，
-    // 不再发起下一次调用（此前靠工具调用上限兜底，上限删掉后必须自己站住）。
+    // 不再发起下一次调用（工具调用没有上限兜底，这条出口必须自己站住）。
     let events = {
         let cancel = Arc::new(std::sync::atomic::AtomicBool::new(true));
         let mut noop = |_e: crate::capabilities::session::api::SessionEvent| {};

@@ -111,7 +111,7 @@ impl EventBus {
     /// 取 `since` 之后的事件批 + 当前头部 + **最老还留着的序号**（同一把锁内）。
     /// 为什么要把 oldest 给客户端：事件台会裁剪（BUS_MAX/BUS_KEEP），`since` 之后那一小段可能
     /// 已经永久没了。客户端据此**重新对齐**（拉一次历史重放），而不是按 seq 干等——干等的结果
-    /// 是后续批次全部滞留，只有刷新页面才恢复（真机上就是这个症状：必须手动刷新才同步）。
+    /// 是后续批次全部滞留，只有刷新页面才恢复。
     pub fn snapshot(&self, sid: Option<&str>, since: u64) -> (Vec<EventLine>, u64, u64) {
         let g = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         let lines = g
