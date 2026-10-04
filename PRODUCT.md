@@ -2,7 +2,7 @@
 
 > 本文档回答：Solomni 是什么、有什么功能、怎么运转。
 > 只写**用户看到与经历的**，不展开实现；实现与开发规则见 [ARCHITECTURE.md](ARCHITECTURE.md)，
-> 模块契约见 [MODULE_SPEC.md](MODULE_SPEC.md)，登记处字段见 [REGISTRY_SPEC.md](REGISTRY_SPEC.md)，理念见 [PHILOSOPHY.md](PHILOSOPHY.md)。
+> 模块契约见 [MODULE_SPEC.md](MODULE_SPEC.md)，登记处字段见 [REGISTRY_SPEC.md](REGISTRY_SPEC.md)，项目方向见 [PHILOSOPHY.md](PHILOSOPHY.md)。
 
 ## 产品是什么
 

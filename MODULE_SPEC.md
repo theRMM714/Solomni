@@ -4,7 +4,7 @@
 > **本文只讲模块作者要遵守的契约**；系统工具、角色、路径模型与回报/验收在 [SYSTOOL.md](SYSTOOL.md)，
 > 代码分层、端口、日志、提示词册这些开发规则见 [ARCHITECTURE.md](ARCHITECTURE.md)，
 > 登记处（供应商 / 模型 / agent / 设置）的字段见 [REGISTRY_SPEC.md](REGISTRY_SPEC.md)，
-> 运行包契约见 [RUNTIME_SPEC.md](RUNTIME_SPEC.md)，理念见 [PHILOSOPHY.md](PHILOSOPHY.md)，产品流程见 [PRODUCT.md](PRODUCT.md)，
+> 运行包契约见 [RUNTIME_SPEC.md](RUNTIME_SPEC.md)，项目方向见 [PHILOSOPHY.md](PHILOSOPHY.md)，产品流程见 [PRODUCT.md](PRODUCT.md)，
 > 测试层级与替身规范见 [TESTING.md](TESTING.md)（门户与路由）与 `docs/testing/` 下的细则。
 
 ## 设计立场

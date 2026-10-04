@@ -134,7 +134,7 @@
 | 项目概括和快速开始（English） | `README_EN.md` |
 | 任意代码、架构、分层、端口、业务边界判据（§九）、硬要求（R1–R13）、日志、提示词或落盘修改 | `ARCHITECTURE.md` |
 | 产品行为、运行流程和用户旅程 | `PRODUCT.md` |
-| 理念、角色和不变量判断 | `PHILOSOPHY.md` |
+| 项目方向：要做成什么、承诺与判据 | `PHILOSOPHY.md` |
 | 模块开发或修改 | `MODULE_SPEC.md` |
 | 系统工具、角色（谁能用哪些工具）、路径模型、回报与验收 | `SYSTOOL.md` |
 | 核心代理的待实现系统工具清单与方案（非测试缺口账） | `SYSTOOL.md` → `systool_gaps.yaml` |

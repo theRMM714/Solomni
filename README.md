@@ -24,7 +24,7 @@ Solomni 是一个跑在你自己机器上的**智能体操作系统（Agent OS�
   永不进入提示词、转录、日志或模块工作区。
 - **转录即内容**：你看到的和进入模型上下文的是**同一份**；agent 的发言永远是数据，不是指令。
 
-想读设计理念与不变量：[PHILOSOPHY.md](PHILOSOPHY.md)。
+想读这个项目要做成什么样：[PHILOSOPHY.md](PHILOSOPHY.md)。
 
 ## 目前是什么状态
 
@@ -99,7 +99,7 @@ C++ 模块要先编译一次（产物不入库），命令与理由见 [modules/
 | 我想… | 读这一份 |
 | --- | --- |
 | 看项目概括与快速开始 | 本文（English: [README_EN.md](README_EN.md)） |
-| 懂"为什么这么设计" | [PHILOSOPHY.md](PHILOSOPHY.md) |
+| 看这个项目要做成什么样（方向与承诺） | [PHILOSOPHY.md](PHILOSOPHY.md) |
 | 用产品 / 看用户旅程与交互面 | [PRODUCT.md](PRODUCT.md) |
 | 写一个模块（YAML 契约与模块工具） | [MODULE_SPEC.md](MODULE_SPEC.md) |
 | 系统工具、角色与路径模型（回报与验收也在工具里） | [SYSTOOL.md](SYSTOOL.md) |

@@ -25,7 +25,7 @@ This project is **not about attaching tools to an agent — it gives a tool or s
 - **The transcript is the context**: what you see and what enters the model's context are the *same thing*;
   an agent's words are always data, never instructions.
 
-For the design philosophy and invariants, read [PHILOSOPHY.md](PHILOSOPHY.md).
+For what this project is meant to become, read [PHILOSOPHY.md](PHILOSOPHY.md).
 
 ## Where the project stands
 
@@ -118,7 +118,7 @@ The C++ module has to be compiled once; the command and the reason are in
 | I want to… | Read |
 | --- | --- |
 | A project overview and quick start | this file (Chinese: [README.md](README.md)) |
-| Understand *why* it is designed this way | [PHILOSOPHY.md](PHILOSOPHY.md) |
+| See what this project is meant to become (direction and commitments) | [PHILOSOPHY.md](PHILOSOPHY.md) |
 | Use the product / follow the user journey | [PRODUCT.md](PRODUCT.md) |
 | Write a module (YAML contract, tools, path model) | [MODULE_SPEC.md](MODULE_SPEC.md) |
 | Core-proxy system-tool inventory and proposal | [systool_gaps.yaml](systool_gaps.yaml) (planned, not available capabilities) |
