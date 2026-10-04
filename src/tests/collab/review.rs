@@ -125,7 +125,6 @@ pub(crate) fn mode_vocabulary_is_single_or_collab_only() {
         parent: None,
         node: None,
         delegation: None,
-        own_work: false,
         run: RunState::Active,
     })
     .unwrap();
@@ -196,7 +195,11 @@ pub(crate) fn approved_plan_spawns_a_sub_session_per_ready_node() {
         "节点不再记在会话 meta 里：一个 agent 一个会话，哪个节点正跑在它里面由链的 sub_session 认"
     );
     assert_eq!(cmeta.mode, "single");
-    assert_eq!(cmeta.work(), sid.as_str(), "沙箱锚在父会话上（共用工作区）");
+    assert_eq!(
+        core.work_root(child).expect("工作根"),
+        sid,
+        "沙箱锚在顶层工作上（整棵树共用一个 work/）"
+    );
     assert_eq!(cmeta.agents.len(), 1, "子会话只有一个席位");
     assert_eq!(cmeta.agents[0].name, "a");
 }

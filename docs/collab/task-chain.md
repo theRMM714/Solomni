@@ -80,7 +80,7 @@ TaskNode { id, title, objective, assignee, deps, status, sub_session, acceptance
 
 讨论 → 整理出链 → 审查关卡 → 链驱动（子会话）→ **每阶段一次验收** → 总验收 → 交付，全部落地：
 调度器是纯函数（单测覆盖串 / 并 / 混合 / 环拒绝 / 悬空依赖）；整理完停在待审（`Pending::PlanReview`，
-推 `Decision`、快照带同一份）；就绪节点各建一个普通单 agent 会话（`parent`/`node`，沙箱锚在父会话上）；
+推 `Decision`、快照带同一份）；就绪节点各建一个普通单 agent 会话（`parent`/`node`，沙箱锚在**顶层工作**上——整棵树共用一个 `work/`）；
 本阶段全部跑完才判这一阶段（一次调用），通过即解锁下一阶段；侧栏按 `meta.parent` 把子会话缩进挂在父会话下。
 
 **验收没过的处置**：**重派哪些节点由核心的结论决定**——只把核心判"没过"的那些退回待办（同阶段里

@@ -69,7 +69,7 @@ impl Conductor {
             let Ok((m, _)) = self.history.load(sid) else {
                 continue;
             };
-            let work = m.work().to_string();
+            let work = self.work_root(sid).unwrap_or_else(|_| m.name.clone());
             if released.iter().any(|w| w == &work) {
                 continue;
             }
@@ -125,6 +125,30 @@ impl Conductor {
             i += 1;
         }
         out
+    }
+
+    /// 一个会话的**工作根**，从它自己的 meta 起算：`meta` 可能**还没落盘**
+    /// （建工作区发生在落盘之前），所以有父就上溯、没有父就是它自己。
+    pub(crate) fn work_root_of(&self, meta: &SessionMeta) -> Result<String, String> {
+        match &meta.parent {
+            None => Ok(meta.name.clone()),
+            Some(p) => self.work_root(p),
+        }
+    }
+
+    /// 一个会话的**工作根**（顶层会话名）：沿 `meta.parent` 一路走到顶。
+    /// 整棵树不论嵌套多少层只有一个 `work/`——共享区与 agent 沙箱都锚在它上面。
+    pub(crate) fn work_root(&self, name: &str) -> Result<String, String> {
+        let mut cur = self.history.meta(name)?;
+        let mut guard = 0usize;
+        while let Some(p) = cur.parent.clone() {
+            guard += 1;
+            if guard > 64 {
+                return Err(format!("会话父子关系成环：{}", name));
+            }
+            cur = self.history.meta(&p)?;
+        }
+        Ok(cur.name)
     }
 
     /// **运行态闸门**：派发 / 唤醒前过它，暂停与关闭都拒绝。

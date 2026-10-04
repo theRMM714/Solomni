@@ -50,7 +50,6 @@ fn meta(name: &str) -> SessionMeta {
         parent: None,
         node: None,
         delegation: None,
-        own_work: false,
         run: crate::capabilities::session::api::RunState::Active,
     }
 }
@@ -220,6 +219,7 @@ fn fs_history_roundtrips_lists_deletes_and_rejects_broken_meta() {
 }
 
 /// 子会话落在**父会话目录内部**（`session/<父>/children/<子>`）：位置与 meta.parent 同源。
+/// 嵌套可以任意深（代理的子会话里还能有它自己的子会话）：整棵 children/ 树都要能找到、列出、删净。
 #[test]
 fn fs_history_nests_children_inside_their_parent_dir() {
     let root = scratch("fs-history-children");
@@ -230,8 +230,17 @@ fn fs_history_nests_children_inside_their_parent_dir() {
     let mut child = meta("p--甲");
     child.parent = Some("p".to_string());
     h.create(&child).expect("建子会话");
+    // 第二层：子会话自己的子会话（代理建的协作子工作会派生节点子会话）。
+    let mut grand = meta("p--甲--乙");
+    grand.parent = Some("p--甲".to_string());
+    h.create(&grand).expect("建孙会话");
     h.append("p--甲", &[serde_json::json!({"type": "say", "text": "hi"})])
         .expect("子会话流水");
+    h.append(
+        "p--甲--乙",
+        &[serde_json::json!({"type": "say", "text": "yo"})],
+    )
+    .expect("孙会话流水（按名字在任意深度定位）");
     assert!(
         root.join("p")
             .join("children")
@@ -240,16 +249,30 @@ fn fs_history_nests_children_inside_their_parent_dir() {
             .is_file(),
         "子会话落在父会话目录内部"
     );
+    assert!(
+        root.join("p")
+            .join("children")
+            .join("p--甲")
+            .join("children")
+            .join("p--甲--乙")
+            .join("meta.yaml")
+            .is_file(),
+        "子会话可以再嵌套：children/ 树任意深"
+    );
     assert!(!root.join("p--甲").exists(), "不再与父会话并列");
     let listed = h.list().expect("列会话");
-    assert_eq!(listed.len(), 2, "父子都在清单里");
+    assert_eq!(listed.len(), 3, "祖父子都在清单里（深层也要收进来）");
     assert_eq!(
-        h.load("p--甲").expect("按名字读子会话").0.parent.as_deref(),
-        Some("p")
+        h.load("p--甲--乙")
+            .expect("按名字读孙会话")
+            .0
+            .parent
+            .as_deref(),
+        Some("p--甲")
     );
     assert!(h.delete("p").expect("删父会话"), "删父 = 删一个目录");
     assert!(!root.join("p").exists());
-    assert!(h.load("p--甲").is_err(), "子会话随父一起消失");
+    assert!(h.load("p--甲--乙").is_err(), "整棵子树随父一起消失");
     let _ = std::fs::remove_dir_all(&root);
 }
 

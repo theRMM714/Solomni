@@ -22,8 +22,9 @@ impl Conductor {
         roster: &crate::capabilities::workspace::api::Roster,
     ) -> Result<crate::capabilities::workspace::api::Sandboxes, String> {
         let names: Vec<String> = meta.agents.iter().map(|a| a.name.clone()).collect();
-        // 沙箱锚在**工作**上：子会话与父会话共用一套工作区（见 SessionMeta::work）。
-        let roots = self.workspace.roots(meta.work(), &names)?;
+        // 沙箱锚在**顶层工作**上：整棵树不论嵌套多少层只有一个 work/（见 Conductor::work_root）。
+        let work = self.work_root_of(meta)?;
+        let roots = self.workspace.roots(&work, &names)?;
         let mut list: Vec<crate::capabilities::workspace::api::Sandbox> = Vec::new();
         for a in &meta.agents {
             let private = roots
@@ -38,7 +39,7 @@ impl Conductor {
                 }
             }
             list.push(crate::capabilities::workspace::api::Sandbox {
-                work_name: meta.work().to_string(),
+                work_name: work.clone(),
                 agent: a.name.clone(),
                 shared: roots.shared.clone(),
                 private,

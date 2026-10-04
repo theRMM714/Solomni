@@ -442,16 +442,31 @@ impl Conductor {
     /// 创建工作：形态 + 参与的 agent（+ 协作需求）→ 建出会话、落盘身份、备好工作区。
     /// 一切选择来自用户；核心只做校验与机械装配，不替用户选。
     pub fn create_work(&mut self, spec: WorkSpec) -> Result<WorkOpened, String> {
-        self.create_work_inner(spec, None, false)
+        self.create_work_inner(spec, None)
     }
 
-    /// 建工作的唯一实现：`parent` = 编排归属（代理建的**子工作**），
-    /// `own_work` = 子工作有**自己的** `work/` 与沙箱（与协作的节点子会话相反）。
+    /// 这棵子树里已经用过的 agent 实例名（实例名就是沙箱目录名，必须**全树唯一**）。
+    /// 顶层会话名可以重复（落点是自己的目录），但共用同一个 work/ 时同名 agent 会撞同一个沙箱。
+    fn subtree_agent_names(&self, root: &str) -> Vec<String> {
+        let mut out: Vec<String> = Vec::new();
+        for sid in self.subtree_of(root) {
+            if let Ok(m) = self.history.meta(&sid) {
+                for a in &m.agents {
+                    if !out.iter().any(|x| x == &a.name) {
+                        out.push(a.name.clone());
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    /// 建工作的唯一实现：`parent` = 编排归属（代理建的**子工作**）。
+    /// 子工作与父会话**共用顶层那一个 work/**，落点在父会话目录的 `children/` 下。
     pub(crate) fn create_work_inner(
         &mut self,
         spec: WorkSpec,
         parent: Option<&str>,
-        own_work: bool,
     ) -> Result<WorkOpened, String> {
         validate_work_name(&spec.name)?;
         if self.sessions.contains_key(&spec.name) || self.history.load(&spec.name).is_ok() {
@@ -529,8 +544,14 @@ impl Conductor {
                 }
             }
         }
-        // 同工作内重名 → 尾号（用户没改名时的兜底）
-        let mut taken: Vec<String> = Vec::new();
+        // 工作根：顶层会话就是自己；子会话沿父链走到顶（整棵树只有一个 work/）。
+        let root = match parent {
+            Some(p) => self.work_root(p)?,
+            None => spec.name.clone(),
+        };
+        // 实例名在**整棵子树**里唯一：共用同一个 work/ 时同名 agent 会撞同一个沙箱目录。
+        // 重名 → 尾号（用户不改名时的兜底），绝不重名。顶层根还不存在时子树名单为空。
+        let mut taken: Vec<String> = self.subtree_agent_names(&root);
         let mut metas: Vec<AgentMeta> = Vec::new();
         for a in &spec.agents {
             let name = crate::capabilities::registry::api::unique_instance_name(&a.name, &taken);
@@ -561,7 +582,6 @@ impl Conductor {
             parent: parent.map(|s| s.to_string()),
             node: None,
             delegation: None,
-            own_work,
             // 档位来自**用户在创建向导里的选择**（默认 = 设置里的档位）；承载不了由下面如实拒绝。
             exec: crate::capabilities::workspace::api::ExecSpec {
                 tier: spec.tier,
@@ -578,8 +598,9 @@ impl Conductor {
         ) {
             return Err(why);
         }
-        // 工作区：work + 各 agent 沙箱（失败即失败，不假装已建）。代拟确认名单时再补建。
-        self.workspace.prepare(&name, &agent_names)?;
+        // 工作区：整棵树只有顶层一个 work/；各 agent 沙箱按实例名建在它下面。
+        // （失败即失败，不假装已建；代拟确认名单时再补建。）
+        self.workspace.prepare(&root, &agent_names)?;
         let sandboxes = self.sandboxes(&meta, &roster)?;
         // 扫描事实如实埋点：本会话用到的模块里，哪些声明的运行包不在包库（缺包不等于崩溃，工具按档位不可用）。
         let session_modules: Vec<Module> = roster

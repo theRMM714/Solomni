@@ -355,12 +355,12 @@ impl Conductor {
             parent: Some(parent.to_string()),
             node: None,
             delegation: None,
-            own_work: false,
             run: RunState::Active,
         };
-        // 沙箱锚在父会话上：该 agent 的目录在父会话里已经建好。
+        // 沙箱锚在**顶层工作**上：该 agent 的目录在共享区那一层已经建好。
+        let work = self.work_root(parent)?;
         self.workspace
-            .prepare(meta.work(), std::slice::from_ref(&a.name))?;
+            .prepare(&work, std::slice::from_ref(&a.name))?;
         self.history.create(&meta)?;
         self.ensure_session(&child)?;
         Ok(child)

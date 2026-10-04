@@ -102,7 +102,7 @@ session/<工作名>/
   transcript.jsonl   # 追加式事件流水（回档只追加一条 rewind 记录）
   work/              # 本工作共享区：用户投喂的文件与成品
   <agent 实例名>/     # 该 agent 的私有沙箱
-  children/          # 子会话（协作派生的执行席）：<工作名>--<agent>/，删主会话即随之消失
+  children/          # 子会话（协作派生的执行席、代理建的子工作；可再嵌套）：<工作名>--<名字>/
 ```
 
 agent 实例名不得占用布局保留的目录名（`work`、`children`）：名单在仓库自带的 `systools/names.yaml`，

@@ -472,7 +472,7 @@ impl Conductor {
     }
 
     /// 代理工具：建一个**子工作**（single / collab）：编排归属是父会话，
-    /// 工作区与沙箱是它自己的（`own_work`）。
+    /// 落点在 `<父>/children/` 下，**与父会话共用顶层那一个 work/**。
     /// 返回（稳定引用, **开场事实**）：事实交给 api 层发布到事件台（核心不持有事件台）。
     pub fn proxy_create(
         &mut self,
@@ -525,7 +525,7 @@ impl Conductor {
             delegate: false,
             tier: pmeta.exec.tier,
         };
-        let opened = self.create_work_inner(work, Some(&parent), true)?;
+        let opened = self.create_work_inner(work, Some(&parent))?;
         Ok((
             d::Created {
                 session: opened.sid,
@@ -644,7 +644,6 @@ impl Conductor {
             parent: None,
             node: None,
             delegation: Some(Delegation { granted_at }),
-            own_work: false,
             run: RunState::Active,
         };
         self.workspace.prepare(name, &[])?;

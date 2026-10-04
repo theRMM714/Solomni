@@ -21,7 +21,7 @@
  * 为什么这个脚本**不进 CI**：它要真实供应商与核心默认模型（CI 上没有 .home/，会回落到内置假模型，
  * 那样验的就不是代理能力而是假脚本）。代理状态机的机器判据在 tests/cross-platform/e2e/driver.js。
  * 只走产品自己的 HTTP 能力面（与前端同一条路），**不改任何登记处**；产物落在**各子会话自己的**
- * 共享区/沙箱里——代理子工作有自己的 work/，父会话的共享区不共享给它们（见 docs/session）。
+ * 共享区/沙箱里——整棵树（含任意深度的子会话）共用顶层那一个 work/（见 docs/session）。
  */
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
@@ -158,13 +158,10 @@ function subtreeRunning(st, root) {
   return ((st && st.sessions) || []).filter((v) => v && names.has(v.sid) && v.running).map((v) => v.sid);
 }
 
-/** 本工作这棵子树在盘上的目录名：`session/<工作>` 与 `session/<工作>--<子工作>`。 */
+/** 本工作这棵子树的落盘根：子会话（含任意深度的嵌套）都在 `session/<工作>/children/` 下。 */
 function subtreeDirs(work) {
   const base = join(process.cwd(), "session");
-  if (!existsSync(base)) return [];
-  return readdirSync(base, { withFileTypes: true })
-    .filter((e) => e.isDirectory() && (e.name === work || e.name.startsWith(work + "--")))
-    .map((e) => e.name);
+  return existsSync(join(base, work)) ? [work] : [];
 }
 
 /** 这棵子树在盘上落下的**产物文件**（会话自己的元数据不算产物）。 */

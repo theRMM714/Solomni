@@ -72,6 +72,29 @@ pub(crate) fn history_delete_cascades_to_children_and_refuses_child_delete() {
     assert!(hist.load(&child).is_err(), "子会话随父一起消失");
 }
 
+/// 工作根沿父链走到顶：代理 → 多 agent 子会话 → 它的节点子会话，第三层也锚在**顶层**那一个 work/ 上。
+#[test]
+pub(crate) fn work_root_walks_to_the_top_across_nested_sub_sessions() {
+    let hist = Arc::new(InMemoryHistory::new());
+    let mut core = core_with_all(
+        vec![module_of("a")],
+        gw(BTreeMap::new(), vec!["[]".into()]),
+        Arc::new(SilentRunner),
+        Arc::new(FakeCatalog::new(vec!["m".to_string()])),
+        Arc::clone(&hist),
+        Arc::new(InMemorySysIo::new()),
+    );
+    let top = core
+        .create_work(collab_work("p", &["a"], false, "需求"))
+        .unwrap()
+        .sid;
+    let mid = core.spawn_agent_session(&top, "a").unwrap();
+    let low = core.spawn_agent_session(&mid, "a").unwrap();
+    assert_eq!(core.work_root(&top).unwrap(), top);
+    assert_eq!(core.work_root(&mid).unwrap(), top, "第二层锚在顶");
+    assert_eq!(core.work_root(&low).unwrap(), top, "第三层也锚在顶");
+}
+
 /// 子树里任一节点在生成中就**整体拒绝**：不能删到一半留下半个状态。
 #[test]
 pub(crate) fn history_delete_refuses_when_any_node_in_the_subtree_is_running() {
@@ -1014,7 +1037,6 @@ pub(crate) fn session_meta_exec_section_roundtrips_and_reads_legacy_meta() {
         parent: None,
         node: None,
         delegation: None,
-        own_work: false,
         run: RunState::Active,
     };
     let text = yaml_serde::to_string(&meta).expect("序列化");

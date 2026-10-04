@@ -28,7 +28,8 @@ pub struct SessionMeta {
     #[serde(default)]
     pub exec: crate::capabilities::workspace::api::ExecSpec,
     /// 谁编排的（子会话 = 父会话名；顶层会话为空）。
-    /// 也是**沙箱锚点**（协作的节点子会话与父会话共用一套工作区，产物要在一起）。
+    /// 也是**落点判据**：子会话落在父会话目录的 `children/` 下（可再嵌套）。
+    /// 整棵树不论嵌套多少层，**只有顶层一个 `work/`**——所有子会话共用它。
     #[serde(default)]
     pub parent: Option<String>,
     /// 这个子会话服务任务链里的哪个节点（顶层会话为空）。
@@ -37,11 +38,6 @@ pub struct SessionMeta {
     /// 任务级委托（全权）：`Some` = 这条会话的核心可以用代理工具代用户决定。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub delegation: Option<Delegation>,
-    /// 工作区锚点：`false`（缺省）= 与父会话**共用**一套工作区（协作的节点子会话）；
-    /// `true` = 这是代理在父会话下建的**子工作**，有自己的 `work/` 与沙箱——
-    /// 只有"谁编排的"仍是父会话。
-    #[serde(default, skip_serializing_if = "is_false")]
-    pub own_work: bool,
     /// 运行态：暂停后不再被派发或唤醒；关闭是终态。缺省（active）= 正常运行。
     /// 它与"这一刻在不在跑"（推的 `Working`，短暂不落盘）是两件事：**它是持久事实**，
     /// 重启/回档后照样成立（见 docs/session/session-model.md 二）。
@@ -87,21 +83,7 @@ pub struct Delegation {
     pub granted_at: i64,
 }
 
-fn is_false(b: &bool) -> bool {
-    !*b
-}
-
 impl SessionMeta {
-    /// 沙箱锚点：**子工作**锚在自己身上（自己的 work/ 与沙箱）；
-    /// 其余子会话（协作的节点会话）锚在父会话上；顶层会话锚在自己身上。
-    pub fn work(&self) -> &str {
-        if self.own_work {
-            &self.name
-        } else {
-            self.parent.as_deref().unwrap_or(&self.name)
-        }
-    }
-
     /// 允许被派发 / 唤醒吗？暂停与关闭都拒绝——**运行态的唯一判据只有这一处**
     /// （派发入口、代理转达、叫醒都问它，不各写一份）。None = 放行。
     pub fn dispatch_refusal(&self) -> Option<String> {

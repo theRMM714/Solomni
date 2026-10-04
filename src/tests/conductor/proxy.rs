@@ -536,7 +536,7 @@ pub(crate) fn the_real_bridge_reads_catalog_and_session_messages() {
     );
     assert!(out.ok && out.output.contains("stopped:0"), "{}", out.output);
 }
-/// 真实宿主：建**子工作**——编排归属是父会话，`own_work` 让它有自己的 work/ 与沙箱。
+/// 真实宿主：建**子工作**——编排归属是父会话，落点在 `<父>/children/` 下，共用同一个 work/。
 #[test]
 pub(crate) fn the_real_bridge_creates_a_child_work() {
     use crate::capabilities::conductor::ports::ProxyHost;
@@ -577,8 +577,15 @@ pub(crate) fn the_real_bridge_creates_a_child_work() {
 
     let (meta, _) = ops.history.open(&child).expect("能打开子工作");
     assert_eq!(meta.parent.as_deref(), Some(parent_sid.as_str()));
-    assert!(meta.own_work, "子工作有自己的 work/ 与沙箱");
     assert_eq!(meta.mode, "single");
+    // 子工作与父会话**共用顶层那一个 work/**（沿父链走到顶就是父会话）。
+    let root = handle
+        .call({
+            let c = child.clone();
+            move |core| core.work_root(&c)
+        })
+        .expect("工作根");
+    assert_eq!(root, parent_sid, "子工作与父会话共用同一个 work/");
 
     let out2 = tools.call(&c, d::CREATE, args);
     assert_eq!(out2, out, "重放同一个 request_id 不再建第二个");
@@ -889,7 +896,7 @@ pub(crate) fn the_real_bridge_creates_a_multi_agent_child_work() {
         .sessions
         .create_work(super::super::single_work("w-parent-multi", &["m1"]))
         .expect("建父工作");
-    let bridge: Arc<dyn ProxyHost + Send + Sync> = Arc::new(ProxyBridge::new(handle));
+    let bridge: Arc<dyn ProxyHost + Send + Sync> = Arc::new(ProxyBridge::new(handle.clone()));
     let mut tools = ProxyTools::new(bridge, test_systools().tools, test_prompts().tools());
     let c = d::ProxyCall {
         source: d::Source::CoreProxy,
@@ -912,7 +919,13 @@ pub(crate) fn the_real_bridge_creates_a_multi_agent_child_work() {
     let (meta, _) = ops.history.open(&child).expect("能打开子工作");
     assert_eq!(meta.mode, "collab", "multi 建的是协作工作");
     assert_eq!(meta.parent.as_deref(), Some(parent.sid.as_str()));
-    assert!(meta.own_work, "子工作有自己的 work/ 与沙箱");
+    let root = handle
+        .call({
+            let c = child.clone();
+            move |core| core.work_root(&c)
+        })
+        .expect("工作根");
+    assert_eq!(root, parent.sid, "子工作与父会话共用同一个 work/");
     assert!(
         meta.task.is_some(),
         "协作必须有本次需求（各 agent 的 objective 合成）"

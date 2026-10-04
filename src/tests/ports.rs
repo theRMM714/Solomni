@@ -60,7 +60,6 @@ fn meta(name: &str) -> SessionMeta {
         parent: None,
         node: None,
         delegation: None,
-        own_work: false,
         run: crate::capabilities::session::api::RunState::Active,
     }
 }
