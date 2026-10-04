@@ -102,7 +102,7 @@ tools:                  # 【可选】外部工具表：工具名 → 该工具�
 **都由系统工具承载，模块不参与。** 执行席做完调 `submit_report`（summary / changes / open）交回执——它就是这一轮的最终答复；
 节点与总验收由核心调 `node_verdict` / `checklist`，`fail` 必须点名要返工的**节点 id**。
 
-模块作者只需记住一件事：**回报不是要模块自己手写的 JSON 块**（旧口径已废弃）。工具怎么声明、谁能调、载荷什么形状，
+模块作者只需记住一件事：**回报不是要模块自己手写的 JSON 块**。工具怎么声明、谁能调、载荷什么形状，
 唯一权威在 [SYSTOOL.md](SYSTOOL.md) 与 [docs/tools/tools-and-roles.md](docs/tools/tools-and-roles.md)。
 
 

@@ -86,7 +86,7 @@ presentation/{cli,web} ──▶ capabilities（含协调业务 conductor）─�
 - 占位符 `{{key}}`；渲染器在 `capabilities/prompt/domain/prompt.rs`（纯逻辑）；文件加载经 `PromptSource` 端口在适配层。
 - **缺文件 / 缺键 / 缺变量 = 报错暴露**，禁止静默兜底文案。
 - **册子只由提示词能力持有一次**（`capabilities/prompt/service.rs`）：组合根装载后把 `Arc<dyn Prompt>` 注入协调业务，
- 协作会话与它**共享同一份**（不再每个会话克隆整本册子）。
+ 协作会话与它**共享同一份**。
 - **别的能力不点字段路径**：按名字取段（`Prompt::text` / `Prompt::render` + `Segment`），
  或拿走两块**共享记录**（`Prompt::tools()` 的 `tool_texts` / `Prompt::refs()`，都是 `Arc`）。
  "哪个回合发哪几段"的**组装留在各业务**（身份块归 `session`、工具说明归 `tools`、清单文本归 `registry` / `workspace`）
@@ -179,10 +179,10 @@ session/<工作名>/
  需要 `LOCALAPPDATA` 在场（缺了它 `CreateProcessW` 报 `os error 203`，容器会静默降级成无围栏）。
  容器 profile **一个 agent 一个**（跨会话复用，数量有界）：守门进程是唯一建它的地方，建成即写进
  `.home/fence-grants.json` 台账；`--fence-clean` 按三步收口：先按台账精确回收（撤 ACE + 删 profile），
- 再按容器 SID 族在**产品根内**扫掉台账外的孤儿授权——账会断（夹具重建、进程被杀、旧版本没记账），
- 断了账不等于没有残留：一条遗留的显式 ACE 就能把目录对受限进程整个藏住（真机在 `tests/` 上抓到过，
- 撤净判定看 SID 在不在场、不看权限位，见 `confine::has_any_ace_for` 与孤儿清扫 `confine::sweep_orphan_aces`），
- 最后按 `Solomni.Agent.` 前缀扫掉整族遗留 profile（探针、台账被删、旧版本建的都在这一扫里）。
+ 再按容器 SID 族在**产品根内**扫掉台账外的孤儿授权——账会断（夹具重建、进程被杀），
+ 断了账不等于没有残留：一条遗留的显式 ACE 就能把目录对受限进程整个藏住。
+ 撤净判定看 SID 在不在场、不看权限位（见 `confine::has_any_ace_for` 与孤儿清扫 `confine::sweep_orphan_aces`），
+ 最后按 `Solomni.Agent.` 前缀扫掉整族遗留 profile（探针、台账被删的都在这一扫里）。
  父目录的只读属性位因此**不继承**（最坏残留面收敛到父目录本身），撤权是否干净由真机探针钉住
  （授权→撤权后父目录与叶子都不得留有该容器 SID 的任何显式 ACE）。
 - `capabilities/workspace/` 里的 `packages` 是运行包契约与包库事实（校验、去重、系统路径冲突预检、能力索引），

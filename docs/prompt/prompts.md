@@ -45,7 +45,7 @@
      名字表是 `capabilities/prompt/domain/prompt.rs` 的 `Segment`——**加一段提示词 = 册子加键 + 这里加变体**
      （缺了编译不过）；
   2. **拿走两块共享记录**：`Prompt::tools()`（`tool_texts`，~100 条模型侧文案）与 `Prompt::refs()`，
-     它们是 `Arc`：沙箱、工具环境、会话一律共享同一份，**不再逐处深拷贝**；
+     它们是 `Arc`：沙箱、工具环境、会话一律共享同一份，**不逐处深拷贝**；
 - 渲染（`{{key}}` 替换、缺键 / 缺变量即报错）在 `capabilities/prompt/domain/prompt.rs`（纯逻辑，不读文件）；
 - **工具总表与角色表不在这份册子里**：`systools/tools.yaml`（工具是什么）与 `systools/roles.yaml`（身份有什么）
   由 `capabilities/tools/detail/yaml_systools.rs` 的 `YamlSystools` 装配成 `SystemTools`，**与册子分开注入**——
