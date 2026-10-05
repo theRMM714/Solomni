@@ -1343,7 +1343,6 @@ function openAgentsModal() {
       const name = nameIn.value.trim();
       const modules = pickedIds();
       if (!name) { c.setMsg('agent 名字不能为空', true); return; }
-      if (!modules.length) { c.setMsg('至少勾选一个模块', true); return; }
       try {
         if (editing && editing !== name) {
           await api('POST', '/api/agents/' + encodeURIComponent(editing) + '/remove');
@@ -1646,14 +1645,12 @@ async function openWizard() {
       const addT = btn('加入本次（临时）', 'btn');
       addT.onclick = () => {
         if (!ed.name.trim()) { c.setMsg('agent 名字不能为空', true); return; }
-        if (!ed.modules.length) { c.setMsg('至少勾选一个模块', true); return; }
         w.agents.push({ name: ed.name.trim(), transient: true, modules: ed.modules.slice(), model: ed.model, why: null });
         ed.open = false; renderAll(); c.setMsg('已加入临时 agent：' + ed.name.trim());
       };
       const addS = btn('保存为 agent 并加入', 'btn btn-primary');
       addS.onclick = async () => {
         if (!ed.name.trim()) { c.setMsg('agent 名字不能为空', true); return; }
-        if (!ed.modules.length) { c.setMsg('至少勾选一个模块', true); return; }
         try {
           await api('POST', '/api/agents', { name: ed.name.trim(), modules: ed.modules.slice(), model: ed.model, note: ed.note.trim() });
           await refreshState();
@@ -1788,7 +1785,6 @@ async function openWizard() {
         if (w.mode === 'single') {
           const top = rec[0];
           const mods = (top.modules || []).slice();
-          if (!mods.length) { c.setMsg('核心推荐的 agent 没有模块', true); return; }
           if (top.reuse === true) {
             // 复用登记处已有的 agent：不论几个模块，完整按它的 modules 勾好（不截断）。
             const who = top.name || mods[0];
@@ -1832,16 +1828,18 @@ async function openWizard() {
       if (w.mode === 'single') {
         if (w.agentPick) {
           const mods = (w.agentPick.modules || []).slice();
-          if (!mods.length) { c.setMsg('单 agent：所选 agent 没有模块', true); return; }
           agents = [{
             name: w.agentPick.name, transient: false, modules: mods,
             model: w.model || w.agentPick.model || state.core,
           }];
         } else {
           const mods = pickedModules();
-          if (!mods.length) { c.setMsg('单 agent：至少勾选 1 个模块，或在上方复用已有 agent', true); return; }
+          const nm = (w.agentName || '').trim();
+          if (!nm && !mods.length) {
+            c.setMsg('单 agent：填一个 agent 名字，或至少勾选 1 个模块', true); return;
+          }
           agents = [{
-            name: (w.agentName || '').trim() || mods[0], transient: true, modules: mods,
+            name: nm || mods[0], transient: true, modules: mods,
             model: w.model || state.core,
           }];
         }

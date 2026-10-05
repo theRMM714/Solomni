@@ -215,7 +215,8 @@ tools:
         required: true
         desc: |-
           agent 数组（只写**身份**，不写任务）：复用登记处的 {"ref":"已存agent名"}，
-          或临时组装 {"name":"新名字","modules":["模块id"],"model":"模型id"}。
+          或临时组装 {"name":"新名字","modules":["模块id"],"model":"模型id"}——`modules` 可省略或为空：
+          零模块 agent 只用内建文件工具（读写、搜索）。
           **model 填 catalog_agents 回的 `id`（不是 `name`）**；同一模块不得出现在两个 agent 里。
       opening:
         type: string

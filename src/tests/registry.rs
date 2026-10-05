@@ -157,9 +157,19 @@ pub(crate) fn agent_crud_and_work_with_agents() {
     assert!(agent_upsert(&mut core, "", &["a"], "", "")
         .unwrap_err()
         .contains("不能为空"));
-    assert!(agent_upsert(&mut core, "x", &[], "", "")
-        .unwrap_err()
-        .contains("至少要有一个模块"));
+    // 模块可以为空：零模块 agent 只用内建文件工具，照样合法。
+    agent_upsert(&mut core, "零模块", &[], "", "").unwrap();
+    assert_eq!(
+        core.registry()
+            .agent_views()
+            .iter()
+            .find(|v| v.name == "零模块")
+            .unwrap()
+            .modules
+            .len(),
+        0
+    );
+    assert!(core.registry_mut().agent_remove("零模块").unwrap());
     assert!(agent_upsert(&mut core, "x", &["ghost"], "", "")
         .unwrap_err()
         .contains("无此模块"));

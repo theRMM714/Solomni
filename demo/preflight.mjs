@@ -75,7 +75,7 @@ export function demoPreflight(state, model) {
 
 /**
  * 代理演示（`demo/run-demo-proxy.mjs`）的前置：与前两个演示不同，这里**不指定模块**——
- * 挑人是核心自己的事；但核心要挑得出人，清单里至少要有一个模块或一个已存 agent。
+ * 挑人是核心自己的事（核心可以临时组装零模块的 agent：只用内建文件工具）。
  *
  * 代理会话跑在**核心默认模型**上（代理工具的执行者是核心自己）：没有核心默认模型就会回落到内置
  * 演示通道——那条通道不会原生调工具，验不出代理能力，所以这里与其余前置一样**如实拒跑**。
@@ -84,8 +84,6 @@ export function demoPreflight(state, model) {
 export function proxyPreflight(state) {
   const providers = (state && state.providers) || [];
   const models = (state && state.models) || [];
-  const modules = (state && state.modules) || [];
-  const agents = (state && state.agents) || [];
   const core = (state && state.core) || "";
   if (!providers.length) {
     return {
@@ -106,15 +104,6 @@ export function proxyPreflight(state) {
       hints: [
         "在界面「设置」里给核心选一个默认模型——代理会话与它临时挑出来的子会话都走这条通道",
         "在册的模型：" + known.join("、"),
-      ],
-    };
-  }
-  if (!modules.length && !agents.length) {
-    return {
-      reason: "清单里既没有模块、也没有已存 agent：核心挑不出可以派活的人",
-      hints: [
-        "模块放进 modules/ 就出现（清单是目录扫描的纯函数）",
-        "或在界面「设置 → agent」先存一个 agent（名字 + 模块 + 模型）",
       ],
     };
   }

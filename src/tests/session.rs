@@ -490,10 +490,15 @@ pub(crate) fn create_work_validates_user_choices() {
         .create_work(work("x", WorkMode::Single, &["ghost"]))
         .unwrap_err()
         .contains("无此模块"));
-    assert!(core
-        .create_work(work("x", WorkMode::Single, &[]))
-        .unwrap_err()
-        .contains("至少要有一个模块"));
+    // 模块可以为空：零模块 agent 照样建得出来（只用内建文件工具）。
+    let opened = core
+        .create_work(work("零模块", WorkMode::Single, &[]))
+        .expect("零模块 agent 合法");
+    assert_eq!(opened.agents.len(), 1);
+    assert!(core.history_open("零模块").expect("读 meta").0.agents[0]
+        .modules
+        .is_empty());
+    let _ = core.history_delete("零模块");
     // 单模式的**组合语义**：点名多个 = 并成一个临时组合（模块去重、保序；模型取核心默认）。
     let two_agents = WorkSpec {
         name: "x".to_string(),

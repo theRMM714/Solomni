@@ -487,9 +487,6 @@ pub fn resolve_new_session(args: &CreateArgs, catalog: &Catalog) -> Result<NewSe
                 false,
             )
         } else {
-            if a.modules.is_empty() {
-                return Err(format!("agents[{}]：agent {} 至少要有一个模块", i, a.name));
-            }
             for id in &a.modules {
                 if !catalog.modules.iter().any(|m| m.id == *id) {
                     return Err(format!(
@@ -684,6 +681,7 @@ fn parse_agents(items: &[serde_json::Value]) -> Result<Vec<ParsedAgent>, String>
                 Some(s) if !s.trim().is_empty() => s.trim().to_string(),
                 _ => return Err(format!("agents[{}] 缺少 name（新 agent 的名字）", i)),
             };
+            // modules 可以省略、也可以为空：零模块 agent 只用内建文件工具。
             let modules = match obj.get("modules").and_then(|v| v.as_array()) {
                 Some(a) => {
                     let mut ids = Vec::new();
@@ -699,7 +697,7 @@ fn parse_agents(items: &[serde_json::Value]) -> Result<Vec<ParsedAgent>, String>
                     }
                     ids
                 }
-                None => return Err(format!("agents[{}] 缺少 modules 数组", i)),
+                None => Vec::new(),
             };
             let model = obj
                 .get("model")
@@ -778,6 +776,17 @@ mod tests {
         assert_eq!(spec.agents[0].modules, vec!["m1".to_string()]);
         assert!(spec.agents[0].transient);
         assert_eq!(spec.opening, "做事");
+
+        // modules 可以省略：零模块 agent 只用内建文件工具。
+        let no_modules: CreateArgs = serde_json::from_value(serde_json::json!({
+            "mode": "single",
+            "agents": [{"name": "纯写作", "model": "gpt"}],
+            "opening": "写一篇稿",
+            "request_id": "r0"
+        }))
+        .unwrap();
+        let spec = resolve_new_session(&no_modules, &c).expect("零模块 agent 合法");
+        assert!(spec.agents[0].modules.is_empty(), "缺省 modules = 空");
 
         let unknown_module: CreateArgs = serde_json::from_value(serde_json::json!({
             "mode": "single",

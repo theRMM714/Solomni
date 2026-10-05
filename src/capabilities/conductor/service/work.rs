@@ -186,9 +186,6 @@ impl Conductor {
         for a in &edit.agents {
             crate::capabilities::registry::api::validate_name(&a.name)?;
             crate::capabilities::registry::api::check_reserved(&a.name, &reserved)?;
-            if a.modules.is_empty() {
-                return Err(format!("agent {} 至少要有一个模块", a.name));
-            }
             for id in &a.modules {
                 if !roster.modules.iter().any(|m| &m.manifest.id == id) {
                     return Err(format!("无此模块：{}", id));
@@ -507,9 +504,6 @@ impl Conductor {
         for a in &spec.agents {
             crate::capabilities::registry::api::validate_name(&a.name)?;
             crate::capabilities::registry::api::check_reserved(&a.name, &reserved)?;
-            if a.modules.is_empty() {
-                return Err(format!("agent {} 至少要有一个模块", a.name));
-            }
             for id in &a.modules {
                 if !roster.modules.iter().any(|m| &m.manifest.id == id) {
                     return Err(format!("无此模块：{}", id));
@@ -529,7 +523,7 @@ impl Conductor {
                 self.registry.resolve(mid)?;
             }
         }
-        // 形态约束（每个 agent ≥1 个模块已在上面的循环里校验）
+        // 形态约束（模块可以为空，上面只校验真实存在与归属不冲突）
         match spec.mode {
             WorkMode::Single => {
                 if spec.agents.len() != 1 {
