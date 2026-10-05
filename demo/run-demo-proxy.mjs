@@ -20,8 +20,9 @@
  *
  * 为什么这个脚本**不进 CI**：它要真实供应商与核心默认模型（CI 上没有 .home/，会回落到内置假模型，
  * 那样验的就不是代理能力而是假脚本）。代理状态机的机器判据在 tests/cross-platform/e2e/driver.js。
- * 只走产品自己的 HTTP 能力面（与前端同一条路），**不改任何登记处**；产物落在**各子会话自己的**
- * 共享区/沙箱里——整棵树（含任意深度的子会话）共用顶层那一个 work/（见 docs/session）。
+ * 只走产品自己的 HTTP 能力面（与前端同一条路），**不改任何登记处**；子会话把产物写进**自己的沙箱**，
+ * 需要共享时再用 work_commit 提交回**顶层那一个共享区** work/——整棵树（含任意深度的子会话）共用它
+ * （见 docs/session；共享区对 agent 只读）。
  */
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
@@ -42,7 +43,7 @@ const QUIET_POLLS = 5;
 /** 说给代理听的目标（第一幕）：只给结果与约束，怎么挑人、怎么分工由它自己定。 */
 const GOAL = [
   "把这件事办完：人怎么挑、活怎么分你自己定，不用问我；这是件小事，人手不用多。",
-  "① 挑合适的人建子工作，让他在自己的共享区里写一份 notes.md（Markdown，正文不少于 300 字，说清「本地优先」的三条理由）；",
+  "① 挑合适的人建子工作，让他在自己的沙箱里写一份 notes.md（Markdown，正文不少于 300 字，说清「本地优先」的三条理由），再用 work_commit 提交回共享区；",
   "② 再让他基于这份笔记产出一份 card.html——自包含、能离线打开（内联样式，不许引用任何外部资源）；",
   "③ 两件产物都落盘之后，用 read_session_messages 把他的话看一遍，确认产物真的存在；",
   "④ 最后告诉我：你派了谁、建了哪些子会话、两件产物的真实绝对路径。",
@@ -50,7 +51,7 @@ const GOAL = [
 
 /** 说给第二个代理听的目标（第二幕）：要一件**要花点时间**的活，好在中途按停止。 */
 const STOP_GOAL =
-  "让合适的人认真写一份 800 字以上的长文《把决定权交给 AI 的边界》，写进他自己的共享区里的 long.md；" +
+  "让合适的人认真写一份 800 字以上的长文《把决定权交给 AI 的边界》，写进他自己的沙箱里的 long.md；" +
   "写细一点、慢慢来。人你自己挑。";
 
 let failed = 0;
@@ -294,6 +295,9 @@ async function main() {
   }
   ok(worked === kids.length && kids.length > 0, "每个子工作都真的跑过（有工具行或发言）", worked + "/" + kids.length);
   ok(seeded === kids.length && kids.length > 0, "每个子会话都写进了开头（核心派的活 / 本次需求）", seeded + "/" + kids.length);
+  // 共享区对 agent 只读：子会话的产物经 work_commit 才进主副本。
+  const kidRows = [...kidsLines.values()].flatMap((kl) => toolRows(kl));
+  ok(kidRows.some((r) => r.name === "work_commit" && r.ok), "子会话产物经 work_commit 提交回共享区", JSON.stringify(kidRows.map((r) => [r.name, r.ok])));
 
   // 关卡不落到用户头上：代理会话自己不待裁，子会话的门由核心代答（没人等用户点头）。
   const nameSet = new Set([sid, ...kids.map((k) => k.name)]);
@@ -333,7 +337,7 @@ async function main() {
     console.log("   （子会话没有 ≥80 字的工具输出，跳过「不转发」取样）");
   }
 
-  // 产物：盘上真的多了东西（成品落在子会话自己的共享区/沙箱里）。
+  // 产物：盘上真的多了东西（成品在子会话自己的沙箱里，提交后也进共享区）。
   const made = producedFiles(sid);
   console.log("   产物 " + made.size + " 件：");
   for (const [name, p] of made) console.log("     " + name + " → " + p + "（" + statSync(p).size + " 字节）");
