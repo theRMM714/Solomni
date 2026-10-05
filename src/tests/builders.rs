@@ -106,6 +106,10 @@ pub(crate) fn run_execution(
             &mut |_r: &crate::capabilities::collab::service::round::Round,
                   _s: &mut dyn FnMut(crate::capabilities::session::api::SessionEvent)| {},
             &mut sink,
+            // 测试不接工具级确认：直接执行（确认路径由 driver 的用例单独钉）。
+            &mut |_req: &crate::capabilities::collab::service::tool_loop::ToolConfirm,
+                  _sink: &mut dyn FnMut(crate::capabilities::session::api::SessionEvent)|
+             -> bool { true },
             &[],
             false,
         );
@@ -682,6 +686,7 @@ pub(crate) fn agent_meta(name: &str, modules: &[&str], model: Option<&str>) -> A
         transient: false,
         modules: modules.iter().map(|s| s.to_string()).collect(),
         model: model.map(|s| s.to_string()),
+        permissions: Default::default(),
     }
 }
 
@@ -719,6 +724,7 @@ pub(crate) fn edit_of(agents: Vec<(&str, &[&str], &str)>) -> SessionEdit {
                 name: n.to_string(),
                 modules: ms.iter().map(|s| s.to_string()).collect(),
                 model: m.to_string(),
+                permissions: None,
             })
             .collect(),
         tier: "host".to_string(),

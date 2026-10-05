@@ -217,6 +217,14 @@ pub struct ToolTexts {
     pub roots_module: String,
     /// 共享主副本只读时，写类工具的如实拒绝（无变量）。
     pub write_shared_read_only: String,
+    /// 会话权限：写被白/黑名单拒绝。变量：path, roots
+    pub write_scope_denied: String,
+    /// 会话权限：读被白/黑名单拒绝。变量：path, roots
+    pub read_scope_denied: String,
+    /// 会话权限：模块目录默认只读。变量：id
+    pub module_write_denied: String,
+    /// 会话权限：工具级确认被用户拒绝（无变量）——工具没有执行。
+    pub tool_denied_by_user: String,
     // —— 内置工具回执（systool）——
     /// 变量：error
     pub bad_args_json: String,

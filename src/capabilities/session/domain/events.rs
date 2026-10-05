@@ -111,6 +111,9 @@ pub struct Live<'a> {
     /// 用户点「停止」时置位；会话与适配层据此立即中止生成。
     pub cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
     pub emit: &'a mut dyn FnMut(SessionEvent),
+    /// 工具级确认：`ask` 表里的工具调用要停下来等用户"是/否"。
+    /// `None` = 这一趟不接确认（照常执行）——CLI 的同步生成、测试与讨论席都走它。
+    pub approval: Option<crate::kernel::api::ApprovalCtx>,
 }
 
 impl Live<'_> {

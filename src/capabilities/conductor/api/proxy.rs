@@ -147,6 +147,11 @@ impl SessionOps for ConductorHandle {
         self.stop_tree(sid).map(|v| !v.is_empty()).unwrap_or(false)
     }
 
+    /// 工具级确认：直接把答案写进放行表并唤醒工作线程（不经队列，生成期间立刻生效）。
+    fn approve(&self, sid: &str, ok: bool) -> bool {
+        self.approvals.resolve(sid, ok)
+    }
+
     fn is_running(&self, sid: &str) -> bool {
         self.jobs.is_running(sid)
     }

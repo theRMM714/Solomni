@@ -62,6 +62,26 @@ pub fn job_json_ro(rw: &[PathBuf], ro: &[PathBuf], cwd: &PathBuf, prepared: bool
     )
 }
 
+/// 带**只读子树**（`ro_tree`）的守门进程入参：模块目录默认只读时用它。
+/// `ro_tree` 是**递归只读**（与用户授权的 `ro` 分开：Windows 上前者递归、后者不递归）。
+pub fn job_json_tree(rw: &[PathBuf], ro_tree: &[PathBuf], cwd: &PathBuf, prepared: bool) -> String {
+    let esc = |p: &PathBuf| p.to_string_lossy().replace('\\', "/");
+    let list = |ps: &[PathBuf]| -> String {
+        ps.iter()
+            .map(|p| format!("\"{}\"", esc(p)))
+            .collect::<Vec<_>>()
+            .join(",")
+    };
+    format!(
+        "{{\"agent\":\"probe\",\"rw\":[{}],\"ro\":[],\"ro_tree\":[{}],\"private\":\"{}\",\"cwd\":\"{}\",\"net\":false,\"prepared\":{},\"home\":null}}",
+        list(rw),
+        list(ro_tree),
+        esc(cwd),
+        esc(cwd),
+        prepared
+    )
+}
+
 /// 运行期交给工具进程的环境白名单：**问产品自己拿**（`--print-fence-env`），不在这里另抄一份。
 /// 探针必须在**同一个环境**里驱动守门进程：环境不同，围栏的真实行为就不同。
 pub fn runtime_env(spec: &str) -> Vec<(String, String)> {

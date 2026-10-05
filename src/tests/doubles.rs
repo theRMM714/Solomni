@@ -726,6 +726,7 @@ pub(crate) fn test_sandbox(
         shared: abs(&["demo", "work"]),
         private: abs(&["demo", agent]),
         modules: map,
+        permissions: Default::default(),
         texts: test_prompts().tools(),
     }
 }
@@ -1036,6 +1037,7 @@ pub(crate) fn with_live<T>(f: impl FnOnce(&mut Live) -> T) -> T {
         llm: Default::default(),
         cancel: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         emit: &mut noop,
+        approval: None,
     };
     f(&mut live)
 }

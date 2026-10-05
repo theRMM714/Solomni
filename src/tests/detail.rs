@@ -45,6 +45,7 @@ fn meta(name: &str) -> SessionMeta {
             transient: false,
             modules: vec!["a".to_string()],
             model: None,
+            permissions: Default::default(),
         }],
         exec: ExecSpec::default(),
         parent: None,

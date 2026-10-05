@@ -2409,14 +2409,25 @@ function renderLiveTick(s) {
 function renderGate(s) {
   const gate = $('#gate');
   gate.innerHTML = '';
-  if (!s || isBusy(s) || s.done || s.readonly) return;
+  if (!s || s.done || s.readonly) return;
+  const p = s.pending;
+  // 工具级确认发生在**生成中**：这时会话是 busy，但这一关必须显示（生成正停下来等它）。
+  if (p && p.kind === 'tool_approval') {
+    const pl = p.payload || {};
+    const what = pl.module ? (pl.module + '.' + pl.tool) : (pl.tool || '工具');
+    gate.appendChild(gateCard('agent 请求执行工具 ' + what + '，是否放行？', [
+      ['放行', () => approveTool(true)],
+      ['拒绝', () => approveTool(false)],
+    ]));
+    return;
+  }
+  if (isBusy(s)) return;
   if (s.awaiting === 'task') {
     gate.appendChild(gateCard('请提交本次协作需求：', [
       ['提交', async () => { const v = takeInput(); if (v) await act('task', v); }],
     ]));
     return;
   }
-  const p = s.pending;
   if (!p) return;
   if (p.kind === 'confirm_slate') {
     gate.appendChild(gateCard('核心已代拟名单（见转录），是否按此建组？', [
@@ -2431,6 +2442,20 @@ function renderGate(s) {
     ]));
   } else {
     gate.appendChild(decisionCard(p));
+  }
+}
+
+/* 工具级确认：回答在等的工具放行（是 / 否）。与「停止」一样**不走生成命令队列**——
+   服务端直接把答案写进放行表并唤醒生成线程。 */
+async function approveTool(ok) {
+  const s = activeSession();
+  if (!s) return;
+  try {
+    await api('POST', '/api/sessions/' + encodeURIComponent(s.sid) + '/approve', { ok: ok });
+    s.pending = null;
+    renderAll();
+  } catch (err) {
+    notice('操作失败', err.message, 'err');
   }
 }
 
@@ -2883,7 +2908,12 @@ function onSend() {
   if (isBusy(s)) { stopGeneration(); return; } // 生成中：同一个键变成「停止」
   if (s.awaiting === 'task') { const v = takeInput(); if (v) act('task', v); return; }
   // 裁决是自由文本：把输入框里的话作为回应提交（核心 AI 判定意图是否明确）。
-  if (s.pending && s.pending.kind !== 'confirm_slate' && s.pending.kind !== 'confirm_begin') {
+  if (
+    s.pending &&
+    s.pending.kind !== 'confirm_slate' &&
+    s.pending.kind !== 'confirm_begin' &&
+    s.pending.kind !== 'tool_approval'
+  ) {
     const v = takeInput();
     if (v) act('decide', v);
     return;

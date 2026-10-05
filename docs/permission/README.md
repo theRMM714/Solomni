@@ -1,0 +1,60 @@
+# permission（权限）
+
+> 独立于会话的一类能力：回答「谁能在本机、在哪些路径上做什么」。
+> 本目录是该单元的唯一细则入口：本页 → [`module-map.md`](module-map.md)（逐文件职责，机器比对）。
+> 分层与依赖方向见 [ARCHITECTURE.md](../../ARCHITECTURE.md) §一，业务边界判据见 §九；测试规范见 [TESTING.md](../../TESTING.md)。
+
+## 一、管什么 / 不管什么
+
+**管**：决定粒度（`ask` / `full`）、工作区路径的读写白名单与黑名单、模块目录写授权；
+把**声明**解析成**生效态**，并提供唯一一处路径判定。
+
+**不管**：不认会话、不碰文件系统、不持端口、不持有状态——落盘的声明在登记处（`settings.yaml` 的全局默认）
+与会话 `meta.yaml`（逐 agent 覆盖），生效态每次现算。
+
+## 二、入站契约与状态归属
+
+`api`：`Permissions` / `PermissionsOverride` / `Granularity` 与 `validate` / `validate_override`。
+**状态不属于本能力**：全局默认归登记处，逐 agent 覆盖归会话 `meta`；本能力只有纯规则。
+
+## 三、语义（唯一一份）
+
+- 默认：整棵工作区**可读、可提交**；
+- **白名单一出现就取代默认**（配了 `allow_read` 就失去默认的整棵可读，配了 `allow_write` 就失去默认提交）；
+- **黑名单只做减法，不让默认失效**；两者重叠时**黑大于白**；
+- `.` 代表整棵工作区；匹配按**路径组件**做（`web` 不匹配 `website`）；
+- **模块目录默认只读**；`module_write` 命中该模块才整块可写；`<module>/userdata/` 恒可写；
+- `granularity`：`full` = 任何工具都不设确认；`ask` = `ask` 表里的工具调用**在执行前**先让用户点"是 / 否"。
+
+### 工具级确认的引擎路径（`ask`）
+
+工具循环在执行一次调用前查这一席的生效权限：命中 `ask` 就
+① 把调用登记进 `kernel::ApprovalRegistry`（与 `JobRegistry` 同级的跨线程机制）、
+② 推一张"是 / 否"的裁决卡并阻塞工作线程，
+③ 用户在 **Web** 上点按钮（`session.act` 的 `approve`，**不经生成命令队列**，与「停止」同一条直路）
+把答案写进放行表并唤醒；点"否"或「停止」→ 工具不执行，回一条"用户拒绝"的工具结果。
+
+**已知限制**（缺口 `permission.approval-answer-paths`）：
+① 纯终端（CLI）是同步生成，生成线程停下来等确认时主线程读不到键盘，所以 CLI 不开启确认（照常执行）；
+② 网页在"等待确认"期间刷新，卡片（短暂 `Decision` 事件）不再出现，只剩「停止」可用。
+
+白名单 / 黑名单是**呈现层词汇**：解析后下游只见一个正向判定（`read_ok` / `write_ok`）。
+平台围栏是正向 allow-list（Landlock 没有 deny 规则），所以嵌套黑名单只在核心层兑现。
+
+## 四、依赖图位置（由源码的 `::api` 引用推导）
+
+- 经 `::api` 用到：无（纯领域，不自持端口）；
+- 谁在用我：`registry`（全局默认）、`session`（逐 agent 覆盖）、`workspace`（落点判定）、
+  `tools`（围栏派生）、`conductor`（解析与装配）。
+
+## 五、改动本单元时必须同步
+
+- 改语义 → 本页 + [`REGISTRY_SPEC.md`](../../REGISTRY_SPEC.md)（settings/agents 字段）+ [docs/session/session-model.md](../session/session-model.md)（meta）；
+- 改落点判定 → [docs/tools/tools-and-roles.md](../tools/tools-and-roles.md) 的路径模型 + 平台围栏探针；
+- 改 `FenceSpec` 字段 → 三平台后端与跨平台字面量门禁。
+
+## 本目录
+
+| 文件 | 内容 |
+| --- | --- |
+| [`module-map.md`](module-map.md) | 逐文件职责（T0 与磁盘双向比对） |

@@ -46,6 +46,7 @@ impl Conductor {
                 shared: roots.shared.clone(),
                 private,
                 modules,
+                permissions: self.permissions_for(meta, &a.name),
                 texts: self.prompt.tools(),
             });
         }
@@ -53,6 +54,21 @@ impl Conductor {
             shared: roots.shared,
             list,
         })
+    }
+
+    /// 一个 agent 的**生效权限**：settings.yaml 的全局默认叠加该 agent 在会话 meta 里的覆盖。
+    /// 只替换显式给出的字段（空集合有确切语义 = 默认整棵工作区，所以覆盖用 Option 表达）。
+    pub(crate) fn permissions_for(
+        &self,
+        meta: &SessionMeta,
+        agent: &str,
+    ) -> crate::capabilities::permission::api::Permissions {
+        let base = self.registry.app().permissions.clone();
+        meta.agents
+            .iter()
+            .find(|a| a.name == agent)
+            .map(|a| base.apply(&a.permissions))
+            .unwrap_or(base)
     }
 
     /// 工具环境：内置文件工具永远可用；外部工具按模块分组放行（模块 id → 目录 + 工具表）。
@@ -114,6 +130,7 @@ impl Conductor {
                 Arc::clone(&self.workspace),
                 &sb.work_name,
                 &sb.agent,
+                sb.permissions.clone(),
             ),
         )]
     }

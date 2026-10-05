@@ -1,5 +1,4 @@
 use super::*;
-use std::sync::Mutex;
 use windows_sys::Win32::Foundation::LocalFree;
 use windows_sys::Win32::Security::Authorization::GetNamedSecurityInfoW;
 use windows_sys::Win32::Security::{
@@ -76,6 +75,8 @@ fn dump_aces(path: &Path) -> String {
 fn container_profile_is_one_per_agent() {
     let a = FenceSpec {
         agent: "甲".to_string(),
+        private: PathBuf::new(),
+        ro_tree: Vec::new(),
         rw: vec![PathBuf::from("session").join("w1")],
         cwd: PathBuf::from("modules").join("m0"),
         ro: Vec::new(),
@@ -153,6 +154,8 @@ fn grant_targets_include_parents_with_stat_only() {
         .join("m0");
     let spec = FenceSpec {
         agent: "probe".to_string(),
+        private: PathBuf::new(),
+        ro_tree: Vec::new(),
         rw: vec![dir.clone()],
         ro: vec![std::env::temp_dir()
             .join("solomni-grant-targets")
@@ -193,6 +196,35 @@ fn grant_targets_include_parents_with_stat_only() {
     }
 }
 
+/// 只读**子树**（模块目录默认只读）与工作目录：都给 `RIGHTS_RO` 递归，写权只能来自 `rw`。
+#[test]
+fn grant_targets_keep_module_read_only_and_cwd_read_only() {
+    let base = std::env::temp_dir().join("solomni-grant-targets");
+    let module = base.join("modules").join("m0");
+    let userdata = module.join("userdata");
+    let spec = FenceSpec {
+        agent: "probe".to_string(),
+        private: PathBuf::new(),
+        ro_tree: vec![module.clone()],
+        rw: vec![userdata.clone()],
+        ro: Vec::new(),
+        cwd: module.clone(),
+        net: false,
+    };
+    let targets = grant_targets(&spec);
+    let find = |p: &std::path::Path| targets.iter().find(|(x, _, _, _)| x == p).cloned();
+    assert_eq!(
+        find(&module).map(|(_, r, rec, inh)| (r, rec, inh)),
+        Some((RIGHTS_RO, true, true)),
+        "模块根（也是 cwd）不得拿到写权"
+    );
+    assert_eq!(
+        find(&userdata).map(|(_, r, rec, inh)| (r, rec, inh)),
+        Some((RIGHTS_RW, true, true)),
+        "userdata 是可写叶子"
+    );
+}
+
 /// 授权这条路的真机验收：真去改一个目录的 DACL。
 /// 本机环境不允许改 ACL 时（例如被沙箱挡住）如实打印原因并跳过——不静默当作通过。
 #[test]
@@ -208,15 +240,16 @@ fn grants_are_written_when_the_environment_allows_it() {
     std::fs::create_dir_all(&dir).expect("建探针目录");
     let spec = FenceSpec {
         agent: "probe".to_string(),
+        private: PathBuf::new(),
+        ro_tree: Vec::new(),
         rw: vec![dir.clone()],
         cwd: dir.clone(),
         ro: Vec::new(),
         net: false,
     };
-    let prepared = Mutex::new(std::collections::BTreeSet::new());
     // 台账落在探针自己的临时目录里（不碰真实 .home/）。
     let home = dir.join("ledger");
-    let outcome = prepare_fence(&spec, "cmd", &prepared, &home);
+    let outcome = prepare_fence(&spec, "cmd", &home);
     assert!(outcome.is_ok(), "授权应当成功：{:?}", outcome.err());
     // 收尾必须把自己写下的权限项按台账撤掉：测试不在本机留痕（撤不动就报出来，不静默）。
     let report = clean(&home).expect("回收应当成功");
@@ -239,14 +272,15 @@ fn revoke_removes_the_container_ace_from_the_given_roots() {
     std::fs::create_dir_all(&dir).expect("建探针目录");
     let spec = FenceSpec {
         agent: "probe".to_string(),
+        private: PathBuf::new(),
+        ro_tree: Vec::new(),
         rw: vec![dir.clone()],
         cwd: dir.clone(),
         ro: Vec::new(),
         net: false,
     };
     let home = dir.join("ledger");
-    let prepared = Mutex::new(std::collections::BTreeSet::new());
-    prepare_fence(&spec, "cmd", &prepared, &home).expect("授权应当成功");
+    prepare_fence(&spec, "cmd", &home).expect("授权应当成功");
     let sid = container_sid(&container_name(&spec)).expect("派生容器 SID");
     assert!(
         has_ace_for(sid, &dir, RIGHTS_RW),
@@ -279,14 +313,15 @@ fn read_only_grants_write_ro_aces_and_revoke_removes_them() {
     std::fs::create_dir_all(&ro).expect("建只读根");
     let spec = FenceSpec {
         agent: "probe-ro".to_string(),
+        private: PathBuf::new(),
+        ro_tree: Vec::new(),
         rw: vec![dir.clone()],
         ro: vec![ro.clone()],
         cwd: dir.clone(),
         net: false,
     };
     let home = dir.join("ledger");
-    let prepared = Mutex::new(std::collections::BTreeSet::new());
-    prepare_fence(&spec, "cmd", &prepared, &home).expect("授权应当成功");
+    prepare_fence(&spec, "cmd", &home).expect("授权应当成功");
     let sid = container_sid(&container_name(&spec)).expect("派生容器 SID");
     assert!(has_ace_for(sid, &ro, RIGHTS_RO), "只读根上要有只读 ACE");
     assert!(
@@ -324,14 +359,15 @@ fn revoke_leaves_no_container_ace_on_leaf_parents() {
     std::fs::write(leaf.join("data.txt"), "x").expect("写探针文件");
     let spec = FenceSpec {
         agent: "probe-leftover".to_string(),
+        private: PathBuf::new(),
+        ro_tree: Vec::new(),
         rw: vec![leaf.clone()],
         cwd: leaf.clone(),
         ro: Vec::new(),
         net: false,
     };
     let home = base.join("ledger");
-    let prepared = Mutex::new(std::collections::BTreeSet::new());
-    prepare_fence(&spec, "cmd", &prepared, &home).expect("授权应当成功");
+    prepare_fence(&spec, "cmd", &home).expect("授权应当成功");
     let sid = container_sid(&container_name(&spec)).expect("派生容器 SID");
     eprintln!("[探针] 授权后父目录 {}", dump_aces(&base));
     eprintln!("[探针] 授权后叶子 {}", dump_aces(&leaf));
@@ -389,6 +425,8 @@ fn container_roundtrip_sees_leaf_but_not_parent_content() {
     std::fs::write(leaf.join("data.txt"), "x").expect("写探针文件");
     let spec = FenceSpec {
         agent: "probe-roundtrip".to_string(),
+        private: PathBuf::new(),
+        ro_tree: Vec::new(),
         rw: vec![leaf.clone()],
         cwd: leaf.clone(),
         ro: Vec::new(),
@@ -397,8 +435,7 @@ fn container_roundtrip_sees_leaf_but_not_parent_content() {
     let container = container_name(&spec);
     ensure_profile(&container).expect("建容器 profile");
     let home = base.join("ledger");
-    let prepared = Mutex::new(std::collections::BTreeSet::new());
-    prepare_fence(&spec, "cmd", &prepared, &home).expect("授权应当成功");
+    prepare_fence(&spec, "cmd", &home).expect("授权应当成功");
     let sid = container_sid(&container).expect("派生容器 SID");
 
     // 先确认容器**真的**生效：某些受管环境里 AppContainer 会被静默降级（令牌里没有包 SID 组、

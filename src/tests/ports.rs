@@ -28,6 +28,8 @@ use std::sync::{Arc, Mutex};
 fn spec() -> FenceSpec {
     FenceSpec {
         agent: "a".to_string(),
+        private: PathBuf::new(),
+        ro_tree: Vec::new(),
         rw: Vec::new(),
         cwd: PathBuf::from("mods").join("m0"),
         ro: Vec::new(),
@@ -55,6 +57,7 @@ fn meta(name: &str) -> SessionMeta {
             transient: false,
             modules: vec!["a".to_string()],
             model: None,
+            permissions: Default::default(),
         }],
         exec: ExecSpec::default(),
         parent: None,

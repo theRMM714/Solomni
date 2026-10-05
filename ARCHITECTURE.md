@@ -111,8 +111,12 @@ presentation/{cli,web} ──▶ capabilities（含协调业务 conductor）─�
 - 会话的旁路配置记录（`{"type":"config"}`）只在编辑提交时追加：供呈现与审计，**不进模型上下文**，回放与状态派生跳过它。
 - 出站模型调用的参数由核心决定、随端口传下去（`LlmOpts{stream, timeout_secs}`），取值来自**全局设置**；`Output` 只管回包形状。
   调用失败**不是**模型的回复：`Completion.error` 与正文分离，上层据此发 `Notice` 并**中断本轮**（不落转录行），会话保持可继续。
-- **围栏**（策略在 `capabilities/tools/domain/fence.rs`，机制在 `detail/confine/`）：可达范围 = 自己的私有沙箱 + 自己的模块目录 + 用户显式授权的只读根（`.home/settings.yaml` 的 `fence_read`，默认空）；
+- **围栏**（策略在 `capabilities/tools/domain/fence.rs`，机制在 `detail/confine/`）：可达范围 = 自己的私有沙箱（永远全权）+ 自己的模块目录（**默认只读**；`module_write` 授权才整块可写，`<module>/userdata/` 恒可写）+ 用户显式授权的只读根（`.home/settings.yaml` 的 `fence_read`，默认空）；
   共享主副本**只有在"这一席可写"时**才进 rw（核心会话），agent 会话默认只读——工具层与围栏层两处都挡住直接写；
+  **会话权限**（`capabilities/permission/`，纯领域）统一裁定：整棵工作区默认可读可提交，**白名单一出现就取代默认、黑名单只做减法**；
+  内置读/写、`work_pull` / `work_commit`（提交白名单）与围栏派生都读同一份生效态（`Sandbox.permissions` / `FenceSpec`）；
+  **工具级确认**（`granularity: ask`）：工具循环执行前查同一份生效态，命中 `ask` 表就登记进 `kernel` 的放行表（`ApprovalRegistry`）、推"是 / 否"裁决卡并阻塞；
+  用户经 `session.act` 的 `approve` 回答（与「停止」一样**不经命令队列**，生成期间立刻生效），停止把等待解成拒绝；
   工具进程走**守门进程**（本程序 `--fence-run`），环境不继承父进程（**密钥与凭据不进工具进程**），`HOME` / `TEMP` 等落进该 agent 的沙箱。
   **一个 agent 一个容器 profile**，守门进程是唯一建它的地方并记进 `.home/fence-grants.json` 台账；`--fence-clean` 按台账回收、再在产品根内扫掉台账外的孤儿授权与遗留 profile。
   机制验证分三态：`Enforced` / `EnvUnavailable`（本机不允许，如实降级照跑）/ `Broken`（我们写错了，未授权时段**拒绝执行**）。

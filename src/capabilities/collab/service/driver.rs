@@ -304,6 +304,49 @@ fn run(
         )),
         None => None,
     };
+    // 工具级确认：这一回合的放行上下文（没有就跟平时一样直接执行）。
+    let approval = live.approval.clone();
+    let mut confirm = |req: &crate::capabilities::collab::service::tool_loop::ToolConfirm,
+                       sink: &mut dyn FnMut(SessionEvent)|
+     -> bool {
+        let Some(ctx) = approval.as_ref() else {
+            return true;
+        };
+        let name = match &req.module {
+            Some(m) => format!("{}.{}", m, req.tool),
+            None => req.tool.clone(),
+        };
+        // 待确认落一条系统行（可回放），再推裁决卡（短暂事件；界面据此出"是/否"）。
+        sink(SessionEvent::Notice(format!(
+            "[待确认] 工具 {} 需要用户放行。",
+            name
+        )));
+        sink(SessionEvent::Decision {
+            kind: "tool_approval".to_string(),
+            summary: format!("agent 请求执行工具 {}。", name),
+            advice: String::new(),
+            question: format!("是否执行 {}？", name),
+            payload: serde_json::json!({
+                "tool": req.tool,
+                "module": req.module,
+                "args": req.args,
+            }),
+        });
+        let slot = ctx.registry.register(&ctx.sid);
+        let answer = slot.wait();
+        ctx.registry.unregister(&ctx.sid);
+        let ok = answer.unwrap_or(false);
+        sink(SessionEvent::Notice(format!(
+            "[确认] 工具 {}：{}",
+            name,
+            if ok {
+                "用户放行"
+            } else {
+                "用户拒绝（或生成已停止）"
+            }
+        )));
+        ok
+    };
     // 两个回调（流式分片 / 工具完成）都要外送短暂事件：把 emit 借出来共享（顺序因此天然正确）。
     let emit = std::cell::RefCell::new(&mut *live.emit);
     let mut acc = String::new();
@@ -351,6 +394,7 @@ fn run(
             },
             on_round,
             sink,
+            &mut confirm,
             &spec.turn,
             spec.verbs,
         )

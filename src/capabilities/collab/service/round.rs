@@ -136,6 +136,8 @@ pub fn converse_with(
     on_tool: &mut dyn FnMut(&ToolCallView),
     on_round: &mut RoundSink<'_>,
     sink: &mut dyn FnMut(SessionEvent),
+    // 工具级确认：`ask` 表里的调用在执行前经它问用户（返回 false = 拒绝、不执行）。
+    confirm: crate::capabilities::collab::service::tool_loop::ConfirmFn<'_>,
     // 本回合的提示（讨论席的开场/轮转词；执行席常为空——它的指令在派发行里）。
     turn: &[Msg],
     // 本回合认不认**协作表态**（讨论席认：见到动词就是这一回合的发言，收尾）。
@@ -364,7 +366,7 @@ pub fn converse_with(
                     // 调度：**连续**声明可并发的调用合成一批并发跑，其余各自独占（写入类因此是批次之间的屏障）。
                     // 结果按原始下标返回，随后一律按原序回填——并发只影响执行，不影响上下文里的顺序。
                     note_unauthorized(ctx, &plan, sink);
-                    let done = run_batch(ctx, &plan);
+                    let done = run_batch(ctx, &plan, confirm, sink);
                     // 先按原序把工具行建好（执行已经做完），再让**唯一那处**构造函数产出这一回复的消息：
                     // 实时与重建走同一个函数，"重建上下文与实时一致"因此是结构保证的。
                     let texts = &ctx.sandbox.texts;
@@ -535,7 +537,7 @@ pub fn converse_with(
                     .collect();
                 // 内置工具（read/write/edit/search）优先且不属于任何模块；外部工具按模块定 cwd。
                 note_unauthorized(ctx, &plan, sink);
-                let done = run_batch(ctx, &plan);
+                let done = run_batch(ctx, &plan, confirm, sink);
                 // 修过信封就如实标注在回执最前面（模型与用户都能看到核心没有瞎猜）
                 let annotate = |outcome: ToolOutcome| -> ToolOutcome {
                     match repaired.as_deref() {

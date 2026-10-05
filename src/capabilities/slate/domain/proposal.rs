@@ -41,6 +41,7 @@ fn merged(picks: Vec<Pick>) -> Pick {
             transient: true,
             modules,
             model,
+            permissions: Default::default(),
         },
         why: why.join("；"),
     }

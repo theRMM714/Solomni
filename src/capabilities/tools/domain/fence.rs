@@ -14,13 +14,21 @@ use std::path::PathBuf;
 pub struct FenceSpec {
     /// 该 agent 的实例名（日志与审计用）。
     pub agent: String,
-    /// 可读可写的根：本次工作共享区 + 该 agent 私有沙箱 + 它自己的模块目录。
+    /// 可读可写的根：本次工作共享区（若这一席可写）+ 该 agent 私有沙箱 + 已授权的模块目录 + 模块 `userdata/`。
     pub rw: Vec<PathBuf>,
     /// 只读的根：**用户显式授权**的额外可达范围（默认空）。
     /// 只读位由各平台机制落实（Landlock 只读位 / seatbelt `file-read*` / Windows `RIGHTS_RO`），
     /// 且**必须授给该 agent 自己的容器身份**，不能像解释器基线那样授给共享组（那等于把用户数据开放给机器上任意容器）。
     #[serde(default)]
     pub ro: Vec<PathBuf>,
+    /// 只读**子树**（递归可读 + 可列目录）：模块目录默认只读时进这里。
+    /// 与 `ro` 分开的理由：Windows 上用户授权的 `ro` 不递归（用户可能授很大的目录），
+    /// 而模块目录必须递归可读（工具脚本就在目录里），两者落成不同的 ACL。
+    #[serde(default)]
+    pub ro_tree: Vec<PathBuf>,
+    /// 该 agent 私有沙箱：工具进程 HOME / TEMP 的落点（空 = 退回 cwd）。
+    #[serde(default)]
+    pub private: PathBuf,
     /// 工具进程的工作目录（它所属模块的根目录）。
     pub cwd: PathBuf,
     /// 是否放行出站网络（默认否）。
@@ -33,17 +41,31 @@ impl FenceSpec {
         // 共享主副本只有在**这一席可写**时才进 rw：agent 会话默认只读，
         // 于是模块外部工具进程也读不到 / 写不了未拉取进沙箱的主副本内容。
         let mut rw = Vec::new();
+        let mut ro_tree = Vec::new();
         if sb.shared_writable {
             rw.push(sb.shared.clone());
         }
         rw.push(sb.private.clone());
-        rw.extend(sb.modules.values().cloned());
+        // 模块目录默认**只读**：只有 module_write 命中该模块才整块可写；
+        // 无论哪种情况，<module>/userdata/ 都保持可写（模块自己的跨任务状态区）。
+        for (id, root) in &sb.modules {
+            if sb.permissions.module_write_ok(id) {
+                rw.push(root.clone());
+            } else {
+                ro_tree.push(root.clone());
+                rw.push(root.join("userdata"));
+            }
+        }
         rw.sort();
         rw.dedup();
+        ro_tree.sort();
+        ro_tree.dedup();
         FenceSpec {
             agent: sb.agent.clone(),
             rw,
             ro: Vec::new(),
+            ro_tree,
+            private: sb.private.clone(),
             cwd: PathBuf::new(),
             net,
         }

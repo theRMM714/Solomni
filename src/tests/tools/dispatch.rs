@@ -242,6 +242,7 @@ pub(crate) fn tool_call_event_is_emitted_before_the_next_round() {
             llm: Default::default(),
             cancel: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             emit: &mut emit,
+            approval: None,
         };
         core.single_say(&sid, "跑一下", &mut live).unwrap();
     }

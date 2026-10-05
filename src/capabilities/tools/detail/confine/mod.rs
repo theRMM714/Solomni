@@ -432,7 +432,11 @@ pub fn fence_env(spec: &FenceSpec) -> Vec<(OsString, OsString)> {
 impl FenceSpec {
     /// 该 agent 的私有沙箱（没有就退回工作目录）——环境里的 HOME / TEMP 落点。
     pub fn private_or_cwd(&self) -> PathBuf {
-        self.rw.get(1).cloned().unwrap_or_else(|| self.cwd.clone())
+        if self.private.as_os_str().is_empty() {
+            self.cwd.clone()
+        } else {
+            self.private.clone()
+        }
     }
 }
 
@@ -451,6 +455,8 @@ mod tests {
     fn selfcheck_injection_switch_reports_env_unavailable() {
         let spec = FenceSpec {
             agent: "a".to_string(),
+            private: PathBuf::new(),
+            ro_tree: Vec::new(),
             rw: vec![PathBuf::from("demo").join("work")],
             cwd: PathBuf::from("mods").join("m0"),
             ro: Vec::new(),
@@ -546,6 +552,8 @@ mod tests {
     fn fence_job_round_trips_and_rejects_incomplete_json() {
         let spec = FenceSpec {
             agent: "a".to_string(),
+            private: PathBuf::new(),
+            ro_tree: Vec::new(),
             rw: vec![PathBuf::from("demo").join("work")],
             cwd: PathBuf::from("mods").join("m0"),
             ro: Vec::new(),
@@ -562,6 +570,8 @@ mod tests {
         // 没有台账可落是合法形态（探针），所以 home 允许缺省；prepared 缺了才报错。
         let bare = FenceSpec {
             agent: "b".to_string(),
+            private: PathBuf::new(),
+            ro_tree: Vec::new(),
             rw: vec![PathBuf::from("demo").join("work")],
             cwd: PathBuf::from("mods").join("m1"),
             ro: Vec::new(),

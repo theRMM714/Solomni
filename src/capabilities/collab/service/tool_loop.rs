@@ -133,16 +133,75 @@ pub(crate) fn is_parallel(ctx: &MemberTools, module: Option<&str>, name: &str) -
     }
 }
 
+/// 一次待用户确认的工具调用：工具名 + 所属模块（内置/核心自有为空）+ 参数原文。
+pub struct ToolConfirm {
+    pub module: Option<String>,
+    pub tool: String,
+    pub args: String,
+}
+
+/// 工具级确认的回调：`(待确认调用, 事件出口) -> 是否放行`（实现方阻塞等用户回答）。
+pub type ConfirmFn<'a> = &'a mut dyn FnMut(&ToolConfirm, &mut dyn FnMut(SessionEvent)) -> bool;
+
+/// 这次调用的候选名字（用于比对 `ask` 表）：内置与核心自有工具用工具名；
+/// 模块工具同时接受"工具名"与"模块.工具"（省略 module 且只有唯一模块时也按模块名兜底）。
+fn ask_candidates(ctx: &MemberTools, module: Option<&str>, tool: &str) -> Vec<String> {
+    if crate::capabilities::tools::api::is_builtin(tool) || handler_for(ctx, tool).is_some() {
+        return vec![tool.to_string()];
+    }
+    match module {
+        Some(m) => vec![tool.to_string(), format!("{}.{}", m, tool)],
+        None if ctx.modules.len() == 1 => {
+            let m = ctx.modules.keys().next().cloned().unwrap_or_default();
+            vec![tool.to_string(), format!("{}.{}", m, tool)]
+        }
+        None => vec![tool.to_string()],
+    }
+}
+
+/// 这次调用要不要先问用户（按这一席的生效权限：`full` 一律不问；`ask` 命中才问）。
+fn needs_ask(ctx: &MemberTools, module: Option<&str>, tool: &str) -> bool {
+    ask_candidates(ctx, module, tool)
+        .iter()
+        .any(|n| ctx.sandbox.permissions.should_ask(n))
+}
+
 /// 执行一批调用：**连续**声明可并发的合成一批并发跑，其余各自独占；结果按**原始下标**返回。
 /// 原生通道与手写信封通道共用这一处调度——并发策略只有一份，两个通道不会各写一套。
 /// 账本走分支副本 + 按原序合并（与串行执行等价，见 crate::capabilities::tools::api::Observations::absorb）。
+/// **要问用户的调用强制串行**：先经 `confirm` 拿到是/否，拒绝就回一条"用户拒绝"的结果、不执行。
 pub(crate) fn run_batch(
     ctx: &mut MemberTools,
     plan: &[(Option<String>, String, String)],
+    confirm: ConfirmFn<'_>,
+    sink: &mut dyn FnMut(SessionEvent),
 ) -> Vec<(String, ToolOutcome)> {
     let mut done: Vec<Option<(String, ToolOutcome)>> = (0..plan.len()).map(|_| None).collect();
     let mut i = 0;
     while i < plan.len() {
+        if needs_ask(ctx, plan[i].0.as_deref(), &plan[i].1) {
+            let (module, tool, args) = &plan[i];
+            let req = ToolConfirm {
+                module: module.clone(),
+                tool: tool.clone(),
+                args: args.clone(),
+            };
+            let allowed = confirm(&req, sink);
+            done[i] = Some(if allowed {
+                run_one(ctx, module.as_deref(), tool, args)
+            } else {
+                let label = module.clone().unwrap_or_default();
+                (
+                    label,
+                    ToolOutcome {
+                        ok: false,
+                        output: ctx.sandbox.texts.tool_denied_by_user.clone(),
+                    },
+                )
+            });
+            i += 1;
+            continue;
+        }
         if is_parallel(ctx, plan[i].0.as_deref(), &plan[i].1) {
             let mut j = i;
             while j < plan.len() && is_parallel(ctx, plan[j].0.as_deref(), &plan[j].1) {

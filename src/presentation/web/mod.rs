@@ -437,6 +437,13 @@ pub(crate) fn route(
             };
             let text = str_field(&req, "text");
             let agent = str_field(&req, "agent");
+            // 工具级确认：回答在等的工具放行（"是 / 否"）。与「停止」一样**不进命令队列**——
+            // 生成期间工作线程正等在放行表上，走队列会等到生成结束。
+            if action == "approve" {
+                let ok = req.get("ok").and_then(|v| v.as_bool()).unwrap_or(false);
+                let answered = ops.sessions.approve(&sid, ok);
+                return ok_json(json!({ "ok": true, "answered": answered }));
+            }
             // 配置界面：提交编辑（「生成中不许改」的守卫在 `Conductor::edit_session` 里）。
             if action == "edit" {
                 let edit = match serde_json::from_value::<SessionEdit>(req.clone()) {
@@ -659,6 +666,8 @@ pub(crate) fn route(
                 tier: current.tier,
                 fence_write: current.fence_write,
                 fence_read: current.fence_read.clone(),
+                // 会话权限的全局默认：界面暂未暴露，改设置保留现值（改 yaml 或后续界面）。
+                permissions: current.permissions.clone(),
                 qemu_path: current.qemu_path.clone(),
                 llm_timeout_secs: req
                     .get("llm_timeout_secs")

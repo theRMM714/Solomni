@@ -644,6 +644,11 @@ impl Conductor {
             shared: roots.shared.clone(),
             private: roots.shared.clone(),
             modules: BTreeMap::new(),
+            // 代理会话：用户选这一形态就是**不确认任何工具**（full）；路径权限沿用全局默认。
+            permissions: crate::capabilities::permission::api::Permissions {
+                granularity: crate::capabilities::permission::api::Granularity::Full,
+                ..self.registry.app().permissions.clone()
+            },
             texts: self.prompt.tools(),
         };
         let channel = self.registry.core_channel();

@@ -341,6 +341,8 @@ fn main() {
     let ops = capabilities::conductor::api::Ops::from_handle(&handle);
 
     if web {
+        // 有网页前端在，工具级确认才有地方被回答（纯终端同步生成不能空等）。
+        handle.allow_tool_approval();
         serve_web(ops, port_flag(&args), allow_fence_write);
     } else {
         // CLI 里输入 webui 可直接转入 Web，无需重启进程（能力面可克隆，两份呈现共用同一个核心）。
@@ -349,6 +351,7 @@ fn main() {
             match presentation::cli::run(ops.clone(), presentation::web::DEFAULT_PORT) {
                 presentation::cli::CliExit::Exit => break,
                 presentation::cli::CliExit::Web(port) => {
+                    handle.allow_tool_approval();
                     serve_web(ops.clone(), port, allow_fence_write);
                 }
             }

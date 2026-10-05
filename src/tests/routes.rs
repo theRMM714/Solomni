@@ -182,6 +182,7 @@ impl SessionOps for FakeOps {
                 name: "甲".to_string(),
                 modules: vec!["m".to_string()],
                 model: String::new(),
+                permissions: None,
             }],
             tier: "host".to_string(),
             base: None,
@@ -234,6 +235,9 @@ impl SessionOps for FakeOps {
     }
     fn stop(&self, _sid: &str) -> bool {
         self.running.swap(false, Ordering::Relaxed)
+    }
+    fn approve(&self, _sid: &str, _ok: bool) -> bool {
+        false
     }
     fn is_running(&self, _sid: &str) -> bool {
         self.running.load(Ordering::Relaxed)

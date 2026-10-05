@@ -32,9 +32,6 @@ pub struct ProcTools {
     pub timeout: Duration,
     /// 回传给模型/轨迹的输出上限（字符数）。
     pub max_output_chars: usize,
-    /// Windows：已经授权过的 (SID, 路径, 权限) 台账（避免每次工具调用重复改目录 ACL）。
-    #[cfg(windows)]
-    pub prepared: std::sync::Mutex<std::collections::BTreeSet<String>>,
 }
 
 impl ProcTools {
@@ -59,8 +56,6 @@ impl ProcTools {
             texts,
             timeout: Duration::from_secs(30),
             max_output_chars: 16_000,
-            #[cfg(windows)]
-            prepared: std::sync::Mutex::new(std::collections::BTreeSet::new()),
         }
     }
 }
@@ -75,7 +70,7 @@ impl ToolRunner for ProcTools {
             use std::sync::atomic::Ordering;
             let mut prepared = false;
             if self.write_allowed.load(Ordering::Relaxed) {
-                match confine::prepare_fence(fence, command, &self.prepared, &self.home) {
+                match confine::prepare_fence(fence, command, &self.home) {
                     Ok(()) => prepared = true,
                     Err(e) => eprintln!("[围栏] 授权未完成（{}）：本次按无围栏执行", e),
                 }
@@ -286,6 +281,8 @@ mod tests {
         let private = PathBuf::from("demo").join("agent-a");
         let spec = FenceSpec {
             agent: "a".to_string(),
+            private: private.clone(),
+            ro_tree: Vec::new(),
             rw: vec![PathBuf::from("demo").join("work"), private.clone()],
             cwd: PathBuf::from("mods").join("m0"),
             ro: Vec::new(),
@@ -482,6 +479,8 @@ mod tests {
     fn spec_for(dir: &Path) -> FenceSpec {
         FenceSpec {
             agent: "proc".to_string(),
+            private: PathBuf::new(),
+            ro_tree: Vec::new(),
             rw: vec![dir.to_path_buf()],
             cwd: dir.to_path_buf(),
             ro: Vec::new(),

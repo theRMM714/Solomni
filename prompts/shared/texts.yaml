@@ -24,6 +24,12 @@ tool_texts:
   roots_private: "- 你私有的沙箱：{{root}}"
   roots_module: "- 模块 {{id}} 的目录：{{root}}"
   write_shared_read_only: "共享区只读：改动请写进你自己的沙箱（工作副本），再用 work_commit 提交。"
+  # —— 会话权限（permission 能力）：白名单/黑名单与模块只读的模型侧拒绝说明 ——
+  write_scope_denied: "写权限受限：{{path}} 不在允许提交的路径内（允许：{{roots}}）。"
+  read_scope_denied: "读权限受限：{{path}} 不在允许读取的路径内（允许：{{roots}}）。"
+  module_write_denied: "模块 {{id}} 的目录默认只读：改模块要先由用户在会话权限里授权（<module>/userdata/ 除外）。"
+  # 工具级确认（granularity=ask）：用户点了"否"，工具不执行——这条随 [工具结果] 进模型上下文。
+  tool_denied_by_user: "用户没有放行这次工具调用：它**没有执行**。请换一种做法，或请用户调整会话权限（ask / full）。"
   # 内置工具回执（systool）
   bad_args_json: "参数不是合法 JSON：{{error}}"
   # 参数不符（由 builtin_tools 的声明判定；why 说事实，signature 是工具签名，模型照着改）

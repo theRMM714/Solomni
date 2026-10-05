@@ -35,16 +35,19 @@
   scope: global
   level: T4
   why: |
-    「垂直分工开发」要求一个 agent 只写自己负责的目录，但当前围栏的可写范围是**整个本次工作共享区**
-    `work/`（加该 agent 的私有沙箱与它自己的模块目录），所有 agent 对共享区都可写——"谁改哪一块"
-    因此只是约定，不是机制保证。PRODUCT.md 已把它写成开发方向，所以需要可判定的验收路径。
+    「垂直分工开发」要求一个 agent 只写自己负责的目录。**已落地**（核心层）：共享工作区的读 / 提交作用域
+    （内置读写在落点之后过白黑名单；`work_commit` / `work_pull` 越界整条拒绝）；模块目录**默认只读**
+    （`module_write` 授权才整块可写，`userdata/` 恒可写）；私有沙箱永远全权；围栏按同一份派生授权
+    （模块根进 `ro_tree` 递归只读，工作目录只读，写权只来自 `rw`）。
+    缺的是**三平台真机探针的 CI 结论**：本机是 drvfs 环境，Landlock 对"允许的根"的写也报 Permission denied
+    （干净 HEAD 同样失败，属既有环境限制），本地跑不出可判定的写结论。
   how: |
-    1) `.home/settings.yaml` 为每个 agent 增加一组可写路径（缺省 = `work/`）；
-    2) 平台后端按这份清单授权（Windows 走 `confine::grant_targets` 的目录 ACL，Linux/macOS 走规则文本）；
-    3) `tests/windows/`、`tests/linux/`、`tests/macos/` 各加一条探针：A agent 写自己目录成功、
-       写 B 的目录**被机制拒绝**（不是工具层拒绝）。
-  accept: 三平台探针各一条"跨 agent 目录写被机制拒绝"通过；不给该清单时行为与今天一致。
-  blocked_by: 缺少实现
+    1) 探针已加：`tests/linux/`、`tests/macos/` 的 `module_dir_is_read_only_but_userdata_is_writable`；
+       既有的 `shared_area_is_outside_the_agent_fence` 钉"跨 agent 不可达"；
+    2) Windows：`confine/windows/tests.rs` 的 `grant_targets_keep_module_read_only_and_cwd_read_only` 钉 ro_tree 递归只读、cwd 只读；
+    3) 推 CI 后按 `docs/testing/execution-ci.md` 核对三平台 `sha`，确认这些探针通过。
+  accept: 三平台 CI 上「模块目录写被机制拒绝 + userdata 可写 + 跨 agent 不可达」探针全过；未配置时行为与今天一致。
+  blocked_by: 待三平台 CI 验证（本机环境跑不出写结论）
 
 - id: module.external-harness-fence-reach
   scope: global
@@ -74,26 +77,23 @@
   accept: 声明了独立入口的模块能不经 AI 直接跑通一次；没声明的模块在列表里如实标注"只能经 AI 使用"。
   blocked_by: 缺少实现
 
-- id: permission.management
+- id: permission.approval-answer-paths
   scope: global
-  level: T2
+  level: T5
   why: |
-    **权限管理**是独立于会话的一类能力：它回答的是「谁能在本机、在哪些路径上做什么」，
-    不是「代理模式的一部分」。
-    它包含两块必须**一起**做的东西（共用同一份权限状态与同一处校验）：
-    1) **决定粒度**：核心代用户决定到哪一步。今天是两个刻度——**完全代理**（用户选代理形态 = 整块托付）
-    与**询问**（核心拿不准就回主对话问用户，即其余形态今天的口径）；将来可能还有别的粒度。
-    这里**没有"撤销"这个概念**：粒度是设置，不是把已给的权力收回来。
-    2) **额外路径权限**：按 agent / 会话设定额外的可写与只读路径（今天只有本次工作的 work/ 与各 agent
-    私沙箱，见 fence.per-agent-write-roots）。
+    工具级确认（`granularity: ask`）的核心与网页正常路径已落地：工具循环执行前查生效权限，命中 `ask` 表
+    就登记进 `kernel` 的放行表并阻塞，用户在网页上点"是 / 否"（`session.act` 的 `approve`，不经命令队列）唤醒。
+    还缺两条回答路径：
+    ① **纯终端（CLI）**：CLI 同步驱动，生成线程停下来等确认时，主线程既在等它返回、又读不到键盘——
+       所以 CLI 不开启确认（照常执行），否则会死等；
+    ② **网页刷新后**：确认卡是短暂 `Decision` 事件，快照的 `pending` 在生成期间拿不到（会话正被工作线程持有），
+       刷新就只剩「停止」，看不到"是 / 否"。
   how: |
-    定义一份可落盘、可回放的**权限状态**（决定粒度、范围、有效期、调用者身份、额外读写路径），
-    在动作执行前统一校验；粒度变化即时生效（改成询问就回到问用户）；路径权限落到各平台围栏的实现
-    （Windows 目录 ACL、Linux / macOS 规则文本），未配置时行为与今天一致。
-  accept: |
-    决定粒度可在完全代理与询问之间按会话（或更细的粒度）设置并即时生效：完全代理时核心自行决定，
-    询问时回到问用户；额外读写路径按设置对指定 agent 生效；未设置时行为与今天一致。
-  blocked_by: 缺少实现
+    1) CLI：把生成放到后台线程，主线程并发读 stdin；收到确认卡时打印提示并读一行，调 `SessionOps::approve`；
+    2) 网页刷新：把当前待确认的调用存进 `ApprovalRegistry` 的格，并向快照暴露（会话视图带上它），
+       前端据此在刷新后重建卡片。
+  accept: 终端里 `granularity=ask` 的会话能打印并回答确认；网页在等待确认期间刷新仍能看到卡片并回答；未配置时行为与今天一致。
+  blocked_by: 缺少实现（CLI 与刷新后的回答路径）
 
 - id: work.commit-history-ui
   scope: global
@@ -107,3 +107,23 @@
     3) 回滚要留可回放的记录，并与回档标记模型对齐（提交锚见 docs/session/session-model.md 的五）。
   accept: 用户能在界面上看到提交历史，并把共享区回滚到任一提交点；回滚后新开的 agent 拉取到的是那一点的内容。
   blocked_by: 缺少实现（呈现面未接入）
+
+- id: actions.single-call-language
+  scope: global
+  level: T5
+  why: |
+    项目承诺「双门同源」（PHILOSOPHY.md 的目标承诺 2 与判据）：一个能力，人直接执行它、
+    agent 经契约调用它，用的是同一份声明。该承诺目前只在**模块**上成立；核心自己的动作
+    （建会话、确认关卡、停止/继续、回档、改需求、设置）仍是两套词汇与两处授权——用户侧是
+    Action / Ops 与前端按钮，agent 侧是 systools/tools.yaml 的系统工具，同一语义因此有两条实现
+    （例如建会话的 create_work 与 proxy_create）。
+  how: |
+    1) 把工具总表推广成**动作表**：每条动作同时声明参数契约与 callers（user / 角色）；
+    2) 动作分发归 conductor（它已拥有 Action）；模型侧 ToolHandler 与呈现侧 Ops 命令各做一个适配器；
+    3) 参数校验、授权（带 caller 身份）、执行、审计各只有一处；
+    4) 一个声明两种呈现：模型侧文本、UI 侧结构化；读取/视图与事件流保持独立，不塞进动作；
+    5) 以 module.standalone-entry 作为第一个验收场景：用户不经 AI 直接调用模块工具。
+  accept: |
+    至少「建会话」与「一个模块工具」两个动作，在 CLI 与 Web 上由用户调用、在会话里由 agent 调用，
+    走同一份声明、同一处授权、同一条审计记录；两侧呈现不同而事实同源；用户不经 AI 能直接用模块工具。
+  blocked_by: 缺少实现

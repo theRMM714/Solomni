@@ -24,7 +24,7 @@
 
 ```text
 session/<工作名>/
- meta.yaml          # 身份与选型：形态、agent 名单、模块与模型、需求、执行档位（exec 段）
+ meta.yaml          # 身份与选型：形态、agent 名单（含各自的权限覆盖 permissions）、模块与模型、需求、执行档位（exec 段）
  transcript.jsonl   # 事件流水（留档只追加 rewind；删除 / 恢复整体重写）
  work/              # 本次工作的共享区**主副本**：用户投喂与成品（整棵树只有顶层这一个，agent 只读）
  .work/             # 共享区版本库：内容寻址对象、提交记录、各 agent 的拉取基线（保留名）
@@ -43,6 +43,8 @@ session/<工作名>/
   各 agent 沙箱也建在它下面；实例名因此在**整棵子树**里唯一（重名自动带尾号，见 registry 的命名策略）。
 - **共享区是版本化工作区**：主副本 `work/` 与版本库 `.work/` 都锚在顶层工作上；agent 只写自己的沙箱，
   `work_pull` / `work_commit` 与主副本同步（文件级三方比较），`work_status` 看状态。
+- **逐 agent 的权限覆盖**写在 `meta.yaml` 的 `agents[].permissions`（读/提交白名单、黑名单、模块写授权、决定粒度）：
+  只覆盖显式给出的字段，缺省继承 `settings.yaml` 的全局默认；语义见 [docs/permission/README.md](../permission/README.md)。
 - 侧栏**可见**：agent 会话挂在主会话下（`meta.parent`），用户可进入查看与发言干预。
 - 侧栏顺序是**树序**，由核心给出（父会话紧跟它的子会话，深度优先、各自按时间倒序）：
   顺序与缩进是同一件事的两面，各排各的就会出现"子会话排在父会话上面"的错位。

@@ -10,7 +10,6 @@
 
 use super::{shell_command, Capability, FenceVerdict, FENCE_FAILED};
 use crate::capabilities::tools::api::FenceSpec;
-use std::collections::BTreeSet;
 use std::ffi::c_void;
 
 mod acl;
@@ -115,12 +114,7 @@ pub(crate) const PROFILE_PREFIX: &str = "Solomni.Agent.";
 
 /// 外层进程调用：把围栏要用的授权一次性做好（按 (SID, 路径, 权限) 去重，不重复改 ACL）。
 /// 授权落点只有两处：共享区/私有沙箱/模块目录（读写）、解释器安装目录（只读+执行）。
-pub fn prepare_fence(
-    spec: &FenceSpec,
-    command: &str,
-    prepared: &std::sync::Mutex<BTreeSet<String>>,
-    home: &Path,
-) -> Result<(), String> {
+pub fn prepare_fence(spec: &FenceSpec, command: &str, home: &Path) -> Result<(), String> {
     let mut result = Ok(());
     // 这一轮真正写下去的授权（用于如实打印足迹 + 落台账，供 --fence-clean 精确回收）。
     let mut written: Vec<(String, PathBuf, u32)> = Vec::new();
@@ -152,13 +146,13 @@ pub fn prepare_fence(
     let sid = container_sid(&container_name(spec))?;
     let todo = grant_targets(spec);
     for (path, rights, recursive, inherit) in todo {
-        let key = format!("{:?}|{}|{}", sid, path.to_string_lossy(), rights);
-        if prepared.lock().expect("授权表锁").contains(&key) {
+        // 跳过条件看**实际 ACE**而不是内存缓存：权限收窄并撤权后，下一次 prepare 必须能把仍需要的授权补回来，
+        // 否则「撤权 + 重授」会留下"缓存说已授、ACE 已撤"的空洞（扩根时被缓存吞掉）。
+        if has_ace_for(sid, &path, rights) {
             continue;
         }
         match grant_one(sid, &path, rights, recursive, inherit) {
             Ok(()) => {
-                prepared.lock().expect("授权表锁").insert(key);
                 written.push((sid_to_string(sid), path.clone(), rights));
             }
             Err(e) => {

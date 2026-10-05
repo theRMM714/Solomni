@@ -74,9 +74,8 @@ impl RunState {
 }
 
 /// 任务级委托：代理模式下，真实用户把决定权**整块**交给核心（全权）。
-/// 本轮不做范围/期限/撤销——它只是一个存在标志与授予时间；
-/// 范围/期限/决定粒度与额外路径权限一起属独立的**权限管理**能力（与某个会话本身无关）
-/// （属独立的**权限管理**能力：见 tests/gaps.yaml 的 permission.management）。
+/// 它只是一个存在标志与授予时间；范围 / 期限 / 决定粒度与额外路径权限归独立的
+/// **权限管理**能力（`capabilities/permission/`，与某个会话本身无关）。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Delegation {
     /// 授予时间（Unix 秒）：授予由真实用户在建工作时完成。
@@ -112,6 +111,10 @@ pub struct AgentMeta {
     pub modules: Vec<String>,
     #[serde(default)]
     pub model: Option<String>,
+    /// 该 agent 的**权限覆盖**（白/黑名单、模块写授权、决定粒度；只覆盖显式给出的字段）。
+    /// 缺省 = 继承 settings.yaml 的全局默认。见 docs/permission/README.md。
+    #[serde(default)]
+    pub permissions: crate::capabilities::permission::api::PermissionsOverride,
 }
 
 /// 历史列表条目。

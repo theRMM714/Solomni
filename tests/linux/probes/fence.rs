@@ -1,7 +1,7 @@
 //! Landlock 探针：真机验收本平台的文件系统围栏——允许的根里写得进，根之外读不到。
 //! 驱动方式与运行期完全一致：交给守门进程（本程序 --fence-run）去装围栏。
 
-use crate::probe::{job_json, run_launcher, scratch};
+use crate::probe::{job_json, job_json_tree, run_launcher, scratch};
 
 /// 与 src/capabilities/tools/detail/confine/linux.rs 的 RULES_REJECTED_MARK 一致（集成测试看不到 crate 内部）。
 /// 自检已确认本机 Landlock 有效，却仍装不上 = 我们的规则写错了；
@@ -212,4 +212,53 @@ fn shared_area_is_outside_the_agent_fence() {
         "共享区不该被工具进程直接读：{}",
         ro
     );
+}
+
+/// **模块目录默认只读**（策略层把模块根放进 `ro_tree`、只把 `userdata/` 放进 `rw`）：
+/// 模块代码写不进、目录读得到、`userdata/` 写得进。
+#[test]
+fn module_dir_is_read_only_but_userdata_is_writable() {
+    let module = scratch("fence-module");
+    let userdata = module.join("userdata");
+    std::fs::create_dir_all(&userdata).unwrap();
+    let script = module.join("script.py");
+    std::fs::write(&script, "print(1)\n").unwrap();
+    // 运行期形态：rw = [userdata]，ro_tree = [模块根]，cwd = 模块根。
+    let spec = job_json_tree(
+        std::slice::from_ref(&userdata),
+        std::slice::from_ref(&module),
+        &module,
+        false,
+    );
+    let (_, _, err) = run_launcher(&spec, "true");
+    if err.contains(RULES_REJECTED_MARK) {
+        panic!(
+            "本机 Landlock 机制有效，但规则装不上（规则写错，不是环境不允许）：{}",
+            err.trim()
+        );
+    }
+    if err.contains("文件系统围栏未生效") {
+        eprintln!(
+            "[探针] 本机 Landlock 不产生实际约束（环境结论，如实跳过，不作为通过）：{}",
+            err.trim()
+        );
+        return;
+    }
+    // 模块代码写不进。
+    let (code, _out, werr) = run_launcher(&spec, &format!("echo x > {}", script.display()));
+    assert_ne!(code, Some(0), "模块目录默认只读：{}", werr);
+    // 模块目录读得到（ro_tree 递归可读的对照）。
+    let (rc, rout, rerr) = run_launcher(&spec, &format!("cat {}", script.display()));
+    assert!(
+        rout.contains("print(1)"),
+        "模块目录要读得到：code={:?} out={} err={}",
+        rc,
+        rout,
+        rerr
+    );
+    // userdata 写得进（对照：不是整条围栏坏了）。
+    let ok = userdata.join("state.json");
+    let (ocode, _oout, oerr) = run_launcher(&spec, &format!("echo ok > {}", ok.display()));
+    assert!(ok.exists(), "userdata 要写得进：{}", oerr);
+    assert_eq!(ocode, Some(0), "{}", oerr);
 }

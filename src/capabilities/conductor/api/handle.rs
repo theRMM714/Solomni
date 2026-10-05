@@ -17,6 +17,8 @@ impl ConductorHandle {
     pub fn spawn(core: Conductor) -> Result<ConductorHandle, String> {
         let worker_log = core.log_handle();
         let jobs = JobRegistry::new();
+        let approvals = crate::kernel::api::ApprovalRegistry::new();
+        let approval_enabled = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let bus = EventBus::new();
         let (tx, rx) = mpsc::channel::<Job>();
         let book = core.systools_book();
@@ -24,6 +26,8 @@ impl ConductorHandle {
         let handle = ConductorHandle {
             tx,
             jobs,
+            approvals,
+            approval_enabled,
             bus,
             log: Arc::clone(&worker_log),
             book,
@@ -66,6 +70,12 @@ impl ConductorHandle {
             .map_err(|_| "核心无回应：命令执行中发生 panic，或核心线程已停止".to_string())?
     }
 
+    /// 打开工具级确认：有交互前端（Web）在服务时才调，纯终端不调（生成线程不能空等一个没人回答的问题）。
+    pub fn allow_tool_approval(&self) {
+        self.approval_enabled
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+
     /// 本核心的事件台（多端订阅）。
     pub fn events(&self) -> Arc<EventBus> {
         Arc::clone(&self.bus)
@@ -79,6 +89,8 @@ impl ConductorHandle {
         let tree = self.call(move |core| Ok(core.subtree_of(&root_owned)))?;
         let mut stopped = Vec::new();
         for sid in tree {
+            // 停止也要解掉在等的工具确认，否则生成线程会一直等下去（wait 返回 None = 拒绝）。
+            self.approvals.cancel(&sid);
             if self.jobs.stop(&sid) {
                 stopped.push(sid);
             }
@@ -211,6 +223,10 @@ impl ConductorHandle {
         };
         bus.push(sid, std::slice::from_ref(&start_working));
         // ② 工作线程：跑生成。短暂事件（流式增量 / 工具行）直送事件台——它是独立锁，不进核心队列。
+        let approvals = Arc::clone(&self.approvals);
+        let approval_enabled = self
+            .approval_enabled
+            .load(std::sync::atomic::Ordering::Relaxed);
         let worker = {
             let sid = sid.to_string();
             let bus = Arc::clone(&bus);
@@ -229,6 +245,9 @@ impl ConductorHandle {
                         llm,
                         cancel,
                         emit: &mut emit,
+                        approval: approval_enabled.then(|| {
+                            crate::kernel::api::ApprovalCtx::new(Arc::clone(&approvals), &sid)
+                        }),
                     };
                     // 逐轮外送 + 边落盘：一轮跑完就上屏并落盘（中途刷新页面因此看得到已产生的部分）。
                     // seq 取**最后一次**入台的序号：命令回包按它给订阅起点。
@@ -358,6 +377,10 @@ impl ConductorHandle {
         let bus = Arc::clone(&self.bus);
         let child_bus = Arc::clone(&self.bus);
         let child_sid = child.clone();
+        let approvals = Arc::clone(&self.approvals);
+        let approval_enabled = self
+            .approval_enabled
+            .load(std::sync::atomic::Ordering::Relaxed);
         let joined = std::thread::Builder::new()
             .name("solomni-member".to_string())
             .spawn(move || {
@@ -374,6 +397,9 @@ impl ConductorHandle {
                     llm,
                     cancel: Arc::clone(&cancel),
                     emit: &mut emit,
+                    approval: approval_enabled.then(|| {
+                        crate::kernel::api::ApprovalCtx::new(Arc::clone(&approvals), &child_sid)
+                    }),
                 };
                 // 权威行与通知也进它自己的台，并在产出的当下落盘（重建与实时同源）。
                 let mut sink = |ev: crate::capabilities::session::api::SessionEvent| {

@@ -211,6 +211,9 @@ pub trait SessionOps: Send + Sync {
     /// 停止：把整棵子树落成 `stopped`（拦住后续派发与唤醒）并中断正在跑的生成；
     /// 返回是否确实中断了一个在跑的生成。「继续」（`continue_flow`）是它的逆操作。
     fn stop(&self, sid: &str) -> bool;
+    /// 工具级确认的回答：`ok` = 是 / 否。**不进命令队列**（生成期间也要立刻生效）；
+    /// 返回是否确实有一个调用在等确认。
+    fn approve(&self, sid: &str, ok: bool) -> bool;
     #[allow(dead_code)]
     fn is_running(&self, sid: &str) -> bool;
     /// **在世会话 × 历史的并集**（界面上的会话列表）：只有会话中心同时知道两边，所以归这里。
@@ -272,6 +275,10 @@ type Job = Box<dyn FnOnce(&mut Conductor) + Send>;
 pub struct ConductorHandle {
     tx: Sender<Job>,
     jobs: Arc<JobRegistry>,
+    /// 工具级确认的放行表：工作线程登记并等待，核心线程（或呈现层）回答。与 jobs 同级，**不进队列**。
+    approvals: Arc<crate::kernel::api::ApprovalRegistry>,
+    /// 有没有"能回答确认"的交互前端（Web 在服务时打开）。纯终端同步生成不打开，避免生成线程空等。
+    approval_enabled: Arc<std::sync::atomic::AtomicBool>,
     bus: Arc<EventBus>,
     /// 日志句柄：呈现层经 LogOps 能力写日志，拿不到这个端口对象本身。
     log: Arc<dyn crate::kernel::ports::Log + Send + Sync>,
@@ -496,6 +503,10 @@ pub struct ConfigAgent {
     pub modules: Vec<String>,
     #[serde(default)]
     pub model: String,
+    /// 该 agent 的**权限覆盖**（白/黑名单、模块写授权、决定粒度）：只覆盖显式给出的字段。
+    /// `None` = 这次编辑没提供权限（**保留现值**）；`Some` = 替换。缺省=保留，避免界面上改模块把权限改没。
+    #[serde(default)]
+    pub permissions: Option<crate::capabilities::permission::api::PermissionsOverride>,
 }
 
 /// 会话配置视图（配置界面用）：身份与冻结标记 + 可改项 + 运行能力事实。

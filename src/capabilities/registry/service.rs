@@ -277,6 +277,8 @@ impl Registry for RegistryService {
     }
 
     fn set_app_settings(&mut self, app: AppSettings) -> Result<(), String> {
+        // 不合法就如实拒绝，不把坏的权限（绝对路径 / ..）落进登记处。
+        crate::capabilities::permission::api::validate(&app.permissions)?;
         self.settings.app = app;
         self.save("registry::set_app_settings")
     }

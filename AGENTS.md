@@ -173,6 +173,7 @@
 | `collab`（协作会话） | `docs/collab/README.md` | `module-map.md`、`task-chain.md` |
 | `session`（会话） | `docs/session/README.md` | `module-map.md`、`session-model.md` |
 | `tools`（工具与围栏） | `docs/tools/README.md` | `module-map.md`、`tools-and-roles.md` |
+| `permission`（权限） | `docs/permission/README.md` | `module-map.md` |
 | `llm`（模型通道与协议） | `docs/llm/README.md` | `module-map.md` |
 | `registry`（登记处） | `docs/registry/README.md` | `module-map.md` |
 | `workspace`（工作区与运行包） | `docs/workspace/README.md` | `module-map.md` |

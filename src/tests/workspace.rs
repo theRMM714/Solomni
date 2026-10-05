@@ -634,6 +634,7 @@ pub(crate) fn vm_tier_is_refused_when_the_machine_cannot_carry_it() {
                     name: "a".to_string(),
                     modules: vec!["a".to_string()],
                     model: String::new(),
+                    permissions: None,
                 }],
                 tier: "vm".to_string(),
                 base: Some("definitely-not-a-real-base-root".to_string()),
@@ -1221,6 +1222,6 @@ pub(crate) fn agent_sandboxes_from_a_work_are_read_only_for_the_shared_area() {
     let sandboxes = core.sandboxes(&meta, &roster).unwrap();
     let sb = sandboxes.list.first().expect("至少一个 agent 沙箱");
     assert!(!sb.shared_writable, "生产里 agent 沙箱默认只读共享区");
-    let (place, _) = sb.resolve(&p(&["w", "work", "x.txt"])).unwrap();
-    assert!(!sb.can_write(&place));
+    let (place, path) = sb.resolve(&p(&["w", "work", "x.txt"])).unwrap();
+    assert!(!sb.can_write(&place, &path));
 }

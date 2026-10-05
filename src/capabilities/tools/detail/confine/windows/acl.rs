@@ -217,7 +217,7 @@ pub(crate) fn interpreter_dirs(command: &str) -> Vec<PathBuf> {
 pub(crate) fn grant_targets(spec: &FenceSpec) -> Vec<(PathBuf, u32, bool, bool)> {
     let mut todo: Vec<(PathBuf, u32, bool, bool)> = Vec::new();
     let mut leaves: Vec<(PathBuf, u32, bool, bool)> = Vec::new();
-    for root in spec.rw.iter().chain(std::iter::once(&spec.cwd)) {
+    for root in &spec.rw {
         if !root.as_os_str().is_empty() {
             leaves.push((root.clone(), RIGHTS_RW, true, true));
         }
@@ -229,6 +229,17 @@ pub(crate) fn grant_targets(spec: &FenceSpec) -> Vec<(PathBuf, u32, bool, bool)>
         if !root.as_os_str().is_empty() {
             leaves.push((root.clone(), RIGHTS_RO, false, true));
         }
+    }
+    // 只读**子树**（模块目录默认只读）：必须递归可读（工具脚本在目录里），所以 recursive + inherit。
+    for root in &spec.ro_tree {
+        if !root.as_os_str().is_empty() {
+            leaves.push((root.clone(), RIGHTS_RO, true, true));
+        }
+    }
+    // 工作目录（模块根）：工具进程要能在里面起（读 + 执行），但**不因此获得写**。
+    // 已授权可写的模块同时也在 rw 里，那一条（更早入列）给的写权才是准的。
+    if !spec.cwd.as_os_str().is_empty() {
+        leaves.push((spec.cwd.clone(), RIGHTS_RO, true, true));
     }
     // 父目录：只读属性、不递归、**不继承**（元组末位是继承标志）。同一个父目录被多个叶子共用时
     // 靠调用方的去重表收口。不继承是为了把残留面收敛到父目录本身：带 (OI)(CI)

@@ -67,9 +67,14 @@ pub fn execute(
         Ok(x) => x,
         Err(e) => return fail(e),
     };
-    // 共享主副本对 agent 只读：写类工具在**寻址之后**如实拒绝（读仍然可以）。
-    if matches!(name, WRITE | EDIT) && !sb.can_write(&place) {
-        return fail(sb.shared_read_only());
+    // 写类工具先过写权限（共享主副本是否可写 + 路径白黑名单 + 模块目录只读）；
+    // 读类工具过读权限（只对共享主副本生效；私有沙箱与模块目录照旧可读）。
+    if matches!(name, WRITE | EDIT) {
+        if !sb.can_write(&place, &path) {
+            return fail(sb.write_refusal(&place, &path));
+        }
+    } else if matches!(name, READ | LIST | SEARCH) && !sb.can_read(&place, &path) {
+        return fail(sb.read_refusal(&place, &path));
     }
     match name {
         READ => read(sb, io, obs, &args, &spec, &path),
@@ -502,8 +507,8 @@ fn apply_patch(sb: &Sandbox, io: &dyn SysIo, obs: &mut Observations, body: &str)
             Ok(x) => x,
             Err(e) => return fail(block_fault(texts, n, e)),
         };
-        if !sb.can_write(&place) {
-            return fail(block_fault(texts, n, sb.shared_read_only()));
+        if !sb.can_write(&place, &path) {
+            return fail(block_fault(texts, n, sb.write_refusal(&place, &path)));
         }
         // 同一个文件被前面的块改过：以后面算出来的内容为准（不能回到盘上的旧内容）
         let source: Option<(String, bool, bool)> = match pending.get(&path) {
