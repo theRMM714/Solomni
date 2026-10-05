@@ -22,8 +22,9 @@ impl Conductor {
         roster: &crate::capabilities::workspace::api::Roster,
     ) -> Result<crate::capabilities::workspace::api::Sandboxes, String> {
         let names: Vec<String> = meta.agents.iter().map(|a| a.name.clone()).collect();
-        // 沙箱锚在**工作**上：子会话与父会话共用一套工作区（见 SessionMeta::work）。
-        let roots = self.workspace.roots(meta.work(), &names)?;
+        // 沙箱锚在**顶层工作**上：整棵树不论嵌套多少层只有一个 work/（见 Conductor::work_root）。
+        let work = self.work_root_of(meta)?;
+        let roots = self.workspace.roots(&work, &names)?;
         let mut list: Vec<crate::capabilities::workspace::api::Sandbox> = Vec::new();
         for a in &meta.agents {
             let private = roots
@@ -38,8 +39,10 @@ impl Conductor {
                 }
             }
             list.push(crate::capabilities::workspace::api::Sandbox {
-                work_name: meta.work().to_string(),
+                work_name: work.clone(),
                 agent: a.name.clone(),
+                // 共享主副本对 agent **只读**：写入走 work_commit（见 PRODUCT.md 的版本化工作区）。
+                shared_writable: false,
                 shared: roots.shared.clone(),
                 private,
                 modules,
@@ -65,6 +68,9 @@ impl Conductor {
         // 这一席的身份：用户建的单 agent 会话 = solo，协作子会话 = executor（见 systools/roles.yaml）。
         role: &str,
     ) -> crate::capabilities::session::api::MemberTools {
+        // 角色表发放的系统工具 id 清单（工具面的名字部分）；核心自有工具按它决定装不装。
+        let allowed = self.role_tools(role);
+        let handlers = self.work_handlers(sb, &allowed);
         crate::capabilities::session::api::MemberTools {
             mode,
             modules: crate::capabilities::session::api::tool_table(modules),
@@ -82,12 +88,34 @@ impl Conductor {
                 .with_read_only(self.fence_read_roots()),
             // 从零开始；按落盘转录重建时由调用方按转录里的最大值续号（见 rebuild_session）。
             reply_seq: 0,
+            line: Default::default(),
             // 这一席的系统工具面**由角色表发放**（越权校验的唯一判据）：给什么写什么，代码里不留第二份名单。
-            allowed: self.role_tools(role),
+            allowed,
             // 能不能用自己模块的工具、以及工具说明块的素材：都按角色表与这个 agent 的模块装配期算好。
             with_modules: self.systools.allows_module_tools(role),
             notes: crate::capabilities::tools::api::tool_notes(&*self.prompt, sb, modules),
+            handlers,
         }
+    }
+
+    /// 核心自有的**共享区版本化**工具执行者：只在角色面确实发到它们时才装。
+    /// 与代理工具同一套路：成员循环只问"谁认领这个名字"，核心自有工具不是循环里的特例。
+    fn work_handlers(
+        &self,
+        sb: &crate::capabilities::workspace::api::Sandbox,
+        allowed: &[String],
+    ) -> Vec<Arc<dyn crate::kernel::ports::ToolHandler>> {
+        use crate::capabilities::conductor::domain::work as dw;
+        if !allowed.iter().any(|t| dw::is_work_tool(t)) {
+            return Vec::new();
+        }
+        vec![Arc::new(
+            crate::capabilities::conductor::service::work_tools::WorkHandler::new(
+                Arc::clone(&self.workspace),
+                &sb.work_name,
+                &sb.agent,
+            ),
+        )]
     }
 
     /// 一轮内对同一个成员最多提醒几次（用户可设，见 session-model.md 二）。
@@ -149,8 +177,9 @@ impl Conductor {
             ),
         );
         // **会话参数**：身份块每回合由它现渲染（不存进消息列表）。
-        let params =
-            crate::capabilities::session::api::SessionParams::from_workspace(&a.name, sb, modules);
+        let params = crate::capabilities::session::api::SessionParams::from_workspace(
+            &a.name, sb, modules, "single", "solo",
+        );
         // 单 agent 工作：用户自己开的那场对话（不是任务链的节点）——身份是 solo。
         let tools = self.tools_env(modules, sb, unavailable, net, mode, "solo");
         let mut s = crate::capabilities::session::api::AgentSession::new(

@@ -43,6 +43,10 @@ impl Conductor {
                 mode: match mode {
                     WorkMode::Single => crate::capabilities::slate::api::Mode::Single,
                     WorkMode::Collab => crate::capabilities::slate::api::Mode::Collab,
+                    // 代理形态没有名单可拟（核心自己挑人）；如实拒绝，不拿单模式的清单糊弄。
+                    WorkMode::Proxy => {
+                        return Err("代理形态没有名单：决定权整块交给核心，由它自己挑人".to_string())
+                    }
                 },
                 chat: chat.as_mut(),
                 tool_mode: self.registry.tool_mode(None),
@@ -180,7 +184,7 @@ impl Conductor {
         child: &str,
         objective: &str,
     ) -> Result<Prepared, String> {
-        // 节点的生成跟随设置里的流式开关（此前写死非流式，节点执行在界面上永远不逐字出）。
+        // 节点的生成跟随设置里的流式开关。
         let llm = self.llm_opts(true);
         self.ensure_session(child)?;
         if matches!(self.sessions.get(child), Some(Session::Collab(_))) {
@@ -344,8 +348,9 @@ impl Conductor {
             l.kind == "user" && l.verb == "需求"
         })
         .ok_or("该会话没有需求行")?;
-        // 回档语义是「保留 id < keep」：需求行本身要留下（旧需求留在流水里），所以传 keep + 1。
-        let mut out = self.rewind(sid, keep + 1)?;
+        // 回档语义是「保留 id < keep」：需求行本身要留下（新需求随后追加），所以传 keep + 1。
+        // 改需求走**删除**模式：真的截掉旧需求之后的派生，再按新需求重新展开。
+        let mut out = self.rewind(sid, RewindTarget::Delete(keep + 1))?;
         let mut fresh = Vec::new();
         {
             let s = self.sessions.get_mut(sid).ok_or("无此会话")?;

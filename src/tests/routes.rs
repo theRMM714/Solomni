@@ -8,7 +8,8 @@ use crate::capabilities::conductor::api::{
 };
 use crate::capabilities::conductor::api::{
     AgentSuggestion, ConfigAgent, FilesAgentView, FilesRootsView, FilesView, Pending,
-    RuntimeReport, SessionConfig, SessionEdit, SessionView, WorkMode, WorkOpened, WorkSpec,
+    RuntimeReport, SessionConfig, SessionEdit, SessionView, TierChoices, WorkMode, WorkOpened,
+    WorkSpec,
 };
 use crate::capabilities::registry::api::AgentView;
 use crate::capabilities::registry::api::RegistryOps;
@@ -106,6 +107,8 @@ fn meta(name: &str) -> SessionMeta {
         exec: crate::capabilities::workspace::api::ExecSpec::default(),
         parent: None,
         node: None,
+        delegation: None,
+        run: crate::capabilities::session::api::RunState::Active,
     }
 }
 
@@ -153,7 +156,11 @@ impl SessionOps for FakeOps {
         self.guard()?;
         Ok(crate::capabilities::conductor::api::Advance { head: 0 })
     }
-    fn rewind(&self, _sid: &str, _keep_id: u64) -> Result<Vec<serde_json::Value>, String> {
+    fn rewind(
+        &self,
+        _sid: &str,
+        _target: crate::capabilities::conductor::api::RewindTarget,
+    ) -> Result<Vec<serde_json::Value>, String> {
         self.guard()?;
         Ok(vec![json!({ "type": "line", "line": "重放" })])
     }
@@ -214,6 +221,7 @@ impl SessionOps for FakeOps {
                 work: "/w/work".to_string(),
                 agents: Vec::new(),
             },
+            usage: Default::default(),
         })
     }
     fn unique_work_name(&self, _base: &str, fallback: &str) -> Result<String, String> {
@@ -244,6 +252,7 @@ impl SessionOps for FakeOps {
                 tier_missing: Vec::new(),
                 running: false,
                 can_update_task: h.mode == "collab",
+                run: h.run.as_str().to_string(),
                 pending: None,
             })
             .collect())
@@ -393,6 +402,7 @@ impl HistoryOps for FakeOps {
             done: false,
             exec: Default::default(),
             parent: None,
+            run: crate::capabilities::session::api::RunState::Active,
         }])
     }
     fn open(&self, name: &str) -> Result<(SessionMeta, Vec<serde_json::Value>), String> {
@@ -419,6 +429,15 @@ impl ConductorOps for FakeOps {
     fn runtime_report(&self, _tier: Tier) -> Result<RuntimeReport, String> {
         self.guard()?;
         Ok(report())
+    }
+    fn tier_choices(&self) -> Result<TierChoices, String> {
+        self.guard()?;
+        Ok(TierChoices {
+            default: "host".to_string(),
+            vm_available: false,
+            vm_unavailable_reason: "guest 本体尚未接入".to_string(),
+            vm_requirements: Vec::new(),
+        })
     }
     fn suggest_models(&self, _task: &str, _mode: WorkMode) -> Result<Vec<AgentSuggestion>, String> {
         self.guard()?;
@@ -989,6 +1008,7 @@ fn success_shapes_are_pinned_per_route() {
         ),
         ("POST", "/api/agents/%E7%94%B2/remove", "", 200, "\"ok\""),
         ("GET", "/api/settings", "", 200, "\"settings\""),
+        ("GET", "/api/tiers", "", 200, "\"tiers\""),
         ("POST", "/api/settings", "{}", 200, "\"ok\""),
         ("GET", "/api/history", "", 200, "\"sessions\""),
         ("GET", "/api/history/w1", "", 200, "\"meta\""),
@@ -1031,4 +1051,24 @@ fn success_shapes_are_pinned_per_route() {
             route.method, route.pattern
         );
     }
+}
+
+/// 传输**可中断**：中断判据一置位，服务器主循环立刻返回（"Ctrl+C 回 CLI"的机制在这里）。
+#[test]
+fn web_serve_returns_when_interrupted() {
+    use std::time::{Duration, Instant};
+    let ops = fake_ops(None);
+    let stop = Arc::new(AtomicBool::new(false));
+    let s2 = Arc::clone(&stop);
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(100));
+        s2.store(true, Ordering::SeqCst);
+    });
+    let started = Instant::now();
+    let r = web::serve_until(&ops, 0, &fence(), &stop);
+    assert!(r.is_ok(), "{:?}", r);
+    assert!(
+        started.elapsed() < Duration::from_secs(3),
+        "收到中断要立刻返回，而不是阻塞到出错"
+    );
 }

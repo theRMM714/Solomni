@@ -1,5 +1,6 @@
 //! 核心（应用服务）测试：跨能力编排——核心推荐、核心操作载荷、会话中心与生成驱动。
 //! 归属判据：钉的是**应用服务的不变式**（会话中心与编排）；其余按能力落各自的文件。
+mod proxy;
 use super::builders::*;
 use super::prelude::*;
 
@@ -182,7 +183,11 @@ pub(crate) fn rewinding_the_main_session_truncates_agent_sessions_by_turn() {
         "回档前 agent 会话该有更晚的回合：{before:?}"
     );
 
-    core.rewind(&sid, line_id + 1).unwrap();
+    core.rewind(
+        &sid,
+        crate::capabilities::conductor::api::RewindTarget::Delete(line_id + 1),
+    )
+    .unwrap();
 
     let (_, after) = core.history_open(&child).unwrap();
     let max_after = lines_of(&after)
@@ -370,7 +375,12 @@ pub(crate) fn prose_then_tool_envelope_keeps_prose_line_and_rebuilds_identically
         Arc::clone(&hist),
         Arc::clone(&io),
     );
-    core2.rewind(&sid, 4).unwrap(); // 保留全部 4 行
+    core2
+        .rewind(
+            &sid,
+            crate::capabilities::conductor::api::RewindTarget::Delete(4),
+        )
+        .unwrap(); // 保留全部 4 行
     let rebuilt = core2.single_history(&sid).expect("重建后应在内存里");
     let key = |h: &[Msg]| {
         h.iter()
@@ -441,7 +451,7 @@ pub(crate) fn tool_envelope_after_prose_runs_and_json_never_shows() {
 }
 
 /// 一次回复里的**多个**原生调用：实时历史与重建历史必须逐条一致（含 tool_calls 与 tool_call_id）。
-/// 这就是原先不一致的那条：实时只推第一条调用的回执、第二条起什么都不推，重建却每条都推。
+/// 钉住这一条：实时与重建都要**每条调用各推一条回执**，不能实时只推第一条、重建却每条都推。
 #[test]
 pub(crate) fn native_multi_call_rebuilds_identically_to_live() {
     use crate::capabilities::llm::api::ToolCall;
@@ -506,7 +516,12 @@ pub(crate) fn native_multi_call_rebuilds_identically_to_live() {
     );
     core2.registry_mut().probe_model_tools("m").expect("探测");
     let rows = transcript_rows(&events).len() as u64;
-    core2.rewind(&sid, rows).unwrap();
+    core2
+        .rewind(
+            &sid,
+            crate::capabilities::conductor::api::RewindTarget::Delete(rows),
+        )
+        .unwrap();
     let rebuilt = core2.single_history(&sid).unwrap();
     let key = |h: &[Msg]| {
         h.iter()

@@ -49,6 +49,8 @@ fn meta(name: &str) -> SessionMeta {
         exec: ExecSpec::default(),
         parent: None,
         node: None,
+        delegation: None,
+        run: crate::capabilities::session::api::RunState::Active,
     }
 }
 
@@ -108,6 +110,107 @@ fn fs_workspace_builds_the_real_layout_and_lists_only_files() {
         none.work.is_empty() && !sessions.join("没这个会话").exists(),
         "查询不该有副作用"
     );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// 用量按区统计：文件数与**真实字节**（删除前如实交代用），空工作区不是错误。
+#[test]
+fn fs_workspace_reports_usage_by_area() {
+    let root = scratch("fs-workspace-usage");
+    let sessions = root.join("session");
+    let ws = FsWorkspace::new(sessions.clone());
+    ws.prepare("w", &["a".to_string()]).expect("建目录");
+    ws.write_work("w", "note.txt", "你好".as_bytes())
+        .expect("投喂");
+    std::fs::write(sessions.join("w").join("a").join("out.bin"), [0u8; 5]).expect("写产物");
+    let u = ws.usage("w", &["a".to_string()]).expect("统计用量");
+    assert_eq!(u.files, 2);
+    assert_eq!(u.bytes, "你好".len() as u64 + 5);
+    assert_eq!(u.work.files, 1);
+    assert_eq!(u.work.bytes, "你好".len() as u64);
+    assert_eq!(u.agents["a"].files, 1);
+    assert_eq!(u.agents["a"].bytes, 5);
+    let empty = ws.usage("没这个会话", &[]).expect("统计不存在的会话不报错");
+    assert_eq!(empty.files, 0, "查询不该有副作用");
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+// ---------- FsWorkStore ----------
+
+/// 真实版本库：文件原语 + 内容寻址对象 / 提交 / head / 基线往返；**符号链接逃逸必须被拒**。
+#[test]
+fn fs_work_store_round_trips_and_refuses_symlink_escapes() {
+    use crate::capabilities::workspace::detail::fs_workstore::FsWorkStore;
+    use crate::capabilities::workspace::domain::workstore::{Change, ChangeKind, Commit, Index};
+    use crate::capabilities::workspace::ports::WorkStore;
+
+    let root = scratch("fs-workstore");
+    let shared = root.join("work");
+    let sandbox = root.join("a");
+    let store = root.join(".work");
+    std::fs::create_dir_all(&shared).expect("建共享区");
+    std::fs::create_dir_all(&sandbox).expect("建沙箱");
+    let s = FsWorkStore::new();
+
+    // 空仓库不是错误。
+    assert_eq!(s.head(&store).unwrap(), None);
+    assert!(s.list(&shared).unwrap().is_empty());
+    assert!(s.read_index(&store, "a").unwrap().is_empty());
+    assert!(s.read_commit(&store, 1).unwrap().is_none());
+    assert!(s.read_object(&store, "nope").is_err());
+
+    // 文件原语：写要建父目录，读不到 = None，删除幂等，列目录相对 / 分隔。
+    assert_eq!(s.read_under(&sandbox, "sub/out.txt").unwrap(), None);
+    s.write_under(&sandbox, "sub/out.txt", b"hi").unwrap();
+    assert_eq!(
+        s.read_under(&sandbox, "sub/out.txt").unwrap().as_deref(),
+        Some(&b"hi"[..])
+    );
+    assert_eq!(s.list(&sandbox).unwrap(), vec!["sub/out.txt"]);
+    s.remove_under(&sandbox, "sub/out.txt").unwrap();
+    s.remove_under(&sandbox, "sub/out.txt").unwrap();
+    assert_eq!(s.read_under(&sandbox, "sub/out.txt").unwrap(), None);
+
+    // 对象 / 提交 / head / 拉取基线。
+    s.write_object(&store, "h1", b"obj").unwrap();
+    assert_eq!(s.read_object(&store, "h1").unwrap(), b"obj");
+    let mut tree = std::collections::BTreeMap::new();
+    tree.insert("a/b.txt".to_string(), "h1".to_string());
+    let c = Commit {
+        id: 1,
+        parent: None,
+        author: "a".to_string(),
+        session: "w--a".to_string(),
+        time: 1,
+        message: "首提交".to_string(),
+        changes: vec![Change {
+            path: "a/b.txt".to_string(),
+            kind: ChangeKind::Add,
+            hash: "h1".to_string(),
+        }],
+        tree,
+        anchor: None,
+    };
+    s.write_commit(&store, &c).unwrap();
+    s.set_head(&store, 1).unwrap();
+    assert_eq!(s.head(&store).unwrap(), Some(1));
+    assert_eq!(s.list_commits(&store).unwrap(), vec![1]);
+    assert_eq!(s.read_commit(&store, 1).unwrap().unwrap(), c);
+    let mut idx = Index::new();
+    idx.insert("a/b.txt".to_string(), "h1".to_string());
+    s.write_index(&store, "a", &idx).unwrap();
+    assert_eq!(s.read_index(&store, "a").unwrap(), idx);
+
+    // 符号链接逃逸：根外的目录被链接进沙箱，写它必须被拒（绝不写进根外）。
+    #[cfg(unix)]
+    {
+        let outside = root.join("outside");
+        std::fs::create_dir_all(&outside).expect("建根外目录");
+        std::os::unix::fs::symlink(&outside, sandbox.join("link")).expect("造链接");
+        let err = s.write_under(&sandbox, "link/pwn.txt", b"x").unwrap_err();
+        assert!(err.contains("符号链接") || err.contains("越过"), "{}", err);
+        assert!(!outside.join("pwn.txt").exists(), "绝不能写进根外");
+    }
     let _ = std::fs::remove_dir_all(&root);
 }
 
@@ -191,6 +294,64 @@ fn fs_history_roundtrips_lists_deletes_and_rejects_broken_meta() {
     assert!(h.delete("w1").expect("删除成功"), "删除已存在的会话 = true");
     assert!(!h.delete("w1").expect("再删"), "重复删除 = false，不是错误");
     assert!(h.load("w1").unwrap_err().contains("无此会话"));
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// 子会话落在**父会话目录内部**（`session/<父>/children/<子>`）：位置与 meta.parent 同源。
+/// 嵌套可以任意深（代理的子会话里还能有它自己的子会话）：整棵 children/ 树都要能找到、列出、删净。
+#[test]
+fn fs_history_nests_children_inside_their_parent_dir() {
+    let root = scratch("fs-history-children");
+    let h = FsHistory::new(root.clone());
+    let mut parent = meta("p");
+    parent.mode = "collab".to_string();
+    h.create(&parent).expect("建父会话");
+    let mut child = meta("p--甲");
+    child.parent = Some("p".to_string());
+    h.create(&child).expect("建子会话");
+    // 第二层：子会话自己的子会话（代理建的协作子工作会派生节点子会话）。
+    let mut grand = meta("p--甲--乙");
+    grand.parent = Some("p--甲".to_string());
+    h.create(&grand).expect("建孙会话");
+    h.append("p--甲", &[serde_json::json!({"type": "say", "text": "hi"})])
+        .expect("子会话流水");
+    h.append(
+        "p--甲--乙",
+        &[serde_json::json!({"type": "say", "text": "yo"})],
+    )
+    .expect("孙会话流水（按名字在任意深度定位）");
+    assert!(
+        root.join("p")
+            .join("children")
+            .join("p--甲")
+            .join("meta.yaml")
+            .is_file(),
+        "子会话落在父会话目录内部"
+    );
+    assert!(
+        root.join("p")
+            .join("children")
+            .join("p--甲")
+            .join("children")
+            .join("p--甲--乙")
+            .join("meta.yaml")
+            .is_file(),
+        "子会话可以再嵌套：children/ 树任意深"
+    );
+    assert!(!root.join("p--甲").exists(), "不再与父会话并列");
+    let listed = h.list().expect("列会话");
+    assert_eq!(listed.len(), 3, "祖父子都在清单里（深层也要收进来）");
+    assert_eq!(
+        h.load("p--甲--乙")
+            .expect("按名字读孙会话")
+            .0
+            .parent
+            .as_deref(),
+        Some("p--甲")
+    );
+    assert!(h.delete("p").expect("删父会话"), "删父 = 删一个目录");
+    assert!(!root.join("p").exists());
+    assert!(h.load("p--甲--乙").is_err(), "整棵子树随父一起消失");
     let _ = std::fs::remove_dir_all(&root);
 }
 
@@ -490,6 +651,23 @@ fn role_face_comes_from_the_role_table() {
     }
 }
 
+/// 目录保留名来自仓库自带的名字表（不在代码里硬编码）：布局固定的目录都必须在册。
+#[test]
+fn names_table_lists_directory_reserved_names() {
+    let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let st = YamlSystools::new(root.join("systools"))
+        .load()
+        .expect("读三张表");
+    for want in ["work", "children"] {
+        assert!(
+            st.reserved_names.iter().any(|n| n == want),
+            "名字表里该有 {}：{:?}",
+            want,
+            st.reserved_names
+        );
+    }
+}
+
 /// 两张表必须自洽：悬空引用 / 缺能力都会被挡下（不靠人看）。
 #[test]
 fn system_tools_and_roles_are_self_consistent() {
@@ -523,6 +701,54 @@ fn system_tools_and_roles_are_self_consistent() {
             .any(|p| p.contains("不存在的系统工具")),
         "悬空引用必须被挡下：{:?}",
         broken.problems()
+    );
+}
+
+/// 机制册必须与两张表自洽：**会话使用类型**在册、**适用角色**在角色表里；
+/// 而且真实会话路径（类型 × 角色）都拿得到机制说明——对应关系是数据，这里只校验不写死。
+#[test]
+fn mechanism_book_matches_session_kinds_and_roles() {
+    let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let st = YamlSystools::new(root.join("systools"))
+        .load()
+        .expect("读系统工具与角色");
+    let prompts = YamlPrompts::new(root.join("prompts"))
+        .load()
+        .expect("读提示词册");
+    let kinds = &prompts.core.session_kinds;
+    let role_ids: Vec<&String> = st.roles.keys().collect();
+    assert!(!prompts.core.mechanisms.is_empty(), "机制册不能为空");
+    for m in &prompts.core.mechanisms {
+        assert!(
+            kinds.iter().any(|k| k == &m.session),
+            "会话使用类型不在全表里：{}",
+            m.session
+        );
+        assert!(!m.roles.is_empty(), "一条机制至少要有一个适用角色");
+        for r in &m.roles {
+            assert!(role_ids.contains(&r), "适用角色不在角色表里：{}", r);
+        }
+    }
+    for (kind, role) in [
+        ("single", "solo"),
+        ("collab", "discussant"),
+        ("collab", "executor"),
+        ("proxy", "core_proxy"),
+    ] {
+        assert!(
+            !prompts.core.mechanisms_for(kind, role).trim().is_empty(),
+            "{} × {} 没有机制说明",
+            kind,
+            role
+        );
+    }
+    assert!(
+        prompts
+            .core
+            .mechanisms_for("single", "core_proxy")
+            .trim()
+            .is_empty(),
+        "类型与角色对不上就不发"
     );
 }
 

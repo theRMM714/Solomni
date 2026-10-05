@@ -185,7 +185,186 @@ tools:
         non_empty: true
         desc: 要留下的摘要：结论、决定、待办、关键路径——丢掉细节，留下"以后还要用的"。
 
-  # —— 协作动词：讨论阶段的表态（声明式工具，不再是"从正文里解析手写信封"）——
+  # —— 核心代理（core_proxy）：核心代用户建会话、转达、观察与控制 ——
+  # 真实会话宿主已落地：外部动作经 conductor 的 ProxyHost 端口，生产实现是 service/proxy.rs 的队列桥
+  catalog_agents:
+    capability: none              # 不碰文件：只读登记处与模块清单
+    desc: 读取当前有效的 agent、模块与模型的公开登记信息（只读）。不返回密钥、真实私有路径或无关内容。
+    parallel: true                # 只读、无副作用：同一回复里的多个读取可以并发跑
+    params:
+      scope:
+        type: string
+        required: true
+        non_empty: true
+        desc: 要读的范围：agents（已存 agent）/ modules（模块公地）/ models（可用模型）/ all（全部）
+  create_session:
+    capability: none              # 不碰文件：建的是会话，不是路径
+    desc: |
+      建一个代理子会话并**写它的开头**（mode=single 单 agent / multi 多 agent 协作）：**建好就开工**——
+      single 立刻以这份开头干活（等于替用户说第一句），multi 以它作为**本次需求**并开始讨论。
+      会话落在父会话目录的 children/ 下、与父共用同一个 work/。授权与父会话由机制提供，不接受模型自授；
+      创建失败不留半成品；同一个 request_id 重放不会重复创建、也不会重复开工。
+    params:
+      mode:
+        type: string
+        required: true
+        non_empty: true
+        desc: single（一个 agent）或 multi（多 agent 协作，至少两个）
+      agents:
+        type: array
+        required: true
+        desc: |-
+          agent 数组（只写**身份**，不写任务）：复用登记处的 {"ref":"已存agent名"}，
+          或临时组装 {"name":"新名字","modules":["模块id"],"model":"模型id"}——`modules` 可省略或为空：
+          零模块 agent 只用内建文件工具（读写、搜索）。
+          **model 填 catalog_agents 回的 `id`（不是 `name`）**；同一模块不得出现在两个 agent 里。
+      opening:
+        type: string
+        required: true
+        non_empty: true
+        desc: |-
+          这个会话的**开头**：single 是它的第一句（用户的需求 / 你代他派的那句话），multi 是本次需求。
+          写完就开工，不需要再发一次 send_session_message。
+      request_id:
+        type: string
+        required: true
+        non_empty: true
+        desc: 幂等标识：同一个 request_id 重放不会重复创建
+  send_session_message:
+    capability: none              # 不碰文件：转达的是消息
+    desc: |
+      代替用户向子会话转达消息（后续补充 / 返工 / 代答门）。核心转达的每一条都留一条
+      "由核心代理转达"的来源记录（不冒充用户原话）；多目标逐个回报成功与失败。
+    params:
+      targets:
+        type: array
+        required: true
+        desc: 目标会话 id 数组；多目标时逐个回报成功与失败，不产生未记录的隐式发送
+      message:
+        type: string
+        required: true
+        non_empty: true
+        desc: 要转达的内容
+      kind:
+        type: string
+        required: true
+        non_empty: true
+        desc: task（派任务）/ user_reply（代答）/ follow_up（补充）/ review（审查意见）/ rework（返工要求）
+      request_id:
+        type: string
+        required: true
+        non_empty: true
+        desc: 幂等标识：同一个 request_id 重放不会重复发送
+  observe_session:
+    capability: none              # 不碰文件：只读会话事实
+    desc: |
+      只读观察一个子会话的元信息（状态 / 待决问题 / 产物索引 / 消息条数），不隐式启动下一轮。
+      **不回消息正文**：正文一律用 read_session_messages 主动倒查（子会话不把整份转录推给你）。
+    parallel: true                # 只读、无副作用
+    params:
+      session_id:
+        type: string
+        required: true
+        non_empty: true
+        desc: 要观察的会话 id
+      view:
+        type: string
+        required: true
+        non_empty: true
+        desc: status（状态 + 消息条数）/ pending（待决问题）/ artifacts（产物索引）/ full（全部，仍不含消息正文）
+      since:
+        type: string
+        desc: 上次观察拿到的 cursor（= 那条会话的消息条数）；给了就多回一个 new_messages（自那次以来新增几条）。观察回执本身始终是**当前事实的幂等快照**，不会因为给了它而变增量
+  read_session_messages:
+    capability: none              # 不碰文件：只读会话消息
+    desc: |
+      倒查一个子会话的消息：0 = 最新一条，1 = 倒数第二条，依次向更早翻。只读，不推进会话。
+      需要看正文时用它，不要指望观察回执把整份转录带过来。
+    parallel: true                # 只读、无副作用
+    params:
+      session_id:
+        type: string
+        required: true
+        non_empty: true
+        desc: 要倒查的会话 id
+      from:
+        type: integer
+        min: 0
+        default: 0
+        desc: 距最新多少条；0 = 最新一条，1 = 倒数第二条，依次往更早
+      count:
+        type: integer
+        min: 1
+        max: 50
+        default: 10
+        desc: 本次取几条（1 到 50）；按新→旧排列
+  control_session:
+    capability: none              # 不碰文件：改的是会话生命周期
+    desc: 控制一个代理子会话：stop（停止：整棵子树落成已停止，拦住派发与唤醒，并中断在跑的生成）/ continue（继续：解冻并按形态唤醒接着走）/ close（关闭已完成或已停止的会话，终态）。
+    params:
+      session_id:
+        type: string
+        required: true
+        non_empty: true
+        desc: 要控制的会话 id
+      action:
+        type: string
+        required: true
+        non_empty: true
+        desc: stop / continue / close
+      reason:
+        type: string
+        required: true
+        non_empty: true
+        desc: 为什么做这个控制（会进可回放记录）
+      request_id:
+        type: string
+        required: true
+        non_empty: true
+        desc: 幂等标识：同一个 request_id 重放不会重复控制
+
+  # —— 共享区版本化工作区：agent 只写自己的沙箱，用 pull / commit 与主副本同步 ——
+  work_pull:
+    capability: none              # 由 workspace 能力执行（经核心自有工具的派发路径），不经 SysIo
+    desc: |
+      把本次工作共享区（主副本）的指定路径拉进**你自己的沙箱**（同一相对路径），并记下拉取基线。
+      路径以共享区为根、用 / 分隔；可以是文件，也可以是文件夹（整棵拉取）。
+      本地已改、上游也改过的路径**不会被覆盖**，会如实报冲突——先用 work_status 看状态。
+    params:
+      paths:
+        type: array
+        required: true
+        desc: 要拉取的路径数组（相对共享区、/ 分隔的字符串；文件夹会整棵展开）
+  work_commit:
+    capability: none              # 由 workspace 能力执行；共享区只有提交这一条写路径
+    desc: |
+      把沙箱里选中的文件提交回共享区。逐个路径做三方比较（你拉取时的基线 / 沙箱当前 / 共享区当前）：
+      任一条冲突 → **整个提交被拒**并逐条点名，绝不静默覆盖别的 agent 的改动。
+      要删除共享区里的文件，用 deletes 显式列出（不会因为沙箱里文件不见了就删）。
+    params:
+      paths:
+        type: array
+        desc: 要提交的路径数组（相对共享区、/ 分隔；文件夹会整棵展开为沙箱里的文件）
+      deletes:
+        type: array
+        desc: 要删除的共享区路径数组（相对共享区、/ 分隔）；删除必须显式列出
+      message:
+        type: string
+        required: true
+        non_empty: true
+        desc: 提交说明（一句话说清这次改了什么）
+  work_status:
+    capability: none              # 只读：不碰文件，读版本库与拉取基线
+    parallel: true                # 只读、无副作用：同一回复里的多个读取可以并发跑
+    desc: |
+      读取共享区的当前提交与路径清单，以及你的工作副本逐条状态
+      （未拉取 / 一致 / 本地有修改 / 上游有更新 / 冲突）。先看它再决定拉取或提交哪些路径。
+    params:
+      paths:
+        type: array
+        desc: 只看这些路径（相对共享区、/ 分隔）；省略 = 你已拉取过的全部路径
+
+  # —— 协作动词：讨论阶段的表态（声明式工具：声明在总表，由角色面按回合发放）——
   say:
     capability: none
     desc: 发表意见、提方案（讨论阶段的正常发言）。
@@ -218,4 +397,3 @@ tools:
         type: string
         required: true
         desc: 要问用户什么
-

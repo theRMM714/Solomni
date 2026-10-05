@@ -1,7 +1,7 @@
 # tools（工具与围栏）
 
 > 系统工具、角色表与一次工具执行的围栏。
-> 系统侧的门户是 [SYSTOOL.md](../../SYSTOOL.md)（工具、角色、路径模型、回报与验收）。
+> 系统侧的门户是 [SYSTOOL.md](../../SYSTOOL.md)（入口与真相源表）；本目录是它的细则。
 > 本目录是该单元的唯一细则入口：本页 → [`module-map.md`](module-map.md)（逐文件职责，机器比对）→ 其它细则。
 > 分层与依赖方向见 [ARCHITECTURE.md](../../ARCHITECTURE.md) §一，业务边界判据见 §九；测试规范见 [TESTING.md](../../TESTING.md)。
 
@@ -23,7 +23,7 @@
 ## 四、改动本单元时必须同步
 
 - 平台专属代码本地不编译——`FenceSpec` 字面量必须写全字段（跨平台字面量门禁）；改围栏 → `tests/<平台>/` 探针；改工具表 → `systools/` 与本目录 `tools-and-roles.md`。
-- 业务缺口账：`src/capabilities/tools/testgaps.yaml`——业务 AI **只记缺口、不写测试**，由测试 AI 实现测试并销账；格式见 [docs/testing/gaps-acceptance.md](../../docs/testing/gaps-acceptance.md) §十二。
+- 核心代理系统工具的待实现规划清单：`systool_gaps.yaml`（仓库根；不是当前工具表，也不替代测试缺口账）。
 
 ## 本目录
 

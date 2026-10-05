@@ -173,7 +173,11 @@ pub(crate) fn collab_delegated_roster_written_back_and_rebuilt_from_meta() {
     assert_eq!(meta.modules, vec!["a".to_string()]);
 
     // 回档（保留需求行）= 按 meta.agents 重建会话（协作走「按转录重建」这条路），再跑到交付。
-    core.rewind(&sid, 1).unwrap();
+    core.rewind(
+        &sid,
+        crate::capabilities::conductor::api::RewindTarget::Delete(1),
+    )
+    .unwrap();
     assert!(
         matches!(core.collab_pending(&sid), Ok(Some(Pending::ConfirmBegin))),
         "重建后仍等确认开始"
@@ -201,7 +205,7 @@ pub(crate) fn collab_delegated_roster_written_back_and_rebuilt_from_meta() {
 
 // ---------- 平衡提取器 ----------
 
-/// 讨论回合也要**逐片外送**（此前 Chunk 只用来当中止信号、内容全丢，界面整回合不动）。
+/// 讨论回合也要**逐片外送**：Chunk 的内容必须真的外送，否则界面整回合不动。
 #[test]
 pub(crate) fn discussion_turn_streams_deltas_and_never_leaks_the_envelope() {
     let seen = Arc::new(Mutex::new(Vec::new()));
@@ -331,7 +335,7 @@ pub(crate) fn core_collab_tool_modules_run_in_execution() {
 }
 // ---------- 运行包：契约、包库、诊断、执行计划 ----------
 
-/// 核心操作必须走**工具调用**：正文里手写 JSON 不再被接受（真机上它既无 schema 校验也不进工具台账）。
+/// 核心操作必须走**工具调用**：正文里手写 JSON 不再被接受（正文 JSON 既无 schema 校验也不进工具台账）。
 #[test]
 pub(crate) fn core_operations_require_a_tool_call_not_body_json() {
     let systools = test_systools();
@@ -373,8 +377,8 @@ pub(crate) fn core_operations_require_a_tool_call_not_body_json() {
 }
 
 /// **核心操作也要能先核实**：模型先发只读核实（read），核心执行并把结果回灌，
-/// 然后再要那一次核心操作调用（plan）。此前是单次调用——模型一想核实就被判"没有调用 plan"，
-/// 整步中断（真机上核心就是这么卡在多轮 `[中断] 没有调用 node_verdict` 上的）。
+/// 然后再要那一次核心操作调用（plan）。单次调用会让模型一想核实就被判"没有调用 plan"，
+/// 整步中断。
 #[test]
 pub(crate) fn core_operation_runs_readonly_verification_before_the_op() {
     let io = Arc::new(InMemorySysIo::new());
@@ -393,9 +397,11 @@ pub(crate) fn core_operation_runs_readonly_verification_before_the_op() {
         unavailable: BTreeMap::new(),
         fence: crate::capabilities::tools::api::FenceSpec::from_sandbox(&sb, false),
         reply_seq: 0,
+        line: Default::default(),
         allowed: vec!["read".to_string(), "plan".to_string()],
         with_modules: false,
         notes: crate::capabilities::tools::api::ToolNotes::default(),
+        handlers: Vec::new(),
     };
     // 第一轮：先核实（read）；第二轮：交出 plan。
     let seen = Arc::new(Mutex::new(Vec::new()));

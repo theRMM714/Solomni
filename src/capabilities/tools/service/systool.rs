@@ -67,6 +67,10 @@ pub fn execute(
         Ok(x) => x,
         Err(e) => return fail(e),
     };
+    // 共享主副本对 agent 只读：写类工具在**寻址之后**如实拒绝（读仍然可以）。
+    if matches!(name, WRITE | EDIT) && !sb.can_write(&place) {
+        return fail(sb.shared_read_only());
+    }
     match name {
         READ => read(sb, io, obs, &args, &spec, &path),
         WRITE => write(sb, io, obs, &args, &spec, &path, &place),
@@ -498,6 +502,9 @@ fn apply_patch(sb: &Sandbox, io: &dyn SysIo, obs: &mut Observations, body: &str)
             Ok(x) => x,
             Err(e) => return fail(block_fault(texts, n, e)),
         };
+        if !sb.can_write(&place) {
+            return fail(block_fault(texts, n, sb.shared_read_only()));
+        }
         // 同一个文件被前面的块改过：以后面算出来的内容为准（不能回到盘上的旧内容）
         let source: Option<(String, bool, bool)> = match pending.get(&path) {
             Some(t) => Some((t.clone(), false, false)),

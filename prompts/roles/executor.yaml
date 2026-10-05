@@ -7,4 +7,5 @@ execute:
     == 你的任务 ==
     {{tasks}}
 
+    产物写进你自己的沙箱、再用 work_commit 提交回共享区——核心验收在共享区里看，没提交的产物它看不到。
     做完用 submit_report 工具回报：summary 做了什么 / changes 动了什么 / open 遗留问题。

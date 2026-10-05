@@ -9,8 +9,8 @@
 //! 保证互斥，因此**不额外上锁**（见 ARCHITECTURE.md §一 的并发不变式）。
 
 pub use crate::capabilities::registry::domain::agents::{
-    listing, model_listing, resolve_picks, unique_instance_name, validate_name, AgentView, Agents,
-    RosterPick,
+    check_reserved, listing, model_listing, resolve_picks, unique_instance_name, validate_name,
+    AgentView, Agents, RosterPick,
 };
 pub use crate::capabilities::registry::domain::providers::{
     AppSettings, ModelEntry, ModelView, Provider, ProviderView, Settings,

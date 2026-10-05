@@ -18,7 +18,30 @@ impl Log for NoopLog {
     fn error(&self, _at: &str, _msg: &str) {}
 }
 
+use crate::kernel::domain::types::ToolOutcome;
 use std::path::Path;
+
+/// 一类工具的执行者：**按名字认领**，不靠“内置 / 模块”的两分法。
+/// 成员循环因此只问“这一回合的工具面里有没有它、谁认领它”，内置、模块与核心自有工具
+/// 走同一条派发路径——加一类工具不再改循环。为什么在 kernel：它是全项目共享的机制接口
+/// （R12 的例外），kernel 不认识任何业务。
+pub trait ToolHandler: Send + Sync {
+    /// 这个名字归不归我（只看名字；模块归属另由模块工具那条路判）。
+    fn owns(&self, name: &str) -> bool;
+    /// 跑一次调用；上下文见 `ToolCtx`。
+    fn run(&self, ctx: &ToolCtx, name: &str, args_json: &str) -> ToolOutcome;
+}
+
+/// 核心自有工具的执行上下文：这一席是谁、属于哪个工作、**提交锚在哪一行**。
+/// 行锚让共享区提交能按转录行精确定位，回档才能把共享区物化回那一刻。
+pub struct ToolCtx<'a> {
+    /// 顶层工作名（共享区与版本库的归属）。
+    pub work: &'a str,
+    /// 这一席的 agent 实例名。
+    pub agent: &'a str,
+    /// 下一条转录行的 id。
+    pub line: u64,
+}
 
 pub trait HostProbe: Send + Sync {
     /// 这个路径存在且是文件。

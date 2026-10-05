@@ -218,13 +218,18 @@ async function main() {
     await sleep(300);
     // 收尾回收：这次真机跑（--fence-live）写过目录 ACL、建过容器 profile，必须按台账撤干净，
     // 再按名字前缀扫掉整族遗留 profile。CI 机器是一次性的，但本地跑同样不许留痕。
-    // 回收失败只如实打印，不改判 e2e 的结论（结论由驱动断言决定）。
+    // 回收失败要改判 e2e：留下没人管的痕迹（孤儿 ACE 会把目录对受限进程藏住，
+    // 见 tests/gaps.yaml 的 fence.leftover-grant-hides-parent）和断言失败同样是失败。
     const cleaned = require("child_process").spawnSync(BIN, ["--fence-clean", "--root", FIXTURE], {
       cwd: PRODUCT_ROOT,
       encoding: "utf8",
     });
     const say = ((cleaned.stdout || "") + (cleaned.stderr || "")).trim().replace(/\r?\n/g, " | ");
     console.log("[e2e] 围栏回收（退出码 " + cleaned.status + "）：" + say);
+    if (cleaned.status !== 0) {
+      console.error("E2E-FAILED（围栏回收未完成：本机留下了没人管的痕迹）");
+      return 1;
+    }
   }
 }
 

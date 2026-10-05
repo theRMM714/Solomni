@@ -9,7 +9,8 @@
 //   SOLOMNI_DEMO_BASE   转录中心地址（默认 http://127.0.0.1:3081）
 //   SOLOMNI_DEMO_MODEL  指定模型 id（默认不指定 = 用核心默认模型）
 //
-// 只走产品自己的 HTTP 能力面（与前端同一条路），不改任何登记处；产物落在本次工作的共享区里。
+// 只走产品自己的 HTTP 能力面（与前端同一条路），不改任何登记处。共享区对 agent 只读：
+// 资料先 work_pull 拉进沙箱，产物在沙箱里产出、再 work_commit 提交回共享区。
 // 一次问询要等模型跑完才返回（可能好几分钟），所以客户端**不设超时**；任何一步不成立都如实打印失败原因
 // 并以非零退出码收场（演示失败不该被当成成功）。
 import { readFileSync, existsSync, readdirSync, statSync } from "node:fs";
@@ -120,8 +121,10 @@ async function main() {
   console.log("（一轮问询要等模型跑完，可能要几分钟）");
   const ask = await say(sid,
     "把共享区里的资料整理成一份能给同事看的报告，并做一个能离线检索的索引包。\n" +
-    "用你手上的模块工具做完这三步：先抽语料，再出 HTML 报告，最后建索引；" +
-    "做完把三个产物（语料、报告、索引）的真实绝对路径念给我。");
+    "共享区对你只读：先用 work_pull 把资料拉进你的沙箱，再用你手上的模块工具在沙箱里做完这三步——" +
+    "先抽语料、再出 HTML 报告、最后建索引——" +
+    "然后用 work_commit 把三件产物（corpus.jsonl、report.html、index.bin）提交回共享区根目录；" +
+    "做完把它们的真实绝对路径念给我。");
   ok(ask.status === 200, "发出需求", ask.text);
 
   const rows = toolRows(await lines(sid));
@@ -131,14 +134,14 @@ async function main() {
   }
 
   // ④ 复核产物：三件都必须真的存在（不靠模型的自我陈述）。
-  // 成品可以落在本工作的共享区，也可以落在某个 agent 的私有沙箱，所以每次递归找一遍。
+  // 产物先落 agent 沙箱、经 work_commit 才进共享区；两处都递归找一遍。
   const root = join(process.cwd(), "session", WORK);
   const artifacts = () => {
     const found = new Map();
     const walk = (dir) => {
       for (const ent of readdirSync(dir, { withFileTypes: true })) {
         const p = join(dir, ent.name);
-        if (ent.isDirectory()) walk(p);
+        if (ent.isDirectory()) { if (ent.name !== ".work") walk(p); }
         else if (!found.has(ent.name)) found.set(ent.name, p);
       }
     };
@@ -164,6 +167,10 @@ async function main() {
   if (want.every((f) => made.has(f))) {
     ok(true, "产物齐全（" + want.map((f) => f + "=" + statSync(made.get(f)).size + " 字节").join(" ") + "）");
   }
+  // 共享区只读：产物必须先落沙箱、再 work_commit 才进主副本——work/ 下有这三件，才算真的交付。
+  const shared = join(root, "work");
+  const inShared = (f) => existsSync(join(shared, f));
+  ok(want.every(inShared), "三件产物已提交回共享区（work/）", want.filter((f) => !inShared(f)).map((f) => "work/" + f).join("、"));
   for (const f of want) {
     console.log("   产物 " + f + " → " + (made.get(f) || "（没有）"));
   }

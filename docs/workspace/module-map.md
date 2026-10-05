@@ -13,6 +13,9 @@
 | `src/capabilities/workspace/domain/packages.rs` |
 | `src/capabilities/workspace/domain/exec.rs` |
 | `src/capabilities/workspace/domain/workspace.rs` |
+| `src/capabilities/workspace/domain/hash.rs` |
+| `src/capabilities/workspace/domain/workstore.rs` |
 | `src/capabilities/workspace/detail/fs_modules.rs` |
 | `src/capabilities/workspace/detail/fs_packages.rs` |
 | `src/capabilities/workspace/detail/fs_workspace.rs` |
+| `src/capabilities/workspace/detail/fs_workstore.rs` |

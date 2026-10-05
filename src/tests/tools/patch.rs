@@ -171,7 +171,11 @@ pub(crate) fn rewind_clears_the_read_ledger_so_overwrite_needs_a_fresh_read() {
     let v1 = tool_views(&e1);
     assert!(v1[0].ok, "新建文件不需要先读过：{}", v1[0].output);
     // 回档：证据作废
-    core.rewind(&sid, 0).unwrap();
+    core.rewind(
+        &sid,
+        crate::capabilities::conductor::api::RewindTarget::Delete(0),
+    )
+    .unwrap();
     // 第二轮：同一个路径已存在，而账本已被清空 → 拒绝并提示先读
     let e2 = with_live(|l| core.single_say(&sid, "再写", l)).unwrap();
     let v2 = tool_views(&e2);
@@ -327,7 +331,7 @@ pub(crate) fn builtin_arg_mistakes_are_named_and_the_signature_comes_back() {
     io.seed(&["demo", "work", "note.txt"], "内容\n");
     let note = s(&["demo", "work", "note.txt"]);
     let run = |tool: &str, args: &str| run_builtin(&sb, &io, tool, args);
-    // 上界由声明给出（不再是代码里的手写判断）
+    // 上界由声明给出（不是代码里的手写判断）
     let big = run("read", &format!("{{\"path\":\"{}\",\"limit\":3000}}", note));
     assert!(
         !big.ok && big.output.contains("参数 limit 不能大于 2000"),
@@ -441,7 +445,13 @@ pub(crate) fn builtin_tool_book_is_the_one_source_of_names_and_paths() {
     let sb = test_sandbox("a1", &[]);
     let env = crate::capabilities::session::domain::session::env_block(
         &prompts,
-        &crate::capabilities::session::api::SessionParams::from_workspace("a1", &sb, &[]),
+        &crate::capabilities::session::api::SessionParams::from_workspace(
+            "a1",
+            &sb,
+            &[],
+            "single",
+            "solo",
+        ),
     );
     assert!(env.contains("【工作环境】"), "{}", env);
     assert!(

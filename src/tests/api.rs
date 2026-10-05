@@ -154,7 +154,7 @@ fn history_merge_is_the_transcript_plus_the_bus_tail_without_repeats() {
     assert!(head > 0, "合流顺带给出头部序号（水位）");
     assert!(!tail.is_empty(), "事件台上还有它之外的实时行（短暂事件）");
     // **过时的短暂事件不许进尾巴**：开跑那条运行态（agent 有名字）已经被盘上的定稿行取代，
-    // 它要是跟着尾巴下去，前端会先画定稿行、再画一个填不上的空"谁正在说"块（真机上的空块）。
+    // 它要是跟着尾巴下去，前端会先画定稿行、再画一个填不上的空"谁正在说"块。
     let opening = tail.iter().any(|v| {
         v.get("type").and_then(|t| t.as_str()) == Some("working")
             && v.get("agent").is_some_and(|a| !a.is_null())
@@ -558,7 +558,13 @@ fn missing_sessions_and_bad_inputs_come_back_as_errors() {
         ops.registry.remove_provider("没这个供应商").is_ok(),
         "删不存在的供应商返回 false，不是错误"
     );
-    assert!(ops.sessions.rewind("没这个会话", 0).is_err());
+    assert!(ops
+        .sessions
+        .rewind(
+            "没这个会话",
+            crate::capabilities::conductor::api::RewindTarget::Archive(0)
+        )
+        .is_err());
 }
 
 #[test]
@@ -801,7 +807,7 @@ fn compaction_survives_a_restart_and_rewinds_back_through_the_point() {
         "重建后的发送视图该是「摘要 + 之后的行」，被压掉的内容不回来"
     );
     assert_eq!(
-        rebuilt.compacted_upto(),
+        rebuilt.compacted_upto,
         next + 2,
         "重建也要恢复压缩点（回档分流靠它）"
     );
@@ -810,14 +816,18 @@ fn compaction_survives_a_restart_and_rewinds_back_through_the_point() {
 
     // ② 回档跨越压缩点：会话在表里且压缩点 > 目标 → `rewind` 走重建，摘要不再生效。
     core.ensure_session(&sid).expect("把重建结果装回表里");
-    core.rewind(&sid, next).expect("回档到压缩点之前");
+    core.rewind(
+        &sid,
+        crate::capabilities::conductor::api::RewindTarget::Delete(next),
+    )
+    .expect("回档到压缩点之前");
     let back = core.take_single(&sid).expect("取回回档后的会话");
     let shown_back = shown(back.dialogue());
     assert!(
         !shown_back.iter().any(|c| c.contains("此前内容摘要")),
         "回档到压缩点之前：摘要该消失（内容回到压缩前）：{shown_back:?}"
     );
-    assert_eq!(back.compacted_upto(), 0, "压缩点该一起回退掉");
+    assert_eq!(back.compacted_upto, 0, "压缩点该一起回退掉");
 }
 
 // ---------- 从「共享意图层」搬来的规则测试（规则跟着归属走） ----------
@@ -898,6 +908,7 @@ fn single_mode_merges_multiple_agents_into_one_transient() {
             agents: picked,
             task: None,
             delegate: false,
+            tier: crate::kernel::api::Tier::Host,
         })
         .expect("建工作");
     assert_eq!(
@@ -978,7 +989,13 @@ fn act_dispatches_to_the_two_result_shapes() {
     }
     match ops
         .sessions
-        .act(&sid, Action::Rewind(0), Output::Final)
+        .act(
+            &sid,
+            Action::Rewind(crate::capabilities::conductor::api::RewindTarget::Archive(
+                0,
+            )),
+            Output::Final,
+        )
         .expect("回档")
     {
         Acted::Replayed(events) => {

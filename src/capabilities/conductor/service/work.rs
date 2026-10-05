@@ -40,6 +40,39 @@ impl Conductor {
         }
     }
 
+    /// 新建工作的**档位选择**（默认档 + 虚拟机档可用性与逐项前置）：与「开始」的校验同源。
+    /// 为什么单独一条读面：创建向导还没有 sid，拿不到会话配置视图；而设置里的默认档与
+    /// 虚拟机档的承载探针是**与某条会话无关**的事实。
+    pub fn tier_choices(&self) -> TierChoices {
+        let default = self.registry.app().tier;
+        // 裸虚拟机档探针：基础根属于会话选型（在会话的 exec 段里），创建时还没填，按未指定探。
+        let vm_probe = crate::capabilities::workspace::api::ExecSpec {
+            tier: crate::kernel::api::Tier::Vm,
+            ..crate::capabilities::workspace::api::ExecSpec::default()
+        };
+        let inputs = crate::capabilities::workspace::api::VmInputs {
+            base: vm_probe.base.as_deref(),
+            qemu: self.qemu_path(),
+            probe: self.probe.as_ref(),
+        };
+        TierChoices {
+            default: default.as_str().to_string(),
+            vm_available: crate::capabilities::workspace::api::tier_readiness(
+                &vm_probe,
+                self.qemu_path(),
+                self.probe.as_ref(),
+            )
+            .ready(),
+            vm_unavailable_reason: crate::capabilities::workspace::api::tier_refusal(
+                &vm_probe,
+                self.qemu_path(),
+                self.probe.as_ref(),
+            )
+            .unwrap_or_default(),
+            vm_requirements: crate::capabilities::workspace::api::vm_requirements(&inputs),
+        }
+    }
+
     /// 本档位下不能执行工具的模块（模块 id → 缺的能力名）：建会话与重建时收口给工具环境。
     pub(crate) fn unavailable_modules(
         &self,
@@ -127,7 +160,14 @@ impl Conductor {
         let (meta, events) = self.history_open(sid)?;
         match meta.mode.as_str() {
             "single" | "collab" => {}
-            other => return Err(format!("未知会话形态：{}（只认 single / collab）", other)),
+            // 代理会话没有名单可编辑（决定权整块交给核心）：如实说明，不报"未知形态"。
+            "proxy" => return Err("代理会话没有可编辑的名单：它不是一个 agent 工作".to_string()),
+            other => {
+                return Err(format!(
+                    "未知会话形态：{}（只认 single / collab / proxy）",
+                    other
+                ))
+            }
         }
         if session_started(&events) {
             let old: Vec<String> = meta.agents.iter().map(|a| a.name.clone()).collect();
@@ -140,13 +180,12 @@ impl Conductor {
         }
         // 校验：模块与模型真实存在；同一模块不得同属两个 agent（沙箱与发言归属会歧义）。
         let roster = self.scan();
+        let reserved = self.reserved_names();
         let mut seen: Vec<String> = Vec::new();
         let mut metas: Vec<AgentMeta> = Vec::new();
         for a in &edit.agents {
             crate::capabilities::registry::api::validate_name(&a.name)?;
-            if a.modules.is_empty() {
-                return Err(format!("agent {} 至少要有一个模块", a.name));
-            }
+            crate::capabilities::registry::api::check_reserved(&a.name, &reserved)?;
             for id in &a.modules {
                 if !roster.modules.iter().any(|m| &m.manifest.id == id) {
                     return Err(format!("无此模块：{}", id));
@@ -351,6 +390,11 @@ impl Conductor {
             .map(|(sid, done)| {
                 let entry = history.iter().find(|h| h.name == sid);
                 let mode = entry.map(|h| h.mode.clone()).unwrap_or_default();
+                // 运行态取落盘事实（不在内存里留影子状态）；拿不到（生成中 / 未落盘）按正常运行。
+                let run = entry
+                    .map(|h| h.run.as_str())
+                    .unwrap_or("active")
+                    .to_string();
                 // 记的档位来自落盘 meta（权威）：环境后来变了也要如实提示——**不拦打开**（记录是用户的）。
                 let exec = entry.map(|h| h.exec.clone()).unwrap_or_default();
                 let readiness = crate::capabilities::workspace::api::tier_readiness(
@@ -381,6 +425,7 @@ impl Conductor {
                     tier_ready: readiness.ready(),
                     tier_missing: readiness.missing().iter().map(|s| s.to_string()).collect(),
                     can_update_task,
+                    run,
                     pending,
                 }
             })
@@ -394,9 +439,53 @@ impl Conductor {
     /// 创建工作：形态 + 参与的 agent（+ 协作需求）→ 建出会话、落盘身份、备好工作区。
     /// 一切选择来自用户；核心只做校验与机械装配，不替用户选。
     pub fn create_work(&mut self, spec: WorkSpec) -> Result<WorkOpened, String> {
+        self.create_work_inner(spec, None)
+    }
+
+    /// 这棵子树里已经用过的 agent 实例名（实例名就是沙箱目录名，必须**全树唯一**）。
+    /// 顶层会话名可以重复（落点是自己的目录），但共用同一个 work/ 时同名 agent 会撞同一个沙箱。
+    fn subtree_agent_names(&self, root: &str) -> Vec<String> {
+        let mut out: Vec<String> = Vec::new();
+        for sid in self.subtree_of(root) {
+            if let Ok(m) = self.history.meta(&sid) {
+                for a in &m.agents {
+                    if !out.iter().any(|x| x == &a.name) {
+                        out.push(a.name.clone());
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    /// 建工作的唯一实现：`parent` = 编排归属（代理建的**子工作**）。
+    /// 子工作与父会话**共用顶层那一个 work/**，落点在父会话目录的 `children/` 下。
+    pub(crate) fn create_work_inner(
+        &mut self,
+        spec: WorkSpec,
+        parent: Option<&str>,
+    ) -> Result<WorkOpened, String> {
         validate_work_name(&spec.name)?;
         if self.sessions.contains_key(&spec.name) || self.history.load(&spec.name).is_ok() {
             return Err(format!("工作名已存在：{}", spec.name));
+        }
+        // **代理形态**（第三人形态）：没有名单、没有需求——用户选这一形态就是**授予全权**。
+        // 它不是一个 agent 工作，装配与其余形态没有共同点，所以在这里就地分岔、不往下走。
+        if spec.mode == WorkMode::Proxy {
+            if !spec.agents.is_empty() || spec.task.is_some() {
+                return Err(
+                    "代理形态不接受 agent 名单或本次需求：决定权是整块交给核心的".to_string(),
+                );
+            }
+            if parent.is_some() {
+                return Err("子工作不能建成代理形态：代理不能往里套代理".to_string());
+            }
+            let (sid, facts) = self.create_proxy_with_facts(&spec.name, now_ts(), spec.tier)?;
+            return Ok(WorkOpened {
+                sid,
+                agents: Vec::new(),
+                facts,
+            });
         }
         // 代拟路径（协作、未给 agent）允许先空着，由核心按需求拟名单；其余形态必须有 agent。
         if spec.agents.is_empty() && !spec.delegate {
@@ -409,13 +498,12 @@ impl Conductor {
             spec.agents = vec![merge_into_one(&spec.agents, &spec.name)];
         }
         let roster = self.scan();
+        let reserved = self.reserved_names();
         // 校验 agent：名字合法、模块与模型真实存在；同一模块不得同时属于两个 agent（沙箱会歧义）
         let mut seen_modules: Vec<String> = Vec::new();
         for a in &spec.agents {
             crate::capabilities::registry::api::validate_name(&a.name)?;
-            if a.modules.is_empty() {
-                return Err(format!("agent {} 至少要有一个模块", a.name));
-            }
+            crate::capabilities::registry::api::check_reserved(&a.name, &reserved)?;
             for id in &a.modules {
                 if !roster.modules.iter().any(|m| &m.manifest.id == id) {
                     return Err(format!("无此模块：{}", id));
@@ -435,21 +523,29 @@ impl Conductor {
                 self.registry.resolve(mid)?;
             }
         }
-        // 形态约束（每个 agent ≥1 个模块已在上面的循环里校验）
+        // 形态约束（模块可以为空，上面只校验真实存在与归属不冲突）
         match spec.mode {
             WorkMode::Single => {
                 if spec.agents.len() != 1 {
                     return Err("单 agent 形态只接受一个 agent（模块数不限）".to_string());
                 }
             }
+            // 代理形态在函数开头就返回了（它没有 agent 名单）；这里只为穷尽，不产生行为。
+            WorkMode::Proxy => {}
             WorkMode::Collab => {
                 if spec.task.as_deref().unwrap_or("").trim().is_empty() {
                     return Err("协作模式必须填写本次需求".to_string());
                 }
             }
         }
-        // 同工作内重名 → 尾号（用户没改名时的兜底）
-        let mut taken: Vec<String> = Vec::new();
+        // 工作根：顶层会话就是自己；子会话沿父链走到顶（整棵树只有一个 work/）。
+        let root = match parent {
+            Some(p) => self.work_root(p)?,
+            None => spec.name.clone(),
+        };
+        // 实例名在**整棵子树**里唯一：共用同一个 work/ 时同名 agent 会撞同一个沙箱目录。
+        // 重名 → 尾号（用户不改名时的兜底），绝不重名。顶层根还不存在时子树名单为空。
+        let mut taken: Vec<String> = self.subtree_agent_names(&root);
         let mut metas: Vec<AgentMeta> = Vec::new();
         for a in &spec.agents {
             let name = crate::capabilities::registry::api::unique_instance_name(&a.name, &taken);
@@ -476,13 +572,16 @@ impl Conductor {
             task: spec.task.clone(),
             ts: now_ts(),
             agents: metas.clone(),
-            // 顶层会话：没有编排者，也没有节点（子会话由 spawn_sub_session 建）。
-            parent: None,
+            // 编排归属（代理建的子工作 = Some(父)）；节点子会话由 spawn_sub_session 另建。
+            parent: parent.map(|s| s.to_string()),
             node: None,
+            delegation: None,
+            // 档位来自**用户在创建向导里的选择**（默认 = 设置里的档位）；承载不了由下面如实拒绝。
             exec: crate::capabilities::workspace::api::ExecSpec {
-                tier: self.registry.app().tier,
+                tier: spec.tier,
                 ..crate::capabilities::workspace::api::ExecSpec::default()
             },
+            run: RunState::Active,
         };
         // 承载校验：默认档位的前置条件不具备时**不允许创建虚拟机档会话**（用户环境问题，不是选型问题）。
         // 必须在建工作区之前收口——拒绝就该什么都不留下。
@@ -493,8 +592,9 @@ impl Conductor {
         ) {
             return Err(why);
         }
-        // 工作区：work + 各 agent 沙箱（失败即失败，不假装已建）。代拟确认名单时再补建。
-        self.workspace.prepare(&name, &agent_names)?;
+        // 工作区：整棵树只有顶层一个 work/；各 agent 沙箱按实例名建在它下面。
+        // （失败即失败，不假装已建；代拟确认名单时再补建。）
+        self.workspace.prepare(&root, &agent_names)?;
         let sandboxes = self.sandboxes(&meta, &roster)?;
         // 扫描事实如实埋点：本会话用到的模块里，哪些声明的运行包不在包库（缺包不等于崩溃，工具按档位不可用）。
         let session_modules: Vec<Module> = roster
@@ -525,6 +625,8 @@ impl Conductor {
         );
 
         let (session, mut events) = match spec.mode {
+            // 代理形态在函数开头就建好返回了：它没有 agent 名单，不走这条装配路。
+            WorkMode::Proxy => return Err("代理形态没有 agent 名单，不经这条装配路".to_string()),
             // 单 agent（模块数不限）。
             WorkMode::Single => {
                 let a = metas.first().ok_or("至少要有一个 agent")?;
@@ -598,7 +700,16 @@ impl Conductor {
         if self.workspace.work_has(sid, &name) && !overwrite {
             return Ok(false);
         }
-        self.workspace.write_work(sid, &name, bytes)?;
+        // 用户投喂 = 一次**权威提交**（作者 user）：共享区只有提交这一条写路径。
+        // 锚到主会话当时的下一条行号，回档才能把这次投喂算进某个转录点。
+        let work = self.work_root(sid).unwrap_or_else(|_| sid.to_string());
+        let line = match self.sessions.get(sid) {
+            Some(Session::Single(s)) => s.next_line,
+            Some(Session::Collab(c)) => c.next_line,
+            None => 0,
+        };
+        self.workspace
+            .work_commit_user(&work, &name, bytes, now_ts(), line)?;
         Ok(true)
     }
 
@@ -612,6 +723,7 @@ impl Conductor {
             .map_err(|_| format!("无此会话：{}", sid))?;
         let names: Vec<String> = meta.agents.iter().map(|a| a.name.clone()).collect();
         let files = self.workspace.files(sid, &names)?;
+        let usage = self.workspace.usage(sid, &names)?;
         let roster = self.scan();
         let sandboxes = self.sandboxes(&meta, &roster)?;
         let mut agents: Vec<FilesAgentView> = Vec::new();
@@ -636,6 +748,7 @@ impl Conductor {
                 work: crate::kernel::api::slash(&sandboxes.shared),
                 agents: agent_roots,
             },
+            usage,
         })
     }
 }

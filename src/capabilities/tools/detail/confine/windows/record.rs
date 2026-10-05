@@ -5,6 +5,7 @@ use crate::capabilities::tools::api::FenceSpec;
 use std::collections::BTreeSet;
 use std::ffi::c_void;
 use std::os::windows::ffi::OsStrExt;
+use std::os::windows::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use windows_sys::Win32::Foundation::LocalFree;
 use windows_sys::Win32::Security::Authorization::{ConvertSidToStringSidW, ConvertStringSidToSidW};
@@ -55,10 +56,9 @@ pub(crate) fn record_profile(home: &Path, name: &str) {
     }
 }
 
-/// 扫掉本程序建过的整族容器 profile：台账只记"我们知道写过什么"，而 profile 可能来自没有台账的路径
-/// （探针、夹具的台账被删、旧版本）。名字前缀是本程序独有的，所以按它扫；`DeleteAppContainerProfile`
-/// 连该容器的存储一起删。返回扫掉的个数。
-pub fn sweep_profiles() -> Result<usize, String> {
+/// 本程序建过的容器 profile 名（Windows 把包目录名转小写，按前缀不区分大小写筛）。
+/// profile 可能来自没有台账的路径（探针、夹具的台账被删、旧版本），所以按名字前缀扫。
+fn our_profile_names() -> Result<Vec<String>, String> {
     let root = match std::env::var_os("LOCALAPPDATA") {
         Some(v) => PathBuf::from(v).join("Packages"),
         None => return Err("取不到 LOCALAPPDATA（容器 profile 的存储根）".to_string()),
@@ -66,23 +66,94 @@ pub fn sweep_profiles() -> Result<usize, String> {
     let entries = match std::fs::read_dir(&root) {
         Ok(e) => e,
         // 没有 Packages 目录 = 本机没有容器 profile。
-        Err(_) => return Ok(0),
+        Err(_) => return Ok(Vec::new()),
     };
+    Ok(entries
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|n| is_our_profile(n))
+        .collect())
+}
+
+/// 扫掉本程序建过的整族容器 profile：台账只记"我们知道写过什么"，而 profile 可能来自没有台账的路径。
+/// 名字前缀是本程序独有的，所以按它扫；`DeleteAppContainerProfile` 连该容器的存储一起删。返回扫掉的个数。
+pub fn sweep_profiles() -> Result<usize, String> {
     let mut deleted = 0usize;
-    for entry in entries.flatten() {
-        let name = entry.file_name().to_string_lossy().into_owned();
-        if !is_our_profile(&name) {
-            continue;
-        }
-        let wide: Vec<u16> = std::ffi::OsStr::new(&name)
-            .encode_wide()
-            .chain(std::iter::once(0))
-            .collect();
-        if unsafe { DeleteAppContainerProfile(wide.as_ptr()) } >= 0 {
+    for name in our_profile_names()? {
+        if delete_profile(&name) {
             deleted += 1;
         }
     }
     Ok(deleted)
+}
+
+/// 删掉一个具名的容器 profile（连该容器的存储一起删）。整族清扫与测试的定向清理共用。
+pub(crate) fn delete_profile(name: &str) -> bool {
+    let wide: Vec<u16> = std::ffi::OsStr::new(name)
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+    (unsafe { DeleteAppContainerProfile(wide.as_ptr()) }) >= 0
+}
+
+/// 孤儿授权清扫：按容器 SID 族在产品根内找我们写过的显式 ACE 并连树撤掉。
+/// 台账是精确回收的依据，但账会断（夹具/临时 home 被删、进程被杀、旧版本没记账）——
+/// 断了账不代表没有残留（fence.leftover-grant-hides-parent：`tests/` 上留过一条旧版
+/// 授出去的显式 ACE，整棵子树因此在受限进程里不可读）。这里反向兜底：本程序建过的
+/// 容器 profile 名 → 派生 SID → 自产品根向下找带该 SID 显式 ACE 的目录，在**最上层**
+/// 命中处连树撤掉（授权只会以某个目录为根整树写下去，树下同名 SID 的 ACE 都是它的
+/// 传播产物）。只扫产品根内：根外落点（解释器目录、根外只读根）仍只由台账管。
+/// **必须在 `sweep_profiles` 之前调用**：profile 删了就派生不出 SID 了。
+pub fn sweep_orphan_aces(root: &Path) -> Result<usize, String> {
+    let mut sids: Vec<PSID> = Vec::new();
+    for name in our_profile_names()? {
+        match container_sid(&name) {
+            Ok(s) => sids.push(s),
+            Err(e) => eprintln!("[围栏] {}：该容器的孤儿扫描跳过", e),
+        }
+    }
+    if sids.is_empty() {
+        return Ok(0);
+    }
+    let mut swept = 0usize;
+    sweep_dir_down(root, &sids, &mut swept);
+    for s in &sids {
+        free_sid(*s);
+    }
+    Ok(swept)
+}
+
+/// 自上而下扫一个目录：最上层命中就整树撤、不再下钻；没命中才继续走子目录。
+fn sweep_dir_down(dir: &Path, sids: &[PSID], swept: &mut usize) {
+    if sids.iter().any(|s| has_any_ace_for(*s, dir)) {
+        for s in sids {
+            if let Err(e) = revoke_one(*s, dir, true) {
+                eprintln!("[围栏] 孤儿撤权未完成（{}）：{}", dir.display(), e);
+            }
+        }
+        *swept += 1;
+        return;
+    }
+    let entries = match std::fs::read_dir(dir) {
+        Ok(e) => e,
+        // 读不了的目录如实跳过：里面就算有残留也不再往下猜。
+        Err(_) => return,
+    };
+    for entry in entries.flatten() {
+        let meta = match std::fs::symlink_metadata(entry.path()) {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
+        if !meta.is_dir() {
+            continue;
+        }
+        // 重解析点（联接/符号链接）不跟：不走出产品根，也不进环。
+        const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0400;
+        if meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+            continue;
+        }
+        sweep_dir_down(&entry.path(), sids, swept);
+    }
 }
 
 pub(crate) fn record_grants(
@@ -186,7 +257,10 @@ pub fn release_fence_home(spec: &FenceSpec, home: Option<&Path>) -> Result<(), S
     let mut result = Ok(());
     // 撤权要覆盖**同一次授权写下的全部条目**：叶子（读写根 / 只读根 / 工作目录）**与它们的父目录**。
     // 落点清单与 prepare_fence 共用 grant_targets——两处各写一份迟早会漏掉某一类。
-    let mut paths: Vec<PathBuf> = grant_targets(spec).into_iter().map(|(p, _, _)| p).collect();
+    let mut paths: Vec<PathBuf> = grant_targets(spec)
+        .into_iter()
+        .map(|(p, _, _, _)| p)
+        .collect();
     paths.sort();
     paths.dedup();
     // 台账比对用字符串：下面 paths 会被消费掉。

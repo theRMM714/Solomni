@@ -23,8 +23,8 @@
   流式增量、核实行、**定稿的转录行**、运行态都是。主会话只拿"谁说了什么"的投影；
   子会话拿完整的一份（含定稿行）。客户端打开哪个标签页读哪条流，不靠"从别人的流里猜自己"。
 - **连接状态只看事件流的取用**：客户端把"取事件失败"（服务没起来 / 连接断了）与"事件应用/渲染出错"分开——
-  后者不是断线，如实报错并留在日志里。真机上曾把渲染异常当成断线，状态点一直红着而服务好好的，
-  真正的异常连一行日志都没有（见 `app.js` 的 `setConn` / `eventError`）。
+  后者不是断线，如实报错并留在日志里；两类都要落到日志，不能只亮状态点
+  （见 `app.js` 的 `setConn` / `eventError`）。
 - **并发归核心**：`stop` 直接置位核心内部的取消标志，**不进命令队列**，所以生成期间照样立刻生效；
   呈现层不需要知道「生成时核心状态被占用」这类内部事实。
 - **生成不占命令队列**（单 agent 与协作的长步骤都是）：命令队列只做**状态变更**与**派发**——生成时先把会话对象
@@ -66,7 +66,7 @@
 **会话表也只由服务端给**：客户端的会话来自 `/api/state` 的 `sessions`，只把事件应用到它已有的会话；
 收到**不认识的 sid**（典型是系统会话，见 [session-model.md](../session/session-model.md) 的推/落表）一律不动。
 
-**历史与实时只有一条流（客户端不再合并两个来源）**：`GET /api/history/{name}` 一次给全——
+**历史与实时只有一条流（客户端不合并两个来源）**：`GET /api/history/{name}` 一次给全——
 盘上转录 `events` + 事件台上**它之外**的尾巴 `live` + 合流时的头部序号 `head`。
 判据是**结构化相等**（两边的 JSON 出自同一套序列化器，就是同一个值），**不是按行 id 猜**：
 `notice`/`node_started` 这类行本来就没有 id，按 id 去重正是"刷新后整段重复"的来源。
@@ -94,10 +94,10 @@
 | GET | `/md.js` | 静态资源 | — | `md.js` | 200 |
 | GET | `/api/events` | 事件台（`EventBus`） | 查询 `sid` / `since` | `{lines:[{seq,sid,events}],head,oldest}` | 200 |
 | GET | `/api/state` | `WorkspaceOps::roster` + `SessionOps::session_views` + `RegistryOps` + `HistoryOps::list` | — | `{modules,rejected,fence,providers,models,core,agents,settings,sessions,history}` | 200, 400 |
-| POST | `/api/sessions` | `SessionOps::create_work` | `{name,mode,agents[],task?,delegate?}`（`agents` = **点名结果**，未归并；单模式下多个会被并成一个临时组合） | `{sid,agents,head}` | 200, 400 |
+| POST | `/api/sessions` | `SessionOps::create_work` | `{name,mode,agents[],task?,delegate?,tier?}`（`mode` = single / collab / **proxy**：proxy 没有名单、选它就是**授予全权**；`agents` = **点名结果**，未归并；单模式下多个会被并成一个临时组合；`tier` 缺省 = 本机档，**proxy 会话的档位也是它建出的子工作的默认档**） | `{sid,agents,head}` | 200, 400 |
 | POST | `/api/sessions/{sid}/{action}` | `SessionOps` + `intent::act` | `{text?,agent?,id?,overwrite?,data_base64?,编辑体}` | `{sid,head}` / `{sid,events}`（重放快照）等 | 200, 400, 404, 409 |
 | GET | `/api/sessions/{sid}/config` | `SessionOps::config` | — | `{config}` | 200, 400 |
-| GET | `/api/sessions/{sid}/files` | `SessionOps::files` | — | `{work,agents,roots}` | 200, 404 |
+| GET | `/api/sessions/{sid}/files` | `SessionOps::files` | — | `{work,agents,roots,usage}` | 200, 404 |
 | POST | `/api/providers` | `RegistryOps::upsert_provider` | `{id,base_url,api_key}` | `{ok}` | 200, 400 |
 | POST | `/api/providers/{id}/{action}` | `RegistryOps::remove_provider` / `discover_models` | — | `{ok}` / `{ok,models}` | 200, 400, 404 |
 | POST | `/api/models` | `RegistryOps::upsert_model` | `{id,name,api_model,provider,note?}` | `{ok}` | 200, 400 |
@@ -109,6 +109,7 @@
 | GET | `/api/history` | `HistoryOps::list` | — | `{sessions}` | 200, 400 |
 | GET | `/api/history/{name}` | `HistoryOps::open` | — | `{meta,events,live,head}` | 200, 404 |
 | POST | `/api/history/{name}/delete` | `HistoryOps::delete` | — | `{ok}` | 200, 400 |
+| GET | `/api/tiers` | `ConductorOps::tier_choices` | — | `{tiers:{default,vm_available,vm_unavailable_reason,vm_requirements}}` | 200, 400 |
 | POST | `/api/suggest-models` | `ConductorOps::suggest_models` | `{task,mode}` | `{ok,agents}` | 200, 400 |
 <!-- ROUTES:END -->
 

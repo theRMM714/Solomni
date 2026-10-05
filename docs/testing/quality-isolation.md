@@ -11,8 +11,8 @@
 - 网络：只绑定本地环回，测试后关闭监听；
 - 进程：记录子进程，超时和失败路径也要杀整棵树；
 - 权限：默认不写真实 ACL、profile 或系统策略；真机探针只能在显式 `--fence-live` 下执行；
-  写了就必须撤回：真机测试收尾要按台账撤掉自己写下的 ACE、删掉自己建过的容器 profile
-  （端到端收尾调 `--fence-clean`，`confine` 的 ACL 契约测试调 `confine::clean`），并把回收结果如实打印——不许留下没人管的痕迹；
+ 写了就必须撤回：真机测试收尾要按台账撤掉自己写下的 ACE、删掉自己建过的容器 profile
+ （端到端收尾调 `--fence-clean`，`confine` 的 ACL 契约测试调 `confine::clean`），并把回收结果如实打印——不许留下没人管的痕迹；
 - 配置：不得读取真实 `.home/`，不得覆盖用户设置；
 - 日志和报告：写入 `target/` 下的测试目录，不把产物写进源码目录；
 - 并发：测试不得共享可变全局状态，除非明确验证并发语义；
@@ -61,6 +61,7 @@
 | `too_many_arguments` | `capabilities/session/service.rs` 的 `core_operation`、`capabilities/collab/service/round.rs` 的 `converse_with`、`capabilities/collab/service/discussion.rs` 的 `turn_with`、`capabilities/collab/service/synthesis.rs` 的 `Execution::review`、`capabilities/collab/service/driver.rs` 的 `discussion_turn`、`capabilities/collab/service/collab.rs` 的 `judge_clear` / `review_nodes` | 同一组参数（身份 / 工具面 / 通道 / 消息 / 出口 / 对照表 / 重填说明）：它们必须一路透传，收口成参数对象只是把参数挪个地方（`turn_with` 只服务内存测试通道） |
 | `dead_code` | `capabilities/conductor/api/mod.rs` 的 `SessionOps::exists` / `is_running` | **入站契约是发布给前端的接口面**：二进制 crate 里暂时没有生产调用点的接口方法会被 `dead_code` 误报（`is_running` 是运行态的**权威查询**——`SessionView.running` 只是事件台对账副本，最终一致） |
 | `dead_code` | `capabilities/session/domain/events.rs` 的 `enum SessionEvent` | 事件词汇里的字段**不全在生产路径被读**（例如 `DiscussionDone` 的 `round` / `over_cap` 供呈现层做裁决确认页）；词汇就是线格式，字段随契约保留，删掉会让呈现侧拿不到事实 |
+| `dead_code` | `capabilities/workspace/api.rs` 的 `Workspace::work_restore` | 共享区"指定提交点还原"的**机制入口**（由测试钉住）：生产回档走 `work_rewind_to` / `work_discard_after` / `work_restore_point` 按行锚算目标，`work_restore` 作为对照留在接口面 |
 | `large_enum_variant` | `capabilities/conductor/service/mod.rs` 的 `enum Session` | 两变体大小差得远，但装箱只换来一次间接寻址，却把"会话本体可直接移动"这个形状改掉 |
 
 新增 allow 必须同时更新本表；理由说不清的就不该 allow。

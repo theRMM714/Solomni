@@ -19,11 +19,15 @@ impl ConductorHandle {
         let jobs = JobRegistry::new();
         let bus = EventBus::new();
         let (tx, rx) = mpsc::channel::<Job>();
+        let book = core.systools_book();
+        let texts = core.prompt_texts();
         let handle = ConductorHandle {
             tx,
             jobs,
             bus,
             log: Arc::clone(&worker_log),
+            book,
+            texts,
         };
         // 注意：工作线程**绝不能**捕获取手柄（那会持有一个 Sender，通道永不闭合、线程永不退出）。
         std::thread::Builder::new()
@@ -67,6 +71,66 @@ impl ConductorHandle {
         Arc::clone(&self.bus)
     }
 
+    /// **级联停止**：把 root 及其整棵子树（按 `meta.parent`）里正在生成的会话都停下来。
+    /// 返回实际停下的会话 id——不假装“停止了一个本来就没在跑的会话”。
+    /// 代理核心的 `stop` 走这条：主会话停 = 所有相关工作一起停（用户看得见的那一下）。
+    pub(crate) fn stop_tree(&self, root: &str) -> Result<Vec<String>, String> {
+        let root_owned = root.to_string();
+        let tree = self.call(move |core| Ok(core.subtree_of(&root_owned)))?;
+        let mut stopped = Vec::new();
+        for sid in tree {
+            if self.jobs.stop(&sid) {
+                stopped.push(sid);
+            }
+        }
+        Ok(stopped)
+    }
+
+    /// 代理会话：把代理工具的成员侧执行面（`ProxyHandler`）装进这一回合的工具环境。
+    /// 执行经队列桥回到核心线程，核心状态的所有权不变。非代理会话、或已装过，什么都不做。
+    fn inject_proxy_handler(
+        &self,
+        sid: &str,
+        session: &mut crate::capabilities::session::api::AgentSession,
+    ) -> Result<(), String> {
+        use crate::capabilities::conductor::domain::proxy as dp;
+        let Some(tools) = session.tools.as_mut() else {
+            return Ok(());
+        };
+        if !tools.handlers.is_empty() || !tools.allowed.iter().any(|t| dp::is_proxy_tool(t)) {
+            return Ok(());
+        }
+        let face = tools.allowed.clone();
+        let granted = {
+            let sid = sid.to_string();
+            self.call(move |core| Ok(core.history_open(&sid)?.0.delegation.map(|d| d.granted_at)))?
+        };
+        let grant = granted.map(|_| dp::Grant {
+            tools: face,
+            ..Default::default()
+        });
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0);
+        let host: std::sync::Arc<
+            dyn crate::capabilities::conductor::ports::ProxyHost + Send + Sync,
+        > = std::sync::Arc::new(
+            crate::capabilities::conductor::service::proxy::ProxyBridge::new(self.clone()),
+        );
+        let handler = crate::capabilities::conductor::service::proxy::ProxyHandler::new(
+            host,
+            self.book.clone(),
+            std::sync::Arc::clone(&self.texts),
+            dp::ProxyCall {
+                grant,
+                parent: Some(sid.to_string()),
+                now,
+            },
+        );
+        tools.handlers = vec![std::sync::Arc::new(handler)];
+        Ok(())
+    }
     /// 测试专用：注入一条必定 panic 的命令，验证「一条命令 panic 不带垮整个核心」。
     #[cfg(test)]
     pub(crate) fn panic_probe(&self) -> Result<(), String> {
@@ -133,7 +197,11 @@ impl ConductorHandle {
                 persister,
             } => (*session, identity, prefix, llm, persister),
         };
-        // 取消标志在**派发时**就登记：生成一开始「停止」就能生效（它本来就不进队列）。
+        let mut session = session;
+        // 代理会话：把代理工具的成员侧执行面装进这一回合（经队列桥回核心线程执行）。
+        self.inject_proxy_handler(sid, &mut session)?;
+        let session = session;
+        // 取消标志在**派发时**就登记：生成一开始「停止」就能生效（它不进命令队列）。
         let cancel = jobs.register(sid);
         // **运行态**：这条会话开始干活，推给它自己的事件台——节点执行、单 agent 发言、继续都走这里，
         // 打开它的标签页要立刻看到占位与「停止」按钮，而不是等 3 秒的状态轮询。
@@ -214,6 +282,13 @@ impl ConductorHandle {
                         Ok(())
                     }
                 })?;
+                // 崩了也要**叫醒父会话**：代理在"派完就等"之后，没有这条通知就会一直睡着。
+                if let Some(proxy) = self.call({
+                    let sid = sid.to_string();
+                    move |core| Ok(core.notify_proxy_of_child(&sid))
+                })? {
+                    self.spawn_detached_proxy(&proxy);
+                }
                 return Err("生成线程崩溃：会话已按落盘转录保留，可继续".to_string());
             }
         };
@@ -226,7 +301,18 @@ impl ConductorHandle {
         })?;
         // 这是**子会话**完成：叫醒父会话推进任务链（脱离本次调用，不等它跑完）。
         if let Some(parent) = parent {
-            self.spawn_detached_collab(&parent);
+            // 代理模式的父：叫醒它去判断下一步（不替它决定）；协作的父：推进任务链。
+            let is_proxy = self
+                .call({
+                    let p = parent.clone();
+                    move |core| Ok(core.session_mode_str(&p) == "proxy")
+                })
+                .unwrap_or(false);
+            if is_proxy {
+                self.spawn_detached_proxy(&parent);
+            } else {
+                self.spawn_detached_collab(&parent);
+            }
         }
         Ok(Advance { head: seq })
     }
@@ -466,6 +552,64 @@ impl ConductorHandle {
             });
     }
 
+    /// 把**已经落盘**的一批事实推到某个会话的事件台（不重复落盘）：代理建子工作的开场事实走这条。
+    pub(crate) fn publish(&self, sid: &str, events: Vec<SessionEvent>) {
+        if events.is_empty() {
+            return;
+        }
+        self.bus.push(sid, &events);
+    }
+
+    /// 机制往一个会话记一条**可回放通知**：落盘（它进历史重放）+ 推它的事件台（在场的前端立刻看到）。
+    /// 代理转达的来源记录与控制记录走这条——两条都要"既留得下、也看得见"。
+    pub(crate) fn record_notice(&self, sid: &str, ev: SessionEvent) {
+        let target = sid.to_string();
+        let mut batch = vec![ev.clone()];
+        let ok = self
+            .call(move |core| {
+                core.record_events(&target, &mut batch);
+                Ok(())
+            })
+            .is_ok();
+        if ok {
+            self.bus.push(sid, std::slice::from_ref(&ev));
+        }
+    }
+
+    /// 起一轮**脱离调用方**的"继续"（恢复被暂停的单 agent 会话用）：不等它跑完。
+    /// 与"派活"的区别：不注入新任务，接着上一次的断点走。
+    pub(crate) fn spawn_detached_continue(&self, sid: &str) {
+        let me = self.clone();
+        let sid = sid.to_string();
+        let _ = std::thread::Builder::new()
+            .name("solomni-resume".to_string())
+            .spawn(move || {
+                let _ = me.single_generation(&sid, None, Output::Stream);
+            });
+    }
+
+    /// 起一次**脱离调用方**的代理回合（子会话停下后叫醒代理用）：不等它跑完。
+    /// 代理那边是一轮普通成员会话生成；它自己决定继续观察、追问、返工还是收敛。
+    pub(crate) fn spawn_detached_proxy(&self, sid: &str) {
+        let me = self.clone();
+        let sid = sid.to_string();
+        let _ = std::thread::Builder::new()
+            .name("solomni-proxy".to_string())
+            .spawn(move || {
+                let _ = me.single_generation(&sid, None, Output::Stream);
+            });
+    }
+    /// 起一次**脱离调用方**的协作阶段步（代理把消息转达到协作子会话用）：不等它跑完。
+    /// 与“叫醒父会话”的区别：这条带一个明确的阶段步（开工 / 代答），不是从断点继续。
+    pub(crate) fn spawn_detached_collab_step(&self, sid: &str, step: CollabStep, text: &str) {
+        let me = self.clone();
+        let (sid, text) = (sid.to_string(), text.to_string());
+        let _ = std::thread::Builder::new()
+            .name("solomni-proxy-collab".to_string())
+            .spawn(move || {
+                let _ = me.collab_generation(&sid, CollabWork::Step(step), &text);
+            });
+    }
     /// 起一次**脱离调用方**的协作推进（叫醒父会话用）：不等它跑完。
     pub(crate) fn spawn_detached_collab(&self, sid: &str) {
         let me = self.clone();
@@ -696,8 +840,15 @@ impl ConductorHandle {
             let sid = sid.to_string();
             move |core| Ok(core.put_collab(&sid, c))
         })?;
+        // 协作会话停下 / 交付时也通知代理父（顶层协作没有代理父：返回 None，什么都不做）。
+        if let Some(proxy) = self.call({
+            let sid = sid.to_string();
+            move |core| Ok(core.notify_proxy_of_child(&sid))
+        })? {
+            self.spawn_detached_proxy(&proxy);
+        }
         // 派发事件（"[节点] 开工"等）**也要落盘**：它们是在这里产生的，不经过上面那条 sink——
-        // 只推不落的话，刷新后回放会少掉"节点开工"那几行（真机上就是这么发现的）。
+        // 只推不落的话，刷新后回放会少掉"节点开工"那几行。
         let persister = self.call({
             let sid = sid.to_string();
             move |core| Ok(core.persister(&sid))

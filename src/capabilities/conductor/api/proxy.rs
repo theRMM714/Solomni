@@ -7,7 +7,7 @@ use crate::capabilities::registry::api::RegistryOps;
 use crate::capabilities::registry::api::{AgentView, AppSettings, ModelView, ProviderView};
 use crate::capabilities::session::api::AgentMeta;
 pub use crate::capabilities::session::api::Pending;
-use crate::capabilities::session::api::{HistoryView, SessionMeta};
+use crate::capabilities::session::api::{HistoryView, RunState, SessionMeta};
 use crate::capabilities::workspace::api::Roster;
 pub use crate::kernel::api::Tier;
 use std::sync::Arc;
@@ -27,6 +27,24 @@ impl SessionOps for ConductorHandle {
     }
 
     fn continue_flow(&self, sid: &str, out: Output) -> Result<Advance, String> {
+        // 「继续」= 「停止」的逆操作：先把整棵子树解冻，再按形态接着走。
+        // 单 agent / 代理补一条「继续」用户行作为这一轮的起因；协作不需要用户发言，从断点推进。
+        let resumed = self.call({
+            let s = sid.to_string();
+            move |core| core.resume_subtree(&s)
+        })?;
+        if resumed {
+            let mode = self
+                .call({
+                    let s = sid.to_string();
+                    move |core| Ok(core.session_mode_str(&s))
+                })
+                .unwrap_or_default();
+            if mode == "collab" {
+                return self.collab_generation(sid, CollabWork::Resume, "");
+            }
+            return self.single_generation(sid, Some("继续。".to_string()), out);
+        }
         self.single_generation(sid, None, out)
     }
 
@@ -71,9 +89,9 @@ impl SessionOps for ConductorHandle {
         ConductorHandle::compact(self, sid)
     }
 
-    fn rewind(&self, sid: &str, keep_id: u64) -> Result<Vec<serde_json::Value>, String> {
+    fn rewind(&self, sid: &str, target: RewindTarget) -> Result<Vec<serde_json::Value>, String> {
         let sid = sid.to_string();
-        self.call(move |core| core.rewind(&sid, keep_id))
+        self.call(move |core| core.rewind(&sid, target))
     }
 
     fn update_task(&self, sid: &str, text: &str) -> Result<Vec<serde_json::Value>, String> {
@@ -119,9 +137,14 @@ impl SessionOps for ConductorHandle {
         self.call(move |core| Ok(core.unique_work_name(&base, &fallback)))
     }
 
-    /// 停止**不走命令队列**：直接置位取消标志，所以生成期间照样立刻生效。
+    /// 停止 = **把整棵子树落成「已停止」**（拦住之后的一切派发与唤醒），再取消正在跑的生成；
+    /// 这两步都不走命令队列里的长操作，生成期间照样立刻生效。
+    /// **顺序不能反**：先冻态再取消——否则被停会话收尾写的那条"这一轮结束"会先把父会话叫醒。
+    /// 用户「继续」（`continue_flow`）是它的逆操作。
     fn stop(&self, sid: &str) -> bool {
-        self.jobs.stop(sid)
+        let sid_owned = sid.to_string();
+        let _ = self.call(move |core| core.set_subtree_run(&sid_owned, RunState::Stopped));
+        self.stop_tree(sid).map(|v| !v.is_empty()).unwrap_or(false)
     }
 
     fn is_running(&self, sid: &str) -> bool {
@@ -206,8 +229,11 @@ impl RegistryOps for ConductorHandle {
             note.to_string(),
         );
         // 模块存在性按**清单**校验：清单归 workspace，登记处只认事实，所以清单由这里取一份给它。
+        // 目录保留名（systools/names.yaml）也在这里收口：登记处不认识工作区布局，名单由 conductor 注入。
         self.call(move |core| {
             let roster = core.scan();
+            let reserved = core.reserved_names();
+            crate::capabilities::registry::api::check_reserved(&name, &reserved)?;
             core.registry_mut()
                 .agent_upsert(&name, &modules, &model, &note, &roster)
         })
@@ -267,6 +293,10 @@ impl crate::capabilities::workspace::api::WorkspaceOps for ConductorHandle {
 impl ConductorOps for ConductorHandle {
     fn runtime_report(&self, tier: Tier) -> Result<RuntimeReport, String> {
         self.call(move |core| Ok(core.runtime_report(tier)))
+    }
+
+    fn tier_choices(&self) -> Result<TierChoices, String> {
+        self.call(|core| Ok(core.tier_choices()))
     }
     fn suggest_models(&self, task: &str, mode: WorkMode) -> Result<Vec<AgentSuggestion>, String> {
         let task = task.to_string();

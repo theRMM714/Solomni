@@ -141,7 +141,12 @@ pub(crate) fn malformed_tool_envelope_becomes_a_failed_tool_line() {
         Arc::clone(&hist),
         Arc::clone(&io),
     );
-    core2.rewind(&sid, 4).unwrap();
+    core2
+        .rewind(
+            &sid,
+            crate::capabilities::conductor::api::RewindTarget::Delete(4),
+        )
+        .unwrap();
     let rebuilt = core2.single_history(&sid).expect("重建后应在内存里");
     let key = |h: &[Msg]| {
         h.iter()
@@ -644,7 +649,7 @@ pub(crate) fn an_aborted_generation_never_executes_a_repairable_envelope() {
         .unwrap()
         .sid;
     // 取消标志在生成开始前就已置位 = 用户按下了「停止」：引擎据此收尾，
-    // 不再发起下一次调用（此前靠工具调用上限兜底，上限删掉后必须自己站住）。
+    // 不再发起下一次调用（工具调用没有上限兜底，这条出口必须自己站住）。
     let events = {
         let cancel = Arc::new(std::sync::atomic::AtomicBool::new(true));
         let mut noop = |_e: crate::capabilities::session::api::SessionEvent| {};
@@ -831,7 +836,12 @@ pub(crate) fn envelope_multi_call_runs_every_call_and_rebuilds_identically() {
         Arc::clone(&io),
     );
     core2
-        .rewind(&sid, transcript_rows(&events).len() as u64)
+        .rewind(
+            &sid,
+            crate::capabilities::conductor::api::RewindTarget::Delete(
+                transcript_rows(&events).len() as u64,
+            ),
+        )
         .unwrap();
     let rebuilt = core2.single_history(&sid).unwrap();
     let key = |h: &[Msg]| {

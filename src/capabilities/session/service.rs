@@ -33,8 +33,16 @@ impl History for SessionService {
         self.store.append(name, events)
     }
 
+    fn replace(&self, name: &str, events: &[serde_json::Value]) -> Result<(), String> {
+        self.store.replace(name, events)
+    }
+
     fn list(&self) -> Result<Vec<HistoryView>, String> {
         self.store.list()
+    }
+
+    fn meta(&self, name: &str) -> Result<SessionMeta, String> {
+        self.store.meta(name)
     }
 
     fn load(&self, name: &str) -> Result<(SessionMeta, Vec<serde_json::Value>), String> {

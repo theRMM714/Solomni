@@ -83,7 +83,7 @@ core: <模型 id>                 # 核心 AI 默认模型（可选）
 ```yaml
 agents:
   <agent 名>:
-    modules: [research, reviewer]   # 成员模块（必填，至少一个）
+    modules: [research, reviewer]   # 成员模块（可以为空：零模块 agent 只用内建文件工具）
     model: <模型 id>                # 默认模型（可选；缺省 = 用核心默认）
     note: ""                        # 一句话说明（可选）
 ```

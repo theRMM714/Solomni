@@ -39,8 +39,8 @@ http.createServer((req, res) => {
     // 整段对话里的用户消息：工具循环的后续轮里，任务原话已不在最后一条，只有从整段里才看得见。
     const allUser = msgs.filter((m) => m.role === 'user').map((m) => m.content || '').join('\n');
     // 从系统提示词里取真实根目录（工作环境块里固定有两行：共享区 / 沙箱）
-    const workRoot = (sys.match(/本次工作的共享区：([^\n]+)/) || [])[1];
-    const sandboxRoot = (sys.match(/你私有的沙箱：([^\n]+)/) || [])[1];
+    const workRoot = (sys.match(/本次工作的共享区(?:（[^）\n]*）)?：([^\n]+)/) || [])[1];
+    const sandboxRoot = (sys.match(/你私有的沙箱(?:（[^）\n]*）)?：([^\n]+)/) || [])[1];
     // 已经跑过工具（手写信封走用户消息，原生通道走 role=tool 的结果消息）。
     const sawToolResult = msgs.some((m) => m.role === 'tool') || user.includes('[工具结果]');
     // 带工具声明、且声明的是探针工具 = 工具调用支持探测（不带声明的那条走普通分支，所以这里只在有 tools 时成立）。
@@ -150,20 +150,51 @@ http.createServer((req, res) => {
     : env('plan', { plan: '方案：一次把事情做完', advice: '我建议现在开工：三件产物都能一次做完。', nodes: [{ id: 'n1', title: '做完', objective: '把事做完', assignee: who, deps: [] }] });
     } else if (sys.includes('harvest') && allUser.includes('真工具链路')) {
       // 真工具链路：按**整段对话里**已经收到的工具结果条数决定下一个调用（真进程、真三语言模块）。
-      // 路径用提示词里给出的真实共享区根目录（相对路径会被围栏拒绝）。
-      const w = workRoot || '';
+      // 新模型：共享区对 agent 只读——先把投喂的文件 pull 进沙箱，产物写沙箱，最后 commit 回共享区。
+      const s = sandboxRoot || '';
       const n = (allUser.match(/\[工具结果\]/g) || []).length;
       if (n === 0) {
-        content = JSON.stringify({ type: 'tool', module: 'harvest', name: 'scan', args: { root: w, out: w + '/corpus.jsonl' } });
+        content = env('work_pull', { paths: ['甲.md', '乙.md'] });
       } else if (n === 1) {
-        content = JSON.stringify({ type: 'tool', module: 'indexer', name: 'build', args: { corpus: w + '/corpus.jsonl', out: w + '/index.bin' } });
+        content = JSON.stringify({ type: 'tool', module: 'harvest', name: 'scan', args: { root: s, out: s + '/corpus.jsonl' } });
       } else if (n === 2) {
-        content = JSON.stringify({ type: 'tool', module: 'indexer', name: 'query', args: { index: w + '/index.bin', q: '检索' } });
+        content = JSON.stringify({ type: 'tool', module: 'indexer', name: 'build', args: { corpus: s + '/corpus.jsonl', out: s + '/index.bin' } });
       } else if (n === 3) {
+        content = JSON.stringify({ type: 'tool', module: 'indexer', name: 'query', args: { index: s + '/index.bin', q: '检索' } });
+      } else if (n === 4) {
+        content = env('work_commit', { paths: ['corpus.jsonl', 'index.bin'], message: '语料与索引' });
+      } else if (n === 5) {
         content = env('submit_report', { summary: '语料与索引都做好了', changes: 'corpus.jsonl 与 index.bin', open: '' });
       } else {
         content = '回报已经交了。';
       }
+    } else if (sys.includes('你是核心代理')) {
+      // 代理模式（T5 旅程）：核心代用户挑人 → 建子工作 → 转达，最后收尾。
+      // 本场景排在"探针判支持原生"之后，所以用**原生**工具调用槽位（不是正文里的手写信封）。
+      const nTools = msgs.filter((m) => m.role === 'tool').length;
+      const toolText = msgs.filter((m) => m.role === 'tool').map((m) => m.content || '').join('\n');
+      const child = (toolText.match(/"session":"([^"]+)"/) || [])[1];
+      const call = (name, args) => [{ id: 'agency_' + name, type: 'function', function: { name, arguments: JSON.stringify(args) } }];
+      if (nTools === 0) {
+        calls = call('catalog_agents', { scope: 'all' });
+      } else if (nTools === 1) {
+        // 建会话 = 建 + 写开头 + 开工：opening 就是它的第一句（不再另发一条 task）。
+        calls = call('create_session', {
+          mode: 'single',
+          agents: [{ ref: '代甲' }],
+          opening: '把这件事做完',
+          request_id: 'agency-1',
+        });
+      } else {
+        content = '子工作已经开工，我盯着它。';
+      }
+    } else if (sawToolResult && allUser.includes('绝对路径读一下')) {
+      // pull 完的第二轮：外部工具读**沙箱里**的那一份（共享区对工具进程不可达）。
+      // 按工具结果条数收尾，别拿"成功输出里有没有内容"当判据——失败时会无限重发同一个调用。
+      const nAbs = (allUser.match(/\[工具结果\]/g) || []).length;
+      content = nAbs <= 1
+        ? JSON.stringify({ type: 'tool', module: 'toolbox', name: 'read_txt', args: { path: (sandboxRoot || '') + '/g.txt' } })
+        : JSON.stringify({ type: 'say', text: '读过了。' });
     } else if (sys.includes('【工作环境】') && !sawToolResult) {
       if (/read_txt/.test(sys)) {
         // 该 agent 的某个模块声明了外部工具（夹具 toolbox）：用**相对路径**调用，专门验证 cwd = 它自己的模块目录。
@@ -176,8 +207,9 @@ http.createServer((req, res) => {
         } else if (user.includes('坏信封')) {
           content = '{"type":"tool","name":"write","args":{"path":"a.md","content":"abc"}]}';
         } else if (user.includes('绝对路径')) {
-          // 外部工具 + **真实绝对路径**（用户投喂的文件）：这正是最初 read_txt 收到 work:/ 直接报错的那个场景
-          content = JSON.stringify({ type: 'tool', module: 'toolbox', name: 'read_txt', args: { path: (workRoot || '') + '/g.txt' } });
+          // 新模型：共享区对 agent 只读，外部工具要先 pull 进沙箱再读。
+          // 注意：本块上面有一个局部变量也叫 env（read_txt 的信封），这里不能调那个辅助函数。
+          content = JSON.stringify({ type: 'tool', name: 'work_pull', args: { paths: ['g.txt'] } });
         } else if (user.includes('顺便')) {
           content = '我先看一下这个文件。' + JSON.stringify(env);
         } else {

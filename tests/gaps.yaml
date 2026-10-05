@@ -31,103 +31,6 @@
     而代价是三套原生 API、每平台真机验证，且 CI 起不了 hypervisor（只能真机验 + env-skip）。
     项目成熟、需求更清楚时再做。
 
-
-- id: web.external-file-delete-not-reflected
-  scope: global
-  level: T5
-  why: |
-    用户在会话的共享区/沙箱里**手工删掉**文件后，@ 菜单还会把它列出来：前端按会话缓存文件清单，
-    只有应用内的上传/编辑/删除才让缓存失效。用户会照着菜单去引用一个已经不存在的文件。
-  how: |
-    给文件清单一个明确的过期判据：每次打开 @ 菜单重拉一次（不跨打开缓存），或随状态刷新按 mtime 失效。
-    不引入目录 watcher——本机、跨平台，代价不值。
-  accept: |
-    在会外删掉一个文件后，再打开 @ 菜单列不出它；应用内上传/编辑后**立刻**仍能列出来。
-  blocked_by: |
-    待排期：本轮先收口会话流与行渲染的统一，这条是观察到的界面同步问题，尚未动手。
-
-- id: session.delete-without-file-check
-  scope: global
-  level: T5
-  why: |
-    「删除会话」只确认"记录将被永久删除"，不看共享区与各 agent 沙箱里**还有没有文件**（产物可能还没被拿走）。
-    用户以为只是删记录，实际把工作区一起带走了。
-  how: |
-    删除前统计共享区与各沙箱里的文件（数量 + 总字节）；非空就如实列出来，让用户明确选择"连文件一起删"。
-  accept: |
-    工作区非空时删除会先列出文件并要求确认；工作区为空保持一步删除。
-  blocked_by: |
-    待排期（同上）：删除语义要一并定"记录与文件分开删"的话术，属于产品口径变更。
-
-- id: session.create-has-no-tier-choice
-  scope: global
-  level: T5
-  why: |
-    执行档位（本机档 / 虚拟机档）只能在会话建好之后的「编辑」里改，创建向导里没有这一项
-    （WorkSpec 只有 name/mode/agents/task/delegate）——建完再改是多余的一步。
-  how: |
-    创建向导加档位选择（默认本机档）；不可用的档位按现有 tier_readiness 逐项说明缺什么并禁用，
-    选定值随 WorkSpec 进 create_work。
-  accept: |
-    创建向导能选档位；选不可用档位时逐项说明缺什么；建出来的会话 meta 档位与所选一致。
-  blocked_by: |
-    待排期：档位可用性判定（exec::tier_readiness）已就位，缺的只是向导里那一格与 WorkSpec 的字段。
-
-- id: cli.webui-ctrl-c-exits-process
-  scope: global
-  level: T5
-  why: |
-    从 CLI 进 Web 转录中心后，Ctrl+C 直接结束整个进程，而不是退回 CLI（用户得重启程序）。
-  how: |
-    给 Web 服务器一个可中断的等待：收到 Ctrl+C / SIGINT 后正常关闭服务器并回到 CLI 主循环。
-  accept: |
-    Ctrl+C 后回到 CLI 提示符、进程仍在；再输入 webui 能重新起服务器。
-  blocked_by: |
-    待排期：要把 Web 服务器从"阻塞到出错"改成可中断等待（收 SIGINT 后正常关闭再回 CLI 主循环）。
-
-- id: session.children-not-deleted-with-parent
-  scope: global
-  level: T1
-  why: |
-    删主会话只删它自己（`Conductor::history_delete` 只处理一个目录），子会话（`<父>--<agent>`）留在盘上
-    变成孤儿：用户得一个个删。反过来，子会话本来就不该由用户单独删（它是核心按节点派生的），
-    但界面给每个子会话都渲染了删除按钮，删除它会让父子关系断掉。**既漏删又错开**。
-  how: |
-    ① 面向用户的删除面（`HistoryOps::delete` → `Conductor::history_delete`）**拒绝子会话**：
-    `meta.parent` 非空即报错，理由说清（"由核心管理，删父会话会一起删掉"）；
-    ② 删主会话时按 `meta.parent` 收集整棵子树（后序：先子后父），逐个撤围栏授权 → 移出内存 → 删目录；
-    ③ 子树里任一节点在生成中就整体拒绝（不能删到一半留下半个状态）；
-    ④ 前端：子会话不渲染删除按钮，父会话的删除按钮 title 写明"连子会话一起删"。
-    内部的 `session::History::delete`（纯存储机制）不受影响——系统路径还需要它。
-  accept: |
-    删主会话后：它的所有子会话一并消失（列表与目录都不再有）；直接删子会话被拒、理由明确且子会话仍在；
-    子树里有会话在生成时删除被拒；前端冒烟断言"子会话没有删除按钮、父会话的按钮接线"。
-  blocked_by: |
-    与 `session.children-stored-as-siblings` 同一批做（落盘位置改到主会话目录内部之后，"连带删除"
-    就是"删一个目录"；两处分开做等于改两遍）。删除口径还要与 `session.delete-without-file-check`
-    对齐（记录与文件分开删）。
-
-- id: session.children-stored-as-siblings
-  scope: global
-  level: T1
-  why: |
-    子会话现在是 `sessions/` 下**与主会话并列**的独立目录（名为 `<父>--<agent>`），父子关系只靠
-    `meta.parent` 这个字段维系。这让"删父带子"必须自己走一遍树，也让目录布局与语义脱节：
-    子会话在主会话目录之外，任何按目录做的操作（清理、统计、迁移、删父）都得先读全部 meta 才知道谁是谁的儿子。
-  how: |
-    子会话放进**主会话目录内部**（例如 `sessions/<主会话>/children/<agent>/`），`meta.parent` 保留为
-    事实与校验（看位置就知道归属）。落到代码：
-    ① session 的 `HistoryStore` 端口（`detail/fs_history.rs`）改布局与"名字 → 路径"的解析；
-    ② 列出 / 打开 / 删除按新布局递归，`history_list` 的树序与 `meta.parent` 保持一致（位置与字段同源）；
-    ③ 重建会话（`rebuild_session` / `ensure_session`）按新路径取子会话流水；
-    ④ GREEN FIELD，不留旧布局的读兼容：旧目录按"未迁移"对待，不静默当成新布局。
-  accept: |
-    建一个会派生节点的协作会话后：磁盘上只有 `sessions/<主会话>/children/<agent>/`（`sessions/` 下不再
-    与主会话并列出现子会话目录）；打开 / 列表 / 回档照常；删主会话 = 删一个目录，子会话随之消失。
-  blocked_by: |
-    与 `session.children-not-deleted-with-parent` 同一批（这条是它的前提）。等用户把问题说完再定实现细节
-    （sid 命名是否仍用 `<父>--<agent>`、children 的目录名取 agent 名还是节点名）。
-
 - id: fence.per-agent-write-roots
   scope: global
   level: T4
@@ -157,45 +60,12 @@
   accept: 授权围栏下该模块的工具跑通一次完整往返；或如实写明"必须把可执行文件放进模块目录"并落到文档与登记处。
   blocked_by: 缺少观察面
 
-- id: fence.leftover-grant-hides-parent
-  scope: global
-  level: T4
-  why: |
-    围栏给"数据边界叶子的直接父目录"授只读属性位（RIGHTS_STAT）时用的是**显式、非继承**的 ACE。
-    实测：`tests/` 上留着一条 `S-1-15-2-1128246502-…:(OI)(CI)(S)`（rights = Synchronize，IsInherited=False），
-    后果是**整个 `tests/` 子树在受限（沙箱）进程里不可读**——列目录、stat 子项、读文件一律拒绝访问，
-    而普通用户身份读得到；`git status` 因此把 `tests/` 下所有已跟踪文件报成"已删除"。
-    一条"只为了让容器判断存在性"的残留授权，反过来把父目录对整个沙箱隐藏：撤权没带走它。
-  how: |
-    1) 复现：在 `--fence-live` 下跑一次会建数据边界叶子的用例（或直接调 `confine::prepare_fence`），
-       然后 `icacls <叶子父目录> /findsid <容器SID> /T` 应命中；受限进程读该父目录应失败。
-    2) 先查撤权路径为什么没带走它：`grant_targets` 与撤销共用一份落点清单（见 ARCHITECTURE 六），
-       父目录那条 RIGHTS_STAT 是否在那份清单里、`--fence-clean` 的扫描是否覆盖它——查清再改。
-    3) `tests/<平台>/` 加一条探针：授权→撤权后父目录不再留有该 SID 的显式 ACE，且受限进程能列该目录。
-  accept: 撤权后父目录 `/findsid` 无命中、受限进程能列目录、`git status` 不再出现幻影删除。
-  blocked_by: 缺少实现
-
-- id: core.agency-mode
-  scope: global
-  level: T5
-  why: |
-    PHILOSOPHY「谁来决定」把"把决定权整块托付给核心"写成开发方向：用户给一个范围，核心在范围内自行决定
-    （今天的"代拟→用户确认"只是它的退化形态）。它是产品行为变化，必须有可判定的验收路径，不能停在"以后会做"。
-  how: |
-    1) 定契约：委托的**范围**（哪些决定可委、哪些不可）、**期限**（一次任务 / 一直）、**撤销**（随时收回、回到点名）；
-    2) 会话参数里加上这份委托（登记处或建工作时选），落盘可回放；
-    3) 提示词与工具面按"有委托 / 无委托"组装（无委托时保持今天的口径：代拟也要用户确认）；
-    4) T5 走一遍：有委托时核心自己建组并开工，转录里如实记录每个决定的出处；撤销后回到点名。
-  accept: 无委托时行为与今天一致；有委托时核心在范围内自行决定且转录可查；撤销即时生效。
-  blocked_by: 缺少实现
-
 - id: module.standalone-entry
   scope: global
   level: T5
   why: |
-    PHILOSOPHY「模块是给 AI 用的应用」把"模块可以独立运行"写成能力：模块自己就是能跑的东西时
-    （命令行工具 / 脚本 / GUI 应用），用户可以**完全不经过 AI** 直接用它。现在模块只经 agent 会话被使用，
-    这条路径没有入口、也没有验收判据。
+    模块的工具本来就是真命令，用户**完全不经过 AI** 也能自己跑它；但模块**没有声明自己的独立入口**，
+    产品也没有把"直接用模块"摆出来——现在模块只经 agent 会话被使用，这条路径没有入口、也没有验收判据。
   how: |
     1) 定契约：模块怎么声明自己的独立入口（`module.yaml` 加一节，例如命令行入口与参数；GUI 同理）；
     2) CLI 加一条"直接用模块"的命令：列出可独立运行的模块并跑它的入口；
@@ -203,3 +73,37 @@
     4) T5 走一遍：不开 AI 会话，直接用模块跑一次，产物落在用户指定目录。
   accept: 声明了独立入口的模块能不经 AI 直接跑通一次；没声明的模块在列表里如实标注"只能经 AI 使用"。
   blocked_by: 缺少实现
+
+- id: permission.management
+  scope: global
+  level: T2
+  why: |
+    **权限管理**是独立于会话的一类能力：它回答的是「谁能在本机、在哪些路径上做什么」，
+    不是「代理模式的一部分」。
+    它包含两块必须**一起**做的东西（共用同一份权限状态与同一处校验）：
+    1) **决定粒度**：核心代用户决定到哪一步。今天是两个刻度——**完全代理**（用户选代理形态 = 整块托付）
+    与**询问**（核心拿不准就回主对话问用户，即其余形态今天的口径）；将来可能还有别的粒度。
+    这里**没有"撤销"这个概念**：粒度是设置，不是把已给的权力收回来。
+    2) **额外路径权限**：按 agent / 会话设定额外的可写与只读路径（今天只有本次工作的 work/ 与各 agent
+    私沙箱，见 fence.per-agent-write-roots）。
+  how: |
+    定义一份可落盘、可回放的**权限状态**（决定粒度、范围、有效期、调用者身份、额外读写路径），
+    在动作执行前统一校验；粒度变化即时生效（改成询问就回到问用户）；路径权限落到各平台围栏的实现
+    （Windows 目录 ACL、Linux / macOS 规则文本），未配置时行为与今天一致。
+  accept: |
+    决定粒度可在完全代理与询问之间按会话（或更细的粒度）设置并即时生效：完全代理时核心自行决定，
+    询问时回到问用户；额外读写路径按设置对指定 agent 生效；未设置时行为与今天一致。
+  blocked_by: 缺少实现
+
+- id: work.commit-history-ui
+  scope: global
+  level: T5
+  why: |
+    共享区的提交记录与"任一提交点可还原"的机制已就位（`work_status` 能看到最近提交），但用户没有入口
+    去浏览提交历史或把共享区回滚到某个提交点——只能在会话里由 agent 看到状态。
+  how: |
+    1) CLI / Web 各加一个入口：列出某工作的提交（id / 作者 / 时间 / message / 改动清单）；
+    2) 选中一个提交点给出"回滚共享区到此处"的动作（调 `Workspace::work_restore`，走现有入站契约）；
+    3) 回滚要留可回放的记录，并与回档标记模型对齐（提交锚见 docs/session/session-model.md 的五）。
+  accept: 用户能在界面上看到提交历史，并把共享区回滚到任一提交点；回滚后新开的 agent 拉取到的是那一点的内容。
+  blocked_by: 缺少实现（呈现面未接入）

@@ -4,9 +4,12 @@ pub use crate::capabilities::session::domain::events::{
     idle, interrupted_note, last_compaction, stopped_note, working, CheckView, LineView, Live,
     Pending, SessionEvent, ToolCallView,
 };
-pub use crate::capabilities::session::domain::history::{AgentMeta, HistoryView, SessionMeta};
+pub use crate::capabilities::session::domain::history::{
+    AgentMeta, Delegation, HistoryView, RunState, SessionMeta,
+};
 pub use crate::capabilities::session::domain::rewind::{
-    find_line_id, last_line_within, max_reply, truncate_events, turn_of_line,
+    align_keep, cut_before_line, find_line_id, last_line_within, max_reply, next_line_id,
+    rewind_marks, truncate_events, turn_of_line, RewindMark, RewindMode,
 };
 pub use crate::capabilities::session::domain::session::{
     keep_whole_replies, stream_piece, summary_message, unique_work_name, AgentSession,
@@ -41,10 +44,14 @@ pub trait History: Send + Sync {
     fn create(&self, meta: &SessionMeta) -> Result<(), String>;
     /// 写回会话元信息（配置界面的编辑：会话身份的**唯一真相**在 meta.yaml）。
     fn save_meta(&self, meta: &SessionMeta) -> Result<(), String>;
-    /// 追加若干事件（只追加；回档也走追加，不物理删行）。
+    /// 追加若干事件（留档只走这条；删除 / 恢复走 `replace`）。
     fn append(&self, name: &str, events: &[serde_json::Value]) -> Result<(), String>;
+    /// 整体重写流水（删除 / 恢复会真的截断）。
+    fn replace(&self, name: &str, events: &[serde_json::Value]) -> Result<(), String>;
     /// 列出全部落盘会话（列表页按它渲染）。
     fn list(&self) -> Result<Vec<HistoryView>, String>;
+    /// **只读元信息**（不回放流水）：运行态（暂停 / 关闭）判定走它，不为此读整份转录。
+    fn meta(&self, name: &str) -> Result<SessionMeta, String>;
     /// 打开一个会话：元信息 + 事件流水（调用方按它回放状态）。
     fn load(&self, name: &str) -> Result<(SessionMeta, Vec<serde_json::Value>), String>;
     /// 删除一个会话目录；false = 本来就不存在。

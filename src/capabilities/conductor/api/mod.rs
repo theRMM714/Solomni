@@ -111,7 +111,7 @@ impl EventBus {
     /// 取 `since` 之后的事件批 + 当前头部 + **最老还留着的序号**（同一把锁内）。
     /// 为什么要把 oldest 给客户端：事件台会裁剪（BUS_MAX/BUS_KEEP），`since` 之后那一小段可能
     /// 已经永久没了。客户端据此**重新对齐**（拉一次历史重放），而不是按 seq 干等——干等的结果
-    /// 是后续批次全部滞留，只有刷新页面才恢复（真机上就是这个症状：必须手动刷新才同步）。
+    /// 是后续批次全部滞留，只有刷新页面才恢复。
     pub fn snapshot(&self, sid: Option<&str>, since: u64) -> (Vec<EventLine>, u64, u64) {
         let g = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         let lines = g
@@ -183,7 +183,7 @@ pub trait SessionOps: Send + Sync {
     fn create_work(&self, spec: WorkSpec) -> Result<(WorkOpened, u64), String>;
     /// 单 agent 会话里说一句（生成可被 `stop` 中止）。
     fn say(&self, sid: &str, text: &str, out: Output) -> Result<Advance, String>;
-    /// 继续一次会话（协作的执行阶段 / 单 agent 的继续）。
+    /// 继续一次会话：被停止过就先解冻整棵子树再接着走；协作从断点推进，单 agent / 代理补一轮「继续」。
     fn continue_flow(&self, sid: &str, out: Output) -> Result<Advance, String>;
     /// 协作推进到下一个阶段（task / slate / begin / answer）。
     fn collab_step(&self, sid: &str, step: CollabStep, text: &str) -> Result<Advance, String>;
@@ -191,7 +191,7 @@ pub trait SessionOps: Send + Sync {
     /// 核心按模块名给出的名单草案（协作代拟名单）。
     fn slate(&self, sid: &str) -> Result<Vec<AgentMeta>, String>;
     /// 回档：返回重放后的完整事件流（已是线格式，供前端整体重建）。
-    fn rewind(&self, sid: &str, keep_id: u64) -> Result<Vec<serde_json::Value>, String>;
+    fn rewind(&self, sid: &str, target: RewindTarget) -> Result<Vec<serde_json::Value>, String>;
     /// 压缩这个会话的上下文（AI 自己压；压不动如实说）。
     fn compact(&self, sid: &str) -> Result<Advance, String>;
     /// 改需求：同样返回完整重放。
@@ -208,7 +208,8 @@ pub trait SessionOps: Send + Sync {
     fn exists(&self, sid: &str) -> Result<bool, String>;
     /// 工作名的缺省与唯一化（命名策略归 `session`）：`base` 去空白、为空用 `fallback`、重名加尾号。
     fn unique_work_name(&self, base: &str, fallback: &str) -> Result<String, String>;
-    /// 请求停止该会话在跑的生成；返回是否确实有一个在跑。
+    /// 停止：把整棵子树落成 `stopped`（拦住后续派发与唤醒）并中断正在跑的生成；
+    /// 返回是否确实中断了一个在跑的生成。「继续」（`continue_flow`）是它的逆操作。
     fn stop(&self, sid: &str) -> bool;
     #[allow(dead_code)]
     fn is_running(&self, sid: &str) -> bool;
@@ -223,7 +224,7 @@ pub trait SessionOps: Send + Sync {
             Action::Continue => self.continue_flow(sid, out).map(Acted::Advanced),
             Action::Step(step, text) => self.collab_step(sid, step, text).map(Acted::Advanced),
             Action::Withdraw(agent) => self.withdraw_agree(sid, agent).map(Acted::Advanced),
-            Action::Rewind(keep_id) => self.rewind(sid, keep_id).map(Acted::Replayed),
+            Action::Rewind(target) => self.rewind(sid, target).map(Acted::Replayed),
             Action::UpdateTask(text) => self.update_task(sid, text).map(Acted::Replayed),
             Action::Compact => self.compact(sid).map(Acted::Advanced),
         }
@@ -237,6 +238,9 @@ pub trait SessionOps: Send + Sync {
 pub trait ConductorOps: Send + Sync {
     /// 运行包与档位的运行报告（只报事实）。
     fn runtime_report(&self, tier: Tier) -> Result<RuntimeReport, String>;
+    /// 新建工作时的**档位选择**（默认档 + 虚拟机档可用性与逐项前置）。
+    /// 与「开始」的校验同源（同一把 `tier_readiness` 尺子），界面照抄，不自己编话。
+    fn tier_choices(&self) -> Result<TierChoices, String>;
     /// 核心按任务推荐的 agent 草案（带理由；用户可改）。
     fn suggest_models(&self, task: &str, mode: WorkMode) -> Result<Vec<AgentSuggestion>, String>;
 }
@@ -271,6 +275,9 @@ pub struct ConductorHandle {
     bus: Arc<EventBus>,
     /// 日志句柄：呈现层经 LogOps 能力写日志，拿不到这个端口对象本身。
     log: Arc<dyn crate::kernel::ports::Log + Send + Sync>,
+    /// 代理会话注入成员侧执行者要的两份装配材料（与核心共享同一份，不在桥这一侧重装）。
+    book: crate::capabilities::tools::api::ToolBook,
+    texts: Arc<crate::capabilities::prompt::api::ToolTexts>,
 }
 
 /// 一次"要一个成员回合"的请求：泵在工作线程上让出，回头找主线程驱动（它才拿得到各 agent 的会话）。
@@ -336,12 +343,23 @@ pub enum Action<'a> {
     Step(CollabStep, &'a str),
     /// 撤回同意。
     Withdraw(&'a str),
-    /// 回档到某行之前。
-    Rewind(u64),
+    /// 回档：留档 / 删除 / 恢复。
+    Rewind(RewindTarget),
     /// 改需求。
     UpdateTask(&'a str),
     /// 压缩上下文（AI 自己压成摘要；此后此前内容不再发给模型，用户仍可查看）。
     Compact,
+}
+
+/// 回档目标：留档 / 删除按**行 id**，恢复按**留档标记 id**。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RewindTarget {
+    /// 留档到某一行之前：标记 + 折叠，可恢复。
+    Archive(u64),
+    /// 删除某一行及其后：真的截断，不可恢复。
+    Delete(u64),
+    /// 恢复到某个留档标记之前：删掉该标记及其后的全部内容。
+    Restore(u64),
 }
 
 /// 动作结果：生成类只回**事件台头部序号**（事实在事件台上，订阅者自己按 since 取）；
@@ -364,12 +382,15 @@ pub enum CollabStep {
     Decide,
 }
 
-/// 工作形态：单 agent（模块数不限）/ 协作（多 agent 分权协商）。
-/// 形态只用于校验与界面标签：会话实现只有「单 agent」与「协作」两种。
+/// 工作形态：单 agent（模块数不限）/ 协作（多 agent 分权协商）/ 代理（决定权整块交给核心）。
+/// 形态只用于校验与界面标签：会话实现只有「单 agent」与「协作」两种——
+/// 代理会话在实现上就是一个单会话（`mode="proxy"`），只是身份换成 `core_proxy` 角色。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WorkMode {
     Single,
     Collab,
+    /// 代理：**没有名单**；用户选这一形态就是在授予全权（见 `SessionMeta::delegation`）。
+    Proxy,
 }
 
 /// 一次工作里的一个 agent 实例（用户选定，或核心代拟的临时组合）。
@@ -406,6 +427,8 @@ pub struct WorkSpec {
     pub task: Option<String>,
     /// 保留：委托核心代拟名单（协作且未给 agent 时）。
     pub delegate: bool,
+    /// 执行档位（用户在创建向导里选的；默认 = 设置里的档位）。承载不了就由 create_work 如实拒绝。
+    pub tier: Tier,
 }
 
 /// 创建工作后的结果：最终实例名（重名已加尾号）、名单，以及**开场事实**。
@@ -450,6 +473,19 @@ pub struct RuntimeReport {
     pub rejected: Vec<String>,
     /// 被拒收的运行包（原因如实）。
     pub rejected_packages: Vec<String>,
+}
+
+/// 新建工作时的档位选择视图（创建向导用）：默认档 + 虚拟机档为什么不能选（逐项前置）。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct TierChoices {
+    /// 默认档位（设置里的 `tier`）。
+    pub default: String,
+    /// **虚拟机档**能不能选（与当前档位无关）。
+    pub vm_available: bool,
+    /// 不能选时的理由（能选 = 空）。
+    pub vm_unavailable_reason: String,
+    /// 虚拟机档的**逐项前置**（缺哪几项、每项怎么补）：界面照抄，不自己编话。
+    pub vm_requirements: Vec<crate::capabilities::workspace::api::VmRequirement>,
 }
 
 /// 配置界面里的一个 agent（名字冻结时仍要显示）。
@@ -524,6 +560,9 @@ pub struct SessionView {
     /// **这条工作有「本次需求」吗**：前端据此决定要不要渲染「改需求」按钮——
     /// 没有就**根本不渲染**（不是灰着）。这是领域事实（有没有需求行），不是"模式"。
     pub can_update_task: bool,
+    /// 运行态（`active` / `stopped` / `closed`）：**持久事实**，与短暂的 `running` 分开。
+    /// 界面据此标出"已暂停 / 已关闭"（这类会话不会再被派发或唤醒）。
+    pub run: String,
     /// 当前等用户裁决的事（None = 没有）：**快照形态**，与推的 `SessionEvent::Decision` 同源。
     /// 刷新页面时界面照样画得出那张卡；推的那条只是增量。
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -537,6 +576,8 @@ pub struct FilesView {
     pub work: Vec<String>,
     pub agents: Vec<FilesAgentView>,
     pub roots: FilesRootsView,
+    /// 工作区用量（文件数与总字节）：删除前如实交代"还有多少东西会被一起删"。
+    pub usage: crate::capabilities::workspace::api::WorkUsage,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
