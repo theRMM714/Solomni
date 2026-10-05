@@ -35,19 +35,22 @@
   scope: global
   level: T4
   why: |
-    「垂直分工开发」要求一个 agent 只写自己负责的目录。**已落地**（核心层）：共享工作区的读 / 提交作用域
+    「垂直分工开发」要求一个 agent 只写自己负责的目录。**核心层已落地**：共享工作区的读 / 提交作用域
     （内置读写在落点之后过白黑名单；`work_commit` / `work_pull` 越界整条拒绝）；模块目录**默认只读**
     （`module_write` 授权才整块可写，`userdata/` 恒可写）；私有沙箱永远全权；围栏按同一份派生授权
     （模块根进 `ro_tree` 递归只读，工作目录只读，写权只来自 `rw`）。
-    缺的是**三平台真机探针的 CI 结论**：本机是 drvfs 环境，Landlock 对"允许的根"的写也报 Permission denied
-    （干净 HEAD 同样失败，属既有环境限制），本地跑不出可判定的写结论。
+    **CI 现状**：Linux / macOS 的 `module_dir_is_read_only_but_userdata_is_writable` 与
+    `shared_area_is_outside_the_agent_fence` 真跑通过（envSkips=0）；Windows 的落点单测
+    `grant_targets_keep_module_read_only_and_cwd_read_only` 通过，但**容器级往返探针在托管 runner 上 env-skip**——
+    那边 AppContainer 被静默降级（容器内 `whoami /groups` 无包 SID 组），所以"真实工具进程是否真被关住"
+    这一层在 CI 上**没有结论**（同 `tests/cross-platform/gaps.yaml` 的 harness.restricted-token-causes-false-failures）。
   how: |
-    1) 探针已加：`tests/linux/`、`tests/macos/` 的 `module_dir_is_read_only_but_userdata_is_writable`；
-       既有的 `shared_area_is_outside_the_agent_fence` 钉"跨 agent 不可达"；
-    2) Windows：`confine/windows/tests.rs` 的 `grant_targets_keep_module_read_only_and_cwd_read_only` 钉 ro_tree 递归只读、cwd 只读；
-    3) 推 CI 后按 `docs/testing/execution-ci.md` 核对三平台 `sha`，确认这些探针通过。
-  accept: 三平台 CI 上「模块目录写被机制拒绝 + userdata 可写 + 跨 agent 不可达」探针全过；未配置时行为与今天一致。
-  blocked_by: 待三平台 CI 验证（本机环境跑不出写结论）
+    1) Linux / macOS：探针已在 CI 真跑，无需再补；
+    2) Windows：在**普通（或高完整性）会话**的机器上重跑 `node run-tests.js --fence-live`，
+       或用自托管 Windows runner；托管 runner 上容器会降级，读不到可判定的往返结论。
+  accept: 三平台都能给出「模块目录写被机制拒绝 + userdata 可写 + 跨 agent 不可达」的真机结论；
+    Linux / macOS 已在 CI 满足，Windows 待普通会话环境。
+  blocked_by: 待普通会话的 Windows 环境验证（托管 runner 静默降级 AppContainer）
 
 - id: module.external-harness-fence-reach
   scope: global

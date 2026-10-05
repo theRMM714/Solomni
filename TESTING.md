@@ -45,8 +45,11 @@
  所以它能被假实现整体替换——`routes.rs` 的 `FakeOps` 就是这么逐条测路由的。
 - T0 质量门禁已并入同一入口，且**全部是零容忍硬失败**：编译、结构审查、格式、clippy、编译告警、依赖重复。
 
-当前平台缺口账（`tests/cross-platform/gaps.yaml`、`tests/<平台>/gaps.yaml`）**为空**：三平台围栏机制与整仓测试
-已由三平台 CI 真跑通过（Windows AppContainer + 目录 ACL 授权与撤权、Linux Landlock、macOS seatbelt）。
+**逐平台**缺口账（`tests/<平台>/gaps.yaml`）**为空**：Linux Landlock、macOS seatbelt 与 Windows 的目录 ACL
+授权/撤权、落点清单都已由三平台 CI 真跑通过。跨平台账只剩一条**环境**条目
+`harness.restricted-token-causes-false-failures`：GitHub 托管的 `windows-latest` 上 AppContainer 会被静默降级
+（容器内 `whoami /groups` 无包 SID 组），所以"真实工具进程是否真被关住"的容器级往返探针 `env-skip`——
+这是环境结论，不是产品结论；要验它在**普通会话**的 Windows 机器上跑 `--fence-live`。
 
 仍未完成的缺口全部记在 `tests/gaps.yaml`（长期目标、已确认但尚未实施的产品/机制缺口都在那里，细则不复述条目内容）。
 条目存在 = 尚未完成；补齐后删除条目，不保留完成历史。
