@@ -706,7 +706,10 @@ impl Conductor {
         if self.workspace.work_has(sid, &name) && !overwrite {
             return Ok(false);
         }
-        self.workspace.write_work(sid, &name, bytes)?;
+        // 用户投喂 = 一次**权威提交**（作者 user）：共享区只有提交这一条写路径。
+        let work = self.work_root(sid).unwrap_or_else(|_| sid.to_string());
+        self.workspace
+            .work_commit_user(&work, &name, bytes, now_ts())?;
         Ok(true)
     }
 

@@ -52,7 +52,7 @@ roles:
 | 回合 | 这一份是什么 |
 | --- | --- |
 | 讨论回合 | `discussant`（发言动词 + 只读核实），**不含模块工具**（它不干活） |
-| 执行回合·单 agent 工作 | `solo` + 该 agent 的模块工具 |
+| 执行回合·单 agent 工作 | `solo` + 该 agent 的模块工具（含共享区版本化三件套） |
 | 执行回合·协作节点 | `executor` + 该 agent 的模块工具（比 `solo` 多一个回报工具） |
 | 核心代理回合 | `core_proxy`（代理工具 + 只读核实），**不含模块工具**（它代用户决定，不替 agent 干活） |
 
@@ -105,7 +105,7 @@ roles:
 
 | 占位符 | 运行时替换为 | 可达范围 |
 | --- | --- | --- |
-| `{{work_root}}` | 本次工作共享区 `session/<工作名>/work/` 的绝对路径 | 本工作内的 agent |
+| `{{work_root}}` | 本次工作共享区 `session/<工作名>/work/` 的绝对路径（**主副本**） | 本工作内的 agent（**只读**：agent 会话里写它会被工具层拒绝，写入走 `work_commit`） |
 | `{{sandbox_root}}` | 该 agent 私有沙箱 `session/<工作名>/<agent实例名>/` 的绝对路径 | 只有它自己 |
 | `{{module_roots}}` | 该 agent 各模块目录的绝对路径（一行一个） | 只有该模块所属的 agent |
 
@@ -135,8 +135,8 @@ prompts/
 | 角色 | 何时 | 工具面（`systools/roles.yaml`） |
 | --- | --- | --- |
 | `discussant` | 讨论阶段 | `say` `agree` `leave` `ask` `read` `list` `search` |
-| `executor` | 任务链节点（agent 子会话） | `read` `list` `write` `edit` `patch` `search` `submit_report` + 该 agent 的模块工具 |
-| `solo` | 用户建的单 agent 工作 | `read` `list` `write` `edit` `patch` `search` + 该 agent 的模块工具（**不发** `submit_report`） |
+| `executor` | 任务链节点（agent 子会话） | `read` `list` `write` `edit` `patch` `search` `work_pull` `work_commit` `work_status` `submit_report` + 该 agent 的模块工具 |
+| `solo` | 用户建的单 agent 工作 | `read` `list` `write` `edit` `patch` `search` `work_pull` `work_commit` `work_status` + 该 agent 的模块工具（**不发** `submit_report`） |
 | `planner` | 核心整理派发 | `read` `search` `plan` `slate` `verdict` |
 | `orchestrator` | 核心链中推进 | `read` `search` `node_verdict` `checklist` |
 | `core_proxy` | 核心代理（用户把决定权整块交给它，代用户决定） | `catalog_agents` `create_session` `send_session_message` `observe_session` `read_session_messages` `control_session` `read` `list` `search`（**不发**模块工具） |
@@ -163,6 +163,11 @@ prompts/
 | 系统工具调用 | 与模块工具同路径：工具行 + `[工具结果]`，可审计、可回放 |
 
 ## 九、当前状态
+
+**共享区是版本化工作区**：主副本 `work/` 对 agent 只读，agent 只写自己的沙箱（工作副本），
+`work_pull` / `work_commit` / `work_status` 三个**核心自有工具**做同步与查看；冲突按文件级三方比较判定，
+**整体拒绝并逐条点名**，不做自动合并（细则见 [workspace](../workspace/README.md) 与 [PRODUCT.md](../../PRODUCT.md)）；
+用户投喂是同一条提交路径里的**权威提交**（作者 = user）。
 
 工具面**按回合按身份注入**（总表不进提示词），越权调用如实拒绝并落工具行，悬空引用由结构审查硬失败挡下；
 核心操作与执行席回报都从**工具参数**取载荷。代理会话复用**通用成员循环**（没有「代理专用」分支），工具动作经队列桥回核心线程执行。

@@ -3,6 +3,8 @@
 use crate::capabilities::workspace::domain::module::Roster;
 use crate::capabilities::workspace::domain::packages::Library;
 use crate::capabilities::workspace::domain::workspace::{WorkFiles, WorkRoots, WorkUsage};
+use crate::capabilities::workspace::domain::workstore::{Commit, Index};
+use std::path::Path;
 
 /// 模块清单来源端口。
 pub trait ModuleSource {
@@ -33,4 +35,35 @@ pub trait Workdirs {
     fn list(&self, session: &str, agents: &[String]) -> Result<WorkFiles, String>;
     /// 统计工作区用量（共享区 + 各 agent 沙箱的文件数与总字节）：删除前如实交代用。
     fn usage(&self, session: &str, agents: &[String]) -> Result<WorkUsage, String>;
+}
+
+/// 共享区**版本库**的落盘端口：文件原语（主副本与沙箱都经它）+ 内容寻址对象 / 提交记录 / 每个 agent 的拉取基线。
+///
+/// 策略不在这一层：三方比较、路径校验、冲突判定都在 `domain::workstore`；本端口只保证
+/// "按给定根与相对路径读写"，并拒绝一切**符号链接逃逸**（相对路径本身干净不等于落点安全）。
+/// **只有 `service.rs` 持有它**（R12）。
+pub trait WorkStore: Send + Sync {
+    /// 读 root 下的一条干净相对路径；不存在 = None。
+    fn read_under(&self, root: &Path, rel: &str) -> Result<Option<Vec<u8>>, String>;
+    /// 写 root 下的一条干净相对路径（需要时建父目录）。
+    fn write_under(&self, root: &Path, rel: &str, bytes: &[u8]) -> Result<(), String>;
+    /// 删 root 下的一条干净相对路径（不存在 = 幂等成功）。
+    fn remove_under(&self, root: &Path, rel: &str) -> Result<(), String>;
+    /// 递归列 root 下的文件（相对路径、/ 分隔、稳定排序）。
+    fn list(&self, root: &Path) -> Result<Vec<String>, String>;
+    /// 当前 head 提交号；空仓库 = None。
+    fn head(&self, store: &Path) -> Result<Option<u64>, String>;
+    fn set_head(&self, store: &Path, id: u64) -> Result<(), String>;
+    /// 读一个提交记录；不存在 = None。
+    fn read_commit(&self, store: &Path, id: u64) -> Result<Option<Commit>, String>;
+    /// 写一个提交记录（调用方已分配 id；只增不改）。
+    fn write_commit(&self, store: &Path, commit: &Commit) -> Result<(), String>;
+    /// 列出全部提交号（升序）。
+    fn list_commits(&self, store: &Path) -> Result<Vec<u64>, String>;
+    /// 读某个 agent 的拉取基线；没有 = 空（不是错误）。
+    fn read_index(&self, store: &Path, agent: &str) -> Result<Index, String>;
+    fn write_index(&self, store: &Path, agent: &str, index: &Index) -> Result<(), String>;
+    /// 内容寻址对象：同指纹只写一次。
+    fn write_object(&self, store: &Path, hash: &str, bytes: &[u8]) -> Result<(), String>;
+    fn read_object(&self, store: &Path, hash: &str) -> Result<Vec<u8>, String>;
 }

@@ -46,9 +46,12 @@ pub struct Sandbox {
     pub work_name: String,
     /// 该 agent 的实例名。
     pub agent: String,
-    /// 本工作共享区（session/<工作名>/work）。
+    /// 本工作共享区（session/<工作名>/work）——**主副本**，agent 会话默认只读。
     pub shared: PathBuf,
-    /// 本 agent 私有沙箱（session/<工作名>/<agent>）。
+    /// 共享主副本这一席能不能写：agent 会话 false（写入走 work_commit），核心会话 true。
+    /// 它只影响**写**；读仍然可按 `resolve` 落到 Shared。
+    pub shared_writable: bool,
+    /// 本 agent 私有沙箱（session/<工作名>/<agent>）——也是它的工作副本。
     pub private: PathBuf,
     /// 成员模块：模块 id → 模块目录。
     pub modules: BTreeMap<String, PathBuf>,
@@ -125,6 +128,16 @@ impl Sandbox {
         }
     }
 
+    /// 该落点这一席能不能写：共享主副本只读时，写类工具一律拒绝（读仍然可以）。
+    pub fn can_write(&self, place: &Place) -> bool {
+        !matches!(place, Place::Shared) || self.shared_writable
+    }
+
+    /// 写共享主副本被拒时的如实说明（文案在提示词册）。
+    pub fn shared_read_only(&self) -> String {
+        self.texts.write_shared_read_only.clone()
+    }
+
     /// 允许的根：共享区、私有沙箱、每个成员模块目录（顺序稳定，便于取最长匹配）。
     fn roots(&self) -> Vec<(Place, PathBuf)> {
         let mut v = vec![
@@ -186,6 +199,8 @@ pub struct WorkRoots {
     pub shared: PathBuf,
     /// agent 实例名 → 私有沙箱目录。
     pub agents: BTreeMap<String, PathBuf>,
+    /// 版本库目录（`session/<工作名>/.work`）：提交记录、内容寻址对象与各 agent 的拉取基线。
+    pub store: PathBuf,
 }
 
 /// 一个区的用量：文件数 + 总字节（真实 stat，不是清单条数）。

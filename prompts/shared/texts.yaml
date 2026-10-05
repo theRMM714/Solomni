@@ -23,6 +23,7 @@ tool_texts:
   roots_shared: "- 本次工作的共享区：{{root}}"
   roots_private: "- 你私有的沙箱：{{root}}"
   roots_module: "- 模块 {{id}} 的目录：{{root}}"
+  write_shared_read_only: "共享区只读：改动请写进你自己的沙箱（工作副本），再用 work_commit 提交。"
   # 内置工具回执（systool）
   bad_args_json: "参数不是合法 JSON：{{error}}"
   # 参数不符（由 builtin_tools 的声明判定；why 说事实，signature 是工具签名，模型照着改）

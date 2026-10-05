@@ -20,10 +20,13 @@ used by people through the UI and by agents through the contract from a single d
 **② Several agents working on one job.**
 A shared workspace has concrete problems by default: they overwrite each other, ownership of artifacts is unclear, and
 someone builds on another's unfinished output as if it were fact. Here every agent has **its own sandbox**
-(`session/<name>/<agent-instance>/`), the shared area is only `work/`, and the only two roads across agents are that
+(`session/<name>/<agent-instance>/`), which is also its **working copy** of the shared area; the shared area `work/`
+is the **main copy and read-only for agents** — pull what you need with `work_pull`, edit in the sandbox, then commit
+with `work_commit`. Commits use a file-level three-way comparison, so a conflict rejects the whole commit and names
+each path instead of silently overwriting; any commit point can be restored. The only two roads across agents are that
 shared area and the transcript that enters the context — artifacts land in their owner's cell, so rework can find the
 person; capabilities are isolated too, a module's directory belongs only to the agent that holds it.
-(`work/` is writable by all agents today, so "who writes which part" is still a convention — the gap is
+(Finer-grained "who may write which part" is still a convention — the gap is
 `fence.per-agent-write-roots` in [tests/gaps.yaml](tests/gaps.yaml).)
 
 **③ When something goes wrong, you need to know what it saw and why it decided that.**
@@ -105,8 +108,8 @@ tools:                       # optional: external tool table
 
 - **One calling convention**: a start command + arguments + a stdin/stdout receipt. Scripts, skills, MCP servers
   and other harnesses are all instances of it.
-- A tool process can reach: this work's shared area + that agent's private sandbox + its own module directory;
-  it accepts **real absolute paths** only, and anything outside is refused.
+- A tool process can reach: that agent's private sandbox + its own module directory; the shared main copy is not
+  among them (pull before editing, commit when done); it accepts **real absolute paths** only, and anything outside is refused.
 - If it runs, it is a valid module; if it does not, the core reports the reason plainly — no guessing, no fallback.
 
 ### Run the demo

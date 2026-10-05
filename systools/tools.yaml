@@ -322,6 +322,47 @@ tools:
         non_empty: true
         desc: 幂等标识：同一个 request_id 重放不会重复控制
 
+  # —— 共享区版本化工作区：agent 只写自己的沙箱，用 pull / commit 与主副本同步 ——
+  work_pull:
+    capability: none              # 由 workspace 能力执行（经核心自有工具的派发路径），不经 SysIo
+    desc: |
+      把本次工作共享区（主副本）的指定路径拉进**你自己的沙箱**（同一相对路径），并记下拉取基线。
+      路径以共享区为根、用 / 分隔；可以是文件，也可以是文件夹（整棵拉取）。
+      本地已改、上游也改过的路径**不会被覆盖**，会如实报冲突——先用 work_status 看状态。
+    params:
+      paths:
+        type: array
+        required: true
+        desc: 要拉取的路径数组（相对共享区、/ 分隔的字符串；文件夹会整棵展开）
+  work_commit:
+    capability: none              # 由 workspace 能力执行；共享区只有提交这一条写路径
+    desc: |
+      把沙箱里选中的文件提交回共享区。逐个路径做三方比较（你拉取时的基线 / 沙箱当前 / 共享区当前）：
+      任一条冲突 → **整个提交被拒**并逐条点名，绝不静默覆盖别的 agent 的改动。
+      要删除共享区里的文件，用 deletes 显式列出（不会因为沙箱里文件不见了就删）。
+    params:
+      paths:
+        type: array
+        desc: 要提交的路径数组（相对共享区、/ 分隔；文件夹会整棵展开为沙箱里的文件）
+      deletes:
+        type: array
+        desc: 要删除的共享区路径数组（相对共享区、/ 分隔）；删除必须显式列出
+      message:
+        type: string
+        required: true
+        non_empty: true
+        desc: 提交说明（一句话说清这次改了什么）
+  work_status:
+    capability: none              # 只读：不碰文件，读版本库与拉取基线
+    parallel: true                # 只读、无副作用：同一回复里的多个读取可以并发跑
+    desc: |
+      读取共享区的当前提交与路径清单，以及你的工作副本逐条状态
+      （未拉取 / 一致 / 本地有修改 / 上游有更新 / 冲突）。先看它再决定拉取或提交哪些路径。
+    params:
+      paths:
+        type: array
+        desc: 只看这些路径（相对共享区、/ 分隔）；省略 = 你已拉取过的全部路径
+
   # —— 协作动词：讨论阶段的表态（声明式工具：声明在总表，由角色面按回合发放）——
   say:
     capability: none

@@ -135,6 +135,84 @@ fn fs_workspace_reports_usage_by_area() {
     let _ = std::fs::remove_dir_all(&root);
 }
 
+// ---------- FsWorkStore ----------
+
+/// 真实版本库：文件原语 + 内容寻址对象 / 提交 / head / 基线往返；**符号链接逃逸必须被拒**。
+#[test]
+fn fs_work_store_round_trips_and_refuses_symlink_escapes() {
+    use crate::capabilities::workspace::detail::fs_workstore::FsWorkStore;
+    use crate::capabilities::workspace::domain::workstore::{Change, ChangeKind, Commit, Index};
+    use crate::capabilities::workspace::ports::WorkStore;
+
+    let root = scratch("fs-workstore");
+    let shared = root.join("work");
+    let sandbox = root.join("a");
+    let store = root.join(".work");
+    std::fs::create_dir_all(&shared).expect("建共享区");
+    std::fs::create_dir_all(&sandbox).expect("建沙箱");
+    let s = FsWorkStore::new();
+
+    // 空仓库不是错误。
+    assert_eq!(s.head(&store).unwrap(), None);
+    assert!(s.list(&shared).unwrap().is_empty());
+    assert!(s.read_index(&store, "a").unwrap().is_empty());
+    assert!(s.read_commit(&store, 1).unwrap().is_none());
+    assert!(s.read_object(&store, "nope").is_err());
+
+    // 文件原语：写要建父目录，读不到 = None，删除幂等，列目录相对 / 分隔。
+    assert_eq!(s.read_under(&sandbox, "sub/out.txt").unwrap(), None);
+    s.write_under(&sandbox, "sub/out.txt", b"hi").unwrap();
+    assert_eq!(
+        s.read_under(&sandbox, "sub/out.txt").unwrap().as_deref(),
+        Some(&b"hi"[..])
+    );
+    assert_eq!(s.list(&sandbox).unwrap(), vec!["sub/out.txt"]);
+    s.remove_under(&sandbox, "sub/out.txt").unwrap();
+    s.remove_under(&sandbox, "sub/out.txt").unwrap();
+    assert_eq!(s.read_under(&sandbox, "sub/out.txt").unwrap(), None);
+
+    // 对象 / 提交 / head / 拉取基线。
+    s.write_object(&store, "h1", b"obj").unwrap();
+    assert_eq!(s.read_object(&store, "h1").unwrap(), b"obj");
+    let mut tree = std::collections::BTreeMap::new();
+    tree.insert("a/b.txt".to_string(), "h1".to_string());
+    let c = Commit {
+        id: 1,
+        parent: None,
+        author: "a".to_string(),
+        session: "w--a".to_string(),
+        time: 1,
+        message: "首提交".to_string(),
+        changes: vec![Change {
+            path: "a/b.txt".to_string(),
+            kind: ChangeKind::Add,
+            hash: "h1".to_string(),
+        }],
+        tree,
+    };
+    s.write_commit(&store, &c).unwrap();
+    s.set_head(&store, 1).unwrap();
+    assert_eq!(s.head(&store).unwrap(), Some(1));
+    assert_eq!(s.list_commits(&store).unwrap(), vec![1]);
+    assert_eq!(s.read_commit(&store, 1).unwrap().unwrap(), c);
+    let mut idx = Index::new();
+    idx.insert("a/b.txt".to_string(), "h1".to_string());
+    s.write_index(&store, "a", &idx).unwrap();
+    assert_eq!(s.read_index(&store, "a").unwrap(), idx);
+
+    // 符号链接逃逸：根外的目录被链接进沙箱，写它必须被拒（绝不写进根外）。
+    #[cfg(unix)]
+    {
+        let outside = root.join("outside");
+        std::fs::create_dir_all(&outside).expect("建根外目录");
+        std::os::unix::fs::symlink(&outside, sandbox.join("link")).expect("造链接");
+        let err = s.write_under(&sandbox, "link/pwn.txt", b"x").unwrap_err();
+        assert!(err.contains("符号链接") || err.contains("越过"), "{}", err);
+        assert!(!outside.join("pwn.txt").exists(), "绝不能写进根外");
+    }
+    let _ = std::fs::remove_dir_all(&root);
+}
+
 // ---------- FsSysIo ----------
 
 #[test]

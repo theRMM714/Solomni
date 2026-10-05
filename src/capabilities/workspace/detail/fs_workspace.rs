@@ -100,6 +100,7 @@ impl Workdirs for FsWorkspace {
         Ok(WorkRoots {
             shared: dir.join("work"),
             agents: map,
+            store: dir.join(".work"),
         })
     }
 

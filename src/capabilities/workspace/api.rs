@@ -12,6 +12,10 @@ pub use crate::capabilities::workspace::domain::packages::{Library, PackageManif
 pub use crate::capabilities::workspace::domain::workspace::{
     safe_file_name, AreaUsage, Place, Sandbox, Sandboxes, WorkFiles, WorkRoots, WorkUsage,
 };
+pub use crate::capabilities::workspace::domain::workstore::{
+    Change, ChangeKind, CommitReport, CommitRequest, CommitSummary, PullReport, StatusEntry,
+    StatusReport,
+};
 
 /// 工作区的**队列面**：呈现层要的清单事实（模块公地 + 拒收原因）。
 /// 只报事实、不做选择——"挑哪些模块组合成一个 agent"是用户与核心的事。
@@ -20,7 +24,7 @@ pub trait WorkspaceOps: Send + Sync {
 }
 
 /// 工作区的**用例面**（`service.rs` 实现）：别的能力要清单事实、要工作区目录，走这里；
-/// 三个出站端口（`ModuleSource` / `PackageSource` / `Workdirs`）**只由它持有**（R12）。
+/// 出站端口（`ModuleSource` / `PackageSource` / `Workdirs` / `WorkStore`）**只由它持有**（R12）。
 pub trait Workspace: Send + Sync {
     /// 模块公地：合法模块 + 拒收原因（清单即事实，每次重扫）。
     fn roster(&self) -> Roster;
@@ -30,8 +34,6 @@ pub trait Workspace: Send + Sync {
     fn runtimes_dir(&self) -> std::path::PathBuf;
     /// 准备工作区：建 session/<工作名>/work 与每个 agent 的沙箱目录。
     fn prepare(&self, session: &str, agents: &[String]) -> Result<(), String>;
-    /// 界面投喂：把文件写进本工作的 work/（文件名由调用方净化）。
-    fn write_work(&self, session: &str, name: &str, bytes: &[u8]) -> Result<(), String>;
     /// work/ 下是否已有同名文件（上传同名冲突判定）。
     fn work_has(&self, session: &str, name: &str) -> bool;
     /// 列出本工作可引用的文件（work/ 与各 agent 沙箱；相对路径、/ 分隔、排序稳定）。
@@ -40,4 +42,36 @@ pub trait Workspace: Send + Sync {
     fn usage(&self, session: &str, agents: &[String]) -> Result<WorkUsage, String>;
     /// 沙箱寻址根（work 与各 agent 私有区）：布局机制在适配层，拼接与越界校验在本能力。
     fn roots(&self, session: &str, agents: &[String]) -> Result<WorkRoots, String>;
+
+    /// **拉取**：把主副本（head）的路径写进该 agent 的沙箱同相对路径，并更新它的拉取基线。
+    /// 本地已改且上游也改的路径**不覆盖**，只报冲突。
+    fn work_pull(&self, work: &str, agent: &str, paths: &[String]) -> Result<PullReport, String>;
+    /// **提交**：文件级三方比较（基线 / 沙箱 / head）。任一条冲突 → 整个提交拒绝、逐条点名。
+    fn work_commit(
+        &self,
+        work: &str,
+        agent: &str,
+        session: &str,
+        req: &CommitRequest,
+    ) -> Result<CommitReport, String>;
+    /// **用户投喂**：一次权威提交（作者 = user），不做冲突拦截；返回提交号。
+    fn work_commit_user(
+        &self,
+        work: &str,
+        path: &str,
+        bytes: &[u8],
+        time: i64,
+    ) -> Result<u64, String>;
+    /// **状态**：head、主副本在 head 上的路径清单、以及逐条基线状态；`paths` 省略 = 全部相关路径。
+    fn work_status(
+        &self,
+        work: &str,
+        agent: &str,
+        paths: &[String],
+    ) -> Result<StatusReport, String>;
+    /// 把主副本物化回某个提交点（只改共享区，不动各会话）。
+    /// **消费方是回档对齐与提交历史（缺口 `work.rewind-and-file-state`）**：机制先就位、进测试，
+    /// 生产调用点随回档重做接入——二进制 crate 里暂时没有生产调用点的接口方法会被 dead_code 误报。
+    #[allow(dead_code)]
+    fn work_restore(&self, work: &str, commit: u64) -> Result<(), String>;
 }

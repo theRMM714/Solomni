@@ -6,8 +6,8 @@
 use super::builders::{RecordingRunner, SilentRunner};
 use super::doubles::{
     abs, module_of, FakeCatalog, InMemoryHistory, InMemoryPackages, InMemorySettings,
-    InMemorySysIo, InMemoryWorkspace, NoFenceHost, RecordingFence, ScriptGateway, SharedScript,
-    TestPrompts, VecSource,
+    InMemorySysIo, InMemoryWorkStore, InMemoryWorkspace, NoFenceHost, RecordingFence,
+    ScriptGateway, SharedScript, TestPrompts, VecSource,
 };
 use crate::capabilities::llm::api::{Chat, CompleteOpts, Msg};
 use crate::capabilities::llm::ports::{ChatGateway, ModelCatalog};
@@ -276,6 +276,75 @@ fn workspace_double_prepares_writes_lists_and_propagates_failure() {
         !bad.work_has("w", "x"),
         "布尔查询没有错误通道，不受失败注入影响"
     );
+}
+
+// ---------- WorkStore ----------
+
+/// 版本库端口替身的契约：文件原语、空仓库、对象/提交/基线往返、失败传播。
+#[test]
+fn work_store_double_round_trips_files_commits_index_and_objects() {
+    use crate::capabilities::workspace::domain::workstore::{Change, ChangeKind, Commit, Index};
+    use crate::capabilities::workspace::ports::WorkStore;
+    let s = InMemoryWorkStore::new();
+    let root = abs(&["w", "work"]);
+    let store = abs(&["w", ".work"]);
+
+    // 空仓库不是错误。
+    assert_eq!(s.head(&store).unwrap(), None);
+    assert!(s.list(&root).unwrap().is_empty());
+    assert!(s.read_index(&store, "a").unwrap().is_empty());
+    assert!(s.read_commit(&store, 1).unwrap().is_none());
+    assert!(s.read_object(&store, "nope").is_err());
+
+    // 文件原语：读不到 = None；删除幂等；列目录稳定。
+    assert_eq!(s.read_under(&root, "a/b.txt").unwrap(), None);
+    s.write_under(&root, "a/b.txt", b"hi").unwrap();
+    assert_eq!(
+        s.read_under(&root, "a/b.txt").unwrap().as_deref(),
+        Some(&b"hi"[..])
+    );
+    assert_eq!(s.list(&root).unwrap(), vec!["a/b.txt"]);
+    s.remove_under(&root, "a/b.txt").unwrap();
+    s.remove_under(&root, "a/b.txt").unwrap();
+    assert_eq!(s.read_under(&root, "a/b.txt").unwrap(), None);
+
+    // 对象 / 提交 / head / 拉取基线。
+    s.write_object(&store, "h1", b"obj").unwrap();
+    assert_eq!(s.read_object(&store, "h1").unwrap(), b"obj");
+    let mut tree = std::collections::BTreeMap::new();
+    tree.insert("a/b.txt".to_string(), "h1".to_string());
+    let c = Commit {
+        id: 1,
+        parent: None,
+        author: "a".to_string(),
+        session: "w--a".to_string(),
+        time: 1,
+        message: "首提交".to_string(),
+        changes: vec![Change {
+            path: "a/b.txt".to_string(),
+            kind: ChangeKind::Add,
+            hash: "h1".to_string(),
+        }],
+        tree,
+    };
+    s.write_commit(&store, &c).unwrap();
+    s.set_head(&store, 1).unwrap();
+    assert_eq!(s.head(&store).unwrap(), Some(1));
+    assert_eq!(s.list_commits(&store).unwrap(), vec![1]);
+    assert_eq!(s.read_commit(&store, 1).unwrap().unwrap(), c);
+    let mut idx = Index::new();
+    idx.insert("a/b.txt".to_string(), "h1".to_string());
+    s.write_index(&store, "a", &idx).unwrap();
+    assert_eq!(s.read_index(&store, "a").unwrap(), idx);
+
+    // 失败注入：每个端口调用都如实传播。
+    let bad = InMemoryWorkStore::new().fail_with("版本库不可用");
+    assert_eq!(
+        bad.write_under(&root, "x", b"").unwrap_err(),
+        "版本库不可用"
+    );
+    assert_eq!(bad.head(&store).unwrap_err(), "版本库不可用");
+    assert_eq!(bad.read_object(&store, "h").unwrap_err(), "版本库不可用");
 }
 
 // ---------- SysIo ----------

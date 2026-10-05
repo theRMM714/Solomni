@@ -23,3 +23,5 @@
 | `src/capabilities/conductor/ports.rs` |
 | `src/capabilities/conductor/domain/proxy.rs` |
 | `src/capabilities/conductor/service/proxy.rs` |
+| `src/capabilities/conductor/service/work_tools.rs` |
+| `src/capabilities/conductor/domain/work.rs` |

@@ -30,8 +30,16 @@ pub struct FenceSpec {
 impl FenceSpec {
     /// 从该 agent 的沙箱派生（模块目录按模块 id 升序，顺序稳定；同一模块不会同属两个 agent）。
     pub fn from_sandbox(sb: &Sandbox, net: bool) -> FenceSpec {
-        let mut rw = vec![sb.shared.clone(), sb.private.clone()];
+        // 共享主副本只有在**这一席可写**时才进 rw：agent 会话默认只读，
+        // 于是模块外部工具进程也读不到 / 写不了未拉取进沙箱的主副本内容。
+        let mut rw = Vec::new();
+        if sb.shared_writable {
+            rw.push(sb.shared.clone());
+        }
+        rw.push(sb.private.clone());
         rw.extend(sb.modules.values().cloned());
+        rw.sort();
+        rw.dedup();
         FenceSpec {
             agent: sb.agent.clone(),
             rw,

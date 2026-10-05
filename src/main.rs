@@ -94,6 +94,7 @@ fn main() {
     );
     let history = capabilities::session::detail::fs_history::FsHistory::new(root.join("session"));
     let workspace = capabilities::workspace::detail::FsWorkspace::new(root.join("session"));
+    let workstore = capabilities::workspace::detail::FsWorkStore::new();
     // 保留名表（内置工具名）由**组合根**问一次工具能力后交进去：清单校验归 workspace，
     // 名字空间归 tools，两边不互相依赖。
     let source = capabilities::workspace::detail::FsModules::new(
@@ -191,6 +192,7 @@ fn main() {
             Arc::new(source),
             Arc::new(packages),
             Arc::new(workspace),
+            Arc::new(workstore),
         ));
 
     let mut conductor = capabilities::conductor::service::Conductor::new(

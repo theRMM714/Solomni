@@ -41,6 +41,8 @@ impl Conductor {
             list.push(crate::capabilities::workspace::api::Sandbox {
                 work_name: work.clone(),
                 agent: a.name.clone(),
+                // 共享主副本对 agent **只读**：写入走 work_commit（见 PRODUCT.md 的版本化工作区）。
+                shared_writable: false,
                 shared: roots.shared.clone(),
                 private,
                 modules,
@@ -66,6 +68,9 @@ impl Conductor {
         // 这一席的身份：用户建的单 agent 会话 = solo，协作子会话 = executor（见 systools/roles.yaml）。
         role: &str,
     ) -> crate::capabilities::session::api::MemberTools {
+        // 角色表发放的系统工具 id 清单（工具面的名字部分）；核心自有工具按它决定装不装。
+        let allowed = self.role_tools(role);
+        let handlers = self.work_handlers(sb, &allowed);
         crate::capabilities::session::api::MemberTools {
             mode,
             modules: crate::capabilities::session::api::tool_table(modules),
@@ -84,12 +89,32 @@ impl Conductor {
             // 从零开始；按落盘转录重建时由调用方按转录里的最大值续号（见 rebuild_session）。
             reply_seq: 0,
             // 这一席的系统工具面**由角色表发放**（越权校验的唯一判据）：给什么写什么，代码里不留第二份名单。
-            allowed: self.role_tools(role),
+            allowed,
             // 能不能用自己模块的工具、以及工具说明块的素材：都按角色表与这个 agent 的模块装配期算好。
             with_modules: self.systools.allows_module_tools(role),
             notes: crate::capabilities::tools::api::tool_notes(&*self.prompt, sb, modules),
-            handlers: Vec::new(),
+            handlers,
         }
+    }
+
+    /// 核心自有的**共享区版本化**工具执行者：只在角色面确实发到它们时才装。
+    /// 与代理工具同一套路：成员循环只问"谁认领这个名字"，核心自有工具不是循环里的特例。
+    fn work_handlers(
+        &self,
+        sb: &crate::capabilities::workspace::api::Sandbox,
+        allowed: &[String],
+    ) -> Vec<Arc<dyn crate::kernel::ports::ToolHandler>> {
+        use crate::capabilities::conductor::domain::work as dw;
+        if !allowed.iter().any(|t| dw::is_work_tool(t)) {
+            return Vec::new();
+        }
+        vec![Arc::new(
+            crate::capabilities::conductor::service::work_tools::WorkHandler::new(
+                Arc::clone(&self.workspace),
+                &sb.work_name,
+                &sb.agent,
+            ),
+        )]
     }
 
     /// 一轮内对同一个成员最多提醒几次（用户可设，见 session-model.md 二）。

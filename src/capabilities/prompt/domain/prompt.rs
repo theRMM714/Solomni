@@ -215,6 +215,8 @@ pub struct ToolTexts {
     pub roots_private: String,
     /// 变量：id, root
     pub roots_module: String,
+    /// 共享主副本只读时，写类工具的如实拒绝（无变量）。
+    pub write_shared_read_only: String,
     // —— 内置工具回执（systool）——
     /// 变量：error
     pub bad_args_json: String,

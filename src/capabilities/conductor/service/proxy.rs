@@ -661,6 +661,8 @@ impl Conductor {
         let sb = Sandbox {
             work_name: meta.name.clone(),
             agent: d::SPEAKER.to_string(),
+            // 核心自己不出现在工具进程里；这里保持可写只是维持既有寻址，写类工具不在它的角色面上。
+            shared_writable: true,
             shared: roots.shared.clone(),
             private: roots.shared.clone(),
             modules: BTreeMap::new(),

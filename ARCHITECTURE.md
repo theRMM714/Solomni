@@ -41,7 +41,8 @@ presentation/{cli,web} ──▶ capabilities（含协调业务 conductor）─�
 | `ModelCatalog` | 按端点与密钥列出一条通道当前可用的模型名 | `HttpModelCatalog` |
 | `SettingsStore` | 登记处持久化（providers / models / settings / agents 四个 yaml） | `YamlSettingsStore` |
 | `ModuleSource` / `PackageSource` | 模块清单来源（扫描 `modules/`）/ 运行包库来源（扫描依赖文件夹 `runtimes/`） | `FsModules` / `FsPackages` |
-| `Workdirs` | 一次工作的共享区、各 agent 沙箱、文件清单、用量与寻址根 | `FsWorkspace` |
+| `Workdirs` | 一次工作的共享区、各 agent 沙箱、版本库目录、文件清单、用量与寻址根 | `FsWorkspace` |
+| `WorkStore` | 共享区版本库的落盘：文件原语 + 内容寻址对象 + 提交记录 + 每个 agent 的拉取基线（并拒绝符号链接逃逸） | `FsWorkStore` |
 | `SysIo` | 内置文件工具的读写机制（读严格 UTF-8、非法字节如实标注；写一律 UTF-8） | `FsSysIo` |
 | `HistoryStore` | 会话历史：顶层会话一个目录，子会话落在**父会话目录内部**（meta + 事件流水） | `FsHistory` |
 | `PromptSource` | 提示词册加载（`prompts/`） | `YamlPrompts` |
@@ -88,7 +89,9 @@ presentation/{cli,web} ──▶ capabilities（含协调业务 conductor）─�
 ## 六、状态与落盘契约
 
 **布局**（机制口径）只在 [docs/session/session-model.md](docs/session/session-model.md) 的「形态」画一次：
-`session/<工作名>/` 下是 `meta.yaml`、`transcript.jsonl`、共享区 `work/`、各 agent 沙箱与 `children/`。
+`session/<工作名>/` 下是 `meta.yaml`、`transcript.jsonl`、共享区主副本 `work/`、版本库 `.work/`、各 agent 沙箱与 `children/`。
+共享区是**版本化工作区**：主副本对 agent 只读，agent 的沙箱就是它的工作副本，`work_pull` / `work_commit` 做同步；
+提交点是内容寻址的整棵树，任一点都能物化回主副本（`work_restore`）。
 **目录保留名**（`work` / `children`）的名单在 `systools/names.yaml`：布局一改就改表，代码里不硬编码。
 
 - **转录即状态**：流水只追加；回档**只追加一条 `{"type":"rewind"}` 记录**，不物理删行；会话内容 = 回放到最后一个截断点。内存与落盘不一致时**以流水为准**。
@@ -107,7 +110,8 @@ presentation/{cli,web} ──▶ capabilities（含协调业务 conductor）─�
 - 会话的旁路配置记录（`{"type":"config"}`）只在编辑提交时追加：供呈现与审计，**不进模型上下文**，回放与状态派生跳过它。
 - 出站模型调用的参数由核心决定、随端口传下去（`LlmOpts{stream, timeout_secs}`），取值来自**全局设置**；`Output` 只管回包形状。
   调用失败**不是**模型的回复：`Completion.error` 与正文分离，上层据此发 `Notice` 并**中断本轮**（不落转录行），会话保持可继续。
-- **围栏**（策略在 `capabilities/tools/domain/fence.rs`，机制在 `detail/confine/`）：可达范围 = 共享区 + 自己的私有沙箱 + 自己的模块目录 + 用户显式授权的只读根（`.home/settings.yaml` 的 `fence_read`，默认空）；
+- **围栏**（策略在 `capabilities/tools/domain/fence.rs`，机制在 `detail/confine/`）：可达范围 = 自己的私有沙箱 + 自己的模块目录 + 用户显式授权的只读根（`.home/settings.yaml` 的 `fence_read`，默认空）；
+  共享主副本**只有在"这一席可写"时**才进 rw（核心会话），agent 会话默认只读——工具层与围栏层两处都挡住直接写；
   工具进程走**守门进程**（本程序 `--fence-run`），环境不继承父进程（**密钥与凭据不进工具进程**），`HOME` / `TEMP` 等落进该 agent 的沙箱。
   **一个 agent 一个容器 profile**，守门进程是唯一建它的地方并记进 `.home/fence-grants.json` 台账；`--fence-clean` 按台账回收、再在产品根内扫掉台账外的孤儿授权与遗留 profile。
   机制验证分三态：`Enforced` / `EnvUnavailable`（本机不允许，如实降级照跑）/ `Broken`（我们写错了，未授权时段**拒绝执行**）。

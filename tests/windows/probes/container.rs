@@ -103,6 +103,45 @@ fn container_cannot_write_outside_its_roots() {
     assert_ne!(code, Some(0));
 }
 
+/// **共享区产品契约**：容器的 rw 只有 agent 沙箱（共享主副本不在其中），
+/// 所以模块工具进程绕不过 work_pull / work_commit 直接读写共享区（工具层那一半由 workspace 的用例钉住）。
+#[test]
+fn container_keeps_the_shared_area_out_of_reach() {
+    if skip_unless_live("container_keeps_the_shared_area_out_of_reach") {
+        return;
+    }
+    let sandbox = scratch("container-shared-sandbox");
+    let shared = scratch("container-shared-work");
+    let planted = shared.join("planted.txt");
+    std::fs::write(&planted, "SHARED-CONTENT").unwrap();
+    // 运行期 agent 的真实形态：rw = [沙箱]，共享区不在其中。
+    let spec = spec_for(&sandbox);
+
+    // 沙箱里写得进（对照：不是整条围栏坏了）。
+    let ok = sandbox.join("out.txt");
+    let (code, _out, err) = run_launcher(&spec, &format!("echo ok> {}", ok.display()));
+    if env_blocks_container(&err) {
+        eprintln!(
+            "[探针] 本环境不允许容器围栏，跳过共享区断言：{}",
+            err.trim()
+        );
+        return;
+    }
+    assert_eq!(code, Some(0), "沙箱要写得进：{}", err);
+    assert!(ok.exists(), "沙箱要写得进：{}", err);
+
+    // 共享区写不进、读不到。
+    let target = shared.join("pwn.txt");
+    let (_wc, _wo, _we) = run_launcher(&spec, &format!("echo x> {}", target.display()));
+    assert!(!target.exists(), "共享区不该被工具进程直接写");
+    let (_rc, ro, _re) = run_launcher(&spec, &format!("type {}", planted.display()));
+    assert!(
+        !ro.contains("SHARED-CONTENT"),
+        "共享区不该被工具进程直接读：{}",
+        ro
+    );
+}
+
 #[test]
 fn container_has_no_network() {
     if skip_unless_live("container_has_no_network") {

@@ -25,7 +25,7 @@ use crate::capabilities::tools::ports::SystoolsSource;
 use crate::capabilities::tools::ports::{FileRead, SysIo, ToolRunner};
 use crate::capabilities::workspace::api::{Library, PackageManifest};
 use crate::capabilities::workspace::api::{Module, ModuleManifest};
-use crate::capabilities::workspace::ports::{ModuleSource, PackageSource, Workdirs};
+use crate::capabilities::workspace::ports::{ModuleSource, PackageSource, WorkStore, Workdirs};
 use crate::kernel::api::Tier;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -169,6 +169,7 @@ impl Workdirs for InMemoryWorkspace {
         Ok(crate::capabilities::workspace::api::WorkRoots {
             shared: abs(&[session, "work"]),
             agents: map,
+            store: abs(&[session, ".work"]),
         })
     }
     fn write_work(&self, session: &str, name: &str, bytes: &[u8]) -> Result<(), String> {
@@ -242,6 +243,219 @@ impl Workdirs for InMemoryWorkspace {
         Ok(crate::capabilities::workspace::api::WorkUsage::total(
             work, map,
         ))
+    }
+}
+
+/// 内存版本库：文件原语 + 内容寻址对象、提交记录、head 与各 agent 的拉取基线。
+/// 键一律用「根路径字符串|相对键」，与真实适配器同一份语义，供端口契约测试与协调业务用例使用。
+#[derive(Default)]
+pub(crate) struct InMemoryWorkStore {
+    files: Mutex<BTreeMap<String, Vec<u8>>>,
+    objects: Mutex<BTreeMap<String, Vec<u8>>>,
+    commits: Mutex<BTreeMap<String, crate::capabilities::workspace::domain::workstore::Commit>>,
+    heads: Mutex<BTreeMap<String, u64>>,
+    index: Mutex<BTreeMap<String, crate::capabilities::workspace::domain::workstore::Index>>,
+    fail: Option<String>,
+}
+
+fn ws_key(root: &std::path::Path, rel: &str) -> String {
+    format!("{}|{}", root.to_string_lossy(), rel)
+}
+
+impl InMemoryWorkStore {
+    pub(crate) fn new() -> InMemoryWorkStore {
+        InMemoryWorkStore::default()
+    }
+
+    /// 注入失败：任何端口调用都返回该原因（端口契约测试用）。
+    pub(crate) fn fail_with(mut self, msg: &str) -> InMemoryWorkStore {
+        self.fail = Some(msg.to_string());
+        self
+    }
+
+    /// 直接放一个文件（模拟主副本 / 沙箱里已有内容）。
+    pub(crate) fn seed(&self, root: &std::path::Path, rel: &str, text: &str) {
+        self.files
+            .lock()
+            .expect("锁")
+            .insert(ws_key(root, rel), text.as_bytes().to_vec());
+    }
+}
+
+impl WorkStore for InMemoryWorkStore {
+    fn read_under(&self, root: &std::path::Path, rel: &str) -> Result<Option<Vec<u8>>, String> {
+        if let Some(m) = &self.fail {
+            return Err(m.clone());
+        }
+        Ok(self
+            .files
+            .lock()
+            .expect("锁")
+            .get(&ws_key(root, rel))
+            .cloned())
+    }
+
+    fn write_under(&self, root: &std::path::Path, rel: &str, bytes: &[u8]) -> Result<(), String> {
+        if let Some(m) = &self.fail {
+            return Err(m.clone());
+        }
+        self.files
+            .lock()
+            .expect("锁")
+            .insert(ws_key(root, rel), bytes.to_vec());
+        Ok(())
+    }
+
+    fn remove_under(&self, root: &std::path::Path, rel: &str) -> Result<(), String> {
+        if let Some(m) = &self.fail {
+            return Err(m.clone());
+        }
+        self.files.lock().expect("锁").remove(&ws_key(root, rel));
+        Ok(())
+    }
+
+    fn list(&self, root: &std::path::Path) -> Result<Vec<String>, String> {
+        if let Some(m) = &self.fail {
+            return Err(m.clone());
+        }
+        let prefix = format!("{}|", root.to_string_lossy());
+        let files = self.files.lock().expect("锁");
+        let mut out: Vec<String> = files
+            .keys()
+            .filter_map(|k| k.strip_prefix(&prefix).map(|s| s.to_string()))
+            .collect();
+        out.sort();
+        Ok(out)
+    }
+
+    fn head(&self, store: &std::path::Path) -> Result<Option<u64>, String> {
+        if let Some(m) = &self.fail {
+            return Err(m.clone());
+        }
+        Ok(self
+            .heads
+            .lock()
+            .expect("锁")
+            .get(&store.to_string_lossy().to_string())
+            .copied())
+    }
+
+    fn set_head(&self, store: &std::path::Path, id: u64) -> Result<(), String> {
+        if let Some(m) = &self.fail {
+            return Err(m.clone());
+        }
+        self.heads
+            .lock()
+            .expect("锁")
+            .insert(store.to_string_lossy().to_string(), id);
+        Ok(())
+    }
+
+    fn read_commit(
+        &self,
+        store: &std::path::Path,
+        id: u64,
+    ) -> Result<Option<crate::capabilities::workspace::domain::workstore::Commit>, String> {
+        if let Some(m) = &self.fail {
+            return Err(m.clone());
+        }
+        Ok(self
+            .commits
+            .lock()
+            .expect("锁")
+            .get(&ws_key(store, &id.to_string()))
+            .cloned())
+    }
+
+    fn write_commit(
+        &self,
+        store: &std::path::Path,
+        commit: &crate::capabilities::workspace::domain::workstore::Commit,
+    ) -> Result<(), String> {
+        if let Some(m) = &self.fail {
+            return Err(m.clone());
+        }
+        self.commits
+            .lock()
+            .expect("锁")
+            .insert(ws_key(store, &commit.id.to_string()), commit.clone());
+        Ok(())
+    }
+
+    fn list_commits(&self, store: &std::path::Path) -> Result<Vec<u64>, String> {
+        if let Some(m) = &self.fail {
+            return Err(m.clone());
+        }
+        let prefix = format!("{}|", store.to_string_lossy());
+        let commits = self.commits.lock().expect("锁");
+        let mut ids: Vec<u64> = commits
+            .keys()
+            .filter_map(|k| k.strip_prefix(&prefix)?.parse::<u64>().ok())
+            .collect();
+        ids.sort_unstable();
+        Ok(ids)
+    }
+
+    fn read_index(
+        &self,
+        store: &std::path::Path,
+        agent: &str,
+    ) -> Result<crate::capabilities::workspace::domain::workstore::Index, String> {
+        if let Some(m) = &self.fail {
+            return Err(m.clone());
+        }
+        Ok(self
+            .index
+            .lock()
+            .expect("锁")
+            .get(&ws_key(store, agent))
+            .cloned()
+            .unwrap_or_default())
+    }
+
+    fn write_index(
+        &self,
+        store: &std::path::Path,
+        agent: &str,
+        index: &crate::capabilities::workspace::domain::workstore::Index,
+    ) -> Result<(), String> {
+        if let Some(m) = &self.fail {
+            return Err(m.clone());
+        }
+        self.index
+            .lock()
+            .expect("锁")
+            .insert(ws_key(store, agent), index.clone());
+        Ok(())
+    }
+
+    fn write_object(
+        &self,
+        store: &std::path::Path,
+        hash: &str,
+        bytes: &[u8],
+    ) -> Result<(), String> {
+        if let Some(m) = &self.fail {
+            return Err(m.clone());
+        }
+        self.objects
+            .lock()
+            .expect("锁")
+            .entry(ws_key(store, hash))
+            .or_insert_with(|| bytes.to_vec());
+        Ok(())
+    }
+
+    fn read_object(&self, store: &std::path::Path, hash: &str) -> Result<Vec<u8>, String> {
+        if let Some(m) = &self.fail {
+            return Err(m.clone());
+        }
+        self.objects
+            .lock()
+            .expect("锁")
+            .get(&ws_key(store, hash))
+            .cloned()
+            .ok_or_else(|| format!("对象不存在：{}", hash))
     }
 }
 
@@ -484,11 +698,24 @@ pub(crate) fn test_sandbox(
     crate::capabilities::workspace::api::Sandbox {
         work_name: "demo".to_string(),
         agent: agent.to_string(),
+        // 测试助手默认**可写共享区**：内置文件工具的既有用例直接写 work/ 复核行为；
+        // 生产里 agent 会话是只读（env.rs 设 false），只读语义由 test_sandbox_readonly 单独钉。
+        shared_writable: true,
         shared: abs(&["demo", "work"]),
         private: abs(&["demo", agent]),
         modules: map,
         texts: test_prompts().tools(),
     }
+}
+
+/// 只读共享区的测试沙箱：模拟**生产里 agent 会话**的默认（共享主副本只读，写入走 work_commit）。
+pub(crate) fn test_sandbox_readonly(
+    agent: &str,
+    modules: &[&str],
+) -> crate::capabilities::workspace::api::Sandbox {
+    let mut sb = test_sandbox(agent, modules);
+    sb.shared_writable = false;
+    sb
 }
 
 /// 测试用会话参数：agent 名 + 该 agent 的沙箱（无模块）。身份块由它现渲染。
@@ -1060,13 +1287,27 @@ pub(crate) fn test_llm_demo() -> Arc<dyn crate::capabilities::llm::api::Llm + Se
     test_llm_with_repair(Arc::new(NoRepair))
 }
 
-/// 测试用的 **workspace 能力面**：把三个端口装进 `WorkspaceService`（与生产同一条路，R12）。
+/// 测试用的 **workspace 能力面**：把四个端口装进 `WorkspaceService`（与生产同一条路，R12）。
+/// 版本库默认用内存替身；要观察主副本/提交记录的用例用 `test_workspace_store`。
 pub(crate) fn test_workspace(
     source: Arc<dyn ModuleSource + Send + Sync>,
     packages: Arc<dyn PackageSource + Send + Sync>,
     dirs: Arc<dyn Workdirs + Send + Sync>,
 ) -> Arc<dyn crate::capabilities::workspace::api::Workspace + Send + Sync> {
-    Arc::new(crate::capabilities::workspace::service::WorkspaceService::new(source, packages, dirs))
+    test_workspace_store(source, packages, dirs, Arc::new(InMemoryWorkStore::new()))
+}
+
+pub(crate) fn test_workspace_store(
+    source: Arc<dyn ModuleSource + Send + Sync>,
+    packages: Arc<dyn PackageSource + Send + Sync>,
+    dirs: Arc<dyn Workdirs + Send + Sync>,
+    store: Arc<dyn WorkStore + Send + Sync>,
+) -> Arc<dyn crate::capabilities::workspace::api::Workspace + Send + Sync> {
+    Arc::new(
+        crate::capabilities::workspace::service::WorkspaceService::new(
+            source, packages, dirs, store,
+        ),
+    )
 }
 
 /// 登记一个 agent（测试装配用）：**校验用的模块清单由调用方取一份**交给登记处——

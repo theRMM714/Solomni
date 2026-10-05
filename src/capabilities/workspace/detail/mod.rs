@@ -3,7 +3,9 @@
 pub mod fs_modules;
 pub mod fs_packages;
 pub mod fs_workspace;
+pub mod fs_workstore;
 
 pub use fs_modules::FsModules;
 pub use fs_packages::FsPackages;
 pub use fs_workspace::FsWorkspace;
+pub use fs_workstore::FsWorkStore;

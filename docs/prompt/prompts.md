@@ -15,7 +15,7 @@
 | --- | --- | --- |
 | `shared/mechanisms.yaml` | `session_kinds` / `mechanisms[].session` / `mechanisms[].roles` / `mechanisms[].text` | **机制说明按（会话使用类型 × 适用角色）分发**：一个会话的身份块把**同时**匹配它类型与角色的条目按声明顺序拼起来（`{{mechanism}}`）。`session_kinds` 是类型全表，`roles` 校验落在角色表（`systools/roles.yaml`）——对应关系全在数据里，代码只做匹配（`CoreTexts::mechanisms_for`） |
 | `shared/protocol.yaml` | `chat_protocol` | 讨论约定（讨论席与执行席一起注入，可自由演化） |
-| `shared/tools.yaml` | `env` | **工作环境块**：本 agent 的真实根目录（共享区 / 沙箱 / 模块目录）与路径规矩 |
+| `shared/tools.yaml` | `env` | **工作环境块**：本 agent 的真实根目录（共享区主副本 / 沙箱工作副本 / 模块目录）、路径规矩与共享区版本化（pull / commit / status）的用法 |
 | | `patch_guide` | 自由格式补丁的写法（每块以 `*** End File` 收尾、SEARCH 要整行一致、一次可多块、整体原子） |
 | | `tool_calling_envelope` / `tool_calling_native` | 工具调用约定**两套，互斥**：一个通道只用一套，由通道形态决定注入哪套 |
 | `shared/texts.yaml` | `no_agents` / `no_model` / `no_module_dirs` / `no_module_tools` / `no_module_tool_params` | 空态说法 |

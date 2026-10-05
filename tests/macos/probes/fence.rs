@@ -174,3 +174,49 @@ fn read_only_roots_are_readable_but_not_writable() {
     assert!(ok.exists(), "读写根要写得进：{}", oerr);
     assert_eq!(ocode, Some(0), "{}", oerr);
 }
+
+/// **共享区产品契约**：agent 的围栏只放行它自己的沙箱，共享主副本在 rw 之外——
+/// 模块工具进程因此绕不过 work_pull / work_commit 直接读写共享区（工具层那一半由 workspace 的用例钉住）。
+/// seatbelt 的 profile 排障开关与既有探针一致。
+#[test]
+fn shared_area_is_outside_the_agent_fence() {
+    let sandbox = scratch("shared-area-sandbox");
+    let shared = scratch("shared-area-work");
+    let planted = shared.join("planted.txt");
+    std::fs::write(&planted, "SHARED-CONTENT").unwrap();
+    // 运行期 agent 的真实形态：rw = [沙箱]，共享区不在其中。
+    let spec = job_json(std::slice::from_ref(&sandbox), &sandbox, false);
+
+    // 沙箱里写得进（对照：不是整条围栏坏了）。
+    let ok = sandbox.join("out.txt");
+    let profile: &[(&str, &str)] = &[("SOLOMNI_FENCE_PROFILE", "1")];
+    let (code, _out, err) =
+        run_launcher_env(&spec, &format!("echo ok > {}", ok.display()), profile);
+    if err.contains(PROFILE_REJECTED_MARK) {
+        panic!(
+            "本机 seatbelt 机制有效，但 profile 被 sandbox_init 拒绝（profile 写错，不是环境不允许）：{}",
+            err.trim()
+        );
+    }
+    if err.contains("文件系统围栏未生效") {
+        eprintln!(
+            "[探针] 本机 seatbelt 不产生实际约束（环境结论，如实跳过，不作为通过）：{}",
+            err.trim()
+        );
+        return;
+    }
+    assert_eq!(code, Some(0), "沙箱要写得进：{}", err);
+    assert!(ok.exists(), "沙箱要写得进：{}", err);
+
+    // 共享区写不进、读不到：共享区不在 rw，围栏这一层就挡住了。
+    let target = shared.join("pwn.txt");
+    let (_wc, _wo, _we) =
+        run_launcher_env(&spec, &format!("echo x > {}", target.display()), profile);
+    assert!(!target.exists(), "共享区不该被工具进程直接写");
+    let (_rc, ro, _re) = run_launcher_env(&spec, &format!("cat {}", planted.display()), profile);
+    assert!(
+        !ro.contains("SHARED-CONTENT"),
+        "共享区不该被工具进程直接读：{}",
+        ro
+    );
+}

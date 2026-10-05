@@ -6,13 +6,13 @@
 
 ## 一、管什么 / 不管什么
 
-**管**：模块清单（`modules/` 扫描结果）、运行包库（`runtimes/`）、`module.yaml` / `package.yaml` 契约、执行档位与执行计划派生、工作区与沙箱寻址（含越界判定）、建工作与上传、文件视图。
+**管**：模块清单（`modules/` 扫描结果）、运行包库（`runtimes/`）、`module.yaml` / `package.yaml` 契约、执行档位与执行计划派生、工作区与沙箱寻址（含越界判定）、建工作与上传、文件视图，以及**共享区版本化工作区**（内容寻址的提交记录、各 agent 的拉取基线、文件级三方比较与按提交点还原）。
 
 **不管**：不执行工具（`tools`）、不写会话流水（`session`）、不决定谁能用哪些工具（`tools` 的角色表）。
 
 ## 二、入站契约与状态归属
 
-`api::WorkspaceOps`（呈现层清单事实）+ `api::Workspace`（roster / library / prepare / write_work / files / roots …）。出站端口 `ModuleSource` / `PackageSource` / `Workdirs` **只由 `service.rs` 持有**（R12）。
+`api::WorkspaceOps`（呈现层清单事实）+ `api::Workspace`（roster / library / prepare / work_has / files / roots / **work_pull / work_commit / work_commit_user / work_status / work_restore** …）。出站端口 `ModuleSource` / `PackageSource` / `Workdirs` / **`WorkStore`**（版本库落盘：文件原语 + 内容寻址对象 + 提交记录 + 拉取基线）**只由 `service.rs` 持有**（R12）。
 
 ## 三、依赖图位置（由源码的 `::api` 引用推导）
 
