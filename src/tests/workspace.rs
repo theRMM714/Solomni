@@ -1108,7 +1108,8 @@ pub(crate) fn read_only_shared_refuses_builtin_writes_and_leaves_the_fence() {
     let sb = test_sandbox_readonly("a", &[]);
     let io = InMemorySysIo::new();
     io.seed(&["demo", "work", "note.txt"], "内容");
-    let work = p(&["demo", "work", "note.txt"]);
+    // 进 JSON / 补丁的路径一律用**书写形式**（/ 分隔；Windows 反斜杠在 JSON 里非法）。
+    let work = s(&["demo", "work", "note.txt"]);
 
     // 读仍然可以（默认只读 = 可读不可写）。
     let rd = run_builtin(&sb, &io, "read", &format!("{{\"path\":\"{}\"}}", work));
@@ -1140,7 +1141,7 @@ pub(crate) fn read_only_shared_refuses_builtin_writes_and_leaves_the_fence() {
     assert!(!pa.ok && pa.output.contains("只读"), "{}", pa.output);
 
     // 自己的沙箱照旧可写。
-    let own = p(&["demo", "a", "out.txt"]);
+    let own = s(&["demo", "a", "out.txt"]);
     let ok = run_builtin(
         &sb,
         &io,

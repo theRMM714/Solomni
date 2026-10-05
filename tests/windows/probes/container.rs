@@ -117,9 +117,9 @@ fn container_keeps_the_shared_area_out_of_reach() {
     // 运行期 agent 的真实形态：rw = [沙箱]，共享区不在其中。
     let spec = spec_for(&sandbox);
 
-    // 沙箱里写得进（对照：不是整条围栏坏了）。
-    let ok = sandbox.join("out.txt");
-    let (code, _out, err) = run_launcher(&spec, &format!("echo ok> {}", ok.display()));
+    // 容器跑得起来（对照：不是整条机制坏了）——用 stdio 往返，**不要求写盘**：
+    // 这些探针不写目录 ACL（授权是产品在真实会话里做的），所以 rw 里的正向写盘不能当断言。
+    let (code, out, err) = run_launcher(&spec, "echo container-ok");
     if env_blocks_container(&err) {
         eprintln!(
             "[探针] 本环境不允许容器围栏，跳过共享区断言：{}",
@@ -127,10 +127,15 @@ fn container_keeps_the_shared_area_out_of_reach() {
         );
         return;
     }
-    assert_eq!(code, Some(0), "沙箱要写得进：{}", err);
-    assert!(ok.exists(), "沙箱要写得进：{}", err);
+    assert_eq!(code, Some(0), "容器要起得来：{}", err);
+    assert!(
+        out.contains("container-ok"),
+        "stdio 要透传：{} / {}",
+        out,
+        err
+    );
 
-    // 共享区写不进、读不到。
+    // 共享区在 rw 之外：读不到、写不进。
     let target = shared.join("pwn.txt");
     let (_wc, _wo, _we) = run_launcher(&spec, &format!("echo x> {}", target.display()));
     assert!(!target.exists(), "共享区不该被工具进程直接写");
