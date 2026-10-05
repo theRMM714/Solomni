@@ -2,6 +2,7 @@
 // 覆盖：agent 登记处 → 推荐复用 → 单 agent（1 个 agent 带多模块）+ 内置 write 落私沙箱
 //       → 协作（非代拟）跑完交付 → 代拟（复用+组装）确认后名单写回 meta 并建出沙箱
 //       → 外部工具 cwd / 绝对路径 / 自由格式补丁 / 正文+信封 / 原生多调用（协议形状由假供应商核对）
+//       → 工具级确认：生成中停下等 yes / no / full；快照带待确认（刷新能重建）；full 本轮不再问
 //       → 代理模式：核心自己挑人、建子工作、转达，来源如实落档，停止即全停。
 const BASE = process.env.E2E_BASE || 'http://127.0.0.1:3099';
 // 假供应商端口由编排器指定：本机可能残留上一次的进程，固定端口会让驱动打到旧的那个。
@@ -37,6 +38,29 @@ async function mockSeen() {
     return null;
   }
 }
+/** 等某会话的待办（pending）出现：用于"生成中确认"这类必须**并发**驱动的场景。 */
+async function waitPending(sid, kind, ms) {
+  const deadline = Date.now() + ms;
+  while (Date.now() < deadline) {
+    const s = await api('GET', '/api/state');
+    const v = ((s.json && s.json.sessions) || []).find((x) => x.sid === sid);
+    if (v && v.pending && v.pending.kind === kind) return v.pending;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  return null;
+}
+
+/** 限时等一个请求收尾：超时记失败并返回（不让整个驱动被一次卡死拖挂）。 */
+async function settle(p, ms, label) {
+  let done = false;
+  const r = await Promise.race([
+    p.then((x) => { done = true; return x; }),
+    new Promise((res) => setTimeout(() => res(null), ms)),
+  ]);
+  if (!done) assert(false, label + '：生成未在限时内收尾', '');
+  return r;
+}
+
 /** 该工作的转录行（从落盘流水取，已应用回档截断）。 */
 async function lines(sid) {
   const r = await api('GET', '/api/history/' + encodeURIComponent(sid));
@@ -160,6 +184,63 @@ async function lines(sid) {
   const ls = await lines(name1);
   const usl = ls.filter((x) => x.speaker === '用户').pop() || {};
   assert(new RegExp('项目 说明\\.md').test(String(usl.line)) && !/@work:/.test(String(usl.line)), '引号内的空格路径被完整改写（真实路径）', String(usl.line).slice(0, 240));
+
+  // 工具级确认（granularity=ask）：真生成 → 真停下 → 真回答；yes / no / full 三态都走一遍。
+  const nameAsk = 'e2e-ask-' + Date.now();
+  const cAsk = await api('POST', '/api/sessions', {
+    name: nameAsk, mode: 'single',
+    agents: [{ name: '确认兵', transient: true, modules: ['research'], model: 'm1' }],
+  });
+  assert(cAsk.status === 200, '建"工具确认"会话', cAsk.text.slice(0, 200));
+  const edAsk = await api('POST', '/api/sessions/' + encodeURIComponent(nameAsk) + '/edit', {
+    agents: [{ name: '确认兵', modules: ['research'], model: 'm1', permissions: { granularity: 'ask', ask: ['write'] } }],
+    tier: 'host', net: false,
+  });
+  assert(edAsk.status === 200, '把该 agent 的粒度设成 ask（ask 表 = write）', edAsk.text.slice(0, 240));
+  const sandbox = path.join(dir(nameAsk), '确认兵');
+  const fDeny = path.join(sandbox, 'ask-deny.txt');
+  const fAllow = path.join(sandbox, 'ask-allow.txt');
+  const fFull1 = path.join(sandbox, 'ask-full-1.txt');
+  const fFull2 = path.join(sandbox, 'ask-full-2.txt');
+  const approveAsk = (answer) => api('POST', '/api/sessions/' + encodeURIComponent(nameAsk) + '/approve', { answer });
+  const sayAsk = (text) => api('POST', '/api/sessions/' + encodeURIComponent(nameAsk) + '/say', { text });
+
+  // ① 拒绝：生成停下来等回答（快照里能看到待确认），答 no → 工具不执行。
+  const pDeny = sayAsk('工具确认：拒绝');
+  const pendDeny = await waitPending(nameAsk, 'tool_approval', 20000);
+  assert(pendDeny && (pendDeny.payload || {}).tool === 'write', '等待中的确认出现在 /api/state 快照里（刷新也能重建卡片）', JSON.stringify(pendDeny || {}).slice(0, 200));
+  assert((await approveAsk('no')).status === 200, '答 no（拒绝）');
+  await settle(pDeny, 30000, '拒绝场景');
+  assert(!fs.existsSync(fDeny), '拒绝 → 工具没执行（文件不存在）', fDeny);
+
+  // ② 放行：答 yes → 工具执行。
+  const pAllow = sayAsk('工具确认：放行');
+  assert(await waitPending(nameAsk, 'tool_approval', 20000), '第二次确认也停下等回答');
+  await approveAsk('yes');
+  await settle(pAllow, 30000, '放行场景');
+  assert(fs.existsSync(fAllow), '放行 → 工具执行（文件存在）', fAllow);
+
+  // ③ 本轮不再问：一次回复给两个 write，第一个答 full → 第二个不再问、两个都执行。
+  const pFull = sayAsk('工具确认：两个，本轮不再问');
+  assert(await waitPending(nameAsk, 'tool_approval', 20000), 'full 场景的第一批确认出现');
+  await approveAsk('full');
+  // 若 full 没生效会出现第二个确认——自动答掉以免挂住整个驱动，并把"多问了一次"记为失败。
+  let second = null;
+  for (let i = 0; i < 200; i++) {
+    const s = await api('GET', '/api/state');
+    const v = ((s.json && s.json.sessions) || []).find((x) => x.sid === nameAsk);
+    if (v && v.pending && v.pending.kind === 'tool_approval') { second = v.pending; break; }
+    if (!v || !v.running) break; // 生成已结束
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  if (second) await approveAsk('yes');
+  await settle(pFull, 30000, 'full 场景');
+  assert(!second, '答 full 后本轮不再弹第二次确认', JSON.stringify(second || {}).slice(0, 160));
+  assert(fs.existsSync(fFull1) && fs.existsSync(fFull2), '答 full → 本轮两个调用都执行', fFull1 + ' / ' + fFull2);
+  // [待确认] 是**系统行（notice）**，不是转录行：从落盘流水按事件类型数。
+  const hAsk = await api('GET', '/api/history/' + encodeURIComponent(nameAsk));
+  const askedTimes = ((hAsk.json && hAsk.json.events) || []).filter((e) => e.type === 'notice' && String(e.text || '').includes('[待确认]')).length;
+  assert(askedTimes === 3, '全程只停三次（full 那轮只停一次；若变成 4 = full 没生效）', 'asked=' + askedTimes);
 
   // 非法工具信封：必须记成一条失败的工具行，且 JSON 绝不上屏（真实 bug 的回归）
   const name1f = 'e2e-badenv-' + Date.now();
