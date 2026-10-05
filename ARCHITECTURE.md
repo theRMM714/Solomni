@@ -116,7 +116,9 @@ presentation/{cli,web} ──▶ capabilities（含协调业务 conductor）─�
   **会话权限**（`capabilities/permission/`，纯领域）统一裁定：整棵工作区默认可读可提交，**白名单一出现就取代默认、黑名单只做减法**；
   内置读/写、`work_pull` / `work_commit`（提交白名单）与围栏派生都读同一份生效态（`Sandbox.permissions` / `FenceSpec`）；
   **工具级确认**（`granularity: ask`）：工具循环执行前查同一份生效态，命中 `ask` 表就登记进 `kernel` 的放行表（`ApprovalRegistry`）、推"是 / 否"裁决卡并阻塞；
-  用户经 `session.act` 的 `approve` 回答（与「停止」一样**不经命令队列**，生成期间立刻生效），停止把等待解成拒绝；
+  用户经 `session.act` 的 `approve` 回答 **yes / no / full**（与「停止」一样**不经命令队列**，生成期间立刻生效）——
+  `full` 只对**本轮**生效（到 AI 停下输出为止，不落盘）；停止把等待解成拒绝。
+  Web 用卡片三选一（刷新后由 `/api/state` 的待确认快照重建），CLI 把生成放后台线程、主线程就地读 `yes/no/full`；
   工具进程走**守门进程**（本程序 `--fence-run`），环境不继承父进程（**密钥与凭据不进工具进程**），`HOME` / `TEMP` 等落进该 agent 的沙箱。
   **一个 agent 一个容器 profile**，守门进程是唯一建它的地方并记进 `.home/fence-grants.json` 台账；`--fence-clean` 按台账回收、再在产品根内扫掉台账外的孤儿授权与遗留 profile。
   机制验证分三态：`Enforced` / `EnvUnavailable`（本机不允许，如实降级照跑）/ `Broken`（我们写错了，未授权时段**拒绝执行**）。

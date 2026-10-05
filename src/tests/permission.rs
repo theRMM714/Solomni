@@ -273,11 +273,12 @@ fn ask_list_only_applies_under_ask_granularity() {
     );
 }
 
-/// 工具级确认：`ask` 命中时先问用户——拒绝则不执行、放行才真的跑（走真实工具循环的调度）。
+/// 工具级确认：`ask` 命中时先问用户——拒绝不执行、放行才跑、`full` 本轮不再问。
 #[test]
 fn ask_tools_are_confirmed_before_execution() {
-    use crate::capabilities::collab::service::tool_loop::{run_batch, ToolConfirm};
+    use crate::capabilities::collab::service::tool_loop::{run_batch, ApprovalGate, ToolConfirm};
     use crate::capabilities::session::api::SessionEvent;
+    use crate::kernel::api::Approval;
     use crate::tests::builders::{member_with_tools, RecordingRunner};
     use std::sync::Arc;
 
@@ -294,11 +295,15 @@ fn ask_tools_are_confirmed_before_execution() {
 
     // ① 拒绝：问过用户、工具没执行、回一条"用户拒绝"。
     let mut asked = Vec::new();
-    let mut deny = |req: &ToolConfirm, _sink: &mut dyn FnMut(SessionEvent)| -> bool {
+    let mut deny = |req: &ToolConfirm, _sink: &mut dyn FnMut(SessionEvent)| -> Approval {
         asked.push(req.tool.clone());
-        false
+        Approval::Deny
     };
-    let done = run_batch(&mut tools, &plan, &mut deny, &mut sink);
+    let mut gate = ApprovalGate {
+        full: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        confirm: &mut deny,
+    };
+    let done = run_batch(&mut tools, &plan, Some(&mut gate), &mut sink);
     assert_eq!(asked, vec!["grep".to_string()], "ask 命中要问用户");
     assert!(!done[0].1.ok);
     assert!(
@@ -312,36 +317,69 @@ fn ask_tools_are_confirmed_before_execution() {
     );
 
     // ② 放行：工具真的执行了一次。
-    let mut allow = |_req: &ToolConfirm, _sink: &mut dyn FnMut(SessionEvent)| -> bool { true };
-    let done = run_batch(&mut tools, &plan, &mut allow, &mut sink);
+    let mut allow =
+        |_req: &ToolConfirm, _sink: &mut dyn FnMut(SessionEvent)| -> Approval { Approval::Allow };
+    let mut gate = ApprovalGate {
+        full: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        confirm: &mut allow,
+    };
+    let done = run_batch(&mut tools, &plan, Some(&mut gate), &mut sink);
     assert!(done[0].1.ok, "{}", done[0].1.output);
     assert_eq!(
         runner.calls.lock().expect("锁").len(),
         1,
         "放行后要执行一次"
     );
+
+    // ③ full：第一次答"本轮不再问"，后面两次调用直接放行、不再问。
+    let mut asked_times = 0usize;
+    let mut full_answer = |_req: &ToolConfirm, _sink: &mut dyn FnMut(SessionEvent)| -> Approval {
+        asked_times += 1;
+        Approval::Full
+    };
+    let mut gate = ApprovalGate {
+        full: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        confirm: &mut full_answer,
+    };
+    let three = vec![
+        (Some("m0".to_string()), "grep".to_string(), "{}".to_string()),
+        (Some("m0".to_string()), "grep".to_string(), "{}".to_string()),
+        (Some("m0".to_string()), "grep".to_string(), "{}".to_string()),
+    ];
+    let done = run_batch(&mut tools, &three, Some(&mut gate), &mut sink);
+    assert!(done.iter().all(|(_, o)| o.ok), "full 之后都要执行");
+    assert_eq!(asked_times, 1, "full 之后本轮不再问");
 }
 
 /// 放行表机制：登记 → 等 → 回答唤醒；停止取消让等待返回 `None`（= 不执行）。
 #[test]
 fn approval_registry_wakes_the_worker_and_cancels_on_stop() {
-    use crate::kernel::api::ApprovalRegistry;
+    use crate::kernel::api::{Approval, ApprovalRegistry};
 
     let reg = ApprovalRegistry::new();
-    // 回答：先登记再唤醒，工作线程拿到 Some(true)。
-    let slot = reg.register("s1");
+    let req = || crate::kernel::api::ApprovalRequest {
+        module: Some("m0".to_string()),
+        tool: "grep".to_string(),
+        args: "{}".to_string(),
+    };
+    // 回答：先登记再唤醒，工作线程拿到回答。
+    assert_eq!(reg.pending("s1"), None, "没登记 = 没在等");
+    let slot = reg.register("s1", req());
+    assert_eq!(reg.pending("s1"), Some(req()), "等待时快照能看到在等什么");
     let h = std::thread::spawn(move || slot.wait());
-    assert!(reg.resolve("s1", true), "有在等的格要报 true");
-    assert_eq!(h.join().expect("线程"), Some(true));
+    assert!(reg.resolve("s1", Approval::Allow), "有在等的格要报 true");
+    assert_eq!(h.join().expect("线程"), Some(Approval::Allow));
+    assert_eq!(reg.pending("s1"), None, "回答之后不再显示为等待");
     reg.unregister("s1");
 
     // 取消（停止）：等待返回 None = 不执行。
-    let slot = reg.register("s2");
+    let slot = reg.register("s2", req());
     let h = std::thread::spawn(move || slot.wait());
     reg.cancel("s2");
+    assert_eq!(reg.pending("s2"), None, "取消之后不再显示为等待");
     assert_eq!(h.join().expect("线程"), None, "取消 = 不执行");
     reg.unregister("s2");
 
     // 没有在等的格：不假装有人放行。
-    assert!(!reg.resolve("nope", true));
+    assert!(!reg.resolve("nope", Approval::Allow));
 }

@@ -307,19 +307,28 @@ fn render(events: &[SessionEvent]) {
             SessionEvent::Ended => {}
             // 请用户裁决：把"为什么要你定 + 建议"如实打出来（与 Web 那张卡同一份事实）。
             SessionEvent::Decision {
+                kind,
                 summary,
                 advice,
                 question,
                 ..
             } => {
-                println!("[裁决] {}", summary);
-                if !advice.trim().is_empty() {
-                    println!("  建议：{}", advice);
+                if kind == "tool_approval" {
+                    // 工具级确认：卡面只把"在等什么"说清；回答由交互循环就地读键盘。
+                    println!("[确认] {}", summary);
+                    if !question.trim().is_empty() {
+                        println!("  {}", question);
+                    }
+                } else {
+                    println!("[裁决] {}", summary);
+                    if !advice.trim().is_empty() {
+                        println!("  建议：{}", advice);
+                    }
+                    if !question.trim().is_empty() {
+                        println!("  {}", question);
+                    }
+                    println!("  （用自然语言回一句即可；回话会进主会话，所有成员都看得到）");
                 }
-                if !question.trim().is_empty() {
-                    println!("  {}", question);
-                }
-                println!("  （用自然语言回一句即可；回话会进主会话，所有成员都看得到）");
             }
             // 流式增量与工具调用实时事件都是短暂事件，终端不在流中渲染（最终行会到）。
             // 短暂事件（流式增量 / 运行态 / 工具调用）：Web 前端用来做实时渲染，CLI 不逐条打。
@@ -348,6 +357,86 @@ fn follow(ops: &Ops, sid: &str, cursor: &mut u64, acted: Acted) {
         return;
     }
     *cursor = drain(ops, sid, *cursor);
+}
+
+/// CLI 侧的动作（拥有字符串）：生成要放后台线程，所以不能借用调用栈上的 `&str`。
+enum CliAction {
+    Say(String),
+    Step(CollabStep, String),
+}
+
+impl CliAction {
+    fn action(&self) -> Action<'_> {
+        match self {
+            CliAction::Say(t) => Action::Say(t),
+            CliAction::Step(step, t) => Action::Step(*step, t),
+        }
+    }
+}
+
+/// 一次生成放**后台线程**；主线程一边渲染事件、一边就地处理工具级确认。
+/// 为什么：确认要在生成进行中读键盘，同步调用会把主线程堵在生成里，读不到输入。
+fn act_interactive(
+    ops: &Ops,
+    sid: &str,
+    action: CliAction,
+    cursor: &mut u64,
+    out: Output,
+) -> Result<Acted, String> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let (gen_ops, gen_sid) = (ops.clone(), sid.to_string());
+    std::thread::spawn(move || {
+        let r = gen_ops.sessions.act(&gen_sid, action.action(), out);
+        let _ = tx.send(r);
+    });
+    loop {
+        let (lines, head, _oldest) = ops.events.snapshot(Some(sid), *cursor);
+        for l in &lines {
+            render(&l.events);
+            for ev in &l.events {
+                if let SessionEvent::Decision { kind, question, .. } = ev {
+                    if kind == "tool_approval" {
+                        confirm_tool(ops, sid, question);
+                    }
+                }
+            }
+        }
+        *cursor = head;
+        match rx.try_recv() {
+            Ok(r) => return r,
+            Err(std::sync::mpsc::TryRecvError::Empty) => {
+                std::thread::sleep(std::time::Duration::from_millis(50))
+            }
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                return Err("生成线程异常结束".to_string())
+            }
+        }
+    }
+}
+
+/// 解析终端里的一次确认回答（纯函数，便于钉映射）：yes / no / full。
+pub(crate) fn parse_approval(text: &str) -> Option<crate::capabilities::conductor::api::Approval> {
+    use crate::capabilities::conductor::api::Approval;
+    match text.trim().to_ascii_lowercase().as_str() {
+        "y" | "yes" | "是" | "allow" => Some(Approval::Allow),
+        "n" | "no" | "否" | "deny" => Some(Approval::Deny),
+        "f" | "full" | "全部" | "都行" => Some(Approval::Full),
+        _ => None,
+    }
+}
+
+/// 终端里的工具确认：yes / no / full（full = 本轮不再问）。
+fn confirm_tool(ops: &Ops, sid: &str, question: &str) {
+    loop {
+        let ans = prompt(&format!("  {} [yes/no/full]", question));
+        if let Some(answer) = parse_approval(&ans) {
+            if !ops.sessions.approve(sid, answer) {
+                println!("  （这次确认已经不在等了）");
+            }
+            return;
+        }
+        println!("  请输入 yes / no / full。");
+    }
 }
 
 /// 登记处为空时的引导文案（**CLI 的说法**：它不再直接点模块）。
@@ -437,7 +526,13 @@ fn single_flow(ops: &Ops, arg: &str) {
             break;
         }
         // 终端只在最终结果上渲染，不要流式（怎么显示是呈现层的事）。
-        match ops.sessions.act(&sid, Action::Say(&say), Output::Final) {
+        match act_interactive(
+            ops,
+            &sid,
+            CliAction::Say(say.clone()),
+            &mut cursor,
+            Output::Final,
+        ) {
             Ok(acted) => follow(ops, &sid, &mut cursor, acted),
             Err(e) => {
                 println!("[错误] {}", e);
@@ -488,7 +583,13 @@ fn proxy_flow(ops: &Ops) {
         if say.is_empty() {
             break;
         }
-        match ops.sessions.act(&sid, Action::Say(&say), Output::Final) {
+        match act_interactive(
+            ops,
+            &sid,
+            CliAction::Say(say.clone()),
+            &mut cursor,
+            Output::Final,
+        ) {
             Ok(acted) => follow(ops, &sid, &mut cursor, acted),
             Err(e) => {
                 println!("[错误] {}", e);
@@ -569,9 +670,11 @@ fn collab_flow(ops: &Ops, arg: &str) {
             Err(e) => println!("[提示] 取名单失败：{}", e),
         }
         let ok = prompt("确认名单？（yes 开始 / 其他取消）");
-        match ops.sessions.act(
+        match act_interactive(
+            ops,
             &sid,
-            Action::Step(CollabStep::ConfirmSlate, &ok),
+            CliAction::Step(CollabStep::ConfirmSlate, ok.clone()),
+            &mut cursor,
             Output::Final,
         ) {
             Ok(acted) => follow(ops, &sid, &mut cursor, acted),
@@ -581,10 +684,13 @@ fn collab_flow(ops: &Ops, arg: &str) {
     // 开始确认。
     if matches!(ops.sessions.pending(&sid), Ok(Some(Pending::ConfirmBegin))) {
         let ans = prompt("开始讨论？（yes / yes,allow：授权小组自裁细节）");
-        match ops
-            .sessions
-            .act(&sid, Action::Step(CollabStep::Begin, &ans), Output::Final)
-        {
+        match act_interactive(
+            ops,
+            &sid,
+            CliAction::Step(CollabStep::Begin, ans.clone()),
+            &mut cursor,
+            Output::Final,
+        ) {
             Ok(acted) => follow(ops, &sid, &mut cursor, acted),
             Err(e) => println!("[错误] {}", e),
         }
@@ -594,10 +700,13 @@ fn collab_flow(ops: &Ops, arg: &str) {
         if let Ok(Some(Pending::Ask { member, question })) = ops.sessions.pending(&sid) {
             println!("[请教] {}：{}", member, question);
             let ans = prompt("你的回答（回车 = 无补充，继续）>");
-            match ops
-                .sessions
-                .act(&sid, Action::Step(CollabStep::Decide, &ans), Output::Final)
-            {
+            match act_interactive(
+                ops,
+                &sid,
+                CliAction::Step(CollabStep::Decide, ans.clone()),
+                &mut cursor,
+                Output::Final,
+            ) {
                 Ok(acted) => follow(ops, &sid, &mut cursor, acted),
                 Err(e) => {
                     println!("[错误] {}", e);

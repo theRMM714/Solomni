@@ -308,15 +308,25 @@ fn run(
     let approval = live.approval.clone();
     let mut confirm = |req: &crate::capabilities::collab::service::tool_loop::ToolConfirm,
                        sink: &mut dyn FnMut(SessionEvent)|
-     -> bool {
+     -> crate::kernel::api::Approval {
+        use crate::kernel::api::Approval;
         let Some(ctx) = approval.as_ref() else {
-            return true;
+            return Approval::Allow;
         };
         let name = match &req.module {
             Some(m) => format!("{}.{}", m, req.tool),
             None => req.tool.clone(),
         };
-        // 待确认落一条系统行（可回放），再推裁决卡（短暂事件；界面据此出"是/否"）。
+        // 先登记放行格，**再**推卡片：否则用户手快会答在一个还没登记的会话上，答案丢掉、生成干等。
+        let slot = ctx.registry.register(
+            &ctx.sid,
+            crate::kernel::api::ApprovalRequest {
+                module: req.module.clone(),
+                tool: req.tool.clone(),
+                args: req.args.clone(),
+            },
+        );
+        // 待确认落一条系统行（可回放），再推裁决卡（短暂事件；界面据此出"是 / 否 / 本轮不再问"）。
         sink(SessionEvent::Notice(format!(
             "[待确认] 工具 {} 需要用户放行。",
             name
@@ -325,28 +335,35 @@ fn run(
             kind: "tool_approval".to_string(),
             summary: format!("agent 请求执行工具 {}。", name),
             advice: String::new(),
-            question: format!("是否执行 {}？", name),
+            question: format!("是否执行 {}？（yes / no / full：full = 本轮不再问）", name),
             payload: serde_json::json!({
                 "tool": req.tool,
                 "module": req.module,
                 "args": req.args,
             }),
         });
-        let slot = ctx.registry.register(&ctx.sid);
         let answer = slot.wait();
         ctx.registry.unregister(&ctx.sid);
-        let ok = answer.unwrap_or(false);
+        let answer = answer.unwrap_or(Approval::Deny);
         sink(SessionEvent::Notice(format!(
             "[确认] 工具 {}：{}",
             name,
-            if ok {
-                "用户放行"
-            } else {
-                "用户拒绝（或生成已停止）"
+            match answer {
+                Approval::Allow => "用户放行",
+                Approval::Deny => "用户拒绝（或生成已停止）",
+                Approval::Full => "用户放行，本轮不再询问",
             }
         )));
-        ok
+        answer
     };
+    // 只有拿到放行上下文时才建确认通道；否则本回合不接确认（照常执行）。
+    let mut gate =
+        approval.as_ref().map(
+            |_| crate::capabilities::collab::service::tool_loop::ApprovalGate {
+                full: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                confirm: &mut confirm,
+            },
+        );
     // 两个回调（流式分片 / 工具完成）都要外送短暂事件：把 emit 借出来共享（顺序因此天然正确）。
     let emit = std::cell::RefCell::new(&mut *live.emit);
     let mut acc = String::new();
@@ -394,7 +411,7 @@ fn run(
             },
             on_round,
             sink,
-            &mut confirm,
+            gate.take(),
             &spec.turn,
             spec.verbs,
         )

@@ -236,8 +236,15 @@ impl SessionOps for FakeOps {
     fn stop(&self, _sid: &str) -> bool {
         self.running.swap(false, Ordering::Relaxed)
     }
-    fn approve(&self, _sid: &str, _ok: bool) -> bool {
+    fn approve(&self, _sid: &str, _answer: crate::capabilities::conductor::api::Approval) -> bool {
         false
+    }
+
+    fn pending_approval(
+        &self,
+        _sid: &str,
+    ) -> Option<crate::capabilities::conductor::api::ApprovalView> {
+        None
     }
     fn is_running(&self, _sid: &str) -> bool {
         self.running.load(Ordering::Relaxed)
@@ -1075,4 +1082,17 @@ fn web_serve_returns_when_interrupted() {
         started.elapsed() < Duration::from_secs(3),
         "收到中断要立刻返回，而不是阻塞到出错"
     );
+}
+
+/// CLI 的确认回答映射：yes / no / full（含常见别名与大小写），其它一律不认、要重新问。
+#[test]
+fn cli_approval_answers_map_to_allow_deny_full() {
+    use crate::capabilities::conductor::api::Approval;
+    use crate::presentation::cli::parse_approval;
+    assert_eq!(parse_approval("yes"), Some(Approval::Allow));
+    assert_eq!(parse_approval(" YES "), Some(Approval::Allow));
+    assert_eq!(parse_approval("no"), Some(Approval::Deny));
+    assert_eq!(parse_approval("full"), Some(Approval::Full));
+    assert_eq!(parse_approval("f"), Some(Approval::Full));
+    assert_eq!(parse_approval("随便"), None, "不认的要重新问");
 }

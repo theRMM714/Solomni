@@ -148,8 +148,9 @@ $ start.bat                 # Windows（或 node start.js）；macOS/Linux 用 .
 ```
 选这个形态**就是授予全权**（不再逐个确认）；想接管就按「停止」：它按编排归属把相关会话一起停下，按「继续」再解冻接着走。
 代理会话自己的档位，也是它建出的子会话的默认档。**决定粒度与额外路径权限**属独立的**权限管理**能力（[docs/permission/README.md](docs/permission/README.md)）：
-路径的读写白名单 / 黑名单、提交作用域、模块写授权，以及"`granularity: ask` 时工具调用先让用户点是 / 否"（在网页上回答）都已落地；
-纯终端与"刷新后"的交互确认见 [tests/gaps.yaml](tests/gaps.yaml) 的 `permission.approval-answer-paths`。
+路径的读写白名单 / 黑名单、提交作用域、模块写授权，以及"`granularity: ask` 时工具调用先让用户回答 yes / no / full"都已落地：
+网页给「放行 / 拒绝 / 本轮都不再问」三选一（刷新后卡片照样重建），终端把生成放后台线程、就地读键盘；
+`full` 只对**本轮**生效（到 AI 停下输出为止，不改落盘设置）。
 
 ### 退出
 

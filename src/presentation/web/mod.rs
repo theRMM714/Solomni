@@ -440,8 +440,14 @@ pub(crate) fn route(
             // 工具级确认：回答在等的工具放行（"是 / 否"）。与「停止」一样**不进命令队列**——
             // 生成期间工作线程正等在放行表上，走队列会等到生成结束。
             if action == "approve" {
-                let ok = req.get("ok").and_then(|v| v.as_bool()).unwrap_or(false);
-                let answered = ops.sessions.approve(&sid, ok);
+                use crate::capabilities::conductor::api::Approval;
+                let raw = str_field(&req, "answer");
+                let answer = match raw.as_str() {
+                    "yes" => Approval::Allow,
+                    "full" => Approval::Full,
+                    _ => Approval::Deny,
+                };
+                let answered = ops.sessions.approve(&sid, answer);
                 return ok_json(json!({ "ok": true, "answered": answered }));
             }
             // 配置界面：提交编辑（「生成中不许改」的守卫在 `Conductor::edit_session` 里）。
@@ -789,6 +795,30 @@ fn state_json(ops: &Ops, fence: &FenceInfo) -> Result<serde_json::Value, String>
     let roster = ops.workspace.roster()?;
     // 会话形态取落盘 meta（单一真相）：只读一次盘，sessions 与 history 共用。
     let history = ops.history.list()?;
+    // 会话快照带上"在等的工具确认"：刷新页面后界面照样画得出那张"是 / 否 / 本轮不再问"的卡
+    // （与推的 `Decision{kind:"tool_approval"}` 同一份事实）。
+    let sessions: Vec<serde_json::Value> = ops
+        .sessions
+        .session_views(&history)?
+        .into_iter()
+        .map(|v| {
+            let mut j = serde_json::to_value(&v).unwrap_or_else(|_| json!({}));
+            if let Some(a) = ops.sessions.pending_approval(&v.sid) {
+                let name = match &a.module {
+                    Some(m) => format!("{}.{}", m, a.tool),
+                    None => a.tool.clone(),
+                };
+                j["pending"] = json!({
+                    "kind": "tool_approval",
+                    "summary": format!("agent 请求执行工具 {}。", name),
+                    "advice": "",
+                    "question": format!("是否执行 {}？（yes / no / full：full = 本轮不再问）", name),
+                    "payload": { "tool": a.tool, "module": a.module, "args": a.args },
+                });
+            }
+            j
+        })
+        .collect();
     Ok(json!({
         "modules": roster.modules.iter().map(|m| json!({
             "id": m.manifest.id,
@@ -802,7 +832,7 @@ fn state_json(ops: &Ops, fence: &FenceInfo) -> Result<serde_json::Value, String>
         "core": ops.registry.core_model()?,
         "agents": ops.registry.agents()?,
         "settings": ops.registry.settings()?,
-        "sessions": ops.sessions.session_views(&history)?,
+        "sessions": sessions,
         "history": history,
     }))
 }

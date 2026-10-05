@@ -77,24 +77,6 @@
   accept: 声明了独立入口的模块能不经 AI 直接跑通一次；没声明的模块在列表里如实标注"只能经 AI 使用"。
   blocked_by: 缺少实现
 
-- id: permission.approval-answer-paths
-  scope: global
-  level: T5
-  why: |
-    工具级确认（`granularity: ask`）的核心与网页正常路径已落地：工具循环执行前查生效权限，命中 `ask` 表
-    就登记进 `kernel` 的放行表并阻塞，用户在网页上点"是 / 否"（`session.act` 的 `approve`，不经命令队列）唤醒。
-    还缺两条回答路径：
-    ① **纯终端（CLI）**：CLI 同步驱动，生成线程停下来等确认时，主线程既在等它返回、又读不到键盘——
-       所以 CLI 不开启确认（照常执行），否则会死等；
-    ② **网页刷新后**：确认卡是短暂 `Decision` 事件，快照的 `pending` 在生成期间拿不到（会话正被工作线程持有），
-       刷新就只剩「停止」，看不到"是 / 否"。
-  how: |
-    1) CLI：把生成放到后台线程，主线程并发读 stdin；收到确认卡时打印提示并读一行，调 `SessionOps::approve`；
-    2) 网页刷新：把当前待确认的调用存进 `ApprovalRegistry` 的格，并向快照暴露（会话视图带上它），
-       前端据此在刷新后重建卡片。
-  accept: 终端里 `granularity=ask` 的会话能打印并回答确认；网页在等待确认期间刷新仍能看到卡片并回答；未配置时行为与今天一致。
-  blocked_by: 缺少实现（CLI 与刷新后的回答路径）
-
 - id: work.commit-history-ui
   scope: global
   level: T5

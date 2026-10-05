@@ -343,10 +343,8 @@ impl Discussion {
             &mut on_tool,
             &mut on_round,
             &mut discard,
-            // 讨论席只跑只读核实工具：不做工具级确认（要问也只会在执行席发生）。
-            &mut |_req: &crate::capabilities::collab::service::tool_loop::ToolConfirm,
-                  _sink: &mut dyn FnMut(SessionEvent)|
-             -> bool { true },
+            // 讨论席只跑只读核实工具：不接工具级确认（要问也只会在执行席发生）。
+            None,
             &turn,
             true,
         );

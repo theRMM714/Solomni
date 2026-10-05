@@ -140,8 +140,16 @@ pub struct ToolConfirm {
     pub args: String,
 }
 
-/// 工具级确认的回调：`(待确认调用, 事件出口) -> 是否放行`（实现方阻塞等用户回答）。
-pub type ConfirmFn<'a> = &'a mut dyn FnMut(&ToolConfirm, &mut dyn FnMut(SessionEvent)) -> bool;
+/// 确认回调：`(待确认调用, 事件出口) -> 放行 / 拒绝 / 本轮不再问`（实现方阻塞等用户回答）。
+pub type ConfirmFn<'a> =
+    &'a mut dyn FnMut(&ToolConfirm, &mut dyn FnMut(SessionEvent)) -> crate::kernel::api::Approval;
+
+/// 一次生成里的确认通道：`full` 一旦置位，本轮（这次生成）剩余调用都不再问；
+/// `confirm` 由调用方实现（阻塞等用户回答，返回放行 / 拒绝 / 本轮不再问）。
+pub struct ApprovalGate<'a> {
+    pub full: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    pub confirm: ConfirmFn<'a>,
+}
 
 /// 这次调用的候选名字（用于比对 `ask` 表）：内置与核心自有工具用工具名；
 /// 模块工具同时接受"工具名"与"模块.工具"（省略 module 且只有唯一模块时也按模块名兜底）。
@@ -159,8 +167,20 @@ fn ask_candidates(ctx: &MemberTools, module: Option<&str>, tool: &str) -> Vec<St
     }
 }
 
-/// 这次调用要不要先问用户（按这一席的生效权限：`full` 一律不问；`ask` 命中才问）。
-fn needs_ask(ctx: &MemberTools, module: Option<&str>, tool: &str) -> bool {
+/// 这次调用要不要先问用户：没有确认通道、或本轮已被"全部放行"，一律不问；
+/// 否则按这一席的生效权限（`full` 粒度不问；`ask` 命中才问）。
+fn needs_ask(
+    ctx: &MemberTools,
+    gate: Option<&ApprovalGate<'_>>,
+    module: Option<&str>,
+    tool: &str,
+) -> bool {
+    let Some(gate) = gate else {
+        return false;
+    };
+    if gate.full.load(std::sync::atomic::Ordering::Relaxed) {
+        return false;
+    }
     ask_candidates(ctx, module, tool)
         .iter()
         .any(|n| ctx.sandbox.permissions.should_ask(n))
@@ -169,24 +189,31 @@ fn needs_ask(ctx: &MemberTools, module: Option<&str>, tool: &str) -> bool {
 /// 执行一批调用：**连续**声明可并发的合成一批并发跑，其余各自独占；结果按**原始下标**返回。
 /// 原生通道与手写信封通道共用这一处调度——并发策略只有一份，两个通道不会各写一套。
 /// 账本走分支副本 + 按原序合并（与串行执行等价，见 crate::capabilities::tools::api::Observations::absorb）。
-/// **要问用户的调用强制串行**：先经 `confirm` 拿到是/否，拒绝就回一条"用户拒绝"的结果、不执行。
+/// **要问用户的调用强制串行**：先经确认通道拿到回答；拒绝就回一条"用户拒绝"的结果、不执行；
+/// 答"本轮不再问"（`Approval::Full`）则放行这一次并把 `full` 置位，本轮剩余调用都不再问。
 pub(crate) fn run_batch(
     ctx: &mut MemberTools,
     plan: &[(Option<String>, String, String)],
-    confirm: ConfirmFn<'_>,
+    mut approval: Option<&mut ApprovalGate<'_>>,
     sink: &mut dyn FnMut(SessionEvent),
 ) -> Vec<(String, ToolOutcome)> {
     let mut done: Vec<Option<(String, ToolOutcome)>> = (0..plan.len()).map(|_| None).collect();
     let mut i = 0;
     while i < plan.len() {
-        if needs_ask(ctx, plan[i].0.as_deref(), &plan[i].1) {
+        if needs_ask(ctx, approval.as_deref(), plan[i].0.as_deref(), &plan[i].1) {
             let (module, tool, args) = &plan[i];
             let req = ToolConfirm {
                 module: module.clone(),
                 tool: tool.clone(),
                 args: args.clone(),
             };
-            let allowed = confirm(&req, sink);
+            let gate = approval.as_deref_mut().expect("needs_ask 已确认有通道");
+            let decision = (gate.confirm)(&req, sink);
+            gate.full.store(
+                decision == crate::kernel::api::Approval::Full,
+                std::sync::atomic::Ordering::Relaxed,
+            );
+            let allowed = decision != crate::kernel::api::Approval::Deny;
             done[i] = Some(if allowed {
                 run_one(ctx, module.as_deref(), tool, args)
             } else {

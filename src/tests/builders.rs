@@ -106,10 +106,8 @@ pub(crate) fn run_execution(
             &mut |_r: &crate::capabilities::collab::service::round::Round,
                   _s: &mut dyn FnMut(crate::capabilities::session::api::SessionEvent)| {},
             &mut sink,
-            // 测试不接工具级确认：直接执行（确认路径由 driver 的用例单独钉）。
-            &mut |_req: &crate::capabilities::collab::service::tool_loop::ToolConfirm,
-                  _sink: &mut dyn FnMut(crate::capabilities::session::api::SessionEvent)|
-             -> bool { true },
+            // 测试不接工具级确认：直接执行（确认路径由 permission 的用例单独钉）。
+            None,
             &[],
             false,
         );

@@ -2416,8 +2416,9 @@ function renderGate(s) {
     const pl = p.payload || {};
     const what = pl.module ? (pl.module + '.' + pl.tool) : (pl.tool || '工具');
     gate.appendChild(gateCard('agent 请求执行工具 ' + what + '，是否放行？', [
-      ['放行', () => approveTool(true)],
-      ['拒绝', () => approveTool(false)],
+      ['放行', () => approveTool('yes')],
+      ['拒绝', () => approveTool('no')],
+      ['本轮都不再问', () => approveTool('full')],
     ]));
     return;
   }
@@ -2447,11 +2448,11 @@ function renderGate(s) {
 
 /* 工具级确认：回答在等的工具放行（是 / 否）。与「停止」一样**不走生成命令队列**——
    服务端直接把答案写进放行表并唤醒生成线程。 */
-async function approveTool(ok) {
+async function approveTool(answer) {
   const s = activeSession();
   if (!s) return;
   try {
-    await api('POST', '/api/sessions/' + encodeURIComponent(s.sid) + '/approve', { ok: ok });
+    await api('POST', '/api/sessions/' + encodeURIComponent(s.sid) + '/approve', { answer: answer });
     s.pending = null;
     renderAll();
   } catch (err) {

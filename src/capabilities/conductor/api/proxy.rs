@@ -148,8 +148,17 @@ impl SessionOps for ConductorHandle {
     }
 
     /// 工具级确认：直接把答案写进放行表并唤醒工作线程（不经队列，生成期间立刻生效）。
-    fn approve(&self, sid: &str, ok: bool) -> bool {
-        self.approvals.resolve(sid, ok)
+    fn approve(&self, sid: &str, answer: Approval) -> bool {
+        self.approvals.resolve(sid, answer)
+    }
+
+    /// 等待快照：刷新页面后界面据此重建"是 / 否 / 本轮不再问"的卡。
+    fn pending_approval(&self, sid: &str) -> Option<ApprovalView> {
+        self.approvals.pending(sid).map(|r| ApprovalView {
+            module: r.module,
+            tool: r.tool,
+            args: r.args,
+        })
     }
 
     fn is_running(&self, sid: &str) -> bool {

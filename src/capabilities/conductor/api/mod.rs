@@ -17,6 +17,8 @@ use crate::capabilities::registry::api::AgentView;
 use crate::capabilities::session::api::AgentMeta;
 use crate::capabilities::session::api::HistoryView;
 pub use crate::capabilities::session::api::{Pending, SessionEvent};
+// 工具确认的答案类型归 kernel（跨线程机制）；这里转出给呈现层，呈现层不直接认 kernel。
+pub use crate::kernel::api::Approval;
 use crate::kernel::api::JobRegistry;
 use crate::kernel::api::SessionId;
 pub use crate::kernel::api::Tier;
@@ -211,9 +213,11 @@ pub trait SessionOps: Send + Sync {
     /// 停止：把整棵子树落成 `stopped`（拦住后续派发与唤醒）并中断正在跑的生成；
     /// 返回是否确实中断了一个在跑的生成。「继续」（`continue_flow`）是它的逆操作。
     fn stop(&self, sid: &str) -> bool;
-    /// 工具级确认的回答：`ok` = 是 / 否。**不进命令队列**（生成期间也要立刻生效）；
-    /// 返回是否确实有一个调用在等确认。
-    fn approve(&self, sid: &str, ok: bool) -> bool;
+    /// 工具级确认的回答：`Allow` / `Deny` / `Full`（本轮不再问）。
+    /// **不进命令队列**（生成期间也要立刻生效）；返回是否确实有一个调用在等确认。
+    fn approve(&self, sid: &str, answer: Approval) -> bool;
+    /// 这个会话此刻在等的工具确认（刷新页面后界面据此重建卡片）；没有 = `None`。
+    fn pending_approval(&self, sid: &str) -> Option<ApprovalView>;
     #[allow(dead_code)]
     fn is_running(&self, sid: &str) -> bool;
     /// **在世会话 × 历史的并集**（界面上的会话列表）：只有会话中心同时知道两边，所以归这里。
@@ -549,6 +553,14 @@ pub struct SessionEdit {
     pub pins: BTreeMap<String, String>,
     #[serde(default)]
     pub net: bool,
+}
+
+/// 工具确认的快照视图：与推的 `Decision{kind:"tool_approval"}` 是同一份事实，界面据此重建卡片。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ApprovalView {
+    pub module: Option<String>,
+    pub tool: String,
+    pub args: String,
 }
 
 /// 会话列表视图。

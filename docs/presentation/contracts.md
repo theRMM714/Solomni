@@ -93,9 +93,9 @@
 | GET | `/app.js` | 静态资源 | — | `app.js` | 200 |
 | GET | `/md.js` | 静态资源 | — | `md.js` | 200 |
 | GET | `/api/events` | 事件台（`EventBus`） | 查询 `sid` / `since` | `{lines:[{seq,sid,events}],head,oldest}` | 200 |
-| GET | `/api/state` | `WorkspaceOps::roster` + `SessionOps::session_views` + `RegistryOps` + `HistoryOps::list` | — | `{modules,rejected,fence,providers,models,core,agents,settings,sessions,history}` | 200, 400 |
+| GET | `/api/state` | `WorkspaceOps::roster` + `SessionOps::session_views` + `SessionOps::pending_approval` + `RegistryOps` + `HistoryOps::list` | — | `{modules,rejected,fence,providers,models,core,agents,settings,sessions,history}`（`sessions[].pending` 含等待中的工具确认） | 200, 400 |
 | POST | `/api/sessions` | `SessionOps::create_work` | `{name,mode,agents[],task?,delegate?,tier?}`（`mode` = single / collab / **proxy**：proxy 没有名单、选它就是**授予全权**；`agents` = **点名结果**，未归并；单模式下多个会被并成一个临时组合；`tier` 缺省 = 本机档，**proxy 会话的档位也是它建出的子工作的默认档**） | `{sid,agents,head}` | 200, 400 |
-| POST | `/api/sessions/{sid}/{action}` | `SessionOps` + `intent::act` | `{text?,agent?,id?,overwrite?,data_base64?,编辑体}` | `{sid,head}` / `{sid,events}`（重放快照）等 | 200, 400, 404, 409 |
+| POST | `/api/sessions/{sid}/{action}` | `SessionOps` + `intent::act` | `{text?,agent?,id?,overwrite?,data_base64?,answer?,编辑体}`（`approve` 用 `answer` = yes / no / full） | `{sid,head}` / `{sid,events}`（重放快照）等 | 200, 400, 404, 409 |
 | GET | `/api/sessions/{sid}/config` | `SessionOps::config` | — | `{config}` | 200, 400 |
 | GET | `/api/sessions/{sid}/files` | `SessionOps::files` | — | `{work,agents,roots,usage}` | 200, 404 |
 | POST | `/api/providers` | `RegistryOps::upsert_provider` | `{id,base_url,api_key}` | `{ok}` | 200, 400 |
