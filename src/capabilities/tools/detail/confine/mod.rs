@@ -176,18 +176,17 @@ pub fn sweep_profiles() -> Result<usize, String> {
     }
 }
 
-/// 外层进程调用：把围栏要用的授权一次性做好（写目录 ACL）；prepared 是"已经授权过"的台账，
-/// 避免每次工具调用重复改 ACL。
+/// 外层进程调用：把围栏要用的授权一次性做好（写目录 ACL）。
+/// 跳过条件看**实际 ACE**而不是内存台账，所以权限收窄并撤权后能正确重授。
 /// 只有 Windows 的容器围栏需要这一步——Linux 的 Landlock 与 macOS 的 seatbelt 在守门进程里自足，
 /// 所以本函数在非 Windows 平台上**不存在**（而不是"存在但空转"）。
 #[cfg(windows)]
 pub fn prepare_fence(
     spec: &FenceSpec,
     command: &str,
-    prepared: &std::sync::Mutex<std::collections::BTreeSet<String>>,
     home: &std::path::Path,
 ) -> Result<(), String> {
-    windows::prepare_fence(spec, command, prepared, home)
+    windows::prepare_fence(spec, command, home)
 }
 
 /// 精确回收：按台账撤掉我们写过的权限项、删掉我们建过的容器 profile（`--fence-clean` 用）。
