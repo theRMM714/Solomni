@@ -19,7 +19,7 @@ env: |-
 patch_guide: |-
   【改文件：用 patch，别把大段文本塞进 JSON】
   信封写成 {"type":"tool","name":"patch"}，**信封之后原样跟补丁文本**（不用转义、不用引号，直接写中文与换行）：
-  *** Update File: {{work_root}}/note.txt
+  *** Update File: {{sandbox_root}}/note.txt
   *** SEARCH
   （从文件里原样抄来的连续几行）
   *** REPLACE
@@ -41,7 +41,8 @@ patch_guide: |-
 tool_calling_envelope: |-
   工具调用约定：需要用工具时，只输出一个 JSON 信封（不要包裹其它文字）：
   {"type":"tool","module":"模块id","name":"工具名","args":{...参数对象...}}
-  外部工具要带上它所属的模块 id（见上面清单每行开头）；内置工具 read/write/edit/patch/search 不用写 module。
+  外部工具要带上它所属的模块 id（见上面清单每行开头）；核心自己实现的系统工具
+  （read / write / edit / patch / list / search / work_pull / work_commit / work_status 等）不用写 module。
   要一次发**多个**调用（互不依赖的那些），就把它们写进同一个信封的 calls 数组——核心按工具声明的并发性一起跑，
   结果按你写的顺序发回：
   {"type":"tool","calls":[{"name":"read","args":{...参数对象...}},{"module":"模块id","name":"工具名","args":{...参数对象...}}]}
