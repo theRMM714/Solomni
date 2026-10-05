@@ -38,7 +38,7 @@ pub struct SessionMeta {
     /// 任务级委托（全权）：`Some` = 这条会话的核心可以用代理工具代用户决定。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub delegation: Option<Delegation>,
-    /// 运行态：暂停后不再被派发或唤醒；关闭是终态。缺省（active）= 正常运行。
+    /// 运行态：停止后不再被派发或唤醒；关闭是终态。缺省（active）= 正常运行。
     /// 它与"这一刻在不在跑"（推的 `Working`，短暂不落盘）是两件事：**它是持久事实**，
     /// 重启/回档后照样成立（见 docs/session/session-model.md 二）。
     #[serde(default, skip_serializing_if = "RunState::is_active")]
@@ -53,8 +53,8 @@ pub enum RunState {
     /// 正常：可以被派发与唤醒。
     #[default]
     Active,
-    /// 暂停：一切派发与唤醒都不再启动（在跑的那次已被停下）。可 resume 回到 Active。
-    Paused,
+    /// 已停止：一切派发与唤醒都不再启动（在跑的那次已被停下）。用户「继续」回到 Active。
+    Stopped,
     /// 关闭：终态，不能再被派发、唤醒或 resume。
     Closed,
 }
@@ -63,7 +63,7 @@ impl RunState {
     pub fn as_str(self) -> &'static str {
         match self {
             RunState::Active => "active",
-            RunState::Paused => "paused",
+            RunState::Stopped => "stopped",
             RunState::Closed => "closed",
         }
     }
@@ -84,17 +84,17 @@ pub struct Delegation {
 }
 
 impl SessionMeta {
-    /// 允许被派发 / 唤醒吗？暂停与关闭都拒绝——**运行态的唯一判据只有这一处**
+    /// 允许被派发 / 唤醒吗？停止与关闭都拒绝——**运行态的唯一判据只有这一处**
     /// （派发入口、代理转达、叫醒都问它，不各写一份）。None = 放行。
     pub fn dispatch_refusal(&self) -> Option<String> {
         match self.run {
             RunState::Active => None,
-            RunState::Paused => Some(format!(
-                "会话 {} 已暂停：先 resume 再派发（暂停期间不接受任何派发或唤醒）",
+            RunState::Stopped => Some(format!(
+                "会话 {} 已停止：先「继续」再派发（停止期间不接受任何派发或唤醒）",
                 self.name
             )),
             RunState::Closed => Some(format!(
-                "会话 {} 已关闭：终态，不能再派发、唤醒或 resume",
+                "会话 {} 已关闭：终态，不能再派发、唤醒或继续",
                 self.name
             )),
         }
@@ -128,7 +128,7 @@ pub struct HistoryView {
     /// 谁编排的（子会话 = 父会话名）：侧栏据此把子会话缩进挂在父会话下。
     #[serde(default)]
     pub parent: Option<String>,
-    /// 运行态（`active` / `paused` / `closed`）：侧栏据此标出已暂停 / 已关闭的会话
+    /// 运行态（`active` / `stopped` / `closed`）：侧栏据此标出已停止 / 已关闭的会话
     /// （"这一刻在不在跑"是另一回事，见 `SessionView.running`）。
     pub run: RunState,
 }

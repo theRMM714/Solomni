@@ -203,30 +203,24 @@ impl ObserveView {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ControlAction {
-    Pause,
-    Resume,
     Stop,
+    Continue,
     Close,
 }
 
 impl ControlAction {
     pub fn parse(s: &str) -> Result<Self, String> {
         match s {
-            "pause" => Ok(Self::Pause),
-            "resume" => Ok(Self::Resume),
             "stop" => Ok(Self::Stop),
+            "continue" => Ok(Self::Continue),
             "close" => Ok(Self::Close),
-            other => Err(format!(
-                "action 只能是 pause / resume / stop / close：{}",
-                other
-            )),
+            other => Err(format!("action 只能是 stop / continue / close：{}", other)),
         }
     }
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::Pause => "pause",
-            Self::Resume => "resume",
             Self::Stop => "stop",
+            Self::Continue => "continue",
             Self::Close => "close",
         }
     }
@@ -1003,8 +997,8 @@ mod tests {
             "{}",
             note
         );
-        let ctl = control_note(ControlAction::Pause, "先冻上");
-        assert!(ctl.contains("pause") && ctl.contains("先冻上"), "{}", ctl);
+        let ctl = control_note(ControlAction::Stop, "先停一下");
+        assert!(ctl.contains("stop") && ctl.contains("先停一下"), "{}", ctl);
     }
 
     /// 消息倒查的边界：`from` 以最新为 0、`count` 有上下界、缺省是 0/10。

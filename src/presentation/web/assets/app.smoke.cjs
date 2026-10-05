@@ -433,13 +433,13 @@ setTimeout(async () => {
       if (!wizardProxy) loadErrors.push("向导代理形态检查：没有找到 proxy 选项");
     } catch (e) { loadErrors.push("向导代理形态检查失败：" + e.message); }
   }
-  // **会话级说明**：代理身份与"已暂停 / 已关闭"都要说清（转录最上方一行，不冒充任何一方的发言）。
+  // **会话级说明**：代理身份与"已停止 / 已关闭"都要说清（转录最上方一行，不冒充任何一方的发言）。
   let sessionNoteRule = false;
   if (!loadErrors.length) {
     try {
       const r = vm.runInNewContext(
         "(function () { const a = sessionNote({ mode: 'proxy', run: 'active' });" +
-          " const b = sessionNote({ mode: 'single', run: 'paused' });" +
+          " const b = sessionNote({ mode: 'single', run: 'stopped' });" +
           " const c = sessionNote({ mode: 'single', run: 'closed' });" +
           " const d = sessionNote({ mode: 'single', run: 'active' });" +
           " return { a: !!a, aCls: a && a.className, aText: a && a.textContent," +
@@ -447,19 +447,19 @@ setTimeout(async () => {
         sandbox
       );
       sessionNoteRule = r.a && r.aCls === "agent-note" && String(r.aText).indexOf("代理模式") >= 0
-        && String(r.bText).indexOf("已暂停") >= 0 && String(r.cText).indexOf("已关闭") >= 0
+        && String(r.bText).indexOf("已停止") >= 0 && String(r.cText).indexOf("已关闭") >= 0
         && r.d === null;
       if (!sessionNoteRule) loadErrors.push("会话级说明检查：" + JSON.stringify(r));
     } catch (e) { loadErrors.push("会话级说明检查失败：" + e.message); }
   }
-  // **侧栏的运行态**：暂停 / 关闭要一眼可辨（持久事实，不是"这一刻在不在跑"）。
+  // **侧栏的运行态**：停止 / 关闭要一眼可辨（持久事实，不是"这一刻在不在跑"）。
   let historyRunTag = false;
   if (!loadErrors.length) {
     try {
       const r = vm.runInNewContext(
         "(function () {" +
           " state.history = [" +
-          "   { name: 'p', mode: 'proxy', ts: 1, done: false, run: 'paused', tier: 'host', parent: null }," +
+          "   { name: 'p', mode: 'proxy', ts: 1, done: false, run: 'stopped', tier: 'host', parent: null }," +
           "   { name: 'c', mode: 'single', ts: 2, done: false, run: 'closed', tier: 'host', parent: 'p' }," +
           "   { name: 'a', mode: 'single', ts: 3, done: false, run: 'active', tier: 'host', parent: null }];" +
           " const box = document.querySelector('#history-list'); box.children.length = 0; renderHistory();" +
@@ -469,7 +469,7 @@ setTimeout(async () => {
         sandbox
       );
       const j = JSON.stringify(r.tags);
-      historyRunTag = j.indexOf("已暂停") >= 0 && j.indexOf("已关闭") >= 0 && j.indexOf("进行中") >= 0;
+      historyRunTag = j.indexOf("已停止") >= 0 && j.indexOf("已关闭") >= 0 && j.indexOf("进行中") >= 0;
       if (!historyRunTag) loadErrors.push("侧栏运行态检查：" + j);
     } catch (e) { loadErrors.push("侧栏运行态检查失败：" + e.message); }
   }

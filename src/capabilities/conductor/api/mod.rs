@@ -183,7 +183,7 @@ pub trait SessionOps: Send + Sync {
     fn create_work(&self, spec: WorkSpec) -> Result<(WorkOpened, u64), String>;
     /// 单 agent 会话里说一句（生成可被 `stop` 中止）。
     fn say(&self, sid: &str, text: &str, out: Output) -> Result<Advance, String>;
-    /// 继续一次会话（协作的执行阶段 / 单 agent 的继续）。
+    /// 继续一次会话：被停止过就先解冻整棵子树再接着走；协作从断点推进，单 agent / 代理补一轮「继续」。
     fn continue_flow(&self, sid: &str, out: Output) -> Result<Advance, String>;
     /// 协作推进到下一个阶段（task / slate / begin / answer）。
     fn collab_step(&self, sid: &str, step: CollabStep, text: &str) -> Result<Advance, String>;
@@ -208,7 +208,8 @@ pub trait SessionOps: Send + Sync {
     fn exists(&self, sid: &str) -> Result<bool, String>;
     /// 工作名的缺省与唯一化（命名策略归 `session`）：`base` 去空白、为空用 `fallback`、重名加尾号。
     fn unique_work_name(&self, base: &str, fallback: &str) -> Result<String, String>;
-    /// 请求停止该会话在跑的生成；返回是否确实有一个在跑。
+    /// 停止：把整棵子树落成 `stopped`（拦住后续派发与唤醒）并中断正在跑的生成；
+    /// 返回是否确实中断了一个在跑的生成。「继续」（`continue_flow`）是它的逆操作。
     fn stop(&self, sid: &str) -> bool;
     #[allow(dead_code)]
     fn is_running(&self, sid: &str) -> bool;
@@ -559,7 +560,7 @@ pub struct SessionView {
     /// **这条工作有「本次需求」吗**：前端据此决定要不要渲染「改需求」按钮——
     /// 没有就**根本不渲染**（不是灰着）。这是领域事实（有没有需求行），不是"模式"。
     pub can_update_task: bool,
-    /// 运行态（`active` / `paused` / `closed`）：**持久事实**，与短暂的 `running` 分开。
+    /// 运行态（`active` / `stopped` / `closed`）：**持久事实**，与短暂的 `running` 分开。
     /// 界面据此标出"已暂停 / 已关闭"（这类会话不会再被派发或唤醒）。
     pub run: String,
     /// 当前等用户裁决的事（None = 没有）：**快照形态**，与推的 `SessionEvent::Decision` 同源。

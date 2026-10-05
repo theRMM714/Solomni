@@ -529,12 +529,11 @@ impl Conductor {
         ))
     }
 
-    /// 代理工具：控制（**只做运行态的状态转移**，不启动也不停止生成——停止要 JobRegistry，
-    /// 只有句柄拿得到，见 `ProxyBridge::control`）。可回放记录也由句柄那一侧写（它才推得到事件台）。
-    /// - pause：冻上（此后的派发与唤醒一律拒绝）；在跑的那次由句柄停；
-    /// - resume：解冻；随后由句柄按形态唤醒它接着走；
-    /// - close：终态。整棵子树里还有在生成的就拒绝（先 stop / pause），不留半个状态；
-    /// - stop：级联停止由句柄承担，不进这条。
+    /// 代理工具：控制里的**终态关闭**（只做运行态的状态转移，不启动也不停止生成——
+    /// 停止 / 继续要 JobRegistry 与唤醒，只有句柄拿得到，见 `ProxyBridge::control`）。
+    /// 可回放记录也由句柄那一侧写（它才推得到事件台）。
+    /// - close：终态。整棵子树里还有在生成的就拒绝（先 stop），不留半个状态；
+    /// - stop / continue：级联停与解冻唤醒由句柄承担，不进这条。
     pub fn proxy_control(
         &self,
         sid: &str,
@@ -542,52 +541,31 @@ impl Conductor {
     ) -> Result<d::ControlState, String> {
         let meta = self.history.meta(sid)?;
         let target = meta.name.clone();
-        let set = |run: RunState| -> Result<(), String> {
-            let mut m = meta.clone();
-            m.run = run;
-            self.history.save_meta(&m)
-        };
-        // 先做状态转移（只改落盘运行态），回执状态在下面按动作给。
         match action {
-            d::ControlAction::Stop => {
-                return Err("stop 不走这条：级联停止由句柄承担".to_string());
+            d::ControlAction::Stop | d::ControlAction::Continue => {
+                return Err(format!(
+                    "{} 不走这条：运行态与生成由句柄承担",
+                    action.as_str()
+                ));
             }
-            d::ControlAction::Pause => match meta.run {
-                RunState::Closed => {
-                    return Err(format!("会话 {} 已关闭：不能再暂停", target));
-                }
-                RunState::Paused => {}
-                RunState::Active => set(RunState::Paused)?,
-            },
-            d::ControlAction::Resume => match meta.run {
-                RunState::Closed => {
-                    return Err(format!("会话 {} 已关闭：终态，不能 resume", target));
-                }
-                RunState::Paused => set(RunState::Active)?,
-                RunState::Active => {}
-            },
             d::ControlAction::Close => {
-                // “关闭已完成或已停止的会话”：子树里还有在生成的就整条拒绝。
+                // 「关闭已完成或已停止的会话」：子树里还有在生成的就整条拒绝。
                 for s in self.subtree_of(sid) {
                     if self.running.contains(&s) {
                         return Err(Self::running_refusal(&s));
                     }
                 }
                 if meta.run != RunState::Closed {
-                    set(RunState::Closed)?;
+                    let mut m = meta.clone();
+                    m.run = RunState::Closed;
+                    self.history.save_meta(&m)?;
                 }
             }
-        };
-        let state = match action {
-            d::ControlAction::Pause => "paused",
-            d::ControlAction::Resume => "active",
-            d::ControlAction::Close => "closed",
-            d::ControlAction::Stop => "stopped",
         };
         Ok(d::ControlState {
             session: target,
             action,
-            state: state.to_string(),
+            state: "closed".to_string(),
         })
     }
 
@@ -814,43 +792,58 @@ impl ProxyHost for ProxyBridge {
     ) -> Result<d::ControlState, String> {
         let handle = self.handle.lock().unwrap_or_else(|e| e.into_inner());
         let session = session.to_string();
-        if action == d::ControlAction::Stop {
-            // 级联停止：整棵子树（本会话 + 所有后代）正在跑的生成都立即中断。
-            let stopped = handle.stop_tree(&session)?;
-            handle.record_notice(
-                &session,
-                SessionEvent::Notice(d::control_note(action, reason)),
-            );
-            return Ok(d::ControlState {
-                session,
-                action,
-                state: format!("stopped:{}", stopped.len()),
-            });
+        match action {
+            // 停止：先把整棵子树冻成「已停止」（拦住后续派发与唤醒），再中断正在跑的生成。
+            d::ControlAction::Stop => {
+                let _ = handle.call({
+                    let s = session.clone();
+                    move |core| core.set_subtree_run(&s, RunState::Stopped)
+                });
+                let stopped = handle.stop_tree(&session)?;
+                handle.record_notice(
+                    &session,
+                    SessionEvent::Notice(d::control_note(action, reason)),
+                );
+                return Ok(d::ControlState {
+                    session,
+                    action,
+                    state: format!("stopped:{}", stopped.len()),
+                });
+            }
+            // 继续：解冻整棵子树，再按形态唤醒它接着走。
+            d::ControlAction::Continue => {
+                let resumed = handle.call({
+                    let s = session.clone();
+                    move |core| core.resume_subtree(&s)
+                })?;
+                if resumed {
+                    let mode = handle.call({
+                        let s = session.clone();
+                        move |core| Ok(core.session_mode_str(&s))
+                    })?;
+                    match mode.as_str() {
+                        "collab" => handle.spawn_detached_collab(&session),
+                        "proxy" => handle.spawn_detached_proxy(&session),
+                        _ => handle.spawn_detached_continue(&session),
+                    }
+                }
+                handle.record_notice(
+                    &session,
+                    SessionEvent::Notice(d::control_note(action, reason)),
+                );
+                return Ok(d::ControlState {
+                    session,
+                    action,
+                    state: "active".to_string(),
+                });
+            }
+            // 关闭是终态：交核心线程改落盘运行态（子树里还有在生成的就整条拒绝）。
+            d::ControlAction::Close => {}
         }
-        // 运行态转移在核心线程上（落盘 meta 是唯一真相）；启动 / 停止生成只有句柄做得了。
         let state = handle.call({
             let s = session.clone();
             move |core| core.proxy_control(&s, action)
         })?;
-        match action {
-            // 先冻上运行态，再停生成：此刻起任何派发与唤醒都被拒（顺序不能反）。
-            d::ControlAction::Pause => {
-                let _ = handle.stop_tree(&session);
-            }
-            // 解冻后按形态唤醒它接着走：协作继续推进链，代理自己再想一轮，单 agent 接着说完。
-            d::ControlAction::Resume => {
-                let mode = handle.call({
-                    let s = session.clone();
-                    move |core| core.dispatch_target(&s)
-                })?;
-                match mode.as_str() {
-                    "collab" => handle.spawn_detached_collab(&session),
-                    "proxy" => handle.spawn_detached_proxy(&session),
-                    _ => handle.spawn_detached_continue(&session),
-                }
-            }
-            _ => {}
-        }
         handle.record_notice(
             &session,
             SessionEvent::Notice(d::control_note(action, reason)),

@@ -2,7 +2,7 @@
 /**
  * 代理模式演示（L4 演示脚本，**在真机上跑**）：用户把决定权**整块**交给核心——
  * 他只跟核心说一句目标，核心自己挑人、建子工作、把活转达出去；子会话停下会自动叫醒核心，
- * 核心再主动倒查正文、接着安排；最后用户按「停止」，整棵子树一起停下。
+ * 核心再主动倒查正文、接着安排；最后用户按「停止」整棵子树停住，按「继续」再解冻接着走。
  *
  * 与另外两个演示的区别（见 PRODUCT.md「代理（proxy）」）：
  *   demo/run-demo.mjs         组合式：一个 agent 装三个模块，用户直接给它活；
@@ -368,9 +368,31 @@ async function main() {
 
   const stopped = await api("POST", "/api/sessions/" + enc(sid2) + "/stop", {});
   ok(stopped.status === 200, "点停止", stopped.text);
-  await sleep(1500);
-  const still = subtreeRunning(await state(), sid2);
-  ok(still.length === 0, "停止即全停：整棵子树都不再跑", still.join("、"));
+  // 停止是**持久事实**（run=stopped），不是只中断这一刻：多等几轮，之后的叫醒也会被闸门拒掉。
+  let still = [];
+  for (let i = 0; i < 5; i++) {
+    await sleep(1500);
+    const running = subtreeRunning(await state(), sid2);
+    if (running.length) { still = running; break; }
+  }
+  ok(still.length === 0, "停止即全停：整棵子树都不再跑（且保持）", still.join("、"));
+  const stoppedTree = (await state()).history.filter((h) => h.name === sid2 || h.parent === sid2);
+  ok(
+    stoppedTree.length > 0 && stoppedTree.every((h) => h.run === "stopped"),
+    "整棵子树落盘为已停止（run=stopped）",
+    JSON.stringify(stoppedTree.map((h) => h.name + ":" + h.run)),
+  );
+
+  // 「继续」是「停止」的逆操作：解冻后再发一轮（这条会等模型跑完）。
+  console.log("   继续：解冻并接着走");
+  const resumed = await api("POST", "/api/sessions/" + enc(sid2) + "/continue", {});
+  ok(resumed.status === 200, "点继续（解冻并接着走）", resumed.text);
+  const activeTree = (await state()).history.filter((h) => h.name === sid2 || h.parent === sid2);
+  ok(
+    activeTree.some((h) => h.run === "active") && activeTree.every((h) => h.run !== "stopped"),
+    "继续后整棵子树回到可被驱动（不再是 stopped）",
+    JSON.stringify(activeTree.map((h) => h.name + ":" + h.run)),
+  );
   if (!caught.length) {
     console.log("   （停止那一刻子树里没有在跑的生成——多半已经跑完；这条只验了停止后的最终态。）");
   }

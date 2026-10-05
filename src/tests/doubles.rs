@@ -1813,9 +1813,8 @@ impl ProxyHost for FakeProxyHost {
             session: session.to_string(),
             action,
             state: match action {
-                dproxy::ControlAction::Pause => "paused",
-                dproxy::ControlAction::Resume => "running",
                 dproxy::ControlAction::Stop => "stopped",
+                dproxy::ControlAction::Continue => "active",
                 dproxy::ControlAction::Close => "closed",
             }
             .to_string(),

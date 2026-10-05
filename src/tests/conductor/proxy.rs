@@ -732,9 +732,9 @@ pub(crate) fn a_finished_child_notifies_the_proxy_without_dumping_its_transcript
     assert!(!text.contains("做事"), "不得把子会话的转录灌进来：{}", text);
 }
 
-/// 运行态是**落盘事实**：暂停后派发与唤醒一律被拒，关闭是终态，resume 解冻后接着走。
+/// 运行态是**落盘事实**：停止后派发与唤醒一律被拒，关闭是终态，继续解冻后放行。
 #[test]
-pub(crate) fn run_state_gates_dispatch_and_survives_pause_close() {
+pub(crate) fn run_state_gates_dispatch_and_survives_stop_close() {
     use crate::capabilities::conductor::ports::ProxyHost;
     use crate::capabilities::conductor::service::proxy::ProxyBridge;
     use crate::capabilities::workspace::api::ModuleManifest;
@@ -762,35 +762,35 @@ pub(crate) fn run_state_gates_dispatch_and_survives_pause_close() {
         text: "做事".to_string(),
     };
 
-    // 暂停：运行态落盘 + 回执如实；转达与"取会话去生成"两道闸都拒绝。
+    // 停止：运行态落盘 + 回执如实；转达与"取会话去生成"两道闸都拒绝。
     let st = bridge
-        .control(&sid, d::ControlAction::Pause, "先冻上")
-        .expect("暂停");
-    assert_eq!(st.state, "paused");
+        .control(&sid, d::ControlAction::Stop, "先停一下")
+        .expect("停止");
+    assert_eq!(st.state, "stopped:0");
     assert_eq!(
         ops.history.open(&sid).expect("meta").0.run,
-        RunState::Paused,
-        "暂停是落盘事实，不是内存状态"
+        RunState::Stopped,
+        "停止是落盘事实，不是内存状态"
     );
-    assert!(bridge.send(&sid, &msg).unwrap_err().contains("已暂停"));
+    assert!(bridge.send(&sid, &msg).unwrap_err().contains("已停止"));
     let taken = handle.call({
         let s = sid.clone();
         move |core| core.take_single(&s).map(|_| ())
     });
     assert!(
-        taken.unwrap_err().contains("已暂停"),
-        "叫醒路径也要被拦：暂停的会话不许被取去生成"
+        taken.unwrap_err().contains("已停止"),
+        "叫醒路径也要被拦：停止的会话不许被取去生成"
     );
     assert_eq!(
         bridge
             .observe(&sid, d::ObserveView::Status, None)
             .expect("观察")
             .state,
-        "paused"
+        "stopped"
     );
     let replay = serde_json::to_string(&ops.history.open(&sid).expect("回放").1).expect("JSON");
     assert!(
-        replay.contains("先冻上"),
+        replay.contains("先停一下"),
         "控制原因要进可回放记录：{}",
         replay
     );
@@ -806,22 +806,22 @@ pub(crate) fn run_state_gates_dispatch_and_survives_pause_close() {
     );
     assert!(bridge.send(&sid, &msg).unwrap_err().contains("已关闭"));
     assert!(bridge
-        .control(&sid, d::ControlAction::Resume, "想反悔")
+        .control(&sid, d::ControlAction::Continue, "想反悔")
         .unwrap_err()
         .contains("已关闭"));
 
-    // 恢复：解冻后派发放行（这条没在等门，接着走的是"继续"）。
+    // 继续：解冻后派发放行（这条没在等门，接着走的是"继续"）。
     let (w2, _) = ops
         .sessions
         .create_work(super::super::single_work("w-run-2", &["m1"]))
         .expect("建工作");
     let sid2 = w2.sid.clone();
     bridge
-        .control(&sid2, d::ControlAction::Pause, "先冻上")
-        .expect("暂停");
+        .control(&sid2, d::ControlAction::Stop, "先停一下")
+        .expect("停止");
     let st = bridge
-        .control(&sid2, d::ControlAction::Resume, "接着做")
-        .expect("恢复");
+        .control(&sid2, d::ControlAction::Continue, "接着做")
+        .expect("继续");
     assert_eq!(st.state, "active");
     assert_eq!(
         ops.history.open(&sid2).expect("meta").0.run,

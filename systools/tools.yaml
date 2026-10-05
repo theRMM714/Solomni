@@ -299,7 +299,7 @@ tools:
         desc: 本次取几条（1 到 50）；按新→旧排列
   control_session:
     capability: none              # 不碰文件：改的是会话生命周期
-    desc: 控制一个代理子会话：pause（暂停）/ resume（恢复）/ stop（中断生成）/ close（关闭已完成或已停止的会话）。
+    desc: 控制一个代理子会话：stop（停止：整棵子树落成已停止，拦住派发与唤醒，并中断在跑的生成）/ continue（继续：解冻并按形态唤醒接着走）/ close（关闭已完成或已停止的会话，终态）。
     params:
       session_id:
         type: string
@@ -310,7 +310,7 @@ tools:
         type: string
         required: true
         non_empty: true
-        desc: pause / resume / stop / close
+        desc: stop / continue / close
       reason:
         type: string
         required: true

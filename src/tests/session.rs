@@ -1220,14 +1220,14 @@ pub(crate) fn session_meta_exec_section_roundtrips_and_reads_legacy_meta() {
     );
     assert!(!back.exec.net);
     assert_eq!(back.run, RunState::Active, "缺省运行态 = 正常运行");
-    // 运行态是**持久事实**：暂停 / 关闭写进 meta 后重启照样成立。
-    let paused = SessionMeta {
-        run: RunState::Paused,
+    // 运行态是**持久事实**：停止 / 关闭写进 meta 后重启照样成立。
+    let stopped = SessionMeta {
+        run: RunState::Stopped,
         ..meta.clone()
     };
     let back: SessionMeta =
-        yaml_serde::from_str(&yaml_serde::to_string(&paused).expect("序列化")).expect("反序列化");
-    assert_eq!(back.run, RunState::Paused);
+        yaml_serde::from_str(&yaml_serde::to_string(&stopped).expect("序列化")).expect("反序列化");
+    assert_eq!(back.run, RunState::Stopped);
     // 缺 exec 段的旧会话照旧可读（默认 = 本机档、不联网、不定版、正常运行）。
     let legacy: SessionMeta =
         yaml_serde::from_str("name: old\nmode: single\nmodules: [a]\nts: 1\n")

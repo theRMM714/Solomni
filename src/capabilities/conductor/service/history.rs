@@ -173,6 +173,46 @@ impl Conductor {
         }
     }
 
+    /// 把整棵子树（含自己）的运行态落成同一个值：**停止**先整棵冻上，**继续**再整棵解开。
+    /// 停止时顺序不能反——先冻态再取消生成，被停会话收尾写的那条"这一轮结束"才会被闸门拒掉。
+    pub(crate) fn set_subtree_run(
+        &self,
+        name: &str,
+        run: crate::capabilities::session::api::RunState,
+    ) -> Result<Vec<String>, String> {
+        let tree = self.subtree_of(name);
+        for sid in &tree {
+            let mut meta = self.history.meta(sid)?;
+            if meta.run != run {
+                meta.run = run;
+                self.history.save_meta(&meta)?;
+            }
+        }
+        Ok(tree)
+    }
+
+    /// 解除整棵子树的「已停止」（停止的逆操作）；返回是否确实解除了至少一个。
+    /// 子树里只要有**已关闭**的就整条拒绝——关闭是终态，不能被「继续」拉回来。
+    pub(crate) fn resume_subtree(&self, name: &str) -> Result<bool, String> {
+        use crate::capabilities::session::api::RunState;
+        let mut any = false;
+        for sid in self.subtree_of(name) {
+            let mut meta = self.history.meta(&sid)?;
+            match meta.run {
+                RunState::Closed => {
+                    return Err(format!("会话 {} 已关闭：终态，不能再继续", sid));
+                }
+                RunState::Stopped => {
+                    meta.run = RunState::Active;
+                    self.history.save_meta(&meta)?;
+                    any = true;
+                }
+                RunState::Active => {}
+            }
+        }
+        Ok(any)
+    }
+
     /// 一个会话的**工作根**（顶层会话名）：沿 `meta.parent` 一路走到顶。
     /// 整棵树不论嵌套多少层只有一个 `work/`——共享区与 agent 沙箱都锚在它上面。
     pub(crate) fn work_root(&self, name: &str) -> Result<String, String> {
@@ -188,7 +228,7 @@ impl Conductor {
         Ok(cur.name)
     }
 
-    /// **运行态闸门**：派发 / 唤醒前过它，暂停与关闭都拒绝。
+    /// **运行态闸门**：派发 / 唤醒前过它，停止与关闭都拒绝。
     /// 拿不到 meta（系统会话等未落盘）就当正常运行——运行态是落盘事实，
     /// 不存在的会话自有别的检查兜底（这里不替它报"无此会话"）。
     pub(crate) fn dispatch_gate(&self, sid: &str) -> Result<(), String> {

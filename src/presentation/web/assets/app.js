@@ -308,8 +308,8 @@ function renderHistory() {
     const name = document.createElement('span'); name.className = 'hname';
     name.textContent = (h.parent ? '└ ' : '') + h.name;
     const mode = document.createElement('span'); mode.className = 'hmode';
-    // 运行态是**持久事实**（暂停 / 关闭），与"这一刻在不在跑"分开：侧栏据此标出来。
-    const stateTag = h.run === 'paused' ? '·已暂停'
+    // 运行态是**持久事实**（停止 / 关闭），与"这一刻在不在跑"分开：侧栏据此标出来。
+    const stateTag = h.run === 'stopped' ? '·已停止'
       : h.run === 'closed' ? '·已关闭'
         : (h.done ? '' : '·进行中 ');
     mode.textContent =
@@ -2216,7 +2216,7 @@ function lineBlock(p, s, key, live) {
 }
 
 /// 定稿行渲染到容器里（每次全量重建这个容器；折叠与 <pre> 滚动状态由 store 恢复）。
-/// 会话级说明（代理身份 / 已暂停 / 已关闭）：放转录最上方，**不冒充任何一方的发言**。
+/// 会话级说明（代理身份 / 已停止 / 已关闭）：放转录最上方，**不冒充任何一方的发言**。
 /// 它只说这条会话是什么、还该不该被驱动——正文一律来自转录本身。
 function sessionNote(s) {
   if (!s) return null;
@@ -2225,7 +2225,7 @@ function sessionNote(s) {
     bits.push('代理模式：核心代你挑人、建子工作并回答它们的关卡——这就是全权；' +
       '按「停止」会让相关会话一起停下。');
   }
-  if (s.run === 'paused') bits.push('这条会话已暂停：不会再被派发或唤醒，直到它被恢复。');
+  if (s.run === 'stopped') bits.push('这条会话已停止：不会再被派发或唤醒；点「继续」可以接着走。');
   if (s.run === 'closed') bits.push('这条会话已关闭：终态，不会再被派发或唤醒。');
   if (!bits.length) return null;
   const d = document.createElement('div');

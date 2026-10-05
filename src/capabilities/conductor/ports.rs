@@ -23,7 +23,7 @@ pub trait ProxyHost: Send + Sync {
         view: ObserveView,
         since: Option<&str>,
     ) -> Result<Snapshot, String>;
-    /// 控制一个会话的生命周期（pause / resume / stop / close），reason 进可回放记录。
+    /// 控制一个会话的生命周期（stop / continue / close），reason 进可回放记录。
     fn control(
         &self,
         session: &str,
