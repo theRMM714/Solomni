@@ -141,7 +141,7 @@ async function main() {
     const walk = (dir) => {
       for (const ent of readdirSync(dir, { withFileTypes: true })) {
         const p = join(dir, ent.name);
-        if (ent.isDirectory()) walk(p);
+        if (ent.isDirectory()) { if (ent.name !== ".work") walk(p); }
         else if (!found.has(ent.name)) found.set(ent.name, p);
       }
     };

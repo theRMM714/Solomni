@@ -172,7 +172,7 @@ function producedFiles(work) {
   const walk = (dir) => {
     for (const ent of readdirSync(dir, { withFileTypes: true })) {
       const p = join(dir, ent.name);
-      if (ent.isDirectory()) walk(p);
+      if (ent.isDirectory()) { if (ent.name !== ".work") walk(p); }
       else if (ent.name !== "meta.yaml" && ent.name !== "transcript.jsonl" && !found.has(ent.name)) found.set(ent.name, p);
     }
   };
