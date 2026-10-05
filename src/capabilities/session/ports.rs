@@ -3,7 +3,7 @@
 use crate::capabilities::session::domain::history::{HistoryView, SessionMeta};
 
 /// 会话历史端口：一个会话一个目录（meta + 事件流水）。
-/// 流水只追加；回档以 rewind 记录追加，不物理删行（会话状态 = 回放截断）。
+/// 流水只追加；留档只在流水追加一条 rewind 记录，删除 / 恢复会整体重写（会话状态 = 按标记回放的活动窗口）。
 pub trait HistoryStore {
     fn create(&self, meta: &SessionMeta) -> Result<(), String>;
     /// 写回会话元信息（配置界面的编辑：会话身份唯一真相在 meta.yaml）。

@@ -30,10 +30,13 @@ person; capabilities are isolated too, a module's directory belongs only to the 
 `fence.per-agent-write-roots` in [tests/gaps.yaml](tests/gaps.yaml).)
 
 **③ When something goes wrong, you need to know what it saw and why it decided that.**
-The transcript is **append-only**; rewinding appends one record instead of deleting lines; line ids are monotonic and
-replay is reproducible, so **a rebuild matches the live run line by line**; what you see is exactly what entered the
-model. A delivery can be replayed from disk — what the AI did is an auditable, reproducible engineering artifact, not a
-chat that is gone.
+The transcript is **append-only** (delete/restore are explicit actions that really rewrite the log). On any line,
+"rewind to here" offers: **archive** — append a marker and collapse the earlier lines (all bytes kept, recoverable);
+**delete** — really truncate to that point; **restore** — truncate at the marker, discarding work done since. Line ids
+are monotonic and never reused, replay is reproducible, so **a rebuild matches the live run line by line**; the shared
+area comes back to that moment too, via the `(agent, line)` anchor on each commit, with the whole subtree synchronized.
+A delivery can be replayed from disk — what the AI did is an auditable, reproducible engineering artifact, not a chat
+that is gone.
 
 ## What it is made of
 
@@ -55,9 +58,10 @@ chat that is gone.
     from the API / scripts today.
 - **Modules are drop-in**: a folder with a valid `module.yaml` under `modules/` appears; remove it and it is
   gone — no registration, no build, no restart.
-- **Sessions and history**: one directory per piece of work (`session/<name>/`); append-only transcripts,
-  rewind to any line, context compaction; child sessions live under the parent's `children/` (nesting is
-  allowed) and the whole tree shares **one** work area.
+- **Sessions and history**: one directory per piece of work (`session/<name>/`); "rewind to here" on any line —
+  **archive** (recoverable) / **delete** (real truncation) / **restore** — and the shared area comes back with it,
+  anchored by commit line; transcripts are replayable, context is compactable; child sessions live under the
+  parent's `children/` (nesting is allowed) and the whole tree shares **one** work area.
 - **Three isolation layers**: path checks inside the built-in tools → every tool process runs behind the gate
   process (environment allowlist / process tree / timeout kills the whole tree) → platform fences
   (Windows AppContainer, Linux Landlock, macOS seatbelt). If a mechanism cannot be installed, the capability

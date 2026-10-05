@@ -3,7 +3,7 @@
 //! —— 位置本身就是归属，删父会话 = 删一个目录。名字即目录名（conductor 已校验）。
 //! 子会话可以再往下嵌套（代理建的子会话里还能有它自己的子会话），所以 children/ 的查找与遍历
 //! 必须是**任意深度**的：整棵 children/ 树都属于同一个顶层 work。
-//! 流水只追加，回档将来以 rewind 记录追加，不物理删行。
+//! 流水只追加；留档追加一条 rewind 记录，删除 / 恢复整体重写。
 
 use crate::capabilities::session::api::{HistoryView, SessionMeta};
 use crate::capabilities::session::ports::HistoryStore;

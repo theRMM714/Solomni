@@ -44,7 +44,7 @@ pub trait History: Send + Sync {
     fn create(&self, meta: &SessionMeta) -> Result<(), String>;
     /// 写回会话元信息（配置界面的编辑：会话身份的**唯一真相**在 meta.yaml）。
     fn save_meta(&self, meta: &SessionMeta) -> Result<(), String>;
-    /// 追加若干事件（留档只追加，不物理删行）。
+    /// 追加若干事件（留档只走这条；删除 / 恢复走 `replace`）。
     fn append(&self, name: &str, events: &[serde_json::Value]) -> Result<(), String>;
     /// 整体重写流水（删除 / 恢复会真的截断）。
     fn replace(&self, name: &str, events: &[serde_json::Value]) -> Result<(), String>;
