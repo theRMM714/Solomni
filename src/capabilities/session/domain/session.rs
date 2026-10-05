@@ -43,6 +43,15 @@ pub struct SessionParams {
     pub module_dirs: std::collections::BTreeMap<String, std::path::PathBuf>,
     /// 模块能力包：id + 模块 system（顺序即装配顺序）。
     pub modules: Vec<(String, String)>,
+    /// **角色提示词段**：`None` = 普通 agent（模块能力包 + `AgentSystem`）；
+    /// `Some(seg)` = 不是 agent 的核心身份（代理这类），身份块渲染 `seg` 那一段角色提示词。
+    /// 存段名而不是渲染好的文本：身份块**每回合现渲染**（册子一改，下一次调用就生效）。
+    pub role_system: Option<crate::capabilities::prompt::api::Segment>,
+    /// 这个会话的**使用类型**（single / collab / proxy）：机制册的第一把钥匙。
+    /// 与 `role` 一起按落盘形态派生，重建后是同一份。
+    pub session_kind: String,
+    /// 这一席的**角色**（solo / executor / discussant / core_proxy…）：机制册的第二把钥匙。
+    pub role: String,
 }
 
 impl SessionParams {
@@ -52,6 +61,8 @@ impl SessionParams {
         agent: &str,
         sb: &crate::capabilities::workspace::api::Sandbox,
         modules: &[crate::capabilities::workspace::api::Module],
+        session_kind: &str,
+        role: &str,
     ) -> SessionParams {
         SessionParams {
             agent: agent.to_string(),
@@ -63,6 +74,9 @@ impl SessionParams {
                 .iter()
                 .map(|m| (m.manifest.id.clone(), m.manifest.system.clone()))
                 .collect(),
+            role_system: None,
+            session_kind: session_kind.to_string(),
+            role: role.to_string(),
         }
     }
 
@@ -73,13 +87,27 @@ impl SessionParams {
         mode: crate::capabilities::llm::api::ToolMode,
     ) -> String {
         let env = env_block(prompt, self);
-        crate::capabilities::workspace::api::agent_system(
-            prompt,
-            &self.agent,
-            &self.modules,
-            &env,
-            mode,
-        )
+        match self.role_system {
+            // 角色身份（代理这类不是 agent 的核心）：同一份机制 / 环境 / 调用约定口径。
+            Some(seg) => crate::capabilities::workspace::api::role_system(
+                prompt,
+                seg,
+                &self.agent,
+                &env,
+                mode,
+                &self.session_kind,
+                &self.role,
+            ),
+            None => crate::capabilities::workspace::api::agent_system(
+                prompt,
+                &self.agent,
+                &self.modules,
+                &env,
+                mode,
+                &self.session_kind,
+                &self.role,
+            ),
+        }
     }
 }
 
@@ -211,7 +239,7 @@ impl AgentSession {
         refs: std::sync::Arc<crate::capabilities::prompt::api::RefsPrompts>,
         tool_texts: std::sync::Arc<crate::capabilities::prompt::api::ToolTexts>,
     ) -> AgentSession {
-        AgentSession {
+        let mut s = AgentSession {
             cur_turn: 0,
             compact_at: 0,
             compacted_upto: 0,
@@ -227,7 +255,9 @@ impl AgentSession {
             marks: Vec::new(),
             line_reply: Vec::new(),
             cur_reply: 0,
-        }
+        };
+        s.set_next_line(0);
+        s
     }
 
     /// 从落盘事件重建（继续/回档历史会话用）。
@@ -247,12 +277,13 @@ impl AgentSession {
         refs: std::sync::Arc<crate::capabilities::prompt::api::RefsPrompts>,
         tool_texts: std::sync::Arc<crate::capabilities::prompt::api::ToolTexts>,
     ) -> AgentSession {
-        AgentSession {
+        let next = marks.len() as u64;
+        let mut s = AgentSession {
             cur_turn: 0,
             compact_at: 0,
             compacted_upto,
             id: id.to_string(),
-            next_line: marks.len() as u64,
+            next_line: next,
             params,
             dialogue,
             chat,
@@ -263,7 +294,9 @@ impl AgentSession {
             marks,
             line_reply,
             cur_reply: 0,
-        }
+        };
+        s.set_next_line(next);
+        s
     }
 
     /// 这条会话**正在用**的工具调用形态（身份块里的调用约定按它现渲染）。
@@ -312,11 +345,6 @@ impl AgentSession {
         self.compact_at = chars;
     }
 
-    /// 压缩点（转录行 id）：0 = 没压过。回档到它之前，被销毁的对话在内存里补不回来。
-    pub fn compacted_upto(&self) -> u64 {
-        self.compacted_upto
-    }
-
     /// 当前下一条转录行的 id（压缩点用它：把此前的行全部移出发送视图）。
     pub fn next_line_id(&self) -> u64 {
         self.next_line
@@ -351,6 +379,14 @@ impl AgentSession {
         self.cur_turn = turn_id;
     }
 
+    /// 回档重建后把行号与**工具行锚**一起推到"全量下一个 id"（永不回退）。
+    pub fn set_next_line(&mut self, next: u64) {
+        self.next_line = next;
+        if let Some(t) = self.tools.as_ref() {
+            t.line.store(next, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+
     /// 生成一条转录行，并记下它完成时的历史长度（回档按 marks 逐行精确回退）与它属于哪次回复。
     pub(crate) fn line(
         &mut self,
@@ -377,6 +413,10 @@ impl AgentSession {
             turn: self.cur_turn,
         };
         self.next_line += 1;
+        if let Some(t) = self.tools.as_ref() {
+            t.line
+                .store(self.next_line, std::sync::atomic::Ordering::Relaxed);
+        }
         self.line_reply.push(reply);
         self.marks.push(self.dialogue.len());
         v
@@ -387,12 +427,11 @@ impl AgentSession {
         matches!(self.dialogue.last().map(|m| m.role.as_str()), Some("user"))
     }
 
-    /// 回档：只保留前 keep_id 行（= 删掉该行及其后）；对话与 marks 同步截断。
-    /// keep_id = 0 → 转录清空，对话也清空（marks 同清）；身份与环境不在这里，不受影响。
-    /// **按回复原子**：截在一次回复内部会留下"孤儿工具结果"（协议要求结果紧跟发起它的助手消息），
-    /// 所以 keep_id 落在某次回复中间时，这条回复整条丢掉（退到它的第一行之前）。
-    pub fn rewind(&mut self, keep_id: u64) {
-        // 回档把转录截掉了：那段"我完整读过哪些文件"的读取证据随之作废（保守，宁肯让模型重读）。
+    /// **删除模式**的精确回退（不重建，保住通道）：只保留前 keep_id 行（= 删该行及其后），
+    /// 对话与 marks 同步截断；keep_id = 0 → 转录清空、对话清空。**按回复原子**：截在一次回复
+    /// 内部时退到该回复第一行之前，绝不留下孤儿工具结果。
+    pub fn apply_rewind(&mut self, keep_id: u64) {
+        // 转录里那段"我完整读过哪些文件"的证据随删除作废（保守，宁肯让模型重读）。
         if let Some(t) = self.tools.as_mut() {
             t.observations.clear();
         }

@@ -64,7 +64,7 @@ async function refreshState() {
     if (state.sessions.has(v.sid) || !state.running.has(v.sid)) continue;
     const h = (state.history || []).find((x) => x.name === v.sid);
     const s = {
-      sid: v.sid, mode: v.mode || 'single', title: (h && h.name) || v.sid,
+      sid: v.sid, mode: v.mode || 'single', title: (h && h.name) || v.sid, run: v.run || 'active',
       lines: [], live: [], pending: v.pending || null, sending: false,
       running: false, working: null, running_known: false,
       can_update_task: !!v.can_update_task,
@@ -81,6 +81,7 @@ async function refreshState() {
     const v = state.views.get(cur.sid);
     if (!v) continue;
     cur.can_update_task = !!v.can_update_task;
+    cur.run = v.run || 'active';
     cur.pending = v.pending || null;
     // 运行态**只对账、不覆盖**：这条会话已经有实时知识（事件就是真相）时，快照比它滞后——
     // 一次迟到的轮询不能把已经收尾的回合标回"在跑"。没有实时知识时按快照补齐，并清掉本地遗留
@@ -307,8 +308,12 @@ function renderHistory() {
     const name = document.createElement('span'); name.className = 'hname';
     name.textContent = (h.parent ? '└ ' : '') + h.name;
     const mode = document.createElement('span'); mode.className = 'hmode';
+    // 运行态是**持久事实**（停止 / 关闭），与"这一刻在不在跑"分开：侧栏据此标出来。
+    const stateTag = h.run === 'stopped' ? '·已停止'
+      : h.run === 'closed' ? '·已关闭'
+        : (h.done ? '' : '·进行中 ');
     mode.textContent =
-      (h.done ? '' : '·进行中 ') + h.mode +
+      stateTag + h.mode +
       (h.tier === 'vm' && h.tier_ready === false ? '·虚拟机档不可用' : '');
     const acts = document.createElement('div'); acts.className = 'history-acts';
 
@@ -326,11 +331,14 @@ function renderHistory() {
     }
     acts.appendChild(open); acts.appendChild(edit);
 
-    const del = btn('✕', 'hdel');
-    del.title = '删除该会话（记录永久删除）';
-    del.onclick = (e) => { e.stopPropagation(); deleteHistory(h.name); };
-
-    el.appendChild(name); el.appendChild(mode); el.appendChild(acts); el.appendChild(del);
+    el.appendChild(name); el.appendChild(mode); el.appendChild(acts);
+    // 子会话由核心按节点派生，不单独删（删父会话会一起删掉它）：**不渲染**删除按钮。
+    if (!h.parent) {
+      const del = btn('✕', 'hdel');
+      del.title = '删除该会话（连同它的子会话与工作区文件一起删除）';
+      del.onclick = (e) => { e.stopPropagation(); deleteHistory(h.name); };
+      el.appendChild(del);
+    }
     box.appendChild(el);
   }
 }
@@ -453,7 +461,29 @@ async function openHistory(name) {
 }
 
 async function deleteHistory(name) {
-  if (!(await confirmBox('删除会话', '删除会话「' + name + '」？该会话的记录将被永久删除。', '删除'))) return;
+  // 删除前如实交代工作区：会被一起删掉的产物先列出来（数量 + 字节），避免"以为只删记录"。
+  // 一次 GET /files 拿到同一份清单与用量；拉不到（会话已不存在）就退回一步确认。
+  let usage = null;
+  try {
+    const r = await api('GET', '/api/sessions/' + encodeURIComponent(name) + '/files');
+    usage = (r && r.usage) || null;
+  } catch (e) { usage = null; }
+  if (usage && usage.files > 0) {
+    const areas = [];
+    if (usage.work && usage.work.files) {
+      areas.push('· 共享区 work/：' + usage.work.files + ' 个文件（' + usage.work.bytes + ' 字节）');
+    }
+    for (const a of Object.keys(usage.agents || {})) {
+      const u = usage.agents[a];
+      if (u && u.files) areas.push('· 沙箱 ' + a + '/：' + u.files + ' 个文件（' + u.bytes + ' 字节）');
+    }
+    const text = '会话「' + name + '」的记录将被永久删除，它的工作区里还有 ' + usage.files +
+      ' 个文件（共 ' + usage.bytes + ' 字节）：\n' + areas.join('\n') +
+      '\n这些文件也会一起删掉（子会话一并删除）。';
+    if (!(await confirmBox('删除会话与工作区文件', text, '一起删除'))) return;
+  } else if (!(await confirmBox('删除会话', '删除会话「' + name + '」？该会话的记录将被永久删除。', '删除'))) {
+    return;
+  }
   try {
     await api('POST', '/api/history/' + encodeURIComponent(name) + '/delete', {});
     if (state.sessions.has(name)) {
@@ -1313,7 +1343,6 @@ function openAgentsModal() {
       const name = nameIn.value.trim();
       const modules = pickedIds();
       if (!name) { c.setMsg('agent 名字不能为空', true); return; }
-      if (!modules.length) { c.setMsg('至少勾选一个模块', true); return; }
       try {
         if (editing && editing !== name) {
           await api('POST', '/api/agents/' + encodeURIComponent(editing) + '/remove');
@@ -1409,25 +1438,59 @@ function renameUpload(sid, name, b64, alt) {
   });
 }
 /* ---------- 新建工作向导 ---------- */
-function openWizard() {
+async function openWizard() {
   // single 形态：w.modules = 勾选的模块；w.agentPick = 复用的登记处 agent
   // （null = 用勾选的模块组临时 agent，名字见 w.agentName）。
-  const w = { mode: 'single', modules: [], agentPick: null, agentName: '', agents: [], task: '' };
+  const w = { mode: 'single', modules: [], agentPick: null, agentName: '', agents: [], task: '', tier: 'host' };
   const ed = { open: false, name: '', modules: [], model: null, note: '' };
+  // 档位选择：默认档与虚拟机档可用性由后端给（GET /api/tiers，与「开始」的校验同源）。
+  let tiers = null;
+  try { const r = await api('GET', '/api/tiers'); tiers = (r && r.tiers) || null; } catch (e) { tiers = null; }
+  if (tiers && tiers.default) w.tier = tiers.default;
+  // 档位那一格：虚拟机档不可用时禁用，并逐项说明缺什么、怎么补（照抄后端事实，不自己编话）。
+  const tierField = document.createElement('div'); tierField.className = 'wf-field';
+  const tierLabel = document.createElement('div'); tierLabel.className = 'wf-label'; tierLabel.textContent = '执行档位';
+  const hostR = cfgRadio('本机档 —— 脚本直接在宿主上跑：宿主自备解释器；隔离就是宿主本身（默认）。', w.tier !== 'vm', 'wf-tier');
+  const vmOk = !!(tiers && tiers.vm_available);
+  const vmR = cfgRadio('虚拟机档 —— 一整套 guest，隔离更强；按模块声明装载运行包，依赖 guest 本体。', w.tier === 'vm', 'wf-tier', !vmOk);
+  hostR.box.addEventListener('change', () => { if (hostR.box.checked) w.tier = 'host'; });
+  vmR.box.addEventListener('change', () => { if (vmR.box.checked) w.tier = 'vm'; });
+  tierField.appendChild(tierLabel); tierField.appendChild(hostR.wrap); tierField.appendChild(vmR.wrap);
+  if (!vmOk) {
+    const reqs = (tiers && tiers.vm_requirements) || [];
+    const lines = reqs.filter((r) => !r.met).map((r) => '· ' + r.detail + (r.how ? '（' + r.how + '）' : ''));
+    tierField.appendChild(cfgHint(
+      '虚拟机档现在不能选：' + ((tiers && tiers.vm_unavailable_reason) || '本机不具备虚拟机档的前置条件') +
+      (lines.length ? '\n' + lines.join('\n') : ''),
+      'err'
+    ));
+  }
 
   openModal('新建工作', (c) => {
     const nameIn = textInput('工作名称（必填，会话落盘目录名）');
     const modeSel = selectInput([
       { value: 'single', label: '单 agent（1 个或多个模块）' },
       { value: 'collab', label: '协作（多个 agent）' },
+      { value: 'proxy', label: '代理（把决定权整块交给核心）' },
     ], 'single');
-    // 形态预设标签保留：单 agent 里 1 个模块就是"直连式"，多个就是"组合式"。
+    // 形态说明随选择走（三种形态的差别就在这一句里说清）。
     const modeHint = document.createElement('div'); modeHint.className = 'wf-hint';
-    modeHint.textContent = '单 agent：选 1 个模块 = 直连式；选多个 = 组合式。';
+    function modeHintText() {
+      if (w.mode === 'proxy') {
+        return '代理：没有名单要选——核心自己挑人、建子工作并代你决定（选这个形态就是授予全权）。\n' +
+          '它的子会话不会把整份对话推给它；它靠观察与倒查消息决定下一步。想接管就按「停止」：相关的会话会一起停下。';
+      }
+      if (w.mode === 'collab') {
+        return '协作：多个 agent 各自独立沙箱，先分权协商、再按任务链执行，由核心统一验收。';
+      }
+      return '单 agent：选 1 个模块 = 直连式；选多个 = 组合式。';
+    }
     const partWrap = document.createElement('div'); partWrap.className = 'wf-field';
     const modelWrap = document.createElement('div'); modelWrap.className = 'wf-models';
     const editorWrap = document.createElement('div'); editorWrap.className = 'wf-field hidden';
     const taskIn = areaInput('本次需求（协作必填；也可写上，核心据此推荐）');
+    // 需求那一格与推荐按钮都是**非代理形态**才问的：形态一换就收起来（见 renderParts）。
+    const taskField = field('本次需求', taskIn);
     const recBtn = btn('让核心推荐', 'btn btn-block');
     const createBtn = btn('创建并开始', 'btn btn-primary btn-block');
     const cancelBtn = btn('取消', 'btn btn-block');
@@ -1582,14 +1645,12 @@ function openWizard() {
       const addT = btn('加入本次（临时）', 'btn');
       addT.onclick = () => {
         if (!ed.name.trim()) { c.setMsg('agent 名字不能为空', true); return; }
-        if (!ed.modules.length) { c.setMsg('至少勾选一个模块', true); return; }
         w.agents.push({ name: ed.name.trim(), transient: true, modules: ed.modules.slice(), model: ed.model, why: null });
         ed.open = false; renderAll(); c.setMsg('已加入临时 agent：' + ed.name.trim());
       };
       const addS = btn('保存为 agent 并加入', 'btn btn-primary');
       addS.onclick = async () => {
         if (!ed.name.trim()) { c.setMsg('agent 名字不能为空', true); return; }
-        if (!ed.modules.length) { c.setMsg('至少勾选一个模块', true); return; }
         try {
           await api('POST', '/api/agents', { name: ed.name.trim(), modules: ed.modules.slice(), model: ed.model, note: ed.note.trim() });
           await refreshState();
@@ -1637,6 +1698,18 @@ function openWizard() {
 
     function renderParts() {
       partWrap.innerHTML = '';
+      modeHint.textContent = modeHintText();
+      // 代理形态没有名单也没有模型要选：把该说的说清，把不该问的收起来。
+      const proxy = w.mode === 'proxy';
+      taskField.className = proxy ? 'wf-field hidden' : 'wf-field';
+      recBtn.className = proxy ? 'btn btn-block hidden' : 'btn btn-block';
+      if (proxy) {
+        partWrap.appendChild(emptyHint(
+          '（代理形态不需要选人）核心会用登记处里当前有效的 agent 与模块自己组队，' +
+          '按你的目标建出一个或多个子工作，并代你回答它们的关卡。'
+        ));
+        return;
+      }
       const lab = document.createElement('div'); lab.className = 'wf-label';
       lab.textContent = w.mode === 'single' ? '单 agent：复用已有 agent，或勾选它的模块'
         : 'agent（协作：可多个，各自独立沙箱）';
@@ -1646,6 +1719,10 @@ function openWizard() {
 
     function renderModels() {
       modelWrap.innerHTML = '';
+      if (w.mode === 'proxy') {
+        modelWrap.appendChild(emptyHint('（代理会话走核心默认通道：模型按登记处的核心默认）'));
+        return;
+      }
       const opts = modelOptions();
       if (w.mode === 'single') {
         const who = w.agentPick ? w.agentPick.name : ((w.agentName || '').trim() || pickedModules()[0] || '');
@@ -1685,6 +1762,7 @@ function openWizard() {
     });
 
     recBtn.onclick = async () => {
+      if (w.mode === 'proxy') { c.setMsg('代理形态不需要名单：核心自己挑人', true); return; }
       const task = taskIn.value.trim();
       if (!task) { c.setMsg('先写下本次需求，核心才能据此推荐', true); return; }
       c.setMsg('核心根据需求推荐中…');
@@ -1707,7 +1785,6 @@ function openWizard() {
         if (w.mode === 'single') {
           const top = rec[0];
           const mods = (top.modules || []).slice();
-          if (!mods.length) { c.setMsg('核心推荐的 agent 没有模块', true); return; }
           if (top.reuse === true) {
             // 复用登记处已有的 agent：不论几个模块，完整按它的 modules 勾好（不截断）。
             const who = top.name || mods[0];
@@ -1743,19 +1820,26 @@ function openWizard() {
       if (!name) { c.setMsg('工作名称必填', true); return; }
       const task = taskIn.value.trim();
       let agents;
+      if (w.mode === 'proxy') {
+        // 代理：没有名单、没有需求——选这个形态就是**授予全权**（后端建 mode=proxy 的会话）。
+        await submit({ name, mode: 'proxy', agents: [], tier: w.tier });
+        return;
+      }
       if (w.mode === 'single') {
         if (w.agentPick) {
           const mods = (w.agentPick.modules || []).slice();
-          if (!mods.length) { c.setMsg('单 agent：所选 agent 没有模块', true); return; }
           agents = [{
             name: w.agentPick.name, transient: false, modules: mods,
             model: w.model || w.agentPick.model || state.core,
           }];
         } else {
           const mods = pickedModules();
-          if (!mods.length) { c.setMsg('单 agent：至少勾选 1 个模块，或在上方复用已有 agent', true); return; }
+          const nm = (w.agentName || '').trim();
+          if (!nm && !mods.length) {
+            c.setMsg('单 agent：填一个 agent 名字，或至少勾选 1 个模块', true); return;
+          }
           agents = [{
-            name: (w.agentName || '').trim() || mods[0], transient: true, modules: mods,
+            name: nm || mods[0], transient: true, modules: mods,
             model: w.model || state.core,
           }];
         }
@@ -1767,7 +1851,7 @@ function openWizard() {
       }
       const names = agents.map((a) => a.name);
       const dup = names.filter((n, i) => names.indexOf(n) !== i)[0];
-      const body = { name, mode: w.mode, agents };
+      const body = { name, mode: w.mode, agents, tier: w.tier };
       if (task) body.task = task;
       if (dup) {
         choiceModal('agent 重名', '本次工作里有同名 agent「' + dup + '」。', [
@@ -1782,9 +1866,10 @@ function openWizard() {
     c.body.appendChild(field('工作名称', nameIn));
     c.body.appendChild(field('形态', modeSel));
     c.body.appendChild(modeHint);
+    c.body.appendChild(tierField);
     c.body.appendChild(partWrap);
     c.body.appendChild(modelWrap);
-    c.body.appendChild(field('本次需求', taskIn));
+    c.body.appendChild(taskField);
     c.body.appendChild(recBtn);
     c.body.appendChild(createBtn);
     c.body.appendChild(cancelBtn);
@@ -1798,7 +1883,7 @@ async function startSession(body) {
   const r = await api('POST', '/api/sessions', body);
   const sid = r.sid;
   const s = {
-    sid, mode: body.mode, title: body.name || sid,
+    sid, mode: body.mode, title: body.name || sid, run: 'active',
     lines: [], live: [], pending: null, sending: false,
     running: false, working: null, running_known: false,
     done: false, awaiting: null, fold: {}, scroll: {},
@@ -1857,6 +1942,16 @@ function absorb(s, ev) {
         cls: 'sys compacted',
         who: '',
         text: '[压缩] 此前内容已压成摘要（不再发给模型，仍可查看）：\n' + ev.summary,
+      });
+      break;
+    // 留档回档：折叠分界。内容保留在文件里，可恢复；旧格式删除标记不进界面。
+    case 'rewind':
+      if (ev.mode !== 'archive') break;
+      s.lines.push({
+        cls: 'sys rewind',
+        who: '',
+        text: '[留档] 以下内容已折叠（保留在文件里，可恢复）',
+        mark: ev.mark,
       });
       break;
     // 任务链的进展：节点开工/回报/验收/交付——主会话也要看得到，不必点进子会话。
@@ -2070,11 +2165,11 @@ function syncSendButton(s) {
 /// 只有本来就在底部才自动跟随；用户往上滚时保持原位置（流式刷新不抢滚动条）。
 function nearBottom(box) { return box.scrollHeight - box.scrollTop - box.clientHeight < 80; }
 
-/// 回档按钮：删掉这一行和它之后的所有消息。
+/// 回档按钮：回到这一行（留档或删除，点开后再选）。
 function rewindButton(id) {
   const b = document.createElement('button');
-  b.className = 'line-act danger'; b.textContent = '删除此行和之后所有消息';
-  b.title = '删除此行和之后所有消息';
+  b.className = 'line-act'; b.textContent = '回档到此处';
+  b.title = '回到这一行：留档（可恢复）或删除（不可恢复）';
   b.onclick = () => rewindTo(id);
   return b;
 }
@@ -2119,9 +2214,29 @@ function lineBlock(p, s, key, live) {
 }
 
 /// 定稿行渲染到容器里（每次全量重建这个容器；折叠与 <pre> 滚动状态由 store 恢复）。
+/// 会话级说明（代理身份 / 已停止 / 已关闭）：放转录最上方，**不冒充任何一方的发言**。
+/// 它只说这条会话是什么、还该不该被驱动——正文一律来自转录本身。
+function sessionNote(s) {
+  if (!s) return null;
+  const bits = [];
+  if (s.mode === 'proxy') {
+    bits.push('代理模式：核心代你挑人、建子工作并回答它们的关卡——这就是全权；' +
+      '按「停止」会让相关会话一起停下。');
+  }
+  if (s.run === 'stopped') bits.push('这条会话已停止：不会再被派发或唤醒；点「继续」可以接着走。');
+  if (s.run === 'closed') bits.push('这条会话已关闭：终态，不会再被派发或唤醒。');
+  if (!bits.length) return null;
+  const d = document.createElement('div');
+  d.className = 'agent-note';
+  d.textContent = bits.join('\n');
+  return d;
+}
+
 function renderDone(s) {
   if (!doneBox) return;
   doneBox.innerHTML = '';
+  const note = sessionNote(s);
+  if (note) doneBox.appendChild(note);
   // tool 行的稳定序号：在 s.lines 里按出现顺序数（兜底的信封行不算，它用 L<行id>:raw）。
   let toolSeq = 0;
   for (const l of s.lines) {
@@ -2141,8 +2256,16 @@ function renderDone(s) {
     if (bodyless && !l.reasoning) continue;
     // 建块只有一处（lineBlock）：身份 → 思维链 → 正文；定稿行与实时块同一套画法。
     const el = lineBlock(l, s, 'L' + l.id, false).node;
-    // 删除：删掉这一行和它之后的所有消息（服务端按行 id 重建，前端整体替换）。
+    // 回档：到这一行为止（服务端按行 id 重建，前端整体替换）。
     if (typeof l.id === 'number') el.appendChild(rewindButton(l.id));
+    // 留档分界上的「恢复」：删掉该标记及其后的内容（含留档期间的新工作）。
+    if (typeof l.mark === 'number') {
+      const rb = document.createElement('button');
+      rb.className = 'line-act'; rb.textContent = '恢复';
+      rb.title = '恢复到这次留档之前（标记及其后的内容会被删除）';
+      rb.onclick = () => restoreMark(l.mark);
+      el.appendChild(rb);
+    }
     // 撤回该同意：转录追加一条撤回行，继续时按剩余转录重新判定。
     if (l.verb === 'agree' && l.speaker) {
       const w = document.createElement('button');
@@ -2462,29 +2585,43 @@ async function act(action, text) {
   }
 }
 
-/* 删除：删掉这一行和它之后的所有消息；服务端返回重放后的完整事件流，前端整体重建。 */
+/* 回档：留档（默认，可恢复）或删除（真的截断）；服务端回重放后的完整事件流，前端整体重建。 */
 function rewindTo(id) {
   const s = activeSession();
   if (!s || isBusy(s)) return;
-  choiceModal('删除消息', '删除这一行和之后的所有消息？此操作不可撤销。', [
-    ['删除', 'btn btn-danger', async () => {
-      try {
-        const r = await api('POST', '/api/sessions/' + encodeURIComponent(s.sid) + '/rewind', { id });
-        s.lines = [];
-        s.live = [];
-        s.fold = {};   // 行整体重建，折叠状态一并重来（避免旧键被新行复用）
-        s.scroll = {};
-        s.pending = null;
-        s.done = false;
-        s.readonly = false; // 历史回放会话一旦删除即转为活动会话
-        if (typeof r.head === 'number') s.floor = r.head;
-        for (const ev of (r.events || [])) absorb(s, ev);
-        for (const ev of (r.live || [])) absorb(s, ev);
-        renderAll();
-      } catch (err) { notice('操作失败', err.message, 'err'); }
-    }],
+  choiceModal('回档到此处', '留档：保留内容、折叠成标记，可随时恢复；删除：真的删掉这一行及其后的全部，不可恢复。', [
+    ['留档', 'btn', () => applyRewind(s, { id, mode: 'archive' })],
+    ['删除', 'btn btn-danger', () => applyRewind(s, { id, mode: 'delete' })],
     ['取消', 'btn btn-ghost', () => {}],
   ]);
+}
+
+/* 恢复某次留档：删掉该标记及其后的内容（含留档期间的新工作）。 */
+function restoreMark(mark) {
+  const s = activeSession();
+  if (!s || isBusy(s)) return;
+  choiceModal('恢复这次留档', '恢复到留档之前：该标记及其后的全部内容（含留档期间的新工作）会被删除。', [
+    ['恢复', 'btn btn-danger', () => applyRewind(s, { id: mark, mode: 'restore' })],
+    ['取消', 'btn btn-ghost', () => {}],
+  ]);
+}
+
+/* 回档请求的统一收尾：服务端回重放事件，前端整体重建。 */
+async function applyRewind(s, body) {
+  try {
+    const r = await api('POST', '/api/sessions/' + encodeURIComponent(s.sid) + '/rewind', body);
+    s.lines = [];
+    s.live = [];
+    s.fold = {};   // 行整体重建，折叠状态一并重来（避免旧键被新行复用）
+    s.scroll = {};
+    s.pending = null;
+    s.done = false;
+    s.readonly = false; // 历史回放会话一旦回档即转为活动会话
+    if (typeof r.head === 'number') s.floor = r.head;
+    for (const ev of (r.events || [])) absorb(s, ev);
+    for (const ev of (r.live || [])) absorb(s, ev);
+    renderAll();
+  } catch (err) { notice('操作失败', err.message, 'err'); }
 }
 
 /* 撤回某 agent 的同意（转录追加撤回行，协作才有意义）；值 = agent 实例名。 */
@@ -2561,6 +2698,13 @@ function atHint(box) {
 
 async function atLoad(sid) {
   if (filesCache.has(sid)) return filesCache.get(sid);
+  return atFetch(sid);
+}
+
+/* **每次打开 @ 菜单都重拉一次**：文件可能在会外被手工删掉，或被 agent 的工具改过。
+ * 前端不引入目录 watcher（本机、跨平台，代价不值）；拉到的结果写回缓存，
+ * 供长路径缩写（setActive / loadPathRoots）快速复用。 */
+async function atFetch(sid) {
   try {
     const data = await api('GET', '/api/sessions/' + encodeURIComponent(sid) + '/files');
     filesCache.set(sid, data);
@@ -2701,7 +2845,7 @@ async function atOnInput() {
   atState.items = []; atState.all = []; atState.active = 0;
   atState.sid = s.sid; atState.start = tok.start;
   atRender();
-  const data = await atLoad(s.sid);
+  const data = await atFetch(s.sid); // 每次打开都重拉：不跨打开缓存（会外删除立刻可见）
   if (atState.sid !== s.sid || !atState.open) return; // 拉取期间切了会话 / 菜单已关
   if (!data) { atClose(); return; }                   // 拉不到：安静收起，之后 Enter 恢复为正常发送
   const tok2 = atToken(); // 拉取期间内容可能又变了，重新确认

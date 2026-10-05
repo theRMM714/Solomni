@@ -187,8 +187,8 @@ impl CollabSession {
             });
         }
         // 等用户的事挂着（请教 / 方案待审 / 节点没过）：**泵不往下推**——唤醒（子会话完成、
-        // 别的客户端动作）也不能替用户点「继续」，否则"暂停"形同虚设（真机上演过：总验收没过、
-        // 本该停下等用户，节点子会话一完成就把那些节点又派了一遍）。重派在**用户那一步**做（见 resume）。
+        // 别的客户端动作）也不能替用户点「继续」，否则"暂停"形同虚设：
+        // 本该停下等用户时，节点子会话一完成就会把那些节点又派一遍。重派在**用户那一步**做（见 resume）。
         if self.awaiting_user() {
             sink(crate::capabilities::session::api::idle());
             return;
@@ -484,7 +484,11 @@ impl CollabSession {
             };
             // **会话参数**：身份块每回合由它现渲染，不存进任何人的消息列表。
             let params = crate::capabilities::session::api::SessionParams::from_workspace(
-                &a.name, &sandbox, &modules,
+                &a.name,
+                &sandbox,
+                &modules,
+                "collab",
+                "discussant",
             );
             let mut member = Member::plain(&a.name, params, mode);
             // 围栏：可达范围 + 断网，由该 agent 的沙箱与 exec 段派生（机制在 adapters）；
@@ -506,6 +510,7 @@ impl CollabSession {
                 sandbox,
                 builtin_tools: self.systools.book(),
                 reply_seq: self.reply_seq,
+                line: Default::default(),
                 // 本档位下不能执行工具的模块（缺运行包）：机制侧据此拒绝执行。
                 unavailable: crate::capabilities::workspace::api::unavailable(
                     &self.spec, &modules, &library,
@@ -520,6 +525,7 @@ impl CollabSession {
                 // 讨论席不干活：拿不到自己模块的工具（角色表的 module_tools）。
                 with_modules: self.systools.allows_module_tools("discussant"),
                 notes: tool_notes,
+                handlers: Vec::new(),
             });
             members.push(member);
         }

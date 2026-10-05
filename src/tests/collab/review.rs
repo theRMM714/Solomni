@@ -91,6 +91,9 @@ pub(crate) fn mode_vocabulary_is_single_or_collab_only() {
     use crate::presentation::web::parse_mode;
     assert!(matches!(parse_mode("single"), Ok(WorkMode::Single)));
     assert!(matches!(parse_mode("collab"), Ok(WorkMode::Collab)));
+    // 第三人形态：代理（没有名单，选它就是授予全权）。
+    assert!(matches!(parse_mode("proxy"), Ok(WorkMode::Proxy)));
+    assert!(parse_mode("nope").is_err());
     for bad in ["direct", "compose", "omni", ""] {
         let e = parse_mode(bad).unwrap_err();
         assert!(e.contains("未知模式"), "web 必须 400 并说明：{}", e);
@@ -121,10 +124,17 @@ pub(crate) fn mode_vocabulary_is_single_or_collab_only() {
         exec: ExecSpec::default(),
         parent: None,
         node: None,
+        delegation: None,
+        run: RunState::Active,
     })
     .unwrap();
     // 内存里没有这个会话 → 走 rebuild_session，对未知形态如实报错。
-    let err = core.rewind("旧会话", 0).unwrap_err();
+    let err = core
+        .rewind(
+            "旧会话",
+            crate::capabilities::conductor::api::RewindTarget::Delete(0),
+        )
+        .unwrap_err();
     assert!(err.contains("未知会话形态"), "{}", err);
 }
 
@@ -190,7 +200,11 @@ pub(crate) fn approved_plan_spawns_a_sub_session_per_ready_node() {
         "节点不再记在会话 meta 里：一个 agent 一个会话，哪个节点正跑在它里面由链的 sub_session 认"
     );
     assert_eq!(cmeta.mode, "single");
-    assert_eq!(cmeta.work(), sid.as_str(), "沙箱锚在父会话上（共用工作区）");
+    assert_eq!(
+        core.work_root(child).expect("工作根"),
+        sid,
+        "沙箱锚在顶层工作上（整棵树共用一个 work/）"
+    );
     assert_eq!(cmeta.agents.len(), 1, "子会话只有一个席位");
     assert_eq!(cmeta.agents[0].name, "a");
 }

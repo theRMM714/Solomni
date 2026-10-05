@@ -46,7 +46,7 @@ pub enum FenceVerdict {
 }
 
 /// 测试专用的注入开关：让探针能确定性地构造「本机不允许」这一态。
-/// 为什么需要：`EnvUnavailable` 在真机上要靠老内核 / 失效的私有 ABI / 被环境拒绝建容器才会出现，
+/// 为什么需要：`EnvUnavailable` 只在老内核 / 失效的私有 ABI / 环境拒绝建容器时出现，
 /// 正常 runner 上碰不到——没有这条开关，那一路分支就只被偶然验证过。
 /// **只在测试里打开**（探针自己给守门进程带这个环境变量），运行期永不设置它。
 pub const SELFCHECK_FAIL_FLAG: &str = "SOLOMNI_FENCE_SELFCHECK_FAIL";
@@ -203,6 +203,13 @@ pub fn clean(home: &std::path::Path) -> Result<String, String> {
     }
 }
 
+/// 孤儿授权清扫：按容器 SID 族在产品根内撤掉台账之外的残留 ACE（`--fence-clean` 用）。
+/// 只有 Windows 写本机 ACL，其它平台没有这一步（而不是"存在但空转"）。
+#[cfg(windows)]
+pub fn sweep_orphan_aces(root: &std::path::Path) -> Result<usize, String> {
+    windows::sweep_orphan_aces(root)
+}
+
 /// 撤销一次会话的围栏授权（会话删除时由核心经 FenceHost 端口请求；其它平台是空操作）。
 pub fn release_fence(spec: &FenceSpec) -> Result<(), String> {
     #[cfg(windows)]
@@ -225,7 +232,7 @@ pub(crate) fn interpreter_dirs(command: &str) -> Vec<std::path::PathBuf> {
 }
 
 /// 可执行扩展名：PATHEXT（若在场）**加**一份标准兜底，按小写去重。
-/// 兜底不是装饰：真机上见过 PATHEXT 缺席的进程环境（CI 的 runner 起 node 再起产品），
+/// 兜底不是装饰：PATHEXT 可能缺席（CI 的 runner 起 node 再起产品），
 /// 那时只按 PATHEXT 找扩展名会一个解释器都解析不出来——容器里的工具连 python 都找不到。
 fn exec_extensions(pathext: Option<&str>) -> Vec<String> {
     let mut exts: Vec<String> = Vec::new();
@@ -471,7 +478,7 @@ mod tests {
         );
     }
     /// 安装目录上溯**绝不能停在文件系统根**：/bin 的父目录就是 /，
-    /// 一旦返回 / 就等于把整盘放行（macOS 的 seatbelt 会因此形同虚设，真机上已抓到过一次）。
+    /// 一旦返回 / 就等于把整盘放行（macOS 的 seatbelt 会因此形同虚设）。
     #[test]
     fn install_dir_never_climbs_to_the_filesystem_root() {
         let root = if cfg!(windows) {
@@ -504,7 +511,7 @@ mod tests {
         );
     }
 
-    /// cmd 只认程序名里的反斜杠：`build/indexer build` 会被读成命令 build + 开关 /indexer（真机上模块工具因此跑不起来）。
+    /// cmd 只认程序名里的反斜杠：`build/indexer build` 会被读成命令 build + 开关 /indexer（模块工具会因此跑不起来）。
     /// 参数里的正斜杠必须原样保留——`node tools/report.js` 正是靠它。
     #[cfg(windows)]
     #[test]
@@ -574,7 +581,7 @@ mod tests {
     }
 
     /// 解析解释器不能假设环境形状：PATHEXT 缺席（真机 CI 上见过）时靠标准兜底扩展名照样找到 .exe，
-    /// 带引号的 PATH 项照样能用——否则容器里的工具连解释器都找不到（真机上就是这么挂的）。
+    /// 带引号的 PATH 项照样能用——否则容器里的工具连解释器都找不到。
     #[test]
     fn interpreter_dirs_resolves_without_pathext_and_with_quoted_path_entries() {
         let root = crate::tests::scratch("interpreter-dirs");

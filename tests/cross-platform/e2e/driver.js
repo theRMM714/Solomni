@@ -1,7 +1,8 @@
 // e2e 驱动（L4，由 orchestrator.js 调起）：隔离根内跑，绝不动真实 .home/ 与 session/。
 // 覆盖：agent 登记处 → 推荐复用 → 单 agent（1 个 agent 带多模块）+ 内置 write 落私沙箱
 //       → 协作（非代拟）跑完交付 → 代拟（复用+组装）确认后名单写回 meta 并建出沙箱
-//       → 外部工具 cwd / 绝对路径 / 自由格式补丁 / 正文+信封 / 原生多调用（协议形状由假供应商核对）。
+//       → 外部工具 cwd / 绝对路径 / 自由格式补丁 / 正文+信封 / 原生多调用（协议形状由假供应商核对）
+//       → 代理模式：核心自己挑人、建子工作、转达，来源如实落档，停止即全停。
 const BASE = process.env.E2E_BASE || 'http://127.0.0.1:3099';
 // 假供应商端口由编排器指定：本机可能残留上一次的进程，固定端口会让驱动打到旧的那个。
 const MOCK_BASE = process.env.E2E_MOCK_BASE || 'http://127.0.0.1:8397';
@@ -585,6 +586,37 @@ async function approvePlan(name) {
   assert(seen && String(seen.toolIds) === 'call_a,call_b', '结果消息用 tool_call_id 各回应自己的调用', JSON.stringify(seen));
   assert((await api('POST', '/api/settings', { streaming: true })).status === 200, '恢复流式');
 
+
+  // ---- 代理模式（第三人形态）：核心代用户挑人 → 建子工作 → 转达 → 停止即全停 ----
+  {
+    await api('POST', '/api/agents', { name: '代甲', modules: ['render'], model: 'm1' });
+    const pName = 'e2e-agency-' + Date.now();
+    const created = await api('POST', '/api/sessions', { name: pName, mode: 'proxy' });
+    assert(created.status === 200 && created.json && created.json.sid === pName, '建代理会话（第三人形态，没有名单）', created.text.slice(0, 200));
+    const said = await api('POST', '/api/sessions/' + encodeURIComponent(pName) + '/say', { text: '把这件事做完' });
+    assert(said.status === 200, '跟代理说一句，它自己跑一轮', said.text.slice(0, 200));
+    const pl = await lines(pName);
+    const called = pl.filter((x) => x.tool).map((x) => x.tool.name);
+    assert(called.indexOf('catalog_agents') >= 0, '代理先自己看清单（catalog_agents）', JSON.stringify(called));
+    assert(called.indexOf('create_session') >= 0, '代理自己建出子工作（create_session）', JSON.stringify(called));
+    assert(called.every((n) => ['catalog_agents', 'create_session'].indexOf(n) >= 0), '代理这一轮只用了它自己的工具面', JSON.stringify(called));
+    const st = await api('GET', '/api/state');
+    const hist = (st.json && st.json.history) || [];
+    const kid = hist.find((h) => h.parent === pName);
+    assert(!!kid, '子工作挂在代理会话下（编排归属）', JSON.stringify(hist.map((h) => h.name + '<-' + (h.parent || ''))).slice(0, 300));
+    if (kid) {
+      const kr = await api('GET', '/api/history/' + encodeURIComponent(kid.name));
+      assert(kr.text.indexOf('核心代理转达') >= 0, '子工作的记录里留下来源（核心的话不冒充用户原文）', kr.text.slice(0, 240));
+      // 建会话 = 写开头 + 开工：opening 已经是子会话的派发行，不用再发一条。
+      assert(kr.text.indexOf('把这件事做完') >= 0, '开头的派发已经点火（create_session 自带 opening）', kr.text.slice(0, 300));
+    }
+    const stopped = await api('POST', '/api/sessions/' + encodeURIComponent(pName) + '/stop', {});
+    assert(stopped.status === 200, '点停止', stopped.text.slice(0, 160));
+    await new Promise((res) => setTimeout(res, 400));
+    const st2 = await api('GET', '/api/state');
+    const running = ((st2.json && st2.json.sessions) || []).filter((s) => s.running).map((s) => s.sid);
+    assert(running.length === 0, '停止即全停：相关会话都不再跑', JSON.stringify(running));
+  }
   console.log((failed ? 'E2E-FAILED failed=' + failed : 'E2E-DONE exitCode=0'));
   process.exitCode = failed ? 1 : 0;
 })().catch((e) => { console.log('FAIL 驱动异常 :: ' + e.message); process.exitCode = 1; });

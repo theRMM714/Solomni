@@ -1,7 +1,7 @@
 # 模型侧文案：回执/失败说明/清单行等（改文案只改这里）。
 refs:
   foreign_sandbox: "（无权读取：{{path}} 在 agent「{{agent}}」的私有沙箱里，不是你自己的。可用的是上面列出的真实路径）"
-  collab_sandbox: "（{{path}} 只有 agent「{{agent}}」能读，其它 agent 无权；要共享请请用户把它放进本工作的共享区）"
+  collab_sandbox: "（{{path}} 只有 agent「{{agent}}」能读，其它 agent 无权；要共享请让用户把它放进本工作的共享区）"
 
 no_agents: "（登记处还没有 agent；这次只能组装新的）"
 no_model: "（核心默认）"
@@ -20,9 +20,10 @@ tool_texts:
   path_parent_dir: "路径不能含 .. 段：{{path}}"
   path_outside_roots: "路径不在允许的根目录内：{{path}}"
   roots_wrapper: "{{why}}。允许的根目录：\n{{roots}}"
-  roots_shared: "- 本次工作的共享区：{{root}}"
+  roots_shared: "- 本次工作的共享区（主副本，只读）：{{root}}"
   roots_private: "- 你私有的沙箱：{{root}}"
   roots_module: "- 模块 {{id}} 的目录：{{root}}"
+  write_shared_read_only: "共享区只读：改动请写进你自己的沙箱（工作副本），再用 work_commit 提交。"
   # 内置工具回执（systool）
   bad_args_json: "参数不是合法 JSON：{{error}}"
   # 参数不符（由 builtin_tools 的声明判定；why 说事实，signature 是工具签名，模型照着改）

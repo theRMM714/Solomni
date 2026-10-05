@@ -5,4 +5,4 @@
 
 pub use crate::kernel::domain::jobs::JobRegistry;
 pub use crate::kernel::domain::path::slash;
-pub use crate::kernel::domain::types::{SessionId, Tier, DEFAULT_LLM_TIMEOUT_SECS};
+pub use crate::kernel::domain::types::{SessionId, Tier, ToolOutcome, DEFAULT_LLM_TIMEOUT_SECS};

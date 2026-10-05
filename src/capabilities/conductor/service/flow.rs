@@ -274,7 +274,7 @@ impl Conductor {
                 Ok(child) => {
                     // 派发文案用册子里的执行提示词模板渲染（objective 是核心 AI 写的那段任务提示词）。
                     // 上一次的验收结论（没有 = 首轮）：**返工必须知道上次错在哪**，
-                    // 否则它只能把同一件事原样再做一遍（真机上就是这样白跑一轮的）。
+                    // 否则它只能把同一件事原样再做一遍。
                     let (raw, rework) = self
                         .sessions
                         .get(sid)
@@ -354,10 +354,13 @@ impl Conductor {
             exec: pmeta.exec.clone(),
             parent: Some(parent.to_string()),
             node: None,
+            delegation: None,
+            run: RunState::Active,
         };
-        // 沙箱锚在父会话上：该 agent 的目录在父会话里已经建好。
+        // 沙箱锚在**顶层工作**上：该 agent 的目录在共享区那一层已经建好。
+        let work = self.work_root(parent)?;
         self.workspace
-            .prepare(meta.work(), std::slice::from_ref(&a.name))?;
+            .prepare(&work, std::slice::from_ref(&a.name))?;
         self.history.create(&meta)?;
         self.ensure_session(&child)?;
         Ok(child)
@@ -383,6 +386,24 @@ impl Conductor {
         self.spawn_agent_session(parent, &assignee)
     }
 
+    /// 代理模式：一个子会话停下了 → 往**代理会话**写一条通知行（只写这一条，不转发子会话转录）。
+    /// 返回被通知的代理会话名；父不是代理会话（协作节点等）就返回 None、什么都不做。
+    pub(crate) fn notify_proxy_of_child(&mut self, child: &str) -> Option<String> {
+        let (meta, _) = self.history.load(child).ok()?;
+        let parent = meta.parent.clone()?;
+        let (pm, _) = self.history.load(&parent).ok()?;
+        if pm.mode != "proxy" {
+            return None;
+        }
+        let mut ps = self.take_single(&parent).ok()?;
+        let mut evs = ps.note_task(&format!(
+            "[子会话] {} 这一轮结束。要看它说了什么用 read_session_messages（0 = 最新）；要它继续或返工用 send_session_message。",
+            child
+        ));
+        self.put_single(&parent, ps);
+        self.record_events(&parent, &mut evs);
+        Some(parent)
+    }
     /// 生成结束**交回**：重新插入 + 解除"生成中"。
     /// 转录**已由工作线程按"一轮一次"的粒度增量落盘**（见 `Persister`），这里不重复落。
     /// 返回：若这是个**子会话**，返回它的父会话（调用方据此**叫醒父会话**推进任务链）。
@@ -405,6 +426,9 @@ impl Conductor {
         if let Some(node) = node {
             self.mark_node_done(&parent, &node, &note);
         }
+        // 代理模式的父：把"这个子会话停下了"如实告诉它（**不转发子会话转录**），
+        // 由调用方按形态叫醒父会话。
+        let _ = self.notify_proxy_of_child(sid);
         Some(parent)
     }
 

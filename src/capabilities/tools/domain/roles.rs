@@ -35,6 +35,9 @@ pub type RoleTable = BTreeMap<String, RoleDecl>;
 pub struct SystemTools {
     pub tools: crate::capabilities::tools::api::ToolBook,
     pub roles: RoleTable,
+    /// 目录保留名（`systools/names.yaml`）：`session/<工作>/` 下由布局固定占用的目录名，
+    /// agent 实例名不得占用。名单不硬编码在代码里，布局改了就改表。
+    pub reserved_names: Vec<String>,
 }
 
 impl SystemTools {

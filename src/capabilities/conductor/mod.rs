@@ -7,6 +7,11 @@
 //!
 //! 它与别的能力**平级**：只经各能力的 `api` 编排，**不持任何别人的端口**（R12）；
 //! 各能力也不反向调它（依赖方向见 ARCHITECTURE.md §一）。
+//!
+//! 它自己的出站端口只有一个：`ports::ProxyHost`——核心代理工具要做的外部动作
+//! （清单 / 建会话 / 转达 / 观察 / 生命周期）。生产宿主是 `service/proxy.rs` 的队列桥，端口见 `ports.rs`。
 
 pub mod api;
+pub mod domain;
+pub mod ports;
 pub mod service;

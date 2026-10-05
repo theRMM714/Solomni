@@ -12,7 +12,7 @@
 
 ## 二、入站契约与状态归属
 
-`api::HistoryOps`（呈现层队列面）+ `api::History`（别的能力的直连面：造会话 / 写元信息 / 追流水 / 读回 / 删除）+ 行与事件词汇。出站端口 `HistoryStore` **只由 `service.rs` 持有**（R12）。
+`api::HistoryOps`（呈现层队列面）+ `api::History`（别的能力的直连面：造会话 / 写元信息 / **只读元信息** / 追流水 / 读回 / 删除）+ 行与事件词汇与**运行态**（`RunState`：停止 / 关闭，落盘在 `meta.run`）。出站端口 `HistoryStore` **只由 `service.rs` 持有**（R12）。
 
 ## 三、依赖图位置（由源码的 `::api` 引用推导）
 
@@ -22,7 +22,6 @@
 ## 四、改动本单元时必须同步
 
 - 行与事件词汇（`domain/events.rs`、`LineView` 字段）一改 → `collab` 的状态派生、`conductor` 的视图、`cli`/`web` 渲染、`src/tests/session.rs` 全跟。
-- 业务缺口账：`src/capabilities/session/testgaps.yaml`——业务 AI **只记缺口、不写测试**，由测试 AI 实现测试并销账；格式见 [docs/testing/gaps-acceptance.md](../../docs/testing/gaps-acceptance.md) §十二。
 
 ## 本目录
 

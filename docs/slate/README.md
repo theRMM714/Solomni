@@ -22,7 +22,6 @@
 ## 四、改动本单元时必须同步
 
 - 收束规则一改 → `src/tests/slate.rs` 与两个调用方（`conductor` 的一次性推荐、`collab` 的代拟）的用例。
-- 业务缺口账：`src/capabilities/slate/testgaps.yaml`——业务 AI **只记缺口、不写测试**，由测试 AI 实现测试并销账；格式见 [docs/testing/gaps-acceptance.md](../../docs/testing/gaps-acceptance.md) §十二。
 
 ## 本目录
 

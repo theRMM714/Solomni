@@ -103,6 +103,50 @@ fn container_cannot_write_outside_its_roots() {
     assert_ne!(code, Some(0));
 }
 
+/// **共享区产品契约**：容器的 rw 只有 agent 沙箱（共享主副本不在其中），
+/// 所以模块工具进程绕不过 work_pull / work_commit 直接读写共享区（工具层那一半由 workspace 的用例钉住）。
+#[test]
+fn container_keeps_the_shared_area_out_of_reach() {
+    if skip_unless_live("container_keeps_the_shared_area_out_of_reach") {
+        return;
+    }
+    let sandbox = scratch("container-shared-sandbox");
+    let shared = scratch("container-shared-work");
+    let planted = shared.join("planted.txt");
+    std::fs::write(&planted, "SHARED-CONTENT").unwrap();
+    // 运行期 agent 的真实形态：rw = [沙箱]，共享区不在其中。
+    let spec = spec_for(&sandbox);
+
+    // 容器跑得起来（对照：不是整条机制坏了）——用 stdio 往返，**不要求写盘**：
+    // 这些探针不写目录 ACL（授权是产品在真实会话里做的），所以 rw 里的正向写盘不能当断言。
+    let (code, out, err) = run_launcher(&spec, "echo container-ok");
+    if env_blocks_container(&err) {
+        eprintln!(
+            "[探针] 本环境不允许容器围栏，跳过共享区断言：{}",
+            err.trim()
+        );
+        return;
+    }
+    assert_eq!(code, Some(0), "容器要起得来：{}", err);
+    assert!(
+        out.contains("container-ok"),
+        "stdio 要透传：{} / {}",
+        out,
+        err
+    );
+
+    // 共享区在 rw 之外：读不到、写不进。
+    let target = shared.join("pwn.txt");
+    let (_wc, _wo, _we) = run_launcher(&spec, &format!("echo x> {}", target.display()));
+    assert!(!target.exists(), "共享区不该被工具进程直接写");
+    let (_rc, ro, _re) = run_launcher(&spec, &format!("type {}", planted.display()));
+    assert!(
+        !ro.contains("SHARED-CONTENT"),
+        "共享区不该被工具进程直接读：{}",
+        ro
+    );
+}
+
 #[test]
 fn container_has_no_network() {
     if skip_unless_live("container_has_no_network") {
@@ -173,7 +217,7 @@ fn verify_separates_env_unavailable_from_broken_container_steps() {
     );
 }
 /// 未授权时段 + **本环境不允许建容器**这一路（测试专用注入）：结论必须是 env-unavailable（不是 broken），
-/// 而且守门进程要**照常执行命令**（如实降级，不是拒绝执行）——这条分支真机上要靠环境恰好不允许才会出现。
+/// 而且守门进程要**照常执行命令**（如实降级，不是拒绝执行）——这条分支要靠环境恰好不允许才会出现。
 /// 注入不改本机状态（不写 ACL、不建 profile），所以不归 --fence-live 管。
 #[test]
 fn env_unavailable_degrades_and_still_runs_the_command() {

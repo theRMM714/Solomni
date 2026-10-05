@@ -20,6 +20,10 @@ pub trait Prompt: Send + Sync {
     /// 按名字渲染一段（`{{key}}` 替换）；**缺变量 = 装配错误**，直接暴露，不静默兜底。
     fn render(&self, seg: Segment, vars: Vars) -> String;
 
+    /// 按（**会话使用类型**，**角色**）取这个回合的机制说明：只拿同时匹配的条目，
+    /// 按册子声明顺序拼接（没配 = 空串）。对应关系在 `prompts/shared/mechanisms.yaml`，这里只做匹配。
+    fn mechanism(&self, session: &str, role: &str) -> String;
+
     /// 工具与路径的模型侧文案（~100 条模板）：**共享一份**——调用方拿 `Arc`，不深拷贝。
     fn tools(&self) -> Arc<ToolTexts>;
 

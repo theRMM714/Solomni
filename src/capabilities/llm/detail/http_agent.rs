@@ -30,7 +30,7 @@ pub fn agent(connect_secs: u64, total_secs: u64) -> ureq::Agent {
 
 /// 一次模型调用的出站代理：连接 10 秒；**等响应头 / 读响应体 / 整体预算**都用同一个预算。
 /// 为什么三项共用一个预算：**非流式**下供应商要等整段生成完才发响应头，
-/// 把"等响应头"单独设小会把几十秒的正常长回复误判成不通——真机上就是这么炸的。
+/// 把"等响应头"单独设小会把几十秒的正常长回复误判成不通。
 pub fn agent_for_llm(timeout_secs: u64) -> ureq::Agent {
     let budget = Some(Duration::from_secs(timeout_secs.max(1)));
     let builder = ureq::Agent::config_builder()
@@ -71,7 +71,7 @@ const SEC_E_NO_CREDENTIALS: i64 = 0x8009_030E_u32 as i64;
 /// - 真正认不出的错误由 `_` 收 → `fail`，原始原文照打，绝不因为认不出性质就当成"环境不允许"。
 ///
 /// **TLS 家族不止一个变体**：Windows 上 native-tls 的错误走 `NativeTls`（不是通用的 `Tls` 壳），
-/// 只匹配 `Tls` 会让真机上的凭证错误落进 `_` 被报成 `fail`——真机上抓到过一次。
+/// 只匹配 `Tls` 会让真机上的凭证错误落进 `_` 被报成 `fail`。
 /// 两个变体都按同一份判据（错误原文里的稳定码）分类。
 pub fn classify(e: &ureq::Error) -> &'static str {
     match e {
@@ -91,7 +91,7 @@ pub fn classify(e: &ureq::Error) -> &'static str {
 
 /// 错误原文里有没有"取不到系统凭证"这个稳定码（十六进制与**有符号十进制**两种写法都认）。
 /// 有符号那一份必须按 i32 渲染：Windows 把它印成 `-2146893042`，而按 u32 渲染是 `2148074254`——
-/// 两者是同一个码，少认一个就会把环境结论误报成失败（真机上抓到过一次）。
+/// 两者是同一个码，少认一个就会把环境结论误报成失败。
 /// 只在**已经判定是 TLS 错误**之后才问它——所以这条判据不会把别的失败误判成环境结论。
 pub(crate) fn lacks_system_credentials(text: &str) -> bool {
     let hex = format!("{:08X}", SEC_E_NO_CREDENTIALS as u32);

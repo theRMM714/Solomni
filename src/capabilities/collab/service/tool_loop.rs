@@ -51,6 +51,14 @@ pub(crate) fn run_branch(
                 args_json,
             ),
         )
+    } else if let Some(h) = handler_for(ctx, name) {
+        // 核心自有工具：与内置、模块走**同一条派发路径**，不是循环里的特例。
+        let tctx = crate::kernel::ports::ToolCtx {
+            work: &ctx.sandbox.work_name,
+            agent: &ctx.sandbox.agent,
+            line: ctx.line.load(std::sync::atomic::Ordering::Relaxed),
+        };
+        (String::new(), h.run(&tctx, name, args_json))
     } else {
         let inv = ToolInvoke {
             malformed: None,
@@ -70,10 +78,22 @@ pub(crate) fn run_branch(
 pub(crate) fn face_has(ctx: &MemberTools, module: Option<&str>, name: &str) -> bool {
     if crate::capabilities::tools::api::is_builtin(name) {
         ctx.allowed.iter().any(|t| t == name)
+    } else if handler_for(ctx, name).is_some() {
+        // 核心自有工具与内置**同口径**：名字在这一回合的工具面里，就是放行。
+        ctx.allowed.iter().any(|t| t == name)
     } else {
         // 没写 module 不算越权：那是"派发时消歧"的事，由 dispatch_external 如实说清（多模块下不猜）。
         ctx.with_modules && module.map(|m| ctx.modules.contains_key(m)).unwrap_or(true)
     }
+}
+
+/// 这一回合有没有哪个执行者认领这个名字（核心自有工具）。
+/// 认领了就按**工具面**放行，不再走模块派发——判据因此只剩“面里有没有它”。
+fn handler_for<'a>(
+    ctx: &'a MemberTools,
+    name: &str,
+) -> Option<&'a std::sync::Arc<dyn crate::kernel::ports::ToolHandler>> {
+    ctx.handlers.iter().find(|h| h.owns(name))
 }
 
 /// 本回合的工具面之外的调用：**如实说一句**（用户可见），执行侧负责不执行（见 run_branch）。

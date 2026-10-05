@@ -3,7 +3,7 @@
 
 use crate::capabilities::conductor::api::{Acted, Action};
 use crate::capabilities::conductor::api::{
-    AgentInstance, CollabStep, Pending, SessionEvent, WorkMode, WorkSpec,
+    AgentInstance, CollabStep, Pending, SessionEvent, Tier, WorkMode, WorkSpec,
 };
 use crate::capabilities::conductor::api::{Ops, Output};
 use crate::capabilities::registry::api::{ModelView, ProviderView};
@@ -34,9 +34,12 @@ pub fn run(ops: Ops, web_default_port: u16) -> CliExit {
         match cmd.as_str() {
             "single" => single_flow(&ops, &arg),
             "collab" => collab_flow(&ops, &arg),
+            "proxy" => proxy_flow(&ops),
             "provider" => provider_flow(&ops, &arg),
             "model" => model_flow(&ops, &arg),
             "core" => core_flow(&ops, &arg),
+            // 回档：留档（标记+折叠，可恢复）/ 删除（真的截掉）/ 恢复（删掉该标记及其后）。
+            "rewind" => rewind_cmd(&ops, &arg),
             "rescan" => print_roster(&ops),
             // 转入 Web 转录中心：接受 webui / -webUI（启动参数也这么写），可选端口。
             "webui" | "-webui" | "web" | "-web" => {
@@ -50,6 +53,57 @@ pub fn run(ops: Ops, web_default_port: u16) -> CliExit {
     }
     println!("再见。");
     CliExit::Exit
+}
+
+/// 命令行回档：给共享区与整棵子树都对齐到同一个点。
+/// 留档 = 标记 + 折叠（可恢复）；删除 = 真的截掉；恢复 = 删掉该标记及其后（不可恢复）。
+fn rewind_cmd(ops: &Ops, arg: &str) {
+    use crate::capabilities::conductor::api::RewindTarget;
+    let parts: Vec<&str> = arg.split_whitespace().collect();
+    let usage = "[用法] rewind <会话> archive|delete <行id>  或  rewind <会话> restore <标记id>";
+    if parts.len() < 3 {
+        println!("{}", usage);
+        return;
+    }
+    let (sid, verb) = (parts[0], parts[1].to_ascii_lowercase());
+    let num = match parts[2].parse::<u64>() {
+        Ok(n) => n,
+        Err(_) => {
+            println!("{}", usage);
+            return;
+        }
+    };
+    let target = match verb.as_str() {
+        "archive" => RewindTarget::Archive(num),
+        "delete" => RewindTarget::Delete(num),
+        "restore" => RewindTarget::Restore(num),
+        _ => {
+            println!("{}", usage);
+            return;
+        }
+    };
+    match ops.sessions.rewind(sid, target) {
+        Ok(events) => {
+            let rows: Vec<String> = events
+                .iter()
+                .filter(|e| e.get("type").and_then(|t| t.as_str()) == Some("transcript"))
+                .filter_map(|e| e.get("lines").and_then(|l| l.as_array()))
+                .flatten()
+                .map(|l| {
+                    format!(
+                        "#{} {}",
+                        l.get("id").and_then(|i| i.as_u64()).unwrap_or(0),
+                        l.get("line").and_then(|x| x.as_str()).unwrap_or("")
+                    )
+                })
+                .collect();
+            println!("[回档] 现在 {} 行（尾部）：", rows.len());
+            for r in rows.iter().rev().take(10).rev() {
+                println!("  {}", r);
+            }
+        }
+        Err(e) => println!("[错误] {}", e),
+    }
 }
 
 fn print_roster(ops: &Ops) {
@@ -156,7 +210,7 @@ fn print_menu(ops: &Ops) {
             model_label(a.model.as_deref())
         );
     }
-    println!("命令：single [agent名…] | collab [agent名…|?] | provider list|add|rm|discover | model list|add|rm | core <模型id> | rescan | webui | exit");
+    println!("命令：single [agent名…] | collab [agent名…|?] | proxy（决定权整块交给核心） | provider list|add|rm|discover | model list|add|rm | core <模型id> | rewind <会话> archive|delete <行id> | rewind <会话> restore <标记id> | rescan | webui | exit");
 }
 
 /// 模型标签（CLI 展示文案；核心默认是登记处的概念，不是提示词）。
@@ -352,6 +406,12 @@ fn single_flow(ops: &Ops, arg: &str) {
             return;
         }
     };
+    // 档位：CLI 不提供交互选择，用设置里的默认档（与 Web 向导的默认一致）。
+    let tier = ops
+        .registry
+        .settings()
+        .map(|s| s.tier)
+        .unwrap_or(Tier::Host);
     // 订阅起点：命令回包只给头部序号，事实一律从事件台按 since 取。
     let mut cursor = ops.events.head();
     let opened = match ops.sessions.create_work(WorkSpec {
@@ -360,6 +420,7 @@ fn single_flow(ops: &Ops, arg: &str) {
         agents: picked,
         task: None,
         delegate: false,
+        tier,
     }) {
         Ok(o) => o.0,
         Err(e) => {
@@ -386,7 +447,58 @@ fn single_flow(ops: &Ops, arg: &str) {
     }
 }
 
-// ---------- 模式三：协作（按核心 pending 驱动） ----------
+// ---------- 模式三：代理（决定权整块交给核心） ----------
+
+/// 把决定权整块交给核心：**没有名单**（核心自己挑人、建子工作），接着就是跟它对话。
+/// 选这一形态本身就是**授予全权**（`WorkMode::Proxy` → `meta.delegation`）。
+fn proxy_flow(ops: &Ops) {
+    let work_name = match ops.sessions.unique_work_name("proxy", "proxy") {
+        Ok(n) => n,
+        Err(e) => {
+            println!("[错误] {}", e);
+            return;
+        }
+    };
+    let tier = ops
+        .registry
+        .settings()
+        .map(|s| s.tier)
+        .unwrap_or(Tier::Host);
+    // 订阅起点：命令回包只给头部序号，事实一律从事件台按 since 取。
+    let mut cursor = ops.events.head();
+    let opened = match ops.sessions.create_work(WorkSpec {
+        name: work_name,
+        mode: WorkMode::Proxy,
+        agents: Vec::new(),
+        task: None,
+        delegate: false,
+        tier,
+    }) {
+        Ok(o) => o.0,
+        Err(e) => {
+            println!("[错误] {}", e);
+            return;
+        }
+    };
+    cursor = drain(ops, &opened.sid, cursor);
+    let sid = opened.sid;
+    println!("（核心代理 {} —— 输入消息，空行结束会话）", sid);
+    loop {
+        let say = prompt("你>");
+        if say.is_empty() {
+            break;
+        }
+        match ops.sessions.act(&sid, Action::Say(&say), Output::Final) {
+            Ok(acted) => follow(ops, &sid, &mut cursor, acted),
+            Err(e) => {
+                println!("[错误] {}", e);
+                break;
+            }
+        }
+    }
+}
+
+// ---------- 模式四：协作（按核心 pending 驱动） ----------
 
 fn collab_flow(ops: &Ops, arg: &str) {
     let trimmed = arg.trim();
@@ -411,6 +523,11 @@ fn collab_flow(ops: &Ops, arg: &str) {
             return;
         }
     };
+    let tier = ops
+        .registry
+        .settings()
+        .map(|s| s.tier)
+        .unwrap_or(Tier::Host);
     let mut cursor = ops.events.head();
     let sid = match ops.sessions.create_work(WorkSpec {
         name: work_name,
@@ -418,6 +535,7 @@ fn collab_flow(ops: &Ops, arg: &str) {
         agents,
         task: Some(task),
         delegate,
+        tier,
     }) {
         Ok((o, _)) => {
             cursor = drain(ops, &o.sid, cursor);

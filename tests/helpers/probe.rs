@@ -63,7 +63,7 @@ pub fn job_json_ro(rw: &[PathBuf], ro: &[PathBuf], cwd: &PathBuf, prepared: bool
 }
 
 /// 运行期交给工具进程的环境白名单：**问产品自己拿**（`--print-fence-env`），不在这里另抄一份。
-/// 探针必须在**同一个环境**里驱动守门进程：环境不同，围栏的真实行为就不同（真机上已抓到过这种盲区）。
+/// 探针必须在**同一个环境**里驱动守门进程：环境不同，围栏的真实行为就不同。
 pub fn runtime_env(spec: &str) -> Vec<(String, String)> {
     let out = Command::new(bin())
         .arg("--print-fence-env")

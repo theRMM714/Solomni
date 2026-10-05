@@ -20,6 +20,13 @@ struct RoleFile {
     roles: RoleTable,
 }
 
+/// 名字表的文件形状：目录保留名（agent 实例名不得占用）。
+#[derive(Deserialize)]
+struct NamesFile {
+    #[serde(default)]
+    reserved: Vec<String>,
+}
+
 pub struct YamlSystools {
     dir: PathBuf,
 }
@@ -46,9 +53,18 @@ impl SystoolsSource for YamlSystools {
             .map_err(|e| format!("角色表读不了（systools/roles.yaml）：{}", e))?;
         let roles: RoleFile = yaml_serde::from_str(&text)
             .map_err(|e| format!("角色表非法（systools/roles.yaml）：{}", e))?;
+        let path = self.dir.join("names.yaml");
+        let text = std::fs::read_to_string(&path)
+            .map_err(|e| format!("名字表读不了（systools/names.yaml）：{}", e))?;
+        let names: NamesFile = yaml_serde::from_str(&text)
+            .map_err(|e| format!("名字表非法（systools/names.yaml）：{}", e))?;
+        if names.reserved.is_empty() {
+            return Err("名字表里一个保留名都没有（systools/names.yaml）".to_string());
+        }
         Ok(SystemTools {
             tools: tools.tools,
             roles: roles.roles,
+            reserved_names: names.reserved,
         })
     }
 }

@@ -25,7 +25,7 @@ use crate::capabilities::tools::ports::SystoolsSource;
 use crate::capabilities::tools::ports::{FileRead, SysIo, ToolRunner};
 use crate::capabilities::workspace::api::{Library, PackageManifest};
 use crate::capabilities::workspace::api::{Module, ModuleManifest};
-use crate::capabilities::workspace::ports::{ModuleSource, PackageSource, Workdirs};
+use crate::capabilities::workspace::ports::{ModuleSource, PackageSource, WorkStore, Workdirs};
 use crate::kernel::api::Tier;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -136,6 +136,14 @@ impl InMemoryWorkspace {
             .expect("锁")
             .insert(format!("{}/{}/{}", session, area, rel), Vec::new());
     }
+
+    /// 放一个**指定大小**的文件（用量断言用）：键与真实布局同构。
+    pub(crate) fn seed_bytes(&self, session: &str, area: &str, rel: &str, bytes: usize) {
+        self.files
+            .lock()
+            .expect("锁")
+            .insert(format!("{}/{}/{}", session, area, rel), vec![0u8; bytes]);
+    }
 }
 
 impl Workdirs for InMemoryWorkspace {
@@ -161,6 +169,7 @@ impl Workdirs for InMemoryWorkspace {
         Ok(crate::capabilities::workspace::api::WorkRoots {
             shared: abs(&[session, "work"]),
             agents: map,
+            store: abs(&[session, ".work"]),
         })
     }
     fn write_work(&self, session: &str, name: &str, bytes: &[u8]) -> Result<(), String> {
@@ -204,6 +213,271 @@ impl Workdirs for InMemoryWorkspace {
             map.insert(a.clone(), got);
         }
         Ok(crate::capabilities::workspace::api::WorkFiles { work, agents: map })
+    }
+
+    fn usage(
+        &self,
+        session: &str,
+        agents: &[String],
+    ) -> Result<crate::capabilities::workspace::api::WorkUsage, String> {
+        if let Some(m) = &self.fail {
+            return Err(m.clone());
+        }
+        use crate::capabilities::workspace::api::AreaUsage;
+        let files = self.files.lock().expect("锁");
+        let area = |prefix: &str| -> AreaUsage {
+            let mut out = AreaUsage::default();
+            for (k, v) in files.iter() {
+                if k.starts_with(prefix) {
+                    out.files += 1;
+                    out.bytes += v.len() as u64;
+                }
+            }
+            out
+        };
+        let work = area(&format!("{}/work/", session));
+        let mut map = BTreeMap::new();
+        for a in agents {
+            map.insert(a.clone(), area(&format!("{}/{}/", session, a)));
+        }
+        Ok(crate::capabilities::workspace::api::WorkUsage::total(
+            work, map,
+        ))
+    }
+}
+
+/// 内存版本库：文件原语 + 内容寻址对象、提交记录、head 与各 agent 的拉取基线。
+/// 键一律用「根路径字符串|相对键」，与真实适配器同一份语义，供端口契约测试与协调业务用例使用。
+#[derive(Default)]
+pub(crate) struct InMemoryWorkStore {
+    files: Mutex<BTreeMap<String, Vec<u8>>>,
+    objects: Mutex<BTreeMap<String, Vec<u8>>>,
+    commits: Mutex<BTreeMap<String, crate::capabilities::workspace::domain::workstore::Commit>>,
+    heads: Mutex<BTreeMap<String, u64>>,
+    index: Mutex<BTreeMap<String, crate::capabilities::workspace::domain::workstore::Index>>,
+    fail: Option<String>,
+}
+
+fn ws_key(root: &std::path::Path, rel: &str) -> String {
+    format!("{}|{}", root.to_string_lossy(), rel)
+}
+
+impl InMemoryWorkStore {
+    pub(crate) fn new() -> InMemoryWorkStore {
+        InMemoryWorkStore::default()
+    }
+
+    /// 注入失败：任何端口调用都返回该原因（端口契约测试用）。
+    pub(crate) fn fail_with(mut self, msg: &str) -> InMemoryWorkStore {
+        self.fail = Some(msg.to_string());
+        self
+    }
+
+    /// 直接放一个文件（模拟主副本 / 沙箱里已有内容）。
+    pub(crate) fn seed(&self, root: &std::path::Path, rel: &str, text: &str) {
+        self.files
+            .lock()
+            .expect("锁")
+            .insert(ws_key(root, rel), text.as_bytes().to_vec());
+    }
+}
+
+impl WorkStore for InMemoryWorkStore {
+    fn read_under(&self, root: &std::path::Path, rel: &str) -> Result<Option<Vec<u8>>, String> {
+        if let Some(m) = &self.fail {
+            return Err(m.clone());
+        }
+        Ok(self
+            .files
+            .lock()
+            .expect("锁")
+            .get(&ws_key(root, rel))
+            .cloned())
+    }
+
+    fn write_under(&self, root: &std::path::Path, rel: &str, bytes: &[u8]) -> Result<(), String> {
+        if let Some(m) = &self.fail {
+            return Err(m.clone());
+        }
+        self.files
+            .lock()
+            .expect("锁")
+            .insert(ws_key(root, rel), bytes.to_vec());
+        Ok(())
+    }
+
+    fn remove_under(&self, root: &std::path::Path, rel: &str) -> Result<(), String> {
+        if let Some(m) = &self.fail {
+            return Err(m.clone());
+        }
+        self.files.lock().expect("锁").remove(&ws_key(root, rel));
+        Ok(())
+    }
+
+    fn list(&self, root: &std::path::Path) -> Result<Vec<String>, String> {
+        if let Some(m) = &self.fail {
+            return Err(m.clone());
+        }
+        let prefix = format!("{}|", root.to_string_lossy());
+        let files = self.files.lock().expect("锁");
+        let mut out: Vec<String> = files
+            .keys()
+            .filter_map(|k| k.strip_prefix(&prefix).map(|s| s.to_string()))
+            .collect();
+        out.sort();
+        Ok(out)
+    }
+
+    fn head(&self, store: &std::path::Path) -> Result<Option<u64>, String> {
+        if let Some(m) = &self.fail {
+            return Err(m.clone());
+        }
+        Ok(self
+            .heads
+            .lock()
+            .expect("锁")
+            .get(&store.to_string_lossy().to_string())
+            .copied())
+    }
+
+    fn set_head(&self, store: &std::path::Path, id: u64) -> Result<(), String> {
+        if let Some(m) = &self.fail {
+            return Err(m.clone());
+        }
+        self.heads
+            .lock()
+            .expect("锁")
+            .insert(store.to_string_lossy().to_string(), id);
+        Ok(())
+    }
+
+    fn clear_head(&self, store: &std::path::Path) -> Result<(), String> {
+        if let Some(m) = &self.fail {
+            return Err(m.clone());
+        }
+        self.heads
+            .lock()
+            .expect("锁")
+            .remove(&store.to_string_lossy().to_string());
+        Ok(())
+    }
+
+    fn read_commit(
+        &self,
+        store: &std::path::Path,
+        id: u64,
+    ) -> Result<Option<crate::capabilities::workspace::domain::workstore::Commit>, String> {
+        if let Some(m) = &self.fail {
+            return Err(m.clone());
+        }
+        Ok(self
+            .commits
+            .lock()
+            .expect("锁")
+            .get(&ws_key(store, &id.to_string()))
+            .cloned())
+    }
+
+    fn write_commit(
+        &self,
+        store: &std::path::Path,
+        commit: &crate::capabilities::workspace::domain::workstore::Commit,
+    ) -> Result<(), String> {
+        if let Some(m) = &self.fail {
+            return Err(m.clone());
+        }
+        self.commits
+            .lock()
+            .expect("锁")
+            .insert(ws_key(store, &commit.id.to_string()), commit.clone());
+        Ok(())
+    }
+
+    fn list_commits(&self, store: &std::path::Path) -> Result<Vec<u64>, String> {
+        if let Some(m) = &self.fail {
+            return Err(m.clone());
+        }
+        let prefix = format!("{}|", store.to_string_lossy());
+        let commits = self.commits.lock().expect("锁");
+        let mut ids: Vec<u64> = commits
+            .keys()
+            .filter_map(|k| k.strip_prefix(&prefix)?.parse::<u64>().ok())
+            .collect();
+        ids.sort_unstable();
+        Ok(ids)
+    }
+
+    fn remove_commit(&self, store: &std::path::Path, id: u64) -> Result<(), String> {
+        if let Some(m) = &self.fail {
+            return Err(m.clone());
+        }
+        self.commits
+            .lock()
+            .expect("锁")
+            .remove(&ws_key(store, &id.to_string()));
+        Ok(())
+    }
+
+    fn read_index(
+        &self,
+        store: &std::path::Path,
+        agent: &str,
+    ) -> Result<crate::capabilities::workspace::domain::workstore::Index, String> {
+        if let Some(m) = &self.fail {
+            return Err(m.clone());
+        }
+        Ok(self
+            .index
+            .lock()
+            .expect("锁")
+            .get(&ws_key(store, agent))
+            .cloned()
+            .unwrap_or_default())
+    }
+
+    fn write_index(
+        &self,
+        store: &std::path::Path,
+        agent: &str,
+        index: &crate::capabilities::workspace::domain::workstore::Index,
+    ) -> Result<(), String> {
+        if let Some(m) = &self.fail {
+            return Err(m.clone());
+        }
+        self.index
+            .lock()
+            .expect("锁")
+            .insert(ws_key(store, agent), index.clone());
+        Ok(())
+    }
+
+    fn write_object(
+        &self,
+        store: &std::path::Path,
+        hash: &str,
+        bytes: &[u8],
+    ) -> Result<(), String> {
+        if let Some(m) = &self.fail {
+            return Err(m.clone());
+        }
+        self.objects
+            .lock()
+            .expect("锁")
+            .entry(ws_key(store, hash))
+            .or_insert_with(|| bytes.to_vec());
+        Ok(())
+    }
+
+    fn read_object(&self, store: &std::path::Path, hash: &str) -> Result<Vec<u8>, String> {
+        if let Some(m) = &self.fail {
+            return Err(m.clone());
+        }
+        self.objects
+            .lock()
+            .expect("锁")
+            .get(&ws_key(store, hash))
+            .cloned()
+            .ok_or_else(|| format!("对象不存在：{}", hash))
     }
 }
 
@@ -446,11 +720,24 @@ pub(crate) fn test_sandbox(
     crate::capabilities::workspace::api::Sandbox {
         work_name: "demo".to_string(),
         agent: agent.to_string(),
+        // 测试助手默认**可写共享区**：内置文件工具的既有用例直接写 work/ 复核行为；
+        // 生产里 agent 会话是只读（env.rs 设 false），只读语义由 test_sandbox_readonly 单独钉。
+        shared_writable: true,
         shared: abs(&["demo", "work"]),
         private: abs(&["demo", agent]),
         modules: map,
         texts: test_prompts().tools(),
     }
+}
+
+/// 只读共享区的测试沙箱：模拟**生产里 agent 会话**的默认（共享主副本只读，写入走 work_commit）。
+pub(crate) fn test_sandbox_readonly(
+    agent: &str,
+    modules: &[&str],
+) -> crate::capabilities::workspace::api::Sandbox {
+    let mut sb = test_sandbox(agent, modules);
+    sb.shared_writable = false;
+    sb
 }
 
 /// 测试用会话参数：agent 名 + 该 agent 的沙箱（无模块）。身份块由它现渲染。
@@ -459,6 +746,8 @@ pub(crate) fn test_params(agent: &str) -> crate::capabilities::session::api::Ses
         agent,
         &test_sandbox(agent, &[]),
         &[],
+        "single",
+        "solo",
     )
 }
 
@@ -537,6 +826,14 @@ impl HistoryStore for InMemoryHistory {
             .extend_from_slice(events);
         Ok(())
     }
+    fn replace(&self, name: &str, events: &[serde_json::Value]) -> Result<(), String> {
+        self.guard()?;
+        self.events
+            .lock()
+            .expect("锁")
+            .insert(name.to_string(), events.to_vec());
+        Ok(())
+    }
     fn list(&self) -> Result<Vec<HistoryView>, String> {
         self.guard()?;
         let metas = self.metas.lock().expect("锁");
@@ -556,8 +853,18 @@ impl HistoryStore for InMemoryHistory {
                     .unwrap_or(false),
                 exec: m.exec.clone(),
                 parent: m.parent.clone(),
+                run: m.run,
             })
             .collect())
+    }
+    fn meta(&self, name: &str) -> Result<SessionMeta, String> {
+        self.guard()?;
+        self.metas
+            .lock()
+            .expect("锁")
+            .get(name)
+            .cloned()
+            .ok_or_else(|| format!("无此会话：{}", name))
     }
     fn load(&self, name: &str) -> Result<(SessionMeta, Vec<serde_json::Value>), String> {
         self.guard()?;
@@ -771,6 +1078,7 @@ pub(crate) fn work(name: &str, mode: WorkMode, modules: &[&str]) -> WorkSpec {
         agents,
         task: None,
         delegate: false,
+        tier: crate::kernel::api::Tier::Host,
     }
 }
 
@@ -1009,13 +1317,27 @@ pub(crate) fn test_llm_demo() -> Arc<dyn crate::capabilities::llm::api::Llm + Se
     test_llm_with_repair(Arc::new(NoRepair))
 }
 
-/// 测试用的 **workspace 能力面**：把三个端口装进 `WorkspaceService`（与生产同一条路，R12）。
+/// 测试用的 **workspace 能力面**：把四个端口装进 `WorkspaceService`（与生产同一条路，R12）。
+/// 版本库默认用内存替身；要观察主副本/提交记录的用例用 `test_workspace_store`。
 pub(crate) fn test_workspace(
     source: Arc<dyn ModuleSource + Send + Sync>,
     packages: Arc<dyn PackageSource + Send + Sync>,
     dirs: Arc<dyn Workdirs + Send + Sync>,
 ) -> Arc<dyn crate::capabilities::workspace::api::Workspace + Send + Sync> {
-    Arc::new(crate::capabilities::workspace::service::WorkspaceService::new(source, packages, dirs))
+    test_workspace_store(source, packages, dirs, Arc::new(InMemoryWorkStore::new()))
+}
+
+pub(crate) fn test_workspace_store(
+    source: Arc<dyn ModuleSource + Send + Sync>,
+    packages: Arc<dyn PackageSource + Send + Sync>,
+    dirs: Arc<dyn Workdirs + Send + Sync>,
+    store: Arc<dyn WorkStore + Send + Sync>,
+) -> Arc<dyn crate::capabilities::workspace::api::Workspace + Send + Sync> {
+    Arc::new(
+        crate::capabilities::workspace::service::WorkspaceService::new(
+            source, packages, dirs, store,
+        ),
+    )
 }
 
 /// 登记一个 agent（测试装配用）：**校验用的模块清单由调用方取一份**交给登记处——
@@ -1261,4 +1583,241 @@ pub(crate) fn core_with_gateway(
         Arc::new(crate::kernel::ports::NoopLog),
         Arc::new(crate::kernel::detail::HostProbeAdapter),
     )
+}
+
+// ---------- 核心代理（core_proxy）工具的宿主替身 ----------
+
+use crate::capabilities::conductor::domain::proxy as dproxy;
+use crate::capabilities::conductor::ports::ProxyHost;
+
+/// 代理工具的宿主替身：只按用例给的答案回答，并把每次动作记进日志
+/// （用户可见的“未授权 = 根本没碰宿主”就靠这份日志钉住）。
+pub(crate) struct FakeProxyHost {
+    log: Mutex<Vec<String>>,
+    facts: dproxy::Catalog,
+    fail_create: Mutex<Option<String>>,
+    fail_send: Mutex<Vec<String>>,
+    fail_control: Mutex<Vec<String>>,
+    created: Mutex<Vec<dproxy::NewSession>>,
+    relayed: Mutex<Vec<dproxy::Relayed>>,
+    events: Mutex<Vec<String>>,
+}
+
+impl FakeProxyHost {
+    pub(crate) fn new() -> FakeProxyHost {
+        FakeProxyHost {
+            log: Mutex::new(Vec::new()),
+            facts: FakeProxyHost::facts(),
+            fail_create: Mutex::new(None),
+            fail_send: Mutex::new(Vec::new()),
+            fail_control: Mutex::new(Vec::new()),
+            created: Mutex::new(Vec::new()),
+            relayed: Mutex::new(Vec::new()),
+            events: Mutex::new(Vec::new()),
+        }
+    }
+
+    fn facts() -> dproxy::Catalog {
+        dproxy::Catalog {
+            agents: vec![dproxy::AgentFact {
+                name: "a".to_string(),
+                modules: vec!["m1".to_string()],
+                model: Some("gpt".to_string()),
+                note: "已存".to_string(),
+            }],
+            modules: vec![
+                dproxy::ModuleFact {
+                    id: "m1".to_string(),
+                    tools: vec!["t".to_string()],
+                },
+                dproxy::ModuleFact {
+                    id: "m2".to_string(),
+                    tools: Vec::new(),
+                },
+            ],
+            models: vec![
+                dproxy::ModelFact {
+                    id: "gpt".to_string(),
+                    name: "GPT".to_string(),
+                    tools: "native".to_string(),
+                },
+                // 第二个模型：让“模型越出授权范围”能被单独钉住（否则会先被“无此模型”挡下）。
+                dproxy::ModelFact {
+                    id: "other".to_string(),
+                    name: "Other".to_string(),
+                    tools: "envelope".to_string(),
+                },
+            ],
+        }
+    }
+
+    /// 记下的每一次宿主动作（断言“未授权/越界时什么都没发生”）。
+    pub(crate) fn calls(&self) -> Vec<String> {
+        self.log.lock().expect("锁").clone()
+    }
+
+    pub(crate) fn created(&self) -> Vec<dproxy::NewSession> {
+        self.created.lock().expect("锁").clone()
+    }
+
+    pub(crate) fn relayed(&self) -> Vec<dproxy::Relayed> {
+        self.relayed.lock().expect("锁").clone()
+    }
+
+    /// 预置一条消息（观察的计数与消息倒查都读它）。
+    pub(crate) fn add_event(&self, text: &str) {
+        self.events.lock().expect("锁").push(text.to_string());
+    }
+
+    pub(crate) fn fail_create(&self, why: &str) {
+        *self.fail_create.lock().expect("锁") = Some(why.to_string());
+    }
+
+    pub(crate) fn clear_fail_create(&self) {
+        *self.fail_create.lock().expect("锁") = None;
+    }
+
+    pub(crate) fn fail_send(&self, target: &str) {
+        self.fail_send.lock().expect("锁").push(target.to_string());
+    }
+
+    pub(crate) fn fail_control(&self, action: &str) {
+        self.fail_control
+            .lock()
+            .expect("锁")
+            .push(action.to_string());
+    }
+}
+
+impl ProxyHost for FakeProxyHost {
+    fn catalog(&self, _scope: dproxy::CatalogScope) -> Result<dproxy::Catalog, String> {
+        self.log.lock().expect("锁").push("catalog".to_string());
+        Ok(self.facts.clone())
+    }
+
+    fn create_session(&self, spec: &dproxy::NewSession) -> Result<dproxy::Created, String> {
+        self.log
+            .lock()
+            .expect("锁")
+            .push(format!("create:{}", spec.request_id));
+        if let Some(why) = self.fail_create.lock().expect("锁").clone() {
+            return Err(why);
+        }
+        self.created.lock().expect("锁").push(spec.clone());
+        Ok(dproxy::Created {
+            session: format!("work-{}", spec.request_id),
+            agents: spec.agents.iter().map(|a| a.name.clone()).collect(),
+        })
+    }
+
+    fn send(&self, target: &str, msg: &dproxy::Relayed) -> Result<(), String> {
+        self.log
+            .lock()
+            .expect("锁")
+            .push(format!("send:{}:{}", target, msg.kind.as_str()));
+        self.relayed.lock().expect("锁").push(msg.clone());
+        if self
+            .fail_send
+            .lock()
+            .expect("锁")
+            .iter()
+            .any(|t| t == target)
+        {
+            return Err(format!("目标 {} 不存在或已关闭", target));
+        }
+        Ok(())
+    }
+
+    fn observe(
+        &self,
+        session: &str,
+        view: dproxy::ObserveView,
+        since: Option<&str>,
+    ) -> Result<dproxy::Snapshot, String> {
+        self.log.lock().expect("锁").push(format!(
+            "observe:{}:{:?}:{}",
+            session,
+            view,
+            since.unwrap_or("")
+        ));
+        // 观察只回元信息：**不回消息正文**（正文走 messages 倒查）。
+        let count = self.events.lock().expect("锁").len();
+        Ok(dproxy::Snapshot {
+            session: session.to_string(),
+            state: "running".to_string(),
+            pending: None,
+            artifacts: None,
+            message_count: Some(count),
+            cursor: Some(count.to_string()),
+            new_messages: None,
+        })
+    }
+
+    fn messages(
+        &self,
+        session: &str,
+        from: usize,
+        count: usize,
+    ) -> Result<dproxy::MessagesPage, String> {
+        self.log
+            .lock()
+            .expect("锁")
+            .push(format!("messages:{}:{}:{}", session, from, count));
+        let events = self.events.lock().expect("锁").clone();
+        let total = events.len();
+        let mut out = Vec::new();
+        let mut i = from;
+        while i < total && out.len() < count {
+            let idx = total - 1 - i;
+            out.push(dproxy::MessageLine {
+                id: idx as u64 + 1,
+                speaker: "a".to_string(),
+                verb: String::new(),
+                kind: "msg".to_string(),
+                text: events[idx].clone(),
+            });
+            i += 1;
+        }
+        let next = if i < total { Some(i) } else { None };
+        Ok(dproxy::MessagesPage {
+            session: session.to_string(),
+            messages: out,
+            next,
+        })
+    }
+
+    fn control(
+        &self,
+        session: &str,
+        action: dproxy::ControlAction,
+        _reason: &str,
+    ) -> Result<dproxy::ControlState, String> {
+        self.log
+            .lock()
+            .expect("锁")
+            .push(format!("control:{}:{}", session, action.as_str()));
+        if self
+            .fail_control
+            .lock()
+            .expect("锁")
+            .iter()
+            .any(|a| a == action.as_str())
+        {
+            return Err(format!(
+                "会话 {} 不能 {}：当前状态不允许",
+                session,
+                action.as_str()
+            ));
+        }
+        Ok(dproxy::ControlState {
+            session: session.to_string(),
+            action,
+            state: match action {
+                dproxy::ControlAction::Stop => "stopped",
+                dproxy::ControlAction::Continue => "active",
+                dproxy::ControlAction::Close => "closed",
+            }
+            .to_string(),
+        })
+    }
 }

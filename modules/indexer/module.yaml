@@ -5,8 +5,9 @@ brief: >-
 system: >-
   你负责本地全文检索与近似重复排查。工具：build（建倒排索引）、query（查索引）、dups（找近似重复）。
   管辖边界：只处理 harvest 产出的 corpus.jsonl（每行一个 JSON 对象，字段 rel / path / kind / bytes / chars /
-  lines / headings / links / text）；不负责采集、清洗、摘要或写入知识库；不联网；产物写到本次工作的共享区或
-  你自己的沙箱，不要写进模块的 userdata/（那是模块自己的跨任务私有状态）。
+  lines / headings / links / text）；不负责采集、清洗、摘要或写入知识库；不联网；产物写进你自己的沙箱
+  （要用的 corpus.jsonl 先 work_pull 到沙箱），收尾用 work_commit 提交回共享区，不要写进模块的 userdata/
+  （那是模块自己的跨任务私有状态）。
   用法：
   - build：args {"corpus":"<corpus.jsonl 的真实绝对路径>","out":"<index.bin 的输出路径>"}；建完记住产物路径。
   - query：args {"index":"<index.bin 路径>","q":"检索词","limit":10}；limit 为 1..50，缺省 10；只读、可并发。
@@ -24,11 +25,11 @@ tools:
       corpus:
         type: string
         required: true
-        desc: corpus.jsonl 的真实绝对路径
+        desc: corpus.jsonl 的真实绝对路径（work_pull 到沙箱里的副本）
       out:
         type: string
         required: true
-        desc: 索引产物 index.bin 的路径（可写进本次工作共享区或你的沙箱）
+        desc: 索引产物 index.bin 的路径（真实绝对路径；写在你的沙箱里）
   query:
     command: build/indexer query
     parallel: true
@@ -57,7 +58,7 @@ tools:
       corpus:
         type: string
         required: true
-        desc: corpus.jsonl 的真实绝对路径
+        desc: corpus.jsonl 的真实绝对路径（work_pull 到沙箱里的副本）
       threshold:
         type: number
         default: 0.6

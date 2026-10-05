@@ -30,7 +30,7 @@ Fake 必须：
 | --- | --- | --- |
 | `src/capabilities/llm/detail/fake_chat.rs:FakeChat` | 脚本模型，同时记录 `calls`，兼具 Fake + Spy | 契约已就位（成功 / 空 / 流式 / 中止 / 记录） |
 | `src/capabilities/llm/detail/fake_chat.rs:DemoGateway` | 演示/回落网关 | 契约已就位（两类通道 / 回落告知 / 无网络无密钥） |
-| `src/tests/doubles.rs:InMemorySettings`、`InMemoryHistory`、`InMemoryWorkspace`、`InMemorySysIo` | 内存 Fake | 已被核心测试装配使用；端口矩阵已登记（见 §三，已验收） |
+| `src/tests/doubles.rs:InMemorySettings`、`InMemoryHistory`、`InMemoryWorkspace`、`InMemorySysIo`、`InMemoryWorkStore` | 内存 Fake | 已被核心测试装配使用；端口矩阵已登记（见 §三，已验收） |
 | `src/tests/doubles.rs:InMemoryPackages` | 包库 Fake | 已被核心测试使用；端口矩阵已登记（见 §三，已验收） |
 | `src/tests/doubles.rs:FakeCatalog` | 模型目录 Fake + 调用记录（`seen`） | 已被核心测试使用；端口矩阵已登记（见 §三，已验收） |
 | `src/tests/doubles.rs:VecSource` | 模块清单 Fake | 已被核心测试使用；端口矩阵已登记（见 §三，已验收） |
@@ -121,7 +121,8 @@ Fixture 必须：
 | `ModuleSource` | `VecSource` | 不适用 | 不适用（错误进 `rejected`） | 不适用 | `FsModules` | 已验收 |
 | `PackageSource` | `InMemoryPackages` | 不适用 | 不适用（错误进 `rejected`） | 不适用 | `FsPackages` | 已验收 |
 | `Workdirs` | `InMemoryWorkspace` | 内存布局可观察 | `fail_with` | 不适用 | `FsWorkspace` | 已验收 |
-| `ModuleSource` / `PackageSource` / `Workdirs` 的持有者 | ——（三个端口**只由 `workspace::service.rs` 持有**；别的能力经 `workspace::api::Workspace` 要清单与目录） | 不适用 | 不适用 | 不适用 | 不适用 | 已收口 |
+| `WorkStore` | `InMemoryWorkStore` | 内存文件 / 提交 / 基线可观察 | `fail_with` | 不适用 | `FsWorkStore`（含符号链接逃逸拒绝） | 已验收；**持有者只有 `workspace::service.rs`**（R12） |
+| `ModuleSource` / `PackageSource` / `Workdirs` / `WorkStore` 的持有者 | ——（四个端口**只由 `workspace::service.rs` 持有**；别的能力经 `workspace::api::Workspace` 要清单、目录与版本库用例） | 不适用 | 不适用 | 不适用 | 不适用 | 已收口 |
 | `SysIo` | `InMemorySysIo`（含并发峰值与按文件延时） | 内存内容 + 同时在读的峰值 | `fail_with` | 不适用 | `FsSysIo`（含 lossy / cut） | 已验收；**持有者只有 `tools::service.rs`**（R12） |
 | `HistoryStore` | `InMemoryHistory` | 内存流水可观察 | `fail_with` | 不适用 | `FsHistory` | 已验收；**持有者只有 `session::service.rs`**（R12） |
 | `PromptSource` | `TestPrompts` | 不适用 | `fail_with` | 不适用 | `YamlPrompts` | 已验收 |

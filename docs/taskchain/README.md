@@ -22,7 +22,6 @@
 ## 四、改动本单元时必须同步
 
 - 图算法一改 → `src/tests/taskchain.rs`；驱动语义与验收流程见 `docs/collab/task-chain.md`；线格式改动连带 `session`。
-- 业务缺口账：`src/capabilities/taskchain/testgaps.yaml`——业务 AI **只记缺口、不写测试**，由测试 AI 实现测试并销账；格式见 [docs/testing/gaps-acceptance.md](../../docs/testing/gaps-acceptance.md) §十二。
 
 ## 本目录
 

@@ -22,7 +22,6 @@
 ## 四、改动本单元时必须同步
 
 - 状态派生（`domain/`）与驱动（`service/driver.rs`）必须同改；`src/tests/collab/` 五份用例、本目录 `task-chain.md`、`docs/session/session-model.md`、`docs/tools/tools-and-roles.md`。
-- 业务缺口账：`src/capabilities/collab/testgaps.yaml`——业务 AI **只记缺口、不写测试**，由测试 AI 实现测试并销账；格式见 [docs/testing/gaps-acceptance.md](../../docs/testing/gaps-acceptance.md) §十二。
 
 ## 本目录
 

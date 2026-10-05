@@ -213,10 +213,10 @@ fn install_profile(spec: &FenceSpec, command: &str) -> Result<(), String> {
 fn profile_text(spec: &FenceSpec, command: &str) -> String {
     // 取舍写在这里：`file-read-metadata` 全局放行（只 stat：存在性/大小/时间戳），
     // 因为**路径解析本身**就需要它——只给祖先目录放行不够（进程解析 /Users/... 时还要读中间符号链接项），
-    // 少了它连 shell 都起不来（真机上表现为工具进程被信号 6 结束）。
+    // 少了它连 shell 都起不来：工具进程会被信号 6 结束。
     // 内容读取（file-read-data）仍然逐条放行，越界读照样拿不到内容。
     // 与路径无关的放行：进程/加载器起来所需的全部内核操作。只有 process* + sysctl-read + mach-lookup 时，
-    // 加载器仍会 abort（真机上表现为工具进程被信号 6 结束、子进程一个字节都不输出）；
+    // 加载器仍会 abort：工具进程被信号 6 结束、子进程一个字节都不输出；
     // file-map-executable 必须**全局**放行——dyld 要把可执行文件与动态库 mmap 进内存，逐路径列举覆盖不全，
     // 凡没列到的映射都直接 abort。它不构成越界读：映射仍要先拿到该路径的 file-read-data，内容读取照旧逐条放行。
     let mut out = String::from(

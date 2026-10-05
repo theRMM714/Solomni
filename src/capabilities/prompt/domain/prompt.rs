@@ -60,8 +60,6 @@ pub struct Prompts {
 /// 加/改一段提示词的步骤因此固定成两步：`prompts/` 里加键 → 这里加一个变体（缺了编译不过）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Segment {
-    /// 机制说明（这个系统怎么运转、一个 agent 一个会话、表态只能用动词）。
-    Mechanism,
     ChatProtocol,
     DiscussOpener,
     DiscussStep,
@@ -79,6 +77,8 @@ pub enum Segment {
     SlateModeCollab,
     VerdictSystem,
     VerdictUser,
+    /// 核心代理（core_proxy）的身份提示词：在用户授予的任务级授权范围内代用户决定与转达。
+    ProxySystem,
     AgentSystem,
     ToolCallingEnvelope,
     ToolCallingNative,
@@ -120,6 +120,15 @@ pub fn merge_book(docs: &[String]) -> Result<Prompts, String> {
     // 剩下的键就是"核心段"（`core:` 的内容）。
     let core: CoreTexts = yaml_serde::from_value(yaml_serde::Value::Mapping(merged))
         .map_err(|e| format!("提示词册缺键或类型不对：{}", e))?;
+    // 机制册自检：条目挂的**会话使用类型**必须在全表里——缺了就是装配错误，不静默漏发一份机制。
+    for m in &core.mechanisms {
+        if !core.session_kinds.iter().any(|k| k == &m.session) {
+            return Err(format!(
+                "机制册非法：会话使用类型不在 session_kinds 里：{}",
+                m.session
+            ));
+        }
+    }
     Ok(Prompts {
         core,
         tools: std::sync::Arc::new(tools),
@@ -140,9 +149,11 @@ fn take_section<T: DeserializeOwned>(
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct CoreTexts {
-    /// 机制说明（这个系统怎么运转、一个 agent 一个会话、表态只能用动词）。
-    /// 讨论席与执行席**都**拿它——AI 不知道机制，就只会写散文。
-    pub mechanism: String,
+    /// 会话使用类型的**全表**：机制册的校验口径之一（另一处是角色表）。
+    pub session_kinds: Vec<String>,
+    /// **机制说明册**：每条按（会话使用类型 × 适用角色）分发，见 `mechanisms_for`。
+    /// AI 不知道机制就只会写散文——所以哪一类会话由哪个角色拿哪一段，是**数据**，不是代码分支。
+    pub mechanisms: Vec<Mechanism>,
     pub chat_protocol: String,
     pub discuss: DiscussPrompts,
     pub synthesize: SynthPrompts,
@@ -153,6 +164,8 @@ pub struct CoreTexts {
     pub slate: SlatePrompts,
     /// 判定用户对裁决的回应是否明确到可以开工/放行。
     pub verdict: VerdictPrompts,
+    /// 核心代理（core_proxy）的身份提示词。
+    pub proxy: ProxyPrompts,
     /// 一个 agent 的职责提示词（由它的模块合成为一份能力包）。
     pub agent: AgentPrompts,
     /// 工具调用约定：手写信封（envelope 形态）。
@@ -202,6 +215,8 @@ pub struct ToolTexts {
     pub roots_private: String,
     /// 变量：id, root
     pub roots_module: String,
+    /// 共享主副本只读时，写类工具的如实拒绝（无变量）。
+    pub write_shared_read_only: String,
     // —— 内置工具回执（systool）——
     /// 变量：error
     pub bad_args_json: String,
@@ -448,6 +463,12 @@ pub struct SynthPrompts {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+pub struct ProxyPrompts {
+    /// 核心代理的身份提示词（能用哪些工具由角色表按回合注入，不在这里列清单）。
+    pub system: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 pub struct ExecutePrompts {
     /// user 变量：tasks
     pub user: String,
@@ -478,6 +499,16 @@ pub struct SlatePrompts {
     pub mode_collab: String,
 }
 
+/// 一条机制说明：**会话使用类型与适用角色同时对上**才注入（见 `CoreTexts::mechanisms_for`）。
+#[derive(Debug, Clone, Deserialize)]
+pub struct Mechanism {
+    /// 会话使用类型（必须在 `session_kinds` 里）。
+    pub session: String,
+    /// 适用角色（必须在角色表里存在——悬空引用由测试门禁挡下）。
+    pub roles: Vec<String>,
+    pub text: String,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct AgentPrompts {
     /// system 变量：agent, modules, mechanism, env, tool_calling
@@ -485,10 +516,20 @@ pub struct AgentPrompts {
 }
 
 impl CoreTexts {
+    /// 按（**会话使用类型**，**角色**）取这个回合的机制说明：只拿**同时**匹配的条目，
+    /// 按册子里的声明顺序拼接（一条都没配 = 空串）。对应关系全部写在 YAML 里，这里只做匹配。
+    pub fn mechanisms_for(&self, session: &str, role: &str) -> String {
+        self.mechanisms
+            .iter()
+            .filter(|m| m.session == session && m.roles.iter().any(|r| r == role))
+            .map(|m| m.text.trim().to_string())
+            .collect::<Vec<_>>()
+            .join("\n\n")
+    }
+
     /// **按名字取一段原文**：册子的布局只在这里露面（新加一段 = 这里加一支 match）。
     pub fn segment(&self, seg: Segment) -> &str {
         match seg {
-            Segment::Mechanism => &self.mechanism,
             Segment::ChatProtocol => &self.chat_protocol,
             Segment::DiscussOpener => &self.discuss.opener,
             Segment::DiscussStep => &self.discuss.step,
@@ -506,6 +547,7 @@ impl CoreTexts {
             Segment::SlateModeCollab => &self.slate.mode_collab,
             Segment::VerdictSystem => &self.verdict.system,
             Segment::VerdictUser => &self.verdict.user,
+            Segment::ProxySystem => &self.proxy.system,
             Segment::AgentSystem => &self.agent.system,
             Segment::ToolCallingEnvelope => &self.tool_calling_envelope,
             Segment::ToolCallingNative => &self.tool_calling_native,

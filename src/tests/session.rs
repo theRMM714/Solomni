@@ -45,6 +45,140 @@ pub(crate) fn create_work_persists_and_history_replays() {
         .is_ok());
 }
 
+/// 删父带子：整个子树一起消失；子会话不允许单独删（它由核心按节点派生）。
+#[test]
+pub(crate) fn history_delete_cascades_to_children_and_refuses_child_delete() {
+    let hist = Arc::new(InMemoryHistory::new());
+    let mut core = core_with_all(
+        vec![module_of("a")],
+        gw(BTreeMap::new(), vec!["[]".into()]),
+        Arc::new(SilentRunner),
+        Arc::new(FakeCatalog::new(vec!["m".to_string()])),
+        Arc::clone(&hist),
+        Arc::new(InMemorySysIo::new()),
+    );
+    let parent = core
+        .create_work(collab_work("p", &["a"], false, "需求"))
+        .unwrap()
+        .sid;
+    let child = core.spawn_agent_session(&parent, "a").unwrap();
+    // 子会话不允许单独删，理由要明确，且拒绝后它仍在。
+    let err = core.history_delete(&child).unwrap_err();
+    assert!(err.contains("子会话"), "{}", err);
+    assert!(hist.load(&child).is_ok(), "拒绝删除后子会话仍在");
+    // 删父会话：子会话随之消失。
+    assert!(core.history_delete(&parent).unwrap());
+    assert!(hist.load(&parent).is_err());
+    assert!(hist.load(&child).is_err(), "子会话随父一起消失");
+}
+
+/// 工作根沿父链走到顶：代理 → 多 agent 子会话 → 它的节点子会话，第三层也锚在**顶层**那一个 work/ 上。
+#[test]
+pub(crate) fn work_root_walks_to_the_top_across_nested_sub_sessions() {
+    let hist = Arc::new(InMemoryHistory::new());
+    let mut core = core_with_all(
+        vec![module_of("a")],
+        gw(BTreeMap::new(), vec!["[]".into()]),
+        Arc::new(SilentRunner),
+        Arc::new(FakeCatalog::new(vec!["m".to_string()])),
+        Arc::clone(&hist),
+        Arc::new(InMemorySysIo::new()),
+    );
+    let top = core
+        .create_work(collab_work("p", &["a"], false, "需求"))
+        .unwrap()
+        .sid;
+    let mid = core.spawn_agent_session(&top, "a").unwrap();
+    let low = core.spawn_agent_session(&mid, "a").unwrap();
+    assert_eq!(core.work_root(&top).unwrap(), top);
+    assert_eq!(core.work_root(&mid).unwrap(), top, "第二层锚在顶");
+    assert_eq!(core.work_root(&low).unwrap(), top, "第三层也锚在顶");
+}
+
+/// 身份块里的机制说明按（**会话使用类型** × **角色**）取：对得上的拿，对不上的不拿。
+#[test]
+pub(crate) fn identity_takes_the_mechanism_of_its_session_and_role() {
+    let prompt = test_prompts();
+    let mode = crate::capabilities::llm::api::ToolMode::Envelope;
+    let identity = |kind: &str, role: &str| {
+        let mut p = test_params("a");
+        p.session_kind = kind.to_string();
+        p.role = role.to_string();
+        p.identity(&prompt, mode)
+    };
+    let solo = identity("single", "solo");
+    let discussant = identity("collab", "discussant");
+    let executor = identity("collab", "executor");
+    let proxy = identity("proxy", "core_proxy");
+    let mismatch = identity("single", "core_proxy");
+    assert!(solo.contains("单 agent 工作"), "{}", solo);
+    assert!(
+        discussant.contains("一个 agent = 一个会话"),
+        "{}",
+        discussant
+    );
+    assert!(executor.contains("一个 agent = 一个会话"), "{}", executor);
+    assert!(proxy.contains("派完活就让出回合"), "{}", proxy);
+    assert!(!solo.contains("一个 agent = 一个会话"), "各拿自己那一份");
+    assert!(!proxy.contains("一个 agent = 一个会话"), "各拿自己那一份");
+    assert!(
+        !mismatch.contains("单 agent 工作"),
+        "类型对不上就不发：{}",
+        mismatch
+    );
+}
+
+/// 子树里任一节点在生成中就**整体拒绝**：不能删到一半留下半个状态。
+#[test]
+pub(crate) fn history_delete_refuses_when_any_node_in_the_subtree_is_running() {
+    let hist = Arc::new(InMemoryHistory::new());
+    let mut core = core_with_all(
+        vec![module_of("a")],
+        gw(BTreeMap::new(), vec!["[]".into()]),
+        Arc::new(SilentRunner),
+        Arc::new(FakeCatalog::new(vec!["m".to_string()])),
+        Arc::clone(&hist),
+        Arc::new(InMemorySysIo::new()),
+    );
+    let parent = core
+        .create_work(collab_work("p", &["a"], false, "需求"))
+        .unwrap()
+        .sid;
+    let child = core.spawn_agent_session(&parent, "a").unwrap();
+    core.take_single(&child)
+        .expect("把子会话交给工作线程（标记生成中）");
+    let err = core.history_delete(&parent).unwrap_err();
+    assert!(err.contains("正在生成"), "{}", err);
+    assert!(
+        hist.load(&parent).is_ok() && hist.load(&child).is_ok(),
+        "整体拒绝：父与子都还在"
+    );
+}
+
+/// 创建工作的档位来自用户选择；承载不了的虚拟机档如实拒绝（与「开始」的校验同源）。
+#[test]
+pub(crate) fn create_work_uses_chosen_tier_and_rejects_unavailable_vm() {
+    let hist = Arc::new(InMemoryHistory::new());
+    let mut core = core_with_all(
+        vec![module_of("a")],
+        gw(BTreeMap::new(), vec!["[]".into()]),
+        Arc::new(SilentRunner),
+        Arc::new(FakeCatalog::new(vec!["m".to_string()])),
+        Arc::clone(&hist),
+        Arc::new(InMemorySysIo::new()),
+    );
+    let host = core
+        .create_work(work("h", WorkMode::Single, &["a"]))
+        .unwrap()
+        .sid;
+    assert_eq!(core.history_open(&host).unwrap().0.exec.tier, Tier::Host);
+    let mut vm = work("v", WorkMode::Single, &["a"]);
+    vm.tier = Tier::Vm;
+    let err = core.create_work(vm).unwrap_err();
+    assert!(err.contains("虚拟机档现在不可用"), "{}", err);
+    assert!(core.history_open("v").is_err(), "拒绝就该什么都不留下");
+}
+
 #[test]
 pub(crate) fn direct_rewind_drops_tail_then_continue_allows_user_turn() {
     let mut member = BTreeMap::new();
@@ -77,7 +211,12 @@ pub(crate) fn direct_rewind_drops_tail_then_continue_allows_user_turn() {
     assert!(matches!(&blocked[0], SessionEvent::Notice(n) if n.contains("最后一条是 AI 发言")));
 
     // 回档到第 1 行：保留前 1 行（= 删第 1 行及其后），只留「用户·问一」
-    let replayed = core.rewind(&sid, 1).unwrap();
+    let replayed = core
+        .rewind(
+            &sid,
+            crate::capabilities::conductor::api::RewindTarget::Delete(1),
+        )
+        .unwrap();
     let lines = replay_lines(&replayed);
     assert_eq!(lines, vec!["[用户] 问一".to_string()]);
 
@@ -104,6 +243,119 @@ pub(crate) fn direct_rewind_drops_tail_then_continue_allows_user_turn() {
     );
 }
 
+/// 留档：只标记并折叠尾部，文件字节一个不少，新行从最大 id 续号；恢复把标记及其后真的删掉。
+#[test]
+pub(crate) fn archive_folds_the_tail_and_restore_brings_it_back() {
+    use crate::capabilities::conductor::api::RewindTarget;
+    use crate::capabilities::session::api::next_line_id;
+    let say = |t: &str| serde_json::json!({"type": "say", "text": t}).to_string();
+    let mut member = BTreeMap::new();
+    member.insert("a".to_string(), vec![say("答一"), say("答二")]);
+    let hist = Arc::new(InMemoryHistory::new());
+    let mut core = core_with_all(
+        vec![module_of("a")],
+        gw(member, vec!["[]".into()]),
+        Arc::new(SilentRunner),
+        Arc::new(FakeCatalog::new(vec!["m".to_string()])),
+        Arc::clone(&hist),
+        Arc::new(InMemorySysIo::new()),
+    );
+    let sid = core
+        .create_work(work("w", WorkMode::Single, &["a"]))
+        .unwrap()
+        .sid;
+    with_live(|l| core.single_say(&sid, "问一", l)).unwrap(); // 行 0 用户 / 1 AI
+    with_live(|l| core.single_say(&sid, "问二", l)).unwrap(); // 行 2 用户 / 3 AI
+
+    let rows = |raw: &[serde_json::Value]| -> Vec<u64> {
+        raw.iter()
+            .filter_map(|e| e.get("lines").and_then(|l| l.as_array()))
+            .flatten()
+            .map(|l| l.get("id").and_then(|i| i.as_u64()).unwrap_or(0))
+            .collect()
+    };
+
+    // 留档到第 1 行：活动视图只剩「用户 问一」；文件里 2/3 仍在，标记写进流水。
+    let replayed = core.rewind(&sid, RewindTarget::Archive(1)).unwrap();
+    assert_eq!(replay_lines(&replayed), vec!["[用户] 问一".to_string()]);
+    let (_, raw) = hist.load("w").unwrap();
+    assert_eq!(rows(&raw), vec![0, 1, 2, 3], "留档不删字节");
+    assert_eq!(next_line_id(&raw), 4, "新行从最大 id 续号，绝不复用");
+    assert!(
+        raw.iter()
+            .any(|e| e.get("type").and_then(|t| t.as_str()) == Some("rewind")),
+        "留档标记要进流水"
+    );
+    assert_eq!(
+        crate::capabilities::session::api::truncate_events(&raw)
+            .iter()
+            .filter_map(|e| e.get("lines").and_then(|l| l.as_array()))
+            .flatten()
+            .count(),
+        1,
+        "活动视图只剩折叠外的行"
+    );
+
+    // 恢复标记 1：活动视图回到全部 4 行；标记与它之后的内容**真的**从文件里消失。
+    let back = core.rewind(&sid, RewindTarget::Restore(1)).unwrap();
+    assert_eq!(
+        replay_lines(&back),
+        vec![
+            "[用户] 问一".to_string(),
+            "[a] 答一".to_string(),
+            "[用户] 问二".to_string(),
+            "[a] 答二".to_string()
+        ]
+    );
+    let (_, raw2) = hist.load("w").unwrap();
+    assert_eq!(rows(&raw2), vec![0, 1, 2, 3]);
+    assert!(
+        !raw2
+            .iter()
+            .any(|e| e.get("type").and_then(|t| t.as_str()) == Some("rewind")),
+        "恢复真的删掉了标记"
+    );
+}
+
+/// 删除：真的把标记点之后的字节从文件里删掉（不是只截视图）。
+#[test]
+pub(crate) fn delete_rewrites_the_file_for_real() {
+    use crate::capabilities::conductor::api::RewindTarget;
+    let say = |t: &str| serde_json::json!({"type": "say", "text": t}).to_string();
+    let mut member = BTreeMap::new();
+    member.insert("a".to_string(), vec![say("答一"), say("答二")]);
+    let hist = Arc::new(InMemoryHistory::new());
+    let mut core = core_with_all(
+        vec![module_of("a")],
+        gw(member, vec!["[]".into()]),
+        Arc::new(SilentRunner),
+        Arc::new(FakeCatalog::new(vec!["m".to_string()])),
+        Arc::clone(&hist),
+        Arc::new(InMemorySysIo::new()),
+    );
+    let sid = core
+        .create_work(work("w", WorkMode::Single, &["a"]))
+        .unwrap()
+        .sid;
+    with_live(|l| core.single_say(&sid, "问一", l)).unwrap();
+    with_live(|l| core.single_say(&sid, "问二", l)).unwrap();
+
+    core.rewind(&sid, RewindTarget::Delete(2)).unwrap();
+    let (_, raw) = hist.load("w").unwrap();
+    let ids: Vec<u64> = raw
+        .iter()
+        .filter_map(|e| e.get("lines").and_then(|l| l.as_array()))
+        .flatten()
+        .map(|l| l.get("id").and_then(|i| i.as_u64()).unwrap_or(0))
+        .collect();
+    assert_eq!(ids, vec![0, 1], "删除真的截断文件");
+    assert!(
+        !raw.iter()
+            .any(|e| e.get("type").and_then(|t| t.as_str()) == Some("rewind")),
+        "删除不留标记"
+    );
+}
+
 #[test]
 pub(crate) fn rewind_keeps_only_lines_before_the_mark() {
     let mut member = BTreeMap::new();
@@ -123,7 +375,12 @@ pub(crate) fn rewind_keeps_only_lines_before_the_mark() {
     with_live(|l| core.single_say(&sid, "问二", l)).unwrap(); // 行 2 用户 / 3 AI
 
     // 回档到第 2 行 = 删第 2 行及其后 → 只留前 2 行，历史与 marks 同步截断
-    let replayed = core.rewind(&sid, 2).unwrap();
+    let replayed = core
+        .rewind(
+            &sid,
+            crate::capabilities::conductor::api::RewindTarget::Delete(2),
+        )
+        .unwrap();
     assert_eq!(
         replay_lines(&replayed),
         vec!["[用户] 问一".to_string(), "[a] 答一".to_string()]
@@ -135,7 +392,12 @@ pub(crate) fn rewind_keeps_only_lines_before_the_mark() {
     );
 
     // 回档到第 0 行 = 转录清空、对话也清空（身份由参数现渲染，不在对话里）
-    let replayed = core.rewind(&sid, 0).unwrap();
+    let replayed = core
+        .rewind(
+            &sid,
+            crate::capabilities::conductor::api::RewindTarget::Delete(0),
+        )
+        .unwrap();
     assert!(
         replay_lines(&replayed).is_empty(),
         "点第一行 → 转录清空：{:?}",
@@ -185,7 +447,12 @@ pub(crate) fn rebuilt_context_keeps_tool_result() {
         Arc::clone(&io),
     );
     // 内存里没有这个会话 → 走 rebuild_session（保留全部 3 行）
-    core2.rewind(&sid, 3).unwrap();
+    core2
+        .rewind(
+            &sid,
+            crate::capabilities::conductor::api::RewindTarget::Delete(3),
+        )
+        .unwrap();
     let h = core2.single_history(&sid).expect("重建后应在内存里");
     assert!(
         h.iter()
@@ -223,10 +490,15 @@ pub(crate) fn create_work_validates_user_choices() {
         .create_work(work("x", WorkMode::Single, &["ghost"]))
         .unwrap_err()
         .contains("无此模块"));
-    assert!(core
-        .create_work(work("x", WorkMode::Single, &[]))
-        .unwrap_err()
-        .contains("至少要有一个模块"));
+    // 模块可以为空：零模块 agent 照样建得出来（只用内建文件工具）。
+    let opened = core
+        .create_work(work("零模块", WorkMode::Single, &[]))
+        .expect("零模块 agent 合法");
+    assert_eq!(opened.agents.len(), 1);
+    assert!(core.history_open("零模块").expect("读 meta").0.agents[0]
+        .modules
+        .is_empty());
+    let _ = core.history_delete("零模块");
     // 单模式的**组合语义**：点名多个 = 并成一个临时组合（模块去重、保序；模型取核心默认）。
     let two_agents = WorkSpec {
         name: "x".to_string(),
@@ -247,6 +519,7 @@ pub(crate) fn create_work_validates_user_choices() {
         ],
         task: None,
         delegate: false,
+        tier: crate::kernel::api::Tier::Host,
     };
     let opened = core
         .create_work(two_agents)
@@ -360,7 +633,7 @@ pub(crate) fn core_direct_seeds_system_prompt() {
         "对话里只有真正发生过的事（此刻还没有）"
     );
     let events = with_live(|l| core.single_say(&sid, "在吗", l)).unwrap();
-    // 回归：用户发言必须入转录（此前只进历史、不进转录，历史回放会丢用户消息）。
+    // 用户发言必须入转录：只进历史不进转录的话，历史回放会丢用户消息。
     match &events[0] {
         SessionEvent::Transcript(lines) => {
             assert_eq!(lines[0].kind, "user");
@@ -611,7 +884,7 @@ pub(crate) fn node_task_is_a_system_line_but_a_user_message() {
     else {
         panic!("节点回合该是可以跑的");
     };
-    // 节点执行跟随设置里的流式开关（此前写死非流式，节点在界面上永远不逐字出）。
+    // 节点执行跟随设置里的流式开关。
     assert!(llm.stream, "默认设置下节点执行也要流式");
     let dialogue = session.dialogue();
     let last = dialogue.last().expect("注入过任务");
@@ -651,7 +924,12 @@ pub(crate) fn node_task_is_a_system_line_but_a_user_message() {
         Arc::clone(&io),
     );
     // keep_id = MAX：不截断，只为触发"按落盘转录重建"。
-    core2.rewind(&sid, u64::MAX).expect("回档即重建");
+    core2
+        .rewind(
+            &sid,
+            crate::capabilities::conductor::api::RewindTarget::Delete(u64::MAX),
+        )
+        .expect("回档即重建");
     let rebuilt = core2.single_history(&sid).expect("重建后应在内存里");
     let tail = rebuilt.last().expect("重建后仍有任务行");
     assert_eq!(tail.role, "user", "重建后派发行仍是 user 角色：{:?}", tail);
@@ -934,6 +1212,8 @@ pub(crate) fn session_meta_exec_section_roundtrips_and_reads_legacy_meta() {
         },
         parent: None,
         node: None,
+        delegation: None,
+        run: RunState::Active,
     };
     let text = yaml_serde::to_string(&meta).expect("序列化");
     let back: SessionMeta = yaml_serde::from_str(&text).expect("反序列化");
@@ -944,7 +1224,16 @@ pub(crate) fn session_meta_exec_section_roundtrips_and_reads_legacy_meta() {
         Some("3.12.4")
     );
     assert!(!back.exec.net);
-    // 缺 exec 段的旧会话照旧可读（默认 = 本机档、不联网、不定版）。
+    assert_eq!(back.run, RunState::Active, "缺省运行态 = 正常运行");
+    // 运行态是**持久事实**：停止 / 关闭写进 meta 后重启照样成立。
+    let stopped = SessionMeta {
+        run: RunState::Stopped,
+        ..meta.clone()
+    };
+    let back: SessionMeta =
+        yaml_serde::from_str(&yaml_serde::to_string(&stopped).expect("序列化")).expect("反序列化");
+    assert_eq!(back.run, RunState::Stopped);
+    // 缺 exec 段的旧会话照旧可读（默认 = 本机档、不联网、不定版、正常运行）。
     let legacy: SessionMeta =
         yaml_serde::from_str("name: old\nmode: single\nmodules: [a]\nts: 1\n")
             .expect("旧 meta.yaml 必须可读");
@@ -952,6 +1241,7 @@ pub(crate) fn session_meta_exec_section_roundtrips_and_reads_legacy_meta() {
     assert!(legacy.exec.base.is_none());
     assert!(!legacy.exec.net);
     assert!(legacy.exec.pins.is_empty());
+    assert_eq!(legacy.run, RunState::Active);
 }
 
 /// 回档**按回复原子**：截在一次回复中间时整条回复一起丢，绝不留下"孤儿工具结果"。
@@ -994,7 +1284,12 @@ pub(crate) fn rewind_never_splits_a_reply() {
     with_live(|l| core.single_say(&sid, "读两个文件", l)).unwrap();
 
     // 行序：0 用户 / 1 工具 / 2 工具 / 3 答复。回档到第 2 行 = 落在回复内部 → 整条回复一起丢。
-    let replayed = core.rewind(&sid, 2).unwrap();
+    let replayed = core
+        .rewind(
+            &sid,
+            crate::capabilities::conductor::api::RewindTarget::Delete(2),
+        )
+        .unwrap();
     assert_eq!(
         replay_lines(&replayed),
         vec!["[用户] 读两个文件".to_string()],
@@ -1026,6 +1321,7 @@ pub(crate) fn history_list_is_ordered_as_a_tree() {
             done: false,
             exec: Default::default(),
             parent: parent.map(|s| s.to_string()),
+            run: RunState::Active,
         }
     };
     // 顶层 A(10) 比 B(5) 新；A 下两个子会话（甲=9 比 乙=8 新）。

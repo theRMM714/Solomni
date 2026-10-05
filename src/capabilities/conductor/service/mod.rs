@@ -4,8 +4,8 @@
 
 use crate::capabilities::conductor::api::{
     AgentInstance, AgentSuggestion, CollabStep, ConfigAgent, FilesAgentRootView, FilesAgentView,
-    FilesRootsView, FilesView, RuntimeReport, SessionConfig, SessionEdit, SessionView, WorkMode,
-    WorkOpened, WorkSpec,
+    FilesRootsView, FilesView, RewindTarget, RuntimeReport, SessionConfig, SessionEdit,
+    SessionView, TierChoices, WorkMode, WorkOpened, WorkSpec,
 };
 use crate::capabilities::llm::api::Llm;
 use crate::capabilities::session::api::History;
@@ -20,7 +20,7 @@ use crate::capabilities::llm::api::Channel;
 use crate::capabilities::llm::api::Msg;
 use crate::capabilities::prompt::api::{Prompt, Segment};
 use crate::capabilities::registry::api::Registry;
-use crate::capabilities::session::api::{AgentMeta, HistoryView, SessionMeta};
+use crate::capabilities::session::api::{AgentMeta, HistoryView, RunState, SessionMeta};
 use crate::capabilities::tools::api::{ToolExec, Tools};
 use crate::capabilities::workspace::api::Module;
 use crate::kernel::api::SessionId;
@@ -202,9 +202,11 @@ pub struct Conductor {
 mod env;
 mod flow;
 mod history;
+pub mod proxy;
 mod rewind;
 mod turn;
 mod work;
+mod work_tools;
 impl Conductor {
     /// 组合根专用：main 负责创建适配器并注入；conductor 不自建任何具体实现。
     // 组合根注入的构造函数：参数天然多，收口成参数对象只是把参数挪个地方、并让装配更难读。
@@ -251,6 +253,23 @@ impl Conductor {
         self.registry.as_mut()
     }
 
+    /// 目录保留名（`systools/names.yaml`）：agent 实例名不得占用（与工作区布局同源）。
+    pub(crate) fn reserved_names(&self) -> Vec<String> {
+        self.systools.reserved_names()
+    }
+
+    /// 工具总表的声明书（代理执行者在队列桥那一侧校验参数/拼回执要用）。
+    pub(crate) fn systools_book(&self) -> crate::capabilities::tools::api::ToolBook {
+        self.systools.book()
+    }
+
+    /// 模型侧工具文案（共享一份）：同上。
+    pub(crate) fn prompt_texts(
+        &self,
+    ) -> std::sync::Arc<crate::capabilities::prompt::api::ToolTexts> {
+        self.prompt.tools()
+    }
+
     /// 生成期间"会话不在表里"的三种进入点共用这一句（错误文案要一致，别处不再各写一份）。
     fn running_refusal(sid: &str) -> String {
         format!("会话 {} 正在生成中：先「停止」或等它结束，再做这一步", sid)
@@ -262,6 +281,8 @@ impl Conductor {
         &mut self,
         sid: &str,
     ) -> Result<crate::capabilities::session::api::AgentSession, String> {
+        // 运行态闸门：暂停 / 关闭的会话不启动任何生成（唤醒与派发都从这里过）。
+        self.dispatch_gate(sid)?;
         if self.running.contains(sid) {
             return Err(Self::running_refusal(sid));
         }
@@ -282,6 +303,8 @@ impl Conductor {
     /// 把协作会话**交给工作线程**（核心表里留"生成中"）。
     /// 会话还没装进内存时先从落盘重建：协作的"继续"可能先于"打开"到达。
     pub(crate) fn take_collab(&mut self, sid: &str) -> Result<CollabSession, String> {
+        // 同上：运行态闸门是第一道，先于"取出来"。
+        self.dispatch_gate(sid)?;
         if self.running.contains(sid) {
             return Err(Self::running_refusal(sid));
         }
@@ -447,7 +470,6 @@ impl Conductor {
     }
 
     /// 该会话此刻的**身份块**（按当前提示词册与形态现渲染）：测试用它断言"它被告诉了什么"。
-    /// 该会话当前的压缩点（测试断言「重建也恢复压缩点」）。
     pub fn single_identity(&self, sid: &str) -> Option<String> {
         match self.sessions.get(sid) {
             Some(Session::Single(s)) => Some(s.params().identity(&*self.prompt, s.tool_mode())),
@@ -513,6 +535,7 @@ fn mode_str(mode: WorkMode) -> &'static str {
     match mode {
         WorkMode::Single => "single",
         WorkMode::Collab => "collab",
+        WorkMode::Proxy => "proxy",
     }
 }
 

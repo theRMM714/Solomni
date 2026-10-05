@@ -10,13 +10,8 @@ use crate::capabilities::workspace::api::Sandbox;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-/// 一次工具执行结果：ok = 退出码成功；output 已截断（截断规则在适配层）。
-/// **事实，不是端口**——所以它住在 domain，由 `api` 导出。
-#[derive(Debug, Clone, PartialEq)]
-pub struct ToolOutcome {
-    pub ok: bool,
-    pub output: String,
-}
+/// 一次工具执行结果的事实类型：**归 kernel 共享**——内置、模块与核心自有工具同一形状（R6）。
+pub use crate::kernel::api::ToolOutcome;
 
 pub const READ: &str = "read";
 pub const WRITE: &str = "write";
@@ -141,7 +136,7 @@ enum Seen {
 }
 
 impl Observations {
-    /// 回档时清空（转录里那段读取证据已经不存在了）。
+    /// 回档（删除模式）时清空：转录里那段读取证据已经不存在了。
     pub fn clear(&mut self) {
         self.seen.clear();
     }

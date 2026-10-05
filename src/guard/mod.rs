@@ -30,6 +30,16 @@ pub fn fence_clean(root: &std::path::Path) -> i32 {
             failed = true;
         }
     }
+    // 孤儿授权清扫必须排在 profile 清扫**之前**：profile 删了就派生不出 SID，没法按 SID 找残留。
+    #[cfg(windows)]
+    match crate::capabilities::tools::detail::confine::sweep_orphan_aces(root) {
+        Ok(0) => lines.push("产品根内没有台账外的孤儿授权".to_string()),
+        Ok(n) => lines.push(format!("产品根内孤儿授权清扫：连树撤掉 {} 处", n)),
+        Err(e) => {
+            lines.push(format!("孤儿授权清扫未完成：{}", e));
+            failed = true;
+        }
+    }
     match crate::capabilities::tools::detail::confine::sweep_profiles() {
         Ok(n) => lines.push(format!("扫掉 {} 个本程序建过的容器 profile", n)),
         Err(e) => {

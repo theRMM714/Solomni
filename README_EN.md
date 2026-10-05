@@ -1,96 +1,128 @@
 # Solomni
 
-> **中文版:** [README.md](README.md) —— the same overview in Chinese.
+> **中文:** [README.md](README.md) —— the same overview in Chinese.
 
-Solomni is an **Agent OS** that runs entirely on your own machine.
+Solomni is an **agent runtime environment (AgentOS) that runs on your own machine**: one executable plus a
+`modules/` folder is the whole product. No installer, no server, no account.
 
-## What it is, in one sentence
+## Why you need it
 
-**One executable plus a `modules/` folder is the whole product.** No installer, no server, no account.
+**① You have a tool or a workflow, and you want AI to use it.**
+The usual route is to wrap it as a plugin for one specific product — and then it is tied to that product: switch agents
+or platforms and you wrap it again, while the tool itself grows a shell coupled to the host. Here you **adapt it to the
+contract once**: a folder plus a `module.yaml` (responsibility prompt + tool declarations), with the command it already
+had; some things need a small change on their own side (putting an executable inside the module folder, agreeing on how
+arguments are passed and how the receipt looks), but that change stays on their side — no restructuring, no SDK. Once
+adapted, **nothing is left behind**: **outside the contract the two sides depend on nothing from each other** — take the
+platform away and the tool still runs as it did; take the tool away and the platform keeps running. The same capability is
+used by people through the UI and by agents through the contract from a single declaration — no two entry points to maintain.
 
-This project is **not about attaching tools to an agent — it gives a tool or skill an agent**:
+**② Several agents working on one job.**
+A shared workspace has concrete problems by default: they overwrite each other, ownership of artifacts is unclear, and
+someone builds on another's unfinished output as if it were fact. Here every agent has **its own sandbox**
+(`session/<name>/<agent-instance>/`), which is also its **working copy** of the shared area; the shared area `work/`
+is the **main copy and read-only for agents** — pull what you need with `work_pull`, edit in the sandbox, then commit
+with `work_commit`. Commits use a file-level three-way comparison, so a conflict rejects the whole commit and names
+each path instead of silently overwriting; any commit point can be restored. The only two roads across agents are that
+shared area and the transcript that enters the context — artifacts land in their owner's cell, so rework can find the
+person; capabilities are isolated too, a module's directory belongs only to the agent that holds it.
+(Finer-grained "who may write which part" is still a convention — the gap is
+`fence.per-agent-write-roots` in [tests/gaps.yaml](tests/gaps.yaml).)
 
-- **A module is a folder** = a charter prompt + optional external tools + a private workspace.
-  Drop it into `modules/` and it appears; take it out and it is gone — no registration, no build, no restart.
-- **A module can be anything**: a prompt, a Python / Node / C++ script, an MCP, a skill.
-  It only needs a `module.yaml` written in YAML to follow the contract, and it **imports no code or
-  dependency from this project**. Your tools stay yours: without this product they still run.
-- **Agents speak, not modules**: an agent = a name + the modules it holds + its model + its own sandbox.
-  Whichever agent a module is loaded into, that agent speaks in its name.
-- **The form follows the task**: the same set of modules can be assembled as one AI holding several
-  capabilities (single agent) or as several AIs each holding one (collaboration); when the task ends the
-  When the task ends the projection dissolves; the capabilities still belong to the modules.
-- **Local by design**: the web UI binds `127.0.0.1` only; keys live in the local registry and in outbound
-  calls only, and never enter prompts, transcripts, logs or module workspaces.
-- **The transcript is the context**: what you see and what enters the model's context are the *same thing*;
-  an agent's words are always data, never instructions.
+**③ When something goes wrong, you need to know what it saw and why it decided that.**
+The transcript is **append-only** (delete/restore are explicit actions that really rewrite the log). On any line,
+"rewind to here" offers: **archive** — append a marker and collapse the earlier lines (all bytes kept, recoverable);
+**delete** — really truncate to that point; **restore** — truncate at the marker, discarding work done since. Line ids
+are monotonic and never reused, replay is reproducible, so **a rebuild matches the live run line by line**; the shared
+area comes back to that moment too, via the `(agent, line)` anchor on each commit, with the whole subtree synchronized.
+A delivery can be replayed from disk — what the AI did is an auditable, reproducible engineering artifact, not a chat
+that is gone.
 
-For the design philosophy and invariants, read [PHILOSOPHY.md](PHILOSOPHY.md).
+## What it is made of
 
-## Where the project stands
+| Thing | What it is |
+| --- | --- |
+| **Core** | The only program in the product (Rust). It provides the mechanisms: sessions and transcripts, task orchestration and acceptance, tool execution and fencing, the registry, rewind and compaction |
+| **Module** | A folder `modules/<id>/`: a `module.yaml` (responsibility prompt + tool declarations) plus the tools themselves — any language, anything that runs |
+| **Agent** | A name + the modules it holds + a model + its own sandbox. Whichever agent a module is loaded into, it speaks in that agent's name |
+| **Users** | People and agents. People use the interfaces (terminal / local web UI), agents use the module contract — the same modules, two doors |
 
-**Working today**:
+## What works today
 
-- **Two forms**: single agent (direct / composite) and group collaboration — form-up → discussion →
-  a task chain is drafted → **review gate** (nothing starts until you approve) → execution per stage with
-  concurrency inside a stage → **one acceptance pass per stage** → final acceptance → delivery. On failure,
-  only the named nodes are sent back (nodes already passed in that stage stay passed); you control the flow
-  with Stop / Continue.
+- **Three forms** (chosen per piece of work):
+  - **single agent**: one AI holding several module capabilities, working directly;
+  - **group collaboration**: several agents each holding one capability — form-up → discussion → a task chain
+    is drafted → **review gate** (nothing starts until you approve) → execution per stage with concurrency →
+    one acceptance pass per stage → final acceptance → delivery; on failure only the named nodes go back;
+  - **proxy**: hand the whole decision to the core, which picks people and creates child sessions; entered
+    from the API / scripts today.
+- **Modules are drop-in**: a folder with a valid `module.yaml` under `modules/` appears; remove it and it is
+  gone — no registration, no build, no restart.
+- **Sessions and history**: one directory per piece of work (`session/<name>/`); "rewind to here" on any line —
+  **archive** (recoverable) / **delete** (real truncation) / **restore** — and the shared area comes back with it,
+  anchored by commit line; transcripts are replayable, context is compactable; child sessions live under the
+  parent's `children/` (nesting is allowed) and the whole tree shares **one** work area.
+- **Three isolation layers**: path checks inside the built-in tools → every tool process runs behind the gate
+  process (environment allowlist / process tree / timeout kills the whole tree) → platform fences
+  (Windows AppContainer, Linux Landlock, macOS seatbelt). If a mechanism cannot be installed, the capability
+  grade is reported honestly instead of pretending.
+- **Registry**: four YAML files for providers / models / agents / settings, all under `.home/`, managed from
+  the UI. Keys live only in the local registry and in the core's outbound calls (boundaries in
+  [REGISTRY_SPEC.md](REGISTRY_SPEC.md)).
 - **Two interfaces**: the terminal transcript center (default) and the local web UI (`-webUI`, binds
   `127.0.0.1` only, port 3081 by default).
-- **Sessions and history**: one directory per piece of work (`session/<name>/`), append-only records,
-  rewind to any line, and context compaction.
-- **Three isolation layers**: path checks inside the built-in tools → every tool process runs behind the
-  gate process (environment allowlist / process tree / timeout kills the whole tree) → platform fences
-  (Windows AppContainer, Linux Landlock, macOS seatbelt). If a mechanism cannot be installed, the startup
-  report says so instead of pretending.
-- **Registry**: four YAML files for providers / models / agents / settings, all under `.home/`, managed
-  from the UI; keys are never echoed back.
 
-**Not wired up yet (stated plainly)**:
+## Install and run
 
-- **The guest body for the VM tier**: selection, diagnostics, the mount plan and the per-item pre-checks are
-  in place, but the guest itself is not wired up, so the VM tier **cannot be selected at all** right now
-  (the UI lists exactly what is missing and how to provide it).
-- **Credential custody for external tool services** (module tools must not depend on credentials today),
-  module packaging/marketplace, and further parallel dispatch at execution time.
-- Every unfinished item, how to finish it and its acceptance criteria live in exactly one place:
-  [tests/gaps.yaml](tests/gaps.yaml).
-
-**Quality**: `node run-tests.js` is the single entry point — locally it runs T0 (format / compile / clippy /
-duplicate dependencies, all zero-tolerance) plus unit, cross-platform integration, frontend smoke and
-end-to-end tests; real-machine fence probes run in three-platform CI (see [TESTING.md](TESTING.md)).
-
-## How to use it
-
-### 1) Start the product
+Requirements: **Node** (to run the launcher) and **Rust** (to build the core).
 
 ```bash
-start.bat                 # Windows (double-click or command line)
-node start.js             # any platform (macOS/Linux: ./start.sh)
-node start.js -webUI      # go straight to the local web UI; or type webui in the menu
+node start.js            # any platform; on Windows also start.bat, on macOS / Linux also ./start.sh
+node start.js -webUI     # go straight to the local web UI (127.0.0.1:3081)
 ```
 
-The first run needs no manual setup: the launcher keeps the toolchain inside the project
-(`platform/`, `.tools/`) and asks for consent before installing Rust if it is missing.
-**It also runs without any provider configured** — a built-in fake model demonstrates the flow and says so.
+- The first run keeps the toolchain **inside the project** (`platform/`, `.tools/`): if Rust is missing it asks
+  for consent before installing, and never touches the system.
+- **You can run it without a provider**: it walks the flow with the built-in fake model and says so plainly.
+- Common flags: `--root <dir>` (product root), `--web-port <port>`, `--release`.
+- At the terminal prompt: `single <agent>…` / `collab <request>` / `proxy` / `webui`.
 
-### 2) Register a channel and models (optional)
+### Add a provider and a model
 
-Add a provider (endpoint + key) and models in the UI, and pick the core default model.
-Keys are written only to `.home/providers.yaml`.
+In the UI, add a provider (endpoint + key) and models, and pick the core default model. Keys are written only
+to `.home/providers.yaml` and are never echoed back.
 
-### 3) Create a piece of work
+## Module contract
 
-Name it → pick a form (single agent / collaboration) → pick agents (the core can recommend a roster, but
-**you confirm it**) → for collaboration, write down the task. Then watch it discuss, execute and review:
-you can Stop / Continue at any time, and speak inside any sub-session.
+A module is a folder plus a `module.yaml`, and it **depends on nothing in this project**; the core does not
+depend on the module's implementation either — both sides depend only on this contract (full fields and rules
+in [MODULE_SPEC.md](MODULE_SPEC.md)):
+
+```yaml
+id: research                 # globally unique, = the folder name
+brief: Research and comparison.   # short capability note: what the core picks people from
+system: You take care of research...  # responsibility prompt: scope + how your tools are used
+runtimes: [python]           # optional: runtime capabilities the tools need (versions are chosen per session)
+tools:                       # optional: external tool table
+  read_txt:
+    command: python tools/read_txt.py   # working directory = the module root
+    params:
+      path: { type: string, required: true, desc: real absolute path to read }
+```
+
+- **One calling convention**: a start command + arguments + a stdin/stdout receipt. Scripts, skills, MCP servers
+  and other harnesses are all instances of it.
+- A tool process can reach: that agent's private sandbox + its own module directory; the shared main copy is not
+  among them (pull before editing, commit when done); it accepts **real absolute paths** only, and anything outside is refused.
+- If it runs, it is a valid module; if it does not, the core reports the reason plainly — no guessing, no fallback.
 
 ### Run the demo
 
 The demo is a **real-machine test**: it runs against a real model — it feeds real files, calls real tools and
-checks real artifacts. So it verifies the preconditions first: the three modules are in the roster, the indexer
-is built, and the registry holds a provider plus a usable model (`SOLOMNI_DEMO_MODEL`, or the core default).
+checks real artifacts. So it verifies the preconditions first. The first two scripts need the three modules in
+the roster, the indexer built, and a provider plus a usable model (`SOLOMNI_DEMO_MODEL`, or the core default);
+the **proxy** script needs a provider, a model and a **core default model**, plus at least one module or a
+stored agent.
 **When a precondition is missing it prints `DEMO-SKIPPED` with how to fix it and exits with code 2** — it never
 runs the flow on the built-in demo channel just to look successful.
 
@@ -98,36 +130,49 @@ runs the flow on the built-in demo channel just to look successful.
 node start.js -webUI
 node demo/run-demo.mjs         # composite: one agent holding three modules (python / node / C++)
 node demo/run-demo-collab.mjs  # collaboration: three agents with separate powers, end to end
+node demo/run-demo-proxy.mjs   # proxy: talk to the core only; it picks people, one stop stops the tree
 ```
 
-The C++ module has to be compiled once; the command and the reason are in
-[modules/indexer/README.md](modules/indexer/README.md).
+The C++ module has to be compiled once (the artifact is not committed); the command and the reason are in
+[modules/indexer/README.md](modules/indexer/README.md) — the preflight check confirms it for you.
+
+## Not wired up yet
+
+- **The guest body for the VM tier**: selection, diagnostics, the mount plan and the per-item pre-checks are in
+  place, but the guest itself is not wired in, so the **VM tier cannot be selected at all** right now (the UI
+  lists what is missing and how to fix each item).
+- Credential custody for external tool services (module tools must not depend on credentials today), module
+  distribution and a marketplace, and wider concurrent dispatch.
+- Every unfinished item, how to fix it and its acceptance criteria have exactly one authority:
+  [tests/gaps.yaml](tests/gaps.yaml).
 
 ## What it is not
 
 - Not a model or a provider: channels and keys are product resources, and models are replaceable.
 - Not a runtime that schedules resident processes: modules never sit around waiting; they work once per task.
-- It is not a resident service: a module appears when you drop it in and disappears when you take it out.
-  user picks the form.
+- Not a server: it binds `127.0.0.1` only — no server side, no account.
+
+**Quality**: `node run-tests.js` is the single entry point — T0 (format / compile / clippy / duplicate deps /
+structural review, zero tolerance) + unit + cross-platform integration + frontend smoke + end-to-end; the
+real-machine fence probes run on three CI platforms (see [TESTING.md](TESTING.md)).
 
 ## Document guide
 
 | I want to… | Read |
 | --- | --- |
-| A project overview and quick start | this file (Chinese: [README.md](README.md)) |
-| Understand *why* it is designed this way | [PHILOSOPHY.md](PHILOSOPHY.md) |
-| Use the product / follow the user journey | [PRODUCT.md](PRODUCT.md) |
-| Write a module (YAML contract, tools, path model) | [MODULE_SPEC.md](MODULE_SPEC.md) |
+| See the overview and quick start | This file (Chinese: [README.md](README.md)) |
+| See what this project is meant to become (direction and commitments) | [PHILOSOPHY.md](PHILOSOPHY.md) |
+| Use the product / see user journeys and interfaces | [PRODUCT.md](PRODUCT.md) |
+| Write a module (YAML contract and module tools) | [MODULE_SPEC.md](MODULE_SPEC.md) |
+| System tools, roles and the path model (reports and acceptance too) | [SYSTOOL.md](SYSTOOL.md) |
+| The planned core-proxy system tools | [systool_gaps.yaml](systool_gaps.yaml) (planned, not current capability) |
 | Build a runtime package (`package.yaml`) | [RUNTIME_SPEC.md](RUNTIME_SPEC.md) |
 | Manage providers / models / agents / settings (and key boundaries) | [REGISTRY_SPEC.md](REGISTRY_SPEC.md) |
-| Change the code (layering, ports, logging, prompts, persistence) | [ARCHITECTURE.md](ARCHITECTURE.md) |
+| Change code (layers, ports, logging, prompts, on-disk contracts) | [ARCHITECTURE.md](ARCHITECTURE.md) |
 | Write tests and acceptance (levels, doubles, gates, gaps, CI) | [TESTING.md](TESTING.md) |
-| Repo collaboration rules and the document routing table | [AGENTS.md](AGENTS.md) |
+| Repository rules and document routing | [AGENTS.md](AGENTS.md) |
 
-> **Two layers**: the repository root holds the **portals** (positioning and references) and `docs/` holds the
-> **details** — every fact has exactly one home. Details: `docs/testing/` (levels, doubles and the port matrix,
-> quality and isolation, entry points and CI, gaps and acceptance, module delivery); each business and
-> mechanism unit has its own directory under `docs/<unit>/` (with a per-file `module-map.md`). The full
-> routing table is in [AGENTS.md](AGENTS.md).
+> **Two layers**: the repository root holds **portals** (positioning + references), `docs/` holds the **details**
+> — every fact has exactly one authority. Full routing is in [AGENTS.md](AGENTS.md) under "Document routing".
 
 Apache License 2.0 · see [LICENSE](LICENSE)

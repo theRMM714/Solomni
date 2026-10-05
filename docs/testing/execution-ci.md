@@ -41,6 +41,10 @@ node run-tests.js
 
 T0 与业务测试在同一次运行里出结果，但结论分开记：质量失败不能被业务测试通过抵消，反之亦然。
 
+> L4 端到端在 `tests/cross-platform/e2e/root/` 下**现场生成**夹具：`orchestrator.js` 把产品根的
+> `prompts/`、`modules/`、`systools/` 拷进去再启动产品。那是**运行时副本、不是文档面**——
+> 不要手改、不要当文档审计；要改就改产品根的那一份，副本每次重跑都会覆盖。
+
 ### 真机入口（本地）
 
 ```text
@@ -49,6 +53,36 @@ node run-tests.js --fence-live
 
 仅允许在一次性 runner、VM 或明确授权的环境使用：它会改本机状态（写目录 ACL、建容器 profile）并创建容器身份。
 普通开发机上**不要**开；本地默认安全模式（见 [quality-isolation.md](quality-isolation.md)）。
+
+**本地这条最后一行有个前提：门禁要在「普通 shell」里跑。** 如果本地 shell 本身是受限令牌
+（例如低完整性 / 文件沙箱的会话），三件事会同时不成立，而报错都指向错误的方向：
+
+- `%LOCALAPPDATA%\Python` 之类**用户目录下的解释器**访问被拒 → doctor 报"没有 python"、
+  L4 的真工具场景报 `'python' is not recognized`（看着像产品缺陷，其实是环境）；
+- **改目录 DACL 被拒**（错误码 5）→ 容器围栏装不上，探针只能 env-skip；
+- Node 的**管道 stdio 捕获被拒（EPERM）**→ L4 收尾的围栏回收 `status` 为 null、输出为空，
+  被判成"本机留下了没人管的痕迹"（见 `tests/cross-platform/gaps.yaml` 的 harness.fence-clean-under-restricted-token）。
+
+判据：`whoami /groups` 里出现 `Mandatory Label\Low Mandatory Level` 就是这种会话。
+
+**这种会话里要拿到可信结论，只有两条路，按优先级：**
+
+1. **换普通 shell（推荐，也是唯一的常规路径）**：在不受限的 PowerShell 窗口里跑同一份门禁
+   （`node run-tests.js`；要验真机围栏再加 `--fence-live`，那会改本机状态，只在一次性 runner 或明确授权的机器上做）。
+2. **对这一次执行放宽沙箱（提权）**：只能在受限会话里跑时，可为**单次执行**申请放宽到不受限，
+   批准范围仅限该次、只用于本来被沙箱拒掉的动作用。两条硬约束：
+   - **必须有人批准**：批准不到的会话会一直等着、根本不发车——所以它不是默认路径，也不该写进自动化；
+   - 放宽只解决"环境不允许"，**不替代**真机围栏验收：`--fence-live` 仍然只在一次性环境里跑。
+
+> **受限令牌会话里的一切围栏 / L4 结论都不可信**——实测（同一台机器、同一份代码）：
+> 在 `Mandatory Label\Low Mandatory Level` 的会话里，doctor 报容器围栏装不上（读写 DACL 都 Error 5）、
+> `python` 在工具进程里不可达（`where` 找不到、绝对路径 `Access is denied`）、围栏回收因 Node 管道 stdio
+> 被拒（EPERM，`status` 为 null）被判成"本机留下了没人管的痕迹"；
+> 换成**普通或提权（`High`）会话**后：`node run-tests.js` 直接 `TEST-REPORT-OK`，L4 `E2E-OK`，
+> doctor 报 `fs=true net=true tree=true`（AppContainer + Job Object 内核强制），python / node / C++ 真工具链全跑通。
+> **所以"卷不支持 ACL""python 装得不对"这类结论都是误判**——判据只有一个：
+> `whoami /groups` 里出现 `Mandatory Label\Low Mandatory Level`，就别信这次的门禁结论。
+> 提权与普通 shell 给出同一种结论；`--fence-live`（改本机状态）仍然只在一次性环境里做。
 
 ### CI（GitHub Actions）：跨平台与真机的唯一事实来源
 

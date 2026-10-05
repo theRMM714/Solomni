@@ -58,7 +58,12 @@ pub(crate) fn collab_rewind_rebuilds_from_transcript_and_resume_waits_at_gate() 
         Ok(Some(Pending::ConfirmBegin))
     ));
     // 回档到需求行之后（保留前 1 行 = 需求行）：协作走「按转录重建」
-    let replayed = core.rewind(&sid, 1).unwrap();
+    let replayed = core
+        .rewind(
+            &sid,
+            crate::capabilities::conductor::api::RewindTarget::Delete(1),
+        )
+        .unwrap();
     assert_eq!(
         replay_lines(&replayed),
         vec!["[用户:需求] 做个东西".to_string()]

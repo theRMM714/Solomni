@@ -22,7 +22,6 @@
 ## 四、改动本单元时必须同步
 
 - 请求体形状是**真实会话与探针共用的唯一定义**（`detail/http_chat.rs`）；改协议 → `src/tests/llm.rs`、`src/tests/detail.rs`、`src/tests/fakes.rs`；信封回执文案来自 `prompt` 的 `ToolTexts`。
-- 业务缺口账：`src/capabilities/llm/testgaps.yaml`——业务 AI **只记缺口、不写测试**，由测试 AI 实现测试并销账；格式见 [docs/testing/gaps-acceptance.md](../../docs/testing/gaps-acceptance.md) §十二。
 
 ## 本目录
 

@@ -58,6 +58,10 @@ impl Tools for ToolsService {
         self.catalog.tools.clone()
     }
 
+    fn reserved_names(&self) -> Vec<String> {
+        self.catalog.reserved_names.clone()
+    }
+
     fn problems(&self) -> Vec<String> {
         self.catalog.problems()
     }

@@ -22,7 +22,6 @@
 ## 四、改动本单元时必须同步
 
 - 册子只被本单元持有一次（组合根装载后把 `Arc<dyn Prompt>` 注入协调业务）；**缺文件 / 缺键 / 缺变量 = 报错暴露**，禁止静默兜底文案；键清单一改 → `prompts/`、本目录 `prompts.md`、`src/tests/prompt.rs`。
-- 业务缺口账：`src/capabilities/prompt/testgaps.yaml`——业务 AI **只记缺口、不写测试**，由测试 AI 实现测试并销账；格式见 [docs/testing/gaps-acceptance.md](../../docs/testing/gaps-acceptance.md) §十二。
 
 ## 本目录
 

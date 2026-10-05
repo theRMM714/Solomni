@@ -29,3 +29,11 @@ pub const DEFAULT_LLM_TIMEOUT_SECS: u64 = 300;
 
 /// 前端唯一的会话标识 = 工作名（用户的命名，也是落盘目录名）。
 pub type SessionId = String;
+
+/// 一次工具调用的事实结果：`ok` = 成功；`output` 已截断（截断规则由各执行者定）。
+/// **为什么在 kernel**：内置工具、模块工具与核心自有工具共用这同一个形状，谁都不该复制第二份（R6）。
+#[derive(Debug, Clone, PartialEq)]
+pub struct ToolOutcome {
+    pub ok: bool,
+    pub output: String,
+}

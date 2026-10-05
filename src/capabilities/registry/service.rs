@@ -245,9 +245,6 @@ impl Registry for RegistryService {
         roster: &Roster,
     ) -> Result<(), String> {
         agents::validate_name(name)?;
-        if module_ids.is_empty() {
-            return Err("agent 至少要有一个模块".to_string());
-        }
         for id in module_ids {
             if !roster.modules.iter().any(|m| &m.manifest.id == id) {
                 return Err(format!("无此模块：{}", id));

@@ -22,7 +22,6 @@
 ## 四、改动本单元时必须同步
 
 - 字段一改 → `REGISTRY_SPEC.md`（唯一权威）、`src/tests/registry.rs`、`web` 的设置页；密钥永不进入提示词 / 转录 / 日志 / 模块工作区。
-- 业务缺口账：`src/capabilities/registry/testgaps.yaml`——业务 AI **只记缺口、不写测试**，由测试 AI 实现测试并销账；格式见 [docs/testing/gaps-acceptance.md](../../docs/testing/gaps-acceptance.md) §十二。
 
 ## 本目录
 

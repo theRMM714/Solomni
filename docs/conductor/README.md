@@ -6,7 +6,7 @@
 
 ## 一、管什么 / 不管什么
 
-**管**：会话中心（会话在世表、命令队列、运行态）、生成驱动（单 agent 与协作的长步骤都在工作线程跑，队列只占「取/交」两步）、跨能力用例与跨会话回档编排、把各能力的能力接口组装成呈现层唯一入口 `Ops`。
+**管**：会话中心（会话在世表、命令队列、运行态）、**工作形态**（single / collab / **proxy**：proxy 没有名单，用户选它就是授予全权，见 §二）、生成驱动（单 agent 与协作的长步骤都在工作线程跑，队列只占「取/交」两步）、跨能力用例与跨会话回档编排、把各能力的能力接口组装成呈现层唯一入口 `Ops`。运行态分两层：**短暂**的「这一刻谁在干活」（`SessionEvent::Working`，不落盘）与**持久**的「还该不该被驱动」（`meta.run`：`active` / `paused` / `closed`，派发前过 `dispatch_gate`）。
 
 **不管**：不读文件（`std::fs`）、不发网络（ureq）、不碰 stdin/stdout——机制一律下沉各能力的 `detail/`；**不持任何别人的端口**（R12）；不替用户选人、选形态。
 
@@ -22,7 +22,6 @@
 ## 四、改动本单元时必须同步
 
 - 动 `Ops`（增删方法、事件、视图字段）→ 同时改 `cli`、`web`、`src/tests/api.rs`、`docs/presentation/contracts.md`（路由表由 `src/tests/routes.rs` 机器比对）；跨会话回档的编排与 `session` 的纯行算术要一起改（见 `session-model.md` 五）。
-- 业务缺口账：`src/capabilities/conductor/testgaps.yaml`——业务 AI **只记缺口、不写测试**，由测试 AI 实现测试并销账；格式见 [docs/testing/gaps-acceptance.md](../../docs/testing/gaps-acceptance.md) §十二。
 
 ## 本目录
 
