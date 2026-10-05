@@ -380,8 +380,9 @@ fn revoke_leaves_no_container_ace_on_leaf_parents() {
     let home = base.join("ledger");
     prepare_fence(&spec, "cmd", &home).expect("授权应当成功");
     let sid = container_sid(&container_name(&spec)).expect("派生容器 SID");
-    eprintln!("[探针] 授权后父目录 {}", dump_aces(&base));
-    eprintln!("[探针] 授权后叶子 {}", dump_aces(&leaf));
+    // 诊断输出用 [诊断] 前缀：门禁只把 [探针] 当 env-skip，别让这两行把"跳过数"充大。
+    eprintln!("[诊断] 授权后父目录 {}", dump_aces(&base));
+    eprintln!("[诊断] 授权后叶子 {}", dump_aces(&leaf));
     assert!(
         has_any_ace_for(sid, &base),
         "授权后父目录上该容器 SID 的显式 ACE 应在场"
@@ -395,8 +396,8 @@ fn revoke_leaves_no_container_ace_on_leaf_parents() {
         "授权后叶子上应有读写 ACE"
     );
     release_fence_home(&spec, Some(&home)).expect("撤权应当成功");
-    eprintln!("[探针] 撤权后父目录 {}", dump_aces(&base));
-    eprintln!("[探针] 撤权后叶子 {}", dump_aces(&leaf));
+    eprintln!("[诊断] 撤权后父目录 {}", dump_aces(&base));
+    eprintln!("[诊断] 撤权后叶子 {}", dump_aces(&leaf));
     let on_parent = has_any_ace_for(sid, &base);
     let on_leaf = has_any_ace_for(sid, &leaf);
     free_sid(sid);
