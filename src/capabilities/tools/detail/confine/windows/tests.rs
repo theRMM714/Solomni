@@ -212,16 +212,27 @@ fn grant_targets_keep_module_read_only_and_cwd_read_only() {
         net: false,
     };
     let targets = grant_targets(&spec);
-    let find = |p: &std::path::Path| targets.iter().find(|(x, _, _, _)| x == p).cloned();
-    assert_eq!(
-        find(&module).map(|(_, r, rec, inh)| (r, rec, inh)),
-        Some((RIGHTS_RO, true, true)),
-        "模块根（也是 cwd）不得拿到写权"
+    // 同一个路径可能有多条（父目录 STAT + 叶子 RO/RW），所以要按**权限位**找那一条，
+    // 不能取第一条（那往往是父目录的 STAT）。
+    let has = |p: &std::path::Path, r: u32, rec: bool, inh: bool| {
+        targets
+            .iter()
+            .any(|(x, rr, rc, ii)| x == p && *rr == r && *rc == rec && *ii == inh)
+    };
+    assert!(
+        has(&module, RIGHTS_RO, true, true),
+        "模块根（也是 cwd）要有递归只读：{:?}",
+        targets
     );
-    assert_eq!(
-        find(&userdata).map(|(_, r, rec, inh)| (r, rec, inh)),
-        Some((RIGHTS_RW, true, true)),
-        "userdata 是可写叶子"
+    assert!(
+        !has(&module, RIGHTS_RW, true, true),
+        "模块根不得拿到写权：{:?}",
+        targets
+    );
+    assert!(
+        has(&userdata, RIGHTS_RW, true, true),
+        "userdata 是可写叶子：{:?}",
+        targets
     );
 }
 
