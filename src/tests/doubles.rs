@@ -351,6 +351,17 @@ impl WorkStore for InMemoryWorkStore {
         Ok(())
     }
 
+    fn clear_head(&self, store: &std::path::Path) -> Result<(), String> {
+        if let Some(m) = &self.fail {
+            return Err(m.clone());
+        }
+        self.heads
+            .lock()
+            .expect("锁")
+            .remove(&store.to_string_lossy().to_string());
+        Ok(())
+    }
+
     fn read_commit(
         &self,
         store: &std::path::Path,
@@ -394,6 +405,17 @@ impl WorkStore for InMemoryWorkStore {
             .collect();
         ids.sort_unstable();
         Ok(ids)
+    }
+
+    fn remove_commit(&self, store: &std::path::Path, id: u64) -> Result<(), String> {
+        if let Some(m) = &self.fail {
+            return Err(m.clone());
+        }
+        self.commits
+            .lock()
+            .expect("锁")
+            .remove(&ws_key(store, &id.to_string()));
+        Ok(())
     }
 
     fn read_index(
@@ -802,6 +824,14 @@ impl HistoryStore for InMemoryHistory {
             .entry(name.to_string())
             .or_default()
             .extend_from_slice(events);
+        Ok(())
+    }
+    fn replace(&self, name: &str, events: &[serde_json::Value]) -> Result<(), String> {
+        self.guard()?;
+        self.events
+            .lock()
+            .expect("锁")
+            .insert(name.to_string(), events.to_vec());
         Ok(())
     }
     fn list(&self) -> Result<Vec<HistoryView>, String> {

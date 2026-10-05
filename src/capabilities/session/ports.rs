@@ -9,6 +9,9 @@ pub trait HistoryStore {
     /// 写回会话元信息（配置界面的编辑：会话身份唯一真相在 meta.yaml）。
     fn save_meta(&self, meta: &SessionMeta) -> Result<(), String>;
     fn append(&self, name: &str, events: &[serde_json::Value]) -> Result<(), String>;
+    /// **整体重写**一个会话的流水（截断/恢复用）：留档只追加，删除与恢复会真的落到这里。
+    /// 机制必须原子（先写临时文件再替换），失败时原文件保持可用。
+    fn replace(&self, name: &str, events: &[serde_json::Value]) -> Result<(), String>;
     fn list(&self) -> Result<Vec<HistoryView>, String>;
     /// **只读元信息**（不回放流水）：派发前的运行态判定等"只看身份与运行态"的场合用它，
     /// 免得为查一个字段把整份转录读一遍。

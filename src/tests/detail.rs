@@ -189,6 +189,7 @@ fn fs_work_store_round_trips_and_refuses_symlink_escapes() {
             hash: "h1".to_string(),
         }],
         tree,
+        anchor: None,
     };
     s.write_commit(&store, &c).unwrap();
     s.set_head(&store, 1).unwrap();

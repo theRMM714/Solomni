@@ -171,7 +171,11 @@ pub(crate) fn rewind_clears_the_read_ledger_so_overwrite_needs_a_fresh_read() {
     let v1 = tool_views(&e1);
     assert!(v1[0].ok, "新建文件不需要先读过：{}", v1[0].output);
     // 回档：证据作废
-    core.rewind(&sid, 0).unwrap();
+    core.rewind(
+        &sid,
+        crate::capabilities::conductor::api::RewindTarget::Delete(0),
+    )
+    .unwrap();
     // 第二轮：同一个路径已存在，而账本已被清空 → 拒绝并提示先读
     let e2 = with_live(|l| core.single_say(&sid, "再写", l)).unwrap();
     let v2 = tool_views(&e2);

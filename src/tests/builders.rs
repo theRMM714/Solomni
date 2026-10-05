@@ -370,6 +370,7 @@ pub(crate) fn member_with_tools(
             false,
         ),
         reply_seq: 0,
+        line: Default::default(),
         // 测试替身按"执行席"发放全部内置工具（角色表的越权校验另有专门用例）。
         allowed: crate::capabilities::tools::api::names(),
         with_modules: true,
@@ -654,6 +655,7 @@ pub(crate) fn native_member(
         unavailable: BTreeMap::new(),
         fence: crate::capabilities::tools::api::FenceSpec::from_sandbox(&sb, false),
         reply_seq: 0,
+        line: Default::default(),
         // 测试替身按"执行席"发放全部内置工具（角色表的越权校验另有专门用例）。
         allowed: crate::capabilities::tools::api::names(),
         with_modules: true,

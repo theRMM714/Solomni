@@ -348,8 +348,9 @@ impl Conductor {
             l.kind == "user" && l.verb == "需求"
         })
         .ok_or("该会话没有需求行")?;
-        // 回档语义是「保留 id < keep」：需求行本身要留下（旧需求留在流水里），所以传 keep + 1。
-        let mut out = self.rewind(sid, keep + 1)?;
+        // 回档语义是「保留 id < keep」：需求行本身要留下（新需求随后追加），所以传 keep + 1。
+        // 改需求走**删除**模式：真的截掉旧需求之后的派生，再按新需求重新展开。
+        let mut out = self.rewind(sid, RewindTarget::Delete(keep + 1))?;
         let mut fresh = Vec::new();
         {
             let s = self.sessions.get_mut(sid).ok_or("无此会话")?;

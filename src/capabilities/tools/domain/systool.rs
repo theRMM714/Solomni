@@ -136,7 +136,7 @@ enum Seen {
 }
 
 impl Observations {
-    /// 回档时清空（转录里那段读取证据已经不存在了）。
+    /// 回档（删除模式）时清空：转录里那段读取证据已经不存在了。
     pub fn clear(&mut self) {
         self.seen.clear();
     }

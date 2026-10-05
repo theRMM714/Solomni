@@ -1946,6 +1946,16 @@ function absorb(s, ev) {
         text: '[压缩] 此前内容已压成摘要（不再发给模型，仍可查看）：\n' + ev.summary,
       });
       break;
+    // 留档回档：折叠分界。内容保留在文件里，可恢复；旧格式删除标记不进界面。
+    case 'rewind':
+      if (ev.mode !== 'archive') break;
+      s.lines.push({
+        cls: 'sys rewind',
+        who: '',
+        text: '[留档] 以下内容已折叠（保留在文件里，可恢复）',
+        mark: ev.mark,
+      });
+      break;
     // 任务链的进展：节点开工/回报/验收/交付——主会话也要看得到，不必点进子会话。
     case 'node_started':
       s.lines.push({ cls: 'sys system', who: '', text: '[节点] 开工：' + (ev.assignee || '') + ' · ' + (ev.node || '') });
@@ -2157,11 +2167,11 @@ function syncSendButton(s) {
 /// 只有本来就在底部才自动跟随；用户往上滚时保持原位置（流式刷新不抢滚动条）。
 function nearBottom(box) { return box.scrollHeight - box.scrollTop - box.clientHeight < 80; }
 
-/// 回档按钮：删掉这一行和它之后的所有消息。
+/// 回档按钮：回到这一行（留档或删除，点开后再选）。
 function rewindButton(id) {
   const b = document.createElement('button');
-  b.className = 'line-act danger'; b.textContent = '删除此行和之后所有消息';
-  b.title = '删除此行和之后所有消息';
+  b.className = 'line-act'; b.textContent = '回档到此处';
+  b.title = '回到这一行：留档（可恢复）或删除（不可恢复）';
   b.onclick = () => rewindTo(id);
   return b;
 }
@@ -2248,8 +2258,16 @@ function renderDone(s) {
     if (bodyless && !l.reasoning) continue;
     // 建块只有一处（lineBlock）：身份 → 思维链 → 正文；定稿行与实时块同一套画法。
     const el = lineBlock(l, s, 'L' + l.id, false).node;
-    // 删除：删掉这一行和它之后的所有消息（服务端按行 id 重建，前端整体替换）。
+    // 回档：到这一行为止（服务端按行 id 重建，前端整体替换）。
     if (typeof l.id === 'number') el.appendChild(rewindButton(l.id));
+    // 留档分界上的「恢复」：删掉该标记及其后的内容（含留档期间的新工作）。
+    if (typeof l.mark === 'number') {
+      const rb = document.createElement('button');
+      rb.className = 'line-act'; rb.textContent = '恢复';
+      rb.title = '恢复到这次留档之前（标记及其后的内容会被删除）';
+      rb.onclick = () => restoreMark(l.mark);
+      el.appendChild(rb);
+    }
     // 撤回该同意：转录追加一条撤回行，继续时按剩余转录重新判定。
     if (l.verb === 'agree' && l.speaker) {
       const w = document.createElement('button');
@@ -2569,29 +2587,43 @@ async function act(action, text) {
   }
 }
 
-/* 删除：删掉这一行和它之后的所有消息；服务端返回重放后的完整事件流，前端整体重建。 */
+/* 回档：留档（默认，可恢复）或删除（真的截断）；服务端回重放后的完整事件流，前端整体重建。 */
 function rewindTo(id) {
   const s = activeSession();
   if (!s || isBusy(s)) return;
-  choiceModal('删除消息', '删除这一行和之后的所有消息？此操作不可撤销。', [
-    ['删除', 'btn btn-danger', async () => {
-      try {
-        const r = await api('POST', '/api/sessions/' + encodeURIComponent(s.sid) + '/rewind', { id });
-        s.lines = [];
-        s.live = [];
-        s.fold = {};   // 行整体重建，折叠状态一并重来（避免旧键被新行复用）
-        s.scroll = {};
-        s.pending = null;
-        s.done = false;
-        s.readonly = false; // 历史回放会话一旦删除即转为活动会话
-        if (typeof r.head === 'number') s.floor = r.head;
-        for (const ev of (r.events || [])) absorb(s, ev);
-        for (const ev of (r.live || [])) absorb(s, ev);
-        renderAll();
-      } catch (err) { notice('操作失败', err.message, 'err'); }
-    }],
+  choiceModal('回档到此处', '留档：保留内容、折叠成标记，可随时恢复；删除：真的删掉这一行及其后的全部，不可恢复。', [
+    ['留档', 'btn', () => applyRewind(s, { id, mode: 'archive' })],
+    ['删除', 'btn btn-danger', () => applyRewind(s, { id, mode: 'delete' })],
     ['取消', 'btn btn-ghost', () => {}],
   ]);
+}
+
+/* 恢复某次留档：删掉该标记及其后的内容（含留档期间的新工作）。 */
+function restoreMark(mark) {
+  const s = activeSession();
+  if (!s || isBusy(s)) return;
+  choiceModal('恢复这次留档', '恢复到留档之前：该标记及其后的全部内容（含留档期间的新工作）会被删除。', [
+    ['恢复', 'btn btn-danger', () => applyRewind(s, { id: mark, mode: 'restore' })],
+    ['取消', 'btn btn-ghost', () => {}],
+  ]);
+}
+
+/* 回档请求的统一收尾：服务端回重放事件，前端整体重建。 */
+async function applyRewind(s, body) {
+  try {
+    const r = await api('POST', '/api/sessions/' + encodeURIComponent(s.sid) + '/rewind', body);
+    s.lines = [];
+    s.live = [];
+    s.fold = {};   // 行整体重建，折叠状态一并重来（避免旧键被新行复用）
+    s.scroll = {};
+    s.pending = null;
+    s.done = false;
+    s.readonly = false; // 历史回放会话一旦回档即转为活动会话
+    if (typeof r.head === 'number') s.floor = r.head;
+    for (const ev of (r.events || [])) absorb(s, ev);
+    for (const ev of (r.live || [])) absorb(s, ev);
+    renderAll();
+  } catch (err) { notice('操作失败', err.message, 'err'); }
 }
 
 /* 撤回某 agent 的同意（转录追加撤回行，协作才有意义）；值 = agent 实例名。 */

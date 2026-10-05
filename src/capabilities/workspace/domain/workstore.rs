@@ -38,6 +38,16 @@ pub struct Change {
     pub hash: String,
 }
 
+/// 提交锚：这个提交点是**哪个会话（agent 实例名）的哪一行**触发的。
+/// **空 agent = 主会话/用户投喂**。回档按它把共享区物化回某一行那一刻。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CommitAnchor {
+    #[serde(default)]
+    pub agent: String,
+    #[serde(default)]
+    pub line: u64,
+}
+
 /// 一个提交点（提交记录 + 该点的整棵树）。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Commit {
@@ -52,6 +62,9 @@ pub struct Commit {
     pub message: String,
     pub changes: Vec<Change>,
     pub tree: Tree,
+    /// 转录行锚（旧记录没有 = None，按"总在回档点之前"保守处理）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub anchor: Option<CommitAnchor>,
 }
 
 /// 冲突的四种形态（回执要能点名"哪种冲突"，不是笼统一句"冲突"）。
@@ -405,6 +418,8 @@ pub struct CommitRequest {
     pub message: String,
     /// 提交时间（由调用方给：本能力不持时钟）。
     pub time: i64,
+    /// 提交锚的行号（调用方给：这一席下一条转录行的 id）。
+    pub line: u64,
 }
 
 /// work_commit 的结果。

@@ -38,6 +38,8 @@ pub fn run(ops: Ops, web_default_port: u16) -> CliExit {
             "provider" => provider_flow(&ops, &arg),
             "model" => model_flow(&ops, &arg),
             "core" => core_flow(&ops, &arg),
+            // 回档：留档（标记+折叠，可恢复）/ 删除（真的截掉）/ 恢复（删掉该标记及其后）。
+            "rewind" => rewind_cmd(&ops, &arg),
             "rescan" => print_roster(&ops),
             // 转入 Web 转录中心：接受 webui / -webUI（启动参数也这么写），可选端口。
             "webui" | "-webui" | "web" | "-web" => {
@@ -51,6 +53,57 @@ pub fn run(ops: Ops, web_default_port: u16) -> CliExit {
     }
     println!("再见。");
     CliExit::Exit
+}
+
+/// 命令行回档：给共享区与整棵子树都对齐到同一个点。
+/// 留档 = 标记 + 折叠（可恢复）；删除 = 真的截掉；恢复 = 删掉该标记及其后（不可恢复）。
+fn rewind_cmd(ops: &Ops, arg: &str) {
+    use crate::capabilities::conductor::api::RewindTarget;
+    let parts: Vec<&str> = arg.split_whitespace().collect();
+    let usage = "[用法] rewind <会话> archive|delete <行id>  或  rewind <会话> restore <标记id>";
+    if parts.len() < 3 {
+        println!("{}", usage);
+        return;
+    }
+    let (sid, verb) = (parts[0], parts[1].to_ascii_lowercase());
+    let num = match parts[2].parse::<u64>() {
+        Ok(n) => n,
+        Err(_) => {
+            println!("{}", usage);
+            return;
+        }
+    };
+    let target = match verb.as_str() {
+        "archive" => RewindTarget::Archive(num),
+        "delete" => RewindTarget::Delete(num),
+        "restore" => RewindTarget::Restore(num),
+        _ => {
+            println!("{}", usage);
+            return;
+        }
+    };
+    match ops.sessions.rewind(sid, target) {
+        Ok(events) => {
+            let rows: Vec<String> = events
+                .iter()
+                .filter(|e| e.get("type").and_then(|t| t.as_str()) == Some("transcript"))
+                .filter_map(|e| e.get("lines").and_then(|l| l.as_array()))
+                .flatten()
+                .map(|l| {
+                    format!(
+                        "#{} {}",
+                        l.get("id").and_then(|i| i.as_u64()).unwrap_or(0),
+                        l.get("line").and_then(|x| x.as_str()).unwrap_or("")
+                    )
+                })
+                .collect();
+            println!("[回档] 现在 {} 行（尾部）：", rows.len());
+            for r in rows.iter().rev().take(10).rev() {
+                println!("  {}", r);
+            }
+        }
+        Err(e) => println!("[错误] {}", e),
+    }
 }
 
 fn print_roster(ops: &Ops) {
@@ -157,7 +210,7 @@ fn print_menu(ops: &Ops) {
             model_label(a.model.as_deref())
         );
     }
-    println!("命令：single [agent名…] | collab [agent名…|?] | proxy（决定权整块交给核心） | provider list|add|rm|discover | model list|add|rm | core <模型id> | rescan | webui | exit");
+    println!("命令：single [agent名…] | collab [agent名…|?] | proxy（决定权整块交给核心） | provider list|add|rm|discover | model list|add|rm | core <模型id> | rewind <会话> archive|delete <行id> | rewind <会话> restore <标记id> | rescan | webui | exit");
 }
 
 /// 模型标签（CLI 展示文案；核心默认是登记处的概念，不是提示词）。

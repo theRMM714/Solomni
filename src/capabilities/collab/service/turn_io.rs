@@ -81,6 +81,7 @@ impl CollabSession {
             unavailable: std::collections::BTreeMap::new(),
             fence: crate::capabilities::tools::api::FenceSpec::from_sandbox(&sb, false),
             reply_seq: 0,
+            line: Default::default(),
             allowed,
             with_modules: false,
             notes: crate::capabilities::tools::api::ToolNotes::default(),

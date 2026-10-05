@@ -48,6 +48,9 @@ pub struct MemberTools {
     /// **回复 id 计数器**：一次模型回复一个号，跨重启单调（重建时按转录里的最大值续号）。
     /// 转录行靠它分组（哪几行属于同一次回复），会话靠它按回复原子回档。
     pub reply_seq: u64,
+    /// **当前行锚**：值 = 下一条转录行的 id。会话每生成一行就推进它；工具执行者（如 work_commit）
+    /// 据此把共享区提交点钉到那一行，回档才能按行精确物化共享区。
+    pub line: Arc<std::sync::atomic::AtomicU64>,
     /// 这个席位**可以调的系统工具 id**（由角色表发放：讨论席 = discussant；执行席按身份 = solo / executor）。
     /// 存在的理由：把"谁能用哪些工具"变成**校验**，而不是提示词里的一句话。
     pub allowed: Vec<String>,

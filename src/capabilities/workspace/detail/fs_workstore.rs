@@ -125,6 +125,14 @@ impl WorkStore for FsWorkStore {
         write_bytes(&store.join("head"), id.to_string().as_bytes())
     }
 
+    fn clear_head(&self, store: &Path) -> Result<(), String> {
+        match std::fs::remove_file(store.join("head")) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(format!("清 head 失败：{}", e)),
+        }
+    }
+
     fn read_commit(&self, store: &Path, id: u64) -> Result<Option<Commit>, String> {
         let path = store.join("commits").join(format!("{}.json", id));
         match std::fs::read_to_string(&path) {
@@ -157,6 +165,15 @@ impl WorkStore for FsWorkStore {
             .collect();
         ids.sort_unstable();
         Ok(ids)
+    }
+
+    fn remove_commit(&self, store: &Path, id: u64) -> Result<(), String> {
+        let path = store.join("commits").join(format!("{}.json", id));
+        match std::fs::remove_file(&path) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(format!("删提交记录失败：{}", e)),
+        }
     }
 
     fn read_index(&self, store: &Path, agent: &str) -> Result<Index, String> {

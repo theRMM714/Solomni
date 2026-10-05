@@ -173,7 +173,11 @@ pub(crate) fn collab_delegated_roster_written_back_and_rebuilt_from_meta() {
     assert_eq!(meta.modules, vec!["a".to_string()]);
 
     // 回档（保留需求行）= 按 meta.agents 重建会话（协作走「按转录重建」这条路），再跑到交付。
-    core.rewind(&sid, 1).unwrap();
+    core.rewind(
+        &sid,
+        crate::capabilities::conductor::api::RewindTarget::Delete(1),
+    )
+    .unwrap();
     assert!(
         matches!(core.collab_pending(&sid), Ok(Some(Pending::ConfirmBegin))),
         "重建后仍等确认开始"
@@ -393,6 +397,7 @@ pub(crate) fn core_operation_runs_readonly_verification_before_the_op() {
         unavailable: BTreeMap::new(),
         fence: crate::capabilities::tools::api::FenceSpec::from_sandbox(&sb, false),
         reply_seq: 0,
+        line: Default::default(),
         allowed: vec!["read".to_string(), "plan".to_string()],
         with_modules: false,
         notes: crate::capabilities::tools::api::ToolNotes::default(),

@@ -897,7 +897,12 @@ impl crate::kernel::ports::ToolHandler for ProxyHandler {
         d::is_proxy_tool(name)
     }
 
-    fn run(&self, _session: &str, name: &str, args_json: &str) -> ToolOutcome {
+    fn run(
+        &self,
+        _ctx: &crate::kernel::ports::ToolCtx,
+        name: &str,
+        args_json: &str,
+    ) -> ToolOutcome {
         let mut tools = self.tools.lock().unwrap_or_else(|e| e.into_inner());
         tools.call(&self.ctx, name, args_json)
     }

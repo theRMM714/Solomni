@@ -71,9 +71,9 @@ impl SessionOps for ConductorHandle {
         ConductorHandle::compact(self, sid)
     }
 
-    fn rewind(&self, sid: &str, keep_id: u64) -> Result<Vec<serde_json::Value>, String> {
+    fn rewind(&self, sid: &str, target: RewindTarget) -> Result<Vec<serde_json::Value>, String> {
         let sid = sid.to_string();
-        self.call(move |core| core.rewind(&sid, keep_id))
+        self.call(move |core| core.rewind(&sid, target))
     }
 
     fn update_task(&self, sid: &str, text: &str) -> Result<Vec<serde_json::Value>, String> {

@@ -617,7 +617,15 @@ pub(crate) fn the_proxy_handler_owns_and_runs_proxy_tools() {
     assert!(!handler.owns("read"), "内置工具不归它");
     assert!(!handler.owns("say"), "讨论动词不归它");
 
-    let out = handler.run("w", d::CATALOG, r#"{"scope":"agents"}"#);
+    let out = handler.run(
+        &crate::kernel::ports::ToolCtx {
+            work: "w",
+            agent: "",
+            line: 0,
+        },
+        d::CATALOG,
+        r#"{"scope":"agents"}"#,
+    );
     assert!(out.ok, "{}", out.output);
     assert!(out.output.contains("agents"), "{}", out.output);
 }

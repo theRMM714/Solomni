@@ -129,7 +129,12 @@ pub(crate) fn mode_vocabulary_is_single_or_collab_only() {
     })
     .unwrap();
     // 内存里没有这个会话 → 走 rebuild_session，对未知形态如实报错。
-    let err = core.rewind("旧会话", 0).unwrap_err();
+    let err = core
+        .rewind(
+            "旧会话",
+            crate::capabilities::conductor::api::RewindTarget::Delete(0),
+        )
+        .unwrap_err();
     assert!(err.contains("未知会话形态"), "{}", err);
 }
 

@@ -4,8 +4,8 @@
 
 use crate::capabilities::conductor::api::{
     AgentInstance, AgentSuggestion, CollabStep, ConfigAgent, FilesAgentRootView, FilesAgentView,
-    FilesRootsView, FilesView, RuntimeReport, SessionConfig, SessionEdit, SessionView, TierChoices,
-    WorkMode, WorkOpened, WorkSpec,
+    FilesRootsView, FilesView, RewindTarget, RuntimeReport, SessionConfig, SessionEdit,
+    SessionView, TierChoices, WorkMode, WorkOpened, WorkSpec,
 };
 use crate::capabilities::llm::api::Llm;
 use crate::capabilities::session::api::History;

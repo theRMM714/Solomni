@@ -141,7 +141,12 @@ pub(crate) fn malformed_tool_envelope_becomes_a_failed_tool_line() {
         Arc::clone(&hist),
         Arc::clone(&io),
     );
-    core2.rewind(&sid, 4).unwrap();
+    core2
+        .rewind(
+            &sid,
+            crate::capabilities::conductor::api::RewindTarget::Delete(4),
+        )
+        .unwrap();
     let rebuilt = core2.single_history(&sid).expect("重建后应在内存里");
     let key = |h: &[Msg]| {
         h.iter()
@@ -831,7 +836,12 @@ pub(crate) fn envelope_multi_call_runs_every_call_and_rebuilds_identically() {
         Arc::clone(&io),
     );
     core2
-        .rewind(&sid, transcript_rows(&events).len() as u64)
+        .rewind(
+            &sid,
+            crate::capabilities::conductor::api::RewindTarget::Delete(
+                transcript_rows(&events).len() as u64,
+            ),
+        )
         .unwrap();
     let rebuilt = core2.single_history(&sid).unwrap();
     let key = |h: &[Msg]| {

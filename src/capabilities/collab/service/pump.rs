@@ -510,6 +510,7 @@ impl CollabSession {
                 sandbox,
                 builtin_tools: self.systools.book(),
                 reply_seq: self.reply_seq,
+                line: Default::default(),
                 // 本档位下不能执行工具的模块（缺运行包）：机制侧据此拒绝执行。
                 unavailable: crate::capabilities::workspace::api::unavailable(
                     &self.spec, &modules, &library,

@@ -183,7 +183,11 @@ pub(crate) fn rewinding_the_main_session_truncates_agent_sessions_by_turn() {
         "回档前 agent 会话该有更晚的回合：{before:?}"
     );
 
-    core.rewind(&sid, line_id + 1).unwrap();
+    core.rewind(
+        &sid,
+        crate::capabilities::conductor::api::RewindTarget::Delete(line_id + 1),
+    )
+    .unwrap();
 
     let (_, after) = core.history_open(&child).unwrap();
     let max_after = lines_of(&after)
@@ -371,7 +375,12 @@ pub(crate) fn prose_then_tool_envelope_keeps_prose_line_and_rebuilds_identically
         Arc::clone(&hist),
         Arc::clone(&io),
     );
-    core2.rewind(&sid, 4).unwrap(); // 保留全部 4 行
+    core2
+        .rewind(
+            &sid,
+            crate::capabilities::conductor::api::RewindTarget::Delete(4),
+        )
+        .unwrap(); // 保留全部 4 行
     let rebuilt = core2.single_history(&sid).expect("重建后应在内存里");
     let key = |h: &[Msg]| {
         h.iter()
@@ -507,7 +516,12 @@ pub(crate) fn native_multi_call_rebuilds_identically_to_live() {
     );
     core2.registry_mut().probe_model_tools("m").expect("探测");
     let rows = transcript_rows(&events).len() as u64;
-    core2.rewind(&sid, rows).unwrap();
+    core2
+        .rewind(
+            &sid,
+            crate::capabilities::conductor::api::RewindTarget::Delete(rows),
+        )
+        .unwrap();
     let rebuilt = core2.single_history(&sid).unwrap();
     let key = |h: &[Msg]| {
         h.iter()

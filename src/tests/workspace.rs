@@ -899,6 +899,7 @@ fn commit_req(
         deletes: deletes.iter().map(|s| s.to_string()).collect(),
         message: message.to_string(),
         time,
+        line: 0,
     }
 }
 
@@ -923,7 +924,7 @@ pub(crate) fn work_commit_reports_conflicts_and_restore_returns_a_commit_point()
     let (ws, _dirs, store) = work_ws();
     ws.prepare("w", &["a".to_string(), "b".to_string()])
         .unwrap();
-    ws.work_commit_user("w", "note.md", b"v1", 1).unwrap();
+    ws.work_commit_user("w", "note.md", b"v1", 1, 0).unwrap();
 
     // a、b 都对准同一版（v1）。
     assert_eq!(
@@ -973,15 +974,60 @@ pub(crate) fn work_commit_reports_conflicts_and_restore_returns_a_commit_point()
     );
 }
 
+/// 按行锚精确物化共享区：agent 第 1 行提交 v1、第 3 行提交 v3；
+/// 回档到第 1 行 → 共享区回到 v1；再丢弃非祖先提交 → 第 3 行的提交记录真的没了。
+#[test]
+pub(crate) fn work_rewind_to_materializes_by_line_anchor_and_discards_later_commits() {
+    use crate::capabilities::workspace::ports::WorkStore;
+    let (ws, _dirs, store) = work_ws();
+    ws.prepare("w", &["a".to_string()]).unwrap();
+    let sb = sandbox_of(&ws, "w", "a");
+    let shared = shared_of(&ws, "w");
+    let root = ws.roots("w", &[]).unwrap().store;
+
+    // 第 1 行：a 提交 v1。
+    store.write_under(&sb, "note.md", b"v1").unwrap();
+    let mut r1 = commit_req(&["note.md"], &[], "v1", 1);
+    r1.line = 1;
+    let id1 = ws.work_commit("w", "a", "w--a", &r1).unwrap().id;
+
+    // 第 3 行：a 再提交 v3。
+    store.write_under(&sb, "note.md", b"v3").unwrap();
+    let mut r3 = commit_req(&["note.md"], &[], "v3", 3);
+    r3.line = 3;
+    let id3 = ws.work_commit("w", "a", "w--a", &r3).unwrap().id;
+    assert_eq!((id1, id3), (1, 2));
+
+    // 回档到第 1 行（保留行 = 1）：只保留锚 ≤ 1 的提交 → v1。
+    let mut keep = std::collections::BTreeMap::new();
+    keep.insert("a".to_string(), 1u64);
+    assert_eq!(ws.work_head("w").unwrap(), Some(id3));
+    assert_eq!(ws.work_rewind_to("w", &keep).unwrap(), Some(id1));
+    assert_eq!(
+        store.read_under(&shared, "note.md").unwrap().as_deref(),
+        Some(&b"v1"[..])
+    );
+    assert_eq!(ws.work_head("w").unwrap(), Some(id1));
+
+    // 丢弃第 1 行之后的提交：第 3 行的提交记录真的没了。
+    ws.work_discard_after("w", Some(id1)).unwrap();
+    assert_eq!(store.list_commits(&root).unwrap(), vec![id1]);
+
+    // 恢复到空共享区。
+    ws.work_restore_point("w", None).unwrap();
+    assert!(store.read_under(&shared, "note.md").unwrap().is_none());
+    assert_eq!(ws.work_head("w").unwrap(), None);
+}
+
 /// 用户投喂 = 权威提交；agent 拉取后按基线提交，新路径是新增。
 #[test]
 pub(crate) fn work_user_commit_is_authoritative_and_pull_tracks_the_baseline() {
     use crate::capabilities::workspace::ports::WorkStore;
     let (ws, _dirs, store) = work_ws();
     ws.prepare("w", &["a".to_string()]).unwrap();
-    ws.work_commit_user("w", "note.md", b"v1", 1).unwrap();
+    ws.work_commit_user("w", "note.md", b"v1", 1, 0).unwrap();
     // 权威覆盖：同名再投喂直接成为新的 head，不报冲突。
-    let id = ws.work_commit_user("w", "note.md", b"v2", 2).unwrap();
+    let id = ws.work_commit_user("w", "note.md", b"v2", 2, 0).unwrap();
     assert_eq!(id, 2);
 
     let r = ws.work_pull("w", "a", &["note.md".to_string()]).unwrap();
@@ -1013,7 +1059,7 @@ pub(crate) fn work_pull_never_clobbers_and_empty_commits_are_refused() {
     let (ws, _dirs, store) = work_ws();
     ws.prepare("w", &["a".to_string(), "b".to_string()])
         .unwrap();
-    ws.work_commit_user("w", "note.md", b"v1", 1).unwrap();
+    ws.work_commit_user("w", "note.md", b"v1", 1, 0).unwrap();
     let sb_a = sandbox_of(&ws, "w", "a");
     let sb_b = sandbox_of(&ws, "w", "b");
     const DRAFT: &[u8] = "本地草稿".as_bytes();
@@ -1032,7 +1078,8 @@ pub(crate) fn work_pull_never_clobbers_and_empty_commits_are_refused() {
     // 有基线、本地改了、上游也改了 → 冲突，不覆盖本地。
     ws.work_pull("w", "b", &["note.md".to_string()]).unwrap();
     store.write_under(&sb_b, "note.md", B_VERSION).unwrap(); // 本地改
-    ws.work_commit_user("w", "note.md", USER_EDIT, 2).unwrap(); // 上游也改
+    ws.work_commit_user("w", "note.md", USER_EDIT, 2, 0)
+        .unwrap(); // 上游也改
     let r = ws.work_pull("w", "b", &["note.md".to_string()]).unwrap();
     assert_eq!(r.conflicts, vec!["note.md"]);
     assert_eq!(
@@ -1060,7 +1107,7 @@ pub(crate) fn work_status_separates_local_and_upstream_changes() {
     use crate::capabilities::workspace::ports::WorkStore;
     let (ws, _dirs, store) = work_ws();
     ws.prepare("w", &["a".to_string()]).unwrap();
-    ws.work_commit_user("w", "note.md", b"v1", 1).unwrap();
+    ws.work_commit_user("w", "note.md", b"v1", 1, 0).unwrap();
     ws.work_pull("w", "a", &["note.md".to_string()]).unwrap();
     let sb = sandbox_of(&ws, "w", "a");
 
@@ -1072,7 +1119,7 @@ pub(crate) fn work_status_separates_local_and_upstream_changes() {
     let st = ws.work_status("w", "a", &[]).unwrap();
     assert_eq!(st.entries[0].state, StatusState::LocalModified);
 
-    ws.work_commit_user("w", "note.md", b"v3", 2).unwrap();
+    ws.work_commit_user("w", "note.md", b"v3", 2, 0).unwrap();
     let st = ws.work_status("w", "a", &[]).unwrap();
     assert_eq!(st.entries[0].state, StatusState::Conflict);
     assert!(st.head.is_some());
@@ -1084,7 +1131,7 @@ pub(crate) fn work_status_separates_local_and_upstream_changes() {
 pub(crate) fn work_delete_is_explicit_in_the_commit_request() {
     let (ws, _dirs, _store) = work_ws();
     ws.prepare("w", &["a".to_string()]).unwrap();
-    ws.work_commit_user("w", "note.md", b"v1", 1).unwrap();
+    ws.work_commit_user("w", "note.md", b"v1", 1, 0).unwrap();
     ws.work_pull("w", "a", &["note.md".to_string()]).unwrap();
 
     let rep = ws

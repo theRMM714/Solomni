@@ -53,8 +53,12 @@ pub(crate) fn run_branch(
         )
     } else if let Some(h) = handler_for(ctx, name) {
         // 核心自有工具：与内置、模块走**同一条派发路径**，不是循环里的特例。
-        let session = ctx.sandbox.work_name.clone();
-        (String::new(), h.run(&session, name, args_json))
+        let tctx = crate::kernel::ports::ToolCtx {
+            work: &ctx.sandbox.work_name,
+            agent: &ctx.sandbox.agent,
+            line: ctx.line.load(std::sync::atomic::Ordering::Relaxed),
+        };
+        (String::new(), h.run(&tctx, name, args_json))
     } else {
         let inv = ToolInvoke {
             malformed: None,

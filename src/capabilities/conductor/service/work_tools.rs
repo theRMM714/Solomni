@@ -42,7 +42,13 @@ impl WorkHandler {
         }
     }
 
-    fn commit(&self, session: &str, args: &serde_json::Value) -> ToolOutcome {
+    fn commit(
+        &self,
+        session: &str,
+        agent: &str,
+        line: u64,
+        args: &serde_json::Value,
+    ) -> ToolOutcome {
         let paths = match dw::str_list(args, "paths") {
             Ok(p) => p,
             Err(e) => return outcome(false, e),
@@ -57,11 +63,9 @@ impl WorkHandler {
             deletes,
             message,
             time: now_ts(),
+            line,
         };
-        match self
-            .workspace
-            .work_commit(&self.work, &self.agent, session, &req)
-        {
+        match self.workspace.work_commit(&self.work, agent, session, &req) {
             Ok(r) => outcome(true, dw::render_commit(&r)),
             Err(e) => outcome(false, e),
         }
@@ -88,14 +92,14 @@ impl ToolHandler for WorkHandler {
         dw::is_work_tool(name)
     }
 
-    fn run(&self, session: &str, name: &str, args_json: &str) -> ToolOutcome {
+    fn run(&self, ctx: &crate::kernel::ports::ToolCtx, name: &str, args_json: &str) -> ToolOutcome {
         let args: serde_json::Value = match serde_json::from_str(args_json) {
             Ok(v) => v,
             Err(e) => return outcome(false, format!("参数不是合法 JSON：{}", e)),
         };
         match name {
             dw::PULL => self.pull(&args),
-            dw::COMMIT => self.commit(session, &args),
+            dw::COMMIT => self.commit(ctx.work, ctx.agent, ctx.line, &args),
             dw::STATUS => self.status(&args),
             other => outcome(false, format!("未知的工作区工具：{}", other)),
         }

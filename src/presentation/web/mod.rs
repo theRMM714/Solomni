@@ -4,7 +4,7 @@
 //! 核心状态在核心自己的线程上：这里拿不到它、也拿不到任何核心锁，「停止」直接说给核心听。
 //! 安全底线：只绑 127.0.0.1；密钥永不进任何响应（能力面只给 id）。
 
-use crate::capabilities::conductor::api::{Acted, Action};
+use crate::capabilities::conductor::api::{Acted, Action, RewindTarget};
 use crate::capabilities::conductor::api::{
     CollabStep, SessionEdit, SessionEvent, WorkMode, WorkSpec,
 };
@@ -487,7 +487,13 @@ pub(crate) fn route(
                 // 压缩上下文：AI 自己压成摘要（此后此前内容不再发给模型，用户仍可查看）。
                 "compact" => Action::Compact,
                 "rewind" => {
-                    Action::Rewind(req.get("id").and_then(|v| v.as_u64()).unwrap_or(u64::MAX))
+                    let id = req.get("id").and_then(|v| v.as_u64()).unwrap_or(u64::MAX);
+                    // mode 缺省 = 留档（新默认：只标记、不删）；delete / restore 显式给出。
+                    Action::Rewind(match req.get("mode").and_then(|v| v.as_str()) {
+                        Some("delete") => RewindTarget::Delete(id),
+                        Some("restore") => RewindTarget::Restore(id),
+                        _ => RewindTarget::Archive(id),
+                    })
                 }
                 "update-task" => Action::UpdateTask(&text),
                 _ => return complaint(400, format!("未知动作：{}", action)),

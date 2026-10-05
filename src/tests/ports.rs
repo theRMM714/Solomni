@@ -326,6 +326,7 @@ fn work_store_double_round_trips_files_commits_index_and_objects() {
             hash: "h1".to_string(),
         }],
         tree,
+        anchor: None,
     };
     s.write_commit(&store, &c).unwrap();
     s.set_head(&store, 1).unwrap();

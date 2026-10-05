@@ -91,10 +91,11 @@ presentation/{cli,web} ──▶ capabilities（含协调业务 conductor）─�
 **布局**（机制口径）只在 [docs/session/session-model.md](docs/session/session-model.md) 的「形态」画一次：
 `session/<工作名>/` 下是 `meta.yaml`、`transcript.jsonl`、共享区主副本 `work/`、版本库 `.work/`、各 agent 沙箱与 `children/`。
 共享区是**版本化工作区**：主副本对 agent 只读，agent 的沙箱就是它的工作副本，`work_pull` / `work_commit` 做同步；
-提交点是内容寻址的整棵树，任一点都能物化回主副本（`work_restore`）。
+提交点是内容寻址的整棵树，每条记录带 `(agent, line)` 行锚；回档按锚把共享区**精确物化**到那一刻
+（留档 / 删除 / 恢复三种模式见 [docs/session/session-model.md](docs/session/session-model.md) 的五）。
 **目录保留名**（`work` / `children`）的名单在 `systools/names.yaml`：布局一改就改表，代码里不硬编码。
 
-- **转录即状态**：流水只追加；回档**只追加一条 `{"type":"rewind"}` 记录**，不物理删行；会话内容 = 回放到最后一个截断点。内存与落盘不一致时**以流水为准**。
+- **转录即状态**：留档只在流水追加一条 `{"type":"rewind",mode:"archive"}` 记录并折叠活动窗口（字节全留、可恢复）；删除与恢复会**整体重写** `transcript.jsonl`（真的删）。会话内容 = 按标记回放出的活动窗口。内存与落盘不一致时**以流水为准**。
 - **转录行的稳定 id**：一轮模型调用 = 一条行；工具调用自成一条行；id 在会话内单调、回放可复现（回档按 id 定位）。
   行上带 `reply`（= 该回复第一行的 id）：重建按它把同一次回复的工具行归成一组，回档按它**原子**截断。
 - **流式增量是短暂事件**：`delta` / `tool_call` 不落盘；历史只记定稿后的行。**行上的判定走结构化字段**（如降级的 `degraded: true`），呈现层不匹配行文本。

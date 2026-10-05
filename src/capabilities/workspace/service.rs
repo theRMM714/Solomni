@@ -12,8 +12,8 @@ use crate::capabilities::workspace::api::{
 };
 use crate::capabilities::workspace::domain::hash::content_hash;
 use crate::capabilities::workspace::domain::workstore::{
-    clean_rel, expand_paths, plan_commit, pull_verdict, status_of, Commit, ConflictAt, Index,
-    PullVerdict, Tree,
+    clean_rel, expand_paths, plan_commit, pull_verdict, status_of, Commit, CommitAnchor,
+    ConflictAt, Index, PullVerdict, Tree,
 };
 use crate::capabilities::workspace::ports::{ModuleSource, PackageSource, WorkStore, Workdirs};
 use std::collections::{BTreeMap, BTreeSet};
@@ -72,6 +72,37 @@ impl WorkspaceService {
 
     fn lock(&self) -> std::sync::MutexGuard<'_, ()> {
         self.version_lock.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// 把主副本物化到某个提交点（None = 清空），head 同步。
+    /// 机制层只做"按目标树写回、删掉树外的文件"；策略（物化到哪一点）由调用方给。
+    fn materialize(
+        store_port: &dyn WorkStore,
+        shared: &std::path::Path,
+        store: &std::path::Path,
+        target: Option<u64>,
+    ) -> Result<(), String> {
+        let tree = match target {
+            Some(id) => store_port
+                .read_commit(store, id)?
+                .map(|c| c.tree)
+                .unwrap_or_default(),
+            None => Tree::new(),
+        };
+        for rel in store_port.list(shared)? {
+            if !tree.contains_key(&rel) {
+                store_port.remove_under(shared, &rel)?;
+            }
+        }
+        for (rel, hash) in &tree {
+            let bytes = store_port.read_object(store, hash)?;
+            store_port.write_under(shared, rel, &bytes)?;
+        }
+        match target {
+            Some(id) => store_port.set_head(store, id)?,
+            None => store_port.clear_head(store)?,
+        }
+        Ok(())
     }
 
     /// 读 head 的整棵树；空仓库 = 空树。
@@ -258,6 +289,10 @@ impl Workspace for WorkspaceService {
             message: msg.to_string(),
             changes: changes.clone(),
             tree: new_tree,
+            anchor: Some(CommitAnchor {
+                agent: agent.to_string(),
+                line: req.line,
+            }),
         };
         self.store.write_commit(&store, &commit)?;
         self.store.set_head(&store, id)?;
@@ -282,6 +317,7 @@ impl Workspace for WorkspaceService {
         path: &str,
         bytes: &[u8],
         time: i64,
+        line: u64,
     ) -> Result<u64, String> {
         let rel = clean_rel(path)?;
         if rel.contains('/') {
@@ -321,6 +357,10 @@ impl Workspace for WorkspaceService {
                 hash,
             }],
             tree: new_tree,
+            anchor: Some(CommitAnchor {
+                agent: String::new(),
+                line,
+            }),
         };
         self.store.write_commit(&store, &commit)?;
         self.store.set_head(&store, id)?;
@@ -386,21 +426,69 @@ impl Workspace for WorkspaceService {
     fn work_restore(&self, work: &str, commit: u64) -> Result<(), String> {
         let _g = self.lock();
         let (shared, store) = self.work_roots(work)?;
-        let target = self
-            .store
-            .read_commit(&store, commit)?
-            .ok_or_else(|| format!("没有提交点 {}", commit))?;
-        // 先删主副本里不在目标树里的文件，再逐个写回。
-        for rel in self.store.list(&shared)? {
-            if !target.tree.contains_key(&rel) {
-                self.store.remove_under(&shared, &rel)?;
+        if self.store.read_commit(&store, commit)?.is_none() {
+            return Err(format!("没有提交点 {}", commit));
+        }
+        WorkspaceService::materialize(self.store.as_ref(), &shared, &store, Some(commit))
+    }
+
+    fn work_head(&self, work: &str) -> Result<Option<u64>, String> {
+        let (_, store) = self.work_roots(work)?;
+        self.store.head(&store)
+    }
+
+    fn work_rewind_to(
+        &self,
+        work: &str,
+        keep_by_agent: &BTreeMap<String, u64>,
+    ) -> Result<Option<u64>, String> {
+        let _g = self.lock();
+        let (shared, store) = self.work_roots(work)?;
+        // 提交按 id 升序：取"各会话都还没越过自己保留行"的最后一个提交点。
+        let mut target = None;
+        for id in self.store.list_commits(&store)? {
+            let Some(c) = self.store.read_commit(&store, id)? else {
+                continue;
+            };
+            let within = match &c.anchor {
+                // 旧记录没有锚：保守地算它在回档点之前（不让老数据把共享区清空）。
+                None => true,
+                Some(a) => keep_by_agent
+                    .get(&a.agent)
+                    .map(|k| a.line <= *k)
+                    .unwrap_or(false),
+            };
+            if within {
+                target = Some(id);
             }
         }
-        for (rel, hash) in &target.tree {
-            let bytes = self.store.read_object(&store, hash)?;
-            self.store.write_under(&shared, rel, &bytes)?;
+        WorkspaceService::materialize(self.store.as_ref(), &shared, &store, target)?;
+        Ok(target)
+    }
+
+    fn work_restore_point(&self, work: &str, commit: Option<u64>) -> Result<(), String> {
+        let _g = self.lock();
+        let (shared, store) = self.work_roots(work)?;
+        WorkspaceService::materialize(self.store.as_ref(), &shared, &store, commit)
+    }
+
+    fn work_discard_after(&self, work: &str, keep: Option<u64>) -> Result<(), String> {
+        let _g = self.lock();
+        let (shared, store) = self.work_roots(work)?;
+        // 保留 keep 的祖先链；其余提交记录真的删掉（删除 / 恢复的"丢弃历史"）。
+        let mut keep_set: BTreeSet<u64> = BTreeSet::new();
+        let mut cur = keep;
+        while let Some(id) = cur {
+            if !keep_set.insert(id) {
+                break; // 防环
+            }
+            cur = self.store.read_commit(&store, id)?.and_then(|c| c.parent);
         }
-        self.store.set_head(&store, commit)?;
-        Ok(())
+        for id in self.store.list_commits(&store)? {
+            if !keep_set.contains(&id) {
+                self.store.remove_commit(&store, id)?;
+            }
+        }
+        WorkspaceService::materialize(self.store.as_ref(), &shared, &store, keep)
     }
 }

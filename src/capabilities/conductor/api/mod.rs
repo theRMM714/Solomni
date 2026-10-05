@@ -191,7 +191,7 @@ pub trait SessionOps: Send + Sync {
     /// 核心按模块名给出的名单草案（协作代拟名单）。
     fn slate(&self, sid: &str) -> Result<Vec<AgentMeta>, String>;
     /// 回档：返回重放后的完整事件流（已是线格式，供前端整体重建）。
-    fn rewind(&self, sid: &str, keep_id: u64) -> Result<Vec<serde_json::Value>, String>;
+    fn rewind(&self, sid: &str, target: RewindTarget) -> Result<Vec<serde_json::Value>, String>;
     /// 压缩这个会话的上下文（AI 自己压；压不动如实说）。
     fn compact(&self, sid: &str) -> Result<Advance, String>;
     /// 改需求：同样返回完整重放。
@@ -223,7 +223,7 @@ pub trait SessionOps: Send + Sync {
             Action::Continue => self.continue_flow(sid, out).map(Acted::Advanced),
             Action::Step(step, text) => self.collab_step(sid, step, text).map(Acted::Advanced),
             Action::Withdraw(agent) => self.withdraw_agree(sid, agent).map(Acted::Advanced),
-            Action::Rewind(keep_id) => self.rewind(sid, keep_id).map(Acted::Replayed),
+            Action::Rewind(target) => self.rewind(sid, target).map(Acted::Replayed),
             Action::UpdateTask(text) => self.update_task(sid, text).map(Acted::Replayed),
             Action::Compact => self.compact(sid).map(Acted::Advanced),
         }
@@ -342,12 +342,23 @@ pub enum Action<'a> {
     Step(CollabStep, &'a str),
     /// 撤回同意。
     Withdraw(&'a str),
-    /// 回档到某行之前。
-    Rewind(u64),
+    /// 回档：留档 / 删除 / 恢复。
+    Rewind(RewindTarget),
     /// 改需求。
     UpdateTask(&'a str),
     /// 压缩上下文（AI 自己压成摘要；此后此前内容不再发给模型，用户仍可查看）。
     Compact,
+}
+
+/// 回档目标：留档 / 删除按**行 id**，恢复按**留档标记 id**。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RewindTarget {
+    /// 留档到某一行之前：标记 + 折叠，可恢复。
+    Archive(u64),
+    /// 删除某一行及其后：真的截断，不可恢复。
+    Delete(u64),
+    /// 恢复到某个留档标记之前：删掉该标记及其后的全部内容。
+    Restore(u64),
 }
 
 /// 动作结果：生成类只回**事件台头部序号**（事实在事件台上，订阅者自己按 since 取）；

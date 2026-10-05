@@ -137,6 +137,28 @@ impl HistoryStore for FsHistory {
         Ok(())
     }
 
+    fn replace(&self, name: &str, events: &[serde_json::Value]) -> Result<(), String> {
+        let d = self
+            .find(name)
+            .ok_or_else(|| format!("无此会话：{}", name))?;
+        let path = d.join("transcript.jsonl");
+        let tmp = d.join("transcript.jsonl.tmp");
+        let mut text = String::new();
+        for ev in events {
+            text.push_str(&serde_json::to_string(ev).map_err(|e| e.to_string())?);
+            text.push('\n');
+        }
+        if let Err(e) = std::fs::write(&tmp, text) {
+            let _ = std::fs::remove_file(&tmp);
+            return Err(format!("重写流水失败：{}", e));
+        }
+        if let Err(e) = std::fs::rename(&tmp, &path) {
+            let _ = std::fs::remove_file(&tmp);
+            return Err(format!("替换流水失败：{}", e));
+        }
+        Ok(())
+    }
+
     fn list(&self) -> Result<Vec<HistoryView>, String> {
         // 子会话在 <会话目录>/children/ 下，并可再往下嵌套：整棵 children/ 树都收进来。
         fn walk(dir: &std::path::Path, out: &mut Vec<HistoryView>) {

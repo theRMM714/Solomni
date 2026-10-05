@@ -61,6 +61,7 @@ pub trait Workspace: Send + Sync {
         path: &str,
         bytes: &[u8],
         time: i64,
+        line: u64,
     ) -> Result<u64, String>;
     /// **状态**：head、主副本在 head 上的路径清单、以及逐条基线状态；`paths` 省略 = 全部相关路径。
     fn work_status(
@@ -74,4 +75,16 @@ pub trait Workspace: Send + Sync {
     /// 生产调用点随回档重做接入——二进制 crate 里暂时没有生产调用点的接口方法会被 dead_code 误报。
     #[allow(dead_code)]
     fn work_restore(&self, work: &str, commit: u64) -> Result<(), String>;
+    /// 共享区当前提交点（留档记 after 用）。
+    fn work_head(&self, work: &str) -> Result<Option<u64>, String>;
+    /// 物化到"各会话都还没越过自己保留行"的最后一个提交点；返回选中的提交（None = 空共享区）。
+    fn work_rewind_to(
+        &self,
+        work: &str,
+        keep_by_agent: &std::collections::BTreeMap<String, u64>,
+    ) -> Result<Option<u64>, String>;
+    /// 物化到某个提交点（None = 清空），不改提交记录（恢复用）。
+    fn work_restore_point(&self, work: &str, commit: Option<u64>) -> Result<(), String>;
+    /// 丢弃不是 keep 祖先的提交记录并物化到 keep（删除 / 恢复的"丢弃历史"）。
+    fn work_discard_after(&self, work: &str, keep: Option<u64>) -> Result<(), String>;
 }

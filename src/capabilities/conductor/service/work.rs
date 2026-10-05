@@ -707,9 +707,15 @@ impl Conductor {
             return Ok(false);
         }
         // 用户投喂 = 一次**权威提交**（作者 user）：共享区只有提交这一条写路径。
+        // 锚到主会话当时的下一条行号，回档才能把这次投喂算进某个转录点。
         let work = self.work_root(sid).unwrap_or_else(|_| sid.to_string());
+        let line = match self.sessions.get(sid) {
+            Some(Session::Single(s)) => s.next_line,
+            Some(Session::Collab(c)) => c.next_line,
+            None => 0,
+        };
         self.workspace
-            .work_commit_user(&work, &name, bytes, now_ts())?;
+            .work_commit_user(&work, &name, bytes, now_ts(), line)?;
         Ok(true)
     }
 

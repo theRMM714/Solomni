@@ -54,12 +54,16 @@ pub trait WorkStore: Send + Sync {
     /// 当前 head 提交号；空仓库 = None。
     fn head(&self, store: &Path) -> Result<Option<u64>, String>;
     fn set_head(&self, store: &Path, id: u64) -> Result<(), String>;
+    /// 清空 head（恢复/删除到"空共享区"时用）。
+    fn clear_head(&self, store: &Path) -> Result<(), String>;
     /// 读一个提交记录；不存在 = None。
     fn read_commit(&self, store: &Path, id: u64) -> Result<Option<Commit>, String>;
     /// 写一个提交记录（调用方已分配 id；只增不改）。
     fn write_commit(&self, store: &Path, commit: &Commit) -> Result<(), String>;
     /// 列出全部提交号（升序）。
     fn list_commits(&self, store: &Path) -> Result<Vec<u64>, String>;
+    /// 删除一个提交记录（删除 / 恢复时丢弃不再可达的提交）。
+    fn remove_commit(&self, store: &Path, id: u64) -> Result<(), String>;
     /// 读某个 agent 的拉取基线；没有 = 空（不是错误）。
     fn read_index(&self, store: &Path, agent: &str) -> Result<Index, String>;
     fn write_index(&self, store: &Path, agent: &str, index: &Index) -> Result<(), String>;

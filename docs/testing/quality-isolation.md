@@ -61,7 +61,7 @@
 | `too_many_arguments` | `capabilities/session/service.rs` 的 `core_operation`、`capabilities/collab/service/round.rs` 的 `converse_with`、`capabilities/collab/service/discussion.rs` 的 `turn_with`、`capabilities/collab/service/synthesis.rs` 的 `Execution::review`、`capabilities/collab/service/driver.rs` 的 `discussion_turn`、`capabilities/collab/service/collab.rs` 的 `judge_clear` / `review_nodes` | 同一组参数（身份 / 工具面 / 通道 / 消息 / 出口 / 对照表 / 重填说明）：它们必须一路透传，收口成参数对象只是把参数挪个地方（`turn_with` 只服务内存测试通道） |
 | `dead_code` | `capabilities/conductor/api/mod.rs` 的 `SessionOps::exists` / `is_running` | **入站契约是发布给前端的接口面**：二进制 crate 里暂时没有生产调用点的接口方法会被 `dead_code` 误报（`is_running` 是运行态的**权威查询**——`SessionView.running` 只是事件台对账副本，最终一致） |
 | `dead_code` | `capabilities/session/domain/events.rs` 的 `enum SessionEvent` | 事件词汇里的字段**不全在生产路径被读**（例如 `DiscussionDone` 的 `round` / `over_cap` 供呈现层做裁决确认页）；词汇就是线格式，字段随契约保留，删掉会让呈现侧拿不到事实 |
-| `dead_code` | `capabilities/workspace/api.rs` 的 `Workspace::work_restore` | 共享区版本化工作区的**还原机制**：消费方是回档对齐与提交历史（缺口 `work.rewind-and-file-state`），生产调用点随回档重做接入；机制先落地、由测试钉住 |
+| `dead_code` | `capabilities/workspace/api.rs` 的 `Workspace::work_restore` | 共享区"指定提交点还原"的**机制入口**（由测试钉住）：生产回档走 `work_rewind_to` / `work_discard_after` / `work_restore_point` 按行锚算目标，`work_restore` 作为对照留在接口面 |
 | `large_enum_variant` | `capabilities/conductor/service/mod.rs` 的 `enum Session` | 两变体大小差得远，但装箱只换来一次间接寻址，却把"会话本体可直接移动"这个形状改掉 |
 
 新增 allow 必须同时更新本表；理由说不清的就不该 allow。

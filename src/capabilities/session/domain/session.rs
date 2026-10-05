@@ -239,7 +239,7 @@ impl AgentSession {
         refs: std::sync::Arc<crate::capabilities::prompt::api::RefsPrompts>,
         tool_texts: std::sync::Arc<crate::capabilities::prompt::api::ToolTexts>,
     ) -> AgentSession {
-        AgentSession {
+        let mut s = AgentSession {
             cur_turn: 0,
             compact_at: 0,
             compacted_upto: 0,
@@ -255,7 +255,9 @@ impl AgentSession {
             marks: Vec::new(),
             line_reply: Vec::new(),
             cur_reply: 0,
-        }
+        };
+        s.set_next_line(0);
+        s
     }
 
     /// 从落盘事件重建（继续/回档历史会话用）。
@@ -275,12 +277,13 @@ impl AgentSession {
         refs: std::sync::Arc<crate::capabilities::prompt::api::RefsPrompts>,
         tool_texts: std::sync::Arc<crate::capabilities::prompt::api::ToolTexts>,
     ) -> AgentSession {
-        AgentSession {
+        let next = marks.len() as u64;
+        let mut s = AgentSession {
             cur_turn: 0,
             compact_at: 0,
             compacted_upto,
             id: id.to_string(),
-            next_line: marks.len() as u64,
+            next_line: next,
             params,
             dialogue,
             chat,
@@ -291,7 +294,9 @@ impl AgentSession {
             marks,
             line_reply,
             cur_reply: 0,
-        }
+        };
+        s.set_next_line(next);
+        s
     }
 
     /// 这条会话**正在用**的工具调用形态（身份块里的调用约定按它现渲染）。
@@ -340,11 +345,6 @@ impl AgentSession {
         self.compact_at = chars;
     }
 
-    /// 压缩点（转录行 id）：0 = 没压过。回档到它之前，被销毁的对话在内存里补不回来。
-    pub fn compacted_upto(&self) -> u64 {
-        self.compacted_upto
-    }
-
     /// 当前下一条转录行的 id（压缩点用它：把此前的行全部移出发送视图）。
     pub fn next_line_id(&self) -> u64 {
         self.next_line
@@ -379,6 +379,14 @@ impl AgentSession {
         self.cur_turn = turn_id;
     }
 
+    /// 回档重建后把行号与**工具行锚**一起推到"全量下一个 id"（永不回退）。
+    pub fn set_next_line(&mut self, next: u64) {
+        self.next_line = next;
+        if let Some(t) = self.tools.as_ref() {
+            t.line.store(next, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+
     /// 生成一条转录行，并记下它完成时的历史长度（回档按 marks 逐行精确回退）与它属于哪次回复。
     pub(crate) fn line(
         &mut self,
@@ -405,6 +413,10 @@ impl AgentSession {
             turn: self.cur_turn,
         };
         self.next_line += 1;
+        if let Some(t) = self.tools.as_ref() {
+            t.line
+                .store(self.next_line, std::sync::atomic::Ordering::Relaxed);
+        }
         self.line_reply.push(reply);
         self.marks.push(self.dialogue.len());
         v
@@ -415,12 +427,11 @@ impl AgentSession {
         matches!(self.dialogue.last().map(|m| m.role.as_str()), Some("user"))
     }
 
-    /// 回档：只保留前 keep_id 行（= 删掉该行及其后）；对话与 marks 同步截断。
-    /// keep_id = 0 → 转录清空，对话也清空（marks 同清）；身份与环境不在这里，不受影响。
-    /// **按回复原子**：截在一次回复内部会留下"孤儿工具结果"（协议要求结果紧跟发起它的助手消息），
-    /// 所以 keep_id 落在某次回复中间时，这条回复整条丢掉（退到它的第一行之前）。
-    pub fn rewind(&mut self, keep_id: u64) {
-        // 回档把转录截掉了：那段"我完整读过哪些文件"的读取证据随之作废（保守，宁肯让模型重读）。
+    /// **删除模式**的精确回退（不重建，保住通道）：只保留前 keep_id 行（= 删该行及其后），
+    /// 对话与 marks 同步截断；keep_id = 0 → 转录清空、对话清空。**按回复原子**：截在一次回复
+    /// 内部时退到该回复第一行之前，绝不留下孤儿工具结果。
+    pub fn apply_rewind(&mut self, keep_id: u64) {
+        // 转录里那段"我完整读过哪些文件"的证据随删除作废（保守，宁肯让模型重读）。
         if let Some(t) = self.tools.as_mut() {
             t.observations.clear();
         }
