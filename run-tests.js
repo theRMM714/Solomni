@@ -324,6 +324,30 @@ function structuralAudit() {
       else if (slots.join("|") !== HEADER_SLOTS.join("|")) {
         problems.push(relF + " 文件头的槽不齐或顺序不对：拿到 [" + slots.join(", ") + "]，要 [" + HEADER_SLOTS.join(", ") + "]");
       }
+      // 附着在 pub 项上的文档块（ARCHITECTURE.md 十.1 的条目层）：首行必须 目的：，其余行必须是
+      // 已知槽或缩进续行——槽外不许有行，散文因此没有地方藏。只强制 pub 项。
+      const ITEM_SLOTS = ["目的", "参数", "返回", "错误", "约束"];
+      let d = 0;
+      while (d < lines.length) {
+        if (!lines[d].trim().startsWith("///")) { d++; continue; }
+        const startDoc = d;
+        while (d < lines.length && lines[d].trim().startsWith("///")) d++;
+        const doc = lines.slice(startDoc, d);
+        let m = d;
+        while (m < lines.length && (lines[m].trim().startsWith("#[") || lines[m].trim() === "")) m++;
+        if (!/^pub(\s|\()/.test((lines[m] ?? "").trim())) continue; // 只强制 pub 项
+        const seen = [];
+        doc.forEach((rawDoc, n) => {
+          const body = rawDoc.trim().slice(3);
+          const text = body.trim();
+          const hit = ITEM_SLOTS.find((s) => text.startsWith(s + "："));
+          if (hit) { seen.push(hit); return; }
+          if (/^ {2,}/.test(body) && seen.length) return; // 槽的续行
+          problems.push(relF + ":" + (startDoc + n + 1) + " pub 项文档的这一行既不是槽也不是续行：" + text.slice(0, 30));
+        });
+        if (seen[0] !== "目的") problems.push(relF + ":" + (startDoc + 1) + " pub 项文档的第一行必须是 目的：…");
+        if (seen.indexOf("目的") !== seen.lastIndexOf("目的")) problems.push(relF + ":" + (startDoc + 1) + " pub 项文档的 目的 槽重复");
+      }
       if (text.includes("/*")) problems.push(relF + " 用了块注释（/* */）：改用 /// 或行内 //");
       // 行内注释：紧贴、连续 ≤ 2 行、单行 ≤ 100 字，且不许出现历史/待办措辞
       let run = 0;

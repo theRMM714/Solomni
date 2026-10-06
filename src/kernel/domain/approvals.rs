@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 
-/// 用户对一次工具确认的回答。
+/// 目的：用户对一次工具确认的回答。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Approval {
     /// 放行这一次。
@@ -19,7 +19,8 @@ pub enum Approval {
     Full,
 }
 
-/// 当前在等的确认请求（快照用）：刷新后界面据此照样画得出那张"是 / 否 / 本轮不再问"的卡。
+/// 目的：当前在等的确认请求（快照用）。
+/// 约束：刷新后界面据此照样画得出那张"是 / 否 / 本轮不再问"的卡。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ApprovalRequest {
     pub module: Option<String>,
@@ -27,7 +28,7 @@ pub struct ApprovalRequest {
     pub args: String,
 }
 
-/// 一次工具放行的等待格：工作线程等 `answer`，核心线程写它并唤醒。
+/// 目的：一次工具放行的等待格——工作线程等 `answer`，核心线程写它并唤醒。
 #[derive(Default)]
 pub struct ApprovalSlot {
     answer: Mutex<Option<Approval>>,
@@ -46,7 +47,8 @@ impl ApprovalSlot {
                 .is_none()
     }
 
-    /// 工作线程：等用户的回答；被取消（停止）返回 `None`。
+    /// 目的：工作线程等用户的回答。
+    /// 返回：回答；被取消（停止）返回 `None`。
     pub fn wait(&self) -> Option<Approval> {
         let mut g = self.answer.lock().unwrap_or_else(|e| e.into_inner());
         loop {
@@ -61,7 +63,8 @@ impl ApprovalSlot {
     }
 }
 
-/// 工具放行表：按会话登记一格。核心登记，呈现层只能说"放行 / 拒绝哪个会话"。
+/// 目的：工具放行表——按会话登记一格。
+/// 约束：核心登记，呈现层只能说"放行 / 拒绝哪个会话"。
 #[derive(Default)]
 pub struct ApprovalRegistry {
     slots: Mutex<HashMap<SessionId, (Arc<ApprovalSlot>, ApprovalRequest)>>,
@@ -72,8 +75,9 @@ impl ApprovalRegistry {
         Arc::new(ApprovalRegistry::default())
     }
 
-    /// 登记一格并给出它（核心内部用）。同一会话同时只有一次生成：重登记即覆盖上一格。
-    /// `request` 是"在等什么"，供快照在刷新后重建卡片。
+    /// 目的：登记一格并给出它（核心内部用）。
+    /// 参数：`request` 是"在等什么"，供快照在刷新后重建卡片。
+    /// 约束：同一会话同时只有一次生成——重登记即覆盖上一格。
     pub(crate) fn register(&self, sid: &str, request: ApprovalRequest) -> Arc<ApprovalSlot> {
         let slot = Arc::new(ApprovalSlot::default());
         self.slots
@@ -83,7 +87,8 @@ impl ApprovalRegistry {
         slot
     }
 
-    /// 这个会话此刻在等的确认请求（没有 / 已回答 / 已取消 = `None`）。
+    /// 目的：这个会话此刻在等的确认请求。
+    /// 返回：在等的那一格；没有 / 已回答 / 已取消 = `None`。
     pub fn pending(&self, sid: &str) -> Option<ApprovalRequest> {
         let slots = self.slots.lock().unwrap_or_else(|e| e.into_inner());
         let (slot, req) = slots.get(sid)?;
@@ -97,7 +102,8 @@ impl ApprovalRegistry {
             .remove(sid);
     }
 
-    /// 用户回答（核心线程）：写入答案并唤醒工作线程；没有在等的格 = `false`。
+    /// 目的：用户回答（核心线程）——写入答案并唤醒工作线程。
+    /// 返回：有没有在等的格（没有 = `false`）。
     pub fn resolve(&self, sid: &str, answer: Approval) -> bool {
         let slot = self
             .slots
@@ -116,7 +122,8 @@ impl ApprovalRegistry {
         }
     }
 
-    /// 取消一个会话在等的确认（停止时用）：工作线程的 `wait` 返回 `None`。
+    /// 目的：取消一个会话在等的确认（停止时用）。
+    /// 约束：工作线程的 `wait` 因此返回 `None`。
     pub fn cancel(&self, sid: &str) {
         let slot = self
             .slots
@@ -131,7 +138,8 @@ impl ApprovalRegistry {
     }
 }
 
-/// 一次生成要用的放行上下文：注册表 + 本会话 id（由核心线程装配进 `Live`）。
+/// 目的：一次生成要用的放行上下文——注册表 + 本会话 id。
+/// 约束：由核心线程装配进 `Live`。
 #[derive(Clone)]
 pub struct ApprovalCtx {
     pub registry: Arc<ApprovalRegistry>,

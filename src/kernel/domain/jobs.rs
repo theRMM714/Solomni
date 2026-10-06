@@ -8,7 +8,8 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-/// 生成中作业的取消表。核心登记，呈现层只能说「停哪个会话」。
+/// 目的：生成中作业的取消表。
+/// 约束：核心登记，呈现层只能说「停哪个会话」。
 #[derive(Default)]
 pub struct JobRegistry {
     running: Mutex<HashMap<SessionId, Arc<AtomicBool>>>,
@@ -19,7 +20,7 @@ impl JobRegistry {
         Arc::new(JobRegistry::default())
     }
 
-    /// 登记一个生成中作业并给出它的取消标志（核心内部用）。
+    /// 目的：登记一个生成中作业并给出它的取消标志（核心内部用）。
     pub(crate) fn register(&self, sid: &str) -> Arc<AtomicBool> {
         let flag = Arc::new(AtomicBool::new(false));
         self.running
@@ -36,7 +37,8 @@ impl JobRegistry {
             .remove(sid);
     }
 
-    /// 请求停止该会话正在跑的生成；返回是否确实有一个在跑。
+    /// 目的：请求停止该会话正在跑的生成。
+    /// 返回：是否确实有一个在跑。
     pub fn stop(&self, sid: &str) -> bool {
         match self
             .running
@@ -53,7 +55,8 @@ impl JobRegistry {
         }
     }
 
-    /// 该会话是否正在生成（配置界面据此拒绝改到一半的语义）。
+    /// 目的：该会话是否正在生成。
+    /// 约束：配置界面据此拒绝改到一半的语义。
     pub fn is_running(&self, sid: &str) -> bool {
         self.running
             .lock()

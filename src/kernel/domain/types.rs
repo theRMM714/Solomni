@@ -5,9 +5,8 @@
 
 use serde::{Deserialize, Serialize};
 
-/// 执行档位：本机 = 直接在宿主上跑；虚拟机 = 整台 guest（不信任 AI 时的可选档）。
-/// **为什么在 kernel**：它被登记处（新会话的默认档位）与执行计划共享，且不认识任何业务概念；
-/// 留在 `exec` 里会让登记处反过来依赖执行能力（`registry ⇄ workspace` 环）。
+/// 目的：执行档位——本机 = 直接在宿主上跑；虚拟机 = 整台 guest（不信任 AI 时的可选档）。
+/// 约束：事实类型只属于 kernel（R6）——它被登记处与执行计划共享，且不认识任何业务概念。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Tier {
@@ -25,15 +24,15 @@ impl Tier {
     }
 }
 
-/// 单次模型调用的默认总预算（秒）。见 `AppSettings::llm_timeout_secs`。
-/// 登记处（设置项）与 `llm` 的出站调用参数共享它，所以放内核。
+/// 目的：单次模型调用的默认总预算（秒）。
+/// 约束：登记处（设置项）与 `llm` 的出站调用参数共享它；设置项见 `AppSettings::llm_timeout_secs`。
 pub const DEFAULT_LLM_TIMEOUT_SECS: u64 = 300;
 
-/// 前端唯一的会话标识 = 工作名（用户的命名，也是落盘目录名）。
+/// 目的：前端唯一的会话标识 = 工作名（用户的命名，也是落盘目录名）。
 pub type SessionId = String;
 
-/// 一次工具调用的事实结果：`ok` = 成功；`output` 已截断（截断规则由各执行者定）。
-/// **为什么在 kernel**：内置工具、模块工具与核心自有工具共用这同一个形状，谁都不该复制第二份（R6）。
+/// 目的：一次工具调用的事实结果——`ok` = 成功；`output` 已截断（截断规则由各执行者定）。
+/// 约束：内置工具、模块工具与核心自有工具共用这同一个形状，谁都不该复制第二份（R6）。
 #[derive(Debug, Clone, PartialEq)]
 pub struct ToolOutcome {
     pub ok: bool,
