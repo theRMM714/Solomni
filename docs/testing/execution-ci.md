@@ -64,6 +64,12 @@ node run-tests.js --fence-live
   被判成"本机留下了没人管的痕迹"（见 `tests/cross-platform/gaps.yaml` 的 harness.fence-clean-under-restricted-token）。
 
 判据：`whoami /groups` 里出现 `Mandatory Label\Low Mandatory Level` 就是这种会话。
+**但要查对进程**：有的受限环境里 shell 自己显示 Medium，而**工作区里的二进制**带 Low 完整性标签
+（`icacls <exe>` 打出 `Mandatory Label\Low Mandatory Level:(I)(NW)`，且标签改不动）——于是 cargo 拉起的
+rustc / 链接器 / 测试二进制全都以 Low 令牌运行，症状与受限会话一模一样：链接器报
+`Cannot create temporary file in …\Temp\: Permission denied`、产品自检报 `建自检目录失败：拒绝访问`、
+测试二进制 `CreateAppContainerProfile` 报 `0x80070005`。这种会话要拿到结论，只有把**构建好的二进制复制到
+工作区外**再跑，或者换一台不受限的机器。
 
 **这种会话里要拿到可信结论，只有两条路，按优先级：**
 
@@ -118,9 +124,11 @@ git show origin/ci-report:runs/windows/logs/<某一步>.log  # 失败证据原�
 
 > `envSkips` 只收集 **`[探针]` 前缀**的行：诊断输出一律用 `[诊断]`，别用 `[探针]`，否则会被算成"跳过"（曾把 Windows 的 1 条真跳过记成 5 条）。
 >
-> 已知环境限制：GitHub 托管的 `windows-latest` 上 AppContainer 会被静默降级（容器内 `whoami /groups` 无包 SID 组），
-> 容器级往返探针因此 `env-skip`——这是**环境结论**，不是产品结论；要验它，在普通（或高完整性）会话的 Windows 机器上跑
-> `node run-tests.js --fence-live`（同 `tests/cross-platform/gaps.yaml` 的 `harness.restricted-token-causes-false-failures`）。
+> 曾经记过一条环境结论——「GitHub 托管的 `windows-latest` 上 AppContainer 会被静默降级（容器内 `whoami /groups`
+> 无包 SID 组）」：普通会话的真机查下来**不成立**。包 SID 在令牌的 `TokenAppContainerSid` 字段里、不在组列表里，
+> 容器其实生效（真机令牌转储：`TokenIsAppContainer=1`、`AppContainerSid` = 该 profile 的 SID、`capabilities=0`）；
+> 那条 `env-skip` 是判据的**假阴性**，现已改成行为对照。
+> **教训**：判「环境降级」要看**被测试进程**的令牌与行为，别拿一个二手字符串特征当判据。
 
 **等多久再拉（推荐节奏）**：push 之后**先等 5 分钟**再拉 `ci-report`；若某个平台的 `meta.json` 的 `sha` 还对不上
 （这次 run 没结束），**每次再等 2 分钟**重拉一次，直到三平台的 `sha` 都对得上，或确认 run 已失败/取消。

@@ -26,8 +26,9 @@ with `work_commit`. Commits use a file-level three-way comparison, so a conflict
 each path instead of silently overwriting; any commit point can be restored. The only two roads across agents are that
 shared area and the transcript that enters the context — artifacts land in their owner's cell, so rework can find the
 person; capabilities are isolated too, a module's directory belongs only to the agent that holds it.
-(Finer-grained "who may write which part" is still a convention — the gap is
-`fence.per-agent-write-roots` in [tests/gaps.yaml](tests/gaps.yaml).)
+(Finer-grained "who may write which part" is enforced by session permissions: per-agent read and commit
+allow-/block-lists, module directories read-only by default — see
+[docs/permission/README.md](docs/permission/README.md).)
 
 **③ When something goes wrong, you need to know what it saw and why it decided that.**
 The transcript is **append-only** (delete/restore are explicit actions that really rewrite the log). On any line,

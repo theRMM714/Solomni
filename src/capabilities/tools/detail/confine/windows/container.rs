@@ -52,6 +52,10 @@ pub(crate) fn is_our_profile(name: &str) -> bool {
 /// 环境不允许容器围栏时的标记（探针据此区分"环境不允许"与"代码有问题"，不互相顶包）。
 pub const ENV_BLOCKED_MARK: &str = "容器围栏不可用（本环境不允许";
 
+/// 本环境**建不出**容器 profile 的标记（与 ENV_BLOCKED_MARK 同一用途：环境结论要能被机器认出来，
+/// 不能靠猜字符串）。改不了目录 ACL 的会话、受限令牌的会话都走这一态。
+pub const PROFILE_ENV_BLOCKED_MARK: &str = "拒绝访问：本环境不允许建 AppContainer profile";
+
 /// 建（或复用）容器 profile：**必须有 profile** —— 没有 profile 的派生 SID 拿不到
 /// ALL APPLICATION PACKAGES 组，连系统目录里的 cmd.exe 都打不开（实测会报"找不到文件"）。
 /// 已存在 = 成功（同一个名字派生出的 SID 与 profile 一致，所以外层用 Derive 预授权 ACL 也有效）。
@@ -86,8 +90,8 @@ pub(crate) fn ensure_profile(name: &str) -> Result<(), String> {
     const E_ACCESSDENIED: i32 = 0x8007_0005u32 as i32;
     if hr == E_ACCESSDENIED {
         return Err(format!(
-            "0x{:08x}（拒绝访问：本环境不允许建 AppContainer profile）",
-            hr as u32
+            "0x{:08x}（{}）",
+            hr as u32, PROFILE_ENV_BLOCKED_MARK
         ));
     }
     Err(format!("0x{:08x}", hr as u32))

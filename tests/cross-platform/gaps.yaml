@@ -14,7 +14,9 @@
     被判成「本机留下了没人管的痕迹」。
     实测（同机同代码）：换成普通 / 提权（`High`）会话后 `TEST-REPORT-OK`、L4 `E2E-OK`、
     doctor `fs=true net=true tree=true`、真工具链全过——上面那些结论**全是误判**，与本产品无关。
-    现状由文档明规（门禁要在普通或提权会话里跑，判据是 `whoami /groups` 出现 `Low Mandatory Level`）；
+    现状由文档明规（门禁要在普通或提权会话里跑）；判据要看**跑测试的那个进程**的令牌，不是 shell 的——
+    受限的 agent 外壳里 shell 可能显示 Medium，而工作区里的二进制带 Low 完整性标签，cargo 与 `solomni.exe`
+    仍然全以 Low 运行（见 docs/testing/execution-ci.md 的「真机入口」一节）；
     这一条只记「要不要让编排自己分辨」。
   how: |
     让编排在受限令牌下如实标注环境不满足、而不是判失败：例如围栏回收改用 `stdio: inherit`，

@@ -410,9 +410,16 @@ fn revoke_leaves_no_container_ace_on_leaf_parents() {
     assert!(!on_leaf, "撤权后叶子不得残留该容器 SID 的任何 ACE");
 }
 
-/// 【真机往返探针】授权（叶子读写 + 父目录只读属性）→ 容器里：能列叶子、能判断"父目录下叶子在
-/// 不在"（RIGHTS_STAT 存在的全部理由）、列不了父目录的内容——口径端到端成立，不悄悄放宽。
+/// 【真机往返探针】授权（叶子读写 + 父目录只读属性）→ 容器里：叶子列得到（也写得进自己的产物）、
+/// 从父目录**按名**走得到叶子（RIGHTS_STAT 存在的全部理由：存在性判断不会假不存在）、
+/// 却列不了父目录的内容——口径端到端成立。
 /// 会创建 AppContainer profile（改本机状态），按测试约定只在 --fence-live（SOLOMNI_FENCE_LIVE=1）下跑。
+///
+/// **这里不再用"容器内 `whoami /groups` 里找包 SID 组"判容器是否生效**：包 SID 在现代 Windows 上
+/// 不在令牌的组列表里（在 `TokenAppContainerSid` 字段），容器真生效也会因此被判成"环境降级"而跳过
+/// （真机令牌转储：`TokenIsAppContainer=1`、`AppContainerSid` = 该 profile 的 SID、`capabilities=0`，
+/// 而同一个进程的 `whoami /groups` 里没有任何 `S-1-15-2-`）。现在改由**行为**给结论：
+/// 授权落点写得进、父目录内容列不到；做不到就响亮失败（那才是口径破了，不是环境不允许）。
 #[test]
 fn container_roundtrip_sees_leaf_but_not_parent_content() {
     if std::env::var("SOLOMNI_FENCE_LIVE")
@@ -445,61 +452,174 @@ fn container_roundtrip_sees_leaf_but_not_parent_content() {
         net: false,
     };
     let container = container_name(&spec);
-    ensure_profile(&container).expect("建容器 profile");
+    // 建不出 profile 分两种：环境不允许（如实跳过）与我们的步骤写错（响亮失败），分开处理。
+    if let Err(e) = ensure_profile(&container) {
+        if e.contains(PROFILE_ENV_BLOCKED_MARK) {
+            eprintln!(
+                "[探针] 本环境不允许建 AppContainer profile（环境结论，如实跳过）：{}",
+                e
+            );
+            let _ = std::fs::remove_dir_all(&base);
+            return;
+        }
+        panic!("建容器 profile：{}", e);
+    }
     let home = base.join("ledger");
     prepare_fence(&spec, "cmd", &home).expect("授权应当成功");
     let sid = container_sid(&container).expect("派生容器 SID");
 
-    // 先确认容器**真的**生效：某些受管环境里 AppContainer 会被静默降级（令牌里没有包 SID 组、
-    // 也没有 ALL APPLICATION PACKAGES），后续断言会拿环境结论冒充口径结论。没生效就如实跳过。
-    let _ = run_in_container(sid, &spec, "cmd /C whoami /groups > g.txt 2>&1");
-    let groups = std::fs::read_to_string(leaf.join("g.txt")).unwrap_or_default();
-    if !groups.contains("S-1-15-2-") {
-        eprintln!(
-            "[探针] 本环境没有真正把进程放进 AppContainer（容器内 whoami /groups 无包 SID 组）：往返探针跳过（不静默当作通过）——请在普通 shell 里重跑本探针"
-        );
-        free_sid(sid);
-        let _ = release_fence_home(&spec, Some(&home));
-        let _ = clean(&home);
-        let _ = delete_profile(&container);
-        let _ = std::fs::remove_dir_all(&base);
-        return;
-    }
-    // 1) 叶子能列：工具在自己的数据边界里看得见自己的产物。
-    let code =
-        run_in_container(sid, &spec, "cmd /C dir /b > out.txt 2>&1").expect("容器进程应当能启动");
+    // 1) 叶子能列（并把结果写进叶子）：工具在自己的数据边界里看得见自己的产物——
+    //    写不进授权落点等于授权没生效，这一条同时也是"容器进程真拿到了 rw 写权"的正向对照。
+    let code = run_in_container(sid, &spec, "dir /b > out.txt 2>&1").expect("容器进程应当能启动");
     let out = std::fs::read_to_string(leaf.join("out.txt")).unwrap_or_default();
-    assert_eq!(code, 0, "容器里列叶子应当成功：{}", out);
+    assert_eq!(
+        code, 0,
+        "容器里列叶子并把结果写回叶子应当成功（写不进授权落点 = 授权没生效，或容器没把进程关进自己的边界）：{}",
+        out
+    );
     assert!(
         out.contains("data.txt"),
         "容器里应能看到叶子里的文件：{}",
         out
     );
 
-    // 2) 父目录能 stat：对"父目录下叶子在不在"的判断要成立（不是假不存在）。
-    let code = run_in_container(
-        sid,
-        &spec,
-        "cmd /C if exist ..\\leaf (echo STAT-OK> stat.txt) else (echo STAT-MISSING> stat.txt)",
-    )
-    .expect("容器进程应当能启动");
-    assert_eq!(code, 0, "容器里判断叶子的存在性应当成功");
-    let stat = std::fs::read_to_string(leaf.join("stat.txt")).unwrap_or_default();
-    assert!(
-        stat.contains("STAT-OK"),
-        "父目录下叶子应被判断为存在：{}",
-        stat
-    );
+    // 2) 父目录能被**按名穿过**：`dir ..\leaf` 要从父目录走到叶子并列出它自己——这正是父目录只拿
+    //    "只读属性"（RIGHTS_STAT）的那条口径：中间目录判不了存在性时，工具会以为"父目录不存在"而
+    //    一路往上建（真机 CI 上抓到过 `WinError 5: 'D:\'`）。
+    //    **不用 cmd 的 `if exist` / `attrib` 当尺子**：它们取属性要走父目录的**列举权**，而那是设计上
+    //    刻意不给的（给了就等于让容器枚举父目录里的其它格子）。真机实测：`if exist` 恒报 STAT-MISSING、
+    //    `attrib` 报 Path not found，而 `dir ..\leaf` 与 `cd ..\leaf` 都正常——拿前两个量会量错东西。
+    let code =
+        run_in_container(sid, &spec, "dir ..\\leaf > reach.txt 2>&1").expect("容器进程应当能启动");
+    let reach = std::fs::read_to_string(leaf.join("reach.txt")).unwrap_or_default();
+    if code != 0 || !reach.contains("data.txt") {
+        // 失败时把"容器自己看到的"落进叶子再报出来：是"被拒"还是"真没有"要分得清。
+        let _ = run_in_container(sid, &spec, "dir .. > diag.txt 2>&1");
+        let _ = run_in_container(sid, &spec, "whoami /priv >> diag.txt 2>&1");
+        let diag = std::fs::read_to_string(leaf.join("diag.txt")).unwrap_or_default();
+        panic!(
+            "父目录要能按名走到叶子（exit={}，拿到 {:?} = 按名穿不过去，存在性判断会假不存在）：容器内诊断——{}",
+            code,
+            reach.trim(),
+            diag
+        );
+    }
 
-    // 3) 父目录的内容读不到：只读属性不等于能读（口径不能悄悄放宽）。
-    let code = run_in_container(sid, &spec, "cmd /C dir .. > denied.txt 2>&1")
-        .expect("容器进程应当能启动");
-    assert_ne!(code, 0, "容器里列父目录的内容应当被拒");
+    // 3) 父目录的内容看不到：只读属性只够按名穿过，不等于能列——容器在父目录里发现不了别的格子。
+    run_in_container(sid, &spec, "dir .. > parent.txt 2>&1").expect("容器进程应当能启动");
+    let parent = std::fs::read_to_string(leaf.join("parent.txt")).unwrap_or_default();
+    assert!(
+        leaf.join("parent.txt").exists(),
+        "这一条的重定向要落到叶子里（叶子可写）才谈得上判定：{}",
+        parent
+    );
+    assert!(
+        !parent.contains("leaf"),
+        "父目录里的条目不该被看见（只读属性只够按名穿过）：{}",
+        parent
+    );
 
     free_sid(sid);
     release_fence_home(&spec, Some(&home)).expect("撤权应当成功");
     clean(&home).expect("台账回收应当成功");
     // 探针建的容器 profile 也要带走：测试不在本机留痕。
+    assert!(delete_profile(&container), "探针的容器 profile 应当删得掉");
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+/// 【真机往返探针·模块形态】**垂直分工的权限方位**端到端验收：`ro_tree` = 模块根（递归只读）、
+/// `rw` = `<模块>/userdata`（可写）、`cwd` = 模块根，而另一席的沙箱不在任何授权里。容器里要同时成立：
+/// ① 模块脚本读得到、`userdata/` 写得进；② 模块目录里写新文件被机制拒（写权只来自 rw）；
+/// ③ 另一席沙箱里的明文拿不到（跨 agent 不可达）。
+/// 会创建 AppContainer profile（改本机状态），只在 --fence-live（SOLOMNI_FENCE_LIVE=1）下跑。
+#[test]
+fn container_roundtrip_keeps_module_read_only_and_peer_unreachable() {
+    if std::env::var("SOLOMNI_FENCE_LIVE")
+        .map(|v| v != "1")
+        .unwrap_or(true)
+    {
+        eprintln!(
+            "[探针] 未开启真机围栏测试：container_roundtrip_keeps_module_read_only_and_peer_unreachable 会创建 AppContainer profile（改本机状态），已跳过；要真跑加 --fence-live"
+        );
+        return;
+    }
+    if !capability().fs {
+        eprintln!(
+            "[探针] 本机不允许改目录 ACL（{}）：模块形态往返探针跳过（不静默当作通过）",
+            capability().note
+        );
+        return;
+    }
+    let base = std::env::temp_dir().join(format!("solomni-module-probe-{}", std::process::id()));
+    let module = base.join("modules").join("m0");
+    let userdata = module.join("userdata");
+    let peer = base.join("session").join("peer");
+    std::fs::create_dir_all(&userdata).expect("建模块 userdata");
+    std::fs::create_dir_all(&peer).expect("建另一席的沙箱");
+    std::fs::write(module.join("script.py"), "print(1)\n").expect("写模块脚本");
+    std::fs::write(peer.join("secret.txt"), "PEER-SECRET").expect("写另一席的明文");
+    let spec = FenceSpec {
+        agent: "probe-module".to_string(),
+        private: userdata.clone(),
+        ro_tree: vec![module.clone()],
+        rw: vec![userdata.clone()],
+        ro: Vec::new(),
+        cwd: module.clone(),
+        net: false,
+    };
+    let container = container_name(&spec);
+    if let Err(e) = ensure_profile(&container) {
+        if e.contains(PROFILE_ENV_BLOCKED_MARK) {
+            eprintln!(
+                "[探针] 本环境不允许建 AppContainer profile（环境结论，如实跳过）：{}",
+                e
+            );
+            let _ = std::fs::remove_dir_all(&base);
+            return;
+        }
+        panic!("建容器 profile：{}", e);
+    }
+    let home = base.join("ledger");
+    prepare_fence(&spec, "cmd", &home).expect("授权应当成功");
+    let sid = container_sid(&container).expect("派生容器 SID");
+
+    // ① 模块目录读得到、userdata 写得进：一条命令验两件事（脚本内容经重定向落进 userdata）。
+    let code = run_in_container(sid, &spec, "type script.py > userdata\\read.txt 2>&1")
+        .expect("容器进程应当能启动");
+    let read = std::fs::read_to_string(userdata.join("read.txt")).unwrap_or_default();
+    assert_eq!(code, 0, "模块目录要读得到、userdata 要写得进：{}", read);
+    assert!(read.contains("print(1)"), "模块脚本内容要读得到：{}", read);
+
+    // ② 模块目录默认只读：模块根里写不进新文件（写权只来自 rw）。
+    let forbidden = module.join("should-not-exist.txt");
+    let code =
+        run_in_container(sid, &spec, "echo x > should-not-exist.txt").expect("容器进程应当能启动");
+    assert!(
+        !forbidden.exists() && code != 0,
+        "模块目录默认只读：模块根里不该写得进新文件（exit={}）：{:?}",
+        code,
+        std::fs::read_dir(&module).map(|d| d.flatten().map(|e| e.file_name()).collect::<Vec<_>>())
+    );
+
+    // ③ 另一席的沙箱不在任何授权里：明文拿不到（跨 agent 不可达）。
+    let peer_file = peer.join("secret.txt");
+    let code = run_in_container(
+        sid,
+        &spec,
+        &format!("type \"{}\" > userdata\\peer.txt 2>&1", peer_file.display()),
+    )
+    .expect("容器进程应当能启动");
+    let got = std::fs::read_to_string(userdata.join("peer.txt")).unwrap_or_default();
+    assert!(
+        !got.contains("PEER-SECRET") && code != 0,
+        "另一席的沙箱不可达：拿到 {:?}（exit={}）",
+        got,
+        code
+    );
+
+    free_sid(sid);
+    release_fence_home(&spec, Some(&home)).expect("撤权应当成功");
+    clean(&home).expect("台账回收应当成功");
     assert!(delete_profile(&container), "探针的容器 profile 应当删得掉");
     let _ = std::fs::remove_dir_all(&base);
 }

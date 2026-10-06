@@ -39,18 +39,62 @@
     （内置读写在落点之后过白黑名单；`work_commit` / `work_pull` 越界整条拒绝）；模块目录**默认只读**
     （`module_write` 授权才整块可写，`userdata/` 恒可写）；私有沙箱永远全权；围栏按同一份派生授权
     （模块根进 `ro_tree` 递归只读，工作目录只读，写权只来自 `rw`）。
-    **CI 现状**：Linux / macOS 的 `module_dir_is_read_only_but_userdata_is_writable` 与
-    `shared_area_is_outside_the_agent_fence` 真跑通过（envSkips=0）；Windows 的落点单测
-    `grant_targets_keep_module_read_only_and_cwd_read_only` 通过，但**容器级往返探针在托管 runner 上 env-skip**——
-    那边 AppContainer 被静默降级（容器内 `whoami /groups` 无包 SID 组），所以"真实工具进程是否真被关住"
-    这一层在 CI 上**没有结论**（同 `tests/cross-platform/gaps.yaml` 的 harness.restricted-token-causes-false-failures）。
+    **真机现状（本轮查清并补齐）**：
+    - Linux / macOS：`module_dir_is_read_only_but_userdata_is_writable` 与
+      `shared_area_is_outside_the_agent_fence` 由 CI 真跑通过（envSkips=0）；"跨 agent 不可达"由通用的
+      "授权根之外不可达"探针覆盖，不另立重复用例。
+    - Windows：落点单测通过；容器级往返探针过去恒 `env-skip`（判据假阴性，见
+      fence.container-probe-misjudges-appcontainer），现已换成行为对照，并补了模块形态的往返用例
+      `container_roundtrip_keeps_module_read_only_and_peer_unreachable`：模块脚本读得到、模块根里写不进、
+      `userdata/` 写得进、另一席的明文拿不到——**已在普通会话的真机上通过**。
+    剩下的只是三平台 CI 复核（平台专属代码按判据要等 CI 结论）。
   how: |
     1) Linux / macOS：探针已在 CI 真跑，无需再补；
-    2) Windows：在**普通（或高完整性）会话**的机器上重跑 `node run-tests.js --fence-live`，
-       或用自托管 Windows runner；托管 runner 上容器会降级，读不到可判定的往返结论。
+    2) Windows：判据换成行为对照 + 模块形态往返（`ro_tree` = 模块根、`rw` = `userdata/`、`cwd` = 模块根，
+       含"另一席读不到"的对照）——已实施并在真机通过；
+    3) 等三平台 CI 复核后关账（本机只验得了 Windows 侧）。
   accept: 三平台都能给出「模块目录写被机制拒绝 + userdata 可写 + 跨 agent 不可达」的真机结论；
-    Linux / macOS 已在 CI 满足，Windows 待普通会话环境。
-  blocked_by: 待普通会话的 Windows 环境验证（托管 runner 静默降级 AppContainer）
+    Linux / macOS 已在 CI 满足，Windows 已在真机满足，待 CI 复核。
+  blocked_by: 待 CI 三平台确认（本轮只在本机验了 Windows 侧）
+
+- id: fence.container-probe-misjudges-appcontainer
+  scope: global
+  level: T4
+  why: |
+    **（已实施，待 CI 复核。）**Windows 的容器级往返探针过去用「容器内 `whoami /groups` 里有没有包 SID 组
+    （`S-1-15-2-`）」判"AppContainer 是否真生效"。现代 Windows 上包 SID **不在令牌的组列表里**（在
+    `TokenAppContainerSid` 字段），所以容器真生效也会被判成"本环境没有真正把进程放进 AppContainer"
+    → **恒 `env-skip`**；CI 与普通会话的真机都是这一句，于是被误记成"托管 runner 静默降级 AppContainer"。
+    真机令牌转储（把转储器送进产品自己的容器里跑）：`TokenIsAppContainer=1`、
+    `AppContainerSid` = 产品为该 profile 派生的 SID、`capabilities=0`（默认断网），
+    而同一个进程的 `whoami /groups` 里没有任何 `S-1-15-2-`。
+    同一处还有两个观察面缺陷：判定用 `let _ =` 吞掉 `run_in_container` 的 Err（容器压根没起来也报"环境降级"），
+    容器内命令的输出（`g.txt`）不打印，于是"真降级"与"判据失败"在现场不可区分。
+  how: |
+    已实施：判据换成**行为对照**（授权落点写得进、从父目录按名走得到叶子、父目录的内容看不到），
+    真不生效就硬失败；环境不允许（改不动 ACL、建不出 profile）仍走 env-skip，判据是稳定标记
+    `PROFILE_ENV_BLOCKED_MARK`；容器内命令的 Err 不再吞掉，失败路径会把容器自己的视图打进 panic 消息。
+  accept: 三平台 CI 上该探针不再假性 env-skip，叶子/父目录那几条断言真跑过（本机真机已过）。
+  blocked_by: 待 CI 三平台确认
+
+- id: fence.module-without-userdata-disables-it
+  scope: global
+  level: T4
+  why: |
+    模块目录里没有 `userdata/` 时，Windows 的授权阶段读它的 DACL 得 `error 2`，`prepare_fence`
+    返回 Err → 产品**整次按无围栏执行**。CI 的 Windows L4 日志逐条可见：
+    `[围栏] 授权未完成：读 DACL 失败（…\modules\research\userdata）：错误码 2` → `本次按无围栏执行`，
+    真工具那几行的 stderr 也写着"容器围栏不可用，按如实降级继续执行"。
+    后果：Windows 上"真工具链在围栏里跑通"的 E2E 结论其实是**无围栏**跑出来的；而围栏派生把
+    `<module>/userdata` 无条件放进 `rw`，于是任何没有该目录的模块都会让这次执行失去围栏。
+  how: |
+    1) 先定契约：`<module>/userdata` 不存在时是"按需建"（它是模块自己的状态区）还是"没有可授的落点，跳过"；
+    2) 一个落点授不上不该让整次执行失去围栏——现在 `prepare_fence` 的"不整体失败"注释与
+       `if result.is_ok() { result = Err(e) }` 自相矛盾，要一起理清；
+    3) 补一条真机用例：模块目录没有 `userdata/` 时工具仍在围栏里跑（或如实说明该模块不可围栏）。
+  accept: 模块目录没有 `userdata/` 时，Windows 上工具仍在围栏里跑（或如实说明为何不能），
+    E2E 的真工具行不再出现"按无围栏执行"。
+  blocked_by: 缺少实现（先定契约）
 
 - id: module.external-harness-fence-reach
   scope: global
