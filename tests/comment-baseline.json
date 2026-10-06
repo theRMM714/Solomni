@@ -10,10 +10,6 @@
     "条目：槽外有行或自造槽",
     "条目：首行不是目的"
   ],
-  "src/capabilities/collab/domain/mod.rs": [
-    "头块：槽外有行或自造槽",
-    "头块：缺文件头"
-  ],
   "src/capabilities/collab/mod.rs": [
     "头块：槽外有行或自造槽",
     "头块：缺文件头"
@@ -101,12 +97,7 @@
   "src/capabilities/conductor/api/proxy.rs": [
     "头块：槽外有行或自造槽",
     "头块：缺文件头",
-    "行内：历史或待办措辞",
     "行内：后面是空行"
-  ],
-  "src/capabilities/conductor/domain/mod.rs": [
-    "头块：槽外有行或自造槽",
-    "头块：缺文件头"
   ],
   "src/capabilities/conductor/domain/proxy.rs": [
     "头块：槽外有行或自造槽",
@@ -116,11 +107,7 @@
     "行内：后面是空行"
   ],
   "src/capabilities/conductor/domain/work.rs": [
-    "头块：槽外有行或自造槽",
-    "头块：缺文件头",
-    "条目：槽外有行或自造槽",
-    "条目：首行不是目的",
-    "行内：后面是空行"
+    "头块：槽外有行或自造槽"
   ],
   "src/capabilities/conductor/mod.rs": [
     "头块：槽外有行或自造槽",
@@ -162,7 +149,6 @@
     "头块：缺文件头",
     "条目：槽外有行或自造槽",
     "条目：首行不是目的",
-    "行内：历史或待办措辞",
     "行内：后面是空行",
     "行内：块注释"
   ],
@@ -226,8 +212,7 @@
     "头块：槽外有行或自造槽",
     "头块：缺文件头",
     "条目：槽外有行或自造槽",
-    "条目：首行不是目的",
-    "行内：历史或待办措辞"
+    "条目：首行不是目的"
   ],
   "src/capabilities/llm/detail/http_probe.rs": [
     "头块：槽外有行或自造槽",
@@ -264,10 +249,6 @@
     "条目：槽外有行或自造槽",
     "条目：首行不是目的"
   ],
-  "src/capabilities/llm/domain/mod.rs": [
-    "头块：槽外有行或自造槽",
-    "头块：缺文件头"
-  ],
   "src/capabilities/llm/mod.rs": [
     "头块：槽外有行或自造槽",
     "头块：缺文件头"
@@ -290,9 +271,6 @@
   ],
   "src/capabilities/permission/api.rs": [
     "头块：槽外有行或自造槽",
-    "头块：缺文件头"
-  ],
-  "src/capabilities/permission/domain/mod.rs": [
     "头块：缺文件头"
   ],
   "src/capabilities/permission/domain/permission.rs": [
@@ -320,10 +298,6 @@
     "头块：缺文件头",
     "条目：槽外有行或自造槽",
     "条目：首行不是目的"
-  ],
-  "src/capabilities/prompt/domain/mod.rs": [
-    "头块：槽外有行或自造槽",
-    "头块：缺文件头"
   ],
   "src/capabilities/prompt/domain/prompt.rs": [
     "头块：槽外有行或自造槽",
@@ -374,10 +348,6 @@
     "条目：槽外有行或自造槽",
     "条目：首行不是目的"
   ],
-  "src/capabilities/registry/domain/mod.rs": [
-    "头块：槽外有行或自造槽",
-    "头块：缺文件头"
-  ],
   "src/capabilities/registry/domain/providers.rs": [
     "头块：槽外有行或自造槽",
     "头块：缺文件头",
@@ -399,7 +369,6 @@
     "头块：缺文件头",
     "条目：槽外有行或自造槽",
     "条目：首行不是目的",
-    "行内：历史或待办措辞",
     "行内：后面是空行"
   ],
   "src/capabilities/session/api.rs": [
@@ -427,10 +396,6 @@
     "头块：缺文件头",
     "条目：槽外有行或自造槽",
     "条目：首行不是目的"
-  ],
-  "src/capabilities/session/domain/mod.rs": [
-    "头块：槽外有行或自造槽",
-    "头块：缺文件头"
   ],
   "src/capabilities/session/domain/rewind.rs": [
     "头块：槽外有行或自造槽",
@@ -474,17 +439,6 @@
     "条目：槽外有行或自造槽",
     "条目：首行不是目的"
   ],
-  "src/capabilities/slate/domain/mod.rs": [
-    "头块：槽外有行或自造槽",
-    "头块：缺文件头"
-  ],
-  "src/capabilities/slate/domain/proposal.rs": [
-    "头块：槽外有行或自造槽",
-    "头块：缺文件头",
-    "条目：槽外有行或自造槽",
-    "条目：首行不是目的",
-    "行内：历史或待办措辞"
-  ],
   "src/capabilities/slate/mod.rs": [
     "头块：槽外有行或自造槽",
     "头块：缺文件头"
@@ -505,10 +459,6 @@
     "条目：槽外有行或自造槽",
     "条目：首行不是目的"
   ],
-  "src/capabilities/taskchain/domain/mod.rs": [
-    "头块：槽外有行或自造槽",
-    "头块：缺文件头"
-  ],
   "src/capabilities/taskchain/mod.rs": [
     "头块：槽外有行或自造槽",
     "头块：缺文件头"
@@ -524,7 +474,6 @@
     "头块：缺文件头",
     "条目：槽外有行或自造槽",
     "条目：首行不是目的",
-    "行内：历史或待办措辞",
     "行内：连续超过 2 行"
   ],
   "src/capabilities/tools/detail/confine/macos.rs": [
@@ -538,8 +487,7 @@
     "头块：槽外有行或自造槽",
     "头块：缺文件头",
     "条目：槽外有行或自造槽",
-    "条目：首行不是目的",
-    "行内：历史或待办措辞"
+    "条目：首行不是目的"
   ],
   "src/capabilities/tools/detail/confine/other.rs": [
     "头块：槽外有行或自造槽",
@@ -575,7 +523,6 @@
   ],
   "src/capabilities/tools/detail/confine/windows/tests.rs": [
     "头块：缺文件头",
-    "行内：历史或待办措辞",
     "行内：块注释",
     "行内：连续超过 2 行"
   ],
@@ -602,16 +549,6 @@
     "头块：缺文件头"
   ],
   "src/capabilities/tools/domain/fence.rs": [
-    "头块：槽外有行或自造槽",
-    "头块：缺文件头",
-    "条目：槽外有行或自造槽",
-    "条目：首行不是目的"
-  ],
-  "src/capabilities/tools/domain/mod.rs": [
-    "头块：槽外有行或自造槽",
-    "头块：缺文件头"
-  ],
-  "src/capabilities/tools/domain/module_tools.rs": [
     "头块：槽外有行或自造槽",
     "头块：缺文件头",
     "条目：槽外有行或自造槽",
@@ -702,10 +639,6 @@
     "条目：槽外有行或自造槽",
     "条目：首行不是目的"
   ],
-  "src/capabilities/workspace/domain/mod.rs": [
-    "头块：槽外有行或自造槽",
-    "头块：缺文件头"
-  ],
   "src/capabilities/workspace/domain/module.rs": [
     "头块：槽外有行或自造槽",
     "头块：缺文件头",
@@ -761,15 +694,13 @@
   ],
   "src/main.rs": [
     "头块：槽外有行或自造槽",
-    "头块：缺文件头",
-    "行内：历史或待办措辞"
+    "头块：缺文件头"
   ],
   "src/presentation/cli/mod.rs": [
     "头块：槽外有行或自造槽",
     "头块：缺文件头",
     "条目：槽外有行或自造槽",
     "条目：首行不是目的",
-    "行内：历史或待办措辞",
     "行内：后面是空行"
   ],
   "src/presentation/mod.rs": [
@@ -781,7 +712,6 @@
     "头块：缺文件头",
     "条目：槽外有行或自造槽",
     "条目：首行不是目的",
-    "行内：历史或待办措辞",
     "行内：连续超过 2 行"
   ],
   "src/presentation/web/routes.rs": [
@@ -878,7 +808,6 @@
     "头块：缺文件头",
     "条目：槽外有行或自造槽",
     "条目：首行不是目的",
-    "行内：历史或待办措辞",
     "行内：后面是空行"
   ],
   "src/tests/mod.rs": [
@@ -911,7 +840,6 @@
     "头块：缺文件头",
     "条目：槽外有行或自造槽",
     "条目：首行不是目的",
-    "行内：历史或待办措辞",
     "行内：后面是空行"
   ],
   "src/tests/routes.rs": [
@@ -925,14 +853,12 @@
     "头块：缺文件头",
     "条目：槽外有行或自造槽",
     "条目：首行不是目的",
-    "行内：历史或待办措辞",
     "行内：后面是空行",
     "行内：连续超过 2 行"
   ],
   "src/tests/slate.rs": [
     "头块：槽外有行或自造槽",
-    "头块：缺文件头",
-    "行内：历史或待办措辞"
+    "头块：缺文件头"
   ],
   "src/tests/taskchain.rs": [
     "头块：槽外有行或自造槽",
@@ -966,8 +892,7 @@
     "头块：槽外有行或自造槽",
     "头块：缺文件头",
     "条目：槽外有行或自造槽",
-    "条目：首行不是目的",
-    "行内：历史或待办措辞"
+    "条目：首行不是目的"
   ],
   "src/tests/workspace.rs": [
     "头块：槽外有行或自造槽",

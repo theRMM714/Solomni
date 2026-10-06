@@ -8,7 +8,7 @@
  *   门禁只报**新增**与**应销账**；--tighten 把快照收紧（收紧后要连同改动一起提交）。
  * - 内容卫生（只报）：悬挂的缺口 id（已删 id 从 git 历史取）、文档里指向不存在的 src 路径、引用的根文档不存在。
  *
- * 用法：node run-hygiene.js [--tighten] [--strict]   出口码：默认 0；--strict 有发现即 1。
+ * 用法：node run-hygiene.js [--by-file] [--dir <模式>]… [--tighten] [--strict]   出口码：默认 0；--strict 有发现即 1。
  */
 "use strict";
 const fs = require("fs");
@@ -19,7 +19,9 @@ const ROOT = __dirname;
 const BASELINE = path.join(ROOT, "tests", "comment-baseline.json");
 const HEADER_SLOTS = ["目的", "管", "不管", "联动"];
 const ITEM_SLOTS = ["目的", "参数", "返回", "错误", "约束"];
-const COMMENT_FORBIDDEN = ["曾经", "原来", "旧版", "旧实现", "改成", "先是", "后来", "遗留", "以前", "与旧逻辑", "TODO", "FIXME", "待补", "临时", "后续", "暂不"];
+/* 词表只收**叙事性**词（讲来历、显式待办）。领域词不进：`临时 agent`、`后续片段`、`本地遗留`、
+ * `暂未暴露` 都是描述当前状态的说法，收进来只会制造误报（迁移时实测过）。 */
+const COMMENT_FORBIDDEN = ["曾经", "原来", "旧版", "旧实现", "改成", "先是", "后来", "以前", "与旧逻辑", "TODO", "FIXME", "待补"];
 const LEDGERS = ["tests/gaps.yaml", "tests/cross-platform/gaps.yaml", "tests/windows/gaps.yaml", "tests/linux/gaps.yaml", "tests/macos/gaps.yaml"];
 
 const RULES = {
@@ -238,41 +240,87 @@ function readBaseline() {
   return raw;
 }
 
+/** `--dir <模式>`：模式里的 `*` 表示一段任意字符（不含分隔符）；匹配文件路径，边界必须是 `/` 或结尾。
+ *  不写正则——模式来自命令行，正则转义最容易在这里出错；按片段顺序比对同样准确。 */
+function dirMatcher(patterns) {
+  return (rel) => {
+    if (!patterns.length) return true;
+    for (const p of patterns) {
+      const pieces = p.split("*");
+      let i = 0;
+      let ok = true;
+      for (let k = 0; k < pieces.length; k++) {
+        const piece = pieces[k];
+        if (!piece) continue; // 空片段 = 那个 *，交给下一片自己找位置
+        const at = k === 0 ? (rel.startsWith(piece) ? 0 : -1) : rel.indexOf(piece, i);
+        if (at < 0) { ok = false; break; }
+        i = at + piece.length;
+      }
+      if (!ok) continue;
+      if (i === rel.length || rel[i] === "/") return true;
+    }
+    return false;
+  };
+}
+
 function main() {
   const argv = process.argv.slice(2);
+  const dirs = [];
+  for (let i = 0; i < argv.length; i++) if (argv[i] === "--dir" && argv[i + 1]) dirs.push(argv[i + 1]);
+  const byFileView = argv.includes("--by-file");
   const scan = scanCommentContract();
-  const by = scan.byFileRule;
-  const baseline = readBaseline();
+  const inDirs = dirMatcher(dirs);
+  const findings = scan.findings.filter((f) => inDirs(f.file));
+  const by = toByFileRule(findings);
+  const scope = dirs.length ? "（--dir " + dirs.join(" / ") + "）" : "";
+  const baselineAll = readBaseline();
+  const baseline = baselineAll === null
+    ? null
+    : Object.fromEntries(Object.entries(baselineAll).filter(([f]) => inDirs(f)));
   const lines = [];
 
   if (argv.includes("--tighten")) {
+    /* 收紧只允许全仓一次做完：带 --dir 收紧会把没过滤到的存量从快照里抹掉，那是静默丢账。 */
+    if (dirs.length) {
+      console.log("--tighten 不接受 --dir：收紧是全仓一次的动作，带过滤收紧会丢掉没扫到的存量。");
+      return 2;
+    }
     const out = { _comment: "注释契约（ARCHITECTURE.md 十）的存量快照：键是文件，值是它当前还欠的规则。门禁只报新增；条目不再成立时必须销账——收紧用 node run-hygiene.js --tighten。" };
     for (const f of Object.keys(by).sort()) out[f] = by[f];
     fs.writeFileSync(BASELINE, JSON.stringify(out, null, 2) + "\n");
     lines.push("已收紧快照 tests/comment-baseline.json：" + Object.keys(by).length + " 个文件、"
-      + scan.findings.length + " 处。" + (baseline ? "（收紧前 " + Object.keys(baseline).length + " 个文件）" : ""));
+      + findings.length + " 处。" + (baselineAll ? "（收紧前 " + Object.keys(baselineAll).length + " 个文件）" : ""));
     console.log(lines.join("\n"));
     return 0;
   }
 
-  // 按规则汇总
   const byRule = new Map();
-  for (const f of scan.findings) {
+  for (const f of findings) {
     const cur = byRule.get(f.rule) || { count: 0, files: new Set() };
     cur.count++;
     cur.files.add(f.file);
     byRule.set(f.rule, cur);
   }
-  lines.push("== 注释契约存量（ARCHITECTURE.md 十） ==");
-  lines.push("合计 " + scan.findings.length + " 处，涉及 " + Object.keys(by).length + " 个文件：");
+  lines.push("== 注释契约存量（ARCHITECTURE.md 十）" + scope + " ==");
+  lines.push("合计 " + findings.length + " 处，涉及 " + Object.keys(by).length + " 个文件：");
   for (const [rule, v] of [...byRule.entries()].sort((a, b) => b[1].count - a[1].count)) {
     lines.push("  " + String(v.count).padStart(5) + " 处  " + String(v.files.size).padStart(4) + " 个文件  " + rule);
+  }
+  if (byFileView) {
+    const counts = new Map();
+    for (const f of findings) counts.set(f.file, (counts.get(f.file) || 0) + 1);
+    lines.push("");
+    lines.push("== 逐文件（欠得最多的在前） ==");
+    for (const [file, n] of [...counts.entries()].sort((a, b) => b[1] - a[1])) {
+      lines.push("  " + String(n).padStart(5) + " 处  " + file + "  :: " + by[file].join("、"));
+    }
   }
   if (baseline === null) {
     lines.push("");
     lines.push("还没有快照：跑 node run-hygiene.js --tighten 建一份（门禁拿它当棘轮基线）。");
   } else {
-    const added = [], stale = [];
+    const added = [];
+    const stale = [];
     for (const f of Object.keys(by)) {
       for (const rule of by[f]) if (!(baseline[f] || []).includes(rule)) added.push(f + " :: " + rule);
     }
@@ -280,12 +328,12 @@ function main() {
       for (const rule of baseline[f]) if (!(by[f] || []).includes(rule)) stale.push(f + " :: " + rule);
     }
     lines.push("");
-    lines.push("与快照比：新增 " + added.length + " 处（门禁会报）、可销账 " + stale.length + " 处（门禁要求销账）");
+    lines.push("与快照比" + scope + "：新增 " + added.length + " 处（门禁会报）、可销账 " + stale.length + " 处（门禁要求销账）");
     for (const a of added.slice(0, 12)) lines.push("  [新增] " + a);
     for (const s of stale.slice(0, 12)) lines.push("  [可销账] " + s);
     if (added.length + stale.length > 24) lines.push("  …（其余省略）");
     if (!added.length && !stale.length) lines.push("  快照与现状一致（棘轮已对齐）");
-    else lines.push("  收紧：node run-hygiene.js --tighten");
+    else lines.push("  收紧：node run-hygiene.js --tighten" + (dirs.length ? "（收紧必须全仓，别带 --dir）" : ""));
   }
 
   const content = contentFindings();
@@ -295,7 +343,7 @@ function main() {
   for (const c of content) lines.push("  [" + c.kind + "] " + c.text);
 
   console.log(lines.join("\n"));
-  if (argv.includes("--strict") && (scan.findings.length || content.length)) return 1;
+  if (argv.includes("--strict") && (findings.length || content.length)) return 1;
   return 0;
 }
 

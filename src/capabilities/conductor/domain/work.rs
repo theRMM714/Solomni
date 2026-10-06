@@ -1,19 +1,16 @@
-//! **共享区版本化工作区**三个核心自有工具的纯逻辑：工具名、入参解析与回执拼装。
-//!
-//! 它不认识端口、不碰 IO：真正的拉取 / 提交 / 状态走 `conductor::service::work_tools` 里的
-//! `WorkHandler` → `workspace::api::Workspace`（与代理工具同一套路，见 docs/tools/tools-and-roles.md）。
-//!
-//! 冲突与状态由 workspace 的纯逻辑判定；这里只负责把结构化结果说成人能读的一行行回执。
+//! 目的：共享区版本化工作区三个核心自有工具（`work_pull` / `work_commit` / `work_status`）的纯逻辑——
+//! 工具名、入参解析与回执拼装。
+//! 管：工具名常量与 `is_work_tool`、取参（`str_list` / `str_arg`）、三份回执的拼装。
+//! 不管：真正的拉取 / 提交 / 状态（走 `conductor::service::work_tools` → `workspace::api::Workspace`）；冲突与状态判定（在 `workspace`）。
+//! 联动：由本能力的 `service/` 调用；工具名与 `systools/tools.yaml` 同一份名单。
 
 use crate::capabilities::workspace::api::{ChangeKind, CommitReport, PullReport, StatusReport};
-
-// ---------- 工具名（与 systools/tools.yaml 同一份名单） ----------
 
 pub const PULL: &str = "work_pull";
 pub const COMMIT: &str = "work_commit";
 pub const STATUS: &str = "work_status";
 
-/// 这三个 id 就是"共享区版本化"的工具面（角色表 executor / solo 引用它们）。
+/// 目的：判定这个名字是不是共享区版本化的工具面（角色表 executor / solo 引用它们）。
 pub fn is_work_tool(name: &str) -> bool {
     matches!(name, PULL | COMMIT | STATUS)
 }
@@ -37,7 +34,8 @@ fn paths(list: &[String]) -> String {
     out
 }
 
-/// work_pull 的回执。
+/// 目的：把 work_pull 的结果说成人能读的几行。
+/// 返回：写入 / 跳过 / 冲突 / 主副本没有 各若干行（路径截断规则见 `MAX_LISTED`）。
 pub fn render_pull(r: &PullReport) -> String {
     let mut out = format!(
         "已对准主副本提交 {}。写入沙箱 {} 个，已是最新 {} 个，无变化 {} 个，跳过（沙箱已有同名文件）{} 个，冲突 {} 个，主副本没有 {} 个。",
@@ -70,7 +68,8 @@ pub fn render_pull(r: &PullReport) -> String {
     out
 }
 
-/// work_commit 成功的回执。
+/// 目的：把 work_commit 的结果说成人能读的几行。
+/// 返回：提交 id 与新增 / 修改 / 删除 各若干行。
 pub fn render_commit(r: &CommitReport) -> String {
     let mut adds = Vec::new();
     let mut mods = Vec::new();
@@ -101,7 +100,8 @@ pub fn render_commit(r: &CommitReport) -> String {
     out
 }
 
-/// work_status 的回执。
+/// 目的：把 work_status 的结果说成人能读的几行。
+/// 返回：主副本当前提交与路径、你的工作副本状态、最近提交。
 pub fn render_status(r: &StatusReport) -> String {
     let mut out = String::new();
     match &r.head {
@@ -132,7 +132,8 @@ pub fn render_status(r: &StatusReport) -> String {
     out
 }
 
-/// 从 args 里取一个字符串数组（缺省 = 空）。
+/// 目的：从 args 里取一个字符串数组（缺省 = 空）。
+/// 错误：不是数组、或数组里有非字符串时如实报错。
 pub fn str_list(args: &serde_json::Value, key: &str) -> Result<Vec<String>, String> {
     match args.get(key) {
         None | Some(serde_json::Value::Null) => Ok(Vec::new()),
@@ -150,7 +151,7 @@ pub fn str_list(args: &serde_json::Value, key: &str) -> Result<Vec<String>, Stri
     }
 }
 
-/// 从 args 里取一个字符串（可缺省）。
+/// 目的：从 args 里取一个字符串（缺省 = `None`）。
 pub fn str_arg(args: &serde_json::Value, key: &str) -> Option<String> {
     args.get(key)
         .and_then(|v| v.as_str())
