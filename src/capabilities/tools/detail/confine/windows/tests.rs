@@ -472,16 +472,25 @@ fn container_roundtrip_sees_leaf_but_not_parent_content() {
     //    写不进授权落点等于授权没生效，这一条同时也是"容器进程真拿到了 rw 写权"的正向对照。
     let code = run_in_container(sid, &spec, "dir /b > out.txt 2>&1").expect("容器进程应当能启动");
     let out = std::fs::read_to_string(leaf.join("out.txt")).unwrap_or_default();
-    assert_eq!(
-        code, 0,
-        "容器里列叶子并把结果写回叶子应当成功（写不进授权落点 = 授权没生效，或容器没把进程关进自己的边界）：{}",
-        out
-    );
-    assert!(
-        out.contains("data.txt"),
-        "容器里应能看到叶子里的文件：{}",
-        out
-    );
+    if code != 0 || !out.contains("data.txt") {
+        // 失败现场要能自证：容器里的令牌与按名解析能力（跨父目录、按绝对路径）各探一次。
+        let abs = leaf.display().to_string();
+        let _ = run_in_container(sid, &spec, "dir \"..\" > diag.txt 2>&1");
+        let _ = run_in_container(sid, &spec, &format!("dir \"{}\" >> diag.txt 2>&1", abs));
+        let _ = run_in_container(
+            sid,
+            &spec,
+            &format!("echo x > \"{}\"\\abs.txt >> diag.txt 2>&1", abs),
+        );
+        let _ = run_in_container(sid, &spec, "whoami /priv >> diag.txt 2>&1");
+        let diag = std::fs::read_to_string(leaf.join("diag.txt")).unwrap_or_default();
+        panic!(
+            "容器里列叶子并把结果写回叶子应当成功（exit={}，拿到 {:?}）：容器内诊断——{}",
+            code,
+            out.trim(),
+            diag
+        );
+    }
 
     // 2) 父目录能被**按名穿过**：`dir ..\leaf` 要从父目录走到叶子并列出它自己——这正是父目录只拿
     //    "只读属性"（RIGHTS_STAT）的那条口径：中间目录判不了存在性时，工具会以为"父目录不存在"而
