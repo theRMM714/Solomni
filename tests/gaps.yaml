@@ -77,6 +77,23 @@
   accept: 三平台 CI 上该探针不再假性 env-skip，叶子/父目录那几条断言真跑过（本机真机已过）。
   blocked_by: 待 CI 三平台确认
 
+- id: fence.container-dir-listing-denied
+  scope: global
+  level: T4
+  why: |
+    CI run 158 的 windows 上，容器里**列自己的授权落点**被拒：`dir /b`（cwd = 授权叶子）报
+    `Access is denied.`（exit 1），而同一个目录里**写文件成功**（`echo x > out.txt` 写下了、报错还被重定向
+    进它），`whoami /priv` 显示 `SeChangeNotifyPrivilege` Enabled，叶子上的 ACE 是 `0x1701FF`（含
+    FILE_LIST_DIRECTORY）。本机（Windows 11，普通会话）同样操作正常。所以"托管 runner 的容器里列目录走不通"
+    是个真实现象，但**根因没有结论**：是 AppContainer 令牌少了什么、还是 cmd 的 `dir` 这类列举在这类环境里
+    另走一条路，得再探。影响面：工具要在自己的边界里列产物（`dir`、Python 的 `os.listdir`）就会撞上。
+  how: |
+    1) 换列举机制再探一次（`for %f in (*)` 这类 FindFirstFile 枚举、或真 python 的 `os.listdir`），
+       把"令牌/权限少了什么"与"cmd 的 dir 自身"分开；
+    2) 结论若指向缺失的权限或 ACE，就在授权阶段补；否则写进能力报告如实说明；
+    3) 结论出来再把 Windows 的往返探针补一条"列自己的产物"的断言。
+  accept: 容器里能列出自己授权落点里的产物；或如实说明本环境不支持并列进能力报告。
+  blocked_by: 缺少观察面（要换列举机制再探一次）
 - id: fence.module-without-userdata-disables-it
   scope: global
   level: T4

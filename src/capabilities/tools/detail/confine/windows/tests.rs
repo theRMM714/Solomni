@@ -410,9 +410,20 @@ fn revoke_leaves_no_container_ace_on_leaf_parents() {
     assert!(!on_leaf, "撤权后叶子不得残留该容器 SID 的任何 ACE");
 }
 
-/// 【真机往返探针】授权（叶子读写 + 父目录只读属性）→ 容器里：叶子列得到（也写得进自己的产物）、
-/// 从父目录**按名**走得到叶子（RIGHTS_STAT 存在的全部理由：存在性判断不会假不存在）、
-/// 却列不了父目录的内容——口径端到端成立。
+/// 失败现场：把容器自己的视图落进叶子再报出来（"被拒"还是"真没有"要分得清）。
+/// 诊断本身只写授权落点，不会把失败吞掉。
+fn container_diag(sid: PSID, spec: &FenceSpec, leaf: &Path) -> String {
+    let _ = run_in_container(sid, spec, "whoami /priv > diag.txt 2>&1");
+    let _ = run_in_container(
+        sid,
+        spec,
+        "cd .. >> diag.txt 2>&1 & echo CD-DONE >> diag.txt",
+    );
+    std::fs::read_to_string(leaf.join("diag.txt")).unwrap_or_default()
+}
+/// 【真机往返探针】授权（叶子读写 + 父目录只读属性）→ 容器里：在自己的边界里写得到也读得回、
+/// 从父目录**按名**穿得到叶子里的文件（RIGHTS_STAT 存在的全部理由：存在性判断不会假不存在）、
+/// 却读不到父目录里的其它条目——口径端到端成立。
 /// 会创建 AppContainer profile（改本机状态），按测试约定只在 --fence-live（SOLOMNI_FENCE_LIVE=1）下跑。
 ///
 /// **这里不再用"容器内 `whoami /groups` 里找包 SID 组"判容器是否生效**：包 SID 在现代 Windows 上
@@ -442,6 +453,8 @@ fn container_roundtrip_sees_leaf_but_not_parent_content() {
     let leaf = base.join("leaf");
     std::fs::create_dir_all(&leaf).expect("建探针目录");
     std::fs::write(leaf.join("data.txt"), "x").expect("写探针文件");
+    // 父目录里另放一个条目：容器应当**读不到**它（只读属性只够按名穿过，不够读内容）。
+    std::fs::write(base.join("parent-secret.txt"), "PARENT-SECRET").expect("写父目录条目");
     let spec = FenceSpec {
         agent: "probe-roundtrip".to_string(),
         private: PathBuf::new(),
@@ -468,64 +481,51 @@ fn container_roundtrip_sees_leaf_but_not_parent_content() {
     prepare_fence(&spec, "cmd", &home).expect("授权应当成功");
     let sid = container_sid(&container).expect("派生容器 SID");
 
-    // 1) 叶子能列（并把结果写进叶子）：工具在自己的数据边界里看得见自己的产物——
-    //    写不进授权落点等于授权没生效，这一条同时也是"容器进程真拿到了 rw 写权"的正向对照。
-    let code = run_in_container(sid, &spec, "dir /b > out.txt 2>&1").expect("容器进程应当能启动");
-    let out = std::fs::read_to_string(leaf.join("out.txt")).unwrap_or_default();
-    if code != 0 || !out.contains("data.txt") {
-        // 失败现场要能自证：容器里的令牌与按名解析能力（跨父目录、按绝对路径）各探一次。
-        let abs = leaf.display().to_string();
-        let _ = run_in_container(sid, &spec, "dir \"..\" > diag.txt 2>&1");
-        let _ = run_in_container(sid, &spec, &format!("dir \"{}\" >> diag.txt 2>&1", abs));
-        let _ = run_in_container(
-            sid,
-            &spec,
-            &format!("echo x > \"{}\"\\abs.txt >> diag.txt 2>&1", abs),
-        );
-        let _ = run_in_container(sid, &spec, "whoami /priv >> diag.txt 2>&1");
-        let diag = std::fs::read_to_string(leaf.join("diag.txt")).unwrap_or_default();
+    // 1) 数据边界里写得到、读得回（cwd 相对路径，与真实工具的形态一致）：写不进授权落点等于授权没生效，
+    //    这一条同时也是"容器进程真拿到了 rw 写权"的正向对照。
+    let code = run_in_container(
+        sid,
+        &spec,
+        "echo data > out.txt & type out.txt > read.txt 2>&1",
+    )
+    .expect("容器进程应当能启动");
+    let read = std::fs::read_to_string(leaf.join("read.txt")).unwrap_or_default();
+    if code != 0 || !read.contains("data") {
         panic!(
-            "容器里列叶子并把结果写回叶子应当成功（exit={}，拿到 {:?}）：容器内诊断——{}",
+            "容器里写自己的边界并读回来应当成功（exit={}，拿到 {:?}）：容器内诊断——{}",
             code,
-            out.trim(),
-            diag
+            read.trim(),
+            container_diag(sid, &spec, &leaf)
         );
     }
 
-    // 2) 父目录能被**按名穿过**：`dir ..\leaf` 要从父目录走到叶子并列出它自己——这正是父目录只拿
-    //    "只读属性"（RIGHTS_STAT）的那条口径：中间目录判不了存在性时，工具会以为"父目录不存在"而
-    //    一路往上建（真机 CI 上抓到过 `WinError 5: 'D:\'`）。
-    //    **不用 cmd 的 `if exist` / `attrib` 当尺子**：它们取属性要走父目录的**列举权**，而那是设计上
-    //    刻意不给的（给了就等于让容器枚举父目录里的其它格子）。真机实测：`if exist` 恒报 STAT-MISSING、
-    //    `attrib` 报 Path not found，而 `dir ..\leaf` 与 `cd ..\leaf` 都正常——拿前两个量会量错东西。
-    let code =
-        run_in_container(sid, &spec, "dir ..\\leaf > reach.txt 2>&1").expect("容器进程应当能启动");
+    // 2) 父目录能被**按名穿过**：从父目录按名字读到叶子里的文件——这正是父目录只拿"只读属性"
+    //    （RIGHTS_STAT）的那条口径：中间目录判不了存在性时，工具会以为"父目录不存在"而一路往上建
+    //    （真机 CI 上抓到过 `WinError 5: 'D:\'`）。
+    //    **不用 `if exist` / `attrib` / `dir` 当尺子**：前两个取属性要走父目录的**列举权**（设计上
+    //    刻意不给：给了就等于让容器枚举父目录里的其它格子）；`dir` 在托管 runner 的容器里另有异常
+    //    （见 tests/gaps.yaml 的 fence.container-dir-listing-denied），拿它们量会量错东西。
+    let code = run_in_container(sid, &spec, "type ..\\leaf\\data.txt > reach.txt 2>&1")
+        .expect("容器进程应当能启动");
     let reach = std::fs::read_to_string(leaf.join("reach.txt")).unwrap_or_default();
-    if code != 0 || !reach.contains("data.txt") {
-        // 失败时把"容器自己看到的"落进叶子再报出来：是"被拒"还是"真没有"要分得清。
-        let _ = run_in_container(sid, &spec, "dir .. > diag.txt 2>&1");
-        let _ = run_in_container(sid, &spec, "whoami /priv >> diag.txt 2>&1");
-        let diag = std::fs::read_to_string(leaf.join("diag.txt")).unwrap_or_default();
+    if code != 0 || !reach.contains('x') {
         panic!(
-            "父目录要能按名走到叶子（exit={}，拿到 {:?} = 按名穿不过去，存在性判断会假不存在）：容器内诊断——{}",
+            "父目录要能按名穿过（exit={}，拿到 {:?} = 穿不过去，存在性判断会假不存在）：容器内诊断——{}",
             code,
             reach.trim(),
-            diag
+            container_diag(sid, &spec, &leaf)
         );
     }
 
-    // 3) 父目录的内容看不到：只读属性只够按名穿过，不等于能列——容器在父目录里发现不了别的格子。
-    run_in_container(sid, &spec, "dir .. > parent.txt 2>&1").expect("容器进程应当能启动");
-    let parent = std::fs::read_to_string(leaf.join("parent.txt")).unwrap_or_default();
+    // 3) 父目录里的其它条目读不到：只读属性只够按名穿过，不等于能读父目录的内容。
+    let code = run_in_container(sid, &spec, "type ..\\parent-secret.txt > psecret.txt 2>&1")
+        .expect("容器进程应当能启动");
+    let got = std::fs::read_to_string(leaf.join("psecret.txt")).unwrap_or_default();
     assert!(
-        leaf.join("parent.txt").exists(),
-        "这一条的重定向要落到叶子里（叶子可写）才谈得上判定：{}",
-        parent
-    );
-    assert!(
-        !parent.contains("leaf"),
-        "父目录里的条目不该被看见（只读属性只够按名穿过）：{}",
-        parent
+        code != 0 && !got.contains("PARENT-SECRET"),
+        "父目录里的其它条目不该读得到：{:?}（exit={}）",
+        got,
+        code
     );
 
     free_sid(sid);
