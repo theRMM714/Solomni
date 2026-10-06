@@ -13,7 +13,7 @@
 "use strict";
 const fs = require("fs");
 const path = require("path");
-const { execFileSync } = require("child_process");
+const { spawnSync } = require("child_process");
 
 const ROOT = __dirname;
 const BASELINE = path.join(ROOT, "tests", "comment-baseline.json");
@@ -122,8 +122,28 @@ function toByFileRule(findings) {
   return by;
 }
 
+const GIT_TMP = path.join(ROOT, "target", "hygiene-git.tmp");
+
+/** 跑 git 并把 stdout 重定向到**文件**再读回。
+ *  受限会话里管道捕获会被拒（spawnSync EPERM），重定向到文件这条路在普通与受限 shell 里都走得通；
+ *  走不通时抛错，由调用方如实降级——不把「没跑」当「没问题」。 */
 function git(args) {
-  return execFileSync("git", args, { cwd: ROOT, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+  fs.mkdirSync(path.dirname(GIT_TMP), { recursive: true });
+  const fd = fs.openSync(GIT_TMP, "w");
+  let r;
+  try {
+    r = spawnSync("git", args, { cwd: ROOT, stdio: ["ignore", fd, "ignore"] });
+  } finally {
+    fs.closeSync(fd);
+  }
+  if (r.error || r.status !== 0) throw new Error(r.error ? r.error.message : "git 退出码 " + r.status);
+  const text = fs.readFileSync(GIT_TMP, "utf8");
+  try {
+    fs.unlinkSync(GIT_TMP);
+  } catch (e) {
+    // 留在 target/ 里也无妨（那棵树不入库）
+  }
+  return text;
 }
 
 /** 当前四本缺口账里的 id + 非账本文件里引用的 id。 */
@@ -142,20 +162,18 @@ function gapIds() {
 
 /** 已删的缺口 id：git 历史里出现在账本上、现在不在了的那些。取不到 git 就返回 null（如实降级）。 */
 function deletedGapIds() {
-  let shas;
-  try { shas = git(["log", "--format=%H", "--"].concat(LEDGERS)).trim().split(/\r?\n/).filter(Boolean); }
-  catch (e) { return null; }
+  // 一次 git log -p 拿全历史（输出重定向到文件再读：管道会被拒，文件不会，也不会被截断）。
+  let text;
+  try {
+    text = git(["log", "-p", "--unified=0", "--"].concat(LEDGERS));
+  } catch (e) {
+    return null;
+  }
   const live = gapIds();
   const ever = new Set();
-  for (const sha of shas.slice(0, 200)) {
-    for (const f of LEDGERS) {
-      let text;
-      try { text = git(["show", sha + ":" + f]); } catch (e) { continue; }
-      for (const line of text.split(/\r?\n/)) {
-        const m = line.match(/^-\s*id:\s*(\S+)/);
-        if (m) ever.add(m[1]);
-      }
-    }
+  for (const line of text.split(/\r?\n/)) {
+    const m = line.match(/^--\s*id:\s*(\S+)/); // diff 里被删掉的那一行形如：-- id: xxx
+    if (m) ever.add(m[1]);
   }
   return [...ever].filter((id) => !live.has(id));
 }

@@ -61,7 +61,12 @@ node run-tests.js --fence-live
   L4 的真工具场景报 `'python' is not recognized`（看着像产品缺陷，其实是环境）；
 - **改目录 DACL 被拒**（错误码 5）→ 容器围栏装不上，探针只能 env-skip；
 - Node 的**管道 stdio 捕获被拒（EPERM）**→ L4 收尾的围栏回收 `status` 为 null、输出为空，
-  被判成"本机留下了没人管的痕迹"。
+  被判成"本机留下了没人管的痕迹"；同一条还会让**所有"探一探这个工具在不在"的代码集体误判**：
+  L4 现场构建 indexer 报"找不到可用的 C++ 编译器"（其实仓库自带 `.tools/mingw64` 的 g++ 能跑，`stdio: ignore` 下 `status=0`），
+  `git` 之类的子进程也一样起不来。要在这种会话里跑子进程，就把 stdout **重定向到文件**再读
+  （`stdio: ["ignore", fd, "ignore"]`），别用管道。
+  （python 同理：它可能确实装着（例如 `%LOCALAPPDATA%\Python\pythoncore-*\python.exe`），
+  但沙箱拒绝读那个目录，连它依赖的 DLL 都读不到 → 进程以 ENOENT 起来 → 看起来像"没装"。）
 
 判据：`whoami /groups` 里出现 `Mandatory Label\Low Mandatory Level` 就是这种会话。
 **但要查对进程**：有的受限环境里 shell 自己显示 Medium，而**工作区里的二进制**带 Low 完整性标签
