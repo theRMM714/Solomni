@@ -293,6 +293,60 @@ function structuralAudit() {
     }
   };
   checkCodeDocRefs(path.join(ROOT, "src"));
+  // 注释契约（ARCHITECTURE.md 十）：文件头四槽 + 行内限量。**只查已迁移目录**——迁移中，未迁移的
+  // 文件不查也不计违规；清单随迁移增长，全仓迁完连这份清单一起删。
+  const COMMENT_CONTRACT_SCOPE = ["src/kernel/"];
+  const HEADER_SLOTS = ["目的", "管", "不管", "联动"];
+  const COMMENT_FORBIDDEN = ["曾经", "原来", "旧版", "旧实现", "改成", "先是", "后来", "遗留", "以前", "与旧逻辑", "TODO", "FIXME", "待补", "临时", "后续", "暂不"];
+  const checkCommentContract = (dir) => {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      const p = path.join(dir, e.name);
+      if (e.isDirectory()) { checkCommentContract(p); continue; }
+      if (!e.name.endsWith(".rs")) continue;
+      const relF = rel(p);
+      if (!COMMENT_CONTRACT_SCOPE.some((s) => relF.startsWith(s))) continue;
+      const text = fs.readFileSync(p, "utf8");
+      const lines = text.split(/\r?\n/);
+      // 文件头：允许前面只有 #![...] 内部属性与空行
+      let i = 0;
+      while (i < lines.length && (lines[i].trim() === "" || /^\s*#!\[/.test(lines[i]))) i++;
+      const slots = [];
+      while (i < lines.length && lines[i].startsWith("//!")) {
+        const raw = lines[i].slice(3);
+        const body = raw.trim();
+        const hit = HEADER_SLOTS.find((s) => body.startsWith(s + "："));
+        if (hit) { slots.push(hit); i++; continue; }
+        if (/^ {2,}/.test(raw) && slots.length) { i++; continue; } // 槽的续行
+        problems.push(relF + " 文件头第 " + (i + 1) + " 行既不是槽也不是续行：" + body.slice(0, 30));
+        i++;
+      }
+      if (!slots.length) problems.push(relF + " 缺文件头（//! 四槽：目的 / 管 / 不管 / 联动）");
+      else if (slots.join("|") !== HEADER_SLOTS.join("|")) {
+        problems.push(relF + " 文件头的槽不齐或顺序不对：拿到 [" + slots.join(", ") + "]，要 [" + HEADER_SLOTS.join(", ") + "]");
+      }
+      if (text.includes("/*")) problems.push(relF + " 用了块注释（/* */）：改用 /// 或行内 //");
+      // 行内注释：紧贴、连续 ≤ 2 行、单行 ≤ 100 字，且不许出现历史/待办措辞
+      let run = 0;
+      lines.forEach((rawLine, n) => {
+        const t = rawLine.trim();
+        if (t.startsWith("//") && !t.startsWith("///") && !t.startsWith("//!")) {
+          const body = t.replace(/^\/\/ ?/, "");
+          if (body.length > 100) problems.push(relF + ":" + (n + 1) + " 行内注释超过 100 字");
+          const bad = COMMENT_FORBIDDEN.find((w) => body.includes(w));
+          if (bad) problems.push(relF + ":" + (n + 1) + " 行内注释出现「" + bad + "」（历史归 git，待办归缺口账）");
+          run++;
+          return;
+        }
+        if (run) {
+          if (run > 2) problems.push(relF + ":" + (n + 1) + " 连续 " + run + " 行行内注释（上限 2 行）");
+          if (t === "") problems.push(relF + ":" + (n + 1) + " 行内注释后面是空行（要紧贴它解释的那一行）");
+          run = 0;
+        }
+      });
+      if (run > 2) problems.push(relF + " 末尾连续 " + run + " 行行内注释（上限 2 行）");
+    }
+  };
+  checkCommentContract(path.join(ROOT, "src"));
   // 文档分层（AGENTS.md「文档分层与同步」）：门户引用 docs/ 下的细则，细则引用彼此——
   // 两边都要真实存在。只查引用不查正文，避免把文档写法变成门禁。
   // **相对解析**：链接按所在文件的目录解析（门户在根、细则在 docs/<领域>/），所以 docs/ 内部写错的同级引用也会被抓到。

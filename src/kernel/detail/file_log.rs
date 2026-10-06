@@ -1,5 +1,8 @@
-//! 文件日志适配器：实现 kernel 的 Log 端口。
-//! 机制：每次运行在 logs/ 下按时间戳创建一个文件；逐行追加；进程内全局共享。
+//! 目的：文件日志适配器——kernel `Log` 端口的落盘实现。
+//! 管：每次运行在 `logs/` 下按时间戳建一个文件、逐行追加；进程内全局共享同一个句柄。
+//! 不管：什么时候记、记什么级别（调用方决定）；日志轮转与归档。
+//! 联动：端口在 `src/kernel/ports.rs`；由入口层的组合根构造（`src/entry/`）。
+
 use crate::kernel::ports::Log;
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;

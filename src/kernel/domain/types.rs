@@ -1,5 +1,7 @@
-//! 跨业务共享的**事实类型**：只放没有领域逻辑的。
-//! 见 ARCHITECTURE.md §九.6 R6：事实类型只属于 kernel，禁止各业务复制 DTO。
+//! 目的：跨业务共享的事实类型。
+//! 管：只没有领域逻辑的事实——`SessionId` / `Tier` / `ToolOutcome` / 默认预算。
+//! 不管：带领域逻辑的类型（归各自能力）；各业务自造一份 DTO 副本（R6 禁止）。
+//! 联动：由 `src/kernel/api.rs` 重导出；判据见 ARCHITECTURE.md 的「硬要求清单」R6。
 
 use serde::{Deserialize, Serialize};
 

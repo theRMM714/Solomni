@@ -1,5 +1,7 @@
-//! 生成中作业的取消表：**机制**，不认识任何业务概念。
-//! 「停止」不排队、不碰核心状态，所以生成期间也能立刻生效——这是它存在的全部理由。
+//! 目的：生成中作业的取消表——让「停止」在生成期间立刻生效。
+//! 管：登记生成中的作业、按作业名取消。
+//! 不管：命令队列与核心状态（正因如此它才能立刻生效）；谁算一个作业（调用方定）。
+//! 联动：与 `src/kernel/domain/approvals.rs` 同级；由核心持有并驱动（`src/capabilities/conductor/api/`）。
 
 use crate::kernel::api::SessionId;
 use std::collections::HashMap;
