@@ -293,84 +293,28 @@ function structuralAudit() {
     }
   };
   checkCodeDocRefs(path.join(ROOT, "src"));
-  // 注释契约（ARCHITECTURE.md 十）：文件头四槽 + 行内限量。**只查已迁移目录**——迁移中，未迁移的
-  // 文件不查也不计违规；清单随迁移增长，全仓迁完连这份清单一起删。
-  const COMMENT_CONTRACT_SCOPE = ["src/kernel/"];
-  const HEADER_SLOTS = ["目的", "管", "不管", "联动"];
-  const COMMENT_FORBIDDEN = ["曾经", "原来", "旧版", "旧实现", "改成", "先是", "后来", "遗留", "以前", "与旧逻辑", "TODO", "FIXME", "待补", "临时", "后续", "暂不"];
-  const checkCommentContract = (dir) => {
-    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
-      const p = path.join(dir, e.name);
-      if (e.isDirectory()) { checkCommentContract(p); continue; }
-      if (!e.name.endsWith(".rs")) continue;
-      const relF = rel(p);
-      if (!COMMENT_CONTRACT_SCOPE.some((s) => relF.startsWith(s))) continue;
-      const text = fs.readFileSync(p, "utf8");
-      const lines = text.split(/\r?\n/);
-      // 文件头：允许前面只有 #![...] 内部属性与空行
-      let i = 0;
-      while (i < lines.length && (lines[i].trim() === "" || /^\s*#!\[/.test(lines[i]))) i++;
-      const slots = [];
-      while (i < lines.length && lines[i].startsWith("//!")) {
-        const raw = lines[i].slice(3);
-        const body = raw.trim();
-        const hit = HEADER_SLOTS.find((s) => body.startsWith(s + "："));
-        if (hit) { slots.push(hit); i++; continue; }
-        if (/^ {2,}/.test(raw) && slots.length) { i++; continue; } // 槽的续行
-        problems.push(relF + " 文件头第 " + (i + 1) + " 行既不是槽也不是续行：" + body.slice(0, 30));
-        i++;
-      }
-      if (!slots.length) problems.push(relF + " 缺文件头（//! 四槽：目的 / 管 / 不管 / 联动）");
-      else if (slots.join("|") !== HEADER_SLOTS.join("|")) {
-        problems.push(relF + " 文件头的槽不齐或顺序不对：拿到 [" + slots.join(", ") + "]，要 [" + HEADER_SLOTS.join(", ") + "]");
-      }
-      // 附着在 pub 项上的文档块（ARCHITECTURE.md 十.1 的条目层）：首行必须 目的：，其余行必须是
-      // 已知槽或缩进续行——槽外不许有行，散文因此没有地方藏。只强制 pub 项。
-      const ITEM_SLOTS = ["目的", "参数", "返回", "错误", "约束"];
-      let d = 0;
-      while (d < lines.length) {
-        if (!lines[d].trim().startsWith("///")) { d++; continue; }
-        const startDoc = d;
-        while (d < lines.length && lines[d].trim().startsWith("///")) d++;
-        const doc = lines.slice(startDoc, d);
-        let m = d;
-        while (m < lines.length && (lines[m].trim().startsWith("#[") || lines[m].trim() === "")) m++;
-        if (!/^pub(\s|\()/.test((lines[m] ?? "").trim())) continue; // 只强制 pub 项
-        const seen = [];
-        doc.forEach((rawDoc, n) => {
-          const body = rawDoc.trim().slice(3);
-          const text = body.trim();
-          const hit = ITEM_SLOTS.find((s) => text.startsWith(s + "："));
-          if (hit) { seen.push(hit); return; }
-          if (/^ {2,}/.test(body) && seen.length) return; // 槽的续行
-          problems.push(relF + ":" + (startDoc + n + 1) + " pub 项文档的这一行既不是槽也不是续行：" + text.slice(0, 30));
-        });
-        if (seen[0] !== "目的") problems.push(relF + ":" + (startDoc + 1) + " pub 项文档的第一行必须是 目的：…");
-        if (seen.indexOf("目的") !== seen.lastIndexOf("目的")) problems.push(relF + ":" + (startDoc + 1) + " pub 项文档的 目的 槽重复");
-      }
-      if (text.includes("/*")) problems.push(relF + " 用了块注释（/* */）：改用 /// 或行内 //");
-      // 行内注释：紧贴、连续 ≤ 2 行、单行 ≤ 100 字，且不许出现历史/待办措辞
-      let run = 0;
-      lines.forEach((rawLine, n) => {
-        const t = rawLine.trim();
-        if (t.startsWith("//") && !t.startsWith("///") && !t.startsWith("//!")) {
-          const body = t.replace(/^\/\/ ?/, "");
-          if (body.length > 100) problems.push(relF + ":" + (n + 1) + " 行内注释超过 100 字");
-          const bad = COMMENT_FORBIDDEN.find((w) => body.includes(w));
-          if (bad) problems.push(relF + ":" + (n + 1) + " 行内注释出现「" + bad + "」（历史归 git，待办归缺口账）");
-          run++;
-          return;
-        }
-        if (run) {
-          if (run > 2) problems.push(relF + ":" + (n + 1) + " 连续 " + run + " 行行内注释（上限 2 行）");
-          if (t === "") problems.push(relF + ":" + (n + 1) + " 行内注释后面是空行（要紧贴它解释的那一行）");
-          run = 0;
-        }
-      });
-      if (run > 2) problems.push(relF + " 末尾连续 " + run + " 行行内注释（上限 2 行）");
+  // 注释契约（ARCHITECTURE.md 十）：判定只有一处——在 run-hygiene.js 里；这里只做**棘轮**：
+  // 拿当前结果与 tests/comment-baseline.json 比。出现快照里没有的（文件 × 规则）= **新增**，硬失败；
+  // 快照里有、现在已经合规 = **应销账**，同样硬失败（本仓基线的既有规矩：条目不再成立必须销账）。
+  const { scanCommentContract } = require("./run-hygiene.js");
+  const COMMENT_BASELINE = path.join(ROOT, "tests", "comment-baseline.json");
+  const contractNow = scanCommentContract().byFileRule;
+  if (!fs.existsSync(COMMENT_BASELINE)) {
+    problems.push("缺注释契约快照：tests/comment-baseline.json（建它：node run-hygiene.js --tighten）");
+  } else {
+    const baselineRaw = JSON.parse(fs.readFileSync(COMMENT_BASELINE, "utf8"));
+    delete baselineRaw._comment;
+    const added = [];
+    const stale = [];
+    for (const f of Object.keys(contractNow)) {
+      for (const rule of contractNow[f]) if (!(baselineRaw[f] || []).includes(rule)) added.push(f + " :: " + rule);
     }
-  };
-  checkCommentContract(path.join(ROOT, "src"));
+    for (const f of Object.keys(baselineRaw)) {
+      for (const rule of baselineRaw[f]) if (!(contractNow[f] || []).includes(rule)) stale.push(f + " :: " + rule);
+    }
+    for (const a of added) problems.push("注释契约新增违规（快照里没有）：" + a);
+    for (const s of stale) problems.push("注释契约快照应销账（现在已合规）：" + s + "（收紧：node run-hygiene.js --tighten）");
+  }
   // 文档分层（AGENTS.md「文档分层与同步」）：门户引用 docs/ 下的细则，细则引用彼此——
   // 两边都要真实存在。只查引用不查正文，避免把文档写法变成门禁。
   // **相对解析**：链接按所在文件的目录解析（门户在根、细则在 docs/<领域>/），所以 docs/ 内部写错的同级引用也会被抓到。
