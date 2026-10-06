@@ -351,9 +351,8 @@ fn read_only_grants_write_ro_aces_and_revoke_removes_them() {
 }
 
 /// 【残留探针】授权（叶子读写 + 父目录只读属性）→ 撤权后，叶子与父目录上都不得留有该容器 SID
-/// 的**任何**显式 ACE。真机残留过一条只有 SYNCHRONIZE 的 (OI)(CI) ACE
-/// （tests/gaps.yaml 的 fence.leftover-grant-hides-parent：整棵 tests/ 子树因此在受限进程里不可读），
-/// 所以撤净判定不看权限位、只看 SID 在不在场（has_any_ace_for）。
+/// 的**任何**显式 ACE。真机残留过一条只有 SYNCHRONIZE 的 (OI)(CI) ACE，整棵 tests/ 子树因此
+/// 对受限进程不可读，所以撤净判定不看权限位、只看 SID 在不在场（has_any_ace_for）。
 /// 现有撤权测试只盯叶子；这条把父目录一并盯住——grant_targets 的落点清单变了它会先红。
 #[test]
 fn revoke_leaves_no_container_ace_on_leaf_parents() {

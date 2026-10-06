@@ -297,7 +297,7 @@ pub(crate) fn rights_covered(mask: u32, rights: u32) -> bool {
 
 /// 该对象上有没有给这个 SID 的**任何**允许 ACE（不看权限位）。
 /// 用途：残留检查——撤权后哪怕只留一位（真机残留过一条只有 SYNCHRONIZE 的 (OI)(CI) ACE，
-/// 见 tests/gaps.yaml 的 fence.leftover-grant-hides-parent）也算没撤干净；
+/// 整棵子树因此对受限进程不可读）也算没撤干净；
 /// has_ace_for 回答"够不够用"，这条回答"在不在场"。
 pub(crate) fn has_any_ace_for(sid: PSID, path: &Path) -> bool {
     const ACCESS_ALLOWED_ACE_TYPE: u8 = 0;

@@ -61,7 +61,7 @@ node run-tests.js --fence-live
   L4 的真工具场景报 `'python' is not recognized`（看着像产品缺陷，其实是环境）；
 - **改目录 DACL 被拒**（错误码 5）→ 容器围栏装不上，探针只能 env-skip；
 - Node 的**管道 stdio 捕获被拒（EPERM）**→ L4 收尾的围栏回收 `status` 为 null、输出为空，
-  被判成"本机留下了没人管的痕迹"（见 `tests/cross-platform/gaps.yaml` 的 harness.fence-clean-under-restricted-token）。
+  被判成"本机留下了没人管的痕迹"。
 
 判据：`whoami /groups` 里出现 `Mandatory Label\Low Mandatory Level` 就是这种会话。
 **但要查对进程**：有的受限环境里 shell 自己显示 Medium，而**工作区里的二进制**带 Low 完整性标签
