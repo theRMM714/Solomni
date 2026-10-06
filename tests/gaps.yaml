@@ -31,51 +31,6 @@
     而代价是三套原生 API、每平台真机验证，且 CI 起不了 hypervisor（只能真机验 + env-skip）。
     项目成熟、需求更清楚时再做。
 
-- id: fence.per-agent-write-roots
-  scope: global
-  level: T4
-  why: |
-    「垂直分工开发」要求一个 agent 只写自己负责的目录。**核心层已落地**：共享工作区的读 / 提交作用域
-    （内置读写在落点之后过白黑名单；`work_commit` / `work_pull` 越界整条拒绝）；模块目录**默认只读**
-    （`module_write` 授权才整块可写，`userdata/` 恒可写）；私有沙箱永远全权；围栏按同一份派生授权
-    （模块根进 `ro_tree` 递归只读，工作目录只读，写权只来自 `rw`）。
-    **真机现状（本轮查清并补齐）**：
-    - Linux / macOS：`module_dir_is_read_only_but_userdata_is_writable` 与
-      `shared_area_is_outside_the_agent_fence` 由 CI 真跑通过（envSkips=0）；"跨 agent 不可达"由通用的
-      "授权根之外不可达"探针覆盖，不另立重复用例。
-    - Windows：落点单测通过；容器级往返探针过去恒 `env-skip`（判据假阴性，见
-      fence.container-probe-misjudges-appcontainer），现已换成行为对照，并补了模块形态的往返用例
-      `container_roundtrip_keeps_module_read_only_and_peer_unreachable`：模块脚本读得到、模块根里写不进、
-      `userdata/` 写得进、另一席的明文拿不到——**已在普通会话的真机上通过**。
-    剩下的只是三平台 CI 复核（平台专属代码按判据要等 CI 结论）。
-  how: |
-    1) Linux / macOS：探针已在 CI 真跑，无需再补；
-    2) Windows：判据换成行为对照 + 模块形态往返（`ro_tree` = 模块根、`rw` = `userdata/`、`cwd` = 模块根，
-       含"另一席读不到"的对照）——已实施并在真机通过；
-    3) 等三平台 CI 复核后关账（本机只验得了 Windows 侧）。
-  accept: 三平台都能给出「模块目录写被机制拒绝 + userdata 可写 + 跨 agent 不可达」的真机结论；
-    Linux / macOS 已在 CI 满足，Windows 已在真机满足，待 CI 复核。
-  blocked_by: 待 CI 三平台确认（本轮只在本机验了 Windows 侧）
-
-- id: fence.container-probe-misjudges-appcontainer
-  scope: global
-  level: T4
-  why: |
-    **（已实施，待 CI 复核。）**Windows 的容器级往返探针过去用「容器内 `whoami /groups` 里有没有包 SID 组
-    （`S-1-15-2-`）」判"AppContainer 是否真生效"。现代 Windows 上包 SID **不在令牌的组列表里**（在
-    `TokenAppContainerSid` 字段），所以容器真生效也会被判成"本环境没有真正把进程放进 AppContainer"
-    → **恒 `env-skip`**；CI 与普通会话的真机都是这一句，于是被误记成"托管 runner 静默降级 AppContainer"。
-    真机令牌转储（把转储器送进产品自己的容器里跑）：`TokenIsAppContainer=1`、
-    `AppContainerSid` = 产品为该 profile 派生的 SID、`capabilities=0`（默认断网），
-    而同一个进程的 `whoami /groups` 里没有任何 `S-1-15-2-`。
-    同一处还有两个观察面缺陷：判定用 `let _ =` 吞掉 `run_in_container` 的 Err（容器压根没起来也报"环境降级"），
-    容器内命令的输出（`g.txt`）不打印，于是"真降级"与"判据失败"在现场不可区分。
-  how: |
-    已实施：判据换成**行为对照**（授权落点写得进、从父目录按名走得到叶子、父目录的内容看不到），
-    真不生效就硬失败；环境不允许（改不动 ACL、建不出 profile）仍走 env-skip，判据是稳定标记
-    `PROFILE_ENV_BLOCKED_MARK`；容器内命令的 Err 不再吞掉，失败路径会把容器自己的视图打进 panic 消息。
-  accept: 三平台 CI 上该探针不再假性 env-skip，叶子/父目录那几条断言真跑过（本机真机已过）。
-  blocked_by: 待 CI 三平台确认
 
 - id: fence.container-dir-listing-denied
   scope: global
