@@ -603,8 +603,9 @@ fn container_roundtrip_sees_leaf_but_not_parent_content() {
     //    （RIGHTS_STAT）的那条口径：中间目录判不了存在性时，工具会以为"父目录不存在"而一路往上建
     //    （真机 CI 上抓到过 `WinError 5: 'D:\'`）。
     //    **不用 `if exist` / `attrib` / `dir` 当尺子**：前两个取属性要走父目录的**列举权**（设计上
-    //    刻意不给：给了就等于让容器枚举父目录里的其它格子）；`dir` 在托管 runner 的容器里另有异常
-    //    （见 tests/gaps.yaml 的 fence.container-dir-listing-denied），拿它们量会量错东西。
+    //    刻意不给：给了就等于让容器枚举父目录里的其它格子）；`dir` 与 PowerShell 的 `Get-ChildItem`
+    //    在托管 runner 的容器里会被拒（真机实测：同一个叶子上 `for` 枚举与 python 的 `os.listdir` 都正常），
+    //    拿它们量会量错东西。
     let code = run_in_container(sid, &spec, "type ..\\leaf\\data.txt > reach.txt 2>&1")
         .expect("容器进程应当能启动");
     let reach = std::fs::read_to_string(leaf.join("reach.txt")).unwrap_or_default();
@@ -628,223 +629,32 @@ fn container_roundtrip_sees_leaf_but_not_parent_content() {
         code
     );
 
+    // 4) 列自己的产物：容器要在自己的边界里看得见自己的东西。判据用 cmd 的 `for` 枚举（FindFirstFile）——
+    //    **不用 `dir`**：同一叶子上 `dir` 与 PowerShell 的 `Get-ChildItem` 会被拒，`for` 与 python 的 `os.listdir` 正常。
+    let code = run_in_container(sid, &spec, "(for %f in (*) do @echo %f) > listing.txt 2>&1")
+        .expect("容器进程应当能启动");
+    let listing = std::fs::read_to_string(leaf.join("listing.txt")).unwrap_or_default();
+    assert!(
+        code == 0 && listing.contains("data.txt"),
+        "容器里要能列出自己的产物（exit={}，拿到 {:?}）",
+        code,
+        listing
+    );
+    // `dir` 只记录、不断言：它是这个环境的已知异常，环境变了要能在日志里看见。
+    let dir_code =
+        run_in_container(sid, &spec, "dir /b > dir-listing.txt 2>&1").expect("容器进程应当能启动");
+    eprintln!(
+        "[诊断] 同一叶子上的 cmd dir：exit={} 输出={:?}",
+        dir_code,
+        std::fs::read_to_string(leaf.join("dir-listing.txt"))
+            .unwrap_or_default()
+            .trim()
+    );
+
     free_sid(sid);
     release_fence(&spec, &home).expect("撤权应当成功");
     clean(&home).expect("台账回收应当成功");
     // 探针建的容器 profile 也要带走：测试不在本机留痕。
-    assert!(delete_profile(&container), "探针的容器 profile 应当删得掉");
-    discard(&base);
-}
-
-/// 【真机诊断】"容器里列自己的授权落点"走不走得通：一张机制矩阵，把 cmd 的 dir 自身、令牌与权限位、
-/// 环境（卷与解释器）分开记下来（见 tests/gaps.yaml 的 fence.container-dir-listing-denied）。
-/// **只采事实、不判失败**：矩阵决定要不要在授权阶段补权限位。控制组照常断言（自己的产物写得进读得回、
-/// 父目录里的别的条目读不到），免得整条探针变成"怎么都算过"。
-/// 会创建 AppContainer profile（改本机状态），只在 --fence-live（SOLOMNI_FENCE_LIVE=1）下跑。
-#[test]
-fn container_listing_matrix_is_recorded_for_diagnosis() {
-    if std::env::var("SOLOMNI_FENCE_LIVE")
-        .map(|v| v != "1")
-        .unwrap_or(true)
-    {
-        eprintln!(
-            "[探针] 未开启真机围栏测试：container_listing_matrix_is_recorded_for_diagnosis 会创建 AppContainer profile（改本机状态），已跳过；要真跑加 --fence-live"
-        );
-        return;
-    }
-    if !capability().fs {
-        eprintln!(
-            "[探针] 本机不允许改目录 ACL（{}）：列举矩阵探针跳过（不静默当作通过）",
-            capability().note
-        );
-        return;
-    }
-    let base = std::env::temp_dir().join(format!("solomni-listing-probe-{}", std::process::id()));
-    discard(&base);
-    let leaf = base.join("leaf");
-    std::fs::create_dir_all(&leaf).expect("建探针目录");
-    std::fs::write(leaf.join("data.txt"), "x").expect("写探针文件");
-    std::fs::write(base.join("parent-secret.txt"), "PARENT-SECRET").expect("写父目录条目");
-    // 列举脚本写成文件而不是一行命令：命令行里的引号会在 cmd 里再被剥一层，量出来的东西就不是列举了。
-    std::fs::write(
-        leaf.join("listdir.py"),
-        "import os\nprint('|'.join(sorted(os.listdir('.'))))\n",
-    )
-    .expect("写 python 列举脚本");
-    std::fs::write(
-        leaf.join("scandir.py"),
-        "import os\nprint('|'.join(sorted(e.name for e in os.scandir('.'))))\n",
-    )
-    .expect("写 python 枚举脚本");
-    std::fs::write(
-        leaf.join("listdir.js"),
-        "console.log(require('fs').readdirSync('.').join('|'))\n",
-    )
-    .expect("写 node 列举脚本");
-    std::fs::write(leaf.join("listdir.ps1"), "Get-ChildItem -Name\n")
-        .expect("写 powershell 列举脚本");
-    let spec = FenceSpec {
-        agent: "probe-listing".to_string(),
-        private: PathBuf::new(),
-        ro_tree: Vec::new(),
-        rw: vec![leaf.clone()],
-        cwd: leaf.clone(),
-        ro: Vec::new(),
-        net: false,
-    };
-    let container = container_name(&spec);
-    if let Err(e) = ensure_profile(&container) {
-        if e.contains(PROFILE_ENV_BLOCKED_MARK) {
-            eprintln!(
-                "[探针] 本环境不允许建容器 profile（{}）：列举矩阵探针跳过（不静默当作通过）",
-                e
-            );
-            discard(&base);
-            return;
-        }
-        panic!("建容器 profile 失败（不是环境不允许）：{}", e);
-    }
-    let home = base.join(".home");
-    prepare_fence(&spec, "cmd", &home).expect("授权应当成功");
-    // 解释器要按**它自己的命令**再授一次基线，否则那一行会以"找不到解释器"告吹，量错东西。
-    let has_exe = |name: &str| crate::kernel::detail::host_probe::find_exe(name).is_some();
-    if has_exe("python") {
-        prepare_fence(&spec, "python listdir.py", &home).expect("python 基线授权应当成功");
-    }
-    if has_exe("node") {
-        prepare_fence(&spec, "node listdir.js", &home).expect("node 基线授权应当成功");
-    }
-    let sid = container_sid(&container).expect("派生容器 SID");
-
-    let mut cases: Vec<(&str, String, &str)> = vec![
-        (
-            "对照-写读往返",
-            "echo data > rw.txt & type rw.txt > matrix-rw.txt 2>&1".to_string(),
-            "matrix-rw.txt",
-        ),
-        (
-            "dir-b",
-            "dir /b > matrix-dir-b.txt 2>&1".to_string(),
-            "matrix-dir-b.txt",
-        ),
-        (
-            "dir-长格式",
-            "dir > matrix-dir.txt 2>&1".to_string(),
-            "matrix-dir.txt",
-        ),
-        (
-            "dir-绝对路径",
-            format!("dir \"{}\" > matrix-dir-abs.txt 2>&1", leaf.display()),
-            "matrix-dir-abs.txt",
-        ),
-        (
-            "for-枚举",
-            "(for %f in (*) do @echo %f) > matrix-for.txt 2>&1".to_string(),
-            "matrix-for.txt",
-        ),
-        (
-            "whoami-priv",
-            "whoami /priv > matrix-priv.txt 2>&1".to_string(),
-            "matrix-priv.txt",
-        ),
-        (
-            "icacls-自己",
-            "icacls . > matrix-icacls.txt 2>&1".to_string(),
-            "matrix-icacls.txt",
-        ),
-        (
-            "负向对照-父目录别的条目",
-            "type ..\\parent-secret.txt > matrix-parent.txt 2>&1".to_string(),
-            "matrix-parent.txt",
-        ),
-    ];
-    if has_exe("python") {
-        cases.push((
-            "python-listdir",
-            "python listdir.py > matrix-py.txt 2>&1".to_string(),
-            "matrix-py.txt",
-        ));
-        cases.push((
-            "python-scandir",
-            "python scandir.py > matrix-scandir.txt 2>&1".to_string(),
-            "matrix-scandir.txt",
-        ));
-    }
-    if has_exe("node") {
-        cases.push((
-            "node-readdir",
-            "node listdir.js > matrix-node.txt 2>&1".to_string(),
-            "matrix-node.txt",
-        ));
-    }
-    if has_exe("powershell") {
-        cases.push((
-            "powershell-getchilditem",
-            "powershell -NoProfile -File listdir.ps1 > matrix-ps.txt 2>&1".to_string(),
-            "matrix-ps.txt",
-        ));
-    }
-
-    // 外层看得见的事实：落点 DACL（含对象 ACE 与"认不出的条数"）、容器 SID、落点所在卷。
-    eprintln!(
-        "[诊断] 列举矩阵探针落点 {}（临时目录 {}）",
-        leaf.display(),
-        std::env::temp_dir().display()
-    );
-    eprintln!("[诊断] 容器 SID {}", sid_to_string(sid));
-    eprintln!("[诊断] 授权后叶子 DACL {}", dump_aces(&leaf));
-    if let Some(root) = leaf.ancestors().last() {
-        let drive = root.to_string_lossy().trim_end_matches('\\').to_string();
-        match std::process::Command::new("fsutil")
-            .args(["fsinfo", "volumeinfo", &drive])
-            .output()
-        {
-            Ok(out) => eprintln!(
-                "[诊断] 卷信息 {}：{}",
-                drive,
-                String::from_utf8_lossy(&out.stdout).replace(['\r', '\n'], " ")
-            ),
-            Err(e) => eprintln!("[诊断] 卷信息 {}：取不到（{}）", drive, e),
-        }
-    }
-
-    let mut reports: Vec<(&str, i32, String)> = Vec::new();
-    for (tag, command, file) in &cases {
-        let code = run_in_container(sid, &spec, command).expect("容器进程应当能启动");
-        let text = std::fs::read_to_string(leaf.join(file))
-            .unwrap_or_else(|e| format!("（读不到输出文件：{}）", e));
-        reports.push((tag, code, text));
-    }
-    for (tag, code, text) in &reports {
-        let one_line = text.split_whitespace().collect::<Vec<_>>().join(" ");
-        eprintln!("[诊断] 列举 {}：exit={} 输出={}", tag, code, one_line);
-    }
-
-    // 控制组：矩阵要有意义，先证明"这个容器确实能读自己的边界、且读不到父目录的别的格子"。
-    let control = reports
-        .iter()
-        .find(|(tag, _, _)| *tag == "对照-写读往返")
-        .expect("对照行必须在");
-    assert!(
-        control.1 == 0 && control.2.contains("data"),
-        "容器里写自己的边界并读回来应当成功（exit={}，拿到 {:?}）",
-        control.1,
-        control.2
-    );
-    let secret = reports
-        .iter()
-        .find(|(tag, _, _)| *tag == "负向对照-父目录别的条目")
-        .expect("负向对照行必须在");
-    assert!(
-        secret.1 != 0 && !secret.2.contains("PARENT-SECRET"),
-        "父目录里的别的条目不该读得到（exit={}，拿到 {:?}）",
-        secret.1,
-        secret.2
-    );
-
-    free_sid(sid);
-    release_fence(&spec, &home).expect("撤权应当成功");
-    clean(&home).expect("台账回收应当成功");
     assert!(delete_profile(&container), "探针的容器 profile 应当删得掉");
     discard(&base);
 }

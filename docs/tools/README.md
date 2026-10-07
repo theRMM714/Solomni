@@ -25,6 +25,11 @@
 - 平台专属代码本地不编译——`FenceSpec` 字面量必须写全字段（跨平台字面量门禁）；改围栏 → `tests/<平台>/` 探针；改工具表 → `systools/` 与本目录 `tools-and-roles.md`。
 - 围栏的写后核对、回滚与台账在 `src/capabilities/tools/detail/confine/windows/`：改落点形状（`GrantTarget`）或台账字段时，`prepare_fence` / `release_fence` / `clean` / `sweep_orphan_aces` 要一起改。
 - ACE 的读法只有一处：`acl.rs` 的 `ace_parts` 按 ACE 头算 SID 偏移（标准 ACE 与回调 ACE 从第 8 字节起，对象 ACE 再加 Flags(4) 与在场的 GUID）。改覆盖的 ACE 类型或身份形状时，写后核对、诊断转储与 `windows/tests.rs` 的对象 ACE 往返探针要一起看。
+- 容器里**列目录**的判据：同一个授权叶子上，cmd 的 `dir` 与 PowerShell 的 `Get-ChildItem` 会被拒，
+  而 cmd 的 `for` 枚举与 python 的 `os.listdir` / `os.scandir` 正常（真机机制矩阵实测：叶子 DACL
+  给容器的是 Modify，写读往返也通）。所以"列自己的产物"用 `for` 枚举钉住
+  （`container_roundtrip_sees_leaf_but_not_parent_content` 的第四步），`dir` 不是可依赖的列举手段。
+  JS 工具进程在容器里起不来（node 的 realpath 要盘卷根）另记在 `tests/gaps.yaml`。
 - 授权面按**注入的事实**派生：`<module>/userdata/` 有没有，由 workspace 扫描读出并随沙箱注入（domain 不读盘）；没有就不进 `rw`，`standalone` 的缺省工作目录退回模块根。`prepare_fence` 也会跳过不存在的落点、不判整次失败。
 - 核心代理系统工具的待实现规划清单：`systool_gaps.yaml`（仓库根；不是当前工具表，也不替代测试缺口账）。
 

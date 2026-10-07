@@ -31,30 +31,6 @@
     而代价是三套原生 API、每平台真机验证，且 CI 起不了 hypervisor（只能真机验 + env-skip）。
     项目成熟、需求更清楚时再做。
 
-
-- id: fence.container-dir-listing-denied
-  scope: global
-  level: T4
-  why: |
-    CI run 158 的 windows 上，容器里**列自己的授权落点**被拒：`dir /b`（cwd = 授权叶子）报
-    `Access is denied.`（exit 1），而同一个目录里**写文件成功**（`echo x > out.txt` 写下了、报错还被重定向
-    进它），`whoami /priv` 显示 `SeChangeNotifyPrivilege` Enabled，叶子上的 ACE 是 `0x1701FF`（含
-    FILE_LIST_DIRECTORY）。本机（Windows 11，普通会话）同样操作正常。所以"托管 runner 的容器里列目录走不通"
-    是个真实现象，但**根因没有结论**：是 AppContainer 令牌少了什么、还是 cmd 的 `dir` 这类列举在这类环境里
-    另走一条路，得再探。影响面：工具要在自己的边界里列产物（`dir`、Python 的 `os.listdir`）就会撞上。
-    改不了目录 ACL 的会话里，真机探针只能如实跳过，所以结论必须由 CI 的 windows 目标给。
-  how: |
-    1) 诊断矩阵已就位：`container_listing_matrix_is_recorded_for_diagnosis`（windows/tests.rs）在授权落点里
-       依次跑 cmd 的 `dir`（相对 / 长格式 / 绝对路径）、`for` 枚举（FindFirstFile）、python 的
-       `os.listdir` / `os.scandir`、node 的 `fs.readdirSync`、powershell 的 `Get-ChildItem`，
-       并记下 `whoami /priv`、容器内的 `icacls`、叶子 DACL 转储与所在卷信息，逐条以 `[诊断]` 打进报告日志
-       （带"父目录别的条目读不到"的负向对照，免得矩阵量错东西）；
-    2) 看一次 CI 的 windows 日志即可分叉：只有 cmd 的 `dir` 失败 → 判据换成别的机制，并把这条环境事实
-       写进 `docs/tools/README.md`；所有列举机制都失败而写读可行 → 在授权阶段补权限位
-       （`grant_targets` / `RIGHTS_*`）再复跑证明；只有特定卷或环境如此 → 按 accept 第二条如实记进能力报告；
-    3) 结论落地后把"列自己的产物"升格成往返探针里的断言，并删掉本条。
-  accept: 容器里能列出自己授权落点里的产物；或如实说明本环境不支持并列进能力报告。
-  blocked_by: 待 CI 真机结论（本机沙箱改不了目录 ACL）
 - id: module.external-harness-fence-reach
   scope: global
   level: T3
@@ -97,23 +73,20 @@
   accept: 用户能在界面上看到提交历史，并把共享区回滚到任一提交点；回滚后新开的 agent 拉取到的是那一点的内容。
   blocked_by: 缺少实现（呈现面未接入）
 
-- id: fence.ace-set-check-skips-object-aces
+- id: fence.node-tool-cannot-start-in-container
   scope: global
   level: T4
   why: |
-    写后核对是"我们的写入不许弄丢任何原有权限项"的判据，按（ACE 类型, SID, 权限位）集合比对。
-    只认标准允许 / 拒绝 ACE（类型 0/1）时，对象 ACE（SID 前还带 GUID）与回调 ACE 都不在账里——
-    含这类 ACE 的对象上，我们弄丢了它，核对不会报。`windows-sys` 不导出 ACE 类型常量，偏移与身份
-    都得自己算对，所以这一层必须真机钉住（文件 DACL 极少出现对象 ACE，风险窄但确实存在）。
+    真机机制矩阵（windows 目标）里，容器内 `node listdir.js`（cwd = 授权叶子）**根本没起来**：
+    node 的模块解析要 realpath，它的 JS 实现会从盘卷根逐级 lstat，在容器里对 `C:\` 报
+    `EPERM: operation not permitted, lstat 'C:\'`——而盘卷根按设计就不在可达范围里。
+    照着祖先链不授权的口径，这不是 runner 独有：**JS 写的模块工具在容器里能不能跑，目前没有验过**
+    （e2e 的三条真工具只覆盖 python 与 C++，夹具里的 render/report.js 从没被跑过）。
+    同一个格子上 python 的工具进程正常，所以这不是"容器坏了"，而是某类解释器的启动路径另有要求。
   how: |
-    解析口径收敛到 `acl.rs` 的 `ace_parts`：标准 ACE 与回调 ACE 的 SID 从第 8 字节起，对象 ACE
-    （5/6/9/10）还要加上 Flags(4) 与在场的 GUID（按 ACE 头的标志位判断）；写后核对的身份是
-    （类型, SID, 权限位, 对象 GUID, 继承对象 GUID），标准 / 对象 / 回调 ACE 都进集合，布局认不出的
-    如实计数（不猜成标准 ACE）。已落地：
-    1) T1（acl.rs 内联单测）：合成字节覆盖标准 / 对象（两个 GUID、只一个、一个不带）/ 回调 / 未知类型 / 缺字节；
-    2) T4 真机往返 `object_ace_is_covered_by_the_write_then_equal_check`：真写一条对象 ACE → 核对看得见它 →
-       授权往返不弄丢它 → 失败注入证明"弄丢会报"。
-    待做：CI 的 windows 目标上真跑过这两层（本机沙箱改不了目录 ACL，真机探针如实跳过）。
-  accept: 写后核对覆盖对象 ACE；或如实说明本平台的 ACL 写入不会产生或破坏对象 ACE。
-  blocked_by: 待 CI 真机确认（本机沙箱改不了目录 ACL）
-
+    1) 专门量一次 node 在容器里的启动：`node -e` 与 `node <文件>` 两种形态、cwd 取模块根与
+       `<module>/userdata/` 两种，把 node 的 realpath 到底要哪一位记下来（机制矩阵的做法可复用）；
+    2) 结论若指向"node 需要 stat 盘卷根"，就按需要补授权（或如实记为与 cmd 的 `dir` 同类的环境事实）；
+    3) 顺带把 e2e 的"真工具"场景补一条 node 工具（夹具里已有现成的 `render/tools/report.js`）。
+  accept: 容器里 JS 写的模块工具跑通一次完整往返；或如实写明该环境不支持并列进能力报告。
+  blocked_by: 缺少观察面（要专门量一次 node 在容器里的启动路径）
