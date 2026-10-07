@@ -191,6 +191,9 @@ pub struct Live<'a> {
     /// 本会话的裁决队（工具级确认这类"等在工作线程上"的关进它）。
     /// `None` = 这一趟不接工具级确认（照常执行）——测试、讨论席与没有交互前端的生成都走它。
     pub decisions: Option<std::sync::Arc<super::decisions::DecisionDoor>>,
+    /// 目的：本会话的**提问端口**（工具执行层与围栏经它请用户裁决）：走同一条裁决队、**阻塞**等回答。
+    ///   `None` = 这一趟没有可回答的前端（CLI 非交互、端到端夹具、测试、讨论席）——按 fail-closed 拒绝。
+    pub ask: Option<std::sync::Arc<dyn crate::kernel::ports::AskUser>>,
 }
 
 impl Live<'_> {
@@ -490,6 +493,10 @@ pub enum Pending {
     PlanReview,
     /// 节点验收没过：等用户点「继续」重派这些节点。
     NodeBlocked { nodes: Vec<String> },
+    /// **工具层自己发起的一类**（围栏这一环装不上、今后任何底层 yes/no）：消息与选项**由发起方给**，
+    /// 通道不解释内容。与工具级确认同属**等在工作线程上**的那一类——发起方阻塞等回答，不点不继续。
+    /// 装箱：它比其它变体大得多，而这一关本来就只挂几条（不值得让整队每个格子都变宽）。
+    ToolAsk(Box<crate::kernel::api::Ask>),
     /// 工具级确认（`ask` 粒度命中）：这一席的这次调用**在执行前**等用户放行。
     /// 它是**等在工作线程上**的那一类——发起方（工具循环）阻塞等回答，不点不继续。
     ToolApproval {
@@ -546,6 +553,8 @@ impl Pending {
             Pending::PlanReview => "plan_review",
             Pending::NodeBlocked { .. } => "node_blocked",
             Pending::ToolApproval { .. } => "tool_approval",
+            // 工具层自己发起的那一类（围栏这类）：机制名固定，重建材料就是那条问题本身。
+            Pending::ToolAsk(_) => "tool_ask",
         }
     }
 
@@ -557,6 +566,8 @@ impl Pending {
                 serde_json::json!({ "member": member, "question": question })
             }
             Pending::NodeBlocked { nodes } => serde_json::json!({ "nodes": nodes }),
+            // 工具层那一类：重建材料就是那条问题（谁在问 + 消息 + 选项集）。
+            Pending::ToolAsk(ask) => serde_json::to_value(ask).unwrap_or(serde_json::Value::Null),
             Pending::ToolApproval {
                 agent,
                 module,
@@ -601,8 +612,8 @@ impl Pending {
                     })
                     .unwrap_or_default(),
             },
-            // 工具级确认**不重建**：它等在工作线程上，重启后那个等待方已经不存在——
-            // 重建出来的卡没人能做主，等于拿一张答不了卡糊用户（已答过的也不重问）。
+            // 工具级确认与**工具层自己发起的那一类**都**不重建**：它们等在工作线程上，
+            // 重启后那个等待方已经不存在——重建出来的卡没人能做主，等于拿一张答不了卡糊用户。
             _ => return None,
         })
     }
@@ -638,6 +649,8 @@ impl Pending {
                 o(OPT_TOOL_DENY, "拒绝（不执行）"),
                 o(OPT_TOOL_FULL, "放行，且本轮都不再问"),
             ],
+            // 工具层那一类：选项集**由发起方给**（它才知道每条选项真能不能执行），通道原样渲染。
+            Pending::ToolAsk(ask) => ask.options.iter().map(|(id, label)| o(id, label)).collect(),
         }
     }
 
@@ -708,6 +721,14 @@ impl Pending {
                     agent
                 ),
                 args.clone(),
+            ),
+            // 工具层那一类：**消息与选项原样来自发起方**——通道不解释内容，只把三段话与选项渲染出来。
+            Pending::ToolAsk(ask) => (
+                ask.role.as_str(),
+                ask.name.clone(),
+                ask.title.clone(),
+                ask.body.clone(),
+                ask.detail.clone(),
             ),
         };
         DecisionCard {

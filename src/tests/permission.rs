@@ -350,7 +350,7 @@ fn ask_tools_are_confirmed_before_execution() {
         full: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         confirm: &mut deny,
     };
-    let done = run_batch(&mut tools, &plan, Some(&mut gate), &mut sink);
+    let done = run_batch(&mut tools, &plan, Some(&mut gate), None, &mut sink);
     assert_eq!(asked, vec!["grep".to_string()], "ask 命中要问用户");
     assert!(!done[0].1.ok);
     assert!(
@@ -371,7 +371,7 @@ fn ask_tools_are_confirmed_before_execution() {
         full: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         confirm: &mut allow,
     };
-    let done = run_batch(&mut tools, &plan, Some(&mut gate), &mut sink);
+    let done = run_batch(&mut tools, &plan, Some(&mut gate), None, &mut sink);
     assert!(done[0].1.ok, "{}", done[0].1.output);
     assert_eq!(
         runner.calls.lock().expect("锁").len(),
@@ -394,9 +394,193 @@ fn ask_tools_are_confirmed_before_execution() {
         (Some("m0".to_string()), "grep".to_string(), "{}".to_string()),
         (Some("m0".to_string()), "grep".to_string(), "{}".to_string()),
     ];
-    let done = run_batch(&mut tools, &three, Some(&mut gate), &mut sink);
+    let done = run_batch(&mut tools, &three, Some(&mut gate), None, &mut sink);
     assert!(done.iter().all(|(_, o)| o.ok), "full 之后都要执行");
     assert_eq!(asked_times, 1, "full 之后本轮不再问");
+}
+
+/// 工具层提问端口**并入裁决通道**（端到端一条）：发起方（工具执行层）自己推问题 + 选项集 →
+/// 卡进**同一条队**（gate = tool_ask）→ 用户按**同一条回答命令**作答 → 选项 id 回到发起方。
+/// 覆盖三态：选"本轮无围栏跑一次"才执行 / 选"放弃"不执行 / 整队作废（停止 = 拒绝）不执行；
+/// 外加没有可回答的前端那一路（fail-closed：不执行）。
+#[test]
+fn tool_layer_ask_rides_the_decision_channel() {
+    use crate::capabilities::conductor::api::{ConductorHandle, Ops, Output};
+    use crate::capabilities::session::api::SessionEvent;
+    use crate::capabilities::tools::domain::fence::{OPT_FENCE_ABORT, OPT_FENCE_UNFENCED};
+    use crate::tests::builders::AskingRunner;
+    use crate::tests::doubles::{abs, core_with_runner, decl, gw, module_of};
+    use crate::tests::prelude::*;
+    use std::sync::Arc;
+
+    /// 跑一次"这一席的围栏装不上，先问用户"的生成。
+    /// `answer = Some(选项 id)` 就等卡进队后按它作答；`stop = true` 则等卡进队后按**停止**（整队作废）。
+    /// 返回：事件、工具行回执、"问过几次"、"真跑了几次"、那张卡的标题与详情。
+    fn ask_case(
+        allow_cards: bool,
+        answer: Option<&str>,
+        stop: bool,
+    ) -> (Vec<SessionEvent>, Vec<String>, usize, usize, String) {
+        // 发起方的规则：**只有**"本轮无围栏跑一次"才真跑；别的答案（放弃 / 没有回答）都不跑。
+        let runner = Arc::new(AskingRunner::new(OPT_FENCE_UNFENCED));
+        let mut member = BTreeMap::new();
+        member.insert(
+            "a".to_string(),
+            vec![
+                "{\"type\":\"tool\",\"module\":\"a\",\"name\":\"grep\",\"args\":{}}".to_string(),
+                "{\"type\":\"say\",\"text\":\"做完了\"}".to_string(),
+            ],
+        );
+        let mut a = module_of("a");
+        a.root = abs(&["mods", "a"]);
+        a.manifest
+            .tools
+            .insert("grep".to_string(), decl("python tools/grep.py"));
+        let handle = ConductorHandle::spawn(core_with_runner(
+            vec![a],
+            gw(member, vec!["[]".into()]),
+            Arc::clone(&runner),
+        ))
+        .expect("起核心线程");
+        // 有交互前端在服务：工具层的提问端口接进裁决队（没有它这一趟就问不了）。
+        if allow_cards {
+            handle.allow_tool_cards();
+        }
+        let ops = Ops::from_handle(&handle);
+        let sid = ops
+            .sessions
+            .create_work(work("w", WorkMode::Single, &["a"]))
+            .expect("建会话")
+            .0
+            .sid;
+        let answerer = {
+            let ops = ops.clone();
+            let sid = sid.clone();
+            let answer = answer.map(|s| s.to_string());
+            std::thread::spawn(move || {
+                for _ in 0..2000 {
+                    if let Ok(Some(q)) = ops.sessions.open_queue(&sid) {
+                        assert_eq!(
+                            q.card.envelope.role, "tools",
+                            "谁在问：工具层（与工具级确认同一信封）"
+                        );
+                        let ids: Vec<String> =
+                            q.card.options.iter().map(|o| o.id.clone()).collect();
+                        assert_eq!(
+                            ids,
+                            vec![OPT_FENCE_UNFENCED.to_string(), OPT_FENCE_ABORT.to_string()],
+                            "选项 id 是契约（发起方给，通道原样渲染）"
+                        );
+                        if stop {
+                            // 停止 = 拒绝：整队作废，等待方解开、按拒绝收场。
+                            let _ = ops.sessions.stop(&sid);
+                            return true;
+                        }
+                        // 回答走**唯一那条命令**（卡号 + 选项 id），处置归发起方。
+                        ops.sessions
+                            .answer_card(&sid, &q.card.id, answer.as_deref().unwrap_or(""), "")
+                            .expect("按选项作答");
+                        return true;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(2));
+                }
+                false
+            })
+        };
+        ops.sessions
+            .say(&sid, "干活", Output::Final)
+            .expect("跑一回合");
+        let reached = answerer.join().expect("作答线程");
+        let (batches, _head, _oldest) = handle.events().snapshot(Some(&sid), 0);
+        let events: Vec<SessionEvent> = batches.into_iter().flat_map(|l| l.events).collect();
+        let outs: Vec<String> = crate::tests::builders::tool_views(&events)
+            .into_iter()
+            .map(|v| v.output)
+            .collect();
+        let asked = runner.asked.lock().expect("锁").len();
+        let ran = runner.calls.lock().expect("锁").len();
+        let card = events
+            .iter()
+            .find_map(|e| match e {
+                SessionEvent::DecisionCard { card, gate, .. } if gate == "tool_ask" => {
+                    Some(format!("{}｜{}", card.message.title, card.message.detail))
+                }
+                _ => None,
+            })
+            .unwrap_or_default();
+        assert_eq!(
+            reached, allow_cards,
+            "有前端就要等到卡（并作答/停止）；没有前端就该没有卡"
+        );
+        // 卡与回答都落盘（会话的事实）：重启后按转录重建时，已答过的不重问。
+        if allow_cards && !stop {
+            let (_, saved) = ops.history.open(&sid).expect("读转录");
+            let kinds: Vec<String> = saved
+                .iter()
+                .filter_map(|ev| {
+                    ev.get("type")
+                        .and_then(|t| t.as_str())
+                        .map(|s| s.to_string())
+                })
+                .collect();
+            assert!(
+                kinds.iter().any(|k| k == "decision_card")
+                    && kinds.iter().any(|k| k == "decision_answer"),
+                "工具层的卡与它的回答都要落盘：{:?}",
+                kinds
+            );
+        }
+        (events, outs, asked, ran, card)
+    }
+
+    // ① 选"本轮无围栏跑一次"：工具真的执行了一次，回执如实标为无围栏。
+    let (events, outs, asked, ran, card) = ask_case(true, Some(OPT_FENCE_UNFENCED), false);
+    assert_eq!(asked, 1, "要问一次：{:?}", outs);
+    assert_eq!(ran, 1, "选了跑一次才执行：{:?}", outs);
+    assert!(card.contains("围栏的这一环装不上"), "{}", card);
+    assert!(card.contains("错误码 5"), "详情要写清缺什么前提：{}", card);
+    assert!(
+        outs.iter().any(|o| o.contains("无围栏跑了一次")),
+        "回执要如实说这次是无围栏跑的：{:?}",
+        outs
+    );
+    let cards = events
+        .iter()
+        .filter(|e| matches!(e, SessionEvent::DecisionCard { gate, .. } if gate == "tool_ask"))
+        .count();
+    assert_eq!(cards, 1, "一次提问推一张卡（同一条队，不是第二条通道）");
+
+    // ② 选"放弃这次调用"：不执行，回执如实说没执行。
+    let (_ev, outs, asked, ran, _card) = ask_case(true, Some(OPT_FENCE_ABORT), false);
+    assert_eq!(asked, 1, "{:?}", outs);
+    assert_eq!(ran, 0, "放弃之后不许执行：{:?}", outs);
+    assert!(
+        outs.iter().any(|o| o.contains("没有执行")),
+        "回执要如实：{:?}",
+        outs
+    );
+
+    // ③ 用户按停止：整队作废 = 拒绝（不是放行），工具不执行。
+    let (_ev, outs, asked, ran, _card) = ask_case(true, None, true);
+    assert_eq!(asked, 1, "{:?}", outs);
+    assert_eq!(ran, 0, "停止 = 拒绝，不许执行：{:?}", outs);
+
+    // ④ 没有可回答的前端（纯终端 / e2e）：没有可点的选项 = 不执行（fail-closed）。
+    let (events, outs, asked, ran, card) = ask_case(false, None, false);
+    assert_eq!(asked, 0, "没有前端就没人能答，不发起裁决");
+    assert_eq!(ran, 0, "不执行：{:?}", outs);
+    assert!(card.is_empty(), "没有前端不该推卡：{}", card);
+    assert!(
+        outs.iter().any(|o| o.contains("没有可回答的前端")),
+        "回执要如实说清为什么没执行：{:?}",
+        outs
+    );
+    assert!(
+        !events
+            .iter()
+            .any(|e| matches!(e, SessionEvent::DecisionCard { gate, .. } if gate == "tool_ask")),
+        "没有可回答的前端时一张卡都不该进队"
+    );
 }
 
 /// 裁决队：先来后到（只有队首可答）、答案校验（旧卡 / 卡上没有的选项都挡下）、整队作废解开等待方。

@@ -1,5 +1,10 @@
 use super::*;
 
+/// 授权应当成立：必要落点全授上（不成立就把结论打出来——它是这一路的判据）。
+fn expect_granted(prep: &FencePrep, what: &str) {
+    assert!(prep.ok(), "{}：必要落点授不上 {:?}", what, prep.blocked);
+}
+
 /// 把对象 DACL 里的 ACE 逐条转储成可读文本（残留调查用：原始权限位 + 继承标志 + SID + 对象 GUID）。
 /// 走 acl_scan：**偏移与认不出的条数都由它一处给出**，诊断不会另抄一套读法而看不出对象 ACE。
 fn dump_aces(path: &Path) -> String {
@@ -166,31 +171,50 @@ fn grant_targets_include_parents_with_stat_only() {
         net: false,
     };
     let targets = grant_targets(&spec);
-    let find = |p: &std::path::Path| targets.iter().find(|(x, _, _, _)| x == p).cloned();
+    let find = |p: &std::path::Path| targets.iter().find(|t| t.path == p).cloned();
     // 叶子：读写根递归、只读根不递归。
     assert_eq!(
-        find(&dir).map(|(_, r, rec, inh)| (r, rec, inh)),
+        find(&dir).map(|t| (t.rights, t.recursive, t.inherit)),
         Some((RIGHTS_RW, true, true)),
         "读写叶子要递归授权"
     );
+    let shared = std::env::temp_dir()
+        .join("solomni-grant-targets")
+        .join("shared");
     assert_eq!(
-        find(
-            &std::env::temp_dir()
-                .join("solomni-grant-targets")
-                .join("shared")
-        )
-        .map(|(_, r, rec, inh)| (r, rec, inh)),
+        find(&shared).map(|t| (t.rights, t.recursive, t.inherit)),
         Some((RIGHTS_RO, false, true)),
         "用户授权的只读根不递归"
+    );
+    // 必要性判据：**用户授权的只读根**是可选落点（授不上只记事实），其余叶子都是必要落点
+    // （缺了这次命令在容器里起不来，或这次执行做不了该做的事）——判据见 docs/tools/README.md。
+    assert_eq!(
+        find(&dir).map(|t| t.part),
+        Some(FencePart::DataBoundary),
+        "数据边界叶子"
+    );
+    assert_eq!(
+        find(&shared).map(|t| t.part),
+        Some(FencePart::AuthorizedRead)
+    );
+    assert!(
+        find(&dir).expect("读写叶子").part.necessary(),
+        "数据边界是必要落点"
+    );
+    assert!(
+        !find(&shared).expect("只读根").part.necessary(),
+        "用户授权的只读根是可选落点（授不上只记事实）"
     );
     // 父目录：只读属性、不递归、**不继承**——继承会把 ACE 传播进整棵子树，
     // 撤权断链时残留面就是整棵子树。
     for leaf in [&dir, &module_root] {
         let parent = leaf.parent().expect("叶子有父目录").to_path_buf();
         let got = find(&parent).expect("父目录要在落点清单里");
-        assert_eq!(got.1, RIGHTS_STAT, "父目录只授读属性：{:?}", parent);
-        assert!(!got.2, "父目录不递归：{:?}", parent);
-        assert!(!got.3, "父目录不继承：{:?}", parent);
+        assert_eq!(got.rights, RIGHTS_STAT, "父目录只授读属性：{:?}", parent);
+        assert!(!got.recursive, "父目录不递归：{:?}", parent);
+        assert!(!got.inherit, "父目录不继承：{:?}", parent);
+        assert_eq!(got.part, FencePart::Parent);
+        assert!(!got.part.necessary(), "父目录是可选落点");
         assert!(
             !rights_covered(RIGHTS_STAT, FILE_GENERIC_READ),
             "读属性不等于能读内容（只够判断存在性）"
@@ -219,7 +243,7 @@ fn grant_targets_keep_module_read_only_and_cwd_read_only() {
     let has = |p: &std::path::Path, r: u32, rec: bool, inh: bool| {
         targets
             .iter()
-            .any(|(x, rr, rc, ii)| x == p && *rr == r && *rc == rec && *ii == inh)
+            .any(|t| t.path == p && t.rights == r && t.recursive == rec && t.inherit == inh)
     };
     assert!(
         has(&module, RIGHTS_RO, true, true),
@@ -262,7 +286,7 @@ fn grants_are_written_when_the_environment_allows_it() {
     // 台账落在探针自己的 base 里（不碰真实 .home/）；产品根 = base，所以落点在根内走快照。
     let home = base.join(".home");
     let outcome = prepare_fence(&spec, "cmd", &home);
-    assert!(outcome.is_ok(), "授权应当成功：{:?}", outcome.err());
+    expect_granted(&outcome, "授权应当成功");
     let rec = load_record(&home);
     assert!(
         rec.snapshots.iter().any(|(p, _)| Path::new(p) == target),
@@ -300,7 +324,7 @@ fn revoke_removes_the_container_ace_from_the_given_roots() {
         net: false,
     };
     let home = base.join(".home");
-    prepare_fence(&spec, "cmd", &home).expect("授权应当成功");
+    expect_granted(&prepare_fence(&spec, "cmd", &home), "授权应当成功");
     let sid = container_sid(&container_name(&spec)).expect("派生容器 SID");
     assert!(
         has_ace_for(sid, &target, RIGHTS_RW),
@@ -342,7 +366,7 @@ fn read_only_grants_write_ro_aces_and_revoke_removes_them() {
         net: false,
     };
     let home = base.join(".home");
-    prepare_fence(&spec, "cmd", &home).expect("授权应当成功");
+    expect_granted(&prepare_fence(&spec, "cmd", &home), "授权应当成功");
     let sid = container_sid(&container_name(&spec)).expect("派生容器 SID");
     assert!(has_ace_for(sid, &ro, RIGHTS_RO), "只读根上要有只读 ACE");
     assert!(
@@ -386,7 +410,7 @@ fn revoke_leaves_no_container_ace_on_leaf_parents() {
         net: false,
     };
     let home = base.join(".home");
-    prepare_fence(&spec, "cmd", &home).expect("授权应当成功");
+    expect_granted(&prepare_fence(&spec, "cmd", &home), "授权应当成功");
     let sid = container_sid(&container_name(&spec)).expect("派生容器 SID");
     // 诊断输出用 [诊断] 前缀：门禁只把 [探针] 当 env-skip，别让这两行把"跳过数"充大。
     eprintln!("[诊断] 授权后父目录 {}", dump_aces(&base));
@@ -578,7 +602,7 @@ fn container_roundtrip_sees_leaf_but_not_parent_content() {
         panic!("建容器 profile：{}", e);
     }
     let home = base.join("ledger");
-    prepare_fence(&spec, "cmd", &home).expect("授权应当成功");
+    expect_granted(&prepare_fence(&spec, "cmd", &home), "授权应当成功");
     let sid = container_sid(&container).expect("派生容器 SID");
 
     // 1) 数据边界里写得到、读得回（cwd 相对路径，与真实工具的形态一致）：写不进授权落点等于授权没生效，
@@ -712,7 +736,7 @@ fn container_roundtrip_keeps_module_read_only_and_peer_unreachable() {
         panic!("建容器 profile：{}", e);
     }
     let home = base.join("ledger");
-    prepare_fence(&spec, "cmd", &home).expect("授权应当成功");
+    expect_granted(&prepare_fence(&spec, "cmd", &home), "授权应当成功");
     let sid = container_sid(&container).expect("派生容器 SID");
 
     // ① 模块目录读得到、userdata 写得进：一条命令验两件事（脚本内容经重定向落进 userdata）。
@@ -838,12 +862,13 @@ fn container_runs_a_node_module_tool_with_realpath_skipped() {
     }
     let home = base.join("ledger");
     let command = "node tools/report.js userdata/report.txt";
-    if let Err(e) = prepare_fence(&spec, command, &home) {
+    let prep = prepare_fence(&spec, command, &home);
+    if let Some(blocked) = &prep.blocked {
         // 解释器目录（PATH 里那个 node 的安装处）授不上权限时，容器里读不到解释器，这条链路本机做不了：
         // 环境结论，如实跳过。授权代码真坏了会被同族的往返探针响亮抓住（它们用的是系统里的 cmd）。
         eprintln!(
             "[探针] 本机给授权落点写不了权限（{}）：node 形态往返探针跳过（不静默当作通过）",
-            e
+            blocked.line()
         );
         if let Err(e) = release_fence(&spec, &home) {
             eprintln!("[诊断] 撤权未完成（{}）：要收尾请跑 --fence-clean", e);
@@ -1039,7 +1064,7 @@ fn journal_records_snapshot_and_grant_before_touching_acl() {
         ro: Vec::new(),
         net: false,
     };
-    prepare_fence(&spec, "cmd", &home).expect("授权应当成功");
+    expect_granted(&prepare_fence(&spec, "cmd", &home), "授权应当成功");
     let rec = load_record(&home);
     assert!(
         rec.snapshots.iter().any(|(p, _)| Path::new(p) == target),
@@ -1119,11 +1144,7 @@ fn missing_grant_target_is_skipped_and_not_journaled() {
     };
     let home = base.join(".home");
     let outcome = prepare_fence(&spec, "cmd", &home);
-    assert!(
-        outcome.is_ok(),
-        "不存在的落点应跳过、不判整次失败：{:?}",
-        outcome
-    );
+    expect_granted(&outcome, "不存在的落点应跳过、不判整次失败");
     let rec = load_record(&home);
     assert!(
         !rec.snapshots.iter().any(|(p, _)| Path::new(p) == absent),
@@ -1191,10 +1212,12 @@ fn journal_failure_blocks_the_acl_write() {
         net: false,
     };
     let outcome = prepare_fence(&spec, "cmd", &home);
-    assert!(
-        outcome.is_err(),
-        "台账落不了盘时必须如实失败：{:?}",
-        outcome
+    // 台账落不了盘 = **必要**的一环走不动：如实进结论（调用方据此问用户或拒绝，不许降级）。
+    assert_eq!(
+        outcome.blocked.as_ref().map(|b| b.part),
+        Some(FencePart::Ledger),
+        "台账落不了盘必须如实报成必要落点授不上：{:?}",
+        outcome.blocked
     );
     let sid = container_sid(&container_name(&spec)).expect("派生容器 SID");
     let wrote = has_ace_for(sid, &target, RIGHTS_RW);

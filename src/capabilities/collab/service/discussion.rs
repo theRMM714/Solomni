@@ -345,6 +345,8 @@ impl Discussion {
             &mut discard,
             // 讨论席只跑只读核实工具：不接工具级确认（要问也只会在执行席发生）。
             None,
+            // 讨论席也没有可回答的前端：工具层要问就得靠"没有提问端口 = fail-closed 拒绝"。
+            None,
             &turn,
             true,
         );

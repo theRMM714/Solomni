@@ -76,6 +76,32 @@ impl ConductorHandle {
             .store(true, std::sync::atomic::Ordering::Relaxed);
     }
 
+    /// 目的：这个会话的**工具层提问端口**：一张卡的登记 + 外送/落盘 + 停会话，全走同一个会话的那条道。
+    /// 参数：`door` = 该会话的裁决队（与核心各关卡共用）；`bus` / `persister` = 卡的外送与落盘。
+    fn session_ask(
+        &self,
+        door: &Arc<crate::capabilities::session::api::DecisionDoor>,
+        sid: &str,
+        bus: Arc<EventBus>,
+        persister: crate::capabilities::conductor::service::Persister,
+    ) -> Arc<dyn crate::kernel::ports::AskUser> {
+        let owner = sid.to_string();
+        let emit: Box<dyn Fn(SessionEvent) + Send + Sync> = Box::new(move |ev: SessionEvent| {
+            bus.push(&owner, std::slice::from_ref(&ev));
+            if let Some(warn) = persister.persist(std::slice::from_ref(&ev)) {
+                bus.push(&owner, std::slice::from_ref(&SessionEvent::Notice(warn)));
+            }
+        });
+        Arc::new(
+            crate::capabilities::conductor::service::ask_user::SessionAsk::new(
+                Arc::clone(door),
+                sid,
+                emit,
+                self.clone(),
+            ),
+        )
+    }
+
     /// 目的：这个会话的**裁决队**（工具级确认进它）：只有接了交互前端才给——否则这一趟不接确认。
     /// 约束：在**派发之前**取（生成线程一开始就可能要问），取的是同一份句柄。
     fn decisions_of(
@@ -260,6 +286,10 @@ impl ConductorHandle {
         bus.push(sid, std::slice::from_ref(&start_working));
         // ② 工作线程：跑生成。短暂事件（流式增量 / 工具行）直送事件台——它是独立锁，不进核心队列。
         let decisions = self.decisions_of(sid)?;
+        // 工具层的提问端口：与工具级确认**同一条通道**（同一份裁决队）——没有交互前端就没有它。
+        let ask = decisions
+            .as_ref()
+            .map(|door| self.session_ask(door, sid, Arc::clone(&bus), persister.clone()));
         let worker = {
             let sid = sid.to_string();
             let bus = Arc::clone(&bus);
@@ -279,6 +309,7 @@ impl ConductorHandle {
                         cancel,
                         emit: &mut emit,
                         decisions,
+                        ask,
                     };
                     // 逐轮外送 + 边落盘：一轮跑完就上屏并落盘（中途刷新页面因此看得到已产生的部分）。
                     // seq 取**最后一次**入台的序号：命令回包按它给订阅起点。
@@ -409,6 +440,10 @@ impl ConductorHandle {
         let child_bus = Arc::clone(&self.bus);
         let child_sid = child.clone();
         let decisions = self.decisions_of(&child)?;
+        // 工具层的提问端口：这一席的围栏装不上时经它问用户（与工具级确认同一条队）。
+        let ask = decisions
+            .as_ref()
+            .map(|door| self.session_ask(door, &child, Arc::clone(&bus), persister.clone()));
         let joined = std::thread::Builder::new()
             .name("solomni-member".to_string())
             .spawn(move || {
@@ -426,6 +461,7 @@ impl ConductorHandle {
                     cancel: Arc::clone(&cancel),
                     emit: &mut emit,
                     decisions,
+                    ask,
                 };
                 // 权威行与通知也进它自己的台，并在产出的当下落盘（重建与实时同源）。
                 let mut sink = |ev: crate::capabilities::session::api::SessionEvent| {

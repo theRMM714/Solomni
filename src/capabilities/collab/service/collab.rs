@@ -464,6 +464,8 @@ impl CollabSession {
             Pending::ConfirmSlate => "代拟名单待用户确认。".to_string(),
             // 工具级确认不经过"判意图明确"这条路（它的处置是放行 / 拒绝，不是开不开工）。
             Pending::ToolApproval { tool, .. } => format!("工具级确认：{} 要不要放行。", tool),
+            // 工具层自己发起的那一类（围栏这类）同样不走"判意图明确"：它的处置在发起方那边。
+            Pending::ToolAsk(ask) => format!("工具层在问：{}。", ask.title),
             Pending::ConfirmBegin => "名单已定，等用户确认开始讨论。".to_string(),
         }
     }

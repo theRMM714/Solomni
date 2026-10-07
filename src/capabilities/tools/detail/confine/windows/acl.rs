@@ -437,9 +437,32 @@ pub(crate) fn interpreter_dirs(command: &str) -> Vec<PathBuf> {
     super::super::interpreter_dirs(command)
 }
 
-/// 目的：一个授权落点（路径, 权限位, 是否递归整树, ACE 是否被子项继承）。
-/// 约束：把 grant_targets 的元组收成一个名字，prepare / release / 回滚共用同一份形状。
-pub(crate) type GrantTarget = (PathBuf, u32, bool, bool);
+/// 目的：一个授权落点：**哪一环**（决定授不上时能不能降级）+ 路径 + 权限位 + 递归与继承。
+/// 约束：把落点收成一个名字，prepare / release / 回滚与探针共用同一份形状。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct GrantTarget {
+    pub(crate) path: PathBuf,
+    pub(crate) rights: u32,
+    pub(crate) recursive: bool,
+    pub(crate) inherit: bool,
+    /// 目的：这一环是什么（必要 / 可选的判据只在 `FencePart::necessary`）。
+    pub(crate) part: FencePart,
+}
+
+/// 目的：一个**读写叶子**是哪一环：私有沙箱 / 模块目录与 cwd 之下 / 其余数据边界。
+/// 约束：判据按策略侧派生的路径比（沙箱、模块目录、cwd 都不是猜出来的），三类**都是必要落点**——
+///   区别只在给用户看时说不说得清缺的是哪一环。
+fn rw_part(spec: &FenceSpec, path: &Path) -> FencePart {
+    if !spec.private.as_os_str().is_empty() && path == spec.private {
+        return FencePart::Sandbox;
+    }
+    let under =
+        |root: &Path| !root.as_os_str().is_empty() && (path == root || path.starts_with(root));
+    if under(&spec.cwd) || spec.ro_tree.iter().any(|m| under(m)) {
+        return FencePart::Module;
+    }
+    FencePart::DataBoundary
+}
 
 /// 围栏要授权的全部落点：数据边界叶子（读写 / 用户授权的只读）+ **它们的父目录**（只读属性）。
 ///
@@ -455,9 +478,16 @@ pub(crate) type GrantTarget = (PathBuf, u32, bool, bool);
 pub(crate) fn grant_targets(spec: &FenceSpec) -> Vec<GrantTarget> {
     let mut todo: Vec<GrantTarget> = Vec::new();
     let mut leaves: Vec<GrantTarget> = Vec::new();
+    let leaf = |path: &Path, rights: u32, recursive: bool, part: FencePart| GrantTarget {
+        path: path.to_path_buf(),
+        rights,
+        recursive,
+        inherit: true,
+        part,
+    };
     for root in &spec.rw {
         if !root.as_os_str().is_empty() {
-            leaves.push((root.clone(), RIGHTS_RW, true, true));
+            leaves.push(leaf(root, RIGHTS_RW, true, rw_part(spec, root)));
         }
     }
     // 用户显式授权的只读根（`fence_read`）：只写只读 ACE，**授给该 agent 自己的容器 SID**。
@@ -465,29 +495,35 @@ pub(crate) fn grant_targets(spec: &FenceSpec) -> Vec<GrantTarget> {
     // 只读根不递归：用户可能授一个很大的目录（例如项目根），递归会改整棵树的 DACL。
     for root in &spec.ro {
         if !root.as_os_str().is_empty() {
-            leaves.push((root.clone(), RIGHTS_RO, false, true));
+            leaves.push(leaf(root, RIGHTS_RO, false, FencePart::AuthorizedRead));
         }
     }
     // 只读**子树**（模块目录默认只读）：必须递归可读（工具脚本在目录里），所以 recursive + inherit。
     for root in &spec.ro_tree {
         if !root.as_os_str().is_empty() {
-            leaves.push((root.clone(), RIGHTS_RO, true, true));
+            leaves.push(leaf(root, RIGHTS_RO, true, FencePart::Module));
         }
     }
     // 工作目录（模块根）：工具进程要能在里面起（读 + 执行），但**不因此获得写**。
     // 已授权可写的模块同时也在 rw 里，那一条（更早入列）给的写权才是准的。
     if !spec.cwd.as_os_str().is_empty() {
-        leaves.push((spec.cwd.clone(), RIGHTS_RO, true, true));
+        leaves.push(leaf(&spec.cwd, RIGHTS_RO, true, FencePart::Cwd));
     }
-    // 父目录：只读属性、不递归、**不继承**（元组末位是继承标志）。同一个父目录被多个叶子共用时
+    // 父目录：只读属性、不递归、**不继承**（`inherit` 是继承标志）。同一个父目录被多个叶子共用时
     // 靠调用方的去重表收口。不继承是为了把残留面收敛到父目录本身：带 (OI)(CI)
     // 的 ACE 会传播进已存在的子项、再传给之后新建的子项——一旦撤权断链（进程被杀、台账丢失），
     // 受污染的就是整棵子树；不继承把最坏残留面收敛到父目录本身，而新建子项反正会拿到自己的
     // 授权，不需要它。
-    for (leaf, _, _, _) in &leaves {
-        if let Some(parent) = leaf.parent() {
+    for one in &leaves {
+        if let Some(parent) = one.path.parent() {
             if !parent.as_os_str().is_empty() {
-                todo.push((parent.to_path_buf(), RIGHTS_STAT, false, false));
+                todo.push(GrantTarget {
+                    path: parent.to_path_buf(),
+                    rights: RIGHTS_STAT,
+                    recursive: false,
+                    inherit: false,
+                    part: FencePart::Parent,
+                });
             }
         }
     }

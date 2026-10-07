@@ -5,6 +5,7 @@
 //! 能力不足时如实上报（capability），降级而非崩溃——绝不静默假装有围栏。
 
 use crate::capabilities::tools::api::FenceSpec;
+use crate::capabilities::tools::domain::fence::{FenceBlocked, FencePart};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -186,16 +187,41 @@ pub fn sweep_profiles() -> Result<usize, String> {
     }
 }
 
-/// 外层进程调用：把围栏要用的授权一次性做好（写目录 ACL）。
+/// 目的：一次围栏授权的结论：**必要**落点是否全部授上 + 其余授不上落点的事实。
+/// 约束：必要落点授不上时调用方**不许降级**（问用户或按 fail-closed 拒绝，见 docs/tools/README.md）；
+///   可选落点授不上只进 `notes`，不牵动这次执行。
+#[derive(Debug, Clone, Default)]
+pub struct FencePrep {
+    /// 目的：必要落点授不上时的如实结论（`None` = 围栏成立，可以按围栏执行）。
+    pub blocked: Option<FenceBlocked>,
+    /// 目的：其余授不上落点的事实（可选落点只在这里记一条）。
+    pub notes: Vec<String>,
+}
+
+impl FencePrep {
+    /// 目的：这次授权成不成立（必要落点全授上了）。
+    pub fn ok(&self) -> bool {
+        self.blocked.is_none()
+    }
+
+    /// 目的：记一个落点授不上的事实：**必要**落点进 `blocked`（第一次为准——那就是要补的那一环），
+    ///   可选落点与后续必要落点进 `notes`。
+    pub fn fail(&mut self, part: FencePart, path: std::path::PathBuf, why: String) {
+        let fact = FenceBlocked { part, path, why };
+        if fact.part.necessary() && self.blocked.is_none() {
+            self.blocked = Some(fact);
+            return;
+        }
+        self.notes.push(fact.line());
+    }
+}
+
+/// 外层进程调用：把围栏要用的授权一次性做好（写目录 ACL），并按落点的必要性如实收尾。
 /// 跳过条件看**实际 ACE**而不是内存台账，所以权限收窄并撤权后能正确重授。
 /// 只有 Windows 的容器围栏需要这一步——Linux 的 Landlock 与 macOS 的 seatbelt 在守门进程里自足，
 /// 所以本函数在非 Windows 平台上**不存在**（而不是"存在但空转"）。
 #[cfg(windows)]
-pub fn prepare_fence(
-    spec: &FenceSpec,
-    command: &str,
-    home: &std::path::Path,
-) -> Result<(), String> {
+pub fn prepare_fence(spec: &FenceSpec, command: &str, home: &std::path::Path) -> FencePrep {
     windows::prepare_fence(spec, command, home)
 }
 

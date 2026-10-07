@@ -22,6 +22,7 @@
 | `src/capabilities/conductor/service/rewind.rs` |
 | `src/capabilities/conductor/service/env.rs` |
 | `src/capabilities/conductor/service/history.rs` |
+| `src/capabilities/conductor/service/ask_user.rs` |
 | `src/capabilities/conductor/ports.rs` |
 | `src/capabilities/conductor/domain/action.rs` |
 | `src/capabilities/conductor/domain/proxy.rs` |

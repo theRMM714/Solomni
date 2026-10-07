@@ -61,25 +61,41 @@ impl ProcTools {
 }
 
 impl ToolRunner for ProcTools {
-    fn run(&self, fence: &FenceSpec, command: &str, args_json: &str) -> ToolOutcome {
+    fn run(
+        &self,
+        fence: &FenceSpec,
+        command: &str,
+        args_json: &str,
+        ask: Option<&dyn crate::kernel::ports::AskUser>,
+    ) -> ToolOutcome {
         // Windows：容器围栏要先把「可达范围」授权给容器 SID。
-        // **默认不写本机任何权限项**：只有用户显式授权（设置里的 fence_write，或环境变量 SOLOMNI_FENCE_WRITE=1）才做；
-        // 授权做成了才让守门进程去装容器——没做成就是无围栏执行，这一点如实进工具回执的 stderr。
+        // **默认不写本机任何权限项**：只有用户显式授权（设置里的 fence_write，或环境变量 SOLOMNI_FENCE_WRITE=1）才做。
         #[cfg(windows)]
-        let prepared = {
+        let (prepared, unfenced_note) = {
             use std::sync::atomic::Ordering;
             let mut prepared = false;
+            let mut note: Option<String> = None;
             if self.write_allowed.load(Ordering::Relaxed) {
-                match confine::prepare_fence(fence, command, &self.home) {
-                    Ok(()) => prepared = true,
-                    Err(e) => eprintln!("[围栏] 授权未完成（{}）：本次按无围栏执行", e),
+                let prep = confine::prepare_fence(fence, command, &self.home);
+                // 可选落点授不上只记事实（不牵动这次执行）：脚印打在 stderr，回执里不打扰模型。
+                for n in &prep.notes {
+                    eprintln!("[围栏] {}（可选落点，本次照常执行）", n);
+                }
+                // 必要落点授不上：**不许降级**——问用户（没有可回答的前端就按 fail-closed 拒绝）。
+                if prep.ok() {
+                    prepared = true;
+                } else if let Some(blocked) = &prep.blocked {
+                    match self.fence_blocked(ask, fence, blocked) {
+                        FenceGo::Unfenced { note: n } => note = Some(n),
+                        FenceGo::Refused(outcome) => return outcome,
+                    }
                 }
             } else if !self.disclosed.swap(true, Ordering::Relaxed) {
                 eprintln!(
-                    "[围栏] 容器围栏未启用（没有授权在本机写权限）：外部工具按无围栏执行。要启用：在设置里打开，或在 .home/settings.yaml 写 fence_write: true"
+                    "[围栏] 容器围栏未启用（用户没授权在本机写权限）：外部工具按无围栏执行（能力等级见启动报告）。要启用：在设置里打开，或在 .home/settings.yaml 写 fence_write: true"
                 );
             }
-            if !prepared {
+            if !prepared && note.is_none() {
                 // 未授权时段先问机制：环境不允许就如实降级，我们写错了就拒绝执行（见 refuse_when_broken）。
                 if let Some(outcome) =
                     refuse_when_broken(&self.texts, confine::verify(fence, command))
@@ -87,11 +103,11 @@ impl ToolRunner for ProcTools {
                     return outcome;
                 }
             }
-            prepared
+            (prepared, note)
         };
         // 其它平台没有容器围栏，也就没有"要先授权"这一步。
         #[cfg(not(windows))]
-        let prepared = false;
+        let (prepared, unfenced_note): (bool, Option<String>) = (false, None);
         // 容器 profile 的台账落点：只有 Windows 的守门进程会写它（外层不知道 profile 建成了没有）。
         #[cfg(windows)]
         let home = Some(self.home.clone());
@@ -161,7 +177,114 @@ impl ToolRunner for ProcTools {
         let out = out_reader.join().unwrap_or_default();
         let err = err_reader.join().unwrap_or_default();
         let code = child.try_wait().ok().flatten().and_then(|s| s.code());
-        self.assemble(out, err, timed_out, code)
+        let mut outcome = self.assemble(out, err, timed_out, code);
+        // 用户裁决"本轮无围栏跑一次"：这次执行在回执里**如实标为无围栏**（模型与用户都看得到）。
+        if let Some(note) = unfenced_note {
+            outcome.output.push('\n');
+            outcome.output.push_str(&note);
+        }
+        outcome
+    }
+}
+
+/// 目的：必要落点授不上时的处置结论：按用户裁决**无围栏跑一次**，或**不执行**（fail-closed）。
+#[cfg(windows)]
+enum FenceGo {
+    /// 无围栏跑这一次（回执里如实标注：这次没有容器那层强制）。
+    Unfenced { note: String },
+    /// 不执行：回执已经写清了为什么（问不到人、拒了、或者这一环连选项都构不出）。
+    Refused(ToolOutcome),
+}
+
+/// 目的：一个**必要**落点授不上时的处置：**不许降级**——问用户，问不到就按 fail-closed 拒绝。
+/// 参数：`ask` = 这一趟的提问端口（`None` = 没有可回答的前端）；`blocked` = 哪一环、哪个目录、缺什么前提。
+/// 返回：`Unfenced`（用户选了无围栏跑一次；回执里如实标注）或 `Refused`（不执行）。
+/// 约束：**构不出可用选项**（除"放弃"外没有一条真能执行的）时**不发起裁决**，
+///   改为停掉这个会话 + 落一条警告（契约禁止置灰，见 docs/session/session-model.md 的「请用户裁决」）。
+#[cfg(windows)]
+impl ProcTools {
+    fn fence_blocked(
+        &self,
+        ask: Option<&dyn crate::kernel::ports::AskUser>,
+        fence: &FenceSpec,
+        blocked: &crate::capabilities::tools::domain::fence::FenceBlocked,
+    ) -> FenceGo {
+        use crate::capabilities::tools::domain::fence::{self, OPT_FENCE_UNFENCED};
+        let why = blocked.line();
+        eprintln!("[围栏] 必要落点授不上（{}）：本次不许按无围栏跑", why);
+        // 无围栏跑一次真能不能跑起来：判据是这次命令的起点在不在（domain 不读盘，所以在这里读）。
+        let unfenced_possible = !fence.cwd.as_os_str().is_empty() && fence.cwd.is_dir();
+        let Some(request) = fence::fence_ask(blocked, &fence.agent, unfenced_possible) else {
+            // 构不出可用选项：不发起裁决，改为停掉这个会话 + 落一条警告。
+            match ask {
+                Some(ask) => ask.halt(&why),
+                None => eprintln!("[围栏] 这一趟没有可回答的前端：不停会话，只如实拒绝这次调用"),
+            }
+            return FenceGo::Refused(self.fence_refusal(blocked, false));
+        };
+        let Some(ask) = ask else {
+            // 没有可回答的前端（CLI 非交互 / e2e / 讨论席）：没有可点的选项 = 不执行（fail-closed）。
+            eprintln!("[围栏] 这一趟没有可回答的前端：本次拒绝执行（不按无围栏跑）");
+            return FenceGo::Refused(self.fence_refusal(blocked, false));
+        };
+        match ask.ask(&request).as_deref() {
+            // 用户按卡选了"本轮无围栏跑一次"：这一次执行**没有容器那层强制**，回执里如实标注。
+            Some(OPT_FENCE_UNFENCED) => FenceGo::Unfenced {
+                note: self.fence_note(blocked),
+            },
+            // 拒绝 / 没人答 / 停会话解成拒绝：不执行。
+            _ => FenceGo::Refused(self.fence_refusal(blocked, true)),
+        }
+    }
+
+    /// 目的：不执行时的回执——哪一环、哪个目录、缺什么前提、怎么补（文案来自提示词册，它随工具结果进模型上下文）。
+    fn fence_refusal(
+        &self,
+        blocked: &crate::capabilities::tools::domain::fence::FenceBlocked,
+        asked: bool,
+    ) -> ToolOutcome {
+        let texts = &self.texts;
+        let path = where_text(blocked);
+        let mut output = texts.render(
+            &texts.tool_fence_blocked,
+            &[
+                ("part", blocked.part.label().to_string()),
+                ("path", path),
+                ("why", blocked.why.clone()),
+                ("fix", blocked.part.fix().to_string()),
+            ],
+        );
+        if asked {
+            output.push('\n');
+            output.push_str(&texts.tool_denied_by_user);
+        }
+        ToolOutcome { ok: false, output }
+    }
+
+    /// 目的：无围栏跑一次时回执里的如实标注（模型下一轮看得到"这次没有容器那层强制"）。
+    fn fence_note(
+        &self,
+        blocked: &crate::capabilities::tools::domain::fence::FenceBlocked,
+    ) -> String {
+        let texts = &self.texts;
+        texts.render(
+            &texts.tool_fence_unfenced,
+            &[
+                ("part", blocked.part.label().to_string()),
+                ("path", where_text(blocked)),
+                ("why", blocked.why.clone()),
+            ],
+        )
+    }
+}
+
+/// 目的：这一环授不上的**哪个目录**：没有具体目录的一环（容器身份 / 授权台账）如实说没有。
+#[cfg(windows)]
+fn where_text(blocked: &crate::capabilities::tools::domain::fence::FenceBlocked) -> String {
+    if blocked.path.as_os_str().is_empty() {
+        "没有具体目录".to_string()
+    } else {
+        blocked.path.to_string_lossy().into_owned()
     }
 }
 
@@ -527,6 +650,7 @@ mod tests {
             &spec_for(&dir),
             &format!("{} echo_stdin.py", py),
             "{\"k\":\"v\"}",
+            None,
         );
         assert!(out.ok, "工具应当成功：{}", out.output);
         assert!(
@@ -556,7 +680,7 @@ mod tests {
         .expect("写脚本");
         std::env::set_var("SOLOMNI_PROBE_ENV_LEAK", "leak-me");
         let tools = real_runner(exe, &dir, 60);
-        let out = tools.run(&spec_for(&dir), &format!("{} echo_env.py", py), "{}");
+        let out = tools.run(&spec_for(&dir), &format!("{} echo_env.py", py), "{}", None);
         std::env::remove_var("SOLOMNI_PROBE_ENV_LEAK");
         assert!(out.ok, "工具应当成功：{}", out.output);
         assert!(
@@ -598,6 +722,7 @@ mod tests {
             &spec_for(&dir),
             &format!("{} echo_node_opts.js", node),
             "{}",
+            None,
         );
         assert!(out.ok, "node 工具应当成功：{}", out.output);
         for flag in ["--preserve-symlinks", "--preserve-symlinks-main"] {
@@ -614,7 +739,12 @@ mod tests {
                 "import os\nprint('OPTS=' + str(os.environ.get('NODE_OPTIONS')))\n",
             )
             .expect("写 python 脚本");
-            let out = tools.run(&spec_for(&dir), &format!("{} echo_node_opts.py", py), "{}");
+            let out = tools.run(
+                &spec_for(&dir),
+                &format!("{} echo_node_opts.py", py),
+                "{}",
+                None,
+            );
             assert!(out.ok, "python 工具应当成功：{}", out.output);
             assert!(
                 out.output.contains("OPTS=None"),
@@ -658,7 +788,7 @@ mod tests {
             std::fs::set_permissions(&script, perm).expect("加执行位");
         }
         let tools = real_runner(exe, &dir, 60);
-        let out = tools.run(&spec_for(&dir), command, "{}");
+        let out = tools.run(&spec_for(&dir), command, "{}", None);
         assert!(out.ok, "带正斜杠的相对程序名必须能跑起来：{}", out.output);
         assert!(
             out.output.contains("PROBE-OK"),
@@ -687,7 +817,7 @@ mod tests {
         std::fs::write(dir.join("sleep60.py"), "import time\ntime.sleep(60)\n").expect("写脚本");
         let tools = real_runner(exe, &dir, 2);
         let started = Instant::now();
-        let out = tools.run(&spec_for(&dir), &format!("{} sleep60.py", py), "{}");
+        let out = tools.run(&spec_for(&dir), &format!("{} sleep60.py", py), "{}", None);
         assert!(!out.ok, "超时必须如实回执失败：{}", out.output);
         assert!(
             out.output.contains(&tools.texts.tool_timeout),
@@ -702,12 +832,181 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// 开了授权的 runner：只有开了才会走到"必要落点授不上"这条路（关着是用户自己选的档位）。
+    /// 授权是把本机目录 ACL 写给容器身份（真机探针才用，所以它在 `--fence-live` 之外没人调）。
+    #[cfg(windows)]
+    fn real_runner_with_write(exe: PathBuf, home: &std::path::Path) -> ProcTools {
+        let mut t = ProcTools::new(
+            exe,
+            prompt_texts(),
+            home.to_path_buf(),
+            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)),
+        );
+        t.timeout = Duration::from_secs(60);
+        t
+    }
+
+    /// 是否允许跑"会改本机状态"的真机探针（默认否：测试不该在真机上留下痕迹）。
+    #[cfg(windows)]
+    fn fence_live() -> bool {
+        std::env::var("SOLOMNI_FENCE_LIVE")
+            .map(|v| v == "1")
+            .unwrap_or(false)
+    }
+
+    /// 探针用的提问端口替身：记下每次问到的选项 id，按脚本作答（`None` = 拒绝 / 没人答）。
+    #[cfg(windows)]
+    struct RecordingAsk {
+        answer: Option<String>,
+        asked: std::sync::Mutex<Vec<Vec<String>>>,
+        halted: std::sync::Mutex<Vec<String>>,
+    }
+
+    #[cfg(windows)]
+    impl RecordingAsk {
+        fn new(answer: Option<&str>) -> RecordingAsk {
+            RecordingAsk {
+                answer: answer.map(|s| s.to_string()),
+                asked: std::sync::Mutex::new(Vec::new()),
+                halted: std::sync::Mutex::new(Vec::new()),
+            }
+        }
+
+        fn asked_ids(&self) -> Vec<Vec<String>> {
+            self.asked.lock().unwrap_or_else(|e| e.into_inner()).clone()
+        }
+    }
+
+    #[cfg(windows)]
+    impl crate::kernel::ports::AskUser for RecordingAsk {
+        fn ask(&self, ask: &crate::kernel::api::Ask) -> Option<String> {
+            self.asked
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .push(ask.options.iter().map(|(id, _)| id.clone()).collect());
+            self.answer.clone()
+        }
+
+        fn halt(&self, why: &str) {
+            self.halted
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .push(why.to_string());
+        }
+    }
+
+    /// **真机探针（T4）**：**必要落点授不上时绝不静默无围栏执行**。
+    /// 本机构造这一态：把解释器装在系统目录下的机器（nvm4w 的 `C:\\nvm4w\\nodejs`：属主 Administrators、
+    /// 只给 Authenticated Users Modify）——那里的 DACL 写不进（错误码 5），于是**任何** node 工具都曾静默变成无围栏跑。
+    /// 断言三条：选了"本轮无围栏跑一次"才跑（且回执如实标为无围栏）；选"放弃"不执行；没有可回答的前端也不执行。
+    /// 本机构造不出这一态（解释器目录授得进）就如实 env-skip——不静默当作通过。
+    #[cfg(windows)]
+    #[test]
+    fn unwritable_interpreter_dir_never_silently_runs_unfenced() {
+        use crate::capabilities::tools::domain::fence::{
+            FencePart, OPT_FENCE_ABORT, OPT_FENCE_UNFENCED,
+        };
+        if !fence_live() {
+            eprintln!(
+                "[探针] 未开启真机围栏测试：本探针要写本机权限项，已跳过；要真跑加 --fence-live"
+            );
+            return;
+        }
+        let Some(node) = node() else {
+            eprintln!("[探针] 本机没有可用的 node：这条探针构造不出解释器目录授不上，跳过");
+            return;
+        };
+        let Some(exe) = built_exe() else {
+            eprintln!("[探针] 未找到已构建的 solomni 可执行文件（先 cargo build），跳过真机探针");
+            return;
+        };
+        let dir = crate::tests::scratch("proc-tools-fence-blocked");
+        let home = dir.join(".home");
+        std::fs::write(dir.join("probe.js"), "process.stdout.write('RAN');").expect("写脚本");
+        let spec = spec_for(&dir);
+        let command = format!("{} probe.js", node);
+        // 先问机制：这一态在本机构造得出来吗（真授不上才继续，能授权就如实跳过）。
+        let prep = confine::prepare_fence(&spec, &command, &home);
+        let Some(blocked) = prep.blocked.as_ref() else {
+            eprintln!(
+                "[探针] 本机解释器目录授得进（构造不出\"授不上\"这一态）：真机探针跳过（不静默当作通过）"
+            );
+            let _ = confine::clean(&home);
+            let _ = std::fs::remove_dir_all(&dir);
+            return;
+        };
+        if blocked.part != FencePart::Interpreter {
+            eprintln!(
+                "[诊断] 本机授不上的不是解释器目录，而是 {}：这条探针仍按同一条规矩断言",
+                blocked.line()
+            );
+        }
+        let tools = real_runner_with_write(exe, &home);
+        // ① 用户选"本轮无围栏跑一次"：命令真跑，回执**如实标为无围栏**。
+        let ask = RecordingAsk::new(Some(OPT_FENCE_UNFENCED));
+        let out = tools.run(&spec, &command, "{}", Some(&ask));
+        assert_eq!(
+            ask.asked_ids(),
+            vec![vec![
+                OPT_FENCE_UNFENCED.to_string(),
+                OPT_FENCE_ABORT.to_string()
+            ]],
+            "必要落点授不上要**问**用户（选项 id 是契约）"
+        );
+        assert!(
+            ask.halted.lock().expect("锁").is_empty(),
+            "有选项就不该停会话"
+        );
+        assert!(
+            out.output.contains(&tools.texts.tool_fence_unfenced),
+            "回执要如实标为无围栏：{}",
+            out.output
+        );
+        assert!(
+            out.output.contains("RAN"),
+            "选了跑一次就要真跑起来：{}",
+            out.output
+        );
+        // ② 用户选"放弃这次调用"：不执行，回执写清哪一环、哪个目录、缺什么、怎么补。
+        let ask = RecordingAsk::new(Some(OPT_FENCE_ABORT));
+        let out = tools.run(&spec, &command, "{}", Some(&ask));
+        assert!(!out.ok, "放弃 = 不执行");
+        assert!(
+            !out.output.contains("RAN"),
+            "放弃之后命令绝不许跑：{}",
+            out.output
+        );
+        for want in [blocked.part.label(), "没有执行", "怎么补"] {
+            assert!(
+                out.output.contains(want),
+                "回执要写清 {}：{}",
+                want,
+                out.output
+            );
+        }
+        // ③ 没有可回答的前端（纯终端 / e2e）：没有可点的选项 = 不执行（fail-closed）。
+        let out = tools.run(&spec, &command, "{}", None);
+        assert!(!out.ok, "没有可回答的前端 = 不执行");
+        assert!(
+            !out.output.contains("RAN"),
+            "没有可回答的前端时命令绝不许跑：{}",
+            out.output
+        );
+        assert!(out.output.contains("没有执行"), "{}", out.output);
+        // 收尾：撤掉这次写下的授权、删掉台账——测试不在本机留痕。
+        if let Err(e) = confine::release_fence(&spec, &home) {
+            eprintln!("[诊断] 撤权未完成（{}）：要收尾请跑 --fence-clean", e);
+        }
+        confine::clean(&home).ok();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// 守门进程起不来：如实回执「启动失败」，不 panic、不假装跑过。
     #[test]
     fn missing_launcher_binary_is_reported_honestly() {
         let dir = crate::tests::scratch("proc-tools-missing-exe");
         let tools = real_runner(PathBuf::from("definitely-not-here-solomni"), &dir, 5);
-        let out = tools.run(&spec_for(&dir), "echo hi", "{}");
+        let out = tools.run(&spec_for(&dir), "echo hi", "{}", None);
         assert!(!out.ok);
         assert!(out.output.contains("工具进程启动失败"), "{}", out.output);
         let _ = std::fs::remove_dir_all(&dir);

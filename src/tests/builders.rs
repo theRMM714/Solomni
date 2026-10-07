@@ -120,6 +120,8 @@ pub(crate) fn run_execution(
             &mut sink,
             // 测试不接工具级确认：直接执行（确认路径由 permission 的用例单独钉）。
             None,
+            // 也不接工具层提问：默认路径就是"没有可回答的前端 = fail-closed 拒绝"。
+            None,
             &[],
             false,
         );
@@ -253,6 +255,7 @@ impl ToolRunner for SilentRunner {
         _fence: &crate::capabilities::tools::api::FenceSpec,
         _command: &str,
         _args: &str,
+        _ask: Option<&dyn crate::kernel::ports::AskUser>,
     ) -> ToolOutcome {
         panic!("不应调用工具");
     }
@@ -281,6 +284,7 @@ impl ToolRunner for RecordingRunner {
         fence: &crate::capabilities::tools::api::FenceSpec,
         command: &str,
         args_json: &str,
+        _ask: Option<&dyn crate::kernel::ports::AskUser>,
     ) -> ToolOutcome {
         // 记下工具进程的工作目录（= 该模块的根）与命令、参数。
         self.calls.lock().expect("锁").push((
@@ -323,6 +327,7 @@ impl ToolRunner for ParallelRunner {
         _fence: &crate::capabilities::tools::api::FenceSpec,
         command: &str,
         args_json: &str,
+        _ask: Option<&dyn crate::kernel::ports::AskUser>,
     ) -> ToolOutcome {
         let now = self.active.fetch_add(1, Ordering::SeqCst) + 1;
         self.peak.fetch_max(now, Ordering::SeqCst);
@@ -333,6 +338,79 @@ impl ToolRunner for ParallelRunner {
         ToolOutcome {
             ok: true,
             output: format!("{} 跑完了 {}", command, args_json),
+        }
+    }
+}
+
+/// 目的：提问型 runner——跑之前先经**工具层提问端口**问一次（模拟围栏那类"这一环装不上就先问"的执行层）。
+/// 参数：`allow` = 只有收到这个选项 id 才真跑（别的选项、没有回答、没有端口一律不跑）。
+pub(crate) struct AskingRunner {
+    pub(crate) asked: Mutex<Vec<Vec<String>>>,
+    pub(crate) calls: Mutex<Vec<(PathBuf, String, String)>>,
+    /// 目的：只有收到这个选项 id 才真跑（别的选项、没有回答、没有端口一律不跑）。
+    pub(crate) allow: String,
+}
+
+impl AskingRunner {
+    pub(crate) fn new(allow: &str) -> AskingRunner {
+        AskingRunner {
+            asked: Mutex::new(Vec::new()),
+            calls: Mutex::new(Vec::new()),
+            allow: allow.to_string(),
+        }
+    }
+}
+
+impl ToolRunner for AskingRunner {
+    fn run(
+        &self,
+        fence: &crate::capabilities::tools::api::FenceSpec,
+        command: &str,
+        args_json: &str,
+        ask: Option<&dyn crate::kernel::ports::AskUser>,
+    ) -> ToolOutcome {
+        let Some(ask) = ask else {
+            // 没有可回答的前端：没有可点的选项 = 不执行（fail-closed）。
+            return ToolOutcome {
+                ok: false,
+                output: "这一趟没有可回答的前端：这次调用没有执行".to_string(),
+            };
+        };
+        let request = crate::kernel::api::Ask {
+            role: "tools".to_string(),
+            name: fence.agent.clone(),
+            title: "围栏的这一环装不上，这次调用怎么跑？".to_string(),
+            body: "按规则不许悄悄按无围栏执行。".to_string(),
+            detail: "模块目录（C:/mods/a）授不上：写 DACL 失败（错误码 5）".to_string(),
+            options: vec![
+                (
+                    crate::capabilities::tools::domain::fence::OPT_FENCE_UNFENCED.to_string(),
+                    "本轮无围栏跑一次".to_string(),
+                ),
+                (
+                    crate::capabilities::tools::domain::fence::OPT_FENCE_ABORT.to_string(),
+                    "放弃这次调用".to_string(),
+                ),
+            ],
+        };
+        self.asked
+            .lock()
+            .expect("锁")
+            .push(request.options.iter().map(|(id, _)| id.clone()).collect());
+        if ask.ask(&request).as_deref() != Some(self.allow.as_str()) {
+            return ToolOutcome {
+                ok: false,
+                output: "用户没有放行这次调用：它没有执行".to_string(),
+            };
+        }
+        self.calls.lock().expect("锁").push((
+            fence.cwd.clone(),
+            command.to_string(),
+            args_json.to_string(),
+        ));
+        ToolOutcome {
+            ok: true,
+            output: "按你的裁决无围栏跑了一次".to_string(),
         }
     }
 }

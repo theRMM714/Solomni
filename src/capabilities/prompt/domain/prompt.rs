@@ -413,6 +413,12 @@ pub struct ToolTexts {
     pub tool_timeout: String,
     /// 围栏没装上（命令未执行）。
     pub tool_fence_failed: String,
+    /// 目的：围栏的**必要落点**授不上、这次调用没执行的拒绝回执。
+    ///   变量：part, path, why, fix
+    pub tool_fence_blocked: String,
+    /// 目的：用户裁决"本轮无围栏跑一次"时，这次执行如实标为无围栏的回执。
+    ///   变量：part, path, why
+    pub tool_fence_unfenced: String,
     /// 变量：chars, limit
     pub tool_truncated: String,
     // —— 拟名单/推荐时给模型看的清单行 ——

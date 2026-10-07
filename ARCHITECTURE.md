@@ -53,8 +53,9 @@ presentation/{cli,web} ──▶ capabilities（含协调业务 conductor）─�
 | `FenceHost` | 围栏授权的释放（删除会话时请求一次撤销） | `confine::FenceHostAdapter`（本平台无该机制时为空操作） |
 | `Log` / `HostProbe` | 运行日志（三级）/ 宿主能力探测（**只问事实**：路径存在性、PATH 上的可执行文件、本机虚拟化能力） | `FileLog` / `HostProbeAdapter`（测试 `NoopLog` / `FixedProbe`） |
 | `ToolHandler` | **一类工具的执行者**（按名字认领）：内置、模块与核心自有工具因此走**同一条派发路径** | 各能力注入（工具能力管内置与模块；conductor 注入代理工具那个） |
+| `AskUser` | **请用户裁决的提问端口**：需要用户裁决的机制（工具执行层、围栏）推一条问题并**阻塞**等一个选项 id——走会话的**统一裁决通道**（不是第二条） | 会话侧实现（conductor 的 `SessionAsk`：卡片进那一条队、`answer_card` 作答；构不出可用选项时停会话 + 落警告） |
 
-端口只有一个持有者：**定义它的那个能力的 `service.rs`**（R12）。**例外**：`kernel` 的机制端口（`Log` / `HostProbe` / `ToolHandler`）全项目共享。
+端口只有一个持有者：**定义它的那个能力的 `service.rs`**（R12）。**例外**：`kernel` 的机制端口（`Log` / `HostProbe` / `ToolHandler` / `AskUser`）全项目共享。
 新增端口前先问一句：**这是 IO 或可替换点吗**？不是就别加 trait。
 
 ## 三、模块地图与入站契约
@@ -125,6 +126,10 @@ presentation/{cli,web} ──▶ capabilities（含协调业务 conductor）─�
   （产品根内路径存原始安全描述符、根外只存 ACE 摘要），写后核对（我们的 ACE 在不在、原有权限项有没有丢），失败就回滚并如实报错；
   `--fence-clean` 按台账**整体还原**根内路径、精确撤销根外条目，再在产品根内扫掉台账外的孤儿授权（含任何显式包 SID ACE）与遗留 profile。
   机制验证分三态：`Enforced` / `EnvUnavailable`（本机不允许，如实降级照跑）/ `Broken`（我们写错了，未授权时段**拒绝执行**）。
+  **必要落点授不上不许降级**（解释器目录 / 模块目录 / 工作目录 / 私有沙箱 / 其余数据边界 / 容器身份 / 台账）：
+  经统一裁决通道问用户（`fence_unfenced_once` 本轮无围栏跑一次 / `fence_abort` 放弃这次调用），
+  拒绝、没人答、按停止（整队作废 = 拒绝）与**没有可回答的前端**一律不执行；**可选落点**（用户授权的只读根、
+  父目录的只读属性、不存在的落点）授不上只记事实；判据与行为见 [docs/tools/README.md](docs/tools/README.md) 五。
   **装不上就如实报告能力等级；未授权不等于无围栏**（进程树、资源上限与环境白名单两种时段都生效）。平台细节见 [docs/tools/README.md](docs/tools/README.md) 与 `confine/` 的源码。
 - `capabilities/workspace/` 的 `packages` 是运行包契约与包库事实，`exec` 是执行档位与执行计划派生；两者都是纯逻辑。契约见 [RUNTIME_SPEC.md](RUNTIME_SPEC.md)。
   登记处四份 yaml 的字段与读写规则见 [REGISTRY_SPEC.md](REGISTRY_SPEC.md)。

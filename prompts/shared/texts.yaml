@@ -143,6 +143,10 @@ tool_texts:
   tool_stderr_header: "[stderr]"
   tool_timeout: "[超时] 工具进程与它拉起的整棵进程树已被终止"
   tool_fence_failed: "[围栏] 工具进程没有进入围栏：命令未执行（当前能力等级见启动报告）"
+  # 围栏的**必要落点**授不上：不许静默降级——回执写清哪一环、哪个目录、缺什么前提、怎么补
+  tool_fence_blocked: "[围栏] 这次调用**没有执行**：{{part}}（{{path}}）授不上——{{why}}。怎么补：{{fix}}"
+  # 用户裁决"本轮无围栏跑一次"：这次执行如实标为无围栏（没有容器那层强制）
+  tool_fence_unfenced: "[围栏] 这次调用按你的裁决**无围栏**执行（没有容器那层强制）：{{part}}（{{path}}）授不上——{{why}}"
   tool_truncated: "[截断] 输出共 {{chars}} 字符，仅保留前 {{limit}}"
   # 拟名单/推荐时给模型看的清单行
   module_listing_line: "- {{id}}：{{brief}}"

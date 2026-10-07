@@ -451,7 +451,7 @@ fn prompt_source_double_loads_the_builtin_book_and_propagates_failure() {
 fn tool_runner_double_records_the_call_site_and_reports_failure_honestly() {
     let fence = spec();
     let ok = RecordingRunner::new("输出", true);
-    let out = ok.run(&fence, "python tools/x.py", "{\"k\":1}");
+    let out = ok.run(&fence, "python tools/x.py", "{\"k\":1}", None);
     assert!(out.ok && out.output == "输出");
     let calls = ok.calls.lock().expect("锁");
     assert_eq!(calls.len(), 1, "每次调用都要留现场");
@@ -464,7 +464,7 @@ fn tool_runner_double_records_the_call_site_and_reports_failure_honestly() {
     drop(calls);
 
     let bad = RecordingRunner::new("失败原因", false);
-    let out = bad.run(&fence, "x", "{}");
+    let out = bad.run(&fence, "x", "{}", None);
     assert!(
         !out.ok && out.output == "失败原因",
         "失败必须如实回执（ok = false + 原因）"
@@ -474,7 +474,7 @@ fn tool_runner_double_records_the_call_site_and_reports_failure_honestly() {
 #[test]
 #[should_panic(expected = "不应调用工具")]
 fn silent_runner_double_fails_loudly_on_any_call() {
-    let _ = SilentRunner.run(&spec(), "x", "{}");
+    let _ = SilentRunner.run(&spec(), "x", "{}", None);
 }
 
 // ---------- FenceHost ----------

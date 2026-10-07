@@ -329,7 +329,11 @@ impl ConductorHandle {
             module.has_userdata,
         );
         let args_json = serde_json::to_string(&module_args).unwrap_or_else(|_| "{}".to_string());
-        let outcome = self.tools.run_module(&fence, &decl.command, &args_json);
+        // 人直接跑模块工具：这一趟**没有可回答的前端**（没有会话、没有裁决队），所以不给提问端口——
+        // 围栏的必要落点授不上时按 fail-closed 拒绝这次调用（回执写清哪一环、怎么补）。
+        let outcome = self
+            .tools
+            .run_module(&fence, &decl.command, &args_json, None);
         Ok(Acted::Done(
             serde_json::json!({ "ok": outcome.ok, "output": outcome.output }),
         ))

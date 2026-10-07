@@ -288,7 +288,12 @@ pub(crate) fn grant_one_journaled(
     target: &GrantTarget,
     root: &Path,
 ) -> Result<(), String> {
-    let (path, rights, recursive, inherit) = (target.0.as_path(), target.1, target.2, target.3);
+    let (path, rights, recursive, inherit) = (
+        target.path.as_path(),
+        target.rights,
+        target.recursive,
+        target.inherit,
+    );
     let key = path.to_string_lossy().into_owned();
     if inside_root(path, root) {
         let bytes = sd_bytes(path).map_err(|e| format!("读原始安全描述符失败：{}", e))?;
@@ -460,10 +465,7 @@ pub fn release_fence(spec: &FenceSpec, home: &Path) -> Result<(), String> {
     let had_record = record_path(home).exists();
     // 撤权要覆盖**同一次授权写下的全部条目**：叶子（读写根 / 只读根 / 工作目录）**与它们的父目录**。
     // 落点清单与 prepare_fence 共用 grant_targets——两处各写一份迟早会漏掉某一类。
-    let mut paths: Vec<PathBuf> = grant_targets(spec)
-        .into_iter()
-        .map(|(p, _, _, _)| p)
-        .collect();
+    let mut paths: Vec<PathBuf> = grant_targets(spec).into_iter().map(|t| t.path).collect();
     // 台账里这个 SID 写过的路径也要覆盖：配置改过后，落点清单可能已经算不出它们。
     for (s, p, _) in &rec.grants {
         if s == &sid_text {

@@ -6,6 +6,7 @@
 //! 本机档与虚拟机档共用这份围栏：虚拟机档的 guest 内视图由装配阶段按同一批根组装。
 
 use crate::capabilities::workspace::api::Sandbox;
+use crate::kernel::api::Ask;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
@@ -120,4 +121,133 @@ impl FenceSpec {
         out.cwd = module_root.to_path_buf();
         out
     }
+}
+
+/// 目的：一次围栏执行的**落点环节**——授权装不上的时候，用户与模型都要知道缺的是哪一环。
+/// 约束：**必要 / 可选的判据只在这一处**（`necessary`）：必要落点缺了这次命令在容器里起不来，
+///   或围栏本身不成立；可选落点缺了命令照跑，只是可达范围小一点。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FencePart {
+    /// 解释器安装目录（基线，授给共享包组）：容器里连解释器都起不来。
+    Interpreter,
+    /// 模块目录（只读子树或可写叶子）：工具脚本与它的依赖都在这里。
+    Module,
+    /// 工具进程的工作目录（模块根）。
+    Cwd,
+    /// 该 agent 的私有沙箱：工具进程 `HOME` / `TEMP` 的落点。
+    Sandbox,
+    /// 其余**数据边界**（共享区主副本、模块 `userdata/` 这类读写根）：这次执行要用到的根。
+    DataBoundary,
+    /// 用户显式授权的只读根（`fence_read`）。
+    AuthorizedRead,
+    /// 数据边界的父目录（只授读属性：容器里判"这个目录在不在"用它）。
+    Parent,
+    /// 容器身份（派生 AppContainer SID）：没有它谈不上容器围栏。
+    ContainerIdentity,
+    /// 授权台账（写 ACL 之前先落盘的那一份）：落不下就不能动本机权限项。
+    Ledger,
+}
+
+impl FencePart {
+    /// 目的：这一环**必要**吗——缺了这次命令在容器里起不来，或这次执行根本做不了该做的事。
+    /// 约束：判据只有这一处（枚举里这两条就是可选的）；可选落点授不上只记事实（见 `FencePrep`），
+    ///   不牵动这次执行。
+    pub fn necessary(&self) -> bool {
+        !matches!(self, FencePart::AuthorizedRead | FencePart::Parent)
+    }
+
+    /// 目的：给人看的环节名（回执、裁决卡与警告都用它）。
+    pub fn label(&self) -> &'static str {
+        match self {
+            FencePart::Interpreter => "解释器安装目录",
+            FencePart::Module => "模块目录",
+            FencePart::Cwd => "工具进程的工作目录",
+            FencePart::Sandbox => "该 agent 的私有沙箱",
+            FencePart::DataBoundary => "数据边界（这次执行要读写的根）",
+            FencePart::AuthorizedRead => "用户授权的只读根",
+            FencePart::Parent => "数据边界的父目录",
+            FencePart::ContainerIdentity => "容器身份",
+            FencePart::Ledger => "授权台账",
+        }
+    }
+
+    /// 目的：这一环**怎么补**（一句可操作的话；回执与裁决卡都用它）。
+    pub fn fix(&self) -> &'static str {
+        match self {
+            FencePart::Interpreter => {
+                "把解释器装在你自己拥有的目录里（属主不是你就改不动它的权限项），或请管理员放行那个安装目录"
+            }
+            FencePart::Module | FencePart::Cwd => {
+                "把模块目录放进你自己拥有的位置（工作区里的模块目录属主就是你）"
+            }
+            FencePart::Sandbox => "让这次工作的会话目录落在你自己拥有的位置（默认就在工作区里）",
+            FencePart::DataBoundary => "让这次工作的目录落在你自己拥有的位置（默认就在工作区里）",
+            FencePart::ContainerIdentity => "确认本机能建 AppContainer profile（受限会话里建不起来）",
+            FencePart::Ledger => "确认产品私有区 .home/ 可写（授权台账要落在那里）",
+            FencePart::AuthorizedRead | FencePart::Parent => {
+                "这一次不影响围栏成立；下次想让它可达再补"
+            }
+        }
+    }
+}
+
+/// 目的：一个落点授不上的如实结论：**哪一环** + 哪个目录 + 缺什么前提。
+/// 约束：它是"必要落点授不上"这条路的唯一材料——裁决卡、回执与停会话警告都从它派生。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FenceBlocked {
+    /// 目的：哪一环（`necessary()` 为真）。
+    pub part: FencePart,
+    /// 目的：授不上的那个目录；没有具体目录的一环（容器身份 / 台账）= 空。
+    pub path: PathBuf,
+    /// 目的：缺什么前提（机制给的原话，例如写 DACL 的失败原因）。
+    pub why: String,
+}
+
+impl FenceBlocked {
+    /// 目的：这一环的一句话（哪一环、哪个目录、缺什么前提、怎么补）——给用户看的原话。
+    pub fn line(&self) -> String {
+        let where_ = if self.path.as_os_str().is_empty() {
+            String::new()
+        } else {
+            format!("（{}）", self.path.display())
+        };
+        format!(
+            "{}{} 授不上：{}；怎么补：{}",
+            self.part.label(),
+            where_,
+            self.why,
+            self.part.fix()
+        )
+    }
+}
+
+/// 目的：必要落点授不上时给用户的选项 id——**本轮无围栏跑一次**（这一次调用按无围栏执行）。
+pub const OPT_FENCE_UNFENCED: &str = "fence_unfenced_once";
+/// 目的：必要落点授不上时给用户的选项 id——**放弃这次调用**（不执行；没有回答也是它）。
+pub const OPT_FENCE_ABORT: &str = "fence_abort";
+
+/// 目的：把"必要落点授不上"变成一条裁决（消息三段 + 选项集）——问什么、几个选项由工具层自己定。
+/// 参数：`name` = 谁撞上的（agent 实例名，写进信封）；`unfenced_possible` = 无围栏跑这一次
+///   **真能不能跑起来**（工作目录在不在这类事实，由调用方读盘后喂进来——domain 不读盘）。
+/// 返回：`None` = **构不出可用选项**（除"放弃"外没有一条真能执行的）：调用方**不发起裁决**，
+///   改为停掉这个会话 + 落一条警告（契约禁止置灰）。
+pub fn fence_ask(block: &FenceBlocked, name: &str, unfenced_possible: bool) -> Option<Ask> {
+    if !unfenced_possible {
+        return None;
+    }
+    Some(Ask {
+        role: "tools".to_string(),
+        name: name.to_string(),
+        title: format!("围栏的{}装不上，这次调用怎么跑？", block.part.label()),
+        body: "按规则不许悄悄按无围栏执行。要么这一轮破例跑一次（这次就没有容器那层强制），要么放弃这次调用。"
+            .to_string(),
+        detail: block.line(),
+        options: vec![
+            (
+                OPT_FENCE_UNFENCED.to_string(),
+                "本轮无围栏跑一次".to_string(),
+            ),
+            (OPT_FENCE_ABORT.to_string(), "放弃这次调用".to_string()),
+        ],
+    })
 }

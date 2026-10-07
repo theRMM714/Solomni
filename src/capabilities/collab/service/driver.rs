@@ -407,6 +407,8 @@ fn run(
             on_round,
             sink,
             confirms.take(),
+            // 工具层提问端口（围栏这类"装不上就先问"）：与工具级确认走**同一条队**。
+            live.ask.as_deref(),
             &spec.turn,
             spec.verbs,
         )

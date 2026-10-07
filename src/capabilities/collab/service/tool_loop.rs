@@ -13,8 +13,9 @@ pub(crate) fn run_one(
     module: Option<&str>,
     name: &str,
     args_json: &str,
+    ask: Option<&dyn crate::kernel::ports::AskUser>,
 ) -> (String, ToolOutcome) {
-    let (label, outcome, branch) = run_branch(ctx, module, name, args_json);
+    let (label, outcome, branch) = run_branch(ctx, module, name, args_json, ask);
     // 串行：分支的副本就是"这次调用之后"的账本，直接接管（与逐个记账等价）。
     ctx.observations = branch;
     (label, outcome)
@@ -28,6 +29,7 @@ pub(crate) fn run_branch(
     module: Option<&str>,
     name: &str,
     args_json: &str,
+    ask: Option<&dyn crate::kernel::ports::AskUser>,
 ) -> (
     String,
     ToolOutcome,
@@ -68,7 +70,7 @@ pub(crate) fn run_branch(
             body: String::new(),
             lead: String::new(),
         };
-        dispatch_external(ctx, &inv)
+        dispatch_external(ctx, &inv, ask)
     };
     (label, outcome, branch)
 }
@@ -190,10 +192,12 @@ fn needs_ask(
 /// 账本走分支副本 + 按原序合并（与串行执行等价，见 crate::capabilities::tools::api::Observations::absorb）。
 /// **要问用户的调用强制串行**：先经确认通道拿到回答；拒绝就回一条"用户拒绝"的结果、不执行；
 /// 答"本轮不再问"（`OPT_TOOL_FULL`）则放行这一次并把 `full` 置位，本轮剩余调用都不再问。
+/// 参数：`ask` = 这一趟的**提问端口**（工具执行层与围栏要请用户裁决时经它问；`None` = 没有可回答的前端）。
 pub(crate) fn run_batch(
     ctx: &mut MemberTools,
     plan: &[(Option<String>, String, String)],
     mut confirms: Option<&mut ConfirmGate<'_>>,
+    ask: Option<&dyn crate::kernel::ports::AskUser>,
     sink: &mut dyn FnMut(SessionEvent),
 ) -> Vec<(String, ToolOutcome)> {
     let mut done: Vec<Option<(String, ToolOutcome)>> = (0..plan.len()).map(|_| None).collect();
@@ -213,7 +217,7 @@ pub(crate) fn run_batch(
             // 选项 id 是契约：放行（这一次 / 本轮都放）才执行，其余（拒绝 / 作废）一律不执行。
             let allowed = full || decision == crate::capabilities::session::api::OPT_TOOL_ALLOW;
             done[i] = Some(if allowed {
-                run_one(ctx, module.as_deref(), tool, args)
+                run_one(ctx, module.as_deref(), tool, args, ask)
             } else {
                 let label = module.clone().unwrap_or_default();
                 (
@@ -240,7 +244,7 @@ pub(crate) fn run_batch(
                 let handles: Vec<_> = plan[i..j]
                     .iter()
                     .map(|(module, tool, args)| {
-                        s.spawn(|| run_branch(ctx, module.as_deref(), tool, args))
+                        s.spawn(|| run_branch(ctx, module.as_deref(), tool, args, ask))
                     })
                     .collect();
                 handles
@@ -255,7 +259,7 @@ pub(crate) fn run_batch(
             i = j;
         } else {
             let (module, tool, args) = &plan[i];
-            done[i] = Some(run_one(ctx, module.as_deref(), tool, args));
+            done[i] = Some(run_one(ctx, module.as_deref(), tool, args, ask));
             i += 1;
         }
     }
@@ -369,7 +373,11 @@ pub(crate) fn deny(ctx: &MemberTools, why: String) -> ToolOutcome {
 
 /// 外部工具派发：先定模块（信封里的 module；省略时只有唯一模块才兜底），再查该模块的工具表。
 /// 返回（实际使用的模块 id, 执行结果）。不猜：多模块 agent 下省略 module 直接如实报错。
-pub(crate) fn dispatch_external(ctx: &MemberTools, inv: &ToolInvoke) -> (String, ToolOutcome) {
+pub(crate) fn dispatch_external(
+    ctx: &MemberTools,
+    inv: &ToolInvoke,
+    ask: Option<&dyn crate::kernel::ports::AskUser>,
+) -> (String, ToolOutcome) {
     let module = match inv.module.as_deref() {
         Some(m) => m.to_string(),
         None if ctx.modules.len() == 1 => ctx.modules.keys().next().cloned().unwrap_or_default(),
@@ -432,7 +440,7 @@ pub(crate) fn dispatch_external(ctx: &MemberTools, inv: &ToolInvoke) -> (String,
             (
                 module,
                 ctx.tools
-                    .run_module(&ctx.fence.at(&mt.root), command, &inv.args_json),
+                    .run_module(&ctx.fence.at(&mt.root), command, &inv.args_json, ask),
             )
         }
         None => {

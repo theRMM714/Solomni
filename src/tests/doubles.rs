@@ -1040,6 +1040,7 @@ pub(crate) fn with_live<T>(f: impl FnOnce(&mut Live) -> T) -> T {
         cancel: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         emit: &mut noop,
         decisions: None,
+        ask: None,
     };
     f(&mut live)
 }
