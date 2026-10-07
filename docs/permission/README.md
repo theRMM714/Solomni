@@ -39,6 +39,11 @@
 （`/api/state` 的快照带上 `pending_approval`）。CLI 把生成放后台线程、主线程就地提示
 `yes / no / full`（`presentation::cli` 的交互循环），所以终端同样能回答。
 
+> **目标契约（实施中）**：工具确认并入**裁决通道**——与核心的各关卡共用一条队列、一张卡（消息 + 选项）、
+> 一条回答命令；选项 id 仍是 `allow` / `deny` / `full`（文案归呈现层），但 `kernel::ApprovalRegistry`
+> 与动作 `approve_tool` 取消，`/api/state` 的快照只剩一份 `pending`。语义与生命周期见
+> [docs/session/session-model.md](../session/session-model.md) 的「请用户裁决：一条通道，消息 + 选项」。
+
 白名单 / 黑名单是**呈现层词汇**：解析后下游只见一个正向判定（`read_ok` / `write_ok`）。
 平台围栏是正向 allow-list（Landlock 没有 deny 规则），所以嵌套黑名单只在核心层兑现。
 
