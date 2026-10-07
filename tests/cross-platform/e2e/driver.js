@@ -588,8 +588,9 @@ async function approvePlan(name) {
   assert(tF.includes('用第一个方案'), '用户回答并入转录（进上下文）', tF.slice(-300));
 
 
-  /* ---------- 真工具链路（L4）：三个真模块里的两个，真的在真进程里跑 ----------
-   * harvest（python）扫夹具共享区 → corpus.jsonl；indexer（C++，CI 里现编）建索引 → 检索有命中。
+  /* ---------- 真工具链路（L4）：三个真模块三个语言，真的在真进程里跑 ----------
+   * harvest（python）扫夹具共享区 → corpus.jsonl；render（node）把语料渲染成自包含 HTML；
+   * indexer（C++，CI 里现编）建索引 → 检索有命中。
    * 这一段证明的是"三种语言的模块在真进程里真的能用"，与上面的信封/状态机验收互补。
    * 工具用真进程，所以路径必须是**提示词里给出的真实绝对路径**（相对路径会被围栏拒绝）。
    */
@@ -597,9 +598,9 @@ async function approvePlan(name) {
   const workDir = path.join(ROOT, 'session', nameR, 'work');
   const cR = await api('POST', '/api/actions/create_session', {
     name: nameR, mode: 'single',
-    agents: [{ name: '资料手', transient: true, modules: ['harvest', 'indexer'], model: 'm1' }],
+    agents: [{ name: '资料手', transient: true, modules: ['harvest', 'render', 'indexer'], model: 'm1' }],
   });
-  assert(cR.status === 200, '建「真工具」工作（harvest + indexer）', cR.text.slice(0, 200));
+  assert(cR.status === 200, '建「真工具」工作（harvest + render + indexer）', cR.text.slice(0, 200));
   // 投喂两份材料（走产品的上传能力面，落进本次工作的共享区）。
   assert((await act(nameR, 'upload', {
     name: '甲.md', data_base64: Buffer.from('# 甲\n\n本地优先的检索：索引建好之后可以离线查。\n', 'utf8').toString('base64'),
@@ -608,9 +609,10 @@ async function approvePlan(name) {
     name: '乙.md', data_base64: Buffer.from('# 乙\n\n本地优先的检索：离线查更稳。\n', 'utf8').toString('base64'),
   })).status === 200, '投喂乙.md');
   const corpusPath = path.join(workDir, 'corpus.jsonl');
+  const reportPath = path.join(workDir, 'report.html');
   const indexPath = path.join(workDir, 'index.bin');
-  // 直接经产品能力面驱动一次发言：假供应商会按提示词分支发出 harvest.scan 与 indexer.build/query。
-  const sayR = await act(nameR, 'send_message', { text: '真工具链路：先抽语料，再建索引并检索' });
+  // 直接经产品能力面驱动一次发言：假供应商会按提示词分支发出 harvest.scan、render.report 与 indexer.build/query。
+  const sayR = await act(nameR, 'send_message', { text: '真工具链路：先抽语料，再渲染报告，最后建索引并检索' });
   assert(sayR.status === 200, '「真工具」发言', sayR.text.slice(0, 200));
   const rowsR = (await all(nameR)).filter((x) => x.tool).map((x) => x.tool);
   // 失败时把工具原文打出来：真机围栏开着时（CI）只有它能说清是哪一层拦住了。
@@ -622,6 +624,12 @@ async function approvePlan(name) {
   console.log('   共享区存在吗：' + fs.existsSync(workDir) + '（' + workDir + '）');
   assert(rowsR.some((r) => r.name === 'scan'), 'harvest.scan 真的跑了（python 工具进程）', JSON.stringify(rowsR.map((r) => r.name)));
   assert(fs.existsSync(corpusPath), 'corpus.jsonl 真的落地', corpusPath);
+  assert(rowsR.some((r) => r.name === 'report' && r.ok), 'render.report 真的跑了（node 工具进程）', JSON.stringify(rowsR.map((r) => [r.name, r.ok])));
+  assert(fs.existsSync(reportPath), 'report.html 真的落地', reportPath);
+  // 产物要真的来自语料：报告里得出现语料里的那两份资料（空对象兜底不算数）。
+  const reportHtml = fs.readFileSync(reportPath, 'utf8');
+  assert(/<html/i.test(reportHtml) && reportHtml.includes('甲.md') && reportHtml.includes('乙.md'),
+    '报告是自包含 HTML 且按语料逐条列了目录', reportHtml.slice(0, 300));
   assert(rowsR.some((r) => r.name === 'build'), 'indexer.build 真的跑了（C++ 工具进程）', JSON.stringify(rowsR.map((r) => r.name)));
   assert(fs.existsSync(indexPath), 'index.bin 真的落地', indexPath);
   assert(rowsR.some((r) => r.name === 'query' && r.ok), 'indexer.query 真的跑了并成功', JSON.stringify(rowsR.map((r) => [r.name, r.ok])));

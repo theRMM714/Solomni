@@ -109,7 +109,7 @@ impl ToolRunner for ProcTools {
             .stderr(Stdio::piped());
         // 环境白名单：不继承父进程环境（密钥与无关凭据不进工具进程）；HOME/TEMP 落进该 agent 的私有沙箱。
         cmd.env_clear();
-        for (k, v) in confine::fence_env(fence) {
+        for (k, v) in confine::fence_env(fence, command) {
             cmd.env(k, v);
         }
         // 独立进程组：Unix 上超时/停止能杀整棵树；Windows 侧由守门进程的 Job Object 兜住。
@@ -289,7 +289,7 @@ mod tests {
             net: false,
         };
         let env: Vec<(String, String)> =
-            crate::capabilities::tools::detail::confine::fence_env(&spec)
+            crate::capabilities::tools::detail::confine::fence_env(&spec, "python tools/x.py")
                 .into_iter()
                 .map(|(k, v)| {
                     (
@@ -452,6 +452,21 @@ mod tests {
         None
     }
 
+    /// 本机可用的 node（没有就如实跳过需要它的用例）。解释器基线只在 Windows 的容器围栏上需要。
+    #[cfg(windows)]
+    fn node() -> Option<&'static str> {
+        let ok = std::process::Command::new("node")
+            .arg("-v")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false);
+        if ok {
+            Some("node")
+        } else {
+            None
+        }
+    }
+
     fn prompt_texts() -> std::sync::Arc<crate::capabilities::prompt::api::ToolTexts> {
         use crate::capabilities::prompt::api::Prompt;
         use crate::capabilities::prompt::ports::PromptSource;
@@ -554,6 +569,59 @@ mod tests {
             "密钥不得进工具进程：{}",
             out.output
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 解释器基线要在**真进程**上成立：`node <文件>` 的工具进程拿到 `NODE_OPTIONS`（容器里 node 靠它跳过
+    /// realpath，否则脚本执行前就 EPERM 死）；别的解释器看不到它——注入面只覆盖真正需要它的那一种命令。
+    #[cfg(windows)]
+    #[test]
+    fn real_node_tool_process_carries_the_realpath_skip() {
+        let Some(exe) = built_exe() else {
+            eprintln!(
+                "[探针] 未找到已构建的 solomni 可执行文件（先 cargo build），跳过解释器基线契约"
+            );
+            return;
+        };
+        let Some(node) = node() else {
+            eprintln!("[探针] 本机没有可用的 node，跳过解释器基线契约");
+            return;
+        };
+        let dir = crate::tests::scratch("proc-tools-node-env");
+        std::fs::write(
+            dir.join("echo_node_opts.js"),
+            "process.stdout.write('OPTS=' + String(process.env.NODE_OPTIONS));",
+        )
+        .expect("写脚本");
+        let tools = real_runner(exe, &dir, 60);
+        let out = tools.run(
+            &spec_for(&dir),
+            &format!("{} echo_node_opts.js", node),
+            "{}",
+        );
+        assert!(out.ok, "node 工具应当成功：{}", out.output);
+        for flag in ["--preserve-symlinks", "--preserve-symlinks-main"] {
+            assert!(
+                out.output.contains(flag),
+                "工具进程要拿到解释器基线（缺 {}）：{}",
+                flag,
+                out.output
+            );
+        }
+        if let Some(py) = python() {
+            std::fs::write(
+                dir.join("echo_node_opts.py"),
+                "import os\nprint('OPTS=' + str(os.environ.get('NODE_OPTIONS')))\n",
+            )
+            .expect("写 python 脚本");
+            let out = tools.run(&spec_for(&dir), &format!("{} echo_node_opts.py", py), "{}");
+            assert!(out.ok, "python 工具应当成功：{}", out.output);
+            assert!(
+                out.output.contains("OPTS=None"),
+                "非 node 命令不该带解释器基线：{}",
+                out.output
+            );
+        }
         let _ = std::fs::remove_dir_all(&dir);
     }
 

@@ -158,13 +158,16 @@ http.createServer((req, res) => {
       } else if (n === 1) {
         content = JSON.stringify({ type: 'tool', module: 'harvest', name: 'scan', args: { root: s, out: s + '/corpus.jsonl' } });
       } else if (n === 2) {
-        content = JSON.stringify({ type: 'tool', module: 'indexer', name: 'build', args: { corpus: s + '/corpus.jsonl', out: s + '/index.bin' } });
+        // render 是 JS 写的（node 工具进程）：容器围栏下它要靠解释器基线的 realpath 开关才起得来。
+        content = JSON.stringify({ type: 'tool', module: 'render', name: 'report', args: { corpus: s + '/corpus.jsonl', out: s + '/report.html', title: '资料报告' } });
       } else if (n === 3) {
-        content = JSON.stringify({ type: 'tool', module: 'indexer', name: 'query', args: { index: s + '/index.bin', q: '检索' } });
+        content = JSON.stringify({ type: 'tool', module: 'indexer', name: 'build', args: { corpus: s + '/corpus.jsonl', out: s + '/index.bin' } });
       } else if (n === 4) {
-        content = env('work_commit', { paths: ['corpus.jsonl', 'index.bin'], message: '语料与索引' });
+        content = JSON.stringify({ type: 'tool', module: 'indexer', name: 'query', args: { index: s + '/index.bin', q: '检索' } });
       } else if (n === 5) {
-        content = env('submit_report', { summary: '语料与索引都做好了', changes: 'corpus.jsonl 与 index.bin', open: '' });
+        content = env('work_commit', { paths: ['corpus.jsonl', 'report.html', 'index.bin'], message: '语料、报告与索引' });
+      } else if (n === 6) {
+        content = env('submit_report', { summary: '语料、报告与索引都做好了', changes: 'corpus.jsonl、report.html 与 index.bin', open: '' });
       } else {
         content = '回报已经交了。';
       }

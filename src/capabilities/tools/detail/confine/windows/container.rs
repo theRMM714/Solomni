@@ -23,7 +23,7 @@ use windows_sys::Win32::System::JobObjects::{
 use windows_sys::Win32::System::Threading::{
     CreateProcessW, DeleteProcThreadAttributeList, GetCurrentProcess, GetExitCodeProcess,
     InitializeProcThreadAttributeList, UpdateProcThreadAttribute, WaitForSingleObject,
-    EXTENDED_STARTUPINFO_PRESENT, INFINITE, PROCESS_INFORMATION,
+    CREATE_UNICODE_ENVIRONMENT, EXTENDED_STARTUPINFO_PRESENT, INFINITE, PROCESS_INFORMATION,
     PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES, STARTF_USESTDHANDLES, STARTUPINFOEXW,
 };
 
@@ -167,8 +167,17 @@ pub(crate) fn join_kill_on_close_job(max_processes: u32) -> Result<(), String> {
     }
 }
 
-/// 把工具进程放进容器里跑：不给任何 capability（= 断网），stdio 用外层给的那三个句柄。
+/// 把工具进程放进容器里跑：不给任何 capability（= 断网），stdio 用外层给的那三个句柄；环境用运行期白名单显式给出。
 pub(crate) fn run_in_container(sid: PSID, spec: &FenceSpec, command: &str) -> Result<i32, String> {
+    // 环境块显式给（见 fence_env）：子进程拿到的就是白名单本身，不靠"守门进程恰好继承了什么"。
+    let mut block: Vec<u16> = Vec::new();
+    for (k, v) in super::super::fence_env(spec, command) {
+        block.extend(k.encode_wide());
+        block.push(u16::from(b'='));
+        block.extend(v.encode_wide());
+        block.push(0);
+    }
+    block.push(0);
     let mut caps = SECURITY_CAPABILITIES {
         AppContainerSid: sid,
         Capabilities: std::ptr::null_mut(),
@@ -230,8 +239,8 @@ pub(crate) fn run_in_container(sid: PSID, spec: &FenceSpec, command: &str) -> Re
             std::ptr::null_mut(),
             std::ptr::null_mut(),
             1,
-            EXTENDED_STARTUPINFO_PRESENT,
-            std::ptr::null(),
+            EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT,
+            block.as_ptr() as *const c_void,
             cwd.as_ptr(),
             &si.StartupInfo,
             &mut pi,

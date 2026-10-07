@@ -29,7 +29,11 @@
   而 cmd 的 `for` 枚举与 python 的 `os.listdir` / `os.scandir` 正常（真机机制矩阵实测：叶子 DACL
   给容器的是 Modify，写读往返也通）。所以"列自己的产物"用 `for` 枚举钉住
   （`container_roundtrip_sees_leaf_but_not_parent_content` 的第四步），`dir` 不是可依赖的列举手段。
-  JS 工具进程在容器里起不来（node 的 realpath 要盘卷根）另记在 `tests/gaps.yaml`。
+- 命令里的解释器有**基线**：`node <文件>` 的命令由围栏注入 `NODE_OPTIONS=--preserve-symlinks --preserve-symlinks-main`
+  ——node 的 `fs.realpathSync` 先 lstat 盘卷根、再逐级 lstat 祖先前缀，而这两类落点按设计都不在可达范围
+  （卷根属主是系统、非管理员改不动；祖先链只靠令牌的「按名穿过」特权，管不到显式 lstat），少了它进程在脚本执行前就 EPERM 死。
+  只在本平台注入（Landlock 不管 stat、seatbelt 已给祖先放行 `file-read-metadata`）；判据与 `interpreter_dirs` 共用
+  同一份 PATH 解析（`command_programs_in`），而白名单随命令而变——`--print-fence-env` 与探针都按同一条命令问。
 - 授权面按**注入的事实**派生：`<module>/userdata/` 有没有，由 workspace 扫描读出并随沙箱注入（domain 不读盘）；没有就不进 `rw`，`standalone` 的缺省工作目录退回模块根。`prepare_fence` 也会跳过不存在的落点、不判整次失败。
 - 核心代理系统工具的待实现规划清单：`systool_gaps.yaml`（仓库根；不是当前工具表，也不替代测试缺口账）。
 

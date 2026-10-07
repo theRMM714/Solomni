@@ -270,13 +270,15 @@ fn strip_verbatim_prefix(path: &std::path::Path) -> std::path::PathBuf {
     }
 }
 
-/// 解析规则由调用方把环境形状喂进来：**不能假设 PATH / PATHEXT 一定在场或一定干净**。
-fn interpreter_dirs_in(
+/// 命令里出现的**程序**：按 PATH 解析出真实路径（解析不出的跳过，不猜）。
+/// 约束：绝对路径的 token 一律不算——那可能是数据文件，把它当程序会连带把它放行（见 interpreter_dirs 的用例）。
+/// 约束：解释器目录与「命令用到了哪个解释器」都从这一份派生——两处各写一遍迟早会漏掉某一类
+///   （PATHEXT 缺席、带引号的 PATH 项、符号链接的真身）。
+fn command_programs_in(
     command: &str,
     path_var: &std::ffi::OsStr,
     pathext: Option<&str>,
 ) -> Vec<std::path::PathBuf> {
-    let mut dirs: Vec<std::path::PathBuf> = Vec::new();
     let mut candidates: Vec<String> = Vec::new();
     for raw in command.split([' ', '\t', '&', '|', ';', '\n']) {
         let token = raw.trim_matches(|c| c == '"' || c == '\'' || c == '(' || c == ')');
@@ -287,18 +289,13 @@ fn interpreter_dirs_in(
         {
             continue;
         }
-        // 绝对路径：只有「可执行文件」才算程序（命令里的数据文件路径不是解释器——
-        // 把它当解释器会连带把那个文件放行，等于给围栏开了个洞）。
-        let p = std::path::Path::new(token);
-        if p.is_absolute() {
-            if p.is_file() && is_executable(p) {
-                dirs.push(p.to_path_buf());
-            }
+        if std::path::Path::new(token).is_absolute() {
             continue;
         }
         candidates.push(token.to_string());
     }
     let exts = exec_extensions(pathext);
+    let mut hits: Vec<std::path::PathBuf> = Vec::new();
     for name in candidates {
         for entry in std::env::split_paths(path_var) {
             // PATH 项可能带外层引号（手写的 PATH 常见）：带引号去 join 就永远找不到。
@@ -314,21 +311,34 @@ fn interpreter_dirs_in(
                 tries.push(dir.join(format!("{}{}", name, e)));
             }
             if let Some(hit) = tries.into_iter().find(|p| p.is_file() && is_executable(p)) {
-                // 解释器常见布局：<root>/bin/xxx（官方安装与虚拟环境）或 <root>/xxx。
-                if let Some(parent) = hit.parent() {
+                hits.push(hit);
+                break;
+            }
+        }
+    }
+    hits
+}
+
+/// 解析规则由调用方把环境形状喂进来：**不能假设 PATH / PATHEXT 一定在场或一定干净**。
+fn interpreter_dirs_in(
+    command: &str,
+    path_var: &std::ffi::OsStr,
+    pathext: Option<&str>,
+) -> Vec<std::path::PathBuf> {
+    let mut dirs: Vec<std::path::PathBuf> = Vec::new();
+    for hit in command_programs_in(command, path_var, pathext) {
+        // 解释器常见布局：<root>/bin/xxx（官方安装与虚拟环境）或 <root>/xxx。
+        if let Some(parent) = hit.parent() {
+            dirs.push(install_dir(parent));
+        }
+        // 符号链接要把**真身**的安装目录也放行：macOS 上 python3 常常是链接，动态库在真身旁边——
+        // 只放行链接所在目录会让加载器取不到库（进程直接 SIGABRT）。
+        if let Ok(real) = std::fs::canonicalize(&hit) {
+            let real = strip_verbatim_prefix(&real);
+            if real != hit {
+                if let Some(parent) = real.parent() {
                     dirs.push(install_dir(parent));
                 }
-                // 符号链接要把**真身**的安装目录也放行：macOS 上 python3 常常是链接，动态库在真身旁边——
-                // 只放行链接所在目录会让加载器取不到库（进程直接 SIGABRT）。
-                if let Ok(real) = std::fs::canonicalize(&hit) {
-                    let real = strip_verbatim_prefix(&real);
-                    if real != hit {
-                        if let Some(parent) = real.parent() {
-                            dirs.push(install_dir(parent));
-                        }
-                    }
-                }
-                break;
             }
         }
     }
@@ -353,6 +363,60 @@ fn install_dir(bin: &std::path::Path) -> std::path::PathBuf {
         }
     }
     bin.to_path_buf()
+}
+
+/// node 的「跳过 realpath」开关：主模块看 `-main`，依赖与 ESM 看另一个——**两个都要**
+/// （单开任何一个，另一半照样 realpath，真机实测如此）。
+#[cfg(windows)]
+const NODE_REALPATH_FLAGS: &str = "--preserve-symlinks --preserve-symlinks-main";
+
+/// 目的：命令用 node 时要补的环境（`NODE_OPTIONS` 跳过 realpath）；不是 node 就是 `None`。
+/// 约束：Windows 的容器围栏才需要它——`fs.realpathSync` 先 lstat 盘卷根、再逐级 lstat 祖先前缀，
+///   而这两类落点按设计都不在可达范围（卷根属主是系统、非管理员改不动；祖先链只靠令牌的
+///   「按名穿过」特权，管不到显式 lstat），进程在脚本执行前就 EPERM 死。
+/// 约束：另两个平台不需要：Landlock 的权限位里没有「读属性」这一项，seatbelt 的规则显式给祖先
+///   放行了 file-read-metadata（见 macos.rs 的祖先元数据放行）。
+#[cfg(windows)]
+fn node_realpath_env(command: &str) -> Option<(OsString, OsString)> {
+    let path_var = std::env::var_os("PATH").unwrap_or_default();
+    let pathext = std::env::var("PATHEXT").ok();
+    node_realpath_env_in(command, &path_var, pathext.as_deref())
+}
+
+/// 同上，环境形状由调用方喂进来（与 `interpreter_dirs_in` 同一个理由：不能假设 PATH / PATHEXT 干净）。
+#[cfg(windows)]
+fn node_realpath_env_in(
+    command: &str,
+    path_var: &std::ffi::OsStr,
+    pathext: Option<&str>,
+) -> Option<(OsString, OsString)> {
+    let is_node = command_programs_in(command, path_var, pathext)
+        .iter()
+        .any(|p| is_node_program(p));
+    if !is_node {
+        return None;
+    }
+    Some((
+        OsString::from("NODE_OPTIONS"),
+        OsString::from(NODE_REALPATH_FLAGS),
+    ))
+}
+
+/// 程序是不是 node：看程序名，也看**真身**的程序名——安装器常把 `<root>/nodejs` 做成指向具体版本目录的
+/// 符号链接（真机如此），只认链接名会漏掉那一类。
+#[cfg(windows)]
+fn is_node_program(program: &std::path::Path) -> bool {
+    fn named_node(p: &std::path::Path) -> bool {
+        p.file_stem()
+            .map(|s| s.to_string_lossy().eq_ignore_ascii_case("node"))
+            .unwrap_or(false)
+    }
+    if named_node(program) {
+        return true;
+    }
+    std::fs::canonicalize(program)
+        .map(|real| named_node(&strip_verbatim_prefix(&real)))
+        .unwrap_or(false)
 }
 
 /// 是不是「可执行文件」：Unix 看执行位；Windows 没有这个概念，文件存在即算（PATH 解析已按 PATHEXT 试过扩展名）。
@@ -399,7 +463,7 @@ pub fn shell_command(command: &str) -> Command {
 
 /// 环境白名单：子进程只拿到这些（其余一律不继承——密钥与无关凭据不进工具进程）。
 /// 解释器需要 HOME/TEMP 这类落点：全部指到该 agent 的私有沙箱里（缓存与临时文件落在工作区内）。
-pub fn fence_env(spec: &FenceSpec) -> Vec<(OsString, OsString)> {
+pub fn fence_env(spec: &FenceSpec, command: &str) -> Vec<(OsString, OsString)> {
     let keep = [
         "PATH",
         "PATHEXT",
@@ -435,6 +499,14 @@ pub fn fence_env(spec: &FenceSpec) -> Vec<(OsString, OsString)> {
     out.push((OsString::from("TMP"), home.clone().into_os_string()));
     // macOS / Linux 认 TMPDIR：不设的话进程会去读系统临时区（那不在可达范围内）。
     out.push((OsString::from("TMPDIR"), home.into_os_string()));
+    // 解释器基线：命令用 node 时要跳过 realpath，否则容器里起不来（理由见 node_realpath_env）。
+    #[cfg(windows)]
+    if let Some((k, v)) = node_realpath_env(command) {
+        out.push((k, v));
+    }
+    // 其余平台不需要它：Landlock 不管 stat、seatbelt 已放行祖先元数据，realpath 正常。
+    #[cfg(not(windows))]
+    let _ = command;
     out
 }
 
@@ -671,6 +743,73 @@ mod tests {
                 .iter()
                 .all(|d| !d.ends_with("nope")),
             "数据/缺失路径不该被当成解释器"
+        );
+    }
+
+    /// 解释器基线：`node <文件>` 的命令要带上"跳过 realpath"的两个开关；别的解释器、命令里的数据文件路径都不带。
+    /// 判据与解释器目录同一份 PATH 解析（PATHEXT 兜底、带引号的 PATH 项、按名解析才认）。
+    #[cfg(windows)]
+    #[test]
+    fn node_commands_get_the_realpath_skip_and_nothing_else_does() {
+        let root = crate::tests::scratch("interpreter-node");
+        let dir = root.join("nodedir");
+        std::fs::create_dir_all(&dir).expect("建解释器目录");
+        std::fs::write(dir.join("node.exe"), b"stub").expect("放假 node");
+        std::fs::write(dir.join("python.exe"), b"stub").expect("放假 python");
+        let path = dir.as_os_str();
+
+        let (key, value) =
+            node_realpath_env_in("node tools/report.js", path, None).expect("node 命令要带上开关");
+        assert_eq!(key, OsString::from("NODE_OPTIONS"));
+        let value = value.to_string_lossy().to_string();
+        // 两个开关都要：只开一个，另一半照样 realpath（真机上量过）。
+        for flag in ["--preserve-symlinks", "--preserve-symlinks-main"] {
+            assert!(value.contains(flag), "缺开关 {}：{}", flag, value);
+        }
+        assert!(
+            node_realpath_env_in("node.exe tools/report.js", path, None).is_some(),
+            "带扩展名写 node 也要认（标准兜底扩展名）"
+        );
+        let quoted = std::ffi::OsString::from(format!("\"{}\"", dir.display()));
+        assert!(
+            node_realpath_env_in("node tools/report.js", &quoted, None).is_some(),
+            "带引号的 PATH 项也要能解析"
+        );
+        assert!(
+            node_realpath_env_in("python tools/x.py", path, None).is_none(),
+            "别的解释器不带它（免得在不需要的地方改模块解析语义）"
+        );
+        assert!(
+            node_realpath_env_in("cmd /C echo hi", path, None).is_none(),
+            "命令里没有 node 就不带"
+        );
+        assert!(
+            node_realpath_env_in("cat C:\\nope\\nope.exe", path, None).is_none(),
+            "数据文件路径不算程序（与解释器目录同一口径）"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// 非 node 命令在三平台都不带解释器开关：那是 Windows 容器独有的补丁（另两个平台 realpath 正常）。
+    #[test]
+    fn non_node_commands_carry_no_interpreter_switch() {
+        let spec = FenceSpec {
+            agent: "a".to_string(),
+            rw: Vec::new(),
+            ro: Vec::new(),
+            ro_tree: Vec::new(),
+            private: PathBuf::new(),
+            cwd: PathBuf::from("mods").join("m0"),
+            net: false,
+        };
+        let keys: Vec<String> = fence_env(&spec, "python tools/x.py")
+            .into_iter()
+            .map(|(k, _)| k.to_string_lossy().into_owned())
+            .collect();
+        assert!(
+            !keys.iter().any(|k| k == "NODE_OPTIONS"),
+            "非 node 命令不该带 NODE_OPTIONS：{:?}",
+            keys
         );
     }
 }

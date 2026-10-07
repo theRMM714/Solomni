@@ -756,6 +756,148 @@ fn container_roundtrip_keeps_module_read_only_and_peer_unreachable() {
     discard(&base);
 }
 
+/// 本机有没有能跑的 node（没有就如实跳过需要它的探针）。
+fn node_runs() -> bool {
+    std::process::Command::new("node")
+        .arg("-v")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+/// 【真机往返探针·node 形态】容器里 `node <文件>` 必须跑得起来：node 的 `fs.realpathSync` 会先 lstat 盘卷根、
+/// 再逐级 lstat 祖先前缀，而这两类落点按设计都不在可达范围——没有解释器基线（`NODE_OPTIONS` 跳过 realpath），
+/// 进程在脚本执行前就 EPERM 死。所以分两段：带运行期环境跑通一次完整往返（模块脚本 + require 进来的依赖 +
+/// 产物落进 userdata），再用同一份环境**关掉开关**复现失败现场（根因钉死，不是"容器坏了"）。
+/// 会创建 AppContainer profile（改本机状态），只在 --fence-live（SOLOMNI_FENCE_LIVE=1）下跑；本机没有 node 时如实跳过。
+#[test]
+fn container_runs_a_node_module_tool_with_realpath_skipped() {
+    if std::env::var("SOLOMNI_FENCE_LIVE")
+        .map(|v| v != "1")
+        .unwrap_or(true)
+    {
+        eprintln!(
+            "[探针] 未开启真机围栏测试：container_runs_a_node_module_tool_with_realpath_skipped 会创建 AppContainer profile（改本机状态），已跳过；要真跑加 --fence-live"
+        );
+        return;
+    }
+    if !capability().fs {
+        eprintln!(
+            "[探针] 本机不允许改目录 ACL（{}）：node 形态往返探针跳过（不静默当作通过）",
+            capability().note
+        );
+        return;
+    }
+    if !node_runs() {
+        eprintln!("[探针] 本机没有能跑的 node：node 形态往返探针跳过（不静默当作通过）");
+        return;
+    }
+    let base = std::env::temp_dir().join(format!("solomni-node-probe-{}", std::process::id()));
+    let module = base.join("modules").join("m0");
+    let userdata = module.join("userdata");
+    std::fs::create_dir_all(module.join("tools")).expect("建模块 tools");
+    std::fs::create_dir_all(&userdata).expect("建模块 userdata");
+    // 主脚本 require 同目录的依赖：依赖那一路也要 realpath，光有主模块那个开关不够（这正是两个开关的理由）。
+    std::fs::write(
+        module.join("tools").join("helper.js"),
+        "module.exports = { marker: 'node-tool-ok' };",
+    )
+    .expect("写依赖脚本");
+    std::fs::write(
+        module.join("tools").join("report.js"),
+        "const helper = require('./helper.js'); const fs = require('fs'); fs.writeFileSync(process.argv[2], helper.marker);",
+    )
+    .expect("写主脚本");
+    let spec = FenceSpec {
+        agent: "probe-node".to_string(),
+        rw: vec![userdata.clone()],
+        ro: Vec::new(),
+        ro_tree: vec![module.clone()],
+        private: userdata.clone(),
+        cwd: module.clone(),
+        net: false,
+    };
+    let container = container_name(&spec);
+    if let Err(e) = ensure_profile(&container) {
+        if e.contains(PROFILE_ENV_BLOCKED_MARK) {
+            eprintln!(
+                "[探针] 本环境不允许建 AppContainer profile（环境结论，如实跳过）：{}",
+                e
+            );
+            discard(&base);
+            return;
+        }
+        panic!("建容器 profile：{}", e);
+    }
+    let home = base.join("ledger");
+    let command = "node tools/report.js userdata/report.txt";
+    if let Err(e) = prepare_fence(&spec, command, &home) {
+        // 解释器目录（PATH 里那个 node 的安装处）授不上权限时，容器里读不到解释器，这条链路本机做不了：
+        // 环境结论，如实跳过。授权代码真坏了会被同族的往返探针响亮抓住（它们用的是系统里的 cmd）。
+        eprintln!(
+            "[探针] 本机给授权落点写不了权限（{}）：node 形态往返探针跳过（不静默当作通过）",
+            e
+        );
+        if let Err(e) = release_fence(&spec, &home) {
+            eprintln!("[诊断] 撤权未完成（{}）：要收尾请跑 --fence-clean", e);
+        }
+        clean(&home).ok();
+        delete_profile(&container);
+        discard(&base);
+        return;
+    }
+    let sid = container_sid(&container).expect("派生容器 SID");
+
+    // ① 运行期白名单这一层就要带上两个开关：机制不在这儿就位，容器里再补已经晚了。
+    let env = crate::capabilities::tools::detail::confine::fence_env(&spec, command);
+    let opts = env
+        .iter()
+        .find(|(k, _)| k == "NODE_OPTIONS")
+        .map(|(_, v)| v.to_string_lossy().to_string())
+        .unwrap_or_default();
+    assert!(
+        opts.contains("--preserve-symlinks") && opts.contains("--preserve-symlinks-main"),
+        "运行期环境要带两个开关（缺哪个都会在另一半上照样 realpath）：{:?}",
+        opts
+    );
+
+    // ② 容器里跑得通：产物落在 userdata（rw 里），内容来自 require 进来的依赖。
+    let code = run_in_container(sid, &spec, command).expect("容器进程应当能启动");
+    let got = std::fs::read_to_string(userdata.join("report.txt")).unwrap_or_default();
+    assert!(
+        code == 0 && got.contains("node-tool-ok"),
+        "容器里 node 工具应当跑通（exit={}，产物 {:?}）——容器里 stdout/stderr 已透传到本进程输出",
+        code,
+        got.trim()
+    );
+
+    // ③ 对照：命令行把两个开关关掉（命令行优先于 NODE_OPTIONS）→ 复现"脚本执行前就倒"的失败现场。
+    let off = "node --no-preserve-symlinks --no-preserve-symlinks-main tools/report.js userdata/off.txt 2> userdata/off-err.txt";
+    let off_code = run_in_container(sid, &spec, off).expect("容器进程应当能启动");
+    let off_err = std::fs::read_to_string(userdata.join("off-err.txt")).unwrap_or_default();
+    if off_code == 0 {
+        eprintln!(
+            "[诊断] 关掉开关也跑通了（本机这条路径不再需要它）：{:?}",
+            off_err.trim()
+        );
+    } else {
+        assert!(
+            off_err.contains("lstat"),
+            "关掉开关的失败现场应当是 realpath 的 lstat 落点（exit={}，原话 {:?}）",
+            off_code,
+            off_err.trim()
+        );
+    }
+
+    free_sid(sid);
+    release_fence(&spec, &home).expect("撤权应当成功");
+    clean(&home).expect("台账回收应当成功");
+    assert!(delete_profile(&container), "探针的容器 profile 应当删得掉");
+    discard(&base);
+}
+
 /// ACL 写法的语义与后果验证：非递归 `SetNamedSecurityInfoW` 与递归 `TreeSetNamedSecurityInfoW`（带/不带继承标志）
 /// 各自把 ACE 铺到哪些节点、写入后目标还能不能读回自己的 DACL——`grant_one` 的 `recursive` 分支就靠 TreeSet，
 /// 「去继承、全显式」能不能成立全看这里。探针只打印事实、不预设结论；本机不允许改 ACL 时如实跳过。
