@@ -178,11 +178,11 @@ http.createServer((req, res) => {
       if (nTools === 0) {
         calls = call('catalog_agents', { scope: 'all' });
       } else if (nTools === 1) {
-        // 建会话 = 建 + 写开头 + 开工：opening 就是它的第一句（不再另发一条 task）。
+        // 建会话 = 建 + 写开头 + 开工：task 就是它的第一句（不再另发一条消息）。
         calls = call('create_session', {
           mode: 'single',
           agents: [{ ref: '代甲' }],
-          opening: '把这件事做完',
+          task: '把这件事做完',
           request_id: 'agency-1',
         });
       } else {

@@ -211,8 +211,8 @@ pub trait SessionOps: Send + Sync {
     /// 工作名的缺省与唯一化（命名策略归 `session`）：`base` 去空白、为空用 `fallback`、重名加尾号。
     fn unique_work_name(&self, base: &str, fallback: &str) -> Result<String, String>;
     /// 停止：把整棵子树落成 `stopped`（拦住后续派发与唤醒）并中断正在跑的生成；
-    /// 返回是否确实中断了一个在跑的生成。「继续」（`continue_flow`）是它的逆操作。
-    fn stop(&self, sid: &str) -> bool;
+    /// 返回**实际停下的会话**（空 = 本来就没在跑）。「继续」（`continue_flow`）是它的逆操作。
+    fn stop(&self, sid: &str) -> Vec<String>;
     /// 工具级确认的回答：`Allow` / `Deny` / `Full`（本轮不再问）。
     /// **不进命令队列**（生成期间也要立刻生效）；返回是否确实有一个调用在等确认。
     fn approve(&self, sid: &str, answer: Approval) -> bool;
@@ -223,19 +223,6 @@ pub trait SessionOps: Send + Sync {
     /// **在世会话 × 历史的并集**（界面上的会话列表）：只有会话中心同时知道两边，所以归这里。
     /// 落盘历史的列表 / 打开 / 删除归 `session::api::HistoryOps`。
     fn session_views(&self, history: &[HistoryView]) -> Result<Vec<SessionView>, String>;
-
-    /// **动作分发**：一次动作 → 一次能力调用。CLI 与 Web 共用这一份（新增动作只改这里）。
-    fn act(&self, sid: &str, action: Action<'_>, out: Output) -> Result<Acted, String> {
-        match action {
-            Action::Say(text) => self.say(sid, text, out).map(Acted::Advanced),
-            Action::Continue => self.continue_flow(sid, out).map(Acted::Advanced),
-            Action::Step(step, text) => self.collab_step(sid, step, text).map(Acted::Advanced),
-            Action::Withdraw(agent) => self.withdraw_agree(sid, agent).map(Acted::Advanced),
-            Action::Rewind(target) => self.rewind(sid, target).map(Acted::Replayed),
-            Action::UpdateTask(text) => self.update_task(sid, text).map(Acted::Replayed),
-            Action::Compact => self.compact(sid).map(Acted::Advanced),
-        }
-    }
 }
 
 /// 核心自己的用例（会话中心之外的那些）：运行报告与核心推荐。
@@ -256,6 +243,8 @@ pub trait ConductorOps: Send + Sync {
 /// 呈现层因此拿不到端口对象、也不依赖 kernel（见 ARCHITECTURE.md §一）。
 pub trait LogOps: Send + Sync {
     fn info(&self, at: &str, msg: &str);
+    // 入口契约发布给前端的三个级别；warn 暂无调用点（呈现层的降级提示走它），先留着这一格。
+    #[allow(dead_code)]
     fn warn(&self, at: &str, msg: &str);
     fn error(&self, at: &str, msg: &str);
 }
@@ -289,6 +278,8 @@ pub struct ConductorHandle {
     /// 代理会话注入成员侧执行者要的两份装配材料（与核心共享同一份，不在桥这一侧重装）。
     book: crate::capabilities::tools::api::ToolBook,
     texts: Arc<crate::capabilities::prompt::api::ToolTexts>,
+    /// 工具执行面："人直接跑一个模块工具"（无会话）也走它，不另起一套执行机制。
+    tools: Arc<dyn crate::capabilities::tools::api::ToolExec + Send + Sync>,
 }
 
 /// 一次"要一个成员回合"的请求：泵在工作线程上让出，回头找主线程驱动（它才拿得到各 agent 的会话）。
@@ -307,6 +298,7 @@ pub(crate) struct AskReq {
     /// 回合 id（整场工作单调递增；两边对得上就靠它）。
     turn_id: u64,
 }
+mod action;
 mod handle;
 mod proxy;
 
@@ -322,6 +314,8 @@ pub struct Ops {
     pub history: Arc<dyn crate::capabilities::session::api::HistoryOps + Send + Sync>,
     pub workspace: Arc<dyn crate::capabilities::workspace::api::WorkspaceOps + Send + Sync>,
     pub events: Arc<EventBus>,
+    /// 动作能力：目录 + 分发（CLI 与 Web 共用同一份声明与同一处授权）。
+    pub actions: Arc<dyn ActionOps + Send + Sync>,
     /// 日志能力：呈现层只经它埋点（**不持有端口对象**）。
     pub log: Arc<dyn LogOps + Send + Sync>,
 }
@@ -336,6 +330,7 @@ impl Ops {
             history: Arc::new(h.clone()),
             workspace: Arc::new(h.clone()),
             events: h.events(),
+            actions: Arc::new(h.clone()),
             log: Arc::new(h.clone()),
         }
     }
@@ -343,23 +338,68 @@ impl Ops {
 
 // ---------- 入站词汇（呈现层与核心共用的形状） ----------
 
-/// 一次会话动作（**用例词汇**）：CLI 与 Web 共用同一分发（新增动作只改这里）。
-#[derive(Debug, Clone, Copy)]
-pub enum Action<'a> {
-    /// 单 agent 说一句。
-    Say(&'a str),
-    /// 继续一次会话。
-    Continue,
-    /// 协作推进到下一阶段。
-    Step(CollabStep, &'a str),
-    /// 撤回同意。
-    Withdraw(&'a str),
-    /// 回档：留档 / 删除 / 恢复。
-    Rewind(RewindTarget),
-    /// 改需求。
-    UpdateTask(&'a str),
-    /// 压缩上下文（AI 自己压成摘要；此后此前内容不再发给模型，用户仍可查看）。
-    Compact,
+// ---------- 动作（声明在 systools/tools.yaml；分发归 conductor） ----------
+
+/// 一次动作的**调用者身份**：授权判据（动作表 `callers`）的输入。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Caller {
+    /// 人经呈现层（CLI / Web）调用。
+    User,
+    /// 会话里的某个身份（模型经工具调用发起）：角色 id + 它所在的工作与会话。
+    Role {
+        role: String,
+        work: String,
+        agent: String,
+    },
+}
+
+impl Caller {
+    /// 动作表 `callers` 里代表它的身份串（授权比对只认它）。
+    pub fn token(&self) -> &str {
+        match self {
+            Caller::User => "user",
+            Caller::Role { role, .. } => role,
+        }
+    }
+}
+
+/// 一次动作请求：动作 id + **已解析的参数对象** + 调用者身份 + 输出方式。
+/// 参数校验、授权、执行、审计都在 `ActionOps::act` 一处完成；两个适配器只负责造出它。
+#[derive(Debug, Clone)]
+pub struct ActionCall {
+    pub id: String,
+    pub args: serde_json::Value,
+    pub caller: Caller,
+    pub out: Output,
+}
+
+/// 目录里一条参数的呈现形态（前端与 CLI 照它生成输入，不硬编码参数名）。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ActionParamView {
+    pub name: String,
+    pub ty: String,
+    pub required: bool,
+    pub desc: String,
+}
+
+/// 动作目录里的一条：**这个调用者此刻能做什么**。前端据此渲染，不写第二份动作清单。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ActionView {
+    pub id: String,
+    pub desc: String,
+    pub params: Vec<ActionParamView>,
+    /// 这个调用者此刻能不能调（授权通过 + 此刻适用）。
+    pub available: bool,
+    /// 不能调时的原因（能调时为空）。
+    pub reason: String,
+}
+
+/// 动作能力的入站面：目录 + 分发。
+pub trait ActionOps: Send + Sync {
+    /// 目录：给这个调用者能看到的动作（含此刻可用性）。`sid` = 当前会话上下文。
+    fn catalog(&self, caller: &Caller, sid: Option<&str>) -> Result<Vec<ActionView>, String>;
+    /// 分发一次动作：参数校验 → 按 `callers` 授权 → 执行 → 审计，各只有一处。
+    fn act(&self, call: ActionCall) -> Result<Acted, String>;
 }
 
 /// 回档目标：留档 / 删除按**行 id**，恢复按**留档标记 id**。
@@ -374,10 +414,12 @@ pub enum RewindTarget {
 }
 
 /// 动作结果：生成类只回**事件台头部序号**（事实在事件台上，订阅者自己按 since 取）；
-/// 回档/改需求给完整重放（那是快照，不是增量事实）。
+/// 回档 / 改需求给完整重放（那是快照，不是增量事实）；其余给一份结构化结果（如 `{ok:true}`）。
+#[derive(Debug)]
 pub enum Acted {
     Advanced(Advance),
     Replayed(Vec<serde_json::Value>),
+    Done(serde_json::Value),
 }
 
 //

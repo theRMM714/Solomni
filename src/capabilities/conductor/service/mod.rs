@@ -199,6 +199,7 @@ pub struct Conductor {
     running: std::collections::BTreeSet<SessionId>,
 }
 
+mod action;
 mod env;
 mod flow;
 mod history;
@@ -241,6 +242,11 @@ impl Conductor {
     /// 日志端口句柄：入站手柄（conductor::api）与组合根共用同一份事实记录。
     pub fn log_handle(&self) -> Arc<dyn crate::kernel::ports::Log + Send + Sync> {
         Arc::clone(&self.log)
+    }
+
+    /// 工具执行面句柄：入站手柄跑"人直接用的模块工具"要用同一份执行面（不重装）。
+    pub fn tools_handle(&self) -> Arc<dyn ToolExec + Send + Sync> {
+        Arc::clone(&self.tools)
     }
 
     /// 登记处能力面（只读）：组合根与测试读登记处的事实走这里。

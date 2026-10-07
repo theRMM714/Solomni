@@ -7,7 +7,7 @@
 
 use crate::capabilities::workspace::api::Sandbox;
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// 守门进程要执行的命令与其环境上下文。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -75,6 +75,31 @@ impl FenceSpec {
     pub fn with_read_only(mut self, ro: Vec<PathBuf>) -> FenceSpec {
         self.ro = ro;
         self
+    }
+
+    /// 目的：**无会话**（人直接跑一个模块工具）的围栏：模块目录递归只读 + 它自己的 `userdata/` 可写，
+    /// 外加一份用户指定的工作目录（缺省 = 模块的 `userdata/`）。
+    /// 约束：与 agent 会话同一条围栏口径——不装机制时只留进程树与环境白名单，如实降级。
+    pub fn standalone(module_root: &Path, work_root: Option<&Path>) -> FenceSpec {
+        let userdata = module_root.join("userdata");
+        let private = work_root
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| userdata.clone());
+        let mut rw = vec![private.clone()];
+        if private != userdata {
+            rw.push(userdata);
+        }
+        rw.sort();
+        rw.dedup();
+        FenceSpec {
+            agent: "user".to_string(),
+            rw,
+            ro: Vec::new(),
+            ro_tree: vec![module_root.to_path_buf()],
+            private,
+            cwd: module_root.to_path_buf(),
+            net: false,
+        }
     }
 
     /// 把这个围栏的工作目录设成某个模块的根（该模块的工具就在这里跑）。

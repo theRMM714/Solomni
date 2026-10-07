@@ -501,6 +501,7 @@ impl CollabSession {
                 crate::capabilities::tools::api::tool_notes(&*prompts, &sandbox, &modules);
             member.tools = Some(MemberTools {
                 mode,
+                role: "discussant".to_string(),
                 // 模块 id → 该模块的（目录, 工具表）：多模块 agent 靠信封里的 module 消歧。
                 modules: crate::capabilities::session::api::tool_table(&modules),
                 observations: crate::capabilities::tools::api::Observations::default(),

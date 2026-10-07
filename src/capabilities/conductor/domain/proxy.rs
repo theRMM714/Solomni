@@ -121,19 +121,21 @@ impl CatalogScope {
     }
 }
 
-/// create_session 的形态。
+/// create_session 的形态：与 `WorkMode` 同词（single / collab / proxy）；代理不能往代理里套。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SessionMode {
     Single,
-    Multi,
+    Collab,
+    Proxy,
 }
 
 impl SessionMode {
     pub fn parse(s: &str) -> Result<Self, String> {
         match s {
             "single" => Ok(Self::Single),
-            "multi" => Ok(Self::Multi),
-            other => Err(format!("mode 只能是 single 或 multi：{}", other)),
+            "collab" => Ok(Self::Collab),
+            "proxy" => Ok(Self::Proxy),
+            other => Err(format!("mode 只能是 single / collab / proxy：{}", other)),
         }
     }
 }
@@ -355,10 +357,14 @@ pub struct ControlState {
 pub struct NewSession {
     pub mode: SessionMode,
     pub agents: Vec<NewAgent>,
-    /// **这个会话的开头**：single = 它的第一句（点火用的派发），multi = 本次需求。
+    /// **这个会话的开头 / 本次需求**：single = 它的第一句（点火用的派发），collab = 本次需求。
     /// 建好就开始——不是"给某个 agent 的任务"（见 `ProxyBridge::create_session`）。
-    pub opening: String,
+    pub task: String,
     pub request_id: String,
+    /// 工作名：给了就用它，没给由宿主派生（代理建的子工作按 agent 名派生）。
+    pub name: Option<String>,
+    /// 执行档位：给了就用它，没给由宿主按父会话或设置定。
+    pub tier: Option<String>,
     /// 父会话：由**机制**从调用上下文填，不从模型参数取（模型不能自选父）。
     pub parent: Option<String>,
 }
@@ -390,10 +396,20 @@ pub struct CatalogArgs {
 #[derive(Debug, Clone, Deserialize)]
 pub struct CreateArgs {
     pub mode: String,
-    /// 每项是对象，形状在 parse_agents 里逐条校验（数组元素形状声明层表达不了）。
+    /// 每项是对象，形状在 parse_agents 里逐条校验（数组元素形状声明层表达不了）；省略 = 空（代理形态 / 代拟）。
+    #[serde(default)]
     pub agents: Vec<serde_json::Value>,
-    pub opening: String,
+    /// 本次需求 / 单模式的开头：代理必填（建好就开工），用户可省（单模式先建空会话）。
+    #[serde(default)]
+    pub task: Option<String>,
+    #[serde(default)]
     pub request_id: String,
+    /// 工作名（可省 = 由宿主派生）。
+    #[serde(default)]
+    pub name: Option<String>,
+    /// 执行档位 host / vm（可省 = 由宿主按父会话或设置定）。
+    #[serde(default)]
+    pub tier: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -451,23 +467,36 @@ pub fn catalog_scope(args: &CatalogArgs) -> Result<CatalogScope, String> {
 /// 失败一律如实报错——调用方据此拒绝整次调用，不留半成品。
 pub fn resolve_new_session(args: &CreateArgs, catalog: &Catalog) -> Result<NewSession, String> {
     let mode = SessionMode::parse(args.mode.trim())?;
+    if mode == SessionMode::Proxy {
+        return Err("代理不能往里套代理：mode 只能是 single 或 collab".to_string());
+    }
     let request_id = args.request_id.trim().to_string();
     if request_id.is_empty() {
         return Err("request_id 不能为空（幂等标识）".to_string());
     }
-    let opening = args.opening.trim().to_string();
-    if opening.is_empty() {
+    let task = args.task.clone().unwrap_or_default().trim().to_string();
+    if task.is_empty() {
         return Err(
-            "opening 不能为空（这个会话的开头：single 是它的第一句，multi 是本次需求）".to_string(),
+            "task 不能为空（这个会话的开头：single 是它的第一句，collab 是本次需求）".to_string(),
         );
     }
+    let name = args
+        .name
+        .as_ref()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    let tier = args
+        .tier
+        .as_ref()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
     let agents = parse_agents(&args.agents)?;
     match mode {
         SessionMode::Single if agents.len() != 1 => {
             return Err("mode=single 只接受一个 agent".to_string())
         }
-        SessionMode::Multi if agents.len() < 2 => {
-            return Err("mode=multi 至少要两个 agent".to_string())
+        SessionMode::Collab if agents.len() < 2 => {
+            return Err("mode=collab 至少要两个 agent".to_string())
         }
         _ => {}
     }
@@ -540,8 +569,10 @@ pub fn resolve_new_session(args: &CreateArgs, catalog: &Catalog) -> Result<NewSe
     Ok(NewSession {
         mode,
         agents: resolved,
-        opening,
+        task,
         request_id,
+        name,
+        tier,
         parent: None,
     })
 }
@@ -767,7 +798,7 @@ mod tests {
         let ok: CreateArgs = serde_json::from_value(serde_json::json!({
             "mode": "single",
             "agents": [{"name": "a", "modules": ["m1"], "model": "gpt"}],
-            "opening": "做事",
+            "task": "做事",
             "request_id": "r1"
         }))
         .unwrap();
@@ -775,13 +806,13 @@ mod tests {
         assert_eq!(spec.mode, SessionMode::Single);
         assert_eq!(spec.agents[0].modules, vec!["m1".to_string()]);
         assert!(spec.agents[0].transient);
-        assert_eq!(spec.opening, "做事");
+        assert_eq!(spec.task, "做事");
 
         // modules 可以省略：零模块 agent 只用内建文件工具。
         let no_modules: CreateArgs = serde_json::from_value(serde_json::json!({
             "mode": "single",
             "agents": [{"name": "纯写作", "model": "gpt"}],
-            "opening": "写一篇稿",
+            "task": "写一篇稿",
             "request_id": "r0"
         }))
         .unwrap();
@@ -791,7 +822,7 @@ mod tests {
         let unknown_module: CreateArgs = serde_json::from_value(serde_json::json!({
             "mode": "single",
             "agents": [{"name": "a", "modules": ["nope"]}],
-            "opening": "做事",
+            "task": "做事",
             "request_id": "r2"
         }))
         .unwrap();
@@ -803,7 +834,7 @@ mod tests {
         let model_name: CreateArgs = serde_json::from_value(serde_json::json!({
             "mode": "single",
             "agents": [{"name": "a", "modules": ["m1"], "model": "GPT"}],
-            "opening": "做事",
+            "task": "做事",
             "request_id": "r2b"
         }))
         .unwrap();
@@ -811,22 +842,22 @@ mod tests {
         assert!(err.contains("无此模型"), "{}", err);
         assert!(err.contains("gpt"), "失败要把在册模型 id 列回去：{}", err);
 
-        let empty_opening: CreateArgs = serde_json::from_value(serde_json::json!({
+        let empty_task: CreateArgs = serde_json::from_value(serde_json::json!({
             "mode": "single",
             "agents": [{"name": "a", "modules": ["m1"]}],
-            "opening": "   ",
+            "task": "   ",
             "request_id": "r2c"
         }))
         .unwrap();
-        assert!(resolve_new_session(&empty_opening, &c)
+        assert!(resolve_new_session(&empty_task, &c)
             .unwrap_err()
-            .contains("opening"));
+            .contains("task"));
 
-        // 身份项不接受任务字段（任务是会话级的 opening）。
+        // 身份项不接受任务字段（任务是会话级的 task）。
         let extra: CreateArgs = serde_json::from_value(serde_json::json!({
             "mode": "single",
             "agents": [{"ref": "a", "objective": "做事"}],
-            "opening": "做事",
+            "task": "做事",
             "request_id": "r2d"
         }))
         .unwrap();
@@ -835,12 +866,12 @@ mod tests {
             .contains("不认识的键"));
 
         let dup: CreateArgs = serde_json::from_value(serde_json::json!({
-            "mode": "multi",
+            "mode": "collab",
             "agents": [
                 {"name": "a", "modules": ["m1"]},
                 {"name": "b", "modules": ["m1"]}
             ],
-            "opening": "一起做",
+            "task": "一起做",
             "request_id": "r3"
         }))
         .unwrap();
@@ -849,9 +880,9 @@ mod tests {
             .contains("同一模块只能属于一个 agent"));
 
         let one: CreateArgs = serde_json::from_value(serde_json::json!({
-            "mode": "multi",
+            "mode": "collab",
             "agents": [{"name": "a", "modules": ["m1"]}],
-            "opening": "一起做",
+            "task": "一起做",
             "request_id": "r4"
         }))
         .unwrap();
@@ -863,7 +894,7 @@ mod tests {
         let reuse: CreateArgs = serde_json::from_value(serde_json::json!({
             "mode": "single",
             "agents": [{"ref": "a"}],
-            "opening": "做事",
+            "task": "做事",
             "request_id": "r5"
         }))
         .unwrap();
@@ -874,7 +905,7 @@ mod tests {
         let missing: CreateArgs = serde_json::from_value(serde_json::json!({
             "mode": "single",
             "agents": [{"ref": "nope"}],
-            "opening": "做事",
+            "task": "做事",
             "request_id": "r6"
         }))
         .unwrap();

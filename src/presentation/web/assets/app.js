@@ -735,7 +735,7 @@ function buildConfigForm(sid, cfg, c, box) {
     save.disabled = true;
     c.setMsg('保存中…');
     try {
-      await api('POST', '/api/sessions/' + encodeURIComponent(sid) + '/edit', body);
+      await api('POST', actionUrl('edit_session'), Object.assign({ session_id: sid }, body));
       await refreshState();
       c.setMsg('已保存：下一次发言按新配置生效');
       loadConfig(sid, c, box); // 重读一遍：把落盘后的样子如实显示出来
@@ -1377,12 +1377,15 @@ uploadPicker.addEventListener('change', () => {
   reader.onload = async () => {
     const b64 = String(reader.result || '').split(',')[1] || '';
     try {
-      await api('POST', '/api/sessions/' + encodeURIComponent(s.sid) + '/upload', { name: f.name, data_base64: b64 });
-      filesCache.delete(s.sid); // 文件清单变了，@ 菜单下次重拉
-      notice('已上传', '已上传到本次工作的 work/：' + f.name);
+      const r = await api('POST', actionUrl('upload'), { session_id: s.sid, name: f.name, data_base64: b64 });
+      if (r.uploaded === false) {
+        conflictUpload(s.sid, f.name, b64);
+      } else {
+        filesCache.delete(s.sid); // 文件清单变了，@ 菜单下次重拉
+        notice('已上传', '已上传到本次工作的 work/：' + f.name);
+      }
     } catch (err) {
-      if (err.status === 409) conflictUpload(s.sid, f.name, b64);
-      else notice('操作失败', err.message, 'err');
+      notice('操作失败', err.message, 'err');
     }
     uploadPicker.value = '';
   };
@@ -1400,9 +1403,13 @@ function suggestAltName(name) {
 
 async function sendUpload(sid, name, b64, overwrite) {
   try {
-    const body = { name, data_base64: b64 };
+    const body = { session_id: sid, name, data_base64: b64 };
     if (overwrite) body.overwrite = true;
-    await api('POST', '/api/sessions/' + encodeURIComponent(sid) + '/upload', body);
+    const r = await api('POST', actionUrl('upload'), body);
+    if (r.uploaded === false) {
+      notice('同名文件已存在', '目标里已经有这个名字，请改名或确认覆盖。', 'err');
+      return;
+    }
     filesCache.delete(sid); // 文件清单变了，@ 菜单下次重拉
     notice('已上传', '已上传：' + name);
   } catch (e) { notice('操作失败', e.message, 'err'); }
@@ -1425,11 +1432,11 @@ function renameUpload(sid, name, b64, alt) {
       const v = inp.value.trim();
       if (!v) { c.setMsg('文件名不能为空', true); return; }
       try {
-        await api('POST', '/api/sessions/' + encodeURIComponent(sid) + '/upload', { name: v, data_base64: b64 });
+        const r = await api('POST', actionUrl('upload'), { session_id: sid, name: v, data_base64: b64 });
+        if (r.uploaded === false) { c.setMsg('还是同名，请换一个名字', true); return; }
         filesCache.delete(sid); // 文件清单变了，@ 菜单下次重拉
         closeModal(); notice('已上传', '已上传：' + v);
       } catch (e) {
-        if (e.status === 409) { c.setMsg('还是同名，请换一个名字', true); return; }
         c.setMsg(e.message, true);
       }
     };
@@ -1880,7 +1887,7 @@ async function openWizard() {
 
 /* ---------- 会话 ---------- */
 async function startSession(body) {
-  const r = await api('POST', '/api/sessions', body);
+  const r = await api('POST', actionUrl('create_session'), body);
   const sid = r.sid;
   const s = {
     sid, mode: body.mode, title: body.name || sid, run: 'active',
@@ -2452,7 +2459,7 @@ async function approveTool(answer) {
   const s = activeSession();
   if (!s) return;
   try {
-    await api('POST', '/api/sessions/' + encodeURIComponent(s.sid) + '/approve', { answer: answer });
+    await api('POST', actionUrl('approve_tool'), { session_id: s.sid, answer: answer });
     s.pending = null;
     renderAll();
   } catch (err) {
@@ -2504,7 +2511,7 @@ async function updateTask(text) {
   const s = activeSession();
   if (!s || isBusy(s)) return;
   try {
-    const r = await api('POST', '/api/sessions/' + encodeURIComponent(s.sid) + '/update-task', { text });
+    const r = await api('POST', actionUrl('update_task'), { session_id: s.sid, text });
     s.lines = []; s.pending = null; s.readonly = false; s.done = false;
     for (const ev of (r.events || [])) absorb(s, ev);
     renderAll();
@@ -2583,6 +2590,10 @@ function applyBatch(seq, sid, events) {
   // 事件按序吸收，运行态因此自己就对了——猜"有增量=在跑"只会与事件打架。
   return absorbEvents(s, events);
 }
+/* 本地名 → 动作 id 的映射：动作目录与校验都在核心（systools/tools.yaml），这里只做转写。 */
+const ACT_IDS = { say: 'send_message', task: 'set_task', slate: 'confirm_slate', begin: 'begin', decide: 'decide' };
+/* 动作只有一个入口 /api/actions/{id}：声明、授权、执行与审计都在核心那一处。 */
+function actionUrl(id) { return '/api/actions/' + id; }
 async function act(action, text) {
   const s = activeSession();
   if (!s || isBusy(s) || s.readonly) return;
@@ -2595,7 +2606,7 @@ async function act(action, text) {
   renderStream();
   try {
     // 命令回包只有头部序号：事实（含自己那条发言的权威行）由事件流补进来。
-    await api('POST', '/api/sessions/' + encodeURIComponent(s.sid) + '/' + action, { text });
+    await api('POST', actionUrl(ACT_IDS[action] || action), { session_id: s.sid, text });
     s.awaiting = null;
     renderAll();
   } catch (err) {
@@ -2635,7 +2646,7 @@ function restoreMark(mark) {
 /* 回档请求的统一收尾：服务端回重放事件，前端整体重建。 */
 async function applyRewind(s, body) {
   try {
-    const r = await api('POST', '/api/sessions/' + encodeURIComponent(s.sid) + '/rewind', body);
+    const r = await api('POST', actionUrl('rewind'), Object.assign({ session_id: s.sid }, body));
     s.lines = [];
     s.live = [];
     s.fold = {};   // 行整体重建，折叠状态一并重来（避免旧键被新行复用）
@@ -2657,7 +2668,7 @@ function withdrawAgree(agent) {
   choiceModal('撤回同意', '撤回「' + agent + '」的同意？继续时会按剩余转录重新判定。', [
     ['撤回', 'btn btn-danger', async () => {
       try {
-        await api('POST', '/api/sessions/' + encodeURIComponent(s.sid) + '/withdraw', { agent });
+        await api('POST', actionUrl('withdraw'), { session_id: s.sid, agent });
         renderAll();
       } catch (err) { notice('操作失败', err.message, 'err'); }
     }],
@@ -2672,7 +2683,7 @@ async function continueFlow() {
   s.sending = true;
   renderStream();
   try {
-    await api('POST', '/api/sessions/' + encodeURIComponent(s.sid) + '/continue', {});
+    await api('POST', actionUrl('control_session'), { session_id: s.sid, action: 'continue' });
     s.readonly = false; // 历史回放会话一旦继续即转为活动会话（跨重启续跑）
     renderAll();
   } catch (err) {
@@ -2899,7 +2910,7 @@ async function stopGeneration() {
   const s = activeSession();
   if (!s || !isBusy(s)) return;
   try {
-    await api('POST', '/api/sessions/' + encodeURIComponent(s.sid) + '/stop', {});
+    await api('POST', actionUrl('control_session'), { session_id: s.sid, action: 'stop' });
   } catch (e) { /* 停止失败不吵用户；按钮仍是停止，可再点一次 */ }
 }
 

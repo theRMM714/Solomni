@@ -355,6 +355,7 @@ pub(crate) fn member_with_tools(
     // 该路径走模块声明的外部命令（grep）：空沙箱 + 内存 IO，内置工具不参与。
     m.tools = Some(MemberTools {
         mode: crate::capabilities::llm::api::ToolMode::Envelope,
+        role: "solo".to_string(),
         modules,
         observations: crate::capabilities::tools::api::Observations::default(),
         llm: test_llm_demo(),
@@ -647,6 +648,7 @@ pub(crate) fn native_member(
     let sb = test_sandbox(id, &[]);
     m.tools = Some(MemberTools {
         mode: crate::capabilities::llm::api::ToolMode::Native,
+        role: "solo".to_string(),
         modules,
         observations: crate::capabilities::tools::api::Observations::default(),
         llm: test_llm_demo(),

@@ -32,6 +32,10 @@ pub struct ToolSchema {
     /// 为什么挂在能力上而不是"系统工具就免检"：`read`/`write` 也是系统工具，但它们碰文件系统。
     #[serde(default)]
     pub capability: String,
+    /// 目的：谁能调这条动作——**调用者身份**清单（`user` = 人经呈现层调用；其余是角色 id）。
+    /// 约束：它和 `systools/roles.yaml` 的（角色 → 工具面）是同一关系的两面，由 `SystemTools::problems` 双向锁死一致。
+    #[serde(default)]
+    pub callers: Vec<String>,
 }
 
 impl ToolSchema {

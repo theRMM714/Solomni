@@ -22,6 +22,16 @@ impl Tier {
             Tier::Vm => "vm",
         }
     }
+
+    /// 目的：把对外写法解析成档位；缺省（空串）= 本机档，未知值如实报错。
+    /// 约束：呈现层与协调业务共用这一处解析，不再各写一份（对外词汇只有 host / vm）。
+    pub fn parse(s: &str) -> Result<Tier, String> {
+        match s.trim() {
+            "" | "host" => Ok(Tier::Host),
+            "vm" => Ok(Tier::Vm),
+            other => Err(format!("未知执行档位：{}（只接受 host / vm）", other)),
+        }
+    }
 }
 
 /// 目的：单次模型调用的默认总预算（秒）。

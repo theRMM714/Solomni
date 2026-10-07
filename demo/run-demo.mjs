@@ -33,6 +33,8 @@ const ok = (cond, label, extra) => {
 };
 
 /** 一次能力面调用：不设客户端超时（模型一轮可能跑几分钟），等它自己返回。 */
+/* 动作只有一个入口 /api/actions/{id}：声明与校验都在核心。 */
+const actUrl = (id) => "/api/actions/" + id;
 function api(method, path, body) {
   return new Promise((resolve, reject) => {
     const payload = body === undefined ? null : Buffer.from(JSON.stringify(body), "utf8");
@@ -78,7 +80,7 @@ async function lines(sid) {
 
 /** 说一句话：这一轮跑完（模型不再调用工具）才会返回，所以这里只等，不轮询。 */
 async function say(sid, text) {
-  const r = await api("POST", "/api/sessions/" + encodeURIComponent(sid) + "/say", { text });
+  const r = await api("POST", actUrl("send_message"), { session_id: sid, text });
   return r;
 }
 
@@ -102,7 +104,7 @@ async function main() {
   // ① 建工作：一个 agent、三个模块（抽取 / 呈现 / 检索各一个模块），模型用核心默认（也可用环境变量指定）。
   const agent = { name: "资料手", modules: ["harvest", "render", "indexer"] };
   if (MODEL) agent.model = MODEL;
-  const created = await api("POST", "/api/sessions", { name: WORK, mode: "single", agents: [agent] });
+  const created = await api("POST", actUrl("create_session"), { name: WORK, mode: "single", agents: [agent] });
   ok(created.status === 200, "建工作 " + WORK, created.text);
   const sid = (created.json && created.json.sid) || WORK;
 
@@ -110,7 +112,8 @@ async function main() {
   const files = readdirSync(SAMPLE).sort();
   ok(files.length > 0, "示例语料非空", files.join(" "));
   for (const name of files) {
-    const up = await api("POST", "/api/sessions/" + encodeURIComponent(sid) + "/upload", {
+    const up = await api("POST", actUrl("upload"), {
+      session_id: sid,
       name,
       data_base64: readFileSync(join(SAMPLE, name)).toString("base64"),
     });

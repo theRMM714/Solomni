@@ -41,6 +41,8 @@ const ok = (cond, label, extra) => {
 
 /** 一次能力面调用：不设客户端超时（一轮可能跑几分钟），等它自己返回。
     长请求被网络层重置（ECONNRESET）是常态——**重试**，而不是让整个演示崩掉。 */
+/* 动作只有一个入口 /api/actions/{id}：声明与校验都在核心。 */
+const actUrl = (id) => "/api/actions/" + id;
 async function api(method, path, body, tries = 3) {
   for (let i = 1; ; i++) {
     try {
@@ -155,7 +157,7 @@ async function main() {
     { name: "检索手", modules: ["indexer"] },
   ];
   if (MODEL) for (const a of agents) a.model = MODEL;
-  const created = await api("POST", "/api/sessions", { name: WORK, mode: "collab", agents, task });
+  const created = await api("POST", actUrl("create_session"), { name: WORK, mode: "collab", agents, task });
   ok(created.status === 200, "建协作工作 " + WORK + "（3 个 agent / 3 个模块 / 3 种语言）", created.text);
   const sid = (created.json && created.json.sid) || WORK;
 
@@ -163,7 +165,8 @@ async function main() {
   const files = readdirSync(SAMPLE).sort();
   ok(files.length > 0, "示例语料非空", files.join(" "));
   for (const name of files) {
-    const up = await api("POST", "/api/sessions/" + encodeURIComponent(sid) + "/upload", {
+    const up = await api("POST", actUrl("upload"), {
+      session_id: sid,
       name,
       data_base64: readFileSync(join(SAMPLE, name)).toString("base64"),
     });
@@ -172,7 +175,7 @@ async function main() {
 
   // ③ 开始讨论（不带 allow：需要用户裁决时如实停下来问你，而不是替你决定）。
   console.log("（协作一轮要等模型跑完，可能要几分钟）");
-  const begin = await api("POST", "/api/sessions/" + encodeURIComponent(sid) + "/begin", { text: "yes" });
+  const begin = await api("POST", actUrl("begin"), { session_id: sid, text: "yes" });
   ok(begin.status === 200, "开始讨论", begin.text);
 
   // ④ 轮询：协作是拉模式——有 pending 就回答，没 pending 就继续推进，直到交付。
@@ -189,27 +192,27 @@ async function main() {
     const pending = view && view.pending;
     if (pending && pending.kind === "ask") {
       console.log("   [裁决] " + String(pending.summary || "") + " 提问：" + String(pending.question || "").slice(0, 200));
-      const ans = await api("POST", "/api/sessions/" + encodeURIComponent(sid) + "/decide", { text: "按你的判断做" });
+      const ans = await api("POST", actUrl("decide"), { session_id: sid, text: "按你的判断做" });
       ok(ans.status === 200, "回应 agent 的请教（自由文本）", ans.text);
       continue;
     }
     // **审查关卡**：整理完不自动开工——方案与任务链先给用户看，用户回一句明确的"开工"才推进。
     if (pending && pending.kind === "plan_review") {
       console.log("   [裁决] " + String(pending.summary || "") + " → 回一句明确的开工");
-      const a = await api("POST", "/api/sessions/" + encodeURIComponent(sid) + "/decide", { text: "同意开工，按方案推进。" });
+      const a = await api("POST", actUrl("decide"), { session_id: sid, text: "同意开工，按方案推进。" });
       ok(a.status === 200, "审查关卡：明确开工", a.text);
       continue;
     }
     // **节点验收没过**：如实报告是哪几个节点，然后点「继续」重派它们。
     if (pending && pending.kind === "node_blocked") {
       console.log("   [节点验收] 没通过：" + JSON.stringify((pending.payload && pending.payload.nodes) || []));
-      const c = await api("POST", "/api/sessions/" + encodeURIComponent(sid) + "/continue", {});
+      const c = await api("POST", actUrl("control_session"), { session_id: sid, action: "continue" });
       ok(c.status === 200, "重派没通过的节点", c.text);
       continue;
     }
     const ev = await events(sid);
     if (ev.some((e) => e.type === "ended")) { delivered = true; break; }
-    const c = await api("POST", "/api/sessions/" + encodeURIComponent(sid) + "/continue", {});
+    const c = await api("POST", actUrl("control_session"), { session_id: sid, action: "continue" });
     // 「正在生成中」是**正常**的：协作在跑，此刻不该推进——等下一轮再问，别当失败更别 break
     //（之前就是这样提前退出，于是断言在任务跑完之前执行，报出一串假 FAIL）。
     if (c.status !== 200 && !/正在生成中/.test(c.text || "")) {

@@ -387,6 +387,7 @@ pub(crate) fn core_operation_runs_readonly_verification_before_the_op() {
     let sb = test_sandbox("核心", &[]);
     let mut verify = MemberTools {
         mode: crate::capabilities::llm::api::ToolMode::Envelope,
+        role: "orchestrator".to_string(),
         modules: BTreeMap::new(),
         observations: crate::capabilities::tools::api::Observations::default(),
         llm: test_llm_demo(),

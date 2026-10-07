@@ -104,7 +104,7 @@ pub(crate) fn without_a_grant_nothing_reaches_the_host() {
         (d::CATALOG, r#"{"scope":"all"}"#),
         (
             d::CREATE,
-            r#"{"mode":"single","agents":[{"ref":"a"}],"opening":"做事","request_id":"r1"}"#,
+            r#"{"mode":"single","agents":[{"ref":"a"}],"task":"做事","request_id":"r1"}"#,
         ),
         (
             d::SEND,
@@ -144,7 +144,7 @@ pub(crate) fn grant_scope_expiry_and_bounds_are_enforced() {
     let out = tools.call(
         &c,
         d::CREATE,
-        r#"{"mode":"single","agents":[{"ref":"a"}],"opening":"做事","request_id":"r1"}"#,
+        r#"{"mode":"single","agents":[{"ref":"a"}],"task":"做事","request_id":"r1"}"#,
     );
     assert!(
         !out.ok && out.output.contains("不包含这个工具"),
@@ -170,7 +170,7 @@ pub(crate) fn grant_scope_expiry_and_bounds_are_enforced() {
     let out = tools.call(
         &model_scoped,
         d::CREATE,
-        r#"{"mode":"single","agents":[{"name":"x","modules":["m1"],"model":"other"}],"opening":"做事","request_id":"r2"}"#,
+        r#"{"mode":"single","agents":[{"name":"x","modules":["m1"],"model":"other"}],"task":"做事","request_id":"r2"}"#,
     );
     assert!(
         !out.ok && out.output.contains("不覆盖这个模型"),
@@ -201,13 +201,13 @@ pub(crate) fn grant_scope_expiry_and_bounds_are_enforced() {
 pub(crate) fn create_session_validates_then_creates_once() {
     let (host, mut tools) = rig();
     let c = ctx(Some(full_grant()));
-    let args = r#"{"mode":"single","agents":[{"name":"x","modules":["m1"],"model":"gpt"}],"opening":"做事","request_id":"r1"}"#;
+    let args = r#"{"mode":"single","agents":[{"name":"x","modules":["m1"],"model":"gpt"}],"task":"做事","request_id":"r1"}"#;
     let out = tools.call(&c, d::CREATE, args);
     assert!(out.ok, "{}", out.output);
     assert!(out.output.contains("work-r1"), "{}", out.output);
     let made = host.created();
     assert_eq!(made.len(), 1);
-    assert_eq!(made[0].opening, "做事");
+    assert_eq!(made[0].task, "做事");
     assert_eq!(made[0].agents[0].name, "x");
     assert!(made[0].agents[0].transient, "新组装的 agent 是临时项");
 
@@ -217,36 +217,36 @@ pub(crate) fn create_session_validates_then_creates_once() {
 
     for (bad, why) in [
         (
-            r#"{"mode":"single","agents":[{"name":"x","modules":["nope"]}],"opening":"做事","request_id":"b1"}"#,
+            r#"{"mode":"single","agents":[{"name":"x","modules":["nope"]}],"task":"做事","request_id":"b1"}"#,
             "无此模块",
         ),
         (
-            r#"{"mode":"multi","agents":[{"name":"x","modules":["m1"]},{"name":"y","modules":["m1"]}],"opening":"做事","request_id":"b2"}"#,
+            r#"{"mode":"collab","agents":[{"name":"x","modules":["m1"]},{"name":"y","modules":["m1"]}],"task":"做事","request_id":"b2"}"#,
             "同一模块只能属于一个 agent",
         ),
         (
-            r#"{"mode":"multi","agents":[{"name":"x","modules":["m1"]}],"opening":"做事","request_id":"b3"}"#,
+            r#"{"mode":"collab","agents":[{"name":"x","modules":["m1"]}],"task":"做事","request_id":"b3"}"#,
             "至少要两个 agent",
         ),
         (
-            r#"{"mode":"single","agents":[{"name":"x","modules":["m1"]},{"name":"y","modules":["m2"]}],"opening":"做事","request_id":"b4"}"#,
+            r#"{"mode":"single","agents":[{"name":"x","modules":["m1"]},{"name":"y","modules":["m2"]}],"task":"做事","request_id":"b4"}"#,
             "只接受一个 agent",
         ),
         (
-            r#"{"mode":"single","agents":[{"ref":"nope"}],"opening":"做事","request_id":"b5"}"#,
+            r#"{"mode":"single","agents":[{"ref":"nope"}],"task":"做事","request_id":"b5"}"#,
             "不在登记处",
         ),
         (
-            r#"{"mode":"single","agents":[{"name":"a/b","modules":["m1"]}],"opening":"做事","request_id":"b6"}"#,
+            r#"{"mode":"single","agents":[{"name":"a/b","modules":["m1"]}],"task":"做事","request_id":"b6"}"#,
             "名字不合法",
         ),
         (
-            r#"{"mode":"single","agents":[{"name":"x","modules":["m1"],"extra":1}],"opening":"做事","request_id":"b7"}"#,
+            r#"{"mode":"single","agents":[{"name":"x","modules":["m1"],"extra":1}],"task":"做事","request_id":"b7"}"#,
             "不认识的键",
         ),
         (
             r#"{"mode":"single","agents":[{"name":"x","modules":["m1"]}],"request_id":"b8"}"#,
-            "opening",
+            "task",
         ),
     ] {
         let out = tools.call(&c, d::CREATE, bad);
@@ -265,7 +265,7 @@ pub(crate) fn create_session_validates_then_creates_once() {
     let out = tools.call(
         &c,
         d::CREATE,
-        r#"{"mode":"single","agents":[{"ref":"a"}],"opening":"做事","request_id":"r9"}"#,
+        r#"{"mode":"single","agents":[{"ref":"a"}],"task":"做事","request_id":"r9"}"#,
     );
     assert!(!out.ok && out.output.contains("磁盘满"), "{}", out.output);
     assert_eq!(host.created().len(), 1);
@@ -273,7 +273,7 @@ pub(crate) fn create_session_validates_then_creates_once() {
     let out = tools.call(
         &c,
         d::CREATE,
-        r#"{"mode":"single","agents":[{"ref":"a"}],"opening":"做事","request_id":"r9"}"#,
+        r#"{"mode":"single","agents":[{"ref":"a"}],"task":"做事","request_id":"r9"}"#,
     );
     assert!(out.ok, "失败不记账，重放要再试：{}", out.output);
     assert_eq!(host.created().len(), 2);
@@ -507,7 +507,7 @@ pub(crate) fn the_real_bridge_reads_catalog_and_session_messages() {
     let out = tools.call(
         &c,
         d::CREATE,
-        r#"{"mode":"single","agents":[{"name":"x","modules":["m1"]}],"opening":"做事","request_id":"z"}"#,
+        r#"{"mode":"single","agents":[{"name":"x","modules":["m1"]}],"task":"做事","request_id":"z"}"#,
     );
     assert!(!out.ok && out.output.contains("无此会话"), "{}", out.output);
     // 转达：目标不存在时如实拒绝。
@@ -556,7 +556,7 @@ pub(crate) fn the_real_bridge_creates_a_child_work() {
         parent: Some(parent_sid.clone()),
         now: 1000,
     };
-    let args = r#"{"mode":"single","agents":[{"name":"c1","modules":["m1"]}],"opening":"做事","request_id":"r1"}"#;
+    let args = r#"{"mode":"single","agents":[{"name":"c1","modules":["m1"]}],"task":"做事","request_id":"r1"}"#;
     let out = tools.call(&c, d::CREATE, args);
     assert!(out.ok, "{}", out.output);
     let v: serde_json::Value = serde_json::from_str(&out.output).expect("JSON");
@@ -712,11 +712,13 @@ pub(crate) fn a_finished_child_notifies_the_proxy_without_dumping_its_transcript
                     modules: vec!["m1".to_string()],
                     model: None,
                 }],
-                opening: "做事".to_string(),
+                task: "做事".to_string(),
                 request_id: "r1".to_string(),
+                name: None,
+                tier: None,
                 parent: Some("w-notify".to_string()),
             };
-            Ok(core.proxy_create(&spec)?.0.session)
+            Ok(core.create_session(&spec)?.0.session)
         })
         .expect("建子工作");
     let notified = handle
@@ -897,7 +899,7 @@ pub(crate) fn the_real_bridge_creates_a_multi_agent_child_work() {
         parent: Some(parent.sid.clone()),
         now: 1000,
     };
-    let args = r#"{"mode":"multi","agents":[{"name":"c1","modules":["m1"]},{"name":"c2","modules":["m2"]}],"opening":"做事","request_id":"m1"}"#;
+    let args = r#"{"mode":"collab","agents":[{"name":"c1","modules":["m1"]},{"name":"c2","modules":["m2"]}],"task":"做事","request_id":"m1"}"#;
     let out = tools.call(&c, d::CREATE, args);
     assert!(out.ok, "{}", out.output);
     let v: serde_json::Value = serde_json::from_str(&out.output).expect("JSON");
@@ -921,7 +923,7 @@ pub(crate) fn the_real_bridge_creates_a_multi_agent_child_work() {
     assert_eq!(root, parent.sid, "子工作与父会话共用同一个 work/");
     assert!(meta.task.is_some(), "协作必须有本次需求（会话级 opening）");
     // 同一模块不得同时属于两个 agent（登记处事实核对在调用前完成，不留半成品）。
-    let dup = r#"{"mode":"multi","agents":[{"name":"c1","modules":["m1"]},{"name":"c2","modules":["m1"]}],"opening":"做事","request_id":"m2"}"#;
+    let dup = r#"{"mode":"collab","agents":[{"name":"c1","modules":["m1"]},{"name":"c2","modules":["m1"]}],"task":"做事","request_id":"m2"}"#;
     let out = tools.call(&c, d::CREATE, dup);
     assert!(!out.ok && out.output.contains("同一模块"), "{}", out.output);
 }
@@ -1158,7 +1160,7 @@ pub(crate) fn the_proxy_created_child_publishes_its_opening_facts() {
         .expect("建代理会话");
     let bridge: Arc<dyn ProxyHost + Send + Sync> = Arc::new(ProxyBridge::new(handle.clone()));
     let spec = d::NewSession {
-        mode: d::SessionMode::Multi,
+        mode: d::SessionMode::Collab,
         agents: vec![
             d::NewAgent {
                 name: "c1".to_string(),
@@ -1173,8 +1175,10 @@ pub(crate) fn the_proxy_created_child_publishes_its_opening_facts() {
                 model: None,
             },
         ],
-        opening: "一起做".to_string(),
+        task: "一起做".to_string(),
         request_id: "r1".to_string(),
+        name: None,
+        tier: None,
         parent: Some(proxy),
     };
     let created = bridge.create_session(&spec).expect("建协作子工作");

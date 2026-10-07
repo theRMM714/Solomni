@@ -4,10 +4,7 @@
 //! 核心状态在核心自己的线程上：这里拿不到它、也拿不到任何核心锁，「停止」直接说给核心听。
 //! 安全底线：只绑 127.0.0.1；密钥永不进任何响应（能力面只给 id）。
 
-use crate::capabilities::conductor::api::{Acted, Action, RewindTarget};
-use crate::capabilities::conductor::api::{
-    CollabStep, SessionEdit, SessionEvent, WorkMode, WorkSpec,
-};
+use crate::capabilities::conductor::api::{Acted, ActionCall, Caller, SessionEvent, WorkMode};
 use crate::capabilities::conductor::api::{Ops, Output};
 use crate::capabilities::registry::api::AppSettings;
 pub mod routes;
@@ -222,32 +219,6 @@ fn parse_body(body: &str) -> Result<serde_json::Value, String> {
     serde_json::from_str::<serde_json::Value>(body).map_err(|e| format!("请求不是 JSON：{}", e))
 }
 
-/// 极简 base64 解码（上传用；标准字母表，容忍换行与缺失填充）。
-fn base64_decode(s: &str) -> Result<Vec<u8>, String> {
-    let mut out = Vec::new();
-    let mut buf: u32 = 0;
-    let mut bits: u32 = 0;
-    for c in s.bytes() {
-        let v = match c {
-            b'A'..=b'Z' => c - b'A',
-            b'a'..=b'z' => c - b'a' + 26,
-            b'0'..=b'9' => c - b'0' + 52,
-            b'+' => 62,
-            b'/' => 63,
-            b'=' | b'\n' | b'\r' | b' ' | b'\t' => continue,
-            _ => return Err("base64 含非法字符".to_string()),
-        } as u32;
-        buf = (buf << 6) | v;
-        bits += 6;
-        if bits >= 8 {
-            bits -= 8;
-            out.push((buf >> bits) as u8);
-            buf &= (1 << bits) - 1;
-        }
-    }
-    Ok(out)
-}
-
 fn str_field(v: &serde_json::Value, key: &str) -> String {
     v.get(key)
         .and_then(|t| t.as_str())
@@ -350,177 +321,48 @@ pub(crate) fn route(
             Err(e) => complaint(400, e),
         },
 
-        // ---- 创建/操作会话（工作） ----
-        "session.new" => {
-            let req = match parse_body(body) {
-                Ok(v) => v,
-                Err(e) => return complaint(400, e),
-            };
-            let mode = match parse_mode(&str_field(&req, "mode")) {
-                Ok(m) => m,
-                Err(e) => return complaint(400, e),
-            };
-            // 档位：缺省 = 本机档（旧调用点不传也照常工作）；未知值如实报错。
-            let tier = match parse_tier(&str_field(&req, "tier")) {
-                Ok(t) => t,
-                Err(e) => return complaint(400, e),
-            };
-            let agents: Vec<crate::capabilities::conductor::api::AgentInstance> = req
-                .get("agents")
-                .and_then(|t| t.as_array())
-                .map(|arr| {
-                    arr.iter()
-                        .map(|x| crate::capabilities::conductor::api::AgentInstance {
-                            name: x
-                                .get("name")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("")
-                                .to_string(),
-                            transient: x
-                                .get("transient")
-                                .and_then(|v| v.as_bool())
-                                .unwrap_or(false),
-                            modules: x
-                                .get("modules")
-                                .and_then(|v| v.as_array())
-                                .map(|m| {
-                                    m.iter()
-                                        .filter_map(|s| s.as_str().map(|s| s.to_string()))
-                                        .collect()
-                                })
-                                .unwrap_or_default(),
-                            model: x
-                                .get("model")
-                                .and_then(|v| v.as_str())
-                                .filter(|s| !s.is_empty())
-                                .map(|s| s.to_string()),
-                        })
-                        .collect()
-                })
-                .unwrap_or_default();
-            let spec = WorkSpec {
-                name: str_field(&req, "name"),
-                mode,
-                agents,
-                task: req
-                    .get("task")
-                    .and_then(|t| t.as_str())
-                    .map(|s| s.to_string()),
-                delegate: req
-                    .get("delegate")
-                    .and_then(|t| t.as_bool())
-                    .unwrap_or(false),
-                tier,
-            };
-            match ops.sessions.create_work(spec) {
-                Ok((o, head)) => ok_json(json!({ "sid": o.sid, "agents": o.agents, "head": head })),
-                Err(e) => {
-                    log.error("web::create_work", &format!("创建工作失败：{}", e));
-                    complaint(400, e)
-                }
+        // ---- 动作目录与动作分发（唯一路径：声明在 systools/tools.yaml） ----
+        // 目录：这个调用者此刻能做什么（含可用性）。前端据此渲染，不写第二份动作清单。
+        "actions" => {
+            let sid = url
+                .split('?')
+                .nth(1)
+                .unwrap_or("")
+                .split('&')
+                .find_map(|kv| kv.strip_prefix("sid="))
+                .map(routes::url_decode)
+                .filter(|s| !s.is_empty());
+            match ops.actions.catalog(&Caller::User, sid.as_deref()) {
+                Ok(list) => ok_json(json!({ "actions": list })),
+                Err(e) => complaint(400, e),
             }
         }
-
-        "session.act" => {
-            // 「停止」不进命令队列：直接置位核心的取消标志，所以生成期间照样立刻生效。
-            if action == "stop" {
-                let found = ops.sessions.stop(&sid);
-                log.info(
-                    "web::stop",
-                    &format!("sid={} 找到在跑的生成={}", sid, found),
-                );
-                return ok_json(json!({ "ok": true }));
-            }
+        // 分发：一次动作 = 参数按声明校验 + callers 授权 + 执行 + 审计（各只有一处）。
+        "action" => {
             let req = match parse_body(body) {
                 Ok(v) => v,
                 Err(e) => return complaint(400, e),
             };
-            let text = str_field(&req, "text");
-            let agent = str_field(&req, "agent");
-            // 工具级确认：回答在等的工具放行（"是 / 否"）。与「停止」一样**不进命令队列**——
-            // 生成期间工作线程正等在放行表上，走队列会等到生成结束。
-            if action == "approve" {
-                use crate::capabilities::conductor::api::Approval;
-                let raw = str_field(&req, "answer");
-                let answer = match raw.as_str() {
-                    "yes" => Approval::Allow,
-                    "full" => Approval::Full,
-                    _ => Approval::Deny,
-                };
-                let answered = ops.sessions.approve(&sid, answer);
-                return ok_json(json!({ "ok": true, "answered": answered }));
-            }
-            // 配置界面：提交编辑（「生成中不许改」的守卫在 `Conductor::edit_session` 里）。
-            if action == "edit" {
-                let edit = match serde_json::from_value::<SessionEdit>(req.clone()) {
-                    Ok(e) => e,
-                    Err(e) => return complaint(400, format!("编辑内容非法：{}", e)),
-                };
-                return match ops.sessions.edit(&sid, edit) {
-                    Ok(()) => ok_json(json!({ "ok": true })),
-                    Err(e) => {
-                        log.warn("web::edit_session", &format!("sid={} 编辑被拒：{}", sid, e));
-                        complaint(400, e)
-                    }
-                };
-            }
-            // 上传：把文件写进本次工作的 work/；同名冲突返回 409，由用户决定覆盖/改名。
-            if action == "upload" {
-                let name = str_field(&req, "name");
-                let overwrite = req
-                    .get("overwrite")
-                    .and_then(|v| v.as_bool())
-                    .unwrap_or(false);
-                let bytes = match base64_decode(&str_field(&req, "data_base64")) {
-                    Ok(b) => b,
-                    Err(e) => return complaint(400, e),
-                };
-                return match ops.sessions.upload(&sid, &name, &bytes, overwrite) {
-                    Ok(true) => ok_json(json!({ "ok": true })),
-                    Ok(false) => complaint(409, "同名文件已存在"),
-                    Err(e) => complaint(400, e),
-                };
-            }
-
-            // 生成类动作：流式与否是**显示**的选择，归呈现层（取自设置）。
+            // 流式与否是**显示**的选择，归呈现层（取自设置）。
             let out = match ops.registry.settings() {
                 Ok(s) if s.streaming => Output::Stream,
                 _ => Output::Final,
             };
-            // 其余动作走共享意图层：分发只写一份（新增动作只改 intent::Action）。
-            let what = match action.as_str() {
-                "say" => Action::Say(&text),
-                "continue" => Action::Continue,
-                "task" => Action::Step(CollabStep::SetTask, &text),
-                "slate" => Action::Step(CollabStep::ConfirmSlate, &text),
-                "begin" => Action::Step(CollabStep::Begin, &text),
-                // 用户对裁决的回应：自然语言一句话。核心 AI 判定意图是否明确，明确了才开工/放行。
-                "decide" => Action::Step(CollabStep::Decide, &text),
-                "withdraw" => Action::Withdraw(&agent),
-                // 压缩上下文：AI 自己压成摘要（此后此前内容不再发给模型，用户仍可查看）。
-                "compact" => Action::Compact,
-                "rewind" => {
-                    let id = req.get("id").and_then(|v| v.as_u64()).unwrap_or(u64::MAX);
-                    // mode 缺省 = 留档（新默认：只标记、不删）；delete / restore 显式给出。
-                    Action::Rewind(match req.get("mode").and_then(|v| v.as_str()) {
-                        Some("delete") => RewindTarget::Delete(id),
-                        Some("restore") => RewindTarget::Restore(id),
-                        _ => RewindTarget::Archive(id),
-                    })
-                }
-                "update-task" => Action::UpdateTask(&text),
-                _ => return complaint(400, format!("未知动作：{}", action)),
+            let call = ActionCall {
+                id: id.clone(),
+                args: req,
+                caller: Caller::User,
+                out,
             };
-            match ops.sessions.act(&sid, what, out) {
-                // 命令回包只给**事件台头部序号**：事实由长轮询按 since 订阅（不在这里捎带）。
-                Ok(Acted::Advanced(adv)) => ok_json(json!({ "sid": sid, "head": adv.head })),
+            match ops.actions.act(call) {
+                // 生成类只回**事件台头部序号**：事实由长轮询按 since 订阅。
+                Ok(Acted::Advanced(adv)) => ok_json(json!({ "head": adv.head })),
                 // 回档 / 改需求返回完整重放（前端整体重建）。
-                Ok(Acted::Replayed(events)) => ok_json(json!({ "sid": sid, "events": events })),
+                Ok(Acted::Replayed(events)) => ok_json(json!({ "events": events })),
+                // 其余给一份结构化结果（{ok:true} / {sid,agents} …）。
+                Ok(Acted::Done(v)) => ok_json(v),
                 Err(e) => {
-                    log.error(
-                        "web::session_action",
-                        &format!("会话动作 {} 失败：{}", action, e),
-                    );
+                    log.error("web::action", &format!("动作 {} 失败：{}", id, e));
                     complaint(400, e)
                 }
             }
@@ -778,15 +620,6 @@ pub fn parse_mode(s: &str) -> Result<WorkMode, String> {
             "未知模式：{}（只接受 single / collab / proxy）",
             other
         )),
-    }
-}
-
-/// 请求里的档位标识 → Tier：唯一解析处；缺省（空串）= 本机档，未知值如实报错。
-pub fn parse_tier(s: &str) -> Result<crate::capabilities::conductor::api::Tier, String> {
-    match s {
-        "" | "host" => Ok(crate::capabilities::conductor::api::Tier::Host),
-        "vm" => Ok(crate::capabilities::conductor::api::Tier::Vm),
-        other => Err(format!("未知执行档位：{}（只接受 host / vm）", other)),
     }
 }
 

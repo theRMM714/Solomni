@@ -2,7 +2,7 @@
 
 pub use crate::capabilities::tools::domain::fence::FenceSpec;
 pub use crate::capabilities::tools::domain::patch::{EditFault, Fault};
-pub use crate::capabilities::tools::domain::roles::{RoleTable, SystemTools};
+pub use crate::capabilities::tools::domain::roles::{action_audit, RoleTable, SystemTools};
 pub use crate::capabilities::tools::domain::schema::{ArgFault, ToolBook, ToolSchema};
 pub use crate::capabilities::tools::domain::systool::{
     arg_fault_text, is_builtin, is_freeform, names, patch_decl, refuse, tool_notes, Observations,

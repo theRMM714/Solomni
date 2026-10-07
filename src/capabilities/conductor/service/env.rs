@@ -107,6 +107,7 @@ impl Conductor {
             line: Default::default(),
             // 这一席的系统工具面**由角色表发放**（越权校验的唯一判据）：给什么写什么，代码里不留第二份名单。
             allowed,
+            role: role.to_string(),
             // 能不能用自己模块的工具、以及工具说明块的素材：都按角色表与这个 agent 的模块装配期算好。
             with_modules: self.systools.allows_module_tools(role),
             notes: crate::capabilities::tools::api::tool_notes(&*self.prompt, sb, modules),

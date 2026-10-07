@@ -11,9 +11,11 @@
 | --- | --- |
 | `src/capabilities/conductor/mod.rs` |
 | `src/capabilities/conductor/api/mod.rs` |
+| `src/capabilities/conductor/api/action.rs` |
 | `src/capabilities/conductor/api/handle.rs` |
 | `src/capabilities/conductor/api/proxy.rs` |
 | `src/capabilities/conductor/service/mod.rs` |
+| `src/capabilities/conductor/service/action.rs` |
 | `src/capabilities/conductor/service/work.rs` |
 | `src/capabilities/conductor/service/turn.rs` |
 | `src/capabilities/conductor/service/flow.rs` |

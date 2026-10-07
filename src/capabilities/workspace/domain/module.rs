@@ -15,6 +15,8 @@ pub enum ParamType {
     /// 为什么需要：这种嵌套结构标量类型表达不了；它照样是一次**工具调用**（名字、存在性、
     /// 载荷形状都校验，且进工具台账），语义校验（负责人在不在名单、依赖成不成环）由代码在做完调用后照旧执行。
     Array,
+    /// 对象：键值表这类结构（如会话编辑的定版表 `pins`）用它承载；成员形状由语义校验管。
+    Object,
 }
 
 impl ParamType {
@@ -26,6 +28,7 @@ impl ParamType {
             ParamType::Number => "number",
             ParamType::Boolean => "boolean",
             ParamType::Array => "array",
+            ParamType::Object => "object",
         }
     }
 
@@ -38,6 +41,7 @@ impl ParamType {
             ParamType::Boolean => v.is_boolean(),
             // 结构化载荷一律是数组（标量走 string/integer 那几种）。
             ParamType::Array => v.is_array(),
+            ParamType::Object => v.is_object(),
         }
     }
 }

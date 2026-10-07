@@ -116,7 +116,7 @@ presentation/{cli,web} ──▶ capabilities（含协调业务 conductor）─�
   **会话权限**（`capabilities/permission/`，纯领域）统一裁定：整棵工作区默认可读可提交，**白名单一出现就取代默认、黑名单只做减法**；
   内置读/写、`work_pull` / `work_commit`（提交白名单）与围栏派生都读同一份生效态（`Sandbox.permissions` / `FenceSpec`）；
   **工具级确认**（`granularity: ask`）：工具循环执行前查同一份生效态，命中 `ask` 表就登记进 `kernel` 的放行表（`ApprovalRegistry`）、推"是 / 否"裁决卡并阻塞；
-  用户经 `session.act` 的 `approve` 回答 **yes / no / full**（与「停止」一样**不经命令队列**，生成期间立刻生效）——
+  用户经动作表 `approve_tool`（`POST /api/actions/{id}`）回答 **allow / deny / full**（与「停止」一样**不经命令队列**，生成期间立刻生效）——
   `full` 只对**本轮**生效（到 AI 停下输出为止，不落盘）；停止把等待解成拒绝。
   Web 用卡片三选一（刷新后由 `/api/state` 的待确认快照重建），CLI 把生成放后台线程、主线程就地读 `yes/no/full`；
   工具进程走**守门进程**（本程序 `--fence-run`），环境不继承父进程（**密钥与凭据不进工具进程**），`HOME` / `TEMP` 等落进该 agent 的沙箱。

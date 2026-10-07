@@ -274,9 +274,7 @@ fn json_ok<T: serde::Serialize>(v: &T) -> ToolOutcome {
 // ---------- 真实宿主：Conductor 的代理方法族 + 队列桥 ----------
 
 use super::{now_ts, validate_work_name, Conductor, Session};
-use crate::capabilities::conductor::api::{
-    AgentInstance, CollabStep, ConductorHandle, SessionOps, WorkMode, WorkSpec,
-};
+use crate::capabilities::conductor::api::{CollabStep, ConductorHandle, SessionOps};
 use crate::capabilities::session::api::{
     AgentSession, Delegation, RunState, SessionEvent, SessionMeta, SessionParams,
 };
@@ -470,65 +468,6 @@ impl Conductor {
             .unwrap_or_default()
     }
 
-    /// 代理工具：建一个**子工作**（single / collab）：编排归属是父会话，
-    /// 落点在 `<父>/children/` 下，**与父会话共用顶层那一个 work/**。
-    /// 返回（稳定引用, **开场事实**）：事实交给 api 层发布到事件台（核心不持有事件台）。
-    pub fn proxy_create(
-        &mut self,
-        spec: &d::NewSession,
-    ) -> Result<(d::Created, Vec<SessionEvent>), String> {
-        let parent = spec
-            .parent
-            .clone()
-            .ok_or_else(|| "代理建会话缺少父会话：它由机制提供，不接受模型自参".to_string())?;
-        let (pmeta, _) = self.history_open(&parent)?;
-        // 子工作名按**它的 agent 名**派生（沿用"一个 agent 一个会话"的口径）；
-        // 撞名由 unique_work_name 加尾号，绝不重名。
-        let base = spec
-            .agents
-            .first()
-            .map(|a| a.name.clone())
-            .unwrap_or_else(|| format!("w-{}", spec.request_id));
-        let name = self.unique_work_name(&format!("{}--{}", parent, base), "work");
-        let mode = match spec.mode {
-            d::SessionMode::Single => WorkMode::Single,
-            d::SessionMode::Multi => WorkMode::Collab,
-        };
-        let agents: Vec<AgentInstance> = spec
-            .agents
-            .iter()
-            .map(|a| AgentInstance {
-                name: a.name.clone(),
-                transient: a.transient,
-                modules: a.modules.clone(),
-                model: a.model.clone(),
-            })
-            .collect();
-        // 多 agent 是协作工作：opening 就是**本次需求**（协作必须有需求）。
-        // 代理形态不会出现在这里：代理工具只能建 single / multi（代理不能往里套代理）。
-        let task = if mode == WorkMode::Collab {
-            Some(spec.opening.clone())
-        } else {
-            None
-        };
-        let work = WorkSpec {
-            name,
-            mode,
-            agents,
-            task,
-            delegate: false,
-            tier: pmeta.exec.tier,
-        };
-        let opened = self.create_work_inner(work, Some(&parent))?;
-        Ok((
-            d::Created {
-                session: opened.sid,
-                agents: opened.agents,
-            },
-            opened.facts,
-        ))
-    }
-
     /// 代理工具：控制里的**终态关闭**（只做运行态的状态转移，不启动也不停止生成——
     /// 停止 / 继续要 JobRegistry 与唤醒，只有句柄拿得到，见 `ProxyBridge::control`）。
     /// 可回放记录也由句柄那一侧写（它才推得到事件台）。
@@ -715,28 +654,13 @@ impl ProxyHost for ProxyBridge {
 
     fn create_session(&self, spec: &d::NewSession) -> Result<d::Created, String> {
         let handle = self.handle.lock().unwrap_or_else(|e| e.into_inner());
-        let spec = spec.clone();
-        let opening = spec.opening.clone();
-        let (created, facts) = handle.call(move |core| core.proxy_create(&spec))?;
-        // 开场事实（子会话开出来的那几条）推到事件台：在场的前端立刻看到它，不用等刷新。
-        handle.publish(&created.session, facts);
-        // **会话的开头**：先记一条来源（这句不是用户原话），再**建成即开工**——
-        // single = 以"核心派的活"注入并点火；multi 的 opening 已是本次需求，替用户按下"开始讨论"。
-        handle.record_notice(
-            &created.session,
-            SessionEvent::Notice(d::relay_note(d::MessageKind::Task)),
-        );
-        let mode = handle.call({
-            let c = created.session.clone();
-            move |core| core.dispatch_target(&c)
-        })?;
-        if mode == "collab" {
-            // "开始讨论"这一步是二选一（文本里含 allow 才放行）；全权代理直接放行。
-            handle.spawn_detached_collab_step(&created.session, CollabStep::Begin, "allow");
-        } else {
-            handle.spawn_detached_node(&created.session, &opening);
-        }
-        Ok(created)
+        // 模型侧只是**适配器**：调用者身份 + 载荷交给唯一实现（建会话 + 建好就开工）。
+        let caller = crate::capabilities::conductor::api::Caller::Role {
+            role: "core_proxy".to_string(),
+            work: spec.parent.clone().unwrap_or_default(),
+            agent: d::SPEAKER.to_string(),
+        };
+        handle.create_session_call(&caller, spec)
     }
 
     fn send(&self, target: &str, msg: &d::Relayed) -> Result<(), String> {
@@ -796,64 +720,18 @@ impl ProxyHost for ProxyBridge {
         reason: &str,
     ) -> Result<d::ControlState, String> {
         let handle = self.handle.lock().unwrap_or_else(|e| e.into_inner());
-        let session = session.to_string();
-        match action {
-            // 停止：先把整棵子树冻成「已停止」（拦住后续派发与唤醒），再中断正在跑的生成。
-            d::ControlAction::Stop => {
-                let _ = handle.call({
-                    let s = session.clone();
-                    move |core| core.set_subtree_run(&s, RunState::Stopped)
-                });
-                let stopped = handle.stop_tree(&session)?;
-                handle.record_notice(
-                    &session,
-                    SessionEvent::Notice(d::control_note(action, reason)),
-                );
-                return Ok(d::ControlState {
-                    session,
-                    action,
-                    state: format!("stopped:{}", stopped.len()),
-                });
-            }
-            // 继续：解冻整棵子树，再按形态唤醒它接着走。
-            d::ControlAction::Continue => {
-                let resumed = handle.call({
-                    let s = session.clone();
-                    move |core| core.resume_subtree(&s)
-                })?;
-                if resumed {
-                    let mode = handle.call({
-                        let s = session.clone();
-                        move |core| Ok(core.session_mode_str(&s))
-                    })?;
-                    match mode.as_str() {
-                        "collab" => handle.spawn_detached_collab(&session),
-                        "proxy" => handle.spawn_detached_proxy(&session),
-                        _ => handle.spawn_detached_continue(&session),
-                    }
-                }
-                handle.record_notice(
-                    &session,
-                    SessionEvent::Notice(d::control_note(action, reason)),
-                );
-                return Ok(d::ControlState {
-                    session,
-                    action,
-                    state: "active".to_string(),
-                });
-            }
-            // 关闭是终态：交核心线程改落盘运行态（子树里还有在生成的就整条拒绝）。
-            d::ControlAction::Close => {}
-        }
-        let state = handle.call({
-            let s = session.clone();
-            move |core| core.proxy_control(&s, action)
-        })?;
-        handle.record_notice(
-            &session,
-            SessionEvent::Notice(d::control_note(action, reason)),
-        );
-        Ok(state)
+        // 模型侧只是**适配器**：调用者身份 + 控制语义交给唯一实现。
+        let caller = crate::capabilities::conductor::api::Caller::Role {
+            role: "core_proxy".to_string(),
+            work: session.to_string(),
+            agent: d::SPEAKER.to_string(),
+        };
+        let state = handle.control_session_call(&caller, session, action, reason)?;
+        Ok(d::ControlState {
+            session: session.to_string(),
+            action,
+            state,
+        })
     }
 
     fn messages(

@@ -71,6 +71,7 @@ impl CollabSession {
             .unwrap_or_default();
         Some(crate::capabilities::session::api::MemberTools {
             mode: self.core_mode,
+            role: role.to_string(),
             modules: std::collections::BTreeMap::new(),
             observations: crate::capabilities::tools::api::Observations::default(),
             llm: Arc::clone(&self.llm),

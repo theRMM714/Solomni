@@ -4,7 +4,8 @@
 //! 假能力面顺带证明一件事：「按角色切分」的能力接口真能被替换——新增一种呈现不必认识 `Conductor`。
 
 use crate::capabilities::conductor::api::{
-    Advance, ConductorOps, EventBus, Ops, Output, SessionOps,
+    Acted, ActionCall, ActionOps, ActionView, Advance, Caller, ConductorOps, EventBus, Ops, Output,
+    SessionOps,
 };
 use crate::capabilities::conductor::api::{
     AgentSuggestion, ConfigAgent, FilesAgentView, FilesRootsView, FilesView, Pending,
@@ -63,6 +64,7 @@ fn fake_ops_probe(fail: Option<&str>, probe: crate::capabilities::llm::api::Prob
         history: f.clone(),
         core: f.clone(),
         workspace: f.clone(),
+        actions: f.clone(),
         events: EventBus::new(),
         log: Arc::new(super::doubles::NoopLogOps),
     }
@@ -76,8 +78,27 @@ fn fake_ops(fail: Option<&str>) -> Ops {
         history: f.clone(),
         core: f.clone(),
         workspace: f.clone(),
+        actions: f.clone(),
         events: EventBus::new(),
         log: Arc::new(super::doubles::NoopLogOps),
+    }
+}
+
+/// 假动作面：目录给空表，分发按 id 给**有形状的回包**（路由契约测试只盯形状与错误传播）。
+impl ActionOps for FakeOps {
+    fn catalog(&self, _caller: &Caller, _sid: Option<&str>) -> Result<Vec<ActionView>, String> {
+        self.guard()?;
+        Ok(Vec::new())
+    }
+    fn act(&self, call: ActionCall) -> Result<Acted, String> {
+        self.guard()?;
+        Ok(match call.id.as_str() {
+            "create_session" => Acted::Done(json!({ "sid": "w1", "agents": ["a"] })),
+            "rewind" | "update_task" => Acted::Replayed(Vec::new()),
+            "send_message" | "set_task" | "confirm_slate" | "begin" | "decide" | "withdraw"
+            | "compact" => Acted::Advanced(Advance { head: 1 }),
+            _ => Acted::Done(json!({ "ok": true })),
+        })
     }
 }
 
@@ -233,8 +254,9 @@ impl SessionOps for FakeOps {
         self.guard()?;
         Ok(true)
     }
-    fn stop(&self, _sid: &str) -> bool {
-        self.running.swap(false, Ordering::Relaxed)
+    fn stop(&self, _sid: &str) -> Vec<String> {
+        self.running.swap(false, Ordering::Relaxed);
+        Vec::new()
     }
     fn approve(&self, _sid: &str, _answer: crate::capabilities::conductor::api::Approval) -> bool {
         false
@@ -492,7 +514,7 @@ fn sample_param(route_id: &str, name: &str) -> &'static str {
         "name" => "a1",
         "action" => match route_id {
             "provider.act" | "model.act" | "agent.act" => "remove",
-            _ => "say",
+            _ => "create_session",
         },
         _ => "x",
     }
@@ -530,8 +552,7 @@ fn shape_matches(pattern: &str, url: &str) -> bool {
 /// 每条路由给一个**合法**请求体，好让错误路径真的落到能力上（而不是先死在解析上）。
 fn sample_body(route: &routes::Route) -> &'static str {
     match route.id {
-        "session.new" => r#"{"name":"w","mode":"single","agents":[{"name":"a","modules":["m"]}]}"#,
-        "session.act" => r#"{"text":"x","id":0}"#,
+        "action" => r#"{"session_id":"w1","text":"x","id":0}"#,
         "provider.new" => r#"{"id":"p","base_url":"u","api_key":"k"}"#,
         "model.new" => r#"{"id":"m","name":"M","api_model":"m","provider":"p"}"#,
         "agent.new" => r#"{"name":"a","modules":["m"]}"#,
@@ -774,13 +795,7 @@ fn request_bodies_are_validated_before_anything_else() {
     for route in ROUTES {
         if !matches!(
             route.id,
-            "session.new"
-                | "session.act"
-                | "provider.new"
-                | "model.new"
-                | "agent.new"
-                | "settings.set"
-                | "suggest"
+            "action" | "provider.new" | "model.new" | "agent.new" | "settings.set" | "suggest"
         ) {
             continue;
         }
@@ -797,33 +812,19 @@ fn request_bodies_are_validated_before_anything_else() {
 #[test]
 fn session_action_boundaries_are_explicit() {
     let ops = fake_ops(None);
-    // 未知动作：400 + 明确讲清是未知动作（老语义保留）。
-    let (code, text) = call(&ops, "POST", "/api/sessions/w1/乱来", "{}");
-    assert_eq!(code, 400);
-    assert!(text.contains("未知动作"), "{}", text);
-    // 未知模式：400。
-    let (code, text) = call(
-        &ops,
-        "POST",
-        "/api/sessions",
-        r#"{"name":"w","mode":"三个和尚"}"#,
-    );
-    assert_eq!(code, 400);
-    assert!(text.contains("未知模式"), "{}", text);
-    // 上传同名冲突：409（不是 400 —— 前端据此弹「覆盖/改名」）。
-    let (code, _) = call(
-        &ops,
-        "POST",
-        "/api/sessions/w1/upload",
-        r#"{"name":"a.txt","data_base64":"aGk="}"#,
-    );
-    assert_eq!(code, 409);
-    // 供应商/模型/agent 的未知动作：404。
+    // 不在目录里的路径：404（动作 id 的解释权归核心，传输层不猜）。
+    assert_eq!(call(&ops, "POST", "/api/sessions/w1/乱来", "{}").0, 404);
+    // 供应商/模型/agent 的未知动作：404（它们的动作仍在传输层按名字分发）。
     assert_eq!(call(&ops, "POST", "/api/providers/p1/乱来", "{}").0, 404);
     assert_eq!(call(&ops, "POST", "/api/models/m1/乱来", "{}").0, 404);
     assert_eq!(call(&ops, "POST", "/api/agents/甲/乱来", "{}").0, 404);
-    // 停止：只要没在跑也回 {ok:true}（与老语义一致，前端不看 found）。
-    let (code, text) = call(&ops, "POST", "/api/sessions/w1/stop", "{}");
+    // 停止走动作路由：只要没在跑也回 {ok:true}（前端不看 state）。
+    let (code, text) = call(
+        &ops,
+        "POST",
+        "/api/actions/control_session",
+        r#"{"session_id":"w1","action":"stop"}"#,
+    );
     assert_eq!(code, 200);
     assert!(text.contains("\"ok\":true"), "{}", text);
 }
@@ -942,53 +943,54 @@ fn success_shapes_are_pinned_per_route() {
         ("GET", "/api/state", "", 200, "\"modules\""),
         (
             "POST",
-            "/api/sessions",
-            r#"{"name":"w","mode":"single","agents":[{"name":"a","modules":["m"]}]}"#,
+            "/api/actions/create_session",
+            r#"{"mode":"single","agents":[{"name":"a","modules":["m"]}]}"#,
             200,
             "\"sid\"",
         ),
         (
             "POST",
-            "/api/sessions/w1/say",
-            r#"{"text":"你好"}"#,
+            "/api/actions/send_message",
+            r#"{"session_id":"w1","text":"你好"}"#,
             200,
             "\"head\"",
         ),
         (
             "POST",
-            "/api/sessions/w1/rewind",
-            r#"{"id":0}"#,
+            "/api/actions/rewind",
+            r#"{"session_id":"w1","mode":"archive","id":0}"#,
             200,
             "\"events\"",
         ),
         (
             "POST",
-            "/api/sessions/w1/update-task",
-            r#"{"text":"新需求"}"#,
+            "/api/actions/update_task",
+            r#"{"session_id":"w1","text":"新需求"}"#,
             200,
             "\"events\"",
         ),
         (
             "POST",
-            "/api/sessions/w1/withdraw",
-            r#"{"agent":"甲"}"#,
+            "/api/actions/withdraw",
+            r#"{"session_id":"w1","agent":"甲"}"#,
             200,
             "\"head\"",
         ),
         (
             "POST",
-            "/api/sessions/w1/edit",
-            r#"{"agents":[],"tier":"host"}"#,
+            "/api/actions/edit_session",
+            r#"{"session_id":"w1","agents":[],"tier":"host"}"#,
             200,
             "\"ok\"",
         ),
         (
             "POST",
-            "/api/sessions/w1/upload",
-            r#"{"name":"a.txt","data_base64":"aGk=","overwrite":true}"#,
+            "/api/actions/upload",
+            r#"{"session_id":"w1","name":"a.txt","data_base64":"aGk=","overwrite":true}"#,
             200,
             "\"ok\"",
         ),
+        ("GET", "/api/actions?sid=w1", "", 200, "\"actions\""),
         ("GET", "/api/sessions/w1/config", "", 200, "\"config\""),
         ("GET", "/api/sessions/w1/files", "", 200, "\"roots\""),
         (

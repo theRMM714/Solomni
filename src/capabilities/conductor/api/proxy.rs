@@ -141,10 +141,10 @@ impl SessionOps for ConductorHandle {
     /// 这两步都不走命令队列里的长操作，生成期间照样立刻生效。
     /// **顺序不能反**：先冻态再取消——否则被停会话收尾写的那条"这一轮结束"会先把父会话叫醒。
     /// 用户「继续」（`continue_flow`）是它的逆操作。
-    fn stop(&self, sid: &str) -> bool {
+    fn stop(&self, sid: &str) -> Vec<String> {
         let sid_owned = sid.to_string();
         let _ = self.call(move |core| core.set_subtree_run(&sid_owned, RunState::Stopped));
-        self.stop_tree(sid).map(|v| !v.is_empty()).unwrap_or(false)
+        self.stop_tree(sid).unwrap_or_default()
     }
 
     /// 工具级确认：直接把答案写进放行表并唤醒工作线程（不经队列，生成期间立刻生效）。

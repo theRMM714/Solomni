@@ -261,6 +261,24 @@ pub(crate) fn run_batch(
             i += 1;
         }
     }
+    // 每一次调用都留一条**同形状的审计记录**（与呈现层的动作记录同一处格式化）：可查、可对账。
+    for ((module, tool, _args), slot) in plan.iter().zip(done.iter()) {
+        if let Some((_label, outcome)) = slot {
+            let name = match module {
+                Some(m) => format!("{}.{}", m, tool),
+                None => tool.clone(),
+            };
+            ctx.log.info(
+                "action",
+                &crate::capabilities::tools::api::action_audit(
+                    &ctx.role,
+                    &name,
+                    outcome.ok,
+                    &outcome.output,
+                ),
+            );
+        }
+    }
     done.into_iter()
         .map(|d| d.expect("每个调用都有执行结果"))
         .collect()
