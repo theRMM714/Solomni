@@ -552,12 +552,37 @@ fn answer_gates(ops: &Ops, sid: &str, cursor: &mut u64) {
             note,
         };
         match act_interactive(ops, sid, action, cursor, Output::Final) {
-            Ok(acted) => follow(ops, sid, cursor, acted),
+            Ok(acted) => {
+                follow(ops, sid, cursor, acted);
+                wait_quiet(ops, sid, cursor);
+            }
             Err(e) => {
                 println!("[错误] {}", e);
                 return;
             }
         }
+    }
+}
+
+/// 回答之后**跟到这一段收尾**再回提示符：回答是直路（先落定、处置脱离调用方跑），
+/// 不跟的话终端会在讨论还在跑的时候就回到提示符——用户既看不到后续，也等不到下一张卡。
+/// 判据：这条会话不在跑，且事件台连着几拍没有再长（等的是"脱离调用方那一段"，不是某一次生成）。
+fn wait_quiet(ops: &Ops, sid: &str, cursor: &mut u64) {
+    let mut last = u64::MAX;
+    let mut quiet = 0u32;
+    loop {
+        *cursor = drain(ops, sid, *cursor);
+        let head = ops.events.head();
+        if !ops.sessions.is_running(sid) && head == last {
+            quiet += 1;
+            if quiet >= 3 {
+                return;
+            }
+        } else {
+            quiet = 0;
+        }
+        last = head;
+        std::thread::sleep(std::time::Duration::from_millis(100));
     }
 }
 

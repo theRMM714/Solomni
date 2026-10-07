@@ -54,12 +54,42 @@ async function waitCard(sid, ms) {
     await new Promise((r) => setTimeout(r, 50));
   }
 }
-/** 按**选项 id** 回答当前那张卡（+ 可选附言）：回答只有这一条命令。 */
+/** 等这条会话**这一段收尾**：不在跑，且流水连着几拍没有再长。
+ *  回答是**直路**（先落定、处置脱离调用方跑），所以"回答返回"不等于"这一段跑完"——
+ *  客户端要接着跟到它收尾，才谈得上断言后续（讨论 / 关卡 / 转录）。
+ *  判据用两个：见过"在跑"（脱离调用方那一段真的起来了）或流水长过（那一答本身也落盘）；
+ *  之后要连着 8 拍（约 0.8s）没新事实才算收尾——快慢通道都不误判。
+ *  代拟名单那一关的处置在核心线程上同步走完（从没"在跑"）：给 1.5s 的宽限再收，别把它当没收尾。 */
+async function settleSegment(sid, ms) {
+  const started = Date.now();
+  const deadline = started + (ms || 60000);
+  let last = -1;
+  let quiet = 0;
+  let sawRunning = false;
+  for (;;) {
+    const s = await api('GET', '/api/state');
+    const v = ((s.json && s.json.sessions) || []).find((x) => x.sid === sid);
+    const h = await api('GET', '/api/history/' + encodeURIComponent(sid));
+    const len = ((h.json && h.json.events) || []).length;
+    if (v && v.running) sawRunning = true;
+    if (v && !v.running && len === last) quiet++;
+    else quiet = 0;
+    last = len;
+    if (!(v && v.running) && quiet >= 8 && (sawRunning || Date.now() - started > 1500)) return true;
+    if (Date.now() > deadline) return false;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+}
+
+/** 按**选项 id** 回答当前那张卡（+ 可选附言）：回答只有这一条命令。
+ *  回答之后**跟到这一段收尾**（回答是直路，见 settleSegment）——下面的断言都建立在"这一段已经跑完"上。 */
 async function answer(sid, option, note) {
   const card = await waitCard(sid);
   assert(!!card, '有待答的裁决卡：' + sid, JSON.stringify(card));
   if (!card) return { status: 0, text: 'no card' };
-  return act(sid, 'answer_card', { card: card.id, option: option, note: note || '' });
+  const r = await act(sid, 'answer_card', { card: card.id, option: option, note: note || '' });
+  assert(await settleSegment(sid, 60000), '回答之后这一段要收尾：' + sid);
+  return r;
 }
 
 /** 等某会话**某一关**的卡出现（pending 就是那张卡）：用于"生成中确认"这类必须**并发**驱动的场景。 */
