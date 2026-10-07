@@ -293,10 +293,10 @@ function structuralAudit() {
     }
   };
   checkCodeDocRefs(path.join(ROOT, "src"));
-  // 注释契约（ARCHITECTURE.md 十）：判定只有一处——在 run-hygiene.js 里；这里只做**棘轮**：
-  // 拿当前结果与 tests/comment-baseline.json 比。出现快照里没有的（文件 × 规则）= **新增**，硬失败；
-  // 快照里有、现在已经合规 = **应销账**，同样硬失败（本仓基线的既有规矩：条目不再成立必须销账）。
-  const { scanCommentContract } = require("./run-hygiene.js");
+  // 注释契约（ARCHITECTURE.md 十）：判定与棘轮比对只有一处——run-hygiene.js 的 scanCommentContract
+  // 与 compareContract。棘轮**只减不增**：新文件零容忍（快照里没有 = 从 0 起算），老文件同类变多也是新增；
+  // 变少 = 应销账，同样硬失败（收紧只能往下，见 --tighten）。
+  const { scanCommentContract, compareContract, ratchetSelfTest } = require("./run-hygiene.js");
   const COMMENT_BASELINE = path.join(ROOT, "tests", "comment-baseline.json");
   const contractNow = scanCommentContract().byFileRule;
   if (!fs.existsSync(COMMENT_BASELINE)) {
@@ -304,17 +304,11 @@ function structuralAudit() {
   } else {
     const baselineRaw = JSON.parse(fs.readFileSync(COMMENT_BASELINE, "utf8"));
     delete baselineRaw._comment;
-    const added = [];
-    const stale = [];
-    for (const f of Object.keys(contractNow)) {
-      for (const rule of contractNow[f]) if (!(baselineRaw[f] || []).includes(rule)) added.push(f + " :: " + rule);
-    }
-    for (const f of Object.keys(baselineRaw)) {
-      for (const rule of baselineRaw[f]) if (!(contractNow[f] || []).includes(rule)) stale.push(f + " :: " + rule);
-    }
-    for (const a of added) problems.push("注释契约新增违规（快照里没有）：" + a);
-    for (const s of stale) problems.push("注释契约快照应销账（现在已合规）：" + s + "（收紧：node run-hygiene.js --tighten）");
+    const { added, stale } = compareContract(contractNow, baselineRaw);
+    for (const a of added) problems.push("注释契约新增违规（棘轮只减不增）：" + a);
+    for (const s of stale) problems.push("注释契约快照应销账（现在变少了）：" + s + "（收紧：node run-hygiene.js --tighten）");
   }
+  for (const b of ratchetSelfTest()) problems.push("棘轮自测失败：" + b);
   // 文档分层（AGENTS.md「文档分层与同步」）：门户引用 docs/ 下的细则，细则引用彼此——
   // 两边都要真实存在。只查引用不查正文，避免把文档写法变成门禁。
   // **相对解析**：链接按所在文件的目录解析（门户在根、细则在 docs/<领域>/），所以 docs/ 内部写错的同级引用也会被抓到。

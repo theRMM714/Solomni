@@ -77,8 +77,7 @@ impl FenceSpec {
         self
     }
 
-    /// 目的：**无会话**（人直接跑一个模块工具）的围栏：模块目录递归只读 + 它自己的 `userdata/` 可写，
-    /// 外加一份用户指定的工作目录（缺省 = 模块的 `userdata/`）。
+    /// 目的：**无会话**（人直接跑一个模块工具）的围栏——模块目录递归只读 + 它自己的 `userdata/` 可写，外加用户指定的工作目录（缺省 = `userdata/`）。
     /// 约束：与 agent 会话同一条围栏口径——不装机制时只留进程树与环境白名单，如实降级。
     pub fn standalone(module_root: &Path, work_root: Option<&Path>) -> FenceSpec {
         let userdata = module_root.join("userdata");

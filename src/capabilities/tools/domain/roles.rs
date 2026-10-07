@@ -97,11 +97,8 @@ impl SystemTools {
         self.roles.contains_key(caller) || caller == "user" || caller.starts_with("user:")
     }
 
-    /// 悬空引用（角色引用了总表里没有的 id）与缺能力的工具：都返回可读的原因，空 = 一切正常。
-    /// 由测试门禁消费——两张表不漂靠它，不靠人看。
-    ///
-    /// `callers`（谁能调）与角色表的（这个身份有什么）是**同一关系的两面**：这里双向比对，
-    /// 任何一边漏写 / 多写都当场报错。
+    /// 目的：悬空引用（角色引用了总表里没有的 id）与缺能力的工具都返回可读的原因，空 = 一切正常。
+    /// 约束：`callers`（谁能调）与角色表的工具面是**同一关系的两面**——这里双向比对，任何一边漏写 / 多写都当场报错；由测试门禁消费，不靠人看。
     pub fn problems(&self) -> Vec<String> {
         let mut out = Vec::new();
         for (id, schema) in &self.tools {

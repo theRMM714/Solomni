@@ -4,8 +4,9 @@
  * 卫生回答"仓库里还欠多少、挂在谁身上"。存量在迁移期必然存在，所以它只报，不拦；唯一会写文件的入口是 --tighten。
  *
  * 两类：
- * - 格式存量（注释契约，ARCHITECTURE.md 十）：按 文件 × 规则 统计，与 tests/comment-baseline.json 比。
- *   门禁只报**新增**与**应销账**；--tighten 把快照收紧（收紧后要连同改动一起提交）。
+ * - 格式存量（注释契约，ARCHITECTURE.md 十）：按 文件 × 规则 **计数**，与 tests/comment-baseline.json 比。
+ *   棘轮只减不增：新文件零容忍（快照里没有 = 从 0 起算），老文件同类变多也算新增；变少要求销账。
+ *   --tighten 只许往下收束：出现新增就拒绝写盘（收紧后连同改动一起提交）。
  * - 内容卫生（只报）：悬挂的缺口 id（已删 id 从 git 历史取）、文档里指向不存在的 src 路径、引用的根文档不存在。
  *
  * 用法：node run-hygiene.js [--by-file] [--dir <模式>]… [--tighten] [--strict]   出口码：默认 0；--strict 有发现即 1。
@@ -117,11 +118,48 @@ function scanCommentContract() {
 function toByFileRule(findings) {
   const by = {};
   for (const f of findings) {
-    if (!by[f.file]) by[f.file] = [];
-    if (!by[f.file].includes(f.rule)) by[f.file].push(f.rule);
+    if (!by[f.file]) by[f.file] = {};
+    by[f.file][f.rule] = (by[f.file][f.rule] || 0) + 1;
   }
-  for (const k of Object.keys(by)) by[k].sort();
   return by;
+}
+
+/** 棘轮比对（门禁与卫生工具共用这一份判定）：返回 { added, stale }，元素是给人看的字符串（带计数）。
+ *  **added** = 现在比快照多——新文件从 0 起算（零容忍），老文件同类变多也不许；门禁硬失败。
+ *  **stale** = 现在比快照少——同样硬失败，必须收紧；收紧只能往下（见 --tighten）。 */
+function compareContract(now, baseline) {
+  const added = [];
+  const stale = [];
+  for (const f of Object.keys(now)) {
+    for (const rule of Object.keys(now[f])) {
+      const was = (baseline[f] || {})[rule] || 0;
+      const is = now[f][rule];
+      if (is > was) added.push(f + " :: " + rule + "（" + was + " → " + is + "）");
+    }
+  }
+  for (const f of Object.keys(baseline)) {
+    for (const rule of Object.keys(baseline[f] || {})) {
+      const was = baseline[f][rule];
+      const is = (now[f] || {})[rule] || 0;
+      if (is < was) stale.push(f + " :: " + rule + "（" + was + " → " + is + "）");
+    }
+  }
+  return { added: added, stale: stale };
+}
+
+/** 棘轮语义的自测（T0 调用）：把「新文件零容忍 / 只减不增 / 收束只能往下」钉成可执行的判据。 */
+function ratchetSelfTest() {
+  const bad = [];
+  const eq = (name, got, want) => {
+    if (JSON.stringify(got) !== JSON.stringify(want)) bad.push(name + "：期望 " + JSON.stringify(want) + "，实际 " + JSON.stringify(got));
+  };
+  eq("新文件零容忍", compareContract({ "a.rs": { R: 1 } }, {}).added.length, 1);
+  eq("老文件同类变多 = 新增", compareContract({ "a.rs": { R: 2 } }, { "a.rs": { R: 1 } }).added.length, 1);
+  const flat = compareContract({ "a.rs": { R: 1 } }, { "a.rs": { R: 1 } });
+  eq("持平通过", flat.added.length + flat.stale.length, 0);
+  eq("变少要销账", compareContract({ "a.rs": { R: 1 } }, { "a.rs": { R: 3 } }).stale.length, 1);
+  eq("条目整条消失要销账", compareContract({}, { "a.rs": { R: 1 } }).stale.length, 1);
+  return bad;
 }
 
 const GIT_TMP = path.join(ROOT, "target", "hygiene-git.tmp");
@@ -285,7 +323,17 @@ function main() {
       console.log("--tighten 不接受 --dir：收紧是全仓一次的动作，带过滤收紧会丢掉没扫到的存量。");
       return 2;
     }
-    const out = { _comment: "注释契约（ARCHITECTURE.md 十）的存量快照：键是文件，值是它当前还欠的规则。门禁只报新增；条目不再成立时必须销账——收紧用 node run-hygiene.js --tighten。" };
+    /* 收紧是棘轮唯一的下调入口：出现任何「新增」就拒绝写盘——否则先违规再收紧等于把违规洗成存量。 */
+    if (baselineAll) {
+      const { added } = compareContract(by, baselineAll);
+      if (added.length) {
+        console.log("收紧被拒：棘轮只减不增，这次有 " + added.length + " 处新增——先把它们清掉再收紧。");
+        for (const a of added.slice(0, 12)) console.log("  [新增] " + a);
+        if (added.length > 12) console.log("  …（其余省略）");
+        return 2;
+      }
+    }
+    const out = { _comment: "注释契约（ARCHITECTURE.md 十）的存量快照：键是文件，值是「规则 → 计数」。棘轮只减不增：新文件零容忍，老文件同类变多也算新增；变少必须销账。收紧只能往下：node run-hygiene.js --tighten。" };
     for (const f of Object.keys(by).sort()) out[f] = by[f];
     fs.writeFileSync(BASELINE, JSON.stringify(out, null, 2) + "\n");
     lines.push("已收紧快照 tests/comment-baseline.json：" + Object.keys(by).length + " 个文件、"
@@ -312,21 +360,14 @@ function main() {
     lines.push("");
     lines.push("== 逐文件（欠得最多的在前） ==");
     for (const [file, n] of [...counts.entries()].sort((a, b) => b[1] - a[1])) {
-      lines.push("  " + String(n).padStart(5) + " 处  " + file + "  :: " + by[file].join("、"));
+      lines.push("  " + String(n).padStart(5) + " 处  " + file + "  :: " + Object.keys(by[file]).join("、"));
     }
   }
   if (baseline === null) {
     lines.push("");
     lines.push("还没有快照：跑 node run-hygiene.js --tighten 建一份（门禁拿它当棘轮基线）。");
   } else {
-    const added = [];
-    const stale = [];
-    for (const f of Object.keys(by)) {
-      for (const rule of by[f]) if (!(baseline[f] || []).includes(rule)) added.push(f + " :: " + rule);
-    }
-    for (const f of Object.keys(baseline)) {
-      for (const rule of baseline[f]) if (!(by[f] || []).includes(rule)) stale.push(f + " :: " + rule);
-    }
+    const { added, stale } = compareContract(by, baseline);
     lines.push("");
     lines.push("与快照比" + scope + "：新增 " + added.length + " 处（门禁会报）、可销账 " + stale.length + " 处（门禁要求销账）");
     for (const a of added.slice(0, 12)) lines.push("  [新增] " + a);
@@ -348,4 +389,4 @@ function main() {
 }
 
 if (require.main === module) process.exit(main());
-module.exports = { scanCommentContract, deletedGapIds, contentFindings, RULES, LEDGERS };
+module.exports = { scanCommentContract, compareContract, ratchetSelfTest, deletedGapIds, contentFindings, RULES, LEDGERS };

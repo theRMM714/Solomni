@@ -44,7 +44,7 @@
 - **入站契约也是契约**：呈现层只依赖各能力的能力接口（见 [docs/presentation/contracts.md](docs/presentation/contracts.md)）与事件台（拿不到 `Core`、拿不到任何核心锁），
  所以它能被假实现整体替换——`routes.rs` 的 `FakeOps` 就是这么逐条测路由的。
 - T0 质量门禁已并入同一入口，且**全部是零容忍硬失败**：编译、结构审查、格式、clippy、编译告警、依赖重复。
-- 门禁之外另有一个**仓库卫生审查**脚本 `run-hygiene.js`（注释契约存量棘轮 + 内容卫生，只报不拦，也不进 `TEST-REPORT-*`）：
+- 门禁之外另有一个**仓库卫生审查**脚本 `run-hygiene.js`（注释契约存量棘轮 + 内容卫生；报告只报不拦、收紧只能往下，也不进 `TEST-REPORT-*`）：
   判据与用法见 [docs/testing/quality-isolation.md](docs/testing/quality-isolation.md) 的「门禁之外」。
 
 **逐平台**缺口账（`tests/<平台>/gaps.yaml`）**为空**：Linux Landlock、macOS seatbelt 与 Windows 的目录 ACL

@@ -342,7 +342,6 @@ impl Ops {
 // ---------- 入站词汇（呈现层与核心共用的形状） ----------
 
 // ---------- 动作（声明在 systools/tools.yaml；分发归 conductor） ----------
-
 /// 目的：一次动作的**调用者身份**——授权判据（动作表 `callers`）的输入。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Caller {
