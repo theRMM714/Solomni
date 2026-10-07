@@ -47,10 +47,11 @@
 - 门禁之外另有一个**仓库卫生审查**脚本 `run-hygiene.js`（注释契约存量棘轮 + 内容卫生；报告只报不拦、收紧只能往下，也不进 `TEST-REPORT-*`）：
   判据与用法见 [docs/testing/quality-isolation.md](docs/testing/quality-isolation.md) 的「门禁之外」。
 
-**逐平台**缺口账（`tests/<平台>/gaps.yaml`）**为空**：Linux Landlock、macOS seatbelt 与 Windows 的目录 ACL
-授权/撤权、落点清单都已由三平台 CI 真跑通过。跨平台账只剩一条**环境**条目
-`harness.restricted-token-causes-false-failures`（受限令牌会话会让门禁得出一串假失败，
-见 [docs/testing/execution-ci.md](docs/testing/execution-ci.md) 的「真机入口」一节）。
+**逐平台**与**跨平台**缺口账（`tests/<平台>/gaps.yaml`、`tests/cross-platform/gaps.yaml`）**都为空**：
+Linux Landlock、macOS seatbelt 与 Windows 的目录 ACL 授权/撤权、落点清单都已由三平台 CI 真跑通过。
+原先那条环境条目已查清并销账：让门禁得出一串假失败的
+不是「受限令牌会话」，而是 DSH 的 Windows 写沙箱后端授写权时给授权根打上的 Low 完整性标签；判据、后果与处置
+见 [docs/testing/execution-ci.md](docs/testing/execution-ci.md) 的「真机入口」一节。
 **Windows 的容器级往返探针曾经恒 `env-skip`**，真机查下来不是环境降级：那条判据（容器内
 `whoami /groups` 里找包 SID 组）在现代 Windows 上是**假阴性**——包 SID 在令牌的 `TokenAppContainerSid`
 字段里，不在组列表里。判据已换成行为对照（授权落点写得进、从父目录按名走得到叶子、父目录的内容看不到），

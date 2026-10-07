@@ -54,46 +54,45 @@ node run-tests.js --fence-live
 仅允许在一次性 runner、VM 或明确授权的环境使用：它会改本机状态（写目录 ACL、建容器 profile）并创建容器身份。
 普通开发机上**不要**开；本地默认安全模式（见 [quality-isolation.md](quality-isolation.md)）。
 
-**本地这条最后一行有个前提：门禁要在「普通 shell」里跑。** 如果本地 shell 本身是受限令牌
-（例如低完整性 / 文件沙箱的会话），三件事会同时不成立，而报错都指向错误的方向：
+**本地这条最后一行有个前提：门禁要在「工作区没有被打上低完整性标签」的环境里跑。**
+DSH 的 Windows 写沙箱后端（`@deepseek-ai/dsh-sandbox-windows-acl`）在**给每个授权根授写权**的同一次
+`SetNamedSecurityInfoW` 调用里，顺手给那个目录打上 **Low 完整性标签**（`SYSTEM_MANDATORY_LABEL_ACE`、
+no-write-up、`(OI)(CI)` 可继承）。它有三个要命处：
 
-- `%LOCALAPPDATA%\Python` 之类**用户目录下的解释器**访问被拒 → doctor 报"没有 python"、
-  L4 的真工具场景报 `'python' is not recognized`（看着像产品缺陷，其实是环境）；
-- **改目录 DACL 被拒**（错误码 5）→ 容器围栏装不上，探针只能 env-skip；
-- Node 的**管道 stdio 捕获被拒（EPERM）**→ L4 收尾的围栏回收 `status` 为 null、输出为空，
-  被判成"本机留下了没人管的痕迹"；同一条还会让**所有"探一探这个工具在不在"的代码集体误判**：
-  L4 现场构建 indexer 报"找不到可用的 C++ 编译器"（其实仓库自带 `.tools/mingw64` 的 g++ 能跑，`stdio: ignore` 下 `status=0`），
-  `git` 之类的子进程也一样起不来。要在这种会话里跑子进程，就把 stdout **重定向到文件**再读
-  （`stdio: ["ignore", fd, "ignore"]`），别用管道。
-  （python 同理：它可能确实装着（例如 `%LOCALAPPDATA%\Python\pythoncore-*\python.exe`），
-  但沙箱拒绝读那个目录，连它依赖的 DLL 都读不到 → 进程以 ENOENT 起来 → 看起来像"没装"。）
+- **跟着会话留下来**：`dispose()` 不撤销它——会话结束、甚至会话之后切成「完全权限」，标签都还在；
+- **按「映像文件」生效**：Windows 的进程完整性 = min(令牌, 映像)，所以工作区里的一切二进制
+  （`cargo`、`rustc`、链接器、测试二进制、`solomni.exe`）从被打标签那一刻起**全以 Low 运行**；
+- **降级容易、回收难**：把对象降成 Low 不需要特权，撤/抬回去要 `SeRelabelPrivilege`（只有提权令牌有）。
 
-判据：`whoami /groups` 里出现 `Mandatory Label\Low Mandatory Level` 就是这种会话。
-**但要查对进程**：有的受限环境里 shell 自己显示 Medium，而**工作区里的二进制**带 Low 完整性标签
-（`icacls <exe>` 打出 `Mandatory Label\Low Mandatory Level:(I)(NW)`，且标签改不动）——于是 cargo 拉起的
-rustc / 链接器 / 测试二进制全都以 Low 令牌运行，症状与受限会话一模一样：链接器报
-`Cannot create temporary file in …\Temp\: Permission denied`、产品自检报 `建自检目录失败：拒绝访问`、
-测试二进制 `CreateAppContainerProfile` 报 `0x80070005`。这种会话要拿到结论，只有把**构建好的二进制复制到
-工作区外**再跑，或者换一台不受限的机器。
+后果是一串「指向错误方向」的假失败：
 
-**这种会话里要拿到可信结论，只有两条路，按优先级：**
+- 写 `%TEMP%`（中完整性）被拒 → 链接器报 `Cannot create temporary file in …\Temp\: Permission denied`、
+  产品自检报 `建自检目录失败：拒绝访问`（`--doctor` 因此 `fs=false`）、真机探针只能 env-skip；
+- 改目录 DACL 被拒（错误码 5）→ 容器围栏装不上；
+- **读**用户目录下的解释器被拒 → doctor 报「没有 python」、L4 真工具场景报 python 不可达（看着像产品缺陷）；
+- 拉子进程/抓管道另行受会话沙箱限制（Node 管道 stdio 被拒 EPERM、`status` 为 null，被判成「本机留下了没人管的痕迹」）——
+  这一条与 Low 标签是**两件事**，但同样要求把 stdout 重定向到文件再读（`stdio: ["ignore", fd, "ignore"]`），别用管道。
 
-1. **换普通 shell（推荐，也是唯一的常规路径）**：在不受限的 PowerShell 窗口里跑同一份门禁
-   （`node run-tests.js`；要验真机围栏再加 `--fence-live`，那会改本机状态，只在一次性 runner 或明确授权的机器上做）。
-2. **对这一次执行放宽沙箱（提权）**：只能在受限会话里跑时，可为**单次执行**申请放宽到不受限，
-   批准范围仅限该次、只用于本来被沙箱拒掉的动作用。两条硬约束：
-   - **必须有人批准**：批准不到的会话会一直等着、根本不发车——所以它不是默认路径，也不该写进自动化；
-   - 放宽只解决"环境不允许"，**不替代**真机围栏验收：`--fence-live` 仍然只在一次性环境里跑。
+**判据（唯一）**：`icacls "<工作区根>" | findstr Mandatory` 打出 `Mandatory Label\Low Mandatory Level`
+就是它（子项显示 `(I)` 继承）。**不要只看 `whoami /groups`**：shell 自己可能显示 Medium，真正决定进程
+完整性的是**映像文件**上的标签——这就是「要查对进程」的意思。
 
-> **受限令牌会话里的一切围栏 / L4 结论都不可信**——实测（同一台机器、同一份代码）：
-> 在 `Mandatory Label\Low Mandatory Level` 的会话里，doctor 报容器围栏装不上（读写 DACL 都 Error 5）、
-> `python` 在工具进程里不可达（`where` 找不到、绝对路径 `Access is denied`）、围栏回收因 Node 管道 stdio
-> 被拒（EPERM，`status` 为 null）被判成"本机留下了没人管的痕迹"；
-> 换成**普通或提权（`High`）会话**后：`node run-tests.js` 直接 `TEST-REPORT-OK`，L4 `E2E-OK`，
-> doctor 报 `fs=true net=true tree=true`（AppContainer + Job Object 内核强制），python / node / C++ 真工具链全跑通。
-> **所以"卷不支持 ACL""python 装得不对"这类结论都是误判**——判据只有一个：
-> `whoami /groups` 里出现 `Mandatory Label\Low Mandatory Level`，就别信这次的门禁结论。
-> 提权与普通 shell 给出同一种结论；`--fence-live`（改本机状态）仍然只在一次性环境里做。
+**处置，按优先级：**
+
+1. **以「完全权限」启动会话**：没有文件写授权就不会打标签（首选，也是唯一不产生残留的做法）；
+   只在受限会话里跑时，可为**单次执行**申请放宽到不受限——批准范围仅限该次，且不替代真机围栏验收。
+2. **提权把级别设回去**（清残留）：`icacls "<根>" /setintegritylevel "(OI)(CI)Medium" /T /C`
+   （只能在管理员窗口做，因为需要 `SeRelabelPrivilege`）；清完用同一条 `icacls` 复查，不应再有 `Mandatory` 行。
+3. **把二进制复制到未打标记的目录再跑**（临时绕过）：注意别把 `TEMP` 指进被标记的树，探针要落在系统临时目录。
+4. **换一台不受限的机器 / 交给 CI**：跨平台与真机的结论一律以 CI 为准。
+
+> **工作区带 Low 标签时的一切围栏 / L4 结论都不可信**——实测（同一台机器、同一份代码）：标签在时
+> doctor 报 `fs=false`、读写 DACL 都 Error 5、python 在工具进程里不可达、围栏回收因 Node 管道 stdio 被拒
+> 被判成「本机留下了没人管的痕迹」；**把它清掉**之后同一条 `node run-tests.js --fence-live` 立刻
+> `391 passed / 0 failed`、doctor 报 `fs=true net=true tree=true`、真工具链全跑通，`--fence-live` 的真机探针
+> （容器往返、对象 ACE 往返、授权/撤销/台账/孤儿清扫）也在本机真跑通过。所以「卷不支持 ACL」「python 装得不对」
+> 这类结论都是误判。**注意：换普通或提权（`High`）的 shell 本身不解决**——映像是 Low 的，进程照样是 Low；
+> 要么不打标签，要么把标签清掉，要么把二进制搬出这棵树。
 
 ### CI（GitHub Actions）：跨平台与真机的唯一事实来源
 
