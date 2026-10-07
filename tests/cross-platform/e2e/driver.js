@@ -14,6 +14,8 @@ const ROOT = path.join(__dirname, 'root');
 
 /* 动作只有一个入口 /api/actions/{id}：这里把"某会话的动作"包一层，session_id 自动带上。 */
 const act = (sid, id, body) => api('POST', '/api/actions/' + id, Object.assign({ session_id: sid }, body || {}));
+/* 登记处动作不跟会话走：直接打动作端点（不带 session_id）。 */
+const reg = (id, body) => api('POST', '/api/actions/' + id, body || {});
 
 async function api(method, p, body) {
   const r = await fetch(BASE + p, {
@@ -83,12 +85,12 @@ async function lines(sid) {
   assert(st.status === 200 && Array.isArray(st.json.agents), 'GET /api/state 带 agents', st.text.slice(0, 120));
 
   // 登记处：一个供应商 + 两个模型
-  assert((await api('POST', '/api/providers', { id: 'mock', base_url: MOCK_BASE + '/v1', api_key: 'k' })).status === 200, '登记供应商');
-  assert((await api('POST', '/api/models', { id: 'm1', name: 'M1', api_model: 'm1', provider: 'mock', note: '' })).status === 200, '登记模型 m1');
-  assert((await api('POST', '/api/models', { id: 'm2', name: 'M2', api_model: 'm2', provider: 'mock', note: '' })).status === 200, '登记模型 m2');
-  assert((await api('POST', '/api/models/m1/core')).status === 200, '设核心默认 m1');
-  assert((await api('POST', '/api/agents', { name: '单兵', modules: ['summarizer'], model: 'm1', note: 'e2e' })).status === 200, '登记 agent 单兵');
-  assert((await api('POST', '/api/agents', { name: '双子', modules: ['research', 'reviewer'], model: 'm2', note: 'e2e 多模块' })).status === 200, '登记 agent 双子（2 模块 / m2）');
+  assert((await reg('upsert_provider', { id: 'mock', base_url: MOCK_BASE + '/v1', api_key: 'k' })).status === 200, '登记供应商');
+  assert((await reg('upsert_model', { id: 'm1', name: 'M1', api_model: 'm1', provider: 'mock', note: '' })).status === 200, '登记模型 m1');
+  assert((await reg('upsert_model', { id: 'm2', name: 'M2', api_model: 'm2', provider: 'mock', note: '' })).status === 200, '登记模型 m2');
+  assert((await reg('set_core_model', { id: 'm1' })).status === 200, '设核心默认 m1');
+  assert((await reg('upsert_agent', { name: '单兵', modules: ['summarizer'], model: 'm1', note: 'e2e' })).status === 200, '登记 agent 单兵');
+  assert((await reg('upsert_agent', { name: '双子', modules: ['research', 'reviewer'], model: 'm2', note: 'e2e 多模块' })).status === 200, '登记 agent 双子（2 模块 / m2）');
 
   // 推荐：核心优先复用登记处里的 agent（不代拟模型）
   const sug = await api('POST', '/api/suggest-models', { task: '调研并总结', mode: 'single' });
@@ -630,11 +632,11 @@ async function approvePlan(name) {
   // 原生工具调用（真实二进制 + 真 HTTP）：先实测这条通道支持（探测把 tools 写回 native），
   // 再跑一次"一次回复两个调用"，并核对**发给供应商的历史就是协议形状**。
   // 放在最后：把 m1 判成 native 之后，前面那些信封场景的预期就不再成立。
-  const probe = await api('POST', '/api/models/m1/probe');
+  const probe = await reg('probe_model_tools', { id: 'm1' });
   assert(probe.status === 200 && probe.json && probe.json.outcome === 'supported', '探针判这条通道支持原生工具调用', probe.text.slice(0, 200));
   assert(probe.json && probe.json.mode === 'native', '探测结论写回登记处（mode=native）', JSON.stringify(probe.json));
   // 关流式：这条断言要看"最终那一条请求的消息形状"，非流式最好断言（流式分片的形状由 T2 契约测试盯）。
-  assert((await api('POST', '/api/settings', { streaming: false })).status === 200, '关流式（本场景用）');
+  assert((await reg('set_settings', { streaming: false })).status === 200, '关流式（本场景用）');
   const name1n = 'e2e-native-' + Date.now();
   const c1n = await api('POST', '/api/actions/create_session', {
     name: name1n, mode: 'single',
@@ -669,12 +671,12 @@ async function approvePlan(name) {
     JSON.stringify(seen),
   );
   assert(seen && String(seen.toolIds) === 'call_a,call_b', '结果消息用 tool_call_id 各回应自己的调用', JSON.stringify(seen));
-  assert((await api('POST', '/api/settings', { streaming: true })).status === 200, '恢复流式');
+  assert((await reg('set_settings', { streaming: true })).status === 200, '恢复流式');
 
 
   // ---- 代理模式（第三人形态）：核心代用户挑人 → 建子工作 → 转达 → 停止即全停 ----
   {
-    await api('POST', '/api/agents', { name: '代甲', modules: ['render'], model: 'm1' });
+    await reg('upsert_agent', { name: '代甲', modules: ['render'], model: 'm1' });
     const pName = 'e2e-agency-' + Date.now();
     const created = await api('POST', '/api/actions/create_session', { name: pName, mode: 'proxy' });
     assert(created.status === 200 && created.json && created.json.sid === pName, '建代理会话（第三人形态，没有名单）', created.text.slice(0, 200));

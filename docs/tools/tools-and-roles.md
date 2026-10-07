@@ -98,6 +98,9 @@ roles:
 - **读取与视图不进动作表**：会话列表 / 配置 / 文件清单 / 历史是读接口，事实仍只有**事件台**一条来路。
 - **人经呈现层调用**（`caller = user`）与**模型经工具调用**（`caller = 角色 id`）走同一次校验、同一处授权、同一条审计；
   适配器不各自校验、也不各自判权。
+- **登记处动作只给 user**：供应商 / 密钥 / 模型 / agent / 设置的写面（`upsert_provider` / `remove_provider` / `discover_models` / `upsert_model` / `remove_model` /
+  `set_core_model` / `probe_model_tools` / `probe_replay_shape` / `upsert_agent` / `remove_agent` / `set_settings`）的 `callers` 只有 `user`——
+  产品级资源默认不开放给任何角色；`api_key` 只进登记处，不进动作目录、不进审计。读（`GET /api/settings`、`/api/state`）仍是独立读接口。
 - **模块工具也是动作**（动态动作，来自清单）：id = `module.<模块id>.<工具名>`。人可直接跑（无会话，围栏按模块目录 + 可选工作目录派生）；
   会话里由成员循环执行（同一份 `module.yaml` 声明、同一个 `ToolExec::run_module`）。两条路径的审计记录同一处格式化（`action_audit`），
   只是各自进自己的账本：呈现层进运行日志，模型侧进**转录工具行**（可回放）。**缺运行包 = 不执行**：两条路径读同一把尺子（`runtime_report.missing`），

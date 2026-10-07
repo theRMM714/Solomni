@@ -6,7 +6,6 @@
 
 use crate::capabilities::conductor::api::{Acted, ActionCall, Caller, SessionEvent, WorkMode};
 use crate::capabilities::conductor::api::{Ops, Output};
-use crate::capabilities::registry::api::AppSettings;
 pub mod routes;
 use serde_json::json;
 use std::sync::Arc;
@@ -226,17 +225,6 @@ fn str_field(v: &serde_json::Value, key: &str) -> String {
         .to_string()
 }
 
-fn str_list(v: &serde_json::Value, key: &str) -> Vec<String> {
-    v.get(key)
-        .and_then(|t| t.as_array())
-        .map(|a| {
-            a.iter()
-                .filter_map(|x| x.as_str().map(|s| s.to_string()))
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
 /// 长轮询最长等待：有新事件立刻回，否则到点回空（客户端随即再问一次）。
 const POLL_WAIT: Duration = Duration::from_secs(20);
 const POLL_TICK: Duration = Duration::from_millis(300);
@@ -255,7 +243,6 @@ pub(crate) fn route(
         return complaint(404, "无此路由");
     };
     let sid = m.param("sid");
-    let action = m.param("action");
     let id = m.param("id");
     let name = m.param("name");
 
@@ -381,164 +368,11 @@ pub(crate) fn route(
             Err(e) => complaint(404, e),
         },
 
-        // ---- 供应商 ----
-        "provider.new" => {
-            let req = match parse_body(body) {
-                Ok(v) => v,
-                Err(e) => return complaint(400, e),
-            };
-            match ops.registry.upsert_provider(
-                &str_field(&req, "id"),
-                &str_field(&req, "base_url"),
-                &str_field(&req, "api_key"),
-            ) {
-                Ok(()) => ok_json(json!({ "ok": true })),
-                Err(e) => complaint(400, e),
-            }
-        }
-        "provider.act" => {
-            let outcome = match action.as_str() {
-                "remove" => ops
-                    .registry
-                    .remove_provider(&id)
-                    .map(|ok| json!({ "ok": ok })),
-                "discover" => ops
-                    .registry
-                    .discover_models(&id)
-                    .map(|models| json!({ "ok": true, "models": models })),
-                _ => return complaint(404, format!("未知动作：{}", action)),
-            };
-            match outcome {
-                Ok(v) => ok_json(v),
-                Err(e) => complaint(400, e),
-            }
-        }
-
-        // ---- 模型 ----
-        "model.new" => {
-            let req = match parse_body(body) {
-                Ok(v) => v,
-                Err(e) => return complaint(400, e),
-            };
-            match ops.registry.upsert_model(
-                &str_field(&req, "id"),
-                &str_field(&req, "name"),
-                &str_field(&req, "api_model"),
-                &str_field(&req, "provider"),
-                &str_field(&req, "note"),
-                req.get("context").and_then(|v| v.as_u64()).unwrap_or(0),
-            ) {
-                Ok(()) => ok_json(json!({ "ok": true })),
-                Err(e) => complaint(400, e),
-            }
-        }
-        "model.act" => {
-            let outcome = match action.as_str() {
-                "remove" => ops.registry.remove_model(&id).map(|ok| json!({ "ok": ok })),
-                "core" => ops
-                    .registry
-                    .set_core_model(&id)
-                    .map(|ok| json!({ "ok": ok })),
-                // 探测要真实网络（两条最小请求），结论由 conductor 按三种如实回报并只写确定的结论。
-                "probe" => ops
-                    .registry
-                    .probe_model_tools(&id)
-                    .map(|outcome| probe_json(ops, &id, &outcome)),
-                // 回放形状探测：只报事实、不改登记处（采不采用由人定）。
-                "probe-replay" => ops
-                    .registry
-                    .probe_replay_shape(&id)
-                    .map(|report| json!({ "ok": true, "shapes": report.shapes })),
-                _ => return complaint(404, format!("未知动作：{}", action)),
-            };
-            match outcome {
-                Ok(v) => ok_json(v),
-                Err(e) => complaint(400, e),
-            }
-        }
-
-        // ---- agent ----
-        "agent.new" => {
-            let req = match parse_body(body) {
-                Ok(v) => v,
-                Err(e) => return complaint(400, e),
-            };
-            match ops.registry.upsert_agent(
-                &str_field(&req, "name"),
-                &str_list(&req, "modules"),
-                &str_field(&req, "model"),
-                &str_field(&req, "note"),
-            ) {
-                Ok(()) => ok_json(json!({ "ok": true })),
-                Err(e) => complaint(400, e),
-            }
-        }
-        "agent.act" => {
-            let outcome = match action.as_str() {
-                "remove" => ops
-                    .registry
-                    .remove_agent(&name)
-                    .map(|ok| json!({ "ok": ok })),
-                _ => return complaint(404, format!("未知动作：{}", action)),
-            };
-            match outcome {
-                Ok(v) => ok_json(v),
-                Err(e) => complaint(400, e),
-            }
-        }
-
         // ---- 基本设置 ----
         "settings.get" => match ops.registry.settings() {
             Ok(s) => ok_json(json!({ "settings": s })),
             Err(e) => complaint(400, e),
         },
-        "settings.set" => {
-            let req = match parse_body(body) {
-                Ok(v) => v,
-                Err(e) => return complaint(400, e),
-            };
-            let current = match ops.registry.settings() {
-                Ok(s) => s,
-                Err(e) => return complaint(400, e),
-            };
-            let settings = AppSettings {
-                streaming: req
-                    .get("streaming")
-                    .and_then(|v| v.as_bool())
-                    .unwrap_or(current.streaming),
-                show_reasoning: req
-                    .get("show_reasoning")
-                    .and_then(|v| v.as_bool())
-                    .unwrap_or(current.show_reasoning),
-                // 执行档位与围栏写权限：界面暂未暴露（后续阶段），改设置只保留现有值。
-                tier: current.tier,
-                fence_write: current.fence_write,
-                fence_read: current.fence_read.clone(),
-                // 会话权限的全局默认：界面暂未暴露，改设置保留现值（改 yaml 或后续界面）。
-                permissions: current.permissions.clone(),
-                qemu_path: current.qemu_path.clone(),
-                llm_timeout_secs: req
-                    .get("llm_timeout_secs")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(current.llm_timeout_secs),
-                // 压缩阈值可由界面调；缺省沿用现值。
-                compact_at_percent: req
-                    .get("compact_at_percent")
-                    .and_then(|v| v.as_u64())
-                    .map(|v| v as u8)
-                    .unwrap_or(current.compact_at_percent),
-                discuss_remind_cap: req
-                    .get("discuss_remind_cap")
-                    .and_then(|v| v.as_u64())
-                    .map(|v| v as u32)
-                    .unwrap_or(current.discuss_remind_cap),
-            };
-            match ops.registry.set_settings(settings) {
-                Ok(()) => ok_json(json!({ "ok": true })),
-                Err(e) => complaint(400, e),
-            }
-        }
-
         // ---- 会话历史 ----
         "history.list" => match ops.history.list() {
             Ok(sessions) => ok_json(json!({ "sessions": sessions })),
@@ -585,28 +419,6 @@ pub(crate) fn route(
         // 目录里有、这里却没有分支 = 程序缺陷（契约测试会逐条点名）。
         _ => complaint(500, "路由目录与处理器不一致（程序缺陷）"),
     }
-}
-
-/// 探测结论 → 响应 JSON。三种结论如实给出（不猜）；`mode` 是探测后登记处里的**实际**形态，
-/// 也就是下一次生成会走的那套协议（无法判定时登记处不变，它就是原样）。
-fn probe_json(
-    ops: &Ops,
-    id: &str,
-    outcome: &crate::capabilities::conductor::api::ProbeOutcome,
-) -> serde_json::Value {
-    use crate::capabilities::conductor::api::ProbeOutcome;
-    let (kind, detail) = match outcome {
-        ProbeOutcome::Supported { detail } => ("supported", detail.clone()),
-        ProbeOutcome::Unsupported { detail } => ("unsupported", detail.clone()),
-        ProbeOutcome::Unknown { detail } => ("unknown", detail.clone()),
-    };
-    let mode = ops
-        .registry
-        .models()
-        .ok()
-        .and_then(|ms| ms.into_iter().find(|m| m.id == id))
-        .map(|m| m.tools);
-    json!({ "ok": true, "outcome": kind, "detail": detail, "mode": mode })
 }
 
 /// 请求里的形态标识 → WorkMode：唯一解析处；未知值如实报错（路由据此回 400）。

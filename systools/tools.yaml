@@ -509,3 +509,86 @@ tools:
     params:
       session_id: { type: string, required: true, non_empty: true, desc: 会话 id }
       answer: { type: string, required: true, non_empty: true, desc: yes / no / full }
+
+  # —— 登记处动作：产品级资源（供应商 / 密钥 / 模型 / agent / 设置）——
+  # callers **只给 user**：这些是产品级资源，默认不开放给任何角色（密钥与全局配置只由人操作）。
+  upsert_provider:
+    capability: none
+    callers: [user]
+    desc: 登记（或更新）一个供应商：端点 + 密钥。api_key 留空 = 保留原密钥（界面从不回显，值也不进动作目录）。
+    params:
+      id: { type: string, required: true, non_empty: true, desc: 供应商 id }
+      base_url: { type: string, required: true, non_empty: true, desc: 端点基地址 }
+      api_key: { type: string, desc: 密钥；留空 = 保留原密钥 }
+  remove_provider:
+    capability: none
+    callers: [user]
+    desc: 移除一个供应商。
+    params:
+      id: { type: string, required: true, non_empty: true, desc: 供应商 id }
+  discover_models:
+    capability: none
+    callers: [user]
+    desc: 按该供应商的端点与密钥列出它当前可用的模型名（真实网络调用）。
+    params:
+      id: { type: string, required: true, non_empty: true, desc: 供应商 id }
+  upsert_model:
+    capability: none
+    callers: [user]
+    desc: 登记（或更新）一个模型：展示名 / 实际模型串 / 所属供应商 / 能力说明 / 上下文窗口。
+    params:
+      id: { type: string, required: true, non_empty: true, desc: 模型 id }
+      name: { type: string, required: true, non_empty: true, desc: 展示名 }
+      api_model: { type: string, required: true, non_empty: true, desc: 发给供应商的实际模型串 }
+      provider: { type: string, required: true, non_empty: true, desc: 所属供应商 id }
+      note: { type: string, desc: 能力说明（给人看） }
+      context: { type: integer, min: 0, desc: 上下文窗口（token，估算用）；省略 = 0（未知） }
+  remove_model:
+    capability: none
+    callers: [user]
+    desc: 移除一个模型。
+    params:
+      id: { type: string, required: true, non_empty: true, desc: 模型 id }
+  set_core_model:
+    capability: none
+    callers: [user]
+    desc: 把某个模型设为核心默认（未指定模型的 agent 回落它）。
+    params:
+      id: { type: string, required: true, non_empty: true, desc: 模型 id }
+  probe_model_tools:
+    capability: none
+    callers: [user]
+    desc: 实测一条通道支不支持原生工具调用（两条最小请求）；结论写回登记处，三态如实报。
+    params:
+      id: { type: string, required: true, non_empty: true, desc: 模型 id }
+  probe_replay_shape:
+    capability: none
+    callers: [user]
+    desc: 实测这个模型在回放形状上的结论（只报事实，不改登记处：采不采用由人定）。
+    params:
+      id: { type: string, required: true, non_empty: true, desc: 模型 id }
+  upsert_agent:
+    capability: none
+    callers: [user]
+    desc: 登记（或更新）一个 agent：名字 / 模块 / 默认模型 / 说明。名字会成为沙箱目录名（校验更严）。
+    params:
+      name: { type: string, required: true, non_empty: true, desc: agent 名字 }
+      modules: { type: array, desc: 该 agent 具备的模块 id 数组（可空） }
+      model: { type: string, desc: 默认模型 id；留空 = 核心默认 }
+      note: { type: string, desc: 说明（给人看） }
+  remove_agent:
+    capability: none
+    callers: [user]
+    desc: 从登记处移除一个 agent。
+    params:
+      name: { type: string, required: true, non_empty: true, desc: agent 名字 }
+  set_settings:
+    capability: none
+    callers: [user]
+    desc: 改产品设置（部分更新：未提交的字段保留现值）。执行档位 / 围栏写权限 / 会话权限默认值不在这一层暴露。
+    params:
+      streaming: { type: boolean, desc: 流式传输 }
+      show_reasoning: { type: boolean, desc: 思维链显示 }
+      llm_timeout_secs: { type: integer, min: 1, desc: 单次模型调用的超时（秒） }
+      compact_at_percent: { type: integer, min: 0, max: 100, desc: 上下文用到百分之多少就压缩 }
+      discuss_remind_cap: { type: integer, min: 0, desc: 一轮内最多提醒几次 }

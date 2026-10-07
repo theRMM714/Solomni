@@ -1014,7 +1014,7 @@ function openProvidersModal() {
         const del = btn('删除', 'link-btn danger');
         del.onclick = async () => {
           try {
-            await api('POST', '/api/providers/' + encodeURIComponent(p.id) + '/remove');
+            await api('POST', actionUrl('remove_provider'), { id: p.id });
             await refreshState(); rebuild();
             c.setMsg('已删除 ' + p.id);
           } catch (e) { c.setMsg(e.message, true); }
@@ -1029,7 +1029,7 @@ function openProvidersModal() {
       const id = idIn.value.trim(), url = urlIn.value.trim(), key = keyIn.value;
       if (!id || !url || !key) { c.setMsg('id / base_url / api_key 均不能为空', true); return; }
       try {
-        await api('POST', '/api/providers', { id, base_url: url, api_key: key });
+        await api('POST', actionUrl('upsert_provider'), { id, base_url: url, api_key: key });
         keyIn.value = '';
         await refreshState(); rebuild();
         c.setMsg('已保存：' + id);
@@ -1089,7 +1089,7 @@ function openModelsModal() {
         const del = btn('删除', 'link-btn danger');
         del.onclick = async () => {
           try {
-            await api('POST', '/api/models/' + encodeURIComponent(m.id) + '/remove');
+            await api('POST', actionUrl('remove_model'), { id: m.id });
             await refreshState(); rebuild();
             c.setMsg('已删除 ' + m.id);
           } catch (e) { c.setMsg(e.message, true); }
@@ -1100,7 +1100,7 @@ function openModelsModal() {
           probe.disabled = true;
           c.setMsg('正在实测 ' + m.id + ' 的工具调用支持（要发两条最小请求）…');
           try {
-            const r = await api('POST', '/api/models/' + encodeURIComponent(m.id) + '/probe', {});
+            const r = await api('POST', actionUrl('probe_model_tools'), { id: m.id });
             const what = r.outcome === 'supported' ? '支持原生工具调用'
               : r.outcome === 'unsupported' ? '**不支持**原生工具调用（供应商拒了带 tools 的请求）'
               : '无法判定（供应商接受了 tools，但这次没有发起调用）';
@@ -1115,7 +1115,7 @@ function openModelsModal() {
           probeReplay.disabled = true;
           c.setMsg('正在实测 ' + m.id + ' 的回放形状（几种写法各发一次）…');
           try {
-            const r = await api('POST', '/api/models/' + encodeURIComponent(m.id) + '/probe-replay', {});
+            const r = await api('POST', actionUrl('probe_replay_shape'), { id: m.id });
             const lines = (r.shapes || []).map((s) => {
               const verdict = !s.accepted ? '被拒' : (s.understood ? '收+读懂' : '收未懂');
               return verdict + '  ' + s.name + '  ' + (s.detail || '');
@@ -1141,7 +1141,7 @@ function openModelsModal() {
           chips.innerHTML = '';
           c.setMsg('正在拉取 ' + p.id + ' 的模型列表…');
           try {
-            const r = await api('POST', '/api/providers/' + encodeURIComponent(p.id) + '/discover', {});
+            const r = await api('POST', actionUrl('discover_models'), { id: p.id });
             const list = r.models || [];
             if (!list.length) { chips.appendChild(emptyHint('（未返回模型）')); }
             for (const name of list) {
@@ -1170,7 +1170,7 @@ function openModelsModal() {
         c.setMsg('id / 名字 / api_model / 供应商 均不能为空', true); return;
       }
       try {
-        await api('POST', '/api/models', body);
+        await api('POST', actionUrl('upsert_model'), body);
         await refreshState(); rebuild();
         c.setMsg('已保存：' + body.id);
       } catch (e) { c.setMsg(e.message, true); }
@@ -1205,7 +1205,7 @@ function openCoreModal() {
       const id = sel.value;
       if (!id) { c.setMsg('请先登记模型', true); return; }
       try {
-        await api('POST', '/api/models/' + encodeURIComponent(id) + '/core');
+        await api('POST', actionUrl('set_core_model'), { id });
         await refreshState();
         c.setMsg('核心 AI 默认模型：' + id);
       } catch (e) { c.setMsg(e.message, true); }
@@ -1231,7 +1231,7 @@ function openSettingsModal() {
     const save = btn('保存', 'btn btn-primary btn-block');
     save.onclick = async () => {
       try {
-        await api('POST', '/api/settings', {
+        await api('POST', actionUrl('set_settings'), {
           streaming: stream.box.checked,
           show_reasoning: cot.box.checked,
           llm_timeout_secs: Number(to.input.value) || 300,
@@ -1327,7 +1327,7 @@ function openAgentsModal() {
         const del = btn('删除', 'link-btn danger');
         del.onclick = async () => {
           try {
-            await api('POST', '/api/agents/' + encodeURIComponent(a.name) + '/remove');
+            await api('POST', actionUrl('remove_agent'), { name: a.name });
             await refreshState(); renderList();
             if (editing === a.name) resetForm();
             c.setMsg('已删除 ' + a.name);
@@ -1345,9 +1345,9 @@ function openAgentsModal() {
       if (!name) { c.setMsg('agent 名字不能为空', true); return; }
       try {
         if (editing && editing !== name) {
-          await api('POST', '/api/agents/' + encodeURIComponent(editing) + '/remove');
+          await api('POST', actionUrl('remove_agent'), { name: editing });
         }
-        await api('POST', '/api/agents', { name, modules, model: modelSel.value || null, note: noteIn.value.trim() });
+        await api('POST', actionUrl('upsert_agent'), { name, modules, model: modelSel.value || undefined, note: noteIn.value.trim() });
         await refreshState(); renderList(); resetForm();
         c.setMsg('已保存 agent：' + name);
       } catch (e) { c.setMsg(e.message, true); }
@@ -1606,7 +1606,7 @@ async function openWizard() {
           keep.onclick = async () => {
             if (!a.name.trim()) { c.setMsg('agent 名字不能为空', true); return; }
             try {
-              await api('POST', '/api/agents', { name: a.name.trim(), modules: a.modules.slice(), model: a.model, note: '' });
+              await api('POST', actionUrl('upsert_agent'), { name: a.name.trim(), modules: a.modules.slice(), model: a.model || undefined, note: '' });
               await refreshState();
               a.transient = false; a.reuse = true;
               renderAll(); c.setMsg('已保存 agent：' + a.name.trim());
@@ -1659,7 +1659,7 @@ async function openWizard() {
       addS.onclick = async () => {
         if (!ed.name.trim()) { c.setMsg('agent 名字不能为空', true); return; }
         try {
-          await api('POST', '/api/agents', { name: ed.name.trim(), modules: ed.modules.slice(), model: ed.model, note: ed.note.trim() });
+          await api('POST', actionUrl('upsert_agent'), { name: ed.name.trim(), modules: ed.modules.slice(), model: ed.model || undefined, note: ed.note.trim() });
           await refreshState();
           w.agents.push({ name: ed.name.trim(), transient: false, modules: ed.modules.slice(), model: ed.model, why: null });
           ed.open = false; renderAll(); c.setMsg('已保存并加入 agent：' + ed.name.trim());

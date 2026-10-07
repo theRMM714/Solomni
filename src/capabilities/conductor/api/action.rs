@@ -5,6 +5,7 @@
 
 use super::*;
 use crate::capabilities::conductor::domain::proxy as d;
+use crate::capabilities::registry::api::{AppSettings, RegistryOps};
 use crate::capabilities::tools::api::{arg_fault_text, ToolSchema};
 
 /// 这个动作此刻适不适用（人经呈现层的协作动作按"在等哪一关"判）。
@@ -443,8 +444,133 @@ impl ConductorHandle {
                 ))
             }
             // 文件域 / 协作动词 / 核心操作这些动作由成员工具循环执行，不经分发器。
+            // 登记处动作（供应商 / 密钥 / 模型 / agent / 设置）：产品级资源，只给人用。
+            "upsert_provider" | "remove_provider" | "discover_models" | "upsert_model"
+            | "remove_model" | "set_core_model" | "probe_model_tools" | "probe_replay_shape"
+            | "upsert_agent" | "remove_agent" | "set_settings" => self.execute_registry(id, args),
             other => Err(format!("这个动作不由分发器执行：{}", other)),
         }
+    }
+
+    /// 目的：登记处动作的执行体——供应商 / 密钥 / 模型 / agent / 设置，**只给人用**（`callers: [user]`）。
+    /// 约束：`api_key` 只进登记处，不进动作目录、不进审计；`set_settings` 是部分更新（未提交字段保留现值）。
+    fn execute_registry(&self, id: &str, args: &serde_json::Value) -> Result<Acted, String> {
+        let s = |k: &str| {
+            args.get(k)
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string()
+        };
+        match id {
+            "upsert_provider" => {
+                self.upsert_provider(&s("id"), &s("base_url"), &s("api_key"))?;
+                Ok(Acted::Done(serde_json::json!({ "ok": true })))
+            }
+            "remove_provider" => {
+                let ok = self.remove_provider(&s("id"))?;
+                Ok(Acted::Done(serde_json::json!({ "ok": ok })))
+            }
+            "discover_models" => {
+                let models = self.discover_models(&s("id"))?;
+                Ok(Acted::Done(
+                    serde_json::json!({ "ok": true, "models": models }),
+                ))
+            }
+            "upsert_model" => {
+                let context = args.get("context").and_then(|v| v.as_u64()).unwrap_or(0);
+                self.upsert_model(
+                    &s("id"),
+                    &s("name"),
+                    &s("api_model"),
+                    &s("provider"),
+                    &s("note"),
+                    context,
+                )?;
+                Ok(Acted::Done(serde_json::json!({ "ok": true })))
+            }
+            "remove_model" => {
+                let ok = self.remove_model(&s("id"))?;
+                Ok(Acted::Done(serde_json::json!({ "ok": ok })))
+            }
+            "set_core_model" => {
+                let ok = self.set_core_model(&s("id"))?;
+                Ok(Acted::Done(serde_json::json!({ "ok": ok })))
+            }
+            "probe_model_tools" => {
+                let outcome = self.probe_model_tools(&s("id"))?;
+                Ok(Acted::Done(self.probe_json(&s("id"), &outcome)))
+            }
+            "probe_replay_shape" => {
+                let report = self.probe_replay_shape(&s("id"))?;
+                Ok(Acted::Done(
+                    serde_json::json!({ "ok": true, "shapes": report.shapes }),
+                ))
+            }
+            "upsert_agent" => {
+                let modules: Vec<String> = args
+                    .get("modules")
+                    .and_then(|v| v.as_array())
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(|x| x.as_str().map(|s| s.to_string()))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                self.upsert_agent(&s("name"), &modules, &s("model"), &s("note"))?;
+                Ok(Acted::Done(serde_json::json!({ "ok": true })))
+            }
+            "remove_agent" => {
+                let ok = self.remove_agent(&s("name"))?;
+                Ok(Acted::Done(serde_json::json!({ "ok": ok })))
+            }
+            "set_settings" => {
+                self.apply_settings(args)?;
+                Ok(Acted::Done(serde_json::json!({ "ok": true })))
+            }
+            other => Err(format!("未知的登记处动作：{}", other)),
+        }
+    }
+
+    /// 目的：设置的部分更新——未提交的字段保留现值（执行档位 / 围栏写权限 / 会话权限默认值不在这一层暴露）。
+    fn apply_settings(&self, args: &serde_json::Value) -> Result<(), String> {
+        let current = self.settings()?;
+        let num = |k: &str| args.get(k).and_then(|v| v.as_u64());
+        let settings = AppSettings {
+            streaming: args
+                .get("streaming")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(current.streaming),
+            show_reasoning: args
+                .get("show_reasoning")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(current.show_reasoning),
+            tier: current.tier,
+            fence_write: current.fence_write,
+            fence_read: current.fence_read.clone(),
+            permissions: current.permissions.clone(),
+            qemu_path: current.qemu_path.clone(),
+            llm_timeout_secs: num("llm_timeout_secs").unwrap_or(current.llm_timeout_secs),
+            compact_at_percent: num("compact_at_percent")
+                .map(|v| v as u8)
+                .unwrap_or(current.compact_at_percent),
+            discuss_remind_cap: num("discuss_remind_cap")
+                .map(|v| v as u32)
+                .unwrap_or(current.discuss_remind_cap),
+        };
+        self.set_settings(settings)
+    }
+
+    /// 目的：探测结论 → 响应 JSON；`mode` 取探测后登记处里的实际形态（结论只翻译、不解释）。
+    fn probe_json(
+        &self,
+        id: &str,
+        outcome: &crate::capabilities::llm::api::ProbeOutcome,
+    ) -> serde_json::Value {
+        let mode = RegistryOps::models(self)
+            .ok()
+            .and_then(|ms| ms.into_iter().find(|m| m.id == id))
+            .map(|m| m.tools);
+        crate::capabilities::conductor::domain::action::probe_view(outcome, mode)
     }
 }
 

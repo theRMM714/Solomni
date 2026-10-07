@@ -22,6 +22,8 @@
 ## 四、改动本单元时必须同步
 
 - 字段一改 → `REGISTRY_SPEC.md`（唯一权威）、`src/tests/registry.rs`、`web` 的设置页；密钥永不进入提示词 / 转录 / 日志 / 模块工作区。
+- 写面（登记 / 移除 / 设核心默认 / 探测 / 改设置）以**用户动作**暴露：声明在 `systools/tools.yaml`（`callers: [user]`），执行体在 `conductor/api/action.rs` 的 `execute_registry`；
+  改一个写方法要同时改动作表、执行体与前端调用点。**这些动作默认不开放给任何角色**（供应商与密钥是产品级资源）。
 
 ## 本目录
 

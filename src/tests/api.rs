@@ -1092,6 +1092,45 @@ fn module_tools_are_actions_users_can_run_directly() {
         .is_err());
 }
 
+/// 登记处动作：人可以用（同一处分发），**供应商与密钥相关默认不开放给非 user 身份**。
+#[test]
+fn registry_actions_are_user_only_and_go_through_the_dispatcher() {
+    let (_h, ops) = ops_with(vec![module_of("a")], Vec::new());
+    // 人可以用：登记一个 agent，再从登记处读回来（走的是动作分发，不是传输层直调）。
+    ops.actions
+        .act(ActionCall {
+            id: "upsert_agent".to_string(),
+            args: serde_json::json!({ "name": "甲", "modules": ["a"] }),
+            caller: Caller::User,
+            out: Output::Final,
+        })
+        .expect("登记 agent");
+    let agents = ops.registry.agents().expect("读 agent");
+    assert!(agents.iter().any(|a| a.name == "甲"), "{:?}", agents);
+
+    // 角色不能调登记处动作：供应商 / 密钥类是产品级资源，默认只给人。
+    let role = Caller::Role {
+        role: "core_proxy".to_string(),
+        work: "w".to_string(),
+        agent: "a".to_string(),
+    };
+    let err = ops
+        .actions
+        .act(ActionCall {
+            id: "upsert_provider".to_string(),
+            args: serde_json::json!({ "id": "p", "base_url": "u", "api_key": "k" }),
+            caller: role.clone(),
+            out: Output::Final,
+        })
+        .unwrap_err();
+    assert!(err.contains("不接受这个调用者"), "{}", err);
+    // 目录里对角色也不列出它们。
+    let cat = ops.actions.catalog(&role, None).expect("动作目录");
+    assert!(!cat
+        .iter()
+        .any(|a| a.id.starts_with("upsert_") || a.id == "set_settings"));
+}
+
 /// 缺运行包 = 不执行：直跑模块工具也要过与成员循环同一把尺子，目录里如实标不可用。
 #[test]
 fn module_action_refuses_when_its_runtime_package_is_missing() {
