@@ -748,7 +748,7 @@ fn acl_write_flavours_are_probed_for_scope_and_readability() {
         let root_after = acl_entries(&tree).expect("读撤销后根 ACE 集合");
         let sub_after = acl_entries(&tree.join("sub")).expect("读撤销后子目录 ACE 集合");
         eprintln!(
-            "[探针] {tag}：grant_ok={} 根ACE={} 子目录ACE={} 子文件ACE={} revoke_ok={}",
+            "[诊断] {tag}：grant_ok={} 根ACE={} 子目录ACE={} 子文件ACE={} revoke_ok={}",
             grant.is_ok(),
             root_ace,
             sub_ace,
