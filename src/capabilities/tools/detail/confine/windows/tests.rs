@@ -1,71 +1,31 @@
 use super::*;
-use windows_sys::Win32::Foundation::LocalFree;
-use windows_sys::Win32::Security::Authorization::GetNamedSecurityInfoW;
-use windows_sys::Win32::Security::{
-    GetAce, GetAclInformation, ACL_SIZE_INFORMATION, DACL_SECURITY_INFORMATION,
-};
 
-/// 把对象 DACL 里的允许 ACE 逐条转储成可读文本（残留调查用：原始权限位 + 继承标志 + SID）。
+/// 把对象 DACL 里的 ACE 逐条转储成可读文本（残留调查用：原始权限位 + 继承标志 + SID + 对象 GUID）。
+/// 走 acl_scan：**偏移与认不出的条数都由它一处给出**，诊断不会另抄一套读法而看不出对象 ACE。
 fn dump_aces(path: &Path) -> String {
-    const ACL_SIZE_INFORMATION_CLASS: i32 = 2;
-    let mut dacl: *mut ACL = std::ptr::null_mut();
-    let mut sd: PSID = std::ptr::null_mut();
-    let w = wide(path);
-    let rc = unsafe {
-        GetNamedSecurityInfoW(
-            w.as_ptr(),
-            SE_FILE_OBJECT,
-            DACL_SECURITY_INFORMATION,
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-            &mut dacl,
-            std::ptr::null_mut(),
-            &mut sd,
-        )
+    let scan = match acl_scan(path) {
+        Ok(scan) => scan,
+        Err(e) => return format!("{}：{}", path.display(), e),
     };
-    if rc != 0 {
-        return format!("{}：读 DACL 失败（{}）", path.display(), rc);
-    }
-    let mut out = format!(
-        "{}：
-",
-        path.display()
-    );
-    if !dacl.is_null() {
-        let mut info: ACL_SIZE_INFORMATION = unsafe { std::mem::zeroed() };
-        let ok = unsafe {
-            GetAclInformation(
-                dacl,
-                &mut info as *mut _ as *mut c_void,
-                std::mem::size_of::<ACL_SIZE_INFORMATION>() as u32,
-                ACL_SIZE_INFORMATION_CLASS,
-            )
-        };
-        if ok != 0 {
-            for i in 0..info.AceCount {
-                let mut ace: *mut c_void = std::ptr::null_mut();
-                if unsafe { GetAce(dacl, i, &mut ace) } == 0 || ace.is_null() {
-                    continue;
-                }
-                let base = ace as *const u8;
-                let ace_type = unsafe { *base };
-                let flags = unsafe { *base.add(1) };
-                let mask = unsafe { std::ptr::read_unaligned(base.add(4) as *const u32) };
-                let sid_text = sid_to_string(unsafe { base.add(8) as PSID });
-                out.push_str(&format!(
-                    "  type={} flags=0x{:02X} mask=0x{:08X} inherited={} sid={}
-",
-                    ace_type,
-                    flags,
-                    mask,
-                    flags & 0x10 != 0,
-                    sid_text
-                ));
-            }
+    let mut out = format!("{}：\n", path.display());
+    for v in &scan.entries {
+        out.push_str(&format!(
+            "  type={} flags=0x{:02X} mask=0x{:08X} inherited={} sid={}\n",
+            v.ace_type,
+            v.flags,
+            v.mask,
+            v.flags & INHERITED_ACE != 0,
+            v.sid
+        ));
+        if !v.object_type.is_empty() || !v.inherited_object_type.is_empty() {
+            out.push_str(&format!(
+                "    object={} inherited_object={}\n",
+                v.object_type, v.inherited_object_type
+            ));
         }
     }
-    unsafe {
-        LocalFree(sd);
+    if scan.unparsed > 0 {
+        out.push_str(&format!("  认不出的 ACE：{} 条\n", scan.unparsed));
     }
     out
 }
@@ -458,6 +418,98 @@ fn revoke_leaves_no_container_ace_on_leaf_parents() {
     assert!(!on_leaf, "撤权后叶子不得残留该容器 SID 的任何 ACE");
 }
 
+/// 【真机往返】对象 ACE（SID 前还带类型 GUID）也进写后核对的账：
+/// 真写下一条对象 ACE → 核对看得见它 → 我们的授权往返（记录 → 写 → 读回）不弄丢它 →
+/// 再把"弄丢"注入一次，证明核对确实会报（不然这条断言可能永远为真）。
+/// 会改本机状态（写临时文件的 DACL），按测试约定只在 --fence-live 下跑；做不了往返预检就如实跳过。
+#[test]
+fn object_ace_is_covered_by_the_write_then_equal_check() {
+    if std::env::var("SOLOMNI_FENCE_LIVE")
+        .map(|v| v != "1")
+        .unwrap_or(true)
+    {
+        eprintln!(
+            "[探针] 未开启真机围栏测试：object_ace_is_covered_by_the_write_then_equal_check 会改本机 ACL（临时文件），已跳过；要真跑加 --fence-live"
+        );
+        return;
+    }
+    let base =
+        std::env::temp_dir().join(format!("solomni-object-ace-probe-{}", std::process::id()));
+    discard(&base);
+    std::fs::create_dir_all(&base).expect("建探针目录");
+    if !acl_round_trip(&base, "object-ace") {
+        eprintln!(
+            "[探针] 本机做不了 ACL 完整往返（写→读回→撤）：对象 ACE 探针跳过（不静默当作通过）"
+        );
+        discard(&base);
+        return;
+    }
+    let file = base.join("data.txt");
+    std::fs::write(&file, b"x").expect("写探针文件");
+    let spec = FenceSpec {
+        agent: "probe-object-ace".to_string(),
+        private: PathBuf::new(),
+        ro_tree: Vec::new(),
+        rw: vec![base.clone()],
+        cwd: base.clone(),
+        ro: Vec::new(),
+        net: false,
+    };
+    let sid = container_sid(&container_name(&spec)).expect("派生容器 SID");
+    let snapshot = sd_bytes(&file).expect("记下探针文件的原始安全描述符");
+    let guid = [
+        0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF,
+        0x01,
+    ];
+    let outcome = grant_one_object_ace(sid, &file, RIGHTS_RO, guid);
+    assert!(
+        outcome.is_ok(),
+        "写一条对象 ACE 应当成功：{:?}",
+        outcome.err()
+    );
+    eprintln!("[诊断] 含对象 ACE 的文件 DACL {}", dump_aces(&file));
+    let with_object = acl_entries(&file).expect("读含对象 ACE 的集合");
+    let object_entry = with_object
+        .iter()
+        .find(|e| e.0 == 5)
+        .expect("对象 ACE 必须被核对看得见——这就是这条缺口的分界线");
+    assert!(
+        !object_entry.3.is_empty(),
+        "身份里要带上对象类型 GUID，否则两条只差 GUID 的 ACE 会互相顶包：{:?}",
+        object_entry
+    );
+    eprintln!("[诊断] 对象 ACE 的身份：{:?}", object_entry);
+
+    // 我们的授权往返：记录 → 写 → 读回核对。对象 ACE 必须活下来，否则核对会如实报"弄丢了"。
+    let grant = grant_verified(sid, &file, RIGHTS_RO, false, false);
+    assert!(
+        grant.is_ok(),
+        "写后核对不该把对象 ACE 判成丢失：{:?}",
+        grant.err()
+    );
+    let after = acl_entries(&file).expect("读我们授权后的集合");
+    assert!(
+        !lost_entries(&with_object, &after).iter().any(|e| e.0 == 5),
+        "对象 ACE 不能在授权往返里丢：{:?}",
+        lost_entries(&with_object, &after)
+    );
+    revoke_one(sid, &file, false).expect("撤掉我们写的那条 ACE");
+
+    // 注入一次"对象 ACE 被弄丢"：核对必须报出来。
+    restore_sd(&file, &snapshot).expect("还原成没有对象 ACE 的原始安全描述符");
+    let without = acl_entries(&file).expect("读还原后的集合");
+    let lost = lost_entries(&with_object, &without);
+    assert!(
+        lost.iter().any(|e| e.0 == 5),
+        "弄丢对象 ACE 必须被核对报出来，实际丢失：{:?}",
+        lost
+    );
+    eprintln!("[诊断] 注入丢失后核对报出：{:?}", lost);
+
+    free_sid(sid);
+    discard(&base);
+}
+
 /// 失败现场：把容器自己的视图落进叶子再报出来（"被拒"还是"真没有"要分得清）。
 /// 诊断本身只写授权落点，不会把失败吞掉。
 fn container_diag(sid: PSID, spec: &FenceSpec, leaf: &Path) -> String {
@@ -580,6 +632,219 @@ fn container_roundtrip_sees_leaf_but_not_parent_content() {
     release_fence(&spec, &home).expect("撤权应当成功");
     clean(&home).expect("台账回收应当成功");
     // 探针建的容器 profile 也要带走：测试不在本机留痕。
+    assert!(delete_profile(&container), "探针的容器 profile 应当删得掉");
+    discard(&base);
+}
+
+/// 【真机诊断】"容器里列自己的授权落点"走不走得通：一张机制矩阵，把 cmd 的 dir 自身、令牌与权限位、
+/// 环境（卷与解释器）分开记下来（见 tests/gaps.yaml 的 fence.container-dir-listing-denied）。
+/// **只采事实、不判失败**：矩阵决定要不要在授权阶段补权限位。控制组照常断言（自己的产物写得进读得回、
+/// 父目录里的别的条目读不到），免得整条探针变成"怎么都算过"。
+/// 会创建 AppContainer profile（改本机状态），只在 --fence-live（SOLOMNI_FENCE_LIVE=1）下跑。
+#[test]
+fn container_listing_matrix_is_recorded_for_diagnosis() {
+    if std::env::var("SOLOMNI_FENCE_LIVE")
+        .map(|v| v != "1")
+        .unwrap_or(true)
+    {
+        eprintln!(
+            "[探针] 未开启真机围栏测试：container_listing_matrix_is_recorded_for_diagnosis 会创建 AppContainer profile（改本机状态），已跳过；要真跑加 --fence-live"
+        );
+        return;
+    }
+    if !capability().fs {
+        eprintln!(
+            "[探针] 本机不允许改目录 ACL（{}）：列举矩阵探针跳过（不静默当作通过）",
+            capability().note
+        );
+        return;
+    }
+    let base = std::env::temp_dir().join(format!("solomni-listing-probe-{}", std::process::id()));
+    discard(&base);
+    let leaf = base.join("leaf");
+    std::fs::create_dir_all(&leaf).expect("建探针目录");
+    std::fs::write(leaf.join("data.txt"), "x").expect("写探针文件");
+    std::fs::write(base.join("parent-secret.txt"), "PARENT-SECRET").expect("写父目录条目");
+    // 列举脚本写成文件而不是一行命令：命令行里的引号会在 cmd 里再被剥一层，量出来的东西就不是列举了。
+    std::fs::write(
+        leaf.join("listdir.py"),
+        "import os\nprint('|'.join(sorted(os.listdir('.'))))\n",
+    )
+    .expect("写 python 列举脚本");
+    std::fs::write(
+        leaf.join("scandir.py"),
+        "import os\nprint('|'.join(sorted(e.name for e in os.scandir('.'))))\n",
+    )
+    .expect("写 python 枚举脚本");
+    std::fs::write(
+        leaf.join("listdir.js"),
+        "console.log(require('fs').readdirSync('.').join('|'))\n",
+    )
+    .expect("写 node 列举脚本");
+    std::fs::write(leaf.join("listdir.ps1"), "Get-ChildItem -Name\n")
+        .expect("写 powershell 列举脚本");
+    let spec = FenceSpec {
+        agent: "probe-listing".to_string(),
+        private: PathBuf::new(),
+        ro_tree: Vec::new(),
+        rw: vec![leaf.clone()],
+        cwd: leaf.clone(),
+        ro: Vec::new(),
+        net: false,
+    };
+    let container = container_name(&spec);
+    if let Err(e) = ensure_profile(&container) {
+        if e.contains(PROFILE_ENV_BLOCKED_MARK) {
+            eprintln!(
+                "[探针] 本环境不允许建容器 profile（{}）：列举矩阵探针跳过（不静默当作通过）",
+                e
+            );
+            discard(&base);
+            return;
+        }
+        panic!("建容器 profile 失败（不是环境不允许）：{}", e);
+    }
+    let home = base.join(".home");
+    prepare_fence(&spec, "cmd", &home).expect("授权应当成功");
+    // 解释器要按**它自己的命令**再授一次基线，否则那一行会以"找不到解释器"告吹，量错东西。
+    let has_exe = |name: &str| crate::kernel::detail::host_probe::find_exe(name).is_some();
+    if has_exe("python") {
+        prepare_fence(&spec, "python listdir.py", &home).expect("python 基线授权应当成功");
+    }
+    if has_exe("node") {
+        prepare_fence(&spec, "node listdir.js", &home).expect("node 基线授权应当成功");
+    }
+    let sid = container_sid(&container).expect("派生容器 SID");
+
+    let mut cases: Vec<(&str, String, &str)> = vec![
+        (
+            "对照-写读往返",
+            "echo data > rw.txt & type rw.txt > matrix-rw.txt 2>&1".to_string(),
+            "matrix-rw.txt",
+        ),
+        (
+            "dir-b",
+            "dir /b > matrix-dir-b.txt 2>&1".to_string(),
+            "matrix-dir-b.txt",
+        ),
+        (
+            "dir-长格式",
+            "dir > matrix-dir.txt 2>&1".to_string(),
+            "matrix-dir.txt",
+        ),
+        (
+            "dir-绝对路径",
+            format!("dir \"{}\" > matrix-dir-abs.txt 2>&1", leaf.display()),
+            "matrix-dir-abs.txt",
+        ),
+        (
+            "for-枚举",
+            "(for %f in (*) do @echo %f) > matrix-for.txt 2>&1".to_string(),
+            "matrix-for.txt",
+        ),
+        (
+            "whoami-priv",
+            "whoami /priv > matrix-priv.txt 2>&1".to_string(),
+            "matrix-priv.txt",
+        ),
+        (
+            "icacls-自己",
+            "icacls . > matrix-icacls.txt 2>&1".to_string(),
+            "matrix-icacls.txt",
+        ),
+        (
+            "负向对照-父目录别的条目",
+            "type ..\\parent-secret.txt > matrix-parent.txt 2>&1".to_string(),
+            "matrix-parent.txt",
+        ),
+    ];
+    if has_exe("python") {
+        cases.push((
+            "python-listdir",
+            "python listdir.py > matrix-py.txt 2>&1".to_string(),
+            "matrix-py.txt",
+        ));
+        cases.push((
+            "python-scandir",
+            "python scandir.py > matrix-scandir.txt 2>&1".to_string(),
+            "matrix-scandir.txt",
+        ));
+    }
+    if has_exe("node") {
+        cases.push((
+            "node-readdir",
+            "node listdir.js > matrix-node.txt 2>&1".to_string(),
+            "matrix-node.txt",
+        ));
+    }
+    if has_exe("powershell") {
+        cases.push((
+            "powershell-getchilditem",
+            "powershell -NoProfile -File listdir.ps1 > matrix-ps.txt 2>&1".to_string(),
+            "matrix-ps.txt",
+        ));
+    }
+
+    // 外层看得见的事实：落点 DACL（含对象 ACE 与"认不出的条数"）、容器 SID、落点所在卷。
+    eprintln!(
+        "[诊断] 列举矩阵探针落点 {}（临时目录 {}）",
+        leaf.display(),
+        std::env::temp_dir().display()
+    );
+    eprintln!("[诊断] 容器 SID {}", sid_to_string(sid));
+    eprintln!("[诊断] 授权后叶子 DACL {}", dump_aces(&leaf));
+    if let Some(root) = leaf.ancestors().last() {
+        let drive = root.to_string_lossy().trim_end_matches('\\').to_string();
+        match std::process::Command::new("fsutil")
+            .args(["fsinfo", "volumeinfo", &drive])
+            .output()
+        {
+            Ok(out) => eprintln!(
+                "[诊断] 卷信息 {}：{}",
+                drive,
+                String::from_utf8_lossy(&out.stdout).replace(['\r', '\n'], " ")
+            ),
+            Err(e) => eprintln!("[诊断] 卷信息 {}：取不到（{}）", drive, e),
+        }
+    }
+
+    let mut reports: Vec<(&str, i32, String)> = Vec::new();
+    for (tag, command, file) in &cases {
+        let code = run_in_container(sid, &spec, command).expect("容器进程应当能启动");
+        let text = std::fs::read_to_string(leaf.join(file))
+            .unwrap_or_else(|e| format!("（读不到输出文件：{}）", e));
+        reports.push((tag, code, text));
+    }
+    for (tag, code, text) in &reports {
+        let one_line = text.split_whitespace().collect::<Vec<_>>().join(" ");
+        eprintln!("[诊断] 列举 {}：exit={} 输出={}", tag, code, one_line);
+    }
+
+    // 控制组：矩阵要有意义，先证明"这个容器确实能读自己的边界、且读不到父目录的别的格子"。
+    let control = reports
+        .iter()
+        .find(|(tag, _, _)| *tag == "对照-写读往返")
+        .expect("对照行必须在");
+    assert!(
+        control.1 == 0 && control.2.contains("data"),
+        "容器里写自己的边界并读回来应当成功（exit={}，拿到 {:?}）",
+        control.1,
+        control.2
+    );
+    let secret = reports
+        .iter()
+        .find(|(tag, _, _)| *tag == "负向对照-父目录别的条目")
+        .expect("负向对照行必须在");
+    assert!(
+        secret.1 != 0 && !secret.2.contains("PARENT-SECRET"),
+        "父目录里的别的条目不该读得到（exit={}，拿到 {:?}）",
+        secret.1,
+        secret.2
+    );
+
+    free_sid(sid);
+    release_fence(&spec, &home).expect("撤权应当成功");
+    clean(&home).expect("台账回收应当成功");
     assert!(delete_profile(&container), "探针的容器 profile 应当删得掉");
     discard(&base);
 }
