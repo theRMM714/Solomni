@@ -31,6 +31,10 @@ const READ_ONLY_BASELINE: &[&str] = &[
     "/etc/ld.so.cache",
     "/etc/localtime",
     "/etc/terminfo",
+    // Node 起进程时初始化 OpenSSL 会读系统配置（python / C++ 不读）：不放行它，
+    // JS 模块工具连 `node -e` 都起不来。两个常见落点各守一处，不存在的由 exists() 跳过。
+    "/etc/ssl/openssl.cnf",
+    "/etc/pki/tls/openssl.cnf",
     "/dev/null",
     "/dev/zero",
     "/dev/urandom",

@@ -262,3 +262,48 @@ fn module_dir_is_read_only_but_userdata_is_writable() {
     assert!(ok.exists(), "userdata 要写得进：{}", oerr);
     assert_eq!(ocode, Some(0), "{}", oerr);
 }
+
+/// **JS 工具能起**：Node 启动初始化 OpenSSL 会读系统 OpenSSL 配置（python / C++ 不读）——
+/// 只读运行基线必须放行它，否则模块工具在脚本执行前就失败。无 node 时如实跳过。
+#[test]
+fn fence_allows_node_to_start_by_reading_the_openssl_config() {
+    let has_node = std::process::Command::new("node")
+        .arg("--version")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+    if !has_node {
+        eprintln!("[探针] 本机没有 node：跳过 JS 工具启动探针（不静默当作通过）");
+        return;
+    }
+    let module = scratch("fence-node");
+    std::fs::write(module.join("listdir.js"), "console.log('NODE-OK')\n").expect("写 node 脚本");
+    // 运行期形态：rw = [模块根]，ro_tree = [模块根]，cwd = 模块根（脚本就在里面）。
+    let spec = job_json_tree(
+        std::slice::from_ref(&module),
+        std::slice::from_ref(&module),
+        &module,
+        false,
+    );
+    let (code, out, err) = run_launcher(&spec, "node listdir.js");
+    if err.contains(RULES_REJECTED_MARK) {
+        panic!(
+            "本机 Landlock 机制有效，但规则装不上（规则写错，不是环境不允许）：{}",
+            err.trim()
+        );
+    }
+    if err.contains("文件系统围栏未生效") {
+        eprintln!(
+            "[探针] 本机 Landlock 不产生实际约束（环境结论，如实跳过，不作为通过）：{}",
+            err.trim()
+        );
+        return;
+    }
+    assert_eq!(code, Some(0), "围栏里 node 要起得来：{} / {}", out, err);
+    assert!(
+        out.contains("NODE-OK"),
+        "node 脚本的 stdout 要透传：{} / {}",
+        out,
+        err
+    );
+}
