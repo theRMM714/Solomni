@@ -382,7 +382,13 @@ fn render(events: &[SessionEvent]) {
             }
             SessionEvent::Ended => {}
             // **裁决卡**：界面只认这四个字段（信封 / 消息 / 选项），不认识业务含义。
-            SessionEvent::DecisionCard { card, .. } => print_card(card),
+            // 交互模式下随后由 `answer_gates` 把它整张打出来并就地作答；这里只提一句，不重复整张。
+            SessionEvent::DecisionCard { card, .. } => {
+                println!(
+                    "[裁决] 有一张卡在等你：{}（{}）——按提示作答",
+                    card.message.title, card.envelope.name
+                )
+            }
             // 一次回答的记录（谁答的、选了哪个 id）：如实打出来，便于对账。
             SessionEvent::DecisionAnswer(a) => {
                 println!("[裁决] {} 答了 {}：选了 {}", a.by, a.card, a.option)
@@ -394,31 +400,6 @@ fn render(events: &[SessionEvent]) {
                 cards.join("、"),
                 reason
             ),
-            // 请用户裁决：把"为什么要你定 + 建议"如实打出来（与 Web 那张卡同一份事实）。
-            SessionEvent::Decision {
-                kind,
-                summary,
-                advice,
-                question,
-                ..
-            } => {
-                if kind == "tool_approval" {
-                    // 工具级确认：卡面只把"在等什么"说清；回答由交互循环就地读键盘。
-                    println!("[确认] {}", summary);
-                    if !question.trim().is_empty() {
-                        println!("  {}", question);
-                    }
-                } else {
-                    println!("[裁决] {}", summary);
-                    if !advice.trim().is_empty() {
-                        println!("  建议：{}", advice);
-                    }
-                    if !question.trim().is_empty() {
-                        println!("  {}", question);
-                    }
-                    println!("  （用自然语言回一句即可；回话会进主会话，所有成员都看得到）");
-                }
-            }
             // 流式增量与工具调用实时事件都是短暂事件，终端不在流中渲染（最终行会到）。
             // 短暂事件（流式增量 / 运行态 / 工具调用）：Web 前端用来做实时渲染，CLI 不逐条打。
             SessionEvent::Delta { .. }
@@ -527,7 +508,7 @@ fn print_card(card: &DecisionCard) {
 }
 
 /// 选中的选项 id：先按序号、再按 id 原文认——两者都是那张卡上**用户看得见**的东西。
-fn pick_option(card: &DecisionCard, ans: &str) -> Option<String> {
+pub(crate) fn pick_option(card: &DecisionCard, ans: &str) -> Option<String> {
     if let Ok(n) = ans.parse::<usize>() {
         if n >= 1 && n <= card.options.len() {
             return Some(card.options[n - 1].id.clone());
@@ -543,7 +524,7 @@ fn pick_option(card: &DecisionCard, ans: &str) -> Option<String> {
 /// 不点不继续：空输入 = 先不答（会话仍在等）。
 fn answer_gates(ops: &Ops, sid: &str, cursor: &mut u64) {
     loop {
-        let queue = match ops.sessions.open_card(sid) {
+        let queue = match ops.sessions.open_queue(sid) {
             Ok(Some(q)) => q,
             Ok(None) => return,
             Err(e) => {
@@ -580,8 +561,8 @@ fn answer_gates(ops: &Ops, sid: &str, cursor: &mut u64) {
     }
 }
 
-/// 一次生成放**后台线程**；主线程一边渲染事件、一边就地处理工具级确认。
-/// 为什么：确认要在生成进行中读键盘，同步调用会把主线程堵在生成里，读不到输入。
+/// 一次生成放**后台线程**；主线程一边渲染事件、一边就地按卡作答（工具级确认等在工作线程上）。
+/// 为什么：回答要在生成进行中读键盘，同步调用会把主线程堵在生成里，读不到输入。
 fn act_interactive(
     ops: &Ops,
     sid: &str,
@@ -597,17 +578,19 @@ fn act_interactive(
     });
     loop {
         let (lines, head, _oldest) = ops.events.snapshot(Some(sid), *cursor);
+        // 这一批里出现了裁决卡就就地作答（工具级确认发生在生成中，不能等这一次生成收尾）。
+        let mut carded = false;
         for l in &lines {
             render(&l.events);
-            for ev in &l.events {
-                if let SessionEvent::Decision { kind, question, .. } = ev {
-                    if kind == "tool_approval" {
-                        confirm_tool(ops, sid, question);
-                    }
-                }
-            }
+            carded |= l
+                .events
+                .iter()
+                .any(|e| matches!(e, SessionEvent::DecisionCard { .. }));
         }
         *cursor = head;
+        if carded {
+            answer_gates(ops, sid, cursor);
+        }
         match rx.try_recv() {
             Ok(r) => return r,
             Err(std::sync::mpsc::TryRecvError::Empty) => {
@@ -617,31 +600,6 @@ fn act_interactive(
                 return Err("生成线程异常结束".to_string())
             }
         }
-    }
-}
-
-/// 解析终端里的一次确认回答（纯函数，便于钉映射）：yes / no / full。
-pub(crate) fn parse_approval(text: &str) -> Option<crate::capabilities::conductor::api::Approval> {
-    use crate::capabilities::conductor::api::Approval;
-    match text.trim().to_ascii_lowercase().as_str() {
-        "y" | "yes" | "是" | "allow" => Some(Approval::Allow),
-        "n" | "no" | "否" | "deny" => Some(Approval::Deny),
-        "f" | "full" | "全部" | "都行" => Some(Approval::Full),
-        _ => None,
-    }
-}
-
-/// 终端里的工具确认：yes / no / full（full = 本轮不再问）。
-fn confirm_tool(ops: &Ops, sid: &str, question: &str) {
-    loop {
-        let ans = prompt(&format!("  {} [yes/no/full]", question));
-        if let Some(answer) = parse_approval(&ans) {
-            if !ops.sessions.approve(sid, answer) {
-                println!("  （这次确认已经不在等了）");
-            }
-            return;
-        }
-        println!("  请输入 yes / no / full。");
     }
 }
 

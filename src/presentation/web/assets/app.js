@@ -2033,10 +2033,6 @@ function absorb(s, ev) {
       s.lines.push(ev.ok ? { cls: 'ok', who: '交付', text: '全部通过，交付用户。' }
         : { cls: 'bad', who: '裁决', text: '返工超限仍未通过，交用户裁决。' });
       break;
-    case 'decision':
-      // 工具级确认（本片未并入通道）：与快照里的 pending 是同一个事实，只是到达得更快。
-      s.pending = ev;
-      return false; // 门要整帧重画
     case 'decision_card':
       // **裁决卡**：与快照里的 pending 是同一个事实，只是到达得更快。
       // waiting 里是排在队首之后还在等的几张（前面还排着几条由它如实显示）。
@@ -2431,24 +2427,15 @@ function renderGate(s) {
   gate.innerHTML = '';
   if (!s || s.done || s.readonly) return;
   const p = s.pending;
-  // 工具级确认发生在**生成中**：这时会话是 busy，但这一关必须显示（生成正停下来等它）。
-  if (p && p.kind === 'tool_approval') {
-    const pl = p.payload || {};
-    const what = pl.module ? (pl.module + '.' + pl.tool) : (pl.tool || '工具');
-    gate.appendChild(gateCard('agent 请求执行工具 ' + what + '，是否放行？', [
-      ['放行', () => approveTool('yes')],
-      ['拒绝', () => approveTool('no')],
-      ['本轮都不再问', () => approveTool('full')],
-    ]));
-    return;
-  }
-  if (isBusy(s)) return;
-  if (s.awaiting === 'task') {
+  if (isBusy(s) && !p) return;
+  if (s.awaiting === 'task' && !isBusy(s)) {
     gate.appendChild(gateCard('请提交本次协作需求：', [
       ['提交', async () => { const v = takeInput(); if (v) await act('task', v); }],
     ]));
     return;
   }
+  // **卡片照画**：工具级确认发生在生成中（生成正停下来等这一答），核心关卡的卡也一样——
+  // 前端只认后端给的四格（信封 / 消息 / 选项），不按 kind 猜按钮、也不在忙时把它藏起来。
   if (!p) return;
   gate.appendChild(renderCard(p));
 }
@@ -2525,20 +2512,6 @@ async function answerCard(card, option, note) {
     s.sending = false;
     needState = true;
     renderAll();
-  }
-}
-
-/* 工具级确认：回答在等的工具放行（是 / 否）。与「停止」一样**不走生成命令队列**——
-   服务端直接把答案写进放行表并唤醒生成线程。 */
-async function approveTool(answer) {
-  const s = activeSession();
-  if (!s) return;
-  try {
-    await api('POST', actionUrl('approve_tool'), { session_id: s.sid, answer: answer });
-    s.pending = null;
-    renderAll();
-  } catch (err) {
-    notice('操作失败', err.message, 'err');
   }
 }
 

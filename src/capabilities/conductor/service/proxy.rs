@@ -680,7 +680,7 @@ impl ProxyHost for ProxyBridge {
             // 适配规则定，附言 = 转达的话）；没挂卡就把它推着接着走。
             let card = handle.call({
                 let t = target.clone();
-                move |core| core.collab_open_card(&t)
+                move |core| core.open_queue(&t)
             })?;
             match card {
                 Some(q) => {

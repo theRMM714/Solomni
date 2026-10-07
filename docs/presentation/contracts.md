@@ -96,7 +96,7 @@
 | GET | `/app.js` | 静态资源 | — | `app.js` | 200 |
 | GET | `/md.js` | 静态资源 | — | `md.js` | 200 |
 | GET | `/api/events` | 事件台（`EventBus`） | 查询 `sid` / `since` | `{lines:[{seq,sid,events}],head,oldest}` | 200 |
-| GET | `/api/state` | `WorkspaceOps::roster` + `SessionOps::session_views` + `SessionOps::pending_approval` + `RegistryOps` + `HistoryOps::list` | — | `{modules,rejected,fence,providers,models,core,agents,settings,sessions,history}`（`sessions[].pending` 含等待中的工具确认） | 200, 400 |
+| GET | `/api/state` | `WorkspaceOps::roster` + `SessionOps::session_views` + `RegistryOps` + `HistoryOps::list` | — | `{modules,rejected,fence,providers,models,core,agents,settings,sessions,history}`（`sessions[].pending` 是**当前那张裁决卡**的快照，与推的 `decision_card` 同一份） | 200, 400 |
 | GET | `/api/actions` | `ActionOps::catalog` | 查询 `sid` | `{actions:[{id,desc,params,available,reason}]}` | 200, 400 |
 | POST | `/api/actions/{id}` | `ActionOps::act` | `{…按动作声明}` | `{head}` / `{events}`（重放快照） / `{ok,…}` | 200, 400 |
 | GET | `/api/sessions/{sid}/config` | `SessionOps::config` | — | `{config}` | 200, 400 |

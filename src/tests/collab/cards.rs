@@ -195,7 +195,7 @@ pub(crate) fn answers_are_validated_against_the_card_they_answered() {
         .unwrap()
         .sid;
     let card = core
-        .collab_open_card(&sid)
+        .open_queue(&sid)
         .expect("取卡")
         .expect("挂着一张卡")
         .card;
@@ -206,7 +206,7 @@ pub(crate) fn answers_are_validated_against_the_card_they_answered() {
     let foreign = core.collab_answer(&sid, &card.id, OPT_PLAN_START, "");
     assert!(foreign.is_err(), "选项不在卡上要拒：{:?}", foreign);
     // 被拒的回答**不留痕**：这一关还挂着，卡号没变。
-    let still = core.collab_open_card(&sid).unwrap().expect("还挂着").card;
+    let still = core.open_queue(&sid).unwrap().expect("还挂着").card;
     assert_eq!(still.id, card.id);
     // 合法的回答：落一条"谁答的、选了哪个 id"的记录。
     let ev = answer_card(&mut core, &sid, OPT_BEGIN, "").unwrap();
@@ -231,22 +231,14 @@ pub(crate) fn cards_and_answers_survive_a_rebuild() {
         .create_work(collab_work("w", &["a"], false, "做个东西"))
         .unwrap()
         .sid;
-    let first = core
-        .collab_open_card(&sid)
-        .unwrap()
-        .expect("挂着一张卡")
-        .card;
+    let first = core.open_queue(&sid).unwrap().expect("挂着一张卡").card;
     // 回档到需求行之后：会话按**转录**重建（重启同一条路）。
     core.rewind(
         &sid,
         crate::capabilities::conductor::api::RewindTarget::Delete(1),
     )
     .unwrap();
-    let rebuilt = core
-        .collab_open_card(&sid)
-        .unwrap()
-        .expect("重建后卡还在")
-        .card;
+    let rebuilt = core.open_queue(&sid).unwrap().expect("重建后卡还在").card;
     assert_eq!(rebuilt.id, first.id, "卡号跨重建稳定");
     let ids = option_ids(&rebuilt);
     let was = option_ids(&first);
@@ -341,7 +333,7 @@ pub(crate) fn the_say_option_lets_the_core_judge_the_users_words() {
         .sid;
     answer_card(&mut core, &sid, OPT_BEGIN, "").unwrap();
     let card = core
-        .collab_open_card(&sid)
+        .open_queue(&sid)
         .unwrap()
         .expect("整理完停在方案待审")
         .card;
@@ -407,12 +399,12 @@ pub(crate) fn a_second_gate_queues_behind_the_first() {
         .create_work(collab_work("w", &["a"], false, "做个东西"))
         .unwrap()
         .sid;
-    let first = core.collab_open_card(&sid).unwrap().expect("挂着一张卡");
+    let first = core.open_queue(&sid).unwrap().expect("挂着一张卡");
     assert_eq!(first.card.id, "d1", "开场那一关先问");
     assert!(first.waiting.is_empty(), "队首后面还没人等");
     // 第二个发起方（这里用「再写一次本次需求」这条真实入口）只能排到它后面。
     let ev = core.collab_set_task(&sid, "第二个需求").unwrap();
-    let queued = core.collab_open_card(&sid).unwrap().expect("还挂着");
+    let queued = core.open_queue(&sid).unwrap().expect("还挂着");
     assert_eq!(queued.card.id, "d1", "队首不变：先来的先问");
     assert_eq!(queued.waiting.len(), 1, "后来的如实排队");
     assert!(
@@ -459,7 +451,7 @@ pub(crate) fn a_second_gate_queues_behind_the_first() {
     let crate::capabilities::conductor::service::Session::Collab(c) = rebuilt else {
         panic!("重建出来的还该是协作会话");
     };
-    let q = c.open_queue().expect("重建后队首还在");
+    let q = c.door.queue().expect("重建后队首还在");
     assert_eq!(q.card.id, "d1", "队首还是先来的那张");
     assert_eq!(q.waiting.len(), 1, "后面还在等的那张也建回来了");
     assert_eq!(q.waiting[0].id, "d2", "等待者的卡号不乱");
@@ -474,7 +466,7 @@ pub(crate) fn a_second_gate_queues_behind_the_first() {
         "队首推进要如实推那张卡：{:?}",
         ev.iter().map(|e| e.to_json()).collect::<Vec<_>>()
     );
-    let next = core.collab_open_card(&sid).unwrap().expect("轮到它了");
+    let next = core.open_queue(&sid).unwrap().expect("轮到它了");
     assert_eq!(next.card.id, "d2", "先来后到：队首依次往前");
     assert!(next.waiting.is_empty(), "队列里只剩它一张");
     // **重建整队**（重启 / 回档走同一条路）：按转录重建出来的是**整条队**，不只是最后一张，顺序不乱。
@@ -483,7 +475,7 @@ pub(crate) fn a_second_gate_queues_behind_the_first() {
     let crate::capabilities::conductor::service::Session::Collab(c) = rebuilt else {
         panic!("重建出来的还该是协作会话");
     };
-    let q = c.open_queue().expect("重建后队首还在");
+    let q = c.door.queue().expect("重建后队首还在");
     assert_eq!(q.card.id, "d2", "重建后队首仍是没答的那张");
     assert!(q.waiting.is_empty(), "答过的 d1 不重问：{:?}", q.card.id);
 }
@@ -531,7 +523,7 @@ pub(crate) fn stopping_voids_the_whole_queue_and_persists_it() {
     // 用户按停止：整队作废。
     ops.sessions.stop(&sid);
     assert!(
-        ops.sessions.open_card(&sid).expect("取卡").is_none(),
+        ops.sessions.open_queue(&sid).expect("取卡").is_none(),
         "作废之后没有挂起的卡（等待方解开，不是永远挂着）"
     );
     let on_bus: Vec<serde_json::Value> = ops
@@ -571,7 +563,7 @@ pub(crate) fn stopping_voids_the_whole_queue_and_persists_it() {
                 let s = core.rebuild_session(&meta, &events)?;
                 match s {
                     crate::capabilities::conductor::service::Session::Collab(c) => {
-                        Ok(c.open_queue())
+                        Ok(c.door.queue())
                     }
                     _ => Err("重建出来的还该是协作会话".to_string()),
                 }
@@ -592,7 +584,7 @@ pub(crate) fn stopping_voids_the_whole_queue_and_persists_it() {
         .expect("停止之后必须能继续");
     let again = ops
         .sessions
-        .open_card(&sid)
+        .open_queue(&sid)
         .expect("取卡")
         .expect("续一张新卡接着问");
     assert_ne!(again.card.id, "d1", "续的是新卡号，不复活作废过的卡");

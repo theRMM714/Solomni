@@ -15,11 +15,8 @@
 use crate::capabilities::conductor::service::Conductor;
 use crate::capabilities::registry::api::AgentView;
 use crate::capabilities::session::api::HistoryView;
-pub use crate::capabilities::session::api::{
-    DecisionCard, DecisionQueue, DecisionWaiter, SessionEvent,
-};
-// 工具确认的答案类型归 kernel（跨线程机制）；这里转出给呈现层，呈现层不直接认 kernel。
-pub use crate::kernel::api::Approval;
+pub use crate::capabilities::session::api::{DecisionCard, DecisionQueue, DecisionWaiter};
+pub use crate::capabilities::session::api::{GateTicket, SessionEvent};
 use crate::kernel::api::JobRegistry;
 use crate::kernel::api::SessionId;
 pub use crate::kernel::api::Tier;
@@ -195,6 +192,7 @@ pub trait SessionOps: Send + Sync {
     fn set_task(&self, sid: &str, text: &str) -> Result<Advance, String>;
     /// **回答一张裁决卡**（唯一的回答口）：带卡片 id + 选项 id（+ 附言）。
     /// 约束：校验选项 id 属于**当时那张卡**的选项集（防旧卡的答案放行新请求）；不合就如实拒绝。
+    /// 与「停止」同一条直路：这一答先落定（出队 + 记一条回答），处置再脱离调用方跑。
     fn answer_card(
         &self,
         sid: &str,
@@ -204,7 +202,7 @@ pub trait SessionOps: Send + Sync {
     ) -> Result<Advance, String>;
     /// 当前挂着的那一队裁决（None = 没有等你定的事）：队首卡按选项渲染，后面还在等的几张如实列出。
     /// 约束：判据只有这一处——推的事件与快照的 pending 都从它派生（见 docs/session/session-model.md）。
-    fn open_card(&self, sid: &str) -> Result<Option<DecisionQueue>, String>;
+    fn open_queue(&self, sid: &str) -> Result<Option<DecisionQueue>, String>;
     fn withdraw_agree(&self, sid: &str, agent: &str) -> Result<Advance, String>;
     /// 回档：返回重放后的完整事件流（已是线格式，供前端整体重建）。
     fn rewind(&self, sid: &str, target: RewindTarget) -> Result<Vec<serde_json::Value>, String>;
@@ -226,11 +224,6 @@ pub trait SessionOps: Send + Sync {
     /// 目的：停止——把整棵子树落成 `stopped`（拦住后续派发与唤醒）并中断正在跑的生成。
     /// 返回：**实际停下的会话**（空 = 本来就没在跑）；「继续」（`continue_flow`）是它的逆操作。
     fn stop(&self, sid: &str) -> Vec<String>;
-    /// 工具级确认的回答：`Allow` / `Deny` / `Full`（本轮不再问）。
-    /// **不进命令队列**（生成期间也要立刻生效）；返回是否确实有一个调用在等确认。
-    fn approve(&self, sid: &str, answer: Approval) -> bool;
-    /// 这个会话此刻在等的工具确认（刷新页面后界面据此重建卡片）；没有 = `None`。
-    fn pending_approval(&self, sid: &str) -> Option<ApprovalView>;
     #[allow(dead_code)]
     fn is_running(&self, sid: &str) -> bool;
     /// **在世会话 × 历史的并集**（界面上的会话列表）：只有会话中心同时知道两边，所以归这里。
@@ -264,17 +257,12 @@ pub trait LogOps: Send + Sync {
 
 // ---------- 核心手柄（命令通道） ----------
 
-/// 目的：协作在工作线程上要做的事：回答一张裁决卡（放行类要接着跑泵），或从断点继续。
-///   为什么要分：回答的**处置**在工作线程上跑（长流程），"从断点继续"是另一条语义；
+/// 目的：协作在工作线程上要做的事：处置一张**已经出队**的回答（放行类要接着跑泵），或从断点继续。
+///   为什么要分：回答的**落定**（校验 / 出队 / 记账）在核心线程上做完，长流程的处置才在这里跑；
 ///   两者都不属于对外契约（前端只发"回答"，不问后端怎么推进）。
-#[derive(Clone)]
 pub(crate) enum CollabWork {
-    /// 回答一张裁决卡：卡号 + 选项 id + 附言。
-    Answer {
-        card: String,
-        option: String,
-        note: String,
-    },
+    /// 处置一张已经出队的回答（队列给的处置票）。
+    Dispose(GateTicket),
     Resume,
 }
 
@@ -286,10 +274,9 @@ type Job = Box<dyn FnOnce(&mut Conductor) + Send>;
 pub struct ConductorHandle {
     tx: Sender<Job>,
     jobs: Arc<JobRegistry>,
-    /// 工具级确认的放行表：工作线程登记并等待，核心线程（或呈现层）回答。与 jobs 同级，**不进队列**。
-    approvals: Arc<crate::kernel::api::ApprovalRegistry>,
-    /// 有没有"能回答确认"的交互前端（Web 在服务时打开）。纯终端同步生成不打开，避免生成线程空等。
-    approval_enabled: Arc<std::sync::atomic::AtomicBool>,
+    /// 有没有"能作答"的交互前端（Web 在服务时打开）：打开才把工具级确认接进裁决队。
+    /// 纯终端同步生成不打开，避免生成线程空等一个没人回答的问题。
+    interactive: Arc<std::sync::atomic::AtomicBool>,
     bus: Arc<EventBus>,
     /// 日志句柄：呈现层经 LogOps 能力写日志，拿不到这个端口对象本身。
     log: Arc<dyn crate::kernel::ports::Log + Send + Sync>,
@@ -604,14 +591,6 @@ pub struct SessionEdit {
     pub net: bool,
 }
 
-/// 工具确认的快照视图：与推的 `Decision{kind:"tool_approval"}` 是同一份事实，界面据此重建卡片。
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct ApprovalView {
-    pub module: Option<String>,
-    pub tool: String,
-    pub args: String,
-}
-
 /// 会话列表视图。
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct SessionView {
@@ -635,8 +614,8 @@ pub struct SessionView {
     /// 运行态（`active` / `stopped` / `closed`）：**持久事实**，与短暂的 `running` 分开。
     /// 界面据此标出"已暂停 / 已关闭"（这类会话不会再被派发或唤醒）。
     pub run: String,
-    /// 当前等用户裁决的事（None = 没有）：**快照形态**，与推的 `SessionEvent::Decision` 同源。
-    /// 刷新页面时界面照样画得出那张卡；推的那条只是增量。
+    /// 当前等用户裁决的**队首那张**（None = 没有）：**快照形态**，与推的 `decision_card` 同源。
+    /// 刷新页面时界面照样画得出那张卡；推的那条只是增量（队列里后面的几张在 waiting 里）。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pending: Option<serde_json::Value>,
 }

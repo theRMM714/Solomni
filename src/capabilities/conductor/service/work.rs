@@ -454,12 +454,9 @@ impl Conductor {
                     Some(Session::Single(_)) => false,
                     None => mode == "collab",
                 };
-                // 待裁决：对象不在表里（正在生成）时拿不到，如实给 None（推的卡片事件会补上）。
-                // 形状与推的那个事件**同一份**（快照与推都只从 Pending::event 来）。
-                let pending = match self.sessions.get(&sid) {
-                    Some(Session::Collab(c)) => c.open_card_json(),
-                    _ => None,
-                };
+                // 待裁决：**判据只有队本身**（核心各关卡与工具级确认排在同一条队上）——
+                // 正在生成的会话（对象在工作线程手里）照样取得到；推的卡片事件与它是同一份。
+                let pending = self.desk.peek(&sid).and_then(|d| d.json());
                 SessionView {
                     running: running_now.contains(&sid),
                     sid,
@@ -698,6 +695,8 @@ impl Conductor {
             }
             WorkMode::Collab => {
                 let task = spec.task.as_deref().unwrap_or("").trim().to_string();
+                // 裁决队按会话 id 取：核心各关卡与这一席的工具级确认共用同一条队。
+                let door = self.desk_of(&name);
                 let mut cs = CollabSession::start(
                     Arc::clone(&self.llm),
                     Arc::clone(&self.workspace),
@@ -710,6 +709,7 @@ impl Conductor {
                     metas.clone(),
                     delegate,
                     sandboxes.clone(),
+                    door,
                 )?;
                 let mut out = Vec::new();
                 cs.set_task(&task, &mut |e| out.push(e));

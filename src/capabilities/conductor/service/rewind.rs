@@ -263,6 +263,9 @@ impl Conductor {
     ) -> Result<Session, String> {
         let roster = self.workspace.roster();
         let sandboxes = self.sandboxes(meta, &roster)?;
+        // 整队的权威是**转录**：重建之前先把队清空并按已发出的卡号续号（内存里那一份不作数）。
+        self.desk_of(&meta.name)
+            .rebuild(crate::capabilities::session::api::issued_in(events));
         match meta.mode.as_str() {
             "collab" => Ok(Session::Collab(CollabSession::restore(
                 Arc::clone(&self.llm),
@@ -275,6 +278,8 @@ impl Conductor {
                 meta,
                 events,
                 sandboxes,
+                // 重建出来的整队进**同一条队**（按转录里已发出的卡号续号，已答过的不重问）。
+                self.desk_of(&meta.name),
             )?)),
             // 单 agent：按 meta.agents[0] 重建（名单是唯一真相；模块数不限）。
             "single" => {

@@ -153,7 +153,7 @@ impl SessionOps for FakeOps {
         Ok(Advance { head: 10 })
     }
     /// 假卡：路由契约测试只盯形状——封套 / 消息 / 选项都在（队列里只有它一张）。
-    fn open_card(&self, sid: &str) -> Result<Option<DecisionQueue>, String> {
+    fn open_queue(&self, sid: &str) -> Result<Option<DecisionQueue>, String> {
         self.guard()?;
         Ok(Some(DecisionQueue {
             card: serde_json::from_value(json!({
@@ -250,16 +250,6 @@ impl SessionOps for FakeOps {
     fn stop(&self, _sid: &str) -> Vec<String> {
         self.running.swap(false, Ordering::Relaxed);
         Vec::new()
-    }
-    fn approve(&self, _sid: &str, _answer: crate::capabilities::conductor::api::Approval) -> bool {
-        false
-    }
-
-    fn pending_approval(
-        &self,
-        _sid: &str,
-    ) -> Option<crate::capabilities::conductor::api::ApprovalView> {
-        None
     }
     fn is_running(&self, _sid: &str) -> bool {
         self.running.load(Ordering::Relaxed)
@@ -962,15 +952,31 @@ fn web_serve_returns_when_interrupted() {
     );
 }
 
-/// CLI 的确认回答映射：yes / no / full（含常见别名与大小写），其它一律不认、要重新问。
+/// CLI 的选项选择：序号与选项 id 原文都认——两者都是那张卡上**用户看得见**的东西。
 #[test]
-fn cli_approval_answers_map_to_allow_deny_full() {
-    use crate::capabilities::conductor::api::Approval;
-    use crate::presentation::cli::parse_approval;
-    assert_eq!(parse_approval("yes"), Some(Approval::Allow));
-    assert_eq!(parse_approval(" YES "), Some(Approval::Allow));
-    assert_eq!(parse_approval("no"), Some(Approval::Deny));
-    assert_eq!(parse_approval("full"), Some(Approval::Full));
-    assert_eq!(parse_approval("f"), Some(Approval::Full));
-    assert_eq!(parse_approval("随便"), None, "不认的要重新问");
+fn cli_picks_an_option_by_index_or_id() {
+    use crate::capabilities::session::api::DecisionCard;
+    let card: DecisionCard = serde_json::from_value(json!({
+        "id": "d1",
+        "envelope": { "role": "tools", "name": "甲" },
+        "message": { "title": "要不要执行？", "body": "", "detail": "" },
+        "options": [
+            { "id": "allow", "label": "放行这一次" },
+            { "id": "deny", "label": "拒绝" },
+        ],
+    }))
+    .expect("假卡形状");
+    assert_eq!(
+        crate::presentation::cli::pick_option(&card, "1").as_deref(),
+        Some("allow")
+    );
+    assert_eq!(
+        crate::presentation::cli::pick_option(&card, "deny").as_deref(),
+        Some("deny")
+    );
+    assert_eq!(
+        crate::presentation::cli::pick_option(&card, "9"),
+        None,
+        "卡上没有的不认"
+    );
 }

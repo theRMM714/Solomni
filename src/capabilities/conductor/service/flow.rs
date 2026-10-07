@@ -27,8 +27,8 @@ impl Conductor {
                         llm,
                         cancel,
                         emit: &mut |ev: SessionEvent| out.borrow_mut().push(ev),
-                        // CLI 是同步驱动、生成期间读不到键盘：这一趟不接工具级确认。
-                        approval: None,
+                        // 同步驱动、生成期间读不到键盘：这一趟不接工具级确认。
+                        decisions: None,
                     };
                     let mut sink = |ev: SessionEvent| out.borrow_mut().push(ev);
                     // 执行提示词是**核心派的活**（派发行）：界面系统行、上下文 user 角色。
@@ -98,7 +98,7 @@ impl Conductor {
                     },
                     cancel: std::sync::Arc::clone(&cancel),
                     emit: &mut |e: SessionEvent| notes.borrow_mut().push(e),
-                    approval: None,
+                    decisions: None,
                 };
                 let mut sink = |e: SessionEvent| notes.borrow_mut().push(e);
                 let face = systools.role_face("discussant");

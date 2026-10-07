@@ -1,10 +1,10 @@
 //! **回合收发**：把成员的回复喂回状态机（`feed_with`）、取出待问的一步（`take_ask`）、
-//! 回答与裁决（`answer` / `decide`）以及核心核实工具面与通道参数。
+//! 把一张已出队的回答落到业务上（`dispose`）以及核心核实工具面与通道参数。
 
 use super::collab::*;
 use crate::capabilities::collab::service::discussion::TurnOut;
 use crate::capabilities::session::api::{
-    DecisionAnswer, LineView, Pending, SessionEvent, OPT_ASK_REPLY, OPT_BEGIN, OPT_BEGIN_ALLOW,
+    AgentMeta, LineView, Pending, SessionEvent, OPT_ASK_REPLY, OPT_BEGIN, OPT_BEGIN_ALLOW,
     OPT_NODE_REWORK, OPT_NODE_SAY, OPT_PLAN_SAY, OPT_PLAN_START, OPT_SLATE_CANCEL,
     OPT_SLATE_CONFIRM,
 };
@@ -124,7 +124,7 @@ impl CollabSession {
     }
 
     /// 回答请教那一关：用户的话进主会话（所有成员下一回合都看得到），接着往下推。
-    /// 约束：那一关已由 `answer_card` 出队——这里只管"他的话怎么进业务"，不碰队列。
+    /// 约束：那一关已由队列出队——这里只管"他的话怎么进业务"，不碰队列。
     pub(crate) fn answer(&mut self, text: &str, sink: &mut dyn FnMut(SessionEvent)) {
         let roots = crate::capabilities::prompt::api::RefRoots {
             work: self.sandboxes.shared.clone(),
@@ -138,63 +138,19 @@ impl CollabSession {
         self.pump_with(sink);
     }
 
-    /// 目的：回答**队首那张**裁决卡——带卡片 id + 选项 id（+ 附言），校验选项属于当时那张卡。
-    /// 约束：只有这一条回答口——选项 id 是行为契约，描述文字只用于渲染（见 session-model.md「请用户裁决」）；
-    ///   只有队首可答，排在后面的那几张还不能答（它们对用户不可见）。
-    /// 错误：没有挂起、卡号不是队首、选项不在那张卡上、该关必填的附言为空，都如实拒绝且不留痕。
-    /// 返回：这一关**放行了没有**（true = 开工 / 重派，调用方要接着跑整条流水线）。
-    pub fn answer_card(
+    /// 目的：把一张**已经出队**的回答落到业务上（处置归发起方）：按选项 id 分派这一关该做什么。
+    /// 参数：`ticket` = 队列给的处置票（卡号 / 选项 / 附言 / 这一关的材料与建议）。
+    /// 返回：这一关**放行了没有**（true = 开工 / 重派，调用方要接着跑整条流水线）+ 刚定下的名单。
+    /// 错误：附言必填的那几关没给附言、选项不在这一关能分派的范围里，都如实拒绝。
+    pub fn dispose(
         &mut self,
-        card_id: &str,
-        option: &str,
-        note: &str,
+        ticket: &crate::capabilities::session::api::GateTicket,
         sink: &mut dyn FnMut(SessionEvent),
-    ) -> Result<bool, String> {
-        let Some(gate) = self.gates.front().cloned() else {
-            return Err("[裁决] 现在没有等你定的事。".to_string());
-        };
-        if gate.id != card_id {
-            return Err(format!(
-                "这张卡已经不是当前那张了（现在等的是 {}）；请按界面上的卡片作答。",
-                gate.id
-            ));
-        }
-        if !gate.pending.card(&gate.id, &gate.advice).has_option(option) {
-            return Err(format!("这张卡上没有这个选项：{}", option));
-        }
-        // 选项必须是这一关能分派的那些（卡上的选项集就是它们）：不认识的在记账与出队**之前**挡下。
-        if !matches!(
-            option,
-            OPT_ASK_REPLY
-                | OPT_SLATE_CONFIRM
-                | OPT_SLATE_CANCEL
-                | OPT_BEGIN
-                | OPT_BEGIN_ALLOW
-                | OPT_PLAN_START
-                | OPT_NODE_REWORK
-                | OPT_PLAN_SAY
-                | OPT_NODE_SAY
-        ) {
-            return Err(format!("这张卡上没有这个选项：{}", option));
-        }
-        let note = note.trim().to_string();
-        // 必填附言先判：被拒的回答**不留痕**（不落回答、不出队），这一关继续挂着等他说清楚。
-        if option == OPT_ASK_REPLY && note.is_empty() {
-            return Err("这一关要附一句回话：把要说的话写在附言里。".to_string());
-        }
-        if (option == OPT_PLAN_SAY || option == OPT_NODE_SAY) && note.is_empty() {
-            return Err("这一关要附一句你的想法：把要说的话写在附言里。".to_string());
-        }
-        // 接受这一答：先落档（谁答的、选了哪个 id、附言），再出队——后面排着的依次往前一位。
-        sink(SessionEvent::DecisionAnswer(DecisionAnswer {
-            card: gate.id.clone(),
-            by: "用户".to_string(),
-            option: option.to_string(),
-            note: note.clone(),
-        }));
-        self.gates.pop_front();
-        self.announced = None;
-        let p = gate.pending.clone();
+    ) -> Result<(bool, Option<Vec<AgentMeta>>), String> {
+        let option = ticket.option.as_str();
+        let note = ticket.note.trim().to_string();
+        let empty_before = self.roster.is_empty();
+        let p = ticket.pending.clone();
         let nodes = match &p {
             Pending::NodeBlocked { nodes } => nodes.clone(),
             _ => Vec::new(),
@@ -230,12 +186,12 @@ impl CollabSession {
             }
             // "先说一句"：他的话进主会话当反馈，**由核心 AI 判这句话是否明确**——
             // 明确才开工 / 重派，模糊就不动、关卡继续挂着（见 session-model.md「请用户裁决」）。
-            OPT_PLAN_SAY | OPT_NODE_SAY => self.judge_note(&p, &gate.advice, &note, sink),
+            OPT_PLAN_SAY | OPT_NODE_SAY => self.judge_note(&p, &ticket.advice, &note, sink),
             other => return Err(format!("这张卡上没有这个选项：{}", other)),
         };
-        // 出队之后队首换了：把新的队首卡（+ 后面还在等的几张）如实推给界面。
-        self.announce(sink);
-        Ok(go)
+        // 名单刚由这一答定下来：调用方要把 roster 写回 meta（重建与沙箱归属都读它）。
+        let confirmed = (empty_before && !self.roster.is_empty()).then(|| self.roster.to_vec());
+        Ok((go, confirmed))
     }
 
     /// "先说一句"这一条的处理：他的话进主会话当反馈，再由核心 AI 判**是否明确**。

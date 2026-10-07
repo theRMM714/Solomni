@@ -15,8 +15,8 @@
     "头块：缺文件头": 1
   },
   "src/capabilities/collab/service/collab.rs": {
-    "条目：槽外有行或自造槽": 61,
-    "条目：首行不是目的": 50
+    "条目：槽外有行或自造槽": 60,
+    "条目：首行不是目的": 49
   },
   "src/capabilities/collab/service/discussion.rs": {
     "头块：槽外有行或自造槽": 6,
@@ -86,8 +86,8 @@
   "src/capabilities/conductor/api/mod.rs": {
     "头块：槽外有行或自造槽": 12,
     "头块：缺文件头": 1,
-    "条目：槽外有行或自造槽": 105,
-    "条目：首行不是目的": 69,
+    "条目：槽外有行或自造槽": 104,
+    "条目：首行不是目的": 68,
     "行内：后面是空行": 5,
     "行内：连续超过 2 行": 1
   },
@@ -158,8 +158,8 @@
   "src/capabilities/conductor/service/turn.rs": {
     "头块：槽外有行或自造槽": 6,
     "头块：缺文件头": 1,
-    "条目：槽外有行或自造槽": 23,
-    "条目：首行不是目的": 10,
+    "条目：槽外有行或自造槽": 22,
+    "条目：首行不是目的": 9,
     "行内：后面是空行": 1
   },
   "src/capabilities/conductor/service/work.rs": {

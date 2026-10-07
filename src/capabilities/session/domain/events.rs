@@ -128,21 +128,6 @@ pub enum SessionEvent {
         kind: String,
         text: String,
     },
-    /// **请用户裁决**（短暂、不落盘）：核心把"为什么停下来等你"和"我建议怎么做"说清楚，
-    /// 用户用自然语言回一句；核心 AI 判定意图是否明确，明确了才开工/放行。
-    /// 与 `Pending` 同源：快照里带同一份（刷新页面照样画得出），这条只是推的增量。
-    Decision {
-        /// 什么在等裁决：ask / confirm_slate / confirm_begin / plan_review / node_blocked
-        kind: String,
-        /// 核心对当前情况的说明（为什么要你定）
-        summary: String,
-        /// 核心的建议（没有建议时为空串）
-        advice: String,
-        /// 要用户回答的那句（ask 时是成员的原话）
-        question: String,
-        /// 相关载荷（未过的节点 id、名单说明之类）
-        payload: serde_json::Value,
-    },
     /// **裁决卡**（推 + 落盘）：渲染层按 card 的四个字段画、按选项 id 回答。
     /// gate 与本关的载荷是机制自己的重建材料（重启后由转录重建挂起，见 docs/session/session-model.md）。
     DecisionCard {
@@ -203,9 +188,9 @@ pub struct Live<'a> {
     /// 用户点「停止」时置位；会话与适配层据此立即中止生成。
     pub cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
     pub emit: &'a mut dyn FnMut(SessionEvent),
-    /// 工具级确认：`ask` 表里的工具调用要停下来等用户"是/否"。
-    /// `None` = 这一趟不接确认（照常执行）——CLI 的同步生成、测试与讨论席都走它。
-    pub approval: Option<crate::kernel::api::ApprovalCtx>,
+    /// 本会话的裁决队（工具级确认这类"等在工作线程上"的关进它）。
+    /// `None` = 这一趟不接工具级确认（照常执行）——测试、讨论席与没有交互前端的生成都走它。
+    pub decisions: Option<std::sync::Arc<super::decisions::DecisionDoor>>,
 }
 
 impl Live<'_> {
@@ -451,20 +436,6 @@ impl SessionEvent {
             SessionEvent::Working { agent } => {
                 serde_json::json!({ "type": "working", "agent": agent })
             }
-            SessionEvent::Decision {
-                kind,
-                summary,
-                advice,
-                question,
-                payload,
-            } => serde_json::json!({
-                "type": "decision",
-                "kind": kind,
-                "summary": summary,
-                "advice": advice,
-                "question": question,
-                "payload": payload
-            }),
             SessionEvent::DecisionCard {
                 card,
                 gate,
@@ -519,6 +490,17 @@ pub enum Pending {
     PlanReview,
     /// 节点验收没过：等用户点「继续」重派这些节点。
     NodeBlocked { nodes: Vec<String> },
+    /// 工具级确认（`ask` 粒度命中）：这一席的这次调用**在执行前**等用户放行。
+    /// 它是**等在工作线程上**的那一类——发起方（工具循环）阻塞等回答，不点不继续。
+    ToolApproval {
+        /// 谁要跑这次调用（agent 实例名）：卡片的信封显示它。
+        agent: String,
+        /// 这次调用属于哪个模块（内置 / 核心自有为空，没有模块的工具按工具名问）。
+        module: Option<String>,
+        tool: String,
+        /// 模型给的参数原文（如实展示，让用户看清要执行什么）。
+        args: String,
+    },
 }
 
 /// 目的：请教这一关的选项 id——附一句回话（id 是契约，改文案不改行为）。
@@ -539,6 +521,20 @@ pub const OPT_PLAN_SAY: &str = "plan_say";
 pub const OPT_NODE_REWORK: &str = "node_rework";
 /// 目的：节点没过这一关的选项 id——先说一句，由核心 AI 判这句话够不够明确。
 pub const OPT_NODE_SAY: &str = "node_say";
+/// 目的：工具级确认的选项 id——放行这一次。
+pub const OPT_TOOL_ALLOW: &str = "allow";
+/// 目的：工具级确认的选项 id——拒绝（工具不执行，回一条"用户拒绝"的结果给模型）。
+pub const OPT_TOOL_DENY: &str = "deny";
+/// 目的：工具级确认的选项 id——放行这一次，且**本轮（这次生成）剩余调用都不再问**（不落盘成策略）。
+pub const OPT_TOOL_FULL: &str = "full";
+
+/// 目的：工具的全名（内置 / 核心自有 = 工具名；模块工具 = 模块.工具）：卡片与记录都用这一种写法。
+pub fn qualify(module: Option<&str>, tool: &str) -> String {
+    match module {
+        Some(m) => format!("{}.{}", m, tool),
+        None => tool.to_string(),
+    }
+}
 
 impl Pending {
     /// 目的：这一关的机制名（落盘与重建按它认门）。
@@ -549,6 +545,7 @@ impl Pending {
             Pending::ConfirmBegin => "confirm_begin",
             Pending::PlanReview => "plan_review",
             Pending::NodeBlocked { .. } => "node_blocked",
+            Pending::ToolApproval { .. } => "tool_approval",
         }
     }
 
@@ -560,6 +557,17 @@ impl Pending {
                 serde_json::json!({ "member": member, "question": question })
             }
             Pending::NodeBlocked { nodes } => serde_json::json!({ "nodes": nodes }),
+            Pending::ToolApproval {
+                agent,
+                module,
+                tool,
+                args,
+            } => serde_json::json!({
+                "agent": agent,
+                "module": module,
+                "tool": tool,
+                "args": args
+            }),
             _ => serde_json::json!({}),
         }
     }
@@ -593,6 +601,8 @@ impl Pending {
                     })
                     .unwrap_or_default(),
             },
+            // 工具级确认**不重建**：它等在工作线程上，重启后那个等待方已经不存在——
+            // 重建出来的卡没人能做主，等于拿一张答不了卡糊用户（已答过的也不重问）。
             _ => return None,
         })
     }
@@ -622,6 +632,26 @@ impl Pending {
                 o(OPT_NODE_REWORK, "重派没过的节点"),
                 o(OPT_NODE_SAY, "先说一句（核心判明确性）"),
             ],
+            // 工具级确认：三条都是**真能执行**的（通道里没有置灰那一说）。
+            Pending::ToolApproval { .. } => vec![
+                o(OPT_TOOL_ALLOW, "放行这一次"),
+                o(OPT_TOOL_DENY, "拒绝（不执行）"),
+                o(OPT_TOOL_FULL, "放行，且本轮都不再问"),
+            ],
+        }
+    }
+
+    /// 目的：这一关的某个选项**要不要附言**：要就给出"为什么"的原文（队列在出队前按它校验）。
+    /// 约束：判据属于发起方（这一关自己的规则）；校验只此一处——被拒的回答不出队、不落回答。
+    pub fn note_requirement(&self, option: &str) -> Option<String> {
+        match (self, option) {
+            (Pending::Ask { .. }, OPT_ASK_REPLY) => {
+                Some("这一关要附一句回话：把要说的话写在附言里。".to_string())
+            }
+            (Pending::PlanReview, OPT_PLAN_SAY) | (Pending::NodeBlocked { .. }, OPT_NODE_SAY) => {
+                Some("这一关要附一句你的想法：把要说的话写在附言里。".to_string())
+            }
+            _ => None,
         }
     }
 
@@ -663,6 +693,21 @@ impl Pending {
                 "有节点没过验收，要不要重派？".to_string(),
                 format!("没过验收的节点：{}。", nodes.join("、")),
                 advice.to_string(),
+            ),
+            Pending::ToolApproval {
+                agent,
+                module,
+                tool,
+                args,
+            } => (
+                "tools",
+                agent.clone(),
+                format!("是否执行工具 {}？", qualify(module.as_deref(), tool)),
+                format!(
+                    "{} 请求执行这次调用：这一席的权限表把它列为「要问」（ask 粒度）。",
+                    agent
+                ),
+                args.clone(),
             ),
         };
         DecisionCard {

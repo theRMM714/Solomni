@@ -17,8 +17,7 @@ impl ConductorHandle {
     pub fn spawn(core: Conductor) -> Result<ConductorHandle, String> {
         let worker_log = core.log_handle();
         let jobs = JobRegistry::new();
-        let approvals = crate::kernel::api::ApprovalRegistry::new();
-        let approval_enabled = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let interactive = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let bus = EventBus::new();
         let (tx, rx) = mpsc::channel::<Job>();
         let book = core.systools_book();
@@ -27,8 +26,7 @@ impl ConductorHandle {
         let handle = ConductorHandle {
             tx,
             jobs,
-            approvals,
-            approval_enabled,
+            interactive,
             bus,
             log: Arc::clone(&worker_log),
             book,
@@ -72,10 +70,23 @@ impl ConductorHandle {
             .map_err(|_| "核心无回应：命令执行中发生 panic，或核心线程已停止".to_string())?
     }
 
-    /// 打开工具级确认：有交互前端（Web）在服务时才调，纯终端不调（生成线程不能空等一个没人回答的问题）。
-    pub fn allow_tool_approval(&self) {
-        self.approval_enabled
+    /// 接上工具级确认：有交互前端（Web）在服务时才调，纯终端不调（生成线程不能空等一个没人回答的问题）。
+    pub fn allow_tool_cards(&self) {
+        self.interactive
             .store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// 目的：这个会话的**裁决队**（工具级确认进它）：只有接了交互前端才给——否则这一趟不接确认。
+    /// 约束：在**派发之前**取（生成线程一开始就可能要问），取的是同一份句柄。
+    fn decisions_of(
+        &self,
+        sid: &str,
+    ) -> Result<Option<Arc<crate::capabilities::session::api::DecisionDoor>>, String> {
+        if !self.interactive.load(std::sync::atomic::Ordering::Relaxed) {
+            return Ok(None);
+        }
+        let sid = sid.to_string();
+        self.call(move |core| Ok(core.desk_of(&sid))).map(Some)
     }
 
     /// 本核心的事件台（多端订阅）。
@@ -91,8 +102,7 @@ impl ConductorHandle {
         let tree = self.call(move |core| Ok(core.subtree_of(&root_owned)))?;
         let mut stopped = Vec::new();
         for sid in tree {
-            // 停止也要解掉在等的工具确认，否则生成线程会一直等下去（wait 返回 None = 拒绝）。
-            self.approvals.cancel(&sid);
+            // 在等的工具确认由「停止 = 整队作废」解开（见 SessionOps::stop），这里只管取消生成。
             if self.jobs.stop(&sid) {
                 stopped.push(sid);
             }
@@ -249,10 +259,7 @@ impl ConductorHandle {
         };
         bus.push(sid, std::slice::from_ref(&start_working));
         // ② 工作线程：跑生成。短暂事件（流式增量 / 工具行）直送事件台——它是独立锁，不进核心队列。
-        let approvals = Arc::clone(&self.approvals);
-        let approval_enabled = self
-            .approval_enabled
-            .load(std::sync::atomic::Ordering::Relaxed);
+        let decisions = self.decisions_of(sid)?;
         let worker = {
             let sid = sid.to_string();
             let bus = Arc::clone(&bus);
@@ -271,9 +278,7 @@ impl ConductorHandle {
                         llm,
                         cancel,
                         emit: &mut emit,
-                        approval: approval_enabled.then(|| {
-                            crate::kernel::api::ApprovalCtx::new(Arc::clone(&approvals), &sid)
-                        }),
+                        decisions,
                     };
                     // 逐轮外送 + 边落盘：一轮跑完就上屏并落盘（中途刷新页面因此看得到已产生的部分）。
                     // seq 取**最后一次**入台的序号：命令回包按它给订阅起点。
@@ -403,10 +408,7 @@ impl ConductorHandle {
         let bus = Arc::clone(&self.bus);
         let child_bus = Arc::clone(&self.bus);
         let child_sid = child.clone();
-        let approvals = Arc::clone(&self.approvals);
-        let approval_enabled = self
-            .approval_enabled
-            .load(std::sync::atomic::Ordering::Relaxed);
+        let decisions = self.decisions_of(&child)?;
         let joined = std::thread::Builder::new()
             .name("solomni-member".to_string())
             .spawn(move || {
@@ -423,9 +425,7 @@ impl ConductorHandle {
                     llm,
                     cancel: Arc::clone(&cancel),
                     emit: &mut emit,
-                    approval: approval_enabled.then(|| {
-                        crate::kernel::api::ApprovalCtx::new(Arc::clone(&approvals), &child_sid)
-                    }),
+                    decisions,
                 };
                 // 权威行与通知也进它自己的台，并在产出的当下落盘（重建与实时同源）。
                 let mut sink = |ev: crate::capabilities::session::api::SessionEvent| {
@@ -682,7 +682,7 @@ impl ConductorHandle {
             .name("solomni-child-collab".to_string())
             .spawn(move || {
                 let look = sid.clone();
-                let Ok(Some(queue)) = me.call(move |core| core.collab_open_card(&look)) else {
+                let Ok(Some(queue)) = me.call(move |core| core.open_queue(&look)) else {
                     return;
                 };
                 let allow = crate::capabilities::session::api::OPT_BEGIN_ALLOW;
@@ -700,6 +700,21 @@ impl ConductorHandle {
                     return;
                 }
                 let _ = me.answer_card(&sid, &queue.card.id, &option, "");
+            });
+    }
+
+    /// 目的：起一次**脱离调用方**的回答处置（回答已经落定）：不等它跑完，用户点完立刻拿到回执。
+    pub(crate) fn spawn_detached_dispose(
+        &self,
+        sid: &str,
+        ticket: crate::capabilities::session::api::GateTicket,
+    ) {
+        let me = self.clone();
+        let sid = sid.to_string();
+        let _ = std::thread::Builder::new()
+            .name("solomni-answer".to_string())
+            .spawn(move || {
+                let _ = me.collab_generation(&sid, CollabWork::Dispose(ticket));
             });
     }
 
@@ -772,14 +787,10 @@ impl ConductorHandle {
                                 bus.push(&sid, std::slice::from_ref(&SessionEvent::Notice(warn)));
                             }
                         };
-                        match work {
-                            // 回答一张裁决卡：处置归这一关自己（校验与落档已在 answer_card 里做完）。
-                            CollabWork::Answer {
-                                card,
-                                option,
-                                note,
-                            } => {
-                                if let Err(e) = c.answer_card(&card, &option, &note, &mut sink) {
+                        match &work {
+                            // 处置一张已经出队的回答：落定（校验 / 出队 / 记账）已在核心线程上做完。
+                            CollabWork::Dispose(ticket) => {
+                                if let Err(e) = c.dispose(ticket, &mut sink) {
                                     sink(SessionEvent::Notice(format!("[裁决] {}", e)));
                                 }
                             }

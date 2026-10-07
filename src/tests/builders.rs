@@ -10,7 +10,7 @@ pub(crate) fn answer_card(
     option: &str,
     note: &str,
 ) -> Result<Vec<SessionEvent>, String> {
-    let queue = core.collab_open_card(sid)?.ok_or("现在没有挂着的裁决卡")?;
+    let queue = core.open_queue(sid)?.ok_or("现在没有挂着的裁决卡")?;
     core.collab_answer(sid, &queue.card.id, option, note)
 }
 

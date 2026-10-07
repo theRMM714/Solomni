@@ -15,6 +15,5 @@
 | `src/kernel/domain/types.rs` |
 | `src/kernel/domain/path.rs` |
 | `src/kernel/domain/jobs.rs` |
-| `src/kernel/domain/approvals.rs` |
 | `src/kernel/detail/file_log.rs` |
 | `src/kernel/detail/host_probe.rs` |

@@ -300,7 +300,7 @@ fn reads_are_not_queued_behind_a_collab_discussion() {
     // 回答当前那张卡（选项 id 是契约）：协作从这一答开始跑泵。
     let card = ops
         .sessions
-        .open_card(&sid)
+        .open_queue(&sid)
         .expect("取卡")
         .expect("挂着一张卡")
         .card
@@ -360,7 +360,7 @@ fn stopping_a_collab_discussion_is_prompt_and_keeps_the_session() {
     // 回答当前那张卡（选项 id 是契约）：协作从这一答开始跑泵。
     let card = ops
         .sessions
-        .open_card(&sid)
+        .open_queue(&sid)
         .expect("取卡")
         .expect("挂着一张卡")
         .card
@@ -379,31 +379,40 @@ fn stopping_a_collab_discussion_is_prompt_and_keeps_the_session() {
 
     let stopped = Instant::now();
     assert!(!ops.sessions.stop(&sid).is_empty(), "在跑就该停得掉");
+    // 回答与「停止」同一条直路：这一答只负责**落定**，处置脱离调用方跑，所以这里等它收尾。
     worker
         .join()
         .expect("协作线程")
         .expect("停止是正常收尾，不是错误");
+    // **子会话也要收尾**：它那一回合没有定稿行，流式层必须撤下并如实说一句——
+    // 否则打开那个标签页，光标一直挂着、按钮一直停在「停止」。
+    // 替身让第一个成员（a）正常说完、第二个（b）卡住被停——收尾要看**被停的那个**。
+    let child = format!("{}--b", sid);
+    let stopped_line = |evs: &[SessionEvent]| {
+        evs.iter()
+            .any(|e| matches!(e, SessionEvent::Notice(n) if n.contains("[停止]")))
+    };
+    let bus_of = |sid: &str| -> Vec<SessionEvent> {
+        let (batches, _head, _oldest) = handle.events().snapshot(Some(sid), 0);
+        batches
+            .iter()
+            .flat_map(|l| l.events.iter().cloned())
+            .collect()
+    };
+    let deadline = Instant::now() + Duration::from_secs(3);
+    let (mut on_bus, mut on_child) = (bus_of(&sid), bus_of(&child));
+    while Instant::now() < deadline && !(stopped_line(&on_bus) && stopped_line(&on_child)) {
+        std::thread::sleep(Duration::from_millis(10));
+        on_bus = bus_of(&sid);
+        on_child = bus_of(&child);
+    }
     assert!(
         stopped.elapsed() < Duration::from_secs(3),
         "停止要在一个成员调用内收尾（{:?}）",
         stopped.elapsed()
     );
-    // 回包只给头部序号；事实从**事件台**取（命令不携带事实）。
-    let (batches, _head, _oldest) = handle.events().snapshot(Some(&sid), 0);
-    let on_bus: Vec<&SessionEvent> = batches.iter().flat_map(|l| l.events.iter()).collect();
     // 如实告知：用户看得到"停在哪、没作废"。
-    assert!(
-        on_bus
-            .iter()
-            .any(|e| matches!(e, SessionEvent::Notice(n) if n.contains("[停止]"))),
-        "要有「已停止」的如实说明"
-    );
-    // **子会话也要收尾**：它那一回合没有定稿行，流式层必须撤下并如实说一句——
-    // 否则打开那个标签页，光标一直挂着、按钮一直停在「停止」。
-    // 替身让第一个成员（a）正常说完、第二个（b）卡住被停——收尾要看**被停的那个**。
-    let child = format!("{}--b", sid);
-    let (child_batches, _ch, _co) = handle.events().snapshot(Some(&child), 0);
-    let on_child: Vec<&SessionEvent> = child_batches.iter().flat_map(|l| l.events.iter()).collect();
+    assert!(stopped_line(&on_bus), "要有「已停止」的如实说明");
     assert!(
         on_child
             .iter()
@@ -464,7 +473,7 @@ fn collab_transcript_lands_on_disk_while_the_discussion_runs() {
     // 回答当前那张卡（选项 id 是契约）：协作从这一答开始跑泵。
     let card = ops
         .sessions
-        .open_card(&sid)
+        .open_queue(&sid)
         .expect("取卡")
         .expect("挂着一张卡")
         .card
@@ -509,7 +518,7 @@ fn collab_discussion_emits_each_member_line_as_it_speaks() {
     // 回答当前那张卡（选项 id 是契约）：协作从这一答开始跑泵。
     let card = ops
         .sessions
-        .open_card(&sid)
+        .open_queue(&sid)
         .expect("取卡")
         .expect("挂着一张卡")
         .card
@@ -563,7 +572,7 @@ fn missing_sessions_and_bad_inputs_come_back_as_errors() {
         .say("没这个会话", "你好", Output::Final)
         .is_err());
     assert!(ops.sessions.config("没这个会话").is_err());
-    assert!(ops.sessions.open_card("没这个会话").is_err());
+    assert!(ops.sessions.open_queue("没这个会话").is_err());
     assert!(ops.sessions.files("没这个会话").is_err());
     assert!(!ops.sessions.exists("没这个会话").expect("查存在"));
     assert!(ops.history.open("没这个会话").is_err());

@@ -1,10 +1,14 @@
 //! 入站能力面：**其它能力与呈现层只准用这里**（不许碰 `domain` / `ports`）。
 
+pub use crate::capabilities::session::domain::decisions::{
+    issued_in, AnswerSlot, Answered, DecisionDesk, DecisionDoor, GateTicket,
+};
 pub use crate::capabilities::session::domain::events::{
-    idle, interrupted_note, last_compaction, stopped_note, working, CheckView, DecisionAnswer,
+    idle, interrupted_note, last_compaction, qualify, stopped_note, working, CheckView,
     DecisionCard, DecisionOption, DecisionQueue, DecisionWaiter, LineView, Live, Pending,
     SessionEvent, ToolCallView, OPT_ASK_REPLY, OPT_BEGIN, OPT_BEGIN_ALLOW, OPT_NODE_REWORK,
     OPT_NODE_SAY, OPT_PLAN_SAY, OPT_PLAN_START, OPT_SLATE_CANCEL, OPT_SLATE_CONFIRM,
+    OPT_TOOL_ALLOW, OPT_TOOL_DENY, OPT_TOOL_FULL,
 };
 pub use crate::capabilities::session::domain::history::{
     AgentMeta, Delegation, HistoryView, RunState, SessionMeta,

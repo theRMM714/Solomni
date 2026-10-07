@@ -140,13 +140,12 @@ pub struct ToolConfirm {
     pub args: String,
 }
 
-/// 确认回调：`(待确认调用, 事件出口) -> 放行 / 拒绝 / 本轮不再问`（实现方阻塞等用户回答）。
-pub type ConfirmFn<'a> =
-    &'a mut dyn FnMut(&ToolConfirm, &mut dyn FnMut(SessionEvent)) -> crate::kernel::api::Approval;
+/// 确认回调：`(待确认调用, 事件出口) -> 用户选的选项 id`（`allow` / `deny` / `full`）：实现方阻塞等回答。
+pub type ConfirmFn<'a> = &'a mut dyn FnMut(&ToolConfirm, &mut dyn FnMut(SessionEvent)) -> String;
 
 /// 一次生成里的确认通道：`full` 一旦置位，本轮（这次生成）剩余调用都不再问；
-/// `confirm` 由调用方实现（阻塞等用户回答，返回放行 / 拒绝 / 本轮不再问）。
-pub struct ApprovalGate<'a> {
+/// `confirm` 由调用方实现（阻塞等用户回答，给回选项 id）。
+pub struct ConfirmGate<'a> {
     pub full: std::sync::Arc<std::sync::atomic::AtomicBool>,
     pub confirm: ConfirmFn<'a>,
 }
@@ -171,7 +170,7 @@ fn ask_candidates(ctx: &MemberTools, module: Option<&str>, tool: &str) -> Vec<St
 /// 否则按这一席的生效权限（`full` 粒度不问；`ask` 命中才问）。
 fn needs_ask(
     ctx: &MemberTools,
-    gate: Option<&ApprovalGate<'_>>,
+    gate: Option<&ConfirmGate<'_>>,
     module: Option<&str>,
     tool: &str,
 ) -> bool {
@@ -190,30 +189,29 @@ fn needs_ask(
 /// 原生通道与手写信封通道共用这一处调度——并发策略只有一份，两个通道不会各写一套。
 /// 账本走分支副本 + 按原序合并（与串行执行等价，见 crate::capabilities::tools::api::Observations::absorb）。
 /// **要问用户的调用强制串行**：先经确认通道拿到回答；拒绝就回一条"用户拒绝"的结果、不执行；
-/// 答"本轮不再问"（`Approval::Full`）则放行这一次并把 `full` 置位，本轮剩余调用都不再问。
+/// 答"本轮不再问"（`OPT_TOOL_FULL`）则放行这一次并把 `full` 置位，本轮剩余调用都不再问。
 pub(crate) fn run_batch(
     ctx: &mut MemberTools,
     plan: &[(Option<String>, String, String)],
-    mut approval: Option<&mut ApprovalGate<'_>>,
+    mut confirms: Option<&mut ConfirmGate<'_>>,
     sink: &mut dyn FnMut(SessionEvent),
 ) -> Vec<(String, ToolOutcome)> {
     let mut done: Vec<Option<(String, ToolOutcome)>> = (0..plan.len()).map(|_| None).collect();
     let mut i = 0;
     while i < plan.len() {
-        if needs_ask(ctx, approval.as_deref(), plan[i].0.as_deref(), &plan[i].1) {
+        if needs_ask(ctx, confirms.as_deref(), plan[i].0.as_deref(), &plan[i].1) {
             let (module, tool, args) = &plan[i];
             let req = ToolConfirm {
                 module: module.clone(),
                 tool: tool.clone(),
                 args: args.clone(),
             };
-            let gate = approval.as_deref_mut().expect("needs_ask 已确认有通道");
+            let gate = confirms.as_deref_mut().expect("needs_ask 已确认有通道");
             let decision = (gate.confirm)(&req, sink);
-            gate.full.store(
-                decision == crate::kernel::api::Approval::Full,
-                std::sync::atomic::Ordering::Relaxed,
-            );
-            let allowed = decision != crate::kernel::api::Approval::Deny;
+            let full = decision == crate::capabilities::session::api::OPT_TOOL_FULL;
+            gate.full.store(full, std::sync::atomic::Ordering::Relaxed);
+            // 选项 id 是契约：放行（这一次 / 本轮都放）才执行，其余（拒绝 / 作废）一律不执行。
+            let allowed = full || decision == crate::capabilities::session::api::OPT_TOOL_ALLOW;
             done[i] = Some(if allowed {
                 run_one(ctx, module.as_deref(), tool, args)
             } else {

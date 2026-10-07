@@ -1254,7 +1254,7 @@ pub(crate) fn collab_child_send_lands_on_the_gate_it_awaits() {
     let child = work.sid.clone();
     let card = ops
         .sessions
-        .open_card(&child)
+        .open_queue(&child)
         .expect("取卡")
         .expect("挂着一张卡")
         .card;
@@ -1277,7 +1277,7 @@ pub(crate) fn collab_child_send_lands_on_the_gate_it_awaits() {
     let want = vec![OPT_BEGIN.to_string(), OPT_BEGIN_ALLOW.to_string()];
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
     loop {
-        let now = ops.sessions.open_card(&child).expect("取卡");
+        let now = ops.sessions.open_queue(&child).expect("取卡");
         let ids: Vec<String> = now
             .iter()
             .flat_map(|q| q.card.options.iter().map(|o| o.id.clone()))

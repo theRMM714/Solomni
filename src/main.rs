@@ -342,8 +342,8 @@ fn main() {
     };
     let ops = capabilities::conductor::api::Ops::from_handle(&handle);
 
-    // 工具级确认要有地方被回答：网页有裁决卡，CLI 在生成中就地读键盘——两边都打开了。
-    handle.allow_tool_approval();
+    // 工具级确认要有地方被作答：网页有裁决卡，CLI 在生成中就地按选项答——两边都接上了。
+    handle.allow_tool_cards();
     if web {
         serve_web(ops, port_flag(&args), allow_fence_write);
     } else {

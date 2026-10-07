@@ -443,8 +443,10 @@ tools:
     capability: none
     callers: [user]
     desc: |
-      回答一张裁决卡：带**卡片 id + 选项 id**（+ 可选附言），后端校验选项 id 属于当时那张卡的选项集。
-      问什么、有几个选项、每个选项做什么由发起方（核心）实现；呈现层只把选项画成按钮、把选中的 id 发回来。
+      回答一张裁决卡：带**卡片 id + 选项 id**（+ 可选附言），后端校验选项 id 属于当时那张卡的选项集
+      （防旧卡的答案放行新请求），并且**只有队首那张**能答。
+      问什么、有几个选项、每个选项做什么由发起方实现（核心各关卡与工具级确认共用这一条队）；
+      呈现层只把选项画成按钮、把选中的 id 发回来。
     params:
       session_id: { type: string, required: true, non_empty: true, desc: 会话 id }
       card: { type: string, required: true, non_empty: true, desc: 回答的是哪张卡（卡片 id） }
@@ -492,13 +494,6 @@ tools:
       name: { type: string, required: true, non_empty: true, desc: 落进共享区的文件名 }
       data_base64: { type: string, required: true, desc: 文件内容的 base64 }
       overwrite: { type: boolean, desc: 同名时是否覆盖（缺省 false） }
-  approve_tool:
-    capability: none
-    callers: [user]
-    desc: 回答工具级确认：yes（放行这一次）/ no（不执行）/ full（放行且本轮剩余调用都不再问）。
-    params:
-      session_id: { type: string, required: true, non_empty: true, desc: 会话 id }
-      answer: { type: string, required: true, non_empty: true, desc: yes / no / full }
 
   # —— 登记处动作：产品级资源（供应商 / 密钥 / 模型 / agent / 设置）——
   # callers **只给 user**：这些是产品级资源，默认不开放给任何角色（密钥与全局配置只由人操作）。

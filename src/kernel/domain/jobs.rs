@@ -1,7 +1,7 @@
 //! 目的：生成中作业的取消表——让「停止」在生成期间立刻生效。
 //! 管：登记生成中的作业、按作业名取消。
 //! 不管：命令队列与核心状态（正因如此它才能立刻生效）；谁算一个作业（调用方定）。
-//! 联动：与 `src/kernel/domain/approvals.rs` 同级；由核心持有并驱动（`src/capabilities/conductor/api/`）。
+//! 联动：由核心持有并驱动（`src/capabilities/conductor/api/handle.rs`）；它与会话的裁决队各管一半——这里管取消生成，那里管等用户。
 
 use crate::kernel::api::SessionId;
 use std::collections::HashMap;

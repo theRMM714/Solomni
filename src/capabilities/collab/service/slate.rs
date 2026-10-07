@@ -7,7 +7,7 @@ use crate::capabilities::llm::api::{CompleteOpts, Llm};
 use crate::capabilities::prompt::api::{Prompt, Segment};
 use crate::capabilities::registry::api::Settings;
 use crate::capabilities::session::api::SessionMeta;
-use crate::capabilities::session::api::{LineView, Pending, SessionEvent};
+use crate::capabilities::session::api::{DecisionDoor, LineView, Pending, SessionEvent};
 use crate::capabilities::tools::api::ToolExec;
 use crate::capabilities::workspace::api::Sandboxes;
 use crate::capabilities::workspace::api::Workspace;
@@ -169,13 +169,12 @@ impl CollabSession {
         }
         // 用户点「继续」= **重派核心指名没过的那几个节点**（只退这些；同阶段已通过的保持已通过，
         // 不整阶段重来）。放在这里而不是泵里：唤醒（子会话完成）不能替用户做这个决定。
-        let blocked = match self.gates.front().map(|g| &g.pending) {
-            Some(Pending::NodeBlocked { nodes }) => Some(nodes.clone()),
+        let blocked = match self.door.head().map(|(_, p, _)| p) {
+            Some(Pending::NodeBlocked { nodes }) => Some(nodes),
             _ => None,
         };
         if let Some(nodes) = blocked {
-            self.gates.pop_front();
-            self.announced = None;
+            self.door.drop_head();
             self.gate_advice.clear();
             for n in &nodes {
                 self.reset_node(n);
@@ -190,11 +189,11 @@ impl CollabSession {
             return;
         }
         // 停会话把整队作废之后回来：那一关还挂在状态上，续一个新卡号接着问（不假装修好了）。
-        if self.gates.is_empty() && !self.roster.is_empty() {
+        if self.door.is_empty() && !self.roster.is_empty() {
             self.ask_user(Pending::ConfirmBegin, sink);
             return;
         }
-        if self.gates.is_empty() && !self.slate_picks.is_empty() {
+        if self.door.is_empty() && !self.slate_picks.is_empty() {
             self.ask_user(Pending::ConfirmSlate, sink);
             return;
         }
@@ -233,6 +232,8 @@ impl CollabSession {
         meta: &SessionMeta,
         events: &[serde_json::Value],
         sandboxes: Sandboxes,
+        // 本会话的裁决队（核心按会话 id 与转录里已发出的卡号给）：重建出来的整队进它。
+        door: Arc<DecisionDoor>,
     ) -> Result<CollabSession, String> {
         let names: Vec<String> = meta.agents.iter().map(|a| a.name.clone()).collect();
         let st = crate::capabilities::collab::domain::collab_state::derive(events, &names);
@@ -261,9 +262,7 @@ impl CollabSession {
             task: st.task.clone().unwrap_or_default(),
             slate_picks: Vec::new(),
             settings,
-            gates: std::collections::VecDeque::new(),
-            announced: None,
-            cards: st.cards,
+            door,
             allow: st.allow,
             plan: st.plan.clone(),
             // 链随 plan_review 事件落档：重建后按它还原，不重新整理（省一次模型调用）。
@@ -335,19 +334,8 @@ impl CollabSession {
         // **整队**由转录重建（先来后到）：每张没人回答的卡沿用它自己的卡号；卡连同那一段被回档截掉、
         // 或被停会话整队作废时，按状态续新卡号接着问（已答过的不重问，见 session-model.md「请用户裁决」）。
         for (id, p, advice) in derive_gates(&st) {
-            let id = match id {
-                Some(id) => id,
-                // 状态派生出来的那一关还没有卡号：按已发出的卡数续号，不与用过的卡号相撞。
-                None => {
-                    s.cards += 1;
-                    format!("d{}", s.cards)
-                }
-            };
-            s.gates.push_back(Gate {
-                id,
-                pending: p,
-                advice,
-            });
+            // 没人回答的那张沿用它自己的卡号；状态派生出来的那一关还没有卡号，由队列续号。
+            s.door.push(id.as_deref(), p, &advice, None);
         }
         Ok(s)
     }

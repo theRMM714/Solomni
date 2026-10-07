@@ -322,9 +322,10 @@ fn ask_list_only_applies_under_ask_granularity() {
 /// 工具级确认：`ask` 命中时先问用户——拒绝不执行、放行才跑、`full` 本轮不再问。
 #[test]
 fn ask_tools_are_confirmed_before_execution() {
-    use crate::capabilities::collab::service::tool_loop::{run_batch, ApprovalGate, ToolConfirm};
-    use crate::capabilities::session::api::SessionEvent;
-    use crate::kernel::api::Approval;
+    use crate::capabilities::collab::service::tool_loop::{run_batch, ConfirmGate, ToolConfirm};
+    use crate::capabilities::session::api::{
+        SessionEvent, OPT_TOOL_ALLOW, OPT_TOOL_DENY, OPT_TOOL_FULL,
+    };
     use crate::tests::builders::{member_with_tools, RecordingRunner};
     use std::sync::Arc;
 
@@ -341,11 +342,11 @@ fn ask_tools_are_confirmed_before_execution() {
 
     // ① 拒绝：问过用户、工具没执行、回一条"用户拒绝"。
     let mut asked = Vec::new();
-    let mut deny = |req: &ToolConfirm, _sink: &mut dyn FnMut(SessionEvent)| -> Approval {
+    let mut deny = |req: &ToolConfirm, _sink: &mut dyn FnMut(SessionEvent)| -> String {
         asked.push(req.tool.clone());
-        Approval::Deny
+        OPT_TOOL_DENY.to_string()
     };
-    let mut gate = ApprovalGate {
+    let mut gate = ConfirmGate {
         full: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         confirm: &mut deny,
     };
@@ -363,9 +364,10 @@ fn ask_tools_are_confirmed_before_execution() {
     );
 
     // ② 放行：工具真的执行了一次。
-    let mut allow =
-        |_req: &ToolConfirm, _sink: &mut dyn FnMut(SessionEvent)| -> Approval { Approval::Allow };
-    let mut gate = ApprovalGate {
+    let mut allow = |_req: &ToolConfirm, _sink: &mut dyn FnMut(SessionEvent)| -> String {
+        OPT_TOOL_ALLOW.to_string()
+    };
+    let mut gate = ConfirmGate {
         full: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         confirm: &mut allow,
     };
@@ -379,11 +381,11 @@ fn ask_tools_are_confirmed_before_execution() {
 
     // ③ full：第一次答"本轮不再问"，后面两次调用直接放行、不再问。
     let mut asked_times = 0usize;
-    let mut full_answer = |_req: &ToolConfirm, _sink: &mut dyn FnMut(SessionEvent)| -> Approval {
+    let mut full_answer = |_req: &ToolConfirm, _sink: &mut dyn FnMut(SessionEvent)| -> String {
         asked_times += 1;
-        Approval::Full
+        OPT_TOOL_FULL.to_string()
     };
-    let mut gate = ApprovalGate {
+    let mut gate = ConfirmGate {
         full: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         confirm: &mut full_answer,
     };
@@ -397,35 +399,242 @@ fn ask_tools_are_confirmed_before_execution() {
     assert_eq!(asked_times, 1, "full 之后本轮不再问");
 }
 
-/// 放行表机制：登记 → 等 → 回答唤醒；停止取消让等待返回 `None`（= 不执行）。
+/// 裁决队：先来后到（只有队首可答）、答案校验（旧卡 / 卡上没有的选项都挡下）、整队作废解开等待方。
 #[test]
-fn approval_registry_wakes_the_worker_and_cancels_on_stop() {
-    use crate::kernel::api::{Approval, ApprovalRegistry};
+fn decision_door_queues_only_the_head_and_voids_waiters() {
+    use crate::capabilities::session::api::{
+        AnswerSlot, Answered, DecisionDoor, Pending, SessionEvent, OPT_BEGIN, OPT_TOOL_ALLOW,
+    };
+    use std::sync::Arc;
 
-    let reg = ApprovalRegistry::new();
-    let req = || crate::kernel::api::ApprovalRequest {
+    let tool = || Pending::ToolApproval {
+        agent: "甲".to_string(),
         module: Some("m0".to_string()),
         tool: "grep".to_string(),
         args: "{}".to_string(),
     };
-    // 回答：先登记再唤醒，工作线程拿到回答。
-    assert_eq!(reg.pending("s1"), None, "没登记 = 没在等");
-    let slot = reg.register("s1", req());
-    assert_eq!(reg.pending("s1"), Some(req()), "等待时快照能看到在等什么");
-    let h = std::thread::spawn(move || slot.wait());
-    assert!(reg.resolve("s1", Approval::Allow), "有在等的格要报 true");
-    assert_eq!(h.join().expect("线程"), Some(Approval::Allow));
-    assert_eq!(reg.pending("s1"), None, "回答之后不再显示为等待");
-    reg.unregister("s1");
+    let door = Arc::new(DecisionDoor::default());
+    assert!(door.is_empty(), "没进队 = 没在等");
 
-    // 取消（停止）：等待返回 None = 不执行。
-    let slot = reg.register("s2", req());
+    // 工具级确认（等在工作线程上）：进队 → 等 → 回答唤醒。
+    let slot = AnswerSlot::new();
+    let (id, evs) = door.push(None, tool(), "", Some(Arc::clone(&slot)));
+    assert_eq!(id, "d1");
+    assert!(
+        evs.iter()
+            .any(|e| matches!(e, SessionEvent::DecisionCard { .. })),
+        "进队要推一张卡"
+    );
+    assert!(
+        !evs.iter()
+            .any(|e| matches!(e, SessionEvent::Working { .. })),
+        "等在工作线程上的那一关不推空闲（生成还在跑）"
+    );
     let h = std::thread::spawn(move || slot.wait());
-    reg.cancel("s2");
-    assert_eq!(reg.pending("s2"), None, "取消之后不再显示为等待");
-    assert_eq!(h.join().expect("线程"), None, "取消 = 不执行");
-    reg.unregister("s2");
+    // 旧卡号 / 卡上没有的选项都答不动它（校验属于当时那张卡），而且不留痕。
+    assert!(door.answer("d404", OPT_TOOL_ALLOW, "").is_err(), "旧卡不行");
+    assert!(door.answer(&id, OPT_BEGIN, "").is_err(), "别关的选项不行");
+    assert!(!door.is_empty(), "被拒的回答不出队");
+    match door.answer(&id, OPT_TOOL_ALLOW, "").expect("答队首那张") {
+        Answered::Waiting(evs) => assert!(
+            evs.iter().any(
+                |e| matches!(e, SessionEvent::DecisionAnswer(a) if a.option == OPT_TOOL_ALLOW)
+            ),
+            "回答要落一条记录"
+        ),
+        Answered::Gate(..) => panic!("工具卡不该走核心关卡那条路"),
+    }
+    assert_eq!(
+        h.join().expect("线程"),
+        Some(OPT_TOOL_ALLOW.to_string()),
+        "回答要唤醒等待方"
+    );
+    assert!(door.is_empty(), "答完不再挂着");
 
-    // 没有在等的格：不假装有人放行。
-    assert!(!reg.resolve("nope", Approval::Allow));
+    // 队列：先来后到——排在后面的那几张还不能答（它的答案会被"卡号不是队首"挡下）。
+    door.push(None, Pending::ConfirmBegin, "", None);
+    let slot2 = AnswerSlot::new();
+    let (second, _) = door.push(None, tool(), "", Some(Arc::clone(&slot2)));
+    assert!(
+        door.answer(&second, OPT_TOOL_ALLOW, "").is_err(),
+        "只有队首可答"
+    );
+    let h2 = std::thread::spawn(move || slot2.wait());
+    // 整队作废（停止 / 关闭 = 拒绝）：排队的卡一律作废，等待方解开、按拒绝收场。
+    assert_eq!(door.void(), vec!["d2".to_string(), "d3".to_string()]);
+    assert_eq!(h2.join().expect("线程"), None, "作废 = 拒绝（不执行）");
+    assert!(door.is_empty(), "作废之后不再挂着");
+    assert!(door.queue().is_none(), "作废之后快照里没有卡");
+}
+
+/// 工具级确认**并入裁决通道**（端到端一条）：`ask` 命中 → 卡片进同一条队 → 按选项作答 → 工具才跑。
+/// 三态都走一遍（放行 / 拒绝 / 本轮不再问），并核对卡与回答**落盘**（重启后不重问的那份事实）。
+#[test]
+fn tool_confirmation_rides_the_decision_channel() {
+    use crate::capabilities::conductor::api::{ConductorHandle, Ops, Output};
+    use crate::capabilities::session::api::{
+        SessionEvent, OPT_TOOL_ALLOW, OPT_TOOL_DENY, OPT_TOOL_FULL,
+    };
+    use crate::tests::builders::{tool_line_texts, RecordingRunner};
+    use crate::tests::doubles::{abs, core_with_runner, decl, gw, module_of};
+    use crate::tests::prelude::*;
+    use std::sync::{Arc, Mutex};
+
+    /// 跑一次"这一席要问用户"的生成：等第一张工具卡进队、按 `answer` 作答（走**回答命令**那条路），
+    /// 再等它跑完。返回：事件台上的事件、工具行、卡片张数、这一席的工具进程实际跑了几次。
+    fn ask_case(
+        answer: &str,
+        calls: usize,
+    ) -> (Vec<SessionEvent>, Vec<String>, Vec<String>, usize, usize) {
+        let runner = Arc::new(RecordingRunner {
+            calls: Mutex::new(Vec::new()),
+            out: "ok".into(),
+            ok: true,
+        });
+        let mut script: Vec<String> = Vec::new();
+        for _ in 0..calls {
+            script.push(
+                "{\"type\":\"tool\",\"module\":\"a\",\"name\":\"grep\",\"args\":{}}".to_string(),
+            );
+        }
+        script.push("{\"type\":\"say\",\"text\":\"做完了\"}".to_string());
+        let mut member = BTreeMap::new();
+        member.insert("a".to_string(), script);
+        let mut a = module_of("a");
+        a.root = abs(&["mods", "a"]);
+        a.manifest
+            .tools
+            .insert("grep".to_string(), decl("python tools/grep.py"));
+        let handle = ConductorHandle::spawn(core_with_runner(
+            vec![a],
+            gw(member, vec!["[]".into()]),
+            Arc::clone(&runner),
+        ))
+        .expect("起核心线程");
+        // 有交互前端在服务：工具级确认接进裁决队（纯终端同步生成不接，避免空等）。
+        handle.allow_tool_cards();
+        let ops = Ops::from_handle(&handle);
+        let sid = ops
+            .sessions
+            .create_work(work("w", WorkMode::Single, &["a"]))
+            .expect("建会话")
+            .0
+            .sid;
+        // 粒度与问谁走**同一条设置路**（逐 agent 覆盖写回 meta，与界面里改配置同一条命令）。
+        ops.sessions
+            .edit(
+                &sid,
+                SessionEdit {
+                    agents: vec![ConfigAgent {
+                        name: "a".to_string(),
+                        modules: vec!["a".to_string()],
+                        model: String::new(),
+                        permissions: Some(PermissionsOverride {
+                            granularity: Some(Granularity::Ask),
+                            ask: Some(paths(&["a.grep"])),
+                            ..Default::default()
+                        }),
+                    }],
+                    tier: "host".to_string(),
+                    base: None,
+                    pins: BTreeMap::new(),
+                    net: false,
+                },
+            )
+            .expect("把这一席的粒度设成 ask");
+        let answerer = {
+            let ops = ops.clone();
+            let sid = sid.clone();
+            let answer = answer.to_string();
+            std::thread::spawn(move || {
+                for _ in 0..2000 {
+                    if let Ok(Some(q)) = ops.sessions.open_queue(&sid) {
+                        assert_eq!(
+                            q.card
+                                .options
+                                .iter()
+                                .map(|o| o.id.clone())
+                                .collect::<Vec<_>>(),
+                            vec![
+                                OPT_TOOL_ALLOW.to_string(),
+                                OPT_TOOL_DENY.to_string(),
+                                OPT_TOOL_FULL.to_string()
+                            ],
+                            "工具卡的选项 id 是契约：allow / deny / full"
+                        );
+                        assert_eq!(q.card.envelope.role, "tools", "谁在问：工具层");
+                        // 回答走**唯一那条命令**（卡号 + 选项 id）。
+                        ops.sessions
+                            .answer_card(&sid, &q.card.id, &answer, "")
+                            .expect("按选项作答");
+                        return true;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(2));
+                }
+                false
+            })
+        };
+        ops.sessions
+            .say(&sid, "干活", Output::Final)
+            .expect("跑一回合");
+        assert!(answerer.join().expect("作答线程"), "工具卡要进队并等回答");
+        assert!(
+            ops.sessions.open_queue(&sid).expect("取卡").is_none(),
+            "答完不再挂着"
+        );
+        let (batches, _head, _oldest) = handle.events().snapshot(Some(&sid), 0);
+        let events: Vec<SessionEvent> = batches.into_iter().flat_map(|l| l.events).collect();
+        let cards = events
+            .iter()
+            .filter(
+                |e| matches!(e, SessionEvent::DecisionCard { gate, .. } if gate == "tool_approval"),
+            )
+            .count();
+        let lines = tool_line_texts(&events);
+        let outs: Vec<String> = crate::tests::builders::tool_views(&events)
+            .into_iter()
+            .map(|v| v.output)
+            .collect();
+        let ran = runner.calls.lock().expect("锁").len();
+        // 卡与回答都落盘（会话的事实）：重启后不重问已答的。
+        let (_, saved) = ops.history.open(&sid).expect("读转录");
+        let kinds: Vec<String> = saved
+            .iter()
+            .filter_map(|ev| {
+                ev.get("type")
+                    .and_then(|t| t.as_str())
+                    .map(|s| s.to_string())
+            })
+            .collect();
+        assert!(
+            kinds.iter().any(|k| k == "decision_card")
+                && kinds.iter().any(|k| k == "decision_answer"),
+            "工具卡与它的回答都要落盘：{:?}",
+            kinds
+        );
+        assert_eq!(outs.len(), calls.max(1), "每次调用都要留一条工具结果");
+        (events, lines, outs, cards, ran)
+    }
+
+    // ① 放行：卡进队 → 答 allow → 工具真的执行。
+    let (_ev, lines, outs, cards, ran) = ask_case(OPT_TOOL_ALLOW, 1);
+    assert_eq!(cards, 1, "先问一次：{:?}", lines);
+    assert_eq!(ran, 1, "放行之后工具执行一次：{:?}", lines);
+    assert_eq!(outs, vec!["ok".to_string()], "{:?}", lines);
+
+    // ② 拒绝：不执行，回一条"用户没有放行"的结果给模型（如实说，且不启动进程）。
+    let (_ev, lines, outs, cards, ran) = ask_case(OPT_TOOL_DENY, 1);
+    assert_eq!(cards, 1, "{:?}", lines);
+    assert_eq!(ran, 0, "拒绝之后不启动工具进程：{:?}", lines);
+    assert!(
+        outs.iter().any(|o| o.contains("没有放行")),
+        "拒绝的理由要如实回给模型：{:?}",
+        outs
+    );
+
+    // ③ 本轮不再问：一次回复里两次调用，答 full → 只问一次、两次都执行（且**不落盘**成策略）。
+    let (_ev, lines, outs, cards, ran) = ask_case(OPT_TOOL_FULL, 2);
+    assert_eq!(cards, 1, "full 之后本轮不再问：{:?}", lines);
+    assert_eq!(ran, 2, "两次调用都要执行：{:?}", lines);
+    assert!(outs.iter().all(|o| o == "ok"), "{:?}", outs);
 }

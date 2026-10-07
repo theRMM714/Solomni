@@ -8,15 +8,6 @@ use crate::capabilities::conductor::domain::proxy as d;
 use crate::capabilities::registry::api::{AppSettings, RegistryOps};
 use crate::capabilities::tools::api::{arg_fault_text, ToolSchema};
 
-/// 工具级确认的答案：对外词汇 allow / deny / full。
-fn approval_of(answer: &str) -> Approval {
-    match answer.trim() {
-        "allow" | "yes" => Approval::Allow,
-        "full" => Approval::Full,
-        _ => Approval::Deny,
-    }
-}
-
 /// 极简 base64 解码（上传动作的参数是 base64；标准字母表，容忍换行与缺失填充）。
 fn base64_decode(s: &str) -> Result<Vec<u8>, String> {
     let mut out = Vec::new();
@@ -419,12 +410,6 @@ impl ConductorHandle {
                 let uploaded = self.upload(&s("session_id"), &s("name"), &bytes, overwrite)?;
                 Ok(Acted::Done(
                     serde_json::json!({ "ok": true, "uploaded": uploaded }),
-                ))
-            }
-            "approve_tool" => {
-                let answered = self.approve(&s("session_id"), approval_of(&s("answer")));
-                Ok(Acted::Done(
-                    serde_json::json!({ "ok": true, "answered": answered }),
                 ))
             }
             // 文件域 / 协作动词 / 核心操作这些动作由成员工具循环执行，不经分发器。

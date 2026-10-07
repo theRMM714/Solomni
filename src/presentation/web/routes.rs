@@ -100,7 +100,7 @@ pub const ROUTES: &[Route] = &[
         request: "{…按动作声明}",
         response: "{head} / {events}（重放快照） / {ok,…}",
         statuses: &[200, 400],
-        note: "一次动作：参数按 systools/tools.yaml 校验 → callers 授权 → 执行 → 审计（stop / approve_tool 生成期间也立刻生效）",
+        note: "一次动作：参数按 systools/tools.yaml 校验 → callers 授权 → 执行 → 审计（stop / answer_card 生成期间也立刻生效）",
     },
     Route {
         id: "session.config",

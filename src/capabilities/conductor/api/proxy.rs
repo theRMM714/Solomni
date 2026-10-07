@@ -5,6 +5,7 @@
 use super::*;
 use crate::capabilities::registry::api::RegistryOps;
 use crate::capabilities::registry::api::{AgentView, AppSettings, ModelView, ProviderView};
+use crate::capabilities::session::api::Answered;
 use crate::capabilities::session::api::{HistoryView, RunState, SessionMeta};
 use crate::capabilities::workspace::api::Roster;
 pub use crate::kernel::api::Tier;
@@ -57,8 +58,9 @@ impl SessionOps for ConductorHandle {
         })
     }
 
-    /// **回答一张裁决卡**：校验与落档由核心做；放行类的推进（跑泵）在工作线程上跑。
-    /// 代拟名单那一关要写回 meta 并建沙箱，所以它也留在核心线程上收尾（与"写需求"同一条）。
+    /// **回答一张裁决卡**（唯一的回答口）：与「停止」同一条直路——回答**先落定**
+    /// （校验 + 出队 + 记一条回答，都在核心线程上跑完），处置再脱离调用方跑。
+    /// 为什么必须先落定：界面据此立刻看到队首换人；等待方（工具级确认那种）当场就被唤醒。
     fn answer_card(
         &self,
         sid: &str,
@@ -66,38 +68,44 @@ impl SessionOps for ConductorHandle {
         option: &str,
         note: &str,
     ) -> Result<Advance, String> {
-        let gate = self.call({
-            let s = sid.to_string();
-            move |core| core.collab_gate_kind(&s)
-        })?;
-        if gate.as_deref() == Some("confirm_slate") {
+        let (answered, events) = self.call({
             let (sid, card, option, note) = (
                 sid.to_string(),
                 card.to_string(),
                 option.to_string(),
                 note.to_string(),
             );
-            let bus = Arc::clone(&self.bus);
-            return self.call(move |core| {
-                let events = core.collab_answer(&sid, &card, &option, &note)?;
-                let head = bus.push(&sid, &events);
+            move |core| core.take_card(&sid, &card, &option, &note)
+        })?;
+        let mut head = self.bus.push(sid, &events);
+        match answered {
+            // 等在工作线程上的那一关（工具级确认）：回答已经写进等待格，没有要推进的事。
+            Answered::Waiting(_) => Ok(Advance { head }),
+            Answered::Gate(ticket, _) => {
+                // 代拟名单这一关要写回 meta 并建沙箱：短步骤，留在核心线程上收尾。
+                if matches!(
+                    ticket.pending,
+                    crate::capabilities::session::api::Pending::ConfirmSlate
+                ) {
+                    let more = self.call({
+                        let sid = sid.to_string();
+                        move |core| core.dispose_and_advance(&sid, &ticket)
+                    })?;
+                    head = self.bus.push(sid, &more);
+                    return Ok(Advance { head });
+                }
+                // 放行 / 重派 / 请教 / 判明确性：长流程——脱离调用方点火（回答本身已经落定）。
+                self.spawn_detached_dispose(sid, ticket);
                 Ok(Advance { head })
-            });
+            }
         }
-        self.collab_generation(
-            sid,
-            CollabWork::Answer {
-                card: card.to_string(),
-                option: option.to_string(),
-                note: note.to_string(),
-            },
-        )
     }
 
     /// 当前挂着的那一队裁决（队首卡 + 后面还在等的那几张）：CLI 与 Web 照同一份渲染。
-    fn open_card(&self, sid: &str) -> Result<Option<DecisionQueue>, String> {
+    /// 约束：判据只有这一处——核心各关卡与工具级确认共用同一条队。
+    fn open_queue(&self, sid: &str) -> Result<Option<DecisionQueue>, String> {
         let sid = sid.to_string();
-        self.call(move |core| core.collab_open_card(&sid))
+        self.call(move |core| core.open_queue(&sid))
     }
 
     fn withdraw_agree(&self, sid: &str, agent: &str) -> Result<Advance, String> {
@@ -168,20 +176,6 @@ impl SessionOps for ConductorHandle {
         // **停止 = 拒绝**：整棵子树里等用户裁决的队一律作废（落盘 + 如实外送），等待方因此解开。
         self.void_gates(sid);
         self.stop_tree(sid).unwrap_or_default()
-    }
-
-    /// 工具级确认：直接把答案写进放行表并唤醒工作线程（不经队列，生成期间立刻生效）。
-    fn approve(&self, sid: &str, answer: Approval) -> bool {
-        self.approvals.resolve(sid, answer)
-    }
-
-    /// 等待快照：刷新页面后界面据此重建"是 / 否 / 本轮不再问"的卡。
-    fn pending_approval(&self, sid: &str) -> Option<ApprovalView> {
-        self.approvals.pending(sid).map(|r| ApprovalView {
-            module: r.module,
-            tool: r.tool,
-            args: r.args,
-        })
     }
 
     fn is_running(&self, sid: &str) -> bool {

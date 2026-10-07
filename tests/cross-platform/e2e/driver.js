@@ -2,7 +2,7 @@
 // 覆盖：agent 登记处 → 推荐复用 → 单 agent（1 个 agent 带多模块）+ 内置 write 落私沙箱
 //       → 协作（非代拟）跑完交付 → 代拟（复用+组装）确认后名单写回 meta 并建出沙箱
 //       → 外部工具 cwd / 绝对路径 / 自由格式补丁 / 正文+信封 / 原生多调用（协议形状由假供应商核对）
-//       → 工具级确认：生成中停下等 yes / no / full；快照带待确认（刷新能重建）；full 本轮不再问
+//       → 工具级确认（与本通道同形）：生成中停下等 allow / deny / full；快照带那张卡（刷新能重建）；full 本轮不再问
 //       → 代理模式：核心自己挑人、建子工作、转达，来源如实落档，停止即全停。
 const BASE = process.env.E2E_BASE || 'http://127.0.0.1:3099';
 // 假供应商端口由编排器指定：本机可能残留上一次的进程，固定端口会让驱动打到旧的那个。
@@ -62,13 +62,13 @@ async function answer(sid, option, note) {
   return act(sid, 'answer_card', { card: card.id, option: option, note: note || '' });
 }
 
-/** 等某会话的待办（pending）出现：用于"生成中确认"这类必须**并发**驱动的场景。 */
-async function waitPending(sid, kind, ms) {
+/** 等某会话**某一关**的卡出现（pending 就是那张卡）：用于"生成中确认"这类必须**并发**驱动的场景。 */
+async function waitPending(sid, gate, ms) {
   const deadline = Date.now() + ms;
   while (Date.now() < deadline) {
     const s = await api('GET', '/api/state');
     const v = ((s.json && s.json.sessions) || []).find((x) => x.sid === sid);
-    if (v && v.pending && v.pending.kind === kind) return v.pending;
+    if (v && v.pending && v.pending.gate === gate) return v.pending;
     await new Promise((r) => setTimeout(r, 100));
   }
   return null;
@@ -226,38 +226,42 @@ async function lines(sid) {
   const fAllow = path.join(sandbox, 'ask-allow.txt');
   const fFull1 = path.join(sandbox, 'ask-full-1.txt');
   const fFull2 = path.join(sandbox, 'ask-full-2.txt');
-  const approveAsk = (answer) => act(nameAsk, 'approve_tool', { answer });
+  // 工具确认与核心各关卡**同一条通道**：同一张卡形状、同一条回答命令（卡号 + 选项 id）。
+  const answerAsk = (card, option) => act(nameAsk, 'answer_card', { card: card.id, option: option, note: '' });
   const sayAsk = (text) => act(nameAsk, 'send_message', { text });
 
-  // ① 拒绝：生成停下来等回答（快照里能看到待确认），答 no → 工具不执行。
+  // ① 拒绝：生成停下来等回答（快照里能看到那张卡），答 deny → 工具不执行。
   const pDeny = sayAsk('工具确认：拒绝');
   const pendDeny = await waitPending(nameAsk, 'tool_approval', 20000);
   assert(pendDeny && (pendDeny.payload || {}).tool === 'write', '等待中的确认出现在 /api/state 快照里（刷新也能重建卡片）', JSON.stringify(pendDeny || {}).slice(0, 200));
-  assert((await approveAsk('no')).status === 200, '答 no（拒绝）');
+  assert((pendDeny.options || []).map((o) => o.id).join() === 'allow,deny,full', '工具卡的选项 id 是 allow / deny / full', JSON.stringify((pendDeny || {}).options));
+  assert((await answerAsk(pendDeny, 'deny')).status === 200, '答 deny（拒绝）');
   await settle(pDeny, 30000, '拒绝场景');
   assert(!fs.existsSync(fDeny), '拒绝 → 工具没执行（文件不存在）', fDeny);
 
-  // ② 放行：答 yes → 工具执行。
+  // ② 放行：答 allow → 工具执行。
   const pAllow = sayAsk('工具确认：放行');
-  assert(await waitPending(nameAsk, 'tool_approval', 20000), '第二次确认也停下等回答');
-  await approveAsk('yes');
+  const pendAllow = await waitPending(nameAsk, 'tool_approval', 20000);
+  assert(pendAllow, '第二次确认也停下等回答');
+  await answerAsk(pendAllow, 'allow');
   await settle(pAllow, 30000, '放行场景');
   assert(fs.existsSync(fAllow), '放行 → 工具执行（文件存在）', fAllow);
 
   // ③ 本轮不再问：一次回复给两个 write，第一个答 full → 第二个不再问、两个都执行。
   const pFull = sayAsk('工具确认：两个，本轮不再问');
-  assert(await waitPending(nameAsk, 'tool_approval', 20000), 'full 场景的第一批确认出现');
-  await approveAsk('full');
+  const pendFull = await waitPending(nameAsk, 'tool_approval', 20000);
+  assert(pendFull, 'full 场景的第一批确认出现');
+  await answerAsk(pendFull, 'full');
   // 若 full 没生效会出现第二个确认——自动答掉以免挂住整个驱动，并把"多问了一次"记为失败。
   let second = null;
   for (let i = 0; i < 200; i++) {
     const s = await api('GET', '/api/state');
     const v = ((s.json && s.json.sessions) || []).find((x) => x.sid === nameAsk);
-    if (v && v.pending && v.pending.kind === 'tool_approval') { second = v.pending; break; }
+    if (v && v.pending && v.pending.gate === 'tool_approval') { second = v.pending; break; }
     if (!v || !v.running) break; // 生成已结束
     await new Promise((r) => setTimeout(r, 100));
   }
-  if (second) await approveAsk('yes');
+  if (second) await answerAsk(second, 'allow');
   await settle(pFull, 30000, 'full 场景');
   assert(!second, '答 full 后本轮不再弹第二次确认', JSON.stringify(second || {}).slice(0, 160));
   assert(fs.existsSync(fFull1) && fs.existsSync(fFull2), '答 full → 本轮两个调用都执行', fFull1 + ' / ' + fFull2);
