@@ -522,7 +522,7 @@ fn fs_modules_accepts_valid_folders_and_rejects_each_illegal_form_with_a_reason(
     let _ = std::fs::remove_dir_all(&root);
 }
 
-/// 扫描把 `has_userdata` 置对：模块根下有 userdata 目录 = true，没有 = false。
+/// 载入即确保模块有 `userdata/`：没有就建出来，已存在的不动（幂等）；建不了才置 false。
 #[test]
 fn fs_modules_reads_the_userdata_fact() {
     let root = scratch("fs-modules-userdata");
@@ -539,8 +539,9 @@ fn fs_modules_reads_the_userdata_fact() {
     put("with");
     put("without");
     std::fs::create_dir_all(dir.join("with").join("userdata")).expect("建 userdata");
+    std::fs::write(dir.join("with").join("userdata").join("keep.txt"), "x").expect("放已有的状态");
 
-    let roster = FsModules::new(dir, crate::capabilities::tools::api::names()).scan();
+    let roster = FsModules::new(dir.clone(), crate::capabilities::tools::api::names()).scan();
     let fact = |id: &str| {
         roster
             .modules
@@ -549,8 +550,18 @@ fn fs_modules_reads_the_userdata_fact() {
             .map(|m| m.has_userdata)
             .expect("模块在清单里")
     };
-    assert!(fact("with"), "有 userdata 目录 = true");
-    assert!(!fact("without"), "没有 userdata 目录 = false");
+    assert!(
+        fact("with") && fact("without"),
+        "载入后每个模块都拿到私有可写落点"
+    );
+    assert!(
+        dir.join("without").join("userdata").is_dir(),
+        "原本没有的会被建出来"
+    );
+    assert!(
+        dir.join("with").join("userdata").join("keep.txt").is_file(),
+        "已存在的不动（幂等）"
+    );
     let _ = std::fs::remove_dir_all(&root);
 }
 

@@ -34,7 +34,7 @@
   （卷根属主是系统、非管理员改不动；祖先链只靠令牌的「按名穿过」特权，管不到显式 lstat），少了它进程在脚本执行前就 EPERM 死。
   只在本平台注入（Landlock 不管 stat、seatbelt 已给祖先放行 `file-read-metadata`）；判据与 `interpreter_dirs` 共用
   同一份 PATH 解析（`command_programs_in`），而白名单随命令而变——`--print-fence-env` 与探针都按同一条命令问。
-- 授权面按**注入的事实**派生：`<module>/userdata/` 有没有，由 workspace 扫描读出并随沙箱注入（domain 不读盘）；没有就不进 `rw`，`standalone` 的缺省工作目录退回模块根。`prepare_fence` 也会跳过不存在的落点、不判整次失败。
+- 授权面按**注入的事实**派生：`<module>/userdata/` 由 workspace 在**载入时确保存在**（产品唯一的自动写盘，幂等；建不了如实标注、不阻断加载）并随沙箱注入（domain 不读盘）；事实为否（建不了）时不进 `rw`，`standalone` 的缺省工作目录退回模块根。`prepare_fence` 也会跳过不存在的落点、不判整次失败。
 - 核心代理系统工具的待实现规划清单：`systool_gaps.yaml`（仓库根；不是当前工具表，也不替代测试缺口账）。
 
 ## 五、围栏落点：必要与可选
