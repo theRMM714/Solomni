@@ -2,7 +2,9 @@
 //! 只做解析与渲染，不做业务决策；Web 前端与它并列，共用同一能力面与事件词汇。
 
 use crate::capabilities::conductor::api::{Acted, ActionCall, Caller};
-use crate::capabilities::conductor::api::{AgentInstance, DecisionCard, SessionEvent, Tier};
+use crate::capabilities::conductor::api::{
+    AgentInstance, DecisionCard, DecisionWaiter, SessionEvent, Tier,
+};
 use crate::capabilities::conductor::api::{Ops, Output};
 use crate::capabilities::registry::api::{ModelView, ProviderView};
 use std::io::Write;
@@ -385,6 +387,13 @@ fn render(events: &[SessionEvent]) {
             SessionEvent::DecisionAnswer(a) => {
                 println!("[裁决] {} 答了 {}：选了 {}", a.by, a.card, a.option)
             }
+            // 整队作废（停止 / 关闭）：如实说清作废了哪几张、为什么——等待方按"拒绝"解开。
+            SessionEvent::DecisionVoid { cards, reason } => println!(
+                "[裁决] 作废 {} 张没答的卡（{}）：{}",
+                cards.len(),
+                cards.join("、"),
+                reason
+            ),
             // 请用户裁决：把"为什么要你定 + 建议"如实打出来（与 Web 那张卡同一份事实）。
             SessionEvent::Decision {
                 kind,
@@ -475,6 +484,34 @@ impl CliAction {
     }
 }
 
+/// 目的：队首之后还在等的那几张，一行一张（谁在等、问的什么、前面还排着几条）。
+/// 约束：**文本构造与打印分开**——文本可判，打印只是把它写出去。
+pub(crate) fn waiting_lines(waiting: &[DecisionWaiter]) -> Vec<String> {
+    if waiting.is_empty() {
+        return Vec::new();
+    }
+    let mut out = vec![format!(
+        "  后面还排着 {} 张（先答上面那张）：",
+        waiting.len()
+    )];
+    for (i, w) in waiting.iter().enumerate() {
+        out.push(format!(
+            "    {}) {} 在等：{}",
+            i + 1,
+            w.envelope.name,
+            w.title
+        ));
+    }
+    out
+}
+
+/// 把还在等的那几张如实打出来（**只有队首能答**）。
+fn print_waiting(waiting: &[DecisionWaiter]) {
+    for line in waiting_lines(waiting) {
+        println!("{}", line);
+    }
+}
+
 /// 把一张裁决卡按它的四个字段打出来（信封 / 消息 / 选项）：CLI 不认识业务含义，只认这几格。
 fn print_card(card: &DecisionCard) {
     println!("[裁决] {}（{}）", card.message.title, card.envelope.name);
@@ -506,21 +543,24 @@ fn pick_option(card: &DecisionCard, ans: &str) -> Option<String> {
 /// 不点不继续：空输入 = 先不答（会话仍在等）。
 fn answer_gates(ops: &Ops, sid: &str, cursor: &mut u64) {
     loop {
-        let card = match ops.sessions.open_card(sid) {
-            Ok(Some(c)) => c,
+        let queue = match ops.sessions.open_card(sid) {
+            Ok(Some(q)) => q,
             Ok(None) => return,
             Err(e) => {
                 println!("[提示] 取裁决卡失败：{}", e);
                 return;
             }
         };
-        print_card(&card);
+        let card = &queue.card;
+        print_card(card);
+        // 队首之后还在等的那几张：如实列出来（"谁在等、前面还排着几条"），但它们还不能答。
+        print_waiting(&queue.waiting);
         let ans = prompt("选哪一项（序号 / 选项 id；回车 = 先不答）>");
         let ans = ans.trim();
         if ans.is_empty() {
             return;
         }
-        let Some(option) = pick_option(&card, ans) else {
+        let Some(option) = pick_option(card, ans) else {
             println!("  这张卡上没有这一项，请按上面的序号或 id 作答。");
             continue;
         };

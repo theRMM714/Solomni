@@ -4,6 +4,7 @@
 
 use super::doubles::module_of;
 use super::ops_with;
+use crate::capabilities::session::api::Pending;
 use crate::kernel::api::Tier;
 use crate::presentation::cli;
 
@@ -73,4 +74,29 @@ fn pick_agents_guides_on_empty_registry_and_names_the_unknown() {
     assert!(cli::pick_agents(&ops, &[])
         .unwrap_err()
         .contains("没有点名"));
+}
+
+/// 目的：队首之后还在等的那几张要如实列成文本（谁在等、前面还排着几条，一行一张）。
+#[test]
+fn waiting_list_is_built_line_by_line() {
+    // 等待者用**生产那一条派生**造（Pending → 等待者），不手搓结构体。
+    let ask = Pending::Ask {
+        member: "甲".to_string(),
+        question: "选哪个？".to_string(),
+    };
+    let begin = Pending::ConfirmBegin;
+    assert!(cli::waiting_lines(&[]).is_empty(), "没人等就一行都不占");
+    let lines = cli::waiting_lines(&[ask.waiter("d2", ""), begin.waiter("d3", "")]);
+    assert_eq!(lines.len(), 3, "一条头 + 每位等待者一行：{:?}", lines);
+    assert!(
+        lines[0].contains("排着 2 张"),
+        "要说清前面还排着几条：{:?}",
+        lines[0]
+    );
+    assert!(
+        lines[1].contains("甲") && lines[1].contains("在等"),
+        "等待者要带名字与它在等什么：{:?}",
+        lines[1]
+    );
+    assert!(lines[2].contains("核心"), "按先来后到：{:?}", lines[2]);
 }

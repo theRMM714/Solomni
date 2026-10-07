@@ -15,11 +15,8 @@
     "头块：缺文件头": 1
   },
   "src/capabilities/collab/service/collab.rs": {
-    "头块：槽外有行或自造槽": 6,
-    "头块：缺文件头": 1,
     "条目：槽外有行或自造槽": 61,
-    "条目：首行不是目的": 51,
-    "行内：连续超过 2 行": 1
+    "条目：首行不是目的": 50
   },
   "src/capabilities/collab/service/discussion.rs": {
     "头块：槽外有行或自造槽": 6,

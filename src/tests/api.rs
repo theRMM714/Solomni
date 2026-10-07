@@ -303,6 +303,7 @@ fn reads_are_not_queued_behind_a_collab_discussion() {
         .open_card(&sid)
         .expect("取卡")
         .expect("挂着一张卡")
+        .card
         .id;
     let worker = {
         let sessions = Arc::clone(&ops.sessions);
@@ -362,6 +363,7 @@ fn stopping_a_collab_discussion_is_prompt_and_keeps_the_session() {
         .open_card(&sid)
         .expect("取卡")
         .expect("挂着一张卡")
+        .card
         .id;
     let worker = {
         let sessions = Arc::clone(&ops.sessions);
@@ -465,6 +467,7 @@ fn collab_transcript_lands_on_disk_while_the_discussion_runs() {
         .open_card(&sid)
         .expect("取卡")
         .expect("挂着一张卡")
+        .card
         .id;
     let worker = {
         let sessions = Arc::clone(&ops.sessions);
@@ -509,6 +512,7 @@ fn collab_discussion_emits_each_member_line_as_it_speaks() {
         .open_card(&sid)
         .expect("取卡")
         .expect("挂着一张卡")
+        .card
         .id;
     let worker = {
         let sessions = Arc::clone(&ops.sessions);

@@ -8,7 +8,7 @@ use crate::capabilities::conductor::api::{
     SessionOps,
 };
 use crate::capabilities::conductor::api::{
-    AgentSuggestion, ConfigAgent, DecisionCard, FilesAgentView, FilesRootsView, FilesView,
+    AgentSuggestion, ConfigAgent, DecisionQueue, FilesAgentView, FilesRootsView, FilesView,
     RuntimeReport, SessionConfig, SessionEdit, SessionView, TierChoices, WorkMode, WorkOpened,
     WorkSpec,
 };
@@ -152,18 +152,19 @@ impl SessionOps for FakeOps {
         self.guard()?;
         Ok(Advance { head: 10 })
     }
-    /// 假卡：路由契约测试只盯形状——封套 / 消息 / 选项都在。
-    fn open_card(&self, sid: &str) -> Result<Option<DecisionCard>, String> {
+    /// 假卡：路由契约测试只盯形状——封套 / 消息 / 选项都在（队列里只有它一张）。
+    fn open_card(&self, sid: &str) -> Result<Option<DecisionQueue>, String> {
         self.guard()?;
-        Ok(Some(
-            serde_json::from_value(json!({
+        Ok(Some(DecisionQueue {
+            card: serde_json::from_value(json!({
                 "id": format!("d1-{}", sid),
                 "envelope": { "role": "core", "name": "核心" },
                 "message": { "title": "要不要继续？", "body": "假能力面", "detail": "" },
                 "options": [{ "id": "go", "label": "继续" }],
             }))
             .expect("假卡形状"),
-        ))
+            waiting: Vec::new(),
+        }))
     }
     fn withdraw_agree(&self, _sid: &str, _agent: &str) -> Result<Advance, String> {
         self.guard()?;

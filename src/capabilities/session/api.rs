@@ -2,9 +2,9 @@
 
 pub use crate::capabilities::session::domain::events::{
     idle, interrupted_note, last_compaction, stopped_note, working, CheckView, DecisionAnswer,
-    DecisionCard, DecisionOption, LineView, Live, Pending, SessionEvent, ToolCallView,
-    OPT_ASK_REPLY, OPT_BEGIN, OPT_BEGIN_ALLOW, OPT_NODE_REWORK, OPT_NODE_SAY, OPT_PLAN_SAY,
-    OPT_PLAN_START, OPT_SLATE_CANCEL, OPT_SLATE_CONFIRM,
+    DecisionCard, DecisionOption, DecisionQueue, DecisionWaiter, LineView, Live, Pending,
+    SessionEvent, ToolCallView, OPT_ASK_REPLY, OPT_BEGIN, OPT_BEGIN_ALLOW, OPT_NODE_REWORK,
+    OPT_NODE_SAY, OPT_PLAN_SAY, OPT_PLAN_START, OPT_SLATE_CANCEL, OPT_SLATE_CONFIRM,
 };
 pub use crate::capabilities::session::domain::history::{
     AgentMeta, Delegation, HistoryView, RunState, SessionMeta,

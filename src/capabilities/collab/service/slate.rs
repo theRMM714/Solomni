@@ -169,8 +169,13 @@ impl CollabSession {
         }
         // 用户点「继续」= **重派核心指名没过的那几个节点**（只退这些；同阶段已通过的保持已通过，
         // 不整阶段重来）。放在这里而不是泵里：唤醒（子会话完成）不能替用户做这个决定。
-        if let Some(Pending::NodeBlocked { nodes }) = self.pending.clone() {
-            self.pending = None;
+        let blocked = match self.gates.front().map(|g| &g.pending) {
+            Some(Pending::NodeBlocked { nodes }) => Some(nodes.clone()),
+            _ => None,
+        };
+        if let Some(nodes) = blocked {
+            self.gates.pop_front();
+            self.announced = None;
             self.gate_advice.clear();
             for n in &nodes {
                 self.reset_node(n);
@@ -182,11 +187,20 @@ impl CollabSession {
         }
         if self.delegated && self.slate_picks.is_empty() && self.roster.is_empty() {
             self.draft_slate(sink);
-        } else {
-            sink(SessionEvent::Notice(
-                "[提示] 等待你在裁决门确认名单 / 开始讨论。".into(),
-            ));
+            return;
         }
+        // 停会话把整队作废之后回来：那一关还挂在状态上，续一个新卡号接着问（不假装修好了）。
+        if self.gates.is_empty() && !self.roster.is_empty() {
+            self.ask_user(Pending::ConfirmBegin, sink);
+            return;
+        }
+        if self.gates.is_empty() && !self.slate_picks.is_empty() {
+            self.ask_user(Pending::ConfirmSlate, sink);
+            return;
+        }
+        sink(SessionEvent::Notice(
+            "[提示] 等待你在裁决门确认名单 / 开始讨论。".into(),
+        ));
     }
 
     /// 撤回某 agent 的同意：转录追加一条撤回行（用户可见、也进上下文），并就地复位本轮表态。
@@ -247,8 +261,8 @@ impl CollabSession {
             task: st.task.clone().unwrap_or_default(),
             slate_picks: Vec::new(),
             settings,
-            pending: None,
-            card_id: None,
+            gates: std::collections::VecDeque::new(),
+            announced: None,
             cards: st.cards,
             allow: st.allow,
             plan: st.plan.clone(),
@@ -318,13 +332,22 @@ impl CollabSession {
             disc.transcript = disc_lines;
             s.disc = Some(disc);
         }
-        // 挂起由转录重建：优先沿用那张**没人回答的卡**的卡号；卡连同那一段被回档截掉时，
-        // 按状态续一个新卡号接着问（已答过的那一张不会回来，见 session-model.md「请用户裁决」）。
-        if let Some((id, p, advice)) = derive_gate(&st) {
-            let id = id.unwrap_or_else(|| format!("d{}", s.cards + 1));
-            s.pending = Some(p);
-            s.card_id = Some(id);
-            s.gate_advice = advice;
+        // **整队**由转录重建（先来后到）：每张没人回答的卡沿用它自己的卡号；卡连同那一段被回档截掉、
+        // 或被停会话整队作废时，按状态续新卡号接着问（已答过的不重问，见 session-model.md「请用户裁决」）。
+        for (id, p, advice) in derive_gates(&st) {
+            let id = match id {
+                Some(id) => id,
+                // 状态派生出来的那一关还没有卡号：按已发出的卡数续号，不与用过的卡号相撞。
+                None => {
+                    s.cards += 1;
+                    format!("d{}", s.cards)
+                }
+            };
+            s.gates.push_back(Gate {
+                id,
+                pending: p,
+                advice,
+            });
         }
         Ok(s)
     }

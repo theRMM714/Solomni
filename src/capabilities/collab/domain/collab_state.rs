@@ -36,8 +36,10 @@ pub struct CollabState {
     pub rework: usize,
     pub delivery: Option<bool>,
     pub ended: bool,
-    /// 目的：最后一张**没人回答**的裁决卡（卡号 / 这一关的机制名 / 机制载荷）：挂起状态的唯一来源。
-    pub open_gate: Option<(String, String, serde_json::Value)>,
+    /// 目的：转录里**还没人回答、也还没作废**的裁决卡（按先来后到，队首在最前）：整队重建的唯一来源。
+    pub open_gates: Vec<(String, String, serde_json::Value)>,
+    /// 目的：已经发过的卡号（含已答、已作废的）：卡号计数与"同一张重推"的去重都认它。
+    pub issued_cards: std::collections::BTreeSet<String>,
     /// 目的：已发出的裁决卡数（卡号计数器；重启后从转录续号，卡号因此稳定）。
     pub cards: u64,
     /// 工具执行次数（回档警告用）。
@@ -171,9 +173,8 @@ pub fn derive(events: &[serde_json::Value], roster_names: &[String]) -> CollabSt
                     .and_then(|t| t.as_str())
                     .map(|s| s.to_string());
             }
-            // 裁决卡与回答：挂起与否只认这一对（答过的不再挂，见 session-model.md「请用户裁决」）。
+            // 裁决卡、回答与作废：队列只认这一族（答过的不重问、作废的不再挂，见 session-model.md「请用户裁决」）。
             "decision_card" => {
-                st.cards += 1;
                 let id = ev
                     .get("id")
                     .and_then(|t| t.as_str())
@@ -185,13 +186,44 @@ pub fn derive(events: &[serde_json::Value], roster_names: &[String]) -> CollabSt
                     .unwrap_or("")
                     .to_string();
                 let payload = ev.get("payload").cloned().unwrap_or(serde_json::json!({}));
-                st.open_gate = Some((id, gate, payload));
+                upsert_card(&mut st, id, gate, payload);
+                // 队首那条事件还带着**排在它后面的那几张**（谁在等 + 各自的重建材料）：
+                // 整队因此只凭转录就能重建，而不是只剩队首一张。
+                if let Some(list) = ev.get("waiting").and_then(|w| w.as_array()) {
+                    for w in list {
+                        let wid = w
+                            .get("id")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        let wgate = w
+                            .get("gate")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        let wpayload = w.get("payload").cloned().unwrap_or(serde_json::json!({}));
+                        if wid.is_empty() || wgate.is_empty() {
+                            continue;
+                        }
+                        upsert_card(&mut st, wid, wgate, wpayload);
+                    }
+                }
             }
             "decision_answer" => {
                 let card = ev.get("card").and_then(|t| t.as_str()).unwrap_or("");
-                if st.open_gate.as_ref().is_some_and(|(id, _, _)| id == card) {
-                    st.open_gate = None;
-                }
+                st.open_gates.retain(|(g, _, _)| g != card);
+            }
+            "decision_void" => {
+                let cards: Vec<String> = ev
+                    .get("cards")
+                    .and_then(|c| c.as_array())
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(|x| x.as_str().map(|s| s.to_string()))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                st.open_gates.retain(|(g, _, _)| !cards.contains(g));
             }
             "delivery" => st.delivery = ev.get("ok").and_then(|t| t.as_bool()),
             "ended" => st.ended = true,
@@ -212,6 +244,21 @@ pub fn derive(events: &[serde_json::Value], roster_names: &[String]) -> CollabSt
         }
     }
     st
+}
+
+/// 目的：把一张卡的机制材料并入队列——认得出（同卡号）就就地更新，新的追加到队尾。
+/// 约束：卡号计数只认**没见过的卡号**——队列形态变了会重推同一张，那不算新卡。
+fn upsert_card(st: &mut CollabState, id: String, gate: String, payload: serde_json::Value) {
+    if st.open_gates.iter().any(|(g, _, _)| *g == id) {
+        if let Some(slot) = st.open_gates.iter_mut().find(|(g, _, _)| *g == id) {
+            *slot = (id, gate, payload);
+        }
+        return;
+    }
+    if st.issued_cards.insert(id.clone()) {
+        st.cards += 1;
+    }
+    st.open_gates.push((id, gate, payload));
 }
 
 /// 统计事件流水里的工具执行次数：数带 tool 字段的转录行（回档警告用它，行即事实）。

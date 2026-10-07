@@ -100,6 +100,30 @@ impl ConductorHandle {
         Ok(stopped)
     }
 
+    /// 目的：把 root 及其整棵子树里等用户裁决的队**一律作废**（停止 = 拒绝），并落盘 + 外送。
+    /// 约束：作废是会话的事实——与回答同一条路（落进转录），重启后按它重建，作废过的卡不再挂起。
+    pub(crate) fn void_gates(&self, root: &str) {
+        let root_owned = root.to_string();
+        let Ok(voids) = self.call(move |core| Ok(core.void_gates_in_subtree(&root_owned))) else {
+            return;
+        };
+        for (sid, events) in voids {
+            let warn = self
+                .call({
+                    let sid = sid.clone();
+                    let events = events.clone();
+                    move |core| Ok(core.persister(&sid).persist(&events))
+                })
+                .ok()
+                .flatten();
+            self.bus.push(&sid, &events);
+            if let Some(w) = warn {
+                self.bus
+                    .push(&sid, std::slice::from_ref(&SessionEvent::Notice(w)));
+            }
+        }
+    }
+
     /// 代理会话：把代理工具的成员侧执行面（`ProxyHandler`）装进这一回合的工具环境。
     /// 执行经队列桥回到核心线程，核心状态的所有权不变。非代理会话、或已装过，什么都不做。
     fn inject_proxy_handler(
@@ -658,14 +682,16 @@ impl ConductorHandle {
             .name("solomni-child-collab".to_string())
             .spawn(move || {
                 let look = sid.clone();
-                let Ok(Some(card)) = me.call(move |core| core.collab_open_card(&look)) else {
+                let Ok(Some(queue)) = me.call(move |core| core.collab_open_card(&look)) else {
                     return;
                 };
                 let allow = crate::capabilities::session::api::OPT_BEGIN_ALLOW;
-                let option = if card.options.iter().any(|o| o.id == allow) {
+                let option = if queue.card.options.iter().any(|o| o.id == allow) {
                     allow.to_string()
                 } else {
-                    card.options
+                    queue
+                        .card
+                        .options
                         .first()
                         .map(|o| o.id.clone())
                         .unwrap_or_default()
@@ -673,7 +699,7 @@ impl ConductorHandle {
                 if option.is_empty() {
                     return;
                 }
-                let _ = me.answer_card(&sid, &card.id, &option, "");
+                let _ = me.answer_card(&sid, &queue.card.id, &option, "");
             });
     }
 

@@ -143,12 +143,18 @@ pub(crate) fn collab_delegated_roster_written_back_and_rebuilt_from_meta() {
         core.history_open("w").unwrap().0.agents.is_empty(),
         "确认名单之前不落档（名单只活在内存里）"
     );
-    // CLI 的确认门要能把这份表单逐行读出来。
-    let slate = core.collab_slate(&sid).unwrap();
-    assert_eq!(slate.len(), 1);
-    assert_eq!(slate[0].name, "调研员");
-    assert!(slate[0].transient, "组装项如实标记为临时 agent");
-    assert_eq!(slate[0].model.as_deref(), Some("m"));
+    // CLI 的确认门要把这份表单逐行读出来——名单在**转录的 [代拟] 行**里（界面照那份显示）。
+    let (_, events) = core.history_open("w").unwrap();
+    let slate: Vec<String> = replay_lines(&events)
+        .into_iter()
+        .filter(|l| l.starts_with("[代拟] "))
+        .collect();
+    assert_eq!(slate.len(), 1, "代拟行要落在转录里：{:?}", slate);
+    assert!(
+        slate[0].contains("调研员〈a〉→ m"),
+        "代拟行要写清名字 / 模块 / 模型：{:?}",
+        slate[0]
+    );
 
     answer_card(&mut core, &sid, OPT_SLATE_CONFIRM, "").unwrap();
     // 确认后名单写回 meta（重启/回档后的权威来源）。

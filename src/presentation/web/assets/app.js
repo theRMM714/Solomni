@@ -2039,10 +2039,15 @@ function absorb(s, ev) {
       return false; // 门要整帧重画
     case 'decision_card':
       // **裁决卡**：与快照里的 pending 是同一个事实，只是到达得更快。
+      // waiting 里是排在队首之后还在等的几张（前面还排着几条由它如实显示）。
       s.pending = ev;
       return false; // 门要整帧重画
     case 'decision_answer':
       // 一次回答的记录：这一关不再挂着（下一关的卡会随后自己推来）。
+      s.pending = null;
+      return false; // 门要整帧重画
+    case 'decision_void':
+      // **整队作废**（用户按停止 / 会话关闭 = 拒绝）：队列里没答的卡一律作废，界面撤下这张卡。
       s.pending = null;
       return false; // 门要整帧重画
     case 'ended':
@@ -2457,6 +2462,16 @@ function renderCard(p) {
   who.className = 'who';
   who.textContent = (p.envelope && p.envelope.name) || '';
   if (who.textContent) el.appendChild(who);
+  // **谁在等、前面还排着几条**：队首之后还在等的那几张如实列出来（只有队首能答）。
+  const waiting = p.waiting || [];
+  if (waiting.length) {
+    const wq = document.createElement('div');
+    wq.className = 'queue';
+    wq.textContent =
+      '后面还排着 ' + waiting.length + ' 张（先答上面这张）：' +
+      waiting.map((w) => ((w.envelope && w.envelope.name) || '') + ' 在等 ' + (w.title || '')).join('；');
+    el.appendChild(wq);
+  }
   const q = document.createElement('div');
   q.className = 'q';
   q.textContent = msg.title || '';

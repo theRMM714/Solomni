@@ -683,9 +683,9 @@ impl ProxyHost for ProxyBridge {
                 move |core| core.collab_open_card(&t)
             })?;
             match card {
-                Some(c) => {
-                    let option = d::relay_option(&c.options, &msg.text);
-                    handle.spawn_detached_collab_answer(&target, &c.id, &option, &msg.text);
+                Some(q) => {
+                    let option = d::relay_option(&q.card.options, &msg.text);
+                    handle.spawn_detached_collab_answer(&target, &q.card.id, &option, &msg.text);
                 }
                 None => handle.spawn_detached_collab(&target),
             }

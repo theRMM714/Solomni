@@ -322,19 +322,25 @@ setTimeout(async () => {
           "  pending: { type: 'decision_card', gate: 'plan_review', id: 'd1'," +
           "    envelope: { role: 'core', name: '核心' }," +
           "    message: { title: '开工？', body: '方案已备好', detail: '建议先做 A' }," +
-          "    options: [{ id: 'plan_start', label: '开工' }, { id: 'plan_say', label: '先说一句' }] } };" +
+          "    options: [{ id: 'plan_start', label: '开工' }, { id: 'plan_say', label: '先说一句' }]," +
+          "    waiting: [{ envelope: { role: 'member', name: '甲' }, title: '甲 在等你回话' }] } };" +
           "renderGate(s); const g = document.querySelector('#gate');" +
           "const card = g.children[0] || { children: [] };" +
           "const cls = card.children.map(function (c) { return c.className; });" +
           "const row = card.children.filter(function (c) { return c.className === 'btns'; })[0] || { children: [] };" +
+          "const q = card.children.filter(function (c) { return c.className === 'queue'; })[0] || { textContent: '' };" +
           "return { hasInput: cls.indexOf('decision-input') >= 0, who: cls.indexOf('who') >= 0," +
+          "  queue: q.textContent," +
           "  labels: Array.prototype.map.call(row.children, function (b) { return b.textContent; }) }; })()",
         sandbox
       );
+      // 队列可见：队首之后还在等的那几张如实显示（"谁在等、前面还排着几条"）。
+      const queueShown = /排着 1 张/.test(r.queue) && /甲/.test(r.queue);
       decisionCardRule =
-        r.hasInput && r.who && r.labels.length === 2 && r.labels[0] === '开工' && r.labels[1] === '先说一句';
+        r.hasInput && r.who && queueShown &&
+        r.labels.length === 2 && r.labels[0] === '开工' && r.labels[1] === '先说一句';
       if (!decisionCardRule) {
-        loadErrors.push("裁决卡检查：输入框=" + r.hasInput + "、信封=" + r.who + "、选项=" + r.labels);
+        loadErrors.push("裁决卡检查：输入框=" + r.hasInput + "、信封=" + r.who + "、队列=" + r.queue + "、选项=" + r.labels);
       }
     } catch (e) { loadErrors.push("裁决卡检查失败：" + e.message); }
   }

@@ -330,6 +330,34 @@ impl Conductor {
         }
     }
 
+    /// 目的：这一段工作已被停 / 已关闭时，把它的裁决队**整队作废**（等待方按「停止 = 拒绝」解开）。
+    /// 返回：要外送 / 落盘的作废事件（本来就没挂着卡 = 空）。判据是落盘的运行态（meta.run），不是内存猜测。
+    pub(crate) fn void_gates_of(&mut self, sid: &str) -> Vec<SessionEvent> {
+        let reason = match self.history.meta(sid).map(|m| m.run) {
+            Ok(RunState::Stopped) => "用户按了停止：这一队裁决一律作废（停止 = 拒绝）",
+            Ok(RunState::Closed) => "会话已关闭：这一队裁决一律作废",
+            _ => return Vec::new(),
+        };
+        let mut out = Vec::new();
+        if let Some(Session::Collab(c)) = self.sessions.get_mut(sid) {
+            c.void_gates(reason, &mut |e| out.push(e));
+        }
+        out
+    }
+
+    /// 目的：把 root 及其整棵子树里等用户裁决的队**一律作废**（停止 = 拒绝），按会话给出作废事件。
+    /// 约束：会话此刻被生成线程拿在手里时它不在表里——那一份由 put_collab 交回时按运行态作废。
+    pub(crate) fn void_gates_in_subtree(&mut self, root: &str) -> Vec<(String, Vec<SessionEvent>)> {
+        let mut out = Vec::new();
+        for sid in self.subtree_of(root) {
+            let evs = self.void_gates_of(&sid);
+            if !evs.is_empty() {
+                out.push((sid, evs));
+            }
+        }
+        out
+    }
+
     /// 协作生成结束**交回**：重新插入 + 解除"生成中"，并**为就绪节点派发子会话**。
     /// 转录已由工作线程按"一次模型调用"的粒度增量落盘（见 `Persister`），这里不重复落。
     /// 返回值：派发产生的事件（调用方负责入台）。
@@ -340,7 +368,11 @@ impl Conductor {
     ) -> (Vec<SessionEvent>, Vec<(String, String, String)>) {
         self.running.remove(sid);
         self.sessions.insert(sid.to_string(), Session::Collab(c));
-        self.spawn_ready_nodes(sid)
+        // 交回时这段工作已被停 / 已关闭：队列里没答的卡**一律作废**（生成期间对象在别人手里，只能在这里补）。
+        let mut voided = self.void_gates_of(sid);
+        let (spawned, todo) = self.spawn_ready_nodes(sid);
+        voided.extend(spawned);
+        (voided, todo)
     }
 
     /// 方案过审后：链里**就绪且还没有子会话**的节点各建一个子会话，并如实外送。

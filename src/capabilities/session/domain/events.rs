@@ -42,6 +42,28 @@ impl DecisionCard {
     }
 }
 
+/// 目的：队首之后还在等的一张卡——界面只看信封与标题（谁在等、问的什么）。
+/// 约束：`id` / `gate` / `payload` 是**机制自己的重建材料**（与队首那张同一套），呈现层不看它们；
+///   带上它们，整队才能只凭队首那条事件从转录重建（见 docs/session/session-model.md「请用户裁决」）。
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct DecisionWaiter {
+    /// 目的：这一张自己的卡号（会话内唯一、稳定）：它升为队首后按这个号回答。
+    pub id: String,
+    pub envelope: DecisionEnvelope,
+    pub title: String,
+    /// 目的：这一关的机制名（与队首那条同一口径）。
+    pub gate: String,
+    /// 目的：这一关的机制载荷（重建这一关用它；不含渲染内容）。
+    pub payload: serde_json::Value,
+}
+
+/// 目的：当前的那一队裁决——队首卡（用户可见 / 可答的那张）+ 后面还在等的几张（先来后到）。
+#[derive(Debug, Clone)]
+pub struct DecisionQueue {
+    pub card: DecisionCard,
+    pub waiting: Vec<DecisionWaiter>,
+}
+
 /// 目的：一次回答的记录——谁答的、选了哪个 id、附言。落盘后重启仍能重建"答过什么"。
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DecisionAnswer {
@@ -128,7 +150,12 @@ pub enum SessionEvent {
         /// 这一关的机制名（ask / confirm_slate / confirm_begin / plan_review / node_blocked）。
         gate: String,
         payload: serde_json::Value,
+        /// 排在队首之后还在等的几张（**只有队首可答**）：界面据此显示"前面还排着几条"。
+        waiting: Vec<DecisionWaiter>,
     },
+    /// **整队作废**（推 + 落盘）：用户按停止（或会话关闭）时，队列里还没答的卡一律作废。
+    /// 等待方按「停止 = 拒绝」解开（不是放行、也不是永远挂着）；已答过的不受影响。
+    DecisionVoid { cards: Vec<String>, reason: String },
     /// **一次裁决回答**（推 + 落盘）：谁答的、选了哪个 id、附言。
     DecisionAnswer(DecisionAnswer),
     /// **正在工作**（短暂，不落盘）：主会话据此知道"现在是谁在干活"。
@@ -442,15 +469,22 @@ impl SessionEvent {
                 card,
                 gate,
                 payload,
+                waiting,
             } => {
                 let mut v = serde_json::to_value(card).unwrap_or(serde_json::Value::Null);
                 if let Some(o) = v.as_object_mut() {
                     o.insert("type".to_string(), serde_json::json!("decision_card"));
                     o.insert("gate".to_string(), serde_json::json!(gate));
                     o.insert("payload".to_string(), payload.clone());
+                    o.insert("waiting".to_string(), serde_json::json!(waiting));
                 }
                 v
             }
+            SessionEvent::DecisionVoid { cards, reason } => serde_json::json!({
+                "type": "decision_void",
+                "cards": cards,
+                "reason": reason
+            }),
             SessionEvent::DecisionAnswer(a) => {
                 let mut v = serde_json::to_value(a).unwrap_or(serde_json::Value::Null);
                 if let Some(o) = v.as_object_mut() {
@@ -646,8 +680,26 @@ impl Pending {
         }
     }
 
-    /// 目的：推给用户的裁决事件（卡片 + 机制自己的重建材料）。
-    pub fn event(&self, id: &str, advice: &str) -> SessionEvent {
+    /// 目的：这一关作为**等待者**的形态（谁在等、问的什么 + 它自己的重建材料）。
+    /// 参数：id = 它自己的卡号；advice = 它那一关的建议（与队首同一来源，重建时要它）。
+    pub fn waiter(&self, id: &str, advice: &str) -> DecisionWaiter {
+        let card = self.card(id, advice);
+        let mut payload = self.payload();
+        if let Some(o) = payload.as_object_mut() {
+            o.insert("advice".to_string(), serde_json::json!(advice));
+        }
+        DecisionWaiter {
+            id: id.to_string(),
+            envelope: card.envelope,
+            title: card.message.title,
+            gate: self.kind().to_string(),
+            payload,
+        }
+    }
+
+    /// 目的：推给用户的裁决事件（卡片 + 机制自己的重建材料 + 后面还在等的那几张）。
+    /// 参数：waiting = 排在队首之后的等待者（先来后到）；队列里只有它一张就是空。
+    pub fn event(&self, id: &str, advice: &str, waiting: &[DecisionWaiter]) -> SessionEvent {
         let mut payload = self.payload();
         if let Some(o) = payload.as_object_mut() {
             o.insert("advice".to_string(), serde_json::json!(advice));
@@ -656,11 +708,12 @@ impl Pending {
             card: self.card(id, advice),
             gate: self.kind().to_string(),
             payload,
+            waiting: waiting.to_vec(),
         }
     }
 
     /// 目的：快照形态（会话视图里的 pending）——与推的事件**同一份事实**。
-    pub fn to_json(&self, id: &str, advice: &str) -> serde_json::Value {
-        self.event(id, advice).to_json()
+    pub fn to_json(&self, id: &str, advice: &str, waiting: &[DecisionWaiter]) -> serde_json::Value {
+        self.event(id, advice, waiting).to_json()
     }
 }

@@ -1256,7 +1256,8 @@ pub(crate) fn collab_child_send_lands_on_the_gate_it_awaits() {
         .sessions
         .open_card(&child)
         .expect("取卡")
-        .expect("挂着一张卡");
+        .expect("挂着一张卡")
+        .card;
     let ids: Vec<String> = card.options.iter().map(|o| o.id.clone()).collect();
     assert_eq!(
         ids,
@@ -1279,7 +1280,7 @@ pub(crate) fn collab_child_send_lands_on_the_gate_it_awaits() {
         let now = ops.sessions.open_card(&child).expect("取卡");
         let ids: Vec<String> = now
             .iter()
-            .flat_map(|c| c.options.iter().map(|o| o.id.clone()))
+            .flat_map(|q| q.card.options.iter().map(|o| o.id.clone()))
             .collect();
         if ids == want {
             break;

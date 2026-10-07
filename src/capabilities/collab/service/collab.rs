@@ -1,9 +1,9 @@
-//! 协作会话状态机：建组 → 讨论 → 整理（出任务链）→ **审查关卡** → 链驱动（节点各跑在子会话里）
-//! → 节点验收 → 总验收（拉模式）。见 docs/collab/task-chain.md。
-//! 前端经 Conductor 门面按 pending 驱动（set_task → confirm_slate? → begin → answer…），泵式收事件。
-//! 发言席只有 agent：名单是 Vec<AgentMeta>（名字 / 模块 / 模型），member id = agent 实例名。
-//! 名单的权威来源是会话 meta.agents（代拟确认后由 Conductor 写回 meta）；转录只用来恢复讨论进度。
-//! 依赖全部为端口与核心数据；无 IO，无具体适配器。
+//! 目的：协作会话状态机——建组、讨论、整理（出任务链）、审查关卡、链驱动、节点验收、总验收。
+//! 管：会话对象的字段（名单 / 讨论 / 链 / **等用户裁决的队列**）与裁决卡的登记、作废、快照形态。
+//! 不管：讨论本身的推进（`discussion.rs`）、泵的每一步（`pump.rs`）、回合收发与回答
+//!   （`turn_io.rs`）、代拟名单与按转录重建（`slate.rs`）；它不碰会话表，也不写别人的会话。
+//! 联动：契约见 docs/session/session-model.md 的「请用户裁决：一条通道，消息 + 选项」与
+//!   docs/collab/task-chain.md；前端按快照的 pending 与推的裁决事件驱动，不做第二真相。
 
 use super::pump::*;
 use crate::capabilities::collab::service::discussion::Discussion;
@@ -12,7 +12,7 @@ use crate::capabilities::llm::api::{Chat, Llm, Msg};
 use crate::capabilities::prompt::api::{Prompt, Segment};
 use crate::capabilities::registry::api::Settings;
 use crate::capabilities::session::api::AgentMeta;
-use crate::capabilities::session::api::{DecisionCard, LineView, Pending, SessionEvent};
+use crate::capabilities::session::api::{DecisionQueue, LineView, Pending, SessionEvent};
 use crate::capabilities::tools::api::ToolExec;
 use crate::capabilities::workspace::api::ExecSpec;
 use crate::capabilities::workspace::api::Sandboxes;
@@ -94,6 +94,14 @@ pub(crate) fn read_only_roots(
         .collect()
 }
 
+/// 目的：队列里的一关——卡号 + 这一关的机制材料 + 核心给的建议（同生同灭）。
+#[derive(Debug, Clone)]
+pub(crate) struct Gate {
+    pub(crate) id: String,
+    pub(crate) pending: Pending,
+    pub(crate) advice: String,
+}
+
 pub struct CollabSession {
     /// 是否代拟：显式传入（WorkSpec.delegate / meta.delegate），不从名单是否为空推断。
     pub(crate) delegated: bool,
@@ -104,10 +112,10 @@ pub struct CollabSession {
     pub(crate) slate_picks: Vec<AgentMeta>,
     /// 登记处快照：agent 的模型解析与核心通道在此进行（策略在 conductor）。
     pub(crate) settings: Settings,
-    /// 当前用户介入请求。
-    pub(crate) pending: Option<Pending>,
-    /// 目的：当前挂着的那张卡的 id（与 pending 同生同灭）：回答按它认卡。
-    pub(crate) card_id: Option<String>,
+    /// 目的：等用户裁决的**队列**（先来后到）：队首那张才对用户可见、可答，其余如实排在后面。
+    pub(crate) gates: std::collections::VecDeque<Gate>,
+    /// 目的：已经推给界面的队列形态（队首卡号 + 后面等待的卡号）：形态变了才再推一条。
+    pub(crate) announced: Option<(String, Vec<String>)>,
     /// 目的：已发出的卡数：下一条卡号是 cards + 1（会话内唯一、跨重启稳定）。
     pub(crate) cards: u64,
     pub(crate) allow: bool,
@@ -155,8 +163,8 @@ pub struct CollabSession {
     pub(crate) cancel: Arc<std::sync::atomic::AtomicBool>,
     /// 方案是否已过审（审查关卡）：没过审不开工。由转录里的 [用户:同意方案] 派生。
     pub(crate) plan_approved: bool,
-    /// 核心 AI 给用户的**建议**（随方案 / 节点验收那一次调用一起产出）：只属于当前这一关，
-    /// 进推的 Decision 与快照里的 pending；用掉就清，别漏到下一关。
+    /// 核心 AI 给用户的**建议**（随方案 / 节点验收那一次调用一起产出）：只属于**下一次登记**的那一关，
+    /// 登记时搬进队列里的那一关；用掉就清，别漏到下一关。
     pub(crate) gate_advice: String,
 }
 
@@ -188,8 +196,8 @@ impl CollabSession {
             task: String::new(),
             slate_picks: Vec::new(),
             settings,
-            pending: None,
-            card_id: None,
+            gates: std::collections::VecDeque::new(),
+            announced: None,
             cards: 0,
             allow: false,
             plan: None,
@@ -224,7 +232,6 @@ impl CollabSession {
         let line = self.view(LineView::user("同意方案", String::new()));
         sink(SessionEvent::Transcript(vec![line]));
         self.plan_approved = true;
-        self.pending = None;
         self.gate_advice.clear(); // 这一关解除了，建议不再属于任何挂起的事
     }
 
@@ -432,39 +439,86 @@ impl CollabSession {
         }
     }
 
-    /// 目的：挂起一件等用户裁决的事，并**推**一张裁决卡（卡片 + 机制重建材料）。
-    ///   卡号在这一处分配（会话内唯一、跨重启稳定）：推的事件与快照里的 pending 同源，不做第二真相。
+    /// 目的：挂起一件等用户裁决的事：**进队尾**，并把它此刻的队列形态推给界面。
+    ///   卡号在这一处分配（会话内唯一、跨重启稳定）：推的事件与快照里的 pending 同源。
+    /// 约束：一次只有队首那张对用户可见 / 可答——后面进来的排在它后面，不抢占、不覆盖。
     pub(crate) fn ask_user(&mut self, p: Pending, sink: &mut dyn FnMut(SessionEvent)) {
-        // 建议是核心 AI 给的（随方案/验收那一次调用）：关卡挂着期间一直有效（快照也要它），
-        // 解除挂起时（见 close_gate）清掉，别漏到下一关。
-        // 等用户 = 这一刻没人在干活（否则界面一直显示上一个成员的名字）。
-        sink(crate::capabilities::session::api::idle());
         self.cards += 1;
         let id = format!("d{}", self.cards);
-        let ev = p.event(&id, &self.gate_advice);
-        self.pending = Some(p);
-        self.card_id = Some(id);
+        let advice = std::mem::take(&mut self.gate_advice);
+        self.gates.push_back(Gate {
+            id,
+            pending: p,
+            advice,
+        });
+        self.announce(sink);
+    }
+
+    /// 目的：把**当前队列形态**推给界面（队首卡 + 后面还在等的几张）：形态变了才推一条。
+    /// 约束：推的与快照的是同一份（`Pending::event`），不做第二真相；等用户 = 这一刻没人在干活。
+    pub(crate) fn announce(&mut self, sink: &mut dyn FnMut(SessionEvent)) {
+        let Some(head) = self.gates.front() else {
+            self.announced = None;
+            return;
+        };
+        let shape = (
+            head.id.clone(),
+            self.gates
+                .iter()
+                .skip(1)
+                .map(|g| g.id.clone())
+                .collect::<Vec<String>>(),
+        );
+        if self.announced.as_ref() == Some(&shape) {
+            return;
+        }
+        let ev = head.pending.event(&head.id, &head.advice, &self.waiters());
+        self.announced = Some(shape);
+        sink(crate::capabilities::session::api::idle());
         sink(ev);
     }
 
-    /// 目的：解除挂起：这一关没人再挂着（卡与建议一起清）。回答处理好了就调它。
-    pub(crate) fn close_gate(&mut self) {
-        self.pending = None;
-        self.card_id = None;
+    /// 目的：队首之后还在等的几张卡（谁在等、问的什么 + 各自的重建材料）：推的事件与快照都带它。
+    pub(crate) fn waiters(&self) -> Vec<crate::capabilities::session::api::DecisionWaiter> {
+        self.gates
+            .iter()
+            .skip(1)
+            .map(|g| g.pending.waiter(&g.id, &g.advice))
+            .collect()
+    }
+
+    /// 目的：整队作废（用户按停止 / 会话被关闭 = 拒绝）：队列里还没答的卡一律作废，等待方因此解开。
+    /// 约束：作废是会话的事实——落一条 `DecisionVoid`（卡号 + 原因），转录里作废过的卡不再挂起。
+    pub fn void_gates(&mut self, reason: &str, sink: &mut dyn FnMut(SessionEvent)) {
+        if self.gates.is_empty() {
+            return;
+        }
+        let cards: Vec<String> = self.gates.iter().map(|g| g.id.clone()).collect();
+        self.gates.clear();
+        self.announced = None;
         self.gate_advice.clear();
+        sink(SessionEvent::DecisionVoid {
+            cards,
+            reason: reason.to_string(),
+        });
     }
 
-    /// 目的：当前挂着的卡（没有挂起 = None）：刷新页面照它重建，与推的那张同一份。
-    pub fn open_card(&self) -> Option<DecisionCard> {
-        let p = self.pending.as_ref()?;
-        let id = self.card_id.as_deref().unwrap_or("");
-        Some(p.card(id, &self.gate_advice))
+    /// 目的：当前挂着的那一队裁决（没有挂起 = None）：刷新页面照它重建，与推的那张同一份。
+    pub fn open_queue(&self) -> Option<DecisionQueue> {
+        let head = self.gates.front()?;
+        Some(DecisionQueue {
+            card: head.pending.card(&head.id, &head.advice),
+            waiting: self.waiters(),
+        })
     }
 
-    /// 目的：快照形态的挂起（会话视图里的 pending）：与推的那张卡**同一份事实**。
+    /// 目的：快照形态的挂起（会话视图里的 pending）：与推的那张卡**同一份事实**（含等待者）。
     pub fn open_card_json(&self) -> Option<serde_json::Value> {
-        let p = self.pending.as_ref()?;
-        Some(p.to_json(self.card_id.as_deref().unwrap_or(""), &self.gate_advice))
+        let head = self.gates.front()?;
+        Some(
+            head.pending
+                .to_json(&head.id, &head.advice, &self.waiters()),
+        )
     }
 
     /// 裁决的**背景**：交给核心 AI 判"用户的意图明确了吗"用——把现场说清楚，别让它猜。
@@ -495,14 +549,10 @@ impl CollabSession {
         }
     }
 
-    /// 正在等用户（请教 / 方案待审 / 节点没过）：泵**不再往下推**，直到用户回应。
+    /// 正在等用户（队列里还有没答的卡）：泵**不再往下推**，直到用户回答或整队作废。
+    /// 判据是队列本身：请教 / 名单确认 / 开工确认 / 方案待审 / 节点没过都排在同一条队上。
     pub fn awaiting_user(&self) -> bool {
-        matches!(
-            self.pending,
-            Some(Pending::Ask { .. })
-                | Some(Pending::PlanReview)
-                | Some(Pending::NodeBlocked { .. })
-        )
+        !self.gates.is_empty()
     }
 
     /// 成员回合失败：记下原因，下一次泵推一步时如实交回（不静默吞掉）。
@@ -553,12 +603,6 @@ impl CollabSession {
     /// 在组名单（agent 实例）。
     pub fn roster(&self) -> &[AgentMeta] {
         &self.roster
-    }
-
-    /// 目的：测试用：代拟拟好的名单（生产路径不取它——名单在转录的 [代拟] 行里）。
-    #[cfg(test)]
-    pub fn slate(&self) -> Vec<AgentMeta> {
-        self.slate_picks.clone()
     }
 
     /// 代拟确认后由 Conductor 补上沙箱清单（名单刚定下来时才有）。

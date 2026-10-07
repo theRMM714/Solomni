@@ -94,7 +94,8 @@ impl SessionOps for ConductorHandle {
         )
     }
 
-    fn open_card(&self, sid: &str) -> Result<Option<DecisionCard>, String> {
+    /// 当前挂着的那一队裁决（队首卡 + 后面还在等的那几张）：CLI 与 Web 照同一份渲染。
+    fn open_card(&self, sid: &str) -> Result<Option<DecisionQueue>, String> {
         let sid = sid.to_string();
         self.call(move |core| core.collab_open_card(&sid))
     }
@@ -164,6 +165,8 @@ impl SessionOps for ConductorHandle {
     fn stop(&self, sid: &str) -> Vec<String> {
         let sid_owned = sid.to_string();
         let _ = self.call(move |core| core.set_subtree_run(&sid_owned, RunState::Stopped));
+        // **停止 = 拒绝**：整棵子树里等用户裁决的队一律作废（落盘 + 如实外送），等待方因此解开。
+        self.void_gates(sid);
         self.stop_tree(sid).unwrap_or_default()
     }
 

@@ -18,6 +18,10 @@ impl CollabSession {
         if self.done || self.disc.is_none() {
             return;
         }
+        // 队列里还挂着等用户答的卡：泵**一步都不推**（谁也不能替用户答，见 session-model.md）。
+        if self.awaiting_user() {
+            return;
+        }
         let prompts = self.prompts.clone();
         // 讨论阶段：只在未收敛时步进（回档/重启后可从中途接着走）。
         if !self.disc.as_ref().expect("disc 已确认存在").closed {
@@ -549,35 +553,37 @@ pub(crate) fn slate_item(a: &AgentMeta, why: &str) -> String {
     }
 }
 
-/// 目的：从派生状态推出当前挂起（None = 没有待用户处理的门）。
-///   判据两条并用：**转录里最后一张没人回答的卡**优先（它带着卡号与这一关的载荷）；
-///   没有这样的卡时退回**状态派生**——回档把卡连同那一段转录一起截掉时，
+/// 目的：从派生状态推出**当前整队**待用户裁决的关（空 = 没有待用户处理的门）：队首在最前。
+///   判据两条并用：**转录里没人回答、也没作废的那几张卡**优先（按先来后到，各带卡号与这一关的载荷）；
+///   一张都没有时退回**状态派生**——回档把卡连同那一段转录一起截掉、或停会话把整队作废之后，
 ///   状态照样说得出"还停在名单确认 / 开始讨论"，回来时续一个新卡号接着问。
-pub(crate) fn derive_gate(
+pub(crate) fn derive_gates(
     st: &crate::capabilities::collab::domain::collab_state::CollabState,
-) -> Option<(Option<String>, Pending, String)> {
+) -> Vec<(Option<String>, Pending, String)> {
     if st.ended {
-        return None;
+        return Vec::new();
     }
-    if let Some((id, gate, payload)) = st.open_gate.as_ref() {
-        if let Some(p) = Pending::from_payload(gate, payload) {
+    let mut out: Vec<(Option<String>, Pending, String)> = st
+        .open_gates
+        .iter()
+        .filter_map(|(id, gate, payload)| {
+            let p = Pending::from_payload(gate, payload)?;
             let advice = payload
                 .get("advice")
                 .and_then(|v| v.as_str())
                 .unwrap_or("")
                 .to_string();
-            return Some((Some(id.clone()), p, advice));
-        }
-    }
-    if !st.begun {
+            Some((Some(id.clone()), p, advice))
+        })
+        .collect();
+    if out.is_empty() && !st.begun {
         if st.slate.is_some() && !st.slate_confirmed {
-            return Some((None, Pending::ConfirmSlate, String::new()));
-        }
-        if st.task.is_some() {
-            return Some((None, Pending::ConfirmBegin, String::new()));
+            out.push((None, Pending::ConfirmSlate, String::new()));
+        } else if st.task.is_some() {
+            out.push((None, Pending::ConfirmBegin, String::new()));
         }
     }
-    None
+    out
 }
 
 /// 逐成员外送：把刚定稿的讨论行变成带**会话内稳定 id** 的转录事件交出去。

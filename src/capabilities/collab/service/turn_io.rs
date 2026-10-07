@@ -123,26 +123,25 @@ impl CollabSession {
         }
     }
 
-    /// 回答 ask（仅 Ask 挂起时有效）；回答转达后继续泵。用户回答同样先改写 @ 引用。
-    pub fn answer(&mut self, text: &str, sink: &mut dyn FnMut(SessionEvent)) {
-        if matches!(self.pending, Some(Pending::Ask { .. })) {
-            self.close_gate();
-            let roots = crate::capabilities::prompt::api::RefRoots {
-                work: self.sandboxes.shared.clone(),
-                private: None,
-            };
-            let text =
-                crate::capabilities::prompt::api::rewrite(text, None, &roots, &self.prompts.refs());
-            if let Some(disc) = self.disc.as_mut() {
-                disc.pending_user_answers.push(text);
-            }
-            self.pump_with(sink);
+    /// 回答请教那一关：用户的话进主会话（所有成员下一回合都看得到），接着往下推。
+    /// 约束：那一关已由 `answer_card` 出队——这里只管"他的话怎么进业务"，不碰队列。
+    pub(crate) fn answer(&mut self, text: &str, sink: &mut dyn FnMut(SessionEvent)) {
+        let roots = crate::capabilities::prompt::api::RefRoots {
+            work: self.sandboxes.shared.clone(),
+            private: None,
+        };
+        let text =
+            crate::capabilities::prompt::api::rewrite(text, None, &roots, &self.prompts.refs());
+        if let Some(disc) = self.disc.as_mut() {
+            disc.pending_user_answers.push(text);
         }
+        self.pump_with(sink);
     }
 
-    /// 目的：回答一张裁决卡——带卡片 id + 选项 id（+ 附言），校验选项 id 属于当时那张卡。
-    /// 约束：只有这一条回答口——选项 id 是行为契约，描述文字只用于渲染（见 session-model.md「请用户裁决」）。
-    /// 错误：没有挂起、卡号对不上、选项不在那张卡上，都如实拒绝，不吞不猜。
+    /// 目的：回答**队首那张**裁决卡——带卡片 id + 选项 id（+ 附言），校验选项属于当时那张卡。
+    /// 约束：只有这一条回答口——选项 id 是行为契约，描述文字只用于渲染（见 session-model.md「请用户裁决」）；
+    ///   只有队首可答，排在后面的那几张还不能答（它们对用户不可见）。
+    /// 错误：没有挂起、卡号不是队首、选项不在那张卡上、该关必填的附言为空，都如实拒绝且不留痕。
     /// 返回：这一关**放行了没有**（true = 开工 / 重派，调用方要接着跑整条流水线）。
     pub fn answer_card(
         &mut self,
@@ -151,87 +150,105 @@ impl CollabSession {
         note: &str,
         sink: &mut dyn FnMut(SessionEvent),
     ) -> Result<bool, String> {
-        let Some(p) = self.pending.clone() else {
+        let Some(gate) = self.gates.front().cloned() else {
             return Err("[裁决] 现在没有等你定的事。".to_string());
         };
-        let open = self.card_id.clone().unwrap_or_default();
-        if open != card_id {
+        if gate.id != card_id {
             return Err(format!(
                 "这张卡已经不是当前那张了（现在等的是 {}）；请按界面上的卡片作答。",
-                if open.is_empty() {
-                    "（没有）"
-                } else {
-                    &open
-                }
+                gate.id
             ));
         }
-        if !p.card(&open, &self.gate_advice).has_option(option) {
+        if !gate.pending.card(&gate.id, &gate.advice).has_option(option) {
             return Err(format!("这张卡上没有这个选项：{}", option));
         }
-        // 回答先落档（谁答的、选了哪个 id、附言），再按选项 id 分派给这一关自己处置。
+        // 选项必须是这一关能分派的那些（卡上的选项集就是它们）：不认识的在记账与出队**之前**挡下。
+        if !matches!(
+            option,
+            OPT_ASK_REPLY
+                | OPT_SLATE_CONFIRM
+                | OPT_SLATE_CANCEL
+                | OPT_BEGIN
+                | OPT_BEGIN_ALLOW
+                | OPT_PLAN_START
+                | OPT_NODE_REWORK
+                | OPT_PLAN_SAY
+                | OPT_NODE_SAY
+        ) {
+            return Err(format!("这张卡上没有这个选项：{}", option));
+        }
+        let note = note.trim().to_string();
+        // 必填附言先判：被拒的回答**不留痕**（不落回答、不出队），这一关继续挂着等他说清楚。
+        if option == OPT_ASK_REPLY && note.is_empty() {
+            return Err("这一关要附一句回话：把要说的话写在附言里。".to_string());
+        }
+        if (option == OPT_PLAN_SAY || option == OPT_NODE_SAY) && note.is_empty() {
+            return Err("这一关要附一句你的想法：把要说的话写在附言里。".to_string());
+        }
+        // 接受这一答：先落档（谁答的、选了哪个 id、附言），再出队——后面排着的依次往前一位。
         sink(SessionEvent::DecisionAnswer(DecisionAnswer {
-            card: open.clone(),
+            card: gate.id.clone(),
             by: "用户".to_string(),
             option: option.to_string(),
-            note: note.to_string(),
+            note: note.clone(),
         }));
-        let note = note.trim().to_string();
+        self.gates.pop_front();
+        self.announced = None;
+        let p = gate.pending.clone();
         let nodes = match &p {
             Pending::NodeBlocked { nodes } => nodes.clone(),
             _ => Vec::new(),
         };
-        match option {
+        let go = match option {
             // 请教：他的话进主会话（所有成员下一回合都看得到），继续泵；不单独转给那个成员。
             OPT_ASK_REPLY => {
-                if note.is_empty() {
-                    return Err("这一关要附一句回话：把要说的话写在附言里。".to_string());
-                }
                 self.answer(&note, sink);
-                Ok(false)
+                false
             }
             OPT_SLATE_CONFIRM | OPT_SLATE_CANCEL => {
-                self.close_gate();
                 self.confirm_slate(option == OPT_SLATE_CONFIRM, sink);
-                Ok(false)
+                false
             }
             OPT_BEGIN | OPT_BEGIN_ALLOW => {
-                self.close_gate();
                 self.begin(option == OPT_BEGIN_ALLOW, sink);
-                Ok(false)
+                false
             }
             // 放行类：他的附言进主会话当反馈，然后才开工 / 重派。
             OPT_PLAN_START => {
-                self.close_gate();
                 self.note_user(&note, sink);
                 self.approve_plan(sink);
                 self.resume(sink);
-                Ok(true)
+                true
             }
             OPT_NODE_REWORK => {
-                self.close_gate();
                 self.note_user(&note, sink);
                 for n in &nodes {
                     self.reset_node(n);
                 }
                 self.resume(sink);
-                Ok(true)
+                true
             }
             // "先说一句"：他的话进主会话当反馈，**由核心 AI 判这句话是否明确**——
             // 明确才开工 / 重派，模糊就不动、关卡继续挂着（见 session-model.md「请用户裁决」）。
-            OPT_PLAN_SAY | OPT_NODE_SAY => {
-                if note.is_empty() {
-                    return Err("这一关要附一句你的想法：把要说的话写在附言里。".to_string());
-                }
-                Ok(self.judge_note(&p, &note, sink))
-            }
-            other => Err(format!("这张卡上没有这个选项：{}", other)),
-        }
+            OPT_PLAN_SAY | OPT_NODE_SAY => self.judge_note(&p, &gate.advice, &note, sink),
+            other => return Err(format!("这张卡上没有这个选项：{}", other)),
+        };
+        // 出队之后队首换了：把新的队首卡（+ 后面还在等的几张）如实推给界面。
+        self.announce(sink);
+        Ok(go)
     }
 
     /// "先说一句"这一条的处理：他的话进主会话当反馈，再由核心 AI 判**是否明确**。
-    /// 明确才开工 / 重派；模糊就不动、关卡继续挂着（作废这一条、推一张新的）。
+    /// 明确才开工 / 重派；模糊就不动、关卡继续挂着（这一条已经答过，续一张新的接着问）。
     /// 返回：明确到可以放行 = true。
-    fn judge_note(&mut self, p: &Pending, note: &str, sink: &mut dyn FnMut(SessionEvent)) -> bool {
+    /// 参数：advice = 原来那一关带着的建议（续的新卡要带上它，别让建议随出队丢掉）。
+    fn judge_note(
+        &mut self,
+        p: &Pending,
+        advice: &str,
+        note: &str,
+        sink: &mut dyn FnMut(SessionEvent),
+    ) -> bool {
         let kind = p.kind();
         let brief = self.decision_brief(p);
         let text = note.to_string();
@@ -263,13 +280,11 @@ impl CollabSession {
                 }
                 match p {
                     Pending::PlanReview => {
-                        self.close_gate();
                         self.approve_plan(sink);
                         self.resume(sink);
                         true
                     }
                     Pending::NodeBlocked { nodes } => {
-                        self.close_gate();
                         for n in nodes {
                             self.reset_node(n);
                         }
@@ -279,7 +294,7 @@ impl CollabSession {
                     _ => false,
                 }
             }
-            // 不明确 = **不动**：不自动往下推，关卡继续挂着等他补一句。
+            // 不明确 = **不动**：不自动往下推，这一关续一张新卡接着等他补一句。
             Ok((false, why)) => {
                 sink(SessionEvent::Notice(if why.trim().is_empty() {
                     "[裁决] 我还没听出明确的意思，先不动；请再说一句（要做 / 不要做 / 照哪个走）。"
@@ -287,6 +302,7 @@ impl CollabSession {
                 } else {
                     format!("[裁决] 先不动——{}；请再说一句。", why)
                 }));
+                self.gate_advice = advice.to_string();
                 self.ask_user(p.clone(), sink);
                 false
             }
@@ -297,6 +313,7 @@ impl CollabSession {
                         err
                     )),
                 ));
+                self.gate_advice = advice.to_string();
                 self.ask_user(p.clone(), sink);
                 false
             }

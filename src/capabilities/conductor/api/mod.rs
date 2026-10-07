@@ -15,7 +15,9 @@
 use crate::capabilities::conductor::service::Conductor;
 use crate::capabilities::registry::api::AgentView;
 use crate::capabilities::session::api::HistoryView;
-pub use crate::capabilities::session::api::{DecisionCard, SessionEvent};
+pub use crate::capabilities::session::api::{
+    DecisionCard, DecisionQueue, DecisionWaiter, SessionEvent,
+};
 // 工具确认的答案类型归 kernel（跨线程机制）；这里转出给呈现层，呈现层不直接认 kernel。
 pub use crate::kernel::api::Approval;
 use crate::kernel::api::JobRegistry;
@@ -200,8 +202,9 @@ pub trait SessionOps: Send + Sync {
         option: &str,
         note: &str,
     ) -> Result<Advance, String>;
-    /// 当前挂着的那张卡（None = 没有等你定的事）：呈现层按选项渲染，不按 kind 猜。
-    fn open_card(&self, sid: &str) -> Result<Option<DecisionCard>, String>;
+    /// 当前挂着的那一队裁决（None = 没有等你定的事）：队首卡按选项渲染，后面还在等的几张如实列出。
+    /// 约束：判据只有这一处——推的事件与快照的 pending 都从它派生（见 docs/session/session-model.md）。
+    fn open_card(&self, sid: &str) -> Result<Option<DecisionQueue>, String>;
     fn withdraw_agree(&self, sid: &str, agent: &str) -> Result<Advance, String>;
     /// 回档：返回重放后的完整事件流（已是线格式，供前端整体重建）。
     fn rewind(&self, sid: &str, target: RewindTarget) -> Result<Vec<serde_json::Value>, String>;

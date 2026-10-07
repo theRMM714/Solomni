@@ -299,18 +299,8 @@ impl Conductor {
         self.collab_tail(sid, out, confirmed)
     }
 
-    /// 目的：测试用：代拟拟好的名单（生产路径不取它——名单在转录的 [代拟] 行里，界面照那份显示）。
-    #[cfg(test)]
-    pub fn collab_slate(&mut self, sid: &str) -> Result<Vec<AgentMeta>, String> {
-        self.ensure_session(sid)?;
-        match self.sessions.get(sid) {
-            Some(Session::Collab(c)) => Ok(c.slate()),
-            Some(_) => Err("该会话不是协作模式".to_string()),
-            None => Err("无此会话".to_string()),
-        }
-    }
-
     /// 目的：当前挂起是哪一关（None = 没在等门）：回答走"短步骤"还是"点火跑泵"按它分。
+    /// 约束：判据是**队首**那一关——排队里后面的那几张还不能答。
     pub fn collab_gate_kind(&mut self, sid: &str) -> Result<Option<String>, String> {
         // 会话不在中心 / 不是协作会话：如实给 None——真正的拒绝由回答那一步报出来。
         Ok(match self.collab_pending(sid) {
@@ -319,14 +309,14 @@ impl Conductor {
         })
     }
 
-    /// 目的：当前挂着的那张卡（没有挂起 = None）：呈现层按它渲染，回答按它认卡。
+    /// 目的：当前挂着的那一队裁决（没有挂起 = None）：呈现层按它渲染，回答按**队首**认卡。
     pub fn collab_open_card(
         &mut self,
         sid: &str,
-    ) -> Result<Option<crate::capabilities::session::api::DecisionCard>, String> {
+    ) -> Result<Option<crate::capabilities::session::api::DecisionQueue>, String> {
         self.ensure_session(sid)?;
         match self.sessions.get(sid) {
-            Some(Session::Collab(c)) => Ok(c.open_card()),
+            Some(Session::Collab(c)) => Ok(c.open_queue()),
             Some(_) => Err("该会话不是协作模式".to_string()),
             None => Err("无此会话".to_string()),
         }
@@ -464,10 +454,10 @@ impl Conductor {
         Ok(events)
     }
 
-    /// 协作会话当前介入请求（None = 无挂起或已终结）。
+    /// 协作会话当前的介入请求（None = 无挂起或已终结）：**队首**那一关——排队里后面的还不能答。
     pub fn collab_pending(&self, sid: &str) -> Result<Option<Pending>, String> {
         match self.sessions.get(sid) {
-            Some(Session::Collab(c)) => Ok(c.pending.clone()),
+            Some(Session::Collab(c)) => Ok(c.gates.front().map(|g| g.pending.clone())),
             Some(_) => Err("该会话不是协作模式".to_string()),
             None => Err("无此会话".to_string()),
         }
