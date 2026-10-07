@@ -106,7 +106,7 @@ fn acl_round_trip(base: &Path, tag: &str) -> bool {
         && has_any_ace_for(sid, &target)
         && revoke_one(sid, &target, false).is_ok()
         && acl_entries(&target)
-            .map(|after| after == before)
+            .map(|after| lost_entries(&before, &after).is_empty())
             .unwrap_or(false);
     free_sid(sid);
     ok
@@ -758,13 +758,13 @@ fn acl_write_flavours_are_probed_for_scope_and_readability() {
         free_sid(sid);
         assert!(grant.is_ok(), "{tag}：授予应当成功");
         assert!(revoke.is_ok(), "{tag}：撤销应当成功");
-        assert_eq!(
-            root_before, root_after,
-            "{tag}：写入并撤销后根原有 ACE 集合必须一致"
+        assert!(
+            lost_entries(&root_before, &root_after).is_empty(),
+            "{tag}：写入并撤销后根原有的不同 ACE 必须都在（集合语义）"
         );
-        assert_eq!(
-            sub_before, sub_after,
-            "{tag}：写入并撤销后子目录原有 ACE 集合必须一致"
+        assert!(
+            lost_entries(&sub_before, &sub_after).is_empty(),
+            "{tag}：写入并撤销后子目录原有的不同 ACE 必须都在（集合语义）"
         );
         match (recursive, inherit) {
             // 非递归只设根本身；TreeSet 配**不带继承标志**的 ACE 同样只落在根——
@@ -860,7 +860,11 @@ fn write_then_restore_keeps_the_original_ace_set() {
     free_sid(sid);
     restore_sd(&target, &bytes).expect("还原原始安全描述符");
     let after = acl_entries(&target).expect("读还原后 ACE 集合");
-    assert_eq!(before, after, "写入并还原后原有 ACE 集合必须一致");
+    // 集合语义：还原可能把重复 ACE 收敛成一份，出现次数变少不算不一致；不同三元组必须一致。
+    assert!(
+        lost_entries(&before, &after).is_empty() && lost_entries(&after, &before).is_empty(),
+        "写入并还原后原有 ACE 集合必须一致"
+    );
     let sid = container_sid(&container_name(&spec)).expect("派生容器 SID");
     assert!(
         !has_any_ace_for(sid, &target),

@@ -369,19 +369,16 @@ pub(crate) fn acl_entries(path: &Path) -> Result<Vec<(u8, String, u32)>, String>
     Ok(out)
 }
 
-/// 目的：找出「写前有、写后没了」的 ACE（多重集差）。
-fn lost_entries(
+/// 目的：找出「写前在场、写后整个不见了」的不同 ACE 三元组（集合语义）。
+/// 约束：TreeSet 会把子节点上重复的 ACE 收敛成一份，出现次数变少不算丢失；同一三元组仍在即算在场。
+pub(crate) fn lost_entries(
     before: &[(u8, String, u32)],
     after: &[(u8, String, u32)],
 ) -> Vec<(u8, String, u32)> {
-    let mut pool = after.to_vec();
     let mut lost = Vec::new();
     for item in before {
-        match pool.iter().position(|x| x == item) {
-            Some(pos) => {
-                pool.remove(pos);
-            }
-            None => lost.push(item.clone()),
+        if !after.contains(item) && !lost.contains(item) {
+            lost.push(item.clone());
         }
     }
     lost
