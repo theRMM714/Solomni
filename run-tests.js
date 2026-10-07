@@ -65,6 +65,8 @@ function sh(cmd, args) {
   const slug = (s) => String(s).replace(/[^\w.-]+/g, "_");
   const logFile = path.join(logDir, slug(path.basename(cmd)) + "-" + args.map(slug).join("_") + ".log");
   const fd = fs.openSync(logFile, "w");
+  // 跑之前先报出这一步的**实时日志落点**：门禁卡住时直接读这个文件就知道停在哪（子进程边走边写）。
+  process.stdout.write("    实时日志：" + path.relative(ROOT, logFile) + "\n");
   const r = spawnSync(cmd, args, { cwd: ROOT, env: buildEnv(), stdio: ["ignore", fd, fd] });
   fs.closeSync(fd);
   const out = fs.readFileSync(logFile, "utf8");

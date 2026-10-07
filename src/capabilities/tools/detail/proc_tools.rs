@@ -958,7 +958,15 @@ mod tests {
             "有选项就不该停会话"
         );
         assert!(
-            out.output.contains(&tools.texts.tool_fence_unfenced),
+            // 册子文案带占位符，渲染后才进回执：按**无占位符的前缀**断言，改文案不改这里。
+            out.output.contains(
+                tools
+                    .texts
+                    .tool_fence_unfenced
+                    .split("{{")
+                    .next()
+                    .unwrap_or("")
+            ),
             "回执要如实标为无围栏：{}",
             out.output
         );

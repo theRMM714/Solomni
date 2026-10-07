@@ -17,6 +17,27 @@ const act = (sid, id, body) => api('POST', '/api/actions/' + id, Object.assign({
 /* 登记处动作不跟会话走：直接打动作端点（不带 session_id）。 */
 const reg = (id, body) => api('POST', '/api/actions/' + id, body || {});
 
+/** 取状态并**顺手答掉挡路的卡**：任何等待循环都必须过它——没人答卡就是"不点不继续"，会永远挂着。 */
+async function stateOk() {
+  const s = await api('GET', '/api/state');
+  const holder = (((s.json && s.json.sessions) || []).find((x) => x.pending && x.pending.gate === 'tool_ask'));
+  if (holder) {
+    console.log('    [诊断] 顺手答 tool_ask：sid=' + holder.sid + ' id=' + holder.pending.id);
+    await act(holder.sid, 'answer_card', { card: holder.pending.id, option: 'fence_unfenced_once', note: '' });
+  }
+  return s;
+}
+
+/** 并发答卡泵：动作在飞的时候（`send_message` 要等整次生成结束才返回）也要能答卡——
+ *  否则生成卡在"等用户答卡"上、驱动卡在动作上，双方互等。CI 上这类卡不出现，泵只是空转。
+ *  用 `unref` 让定时器不吊住进程。 */
+function startCardPump() {
+  const t = setInterval(() => { stateOk().catch(() => {}); }, 300);
+  if (t.unref) t.unref();
+  return t;
+}
+startCardPump();
+
 async function api(method, p, body) {
   const r = await fetch(BASE + p, {
     method,
@@ -47,7 +68,7 @@ async function mockSeen() {
 async function waitCard(sid, ms) {
   const deadline = Date.now() + (ms || 15000);
   for (;;) {
-    const s = await api('GET', '/api/state');
+    const s = await stateOk();
     const v = ((s.json && s.json.sessions) || []).find((x) => x.sid === sid);
     if (v && v.pending && v.pending.type === 'decision_card') return v.pending;
     if (Date.now() > deadline) return null;
@@ -66,12 +87,25 @@ async function settleSegment(sid, ms) {
   let last = -1;
   let quiet = 0;
   let sawRunning = false;
+  let seenGate = '';
   for (;;) {
-    const s = await api('GET', '/api/state');
+    const s = await stateOk();
     const v = ((s.json && s.json.sessions) || []).find((x) => x.sid === sid);
     const h = await api('GET', '/api/history/' + encodeURIComponent(sid));
     const len = ((h.json && h.json.events) || []).length;
     if (v && v.running) sawRunning = true;
+    const anyPend = (((s.json && s.json.sessions) || []).find((x) => x.pending) || {});
+    if (anyPend.pending && anyPend.pending.gate !== seenGate) {
+      seenGate = anyPend.pending.gate;
+      console.log('    [诊断] 有待答卡：sid=' + anyPend.sid + ' gate=' + seenGate + ' id=' + anyPend.pending.id
+        + ' 选项=' + JSON.stringify((anyPend.pending.options || []).map((o) => o.id)));
+    }
+    const holder = (((s.json && s.json.sessions) || []).find((x) => x.pending && x.pending.gate === 'tool_ask'));
+    if (holder) {
+      // 围栏必要落点授不上的卡会挂在**跑工具的那一席**上（可能是子会话），不是主会话：扫全部会话才答得到。
+      // 没人答它就永远收不了尾；夹具选"本轮无围栏跑一次"（CI 上这张卡不出现），回执会如实标为无围栏。
+      await act(holder.sid, 'answer_card', { card: holder.pending.id, option: 'fence_unfenced_once', note: '' });
+    }
     if (v && !v.running && len === last) quiet++;
     else quiet = 0;
     last = len;
@@ -96,7 +130,7 @@ async function answer(sid, option, note) {
 async function waitPending(sid, gate, ms) {
   const deadline = Date.now() + ms;
   while (Date.now() < deadline) {
-    const s = await api('GET', '/api/state');
+    const s = await stateOk();
     const v = ((s.json && s.json.sessions) || []).find((x) => x.sid === sid);
     if (v && v.pending && v.pending.gate === gate) return v.pending;
     await new Promise((r) => setTimeout(r, 100));
@@ -127,10 +161,10 @@ async function lines(sid) {
 
 (async () => {
   for (let i = 0; i < 60; i++) {
-    try { const s = await api('GET', '/api/state'); if (s.status === 200) break; } catch {}
+    try { const s = await stateOk(); if (s.status === 200) break; } catch {}
     await new Promise((r) => setTimeout(r, 250));
   }
-  const st = await api('GET', '/api/state');
+  const st = await stateOk();
   assert(st.status === 200 && Array.isArray(st.json.agents), 'GET /api/state 带 agents', st.text.slice(0, 120));
 
   // 登记处：一个供应商 + 两个模型
@@ -285,7 +319,7 @@ async function lines(sid) {
   // 若 full 没生效会出现第二个确认——自动答掉以免挂住整个驱动，并把"多问了一次"记为失败。
   let second = null;
   for (let i = 0; i < 200; i++) {
-    const s = await api('GET', '/api/state');
+    const s = await stateOk();
     const v = ((s.json && s.json.sessions) || []).find((x) => x.sid === nameAsk);
     if (v && v.pending && v.pending.gate === 'tool_approval') { second = v.pending; break; }
     if (!v || !v.running) break; // 生成已结束
@@ -423,7 +457,7 @@ async function lines(sid) {
   );
   assert(childJson.includes('"working"'), '子会话事件台带运行态（在跑/收尾）', childJson.slice(0, 200));
   // 裁决卡上的**建议由核心 AI 给**（随 plan 那一次调用一起产出，不额外花调用）。
-  const stPlan = await api('GET', '/api/state');
+  const stPlan = await stateOk();
   const viewPlan = ((stPlan.json && stPlan.json.sessions) || []).find((v) => v.sid === name2);
   const pendPlan = (viewPlan && viewPlan.pending) || null;
   // 待裁决是**快照字段**（与推的 Decision 同源）：刷新页面照样画得出那张卡。
@@ -632,7 +666,7 @@ async function approvePlan(name) {
   const beginF = await answer(nF, 'begin');
   assert(beginF.status === 200, '「提问」开始讨论（不授权自裁）', beginF.text.slice(0, 200));
   // 待裁决是**快照字段**（与推的 Decision 同源）：从 /api/state 的会话视图读。
-  const stF = await api('GET', '/api/state');
+  const stF = await stateOk();
   const viewF = ((stF.json && stF.json.sessions) || []).find((v) => v.sid === nF);
   const pendF = (viewF && viewF.pending) || null;
   assert(
@@ -753,7 +787,7 @@ async function approvePlan(name) {
     assert(called.indexOf('catalog_agents') >= 0, '代理先自己看清单（catalog_agents）', JSON.stringify(called));
     assert(called.indexOf('create_session') >= 0, '代理自己建出子工作（create_session）', JSON.stringify(called));
     assert(called.every((n) => ['catalog_agents', 'create_session'].indexOf(n) >= 0), '代理这一轮只用了它自己的工具面', JSON.stringify(called));
-    const st = await api('GET', '/api/state');
+    const st = await stateOk();
     const hist = (st.json && st.json.history) || [];
     const kid = hist.find((h) => h.parent === pName);
     assert(!!kid, '子工作挂在代理会话下（编排归属）', JSON.stringify(hist.map((h) => h.name + '<-' + (h.parent || ''))).slice(0, 300));
@@ -766,7 +800,7 @@ async function approvePlan(name) {
     const stopped = await act(pName, 'control_session', { action: 'stop' });
     assert(stopped.status === 200, '点停止', stopped.text.slice(0, 160));
     await new Promise((res) => setTimeout(res, 400));
-    const st2 = await api('GET', '/api/state');
+    const st2 = await stateOk();
     const running = ((st2.json && st2.json.sessions) || []).filter((s) => s.running).map((s) => s.sid);
     assert(running.length === 0, '停止即全停：相关会话都不再跑', JSON.stringify(running));
   }
