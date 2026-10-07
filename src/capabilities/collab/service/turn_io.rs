@@ -64,6 +64,7 @@ impl CollabSession {
         sb.agent = "核心".to_string();
         sb.private = sb.shared.clone();
         sb.modules.clear();
+        sb.modules_with_userdata.clear();
         let allowed: Vec<String> = self
             .systools
             .tool_face(role)

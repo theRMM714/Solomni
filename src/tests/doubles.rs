@@ -726,6 +726,7 @@ pub(crate) fn test_sandbox(
         shared: abs(&["demo", "work"]),
         private: abs(&["demo", agent]),
         modules: map,
+        modules_with_userdata: std::collections::BTreeSet::new(),
         permissions: Default::default(),
         texts: test_prompts().tools(),
     }
@@ -1020,6 +1021,7 @@ pub(crate) fn module_of(id: &str) -> Module {
             tools: BTreeMap::new(),
         },
         root: abs(&[id]),
+        has_userdata: false,
     }
 }
 

@@ -33,9 +33,13 @@ impl Conductor {
                 .cloned()
                 .ok_or_else(|| format!("工作区没有给出 agent {} 的沙箱路径", a.name))?;
             let mut modules = BTreeMap::new();
+            let mut modules_with_userdata = std::collections::BTreeSet::new();
             for id in &a.modules {
                 if let Some(m) = roster.modules.iter().find(|m| &m.manifest.id == id) {
                     modules.insert(id.clone(), m.root.clone());
+                    if m.has_userdata {
+                        modules_with_userdata.insert(id.clone());
+                    }
                 }
             }
             list.push(crate::capabilities::workspace::api::Sandbox {
@@ -46,6 +50,7 @@ impl Conductor {
                 shared: roots.shared.clone(),
                 private,
                 modules,
+                modules_with_userdata,
                 permissions: self.permissions_for(meta, &a.name),
                 texts: self.prompt.tools(),
             });

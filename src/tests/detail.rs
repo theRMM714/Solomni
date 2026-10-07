@@ -522,6 +522,38 @@ fn fs_modules_accepts_valid_folders_and_rejects_each_illegal_form_with_a_reason(
     let _ = std::fs::remove_dir_all(&root);
 }
 
+/// 扫描把 `has_userdata` 置对：模块根下有 userdata 目录 = true，没有 = false。
+#[test]
+fn fs_modules_reads_the_userdata_fact() {
+    let root = scratch("fs-modules-userdata");
+    let dir = root.join("modules");
+    let put = |folder: &str| {
+        let d = dir.join(folder);
+        std::fs::create_dir_all(&d).expect("建模块目录");
+        std::fs::write(
+            d.join("module.yaml"),
+            format!("id: {}\nbrief: b\nsystem: s\n", folder),
+        )
+        .expect("写清单");
+    };
+    put("with");
+    put("without");
+    std::fs::create_dir_all(dir.join("with").join("userdata")).expect("建 userdata");
+
+    let roster = FsModules::new(dir, crate::capabilities::tools::api::names()).scan();
+    let fact = |id: &str| {
+        roster
+            .modules
+            .iter()
+            .find(|m| m.manifest.id == id)
+            .map(|m| m.has_userdata)
+            .expect("模块在清单里")
+    };
+    assert!(fact("with"), "有 userdata 目录 = true");
+    assert!(!fact("without"), "没有 userdata 目录 = false");
+    let _ = std::fs::remove_dir_all(&root);
+}
+
 // ---------- FsPackages ----------
 
 #[test]

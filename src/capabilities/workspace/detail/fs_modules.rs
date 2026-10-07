@@ -70,7 +70,9 @@ fn scan_dir(modules_dir: &Path, reserved: &[String]) -> Roster {
                 }
                 modules.push(Module {
                     manifest: m,
-                    root: path,
+                    root: path.clone(),
+                    // 事实在这里读出：domain 只消费，不读盘。
+                    has_userdata: path.join("userdata").is_dir(),
                 });
             }
             Err(e) => rejected.push(format!(

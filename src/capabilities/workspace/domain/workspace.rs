@@ -56,6 +56,8 @@ pub struct Sandbox {
     pub private: PathBuf,
     /// 成员模块：模块 id → 模块目录。
     pub modules: BTreeMap<String, PathBuf>,
+    /// 目的：有 <root>/userdata 目录的模块 id（工作区扫描读出的事实；围栏派生据此决定派不派这条）。
+    pub modules_with_userdata: std::collections::BTreeSet<String>,
     /// 本席位的生效权限（读/提交白黑名单、模块写授权、决定粒度）：由 conductor 解析后注入。
     /// 私有沙箱不在它的管辖内（永远全权）；它只管共享工作区与模块目录。
     pub permissions: Permissions,

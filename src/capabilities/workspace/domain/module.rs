@@ -149,6 +149,8 @@ pub fn check_tools(m: &ModuleManifest, reserved: &[String]) -> Result<(), String
 pub struct Module {
     pub manifest: ModuleManifest,
     pub root: PathBuf,
+    /// 目的：模块根下有没有 userdata/ 目录（工作区扫描读出的事实；策略层据此决定派不派它）。
+    pub has_userdata: bool,
 }
 
 /// **身份块的系统提示**：把 `{{mechanism}}` / `{{env}}` / `{{tool_calling}}` 三件事按同一口径填进模板。

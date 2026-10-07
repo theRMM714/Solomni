@@ -451,6 +451,7 @@ pub(crate) fn the_real_bridge_reads_catalog_and_session_messages() {
             tools: BTreeMap::new(),
         },
         root: PathBuf::from("modules").join("m1"),
+        has_userdata: false,
     };
     let (handle, ops) = super::super::ops_with(vec![module], vec![]);
     let (opened, _head) = ops
@@ -541,6 +542,7 @@ pub(crate) fn the_real_bridge_creates_a_child_work() {
             tools: BTreeMap::new(),
         },
         root: PathBuf::from("modules").join("m1"),
+        has_userdata: false,
     };
     let (handle, ops) = super::super::ops_with(vec![module], vec![]);
     let (parent, _head) = ops
@@ -603,6 +605,7 @@ pub(crate) fn the_proxy_handler_owns_and_runs_proxy_tools() {
             tools: BTreeMap::new(),
         },
         root: PathBuf::from("modules").join("m1"),
+        has_userdata: false,
     };
     let (handle, _ops) = super::super::ops_with(vec![module], vec![]);
     let host: Arc<dyn ProxyHost + Send + Sync> = Arc::new(ProxyBridge::new(handle));
@@ -697,6 +700,7 @@ pub(crate) fn a_finished_child_notifies_the_proxy_without_dumping_its_transcript
             tools: BTreeMap::new(),
         },
         root: PathBuf::from("modules").join("m1"),
+        has_userdata: false,
     };
     let (handle, ops) = super::super::ops_with(vec![module], vec![]);
     let proxy = handle
@@ -750,6 +754,7 @@ pub(crate) fn run_state_gates_dispatch_and_survives_stop_close() {
             tools: BTreeMap::new(),
         },
         root: PathBuf::from("modules").join("m1"),
+        has_userdata: false,
     };
     let (handle, ops) = super::super::ops_with(vec![module], vec![]);
     let (work, _) = ops
@@ -847,6 +852,7 @@ pub(crate) fn relay_records_its_source_on_the_target() {
             tools: BTreeMap::new(),
         },
         root: PathBuf::from("modules").join("m1"),
+        has_userdata: false,
     };
     let (handle, ops) = super::super::ops_with(vec![module], vec![]);
     let (work, _) = ops
@@ -886,6 +892,7 @@ pub(crate) fn the_real_bridge_creates_a_multi_agent_child_work() {
             tools: BTreeMap::new(),
         },
         root: PathBuf::from("modules").join(id),
+        has_userdata: false,
     };
     let (handle, ops) = super::super::ops_with(vec![module("m1"), module("m2")], vec![]);
     let (parent, _) = ops
@@ -943,6 +950,7 @@ pub(crate) fn the_proxy_identity_is_the_role_prompt() {
             tools: BTreeMap::new(),
         },
         root: PathBuf::from("modules").join("m1"),
+        has_userdata: false,
     };
     let (handle, ops) = super::super::ops_with(vec![module], vec![]);
     let proxy = handle
@@ -1092,6 +1100,7 @@ pub(crate) fn observe_reports_new_messages_since_the_last_cursor() {
             tools: BTreeMap::new(),
         },
         root: PathBuf::from("modules").join("m1"),
+        has_userdata: false,
     };
     let (handle, ops) = super::super::ops_with(vec![module], vec![]);
     let (work, _) = ops
@@ -1153,6 +1162,7 @@ pub(crate) fn the_proxy_created_child_publishes_its_opening_facts() {
             tools: BTreeMap::new(),
         },
         root: PathBuf::from("modules").join(id),
+        has_userdata: false,
     };
     let (handle, _ops) = super::super::ops_with(vec![module("m1"), module("m2")], vec![]);
     let proxy = handle
@@ -1219,6 +1229,7 @@ pub(crate) fn collab_child_send_lands_on_the_gate_it_awaits() {
             tools: BTreeMap::new(),
         },
         root: PathBuf::from("modules").join("m1"),
+        has_userdata: false,
     };
     let (handle, ops) = super::super::ops_with(
         vec![module],

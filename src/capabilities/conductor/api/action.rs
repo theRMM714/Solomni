@@ -346,8 +346,11 @@ impl ConductorHandle {
             }
         }
         let work = work.map(std::path::PathBuf::from);
-        let fence =
-            crate::capabilities::tools::api::FenceSpec::standalone(&module.root, work.as_deref());
+        let fence = crate::capabilities::tools::api::FenceSpec::standalone(
+            &module.root,
+            work.as_deref(),
+            module.has_userdata,
+        );
         let args_json = serde_json::to_string(&module_args).unwrap_or_else(|_| "{}".to_string());
         let outcome = self.tools.run_module(&fence, &decl.command, &args_json);
         Ok(Acted::Done(

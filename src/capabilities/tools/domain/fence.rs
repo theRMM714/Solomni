@@ -46,17 +46,15 @@ impl FenceSpec {
             rw.push(sb.shared.clone());
         }
         rw.push(sb.private.clone());
-        // 模块目录默认**只读**：只有 module_write 命中该模块才整块可写；
-        // 无论哪种情况，<module>/userdata/ 都保持可写（模块自己的跨任务状态区）。
+        // 模块目录默认**只读**：只有 module_write 命中该模块才整块可写。
+        // <module>/userdata 派不派，看工作区扫描注入的事实（domain 不读盘）。
         for (id, root) in &sb.modules {
             if sb.permissions.module_write_ok(id) {
                 rw.push(root.clone());
             } else {
                 ro_tree.push(root.clone());
-                let userdata = root.join("userdata");
-                // 授权面按实际布局派生：只有 userdata 真的存在才派这条可写落点。
-                if userdata.is_dir() {
-                    rw.push(userdata);
+                if sb.modules_with_userdata.contains(id) {
+                    rw.push(root.join("userdata"));
                 }
             }
         }
@@ -81,12 +79,16 @@ impl FenceSpec {
         self
     }
 
-    /// 目的：**无会话**（人直接跑一个模块工具）的围栏——模块目录递归只读 + 它自己的 `userdata/`（存在时）可写，外加用户指定的工作目录（缺省 = `userdata/`，不存在则退回模块根）。
+    /// 目的：**无会话**（人直接跑一个模块工具）的围栏——模块目录递归只读 + 它自己的 `userdata/`（事实说有才）可写，外加用户指定的工作目录（缺省 = `userdata/`，没有则退回模块根）。
+    /// 参数：has_userdata 是工作区扫描给出的"该模块有没有 `userdata/`"事实（domain 不读盘）。
     /// 约束：与 agent 会话同一条围栏口径——不装机制时只留进程树与环境白名单，如实降级。
-    pub fn standalone(module_root: &Path, work_root: Option<&Path>) -> FenceSpec {
+    pub fn standalone(
+        module_root: &Path,
+        work_root: Option<&Path>,
+        has_userdata: bool,
+    ) -> FenceSpec {
         let userdata = module_root.join("userdata");
-        let has_userdata = userdata.is_dir();
-        // 缺省工作目录 = 模块的 userdata（存在时）；不存在就退回 cwd（模块根），不派不存在的落点。
+        // 缺省工作目录 = 模块的 userdata（事实说有才用）；否则退回 cwd（模块根），不派不存在的落点。
         let private = match work_root {
             Some(p) => p.to_path_buf(),
             None if has_userdata => userdata.clone(),

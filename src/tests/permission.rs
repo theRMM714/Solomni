@@ -205,33 +205,31 @@ fn builtin_tools_respect_the_scope() {
     );
 }
 
-/// 围栏派生：模块目录默认只读（进 ro_tree）；`userdata/` **存在**时进 rw，不存在就不派这条。
-/// `standalone` 的缺省工作目录同样按 userdata 是否存在回退。
+/// 围栏派生：模块目录默认只读（进 ro_tree）；`userdata/` 的派发看**注入的事实**，domain 不读盘。
+/// `standalone` 的缺省工作目录同样按这条事实回退。
 #[test]
 fn fence_spec_scopes_module_dirs_and_userdata() {
     use crate::capabilities::tools::api::FenceSpec;
-    let base = crate::tests::scratch("fence-userdata");
-    let module = base.join("mods").join("data");
-    std::fs::create_dir_all(&module).expect("建模块目录");
     let mut sb = test_sandbox("a1", &[]);
+    let module = abs(&["mods", "data"]);
     sb.modules.insert("data".to_string(), module.clone());
 
-    // userdata 不存在：不进 rw，模块根仍进 ro_tree。
+    // 事实：没有 userdata → 不进 rw，模块根仍进 ro_tree。
     let spec = FenceSpec::from_sandbox(&sb, false);
     assert!(spec.ro_tree.contains(&module), "模块目录默认只读");
     assert!(
         !spec.rw.contains(&module.join("userdata")),
-        "userdata 不存在就不派这条落点"
+        "事实说没有 userdata 就不派这条落点"
     );
     assert!(!spec.rw.contains(&module), "未授权时整块模块目录不进 rw");
     assert_eq!(spec.private, sb.private, "HOME/TEMP 落在私有沙箱");
 
-    // userdata 存在：进 rw。
-    std::fs::create_dir_all(module.join("userdata")).expect("建模块 userdata");
+    // 事实：有 userdata → 进 rw。
+    sb.modules_with_userdata.insert("data".to_string());
     let spec = FenceSpec::from_sandbox(&sb, false);
     assert!(
         spec.rw.contains(&module.join("userdata")),
-        "userdata 存在时可写"
+        "事实说有 userdata 就可写"
     );
 
     // 授权后：模块整块进 rw，不再进 ro_tree。
@@ -240,37 +238,40 @@ fn fence_spec_scopes_module_dirs_and_userdata() {
     assert!(spec.rw.contains(&module));
     assert!(!spec.ro_tree.contains(&module));
     assert!(spec.net, "net 随参数透传");
-
-    let _ = std::fs::remove_dir_all(&base);
 }
 
-/// `standalone` 的缺省工作目录按实际布局回退：userdata 不存在时退回模块根，不派不存在的落点。
+/// `standalone` 的缺省工作目录按**注入的事实**回退：没有 userdata 时退回模块根，不派不存在的落点。
 #[test]
 fn standalone_falls_back_when_userdata_is_absent() {
     use crate::capabilities::tools::api::FenceSpec;
-    let base = crate::tests::scratch("fence-standalone");
-    let module = base.join("m0");
-    std::fs::create_dir_all(&module).expect("建模块目录");
+    let module = abs(&["mods", "m0"]);
 
-    let spec = FenceSpec::standalone(&module, None);
-    assert!(!spec.rw.contains(&module.join("userdata")), "不存在就不派");
+    let spec = FenceSpec::standalone(&module, None, false);
+    assert!(
+        !spec.rw.contains(&module.join("userdata")),
+        "事实说没有就不派"
+    );
     assert_eq!(
         spec.private_or_cwd(),
         module,
-        "缺 userdata 时工作目录退回模块根"
+        "没有 userdata 时工作目录退回模块根"
     );
     assert_eq!(spec.cwd, module, "cwd 仍是模块根");
 
-    std::fs::create_dir_all(module.join("userdata")).expect("建模块 userdata");
-    let spec = FenceSpec::standalone(&module, None);
-    assert!(spec.rw.contains(&module.join("userdata")), "存在就派");
+    let spec = FenceSpec::standalone(&module, None, true);
+    assert!(spec.rw.contains(&module.join("userdata")), "事实说有就派");
     assert_eq!(
         spec.private,
         module.join("userdata"),
         "缺省工作目录 = userdata"
     );
 
-    let _ = std::fs::remove_dir_all(&base);
+    // 显式 work_root：事实说有 userdata 时补进 rw，说没有时不补。
+    let work = abs(&["mods", "work"]);
+    let with = FenceSpec::standalone(&module, Some(&work), true);
+    assert!(with.rw.contains(&work) && with.rw.contains(&module.join("userdata")));
+    let without = FenceSpec::standalone(&module, Some(&work), false);
+    assert!(without.rw.contains(&work) && !without.rw.contains(&module.join("userdata")));
 }
 
 /// 提交与拉取的作用域判定（工作区工具消费的那一份纯函数）：越界整条拒绝，不带半次提交。
