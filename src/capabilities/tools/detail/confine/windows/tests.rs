@@ -631,3 +631,92 @@ fn container_roundtrip_keeps_module_read_only_and_peer_unreachable() {
     assert!(delete_profile(&container), "探针的容器 profile 应当删得掉");
     let _ = std::fs::remove_dir_all(&base);
 }
+
+/// ACL 写法的语义与后果验证：非递归 `SetNamedSecurityInfoW` 与递归 `TreeSetNamedSecurityInfoW`（带/不带继承标志）
+/// 各自把 ACE 铺到哪些节点、写入后目标还能不能读回自己的 DACL——`grant_one` 的 `recursive` 分支就靠 TreeSet，
+/// 「去继承、全显式」能不能成立全看这里。探针只打印事实、不预设结论；本机不允许改 ACL 时如实跳过。
+#[test]
+fn acl_write_flavours_are_probed_for_scope_and_readability() {
+    if !capability().fs {
+        eprintln!(
+            "[探针] 本机不允许改目录 ACL（{}）：ACL 写法探针跳过（不静默当作通过）",
+            capability().note
+        );
+        return;
+    }
+    let base = std::env::temp_dir().join(format!("solomni-acl-probe-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    // 预检：先在自有目录里做一次完整往返（写 → 读回 → 撤）。受限环境里"写成功但读不回/删不掉"，
+    // 那样的进程做不了观察，也留不了干净的现场——如实跳过，不静默当作通过，更不制造残留。
+    let pre = base.join("preflight");
+    std::fs::create_dir_all(&pre).expect("建预检目录");
+    let pre_spec = FenceSpec {
+        agent: "acl-probe-preflight".to_string(),
+        private: PathBuf::new(),
+        ro_tree: Vec::new(),
+        rw: vec![pre.clone()],
+        cwd: pre.clone(),
+        ro: Vec::new(),
+        net: false,
+    };
+    let pre_sid = container_sid(&container_name(&pre_spec)).expect("派生预检容器 SID");
+    let round_trip = grant_one(pre_sid, &pre, RIGHTS_RO, false, false).is_ok()
+        && has_any_ace_for(pre_sid, &pre)
+        && revoke_one(pre_sid, &pre, false).is_ok();
+    free_sid(pre_sid);
+    if !round_trip {
+        eprintln!("[探针] 本机做不了完整往返（写→读回→撤）：ACL 写法探针跳过（不静默当作通过）");
+        let _ = std::fs::remove_dir_all(&base);
+        return;
+    }
+    let cases = [
+        ("set-rec0-inh0", false, false),
+        ("tree-rec1-inh0", true, false),
+        ("tree-rec1-inh1", true, true),
+    ];
+    for (tag, recursive, inherit) in cases {
+        let tree = base.join(tag);
+        std::fs::create_dir_all(tree.join("sub")).expect("建探针树");
+        std::fs::write(tree.join("a.txt"), b"a").expect("写根文件");
+        std::fs::write(tree.join("sub").join("b.txt"), b"b").expect("写子文件");
+        let spec = FenceSpec {
+            agent: format!("acl-probe-{tag}"),
+            private: PathBuf::new(),
+            ro_tree: Vec::new(),
+            rw: vec![tree.clone()],
+            cwd: tree.clone(),
+            ro: Vec::new(),
+            net: false,
+        };
+        let sid = container_sid(&container_name(&spec)).expect("派生容器 SID");
+        let grant = grant_one(sid, &tree, RIGHTS_RO, recursive, inherit);
+        let root_ace = has_any_ace_for(sid, &tree);
+        let sub_ace = has_any_ace_for(sid, &tree.join("sub"));
+        let file_ace = has_any_ace_for(sid, &tree.join("sub").join("b.txt"));
+        let revoke = revoke_one(sid, &tree, recursive);
+        eprintln!(
+            "[探针] {tag}：grant_ok={} 根ACE={} 子目录ACE={} 子文件ACE={} revoke_ok={}",
+            grant.is_ok(),
+            root_ace,
+            sub_ace,
+            file_ace,
+            revoke.is_ok()
+        );
+        free_sid(sid);
+        assert!(grant.is_ok(), "{tag}：授予应当成功");
+        assert!(revoke.is_ok(), "{tag}：撤销应当成功");
+        match (recursive, inherit) {
+            // 非递归只设根本身；TreeSet 配**不带继承标志**的 ACE 同样只落在根——
+            // 所以「整树覆盖」只有继承这一条路，去继承就得自己逐节点写。
+            (false, _) | (true, false) => assert!(
+                root_ace && !sub_ace && !file_ace,
+                "{tag}：只应落在根本身（root={root_ace} sub={sub_ace} file={file_ace}）"
+            ),
+            (true, true) => assert!(
+                root_ace && sub_ace && file_ace,
+                "{tag}：带继承标志应覆盖整棵树（root={root_ace} sub={sub_ace} file={file_ace}）"
+            ),
+        }
+    }
+    let _ = std::fs::remove_dir_all(&base);
+}
