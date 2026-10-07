@@ -18,12 +18,15 @@ use super::*;
 /// 位置：产品私有区 `.home/fence-grants.json`（数据不出工作区）。
 #[derive(serde::Serialize, serde::Deserialize, Default)]
 pub(crate) struct GrantRecord {
-    /// 我们创建过的容器 profile 名（清理时按名删除）。
+    /// 目的：我们创建过的容器 profile 名（清理时按名删除）。
     #[serde(default)]
-    profiles: BTreeSet<String>,
-    /// (SID, 路径, 权限位) —— 逐条对应写下去的 ACE。
+    pub(crate) profiles: BTreeSet<String>,
+    /// 目的：根外路径的授权摘要（SID, 路径, 权限位）；收尾按它精确撤销。
     #[serde(default)]
-    grants: Vec<(String, String, u32)>,
+    pub(crate) grants: Vec<(String, String, u32)>,
+    /// 目的：产品根内路径的原始安全描述符（路径, self-relative 字节）；收尾整体还原。
+    #[serde(default)]
+    pub(crate) snapshots: Vec<(String, Vec<u8>)>,
 }
 
 pub(crate) fn record_path(home: &Path) -> PathBuf {
@@ -96,13 +99,15 @@ pub(crate) fn delete_profile(name: &str) -> bool {
     (unsafe { DeleteAppContainerProfile(wide.as_ptr()) }) >= 0
 }
 
-/// 孤儿授权清扫：按容器 SID 族在产品根内找我们写过的显式 ACE 并连树撤掉。
+/// 孤儿授权清扫：在产品根内找台账之外、我们写过的显式 ACE 并连树撤掉。
 /// 台账是精确回收的依据，但账会断（夹具/临时 home 被删、进程被杀、旧版本没记账）——
-/// 断了账不代表没有残留（`tests/` 上留过一条旧版授出去的显式 ACE，整棵子树因此对受限进程不可读）。这里反向兜底：本程序建过的
-/// 容器 profile 名 → 派生 SID → 自产品根向下找带该 SID 显式 ACE 的目录，在**最上层**
-/// 命中处连树撤掉（授权只会以某个目录为根整树写下去，树下同名 SID 的 ACE 都是它的
-/// 传播产物）。只扫产品根内：根外落点（解释器目录、根外只读根）仍只由台账管。
-/// **必须在 `sweep_profiles` 之前调用**：profile 删了就派生不出 SID 了。
+/// 断了账不代表没有残留（tests/ 上留过一条旧版授出去的显式 ACE，整棵子树因此对受限进程不可读）。
+/// 反向兜底两条：本程序建过的容器 profile 名派生 SID；以及任何显式、非继承、SID 形如
+/// S-1-15-2-* 的允许 ACE（排除 ALL APPLICATION PACKAGES 与 ALL RESTRICTED 两个基线）——
+/// profile 已删或从没建过的残留也能回收。自产品根向下在**最上层**命中处连树撤掉（授权只会
+/// 以某个目录为根整树写下去，树下同名 SID 的 ACE 都是它的传播产物）。只扫产品根内：根外落点
+/// （解释器目录、根外只读根）仍只由台账管。
+/// **必须在 sweep_profiles 之前调用**：profile 删了就派生不出 SID 了。
 pub fn sweep_orphan_aces(root: &Path) -> Result<usize, String> {
     let mut sids: Vec<PSID> = Vec::new();
     for name in our_profile_names()? {
@@ -111,23 +116,51 @@ pub fn sweep_orphan_aces(root: &Path) -> Result<usize, String> {
             Err(e) => eprintln!("[围栏] {}：该容器的孤儿扫描跳过", e),
         }
     }
-    if sids.is_empty() {
-        return Ok(0);
-    }
+    // 一个 profile 都派生不出 SID 时也要扫：台账外的残留可能来自根本没建过 profile 的路径。
     let mut swept = 0usize;
-    sweep_dir_down(root, &sids, &mut swept);
+    let mut errors: Vec<String> = Vec::new();
+    sweep_dir_down(root, &sids, &mut swept, &mut errors);
     for s in &sids {
         free_sid(*s);
     }
-    Ok(swept)
+    if errors.is_empty() {
+        Ok(swept)
+    } else {
+        Err(errors.join("；"))
+    }
 }
 
 /// 自上而下扫一个目录：最上层命中就整树撤、不再下钻；没命中才继续走子目录。
-fn sweep_dir_down(dir: &Path, sids: &[PSID], swept: &mut usize) {
-    if sids.iter().any(|s| has_any_ace_for(*s, dir)) {
+/// 读不到 DACL 或撤权失败都记进 errors 并继续扫别处，最后如实返回 Err（清不掉不能当清干净）。
+fn sweep_dir_down(dir: &Path, sids: &[PSID], swept: &mut usize, errors: &mut Vec<String>) {
+    let known = sids.iter().any(|s| has_any_ace_for(*s, dir));
+    let orphans = match orphan_package_aces(dir) {
+        Ok(list) => list,
+        Err(e) => {
+            errors.push(e);
+            Vec::new()
+        }
+    };
+    if known || !orphans.is_empty() {
         for s in sids {
             if let Err(e) = revoke_one(*s, dir, true) {
-                eprintln!("[围栏] 孤儿撤权未完成（{}）：{}", dir.display(), e);
+                errors.push(format!("孤儿撤权未完成（{}）：{}", dir.display(), e));
+            }
+        }
+        for text in orphans {
+            match sid_from_string(&text) {
+                Ok(sid) => {
+                    if let Err(e) = revoke_one(sid, dir, true) {
+                        errors.push(format!(
+                            "孤儿撤权未完成（{}，{}）：{}",
+                            dir.display(),
+                            text,
+                            e
+                        ));
+                    }
+                    free_sid(sid);
+                }
+                Err(e) => errors.push(e),
             }
         }
         *swept += 1;
@@ -151,24 +184,163 @@ fn sweep_dir_down(dir: &Path, sids: &[PSID], swept: &mut usize) {
         if meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
             continue;
         }
-        sweep_dir_down(&entry.path(), sids, swept);
+        sweep_dir_down(&entry.path(), sids, swept, errors);
     }
 }
 
-pub(crate) fn record_grants(
+/// 目的：把容器 profile 名先记进台账落盘（守门进程真正建 profile 之前，名字先有主）。
+/// 错误：台账落盘失败时返回原因。
+pub(crate) fn journal_add_profile(
     home: &Path,
-    container: &str,
-    written: &[(String, PathBuf, u32)],
+    rec: &mut GrantRecord,
+    name: &str,
 ) -> Result<(), String> {
-    let mut rec = load_record(home);
-    rec.profiles.insert(container.to_string());
-    for (sid, path, rights) in written {
-        let entry = (sid.clone(), path.to_string_lossy().into_owned(), *rights);
-        if !rec.grants.contains(&entry) {
-            rec.grants.push(entry);
+    if !rec.profiles.insert(name.to_string()) {
+        return Ok(());
+    }
+    if let Err(e) = save_record(home, rec) {
+        rec.profiles.remove(name);
+        return Err(format!("授权台账落盘失败：{}", e));
+    }
+    Ok(())
+}
+
+/// 目的：取产品根（.home 的父目录）：授权落在产品根内还是根外，决定收尾用快照还原还是精确撤权。
+pub(crate) fn product_root(home: &Path) -> PathBuf {
+    match home.parent() {
+        Some(p) if !p.as_os_str().is_empty() => p.to_path_buf(),
+        _ => home.to_path_buf(),
+    }
+}
+
+/// 目的：判断一个路径是否在产品根内（逐分量比，大小写不敏感；能规范化就按规范化路径比）。
+pub(crate) fn inside_root(path: &Path, root: &Path) -> bool {
+    let canon = |p: &Path| {
+        std::fs::canonicalize(p)
+            .map(|c| super::super::strip_verbatim_prefix(&c))
+            .unwrap_or_else(|_| p.to_path_buf())
+    };
+    let path_owned = canon(path);
+    let root_owned = canon(root);
+    let mut left = path_owned.components();
+    for want in root_owned.components() {
+        let ok = left.next().map(|got| {
+            got.as_os_str()
+                .to_string_lossy()
+                .eq_ignore_ascii_case(&want.as_os_str().to_string_lossy())
+        });
+        if ok != Some(true) {
+            return false;
         }
     }
-    save_record(home, &rec)
+    true
+}
+
+/// 目的：把一条根外授权先写进台账落盘；返回本次是否新增了该条目。
+/// 错误：台账落盘失败时返回原因（落盘失败就不得动 ACL）。
+pub(crate) fn journal_add_grant(
+    home: &Path,
+    rec: &mut GrantRecord,
+    sid: &str,
+    path: &Path,
+    rights: u32,
+) -> Result<bool, String> {
+    let entry = (sid.to_string(), path.to_string_lossy().into_owned(), rights);
+    if rec.grants.contains(&entry) {
+        return Ok(false);
+    }
+    rec.grants.push(entry);
+    if let Err(e) = save_record(home, rec) {
+        rec.grants.pop();
+        return Err(format!("授权台账落盘失败：{}", e));
+    }
+    Ok(true)
+}
+
+/// 目的：把一条根内路径的原始安全描述符先写进台账落盘；返回本次是否新增了该路径的快照。
+/// 错误：台账落盘失败时返回原因（落盘失败就不得动 ACL）。
+pub(crate) fn journal_add_snapshot(
+    home: &Path,
+    rec: &mut GrantRecord,
+    path: &Path,
+    bytes: Vec<u8>,
+) -> Result<bool, String> {
+    let key = path.to_string_lossy().into_owned();
+    if rec.snapshots.iter().any(|(p, _)| p == &key) {
+        return Ok(false);
+    }
+    rec.snapshots.push((key, bytes));
+    if let Err(e) = save_record(home, rec) {
+        rec.snapshots.pop();
+        return Err(format!("授权台账落盘失败：{}", e));
+    }
+    Ok(true)
+}
+
+/// 目的：按“先落台账、再写 ACL、写后核对、失败回滚”完成一条授权。
+/// 参数：rec 是本次准备的内存台账；sid_text 是 SID 字符串；target 是落点；root 是产品根。
+/// 错误：台账落盘、写后核对或回滚失败时返回原因（回滚失败会一并写进错误）。
+pub(crate) fn grant_one_journaled(
+    home: &Path,
+    rec: &mut GrantRecord,
+    sid: PSID,
+    sid_text: &str,
+    target: &GrantTarget,
+    root: &Path,
+) -> Result<(), String> {
+    let (path, rights, recursive, inherit) = (target.0.as_path(), target.1, target.2, target.3);
+    let key = path.to_string_lossy().into_owned();
+    if inside_root(path, root) {
+        let bytes = sd_bytes(path).map_err(|e| format!("读原始安全描述符失败：{}", e))?;
+        let added = journal_add_snapshot(home, rec, path, bytes)?;
+        return match grant_verified(sid, path, rights, recursive, inherit) {
+            Ok(()) => Ok(()),
+            Err(e) => {
+                let rollback = rec
+                    .snapshots
+                    .iter()
+                    .find(|(p, _)| p == &key)
+                    .map(|(_, b)| restore_sd(path, b))
+                    .unwrap_or_else(|| Err("台账里没有该路径的快照".to_string()));
+                let journal = if added {
+                    rec.snapshots.retain(|(p, _)| p != &key);
+                    save_record(home, rec).map_err(|x| format!("台账更新失败：{}", x))
+                } else {
+                    Ok(())
+                };
+                Err(combine(e, rollback.err(), journal.err()))
+            }
+        };
+    }
+    let added = journal_add_grant(home, rec, sid_text, path, rights)?;
+    match grant_verified(sid, path, rights, recursive, inherit) {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            let rollback = revoke_one(sid, path, recursive)
+                .map_err(|x| format!("撤销已写入的 ACE 失败：{}", x));
+            let journal = if added {
+                rec.grants.retain(|(s, p, _)| !(s == sid_text && p == &key));
+                save_record(home, rec).map_err(|x| format!("台账更新失败：{}", x))
+            } else {
+                Ok(())
+            };
+            Err(combine(e, rollback.err(), journal.err()))
+        }
+    }
+}
+
+/// 目的：把主错误与回滚、台账更新两条次生错误拼成一条如实的失败原因。
+fn combine(primary: String, rollback: Option<String>, journal: Option<String>) -> String {
+    let mut out = primary;
+    if let Some(r) = rollback {
+        out.push_str("；回滚失败：");
+        out.push_str(&r);
+    }
+    if let Some(j) = journal {
+        out.push_str("；台账更新失败：");
+        out.push_str(&j);
+    }
+    out
 }
 
 /// SID → 字符串（写台账用）。
@@ -210,23 +382,36 @@ pub(crate) fn sid_from_string(text: &str) -> Result<PSID, String> {
 /// 返回给用户看的一句话（清理了几条、删了几个 profile）。
 pub fn clean(home: &Path) -> Result<String, String> {
     let rec = load_record(home);
-    if rec.grants.is_empty() && rec.profiles.is_empty() {
+    if rec.grants.is_empty() && rec.profiles.is_empty() && rec.snapshots.is_empty() {
         return Ok("没有台账：本程序没在本机写过权限项".to_string());
+    }
+    let mut errors: Vec<String> = Vec::new();
+    let mut restored = 0usize;
+    // 根内路径整体还原原始安全描述符：被写坏的 DACL 只有这一条路能修回来。
+    for (path, bytes) in &rec.snapshots {
+        let p = PathBuf::from(path);
+        if std::fs::symlink_metadata(&p).is_err() {
+            continue;
+        }
+        match restore_sd(&p, bytes) {
+            Ok(()) => restored += 1,
+            Err(e) => errors.push(e),
+        }
     }
     let mut removed = 0usize;
     for (sid_text, path, _rights) in &rec.grants {
         let sid = match sid_from_string(sid_text) {
             Ok(s) => s,
             Err(e) => {
-                eprintln!("[围栏] {}", e);
+                errors.push(e);
                 continue;
             }
         };
         let p = PathBuf::from(path);
-        if p.exists() {
-            match revoke_one(sid, &p, false) {
+        if std::fs::symlink_metadata(&p).is_ok() {
+            match revoke_one(sid, &p, true) {
                 Ok(()) => removed += 1,
-                Err(e) => eprintln!("[围栏] 撤销未完成：{}", e),
+                Err(e) => errors.push(e),
             }
         }
         free_sid(sid);
@@ -242,57 +427,91 @@ pub fn clean(home: &Path) -> Result<String, String> {
             deleted += 1;
         }
     }
-    let _ = std::fs::remove_file(record_path(home));
+    if !errors.is_empty() {
+        // 还有没清掉的：台账保留，供下次重试（删了就等于把待办也删了）。
+        return Err(format!(
+            "台账回收未完成：{}（已还原 {} 处、已撤销 {} 条、已删 {} 个 profile；台账保留供重试）",
+            errors.join("；"),
+            restored,
+            removed,
+            deleted
+        ));
+    }
+    // 全部清干净了才删台账；删不掉本身就是没收干净，如实报错。
+    match std::fs::remove_file(record_path(home)) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(format!("权限项已清干净，但删除授权台账失败：{}", e)),
+    }
     Ok(format!(
-        "已撤销 {} 条授权、删除 {} 个容器 profile",
-        removed, deleted
+        "已还原 {} 处原始权限、撤销 {} 条授权、删除 {} 个容器 profile",
+        restored, removed, deleted
     ))
 }
 
-/// 撤销一次会话的授权（会话删除时经 FenceHost 端口调用）。
-/// home 为 None 时只撤权限、不动台账（无台的调用方少见；正常路径都给 home）。
-pub fn release_fence_home(spec: &FenceSpec, home: Option<&Path>) -> Result<(), String> {
+/// 目的：撤销一次会话的授权（会话删除时经 FenceHost 端口调用）。
+/// 参数：spec 是该会话各席的围栏范围；home 是产品私有区（台账落点，也是产品根的锚）。
+/// 错误：撤权、还原或台账更新失败时如实返回；失败条目留在台账里，供下次重试。
+pub fn release_fence(spec: &FenceSpec, home: &Path) -> Result<(), String> {
     let sid = container_sid(&container_name(spec))?;
-    let mut result = Ok(());
+    let sid_text = sid_to_string(sid);
+    let mut rec = load_record(home);
+    // 没有台账就别凭空造一份：释放只在"确实写过授权"时才动台账文件。
+    let had_record = record_path(home).exists();
     // 撤权要覆盖**同一次授权写下的全部条目**：叶子（读写根 / 只读根 / 工作目录）**与它们的父目录**。
     // 落点清单与 prepare_fence 共用 grant_targets——两处各写一份迟早会漏掉某一类。
     let mut paths: Vec<PathBuf> = grant_targets(spec)
         .into_iter()
         .map(|(p, _, _, _)| p)
         .collect();
+    // 台账里这个 SID 写过的路径也要覆盖：配置改过后，落点清单可能已经算不出它们。
+    for (s, p, _) in &rec.grants {
+        if s == &sid_text {
+            paths.push(PathBuf::from(p));
+        }
+    }
     paths.sort();
     paths.dedup();
-    // 台账比对用字符串：下面 paths 会被消费掉。
-    let path_texts: Vec<String> = paths
-        .iter()
-        .map(|p| p.to_string_lossy().into_owned())
-        .collect();
-    for p in paths {
-        if p.as_os_str().is_empty() {
+    let mut errors: Vec<String> = Vec::new();
+    for p in &paths {
+        if p.as_os_str().is_empty() || std::fs::symlink_metadata(p).is_err() {
             continue;
         }
-        if let Err(e) = revoke_one(sid, &p, true) {
-            eprintln!("[围栏] 撤销未完成：{}", e);
-            if result.is_ok() {
-                result = Err(e);
+        let key = p.to_string_lossy().into_owned();
+        // 还有别的容器 SID 在同一个落点上时，只精确撤自己那一条；快照留给最后一个释放者整体还原。
+        let has_other = rec
+            .grants
+            .iter()
+            .any(|(s, q, _)| s != &sid_text && q == &key);
+        let snapshot = rec.snapshots.iter().find(|(q, _)| q == &key).cloned();
+        if let (Some((_, bytes)), false) = (snapshot, has_other) {
+            match restore_sd(p, &bytes) {
+                Ok(()) => {
+                    rec.snapshots.retain(|(q, _)| q != &key);
+                    rec.grants
+                        .retain(|(s, q, _)| !(s == &sid_text && q == &key));
+                }
+                Err(e) => errors.push(e),
             }
+            continue;
+        }
+        match revoke_one(sid, p, true) {
+            Ok(()) => {
+                rec.grants
+                    .retain(|(s, q, _)| !(s == &sid_text && q == &key));
+            }
+            Err(e) => errors.push(e),
         }
     }
-    let sid_text = sid_to_string(sid);
     free_sid(sid);
-    if let Some(h) = home {
-        // 台账跟着会话一起清：撤掉的条目不留残账（账目等于"本机现在还有我们写的哪些权限"）。
-        let mut rec = load_record(h);
-        rec.grants
-            .retain(|(s, p, _)| s != &sid_text || !path_texts.iter().any(|x| x == p));
-        if let Err(e) = save_record(h, &rec) {
-            eprintln!("[围栏] 台账更新失败：{}", e);
+    if had_record {
+        if let Err(e) = save_record(home, &rec) {
+            errors.push(format!("授权台账更新失败：{}", e));
         }
     }
-    result
-}
-
-/// 兼容旧调用点：不带台账的撤销。
-pub fn release_fence(spec: &FenceSpec) -> Result<(), String> {
-    release_fence_home(spec, None)
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors.join("；"))
+    }
 }

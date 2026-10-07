@@ -120,7 +120,9 @@ presentation/{cli,web} ──▶ capabilities（含协调业务 conductor）─�
   `full` 只对**本轮**生效（到 AI 停下输出为止，不落盘）；停止把等待解成拒绝。
   Web 用卡片三选一（刷新后由 `/api/state` 的待确认快照重建），CLI 把生成放后台线程、主线程就地读 `yes/no/full`；
   工具进程走**守门进程**（本程序 `--fence-run`），环境不继承父进程（**密钥与凭据不进工具进程**），`HOME` / `TEMP` 等落进该 agent 的沙箱。
-  **一个 agent 一个容器 profile**，守门进程是唯一建它的地方并记进 `.home/fence-grants.json` 台账；`--fence-clean` 按台账回收、再在产品根内扫掉台账外的孤儿授权与遗留 profile。
+  **一个 agent 一个容器 profile**，守门进程是唯一建它的地方并记进 `.home/fence-grants.json` 台账；每次写 ACL **先把记录落盘**
+  （产品根内路径存原始安全描述符、根外只存 ACE 摘要），写后核对（我们的 ACE 在不在、原有权限项有没有丢），失败就回滚并如实报错；
+  `--fence-clean` 按台账**整体还原**根内路径、精确撤销根外条目，再在产品根内扫掉台账外的孤儿授权（含任何显式包 SID ACE）与遗留 profile。
   机制验证分三态：`Enforced` / `EnvUnavailable`（本机不允许，如实降级照跑）/ `Broken`（我们写错了，未授权时段**拒绝执行**）。
   **装不上就如实报告能力等级；未授权不等于无围栏**（进程树、资源上限与环境白名单两种时段都生效）。平台细节见 [docs/tools/README.md](docs/tools/README.md) 与 `confine/` 的源码。
 - `capabilities/workspace/` 的 `packages` 是运行包契约与包库事实，`exec` 是执行档位与执行计划派生；两者都是纯逻辑。契约见 [RUNTIME_SPEC.md](RUNTIME_SPEC.md)。

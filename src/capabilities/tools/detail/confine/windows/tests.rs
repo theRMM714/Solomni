@@ -70,6 +70,48 @@ fn dump_aces(path: &Path) -> String {
     out
 }
 
+/// 探针目录的收尾：删不掉就如实打印，不静默（受限环境里写坏的 DACL 会让删除失败）。
+fn discard(base: &Path) {
+    if let Err(e) = std::fs::remove_dir_all(base) {
+        if base.exists() {
+            eprintln!("[诊断] 探针目录未清理（{}）：{}", base.display(), e);
+        }
+    }
+}
+
+/// ACL 往返预检：在自有 base 里记 ACE 集合 → 写 → 读回 → 撤 → 集合不变；做不了就返回 false。
+fn acl_round_trip(base: &Path, tag: &str) -> bool {
+    let target = base.join("acl-preflight");
+    if std::fs::create_dir_all(&target).is_err() {
+        return false;
+    }
+    let before = match acl_entries(&target) {
+        Ok(v) => v,
+        Err(_) => return false,
+    };
+    let spec = FenceSpec {
+        agent: format!("acl-preflight-{tag}"),
+        private: PathBuf::new(),
+        ro_tree: Vec::new(),
+        rw: vec![target.clone()],
+        cwd: target.clone(),
+        ro: Vec::new(),
+        net: false,
+    };
+    let sid = match container_sid(&container_name(&spec)) {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
+    let ok = grant_one(sid, &target, RIGHTS_RO, false, false).is_ok()
+        && has_any_ace_for(sid, &target)
+        && revoke_one(sid, &target, false).is_ok()
+        && acl_entries(&target)
+            .map(|after| after == before)
+            .unwrap_or(false);
+    free_sid(sid);
+    ok
+}
+
 /// 容器 profile **一个 agent 一个**：同名 agent 跨会话复用同一个容器身份（数量有界），换 agent 就换 profile。
 #[test]
 fn container_profile_is_one_per_agent() {
@@ -236,102 +278,110 @@ fn grant_targets_keep_module_read_only_and_cwd_read_only() {
     );
 }
 
-/// 授权这条路的真机验收：真去改一个目录的 DACL。
-/// 本机环境不允许改 ACL 时（例如被沙箱挡住）如实打印原因并跳过——不静默当作通过。
+/// 授权这条路的真机验收：真去改一个目录的 DACL，并把台账与快照都落下来。
+/// 先在自有 base 里做完整往返预检；本机做不了就如实打印并跳过（不静默当作通过）。
 #[test]
 fn grants_are_written_when_the_environment_allows_it() {
-    if !capability().fs {
-        eprintln!(
-            "[探针] 本机不允许改目录 ACL（{}）：授权探针跳过（不静默当作通过）——请在普通 shell 里重跑 cargo test 验证",
-            capability().note
-        );
+    let base = std::env::temp_dir().join(format!("solomni-grant-probe-{}", std::process::id()));
+    let target = base.join("target");
+    std::fs::create_dir_all(&target).expect("建探针目录");
+    if !acl_round_trip(&base, "grant") {
+        eprintln!("[探针] 本机做不了 ACL 完整往返（写→读回→撤）：授权探针跳过（不静默当作通过）");
+        discard(&base);
         return;
     }
-    let dir = std::env::temp_dir().join(format!("solomni-grant-probe-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).expect("建探针目录");
     let spec = FenceSpec {
         agent: "probe".to_string(),
         private: PathBuf::new(),
         ro_tree: Vec::new(),
-        rw: vec![dir.clone()],
-        cwd: dir.clone(),
+        rw: vec![target.clone()],
+        cwd: target.clone(),
         ro: Vec::new(),
         net: false,
     };
-    // 台账落在探针自己的临时目录里（不碰真实 .home/）。
-    let home = dir.join("ledger");
+    // 台账落在探针自己的 base 里（不碰真实 .home/）；产品根 = base，所以落点在根内走快照。
+    let home = base.join(".home");
     let outcome = prepare_fence(&spec, "cmd", &home);
     assert!(outcome.is_ok(), "授权应当成功：{:?}", outcome.err());
-    // 收尾必须把自己写下的权限项按台账撤掉：测试不在本机留痕（撤不动就报出来，不静默）。
+    let rec = load_record(&home);
+    assert!(
+        rec.snapshots.iter().any(|(p, _)| Path::new(p) == target),
+        "根内路径要先落原始安全描述符快照"
+    );
+    assert!(
+        !rec.grants.iter().any(|(_, p, _)| Path::new(p) == target),
+        "根内路径收尾走快照还原，不记 ACE 摘要"
+    );
+    // 收尾必须把自己写下的权限项按台账撤掉或还原：测试不在本机留痕。
     let report = clean(&home).expect("回收应当成功");
     assert!(report.contains("撤销"), "回收要如实报数量：{}", report);
-    let _ = std::fs::remove_dir_all(&dir);
+    discard(&base);
 }
 
 /// 撤销的真效果：授权 → 撤权 → 目标目录上不再有该容器 SID 的 ACE。
-/// 与上一条一样只在能改 ACL 的环境里真跑（本机受限沙箱会如实跳过）。
+/// 与上一条一样先做完整往返预检（本机受限沙箱会如实跳过）。
 #[test]
 fn revoke_removes_the_container_ace_from_the_given_roots() {
-    if !capability().fs {
-        eprintln!(
-            "[探针] 本机不允许改目录 ACL（{}）：撤销探针跳过（不静默当作通过）",
-            capability().note
-        );
+    let base = std::env::temp_dir().join(format!("solomni-revoke-probe-{}", std::process::id()));
+    let target = base.join("target");
+    std::fs::create_dir_all(&target).expect("建探针目录");
+    if !acl_round_trip(&base, "revoke") {
+        eprintln!("[探针] 本机做不了 ACL 完整往返（写→读回→撤）：撤销探针跳过（不静默当作通过）");
+        discard(&base);
         return;
     }
-    let dir = std::env::temp_dir().join(format!("solomni-revoke-probe-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).expect("建探针目录");
     let spec = FenceSpec {
         agent: "probe".to_string(),
         private: PathBuf::new(),
         ro_tree: Vec::new(),
-        rw: vec![dir.clone()],
-        cwd: dir.clone(),
+        rw: vec![target.clone()],
+        cwd: target.clone(),
         ro: Vec::new(),
         net: false,
     };
-    let home = dir.join("ledger");
+    let home = base.join(".home");
     prepare_fence(&spec, "cmd", &home).expect("授权应当成功");
     let sid = container_sid(&container_name(&spec)).expect("派生容器 SID");
     assert!(
-        has_ace_for(sid, &dir, RIGHTS_RW),
+        has_ace_for(sid, &target, RIGHTS_RW),
         "授权后根上应当有容器 SID 的 ACE"
     );
     free_sid(sid);
-    release_fence_home(&spec, Some(&home)).expect("撤权应当成功");
+    release_fence(&spec, &home).expect("撤权应当成功");
     let sid = container_sid(&container_name(&spec)).expect("派生容器 SID");
-    let still = has_ace_for(sid, &dir, RIGHTS_RW);
+    let still = has_ace_for(sid, &target, RIGHTS_RW);
     free_sid(sid);
     assert!(!still, "撤权后根上不该再有该容器 SID 的 ACE");
     // 基线授权（解释器目录只读）也记在同一份台账里，一并按台账撤干净。
     clean(&home).expect("基线回收应当成功");
-    let _ = std::fs::remove_dir_all(&dir);
+    discard(&base);
 }
 /// 只读档的真机验收：授权的只读根上写下的是**只读 ACE**，且撤权能把它撤净。
 /// 与读写授权分开断言——只读档的价值就在于"读得到、写不进"。
 #[test]
 fn read_only_grants_write_ro_aces_and_revoke_removes_them() {
-    if !capability().fs {
+    let base = std::env::temp_dir().join(format!("solomni-ro-probe-{}", std::process::id()));
+    let target = base.join("target");
+    let ro = base.join("ro-target");
+    std::fs::create_dir_all(&target).expect("建探针目录");
+    std::fs::create_dir_all(&ro).expect("建只读根");
+    if !acl_round_trip(&base, "ro") {
         eprintln!(
-            "[探针] 本机不允许改目录 ACL（{}）：只读授权探针跳过（不静默当作通过）",
-            capability().note
+            "[探针] 本机做不了 ACL 完整往返（写→读回→撤）：只读授权探针跳过（不静默当作通过）"
         );
+        discard(&base);
         return;
     }
-    let dir = std::env::temp_dir().join(format!("solomni-ro-probe-{}", std::process::id()));
-    let ro = std::env::temp_dir().join(format!("solomni-ro-target-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).expect("建探针目录");
-    std::fs::create_dir_all(&ro).expect("建只读根");
     let spec = FenceSpec {
         agent: "probe-ro".to_string(),
         private: PathBuf::new(),
         ro_tree: Vec::new(),
-        rw: vec![dir.clone()],
+        rw: vec![target.clone()],
         ro: vec![ro.clone()],
-        cwd: dir.clone(),
+        cwd: target.clone(),
         net: false,
     };
-    let home = dir.join("ledger");
+    let home = base.join(".home");
     prepare_fence(&spec, "cmd", &home).expect("授权应当成功");
     let sid = container_sid(&container_name(&spec)).expect("派生容器 SID");
     assert!(has_ace_for(sid, &ro, RIGHTS_RO), "只读根上要有只读 ACE");
@@ -340,14 +390,13 @@ fn read_only_grants_write_ro_aces_and_revoke_removes_them() {
         "只读根上不该有读写 ACE——那正是只读档的意义"
     );
     free_sid(sid);
-    release_fence_home(&spec, Some(&home)).expect("撤权应当成功");
+    release_fence(&spec, &home).expect("撤权应当成功");
     let sid = container_sid(&container_name(&spec)).expect("派生容器 SID");
     let still = has_ace_for(sid, &ro, RIGHTS_RO);
     free_sid(sid);
     assert!(!still, "撤权后只读根上不该再有该容器 SID 的 ACE");
     clean(&home).expect("台账回收应当成功");
-    let _ = std::fs::remove_dir_all(&dir);
-    let _ = std::fs::remove_dir_all(&ro);
+    discard(&base);
 }
 
 /// 【残留探针】授权（叶子读写 + 父目录只读属性）→ 撤权后，叶子与父目录上都不得留有该容器 SID
@@ -376,7 +425,7 @@ fn revoke_leaves_no_container_ace_on_leaf_parents() {
         ro: Vec::new(),
         net: false,
     };
-    let home = base.join("ledger");
+    let home = base.join(".home");
     prepare_fence(&spec, "cmd", &home).expect("授权应当成功");
     let sid = container_sid(&container_name(&spec)).expect("派生容器 SID");
     // 诊断输出用 [诊断] 前缀：门禁只把 [探针] 当 env-skip，别让这两行把"跳过数"充大。
@@ -394,14 +443,14 @@ fn revoke_leaves_no_container_ace_on_leaf_parents() {
         has_ace_for(sid, &leaf, RIGHTS_RW),
         "授权后叶子上应有读写 ACE"
     );
-    release_fence_home(&spec, Some(&home)).expect("撤权应当成功");
+    release_fence(&spec, &home).expect("撤权应当成功");
     eprintln!("[诊断] 撤权后父目录 {}", dump_aces(&base));
     eprintln!("[诊断] 撤权后叶子 {}", dump_aces(&leaf));
     let on_parent = has_any_ace_for(sid, &base);
     let on_leaf = has_any_ace_for(sid, &leaf);
     free_sid(sid);
     clean(&home).expect("台账回收应当成功");
-    let _ = std::fs::remove_dir_all(&base);
+    discard(&base);
     assert!(
         !on_parent,
         "撤权后父目录不得残留该容器 SID 的任何 ACE（残留会把父目录对受限进程藏住）"
@@ -471,7 +520,7 @@ fn container_roundtrip_sees_leaf_but_not_parent_content() {
                 "[探针] 本环境不允许建 AppContainer profile（环境结论，如实跳过）：{}",
                 e
             );
-            let _ = std::fs::remove_dir_all(&base);
+            discard(&base);
             return;
         }
         panic!("建容器 profile：{}", e);
@@ -528,11 +577,11 @@ fn container_roundtrip_sees_leaf_but_not_parent_content() {
     );
 
     free_sid(sid);
-    release_fence_home(&spec, Some(&home)).expect("撤权应当成功");
+    release_fence(&spec, &home).expect("撤权应当成功");
     clean(&home).expect("台账回收应当成功");
     // 探针建的容器 profile 也要带走：测试不在本机留痕。
     assert!(delete_profile(&container), "探针的容器 profile 应当删得掉");
-    let _ = std::fs::remove_dir_all(&base);
+    discard(&base);
 }
 
 /// 【真机往返探针·模块形态】**垂直分工的权限方位**端到端验收：`ro_tree` = 模块根（递归只读）、
@@ -582,7 +631,7 @@ fn container_roundtrip_keeps_module_read_only_and_peer_unreachable() {
                 "[探针] 本环境不允许建 AppContainer profile（环境结论，如实跳过）：{}",
                 e
             );
-            let _ = std::fs::remove_dir_all(&base);
+            discard(&base);
             return;
         }
         panic!("建容器 profile：{}", e);
@@ -626,10 +675,10 @@ fn container_roundtrip_keeps_module_read_only_and_peer_unreachable() {
     );
 
     free_sid(sid);
-    release_fence_home(&spec, Some(&home)).expect("撤权应当成功");
+    release_fence(&spec, &home).expect("撤权应当成功");
     clean(&home).expect("台账回收应当成功");
     assert!(delete_profile(&container), "探针的容器 profile 应当删得掉");
-    let _ = std::fs::remove_dir_all(&base);
+    discard(&base);
 }
 
 /// ACL 写法的语义与后果验证：非递归 `SetNamedSecurityInfoW` 与递归 `TreeSetNamedSecurityInfoW`（带/不带继承标志）
@@ -645,7 +694,7 @@ fn acl_write_flavours_are_probed_for_scope_and_readability() {
         return;
     }
     let base = std::env::temp_dir().join(format!("solomni-acl-probe-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&base);
+    discard(&base);
     // 预检：先在自有目录里做一次完整往返（写 → 读回 → 撤）。受限环境里"写成功但读不回/删不掉"，
     // 那样的进程做不了观察，也留不了干净的现场——如实跳过，不静默当作通过，更不制造残留。
     let pre = base.join("preflight");
@@ -666,7 +715,7 @@ fn acl_write_flavours_are_probed_for_scope_and_readability() {
     free_sid(pre_sid);
     if !round_trip {
         eprintln!("[探针] 本机做不了完整往返（写→读回→撤）：ACL 写法探针跳过（不静默当作通过）");
-        let _ = std::fs::remove_dir_all(&base);
+        discard(&base);
         return;
     }
     let cases = [
@@ -689,11 +738,15 @@ fn acl_write_flavours_are_probed_for_scope_and_readability() {
             net: false,
         };
         let sid = container_sid(&container_name(&spec)).expect("派生容器 SID");
+        let root_before = acl_entries(&tree).expect("读写入前根 ACE 集合");
+        let sub_before = acl_entries(&tree.join("sub")).expect("读写入前子目录 ACE 集合");
         let grant = grant_one(sid, &tree, RIGHTS_RO, recursive, inherit);
         let root_ace = has_any_ace_for(sid, &tree);
         let sub_ace = has_any_ace_for(sid, &tree.join("sub"));
         let file_ace = has_any_ace_for(sid, &tree.join("sub").join("b.txt"));
         let revoke = revoke_one(sid, &tree, recursive);
+        let root_after = acl_entries(&tree).expect("读撤销后根 ACE 集合");
+        let sub_after = acl_entries(&tree.join("sub")).expect("读撤销后子目录 ACE 集合");
         eprintln!(
             "[探针] {tag}：grant_ok={} 根ACE={} 子目录ACE={} 子文件ACE={} revoke_ok={}",
             grant.is_ok(),
@@ -705,6 +758,14 @@ fn acl_write_flavours_are_probed_for_scope_and_readability() {
         free_sid(sid);
         assert!(grant.is_ok(), "{tag}：授予应当成功");
         assert!(revoke.is_ok(), "{tag}：撤销应当成功");
+        assert_eq!(
+            root_before, root_after,
+            "{tag}：写入并撤销后根原有 ACE 集合必须一致"
+        );
+        assert_eq!(
+            sub_before, sub_after,
+            "{tag}：写入并撤销后子目录原有 ACE 集合必须一致"
+        );
         match (recursive, inherit) {
             // 非递归只设根本身；TreeSet 配**不带继承标志**的 ACE 同样只落在根——
             // 所以「整树覆盖」只有继承这一条路，去继承就得自己逐节点写。
@@ -718,5 +779,192 @@ fn acl_write_flavours_are_probed_for_scope_and_readability() {
             ),
         }
     }
-    let _ = std::fs::remove_dir_all(&base);
+    discard(&base);
+}
+
+/// 【台账契约】写前先落盘：快照与授权摘要都要能在 ACL 改动前读回；收尾按快照整体还原。
+#[test]
+fn journal_records_snapshot_and_grant_before_touching_acl() {
+    let base = std::env::temp_dir().join(format!("solomni-journal-probe-{}", std::process::id()));
+    let target = base.join("target");
+    std::fs::create_dir_all(&target).expect("建探针目录");
+    if !acl_round_trip(&base, "journal") {
+        eprintln!("[探针] 本机做不了 ACL 完整往返（写→读回→撤）：台账探针跳过（不静默当作通过）");
+        discard(&base);
+        return;
+    }
+    let home = base.join(".home");
+    let bytes = sd_bytes(&target).expect("读原始安全描述符");
+    let mut rec = load_record(&home);
+    assert!(
+        journal_add_snapshot(&home, &mut rec, &target, bytes.clone()).expect("台账先落盘"),
+        "第一次写该路径的快照应当新增"
+    );
+    let reread = load_record(&home);
+    assert!(
+        reread
+            .snapshots
+            .iter()
+            .any(|(p, b)| Path::new(p) == target && b == &bytes),
+        "动 ACL 之前台账里就要有原始安全描述符"
+    );
+    let spec = FenceSpec {
+        agent: "probe-journal".to_string(),
+        private: PathBuf::new(),
+        ro_tree: Vec::new(),
+        rw: vec![target.clone()],
+        cwd: target.clone(),
+        ro: Vec::new(),
+        net: false,
+    };
+    prepare_fence(&spec, "cmd", &home).expect("授权应当成功");
+    let rec = load_record(&home);
+    assert!(
+        rec.snapshots.iter().any(|(p, _)| Path::new(p) == target),
+        "收尾还原要用的快照必须在场"
+    );
+    clean(&home).expect("回收应当成功");
+    discard(&base);
+}
+
+/// 【写后核对】写下前先记 ACE 集合；写入并还原后，原有 ACE 集合必须与之前一致。
+#[test]
+fn write_then_restore_keeps_the_original_ace_set() {
+    let base = std::env::temp_dir().join(format!("solomni-multiset-probe-{}", std::process::id()));
+    let target = base.join("target");
+    std::fs::create_dir_all(&target).expect("建探针目录");
+    if !acl_round_trip(&base, "multiset") {
+        eprintln!(
+            "[探针] 本机做不了 ACL 完整往返（写→读回→撤）：ACE 集合探针跳过（不静默当作通过）"
+        );
+        discard(&base);
+        return;
+    }
+    let before = acl_entries(&target).expect("读写入前 ACE 集合");
+    let bytes = sd_bytes(&target).expect("存原始安全描述符");
+    let spec = FenceSpec {
+        agent: "probe-multiset".to_string(),
+        private: PathBuf::new(),
+        ro_tree: Vec::new(),
+        rw: vec![target.clone()],
+        cwd: target.clone(),
+        ro: Vec::new(),
+        net: false,
+    };
+    let sid = container_sid(&container_name(&spec)).expect("派生容器 SID");
+    grant_verified(sid, &target, RIGHTS_RO, false, false).expect("写入并核对应当成功");
+    assert!(
+        has_ace_for(sid, &target, RIGHTS_RO),
+        "写入后我们的 ACE 要在场"
+    );
+    free_sid(sid);
+    restore_sd(&target, &bytes).expect("还原原始安全描述符");
+    let after = acl_entries(&target).expect("读还原后 ACE 集合");
+    assert_eq!(before, after, "写入并还原后原有 ACE 集合必须一致");
+    let sid = container_sid(&container_name(&spec)).expect("派生容器 SID");
+    assert!(
+        !has_any_ace_for(sid, &target),
+        "还原后不该再有该容器 SID 的 ACE"
+    );
+    free_sid(sid);
+    discard(&base);
+}
+
+/// 【失败回滚】路径不存在这类写不了的落点必须如实返回 Err，且不给它留台账条目。
+#[test]
+fn failed_grant_is_rolled_back_and_not_journaled() {
+    let base = std::env::temp_dir().join(format!("solomni-rollback-probe-{}", std::process::id()));
+    let target = base.join("target");
+    std::fs::create_dir_all(&target).expect("建探针目录");
+    if !acl_round_trip(&base, "rollback") {
+        eprintln!("[探针] 本机做不了 ACL 完整往返（写→读回→撤）：回滚探针跳过（不静默当作通过）");
+        discard(&base);
+        return;
+    }
+    let missing = base.join("missing");
+    let spec = FenceSpec {
+        agent: "probe-rollback".to_string(),
+        private: PathBuf::new(),
+        ro_tree: Vec::new(),
+        rw: vec![target.clone(), missing.clone()],
+        cwd: target.clone(),
+        ro: Vec::new(),
+        net: false,
+    };
+    let home = base.join(".home");
+    let outcome = prepare_fence(&spec, "cmd", &home);
+    assert!(outcome.is_err(), "写不了的落点必须如实失败：{:?}", outcome);
+    let rec = load_record(&home);
+    assert!(
+        !rec.snapshots.iter().any(|(p, _)| Path::new(p) == missing),
+        "失败落点不得留快照"
+    );
+    assert!(
+        !rec.grants.iter().any(|(_, p, _)| Path::new(p) == missing),
+        "失败落点不得留 ACE 摘要"
+    );
+    clean(&home).expect("回收应当成功");
+    discard(&base);
+}
+
+/// 【孤儿回收】没有台账、也没有 profile 时，按显式包 SID 也要能连树撤掉残留。
+#[test]
+fn sweep_reclaims_orphan_package_ace_without_a_ledger() {
+    let base = std::env::temp_dir().join(format!("solomni-sweep-probe-{}", std::process::id()));
+    let target = base.join("target");
+    std::fs::create_dir_all(&target).expect("建探针目录");
+    if !acl_round_trip(&base, "sweep") {
+        eprintln!(
+            "[探针] 本机做不了 ACL 完整往返（写→读回→撤）：孤儿回收探针跳过（不静默当作通过）"
+        );
+        discard(&base);
+        return;
+    }
+    let sid = container_sid("Solomni.Agent.SweepOrphanProbe").expect("派生容器 SID");
+    grant_one(sid, &target, RIGHTS_RW, false, false).expect("写下孤儿 ACE");
+    assert!(has_any_ace_for(sid, &target), "孤儿 ACE 要在场");
+    let swept = sweep_orphan_aces(&base).expect("孤儿清扫应当成功");
+    assert!(swept >= 1, "至少在 target 处命中一次");
+    assert!(
+        !has_any_ace_for(sid, &target),
+        "清扫后不该再有该包 SID 的显式 ACE"
+    );
+    free_sid(sid);
+    discard(&base);
+}
+
+/// 【先落盘】台账落不了盘时绝不动 ACL：写被台账门禁挡住，目标目录不留任何我们的 ACE。
+#[test]
+fn journal_failure_blocks_the_acl_write() {
+    let base = std::env::temp_dir().join(format!("solomni-journal-gate-{}", std::process::id()));
+    let target = base.join("target");
+    std::fs::create_dir_all(&target).expect("建探针目录");
+    if !acl_round_trip(&base, "journal-gate") {
+        eprintln!("[探针] 本机做不了 ACL 完整往返（写→读回→撤）：先落盘探针跳过（不静默当作通过）");
+        discard(&base);
+        return;
+    }
+    // home 用一个普通文件占位：save_record 的 create_dir_all 必然失败，台账落不了盘。
+    let home = base.join("home-as-file");
+    std::fs::write(&home, b"not a dir").expect("写占位文件");
+    let spec = FenceSpec {
+        agent: "probe-journal-gate".to_string(),
+        private: PathBuf::new(),
+        ro_tree: Vec::new(),
+        rw: vec![target.clone()],
+        cwd: target.clone(),
+        ro: Vec::new(),
+        net: false,
+    };
+    let outcome = prepare_fence(&spec, "cmd", &home);
+    assert!(
+        outcome.is_err(),
+        "台账落不了盘时必须如实失败：{:?}",
+        outcome
+    );
+    let sid = container_sid(&container_name(&spec)).expect("派生容器 SID");
+    let wrote = has_ace_for(sid, &target, RIGHTS_RW);
+    free_sid(sid);
+    assert!(!wrote, "台账没落盘就不许写 ACL");
+    discard(&base);
 }

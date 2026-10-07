@@ -168,7 +168,9 @@ fn main() {
         &systools_source,
         Arc::new(tools),
         Arc::new(io),
-        Arc::new(capabilities::tools::detail::confine::FenceHostAdapter),
+        Arc::new(capabilities::tools::detail::confine::FenceHostAdapter::new(
+            home,
+        )),
     ) {
         Ok(svc) if capabilities::tools::api::Tools::problems(&svc).is_empty() => Arc::new(svc),
         Ok(svc) => {

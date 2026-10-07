@@ -7,7 +7,7 @@
 
 ## 一、管什么 / 不管什么
 
-**管**：系统工具总表与角色表（`systools/`）、内置文件工具（read/write/edit/patch/search）的执行编排与纯规则、工具参数契约、补丁通道、外部工具进程的执行、**围栏策略与平台实现**、授权记录与撤销。
+**管**：系统工具总表与角色表（`systools/`）、内置文件工具（read/write/edit/patch/search）的执行编排与纯规则、工具参数契约、补丁通道、外部工具进程的执行、**围栏策略与平台实现**、授权记录与撤销（写 ACL 前先落台账、写后核对、失败回滚；收尾按台账还原或精确撤销，并在产品根内回收孤儿授权）。
 
 **不管**：不放领域语义（角色是系统的身份，不是业务概念）；不选模型；不碰会话流水。
 
@@ -23,6 +23,7 @@
 ## 四、改动本单元时必须同步
 
 - 平台专属代码本地不编译——`FenceSpec` 字面量必须写全字段（跨平台字面量门禁）；改围栏 → `tests/<平台>/` 探针；改工具表 → `systools/` 与本目录 `tools-and-roles.md`。
+- 围栏的写后核对、回滚与台账在 `src/capabilities/tools/detail/confine/windows/`：改落点形状（`GrantTarget`）或台账字段时，`prepare_fence` / `release_fence` / `clean` / `sweep_orphan_aces` 要一起改。
 - 核心代理系统工具的待实现规划清单：`systool_gaps.yaml`（仓库根；不是当前工具表，也不替代测试缺口账）。
 
 ## 本目录

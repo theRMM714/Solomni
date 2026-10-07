@@ -12,8 +12,9 @@ use windows_sys::Win32::Security::Authorization::{
     EXPLICIT_ACCESS_W, GRANT_ACCESS, REVOKE_ACCESS, TRUSTEE_IS_SID, TRUSTEE_IS_UNKNOWN, TRUSTEE_W,
 };
 use windows_sys::Win32::Security::{
-    EqualSid, GetAce, GetAclInformation, ACL, ACL_SIZE_INFORMATION, CONTAINER_INHERIT_ACE,
-    DACL_SECURITY_INFORMATION, OBJECT_INHERIT_ACE, PSID,
+    EqualSid, GetAce, GetAclInformation, GetSecurityDescriptorLength, SetFileSecurityW, ACL,
+    ACL_SIZE_INFORMATION, CONTAINER_INHERIT_ACE, DACL_SECURITY_INFORMATION, OBJECT_INHERIT_ACE,
+    PSECURITY_DESCRIPTOR, PSID,
 };
 
 /// 文件对象（SetNamedSecurityInfoW / GetNamedSecurityInfoW 的对象类型）。
@@ -203,6 +204,10 @@ pub(crate) fn interpreter_dirs(command: &str) -> Vec<PathBuf> {
     super::super::interpreter_dirs(command)
 }
 
+/// 目的：一个授权落点（路径, 权限位, 是否递归整树, ACE 是否被子项继承）。
+/// 约束：把 grant_targets 的元组收成一个名字，prepare / release / 回滚共用同一份形状。
+pub(crate) type GrantTarget = (PathBuf, u32, bool, bool);
+
 /// 围栏要授权的全部落点：数据边界叶子（读写 / 用户授权的只读）+ **它们的父目录**（只读属性）。
 ///
 /// 父目录为什么要授：容器里对**中间目录**没有 FILE_READ_ATTRIBUTES 时，`exists()` / `stat()` 这类
@@ -214,9 +219,9 @@ pub(crate) fn interpreter_dirs(command: &str) -> Vec<PathBuf> {
 /// 只到**直接父目录**为止（不是整条祖先链）：再往上就是产品根之外，而 stat 到直接父目录已足够让
 /// "父目录在不在"这个判断成立。给祖先链授"穿过"要改写 `C:\` 这种巨型目录的 DACL
 /// （顺整棵树重算继承，真机 ~90 s/条），这里授的是产品内的小目录，各一条 ACE。
-pub(crate) fn grant_targets(spec: &FenceSpec) -> Vec<(PathBuf, u32, bool, bool)> {
-    let mut todo: Vec<(PathBuf, u32, bool, bool)> = Vec::new();
-    let mut leaves: Vec<(PathBuf, u32, bool, bool)> = Vec::new();
+pub(crate) fn grant_targets(spec: &FenceSpec) -> Vec<GrantTarget> {
+    let mut todo: Vec<GrantTarget> = Vec::new();
+    let mut leaves: Vec<GrantTarget> = Vec::new();
     for root in &spec.rw {
         if !root.as_os_str().is_empty() {
             leaves.push((root.clone(), RIGHTS_RW, true, true));
@@ -293,6 +298,194 @@ pub(crate) fn expand_generics(mask: u32) -> u32 {
 /// 已有 ACE 的权限位是不是覆盖得住我们需要的权限位。
 pub(crate) fn rights_covered(mask: u32, rights: u32) -> bool {
     expand_generics(rights) & !expand_generics(mask) == 0
+}
+
+/// 目的：读出一个对象的全部标准 ACE（允许 / 拒绝），带类型、标志、SID 与权限位。
+/// 返回：按 DACL 顺序排列的（ACE 类型, ACE 标志, SID 字符串, 权限位）。
+/// 错误：读不到对象 DACL 时返回原因。
+/// 约束：只覆盖标准 ACE（类型 0/1）；对象 ACE 的 SID 偏移不同，不在此列。
+fn acl_scan(path: &Path) -> Result<Vec<(u8, u8, String, u32)>, String> {
+    const ACL_SIZE_INFORMATION_CLASS: i32 = 2;
+    let mut dacl: *mut ACL = std::ptr::null_mut();
+    let mut sd: PSID = std::ptr::null_mut();
+    let w = wide(path);
+    let rc = unsafe {
+        GetNamedSecurityInfoW(
+            w.as_ptr(),
+            SE_FILE_OBJECT,
+            DACL_SECURITY_INFORMATION,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            &mut dacl,
+            std::ptr::null_mut(),
+            &mut sd,
+        )
+    };
+    if rc != 0 {
+        return Err(format!("读 DACL 失败（{}）：错误码 {}", path.display(), rc));
+    }
+    let mut out: Vec<(u8, u8, String, u32)> = Vec::new();
+    if !dacl.is_null() {
+        let mut info: ACL_SIZE_INFORMATION = unsafe { std::mem::zeroed() };
+        let ok = unsafe {
+            GetAclInformation(
+                dacl,
+                &mut info as *mut _ as *mut c_void,
+                std::mem::size_of::<ACL_SIZE_INFORMATION>() as u32,
+                ACL_SIZE_INFORMATION_CLASS,
+            )
+        };
+        if ok != 0 {
+            for i in 0..info.AceCount {
+                let mut ace: *mut c_void = std::ptr::null_mut();
+                if unsafe { GetAce(dacl, i, &mut ace) } == 0 || ace.is_null() {
+                    continue;
+                }
+                let base = ace as *const u8;
+                let ace_type = unsafe { *base };
+                let flags = unsafe { *base.add(1) };
+                let mask = unsafe { std::ptr::read_unaligned(base.add(4) as *const u32) };
+                let sid = unsafe { base.add(8) as PSID };
+                out.push((ace_type, flags, sid_to_string(sid), mask));
+            }
+        }
+    }
+    unsafe {
+        LocalFree(sd);
+    }
+    Ok(out)
+}
+
+/// 目的：读出一个对象的允许 / 拒绝 ACE 多重集，用于比对一次写入有没有弄丢原有权限项。
+/// 返回：已排序的（ACE 类型, SID 字符串, 权限位）；继承与显式标志被忽略。
+/// 错误：读不到对象 DACL 时返回原因。
+pub(crate) fn acl_entries(path: &Path) -> Result<Vec<(u8, String, u32)>, String> {
+    let mut out: Vec<(u8, String, u32)> = acl_scan(path)?
+        .into_iter()
+        .filter(|(ace_type, _, _, _)| *ace_type == 0 || *ace_type == 1)
+        .map(|(ace_type, _, sid, mask)| (ace_type, sid, mask))
+        .collect();
+    out.sort();
+    Ok(out)
+}
+
+/// 目的：找出「写前有、写后没了」的 ACE（多重集差）。
+fn lost_entries(
+    before: &[(u8, String, u32)],
+    after: &[(u8, String, u32)],
+) -> Vec<(u8, String, u32)> {
+    let mut pool = after.to_vec();
+    let mut lost = Vec::new();
+    for item in before {
+        match pool.iter().position(|x| x == item) {
+            Some(pos) => {
+                pool.remove(pos);
+            }
+            None => lost.push(item.clone()),
+        }
+    }
+    lost
+}
+
+/// 目的：写一条授权并做写后核对（原有权限项不得丢失、我们的 ACE 必须生效）。
+/// 参数：sid 是授权对象，path 是目标，rights 是权限位，recursive 与 inherit 同 grant_one。
+/// 返回：写入且核对通过时 Ok(())。
+/// 错误：读写 DACL 失败、原有权限项丢失、我们的 ACE 未生效，都如实返回；调用方据此回滚。
+pub(crate) fn grant_verified(
+    sid: PSID,
+    path: &Path,
+    rights: u32,
+    recursive: bool,
+    inherit: bool,
+) -> Result<(), String> {
+    let before = acl_entries(path).map_err(|e| format!("读取写入前 DACL 失败：{}", e))?;
+    grant_one(sid, path, rights, recursive, inherit)?;
+    let after = acl_entries(path).map_err(|e| format!("写后读回 DACL 失败：{}", e))?;
+    let lost = lost_entries(&before, &after);
+    if !lost.is_empty() {
+        return Err(format!(
+            "写后核对发现原有权限项丢失（{}，缺 {} 项）",
+            path.display(),
+            lost.len()
+        ));
+    }
+    if !has_ace_for(sid, path, rights) {
+        return Err(format!(
+            "写后校验失败（{}）：给定权限的 ACE 未生效，本机环境不允许",
+            path.display()
+        ));
+    }
+    Ok(())
+}
+
+/// 目的：读出一个对象的 DACL 安全描述符（self-relative 字节），供收尾整体还原。
+/// 错误：读不到对象 DACL 时返回原因。
+pub(crate) fn sd_bytes(path: &Path) -> Result<Vec<u8>, String> {
+    let mut dacl: *mut ACL = std::ptr::null_mut();
+    let mut sd: PSID = std::ptr::null_mut();
+    let w = wide(path);
+    let rc = unsafe {
+        GetNamedSecurityInfoW(
+            w.as_ptr(),
+            SE_FILE_OBJECT,
+            DACL_SECURITY_INFORMATION,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            &mut dacl,
+            std::ptr::null_mut(),
+            &mut sd,
+        )
+    };
+    if rc != 0 {
+        return Err(format!("读 DACL 失败（{}）：错误码 {}", path.display(), rc));
+    }
+    let bytes = unsafe {
+        let len = GetSecurityDescriptorLength(sd) as usize;
+        std::slice::from_raw_parts(sd as *const u8, len).to_vec()
+    };
+    unsafe {
+        LocalFree(sd);
+    }
+    Ok(bytes)
+}
+
+/// 目的：把 sd_bytes 记下的安全描述符整体写回对象（回滚与收尾还原）。
+/// 错误：写回被拒时返回原因。
+pub(crate) fn restore_sd(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    let w = wide(path);
+    let rc = unsafe {
+        SetFileSecurityW(
+            w.as_ptr(),
+            DACL_SECURITY_INFORMATION,
+            bytes.as_ptr() as PSECURITY_DESCRIPTOR,
+        )
+    };
+    if rc == 0 {
+        return Err(format!(
+            "写回安全描述符失败（{}）：{}",
+            path.display(),
+            std::io::Error::last_os_error()
+        ));
+    }
+    Ok(())
+}
+
+/// 目的：列出对象上显式（非继承）的包 SID 允许 ACE，供台账外孤儿授权的回收。
+/// 返回：SID 字符串，形如 S-1-15-2-*；排除 ALL APPLICATION PACKAGES 与 ALL RESTRICTED 两个基线。
+/// 错误：读不到对象 DACL 时返回原因。
+pub(crate) fn orphan_package_aces(path: &Path) -> Result<Vec<String>, String> {
+    const INHERITED_ACE: u8 = 0x10;
+    Ok(acl_scan(path)?
+        .into_iter()
+        .filter(|(ace_type, flags, sid, _)| {
+            *ace_type == 0
+                && flags & INHERITED_ACE == 0
+                && sid.starts_with("S-1-15-2-")
+                && sid != "S-1-15-2-1"
+                && sid != "S-1-15-2-2"
+        })
+        .map(|(_, _, sid, _)| sid)
+        .collect())
 }
 
 /// 该对象上有没有给这个 SID 的**任何**允许 ACE（不看权限位）。

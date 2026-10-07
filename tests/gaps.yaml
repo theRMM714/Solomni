@@ -110,3 +110,16 @@
   accept: 用户能在界面上看到提交历史，并把共享区回滚到任一提交点；回滚后新开的 agent 拉取到的是那一点的内容。
   blocked_by: 缺少实现（呈现面未接入）
 
+- id: fence.ace-set-check-skips-object-aces
+  scope: global
+  level: T4
+  why: |
+    写后核对按（ACE 类型, SID, 权限位）多重集比对，只认标准允许 / 拒绝 ACE（类型 0/1）。
+    对象 ACE（类型 5–8，SID 前还带 GUID）的 SID 偏移不同，当前不参与比对——含这类 ACE 的目录上，
+    我们的写入若弄丢了它，核对不会报。文件 DACL 极少出现对象 ACE，所以风险窄但确实存在。
+  how: |
+    按 ACE 头部的标志位判断 ObjectType / InheritedObjectType 是否在场，算出 SID 偏移，
+    让对象 ACE 也进多重集；补一条含对象 ACE 的真机往返用例。
+  accept: 写后核对覆盖对象 ACE；或如实说明本平台的 ACL 写入不会产生或破坏对象 ACE。
+  blocked_by: 缺少观察面（先在真机上确认文件 DACL 是否会出现对象 ACE）
+

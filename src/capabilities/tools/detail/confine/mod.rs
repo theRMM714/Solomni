@@ -69,12 +69,22 @@ pub fn verify(spec: &FenceSpec, command: &str) -> FenceVerdict {
     backend::verify(spec, command)
 }
 
-/// 围栏授权释放的适配器（实现 conductor 的 FenceHost 端口）：conductor 只说「这个会话的围栏撤掉」。
-pub struct FenceHostAdapter;
+/// 围栏授权释放的适配器（实现 tools 的 FenceHost 端口）：conductor 只说「这个会话的围栏撤掉」。
+pub struct FenceHostAdapter {
+    /// 产品私有区（.home/）：台账落点，也是产品根的锚（收尾还原要读它）。
+    home: PathBuf,
+}
+
+impl FenceHostAdapter {
+    /// 目的：组合根注入产品私有区；释放时据此按台账还原或精确撤权。
+    pub fn new(home: PathBuf) -> Self {
+        Self { home }
+    }
+}
 
 impl crate::capabilities::tools::ports::FenceHost for FenceHostAdapter {
     fn release(&self, spec: &FenceSpec) -> Result<(), String> {
-        release_fence(spec)
+        release_fence(spec, &self.home)
     }
 }
 
@@ -210,14 +220,14 @@ pub fn sweep_orphan_aces(root: &std::path::Path) -> Result<usize, String> {
 }
 
 /// 撤销一次会话的围栏授权（会话删除时由核心经 FenceHost 端口请求；其它平台是空操作）。
-pub fn release_fence(spec: &FenceSpec) -> Result<(), String> {
+pub fn release_fence(spec: &FenceSpec, home: &std::path::Path) -> Result<(), String> {
     #[cfg(windows)]
     {
-        windows::release_fence(spec)
+        windows::release_fence(spec, home)
     }
     #[cfg(not(windows))]
     {
-        let _ = spec;
+        let _ = (spec, home);
         Ok(())
     }
 }
