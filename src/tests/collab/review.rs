@@ -166,11 +166,8 @@ pub(crate) fn approved_plan_spawns_a_sub_session_per_ready_node() {
         .create_work(collab_work("w", &["a"], false, "做个东西"))
         .unwrap()
         .sid;
-    core.collab_continue(&sid, CollabStep::Begin, "yes")
-        .unwrap();
-    let after = core
-        .collab_continue(&sid, CollabStep::Decide, "同意开工")
-        .unwrap();
+    answer_card(&mut core, &sid, OPT_BEGIN, "").unwrap();
+    let after = answer_card(&mut core, &sid, OPT_PLAN_SAY, "同意开工").unwrap();
 
     let started: Vec<(String, String, String)> = after
         .iter()
@@ -240,11 +237,8 @@ pub(crate) fn same_agent_nodes_serialize_but_different_agents_run_together() {
         .create_work(collab_work("w", &["a", "b"], false, "做个东西"))
         .unwrap()
         .sid;
-    core.collab_continue(&sid, CollabStep::Begin, "yes")
-        .unwrap();
-    let evs = core
-        .collab_continue(&sid, CollabStep::Decide, "同意开工")
-        .unwrap();
+    answer_card(&mut core, &sid, OPT_BEGIN, "").unwrap();
+    let evs = answer_card(&mut core, &sid, OPT_PLAN_SAY, "同意开工").unwrap();
     let order: Vec<String> = evs
         .iter()
         .filter_map(|e| match e {
@@ -325,11 +319,8 @@ pub(crate) fn stage_review_refills_until_the_ids_are_valid() {
         .create_work(collab_work("w", &["a"], false, "做个东西"))
         .unwrap()
         .sid;
-    core.collab_continue(&sid, CollabStep::Begin, "yes")
-        .unwrap();
-    let evs = core
-        .collab_continue(&sid, CollabStep::Decide, "同意开工")
-        .unwrap();
+    answer_card(&mut core, &sid, OPT_BEGIN, "").unwrap();
+    let evs = answer_card(&mut core, &sid, OPT_PLAN_SAY, "同意开工").unwrap();
     assert!(
         evs.iter()
             .any(|e| matches!(e, SessionEvent::Notice(n) if n.contains("重填"))),
@@ -386,11 +377,8 @@ pub(crate) fn total_review_rework_names_the_nodes_and_only_they_are_redispatched
         .create_work(collab_work("w", &["a"], false, "做个东西"))
         .unwrap()
         .sid;
-    core.collab_continue(&sid, CollabStep::Begin, "yes")
-        .unwrap();
-    let first = core
-        .collab_continue(&sid, CollabStep::Decide, "同意开工")
-        .unwrap();
+    answer_card(&mut core, &sid, OPT_BEGIN, "").unwrap();
+    let first = answer_card(&mut core, &sid, OPT_PLAN_SAY, "同意开工").unwrap();
     match core.collab_pending(&sid).unwrap() {
         Some(Pending::NodeBlocked { nodes }) => {
             assert_eq!(nodes, vec!["n1-1".to_string()], "只退核心指名的那个节点")
@@ -511,12 +499,9 @@ pub(crate) fn failed_node_acceptance_pauses_then_continue_redispatches() {
         .create_work(collab_work("w", &["a"], false, "做个东西"))
         .unwrap()
         .sid;
-    core.collab_continue(&sid, CollabStep::Begin, "yes")
-        .unwrap();
+    answer_card(&mut core, &sid, OPT_BEGIN, "").unwrap();
 
-    let first = core
-        .collab_continue(&sid, CollabStep::Decide, "同意开工")
-        .unwrap();
+    let first = answer_card(&mut core, &sid, OPT_PLAN_SAY, "同意开工").unwrap();
     assert!(
         matches!(
             core.collab_pending(&sid),
@@ -572,9 +557,7 @@ pub(crate) fn collab_pauses_for_plan_review_until_the_user_approves() {
         .unwrap()
         .sid;
 
-    let events = core
-        .collab_continue(&sid, CollabStep::Begin, "yes")
-        .unwrap();
+    let events = answer_card(&mut core, &sid, OPT_BEGIN, "").unwrap();
     assert!(
         events
             .iter()
@@ -607,9 +590,7 @@ pub(crate) fn collab_pauses_for_plan_review_until_the_user_approves() {
     assert_eq!(reviewed.nodes[0].objective, "把 X 做完");
 
     // 点「同意」之后才推进：执行回报与交付都该出现。
-    let after = core
-        .collab_continue(&sid, CollabStep::Decide, "同意开工")
-        .unwrap();
+    let after = answer_card(&mut core, &sid, OPT_PLAN_SAY, "同意开工").unwrap();
     assert!(
         after
             .iter()

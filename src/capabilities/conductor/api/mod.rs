@@ -14,9 +14,8 @@
 // 登记处的入站契约归登记处自己：这里只用它的面（实现队列代理），不定义。
 use crate::capabilities::conductor::service::Conductor;
 use crate::capabilities::registry::api::AgentView;
-use crate::capabilities::session::api::AgentMeta;
 use crate::capabilities::session::api::HistoryView;
-pub use crate::capabilities::session::api::{Pending, SessionEvent};
+pub use crate::capabilities::session::api::{DecisionCard, SessionEvent};
 // 工具确认的答案类型归 kernel（跨线程机制）；这里转出给呈现层，呈现层不直接认 kernel。
 pub use crate::kernel::api::Approval;
 use crate::kernel::api::JobRegistry;
@@ -190,18 +189,26 @@ pub trait SessionOps: Send + Sync {
     fn say(&self, sid: &str, text: &str, out: Output) -> Result<Advance, String>;
     /// 继续一次会话：被停止过就先解冻整棵子树再接着走；协作从断点推进，单 agent / 代理补一轮「继续」。
     fn continue_flow(&self, sid: &str, out: Output) -> Result<Advance, String>;
-    /// 协作推进到下一个阶段（task / slate / begin / answer）。
-    fn collab_step(&self, sid: &str, step: CollabStep, text: &str) -> Result<Advance, String>;
+    /// 协作会话：写下本次需求（起点那一关）；其余推进一律走"回答一张卡"。
+    fn set_task(&self, sid: &str, text: &str) -> Result<Advance, String>;
+    /// **回答一张裁决卡**（唯一的回答口）：带卡片 id + 选项 id（+ 附言）。
+    /// 约束：校验选项 id 属于**当时那张卡**的选项集（防旧卡的答案放行新请求）；不合就如实拒绝。
+    fn answer_card(
+        &self,
+        sid: &str,
+        card: &str,
+        option: &str,
+        note: &str,
+    ) -> Result<Advance, String>;
+    /// 当前挂着的那张卡（None = 没有等你定的事）：呈现层按选项渲染，不按 kind 猜。
+    fn open_card(&self, sid: &str) -> Result<Option<DecisionCard>, String>;
     fn withdraw_agree(&self, sid: &str, agent: &str) -> Result<Advance, String>;
-    /// 核心按模块名给出的名单草案（协作代拟名单）。
-    fn slate(&self, sid: &str) -> Result<Vec<AgentMeta>, String>;
     /// 回档：返回重放后的完整事件流（已是线格式，供前端整体重建）。
     fn rewind(&self, sid: &str, target: RewindTarget) -> Result<Vec<serde_json::Value>, String>;
     /// 压缩这个会话的上下文（AI 自己压；压不动如实说）。
     fn compact(&self, sid: &str) -> Result<Advance, String>;
     /// 改需求：同样返回完整重放。
     fn update_task(&self, sid: &str, text: &str) -> Result<Vec<serde_json::Value>, String>;
-    fn pending(&self, sid: &str) -> Result<Option<Pending>, String>;
     fn config(&self, sid: &str) -> Result<SessionConfig, String>;
     fn edit(&self, sid: &str, edit: SessionEdit) -> Result<(), String>;
     /// 投喂文件进本次工作的 work/；返回 false = 同名已存在（由用户决定覆盖或改名）。
@@ -254,12 +261,17 @@ pub trait LogOps: Send + Sync {
 
 // ---------- 核心手柄（命令通道） ----------
 
-/// 协作在工作线程上要做的事：推进一个阶段，或从断点继续。
-/// 为什么要分开：`CollabStep` 是**对外**的阶段枚举（前端按 pending 决定），
-/// "继续"不是它的阶段之一（前端走 `continue_flow`），所以内部再分一层，不污染对外契约。
-#[derive(Clone, Copy)]
+/// 目的：协作在工作线程上要做的事：回答一张裁决卡（放行类要接着跑泵），或从断点继续。
+///   为什么要分：回答的**处置**在工作线程上跑（长流程），"从断点继续"是另一条语义；
+///   两者都不属于对外契约（前端只发"回答"，不问后端怎么推进）。
+#[derive(Clone)]
 pub(crate) enum CollabWork {
-    Step(CollabStep),
+    /// 回答一张裁决卡：卡号 + 选项 id + 附言。
+    Answer {
+        card: String,
+        option: String,
+        note: String,
+    },
     Resume,
 }
 
@@ -427,16 +439,6 @@ pub enum Acted {
 //
 // 定义在**能力面**：呈现层只认这里，不再经 `conductor::` 根转一手。
 // 队列代理：只把命令交给核心线程（依赖方向见 ARCHITECTURE.md §一）。
-/// 协作推进阶段：由前端按 pending 决定。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CollabStep {
-    SetTask,
-    ConfirmSlate,
-    Begin,
-    /// **用户对裁决的自由文本回应**：核心 AI 判定意图是否明确，明确了才开工/放行。
-    Decide,
-}
-
 /// 工作形态：单 agent（模块数不限）/ 协作（多 agent 分权协商）/ 代理（决定权整块交给核心）。
 /// 形态只用于校验与界面标签：会话实现只有「单 agent」与「协作」两种——
 /// 代理会话在实现上就是一个单会话（`mode="proxy"`），只是身份换成 `core_proxy` 角色。

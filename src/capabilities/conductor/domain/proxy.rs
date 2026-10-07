@@ -228,29 +228,29 @@ impl ControlAction {
     }
 }
 
-/// 协作子会话的**落门方式**：代理转达一条消息时，按目标"此刻等的是哪一关"决定送到哪里。
-/// 与前端读 `pending.kind` 再选动作是同一口径（`Pending::decision_parts`）——
-/// 别处不许再按消息种类猜门（猜错就会把"开工"按到"请教"上）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum GateRoute {
-    /// 二选一的关（代拟名单）：短步骤，不跑泵。
-    ConfirmSlate,
-    /// 二选一的关（开始讨论）：跑泵。
-    Begin,
-    /// 其余门（请教 / 方案待审 / 节点没过）：自由文本，由协作自己的核心 AI 判明确性。
-    Decide,
-    /// 没在等门（停在中途 / 已收敛）：把它推着接着走，而不是塞一句"没有等你定的事"。
-    Resume,
-}
-
-/// 从"等的是哪一关"（`Pending::decision_parts().0`；None = 没在等门）定落门方式。
-pub fn gate_route(pending: Option<&str>) -> GateRoute {
-    match pending {
-        Some("confirm_slate") => GateRoute::ConfirmSlate,
-        Some("confirm_begin") => GateRoute::Begin,
-        Some(_) => GateRoute::Decide,
-        None => GateRoute::Resume,
+/// 目的：代理通道的**适配规则**：转达的是一句话（模型说的），落门时要把它变成**选项 id**。
+///   判据是稳定的选项 id：确认类看这句话是不是"是"（否则解成取消），其余取第一个选项（放行 / 回话）。
+///   通道本身只认选项 id——这份适配只属于代理这一条转达通道（见 docs/session/session-model.md）。
+pub fn relay_option(
+    options: &[crate::capabilities::session::api::DecisionOption],
+    text: &str,
+) -> String {
+    use crate::capabilities::session::api::{DecisionOption, OPT_SLATE_CANCEL, OPT_SLATE_CONFIRM};
+    let has = |id: &str| options.iter().any(|o: &DecisionOption| o.id == id);
+    if has(OPT_SLATE_CONFIRM) && has(OPT_SLATE_CANCEL) {
+        let t = text.trim().to_ascii_lowercase();
+        let yes = matches!(
+            t.as_str(),
+            "y" | "yes" | "ok" | "allow" | "是" | "确认" | "同意"
+        ) || t.contains("allow");
+        return if yes {
+            OPT_SLATE_CONFIRM
+        } else {
+            OPT_SLATE_CANCEL
+        }
+        .to_string();
     }
+    options.first().map(|o| o.id.clone()).unwrap_or_default()
 }
 
 /// 一次控制动作写进目标会话的**可回放记录**文案（机制写，前端照同一条显示）。
@@ -1011,15 +1011,24 @@ mod tests {
         assert!(all.contains("models"));
     }
 
-    /// 落门方式只看"它此刻等的是哪一关"：二选一走确认，其余门走裁决，没在等门就接着推进。
+    /// 转达的适配只看选项 id：确认类认"是"与"allow"，其余取第一个选项。
     #[test]
-    fn gate_route_follows_the_pending_kind() {
-        assert_eq!(gate_route(Some("confirm_slate")), GateRoute::ConfirmSlate);
-        assert_eq!(gate_route(Some("confirm_begin")), GateRoute::Begin);
-        for kind in ["ask", "plan_review", "node_blocked"] {
-            assert_eq!(gate_route(Some(kind)), GateRoute::Decide, "{}", kind);
-        }
-        assert_eq!(gate_route(None), GateRoute::Resume);
+    fn relay_option_picks_a_stable_option_id() {
+        use crate::capabilities::session::api::{
+            DecisionOption, OPT_ASK_REPLY, OPT_BEGIN, OPT_SLATE_CANCEL, OPT_SLATE_CONFIRM,
+        };
+        let o = |id: &str| DecisionOption {
+            id: id.to_string(),
+            label: id.to_string(),
+        };
+        let slate = vec![o(OPT_SLATE_CONFIRM), o(OPT_SLATE_CANCEL)];
+        assert_eq!(relay_option(&slate, "yes"), OPT_SLATE_CONFIRM);
+        assert_eq!(relay_option(&slate, " 确认 "), OPT_SLATE_CONFIRM);
+        assert_eq!(relay_option(&slate, "先别建"), OPT_SLATE_CANCEL);
+        let ask = vec![o(OPT_ASK_REPLY)];
+        assert_eq!(relay_option(&ask, "随便说说"), OPT_ASK_REPLY);
+        let begin = vec![o(OPT_BEGIN)];
+        assert_eq!(relay_option(&begin, ""), OPT_BEGIN);
     }
 
     /// 转达与控制都要留下"谁、为什么"的可回放记录。

@@ -274,7 +274,7 @@ fn json_ok<T: serde::Serialize>(v: &T) -> ToolOutcome {
 // ---------- 真实宿主：Conductor 的代理方法族 + 队列桥 ----------
 
 use super::{now_ts, validate_work_name, Conductor, Session};
-use crate::capabilities::conductor::api::{CollabStep, ConductorHandle, SessionOps};
+use crate::capabilities::conductor::api::ConductorHandle;
 use crate::capabilities::session::api::{
     AgentSession, Delegation, RunState, SessionEvent, SessionMeta, SessionParams,
 };
@@ -676,24 +676,18 @@ impl ProxyHost for ProxyBridge {
         // 先记来源：这条不是用户原话这个事实要进目标会话的可回放记录（正文不伪装成用户发言）。
         handle.record_notice(&target, SessionEvent::Notice(d::relay_note(msg.kind)));
         if mode == "collab" {
-            // 协作子会话：**按它此刻等的是哪一关**落到对应的阶段步（与前端读 pending 同一口径）。
-            // 它自己的核心 AI 判明确性；这里只负责把话送到正确的门上。
-            let pending = handle.call({
+            // 协作子会话：它此刻挂着哪张卡就把话作为**回答**落到那张卡上（选项 id 由代理通道的
+            // 适配规则定，附言 = 转达的话）；没挂卡就把它推着接着走。
+            let card = handle.call({
                 let t = target.clone();
-                move |core| core.collab_pending(&t)
+                move |core| core.collab_open_card(&t)
             })?;
-            match d::gate_route(pending.as_ref().map(|p| p.decision_parts().0)) {
-                // 代拟名单这关是二选一，且是**短步骤**（不跑泵）：在核心线程上直接推进。
-                d::GateRoute::ConfirmSlate => {
-                    handle.collab_step(&target, CollabStep::ConfirmSlate, &msg.text)?;
+            match card {
+                Some(c) => {
+                    let option = d::relay_option(&c.options, &msg.text);
+                    handle.spawn_detached_collab_answer(&target, &c.id, &option, &msg.text);
                 }
-                d::GateRoute::Begin => {
-                    handle.spawn_detached_collab_step(&target, CollabStep::Begin, &msg.text);
-                }
-                d::GateRoute::Decide => {
-                    handle.spawn_detached_collab_step(&target, CollabStep::Decide, &msg.text);
-                }
-                d::GateRoute::Resume => handle.spawn_detached_collab(&target),
+                None => handle.spawn_detached_collab(&target),
             }
             return Ok(());
         }

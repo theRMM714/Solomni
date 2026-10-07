@@ -250,52 +250,95 @@ impl Conductor {
         }
     }
 
-    /// 协作推进一步：由前端按 pending 驱动；返回期间产生的全部事件。
-    pub fn collab_continue(
+    /// 目的：写下本次需求（协作的起点）：需求入转录，代拟路径接着拟名单。返回期间产生的全部事件。
+    pub fn collab_set_task(&mut self, sid: &str, text: &str) -> Result<Vec<SessionEvent>, String> {
+        let mut out = Vec::new();
+        {
+            let s = self.sessions.get_mut(sid).ok_or("无此会话")?;
+            match s {
+                Session::Collab(c) => c.set_task(text, &mut |e| out.push(e)),
+                _ => return Err("该会话不是协作模式".to_string()),
+            }
+        }
+        out.extend(self.collab_advance(sid)?);
+        self.collab_tail(sid, out, None)
+    }
+
+    /// 目的：**回答一张裁决卡**（核心线程上的那一半）：校验选项属于当时那张卡，再按选项 id 分派。
+    ///   代拟名单这一关要把它定下来的名单写回 meta 并建沙箱，所以它留在核心线程上收尾。
+    pub fn collab_answer(
         &mut self,
         sid: &str,
-        step: CollabStep,
-        text: &str,
+        card: &str,
+        option: &str,
+        note: &str,
     ) -> Result<Vec<SessionEvent>, String> {
         let mut out = Vec::new();
         let mut confirmed: Option<Vec<AgentMeta>> = None;
-        let mut approve = false;
-        {
+        let go = {
             let s = self.sessions.get_mut(sid).ok_or("无此会话")?;
             let collab = match s {
                 Session::Collab(c) => c,
                 _ => return Err("该会话不是协作模式".to_string()),
             };
-            match step {
-                CollabStep::SetTask => collab.set_task(text, &mut |e| out.push(e)),
-                CollabStep::ConfirmSlate => {
-                    collab.confirm_slate(text.eq_ignore_ascii_case("yes"), &mut |e| out.push(e));
-                    if !collab.roster().is_empty() {
-                        confirmed = Some(collab.roster().to_vec());
-                    }
-                }
-                CollabStep::Begin => collab.begin(text.contains("allow"), &mut |e| out.push(e)),
-                // 自由文本回应：请教 = 他的话进主会话；待审 = 记他的话 + 过审开工；
-                // 节点没过 = 记他的话 + 重派。过审后要**同步推进链**（借 self 的动作在块外做）。
-                CollabStep::Decide => {
-                    let before = collab.plan_approved();
-                    collab.decide(text, &mut |e| out.push(e));
-                    if !before && collab.plan_approved() {
-                        approve = true;
-                    }
-                }
+            let empty_before = collab.roster().is_empty();
+            let go = collab.answer_card(card, option, note, &mut |e| out.push(e))?;
+            // 名单刚由这一答定下来：接下来要把 roster 写回 meta（重建与沙箱归属都读它）。
+            if empty_before && !collab.roster().is_empty() {
+                confirmed = Some(collab.roster().to_vec());
             }
-        }
-        if approve {
-            if let Some(Session::Collab(c)) = self.sessions.get_mut(sid) {
-                c.approve_plan(&mut |e| out.push(e));
-            }
+            go
+        };
+        // 放行类（开工 / 重派）：走**同步**那条（泵 + 派发并跑完就绪节点 + 验收）；
+        // 其余（定名单 / 请教 / 继续讨论）只需推进一步泵。生产路径两条都在工作线程上跑。
+        if go {
             out.extend(self.collab_resume(sid)?);
         } else {
-            // 泵让出了"该问谁"：由核心取该 agent 的会话跑这一回合（契约 8 步）。
             out.extend(self.collab_advance(sid)?);
         }
-        // 名单刚定下来：落档 meta（重启/回档后 rebuild_session 从这里拿名单与沙箱归属）并建沙箱目录。
+        self.collab_tail(sid, out, confirmed)
+    }
+
+    /// 目的：测试用：代拟拟好的名单（生产路径不取它——名单在转录的 [代拟] 行里，界面照那份显示）。
+    #[cfg(test)]
+    pub fn collab_slate(&mut self, sid: &str) -> Result<Vec<AgentMeta>, String> {
+        self.ensure_session(sid)?;
+        match self.sessions.get(sid) {
+            Some(Session::Collab(c)) => Ok(c.slate()),
+            Some(_) => Err("该会话不是协作模式".to_string()),
+            None => Err("无此会话".to_string()),
+        }
+    }
+
+    /// 目的：当前挂起是哪一关（None = 没在等门）：回答走"短步骤"还是"点火跑泵"按它分。
+    pub fn collab_gate_kind(&mut self, sid: &str) -> Result<Option<String>, String> {
+        // 会话不在中心 / 不是协作会话：如实给 None——真正的拒绝由回答那一步报出来。
+        Ok(match self.collab_pending(sid) {
+            Ok(p) => p.map(|p| p.kind().to_string()),
+            Err(_) => None,
+        })
+    }
+
+    /// 目的：当前挂着的那张卡（没有挂起 = None）：呈现层按它渲染，回答按它认卡。
+    pub fn collab_open_card(
+        &mut self,
+        sid: &str,
+    ) -> Result<Option<crate::capabilities::session::api::DecisionCard>, String> {
+        self.ensure_session(sid)?;
+        match self.sessions.get(sid) {
+            Some(Session::Collab(c)) => Ok(c.open_card()),
+            Some(_) => Err("该会话不是协作模式".to_string()),
+            None => Err("无此会话".to_string()),
+        }
+    }
+
+    /// 这一步的收尾：名单刚落档就写回 meta + 建沙箱，链就绪就派节点，终结后移出中心。
+    fn collab_tail(
+        &mut self,
+        sid: &str,
+        mut out: Vec<SessionEvent>,
+        confirmed: Option<Vec<AgentMeta>>,
+    ) -> Result<Vec<SessionEvent>, String> {
         if let Some(roster) = confirmed {
             let names: Vec<String> = roster.iter().map(|a| a.name.clone()).collect();
             self.workspace.prepare(sid, &names)?;
@@ -309,8 +352,7 @@ impl Conductor {
                 c.set_sandboxes(sandboxes);
             }
         }
-        // 方案过审后：就绪节点各建一个子会话——**与生产路径同一处置**，
-        // 只在一边接会漏（上一版 ApprovePlan 就是这么漏的，靠 e2e 才逮到）。
+        // 方案过审后：就绪节点各建一个子会话——**与生产路径同一处置**，只在一边接会漏。
         // 必须在"终结后移出中心"之前做：会话一移出，链就找不到了。
         let (spawned, _) = self.spawn_ready_nodes(sid);
         out.extend(spawned);
@@ -322,16 +364,6 @@ impl Conductor {
         }
         self.record_events(sid, &mut out);
         Ok(out)
-    }
-
-    /// 代拟拟好的名单（待用户确认；CLI 把它当表单逐行打印）。
-    pub fn collab_slate(&mut self, sid: &str) -> Result<Vec<AgentMeta>, String> {
-        self.ensure_session(sid)?;
-        match self.sessions.get(sid) {
-            Some(Session::Collab(c)) => Ok(c.slate()),
-            Some(_) => Err("该会话不是协作模式".to_string()),
-            None => Err("无此会话".to_string()),
-        }
     }
 
     /// 协作中途改需求：回到需求行并追加一条新需求（旧需求留在流水里，派生以最后一条为准）。

@@ -2034,8 +2034,16 @@ function absorb(s, ev) {
         : { cls: 'bad', who: '裁决', text: '返工超限仍未通过，交用户裁决。' });
       break;
     case 'decision':
-      // 请用户裁决（短暂）：与快照里的 pending 是同一个事实，只是到达得更快。
+      // 工具级确认（本片未并入通道）：与快照里的 pending 是同一个事实，只是到达得更快。
       s.pending = ev;
+      return false; // 门要整帧重画
+    case 'decision_card':
+      // **裁决卡**：与快照里的 pending 是同一个事实，只是到达得更快。
+      s.pending = ev;
+      return false; // 门要整帧重画
+    case 'decision_answer':
+      // 一次回答的记录：这一关不再挂着（下一关的卡会随后自己推来）。
+      s.pending = null;
       return false; // 门要整帧重画
     case 'ended':
       // 整场工作结束：运行态也是"没在跑"（事件给的事实，不靠快照）。
@@ -2411,7 +2419,7 @@ function renderLiveTick(s) {
   syncSendButton(s);
 }
 
-/* 裁决门：核心请用户定的事。二选一的（名单/开始）给按钮；其余给**自由文本**。
+/* 裁决门：**按后端给的消息与选项渲染**（前端不认识业务含义，也不按 kind 猜按钮）。
    改需求**不是**门——它是会话级按钮（见 syncSendButton / updateTaskFlow）。 */
 function renderGate(s) {
   const gate = $('#gate');
@@ -2437,19 +2445,71 @@ function renderGate(s) {
     return;
   }
   if (!p) return;
-  if (p.kind === 'confirm_slate') {
-    gate.appendChild(gateCard('核心已代拟名单（见转录），是否按此建组？', [
-      ['确认建组', () => act('slate', 'yes')],
-      ['取消', () => act('slate', 'no')],
-    ]));
-  } else if (p.kind === 'confirm_begin') {
-    gate.appendChild(gateCard('名单已定，开始讨论？', [
-      ['开始', () => act('begin', 'yes')],
-      ['开始（授权小组自裁细节）', () => act('begin', 'yes,allow')],
-      ['暂不', () => {}],
-    ]));
-  } else {
-    gate.appendChild(decisionCard(p));
+  gate.appendChild(renderCard(p));
+}
+
+/// 裁决卡：信封 / 消息（标题 / 正文 / 详情）/ 选项——四格都由后端给，前端照画（**扁平**，见契约）。
+function renderCard(p) {
+  const msg = p.message || {};
+  const el = document.createElement('div');
+  el.className = 'gate-card';
+  const who = document.createElement('div');
+  who.className = 'who';
+  who.textContent = (p.envelope && p.envelope.name) || '';
+  if (who.textContent) el.appendChild(who);
+  const q = document.createElement('div');
+  q.className = 'q';
+  q.textContent = msg.title || '';
+  el.appendChild(q);
+  if (msg.body) {
+    const bd = document.createElement('div');
+    bd.className = 'hint';
+    bd.textContent = msg.body;
+    el.appendChild(bd);
+  }
+  if (msg.detail) {
+    const dt = document.createElement('div');
+    dt.className = 'advice';
+    dt.textContent = msg.detail;
+    el.appendChild(dt);
+  }
+  const inp = document.createElement('input');
+  inp.className = 'decision-input';
+  inp.placeholder = '附言（可空；要你回话 / 先说一句的那一关必填）…';
+  el.appendChild(inp);
+  const bs = document.createElement('div');
+  bs.className = 'btns';
+  for (const o of (p.options || [])) {
+    const bt = document.createElement('button');
+    bt.className = 'btn btn-primary';
+    bt.textContent = o.label;
+    bt.onclick = () => answerCard(p.id, o.id, inp.value.trim());
+    bs.appendChild(bt);
+  }
+  el.appendChild(bs);
+  return el;
+}
+
+/* 回答一张裁决卡：**选项 id 是契约**（前端只把它发回去），附言是用户想说的话。
+   回答只有这一条命令（卡片 id + 选项 id），校验属于当时那张卡由后端做。 */
+async function answerCard(card, option, note) {
+  const s = activeSession();
+  if (!s || s.readonly || s.sending) return;
+  if (note) s.lines.push({ cls: 'user', who: '用户', text: note, pending: true });
+  s.sending = true;
+  renderStream();
+  renderGate(s);
+  try {
+    await api('POST', actionUrl('answer_card'), { session_id: s.sid, card: card, option: option, note: note });
+    renderAll();
+  } catch (err) {
+    s.lines = s.lines.filter((x) => !x.pending);
+    s.lines.push({ cls: 'bad', who: '错误', text: err.message });
+    renderAll();
+  } finally {
+    s.sending = false;
+    needState = true;
+    renderAll();
   }
 }
 
@@ -2465,33 +2525,6 @@ async function approveTool(answer) {
   } catch (err) {
     notice('操作失败', err.message, 'err');
   }
-}
-
-/// 裁决卡：**核心的说明 + 建议 + 要你回答的那句 + 自由文本**。
-/// 用户写自己的想法即可（"马上做"这种自然语言就算明确）；核心 AI 判定意图是否明确，明确了才开工/放行。
-function decisionCard(p) {
-  const el = document.createElement('div');
-  el.className = 'gate-card';
-  const q = document.createElement('div'); q.className = 'q'; q.textContent = p.summary || ''; el.appendChild(q);
-  if (p.advice) {
-    const a = document.createElement('div'); a.className = 'advice'; a.textContent = '建议：' + p.advice; el.appendChild(a);
-  }
-  if (p.question) {
-    const qq = document.createElement('div'); qq.className = 'ask'; qq.textContent = p.question; el.appendChild(qq);
-  }
-  const hint = document.createElement('div');
-  hint.className = 'hint';
-  hint.textContent = '用你自己的话说一句——它会进主会话，所有成员都看得到。';
-  el.appendChild(hint);
-  const inp = document.createElement('input');
-  inp.className = 'decision-input';
-  inp.placeholder = '你的想法…';
-  el.appendChild(inp);
-  const bs = document.createElement('div'); bs.className = 'btns';
-  const b = document.createElement('button'); b.className = 'btn btn-primary'; b.textContent = '提交';
-  b.onclick = async () => { const v = inp.value && inp.value.trim(); if (v) await act('decide', v); };
-  bs.appendChild(b); el.appendChild(bs);
-  return el;
 }
 
 /* 改需求：**用户自己点的动作**（不是核心推的门）。
@@ -2591,7 +2624,7 @@ function applyBatch(seq, sid, events) {
   return absorbEvents(s, events);
 }
 /* 本地名 → 动作 id 的映射：动作目录与校验都在核心（systools/tools.yaml），这里只做转写。 */
-const ACT_IDS = { say: 'send_message', task: 'set_task', slate: 'confirm_slate', begin: 'begin', decide: 'decide' };
+const ACT_IDS = { say: 'send_message', task: 'set_task' };
 /* 动作只有一个入口 /api/actions/{id}：声明、授权、执行与审计都在核心那一处。 */
 function actionUrl(id) { return '/api/actions/' + id; }
 async function act(action, text) {
@@ -2919,15 +2952,9 @@ function onSend() {
   if (!s || s.readonly) return;
   if (isBusy(s)) { stopGeneration(); return; } // 生成中：同一个键变成「停止」
   if (s.awaiting === 'task') { const v = takeInput(); if (v) act('task', v); return; }
-  // 裁决是自由文本：把输入框里的话作为回应提交（核心 AI 判定意图是否明确）。
-  if (
-    s.pending &&
-    s.pending.kind !== 'confirm_slate' &&
-    s.pending.kind !== 'confirm_begin' &&
-    s.pending.kind !== 'tool_approval'
-  ) {
-    const v = takeInput();
-    if (v) act('decide', v);
+  // 裁决门挂着时不从这里发：那是卡片上的选项（要补充的话写在卡片里的附言框）。
+  if (s.pending && s.pending.type === 'decision_card') {
+    notice('请按卡片作答', '这一关请点卡片上的选项；要补充的话写在卡片里的附言框。', 'info');
     return;
   }
   if (s.mode !== 'collab') { const v = takeInput(); if (v) act('say', v); return; } // 单 agent 形态可以自由发言

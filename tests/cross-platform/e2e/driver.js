@@ -43,6 +43,25 @@ async function mockSeen() {
     return null;
   }
 }
+/** 等某会话的**裁决卡**出现（卡片 id 从快照取）：回答按卡认，不按文本猜。 */
+async function waitCard(sid, ms) {
+  const deadline = Date.now() + (ms || 15000);
+  for (;;) {
+    const s = await api('GET', '/api/state');
+    const v = ((s.json && s.json.sessions) || []).find((x) => x.sid === sid);
+    if (v && v.pending && v.pending.type === 'decision_card') return v.pending;
+    if (Date.now() > deadline) return null;
+    await new Promise((r) => setTimeout(r, 50));
+  }
+}
+/** 按**选项 id** 回答当前那张卡（+ 可选附言）：回答只有这一条命令。 */
+async function answer(sid, option, note) {
+  const card = await waitCard(sid);
+  assert(!!card, '有待答的裁决卡：' + sid, JSON.stringify(card));
+  if (!card) return { status: 0, text: 'no card' };
+  return act(sid, 'answer_card', { card: card.id, option: option, note: note || '' });
+}
+
 /** 等某会话的待办（pending）出现：用于"生成中确认"这类必须**并发**驱动的场景。 */
 async function waitPending(sid, kind, ms) {
   const deadline = Date.now() + ms;
@@ -357,7 +376,7 @@ async function lines(sid) {
     ],
   });
   assert(c2.status === 200, '建协作工作（2 个 agent）', c2.text.slice(0, 200));
-  const begin = await act(name2, 'begin', { text: 'yes,allow' });
+  const begin = await answer(name2, 'begin_allow');
   assert(begin.status === 200, '确认开始讨论', begin.text.slice(0, 200));
   // 子会话的**事件台**要有它自己的权威行与运行态（不能只落在盘上）：否则打开它的标签页，
   // 流式块永远等不到替换它的那一行——光标一直挂着、按钮永远停在「停止」（真机反馈过）。
@@ -377,10 +396,11 @@ async function lines(sid) {
   // 卡片里的"建议"由核心 AI 随 plan 那一次调用一起给（契约见单测 plan_review_carries_the_core_advice）。
   // 卡片上那句"建议"**由核心 AI 给**（随 plan 那一次调用一起产出），快照里必须带上它。
   assert(
-    pendPlan && pendPlan.kind === 'plan_review' && !!pendPlan.question
-      && String(pendPlan.advice || '').length > 0,
+    pendPlan && pendPlan.type === 'decision_card'
+      && (pendPlan.options || []).some((o) => o.id === 'plan_start')
+      && String((pendPlan.message || {}).detail || '').length > 0,
     '方案待审：快照里带核心 AI 的建议',
-    JSON.stringify(pendPlan).slice(0, 220),
+    JSON.stringify(pendPlan).slice(0, 260),
   );
   // 整理完停在**待审**：用户回一句明确的开工才推进；开工后节点在子会话里跑，交付是异步产生的。
   await approvePlan(name2);
@@ -402,14 +422,14 @@ async function lines(sid) {
     ((await api('GET', '/api/events?sid=' + encodeURIComponent(name3) + '&since=0')).json || {}).lines || [],
   );
   assert(c3Bus.includes('代拟'), '核心已代拟名单', c3Bus.slice(0, 240));
-  const slate = await act(name3, 'confirm_slate', { text: 'yes' });
+  const slate = await answer(name3, 'slate_confirm');
   assert(slate.status === 200, '确认代拟名单', slate.text.slice(0, 200));
   const meta3 = fs.readFileSync(path.join(dir(name3), 'meta.yaml'), 'utf8');
   assert(meta3.includes('单兵') && meta3.includes('新助手'), '名单写回 meta.yaml（复用项 + 组装项）', meta3.split('\n').slice(0, 20).join(' | '));
   assert(/transient: false/.test(meta3), '复用项记为非常驻（transient: false）');
   assert(/transient: true/.test(meta3), '组装项记为临时（transient: true）');
   assert(fs.existsSync(path.join(dir(name3), '单兵')) && fs.existsSync(path.join(dir(name3), '新助手')), '确认名单后按 agent 名建出沙箱目录');
-  const begun3 = await act(name3, 'begin', { text: 'yes,allow' });
+  const begun3 = await answer(name3, 'begin_allow');
   assert(begun3.status === 200, '代拟名单后开始讨论', begun3.text.slice(0, 200));
   await approvePlan(name3);
   const ev3 = JSON.stringify(await waitForDelivery(name3));
@@ -418,7 +438,7 @@ async function lines(sid) {
 
   /** 走完审查关卡：整理完停在待审，用户回一句**明确的开工**才推进（协作的必经一步）。 */
 async function approvePlan(name) {
-  const r = await act(name, 'decide', { text: '同意开工，按方案推进。' });
+  const r = await answer(name, 'plan_say', '同意开工，按方案推进。');
   assert(r.status === 200, '审查关卡：明确开工', r.text.slice(0, 200));
   return [];
 }
@@ -479,7 +499,7 @@ async function approvePlan(name) {
       { name: '乙', transient: true, modules: ['reviewer'], model: 'm1' },
     ],
   })).status === 200, '建「不收敛」协作工作');
-  assert((await act(nA, 'begin', { text: 'yes,allow' })).status === 200, '「不收敛」开始讨论');
+  assert((await answer(nA, 'begin_allow')).status === 200, '「不收敛」开始讨论');
   const tA = joined(await all(nA));
   assert(/\[轮次 2\]/.test(tA), '有人同意、有人没同意 → 不收敛，进入下一轮', tA.slice(-300));
   assert(!tA.includes('delivery'), '未收敛时不交付', tA.slice(-200));
@@ -493,7 +513,7 @@ async function approvePlan(name) {
       { name: '乙', transient: true, modules: ['reviewer'], model: 'm1' },
     ],
   })).status === 200, '建「退场」协作工作');
-  assert((await act(nB, 'begin', { text: 'yes,allow' })).status === 200, '「退场」开始讨论');
+  assert((await answer(nB, 'begin_allow')).status === 200, '「退场」开始讨论');
   await approvePlan(nB);
   const tB = joined(await all(nB));
   const evB = JSON.stringify(await waitForDelivery(nB));
@@ -512,7 +532,7 @@ async function approvePlan(name) {
       { name: '乙', transient: true, modules: ['reviewer'], model: 'm1' },
     ],
   })).status === 200, '建「上限」协作工作');
-  assert((await act(nC, 'begin', { text: 'yes,allow' })).status === 200, '「上限」开始讨论');
+  assert((await answer(nC, 'begin_allow')).status === 200, '「上限」开始讨论');
   const evC = JSON.stringify(await eventsOf(nC));
   assert(evC.includes('讨论轮次超限'), '触上限要如实说明并交用户裁决', evC.slice(-300));
 
@@ -525,7 +545,7 @@ async function approvePlan(name) {
       { name: '乙', transient: true, modules: ['reviewer'], model: 'm1' },
     ],
   })).status === 200, '建「返工」协作工作');
-  assert((await act(nD, 'begin', { text: 'yes,allow' })).status === 200, '「返工」开始讨论');
+  assert((await answer(nD, 'begin_allow')).status === 200, '「返工」开始讨论');
   await approvePlan(nD);
   // 没过 = 暂停并**指名要返工的节点**（结构化字段），而不是整条链重来。
   // 总验收没过 → **指名要返工的节点**（结构化 rework 字段）→ 暂停等你定 → 点「继续」只重派它 → 重验交付。
@@ -553,7 +573,7 @@ async function approvePlan(name) {
       { name: '乙', transient: true, modules: ['reviewer'], model: 'm1' },
     ],
   })).status === 200, '建「撤回」协作工作');
-  assert((await act(nE, 'begin', { text: 'yes,allow' })).status === 200, '「撤回」开始讨论');
+  assert((await answer(nE, 'begin_allow')).status === 200, '「撤回」开始讨论');
   const w = await act(nE, 'withdraw', { agent: '乙' });
   assert(w.status === 200, '撤回乙的同意', w.text.slice(0, 200));
   const wBus = JSON.stringify(
@@ -575,14 +595,18 @@ async function approvePlan(name) {
     ],
   })).status === 200, '建「提问」协作工作');
   // 不给 allow：授权自裁（yes,allow）会让 ask 留档不中止——这正是 allow 的语义分界，所以这里要验"不授权"那一侧。
-  const beginF = await act(nF, 'begin', { text: 'yes' });
+  const beginF = await answer(nF, 'begin');
   assert(beginF.status === 200, '「提问」开始讨论（不授权自裁）', beginF.text.slice(0, 200));
   // 待裁决是**快照字段**（与推的 Decision 同源）：从 /api/state 的会话视图读。
   const stF = await api('GET', '/api/state');
   const viewF = ((stF.json && stF.json.sessions) || []).find((v) => v.sid === nF);
   const pendF = (viewF && viewF.pending) || null;
-  assert(pendF && pendF.kind === 'ask', 'ask 中止轮转并把问题呈给用户（快照里带待裁决）', JSON.stringify(pendF).slice(0, 300));
-  const ansF = await act(nF, 'decide', { text: '用第一个方案' });
+  assert(
+    pendF && pendF.type === 'decision_card' && (pendF.options || []).some((o) => o.id === 'ask_reply'),
+    'ask 中止轮转并把问题呈给用户（快照里带待裁决的卡）',
+    JSON.stringify(pendF).slice(0, 300),
+  );
+  const ansF = await answer(nF, 'ask_reply', '用第一个方案');
   assert(ansF.status === 200, '回答 ask 后继续', ansF.text.slice(0, 200));
   const tF = joined(await all(nF));
   assert(tF.includes('用第一个方案'), '用户回答并入转录（进上下文）', tF.slice(-300));

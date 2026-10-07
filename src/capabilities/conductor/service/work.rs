@@ -454,11 +454,10 @@ impl Conductor {
                     Some(Session::Single(_)) => false,
                     None => mode == "collab",
                 };
-                // 待裁决：对象不在表里（正在生成）时拿不到，如实给 None（推的 Decision 事件会补上）。
+                // 待裁决：对象不在表里（正在生成）时拿不到，如实给 None（推的卡片事件会补上）。
+                // 形状与推的那个事件**同一份**（快照与推都只从 Pending::event 来）。
                 let pending = match self.sessions.get(&sid) {
-                    Some(Session::Collab(c)) => {
-                        c.pending.as_ref().map(|p| p.to_json(c.gate_advice()))
-                    }
+                    Some(Session::Collab(c)) => c.open_card_json(),
                     _ => None,
                 };
                 SessionView {

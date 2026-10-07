@@ -36,8 +36,10 @@ pub struct CollabState {
     pub rework: usize,
     pub delivery: Option<bool>,
     pub ended: bool,
-    /// 未回答的请教（member, question）。
-    pub pending_ask: Option<(String, String)>,
+    /// 目的：最后一张**没人回答**的裁决卡（卡号 / 这一关的机制名 / 机制载荷）：挂起状态的唯一来源。
+    pub open_gate: Option<(String, String, serde_json::Value)>,
+    /// 目的：已发出的裁决卡数（卡号计数器；重启后从转录续号，卡号因此稳定）。
+    pub cards: u64,
     /// 工具执行次数（回档警告用）。
     pub tool_runs: usize,
 }
@@ -98,14 +100,14 @@ pub fn derive(events: &[serde_json::Value], roster_names: &[String]) -> CollabSt
                                 st.closed = false;
                                 reset_agreed(&mut st);
                             }
-                            // 普通用户发言：未答的请教作废。
-                            _ => st.pending_ask = None,
+                            // 普通用户发言：不牵动门（门由卡与回答认，见上）。
+                            _ => {}
                         }
                     } else if speaker == "代拟" {
                         // 代拟行只给人看；名单的权威来源是 meta.agents（确认后写回）。
                         st.slate = Some(text.to_string());
                     } else if speaker == "core" {
-                        st.pending_ask = None;
+                        // 核心自己的行不进表态统计（同意 / 离开只认成员席）。
                     } else if !speaker.is_empty() {
                         match verb {
                             "agree" => {
@@ -114,7 +116,6 @@ pub fn derive(events: &[serde_json::Value], roster_names: &[String]) -> CollabSt
                             "leave" => {
                                 st.present.insert(speaker.to_string(), false);
                             }
-                            "ask" => st.pending_ask = Some((speaker.to_string(), text.to_string())),
                             _ => {}
                         }
                     }
@@ -169,6 +170,28 @@ pub fn derive(events: &[serde_json::Value], roster_names: &[String]) -> CollabSt
                     .get("raw")
                     .and_then(|t| t.as_str())
                     .map(|s| s.to_string());
+            }
+            // 裁决卡与回答：挂起与否只认这一对（答过的不再挂，见 session-model.md「请用户裁决」）。
+            "decision_card" => {
+                st.cards += 1;
+                let id = ev
+                    .get("id")
+                    .and_then(|t| t.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let gate = ev
+                    .get("gate")
+                    .and_then(|t| t.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let payload = ev.get("payload").cloned().unwrap_or(serde_json::json!({}));
+                st.open_gate = Some((id, gate, payload));
+            }
+            "decision_answer" => {
+                let card = ev.get("card").and_then(|t| t.as_str()).unwrap_or("");
+                if st.open_gate.as_ref().is_some_and(|(id, _, _)| id == card) {
+                    st.open_gate = None;
+                }
             }
             "delivery" => st.delivery = ev.get("ok").and_then(|t| t.as_bool()),
             "ended" => st.ended = true,

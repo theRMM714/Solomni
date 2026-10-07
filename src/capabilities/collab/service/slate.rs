@@ -248,6 +248,8 @@ impl CollabSession {
             slate_picks: Vec::new(),
             settings,
             pending: None,
+            card_id: None,
+            cards: st.cards,
             allow: st.allow,
             plan: st.plan.clone(),
             // 链随 plan_review 事件落档：重建后按它还原，不重新整理（省一次模型调用）。
@@ -316,7 +318,14 @@ impl CollabSession {
             disc.transcript = disc_lines;
             s.disc = Some(disc);
         }
-        s.pending = derive_pending(&st);
+        // 挂起由转录重建：优先沿用那张**没人回答的卡**的卡号；卡连同那一段被回档截掉时，
+        // 按状态续一个新卡号接着问（已答过的那一张不会回来，见 session-model.md「请用户裁决」）。
+        if let Some((id, p, advice)) = derive_gate(&st) {
+            let id = id.unwrap_or_else(|| format!("d{}", s.cards + 1));
+            s.pending = Some(p);
+            s.card_id = Some(id);
+            s.gate_advice = advice;
+        }
         Ok(s)
     }
 

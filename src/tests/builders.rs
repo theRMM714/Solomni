@@ -2,6 +2,18 @@
 //! 归属：这些**不属于任何一个能力**——它们是测试装配，谁都可以用（与 `doubles.rs` 同一角色）。
 use super::prelude::*;
 
+/// 目的：测试里**回答当前那张裁决卡**（卡号从会话的挂起取）：返回这一答产生的事件。
+/// 约束：与呈现层同一条路——带选项 id（+ 附言），由 `collab_answer` 校验与落档。
+pub(crate) fn answer_card(
+    core: &mut Conductor,
+    sid: &str,
+    option: &str,
+    note: &str,
+) -> Result<Vec<SessionEvent>, String> {
+    let card = core.collab_open_card(sid)?.ok_or("现在没有挂着的裁决卡")?;
+    core.collab_answer(sid, &card.id, option, note)
+}
+
 /// 从事件流里抽出转录行并**渲染成文本**（行怎么变文本只有 LineView::render 一处）。
 pub(crate) fn replay_lines(events: &[serde_json::Value]) -> Vec<String> {
     events

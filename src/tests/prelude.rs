@@ -42,7 +42,15 @@ pub use crate::capabilities::workspace::api::{Library, PackageManifest};
 pub use crate::capabilities::workspace::ports::{ModuleSource, Workdirs};
 
 pub use crate::capabilities::conductor::api::{
-    AgentInstance, CollabStep, ConfigAgent, Pending, SessionEdit, SessionEvent, WorkMode, WorkSpec,
+    AgentInstance, ConfigAgent, DecisionCard, SessionEdit, SessionEvent, WorkMode, WorkSpec,
+};
+
+pub use crate::capabilities::session::api::Pending;
+
+/// 目的：裁决卡的选项 id（契约）：测试按它作答，不按文案。
+pub use crate::capabilities::session::api::{
+    OPT_ASK_REPLY, OPT_BEGIN, OPT_BEGIN_ALLOW, OPT_NODE_REWORK, OPT_NODE_SAY, OPT_PLAN_SAY,
+    OPT_PLAN_START, OPT_SLATE_CANCEL, OPT_SLATE_CONFIRM,
 };
 
 pub use crate::capabilities::conductor::service::Conductor;

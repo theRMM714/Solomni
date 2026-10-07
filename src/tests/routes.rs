@@ -8,14 +8,14 @@ use crate::capabilities::conductor::api::{
     SessionOps,
 };
 use crate::capabilities::conductor::api::{
-    AgentSuggestion, ConfigAgent, FilesAgentView, FilesRootsView, FilesView, Pending,
+    AgentSuggestion, ConfigAgent, DecisionCard, FilesAgentView, FilesRootsView, FilesView,
     RuntimeReport, SessionConfig, SessionEdit, SessionView, TierChoices, WorkMode, WorkOpened,
     WorkSpec,
 };
 use crate::capabilities::registry::api::AgentView;
 use crate::capabilities::registry::api::RegistryOps;
 use crate::capabilities::registry::api::{AppSettings, ModelView, ProviderView};
-use crate::capabilities::session::api::{AgentMeta, HistoryOps, HistoryView, SessionMeta};
+use crate::capabilities::session::api::{HistoryOps, HistoryView, SessionMeta};
 use crate::capabilities::workspace::api::{Roster, WorkspaceOps};
 use crate::kernel::api::Tier;
 use crate::presentation::web::routes::{self, ROUTES};
@@ -76,8 +76,9 @@ impl ActionOps for FakeOps {
         Ok(match call.id.as_str() {
             "create_session" => Acted::Done(json!({ "sid": "w1", "agents": ["a"] })),
             "rewind" | "update_task" => Acted::Replayed(Vec::new()),
-            "send_message" | "set_task" | "confirm_slate" | "begin" | "decide" | "withdraw"
-            | "compact" => Acted::Advanced(Advance { head: 1 }),
+            "send_message" | "set_task" | "answer_card" | "withdraw" | "compact" => {
+                Acted::Advanced(Advance { head: 1 })
+            }
             _ => Acted::Done(json!({ "ok": true })),
         })
     }
@@ -137,22 +138,36 @@ impl SessionOps for FakeOps {
         self.guard()?;
         Ok(Advance { head: 8 })
     }
-    fn collab_step(
-        &self,
-        _sid: &str,
-        _step: crate::capabilities::conductor::api::CollabStep,
-        _text: &str,
-    ) -> Result<Advance, String> {
+    fn set_task(&self, _sid: &str, _text: &str) -> Result<Advance, String> {
         self.guard()?;
         Ok(Advance { head: 9 })
+    }
+    fn answer_card(
+        &self,
+        _sid: &str,
+        _card: &str,
+        _option: &str,
+        _note: &str,
+    ) -> Result<Advance, String> {
+        self.guard()?;
+        Ok(Advance { head: 10 })
+    }
+    /// 假卡：路由契约测试只盯形状——封套 / 消息 / 选项都在。
+    fn open_card(&self, sid: &str) -> Result<Option<DecisionCard>, String> {
+        self.guard()?;
+        Ok(Some(
+            serde_json::from_value(json!({
+                "id": format!("d1-{}", sid),
+                "envelope": { "role": "core", "name": "核心" },
+                "message": { "title": "要不要继续？", "body": "假能力面", "detail": "" },
+                "options": [{ "id": "go", "label": "继续" }],
+            }))
+            .expect("假卡形状"),
+        ))
     }
     fn withdraw_agree(&self, _sid: &str, _agent: &str) -> Result<Advance, String> {
         self.guard()?;
         Ok(Advance { head: 10 })
-    }
-    fn slate(&self, _sid: &str) -> Result<Vec<AgentMeta>, String> {
-        self.guard()?;
-        Ok(Vec::new())
     }
     fn compact(&self, _sid: &str) -> Result<crate::capabilities::conductor::api::Advance, String> {
         self.guard()?;
@@ -169,10 +184,6 @@ impl SessionOps for FakeOps {
     fn update_task(&self, _sid: &str, _text: &str) -> Result<Vec<serde_json::Value>, String> {
         self.guard()?;
         Ok(vec![json!({ "type": "line", "line": "重放" })])
-    }
-    fn pending(&self, _sid: &str) -> Result<Option<Pending>, String> {
-        self.guard()?;
-        Ok(Some(Pending::ConfirmBegin))
     }
     fn config(&self, _sid: &str) -> Result<SessionConfig, String> {
         self.guard()?;

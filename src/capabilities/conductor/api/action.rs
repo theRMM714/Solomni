@@ -8,20 +8,6 @@ use crate::capabilities::conductor::domain::proxy as d;
 use crate::capabilities::registry::api::{AppSettings, RegistryOps};
 use crate::capabilities::tools::api::{arg_fault_text, ToolSchema};
 
-/// 这个动作此刻适不适用（人经呈现层的协作动作按"在等哪一关"判）。
-/// 返回 `Some(原因)` = 现在不可用；`None` = 可用。只读视图与别的动作一律可用。
-fn applicability(id: &str, pending: Option<&str>) -> Option<&'static str> {
-    match id {
-        "confirm_slate" => (pending != Some("confirm_slate")).then_some("核心还没代拟名单"),
-        "begin" => (pending != Some("confirm_begin")).then_some("名单还没定"),
-        "decide" => match pending {
-            Some("ask") | Some("plan_review") | Some("node_blocked") => None,
-            _ => Some("现在没有等你裁决的事"),
-        },
-        _ => None,
-    }
-}
-
 /// 工具级确认的答案：对外词汇 allow / deny / full。
 fn approval_of(answer: &str) -> Approval {
     match answer.trim() {
@@ -113,7 +99,7 @@ impl ConductorHandle {
                 move |core| core.dispatch_target(&c)
             })?;
             if mode == "collab" {
-                self.spawn_detached_collab_step(&created.session, CollabStep::Begin, "allow");
+                self.start_child_collab(&created.session);
             } else {
                 self.spawn_detached_node(&created.session, &spec.task);
             }
@@ -396,16 +382,11 @@ impl ConductorHandle {
                 ))
             }
             "set_task" => self
-                .collab_step(&s("session_id"), CollabStep::SetTask, &s("text"))
+                .set_task(&s("session_id"), &s("text"))
                 .map(Acted::Advanced),
-            "confirm_slate" => self
-                .collab_step(&s("session_id"), CollabStep::ConfirmSlate, &s("text"))
-                .map(Acted::Advanced),
-            "begin" => self
-                .collab_step(&s("session_id"), CollabStep::Begin, &s("text"))
-                .map(Acted::Advanced),
-            "decide" => self
-                .collab_step(&s("session_id"), CollabStep::Decide, &s("text"))
+            // **唯一的回答口**：带卡片 id + 选项 id（+ 附言），校验属于当时那张卡的选项集。
+            "answer_card" => self
+                .answer_card(&s("session_id"), &s("card"), &s("option"), &s("note"))
                 .map(Acted::Advanced),
             "withdraw" => self
                 .withdraw_agree(&s("session_id"), &s("agent"))
@@ -579,27 +560,13 @@ impl ConductorHandle {
 
 impl ActionOps for ConductorHandle {
     /// 目录：只列这个调用者能调的动作，并给出**此刻可不可用**（人经呈现层按它渲染，不写第二份清单）。
-    fn catalog(&self, caller: &Caller, sid: Option<&str>) -> Result<Vec<ActionView>, String> {
-        let pending = match sid {
-            Some(s) => {
-                let s = s.to_string();
-                self.call(move |core| core.collab_pending(&s))
-                    .ok()
-                    .flatten()
-            }
-            None => None,
-        };
-        let pending_kind = pending.as_ref().map(|p| p.decision_parts().0);
+    fn catalog(&self, caller: &Caller, _sid: Option<&str>) -> Result<Vec<ActionView>, String> {
         let token = caller.token();
         let mut out = Vec::new();
         for (id, schema) in &self.book {
             if !schema.callers.iter().any(|c| c == token) {
                 continue;
             }
-            let (available, reason) = match applicability(id, pending_kind) {
-                None => (true, String::new()),
-                Some(r) => (false, r.to_string()),
-            };
             out.push(ActionView {
                 id: id.clone(),
                 desc: schema.desc.clone(),
@@ -614,8 +581,8 @@ impl ActionOps for ConductorHandle {
                         desc: p.desc.clone(),
                     })
                     .collect(),
-                available,
-                reason,
+                available: true,
+                reason: String::new(),
             });
         }
         // 模块工具动作（动态，来自清单）：模块声明的每个工具都是一条动作，人可直接跑。

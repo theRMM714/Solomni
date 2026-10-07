@@ -201,7 +201,7 @@ impl ConductorHandle {
                     return Err("该会话不是单 agent 模式".to_string());
                 }
                 // 协作会话的"继续"：走同一条 own-and-return（泵在工作线程上）。
-                return self.collab_generation(sid, CollabWork::Resume, "");
+                return self.collab_generation(sid, CollabWork::Resume);
             }
             Prepared::Run {
                 session,
@@ -627,17 +627,56 @@ impl ConductorHandle {
                 let _ = me.single_generation(&sid, None, Output::Stream);
             });
     }
-    /// 起一次**脱离调用方**的协作阶段步（代理把消息转达到协作子会话用）：不等它跑完。
-    /// 与“叫醒父会话”的区别：这条带一个明确的阶段步（开工 / 代答），不是从断点继续。
-    pub(crate) fn spawn_detached_collab_step(&self, sid: &str, step: CollabStep, text: &str) {
+    /// 目的：起一次**脱离调用方**的裁决回答（代理把转达的话落进协作子会话用）：不等它跑完。
+    ///   与"叫醒父会话"的区别：这条带一份明确的回答（卡号 + 选项 id + 附言），不是从断点继续。
+    pub(crate) fn spawn_detached_collab_answer(
+        &self,
+        sid: &str,
+        card: &str,
+        option: &str,
+        note: &str,
+    ) {
         let me = self.clone();
-        let (sid, text) = (sid.to_string(), text.to_string());
+        let (sid, card, option, note) = (
+            sid.to_string(),
+            card.to_string(),
+            option.to_string(),
+            note.to_string(),
+        );
         let _ = std::thread::Builder::new()
             .name("solomni-proxy-collab".to_string())
             .spawn(move || {
-                let _ = me.collab_generation(&sid, CollabWork::Step(step), &text);
+                let _ = me.answer_card(&sid, &card, &option, &note);
             });
     }
+    /// 目的：子会话建好就开工——核心自己建的协作子会话按它此刻那张卡作答（有 begin_allow 就授权自裁）。
+    ///   为什么按选项 id 而不是另走一条"开始"路径：同一个门只能有一条回答口（见 session-model.md）。
+    pub(crate) fn start_child_collab(&self, sid: &str) {
+        let me = self.clone();
+        let sid = sid.to_string();
+        let _ = std::thread::Builder::new()
+            .name("solomni-child-collab".to_string())
+            .spawn(move || {
+                let look = sid.clone();
+                let Ok(Some(card)) = me.call(move |core| core.collab_open_card(&look)) else {
+                    return;
+                };
+                let allow = crate::capabilities::session::api::OPT_BEGIN_ALLOW;
+                let option = if card.options.iter().any(|o| o.id == allow) {
+                    allow.to_string()
+                } else {
+                    card.options
+                        .first()
+                        .map(|o| o.id.clone())
+                        .unwrap_or_default()
+                };
+                if option.is_empty() {
+                    return;
+                }
+                let _ = me.answer_card(&sid, &card.id, &option, "");
+            });
+    }
+
     /// 起一次**脱离调用方**的协作推进（叫醒父会话用）：不等它跑完。
     pub(crate) fn spawn_detached_collab(&self, sid: &str) {
         let me = self.clone();
@@ -645,7 +684,7 @@ impl ConductorHandle {
         let _ = std::thread::Builder::new()
             .name("solomni-chain".to_string())
             .spawn(move || {
-                let _ = me.collab_generation(&sid, CollabWork::Resume, "");
+                let _ = me.collab_generation(&sid, CollabWork::Resume);
             });
     }
 
@@ -655,12 +694,7 @@ impl ConductorHandle {
     /// **核心驱动**（见 docs/session/session-model.md 二之二）：泵只决定"该问谁"，
     /// 成员回合由主线程取该 agent 的会话去跑（它才拿得到那些会话）。所以泵线程与主线程**握手**：
     /// 泵让出 → 发 AskReq → 主线程跑完回 MemberTurn → 泵继续。
-    pub(crate) fn collab_generation(
-        &self,
-        sid: &str,
-        work: CollabWork,
-        text: &str,
-    ) -> Result<Advance, String> {
+    pub(crate) fn collab_generation(&self, sid: &str, work: CollabWork) -> Result<Advance, String> {
         let bus = Arc::clone(&self.bus);
         let jobs = Arc::clone(&self.jobs);
         // **先登记再取会话**：登记早于派发，所以「停止」从派发那一刻起就能生效。
@@ -683,7 +717,6 @@ impl ConductorHandle {
             let sid = sid.to_string();
             move |core| Ok(core.persister(&sid))
         })?;
-        let text = text.to_string();
         // 提醒上限由设置来（用户可调，见 session-model.md 二）：起线程前问一次核心。
         // 调用次数**没有上限**：模型继续核实就继续跑，直到它给出表态（或用户点停止）。
         let remind_cap = self.call(|core| Ok(core.discuss_remind_cap())).unwrap_or(3);
@@ -714,12 +747,16 @@ impl ConductorHandle {
                             }
                         };
                         match work {
-                            CollabWork::Step(CollabStep::Begin) => {
-                                c.begin(text.contains("allow"), &mut sink)
+                            // 回答一张裁决卡：处置归这一关自己（校验与落档已在 answer_card 里做完）。
+                            CollabWork::Answer {
+                                card,
+                                option,
+                                note,
+                            } => {
+                                if let Err(e) = c.answer_card(&card, &option, &note, &mut sink) {
+                                    sink(SessionEvent::Notice(format!("[裁决] {}", e)));
+                                }
                             }
-                            // 提请裁决 / 方案过审 / 节点放行都走这条（自由文本 + 核心判定）。
-                            CollabWork::Step(CollabStep::Decide) => c.decide(&text, &mut sink),
-                            CollabWork::Step(_) => {}
                             CollabWork::Resume => c.resume(&mut sink),
                         }
                         // 核心驱动：泵让出"该问谁"就回头找主线程（它才拿得到各 agent 的会话）。

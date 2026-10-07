@@ -3,7 +3,7 @@
 //! 装配（new 适配器）只发生在 main 组合根。前端只见 Conductor 门面、会话句柄与 SessionEvent 流。
 
 use crate::capabilities::conductor::api::{
-    AgentInstance, AgentSuggestion, CollabStep, ConfigAgent, FilesAgentRootView, FilesAgentView,
+    AgentInstance, AgentSuggestion, ConfigAgent, FilesAgentRootView, FilesAgentView,
     FilesRootsView, FilesView, RewindTarget, RuntimeReport, SessionConfig, SessionEdit,
     SessionView, TierChoices, WorkMode, WorkOpened, WorkSpec,
 };

@@ -435,31 +435,21 @@ tools:
   set_task:
     capability: none
     callers: [user]
-    desc: 协作会话：写下本次需求（开始讨论前的那一关）。
+    desc: 协作会话：写下本次需求（起点那一关；其余推进一律走 answer_card 回答卡片）。
     params:
       session_id: { type: string, required: true, non_empty: true, desc: 会话 id }
       text: { type: string, required: true, desc: 本次需求 }
-  confirm_slate:
+  answer_card:
     capability: none
     callers: [user]
-    desc: 协作会话：确认核心代拟的名单（确认那一刻写回会话 meta）。
+    desc: |
+      回答一张裁决卡：带**卡片 id + 选项 id**（+ 可选附言），后端校验选项 id 属于当时那张卡的选项集。
+      问什么、有几个选项、每个选项做什么由发起方（核心）实现；呈现层只把选项画成按钮、把选中的 id 发回来。
     params:
       session_id: { type: string, required: true, non_empty: true, desc: 会话 id }
-      text: { type: string, required: true, desc: 确认的话（含 allow 即授权小组自裁细节） }
-  begin:
-    capability: none
-    callers: [user]
-    desc: 协作会话：名单已定，确认开始讨论（含 allow 即授权自裁细节）。
-    params:
-      session_id: { type: string, required: true, non_empty: true, desc: 会话 id }
-      text: { type: string, required: true, desc: 确认的话 }
-  decide:
-    capability: none
-    callers: [user]
-    desc: 对裁决关的自由文本回应：核心 AI 判明不明确，明确才开工 / 放行。
-    params:
-      session_id: { type: string, required: true, non_empty: true, desc: 会话 id }
-      text: { type: string, required: true, desc: 回应的话 }
+      card: { type: string, required: true, non_empty: true, desc: 回答的是哪张卡（卡片 id） }
+      option: { type: string, required: true, non_empty: true, desc: 选中的选项 id }
+      note: { type: string, desc: 附言（用户自己的想法；请教这一关必填） }
   withdraw:
     capability: none
     callers: [user]

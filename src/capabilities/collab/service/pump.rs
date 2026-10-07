@@ -1,7 +1,7 @@
 //! **讨论泵**：把讨论推进一步（`pump_with`）并装配成员（`assemble_members`）。
 //!
 //! 泵不自己调模型：它把"该问谁、带什么上下文"交回协调业务（见 session-model.md 二）。
-//! 行外送与增量（`emit_new_lines` / `push_delta` / `review_event` / `derive_pending`）也在这里。
+//! 行外送与增量（`emit_new_lines` / `push_delta` / `review_event` / `derive_gate`）也在这里。
 
 use super::collab::*;
 use crate::capabilities::collab::service::discussion::{Discussion, Member, TurnOut, MAX_ROUNDS};
@@ -549,26 +549,35 @@ pub(crate) fn slate_item(a: &AgentMeta, why: &str) -> String {
     }
 }
 
-/// 从派生状态推出当前挂起（None = 没有待用户处理的门）。
-pub(crate) fn derive_pending(
+/// 目的：从派生状态推出当前挂起（None = 没有待用户处理的门）。
+///   判据两条并用：**转录里最后一张没人回答的卡**优先（它带着卡号与这一关的载荷）；
+///   没有这样的卡时退回**状态派生**——回档把卡连同那一段转录一起截掉时，
+///   状态照样说得出"还停在名单确认 / 开始讨论"，回来时续一个新卡号接着问。
+pub(crate) fn derive_gate(
     st: &crate::capabilities::collab::domain::collab_state::CollabState,
-) -> Option<Pending> {
+) -> Option<(Option<String>, Pending, String)> {
     if st.ended {
         return None;
     }
+    if let Some((id, gate, payload)) = st.open_gate.as_ref() {
+        if let Some(p) = Pending::from_payload(gate, payload) {
+            let advice = payload
+                .get("advice")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            return Some((Some(id.clone()), p, advice));
+        }
+    }
     if !st.begun {
         if st.slate.is_some() && !st.slate_confirmed {
-            return Some(Pending::ConfirmSlate);
+            return Some((None, Pending::ConfirmSlate, String::new()));
         }
         if st.task.is_some() {
-            return Some(Pending::ConfirmBegin);
+            return Some((None, Pending::ConfirmBegin, String::new()));
         }
-        return None;
     }
-    st.pending_ask.as_ref().map(|(m, q)| Pending::Ask {
-        member: m.clone(),
-        question: q.clone(),
-    })
+    None
 }
 
 /// 逐成员外送：把刚定稿的讨论行变成带**会话内稳定 id** 的转录事件交出去。

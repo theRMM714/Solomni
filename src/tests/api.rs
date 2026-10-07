@@ -7,6 +7,7 @@ use crate::capabilities::conductor::api::{
     Acted, ActionCall, AgentInstance, Caller, SessionEdit, SessionEvent, WorkMode, WorkSpec,
 };
 use crate::capabilities::conductor::api::{ConductorHandle, Ops, Output};
+use crate::capabilities::session::api::OPT_BEGIN;
 use crate::capabilities::workspace::api::Module;
 use crate::kernel::api::Tier;
 use std::sync::atomic::Ordering;
@@ -296,16 +297,18 @@ fn reads_are_not_queued_behind_a_collab_discussion() {
         .expect("建协作会话")
         .0
         .sid;
+    // 回答当前那张卡（选项 id 是契约）：协作从这一答开始跑泵。
+    let card = ops
+        .sessions
+        .open_card(&sid)
+        .expect("取卡")
+        .expect("挂着一张卡")
+        .id;
     let worker = {
         let sessions = Arc::clone(&ops.sessions);
         let sid = sid.clone();
-        std::thread::spawn(move || {
-            sessions.collab_step(
-                &sid,
-                crate::capabilities::conductor::api::CollabStep::Begin,
-                "yes",
-            )
-        })
+        let card = card.clone();
+        std::thread::spawn(move || sessions.answer_card(&sid, &card, OPT_BEGIN, ""))
     };
     // 等讨论真的开始（通道已被调用并卡在那里）。
     let deadline = Instant::now() + Duration::from_secs(5);
@@ -353,16 +356,18 @@ fn stopping_a_collab_discussion_is_prompt_and_keeps_the_session() {
         .expect("建协作会话")
         .0
         .sid;
+    // 回答当前那张卡（选项 id 是契约）：协作从这一答开始跑泵。
+    let card = ops
+        .sessions
+        .open_card(&sid)
+        .expect("取卡")
+        .expect("挂着一张卡")
+        .id;
     let worker = {
         let sessions = Arc::clone(&ops.sessions);
         let sid = sid.clone();
-        std::thread::spawn(move || {
-            sessions.collab_step(
-                &sid,
-                crate::capabilities::conductor::api::CollabStep::Begin,
-                "yes",
-            )
-        })
+        let card = card.clone();
+        std::thread::spawn(move || sessions.answer_card(&sid, &card, OPT_BEGIN, ""))
     };
     let deadline = Instant::now() + Duration::from_secs(5);
     while started.load(Ordering::Relaxed) == 0 {
@@ -454,16 +459,18 @@ fn collab_transcript_lands_on_disk_while_the_discussion_runs() {
         .expect("建协作会话")
         .0
         .sid;
+    // 回答当前那张卡（选项 id 是契约）：协作从这一答开始跑泵。
+    let card = ops
+        .sessions
+        .open_card(&sid)
+        .expect("取卡")
+        .expect("挂着一张卡")
+        .id;
     let worker = {
         let sessions = Arc::clone(&ops.sessions);
         let sid = sid.clone();
-        std::thread::spawn(move || {
-            sessions.collab_step(
-                &sid,
-                crate::capabilities::conductor::api::CollabStep::Begin,
-                "yes",
-            )
-        })
+        let card = card.clone();
+        std::thread::spawn(move || sessions.answer_card(&sid, &card, OPT_BEGIN, ""))
     };
     // 等第二个成员卡在调用里：此时第一个成员的发言已经定稿。
     let deadline = Instant::now() + Duration::from_secs(5);
@@ -496,16 +503,18 @@ fn collab_discussion_emits_each_member_line_as_it_speaks() {
         .expect("建协作会话")
         .0
         .sid;
+    // 回答当前那张卡（选项 id 是契约）：协作从这一答开始跑泵。
+    let card = ops
+        .sessions
+        .open_card(&sid)
+        .expect("取卡")
+        .expect("挂着一张卡")
+        .id;
     let worker = {
         let sessions = Arc::clone(&ops.sessions);
         let sid = sid.clone();
-        std::thread::spawn(move || {
-            sessions.collab_step(
-                &sid,
-                crate::capabilities::conductor::api::CollabStep::Begin,
-                "yes",
-            )
-        })
+        let card = card.clone();
+        std::thread::spawn(move || sessions.answer_card(&sid, &card, OPT_BEGIN, ""))
     };
     // 等第二个成员卡住：说明第一个成员已经说完，但**整轮还没结束**。
     let deadline = Instant::now() + Duration::from_secs(5);
@@ -550,7 +559,7 @@ fn missing_sessions_and_bad_inputs_come_back_as_errors() {
         .say("没这个会话", "你好", Output::Final)
         .is_err());
     assert!(ops.sessions.config("没这个会话").is_err());
-    assert!(ops.sessions.pending("没这个会话").is_err());
+    assert!(ops.sessions.open_card("没这个会话").is_err());
     assert!(ops.sessions.files("没这个会话").is_err());
     assert!(!ops.sessions.exists("没这个会话").expect("查存在"));
     assert!(ops.history.open("没这个会话").is_err());

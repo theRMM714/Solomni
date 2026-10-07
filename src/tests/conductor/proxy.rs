@@ -1212,8 +1212,7 @@ pub(crate) fn the_proxy_created_child_publishes_its_opening_facts() {
     );
 }
 
-/// 协作子会话的落门：`send` 按它**此刻等的是哪一关**送到对应的阶段步。
-/// `ConfirmSlate` 是同步短步骤，所以这条可以确定性断言（不用等泵）。
+/// 目的：协作子会话的落门：`send` 按它**此刻等的是哪一关**回答那张卡（选项 id 由代理通道的适配规则定）。
 #[test]
 pub(crate) fn collab_child_send_lands_on_the_gate_it_awaits() {
     use crate::capabilities::conductor::ports::ProxyHost;
@@ -1253,11 +1252,16 @@ pub(crate) fn collab_child_send_lands_on_the_gate_it_awaits() {
         })
         .expect("建协作工作（代拟）");
     let child = work.sid.clone();
-    let p = ops.sessions.pending(&child);
-    assert!(
-        matches!(p, Ok(Some(Pending::ConfirmSlate))),
-        "pending={:?}，回放：{}",
-        p,
+    let card = ops
+        .sessions
+        .open_card(&child)
+        .expect("取卡")
+        .expect("挂着一张卡");
+    let ids: Vec<String> = card.options.iter().map(|o| o.id.clone()).collect();
+    assert_eq!(
+        ids,
+        vec![OPT_SLATE_CONFIRM.to_string(), OPT_SLATE_CANCEL.to_string()],
+        "代拟门要挂上「确认建组 / 取消」两个选项；回放：{}",
         serde_json::to_string(&ops.history.open(&child).expect("回放").1).expect("JSON")
     );
     let bridge: Arc<dyn ProxyHost + Send + Sync> = Arc::new(ProxyBridge::new(handle));
@@ -1266,13 +1270,25 @@ pub(crate) fn collab_child_send_lands_on_the_gate_it_awaits() {
         parent: None,
         text: "yes".to_string(),
     };
+    // "yes" 在代拟那一关解成"确认建组"，于是这一关过去、下一关（开始讨论）挂起来。
+    // 转达是**脱离调用方**的（代理不等它跑完），所以这里等它落地。
     bridge.send(&child, &msg).expect("转达到协作子会话");
-    // 转达返回时这一关已经过了（ConfirmSlate 是同步短步骤）——落错门就不会有这一步。
-    assert!(
-        matches!(
-            ops.sessions.pending(&child),
-            Ok(Some(Pending::ConfirmBegin))
-        ),
-        "转达要落在它此刻等的那一关"
-    );
+    let want = vec![OPT_BEGIN.to_string(), OPT_BEGIN_ALLOW.to_string()];
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        let now = ops.sessions.open_card(&child).expect("取卡");
+        let ids: Vec<String> = now
+            .iter()
+            .flat_map(|c| c.options.iter().map(|o| o.id.clone()))
+            .collect();
+        if ids == want {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "转达要落在它此刻等的那一关，现在挂的是 {:?}",
+            ids
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
 }

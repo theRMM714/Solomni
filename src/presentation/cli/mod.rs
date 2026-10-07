@@ -2,7 +2,7 @@
 //! 只做解析与渲染，不做业务决策；Web 前端与它并列，共用同一能力面与事件词汇。
 
 use crate::capabilities::conductor::api::{Acted, ActionCall, Caller};
-use crate::capabilities::conductor::api::{AgentInstance, CollabStep, Pending, SessionEvent, Tier};
+use crate::capabilities::conductor::api::{AgentInstance, DecisionCard, SessionEvent, Tier};
 use crate::capabilities::conductor::api::{Ops, Output};
 use crate::capabilities::registry::api::{ModelView, ProviderView};
 use std::io::Write;
@@ -379,6 +379,12 @@ fn render(events: &[SessionEvent]) {
                 }
             }
             SessionEvent::Ended => {}
+            // **裁决卡**：界面只认这四个字段（信封 / 消息 / 选项），不认识业务含义。
+            SessionEvent::DecisionCard { card, .. } => print_card(card),
+            // 一次回答的记录（谁答的、选了哪个 id）：如实打出来，便于对账。
+            SessionEvent::DecisionAnswer(a) => {
+                println!("[裁决] {} 答了 {}：选了 {}", a.by, a.card, a.option)
+            }
             // 请用户裁决：把"为什么要你定 + 建议"如实打出来（与 Web 那张卡同一份事实）。
             SessionEvent::Decision {
                 kind,
@@ -436,29 +442,100 @@ fn follow(ops: &Ops, sid: &str, cursor: &mut u64, acted: Acted) {
 /// CLI 侧的动作（拥有字符串）：生成要放后台线程，所以不能借用调用栈上的 `&str`。
 enum CliAction {
     Say(String),
-    Step(CollabStep, String),
+    /// 回答一张裁决卡：卡号 + 选项 id + 附言（与 Web 回答的是同一条命令）。
+    Answer {
+        card: String,
+        option: String,
+        note: String,
+    },
 }
 
 impl CliAction {
     /// 目的：把 CLI 的动作变成一次**动作调用**（与 Web 同一条分发、同一份声明）。
     fn call(&self, sid: &str, out: Output) -> ActionCall {
-        let (id, text) = match self {
-            CliAction::Say(t) => ("send_message", t.clone()),
-            CliAction::Step(step, t) => (
-                match step {
-                    CollabStep::SetTask => "set_task",
-                    CollabStep::ConfirmSlate => "confirm_slate",
-                    CollabStep::Begin => "begin",
-                    CollabStep::Decide => "decide",
-                },
-                t.clone(),
-            ),
+        match self {
+            CliAction::Say(t) => ActionCall {
+                id: "send_message".to_string(),
+                args: serde_json::json!({ "session_id": sid, "text": t }),
+                caller: Caller::User,
+                out,
+            },
+            CliAction::Answer { card, option, note } => ActionCall {
+                id: "answer_card".to_string(),
+                args: serde_json::json!({
+                    "session_id": sid,
+                    "card": card,
+                    "option": option,
+                    "note": note,
+                }),
+                caller: Caller::User,
+                out,
+            },
+        }
+    }
+}
+
+/// 把一张裁决卡按它的四个字段打出来（信封 / 消息 / 选项）：CLI 不认识业务含义，只认这几格。
+fn print_card(card: &DecisionCard) {
+    println!("[裁决] {}（{}）", card.message.title, card.envelope.name);
+    if !card.message.body.trim().is_empty() {
+        println!("  {}", card.message.body);
+    }
+    if !card.message.detail.trim().is_empty() {
+        println!("  {}", card.message.detail);
+    }
+    for (i, o) in card.options.iter().enumerate() {
+        println!("  {}) {}（{}）", i + 1, o.label, o.id);
+    }
+}
+
+/// 选中的选项 id：先按序号、再按 id 原文认——两者都是那张卡上**用户看得见**的东西。
+fn pick_option(card: &DecisionCard, ans: &str) -> Option<String> {
+    if let Ok(n) = ans.parse::<usize>() {
+        if n >= 1 && n <= card.options.len() {
+            return Some(card.options[n - 1].id.clone());
+        }
+    }
+    card.options
+        .iter()
+        .find(|o| o.id == ans)
+        .map(|o| o.id.clone())
+}
+
+/// 裁决门：**按卡片上的选项作答**（回答回的是选项 id + 附言，不是自由文本）。
+/// 不点不继续：空输入 = 先不答（会话仍在等）。
+fn answer_gates(ops: &Ops, sid: &str, cursor: &mut u64) {
+    loop {
+        let card = match ops.sessions.open_card(sid) {
+            Ok(Some(c)) => c,
+            Ok(None) => return,
+            Err(e) => {
+                println!("[提示] 取裁决卡失败：{}", e);
+                return;
+            }
         };
-        ActionCall {
-            id: id.to_string(),
-            args: serde_json::json!({ "session_id": sid, "text": text }),
-            caller: Caller::User,
-            out,
+        print_card(&card);
+        let ans = prompt("选哪一项（序号 / 选项 id；回车 = 先不答）>");
+        let ans = ans.trim();
+        if ans.is_empty() {
+            return;
+        }
+        let Some(option) = pick_option(&card, ans) else {
+            println!("  这张卡上没有这一项，请按上面的序号或 id 作答。");
+            continue;
+        };
+        let note = prompt("附言（可空；请教那一关必填）>");
+        let action = CliAction::Answer {
+            card: card.id.clone(),
+            option,
+            note,
+        };
+        match act_interactive(ops, sid, action, cursor, Output::Final) {
+            Ok(acted) => follow(ops, sid, cursor, acted),
+            Err(e) => {
+                println!("[错误] {}", e);
+                return;
+            }
         }
     }
 }
@@ -716,7 +793,7 @@ fn proxy_flow(ops: &Ops) {
     }
 }
 
-// ---------- 模式四：协作（按核心 pending 驱动） ----------
+// ---------- 模式四：协作（按裁决卡的选项作答驱动） ----------
 
 fn collab_flow(ops: &Ops, arg: &str) {
     let trimmed = arg.trim();
@@ -759,73 +836,8 @@ fn collab_flow(ops: &Ops, arg: &str) {
         }
     };
 
-    // 名单确认（代拟路径）：把核心填好的表单逐行打出来，再问。
-    if matches!(ops.sessions.pending(&sid), Ok(Some(Pending::ConfirmSlate))) {
-        match ops.sessions.slate(&sid) {
-            Ok(list) => {
-                println!("[代拟] 核心拟的名单：");
-                for a in list {
-                    println!(
-                        "  {}：模块 {} · 模型 {} · {}",
-                        a.name,
-                        a.modules.join(" + "),
-                        model_label(a.model.as_deref()),
-                        if a.transient {
-                            "组装（临时）"
-                        } else {
-                            "复用已存 agent"
-                        }
-                    );
-                }
-            }
-            Err(e) => println!("[提示] 取名单失败：{}", e),
-        }
-        let ok = prompt("确认名单？（yes 开始 / 其他取消）");
-        match act_interactive(
-            ops,
-            &sid,
-            CliAction::Step(CollabStep::ConfirmSlate, ok.clone()),
-            &mut cursor,
-            Output::Final,
-        ) {
-            Ok(acted) => follow(ops, &sid, &mut cursor, acted),
-            Err(e) => println!("[错误] {}", e),
-        }
-    }
-    // 开始确认。
-    if matches!(ops.sessions.pending(&sid), Ok(Some(Pending::ConfirmBegin))) {
-        let ans = prompt("开始讨论？（yes / yes,allow：授权小组自裁细节）");
-        match act_interactive(
-            ops,
-            &sid,
-            CliAction::Step(CollabStep::Begin, ans.clone()),
-            &mut cursor,
-            Output::Final,
-        ) {
-            Ok(acted) => follow(ops, &sid, &mut cursor, acted),
-            Err(e) => println!("[错误] {}", e),
-        }
-    }
-    // ask 循环（每次回答后可能接新的请教）。
-    while matches!(ops.sessions.pending(&sid), Ok(Some(Pending::Ask { .. }))) {
-        if let Ok(Some(Pending::Ask { member, question })) = ops.sessions.pending(&sid) {
-            println!("[请教] {}：{}", member, question);
-            let ans = prompt("你的回答（回车 = 无补充，继续）>");
-            match act_interactive(
-                ops,
-                &sid,
-                CliAction::Step(CollabStep::Decide, ans.clone()),
-                &mut cursor,
-                Output::Final,
-            ) {
-                Ok(acted) => follow(ops, &sid, &mut cursor, acted),
-                Err(e) => {
-                    println!("[错误] {}", e);
-                    break;
-                }
-            }
-        }
-    }
+    // 裁决门：**按卡片上的选项作答**（名单确认 / 开始讨论 / 请教 / 方案待审 / 节点没过都走这里）。
+    answer_gates(ops, &sid, &mut cursor);
 }
 
 // ---------- 登记处管理（密钥只在核心层进出） ----------

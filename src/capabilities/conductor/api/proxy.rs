@@ -5,8 +5,6 @@
 use super::*;
 use crate::capabilities::registry::api::RegistryOps;
 use crate::capabilities::registry::api::{AgentView, AppSettings, ModelView, ProviderView};
-use crate::capabilities::session::api::AgentMeta;
-pub use crate::capabilities::session::api::Pending;
 use crate::capabilities::session::api::{HistoryView, RunState, SessionMeta};
 use crate::capabilities::workspace::api::Roster;
 pub use crate::kernel::api::Tier;
@@ -41,32 +39,64 @@ impl SessionOps for ConductorHandle {
                 })
                 .unwrap_or_default();
             if mode == "collab" {
-                return self.collab_generation(sid, CollabWork::Resume, "");
+                return self.collab_generation(sid, CollabWork::Resume);
             }
             return self.single_generation(sid, Some("继续。".to_string()), out);
         }
         self.single_generation(sid, None, out)
     }
 
-    fn collab_step(&self, sid: &str, step: CollabStep, text: &str) -> Result<Advance, String> {
-        match step {
-            // 短步骤（写需求 / 定名单）不调模型，而且"定名单"还有落盘与建沙箱的后续——留在核心线程上。
-            CollabStep::SetTask | CollabStep::ConfirmSlate => {
-                let sid = sid.to_string();
-                let text = text.to_string();
-                let bus = Arc::clone(&self.bus);
-                self.call(move |core| {
-                    let events = core.collab_continue(&sid, step, &text)?;
-                    let head = bus.push(&sid, &events);
-                    Ok(Advance { head })
-                })
-            }
-            // 长步骤（开始讨论 / 回答）：队列只占"取/交"两步，泵在工作线程上跑。
-            // 「同意方案」也要跑泵（过关后接着推进），所以和长步骤走同一条路。
-            CollabStep::Begin | CollabStep::Decide => {
-                self.collab_generation(sid, CollabWork::Step(step), text)
-            }
+    fn set_task(&self, sid: &str, text: &str) -> Result<Advance, String> {
+        // 短步骤（不调模型之外的东西；但代拟路径要接着拟名单与落盘）——留在核心线程上。
+        let (sid, text) = (sid.to_string(), text.to_string());
+        let bus = Arc::clone(&self.bus);
+        self.call(move |core| {
+            let events = core.collab_set_task(&sid, &text)?;
+            let head = bus.push(&sid, &events);
+            Ok(Advance { head })
+        })
+    }
+
+    /// **回答一张裁决卡**：校验与落档由核心做；放行类的推进（跑泵）在工作线程上跑。
+    /// 代拟名单那一关要写回 meta 并建沙箱，所以它也留在核心线程上收尾（与"写需求"同一条）。
+    fn answer_card(
+        &self,
+        sid: &str,
+        card: &str,
+        option: &str,
+        note: &str,
+    ) -> Result<Advance, String> {
+        let gate = self.call({
+            let s = sid.to_string();
+            move |core| core.collab_gate_kind(&s)
+        })?;
+        if gate.as_deref() == Some("confirm_slate") {
+            let (sid, card, option, note) = (
+                sid.to_string(),
+                card.to_string(),
+                option.to_string(),
+                note.to_string(),
+            );
+            let bus = Arc::clone(&self.bus);
+            return self.call(move |core| {
+                let events = core.collab_answer(&sid, &card, &option, &note)?;
+                let head = bus.push(&sid, &events);
+                Ok(Advance { head })
+            });
         }
+        self.collab_generation(
+            sid,
+            CollabWork::Answer {
+                card: card.to_string(),
+                option: option.to_string(),
+                note: note.to_string(),
+            },
+        )
+    }
+
+    fn open_card(&self, sid: &str) -> Result<Option<DecisionCard>, String> {
+        let sid = sid.to_string();
+        self.call(move |core| core.collab_open_card(&sid))
     }
 
     fn withdraw_agree(&self, sid: &str, agent: &str) -> Result<Advance, String> {
@@ -78,11 +108,6 @@ impl SessionOps for ConductorHandle {
             let head = bus.push(&sid, &events);
             Ok(Advance { head })
         })
-    }
-
-    fn slate(&self, sid: &str) -> Result<Vec<AgentMeta>, String> {
-        let sid = sid.to_string();
-        self.call(move |core| core.collab_slate(&sid))
     }
 
     fn compact(&self, sid: &str) -> Result<Advance, String> {
@@ -98,11 +123,6 @@ impl SessionOps for ConductorHandle {
         let sid = sid.to_string();
         let text = text.to_string();
         self.call(move |core| core.update_task(&sid, &text))
-    }
-
-    fn pending(&self, sid: &str) -> Result<Option<Pending>, String> {
-        let sid = sid.to_string();
-        self.call(move |core| core.collab_pending(&sid))
     }
 
     fn config(&self, sid: &str) -> Result<SessionConfig, String> {
