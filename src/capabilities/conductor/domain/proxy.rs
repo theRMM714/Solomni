@@ -361,9 +361,9 @@ pub struct NewSession {
     /// 建好就开始——不是"给某个 agent 的任务"（见 `ProxyBridge::create_session`）。
     pub task: String,
     pub request_id: String,
-    /// 工作名：给了就用它，没给由宿主派生（代理建的子工作按 agent 名派生）。
+    /// 目的：工作名——给了就用它，没给由宿主派生（代理建的子工作按 agent 名派生）。
     pub name: Option<String>,
-    /// 执行档位：给了就用它，没给由宿主按父会话或设置定。
+    /// 目的：执行档位——给了就用它，没给由宿主按父会话或设置定。
     pub tier: Option<String>,
     /// 父会话：由**机制**从调用上下文填，不从模型参数取（模型不能自选父）。
     pub parent: Option<String>,
@@ -399,15 +399,15 @@ pub struct CreateArgs {
     /// 每项是对象，形状在 parse_agents 里逐条校验（数组元素形状声明层表达不了）；省略 = 空（代理形态 / 代拟）。
     #[serde(default)]
     pub agents: Vec<serde_json::Value>,
-    /// 本次需求 / 单模式的开头：代理必填（建好就开工），用户可省（单模式先建空会话）。
+    /// 目的：本次需求 / 单模式的开头——代理必填（建好就开工），用户可省（单模式先建空会话）。
     #[serde(default)]
     pub task: Option<String>,
     #[serde(default)]
     pub request_id: String,
-    /// 工作名（可省 = 由宿主派生）。
+    /// 目的：工作名（可省 = 由宿主派生）。
     #[serde(default)]
     pub name: Option<String>,
-    /// 执行档位 host / vm（可省 = 由宿主按父会话或设置定）。
+    /// 目的：执行档位 host / vm（可省 = 由宿主按父会话或设置定）。
     #[serde(default)]
     pub tier: Option<String>,
 }

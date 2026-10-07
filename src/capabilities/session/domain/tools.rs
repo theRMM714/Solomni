@@ -54,7 +54,7 @@ pub struct MemberTools {
     /// 这个席位**可以调的系统工具 id**（由角色表发放：讨论席 = discussant；执行席按身份 = solo / executor）。
     /// 存在的理由：把"谁能用哪些工具"变成**校验**，而不是提示词里的一句话。
     pub allowed: Vec<String>,
-    /// 这一席的角色 id（`systools/roles.yaml` 的键）：工具调用的审计记录用它当调用者身份。
+    /// 目的：这一席的角色 id（`systools/roles.yaml` 的键）——工具调用的审计记录用它当调用者身份。
     pub role: String,
     /// 这个席位**能不能用它自己模块的工具**（角色表的 module_tools；执行席是，讨论席不是）。
     pub with_modules: bool,

@@ -550,7 +550,7 @@ pub(crate) fn pick_agents(ops: &Ops, names: &[String]) -> Result<Vec<AgentInstan
     Ok(views.iter().map(AgentInstance::from_view).collect())
 }
 
-/// 建会话走**动作表**（与 Web / agent 同一份声明、同一处授权）：CLI 只把用户的选择变成参数。
+/// 目的：建会话走**动作表**——与 Web / agent 同一份声明、同一处授权，CLI 只把用户的选择变成参数。
 pub(crate) fn create_session_action(
     ops: &Ops,
     name: &str,

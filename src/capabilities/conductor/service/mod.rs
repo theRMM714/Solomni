@@ -244,7 +244,7 @@ impl Conductor {
         Arc::clone(&self.log)
     }
 
-    /// 工具执行面句柄：入站手柄跑"人直接用的模块工具"要用同一份执行面（不重装）。
+    /// 目的：工具执行面句柄——入站手柄跑"人直接用的模块工具"要用同一份执行面（不重装）。
     pub fn tools_handle(&self) -> Arc<dyn ToolExec + Send + Sync> {
         Arc::clone(&self.tools)
     }

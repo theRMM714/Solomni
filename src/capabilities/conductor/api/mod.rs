@@ -181,8 +181,8 @@ impl EventBus {
 
 /// 会话能力：创建、推进、回档、编辑、停止。会话界面只需要这一个。
 pub trait SessionOps: Send + Sync {
-    /// 建工作：回包是（会话与名单）+ **事件台头部**——开场事实只进事件台（命令不携带事实）。
-    /// 呈现侧建会话现在统一走动作表（`create_session`）；这一格保留给契约测试与其它调用方，
+    /// 目的：建工作——回包是（会话与名单）+ **事件台头部**，开场事实只进事件台（命令不携带事实）。
+    /// 约束：呈现侧建会话统一走动作表（`create_session`）；这一格保留给契约测试与其它调用方，
     /// 二进制 crate 里没有调用点会被 dead_code 误报（见 docs/testing/quality-isolation.md 的 allow 清单）。
     #[allow(dead_code)]
     fn create_work(&self, spec: WorkSpec) -> Result<(WorkOpened, u64), String>;
@@ -213,8 +213,8 @@ pub trait SessionOps: Send + Sync {
     fn exists(&self, sid: &str) -> Result<bool, String>;
     /// 工作名的缺省与唯一化（命名策略归 `session`）：`base` 去空白、为空用 `fallback`、重名加尾号。
     fn unique_work_name(&self, base: &str, fallback: &str) -> Result<String, String>;
-    /// 停止：把整棵子树落成 `stopped`（拦住后续派发与唤醒）并中断正在跑的生成；
-    /// 返回**实际停下的会话**（空 = 本来就没在跑）。「继续」（`continue_flow`）是它的逆操作。
+    /// 目的：停止——把整棵子树落成 `stopped`（拦住后续派发与唤醒）并中断正在跑的生成。
+    /// 返回：**实际停下的会话**（空 = 本来就没在跑）；「继续」（`continue_flow`）是它的逆操作。
     fn stop(&self, sid: &str) -> Vec<String>;
     /// 工具级确认的回答：`Allow` / `Deny` / `Full`（本轮不再问）。
     /// **不进命令队列**（生成期间也要立刻生效）；返回是否确实有一个调用在等确认。
@@ -343,7 +343,7 @@ impl Ops {
 
 // ---------- 动作（声明在 systools/tools.yaml；分发归 conductor） ----------
 
-/// 一次动作的**调用者身份**：授权判据（动作表 `callers`）的输入。
+/// 目的：一次动作的**调用者身份**——授权判据（动作表 `callers`）的输入。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Caller {
     /// 人经呈现层（CLI / Web）调用。
@@ -357,7 +357,7 @@ pub enum Caller {
 }
 
 impl Caller {
-    /// 动作表 `callers` 里代表它的身份串（授权比对只认它）。
+    /// 目的：动作表 `callers` 里代表它的身份串（授权比对只认它）。
     pub fn token(&self) -> &str {
         match self {
             Caller::User => "user",
@@ -366,8 +366,8 @@ impl Caller {
     }
 }
 
-/// 一次动作请求：动作 id + **已解析的参数对象** + 调用者身份 + 输出方式。
-/// 参数校验、授权、执行、审计都在 `ActionOps::act` 一处完成；两个适配器只负责造出它。
+/// 目的：一次动作请求——动作 id + **已解析的参数对象** + 调用者身份 + 输出方式。
+/// 约束：参数校验、授权、执行、审计都在 `ActionOps::act` 一处完成；两个适配器只负责造出它。
 #[derive(Debug, Clone)]
 pub struct ActionCall {
     pub id: String,
@@ -376,7 +376,7 @@ pub struct ActionCall {
     pub out: Output,
 }
 
-/// 目录里一条参数的呈现形态（前端与 CLI 照它生成输入，不硬编码参数名）。
+/// 目的：目录里一条参数的呈现形态（前端与 CLI 照它生成输入，不硬编码参数名）。
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct ActionParamView {
     pub name: String,
@@ -385,19 +385,19 @@ pub struct ActionParamView {
     pub desc: String,
 }
 
-/// 动作目录里的一条：**这个调用者此刻能做什么**。前端据此渲染，不写第二份动作清单。
+/// 目的：动作目录里的一条——**这个调用者此刻能做什么**。前端据此渲染，不写第二份动作清单。
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct ActionView {
     pub id: String,
     pub desc: String,
     pub params: Vec<ActionParamView>,
-    /// 这个调用者此刻能不能调（授权通过 + 此刻适用）。
+    /// 目的：这个调用者此刻能不能调（授权通过 + 此刻适用）。
     pub available: bool,
-    /// 不能调时的原因（能调时为空）。
+    /// 目的：不能调时的原因（能调时为空）。
     pub reason: String,
 }
 
-/// 动作能力的入站面：目录 + 分发。
+/// 目的：动作能力的入站面——目录 + 分发。
 pub trait ActionOps: Send + Sync {
     /// 目录：给这个调用者能看到的动作（含此刻可用性）。`sid` = 当前会话上下文。
     fn catalog(&self, caller: &Caller, sid: Option<&str>) -> Result<Vec<ActionView>, String>;
