@@ -53,7 +53,11 @@ impl FenceSpec {
                 rw.push(root.clone());
             } else {
                 ro_tree.push(root.clone());
-                rw.push(root.join("userdata"));
+                let userdata = root.join("userdata");
+                // 授权面按实际布局派生：只有 userdata 真的存在才派这条可写落点。
+                if userdata.is_dir() {
+                    rw.push(userdata);
+                }
             }
         }
         rw.sort();
@@ -77,15 +81,22 @@ impl FenceSpec {
         self
     }
 
-    /// 目的：**无会话**（人直接跑一个模块工具）的围栏——模块目录递归只读 + 它自己的 `userdata/` 可写，外加用户指定的工作目录（缺省 = `userdata/`）。
+    /// 目的：**无会话**（人直接跑一个模块工具）的围栏——模块目录递归只读 + 它自己的 `userdata/`（存在时）可写，外加用户指定的工作目录（缺省 = `userdata/`，不存在则退回模块根）。
     /// 约束：与 agent 会话同一条围栏口径——不装机制时只留进程树与环境白名单，如实降级。
     pub fn standalone(module_root: &Path, work_root: Option<&Path>) -> FenceSpec {
         let userdata = module_root.join("userdata");
-        let private = work_root
-            .map(|p| p.to_path_buf())
-            .unwrap_or_else(|| userdata.clone());
-        let mut rw = vec![private.clone()];
-        if private != userdata {
+        let has_userdata = userdata.is_dir();
+        // 缺省工作目录 = 模块的 userdata（存在时）；不存在就退回 cwd（模块根），不派不存在的落点。
+        let private = match work_root {
+            Some(p) => p.to_path_buf(),
+            None if has_userdata => userdata.clone(),
+            None => PathBuf::new(),
+        };
+        let mut rw: Vec<PathBuf> = Vec::new();
+        if !private.as_os_str().is_empty() {
+            rw.push(private.clone());
+        }
+        if has_userdata && private != userdata {
             rw.push(userdata);
         }
         rw.sort();

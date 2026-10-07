@@ -24,6 +24,7 @@
 
 - 平台专属代码本地不编译——`FenceSpec` 字面量必须写全字段（跨平台字面量门禁）；改围栏 → `tests/<平台>/` 探针；改工具表 → `systools/` 与本目录 `tools-and-roles.md`。
 - 围栏的写后核对、回滚与台账在 `src/capabilities/tools/detail/confine/windows/`：改落点形状（`GrantTarget`）或台账字段时，`prepare_fence` / `release_fence` / `clean` / `sweep_orphan_aces` 要一起改。
+- 授权面按**实际布局**派生：`<module>/userdata/` 不存在就不进 `rw`（`standalone` 的缺省工作目录退回模块根）；`prepare_fence` 也会跳过不存在的落点、不判整次失败。
 - 核心代理系统工具的待实现规划清单：`systool_gaps.yaml`（仓库根；不是当前工具表，也不替代测试缺口账）。
 
 ## 本目录

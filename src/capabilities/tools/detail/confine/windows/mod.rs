@@ -140,6 +140,14 @@ fn self_check_scratch(sid: PSID, scratch: &Path) -> Result<(), String> {
 /// 本程序建的容器 profile 前缀（`container_name` 生成的就是它；`--fence-clean` 按它扫整族）。
 pub(crate) const PROFILE_PREFIX: &str = "Solomni.Agent.";
 
+/// 目的：判断授权落点是不是**不存在**（派生与执行之间有竞态时兜底；不存在就跳过，不判整次失败）。
+fn missing(path: &Path) -> bool {
+    matches!(
+        std::fs::symlink_metadata(path),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound
+    )
+}
+
 /// 目的：把围栏要用的授权一次性做好（按 (SID, 路径, 权限) 去重，不重复改 ACL）。
 /// 约束：每条授权先落台账再动 ACL，写后核对；失败就回滚并如实返回 Err（不静默降级）。
 pub fn prepare_fence(spec: &FenceSpec, command: &str, home: &Path) -> Result<(), String> {
@@ -162,6 +170,10 @@ pub fn prepare_fence(spec: &FenceSpec, command: &str, home: &Path) -> Result<(),
     let interpreters = interpreter_dirs(command);
     // 基线一：解释器安装目录（只读+执行）——**必需**：拿不到它，容器里连解释器都起不来。
     for dir in interpreters.iter().cloned() {
+        if missing(&dir) {
+            eprintln!("[诊断] 授权落点不存在，跳过（{}）", dir.display());
+            continue;
+        }
         if has_ace_for(base, &dir, RIGHTS_RO) {
             continue;
         }
@@ -189,6 +201,11 @@ pub fn prepare_fence(spec: &FenceSpec, command: &str, home: &Path) -> Result<(),
     let todo = grant_targets(spec);
     for target in todo {
         let (path, rights) = (&target.0, target.1);
+        // 落点不存在（例如没有 userdata 的模块，或授权面派生与执行之间有竞态）：跳过这一条，不判整次失败。
+        if missing(path) {
+            eprintln!("[诊断] 授权落点不存在，跳过（{}）", path.display());
+            continue;
+        }
         // 跳过条件看**实际 ACE**而不是内存缓存：权限收窄并撤权后，下一次 prepare 必须能把仍需要的授权补回来，
         // 否则「撤权 + 重授」会留下"缓存说已授、ACE 已撤"的空洞（扩根时被缓存吞掉）。
         if has_ace_for(sid, path, rights) {

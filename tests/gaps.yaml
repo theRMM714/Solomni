@@ -49,25 +49,6 @@
     3) 结论出来再把 Windows 的往返探针补一条"列自己的产物"的断言。
   accept: 容器里能列出自己授权落点里的产物；或如实说明本环境不支持并列进能力报告。
   blocked_by: 缺少观察面（要换列举机制再探一次）
-- id: fence.module-without-userdata-disables-it
-  scope: global
-  level: T4
-  why: |
-    模块目录里没有 `userdata/` 时，Windows 的授权阶段读它的 DACL 得 `error 2`，`prepare_fence`
-    返回 Err → 产品**整次按无围栏执行**。CI 的 Windows L4 日志逐条可见：
-    `[围栏] 授权未完成：读 DACL 失败（…\modules\research\userdata）：错误码 2` → `本次按无围栏执行`，
-    真工具那几行的 stderr 也写着"容器围栏不可用，按如实降级继续执行"。
-    后果：Windows 上"真工具链在围栏里跑通"的 E2E 结论其实是**无围栏**跑出来的；而围栏派生把
-    `<module>/userdata` 无条件放进 `rw`，于是任何没有该目录的模块都会让这次执行失去围栏。
-  how: |
-    1) 先定契约：`<module>/userdata` 不存在时是"按需建"（它是模块自己的状态区）还是"没有可授的落点，跳过"；
-    2) 一个落点授不上不该让整次执行失去围栏——现在 `prepare_fence` 的"不整体失败"注释与
-       `if result.is_ok() { result = Err(e) }` 自相矛盾，要一起理清；
-    3) 补一条真机用例：模块目录没有 `userdata/` 时工具仍在围栏里跑（或如实说明该模块不可围栏）。
-  accept: 模块目录没有 `userdata/` 时，Windows 上工具仍在围栏里跑（或如实说明为何不能），
-    E2E 的真工具行不再出现"按无围栏执行"。
-  blocked_by: 缺少实现（先定契约）
-
 - id: module.external-harness-fence-reach
   scope: global
   level: T3

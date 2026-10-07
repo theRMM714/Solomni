@@ -874,38 +874,46 @@ fn write_then_restore_keeps_the_original_ace_set() {
     discard(&base);
 }
 
-/// 【失败回滚】路径不存在这类写不了的落点必须如实返回 Err，且不给它留台账条目。
+/// 【缺落点跳过】路径不存在的落点只跳过、不判整次失败：存在的照常授权，台账里不留不存在的那条。
 #[test]
-fn failed_grant_is_rolled_back_and_not_journaled() {
-    let base = std::env::temp_dir().join(format!("solomni-rollback-probe-{}", std::process::id()));
+fn missing_grant_target_is_skipped_and_not_journaled() {
+    let base = std::env::temp_dir().join(format!("solomni-skip-probe-{}", std::process::id()));
     let target = base.join("target");
     std::fs::create_dir_all(&target).expect("建探针目录");
-    if !acl_round_trip(&base, "rollback") {
-        eprintln!("[探针] 本机做不了 ACL 完整往返（写→读回→撤）：回滚探针跳过（不静默当作通过）");
+    if !acl_round_trip(&base, "skip") {
+        eprintln!("[探针] 本机做不了 ACL 完整往返（写→读回→撤）：缺落点探针跳过（不静默当作通过）");
         discard(&base);
         return;
     }
-    let missing = base.join("missing");
+    let absent = base.join("missing");
     let spec = FenceSpec {
-        agent: "probe-rollback".to_string(),
+        agent: "probe-skip".to_string(),
         private: PathBuf::new(),
         ro_tree: Vec::new(),
-        rw: vec![target.clone(), missing.clone()],
+        rw: vec![target.clone(), absent.clone()],
         cwd: target.clone(),
         ro: Vec::new(),
         net: false,
     };
     let home = base.join(".home");
     let outcome = prepare_fence(&spec, "cmd", &home);
-    assert!(outcome.is_err(), "写不了的落点必须如实失败：{:?}", outcome);
+    assert!(
+        outcome.is_ok(),
+        "不存在的落点应跳过、不判整次失败：{:?}",
+        outcome
+    );
     let rec = load_record(&home);
     assert!(
-        !rec.snapshots.iter().any(|(p, _)| Path::new(p) == missing),
-        "失败落点不得留快照"
+        !rec.snapshots.iter().any(|(p, _)| Path::new(p) == absent),
+        "跳过的落点不得留快照"
     );
     assert!(
-        !rec.grants.iter().any(|(_, p, _)| Path::new(p) == missing),
-        "失败落点不得留 ACE 摘要"
+        !rec.grants.iter().any(|(_, p, _)| Path::new(p) == absent),
+        "跳过的落点不得留 ACE 摘要"
+    );
+    assert!(
+        rec.snapshots.iter().any(|(p, _)| Path::new(p) == target),
+        "存在的落点要照常授权"
     );
     clean(&home).expect("回收应当成功");
     discard(&base);
