@@ -182,6 +182,9 @@ impl EventBus {
 /// 会话能力：创建、推进、回档、编辑、停止。会话界面只需要这一个。
 pub trait SessionOps: Send + Sync {
     /// 建工作：回包是（会话与名单）+ **事件台头部**——开场事实只进事件台（命令不携带事实）。
+    /// 呈现侧建会话现在统一走动作表（`create_session`）；这一格保留给契约测试与其它调用方，
+    /// 二进制 crate 里没有调用点会被 dead_code 误报（见 docs/testing/quality-isolation.md 的 allow 清单）。
+    #[allow(dead_code)]
     fn create_work(&self, spec: WorkSpec) -> Result<(WorkOpened, u64), String>;
     /// 单 agent 会话里说一句（生成可被 `stop` 中止）。
     fn say(&self, sid: &str, text: &str, out: Output) -> Result<Advance, String>;

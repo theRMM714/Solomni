@@ -2,9 +2,7 @@
 //! 只做解析与渲染，不做业务决策；Web 前端与它并列，共用同一能力面与事件词汇。
 
 use crate::capabilities::conductor::api::{Acted, ActionCall, Caller};
-use crate::capabilities::conductor::api::{
-    AgentInstance, CollabStep, Pending, SessionEvent, Tier, WorkMode, WorkSpec,
-};
+use crate::capabilities::conductor::api::{AgentInstance, CollabStep, Pending, SessionEvent, Tier};
 use crate::capabilities::conductor::api::{Ops, Output};
 use crate::capabilities::registry::api::{ModelView, ProviderView};
 use std::io::Write;
@@ -120,7 +118,6 @@ fn module_cmd(ops: &Ops, arg: &str) {
 /// 命令行回档：给共享区与整棵子树都对齐到同一个点。
 /// 留档 = 标记 + 折叠（可恢复）；删除 = 真的截掉；恢复 = 删掉该标记及其后（不可恢复）。
 fn rewind_cmd(ops: &Ops, arg: &str) {
-    use crate::capabilities::conductor::api::RewindTarget;
     let parts: Vec<&str> = arg.split_whitespace().collect();
     let usage = "[用法] rewind <会话> archive|delete <行id>  或  rewind <会话> restore <标记id>";
     if parts.len() < 3 {
@@ -135,17 +132,21 @@ fn rewind_cmd(ops: &Ops, arg: &str) {
             return;
         }
     };
-    let target = match verb.as_str() {
-        "archive" => RewindTarget::Archive(num),
-        "delete" => RewindTarget::Delete(num),
-        "restore" => RewindTarget::Restore(num),
+    let mode = match verb.as_str() {
+        "archive" | "delete" | "restore" => verb.clone(),
         _ => {
             println!("{}", usage);
             return;
         }
     };
-    match ops.sessions.rewind(sid, target) {
-        Ok(events) => {
+    // 回档也走动作表：同一份声明与同一处授权（CLI 只把参数装好）。
+    match ops.actions.act(ActionCall {
+        id: "rewind".to_string(),
+        args: serde_json::json!({ "session_id": sid, "mode": mode, "id": num }),
+        caller: Caller::User,
+        out: Output::Final,
+    }) {
+        Ok(Acted::Replayed(events)) => {
             let rows: Vec<String> = events
                 .iter()
                 .filter(|e| e.get("type").and_then(|t| t.as_str()) == Some("transcript"))
@@ -164,6 +165,7 @@ fn rewind_cmd(ops: &Ops, arg: &str) {
                 println!("  {}", r);
             }
         }
+        Ok(_) => println!("[回档] 完成"),
         Err(e) => println!("[错误] {}", e),
     }
 }
@@ -538,6 +540,50 @@ pub(crate) fn pick_agents(ops: &Ops, names: &[String]) -> Result<Vec<AgentInstan
     Ok(views.iter().map(AgentInstance::from_view).collect())
 }
 
+/// 建会话走**动作表**（与 Web / agent 同一份声明、同一处授权）：CLI 只把用户的选择变成参数。
+pub(crate) fn create_session_action(
+    ops: &Ops,
+    name: &str,
+    mode: &str,
+    agents: &[AgentInstance],
+    task: Option<&str>,
+    tier: Tier,
+) -> Result<String, String> {
+    let agents: Vec<serde_json::Value> = agents
+        .iter()
+        .map(|a| {
+            serde_json::json!({
+                "name": a.name,
+                "transient": a.transient,
+                "modules": a.modules,
+                "model": a.model,
+            })
+        })
+        .collect();
+    let mut args = serde_json::json!({
+        "name": name,
+        "mode": mode,
+        "agents": agents,
+        "tier": tier.as_str(),
+    });
+    if let Some(t) = task {
+        args["task"] = serde_json::json!(t);
+    }
+    match ops.actions.act(ActionCall {
+        id: "create_session".to_string(),
+        args,
+        caller: Caller::User,
+        out: Output::Final,
+    })? {
+        Acted::Done(v) => v
+            .get("sid")
+            .and_then(|s| s.as_str())
+            .map(|s| s.to_string())
+            .ok_or_else(|| "建会话回包缺 sid".to_string()),
+        _ => Err("建会话该给结构化结果".to_string()),
+    }
+}
+
 // ---------- 形态一：单 agent（模块数不限） ----------
 
 fn single_flow(ops: &Ops, arg: &str) {
@@ -580,22 +626,14 @@ fn single_flow(ops: &Ops, arg: &str) {
         .unwrap_or(Tier::Host);
     // 订阅起点：命令回包只给头部序号，事实一律从事件台按 since 取。
     let mut cursor = ops.events.head();
-    let opened = match ops.sessions.create_work(WorkSpec {
-        name: work_name,
-        mode: WorkMode::Single,
-        agents: picked,
-        task: None,
-        delegate: false,
-        tier,
-    }) {
-        Ok(o) => o.0,
+    let sid = match create_session_action(ops, &work_name, "single", &picked, None, tier) {
+        Ok(sid) => sid,
         Err(e) => {
             println!("[错误] {}", e);
             return;
         }
     };
-    cursor = drain(ops, &opened.sid, cursor);
-    let sid = opened.sid;
+    cursor = drain(ops, &sid, cursor);
     println!("（单 agent {} —— 输入消息，空行结束会话）", sid);
     loop {
         let say = prompt("你>");
@@ -638,22 +676,14 @@ fn proxy_flow(ops: &Ops) {
         .unwrap_or(Tier::Host);
     // 订阅起点：命令回包只给头部序号，事实一律从事件台按 since 取。
     let mut cursor = ops.events.head();
-    let opened = match ops.sessions.create_work(WorkSpec {
-        name: work_name,
-        mode: WorkMode::Proxy,
-        agents: Vec::new(),
-        task: None,
-        delegate: false,
-        tier,
-    }) {
-        Ok(o) => o.0,
+    let sid = match create_session_action(ops, &work_name, "proxy", &[], None, tier) {
+        Ok(sid) => sid,
         Err(e) => {
             println!("[错误] {}", e);
             return;
         }
     };
-    cursor = drain(ops, &opened.sid, cursor);
-    let sid = opened.sid;
+    cursor = drain(ops, &sid, cursor);
     println!("（核心代理 {} —— 输入消息，空行结束会话）", sid);
     loop {
         let say = prompt("你>");
@@ -707,17 +737,11 @@ fn collab_flow(ops: &Ops, arg: &str) {
         .map(|s| s.tier)
         .unwrap_or(Tier::Host);
     let mut cursor = ops.events.head();
-    let sid = match ops.sessions.create_work(WorkSpec {
-        name: work_name,
-        mode: WorkMode::Collab,
-        agents,
-        task: Some(task),
-        delegate,
-        tier,
-    }) {
-        Ok((o, _)) => {
-            cursor = drain(ops, &o.sid, cursor);
-            o.sid
+    // 代拟由形态派生（协作 + 没给名单 = 核心按需求拟名单）；CLI 只交点名结果。
+    let sid = match create_session_action(ops, &work_name, "collab", &agents, Some(&task), tier) {
+        Ok(sid) => {
+            cursor = drain(ops, &sid, cursor);
+            sid
         }
         Err(e) => {
             println!("[错误] {}", e);

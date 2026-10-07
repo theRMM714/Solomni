@@ -1,10 +1,28 @@
 //! CLI 前端（`cli`）的测试：**传输侧**的输入解析与点名包装。
 //! **业务规则不在这里**：点名归 `registry`、命名与「生成中禁改」归 `session`/`conductor`、
-//! 组合语义归 `conductor::create_work`、动作分发归 `SessionOps::act`——它们的测试在 `tests/api.rs`。
+//! 组合语义归 `conductor::create_session`、动作分发归 `ActionOps::act`——它们的测试在 `tests/api.rs`。
 
 use super::doubles::module_of;
 use super::ops_with;
+use crate::kernel::api::Tier;
 use crate::presentation::cli;
+
+/// 建会话在 CLI 上走**动作表**：同一份声明、同一处授权（未知形态在分发处被拒）。
+#[test]
+fn cli_session_creation_goes_through_the_action_table() {
+    let (_h, ops) = ops_with(vec![module_of("a")], Vec::new());
+    ops.registry
+        .upsert_agent("甲", &["a".to_string()], "", "")
+        .expect("建 agent");
+    let picked = cli::pick_agents(&ops, &["甲".to_string()]).expect("点名");
+    let sid = cli::create_session_action(&ops, "cli-1", "single", &picked, None, Tier::Host)
+        .expect("走动作表建会话");
+    assert_eq!(sid, "cli-1");
+    assert!(
+        cli::create_session_action(&ops, "cli-2", "乱来", &picked, None, Tier::Host).is_err(),
+        "未知形态在分发处如实拒绝"
+    );
+}
 
 #[test]
 fn split_names_accepts_commas_and_whitespace() {

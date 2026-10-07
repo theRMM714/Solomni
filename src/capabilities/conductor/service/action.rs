@@ -87,7 +87,11 @@ impl Conductor {
             delegate,
             tier,
         };
-        let opened = self.create_work_inner(work, parent.as_deref())?;
+        // 有父 = 子工作（`create_work_inner` 直接给 parent）；没有父 = 顶层会话，走同一个入口包装。
+        let opened = match parent.as_deref() {
+            Some(p) => self.create_work_inner(work, Some(p))?,
+            None => self.create_work(work)?,
+        };
         Ok((
             d::Created {
                 session: opened.sid,
