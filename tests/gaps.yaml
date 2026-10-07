@@ -72,3 +72,46 @@
     3) 回滚要留可回放的记录，并与回档标记模型对齐（提交锚见 docs/session/session-model.md 的五）。
   accept: 用户能在界面上看到提交历史，并把共享区回滚到任一提交点；回滚后新开的 agent 拉取到的是那一点的内容。
   blocked_by: 缺少实现（呈现面未接入）
+
+- id: fence.no-silent-fence-degradation
+  scope: global
+  level: T4
+  why: |
+    围栏授权只要有一处落点写不进（`prepare_fence` 返错），这次工具调用就按**无围栏**执行——不拒绝、
+    也不问用户，回执里只有一行提示。真机触发点：把 node 装在系统目录下的机器（nvm4w 把解释器放在
+    `C:\nvm4w\nodejs`，属主 Administrators、只给 Authenticated Users Modify），解释器目录的 ACE 写不进，
+    于是**任何** node 工具都静默变成无围栏跑。这是"一个环节有问题就整体降级"，而且用户无感知。
+  how: |
+    1) 先定判据：哪些落点是**必要**的（解释器目录、模块目录、cwd、私有沙箱——缺了这次命令跑不了或围栏不成立），
+       哪些是**可选**的（用户显式授权的只读根、不存在的 userdata 等）。可选落点授不上只记事实，不牵动整次执行。
+    2) 必要落点授不上时不许降级：走既有裁决通道（kernel 的 ApprovalRegistry / tool_loop 的 ApprovalGate），
+       卡片带"为什么问"，让用户选①放弃这次调用②本轮无围栏跑一次；没有回答或拒绝 = 不执行。
+       该卡要与 `granularity: ask` 那张卡同一份事实，Web 与 CLI 两端同形。
+    3) 回执把"这一环为什么装不上"写成可操作的一句（哪个目录、缺什么前提、怎么补），并按需经
+       `SessionEvent::Notice` 送达用户面，而不是只给模型看。
+  accept: |
+    真机构造一次必要落点授不上：工具调用必须被**拒绝**或**弹裁决**，绝不静默无围栏执行；用户选"本轮无围栏"时才跑，
+    且这次执行在转录与回执里如实标为无围栏；可选落点授不上不影响围栏成立。届时删除本条并同步文档。
+  blocked_by: 缺少实现（要先定"必要落点"判据与裁决卡文案契约，跨 kernel / tools / 呈现三处）
+
+- id: fence.node-entry-scope-unreachable
+  scope: global
+  level: T4
+  why: |
+    跳过 realpath 只解决 node 启动的第一段。主模块**格式判定**还会逐级向上找最近的作用域配置
+    （`shouldUseESMLoader` → 就近 package.json），容器里够不到的祖先会让它直接判死：
+    `ERR_INVALID_PACKAGE_CONFIG: Cannot read package config <祖先>/package.json: operation not permitted`，
+    进程照样起不来。真机实测：模块根不带 package.json 的 .js 入口一路向上，到用户主目录那一级就报错；
+    模块根带一份 `package.json`（或入口用 .cjs/.mjs）时它走到模块根就停，往返就通。
+    **CI 现在绿不代表这条不存在**：runner 的祖先目录恰好不拒绝——换机器、换工作区布局就会翻出来。
+  how: |
+    1) 定契约：node 模块的入口作用域要能被容器读到（模块根带 package.json，或入口用 .cjs/.mjs）——
+       写进 MODULE_SPEC 与模块模板，并在 e2e 的真模块（render）上落实。
+    2) 加 T4 探针两种形态：带 package.json（预期跑通）与不带的 .js 入口（预期给出可读、可据以改模块的失败结论），
+       两边的结论都进能力报告——别把"布局恰好能过"当成"容器里 node 能用"。
+    3) 再评估"少一层契约"是否可行：入口作用域能不能进围栏的授权面（例如把模块根的 package.json 当运行基线），
+       或由产品在沙箱里兜一份只读的包作用域——两条都要先量真机。
+  accept: |
+    真机上两种形态都有结论：带 package.json（或 .cjs/.mjs）的 node 模块工具在容器里跑通一次完整往返；
+    不带的给出可读原因（而不是 ERR_INVALID_PACKAGE_CONFIG 原话）；契约与文档同步。
+  blocked_by: 缺少实现（先定模块契约：入口作用域由模块自带，还是由围栏兜住）

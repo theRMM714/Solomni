@@ -771,6 +771,8 @@ fn node_runs() -> bool {
 /// 再逐级 lstat 祖先前缀，而这两类落点按设计都不在可达范围——没有解释器基线（`NODE_OPTIONS` 跳过 realpath），
 /// 进程在脚本执行前就 EPERM 死。所以分两段：带运行期环境跑通一次完整往返（模块脚本 + require 进来的依赖 +
 /// 产物落进 userdata），再用同一份环境**关掉开关**复现失败现场（根因钉死，不是"容器坏了"）。
+/// 夹具的模块根带一份 package.json：主模块格式判定会逐级向上找作用域配置，容器里够不到的祖先会让它报
+/// `ERR_INVALID_PACKAGE_CONFIG` 判死；不带它的形态另记在 `tests/gaps.yaml`。
 /// 会创建 AppContainer profile（改本机状态），只在 --fence-live（SOLOMNI_FENCE_LIVE=1）下跑；本机没有 node 时如实跳过。
 #[test]
 fn container_runs_a_node_module_tool_with_realpath_skipped() {
@@ -800,6 +802,9 @@ fn container_runs_a_node_module_tool_with_realpath_skipped() {
     std::fs::create_dir_all(module.join("tools")).expect("建模块 tools");
     std::fs::create_dir_all(&userdata).expect("建模块 userdata");
     // 主脚本 require 同目录的依赖：依赖那一路也要 realpath，光有主模块那个开关不够（这正是两个开关的理由）。
+    // 模块根放一份 package.json：主模块格式判定会逐级向上找作用域配置，够不到的祖先会直接把它判死。
+    std::fs::write(module.join("package.json"), "{ \"type\": \"commonjs\" }")
+        .expect("写模块根 package.json");
     std::fs::write(
         module.join("tools").join("helper.js"),
         "module.exports = { marker: 'node-tool-ok' };",
