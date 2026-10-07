@@ -55,6 +55,16 @@ pub fn run(ops: Ops, web_default_port: u16) -> CliExit {
     CliExit::Exit
 }
 
+/// 目的：把用户写的模块工具名规整成动作 id——`<模块id>.<工具名>` 与完整的 `module.<模块id>.<工具名>` 都收。
+pub(crate) fn module_action_id(arg: &str) -> String {
+    let a = arg.trim();
+    if a.starts_with("module.") {
+        a.to_string()
+    } else {
+        format!("module.{}", a)
+    }
+}
+
 /// 直接用模块工具（不经 AI）：`module` 列清单，`module <模块id>.<工具名> [json 参数]` 跑一次。
 /// 清单来自核心的动作目录（`module.<模块id>.<工具名>`），所以与 Web 看到的是同一份事实。
 fn module_cmd(ops: &Ops, arg: &str) {
@@ -98,7 +108,7 @@ fn module_cmd(ops: &Ops, arg: &str) {
         }
     };
     match ops.actions.act(ActionCall {
-        id: id.to_string(),
+        id: module_action_id(id),
         args,
         caller: Caller::User,
         out: Output::Final,

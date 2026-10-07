@@ -1,7 +1,7 @@
 //! 入站契约（`conductor::api`）的契约测试：命令/事件模型、能力分面、停止语义、panic 隔离。
 //! 这一层不碰 HTTP；HTTP 侧（路由目录与逐路由契约）另见本目录的 routes。
 
-use super::doubles::{collab_work, decl, module_of};
+use super::doubles::{collab_work, decl, module_of, module_with_runtimes};
 use super::{gated_ops, ops_with, single_work, slow_ops};
 use crate::capabilities::conductor::api::{
     Acted, ActionCall, AgentInstance, Caller, SessionEdit, SessionEvent, WorkMode, WorkSpec,
@@ -1090,6 +1090,37 @@ fn module_tools_are_actions_users_can_run_directly() {
             out: Output::Final,
         })
         .is_err());
+}
+
+/// 缺运行包 = 不执行：直跑模块工具也要过与成员循环同一把尺子，目录里如实标不可用。
+#[test]
+fn module_action_refuses_when_its_runtime_package_is_missing() {
+    let mut m = module_with_runtimes("harvest", &["python"]);
+    m.manifest
+        .tools
+        .insert("scan".to_string(), decl("python tools/scan.py"));
+    let (_h, ops) = ops_with(vec![m], Vec::new());
+    let err = ops
+        .actions
+        .act(ActionCall {
+            id: "module.harvest.scan".to_string(),
+            args: serde_json::json!({}),
+            caller: Caller::User,
+            out: Output::Final,
+        })
+        .unwrap_err();
+    assert!(err.contains("运行包"), "{}", err);
+    let cat = ops.actions.catalog(&Caller::User, None).expect("目录");
+    let e = cat
+        .iter()
+        .find(|a| a.id == "module.harvest.scan")
+        .expect("模块工具进目录");
+    assert!(
+        !e.available && e.reason.contains("运行能力"),
+        "available={} reason={}",
+        e.available,
+        e.reason
+    );
 }
 
 /// 动作表是唯一的路：未知 id、未知取值、越出 callers 的调用都在分发处如实拒绝。

@@ -7,6 +7,19 @@ use super::ops_with;
 use crate::kernel::api::Tier;
 use crate::presentation::cli;
 
+/// 模块工具名两种写法都收：`<模块id>.<工具名>` 与完整的 `module.<模块id>.<工具名>`。
+#[test]
+fn module_action_id_accepts_both_forms() {
+    assert_eq!(
+        cli::module_action_id("toolbox.read_txt"),
+        "module.toolbox.read_txt"
+    );
+    assert_eq!(
+        cli::module_action_id("module.toolbox.read_txt"),
+        "module.toolbox.read_txt"
+    );
+}
+
 /// 建会话在 CLI 上走**动作表**：同一份声明、同一处授权（未知形态在分发处被拒）。
 #[test]
 fn cli_session_creation_goes_through_the_action_table() {

@@ -264,6 +264,17 @@ impl ConductorHandle {
         })
     }
 
+    /// 目的：模块 id → 它在当前档位下缺的运行包能力（空表 = 都能跑）。
+    /// 约束：与成员循环读同一把尺子（`runtime_report.missing`）——缺包 = 不执行，不静默降级。
+    fn missing_runtimes(&self) -> BTreeMap<String, Vec<String>> {
+        let tier = self
+            .call(|core| Ok(core.registry().app_settings().tier))
+            .unwrap_or_default();
+        ConductorOps::runtime_report(self, tier)
+            .map(|r| r.missing)
+            .unwrap_or_default()
+    }
+
     /// 目的：模块工具动作的授权——它是**人直接用**的入口，会话里的模块工具走成员循环。
     fn authorize_module(&self, caller: &Caller) -> Result<(), String> {
         match caller {
@@ -313,6 +324,14 @@ impl ConductorHandle {
     ) -> Result<Acted, String> {
         self.authorize_module(caller)?;
         let (module, tool, decl) = self.module_action(id)?;
+        // 与成员循环同一把尺子：该能力不在包库里 = 该模块的工具不执行，并如实说明缺哪个能力。
+        if let Some(caps) = self.missing_runtimes().get(&module.manifest.id) {
+            return Err(format!(
+                "模块 {} 的运行包 {} 未装载，不能直接跑它的工具；把包放进依赖文件夹 runtimes/（契约见 RUNTIME_SPEC.md）",
+                module.manifest.id,
+                caps.join("、")
+            ));
+        }
         // `workspace` 是机制参数（围栏的落点），不是模块声明的参数：先摘出来再按声明校验其余。
         let mut module_args = args.clone();
         let work = module_args.as_object_mut().and_then(|o| {
@@ -474,6 +493,7 @@ impl ActionOps for ConductorHandle {
         // 会话里的模块工具由成员循环执行——那是同一个声明、同一个执行面的另一个适配器。
         if matches!(caller, Caller::User) {
             if let Ok(roster) = self.call(|core| Ok(core.scan())) {
+                let missing = self.missing_runtimes();
                 for m in &roster.modules {
                     for (tool, decl) in &m.manifest.tools {
                         let mut params: Vec<ActionParamView> = match decl.schema() {
@@ -496,12 +516,16 @@ impl ActionOps for ConductorHandle {
                             required: false,
                             desc: "工作目录（绝对路径）；省略 = 模块自己的 userdata/".to_string(),
                         });
+                        let (available, reason) = match missing.get(&m.manifest.id) {
+                            Some(caps) => (false, format!("缺运行能力：{}", caps.join("、"))),
+                            None => (true, String::new()),
+                        };
                         out.push(ActionView {
                             id: format!("module.{}.{}", m.manifest.id, tool),
                             desc: decl.desc.clone(),
                             params,
-                            available: true,
-                            reason: String::new(),
+                            available,
+                            reason,
                         });
                     }
                 }
