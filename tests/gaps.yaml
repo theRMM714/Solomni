@@ -77,16 +77,25 @@
   scope: global
   level: T4
   why: |
-    真机机制矩阵（windows 目标）里，容器内 `node listdir.js`（cwd = 授权叶子）**根本没起来**：
-    node 的模块解析要 realpath，它的 JS 实现会从盘卷根逐级 lstat，在容器里对 `C:\` 报
-    `EPERM: operation not permitted, lstat 'C:\'`——而盘卷根按设计就不在可达范围里。
-    照着祖先链不授权的口径，这不是 runner 独有：**JS 写的模块工具在容器里能不能跑，目前没有验过**
-    （e2e 的三条真工具只覆盖 python 与 C++，夹具里的 render/report.js 从没被跑过）。
-    同一个格子上 python 的工具进程正常，所以这不是"容器坏了"，而是某类解释器的启动路径另有要求。
+    Windows 容器围栏（AppContainer）里，`node <文件>` 形式的模块工具**根本没起来**。根因已定位到
+    Node 自己的启动路径：模块解析走 `fs.realpathSync`，它的 JS 实现在本平台会先 `lstat` 盘卷根
+    `C:\`、再对入口路径的每一级祖先前缀 `lstat`；而围栏按设计只给"授权叶子 + 直接父目录"写 ACE
+    （grant_targets），盘卷根与中间祖先都不在可达范围，于是进程在脚本执行前就报
+    `EPERM: operation not permitted, lstat 'C:\'`。
+    这不是 runner 独有：JS 写的模块工具在容器里从没验过（e2e 真工具只覆盖 python 与 C++，
+    夹具里的 render/tools/report.js 从没被跑过）。同格子上 python / C++ 的工具进程正常，说明不是
+    "容器坏了"；对照 `node -e` 不走 realpath（evalScript 直接建 `[eval]` 模块）能把根因钉死。
   how: |
-    1) 专门量一次 node 在容器里的启动：`node -e` 与 `node <文件>` 两种形态、cwd 取模块根与
-       `<module>/userdata/` 两种，把 node 的 realpath 到底要哪一位记下来（机制矩阵的做法可复用）；
-    2) 结论若指向"node 需要 stat 盘卷根"，就按需要补授权（或如实记为与 cmd 的 `dir` 同类的环境事实）；
-    3) 顺带把 e2e 的"真工具"场景补一条 node 工具（夹具里已有现成的 `render/tools/report.js`）。
-  accept: 容器里 JS 写的模块工具跑通一次完整往返；或如实写明该环境不支持并列进能力报告。
-  blocked_by: 缺少观察面（要专门量一次 node 在容器里的启动路径）
+    方向已定：让 Node 跳过 realpath，而不是给盘卷根补授权——`C:\` 与 `C:\Users` 的属主是系统
+    （TrustedInstaller / SYSTEM），非管理员改不了它们的 DACL，补授权会让本机档被迫要求管理员，
+    违背围栏"只用用户自己的目录"的前提。要做的事，按顺序（开发与验收都在 Windows 侧）：
+    1) 围栏识别命令解释器是 node 时，经环境白名单注入
+       `NODE_OPTIONS=--preserve-symlinks --preserve-symlinks-main`：CJS 主模块看 -main，
+       依赖与 ESM 看 --preserve-symlinks；两个开关经 NODE_OPTIONS 传入本机 Node v24.21.0 已验。
+    2) 真机先量一次启动路径，确认补丁够用：`node -e "…"`（预期能起）、`node <文件>`（复现）、
+       `node --preserve-symlinks --preserve-symlinks-main <文件>`（预期跑通）；若跳过 realpath 后仍
+       倒在别的系统读取（例如 OpenSSL 配置、祖先 package.json 遍历），把该落点按解释器基线补进授权。
+    3) 加 T4 真机探针（tests/windows/probes/container.rs，无 node 时如实 env-skip），并把 e2e 的
+       "真工具"场景补一条 node 工具（夹具里已有现成的 render/tools/report.js）。
+  accept: Windows 容器里 JS 写的模块工具跑通一次完整往返（产物落地、越界仍不可达）；或如实写明该环境不支持并列进能力报告。
+  blocked_by: 缺少观察面（要真机量一次 node 在容器里的启动路径；开发与验收在 Windows 侧）
