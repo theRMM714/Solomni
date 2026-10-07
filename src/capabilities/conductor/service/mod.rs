@@ -67,7 +67,7 @@ pub(crate) enum PersistPolicy {
 
 impl PersistPolicy {
     /// 一条事件该不该留：`Drop` 一条都不留；`Keep` 也不留**短暂事件**
-    /// （流式增量 / 运行态 / 实时工具卡 / 裁决卡——它们只给在场的前端看）。
+    /// （流式增量 / 运行态 / 实时工具卡——它们只给在场的前端看；裁决卡与回答按会话种类落盘）。
     pub(crate) fn keeps(&self, ev: &SessionEvent) -> bool {
         if *self == PersistPolicy::Drop {
             return false;
