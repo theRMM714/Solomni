@@ -1,0 +1,1 @@
+把运行包文件夹放进这里（一个包 = 一个文件夹 + package.yaml）；契约见 RUNTIME_SPEC.md。

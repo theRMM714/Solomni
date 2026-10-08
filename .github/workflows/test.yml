@@ -1,23 +1,39 @@
 # 三平台测试：GitHub 托管 runner 是一次性机器，「会改本机状态」的真机围栏测试只在这里开。
 # 本地默认安全模式（见 TESTING.md）：会改本机状态的测试要显式 --fence-live。
-# 无论成败都把报告与日志留两份：产物（供人下载）与 ci-report 分支（供没有凭据的会话直接读）。测试 job 仅需读取权限；只有 publish-report job 可写 ci-report。
-# 成功 run 的 job 日志要凭据才读得到、且没有产物，所以"绿了"本身必须自带现场（steps/envSkips/围栏能力）。
+#
+# 触发：**只有手动 workflow_dispatch**。main 禁止直接 push（只走 PR）；CI 的唯一价值是给出本机
+# 拿不到的结论（他平台编译、真机围栏、TLS 出站），所以攒批后由人派发，不跟着每次推送跑。
+# inputs.clean=true 跳过缓存，用于「干净机器」验收。契约见 docs/testing/execution-ci.md。
+#
+# 契约：每个平台**恰好两个 job**——quality（T0 + 单元 + 平台探针 + 前端冒烟）与 e2e（L4 端到端）；
+# 不得再拆。publish-report 下载两份报告、合并后发布 ci-report（成败都发）。
 name: 测试
 
 on:
-  push:
-  pull_request:
+  workflow_dispatch:
+    inputs:
+      clean:
+        description: "跳过缓存，按干净机器跑（验收用）"
+        type: boolean
+        default: false
 
 permissions:
   contents: read # 默认只读；仅 publish-report job 获得 ci-report 写权限。
 
+# 同一 ref 同时只跑一次；不自动取消已开跑的那次（验收现场不能被中途掐掉，ci-report 不能被写坏）。
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
-  test:
+  quality:
+    name: 质量与单元（${{ matrix.os }}）
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
         os: [windows-latest, ubuntu-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
 
@@ -33,8 +49,21 @@ jobs:
           rustc --version
           cargo --version
 
-      - name: 跑全部测试（一次性环境：允许真机围栏测试）
-        run: node run-tests.js --fence-live
+      # 只缓存依赖与 debug 产物。不缓存 target/ 根：报告与日志来自本次运行，不能被上一次的缓存顶替。
+      - name: 缓存依赖与编译产物（inputs.clean 时跳过）
+        if: ${{ !inputs.clean }}
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target/debug
+          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: 质量门禁 + 单元 + 平台探针（跳过 L4，由 e2e job 承担）
+        run: node run-tests.js --fence-live --skip-e2e
 
       - name: 抓 macOS 沙箱拒绝记录（无论成败都留；非 macOS 跳过）
         if: always() && runner.os == 'macOS'
@@ -55,13 +84,62 @@ jobs:
             target/test-logs/
           if-no-files-found: ignore
 
+  e2e:
+    name: 端到端（${{ matrix.os }}）
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "lts/*"
+
+      - name: 准备 Rust（runner 自带工具链，不装项目外的任何东西）
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustc --version
+          cargo --version
+
+      - name: 缓存依赖与编译产物（inputs.clean 时跳过）
+        if: ${{ !inputs.clean }}
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target/debug
+          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      # 自己构建产品（不依赖 quality job 的产物，才能和它并行）：构建 + 编排 + 写 e2e-report.json。
+      - name: 跑 L4 端到端
+        run: node tests/ci-e2e.mjs
+
+      - name: 留产物（e2e 报告与日志；无论成败）
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-report-${{ matrix.os }}
+          path: |
+            target/e2e-report.json
+            target/test-logs/
+          if-no-files-found: ignore
+
   publish-report:
-    name: 汇总并发布 ci-report
-    needs: test
+    name: 合并并发布 ci-report
+    needs: [quality, e2e]
+    if: ${{ always() && !cancelled() }}
     permissions:
       contents: write
-    if: ${{ always() && needs.test.result != 'cancelled' && github.event_name == 'push' }}
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     concurrency:
       group: ci-report-publish
       cancel-in-progress: false
@@ -70,10 +148,17 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: 下载三个测试 job 的报告产物
+      - name: 下载 quality 报告产物
         uses: actions/download-artifact@v8
         with:
           pattern: test-report-*
+          path: ci-artifacts
+          merge-multiple: false
+
+      - name: 下载 e2e 报告产物
+        uses: actions/download-artifact@v8
+        with:
+          pattern: e2e-report-*
           path: ci-artifacts
           merge-multiple: false
 
@@ -95,21 +180,23 @@ jobs:
       - name: 恢复源码工作树
         run: git checkout --detach "${GITHUB_SHA}"
 
-      - name: 逐平台写入干净的报告分支
+      - name: 逐平台合并并写入干净的报告分支
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
 
-          # ci-publish.mjs 负责报告内容、失败证据和 Contents API 写入；这里串行调用，
-          # 避免三个平台同时覆盖 ci-report，并使前面的空分支重建不会留下旧文件。
+          # 每个平台把 quality 与 e2e 两份报告合并成该平台唯一的 test-report.json（tests/ci-merge.mjs），
+          # 再由 ci-publish.mjs 写内容、失败证据与 Contents API。串行调用避免三平台同时覆盖 ci-report。
           for platform in windows-latest ubuntu-latest macos-latest; do
             rm -rf target
             mkdir -p target/test-logs
 
-            artifact_target="ci-artifacts/test-report-${platform}"
-            if [ -d "${artifact_target}" ]; then
-              cp -R "${artifact_target}/." target/
+            if [ -d "ci-artifacts/test-report-${platform}" ]; then
+              cp -R "ci-artifacts/test-report-${platform}/." target/
+            fi
+            if [ -d "ci-artifacts/e2e-report-${platform}" ]; then
+              cp -R "ci-artifacts/e2e-report-${platform}/." target/
             fi
 
             case "${platform}" in
@@ -119,6 +206,7 @@ jobs:
               *) echo "未知平台：${platform}" >&2; exit 1 ;;
             esac
 
-            echo "发布 ${platform} 的报告"
+            echo "合并并发布 ${platform} 的报告"
+            node tests/ci-merge.mjs
             RUNNER_OS="${runner_os}" node tests/ci-publish.mjs
           done
