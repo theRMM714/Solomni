@@ -103,8 +103,22 @@ AppContainer 包 ACE（`S-1-15-2-*`）；**它不碰完整性标签**（脚本�
 
 ### CI（GitHub Actions）：跨平台与真机的唯一事实来源
 
-工作流 `.github/workflows/test.yml`，矩阵 `windows-latest / ubuntu-latest / macos-latest`（`fail-fast: false`，
-一个平台失败不影响另外两个出结论），`on: push` 与 `pull_request`；每个平台跑 `node run-tests.js --fence-live`。
+工作流 `.github/workflows/test.yml`，**只有手动触发**（`workflow_dispatch`）：`main` 禁止直接 push（只走 PR），
+日常提交不自动跑 CI。矩阵 `windows-latest / ubuntu-latest / macos-latest`（`fail-fast: false`，
+一个平台失败不影响另外两个出结论）。
+
+**契约：每个平台恰好两个 job**——`quality` 与 `e2e`；这是刻意的上限，**不得再拆**：
+
+| job | 跑什么 | 对应入口 |
+| --- | --- | --- |
+| `quality` | T0 质量门禁 + L1 单元 + 平台探针 + 前端冒烟（**跳过 L4**） | `node run-tests.js --fence-live --skip-e2e` |
+| `e2e` | L4 端到端（自己构建产品，与 `quality` 并行） | `node tests/ci-e2e.mjs`（CI 专用；本地整跑用 `node run-tests.js --fence-live`） |
+
+`publish-report` 把两个 job 的产物（`test-report-<os>` 与 `e2e-report-<os>`）用 `tests/ci-merge.mjs` 合并成该平台
+唯一的 `test-report.json`，再交给 `tests/ci-publish.mjs` 发布。**任一半缺报告都补一条 `fail` 步骤**——"没跑到"不能读成"通过"。
+
+`workflow_dispatch` 的 `clean` 输入（`true`）跳过 `actions/cache` 按干净机器跑；缓存只覆盖 `~/.cargo/registry`、
+`~/.cargo/git`、`target/debug`，**不缓存 `target/` 根**（报告与日志必须来自本次运行）。
 
 **为什么必须有 CI**——下面这些结论本地拿不到：
 
@@ -113,17 +127,25 @@ AppContainer 包 ACE（`S-1-15-2-*`）；**它不碰完整性标签**（脚本�
 | 平台专属代码（`capabilities/tools/detail/confine/` 各平台文件、`tests/<平台>/`） | 平台目标的 `main.rs` 首行是 `#![cfg(target_os = …)]`：非本平台的目标整目标为空，代码根本不编译 | 三平台各编译并各跑一次 |
 | 真机围栏（ACL / 容器 profile / Landlock / seatbelt） | 本地默认安全模式会跳过会改本机状态的探针 | 一次性 runner 上真跑，并验撤权与 profile 回收 |
 | HTTPS/TLS 出站链路 | 受限环境可能取不到系统 TLS 凭证（判据见 [levels.md](levels.md) 的 T4），本地只能 env-skip | 干净 runner 上真连公网端点 |
-| T0 六项（clippy 只编译当前平台的 `#[cfg]`、依赖图随平台变） | 本机只能代表本平台（判的是**平台差异**，不是「改了门禁就要推」） | 三平台各自零容忍跑一遍 |
+| T0 六项（clippy 只编译当前平台的 `#[cfg]`、依赖图随平台变） | 本机只能代表本平台（判的是**平台差异**，不是「改了门禁就要派发」） | 三平台各自零容忍跑一遍 |
 | 三种语言的模块（python / node / C++）在真进程里跑 | 本机只代表本平台的解释器与编译器 | 三平台各跑一次真工具链路，indexer 现场编译 |
 | 发布前验收 | 本地通过 ≠ 三平台通过 | 三平台报告 + 三平台 `TEST-REPORT-ACCEPTED` |
 
-**什么时候该推、什么时候不该推**：CI 的唯一价值是给出**本机拿不到的结论**（其它平台能不能编译通过、真机围栏与解释器链路、TLS 出站）。判据只有一条——
+**什么时候派发、什么时候不派发**：CI 的唯一价值是给出**本机拿不到的结论**（其它平台能不能编译通过、真机围栏与解释器链路、TLS 出站）。判据只有一条——
 这次改动的验收结论**是否依赖本机之外**：
 
-- **依赖** → 必须推，并按下面的读法比对 `sha`；
-- **不依赖** → 不推，本地入口就是验收结论。明确不算理由的：纯逻辑、文档、当前平台的用例，以及**门禁与卫生工具自身的改动**
-  （本机跑同一份入口即同一判据）；攒批，等下一次真需要他平台或真机结论时一起推。
-- 用户明确要求推时例外。
+- **依赖** → 派发一次，并按下面的读法比对 `sha`；
+- **不依赖** → 不派发，本地入口就是验收结论。明确不算理由的：纯逻辑、文档、当前平台的用例，以及**门禁与卫生工具自身的改动**
+  （本机跑同一份入口即同一判据）；攒批，等下一次真需要他平台或真机结论时一起派发。
+- 用户明确要求派发时例外。
+
+**触发（需要 CI 时）**：只能手动派发，用 `gh` 发起，`--ref` 指向要验证的分支（`main` 禁止直接 push，通常是 `development`）：
+
+```text
+gh workflow run test.yml --ref <分支>
+```
+
+按干净机器跑（跳过缓存）时加 `-f clean=true`。触发后按下面的读法比对 `sha`。
 
 **报告怎么读（硬规矩）**：只用 `git` 或 git CLI 拉 `ci-report` 分支，**禁止轮询网页**；时机无法确认时委托用户拉取（见 `AGENTS.md`）。
 
@@ -147,7 +169,7 @@ git show origin/ci-report:runs/windows/logs/<某一步>.log  # 失败证据原�
 > （包 SID 在令牌的 `TokenAppContainerSid` 字段里，不在组列表里），按它判会把生效的容器记成降级。
 > 容器是否生效用**行为对照**（授权落点写得进、父目录按名可用、父目录内容不可见），见 [levels.md](levels.md) 的 T4。
 
-**等多久再拉（推荐节奏）**：push 之后**先等 5 分钟**再拉 `ci-report`；若某个平台的 `meta.json` 的 `sha` 还对不上
+**等多久再拉（推荐节奏）**：派发之后**先等 5 分钟**再拉 `ci-report`；若某个平台的 `meta.json` 的 `sha` 还对不上
 （这次 run 没结束），**每次再等 2 分钟**重拉一次，直到三平台的 `sha` 都对得上，或确认 run 已失败/取消。
 等的是 git 拉取，不是网页轮询——`AGENTS.md` 禁止查网页；时间上拿不准（比如 runner 排队很久）就委托用户拉取。
 
@@ -155,7 +177,7 @@ git show origin/ci-report:runs/windows/logs/<某一步>.log  # 失败证据原�
 
 - Actions 注释：失败逐条 `::error::`（带断言原文），通过一条 `::notice::` 概览——匿名可读，不需要凭据；
 - `ci-report` 滚动分支：同一路径每次覆盖，**只留最近一次**（要历史看 Actions 产物 `test-report-<os>`）；
-- 只有 **push 事件**才发布 `ci-report`；`pull_request` 的结论只能在 Actions 注释里看；
+- 现在只有**手动派发的 run** 才发布 `ci-report`（没有 push / PR 触发）；
 - 报告发布失败（例如 token 权限不对）只是 `::warning::`，**不影响**测试本身的成败——所以"没读到报告"不等于"测试没过"。
 
 **本地与 CI 的关系**：本地入口是快速反馈；CI 是**跨平台与真机**的最终判据，**不是每次改动的必经关卡**。
