@@ -382,12 +382,16 @@ pub(crate) fn grant_one_journaled(
         return match grant_verified(sid, path, rights, recursive, inherit) {
             Ok(()) => Ok(()),
             Err(e) => {
-                let rollback = rec
-                    .snapshots
-                    .iter()
-                    .find(|s| s.path == key)
-                    .map(|s| restore_sd(path, &s.bytes))
-                    .unwrap_or_else(|| Err("台账里没有该路径的快照".to_string()));
+                // 只有**真写进去**才谈回滚：写都没成功时再报一条"回滚失败"，会把"这次没动过权限项"说反。
+                let rollback = if has_any_ace_for(sid, path) {
+                    rec.snapshots
+                        .iter()
+                        .find(|s| s.path == key)
+                        .map(|s| restore_sd(path, &s.bytes))
+                        .unwrap_or_else(|| Err("台账里没有该路径的快照".to_string()))
+                } else {
+                    Ok(())
+                };
                 let journal = if added {
                     rec.snapshots.retain(|s| s.path != key);
                     save_record(home, rec).map_err(|x| format!("台账更新失败：{}", x))
@@ -402,8 +406,13 @@ pub(crate) fn grant_one_journaled(
     match grant_verified(sid, path, rights, recursive, inherit) {
         Ok(()) => Ok(()),
         Err(e) => {
-            let rollback = revoke_one(sid, path, recursive)
-                .map_err(|x| format!("撤销已写入的 ACE 失败：{}", x));
+            // 同上：写入没成功就没有"已写入的 ACE"可撤，如实只说主错误。
+            let rollback = if has_any_ace_for(sid, path) {
+                revoke_one(sid, path, recursive)
+                    .map_err(|x| format!("撤销已写入的 ACE 失败：{}", x))
+            } else {
+                Ok(())
+            };
             let journal = if added {
                 rec.grants.retain(|g| !(g.sid == sid_text && g.path == key));
                 save_record(home, rec).map_err(|x| format!("台账更新失败：{}", x))

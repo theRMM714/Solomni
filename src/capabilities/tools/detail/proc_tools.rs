@@ -956,6 +956,11 @@ mod tests {
             "必要落点授不上要**问**用户（选项 id 是契约）"
         );
         assert!(
+            !blocked.why.contains("回滚失败"),
+            "写入没成功就不许报“回滚失败”（否则用户以为本机权限被改了一半）：{}",
+            blocked.why
+        );
+        assert!(
             ask.halted.lock().expect("锁").is_empty(),
             "有选项就不该停会话"
         );
