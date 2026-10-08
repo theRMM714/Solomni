@@ -297,7 +297,10 @@ pub fn run_fenced(spec: &FenceSpec, prepared: bool, home: Option<&Path>, command
     let outcome = run_in_container(sid, spec, command);
     free_sid(sid);
     match outcome {
-        Ok(code) => code,
+        Ok(code) => {
+            super::note_fence_boundary(spec, true, code);
+            code
+        }
         Err(e) => {
             // 容器起不来也要如实说清，并退回普通方式执行（能力等级已在启动报告里说明）。
             eprintln!("[围栏] 容器围栏未生效（{}）：按如实降级继续执行", e);

@@ -57,6 +57,11 @@ fn fence_denies_outside_paths_and_allows_the_given_roots() {
         err
     );
     assert_ne!(code, Some(0), "越界读应以非零退出：{} / {}", out, err);
+    assert!(
+        err.contains("范围外的访问被围栏拒绝"),
+        "围栏内失败要带一条不分语言的边界说明：{}",
+        err
+    );
 }
 
 /// 未授权时段（`prepared = false`）的机制验证：把"本机不允许"与"我们写错了"分开。
@@ -278,6 +283,9 @@ fn fence_allows_node_to_start_by_reading_the_openssl_config() {
     }
     let module = scratch("fence-node");
     std::fs::write(module.join("listdir.js"), "console.log('NODE-OK')\n").expect("写 node 脚本");
+    // Node 会从入口向上找最近的 package.json：模块要自带这份作用域，别靠祖先目录恰好没有。
+    std::fs::write(module.join("package.json"), r#"{ "type": "commonjs" }"#)
+        .expect("写模块根 package.json");
     // 运行期形态：rw = [模块根]，ro_tree = [模块根]，cwd = 模块根（脚本就在里面）。
     let spec = job_json_tree(
         std::slice::from_ref(&module),

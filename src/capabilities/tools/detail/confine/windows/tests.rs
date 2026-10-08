@@ -796,7 +796,7 @@ fn node_runs() -> bool {
 /// 进程在脚本执行前就 EPERM 死。所以分两段：带运行期环境跑通一次完整往返（模块脚本 + require 进来的依赖 +
 /// 产物落进 userdata），再用同一份环境**关掉开关**复现失败现场（根因钉死，不是"容器坏了"）。
 /// 夹具的模块根带一份 package.json：主模块格式判定会逐级向上找作用域配置，容器里够不到的祖先会让它报
-/// `ERR_INVALID_PACKAGE_CONFIG` 判死；不带它的形态另记在 `tests/gaps.yaml`。
+/// `ERR_INVALID_PACKAGE_CONFIG` 判死；模块要自带这份作用域（见 MODULE_SPEC 的「模块目录就是发现边界」）。
 /// 会创建 AppContainer profile（改本机状态），只在 --fence-live（SOLOMNI_FENCE_LIVE=1）下跑；本机没有 node 时如实跳过。
 #[test]
 fn container_runs_a_node_module_tool_with_realpath_skipped() {

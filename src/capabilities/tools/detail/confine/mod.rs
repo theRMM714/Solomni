@@ -173,6 +173,58 @@ pub fn run_fenced(job: &FenceJob, command: &str) -> i32 {
     backend::run_fenced(&job.spec, job.prepared, job.home.as_deref(), command)
 }
 
+/// 目的：围栏里工具失败时给回执的边界说明（可达范围 + 范围外被拒）；不需要说明时返回 None。
+/// 约束：只在围栏真强制生效且工具自己非零退出时给；不含任何语言知识，也不猜被拒的是哪条路径。
+fn fence_boundary_note(spec: &FenceSpec, enforced: bool, code: i32) -> Option<String> {
+    if !enforced || code == 0 {
+        return None;
+    }
+    Some(format!(
+        "[围栏] 工具进程只可达 {}（网：{}）；范围外的访问被围栏拒绝。",
+        reachable_roots(spec),
+        if spec.net { "开" } else { "关" }
+    ))
+}
+
+/// 目的：可达范围的一行摘要（工作目录 + 读写/只读根，去重；超过三处折叠成一处计数）。
+fn reachable_roots(spec: &FenceSpec) -> String {
+    let mut all: Vec<String> = Vec::new();
+    push_root(&mut all, &spec.cwd);
+    for p in spec
+        .rw
+        .iter()
+        .chain(spec.ro.iter())
+        .chain(spec.ro_tree.iter())
+    {
+        push_root(&mut all, p);
+    }
+    if all.is_empty() {
+        return "（无）".to_string();
+    }
+    if all.len() <= 3 {
+        return all.join("、");
+    }
+    format!("{} 等 {} 处", all[..3].join("、"), all.len())
+}
+
+/// 目的：把一个非空的根收进摘要，重复的丢掉。
+fn push_root(all: &mut Vec<String>, p: &Path) {
+    if p.as_os_str().is_empty() {
+        return;
+    }
+    let s = p.display().to_string();
+    if !all.contains(&s) {
+        all.push(s);
+    }
+}
+
+/// 目的：把边界说明打到 stderr（守门进程的 stderr 由外层拼进工具回执）。
+fn note_fence_boundary(spec: &FenceSpec, enforced: bool, code: i32) {
+    if let Some(line) = fence_boundary_note(spec, enforced, code) {
+        eprintln!("{}", line);
+    }
+}
+
 /// 扫掉本程序建过的整族容器 profile：台账只记"我们知道写过什么"，而 profile 可能来自没有台账的路径
 /// （探针、夹具的台账被删、旧版本）。名字前缀是本程序独有的，所以按它扫。返回扫掉的个数。
 pub fn sweep_profiles() -> Result<usize, String> {
@@ -843,5 +895,47 @@ mod tests {
             "非 node 命令不该带 NODE_OPTIONS：{:?}",
             keys
         );
+    }
+
+    /// 围栏边界说明只在围栏内**失败**时给：成功不打扰、没强制生效不谈边界。
+    #[test]
+    fn fence_boundary_note_only_on_enforced_failure() {
+        let spec = FenceSpec {
+            agent: "a".to_string(),
+            rw: vec![PathBuf::from("demo").join("sandbox")],
+            ro: Vec::new(),
+            ro_tree: vec![PathBuf::from("mods").join("m0")],
+            private: PathBuf::from("demo").join("sandbox"),
+            cwd: PathBuf::from("mods").join("m0"),
+            net: false,
+        };
+        assert!(fence_boundary_note(&spec, true, 0).is_none(), "成功不打扰");
+        assert!(
+            fence_boundary_note(&spec, false, 1).is_none(),
+            "没强制生效就不谈边界"
+        );
+        let note = fence_boundary_note(&spec, true, 1).expect("围栏内失败要有边界说明");
+        assert!(note.contains("范围外的访问被围栏拒绝"), "{}", note);
+        assert!(note.contains("（网：关）"), "{}", note);
+        assert!(note.contains("mods"), "要报出可达范围：{}", note);
+    }
+
+    /// 可达范围摘要：重复的根只报一次；根多时折叠，失败说明不因根多而失控。
+    #[test]
+    fn reachable_roots_dedupes_and_collapses() {
+        let mut spec = FenceSpec {
+            agent: "a".to_string(),
+            rw: vec![PathBuf::from("r1")],
+            ro: Vec::new(),
+            ro_tree: vec![PathBuf::from("r1")],
+            private: PathBuf::from("r1"),
+            cwd: PathBuf::from("r1"),
+            net: false,
+        };
+        assert_eq!(reachable_roots(&spec), "r1", "重复的根只报一次");
+        spec.rw = (1..=6).map(|i| PathBuf::from(format!("r{}", i))).collect();
+        let many = reachable_roots(&spec);
+        assert!(many.starts_with("r1"), "{}", many);
+        assert!(many.ends_with("等 6 处"), "{}", many);
     }
 }

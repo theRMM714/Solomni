@@ -27,7 +27,12 @@ pub fn run_fenced(
     command: &str,
 ) -> i32 {
     match shell_command(command).current_dir(&spec.cwd).status() {
-        Ok(s) => s.code().unwrap_or(FENCE_FAILED),
+        Ok(s) => {
+            let code = s.code().unwrap_or(FENCE_FAILED);
+            // 本平台没有文件系统围栏可装：边界说明恒不触发，调用只为与三平台同一处收口。
+            super::note_fence_boundary(spec, false, code);
+            code
+        }
         Err(e) => {
             eprintln!("[围栏] 工具进程启动失败：{}", e);
             FENCE_FAILED
