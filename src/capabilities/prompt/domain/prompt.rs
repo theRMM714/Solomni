@@ -418,6 +418,16 @@ pub struct ToolTexts {
     // 这套机制只在 Windows 的容器围栏里用（unix 没有 prepare_fence 这一步）：unix 侧无使用点，如实放行死代码。
     #[allow(dead_code)]
     pub tool_fence_blocked: String,
+    /// 目的：这一问**没人能答、按发起方声明的默认项收场**（这一下不是用户答的）时的追加说明。
+    ///   变量：part, path, option——说清前因与"按哪个选项办的"。
+    // 这套机制只在 Windows 的容器围栏里用（unix 没有 prepare_fence 这一步）：unix 侧无使用点，如实放行死代码。
+    #[allow(dead_code)]
+    pub tool_no_answerer_defaulted: String,
+    /// 目的：这一问**没人能答、也没声明默认项**（这一趟不执行）时的追加说明。
+    ///   变量：part, path。
+    // 这套机制只在 Windows 的容器围栏里用（unix 没有 prepare_fence 这一步）：unix 侧无使用点，如实放行死代码。
+    #[allow(dead_code)]
+    pub tool_no_answerer_refused: String,
     /// 目的：用户裁决"本轮无围栏跑一次"时，这次执行如实标为无围栏的回执。
     ///   变量：part, path, why
     // 这套机制只在 Windows 的容器围栏里用（unix 没有 prepare_fence 这一步）：unix 侧无使用点，如实放行死代码。

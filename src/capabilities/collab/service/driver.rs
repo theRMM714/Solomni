@@ -311,7 +311,7 @@ fn run(
                        sink: &mut dyn FnMut(SessionEvent)|
      -> String {
         use crate::capabilities::session::api::{
-            qualify, AnswerSlot, Pending, OPT_TOOL_ALLOW, OPT_TOOL_DENY, OPT_TOOL_FULL,
+            qualify, AnswerSlot, Pending, SlotWake, OPT_TOOL_ALLOW, OPT_TOOL_DENY, OPT_TOOL_FULL,
         };
         let Some(door) = decisions.as_ref() else {
             return OPT_TOOL_ALLOW.to_string();
@@ -339,7 +339,10 @@ fn run(
             sink(e);
         }
         // 等用户按卡上的选项作答（**不设超时**）：回答由核心写进这一格；整队作废（停止）= 拒绝。
-        let answer = slot.wait().unwrap_or_else(|| OPT_TOOL_DENY.to_string());
+        let answer = match slot.wait() {
+            SlotWake::Answer(id) => id,
+            _ => OPT_TOOL_DENY.to_string(),
+        };
         sink(SessionEvent::Notice(format!(
             "[确认] 工具 {}：{}",
             name,

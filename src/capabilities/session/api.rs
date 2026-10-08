@@ -1,7 +1,7 @@
 //! 入站能力面：**其它能力与呈现层只准用这里**（不许碰 `domain` / `ports`）。
 
 pub use crate::capabilities::session::domain::decisions::{
-    issued_in, AnswerSlot, Answered, DecisionDesk, DecisionDoor, GateTicket,
+    issued_in, AnswerSlot, Answered, DecisionDesk, DecisionDoor, GateTicket, SlotWake,
 };
 pub use crate::capabilities::session::domain::events::{
     idle, interrupted_note, last_compaction, qualify, stopped_note, working, CheckView,

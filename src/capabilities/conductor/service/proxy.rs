@@ -676,18 +676,26 @@ impl ProxyHost for ProxyBridge {
         // 先记来源：这条不是用户原话这个事实要进目标会话的可回放记录（正文不伪装成用户发言）。
         handle.record_notice(&target, SessionEvent::Notice(d::relay_note(msg.kind)));
         if mode == "collab" {
-            // 协作子会话：它此刻挂着哪张卡就把话作为**回答**落到那张卡上（选项 id 由代理通道的
-            // 适配规则定，附言 = 转达的话）；没挂卡就把它推着接着走。
+            // 协作子会话：它此刻挂着哪张卡时，**只有当这次转达明确写了选项 id 才代答**（附言 = 转达的话）；
+            // 没写选项 id 就没有答案——不替用户猜（见 docs/session/session-model.md 的「请用户裁决」）。
             let card = handle.call({
                 let t = target.clone();
                 move |core| core.open_queue(&t)
             })?;
-            match card {
-                Some(q) => {
-                    let option = d::relay_option(&q.card.options, &msg.text);
+            match (card, msg.reply.as_deref()) {
+                (Some(q), Some(reply)) => {
+                    let option = d::relay_reply(&q.card.options, reply)?;
                     handle.spawn_detached_collab_answer(&target, &q.card.id, &option, &msg.text);
                 }
-                None => handle.spawn_detached_collab(&target),
+                // 挂着卡但这次转达不是代答：只记来源、不替用户作答（那一问按它自己声明的收场走）。
+                (Some(q), None) => handle.record_notice(
+                    &target,
+                    SessionEvent::Notice(format!(
+                        "[代理] 这条子会话正等你裁决（卡 {}）：这次转达没有带选项 id，不作代答。",
+                        q.card.id
+                    )),
+                ),
+                (None, _) => handle.spawn_detached_collab(&target),
             }
             return Ok(());
         }

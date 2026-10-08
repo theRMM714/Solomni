@@ -120,6 +120,8 @@ presentation/{cli,web} ──▶ capabilities（含协调业务 conductor）─�
   （与核心各关卡共用同一条队，见 [docs/session/session-model.md](docs/session/session-model.md) 的「请用户裁决」）并阻塞；
   用户经**同一条回答命令** `answer_card`（`POST /api/actions/{id}`，带卡片 id + 选项 id）回答 **allow / deny / full**
   （与「停止」同一条直路，生成期间立刻生效）——`full` 只对**本轮**生效（到 AI 停下输出为止，不落盘）；停止把整队解成拒绝。
+  **没人答时**按发起方在那一问上声明的**选项 id** 收场（`Ask.on_unanswered`；不写 = 这一趟不执行），停止不套用它；
+  发起方只看"照哪个选项办"（`AskOutcome::decided`），"为什么没有答案"由端口如实分开记进会话。
   Web 与 CLI 都按后端给的**卡片四格**渲染与作答（刷新后由 `/api/state` 的 `pending` 快照重建那张卡）；
   工具进程走**守门进程**（本程序 `--fence-run`），环境不继承父进程（**密钥与凭据不进工具进程**），`HOME` / `TEMP` 等落进该 agent 的沙箱。
   **一个 agent 一个容器 profile**，守门进程是唯一建它的地方并记进 `.home/fence-grants.json` 台账；每次写 ACL **先把记录落盘**
