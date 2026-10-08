@@ -210,6 +210,8 @@ impl FencePrep {
 
     /// 目的：记一个落点授不上的事实：**必要**落点进 `blocked`（第一次为准——那就是要补的那一环），
     ///   可选落点与后续必要落点进 `notes`。
+    // 这套机制只在 Windows 的容器围栏里用（unix 没有 prepare_fence 这一步）：unix 侧无使用点，如实放行死代码。
+    #[allow(dead_code)]
     pub fn fail(&mut self, part: FencePart, path: std::path::PathBuf, why: String) {
         let fact = FenceBlocked { part, path, why };
         if fact.part.necessary() && self.blocked.is_none() {
