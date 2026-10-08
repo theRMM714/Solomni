@@ -76,7 +76,7 @@ node start.js -webUI     # 直接进本地网页（127.0.0.1:3081）
 - 首次运行把工具链收敛在**项目内**（`platform/`、`.tools/`）：缺 Rust 会先征求同意再装，不动系统。
 - **没有配供应商也能跑**：用内置假模型把流程演示一遍，并如实告知。
 - 常用参数：`--root <目录>`（换产品根）、`--web-port <端口>`、`--release`。
-- 终端提示符下的命令：`single <agent>…` / `collab <本次需求>` / `proxy` / `webui`。
+- 终端提示符下的命令：`single [agent名…]` / `collab [agent名…|?]` / `proxy（决定权整块交给核心）` / `module [模块id.工具名 [json]]（不经 AI 直接用模块工具）` / `webui`。
 
 ### 配供应商与模型
 

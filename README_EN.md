@@ -95,7 +95,7 @@ node start.js -webUI     # go straight to the local web UI (127.0.0.1:3081)
   for consent before installing, and never touches the system.
 - **You can run it without a provider**: it walks the flow with the built-in fake model and says so plainly.
 - Common flags: `--root <dir>` (product root), `--web-port <port>`, `--release`.
-- At the terminal prompt: `single <agent>…` / `collab <request>` / `proxy` / `webui`.
+- Commands at the prompt: `single [agent…]` / `collab [agent…|?]` / `proxy` (hand the whole decision to the core) / `module [module-id.tool [json]]` (run a module tool directly, without AI) / `webui`.
 
 ### Add a provider and a model
 
