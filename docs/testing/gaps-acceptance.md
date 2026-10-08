@@ -31,6 +31,8 @@ tests/
  gaps.yaml
  gaps.yaml # 全局长期目标（不影响 TEST-REPORT-ACCEPTED）
  ci-publish.mjs # CI 报告发布脚本（把三平台报告写入 ci-report 分支）
+ ci-e2e.mjs     # CI 的 e2e job 入口（构建 + 跑 L4 编排，写 e2e-report.json）
+ ci-merge.mjs   # 发布前把 quality 与 e2e 两份报告合并成该平台唯一的一份
 ```
 
 单元层与 `capabilities/` **同构**：T1 用例按业务分文件——`taskchain.rs` / `prompt.rs` / `registry.rs` /
@@ -90,7 +92,7 @@ tests/
 7. 失败时修代码或测试；环境不允许时记录 `env-skip`；未实现时建立 `gap`；不要把任何一种写成通过。
 8. 运行完整入口并阅读 `target/test-report.json`，确认报告与日志能解释结果。
 9. 测试完成后检查 `git status` 和 `.gitignore`，确保没有测试产物被跟踪。
-10. 需要 CI 的场景（见本文「验收清单」）：推上去后按 [execution-ci.md](execution-ci.md) 的 CI 读法拉 `ci-report`，**先比对 `sha`**，再按平台核对 steps / envSkips。
+10. 需要 CI 的场景（见本文「验收清单」）：手动派发 CI（`workflow_dispatch`）后按 [execution-ci.md](execution-ci.md) 的读法拉 `ci-report`，**先比对 `sha`**，再按平台核对 steps / envSkips。
 11. 只有当目标行为、质量门禁、当前平台缺口与（需要时）CI 三平台结论都符合要求，才可宣称本次测试验收完成。
 
 ## 十四、验收清单
@@ -112,7 +114,7 @@ tests/
 未能回答的问题不是"以后再说"，而是测试设计或观察面仍不完整，应进入缺口账。
 
 **需要 CI 才算验收的场景**（其余按 [execution-ci.md](execution-ci.md) 的 CI 表）：改了平台专属代码（`capabilities/tools/detail/confine/` 或 `tests/<平台>/`）、
-改了平台围栏机制、改了 HTTPS/TLS 链路、改了只在其它平台编译的 `#[cfg]` 分支——**这些本机跑不出结论，必须推 CI 并比对 `sha`**。
+改了平台围栏机制、改了 HTTPS/TLS 链路、改了只在其它平台编译的 `#[cfg]` 分支——**这些本机跑不出结论，必须手动派发 CI 并比对 `sha`**。
 
-反过来同样要守：**本机能跑出结论的改动不要为此推 CI**。纯逻辑、文档、当前平台的用例，以及**质量门禁与卫生工具自身的改动**
-（本机跑的就是同一份 `node run-tests.js` / `run-hygiene.js`，本地入口即判据）都不构成推送理由；攒批，等下一次真需要他平台或真机结论时一起推。
+反过来同样要守：**本机能跑出结论的改动不要为此派发 CI**。纯逻辑、文档、当前平台的用例，以及**质量门禁与卫生工具自身的改动**
+（本机跑的就是同一份 `node run-tests.js` / `run-hygiene.js`，本地入口即判据）都不构成派发理由；攒批，等下一次真需要他平台或真机结论时一起派发。

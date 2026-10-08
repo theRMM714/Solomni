@@ -19,6 +19,9 @@ const BIN = path.join(ROOT, "target", PROFILE, EXE);
 const PLATFORM_TARGETS = ["cross-platform", "windows", "linux", "macos"];
 // 真机围栏测试（会改本机状态：建 AppContainer profile、写目录 ACL）默认不跑，必须显式开启。
 const FENCE_LIVE = process.argv.includes("--fence-live") || process.env.SOLOMNI_FENCE_LIVE === "1";
+// CI 把每个平台拆成两个 job（契约见 docs/testing/execution-ci.md）：质量 job 用 --skip-e2e 跳过 L4，
+// L4 由独立的 e2e job（tests/ci-e2e.mjs）跑，发布时两份报告合并。本地直接跑不带这个开关。
+const SKIP_E2E = process.argv.includes("--skip-e2e");
 const REPORT = path.join(ROOT, "target", "test-report.json");
 // 缺口账：唯一真相是这些文件。平台账决定 TEST-REPORT-ACCEPTED；全局账是长期目标（每条都进报告）。
 const GAP_FILES = [
@@ -875,19 +878,22 @@ function pushStep(obj) {
   });
 
   // L4：端到端（有编排才跑；没有就是一条缺口，不装作跑过）
-  const e2e = path.join(ROOT, "tests", "cross-platform", "e2e", "orchestrator.js");
-  if (fs.existsSync(e2e)) {
-    announce("L4 端到端");
-    const r = sh(process.execPath, [e2e]);
-    announceDone(r.code === 0 ? "完成" : "失败", "");
-    pushStep({
-      step: "L4 端到端",
-      status: r.code === 0 && r.out.includes("E2E-OK") ? "pass" : "fail",
-      detail: r.out.trim().split(/\r?\n/).slice(-2).join(" / "),
-      raw: r.code === 0 ? null : r.out.slice(-800),
-    });
-  } else {
-    pushStep({ step: "L4 端到端", status: "gap", detail: "cross-platform.e2e.not-in-runner（编排尚未迁入）" });
+  // 质量 job 用 --skip-e2e 跳过它（报告里也不留空占位）：L4 由独立 e2e job 跑，发布时合并。
+  if (!SKIP_E2E) {
+    const e2e = path.join(ROOT, "tests", "cross-platform", "e2e", "orchestrator.js");
+    if (fs.existsSync(e2e)) {
+      announce("L4 端到端");
+      const r = sh(process.execPath, [e2e]);
+      announceDone(r.code === 0 ? "完成" : "失败", "");
+      pushStep({
+        step: "L4 端到端",
+        status: r.code === 0 && r.out.includes("E2E-OK") ? "pass" : "fail",
+        detail: r.out.trim().split(/\r?\n/).slice(-2).join(" / "),
+        raw: r.code === 0 ? null : r.out.slice(-800),
+      });
+    } else {
+      pushStep({ step: "L4 端到端", status: "gap", detail: "cross-platform.e2e.not-in-runner（编排尚未迁入）" });
+    }
   }
 
   const gaps = gapLedgers();
@@ -921,6 +927,7 @@ function pushStep(obj) {
   for (const s of steps) {
     console.log("  " + s.status.padEnd(13) + " " + s.step.padEnd(24) + " " + (s.detail || "") + (s.ms ? "  [" + (s.ms / 1000).toFixed(1) + "s]" : ""));
   }
+  if (SKIP_E2E) console.log("  [stage] 已跳过 L4 端到端：由独立 e2e job 承担，两份报告在发布时合并（见 docs/testing/execution-ci.md）");
   if (doctor && doctor.fence) console.log("  [doctor] 围栏 fs=" + doctor.fence.fs + " net=" + doctor.fence.net + " tree=" + doctor.fence.tree + "（" + doctor.fence.note + "）");
   for (const s of envSkips) console.log("  [env-skip] " + s.step + "：" + s.detail);
   for (const s of skips) console.log("  [env-skip] " + s);
