@@ -101,3 +101,16 @@ node run-hygiene.js --strict   # 有发现即非零退出（给想拿它当自�
 - **内容卫生**（只报）：悬挂的缺口 id（已删 id 从 git 历史取）、docs 与根文档里指向不存在的 `src/**.rs`；
   取不到 git 历史时如实写「没跑」，不当作通过。
 - 它**不进 T0、不进 `TEST-REPORT-*`**：混进门禁只有两种结局——门禁天天红，或者开始放行，两种都不诚实。
+
+## 产物落点（临时诊断与运行日志）
+
+非源码产物只许落在下面三处，**不许平铺在 `target/` 根**——它是最容易攒出来的一类垃圾（真机上 `target/` 根曾被 90 多个
+`gate*.log` / `e2e-*.log` / `probe-*.txt` 铺满，编辑器与搜索都被拖慢）：
+
+- `target/logs/` —— 运行日志、门禁与端到端的原始输出、一次性诊断的 `.txt`；
+- `target/scratch/` —— 一次性脚本与探针（`.mjs` / `.js` / `.ps1` / `.sh`）；
+- `target/ci/` —— 从 CI 拉回来的报告快照（`ci-*.json`）。
+
+门禁自己写的每步日志仍在 `target/test-logs/`（按步骤名覆盖、不累积），测试隔离根仍在 `target/test-scratch/`；
+`target/` 根只留工具自己读的那几份（`test-report.json`、`.rustc_info.json`、`CACHEDIR.TAG`、`.dep-graph.json`）。
+平铺即视为没收尾。

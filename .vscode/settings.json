@@ -1,27 +1,8 @@
 {
-  "//目的": "把项目自带/生成的巨型目录从编辑器索引里摘出去：platform(本地工具链与依赖源码) / target(构建产物) / .tools(mingw) 共约 10.8 万个文件，VS Code 默认会遍历它们（打开慢、搜索慢、watcher 空转）。",
-  "files.exclude": {
-    "target/": true,
-    "platform/": true,
-    ".tools/": true,
-    "tests/cross-platform/e2e/root/session/": true,
-    "tests/cross-platform/e2e/root/logs/": true
-  },
-  "search.exclude": {
-    "target/": true,
-    "platform/": true,
-    ".tools/": true,
-    "tests/cross-platform/e2e/root/": true
-  },
+  "//说明": "只保留 watcher 排除（防止编辑器去爬 10 万+ 的工具链/构建文件），不再隐藏任何文件：资源管理器与搜索照旧能看到 target/platform/.tools 里的一切。",
   "files.watcherExclude": {
     "target/**": true,
     "platform/**": true,
-    ".tools/**": true,
-    "tests/cross-platform/e2e/root/**": true
-  },
-  "rust-analyzer.files.excludeDirs": [
-    "target",
-    "platform",
-    ".tools"
-  ]
+    ".tools/**": true
+  }
 }
