@@ -158,13 +158,16 @@ http.createServer((req, res) => {
       } else if (n === 1) {
         content = JSON.stringify({ type: 'tool', module: 'harvest', name: 'scan', args: { root: s, out: s + '/corpus.jsonl' } });
       } else if (n === 2) {
-        content = JSON.stringify({ type: 'tool', module: 'indexer', name: 'build', args: { corpus: s + '/corpus.jsonl', out: s + '/index.bin' } });
+        // render 是 JS 写的（node 工具进程）：容器围栏下它要靠解释器基线的 realpath 开关才起得来。
+        content = JSON.stringify({ type: 'tool', module: 'render', name: 'report', args: { corpus: s + '/corpus.jsonl', out: s + '/report.html', title: '资料报告' } });
       } else if (n === 3) {
-        content = JSON.stringify({ type: 'tool', module: 'indexer', name: 'query', args: { index: s + '/index.bin', q: '检索' } });
+        content = JSON.stringify({ type: 'tool', module: 'indexer', name: 'build', args: { corpus: s + '/corpus.jsonl', out: s + '/index.bin' } });
       } else if (n === 4) {
-        content = env('work_commit', { paths: ['corpus.jsonl', 'index.bin'], message: '语料与索引' });
+        content = JSON.stringify({ type: 'tool', module: 'indexer', name: 'query', args: { index: s + '/index.bin', q: '检索' } });
       } else if (n === 5) {
-        content = env('submit_report', { summary: '语料与索引都做好了', changes: 'corpus.jsonl 与 index.bin', open: '' });
+        content = env('work_commit', { paths: ['corpus.jsonl', 'report.html', 'index.bin'], message: '语料、报告与索引' });
+      } else if (n === 6) {
+        content = env('submit_report', { summary: '语料、报告与索引都做好了', changes: 'corpus.jsonl、report.html 与 index.bin', open: '' });
       } else {
         content = '回报已经交了。';
       }
@@ -178,11 +181,11 @@ http.createServer((req, res) => {
       if (nTools === 0) {
         calls = call('catalog_agents', { scope: 'all' });
       } else if (nTools === 1) {
-        // 建会话 = 建 + 写开头 + 开工：opening 就是它的第一句（不再另发一条 task）。
+        // 建会话 = 建 + 写开头 + 开工：task 就是它的第一句（不再另发一条消息）。
         calls = call('create_session', {
           mode: 'single',
           agents: [{ ref: '代甲' }],
-          opening: '把这件事做完',
+          task: '把这件事做完',
           request_id: 'agency-1',
         });
       } else {
@@ -195,6 +198,28 @@ http.createServer((req, res) => {
       content = nAbs <= 1
         ? JSON.stringify({ type: 'tool', module: 'toolbox', name: 'read_txt', args: { path: (sandboxRoot || '') + '/g.txt' } })
         : JSON.stringify({ type: 'say', text: '读过了。' });
+    } else if (sys.includes('【工作环境】') && allUser.includes('工具确认')) {
+      // 工具级确认 E2E：按任务里的标记给 write 调用（会话的 ask 表里就是 write）。
+      // 用**手写信封**（与单 agent 内置工具同一条通道）：这个 agent 的通道形态是 envelope，原生槽位它不认。
+      // "本轮不再问"要**跨轮**验证：一次生成里第一轮写 ask-full-1，拿到工具结果后的第二轮再写 ask-full-2——
+      // 答过 full 之后第二轮不该再弹确认。
+      const s = sandboxRoot || 'sandbox-root';
+      const w = (file) => JSON.stringify({ type: 'tool', name: 'write', args: { path: s + '/' + file, content: 'x' } });
+      // 本次生成里已跑过几次工具：从**最后一条任务消息**往后数——手写信封通道里工具结果是 user 消息，
+      // 不能数整段对话（上一次生成的结果会把这一次的轮次算错）。
+      let boundary = -1;
+      for (let i = 0; i < msgs.length; i++) {
+        if (msgs[i].role === 'user' && !String(msgs[i].content || '').includes('[工具结果]')) boundary = i;
+      }
+      const ran = msgs.slice(boundary + 1).filter((m) => m.role === 'user' && String(m.content || '').includes('[工具结果]')).length;
+      // 只看**当前任务**（最后一条非工具结果的 user 消息）：整段对话里有上一条任务，拿它判会串。
+      const task = String((msgs[boundary] || {}).content || '');
+      const done = JSON.stringify({ type: 'say', text: '收到' });
+      if (task.includes('拒绝')) content = ran === 0 ? w('ask-deny.txt') : done;
+      else if (task.includes('放行')) content = ran === 0 ? w('ask-allow.txt') : done;
+      else if (ran === 0) content = w('ask-full-1.txt');
+      else if (ran === 1) content = w('ask-full-2.txt');
+      else content = done;
     } else if (sys.includes('【工作环境】') && !sawToolResult) {
       if (/read_txt/.test(sys)) {
         // 该 agent 的某个模块声明了外部工具（夹具 toolbox）：用**相对路径**调用，专门验证 cwd = 它自己的模块目录。

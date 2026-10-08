@@ -972,6 +972,7 @@ pub(crate) fn edit_session_writes_meta_appends_config_record_and_rebuilds() {
                 name: "a".to_string(),
                 modules: vec!["b".to_string()],
                 model: "m".to_string(),
+                permissions: None,
             }],
             tier: "vm".to_string(),
             base: Some(base_dir.to_string_lossy().into_owned()),

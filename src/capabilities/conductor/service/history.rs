@@ -98,6 +98,8 @@ impl Conductor {
         }
         for sid in &subtree {
             self.sessions.remove(sid);
+            // 会话没了，它的裁决队随会话一起消失（等待方与转录都不复存在）。
+            self.forget_desk(sid);
         }
         // 后序删除：先子后父。父会话目录被删时，落在它内部的子会话目录一起消失。
         let mut target_deleted = false;

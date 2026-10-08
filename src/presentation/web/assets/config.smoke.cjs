@@ -126,8 +126,10 @@ const sandbox = {
     if (/\/files$/.test(url)) return jsonRes({ work: [], agents: [], roots: { work: "/session/w/work", agents: [] } });
     if (/\/api\/sessions\/w\/config$/.test(url)) return jsonRes({ config: CFG });
     if (/\/api\/sessions\/raw\/config$/.test(url)) return jsonRes({ config: RAW });
-    if (/\/api\/sessions\/raw\/edit$/.test(url)) return jsonRes({ ok: true });
-    if (/\/api\/sessions\/w\/edit$/.test(url)) {
+    if (url === "/api/actions/edit_session") {
+      let sid = "";
+      try { sid = String((JSON.parse(opts.body || "{}") || {}).session_id || ""); } catch (e) { sid = ""; }
+      if (sid === "raw") return jsonRes({ ok: true });
       // 后端在生成中拒绝编辑：原文必须原样显示出来（前端不许兜底改写）
       return jsonRes({ error: "该会话正在生成中：先「停止」或等它结束，再改配置" }, false, 400);
     }
@@ -230,10 +232,11 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   check("config: 保存失败显示后端 error 原文",
     msg && String(msg.textContent).indexOf("保存失败：该会话正在生成中：先「停止」或等它结束，再改配置") >= 0, msg && msg.textContent);
   check("config: 失败后保存按钮可再点", save.disabled === false);
-  const editCall = calls.find((c) => /\/edit$/.test(c.url));
+  const editCall = calls.find((c) => /\/api\/actions\/edit_session$/.test(c.url));
   const sent = JSON.parse(editCall.body);
-  check("config: 提交体形状 {agents,tier,base,pins,net}",
-    JSON.stringify(Object.keys(sent).sort()) === JSON.stringify(["agents", "base", "net", "pins", "tier"]), editCall.body);
+  check("config: 提交体形状 {session_id,agents,tier,base,pins,net}",
+    JSON.stringify(Object.keys(sent).sort()) === JSON.stringify(["agents", "base", "net", "pins", "session_id", "tier"])
+      && sent.session_id === "w", editCall.body);
   check("config: 提交体内容（名单/模块/模型/档位/base/pins/网络）",
     sent.tier === "vm" && sent.base === "base-linux" && sent.net === true
     && sent.agents[0].name === "调研员" && JSON.stringify(sent.agents[0].modules) === JSON.stringify(["research"])
@@ -245,7 +248,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   pinSelects[0]._h.change[0]();
   findButton(modal, "保存").onclick();
   await sleep(60);
-  const sent2 = JSON.parse(calls.filter((c) => /\/edit$/.test(c.url)).pop().body);
+  const sent2 = JSON.parse(calls.filter((c) => /\/api\/actions\/edit_session$/.test(c.url)).pop().body);
   check("config: 取消定版后不从 pins 提交空串", !("python" in sent2.pins) && sent2.pins.ruby === "3.2", JSON.stringify(sent2.pins));
 
   /* ---- 重新扫描 = 重新 GET config 并重绘 ---- */
@@ -267,7 +270,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     baseField(reg.get("#modal-root")).className);
   findButton(reg.get("#modal-root"), "保存").onclick();
   await sleep(60);
-  const sent3 = JSON.parse(calls.filter((c) => /\/edit$/.test(c.url)).pop().body);
+  const sent3 = JSON.parse(calls.filter((c) => /\/api\/actions\/edit_session$/.test(c.url)).pop().body);
   check("config: 本机档提交 tier=host 且 base=null", sent3.tier === "host" && sent3.base === null, JSON.stringify(sent3));
 
   /* ---- 未开过的会话（started=false）：名字可改、无冻结、跨 agent 重复模块实时提示、保存成功 ---- */
@@ -300,7 +303,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await sleep(80);
   const msg2 = findByClass(reg.get("#modal-root"), "modal-msg")[0];
   check("config(raw): 保存成功后如实提示", msg2 && String(msg2.textContent).indexOf("已保存") >= 0, msg2 && msg2.textContent);
-  const sentRaw = JSON.parse(calls.filter((c) => /\/raw\/edit$/.test(c.url)).pop().body);
+  const sentRaw = JSON.parse(calls.filter((c) => /\/api\/actions\/edit_session$/.test(c.url)).pop().body);
   check("config(raw): 名字改动随提交送出", sentRaw.agents.map((a) => a.name).join(",") === "x,y", JSON.stringify(sentRaw.agents));
   check("config(raw): 无模型以空串送出", sentRaw.agents[0].model === "" && sentRaw.agents[1].model === "m2", JSON.stringify(sentRaw.agents));
 

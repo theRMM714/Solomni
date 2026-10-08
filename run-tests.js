@@ -65,6 +65,8 @@ function sh(cmd, args) {
   const slug = (s) => String(s).replace(/[^\w.-]+/g, "_");
   const logFile = path.join(logDir, slug(path.basename(cmd)) + "-" + args.map(slug).join("_") + ".log");
   const fd = fs.openSync(logFile, "w");
+  // 跑之前先报出这一步的**实时日志落点**：门禁卡住时直接读这个文件就知道停在哪（子进程边走边写）。
+  process.stdout.write("    实时日志：" + path.relative(ROOT, logFile) + "\n");
   const r = spawnSync(cmd, args, { cwd: ROOT, env: buildEnv(), stdio: ["ignore", fd, fd] });
   fs.closeSync(fd);
   const out = fs.readFileSync(logFile, "utf8");
@@ -293,6 +295,22 @@ function structuralAudit() {
     }
   };
   checkCodeDocRefs(path.join(ROOT, "src"));
+  // 注释契约（ARCHITECTURE.md 十）：判定与棘轮比对只有一处——run-hygiene.js 的 scanCommentContract
+  // 与 compareContract。棘轮**只减不增**：新文件零容忍（快照里没有 = 从 0 起算），老文件同类变多也是新增；
+  // 变少 = 应销账，同样硬失败（收紧只能往下，见 --tighten）。
+  const { scanCommentContract, compareContract, ratchetSelfTest } = require("./run-hygiene.js");
+  const COMMENT_BASELINE = path.join(ROOT, "tests", "comment-baseline.json");
+  const contractNow = scanCommentContract().byFileRule;
+  if (!fs.existsSync(COMMENT_BASELINE)) {
+    problems.push("缺注释契约快照：tests/comment-baseline.json（建它：node run-hygiene.js --tighten）");
+  } else {
+    const baselineRaw = JSON.parse(fs.readFileSync(COMMENT_BASELINE, "utf8"));
+    delete baselineRaw._comment;
+    const { added, stale } = compareContract(contractNow, baselineRaw);
+    for (const a of added) problems.push("注释契约新增违规（棘轮只减不增）：" + a);
+    for (const s of stale) problems.push("注释契约快照应销账（现在变少了）：" + s + "（收紧：node run-hygiene.js --tighten）");
+  }
+  for (const b of ratchetSelfTest()) problems.push("棘轮自测失败：" + b);
   // 文档分层（AGENTS.md「文档分层与同步」）：门户引用 docs/ 下的细则，细则引用彼此——
   // 两边都要真实存在。只查引用不查正文，避免把文档写法变成门禁。
   // **相对解析**：链接按所在文件的目录解析（门户在根、细则在 docs/<领域>/），所以 docs/ 内部写错的同级引用也会被抓到。

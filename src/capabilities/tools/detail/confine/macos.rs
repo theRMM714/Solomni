@@ -238,6 +238,16 @@ fn profile_text(spec: &FenceSpec, command: &str) -> String {
             ro_paths.push(root.to_string_lossy().replace('\\', "/"));
         }
     }
+    // 只读子树（模块目录默认只读）：seatbelt 的 subpath 天然递归，与 ro 同走只读。
+    for root in &spec.ro_tree {
+        if !root.as_os_str().is_empty() {
+            ro_paths.push(root.to_string_lossy().replace('\\', "/"));
+        }
+    }
+    // 工作目录（模块根）：工具进程要能在里面起（读），但**不因此获得写**。
+    if !spec.cwd.as_os_str().is_empty() {
+        ro_paths.push(spec.cwd.to_string_lossy().replace('\\', "/"));
+    }
     ro_paths.sort();
     ro_paths.dedup();
     for p in &ro_paths {

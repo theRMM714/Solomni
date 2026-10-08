@@ -75,6 +75,10 @@ pub struct AppSettings {
     /// 到顶就放它过去：主会话如实记一行"未回应"，整轮继续（不阻塞）。
     #[serde(default = "default_discuss_remind_cap")]
     pub discuss_remind_cap: u32,
+    /// **会话权限的全局默认**（白/黑名单、模块写授权、决定粒度）：可被会话里逐 agent 的覆盖替换。
+    /// 语义见 capabilities/permission/domain/permission.rs：空白名单 = 整棵工作区，黑名单只做减法。
+    #[serde(default)]
+    pub permissions: crate::capabilities::permission::api::Permissions,
 }
 
 fn default_discuss_remind_cap() -> u32 {
@@ -105,6 +109,7 @@ impl Default for AppSettings {
             llm_timeout_secs: crate::kernel::api::DEFAULT_LLM_TIMEOUT_SECS,
             compact_at_percent: 70,
             discuss_remind_cap: 3,
+            permissions: Default::default(),
         }
     }
 }

@@ -2,6 +2,7 @@
 // 覆盖：agent 登记处 → 推荐复用 → 单 agent（1 个 agent 带多模块）+ 内置 write 落私沙箱
 //       → 协作（非代拟）跑完交付 → 代拟（复用+组装）确认后名单写回 meta 并建出沙箱
 //       → 外部工具 cwd / 绝对路径 / 自由格式补丁 / 正文+信封 / 原生多调用（协议形状由假供应商核对）
+//       → 工具级确认（与本通道同形）：生成中停下等 allow / deny / full；快照带那张卡（刷新能重建）；full 本轮不再问
 //       → 代理模式：核心自己挑人、建子工作、转达，来源如实落档，停止即全停。
 const BASE = process.env.E2E_BASE || 'http://127.0.0.1:3099';
 // 假供应商端口由编排器指定：本机可能残留上一次的进程，固定端口会让驱动打到旧的那个。
@@ -10,6 +11,32 @@ const fs = require('fs');
 const path = require('path');
 // 夹具根：本目录下的 root/（隔离根：prompts/、.home、modules 都在里面）。
 const ROOT = path.join(__dirname, 'root');
+
+/* 动作只有一个入口 /api/actions/{id}：这里把"某会话的动作"包一层，session_id 自动带上。 */
+const act = (sid, id, body) => api('POST', '/api/actions/' + id, Object.assign({ session_id: sid }, body || {}));
+/* 登记处动作不跟会话走：直接打动作端点（不带 session_id）。 */
+const reg = (id, body) => api('POST', '/api/actions/' + id, body || {});
+
+/** 取状态并**顺手答掉挡路的卡**：任何等待循环都必须过它——没人答卡就是"不点不继续"，会永远挂着。 */
+async function stateOk() {
+  const s = await api('GET', '/api/state');
+  const holder = (((s.json && s.json.sessions) || []).find((x) => x.pending && x.pending.gate === 'tool_ask'));
+  if (holder) {
+    console.log('    [诊断] 顺手答 tool_ask：sid=' + holder.sid + ' id=' + holder.pending.id);
+    await act(holder.sid, 'answer_card', { card: holder.pending.id, option: 'fence_unfenced_once', note: '' });
+  }
+  return s;
+}
+
+/** 并发答卡泵：动作在飞的时候（`send_message` 要等整次生成结束才返回）也要能答卡——
+ *  否则生成卡在"等用户答卡"上、驱动卡在动作上，双方互等。CI 上这类卡不出现，泵只是空转。
+ *  用 `unref` 让定时器不吊住进程。 */
+function startCardPump() {
+  const t = setInterval(() => { stateOk().catch(() => {}); }, 300);
+  if (t.unref) t.unref();
+  return t;
+}
+startCardPump();
 
 async function api(method, p, body) {
   const r = await fetch(BASE + p, {
@@ -37,6 +64,91 @@ async function mockSeen() {
     return null;
   }
 }
+/** 等某会话的**裁决卡**出现（卡片 id 从快照取）：回答按卡认，不按文本猜。 */
+async function waitCard(sid, ms) {
+  const deadline = Date.now() + (ms || 15000);
+  for (;;) {
+    const s = await stateOk();
+    const v = ((s.json && s.json.sessions) || []).find((x) => x.sid === sid);
+    if (v && v.pending && v.pending.type === 'decision_card') return v.pending;
+    if (Date.now() > deadline) return null;
+    await new Promise((r) => setTimeout(r, 50));
+  }
+}
+/** 等这条会话**这一段收尾**：不在跑，且流水连着几拍没有再长。
+ *  回答是**直路**（先落定、处置脱离调用方跑），所以"回答返回"不等于"这一段跑完"——
+ *  客户端要接着跟到它收尾，才谈得上断言后续（讨论 / 关卡 / 转录）。
+ *  判据用两个：见过"在跑"（脱离调用方那一段真的起来了）或流水长过（那一答本身也落盘）；
+ *  之后要连着 8 拍（约 0.8s）没新事实才算收尾——快慢通道都不误判。
+ *  代拟名单那一关的处置在核心线程上同步走完（从没"在跑"）：给 1.5s 的宽限再收，别把它当没收尾。 */
+async function settleSegment(sid, ms) {
+  const started = Date.now();
+  const deadline = started + (ms || 60000);
+  let last = -1;
+  let quiet = 0;
+  let sawRunning = false;
+  let seenGate = '';
+  for (;;) {
+    const s = await stateOk();
+    const v = ((s.json && s.json.sessions) || []).find((x) => x.sid === sid);
+    const h = await api('GET', '/api/history/' + encodeURIComponent(sid));
+    const len = ((h.json && h.json.events) || []).length;
+    if (v && v.running) sawRunning = true;
+    const anyPend = (((s.json && s.json.sessions) || []).find((x) => x.pending) || {});
+    if (anyPend.pending && anyPend.pending.gate !== seenGate) {
+      seenGate = anyPend.pending.gate;
+      console.log('    [诊断] 有待答卡：sid=' + anyPend.sid + ' gate=' + seenGate + ' id=' + anyPend.pending.id
+        + ' 选项=' + JSON.stringify((anyPend.pending.options || []).map((o) => o.id)));
+    }
+    const holder = (((s.json && s.json.sessions) || []).find((x) => x.pending && x.pending.gate === 'tool_ask'));
+    if (holder) {
+      // 围栏必要落点授不上的卡会挂在**跑工具的那一席**上（可能是子会话），不是主会话：扫全部会话才答得到。
+      // 没人答它就永远收不了尾；夹具选"本轮无围栏跑一次"（CI 上这张卡不出现），回执会如实标为无围栏。
+      await act(holder.sid, 'answer_card', { card: holder.pending.id, option: 'fence_unfenced_once', note: '' });
+    }
+    if (v && !v.running && len === last) quiet++;
+    else quiet = 0;
+    last = len;
+    if (!(v && v.running) && quiet >= 8 && (sawRunning || Date.now() - started > 1500)) return true;
+    if (Date.now() > deadline) return false;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+}
+
+/** 按**选项 id** 回答当前那张卡（+ 可选附言）：回答只有这一条命令。
+ *  回答之后**跟到这一段收尾**（回答是直路，见 settleSegment）——下面的断言都建立在"这一段已经跑完"上。 */
+async function answer(sid, option, note) {
+  const card = await waitCard(sid);
+  assert(!!card, '有待答的裁决卡：' + sid, JSON.stringify(card));
+  if (!card) return { status: 0, text: 'no card' };
+  const r = await act(sid, 'answer_card', { card: card.id, option: option, note: note || '' });
+  assert(await settleSegment(sid, 60000), '回答之后这一段要收尾：' + sid);
+  return r;
+}
+
+/** 等某会话**某一关**的卡出现（pending 就是那张卡）：用于"生成中确认"这类必须**并发**驱动的场景。 */
+async function waitPending(sid, gate, ms) {
+  const deadline = Date.now() + ms;
+  while (Date.now() < deadline) {
+    const s = await stateOk();
+    const v = ((s.json && s.json.sessions) || []).find((x) => x.sid === sid);
+    if (v && v.pending && v.pending.gate === gate) return v.pending;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  return null;
+}
+
+/** 限时等一个请求收尾：超时记失败并返回（不让整个驱动被一次卡死拖挂）。 */
+async function settle(p, ms, label) {
+  let done = false;
+  const r = await Promise.race([
+    p.then((x) => { done = true; return x; }),
+    new Promise((res) => setTimeout(() => res(null), ms)),
+  ]);
+  if (!done) assert(false, label + '：生成未在限时内收尾', '');
+  return r;
+}
+
 /** 该工作的转录行（从落盘流水取，已应用回档截断）。 */
 async function lines(sid) {
   const r = await api('GET', '/api/history/' + encodeURIComponent(sid));
@@ -49,19 +161,19 @@ async function lines(sid) {
 
 (async () => {
   for (let i = 0; i < 60; i++) {
-    try { const s = await api('GET', '/api/state'); if (s.status === 200) break; } catch {}
+    try { const s = await stateOk(); if (s.status === 200) break; } catch {}
     await new Promise((r) => setTimeout(r, 250));
   }
-  const st = await api('GET', '/api/state');
+  const st = await stateOk();
   assert(st.status === 200 && Array.isArray(st.json.agents), 'GET /api/state 带 agents', st.text.slice(0, 120));
 
   // 登记处：一个供应商 + 两个模型
-  assert((await api('POST', '/api/providers', { id: 'mock', base_url: MOCK_BASE + '/v1', api_key: 'k' })).status === 200, '登记供应商');
-  assert((await api('POST', '/api/models', { id: 'm1', name: 'M1', api_model: 'm1', provider: 'mock', note: '' })).status === 200, '登记模型 m1');
-  assert((await api('POST', '/api/models', { id: 'm2', name: 'M2', api_model: 'm2', provider: 'mock', note: '' })).status === 200, '登记模型 m2');
-  assert((await api('POST', '/api/models/m1/core')).status === 200, '设核心默认 m1');
-  assert((await api('POST', '/api/agents', { name: '单兵', modules: ['summarizer'], model: 'm1', note: 'e2e' })).status === 200, '登记 agent 单兵');
-  assert((await api('POST', '/api/agents', { name: '双子', modules: ['research', 'reviewer'], model: 'm2', note: 'e2e 多模块' })).status === 200, '登记 agent 双子（2 模块 / m2）');
+  assert((await reg('upsert_provider', { id: 'mock', base_url: MOCK_BASE + '/v1', api_key: 'k' })).status === 200, '登记供应商');
+  assert((await reg('upsert_model', { id: 'm1', name: 'M1', api_model: 'm1', provider: 'mock', note: '' })).status === 200, '登记模型 m1');
+  assert((await reg('upsert_model', { id: 'm2', name: 'M2', api_model: 'm2', provider: 'mock', note: '' })).status === 200, '登记模型 m2');
+  assert((await reg('set_core_model', { id: 'm1' })).status === 200, '设核心默认 m1');
+  assert((await reg('upsert_agent', { name: '单兵', modules: ['summarizer'], model: 'm1', note: 'e2e' })).status === 200, '登记 agent 单兵');
+  assert((await reg('upsert_agent', { name: '双子', modules: ['research', 'reviewer'], model: 'm2', note: 'e2e 多模块' })).status === 200, '登记 agent 双子（2 模块 / m2）');
 
   // 推荐：核心优先复用登记处里的 agent（不代拟模型）
   const sug = await api('POST', '/api/suggest-models', { task: '调研并总结', mode: 'single' });
@@ -73,7 +185,7 @@ async function lines(sid) {
 
   // 单 agent（模块无外部工具）：内置 write 落在该 agent 私沙箱
   const name1 = 'e2e-single-' + Date.now();
-  const c1 = await api('POST', '/api/sessions', {
+  const c1 = await api('POST', '/api/actions/create_session', {
     name: name1, mode: 'single',
     agents: [{ name: '专属', transient: true, modules: ['research'], model: 'm1' }],
   });
@@ -81,7 +193,7 @@ async function lines(sid) {
   const meta1 = fs.readFileSync(path.join(dir(name1), 'meta.yaml'), 'utf8');
   assert(/mode: single/.test(meta1), 'meta.mode = single', meta1.split('\n').slice(0, 6).join(' | '));
 
-  const said = await api('POST', '/api/sessions/' + encodeURIComponent(name1) + '/say', { text: '记一笔' });
+  const said = await act(name1, 'send_message', { text: '记一笔' });
   assert(said.status === 200, '单 agent 发言', said.text.slice(0, 200));
   const note = path.join(dir(name1), '专属', 'mock-note.txt');
   assert(fs.existsSync(note) && fs.readFileSync(note, 'utf8') === '来自内置工具', '内置 write 落在该 agent 私沙箱', note);
@@ -93,7 +205,7 @@ async function lines(sid) {
   assert(t1.name === 'write' && t1.ok === true && t1.module === '', '工具调用是一条 tool 行（内置工具 module 为空）', JSON.stringify(t1).slice(0, 200));
   assert(l1[2] && !l1[2].tool, '最后一行是纯文本行', JSON.stringify(l1[2] || {}).slice(0, 160));
   // 回档：删除该行及其后（点第一行 → 转录清空）
-  assert((await api('POST', '/api/sessions/' + encodeURIComponent(name1) + '/rewind', { id: 0 })).status === 200, '回档到第一行');
+  assert((await act(name1, 'rewind', { id: 0 })).status === 200, '回档到第一行');
   const l1r = await lines(name1);
   assert(l1r.length === 0, '删除第一行后转录清空', JSON.stringify(l1r).slice(0, 160));
 
@@ -101,14 +213,14 @@ async function lines(sid) {
   fs.mkdirSync(path.join(ROOT, 'modules', 'toolbox', 'userdata'), { recursive: true });
   fs.writeFileSync(path.join(ROOT, 'modules', 'toolbox', 'userdata', 'e2e.txt'), '第一行内容\n第二行内容\n');
   const name1b = 'e2e-multi-' + Date.now();
-  const c1b = await api('POST', '/api/sessions', {
+  const c1b = await api('POST', '/api/actions/create_session', {
     name: name1b, mode: 'single',
     agents: [{ name: '双子形', transient: true, modules: ['research', 'toolbox'], model: 'm1' }],
   });
   assert(c1b.status === 200, '建单 agent 工作（1 个 agent 带 2 个模块）', c1b.text.slice(0, 200));
   const meta1b = fs.readFileSync(path.join(dir(name1b), 'meta.yaml'), 'utf8');
   assert((meta1b.match(/- research|- toolbox/g) || []).length >= 2, 'meta 记录了该 agent 的两个模块');
-  const said1b = await api('POST', '/api/sessions/' + encodeURIComponent(name1b) + '/say', { text: '读一下' });
+  const said1b = await act(name1b, 'send_message', { text: '读一下' });
   assert(said1b.status === 200, '多模块 agent 发言', said1b.text.slice(0, 200));
   const lb = await lines(name1b);
   const tb = (lb[1] || {}).tool || {};
@@ -116,7 +228,7 @@ async function lines(sid) {
   assert(String(tb.output || '').includes('第二行内容'), '工具结果原文进了转录（重启/回档后仍可回放）', String(tb.output).slice(0, 160));
 
   // 多模块 agent 漏写 module：核心如实报错并列出可用的 模块.工具（不猜）
-  const said1c = await api('POST', '/api/sessions/' + encodeURIComponent(name1b) + '/say', { text: '不要写模块，直接读' });
+  const said1c = await act(name1b, 'send_message', { text: '不要写模块，直接读' });
   assert(said1c.status === 200, '漏写 module 时仍能发言（不崩）', said1c.text.slice(0, 200));
   const lc = await lines(name1b);
   const fail = lc.filter((x) => x.tool).pop() || {};
@@ -126,9 +238,9 @@ async function lines(sid) {
 
   // 上传（同名不覆盖）＋ 文件清单 ＋ @ 引用改写
   const b64 = Buffer.from('用户投喂').toString('base64');
-  const up1 = await api('POST', '/api/sessions/' + encodeURIComponent(name1) + '/upload', { name: 'f.txt', data_base64: b64 });
-  const up2 = await api('POST', '/api/sessions/' + encodeURIComponent(name1) + '/upload', { name: 'f.txt', data_base64: b64 });
-  assert(up1.status === 200 && up2.status === 409, '上传同名返回 409（不静默覆盖）', up1.status + '/' + up2.status);
+  const up1 = await act(name1, 'upload', { name: 'f.txt', data_base64: b64 });
+  const up2 = await act(name1, 'upload', { name: 'f.txt', data_base64: b64 });
+  assert(up1.status === 200 && up2.status === 200 && up2.json && up2.json.uploaded === false, '上传同名如实报出、不静默覆盖', up1.status + '/' + up2.status + ' ' + up2.text.slice(0, 120));
   assert(fs.existsSync(path.join(dir(name1), 'work', 'f.txt')), '投喂落在 work/');
   const files = await api('GET', '/api/sessions/' + encodeURIComponent(name1) + '/files');
   assert(files.status === 200 && (files.json.work || []).includes('f.txt'), 'GET /files 列出共享区文件', files.text.slice(0, 200));
@@ -138,14 +250,14 @@ async function lines(sid) {
   assert(typeof rr.work === 'string' && /\/work$/.test(rr.work), '/files 返回共享区真实根（/ 分隔）', JSON.stringify(rr).slice(0, 220));
   const ra = (rr.agents || [])[0] || {};
   assert(String(ra.name || '') !== '' && String(ra.root || '').endsWith('/' + ra.name), '/files 返回 agent 沙箱真实根（与 agents 同序同名）', JSON.stringify(ra).slice(0, 220));
-  const saidRef = await api('POST', '/api/sessions/' + encodeURIComponent(name1) + '/say', { text: '@work:f.txt 看一下' });
+  const saidRef = await act(name1, 'send_message', { text: '@work:f.txt 看一下' });
   assert(saidRef.status === 200, '@ 引用发言', saidRef.text.slice(0, 200));
   const lr = await lines(name1);
   const ul = lr.filter((x) => x.speaker === '用户').pop() || {};
   assert(!/@work:/.test(String(ul.line)) && /work[\\/]+f\.txt/.test(String(ul.line)), '核心把 @work:… 改写成真实绝对路径', String(ul.line).slice(0, 200));
 
   // 句读标点不进路径：@work:f.txt，看一下 → work:/f.txt，看一下
-  const saidPunct = await api('POST', '/api/sessions/' + encodeURIComponent(name1) + '/say', { text: '@work:f.txt，看一下' });
+  const saidPunct = await act(name1, 'send_message', { text: '@work:f.txt，看一下' });
   assert(saidPunct.status === 200, '带句读的引用发言', saidPunct.text.slice(0, 200));
   const lp = await lines(name1);
   const upl = lp.filter((x) => x.speaker === '用户').pop() || {};
@@ -153,22 +265,83 @@ async function lines(sid) {
 
   // 文件名含空格：引用用引号包住路径 → 仍能改写成正确路径
   const spaced = '项目 说明.md';
-  const upSpace = await api('POST', '/api/sessions/' + encodeURIComponent(name1) + '/upload', { name: spaced, data_base64: b64 });
+  const upSpace = await act(name1, 'upload', { name: spaced, data_base64: b64 });
   assert(upSpace.status === 200, '上传含空格文件名的文件', upSpace.text.slice(0, 160));
-  const saidSpace = await api('POST', '/api/sessions/' + encodeURIComponent(name1) + '/say', { text: '@work:"' + spaced + '" 看一下' });
+  const saidSpace = await act(name1, 'send_message', { text: '@work:"' + spaced + '" 看一下' });
   assert(saidSpace.status === 200, '引用含空格文件名', saidSpace.text.slice(0, 200));
   const ls = await lines(name1);
   const usl = ls.filter((x) => x.speaker === '用户').pop() || {};
   assert(new RegExp('项目 说明\\.md').test(String(usl.line)) && !/@work:/.test(String(usl.line)), '引号内的空格路径被完整改写（真实路径）', String(usl.line).slice(0, 240));
 
+  // 工具级确认（granularity=ask）：真生成 → 真停下 → 真回答；yes / no / full 三态都走一遍。
+  const nameAsk = 'e2e-ask-' + Date.now();
+  const cAsk = await api('POST', '/api/actions/create_session', {
+    name: nameAsk, mode: 'single',
+    agents: [{ name: '确认兵', transient: true, modules: ['research'], model: 'm1' }],
+  });
+  assert(cAsk.status === 200, '建"工具确认"会话', cAsk.text.slice(0, 200));
+  const edAsk = await act(nameAsk, 'edit_session', {
+    agents: [{ name: '确认兵', modules: ['research'], model: 'm1', permissions: { granularity: 'ask', ask: ['write'] } }],
+    tier: 'host', net: false,
+  });
+  assert(edAsk.status === 200, '把该 agent 的粒度设成 ask（ask 表 = write）', edAsk.text.slice(0, 240));
+  const sandbox = path.join(dir(nameAsk), '确认兵');
+  const fDeny = path.join(sandbox, 'ask-deny.txt');
+  const fAllow = path.join(sandbox, 'ask-allow.txt');
+  const fFull1 = path.join(sandbox, 'ask-full-1.txt');
+  const fFull2 = path.join(sandbox, 'ask-full-2.txt');
+  // 工具确认与核心各关卡**同一条通道**：同一张卡形状、同一条回答命令（卡号 + 选项 id）。
+  const answerAsk = (card, option) => act(nameAsk, 'answer_card', { card: card.id, option: option, note: '' });
+  const sayAsk = (text) => act(nameAsk, 'send_message', { text });
+
+  // ① 拒绝：生成停下来等回答（快照里能看到那张卡），答 deny → 工具不执行。
+  const pDeny = sayAsk('工具确认：拒绝');
+  const pendDeny = await waitPending(nameAsk, 'tool_approval', 20000);
+  assert(pendDeny && (pendDeny.payload || {}).tool === 'write', '等待中的确认出现在 /api/state 快照里（刷新也能重建卡片）', JSON.stringify(pendDeny || {}).slice(0, 200));
+  assert((pendDeny.options || []).map((o) => o.id).join() === 'allow,deny,full', '工具卡的选项 id 是 allow / deny / full', JSON.stringify((pendDeny || {}).options));
+  assert((await answerAsk(pendDeny, 'deny')).status === 200, '答 deny（拒绝）');
+  await settle(pDeny, 30000, '拒绝场景');
+  assert(!fs.existsSync(fDeny), '拒绝 → 工具没执行（文件不存在）', fDeny);
+
+  // ② 放行：答 allow → 工具执行。
+  const pAllow = sayAsk('工具确认：放行');
+  const pendAllow = await waitPending(nameAsk, 'tool_approval', 20000);
+  assert(pendAllow, '第二次确认也停下等回答');
+  await answerAsk(pendAllow, 'allow');
+  await settle(pAllow, 30000, '放行场景');
+  assert(fs.existsSync(fAllow), '放行 → 工具执行（文件存在）', fAllow);
+
+  // ③ 本轮不再问：一次回复给两个 write，第一个答 full → 第二个不再问、两个都执行。
+  const pFull = sayAsk('工具确认：两个，本轮不再问');
+  const pendFull = await waitPending(nameAsk, 'tool_approval', 20000);
+  assert(pendFull, 'full 场景的第一批确认出现');
+  await answerAsk(pendFull, 'full');
+  // 若 full 没生效会出现第二个确认——自动答掉以免挂住整个驱动，并把"多问了一次"记为失败。
+  let second = null;
+  for (let i = 0; i < 200; i++) {
+    const s = await stateOk();
+    const v = ((s.json && s.json.sessions) || []).find((x) => x.sid === nameAsk);
+    if (v && v.pending && v.pending.gate === 'tool_approval') { second = v.pending; break; }
+    if (!v || !v.running) break; // 生成已结束
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  if (second) await answerAsk(second, 'allow');
+  await settle(pFull, 30000, 'full 场景');
+  assert(!second, '答 full 后本轮不再弹第二次确认', JSON.stringify(second || {}).slice(0, 160));
+  assert(fs.existsSync(fFull1) && fs.existsSync(fFull2), '答 full → 本轮两个调用都执行', fFull1 + ' / ' + fFull2);
+  // [待确认] 是**系统行（notice）**，不是转录行：从落盘流水按事件类型数。
+  const hAsk = await api('GET', '/api/history/' + encodeURIComponent(nameAsk));
+  const askedTimes = ((hAsk.json && hAsk.json.events) || []).filter((e) => e.type === 'notice' && String(e.text || '').includes('[待确认]')).length;
+  assert(askedTimes === 3, '全程只停三次（full 那轮只停一次；若变成 4 = full 没生效）', 'asked=' + askedTimes);
+
   // 非法工具信封：必须记成一条失败的工具行，且 JSON 绝不上屏（真实 bug 的回归）
   const name1f = 'e2e-badenv-' + Date.now();
-  const c1f = await api('POST', '/api/sessions', {
+  const c1f = await api('POST', '/api/actions/create_session', {
     name: name1f, mode: 'single',
     agents: [{ name: '坏信封手', transient: true, modules: ['toolbox'], model: 'm1' }],
   });
   assert(c1f.status === 200, '建「坏信封」工作', c1f.text.slice(0, 200));
-  const s1f = await api('POST', '/api/sessions/' + encodeURIComponent(name1f) + '/say', { text: '坏信封' });
+  const s1f = await act(name1f, 'send_message', { text: '坏信封' });
   assert(s1f.status === 200, '非法信封发言', s1f.text.slice(0, 200));
   const lf = await lines(name1f);
   const tf = lf.filter((x) => x.tool).pop() || {};
@@ -178,12 +351,12 @@ async function lines(sid) {
 
   // 正文在前、坏信封在后且未闭合：正文保留，坏 JSON 不上屏
   const name1g = 'e2e-unclosed-' + Date.now();
-  const c1g = await api('POST', '/api/sessions', {
+  const c1g = await api('POST', '/api/actions/create_session', {
     name: name1g, mode: 'single',
     agents: [{ name: '半截手', transient: true, modules: ['toolbox'], model: 'm1' }],
   });
   assert(c1g.status === 200, '建「半截信封」工作', c1g.text.slice(0, 200));
-  const s1g = await api('POST', '/api/sessions/' + encodeURIComponent(name1g) + '/say', { text: '半截信封' });
+  const s1g = await act(name1g, 'send_message', { text: '半截信封' });
   assert(s1g.status === 200, '半截信封发言', s1g.text.slice(0, 200));
   const lu = await lines(name1g);
   const tu = lu.filter((x) => x.tool).pop() || {};
@@ -193,16 +366,16 @@ async function lines(sid) {
 
   // 外部工具 + 真实绝对路径读用户投喂的文件（最初那个"read_txt 不认识路径"的场景，现在必须是绿的）
   const name1h = 'e2e-abspath-' + Date.now();
-  const c1h = await api('POST', '/api/sessions', {
+  const c1h = await api('POST', '/api/actions/create_session', {
     name: name1h, mode: 'single',
     agents: [{ name: '工具手', transient: true, modules: ['toolbox'], model: 'm1' }],
   });
   assert(c1h.status === 200, '建「绝对路径」工作', c1h.text.slice(0, 200));
-  const upH = await api('POST', '/api/sessions/' + encodeURIComponent(name1h) + '/upload', {
+  const upH = await act(name1h, 'upload', {
     name: 'g.txt', data_base64: Buffer.from('绝对路径能读到').toString('base64'),
   });
   assert(upH.status === 200, '投喂 g.txt', upH.text.slice(0, 160));
-  const s1h = await api('POST', '/api/sessions/' + encodeURIComponent(name1h) + '/say', { text: '绝对路径读一下' });
+  const s1h = await act(name1h, 'send_message', { text: '绝对路径读一下' });
   assert(s1h.status === 200, '绝对路径发言', s1h.text.slice(0, 200));
   const lh = await lines(name1h);
   const th = lh.filter((x) => x.tool).pop() || {};
@@ -211,12 +384,12 @@ async function lines(sid) {
 
   // 自由格式补丁：信封 + 之后原样跟补丁正文（不转义）——这条新路径必须在真实二进制上通
   const name1p = 'e2e-patch-' + Date.now();
-  const c1p = await api('POST', '/api/sessions', {
+  const c1p = await api('POST', '/api/actions/create_session', {
     name: name1p, mode: 'single',
     agents: [{ name: '补丁手', transient: true, modules: ['research'], model: 'm1' }],
   });
   assert(c1p.status === 200, '建「补丁」工作', c1p.text.slice(0, 200));
-  const s1p = await api('POST', '/api/sessions/' + encodeURIComponent(name1p) + '/say', { text: '打补丁' });
+  const s1p = await act(name1p, 'send_message', { text: '打补丁' });
   assert(s1p.status === 200, '补丁发言', s1p.text.slice(0, 200));
   const lpatch = await lines(name1p);
   const tpatch = lpatch.filter((x) => x.tool).pop() || {};
@@ -236,7 +409,7 @@ async function lines(sid) {
 
   // 协作里引用某个 agent 的私沙：如实说明只有那个 agent 能读（speaker = None）
   const name1e = 'e2e-refcollab-' + Date.now();
-  const c1e = await api('POST', '/api/sessions', {
+  const c1e = await api('POST', '/api/actions/create_session', {
     name: name1e, mode: 'collab', task: '@sandbox:甲/秘密.md 只看这个',
     agents: [{ name: '甲', transient: true, modules: ['summarizer'], model: 'm1' }],
   });
@@ -248,12 +421,12 @@ async function lines(sid) {
 
   // 同一轮"先写正文再发工具信封"：正文进转录，信封 JSON 不出现在任何行里
   const name1d = 'e2e-prose-' + Date.now();
-  const c1d = await api('POST', '/api/sessions', {
+  const c1d = await api('POST', '/api/actions/create_session', {
     name: name1d, mode: 'single',
     agents: [{ name: '双子形2', transient: true, modules: ['research', 'toolbox'], model: 'm1' }],
   });
   assert(c1d.status === 200, '建「正文+工具」工作', c1d.text.slice(0, 200));
-  const sd = await api('POST', '/api/sessions/' + encodeURIComponent(name1d) + '/say', { text: '顺便读一下' });
+  const sd = await act(name1d, 'send_message', { text: '顺便读一下' });
   assert(sd.status === 200, '「正文+工具」发言', sd.text.slice(0, 200));
   const ld = await lines(name1d);
   assert(ld.map((x) => x.id).join() === '0,1,2,3', '正文行 + tool 行 + 答复行（4 条，id 连续）', JSON.stringify(ld.map((x) => x.id)));
@@ -263,7 +436,7 @@ async function lines(sid) {
 
   // 协作（非代拟）：两个 agent 跑完五阶段并交付
   const name2 = 'e2e-collab-' + Date.now();
-  const c2 = await api('POST', '/api/sessions', {
+  const c2 = await api('POST', '/api/actions/create_session', {
     name: name2, mode: 'collab', task: '一起把事情做完',
     agents: [
       { name: '甲', transient: true, modules: ['summarizer'], model: 'm1' },
@@ -271,7 +444,7 @@ async function lines(sid) {
     ],
   });
   assert(c2.status === 200, '建协作工作（2 个 agent）', c2.text.slice(0, 200));
-  const begin = await api('POST', '/api/sessions/' + encodeURIComponent(name2) + '/begin', { text: 'yes,allow' });
+  const begin = await answer(name2, 'begin_allow');
   assert(begin.status === 200, '确认开始讨论', begin.text.slice(0, 200));
   // 子会话的**事件台**要有它自己的权威行与运行态（不能只落在盘上）：否则打开它的标签页，
   // 流式块永远等不到替换它的那一行——光标一直挂着、按钮永远停在「停止」（真机反馈过）。
@@ -284,17 +457,18 @@ async function lines(sid) {
   );
   assert(childJson.includes('"working"'), '子会话事件台带运行态（在跑/收尾）', childJson.slice(0, 200));
   // 裁决卡上的**建议由核心 AI 给**（随 plan 那一次调用一起产出，不额外花调用）。
-  const stPlan = await api('GET', '/api/state');
+  const stPlan = await stateOk();
   const viewPlan = ((stPlan.json && stPlan.json.sessions) || []).find((v) => v.sid === name2);
   const pendPlan = (viewPlan && viewPlan.pending) || null;
   // 待裁决是**快照字段**（与推的 Decision 同源）：刷新页面照样画得出那张卡。
   // 卡片里的"建议"由核心 AI 随 plan 那一次调用一起给（契约见单测 plan_review_carries_the_core_advice）。
   // 卡片上那句"建议"**由核心 AI 给**（随 plan 那一次调用一起产出），快照里必须带上它。
   assert(
-    pendPlan && pendPlan.kind === 'plan_review' && !!pendPlan.question
-      && String(pendPlan.advice || '').length > 0,
+    pendPlan && pendPlan.type === 'decision_card'
+      && (pendPlan.options || []).some((o) => o.id === 'plan_start')
+      && String((pendPlan.message || {}).detail || '').length > 0,
     '方案待审：快照里带核心 AI 的建议',
-    JSON.stringify(pendPlan).slice(0, 220),
+    JSON.stringify(pendPlan).slice(0, 260),
   );
   // 整理完停在**待审**：用户回一句明确的开工才推进；开工后节点在子会话里跑，交付是异步产生的。
   await approvePlan(name2);
@@ -308,21 +482,22 @@ async function lines(sid) {
 
   // 代拟：核心优先复用（单兵）+ 组装（新助手），确认后名单写回 meta
   const name3 = 'e2e-delegate-' + Date.now();
-  const c3 = await api('POST', '/api/sessions', { name: name3, mode: 'collab', agents: [], task: '调研一下再总结', delegate: true });
+  // 协作且不给名单 = 委托核心代拟（delegate 由核心按形态派生，不再是参数）。
+  const c3 = await api('POST', '/api/actions/create_session', { name: name3, mode: 'collab', agents: [], task: '调研一下再总结' });
   assert(c3.status === 200, '建代拟工作（无名单）', c3.text.slice(0, 200));
   // 开场事实在**事件台**上（回包只给 head）：按会话过滤取它自己的流。
   const c3Bus = JSON.stringify(
     ((await api('GET', '/api/events?sid=' + encodeURIComponent(name3) + '&since=0')).json || {}).lines || [],
   );
   assert(c3Bus.includes('代拟'), '核心已代拟名单', c3Bus.slice(0, 240));
-  const slate = await api('POST', '/api/sessions/' + encodeURIComponent(name3) + '/slate', { text: 'yes' });
+  const slate = await answer(name3, 'slate_confirm');
   assert(slate.status === 200, '确认代拟名单', slate.text.slice(0, 200));
   const meta3 = fs.readFileSync(path.join(dir(name3), 'meta.yaml'), 'utf8');
   assert(meta3.includes('单兵') && meta3.includes('新助手'), '名单写回 meta.yaml（复用项 + 组装项）', meta3.split('\n').slice(0, 20).join(' | '));
   assert(/transient: false/.test(meta3), '复用项记为非常驻（transient: false）');
   assert(/transient: true/.test(meta3), '组装项记为临时（transient: true）');
   assert(fs.existsSync(path.join(dir(name3), '单兵')) && fs.existsSync(path.join(dir(name3), '新助手')), '确认名单后按 agent 名建出沙箱目录');
-  const begun3 = await api('POST', '/api/sessions/' + encodeURIComponent(name3) + '/begin', { text: 'yes,allow' });
+  const begun3 = await answer(name3, 'begin_allow');
   assert(begun3.status === 200, '代拟名单后开始讨论', begun3.text.slice(0, 200));
   await approvePlan(name3);
   const ev3 = JSON.stringify(await waitForDelivery(name3));
@@ -331,7 +506,7 @@ async function lines(sid) {
 
   /** 走完审查关卡：整理完停在待审，用户回一句**明确的开工**才推进（协作的必经一步）。 */
 async function approvePlan(name) {
-  const r = await api('POST', '/api/sessions/' + encodeURIComponent(name) + '/decide', { text: '同意开工，按方案推进。' });
+  const r = await answer(name, 'plan_say', '同意开工，按方案推进。');
   assert(r.status === 200, '审查关卡：明确开工', r.text.slice(0, 200));
   return [];
 }
@@ -385,28 +560,28 @@ async function approvePlan(name) {
 
   // ① agree 收敛：只有一个人同意时不该收敛（要出现下一轮），两人都同意才收敛。
   const nA = 'e2e-collab-noconv-' + Date.now();
-  assert((await api('POST', '/api/sessions', {
+  assert((await api('POST', '/api/actions/create_session', {
     name: nA, mode: 'collab', task: '不收敛：先各说各的',
     agents: [
       { name: '甲', transient: true, modules: ['summarizer'], model: 'm1' },
       { name: '乙', transient: true, modules: ['reviewer'], model: 'm1' },
     ],
   })).status === 200, '建「不收敛」协作工作');
-  assert((await api('POST', '/api/sessions/' + encodeURIComponent(nA) + '/begin', { text: 'yes,allow' })).status === 200, '「不收敛」开始讨论');
+  assert((await answer(nA, 'begin_allow')).status === 200, '「不收敛」开始讨论');
   const tA = joined(await all(nA));
   assert(/\[轮次 2\]/.test(tA), '有人同意、有人没同意 → 不收敛，进入下一轮', tA.slice(-300));
   assert(!tA.includes('delivery'), '未收敛时不交付', tA.slice(-200));
 
   // ② leave 不可逆：退场后不再被询问；留下的那个人同意即收敛（退场者不算收敛门槛）。
   const nB = 'e2e-collab-leave-' + Date.now();
-  assert((await api('POST', '/api/sessions', {
+  assert((await api('POST', '/api/actions/create_session', {
     name: nB, mode: 'collab', task: '退场：甲先撤',
     agents: [
       { name: '甲', transient: true, modules: ['summarizer'], model: 'm1' },
       { name: '乙', transient: true, modules: ['reviewer'], model: 'm1' },
     ],
   })).status === 200, '建「退场」协作工作');
-  assert((await api('POST', '/api/sessions/' + encodeURIComponent(nB) + '/begin', { text: 'yes,allow' })).status === 200, '「退场」开始讨论');
+  assert((await answer(nB, 'begin_allow')).status === 200, '「退场」开始讨论');
   await approvePlan(nB);
   const tB = joined(await all(nB));
   const evB = JSON.stringify(await waitForDelivery(nB));
@@ -418,27 +593,27 @@ async function approvePlan(name) {
 
   // ③ 轮次上限：谁都不同意 → 触上限并交用户裁决。
   const nC = 'e2e-collab-cap-' + Date.now();
-  assert((await api('POST', '/api/sessions', {
+  assert((await api('POST', '/api/actions/create_session', {
     name: nC, mode: 'collab', task: '上限：一直议下去',
     agents: [
       { name: '甲', transient: true, modules: ['summarizer'], model: 'm1' },
       { name: '乙', transient: true, modules: ['reviewer'], model: 'm1' },
     ],
   })).status === 200, '建「上限」协作工作');
-  assert((await api('POST', '/api/sessions/' + encodeURIComponent(nC) + '/begin', { text: 'yes,allow' })).status === 200, '「上限」开始讨论');
+  assert((await answer(nC, 'begin_allow')).status === 200, '「上限」开始讨论');
   const evC = JSON.stringify(await eventsOf(nC));
   assert(evC.includes('讨论轮次超限'), '触上限要如实说明并交用户裁决', evC.slice(-300));
 
   // ④ 返工闭环：验收先 fail → 定向返工 → 重验 → 交付。
   const nD = 'e2e-collab-rework-' + Date.now();
-  assert((await api('POST', '/api/sessions', {
+  assert((await api('POST', '/api/actions/create_session', {
     name: nD, mode: 'collab', task: '返工：第一次验收不过',
     agents: [
       { name: '甲', transient: true, modules: ['summarizer'], model: 'm1' },
       { name: '乙', transient: true, modules: ['reviewer'], model: 'm1' },
     ],
   })).status === 200, '建「返工」协作工作');
-  assert((await api('POST', '/api/sessions/' + encodeURIComponent(nD) + '/begin', { text: 'yes,allow' })).status === 200, '「返工」开始讨论');
+  assert((await answer(nD, 'begin_allow')).status === 200, '「返工」开始讨论');
   await approvePlan(nD);
   // 没过 = 暂停并**指名要返工的节点**（结构化字段），而不是整条链重来。
   // 总验收没过 → **指名要返工的节点**（结构化 rework 字段）→ 暂停等你定 → 点「继续」只重派它 → 重验交付。
@@ -450,7 +625,7 @@ async function approvePlan(name) {
     evPause.slice(-300),
   );
   assert(
-    (await api('POST', '/api/sessions/' + encodeURIComponent(nD) + '/continue', {})).status === 200,
+    (await act(nD, 'control_session', { action: 'continue' })).status === 200,
     '点「继续」重派指名的节点',
   );
   const evD = JSON.stringify(await waitForDelivery(nD));
@@ -459,15 +634,15 @@ async function approvePlan(name) {
 
   // ⑤ 撤回同意：撤回行进转录，讨论重新打开并继续轮转。
   const nE = 'e2e-collab-withdraw-' + Date.now();
-  assert((await api('POST', '/api/sessions', {
+  assert((await api('POST', '/api/actions/create_session', {
     name: nE, mode: 'collab', task: '不收敛：撤回后重议',
     agents: [
       { name: '甲', transient: true, modules: ['summarizer'], model: 'm1' },
       { name: '乙', transient: true, modules: ['reviewer'], model: 'm1' },
     ],
   })).status === 200, '建「撤回」协作工作');
-  assert((await api('POST', '/api/sessions/' + encodeURIComponent(nE) + '/begin', { text: 'yes,allow' })).status === 200, '「撤回」开始讨论');
-  const w = await api('POST', '/api/sessions/' + encodeURIComponent(nE) + '/withdraw', { agent: '乙' });
+  assert((await answer(nE, 'begin_allow')).status === 200, '「撤回」开始讨论');
+  const w = await act(nE, 'withdraw', { agent: '乙' });
   assert(w.status === 200, '撤回乙的同意', w.text.slice(0, 200));
   const wBus = JSON.stringify(
     ((await api('GET', '/api/events?sid=' + encodeURIComponent(nE) + '&since=0')).json || {}).lines || [],
@@ -480,7 +655,7 @@ async function approvePlan(name) {
 
   // ⑥ ask 中止：agent 提问 → 轮转中止并呈给用户；回答后继续。
   const nF = 'e2e-collab-ask-' + Date.now();
-  assert((await api('POST', '/api/sessions', {
+  assert((await api('POST', '/api/actions/create_session', {
     name: nF, mode: 'collab', task: '提问：需要用户决定',
     agents: [
       { name: '甲', transient: true, modules: ['summarizer'], model: 'm1' },
@@ -488,42 +663,48 @@ async function approvePlan(name) {
     ],
   })).status === 200, '建「提问」协作工作');
   // 不给 allow：授权自裁（yes,allow）会让 ask 留档不中止——这正是 allow 的语义分界，所以这里要验"不授权"那一侧。
-  const beginF = await api('POST', '/api/sessions/' + encodeURIComponent(nF) + '/begin', { text: 'yes' });
+  const beginF = await answer(nF, 'begin');
   assert(beginF.status === 200, '「提问」开始讨论（不授权自裁）', beginF.text.slice(0, 200));
   // 待裁决是**快照字段**（与推的 Decision 同源）：从 /api/state 的会话视图读。
-  const stF = await api('GET', '/api/state');
+  const stF = await stateOk();
   const viewF = ((stF.json && stF.json.sessions) || []).find((v) => v.sid === nF);
   const pendF = (viewF && viewF.pending) || null;
-  assert(pendF && pendF.kind === 'ask', 'ask 中止轮转并把问题呈给用户（快照里带待裁决）', JSON.stringify(pendF).slice(0, 300));
-  const ansF = await api('POST', '/api/sessions/' + encodeURIComponent(nF) + '/decide', { text: '用第一个方案' });
+  assert(
+    pendF && pendF.type === 'decision_card' && (pendF.options || []).some((o) => o.id === 'ask_reply'),
+    'ask 中止轮转并把问题呈给用户（快照里带待裁决的卡）',
+    JSON.stringify(pendF).slice(0, 300),
+  );
+  const ansF = await answer(nF, 'ask_reply', '用第一个方案');
   assert(ansF.status === 200, '回答 ask 后继续', ansF.text.slice(0, 200));
   const tF = joined(await all(nF));
   assert(tF.includes('用第一个方案'), '用户回答并入转录（进上下文）', tF.slice(-300));
 
 
-  /* ---------- 真工具链路（L4）：三个真模块里的两个，真的在真进程里跑 ----------
-   * harvest（python）扫夹具共享区 → corpus.jsonl；indexer（C++，CI 里现编）建索引 → 检索有命中。
+  /* ---------- 真工具链路（L4）：三个真模块三个语言，真的在真进程里跑 ----------
+   * harvest（python）扫夹具共享区 → corpus.jsonl；render（node）把语料渲染成自包含 HTML；
+   * indexer（C++，CI 里现编）建索引 → 检索有命中。
    * 这一段证明的是"三种语言的模块在真进程里真的能用"，与上面的信封/状态机验收互补。
    * 工具用真进程，所以路径必须是**提示词里给出的真实绝对路径**（相对路径会被围栏拒绝）。
    */
   const nameR = 'e2e-realtools-' + Date.now();
   const workDir = path.join(ROOT, 'session', nameR, 'work');
-  const cR = await api('POST', '/api/sessions', {
+  const cR = await api('POST', '/api/actions/create_session', {
     name: nameR, mode: 'single',
-    agents: [{ name: '资料手', transient: true, modules: ['harvest', 'indexer'], model: 'm1' }],
+    agents: [{ name: '资料手', transient: true, modules: ['harvest', 'render', 'indexer'], model: 'm1' }],
   });
-  assert(cR.status === 200, '建「真工具」工作（harvest + indexer）', cR.text.slice(0, 200));
+  assert(cR.status === 200, '建「真工具」工作（harvest + render + indexer）', cR.text.slice(0, 200));
   // 投喂两份材料（走产品的上传能力面，落进本次工作的共享区）。
-  assert((await api('POST', '/api/sessions/' + encodeURIComponent(nameR) + '/upload', {
+  assert((await act(nameR, 'upload', {
     name: '甲.md', data_base64: Buffer.from('# 甲\n\n本地优先的检索：索引建好之后可以离线查。\n', 'utf8').toString('base64'),
   })).status === 200, '投喂甲.md');
-  assert((await api('POST', '/api/sessions/' + encodeURIComponent(nameR) + '/upload', {
+  assert((await act(nameR, 'upload', {
     name: '乙.md', data_base64: Buffer.from('# 乙\n\n本地优先的检索：离线查更稳。\n', 'utf8').toString('base64'),
   })).status === 200, '投喂乙.md');
   const corpusPath = path.join(workDir, 'corpus.jsonl');
+  const reportPath = path.join(workDir, 'report.html');
   const indexPath = path.join(workDir, 'index.bin');
-  // 直接经产品能力面驱动一次发言：假供应商会按提示词分支发出 harvest.scan 与 indexer.build/query。
-  const sayR = await api('POST', '/api/sessions/' + encodeURIComponent(nameR) + '/say', { text: '真工具链路：先抽语料，再建索引并检索' });
+  // 直接经产品能力面驱动一次发言：假供应商会按提示词分支发出 harvest.scan、render.report 与 indexer.build/query。
+  const sayR = await act(nameR, 'send_message', { text: '真工具链路：先抽语料，再渲染报告，最后建索引并检索' });
   assert(sayR.status === 200, '「真工具」发言', sayR.text.slice(0, 200));
   const rowsR = (await all(nameR)).filter((x) => x.tool).map((x) => x.tool);
   // 失败时把工具原文打出来：真机围栏开着时（CI）只有它能说清是哪一层拦住了。
@@ -535,6 +716,12 @@ async function approvePlan(name) {
   console.log('   共享区存在吗：' + fs.existsSync(workDir) + '（' + workDir + '）');
   assert(rowsR.some((r) => r.name === 'scan'), 'harvest.scan 真的跑了（python 工具进程）', JSON.stringify(rowsR.map((r) => r.name)));
   assert(fs.existsSync(corpusPath), 'corpus.jsonl 真的落地', corpusPath);
+  assert(rowsR.some((r) => r.name === 'report' && r.ok), 'render.report 真的跑了（node 工具进程）', JSON.stringify(rowsR.map((r) => [r.name, r.ok])));
+  assert(fs.existsSync(reportPath), 'report.html 真的落地', reportPath);
+  // 产物要真的来自语料：报告里得出现语料里的那两份资料（空对象兜底不算数）。
+  const reportHtml = fs.readFileSync(reportPath, 'utf8');
+  assert(/<html/i.test(reportHtml) && reportHtml.includes('甲.md') && reportHtml.includes('乙.md'),
+    '报告是自包含 HTML 且按语料逐条列了目录', reportHtml.slice(0, 300));
   assert(rowsR.some((r) => r.name === 'build'), 'indexer.build 真的跑了（C++ 工具进程）', JSON.stringify(rowsR.map((r) => r.name)));
   assert(fs.existsSync(indexPath), 'index.bin 真的落地', indexPath);
   assert(rowsR.some((r) => r.name === 'query' && r.ok), 'indexer.query 真的跑了并成功', JSON.stringify(rowsR.map((r) => [r.name, r.ok])));
@@ -545,18 +732,18 @@ async function approvePlan(name) {
   // 原生工具调用（真实二进制 + 真 HTTP）：先实测这条通道支持（探测把 tools 写回 native），
   // 再跑一次"一次回复两个调用"，并核对**发给供应商的历史就是协议形状**。
   // 放在最后：把 m1 判成 native 之后，前面那些信封场景的预期就不再成立。
-  const probe = await api('POST', '/api/models/m1/probe');
+  const probe = await reg('probe_model_tools', { id: 'm1' });
   assert(probe.status === 200 && probe.json && probe.json.outcome === 'supported', '探针判这条通道支持原生工具调用', probe.text.slice(0, 200));
   assert(probe.json && probe.json.mode === 'native', '探测结论写回登记处（mode=native）', JSON.stringify(probe.json));
   // 关流式：这条断言要看"最终那一条请求的消息形状"，非流式最好断言（流式分片的形状由 T2 契约测试盯）。
-  assert((await api('POST', '/api/settings', { streaming: false })).status === 200, '关流式（本场景用）');
+  assert((await reg('set_settings', { streaming: false })).status === 200, '关流式（本场景用）');
   const name1n = 'e2e-native-' + Date.now();
-  const c1n = await api('POST', '/api/sessions', {
+  const c1n = await api('POST', '/api/actions/create_session', {
     name: name1n, mode: 'single',
     agents: [{ name: '多调手', transient: true, modules: ['summarizer'], model: 'm1' }],
   });
   assert(c1n.status === 200, '建「原生多调用」工作', c1n.text.slice(0, 200));
-  const s1n = await api('POST', '/api/sessions/' + encodeURIComponent(name1n) + '/say', { text: '原生多调用' });
+  const s1n = await act(name1n, 'send_message', { text: '原生多调用' });
   assert(s1n.status === 200, '原生多调用发言', s1n.text.slice(0, 200));
   const ln = await lines(name1n);
   const toolsN = ln.filter((x) => x.tool);
@@ -584,36 +771,36 @@ async function approvePlan(name) {
     JSON.stringify(seen),
   );
   assert(seen && String(seen.toolIds) === 'call_a,call_b', '结果消息用 tool_call_id 各回应自己的调用', JSON.stringify(seen));
-  assert((await api('POST', '/api/settings', { streaming: true })).status === 200, '恢复流式');
+  assert((await reg('set_settings', { streaming: true })).status === 200, '恢复流式');
 
 
   // ---- 代理模式（第三人形态）：核心代用户挑人 → 建子工作 → 转达 → 停止即全停 ----
   {
-    await api('POST', '/api/agents', { name: '代甲', modules: ['render'], model: 'm1' });
+    await reg('upsert_agent', { name: '代甲', modules: ['render'], model: 'm1' });
     const pName = 'e2e-agency-' + Date.now();
-    const created = await api('POST', '/api/sessions', { name: pName, mode: 'proxy' });
+    const created = await api('POST', '/api/actions/create_session', { name: pName, mode: 'proxy' });
     assert(created.status === 200 && created.json && created.json.sid === pName, '建代理会话（第三人形态，没有名单）', created.text.slice(0, 200));
-    const said = await api('POST', '/api/sessions/' + encodeURIComponent(pName) + '/say', { text: '把这件事做完' });
+    const said = await act(pName, 'send_message', { text: '把这件事做完' });
     assert(said.status === 200, '跟代理说一句，它自己跑一轮', said.text.slice(0, 200));
     const pl = await lines(pName);
     const called = pl.filter((x) => x.tool).map((x) => x.tool.name);
     assert(called.indexOf('catalog_agents') >= 0, '代理先自己看清单（catalog_agents）', JSON.stringify(called));
     assert(called.indexOf('create_session') >= 0, '代理自己建出子工作（create_session）', JSON.stringify(called));
     assert(called.every((n) => ['catalog_agents', 'create_session'].indexOf(n) >= 0), '代理这一轮只用了它自己的工具面', JSON.stringify(called));
-    const st = await api('GET', '/api/state');
+    const st = await stateOk();
     const hist = (st.json && st.json.history) || [];
     const kid = hist.find((h) => h.parent === pName);
     assert(!!kid, '子工作挂在代理会话下（编排归属）', JSON.stringify(hist.map((h) => h.name + '<-' + (h.parent || ''))).slice(0, 300));
     if (kid) {
       const kr = await api('GET', '/api/history/' + encodeURIComponent(kid.name));
       assert(kr.text.indexOf('核心代理转达') >= 0, '子工作的记录里留下来源（核心的话不冒充用户原文）', kr.text.slice(0, 240));
-      // 建会话 = 写开头 + 开工：opening 已经是子会话的派发行，不用再发一条。
-      assert(kr.text.indexOf('把这件事做完') >= 0, '开头的派发已经点火（create_session 自带 opening）', kr.text.slice(0, 300));
+      // 建会话 = 写开头 + 开工：task 已经是子会话的派发行，不用再发一条。
+      assert(kr.text.indexOf('把这件事做完') >= 0, '开头的派发已经点火（create_session 自带 task）', kr.text.slice(0, 300));
     }
-    const stopped = await api('POST', '/api/sessions/' + encodeURIComponent(pName) + '/stop', {});
+    const stopped = await act(pName, 'control_session', { action: 'stop' });
     assert(stopped.status === 200, '点停止', stopped.text.slice(0, 160));
     await new Promise((res) => setTimeout(res, 400));
-    const st2 = await api('GET', '/api/state');
+    const st2 = await stateOk();
     const running = ((st2.json && st2.json.sessions) || []).filter((s) => s.running).map((s) => s.sid);
     assert(running.length === 0, '停止即全停：相关会话都不再跑', JSON.stringify(running));
   }

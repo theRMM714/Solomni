@@ -23,7 +23,7 @@ use windows_sys::Win32::System::JobObjects::{
 use windows_sys::Win32::System::Threading::{
     CreateProcessW, DeleteProcThreadAttributeList, GetCurrentProcess, GetExitCodeProcess,
     InitializeProcThreadAttributeList, UpdateProcThreadAttribute, WaitForSingleObject,
-    EXTENDED_STARTUPINFO_PRESENT, INFINITE, PROCESS_INFORMATION,
+    CREATE_UNICODE_ENVIRONMENT, EXTENDED_STARTUPINFO_PRESENT, INFINITE, PROCESS_INFORMATION,
     PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES, STARTF_USESTDHANDLES, STARTUPINFOEXW,
 };
 
@@ -51,6 +51,10 @@ pub(crate) fn is_our_profile(name: &str) -> bool {
 
 /// 环境不允许容器围栏时的标记（探针据此区分"环境不允许"与"代码有问题"，不互相顶包）。
 pub const ENV_BLOCKED_MARK: &str = "容器围栏不可用（本环境不允许";
+
+/// 本环境**建不出**容器 profile 的标记（与 ENV_BLOCKED_MARK 同一用途：环境结论要能被机器认出来，
+/// 不能靠猜字符串）。改不了目录 ACL 的会话、受限令牌的会话都走这一态。
+pub const PROFILE_ENV_BLOCKED_MARK: &str = "拒绝访问：本环境不允许建 AppContainer profile";
 
 /// 建（或复用）容器 profile：**必须有 profile** —— 没有 profile 的派生 SID 拿不到
 /// ALL APPLICATION PACKAGES 组，连系统目录里的 cmd.exe 都打不开（实测会报"找不到文件"）。
@@ -86,8 +90,8 @@ pub(crate) fn ensure_profile(name: &str) -> Result<(), String> {
     const E_ACCESSDENIED: i32 = 0x8007_0005u32 as i32;
     if hr == E_ACCESSDENIED {
         return Err(format!(
-            "0x{:08x}（拒绝访问：本环境不允许建 AppContainer profile）",
-            hr as u32
+            "0x{:08x}（{}）",
+            hr as u32, PROFILE_ENV_BLOCKED_MARK
         ));
     }
     Err(format!("0x{:08x}", hr as u32))
@@ -163,8 +167,17 @@ pub(crate) fn join_kill_on_close_job(max_processes: u32) -> Result<(), String> {
     }
 }
 
-/// 把工具进程放进容器里跑：不给任何 capability（= 断网），stdio 用外层给的那三个句柄。
+/// 把工具进程放进容器里跑：不给任何 capability（= 断网），stdio 用外层给的那三个句柄；环境用运行期白名单显式给出。
 pub(crate) fn run_in_container(sid: PSID, spec: &FenceSpec, command: &str) -> Result<i32, String> {
+    // 环境块显式给（见 fence_env）：子进程拿到的就是白名单本身，不靠"守门进程恰好继承了什么"。
+    let mut block: Vec<u16> = Vec::new();
+    for (k, v) in super::super::fence_env(spec, command) {
+        block.extend(k.encode_wide());
+        block.push(u16::from(b'='));
+        block.extend(v.encode_wide());
+        block.push(0);
+    }
+    block.push(0);
     let mut caps = SECURITY_CAPABILITIES {
         AppContainerSid: sid,
         Capabilities: std::ptr::null_mut(),
@@ -226,8 +239,8 @@ pub(crate) fn run_in_container(sid: PSID, spec: &FenceSpec, command: &str) -> Re
             std::ptr::null_mut(),
             std::ptr::null_mut(),
             1,
-            EXTENDED_STARTUPINFO_PRESENT,
-            std::ptr::null(),
+            EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT,
+            block.as_ptr() as *const c_void,
             cwd.as_ptr(),
             &si.StartupInfo,
             &mut pi,

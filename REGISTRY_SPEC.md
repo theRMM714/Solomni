@@ -104,6 +104,13 @@ qemu_path: ""          # 虚拟机档用的 QEMU 可执行文件路径（用户�
 llm_timeout_secs: 300  # 单次模型调用的总预算（秒），全局通用（讨论/执行/验收/单 agent）
 compact_at_percent: 70 # 上下文用到模型窗口的百分之多少就自动压一次（0 = 关）
 discuss_remind_cap: 3  # 讨论里一轮内对同一个成员最多提醒几次（提醒 = "你还没用动词表态"）
+permissions:           # 【可选】会话权限的全局默认（可被会话 meta 里逐 agent 的覆盖替换）
+  allow_read: []       # 读白名单（相对工作区根；空 = 整棵工作区可读）
+  allow_write: []      # 提交白名单（相对工作区根；空 = 整棵工作区可提交）
+  deny: []             # 黑名单：读写都禁，只做减法（不让默认失效）
+  module_write: []     # 模块目录写授权（模块 id；空 = 模块目录只读，userdata/ 恒可写）
+  granularity: ask     # 决定粒度：ask = ask 表里的工具要用户放行；full = 任何工具都不设确认
+  ask: []              # granularity=ask 时要用户放行的工具名（模块工具写 module.tool）
 ```
 
 - 这些是**默认值**：会话可在 `meta.yaml` 的 `exec` 段单独选定档位与定版
@@ -117,6 +124,9 @@ discuss_remind_cap: 3  # 讨论里一轮内对同一个成员最多提醒几次�
 - `fence_read` 是**用户显式授权的只读根**（字符串数组，默认空 = 一个都不放行）：工具进程对这些目录**只读可达**，
   不继承写。授权落在用户自己的目录上；本程序只加只读 ACE（Windows 上授给该 agent 自己的容器身份，不是共享组），
   撤权与 `fence_write` 走同一份台账（`--fence-clean` 一并撤净）。
+- `permissions` 是**会话权限的全局默认**，逐 agent 的覆盖写在会话的 `meta.yaml`（见
+  [docs/session/session-model.md](docs/session/session-model.md) 的「形态」）。语义只有一份权威：
+  [docs/permission/README.md](docs/permission/README.md)。未配置时 = 整棵工作区可读可提交、模块目录只读，与今天一致。
 
 ## 六、名字与 id
 

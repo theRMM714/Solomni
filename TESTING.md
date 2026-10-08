@@ -44,9 +44,18 @@
 - **入站契约也是契约**：呈现层只依赖各能力的能力接口（见 [docs/presentation/contracts.md](docs/presentation/contracts.md)）与事件台（拿不到 `Core`、拿不到任何核心锁），
  所以它能被假实现整体替换——`routes.rs` 的 `FakeOps` 就是这么逐条测路由的。
 - T0 质量门禁已并入同一入口，且**全部是零容忍硬失败**：编译、结构审查、格式、clippy、编译告警、依赖重复。
+- 门禁之外另有一个**仓库卫生审查**脚本 `run-hygiene.js`（注释契约存量棘轮 + 内容卫生；报告只报不拦、收紧只能往下，也不进 `TEST-REPORT-*`）：
+  判据与用法见 [docs/testing/quality-isolation.md](docs/testing/quality-isolation.md) 的「门禁之外」。
 
-当前平台缺口账（`tests/cross-platform/gaps.yaml`、`tests/<平台>/gaps.yaml`）**为空**：三平台围栏机制与整仓测试
-已由三平台 CI 真跑通过（Windows AppContainer + 目录 ACL 授权与撤权、Linux Landlock、macOS seatbelt）。
+**逐平台**与**跨平台**缺口账（`tests/<平台>/gaps.yaml`、`tests/cross-platform/gaps.yaml`）**都为空**：
+Linux Landlock、macOS seatbelt 与 Windows 的目录 ACL 授权/撤权、落点清单都已由三平台 CI 真跑通过。
+判「环境不允许」的判据只有一条：**看被测试进程自己的令牌与行为**，不拿二手字符串特征当判据。
+- Windows 容器里 `whoami /groups` 不含包 SID 组是**正常**的（包 SID 在令牌的 `TokenAppContainerSid` 字段，
+  不在组列表里），按它判「环境降级」是假阴性；容器是否生效由**行为对照**给结论——授权落点写得进、
+  从父目录按名走得到叶子、父目录里的其它条目看不到。
+- 工作区被写沙箱挡住时，原因不是「受限令牌会话」，而是 DSH 的 Windows 写沙箱后端授写权时给授权根打上的
+  Low 完整性标签；判据、后果与处置见 [docs/testing/execution-ci.md](docs/testing/execution-ci.md) 的「真机入口」一节。
+- Windows 的「模块目录只读 + `userdata/` 可写 + 另一席不可达」由容器往返探针在真机上验收。
 
 仍未完成的缺口全部记在 `tests/gaps.yaml`（长期目标、已确认但尚未实施的产品/机制缺口都在那里，细则不复述条目内容）。
 条目存在 = 尚未完成；补齐后删除条目，不保留完成历史。

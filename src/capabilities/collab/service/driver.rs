@@ -304,6 +304,61 @@ fn run(
         )),
         None => None,
     };
+    // 工具级确认：这一回合的裁决队（与核心各关卡**共用同一条队**，没有就跟平时一样直接执行）。
+    let decisions = live.decisions.clone();
+    let agent = s.params().agent.clone();
+    let mut confirm = |req: &crate::capabilities::collab::service::tool_loop::ToolConfirm,
+                       sink: &mut dyn FnMut(SessionEvent)|
+     -> String {
+        use crate::capabilities::session::api::{
+            qualify, AnswerSlot, Pending, OPT_TOOL_ALLOW, OPT_TOOL_DENY, OPT_TOOL_FULL,
+        };
+        let Some(door) = decisions.as_ref() else {
+            return OPT_TOOL_ALLOW.to_string();
+        };
+        let name = qualify(req.module.as_deref(), &req.tool);
+        // 待确认落一条系统行（可回放），再进队并推卡片——**先登记再推**：
+        // 否则用户手快会答在一张还没进队的卡上，答案丢掉、生成干等。
+        sink(SessionEvent::Notice(format!(
+            "[待确认] 工具 {} 需要用户放行。",
+            name
+        )));
+        let slot = AnswerSlot::new();
+        let (_, evs) = door.push(
+            None,
+            Pending::ToolApproval {
+                agent: agent.clone(),
+                module: req.module.clone(),
+                tool: req.tool.clone(),
+                args: req.args.clone(),
+            },
+            "",
+            Some(std::sync::Arc::clone(&slot)),
+        );
+        for e in evs {
+            sink(e);
+        }
+        // 等用户按卡上的选项作答（**不设超时**）：回答由核心写进这一格；整队作废（停止）= 拒绝。
+        let answer = slot.wait().unwrap_or_else(|| OPT_TOOL_DENY.to_string());
+        sink(SessionEvent::Notice(format!(
+            "[确认] 工具 {}：{}",
+            name,
+            match answer.as_str() {
+                OPT_TOOL_ALLOW => "用户放行",
+                OPT_TOOL_FULL => "用户放行，本轮不再询问",
+                _ => "用户拒绝（或生成已停止）",
+            }
+        )));
+        answer
+    };
+    // 只有接上裁决队时才建确认通道；否则本回合不接确认（照常执行）。
+    let mut confirms =
+        decisions.as_ref().map(
+            |_| crate::capabilities::collab::service::tool_loop::ConfirmGate {
+                full: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                confirm: &mut confirm,
+            },
+        );
     // 两个回调（流式分片 / 工具完成）都要外送短暂事件：把 emit 借出来共享（顺序因此天然正确）。
     let emit = std::cell::RefCell::new(&mut *live.emit);
     let mut acc = String::new();
@@ -351,6 +406,9 @@ fn run(
             },
             on_round,
             sink,
+            confirms.take(),
+            // 工具层提问端口（围栏这类"装不上就先问"）：与工具级确认走**同一条队**。
+            live.ask.as_deref(),
             &spec.turn,
             spec.verbs,
         )

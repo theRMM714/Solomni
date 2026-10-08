@@ -31,16 +31,11 @@ pub(crate) fn core_collab_demo_runs_full_five_stages() {
         core.collab_pending(&sid),
         Ok(Some(Pending::ConfirmBegin))
     ));
-    let events = core
-        .collab_continue(&sid, CollabStep::Begin, "yes")
-        .unwrap();
+    let events = answer_card(&mut core, &sid, OPT_BEGIN, "").unwrap();
     // 整理完停在**审查关卡**：点「同意」才继续（P4b 起协作的必经一步）。
     let events = {
         let mut e = events;
-        e.extend(
-            core.collab_continue(&sid, CollabStep::Decide, "同意开工")
-                .unwrap(),
-        );
+        e.extend(answer_card(&mut core, &sid, OPT_PLAN_SAY, "同意开工").unwrap());
         e
     };
     assert!(events.iter().any(|e| matches!(e, SessionEvent::Plan(_))));
@@ -81,23 +76,16 @@ pub(crate) fn core_collab_delegated_slate_flow() {
     assert!(ev.iter().any(
         |e| matches!(e, SessionEvent::Transcript(l) if l.iter().any(|x| x.speaker == "代拟"))
     ));
-    let _ = core
-        .collab_continue(&sid, CollabStep::ConfirmSlate, "yes")
-        .unwrap();
+    let _ = answer_card(&mut core, &sid, OPT_SLATE_CONFIRM, "").unwrap();
     assert!(matches!(
         core.collab_pending(&sid),
         Ok(Some(Pending::ConfirmBegin))
     ));
-    let events = core
-        .collab_continue(&sid, CollabStep::Begin, "yes")
-        .unwrap();
+    let events = answer_card(&mut core, &sid, OPT_BEGIN, "").unwrap();
     // 整理完停在**审查关卡**：点「同意」才继续（P4b 起协作的必经一步）。
     let events = {
         let mut e = events;
-        e.extend(
-            core.collab_continue(&sid, CollabStep::Decide, "同意开工")
-                .unwrap(),
-        );
+        e.extend(answer_card(&mut core, &sid, OPT_PLAN_SAY, "同意开工").unwrap());
         e
     };
     assert!(events
@@ -155,15 +143,20 @@ pub(crate) fn collab_delegated_roster_written_back_and_rebuilt_from_meta() {
         core.history_open("w").unwrap().0.agents.is_empty(),
         "确认名单之前不落档（名单只活在内存里）"
     );
-    // CLI 的确认门要能把这份表单逐行读出来。
-    let slate = core.collab_slate(&sid).unwrap();
-    assert_eq!(slate.len(), 1);
-    assert_eq!(slate[0].name, "调研员");
-    assert!(slate[0].transient, "组装项如实标记为临时 agent");
-    assert_eq!(slate[0].model.as_deref(), Some("m"));
+    // CLI 的确认门要把这份表单逐行读出来——名单在**转录的 [代拟] 行**里（界面照那份显示）。
+    let (_, events) = core.history_open("w").unwrap();
+    let slate: Vec<String> = replay_lines(&events)
+        .into_iter()
+        .filter(|l| l.starts_with("[代拟] "))
+        .collect();
+    assert_eq!(slate.len(), 1, "代拟行要落在转录里：{:?}", slate);
+    assert!(
+        slate[0].contains("调研员〈a〉→ m"),
+        "代拟行要写清名字 / 模块 / 模型：{:?}",
+        slate[0]
+    );
 
-    core.collab_continue(&sid, CollabStep::ConfirmSlate, "yes")
-        .unwrap();
+    answer_card(&mut core, &sid, OPT_SLATE_CONFIRM, "").unwrap();
     // 确认后名单写回 meta（重启/回档后的权威来源）。
     let meta = core.history_open("w").unwrap().0;
     assert_eq!(meta.agents.len(), 1);
@@ -182,16 +175,11 @@ pub(crate) fn collab_delegated_roster_written_back_and_rebuilt_from_meta() {
         matches!(core.collab_pending(&sid), Ok(Some(Pending::ConfirmBegin))),
         "重建后仍等确认开始"
     );
-    let events = core
-        .collab_continue(&sid, CollabStep::Begin, "yes")
-        .unwrap();
+    let events = answer_card(&mut core, &sid, OPT_BEGIN, "").unwrap();
     // 整理完停在**审查关卡**：点「同意」才继续（P4b 起协作的必经一步）。
     let events = {
         let mut e = events;
-        e.extend(
-            core.collab_continue(&sid, CollabStep::Decide, "同意开工")
-                .unwrap(),
-        );
+        e.extend(answer_card(&mut core, &sid, OPT_PLAN_SAY, "同意开工").unwrap());
         e
     };
     assert!(
@@ -311,12 +299,9 @@ pub(crate) fn core_collab_tool_modules_run_in_execution() {
         .unwrap();
     let sid = opened.sid;
     let mut events = opened.facts;
-    events.extend(core.collab_continue(&sid, CollabStep::Begin, "").unwrap());
+    events.extend(answer_card(&mut core, &sid, OPT_BEGIN, "").unwrap());
     // 整理完停在**审查关卡**：点「同意」才继续（P4b 起协作的必经一步）。
-    events.extend(
-        core.collab_continue(&sid, CollabStep::Decide, "同意开工")
-            .unwrap(),
-    );
+    events.extend(answer_card(&mut core, &sid, OPT_PLAN_SAY, "同意开工").unwrap());
     // 工具在**节点自己的子会话**里跑：那条 tool 转录行落在子会话的转录上（单 agent 行格式）。
     assert!(
         events
@@ -387,6 +372,7 @@ pub(crate) fn core_operation_runs_readonly_verification_before_the_op() {
     let sb = test_sandbox("核心", &[]);
     let mut verify = MemberTools {
         mode: crate::capabilities::llm::api::ToolMode::Envelope,
+        role: "orchestrator".to_string(),
         modules: BTreeMap::new(),
         observations: crate::capabilities::tools::api::Observations::default(),
         llm: test_llm_demo(),

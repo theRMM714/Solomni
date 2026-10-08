@@ -1,10 +1,13 @@
-# 系统工具总表：工具**是什么**（唯一真相：说明、参数契约、能否并发）。
-# 改工具的参数或说明只改这里；模型侧说明与调用校验都由这一份声明驱动。
-# 与模块工具的区别：模块工具在各自 module.yaml（外部命令），系统工具的实现是核心能力。
+# 动作表：一条动作**是什么**（唯一真相：说明、参数契约、能否并发、谁能调它）。
+# 改动作的参数或说明只改这里；模型侧说明、调用校验与授权都读这一份声明。
+# callers = 谁能调它：user（人经呈现层）/ 角色 id；它与 roles.yaml 的工具面是同一关系的两面，
+# 由 SystemTools::problems 双向锁死——任何一边漏写/多写都是装配错误。
+# 与模块工具的区别：模块工具在各自 module.yaml（外部命令，动作 id = module.<模块id>.<工具名>）。
 
 tools:
   read:
     capability: fs-read        # 权限收口依据：碰文件系统的系统工具照样受沙箱/围栏约束
+    callers: [user, discussant, executor, solo, core_proxy, planner, orchestrator]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
     desc: 读取文本文件（UTF-8）。
     parallel: true                    # 只读、无副作用：同一回复里的多个读取**真的并发跑**
     params:
@@ -25,6 +28,7 @@ tools:
         desc: 本次最多返回的行数；省略即尽量多读
   write:
     capability: fs-write        # 权限收口依据：碰文件系统的系统工具照样受沙箱/围栏约束
+    callers: [executor, solo]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
     desc: 整份写入文本文件（UTF-8）：文件不存在则新建；已存在则整份覆盖，但**要求你在本次会话里先完整读过它**（只改一处请用 edit）。
     params:
       path:
@@ -37,6 +41,7 @@ tools:
         desc: 要写入的**完整**内容（会整份覆盖，不是追加、不是局部修改）
   edit:
     capability: fs-write        # 权限收口依据：碰文件系统的系统工具照样受沙箱/围栏约束
+    callers: [executor, solo]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
     desc: 对已存在的文本文件做一处精确替换（按字面匹配，不动别处）。
     params:
       path:
@@ -57,9 +62,11 @@ tools:
         desc: 是否替换全部命中；省略 = 要求唯一命中（多处命中会报错并列出位置）
   patch:
     capability: fs-write        # 权限收口依据：碰文件系统的系统工具照样受沙箱/围栏约束
+    callers: [executor, solo]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
     desc: 用一段**自由格式**的补丁文本改文件（信封之后原样跟补丁；大段内容不要塞进 JSON）。语法见 patch_guide。
   list:
     capability: fs-read        # 权限收口依据：碰文件系统的系统工具照样受沙箱/围栏约束
+    callers: [user, discussant, executor, solo, core_proxy]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
     desc: 列一个目录（名字 / 是否目录 / 字节数，按名字排序）。**确认资料齐不齐、脚本在不在就用它**；read 只读文件，遇到目录会引导你用 list。
     parallel: true                    # 只读、无副作用
     params:
@@ -69,6 +76,7 @@ tools:
         desc: 要列的目录的真实绝对路径
   search:
     capability: fs-read        # 权限收口依据：碰文件系统的系统工具照样受沙箱/围栏约束
+    callers: [user, discussant, executor, solo, core_proxy, planner, orchestrator]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
     desc: 在文本文件里查关键词，返回带行号的命中行。
     parallel: true                    # 只读、无副作用
     params:
@@ -90,6 +98,7 @@ tools:
   # —— 核心操作：核心 AI 的产出（驱动核心走下一步）必须走工具调用，不在正文里手写 JSON ——
   plan:
     capability: none
+    callers: [planner]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
     desc: 交出方案与任务链：总结讨论，把它拆成一张有向无环图。
     params:
       plan:
@@ -107,6 +116,7 @@ tools:
 
   node_verdict:
     capability: none
+    callers: [orchestrator]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
     desc: |
       交出这一阶段的验收结论：逐节点核对产出够不够它的**当前目标**。
       后果（核心据此动作）：ok=false 的节点会被**退回待办**——用户点「继续」后**只重派这些**（同阶段其余节点保持"已通过"，不整阶段重来）；整阶段全部 ok 才解锁下一阶段。
@@ -122,6 +132,7 @@ tools:
 
   checklist:
     capability: none
+    callers: [orchestrator]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
     desc: |
       交出总验收清单：按方案逐条核对各节点的回报。
       后果（核心据此动作）：status=fail 的条目**必须**填 rework = 要返工的**节点 id**（从提示词里那张"节点 id — 负责人"表里选）——
@@ -135,6 +146,7 @@ tools:
 
   verdict:
     capability: none
+    callers: [planner]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
     desc: 判定用户对裁决的回应是否**明确到可以开工 / 放行**。
     params:
       clear:
@@ -150,6 +162,7 @@ tools:
 
   slate:
     capability: none
+    callers: [planner]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
     desc: 交出这次工作的 agent 名单（推荐 / 代拟同一条协议）。
     params:
       picks:
@@ -159,6 +172,7 @@ tools:
 
   submit_report:
     capability: none              # 不碰文件：承载"这个节点做完了什么"
+    callers: [executor]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
     desc: 回报这个节点的产出：做完了什么、动了什么、还留什么问题。**收尾时用它**——它就是这一轮的最终答复。
     params:
       summary:
@@ -177,6 +191,7 @@ tools:
 
   compact:
     capability: none              # 不碰文件：改的是"发给模型什么"，不是"留下什么"
+    callers: [user]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
     desc: 压缩上下文：把此前的内容写成一份 summary（此后不再发给模型，但用户仍可查看）。**只在压缩回合由系统发起时使用**。
     params:
       summary:
@@ -189,6 +204,7 @@ tools:
   # 真实会话宿主已落地：外部动作经 conductor 的 ProxyHost 端口，生产实现是 service/proxy.rs 的队列桥
   catalog_agents:
     capability: none              # 不碰文件：只读登记处与模块清单
+    callers: [core_proxy]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
     desc: 读取当前有效的 agent、模块与模型的公开登记信息（只读）。不返回密钥、真实私有路径或无关内容。
     parallel: true                # 只读、无副作用：同一回复里的多个读取可以并发跑
     params:
@@ -199,9 +215,11 @@ tools:
         desc: 要读的范围：agents（已存 agent）/ modules（模块公地）/ models（可用模型）/ all（全部）
   create_session:
     capability: none              # 不碰文件：建的是会话，不是路径
+    callers: [user, core_proxy]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
     desc: |
-      建一个代理子会话并**写它的开头**（mode=single 单 agent / multi 多 agent 协作）：**建好就开工**——
-      single 立刻以这份开头干活（等于替用户说第一句），multi 以它作为**本次需求**并开始讨论。
+      建一场工作（形态 + 名单 + 本次需求）：single 单 agent / collab 多 agent 协作 / proxy 把决定权整块交给核心。
+      人经呈现层调用时先建出会话、由用户后续发言推进；核心代理调用时**建好就开工**——
+      single 以 task 为第一句干活，collab 以 task 作为**本次需求**并开始讨论。
       会话落在父会话目录的 children/ 下、与父共用同一个 work/。授权与父会话由机制提供，不接受模型自授；
       创建失败不留半成品；同一个 request_id 重放不会重复创建、也不会重复开工。
     params:
@@ -209,29 +227,31 @@ tools:
         type: string
         required: true
         non_empty: true
-        desc: single（一个 agent）或 multi（多 agent 协作，至少两个）
+        desc: single（一个 agent）/ collab（多 agent 协作，至少两个）/ proxy（没有名单：核心自己挑人，只有人经呈现层能建）
       agents:
         type: array
-        required: true
         desc: |-
           agent 数组（只写**身份**，不写任务）：复用登记处的 {"ref":"已存agent名"}，
           或临时组装 {"name":"新名字","modules":["模块id"],"model":"模型id"}——`modules` 可省略或为空：
-          零模块 agent 只用内建文件工具（读写、搜索）。
+          零模块 agent 只用内建文件工具（读写、搜索）。proxy 给空数组（或省略）；collab 省略 = 委托核心按 task 代拟名单。
           **model 填 catalog_agents 回的 `id`（不是 `name`）**；同一模块不得出现在两个 agent 里。
-      opening:
+      task:
         type: string
-        required: true
-        non_empty: true
         desc: |-
-          这个会话的**开头**：single 是它的第一句（用户的需求 / 你代他派的那句话），multi 是本次需求。
-          写完就开工，不需要再发一次 send_session_message。
+          这个会话的**开头 / 本次需求**：single 是它的第一句，collab 是本次需求。
+          核心代理调用时必填（建好就开工）；人经呈现层可省（single 先建空会话，稍后再发言）。
+      name:
+        type: string
+        desc: 工作名（落盘目录名）；省略 = 由核心派生并保证不重名
+      tier:
+        type: string
+        desc: 执行档位 host / vm；省略 = 子会话沿用父会话，顶层用设置里的默认档
       request_id:
         type: string
-        required: true
-        non_empty: true
-        desc: 幂等标识：同一个 request_id 重放不会重复创建
+        desc: 幂等标识（核心代理必填）：同一个 request_id 重放不会重复创建
   send_session_message:
     capability: none              # 不碰文件：转达的是消息
+    callers: [core_proxy]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
     desc: |
       代替用户向子会话转达消息（后续补充 / 返工 / 代答门）。核心转达的每一条都留一条
       "由核心代理转达"的来源记录（不冒充用户原话）；多目标逐个回报成功与失败。
@@ -257,6 +277,7 @@ tools:
         desc: 幂等标识：同一个 request_id 重放不会重复发送
   observe_session:
     capability: none              # 不碰文件：只读会话事实
+    callers: [core_proxy]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
     desc: |
       只读观察一个子会话的元信息（状态 / 待决问题 / 产物索引 / 消息条数），不隐式启动下一轮。
       **不回消息正文**：正文一律用 read_session_messages 主动倒查（子会话不把整份转录推给你）。
@@ -277,6 +298,7 @@ tools:
         desc: 上次观察拿到的 cursor（= 那条会话的消息条数）；给了就多回一个 new_messages（自那次以来新增几条）。观察回执本身始终是**当前事实的幂等快照**，不会因为给了它而变增量
   read_session_messages:
     capability: none              # 不碰文件：只读会话消息
+    callers: [core_proxy]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
     desc: |
       倒查一个子会话的消息：0 = 最新一条，1 = 倒数第二条，依次向更早翻。只读，不推进会话。
       需要看正文时用它，不要指望观察回执把整份转录带过来。
@@ -300,6 +322,7 @@ tools:
         desc: 本次取几条（1 到 50）；按新→旧排列
   control_session:
     capability: none              # 不碰文件：改的是会话生命周期
+    callers: [user, core_proxy]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
     desc: 控制一个代理子会话：stop（停止：整棵子树落成已停止，拦住派发与唤醒，并中断在跑的生成）/ continue（继续：解冻并按形态唤醒接着走）/ close（关闭已完成或已停止的会话，终态）。
     params:
       session_id:
@@ -314,18 +337,15 @@ tools:
         desc: stop / continue / close
       reason:
         type: string
-        required: true
-        non_empty: true
-        desc: 为什么做这个控制（会进可回放记录）
+        desc: 为什么做这个控制（会进可回放记录）；省略 = 由核心按调用者补一条通用记录
       request_id:
         type: string
-        required: true
-        non_empty: true
-        desc: 幂等标识：同一个 request_id 重放不会重复控制
+        desc: 幂等标识（核心代理必填）：同一个 request_id 重放不会重复控制
 
   # —— 共享区版本化工作区：agent 只写自己的沙箱，用 pull / commit 与主副本同步 ——
   work_pull:
     capability: none              # 由 workspace 能力执行（经核心自有工具的派发路径），不经 SysIo
+    callers: [executor, solo]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
     desc: |
       把本次工作共享区（主副本）的指定路径拉进**你自己的沙箱**（同一相对路径），并记下拉取基线。
       路径以共享区为根、用 / 分隔；可以是文件，也可以是文件夹（整棵拉取）。
@@ -337,6 +357,7 @@ tools:
         desc: 要拉取的路径数组（相对共享区、/ 分隔的字符串；文件夹会整棵展开）
   work_commit:
     capability: none              # 由 workspace 能力执行；共享区只有提交这一条写路径
+    callers: [executor, solo]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
     desc: |
       把沙箱里选中的文件提交回共享区。逐个路径做三方比较（你拉取时的基线 / 沙箱当前 / 共享区当前）：
       任一条冲突 → **整个提交被拒**并逐条点名，绝不静默覆盖别的 agent 的改动。
@@ -355,6 +376,7 @@ tools:
         desc: 提交说明（一句话说清这次改了什么）
   work_status:
     capability: none              # 只读：不碰文件，读版本库与拉取基线
+    callers: [executor, solo]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
     parallel: true                # 只读、无副作用：同一回复里的多个读取可以并发跑
     desc: |
       读取共享区的当前提交与路径清单，以及你的工作副本逐条状态
@@ -367,6 +389,7 @@ tools:
   # —— 协作动词：讨论阶段的表态（声明式工具：声明在总表，由角色面按回合发放）——
   say:
     capability: none
+    callers: [discussant]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
     desc: 发表意见、提方案（讨论阶段的正常发言）。
     params:
       text:
@@ -375,6 +398,7 @@ tools:
         desc: 要说的话
   agree:
     capability: none
+    callers: [discussant]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
     desc: 同意当前方案：认为方案没有缺口、你可以开工时用它。发过之后不再被追问，直到在场者全部同意。
     params:
       text:
@@ -383,6 +407,7 @@ tools:
         desc: 附一句同意理由（可短）
   leave:
     capability: none
+    callers: [discussant]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
     desc: 退出讨论：你的模块与这件事无关时用它（离开的人不计入"在场者全部同意"）。
     params:
       text:
@@ -391,9 +416,164 @@ tools:
         desc: 为什么不再参与
   ask:
     capability: none
+    callers: [discussant]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
     desc: 需要用户决定时用它（缺参数、需求有歧义、要在几条路线里选）：讨论暂停，等用户回答后继续。
     params:
       text:
         type: string
         required: true
         desc: 要问用户什么
+
+  # —— 会话动作：人经呈现层调用（user）；agent 侧对应 create_session / control_session / send_session_message ——
+  send_message:
+    capability: none
+    callers: [user]
+    desc: 向一条会话投喂一条**用户发言**并推进它（生成可用 control_session 的 stop 中止）。
+    params:
+      session_id: { type: string, required: true, non_empty: true, desc: 会话 id }
+      text: { type: string, required: true, desc: 要说的话 }
+  set_task:
+    capability: none
+    callers: [user]
+    desc: 协作会话：写下本次需求（起点那一关；其余推进一律走 answer_card 回答卡片）。
+    params:
+      session_id: { type: string, required: true, non_empty: true, desc: 会话 id }
+      text: { type: string, required: true, desc: 本次需求 }
+  answer_card:
+    capability: none
+    callers: [user]
+    desc: |
+      回答一张裁决卡：带**卡片 id + 选项 id**（+ 可选附言），后端校验选项 id 属于当时那张卡的选项集
+      （防旧卡的答案放行新请求），并且**只有队首那张**能答。
+      问什么、有几个选项、每个选项做什么由发起方实现（核心各关卡与工具级确认共用这一条队）；
+      呈现层只把选项画成按钮、把选中的 id 发回来。
+    params:
+      session_id: { type: string, required: true, non_empty: true, desc: 会话 id }
+      card: { type: string, required: true, non_empty: true, desc: 回答的是哪张卡（卡片 id） }
+      option: { type: string, required: true, non_empty: true, desc: 选中的选项 id }
+      note: { type: string, desc: 附言（用户自己的想法；请教这一关必填） }
+  withdraw:
+    capability: none
+    callers: [user]
+    desc: 协作会话：撤回某个 agent 的同意（核心按剩余转录重新判定收敛）。
+    params:
+      session_id: { type: string, required: true, non_empty: true, desc: 会话 id }
+      agent: { type: string, required: true, non_empty: true, desc: 要撤回的 agent 实例名 }
+  rewind:
+    capability: none
+    callers: [user]
+    desc: 回档：archive（留档，可恢复）/ delete（真截断）/ restore（删掉该留档标记及其后）；返回重放后的完整事件流。
+    params:
+      session_id: { type: string, required: true, non_empty: true, desc: 会话 id }
+      mode: { type: string, non_empty: true, desc: archive / delete / restore；省略 = archive（留档） }
+      id: { type: integer, required: true, min: 0, desc: 行 id（archive / delete）或留档标记 id（restore） }
+  update_task:
+    capability: none
+    callers: [user]
+    desc: 改需求：给会话换一份本次需求；返回重放后的完整事件流。
+    params:
+      session_id: { type: string, required: true, non_empty: true, desc: 会话 id }
+      text: { type: string, required: true, desc: 新的需求 }
+  edit_session:
+    capability: none
+    callers: [user]
+    desc: 配置：改每个 agent 的模块与模型、执行档位、定版与网络（会话开过后名单与形态冻结）。
+    params:
+      session_id: { type: string, required: true, non_empty: true, desc: 会话 id }
+      agents: { type: array, required: true, desc: 每个 agent 的配置数组（name / modules / model / permissions） }
+      tier: { type: string, required: true, non_empty: true, desc: 执行档位 host / vm }
+      base: { type: string, desc: 虚拟机档的基础根（可选） }
+      pins: { type: object, desc: 能力定版表（可选） }
+      net: { type: boolean, desc: 是否放行出站网络 }
+  upload:
+    capability: none
+    callers: [user]
+    desc: 把一份文件写进本次工作的共享区（作者 = user，权威提交）；同名冲突如实报出，不静默覆盖。
+    params:
+      session_id: { type: string, required: true, non_empty: true, desc: 会话 id }
+      name: { type: string, required: true, non_empty: true, desc: 落进共享区的文件名 }
+      data_base64: { type: string, required: true, desc: 文件内容的 base64 }
+      overwrite: { type: boolean, desc: 同名时是否覆盖（缺省 false） }
+
+  # —— 登记处动作：产品级资源（供应商 / 密钥 / 模型 / agent / 设置）——
+  # callers **只给 user**：这些是产品级资源，默认不开放给任何角色（密钥与全局配置只由人操作）。
+  upsert_provider:
+    capability: none
+    callers: [user]
+    desc: 登记（或更新）一个供应商：端点 + 密钥。api_key 留空 = 保留原密钥（界面从不回显，值也不进动作目录）。
+    params:
+      id: { type: string, required: true, non_empty: true, desc: 供应商 id }
+      base_url: { type: string, required: true, non_empty: true, desc: 端点基地址 }
+      api_key: { type: string, desc: 密钥；留空 = 保留原密钥 }
+  remove_provider:
+    capability: none
+    callers: [user]
+    desc: 移除一个供应商。
+    params:
+      id: { type: string, required: true, non_empty: true, desc: 供应商 id }
+  discover_models:
+    capability: none
+    callers: [user]
+    desc: 按该供应商的端点与密钥列出它当前可用的模型名（真实网络调用）。
+    params:
+      id: { type: string, required: true, non_empty: true, desc: 供应商 id }
+  upsert_model:
+    capability: none
+    callers: [user]
+    desc: 登记（或更新）一个模型：展示名 / 实际模型串 / 所属供应商 / 能力说明 / 上下文窗口。
+    params:
+      id: { type: string, required: true, non_empty: true, desc: 模型 id }
+      name: { type: string, required: true, non_empty: true, desc: 展示名 }
+      api_model: { type: string, required: true, non_empty: true, desc: 发给供应商的实际模型串 }
+      provider: { type: string, required: true, non_empty: true, desc: 所属供应商 id }
+      note: { type: string, desc: 能力说明（给人看） }
+      context: { type: integer, min: 0, desc: 上下文窗口（token，估算用）；省略 = 0（未知） }
+  remove_model:
+    capability: none
+    callers: [user]
+    desc: 移除一个模型。
+    params:
+      id: { type: string, required: true, non_empty: true, desc: 模型 id }
+  set_core_model:
+    capability: none
+    callers: [user]
+    desc: 把某个模型设为核心默认（未指定模型的 agent 回落它）。
+    params:
+      id: { type: string, required: true, non_empty: true, desc: 模型 id }
+  probe_model_tools:
+    capability: none
+    callers: [user]
+    desc: 实测一条通道支不支持原生工具调用（两条最小请求）；结论写回登记处，三态如实报。
+    params:
+      id: { type: string, required: true, non_empty: true, desc: 模型 id }
+  probe_replay_shape:
+    capability: none
+    callers: [user]
+    desc: 实测这个模型在回放形状上的结论（只报事实，不改登记处：采不采用由人定）。
+    params:
+      id: { type: string, required: true, non_empty: true, desc: 模型 id }
+  upsert_agent:
+    capability: none
+    callers: [user]
+    desc: 登记（或更新）一个 agent：名字 / 模块 / 默认模型 / 说明。名字会成为沙箱目录名（校验更严）。
+    params:
+      name: { type: string, required: true, non_empty: true, desc: agent 名字 }
+      modules: { type: array, desc: 该 agent 具备的模块 id 数组（可空） }
+      model: { type: string, desc: 默认模型 id；留空 = 核心默认 }
+      note: { type: string, desc: 说明（给人看） }
+  remove_agent:
+    capability: none
+    callers: [user]
+    desc: 从登记处移除一个 agent。
+    params:
+      name: { type: string, required: true, non_empty: true, desc: agent 名字 }
+  set_settings:
+    capability: none
+    callers: [user]
+    desc: 改产品设置（部分更新：未提交的字段保留现值）。执行档位 / 围栏写权限 / 会话权限默认值不在这一层暴露。
+    params:
+      streaming: { type: boolean, desc: 流式传输 }
+      show_reasoning: { type: boolean, desc: 思维链显示 }
+      llm_timeout_secs: { type: integer, min: 1, desc: 单次模型调用的超时（秒） }
+      compact_at_percent: { type: integer, min: 0, max: 100, desc: 上下文用到百分之多少就压缩 }
+      discuss_remind_cap: { type: integer, min: 0, desc: 一轮内最多提醒几次 }

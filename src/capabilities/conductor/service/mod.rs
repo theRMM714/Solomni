@@ -3,7 +3,7 @@
 //! 装配（new 适配器）只发生在 main 组合根。前端只见 Conductor 门面、会话句柄与 SessionEvent 流。
 
 use crate::capabilities::conductor::api::{
-    AgentInstance, AgentSuggestion, CollabStep, ConfigAgent, FilesAgentRootView, FilesAgentView,
+    AgentInstance, AgentSuggestion, ConfigAgent, FilesAgentRootView, FilesAgentView,
     FilesRootsView, FilesView, RewindTarget, RuntimeReport, SessionConfig, SessionEdit,
     SessionView, TierChoices, WorkMode, WorkOpened, WorkSpec,
 };
@@ -11,7 +11,7 @@ use crate::capabilities::llm::api::Llm;
 use crate::capabilities::session::api::History;
 #[cfg(test)]
 pub(crate) use crate::capabilities::session::api::Live;
-use crate::capabilities::session::api::{Pending, SessionEvent};
+use crate::capabilities::session::api::{Answered, GateTicket, SessionEvent};
 use crate::capabilities::workspace::api::Workspace;
 
 use crate::capabilities::collab::api::AfterTurn;
@@ -67,17 +67,14 @@ pub(crate) enum PersistPolicy {
 
 impl PersistPolicy {
     /// 一条事件该不该留：`Drop` 一条都不留；`Keep` 也不留**短暂事件**
-    /// （流式增量 / 运行态 / 实时工具卡 / 裁决卡——它们只给在场的前端看）。
+    /// （流式增量 / 运行态 / 实时工具卡——它们只给在场的前端看；裁决卡与回答按会话种类落盘）。
     pub(crate) fn keeps(&self, ev: &SessionEvent) -> bool {
         if *self == PersistPolicy::Drop {
             return false;
         }
         !matches!(
             ev,
-            SessionEvent::Delta { .. }
-                | SessionEvent::Working { .. }
-                | SessionEvent::ToolCall(_)
-                | SessionEvent::Decision { .. }
+            SessionEvent::Delta { .. } | SessionEvent::Working { .. } | SessionEvent::ToolCall(_)
         )
     }
 }
@@ -192,6 +189,9 @@ pub struct Conductor {
     /// 工具总表与角色表的能力面（`systools/` 两张表）：**表本体在工具能力里**，与册子互不依赖。
     systools: Arc<dyn Tools>,
     sessions: HashMap<SessionId, Session>,
+    /// **裁决队**（按会话 id 取）：核心各关卡与工具级确认共用同一条队（见 docs/session/session-model.md）。
+    /// 它跨线程：生成线程等在工作线程上，回答与快照在核心线程上——同一份句柄、同一把锁。
+    desk: Arc<crate::capabilities::session::api::DecisionDesk>,
     /// 正在生成的会话：对象被工作线程**取走**了，核心表里暂时没有它。
     /// 为什么取出而不是就地生成：生成要跑几十秒到几分钟，占着唯一的命令队列会让
     /// 读接口（历史列表、状态）与其它会话的命令全排在它后面——界面因此"假死"。
@@ -199,6 +199,8 @@ pub struct Conductor {
     running: std::collections::BTreeSet<SessionId>,
 }
 
+mod action;
+pub(crate) mod ask_user;
 mod env;
 mod flow;
 mod history;
@@ -206,7 +208,7 @@ pub mod proxy;
 mod rewind;
 mod turn;
 mod work;
-mod work_tools;
+pub(crate) mod work_tools;
 impl Conductor {
     /// 组合根专用：main 负责创建适配器并注入；conductor 不自建任何具体实现。
     // 组合根注入的构造函数：参数天然多，收口成参数对象只是把参数挪个地方、并让装配更难读。
@@ -234,6 +236,7 @@ impl Conductor {
             prompt,
             systools,
             sessions: HashMap::new(),
+            desk: crate::capabilities::session::api::DecisionDesk::new(),
             running: std::collections::BTreeSet::new(),
         }
     }
@@ -241,6 +244,11 @@ impl Conductor {
     /// 日志端口句柄：入站手柄（conductor::api）与组合根共用同一份事实记录。
     pub fn log_handle(&self) -> Arc<dyn crate::kernel::ports::Log + Send + Sync> {
         Arc::clone(&self.log)
+    }
+
+    /// 目的：工具执行面句柄——入站手柄跑"人直接用的模块工具"要用同一份执行面（不重装）。
+    pub fn tools_handle(&self) -> Arc<dyn ToolExec + Send + Sync> {
+        Arc::clone(&self.tools)
     }
 
     /// 登记处能力面（只读）：组合根与测试读登记处的事实走这里。
@@ -324,6 +332,63 @@ impl Conductor {
         }
     }
 
+    /// 目的：这一段工作已被停 / 已关闭时，把它的裁决队**整队作废**（等待方按「停止 = 拒绝」解开）。
+    /// 返回：要外送 / 落盘的作废事件（本来就没挂着卡 = 空）。判据是落盘的运行态（meta.run），不是内存猜测。
+    pub(crate) fn void_gates_of(&mut self, sid: &str) -> Vec<SessionEvent> {
+        let reason = match self.history.meta(sid).map(|m| m.run) {
+            Ok(RunState::Stopped) => "用户按了停止：这一队裁决一律作废（停止 = 拒绝）",
+            Ok(RunState::Closed) => "会话已关闭：这一队裁决一律作废",
+            _ => return Vec::new(),
+        };
+        // 判据是**队本身**（核心各关卡与工具级确认排在同一条队上）；没有队 = 本来就没挂着卡。
+        let Some(door) = self.desk.peek(sid) else {
+            return Vec::new();
+        };
+        let cards = door.void();
+        if cards.is_empty() {
+            return Vec::new();
+        }
+        vec![SessionEvent::DecisionVoid {
+            cards,
+            reason: reason.to_string(),
+        }]
+    }
+
+    /// 目的：取这个会话的**裁决队**（核心各关卡与工具级确认共用同一条）。
+    /// 约束：新队按转录里已发出的卡号续号——卡号会话内唯一、跨重启稳定（已答过的不重问）。
+    pub(crate) fn desk_of(
+        &self,
+        sid: &str,
+    ) -> Arc<crate::capabilities::session::api::DecisionDoor> {
+        if let Some(d) = self.desk.peek(sid) {
+            return d;
+        }
+        let issued = self
+            .history
+            .load(sid)
+            .map(|(_, ev)| crate::capabilities::session::api::issued_in(&ev))
+            .unwrap_or(0);
+        self.desk.session(sid, issued)
+    }
+
+    /// 目的：会话没了，它的裁决队随会话一起消失（等待方与转录都不复存在）。
+    pub(crate) fn forget_desk(&self, sid: &str) {
+        self.desk.forget(sid);
+    }
+
+    /// 目的：把 root 及其整棵子树里等用户裁决的队**一律作废**（停止 = 拒绝），按会话给出作废事件。
+    /// 约束：会话此刻被生成线程拿在手里时它不在表里——那一份由 put_collab 交回时按运行态作废。
+    pub(crate) fn void_gates_in_subtree(&mut self, root: &str) -> Vec<(String, Vec<SessionEvent>)> {
+        let mut out = Vec::new();
+        for sid in self.subtree_of(root) {
+            let evs = self.void_gates_of(&sid);
+            if !evs.is_empty() {
+                out.push((sid, evs));
+            }
+        }
+        out
+    }
+
     /// 协作生成结束**交回**：重新插入 + 解除"生成中"，并**为就绪节点派发子会话**。
     /// 转录已由工作线程按"一次模型调用"的粒度增量落盘（见 `Persister`），这里不重复落。
     /// 返回值：派发产生的事件（调用方负责入台）。
@@ -334,7 +399,11 @@ impl Conductor {
     ) -> (Vec<SessionEvent>, Vec<(String, String, String)>) {
         self.running.remove(sid);
         self.sessions.insert(sid.to_string(), Session::Collab(c));
-        self.spawn_ready_nodes(sid)
+        // 交回时这段工作已被停 / 已关闭：队列里没答的卡**一律作废**（生成期间对象在别人手里，只能在这里补）。
+        let mut voided = self.void_gates_of(sid);
+        let (spawned, todo) = self.spawn_ready_nodes(sid);
+        voided.extend(spawned);
+        (voided, todo)
     }
 
     /// 方案过审后：链里**就绪且还没有子会话**的节点各建一个子会话，并如实外送。

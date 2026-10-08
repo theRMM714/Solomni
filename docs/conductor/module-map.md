@@ -11,16 +11,20 @@
 | --- | --- |
 | `src/capabilities/conductor/mod.rs` |
 | `src/capabilities/conductor/api/mod.rs` |
+| `src/capabilities/conductor/api/action.rs` |
 | `src/capabilities/conductor/api/handle.rs` |
 | `src/capabilities/conductor/api/proxy.rs` |
 | `src/capabilities/conductor/service/mod.rs` |
+| `src/capabilities/conductor/service/action.rs` |
 | `src/capabilities/conductor/service/work.rs` |
 | `src/capabilities/conductor/service/turn.rs` |
 | `src/capabilities/conductor/service/flow.rs` |
 | `src/capabilities/conductor/service/rewind.rs` |
 | `src/capabilities/conductor/service/env.rs` |
 | `src/capabilities/conductor/service/history.rs` |
+| `src/capabilities/conductor/service/ask_user.rs` |
 | `src/capabilities/conductor/ports.rs` |
+| `src/capabilities/conductor/domain/action.rs` |
 | `src/capabilities/conductor/domain/proxy.rs` |
 | `src/capabilities/conductor/service/proxy.rs` |
 | `src/capabilities/conductor/service/work_tools.rs` |

@@ -64,6 +64,8 @@ const enc = encodeURIComponent;
 
 /** 一次能力面调用：不设客户端超时（一轮可能跑几分钟），等它自己返回。
     长请求被网络层重置（ECONNRESET）是常态——**重试**，而不是让整个演示崩掉。 */
+/* 动作只有一个入口 /api/actions/{id}：声明与校验都在核心。 */
+const actUrl = (id) => "/api/actions/" + id;
 async function api(method, path, body, tries = 3) {
   for (let i = 1; ; i++) {
     try {
@@ -194,7 +196,7 @@ async function main() {
   if (block) return refuseDemo(block);
 
   console.log("第一幕：把决定权整块交给核心（它自己挑人、建子工作、转达；子会话停下会叫醒它）");
-  const created = await api("POST", "/api/sessions", { name: WORK, mode: "proxy" });
+  const created = await api("POST", actUrl("create_session"), { name: WORK, mode: "proxy" });
   ok(
     created.status === 200 && created.json && created.json.sid === WORK,
     "建代理会话（没有名单：选它就是授予全权）",
@@ -206,7 +208,7 @@ async function main() {
   ok(opened.includes("决定权整块交给核心"), "授权事实留在转录里（不只看 meta）", opened.slice(0, 200));
 
   console.log("（跟核心说一句目标；一轮要等模型跑完，可能要几分钟）");
-  const said = await api("POST", "/api/sessions/" + enc(sid) + "/say", { text: GOAL });
+  const said = await api("POST", actUrl("send_message"), { session_id: sid, text: GOAL });
   ok(said.status === 200, "跟核心说目标", said.text);
 
   // ---- 等它把活派下去、子会话跑完、它被叫醒、最后收敛 ----
@@ -347,10 +349,10 @@ async function main() {
 
   // ---- 第二幕：用户接管 = 按一次停止，整棵子树一起停 ----
   console.log("第二幕：用户按下停止 = 整棵子树一起停");
-  const created2 = await api("POST", "/api/sessions", { name: STOP_WORK, mode: "proxy" });
+  const created2 = await api("POST", actUrl("create_session"), { name: STOP_WORK, mode: "proxy" });
   ok(created2.status === 200, "建第二幕的代理会话", created2.text);
   const sid2 = (created2.json && created2.json.sid) || STOP_WORK;
-  const said2 = await api("POST", "/api/sessions/" + enc(sid2) + "/say", { text: STOP_GOAL });
+  const said2 = await api("POST", actUrl("send_message"), { session_id: sid2, text: STOP_GOAL });
   ok(said2.status === 200, "跟它说一件要花时间的事", said2.text);
 
   // 等它把活派给某个人、那个人真的在跑——这时候按停止才有级联可言。
@@ -366,7 +368,7 @@ async function main() {
     "；在跑 " + (caught.length ? caught.join("、") : "无"),
   );
 
-  const stopped = await api("POST", "/api/sessions/" + enc(sid2) + "/stop", {});
+  const stopped = await api("POST", actUrl("control_session"), { session_id: sid2, action: "stop" });
   ok(stopped.status === 200, "点停止", stopped.text);
   // 停止是**持久事实**（run=stopped），不是只中断这一刻：多等几轮，之后的叫醒也会被闸门拒掉。
   let still = [];
@@ -385,7 +387,7 @@ async function main() {
 
   // 「继续」是「停止」的逆操作：解冻后再发一轮（这条会等模型跑完）。
   console.log("   继续：解冻并接着走");
-  const resumed = await api("POST", "/api/sessions/" + enc(sid2) + "/continue", {});
+  const resumed = await api("POST", actUrl("control_session"), { session_id: sid2, action: "continue" });
   ok(resumed.status === 200, "点继续（解冻并接着走）", resumed.text);
   const activeTree = (await state()).history.filter((h) => h.name === sid2 || h.parent === sid2);
   ok(

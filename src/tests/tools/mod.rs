@@ -5,5 +5,6 @@
 
 mod dispatch;
 mod face;
+mod fence;
 mod patch;
 mod run_loop;

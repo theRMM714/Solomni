@@ -121,19 +121,21 @@ impl CatalogScope {
     }
 }
 
-/// create_session 的形态。
+/// create_session 的形态：与 `WorkMode` 同词（single / collab / proxy）；代理不能往代理里套。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SessionMode {
     Single,
-    Multi,
+    Collab,
+    Proxy,
 }
 
 impl SessionMode {
     pub fn parse(s: &str) -> Result<Self, String> {
         match s {
             "single" => Ok(Self::Single),
-            "multi" => Ok(Self::Multi),
-            other => Err(format!("mode 只能是 single 或 multi：{}", other)),
+            "collab" => Ok(Self::Collab),
+            "proxy" => Ok(Self::Proxy),
+            other => Err(format!("mode 只能是 single / collab / proxy：{}", other)),
         }
     }
 }
@@ -226,29 +228,29 @@ impl ControlAction {
     }
 }
 
-/// 协作子会话的**落门方式**：代理转达一条消息时，按目标"此刻等的是哪一关"决定送到哪里。
-/// 与前端读 `pending.kind` 再选动作是同一口径（`Pending::decision_parts`）——
-/// 别处不许再按消息种类猜门（猜错就会把"开工"按到"请教"上）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum GateRoute {
-    /// 二选一的关（代拟名单）：短步骤，不跑泵。
-    ConfirmSlate,
-    /// 二选一的关（开始讨论）：跑泵。
-    Begin,
-    /// 其余门（请教 / 方案待审 / 节点没过）：自由文本，由协作自己的核心 AI 判明确性。
-    Decide,
-    /// 没在等门（停在中途 / 已收敛）：把它推着接着走，而不是塞一句"没有等你定的事"。
-    Resume,
-}
-
-/// 从"等的是哪一关"（`Pending::decision_parts().0`；None = 没在等门）定落门方式。
-pub fn gate_route(pending: Option<&str>) -> GateRoute {
-    match pending {
-        Some("confirm_slate") => GateRoute::ConfirmSlate,
-        Some("confirm_begin") => GateRoute::Begin,
-        Some(_) => GateRoute::Decide,
-        None => GateRoute::Resume,
+/// 目的：代理通道的**适配规则**：转达的是一句话（模型说的），落门时要把它变成**选项 id**。
+///   判据是稳定的选项 id：确认类看这句话是不是"是"（否则解成取消），其余取第一个选项（放行 / 回话）。
+///   通道本身只认选项 id——这份适配只属于代理这一条转达通道（见 docs/session/session-model.md）。
+pub fn relay_option(
+    options: &[crate::capabilities::session::api::DecisionOption],
+    text: &str,
+) -> String {
+    use crate::capabilities::session::api::{DecisionOption, OPT_SLATE_CANCEL, OPT_SLATE_CONFIRM};
+    let has = |id: &str| options.iter().any(|o: &DecisionOption| o.id == id);
+    if has(OPT_SLATE_CONFIRM) && has(OPT_SLATE_CANCEL) {
+        let t = text.trim().to_ascii_lowercase();
+        let yes = matches!(
+            t.as_str(),
+            "y" | "yes" | "ok" | "allow" | "是" | "确认" | "同意"
+        ) || t.contains("allow");
+        return if yes {
+            OPT_SLATE_CONFIRM
+        } else {
+            OPT_SLATE_CANCEL
+        }
+        .to_string();
     }
+    options.first().map(|o| o.id.clone()).unwrap_or_default()
 }
 
 /// 一次控制动作写进目标会话的**可回放记录**文案（机制写，前端照同一条显示）。
@@ -355,10 +357,14 @@ pub struct ControlState {
 pub struct NewSession {
     pub mode: SessionMode,
     pub agents: Vec<NewAgent>,
-    /// **这个会话的开头**：single = 它的第一句（点火用的派发），multi = 本次需求。
+    /// **这个会话的开头 / 本次需求**：single = 它的第一句（点火用的派发），collab = 本次需求。
     /// 建好就开始——不是"给某个 agent 的任务"（见 `ProxyBridge::create_session`）。
-    pub opening: String,
+    pub task: String,
     pub request_id: String,
+    /// 目的：工作名——给了就用它，没给由宿主派生（代理建的子工作按 agent 名派生）。
+    pub name: Option<String>,
+    /// 目的：执行档位——给了就用它，没给由宿主按父会话或设置定。
+    pub tier: Option<String>,
     /// 父会话：由**机制**从调用上下文填，不从模型参数取（模型不能自选父）。
     pub parent: Option<String>,
 }
@@ -390,10 +396,20 @@ pub struct CatalogArgs {
 #[derive(Debug, Clone, Deserialize)]
 pub struct CreateArgs {
     pub mode: String,
-    /// 每项是对象，形状在 parse_agents 里逐条校验（数组元素形状声明层表达不了）。
+    /// 每项是对象，形状在 parse_agents 里逐条校验（数组元素形状声明层表达不了）；省略 = 空（代理形态 / 代拟）。
+    #[serde(default)]
     pub agents: Vec<serde_json::Value>,
-    pub opening: String,
+    /// 目的：本次需求 / 单模式的开头——代理必填（建好就开工），用户可省（单模式先建空会话）。
+    #[serde(default)]
+    pub task: Option<String>,
+    #[serde(default)]
     pub request_id: String,
+    /// 目的：工作名（可省 = 由宿主派生）。
+    #[serde(default)]
+    pub name: Option<String>,
+    /// 目的：执行档位 host / vm（可省 = 由宿主按父会话或设置定）。
+    #[serde(default)]
+    pub tier: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -451,23 +467,36 @@ pub fn catalog_scope(args: &CatalogArgs) -> Result<CatalogScope, String> {
 /// 失败一律如实报错——调用方据此拒绝整次调用，不留半成品。
 pub fn resolve_new_session(args: &CreateArgs, catalog: &Catalog) -> Result<NewSession, String> {
     let mode = SessionMode::parse(args.mode.trim())?;
+    if mode == SessionMode::Proxy {
+        return Err("代理不能往里套代理：mode 只能是 single 或 collab".to_string());
+    }
     let request_id = args.request_id.trim().to_string();
     if request_id.is_empty() {
         return Err("request_id 不能为空（幂等标识）".to_string());
     }
-    let opening = args.opening.trim().to_string();
-    if opening.is_empty() {
+    let task = args.task.clone().unwrap_or_default().trim().to_string();
+    if task.is_empty() {
         return Err(
-            "opening 不能为空（这个会话的开头：single 是它的第一句，multi 是本次需求）".to_string(),
+            "task 不能为空（这个会话的开头：single 是它的第一句，collab 是本次需求）".to_string(),
         );
     }
+    let name = args
+        .name
+        .as_ref()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    let tier = args
+        .tier
+        .as_ref()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
     let agents = parse_agents(&args.agents)?;
     match mode {
         SessionMode::Single if agents.len() != 1 => {
             return Err("mode=single 只接受一个 agent".to_string())
         }
-        SessionMode::Multi if agents.len() < 2 => {
-            return Err("mode=multi 至少要两个 agent".to_string())
+        SessionMode::Collab if agents.len() < 2 => {
+            return Err("mode=collab 至少要两个 agent".to_string())
         }
         _ => {}
     }
@@ -540,8 +569,10 @@ pub fn resolve_new_session(args: &CreateArgs, catalog: &Catalog) -> Result<NewSe
     Ok(NewSession {
         mode,
         agents: resolved,
-        opening,
+        task,
         request_id,
+        name,
+        tier,
         parent: None,
     })
 }
@@ -767,7 +798,7 @@ mod tests {
         let ok: CreateArgs = serde_json::from_value(serde_json::json!({
             "mode": "single",
             "agents": [{"name": "a", "modules": ["m1"], "model": "gpt"}],
-            "opening": "做事",
+            "task": "做事",
             "request_id": "r1"
         }))
         .unwrap();
@@ -775,13 +806,13 @@ mod tests {
         assert_eq!(spec.mode, SessionMode::Single);
         assert_eq!(spec.agents[0].modules, vec!["m1".to_string()]);
         assert!(spec.agents[0].transient);
-        assert_eq!(spec.opening, "做事");
+        assert_eq!(spec.task, "做事");
 
         // modules 可以省略：零模块 agent 只用内建文件工具。
         let no_modules: CreateArgs = serde_json::from_value(serde_json::json!({
             "mode": "single",
             "agents": [{"name": "纯写作", "model": "gpt"}],
-            "opening": "写一篇稿",
+            "task": "写一篇稿",
             "request_id": "r0"
         }))
         .unwrap();
@@ -791,7 +822,7 @@ mod tests {
         let unknown_module: CreateArgs = serde_json::from_value(serde_json::json!({
             "mode": "single",
             "agents": [{"name": "a", "modules": ["nope"]}],
-            "opening": "做事",
+            "task": "做事",
             "request_id": "r2"
         }))
         .unwrap();
@@ -803,7 +834,7 @@ mod tests {
         let model_name: CreateArgs = serde_json::from_value(serde_json::json!({
             "mode": "single",
             "agents": [{"name": "a", "modules": ["m1"], "model": "GPT"}],
-            "opening": "做事",
+            "task": "做事",
             "request_id": "r2b"
         }))
         .unwrap();
@@ -811,22 +842,22 @@ mod tests {
         assert!(err.contains("无此模型"), "{}", err);
         assert!(err.contains("gpt"), "失败要把在册模型 id 列回去：{}", err);
 
-        let empty_opening: CreateArgs = serde_json::from_value(serde_json::json!({
+        let empty_task: CreateArgs = serde_json::from_value(serde_json::json!({
             "mode": "single",
             "agents": [{"name": "a", "modules": ["m1"]}],
-            "opening": "   ",
+            "task": "   ",
             "request_id": "r2c"
         }))
         .unwrap();
-        assert!(resolve_new_session(&empty_opening, &c)
+        assert!(resolve_new_session(&empty_task, &c)
             .unwrap_err()
-            .contains("opening"));
+            .contains("task"));
 
-        // 身份项不接受任务字段（任务是会话级的 opening）。
+        // 身份项不接受任务字段（任务是会话级的 task）。
         let extra: CreateArgs = serde_json::from_value(serde_json::json!({
             "mode": "single",
             "agents": [{"ref": "a", "objective": "做事"}],
-            "opening": "做事",
+            "task": "做事",
             "request_id": "r2d"
         }))
         .unwrap();
@@ -835,12 +866,12 @@ mod tests {
             .contains("不认识的键"));
 
         let dup: CreateArgs = serde_json::from_value(serde_json::json!({
-            "mode": "multi",
+            "mode": "collab",
             "agents": [
                 {"name": "a", "modules": ["m1"]},
                 {"name": "b", "modules": ["m1"]}
             ],
-            "opening": "一起做",
+            "task": "一起做",
             "request_id": "r3"
         }))
         .unwrap();
@@ -849,9 +880,9 @@ mod tests {
             .contains("同一模块只能属于一个 agent"));
 
         let one: CreateArgs = serde_json::from_value(serde_json::json!({
-            "mode": "multi",
+            "mode": "collab",
             "agents": [{"name": "a", "modules": ["m1"]}],
-            "opening": "一起做",
+            "task": "一起做",
             "request_id": "r4"
         }))
         .unwrap();
@@ -863,7 +894,7 @@ mod tests {
         let reuse: CreateArgs = serde_json::from_value(serde_json::json!({
             "mode": "single",
             "agents": [{"ref": "a"}],
-            "opening": "做事",
+            "task": "做事",
             "request_id": "r5"
         }))
         .unwrap();
@@ -874,7 +905,7 @@ mod tests {
         let missing: CreateArgs = serde_json::from_value(serde_json::json!({
             "mode": "single",
             "agents": [{"ref": "nope"}],
-            "opening": "做事",
+            "task": "做事",
             "request_id": "r6"
         }))
         .unwrap();
@@ -980,15 +1011,24 @@ mod tests {
         assert!(all.contains("models"));
     }
 
-    /// 落门方式只看"它此刻等的是哪一关"：二选一走确认，其余门走裁决，没在等门就接着推进。
+    /// 转达的适配只看选项 id：确认类认"是"与"allow"，其余取第一个选项。
     #[test]
-    fn gate_route_follows_the_pending_kind() {
-        assert_eq!(gate_route(Some("confirm_slate")), GateRoute::ConfirmSlate);
-        assert_eq!(gate_route(Some("confirm_begin")), GateRoute::Begin);
-        for kind in ["ask", "plan_review", "node_blocked"] {
-            assert_eq!(gate_route(Some(kind)), GateRoute::Decide, "{}", kind);
-        }
-        assert_eq!(gate_route(None), GateRoute::Resume);
+    fn relay_option_picks_a_stable_option_id() {
+        use crate::capabilities::session::api::{
+            DecisionOption, OPT_ASK_REPLY, OPT_BEGIN, OPT_SLATE_CANCEL, OPT_SLATE_CONFIRM,
+        };
+        let o = |id: &str| DecisionOption {
+            id: id.to_string(),
+            label: id.to_string(),
+        };
+        let slate = vec![o(OPT_SLATE_CONFIRM), o(OPT_SLATE_CANCEL)];
+        assert_eq!(relay_option(&slate, "yes"), OPT_SLATE_CONFIRM);
+        assert_eq!(relay_option(&slate, " 确认 "), OPT_SLATE_CONFIRM);
+        assert_eq!(relay_option(&slate, "先别建"), OPT_SLATE_CANCEL);
+        let ask = vec![o(OPT_ASK_REPLY)];
+        assert_eq!(relay_option(&ask, "随便说说"), OPT_ASK_REPLY);
+        let begin = vec![o(OPT_BEGIN)];
+        assert_eq!(relay_option(&begin, ""), OPT_BEGIN);
     }
 
     /// 转达与控制都要留下"谁、为什么"的可回放记录。

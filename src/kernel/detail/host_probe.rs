@@ -1,5 +1,7 @@
-//! HostProbe 的机制实现：读环境变量、查路径存在性、按平台判定虚拟化能力。
-//! **只读事实**：不执行任何程序、不安装、不写任何东西。
+//! 目的：`HostProbe` 端口的机制实现——把本机事实读出来。
+//! 管：读环境变量、查路径存在性、按平台判定虚拟机能力。
+//! 不管：任何写动作（不执行程序、不安装、不改配置）；事实怎么解释（调用方定）。
+//! 联动：端口在 `src/kernel/ports.rs`；由入口层的组合根构造（`src/entry/`）。
 
 use crate::kernel::ports::HostProbe;
 use std::path::Path;
@@ -9,9 +11,9 @@ const EXE_SUFFIX: &str = ".exe";
 #[cfg(not(windows))]
 const EXE_SUFFIX: &str = "";
 
-/// 在 PATH 里找一个可执行文件，返回**真实路径**（找不到就是没有，不去别处翻）。
-/// 平台扩展名按 `PATHEXT` 展开（Windows 不设时用平台后缀）——**查法只有这一处**，
-/// `has_exe` 与自检报告共用它，免得两处各写一遍再慢慢漂移。
+/// 目的：在 PATH 里找一个可执行文件，返回**真实路径**（找不到就是没有，不去别处翻）。
+/// 参数：`name` 是不带目录的可执行文件名；扩展名按 `PATHEXT` 展开（Windows 不设时用平台后缀）。
+/// 约束：查法只有这一处——`has_exe` 与自检报告共用它。
 pub fn find_exe(name: &str) -> Option<std::path::PathBuf> {
     let path_var = std::env::var_os("PATH")?;
     let exts: Vec<String> = std::env::var("PATHEXT")
@@ -33,7 +35,7 @@ pub fn find_exe(name: &str) -> Option<std::path::PathBuf> {
     None
 }
 
-/// 本机事实探测（生产实现）。
+/// 目的：`HostProbe` 端口的生产实现——把本机事实读出来。
 pub struct HostProbeAdapter;
 
 impl HostProbe for HostProbeAdapter {

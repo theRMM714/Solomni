@@ -168,7 +168,9 @@ fn main() {
         &systools_source,
         Arc::new(tools),
         Arc::new(io),
-        Arc::new(capabilities::tools::detail::confine::FenceHostAdapter),
+        Arc::new(capabilities::tools::detail::confine::FenceHostAdapter::new(
+            home,
+        )),
     ) {
         Ok(svc) if capabilities::tools::api::Tools::problems(&svc).is_empty() => Arc::new(svc),
         Ok(svc) => {
@@ -340,6 +342,8 @@ fn main() {
     };
     let ops = capabilities::conductor::api::Ops::from_handle(&handle);
 
+    // 工具级确认要有地方被作答：网页有裁决卡，CLI 在生成中就地按选项答——两边都接上了。
+    handle.allow_tool_cards();
     if web {
         serve_web(ops, port_flag(&args), allow_fence_write);
     } else {

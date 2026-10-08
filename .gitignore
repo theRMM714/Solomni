@@ -37,4 +37,5 @@ modules/*/build/
 # ---- IDE / 编辑器 ----
 .idea/
 *.iml
-.vscode/
+.vscode/*
+!.vscode/settings.json

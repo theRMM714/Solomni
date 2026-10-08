@@ -1,12 +1,13 @@
 //! 入站契约（`conductor::api`）的契约测试：命令/事件模型、能力分面、停止语义、panic 隔离。
 //! 这一层不碰 HTTP；HTTP 侧（路由目录与逐路由契约）另见本目录的 routes。
 
-use super::doubles::{collab_work, module_of};
+use super::doubles::{collab_work, decl, module_of, module_with_runtimes};
 use super::{gated_ops, ops_with, single_work, slow_ops};
 use crate::capabilities::conductor::api::{
-    Acted, Action, AgentInstance, SessionEdit, SessionEvent, WorkMode, WorkSpec,
+    Acted, ActionCall, AgentInstance, Caller, SessionEdit, SessionEvent, WorkMode, WorkSpec,
 };
 use crate::capabilities::conductor::api::{ConductorHandle, Ops, Output};
+use crate::capabilities::session::api::OPT_BEGIN;
 use crate::capabilities::workspace::api::Module;
 use crate::kernel::api::Tier;
 use std::sync::atomic::Ordering;
@@ -210,7 +211,7 @@ fn stop_takes_effect_while_generation_is_still_running() {
     }
 
     let stopped = Instant::now();
-    assert!(ops.sessions.stop(&sid), "在跑就该停得掉");
+    assert!(!ops.sessions.stop(&sid).is_empty(), "在跑就该停得掉");
     assert!(ops.sessions.is_running(&sid), "停止是置位，不是同步等待");
     let out = worker.join().expect("生成线程");
     assert!(out.is_ok(), "停止是正常收尾，不是错误：{:?}", out.err());
@@ -222,8 +223,8 @@ fn stop_takes_effect_while_generation_is_still_running() {
     assert!(!ops.sessions.is_running(&sid), "收尾后不再标记在跑");
     assert!(ticks.load(Ordering::Relaxed) > 0, "通道确实被调用过");
     assert!(
-        !ops.sessions.stop("没这个会话"),
-        "停一个没在跑的会话 = false"
+        ops.sessions.stop("没这个会话").is_empty(),
+        "停一个没在跑的会话 = 空"
     );
 }
 
@@ -296,16 +297,19 @@ fn reads_are_not_queued_behind_a_collab_discussion() {
         .expect("建协作会话")
         .0
         .sid;
+    // 回答当前那张卡（选项 id 是契约）：协作从这一答开始跑泵。
+    let card = ops
+        .sessions
+        .open_queue(&sid)
+        .expect("取卡")
+        .expect("挂着一张卡")
+        .card
+        .id;
     let worker = {
         let sessions = Arc::clone(&ops.sessions);
         let sid = sid.clone();
-        std::thread::spawn(move || {
-            sessions.collab_step(
-                &sid,
-                crate::capabilities::conductor::api::CollabStep::Begin,
-                "yes",
-            )
-        })
+        let card = card.clone();
+        std::thread::spawn(move || sessions.answer_card(&sid, &card, OPT_BEGIN, ""))
     };
     // 等讨论真的开始（通道已被调用并卡在那里）。
     let deadline = Instant::now() + Duration::from_secs(5);
@@ -353,16 +357,19 @@ fn stopping_a_collab_discussion_is_prompt_and_keeps_the_session() {
         .expect("建协作会话")
         .0
         .sid;
+    // 回答当前那张卡（选项 id 是契约）：协作从这一答开始跑泵。
+    let card = ops
+        .sessions
+        .open_queue(&sid)
+        .expect("取卡")
+        .expect("挂着一张卡")
+        .card
+        .id;
     let worker = {
         let sessions = Arc::clone(&ops.sessions);
         let sid = sid.clone();
-        std::thread::spawn(move || {
-            sessions.collab_step(
-                &sid,
-                crate::capabilities::conductor::api::CollabStep::Begin,
-                "yes",
-            )
-        })
+        let card = card.clone();
+        std::thread::spawn(move || sessions.answer_card(&sid, &card, OPT_BEGIN, ""))
     };
     let deadline = Instant::now() + Duration::from_secs(5);
     while started.load(Ordering::Relaxed) == 0 {
@@ -371,32 +378,41 @@ fn stopping_a_collab_discussion_is_prompt_and_keeps_the_session() {
     }
 
     let stopped = Instant::now();
-    assert!(ops.sessions.stop(&sid), "在跑就该停得掉");
+    assert!(!ops.sessions.stop(&sid).is_empty(), "在跑就该停得掉");
+    // 回答与「停止」同一条直路：这一答只负责**落定**，处置脱离调用方跑，所以这里等它收尾。
     worker
         .join()
         .expect("协作线程")
         .expect("停止是正常收尾，不是错误");
+    // **子会话也要收尾**：它那一回合没有定稿行，流式层必须撤下并如实说一句——
+    // 否则打开那个标签页，光标一直挂着、按钮一直停在「停止」。
+    // 替身让第一个成员（a）正常说完、第二个（b）卡住被停——收尾要看**被停的那个**。
+    let child = format!("{}--b", sid);
+    let stopped_line = |evs: &[SessionEvent]| {
+        evs.iter()
+            .any(|e| matches!(e, SessionEvent::Notice(n) if n.contains("[停止]")))
+    };
+    let bus_of = |sid: &str| -> Vec<SessionEvent> {
+        let (batches, _head, _oldest) = handle.events().snapshot(Some(sid), 0);
+        batches
+            .iter()
+            .flat_map(|l| l.events.iter().cloned())
+            .collect()
+    };
+    let deadline = Instant::now() + Duration::from_secs(3);
+    let (mut on_bus, mut on_child) = (bus_of(&sid), bus_of(&child));
+    while Instant::now() < deadline && !(stopped_line(&on_bus) && stopped_line(&on_child)) {
+        std::thread::sleep(Duration::from_millis(10));
+        on_bus = bus_of(&sid);
+        on_child = bus_of(&child);
+    }
     assert!(
         stopped.elapsed() < Duration::from_secs(3),
         "停止要在一个成员调用内收尾（{:?}）",
         stopped.elapsed()
     );
-    // 回包只给头部序号；事实从**事件台**取（命令不携带事实）。
-    let (batches, _head, _oldest) = handle.events().snapshot(Some(&sid), 0);
-    let on_bus: Vec<&SessionEvent> = batches.iter().flat_map(|l| l.events.iter()).collect();
     // 如实告知：用户看得到"停在哪、没作废"。
-    assert!(
-        on_bus
-            .iter()
-            .any(|e| matches!(e, SessionEvent::Notice(n) if n.contains("[停止]"))),
-        "要有「已停止」的如实说明"
-    );
-    // **子会话也要收尾**：它那一回合没有定稿行，流式层必须撤下并如实说一句——
-    // 否则打开那个标签页，光标一直挂着、按钮一直停在「停止」。
-    // 替身让第一个成员（a）正常说完、第二个（b）卡住被停——收尾要看**被停的那个**。
-    let child = format!("{}--b", sid);
-    let (child_batches, _ch, _co) = handle.events().snapshot(Some(&child), 0);
-    let on_child: Vec<&SessionEvent> = child_batches.iter().flat_map(|l| l.events.iter()).collect();
+    assert!(stopped_line(&on_bus), "要有「已停止」的如实说明");
     assert!(
         on_child
             .iter()
@@ -454,16 +470,19 @@ fn collab_transcript_lands_on_disk_while_the_discussion_runs() {
         .expect("建协作会话")
         .0
         .sid;
+    // 回答当前那张卡（选项 id 是契约）：协作从这一答开始跑泵。
+    let card = ops
+        .sessions
+        .open_queue(&sid)
+        .expect("取卡")
+        .expect("挂着一张卡")
+        .card
+        .id;
     let worker = {
         let sessions = Arc::clone(&ops.sessions);
         let sid = sid.clone();
-        std::thread::spawn(move || {
-            sessions.collab_step(
-                &sid,
-                crate::capabilities::conductor::api::CollabStep::Begin,
-                "yes",
-            )
-        })
+        let card = card.clone();
+        std::thread::spawn(move || sessions.answer_card(&sid, &card, OPT_BEGIN, ""))
     };
     // 等第二个成员卡在调用里：此时第一个成员的发言已经定稿。
     let deadline = Instant::now() + Duration::from_secs(5);
@@ -496,16 +515,19 @@ fn collab_discussion_emits_each_member_line_as_it_speaks() {
         .expect("建协作会话")
         .0
         .sid;
+    // 回答当前那张卡（选项 id 是契约）：协作从这一答开始跑泵。
+    let card = ops
+        .sessions
+        .open_queue(&sid)
+        .expect("取卡")
+        .expect("挂着一张卡")
+        .card
+        .id;
     let worker = {
         let sessions = Arc::clone(&ops.sessions);
         let sid = sid.clone();
-        std::thread::spawn(move || {
-            sessions.collab_step(
-                &sid,
-                crate::capabilities::conductor::api::CollabStep::Begin,
-                "yes",
-            )
-        })
+        let card = card.clone();
+        std::thread::spawn(move || sessions.answer_card(&sid, &card, OPT_BEGIN, ""))
     };
     // 等第二个成员卡住：说明第一个成员已经说完，但**整轮还没结束**。
     let deadline = Instant::now() + Duration::from_secs(5);
@@ -550,7 +572,7 @@ fn missing_sessions_and_bad_inputs_come_back_as_errors() {
         .say("没这个会话", "你好", Output::Final)
         .is_err());
     assert!(ops.sessions.config("没这个会话").is_err());
-    assert!(ops.sessions.pending("没这个会话").is_err());
+    assert!(ops.sessions.open_queue("没这个会话").is_err());
     assert!(ops.sessions.files("没这个会话").is_err());
     assert!(!ops.sessions.exists("没这个会话").expect("查存在"));
     assert!(ops.history.open("没这个会话").is_err());
@@ -960,7 +982,7 @@ fn editing_is_refused_while_a_session_is_generating() {
     let err = ops.sessions.edit(&sid, edit()).unwrap_err();
     assert!(err.contains("正在生成中"), "生成中必须拒绝改配置：{err}");
 
-    assert!(ops.sessions.stop(&sid), "停掉它");
+    assert!(!ops.sessions.stop(&sid).is_empty(), "停掉它");
     let _ = worker.join();
     ops.sessions.edit(&sid, edit()).expect("收尾后可以改");
     assert!(
@@ -980,33 +1002,222 @@ fn act_dispatches_to_the_two_result_shapes() {
         .sid;
 
     match ops
-        .sessions
-        .act(&sid, Action::Say("你好"), Output::Final)
+        .actions
+        .act(ActionCall {
+            id: "send_message".to_string(),
+            args: serde_json::json!({ "session_id": sid, "text": "你好" }),
+            caller: Caller::User,
+            out: Output::Final,
+        })
         .expect("说一句")
     {
         Acted::Advanced(adv) => assert!(adv.head > 0, "生成类只回事件台头部序号"),
-        Acted::Replayed(_) => panic!("说一句不该给重放"),
+        _ => panic!("说一句不该给重放或结构化结果"),
     }
     match ops
-        .sessions
-        .act(
-            &sid,
-            Action::Rewind(crate::capabilities::conductor::api::RewindTarget::Archive(
-                0,
-            )),
-            Output::Final,
-        )
+        .actions
+        .act(ActionCall {
+            id: "rewind".to_string(),
+            args: serde_json::json!({ "session_id": sid, "mode": "archive", "id": 0 }),
+            caller: Caller::User,
+            out: Output::Final,
+        })
         .expect("回档")
     {
         Acted::Replayed(events) => {
             assert!(events.iter().all(|e| e.is_object()), "重放是线格式事件数组")
         }
-        Acted::Advanced(_) => panic!("回档不该给事件批"),
+        _ => panic!("回档不该给事件批或结构化结果"),
     }
     assert!(
-        ops.sessions
-            .act("没这个会话", Action::Say("x"), Output::Final)
+        ops.actions
+            .act(ActionCall {
+                id: "send_message".to_string(),
+                args: serde_json::json!({ "session_id": "没这个会话", "text": "x" }),
+                caller: Caller::User,
+                out: Output::Final,
+            })
             .is_err(),
         "无此会话如实报错"
     );
+}
+
+/// 模块工具是动作：人可直接跑（无会话），会话里的模块循环是它的另一个适配器。
+#[test]
+fn module_tools_are_actions_users_can_run_directly() {
+    use super::builders::RecordingRunner;
+    let mut m = module_of("toolbox");
+    m.manifest
+        .tools
+        .insert("read_txt".to_string(), decl("python tools/read_txt.py"));
+    let runner = Arc::new(RecordingRunner::new("工具输出", true));
+    let handle = ConductorHandle::spawn(super::doubles::core_with_runner(
+        vec![m],
+        super::doubles::gw(std::collections::BTreeMap::new(), Vec::new()),
+        runner,
+    ))
+    .expect("起核心线程");
+    let ops = Ops::from_handle(&handle);
+
+    // 目录里列出模块工具动作（人可直接跑）；参数契约照抄 module.yaml，外加一个可选 workspace。
+    let catalog = ops.actions.catalog(&Caller::User, None).expect("动作目录");
+    let entry = catalog
+        .iter()
+        .find(|a| a.id == "module.toolbox.read_txt")
+        .expect("模块工具该进动作目录");
+    assert!(
+        entry.params.iter().any(|p| p.name == "workspace"),
+        "{:?}",
+        entry.params.iter().map(|p| &p.name).collect::<Vec<_>>()
+    );
+
+    // 直接跑一次（无会话）：给一份工作目录。
+    match ops
+        .actions
+        .act(ActionCall {
+            id: "module.toolbox.read_txt".to_string(),
+            args: serde_json::json!({ "workspace": "work" }),
+            caller: Caller::User,
+            out: Output::Final,
+        })
+        .expect("直接跑模块工具")
+    {
+        Acted::Done(v) => assert_eq!(v.get("ok").and_then(|b| b.as_bool()), Some(true)),
+        _ => panic!("模块工具该给结构化结果"),
+    }
+
+    // 角色不能从这个入口调：会话里的模块工具走成员循环（那条路由角色面授权）。
+    let err = ops
+        .actions
+        .act(ActionCall {
+            id: "module.toolbox.read_txt".to_string(),
+            args: serde_json::json!({}),
+            caller: Caller::Role {
+                role: "executor".to_string(),
+                work: "w".to_string(),
+                agent: "a".to_string(),
+            },
+            out: Output::Final,
+        })
+        .unwrap_err();
+    assert!(err.contains("用户直接调用"), "{}", err);
+
+    // 清单里没有的模块工具如实拒绝。
+    assert!(ops
+        .actions
+        .act(ActionCall {
+            id: "module.nope.x".to_string(),
+            args: serde_json::json!({}),
+            caller: Caller::User,
+            out: Output::Final,
+        })
+        .is_err());
+}
+
+/// 登记处动作：人可以用（同一处分发），**供应商与密钥相关默认不开放给非 user 身份**。
+#[test]
+fn registry_actions_are_user_only_and_go_through_the_dispatcher() {
+    let (_h, ops) = ops_with(vec![module_of("a")], Vec::new());
+    // 人可以用：登记一个 agent，再从登记处读回来（走的是动作分发，不是传输层直调）。
+    ops.actions
+        .act(ActionCall {
+            id: "upsert_agent".to_string(),
+            args: serde_json::json!({ "name": "甲", "modules": ["a"] }),
+            caller: Caller::User,
+            out: Output::Final,
+        })
+        .expect("登记 agent");
+    let agents = ops.registry.agents().expect("读 agent");
+    assert!(agents.iter().any(|a| a.name == "甲"), "{:?}", agents);
+
+    // 角色不能调登记处动作：供应商 / 密钥类是产品级资源，默认只给人。
+    let role = Caller::Role {
+        role: "core_proxy".to_string(),
+        work: "w".to_string(),
+        agent: "a".to_string(),
+    };
+    let err = ops
+        .actions
+        .act(ActionCall {
+            id: "upsert_provider".to_string(),
+            args: serde_json::json!({ "id": "p", "base_url": "u", "api_key": "k" }),
+            caller: role.clone(),
+            out: Output::Final,
+        })
+        .unwrap_err();
+    assert!(err.contains("不接受这个调用者"), "{}", err);
+    // 目录里对角色也不列出它们。
+    let cat = ops.actions.catalog(&role, None).expect("动作目录");
+    assert!(!cat
+        .iter()
+        .any(|a| a.id.starts_with("upsert_") || a.id == "set_settings"));
+}
+
+/// 缺运行包 = 不执行：直跑模块工具也要过与成员循环同一把尺子，目录里如实标不可用。
+#[test]
+fn module_action_refuses_when_its_runtime_package_is_missing() {
+    let mut m = module_with_runtimes("harvest", &["python"]);
+    m.manifest
+        .tools
+        .insert("scan".to_string(), decl("python tools/scan.py"));
+    let (_h, ops) = ops_with(vec![m], Vec::new());
+    let err = ops
+        .actions
+        .act(ActionCall {
+            id: "module.harvest.scan".to_string(),
+            args: serde_json::json!({}),
+            caller: Caller::User,
+            out: Output::Final,
+        })
+        .unwrap_err();
+    assert!(err.contains("运行包"), "{}", err);
+    let cat = ops.actions.catalog(&Caller::User, None).expect("目录");
+    let e = cat
+        .iter()
+        .find(|a| a.id == "module.harvest.scan")
+        .expect("模块工具进目录");
+    assert!(
+        !e.available && e.reason.contains("运行能力"),
+        "available={} reason={}",
+        e.available,
+        e.reason
+    );
+}
+
+/// 动作表是唯一的路：未知 id、未知取值、越出 callers 的调用都在分发处如实拒绝。
+#[test]
+fn action_table_rejects_unknown_id_value_and_caller() {
+    let (_h, ops) = ops_with(vec![module_of("a")], Vec::new());
+    let call = |id: &str, args: serde_json::Value, caller: Caller| ActionCall {
+        id: id.to_string(),
+        args,
+        caller,
+        out: Output::Final,
+    };
+    // 未知动作 id：声明表里没有 ⇒ 不落到任何实现。
+    let err = ops
+        .actions
+        .act(call("乱来", serde_json::json!({}), Caller::User))
+        .unwrap_err();
+    assert!(err.contains("未知动作"), "{}", err);
+    // 未知形态：参数声明过关，语义层如实拒绝。
+    let err = ops
+        .actions
+        .act(call(
+            "create_session",
+            serde_json::json!({ "mode": "三个和尚", "agents": [] }),
+            Caller::User,
+        ))
+        .unwrap_err();
+    assert!(err.contains("mode"), "{}", err);
+    // 授权：动作表说 user 不能调只给核心代理的动作。
+    let err = ops
+        .actions
+        .act(call(
+            "catalog_agents",
+            serde_json::json!({ "scope": "all" }),
+            Caller::User,
+        ))
+        .unwrap_err();
+    assert!(err.contains("不接受这个调用者"), "{}", err);
 }

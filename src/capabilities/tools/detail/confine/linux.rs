@@ -31,6 +31,10 @@ const READ_ONLY_BASELINE: &[&str] = &[
     "/etc/ld.so.cache",
     "/etc/localtime",
     "/etc/terminfo",
+    // Node 起进程时初始化 OpenSSL 会读系统配置（python / C++ 不读）：不放行它，
+    // JS 模块工具连 `node -e` 都起不来。两个常见落点各守一处，不存在的由 exists() 跳过。
+    "/etc/ssl/openssl.cnf",
+    "/etc/pki/tls/openssl.cnf",
     "/dev/null",
     "/dev/zero",
     "/dev/urandom",
@@ -309,11 +313,19 @@ fn install_rules(spec: &FenceSpec, command: &str) -> Result<(), String> {
     for root in &spec.rw {
         wanted.push((root.clone(), allowed_rw));
     }
+    // 工作目录（模块根）：工具进程要能在里面起（读 + 执行），但**不因此获得写**——
+    // 模块目录默认只读时，写权只能来自 rw（module_write 授权）。
     if !spec.cwd.as_os_str().is_empty() {
-        wanted.push((spec.cwd.clone(), allowed_rw));
+        wanted.push((spec.cwd.clone(), RO_ALL));
     }
     // 用户显式授权的只读根（`fence_read`）：只给只读位，一个写位都不给。
     for root in &spec.ro {
+        if !root.as_os_str().is_empty() {
+            wanted.push((root.clone(), RO_ALL));
+        }
+    }
+    // 只读子树（模块目录默认只读）：同为只读；与 ro 的分野只在 Windows 的递归位上。
+    for root in &spec.ro_tree {
         if !root.as_os_str().is_empty() {
             wanted.push((root.clone(), RO_ALL));
         }

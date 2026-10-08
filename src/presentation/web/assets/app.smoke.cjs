@@ -311,25 +311,37 @@ setTimeout(async () => {
       if (!taskButtonRule) loadErrors.push("改需求按钮规则：无权=" + r.off + "、有权=" + r.on + "、工作中 disabled=" + r.busyDisabled);
     } catch (e) { loadErrors.push("改需求按钮检查失败：" + e.message); }
   }
-  // **裁决卡**：自由文本那类渲染成"说明 + 建议 + 问题 + 输入框 + 提交"；二选一仍给按钮。
+  // **裁决卡**：按后端给的消息与选项渲染（信封 / 标题 / 正文 / 详情 + 每个选项一个按钮），
+  // 点一个选项就把它的 **id** 发回去——前端不认识业务含义，也不按 kind 猜按钮。
   let decisionCardRule = false;
   if (!loadErrors.length) {
     try {
       const r = vm.runInNewContext(
         "(function () {" +
           "const s = { sid: 'd', lines: [], live: [], sending: false, done: false, readonly: false, fold: {}, scroll: {}," +
-          "  pending: { type: 'decision', kind: 'plan_review', summary: 'S', advice: 'A', question: 'Q', payload: {} } };" +
+          "  pending: { type: 'decision_card', gate: 'plan_review', id: 'd1'," +
+          "    envelope: { role: 'core', name: '核心' }," +
+          "    message: { title: '开工？', body: '方案已备好', detail: '建议先做 A' }," +
+          "    options: [{ id: 'plan_start', label: '开工' }, { id: 'plan_say', label: '先说一句' }]," +
+          "    waiting: [{ envelope: { role: 'member', name: '甲' }, title: '甲 在等你回话' }] } };" +
           "renderGate(s); const g = document.querySelector('#gate');" +
           "const card = g.children[0] || { children: [] };" +
           "const cls = card.children.map(function (c) { return c.className; });" +
-          "const slate = { sid: 'd2', lines: [], live: [], sending: false, done: false, readonly: false, fold: {}, scroll: {}," +
-          "  pending: { type: 'decision', kind: 'confirm_slate', summary: 'S2' } };" +
-          "renderGate(slate); const g2 = document.querySelector('#gate');" +
-          "return { hasInput: cls.indexOf('decision-input') >= 0, hasBtns: cls.indexOf('btns') >= 0, slateKids: g2.children.length }; })()",
+          "const row = card.children.filter(function (c) { return c.className === 'btns'; })[0] || { children: [] };" +
+          "const q = card.children.filter(function (c) { return c.className === 'queue'; })[0] || { textContent: '' };" +
+          "return { hasInput: cls.indexOf('decision-input') >= 0, who: cls.indexOf('who') >= 0," +
+          "  queue: q.textContent," +
+          "  labels: Array.prototype.map.call(row.children, function (b) { return b.textContent; }) }; })()",
         sandbox
       );
-      decisionCardRule = r.hasInput && r.hasBtns && r.slateKids > 0;
-      if (!decisionCardRule) loadErrors.push("裁决卡检查：输入框=" + r.hasInput + "、按钮=" + r.hasBtns + "、二选一卡=" + r.slateKids);
+      // 队列可见：队首之后还在等的那几张如实显示（"谁在等、前面还排着几条"）。
+      const queueShown = /排着 1 张/.test(r.queue) && /甲/.test(r.queue);
+      decisionCardRule =
+        r.hasInput && r.who && queueShown &&
+        r.labels.length === 2 && r.labels[0] === '开工' && r.labels[1] === '先说一句';
+      if (!decisionCardRule) {
+        loadErrors.push("裁决卡检查：输入框=" + r.hasInput + "、信封=" + r.who + "、队列=" + r.queue + "、选项=" + r.labels);
+      }
     } catch (e) { loadErrors.push("裁决卡检查失败：" + e.message); }
   }
   // **只有正在传的那一块带光标**：一轮开始后，前一块不再像"还在流式"（否则看着像已落盘还在流）。

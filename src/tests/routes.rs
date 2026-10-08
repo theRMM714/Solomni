@@ -4,17 +4,18 @@
 //! 假能力面顺带证明一件事：「按角色切分」的能力接口真能被替换——新增一种呈现不必认识 `Conductor`。
 
 use crate::capabilities::conductor::api::{
-    Advance, ConductorOps, EventBus, Ops, Output, SessionOps,
+    Acted, ActionCall, ActionOps, ActionView, Advance, Caller, ConductorOps, EventBus, Ops, Output,
+    SessionOps,
 };
 use crate::capabilities::conductor::api::{
-    AgentSuggestion, ConfigAgent, FilesAgentView, FilesRootsView, FilesView, Pending,
+    AgentSuggestion, ConfigAgent, DecisionQueue, FilesAgentView, FilesRootsView, FilesView,
     RuntimeReport, SessionConfig, SessionEdit, SessionView, TierChoices, WorkMode, WorkOpened,
     WorkSpec,
 };
 use crate::capabilities::registry::api::AgentView;
 use crate::capabilities::registry::api::RegistryOps;
 use crate::capabilities::registry::api::{AppSettings, ModelView, ProviderView};
-use crate::capabilities::session::api::{AgentMeta, HistoryOps, HistoryView, SessionMeta};
+use crate::capabilities::session::api::{HistoryOps, HistoryView, SessionMeta};
 use crate::capabilities::workspace::api::{Roster, WorkspaceOps};
 use crate::kernel::api::Tier;
 use crate::presentation::web::routes::{self, ROUTES};
@@ -32,8 +33,6 @@ use std::sync::Arc;
 struct FakeOps {
     fail: Option<String>,
     running: AtomicBool,
-    /// 探测结论可换（缺省"支持"）：用来验三种结论都**原样**穿过呈现层、不被改写。
-    probe: Option<crate::capabilities::llm::api::ProbeOutcome>,
 }
 
 impl FakeOps {
@@ -41,7 +40,6 @@ impl FakeOps {
         FakeOps {
             fail: fail.map(|s| s.to_string()),
             running: AtomicBool::new(false),
-            probe: None,
         }
     }
 
@@ -53,21 +51,6 @@ impl FakeOps {
     }
 }
 
-fn fake_ops_probe(fail: Option<&str>, probe: crate::capabilities::llm::api::ProbeOutcome) -> Ops {
-    let mut f = FakeOps::new(fail);
-    f.probe = Some(probe);
-    let f = Arc::new(f);
-    Ops {
-        sessions: f.clone(),
-        registry: f.clone(),
-        history: f.clone(),
-        core: f.clone(),
-        workspace: f.clone(),
-        events: EventBus::new(),
-        log: Arc::new(super::doubles::NoopLogOps),
-    }
-}
-
 fn fake_ops(fail: Option<&str>) -> Ops {
     let f = Arc::new(FakeOps::new(fail));
     Ops {
@@ -76,8 +59,28 @@ fn fake_ops(fail: Option<&str>) -> Ops {
         history: f.clone(),
         core: f.clone(),
         workspace: f.clone(),
+        actions: f.clone(),
         events: EventBus::new(),
         log: Arc::new(super::doubles::NoopLogOps),
+    }
+}
+
+/// 假动作面：目录给空表，分发按 id 给**有形状的回包**（路由契约测试只盯形状与错误传播）。
+impl ActionOps for FakeOps {
+    fn catalog(&self, _caller: &Caller, _sid: Option<&str>) -> Result<Vec<ActionView>, String> {
+        self.guard()?;
+        Ok(Vec::new())
+    }
+    fn act(&self, call: ActionCall) -> Result<Acted, String> {
+        self.guard()?;
+        Ok(match call.id.as_str() {
+            "create_session" => Acted::Done(json!({ "sid": "w1", "agents": ["a"] })),
+            "rewind" | "update_task" => Acted::Replayed(Vec::new()),
+            "send_message" | "set_task" | "answer_card" | "withdraw" | "compact" => {
+                Acted::Advanced(Advance { head: 1 })
+            }
+            _ => Acted::Done(json!({ "ok": true })),
+        })
     }
 }
 
@@ -135,22 +138,37 @@ impl SessionOps for FakeOps {
         self.guard()?;
         Ok(Advance { head: 8 })
     }
-    fn collab_step(
-        &self,
-        _sid: &str,
-        _step: crate::capabilities::conductor::api::CollabStep,
-        _text: &str,
-    ) -> Result<Advance, String> {
+    fn set_task(&self, _sid: &str, _text: &str) -> Result<Advance, String> {
         self.guard()?;
         Ok(Advance { head: 9 })
+    }
+    fn answer_card(
+        &self,
+        _sid: &str,
+        _card: &str,
+        _option: &str,
+        _note: &str,
+    ) -> Result<Advance, String> {
+        self.guard()?;
+        Ok(Advance { head: 10 })
+    }
+    /// 假卡：路由契约测试只盯形状——封套 / 消息 / 选项都在（队列里只有它一张）。
+    fn open_queue(&self, sid: &str) -> Result<Option<DecisionQueue>, String> {
+        self.guard()?;
+        Ok(Some(DecisionQueue {
+            card: serde_json::from_value(json!({
+                "id": format!("d1-{}", sid),
+                "envelope": { "role": "core", "name": "核心" },
+                "message": { "title": "要不要继续？", "body": "假能力面", "detail": "" },
+                "options": [{ "id": "go", "label": "继续" }],
+            }))
+            .expect("假卡形状"),
+            waiting: Vec::new(),
+        }))
     }
     fn withdraw_agree(&self, _sid: &str, _agent: &str) -> Result<Advance, String> {
         self.guard()?;
         Ok(Advance { head: 10 })
-    }
-    fn slate(&self, _sid: &str) -> Result<Vec<AgentMeta>, String> {
-        self.guard()?;
-        Ok(Vec::new())
     }
     fn compact(&self, _sid: &str) -> Result<crate::capabilities::conductor::api::Advance, String> {
         self.guard()?;
@@ -168,10 +186,6 @@ impl SessionOps for FakeOps {
         self.guard()?;
         Ok(vec![json!({ "type": "line", "line": "重放" })])
     }
-    fn pending(&self, _sid: &str) -> Result<Option<Pending>, String> {
-        self.guard()?;
-        Ok(Some(Pending::ConfirmBegin))
-    }
     fn config(&self, _sid: &str) -> Result<SessionConfig, String> {
         self.guard()?;
         Ok(SessionConfig {
@@ -182,6 +196,7 @@ impl SessionOps for FakeOps {
                 name: "甲".to_string(),
                 modules: vec!["m".to_string()],
                 model: String::new(),
+                permissions: None,
             }],
             tier: "host".to_string(),
             base: None,
@@ -232,8 +247,9 @@ impl SessionOps for FakeOps {
         self.guard()?;
         Ok(true)
     }
-    fn stop(&self, _sid: &str) -> bool {
-        self.running.swap(false, Ordering::Relaxed)
+    fn stop(&self, _sid: &str) -> Vec<String> {
+        self.running.swap(false, Ordering::Relaxed);
+        Vec::new()
     }
     fn is_running(&self, _sid: &str) -> bool {
         self.running.load(Ordering::Relaxed)
@@ -383,12 +399,9 @@ impl RegistryOps for FakeOps {
         _id: &str,
     ) -> Result<crate::capabilities::llm::api::ProbeOutcome, String> {
         self.guard()?;
-        Ok(self
-            .probe
-            .clone()
-            .unwrap_or(crate::capabilities::llm::api::ProbeOutcome::Supported {
-                detail: "替身说支持".to_string(),
-            }))
+        Ok(crate::capabilities::llm::api::ProbeOutcome::Supported {
+            detail: "替身说支持".to_string(),
+        })
     }
 }
 
@@ -473,16 +486,12 @@ fn call(ops: &Ops, method: &str, url: &str, body: &str) -> (u16, String) {
     (code, text)
 }
 
-/// 目录里的参数取样（只为本文件合成请求用）：action 要按路由给出**合法**值，否则先死在未知动作上。
-fn sample_param(route_id: &str, name: &str) -> &'static str {
+/// 目录里的参数取样（只为本文件合成请求用）：动作路由要给出**合法**动作 id，否则先死在未知动作上。
+fn sample_param(_route_id: &str, name: &str) -> &'static str {
     match name {
         "sid" => "w1",
-        "id" => "p1",
         "name" => "a1",
-        "action" => match route_id {
-            "provider.act" | "model.act" | "agent.act" => "remove",
-            _ => "say",
-        },
+        "id" => "create_session",
         _ => "x",
     }
 }
@@ -519,11 +528,7 @@ fn shape_matches(pattern: &str, url: &str) -> bool {
 /// 每条路由给一个**合法**请求体，好让错误路径真的落到能力上（而不是先死在解析上）。
 fn sample_body(route: &routes::Route) -> &'static str {
     match route.id {
-        "session.new" => r#"{"name":"w","mode":"single","agents":[{"name":"a","modules":["m"]}]}"#,
-        "session.act" => r#"{"text":"x","id":0}"#,
-        "provider.new" => r#"{"id":"p","base_url":"u","api_key":"k"}"#,
-        "model.new" => r#"{"id":"m","name":"M","api_model":"m","provider":"p"}"#,
-        "agent.new" => r#"{"name":"a","modules":["m"]}"#,
+        "action" => r#"{"mode":"single","agents":[]}"#,
         "suggest" => r#"{"task":"t","mode":"single"}"#,
         _ => "{}",
     }
@@ -761,16 +766,7 @@ fn every_api_route_reports_capability_failure_as_4xx() {
 fn request_bodies_are_validated_before_anything_else() {
     let ops = fake_ops(None);
     for route in ROUTES {
-        if !matches!(
-            route.id,
-            "session.new"
-                | "session.act"
-                | "provider.new"
-                | "model.new"
-                | "agent.new"
-                | "settings.set"
-                | "suggest"
-        ) {
+        if !matches!(route.id, "action" | "suggest") {
             continue;
         }
         let (code, text) = call(&ops, route.method, &sample_url(route), "不是 JSON");
@@ -786,115 +782,24 @@ fn request_bodies_are_validated_before_anything_else() {
 #[test]
 fn session_action_boundaries_are_explicit() {
     let ops = fake_ops(None);
-    // 未知动作：400 + 明确讲清是未知动作（老语义保留）。
-    let (code, text) = call(&ops, "POST", "/api/sessions/w1/乱来", "{}");
-    assert_eq!(code, 400);
-    assert!(text.contains("未知动作"), "{}", text);
-    // 未知模式：400。
-    let (code, text) = call(
-        &ops,
-        "POST",
-        "/api/sessions",
-        r#"{"name":"w","mode":"三个和尚"}"#,
-    );
-    assert_eq!(code, 400);
-    assert!(text.contains("未知模式"), "{}", text);
-    // 上传同名冲突：409（不是 400 —— 前端据此弹「覆盖/改名」）。
-    let (code, _) = call(
-        &ops,
-        "POST",
-        "/api/sessions/w1/upload",
-        r#"{"name":"a.txt","data_base64":"aGk="}"#,
-    );
-    assert_eq!(code, 409);
-    // 供应商/模型/agent 的未知动作：404。
+    // 不在目录里的路径：404（动作 id 的解释权归核心，传输层不猜）。
+    assert_eq!(call(&ops, "POST", "/api/sessions/w1/乱来", "{}").0, 404);
+    // 登记处路由已并入动作路由：这些老路径现在也不在目录里，同样是 404。
     assert_eq!(call(&ops, "POST", "/api/providers/p1/乱来", "{}").0, 404);
     assert_eq!(call(&ops, "POST", "/api/models/m1/乱来", "{}").0, 404);
     assert_eq!(call(&ops, "POST", "/api/agents/甲/乱来", "{}").0, 404);
-    // 停止：只要没在跑也回 {ok:true}（与老语义一致，前端不看 found）。
-    let (code, text) = call(&ops, "POST", "/api/sessions/w1/stop", "{}");
+    // 停止走动作路由：只要没在跑也回 {ok:true}（前端不看 state）。
+    let (code, text) = call(
+        &ops,
+        "POST",
+        "/api/actions/control_session",
+        r#"{"session_id":"w1","action":"stop"}"#,
+    );
     assert_eq!(code, 200);
     assert!(text.contains("\"ok\":true"), "{}", text);
 }
 
 // ---------- 逐条路由：成功形态 ----------
-
-/// 探测回包：三种结论**原样**穿过呈现层（不改写、不降级），`mode` 取自登记处（探测后的事实）。
-#[test]
-fn model_probe_passes_the_verdict_through_verbatim() {
-    use crate::capabilities::llm::api::ProbeOutcome;
-    let cases = [
-        (
-            ProbeOutcome::Supported {
-                detail: "真的调了".to_string(),
-            },
-            "supported",
-            "真的调了",
-        ),
-        (
-            ProbeOutcome::Unsupported {
-                detail: "供应商说 tools 不认识".to_string(),
-            },
-            "unsupported",
-            "供应商说 tools 不认识",
-        ),
-        (
-            ProbeOutcome::Unknown {
-                detail: "没发起调用".to_string(),
-            },
-            "unknown",
-            "没发起调用",
-        ),
-    ];
-    for (outcome, want, detail) in cases {
-        let ops = fake_ops_probe(None, outcome);
-        let (code, text) = call(&ops, "POST", "/api/models/m1/probe", "");
-        assert_eq!(code, 200, "{}", text);
-        let v: serde_json::Value = serde_json::from_str(&text).expect("探测回包是 JSON");
-        assert_eq!(v["outcome"], want, "{}", text);
-        assert_eq!(v["detail"], detail, "{}", text);
-        assert_eq!(
-            v["mode"], "envelope",
-            "形态取登记处现有值（替身的模型就是 envelope），不由结论反推：{}",
-            text
-        );
-    }
-    // 能力面失败要如实传播（绝不静默降级成"不支持"）。
-    let ops = fake_ops(Some("假能力面：探测失败"));
-    let (code, text) = call(&ops, "POST", "/api/models/m1/probe", "");
-    assert_eq!(code, 400);
-    assert!(text.contains("假能力面"), "{}", text);
-}
-
-/// 回放形状探测回包：逐项如实穿过呈现层（含"收了但没读懂"这一档与供应商原话），且不改登记处。
-#[test]
-fn replay_probe_passes_every_shape_through_verbatim() {
-    let ops = fake_ops(None);
-    let (code, text) = call(&ops, "POST", "/api/models/m1/probe-replay", "");
-    assert_eq!(code, 200, "{}", text);
-    let v: serde_json::Value = serde_json::from_str(&text).expect("回包是 JSON");
-    assert_eq!(v["ok"], true);
-    let shapes = v["shapes"].as_array().expect("shapes 是数组");
-    assert_eq!(shapes.len(), 2, "{}", text);
-    assert_eq!(shapes[0]["name"], "baseline-text");
-    assert_eq!(shapes[0]["accepted"], true);
-    assert_eq!(shapes[0]["understood"], true);
-    assert_eq!(shapes[1]["accepted"], false);
-    assert_eq!(shapes[1]["understood"], false);
-    assert!(
-        shapes[1]["detail"]
-            .as_str()
-            .unwrap_or("")
-            .contains("content is required"),
-        "被拒要带供应商原话：{}",
-        text
-    );
-    // 能力面失败要如实传播，绝不静默当成"形状被拒"。
-    let ops = fake_ops(Some("假能力面：探测失败"));
-    let (code, text) = call(&ops, "POST", "/api/models/m1/probe-replay", "");
-    assert_eq!(code, 400);
-    assert!(text.contains("假能力面"), "{}", text);
-}
 
 /// 事件台的 `sid` 过滤要**解百分号**：会话名常带中文（`<工作>--<agent>`，节点与讨论都用这个名字），
 /// 不解回来就永远匹配不到任何事件——长轮询只能干等到超时，客户端拿到空批。
@@ -931,85 +836,59 @@ fn success_shapes_are_pinned_per_route() {
         ("GET", "/api/state", "", 200, "\"modules\""),
         (
             "POST",
-            "/api/sessions",
-            r#"{"name":"w","mode":"single","agents":[{"name":"a","modules":["m"]}]}"#,
+            "/api/actions/create_session",
+            r#"{"mode":"single","agents":[{"name":"a","modules":["m"]}]}"#,
             200,
             "\"sid\"",
         ),
         (
             "POST",
-            "/api/sessions/w1/say",
-            r#"{"text":"你好"}"#,
+            "/api/actions/send_message",
+            r#"{"session_id":"w1","text":"你好"}"#,
             200,
             "\"head\"",
         ),
         (
             "POST",
-            "/api/sessions/w1/rewind",
-            r#"{"id":0}"#,
+            "/api/actions/rewind",
+            r#"{"session_id":"w1","mode":"archive","id":0}"#,
             200,
             "\"events\"",
         ),
         (
             "POST",
-            "/api/sessions/w1/update-task",
-            r#"{"text":"新需求"}"#,
+            "/api/actions/update_task",
+            r#"{"session_id":"w1","text":"新需求"}"#,
             200,
             "\"events\"",
         ),
         (
             "POST",
-            "/api/sessions/w1/withdraw",
-            r#"{"agent":"甲"}"#,
+            "/api/actions/withdraw",
+            r#"{"session_id":"w1","agent":"甲"}"#,
             200,
             "\"head\"",
         ),
         (
             "POST",
-            "/api/sessions/w1/edit",
-            r#"{"agents":[],"tier":"host"}"#,
+            "/api/actions/edit_session",
+            r#"{"session_id":"w1","agents":[],"tier":"host"}"#,
             200,
             "\"ok\"",
         ),
         (
             "POST",
-            "/api/sessions/w1/upload",
-            r#"{"name":"a.txt","data_base64":"aGk=","overwrite":true}"#,
+            "/api/actions/upload",
+            r#"{"session_id":"w1","name":"a.txt","data_base64":"aGk=","overwrite":true}"#,
             200,
             "\"ok\"",
         ),
+        ("GET", "/api/actions?sid=w1", "", 200, "\"actions\""),
         ("GET", "/api/sessions/w1/config", "", 200, "\"config\""),
         ("GET", "/api/sessions/w1/files", "", 200, "\"roots\""),
-        (
-            "POST",
-            "/api/providers",
-            r#"{"id":"p","base_url":"u","api_key":"k"}"#,
-            200,
-            "\"ok\"",
-        ),
-        ("POST", "/api/providers/p1/remove", "", 200, "\"ok\""),
-        ("POST", "/api/providers/p1/discover", "", 200, "\"models\""),
-        (
-            "POST",
-            "/api/models",
-            r#"{"id":"m","name":"M","api_model":"m","provider":"p"}"#,
-            200,
-            "\"ok\"",
-        ),
-        ("POST", "/api/models/m1/remove", "", 200, "\"ok\""),
-        ("POST", "/api/models/m1/core", "", 200, "\"ok\""),
-        ("POST", "/api/models/m1/probe", "", 200, "\"outcome\""),
-        (
-            "POST",
-            "/api/agents",
-            r#"{"name":"甲","modules":["m"]}"#,
-            200,
-            "\"ok\"",
-        ),
-        ("POST", "/api/agents/%E7%94%B2/remove", "", 200, "\"ok\""),
+        // 登记处动作现在都走 /api/actions/{id}（上面已有成功用例盯着这条路由的形态）。
         ("GET", "/api/settings", "", 200, "\"settings\""),
         ("GET", "/api/tiers", "", 200, "\"tiers\""),
-        ("POST", "/api/settings", "{}", 200, "\"ok\""),
         ("GET", "/api/history", "", 200, "\"sessions\""),
         ("GET", "/api/history/w1", "", 200, "\"meta\""),
         ("POST", "/api/history/w1/delete", "", 200, "\"ok\""),
@@ -1070,5 +949,34 @@ fn web_serve_returns_when_interrupted() {
     assert!(
         started.elapsed() < Duration::from_secs(3),
         "收到中断要立刻返回，而不是阻塞到出错"
+    );
+}
+
+/// CLI 的选项选择：序号与选项 id 原文都认——两者都是那张卡上**用户看得见**的东西。
+#[test]
+fn cli_picks_an_option_by_index_or_id() {
+    use crate::capabilities::session::api::DecisionCard;
+    let card: DecisionCard = serde_json::from_value(json!({
+        "id": "d1",
+        "envelope": { "role": "tools", "name": "甲" },
+        "message": { "title": "要不要执行？", "body": "", "detail": "" },
+        "options": [
+            { "id": "allow", "label": "放行这一次" },
+            { "id": "deny", "label": "拒绝" },
+        ],
+    }))
+    .expect("假卡形状");
+    assert_eq!(
+        crate::presentation::cli::pick_option(&card, "1").as_deref(),
+        Some("allow")
+    );
+    assert_eq!(
+        crate::presentation::cli::pick_option(&card, "deny").as_deref(),
+        Some("deny")
+    );
+    assert_eq!(
+        crate::presentation::cli::pick_option(&card, "9"),
+        None,
+        "卡上没有的不认"
     );
 }

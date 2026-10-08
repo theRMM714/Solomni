@@ -218,8 +218,8 @@ async function main() {
     await sleep(300);
     // 收尾回收：这次真机跑（--fence-live）写过目录 ACL、建过容器 profile，必须按台账撤干净，
     // 再按名字前缀扫掉整族遗留 profile。CI 机器是一次性的，但本地跑同样不许留痕。
-    // 回收失败要改判 e2e：留下没人管的痕迹（孤儿 ACE 会把目录对受限进程藏住，
-    // 见 tests/gaps.yaml 的 fence.leftover-grant-hides-parent）和断言失败同样是失败。
+    // 回收失败要改判 e2e：留下没人管的痕迹和断言失败同样是失败——真机残留过一条只有
+    // SYNCHRONIZE 的 (OI)(CI) ACE，整棵 tests/ 子树因此对受限进程不可读。
     const cleaned = require("child_process").spawnSync(BIN, ["--fence-clean", "--root", FIXTURE], {
       cwd: PRODUCT_ROOT,
       encoding: "utf8",

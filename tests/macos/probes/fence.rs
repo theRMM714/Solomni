@@ -220,3 +220,50 @@ fn shared_area_is_outside_the_agent_fence() {
         ro
     );
 }
+
+/// **模块目录默认只读**（策略层把模块根放进 `ro_tree`、只把 `userdata/` 放进 `rw`）：
+/// 模块代码写不进、目录读得到、`userdata/` 写得进。
+#[test]
+fn module_dir_is_read_only_but_userdata_is_writable() {
+    use crate::probe::{job_json_tree, run_launcher, scratch};
+    let profile: &[(&str, &str)] = &[("SOLOMNI_FENCE_PROFILE", "1")];
+    let module = scratch("fence-module");
+    let userdata = module.join("userdata");
+    std::fs::create_dir_all(&userdata).unwrap();
+    let script = module.join("script.py");
+    std::fs::write(&script, "print(1)\n").unwrap();
+    let spec = job_json_tree(
+        std::slice::from_ref(&userdata),
+        std::slice::from_ref(&module),
+        &module,
+        false,
+    );
+    let (_, _, err) = run_launcher_env(&spec, "true", profile);
+    if err.contains(PROFILE_REJECTED_MARK) {
+        panic!(
+            "本机 seatbelt 机制有效，但 profile 被 sandbox_init 拒绝（profile 写错，不是环境不允许）：{}",
+            err.trim()
+        );
+    }
+    if err.contains("文件系统围栏未生效") {
+        eprintln!(
+            "[探针] 本机 seatbelt 不产生实际约束（环境结论，如实跳过，不作为通过）：{}",
+            err.trim()
+        );
+        return;
+    }
+    let (code, _out, werr) = run_launcher(&spec, &format!("echo x > {}", script.display()));
+    assert_ne!(code, Some(0), "模块目录默认只读：{}", werr);
+    let (rc, rout, rerr) = run_launcher(&spec, &format!("cat {}", script.display()));
+    assert!(
+        rout.contains("print(1)"),
+        "模块目录要读得到：code={:?} out={} err={}",
+        rc,
+        rout,
+        rerr
+    );
+    let ok = userdata.join("state.json");
+    let (ocode, _oout, oerr) = run_launcher(&spec, &format!("echo ok > {}", ok.display()));
+    assert!(ok.exists(), "userdata 要写得进：{}", oerr);
+    assert_eq!(ocode, Some(0), "{}", oerr);
+}

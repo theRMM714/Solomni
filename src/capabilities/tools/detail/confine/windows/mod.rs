@@ -8,9 +8,9 @@
 //! 守门进程只负责"按同一个名字派生同一个 SID 并把工具放进去"。
 //! 机制不可用时一律如实降级（stderr 说明 + 启动报告 fs/net=false），绝不假装有围栏。
 
-use super::{shell_command, Capability, FenceVerdict, FENCE_FAILED};
+use super::{shell_command, Capability, FencePrep, FenceVerdict, FENCE_FAILED};
 use crate::capabilities::tools::api::FenceSpec;
-use std::collections::BTreeSet;
+use crate::capabilities::tools::domain::fence::FencePart;
 use std::ffi::c_void;
 
 mod acl;
@@ -98,47 +98,106 @@ pub fn capability() -> Capability {
     }
 }
 
-/// 自检：派生 SID + 真去改一个目录的 DACL（改不动就说明本机环境不允许，如实报 fs=false）。
+/// 目的：派生 SID 并真去改一个目录的 DACL，验证本机允许写权限。
+/// 约束：改不动或清不干净都报 fs=false；profile 名在 PROFILE_PREFIX 之下，--fence-clean 覆盖得到它。
 pub(crate) fn self_check() -> Result<(), String> {
-    let sid = container_sid("Solomni.Fence.SelfCheck")?;
+    let sid = container_sid(&format!("{}FenceSelfCheck", PROFILE_PREFIX))?;
     let scratch =
         std::env::temp_dir().join(format!("solomni-fence-selfcheck-{}", std::process::id()));
-    std::fs::create_dir_all(&scratch).map_err(|e| format!("建自检目录失败：{}", e))?;
-    let outcome = grant_one(sid, &scratch, RIGHTS_RO, false, false);
-    let _ = std::fs::remove_dir_all(&scratch);
+    let outcome = self_check_scratch(sid, &scratch);
     free_sid(sid);
-    outcome.map_err(|e| format!("改不动目录 ACL：{}", e))
+    outcome
+}
+
+/// 目的：在临时目录里做一次写→校验→还原→删除；任何一步清不掉都返回原因，不静默留痕。
+fn self_check_scratch(sid: PSID, scratch: &Path) -> Result<(), String> {
+    std::fs::create_dir_all(scratch).map_err(|e| format!("建自检目录失败：{}", e))?;
+    let mut problems: Vec<String> = Vec::new();
+    let bytes = match sd_bytes(scratch) {
+        Ok(b) => b,
+        Err(e) => {
+            problems.push(format!("读自检目录安全描述符失败：{}", e));
+            Vec::new()
+        }
+    };
+    if let Err(e) = grant_verified(sid, scratch, RIGHTS_RO, false, false) {
+        problems.push(format!("改不动目录 ACL：{}", e));
+    }
+    if !bytes.is_empty() {
+        if let Err(e) = restore_sd(scratch, &bytes) {
+            problems.push(format!("自检目录还原失败：{}", e));
+        }
+    }
+    if let Err(e) = std::fs::remove_dir_all(scratch) {
+        problems.push(format!("删自检目录失败：{}", e));
+    }
+    if problems.is_empty() {
+        Ok(())
+    } else {
+        Err(problems.join("；"))
+    }
 }
 
 /// 本程序建的容器 profile 前缀（`container_name` 生成的就是它；`--fence-clean` 按它扫整族）。
 pub(crate) const PROFILE_PREFIX: &str = "Solomni.Agent.";
 
-/// 外层进程调用：把围栏要用的授权一次性做好（按 (SID, 路径, 权限) 去重，不重复改 ACL）。
-/// 授权落点只有两处：共享区/私有沙箱/模块目录（读写）、解释器安装目录（只读+执行）。
-pub fn prepare_fence(
-    spec: &FenceSpec,
-    command: &str,
-    prepared: &std::sync::Mutex<BTreeSet<String>>,
-    home: &Path,
-) -> Result<(), String> {
-    let mut result = Ok(());
-    // 这一轮真正写下去的授权（用于如实打印足迹 + 落台账，供 --fence-clean 精确回收）。
+/// 目的：判断授权落点是不是**不存在**（派生与执行之间有竞态时兜底；不存在就跳过，不判整次失败）。
+fn missing(path: &Path) -> bool {
+    matches!(
+        std::fs::symlink_metadata(path),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound
+    )
+}
+
+/// 目的：把围栏要用的授权一次性做好（按 (SID, 路径, 权限) 去重，不重复改 ACL），并如实分出
+///   **必要**落点（授不上就要问用户或拒绝）与**可选**落点（只记事实）。
+/// 约束：每条授权先落台账再动 ACL，写后核对；失败就回滚并如实记进结论（不静默降级）。
+pub fn prepare_fence(spec: &FenceSpec, command: &str, home: &Path) -> FencePrep {
+    // 这一轮真正写下去的授权（用于如实打印足迹）。
     let mut written: Vec<(String, PathBuf, u32)> = Vec::new();
+    let mut prep = FencePrep::default();
+    // 产品根 = .home 的父目录：根内路径存原始安全描述符收尾还原，根外只记 ACE 摘要精确撤销。
+    let root = product_root(home);
+    let mut rec = load_record(home);
+    let container = container_name(spec);
+    if let Err(e) = journal_add_profile(home, &mut rec, &container) {
+        // 台账落不下就不能动本机权限项（这一环是必要的）：如实收尾，让调用方去问用户。
+        eprintln!("[围栏] 授权台账落盘失败：{}", e);
+        prep.fail(FencePart::Ledger, PathBuf::new(), e);
+        return prep;
+    }
     // 基线都授给 ALL APPLICATION PACKAGES（与 agent 无关）：已有**够用**的 ACE 就跳过，第一次之后不再重走整棵树。
-    let base = baseline_sid()?;
+    let base = match baseline_sid() {
+        Ok(sid) => sid,
+        Err(e) => {
+            prep.fail(FencePart::Interpreter, PathBuf::new(), e);
+            return prep;
+        }
+    };
+    let base_text = sid_to_string(base);
     let interpreters = interpreter_dirs(command);
-    // 基线一：解释器安装目录（只读+执行）——**必需**：拿不到它，容器里连解释器都起不来。
+    // 基线一：解释器安装目录（只读+执行）——**必要**：拿不到它，容器里连解释器都起不来。
     for dir in interpreters.iter().cloned() {
+        if missing(&dir) {
+            eprintln!("[诊断] 授权落点不存在，跳过（{}）", dir.display());
+            continue;
+        }
         if has_ace_for(base, &dir, RIGHTS_RO) {
             continue;
         }
-        if let Err(e) = grant_one(base, &dir, RIGHTS_RO, true, true) {
-            eprintln!("[围栏] 解释器目录授权未完成（{}）：{}", dir.display(), e);
-            if result.is_ok() {
-                result = Err(e);
+        let target = GrantTarget {
+            path: dir.clone(),
+            rights: RIGHTS_RO,
+            recursive: true,
+            inherit: true,
+            part: FencePart::Interpreter,
+        };
+        match grant_one_journaled(home, &mut rec, base, &base_text, &target, &root) {
+            Ok(()) => written.push((base_text.clone(), dir, RIGHTS_RO)),
+            Err(e) => {
+                eprintln!("[围栏] 解释器目录授权未完成（{}）：{}", dir.display(), e);
+                prep.fail(FencePart::Interpreter, dir, e);
             }
-        } else {
-            written.push((String::from("S-1-15-2-1"), dir, RIGHTS_RO));
         }
     }
     // **祖先链不用授**：容器的令牌里有 SeChangeNotifyPrivilege（Bypass traverse checking，真机 whoami /priv
@@ -149,28 +208,37 @@ pub fn prepare_fence(
 
     // 数据边界（会话目录、模块目录）→ 授给该 agent 自己的容器 SID（互相看不见）；
     // 落点清单由 grant_targets 统一给出（叶子 + 父目录的只读属性），prepare 与 release 共用同一份。
-    let sid = container_sid(&container_name(spec))?;
+    let sid = match container_sid(&container) {
+        Ok(sid) => sid,
+        Err(e) => {
+            // 派生不出容器身份就谈不上围栏：必要的一环，如实收尾（不再动任何权限项）。
+            prep.fail(FencePart::ContainerIdentity, PathBuf::new(), e);
+            return prep;
+        }
+    };
+    let sid_text = sid_to_string(sid);
     let todo = grant_targets(spec);
-    for (path, rights, recursive, inherit) in todo {
-        let key = format!("{:?}|{}|{}", sid, path.to_string_lossy(), rights);
-        if prepared.lock().expect("授权表锁").contains(&key) {
+    for target in todo {
+        let (path, rights) = (&target.path, target.rights);
+        // 落点不存在（例如没有 userdata 的模块，或授权面派生与执行之间有竞态）：跳过这一条，不判整次失败。
+        if missing(path) {
+            eprintln!("[诊断] 授权落点不存在，跳过（{}）", path.display());
             continue;
         }
-        match grant_one(sid, &path, rights, recursive, inherit) {
-            Ok(()) => {
-                prepared.lock().expect("授权表锁").insert(key);
-                written.push((sid_to_string(sid), path.clone(), rights));
-            }
+        // 跳过条件看**实际 ACE**而不是内存缓存：权限收窄并撤权后，下一次 prepare 必须能把仍需要的授权补回来，
+        // 否则「撤权 + 重授」会留下"缓存说已授、ACE 已撤"的空洞（扩根时被缓存吞掉）。
+        if has_ace_for(sid, path, rights) {
+            continue;
+        }
+        match grant_one_journaled(home, &mut rec, sid, &sid_text, &target, &root) {
+            Ok(()) => written.push((sid_text.clone(), target.path.clone(), rights)),
             Err(e) => {
-                // 一个落点授不上（例如祖先里的系统目录）不整体失败：如实记下，让自检与探针去判定。
+                // 按这一环的**必要性**分流：必要落点授不上要问用户（不许降级），可选落点只记事实。
                 eprintln!("[围栏] 授权未完成：{}", e);
-                if result.is_ok() {
-                    result = Err(e);
-                }
+                prep.fail(target.part, target.path.clone(), e);
             }
         }
     }
-    let container = container_name(spec);
     free_sid(sid);
     if !written.is_empty() {
         // 如实打印足迹：用户看得见到底动了哪些目录、授给了谁。
@@ -179,14 +247,8 @@ pub fn prepare_fence(
             .map(|(s, p, _)| format!("{} → {}", s, p.display()))
             .collect();
         eprintln!("[围栏] 已写权限 {} 处：{}", written.len(), list.join("；"));
-        if let Err(e) = record_grants(home, &container, &written) {
-            eprintln!(
-                "[围栏] 授权台账落盘失败（影响 --fence-clean 的精确回收）：{}",
-                e
-            );
-        }
     }
-    result
+    prep
 }
 
 /// 本机能不能强制住容器围栏（**不写任何目录 ACL**）：建容器 profile + 派生容器 SID 就是容器能起来的全部前提。

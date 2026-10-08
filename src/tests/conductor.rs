@@ -1,5 +1,6 @@
 //! 核心（应用服务）测试：跨能力编排——核心推荐、核心操作载荷、会话中心与生成驱动。
 //! 归属判据：钉的是**应用服务的不变式**（会话中心与编排）；其余按能力落各自的文件。
+mod ask_user;
 mod proxy;
 use super::builders::*;
 use super::prelude::*;
@@ -74,10 +75,10 @@ pub(crate) fn plan_review_carries_the_core_advice() {
         .create_work(collab_work("w", &["a"], false, "任务"))
         .unwrap()
         .sid;
-    let events = core.collab_continue(&sid, CollabStep::Begin, "").unwrap();
+    let events = answer_card(&mut core, &sid, OPT_BEGIN, "").unwrap();
     let advice = events.iter().find_map(|e| match e {
-        SessionEvent::Decision { advice, kind, .. } if kind == "plan_review" => {
-            Some(advice.clone())
+        SessionEvent::DecisionCard { card, gate, .. } if gate == "plan_review" => {
+            Some(card.message.detail.clone())
         }
         _ => None,
     });
@@ -160,8 +161,7 @@ pub(crate) fn rewinding_the_main_session_truncates_agent_sessions_by_turn() {
         .create_work(collab_work("w", &["a"], false, "做个东西"))
         .unwrap()
         .sid;
-    core.collab_continue(&sid, CollabStep::Begin, "yes")
-        .unwrap();
+    answer_card(&mut core, &sid, OPT_BEGIN, "").unwrap();
     let child = format!("{}--a", sid);
 
     // 主会话里第一条**带回合**的发言行（开场那次）——回档就保留到它。
