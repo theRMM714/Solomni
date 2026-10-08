@@ -401,9 +401,27 @@ impl Conductor {
             return None;
         }
         let mut ps = self.take_single(&parent).ok()?;
+        // 停在门上时把**那张卡与它的选项 id 一并说出**：代理要代答就得按选项 id 答（否则只能等用户）。
+        let gate = self
+            .desk_of(child)
+            .queue()
+            .map(|q| {
+                format!(
+                    "；它停在等你答的那张卡上：card={}，问「{}」，选项：{}。要代答就 send_session_message（kind=user_reply，reply=<选项 id>）",
+                    q.card.id,
+                    q.card.message.title,
+                    q.card
+                        .options
+                        .iter()
+                        .map(|o| o.id.as_str())
+                        .collect::<Vec<_>>()
+                        .join(" / ")
+                )
+            })
+            .unwrap_or_default();
         let mut evs = ps.note_task(&format!(
-            "[子会话] {} 这一轮结束。要看它说了什么用 read_session_messages（0 = 最新）；要它继续或返工用 send_session_message。",
-            child
+            "[子会话] {} 这一轮结束{}。要看它说了什么用 read_session_messages（0 = 最新）；要它继续或返工用 send_session_message。",
+            child, gate
         ));
         self.put_single(&parent, ps);
         self.record_events(&parent, &mut evs);
