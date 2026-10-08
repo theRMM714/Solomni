@@ -289,11 +289,11 @@ fn grants_are_written_when_the_environment_allows_it() {
     expect_granted(&outcome, "授权应当成功");
     let rec = load_record(&home);
     assert!(
-        rec.snapshots.iter().any(|(p, _)| Path::new(p) == target),
+        rec.snapshots.iter().any(|s| Path::new(&s.path) == target),
         "根内路径要先落原始安全描述符快照"
     );
     assert!(
-        !rec.grants.iter().any(|(_, p, _)| Path::new(p) == target),
+        !rec.grants.iter().any(|g| Path::new(&g.path) == target),
         "根内路径收尾走快照还原，不记 ACE 摘要"
     );
     // 收尾必须把自己写下的权限项按台账撤掉或还原：测试不在本机留痕。
@@ -1052,7 +1052,7 @@ fn journal_records_snapshot_and_grant_before_touching_acl() {
         reread
             .snapshots
             .iter()
-            .any(|(p, b)| Path::new(p) == target && b == &bytes),
+            .any(|s| Path::new(&s.path) == target && s.bytes == bytes),
         "动 ACL 之前台账里就要有原始安全描述符"
     );
     let spec = FenceSpec {
@@ -1067,7 +1067,7 @@ fn journal_records_snapshot_and_grant_before_touching_acl() {
     expect_granted(&prepare_fence(&spec, "cmd", &home), "授权应当成功");
     let rec = load_record(&home);
     assert!(
-        rec.snapshots.iter().any(|(p, _)| Path::new(p) == target),
+        rec.snapshots.iter().any(|s| Path::new(&s.path) == target),
         "收尾还原要用的快照必须在场"
     );
     clean(&home).expect("回收应当成功");
@@ -1147,15 +1147,15 @@ fn missing_grant_target_is_skipped_and_not_journaled() {
     expect_granted(&outcome, "不存在的落点应跳过、不判整次失败");
     let rec = load_record(&home);
     assert!(
-        !rec.snapshots.iter().any(|(p, _)| Path::new(p) == absent),
+        !rec.snapshots.iter().any(|s| Path::new(&s.path) == absent),
         "跳过的落点不得留快照"
     );
     assert!(
-        !rec.grants.iter().any(|(_, p, _)| Path::new(p) == absent),
+        !rec.grants.iter().any(|g| Path::new(&g.path) == absent),
         "跳过的落点不得留 ACE 摘要"
     );
     assert!(
-        rec.snapshots.iter().any(|(p, _)| Path::new(p) == target),
+        rec.snapshots.iter().any(|s| Path::new(&s.path) == target),
         "存在的落点要照常授权"
     );
     clean(&home).expect("回收应当成功");
@@ -1224,4 +1224,134 @@ fn journal_failure_blocks_the_acl_write() {
     free_sid(sid);
     assert!(!wrote, "台账没落盘就不许写 ACL");
     discard(&base);
+}
+
+/// 【按条处置】清单看得见每一条的现状；按路径只还原一条、按 SID + 路径只撤一条，
+/// 其余条目与整份 DACL 不受影响；台账外的根外残留也能按 SID + 路径撤掉并如实标注它不在台账里。
+#[test]
+fn ledger_catalog_and_per_item_disposal_keep_the_rest_untouched() {
+    let base = std::env::temp_dir().join(format!("solomni-grant-probe-{}", std::process::id()));
+    let inside = base.join("inside");
+    let outside =
+        std::env::temp_dir().join(format!("solomni-grant-outside-{}", std::process::id()));
+    std::fs::create_dir_all(&inside).expect("建根内目录");
+    std::fs::create_dir_all(&outside).expect("建根外目录");
+    if !acl_round_trip(&base, "grant") || !acl_round_trip(&outside, "grant-outside") {
+        eprintln!(
+            "[探针] 本机做不了 ACL 完整往返（写→读回→撤）：按条处置探针跳过（不静默当作通过）"
+        );
+        discard(&base);
+        discard(&outside);
+        return;
+    }
+    let home = base.join(".home");
+    let spec = FenceSpec {
+        agent: "probe-grant".to_string(),
+        private: PathBuf::new(),
+        ro_tree: Vec::new(),
+        rw: vec![inside.clone()],
+        cwd: inside.clone(),
+        ro: Vec::new(),
+        net: false,
+    };
+    let sid = container_sid(&container_name(&spec)).expect("派生容器 SID");
+    let sid_text = sid_to_string(sid);
+    // 一条根内授权（走快照）+ 一条根外授权（走摘要）：都经“先落台账、再写 ACL、写后核对”那条路。
+    let mut rec = load_record(&home);
+    let inside_target = GrantTarget {
+        path: inside.clone(),
+        rights: RIGHTS_RW,
+        recursive: false,
+        inherit: false,
+        part: FencePart::DataBoundary,
+    };
+    grant_one_journaled(&home, &mut rec, sid, &sid_text, &inside_target, &base)
+        .expect("根内授权应当成功");
+    let outside_target = GrantTarget {
+        path: outside.clone(),
+        rights: RIGHTS_RO,
+        recursive: false,
+        inherit: false,
+        part: FencePart::Interpreter,
+    };
+    grant_one_journaled(&home, &mut rec, sid, &sid_text, &outside_target, &base)
+        .expect("根外授权应当成功");
+    free_sid(sid);
+    // 清单：两条都看得见，都如实标成“现在还在”，且与盘上的 ACE 对得上。
+    let view = catalog(&home);
+    assert_eq!(
+        view.entries.len(),
+        2,
+        "台账里应当有两条：{:?}",
+        view.entries
+    );
+    assert!(
+        view.entries.iter().all(|e| e.present),
+        "两条授权都还在盘上：{:?}",
+        view.entries
+    );
+    assert!(
+        view.entries
+            .iter()
+            .any(|e| e.kind == "snapshot" && Path::new(&e.path) == inside),
+        "根内那条要如实标成快照：{:?}",
+        view.entries
+    );
+    assert!(
+        view.entries
+            .iter()
+            .any(|e| e.kind == "grant" && Path::new(&e.path) == outside),
+        "根外那条要如实标成授权摘要：{:?}",
+        view.entries
+    );
+    // 按路径只还原根内那一条：它自己的容器 ACE 消失，根外那条与它的整份 DACL 不受影响。
+    let before = acl_entries(&outside).expect("读根外 ACE 集合");
+    let said = restore_one(&home, &inside).expect("按路径还原应当成功");
+    assert!(
+        said.contains(&inside.to_string_lossy().into_owned()),
+        "{}",
+        said
+    );
+    let sid = container_sid(&container_name(&spec)).expect("再派生容器 SID");
+    assert!(
+        !has_any_ace_for(sid, &inside),
+        "还原后根内那条不该再有该容器 SID 的 ACE"
+    );
+    assert!(has_any_ace_for(sid, &outside), "其余条目不受影响");
+    free_sid(sid);
+    assert_eq!(
+        acl_entries(&outside).expect("读根外 ACE 集合"),
+        before,
+        "还原一条不得改动其余条目的 DACL"
+    );
+    assert_eq!(catalog(&home).entries.len(), 1, "还原过的那条已从台账销掉");
+    // 按 SID + 路径撤根外那一条，只动它。
+    let said = revoke_grant(&home, &sid_text, &outside).expect("按条撤销应当成功");
+    assert!(said.contains("按台账"), "{}", said);
+    let sid = container_sid(&container_name(&spec)).expect("再派生容器 SID");
+    assert!(
+        !has_any_ace_for(sid, &outside),
+        "撤过的落点不该再有该 SID 的 ACE"
+    );
+    free_sid(sid);
+    assert!(load_record(&home).is_empty(), "两条都处置完，台账应当清空");
+    // 台账外残留：直接写一条 ACE、不经台账，再按 SID + 路径撤掉——如实标注它不在台账里。
+    let orphan = container_sid("Solomni.Agent.GrantOrphanProbe").expect("派生孤儿容器 SID");
+    let orphan_text = sid_to_string(orphan);
+    grant_verified(orphan, &outside, RIGHTS_RO, false, false).expect("写下台账外 ACE");
+    let said = revoke_grant(&home, &orphan_text, &outside).expect("台账外残留也要撤得掉");
+    assert!(
+        said.contains("不在台账里"),
+        "要如实标注它不在台账里：{}",
+        said
+    );
+    assert!(!has_any_ace_for(orphan, &outside), "台账外 ACE 应当被撤掉");
+    free_sid(orphan);
+    // 台账里没有的快照：按条还原如实拒绝（当次调用什么都没做）。
+    assert!(
+        restore_one(&home, &inside).is_err(),
+        "台账里没有这条快照就如实拒绝"
+    );
+    discard(&base);
+    discard(&outside);
 }

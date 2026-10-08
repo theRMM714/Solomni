@@ -296,11 +296,110 @@ pub fn clean(home: &std::path::Path) -> Result<String, String> {
     }
 }
 
-/// 孤儿授权清扫：按容器 SID 族在产品根内撤掉台账之外的残留 ACE（`--fence-clean` 用）。
+/// 孤儿授权清扫：按容器 SID 族在产品根内撤掉台账之外的残留 ACE（--fence-clean 用）。
 /// 只有 Windows 写本机 ACL，其它平台没有这一步（而不是"存在但空转"）。
 #[cfg(windows)]
 pub fn sweep_orphan_aces(root: &std::path::Path) -> Result<usize, String> {
     windows::sweep_orphan_aces(root)
+}
+
+/// 目的：台账现值里的**一条**（机器可读，与平台无关的形状）：哪一类、谁、哪个路径、什么权限、什么时候记的。
+/// 约束：present = 这一条现在还在不在（路径在不在、ACE 还在不在、profile 还在不在）；
+///   ace_sids = 该路径上**现在**看得到的显式包 SID 允许 ACE（与台账一比对，差异就看得见）；
+///   notes = 读不到 DACL、认不出布局、路径不在这类如实记下的事实。
+#[derive(Debug, serde::Serialize)]
+pub struct LedgerEntry {
+    /// 目的：这一条属于哪一类——snapshot（根内快照）/ grant（根外授权摘要）/ profile（容器 profile）。
+    pub kind: &'static str,
+    /// 目的：授给谁（只有 grant 有；其余为空串）。
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub sid: String,
+    /// 目的：哪个路径（profile 条目里是 profile 名，其余是路径）。
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub path: String,
+    /// 目的：权限位（只有 grant 有）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rights: Option<u32>,
+    /// 目的：记录时刻（Unix 秒）。
+    pub at: u64,
+    /// 目的：这一条现在还在不在。
+    pub present: bool,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub ace_sids: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub notes: Vec<String>,
+}
+
+/// 目的：台账现值（机器可读的数字面）：条目清单 + 一句如实说明。
+#[derive(Debug, serde::Serialize)]
+pub struct Ledger {
+    /// 目的：一句如实说明（没有台账 / 本平台不留权限项）。
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub note: String,
+    pub entries: Vec<LedgerEntry>,
+}
+
+/// 目的：台账现值（清单 + "当前实际 ACE 与台账对不对得上"的差异）。
+/// 约束：只有 Windows 写本机权限项，所以台账只在 Windows 上有内容；其它平台如实说"本平台不留权限项"。
+pub fn ledger(home: &std::path::Path) -> Ledger {
+    #[cfg(windows)]
+    {
+        windows::catalog(home)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = home;
+        Ledger {
+            note: "本平台的围栏不留权限项，没有台账".to_string(),
+            entries: Vec::new(),
+        }
+    }
+}
+
+/// 目的：按路径**只还原一条**快照（其余条目与整份 DACL 不受影响）。
+/// 错误：台账里没有该路径、路径不在了、写回被拒都如实返回；失败时台账不改（供重试）。
+pub fn restore_one(home: &std::path::Path, path: &std::path::Path) -> Result<String, String> {
+    #[cfg(windows)]
+    {
+        windows::restore_one(home, path)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (home, path);
+        Err("本平台的围栏不留权限项，没有可还原的快照".to_string())
+    }
+}
+
+/// 目的：按 **SID + 路径**只撤一条授权（其余条目不受影响）；**不在台账里也照撤**（台账外残留走这条）。
+/// 错误：路径不在了、SID 不合法、写撤权后的 DACL 被拒都如实返回；失败时台账不改动。
+pub fn revoke_grant(
+    home: &std::path::Path,
+    sid: &str,
+    path: &std::path::Path,
+) -> Result<String, String> {
+    #[cfg(windows)]
+    {
+        windows::revoke_grant(home, sid, path)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (home, sid, path);
+        Err("本平台的围栏不留权限项，没有可撤销的授权".to_string())
+    }
+}
+
+/// 目的：按名**只删一个**容器 profile（连该容器的存储一起删）。
+/// 错误：删除被拒时如实返回；失败时台账不改动。
+pub fn remove_profile_one(home: &std::path::Path, name: &str) -> Result<String, String> {
+    #[cfg(windows)]
+    {
+        windows::remove_profile_one(home, name)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (home, name);
+        Err("本平台没有容器 profile".to_string())
+    }
 }
 
 /// 撤销一次会话的围栏授权（会话删除时由核心经 FenceHost 端口请求；其它平台是空操作）。

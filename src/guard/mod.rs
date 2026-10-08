@@ -18,6 +18,139 @@ pub fn fence_run(args: &[String], flag: usize) -> i32 {
     }
 }
 
+/// 目的：**按条处置**围栏台账（与 --fence-clean 的整体收尾并列）：列清单 / 还原一条 / 撤一条 / 删一个 profile。
+/// 返回：Some(退出码) = 这组开关出现了并已处置（0 成功 / 1 失败 / 2 用法错）；None = 没出现（交给别的模式）。
+/// 约束：与 --fence-clean 共用同一份台账与同一套 ACE 读法（confine 的 catalog / restore_one / revoke_grant /
+///   remove_profile_one）；**未指定的条目一概不动**。
+pub fn fence_grant(args: &[String], root: &std::path::Path) -> Option<i32> {
+    use crate::capabilities::tools::detail::confine;
+    let home = root.join(".home");
+    let after = |flag: &str| -> Option<String> {
+        args.iter()
+            .position(|a| a == flag)
+            .and_then(|i| args.get(i + 1))
+            .cloned()
+    };
+    // 列清单：机器可读优先（默认 JSON）；--human 给一行一句的可读版。恒退出 0，判定归调用方。
+    if args.iter().any(|a| a == "--fence-ledger") {
+        let view = confine::ledger(&home);
+        if args.iter().any(|a| a == "--human") {
+            for line in ledger_lines(&view) {
+                println!("[围栏] {}", line);
+            }
+        } else {
+            match serde_json::to_string_pretty(&view) {
+                Ok(text) => println!("{}", text),
+                Err(e) => {
+                    eprintln!("[围栏] 台账序列化失败：{}", e);
+                    return Some(1);
+                }
+            }
+        }
+        return Some(0);
+    }
+    // 按路径只还原一条快照（其余条目与整份 DACL 不受影响）。
+    if args.iter().any(|a| a == "--fence-restore") {
+        let Some(path) = after("--fence-restore") else {
+            eprintln!("用法：solomni --fence-restore 路径（要整体收尾用 --fence-clean）");
+            return Some(2);
+        };
+        return Some(report(confine::restore_one(
+            &home,
+            &std::path::PathBuf::from(path),
+        )));
+    }
+    // 按 SID + 路径只撤一条授权；不在台账里的台账外残留也走这一条。
+    if args.iter().any(|a| a == "--fence-revoke") {
+        let (Some(sid), Some(path)) = (after("--fence-revoke"), {
+            args.iter()
+                .position(|a| a == "--fence-revoke")
+                .and_then(|i| args.get(i + 2))
+                .cloned()
+        }) else {
+            eprintln!("用法：solomni --fence-revoke <SID> 路径（不在台账里的残留也照撤）");
+            return Some(2);
+        };
+        return Some(report(confine::revoke_grant(
+            &home,
+            &sid,
+            &std::path::PathBuf::from(path),
+        )));
+    }
+    // 按名只删一个容器 profile。
+    if args.iter().any(|a| a == "--fence-profile-rm") {
+        let Some(name) = after("--fence-profile-rm") else {
+            eprintln!("用法：solomni --fence-profile-rm <profile 名>");
+            return Some(2);
+        };
+        return Some(report(confine::remove_profile_one(&home, &name)));
+    }
+    None
+}
+
+/// 一行一句的可读清单（时间记 Unix 秒：不引时区与本地化）。
+fn ledger_lines(view: &crate::capabilities::tools::detail::confine::Ledger) -> Vec<String> {
+    use crate::capabilities::tools::detail::confine::LedgerEntry;
+    let mut out: Vec<String> = Vec::new();
+    if !view.note.is_empty() {
+        out.push(view.note.clone());
+    }
+    for e in &view.entries {
+        let LedgerEntry {
+            kind,
+            sid,
+            path,
+            rights,
+            at,
+            present,
+            ace_sids,
+            notes,
+        } = e;
+        let state = if *present {
+            "现在还在"
+        } else {
+            "现在不在了"
+        };
+        let mut line = match *kind {
+            "snapshot" => format!("[快照] {}（记于 {} 秒；{}）", path, at, state),
+            "grant" => format!(
+                "[授权] {} → {}（权限位 0x{:X}，记于 {} 秒；{}）",
+                sid,
+                path,
+                rights.unwrap_or(0),
+                at,
+                state
+            ),
+            _ => format!("[profile] {}（记于 {} 秒；{}）", path, at, state),
+        };
+        if !ace_sids.is_empty() {
+            line.push_str(&format!("；盘上显式包授权：{}", ace_sids.join("、")));
+        }
+        for n in notes {
+            line.push_str(&format!("；{}", n));
+        }
+        out.push(line);
+    }
+    if out.is_empty() {
+        out.push("台账里没有条目".to_string());
+    }
+    out
+}
+
+/// 把一次按条处置的结果如实打到用户面：成功一句话，失败写清为什么。
+fn report(done: Result<String, String>) -> i32 {
+    match done {
+        Ok(msg) => {
+            println!("[围栏] {}", msg);
+            0
+        }
+        Err(e) => {
+            eprintln!("[围栏] {}", e);
+            1
+        }
+    }
+}
+
 /// （台账可能不存在：探针、夹具的台账被删、旧版本建的）——隐藏模式，用户经文档知道它。
 pub fn fence_clean(root: &std::path::Path) -> i32 {
     let home = root.join(".home");

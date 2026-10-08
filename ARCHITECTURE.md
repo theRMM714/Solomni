@@ -20,7 +20,7 @@ presentation/{cli,web} ──▶ capabilities（含协调业务 conductor）─�
 | `capabilities/` | **业务能力**：按业务功能垂直切分。每个能力有 `api`（入站契约：trait + DTO）/ `service`（本能力的状态与用例）/ `ports`（出站端口，只由定义它的能力持有）/ `domain`（纯逻辑）/ `detail`（只有组合根能构造） | **业务之间只经对方的 `api`**；不反向依赖 `entry` / `presentation`（T0 机器判定，见 §九.7） |
 | `capabilities/conductor/` | **协调业务**：会话中心（在世表、命令队列、运行态）、生成驱动、跨能力用例与跨会话回档编排；与别的能力**平级** | 不读文件、不发网络、不碰 stdin/stdout——机制下沉各能力的 `detail/` |
 | `presentation/{cli,web}/` | **前端（交付机制）**：各渠道一个子目录，完全分开——传输（argv/stdout vs HTTP）、路由、纯渲染。**不是业务能力** | 只依赖各能力的 `::api`；**拿不到端口对象，也拿不到 `Core`**；两者互不依赖 |
-| `entry/` + `main.rs` + `diagnostics/` + `guard/` | **入口层**：组合根（`main.rs`：`new` 出所有适配器并注入）+ 机器可读探针（`--doctor` / `--https-check` / `--print-routes` / `--print-fence-env` / `--fence-verify`）+ 围栏守门进程（`--fence-run` / `--fence-clean`，**第二个程序入口**） | 它依赖所有人，**任何人都不许依赖它**；除装配与探针外无业务 |
+| `entry/` + `main.rs` + `diagnostics/` + `guard/` | **入口层**：组合根（`main.rs`：`new` 出所有适配器并注入）+ 机器可读探针（`--doctor` / `--https-check` / `--print-routes` / `--print-fence-env` / `--fence-verify`）+ 围栏守门进程与台账处置（`--fence-run`；以及 `--fence-clean` / `--fence-ledger` / `--fence-restore` / `--fence-revoke` / `--fence-profile-rm`） | 它依赖所有人，**任何人都不许依赖它**；除装配与探针外无业务 |
 
 推论：
 
@@ -125,6 +125,7 @@ presentation/{cli,web} ──▶ capabilities（含协调业务 conductor）─�
   **一个 agent 一个容器 profile**，守门进程是唯一建它的地方并记进 `.home/fence-grants.json` 台账；每次写 ACL **先把记录落盘**
   （产品根内路径存原始安全描述符、根外只存 ACE 摘要），写后核对（我们的 ACE 在不在、原有权限项有没有丢），失败就回滚并如实报错；
   `--fence-clean` 按台账**整体还原**根内路径、精确撤销根外条目，再在产品根内扫掉台账外的孤儿授权（含任何显式包 SID ACE）与遗留 profile。
+  **按条处置**是它的细分入口：`--fence-ledger` 列出台账现值（快照路径 + 时间、根外授权 SID/路径/权限位、profile，以及“当前实际 ACE 与台账对不对得上”的差异），`--fence-restore` 只还原一条、`--fence-revoke` 只撤一条（**台账外的根外残留也能按 SID + 路径撤**）、`--fence-profile-rm` 只删一个；两者共用同一份台账与同一套 ACE 读法。
   机制验证分三态：`Enforced` / `EnvUnavailable`（本机不允许，如实降级照跑）/ `Broken`（我们写错了，未授权时段**拒绝执行**）。
   **必要落点授不上不许降级**（解释器目录 / 模块目录 / 工作目录 / 私有沙箱 / 其余数据边界 / 容器身份 / 台账）：
   经统一裁决通道问用户（`fence_unfenced_once` 本轮无围栏跑一次 / `fence_abort` 放弃这次调用），

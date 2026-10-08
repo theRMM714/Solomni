@@ -7,7 +7,7 @@
 
 ## 一、管什么 / 不管什么
 
-**管**：系统工具总表与角色表（`systools/`）、内置文件工具（read/write/edit/patch/search）的执行编排与纯规则、工具参数契约、补丁通道、外部工具进程的执行、**围栏策略与平台实现**、授权记录与撤销（写 ACL 前先落台账；写后核对**覆盖标准、对象与回调 ACE**，身份 = ACE 类型 + SID + 权限位 + 对象 GUID，布局认不出的如实计数；失败回滚；收尾按台账还原或精确撤销，并在产品根内回收孤儿授权）。
+**管**：系统工具总表与角色表（`systools/`）、内置文件工具（read/write/edit/patch/search）的执行编排与纯规则、工具参数契约、补丁通道、外部工具进程的执行、**围栏策略与平台实现**、授权记录与撤销（写 ACL 前先落台账；写后核对**覆盖标准、对象与回调 ACE**，身份 = ACE 类型 + SID + 权限位 + 对象 GUID，布局认不出的如实计数；失败回滚；收尾按台账还原或精确撤销，并在产品根内回收孤儿授权）；**按条处置**与台账清单（列出快照路径 + 时间、根外授权 SID/路径/权限位、profile 与“当前实际 ACE 与台账对不对得上”的差异；按路径只还原一条、按 SID + 路径只撤一条——**含台账外的根外残留**、按名只删一个 profile）。
 
 **不管**：不放领域语义（角色是系统的身份，不是业务概念）；不选模型；不碰会话流水。
 
@@ -23,7 +23,7 @@
 ## 四、改动本单元时必须同步
 
 - 平台专属代码本地不编译——`FenceSpec` 字面量必须写全字段（跨平台字面量门禁）；改围栏 → `tests/<平台>/` 探针；改工具表 → `systools/` 与本目录 `tools-and-roles.md`。
-- 围栏的写后核对、回滚与台账在 `src/capabilities/tools/detail/confine/windows/`：改落点形状（`GrantTarget`）或台账字段时，`prepare_fence` / `release_fence` / `clean` / `sweep_orphan_aces` 要一起改。
+- 围栏的写后核对、回滚与台账在 `src/capabilities/tools/detail/confine/windows/`：改落点形状（`GrantTarget`）或台账字段时，`prepare_fence` / `release_fence` / `clean` / `sweep_orphan_aces` 与按条处置（`catalog` / `restore_one` / `revoke_grant` / `remove_profile_one`）要一起改。
 - ACE 的读法只有一处：`acl.rs` 的 `ace_parts` 按 ACE 头算 SID 偏移（标准 ACE 与回调 ACE 从第 8 字节起，对象 ACE 再加 Flags(4) 与在场的 GUID）。改覆盖的 ACE 类型或身份形状时，写后核对、诊断转储与 `windows/tests.rs` 的对象 ACE 往返探针要一起看。
 - 容器里**列目录**的判据：同一个授权叶子上，cmd 的 `dir` 与 PowerShell 的 `Get-ChildItem` 会被拒，
   而 cmd 的 `for` 枚举与 python 的 `os.listdir` / `os.scandir` 正常（真机机制矩阵实测：叶子 DACL
