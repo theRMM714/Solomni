@@ -162,7 +162,7 @@ function ratchetSelfTest() {
   return bad;
 }
 
-const GIT_TMP = path.join(ROOT, "target", "hygiene-git.tmp");
+const GIT_TMP = path.join(ROOT, "target", "scratch", "hygiene-git.tmp");
 
 /** 跑 git 并把 stdout 重定向到**文件**再读回。
  *  受限会话里管道捕获会被拒（spawnSync EPERM），重定向到文件这条路在普通与受限 shell 里都走得通；
@@ -181,7 +181,7 @@ function git(args) {
   try {
     fs.unlinkSync(GIT_TMP);
   } catch (e) {
-    // 留在 target/ 里也无妨（那棵树不入库）
+    // 留在 target/scratch 里也无妨（那棵树不入库）
   }
   return text;
 }
