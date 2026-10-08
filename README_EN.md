@@ -66,12 +66,21 @@ that is gone.
 - **Three isolation layers**: path checks inside the built-in tools → every tool process runs behind the gate
   process (environment allowlist / process tree / timeout kills the whole tree) → platform fences
   (Windows AppContainer, Linux Landlock, macOS seatbelt). If a mechanism cannot be installed, the capability
-  grade is reported honestly instead of pretending.
+  grade is reported honestly instead of pretending. Fence grant targets are split into **required** and
+  **optional**: an optional target that cannot be granted is only recorded, while a **required** one is never
+  degraded silently — it raises a card offering "run this once unfenced / drop the call", and with no front end
+  able to answer, the call is refused (the command is never started).
 - **Registry**: four YAML files for providers / models / agents / settings, all under `.home/`, managed from
   the UI. Keys live only in the local registry and in the core's outbound calls (boundaries in
   [REGISTRY_SPEC.md](REGISTRY_SPEC.md)).
 - **Two interfaces**: the terminal transcript center (default) and the local web UI (`-webUI`, binds
   `127.0.0.1` only, port 3081 by default).
+- **One decision channel**: everything that needs your call — the core's gates (roster / start / plan review /
+  failed node), tool-level confirmation, and questions raised by the tool layer itself — uses the same card:
+  **message + options** (the option id is the contract, wording belongs to the UI), answered by one command.
+  It **blocks**: nothing moves until you answer; pressing stop voids the whole queue and releases waiters as
+  "denied". Cards and answers are persisted with the session (already answered ones are never re-asked); when no
+  option can actually be executed, no card is shown — the session is stopped and a warning is recorded.
 
 ## Install and run
 
@@ -115,6 +124,9 @@ tools:                       # optional: external tool table
   and other harnesses are all instances of it.
 - A tool process can reach: that agent's private sandbox + its own module directory; the shared main copy is not
   among them (pull before editing, commit when done); it accepts **real absolute paths** only, and anything outside is refused.
+- **Every module keeps a cross-task private area** `<module>/userdata/`: it is ensured to exist when the
+  module is loaded (directory only, idempotent; failure never blocks loading, it is just reported — that seat then
+  has no private landing). Module directories are read-only by default, `userdata/` excepted.
 - If it runs, it is a valid module; if it does not, the core reports the reason plainly — no guessing, no fallback.
 
 ### Run the demo
