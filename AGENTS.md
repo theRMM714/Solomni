@@ -134,10 +134,9 @@
 - 不覆盖、删除或提交用户已有且不属于当前范围的工作区修改。
 - 完成修改和适用测试后创建本地提交。
 - `main` 禁止直接 push，只走 PR；其它分支只有需要真机或 GitHub Actions 验证、或用户明确授权时才推，其余不得擅自 `git push`。
-- CI 只有**手动派发**才会跑，用 `gh workflow run test.yml --ref <分支>` 触发；派发前先确认这次结论依赖本机之外（判据见 `docs/testing/execution-ci.md`）。
+- CI 只有**手动派发**才会跑，用 `gh` 触发；派发前先确认这次结论依赖本机之外（命令与判据见 `docs/testing/execution-ci.md`）。
 - actions的ci-report直接用git或git cli拉取，禁止轮询查网页。无法确认时机时委托用户拉取。
-- 拉取节奏（推荐）：派发后先等 5 分钟；`meta.json` 的 `sha` 还对不上（run 没结束）就每次再等 2 分钟重拉，
-  直到三平台 `sha` 都对得上，或确认 run 已失败/取消（判据见 `docs/testing/execution-ci.md`）。
+- 拉取节奏与判定顺序一律以 `docs/testing/execution-ci.md` 为准。
 
 ## 八、文档路由
 
