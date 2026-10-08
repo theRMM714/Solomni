@@ -182,7 +182,7 @@ session/<工作名>/
 > **工具层与围栏也接进来了**：经 `kernel::ports::AskUser`（推一条问题、**阻塞**等一个选项 id）走同一条队，
 > 构不出可用选项时**不发起裁决**，改为停掉这个会话 + 落一条警告。
 > **仍未落地**：无回答者场景的**声明策略**（CLI 非交互 / 端到端夹具 / 代理链按发起方声明的策略收场；
-> 眼下这些场景一律按默认的 fail-closed 拒绝，见下）。剩余部分按 `tests/gaps.yaml` 的 `session.unified-decision-channel` 推进。
+> 眼下这些场景一律按默认的 fail-closed 拒绝，见下）。剩余部分按 `tests/gaps.yaml` 的 `session.decision-without-answerer` 推进。
 
 **形状**（`DecisionCard`）：`id`（会话内唯一、稳定）+ **信封**（谁在问：核心 / 某一席 / 工具层）+
 **消息**（`title` / `body` / `detail`）+ **选项**（`{id, label}`，有序）。

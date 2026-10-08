@@ -141,13 +141,11 @@ git show origin/ci-report:runs/windows/logs/<某一步>.log  # 失败证据原�
 3. 再读 `test-report.json` 的 `steps` 与 `envSkips`：**CI 上的 env-skip 同样不算通过**，它只说明那条围栏没被验收。
 4. 失败时从 `logs/` 取断言原文，不在摘要里找感觉。
 
-> `envSkips` 只收集 **`[探针]` 前缀**的行：诊断输出一律用 `[诊断]`，别用 `[探针]`，否则会被算成"跳过"（曾把 Windows 的 1 条真跳过记成 5 条）。
+> `envSkips` 只收集 **`[探针]` 前缀**的行：诊断输出一律用 `[诊断]`，别用 `[探针]`，否则会被算成"跳过"。
 >
-> 曾经记过一条环境结论——「GitHub 托管的 `windows-latest` 上 AppContainer 会被静默降级（容器内 `whoami /groups`
-> 无包 SID 组）」：普通会话的真机查下来**不成立**。包 SID 在令牌的 `TokenAppContainerSid` 字段里、不在组列表里，
-> 容器其实生效（真机令牌转储：`TokenIsAppContainer=1`、`AppContainerSid` = 该 profile 的 SID、`capabilities=0`）；
-> 那条 `env-skip` 是判据的**假阴性**，现已改成行为对照。
-> **教训**：判「环境降级」要看**被测试进程**的令牌与行为，别拿一个二手字符串特征当判据。
+> 判「环境降级」只看**被测试进程**的令牌与行为：`whoami /groups` 里找包 SID 组在现代 Windows 上是**假阴性**
+> （包 SID 在令牌的 `TokenAppContainerSid` 字段里，不在组列表里），按它判会把生效的容器记成降级。
+> 容器是否生效用**行为对照**（授权落点写得进、父目录按名可用、父目录内容不可见），见 [levels.md](levels.md) 的 T4。
 
 **等多久再拉（推荐节奏）**：push 之后**先等 5 分钟**再拉 `ci-report`；若某个平台的 `meta.json` 的 `sha` 还对不上
 （这次 run 没结束），**每次再等 2 分钟**重拉一次，直到三平台的 `sha` 都对得上，或确认 run 已失败/取消。

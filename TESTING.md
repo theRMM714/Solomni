@@ -49,13 +49,13 @@
 
 **逐平台**与**跨平台**缺口账（`tests/<平台>/gaps.yaml`、`tests/cross-platform/gaps.yaml`）**都为空**：
 Linux Landlock、macOS seatbelt 与 Windows 的目录 ACL 授权/撤权、落点清单都已由三平台 CI 真跑通过。
-原先那条环境条目已查清并销账：让门禁得出一串假失败的
-不是「受限令牌会话」，而是 DSH 的 Windows 写沙箱后端授写权时给授权根打上的 Low 完整性标签；判据、后果与处置
-见 [docs/testing/execution-ci.md](docs/testing/execution-ci.md) 的「真机入口」一节。
-**Windows 的容器级往返探针曾经恒 `env-skip`**，真机查下来不是环境降级：那条判据（容器内
-`whoami /groups` 里找包 SID 组）在现代 Windows 上是**假阴性**——包 SID 在令牌的 `TokenAppContainerSid`
-字段里，不在组列表里。判据已换成行为对照（授权落点写得进、从父目录按名走得到叶子、父目录的内容看不到），
-Windows 的「模块目录只读 + `userdata/` 可写 + 另一席不可达」由容器往返探针在真机上验收。
+判「环境不允许」的判据只有一条：**看被测试进程自己的令牌与行为**，不拿二手字符串特征当判据。
+- Windows 容器里 `whoami /groups` 不含包 SID 组是**正常**的（包 SID 在令牌的 `TokenAppContainerSid` 字段，
+  不在组列表里），按它判「环境降级」是假阴性；容器是否生效由**行为对照**给结论——授权落点写得进、
+  从父目录按名走得到叶子、父目录里的其它条目看不到。
+- 工作区被写沙箱挡住时，原因不是「受限令牌会话」，而是 DSH 的 Windows 写沙箱后端授写权时给授权根打上的
+  Low 完整性标签；判据、后果与处置见 [docs/testing/execution-ci.md](docs/testing/execution-ci.md) 的「真机入口」一节。
+- Windows 的「模块目录只读 + `userdata/` 可写 + 另一席不可达」由容器往返探针在真机上验收。
 
 仍未完成的缺口全部记在 `tests/gaps.yaml`（长期目标、已确认但尚未实施的产品/机制缺口都在那里，细则不复述条目内容）。
 条目存在 = 尚未完成；补齐后删除条目，不保留完成历史。
