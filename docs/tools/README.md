@@ -80,9 +80,9 @@
 那里没有 `prepare_fence`（不是存在但空转）。
 
 **真机验收**：`unwritable_interpreter_dir_never_silently_runs_unfenced`（`ProcTools` 的用例，`--fence-live` 才跑，
-要 `cargo build` 出可执行文件）——在解释器目录授不进的机器（例如 nvm4w 把 node 放在系统目录下的 `C:\nvm4w\nodejs`，
-属主 Administrators、只给 Authenticated Users Modify，DACL 写不进=错误码 5）上断言：选「跑一次」才跑且如实标注 /
-选「放弃」不执行 / 没有可回答的前端也不执行；本机解释器目录授得进（构造不出这一态）就如实 `env-skip`。
+要可执行文件已构建）断言三条真机行为：选「跑一次」才跑且回执如实标为无围栏 / 选「放弃」不执行 /
+没有可回答的前端也不执行。**已在真机通过**：解释器装在属主不是当前用户的目录里（系统级安装，当前用户对那个目录
+没有写 DACL 的权限）时，授权写不进（错误码 5），三条行为如上。解释器目录授得进（构造不出这一态）就如实 `env-skip`。
 ## 本目录
 
 | 文件 | 内容 |
