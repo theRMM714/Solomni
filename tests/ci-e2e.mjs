@@ -33,20 +33,24 @@ function run(cmd, args, logName) {
 const probes = (out) => out.split(/\r?\n/).filter((l) => l.includes("[探针]")).map((l) => l.trim());
 
 function main() {
-  const start = Date.now();
   let status = "pass";
   let detail = "";
   let raw = null;
+  let ms = 0;
   const envSkips = [];
 
+  const buildStart = Date.now();
   const build = run("cargo", ["build", "--color", "never"], "e2e-cargo-build.log");
+  const buildMs = Date.now() - buildStart;
   envSkips.push(...probes(build.out));
   if (build.code !== 0) {
     status = "fail";
+    ms = buildMs;
     detail = "cargo build 失败：" + (build.error || "") + "（日志 target/test-logs/e2e-cargo-build.log）";
     raw = build.out.slice(-800);
   } else if (!fs.existsSync(BIN)) {
     status = "fail";
+    ms = buildMs;
     detail = "cargo build 成功但找不到二进制 " + path.relative(ROOT, BIN);
   } else {
     const orchestrator = path.join(ROOT, "tests", "cross-platform", "e2e", "orchestrator.js");
@@ -54,7 +58,9 @@ function main() {
       status = "gap";
       detail = "cross-platform.e2e.not-in-runner（编排尚未迁入）";
     } else {
+      const start = Date.now();
       const r = run(process.execPath, [orchestrator], "e2e-orchestrator.log");
+      ms = Date.now() - start;
       envSkips.push(...probes(r.out));
       status = r.code === 0 && r.out.includes("E2E-OK") ? "pass" : "fail";
       detail = r.out.trim().split(/\r?\n/).slice(-2).join(" / ");
@@ -62,11 +68,12 @@ function main() {
     }
   }
 
+  // ms 只量 L4 本体（编排器）：构建是前置，算进来会让"这一步慢不慢"失真；构建耗时单列在 detail 里。
   const report = {
     platform: process.platform,
     arch: process.arch,
     osKey: IS_WIN ? "windows" : process.platform === "darwin" ? "macos" : "linux",
-    steps: [{ step: "L4 端到端", status, detail, ms: Date.now() - start }],
+    steps: [{ step: "L4 端到端", status, detail: detail + "（构建 " + (buildMs / 1000).toFixed(1) + "s）", ms }],
     envSkips,
     failed: status === "fail" ? 1 : 0,
     quality: { failed: 0, steps: [] },
