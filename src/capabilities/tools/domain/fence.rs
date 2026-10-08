@@ -127,6 +127,8 @@ impl FenceSpec {
 /// 约束：**必要 / 可选的判据只在这一处**（`necessary`）：必要落点缺了这次命令在容器里起不来，
 ///   或围栏本身不成立；可选落点缺了命令照跑，只是可达范围小一点。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+// 这套机制只在 Windows 的容器围栏里用（unix 没有 prepare_fence 这一步）：unix 侧无使用点，如实放行死代码。
+#[allow(dead_code)]
 pub enum FencePart {
     /// 解释器安装目录（基线，授给共享包组）：容器里连解释器都起不来。
     Interpreter,
@@ -152,6 +154,8 @@ impl FencePart {
     /// 目的：这一环**必要**吗——缺了这次命令在容器里起不来，或这次执行根本做不了该做的事。
     /// 约束：判据只有这一处（枚举里这两条就是可选的）；可选落点授不上只记事实（见 `FencePrep`），
     ///   不牵动这次执行。
+    // 这套机制只在 Windows 的容器围栏里用（unix 没有 prepare_fence 这一步）：unix 侧无使用点，如实放行死代码。
+    #[allow(dead_code)]
     pub fn necessary(&self) -> bool {
         !matches!(self, FencePart::AuthorizedRead | FencePart::Parent)
     }
@@ -194,6 +198,8 @@ impl FencePart {
 /// 目的：一个落点授不上的如实结论：**哪一环** + 哪个目录 + 缺什么前提。
 /// 约束：它是"必要落点授不上"这条路的唯一材料——裁决卡、回执与停会话警告都从它派生。
 #[derive(Debug, Clone, PartialEq, Eq)]
+// 这套机制只在 Windows 的容器围栏里用（unix 没有 prepare_fence 这一步）：unix 侧无使用点，如实放行死代码。
+#[allow(dead_code)]
 pub struct FenceBlocked {
     /// 目的：哪一环（`necessary()` 为真）。
     pub part: FencePart,
@@ -205,6 +211,8 @@ pub struct FenceBlocked {
 
 impl FenceBlocked {
     /// 目的：这一环的一句话（哪一环、哪个目录、缺什么前提、怎么补）——给用户看的原话。
+    // 这套机制只在 Windows 的容器围栏里用（unix 没有 prepare_fence 这一步）：unix 侧无使用点，如实放行死代码。
+    #[allow(dead_code)]
     pub fn line(&self) -> String {
         let where_ = if self.path.as_os_str().is_empty() {
             String::new()
@@ -222,8 +230,12 @@ impl FenceBlocked {
 }
 
 /// 目的：必要落点授不上时给用户的选项 id——**本轮无围栏跑一次**（这一次调用按无围栏执行）。
+// 这套机制只在 Windows 的容器围栏里用（unix 没有 prepare_fence 这一步）：unix 侧无使用点，如实放行死代码。
+#[allow(dead_code)]
 pub const OPT_FENCE_UNFENCED: &str = "fence_unfenced_once";
 /// 目的：必要落点授不上时给用户的选项 id——**放弃这次调用**（不执行；没有回答也是它）。
+// 这套机制只在 Windows 的容器围栏里用（unix 没有 prepare_fence 这一步）：unix 侧无使用点，如实放行死代码。
+#[allow(dead_code)]
 pub const OPT_FENCE_ABORT: &str = "fence_abort";
 
 /// 目的：把"必要落点授不上"变成一条裁决（消息三段 + 选项集）——问什么、几个选项由工具层自己定。
@@ -231,6 +243,8 @@ pub const OPT_FENCE_ABORT: &str = "fence_abort";
 ///   **真能不能跑起来**（工作目录在不在这类事实，由调用方读盘后喂进来——domain 不读盘）。
 /// 返回：`None` = **构不出可用选项**（除"放弃"外没有一条真能执行的）：调用方**不发起裁决**，
 ///   改为停掉这个会话 + 落一条警告（契约禁止置灰）。
+// 这套机制只在 Windows 的容器围栏里用（unix 没有 prepare_fence 这一步）：unix 侧无使用点，如实放行死代码。
+#[allow(dead_code)]
 pub fn fence_ask(block: &FenceBlocked, name: &str, unfenced_possible: bool) -> Option<Ask> {
     if !unfenced_possible {
         return None;

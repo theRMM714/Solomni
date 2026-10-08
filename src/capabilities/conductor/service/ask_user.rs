@@ -45,6 +45,8 @@ impl SessionAsk {
     }
 
     /// 目的：这一趟是不是已经停过会话（停了就不再发起新的裁决）。
+    // 这套机制只在 Windows 的容器围栏里用（unix 没有 prepare_fence 这一步）：unix 侧无使用点，如实放行死代码。
+    #[allow(dead_code)]
     fn stopped(&self) -> bool {
         self.halted.load(std::sync::atomic::Ordering::Relaxed)
     }

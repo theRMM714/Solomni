@@ -415,9 +415,13 @@ pub struct ToolTexts {
     pub tool_fence_failed: String,
     /// 目的：围栏的**必要落点**授不上、这次调用没执行的拒绝回执。
     ///   变量：part, path, why, fix
+    // 这套机制只在 Windows 的容器围栏里用（unix 没有 prepare_fence 这一步）：unix 侧无使用点，如实放行死代码。
+    #[allow(dead_code)]
     pub tool_fence_blocked: String,
     /// 目的：用户裁决"本轮无围栏跑一次"时，这次执行如实标为无围栏的回执。
     ///   变量：part, path, why
+    // 这套机制只在 Windows 的容器围栏里用（unix 没有 prepare_fence 这一步）：unix 侧无使用点，如实放行死代码。
+    #[allow(dead_code)]
     pub tool_fence_unfenced: String,
     /// 变量：chars, limit
     pub tool_truncated: String,

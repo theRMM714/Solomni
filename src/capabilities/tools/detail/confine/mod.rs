@@ -191,6 +191,8 @@ pub fn sweep_profiles() -> Result<usize, String> {
 /// 约束：必要落点授不上时调用方**不许降级**（问用户或按 fail-closed 拒绝，见 docs/tools/README.md）；
 ///   可选落点授不上只进 `notes`，不牵动这次执行。
 #[derive(Debug, Clone, Default)]
+// 这套机制只在 Windows 的容器围栏里用（unix 没有 prepare_fence 这一步）：unix 侧无使用点，如实放行死代码。
+#[allow(dead_code)]
 pub struct FencePrep {
     /// 目的：必要落点授不上时的如实结论（`None` = 围栏成立，可以按围栏执行）。
     pub blocked: Option<FenceBlocked>,
@@ -200,6 +202,8 @@ pub struct FencePrep {
 
 impl FencePrep {
     /// 目的：这次授权成不成立（必要落点全授上了）。
+    // 这套机制只在 Windows 的容器围栏里用（unix 没有 prepare_fence 这一步）：unix 侧无使用点，如实放行死代码。
+    #[allow(dead_code)]
     pub fn ok(&self) -> bool {
         self.blocked.is_none()
     }

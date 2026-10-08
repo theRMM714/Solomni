@@ -61,6 +61,8 @@ impl ProcTools {
 }
 
 impl ToolRunner for ProcTools {
+    // 提问端口只在 Windows 的容器围栏那一路用；unix 侧没有 prepare_fence，参数如实闲置。
+    #[cfg_attr(not(windows), allow(unused_variables))]
     fn run(
         &self,
         fence: &FenceSpec,
