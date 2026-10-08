@@ -726,6 +726,8 @@ pub(crate) fn test_sandbox(
         shared: abs(&["demo", "work"]),
         private: abs(&["demo", agent]),
         modules: map,
+        modules_with_userdata: std::collections::BTreeSet::new(),
+        permissions: Default::default(),
         texts: test_prompts().tools(),
     }
 }
@@ -1019,6 +1021,7 @@ pub(crate) fn module_of(id: &str) -> Module {
             tools: BTreeMap::new(),
         },
         root: abs(&[id]),
+        has_userdata: false,
     }
 }
 
@@ -1036,6 +1039,8 @@ pub(crate) fn with_live<T>(f: impl FnOnce(&mut Live) -> T) -> T {
         llm: Default::default(),
         cancel: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         emit: &mut noop,
+        decisions: None,
+        ask: None,
     };
     f(&mut live)
 }

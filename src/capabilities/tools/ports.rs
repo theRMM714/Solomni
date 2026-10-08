@@ -45,5 +45,14 @@ pub trait SysIo: Send + Sync {
 /// 工具执行端口：机制（围栏安装/进程拉起/stdin 送参/超时杀树/截断）在适配层。
 /// 策略在本能力：哪个模块能调哪个工具、命令映射、可达到哪些根，由核心按 module.yaml 与沙箱派生后传入。
 pub trait ToolRunner {
-    fn run(&self, fence: &FenceSpec, command: &str, args_json: &str) -> ToolOutcome;
+    /// 目的：按围栏跑一次外部工具。
+    /// 参数：`ask` = 这一趟的**提问端口**（围栏的必要落点授不上时经它问用户；`None` = 没有可回答的前端，
+    ///   按 fail-closed 拒绝这次调用）。
+    fn run(
+        &self,
+        fence: &FenceSpec,
+        command: &str,
+        args_json: &str,
+        ask: Option<&dyn crate::kernel::ports::AskUser>,
+    ) -> ToolOutcome;
 }

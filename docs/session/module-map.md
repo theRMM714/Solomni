@@ -10,6 +10,7 @@
 | `src/capabilities/session/api.rs` |
 | `src/capabilities/session/service.rs` |
 | `src/capabilities/session/ports.rs` |
+| `src/capabilities/session/domain/decisions.rs` |
 | `src/capabilities/session/domain/session.rs` |
 | `src/capabilities/session/domain/tools.rs` |
 | `src/capabilities/session/domain/history.rs` |

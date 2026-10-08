@@ -131,6 +131,7 @@ body {
 .gate-card .advice { color: var(--fg-dim); font-size: 13px; }
 .gate-card .ask { font-size: 13px; }
 .gate-card .hint { color: var(--fg-dim); font-size: 12px; opacity: .85; }
+.gate-card .queue { width: 100%; color: var(--fg-dim); font-size: 12px; opacity: .9; }
 .gate-card .decision-input {
   width: 100%; box-sizing: border-box; padding: 8px 10px; font: inherit;
   border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg2); color: var(--fg);

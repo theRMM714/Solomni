@@ -68,9 +68,20 @@ fn scan_dir(modules_dir: &Path, reserved: &[String]) -> Roster {
                     rejected.push(format!("{}: {}", dir_name, why));
                     continue;
                 }
+                // 载入即确保私有区存在：模块恒有一个可写的 userdata/（产品唯一的自动写盘，幂等）。
+                // 建不了不阻断加载（只读挂载、权限不足）：如实记一条，事实字段给"能不能用"。
+                let userdata = path.join("userdata");
+                let has_userdata = userdata.is_dir() || std::fs::create_dir_all(&userdata).is_ok();
+                if !has_userdata {
+                    eprintln!(
+                        "[模块] {} 的 userdata 建不了：这一席拿不到私有可写落点",
+                        dir_name
+                    );
+                }
                 modules.push(Module {
                     manifest: m,
-                    root: path,
+                    root: path.clone(),
+                    has_userdata,
                 });
             }
             Err(e) => rejected.push(format!(

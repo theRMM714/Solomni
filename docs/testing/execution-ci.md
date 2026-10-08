@@ -54,35 +54,52 @@ node run-tests.js --fence-live
 仅允许在一次性 runner、VM 或明确授权的环境使用：它会改本机状态（写目录 ACL、建容器 profile）并创建容器身份。
 普通开发机上**不要**开；本地默认安全模式（见 [quality-isolation.md](quality-isolation.md)）。
 
-**本地这条最后一行有个前提：门禁要在「普通 shell」里跑。** 如果本地 shell 本身是受限令牌
-（例如低完整性 / 文件沙箱的会话），三件事会同时不成立，而报错都指向错误的方向：
+**本地这条最后一行有个前提：门禁要在「工作区没有被打上低完整性标签」的环境里跑。**
+DSH 的 Windows 写沙箱后端（`@deepseek-ai/dsh-sandbox-windows-acl`）在**给每个授权根授写权**的同一次
+`SetNamedSecurityInfoW` 调用里，顺手给那个目录打上 **Low 完整性标签**（`SYSTEM_MANDATORY_LABEL_ACE`、
+no-write-up、`(OI)(CI)` 可继承）。它有三个要命处：
 
-- `%LOCALAPPDATA%\Python` 之类**用户目录下的解释器**访问被拒 → doctor 报"没有 python"、
-  L4 的真工具场景报 `'python' is not recognized`（看着像产品缺陷，其实是环境）；
-- **改目录 DACL 被拒**（错误码 5）→ 容器围栏装不上，探针只能 env-skip；
-- Node 的**管道 stdio 捕获被拒（EPERM）**→ L4 收尾的围栏回收 `status` 为 null、输出为空，
-  被判成"本机留下了没人管的痕迹"（见 `tests/cross-platform/gaps.yaml` 的 harness.fence-clean-under-restricted-token）。
+- **跟着会话留下来**：`dispose()` 不撤销它——会话结束、甚至会话之后切成「完全权限」，标签都还在；
+- **按「映像文件」生效**：Windows 的进程完整性 = min(令牌, 映像)，所以工作区里的一切二进制
+  （`cargo`、`rustc`、链接器、测试二进制、`solomni.exe`）从被打标签那一刻起**全以 Low 运行**；
+- **降级容易、回收难**：把对象降成 Low 不需要特权，撤/抬回去要 `SeRelabelPrivilege`（只有提权令牌有）。
 
-判据：`whoami /groups` 里出现 `Mandatory Label\Low Mandatory Level` 就是这种会话。
+后果是一串「指向错误方向」的假失败：
 
-**这种会话里要拿到可信结论，只有两条路，按优先级：**
+- 写 `%TEMP%`（中完整性）被拒 → 链接器报 `Cannot create temporary file in …\Temp\: Permission denied`、
+  产品自检报 `建自检目录失败：拒绝访问`（`--doctor` 因此 `fs=false`）、真机探针只能 env-skip；
+- 改目录 DACL 被拒（错误码 5）→ 容器围栏装不上；
+- **读**用户目录下的解释器被拒 → doctor 报「没有 python」、L4 真工具场景报 python 不可达（看着像产品缺陷）；
+- 拉子进程/抓管道另行受会话沙箱限制（Node 管道 stdio 被拒 EPERM、`status` 为 null，被判成「本机留下了没人管的痕迹」）——
+  这一条与 Low 标签是**两件事**，但同样要求把 stdout 重定向到文件再读（`stdio: ["ignore", fd, "ignore"]`），别用管道。
 
-1. **换普通 shell（推荐，也是唯一的常规路径）**：在不受限的 PowerShell 窗口里跑同一份门禁
-   （`node run-tests.js`；要验真机围栏再加 `--fence-live`，那会改本机状态，只在一次性 runner 或明确授权的机器上做）。
-2. **对这一次执行放宽沙箱（提权）**：只能在受限会话里跑时，可为**单次执行**申请放宽到不受限，
-   批准范围仅限该次、只用于本来被沙箱拒掉的动作用。两条硬约束：
-   - **必须有人批准**：批准不到的会话会一直等着、根本不发车——所以它不是默认路径，也不该写进自动化；
-   - 放宽只解决"环境不允许"，**不替代**真机围栏验收：`--fence-live` 仍然只在一次性环境里跑。
+**判据（唯一）**：`icacls "<工作区根>" | findstr Mandatory` 打出 `Mandatory Label\Low Mandatory Level`
+就是它（子项显示 `(I)` 继承）。**不要只看 `whoami /groups`**：shell 自己可能显示 Medium，真正决定进程
+完整性的是**映像文件**上的标签——这就是「要查对进程」的意思。
 
-> **受限令牌会话里的一切围栏 / L4 结论都不可信**——实测（同一台机器、同一份代码）：
-> 在 `Mandatory Label\Low Mandatory Level` 的会话里，doctor 报容器围栏装不上（读写 DACL 都 Error 5）、
-> `python` 在工具进程里不可达（`where` 找不到、绝对路径 `Access is denied`）、围栏回收因 Node 管道 stdio
-> 被拒（EPERM，`status` 为 null）被判成"本机留下了没人管的痕迹"；
-> 换成**普通或提权（`High`）会话**后：`node run-tests.js` 直接 `TEST-REPORT-OK`，L4 `E2E-OK`，
-> doctor 报 `fs=true net=true tree=true`（AppContainer + Job Object 内核强制），python / node / C++ 真工具链全跑通。
-> **所以"卷不支持 ACL""python 装得不对"这类结论都是误判**——判据只有一个：
-> `whoami /groups` 里出现 `Mandatory Label\Low Mandatory Level`，就别信这次的门禁结论。
-> 提权与普通 shell 给出同一种结论；`--fence-live`（改本机状态）仍然只在一次性环境里做。
+**处置，按优先级：**
+
+1. **以「完全权限」启动会话**：没有文件写授权就不会打标签（首选，也是唯一不产生残留的做法）；
+   只在受限会话里跑时，可为**单次执行**申请放宽到不受限——批准范围仅限该次，且不替代真机围栏验收。
+2. **提权把级别设回去**（清残留）：`icacls "<根>" /setintegritylevel "(OI)(CI)Medium" /T /C`
+   （只能在管理员窗口做，因为需要 `SeRelabelPrivilege`）；清完用同一条 `icacls` 复查，不应再有 `Mandatory` 行。
+3. **把二进制复制到未打标记的目录再跑**（临时绕过）：注意别把 `TEMP` 指进被标记的树，探针要落在系统临时目录。
+4. **换一台不受限的机器 / 交给 CI**：跨平台与真机的结论一律以 CI 为准。
+另有一个**名字相近、用途不同**的官方工具：随 DSH 分发的自愈技能 `diagnose-windows-sandbox-acl`。
+它只覆盖 **ACL 侧**——给缺有效 `WRITE_DAC` / `WRITE_OWNER` 的链上目录补当前用户全权、并删掉显式的
+AppContainer 包 ACE（`S-1-15-2-*`）；**它不碰完整性标签**（脚本里只把 Low 标签读出来记一笔事实）。
+两者不要混用：标签残留走上面第 1/2/3 条；它自己的场景是「DSH 授权失败 → 沙箱 fail-closed」，
+且要在**没有产品会话运行**时用——它删掉的是产品**活着的**授权（容器会中途失去访问、那次会话直接失败；
+产品收尾会把根内 DACL 按快照整体还原，但救不了已经失败的那一次运行）。两条边界互不相干：
+产品的快照/还原只带 `DACL_SECURITY_INFORMATION`（标签在 SACL），所以它既不碰标签、也修不了标签。
+
+> **工作区带 Low 标签时的一切围栏 / L4 结论都不可信**——实测（同一台机器、同一份代码）：标签在时
+> doctor 报 `fs=false`、读写 DACL 都 Error 5、python 在工具进程里不可达、围栏回收因 Node 管道 stdio 被拒
+> 被判成「本机留下了没人管的痕迹」；**把它清掉**之后同一条 `node run-tests.js --fence-live` 立刻
+> `391 passed / 0 failed`、doctor 报 `fs=true net=true tree=true`、真工具链全跑通，`--fence-live` 的真机探针
+> （容器往返、对象 ACE 往返、授权/撤销/台账/孤儿清扫）也在本机真跑通过。所以「卷不支持 ACL」「python 装得不对」
+> 这类结论都是误判。**注意：换普通或提权（`High`）的 shell 本身不解决**——映像是 Low 的，进程照样是 Low；
+> 要么不打标签，要么把标签清掉，要么把二进制搬出这棵树。
 
 ### CI（GitHub Actions）：跨平台与真机的唯一事实来源
 
@@ -96,9 +113,17 @@ node run-tests.js --fence-live
 | 平台专属代码（`capabilities/tools/detail/confine/` 各平台文件、`tests/<平台>/`） | 平台目标的 `main.rs` 首行是 `#![cfg(target_os = …)]`：非本平台的目标整目标为空，代码根本不编译 | 三平台各编译并各跑一次 |
 | 真机围栏（ACL / 容器 profile / Landlock / seatbelt） | 本地默认安全模式会跳过会改本机状态的探针 | 一次性 runner 上真跑，并验撤权与 profile 回收 |
 | HTTPS/TLS 出站链路 | 受限环境可能取不到系统 TLS 凭证（判据见 [levels.md](levels.md) 的 T4），本地只能 env-skip | 干净 runner 上真连公网端点 |
-| T0 六项（clippy 只编译当前平台的 `#[cfg]`、依赖图随平台变） | 本机只能代表本平台 | 三平台各自零容忍跑一遍 |
+| T0 六项（clippy 只编译当前平台的 `#[cfg]`、依赖图随平台变） | 本机只能代表本平台（判的是**平台差异**，不是「改了门禁就要推」） | 三平台各自零容忍跑一遍 |
 | 三种语言的模块（python / node / C++）在真进程里跑 | 本机只代表本平台的解释器与编译器 | 三平台各跑一次真工具链路，indexer 现场编译 |
 | 发布前验收 | 本地通过 ≠ 三平台通过 | 三平台报告 + 三平台 `TEST-REPORT-ACCEPTED` |
+
+**什么时候该推、什么时候不该推**：CI 的唯一价值是给出**本机拿不到的结论**（其它平台能不能编译通过、真机围栏与解释器链路、TLS 出站）。判据只有一条——
+这次改动的验收结论**是否依赖本机之外**：
+
+- **依赖** → 必须推，并按下面的读法比对 `sha`；
+- **不依赖** → 不推，本地入口就是验收结论。明确不算理由的：纯逻辑、文档、当前平台的用例，以及**门禁与卫生工具自身的改动**
+  （本机跑同一份入口即同一判据）；攒批，等下一次真需要他平台或真机结论时一起推。
+- 用户明确要求推时例外。
 
 **报告怎么读（硬规矩）**：只用 `git` 或 git CLI 拉 `ci-report` 分支，**禁止轮询网页**；时机无法确认时委托用户拉取（见 `AGENTS.md`）。
 
@@ -116,6 +141,12 @@ git show origin/ci-report:runs/windows/logs/<某一步>.log  # 失败证据原�
 3. 再读 `test-report.json` 的 `steps` 与 `envSkips`：**CI 上的 env-skip 同样不算通过**，它只说明那条围栏没被验收。
 4. 失败时从 `logs/` 取断言原文，不在摘要里找感觉。
 
+> `envSkips` 只收集 **`[探针]` 前缀**的行：诊断输出一律用 `[诊断]`，别用 `[探针]`，否则会被算成"跳过"。
+>
+> 判「环境降级」只看**被测试进程**的令牌与行为：`whoami /groups` 里找包 SID 组在现代 Windows 上是**假阴性**
+> （包 SID 在令牌的 `TokenAppContainerSid` 字段里，不在组列表里），按它判会把生效的容器记成降级。
+> 容器是否生效用**行为对照**（授权落点写得进、父目录按名可用、父目录内容不可见），见 [levels.md](levels.md) 的 T4。
+
 **等多久再拉（推荐节奏）**：push 之后**先等 5 分钟**再拉 `ci-report`；若某个平台的 `meta.json` 的 `sha` 还对不上
 （这次 run 没结束），**每次再等 2 分钟**重拉一次，直到三平台的 `sha` 都对得上，或确认 run 已失败/取消。
 等的是 git 拉取，不是网页轮询——`AGENTS.md` 禁止查网页；时间上拿不准（比如 runner 排队很久）就委托用户拉取。
@@ -127,8 +158,9 @@ git show origin/ci-report:runs/windows/logs/<某一步>.log  # 失败证据原�
 - 只有 **push 事件**才发布 `ci-report`；`pull_request` 的结论只能在 Actions 注释里看；
 - 报告发布失败（例如 token 权限不对）只是 `::warning::`，**不影响**测试本身的成败——所以"没读到报告"不等于"测试没过"。
 
-**本地与 CI 的关系**：本地入口是快速反馈，CI 是跨平台与真机的最终判据。两边都跑通、且 CI 的 `sha` 对得上，
-才算本次验收完成（见 [gaps-acceptance.md](gaps-acceptance.md)）。
+**本地与 CI 的关系**：本地入口是快速反馈；CI 是**跨平台与真机**的最终判据，**不是每次改动的必经关卡**。
+本次改动若结论依赖本机之外，则本地 + CI 两边都跑通、且 CI 的 `sha` 对得上才算验收完成；
+否则本地入口通过即验收完成（判据见 [gaps-acceptance.md](gaps-acceptance.md)）。
 
 ### 当前报告状态
 

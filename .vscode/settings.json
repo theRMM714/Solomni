@@ -1,0 +1,8 @@
+{
+  "//说明": "只保留 watcher 排除（防止编辑器去爬 10 万+ 的工具链/构建文件），不再隐藏任何文件：资源管理器与搜索照旧能看到 target/platform/.tools 里的一切。",
+  "files.watcherExclude": {
+    "target/**": true,
+    "platform/**": true,
+    ".tools/**": true
+  }
+}

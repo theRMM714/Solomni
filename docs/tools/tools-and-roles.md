@@ -13,6 +13,7 @@
 tools:
   read:
     capability: fs-read   # 能力：决定收口（沙箱 / 围栏）
+    callers: [user, discussant, executor, solo, core_proxy]   # 谁能调它：user（经呈现层）/ 角色 id
     desc: 读取文本文件（UTF-8）。
     parallel: true        # 同一回复里的多个调用能否真的并发跑
     params:               # 既用于生成声明，也用于校验调用参数
@@ -24,6 +25,8 @@ tools:
 
 - **`capability` 决定收口，不按"系统 / 模块"一刀切**：`read` / `list` / `search` / `write` / `edit` / `patch` 虽都是系统工具，
   但碰文件系统，**照样受沙箱与围栏约束**；`say` / `agree` 这类不碰文件。
+- **`callers` 是授权判据**：`user` = 人经呈现层调用，其余是角色 id。它与角色表的（这个身份有什么）是**同一关系的两面**，
+  由 `SystemTools::problems` 双向锁死——任何一边漏写 / 多写都是装配错误。
 - **列目录是"核实"的前提**：`read` 只读文件、`search` 要关键词，**没有 `list` 就确认不了"资料齐不齐"**；`read` 遇到目录会如实引导到 `list`。
 - 参数不合法 → **如实拒绝并落工具行**。
 
@@ -84,6 +87,25 @@ roles:
 - 越权调用 → **如实拒绝 + 落工具行**（用户要能看到"它越权了"）。
 - **悬空引用**（角色引用总表里不存在的 id）→ **结构审查硬失败**。这是两张表不漂的机制保证。
 
+## 三之二、动作与分发（唯一一处）
+
+**动作表是授权与执行的唯一真相**：每条动作声明参数契约与 `callers`；分发只有一处（`conductor` 的 `ActionOps`）——
+**参数按声明校验 → 按 `callers` 授权 → 执行 → 审计**。
+
+- **两个适配器**：模型侧（`ToolHandler`，按名字认领）与呈现侧（`POST /api/actions/{id}`、`GET /api/actions` 动作目录）
+  都只负责造一次 `ActionCall`（动作 id + 参数 + 调用者身份）并各按自己的媒介呈现结果——
+  模型侧拿文本回执，呈现侧拿结构化结果。**同一份声明，两种呈现。**
+- **读取与视图不进动作表**：会话列表 / 配置 / 文件清单 / 历史是读接口，事实仍只有**事件台**一条来路。
+- **人经呈现层调用**（`caller = user`）与**模型经工具调用**（`caller = 角色 id`）走同一次校验、同一处授权、同一条审计；
+  适配器不各自校验、也不各自判权。
+- **登记处动作只给 user**：供应商 / 密钥 / 模型 / agent / 设置的写面（`upsert_provider` / `remove_provider` / `discover_models` / `upsert_model` / `remove_model` /
+  `set_core_model` / `probe_model_tools` / `probe_replay_shape` / `upsert_agent` / `remove_agent` / `set_settings`）的 `callers` 只有 `user`——
+  产品级资源默认不开放给任何角色；`api_key` 只进登记处，不进动作目录、不进审计。读（`GET /api/settings`、`/api/state`）仍是独立读接口。
+- **模块工具也是动作**（动态动作，来自清单）：id = `module.<模块id>.<工具名>`。人可直接跑（无会话，围栏按模块目录 + 可选工作目录派生）；
+  会话里由成员循环执行（同一份 `module.yaml` 声明、同一个 `ToolExec::run_module`）。两条路径的审计记录同一处格式化（`action_audit`），
+  只是各自进自己的账本：呈现层进运行日志，模型侧进**转录工具行**（可回放）。**缺运行包 = 不执行**：两条路径读同一把尺子（`runtime_report.missing`），
+  目录里如实标不可用，不静默降级。
+
 ## 四、核心操作必须走工具调用
 
 **规则**：任何**会驱动核心**的产出都必须是一次**工具调用**——建任务链、节点验收、总验收、代拟 / 推荐名单、执行席回报。
@@ -106,10 +128,12 @@ roles:
 | 占位符 | 运行时替换为 | 可达范围 |
 | --- | --- | --- |
 | `{{work_root}}` | 本次工作共享区 `session/<工作名>/work/` 的绝对路径（**主副本**） | 本工作内的 agent（**只读**：agent 会话里写它会被工具层拒绝，写入走 `work_commit`） |
-| `{{sandbox_root}}` | 该 agent 私有沙箱 `session/<工作名>/<agent实例名>/` 的绝对路径 | 只有它自己 |
-| `{{module_roots}}` | 该 agent 各模块目录的绝对路径（一行一个） | 只有该模块所属的 agent |
+| `{{sandbox_root}}` | 该 agent 私有沙箱 `session/<工作名>/<agent实例名>/` 的绝对路径 | 只有它自己（**永远全权**） |
+| `{{module_roots}}` | 该 agent 各模块目录的绝对路径（一行一个） | 只有该模块所属的 agent（**默认只读**；`module_write` 授权才可写；`<module>/userdata/` 恒可写） |
 
 - **越界即拒绝**：路径必须是列出的真实根**之下**的绝对路径；相对路径、`..` 跳出、不在任何根之内一律拒绝，并把允许的根列回去（如实报错，不纠正）。
+- **会话权限叠加在落点之上**：共享区读写受该 agent 的白名单 / 黑名单约束（默认整棵放行；白名单一出现就取代默认，黑名单只做减法）；
+  `work_commit` 只接受白名单内的相对路径（越界**整条拒绝**），`work_pull` 只拉白名单内的路径。语义见 [docs/permission/README.md](../permission/README.md)。
 - **编码**：读严格 UTF-8（非法字节按替换字符呈现并如实标注——**本程序不猜编码**）；写一律 UTF-8。
 - **用户也能引用**：输入框里用 `@` 挑文件（`@work:相对路径` / `@sandbox:<agent>/相对路径`，**给人用**），
   核心替换成真实绝对路径之后才进转录与上下文；引用别人的私有沙箱时如实说明无权读取，且不泄漏对方的真实路径。
@@ -153,8 +177,8 @@ prompts/
 
 | 场景 | 约定 |
 | --- | --- |
-| 代理工具 | 六个工具 + `core_proxy` 角色 + 队列桥宿主都已接上真实会话；委托是**全权**；决定粒度与额外路径权限属独立的**权限管理**能力（不在这里）。孩子不把转录推给代理：门的通知、意外停止通知 + `read_session_messages` 主动倒查 |
-| 建会话 = 建 + 写开头 + 开工 | `create_session` 的 `agents[]` 只写**身份**（`ref` 或 `name`+`modules`+`model`，`model` 填 `catalog_agents` 回的 `id`），会话级 `opening` 是它的**开头**：single 立刻以它开工，multi 以它当本次需求并开始讨论。后续补充 / 返工 / 代答门仍走 `send_session_message` |
+| 代理工具 | 六个工具 + `core_proxy` 角色 + 队列桥宿主都已接上真实会话；委托是**全权**（`granularity=full`）；路径的白/黑名单与模块写授权已落在会话权限（[docs/permission/README.md](../permission/README.md)），工具级"每次调用是否放行"的引擎路径尚未接入。孩子不把转录推给代理：门的通知、意外停止通知 + `read_session_messages` 主动倒查 |
+| 建会话 = 建 + 写开头 + 开工 | `create_session` 一份声明两处调用：**人经呈现层**给 `name` / `mode` / `agents`（可省 `tier`）先建出会话，后续用 `send_message` 发言推进；**核心代理**给 `mode`（single / collab）+ `agents`（只写身份：`ref` 或 `name`+`modules`+`model`）+ `task`，**建好就开工**（single 以 task 为第一句，collab 以它当本次需求）。后续补充 / 返工 / 代答门仍走 `send_session_message` |
 | 代理工具的生命周期 | `stop` = 把整棵子树落成 `stopped`（拦住派发与唤醒）再**级联中断**在跑的生成，会话上的停止按钮就是这一下；`continue` = 解冻并按形态唤醒接着走；`close` 是终态。停止 / 继续是一对逆操作，没有单独的暂停；都不改写历史 |
 | 代理模式下的子会话审查关卡 | 不再问用户：作为**门**交给核心判断，核心用 `send_session_message(kind=user_reply)` 回答 |
 | 代理模式下子会话的转录 | **不转发给核心**：核心只拿门的通知与意外停止通知，正文经 `read_session_messages`（0 = 最新）主动倒查 |

@@ -136,11 +136,17 @@ pub fn converse_with(
     on_tool: &mut dyn FnMut(&ToolCallView),
     on_round: &mut RoundSink<'_>,
     sink: &mut dyn FnMut(SessionEvent),
+    // 工具级确认：`ask` 表里的调用在执行前经它问用户（None = 这一回合不接确认）。
+    confirms: Option<crate::capabilities::collab::service::tool_loop::ConfirmGate<'_>>,
+    // 工具层提问端口：围栏这类"装不上就先问"的执行层经它请用户裁决（None = 没有可回答的前端）。
+    ask: Option<&dyn crate::kernel::ports::AskUser>,
     // 本回合的提示（讨论席的开场/轮转词；执行席常为空——它的指令在派发行里）。
     turn: &[Msg],
     // 本回合认不认**协作表态**（讨论席认：见到动词就是这一回合的发言，收尾）。
     verbs: bool,
 ) -> Vec<Round> {
+    // 确认通道在本回合内**只用一次**（full 置位后不再问），所以要可变借用在整段循环里活着。
+    let mut confirms = confirms;
     // 身份 + 本回合工具 + 对话 + 本回合提示：**唯一的装配点**。
     // 工具面取自这一席位（执行席的表现 + 它自己模块的工具）；讨论席的动词面也在这里（见 crate::capabilities::session::api::TurnRun）。
     let (ids, with_modules) = match tools.as_ref() {
@@ -364,7 +370,7 @@ pub fn converse_with(
                     // 调度：**连续**声明可并发的调用合成一批并发跑，其余各自独占（写入类因此是批次之间的屏障）。
                     // 结果按原始下标返回，随后一律按原序回填——并发只影响执行，不影响上下文里的顺序。
                     note_unauthorized(ctx, &plan, sink);
-                    let done = run_batch(ctx, &plan);
+                    let done = run_batch(ctx, &plan, confirms.as_mut(), ask, sink);
                     // 先按原序把工具行建好（执行已经做完），再让**唯一那处**构造函数产出这一回复的消息：
                     // 实时与重建走同一个函数，"重建上下文与实时一致"因此是结构保证的。
                     let texts = &ctx.sandbox.texts;
@@ -535,7 +541,7 @@ pub fn converse_with(
                     .collect();
                 // 内置工具（read/write/edit/search）优先且不属于任何模块；外部工具按模块定 cwd。
                 note_unauthorized(ctx, &plan, sink);
-                let done = run_batch(ctx, &plan);
+                let done = run_batch(ctx, &plan, confirms.as_mut(), ask, sink);
                 // 修过信封就如实标注在回执最前面（模型与用户都能看到核心没有瞎猜）
                 let annotate = |outcome: ToolOutcome| -> ToolOutcome {
                     match repaired.as_deref() {

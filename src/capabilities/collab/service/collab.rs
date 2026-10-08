@@ -1,9 +1,10 @@
-//! 协作会话状态机：建组 → 讨论 → 整理（出任务链）→ **审查关卡** → 链驱动（节点各跑在子会话里）
-//! → 节点验收 → 总验收（拉模式）。见 docs/collab/task-chain.md。
-//! 前端经 Conductor 门面按 pending 驱动（set_task → confirm_slate? → begin → answer…），泵式收事件。
-//! 发言席只有 agent：名单是 Vec<AgentMeta>（名字 / 模块 / 模型），member id = agent 实例名。
-//! 名单的权威来源是会话 meta.agents（代拟确认后由 Conductor 写回 meta）；转录只用来恢复讨论进度。
-//! 依赖全部为端口与核心数据；无 IO，无具体适配器。
+//! 目的：协作会话状态机——建组、讨论、整理（出任务链）、审查关卡、链驱动、节点验收、总验收。
+//! 管：会话对象的字段（名单 / 讨论 / 链 / **本会话的裁决队句柄**）与各关卡的登记、处置、快照形态。
+//! 不管：队列本身的排队与校验（在 `crate::capabilities::session::api::DecisionDoor`，与工具级确认共用）、
+//!   讨论推进（`discussion.rs`）、泵的每一步（`pump.rs`）、回合收发与回答（`turn_io.rs`）、
+//!   代拟名单与按转录重建（`slate.rs`）；它不碰会话表，也不写别人的会话。
+//! 联动：契约见 docs/session/session-model.md 的「请用户裁决：一条通道，消息 + 选项」与
+//!   docs/collab/task-chain.md；前端按快照的 pending 与推的裁决事件驱动，不做第二真相。
 
 use super::pump::*;
 use crate::capabilities::collab::service::discussion::Discussion;
@@ -12,7 +13,7 @@ use crate::capabilities::llm::api::{Chat, Llm, Msg};
 use crate::capabilities::prompt::api::{Prompt, Segment};
 use crate::capabilities::registry::api::Settings;
 use crate::capabilities::session::api::AgentMeta;
-use crate::capabilities::session::api::{LineView, Pending, SessionEvent};
+use crate::capabilities::session::api::{DecisionDoor, LineView, Pending, SessionEvent};
 use crate::capabilities::tools::api::ToolExec;
 use crate::capabilities::workspace::api::ExecSpec;
 use crate::capabilities::workspace::api::Sandboxes;
@@ -104,8 +105,8 @@ pub struct CollabSession {
     pub(crate) slate_picks: Vec<AgentMeta>,
     /// 登记处快照：agent 的模型解析与核心通道在此进行（策略在 conductor）。
     pub(crate) settings: Settings,
-    /// 当前用户介入请求。
-    pub(crate) pending: Option<Pending>,
+    /// 目的：本会话的裁决队（**与工具级确认共用同一条队**）：排队与校验归它，这里只管各关卡的处置。
+    pub(crate) door: Arc<DecisionDoor>,
     pub(crate) allow: bool,
     /// 已记录在案的执行方案（回档/重启后沿用，未整理则为 None）。
     pub(crate) plan: Option<String>,
@@ -151,8 +152,8 @@ pub struct CollabSession {
     pub(crate) cancel: Arc<std::sync::atomic::AtomicBool>,
     /// 方案是否已过审（审查关卡）：没过审不开工。由转录里的 [用户:同意方案] 派生。
     pub(crate) plan_approved: bool,
-    /// 核心 AI 给用户的**建议**（随方案 / 节点验收那一次调用一起产出）：只属于当前这一关，
-    /// 进推的 Decision 与快照里的 pending；用掉就清，别漏到下一关。
+    /// 核心 AI 给用户的**建议**（随方案 / 节点验收那一次调用一起产出）：只属于**下一次登记**的那一关，
+    /// 登记时搬进队列里的那一关；用掉就清，别漏到下一关。
     pub(crate) gate_advice: String,
 }
 
@@ -173,6 +174,8 @@ impl CollabSession {
         roster: Vec<AgentMeta>,
         delegated: bool,
         sandboxes: Sandboxes,
+        // 本会话的裁决队（核心按会话 id 给；与工具级确认共用同一条）。
+        door: Arc<DecisionDoor>,
     ) -> Result<CollabSession, String> {
         let core_channel = settings.core_channel();
         let (core_chat, core_is_demo) = llm.core_channel(core_channel.as_ref());
@@ -184,7 +187,7 @@ impl CollabSession {
             task: String::new(),
             slate_picks: Vec::new(),
             settings,
-            pending: None,
+            door,
             allow: false,
             plan: None,
             chain: None,
@@ -218,7 +221,6 @@ impl CollabSession {
         let line = self.view(LineView::user("同意方案", String::new()));
         sink(SessionEvent::Transcript(vec![line]));
         self.plan_approved = true;
-        self.pending = None;
         self.gate_advice.clear(); // 这一关解除了，建议不再属于任何挂起的事
     }
 
@@ -268,36 +270,8 @@ impl CollabSession {
         }
     }
 
-    /// 裁决的**背景**：交给核心 AI 判"用户的意图明确了吗"用——把现场说清楚，别让它猜。
-    pub(crate) fn decision_brief(&self, p: &Pending) -> String {
-        match p {
-            Pending::PlanReview => {
-                let chain = self
-                    .chain
-                    .as_ref()
-                    .map(|c| {
-                        c.nodes
-                            .iter()
-                            .map(|n| format!("- {}（{}）→ {}", n.id, n.title, n.assignee))
-                            .collect::<Vec<_>>()
-                            .join("\n")
-                    })
-                    .unwrap_or_default();
-                format!(
-                    "方案：{}\n任务链：\n{}",
-                    self.plan.clone().unwrap_or_default(),
-                    chain
-                )
-            }
-            Pending::NodeBlocked { nodes } => format!("没过验收的节点：{}", nodes.join("、")),
-            Pending::Ask { member, question } => format!("{} 问：{}", member, question),
-            Pending::ConfirmSlate => "代拟名单待用户确认。".to_string(),
-            Pending::ConfirmBegin => "名单已定，等用户确认开始讨论。".to_string(),
-        }
-    }
-
     /// 用户对裁决的回应**明确到可以开工 / 放行**了吗：由核心 AI 判（`verdict` 工具）。
-    /// 取字段而不是 &mut self：调用点在泵里，core_chat 要被可变借用（同 review_nodes）。
+    /// 取字段而不是 &mut self：调用点在协作这一侧，core_chat 要被可变借用（同 review_nodes）。
     // 参数是一组"取字段而不是自己"的出口（prompts/cancel/opts/chat/verify/三句输入），
     // 收口成参数对象只会把它们藏起来、让"谁读什么"更难看清（同 engine::converse_with 的取舍）。
     #[allow(clippy::too_many_arguments)]
@@ -358,7 +332,7 @@ impl CollabSession {
     /// 一次调用判完整条链（比逐节点各调一次省得多，也便于横向比较）。
     /// 取字段而不是 &mut self：调用点在泵里，core_chat 要被可变借用。
     // 参数是一组"取字段而不是自己"的出口（prompts / cancel / opts / mode / chat / verify / 重填说明），
-    // 与 judge_clear / Execution::review 同一取舍（见 docs/testing/quality-isolation.md）。
+    // 与 Execution::review 同一取舍（见 docs/testing/quality-isolation.md）。
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn review_nodes(
         prompt: &dyn Prompt,
@@ -454,32 +428,52 @@ impl CollabSession {
         }
     }
 
-    /// 当前这一关的建议（核心 AI 给的；没有就是空串）。
-    pub fn gate_advice(&self) -> &str {
-        &self.gate_advice
-    }
-
-    /// 挂起一件等用户裁决的事，并**推**一条 `Decision`。
-    /// `Pending` 是快照字段（刷新页面照样画得出那张卡），这条是增量（界面立刻出卡）——
-    /// 两处同源：都来自 `Pending::decision_parts`，不做第二真相。
+    /// 目的：挂起一件等用户裁决的事：**进队尾**，并把它此刻的队列形态推给界面。
+    /// 约束：卡号与排队归队列（会话内唯一、跨重启稳定）；一次只有队首那张对用户可见 / 可答。
     pub(crate) fn ask_user(&mut self, p: Pending, sink: &mut dyn FnMut(SessionEvent)) {
-        // 建议是核心 AI 给的（随方案/验收那一次调用）：关卡挂着期间一直有效（快照也要它），
-        // 解除挂起时（见各 pending = None 处）清掉，别漏到下一关。
-        // 等用户 = 这一刻没人在干活（否则界面一直显示上一个成员的名字）。
-        sink(crate::capabilities::session::api::idle());
-        let ev = p.decision(&self.gate_advice);
-        self.pending = Some(p);
-        sink(ev);
+        let advice = std::mem::take(&mut self.gate_advice);
+        let (_id, evs) = self.door.push(None, p, &advice, None);
+        for e in evs {
+            sink(e);
+        }
     }
 
-    /// 正在等用户（请教 / 方案待审 / 节点没过）：泵**不再往下推**，直到用户回应。
+    /// 裁决的**背景**：交给核心 AI 判"用户的意图明确了吗"用——把现场说清楚，别让它猜。
+    pub(crate) fn decision_brief(&self, p: &Pending) -> String {
+        match p {
+            Pending::PlanReview => {
+                let chain = self
+                    .chain
+                    .as_ref()
+                    .map(|c| {
+                        c.nodes
+                            .iter()
+                            .map(|n| format!("- {}（{}）→ {}", n.id, n.title, n.assignee))
+                            .collect::<Vec<_>>()
+                            .join("\n")
+                    })
+                    .unwrap_or_default();
+                format!(
+                    "方案：{}\n任务链：\n{}",
+                    self.plan.clone().unwrap_or_default(),
+                    chain
+                )
+            }
+            Pending::NodeBlocked { nodes } => format!("没过验收的节点：{}", nodes.join("、")),
+            Pending::Ask { member, question } => format!("{} 问：{}", member, question),
+            Pending::ConfirmSlate => "代拟名单待用户确认。".to_string(),
+            // 工具级确认不经过"判意图明确"这条路（它的处置是放行 / 拒绝，不是开不开工）。
+            Pending::ToolApproval { tool, .. } => format!("工具级确认：{} 要不要放行。", tool),
+            // 工具层自己发起的那一类（围栏这类）同样不走"判意图明确"：它的处置在发起方那边。
+            Pending::ToolAsk(ask) => format!("工具层在问：{}。", ask.title),
+            Pending::ConfirmBegin => "名单已定，等用户确认开始讨论。".to_string(),
+        }
+    }
+
+    /// 正在等用户（队列里还有没答的卡）：泵**不再往下推**，直到用户回答或整队作废。
+    /// 判据是队列本身：请教 / 名单确认 / 开工确认 / 方案待审 / 节点没过都排在同一条队上。
     pub fn awaiting_user(&self) -> bool {
-        matches!(
-            self.pending,
-            Some(Pending::Ask { .. })
-                | Some(Pending::PlanReview)
-                | Some(Pending::NodeBlocked { .. })
-        )
+        !self.door.is_empty()
     }
 
     /// 成员回合失败：记下原因，下一次泵推一步时如实交回（不静默吞掉）。
@@ -525,16 +519,6 @@ impl CollabSession {
                 n.reported = false; // 重派后"完成"要再报一次
             }
         }
-    }
-
-    /// 在组名单（agent 实例）。
-    pub fn roster(&self) -> &[AgentMeta] {
-        &self.roster
-    }
-
-    /// 代拟拟好的名单（待用户确认；确认后落到 roster）。
-    pub fn slate(&self) -> Vec<AgentMeta> {
-        self.slate_picks.clone()
     }
 
     /// 代拟确认后由 Conductor 补上沙箱清单（名单刚定下来时才有）。

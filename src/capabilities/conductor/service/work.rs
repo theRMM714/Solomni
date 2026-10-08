@@ -103,6 +103,8 @@ impl Conductor {
                     name: a.name.clone(),
                     modules: a.modules.clone(),
                     model: a.model.clone().unwrap_or_default(),
+                    // 视图要把现值给出去；编辑回包缺了它 = 保留现值（见 SessionEdit 的字段说明）。
+                    permissions: Some(a.permissions.clone()),
                 })
                 .collect(),
             tier: tier.as_str().to_string(),
@@ -183,9 +185,21 @@ impl Conductor {
         let reserved = self.reserved_names();
         let mut seen: Vec<String> = Vec::new();
         let mut metas: Vec<AgentMeta> = Vec::new();
+        // 旧权限按名字留档：这次编辑没给某个 agent 的 permissions（None）= 保留它的现值。
+        let old_permissions: std::collections::BTreeMap<
+            String,
+            crate::capabilities::permission::api::PermissionsOverride,
+        > = meta
+            .agents
+            .iter()
+            .map(|x| (x.name.clone(), x.permissions.clone()))
+            .collect();
         for a in &edit.agents {
             crate::capabilities::registry::api::validate_name(&a.name)?;
             crate::capabilities::registry::api::check_reserved(&a.name, &reserved)?;
+            if let Some(p) = &a.permissions {
+                crate::capabilities::permission::api::validate_override(p)?;
+            }
             for id in &a.modules {
                 if !roster.modules.iter().any(|m| &m.manifest.id == id) {
                     return Err(format!("无此模块：{}", id));
@@ -213,6 +227,10 @@ impl Conductor {
                 } else {
                     Some(a.model.clone())
                 },
+                permissions: a
+                    .permissions
+                    .clone()
+                    .unwrap_or_else(|| old_permissions.get(&a.name).cloned().unwrap_or_default()),
             });
         }
         if metas.is_empty() {
@@ -288,10 +306,37 @@ impl Conductor {
         new_meta.agents = metas;
         new_meta.exec = spec;
         self.history.save_meta(&new_meta)?;
+        // 权限或模块可能变了：撤掉按**旧配置**写下的围栏授权；下一次工具执行按新配置重授（即时生效）。
+        self.release_session_fences(&meta);
         self.record_config(sid, &new_meta);
         // 内存里那份是按旧配置装的：丢掉它，下一次访问按新配置从转录重建（转录即状态，不丢内容）。
         self.sessions.remove(sid);
         Ok(())
+    }
+
+    /// 撤掉一次会话按**给定 meta** 写下的围栏授权（权限或模块变更后调用）。
+    /// 其它平台没有持久授权（release 是空操作）；Windows 撤 ACE，下一次 `prepare_fence` 按实际 ACE 重授。
+    fn release_session_fences(&self, meta: &SessionMeta) {
+        let roster = self.workspace.roster();
+        match self.sandboxes(meta, &roster) {
+            Ok(sandboxes) => {
+                for sb in &sandboxes.list {
+                    let spec =
+                        crate::capabilities::tools::api::FenceSpec::from_sandbox(sb, meta.exec.net)
+                            .with_read_only(self.fence_read_roots());
+                    if let Err(e) = self.tools.release_fence(&spec) {
+                        self.log.warn(
+                            "conductor::release_session_fences",
+                            &format!("撤销围栏授权未完成：{}", e),
+                        );
+                    }
+                }
+            }
+            Err(e) => self.log.warn(
+                "conductor::release_session_fences",
+                &format!("取沙箱失败，未撤销授权：{}", e),
+            ),
+        }
     }
 
     /// 追加一条旁路配置记录：只作呈现与审计（不进模型上下文，回放与状态派生都跳过它）。
@@ -409,13 +454,9 @@ impl Conductor {
                     Some(Session::Single(_)) => false,
                     None => mode == "collab",
                 };
-                // 待裁决：对象不在表里（正在生成）时拿不到，如实给 None（推的 Decision 事件会补上）。
-                let pending = match self.sessions.get(&sid) {
-                    Some(Session::Collab(c)) => {
-                        c.pending.as_ref().map(|p| p.to_json(c.gate_advice()))
-                    }
-                    _ => None,
-                };
+                // 待裁决：**判据只有队本身**（核心各关卡与工具级确认排在同一条队上）——
+                // 正在生成的会话（对象在工作线程手里）照样取得到；推的卡片事件与它是同一份。
+                let pending = self.desk.peek(&sid).and_then(|d| d.json());
                 SessionView {
                     running: running_now.contains(&sid),
                     sid,
@@ -555,6 +596,7 @@ impl Conductor {
                 transient: a.transient,
                 modules: a.modules.clone(),
                 model: a.model.clone(),
+                permissions: Default::default(),
             });
         }
         // 模块扁平清单（展示用；顺序按 agent 名单展开）
@@ -653,6 +695,8 @@ impl Conductor {
             }
             WorkMode::Collab => {
                 let task = spec.task.as_deref().unwrap_or("").trim().to_string();
+                // 裁决队按会话 id 取：核心各关卡与这一席的工具级确认共用同一条队。
+                let door = self.desk_of(&name);
                 let mut cs = CollabSession::start(
                     Arc::clone(&self.llm),
                     Arc::clone(&self.workspace),
@@ -665,6 +709,7 @@ impl Conductor {
                     metas.clone(),
                     delegate,
                     sandboxes.clone(),
+                    door,
                 )?;
                 let mut out = Vec::new();
                 cs.set_task(&task, &mut |e| out.push(e));

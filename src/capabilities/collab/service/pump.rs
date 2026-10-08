@@ -1,7 +1,7 @@
 //! **讨论泵**：把讨论推进一步（`pump_with`）并装配成员（`assemble_members`）。
 //!
 //! 泵不自己调模型：它把"该问谁、带什么上下文"交回协调业务（见 session-model.md 二）。
-//! 行外送与增量（`emit_new_lines` / `push_delta` / `review_event` / `derive_pending`）也在这里。
+//! 行外送与增量（`emit_new_lines` / `push_delta` / `review_event` / `derive_gate`）也在这里。
 
 use super::collab::*;
 use crate::capabilities::collab::service::discussion::{Discussion, Member, TurnOut, MAX_ROUNDS};
@@ -16,6 +16,10 @@ impl CollabSession {
     /// 泵：推进讨论直至暂停（ask）或收敛并走完整理/执行/验收/交付；事件逐条经 sink 外送。
     pub fn pump_with(&mut self, sink: &mut dyn FnMut(SessionEvent)) {
         if self.done || self.disc.is_none() {
+            return;
+        }
+        // 队列里还挂着等用户答的卡：泵**一步都不推**（谁也不能替用户答，见 session-model.md）。
+        if self.awaiting_user() {
             return;
         }
         let prompts = self.prompts.clone();
@@ -501,6 +505,7 @@ impl CollabSession {
                 crate::capabilities::tools::api::tool_notes(&*prompts, &sandbox, &modules);
             member.tools = Some(MemberTools {
                 mode,
+                role: "discussant".to_string(),
                 // 模块 id → 该模块的（目录, 工具表）：多模块 agent 靠信封里的 module 消歧。
                 modules: crate::capabilities::session::api::tool_table(&modules),
                 observations: crate::capabilities::tools::api::Observations::default(),
@@ -548,26 +553,37 @@ pub(crate) fn slate_item(a: &AgentMeta, why: &str) -> String {
     }
 }
 
-/// 从派生状态推出当前挂起（None = 没有待用户处理的门）。
-pub(crate) fn derive_pending(
+/// 目的：从派生状态推出**当前整队**待用户裁决的关（空 = 没有待用户处理的门）：队首在最前。
+///   判据两条并用：**转录里没人回答、也没作废的那几张卡**优先（按先来后到，各带卡号与这一关的载荷）；
+///   一张都没有时退回**状态派生**——回档把卡连同那一段转录一起截掉、或停会话把整队作废之后，
+///   状态照样说得出"还停在名单确认 / 开始讨论"，回来时续一个新卡号接着问。
+pub(crate) fn derive_gates(
     st: &crate::capabilities::collab::domain::collab_state::CollabState,
-) -> Option<Pending> {
+) -> Vec<(Option<String>, Pending, String)> {
     if st.ended {
-        return None;
+        return Vec::new();
     }
-    if !st.begun {
+    let mut out: Vec<(Option<String>, Pending, String)> = st
+        .open_gates
+        .iter()
+        .filter_map(|(id, gate, payload)| {
+            let p = Pending::from_payload(gate, payload)?;
+            let advice = payload
+                .get("advice")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            Some((Some(id.clone()), p, advice))
+        })
+        .collect();
+    if out.is_empty() && !st.begun {
         if st.slate.is_some() && !st.slate_confirmed {
-            return Some(Pending::ConfirmSlate);
+            out.push((None, Pending::ConfirmSlate, String::new()));
+        } else if st.task.is_some() {
+            out.push((None, Pending::ConfirmBegin, String::new()));
         }
-        if st.task.is_some() {
-            return Some(Pending::ConfirmBegin);
-        }
-        return None;
     }
-    st.pending_ask.as_ref().map(|(m, q)| Pending::Ask {
-        member: m.clone(),
-        question: q.clone(),
-    })
+    out
 }
 
 /// 逐成员外送：把刚定稿的讨论行变成带**会话内稳定 id** 的转录事件交出去。

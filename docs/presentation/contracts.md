@@ -11,13 +11,16 @@
 
 | 东西 | 定义在 | 形态 |
 | --- | --- | --- |
-| 能力接口 | **各能力自己的 `api.rs`** | `SessionOps` / `ConductorOps` / `LogOps` 定义在 `capabilities/conductor/api/mod.rs`（会话中心与核心自己的用例）；`RegistryOps` 在 `capabilities/registry/api.rs`、`HistoryOps` 在 `capabilities/session/api.rs`、`WorkspaceOps` 在 `capabilities/workspace/api.rs`。**全 `&self`、可替换成假实现**；实现都是 `capabilities/conductor/api/proxy.rs` 里的队列代理（`ConductorHandle`）|
+| 能力接口 | **各能力自己的 `api.rs`** | `SessionOps` / `ConductorOps` / `ActionOps` / `LogOps` 定义在 `capabilities/conductor/api/mod.rs`（会话中心、核心自己的用例与**动作目录 / 分发**）；`RegistryOps` 在 `capabilities/registry/api.rs`、`HistoryOps` 在 `capabilities/session/api.rs`、`WorkspaceOps` 在 `capabilities/workspace/api.rs`。**全 `&self`、可替换成假实现**；实现都是 `capabilities/conductor/api/proxy.rs` 里的队列代理（`ConductorHandle`）|
 | 事件台 | `capabilities/conductor/api.rs` | `EventBus`：核心独占生产，任意数量的消费者按序号增量取 |
 
 规则：
 
 - **命令**：呈现层调能力接口 → 核心在自己的线程上执行 → 同步回包（`Advance`：**事件台头部序号**）。
   命令**不携带事实**——事实只有一条来路（事件台）；回包里的 `head` 只是"我现在说到哪了"。
+- **动作只有一条路**：`GET /api/actions` 是**动作目录**（这个调用者此刻能做什么，含可用性），`POST /api/actions/{id}` 是**唯一分发**；
+  参数按动作表（`systools/tools.yaml`）校验 → 按 `callers` 授权 → 执行 → 审计，各只有一处。
+  模型侧经 `ToolHandler` 走**同一份声明与同一处授权**——两个适配器，两种呈现，事实同源。
 - **事件**：生成过程中的短暂事件与最终事件都进事件台；Web 长轮询按 `since` 取，客户端按 `seq` 增量取。
 - **事件按会话分开**：一条会话在自己那一回合里产生的东西进**它自己的事件流**（`sid` 就是那条流）——
   流式增量、核实行、**定稿的转录行**、运行态都是。主会话只拿"谁说了什么"的投影；
@@ -93,19 +96,12 @@
 | GET | `/app.js` | 静态资源 | — | `app.js` | 200 |
 | GET | `/md.js` | 静态资源 | — | `md.js` | 200 |
 | GET | `/api/events` | 事件台（`EventBus`） | 查询 `sid` / `since` | `{lines:[{seq,sid,events}],head,oldest}` | 200 |
-| GET | `/api/state` | `WorkspaceOps::roster` + `SessionOps::session_views` + `RegistryOps` + `HistoryOps::list` | — | `{modules,rejected,fence,providers,models,core,agents,settings,sessions,history}` | 200, 400 |
-| POST | `/api/sessions` | `SessionOps::create_work` | `{name,mode,agents[],task?,delegate?,tier?}`（`mode` = single / collab / **proxy**：proxy 没有名单、选它就是**授予全权**；`agents` = **点名结果**，未归并；单模式下多个会被并成一个临时组合；`tier` 缺省 = 本机档，**proxy 会话的档位也是它建出的子工作的默认档**） | `{sid,agents,head}` | 200, 400 |
-| POST | `/api/sessions/{sid}/{action}` | `SessionOps` + `intent::act` | `{text?,agent?,id?,overwrite?,data_base64?,编辑体}` | `{sid,head}` / `{sid,events}`（重放快照）等 | 200, 400, 404, 409 |
+| GET | `/api/state` | `WorkspaceOps::roster` + `SessionOps::session_views` + `RegistryOps` + `HistoryOps::list` | — | `{modules,rejected,fence,providers,models,core,agents,settings,sessions,history}`（`sessions[].pending` 是**当前那张裁决卡**的快照，与推的 `decision_card` 同一份） | 200, 400 |
+| GET | `/api/actions` | `ActionOps::catalog` | 查询 `sid` | `{actions:[{id,desc,params,available,reason}]}` | 200, 400 |
+| POST | `/api/actions/{id}` | `ActionOps::act` | `{…按动作声明}` | `{head}` / `{events}`（重放快照） / `{ok,…}` | 200, 400 |
 | GET | `/api/sessions/{sid}/config` | `SessionOps::config` | — | `{config}` | 200, 400 |
 | GET | `/api/sessions/{sid}/files` | `SessionOps::files` | — | `{work,agents,roots,usage}` | 200, 404 |
-| POST | `/api/providers` | `RegistryOps::upsert_provider` | `{id,base_url,api_key}` | `{ok}` | 200, 400 |
-| POST | `/api/providers/{id}/{action}` | `RegistryOps::remove_provider` / `discover_models` | — | `{ok}` / `{ok,models}` | 200, 400, 404 |
-| POST | `/api/models` | `RegistryOps::upsert_model` | `{id,name,api_model,provider,note?}` | `{ok}` | 200, 400 |
-| POST | `/api/models/{id}/{action}` | `RegistryOps::remove_model` / `set_core_model` / `probe_model_tools` / `probe_replay_shape` | — | `{ok}` / `{ok,outcome,detail,mode}` / `{ok,shapes}` | 200, 400, 404 |
-| POST | `/api/agents` | `RegistryOps::upsert_agent` | `{name,modules[],model?,note?}` | `{ok}` | 200, 400 |
-| POST | `/api/agents/{name}/{action}` | `RegistryOps::remove_agent` | — | `{ok}` | 200, 400, 404 |
 | GET | `/api/settings` | `RegistryOps::settings` | — | `{settings}` | 200, 400 |
-| POST | `/api/settings` | `RegistryOps::set_settings` | `{streaming?,show_reasoning?}` | `{ok}` | 200, 400 |
 | GET | `/api/history` | `HistoryOps::list` | — | `{sessions}` | 200, 400 |
 | GET | `/api/history/{name}` | `HistoryOps::open` | — | `{meta,events,live,head}` | 200, 404 |
 | POST | `/api/history/{name}/delete` | `HistoryOps::delete` | — | `{ok}` | 200, 400 |

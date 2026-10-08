@@ -1,9 +1,13 @@
 //! **回合收发**：把成员的回复喂回状态机（`feed_with`）、取出待问的一步（`take_ask`）、
-//! 回答与裁决（`answer` / `decide`）以及核心核实工具面与通道参数。
+//! 把一张已出队的回答落到业务上（`dispose`）以及核心核实工具面与通道参数。
 
 use super::collab::*;
 use crate::capabilities::collab::service::discussion::TurnOut;
-use crate::capabilities::session::api::{LineView, Pending, SessionEvent};
+use crate::capabilities::session::api::{
+    AgentMeta, LineView, Pending, SessionEvent, OPT_ASK_REPLY, OPT_BEGIN, OPT_BEGIN_ALLOW,
+    OPT_NODE_REWORK, OPT_NODE_SAY, OPT_PLAN_SAY, OPT_PLAN_START, OPT_SLATE_CANCEL,
+    OPT_SLATE_CONFIRM,
+};
 use std::sync::Arc;
 
 use super::pump::*;
@@ -64,6 +68,7 @@ impl CollabSession {
         sb.agent = "核心".to_string();
         sb.private = sb.shared.clone();
         sb.modules.clear();
+        sb.modules_with_userdata.clear();
         let allowed: Vec<String> = self
             .systools
             .tool_face(role)
@@ -71,6 +76,7 @@ impl CollabSession {
             .unwrap_or_default();
         Some(crate::capabilities::session::api::MemberTools {
             mode: self.core_mode,
+            role: role.to_string(),
             modules: std::collections::BTreeMap::new(),
             observations: crate::capabilities::tools::api::Observations::default(),
             llm: Arc::clone(&self.llm),
@@ -117,105 +123,156 @@ impl CollabSession {
         }
     }
 
-    /// 回答 ask（仅 Ask 挂起时有效）；回答转达后继续泵。用户回答同样先改写 @ 引用。
-    pub fn answer(&mut self, text: &str, sink: &mut dyn FnMut(SessionEvent)) {
-        if matches!(self.pending, Some(Pending::Ask { .. })) {
-            self.pending = None;
-            self.gate_advice.clear();
-            let roots = crate::capabilities::prompt::api::RefRoots {
-                work: self.sandboxes.shared.clone(),
-                private: None,
-            };
-            let text =
-                crate::capabilities::prompt::api::rewrite(text, None, &roots, &self.prompts.refs());
-            if let Some(disc) = self.disc.as_mut() {
-                disc.pending_user_answers.push(text);
-            }
-            self.pump_with(sink);
+    /// 回答请教那一关：用户的话进主会话（所有成员下一回合都看得到），接着往下推。
+    /// 约束：那一关已由队列出队——这里只管"他的话怎么进业务"，不碰队列。
+    pub(crate) fn answer(&mut self, text: &str, sink: &mut dyn FnMut(SessionEvent)) {
+        let roots = crate::capabilities::prompt::api::RefRoots {
+            work: self.sandboxes.shared.clone(),
+            private: None,
+        };
+        let text =
+            crate::capabilities::prompt::api::rewrite(text, None, &roots, &self.prompts.refs());
+        if let Some(disc) = self.disc.as_mut() {
+            disc.pending_user_answers.push(text);
         }
+        self.pump_with(sink);
     }
 
-    /// 用户对当前裁决的**自由文本回应**（与"二选一确认"分开）：
-    /// - 请教：他的话进**主会话**（所有成员下一回合都看得到），继续泵；**不单独转给那个成员**。
-    /// - 方案待审：先记下他的话（进主会话），再过审开工。
-    /// - 节点没过：先记下他的话，再重派没过的节点。
-    /// - 名单 / 开始是二选一（前端给的是确认按钮），不走这条路——如实说明，不假装收下。
-    ///
-    /// 没有挂起的事同样如实说。
-    pub fn decide(&mut self, text: &str, sink: &mut dyn FnMut(SessionEvent)) {
-        match self.pending.clone() {
-            // 请教：他的话进主会话（所有成员下一回合都看得到），继续泵。
-            // 这不是"放行工作"，所以**不判明确性**——他说什么就是什么。
-            Some(Pending::Ask { .. }) => self.answer(text, sink),
-            // 放行类（方案待审 / 节点没过）：**由核心 AI 判定他的意图是否明确**，明确才开工/放行。
-            // 不明确就不开工（他的话仍进主会话当反馈，关卡留着等他补一句）。
-            Some(p @ Pending::PlanReview) | Some(p @ Pending::NodeBlocked { .. }) => {
-                let kind = p.decision_parts().0;
-                let brief = self.decision_brief(&p);
-                let text_owned = text.to_string();
-                let mut verify = self.core_verify_tools("planner");
-                sink(crate::capabilities::session::api::working("核心"));
-                let judged = Self::judge_clear(
-                    &*self.prompts,
-                    &*self.systools,
-                    &self.cancel,
-                    crate::capabilities::llm::api::CompleteOpts::plain(self.settings.app.streaming)
-                        .with_timeout(self.settings.app.llm_timeout_secs),
-                    self.core_mode,
-                    self.core_chat.as_mut(),
-                    verify.as_mut(),
-                    kind,
-                    &brief,
-                    &text_owned,
-                    sink,
-                );
-                sink(crate::capabilities::session::api::idle());
-                match judged {
-                    Ok((true, why)) => {
-                        self.note_user(text, sink);
-                        if !why.trim().is_empty() {
-                            sink(SessionEvent::Notice(format!(
-                                "[裁决] 照你说的开工：{}",
-                                why
-                            )));
+    /// 目的：把一张**已经出队**的回答落到业务上（处置归发起方）：按选项 id 分派这一关该做什么。
+    /// 参数：`ticket` = 队列给的处置票（卡号 / 选项 / 附言 / 这一关的材料与建议）。
+    /// 返回：这一关**放行了没有**（true = 开工 / 重派，调用方要接着跑整条流水线）+ 刚定下的名单。
+    /// 错误：附言必填的那几关没给附言、选项不在这一关能分派的范围里，都如实拒绝。
+    pub fn dispose(
+        &mut self,
+        ticket: &crate::capabilities::session::api::GateTicket,
+        sink: &mut dyn FnMut(SessionEvent),
+    ) -> Result<(bool, Option<Vec<AgentMeta>>), String> {
+        let option = ticket.option.as_str();
+        let note = ticket.note.trim().to_string();
+        let empty_before = self.roster.is_empty();
+        let p = ticket.pending.clone();
+        let nodes = match &p {
+            Pending::NodeBlocked { nodes } => nodes.clone(),
+            _ => Vec::new(),
+        };
+        let go = match option {
+            // 请教：他的话进主会话（所有成员下一回合都看得到），继续泵；不单独转给那个成员。
+            OPT_ASK_REPLY => {
+                self.answer(&note, sink);
+                false
+            }
+            OPT_SLATE_CONFIRM | OPT_SLATE_CANCEL => {
+                self.confirm_slate(option == OPT_SLATE_CONFIRM, sink);
+                false
+            }
+            OPT_BEGIN | OPT_BEGIN_ALLOW => {
+                self.begin(option == OPT_BEGIN_ALLOW, sink);
+                false
+            }
+            // 放行类：他的附言进主会话当反馈，然后才开工 / 重派。
+            OPT_PLAN_START => {
+                self.note_user(&note, sink);
+                self.approve_plan(sink);
+                self.resume(sink);
+                true
+            }
+            OPT_NODE_REWORK => {
+                self.note_user(&note, sink);
+                for n in &nodes {
+                    self.reset_node(n);
+                }
+                self.resume(sink);
+                true
+            }
+            // "先说一句"：他的话进主会话当反馈，**由核心 AI 判这句话是否明确**——
+            // 明确才开工 / 重派，模糊就不动、关卡继续挂着（见 session-model.md「请用户裁决」）。
+            OPT_PLAN_SAY | OPT_NODE_SAY => self.judge_note(&p, &ticket.advice, &note, sink),
+            other => return Err(format!("这张卡上没有这个选项：{}", other)),
+        };
+        // 名单刚由这一答定下来：调用方要把 roster 写回 meta（重建与沙箱归属都读它）。
+        let confirmed = (empty_before && !self.roster.is_empty()).then(|| self.roster.to_vec());
+        Ok((go, confirmed))
+    }
+
+    /// "先说一句"这一条的处理：他的话进主会话当反馈，再由核心 AI 判**是否明确**。
+    /// 明确才开工 / 重派；模糊就不动、关卡继续挂着（这一条已经答过，续一张新的接着问）。
+    /// 返回：明确到可以放行 = true。
+    /// 参数：advice = 原来那一关带着的建议（续的新卡要带上它，别让建议随出队丢掉）。
+    fn judge_note(
+        &mut self,
+        p: &Pending,
+        advice: &str,
+        note: &str,
+        sink: &mut dyn FnMut(SessionEvent),
+    ) -> bool {
+        let kind = p.kind();
+        let brief = self.decision_brief(p);
+        let text = note.to_string();
+        let mut verify = self.core_verify_tools("planner");
+        sink(crate::capabilities::session::api::working("核心"));
+        let judged = Self::judge_clear(
+            &*self.prompts,
+            &*self.systools,
+            &self.cancel,
+            crate::capabilities::llm::api::CompleteOpts::plain(self.settings.app.streaming)
+                .with_timeout(self.settings.app.llm_timeout_secs),
+            self.core_mode,
+            self.core_chat.as_mut(),
+            verify.as_mut(),
+            kind,
+            &brief,
+            &text,
+            sink,
+        );
+        sink(crate::capabilities::session::api::idle());
+        self.note_user(note, sink);
+        match judged {
+            Ok((true, why)) => {
+                if !why.trim().is_empty() {
+                    sink(SessionEvent::Notice(format!(
+                        "[裁决] 照你说的开工：{}",
+                        why
+                    )));
+                }
+                match p {
+                    Pending::PlanReview => {
+                        self.approve_plan(sink);
+                        self.resume(sink);
+                        true
+                    }
+                    Pending::NodeBlocked { nodes } => {
+                        for n in nodes {
+                            self.reset_node(n);
                         }
-                        match p {
-                            Pending::PlanReview => {
-                                self.approve_plan(sink);
-                                self.resume(sink);
-                            }
-                            _ => self.resume(sink),
-                        }
+                        self.resume(sink);
+                        true
                     }
-                    // 不明确 = **不开工**：不自动重试、不自己往下推，等他补一句。
-                    Ok((false, why)) => {
-                        self.note_user(text, sink);
-                        sink(SessionEvent::Notice(if why.trim().is_empty() {
-                            "[裁决] 我还没听出明确的意思，先不开工；请再说一句（要做 / 不要做 / 照哪个走）。"
-                                .to_string()
-                        } else {
-                            format!("[裁决] 先不开工——{}；请再说一句。", why)
-                        }));
-                    }
-                    Err(err) => {
-                        self.note_user(text, sink);
-                        sink(SessionEvent::Notice(
-                            crate::capabilities::session::api::interrupted_note(&format!(
-                                "判定你的意思时没能问模型（{}）；为稳妥先不开工，请再说一句。",
-                                err
-                            )),
-                        ));
-                    }
+                    _ => false,
                 }
             }
-            Some(Pending::ConfirmSlate) | Some(Pending::ConfirmBegin) => {
-                sink(SessionEvent::Notice(
-                    "[裁决] 这一步是二选一（确认 / 取消），请用卡片上的按钮。".to_string(),
-                ));
+            // 不明确 = **不动**：不自动往下推，这一关续一张新卡接着等他补一句。
+            Ok((false, why)) => {
+                sink(SessionEvent::Notice(if why.trim().is_empty() {
+                    "[裁决] 我还没听出明确的意思，先不动；请再说一句（要做 / 不要做 / 照哪个走）。"
+                        .to_string()
+                } else {
+                    format!("[裁决] 先不动——{}；请再说一句。", why)
+                }));
+                self.gate_advice = advice.to_string();
+                self.ask_user(p.clone(), sink);
+                false
             }
-            None => sink(SessionEvent::Notice(
-                "[裁决] 现在没有等你定的事。".to_string(),
-            )),
+            Err(err) => {
+                sink(SessionEvent::Notice(
+                    crate::capabilities::session::api::interrupted_note(&format!(
+                        "判定你的意思时没能问模型（{}）；为稳妥先不动，请再说一句。",
+                        err
+                    )),
+                ));
+                self.gate_advice = advice.to_string();
+                self.ask_user(p.clone(), sink);
+                false
+            }
         }
     }
 

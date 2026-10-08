@@ -1,9 +1,9 @@
 //! 终端转录中心：解析命令 → 用入站能力面 → 渲染事件流。
 //! 只做解析与渲染，不做业务决策；Web 前端与它并列，共用同一能力面与事件词汇。
 
-use crate::capabilities::conductor::api::{Acted, Action};
+use crate::capabilities::conductor::api::{Acted, ActionCall, Caller};
 use crate::capabilities::conductor::api::{
-    AgentInstance, CollabStep, Pending, SessionEvent, Tier, WorkMode, WorkSpec,
+    AgentInstance, DecisionCard, DecisionWaiter, SessionEvent, Tier,
 };
 use crate::capabilities::conductor::api::{Ops, Output};
 use crate::capabilities::registry::api::{ModelView, ProviderView};
@@ -40,6 +40,8 @@ pub fn run(ops: Ops, web_default_port: u16) -> CliExit {
             "core" => core_flow(&ops, &arg),
             // 回档：留档（标记+折叠，可恢复）/ 删除（真的截掉）/ 恢复（删掉该标记及其后）。
             "rewind" => rewind_cmd(&ops, &arg),
+            // 直接用模块工具（不经 AI）：清单与动作 id 都来自核心的动作目录。
+            "module" => module_cmd(&ops, &arg),
             "rescan" => print_roster(&ops),
             // 转入 Web 转录中心：接受 webui / -webUI（启动参数也这么写），可选端口。
             "webui" | "-webui" | "web" | "-web" => {
@@ -55,10 +57,79 @@ pub fn run(ops: Ops, web_default_port: u16) -> CliExit {
     CliExit::Exit
 }
 
+/// 目的：把用户写的模块工具名规整成动作 id——`<模块id>.<工具名>` 与完整的 `module.<模块id>.<工具名>` 都收。
+pub(crate) fn module_action_id(arg: &str) -> String {
+    let a = arg.trim();
+    if a.starts_with("module.") {
+        a.to_string()
+    } else {
+        format!("module.{}", a)
+    }
+}
+
+/// 直接用模块工具（不经 AI）：`module` 列清单，`module <模块id>.<工具名> [json 参数]` 跑一次。
+/// 清单来自核心的动作目录（`module.<模块id>.<工具名>`），所以与 Web 看到的是同一份事实。
+fn module_cmd(ops: &Ops, arg: &str) {
+    let catalog = match ops.actions.catalog(&Caller::User, None) {
+        Ok(c) => c,
+        Err(e) => {
+            println!("[错误] {}", e);
+            return;
+        }
+    };
+    let modules: Vec<_> = catalog
+        .iter()
+        .filter(|a| a.id.starts_with("module."))
+        .collect();
+    let arg = arg.trim();
+    if arg.is_empty() || arg == "list" {
+        if modules.is_empty() {
+            println!("（没有声明 tools 的模块；模块可以只写 system，不声明外部工具）");
+        }
+        for a in &modules {
+            println!("  {:<28} {}", a.id, first_line(&a.desc));
+        }
+        println!(
+            "用法：module <模块id>.<工具名> [json 参数]（省略 = {{}}；可选 workspace = 工作目录）"
+        );
+        return;
+    }
+    let (id, raw) = match arg.split_once(char::is_whitespace) {
+        Some((id, rest)) => (id, rest.trim()),
+        None => (arg, ""),
+    };
+    let args: serde_json::Value = if raw.is_empty() {
+        serde_json::json!({})
+    } else {
+        match serde_json::from_str(raw) {
+            Ok(v) => v,
+            Err(e) => {
+                println!("[错误] 参数不是合法 JSON：{}", e);
+                return;
+            }
+        }
+    };
+    match ops.actions.act(ActionCall {
+        id: module_action_id(id),
+        args,
+        caller: Caller::User,
+        out: Output::Final,
+    }) {
+        Ok(Acted::Done(v)) => {
+            let ok = v.get("ok").and_then(|b| b.as_bool()).unwrap_or(true);
+            println!("{}", v.get("output").and_then(|s| s.as_str()).unwrap_or(""));
+            if !ok {
+                println!("[失败] 模块工具返回 ok=false（回执见上）");
+            }
+        }
+        Ok(_) => println!("[完成]"),
+        Err(e) => println!("[错误] {}", e),
+    }
+}
+
 /// 命令行回档：给共享区与整棵子树都对齐到同一个点。
 /// 留档 = 标记 + 折叠（可恢复）；删除 = 真的截掉；恢复 = 删掉该标记及其后（不可恢复）。
 fn rewind_cmd(ops: &Ops, arg: &str) {
-    use crate::capabilities::conductor::api::RewindTarget;
     let parts: Vec<&str> = arg.split_whitespace().collect();
     let usage = "[用法] rewind <会话> archive|delete <行id>  或  rewind <会话> restore <标记id>";
     if parts.len() < 3 {
@@ -73,17 +144,21 @@ fn rewind_cmd(ops: &Ops, arg: &str) {
             return;
         }
     };
-    let target = match verb.as_str() {
-        "archive" => RewindTarget::Archive(num),
-        "delete" => RewindTarget::Delete(num),
-        "restore" => RewindTarget::Restore(num),
+    let mode = match verb.as_str() {
+        "archive" | "delete" | "restore" => verb.clone(),
         _ => {
             println!("{}", usage);
             return;
         }
     };
-    match ops.sessions.rewind(sid, target) {
-        Ok(events) => {
+    // 回档也走动作表：同一份声明与同一处授权（CLI 只把参数装好）。
+    match ops.actions.act(ActionCall {
+        id: "rewind".to_string(),
+        args: serde_json::json!({ "session_id": sid, "mode": mode, "id": num }),
+        caller: Caller::User,
+        out: Output::Final,
+    }) {
+        Ok(Acted::Replayed(events)) => {
             let rows: Vec<String> = events
                 .iter()
                 .filter(|e| e.get("type").and_then(|t| t.as_str()) == Some("transcript"))
@@ -102,6 +177,7 @@ fn rewind_cmd(ops: &Ops, arg: &str) {
                 println!("  {}", r);
             }
         }
+        Ok(_) => println!("[回档] 完成"),
         Err(e) => println!("[错误] {}", e),
     }
 }
@@ -210,7 +286,7 @@ fn print_menu(ops: &Ops) {
             model_label(a.model.as_deref())
         );
     }
-    println!("命令：single [agent名…] | collab [agent名…|?] | proxy（决定权整块交给核心） | provider list|add|rm|discover | model list|add|rm | core <模型id> | rewind <会话> archive|delete <行id> | rewind <会话> restore <标记id> | rescan | webui | exit");
+    println!("命令：single [agent名…] | collab [agent名…|?] | proxy（决定权整块交给核心） | module [模块id.工具名 [json]]（不经 AI 直接用模块工具） | provider list|add|rm|discover | model list|add|rm | core <模型id> | rewind <会话> archive|delete <行id> | rewind <会话> restore <标记id> | rescan | webui | exit");
 }
 
 /// 模型标签（CLI 展示文案；核心默认是登记处的概念，不是提示词）。
@@ -305,22 +381,25 @@ fn render(events: &[SessionEvent]) {
                 }
             }
             SessionEvent::Ended => {}
-            // 请用户裁决：把"为什么要你定 + 建议"如实打出来（与 Web 那张卡同一份事实）。
-            SessionEvent::Decision {
-                summary,
-                advice,
-                question,
-                ..
-            } => {
-                println!("[裁决] {}", summary);
-                if !advice.trim().is_empty() {
-                    println!("  建议：{}", advice);
-                }
-                if !question.trim().is_empty() {
-                    println!("  {}", question);
-                }
-                println!("  （用自然语言回一句即可；回话会进主会话，所有成员都看得到）");
+            // **裁决卡**：界面只认这四个字段（信封 / 消息 / 选项），不认识业务含义。
+            // 交互模式下随后由 `answer_gates` 把它整张打出来并就地作答；这里只提一句，不重复整张。
+            SessionEvent::DecisionCard { card, .. } => {
+                println!(
+                    "[裁决] 有一张卡在等你：{}（{}）——按提示作答",
+                    card.message.title, card.envelope.name
+                )
             }
+            // 一次回答的记录（谁答的、选了哪个 id）：如实打出来，便于对账。
+            SessionEvent::DecisionAnswer(a) => {
+                println!("[裁决] {} 答了 {}：选了 {}", a.by, a.card, a.option)
+            }
+            // 整队作废（停止 / 关闭）：如实说清作废了哪几张、为什么——等待方按"拒绝"解开。
+            SessionEvent::DecisionVoid { cards, reason } => println!(
+                "[裁决] 作废 {} 张没答的卡（{}）：{}",
+                cards.len(),
+                cards.join("、"),
+                reason
+            ),
             // 流式增量与工具调用实时事件都是短暂事件，终端不在流中渲染（最终行会到）。
             // 短暂事件（流式增量 / 运行态 / 工具调用）：Web 前端用来做实时渲染，CLI 不逐条打。
             SessionEvent::Delta { .. }
@@ -350,6 +429,205 @@ fn follow(ops: &Ops, sid: &str, cursor: &mut u64, acted: Acted) {
     *cursor = drain(ops, sid, *cursor);
 }
 
+/// CLI 侧的动作（拥有字符串）：生成要放后台线程，所以不能借用调用栈上的 `&str`。
+enum CliAction {
+    Say(String),
+    /// 回答一张裁决卡：卡号 + 选项 id + 附言（与 Web 回答的是同一条命令）。
+    Answer {
+        card: String,
+        option: String,
+        note: String,
+    },
+}
+
+impl CliAction {
+    /// 目的：把 CLI 的动作变成一次**动作调用**（与 Web 同一条分发、同一份声明）。
+    fn call(&self, sid: &str, out: Output) -> ActionCall {
+        match self {
+            CliAction::Say(t) => ActionCall {
+                id: "send_message".to_string(),
+                args: serde_json::json!({ "session_id": sid, "text": t }),
+                caller: Caller::User,
+                out,
+            },
+            CliAction::Answer { card, option, note } => ActionCall {
+                id: "answer_card".to_string(),
+                args: serde_json::json!({
+                    "session_id": sid,
+                    "card": card,
+                    "option": option,
+                    "note": note,
+                }),
+                caller: Caller::User,
+                out,
+            },
+        }
+    }
+}
+
+/// 目的：队首之后还在等的那几张，一行一张（谁在等、问的什么、前面还排着几条）。
+/// 约束：**文本构造与打印分开**——文本可判，打印只是把它写出去。
+pub(crate) fn waiting_lines(waiting: &[DecisionWaiter]) -> Vec<String> {
+    if waiting.is_empty() {
+        return Vec::new();
+    }
+    let mut out = vec![format!(
+        "  后面还排着 {} 张（先答上面那张）：",
+        waiting.len()
+    )];
+    for (i, w) in waiting.iter().enumerate() {
+        out.push(format!(
+            "    {}) {} 在等：{}",
+            i + 1,
+            w.envelope.name,
+            w.title
+        ));
+    }
+    out
+}
+
+/// 把还在等的那几张如实打出来（**只有队首能答**）。
+fn print_waiting(waiting: &[DecisionWaiter]) {
+    for line in waiting_lines(waiting) {
+        println!("{}", line);
+    }
+}
+
+/// 把一张裁决卡按它的四个字段打出来（信封 / 消息 / 选项）：CLI 不认识业务含义，只认这几格。
+fn print_card(card: &DecisionCard) {
+    println!("[裁决] {}（{}）", card.message.title, card.envelope.name);
+    if !card.message.body.trim().is_empty() {
+        println!("  {}", card.message.body);
+    }
+    if !card.message.detail.trim().is_empty() {
+        println!("  {}", card.message.detail);
+    }
+    for (i, o) in card.options.iter().enumerate() {
+        println!("  {}) {}（{}）", i + 1, o.label, o.id);
+    }
+}
+
+/// 选中的选项 id：先按序号、再按 id 原文认——两者都是那张卡上**用户看得见**的东西。
+pub(crate) fn pick_option(card: &DecisionCard, ans: &str) -> Option<String> {
+    if let Ok(n) = ans.parse::<usize>() {
+        if n >= 1 && n <= card.options.len() {
+            return Some(card.options[n - 1].id.clone());
+        }
+    }
+    card.options
+        .iter()
+        .find(|o| o.id == ans)
+        .map(|o| o.id.clone())
+}
+
+/// 裁决门：**按卡片上的选项作答**（回答回的是选项 id + 附言，不是自由文本）。
+/// 不点不继续：空输入 = 先不答（会话仍在等）。
+fn answer_gates(ops: &Ops, sid: &str, cursor: &mut u64) {
+    loop {
+        let queue = match ops.sessions.open_queue(sid) {
+            Ok(Some(q)) => q,
+            Ok(None) => return,
+            Err(e) => {
+                println!("[提示] 取裁决卡失败：{}", e);
+                return;
+            }
+        };
+        let card = &queue.card;
+        print_card(card);
+        // 队首之后还在等的那几张：如实列出来（"谁在等、前面还排着几条"），但它们还不能答。
+        print_waiting(&queue.waiting);
+        let ans = prompt("选哪一项（序号 / 选项 id；回车 = 先不答）>");
+        let ans = ans.trim();
+        if ans.is_empty() {
+            return;
+        }
+        let Some(option) = pick_option(card, ans) else {
+            println!("  这张卡上没有这一项，请按上面的序号或 id 作答。");
+            continue;
+        };
+        let note = prompt("附言（可空；请教那一关必填）>");
+        let action = CliAction::Answer {
+            card: card.id.clone(),
+            option,
+            note,
+        };
+        match act_interactive(ops, sid, action, cursor, Output::Final) {
+            Ok(acted) => {
+                follow(ops, sid, cursor, acted);
+                wait_quiet(ops, sid, cursor);
+            }
+            Err(e) => {
+                println!("[错误] {}", e);
+                return;
+            }
+        }
+    }
+}
+
+/// 回答之后**跟到这一段收尾**再回提示符：回答是直路（先落定、处置脱离调用方跑），
+/// 不跟的话终端会在讨论还在跑的时候就回到提示符——用户既看不到后续，也等不到下一张卡。
+/// 判据：这条会话不在跑，且事件台连着几拍没有再长（等的是"脱离调用方那一段"，不是某一次生成）。
+fn wait_quiet(ops: &Ops, sid: &str, cursor: &mut u64) {
+    let mut last = u64::MAX;
+    let mut quiet = 0u32;
+    loop {
+        *cursor = drain(ops, sid, *cursor);
+        let head = ops.events.head();
+        if !ops.sessions.is_running(sid) && head == last {
+            quiet += 1;
+            if quiet >= 3 {
+                return;
+            }
+        } else {
+            quiet = 0;
+        }
+        last = head;
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+}
+
+/// 一次生成放**后台线程**；主线程一边渲染事件、一边就地按卡作答（工具级确认等在工作线程上）。
+/// 为什么：回答要在生成进行中读键盘，同步调用会把主线程堵在生成里，读不到输入。
+fn act_interactive(
+    ops: &Ops,
+    sid: &str,
+    action: CliAction,
+    cursor: &mut u64,
+    out: Output,
+) -> Result<Acted, String> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let (gen_ops, gen_sid) = (ops.clone(), sid.to_string());
+    std::thread::spawn(move || {
+        let r = gen_ops.actions.act(action.call(&gen_sid, out));
+        let _ = tx.send(r);
+    });
+    loop {
+        let (lines, head, _oldest) = ops.events.snapshot(Some(sid), *cursor);
+        // 这一批里出现了裁决卡就就地作答（工具级确认发生在生成中，不能等这一次生成收尾）。
+        let mut carded = false;
+        for l in &lines {
+            render(&l.events);
+            carded |= l
+                .events
+                .iter()
+                .any(|e| matches!(e, SessionEvent::DecisionCard { .. }));
+        }
+        *cursor = head;
+        if carded {
+            answer_gates(ops, sid, cursor);
+        }
+        match rx.try_recv() {
+            Ok(r) => return r,
+            Err(std::sync::mpsc::TryRecvError::Empty) => {
+                std::thread::sleep(std::time::Duration::from_millis(50))
+            }
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                return Err("生成线程异常结束".to_string())
+            }
+        }
+    }
+}
+
 /// 登记处为空时的引导文案（**CLI 的说法**：它不再直接点模块）。
 pub(crate) const NO_AGENTS: &str = "登记处还没有 agent：请先到 Web 界面「设置 → agent 管理」建一个";
 
@@ -370,6 +648,50 @@ pub(crate) fn pick_agents(ops: &Ops, names: &[String]) -> Result<Vec<AgentInstan
     }
     let views = ops.registry.pick_agents(names)?;
     Ok(views.iter().map(AgentInstance::from_view).collect())
+}
+
+/// 目的：建会话走**动作表**——与 Web / agent 同一份声明、同一处授权，CLI 只把用户的选择变成参数。
+pub(crate) fn create_session_action(
+    ops: &Ops,
+    name: &str,
+    mode: &str,
+    agents: &[AgentInstance],
+    task: Option<&str>,
+    tier: Tier,
+) -> Result<String, String> {
+    let agents: Vec<serde_json::Value> = agents
+        .iter()
+        .map(|a| {
+            serde_json::json!({
+                "name": a.name,
+                "transient": a.transient,
+                "modules": a.modules,
+                "model": a.model,
+            })
+        })
+        .collect();
+    let mut args = serde_json::json!({
+        "name": name,
+        "mode": mode,
+        "agents": agents,
+        "tier": tier.as_str(),
+    });
+    if let Some(t) = task {
+        args["task"] = serde_json::json!(t);
+    }
+    match ops.actions.act(ActionCall {
+        id: "create_session".to_string(),
+        args,
+        caller: Caller::User,
+        out: Output::Final,
+    })? {
+        Acted::Done(v) => v
+            .get("sid")
+            .and_then(|s| s.as_str())
+            .map(|s| s.to_string())
+            .ok_or_else(|| "建会话回包缺 sid".to_string()),
+        _ => Err("建会话该给结构化结果".to_string()),
+    }
 }
 
 // ---------- 形态一：单 agent（模块数不限） ----------
@@ -414,22 +736,14 @@ fn single_flow(ops: &Ops, arg: &str) {
         .unwrap_or(Tier::Host);
     // 订阅起点：命令回包只给头部序号，事实一律从事件台按 since 取。
     let mut cursor = ops.events.head();
-    let opened = match ops.sessions.create_work(WorkSpec {
-        name: work_name,
-        mode: WorkMode::Single,
-        agents: picked,
-        task: None,
-        delegate: false,
-        tier,
-    }) {
-        Ok(o) => o.0,
+    let sid = match create_session_action(ops, &work_name, "single", &picked, None, tier) {
+        Ok(sid) => sid,
         Err(e) => {
             println!("[错误] {}", e);
             return;
         }
     };
-    cursor = drain(ops, &opened.sid, cursor);
-    let sid = opened.sid;
+    cursor = drain(ops, &sid, cursor);
     println!("（单 agent {} —— 输入消息，空行结束会话）", sid);
     loop {
         let say = prompt("你>");
@@ -437,7 +751,13 @@ fn single_flow(ops: &Ops, arg: &str) {
             break;
         }
         // 终端只在最终结果上渲染，不要流式（怎么显示是呈现层的事）。
-        match ops.sessions.act(&sid, Action::Say(&say), Output::Final) {
+        match act_interactive(
+            ops,
+            &sid,
+            CliAction::Say(say.clone()),
+            &mut cursor,
+            Output::Final,
+        ) {
             Ok(acted) => follow(ops, &sid, &mut cursor, acted),
             Err(e) => {
                 println!("[错误] {}", e);
@@ -466,29 +786,27 @@ fn proxy_flow(ops: &Ops) {
         .unwrap_or(Tier::Host);
     // 订阅起点：命令回包只给头部序号，事实一律从事件台按 since 取。
     let mut cursor = ops.events.head();
-    let opened = match ops.sessions.create_work(WorkSpec {
-        name: work_name,
-        mode: WorkMode::Proxy,
-        agents: Vec::new(),
-        task: None,
-        delegate: false,
-        tier,
-    }) {
-        Ok(o) => o.0,
+    let sid = match create_session_action(ops, &work_name, "proxy", &[], None, tier) {
+        Ok(sid) => sid,
         Err(e) => {
             println!("[错误] {}", e);
             return;
         }
     };
-    cursor = drain(ops, &opened.sid, cursor);
-    let sid = opened.sid;
+    cursor = drain(ops, &sid, cursor);
     println!("（核心代理 {} —— 输入消息，空行结束会话）", sid);
     loop {
         let say = prompt("你>");
         if say.is_empty() {
             break;
         }
-        match ops.sessions.act(&sid, Action::Say(&say), Output::Final) {
+        match act_interactive(
+            ops,
+            &sid,
+            CliAction::Say(say.clone()),
+            &mut cursor,
+            Output::Final,
+        ) {
             Ok(acted) => follow(ops, &sid, &mut cursor, acted),
             Err(e) => {
                 println!("[错误] {}", e);
@@ -498,7 +816,7 @@ fn proxy_flow(ops: &Ops) {
     }
 }
 
-// ---------- 模式四：协作（按核心 pending 驱动） ----------
+// ---------- 模式四：协作（按裁决卡的选项作答驱动） ----------
 
 fn collab_flow(ops: &Ops, arg: &str) {
     let trimmed = arg.trim();
@@ -529,17 +847,11 @@ fn collab_flow(ops: &Ops, arg: &str) {
         .map(|s| s.tier)
         .unwrap_or(Tier::Host);
     let mut cursor = ops.events.head();
-    let sid = match ops.sessions.create_work(WorkSpec {
-        name: work_name,
-        mode: WorkMode::Collab,
-        agents,
-        task: Some(task),
-        delegate,
-        tier,
-    }) {
-        Ok((o, _)) => {
-            cursor = drain(ops, &o.sid, cursor);
-            o.sid
+    // 代拟由形态派生（协作 + 没给名单 = 核心按需求拟名单）；CLI 只交点名结果。
+    let sid = match create_session_action(ops, &work_name, "collab", &agents, Some(&task), tier) {
+        Ok(sid) => {
+            cursor = drain(ops, &sid, cursor);
+            sid
         }
         Err(e) => {
             println!("[错误] {}", e);
@@ -547,65 +859,8 @@ fn collab_flow(ops: &Ops, arg: &str) {
         }
     };
 
-    // 名单确认（代拟路径）：把核心填好的表单逐行打出来，再问。
-    if matches!(ops.sessions.pending(&sid), Ok(Some(Pending::ConfirmSlate))) {
-        match ops.sessions.slate(&sid) {
-            Ok(list) => {
-                println!("[代拟] 核心拟的名单：");
-                for a in list {
-                    println!(
-                        "  {}：模块 {} · 模型 {} · {}",
-                        a.name,
-                        a.modules.join(" + "),
-                        model_label(a.model.as_deref()),
-                        if a.transient {
-                            "组装（临时）"
-                        } else {
-                            "复用已存 agent"
-                        }
-                    );
-                }
-            }
-            Err(e) => println!("[提示] 取名单失败：{}", e),
-        }
-        let ok = prompt("确认名单？（yes 开始 / 其他取消）");
-        match ops.sessions.act(
-            &sid,
-            Action::Step(CollabStep::ConfirmSlate, &ok),
-            Output::Final,
-        ) {
-            Ok(acted) => follow(ops, &sid, &mut cursor, acted),
-            Err(e) => println!("[错误] {}", e),
-        }
-    }
-    // 开始确认。
-    if matches!(ops.sessions.pending(&sid), Ok(Some(Pending::ConfirmBegin))) {
-        let ans = prompt("开始讨论？（yes / yes,allow：授权小组自裁细节）");
-        match ops
-            .sessions
-            .act(&sid, Action::Step(CollabStep::Begin, &ans), Output::Final)
-        {
-            Ok(acted) => follow(ops, &sid, &mut cursor, acted),
-            Err(e) => println!("[错误] {}", e),
-        }
-    }
-    // ask 循环（每次回答后可能接新的请教）。
-    while matches!(ops.sessions.pending(&sid), Ok(Some(Pending::Ask { .. }))) {
-        if let Ok(Some(Pending::Ask { member, question })) = ops.sessions.pending(&sid) {
-            println!("[请教] {}：{}", member, question);
-            let ans = prompt("你的回答（回车 = 无补充，继续）>");
-            match ops
-                .sessions
-                .act(&sid, Action::Step(CollabStep::Decide, &ans), Output::Final)
-            {
-                Ok(acted) => follow(ops, &sid, &mut cursor, acted),
-                Err(e) => {
-                    println!("[错误] {}", e);
-                    break;
-                }
-            }
-        }
-    }
+    // 裁决门：**按卡片上的选项作答**（名单确认 / 开始讨论 / 请教 / 方案待审 / 节点没过都走这里）。
+    answer_gates(ops, &sid, &mut cursor);
 }
 
 // ---------- 登记处管理（密钥只在核心层进出） ----------

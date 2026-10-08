@@ -217,6 +217,14 @@ pub struct ToolTexts {
     pub roots_module: String,
     /// 共享主副本只读时，写类工具的如实拒绝（无变量）。
     pub write_shared_read_only: String,
+    /// 会话权限：写被白/黑名单拒绝。变量：path, roots
+    pub write_scope_denied: String,
+    /// 会话权限：读被白/黑名单拒绝。变量：path, roots
+    pub read_scope_denied: String,
+    /// 会话权限：模块目录默认只读。变量：id
+    pub module_write_denied: String,
+    /// 会话权限：工具级确认被用户拒绝（无变量）——工具没有执行。
+    pub tool_denied_by_user: String,
     // —— 内置工具回执（systool）——
     /// 变量：error
     pub bad_args_json: String,
@@ -405,6 +413,16 @@ pub struct ToolTexts {
     pub tool_timeout: String,
     /// 围栏没装上（命令未执行）。
     pub tool_fence_failed: String,
+    /// 目的：围栏的**必要落点**授不上、这次调用没执行的拒绝回执。
+    ///   变量：part, path, why, fix
+    // 这套机制只在 Windows 的容器围栏里用（unix 没有 prepare_fence 这一步）：unix 侧无使用点，如实放行死代码。
+    #[allow(dead_code)]
+    pub tool_fence_blocked: String,
+    /// 目的：用户裁决"本轮无围栏跑一次"时，这次执行如实标为无围栏的回执。
+    ///   变量：part, path, why
+    // 这套机制只在 Windows 的容器围栏里用（unix 没有 prepare_fence 这一步）：unix 侧无使用点，如实放行死代码。
+    #[allow(dead_code)]
+    pub tool_fence_unfenced: String,
     /// 变量：chars, limit
     pub tool_truncated: String,
     // —— 拟名单/推荐时给模型看的清单行 ——

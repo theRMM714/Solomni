@@ -6,13 +6,19 @@
 
 ## 一、管什么 / 不管什么
 
-**管**：运行日志端口、宿主探测端口、生成中作业的取消表、跨业务共享的**事实类型**、路径的对外书写形式。
+**管**：运行日志端口、宿主探测端口、**提问端口**（请用户裁决）、生成中作业的取消表、跨业务共享的**事实类型**、路径的对外书写形式。
 
 **不管**：**不认识任何能力 / 呈现层 / 入口层**；不放有领域语义的类型——它不需要知道什么是回合、回复、工具执行。
 
 ## 二、入站契约与状态归属
 
-`api`（`SessionId` / `Tier` / `DEFAULT_LLM_TIMEOUT_SECS` / `slash` / `JobRegistry`）、`ports`（`Log`、`HostProbe`——R12 的例外：全项目共享）、`domain`（事实类型、路径书写、取消表实现）、`detail`（`FileLog`、`HostProbe`）。
+`api`（`SessionId` / `Tier` / `ToolOutcome` / `Ask` / `DEFAULT_LLM_TIMEOUT_SECS` / `slash` / `JobRegistry`）、
+`ports`（`Log`、`HostProbe`、`ToolHandler`、`AskUser`——R12 的例外：全项目共享）、`domain`（事实类型、路径书写、取消表实现）、
+`detail`（`FileLog`、`HostProbe`）。
+
+`AskUser` 是「需要用户裁决的机制请用户裁决」的**唯一**入口（形状：`ask(问题) -> 选项 id`，**阻塞**；
+`halt(为什么)` = 构不出可用选项时停会话 + 落警告）：工具执行层与围栏用它，实现在会话侧（`conductor` 的 `SessionAsk`），
+走的是会话的**统一裁决通道**——见 [docs/session/session-model.md](../session/session-model.md) 的「请用户裁决」。
 
 ## 三、依赖图位置（由源码的 `::api` 引用推导）
 

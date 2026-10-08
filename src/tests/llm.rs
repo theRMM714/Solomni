@@ -657,6 +657,8 @@ pub(crate) fn an_aborted_generation_never_executes_a_repairable_envelope() {
             llm: Default::default(),
             cancel,
             emit: &mut noop,
+            decisions: None,
+            ask: None,
         };
         core.single_say(&sid, "写", &mut live).unwrap()
     };

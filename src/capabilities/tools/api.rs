@@ -2,7 +2,7 @@
 
 pub use crate::capabilities::tools::domain::fence::FenceSpec;
 pub use crate::capabilities::tools::domain::patch::{EditFault, Fault};
-pub use crate::capabilities::tools::domain::roles::{RoleTable, SystemTools};
+pub use crate::capabilities::tools::domain::roles::{action_audit, RoleTable, SystemTools};
 pub use crate::capabilities::tools::domain::schema::{ArgFault, ToolBook, ToolSchema};
 pub use crate::capabilities::tools::domain::systool::{
     arg_fault_text, is_builtin, is_freeform, names, patch_decl, refuse, tool_notes, Observations,
@@ -42,11 +42,13 @@ pub trait Tools: Send + Sync {
 /// 别人要的是"跑一个工具"，不是"按路径读写文件"。
 pub trait ToolExec: Send + Sync {
     /// 执行一次**外部工具**（模块声明的那种）：围栏安装、守门进程、超时杀树、截断都在端口后面。
+    /// 参数：`ask` = 这一趟的**提问端口**（围栏的必要落点授不上时经它问用户）；`None` = 没有可回答的前端。
     fn run_module(
         &self,
         fence: &crate::capabilities::tools::api::FenceSpec,
         command: &str,
         args_json: &str,
+        ask: Option<&dyn crate::kernel::ports::AskUser>,
     ) -> ToolOutcome;
 
     /// 执行一次**内置工具**：放行、寻址、参数校验在本能力的 domain，机制在 `SysIo` 后面。

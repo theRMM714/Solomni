@@ -104,7 +104,7 @@ pub(crate) fn without_a_grant_nothing_reaches_the_host() {
         (d::CATALOG, r#"{"scope":"all"}"#),
         (
             d::CREATE,
-            r#"{"mode":"single","agents":[{"ref":"a"}],"opening":"做事","request_id":"r1"}"#,
+            r#"{"mode":"single","agents":[{"ref":"a"}],"task":"做事","request_id":"r1"}"#,
         ),
         (
             d::SEND,
@@ -144,7 +144,7 @@ pub(crate) fn grant_scope_expiry_and_bounds_are_enforced() {
     let out = tools.call(
         &c,
         d::CREATE,
-        r#"{"mode":"single","agents":[{"ref":"a"}],"opening":"做事","request_id":"r1"}"#,
+        r#"{"mode":"single","agents":[{"ref":"a"}],"task":"做事","request_id":"r1"}"#,
     );
     assert!(
         !out.ok && out.output.contains("不包含这个工具"),
@@ -170,7 +170,7 @@ pub(crate) fn grant_scope_expiry_and_bounds_are_enforced() {
     let out = tools.call(
         &model_scoped,
         d::CREATE,
-        r#"{"mode":"single","agents":[{"name":"x","modules":["m1"],"model":"other"}],"opening":"做事","request_id":"r2"}"#,
+        r#"{"mode":"single","agents":[{"name":"x","modules":["m1"],"model":"other"}],"task":"做事","request_id":"r2"}"#,
     );
     assert!(
         !out.ok && out.output.contains("不覆盖这个模型"),
@@ -201,13 +201,13 @@ pub(crate) fn grant_scope_expiry_and_bounds_are_enforced() {
 pub(crate) fn create_session_validates_then_creates_once() {
     let (host, mut tools) = rig();
     let c = ctx(Some(full_grant()));
-    let args = r#"{"mode":"single","agents":[{"name":"x","modules":["m1"],"model":"gpt"}],"opening":"做事","request_id":"r1"}"#;
+    let args = r#"{"mode":"single","agents":[{"name":"x","modules":["m1"],"model":"gpt"}],"task":"做事","request_id":"r1"}"#;
     let out = tools.call(&c, d::CREATE, args);
     assert!(out.ok, "{}", out.output);
     assert!(out.output.contains("work-r1"), "{}", out.output);
     let made = host.created();
     assert_eq!(made.len(), 1);
-    assert_eq!(made[0].opening, "做事");
+    assert_eq!(made[0].task, "做事");
     assert_eq!(made[0].agents[0].name, "x");
     assert!(made[0].agents[0].transient, "新组装的 agent 是临时项");
 
@@ -217,36 +217,36 @@ pub(crate) fn create_session_validates_then_creates_once() {
 
     for (bad, why) in [
         (
-            r#"{"mode":"single","agents":[{"name":"x","modules":["nope"]}],"opening":"做事","request_id":"b1"}"#,
+            r#"{"mode":"single","agents":[{"name":"x","modules":["nope"]}],"task":"做事","request_id":"b1"}"#,
             "无此模块",
         ),
         (
-            r#"{"mode":"multi","agents":[{"name":"x","modules":["m1"]},{"name":"y","modules":["m1"]}],"opening":"做事","request_id":"b2"}"#,
+            r#"{"mode":"collab","agents":[{"name":"x","modules":["m1"]},{"name":"y","modules":["m1"]}],"task":"做事","request_id":"b2"}"#,
             "同一模块只能属于一个 agent",
         ),
         (
-            r#"{"mode":"multi","agents":[{"name":"x","modules":["m1"]}],"opening":"做事","request_id":"b3"}"#,
+            r#"{"mode":"collab","agents":[{"name":"x","modules":["m1"]}],"task":"做事","request_id":"b3"}"#,
             "至少要两个 agent",
         ),
         (
-            r#"{"mode":"single","agents":[{"name":"x","modules":["m1"]},{"name":"y","modules":["m2"]}],"opening":"做事","request_id":"b4"}"#,
+            r#"{"mode":"single","agents":[{"name":"x","modules":["m1"]},{"name":"y","modules":["m2"]}],"task":"做事","request_id":"b4"}"#,
             "只接受一个 agent",
         ),
         (
-            r#"{"mode":"single","agents":[{"ref":"nope"}],"opening":"做事","request_id":"b5"}"#,
+            r#"{"mode":"single","agents":[{"ref":"nope"}],"task":"做事","request_id":"b5"}"#,
             "不在登记处",
         ),
         (
-            r#"{"mode":"single","agents":[{"name":"a/b","modules":["m1"]}],"opening":"做事","request_id":"b6"}"#,
+            r#"{"mode":"single","agents":[{"name":"a/b","modules":["m1"]}],"task":"做事","request_id":"b6"}"#,
             "名字不合法",
         ),
         (
-            r#"{"mode":"single","agents":[{"name":"x","modules":["m1"],"extra":1}],"opening":"做事","request_id":"b7"}"#,
+            r#"{"mode":"single","agents":[{"name":"x","modules":["m1"],"extra":1}],"task":"做事","request_id":"b7"}"#,
             "不认识的键",
         ),
         (
             r#"{"mode":"single","agents":[{"name":"x","modules":["m1"]}],"request_id":"b8"}"#,
-            "opening",
+            "task",
         ),
     ] {
         let out = tools.call(&c, d::CREATE, bad);
@@ -265,7 +265,7 @@ pub(crate) fn create_session_validates_then_creates_once() {
     let out = tools.call(
         &c,
         d::CREATE,
-        r#"{"mode":"single","agents":[{"ref":"a"}],"opening":"做事","request_id":"r9"}"#,
+        r#"{"mode":"single","agents":[{"ref":"a"}],"task":"做事","request_id":"r9"}"#,
     );
     assert!(!out.ok && out.output.contains("磁盘满"), "{}", out.output);
     assert_eq!(host.created().len(), 1);
@@ -273,7 +273,7 @@ pub(crate) fn create_session_validates_then_creates_once() {
     let out = tools.call(
         &c,
         d::CREATE,
-        r#"{"mode":"single","agents":[{"ref":"a"}],"opening":"做事","request_id":"r9"}"#,
+        r#"{"mode":"single","agents":[{"ref":"a"}],"task":"做事","request_id":"r9"}"#,
     );
     assert!(out.ok, "失败不记账，重放要再试：{}", out.output);
     assert_eq!(host.created().len(), 2);
@@ -451,6 +451,7 @@ pub(crate) fn the_real_bridge_reads_catalog_and_session_messages() {
             tools: BTreeMap::new(),
         },
         root: PathBuf::from("modules").join("m1"),
+        has_userdata: false,
     };
     let (handle, ops) = super::super::ops_with(vec![module], vec![]);
     let (opened, _head) = ops
@@ -507,7 +508,7 @@ pub(crate) fn the_real_bridge_reads_catalog_and_session_messages() {
     let out = tools.call(
         &c,
         d::CREATE,
-        r#"{"mode":"single","agents":[{"name":"x","modules":["m1"]}],"opening":"做事","request_id":"z"}"#,
+        r#"{"mode":"single","agents":[{"name":"x","modules":["m1"]}],"task":"做事","request_id":"z"}"#,
     );
     assert!(!out.ok && out.output.contains("无此会话"), "{}", out.output);
     // 转达：目标不存在时如实拒绝。
@@ -541,6 +542,7 @@ pub(crate) fn the_real_bridge_creates_a_child_work() {
             tools: BTreeMap::new(),
         },
         root: PathBuf::from("modules").join("m1"),
+        has_userdata: false,
     };
     let (handle, ops) = super::super::ops_with(vec![module], vec![]);
     let (parent, _head) = ops
@@ -556,7 +558,7 @@ pub(crate) fn the_real_bridge_creates_a_child_work() {
         parent: Some(parent_sid.clone()),
         now: 1000,
     };
-    let args = r#"{"mode":"single","agents":[{"name":"c1","modules":["m1"]}],"opening":"做事","request_id":"r1"}"#;
+    let args = r#"{"mode":"single","agents":[{"name":"c1","modules":["m1"]}],"task":"做事","request_id":"r1"}"#;
     let out = tools.call(&c, d::CREATE, args);
     assert!(out.ok, "{}", out.output);
     let v: serde_json::Value = serde_json::from_str(&out.output).expect("JSON");
@@ -603,6 +605,7 @@ pub(crate) fn the_proxy_handler_owns_and_runs_proxy_tools() {
             tools: BTreeMap::new(),
         },
         root: PathBuf::from("modules").join("m1"),
+        has_userdata: false,
     };
     let (handle, _ops) = super::super::ops_with(vec![module], vec![]);
     let host: Arc<dyn ProxyHost + Send + Sync> = Arc::new(ProxyBridge::new(handle));
@@ -697,6 +700,7 @@ pub(crate) fn a_finished_child_notifies_the_proxy_without_dumping_its_transcript
             tools: BTreeMap::new(),
         },
         root: PathBuf::from("modules").join("m1"),
+        has_userdata: false,
     };
     let (handle, ops) = super::super::ops_with(vec![module], vec![]);
     let proxy = handle
@@ -712,11 +716,13 @@ pub(crate) fn a_finished_child_notifies_the_proxy_without_dumping_its_transcript
                     modules: vec!["m1".to_string()],
                     model: None,
                 }],
-                opening: "做事".to_string(),
+                task: "做事".to_string(),
                 request_id: "r1".to_string(),
+                name: None,
+                tier: None,
                 parent: Some("w-notify".to_string()),
             };
-            Ok(core.proxy_create(&spec)?.0.session)
+            Ok(core.create_session(&spec)?.0.session)
         })
         .expect("建子工作");
     let notified = handle
@@ -748,6 +754,7 @@ pub(crate) fn run_state_gates_dispatch_and_survives_stop_close() {
             tools: BTreeMap::new(),
         },
         root: PathBuf::from("modules").join("m1"),
+        has_userdata: false,
     };
     let (handle, ops) = super::super::ops_with(vec![module], vec![]);
     let (work, _) = ops
@@ -845,6 +852,7 @@ pub(crate) fn relay_records_its_source_on_the_target() {
             tools: BTreeMap::new(),
         },
         root: PathBuf::from("modules").join("m1"),
+        has_userdata: false,
     };
     let (handle, ops) = super::super::ops_with(vec![module], vec![]);
     let (work, _) = ops
@@ -884,6 +892,7 @@ pub(crate) fn the_real_bridge_creates_a_multi_agent_child_work() {
             tools: BTreeMap::new(),
         },
         root: PathBuf::from("modules").join(id),
+        has_userdata: false,
     };
     let (handle, ops) = super::super::ops_with(vec![module("m1"), module("m2")], vec![]);
     let (parent, _) = ops
@@ -897,7 +906,7 @@ pub(crate) fn the_real_bridge_creates_a_multi_agent_child_work() {
         parent: Some(parent.sid.clone()),
         now: 1000,
     };
-    let args = r#"{"mode":"multi","agents":[{"name":"c1","modules":["m1"]},{"name":"c2","modules":["m2"]}],"opening":"做事","request_id":"m1"}"#;
+    let args = r#"{"mode":"collab","agents":[{"name":"c1","modules":["m1"]},{"name":"c2","modules":["m2"]}],"task":"做事","request_id":"m1"}"#;
     let out = tools.call(&c, d::CREATE, args);
     assert!(out.ok, "{}", out.output);
     let v: serde_json::Value = serde_json::from_str(&out.output).expect("JSON");
@@ -921,7 +930,7 @@ pub(crate) fn the_real_bridge_creates_a_multi_agent_child_work() {
     assert_eq!(root, parent.sid, "子工作与父会话共用同一个 work/");
     assert!(meta.task.is_some(), "协作必须有本次需求（会话级 opening）");
     // 同一模块不得同时属于两个 agent（登记处事实核对在调用前完成，不留半成品）。
-    let dup = r#"{"mode":"multi","agents":[{"name":"c1","modules":["m1"]},{"name":"c2","modules":["m1"]}],"opening":"做事","request_id":"m2"}"#;
+    let dup = r#"{"mode":"collab","agents":[{"name":"c1","modules":["m1"]},{"name":"c2","modules":["m1"]}],"task":"做事","request_id":"m2"}"#;
     let out = tools.call(&c, d::CREATE, dup);
     assert!(!out.ok && out.output.contains("同一模块"), "{}", out.output);
 }
@@ -941,6 +950,7 @@ pub(crate) fn the_proxy_identity_is_the_role_prompt() {
             tools: BTreeMap::new(),
         },
         root: PathBuf::from("modules").join("m1"),
+        has_userdata: false,
     };
     let (handle, ops) = super::super::ops_with(vec![module], vec![]);
     let proxy = handle
@@ -1090,6 +1100,7 @@ pub(crate) fn observe_reports_new_messages_since_the_last_cursor() {
             tools: BTreeMap::new(),
         },
         root: PathBuf::from("modules").join("m1"),
+        has_userdata: false,
     };
     let (handle, ops) = super::super::ops_with(vec![module], vec![]);
     let (work, _) = ops
@@ -1151,6 +1162,7 @@ pub(crate) fn the_proxy_created_child_publishes_its_opening_facts() {
             tools: BTreeMap::new(),
         },
         root: PathBuf::from("modules").join(id),
+        has_userdata: false,
     };
     let (handle, _ops) = super::super::ops_with(vec![module("m1"), module("m2")], vec![]);
     let proxy = handle
@@ -1158,7 +1170,7 @@ pub(crate) fn the_proxy_created_child_publishes_its_opening_facts() {
         .expect("建代理会话");
     let bridge: Arc<dyn ProxyHost + Send + Sync> = Arc::new(ProxyBridge::new(handle.clone()));
     let spec = d::NewSession {
-        mode: d::SessionMode::Multi,
+        mode: d::SessionMode::Collab,
         agents: vec![
             d::NewAgent {
                 name: "c1".to_string(),
@@ -1173,8 +1185,10 @@ pub(crate) fn the_proxy_created_child_publishes_its_opening_facts() {
                 model: None,
             },
         ],
-        opening: "一起做".to_string(),
+        task: "一起做".to_string(),
         request_id: "r1".to_string(),
+        name: None,
+        tier: None,
         parent: Some(proxy),
     };
     let created = bridge.create_session(&spec).expect("建协作子工作");
@@ -1198,8 +1212,7 @@ pub(crate) fn the_proxy_created_child_publishes_its_opening_facts() {
     );
 }
 
-/// 协作子会话的落门：`send` 按它**此刻等的是哪一关**送到对应的阶段步。
-/// `ConfirmSlate` 是同步短步骤，所以这条可以确定性断言（不用等泵）。
+/// 目的：协作子会话的落门：`send` 按它**此刻等的是哪一关**回答那张卡（选项 id 由代理通道的适配规则定）。
 #[test]
 pub(crate) fn collab_child_send_lands_on_the_gate_it_awaits() {
     use crate::capabilities::conductor::ports::ProxyHost;
@@ -1215,6 +1228,7 @@ pub(crate) fn collab_child_send_lands_on_the_gate_it_awaits() {
             tools: BTreeMap::new(),
         },
         root: PathBuf::from("modules").join("m1"),
+        has_userdata: false,
     };
     let (handle, ops) = super::super::ops_with(
         vec![module],
@@ -1238,11 +1252,17 @@ pub(crate) fn collab_child_send_lands_on_the_gate_it_awaits() {
         })
         .expect("建协作工作（代拟）");
     let child = work.sid.clone();
-    let p = ops.sessions.pending(&child);
-    assert!(
-        matches!(p, Ok(Some(Pending::ConfirmSlate))),
-        "pending={:?}，回放：{}",
-        p,
+    let card = ops
+        .sessions
+        .open_queue(&child)
+        .expect("取卡")
+        .expect("挂着一张卡")
+        .card;
+    let ids: Vec<String> = card.options.iter().map(|o| o.id.clone()).collect();
+    assert_eq!(
+        ids,
+        vec![OPT_SLATE_CONFIRM.to_string(), OPT_SLATE_CANCEL.to_string()],
+        "代拟门要挂上「确认建组 / 取消」两个选项；回放：{}",
         serde_json::to_string(&ops.history.open(&child).expect("回放").1).expect("JSON")
     );
     let bridge: Arc<dyn ProxyHost + Send + Sync> = Arc::new(ProxyBridge::new(handle));
@@ -1251,13 +1271,25 @@ pub(crate) fn collab_child_send_lands_on_the_gate_it_awaits() {
         parent: None,
         text: "yes".to_string(),
     };
+    // "yes" 在代拟那一关解成"确认建组"，于是这一关过去、下一关（开始讨论）挂起来。
+    // 转达是**脱离调用方**的（代理不等它跑完），所以这里等它落地。
     bridge.send(&child, &msg).expect("转达到协作子会话");
-    // 转达返回时这一关已经过了（ConfirmSlate 是同步短步骤）——落错门就不会有这一步。
-    assert!(
-        matches!(
-            ops.sessions.pending(&child),
-            Ok(Some(Pending::ConfirmBegin))
-        ),
-        "转达要落在它此刻等的那一关"
-    );
+    let want = vec![OPT_BEGIN.to_string(), OPT_BEGIN_ALLOW.to_string()];
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        let now = ops.sessions.open_queue(&child).expect("取卡");
+        let ids: Vec<String> = now
+            .iter()
+            .flat_map(|q| q.card.options.iter().map(|o| o.id.clone()))
+            .collect();
+        if ids == want {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "转达要落在它此刻等的那一关，现在挂的是 {:?}",
+            ids
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
 }

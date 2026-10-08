@@ -173,7 +173,7 @@ impl Execution {
     }
 
     // 参数是一组必须一路透传的出口（chat / plan / 对照表 / 重填说明 / 提示词册 / 通道 / 核实环境）：
-    // 与 judge_clear / review_nodes 同一取舍（见 docs/testing/quality-isolation.md）。
+    // 与 review_nodes 同一取舍（见 docs/testing/quality-isolation.md）。
     #[allow(clippy::too_many_arguments)]
     /// 总验收（一次调用）。`nodes` = "节点 id — 负责人"对照表（模型只能从这里选 `rework`）；
     /// `retry` = 上一次填错了要它重填的话（核心据此**一直重填**到合法为止，不设次数上限）。

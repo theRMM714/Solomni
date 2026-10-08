@@ -1,5 +1,9 @@
-//! 纯逻辑：会话状态与簿记、转录行与事件词汇、历史视图。没有 IO，也不加 trait。
+//! 目的：会话的纯逻辑——会话状态与簿记、转录行与事件词汇、历史视图。
+//! 管：`decisions` / `events` / `history` / `rewind` / `session` / `tools` 六个子模块。
+//! 不管：IO 与落盘（历史文件在 `detail/`）；端口的定义（在 `ports.rs`）。
+//! 联动：由本能力的 `service.rs` 消费；`api.rs` 对外重导出会话事实。
 
+pub mod decisions;
 pub mod events;
 pub mod history;
 pub mod rewind;

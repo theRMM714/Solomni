@@ -17,17 +17,21 @@ impl ConductorHandle {
     pub fn spawn(core: Conductor) -> Result<ConductorHandle, String> {
         let worker_log = core.log_handle();
         let jobs = JobRegistry::new();
+        let interactive = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let bus = EventBus::new();
         let (tx, rx) = mpsc::channel::<Job>();
         let book = core.systools_book();
         let texts = core.prompt_texts();
+        let tools = core.tools_handle();
         let handle = ConductorHandle {
             tx,
             jobs,
+            interactive,
             bus,
             log: Arc::clone(&worker_log),
             book,
             texts,
+            tools,
         };
         // 注意：工作线程**绝不能**捕获取手柄（那会持有一个 Sender，通道永不闭合、线程永不退出）。
         std::thread::Builder::new()
@@ -66,6 +70,51 @@ impl ConductorHandle {
             .map_err(|_| "核心无回应：命令执行中发生 panic，或核心线程已停止".to_string())?
     }
 
+    /// 接上工具级确认：有交互前端（Web）在服务时才调，纯终端不调（生成线程不能空等一个没人回答的问题）。
+    pub fn allow_tool_cards(&self) {
+        self.interactive
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// 目的：这个会话的**工具层提问端口**：一张卡的登记 + 外送/落盘 + 停会话，全走同一个会话的那条道。
+    /// 参数：`door` = 该会话的裁决队（与核心各关卡共用）；`bus` / `persister` = 卡的外送与落盘。
+    fn session_ask(
+        &self,
+        door: &Arc<crate::capabilities::session::api::DecisionDoor>,
+        sid: &str,
+        bus: Arc<EventBus>,
+        persister: crate::capabilities::conductor::service::Persister,
+    ) -> Arc<dyn crate::kernel::ports::AskUser> {
+        let owner = sid.to_string();
+        let emit: Box<dyn Fn(SessionEvent) + Send + Sync> = Box::new(move |ev: SessionEvent| {
+            bus.push(&owner, std::slice::from_ref(&ev));
+            if let Some(warn) = persister.persist(std::slice::from_ref(&ev)) {
+                bus.push(&owner, std::slice::from_ref(&SessionEvent::Notice(warn)));
+            }
+        });
+        Arc::new(
+            crate::capabilities::conductor::service::ask_user::SessionAsk::new(
+                Arc::clone(door),
+                sid,
+                emit,
+                self.clone(),
+            ),
+        )
+    }
+
+    /// 目的：这个会话的**裁决队**（工具级确认进它）：只有接了交互前端才给——否则这一趟不接确认。
+    /// 约束：在**派发之前**取（生成线程一开始就可能要问），取的是同一份句柄。
+    fn decisions_of(
+        &self,
+        sid: &str,
+    ) -> Result<Option<Arc<crate::capabilities::session::api::DecisionDoor>>, String> {
+        if !self.interactive.load(std::sync::atomic::Ordering::Relaxed) {
+            return Ok(None);
+        }
+        let sid = sid.to_string();
+        self.call(move |core| Ok(core.desk_of(&sid))).map(Some)
+    }
+
     /// 本核心的事件台（多端订阅）。
     pub fn events(&self) -> Arc<EventBus> {
         Arc::clone(&self.bus)
@@ -79,11 +128,36 @@ impl ConductorHandle {
         let tree = self.call(move |core| Ok(core.subtree_of(&root_owned)))?;
         let mut stopped = Vec::new();
         for sid in tree {
+            // 在等的工具确认由「停止 = 整队作废」解开（见 SessionOps::stop），这里只管取消生成。
             if self.jobs.stop(&sid) {
                 stopped.push(sid);
             }
         }
         Ok(stopped)
+    }
+
+    /// 目的：把 root 及其整棵子树里等用户裁决的队**一律作废**（停止 = 拒绝），并落盘 + 外送。
+    /// 约束：作废是会话的事实——与回答同一条路（落进转录），重启后按它重建，作废过的卡不再挂起。
+    pub(crate) fn void_gates(&self, root: &str) {
+        let root_owned = root.to_string();
+        let Ok(voids) = self.call(move |core| Ok(core.void_gates_in_subtree(&root_owned))) else {
+            return;
+        };
+        for (sid, events) in voids {
+            let warn = self
+                .call({
+                    let sid = sid.clone();
+                    let events = events.clone();
+                    move |core| Ok(core.persister(&sid).persist(&events))
+                })
+                .ok()
+                .flatten();
+            self.bus.push(&sid, &events);
+            if let Some(w) = warn {
+                self.bus
+                    .push(&sid, std::slice::from_ref(&SessionEvent::Notice(w)));
+            }
+        }
     }
 
     /// 代理会话：把代理工具的成员侧执行面（`ProxyHandler`）装进这一回合的工具环境。
@@ -187,7 +261,7 @@ impl ConductorHandle {
                     return Err("该会话不是单 agent 模式".to_string());
                 }
                 // 协作会话的"继续"：走同一条 own-and-return（泵在工作线程上）。
-                return self.collab_generation(sid, CollabWork::Resume, "");
+                return self.collab_generation(sid, CollabWork::Resume);
             }
             Prepared::Run {
                 session,
@@ -211,6 +285,11 @@ impl ConductorHandle {
         };
         bus.push(sid, std::slice::from_ref(&start_working));
         // ② 工作线程：跑生成。短暂事件（流式增量 / 工具行）直送事件台——它是独立锁，不进核心队列。
+        let decisions = self.decisions_of(sid)?;
+        // 工具层的提问端口：与工具级确认**同一条通道**（同一份裁决队）——没有交互前端就没有它。
+        let ask = decisions
+            .as_ref()
+            .map(|door| self.session_ask(door, sid, Arc::clone(&bus), persister.clone()));
         let worker = {
             let sid = sid.to_string();
             let bus = Arc::clone(&bus);
@@ -229,6 +308,8 @@ impl ConductorHandle {
                         llm,
                         cancel,
                         emit: &mut emit,
+                        decisions,
+                        ask,
                     };
                     // 逐轮外送 + 边落盘：一轮跑完就上屏并落盘（中途刷新页面因此看得到已产生的部分）。
                     // seq 取**最后一次**入台的序号：命令回包按它给订阅起点。
@@ -358,6 +439,11 @@ impl ConductorHandle {
         let bus = Arc::clone(&self.bus);
         let child_bus = Arc::clone(&self.bus);
         let child_sid = child.clone();
+        let decisions = self.decisions_of(&child)?;
+        // 工具层的提问端口：这一席的围栏装不上时经它问用户（与工具级确认同一条队）。
+        let ask = decisions
+            .as_ref()
+            .map(|door| self.session_ask(door, &child, Arc::clone(&bus), persister.clone()));
         let joined = std::thread::Builder::new()
             .name("solomni-member".to_string())
             .spawn(move || {
@@ -374,6 +460,8 @@ impl ConductorHandle {
                     llm,
                     cancel: Arc::clone(&cancel),
                     emit: &mut emit,
+                    decisions,
+                    ask,
                 };
                 // 权威行与通知也进它自己的台，并在产出的当下落盘（重建与实时同源）。
                 let mut sink = |ev: crate::capabilities::session::api::SessionEvent| {
@@ -599,17 +687,73 @@ impl ConductorHandle {
                 let _ = me.single_generation(&sid, None, Output::Stream);
             });
     }
-    /// 起一次**脱离调用方**的协作阶段步（代理把消息转达到协作子会话用）：不等它跑完。
-    /// 与“叫醒父会话”的区别：这条带一个明确的阶段步（开工 / 代答），不是从断点继续。
-    pub(crate) fn spawn_detached_collab_step(&self, sid: &str, step: CollabStep, text: &str) {
+    /// 目的：起一次**脱离调用方**的裁决回答（代理把转达的话落进协作子会话用）：不等它跑完。
+    ///   与"叫醒父会话"的区别：这条带一份明确的回答（卡号 + 选项 id + 附言），不是从断点继续。
+    pub(crate) fn spawn_detached_collab_answer(
+        &self,
+        sid: &str,
+        card: &str,
+        option: &str,
+        note: &str,
+    ) {
         let me = self.clone();
-        let (sid, text) = (sid.to_string(), text.to_string());
+        let (sid, card, option, note) = (
+            sid.to_string(),
+            card.to_string(),
+            option.to_string(),
+            note.to_string(),
+        );
         let _ = std::thread::Builder::new()
             .name("solomni-proxy-collab".to_string())
             .spawn(move || {
-                let _ = me.collab_generation(&sid, CollabWork::Step(step), &text);
+                let _ = me.answer_card(&sid, &card, &option, &note);
             });
     }
+    /// 目的：子会话建好就开工——核心自己建的协作子会话按它此刻那张卡作答（有 begin_allow 就授权自裁）。
+    ///   为什么按选项 id 而不是另走一条"开始"路径：同一个门只能有一条回答口（见 session-model.md）。
+    pub(crate) fn start_child_collab(&self, sid: &str) {
+        let me = self.clone();
+        let sid = sid.to_string();
+        let _ = std::thread::Builder::new()
+            .name("solomni-child-collab".to_string())
+            .spawn(move || {
+                let look = sid.clone();
+                let Ok(Some(queue)) = me.call(move |core| core.open_queue(&look)) else {
+                    return;
+                };
+                let allow = crate::capabilities::session::api::OPT_BEGIN_ALLOW;
+                let option = if queue.card.options.iter().any(|o| o.id == allow) {
+                    allow.to_string()
+                } else {
+                    queue
+                        .card
+                        .options
+                        .first()
+                        .map(|o| o.id.clone())
+                        .unwrap_or_default()
+                };
+                if option.is_empty() {
+                    return;
+                }
+                let _ = me.answer_card(&sid, &queue.card.id, &option, "");
+            });
+    }
+
+    /// 目的：起一次**脱离调用方**的回答处置（回答已经落定）：不等它跑完，用户点完立刻拿到回执。
+    pub(crate) fn spawn_detached_dispose(
+        &self,
+        sid: &str,
+        ticket: crate::capabilities::session::api::GateTicket,
+    ) {
+        let me = self.clone();
+        let sid = sid.to_string();
+        let _ = std::thread::Builder::new()
+            .name("solomni-answer".to_string())
+            .spawn(move || {
+                let _ = me.collab_generation(&sid, CollabWork::Dispose(ticket));
+            });
+    }
+
     /// 起一次**脱离调用方**的协作推进（叫醒父会话用）：不等它跑完。
     pub(crate) fn spawn_detached_collab(&self, sid: &str) {
         let me = self.clone();
@@ -617,7 +761,7 @@ impl ConductorHandle {
         let _ = std::thread::Builder::new()
             .name("solomni-chain".to_string())
             .spawn(move || {
-                let _ = me.collab_generation(&sid, CollabWork::Resume, "");
+                let _ = me.collab_generation(&sid, CollabWork::Resume);
             });
     }
 
@@ -627,12 +771,7 @@ impl ConductorHandle {
     /// **核心驱动**（见 docs/session/session-model.md 二之二）：泵只决定"该问谁"，
     /// 成员回合由主线程取该 agent 的会话去跑（它才拿得到那些会话）。所以泵线程与主线程**握手**：
     /// 泵让出 → 发 AskReq → 主线程跑完回 MemberTurn → 泵继续。
-    pub(crate) fn collab_generation(
-        &self,
-        sid: &str,
-        work: CollabWork,
-        text: &str,
-    ) -> Result<Advance, String> {
+    pub(crate) fn collab_generation(&self, sid: &str, work: CollabWork) -> Result<Advance, String> {
         let bus = Arc::clone(&self.bus);
         let jobs = Arc::clone(&self.jobs);
         // **先登记再取会话**：登记早于派发，所以「停止」从派发那一刻起就能生效。
@@ -655,7 +794,6 @@ impl ConductorHandle {
             let sid = sid.to_string();
             move |core| Ok(core.persister(&sid))
         })?;
-        let text = text.to_string();
         // 提醒上限由设置来（用户可调，见 session-model.md 二）：起线程前问一次核心。
         // 调用次数**没有上限**：模型继续核实就继续跑，直到它给出表态（或用户点停止）。
         let remind_cap = self.call(|core| Ok(core.discuss_remind_cap())).unwrap_or(3);
@@ -685,13 +823,13 @@ impl ConductorHandle {
                                 bus.push(&sid, std::slice::from_ref(&SessionEvent::Notice(warn)));
                             }
                         };
-                        match work {
-                            CollabWork::Step(CollabStep::Begin) => {
-                                c.begin(text.contains("allow"), &mut sink)
+                        match &work {
+                            // 处置一张已经出队的回答：落定（校验 / 出队 / 记账）已在核心线程上做完。
+                            CollabWork::Dispose(ticket) => {
+                                if let Err(e) = c.dispose(ticket, &mut sink) {
+                                    sink(SessionEvent::Notice(format!("[裁决] {}", e)));
+                                }
                             }
-                            // 提请裁决 / 方案过审 / 节点放行都走这条（自由文本 + 核心判定）。
-                            CollabWork::Step(CollabStep::Decide) => c.decide(&text, &mut sink),
-                            CollabWork::Step(_) => {}
                             CollabWork::Resume => c.resume(&mut sink),
                         }
                         // 核心驱动：泵让出"该问谁"就回头找主线程（它才拿得到各 agent 的会话）。

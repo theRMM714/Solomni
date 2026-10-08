@@ -130,9 +130,7 @@ pub(crate) fn discussion_member_can_inspect_before_speaking() {
         .create_work(collab_work("w", &["a"], false, "做个东西"))
         .unwrap()
         .sid;
-    let events = core
-        .collab_continue(&sid, CollabStep::Begin, "yes")
-        .unwrap();
+    let events = answer_card(&mut core, &sid, OPT_BEGIN, "").unwrap();
     let inspected = events.iter().any(|e| {
         matches!(e, SessionEvent::Transcript(ls)
             if ls.iter().any(|l| l.tool.as_ref().map(|t| t.name.as_str() == "list").unwrap_or(false)))
@@ -181,9 +179,7 @@ pub(crate) fn discussion_member_cannot_call_a_builtin_outside_its_role_face() {
         .create_work(collab_work("w", &["a"], false, "做个东西"))
         .unwrap()
         .sid;
-    let events = core
-        .collab_continue(&sid, CollabStep::Begin, "yes")
-        .unwrap();
+    let events = answer_card(&mut core, &sid, OPT_BEGIN, "").unwrap();
     assert!(
         events.iter().any(|e| matches!(e, SessionEvent::Notice(n)
             if n.contains("[越权]") && n.contains("write"))),
@@ -220,9 +216,7 @@ pub(crate) fn discussion_member_cannot_use_module_tools() {
         .create_work(collab_work("w", &["a"], false, "做个东西"))
         .unwrap()
         .sid;
-    let events = core
-        .collab_continue(&sid, CollabStep::Begin, "yes")
-        .unwrap();
+    let events = answer_card(&mut core, &sid, OPT_BEGIN, "").unwrap();
     assert!(
         events.iter().any(|e| matches!(e, SessionEvent::Notice(n)
             if n.contains("[越权]") && n.contains("harvest.scan"))),
@@ -262,8 +256,7 @@ pub(crate) fn discussion_member_turn_finalizes_by_round_and_rebuilds_the_same_di
         .create_work(collab_work("w", &["a"], false, "做个东西"))
         .unwrap()
         .sid;
-    core.collab_continue(&sid, CollabStep::Begin, "yes")
-        .unwrap();
+    answer_card(&mut core, &sid, OPT_BEGIN, "").unwrap();
     let child = format!("{}--a", sid);
     // ① 逐轮定稿：核实行与发言行是两条 Transcript，且同属一个回合号。
     let (_, rows) = core.history_open(&child).unwrap();

@@ -3,6 +3,7 @@
 //!
 //! 按域分四个子模块（单文件接近 R10 的 2000 行上限）。
 
+mod cards;
 mod discussion;
 mod flow;
 mod review;

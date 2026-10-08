@@ -3,23 +3,9 @@
 # 「删会话即请求撤销授权」的接线已完成（由 src/tests/core.rs 的
 # deleting_a_session_asks_the_fence_to_release_its_grants 钉住）；真实撤权机制是否生效另记在
 # tests/windows/gaps.yaml。
-
-- id: harness.restricted-token-causes-false-failures
-  scope: global
-  level: T4
-  why: |
-    在受限令牌（低完整性）会话里跑门禁会得到**一连串假失败**，而且都指向错误的方向：doctor 报
-    「容器围栏装不上（读写 DACL 都 Error 5）」、L4 的真工具场景报 python 不可达（`where` 找不到、
-    绝对路径 `Access is denied`）、收尾的围栏回收因 Node 管道 stdio 被拒（EPERM，`status` 为 null）
-    被判成「本机留下了没人管的痕迹」。
-    实测（同机同代码）：换成普通 / 提权（`High`）会话后 `TEST-REPORT-OK`、L4 `E2E-OK`、
-    doctor `fs=true net=true tree=true`、真工具链全过——上面那些结论**全是误判**，与本产品无关。
-    现状由文档明规（门禁要在普通或提权会话里跑，判据是 `whoami /groups` 出现 `Low Mandatory Level`）；
-    这一条只记「要不要让编排自己分辨」。
-  how: |
-    让编排在受限令牌下如实标注环境不满足、而不是判失败：例如围栏回收改用 `stdio: inherit`，
-    或按 `spawnSync` 的 `error` / `status === null` 分辨「没能执行」，并在报告里带上令牌判据。
-  accept: |
-    受限令牌下报告明确写出「本机令牌受限，本次结论不可信」并记入 env-skip；
-    普通 / 提权会话里的失败仍然是硬失败。
-  blocked_by: 缺少实现
+#
+# 当前为空。原先那条环境条目已查清并销账：
+# 让门禁得出一串假失败的不是「受限令牌会话」，而是 DSH 的 Windows 写沙箱后端
+#（@deepseek-ai/dsh-sandbox-windows-acl）在授写权时给授权根打上的 Low 完整性标签
+#（SYSTEM_MANDATORY_LABEL_ACE、可继承、dispose() 不撤销）。判据、后果与处置见
+# docs/testing/execution-ci.md 的「真机入口」一节。

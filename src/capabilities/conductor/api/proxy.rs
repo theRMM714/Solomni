@@ -5,8 +5,7 @@
 use super::*;
 use crate::capabilities::registry::api::RegistryOps;
 use crate::capabilities::registry::api::{AgentView, AppSettings, ModelView, ProviderView};
-use crate::capabilities::session::api::AgentMeta;
-pub use crate::capabilities::session::api::Pending;
+use crate::capabilities::session::api::Answered;
 use crate::capabilities::session::api::{HistoryView, RunState, SessionMeta};
 use crate::capabilities::workspace::api::Roster;
 pub use crate::kernel::api::Tier;
@@ -41,32 +40,72 @@ impl SessionOps for ConductorHandle {
                 })
                 .unwrap_or_default();
             if mode == "collab" {
-                return self.collab_generation(sid, CollabWork::Resume, "");
+                return self.collab_generation(sid, CollabWork::Resume);
             }
             return self.single_generation(sid, Some("继续。".to_string()), out);
         }
         self.single_generation(sid, None, out)
     }
 
-    fn collab_step(&self, sid: &str, step: CollabStep, text: &str) -> Result<Advance, String> {
-        match step {
-            // 短步骤（写需求 / 定名单）不调模型，而且"定名单"还有落盘与建沙箱的后续——留在核心线程上。
-            CollabStep::SetTask | CollabStep::ConfirmSlate => {
-                let sid = sid.to_string();
-                let text = text.to_string();
-                let bus = Arc::clone(&self.bus);
-                self.call(move |core| {
-                    let events = core.collab_continue(&sid, step, &text)?;
-                    let head = bus.push(&sid, &events);
-                    Ok(Advance { head })
-                })
-            }
-            // 长步骤（开始讨论 / 回答）：队列只占"取/交"两步，泵在工作线程上跑。
-            // 「同意方案」也要跑泵（过关后接着推进），所以和长步骤走同一条路。
-            CollabStep::Begin | CollabStep::Decide => {
-                self.collab_generation(sid, CollabWork::Step(step), text)
+    fn set_task(&self, sid: &str, text: &str) -> Result<Advance, String> {
+        // 短步骤（不调模型之外的东西；但代拟路径要接着拟名单与落盘）——留在核心线程上。
+        let (sid, text) = (sid.to_string(), text.to_string());
+        let bus = Arc::clone(&self.bus);
+        self.call(move |core| {
+            let events = core.collab_set_task(&sid, &text)?;
+            let head = bus.push(&sid, &events);
+            Ok(Advance { head })
+        })
+    }
+
+    /// **回答一张裁决卡**（唯一的回答口）：与「停止」同一条直路——回答**先落定**
+    /// （校验 + 出队 + 记一条回答，都在核心线程上跑完），处置再脱离调用方跑。
+    /// 为什么必须先落定：界面据此立刻看到队首换人；等待方（工具级确认那种）当场就被唤醒。
+    fn answer_card(
+        &self,
+        sid: &str,
+        card: &str,
+        option: &str,
+        note: &str,
+    ) -> Result<Advance, String> {
+        let (answered, events) = self.call({
+            let (sid, card, option, note) = (
+                sid.to_string(),
+                card.to_string(),
+                option.to_string(),
+                note.to_string(),
+            );
+            move |core| core.take_card(&sid, &card, &option, &note)
+        })?;
+        let mut head = self.bus.push(sid, &events);
+        match answered {
+            // 等在工作线程上的那一关（工具级确认）：回答已经写进等待格，没有要推进的事。
+            Answered::Waiting(_) => Ok(Advance { head }),
+            Answered::Gate(ticket, _) => {
+                // 代拟名单这一关要写回 meta 并建沙箱：短步骤，留在核心线程上收尾。
+                if matches!(
+                    ticket.pending,
+                    crate::capabilities::session::api::Pending::ConfirmSlate
+                ) {
+                    let more = self.call({
+                        let sid = sid.to_string();
+                        move |core| core.dispose_and_advance(&sid, &ticket)
+                    })?;
+                    head = self.bus.push(sid, &more);
+                    return Ok(Advance { head });
+                }
+                // 放行 / 重派 / 请教 / 判明确性：长流程——脱离调用方点火（回答本身已经落定）。
+                self.spawn_detached_dispose(sid, ticket);
+                Ok(Advance { head })
             }
         }
+    }
+
+    /// 当前挂着的那一队裁决（队首卡 + 后面还在等的那几张）：CLI 与 Web 照同一份渲染。
+    /// 约束：判据只有这一处——核心各关卡与工具级确认共用同一条队。
+    fn open_queue(&self, sid: &str) -> Result<Option<DecisionQueue>, String> {
+        let sid = sid.to_string();
+        self.call(move |core| core.open_queue(&sid))
     }
 
     fn withdraw_agree(&self, sid: &str, agent: &str) -> Result<Advance, String> {
@@ -78,11 +117,6 @@ impl SessionOps for ConductorHandle {
             let head = bus.push(&sid, &events);
             Ok(Advance { head })
         })
-    }
-
-    fn slate(&self, sid: &str) -> Result<Vec<AgentMeta>, String> {
-        let sid = sid.to_string();
-        self.call(move |core| core.collab_slate(&sid))
     }
 
     fn compact(&self, sid: &str) -> Result<Advance, String> {
@@ -98,11 +132,6 @@ impl SessionOps for ConductorHandle {
         let sid = sid.to_string();
         let text = text.to_string();
         self.call(move |core| core.update_task(&sid, &text))
-    }
-
-    fn pending(&self, sid: &str) -> Result<Option<Pending>, String> {
-        let sid = sid.to_string();
-        self.call(move |core| core.collab_pending(&sid))
     }
 
     fn config(&self, sid: &str) -> Result<SessionConfig, String> {
@@ -141,10 +170,12 @@ impl SessionOps for ConductorHandle {
     /// 这两步都不走命令队列里的长操作，生成期间照样立刻生效。
     /// **顺序不能反**：先冻态再取消——否则被停会话收尾写的那条"这一轮结束"会先把父会话叫醒。
     /// 用户「继续」（`continue_flow`）是它的逆操作。
-    fn stop(&self, sid: &str) -> bool {
+    fn stop(&self, sid: &str) -> Vec<String> {
         let sid_owned = sid.to_string();
         let _ = self.call(move |core| core.set_subtree_run(&sid_owned, RunState::Stopped));
-        self.stop_tree(sid).map(|v| !v.is_empty()).unwrap_or(false)
+        // **停止 = 拒绝**：整棵子树里等用户裁决的队一律作废（落盘 + 如实外送），等待方因此解开。
+        self.void_gates(sid);
+        self.stop_tree(sid).unwrap_or_default()
     }
 
     fn is_running(&self, sid: &str) -> bool {

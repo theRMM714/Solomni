@@ -735,7 +735,7 @@ function buildConfigForm(sid, cfg, c, box) {
     save.disabled = true;
     c.setMsg('保存中…');
     try {
-      await api('POST', '/api/sessions/' + encodeURIComponent(sid) + '/edit', body);
+      await api('POST', actionUrl('edit_session'), Object.assign({ session_id: sid }, body));
       await refreshState();
       c.setMsg('已保存：下一次发言按新配置生效');
       loadConfig(sid, c, box); // 重读一遍：把落盘后的样子如实显示出来
@@ -1014,7 +1014,7 @@ function openProvidersModal() {
         const del = btn('删除', 'link-btn danger');
         del.onclick = async () => {
           try {
-            await api('POST', '/api/providers/' + encodeURIComponent(p.id) + '/remove');
+            await api('POST', actionUrl('remove_provider'), { id: p.id });
             await refreshState(); rebuild();
             c.setMsg('已删除 ' + p.id);
           } catch (e) { c.setMsg(e.message, true); }
@@ -1029,7 +1029,7 @@ function openProvidersModal() {
       const id = idIn.value.trim(), url = urlIn.value.trim(), key = keyIn.value;
       if (!id || !url || !key) { c.setMsg('id / base_url / api_key 均不能为空', true); return; }
       try {
-        await api('POST', '/api/providers', { id, base_url: url, api_key: key });
+        await api('POST', actionUrl('upsert_provider'), { id, base_url: url, api_key: key });
         keyIn.value = '';
         await refreshState(); rebuild();
         c.setMsg('已保存：' + id);
@@ -1089,7 +1089,7 @@ function openModelsModal() {
         const del = btn('删除', 'link-btn danger');
         del.onclick = async () => {
           try {
-            await api('POST', '/api/models/' + encodeURIComponent(m.id) + '/remove');
+            await api('POST', actionUrl('remove_model'), { id: m.id });
             await refreshState(); rebuild();
             c.setMsg('已删除 ' + m.id);
           } catch (e) { c.setMsg(e.message, true); }
@@ -1100,7 +1100,7 @@ function openModelsModal() {
           probe.disabled = true;
           c.setMsg('正在实测 ' + m.id + ' 的工具调用支持（要发两条最小请求）…');
           try {
-            const r = await api('POST', '/api/models/' + encodeURIComponent(m.id) + '/probe', {});
+            const r = await api('POST', actionUrl('probe_model_tools'), { id: m.id });
             const what = r.outcome === 'supported' ? '支持原生工具调用'
               : r.outcome === 'unsupported' ? '**不支持**原生工具调用（供应商拒了带 tools 的请求）'
               : '无法判定（供应商接受了 tools，但这次没有发起调用）';
@@ -1115,7 +1115,7 @@ function openModelsModal() {
           probeReplay.disabled = true;
           c.setMsg('正在实测 ' + m.id + ' 的回放形状（几种写法各发一次）…');
           try {
-            const r = await api('POST', '/api/models/' + encodeURIComponent(m.id) + '/probe-replay', {});
+            const r = await api('POST', actionUrl('probe_replay_shape'), { id: m.id });
             const lines = (r.shapes || []).map((s) => {
               const verdict = !s.accepted ? '被拒' : (s.understood ? '收+读懂' : '收未懂');
               return verdict + '  ' + s.name + '  ' + (s.detail || '');
@@ -1141,7 +1141,7 @@ function openModelsModal() {
           chips.innerHTML = '';
           c.setMsg('正在拉取 ' + p.id + ' 的模型列表…');
           try {
-            const r = await api('POST', '/api/providers/' + encodeURIComponent(p.id) + '/discover', {});
+            const r = await api('POST', actionUrl('discover_models'), { id: p.id });
             const list = r.models || [];
             if (!list.length) { chips.appendChild(emptyHint('（未返回模型）')); }
             for (const name of list) {
@@ -1170,7 +1170,7 @@ function openModelsModal() {
         c.setMsg('id / 名字 / api_model / 供应商 均不能为空', true); return;
       }
       try {
-        await api('POST', '/api/models', body);
+        await api('POST', actionUrl('upsert_model'), body);
         await refreshState(); rebuild();
         c.setMsg('已保存：' + body.id);
       } catch (e) { c.setMsg(e.message, true); }
@@ -1205,7 +1205,7 @@ function openCoreModal() {
       const id = sel.value;
       if (!id) { c.setMsg('请先登记模型', true); return; }
       try {
-        await api('POST', '/api/models/' + encodeURIComponent(id) + '/core');
+        await api('POST', actionUrl('set_core_model'), { id });
         await refreshState();
         c.setMsg('核心 AI 默认模型：' + id);
       } catch (e) { c.setMsg(e.message, true); }
@@ -1231,7 +1231,7 @@ function openSettingsModal() {
     const save = btn('保存', 'btn btn-primary btn-block');
     save.onclick = async () => {
       try {
-        await api('POST', '/api/settings', {
+        await api('POST', actionUrl('set_settings'), {
           streaming: stream.box.checked,
           show_reasoning: cot.box.checked,
           llm_timeout_secs: Number(to.input.value) || 300,
@@ -1327,7 +1327,7 @@ function openAgentsModal() {
         const del = btn('删除', 'link-btn danger');
         del.onclick = async () => {
           try {
-            await api('POST', '/api/agents/' + encodeURIComponent(a.name) + '/remove');
+            await api('POST', actionUrl('remove_agent'), { name: a.name });
             await refreshState(); renderList();
             if (editing === a.name) resetForm();
             c.setMsg('已删除 ' + a.name);
@@ -1345,9 +1345,9 @@ function openAgentsModal() {
       if (!name) { c.setMsg('agent 名字不能为空', true); return; }
       try {
         if (editing && editing !== name) {
-          await api('POST', '/api/agents/' + encodeURIComponent(editing) + '/remove');
+          await api('POST', actionUrl('remove_agent'), { name: editing });
         }
-        await api('POST', '/api/agents', { name, modules, model: modelSel.value || null, note: noteIn.value.trim() });
+        await api('POST', actionUrl('upsert_agent'), { name, modules, model: modelSel.value || undefined, note: noteIn.value.trim() });
         await refreshState(); renderList(); resetForm();
         c.setMsg('已保存 agent：' + name);
       } catch (e) { c.setMsg(e.message, true); }
@@ -1377,12 +1377,15 @@ uploadPicker.addEventListener('change', () => {
   reader.onload = async () => {
     const b64 = String(reader.result || '').split(',')[1] || '';
     try {
-      await api('POST', '/api/sessions/' + encodeURIComponent(s.sid) + '/upload', { name: f.name, data_base64: b64 });
-      filesCache.delete(s.sid); // 文件清单变了，@ 菜单下次重拉
-      notice('已上传', '已上传到本次工作的 work/：' + f.name);
+      const r = await api('POST', actionUrl('upload'), { session_id: s.sid, name: f.name, data_base64: b64 });
+      if (r.uploaded === false) {
+        conflictUpload(s.sid, f.name, b64);
+      } else {
+        filesCache.delete(s.sid); // 文件清单变了，@ 菜单下次重拉
+        notice('已上传', '已上传到本次工作的 work/：' + f.name);
+      }
     } catch (err) {
-      if (err.status === 409) conflictUpload(s.sid, f.name, b64);
-      else notice('操作失败', err.message, 'err');
+      notice('操作失败', err.message, 'err');
     }
     uploadPicker.value = '';
   };
@@ -1400,9 +1403,13 @@ function suggestAltName(name) {
 
 async function sendUpload(sid, name, b64, overwrite) {
   try {
-    const body = { name, data_base64: b64 };
+    const body = { session_id: sid, name, data_base64: b64 };
     if (overwrite) body.overwrite = true;
-    await api('POST', '/api/sessions/' + encodeURIComponent(sid) + '/upload', body);
+    const r = await api('POST', actionUrl('upload'), body);
+    if (r.uploaded === false) {
+      notice('同名文件已存在', '目标里已经有这个名字，请改名或确认覆盖。', 'err');
+      return;
+    }
     filesCache.delete(sid); // 文件清单变了，@ 菜单下次重拉
     notice('已上传', '已上传：' + name);
   } catch (e) { notice('操作失败', e.message, 'err'); }
@@ -1425,11 +1432,11 @@ function renameUpload(sid, name, b64, alt) {
       const v = inp.value.trim();
       if (!v) { c.setMsg('文件名不能为空', true); return; }
       try {
-        await api('POST', '/api/sessions/' + encodeURIComponent(sid) + '/upload', { name: v, data_base64: b64 });
+        const r = await api('POST', actionUrl('upload'), { session_id: sid, name: v, data_base64: b64 });
+        if (r.uploaded === false) { c.setMsg('还是同名，请换一个名字', true); return; }
         filesCache.delete(sid); // 文件清单变了，@ 菜单下次重拉
         closeModal(); notice('已上传', '已上传：' + v);
       } catch (e) {
-        if (e.status === 409) { c.setMsg('还是同名，请换一个名字', true); return; }
         c.setMsg(e.message, true);
       }
     };
@@ -1599,7 +1606,7 @@ async function openWizard() {
           keep.onclick = async () => {
             if (!a.name.trim()) { c.setMsg('agent 名字不能为空', true); return; }
             try {
-              await api('POST', '/api/agents', { name: a.name.trim(), modules: a.modules.slice(), model: a.model, note: '' });
+              await api('POST', actionUrl('upsert_agent'), { name: a.name.trim(), modules: a.modules.slice(), model: a.model || undefined, note: '' });
               await refreshState();
               a.transient = false; a.reuse = true;
               renderAll(); c.setMsg('已保存 agent：' + a.name.trim());
@@ -1652,7 +1659,7 @@ async function openWizard() {
       addS.onclick = async () => {
         if (!ed.name.trim()) { c.setMsg('agent 名字不能为空', true); return; }
         try {
-          await api('POST', '/api/agents', { name: ed.name.trim(), modules: ed.modules.slice(), model: ed.model, note: ed.note.trim() });
+          await api('POST', actionUrl('upsert_agent'), { name: ed.name.trim(), modules: ed.modules.slice(), model: ed.model || undefined, note: ed.note.trim() });
           await refreshState();
           w.agents.push({ name: ed.name.trim(), transient: false, modules: ed.modules.slice(), model: ed.model, why: null });
           ed.open = false; renderAll(); c.setMsg('已保存并加入 agent：' + ed.name.trim());
@@ -1880,7 +1887,7 @@ async function openWizard() {
 
 /* ---------- 会话 ---------- */
 async function startSession(body) {
-  const r = await api('POST', '/api/sessions', body);
+  const r = await api('POST', actionUrl('create_session'), body);
   const sid = r.sid;
   const s = {
     sid, mode: body.mode, title: body.name || sid, run: 'active',
@@ -2026,9 +2033,18 @@ function absorb(s, ev) {
       s.lines.push(ev.ok ? { cls: 'ok', who: '交付', text: '全部通过，交付用户。' }
         : { cls: 'bad', who: '裁决', text: '返工超限仍未通过，交用户裁决。' });
       break;
-    case 'decision':
-      // 请用户裁决（短暂）：与快照里的 pending 是同一个事实，只是到达得更快。
+    case 'decision_card':
+      // **裁决卡**：与快照里的 pending 是同一个事实，只是到达得更快。
+      // waiting 里是排在队首之后还在等的几张（前面还排着几条由它如实显示）。
       s.pending = ev;
+      return false; // 门要整帧重画
+    case 'decision_answer':
+      // 一次回答的记录：这一关不再挂着（下一关的卡会随后自己推来）。
+      s.pending = null;
+      return false; // 门要整帧重画
+    case 'decision_void':
+      // **整队作废**（用户按停止 / 会话关闭 = 拒绝）：队列里没答的卡一律作废，界面撤下这张卡。
+      s.pending = null;
       return false; // 门要整帧重画
     case 'ended':
       // 整场工作结束：运行态也是"没在跑"（事件给的事实，不靠快照）。
@@ -2404,61 +2420,99 @@ function renderLiveTick(s) {
   syncSendButton(s);
 }
 
-/* 裁决门：核心请用户定的事。二选一的（名单/开始）给按钮；其余给**自由文本**。
+/* 裁决门：**按后端给的消息与选项渲染**（前端不认识业务含义，也不按 kind 猜按钮）。
    改需求**不是**门——它是会话级按钮（见 syncSendButton / updateTaskFlow）。 */
 function renderGate(s) {
   const gate = $('#gate');
   gate.innerHTML = '';
-  if (!s || isBusy(s) || s.done || s.readonly) return;
-  if (s.awaiting === 'task') {
+  if (!s || s.done || s.readonly) return;
+  const p = s.pending;
+  if (isBusy(s) && !p) return;
+  if (s.awaiting === 'task' && !isBusy(s)) {
     gate.appendChild(gateCard('请提交本次协作需求：', [
       ['提交', async () => { const v = takeInput(); if (v) await act('task', v); }],
     ]));
     return;
   }
-  const p = s.pending;
+  // **卡片照画**：工具级确认发生在生成中（生成正停下来等这一答），核心关卡的卡也一样——
+  // 前端只认后端给的四格（信封 / 消息 / 选项），不按 kind 猜按钮、也不在忙时把它藏起来。
   if (!p) return;
-  if (p.kind === 'confirm_slate') {
-    gate.appendChild(gateCard('核心已代拟名单（见转录），是否按此建组？', [
-      ['确认建组', () => act('slate', 'yes')],
-      ['取消', () => act('slate', 'no')],
-    ]));
-  } else if (p.kind === 'confirm_begin') {
-    gate.appendChild(gateCard('名单已定，开始讨论？', [
-      ['开始', () => act('begin', 'yes')],
-      ['开始（授权小组自裁细节）', () => act('begin', 'yes,allow')],
-      ['暂不', () => {}],
-    ]));
-  } else {
-    gate.appendChild(decisionCard(p));
-  }
+  gate.appendChild(renderCard(p));
 }
 
-/// 裁决卡：**核心的说明 + 建议 + 要你回答的那句 + 自由文本**。
-/// 用户写自己的想法即可（"马上做"这种自然语言就算明确）；核心 AI 判定意图是否明确，明确了才开工/放行。
-function decisionCard(p) {
+/// 裁决卡：信封 / 消息（标题 / 正文 / 详情）/ 选项——四格都由后端给，前端照画（**扁平**，见契约）。
+function renderCard(p) {
+  const msg = p.message || {};
   const el = document.createElement('div');
   el.className = 'gate-card';
-  const q = document.createElement('div'); q.className = 'q'; q.textContent = p.summary || ''; el.appendChild(q);
-  if (p.advice) {
-    const a = document.createElement('div'); a.className = 'advice'; a.textContent = '建议：' + p.advice; el.appendChild(a);
+  const who = document.createElement('div');
+  who.className = 'who';
+  who.textContent = (p.envelope && p.envelope.name) || '';
+  if (who.textContent) el.appendChild(who);
+  // **谁在等、前面还排着几条**：队首之后还在等的那几张如实列出来（只有队首能答）。
+  const waiting = p.waiting || [];
+  if (waiting.length) {
+    const wq = document.createElement('div');
+    wq.className = 'queue';
+    wq.textContent =
+      '后面还排着 ' + waiting.length + ' 张（先答上面这张）：' +
+      waiting.map((w) => ((w.envelope && w.envelope.name) || '') + ' 在等 ' + (w.title || '')).join('；');
+    el.appendChild(wq);
   }
-  if (p.question) {
-    const qq = document.createElement('div'); qq.className = 'ask'; qq.textContent = p.question; el.appendChild(qq);
+  const q = document.createElement('div');
+  q.className = 'q';
+  q.textContent = msg.title || '';
+  el.appendChild(q);
+  if (msg.body) {
+    const bd = document.createElement('div');
+    bd.className = 'hint';
+    bd.textContent = msg.body;
+    el.appendChild(bd);
   }
-  const hint = document.createElement('div');
-  hint.className = 'hint';
-  hint.textContent = '用你自己的话说一句——它会进主会话，所有成员都看得到。';
-  el.appendChild(hint);
+  if (msg.detail) {
+    const dt = document.createElement('div');
+    dt.className = 'advice';
+    dt.textContent = msg.detail;
+    el.appendChild(dt);
+  }
   const inp = document.createElement('input');
   inp.className = 'decision-input';
-  inp.placeholder = '你的想法…';
+  inp.placeholder = '附言（可空；要你回话 / 先说一句的那一关必填）…';
   el.appendChild(inp);
-  const bs = document.createElement('div'); bs.className = 'btns';
-  const b = document.createElement('button'); b.className = 'btn btn-primary'; b.textContent = '提交';
-  b.onclick = async () => { const v = inp.value && inp.value.trim(); if (v) await act('decide', v); };
-  bs.appendChild(b); el.appendChild(bs);
+  const bs = document.createElement('div');
+  bs.className = 'btns';
+  for (const o of (p.options || [])) {
+    const bt = document.createElement('button');
+    bt.className = 'btn btn-primary';
+    bt.textContent = o.label;
+    bt.onclick = () => answerCard(p.id, o.id, inp.value.trim());
+    bs.appendChild(bt);
+  }
+  el.appendChild(bs);
   return el;
+}
+
+/* 回答一张裁决卡：**选项 id 是契约**（前端只把它发回去），附言是用户想说的话。
+   回答只有这一条命令（卡片 id + 选项 id），校验属于当时那张卡由后端做。 */
+async function answerCard(card, option, note) {
+  const s = activeSession();
+  if (!s || s.readonly || s.sending) return;
+  if (note) s.lines.push({ cls: 'user', who: '用户', text: note, pending: true });
+  s.sending = true;
+  renderStream();
+  renderGate(s);
+  try {
+    await api('POST', actionUrl('answer_card'), { session_id: s.sid, card: card, option: option, note: note });
+    renderAll();
+  } catch (err) {
+    s.lines = s.lines.filter((x) => !x.pending);
+    s.lines.push({ cls: 'bad', who: '错误', text: err.message });
+    renderAll();
+  } finally {
+    s.sending = false;
+    needState = true;
+    renderAll();
+  }
 }
 
 /* 改需求：**用户自己点的动作**（不是核心推的门）。
@@ -2478,7 +2532,7 @@ async function updateTask(text) {
   const s = activeSession();
   if (!s || isBusy(s)) return;
   try {
-    const r = await api('POST', '/api/sessions/' + encodeURIComponent(s.sid) + '/update-task', { text });
+    const r = await api('POST', actionUrl('update_task'), { session_id: s.sid, text });
     s.lines = []; s.pending = null; s.readonly = false; s.done = false;
     for (const ev of (r.events || [])) absorb(s, ev);
     renderAll();
@@ -2557,6 +2611,10 @@ function applyBatch(seq, sid, events) {
   // 事件按序吸收，运行态因此自己就对了——猜"有增量=在跑"只会与事件打架。
   return absorbEvents(s, events);
 }
+/* 本地名 → 动作 id 的映射：动作目录与校验都在核心（systools/tools.yaml），这里只做转写。 */
+const ACT_IDS = { say: 'send_message', task: 'set_task' };
+/* 动作只有一个入口 /api/actions/{id}：声明、授权、执行与审计都在核心那一处。 */
+function actionUrl(id) { return '/api/actions/' + id; }
 async function act(action, text) {
   const s = activeSession();
   if (!s || isBusy(s) || s.readonly) return;
@@ -2569,7 +2627,7 @@ async function act(action, text) {
   renderStream();
   try {
     // 命令回包只有头部序号：事实（含自己那条发言的权威行）由事件流补进来。
-    await api('POST', '/api/sessions/' + encodeURIComponent(s.sid) + '/' + action, { text });
+    await api('POST', actionUrl(ACT_IDS[action] || action), { session_id: s.sid, text });
     s.awaiting = null;
     renderAll();
   } catch (err) {
@@ -2609,7 +2667,7 @@ function restoreMark(mark) {
 /* 回档请求的统一收尾：服务端回重放事件，前端整体重建。 */
 async function applyRewind(s, body) {
   try {
-    const r = await api('POST', '/api/sessions/' + encodeURIComponent(s.sid) + '/rewind', body);
+    const r = await api('POST', actionUrl('rewind'), Object.assign({ session_id: s.sid }, body));
     s.lines = [];
     s.live = [];
     s.fold = {};   // 行整体重建，折叠状态一并重来（避免旧键被新行复用）
@@ -2631,7 +2689,7 @@ function withdrawAgree(agent) {
   choiceModal('撤回同意', '撤回「' + agent + '」的同意？继续时会按剩余转录重新判定。', [
     ['撤回', 'btn btn-danger', async () => {
       try {
-        await api('POST', '/api/sessions/' + encodeURIComponent(s.sid) + '/withdraw', { agent });
+        await api('POST', actionUrl('withdraw'), { session_id: s.sid, agent });
         renderAll();
       } catch (err) { notice('操作失败', err.message, 'err'); }
     }],
@@ -2646,7 +2704,7 @@ async function continueFlow() {
   s.sending = true;
   renderStream();
   try {
-    await api('POST', '/api/sessions/' + encodeURIComponent(s.sid) + '/continue', {});
+    await api('POST', actionUrl('control_session'), { session_id: s.sid, action: 'continue' });
     s.readonly = false; // 历史回放会话一旦继续即转为活动会话（跨重启续跑）
     renderAll();
   } catch (err) {
@@ -2873,7 +2931,7 @@ async function stopGeneration() {
   const s = activeSession();
   if (!s || !isBusy(s)) return;
   try {
-    await api('POST', '/api/sessions/' + encodeURIComponent(s.sid) + '/stop', {});
+    await api('POST', actionUrl('control_session'), { session_id: s.sid, action: 'stop' });
   } catch (e) { /* 停止失败不吵用户；按钮仍是停止，可再点一次 */ }
 }
 
@@ -2882,10 +2940,9 @@ function onSend() {
   if (!s || s.readonly) return;
   if (isBusy(s)) { stopGeneration(); return; } // 生成中：同一个键变成「停止」
   if (s.awaiting === 'task') { const v = takeInput(); if (v) act('task', v); return; }
-  // 裁决是自由文本：把输入框里的话作为回应提交（核心 AI 判定意图是否明确）。
-  if (s.pending && s.pending.kind !== 'confirm_slate' && s.pending.kind !== 'confirm_begin') {
-    const v = takeInput();
-    if (v) act('decide', v);
+  // 裁决门挂着时不从这里发：那是卡片上的选项（要补充的话写在卡片里的附言框）。
+  if (s.pending && s.pending.type === 'decision_card') {
+    notice('请按卡片作答', '这一关请点卡片上的选项；要补充的话写在卡片里的附言框。', 'info');
     return;
   }
   if (s.mode !== 'collab') { const v = takeInput(); if (v) act('say', v); return; } // 单 agent 形态可以自由发言

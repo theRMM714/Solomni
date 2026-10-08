@@ -9,6 +9,17 @@
 use serde::Deserialize;
 use std::collections::BTreeMap;
 
+/// 目的：一次动作的**审计记录**（同一形状：谁、调了什么、成没成）。
+/// 约束：人经呈现层的动作与模型经工具调用的同一条动作共用它——审计只有一处格式化。
+pub fn action_audit(caller: &str, action: &str, ok: bool, detail: &str) -> String {
+    let tail = if ok {
+        "成功".to_string()
+    } else {
+        format!("失败：{}", detail)
+    };
+    format!("[动作] {} 调 {}：{}", caller, action, tail)
+}
+
 /// 一个角色：引用的系统工具 id + 提示词（提示词与工具面**同处声明**）。
 ///
 /// 为什么同处：**信封模式**下该角色能用的信封清单要渲染进提示词——提示词与工具面分开声明必然漂。
@@ -81,13 +92,36 @@ impl SystemTools {
             .unwrap_or(false)
     }
 
-    /// 悬空引用（角色引用了总表里没有的 id）与缺能力的工具：都返回可读的原因，空 = 一切正常。
-    /// 由测试门禁消费——两张表不漂靠它，不靠人看。
+    /// 除 `user` 之外的调用者身份都必须是角色表里的角色 id：拼错不会静默退化成"某个用户"。
+    fn is_known_caller(&self, caller: &str) -> bool {
+        self.roles.contains_key(caller) || caller == "user" || caller.starts_with("user:")
+    }
+
+    /// 目的：悬空引用（角色引用了总表里没有的 id）与缺能力的工具都返回可读的原因，空 = 一切正常。
+    /// 约束：`callers`（谁能调）与角色表的工具面是**同一关系的两面**——这里双向比对，任何一边漏写 / 多写都当场报错；由测试门禁消费，不靠人看。
     pub fn problems(&self) -> Vec<String> {
         let mut out = Vec::new();
         for (id, schema) in &self.tools {
             if schema.capability.trim().is_empty() {
                 out.push(format!("工具 {} 没声明 capability（权限收口依据）", id));
+            }
+            if schema.callers.is_empty() {
+                out.push(format!("动作 {} 没声明 callers（谁能调它）", id));
+            }
+            for c in &schema.callers {
+                if !self.is_known_caller(c) {
+                    out.push(format!(
+                        "动作 {} 的 callers 里有不认识的身份：{}（只能是角色 id 或 user / user:…）",
+                        id, c
+                    ));
+                } else if let Some(rd) = self.roles.get(c) {
+                    if !rd.tools.iter().any(|t| t == id) {
+                        out.push(format!(
+                            "动作 {} 的 callers 里有角色 {}，但它的工具面里没有这条动作",
+                            id, c
+                        ));
+                    }
+                }
             }
         }
         for (role, decl) in &self.roles {
@@ -95,8 +129,13 @@ impl SystemTools {
                 out.push(format!("角色 {} 没声明提示词", role));
             }
             for id in &decl.tools {
-                if !self.tools.contains_key(id) {
-                    out.push(format!("角色 {} 引用了不存在的系统工具：{}", role, id));
+                match self.tools.get(id) {
+                    None => out.push(format!("角色 {} 引用了不存在的系统工具：{}", role, id)),
+                    Some(s) if !s.callers.iter().any(|c| c == role) => out.push(format!(
+                        "角色 {} 的工具面有 {}，但动作表里 {} 的 callers 没有它",
+                        role, id, id
+                    )),
+                    Some(_) => {}
                 }
             }
         }

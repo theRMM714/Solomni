@@ -2,7 +2,7 @@
 //! 这些断言不需要写目录 ACL（ACL 授权由产品在真实会话里做），但要**建一个 AppContainer profile**——
 //! 那是改本机状态的动作，所以默认不跑：必须显式开启（node run-tests.js --fence-live 会把它传进来）。
 
-use crate::probe::{env_blocks_container, job_json, run_launcher, scratch};
+use crate::probe::{env_blocks_container, job_json, run_launcher, runtime_env, scratch};
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -181,6 +181,37 @@ fn container_has_no_network() {
         outside_code,
         inside_code,
         err
+    );
+}
+
+/// 解释器基线：`node <文件>` 的命令要在运行期白名单里带上"跳过 realpath"的两个开关——容器里 node 才不会在
+/// 脚本执行前倒在 `lstat 盘卷根`（真机组对照见 crate 内的容器往返探针）。别的解释器不带它。
+/// 不改本机状态（不写 ACL、不建 profile），所以不归 --fence-live 管。
+#[test]
+fn node_commands_carry_the_realpath_skip_in_the_runtime_env() {
+    let dir = scratch("container-node-env");
+    let spec = job_json(
+        std::slice::from_ref(&dir),
+        &PathBuf::from("C:\\Windows\\System32"),
+        true,
+    );
+    let opts = runtime_env(&spec, "node tools/report.js")
+        .into_iter()
+        .find(|(k, _)| k == "NODE_OPTIONS")
+        .map(|(_, v)| v)
+        .expect("node 命令的运行期环境里应当有 NODE_OPTIONS");
+    for flag in ["--preserve-symlinks", "--preserve-symlinks-main"] {
+        assert!(
+            opts.contains(flag),
+            "两个开关都要（只开一个，另一半照样 realpath）：{}",
+            opts
+        );
+    }
+    assert!(
+        !runtime_env(&spec, "python tools/x.py")
+            .iter()
+            .any(|(k, _)| k == "NODE_OPTIONS"),
+        "非 node 命令不该带它（免得在不需要的地方改模块解析语义）"
     );
 }
 
