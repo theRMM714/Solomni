@@ -92,7 +92,7 @@ tests/
 7. 失败时修代码或测试；环境不允许时记录 `env-skip`；未实现时建立 `gap`；不要把任何一种写成通过。
 8. 运行完整入口并阅读 `target/test-report.json`，确认报告与日志能解释结果。
 9. 测试完成后检查 `git status` 和 `.gitignore`，确保没有测试产物被跟踪。
-10. 需要 CI 的场景（见本文「验收清单」）：手动派发 CI（`workflow_dispatch`）后按 [execution-ci.md](execution-ci.md) 的读法拉 `ci-report`，**先比对 `sha`**，再按平台核对 steps / envSkips。
+10. 需要 CI 的场景（见本文「验收清单」）：用 `gh workflow run test.yml --ref <分支>` 手动派发后按 [execution-ci.md](execution-ci.md) 的读法拉 `ci-report`，**先比对 `sha`**，再按平台核对 steps / envSkips。
 11. 只有当目标行为、质量门禁、当前平台缺口与（需要时）CI 三平台结论都符合要求，才可宣称本次测试验收完成。
 
 ## 十四、验收清单
