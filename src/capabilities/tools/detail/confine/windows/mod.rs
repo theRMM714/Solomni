@@ -196,6 +196,11 @@ pub fn prepare_fence(spec: &FenceSpec, command: &str, home: &Path) -> FencePrep 
             eprintln!("[诊断] 授权落点不存在，跳过（{}）", dir.display());
             continue;
         }
+        // 基线的 ACE 可能**早已存在**（系统目录上常有全应用包的允许项）：那不是我们写的，记进台账会让收尾
+        // 去撤系统目录（拒绝访问）。已存在就跳过，不记归属、也不改 DACL。
+        if has_ace_for(base, &dir, RIGHTS_RO) {
+            continue;
+        }
         let target = GrantTarget {
             path: dir.clone(),
             rights: RIGHTS_RO,

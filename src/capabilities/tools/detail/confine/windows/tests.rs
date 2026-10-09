@@ -1295,7 +1295,7 @@ fn ledger_catalog_and_per_item_disposal_keep_the_rest_untouched() {
         &sid_text,
         &inside_target,
         &base,
-        owner,
+        owner.clone(),
     )
     .expect("根内授权应当成功");
     let outside_target = GrantTarget {
@@ -1312,7 +1312,7 @@ fn ledger_catalog_and_per_item_disposal_keep_the_rest_untouched() {
         &sid_text,
         &outside_target,
         &base,
-        owner,
+        owner.clone(),
     )
     .expect("根外授权应当成功");
     free_sid(sid);
@@ -1490,7 +1490,7 @@ fn reconcile_reclaims_dead_owners_and_keeps_live_ones() {
         let mut rec = load_record(&home);
         for g in rec.grants.iter_mut() {
             if g.sid == stale_text {
-                g.owners = vec![dead];
+                g.owners = vec![dead.clone()];
             }
         }
         save_record(&home, &rec).expect("写回台账");
