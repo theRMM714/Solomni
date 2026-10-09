@@ -40,6 +40,12 @@ Get-Content args.json | node modules/render/tools/report.js
 }
 ```
 
+## 为什么模块根有 `package.json`
+
+Node 会从入口脚本所在目录逐级向上找最近的 `package.json` 来判定 `.js` 是 CommonJS 还是 ESM、并解析 `require`。
+围栏只让工具可达本模块目录，够不到的祖先会让 Node 在脚本执行前直接判死。
+本模块自足：这份作用域锚在模块根（`"type": "commonjs"`，与 `report.js` 一致）。
+
 ## 输入：corpus.jsonl
 
 每行一个 JSON 对象、UTF-8、非 ASCII 不转义，字段见 `MODULE_SPEC.md` 与 harvest 模块：

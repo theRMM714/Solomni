@@ -18,6 +18,8 @@ cargo fmt --all -- --check
 cargo check --all-targets
 cargo clippy --all-targets --all-features --keep-going -- -D warnings
 cargo tree --duplicates
+cargo audit
+cargo deny check
 ```
 
 `--keep-going` 不是可选项：`-D warnings` 会让**首个失败的单元中断调度**，而 lint 计数取决于哪些单元真的被编译过，
@@ -38,21 +40,29 @@ cargo tree --duplicates
 - 测试结束后是否遗留子进程、端口、临时目录、权限或句柄；
 - 是否存在重复测试、重复 Fixture、重复测试替身或无理由的跨层重复断言；
 - **"某份文档列出另一处清单"的段落是否还与盘上一致**：提示词键表 ↔ `prompts/**`（每份 yaml 的顶层键双向比对）、
-  `systools/**` 是否被门户或细则提到、根目录 `*.md` 是否都进了 `AGENTS.md` 的路由表。
+  `systools/**` 是否被门户或细则提到、根目录 `*.md` 是否都进了 `AGENTS.md` 的路由表；
+- **门禁自己是否可信**：解析器自测（`run-tests.js` 的 `gateParserSelfTest`）必须过——`cargo tree --duplicates`
+  退出码恒为 0，解析器坏掉就是静默全绿；
+- **是否存在 `#[ignore]` 或未授权的跳过**：`#[ignore]` 一律禁止，报告里 `ignored > 0` 即失败。
 
-`cargo tree --duplicates` 只检查依赖树中的重复版本，不等于源码重复检查。`clippy` 也不能替代业务测试。三者的职责必须分开记录。
+`cargo tree --duplicates` 只检查依赖树中的重复版本，`cargo deny` 的 `bans` 与它同口径但更全面
+（许可证、禁用、来源）；它们都不等于源码重复检查。`clippy` 也不能替代业务测试。这些检查的职责必须分开记录。
 
-当前状态：六项全部并入 `node run-tests.js`，且**全是零容忍硬失败**（没有存量基线）：
+当前状态：七项全部并入 `node run-tests.js`（前六项零容忍硬失败，没有存量基线；供应链一项工具缺失即 `env-skip`）：
 
 - `cargo check --all-targets`；
-- 结构审查（测试目标登记、孤儿测试文件、缺口账格式、模块地图双向一致、文档链接完整性、提示词键表与真相源表比对、根文档路由）；
+- 结构审查（测试目标登记、孤儿测试文件、缺口账格式、模块地图双向一致、文档链接完整性、提示词键表与真相源表比对、根文档路由、
+  **门禁解析器自测**与 **`#[ignore]` 禁令**）；
 - `cargo fmt --all -- --check`；
 - `cargo clippy --all-targets --all-features --keep-going -- -D warnings`；
 - `cargo check` 的 rustc 告警数；
-- `cargo tree --duplicates`。
+- `cargo tree --duplicates`；
+- 供应链：`cargo audit` + `cargo deny check`（配置在 `deny.toml`）。
 
-任何一项不过即 `quality-fail`。工具缺失（没装 rustfmt / clippy 组件）记 `env-skip` 并写明怎么装——
-环境跳过不算通过。设计取舍类 lint 要**带理由窄 allow**，清单见 [quality-isolation.md](quality-isolation.md)。
+任何一项不过即 `quality-fail`。工具缺失（没装 rustfmt / clippy / cargo-audit / cargo-deny）或**取不到 advisory
+数据**记 `env-skip` 并写明怎么装——环境跳过不算通过。设计取舍类 lint 要**带理由窄 allow**，清单见
+[quality-isolation.md](quality-isolation.md)。每步都有墙钟上限（超时 = 硬失败，证据进报告 `timeouts`），
+每步用时超预算只标 `[slow]`、不改变成败。
 
 ### T1：单元测试
 

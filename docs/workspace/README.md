@@ -15,6 +15,8 @@
 `api::WorkspaceOps`（呈现层清单事实）+ `api::Workspace`（roster / library / prepare / work_has / files / roots / **work_pull / work_commit / work_commit_user / work_status / work_restore / work_head / work_rewind_to / work_restore_point / work_discard_after** …）。提交记录带 `CommitAnchor(agent, line)`，回档据此按行精确定位。出站端口 `ModuleSource` / `PackageSource` / `Workdirs` / **`WorkStore`**（版本库落盘：文件原语 + 内容寻址对象 + 提交记录 + 拉取基线 + 删提交/清 head）**只由 `service.rs` 持有**（R12）。
 模块事实带 `has_userdata`（`<root>/userdata` 是不是目录，扫描时读出）：沙箱把它收成 `modules_with_userdata` 一起注入，围栏派生据此决定派不派这条落点——domain 层不读盘。
 
+沙箱还带**会话 id**（`Sandbox.session`）：围栏把它当**会话租约**（`FenceSpec.lease`）带进授权台账，同名 agent 的多个并发会话释放时互不误撤（机制侧见 [docs/tools/README.md](../tools/README.md) 五）。
+
 ## 三、依赖图位置（由源码的 `::api` 引用推导）
 
 - 经 `::api` 用到：`kernel`、`llm`、`prompt`

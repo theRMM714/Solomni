@@ -61,6 +61,11 @@ fn fence_denies_outside_paths_and_allows_the_given_roots() {
         err
     );
     assert_ne!(code, Some(0), "越界读应以非零退出：{} / {}", out, err);
+    assert!(
+        err.contains("范围外的访问被围栏拒绝"),
+        "围栏内失败要带一条不分语言的边界说明：{}",
+        err
+    );
 }
 
 /// 未授权时段（`prepared = false`）的机制验证：把"本机 ABI 失效"与"我们的 profile 写错"分开。

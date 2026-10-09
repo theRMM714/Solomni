@@ -178,9 +178,9 @@ prompts/
 | 场景 | 约定 |
 | --- | --- |
 | 代理工具 | 六个工具 + `core_proxy` 角色 + 队列桥宿主都已接上真实会话；委托是**全权**（`granularity=full`）；路径的白/黑名单与模块写授权已落在会话权限（[docs/permission/README.md](../permission/README.md)），工具级"每次调用是否放行"的引擎路径尚未接入。孩子不把转录推给代理：门的通知、意外停止通知 + `read_session_messages` 主动倒查 |
-| 建会话 = 建 + 写开头 + 开工 | `create_session` 一份声明两处调用：**人经呈现层**给 `name` / `mode` / `agents`（可省 `tier`）先建出会话，后续用 `send_message` 发言推进；**核心代理**给 `mode`（single / collab）+ `agents`（只写身份：`ref` 或 `name`+`modules`+`model`）+ `task`，**建好就开工**（single 以 task 为第一句，collab 以它当本次需求）。后续补充 / 返工 / 代答门仍走 `send_session_message` |
+| 建会话 = 建 + 写开头 + 开工 | `create_session` 一份声明两处调用：**人经呈现层**给 `name` / `mode` / `agents`（可省 `tier`）先建出会话，后续用 `send_message` 发言推进；**核心代理**给 `mode`（single / collab）+ `agents`（只写身份：`ref` 或 `name`+`modules`+`model`）+ `task`，**建好就开工**（single 以 task 为第一句，collab 以它当本次需求）。后续补充 / 返工 / 代答门仍走 `send_session_message`（**代答要显式给 `reply` = 那张卡上的选项 id**；给不出就不作代答，不替用户猜） |
 | 代理工具的生命周期 | `stop` = 把整棵子树落成 `stopped`（拦住派发与唤醒）再**级联中断**在跑的生成，会话上的停止按钮就是这一下；`continue` = 解冻并按形态唤醒接着走；`close` 是终态。停止 / 继续是一对逆操作，没有单独的暂停；都不改写历史 |
-| 代理模式下的子会话审查关卡 | 不再问用户：作为**门**交给核心判断，核心用 `send_session_message(kind=user_reply)` 回答 |
+| 代理模式下的子会话审查关卡 | 不再问用户：作为**门**交给核心判断，核心用 `send_session_message(kind=user_reply, reply=<选项 id>)` 回答 |
 | 代理模式下子会话的转录 | **不转发给核心**：核心只拿门的通知与意外停止通知，正文经 `read_session_messages`（0 = 最新）主动倒查 |
 | 改任务目标 | 等于**改任务提示词**；改完**不作废**，让它跑完再由核心验收；链有问题则与用户在**主会话**讨论改链 |
 | 回档 | **整棵子树按同一回合 id 同步收窗**；留档折叠（可再恢复），删除 / 恢复真的截断（见 [session-model.md](../session/session-model.md) 的五） |

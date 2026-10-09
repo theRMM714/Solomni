@@ -275,6 +275,11 @@ tools:
         required: true
         non_empty: true
         desc: 幂等标识：同一个 request_id 重放不会重复发送
+      reply:
+        type: string
+        desc: |
+          目标正挂着一张裁决卡、而这次转达就是**代答**时，写你要选的**选项 id**（必须是那张卡上的选项，
+          用 observe_session 的 pending 看选项 id）；不写 = 不代答——核心不替用户选（那一问按它自己声明的收场走）。
   observe_session:
     capability: none              # 不碰文件：只读会话事实
     callers: [core_proxy]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致

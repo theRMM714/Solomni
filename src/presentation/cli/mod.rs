@@ -536,7 +536,12 @@ fn answer_gates(ops: &Ops, sid: &str, cursor: &mut u64) {
         print_card(card);
         // 队首之后还在等的那几张：如实列出来（"谁在等、前面还排着几条"），但它们还不能答。
         print_waiting(&queue.waiting);
-        let ans = prompt("选哪一项（序号 / 选项 id；回车 = 先不答）>");
+        let Some(ans) = prompt_opt("选哪一项（序号 / 选项 id；回车 = 先不答）>")
+        else {
+            // 输入到尽头 = 前端答不了了：按**停止**（= 拒绝）收场，绝不把等待方永远吊在这里。
+            eof_stop(ops, sid);
+            return;
+        };
         let ans = ans.trim();
         if ans.is_empty() {
             return;
@@ -973,12 +978,28 @@ fn core_flow(ops: &Ops, arg: &str) {
     }
 }
 
-fn prompt(text: &str) -> String {
+/// 目的：CLI 读输入读到尽头（EOF）时，把挂着的裁决按**停止 = 拒绝**收场——前端负责解开等待方。
+/// 返回：真的停下了这条（整棵）会话。
+/// 约束：停止 = 拒绝（整队作废）；不套用发起方声明的默认项——那会把"没人答"变成放行。
+pub(crate) fn eof_stop(ops: &Ops, sid: &str) -> bool {
+    println!("[提示] 输入已到尽头：挂着的裁决按「停止 = 拒绝」收场，这一趟不继续。");
+    !ops.sessions.stop(sid).is_empty()
+}
+
+/// 目的：读一行输入；**读到尽头（EOF）给 `None`**——"用户不在键盘前"与"用户先不答"是两件事。
+fn prompt_opt(text: &str) -> Option<String> {
     print!("{} ", text);
     std::io::stdout().flush().ok();
     let mut s = String::new();
-    std::io::stdin().read_line(&mut s).ok();
-    s.trim().to_string()
+    match std::io::stdin().read_line(&mut s) {
+        Ok(0) => None,
+        Ok(_) => Some(s.trim().to_string()),
+        Err(_) => None,
+    }
+}
+
+fn prompt(text: &str) -> String {
+    prompt_opt(text).unwrap_or_default()
 }
 
 fn first_line(s: &str) -> &str {

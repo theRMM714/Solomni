@@ -29,7 +29,8 @@ jobs:
   quality:
     name: 质量与单元（${{ matrix.os }}）
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    # 比 e2e 宽：要额外编译 cargo-audit / cargo-deny（供应链门禁，见 docs/testing/levels.md 的 T0）。
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -61,6 +62,10 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-cargo-
+
+      # 供应链工具用 cargo 装（不引第三方 action）；run-tests.js 的「T0 供应链」一步会发现它们。
+      - name: 安装供应链检查工具（cargo-audit / cargo-deny）
+        run: cargo install --locked cargo-audit cargo-deny
 
       - name: 质量门禁 + 单元 + 平台探针（跳过 L4，由 e2e job 承担）
         run: node run-tests.js --fence-live --skip-e2e

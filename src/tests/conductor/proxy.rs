@@ -767,6 +767,7 @@ pub(crate) fn run_state_gates_dispatch_and_survives_stop_close() {
         kind: d::MessageKind::Task,
         parent: None,
         text: "做事".to_string(),
+        reply: None,
     };
 
     // 停止：运行态落盘 + 回执如实；转达与"取会话去生成"两道闸都拒绝。
@@ -865,6 +866,7 @@ pub(crate) fn relay_records_its_source_on_the_target() {
         kind: d::MessageKind::UserReply,
         parent: None,
         text: "照这个做".to_string(),
+        reply: None,
     };
     bridge.send(&sid, &msg).expect("转达");
     let replay = serde_json::to_string(&ops.history.open(&sid).expect("回放").1).expect("JSON");
@@ -1269,9 +1271,11 @@ pub(crate) fn collab_child_send_lands_on_the_gate_it_awaits() {
     let msg = d::Relayed {
         kind: d::MessageKind::UserReply,
         parent: None,
-        text: "yes".to_string(),
+        text: "确认建组".to_string(),
+        // 代答只认选项 id：这次转达明确按"确认建组"那一项作答。
+        reply: Some(OPT_SLATE_CONFIRM.to_string()),
     };
-    // "yes" 在代拟那一关解成"确认建组"，于是这一关过去、下一关（开始讨论）挂起来。
+    // 按那一项作答 → 这一关过去、下一关（开始讨论）挂起来。
     // 转达是**脱离调用方**的（代理不等它跑完），所以这里等它落地。
     bridge.send(&child, &msg).expect("转达到协作子会话");
     let want = vec![OPT_BEGIN.to_string(), OPT_BEGIN_ALLOW.to_string()];

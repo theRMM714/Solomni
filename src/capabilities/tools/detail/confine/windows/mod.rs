@@ -158,9 +158,23 @@ pub fn prepare_fence(spec: &FenceSpec, command: &str, home: &Path) -> FencePrep 
     let mut prep = FencePrep::default();
     // 产品根 = .home 的父目录：根内路径存原始安全描述符收尾还原，根外只记 ACE 摘要精确撤销。
     let root = product_root(home);
+    // 台账写事务要串行：同进程的并发工具调用 + 多实例都会各写一次。
+    let _lock = match lock_ledger(home) {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("[围栏] 授权台账落盘失败：{}", e);
+            prep.fail(FencePart::Ledger, PathBuf::new(), e);
+            return prep;
+        }
+    };
+    // 容器数据授权带本次会话的租约：同名 agent 的多个并发会话各持一份，释放时互不影响。
+    let mut container_owner = current_owner();
+    container_owner.lease = spec.lease.clone();
+    // 解释器基线与容器 profile 不属于任何会话（全应用包共享组 / 一个 agent 一个 profile）：进程级归属。
+    let base_owner = current_owner();
     let mut rec = load_record(home);
     let container = container_name(spec);
-    if let Err(e) = journal_add_profile(home, &mut rec, &container) {
+    if let Err(e) = journal_add_profile(home, &mut rec, &container, base_owner.clone()) {
         // 台账落不下就不能动本机权限项（这一环是必要的）：如实收尾，让调用方去问用户。
         eprintln!("[围栏] 授权台账落盘失败：{}", e);
         prep.fail(FencePart::Ledger, PathBuf::new(), e);
@@ -182,6 +196,8 @@ pub fn prepare_fence(spec: &FenceSpec, command: &str, home: &Path) -> FencePrep 
             eprintln!("[诊断] 授权落点不存在，跳过（{}）", dir.display());
             continue;
         }
+        // 基线的 ACE 可能**早已存在**（系统目录上常有全应用包的允许项）：那不是我们写的，记进台账会让收尾
+        // 去撤系统目录（拒绝访问）。已存在就跳过，不记归属、也不改 DACL。
         if has_ace_for(base, &dir, RIGHTS_RO) {
             continue;
         }
@@ -192,8 +208,17 @@ pub fn prepare_fence(spec: &FenceSpec, command: &str, home: &Path) -> FencePrep 
             inherit: true,
             part: FencePart::Interpreter,
         };
-        match grant_one_journaled(home, &mut rec, base, &base_text, &target, &root) {
-            Ok(()) => written.push((base_text.clone(), dir, RIGHTS_RO)),
+        match grant_one_journaled(
+            home,
+            &mut rec,
+            base,
+            &base_text,
+            &target,
+            &root,
+            base_owner.clone(),
+        ) {
+            Ok(true) => written.push((base_text.clone(), dir, RIGHTS_RO)),
+            Ok(false) => {}
             Err(e) => {
                 eprintln!("[围栏] 解释器目录授权未完成（{}）：{}", dir.display(), e);
                 prep.fail(FencePart::Interpreter, dir, e);
@@ -225,13 +250,19 @@ pub fn prepare_fence(spec: &FenceSpec, command: &str, home: &Path) -> FencePrep 
             eprintln!("[诊断] 授权落点不存在，跳过（{}）", path.display());
             continue;
         }
-        // 跳过条件看**实际 ACE**而不是内存缓存：权限收窄并撤权后，下一次 prepare 必须能把仍需要的授权补回来，
-        // 否则「撤权 + 重授」会留下"缓存说已授、ACE 已撤"的空洞（扩根时被缓存吞掉）。
-        if has_ace_for(sid, path, rights) {
-            continue;
-        }
-        match grant_one_journaled(home, &mut rec, sid, &sid_text, &target, &root) {
-            Ok(()) => written.push((sid_text.clone(), target.path.clone(), rights)),
+        // 归属总要补记（同名 agent 的另一个会话靠它保住这条授权）；改不改 ACL 由 grant_one_journaled
+        // 按**实际 ACE** 判断——权限收窄并撤权后，下一次 prepare 必须能把仍需要的授权补回来。
+        match grant_one_journaled(
+            home,
+            &mut rec,
+            sid,
+            &sid_text,
+            &target,
+            &root,
+            container_owner.clone(),
+        ) {
+            Ok(true) => written.push((sid_text.clone(), target.path.clone(), rights)),
+            Ok(false) => {}
             Err(e) => {
                 // 按这一环的**必要性**分流：必要落点授不上要问用户（不许降级），可选落点只记事实。
                 eprintln!("[围栏] 授权未完成：{}", e);
@@ -297,7 +328,10 @@ pub fn run_fenced(spec: &FenceSpec, prepared: bool, home: Option<&Path>, command
     let outcome = run_in_container(sid, spec, command);
     free_sid(sid);
     match outcome {
-        Ok(code) => code,
+        Ok(code) => {
+            super::note_fence_boundary(spec, true, code);
+            code
+        }
         Err(e) => {
             // 容器起不来也要如实说清，并退回普通方式执行（能力等级已在启动报告里说明）。
             eprintln!("[围栏] 容器围栏未生效（{}）：按如实降级继续执行", e);

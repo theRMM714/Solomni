@@ -44,6 +44,7 @@ impl Conductor {
             }
             list.push(crate::capabilities::workspace::api::Sandbox {
                 work_name: work.clone(),
+                session: meta.name.clone(),
                 agent: a.name.clone(),
                 // 共享主副本对 agent **只读**：写入走 work_commit（见 PRODUCT.md 的版本化工作区）。
                 shared_writable: false,

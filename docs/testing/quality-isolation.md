@@ -32,6 +32,7 @@
 - 编译：`cargo check --all-targets`；
 - 警告：`cargo clippy --all-targets --all-features -- -D warnings`；
 - 重复依赖：`cargo tree --duplicates`；
+- 供应链：`cargo audit`（已知 CVE）与 `cargo deny check`（许可证 / 禁用 / 来源，配置 `deny.toml`）；
 - 测试目标登记、报告结构、缺口账格式；
 - 重复测试、重复 Fixture、重复 Fake 和跨层无理由重复断言；
 - 未使用代码、死代码、无效分支和不必要包装层。
@@ -44,8 +45,9 @@
 - 依赖重复不一定是错误，必须有解释或后续治理记录；
 - 重复代码检查不得诱导新增抽象。先判断重复是否属于同一职责，再决定合并、保留或记录原因。
 
-当前 `node run-tests.js` 已执行上述全部 T0 检查，且**全是零容忍硬失败**：
-编译、结构审查、格式、clippy、编译告警、依赖重复——任何一项不过即 `quality-fail`，**没有存量基线**。
+当前 `node run-tests.js` 已执行上述全部 T0 检查：编译、结构审查（含**门禁解析器自测**与 **`#[ignore]` 禁令**）、
+格式、clippy、编译告警、依赖重复**零容忍硬失败**——任何一项不过即 `quality-fail`，**没有存量基线**。
+供应链（`cargo audit` / `cargo deny check`）同为硬失败，但**工具缺失或取不到 advisory 数据**记 `env-skip`。
 清单与判定见 [levels.md](levels.md) 的 T0 一节。
 
 三平台各自跑同一套检查：clippy 只编译当前平台的 `#[cfg]` 代码（Windows 的容器围栏在 unix 上不存在，

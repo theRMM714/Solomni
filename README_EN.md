@@ -87,12 +87,17 @@ that is gone.
 Requirements: **Node** (to run the launcher) and **Rust** (to build the core).
 
 ```bash
+node env.js setup        # prepare the environment only: toolchain into platform/<os>/ and .tools/
 node start.js            # any platform; on Windows also start.bat, on macOS / Linux also ./start.sh
 node start.js -webUI     # go straight to the local web UI (127.0.0.1:3081)
 ```
 
-- The first run keeps the toolchain **inside the project** (`platform/`, `.tools/`): if Rust is missing it asks
-  for consent before installing, and never touches the system.
+- The environment is its own layer ([env.js](env.js)): path conventions (`platform/<os>/`, `.tools/`), toolchain
+  detection, environment composition and installation all live there. The launcher only orchestrates build/run, and
+  `run-tests.js` resolves its environment from the same place — **switching dev environments means editing one file**.
+  `node env.js` shows the resolved environment; `node env.js --print-env` prints it machine-readable.
+- The toolchain stays **inside the project**: if Rust is missing it asks for consent before installing and never
+  touches the system; with **no interactive terminal** it skips the install, prints the manual steps, and exits.
 - **You can run it without a provider**: it walks the flow with the built-in fake model and says so plainly.
 - Common flags: `--root <dir>` (product root), `--web-port <port>`, `--release`.
 - Commands at the prompt: `single [agent…]` / `collab [agent…|?]` / `proxy` (hand the whole decision to the core) / `module [module-id.tool [json]]` (run a module tool directly, without AI) / `webui`.

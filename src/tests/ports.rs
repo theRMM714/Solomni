@@ -28,6 +28,7 @@ use std::sync::{Arc, Mutex};
 fn spec() -> FenceSpec {
     FenceSpec {
         agent: "a".to_string(),
+        lease: String::new(),
         private: PathBuf::new(),
         ro_tree: Vec::new(),
         rw: Vec::new(),

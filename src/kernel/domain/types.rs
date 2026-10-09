@@ -67,4 +67,45 @@ pub struct Ask {
     pub detail: String,
     /// 目的：选项集——`(id, label)`；**id 是行为契约**（回答按 id 分派、改文案不改行为），label 只给渲染。
     pub options: Vec<(String, String)>,
+    /// 目的：**没人答时怎么办**——发起方声明一个**自己卡上的选项 id**（通道不解释它意味着什么）；
+    ///   不写 = 没人答就交回发起方按 fail-closed 处置。它是"这一问的收场声明"，不是通道的词表：
+    ///   想加"接受 / 拒绝 / 全部接受"这类选项，改的是发起方自己的选项集，不是这里。
+    #[serde(default)]
+    pub on_unanswered: Option<String>,
+}
+
+impl Ask {
+    /// 目的：这个选项 id 是不是本卡选项集里的一条（声明与回答都按它校验，不静默改写）。
+    pub fn has_option(&self, id: &str) -> bool {
+        self.options.iter().any(|(o, _)| o == id)
+    }
+}
+
+/// 目的：一次提问的收场——**为什么没有答案**如实分开，发起方据此处置（不必逐态 match，用 `decided`）。
+/// 约束：通道只认选项 id 与这三种"没有答案"的事实，不认识"接受 / 拒绝"这类语义（那是发起方自己的选项）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AskOutcome {
+    /// 前端答了某个选项 id。
+    Chosen(String),
+    /// 没人答，按发起方声明的 `on_unanswered` 收场（**如实标为"不是用户答的"**）。
+    Defaulted(String),
+    /// 没人答、也没声明默认项：发起方按 fail-closed 处置（这一趟没有可回答的前端，或前端断了）。
+    NoAnswer,
+    /// 用户按了停止 / 会话被关闭：整队作废（= 拒绝）——**不套用默认项**，停止不能被当成放行。
+    Stopped,
+    /// 构不出可用选项：端口不发起裁决，改为停掉这个会话 + 落一条警告（发起方不执行）。
+    NoOptions,
+}
+
+impl AskOutcome {
+    /// 目的：这次**照哪个选项 id 办**——用户答的或声明的默认项都算；`None` = 这次不办。
+    /// 约束：发起方只需要看这一个结果，不必逐态 match；"为什么没答案"的如实记录由端口落进会话。
+    // 这套机制只在 Windows 的容器围栏里用（unix 没有 prepare_fence 这一步）：unix 侧无使用点，如实放行死代码。
+    #[allow(dead_code)]
+    pub fn decided(&self) -> Option<&str> {
+        match self {
+            AskOutcome::Chosen(id) | AskOutcome::Defaulted(id) => Some(id.as_str()),
+            _ => None,
+        }
+    }
 }

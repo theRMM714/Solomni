@@ -510,12 +510,6 @@
     "条目：首行不是目的": 12,
     "行内：连续超过 2 行": 2
   },
-  "src/capabilities/tools/detail/confine/windows/record.rs": {
-    "头块：槽外有行或自造槽": 2,
-    "头块：缺文件头": 1,
-    "条目：槽外有行或自造槽": 19,
-    "条目：首行不是目的": 8
-  },
   "src/capabilities/tools/detail/confine/windows/tests.rs": {
     "头块：缺文件头": 1,
     "行内：块注释": 1,

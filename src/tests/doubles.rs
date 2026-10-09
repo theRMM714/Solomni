@@ -719,6 +719,7 @@ pub(crate) fn test_sandbox(
     }
     crate::capabilities::workspace::api::Sandbox {
         work_name: "demo".to_string(),
+        session: "demo".to_string(),
         agent: agent.to_string(),
         // 测试助手默认**可写共享区**：内置文件工具的既有用例直接写 work/ 复核行为；
         // 生产里 agent 会话是只读（env.rs 设 false），只读语义由 test_sandbox_readonly 单独钉。

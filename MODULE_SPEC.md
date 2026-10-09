@@ -112,6 +112,12 @@ tools:                  # 【可选】外部工具表：工具名 → 声明
   **这些目录本身与它们的直接父目录可以判断存在性**（`exists` / `stat` 得到真实结果），所以"产物目录不存在就先建"这类写法在围栏里也能正常工作。
   写进未被授权的目录仍会失败——失败在**该失败的那一层**，不连累无关路径。内置工具清单与路径模型见 [docs/tools/tools-and-roles.md](docs/tools/tools-and-roles.md) 的「路径模型」。
 
+- **模块目录就是发现边界**：围栏只让工具可达模块目录、`userdata/` 与声明的工作区。
+  许多运行时会按目录**向上**自动找配置——Node 就从入口脚本向上找最近的 `package.json` 来定模块格式、解析 `require`——
+  这类发现一旦落在可达范围之外，就会被系统拒绝（`ERR_INVALID_PACKAGE_CONFIG` 之类），进程在脚本执行前就倒。
+  所以工具要自足：把运行时会向上找的东西自带在模块目录里，让发现终止在模块根
+  （Node 模块的根放一份 `package.json`，或入口用 `.mjs`）。
+
 - **人可以直接用它**：模块工具同时是动作表里的一条动作（id = `module.<模块id>.<工具名>`）。
   不经 AI 会话也能跑：CLI `module <模块id>.<工具名> [json 参数]`，Web `POST /api/actions/module.<模块id>.<工具名>`
   （清单见 `GET /api/actions`）。参数仍按本模块 `params` 校验；可选 `workspace` 给一份工作目录（缺省 = 模块自己的 `userdata/`）；

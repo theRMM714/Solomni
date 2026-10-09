@@ -5,8 +5,10 @@
 //!   「请用户裁决」；队列本体在 `capabilities/session/domain/decisions.rs`，本实现由核心在生成线程上现造。
 
 use crate::capabilities::conductor::api::{ConductorHandle, SessionOps};
-use crate::capabilities::session::api::{AnswerSlot, DecisionDoor, Pending, SessionEvent};
-use crate::kernel::api::Ask;
+use crate::capabilities::session::api::{
+    AnswerSlot, DecisionDoor, Pending, SessionEvent, SlotWake,
+};
+use crate::kernel::api::{Ask, AskOutcome};
 use crate::kernel::ports::AskUser;
 use std::sync::{Arc, Mutex};
 
@@ -53,15 +55,28 @@ impl SessionAsk {
 }
 
 impl AskUser for SessionAsk {
-    fn ask(&self, ask: &Ask) -> Option<String> {
+    fn ask(&self, ask: &Ask) -> AskOutcome {
         if self.stopped() {
-            return None;
+            // 这一趟已经因"做不下去"停过会话：不再推卡，如实按"没人答"收场。
+            return AskOutcome::NoAnswer;
         }
         if ask.options.is_empty() {
             // 契约禁止置灰：没有一条真能执行的选项就不发起裁决——停会话 + 落警告。
             self.halt(&format!("{}：{}（{}）", ask.title, ask.body, ask.detail));
-            return None;
+            return AskOutcome::NoOptions;
         }
+        // 声明的默认项必须是**本卡选项集里的一条**：不属于就如实记一句、按"没人答"处置，不静默改写。
+        let default = match ask.on_unanswered.as_deref() {
+            Some(id) if ask.has_option(id) => Some(id.to_string()),
+            Some(id) => {
+                (self.emit)(SessionEvent::Notice(format!(
+                    "[警告] 这一问声明的默认项不在它的选项集里（{}）：这条声明不算数，没人答时按不执行收场。",
+                    id
+                )));
+                None
+            }
+            None => None,
+        };
         // **先登记再推卡**：否则用户手快会答在一张还没进队的卡上，答案丢掉、发起方干等。
         let slot = AnswerSlot::new();
         let (_, events) = self.door.push(
@@ -73,8 +88,28 @@ impl AskUser for SessionAsk {
         for e in events {
             (self.emit)(e);
         }
-        // 不设超时：回答、用户按停止（整队作废 = **拒绝**）、会话被删都会解开这一格。
-        slot.wait()
+        // 不设超时：回答、用户按停止（整队作废 = 拒绝）、会话被删 / 重建都会解开这一格。
+        match slot.wait() {
+            SlotWake::Answer(id) => AskOutcome::Chosen(id),
+            // 停止是用户的动作（= 拒绝）：**不套用默认项**，否则"按停止"会被吞成放行。
+            SlotWake::Stopped => AskOutcome::Stopped,
+            SlotWake::Gone => match default {
+                Some(id) => {
+                    (self.emit)(SessionEvent::Notice(format!(
+                        "[裁决] 这一问没人能答：按声明的默认项（{}）收场——这一下不是用户答的。",
+                        id
+                    )));
+                    AskOutcome::Defaulted(id)
+                }
+                None => {
+                    (self.emit)(SessionEvent::Notice(
+                        "[裁决] 这一问没人能答（这一趟没有可回答的前端），也没有声明默认项：这一趟不执行。"
+                            .to_string(),
+                    ));
+                    AskOutcome::NoAnswer
+                }
+            },
+        }
     }
 
     fn halt(&self, why: &str) {

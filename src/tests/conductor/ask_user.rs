@@ -7,7 +7,7 @@ use crate::capabilities::conductor::api::{ConductorHandle, Ops, Output};
 use crate::capabilities::conductor::service::ask_user::SessionAsk;
 use crate::capabilities::session::api::SessionEvent;
 use crate::capabilities::tools::domain::fence::{OPT_FENCE_ABORT, OPT_FENCE_UNFENCED};
-use crate::kernel::api::Ask;
+use crate::kernel::api::{Ask, AskOutcome};
 use crate::kernel::ports::AskUser;
 use crate::tests::builders::SilentRunner;
 use crate::tests::doubles::{abs, core_with_runner, gw, module_of};
@@ -61,6 +61,7 @@ fn request() -> Ask {
             ),
             (OPT_FENCE_ABORT.to_string(), "放弃这次调用".to_string()),
         ],
+        on_unanswered: None,
     }
 }
 
@@ -108,7 +109,7 @@ fn ask_pushes_a_card_and_blocks_until_the_answer_command_answers_it() {
     assert!(answerer.join().expect("作答线程"), "卡要进这条会话的队");
     assert_eq!(
         got,
-        Some(OPT_FENCE_UNFENCED.to_string()),
+        AskOutcome::Chosen(OPT_FENCE_UNFENCED.to_string()),
         "选中的选项 id 要还给发起方"
     );
     assert!(door.is_empty(), "答完不再挂着");
@@ -139,7 +140,11 @@ fn no_options_means_halt_instead_of_asking() {
     );
     let mut empty = request();
     empty.options.clear();
-    assert_eq!(ask.ask(&empty), None, "构不出可用选项 = 没有回答");
+    assert_eq!(
+        ask.ask(&empty),
+        AskOutcome::NoOptions,
+        "构不出可用选项 = 没有回答（端口已停会话 + 落警告）"
+    );
     assert!(door.is_empty(), "空选项集不该推卡");
     let pushed = seen.lock().expect("锁");
     assert!(
@@ -155,6 +160,115 @@ fn no_options_means_halt_instead_of_asking() {
         "停下的会话不再派发"
     );
     // 停过一次之后不再推卡：会话已停，再推一张没人能做主的卡只会让人困惑。
-    assert_eq!(ask.ask(&request()), None, "停过之后不再发起裁决");
+    assert_eq!(
+        ask.ask(&request()),
+        AskOutcome::NoAnswer,
+        "停过之后不再发起裁决"
+    );
     assert!(door.is_empty(), "停过之后不许再推卡");
+}
+
+/// 没有可回答的前端（没有端口）时也走同一条：按**发起方自己声明的**默认项收场；声明不算数则如实按"没人答"。
+#[test]
+fn no_answerer_falls_back_to_the_declared_option_or_refuses() {
+    use crate::kernel::ports::ask_user;
+    let mut with_default = request();
+    with_default.on_unanswered = Some(OPT_FENCE_ABORT.to_string());
+    assert_eq!(
+        ask_user(None, &with_default),
+        AskOutcome::Defaulted(OPT_FENCE_ABORT.to_string()),
+        "没人答 + 声明了默认项 = 按它收场（不是用户答的）"
+    );
+    assert_eq!(
+        ask_user(None, &request()),
+        AskOutcome::NoAnswer,
+        "没人答 + 没声明默认项 = 不办（fail-closed）"
+    );
+    let mut bogus = request();
+    bogus.on_unanswered = Some("不在卡上的选项".to_string());
+    assert_eq!(
+        ask_user(None, &bogus),
+        AskOutcome::NoAnswer,
+        "声明不属于本卡选项集就不算数，不静默改写"
+    );
+}
+
+/// 端口上**用户停止 ≠ 没人答**：停止按拒绝收场，**绝不能被声明的默认项吞成放行**。
+#[test]
+fn stopped_is_not_the_same_as_nobody_answered() {
+    let (handle, _ops, sid) = session_case();
+    let door = door_of(&handle, &sid);
+    let ask = SessionAsk::new(
+        Arc::clone(&door),
+        &sid,
+        Box::new(|_ev: SessionEvent| {}),
+        handle.clone(),
+    );
+    let mut request = request();
+    request.on_unanswered = Some(OPT_FENCE_UNFENCED.to_string());
+    let stopper = {
+        let door = Arc::clone(&door);
+        std::thread::spawn(move || {
+            for _ in 0..2000 {
+                if !door.is_empty() {
+                    door.void();
+                    return true;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(2));
+            }
+            false
+        })
+    };
+    assert_eq!(
+        ask.ask(&request),
+        AskOutcome::Stopped,
+        "用户停止 = 拒绝：声明的默认项不能把它吞成放行"
+    );
+    assert!(stopper.join().expect("停止线程"), "卡要先进队");
+}
+
+/// 没人答（这一趟没有回答者）时端口按声明的默认项收场，并在会话里**如实记一句"不是用户答的"**。
+#[test]
+fn port_applies_the_declared_default_and_says_it_was_not_the_user() {
+    let (handle, _ops, sid) = session_case();
+    let door = door_of(&handle, &sid);
+    let seen: Arc<Mutex<Vec<SessionEvent>>> = Arc::new(Mutex::new(Vec::new()));
+    let ask = SessionAsk::new(
+        Arc::clone(&door),
+        &sid,
+        Box::new({
+            let seen = Arc::clone(&seen);
+            move |ev: SessionEvent| seen.lock().expect("锁").push(ev)
+        }),
+        handle.clone(),
+    );
+    let mut request = request();
+    request.on_unanswered = Some(OPT_FENCE_UNFENCED.to_string());
+    // 没人答：等待格被"这一趟没有回答者"解开（会话按转录重建那条路）。
+    let releaser = {
+        let door = Arc::clone(&door);
+        std::thread::spawn(move || {
+            for _ in 0..2000 {
+                if !door.is_empty() {
+                    door.rebuild(0);
+                    return true;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(2));
+            }
+            false
+        })
+    };
+    assert_eq!(
+        ask.ask(&request),
+        AskOutcome::Defaulted(OPT_FENCE_UNFENCED.to_string()),
+        "没人答 + 声明了默认项 = 按它收场"
+    );
+    assert!(releaser.join().expect("线程"), "卡要先进队");
+    let pushed = seen.lock().expect("锁");
+    assert!(
+        pushed.iter().any(|e| matches!(e, SessionEvent::Notice(n)
+            if n.contains("没人能答") && n.contains("不是用户答的"))),
+        "要如实记一句“不是用户答的”：{:?}",
+        *pushed
+    );
 }

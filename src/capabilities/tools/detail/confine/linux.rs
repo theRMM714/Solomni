@@ -239,13 +239,14 @@ pub fn run_fenced(
     _home: Option<&std::path::Path>,
     command: &str,
 ) -> i32 {
-    match install(spec, command) {
-        Ok(()) => {}
+    let enforced = match install(spec, command) {
+        Ok(()) => true,
         Err(e) => {
             // 如实降级：机制装不上就不装，但不假装装上了（启动时已报告能力等级）。
             eprintln!("[围栏] 文件系统围栏未生效（{}）：按如实降级继续执行", e);
+            false
         }
-    }
+    };
     let mut cmd = shell_command(command);
     cmd.current_dir(&spec.cwd);
     // 父进程（守门进程）一死，工具进程跟着死——不留孤儿。
@@ -262,7 +263,11 @@ pub fn run_fenced(
         });
     }
     match cmd.status() {
-        Ok(s) => s.code().unwrap_or(FENCE_FAILED),
+        Ok(s) => {
+            let code = s.code().unwrap_or(FENCE_FAILED);
+            super::note_fence_boundary(spec, enforced, code);
+            code
+        }
         Err(e) => {
             eprintln!("[围栏] 工具进程启动失败：{}", e);
             FENCE_FAILED

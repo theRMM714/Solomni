@@ -4,7 +4,7 @@
 
 use super::doubles::module_of;
 use super::ops_with;
-use crate::capabilities::session::api::Pending;
+use super::prelude::*;
 use crate::kernel::api::Tier;
 use crate::presentation::cli;
 
@@ -99,4 +99,38 @@ fn waiting_list_is_built_line_by_line() {
         lines[1]
     );
     assert!(lines[2].contains("核心"), "按先来后到：{:?}", lines[2]);
+}
+
+/// 目的：CLI 上挂着的裁决答不上（输入到尽头 EOF）时按**停止 = 拒绝**收场——不能一直吊着。
+/// 约束：停止不套用发起方声明的默认项；等待方被解开、会话随后不再被派发。
+#[test]
+fn eof_answers_a_pending_card_by_stopping_instead_of_hanging() {
+    use crate::capabilities::session::api::{AnswerSlot, Pending, SlotWake};
+
+    let (handle, ops) = ops_with(vec![module_of("a")], Vec::new());
+    let sid = "cli-eof-1";
+    ops.sessions
+        .create_work(work(sid, WorkMode::Single, &["a"]))
+        .expect("建会话");
+    let door = {
+        let s = sid.to_string();
+        handle
+            .call(move |core| Ok(core.desk_of(&s)))
+            .expect("取这个会话的裁决队")
+    };
+    // 造一个"工作线程正等答"的现场：卡片带等待格进队，等待格被那个线程等着。
+    let slot = AnswerSlot::new();
+    door.push(None, Pending::ConfirmBegin, "", Some(Arc::clone(&slot)));
+    let waiter = {
+        let slot = Arc::clone(&slot);
+        std::thread::spawn(move || slot.wait())
+    };
+    // 输入到尽头：按停止收场，等待方被解开（而不是永远挂着）。
+    cli::eof_stop(&ops, sid);
+    assert_eq!(
+        waiter.join().expect("等待线程"),
+        SlotWake::Stopped,
+        "EOF = 停止（拒绝），不是“没人答”"
+    );
+    assert!(!ops.sessions.is_running(sid), "EOF 收场后这条会话不再在跑");
 }

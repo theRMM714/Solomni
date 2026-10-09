@@ -630,7 +630,7 @@ fn decision_door_queues_only_the_head_and_voids_waiters() {
     }
     assert_eq!(
         h.join().expect("线程"),
-        Some(OPT_TOOL_ALLOW.to_string()),
+        crate::capabilities::session::api::SlotWake::Answer(OPT_TOOL_ALLOW.to_string()),
         "回答要唤醒等待方"
     );
     assert!(door.is_empty(), "答完不再挂着");
@@ -646,7 +646,11 @@ fn decision_door_queues_only_the_head_and_voids_waiters() {
     let h2 = std::thread::spawn(move || slot2.wait());
     // 整队作废（停止 / 关闭 = 拒绝）：排队的卡一律作废，等待方解开、按拒绝收场。
     assert_eq!(door.void(), vec!["d2".to_string(), "d3".to_string()]);
-    assert_eq!(h2.join().expect("线程"), None, "作废 = 拒绝（不执行）");
+    assert_eq!(
+        h2.join().expect("线程"),
+        crate::capabilities::session::api::SlotWake::Stopped,
+        "整队作废 = 用户停止（发起方按拒绝处置，不套用默认项）"
+    );
     assert!(door.is_empty(), "作废之后不再挂着");
     assert!(door.queue().is_none(), "作废之后快照里没有卡");
 }

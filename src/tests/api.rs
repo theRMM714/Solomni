@@ -372,8 +372,10 @@ fn stopping_a_collab_discussion_is_prompt_and_keeps_the_session() {
         std::thread::spawn(move || sessions.answer_card(&sid, &card, OPT_BEGIN, ""))
     };
     let deadline = Instant::now() + Duration::from_secs(5);
-    while started.load(Ordering::Relaxed) == 0 {
-        assert!(Instant::now() < deadline, "讨论没有启动");
+    // 等到讨论真的进入**阻塞中的那次调用**（gated_ops 的第二次调用一直阻塞到放行/停止）；
+    // 只等第一次会落在「第一次已返回、第二次还没开始」的窗口里，那时 stop 合理地看不到在跑的会话。
+    while started.load(Ordering::Relaxed) < 2 || !ops.sessions.is_running(&sid) {
+        assert!(Instant::now() < deadline, "讨论没有进入可停止的状态");
         std::thread::sleep(Duration::from_millis(5));
     }
 

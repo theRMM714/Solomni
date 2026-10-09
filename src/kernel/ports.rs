@@ -18,7 +18,7 @@ impl Log for NoopLog {
     fn error(&self, _at: &str, _msg: &str) {}
 }
 
-use crate::kernel::domain::types::{Ask, ToolOutcome};
+use crate::kernel::domain::types::{Ask, AskOutcome, ToolOutcome};
 use std::path::Path;
 
 /// 目的：**提问端口**——需要用户裁决的机制（围栏、工具执行层，今后任何 yes/no）经它推一条问题，
@@ -27,16 +27,31 @@ use std::path::Path;
 ///   实现方负责**阻塞**、把用户选中的**选项 id** 原样带回，并在没有可回答的前端时按 fail-closed 收场。
 pub trait AskUser: Send + Sync {
     /// 目的：把这条问题推给用户并**阻塞**等他答（不设超时——不点不继续）。
-    /// 参数：`ask` = 谁在问 + 消息三段 + 选项集；选项集**不得为空**（契约禁止置灰）。
-    /// 返回：用户选中的**选项 id**；拒绝、没人答（停会话解成拒绝）、以及**构不出可用选项**
-    ///   （空选项集，端口已按契约停掉这个会话并落一条警告）一律 `None`——调用方按 fail-closed 处置。
+    /// 参数：`ask` = 谁在问 + 消息三段 + 选项集 + 没人答时的默认项；选项集**不得为空**（契约禁止置灰）。
+    /// 返回：**这次照哪个选项办、或为什么没办**——用户答的、按声明默认项收场的、没人答的、
+    ///   用户停止的、构不出可用选项的，各自如实分开（见 `AskOutcome`）；"为什么"由端口自己落进会话。
     // 这套机制只在 Windows 的容器围栏里用（unix 没有 prepare_fence 这一步）：unix 侧无使用点，如实放行死代码。
     #[allow(dead_code)]
-    fn ask(&self, ask: &Ask) -> Option<String>;
+    fn ask(&self, ask: &Ask) -> AskOutcome;
 
     /// 目的：这一环**构不出可用选项**时的收场：**不发起裁决**，改为**停掉这个会话 + 落一条警告**。
     /// 参数：`why` = 哪一环做不下去、要补什么（请求方给的原话，写进那条警告）。
     fn halt(&self, why: &str);
+}
+
+/// 目的：一次提问的**统一入口**——有前端就问它，没前端就按发起方声明的默认项收场（默认 = 不办）。
+/// 约束：声明只在**属于这张卡选项集**时才算数（不属于就按"没人答"处置，不静默改写）；
+///   发起方只该用 `AskOutcome::decided` 取结果，不必逐态 match。
+// 这套机制只在 Windows 的容器围栏里用（unix 没有 prepare_fence 这一步）：unix 侧无使用点，如实放行死代码。
+#[allow(dead_code)]
+pub fn ask_user(port: Option<&dyn AskUser>, ask: &Ask) -> AskOutcome {
+    match port {
+        Some(p) => p.ask(ask),
+        None => match ask.on_unanswered.as_deref().filter(|id| ask.has_option(id)) {
+            Some(id) => AskOutcome::Defaulted(id.to_string()),
+            None => AskOutcome::NoAnswer,
+        },
+    }
 }
 
 /// 目的：一类工具的执行者——**按名字认领**，不靠“内置 / 模块”的两分法。
