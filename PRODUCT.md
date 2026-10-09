@@ -91,7 +91,7 @@ agent 实例名不得占用 `work` / `children`（名单在 `systools/names.yaml
   那一路**拒绝执行**。机制细节见 [ARCHITECTURE.md](ARCHITECTURE.md)，三平台真机探针见 [TESTING.md](TESTING.md)。
 - **围栏要用就征得同意**：Windows 的路径级围栏要写本机权限项，程序**默认不写**——只有显式授权
   （`settings.yaml` 的 `fence_write: true` 或 `SOLOMNI_FENCE_WRITE=1`）才做；授权后每次写入逐条列出并记进台账；
-  `solomni --fence-clean` 按台账精确撤销并扫掉台账外的孤儿授权（删除会话时也撤销该会话的授权）；想**先看清单、只动其中一条**另有按条入口：`--fence-ledger` 列出台账现值与“与盘上对不对得上”的差异，`--fence-restore <路径>` / `--fence-revoke <SID> <路径>` / `--fence-profile-rm <名>` 各只处置指定那一条（台账外的根外残留也能按 SID + 路径撤掉）。
+  `solomni --fence-clean` 按台账精确撤销并扫掉台账外的孤儿授权（删除会话时也撤销该会话的授权）；启动时会按台账自动对账一次，把上一次运行被杀/崩溃留下的**陈旧授权**收回（只回收归属明确已死的，无法判定的如实报告、留待手动处置；失败不影响启动，可跑 `--fence-reconcile` 重试）；想**先看清单、只动其中一条**另有按条入口：`--fence-ledger` 列出台账现值与“与盘上对不对得上”的差异，`--fence-restore <路径>` / `--fence-revoke <SID> <路径>` / `--fence-profile-rm <名>` 各只处置指定那一条（台账外的根外残留也能按 SID + 路径撤掉）。
 - 上传同名文件绝不静默覆盖（覆盖 / 改名 / 取消）。
 
 ## 运行流程

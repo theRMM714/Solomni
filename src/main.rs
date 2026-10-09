@@ -58,6 +58,7 @@ fn main() {
         .unwrap_or_else(|| PathBuf::from("."));
     // 产品根规范化成**干净的绝对路径**：提示词里给 AI 的、以及各适配器给出的根都是它。
     let (root, root_note) = entry::root::resolve_root(&raw_root);
+    let home = root.join(".home");
     // 隐藏模式：按条处置围栏台账（列清单 / 还原一条 / 撤一条 / 删一个 profile）——比整体收尾更细，
     // 所以排在 --fence-clean 之前；两者共用同一份台账与同一套 ACE 读法（见 docs/tools/README.md）。
     if let Some(code) = guard::fence_grant(&args, &root) {
@@ -80,6 +81,17 @@ fn main() {
     if let Some(note) = &root_note {
         eprintln!("[根目录] {}", note);
         log.warn("main::root", note);
+    }
+    // 启动对账（装配期，会话尚未开工）：按台账回收上一次运行被杀/崩溃留下的陈旧授权。
+    // 只回收归属明确已死的条目；无法判定的报告后跳过；失败如实报、台账保留供重试（--fence-reconcile / --fence-clean）。
+    {
+        let rep = capabilities::tools::detail::confine::reconcile(&home);
+        if rep.has_activity() {
+            println!("[围栏] 启动对账：{}", rep.summary());
+        }
+        if !rep.errors.is_empty() {
+            log.warn("main::fence_reconcile", &rep.summary());
+        }
     }
     // 围栏能力如实告知（不强于实际：机制缺什么就说缺什么）。
     let fence_cap = capabilities::tools::detail::confine::capability();
@@ -154,7 +166,6 @@ fn main() {
 
     // 围栏是否允许在本机写权限：设置里授权过、或环境变量显式指定（SOLOMNI_FENCE_WRITE=1/0 可取反）。
     // 默认不准——没经过用户同意，本程序不动本机任何权限项。
-    let home = root.join(".home");
     let write_allowed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     // 启动报告已经算过的同一个事实：Web 概览要按它区分"本机能力"与"本次实际"（下面那块必定赋值）。
     let allow_fence_write;

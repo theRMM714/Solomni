@@ -31,6 +31,16 @@ pub fn fence_grant(args: &[String], root: &std::path::Path) -> Option<i32> {
             .and_then(|i| args.get(i + 1))
             .cloned()
     };
+    // 启动对账的手动入口（与启动期同一份实现）：按台账回收归属明确已死的陈旧授权。
+    if args.iter().any(|a| a == "--fence-reconcile") {
+        let rep = confine::reconcile(&home);
+        if rep.errors.is_empty() {
+            println!("[围栏] {}", rep.summary());
+            return Some(0);
+        }
+        eprintln!("[围栏] {}", rep.summary());
+        return Some(1);
+    }
     // 列清单：机器可读优先（默认 JSON）；--human 给一行一句的可读版。恒退出 0，判定归调用方。
     if args.iter().any(|a| a == "--fence-ledger") {
         let view = confine::ledger(&home);
@@ -103,6 +113,7 @@ fn ledger_lines(view: &crate::capabilities::tools::detail::confine::Ledger) -> V
             rights,
             at,
             present,
+            owners,
             ace_sids,
             notes,
         } = e;
@@ -123,6 +134,13 @@ fn ledger_lines(view: &crate::capabilities::tools::detail::confine::Ledger) -> V
             ),
             _ => format!("[profile] {}（记于 {} 秒；{}）", path, at, state),
         };
+        if !owners.is_empty() {
+            let who: Vec<String> = owners
+                .iter()
+                .map(|o| format!("pid {}（创建于 {}）", o.pid, o.start))
+                .collect();
+            line.push_str(&format!("；归属：{}", who.join("、")));
+        }
         if !ace_sids.is_empty() {
             line.push_str(&format!("；盘上显式包授权：{}", ace_sids.join("、")));
         }

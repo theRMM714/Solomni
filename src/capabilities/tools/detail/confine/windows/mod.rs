@@ -158,9 +158,19 @@ pub fn prepare_fence(spec: &FenceSpec, command: &str, home: &Path) -> FencePrep 
     let mut prep = FencePrep::default();
     // 产品根 = .home 的父目录：根内路径存原始安全描述符收尾还原，根外只记 ACE 摘要精确撤销。
     let root = product_root(home);
+    // 台账写事务要串行：同进程的并发工具调用 + 多实例都会各写一次。
+    let _lock = match lock_ledger(home) {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("[围栏] 授权台账落盘失败：{}", e);
+            prep.fail(FencePart::Ledger, PathBuf::new(), e);
+            return prep;
+        }
+    };
+    let owner = current_owner();
     let mut rec = load_record(home);
     let container = container_name(spec);
-    if let Err(e) = journal_add_profile(home, &mut rec, &container) {
+    if let Err(e) = journal_add_profile(home, &mut rec, &container, owner) {
         // 台账落不下就不能动本机权限项（这一环是必要的）：如实收尾，让调用方去问用户。
         eprintln!("[围栏] 授权台账落盘失败：{}", e);
         prep.fail(FencePart::Ledger, PathBuf::new(), e);
@@ -192,7 +202,7 @@ pub fn prepare_fence(spec: &FenceSpec, command: &str, home: &Path) -> FencePrep 
             inherit: true,
             part: FencePart::Interpreter,
         };
-        match grant_one_journaled(home, &mut rec, base, &base_text, &target, &root) {
+        match grant_one_journaled(home, &mut rec, base, &base_text, &target, &root, owner) {
             Ok(()) => written.push((base_text.clone(), dir, RIGHTS_RO)),
             Err(e) => {
                 eprintln!("[围栏] 解释器目录授权未完成（{}）：{}", dir.display(), e);
@@ -230,7 +240,7 @@ pub fn prepare_fence(spec: &FenceSpec, command: &str, home: &Path) -> FencePrep 
         if has_ace_for(sid, path, rights) {
             continue;
         }
-        match grant_one_journaled(home, &mut rec, sid, &sid_text, &target, &root) {
+        match grant_one_journaled(home, &mut rec, sid, &sid_text, &target, &root, owner) {
             Ok(()) => written.push((sid_text.clone(), target.path.clone(), rights)),
             Err(e) => {
                 // 按这一环的**必要性**分流：必要落点授不上要问用户（不许降级），可选落点只记事实。

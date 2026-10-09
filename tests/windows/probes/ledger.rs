@@ -105,3 +105,53 @@ fn ledger_listing_and_per_item_commands_are_machine_readable_and_honest() {
 
     let _ = std::fs::remove_dir_all(&root);
 }
+
+/// 【启动对账的 CLI 契约】`--fence-reconcile`：归属明确已死的条目销账并如实报回收；
+/// 缺归属的条目报告并跳过、不当成失败；退出码可判定。
+/// 这里只用**不存在的路径/不存在的 profile**，所以对账不会写任何 ACL（探针不碰本机权限项）。
+#[test]
+fn fence_reconcile_reclaims_dead_owners_and_reports_unjudgeable() {
+    let root = scratch("reconcile-cli");
+    let home = root.join(".home");
+    std::fs::create_dir_all(&home).expect("建私有区");
+    let gone = root.join("gone").join("target");
+    let esc = |p: &std::path::Path| p.to_string_lossy().replace('\\', "/");
+    let gone_s = esc(&gone);
+    let dead = "{\"pid\": 2147483632, \"start\": 1}";
+    let ledger = format!(
+        "{{\n  \"profiles\": [{{\"name\": \"Solomni.Agent.ProbeReconcileGone\", \"at\": 11, \"owners\": [{}]}}],\n  \"grants\": [{{ \"sid\": \"S-1-15-2-1\", \"path\": \"{}\", \"rights\": 18, \"at\": 12, \"owners\": [{}] }}],\n  \"snapshots\": [{{\"path\": \"{}\", \"at\": 13, \"bytes\": []}}]\n}}\n",
+        dead, gone_s, dead, gone_s,
+    );
+    std::fs::write(home.join("fence-grants.json"), ledger).expect("写台账");
+    let root_s = root.to_string_lossy().into_owned();
+
+    // ① 归属已死、路径与 profile 又都不在：只销账，不写 ACL。
+    let (code, out, err) = run(&["--root", &root_s, "--fence-reconcile"]);
+    assert_eq!(code, 0, "对账成功要退出 0：{} / {}", out, err);
+    assert!(out.contains("已回收"), "要如实报回收结果：{}", out);
+    assert!(
+        !home.join("fence-grants.json").exists(),
+        "条目销清后台账文件应当删掉：{}",
+        out
+    );
+
+    // ② 缺归属：报告并跳过，退出 0，台账保留（不许当失败、也不许回收）。
+    let orphan = format!(
+        "{{\"sid\": \"S-1-15-2-2\", \"path\": \"{}\", \"rights\": 18, \"at\": 14}}",
+        gone_s
+    );
+    std::fs::write(
+        home.join("fence-grants.json"),
+        format!("{{ \"grants\": [{}] }}\n", orphan),
+    )
+    .expect("写无归属台账");
+    let (code, out, err) = run(&["--root", &root_s, "--fence-reconcile"]);
+    assert_eq!(code, 0, "缺归属不算失败：{} / {}", out, err);
+    assert!(out.contains("无法判定"), "要如实报告跳过：{}", out);
+    assert!(
+        home.join("fence-grants.json").exists(),
+        "无法判定的条目不许被销账"
+    );
+
+    let _ = std::fs::remove_dir_all(&root);
+}

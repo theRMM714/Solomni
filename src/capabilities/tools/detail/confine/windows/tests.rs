@@ -1,3 +1,4 @@
+use super::super::Owner;
 use super::*;
 
 /// 授权应当成立：必要落点全授上（不成立就把结论打出来——它是这一路的判据）。
@@ -293,8 +294,10 @@ fn grants_are_written_when_the_environment_allows_it() {
         "根内路径要先落原始安全描述符快照"
     );
     assert!(
-        !rec.grants.iter().any(|g| Path::new(&g.path) == target),
-        "根内路径收尾走快照还原，不记 ACE 摘要"
+        rec.grants
+            .iter()
+            .any(|g| Path::new(&g.path) == target && !g.owners.is_empty()),
+        "根内路径也要记授权条目并带上归属（收尾按快照整体还原）"
     );
     // 收尾必须把自己写下的权限项按台账撤掉或还原：测试不在本机留痕。
     let report = clean(&home).expect("回收应当成功");
@@ -1256,6 +1259,7 @@ fn ledger_catalog_and_per_item_disposal_keep_the_rest_untouched() {
     };
     let sid = container_sid(&container_name(&spec)).expect("派生容器 SID");
     let sid_text = sid_to_string(sid);
+    let owner = current_owner();
     // 一条根内授权（走快照）+ 一条根外授权（走摘要）：都经“先落台账、再写 ACL、写后核对”那条路。
     let mut rec = load_record(&home);
     let inside_target = GrantTarget {
@@ -1265,8 +1269,16 @@ fn ledger_catalog_and_per_item_disposal_keep_the_rest_untouched() {
         inherit: false,
         part: FencePart::DataBoundary,
     };
-    grant_one_journaled(&home, &mut rec, sid, &sid_text, &inside_target, &base)
-        .expect("根内授权应当成功");
+    grant_one_journaled(
+        &home,
+        &mut rec,
+        sid,
+        &sid_text,
+        &inside_target,
+        &base,
+        owner,
+    )
+    .expect("根内授权应当成功");
     let outside_target = GrantTarget {
         path: outside.clone(),
         rights: RIGHTS_RO,
@@ -1274,15 +1286,23 @@ fn ledger_catalog_and_per_item_disposal_keep_the_rest_untouched() {
         inherit: false,
         part: FencePart::Interpreter,
     };
-    grant_one_journaled(&home, &mut rec, sid, &sid_text, &outside_target, &base)
-        .expect("根外授权应当成功");
+    grant_one_journaled(
+        &home,
+        &mut rec,
+        sid,
+        &sid_text,
+        &outside_target,
+        &base,
+        owner,
+    )
+    .expect("根外授权应当成功");
     free_sid(sid);
     // 清单：两条都看得见，都如实标成“现在还在”，且与盘上的 ACE 对得上。
     let view = catalog(&home);
     assert_eq!(
         view.entries.len(),
-        2,
-        "台账里应当有两条：{:?}",
+        3,
+        "台账里应当有三条（根内快照 + 根内授权 + 根外授权）：{:?}",
         view.entries
     );
     assert!(
@@ -1354,4 +1374,223 @@ fn ledger_catalog_and_per_item_disposal_keep_the_rest_untouched() {
     );
     discard(&base);
     discard(&outside);
+}
+
+/// 【启动对账·纯逻辑】归属集合的结论：有活归属则留、全死则回收、缺归属或判不了则跳过。
+/// PID 复用（同一 pid、创建时刻对不上）必须判死——否则旧进程的残留永远回收不掉。
+#[test]
+fn owner_state_distinguishes_live_dead_and_unjudgeable() {
+    let me = current_owner();
+    if me.start == 0 {
+        eprintln!("[探针] 本机读不到进程创建时刻：归属判定用例跳过（不静默当作通过）");
+        return;
+    }
+    let dead = Owner {
+        pid: 0x7fff_fff0,
+        start: 1,
+    };
+    assert_eq!(owners_state(&[me]), OwnersState::Keep, "有活归属要留");
+    assert_eq!(owners_state(&[dead]), OwnersState::Reclaim, "全死可回收");
+    assert_eq!(
+        owners_state(&[me, dead]),
+        OwnersState::Keep,
+        "一活一死不回收"
+    );
+    assert_eq!(owners_state(&[]), OwnersState::Unjudgeable, "缺归属要跳过");
+    assert_eq!(
+        owners_state(&[Owner {
+            pid: me.pid,
+            start: me.start.wrapping_add(1)
+        }]),
+        OwnersState::Reclaim,
+        "PID 被复用（创建时刻对不上）要判死"
+    );
+}
+
+/// 【启动对账】归属明确已死的陈旧授权必须被回收（ACE 消失、台账销账）；活归属一个字都不动。
+#[test]
+fn reconcile_reclaims_dead_owners_and_keeps_live_ones() {
+    let base = std::env::temp_dir().join(format!("solomni-reconcile-{}", std::process::id()));
+    let live = base.join("live");
+    let stale = base.join("stale");
+    std::fs::create_dir_all(&live).expect("建活落点");
+    std::fs::create_dir_all(&stale).expect("建陈旧落点");
+    if !acl_round_trip(&base, "reconcile") {
+        eprintln!(
+            "[探针] 本机做不了 ACL 完整往返（写→读回→撤）：启动对账探针跳过（不静默当作通过）"
+        );
+        discard(&base);
+        return;
+    }
+    let home = base.join(".home");
+    let spec_live = FenceSpec {
+        agent: "probe-reconcile-live".to_string(),
+        private: PathBuf::new(),
+        ro_tree: Vec::new(),
+        rw: vec![live.clone()],
+        cwd: live.clone(),
+        ro: Vec::new(),
+        net: false,
+    };
+    let spec_stale = FenceSpec {
+        agent: "probe-reconcile-stale".to_string(),
+        private: PathBuf::new(),
+        ro_tree: Vec::new(),
+        rw: vec![stale.clone()],
+        cwd: stale.clone(),
+        ro: Vec::new(),
+        net: false,
+    };
+    expect_granted(&prepare_fence(&spec_live, "cmd", &home), "活授权应当成功");
+    expect_granted(
+        &prepare_fence(&spec_stale, "cmd", &home),
+        "陈旧授权应当成功",
+    );
+    let stale_sid = container_sid(&container_name(&spec_stale)).expect("派生陈旧 SID");
+    let stale_text = sid_to_string(stale_sid);
+    free_sid(stale_sid);
+    // 把陈旧那条的归属记为一个绝不存在的进程。
+    let dead = Owner {
+        pid: 0x7fff_fff0,
+        start: 1,
+    };
+    {
+        let mut rec = load_record(&home);
+        for g in rec.grants.iter_mut() {
+            if g.sid == stale_text {
+                g.owners = vec![dead];
+            }
+        }
+        save_record(&home, &rec).expect("写回台账");
+    }
+    let rep = reconcile(&home);
+    assert!(rep.errors.is_empty(), "对账不该报错：{:?}", rep.errors);
+    assert!(
+        rep.reclaimed_grants >= 1 || rep.restored_snapshots >= 1,
+        "陈旧授权至少要回收一条：{:?}",
+        rep
+    );
+    let sid = container_sid(&container_name(&spec_stale)).expect("再派生陈旧 SID");
+    assert!(
+        !has_any_ace_for(sid, &stale),
+        "陈旧授权回收后不该再有该容器 SID 的 ACE"
+    );
+    free_sid(sid);
+    let sid = container_sid(&container_name(&spec_live)).expect("再派生活 SID");
+    assert!(has_any_ace_for(sid, &live), "活归属的授权不许被回收");
+    free_sid(sid);
+    clean(&home).expect("收尾回收应当成功");
+    discard(&base);
+}
+
+/// 【启动对账】缺归属/判不了的条目：如实报告并跳过，一条都不回收。
+#[test]
+fn reconcile_skips_entries_without_ownership() {
+    let base = std::env::temp_dir().join(format!("solomni-reconcile-skip-{}", std::process::id()));
+    let target = base.join("target");
+    std::fs::create_dir_all(&target).expect("建探针目录");
+    if !acl_round_trip(&base, "reconcile-skip") {
+        eprintln!(
+            "[探针] 本机做不了 ACL 完整往返（写→读回→撤）：对账跳过探针跳过（不静默当作通过）"
+        );
+        discard(&base);
+        return;
+    }
+    let home = base.join(".home");
+    let spec = FenceSpec {
+        agent: "probe-reconcile-skip".to_string(),
+        private: PathBuf::new(),
+        ro_tree: Vec::new(),
+        rw: vec![target.clone()],
+        cwd: target.clone(),
+        ro: Vec::new(),
+        net: false,
+    };
+    expect_granted(&prepare_fence(&spec, "cmd", &home), "授权应当成功");
+    // 清空全部归属（模拟旧格式/归属读不出来）：对账必须报告并跳过，不许回收。
+    {
+        let mut rec = load_record(&home);
+        for g in rec.grants.iter_mut() {
+            g.owners.clear();
+        }
+        for p in rec.profiles.iter_mut() {
+            p.owners.clear();
+        }
+        save_record(&home, &rec).expect("写回台账");
+    }
+    let rep = reconcile(&home);
+    assert!(rep.errors.is_empty(), "对账不该报错：{:?}", rep.errors);
+    assert_eq!(rep.reclaimed_grants, 0, "缺归属不得回收");
+    assert_eq!(rep.restored_snapshots, 0, "缺归属不得还原快照");
+    assert!(
+        rep.skipped_unjudgeable >= 1,
+        "缺归属要如实报告跳过：{:?}",
+        rep
+    );
+    let sid = container_sid(&container_name(&spec)).expect("派生容器 SID");
+    assert!(has_any_ace_for(sid, &target), "无法判定时不许动 ACE");
+    free_sid(sid);
+    clean(&home).expect("收尾回收应当成功");
+    discard(&base);
+}
+
+/// 【归属集合】释放只撤"当前进程"的那一份归属；同一 SID 还有别的归属时 ACE 必须留着。
+#[test]
+fn release_fence_only_removes_current_owners_claim() {
+    let base = std::env::temp_dir().join(format!("solomni-release-owner-{}", std::process::id()));
+    let target = base.join("target");
+    std::fs::create_dir_all(&target).expect("建探针目录");
+    if !acl_round_trip(&base, "release-owner") {
+        eprintln!(
+            "[探针] 本机做不了 ACL 完整往返（写→读回→撤）：归属释放探针跳过（不静默当作通过）"
+        );
+        discard(&base);
+        return;
+    }
+    let home = base.join(".home");
+    let spec = FenceSpec {
+        agent: "probe-release-owner".to_string(),
+        private: PathBuf::new(),
+        ro_tree: Vec::new(),
+        rw: vec![target.clone()],
+        cwd: target.clone(),
+        ro: Vec::new(),
+        net: false,
+    };
+    expect_granted(&prepare_fence(&spec, "cmd", &home), "授权应当成功");
+    let sid = container_sid(&container_name(&spec)).expect("派生容器 SID");
+    let sid_text = sid_to_string(sid);
+    free_sid(sid);
+    // 给这个 SID 的每条授权再挂一个别的归属（模拟同名 agent 的另一个实例也在用）。
+    let other = Owner {
+        pid: 0x7fff_fff0,
+        start: 1,
+    };
+    {
+        let mut rec = load_record(&home);
+        for g in rec.grants.iter_mut() {
+            if g.sid == sid_text {
+                g.owners.push(other);
+            }
+        }
+        save_record(&home, &rec).expect("写回台账");
+    }
+    release_fence(&spec, &home).expect("释放应当成功");
+    let sid = container_sid(&container_name(&spec)).expect("再派生容器 SID");
+    assert!(
+        has_any_ace_for(sid, &target),
+        "同一 SID 还有别的归属时，ACE 必须留着"
+    );
+    free_sid(sid);
+    // 那个"别的归属"是死的：对账应当把它清掉，ACE 随之消失。
+    let rep = reconcile(&home);
+    assert!(rep.errors.is_empty(), "对账不该报错：{:?}", rep.errors);
+    let sid = container_sid(&container_name(&spec)).expect("再派生容器 SID");
+    assert!(
+        !has_any_ace_for(sid, &target),
+        "别的归属也死了，对账后不该再有该容器 SID 的 ACE"
+    );
+    free_sid(sid);
+    let _ = clean(&home);
+    discard(&base);
 }
