@@ -47,7 +47,7 @@
 - T0 质量门禁已并入同一入口：编译、结构审查、格式、clippy、编译告警、依赖重复**零容忍硬失败**；
   供应链（`cargo audit` / `cargo deny`）同为硬失败，但工具缺失或取不到 advisory 数据时记 `env-skip`。
   结构审查里还含**门禁解析器自测**与 **`#[ignore]` 禁令**（报告里 `ignored > 0` 也算失败）。
-- 默认**并行**跑用例（`--serial` 只在排查隔离/顺序问题时用）；每步都有墙钟上限，超时即硬失败并把证据记进报告
+- 默认**串行**跑用例（`--parallel` 只在排查并发/隔离问题时用，见 [tests/gaps.yaml](tests/gaps.yaml) 的 `testing.parallel-flake`）；每步都有墙钟上限，超时即硬失败并把证据记进报告
   `timeouts`；每步用时进报告，超预算标 `[slow]`（只报不拦）。
 - `node run-tests.js --coverage` 是**手动覆盖率发现模式**：只用来找盲区，不做通过判据、不设阈值
   （判据与局限见 [docs/testing/execution-ci.md](docs/testing/execution-ci.md)）。

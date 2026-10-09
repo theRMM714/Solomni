@@ -110,3 +110,19 @@
     三平台各有一份覆盖率报告，且报告明确标注"仅进程内 / 仅当前平台"或已聚合子进程；
     未覆盖的生产路径逐条有补测或缺口结论。
   blocked_by: 缺少观察面（子进程插桩与合并尚未实现）
+
+- id: testing.parallel-flake
+  scope: global
+  level: T1
+  why: |
+    套件里有依赖真实线程时序的 gated 用例（例如 src/tests/api.rs 的
+    stopping_a_collab_discussion_is_prompt_and_keeps_the_session：它要停的是一个"正在跑"的会话，
+    而 gated 通道第一次调用会立刻返回、第二次才阻塞）。把默认的 --test-threads=1 去掉改并行后实测会偶发：
+    修同步（等 started>=2 且 is_running）前 20 次里失败 3 次，修完 55 次里仍有 1 次。
+  how: |
+    1) 已把门禁默认改回串行（--parallel 只作诊断），门禁不再暴露这份不确定性；
+    2) 要真正支持并行：逐条收紧对线程时序敏感的用例（等"可停止/可观察"的确定状态，而不是"已启动"），
+       并给 <1s / <3s 这类墙上时钟断言留合理上限；判据是在 --parallel 下连续 50 次全绿。
+  accept: |
+    --parallel 连续 50 次全绿；届时删除本条并把门禁默认切到并行。
+  blocked_by: 缺少观察面（时序断言需逐条定位，目前只确认了一条用例）

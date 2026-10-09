@@ -16,7 +16,7 @@ cargo clippy --all-targets --all-features -- -D warnings
 快速检查用于本地反馈，不替代完整入口。
 
 注意：`cargo test` 与 `cargo fmt --check`、`cargo clippy … -D warnings` **都预期全绿**——T0 七项全是零容忍硬失败，没有存量基线。
-用例默认**并行**跑；排查隔离 / 顺序问题时用 `node run-tests.js --serial`。找测试盲区用 `node run-tests.js --coverage`
+用例默认**串行**跑（套件含真实线程时序用例，并行仍会偶发，见 [tests/gaps.yaml](../../tests/gaps.yaml) 的 `testing.parallel-flake`）；排查并发 / 隔离问题时用 `node run-tests.js --parallel`。找测试盲区用 `node run-tests.js --coverage`
 （见下文「覆盖率发现模式」，只报不拦）。
 
 ### 完整本地入口
@@ -36,8 +36,8 @@ node run-tests.js
 7. `T0 编译告警`（硬失败）；
 8. `T0 依赖重复（cargo tree）`（硬失败）；
 9. `T0 供应链（audit/deny）`（工具缺失或取不到 advisory 数据 = env-skip）；
-10. `L1 单元（--bin solomni）`（默认并行；`--serial` 强制串行）；
-11. 逐个运行 `cargo test --test cross-platform/windows/linux/macos`（同样默认并行）；
+10. `L1 单元（--bin solomni）`（默认串行；`--parallel` 改为并发，仅诊断用）；
+11. 逐个运行 `cargo test --test cross-platform/windows/linux/macos`（同样默认串行）；
 12. 前端冒烟；
 13. 存在编排器时运行 L4 端到端（编排器会**现场构建 indexer**：编译器版本进日志，构建失败即失败）；
 14. 写入 `target/test-report.json` 并打印 `TEST-REPORT-OK` 或 `TEST-REPORT-FAIL`。
