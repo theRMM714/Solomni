@@ -31,22 +31,13 @@ const GAP_FILES = [
 ];
 
 function buildEnv() {
-  // start.js -test 会传好现成的环境；直接跑时尽力指向项目内工具链（不碰系统安装）。
-  const e = Object.assign({}, process.env);
+  // 环境解析统一交给 env.js（与启动器同一份，换开发环境只改一处）；
+  // start.js -test 会带着现成环境进来，直接跑时这里解析项目内工具链、没有就继承现成环境。
+  const resolved = require("./env.js").resolve();
+  const e = Object.assign({}, resolved ? resolved.env : process.env);
   // 把开关传给测试与产品：默认"不写本机状态"，只有 --fence-live 才允许。
   e.SOLOMNI_FENCE_LIVE = FENCE_LIVE ? "1" : "0";
   e.SOLOMNI_FENCE_WRITE = FENCE_LIVE ? "1" : "0";
-  const osDir = path.join(ROOT, "platform", IS_WIN ? "windows" : "linux");
-  // 项目内工具链存在就用它（本地收敛原则）；不存在（例如 CI runner）就用环境里现成的。
-  const localCargo = path.join(osDir, "cargo");
-  const localRustup = path.join(osDir, "rustup");
-  if (!e.CARGO_HOME && fs.existsSync(localCargo)) e.CARGO_HOME = localCargo;
-  if (!e.RUSTUP_HOME && fs.existsSync(localRustup)) e.RUSTUP_HOME = localRustup;
-  const mingw = path.join(ROOT, ".tools", "mingw64", "bin");
-  const cargoBin = path.join(osDir, "cargo", "bin");
-  const KEY = Object.keys(e).find((k) => k.toUpperCase() === "PATH") || "PATH";
-  const front = [cargoBin, IS_WIN ? mingw : null].filter((p) => p && fs.existsSync(p));
-  if (front.length) e[KEY] = front.join(path.delimiter) + path.delimiter + (e[KEY] || "");
   return e;
 }
 
