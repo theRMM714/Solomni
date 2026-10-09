@@ -112,12 +112,13 @@ pub fn run_fenced(
     _home: Option<&std::path::Path>,
     command: &str,
 ) -> i32 {
-    match install(spec, command) {
-        Ok(()) => {}
+    let enforced = match install(spec, command) {
+        Ok(()) => true,
         Err(e) => {
             eprintln!("[围栏] 文件系统围栏未生效（{}）：按如实降级继续执行", e);
+            false
         }
-    }
+    };
     let mut cmd = shell_command(command);
     cmd.current_dir(&spec.cwd);
     // 孤儿防护：**不要**给工具另起进程组。守门进程自成一组（由拉起它的一侧设置），
@@ -125,7 +126,10 @@ pub fn run_fenced(
     // 另起组会让工具逃出那一组，外部杀掉守门进程后它就变成孤儿（探针会抓住这种行为）。
     match cmd.status() {
         Ok(s) => match s.code() {
-            Some(c) => c,
+            Some(c) => {
+                super::note_fence_boundary(spec, enforced, c);
+                c
+            }
             None => {
                 // 被信号结束（例如内核按围栏规则直接杀）：如实说出信号，便于定位，
                 // 否则外层只看到"命令未执行"，看不出是围栏干的还是程序自己崩的。

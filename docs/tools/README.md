@@ -7,7 +7,7 @@
 
 ## 一、管什么 / 不管什么
 
-**管**：系统工具总表与角色表（`systools/`）、内置文件工具（read/write/edit/patch/search）的执行编排与纯规则、工具参数契约、补丁通道、外部工具进程的执行、**围栏策略与平台实现**、授权记录与撤销（写 ACL 前先落台账；写后核对**覆盖标准、对象与回调 ACE**，身份 = ACE 类型 + SID + 权限位 + 对象 GUID，布局认不出的如实计数；失败回滚；收尾按台账还原或精确撤销，并在产品根内回收孤儿授权）。
+**管**：系统工具总表与角色表（`systools/`）、内置文件工具（read/write/edit/patch/search）的执行编排与纯规则、工具参数契约、补丁通道、外部工具进程的执行、**围栏策略与平台实现**、授权记录与撤销（写 ACL 前先落台账；写后核对**覆盖标准、对象与回调 ACE**，身份 = ACE 类型 + SID + 权限位 + 对象 GUID，布局认不出的如实计数；失败回滚；收尾按台账还原或精确撤销，并在产品根内回收孤儿授权）；**按条处置**与台账清单（列出快照路径 + 时间、根外授权 SID/路径/权限位、profile 与“当前实际 ACE 与台账对不对得上”的差异；按路径只还原一条、按 SID + 路径只撤一条——**含台账外的根外残留**、按名只删一个 profile）；**归属与启动对账**（每条授权 / profile 记下归属：pid + 进程创建时刻 + **会话租约**（会话 id，防 PID 复用、也区分同名 agent 的并发会话）；台账写事务用**进程内互斥 + 跨进程文件锁**串行；启动期按归属回收“明确已死”的陈旧授权、无法判定的报告后跳过——不询问用户、不阻塞启动，失败保留供重试）。
 
 **不管**：不放领域语义（角色是系统的身份，不是业务概念）；不选模型；不碰会话流水。
 
@@ -23,7 +23,8 @@
 ## 四、改动本单元时必须同步
 
 - 平台专属代码本地不编译——`FenceSpec` 字面量必须写全字段（跨平台字面量门禁）；改围栏 → `tests/<平台>/` 探针；改工具表 → `systools/` 与本目录 `tools-and-roles.md`。
-- 围栏的写后核对、回滚与台账在 `src/capabilities/tools/detail/confine/windows/`：改落点形状（`GrantTarget`）或台账字段时，`prepare_fence` / `release_fence` / `clean` / `sweep_orphan_aces` 要一起改。
+- 围栏的写后核对、回滚与台账在 `src/capabilities/tools/detail/confine/windows/`：改落点形状（`GrantTarget`）或台账字段时，`prepare_fence` / `release_fence` / `clean` / `sweep_orphan_aces` 与按条处置（`catalog` / `restore_one` / `revoke_grant` / `remove_profile_one`）要一起改。
+- 改**归属字段**（含会话租约 `Sandbox.session` → `FenceSpec.lease` → `Owner.lease`）或启动对账时，`record.rs` 的 `current_owner` / `owners_state` / `reconcile` / `release_fence` / `clean` 与入口 `--fence-reconcile` 要一起改；启动对账的接线在 `src/main.rs`。
 - ACE 的读法只有一处：`acl.rs` 的 `ace_parts` 按 ACE 头算 SID 偏移（标准 ACE 与回调 ACE 从第 8 字节起，对象 ACE 再加 Flags(4) 与在场的 GUID）。改覆盖的 ACE 类型或身份形状时，写后核对、诊断转储与 `windows/tests.rs` 的对象 ACE 往返探针要一起看。
 - 容器里**列目录**的判据：同一个授权叶子上，cmd 的 `dir` 与 PowerShell 的 `Get-ChildItem` 会被拒，
   而 cmd 的 `for` 枚举与 python 的 `os.listdir` / `os.scandir` 正常（真机机制矩阵实测：叶子 DACL
@@ -65,22 +66,31 @@
 - **必要落点授不上：不许降级**。经统一裁决通道（见 [session-model.md](../session/session-model.md) 的
   「请用户裁决」）推一条消息（写清哪一环、哪个目录、缺什么前提、怎么补）与两条选项：
   `fence_unfenced_once`（本轮无围栏跑一次——回执与 stderr 都**如实标为无围栏**）/
-  `fence_abort`（放弃这次调用）。拒绝、没人答、用户按停止（整队作废 = 拒绝）一律**不执行**（fail-closed）。
-  没有可回答的前端（CLI 非交互、端到端夹具、讨论席、人直接跑模块工具）时同样**不执行**，回执写清原因。
+  `fence_abort`（放弃这次调用），并在这一问上声明"没人答就当我选了放弃"（`on_unanswered`）。用户拒绝、
+  没人答、用户按停止（整队作废 = 拒绝）一律**不执行**（fail-closed）；回执把"用户拒绝"与"没人答"分开写清楚
+  （后者说清是这一趟没有可回答的前端，还是按声明的默认项办的、**不是用户答的**）。
 - **构不出可用选项**（除「放弃」外没有一条真能执行的）时**不发起裁决**，改为**停掉这个会话 + 落一条警告**
   （契约禁止置灰）；停过一次之后不再推卡。
 - **可选落点授不上只记事实**：留一条 stderr 脚印，不牵动这次执行。
 - **未授权档位不是这条路**：用户没开 `fence_write` 时外层根本不写权限项，那是用户自己选的档位，
   如实降级并在启动报告里说明能力等级。
 - **回执文案来自提示词册**（`tool_texts.tool_fence_blocked` / `tool_fence_unfenced`）：它们随 `[工具结果]` 进模型上下文。
+- **围栏里失败的统一说明**：工具在围栏里非零退出时，守门进程补一条**不分语言**的话（可达范围 + 范围外被围栏拒绝）；
+  成功不打扰。语言自己的报错仍原样透传（各语言的 permission denied 就是这一层），产品不识别具体错误、也不生成配置。
 
 **平台**：只有 Windows 有「外层授权写 ACL」这一步；Linux 的 Landlock 与 macOS 的 seatbelt 在守门进程里自足，
 那里没有 `prepare_fence`（不是存在但空转）。
 
+**启动对账只回收归属明确已死的条目**：`reconcile` 走台账、**不调用** `sweep_orphan_aces` / `sweep_profiles`
+（那两条无归属、会误伤在跑实例）；孤儿清扫只在用户手动的 `--fence-clean`。
+
+**释放按会话租约**：`release_fence` 只撤"当前进程 + 当前会话"的那一份归属；同名 agent 的另一个并发会话仍持归属时，
+ACE 与快照都留着。解释器基线与容器 profile 不属于任何会话（进程级归属），不受单会话释放影响。
+
 **真机验收**：`unwritable_interpreter_dir_never_silently_runs_unfenced`（`ProcTools` 的用例，`--fence-live` 才跑，
-要 `cargo build` 出可执行文件）——在解释器目录授不进的机器（例如 nvm4w 把 node 放在系统目录下的 `C:\nvm4w\nodejs`，
-属主 Administrators、只给 Authenticated Users Modify，DACL 写不进=错误码 5）上断言：选「跑一次」才跑且如实标注 /
-选「放弃」不执行 / 没有可回答的前端也不执行；本机解释器目录授得进（构造不出这一态）就如实 `env-skip`。
+要可执行文件已构建）断言三条真机行为：选「跑一次」才跑且回执如实标为无围栏 / 选「放弃」不执行 /
+没有可回答的前端也不执行。**已在真机通过**：解释器装在属主不是当前用户的目录里（系统级安装，当前用户对那个目录
+没有写 DACL 的权限）时，授权写不进（错误码 5），三条行为如上。解释器目录授得进（构造不出这一态）就如实 `env-skip`。
 ## 本目录
 
 | 文件 | 内容 |

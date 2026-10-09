@@ -17,6 +17,23 @@ const EXE = IS_WIN ? "solomni.exe" : "solomni";
 const PROFILE = process.argv.includes("--release") ? "release" : "debug";
 const BIN = path.join(ROOT, "target", PROFILE, EXE);
 const PLATFORM_TARGETS = ["cross-platform", "windows", "linux", "macos"];
+// 默认串行（--test-threads=1）：套件里有依赖真实线程时序的用例，并行下仍会偶发
+// （见 tests/gaps.yaml 的 testing.parallel-flake）。--parallel 只在排查并发/隔离问题时用，不作门禁默认。
+const PARALLEL = process.argv.includes("--parallel");
+// 每步墙钟上限：没有它，一个挂死的子进程会把本地入口永久卡住（CI 只能靠 job 级 30 分钟兜底）。
+const STEP_TIMEOUT_MS = 15 * 60 * 1000;
+const E2E_TIMEOUT_MS = 20 * 60 * 1000;
+// 只报不拦的步骤时间预算（秒）：超了在报告里标 [slow]，给找慢步骤留基线（对齐 run-hygiene 的"只报不拦"）。
+const STEP_BUDGET_S = {
+  "cargo build": 300,
+  "T0 编译（--all-targets）": 300,
+  "T0 静态检查（clippy）": 300,
+  "L1 单元（--bin solomni）": 300,
+  "目标 cross-platform": 300,
+  "L4 端到端": 600,
+};
+// 覆盖率发现模式（手动，不进默认门禁；判据与局限见 docs/testing/execution-ci.md 与 quality-isolation.md）。
+const COVERAGE = process.argv.includes("--coverage");
 // 真机围栏测试（会改本机状态：建 AppContainer profile、写目录 ACL）默认不跑，必须显式开启。
 const FENCE_LIVE = process.argv.includes("--fence-live") || process.env.SOLOMNI_FENCE_LIVE === "1";
 // CI 把每个平台拆成两个 job（契约见 docs/testing/execution-ci.md）：质量 job 用 --skip-e2e 跳过 L4，
@@ -31,28 +48,28 @@ const GAP_FILES = [
 ];
 
 function buildEnv() {
-  // start.js -test 会传好现成的环境；直接跑时尽力指向项目内工具链（不碰系统安装）。
-  const e = Object.assign({}, process.env);
+  // 环境解析统一交给 env.js（与启动器同一份，换开发环境只改一处）；
+  // start.js -test 会带着现成环境进来，直接跑时这里解析项目内工具链、没有就继承现成环境。
+  const resolved = require("./env.js").resolve();
+  const e = Object.assign({}, resolved ? resolved.env : process.env);
+  // 项目内工具区（AGENTS.md：工具链收敛在 platform/<os>/ 与 .tools/）：把 .tools/bin 放到 PATH 前，
+  // cargo 子命令（cargo-audit / cargo-deny / cargo-llvm-cov）才找得到；没装就是 env-skip。
+  const toolsBin = path.join(ROOT, ".tools", "bin");
+  if (fs.existsSync(toolsBin)) {
+    const pk = Object.keys(e).find((k) => k.toUpperCase() === "PATH") || "PATH";
+    e[pk] = toolsBin + path.delimiter + (e[pk] || "");
+  }
   // 把开关传给测试与产品：默认"不写本机状态"，只有 --fence-live 才允许。
   e.SOLOMNI_FENCE_LIVE = FENCE_LIVE ? "1" : "0";
   e.SOLOMNI_FENCE_WRITE = FENCE_LIVE ? "1" : "0";
-  const osDir = path.join(ROOT, "platform", IS_WIN ? "windows" : "linux");
-  // 项目内工具链存在就用它（本地收敛原则）；不存在（例如 CI runner）就用环境里现成的。
-  const localCargo = path.join(osDir, "cargo");
-  const localRustup = path.join(osDir, "rustup");
-  if (!e.CARGO_HOME && fs.existsSync(localCargo)) e.CARGO_HOME = localCargo;
-  if (!e.RUSTUP_HOME && fs.existsSync(localRustup)) e.RUSTUP_HOME = localRustup;
-  const mingw = path.join(ROOT, ".tools", "mingw64", "bin");
-  const cargoBin = path.join(osDir, "cargo", "bin");
-  const KEY = Object.keys(e).find((k) => k.toUpperCase() === "PATH") || "PATH";
-  const front = [cargoBin, IS_WIN ? mingw : null].filter((p) => p && fs.existsSync(p));
-  if (front.length) e[KEY] = front.join(path.delimiter) + path.delimiter + (e[KEY] || "");
   return e;
 }
 
 let stepNo = 0;
 /// 每步的起跑时刻：报告里带 ms，才能看出"哪一步慢"（真机上 Windows 的 L1 比 Linux 慢两个数量级，就是靠这个定位）
 let stepStart = Date.now();
+/// 被墙钟超时终止的命令；进报告与汇总，作为"这一步为什么失败"的证据。
+const timeouts = [];
 function announce(label) {
   stepNo++;
   stepStart = Date.now();
@@ -61,7 +78,7 @@ function announce(label) {
 function announceDone(status, detail) {
   console.log(status + (detail ? "（" + detail + "）" : "") + "  [" + ((Date.now() - stepStart) / 1000).toFixed(1) + "s]");
 }
-function sh(cmd, args) {
+function sh(cmd, args, timeoutMs) {
   // 输出走文件而不是管道：受限环境里"用管道抓子进程输出"会 EPERM；落成日志还顺带留了档案。
   const logDir = path.join(ROOT, "target", "test-logs");
   fs.mkdirSync(logDir, { recursive: true });
@@ -70,24 +87,36 @@ function sh(cmd, args) {
   const fd = fs.openSync(logFile, "w");
   // 跑之前先报出这一步的**实时日志落点**：门禁卡住时直接读这个文件就知道停在哪（子进程边走边写）。
   process.stdout.write("    实时日志：" + path.relative(ROOT, logFile) + "\n");
-  const r = spawnSync(cmd, args, { cwd: ROOT, env: buildEnv(), stdio: ["ignore", fd, fd] });
+  // 每步都有墙钟上限：挂死的子进程必须被终止，不能把本地入口永久卡住、也不能让 CI 只剩 job 级兜底。
+  const budget = timeoutMs || STEP_TIMEOUT_MS;
+  const r = spawnSync(cmd, args, { cwd: ROOT, env: buildEnv(), stdio: ["ignore", fd, fd], timeout: budget, killSignal: "SIGKILL" });
   fs.closeSync(fd);
   const out = fs.readFileSync(logFile, "utf8");
-  return { code: r.error ? -1 : r.status, out: out, error: r.error ? String(r.error.message) : null, log: path.relative(ROOT, logFile) };
+  const timedOut = !!(r.error && (r.error.code === "ETIMEDOUT" || /timed?\s*out/i.test(String(r.error.message))));
+  if (timedOut) timeouts.push("超时 " + Math.round(budget / 1000) + "s：" + path.basename(cmd) + " " + args.join(" "));
+  return {
+    code: r.error ? -1 : r.status,
+    out: out,
+    error: r.error ? String(r.error.message) : null,
+    timedOut: timedOut,
+    log: path.relative(ROOT, logFile),
+  };
 }
 
 /** 汇总 cargo 的 test result 行：一次运行可能有多条（多目标/多测试）。 */
 function cargoCounts(out) {
-  let passed = 0, failed = 0, resultLines = 0;
+  let passed = 0, failed = 0, ignored = 0, resultLines = 0;
   for (const line of out.split(/\r?\n/)) {
-    const m = line.match(/^test result: (ok|FAILED)\. (\d+) passed; (\d+) failed/);
-    if (m) { resultLines++; passed += Number(m[2]); failed += Number(m[3]); }
+    const m = line.match(/^test result: (ok|FAILED)\. (\d+) passed; (\d+) failed; (\d+) ignored/);
+    if (m) { resultLines++; passed += Number(m[2]); failed += Number(m[3]); ignored += Number(m[4]); }
   }
-  return { passed, failed, resultLines };
+  // ignored > 0 视为未授权的跳过（#[ignore] 被禁，见结构审查）：调用方必须据此判失败。
+  return { passed, failed, ignored, resultLines };
 }
 
 function skipsIn(out) {
-  return out.split(/\r?\n/).filter((l) => l.includes("[探针]")).map((l) => l.trim());
+  // 只认**行首**的 [探针]（诚实标记），不把测试输出里恰好含这三个字的内容算成环境跳过。
+  return out.split(/\r?\n/).map((l) => l.trim()).filter((l) => l.startsWith("[探针]"));
 }
 
 /** 读该平台（含跨平台层）的缺口账：条目存在 = 这条测试还没有。 */
@@ -183,6 +212,48 @@ function duplicateCrates(out) {
   return [...names].sort();
 }
 
+/**
+ * 门禁解析器自测：**门禁自己也要被测**。这些函数决定红灯/绿灯，解析器一坏就是静默全绿
+ * （尤其 cargo tree --duplicates 退出码恒为 0：解析不到重复不会有人发现）。用固定样例断言。
+ * 判定与比对只有一处（本函数），新增解析器时在这里补一条。
+ */
+function gateParserSelfTest() {
+  const bad = [];
+  const eq = (name, got, want) => {
+    const g = JSON.stringify(got);
+    const w = JSON.stringify(want);
+    if (g !== w) bad.push("门禁解析器自测失败：" + name + "：实际 " + g + "，期望 " + w);
+  };
+  eq("normPath 收 .. 并统一分隔符", normPath("tests/cross-platform/../helpers/probe.rs"), "tests/helpers/probe.rs");
+  eq("normPath 去 \\\\?\\ 前缀并收 ..", normPath("\\\\?\\tests\\..\\src\\main.rs"), "src/main.rs");
+  const rootFmt = ROOT_NORM + "src/x.rs";
+  eq(
+    "fmtDeviations 穿透 ANSI 颜色并按根归一",
+    [...fmtDeviations("\u001b[1mDiff in " + rootFmt + ":3:\u001b[0m\nDiff in " + rootFmt + ":9:\n")],
+    ["src/x.rs"],
+  );
+  eq(
+    "clippyLints 从文档锚点取名并归一连字符",
+    clippyLints("...rust-clippy/master/index.html#too_many_arguments...\n...rust-clippy/master/index.html#too-many-arguments..."),
+    { too_many_arguments: 2 },
+  );
+  eq(
+    "checkWarnings 跳过 generated N warnings 汇总行",
+    checkWarnings("warning: unused import\nwarning: solomni (bin) generated 1 warning\nwarning: dead code\n"),
+    2,
+  );
+  eq("duplicateCrates 去重并按名排序", duplicateCrates("serde v1.0.1\nserde v1.0.2\nfoo v0.1.0\n"), ["foo", "serde"]);
+  eq(
+    "cargoCounts 多目标求和并拿到 ignored",
+    cargoCounts(
+      "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out\n" +
+        "test result: FAILED. 1 passed; 2 failed; 4 ignored; 0 measured; 0 filtered out\n",
+    ),
+    { passed: 4, failed: 2, ignored: 4, resultLines: 2 },
+  );
+  eq("skipsIn 只认行首的 [探针]", skipsIn("ok\n[探针] 环境不允许\n其它 [探针] 出现在中间\n"), ["[探针] 环境不允许"]);
+  return bad;
+}
 /** 工具缺失 = env-skip（不静默算过）。 */
 function toolAvailable(sub) {
   return sh("cargo", [sub, "--version"]).code === 0;
@@ -379,6 +450,24 @@ function structuralAudit() {
       }
     };
     walkMarks(abs);
+  }
+
+  // 门禁解析器自测：门禁自己也要被测（解析器一坏就是静默全绿，见 gateParserSelfTest）。
+  for (const b of gateParserSelfTest()) problems.push(b);
+  // #[ignore] 一律不许：跳过必须显式、可判（进缺口账或 env-skip），不能用测试框架的 ignore 藏起来。
+  // 与报告里的 ignored 计数双保险（见 main 的 L1 与平台目标判定）。
+  for (const d of [path.join(ROOT, "src"), path.join(ROOT, "tests")]) {
+    const scanIgnore = (dir) => {
+      for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+        const p = path.join(dir, e.name);
+        if (e.isDirectory()) { scanIgnore(p); continue; }
+        if (!e.name.endsWith(".rs")) continue;
+        fs.readFileSync(p, "utf8").split(/\r?\n/).forEach((line, i) => {
+          if (/^\s*#\[ignore/.test(line)) problems.push("#[ignore] 被禁止（跳过要如实记账，不能用框架 ignore）：" + rel(p) + ":" + (i + 1));
+        });
+      }
+    };
+    scanIgnore(d);
   }
 
   const portalFiles = ["README.md", "README_EN.md", "AGENTS.md", "ARCHITECTURE.md", "PRODUCT.md", "MODULE_SPEC.md", "SYSTOOL.md", "RUNTIME_SPEC.md", "REGISTRY_SPEC.md", "TESTING.md"];
@@ -713,7 +802,85 @@ function structuralAudit() {
   return { problems, targets: targets.map((t) => t.name), testFiles: allTestFiles.length };
 }
 
+/**
+ * 供应链门禁：已知 CVE（cargo audit）与许可证/禁用/来源策略（cargo deny，配置在 deny.toml）。
+ * 工具缺失 = env-skip（离线开发机常见）；工具在但失败要分清"真的有问题"与"取不到数据"。
+ */
+function supplyChainCheck() {
+  const wanted = [
+    { tool: "audit", args: ["audit", "--color", "never"], why: "已知 CVE" },
+    { tool: "deny", args: ["deny", "--color", "never", "check"], why: "许可证 / 禁用 / 来源" },
+  ];
+  const has = wanted.filter((w) => toolAvailable(w.tool));
+  if (!has.length) {
+    return {
+      status: "env-skip",
+      detail: "cargo-audit / cargo-deny 未安装（装：cargo install --locked cargo-audit cargo-deny，落在项目内 .tools/ 或 platform/<os>/）",
+      raw: null,
+    };
+  }
+  const missing = wanted.filter((w) => !has.includes(w)).map((w) => w.tool);
+  const ran = [];
+  const failed = [];
+  const skipped = [];
+  for (const w of has) {
+    const r = sh("cargo", w.args);
+    ran.push(w.tool);
+    if (r.code === 0) continue;
+    // 取不到 advisory 数据 / 连不上网 = 环境不允许（env-skip）；有确凿结论（CVE、许可证不合规）= 硬失败。
+    const findings = /(\d+ vulnerabilit|vulnerabilit(y|ies) found|advisories FAILED|licenses FAILED|bans FAILED|sources FAILED|error\[)/i;
+    const dataIssue = /(could not|couldn't|failed to) (fetch|connect|download)|connection (refused|reset)|dns|network|advisory.db|proxy|timed? ?out/i;
+    if (dataIssue.test(r.out) && !findings.test(r.out)) {
+      skipped.push(w.tool + "（取不到数据）");
+    } else {
+      failed.push(w.tool + "：" + ((r.error || "") + "（日志 " + r.log + "）"));
+    }
+  }
+  if (failed.length) return { status: "fail", detail: failed.join("；"), raw: null };
+  const parts = [];
+  if (ran.length) parts.push("通过：" + ran.join("、"));
+  if (missing.length) parts.push("未安装（env-skip）：" + missing.join("、"));
+  if (skipped.length) parts.push("取不到数据（env-skip）：" + skipped.join("、"));
+  return { status: parts.some((p) => p.startsWith("通过")) ? "pass" : "env-skip", detail: parts.join("；"), raw: null };
+}
+
+/**
+ * 覆盖率发现模式（手动：node run-tests.js --coverage）：**只用来找盲区，不做通过判据、不设阈值**。
+ * 两个已知局限：① 平台 #[cfg] 在别的平台上根本不编译，覆盖率必须逐平台看；
+ * ② 产品二进制（守门进程、L4 端到端）由本入口单独 cargo build，未插桩，进程内覆盖率不包含它们。
+ */
+function runCoverage() {
+  if (!toolAvailable("llvm-cov")) {
+    console.log("[覆盖率] env-skip：未安装 cargo-llvm-cov。");
+    console.log("  装：cargo install --locked cargo-llvm-cov；另需 rustup component add llvm-tools-preview");
+    process.exit(0);
+  }
+  // 缺 llvm-tools-preview 时 cargo-llvm-cov 会就地提示安装（非交互环境下自行往下走然后失败）：
+  // 先问一句，缺就如实 env-skip，不把"没装组件"报成覆盖率失败。
+  const comp = sh("rustup", ["component", "list", "--installed"]);
+  if (comp.code === 0 && !/llvm-tools-preview/.test(comp.out)) {
+    console.log("[覆盖率] env-skip：缺 llvm-tools-preview 组件（装：rustup component add llvm-tools-preview）。");
+    process.exit(0);
+  }
+  const outDir = path.join(ROOT, "target", "coverage");
+  fs.mkdirSync(outDir, { recursive: true });
+  const args = ["llvm-cov", "--workspace", "--all-targets", "--text", "--output-dir", outDir];
+  const r = sh("cargo", args.concat(PARALLEL ? [] : ["--", "--test-threads=1"]));
+  console.log(r.out.trim().split(/\r?\n/).slice(-40).join("\n"));
+  if (r.code !== 0 && /llvm-tools|component download failed|Proceed\?/i.test(r.out)) {
+    console.log("[覆盖率] env-skip：缺 llvm-tools-preview 组件（装：rustup component add llvm-tools-preview）。");
+    process.exit(0);
+  }
+  console.log("[覆盖率] 报告目录：" + path.relative(ROOT, outDir) + "（未覆盖不等于缺口，看过后决定补测或记 tests/gaps.yaml）");
+  process.exit(r.code === 0 ? 0 : 1);
+}
+
 function main() {
+  // 覆盖率发现模式：手动、不进门禁（判据与局限见 docs/testing/execution-ci.md）。
+  if (COVERAGE) {
+    runCoverage();
+    return;
+  }
   const steps = [];
 /** 记一步：用时自动带上（步骤对象不关心时间时也不用写两遍）。 */
 function pushStep(obj) {
@@ -828,37 +995,57 @@ function pushStep(obj) {
     });
   }
 
-  // L1：crate 内联单元测试
+  // T0 供应链：已知 CVE 与许可证/来源策略（工具缺失或取不到数据 = env-skip）。
+  announce("T0 供应链（audit/deny）");
+  const supply = supplyChainCheck();
+  announceDone(supply.status === "pass" ? "完成" : supply.status === "env-skip" ? "env-skip" : "失败", supply.detail);
+  pushStep({
+    step: "T0 供应链（audit/deny）",
+    status: supply.status,
+    detail: supply.detail,
+    raw: supply.raw,
+  });
+
+  // L1：crate 内联单元测试（默认串行；--parallel 只在排查并发/隔离问题时用）
   announce("L1 单元（--bin solomni）");
-  const unit = sh("cargo", ["test", "--color", "never", "--bin", "solomni", "--", "--test-threads=1", "--nocapture"]);
+  const unitArgs = ["test", "--color", "never", "--bin", "solomni", "--", "--nocapture"].concat(PARALLEL ? [] : ["--test-threads=1"]);
+  const unit = sh("cargo", unitArgs);
   const uc = cargoCounts(unit.out);
-  announceDone(unit.code === 0 ? "完成" : "失败", uc.passed + " passed / " + uc.failed + " failed");
+  const unitOk = unit.code === 0 && uc.ignored === 0;
+  const unitDetail =
+    uc.passed + " passed / " + uc.failed + " failed" +
+    (uc.ignored ? " / " + uc.ignored + " ignored（#[ignore] 被禁止）" : "") +
+    (PARALLEL ? "；--parallel" : "");
+  announceDone(unitOk ? "完成" : "失败", unitDetail);
   pushStep({
     step: "L1 单元（--bin solomni）",
-    status: unit.code === 0 ? "pass" : "fail",
-    detail: uc.passed + " passed / " + uc.failed + " failed",
+    status: unitOk ? "pass" : "fail",
+    detail: unitDetail,
     skips: skipsIn(unit.out),
-    raw: unit.code === 0 ? null : unit.out.slice(-800),
+    raw: unitOk ? null : unit.out.slice(-800),
   });
 
   // L2/L3：四个按平台分的测试目标逐一点名（缺目标即失败：新增测试文件必须挂到目标上）
   for (const t of PLATFORM_TARGETS) {
     announce("目标 " + t);
-    const r = sh("cargo", ["test", "--color", "never", "--test", t, "--", "--test-threads=1", "--nocapture"]);
+    const tArgs = ["test", "--color", "never", "--test", t, "--", "--nocapture"].concat(PARALLEL ? [] : ["--test-threads=1"]);
+    const r = sh("cargo", tArgs);
     const c = cargoCounts(r.out);
     const skips = skipsIn(r.out);
     const isOtherPlatform = t !== "cross-platform" && t !== OS_KEY;
     let status;
     if (r.code !== 0) status = "fail";
+    else if (c.ignored > 0) status = "fail";
     else if (c.resultLines === 0) status = "fail";
     else if (c.passed === 0 && isOtherPlatform) status = "skip-platform";
     else status = "pass";
-    announceDone(status === "fail" ? "失败" : status === "skip-platform" ? "本平台不适用" : "完成", c.passed + " passed / " + c.failed + " failed");
+    const counts = c.passed + " passed / " + c.failed + " failed" + (c.ignored ? " / " + c.ignored + " ignored（#[ignore] 被禁止）" : "");
+    announceDone(status === "fail" ? "失败" : status === "skip-platform" ? "本平台不适用" : "完成", counts);
     pushStep({
       step: "目标 " + t,
       status: status,
       detail:
-        c.passed + " passed / " + c.failed + " failed" +
+        counts +
         (status === "skip-platform" ? "（本平台不适用）" : "") +
         (skips.length ? "；env-skip " + skips.length + " 条" : ""),
       skips: skips,
@@ -883,7 +1070,7 @@ function pushStep(obj) {
     const e2e = path.join(ROOT, "tests", "cross-platform", "e2e", "orchestrator.js");
     if (fs.existsSync(e2e)) {
       announce("L4 端到端");
-      const r = sh(process.execPath, [e2e]);
+      const r = sh(process.execPath, [e2e], E2E_TIMEOUT_MS);
       announceDone(r.code === 0 ? "完成" : "失败", "");
       pushStep({
         step: "L4 端到端",
@@ -896,6 +1083,11 @@ function pushStep(obj) {
     }
   }
 
+  // 只报不拦的时间预算：超预算标 [slow]（找慢步骤的基线，不改变成败）。
+  for (const s of steps) {
+    const budget = STEP_BUDGET_S[s.step];
+    if (budget && s.ms > budget * 1000) s.slow = true;
+  }
   const gaps = gapLedgers();
   const globalGapsList = globalGaps();
   const failed = steps.filter((s) => s.status === "fail");
@@ -909,7 +1101,7 @@ function pushStep(obj) {
     profile: PROFILE,
     fenceLive: FENCE_LIVE,
     doctor: doctor,
-    steps: steps.map((s) => ({ step: s.step, status: s.status, detail: s.detail, ms: s.ms })),
+    steps: steps.map((s) => ({ step: s.step, status: s.status, detail: s.detail, ms: s.ms, slow: !!s.slow })),
     envSkips: skips,
     quality: {
       failed: qualityFailed.length,
@@ -917,6 +1109,7 @@ function pushStep(obj) {
     },
     globalGaps: globalGapsList,
     gaps: gaps,
+    timeouts: timeouts,
     failed: failed.length,
   };
   fs.mkdirSync(path.dirname(REPORT), { recursive: true });
@@ -925,12 +1118,13 @@ function pushStep(obj) {
   console.log("");
   console.log("=== 测试汇总（" + process.platform + " " + process.arch + "，报告见 target/test-report.json）===");
   for (const s of steps) {
-    console.log("  " + s.status.padEnd(13) + " " + s.step.padEnd(24) + " " + (s.detail || "") + (s.ms ? "  [" + (s.ms / 1000).toFixed(1) + "s]" : ""));
+    console.log("  " + s.status.padEnd(13) + " " + s.step.padEnd(24) + " " + (s.detail || "") + (s.ms ? "  [" + (s.ms / 1000).toFixed(1) + "s]" : "") + (s.slow ? " [slow]" : ""));
   }
   if (SKIP_E2E) console.log("  [stage] 已跳过 L4 端到端：由独立 e2e job 承担，两份报告在发布时合并（见 docs/testing/execution-ci.md）");
   if (doctor && doctor.fence) console.log("  [doctor] 围栏 fs=" + doctor.fence.fs + " net=" + doctor.fence.net + " tree=" + doctor.fence.tree + "（" + doctor.fence.note + "）");
   for (const s of envSkips) console.log("  [env-skip] " + s.step + "：" + s.detail);
   for (const s of skips) console.log("  [env-skip] " + s);
+  for (const t of timeouts) console.log("  [超时] " + t);
   for (const s of qualityFailed) console.log("  [quality-fail] " + s.step + "：" + s.detail);
   for (const g of gaps) console.log("  [gap] " + g);
   for (const g of globalGapsList) console.log("  [global-gap] " + g);

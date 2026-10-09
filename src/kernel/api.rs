@@ -6,5 +6,5 @@
 pub use crate::kernel::domain::jobs::JobRegistry;
 pub use crate::kernel::domain::path::slash;
 pub use crate::kernel::domain::types::{
-    Ask, SessionId, Tier, ToolOutcome, DEFAULT_LLM_TIMEOUT_SECS,
+    Ask, AskOutcome, SessionId, Tier, ToolOutcome, DEFAULT_LLM_TIMEOUT_SECS,
 };

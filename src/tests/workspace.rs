@@ -1202,6 +1202,8 @@ pub(crate) fn read_only_shared_refuses_builtin_writes_and_leaves_the_fence() {
     let spec = FenceSpec::from_sandbox(&sb, false);
     assert!(!spec.rw.contains(&sb.shared), "主副本不该进 rw");
     assert!(spec.rw.contains(&sb.private));
+    // 会话租约从沙箱带出：同名 agent 的多个并发会话靠它区分围栏归属。
+    assert_eq!(spec.lease, sb.session, "围栏租约 = 沙箱的会话 id");
     let writable = test_sandbox("a", &[]);
     let spec2 = FenceSpec::from_sandbox(&writable, false);
     assert!(spec2.rw.contains(&writable.shared));

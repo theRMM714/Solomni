@@ -392,12 +392,13 @@ impl ToolRunner for AskingRunner {
                     "放弃这次调用".to_string(),
                 ),
             ],
+            on_unanswered: None,
         };
         self.asked
             .lock()
             .expect("锁")
             .push(request.options.iter().map(|(id, _)| id.clone()).collect());
-        if ask.ask(&request).as_deref() != Some(self.allow.as_str()) {
+        if ask.ask(&request).decided() != Some(self.allow.as_str()) {
             return ToolOutcome {
                 ok: false,
                 output: "用户没有放行这次调用：它没有执行".to_string(),

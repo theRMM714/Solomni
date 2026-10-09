@@ -21,6 +21,7 @@
 - 测试替身也属于代码：Fake、Mock、Stub、Spy 和 Fixture 必须有自己的最小验证。
 - 质量门禁和业务测试是两类不同事实；质量门禁失败不能被业务测试通过抵消。
 - 不为了测试制造无意义的 trait、包装层、公共状态或重复测试；可测性必须服从架构边界。
+- **门禁自身也是被测对象**：解析器与清单比对要能自证——一个会静默全绿的门禁比缺工具更危险。
 
 ## 二、当前状态
 
@@ -43,7 +44,17 @@
  - `routes.rs`（HTTP 路由目录 ↔ 处理器 ↔ 文档 ↔ 前端调用 ↔ 演示脚本机器比对；假能力面逐条验成功 / 错误 / 空 / 边界）；
 - **入站契约也是契约**：呈现层只依赖各能力的能力接口（见 [docs/presentation/contracts.md](docs/presentation/contracts.md)）与事件台（拿不到 `Core`、拿不到任何核心锁），
  所以它能被假实现整体替换——`routes.rs` 的 `FakeOps` 就是这么逐条测路由的。
-- T0 质量门禁已并入同一入口，且**全部是零容忍硬失败**：编译、结构审查、格式、clippy、编译告警、依赖重复。
+- T0 质量门禁已并入同一入口：编译、结构审查、格式、clippy、编译告警、依赖重复**零容忍硬失败**；
+  供应链（`cargo audit` / `cargo deny`）同为硬失败，但工具缺失或取不到 advisory 数据时记 `env-skip`。
+  结构审查里还含**门禁解析器自测**与 **`#[ignore]` 禁令**（报告里 `ignored > 0` 也算失败）。
+- 默认**串行**跑用例（`--parallel` 只在排查并发/隔离问题时用，见 [tests/gaps.yaml](tests/gaps.yaml) 的 `testing.parallel-flake`）；每步都有墙钟上限，超时即硬失败并把证据记进报告
+  `timeouts`；每步用时进报告，超预算标 `[slow]`（只报不拦）。
+- `node run-tests.js --coverage` 是**手动覆盖率发现模式**：只用来找盲区，不做通过判据、不设阈值
+  （判据与局限见 [docs/testing/execution-ci.md](docs/testing/execution-ci.md)）。
+- 突变测试是**独立的手动 CI 工作流** `.github/workflows/mutants.yml`（入口 `tests/ci-mutation.mjs`、
+  范围 `tests/mutation-scope.json`）：只有 `core`（小而精）与 `module`（单模块抽查）两个范围，刻意不做 `all`；
+  结果只作调查，**不参与 `TEST-REPORT-ACCEPTED`**，发它自己独占的 `ci-mutation` 滚动分支（各推各的，不碰 `ci-report`），
+  完整现场走 Actions 产物。
 - 门禁之外另有一个**仓库卫生审查**脚本 `run-hygiene.js`（注释契约存量棘轮 + 内容卫生；报告只报不拦、收紧只能往下，也不进 `TEST-REPORT-*`）：
   判据与用法见 [docs/testing/quality-isolation.md](docs/testing/quality-isolation.md) 的「门禁之外」。
 

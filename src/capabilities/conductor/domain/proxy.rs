@@ -228,29 +228,30 @@ impl ControlAction {
     }
 }
 
-/// 目的：代理通道的**适配规则**：转达的是一句话（模型说的），落门时要把它变成**选项 id**。
-///   判据是稳定的选项 id：确认类看这句话是不是"是"（否则解成取消），其余取第一个选项（放行 / 回话）。
-///   通道本身只认选项 id——这份适配只属于代理这一条转达通道（见 docs/session/session-model.md）。
-pub fn relay_option(
+/// 目的：代理转达要代答的那张卡时，校验它给的选项 id **属于那张卡的选项集**（不合法如实拒绝）。
+/// 约束：代理**只认选项 id**，不给任何"从一句话猜选项"的规则——猜会替用户做主
+///   （围栏卡的第一项正是"无围栏跑一次"，猜出来就是把用户的权限授出去）。
+pub fn relay_reply(
     options: &[crate::capabilities::session::api::DecisionOption],
-    text: &str,
-) -> String {
-    use crate::capabilities::session::api::{DecisionOption, OPT_SLATE_CANCEL, OPT_SLATE_CONFIRM};
-    let has = |id: &str| options.iter().any(|o: &DecisionOption| o.id == id);
-    if has(OPT_SLATE_CONFIRM) && has(OPT_SLATE_CANCEL) {
-        let t = text.trim().to_ascii_lowercase();
-        let yes = matches!(
-            t.as_str(),
-            "y" | "yes" | "ok" | "allow" | "是" | "确认" | "同意"
-        ) || t.contains("allow");
-        return if yes {
-            OPT_SLATE_CONFIRM
-        } else {
-            OPT_SLATE_CANCEL
-        }
-        .to_string();
+    reply: &str,
+) -> Result<String, String> {
+    let id = reply.trim();
+    if id.is_empty() {
+        return Err("代答要写选项 id（reply）：空串不算代答".to_string());
     }
-    options.first().map(|o| o.id.clone()).unwrap_or_default()
+    if options.iter().any(|o| o.id == id) {
+        Ok(id.to_string())
+    } else {
+        Err(format!(
+            "这张卡上没有这个选项：{}（卡上的选项：{}）",
+            id,
+            options
+                .iter()
+                .map(|o| o.id.as_str())
+                .collect::<Vec<_>>()
+                .join(" / ")
+        ))
+    }
 }
 
 /// 一次控制动作写进目标会话的**可回放记录**文案（机制写，前端照同一条显示）。
@@ -384,6 +385,8 @@ pub struct Relayed {
     pub kind: MessageKind,
     pub parent: Option<String>,
     pub text: String,
+    /// 目的：目标挂着裁决卡时按这个选项 id 代答（`None` = 不代答——代理不替用户选）。
+    pub reply: Option<String>,
 }
 
 // ---------- 入参（形状由 systools/tools.yaml 声明驱动；这里做语义校验） ----------
@@ -418,6 +421,9 @@ pub struct SendArgs {
     pub message: String,
     pub kind: String,
     pub request_id: String,
+    /// 目的：目标正挂着一张裁决卡时**要按哪个选项 id 代答**；不写 = 不代答（代理不替用户猜）。
+    #[serde(default)]
+    pub reply: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -595,12 +601,18 @@ pub fn relay(args: &SendArgs, call: &ProxyCall) -> Result<(Vec<String>, Relayed)
         return Err("request_id 不能为空（幂等标识）".to_string());
     }
     let kind = MessageKind::parse(args.kind.trim())?;
+    let reply = args
+        .reply
+        .as_ref()
+        .map(|r| r.trim().to_string())
+        .filter(|r| !r.is_empty());
     Ok((
         targets,
         Relayed {
             kind,
             parent: call.parent.clone(),
             text: args.message.trim().to_string(),
+            reply,
         },
     ))
 }
@@ -1011,24 +1023,34 @@ mod tests {
         assert!(all.contains("models"));
     }
 
-    /// 转达的适配只看选项 id：确认类认"是"与"allow"，其余取第一个选项。
+    /// 转达要代答**只认选项 id**：属于那张卡才认，其余一律如实拒绝——不给任何"从一句话猜选项"的规则
+    /// （猜会替用户做主：围栏卡的第一项正是"无围栏跑一次"）。
     #[test]
-    fn relay_option_picks_a_stable_option_id() {
+    fn relay_reply_only_accepts_an_option_id_from_that_card() {
         use crate::capabilities::session::api::{
-            DecisionOption, OPT_ASK_REPLY, OPT_BEGIN, OPT_SLATE_CANCEL, OPT_SLATE_CONFIRM,
+            DecisionOption, OPT_ASK_REPLY, OPT_BEGIN, OPT_SLATE_CANCEL,
         };
         let o = |id: &str| DecisionOption {
             id: id.to_string(),
             label: id.to_string(),
         };
-        let slate = vec![o(OPT_SLATE_CONFIRM), o(OPT_SLATE_CANCEL)];
-        assert_eq!(relay_option(&slate, "yes"), OPT_SLATE_CONFIRM);
-        assert_eq!(relay_option(&slate, " 确认 "), OPT_SLATE_CONFIRM);
-        assert_eq!(relay_option(&slate, "先别建"), OPT_SLATE_CANCEL);
+        let slate = vec![o(OPT_SLATE_CANCEL), o(OPT_BEGIN)];
+        assert_eq!(relay_reply(&slate, OPT_BEGIN), Ok(OPT_BEGIN.to_string()));
+        assert_eq!(
+            relay_reply(&slate, &format!(" {} ", OPT_BEGIN)),
+            Ok(OPT_BEGIN.to_string()),
+            "两侧空白 trim 之后仍按选项 id 校验"
+        );
+        assert!(
+            relay_reply(&slate, "yes").is_err(),
+            "不在卡上的选项不许猜（否则等于替用户做主）"
+        );
+        assert!(relay_reply(&slate, "").is_err(), "空串不算代答");
         let ask = vec![o(OPT_ASK_REPLY)];
-        assert_eq!(relay_option(&ask, "随便说说"), OPT_ASK_REPLY);
-        let begin = vec![o(OPT_BEGIN)];
-        assert_eq!(relay_option(&begin, ""), OPT_BEGIN);
+        assert_eq!(
+            relay_reply(&ask, OPT_ASK_REPLY),
+            Ok(OPT_ASK_REPLY.to_string())
+        );
     }
 
     /// 转达与控制都要留下"谁、为什么"的可回放记录。

@@ -102,6 +102,38 @@ fn blocked_line_names_the_part_the_dir_why_and_the_fix() {
     assert!(sidless.line().contains("容器身份"), "{}", sidless.line());
 }
 
+/// 台账清单面在**没有台账**时也如实给一句话（列清单恒退出 0 的判据：判定归调用方）。
+#[test]
+fn ledger_listing_says_there_is_no_ledger_instead_of_pretending() {
+    let root = crate::tests::scratch("fence-ledger-empty");
+    let home = root.join(".home");
+    let view = crate::capabilities::tools::detail::confine::ledger(&home);
+    assert!(view.entries.is_empty(), "没写过权限项就没有条目");
+    assert!(
+        !view.note.is_empty(),
+        "没有台账时也要如实说一句，不能给一份空清单让人以为一切正常"
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// 其它平台不留权限项：按条处置如实拒绝（不是"存在但空转"）。
+#[cfg(not(windows))]
+#[test]
+fn per_item_disposal_is_honestly_unavailable_off_windows() {
+    use crate::capabilities::tools::detail::confine;
+    let root = crate::tests::scratch("fence-ledger-offplatform");
+    let home = root.join(".home");
+    for done in [
+        confine::restore_one(&home, &root),
+        confine::revoke_grant(&home, "S-1-15-2-1", &root),
+        confine::remove_profile_one(&home, "Solomni.Agent.Probe"),
+    ] {
+        let err = done.expect_err("本平台没有台账，按条处置要如实拒绝");
+        assert!(err.contains("本平台"), "{}", err);
+    }
+    let _ = std::fs::remove_dir_all(&root);
+}
+
 /// 授权结论的分流：**必要**落点进 `blocked`（第一次为准——那就是用户要补的那一环），
 /// 可选落点与后续必要落点进 `notes`（只记事实）。
 #[test]

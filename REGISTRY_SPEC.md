@@ -123,7 +123,7 @@ permissions:           # 【可选】会话权限的全局默认（可被会话 
   预算用尽 = **中断**这一轮并如实告知（用户可以点「继续」重试），不是把会话作废。
 - `fence_read` 是**用户显式授权的只读根**（字符串数组，默认空 = 一个都不放行）：工具进程对这些目录**只读可达**，
   不继承写。授权落在用户自己的目录上；本程序只加只读 ACE（Windows 上授给该 agent 自己的容器身份，不是共享组），
-  撤权与 `fence_write` 走同一份台账（`--fence-clean` 一并撤净）。
+  撤权与 `fence_write` 走同一份台账（`--fence-clean` 一并撤净；启动期按归属对账回收陈旧授权，见 [ARCHITECTURE.md](ARCHITECTURE.md) 六）。
 - `permissions` 是**会话权限的全局默认**，逐 agent 的覆盖写在会话的 `meta.yaml`（见
   [docs/session/session-model.md](docs/session/session-model.md) 的「形态」）。语义只有一份权威：
   [docs/permission/README.md](docs/permission/README.md)。未配置时 = 整棵工作区可读可提交、模块目录只读，与今天一致。

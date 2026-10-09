@@ -198,9 +198,10 @@ enum FenceGo {
     Refused(ToolOutcome),
 }
 
-/// 目的：一个**必要**落点授不上时的处置：**不许降级**——问用户，问不到就按 fail-closed 拒绝。
-/// 参数：`ask` = 这一趟的提问端口（`None` = 没有可回答的前端）；`blocked` = 哪一环、哪个目录、缺什么前提。
-/// 返回：`Unfenced`（用户选了无围栏跑一次；回执里如实标注）或 `Refused`（不执行）。
+/// 目的：一个**必要**落点授不上时的处置：**不许降级**——问用户；拿不到回答就按这一问声明的默认项 /
+///   fail-closed 收场（回执如实说清是"用户拒绝"还是"没人答"）。
+/// 参数：`ask` = 这一趟的提问端口（`None` = 这一趟没有可回答的前端）；`blocked` = 哪一环、哪个目录、缺什么前提。
+/// 返回：`Unfenced`（照"无围栏跑一次"办；回执里如实标注）或 `Refused`（不执行）。
 /// 约束：**构不出可用选项**（除"放弃"外没有一条真能执行的）时**不发起裁决**，
 ///   改为停掉这个会话 + 落一条警告（契约禁止置灰，见 docs/session/session-model.md 的「请用户裁决」）。
 #[cfg(windows)]
@@ -222,43 +223,61 @@ impl ProcTools {
                 Some(ask) => ask.halt(&why),
                 None => eprintln!("[围栏] 这一趟没有可回答的前端：不停会话，只如实拒绝这次调用"),
             }
-            return FenceGo::Refused(self.fence_refusal(blocked, false));
+            return FenceGo::Refused(
+                self.fence_refusal(blocked, &crate::kernel::api::AskOutcome::NoOptions),
+            );
         };
-        let Some(ask) = ask else {
-            // 没有可回答的前端（CLI 非交互 / e2e / 讨论席）：没有可点的选项 = 不执行（fail-closed）。
-            eprintln!("[围栏] 这一趟没有可回答的前端：本次拒绝执行（不按无围栏跑）");
-            return FenceGo::Refused(self.fence_refusal(blocked, false));
-        };
-        match ask.ask(&request).as_deref() {
-            // 用户按卡选了"本轮无围栏跑一次"：这一次执行**没有容器那层强制**，回执里如实标注。
+        // 统一入口：有前端就问它，没有前端就按这一问声明的默认项收场——发起方只看"照哪个选项办"。
+        let outcome = crate::kernel::ports::ask_user(ask, &request);
+        match outcome.decided() {
+            // 用户按卡选了（或没人答时的默认项是）"本轮无围栏跑一次"：回执里如实标注这次没有容器那层强制。
             Some(OPT_FENCE_UNFENCED) => FenceGo::Unfenced {
                 note: self.fence_note(blocked),
             },
-            // 拒绝 / 没人答 / 停会话解成拒绝：不执行。
-            _ => FenceGo::Refused(self.fence_refusal(blocked, true)),
+            // 拒绝 / 按放弃收场 / 没人答 / 停会话解成拒绝：不执行。
+            _ => FenceGo::Refused(self.fence_refusal(blocked, &outcome)),
         }
     }
 
     /// 目的：不执行时的回执——哪一环、哪个目录、缺什么前提、怎么补（文案来自提示词册，它随工具结果进模型上下文）。
+    /// 参数：`outcome` 是这一问的如实收场；用户拒绝与"没人答"分别追加一句，模型看得出差别。
     fn fence_refusal(
         &self,
         blocked: &crate::capabilities::tools::domain::fence::FenceBlocked,
-        asked: bool,
+        outcome: &crate::kernel::api::AskOutcome,
     ) -> ToolOutcome {
+        use crate::kernel::api::AskOutcome;
         let texts = &self.texts;
         let path = where_text(blocked);
+        let part = blocked.part.label().to_string();
         let mut output = texts.render(
             &texts.tool_fence_blocked,
             &[
-                ("part", blocked.part.label().to_string()),
-                ("path", path),
+                ("part", part.clone()),
+                ("path", path.clone()),
                 ("why", blocked.why.clone()),
                 ("fix", blocked.part.fix().to_string()),
             ],
         );
-        if asked {
+        let extra = match outcome {
+            // 用户答了（选了"放弃"，或卡上的别的选项）：如实说用户没有放行这次调用。
+            AskOutcome::Chosen(_) => Some(texts.tool_denied_by_user.clone()),
+            // 没人答、按声明默认项收场：如实说这一下**不是用户答的**、按哪个选项办的。
+            AskOutcome::Defaulted(id) => Some(texts.render(
+                &texts.tool_no_answerer_defaulted,
+                &[("part", part), ("path", path), ("option", id.clone())],
+            )),
+            // 没人答、也没声明默认项：如实说"没人答"，别让模型以为用户拒了。
+            AskOutcome::NoAnswer => Some(texts.render(
+                &texts.tool_no_answerer_refused,
+                &[("part", part), ("path", path)],
+            )),
+            // 用户按了停止（整队作废 = 拒绝）/ 构不出可用选项（端口已停会话 + 落警告）。
+            AskOutcome::Stopped | AskOutcome::NoOptions => None,
+        };
+        if let Some(line) = extra {
             output.push('\n');
-            output.push_str(&texts.tool_denied_by_user);
+            output.push_str(&line);
         }
         ToolOutcome { ok: false, output }
     }
@@ -406,6 +425,7 @@ mod tests {
         let private = PathBuf::from("demo").join("agent-a");
         let spec = FenceSpec {
             agent: "a".to_string(),
+            lease: String::new(),
             private: private.clone(),
             ro_tree: Vec::new(),
             rw: vec![PathBuf::from("demo").join("work"), private.clone()],
@@ -619,6 +639,7 @@ mod tests {
     fn spec_for(dir: &Path) -> FenceSpec {
         FenceSpec {
             agent: "proc".to_string(),
+            lease: String::new(),
             private: PathBuf::new(),
             ro_tree: Vec::new(),
             rw: vec![dir.to_path_buf()],
@@ -881,12 +902,17 @@ mod tests {
 
     #[cfg(windows)]
     impl crate::kernel::ports::AskUser for RecordingAsk {
-        fn ask(&self, ask: &crate::kernel::api::Ask) -> Option<String> {
+        fn ask(&self, ask: &crate::kernel::api::Ask) -> crate::kernel::api::AskOutcome {
+            use crate::kernel::api::AskOutcome;
             self.asked
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
                 .push(ask.options.iter().map(|(id, _)| id.clone()).collect());
-            self.answer.clone()
+            match &self.answer {
+                Some(id) => AskOutcome::Chosen(id.clone()),
+                // 替身按脚本作答；脚本没写 = 没人答（发起方按声明 / fail-closed 收场）。
+                None => AskOutcome::NoAnswer,
+            }
         }
 
         fn halt(&self, why: &str) {
@@ -898,8 +924,8 @@ mod tests {
     }
 
     /// **真机探针（T4）**：**必要落点授不上时绝不静默无围栏执行**。
-    /// 本机构造这一态：把解释器装在系统目录下的机器（nvm4w 的 `C:\\nvm4w\\nodejs`：属主 Administrators、
-    /// 只给 Authenticated Users Modify）——那里的 DACL 写不进（错误码 5），于是**任何** node 工具都曾静默变成无围栏跑。
+    /// 本机构造这一态：解释器装在属主不是当前用户的目录里（系统级安装，当前用户对那个目录没有写 DACL 的权限）——
+    /// 那里的 DACL 写不进（错误码 5），于是**任何**这种解释器的工具都曾静默变成无围栏跑。
     /// 断言三条：选了"本轮无围栏跑一次"才跑（且回执如实标为无围栏）；选"放弃"不执行；没有可回答的前端也不执行。
     /// 本机构造不出这一态（解释器目录授得进）就如实 env-skip——不静默当作通过。
     #[cfg(windows)]
@@ -954,6 +980,11 @@ mod tests {
                 OPT_FENCE_ABORT.to_string()
             ]],
             "必要落点授不上要**问**用户（选项 id 是契约）"
+        );
+        assert!(
+            !blocked.why.contains("回滚失败"),
+            "写入没成功就不许报“回滚失败”（否则用户以为本机权限被改了一半）：{}",
+            blocked.why
         );
         assert!(
             ask.halted.lock().expect("锁").is_empty(),

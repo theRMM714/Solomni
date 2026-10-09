@@ -1,0 +1,28 @@
+{
+  "note": "突变测试范围：只圈高价值纯逻辑（平台/unsafe/真进程实现不入范围）。改这里等于改范围，必须在同一次提交里同步 docs/testing/execution-ci.md 与 tests/gaps.yaml。core 是小而精的先跑集；modules 是单模块抽查的文件级清单。",
+  "core": [
+    "src/capabilities/llm/detail/repair.rs",
+    "src/capabilities/registry/detail/yaml_settings.rs",
+    "src/capabilities/slate/service.rs"
+  ],
+  "modules": {
+    "collab": [
+      "src/capabilities/collab/service/*.rs"
+    ],
+    "registry": [
+      "src/capabilities/registry/**/*.rs"
+    ],
+    "rewind": [
+      "src/capabilities/conductor/service/rewind.rs"
+    ],
+    "patch": [
+      "src/capabilities/tools/domain/patch.rs"
+    ],
+    "repair": [
+      "src/capabilities/llm/detail/repair.rs"
+    ],
+    "slate": [
+      "src/capabilities/slate/*.rs"
+    ]
+  }
+}

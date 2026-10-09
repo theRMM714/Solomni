@@ -15,7 +15,9 @@ cargo clippy --all-targets --all-features -- -D warnings
 
 快速检查用于本地反馈，不替代完整入口。
 
-注意：`cargo test` 与 `cargo fmt --check`、`cargo clippy … -D warnings` **都预期全绿**——T0 六项全是零容忍硬失败，没有存量基线。
+注意：`cargo test` 与 `cargo fmt --check`、`cargo clippy … -D warnings` **都预期全绿**——T0 七项全是零容忍硬失败，没有存量基线。
+用例默认**串行**跑（套件含真实线程时序用例，并行仍会偶发，见 [tests/gaps.yaml](../../tests/gaps.yaml) 的 `testing.parallel-flake`）；排查并发 / 隔离问题时用 `node run-tests.js --parallel`。找测试盲区用 `node run-tests.js --coverage`
+（见下文「覆盖率发现模式」，只报不拦）。
 
 ### 完整本地入口
 
@@ -28,16 +30,20 @@ node run-tests.js
 1. `cargo build`（并打印安全模式 / 真机围栏模式说明）；
 2. 运行 `solomni --doctor`，记录当前平台和围栏能力；
 3. `T0 编译（--all-targets）`（硬失败）；
-4. `T0 结构审查`（硬失败：目标登记 / 孤儿测试文件 / 缺口账格式 / 文档链接完整性）；
+4. `T0 结构审查`（硬失败：目标登记 / 孤儿测试文件 / 缺口账格式 / 文档链接完整性 / 门禁解析器自测 / `#[ignore]` 禁令）；
 5. `T0 格式（fmt --check）`（硬失败）；
 6. `T0 静态检查（clippy）`（硬失败）；
 7. `T0 编译告警`（硬失败）；
 8. `T0 依赖重复（cargo tree）`（硬失败）；
-9. `L1 单元（--bin solomni）`；
-10. 逐个运行 `cargo test --test cross-platform/windows/linux/macos`；
-11. 前端冒烟；
-12. 存在编排器时运行 L4 端到端（编排器会**现场构建 indexer**：编译器版本进日志，构建失败即失败）；
-13. 写入 `target/test-report.json` 并打印 `TEST-REPORT-OK` 或 `TEST-REPORT-FAIL`。
+9. `T0 供应链（audit/deny）`（工具缺失或取不到 advisory 数据 = env-skip）；
+10. `L1 单元（--bin solomni）`（默认串行；`--parallel` 改为并发，仅诊断用）；
+11. 逐个运行 `cargo test --test cross-platform/windows/linux/macos`（同样默认串行）；
+12. 前端冒烟；
+13. 存在编排器时运行 L4 端到端（编排器会**现场构建 indexer**：编译器版本进日志，构建失败即失败）；
+14. 写入 `target/test-report.json` 并打印 `TEST-REPORT-OK` 或 `TEST-REPORT-FAIL`。
+
+每一步都有墙钟上限（默认 15 分钟，L4 20 分钟）：超时即硬失败，证据记进报告的 `timeouts`，不会把本地入口或
+CI job 拖到外层超时。每步用时记在报告的 `ms`，超预算的标 `[slow]`（只报不拦）。
 
 T0 与业务测试在同一次运行里出结果，但结论分开记：质量失败不能被业务测试通过抵消，反之亦然。
 
@@ -101,9 +107,55 @@ AppContainer 包 ACE（`S-1-15-2-*`）；**它不碰完整性标签**（脚本�
 > 这类结论都是误判。**注意：换普通或提权（`High`）的 shell 本身不解决**——映像是 Low 的，进程照样是 Low；
 > 要么不打标签，要么把标签清掉，要么把二进制搬出这棵树。
 
+### 覆盖率发现模式（手动）
+
+```text
+node run-tests.js --coverage
+```
+
+它**只用来找盲区，不做通过判据、不设阈值**（[TESTING.md](../../TESTING.md) 一：覆盖率高不代表行为契约被验证）。
+工具缺失（没装 `cargo-llvm-cov` 或 `llvm-tools-preview`）记 env-skip 并打印安装命令，不算通过。
+两个必须记住的局限：① 平台 `#[cfg]` 在别的平台根本不编译，覆盖率必须**逐平台**看；
+② 产品二进制（守门进程、L4 端到端）由本入口单独 `cargo build`、**未插桩**，进程内覆盖率不包含它们。
+报告落 `target/coverage/`；未覆盖的生产路径逐条决定补测或记 [tests/gaps.yaml](../../tests/gaps.yaml) 的
+`testing.coverage-child-and-platform`。
+
+### 突变测试工作流（手动）
+
+范围只有两个：`core`（小而精，先跑）与 `module`（单模块抽查）；**刻意不做 `all`**——全量收益低
+（平台 `#[cfg]` 在别平台不编译、unviable/等价变异体多）、耗时长，单模块抽查已够用。
+范围是 `tests/mutation-scope.json` 里的**文件级**清单（不写变异体名，避免行号漂移后腐烂）。
+
+```text
+（本地，需自己装 cargo-mutants）
+MUTATION_SCOPE=core node tests/ci-mutation.mjs
+MUTATION_SCOPE=module MUTATION_MODULE=repair node tests/ci-mutation.mjs
+（CI 用 .github/workflows/mutants.yml，手动派发）
+```
+
+测试命令固定「只跑 `--bin solomni` + `--test-threads=1`」：**串行是刻意的**，并行会偶发
+（见 [tests/gaps.yaml](../../tests/gaps.yaml) 的 `testing.parallel-flake`）。工具在 CI 里用
+`taiki-e/install-action` 装（一次性临时环境，不改本机）。
+
+退出码语义（cargo-mutants）：`0` 全捕获、`2` 有未捕获、`3` 有超时、`4` 基线就挂。
+只要不是 `0`，工作流变红并打印 `MUTATION-FOUND`（全捕获打印 `MUTATION-OK`）——**这是给人看的调查结果，
+不参与 `TEST-REPORT-ACCEPTED`，也不写 `ci-report`**。
+
+结果分两处，**各推各的**（`ci-report` 由 `test.yml` 独占，突变不碰它）：
+
+- **`ci-mutation` 滚动分支**（小文本，可 `git show`，无凭据也能读）：
+  `git fetch origin && git show origin/ci-mutation:module-repair/missed.txt`；键是 `core` 或 `module-<名字>`，
+  **同一键每次覆盖、只留最近一次**，内容为 `report.json` / `meta.json` / `missed.txt` / `caught.txt` /
+  `timeout.txt` / `unviable.txt` / `outcomes.json`；
+- **Actions 产物 `mutation-report`**（完整现场）：`target/mutation-report.json`、`target/logs/mutation-*.log`、
+  `mutants.out/`；分支只留最近一次，历史看这里。
+
+首轮「未捕获」要逐条分诊（真缺口补测、等价/无意义变异体记 skip），棘轮基线尚未建立，见
+[tests/gaps.yaml](../../tests/gaps.yaml) 的 `testing.mutation`。
+
 ### CI（GitHub Actions）：跨平台与真机的唯一事实来源
 
-工作流 `.github/workflows/test.yml`，**只有手动触发**（`workflow_dispatch`）：`main` 禁止直接 push（只走 PR），
+跨平台验收工作流是 `.github/workflows/test.yml`，**只有手动触发**（`workflow_dispatch`）：`main` 禁止直接 push（只走 PR），
 日常提交不自动跑 CI。矩阵 `windows-latest / ubuntu-latest / macos-latest`（`fail-fast: false`，
 一个平台失败不影响另外两个出结论）。
 
@@ -111,7 +163,7 @@ AppContainer 包 ACE（`S-1-15-2-*`）；**它不碰完整性标签**（脚本�
 
 | job | 跑什么 | 对应入口 |
 | --- | --- | --- |
-| `quality` | T0 质量门禁 + L1 单元 + 平台探针 + 前端冒烟（**跳过 L4**） | `node run-tests.js --fence-live --skip-e2e` |
+| `quality` | T0 质量门禁 + 供应链（装 cargo-audit / cargo-deny）+ L1 单元 + 平台探针 + 前端冒烟（**跳过 L4**） | `node run-tests.js --fence-live --skip-e2e` |
 | `e2e` | L4 端到端（自己构建产品，与 `quality` 并行） | `node tests/ci-e2e.mjs`（CI 专用；本地整跑用 `node run-tests.js --fence-live`） |
 
 `publish-report` 把两个 job 的产物（`test-report-<os>` 与 `e2e-report-<os>`）用 `tests/ci-merge.mjs` 合并成该平台
@@ -127,7 +179,7 @@ AppContainer 包 ACE（`S-1-15-2-*`）；**它不碰完整性标签**（脚本�
 | 平台专属代码（`capabilities/tools/detail/confine/` 各平台文件、`tests/<平台>/`） | 平台目标的 `main.rs` 首行是 `#![cfg(target_os = …)]`：非本平台的目标整目标为空，代码根本不编译 | 三平台各编译并各跑一次 |
 | 真机围栏（ACL / 容器 profile / Landlock / seatbelt） | 本地默认安全模式会跳过会改本机状态的探针 | 一次性 runner 上真跑，并验撤权与 profile 回收 |
 | HTTPS/TLS 出站链路 | 受限环境可能取不到系统 TLS 凭证（判据见 [levels.md](levels.md) 的 T4），本地只能 env-skip | 干净 runner 上真连公网端点 |
-| T0 六项（clippy 只编译当前平台的 `#[cfg]`、依赖图随平台变） | 本机只能代表本平台（判的是**平台差异**，不是「改了门禁就要派发」） | 三平台各自零容忍跑一遍 |
+| T0 七项（clippy 只编译当前平台的 `#[cfg]`、依赖图随平台变；供应链要联网装工具） | 本机只能代表本平台（判的是**平台差异**，不是「改了门禁就要派发」） | 三平台各自零容忍跑一遍 |
 | 三种语言的模块（python / node / C++）在真进程里跑 | 本机只代表本平台的解释器与编译器 | 三平台各跑一次真工具链路，indexer 现场编译 |
 | 发布前验收 | 本地通过 ≠ 三平台通过 | 三平台报告 + 三平台 `TEST-REPORT-ACCEPTED` |
 
@@ -195,8 +247,9 @@ git show origin/ci-report:runs/windows/logs/<某一步>.log  # 失败证据原�
 - `skip-platform`：当前平台不适用的空平台目标；
 - `gap`：入口没有找到应运行的部分。
 
-报告字段：`steps`（逐步骤状态与用时 `ms`——"哪一步慢"要看它，不看感觉）、`envSkips`（探针级跳过）、`quality`（`failed` / `steps`）、
-`gaps`（平台缺口账）、`globalGaps`（`tests/gaps.yaml` 的长期目标）、`failed`（硬失败数）。
+报告字段：`steps`（逐步骤状态、用时 `ms` 与超预算标记 `slow`——"哪一步慢"要看它，不看感觉）、`envSkips`（探针级跳过）、
+`timeouts`（被墙钟超时终止的命令）、`quality`（`failed` / `steps`）、`gaps`（平台缺口账）、
+`globalGaps`（`tests/gaps.yaml` 的长期目标）、`failed`（硬失败数）。
 `test-fail` 与 `blocked` 这两个更细的状态当前没有实现，也不在计划内——`fail` 与 `gap` 已能如实表达。
 
 ## 二、成功标记
@@ -207,7 +260,8 @@ git show origin/ci-report:runs/windows/logs/<某一步>.log  # 失败证据原�
 - `E2E-OK`：端到端场景完成；
 - `TEST-REPORT-OK`：当前入口的运行步骤没有失败；
 - `TEST-REPORT-FAIL`：当前入口有硬失败步骤**或** T0 任一项不过（同时以非零退出码暴露）；
-- `TEST-REPORT-ACCEPTED`：当前平台缺口账为空。
+- `TEST-REPORT-ACCEPTED`：当前平台缺口账为空；
+- `MUTATION-OK` / `MUTATION-FOUND`：突变测试工作流全捕获 / 有未捕获或超时——**只用于调查，不参与验收**。
 
 固定标记不能替代质量门禁，也不能覆盖 `env-skip`、`gap` 或 `quality-fail`。测试入口必须以非零退出码暴露失败。
 

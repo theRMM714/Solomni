@@ -10,13 +10,27 @@ use super::events::{idle, DecisionAnswer, DecisionQueue, DecisionWaiter, Pending
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Condvar, Mutex};
 
+/// 目的：等待格被解开的方式——回答、用户停止（整队作废）、还是这一趟根本没有回答者（会话按转录重建、前端断了）。
+/// 约束：`Stopped` 与 `Gone` 必须分开——停止是用户的动作（= 拒绝），**不能被发起方的默认项吞成放行**。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SlotWake {
+    /// 用户 / 前端答了一个选项 id。
+    Answer(String),
+    /// 用户按了停止或会话被关闭：整队作废（= 拒绝）。
+    Stopped,
+    /// 没人答：这一趟没有可回答的前端（等待格被重建解开、前端断了）。
+    Gone,
+}
+
 /// 目的：一次**等在工作线程上**的裁决的等待格：发起方在这里等，回答写进来并唤醒它。
-/// 约束：不设超时（不点不继续）；整队作废时解开，`wait` 给 `None`（发起方按「停止 = 拒绝」处置）。
+/// 约束：不设超时（不点不继续）；整队作废与重建都会解开它，但**为什么解开**如实分开（见 `SlotWake`）。
 #[derive(Default)]
 pub struct AnswerSlot {
     option: Mutex<Option<String>>,
     cv: Condvar,
     released: std::sync::atomic::AtomicBool,
+    /// 本次解开是不是"用户停止 / 会话关闭"（整队作废）——只有它不是默认项的适用场景。
+    stopped: std::sync::atomic::AtomicBool,
 }
 
 impl AnswerSlot {
@@ -25,15 +39,19 @@ impl AnswerSlot {
     }
 
     /// 目的：等用户的回答——**阻塞，不设超时**。
-    /// 返回：选中的选项 id；整队作废 / 停止解开时 `None`（发起方按拒绝处置）。
-    pub fn wait(&self) -> Option<String> {
+    /// 返回：回答的选项 id，或"为什么没有答案"（停止 / 没人答）。
+    pub fn wait(&self) -> SlotWake {
         let mut g = self.option.lock().unwrap_or_else(|e| e.into_inner());
         loop {
-            if self.released.load(std::sync::atomic::Ordering::Relaxed) {
-                return None;
-            }
             if let Some(v) = g.clone() {
-                return Some(v);
+                return SlotWake::Answer(v);
+            }
+            if self.released.load(std::sync::atomic::Ordering::Relaxed) {
+                return if self.stopped.load(std::sync::atomic::Ordering::Relaxed) {
+                    SlotWake::Stopped
+                } else {
+                    SlotWake::Gone
+                };
             }
             g = self.cv.wait(g).unwrap_or_else(|e| e.into_inner());
         }
@@ -45,7 +63,12 @@ impl AnswerSlot {
         self.cv.notify_all();
     }
 
-    fn release(&self) {
+    /// 目的：把这一格解开。`stopped` = 是用户停止 / 会话关闭（整队作废）解开的，而不是"没人答"。
+    fn release(&self, stopped: bool) {
+        if stopped {
+            self.stopped
+                .store(true, std::sync::atomic::Ordering::Relaxed);
+        }
         self.released
             .store(true, std::sync::atomic::Ordering::Relaxed);
         self.cv.notify_all();
@@ -219,7 +242,8 @@ impl DecisionDoor {
         let mut g = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         for e in g.queue.iter() {
             if let Some(s) = &e.slot {
-                s.release();
+                // 重建 = 这一趟没有回答者（不是用户停止）：按"没人答"解开。
+                s.release(false);
             }
         }
         g.queue.clear();
@@ -241,7 +265,8 @@ impl DecisionDoor {
         let cards: Vec<String> = g.queue.iter().map(|e| e.id.clone()).collect();
         for e in g.queue.iter() {
             if let Some(s) = &e.slot {
-                s.release();
+                // 整队作废 = 用户停止 / 会话关闭：按"停止 = 拒绝"解开（不套用默认项）。
+                s.release(true);
             }
         }
         g.queue.clear();
