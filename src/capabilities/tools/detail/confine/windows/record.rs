@@ -186,12 +186,13 @@ fn process_start(pid: u32) -> Option<u64> {
     }
 }
 
-/// 目的：当前进程的归属（pid + 创建时刻）——写台账时记进条目。
+/// 目的：当前进程的归属（pid + 创建时刻，租约留空）——写台账时记进条目。
 pub(crate) fn current_owner() -> Owner {
     let pid = std::process::id();
     Owner {
         pid,
         start: process_start(pid).unwrap_or(0),
+        lease: String::new(),
     }
 }
 
@@ -470,7 +471,7 @@ pub(crate) fn journal_add_profile(
         if p.owners.contains(&owner) {
             return Ok(());
         }
-        p.owners.push(owner);
+        p.owners.push(owner.clone());
         if let Err(e) = save_record(home, rec) {
             if let Some(p) = rec.profiles.iter_mut().find(|p| p.name == name) {
                 p.owners.retain(|o| *o != owner);
@@ -542,7 +543,7 @@ pub(crate) fn journal_claim_grant(
         if g.owners.contains(&owner) {
             return Ok((false, false));
         }
-        g.owners.push(owner);
+        g.owners.push(owner.clone());
         if let Err(e) = save_record(home, rec) {
             if let Some(g) = rec
                 .grants
@@ -627,6 +628,7 @@ pub(crate) fn journal_add_snapshot(
 /// 目的：按“先落台账、再写 ACL、写后核对、失败回滚”完成一条授权。
 /// 参数：rec 是本次准备的内存台账；sid_text 是 SID 字符串；target 是落点；root 是产品根；owner 是本次归属。
 /// 错误：台账落盘、写后核对或回滚失败时返回原因（回滚失败会一并写进错误）。
+/// 返回：true = 真改了 ACL；false = ACE 已够用、只补记了归属（不重复改）。
 pub(crate) fn grant_one_journaled(
     home: &Path,
     rec: &mut GrantRecord,
@@ -635,7 +637,7 @@ pub(crate) fn grant_one_journaled(
     target: &GrantTarget,
     root: &Path,
     owner: Owner,
-) -> Result<(), String> {
+) -> Result<bool, String> {
     let (path, rights, recursive, inherit) = (
         target.path.as_path(),
         target.rights,
@@ -651,9 +653,13 @@ pub(crate) fn grant_one_journaled(
     } else {
         false
     };
-    let (_, owner_added) = journal_claim_grant(home, rec, sid_text, path, rights, owner)?;
+    let (_, owner_added) = journal_claim_grant(home, rec, sid_text, path, rights, owner.clone())?;
+    // ACE 已够用：归属已经补记（同名 agent 的另一个会话靠它保住这条授权），不重复改 DACL。
+    if has_ace_for(sid, path, rights) {
+        return Ok(false);
+    }
     match grant_verified(sid, path, rights, recursive, inherit) {
-        Ok(()) => Ok(()),
+        Ok(()) => Ok(true),
         Err(e) => {
             // 只有**真写进去**才谈回滚：写都没成功时再报一条"回滚失败"，会把"这次没动过权限项"说反。
             let rollback = if has_any_ace_for(sid, path) {
@@ -812,7 +818,9 @@ pub fn release_fence(spec: &FenceSpec, home: &Path) -> Result<(), String> {
     let sid = container_sid(&container_name(spec))?;
     let sid_text = sid_to_string(sid);
     free_sid(sid);
-    let owner = current_owner();
+    // 只撤**这个会话**的归属：同名 agent 的另一个会话持有另一份 lease，不能被一起撤掉。
+    let mut owner = current_owner();
+    owner.lease = spec.lease.clone();
     let _lock = lock_ledger(home)?;
     // 没有台账就别凭空造一份：释放只在“确实写过授权”时才动台账文件。
     let had_record = record_path(home).exists();

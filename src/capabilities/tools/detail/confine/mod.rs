@@ -322,7 +322,7 @@ pub fn sweep_orphan_aces(root: &std::path::Path) -> Result<usize, String> {
 
 /// 目的：台账条目的归属——哪个进程还需要这条授权（pid + 进程创建时刻，防 PID 复用）。
 /// 约束：跨平台只承载数据；活性判定与写盘都在 Windows 后端（其它平台没有持久授权，也就没有归属）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Owner {
     /// 目的：归属的进程号（缺省 = 0，判不了，按"无法判定"处理，不主动回收）。
     #[serde(default)]
@@ -330,6 +330,9 @@ pub struct Owner {
     /// 目的：进程创建时刻（Windows FILETIME，自 1601 起的 100ns；0 = 读不到，按"无法判定"处理）。
     #[serde(default)]
     pub start: u64,
+    /// 目的：会话租约（会话 id；空 = 无会话/旧格式）。同一进程里同名 agent 的多个会话靠它区分。
+    #[serde(default)]
+    pub lease: String,
 }
 
 /// 目的：一次启动对账的结果（如实交代回收了什么、跳过了什么、哪里失败）。
@@ -828,6 +831,7 @@ mod tests {
     fn selfcheck_injection_switch_reports_env_unavailable() {
         let spec = FenceSpec {
             agent: "a".to_string(),
+            lease: String::new(),
             private: PathBuf::new(),
             ro_tree: Vec::new(),
             rw: vec![PathBuf::from("demo").join("work")],
@@ -925,6 +929,7 @@ mod tests {
     fn fence_job_round_trips_and_rejects_incomplete_json() {
         let spec = FenceSpec {
             agent: "a".to_string(),
+            lease: String::new(),
             private: PathBuf::new(),
             ro_tree: Vec::new(),
             rw: vec![PathBuf::from("demo").join("work")],
@@ -943,6 +948,7 @@ mod tests {
         // 没有台账可落是合法形态（探针），所以 home 允许缺省；prepared 缺了才报错。
         let bare = FenceSpec {
             agent: "b".to_string(),
+            lease: String::new(),
             private: PathBuf::new(),
             ro_tree: Vec::new(),
             rw: vec![PathBuf::from("demo").join("work")],
@@ -1087,6 +1093,7 @@ mod tests {
     fn non_node_commands_carry_no_interpreter_switch() {
         let spec = FenceSpec {
             agent: "a".to_string(),
+            lease: String::new(),
             rw: Vec::new(),
             ro: Vec::new(),
             ro_tree: Vec::new(),
@@ -1110,6 +1117,7 @@ mod tests {
     fn fence_boundary_note_only_on_enforced_failure() {
         let spec = FenceSpec {
             agent: "a".to_string(),
+            lease: String::new(),
             rw: vec![PathBuf::from("demo").join("sandbox")],
             ro: Vec::new(),
             ro_tree: vec![PathBuf::from("mods").join("m0")],
@@ -1133,6 +1141,7 @@ mod tests {
     fn reachable_roots_dedupes_and_collapses() {
         let mut spec = FenceSpec {
             agent: "a".to_string(),
+            lease: String::new(),
             rw: vec![PathBuf::from("r1")],
             ro: Vec::new(),
             ro_tree: vec![PathBuf::from("r1")],
@@ -1145,5 +1154,20 @@ mod tests {
         let many = reachable_roots(&spec);
         assert!(many.starts_with("r1"), "{}", many);
         assert!(many.ends_with("等 6 处"), "{}", many);
+    }
+
+    /// 会话租约进归属身份：同一进程里同名 agent 的两个会话是**两个**归属，释放其中一个不许动另一个。
+    #[test]
+    fn owner_lease_tells_sessions_apart() {
+        let mk = |lease: &str| Owner {
+            pid: 1,
+            start: 2,
+            lease: lease.to_string(),
+        };
+        let a = mk("s1");
+        let b = mk("s2");
+        assert_eq!(a, a.clone(), "完全相同的归属用于去重/撤销");
+        assert_ne!(a, b, "同进程的两个会话是两个归属");
+        assert_eq!(b.lease, "s2");
     }
 }

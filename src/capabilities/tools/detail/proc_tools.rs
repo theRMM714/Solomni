@@ -425,6 +425,7 @@ mod tests {
         let private = PathBuf::from("demo").join("agent-a");
         let spec = FenceSpec {
             agent: "a".to_string(),
+            lease: String::new(),
             private: private.clone(),
             ro_tree: Vec::new(),
             rw: vec![PathBuf::from("demo").join("work"), private.clone()],
@@ -638,6 +639,7 @@ mod tests {
     fn spec_for(dir: &Path) -> FenceSpec {
         FenceSpec {
             agent: "proc".to_string(),
+            lease: String::new(),
             private: PathBuf::new(),
             ro_tree: Vec::new(),
             rw: vec![dir.to_path_buf()],

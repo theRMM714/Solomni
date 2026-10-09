@@ -15,6 +15,10 @@ use std::path::{Path, PathBuf};
 pub struct FenceSpec {
     /// 该 agent 的实例名（日志与审计用）。
     pub agent: String,
+    /// 目的：本席所属会话的租约（会话 id；空 = 无会话，如独立模块工具）。
+    ///   同名 agent 的多个并发会话共用同一容器 SID 与同一批授权，释放时靠它区分"还有哪个会话在用"。
+    #[serde(default)]
+    pub lease: String,
     /// 可读可写的根：本次工作共享区（若这一席可写）+ 该 agent 私有沙箱 + 已授权的模块目录 + 模块 `userdata/`。
     pub rw: Vec<PathBuf>,
     /// 只读的根：**用户显式授权**的额外可达范围（默认空）。
@@ -65,6 +69,7 @@ impl FenceSpec {
         ro_tree.dedup();
         FenceSpec {
             agent: sb.agent.clone(),
+            lease: sb.session.clone(),
             rw,
             ro: Vec::new(),
             ro_tree,
@@ -106,6 +111,8 @@ impl FenceSpec {
         rw.dedup();
         FenceSpec {
             agent: "user".to_string(),
+            // 无会话（人直接跑模块工具）：没有会话租约可挂。
+            lease: String::new(),
             rw,
             ro: Vec::new(),
             ro_tree: vec![module_root.to_path_buf()],

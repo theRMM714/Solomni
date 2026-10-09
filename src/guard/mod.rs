@@ -137,7 +137,13 @@ fn ledger_lines(view: &crate::capabilities::tools::detail::confine::Ledger) -> V
         if !owners.is_empty() {
             let who: Vec<String> = owners
                 .iter()
-                .map(|o| format!("pid {}（创建于 {}）", o.pid, o.start))
+                .map(|o| {
+                    if o.lease.is_empty() {
+                        format!("pid {}（创建于 {}）", o.pid, o.start)
+                    } else {
+                        format!("pid {}（创建于 {}，会话 {}）", o.pid, o.start, o.lease)
+                    }
+                })
                 .collect();
             line.push_str(&format!("；归属：{}", who.join("、")));
         }

@@ -45,6 +45,8 @@ pub enum Place {
 pub struct Sandbox {
     /// 工作名（提示词里如实告知在替谁干活）。
     pub work_name: String,
+    /// 目的：本席所属会话的 id（会话租约；同名 agent 的多个并发会话靠它区分围栏归属）。
+    pub session: String,
     /// 该 agent 的实例名。
     pub agent: String,
     /// 本工作共享区（session/<工作名>/work）——**主副本**，agent 会话默认只读。

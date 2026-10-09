@@ -57,6 +57,7 @@ fn acl_round_trip(base: &Path, tag: &str) -> bool {
     };
     let spec = FenceSpec {
         agent: format!("acl-preflight-{tag}"),
+        lease: String::new(),
         private: PathBuf::new(),
         ro_tree: Vec::new(),
         rw: vec![target.clone()],
@@ -83,6 +84,7 @@ fn acl_round_trip(base: &Path, tag: &str) -> bool {
 fn container_profile_is_one_per_agent() {
     let a = FenceSpec {
         agent: "甲".to_string(),
+        lease: String::new(),
         private: PathBuf::new(),
         ro_tree: Vec::new(),
         rw: vec![PathBuf::from("session").join("w1")],
@@ -162,6 +164,7 @@ fn grant_targets_include_parents_with_stat_only() {
         .join("m0");
     let spec = FenceSpec {
         agent: "probe".to_string(),
+        lease: String::new(),
         private: PathBuf::new(),
         ro_tree: Vec::new(),
         rw: vec![dir.clone()],
@@ -231,6 +234,7 @@ fn grant_targets_keep_module_read_only_and_cwd_read_only() {
     let userdata = module.join("userdata");
     let spec = FenceSpec {
         agent: "probe".to_string(),
+        lease: String::new(),
         private: PathBuf::new(),
         ro_tree: vec![module.clone()],
         rw: vec![userdata.clone()],
@@ -277,6 +281,7 @@ fn grants_are_written_when_the_environment_allows_it() {
     }
     let spec = FenceSpec {
         agent: "probe".to_string(),
+        lease: String::new(),
         private: PathBuf::new(),
         ro_tree: Vec::new(),
         rw: vec![target.clone()],
@@ -319,6 +324,7 @@ fn revoke_removes_the_container_ace_from_the_given_roots() {
     }
     let spec = FenceSpec {
         agent: "probe".to_string(),
+        lease: String::new(),
         private: PathBuf::new(),
         ro_tree: Vec::new(),
         rw: vec![target.clone()],
@@ -361,6 +367,7 @@ fn read_only_grants_write_ro_aces_and_revoke_removes_them() {
     }
     let spec = FenceSpec {
         agent: "probe-ro".to_string(),
+        lease: String::new(),
         private: PathBuf::new(),
         ro_tree: Vec::new(),
         rw: vec![target.clone()],
@@ -405,6 +412,7 @@ fn revoke_leaves_no_container_ace_on_leaf_parents() {
     std::fs::write(leaf.join("data.txt"), "x").expect("写探针文件");
     let spec = FenceSpec {
         agent: "probe-leftover".to_string(),
+        lease: String::new(),
         private: PathBuf::new(),
         ro_tree: Vec::new(),
         rw: vec![leaf.clone()],
@@ -475,6 +483,7 @@ fn object_ace_is_covered_by_the_write_then_equal_check() {
     std::fs::write(&file, b"x").expect("写探针文件");
     let spec = FenceSpec {
         agent: "probe-object-ace".to_string(),
+        lease: String::new(),
         private: PathBuf::new(),
         ro_tree: Vec::new(),
         rw: vec![base.clone()],
@@ -584,6 +593,7 @@ fn container_roundtrip_sees_leaf_but_not_parent_content() {
     std::fs::write(base.join("parent-secret.txt"), "PARENT-SECRET").expect("写父目录条目");
     let spec = FenceSpec {
         agent: "probe-roundtrip".to_string(),
+        lease: String::new(),
         private: PathBuf::new(),
         ro_tree: Vec::new(),
         rw: vec![leaf.clone()],
@@ -719,6 +729,7 @@ fn container_roundtrip_keeps_module_read_only_and_peer_unreachable() {
     std::fs::write(peer.join("secret.txt"), "PEER-SECRET").expect("写另一席的明文");
     let spec = FenceSpec {
         agent: "probe-module".to_string(),
+        lease: String::new(),
         private: userdata.clone(),
         ro_tree: vec![module.clone()],
         rw: vec![userdata.clone()],
@@ -844,6 +855,7 @@ fn container_runs_a_node_module_tool_with_realpath_skipped() {
     .expect("写主脚本");
     let spec = FenceSpec {
         agent: "probe-node".to_string(),
+        lease: String::new(),
         rw: vec![userdata.clone()],
         ro: Vec::new(),
         ro_tree: vec![module.clone()],
@@ -951,6 +963,7 @@ fn acl_write_flavours_are_probed_for_scope_and_readability() {
     std::fs::create_dir_all(&pre).expect("建预检目录");
     let pre_spec = FenceSpec {
         agent: "acl-probe-preflight".to_string(),
+        lease: String::new(),
         private: PathBuf::new(),
         ro_tree: Vec::new(),
         rw: vec![pre.clone()],
@@ -980,6 +993,7 @@ fn acl_write_flavours_are_probed_for_scope_and_readability() {
         std::fs::write(tree.join("sub").join("b.txt"), b"b").expect("写子文件");
         let spec = FenceSpec {
             agent: format!("acl-probe-{tag}"),
+            lease: String::new(),
             private: PathBuf::new(),
             ro_tree: Vec::new(),
             rw: vec![tree.clone()],
@@ -1060,6 +1074,7 @@ fn journal_records_snapshot_and_grant_before_touching_acl() {
     );
     let spec = FenceSpec {
         agent: "probe-journal".to_string(),
+        lease: String::new(),
         private: PathBuf::new(),
         ro_tree: Vec::new(),
         rw: vec![target.clone()],
@@ -1094,6 +1109,7 @@ fn write_then_restore_keeps_the_original_ace_set() {
     let bytes = sd_bytes(&target).expect("存原始安全描述符");
     let spec = FenceSpec {
         agent: "probe-multiset".to_string(),
+        lease: String::new(),
         private: PathBuf::new(),
         ro_tree: Vec::new(),
         rw: vec![target.clone()],
@@ -1138,6 +1154,7 @@ fn missing_grant_target_is_skipped_and_not_journaled() {
     let absent = base.join("missing");
     let spec = FenceSpec {
         agent: "probe-skip".to_string(),
+        lease: String::new(),
         private: PathBuf::new(),
         ro_tree: Vec::new(),
         rw: vec![target.clone(), absent.clone()],
@@ -1207,6 +1224,7 @@ fn journal_failure_blocks_the_acl_write() {
     std::fs::write(&home, b"not a dir").expect("写占位文件");
     let spec = FenceSpec {
         agent: "probe-journal-gate".to_string(),
+        lease: String::new(),
         private: PathBuf::new(),
         ro_tree: Vec::new(),
         rw: vec![target.clone()],
@@ -1250,6 +1268,7 @@ fn ledger_catalog_and_per_item_disposal_keep_the_rest_untouched() {
     let home = base.join(".home");
     let spec = FenceSpec {
         agent: "probe-grant".to_string(),
+        lease: String::new(),
         private: PathBuf::new(),
         ro_tree: Vec::new(),
         rw: vec![inside.clone()],
@@ -1388,11 +1407,20 @@ fn owner_state_distinguishes_live_dead_and_unjudgeable() {
     let dead = Owner {
         pid: 0x7fff_fff0,
         start: 1,
+        lease: String::new(),
     };
-    assert_eq!(owners_state(&[me]), OwnersState::Keep, "有活归属要留");
-    assert_eq!(owners_state(&[dead]), OwnersState::Reclaim, "全死可回收");
     assert_eq!(
-        owners_state(&[me, dead]),
+        owners_state(std::slice::from_ref(&me)),
+        OwnersState::Keep,
+        "有活归属要留"
+    );
+    assert_eq!(
+        owners_state(std::slice::from_ref(&dead)),
+        OwnersState::Reclaim,
+        "全死可回收"
+    );
+    assert_eq!(
+        owners_state(&[me.clone(), dead.clone()]),
         OwnersState::Keep,
         "一活一死不回收"
     );
@@ -1400,7 +1428,8 @@ fn owner_state_distinguishes_live_dead_and_unjudgeable() {
     assert_eq!(
         owners_state(&[Owner {
             pid: me.pid,
-            start: me.start.wrapping_add(1)
+            start: me.start.wrapping_add(1),
+            lease: String::new()
         }]),
         OwnersState::Reclaim,
         "PID 被复用（创建时刻对不上）要判死"
@@ -1425,6 +1454,7 @@ fn reconcile_reclaims_dead_owners_and_keeps_live_ones() {
     let home = base.join(".home");
     let spec_live = FenceSpec {
         agent: "probe-reconcile-live".to_string(),
+        lease: String::new(),
         private: PathBuf::new(),
         ro_tree: Vec::new(),
         rw: vec![live.clone()],
@@ -1434,6 +1464,7 @@ fn reconcile_reclaims_dead_owners_and_keeps_live_ones() {
     };
     let spec_stale = FenceSpec {
         agent: "probe-reconcile-stale".to_string(),
+        lease: String::new(),
         private: PathBuf::new(),
         ro_tree: Vec::new(),
         rw: vec![stale.clone()],
@@ -1453,6 +1484,7 @@ fn reconcile_reclaims_dead_owners_and_keeps_live_ones() {
     let dead = Owner {
         pid: 0x7fff_fff0,
         start: 1,
+        lease: "dead-session".to_string(),
     };
     {
         let mut rec = load_record(&home);
@@ -1499,6 +1531,7 @@ fn reconcile_skips_entries_without_ownership() {
     let home = base.join(".home");
     let spec = FenceSpec {
         agent: "probe-reconcile-skip".to_string(),
+        lease: String::new(),
         private: PathBuf::new(),
         ro_tree: Vec::new(),
         rw: vec![target.clone()],
@@ -1536,7 +1569,7 @@ fn reconcile_skips_entries_without_ownership() {
 
 /// 【归属集合】释放只撤"当前进程"的那一份归属；同一 SID 还有别的归属时 ACE 必须留着。
 #[test]
-fn release_fence_only_removes_current_owners_claim() {
+fn release_fence_only_removes_the_calling_sessions_claim() {
     let base = std::env::temp_dir().join(format!("solomni-release-owner-{}", std::process::id()));
     let target = base.join("target");
     std::fs::create_dir_all(&target).expect("建探针目录");
@@ -1548,8 +1581,9 @@ fn release_fence_only_removes_current_owners_claim() {
         return;
     }
     let home = base.join(".home");
-    let spec = FenceSpec {
+    let spec_of = |lease: &str| FenceSpec {
         agent: "probe-release-owner".to_string(),
+        lease: lease.to_string(),
         private: PathBuf::new(),
         ro_tree: Vec::new(),
         rw: vec![target.clone()],
@@ -1557,38 +1591,48 @@ fn release_fence_only_removes_current_owners_claim() {
         ro: Vec::new(),
         net: false,
     };
-    expect_granted(&prepare_fence(&spec, "cmd", &home), "授权应当成功");
-    let sid = container_sid(&container_name(&spec)).expect("派生容器 SID");
+    let s1 = spec_of("session-1");
+    let s2 = spec_of("session-2");
+    // 同名 agent 的两个并发会话：同一容器 SID、同一批落点。
+    expect_granted(&prepare_fence(&s1, "cmd", &home), "会话 1 授权应当成功");
+    expect_granted(&prepare_fence(&s2, "cmd", &home), "会话 2 授权应当成功");
+    let sid = container_sid(&container_name(&s1)).expect("派生容器 SID");
     let sid_text = sid_to_string(sid);
     free_sid(sid);
-    // 给这个 SID 的每条授权再挂一个别的归属（模拟同名 agent 的另一个实例也在用）。
-    let other = Owner {
-        pid: 0x7fff_fff0,
-        start: 1,
-    };
+    // 台账里这条 (SID, 路径) 有两个归属（两个会话各一份）。
     {
-        let mut rec = load_record(&home);
-        for g in rec.grants.iter_mut() {
-            if g.sid == sid_text {
-                g.owners.push(other);
-            }
-        }
-        save_record(&home, &rec).expect("写回台账");
+        let rec = load_record(&home);
+        let e = rec
+            .grants
+            .iter()
+            .find(|g| g.sid == sid_text && Path::new(&g.path) == target)
+            .expect("目标授权应在台账里");
+        assert_eq!(e.owners.len(), 2, "两个会话各一份归属：{:?}", e.owners);
     }
-    release_fence(&spec, &home).expect("释放应当成功");
-    let sid = container_sid(&container_name(&spec)).expect("再派生容器 SID");
+    // 释放会话 1：只撤它那份归属，ACE 与会话 2 的归属都留着。
+    release_fence(&s1, &home).expect("释放会话 1 应当成功");
+    let sid = container_sid(&container_name(&s1)).expect("再派生容器 SID");
     assert!(
-        has_any_ace_for(sid, &target),
-        "同一 SID 还有别的归属时，ACE 必须留着"
+        has_ace_for(sid, &target, RIGHTS_RW),
+        "会话 2 还在用，ACE 必须留着"
     );
     free_sid(sid);
-    // 那个"别的归属"是死的：对账应当把它清掉，ACE 随之消失。
-    let rep = reconcile(&home);
-    assert!(rep.errors.is_empty(), "对账不该报错：{:?}", rep.errors);
-    let sid = container_sid(&container_name(&spec)).expect("再派生容器 SID");
+    {
+        let rec = load_record(&home);
+        let e = rec
+            .grants
+            .iter()
+            .find(|g| g.sid == sid_text && Path::new(&g.path) == target)
+            .expect("授权条目应当还在");
+        assert_eq!(e.owners.len(), 1, "只剩会话 2 一份归属");
+        assert_eq!(e.owners[0].lease, "session-2");
+    }
+    // 释放会话 2：最后一个归属走了，ACE 撤掉。
+    release_fence(&s2, &home).expect("释放会话 2 应当成功");
+    let sid = container_sid(&container_name(&s1)).expect("再派生容器 SID");
     assert!(
         !has_any_ace_for(sid, &target),
-        "别的归属也死了，对账后不该再有该容器 SID 的 ACE"
+        "两个会话都释放后不该再有该容器 SID 的 ACE"
     );
     free_sid(sid);
     let _ = clean(&home);
