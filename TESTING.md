@@ -53,7 +53,8 @@
   （判据与局限见 [docs/testing/execution-ci.md](docs/testing/execution-ci.md)）。
 - 突变测试是**独立的手动 CI 工作流** `.github/workflows/mutants.yml`（入口 `tests/ci-mutation.mjs`、
   范围 `tests/mutation-scope.json`）：只有 `core`（小而精）与 `module`（单模块抽查）两个范围，刻意不做 `all`；
-  结果只作调查，**不参与 `TEST-REPORT-ACCEPTED`**。
+  结果只作调查，**不参与 `TEST-REPORT-ACCEPTED`**，发它自己独占的 `ci-mutation` 滚动分支（各推各的，不碰 `ci-report`），
+  完整现场走 Actions 产物。
 - 门禁之外另有一个**仓库卫生审查**脚本 `run-hygiene.js`（注释契约存量棘轮 + 内容卫生；报告只报不拦、收紧只能往下，也不进 `TEST-REPORT-*`）：
   判据与用法见 [docs/testing/quality-isolation.md](docs/testing/quality-isolation.md) 的「门禁之外」。
 

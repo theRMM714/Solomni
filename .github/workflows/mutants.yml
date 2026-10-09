@@ -72,3 +72,29 @@ jobs:
             mutants.out/
             mutants.out.old/
           if-no-files-found: ignore
+
+  publish:
+    name: 发布到 ci-mutation
+    needs: mutation
+    if: ${{ always() && !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    concurrency:
+      group: ci-mutation-publish
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: 取回突变产物
+        uses: actions/download-artifact@v8
+        continue-on-error: true
+        with:
+          name: mutation-report
+          path: .
+
+      - name: 写入 ci-mutation 分支（小文本；完整现场在产物里）
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node tests/ci-mutation-publish.mjs

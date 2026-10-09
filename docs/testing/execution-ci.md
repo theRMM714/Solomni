@@ -139,8 +139,19 @@ MUTATION_SCOPE=module MUTATION_MODULE=repair node tests/ci-mutation.mjs
 
 退出码语义（cargo-mutants）：`0` 全捕获、`2` 有未捕获、`3` 有超时、`4` 基线就挂。
 只要不是 `0`，工作流变红并打印 `MUTATION-FOUND`（全捕获打印 `MUTATION-OK`）——**这是给人看的调查结果，
-不参与 `TEST-REPORT-ACCEPTED`，也不写 `ci-report`**。结果目录 `mutants.out/` 与 `target/mutation-report.json` 上 artifact；
-首轮「未捕获」要逐条分诊（真缺口补测、等价/无意义变异体记 skip），棘轮基线尚未建立，见 `tests/gaps.yaml` 的 `testing.mutation`。
+不参与 `TEST-REPORT-ACCEPTED`，也不写 `ci-report`**。
+
+结果分两处，**各推各的**（`ci-report` 由 `test.yml` 独占，突变不碰它）：
+
+- **`ci-mutation` 滚动分支**（小文本，可 `git show`，无凭据也能读）：
+  `git fetch origin && git show origin/ci-mutation:module-repair/missed.txt`；键是 `core` 或 `module-<名字>`，
+  **同一键每次覆盖、只留最近一次**，内容为 `report.json` / `meta.json` / `missed.txt` / `caught.txt` /
+  `timeout.txt` / `unviable.txt` / `outcomes.json`；
+- **Actions 产物 `mutation-report`**（完整现场）：`target/mutation-report.json`、`target/logs/mutation-*.log`、
+  `mutants.out/`；分支只留最近一次，历史看这里。
+
+首轮「未捕获」要逐条分诊（真缺口补测、等价/无意义变异体记 skip），棘轮基线尚未建立，见
+[tests/gaps.yaml](../../tests/gaps.yaml) 的 `testing.mutation`。
 
 ### CI（GitHub Actions）：跨平台与真机的唯一事实来源
 
