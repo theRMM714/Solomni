@@ -467,6 +467,34 @@ fn yaml_settings_store_defaults_saves_and_reports_malformed_files() {
     let _ = std::fs::remove_dir_all(&root);
 }
 
+#[test]
+fn yaml_settings_store_propagates_non_not_found_read_errors() {
+    // 读错误不止"文件不存在"：拿目录当文件读会得到非 NotFound 的错误，
+    // 这时必须如实报错，不能悄悄退回默认值（否则"配置读不到"会变成"没配置"）。
+    for name in [
+        "providers.yaml",
+        "models.yaml",
+        "settings.yaml",
+        "agents.yaml",
+    ] {
+        let root = scratch(&format!("yaml-settings-readerr-{}", name));
+        let home = root.join(".home");
+        std::fs::create_dir_all(home.join(name)).expect("拿目录占住这个路径");
+        let store = YamlSettingsStore::new(
+            home.join("providers.yaml"),
+            home.join("models.yaml"),
+            home.join("settings.yaml"),
+            home.join("agents.yaml"),
+        );
+        assert!(
+            store.load().is_err(),
+            "{} 是非 NotFound 读错误，必须报错而不是退回默认",
+            name
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+}
+
 // ---------- FsModules ----------
 
 #[test]
