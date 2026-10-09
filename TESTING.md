@@ -51,6 +51,9 @@
   `timeouts`；每步用时进报告，超预算标 `[slow]`（只报不拦）。
 - `node run-tests.js --coverage` 是**手动覆盖率发现模式**：只用来找盲区，不做通过判据、不设阈值
   （判据与局限见 [docs/testing/execution-ci.md](docs/testing/execution-ci.md)）。
+- 突变测试是**独立的手动 CI 工作流** `.github/workflows/mutants.yml`（入口 `tests/ci-mutation.mjs`、
+  范围 `tests/mutation-scope.json`）：只有 `core`（小而精）与 `module`（单模块抽查）两个范围，刻意不做 `all`；
+  结果只作调查，**不参与 `TEST-REPORT-ACCEPTED`**。
 - 门禁之外另有一个**仓库卫生审查**脚本 `run-hygiene.js`（注释契约存量棘轮 + 内容卫生；报告只报不拦、收紧只能往下，也不进 `TEST-REPORT-*`）：
   判据与用法见 [docs/testing/quality-isolation.md](docs/testing/quality-isolation.md) 的「门禁之外」。
 

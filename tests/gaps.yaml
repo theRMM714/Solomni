@@ -77,23 +77,20 @@
   scope: global
   level: T1
   why: |
-    现有手段（分层用例、端口契约、覆盖率 discovery）回答的是"哪些生产代码被执行了"，回答不了
-    "测试能不能发现 bug"——高覆盖也可能是假测试（改了行为用例仍然全绿）。变异测试（cargo-mutants）
-    是唯一能自动暴露"存活变异体"的手段。但全仓约 188 个 .rs / 5.9 万行，逐变异体重编译的全量跑不可行；
-    平台 #[cfg] 的代码在别平台根本不编译，会产生大量无效变异体。故只做定向、不做全量，也不进门禁。
+    覆盖率只说"这行被执行过"，说不了"测试有没有断言住它"；突变测试（cargo-mutants）能自动回答后者。
+    整仓全量不可行、收益也低（平台 #[cfg] 在别平台不编译、unviable/等价变异体多），
+    所以只做 core（小而精）与 module（单模块抽查）两个范围，**刻意不做 all**。
   how: |
-    1) 只圈高价值纯逻辑做定向变异：collab 状态机（src/capabilities/collab/service/）、
-       会话重放与回档锚（src/capabilities/session/、capabilities/conductor/service/rewind.rs）、
-       补丁解析（capabilities/tools/domain/patch.rs）、信封修复（capabilities/llm/detail/repair.rs）、
-       登记处与名单解析（capabilities/registry/、capabilities/slate/）。
-    2) 装：cargo install --locked cargo-mutants（项目内工具区 .tools/ 或 platform/<os>/）。
-    3) 跑：cargo mutants --file <文件> --timeout <秒>，结果落 target/。
-    4) 存活变异体逐条分诊：真缺口补测；等价变异体（语义相同）在结果里标注，不补测。
+    1) 范围在 tests/mutation-scope.json（文件级清单，随代码移动可维护）；入口 tests/ci-mutation.mjs；
+       CI 工作流 .github/workflows/mutants.yml（手动 workflow_dispatch、Linux 单平台、install-action 装工具）。
+    2) 测试命令固定「只跑 --bin solomni + --test-threads=1」：串行是刻意的，并行会偶发
+       （见 testing.parallel-flake）。
+    3) 剩余工作：把首轮结果里确认的"未捕获"逐条分诊——(a) 真缺口补测，(b) 等价/无意义变异体记 skip；
+       并建立 tests/mutation-baseline.json 棘轮，让工作流只对**新增**未捕获变红。
   accept: |
-    对 collab 状态机、会话回档、补丁解析至少各跑一轮定向变异并产出存活清单；真缺口补测完成，
-    等价变异体有书面分诊结论；随后删除本条或把它降级为一次性记录。
-  blocked_by: 有意推迟（成本高：逐变异体重编译；非门禁项，等纯逻辑稳定后再做）
-
+    core 与每个 module 各跑通一次并产出报告；确认的未捕获逐条有补测或 skip 结论；
+    棘轮建立后可手动派发工作流并只对新增未捕获变红。
+  blocked_by: 缺少实现（首轮分诊与棘轮基线尚未做）
 - id: testing.coverage-child-and-platform
   scope: global
   level: T3

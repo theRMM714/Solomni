@@ -1,0 +1,74 @@
+# 突变测试（手动）：只在需要时抽查「测试能不能发现 bug」，不参与验收（见 docs/testing/execution-ci.md）。
+# 只有手动 workflow_dispatch；Linux 单平台——范围是平台无关的纯逻辑，三平台只是 3 倍成本。
+# cargo-mutants 用 taiki-e/install-action 装预编译二进制：CI 是一次性临时环境，不改本机。
+name: 突变测试
+
+on:
+  workflow_dispatch:
+    inputs:
+      scope:
+        description: "范围：core（小而精，先跑这个）或 module（单模块抽查）"
+        type: choice
+        options:
+          - core
+          - module
+        default: core
+      module:
+        description: "scope=module 时测哪个模块（可选值见 tests/mutation-scope.json 的 modules；scope=core 时忽略）"
+        type: string
+        default: repair
+
+permissions:
+  contents: read
+
+jobs:
+  mutation:
+    name: 突变测试
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "lts/*"
+
+      - name: 准备 Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustc --version
+
+      - name: 装 cargo-mutants（预编译，一次性环境）
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-mutants
+
+      - name: 缓存依赖与编译产物
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target/debug
+          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: 跑突变测试
+        env:
+          MUTATION_SCOPE: ${{ inputs.scope }}
+          MUTATION_MODULE: ${{ inputs.module }}
+        run: node tests/ci-mutation.mjs
+
+      - name: 留产物（报告与 mutants.out；无论成败）
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: mutation-report
+          path: |
+            target/mutation-report.json
+            target/logs/mutation-*.log
+            mutants.out/
+            mutants.out.old/
+          if-no-files-found: ignore

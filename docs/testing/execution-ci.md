@@ -120,9 +120,31 @@ node run-tests.js --coverage
 报告落 `target/coverage/`；未覆盖的生产路径逐条决定补测或记 [tests/gaps.yaml](../../tests/gaps.yaml) 的
 `testing.coverage-child-and-platform`。
 
+### 突变测试工作流（手动）
+
+范围只有两个：`core`（小而精，先跑）与 `module`（单模块抽查）；**刻意不做 `all`**——全量收益低
+（平台 `#[cfg]` 在别平台不编译、unviable/等价变异体多）、耗时长，单模块抽查已够用。
+范围是 `tests/mutation-scope.json` 里的**文件级**清单（不写变异体名，避免行号漂移后腐烂）。
+
+```text
+（本地，需自己装 cargo-mutants）
+MUTATION_SCOPE=core node tests/ci-mutation.mjs
+MUTATION_SCOPE=module MUTATION_MODULE=repair node tests/ci-mutation.mjs
+（CI 用 .github/workflows/mutants.yml，手动派发）
+```
+
+测试命令固定「只跑 `--bin solomni` + `--test-threads=1`」：**串行是刻意的**，并行会偶发
+（见 [tests/gaps.yaml](../../tests/gaps.yaml) 的 `testing.parallel-flake`）。工具在 CI 里用
+`taiki-e/install-action` 装（一次性临时环境，不改本机）。
+
+退出码语义（cargo-mutants）：`0` 全捕获、`2` 有未捕获、`3` 有超时、`4` 基线就挂。
+只要不是 `0`，工作流变红并打印 `MUTATION-FOUND`（全捕获打印 `MUTATION-OK`）——**这是给人看的调查结果，
+不参与 `TEST-REPORT-ACCEPTED`，也不写 `ci-report`**。结果目录 `mutants.out/` 与 `target/mutation-report.json` 上 artifact；
+首轮「未捕获」要逐条分诊（真缺口补测、等价/无意义变异体记 skip），棘轮基线尚未建立，见 `tests/gaps.yaml` 的 `testing.mutation`。
+
 ### CI（GitHub Actions）：跨平台与真机的唯一事实来源
 
-工作流 `.github/workflows/test.yml`，**只有手动触发**（`workflow_dispatch`）：`main` 禁止直接 push（只走 PR），
+跨平台验收工作流是 `.github/workflows/test.yml`，**只有手动触发**（`workflow_dispatch`）：`main` 禁止直接 push（只走 PR），
 日常提交不自动跑 CI。矩阵 `windows-latest / ubuntu-latest / macos-latest`（`fail-fast: false`，
 一个平台失败不影响另外两个出结论）。
 
@@ -227,7 +249,8 @@ git show origin/ci-report:runs/windows/logs/<某一步>.log  # 失败证据原�
 - `E2E-OK`：端到端场景完成；
 - `TEST-REPORT-OK`：当前入口的运行步骤没有失败；
 - `TEST-REPORT-FAIL`：当前入口有硬失败步骤**或** T0 任一项不过（同时以非零退出码暴露）；
-- `TEST-REPORT-ACCEPTED`：当前平台缺口账为空。
+- `TEST-REPORT-ACCEPTED`：当前平台缺口账为空；
+- `MUTATION-OK` / `MUTATION-FOUND`：突变测试工作流全捕获 / 有未捕获或超时——**只用于调查，不参与验收**。
 
 固定标记不能替代质量门禁，也不能覆盖 `env-skip`、`gap` 或 `quality-fail`。测试入口必须以非零退出码暴露失败。
 
