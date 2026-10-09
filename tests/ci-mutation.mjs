@@ -14,7 +14,8 @@ const REPORT = path.join(ROOT, "target", "mutation-report.json");
 fs.mkdirSync(LOG_DIR, { recursive: true });
 
 const scope = process.env.MUTATION_SCOPE || "core";
-const moduleName = process.env.MUTATION_MODULE || "";
+// 只有 scope=module 才记模块名：scope=core 时不带，键才是 core（而不是 core-repair）。
+const moduleName = scope === "module" ? process.env.MUTATION_MODULE || "" : "";
 const timeout = process.env.MUTATION_TIMEOUT_SECS || "60";
 
 const die = (m) => {

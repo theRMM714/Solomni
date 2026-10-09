@@ -87,6 +87,22 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # 关键：把 ci-mutation 重建为**空分支**再写报告。否则 Contents API 建分支时会以默认分支 HEAD 为底座，
+      # 把整棵源码树背进报告分支（ci-report 的 publish job 也是这么做的）。
+      - name: 把 ci-mutation 重建为空分支
+        env:
+          REPORT_BRANCH: ci-mutation
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout --orphan ci-mutation-clean
+          git rm -rf . >/dev/null 2>&1 || true
+          git commit --allow-empty -m "重建 ci-mutation 报告树（run ${GITHUB_RUN_NUMBER}）"
+          git push origin "HEAD:refs/heads/${REPORT_BRANCH}" --force
+
+      - name: 恢复源码工作树
+        run: git checkout --detach "${GITHUB_SHA}"
+
       - name: 取回突变产物
         uses: actions/download-artifact@v8
         continue-on-error: true

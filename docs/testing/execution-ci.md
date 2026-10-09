@@ -135,7 +135,8 @@ MUTATION_SCOPE=module MUTATION_MODULE=repair node tests/ci-mutation.mjs
 
 测试命令固定「只跑 `--bin solomni` + `--test-threads=1`」：**串行是刻意的**，并行会偶发
 （见 [tests/gaps.yaml](../../tests/gaps.yaml) 的 `testing.parallel-flake`）。工具在 CI 里用
-`taiki-e/install-action` 装（一次性临时环境，不改本机）。
+`taiki-e/install-action` 装（一次性临时环境，不改本机）。已知**等价变异体**在仓库根的 `.cargo/mutants.toml`
+的 `exclude_re` 里排除（每条都要写明为什么等价，当前 1 条）。
 
 退出码语义（cargo-mutants）：`0` 全捕获、`2` 有未捕获、`3` 有超时、`4` 基线就挂。
 只要不是 `0`，工作流变红并打印 `MUTATION-FOUND`（全捕获打印 `MUTATION-OK`）——**这是给人看的调查结果，
