@@ -1,0 +1,4 @@
+# 突变测试配置（范围在 tests/mutation-scope.json；契约见 docs/testing/execution-ci.md）。
+# 已知等价变异体：unclosed_scan 只在括号 depth>0 时返回 Tail，此时 missing 必非空；
+# `Some(t) if !t.missing.is_empty()` 对可达输入恒真，改成 true 行为等价 → 排除，不补测。
+exclude_re = ["guard !t\\.missing\\.is_empty\\(\\) with true"]

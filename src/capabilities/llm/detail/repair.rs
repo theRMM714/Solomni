@@ -270,4 +270,45 @@ mod tests {
             .repaired
             .is_none());
     }
+
+    #[test]
+    fn a_raw_control_inside_a_cut_string_is_never_repaired() {
+        // 断在字符串中间（还差引号与括号）+ 同时有裸控制字符：转义救不了半截内容，一律不修。
+        // 这里必须**真的有**一个裸控制字符，否则 escape_controls 先返回空、根本走不到"断串"守卫。
+        let cut = "{\"type\":\"tool\",\"name\":\"write\",\"args\":{\"path\":\"a\",\"content\":\"写了一半\n";
+        assert!(
+            UnambiguousRepair
+                .repair(cut, &raw_control(Some(tail("}}", true))))
+                .repaired
+                .is_none(),
+            "断串 + 裸控制字符一律不修"
+        );
+    }
+
+    #[test]
+    fn generic_control_chars_are_escaped_and_space_is_kept() {
+        // 通用控制字符（不是 \n / \r / \t）走 <0x20 那一支转成 \uXXXX；0x20（空格）是普通字符，原样保留。
+        let raw = "{\"type\":\"tool\",\"name\":\"write\",\"args\":{\"path\":\"a\",\"content\":\"x\u{0001} y\"}}";
+        let out = UnambiguousRepair.repair(raw, &raw_control(None));
+        let fixed = out.repaired.expect("控制字符可以转义");
+        assert!(
+            fixed.contains("\\u0001"),
+            "U+0001 要转成 \\u0001：{}",
+            fixed
+        );
+        assert!(
+            fixed.contains("x\\u0001 y"),
+            "空格是普通字符，保持原样：{}",
+            fixed
+        );
+    }
+
+    #[test]
+    fn the_same_escape_is_noted_once_even_when_it_repeats() {
+        // 同一段里两次相同的裸控制字符：回执只记一次（去重）。
+        let raw = "{\"type\":\"tool\",\"name\":\"write\",\"args\":{\"path\":\"a\",\"content\":\"一\n二\n三\"}}";
+        let out = UnambiguousRepair.repair(raw, &raw_control(None));
+        assert!(out.repaired.is_some(), "两处换行都能修");
+        assert_eq!(out.what.len(), 1, "同一种转义只说一次：{:?}", out.what);
+    }
 }

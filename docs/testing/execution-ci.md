@@ -135,7 +135,8 @@ MUTATION_SCOPE=module MUTATION_MODULE=repair node tests/ci-mutation.mjs
 
 测试命令固定「只跑 `--bin solomni` + `--test-threads=1`」：**串行是刻意的**，并行会偶发
 （见 [tests/gaps.yaml](../../tests/gaps.yaml) 的 `testing.parallel-flake`）。工具在 CI 里用
-`taiki-e/install-action` 装（一次性临时环境，不改本机）。
+`taiki-e/install-action` 装（一次性临时环境，不改本机）。已知**等价变异体**在仓库根的 `.cargo/mutants.toml`
+的 `exclude_re` 里排除（每条都要写明为什么等价，当前 1 条）。
 
 退出码语义（cargo-mutants）：`0` 全捕获、`2` 有未捕获、`3` 有超时、`4` 基线就挂。
 只要不是 `0`，工作流变红并打印 `MUTATION-FOUND`（全捕获打印 `MUTATION-OK`）——**这是给人看的调查结果，
@@ -150,8 +151,9 @@ MUTATION_SCOPE=module MUTATION_MODULE=repair node tests/ci-mutation.mjs
 - **Actions 产物 `mutation-report`**（完整现场）：`target/mutation-report.json`、`target/logs/mutation-*.log`、
   `mutants.out/`；分支只留最近一次，历史看这里。
 
-首轮「未捕获」要逐条分诊（真缺口补测、等价/无意义变异体记 skip），棘轮基线尚未建立，见
-[tests/gaps.yaml](../../tests/gaps.yaml) 的 `testing.mutation`。
+首轮 **core** 已分诊：9 个真缺口补测、1 个等价变异体在 `.cargo/mutants.toml` 排除；复跑
+`45 caught / 3 unviable / 0 missed / 0 timeout` → `MUTATION-OK`。各 `module` 可按需派发，首轮尚未逐个抽查；
+棘轮基线暂不建（core 已归零，等出现「已知容忍」的未捕获时再加）。
 
 ### CI（GitHub Actions）：跨平台与真机的唯一事实来源
 
