@@ -72,3 +72,41 @@
     3) 回滚要留可回放的记录，并与回档标记模型对齐（提交锚见 docs/session/session-model.md 的五）。
   accept: 用户能在界面上看到提交历史，并把共享区回滚到任一提交点；回滚后新开的 agent 拉取到的是那一点的内容。
   blocked_by: 缺少实现（呈现面未接入）
+
+- id: testing.mutation
+  scope: global
+  level: T1
+  why: |
+    现有手段（分层用例、端口契约、覆盖率 discovery）回答的是"哪些生产代码被执行了"，回答不了
+    "测试能不能发现 bug"——高覆盖也可能是假测试（改了行为用例仍然全绿）。变异测试（cargo-mutants）
+    是唯一能自动暴露"存活变异体"的手段。但全仓约 188 个 .rs / 5.9 万行，逐变异体重编译的全量跑不可行；
+    平台 #[cfg] 的代码在别平台根本不编译，会产生大量无效变异体。故只做定向、不做全量，也不进门禁。
+  how: |
+    1) 只圈高价值纯逻辑做定向变异：collab 状态机（src/capabilities/collab/service/）、
+       会话重放与回档锚（src/capabilities/session/、capabilities/conductor/service/rewind.rs）、
+       补丁解析（capabilities/tools/domain/patch.rs）、信封修复（capabilities/llm/detail/repair.rs）、
+       登记处与名单解析（capabilities/registry/、capabilities/slate/）。
+    2) 装：cargo install --locked cargo-mutants（项目内工具区 .tools/ 或 platform/<os>/）。
+    3) 跑：cargo mutants --file <文件> --timeout <秒>，结果落 target/。
+    4) 存活变异体逐条分诊：真缺口补测；等价变异体（语义相同）在结果里标注，不补测。
+  accept: |
+    对 collab 状态机、会话回档、补丁解析至少各跑一轮定向变异并产出存活清单；真缺口补测完成，
+    等价变异体有书面分诊结论；随后删除本条或把它降级为一次性记录。
+  blocked_by: 有意推迟（成本高：逐变异体重编译；非门禁项，等纯逻辑稳定后再做）
+
+- id: testing.coverage-child-and-platform
+  scope: global
+  level: T3
+  why: |
+    node run-tests.js --coverage 只覆盖测试进程内的代码。产品二进制（守门进程 solomni --guard、
+    L4 端到端）由本入口单独 cargo build，未插桩，作为子进程运行不会被计入；平台 #[cfg] 代码在
+    别的平台根本不编译。任何一份覆盖率都只代表"当前平台 + 进程内那几层"，当全貌会误导。
+  how: |
+    1) 三平台各自跑一次（与 T4 平台探针同一矩阵）；
+    2) 若要把子进程计入：产品构建也用同一插桩（-C instrument-coverage），LLVM_PROFILE_FILE 带 %p
+       传播到子进程，收尾合并 profraw；
+    3) 产出"未覆盖清单"后逐条决定补测或记缺口。
+  accept: |
+    三平台各有一份覆盖率报告，且报告明确标注"仅进程内 / 仅当前平台"或已聚合子进程；
+    未覆盖的生产路径逐条有补测或缺口结论。
+  blocked_by: 缺少观察面（子进程插桩与合并尚未实现）

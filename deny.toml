@@ -1,0 +1,41 @@
+# 供应链门禁（cargo deny，见 docs/testing/levels.md 的 T0）：
+# 已知 CVE、许可证白名单、禁用与来源策略。判定与命令在 run-tests.js 的「T0 供应链」一步。
+# 版本 2 是当前 cargo-deny 的配置 schema。
+[graph]
+all-features = true
+
+[advisories]
+version = 2
+# 有漏洞即硬失败；被 yank 的版本也不许进入依赖图。
+yanked = "deny"
+ignore = []
+
+[licenses]
+version = 2
+# 白名单按当前依赖树实测得出（含三平台分支）；新增依赖落到表外即失败。
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "Unicode-3.0",
+    "BSL-1.0",
+    "CDLA-Permissive-2.0",
+]
+confidence-threshold = 0.93
+
+[bans]
+# 重复依赖：这里只能 warn。cargo-deny 的图是**三平台并集**，锁文件里 windows-sys 0.52（ring 在非 Windows 分支）
+# 与 0.61（本产品直依赖）会同时出现，但二者在任何单个平台上都不会共存——按平台看零重复由
+# run-tests.js 的 cargo tree --duplicates 零容忍把关（见 docs/testing/levels.md 的 T0）。
+multiple-versions = "warn"
+wildcards = "deny"
+deny = []
+skip = []
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
