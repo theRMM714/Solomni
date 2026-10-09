@@ -72,7 +72,7 @@ fn ask_pushes_a_card_and_blocks_until_the_answer_command_answers_it() {
     let (handle, ops, sid) = session_case();
     let door = door_of(&handle, &sid);
     let seen: Arc<Mutex<Vec<SessionEvent>>> = Arc::new(Mutex::new(Vec::new()));
-    let ask = SessionAsk::new(
+    let ask = Arc::new(SessionAsk::new(
         Arc::clone(&door),
         &sid,
         Box::new({
@@ -80,36 +80,43 @@ fn ask_pushes_a_card_and_blocks_until_the_answer_command_answers_it() {
             move |ev: SessionEvent| seen.lock().expect("锁").push(ev)
         }),
         handle.clone(),
-    );
-    let answerer = {
-        let ops = ops.clone();
-        let sid = sid.clone();
+    ));
+    // 发起方阻塞且不设超时：放工作线程上；主线程**等卡真的进队**再作答。
+    // 反过来（用有上限的轮询线程去答）会在这格永久挂住——全量串行里偶发的死等就是这么来的。
+    let outcome: Arc<Mutex<Option<AskOutcome>>> = Arc::new(Mutex::new(None));
+    let _asker = {
+        let ask = Arc::clone(&ask);
+        let outcome = Arc::clone(&outcome);
         std::thread::spawn(move || {
-            for _ in 0..2000 {
-                if let Ok(Some(q)) = ops.sessions.open_queue(&sid) {
-                    assert_eq!(q.card.envelope.role, "tools", "谁在问：工具层");
-                    assert_eq!(q.card.envelope.name, "a");
-                    assert!(
-                        q.card.message.detail.contains("错误码 5"),
-                        "详情要写清缺什么前提：{}",
-                        q.card.message.detail
-                    );
-                    ops.sessions
-                        .answer_card(&sid, &q.card.id, OPT_FENCE_UNFENCED, "")
-                        .expect("按选项作答");
-                    return true;
-                }
-                std::thread::sleep(std::time::Duration::from_millis(2));
-            }
-            false
+            let got = ask.ask(&request());
+            *outcome.lock().expect("锁") = Some(got);
         })
     };
-    // 发起方阻塞等回答：这一句要等作答线程把它解开。
-    let got = ask.ask(&request());
-    assert!(answerer.join().expect("作答线程"), "卡要进这条会话的队");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let queued = loop {
+        if let Ok(Some(q)) = ops.sessions.open_queue(&sid) {
+            break q;
+        }
+        assert!(std::time::Instant::now() < deadline, "卡要进这条会话的队");
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    };
+    assert_eq!(queued.card.envelope.role, "tools", "谁在问：工具层");
+    assert_eq!(queued.card.envelope.name, "a");
+    assert!(
+        queued.card.message.detail.contains("错误码 5"),
+        "详情要写清缺什么前提：{}",
+        queued.card.message.detail
+    );
+    ops.sessions
+        .answer_card(&sid, &queued.card.id, OPT_FENCE_UNFENCED, "")
+        .expect("按选项作答");
+    while outcome.lock().expect("锁").is_none() {
+        assert!(std::time::Instant::now() < deadline, "ask 没有被作答解开");
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
     assert_eq!(
-        got,
-        AskOutcome::Chosen(OPT_FENCE_UNFENCED.to_string()),
+        outcome.lock().expect("锁").take(),
+        Some(AskOutcome::Chosen(OPT_FENCE_UNFENCED.to_string())),
         "选中的选项 id 要还给发起方"
     );
     assert!(door.is_empty(), "答完不再挂着");
@@ -198,33 +205,40 @@ fn no_answerer_falls_back_to_the_declared_option_or_refuses() {
 fn stopped_is_not_the_same_as_nobody_answered() {
     let (handle, _ops, sid) = session_case();
     let door = door_of(&handle, &sid);
-    let ask = SessionAsk::new(
+    let ask = Arc::new(SessionAsk::new(
         Arc::clone(&door),
         &sid,
         Box::new(|_ev: SessionEvent| {}),
         handle.clone(),
-    );
+    ));
     let mut request = request();
     request.on_unanswered = Some(OPT_FENCE_UNFENCED.to_string());
-    let stopper = {
-        let door = Arc::clone(&door);
+    // ask 阻塞且**不设超时**，所以放到工作线程上；主线程先确认卡已进队，再整队作废。
+    // 反过来（作废线程可能先于入队就放弃）会把这格永久挂住——那正是全量串行里偶发的死等。
+    let outcome: Arc<Mutex<Option<AskOutcome>>> = Arc::new(Mutex::new(None));
+    let _asker = {
+        let ask = Arc::clone(&ask);
+        let outcome = Arc::clone(&outcome);
         std::thread::spawn(move || {
-            for _ in 0..2000 {
-                if !door.is_empty() {
-                    door.void();
-                    return true;
-                }
-                std::thread::sleep(std::time::Duration::from_millis(2));
-            }
-            false
+            let got = ask.ask(&request);
+            *outcome.lock().expect("锁") = Some(got);
         })
     };
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while door.is_empty() {
+        assert!(std::time::Instant::now() < deadline, "卡没有进队");
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+    assert_eq!(door.void().len(), 1, "作废的就是刚进队那张卡");
+    while outcome.lock().expect("锁").is_none() {
+        assert!(std::time::Instant::now() < deadline, "ask 没有被停止解开");
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
     assert_eq!(
-        ask.ask(&request),
-        AskOutcome::Stopped,
+        outcome.lock().expect("锁").take(),
+        Some(AskOutcome::Stopped),
         "用户停止 = 拒绝：声明的默认项不能把它吞成放行"
     );
-    assert!(stopper.join().expect("停止线程"), "卡要先进队");
 }
 
 /// 没人答（这一趟没有回答者）时端口按声明的默认项收场，并在会话里**如实记一句"不是用户答的"**。
@@ -233,7 +247,7 @@ fn port_applies_the_declared_default_and_says_it_was_not_the_user() {
     let (handle, _ops, sid) = session_case();
     let door = door_of(&handle, &sid);
     let seen: Arc<Mutex<Vec<SessionEvent>>> = Arc::new(Mutex::new(Vec::new()));
-    let ask = SessionAsk::new(
+    let ask = Arc::new(SessionAsk::new(
         Arc::clone(&door),
         &sid,
         Box::new({
@@ -241,29 +255,34 @@ fn port_applies_the_declared_default_and_says_it_was_not_the_user() {
             move |ev: SessionEvent| seen.lock().expect("锁").push(ev)
         }),
         handle.clone(),
-    );
+    ));
     let mut request = request();
     request.on_unanswered = Some(OPT_FENCE_UNFENCED.to_string());
-    // 没人答：等待格被"这一趟没有回答者"解开（会话按转录重建那条路）。
-    let releaser = {
-        let door = Arc::clone(&door);
+    // 没人答：主线程等卡进队后按"这一趟没有回答者"重建整队（不用有上限的轮询线程）。
+    let outcome: Arc<Mutex<Option<AskOutcome>>> = Arc::new(Mutex::new(None));
+    let _asker = {
+        let ask = Arc::clone(&ask);
+        let outcome = Arc::clone(&outcome);
         std::thread::spawn(move || {
-            for _ in 0..2000 {
-                if !door.is_empty() {
-                    door.rebuild(0);
-                    return true;
-                }
-                std::thread::sleep(std::time::Duration::from_millis(2));
-            }
-            false
+            let got = ask.ask(&request);
+            *outcome.lock().expect("锁") = Some(got);
         })
     };
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while door.is_empty() {
+        assert!(std::time::Instant::now() < deadline, "卡没有进队");
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+    door.rebuild(0);
+    while outcome.lock().expect("锁").is_none() {
+        assert!(std::time::Instant::now() < deadline, "ask 没有被解开");
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
     assert_eq!(
-        ask.ask(&request),
-        AskOutcome::Defaulted(OPT_FENCE_UNFENCED.to_string()),
+        outcome.lock().expect("锁").take(),
+        Some(AskOutcome::Defaulted(OPT_FENCE_UNFENCED.to_string())),
         "没人答 + 声明了默认项 = 按它收场"
     );
-    assert!(releaser.join().expect("线程"), "卡要先进队");
     let pushed = seen.lock().expect("锁");
     assert!(
         pushed.iter().any(|e| matches!(e, SessionEvent::Notice(n)
