@@ -128,6 +128,7 @@ pub(crate) fn lock_ledger(home: &Path) -> Result<LedgerGuard, String> {
     let path = lock_path(home);
     let file = std::fs::OpenOptions::new()
         .create(true)
+        .truncate(false)
         .read(true)
         .write(true)
         .open(&path)
@@ -1211,8 +1212,8 @@ pub fn reconcile(home: &Path) -> super::super::ReconcileReport {
             .iter()
             .filter(|s| **s != OwnersState::Reclaim)
             .count();
-    let to_do = grant_state.iter().any(|s| *s == OwnersState::Reclaim)
-        || profile_state.iter().any(|s| *s == OwnersState::Reclaim)
+    let to_do = grant_state.contains(&OwnersState::Reclaim)
+        || profile_state.contains(&OwnersState::Reclaim)
         || snap_reclaim.iter().any(|b| *b);
     if !to_do {
         return rep;
