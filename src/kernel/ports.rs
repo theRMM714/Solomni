@@ -42,6 +42,8 @@ pub trait AskUser: Send + Sync {
 /// 目的：一次提问的**统一入口**——有前端就问它，没前端就按发起方声明的默认项收场（默认 = 不办）。
 /// 约束：声明只在**属于这张卡选项集**时才算数（不属于就按"没人答"处置，不静默改写）；
 ///   发起方只该用 `AskOutcome::decided` 取结果，不必逐态 match。
+// 这套机制只在 Windows 的容器围栏里用（unix 没有 prepare_fence 这一步）：unix 侧无使用点，如实放行死代码。
+#[allow(dead_code)]
 pub fn ask_user(port: Option<&dyn AskUser>, ask: &Ask) -> AskOutcome {
     match port {
         Some(p) => p.ask(ask),

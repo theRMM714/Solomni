@@ -100,6 +100,8 @@ pub enum AskOutcome {
 impl AskOutcome {
     /// 目的：这次**照哪个选项 id 办**——用户答的或声明的默认项都算；`None` = 这次不办。
     /// 约束：发起方只需要看这一个结果，不必逐态 match；"为什么没答案"的如实记录由端口落进会话。
+    // 这套机制只在 Windows 的容器围栏里用（unix 没有 prepare_fence 这一步）：unix 侧无使用点，如实放行死代码。
+    #[allow(dead_code)]
     pub fn decided(&self) -> Option<&str> {
         match self {
             AskOutcome::Chosen(id) | AskOutcome::Defaulted(id) => Some(id.as_str()),
