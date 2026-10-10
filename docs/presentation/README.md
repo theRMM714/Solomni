@@ -13,8 +13,8 @@
 | 文件 | 内容 |
 | --- | --- |
 | [`contracts.md`](contracts.md) | 呈现层入站契约、事件台、命令/事件规则与机器可读的 HTTP 路由目录 |
-| [`cli/README.md`](cli/README.md) · [`cli/module-map.md`](cli/module-map.md) | 终端转录中心的入口与逐文件职责 |
-| [`web/README.md`](web/README.md) · [`web/module-map.md`](web/module-map.md) | 本地网页的入口与逐文件职责 |
+| [`cli/README.md`](cli/README.md) · [`cli/unit-map.md`](cli/unit-map.md) | 终端转录中心的入口与逐文件职责 |
+| [`web/README.md`](web/README.md) · [`web/unit-map.md`](web/unit-map.md) | 本地网页的入口与逐文件职责 |
 
 ## 改动时必须同步
 

@@ -69,7 +69,7 @@ Solomni 是一个**跑在自己机器上的智能体运行环境（AgentOS）**�
 前置：**Node**（跑启动器）与 **Rust**（构建核心）。
 
 ```bash
-node env.js setup        # 只准备环境：工具链落进项目内 platform/<os>/ 与 .tools/
+node env.js setup        # 只准备环境：项目内 platform/<os>/ 与 .tools/；有可用 Rust 则直接借用
 node start.js            # 任意平台；Windows 也可双击 start.bat，macOS / Linux 也可 ./start.sh
 node start.js -webUI     # 直接进本地网页（127.0.0.1:3081）
 ```
@@ -77,7 +77,8 @@ node start.js -webUI     # 直接进本地网页（127.0.0.1:3081）
 - 环境是独立一层（[env.js](env.js)）：路径约定（`platform/<os>/`、`.tools/`）、工具链探测、环境拼装与安装都在这里；
   启动器只编排构建与运行，`run-tests.js` 也从这里取环境——**换开发环境只改这一处**。`node env.js` 看解析结果，
   `node env.js --print-env` 给机器读。
-- 工具链收敛在**项目内**：缺 Rust 会先征求同意再装，不动系统；**无交互终端时不做安装**，打印手动步骤后退出。
+- 工具链与缓存收敛在**项目内**：检测到可用的 Rust 就**只读借用**，缓存与产物仍落 `platform/<os>/`；没有或有问题的才先征求同意装进项目内，不动系统；**无交互终端时不做安装**，打印手动步骤后退出。
+  借用系统工具链时不读系统 `~/.cargo/config.toml`（镜像 / 凭据），依赖会重新下到项目内——这是「不写项目外」的取舍；门禁还会快照项目外缓存根，写出去即失败。
 - **没有配供应商也能跑**：用内置假模型把流程演示一遍，并如实告知。
 - 常用参数：`--root <目录>`（换产品根）、`--web-port <端口>`、`--release`。
 - 终端提示符下的命令：`single [agent名…]` / `collab [agent名…|?]` / `proxy（决定权整块交给核心）` / `module [模块id.工具名 [json]]（不经 AI 直接用模块工具）` / `webui`。

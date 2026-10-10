@@ -37,22 +37,23 @@
 - `src/capabilities/llm/detail/fake_chat.rs` 中的 `FakeChat` 与 `DemoGateway`；
 - `src/tests/doubles.rs`（`InMemory*` / `FakeCatalog` / `VecSource` / `ScriptGateway` / `RecordingFence` / `TestPrompts` / `NoopLog`）与 `src/tests/builders.rs`（`RecordingRunner` / `ParallelRunner` / `SilentRunner` / 原生与截断通道替身 / 造会话与造名单的辅助）里的测试装配（替身支持失败注入，供 T2 复用）；
 - `src/tests/` 中的契约测试（T2）：
- - `ports.rs`（14 个端口的替身语义；`Log` 在 `kernel/ports.rs`，见 [docs/kernel/module-map.md](docs/kernel/module-map.md)）、
+ - `ports.rs`（14 个端口的替身语义；`Log` 在 `kernel/ports.rs`，见 [docs/kernel/unit-map.md](docs/kernel/unit-map.md)）、
  `fakes.rs`（FakeChat / DemoGateway 的独立契约）；
  - `detail.rs`（8 个文件系统实现的真实边界 + 本机环回 HTTP 适配器）；
  - `api.rs`（入站契约：命令与事件、生成期间停止立刻生效、错误如实传播、单条命令 panic 不带垮核心）；
  - `routes.rs`（HTTP 路由目录 ↔ 处理器 ↔ 文档 ↔ 前端调用 ↔ 演示脚本机器比对；假能力面逐条验成功 / 错误 / 空 / 边界）；
 - **入站契约也是契约**：呈现层只依赖各能力的能力接口（见 [docs/presentation/contracts.md](docs/presentation/contracts.md)）与事件台（拿不到 `Core`、拿不到任何核心锁），
  所以它能被假实现整体替换——`routes.rs` 的 `FakeOps` 就是这么逐条测路由的。
-- T0 质量门禁已并入同一入口：编译、结构审查、格式、clippy、编译告警、依赖重复**零容忍硬失败**；
+- T0 质量门禁已并入同一入口：编译、结构审查、格式、clippy、编译告警、依赖重复、**项目外写（env / 工具链）**零容忍硬失败；
   供应链（`cargo audit` / `cargo deny`）同为硬失败，但工具缺失或取不到 advisory 数据时记 `env-skip`。
-  结构审查里还含**门禁解析器自测**与 **`#[ignore]` 禁令**（报告里 `ignored > 0` 也算失败）。
+  结构审查里还含**门禁解析器自测**与 **`#[ignore]` 禁令**（报告里 `ignored > 0` 也算失败）；
+  项目外写检测在跑完快照 `~/.cargo` / `~/.rustup` 等缓存根，新增即失败，并在启动时清理上次崩溃残留的 `solomni-*` 临时目录（见 [docs/testing/quality-isolation.md](docs/testing/quality-isolation.md)）。
 - 默认**串行**跑用例（`--parallel` 只在排查并发/隔离问题时用，见 [tests/gaps.yaml](tests/gaps.yaml) 的 `testing.parallel-flake`）；每步都有墙钟上限，超时即硬失败并把证据记进报告
   `timeouts`；每步用时进报告，超预算标 `[slow]`（只报不拦）。
 - `node run-tests.js --coverage` 是**手动覆盖率发现模式**：只用来找盲区，不做通过判据、不设阈值
   （判据与局限见 [docs/testing/execution-ci.md](docs/testing/execution-ci.md)）。
 - 突变测试是**独立的手动 CI 工作流** `.github/workflows/mutants.yml`（入口 `tests/ci-mutation.mjs`、
-  范围 `tests/mutation-scope.json`）：只有 `core`（小而精）与 `module`（单模块抽查）两个范围，刻意不做 `all`；
+  范围 `tests/mutation-scope.json`）：只有 `core`（小而精）与 `capability`（单能力抽查）两个范围，刻意不做 `all`；
   结果只作调查，**不参与 `TEST-REPORT-ACCEPTED`**，发它自己独占的 `ci-mutation` 滚动分支（各推各的，不碰 `ci-report`），
   完整现场走 Actions 产物。
 - 门禁之外另有一个**仓库卫生审查**脚本 `run-hygiene.js`（注释契约存量棘轮 + 内容卫生；报告只报不拦、收紧只能往下，也不进 `TEST-REPORT-*`）：

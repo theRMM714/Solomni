@@ -6,6 +6,10 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
+
+const require = createRequire(import.meta.url);
+const envLayer = require("../env.js");
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const SCOPE_FILE = path.join(ROOT, "tests", "mutation-scope.json");
@@ -14,8 +18,8 @@ const REPORT = path.join(ROOT, "target", "mutation-report.json");
 fs.mkdirSync(LOG_DIR, { recursive: true });
 
 const scope = process.env.MUTATION_SCOPE || "core";
-// 只有 scope=module 才记模块名：scope=core 时不带，键才是 core（而不是 core-repair）。
-const moduleName = scope === "module" ? process.env.MUTATION_MODULE || "" : "";
+// 只有 scope=capability 才记能力名：scope=core 时不带，键才是 core（而不是 core-repair）。
+const capabilityName = scope === "capability" ? process.env.MUTATION_CAPABILITY || "" : "";
 const timeout = process.env.MUTATION_TIMEOUT_SECS || "60";
 
 const die = (m) => {
@@ -27,26 +31,30 @@ const def = JSON.parse(fs.readFileSync(SCOPE_FILE, "utf8"));
 let files;
 if (scope === "core") {
   files = def.core || [];
-} else if (scope === "module") {
-  if (!moduleName) die("scope=module 需要 MUTATION_MODULE（可选：" + Object.keys(def.modules || {}).join(" / ") + "）");
-  files = (def.modules || {})[moduleName];
-  if (!files) die("module 不在 tests/mutation-scope.json 的 modules 里：" + moduleName);
+} else if (scope === "capability") {
+  if (!capabilityName) die("scope=capability 需要 MUTATION_CAPABILITY（可选：" + Object.keys(def.capabilities || {}).join(" / ") + "）");
+  files = (def.capabilities || {})[capabilityName];
+  if (!files) die("能力不在 tests/mutation-scope.json 的 capabilities 里：" + capabilityName);
 } else {
-  die("MUTATION_SCOPE 只认 core 或 module（all 刻意不做，理由见 tests/gaps.yaml 的 testing.mutation）");
+  die("MUTATION_SCOPE 只认 core 或 capability（all 刻意不做，理由见 docs/testing/execution-ci.md 的「突变测试工作流」）");
 }
-if (!files.length) die("范围为空：" + scope + (moduleName ? ":" + moduleName : ""));
+if (!files.length) die("范围为空：" + scope + (capabilityName ? ":" + capabilityName : ""));
 
 const args = ["mutants", "--in-place", "--timeout", timeout, "--build-timeout", String(Number(timeout) * 2)];
 for (const f of files) args.push("-f", f);
 // 只跑 bin（不把 T3/T4 真进程用例拖进每个变异体）+ 串行（并行有已知偶发）。
 args.push("--", "--bin", "solomni", "--", "--test-threads=1");
 
-const logFile = path.join(LOG_DIR, "mutation-" + scope + (moduleName ? "-" + moduleName : "") + ".log");
+const logFile = path.join(LOG_DIR, "mutation-" + scope + (capabilityName ? "-" + capabilityName : "") + ".log");
 const fd = fs.openSync(logFile, "w");
-process.stdout.write("[突变] 范围 " + scope + (moduleName ? ":" + moduleName : "") + "，文件 " + files.length + " 个\n");
+process.stdout.write("[突变] 范围 " + scope + (capabilityName ? ":" + capabilityName : "") + "，文件 " + files.length + " 个\n");
 process.stdout.write("[突变] 命令：cargo " + args.join(" ") + "\n");
 const t0 = Date.now();
-const r = spawnSync("cargo", args, { cwd: ROOT, env: process.env, stdio: ["ignore", fd, fd] });
+// 与门禁同一份环境解析：借用系统工具链可以，但 CARGO_HOME/临时目录仍钉在项目内（不许写它的 home）。
+const resolvedEnv = envLayer.resolve();
+const childEnv = Object.assign({}, resolvedEnv ? resolvedEnv.env : process.env);
+envLayer.pinTemp(childEnv);
+const r = spawnSync("cargo", args, { cwd: ROOT, env: childEnv, stdio: ["ignore", fd, fd] });
 fs.closeSync(fd);
 const out = fs.readFileSync(logFile, "utf8");
 const exitCode = r.error ? -1 : r.status;
@@ -59,7 +67,7 @@ const status =
   "error";
 const report = {
   scope,
-  module: moduleName || null,
+  capability: capabilityName || null,
   files,
   timeoutSecs: Number(timeout),
   exitCode,
