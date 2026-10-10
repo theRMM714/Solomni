@@ -6,7 +6,7 @@ pub use crate::capabilities::workspace::domain::exec::{
 };
 pub use crate::capabilities::workspace::domain::module::{
     agent_system, check_runtimes, check_secrets, check_services, check_tools, listing, role_system,
-    Module, ModuleManifest, Param, ParamType, Roster, ToolDecl,
+    Module, ModuleManifest, Param, ParamType, Roster, ServiceDecl, ToolDecl,
 };
 pub use crate::capabilities::workspace::domain::packages::{Library, PackageManifest};
 pub use crate::capabilities::workspace::domain::workspace::{

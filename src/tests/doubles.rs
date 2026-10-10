@@ -1830,3 +1830,62 @@ impl ProxyHost for FakeProxyHost {
         })
     }
 }
+
+// ---------- 常驻服务（residents）的假适配器 ----------
+/// 目的：常驻服务的假适配器——不拉起任何进程，记录调用并按固定脚本提供操作。
+pub(crate) struct FakeServiceAdapter {
+    pub calls: Arc<Mutex<Vec<String>>>,
+}
+
+impl FakeServiceAdapter {
+    pub(crate) fn new() -> FakeServiceAdapter {
+        FakeServiceAdapter {
+            calls: Arc::new(Mutex::new(Vec::new())),
+        }
+    }
+}
+
+struct FakeServiceInstance {
+    calls: Arc<Mutex<Vec<String>>>,
+}
+
+impl crate::capabilities::residents::ports::ServiceInstance for FakeServiceInstance {
+    fn call(&mut self, op: &str, args: &serde_json::Value) -> Result<String, String> {
+        self.calls.lock().expect("锁").push(format!("call:{}", op));
+        Ok(format!("{} {}", op, args))
+    }
+    fn stop(&mut self) {
+        self.calls.lock().expect("锁").push("stop".to_string());
+    }
+}
+
+impl crate::capabilities::residents::ports::ServiceAdapter for FakeServiceAdapter {
+    fn id(&self) -> &str {
+        "fake"
+    }
+    fn start(
+        &self,
+        spec: &crate::capabilities::residents::ports::LaunchSpec,
+    ) -> Result<
+        (
+            Box<dyn crate::capabilities::residents::ports::ServiceInstance>,
+            Vec<crate::capabilities::residents::api::Operation>,
+        ),
+        String,
+    > {
+        self.calls
+            .lock()
+            .expect("锁")
+            .push(format!("start:{}", spec.name));
+        Ok((
+            Box::new(FakeServiceInstance {
+                calls: Arc::clone(&self.calls),
+            }),
+            vec![crate::capabilities::residents::api::Operation {
+                name: "echo".to_string(),
+                description: "回显参数".to_string(),
+                params: None,
+            }],
+        ))
+    }
+}

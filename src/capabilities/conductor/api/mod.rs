@@ -323,6 +323,8 @@ pub struct Ops {
     pub actions: Arc<dyn ActionOps + Send + Sync>,
     /// 日志能力：呈现层只经它埋点（**不持有端口对象**）。
     pub log: Arc<dyn LogOps + Send + Sync>,
+    /// 目的：常驻服务的统一管理面——Phase 1 由组合根注入；from_handle 给的是空的 NoResidents。
+    pub residents: Arc<dyn crate::capabilities::residents::api::ResidentOps + Send + Sync>,
 }
 
 impl Ops {
@@ -337,7 +339,17 @@ impl Ops {
             events: h.events(),
             actions: Arc::new(h.clone()),
             log: Arc::new(h.clone()),
+            residents: Arc::new(crate::capabilities::residents::api::NoResidents),
         }
+    }
+
+    /// 目的：把组合根装配好的常驻服务面换进来（from_handle 给的是空的 NoResidents）。
+    pub fn with_residents(
+        mut self,
+        residents: Arc<dyn crate::capabilities::residents::api::ResidentOps + Send + Sync>,
+    ) -> Ops {
+        self.residents = residents;
+        self
     }
 }
 

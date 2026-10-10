@@ -213,6 +213,11 @@ fn main() {
             Arc::new(workstore),
         ));
 
+    // **常驻服务能力**：适配器注册表（Phase 1 为空——真实协议适配器随 MCP/ACP 接入）+ 工作区清单来源。
+    let residents: Arc<dyn capabilities::residents::api::ResidentOps + Send + Sync> = Arc::new(
+        capabilities::residents::service::ResidentsService::new(Vec::new(), Arc::clone(&workspace)),
+    );
+
     let mut conductor = capabilities::conductor::service::Conductor::new(
         Box::new(registry),
         Arc::new(capabilities::session::service::SessionService::new(
@@ -356,7 +361,7 @@ fn main() {
             std::process::exit(1);
         }
     };
-    let ops = capabilities::conductor::api::Ops::from_handle(&handle);
+    let ops = capabilities::conductor::api::Ops::from_handle(&handle).with_residents(residents);
 
     // 工具级确认要有地方被作答：网页有裁决卡，CLI 在生成中就地按选项答——两边都接上了。
     handle.allow_tool_cards();

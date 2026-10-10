@@ -17,6 +17,7 @@ mod ports;
 mod prelude;
 mod prompt;
 mod registry;
+mod residents;
 mod routes;
 mod session;
 mod slate;

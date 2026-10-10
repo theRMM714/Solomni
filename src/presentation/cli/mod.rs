@@ -40,6 +40,8 @@ pub fn run(ops: Ops, web_default_port: u16) -> CliExit {
             "core" => core_flow(&ops, &arg),
             // 回档：留档（标记+折叠，可恢复）/ 删除（真的截掉）/ 恢复（删掉该标记及其后）。
             "rewind" => rewind_cmd(&ops, &arg),
+            // 常驻服务：列清单（启停随动作面接入）。
+            "resident" => resident_cmd(&ops),
             // 直接用模块工具（不经 AI）：清单与动作 id 都来自核心的动作目录。
             "module" => module_cmd(&ops, &arg),
             "rescan" => print_roster(&ops),
@@ -129,6 +131,30 @@ fn module_cmd(ops: &Ops, arg: &str) {
 
 /// 命令行回档：给共享区与整棵子树都对齐到同一个点。
 /// 留档 = 标记 + 折叠（可恢复）；删除 = 真的截掉；恢复 = 删掉该标记及其后（不可恢复）。
+/// 目的：列出常驻服务（模块 / 服务 / 适配器 / 状态）；启停随动作面接入。
+fn resident_cmd(ops: &Ops) {
+    match ops.residents.services() {
+        Ok(list) if list.is_empty() => println!("（没有声明任何常驻服务）"),
+        Ok(list) => {
+            for s in &list {
+                let note = if s.reason.is_empty() {
+                    String::new()
+                } else {
+                    format!("（{}）", s.reason)
+                };
+                println!(
+                    "  {:<24} {:<12} {}{}",
+                    format!("{}.{}", s.module, s.name),
+                    s.adapter,
+                    s.state.label(),
+                    note
+                );
+            }
+        }
+        Err(e) => println!("[错误] {}", e),
+    }
+}
+
 fn rewind_cmd(ops: &Ops, arg: &str) {
     let parts: Vec<&str> = arg.split_whitespace().collect();
     let usage = "[用法] rewind <会话> archive|delete <行id>  或  rewind <会话> restore <标记id>";
