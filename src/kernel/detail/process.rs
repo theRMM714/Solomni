@@ -314,8 +314,8 @@ fn refuse_when_broken(
     }
 }
 
-/// 杀掉整棵进程树：工具进程 fork 出来的子孙一并收掉（不留孤儿）。
-fn kill_tree(child: &mut std::process::Child) {
+/// 目的：杀掉整棵进程树——工具进程 fork 出来的子孙一并收掉（不留孤儿）。
+pub(crate) fn kill_tree(child: &mut std::process::Child) {
     #[cfg(unix)]
     {
         // 负 pid = 整个进程组（守门进程是组长，组员含 shell 与工具本身）。

@@ -1986,3 +1986,84 @@ impl crate::capabilities::secrets::ports::SecretStore for InMemorySecretStore {
         Ok(())
     }
 }
+
+/// 目的：已构建的产品可执行文件（守门进程就是它自己）；没有就 None（跳过真实进程用例）。
+pub(crate) fn built_exe() -> Option<std::path::PathBuf> {
+    let me = std::env::current_exe().ok()?;
+    let profile_dir = me.parent()?.parent()?;
+    let name = if cfg!(windows) {
+        "solomni.exe"
+    } else {
+        "solomni"
+    };
+    let p = profile_dir.join(name);
+    p.is_file().then_some(p)
+}
+
+/// 目的：本机可用的 python（没有就 None，如实跳过需要解释器的用例）。
+pub(crate) fn python() -> Option<&'static str> {
+    for name in ["python", "python3"] {
+        if let Ok(o) = std::process::Command::new(name)
+            .arg("-c")
+            .arg("print(1)")
+            .output()
+        {
+            if o.status.success() {
+                return Some(name);
+            }
+        }
+    }
+    None
+}
+
+// ---------- 常驻服务（MCP）的脚本化长驻会话替身 ----------
+/// 目的：脚本化的长驻会话替身——按脚本逐行应答，并记录收到的每一行与关闭调用。
+pub(crate) struct ScriptedHost {
+    pub sent: Arc<Mutex<Vec<String>>>,
+    replies: Mutex<Vec<String>>,
+}
+
+impl ScriptedHost {
+    pub(crate) fn new(replies: Vec<&str>) -> ScriptedHost {
+        ScriptedHost {
+            sent: Arc::new(Mutex::new(Vec::new())),
+            replies: Mutex::new(replies.into_iter().map(str::to_string).collect()),
+        }
+    }
+}
+
+struct ScriptedSession {
+    sent: Arc<Mutex<Vec<String>>>,
+    replies: Mutex<std::collections::VecDeque<String>>,
+}
+
+impl crate::kernel::ports::Session for ScriptedSession {
+    fn send(&mut self, line: &str) -> Result<(), String> {
+        self.sent.lock().expect("锁").push(line.to_string());
+        Ok(())
+    }
+    fn recv(&mut self) -> Result<String, String> {
+        self.replies
+            .lock()
+            .expect("锁")
+            .pop_front()
+            .ok_or_else(|| "脚本没有更多应答".to_string())
+    }
+    fn kill(&mut self) {
+        self.sent.lock().expect("锁").push("<kill>".to_string());
+    }
+}
+
+impl crate::kernel::ports::SessionHost for ScriptedHost {
+    fn open(
+        &self,
+        _spec: &crate::kernel::ports::SessionSpec,
+    ) -> Result<Box<dyn crate::kernel::ports::Session>, String> {
+        let replies: std::collections::VecDeque<String> =
+            self.replies.lock().expect("锁").clone().into();
+        Ok(Box::new(ScriptedSession {
+            sent: Arc::clone(&self.sent),
+            replies: Mutex::new(replies),
+        }))
+    }
+}

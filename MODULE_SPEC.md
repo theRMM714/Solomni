@@ -54,7 +54,7 @@ tools:                  # 【可选】外部工具表：工具名 → 声明
         desc: 要读取的真实绝对路径
 services:               # 【可选】常驻服务：服务名 → 声明（用哪个适配器拉起 + 启动命令）
   fs:
-    adapter: mcp        # 组合根注册的适配器名；未知 = 拒收并列出可用名
+    adapter: mcp        # 组合根注册的适配器名（当前已注册 mcp：stdio 长驻会话）；未知 = 拒收并列出可用名
     command: npx -y @modelcontextprotocol/server-filesystem
     desc: 访问本地文件系统     # 【可选】给模型/用户看的一句话
     enabled: false           # 【可选】缺省 false：没经用户同意不起外部常驻进程

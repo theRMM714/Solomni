@@ -146,6 +146,10 @@ impl ResidentOps for ResidentsService {
         })?;
         // 该模块已配置的隐秘字段：只经环境变量注入该服务进程（值不进命令行）。
         let env = self.secrets.resolve(module)?;
+        // 服务围栏：与"人直接跑模块工具"同一条口径（模块根递归只读 + userdata 可写），并挂上会话租约。
+        let mut fence = crate::kernel::api::FenceSpec::standalone(&m.root, None, m.has_userdata);
+        fence.lease = lease.to_string();
+        fence.agent = format!("resident/{}/{}", module, name);
         let spec = LaunchSpec {
             module: module.to_string(),
             name: name.to_string(),
@@ -153,6 +157,7 @@ impl ResidentOps for ResidentsService {
             cwd: m.root.clone(),
             options: decl.options.clone(),
             env,
+            fence,
         };
         let (instance, operations) = adapter.start(&spec)?;
         self.running.lock().expect("锁").insert(

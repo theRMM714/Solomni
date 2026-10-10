@@ -5,7 +5,7 @@
 > 分层与依赖方向见 [ARCHITECTURE.md](../../ARCHITECTURE.md) §一，业务边界判据见 §九；单元划分与文档路由见 [AGENTS.md](../../AGENTS.md)。
 
 > **无领域语义、无领域状态**的机制；形状与别的业务一致（`api` / `ports` / `domain` / `detail`），但它在依赖图的最底层：**不认识任何能力**。
-> `Log` / `HostProbe` / `ToolHandler` / `AskUser` / `ProcessRunner` / `ProcessTexts` / `FenceHost` 是**全项目共享**的机制端口（R12 的例外）。
+> `Log` / `HostProbe` / `ToolHandler` / `AskUser` / `ProcessRunner` / `SessionHost` / `ProcessTexts` / `FenceHost` 是**全项目共享**的机制端口（R12 的例外）。
 
 | 文件 | 职责 |
 | --- | --- |
@@ -19,6 +19,7 @@
 | `src/kernel/detail/file_log.rs` |
 | `src/kernel/detail/host_probe.rs` |
 | `src/kernel/detail/process.rs` | 外部进程执行机制（守门进程、stdin 送参、隐私字段 env 注入、超时杀树、截断），实现 `ProcessRunner` |
+| `src/kernel/detail/session.rs` | 长驻外部进程机制（守门进程长跑、按行收发、关闭杀树），实现 `SessionHost` |
 | `src/kernel/detail/confine/mod.rs` | 围栏机制入口（策略由调用方传入；实现 `FenceHost` 释放） |
 | `src/kernel/detail/confine/linux.rs` |
 | `src/kernel/detail/confine/macos.rs` |

@@ -7,6 +7,8 @@ pub mod confine;
 pub mod file_log;
 pub mod host_probe;
 pub mod process;
+pub mod session;
 
 pub use file_log::FileLog;
 pub use host_probe::HostProbeAdapter;
+pub use session::ProcessSessions;

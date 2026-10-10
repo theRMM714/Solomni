@@ -17,6 +17,8 @@ pub struct LaunchSpec {
     pub options: BTreeMap<String, String>,
     /// 目的：该模块已配置的隐秘字段注入项（env 名 → 值）；只走进程环境，不进命令行。
     pub env: Vec<(String, String)>,
+    /// 目的：起这个服务进程的围栏（可达范围 + 网络 + 会话租约）；机制由 kernel 的会话端口安装。
+    pub fence: crate::kernel::api::FenceSpec,
 }
 
 /// 目的：一个已拉起的服务实例——适配器负责协议，manager 负责生命周期与串行调用。

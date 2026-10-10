@@ -128,6 +128,30 @@ pub trait ProcessRunner: Send + Sync {
     ) -> ToolOutcome;
 }
 
+/// 目的：一个**长驻**外部进程会话的规格（起常驻服务用）：围栏 + 命令 + 注入项。
+/// 约束：只描述事实；管道、守门进程与杀树机制在 `SessionHost` 的实现里。
+pub struct SessionSpec {
+    pub fence: FenceSpec,
+    pub command: String,
+    pub env: Vec<(String, String)>,
+}
+
+/// 目的：一个已拉起的**长驻**进程会话——按行收发与关闭（MCP / ACP 这类按行的协议用它）。
+/// 约束：`recv` 阻塞读一行；进程结束（EOF）如实返回错误，不假装拿到空行。
+pub trait Session: Send {
+    /// 目的：写一行（自动补换行并 flush）。
+    fn send(&mut self, line: &str) -> Result<(), String>;
+    /// 目的：读一行（不含行尾）；进程已结束 = 错误。
+    fn recv(&mut self) -> Result<String, String>;
+    /// 目的：关闭这个会话（连根杀进程；可重复调用）。
+    fn kill(&mut self);
+}
+
+/// 目的：**长驻进程**执行端口——起一个守门进程并保住它，供按行协议长跑（与一次性的 `ProcessRunner` 并列）。
+pub trait SessionHost: Send + Sync {
+    fn open(&self, spec: &SessionSpec) -> Result<Box<dyn Session>, String>;
+}
+
 /// 目的：围栏授权释放端口——会话删除时由核心请求一次，把该会话各 agent 的围栏授权撤掉。
 /// 参数：`spec` = 该席的围栏（按 `lease` 区分同名 agent 的并发会话）。
 /// 返回：撤权失败或平台限制时如实报错。

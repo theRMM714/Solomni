@@ -12,6 +12,7 @@ mod detail;
 mod doubles;
 mod fakes;
 mod llm;
+mod mcp;
 mod permission;
 mod ports;
 mod prelude;

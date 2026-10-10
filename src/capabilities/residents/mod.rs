@@ -5,5 +5,6 @@
 //! 联动：边界判据见 ARCHITECTURE.md §九.1（自有用例 + ≥2 调用方）；声明契约见 MODULE_SPEC.md。
 
 pub mod api;
+pub mod detail;
 pub mod ports;
 pub mod service;

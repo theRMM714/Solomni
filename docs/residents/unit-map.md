@@ -9,3 +9,5 @@
 | `src/capabilities/residents/api.rs` | 统一管理 API（`ResidentOps`）与 DTO；未注入时的空实现 `NoResidents` |
 | `src/capabilities/residents/ports.rs` | 协议适配器端口（`ServiceAdapter` / `ServiceInstance` / `LaunchSpec`） |
 | `src/capabilities/residents/service.rs` | 注册表与生命周期（启停 / 开关 / 调用 / 租约回收） |
+| `src/capabilities/residents/detail/mod.rs` | 机制实现入口（只有组合根能构造） |
+| `src/capabilities/residents/detail/mcp.rs` | MCP stdio 适配器（握手 / tools/list / tools/call） |
