@@ -19,7 +19,7 @@
 | `src/kernel/detail/file_log.rs` |
 | `src/kernel/detail/host_probe.rs` |
 | `src/kernel/detail/process.rs` | 外部进程执行机制（守门进程、stdin 送参、隐私字段 env 注入、超时杀树、截断），实现 `ProcessRunner` |
-| `src/kernel/detail/session.rs` | 长驻外部进程机制（守门进程长跑、按行收发、关闭杀树），实现 `SessionHost` |
+| `src/kernel/detail/session.rs` | 长驻外部进程机制（守门进程长跑、按行收发、关闭杀树、Windows 容器预授权），实现 `SessionHost` |
 | `src/kernel/detail/confine/mod.rs` | 围栏机制入口（策略由调用方传入；实现 `FenceHost` 释放） |
 | `src/kernel/detail/confine/linux.rs` |
 | `src/kernel/detail/confine/macos.rs` |

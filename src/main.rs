@@ -169,12 +169,14 @@ fn main() {
     let write_allowed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     // 启动报告已经算过的同一个事实：Web 概览要按它区分"本机能力"与"本次实际"（下面那块必定赋值）。
     let allow_fence_write;
+    // 进程机制共用的文案（一次执行与长驻会话同一份）。
+    let process_texts: std::sync::Arc<dyn kernel::ports::ProcessTexts> = std::sync::Arc::new(
+        capabilities::tools::detail::PromptProcessTexts::new(prompt.tools()),
+    );
     // 工具执行：外层拉起的守门进程就是本程序自己（围栏在它里面装）。
     let tools = kernel::detail::process::ProcTools::new(
         std::env::current_exe().unwrap_or_default(),
-        std::sync::Arc::new(capabilities::tools::detail::PromptProcessTexts::new(
-            prompt.tools(),
-        )),
+        std::sync::Arc::clone(&process_texts),
         home.clone(),
         std::sync::Arc::clone(&write_allowed),
     );
@@ -235,6 +237,9 @@ fn main() {
                 Arc::new(capabilities::residents::detail::McpAdapter::new(Arc::new(
                     kernel::detail::ProcessSessions::new(
                         std::env::current_exe().unwrap_or_default(),
+                        std::sync::Arc::clone(&process_texts),
+                        home.clone(),
+                        std::sync::Arc::clone(&write_allowed),
                     ),
                 )))
                     as Arc<dyn capabilities::residents::ports::ServiceAdapter + Send + Sync>,

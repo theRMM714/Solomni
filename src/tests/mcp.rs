@@ -73,7 +73,8 @@ fn mcp_handshake_lists_tools_calls_and_reports_errors() {
 }
 
 /// 真实端到端：`ProcessSessions`（守门进程 + 长驻 stdio）拉起一个真的 MCP 服务，握手、发现、调用。
-/// 约束：需要已构建的产品可执行文件与 python；缺一即如实跳过（Windows 的容器预授权尚未接入长驻会话）。
+/// 约束：需要已构建的产品可执行文件与 python；缺一即如实跳过。Windows 的容器预授权已接入长驻会话，
+///   但 Windows 的长驻围栏由 `tests/windows/` 的真机用例验证，本用例只在 unix 上跑。
 #[cfg(unix)]
 #[test]
 fn mcp_adapter_talks_to_a_real_stdio_server() {
@@ -85,8 +86,12 @@ fn mcp_adapter_talks_to_a_real_stdio_server() {
         return;
     };
     let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let adapter =
-        McpAdapter::new(Arc::new(ProcessSessions::new(exe)) as Arc<dyn SessionHost + Send + Sync>);
+    let adapter = McpAdapter::new(Arc::new(ProcessSessions::new(
+        exe,
+        crate::tests::doubles::test_process_texts(),
+        std::path::PathBuf::new(),
+        Arc::new(std::sync::atomic::AtomicBool::new(false)),
+    )) as Arc<dyn SessionHost + Send + Sync>);
     let mut spec = launch();
     spec.command = format!("{} tests/fixtures/mcp_echo.py", py);
     spec.fence = FenceSpec::standalone(&root, None, false);
@@ -244,7 +249,12 @@ fn residents_mcp_service_end_to_end() {
             options: BTreeMap::new(),
         },
     );
-    let host: Arc<dyn SessionHost + Send + Sync> = Arc::new(ProcessSessions::new(exe));
+    let host: Arc<dyn SessionHost + Send + Sync> = Arc::new(ProcessSessions::new(
+        exe,
+        crate::tests::doubles::test_process_texts(),
+        std::path::PathBuf::new(),
+        Arc::new(std::sync::atomic::AtomicBool::new(false)),
+    ));
     let residents: Arc<dyn ResidentOps + Send + Sync> = Arc::new(ResidentsService::new(
         vec![Arc::new(McpAdapter::new(host)) as Arc<dyn ServiceAdapter + Send + Sync>],
         test_workspace(

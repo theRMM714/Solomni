@@ -291,11 +291,11 @@ fn where_text(blocked: &crate::kernel::domain::fence::FenceBlocked) -> String {
     }
 }
 
-/// 未授权时段遇到机制自检结论时的放行规矩：**只有本机装不上能降级**。
-/// 自检已确认机制有效却仍装不上 = 我们写错了——那种情况按无围栏跑，等于用户以为有围栏、实际什么都没有，
-/// 所以拒绝执行（命令不落进程），回执用提示词册里的固定说法（它随工具结果进模型上下文）。
+/// 目的：未授权时段遇到机制自检结论时的放行规矩——**只有本机装不上能降级**；
+///   自检已确认机制有效却仍装不上 = 我们写错了（按无围栏跑等于用户以为有围栏、实际什么都没有），
+///   所以拒绝执行（命令不落进程），回执用提示词册里的固定说法。
 #[cfg(windows)]
-fn refuse_when_broken(
+pub(crate) fn refuse_when_broken(
     texts: &dyn ProcessTexts,
     verdict: confine::FenceVerdict,
 ) -> Option<ToolOutcome> {
