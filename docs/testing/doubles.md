@@ -135,7 +135,7 @@ Fixture 必须：
 | `HostProbe` | `FixedProbe`（只按声明回答） | 不适用 | 不适用 | 不适用 | `HostProbeAdapter`（真实路径事实；PATH 上不存在的名字如实说没有） | 已验收 |
 
 `Log`、`HostProbe`、`ToolHandler` 与 `AskUser` 是**不在某个能力 `ports.rs`** 的端口：它们在 `kernel/ports.rs`（机制型内核，无领域语义，R12 的例外）。
-见 [../kernel/module-map.md](../kernel/module-map.md)。
+见 [../kernel/unit-map.md](../kernel/unit-map.md)。
 
 "已验收"指该端口在 `src/tests/`（`detail.rs` 覆盖真实实现）的契约测试里有成功、失败、空/边界与交互记录的断言；
 

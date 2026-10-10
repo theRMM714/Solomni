@@ -33,9 +33,9 @@ tests/
  ci-publish.mjs # CI 报告发布脚本（把三平台报告写入 ci-report 分支）
  ci-e2e.mjs     # CI 的 e2e job 入口（构建 + 跑 L4 编排，写 e2e-report.json）
  ci-merge.mjs   # 发布前把 quality 与 e2e 两份报告合并成该平台唯一的一份
-ci-mutation.mjs # 突变测试入口（core / module 两个范围；范围见 tests/mutation-scope.json）
+ci-mutation.mjs # 突变测试入口（core / capability 两个范围；范围见 tests/mutation-scope.json）
 ci-mutation-publish.mjs # 把突变小结发到 ci-mutation 滚动分支（各推各的，不碰 ci-report）
-mutation-scope.json # 突变测试范围（文件级清单；core + 各模块）
+mutation-scope.json # 突变测试范围（文件级清单；core + 各能力）
 ```
 
 单元层与 `capabilities/` **同构**：T1 用例按业务分文件——`taskchain.rs` / `prompt.rs` / `registry.rs` /

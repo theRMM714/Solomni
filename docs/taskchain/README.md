@@ -1,7 +1,7 @@
 # taskchain（任务链）
 
 > 纯领域：依赖图、阶段派生、就绪与验收判定。
-> 本目录是该单元的唯一细则入口：本页 → [`module-map.md`](module-map.md)（逐文件职责，机器比对）→ 其它细则。
+> 本目录是该单元的唯一细则入口：本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）→ 其它细则。
 > 分层与依赖方向见 [ARCHITECTURE.md](../../ARCHITECTURE.md) §一，业务边界判据见 §九；测试规范见 [TESTING.md](../../TESTING.md)。
 
 ## 一、管什么 / 不管什么
@@ -27,4 +27,4 @@
 
 | 文件 | 内容 |
 | --- | --- |
-| [`module-map.md`](module-map.md) | 逐文件职责（T0 与磁盘双向比对） |
+| [`unit-map.md`](unit-map.md) | 逐文件职责（T0 与磁盘双向比对） |
