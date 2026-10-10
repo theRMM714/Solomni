@@ -16,6 +16,7 @@
 状态在 `service.rs`：运行中的实例（key = 模块/服务）、**失败态**（起过但进程已结束 → `Failed`，带如实原因与租约）与用户开关；会话租约用于回收（`reap`）。
 **崩溃检测**：适配器按连接事实回答 `ServiceInstance::is_alive`；进程一结束，`call` 如实标 `Failed` 并从运行态摘除，后续调用如实报"没在跑"。
 **操作清单变化**：服务报告 `notifications/tools/list_changed` 时适配器交回新清单（`take_refreshed_operations`），运行态就地刷新，下一次装配的工具面随之反映。
+**可见面**：就绪服务的操作进动作目录（`GET /api/actions` 对 user 可见）与模型工具面（原生声明 + 信封清单）；CLI `resident list|start|stop|enable|disable|call` 是同一批动作的终端入口。
 
 ## 三、依赖图位置（由源码的 `::api` 引用推导）
 

@@ -684,6 +684,22 @@ impl ActionOps for ConductorHandle {
                         });
                     }
                 }
+                // 已就绪常驻服务的操作：也是一条动态模块动作（id = module.<模块>.<服务>.<操作>）。
+                // 未启动的服务不出现（操作是跑起来才发现的）；呈现层因此不必另建一份清单。
+                for view in self.residents.services().unwrap_or_default() {
+                    if view.state != crate::capabilities::residents::api::ServiceState::Ready {
+                        continue;
+                    }
+                    for op in &view.operations {
+                        out.push(ActionView {
+                            id: format!("module.{}.{}.{}", view.module, view.name, op.name),
+                            desc: op.description.clone(),
+                            params: Vec::new(),
+                            available: true,
+                            reason: String::new(),
+                        });
+                    }
+                }
             }
         }
         Ok(out)

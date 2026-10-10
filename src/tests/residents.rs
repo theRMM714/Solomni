@@ -316,6 +316,59 @@ fn service_operations_are_module_actions() {
     assert!(err.contains("没有操作"), "未知操作要如实拒绝：{}", err);
 }
 
+/// 动作目录：就绪服务的操作进目录（Web/CLI 的动作面板共用）；未启动不出现。
+#[test]
+fn action_catalog_lists_ready_service_operations() {
+    use crate::capabilities::conductor::api::{ActionCall, Caller, ConductorHandle, Ops, Output};
+
+    let fake = Arc::new(FakeServiceAdapter::new());
+    let modules = vec![module_with_service("m1", "fake", true)];
+    let workspace = test_workspace(
+        Arc::new(VecSource(modules.clone())),
+        Arc::new(InMemoryPackages::empty()),
+        Arc::new(InMemoryWorkspace::new()),
+    );
+    let residents: Arc<dyn ResidentOps + Send + Sync> = Arc::new(ResidentsService::new(
+        vec![Arc::clone(&fake) as Arc<dyn ServiceAdapter + Send + Sync>],
+        workspace,
+        Arc::new(crate::capabilities::secrets::api::NoSecrets),
+    ));
+    let gateway = crate::tests::doubles::gw(BTreeMap::new(), Vec::new());
+    let handle = ConductorHandle::spawn(crate::tests::doubles::core_with_services(
+        modules,
+        gateway,
+        Arc::new(crate::tests::builders::SilentRunner),
+        residents,
+        Arc::new(crate::capabilities::secrets::api::NoSecrets),
+    ))
+    .expect("起核心线程");
+    let ops: Ops = crate::capabilities::conductor::api::Ops::from_handle(&handle);
+
+    let before = ops.actions.catalog(&Caller::User, None).expect("目录");
+    assert!(
+        !before.iter().any(|a| a.id == "module.m1.svc.echo"),
+        "未启动的服务操作不该出现在目录里"
+    );
+    assert!(
+        before.iter().any(|a| a.id == "control_resident"),
+        "生命周期动作应当在目录里"
+    );
+
+    ops.actions
+        .act(ActionCall {
+            id: "control_resident".to_string(),
+            args: serde_json::json!({ "module": "m1", "name": "svc", "action": "start" }),
+            caller: Caller::User,
+            out: Output::Final,
+        })
+        .expect("启动服务");
+    let after = ops.actions.catalog(&Caller::User, None).expect("目录");
+    assert!(
+        after.iter().any(|a| a.id == "module.m1.svc.echo"),
+        "就绪服务的操作要进目录"
+    );
+}
+
 /// 没启动就调用：如实拒绝（不静默跑一次）。
 #[test]
 fn residents_call_requires_a_running_service() {
