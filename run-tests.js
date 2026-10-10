@@ -18,6 +18,11 @@ const EXE = IS_WIN ? "solomni.exe" : "solomni";
 const PROFILE = process.argv.includes("--release") ? "release" : "debug";
 const BIN = path.join(ROOT, "target", PROFILE, EXE);
 const PLATFORM_TARGETS = ["cross-platform", "windows", "linux", "macos"];
+// 交叉类型检查：本机不编译的平台专属代码（#[cfg(windows)] / #[cfg(target_os = "macos")]）靠这些 target
+// 兜住类型错误——真实运行仍由对应平台的真机 CI 负责。**只查不装**：装 target 属环境准备（env.js / 手动），
+// 门禁不写系统工具链。macOS 的 C 依赖（ring）在 Linux 上没有 Apple SDK / 交叉 C 工具链，那类失败按 env-skip 如实标注；
+// 有 osxcross 一类工具链的环境会真的检查。
+const CROSS_TARGETS = ["x86_64-pc-windows-msvc", "aarch64-apple-darwin", "x86_64-apple-darwin"];
 // 默认串行（--test-threads=1）：套件里有依赖真实线程时序的用例，并行下仍会偶发
 // （见 tests/gaps.yaml 的 testing.parallel-flake）。--parallel 只在排查并发/隔离问题时用，不作门禁默认。
 const PARALLEL = process.argv.includes("--parallel");
@@ -28,6 +33,9 @@ const E2E_TIMEOUT_MS = 20 * 60 * 1000;
 const STEP_BUDGET_S = {
   "cargo build": 300,
   "T0 编译（--all-targets）": 300,
+  "T0 交叉类型检查（x86_64-pc-windows-msvc）": 600,
+  "T0 交叉类型检查（aarch64-apple-darwin）": 600,
+  "T0 交叉类型检查（x86_64-apple-darwin）": 600,
   "T0 静态检查（clippy）": 300,
   "L1 单元（--bin solomni）": 300,
   "目标 cross-platform": 300,
@@ -180,6 +188,21 @@ function sh(cmd, args, timeoutMs) {
     timedOut: timedOut,
     log: path.relative(ROOT, logFile),
   };
+}
+
+/** 已安装的交叉 target（rustup 不在或查不动 = null；门禁只查不装）。 */
+function installedTargets() {
+  const r = sh("rustup", ["target", "list", "--installed"]);
+  if (r.code !== 0) return null;
+  return r.out.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+}
+
+/** 交叉检查失败是不是"本机没有该平台的 C 工具链 / SDK"这类环境结论（只对 macOS 判定，别处一律当失败）。 */
+function crossEnvLimited(target, out) {
+  if (!target.includes("apple-darwin")) return false;
+  return /unrecognized command-line option '-arch'/.test(out)
+    || /-mmacosx-version-min/.test(out)
+    || /error occurred in cc-rs/.test(out);
 }
 
 /** 汇总 cargo 的 test result 行：一次运行可能有多条（多目标/多测试）。 */
@@ -1065,6 +1088,40 @@ function pushStep(obj) {
       detail: ok ? "" : "rustc 告警 " + got + " 条（cargo check 的原文见日志）",
       raw: ok ? null : check.out.slice(-1200),
     });
+  }
+
+  // ---- T0：交叉类型检查（平台专属代码本机不编译，用装好的 target 兜住类型错误） ----
+  {
+    const installed = installedTargets();
+    for (const target of CROSS_TARGETS) {
+      const label = "T0 交叉类型检查（" + target + "）";
+      announce(label);
+      if (!installed || !installed.includes(target)) {
+        announceDone("env-skip", "未安装该 target");
+        pushStep({ step: label, status: "env-skip", detail: "未安装 " + target + "：rustup target add " + target });
+        continue;
+      }
+      const r = sh("cargo", ["check", "--target", target, "--color", "never"]);
+      if (r.code === 0) {
+        announceDone("完成", "");
+        pushStep({ step: label, status: "pass", detail: "" });
+      } else if (crossEnvLimited(target, r.out)) {
+        announceDone("env-skip", "本机没有该平台的 C 工具链 / SDK");
+        pushStep({
+          step: label,
+          status: "env-skip",
+          detail: "本机无法交叉编译 " + target + "（缺 Apple SDK / 交叉 C 工具链）：真实检查归该平台的真机 CI",
+        });
+      } else {
+        announceDone("失败", "编译失败");
+        pushStep({
+          step: label,
+          status: "fail",
+          detail: "交叉类型检查失败（平台专属代码本机不编译）：" + (r.error || "") + " 日志：" + r.log,
+          raw: r.out.slice(-1200),
+        });
+      }
+    }
   }
 
   announce("T0 依赖重复（cargo tree）");

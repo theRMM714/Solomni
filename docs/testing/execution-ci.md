@@ -15,7 +15,7 @@ cargo clippy --all-targets --all-features -- -D warnings
 
 快速检查用于本地反馈，不替代完整入口。
 
-注意：`cargo test` 与 `cargo fmt --check`、`cargo clippy … -D warnings` **都预期全绿**——T0 八项全是零容忍硬失败，没有存量基线。
+注意：`cargo test` 与 `cargo fmt --check`、`cargo clippy … -D warnings` **都预期全绿**——T0 九项全是零容忍硬失败（交叉类型检查对已装 target 零容忍），没有存量基线。
 用例默认**串行**跑（套件含真实线程时序用例，并行仍会偶发，见 [tests/gaps.yaml](../../tests/gaps.yaml) 的 `testing.parallel-flake`）；排查并发 / 隔离问题时用 `node run-tests.js --parallel`。找测试盲区用 `node run-tests.js --coverage`
 （见下文「覆盖率发现模式」，只报不拦）。
 
@@ -34,13 +34,14 @@ node run-tests.js
 5. `T0 格式（fmt --check）`（硬失败）；
 6. `T0 静态检查（clippy）`（硬失败）；
 7. `T0 编译告警`（硬失败）；
-8. `T0 依赖重复（cargo tree）`（硬失败）；
-9. `T0 供应链（audit/deny）`（工具缺失或取不到 advisory 数据 = env-skip）；
-10. `L1 单元（--bin solomni）`（默认串行；`--parallel` 改为并发，仅诊断用）；
-11. 逐个运行 `cargo test --test cross-platform/windows/linux/macos`（同样默认串行）；
-12. 前端冒烟；
-13. 存在编排器时运行 L4 端到端（编排器会**现场构建 indexer**：编译器版本进日志，构建失败即失败）；
-14. 写入 `target/test-report.json` 并打印 `TEST-REPORT-OK` 或 `TEST-REPORT-FAIL`。
+8. `T0 交叉类型检查（各已装 target）`（硬失败：平台专属 `#[cfg]` 代码本机不编译，用 `cargo check --target` 兜类型错误；target 未装或本机缺该平台交叉 C 工具链 / SDK = `env-skip`）；
+9. `T0 依赖重复（cargo tree）`（硬失败）；
+10. `T0 供应链（audit/deny）`（工具缺失或取不到 advisory 数据 = env-skip）；
+11. `L1 单元（--bin solomni）`（默认串行；`--parallel` 改为并发，仅诊断用）；
+12. 逐个运行 `cargo test --test cross-platform/windows/linux/macos`（同样默认串行）；
+13. 前端冒烟；
+14. 存在编排器时运行 L4 端到端（编排器会**现场构建 indexer**：编译器版本进日志，构建失败即失败）；
+15. 写入 `target/test-report.json` 并打印 `TEST-REPORT-OK` 或 `TEST-REPORT-FAIL`。
 
 每一步都有墙钟上限（默认 15 分钟，L4 20 分钟）：超时即硬失败，证据记进报告的 `timeouts`，不会把本地入口或
 CI job 拖到外层超时。每步用时记在报告的 `ms`，超预算的标 `[slow]`（只报不拦）。
@@ -187,7 +188,7 @@ CI 借 runner 自带 Rust（`CARGO_HOME` / `SOLOMNI_CARGO_HOME` 指项目内）�
 | 平台专属代码（`kernel/detail/confine/` 各平台文件、`tests/<平台>/`） | 平台目标的 `main.rs` 首行是 `#![cfg(target_os = …)]`：非本平台的目标整目标为空，代码根本不编译 | 三平台各编译并各跑一次 |
 | 真机围栏（ACL / 容器 profile / Landlock / seatbelt） | 本地默认安全模式会跳过会改本机状态的探针 | 一次性 runner 上真跑，并验撤权与 profile 回收 |
 | HTTPS/TLS 出站链路 | 受限环境可能取不到系统 TLS 凭证（判据见 [levels.md](levels.md) 的 T4），本地只能 env-skip | 干净 runner 上真连公网端点 |
-| T0 八项（clippy 只编译当前平台的 `#[cfg]`、依赖图随平台变；供应链要联网装工具） | 本机只能代表本平台（判的是**平台差异**，不是「改了门禁就要派发」） | 三平台各自零容忍跑一遍 |
+| T0 九项（clippy 只编译当前平台的 `#[cfg]`；交叉类型检查在本机无目标或交叉 C 工具链时 env-skip；依赖图随平台变；供应链要联网装工具） | 本机只能代表本平台（判的是**平台差异**，不是「改了门禁就要派发」） | 三平台各自零容忍跑一遍 |
 | 三种语言的模块（python / node / C++）在真进程里跑 | 本机只代表本平台的解释器与编译器 | 三平台各跑一次真工具链路，indexer 现场编译 |
 | 发布前验收 | 本地通过 ≠ 三平台通过 | 三平台报告 + 三平台 `TEST-REPORT-ACCEPTED` |
 
@@ -250,7 +251,7 @@ git show origin/ci-report:runs/windows/logs/<某一步>.log  # 失败证据原�
 
 - `pass`：步骤完成；
 - `fail`：断言或命令失败（硬失败）；
-- `quality-fail`：T0 任一项不过（编译 / 结构审查 / 格式 / clippy / 编译告警 / 依赖重复）；
+- `quality-fail`：T0 任一项不过（编译 / 结构审查 / 格式 / clippy / 编译告警 / 交叉类型检查 / 依赖重复）；
 - `env-skip`：工具缺失等环境性跳过（步骤级），与 `envSkips`（探针级的 `[探针]` 行）并列；
 - `skip-platform`：当前平台不适用的空平台目标；
 - `gap`：入口没有找到应运行的部分。

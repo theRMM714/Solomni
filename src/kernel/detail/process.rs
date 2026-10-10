@@ -101,7 +101,7 @@ impl ProcessRunner for ProcTools {
             if !prepared && note.is_none() {
                 // 未授权时段先问机制：环境不允许就如实降级，我们写错了就拒绝执行（见 refuse_when_broken）。
                 if let Some(outcome) =
-                    refuse_when_broken(&self.texts, confine::verify(fence, command))
+                    refuse_when_broken(&*self.texts, confine::verify(fence, command))
                 {
                     return outcome;
                 }

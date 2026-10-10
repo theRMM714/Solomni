@@ -48,7 +48,7 @@ cargo deny check
 `cargo tree --duplicates` 只检查依赖树中的重复版本，`cargo deny` 的 `bans` 与它同口径但更全面
 （许可证、禁用、来源）；它们都不等于源码重复检查。`clippy` 也不能替代业务测试。这些检查的职责必须分开记录。
 
-当前状态：八项全部并入 `node run-tests.js`（前七项零容忍硬失败，没有存量基线；供应链一项工具缺失即 `env-skip`）：
+当前状态：九项全部并入 `node run-tests.js`（前八项零容忍硬失败，没有存量基线；交叉类型检查在 target 未装或本机缺该平台交叉 C 工具链时 `env-skip`，供应链一项工具缺失即 `env-skip`）：
 
 - `cargo check --all-targets`；
 - 结构审查（测试目标登记、孤儿测试文件、缺口账格式、单元地图双向一致、文档链接完整性、提示词键表与真相源表比对、根文档路由、
@@ -56,6 +56,8 @@ cargo deny check
 - `cargo fmt --all -- --check`；
 - `cargo clippy --all-targets --all-features --keep-going -- -D warnings`；
 - `cargo check` 的 rustc 告警数；
+- 交叉类型检查：对已装 target 跑 `cargo check --target <三元组>`——平台专属 `#[cfg]` 代码本机不编译，靠它兜住类型错误；
+  target 未装（`rustup target add <三元组>`）或本机缺该平台交叉 C 工具链 / SDK = `env-skip`，真实运行归该平台真机 CI；
 - `cargo tree --duplicates`；
 - 项目外写（env / 工具链）——判据见 [quality-isolation.md](quality-isolation.md) 的「隔离、清理与副作用」；
 - 供应链：`cargo audit` + `cargo deny check`（配置在 `deny.toml`）——工具获取见 [quality-isolation.md](quality-isolation.md)。
