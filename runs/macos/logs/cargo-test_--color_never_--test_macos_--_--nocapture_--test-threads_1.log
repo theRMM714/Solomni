@@ -1,0 +1,16 @@
+   Compiling solomni v0.1.0 (/Users/runner/work/Solomni/Solomni)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.38s
+     Running tests/macos/main.rs (target/debug/deps/macos-e1fe34aa381b781e)
+
+running 7 tests
+test probes::fence::env_unavailable_degrades_and_still_runs_the_command ... ok
+test probes::fence::fence_denies_outside_paths_and_allows_the_given_roots ... ok
+test probes::fence::module_dir_is_read_only_but_userdata_is_writable ... ok
+test probes::fence::read_only_roots_are_readable_but_not_writable ... ok
+test probes::fence::shared_area_is_outside_the_agent_fence ... ok
+test probes::fence::verify_separates_env_unavailable_from_a_rejected_profile ... ok
+test probes::https::https_reaches_a_public_endpoint_through_the_product_chain ... [HTTPS] ok 200 rustls https://example.com/
+ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.48s
+
