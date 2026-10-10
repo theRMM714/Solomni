@@ -2016,6 +2016,51 @@ pub(crate) fn python() -> Option<&'static str> {
     None
 }
 
+/// 目的：一个带给定常驻服务操作的最小成员工具环境（模型侧工具面用例用）。
+pub(crate) fn member_with_service_tools(
+    module: &str,
+    residents: Arc<dyn crate::capabilities::residents::api::ResidentOps + Send + Sync>,
+    op: crate::capabilities::session::api::ServiceOp,
+) -> crate::capabilities::session::api::MemberTools {
+    let sb = test_sandbox(module, &[]);
+    let mut modules = BTreeMap::new();
+    modules.insert(
+        module.to_string(),
+        crate::capabilities::session::domain::tools::ModuleTools {
+            root: abs(&["mods", module]),
+            commands: BTreeMap::new(),
+            books: BTreeMap::new(),
+            parallel: std::collections::BTreeSet::new(),
+            services: [(op.tool.clone(), op)].into_iter().collect(),
+        },
+    );
+    crate::capabilities::session::api::MemberTools {
+        mode: crate::capabilities::llm::api::ToolMode::Envelope,
+        modules,
+        observations: Default::default(),
+        llm: test_llm_demo(),
+        log: Arc::new(crate::kernel::ports::NoopLog),
+        tools: test_tools_svc_with(
+            Arc::new(SilentRunner),
+            Arc::new(InMemorySysIo::new()),
+            Arc::new(NoFenceHost),
+        ),
+        sandbox: sb.clone(),
+        builtin_tools: test_systools().tools,
+        unavailable: BTreeMap::new(),
+        fence: crate::kernel::api::FenceSpec::from_sandbox(&sb, false),
+        module_env: Default::default(),
+        reply_seq: 0,
+        line: Default::default(),
+        allowed: crate::capabilities::tools::api::names(),
+        role: "solo".to_string(),
+        with_modules: true,
+        notes: Default::default(),
+        handlers: Vec::new(),
+        residents,
+    }
+}
+
 // ---------- 常驻服务（MCP）的脚本化长驻会话替身 ----------
 /// 目的：脚本化的长驻会话替身——按脚本逐行应答，并记录收到的每一行与关闭调用。
 pub(crate) struct ScriptedHost {

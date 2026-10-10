@@ -102,6 +102,99 @@ fn mcp_adapter_talks_to_a_real_stdio_server() {
     instance.stop();
 }
 
+/// 模型侧工具面：已就绪服务的操作进原生声明与可用清单，调用路由到常驻服务能力。
+#[test]
+fn model_tool_face_exposes_started_service_ops() {
+    use crate::capabilities::collab::service::tool_loop::{
+        available_tools, dispatch_external, tool_decls,
+    };
+    use crate::capabilities::llm::api::ToolInvoke;
+    use crate::capabilities::residents::api::ResidentOps;
+    use crate::capabilities::residents::service::ResidentsService;
+    use crate::capabilities::session::api::ServiceOp;
+    use crate::capabilities::workspace::api::ServiceDecl;
+    use crate::tests::doubles::{
+        member_with_service_tools, module_of, test_workspace, FakeServiceAdapter, InMemoryPackages,
+        InMemoryWorkspace, VecSource,
+    };
+    use std::collections::BTreeMap;
+
+    let fake = Arc::new(FakeServiceAdapter::new());
+    let mut m = module_of("m0");
+    m.manifest.services.insert(
+        "svc".to_string(),
+        ServiceDecl {
+            adapter: "fake".to_string(),
+            command: "run".to_string(),
+            desc: String::new(),
+            enabled: true,
+            options: BTreeMap::new(),
+        },
+    );
+    let residents: Arc<dyn ResidentOps + Send + Sync> = Arc::new(ResidentsService::new(
+        vec![Arc::clone(&fake) as Arc<dyn ServiceAdapter + Send + Sync>],
+        test_workspace(
+            Arc::new(VecSource(vec![m])),
+            Arc::new(InMemoryPackages::empty()),
+            Arc::new(InMemoryWorkspace::new()),
+        ),
+        Arc::new(crate::capabilities::secrets::api::NoSecrets),
+    ));
+    let ops = residents.start("m0", "svc", "").expect("启动服务");
+    let op_name = ops[0].name.clone();
+    let ctx = member_with_service_tools(
+        "m0",
+        Arc::clone(&residents),
+        ServiceOp {
+            tool: format!("svc.{}", op_name),
+            service: "svc".to_string(),
+            op: op_name.clone(),
+            description: "回显".to_string(),
+        },
+    );
+
+    let decls = tool_decls(&ctx);
+    assert!(
+        decls.list.iter().any(|d| d.name == "m0_svc_echo"),
+        "原生声明要含服务操作"
+    );
+    assert_eq!(
+        decls.wire.get("m0_svc_echo"),
+        Some(&(Some("m0".to_string()), "svc.echo".to_string())),
+        "线上名要能译回（模块, 服务.操作）"
+    );
+    let listed = available_tools(&ctx);
+    assert!(
+        listed.contains("m0.svc.echo"),
+        "可用清单要含服务操作：{}",
+        listed
+    );
+
+    let inv = ToolInvoke {
+        malformed: None,
+        module: Some("m0".to_string()),
+        name: "svc.echo".to_string(),
+        args_json: "{\"x\":1}".to_string(),
+        body: String::new(),
+        lead: String::new(),
+    };
+    let (module, outcome) = dispatch_external(&ctx, &inv, None);
+    assert_eq!(module, "m0");
+    assert!(
+        outcome.ok && outcome.output.contains("echo"),
+        "{}",
+        outcome.output
+    );
+    assert!(
+        fake.calls
+            .lock()
+            .expect("锁")
+            .iter()
+            .any(|c| c == "call:echo"),
+        "要路由到常驻服务能力"
+    );
+}
+
 /// 服务回 JSON-RPC error：如实报错并带上服务给的消息。
 #[test]
 fn mcp_error_response_is_reported() {

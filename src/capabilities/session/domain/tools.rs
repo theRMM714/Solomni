@@ -8,7 +8,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 
-/// 一个模块的外部工具环境：模块目录（外部工具进程的 cwd）+ 它声明的工具表。
+/// 一个模块的外部工具环境：模块目录（外部工具进程的 cwd）+ 它声明的工具表 + 已启动常驻服务的操作。
 /// cwd 必须落在声明它的模块里（命令形如 python tools/x.py，是相对模块根写的）。
 #[derive(Debug, Clone)]
 pub struct ModuleTools {
@@ -19,6 +19,22 @@ pub struct ModuleTools {
     pub books: BTreeMap<String, crate::capabilities::tools::api::ToolSchema>,
     /// 声明了 parallel 的工具名（只读、无副作用；同一回复里的多个可并发调用会真的并发跑）。
     pub parallel: BTreeSet<String>,
+    /// 目的：已启动常驻服务的操作——工具名（`<服务>.<操作>`）→ 它属于哪个服务的哪个操作；
+    ///   由 conductor 装配工具面时按**已就绪**的服务现填（清单里只有声明，跑起来才有操作）。
+    pub services: BTreeMap<String, ServiceOp>,
+}
+
+/// 目的：一个已启动常驻服务提供的操作（模型侧按 `<服务>.<操作>` 寻址）。
+#[derive(Debug, Clone)]
+pub struct ServiceOp {
+    /// 目的：模型侧的工具名（`<服务>.<操作>`），也是它在模块工具面里的键。
+    pub tool: String,
+    /// 目的：该模块里的服务名（module.yaml 的 services.<名>）。
+    pub service: String,
+    /// 目的：服务自己发现的操作名。
+    pub op: String,
+    /// 目的：给人/模型看的一句话说明（服务给的，可能为空）。
+    pub description: String,
 }
 
 /// 成员的工具执行环境：来自 module.yaml（按模块分组的放行表）+ 注入的执行端口 + 本成员的沙箱。
@@ -66,6 +82,8 @@ pub struct MemberTools {
     /// 循环只问“这一回合的工具面里有没有它、谁认领它”（见 `kernel::ports::ToolHandler`）。
     /// 空 = 这一席没有这类工具（讨论席与普通执行席都是空）。
     pub handlers: Vec<Arc<dyn crate::kernel::ports::ToolHandler>>,
+    /// 目的：常驻服务的统一管理面——模块的 `services` 操作经它调用（**不持它的端口**，R12）。
+    pub residents: Arc<dyn crate::capabilities::residents::api::ResidentOps + Send + Sync>,
 }
 
 impl MemberTools {
@@ -141,6 +159,8 @@ pub fn tool_table(
                         .filter(|(_, decl)| decl.parallel)
                         .map(|(name, _)| name.clone())
                         .collect(),
+                    // 清单里只有声明；操作是服务跑起来才发现的，由 conductor 装配时填。
+                    services: BTreeMap::new(),
                 },
             )
         })

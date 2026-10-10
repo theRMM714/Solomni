@@ -469,6 +469,7 @@ pub(crate) fn member_with_tools(
             commands,
             books: BTreeMap::new(),
             parallel: BTreeSet::new(),
+            services: BTreeMap::new(),
         },
     );
     let mut m = Member::new(
@@ -495,6 +496,7 @@ pub(crate) fn member_with_tools(
         unavailable: BTreeMap::new(),
         fence: crate::kernel::api::FenceSpec::from_sandbox(&test_sandbox("m0", &[]), false),
         module_env: Default::default(),
+        residents: Arc::new(crate::capabilities::residents::api::NoResidents),
         reply_seq: 0,
         line: Default::default(),
         // 测试替身按"执行席"发放全部内置工具（角色表的越权校验另有专门用例）。
@@ -766,6 +768,7 @@ pub(crate) fn native_member(
             commands: BTreeMap::new(),
             books: BTreeMap::new(),
             parallel: BTreeSet::new(),
+            services: BTreeMap::new(),
         },
     );
     let sb = test_sandbox(id, &[]);
@@ -782,6 +785,7 @@ pub(crate) fn native_member(
         unavailable: BTreeMap::new(),
         fence: crate::kernel::api::FenceSpec::from_sandbox(&sb, false),
         module_env: Default::default(),
+        residents: Arc::new(crate::capabilities::residents::api::NoResidents),
         reply_seq: 0,
         line: Default::default(),
         // 测试替身按"执行席"发放全部内置工具（角色表的越权校验另有专门用例）。

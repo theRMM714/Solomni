@@ -93,9 +93,41 @@ impl Conductor {
         // 角色表发放的系统工具 id 清单（工具面的名字部分）；核心自有工具按它决定装不装。
         let allowed = self.role_tools(role);
         let handlers = self.work_handlers(sb, &allowed);
+        // 工具面：静态模块工具 + **已就绪**常驻服务的操作（操作是服务跑起来才发现的，按模块现填）。
+        let with_modules = self.systools.allows_module_tools(role);
+        let mut table = crate::capabilities::session::api::tool_table(modules);
+        let mut notes = crate::capabilities::tools::api::tool_notes(&*self.prompt, sb, modules);
+        if with_modules {
+            let started = self.started_service_ops();
+            for (id, ops) in &started {
+                if let Some(mt) = table.get_mut(id) {
+                    for op in ops {
+                        mt.services.insert(op.tool.clone(), op.clone());
+                    }
+                }
+            }
+            if !started.is_empty() {
+                let texts = self.prompt.tools();
+                let lines: Vec<String> = started
+                    .iter()
+                    .map(|(id, ops)| {
+                        let names = ops
+                            .iter()
+                            .map(|o| o.tool.clone())
+                            .collect::<Vec<_>>()
+                            .join(&texts.tool_list_separator);
+                        texts.render(
+                            &texts.module_tools_line,
+                            &[("id", id.clone()), ("tools", names)],
+                        )
+                    })
+                    .collect();
+                notes.module_tools = format!("{}\n{}", notes.module_tools, lines.join("\n"));
+            }
+        }
         crate::capabilities::session::api::MemberTools {
             mode,
-            modules: crate::capabilities::session::api::tool_table(modules),
+            modules: table,
             observations: crate::capabilities::tools::api::Observations::default(),
             llm: Arc::clone(&self.llm),
             log: Arc::clone(&self.log),
@@ -124,11 +156,38 @@ impl Conductor {
             // 这一席的系统工具面**由角色表发放**（越权校验的唯一判据）：给什么写什么，代码里不留第二份名单。
             allowed,
             role: role.to_string(),
-            // 能不能用自己模块的工具、以及工具说明块的素材：都按角色表与这个 agent 的模块装配期算好。
-            with_modules: self.systools.allows_module_tools(role),
-            notes: crate::capabilities::tools::api::tool_notes(&*self.prompt, sb, modules),
+            // 能不能用自己模块的工具由角色表发放；说明块素材在装配期算好（服务操作已在上面并进来）。
+            with_modules,
+            notes,
             handlers,
+            // 常驻服务的统一管理面：模块的 services 操作经它调用。
+            residents: Arc::clone(&self.residents),
         }
+    }
+
+    /// 目的：**已就绪**常驻服务的操作，按模块分组（模块 → 该模块的服务操作）。
+    /// 约束：只收已就绪的服务——没启动的没有操作可发现，不该出现在模型工具面里。
+    fn started_service_ops(
+        &self,
+    ) -> BTreeMap<String, Vec<crate::capabilities::session::api::ServiceOp>> {
+        let mut out: BTreeMap<String, Vec<crate::capabilities::session::api::ServiceOp>> =
+            BTreeMap::new();
+        for view in self.residents.services().unwrap_or_default() {
+            if view.state != crate::capabilities::residents::api::ServiceState::Ready {
+                continue;
+            }
+            for op in &view.operations {
+                out.entry(view.module.clone()).or_default().push(
+                    crate::capabilities::session::api::ServiceOp {
+                        tool: format!("{}.{}", view.name, op.name),
+                        service: view.name.clone(),
+                        op: op.name.clone(),
+                        description: op.description.clone(),
+                    },
+                );
+            }
+        }
+        out
     }
 
     /// 核心自有的**共享区版本化**工具执行者：只在角色面确实发到它们时才装。
