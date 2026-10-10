@@ -6,8 +6,8 @@
 use crate::capabilities::conductor::api::{ConductorHandle, Ops, Output};
 use crate::capabilities::conductor::service::ask_user::SessionAsk;
 use crate::capabilities::session::api::SessionEvent;
-use crate::capabilities::tools::domain::fence::{OPT_FENCE_ABORT, OPT_FENCE_UNFENCED};
 use crate::kernel::api::{Ask, AskOutcome};
+use crate::kernel::domain::fence::{OPT_FENCE_ABORT, OPT_FENCE_UNFENCED};
 use crate::kernel::ports::AskUser;
 use crate::tests::builders::SilentRunner;
 use crate::tests::doubles::{abs, core_with_runner, gw, module_of};

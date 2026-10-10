@@ -1,8 +1,9 @@
-//! **安全描述符操作**：逐路径改 DACL（授予 / 撤销）、解析 ACE 与 SID、展开泛型掩码。
-//!
-//! 这些本该由内核替调用方算——Windows 上要自己算（`windows-sys` 未暴露 `TreeSetNamedSecurityInfoW`，ACE / ACL 结构也要自己认）。
+//! 目的：Windows 安全描述符操作——逐路径改 DACL（授予 / 撤销）、解析 ACE 与 SID、展开泛型掩码。
+//! 管：这些本该由内核替调用方算，Windows 上要自己算（windows-sys 未暴露 TreeSetNamedSecurityInfoW，ACE / ACL 结构也要自己认）。
+//! 不管：围栏策略（哪些根、什么权限）——由调用方传入的 FenceSpec 决定。
+//! 联动：授权台账与收尾在 record.rs、容器身份在 container.rs、外层调用在 confine::prepare_fence。
 
-use crate::capabilities::tools::api::FenceSpec;
+use crate::kernel::api::FenceSpec;
 use std::ffi::c_void;
 use std::os::windows::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
@@ -206,9 +207,9 @@ pub(crate) fn entry_of(view: &AceView) -> AceEntry {
         view.inherited_object_type.clone(),
     )
 }
-/// 给一个对象授一条 ACE。`recursive` = 连**已有**子项一起设成这个 ACL（TreeSet）；`inherit` = 这条 ACE 被**新建**子项继承。
-/// 两者都要有明确理由：`inherit` 会牵动整棵子树的继承计算（真机实测：2000 个子项的可继承 ACE 写入是空目录的
-/// 20 倍），`recursive` 更是会把整棵树设一遍 ACL——所以只对**真的需要被子项继承**的落点（解释器目录、数据边界）用。
+/// 目的：给一个对象授一条 ACE。`recursive` = 连**已有**子项一起设成这个 ACL（TreeSet）；`inherit` = 这条 ACE 被**新建**子项继承。
+///   两者都要有明确理由：`inherit` 会牵动整棵子树的继承计算（真机实测：2000 个子项的可继承 ACE 写入是空目录的
+///   20 倍），`recursive` 更是会把整棵树设一遍 ACL——所以只对**真的需要被子项继承**的落点（解释器目录、数据边界）用。
 pub(crate) fn grant_one(
     sid: PSID,
     path: &Path,
@@ -343,7 +344,7 @@ fn write_ace(
     Ok(())
 }
 
-/// 把该 SID 的 ACE 从对象上撤掉（会话删除时清理用）。
+/// 目的：把该 SID 的 ACE 从对象上撤掉（会话删除时清理用）。
 pub(crate) fn revoke_one(sid: PSID, path: &Path, recursive: bool) -> Result<(), String> {
     let mut old_dacl: *mut ACL = std::ptr::null_mut();
     let mut sd: PSID = std::ptr::null_mut();
@@ -432,7 +433,7 @@ pub(crate) fn revoke_one(sid: PSID, path: &Path, recursive: bool) -> Result<(), 
     Ok(())
 }
 
-/// 命令里解释器的安装目录：共用实现在 confine/mod.rs（Windows 的目录 ACL 与 macOS 的 seatbelt 同一套语义）。
+/// 目的：命令里解释器的安装目录：共用实现在 confine/mod.rs（Windows 的目录 ACL 与 macOS 的 seatbelt 同一套语义）。
 pub(crate) fn interpreter_dirs(command: &str) -> Vec<PathBuf> {
     super::super::interpreter_dirs(command)
 }
@@ -464,17 +465,15 @@ fn rw_part(spec: &FenceSpec, path: &Path) -> FencePart {
     FencePart::DataBoundary
 }
 
-/// 围栏要授权的全部落点：数据边界叶子（读写 / 用户授权的只读）+ **它们的父目录**（只读属性）。
-///
-/// 父目录为什么要授：容器里对**中间目录**没有 FILE_READ_ATTRIBUTES 时，`exists()` / `stat()` 这类
-/// 常规判断会对一个**确实存在**的目录返回假。后果不是"读不到"，而是模块的"父目录不存在就先建"逻辑
-/// 以为整条链都不存在，一路向上建到盘卷根，撞出 `WinError 5 Access is denied: 'D:\'`
-/// （真机 CI 上抓到的：Python 的 `os.makedirs(parent, exist_ok=True)`）。
-///
-/// 只授"读属性"、**不递归、不继承**：容器能判断存在性，但读不到内容、列不了目录。
-/// 只到**直接父目录**为止（不是整条祖先链）：再往上就是产品根之外，而 stat 到直接父目录已足够让
-/// "父目录在不在"这个判断成立。给祖先链授"穿过"要改写 `C:\` 这种巨型目录的 DACL
-/// （顺整棵树重算继承，真机 ~90 s/条），这里授的是产品内的小目录，各一条 ACE。
+/// 目的：围栏要授权的全部落点：数据边界叶子（读写 / 用户授权的只读）+ **它们的父目录**（只读属性）。
+///   父目录为什么要授：容器里对**中间目录**没有 FILE_READ_ATTRIBUTES 时，`exists()` / `stat()` 这类
+///   常规判断会对一个**确实存在**的目录返回假。后果不是"读不到"，而是模块的"父目录不存在就先建"逻辑
+///   以为整条链都不存在，一路向上建到盘卷根，撞出 `WinError 5 Access is denied: 'D:\'`
+///   （真机 CI 上抓到的：Python 的 `os.makedirs(parent, exist_ok=True)`）。
+///   只授"读属性"、**不递归、不继承**：容器能判断存在性，但读不到内容、列不了目录。
+///   只到**直接父目录**为止（不是整条祖先链）：再往上就是产品根之外，而 stat 到直接父目录已足够让
+///   "父目录在不在"这个判断成立。给祖先链授"穿过"要改写 `C:\` 这种巨型目录的 DACL
+///   （顺整棵树重算继承，真机 ~90 s/条），这里授的是产品内的小目录，各一条 ACE。
 pub(crate) fn grant_targets(spec: &FenceSpec) -> Vec<GrantTarget> {
     let mut todo: Vec<GrantTarget> = Vec::new();
     let mut leaves: Vec<GrantTarget> = Vec::new();
@@ -490,9 +489,8 @@ pub(crate) fn grant_targets(spec: &FenceSpec) -> Vec<GrantTarget> {
             leaves.push(leaf(root, RIGHTS_RW, true, rw_part(spec, root)));
         }
     }
-    // 用户显式授权的只读根（`fence_read`）：只写只读 ACE，**授给该 agent 自己的容器 SID**。
-    // 不能像解释器基线那样授给共享组（S-1-15-2-1）——那等于把用户数据开放给机器上任意容器程序。
-    // 只读根不递归：用户可能授一个很大的目录（例如项目根），递归会改整棵树的 DACL。
+    // 用户显式授权的只读根（`fence_read`）：只写只读 ACE，**授给该 agent 自己的容器 SID**；
+    // 不能授给共享组（那等于向任意容器程序开放用户数据）；不递归（用户可能授很大的目录）。
     for root in &spec.ro {
         if !root.as_os_str().is_empty() {
             leaves.push(leaf(root, RIGHTS_RO, false, FencePart::AuthorizedRead));
@@ -509,11 +507,8 @@ pub(crate) fn grant_targets(spec: &FenceSpec) -> Vec<GrantTarget> {
     if !spec.cwd.as_os_str().is_empty() {
         leaves.push(leaf(&spec.cwd, RIGHTS_RO, true, FencePart::Cwd));
     }
-    // 父目录：只读属性、不递归、**不继承**（`inherit` 是继承标志）。同一个父目录被多个叶子共用时
-    // 靠调用方的去重表收口。不继承是为了把残留面收敛到父目录本身：带 (OI)(CI)
-    // 的 ACE 会传播进已存在的子项、再传给之后新建的子项——一旦撤权断链（进程被杀、台账丢失），
-    // 受污染的就是整棵子树；不继承把最坏残留面收敛到父目录本身，而新建子项反正会拿到自己的
-    // 授权，不需要它。
+    // 父目录：只读属性、不递归、**不继承**；同一个父目录被多个叶子共用时靠调用方的去重表收口。
+    // 不继承是为了把残留面收敛到父目录本身：带 (OI)(CI) 的 ACE 会传播，一旦撤权断链就污染整棵子树。
     for one in &leaves {
         if let Some(parent) = one.path.parent() {
             if !parent.as_os_str().is_empty() {
@@ -531,9 +526,9 @@ pub(crate) fn grant_targets(spec: &FenceSpec) -> Vec<GrantTarget> {
     todo
 }
 
-/// 只读运行基线的授权对象：ALL APPLICATION PACKAGES（S-1-15-2-1）。
-/// 我们的容器令牌本来就带这个组，所以「解释器与系统只读区」这类基线只授一次、与 agent 身份无关；
-/// 每 agent 一个的容器 SID 只用来圈**数据边界**（会话目录、模块目录）。
+/// 目的：只读运行基线的授权对象：ALL APPLICATION PACKAGES（S-1-15-2-1）。
+///   我们的容器令牌本来就带这个组，所以「解释器与系统只读区」这类基线只授一次、与 agent 身份无关；
+///   每 agent 一个的容器 SID 只用来圈**数据边界**（会话目录、模块目录）。
 pub(crate) fn baseline_sid() -> Result<PSID, String> {
     let s: Vec<u16> = std::ffi::OsStr::new("S-1-15-2-1")
         .encode_wide()
@@ -546,7 +541,7 @@ pub(crate) fn baseline_sid() -> Result<PSID, String> {
     Ok(sid)
 }
 
-/// 把通用位展开成具体位：ACL 里存的是哪一套，覆盖关系比较都要等价成立。
+/// 目的：把通用位展开成具体位：ACL 里存的是哪一套，覆盖关系比较都要等价成立。
 pub(crate) fn expand_generics(mask: u32) -> u32 {
     let mut out = mask;
     if mask & GENERIC_READ != 0 {
@@ -564,7 +559,7 @@ pub(crate) fn expand_generics(mask: u32) -> u32 {
     out
 }
 
-/// 已有 ACE 的权限位是不是覆盖得住我们需要的权限位。
+/// 目的：已有 ACE 的权限位是不是覆盖得住我们需要的权限位。
 pub(crate) fn rights_covered(mask: u32, rights: u32) -> bool {
     expand_generics(rights) & !expand_generics(mask) == 0
 }
@@ -786,10 +781,10 @@ fn is_sid_text(text: &str) -> bool {
     text.starts_with("S-1-")
 }
 
-/// 该对象上有没有给这个 SID 的**任何**允许 ACE（不看权限位）。
-/// 用途：残留检查——撤权后哪怕只留一位（真机残留过一条只有 SYNCHRONIZE 的 (OI)(CI) ACE，
-/// 整棵子树因此对受限进程不可读）也算没撤干净；
-/// has_ace_for 回答"够不够用"，这条回答"在不在场"。
+/// 目的：该对象上有没有给这个 SID 的**任何**允许 ACE（不看权限位）。
+///   用途：残留检查——撤权后哪怕只留一位（真机残留过一条只有 SYNCHRONIZE 的 (OI)(CI) ACE，
+///   整棵子树因此对受限进程不可读）也算没撤干净；
+///   has_ace_for 回答"够不够用"，这条回答"在不在场"。
 /// 约束：只看标准允许 ACE（对象 ACE 是给子对象的，不属于"本对象上的残留"）。
 pub(crate) fn has_any_ace_for(sid: PSID, path: &Path) -> bool {
     let want = sid_to_string(sid);
@@ -807,10 +802,10 @@ pub(crate) fn has_any_ace_for(sid: PSID, path: &Path) -> bool {
         .unwrap_or(false)
 }
 
-/// 该对象上是不是已经有给这个 SID 的允许 ACE，**且权限位覆盖得住**。
-/// 用途：基线授权只以递归方式写过一次，所以根上已有"够用"的 ACE 就跳过整棵树——否则每来一个 agent 都要重走几万文件。
-/// 只看"有没有该 SID 的 ACE"不够：解释器目录会继承只有 SYNCHRONIZE 的 ALL APPLICATION PACKAGES ACE，
-/// 基线因此被整条跳过，容器里连解释器都读不到（工具报 python is not recognized）。
+/// 目的：该对象上是不是已经有给这个 SID 的允许 ACE，**且权限位覆盖得住**。
+///   用途：基线授权只以递归方式写过一次，所以根上已有"够用"的 ACE 就跳过整棵树——否则每来一个 agent 都要重走几万文件。
+///   只看"有没有该 SID 的 ACE"不够：解释器目录会继承只有 SYNCHRONIZE 的 ALL APPLICATION PACKAGES ACE，
+///   基线因此被整条跳过，容器里连解释器都读不到（工具报 python is not recognized）。
 /// 约束：只看标准允许 ACE（对象 ACE 是给子对象的，不构成"本对象上已经够用"）。
 pub(crate) fn has_ace_for(sid: PSID, path: &Path, rights: u32) -> bool {
     let want = sid_to_string(sid);

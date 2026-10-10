@@ -3,7 +3,7 @@
 //! 模型选择是会话级决定（记录在会话里），模块清单不再承载模型/供应商偏好。
 
 use serde::Deserialize;
-/// 参数类型（只支持机器能判定的最小集合；不猜、不做隐式转换）。
+/// 目的：参数类型（只支持机器能判定的最小集合；不猜、不做隐式转换）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ParamType {
@@ -20,7 +20,7 @@ pub enum ParamType {
 }
 
 impl ParamType {
-    /// 模型侧与 JSON Schema 共用的类型名。
+    /// 目的：模型侧与 JSON Schema 共用的类型名。
     pub fn name(self) -> &'static str {
         match self {
             ParamType::String => "string",
@@ -32,7 +32,7 @@ impl ParamType {
         }
     }
 
-    /// 该值是否属于这个类型（整数与数字分开判定，不做 1 == 1.0 的宽容）。
+    /// 目的：该值是否属于这个类型（整数与数字分开判定，不做 1 == 1.0 的宽容）。
     pub fn accepts(self, v: &serde_json::Value) -> bool {
         match self {
             ParamType::String => v.is_string(),
@@ -46,28 +46,28 @@ impl ParamType {
     }
 }
 
-/// 一个参数的声明。
+/// 目的：一个参数的声明。
 #[derive(Debug, Clone, Deserialize)]
 pub struct Param {
-    /// YAML 里的 `type`。
+    /// 目的：YAML 里的 `type`。
     #[serde(rename = "type")]
     pub ty: ParamType,
-    /// 必填（缺省 false）。
+    /// 目的：必填（缺省 false）。
     #[serde(default)]
     pub required: bool,
-    /// 字符串参数不允许是空串（缺省 false）。
+    /// 目的：字符串参数不允许是空串（缺省 false）。
     #[serde(default)]
     pub non_empty: bool,
-    /// 给模型看的一句话说明。
+    /// 目的：给模型看的一句话说明。
     #[serde(default)]
     pub desc: String,
-    /// 缺省值（模型不写时用；也写进模型侧说明）。
+    /// 目的：缺省值（模型不写时用；也写进模型侧说明）。
     #[serde(default)]
     pub default: Option<serde_json::Value>,
-    /// 数值下界（含）。
+    /// 目的：数值下界（含）。
     #[serde(default)]
     pub min: Option<f64>,
-    /// 数值上界（含）。
+    /// 目的：数值上界（含）。
     #[serde(default)]
     pub max: Option<f64>,
 }
@@ -75,41 +75,80 @@ pub struct Param {
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-/// module.yaml —— 打包契约。模块对世界的全部自我介绍。
+/// 目的：module.yaml —— 打包契约。模块对世界的全部自我介绍。
 #[derive(Debug, Clone, Deserialize)]
 pub struct ModuleManifest {
     pub id: String,
     pub brief: String,
     pub system: String,
-    /// 运行能力声明：本模块的工具需要哪些运行包能力（如 python / node / bash / c-c++）。
-    /// 只声明能力名，不写版本——版本由用户在会话的执行档位里定（见 capabilities/workspace/domain/exec.rs 与 RUNTIME_SPEC.md）。
+    /// 目的：运行能力声明：本模块的工具需要哪些运行包能力（如 python / node / bash / c-c++）。
+    ///   只声明能力名，不写版本——版本由用户在会话的执行档位里定（见 capabilities/workspace/domain/exec.rs 与 RUNTIME_SPEC.md）。
     #[serde(default)]
     pub runtimes: Vec<String>,
-    /// 外部工具表：工具名 → 该工具的声明（启动命令 + 可选的参数契约）。
-    /// 内置工具名（read / write / search）为保留名，模块不得占用（见 check_tools）。
+    /// 目的：外部工具表：工具名 → 该工具的声明（启动命令 + 可选的参数契约）。
+    ///   内置工具名（read / write / search）为保留名，模块不得占用（见 check_tools）。
     #[serde(default)]
     pub tools: BTreeMap<String, ToolDecl>,
+    /// 目的：常驻服务表：服务名 → 该服务的声明（用哪个适配器 + 启动命令 + 是否默认启用）。
+    ///   适配器名只在组合根注册表里匹配；核心不解释它的含义（见 check_services）。
+    #[serde(default)]
+    pub services: BTreeMap<String, ServiceDecl>,
+    /// 目的：隐秘字段表：字段名 → 它注入该模块进程的环境变量名。**只声明标识，永不声明值**（见 check_secrets）。
+    #[serde(default)]
+    pub secrets: BTreeMap<String, SecretDecl>,
 }
 
-/// 一个模块工具：模块作者声明「怎么启动它」以及「它吃什么参数」。
-/// 参数契约**可选**：不写就照旧不校验、也不写进提示词；写了就由核心按它校验，并把说明写进系统提示。
+/// 目的：一个常驻服务：模块作者声明「用哪个适配器拉起它、怎么启动、默认开不开」。
+///   协议语义全在适配器里（capabilities/residents）；这里只有文本声明，没有执行。
 #[derive(Debug, Clone, Deserialize)]
-pub struct ToolDecl {
-    /// 启动命令（相对模块根写，例如 python tools/x.py）；工作目录 = 该模块的根目录。
+#[allow(dead_code)] // 字段由 residents / 呈现层 / 适配器读取；本能力只做声明形态与语法校验
+pub struct ServiceDecl {
+    /// 目的：组合根注册的适配器名（核心只做注册表匹配，未知 = 拒收并列出可用名）。
+    pub adapter: String,
+    /// 目的：启动命令（相对模块根写；工作目录 = 该模块的根目录）。
     pub command: String,
-    /// 给模型看的一句话说明（可选）。
+    /// 目的：给模型/用户看的一句话说明（可选）。
     #[serde(default)]
     pub desc: String,
-    /// 参数契约（可选）：参数名 → 声明。
+    /// 目的：是否默认启用（缺省 false：没经用户同意不起外部常驻进程）。
+    #[serde(default)]
+    pub enabled: bool,
+    /// 目的：只给该适配器读的私有配置（核心不解释、不校验；键值都是字符串）。
+    #[serde(default)]
+    pub options: BTreeMap<String, String>,
+}
+
+/// 目的：一个隐秘字段：模块声明「我需要哪个隐秘字段、注入成哪个环境变量」——**只声明标识，不声明值**。
+///   值由用户经设置配置、只存 `.home/`，由 `capabilities/secrets` 按模块作用域注入。
+#[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code)] // 字段由 secrets / 呈现层读取；本能力只做声明形态与语法校验
+pub struct SecretDecl {
+    /// 目的：注入该模块工具/服务进程的环境变量名（必填、非空）。
+    pub env: String,
+    /// 目的：给人/模型看的一句话说明（可选）。
+    #[serde(default)]
+    pub desc: String,
+}
+
+/// 目的：一个模块工具：模块作者声明「怎么启动它」以及「它吃什么参数」。
+///   参数契约**可选**：不写就照旧不校验、也不写进提示词；写了就由核心按它校验，并把说明写进系统提示。
+#[derive(Debug, Clone, Deserialize)]
+pub struct ToolDecl {
+    /// 目的：启动命令（相对模块根写，例如 python tools/x.py）；工作目录 = 该模块的根目录。
+    pub command: String,
+    /// 目的：给模型看的一句话说明（可选）。
+    #[serde(default)]
+    pub desc: String,
+    /// 目的：参数契约（可选）：参数名 → 声明。
     #[serde(default)]
     pub params: Option<BTreeMap<String, Param>>,
-    /// 这个工具**可并发执行**（缺省 false = 独占串行）：只读、无副作用的工具才该声明 true，
-    /// 同一回复里的多个可并发调用会真的并发跑（结果仍按调用顺序回填）。
+    /// 目的：这个工具**可并发执行**（缺省 false = 独占串行）：只读、无副作用的工具才该声明 true，
+    ///   同一回复里的多个可并发调用会真的并发跑（结果仍按调用顺序回填）。
     #[serde(default)]
     pub parallel: bool,
 }
 
-/// 运行能力声明的校验（纯逻辑；扫描模块时由适配层调用）：非法或重复 = 拒收并说明原因，不纠正。
+/// 目的：运行能力声明的校验（纯逻辑；扫描模块时由适配层调用）：非法或重复 = 拒收并说明原因，不纠正。
 pub fn check_runtimes(m: &ModuleManifest) -> Result<(), String> {
     let mut seen: Vec<&String> = Vec::new();
     for c in &m.runtimes {
@@ -127,8 +166,8 @@ pub fn check_runtimes(m: &ModuleManifest) -> Result<(), String> {
     Ok(())
 }
 
-/// 外部工具表的校验（纯逻辑；扫描模块时由适配层调用）：**保留名由调用方给**
-/// （工具名空间归工具能力，清单主人不反向依赖它——见 ARCHITECTURE.md §九.3）。
+/// 目的：外部工具表的校验（纯逻辑；扫描模块时由适配层调用）：**保留名由调用方给**
+///   （工具名空间归工具能力，清单主人不反向依赖它——见 ARCHITECTURE.md §九.3）。
 pub fn check_tools(m: &ModuleManifest, reserved: &[String]) -> Result<(), String> {
     for (name, decl) in &m.tools {
         if reserved.iter().any(|r| r == name) {
@@ -144,7 +183,43 @@ pub fn check_tools(m: &ModuleManifest, reserved: &[String]) -> Result<(), String
     Ok(())
 }
 
-/// 一个已发现的模块 = 文件夹 + 清单。
+/// 目的：常驻服务表的校验（纯逻辑；扫描模块时由适配层调用）：**只校验语法**。
+///   适配器名是否存在由 `residents` 在使用时按注册表判——`workspace` 不认识适配器。
+pub fn check_services(m: &ModuleManifest) -> Result<(), String> {
+    for (name, decl) in &m.services {
+        if name.trim().is_empty() {
+            return Err("services 里的服务名为空".to_string());
+        }
+        if decl.adapter.trim().is_empty() {
+            return Err(format!(
+                "services 里的 {} 没写 adapter（用哪个适配器）",
+                name
+            ));
+        }
+        if decl.command.trim().is_empty() {
+            return Err(format!("services 里的 {} 没写 command（启动命令）", name));
+        }
+    }
+    Ok(())
+}
+
+/// 目的：隐秘字段表的校验（纯逻辑；扫描模块时由适配层调用）：字段名与注入的 env 名都不得为空。
+pub fn check_secrets(m: &ModuleManifest) -> Result<(), String> {
+    for (name, decl) in &m.secrets {
+        if name.trim().is_empty() {
+            return Err("secrets 里的字段名为空".to_string());
+        }
+        if decl.env.trim().is_empty() {
+            return Err(format!(
+                "secrets 里的 {} 没写 env（注入的环境变量名）",
+                name
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// 目的：一个已发现的模块 = 文件夹 + 清单。
 #[derive(Debug, Clone)]
 pub struct Module {
     pub manifest: ModuleManifest,
@@ -153,10 +228,10 @@ pub struct Module {
     pub has_userdata: bool,
 }
 
-/// **身份块的系统提示**：把 `{{mechanism}}` / `{{env}}` / `{{tool_calling}}` 三件事按同一口径填进模板。
-/// 模块只是能力包（没有"发言"这回事）；发言席是 agent，所以这份 system 按 agent 成文。
-/// env 由 tools 的 systool 按该 agent 的沙箱渲染后传入。
-/// **工具清单不在这里**：本回合能用哪些工具随回合注入（见 collab 的 engine::tools_block）。
+/// 目的：**身份块的系统提示**：把 `{{mechanism}}` / `{{env}}` / `{{tool_calling}}` 三件事按同一口径填进模板。
+///   模块只是能力包（没有"发言"这回事）；发言席是 agent，所以这份 system 按 agent 成文。
+///   env 由 tools 的 systool 按该 agent 的沙箱渲染后传入。
+///   **工具清单不在这里**：本回合能用哪些工具随回合注入（见 collab 的 engine::tools_block）。
 pub fn agent_system(
     prompt: &dyn crate::capabilities::prompt::api::Prompt,
     agent: &str,
@@ -178,9 +253,9 @@ pub fn agent_system(
     )
 }
 
-/// **角色身份块**（不是 agent 的核心身份）：渲染角色提示词段 + 环境 + 调用约定。
-/// 代理会话（core_proxy）用它：它的身份是角色提示词（`prompts/roles/core_proxy.yaml`），
-/// 不是"某个 agent 的模块能力包"；机制 / 环境 / 调用约定与 agent 身份同一份口径。
+/// 目的：**角色身份块**（不是 agent 的核心身份）：渲染角色提示词段 + 环境 + 调用约定。
+///   代理会话（core_proxy）用它：它的身份是角色提示词（`prompts/roles/core_proxy.yaml`），
+///   不是"某个 agent 的模块能力包"；机制 / 环境 / 调用约定与 agent 身份同一份口径。
 #[allow(clippy::too_many_arguments)]
 pub fn role_system(
     prompt: &dyn crate::capabilities::prompt::api::Prompt,
@@ -239,13 +314,13 @@ fn render_system(
     )
 }
 
-/// 扫描结果：合法模块 + 拒收原因（校验，不是挑选——如实呈现）。
+/// 目的：扫描结果：合法模块 + 拒收原因（校验，不是挑选——如实呈现）。
 pub struct Roster {
     pub modules: Vec<Module>,
     pub rejected: Vec<String>,
 }
 
-/// 模块公地清单（拟名单时给模型看）：id / 简述。
+/// 目的：模块公地清单（拟名单时给模型看）：id / 简述。
 pub fn listing(roster: &Roster, texts: &crate::capabilities::prompt::api::ToolTexts) -> String {
     roster
         .modules

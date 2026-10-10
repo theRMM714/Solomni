@@ -3,8 +3,8 @@
 //! 不管：真实 ACL 的写与撤（Windows 的 confine 探针）、围栏在真机上的行为（`--fence-live` 的 ProcTools 用例）。
 //! 联动：判据写进 docs/tools/README.md 五；卡片契约见 docs/session/session-model.md 的「请用户裁决」。
 
-use crate::capabilities::tools::detail::confine::FencePrep;
-use crate::capabilities::tools::domain::fence::{
+use crate::kernel::detail::confine::FencePrep;
+use crate::kernel::domain::fence::{
     fence_ask, FenceBlocked, FencePart, OPT_FENCE_ABORT, OPT_FENCE_UNFENCED,
 };
 use std::path::PathBuf;
@@ -107,7 +107,7 @@ fn blocked_line_names_the_part_the_dir_why_and_the_fix() {
 fn ledger_listing_says_there_is_no_ledger_instead_of_pretending() {
     let root = crate::tests::scratch("fence-ledger-empty");
     let home = root.join(".home");
-    let view = crate::capabilities::tools::detail::confine::ledger(&home);
+    let view = crate::kernel::detail::confine::ledger(&home);
     assert!(view.entries.is_empty(), "没写过权限项就没有条目");
     assert!(
         !view.note.is_empty(),
@@ -120,7 +120,7 @@ fn ledger_listing_says_there_is_no_ledger_instead_of_pretending() {
 #[cfg(not(windows))]
 #[test]
 fn per_item_disposal_is_honestly_unavailable_off_windows() {
-    use crate::capabilities::tools::detail::confine;
+    use crate::kernel::detail::confine;
     let root = crate::tests::scratch("fence-ledger-offplatform");
     let home = root.join(".home");
     for done in [

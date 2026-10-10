@@ -14,6 +14,8 @@ pub mod llm;
 pub mod permission;
 pub mod prompt;
 pub mod registry;
+pub mod residents;
+pub mod secrets;
 pub mod session;
 pub mod slate;
 pub mod taskchain;

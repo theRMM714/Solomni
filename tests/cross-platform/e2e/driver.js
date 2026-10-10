@@ -729,6 +729,18 @@ async function approvePlan(name) {
   const q = rowsR.filter((r) => r.name === 'query').pop();
   assert(q && /检索/.test(String(q.output || '')), 'query 有命中（不是空结果兜底）', String((q && q.output) || '').slice(0, 300));
 
+  // 不经 AI 直接跑模块（模块的独立入口 = 它声明的 tools）：同一份动作目录，**不建会话**。
+  // 本机档不装载运行包（与成员循环同一把尺子）：声明了 runtimes 的模块照样直跑并落产物。
+  const directRoot = path.join(ROOT, 'session', 'e2e-direct-' + Date.now());
+  const directIn = path.join(directRoot, 'in');
+  fs.mkdirSync(directIn, { recursive: true });
+  fs.writeFileSync(path.join(directIn, '甲.md'), '# 甲\n\n不经 AI 直接跑模块。\n', 'utf8');
+  const directOut = path.join(directRoot, 'corpus.jsonl');
+  const direct = await reg('module.harvest.scan', { root: directIn, out: directOut, workspace: directRoot });
+  assert(direct.status === 200, '不经 AI 直接跑模块工具（module.harvest.scan）', direct.text.slice(0, 300));
+  assert(direct.json && direct.json.ok === true, '直跑的回执 ok=true', JSON.stringify(direct.json).slice(0, 300));
+  assert(fs.existsSync(directOut), '直跑的产物落在用户指定目录', directOut);
+
   // 原生工具调用（真实二进制 + 真 HTTP）：先实测这条通道支持（探测把 tools 写回 native），
   // 再跑一次"一次回复两个调用"，并核对**发给供应商的历史就是协议形状**。
   // 放在最后：把 m1 判成 native 之后，前面那些信封场景的预期就不再成立。

@@ -5,8 +5,8 @@ pub use crate::capabilities::workspace::domain::exec::{
     vm_diagnoses, vm_requirements, Diagnosis, ExecSpec, VmInputs, VmRequirement,
 };
 pub use crate::capabilities::workspace::domain::module::{
-    agent_system, check_runtimes, check_tools, listing, role_system, Module, ModuleManifest, Param,
-    ParamType, Roster, ToolDecl,
+    agent_system, check_runtimes, check_secrets, check_services, check_tools, listing, role_system,
+    Module, ModuleManifest, Param, ParamType, Roster, SecretDecl, ServiceDecl, ToolDecl,
 };
 pub use crate::capabilities::workspace::domain::packages::{Library, PackageManifest};
 pub use crate::capabilities::workspace::domain::workspace::{

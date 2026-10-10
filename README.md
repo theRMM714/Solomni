@@ -66,19 +66,32 @@ Solomni 是一个**跑在自己机器上的智能体运行环境（AgentOS）**�
 
 ## 安装与运行
 
-前置：**Node**（跑启动器）与 **Rust**（构建核心）。
+前置：**Node**（跑启动器）与 **Rust**（构建核心）。环境分两层：**运行环境**（只想跑产品）与**开发环境**（改代码 / 跑门禁）。
+
+### 运行环境
 
 ```bash
-node env.js setup        # 只准备环境：项目内 platform/<os>/ 与 .tools/；有可用 Rust 则直接借用
+node setup-runtime.js    # 准备运行环境：项目内 platform/<os>/ 与 .tools/；有可用 Rust 则只读借用
 node start.js            # 任意平台；Windows 也可双击 start.bat，macOS / Linux 也可 ./start.sh
 node start.js -webUI     # 直接进本地网页（127.0.0.1:3081）
 ```
 
-- 环境是独立一层（[env.js](env.js)）：路径约定（`platform/<os>/`、`.tools/`）、工具链探测、环境拼装与安装都在这里；
-  启动器只编排构建与运行，`run-tests.js` 也从这里取环境——**换开发环境只改这一处**。`node env.js` 看解析结果，
-  `node env.js --print-env` 给机器读。
 - 工具链与缓存收敛在**项目内**：检测到可用的 Rust 就**只读借用**，缓存与产物仍落 `platform/<os>/`；没有或有问题的才先征求同意装进项目内，不动系统；**无交互终端时不做安装**，打印手动步骤后退出。
   借用系统工具链时不读系统 `~/.cargo/config.toml`（镜像 / 凭据），依赖会重新下到项目内——这是「不写项目外」的取舍；门禁还会快照项目外缓存根，写出去即失败。
+
+### 开发环境
+
+```bash
+node setup-dev.js        # 装齐开发环境：开发统一用**项目内**工具链，产物只落 platform/<os>/ 与 .tools/
+node setup-dev.js --check  # 只读校验：缺什么列什么，缺则非零退出
+node run-tests.js        # 质量门禁 + 全量测试（见 TESTING.md）
+```
+
+- 开发环境的**条目清单**是 [dev-tools.js](dev-tools.js)（唯一真相）：`setup-dev.js` 按它装，`run-tests.js` 按它查 / `env-skip`。
+  含 Rust 组件（rustfmt / clippy / llvm-tools-preview）、交叉 target（Windows + macOS）、项目内工具（cargo-audit / cargo-deny / cargo-llvm-cov）。
+- 与运行环境分开的理由：只想跑产品的人不需要这些；门禁在只有运行环境的机器上仍能跑，缺的项如实 `env-skip`。
+- 环境是独立一层（[env.js](env.js)）：路径约定、工具链探测、环境拼装与安装都在这里；`node env.js` 看解析结果，`node env.js --print-env` 给机器读。
+  `setup-runtime.js` / `setup-dev.js` 只编排；`node setup-runtime.js` 与 `node env.js setup` 等价。
 - **没有配供应商也能跑**：用内置假模型把流程演示一遍，并如实告知。
 - 常用参数：`--root <目录>`（换产品根）、`--web-port <端口>`、`--release`。
 - 终端提示符下的命令：`single [agent名…]` / `collab [agent名…|?]` / `proxy（决定权整块交给核心）` / `module [模块id.工具名 [json]]（不经 AI 直接用模块工具）` / `webui`。

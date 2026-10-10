@@ -29,7 +29,7 @@ jobs:
   quality:
     name: 质量与单元（${{ matrix.os }}）
     runs-on: ${{ matrix.os }}
-    # 比 e2e 宽：要额外编译 cargo-audit / cargo-deny（供应链门禁，见 docs/testing/levels.md 的 T0）。
+    # 比 e2e 宽：要额外预编译装 cargo-audit / cargo-deny（供应链门禁，见 docs/testing/levels.md 的 T0）。
     timeout-minutes: 45
     # 借用 runner 自带 Rust，但缓存/安装落项目内（见 docs/testing/execution-ci.md）。
     env:
@@ -71,9 +71,20 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-
 
-      # 供应链工具用 cargo 装（不引第三方 action）；run-tests.js 的「T0 供应链」一步会发现它们。
-      - name: 安装供应链检查工具（cargo-audit / cargo-deny）
-        run: cargo install --locked cargo-audit cargo-deny
+      # 仅 CI：预编译装供应链工具（快）。本地开发不引第三方，仍按 run-tests.js 的提示 cargo install 到项目内。
+      # 安装用时经 SOLOMNI_CI_PREINSTALL_MS 带进门禁报告（见 docs/testing/execution-ci.md）。
+      - name: 记录供应链工具安装起跑
+        shell: bash
+        run: echo "SOLOMNI_PREINSTALL_START_MS=$(node -e 'console.log(Date.now())')" >> "$GITHUB_ENV"
+
+      - name: 安装供应链检查工具（预编译，仅 CI）
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit,cargo-deny
+
+      - name: 记录供应链工具安装耗时（进测试报告）
+        shell: bash
+        run: echo "SOLOMNI_CI_PREINSTALL_MS=$(( $(node -e 'console.log(Date.now())') - SOLOMNI_PREINSTALL_START_MS ))" >> "$GITHUB_ENV"
 
       - name: 质量门禁 + 单元 + 平台探针（跳过 L4，由 e2e job 承担）
         run: node run-tests.js --fence-live --skip-e2e

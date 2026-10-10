@@ -116,7 +116,7 @@ mutation-scope.json # 突变测试范围（文件级清单；core + 各能力）
 
 未能回答的问题不是"以后再说"，而是测试设计或观察面仍不完整，应进入缺口账。
 
-**需要 CI 才算验收的场景**（其余按 [execution-ci.md](execution-ci.md) 的 CI 表）：改了平台专属代码（`capabilities/tools/detail/confine/` 或 `tests/<平台>/`）、
+**需要 CI 才算验收的场景**（其余按 [execution-ci.md](execution-ci.md) 的 CI 表）：改了平台专属代码（`kernel/detail/confine/` 或 `tests/<平台>/`）、
 改了平台围栏机制、改了 HTTPS/TLS 链路、改了只在其它平台编译的 `#[cfg]` 分支——**这些本机跑不出结论，必须手动派发 CI 并比对 `sha`**。
 
 反过来同样要守：**本机能跑出结论的改动不要为此派发 CI**。纯逻辑、文档、当前平台的用例，以及**质量门禁与卫生工具自身的改动**

@@ -5,7 +5,7 @@
 //! 联动：ACE 的读法只有一处（acl.rs 的 acl_scan / ace_parts / revoke/restore）；两条入口（--fence-clean 整体收尾、
 //!   按条处置）共用同一份台账与同一套读法。
 
-use crate::capabilities::tools::api::FenceSpec;
+use crate::kernel::api::FenceSpec;
 use std::ffi::c_void;
 use std::os::windows::ffi::OsStrExt;
 use std::os::windows::fs::MetadataExt;

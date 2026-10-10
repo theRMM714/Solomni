@@ -3,6 +3,7 @@
 //! 不管：IO（在 `detail/`）；端口的定义（在 `ports`）；任何领域语义。
 //! 联动：由 `src/kernel/api.rs` 重导出给各能力。
 
+pub mod fence;
 pub mod jobs;
 pub mod path;
 pub mod types;

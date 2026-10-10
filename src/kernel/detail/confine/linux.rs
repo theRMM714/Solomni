@@ -1,18 +1,18 @@
-//! Linux 后端：Landlock（内核 5.13+）把「可达到哪些路径」变成内核强制——无需 root、无需额外二进制。
-//! 规则：spec.rw 的每个根读写与目录操作；运行基线（系统只读区）只读可执行；其余一律拒绝。
-//! 机制不可用时（老内核、或规则被内核拒）如实降级：打印说明后照常执行——能力等级在启动时已如实告知，不静默假装有围栏。
-//! 只做文件系统；网络在 spec.net 为假时靠调用方（虚拟机档）断网，本档不承诺。
+//! 目的：Linux 后端——Landlock（内核 5.13+）把「可达到哪些路径」变成内核强制，无需 root、无需额外二进制。
+//! 管：规则——spec.rw 的每个根读写与目录操作；运行基线（系统只读区）只读可执行；其余一律拒绝。
+//! 不管：网络——spec.net 为假时靠调用方（虚拟机档）断网，本档不承诺。
+//! 联动：机制不可用时（老内核、或规则被内核拒）如实降级并打印说明；能力等级在启动报告里已如实告知。
 
 use super::{shell_command, Capability, FenceVerdict, FENCE_FAILED};
-use crate::capabilities::tools::api::FenceSpec;
+use crate::kernel::api::FenceSpec;
 use std::ffi::CString;
 use std::os::raw::c_int;
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 
-/// 稳定标记：本机 Landlock 机制有效（自检已过），但我们的规则/安装步骤装不上。
-/// 与「本机内核不能围栏」是两回事——前者是代码写错（掩码/路径），探针据此响亮失败；
-/// 后者才是环境结论，探针如实跳过。
+/// 目的：稳定标记：本机 Landlock 机制有效（自检已过），但我们的规则/安装步骤装不上。
+///   与「本机内核不能围栏」是两回事——前者是代码写错（掩码/路径），探针据此响亮失败；
+///   后者才是环境结论，探针如实跳过。
 pub const RULES_REJECTED_MARK: &str = "landlock 规则被拒绝";
 
 /// 自检之后仍然装不上 = 规则写错，统一带上稳定标记（与 macOS 的 PROFILE_REJECTED_MARK 对称）。
@@ -231,8 +231,8 @@ pub fn capability() -> Capability {
     }
 }
 
-/// `_prepared`（外层是否已完成本机授权）与 `_home`（容器 profile 的台账落点）只有 Windows 的容器围栏用得上：
-/// Linux 的 Landlock 在守门进程里自足，也没有容器 profile 这一步。
+/// 目的：`_prepared`（外层是否已完成本机授权）与 `_home`（容器 profile 的台账落点）只有 Windows 的容器围栏用得上：
+///   Linux 的 Landlock 在守门进程里自足，也没有容器 profile 这一步。
 pub fn run_fenced(
     spec: &FenceSpec,
     _prepared: bool,
@@ -275,8 +275,8 @@ pub fn run_fenced(
     }
 }
 
-/// 装围栏并**如实分类**结果：自检不过 = 本机环境结论（降级照跑）；自检过了还装不上 = 我们写错了。
-/// 探针早就按这两类分别处理（前者如实跳过、后者响亮失败），运行期在未授权时段也照这一份结论走。
+/// 目的：装围栏并**如实分类**结果：自检不过 = 本机环境结论（降级照跑）；自检过了还装不上 = 我们写错了。
+///   探针早就按这两类分别处理（前者如实跳过、后者响亮失败），运行期在未授权时段也照这一份结论走。
 pub fn verify(spec: &FenceSpec, command: &str) -> FenceVerdict {
     if !landlock_confines() {
         return FenceVerdict::EnvUnavailable(
@@ -311,8 +311,7 @@ fn install_rules(spec: &FenceSpec, command: &str) -> Result<(), String> {
         )));
     }
     // **先收集所有放行规则，最后统一挂**：挂上第一条之后进程自己也被约束，
-    // 后续 add_rule 要去 open 的路径（系统只读基线、解释器目录）可能已经打不开——
-    // 那会被报成"规则被拒绝"，而真相是我们的安装顺序写错了。先算清楚再装，两类失败就不会互相顶包。
+    // 后续 add_rule 要 open 的路径可能已打不开（会被误报成「规则被拒绝」）；先算清楚再装。
     let mut wanted: Vec<(PathBuf, u64)> = Vec::new();
     let allowed_rw = mask_for(abi, RW_ALL);
     for root in &spec.rw {
@@ -378,10 +377,8 @@ fn add_rule(ruleset_fd: i32, path: &Path, access: u64) -> Result<(), String> {
             std::io::Error::last_os_error()
         ));
     }
-    // 掩码必须跟根的类型对得上：内核对非目录 parent 会拒掉目录专属位，回 EINVAL。
-    // 少了这个分叉，规则链会在第一个「文件型基线路径」（/etc/ld.so.cache）上断掉，
-    // 后面连 landlock_restrict_self 都走不到——围栏一条都不生效。
-    // 用 metadata 判类型（与上面 open(O_PATH) 一样跟随符号链接，/etc/localtime 这类别名因此判得准）。
+    // 掩码必须跟根的类型对得上（内核对非目录 parent 会拒目录专属位，回 EINVAL）：
+    // 少了这个分叉，规则链会在第一个「文件型基线路径」（/etc/ld.so.cache）上断掉，围栏一条都不生效。
     let allowed_access = match std::fs::metadata(path) {
         Ok(m) if m.is_dir() => access,
         Ok(_) => access & !DIR_ONLY,

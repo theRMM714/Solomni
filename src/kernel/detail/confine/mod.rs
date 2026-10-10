@@ -1,11 +1,10 @@
-//! 守门进程：把围栏装进工具进程，然后才跑模块声明的命令（实现 tools 的围栏策略）。
-//! 机制边界：本层只做机制——按平台把围栏（可读可写的根、断网、进程树围栏、资源上限）装好，
-//! 策略（哪些根可达、放不放网）由 conductor 派生后经命令行传入。
-//! 平台实现分文件：linux.rs（Landlock）/ macos.rs（seatbelt）/ windows.rs（Job Object + 容器）/ other.rs（如实降级）。
-//! 能力不足时如实上报（capability），降级而非崩溃——绝不静默假装有围栏。
+//! 目的：守门进程——把围栏装进工具进程，然后才跑模块声明的命令（实现 tools 的围栏策略）。
+//! 管：按平台把围栏（可读可写的根、断网、进程树围栏、资源上限）装好；平台实现分文件 linux.rs / macos.rs / windows/ / other.rs。
+//! 不管：策略（哪些根可达、放不放网）——由 conductor 派生后经命令行传入。
+//! 联动：能力不足时如实上报（capability），降级而非崩溃——绝不静默假装有围栏。
 
-use crate::capabilities::tools::api::FenceSpec;
-use crate::capabilities::tools::domain::fence::{FenceBlocked, FencePart};
+use crate::kernel::api::FenceSpec;
+use crate::kernel::domain::fence::{FenceBlocked, FencePart};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -27,15 +26,15 @@ mod other;
 #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
 use other as backend;
 
-/// 守门模式参数：主程序带它启动 = 以守门进程身份执行（内部协议，用户不直接用）。
+/// 目的：守门模式参数：主程序带它启动 = 以守门进程身份执行（内部协议，用户不直接用）。
 pub const FENCE_FLAG: &str = "--fence-run";
-/// 围栏装不上时守门进程的退出码（工具执行据此如实报错，不静默）。
+/// 目的：围栏装不上时守门进程的退出码（工具执行据此如实报错，不静默）。
 pub const FENCE_FAILED: i32 = 111;
 
-/// 本机能不能强制住这次执行的围栏——**机制层的验证结论**，与"外层授权了没有"无关。
-/// 三态的理由：把"本机不允许"与"我们的机制写错了"分开。
-/// 前者是环境结论，如实降级照跑（能力等级已在启动报告里说过）；后者绝不能静默降级——
-/// 那等于用户以为有围栏、实际什么都没有。探针早就按这两类分别处理，运行期也必须一样。
+/// 目的：本机能不能强制住这次执行的围栏——**机制层的验证结论**，与"外层授权了没有"无关。
+///   三态的理由：把"本机不允许"与"我们的机制写错了"分开。
+///   前者是环境结论，如实降级照跑（能力等级已在启动报告里说过）；后者绝不能静默降级——
+///   那等于用户以为有围栏、实际什么都没有。探针早就按这两类分别处理，运行期也必须一样。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FenceVerdict {
     /// 机制真装上了，强制生效。
@@ -46,20 +45,20 @@ pub enum FenceVerdict {
     Broken(String),
 }
 
-/// 测试专用的注入开关：让探针能确定性地构造「本机不允许」这一态。
-/// 为什么需要：`EnvUnavailable` 只在老内核 / 失效的私有 ABI / 环境拒绝建容器时出现，
-/// 正常 runner 上碰不到——没有这条开关，那一路分支就只被偶然验证过。
-/// **只在测试里打开**（探针自己给守门进程带这个环境变量），运行期永不设置它。
+/// 目的：测试专用的注入开关：让探针能确定性地构造「本机不允许」这一态。
+///   为什么需要：`EnvUnavailable` 只在老内核 / 失效的私有 ABI / 环境拒绝建容器时出现，
+///   正常 runner 上碰不到——没有这条开关，那一路分支就只被偶然验证过。
+///   **只在测试里打开**（探针自己给守门进程带这个环境变量），运行期永不设置它。
 pub const SELFCHECK_FAIL_FLAG: &str = "SOLOMNI_FENCE_SELFCHECK_FAIL";
 
-/// 自检该不该按「本机不允许」处理：测试专用注入优先，否则问真实自检。
-/// 三平台的自检入口共用这一份判断，避免各写一遍导致探针在某平台上失效。
+/// 目的：自检该不该按「本机不允许」处理：测试专用注入优先，否则问真实自检。
+///   三平台的自检入口共用这一份判断，避免各写一遍导致探针在某平台上失效。
 pub(crate) fn selfcheck_forced_unavailable() -> bool {
     std::env::var_os(SELFCHECK_FAIL_FLAG).is_some()
 }
 
-/// 本机能不能强制住这次执行的围栏（机制层自检，**不写本机任何权限项**）。
-/// 未授权时段靠它把「环境不允许」与「我们写错了」分开——后者绝不能被当成降级吞掉。
+/// 目的：本机能不能强制住这次执行的围栏（机制层自检，**不写本机任何权限项**）。
+///   未授权时段靠它把「环境不允许」与「我们写错了」分开——后者绝不能被当成降级吞掉。
 pub fn verify(spec: &FenceSpec, command: &str) -> FenceVerdict {
     if selfcheck_forced_unavailable() {
         return FenceVerdict::EnvUnavailable(format!(
@@ -70,7 +69,7 @@ pub fn verify(spec: &FenceSpec, command: &str) -> FenceVerdict {
     backend::verify(spec, command)
 }
 
-/// 围栏授权释放的适配器（实现 tools 的 FenceHost 端口）：conductor 只说「这个会话的围栏撤掉」。
+/// 目的：围栏授权释放的适配器（实现 kernel 共享的 FenceHost 端口）：conductor 只说「这个会话的围栏撤掉」。
 pub struct FenceHostAdapter {
     /// 产品私有区（.home/）：台账落点，也是产品根的锚（收尾还原要读它）。
     home: PathBuf,
@@ -83,40 +82,40 @@ impl FenceHostAdapter {
     }
 }
 
-impl crate::capabilities::tools::ports::FenceHost for FenceHostAdapter {
+impl crate::kernel::ports::FenceHost for FenceHostAdapter {
     fn release(&self, spec: &FenceSpec) -> Result<(), String> {
         release_fence(spec, &self.home)
     }
 }
 
-/// 本机能强制的围栏等级（如实上报给用户与日志）。
+/// 目的：本机能强制的围栏等级（如实上报给用户与日志）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Capability {
-    /// 文件系统可达范围是否被真正强制。
+    /// 目的：文件系统可达范围是否被真正强制。
     pub fs: bool,
-    /// 出站网络是否被真正强制关闭。
+    /// 目的：出站网络是否被真正强制关闭。
     pub net: bool,
-    /// 进程树是否连根围住（超时/退出能杀整棵）。
+    /// 目的：进程树是否连根围住（超时/退出能杀整棵）。
     pub tree: bool,
-    /// 如实说明（机制名 + 限制）。
+    /// 目的：如实说明（机制名 + 限制）。
     pub note: String,
 }
 
-/// 本机能力（装配期如实告知）。
+/// 目的：本机能力（装配期如实告知）。
 pub fn capability() -> Capability {
     backend::capability()
 }
 
-/// 守门进程的入参：conductor 的围栏策略 + **外层是否已把本机授权做完** + 产品私有区（台账落点）。
-/// 授权是改本机目录 ACL 的动作（只有 Windows 的容器围栏需要），所以它不进 conductor 的 `FenceSpec`，
-/// 由适配层随这次执行一起交给守门进程。JSON 是**扁平**的：FenceSpec 的字段同层再加 `prepared` 与 `home`。
+/// 目的：守门进程的入参：conductor 的围栏策略 + **外层是否已把本机授权做完** + 产品私有区（台账落点）。
+///   授权是改本机目录 ACL 的动作（只有 Windows 的容器围栏需要），所以它不进 conductor 的 `FenceSpec`，
+///   由适配层随这次执行一起交给守门进程。JSON 是**扁平**的：FenceSpec 的字段同层再加 `prepared` 与 `home`。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FenceJob {
     pub spec: FenceSpec,
     pub prepared: bool,
-    /// 产品私有区（`.home/`）：守门进程把**它建过的容器 profile** 记进这里的台账，供 `--fence-clean` 精确回收。
-    /// 守门进程是唯一真正建 profile 的地方，外层只知道"该建"、不知道"建成了"。
-    /// 没有台账的调用方（探针）给 `None`：那类 profile 由 `--fence-clean` 的前缀清扫兜底。
+    /// 目的：产品私有区（`.home/`）：守门进程把**它建过的容器 profile** 记进这里的台账，供 `--fence-clean` 精确回收。
+    ///   守门进程是唯一真正建 profile 的地方，外层只知道"该建"、不知道"建成了"。
+    ///   没有台账的调用方（探针）给 `None`：那类 profile 由 `--fence-clean` 的前缀清扫兜底。
     pub home: Option<PathBuf>,
 }
 
@@ -158,7 +157,7 @@ impl FenceJob {
     }
 }
 
-/// 组装守门进程的命令行：工具命令作为**数据**传递（不拼进 shell 字符串，杜绝注入）。
+/// 目的：组装守门进程的命令行：工具命令作为**数据**传递（不拼进 shell 字符串，杜绝注入）。
 pub fn launcher(exe: &Path, job: &FenceJob, command: &str) -> Command {
     let mut cmd = Command::new(exe);
     cmd.arg(FENCE_FLAG)
@@ -168,7 +167,7 @@ pub fn launcher(exe: &Path, job: &FenceJob, command: &str) -> Command {
     cmd
 }
 
-/// 守门进程内：装围栏 → 跑命令 → 返回退出码。失败必须报错（stderr）并用 FENCE_FAILED 退出。
+/// 目的：守门进程内：装围栏 → 跑命令 → 返回退出码。失败必须报错（stderr）并用 FENCE_FAILED 退出。
 pub fn run_fenced(job: &FenceJob, command: &str) -> i32 {
     backend::run_fenced(&job.spec, job.prepared, job.home.as_deref(), command)
 }
@@ -225,8 +224,8 @@ fn note_fence_boundary(spec: &FenceSpec, enforced: bool, code: i32) {
     }
 }
 
-/// 扫掉本程序建过的整族容器 profile：台账只记"我们知道写过什么"，而 profile 可能来自没有台账的路径
-/// （探针、夹具的台账被删、旧版本）。名字前缀是本程序独有的，所以按它扫。返回扫掉的个数。
+/// 目的：扫掉本程序建过的整族容器 profile：台账只记"我们知道写过什么"，而 profile 可能来自没有台账的路径
+///   （探针、夹具的台账被删、旧版本）。名字前缀是本程序独有的，所以按它扫。返回扫掉的个数。
 pub fn sweep_profiles() -> Result<usize, String> {
     #[cfg(windows)]
     {
@@ -274,16 +273,16 @@ impl FencePrep {
     }
 }
 
-/// 外层进程调用：把围栏要用的授权一次性做好（写目录 ACL），并按落点的必要性如实收尾。
-/// 跳过条件看**实际 ACE**而不是内存台账，所以权限收窄并撤权后能正确重授。
-/// 只有 Windows 的容器围栏需要这一步——Linux 的 Landlock 与 macOS 的 seatbelt 在守门进程里自足，
-/// 所以本函数在非 Windows 平台上**不存在**（而不是"存在但空转"）。
+/// 目的：外层进程调用：把围栏要用的授权一次性做好（写目录 ACL），并按落点的必要性如实收尾。
+///   跳过条件看**实际 ACE**而不是内存台账，所以权限收窄并撤权后能正确重授。
+///   只有 Windows 的容器围栏需要这一步——Linux 的 Landlock 与 macOS 的 seatbelt 在守门进程里自足，
+///   所以本函数在非 Windows 平台上**不存在**（而不是"存在但空转"）。
 #[cfg(windows)]
 pub fn prepare_fence(spec: &FenceSpec, command: &str, home: &std::path::Path) -> FencePrep {
     windows::prepare_fence(spec, command, home)
 }
 
-/// 精确回收：按台账撤掉我们写过的权限项、删掉我们建过的容器 profile（`--fence-clean` 用）。
+/// 目的：精确回收：按台账撤掉我们写过的权限项、删掉我们建过的容器 profile（`--fence-clean` 用）。
 pub fn clean(home: &std::path::Path) -> Result<String, String> {
     #[cfg(windows)]
     {
@@ -313,8 +312,8 @@ pub fn reconcile(home: &std::path::Path) -> ReconcileReport {
     }
 }
 
-/// 孤儿授权清扫：按容器 SID 族在产品根内撤掉台账之外的残留 ACE（--fence-clean 用）。
-/// 只有 Windows 写本机 ACL，其它平台没有这一步（而不是"存在但空转"）。
+/// 目的：孤儿授权清扫：按容器 SID 族在产品根内撤掉台账之外的残留 ACE（--fence-clean 用）。
+///   只有 Windows 写本机 ACL，其它平台没有这一步（而不是"存在但空转"）。
 #[cfg(windows)]
 pub fn sweep_orphan_aces(root: &std::path::Path) -> Result<usize, String> {
     windows::sweep_orphan_aces(root)
@@ -514,7 +513,7 @@ pub fn remove_profile_one(home: &std::path::Path, name: &str) -> Result<String, 
     }
 }
 
-/// 撤销一次会话的围栏授权（会话删除时由核心经 FenceHost 端口请求；其它平台是空操作）。
+/// 目的：撤销一次会话的围栏授权（会话删除时由核心经 FenceHost 端口请求；其它平台是空操作）。
 pub fn release_fence(spec: &FenceSpec, home: &std::path::Path) -> Result<(), String> {
     #[cfg(windows)]
     {
@@ -527,8 +526,8 @@ pub fn release_fence(spec: &FenceSpec, home: &std::path::Path) -> Result<(), Str
     }
 }
 
-/// 命令里可能出现的外部程序：按 PATH 解析出真实路径（解析不出的跳过，不猜）。
-/// 它们的**安装目录**必须放行（只读+执行），否则受限进程连解释器都起不来——Windows 的目录 ACL 与 macOS 的 seatbelt 都靠它。
+/// 目的：命令里可能出现的外部程序：按 PATH 解析出真实路径（解析不出的跳过，不猜）。
+///   它们的**安装目录**必须放行（只读+执行），否则受限进程连解释器都起不来——Windows 的目录 ACL 与 macOS 的 seatbelt 都靠它。
 pub(crate) fn interpreter_dirs(command: &str) -> Vec<std::path::PathBuf> {
     let path_var = std::env::var_os("PATH").unwrap_or_default();
     let pathext = std::env::var("PATHEXT").ok();
@@ -728,10 +727,10 @@ fn is_executable(_path: &std::path::Path) -> bool {
     true
 }
 
-/// 交给 cmd 解释前，把**程序名**里的正斜杠换成反斜杠。
-/// cmd 只把程序名里的 `\` 当路径分隔符：`build/indexer build` 会被它读成「命令 build + 开关 /indexer」，
-/// 报 `'build' is not recognized`。程序名之后的参数原样保留（`node tools/report.js` 这类命令靠参数里的正斜杠）。
-/// 程序名 = 第一个空白前的字段；模块作者若用引号包住程序名，只改引号内那一段。
+/// 目的：交给 cmd 解释前，把**程序名**里的正斜杠换成反斜杠。
+///   cmd 只把程序名里的 `\` 当路径分隔符：`build/indexer build` 会被它读成「命令 build + 开关 /indexer」，
+///   报 `'build' is not recognized`。程序名之后的参数原样保留（`node tools/report.js` 这类命令靠参数里的正斜杠）。
+///   程序名 = 第一个空白前的字段；模块作者若用引号包住程序名，只改引号内那一段。
 #[cfg(windows)]
 pub(crate) fn windows_program_separators(command: &str) -> String {
     let end = match command.strip_prefix('"') {
@@ -741,7 +740,7 @@ pub(crate) fn windows_program_separators(command: &str) -> String {
     command[..end].replace('/', "\\") + &command[end..]
 }
 
-/// 工具进程的启动命令：命令行由**模块作者**写在 module.yaml 里，交系统 shell 解释（与既有语义一致）。
+/// 目的：工具进程的启动命令：命令行由**模块作者**写在 module.yaml 里，交系统 shell 解释（与既有语义一致）。
 #[cfg(windows)]
 pub fn shell_command(command: &str) -> Command {
     let mut c = Command::new("cmd");
@@ -756,8 +755,8 @@ pub fn shell_command(command: &str) -> Command {
     c
 }
 
-/// 环境白名单：子进程只拿到这些（其余一律不继承——密钥与无关凭据不进工具进程）。
-/// 解释器需要 HOME/TEMP 这类落点：全部指到该 agent 的私有沙箱里（缓存与临时文件落在工作区内）。
+/// 目的：环境白名单：子进程只拿到这些（其余一律不继承——密钥与无关凭据不进工具进程）。
+///   解释器需要 HOME/TEMP 这类落点：全部指到该 agent 的私有沙箱里（缓存与临时文件落在工作区内）。
 pub fn fence_env(spec: &FenceSpec, command: &str) -> Vec<(OsString, OsString)> {
     let keep = [
         "PATH",
@@ -803,17 +802,6 @@ pub fn fence_env(spec: &FenceSpec, command: &str) -> Vec<(OsString, OsString)> {
     #[cfg(not(windows))]
     let _ = command;
     out
-}
-
-impl FenceSpec {
-    /// 该 agent 的私有沙箱（没有就退回工作目录）——环境里的 HOME / TEMP 落点。
-    pub fn private_or_cwd(&self) -> PathBuf {
-        if self.private.as_os_str().is_empty() {
-            self.cwd.clone()
-        } else {
-            self.private.clone()
-        }
-    }
 }
 
 #[cfg(test)]

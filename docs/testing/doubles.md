@@ -127,14 +127,17 @@ Fixture 必须：
 | `HistoryStore` | `InMemoryHistory` | 内存流水可观察 | `fail_with` | 不适用 | `FsHistory` | 已验收；**持有者只有 `session::service.rs`**（R12） |
 | `PromptSource` | `TestPrompts` | 不适用 | `fail_with` | 不适用 | `YamlPrompts` | 已验收 |
 | `SystoolsSource` | 不适用（**直接用真实加载器**：读的就是仓库自己的两份 yaml，确定性足够） | 不适用 | 缺文件 / 缺键由真实加载器如实报错（`tests/detail.rs`） | 不适用 | `YamlSystools` | 已验收 |
-| `ToolRunner` | `RecordingRunner`、`SilentRunner`、`ParallelRunner`、`AskingRunner`（跑之前先经提问端口问一次） | `calls`（cwd / 命令 / 参数）、并发峰值；`AskingRunner` 另记"问过几次、真跑了几次" | `ok = false` 回执 | 真进程超时杀树（`ProcTools`） | `ProcTools` | 已验收 |
+| `ProcessRunner`（kernel 共享） | `RecordingRunner`、`SilentRunner`、`ParallelRunner`、`AskingRunner`（跑之前先经提问端口问一次）、`EnvRecordingRunner`（记每次调用的注入项） | `calls`（cwd / 命令 / 参数）、并发峰值、`envs`（注入项）；`AskingRunner` 另记"问过几次、真跑了几次" | `ok = false` 回执 | 真进程超时杀树（`ProcTools`）；隐私字段只经环境变量注入 | `ProcTools` | 已验收 |
 | `AskUser` | `RecordingAsk`（按脚本作答，记下每次问到的选项 id）、`AskingRunner` 内部的同形替身 | 问到的选项 id / 是否停过会话 | 不适用（作答脚本给 `None` = 拒绝 / 没人答） | 阻塞等回答（不设超时；整队作废解开） | 会话侧实现 `conductor::service::SessionAsk`（卡片进那一条队、`answer_card` 作答；空选项集停会话 + 落警告） | 已验收（`src/tests/conductor/ask_user.rs`、`src/tests/permission.rs` 的端到端一条） |
 | `EnvelopeRepair` | `NoRepair` | 不适用 | 不适用（修复器遇不确定一律不修） | 不适用 | `UnambiguousRepair`（转义裸控制字符 + 补上缺的收尾括号；断在字符串中间、起了两段信封一律不修） | 已验收 |
-| `FenceHost` | `RecordingFence`、`NoFenceHost` | `released` | `fail_with` | 不适用 | `confine::FenceHostAdapter`（真机撤权在 `tests/windows/`） | 已验收 |
+| `FenceHost`（kernel 共享） | `RecordingFence`、`NoFenceHost` | `released` | `fail_with` | 不适用 | `confine::FenceHostAdapter`（真机撤权在 `tests/windows/`） | 已验收 |
+| `ServiceAdapter`（residents） | `FakeServiceAdapter`、`DyingServiceAdapter`（一启动就"死"：调用恒失败且 `is_alive=false`，崩溃检测用） | `calls`（start / call / stop） | 由替身注入启动失败 | 不适用 | `detail::McpAdapter`（MCP stdio；真实服务端到端见 `src/tests/mcp.rs`）；ACP 未接入 | 已验收（`src/tests/residents.rs`、`src/tests/mcp.rs`） |
+| `SessionHost`（kernel 共享） | `ScriptedHost`（按脚本逐行应答；可演 `list_changed` 通知与 EOF） | `sent`（发出的每一行与关闭） | 脚本用尽 = 如实报错 | EOF / 读错误 = `alive()` 转 false（崩溃检测） | `ProcessSessions`（守门进程长跑；真实 MCP 服务端到端见 `src/tests/mcp.rs`，非 unix 或缺 python 时如实跳过） | 已验收 |
+| `SecretStore`（secrets） | `InMemorySecretStore` | `values`、写入次数 | 由替身注入失败 | 不适用 | `detail::YamlSecrets`（`.home/secrets.yaml`，unix 0600） | 契约测试已验收（`src/tests/secrets.rs`）；生产消费点未接入（`#![allow(dead_code)]` 如实标注） |
 | `Log` | `NoopLog` | 不记录（Stub） | 不适用 | 不适用 | `FileLog`（三个级别都落盘） | 已验收 |
 | `HostProbe` | `FixedProbe`（只按声明回答） | 不适用 | 不适用 | 不适用 | `HostProbeAdapter`（真实路径事实；PATH 上不存在的名字如实说没有） | 已验收 |
 
-`Log`、`HostProbe`、`ToolHandler` 与 `AskUser` 是**不在某个能力 `ports.rs`** 的端口：它们在 `kernel/ports.rs`（机制型内核，无领域语义，R12 的例外）。
+`Log`、`HostProbe`、`ToolHandler`、`AskUser`、`ProcessRunner`、`SessionHost` 与 `FenceHost` 是**不在某个能力 `ports.rs`** 的端口：它们在 `kernel/ports.rs`（机制型内核，无领域语义，R12 的例外）。
 见 [../kernel/unit-map.md](../kernel/unit-map.md)。
 
 "已验收"指该端口在 `src/tests/`（`detail.rs` 覆盖真实实现）的契约测试里有成功、失败、空/边界与交互记录的断言；

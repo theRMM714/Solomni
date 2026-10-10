@@ -31,33 +31,22 @@
     而代价是三套原生 API、每平台真机验证，且 CI 起不了 hypervisor（只能真机验 + env-skip）。
     项目成熟、需求更清楚时再做。
 
-- id: module.external-harness-fence-reach
+- id: module.acp-adapter
   scope: global
   level: T3
   why: |
-    MODULE_SPEC 允许把外部 harness 当模块的一个工具（`tools.<名>.command` 指向它的命令行）。
-    围栏目前只按运行包放行解释器目录，系统里已安装的 harness 可执行文件是否落在可达范围内
-    **没有验证过**；文档已按"开发方向"标注，不能停在"大概能跑"。
+    「常驻服务」目前只实现了 MCP stdio 适配器（`residents/detail/mcp.rs`）：`module.yaml` 的
+    `services.<名>.adapter` 写 `acp` 会被如实拒收（未知适配器）——ACP（Agent Client Protocol）这类
+    按行 JSON-RPC 的 harness 拉不起来，MCP 之外的常驻服务对模块作者不可用。
   how: |
-    1) 写一个把外部命令行 harness 当工具的测试模块（命令落在模块目录内）；
-    2) 在授权围栏（`--fence-live`）下跑 T3 真实边界用例，记录可执行文件的可达性结论；
-    3) 若不可达，把可执行文件纳入运行包登记或围栏可达范围，再复跑。
-  accept: 授权围栏下该模块的工具跑通一次完整往返；或如实写明"必须把可执行文件放进模块目录"并落到文档与登记处。
-  blocked_by: 缺少观察面
-
-- id: module.standalone-entry
-  scope: global
-  level: T5
-  why: |
-    **模块工具现在可以直接跑**（动作 id = `module.<模块id>.<工具名>`：CLI `module …`、Web `POST /api/actions/…`），
-    但那只是**工具级**入口：只写 `system`、不声明 `tools` 的模块仍没有独立入口，界面也没有"直接用模块"的清单与回执。
-    缺的是**模块级**契约（谁可独立运行、跑什么）与呈现面（列表 + 运行 + 看回执）。
-  how: |
-    1) 定契约：模块怎么声明自己的独立入口（`module.yaml` 加一节：不写 tools 的模块也能被直接跑）；
-    2) CLI 补模块级入口（工具级已有）；
-    3) GUI 加对应入口（列表 + 运行 + 看回执），与 CLI 共用同一份事实（清单是目录扫描的纯函数）；
-    4) T5 走一遍：不开 AI 会话，直接用模块跑一次，产物落在用户指定目录。
-  accept: 声明了独立入口的模块能不经 AI 直接跑通一次；没声明的模块在列表里如实标注"只能经 AI 使用"。
+    1) 定 ACP 的握手 / 方法 / 回执映射：能共用长驻会话端口 `SessionHost` 与按行收发就共用，
+       不另造机制；协议形状只进 `residents/detail/` 的适配器，kernel 与 service 不认识 ACP；
+    2) 组合根注册该适配器（与 `mcp` 并列，`ServiceAdapter::id()` = `acp`）；
+    3) 契约用例（脚本化会话端口）+ 真实服务端到端（自足 fixture，缺依赖时如实 env-skip）；
+    4) 同步 docs/residents/README.md、docs/testing/doubles.md 端口矩阵、MODULE_SPEC。
+  accept: |
+    声明 `adapter: acp` 的模块能拉起、发现操作、调用并看回执；未知适配器仍如实列出可用名；
+    `node run-tests.js` 全绿。
   blocked_by: 缺少实现
 
 - id: work.commit-history-ui

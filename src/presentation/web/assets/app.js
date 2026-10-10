@@ -3033,6 +3033,112 @@ function eventError(err) {
   try { notice('界面处理事件出错', msg, 'err'); } catch { /* 弹窗本身出问题就只剩控制台 */ }
 }
 
+/* ---------- 设置⑥：模块与服务（列表 + 运行 + 看回执） ---------- */
+/* 事实只有两份：模块清单（/api/state）与动作目录（/api/actions）——不在这里另写一份。
+   动作目录对 user 已含 module.<模块>.<工具>、就绪服务的 module.<模块>.<服务>.<操作> 与 control_resident。 */
+async function openModulesPanel() {
+  const ctx = openModal('模块与服务', () => {});
+  ctx.setMsg('加载中…');
+  let mods = [];
+  let actions = [];
+  try {
+    const st = await api('GET', '/api/state');
+    mods = st.modules || [];
+    const ac = await api('GET', '/api/actions');
+    actions = ac.actions || [];
+  } catch (e) {
+    ctx.setMsg('加载失败：' + e.message, true);
+    return;
+  }
+  // 隐秘字段的设置面另有入口：值不在这一块面板里回显。
+  actions = actions.filter((a) => a.id !== 'set_secret' && a.id !== 'clear_secret');
+  ctx.setMsg('');
+  renderModulesPanel(ctx, mods, actions);
+}
+
+/** 纯渲染（数据注入）：按模块分组列出可直跑的入口；没有入口的模块如实标注。 */
+function renderModulesPanel(ctx, mods, actions) {
+  const byModule = new Map(mods.map((m) => [m.id, []]));
+  const orphan = [];
+  for (const a of actions) {
+    let hit = false;
+    for (const m of mods) {
+      if (a.id.indexOf('module.' + m.id + '.') === 0) {
+        byModule.get(m.id).push(a);
+        hit = true;
+        break;
+      }
+    }
+    if (!hit && a.id !== 'control_resident') orphan.push(a);
+  }
+  const lifecycle = actions.find((a) => a.id === 'control_resident');
+  if (lifecycle) {
+    const sec = panelSection('常驻服务生命周期');
+    sec.appendChild(actionRunner(lifecycle));
+    ctx.body.appendChild(sec);
+  }
+  for (const m of mods) {
+    const sec = panelSection(m.id + (m.brief ? ' · ' + m.brief : ''));
+    const acts = byModule.get(m.id) || [];
+    if (!acts.length) {
+      sec.appendChild(emptyHint('（只能经 AI 使用：没有可直跑的 tools / services）'));
+    } else {
+      for (const a of acts) sec.appendChild(actionRunner(a));
+    }
+    ctx.body.appendChild(sec);
+  }
+  for (const a of orphan) ctx.body.appendChild(actionRunner(a));
+}
+
+function panelSection(title) {
+  const sec = document.createElement('div');
+  sec.className = 'svc-sec';
+  const h = document.createElement('div');
+  h.className = 'svc-title';
+  h.textContent = title;
+  sec.appendChild(h);
+  return sec;
+}
+
+/** 一条动作的运行块：参数按声明现渲染，运行走 /api/actions/{id}，回执打在下面。 */
+function actionRunner(action) {
+  const box = document.createElement('div');
+  box.className = 'svc-run';
+  const name = document.createElement('div');
+  name.className = 'svc-name';
+  name.textContent = action.id + (action.desc ? ' — ' + action.desc : '');
+  box.appendChild(name);
+  const inputs = {};
+  for (const p of action.params || []) {
+    const i = textInput(p.name + (p.required ? '（必填）' : ''));
+    inputs[p.name] = { p, i };
+    box.appendChild(field(p.name, i));
+  }
+  const out = document.createElement('pre');
+  out.className = 'svc-out';
+  const run = btn('运行', 'btn');
+  run.onclick = async () => {
+    const args = {};
+    for (const k of Object.keys(inputs)) {
+      const { p, i } = inputs[k];
+      if (i.value === '' && !p.required) continue;
+      if (p.ty === 'integer') args[k] = Number(i.value);
+      else if (p.ty === 'boolean') args[k] = i.value === 'true';
+      else args[k] = i.value;
+    }
+    out.textContent = '运行中…';
+    try {
+      const r = await api('POST', actionUrl(action.id), args);
+      out.textContent = JSON.stringify(r, null, 2);
+    } catch (e) {
+      out.textContent = '失败：' + e.message;
+    }
+  };
+  box.appendChild(run);
+  box.appendChild(out);
+  return box;
+}
+
 /* ---------- 抽屉（移动端） ---------- */
 $('#btn-drawer').onclick = () => { $('#sidebar').classList.add('open'); $('#drawer-mask').classList.add('show'); };
 $('#drawer-mask').onclick = () => { $('#sidebar').classList.remove('open'); $('#drawer-mask').classList.remove('show'); };
@@ -3045,6 +3151,7 @@ $('#btn-models').onclick = openModelsModal;
 $('#btn-core').onclick = openCoreModal;
 $('#btn-settings').onclick = openSettingsModal;
 $('#btn-agents').onclick = openAgentsModal;
+$('#btn-modules').onclick = openModulesPanel;
 $('#btn-upload').onclick = pickUploadFile;
 
 /* ---------- 启动 ---------- */

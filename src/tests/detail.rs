@@ -550,6 +550,42 @@ fn fs_modules_accepts_valid_folders_and_rejects_each_illegal_form_with_a_reason(
     let _ = std::fs::remove_dir_all(&root);
 }
 
+/// `services:` / `secrets:` 的语法校验：合法进清单；缺 adapter / 缺 env 各自拒收并说明。
+#[test]
+fn fs_modules_validates_service_and_secret_declarations() {
+    let root = scratch("fs-modules-services");
+    let dir = root.join("modules");
+    let put = |folder: &str, yaml: &str| {
+        let d = dir.join(folder);
+        std::fs::create_dir_all(&d).expect("建模块目录");
+        std::fs::write(d.join("module.yaml"), yaml).expect("写清单");
+    };
+    put(
+        "ok",
+        "id: ok\nbrief: b\nsystem: s\nservices:\n  fs:\n    adapter: mcp\n    command: npx -y server\nsecrets:\n  token:\n    env: TOKEN\n",
+    );
+    put(
+        "noadapter",
+        "id: noadapter\nbrief: b\nsystem: s\nservices:\n  fs:\n    command: x\n",
+    );
+    put(
+        "noenv",
+        "id: noenv\nbrief: b\nsystem: s\nsecrets:\n  token:\n    desc: 缺 env\n",
+    );
+
+    let roster = FsModules::new(dir, crate::capabilities::tools::api::names()).scan();
+    let ids: Vec<&str> = roster
+        .modules
+        .iter()
+        .map(|m| m.manifest.id.as_str())
+        .collect();
+    assert_eq!(ids, vec!["ok"], "只有合法模块进清单：{:?}", roster.rejected);
+    let all = roster.rejected.join("\n");
+    assert!(all.contains("adapter"), "缺 adapter 要拒收：{}", all);
+    assert!(all.contains("env"), "缺 env 要拒收：{}", all);
+    let _ = std::fs::remove_dir_all(&root);
+}
+
 /// 载入即确保模块有 `userdata/`：没有就建出来，已存在的不动（幂等）；建不了才置 false。
 #[test]
 fn fs_modules_reads_the_userdata_fact() {

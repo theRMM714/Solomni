@@ -33,7 +33,8 @@
 - `src/presentation/web/assets/*.smoke.cjs` 前端冒烟测试；
 - `tests/gaps.yaml`（全局）与 `tests/<平台>/gaps.yaml`（平台）缺口账；
 - **谁做任务谁补测试**：做完就补上这次改动的用例并跑门禁，通过后同步文档（见 [AGENTS.md](AGENTS.md) 九）；
-- `node run-tests.js` 测试汇总入口（`node start.js -test` 是备好环境后的同一入口）；
+- `node run-tests.js` 测试汇总入口（`node start.js -test` 是备好环境后的同一入口）；开发环境先跑 `node setup-dev.js`
+  （条目清单 [dev-tools.js](dev-tools.js)，`--check` 只读校验；运行环境另见 [setup-runtime.js](setup-runtime.js)）；
 - `src/capabilities/llm/detail/fake_chat.rs` 中的 `FakeChat` 与 `DemoGateway`；
 - `src/tests/doubles.rs`（`InMemory*` / `FakeCatalog` / `VecSource` / `ScriptGateway` / `RecordingFence` / `TestPrompts` / `NoopLog`）与 `src/tests/builders.rs`（`RecordingRunner` / `ParallelRunner` / `SilentRunner` / 原生与截断通道替身 / 造会话与造名单的辅助）里的测试装配（替身支持失败注入，供 T2 复用）；
 - `src/tests/` 中的契约测试（T2）：
@@ -44,10 +45,10 @@
  - `routes.rs`（HTTP 路由目录 ↔ 处理器 ↔ 文档 ↔ 前端调用 ↔ 演示脚本机器比对；假能力面逐条验成功 / 错误 / 空 / 边界）；
 - **入站契约也是契约**：呈现层只依赖各能力的能力接口（见 [docs/presentation/contracts.md](docs/presentation/contracts.md)）与事件台（拿不到 `Core`、拿不到任何核心锁），
  所以它能被假实现整体替换——`routes.rs` 的 `FakeOps` 就是这么逐条测路由的。
-- T0 质量门禁已并入同一入口：编译、结构审查、格式、clippy、编译告警、依赖重复、**项目外写（env / 工具链）**零容忍硬失败；
+- T0 质量门禁已并入同一入口：编译、结构审查、格式、clippy、编译告警、**交叉类型检查（已装 target）**、依赖重复、**项目外写（env / 工具链）**零容忍硬失败；
   供应链（`cargo audit` / `cargo deny`）同为硬失败，但工具缺失或取不到 advisory 数据时记 `env-skip`。
   结构审查里还含**门禁解析器自测**与 **`#[ignore]` 禁令**（报告里 `ignored > 0` 也算失败）；
-  项目外写检测在跑完快照 `~/.cargo` / `~/.rustup` 等缓存根，新增即失败，并在启动时清理上次崩溃残留的 `solomni-*` 临时目录（见 [docs/testing/quality-isolation.md](docs/testing/quality-isolation.md)）。
+  项目外写与供应链工具的获取 / 判定见 [docs/testing/quality-isolation.md](docs/testing/quality-isolation.md)。
 - 默认**串行**跑用例（`--parallel` 只在排查并发/隔离问题时用，见 [tests/gaps.yaml](tests/gaps.yaml) 的 `testing.parallel-flake`）；每步都有墙钟上限，超时即硬失败并把证据记进报告
   `timeouts`；每步用时进报告，超预算标 `[slow]`（只报不拦）。
 - `node run-tests.js --coverage` 是**手动覆盖率发现模式**：只用来找盲区，不做通过判据、不设阈值

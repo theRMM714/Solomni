@@ -168,6 +168,21 @@ function resolve(opts) {
 }
 
 /**
+ * 确保**项目内**工具链就绪（**开发环境专用**：开发统一用项目内工具链，产物留项目内）。
+ * 没有就装进项目；有就直接用。返回 resolve 的结果（source = project）。
+ * 与 ensure() 的区别：ensure() 会借用系统工具链（运行环境照旧），这里不借用。
+ */
+async function ensureProject(opts) {
+  const yes = !!(opts && opts.yes);
+  if (!findProjectCargo()) {
+    await installRust({ yes });
+  }
+  const r = resolve({ requireProject: true });
+  if (!r) die("项目内工具链装好了却仍找不到 cargo（platform/<os>/cargo/bin）");
+  return r;
+}
+
+/**
  * 保证环境就绪（缺工具链时征求同意后装进项目内），返回 resolve 的结果。
  * 无交互终端且没给 --yes 时不做任何安装，如实报错并给手动步骤（不挂着等输入）。
  */
@@ -468,7 +483,7 @@ async function main() {
 
 module.exports = {
   ROOT, IS_WIN, OS_KEY, PLATFORM_DIR, P_RUSTUP, P_CARGO, TOOLS, WINLIBS_BIN,
-  resolve, ensure, pinTemp, findProjectCargo, findAmbientCargo, envPath, setEnvPath,
+  resolve, ensure, ensureProject, pinTemp, findProjectCargo, findAmbientCargo, envPath, setEnvPath,
 };
 
 if (require.main === module) main();

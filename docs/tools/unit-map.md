@@ -15,17 +15,7 @@
 | `src/capabilities/tools/domain/schema.rs` |
 | `src/capabilities/tools/domain/module_tools.rs` |
 | `src/capabilities/tools/domain/roles.rs` |
-| `src/capabilities/tools/domain/fence.rs` |
-| `src/capabilities/tools/detail/confine/mod.rs` |
-| `src/capabilities/tools/detail/confine/linux.rs` |
-| `src/capabilities/tools/detail/confine/macos.rs` |
-| `src/capabilities/tools/detail/confine/other.rs` |
-| `src/capabilities/tools/detail/confine/windows/` |
-| `src/capabilities/tools/detail/confine/windows/mod.rs` |
-| `src/capabilities/tools/detail/confine/windows/acl.rs` |
-| `src/capabilities/tools/detail/confine/windows/record.rs` |
-| `src/capabilities/tools/detail/confine/windows/container.rs` |
-| `src/capabilities/tools/detail/confine/windows/tests.rs` |
-| `src/capabilities/tools/detail/proc_tools.rs` |
+| `src/capabilities/tools/domain/fence.rs` | 围栏描述符的派生策略（其余中立类型在 `kernel/domain/fence.rs`） |
+| `src/capabilities/tools/detail/prompt_process_texts.rs` | 提示词册 → kernel `ProcessTexts` 端口的适配器 |
 | `src/capabilities/tools/detail/sys_io.rs` |
 | `src/capabilities/tools/detail/yaml_systools.rs` |

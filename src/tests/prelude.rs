@@ -31,7 +31,7 @@ pub use crate::capabilities::session::domain::tools::ModuleTools;
 pub use crate::capabilities::session::ports::HistoryStore;
 
 pub use crate::capabilities::tools::api::{ToolExec, ToolOutcome};
-pub use crate::capabilities::tools::ports::ToolRunner;
+pub use crate::kernel::ports::ProcessRunner;
 
 pub use crate::capabilities::workspace::api::Module;
 

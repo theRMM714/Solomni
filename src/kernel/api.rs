@@ -3,6 +3,7 @@
 //! 不管：这些事实与机制自身的实现（在 `domain/`）；机制端口的定义（在 `ports`）。
 //! 联动：消费方是核心（`src/capabilities/conductor/api/`）与各能力；端口见 `src/kernel/ports.rs`。
 
+pub use crate::kernel::domain::fence::FenceSpec;
 pub use crate::kernel::domain::jobs::JobRegistry;
 pub use crate::kernel::domain::path::slash;
 pub use crate::kernel::domain::types::{

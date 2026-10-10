@@ -285,6 +285,10 @@ pub struct ConductorHandle {
     texts: Arc<crate::capabilities::prompt::api::ToolTexts>,
     /// 工具执行面："人直接跑一个模块工具"（无会话）也走它，不另起一套执行机制。
     tools: Arc<dyn crate::capabilities::tools::api::ToolExec + Send + Sync>,
+    /// 常驻服务面（与核心共享同一份）：ResidentOps 由它转发。
+    residents: Arc<dyn crate::capabilities::residents::api::ResidentOps + Send + Sync>,
+    /// 隐秘字段面（与核心共享同一份）：SecretOps 由它转发。
+    secrets: Arc<dyn crate::capabilities::secrets::api::SecretOps + Send + Sync>,
 }
 
 /// 一次"要一个成员回合"的请求：泵在工作线程上让出，回头找主线程驱动（它才拿得到各 agent 的会话）。
@@ -323,6 +327,10 @@ pub struct Ops {
     pub actions: Arc<dyn ActionOps + Send + Sync>,
     /// 日志能力：呈现层只经它埋点（**不持有端口对象**）。
     pub log: Arc<dyn LogOps + Send + Sync>,
+    /// 目的：常驻服务的统一管理面（组合根注入的同一份，经核心手柄转发）。
+    pub residents: Arc<dyn crate::capabilities::residents::api::ResidentOps + Send + Sync>,
+    /// 目的：隐秘字段的统一管理面（组合根注入的同一份，经核心手柄转发）。
+    pub secrets: Arc<dyn crate::capabilities::secrets::api::SecretOps + Send + Sync>,
 }
 
 impl Ops {
@@ -337,6 +345,8 @@ impl Ops {
             events: h.events(),
             actions: Arc::new(h.clone()),
             log: Arc::new(h.clone()),
+            residents: Arc::clone(&h.residents),
+            secrets: Arc::clone(&h.secrets),
         }
     }
 }

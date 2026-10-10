@@ -40,6 +40,10 @@ pub fn run(ops: Ops, web_default_port: u16) -> CliExit {
             "core" => core_flow(&ops, &arg),
             // 回档：留档（标记+折叠，可恢复）/ 删除（真的截掉）/ 恢复（删掉该标记及其后）。
             "rewind" => rewind_cmd(&ops, &arg),
+            // 常驻服务：列清单 / 启停开关 / 调用操作（都走统一动作面）。
+            "resident" => resident_cmd(&ops, &arg),
+            // 隐秘字段：列声明（置值随设置面接入）。
+            "secret" => secret_cmd(&ops),
             // 直接用模块工具（不经 AI）：清单与动作 id 都来自核心的动作目录。
             "module" => module_cmd(&ops, &arg),
             "rescan" => print_roster(&ops),
@@ -83,11 +87,41 @@ fn module_cmd(ops: &Ops, arg: &str) {
         .collect();
     let arg = arg.trim();
     if arg.is_empty() || arg == "list" {
-        if modules.is_empty() {
-            println!("（没有声明 tools 的模块；模块可以只写 system，不声明外部工具）");
-        }
-        for a in &modules {
-            println!("  {:<28} {}", a.id, first_line(&a.desc));
+        // 按**模块**分组：声明的 tools / services 就是它的独立入口；只写 system 的模块如实标注。
+        match ops.workspace.roster() {
+            Ok(roster) => {
+                for m in &roster.modules {
+                    let prefix = format!("module.{}.", m.manifest.id);
+                    let acts: Vec<_> = modules
+                        .iter()
+                        .filter(|a| a.id.starts_with(&prefix))
+                        .collect();
+                    let declares = !m.manifest.tools.is_empty() || !m.manifest.services.is_empty();
+                    if !declares {
+                        println!(
+                            "  {:<20} （只能经 AI 使用：没有声明 tools / services）",
+                            m.manifest.id
+                        );
+                        continue;
+                    }
+                    if acts.is_empty() {
+                        println!(
+                            "  {:<20} （声明的服务还没启动：先 resident start）",
+                            m.manifest.id
+                        );
+                        continue;
+                    }
+                    println!("  {}：", m.manifest.id);
+                    for a in acts {
+                        println!(
+                            "      {:<28} {}",
+                            a.id.trim_start_matches(&prefix),
+                            first_line(&a.desc)
+                        );
+                    }
+                }
+            }
+            Err(e) => println!("[错误] {}", e),
         }
         println!(
             "用法：module <模块id>.<工具名> [json 参数]（省略 = {{}}；可选 workspace = 工作目录）"
@@ -129,6 +163,136 @@ fn module_cmd(ops: &Ops, arg: &str) {
 
 /// 命令行回档：给共享区与整棵子树都对齐到同一个点。
 /// 留档 = 标记 + 折叠（可恢复）；删除 = 真的截掉；恢复 = 删掉该标记及其后（不可恢复）。
+/// 目的：列出模块声明的隐秘字段（是否已配置）；置值随设置面接入。
+fn secret_cmd(ops: &Ops) {
+    match ops.secrets.declared() {
+        Ok(list) if list.is_empty() => println!("（没有声明任何隐秘字段）"),
+        Ok(list) => {
+            for s in &list {
+                let mark = if s.configured {
+                    "已配置"
+                } else {
+                    "未配置"
+                };
+                println!(
+                    "  {:<24} {:<16} {:<8} {}",
+                    format!("{}.{}", s.module, s.name),
+                    s.env,
+                    mark,
+                    s.desc
+                );
+            }
+        }
+        Err(e) => println!("[错误] {}", e),
+    }
+}
+
+/// 目的：常驻服务面板——列服务与状态，启停 / 开关，调用已启动服务的操作（都走统一动作面）。
+fn resident_cmd(ops: &Ops, arg: &str) {
+    let parts: Vec<&str> = arg.split_whitespace().collect();
+    match parts.first().map(|s| s.to_ascii_lowercase()).as_deref() {
+        None | Some("list") => resident_list(ops),
+        Some(v @ ("start" | "stop" | "enable" | "disable")) => {
+            let (Some(module), Some(name)) = (parts.get(1), parts.get(2)) else {
+                println!("[用法] resident start|stop|enable|disable <模块id> <服务名> [租约]");
+                return;
+            };
+            let lease = parts.get(3).copied().unwrap_or("");
+            act_and_print(
+                ops,
+                ActionCall {
+                    id: "control_resident".to_string(),
+                    args: serde_json::json!({ "module": module, "name": name, "action": v, "lease": lease }),
+                    caller: Caller::User,
+                    out: Output::Final,
+                },
+            );
+            // 启停之后顺手刷新清单：状态是用户最想看的。
+            resident_list(ops);
+        }
+        Some("call") => {
+            let (Some(module), Some(service), Some(op)) =
+                (parts.get(1), parts.get(2), parts.get(3))
+            else {
+                println!("[用法] resident call <模块id> <服务名> <操作名> [json 参数]");
+                return;
+            };
+            let raw = parts.get(4..).map(|s| s.join(" ")).unwrap_or_default();
+            let args: serde_json::Value = if raw.trim().is_empty() {
+                serde_json::json!({})
+            } else {
+                match serde_json::from_str(&raw) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        println!("[错误] 参数不是合法 JSON：{}", e);
+                        return;
+                    }
+                }
+            };
+            act_and_print(
+                ops,
+                ActionCall {
+                    id: format!("module.{}.{}.{}", module, service, op),
+                    args,
+                    caller: Caller::User,
+                    out: Output::Final,
+                },
+            );
+        }
+        Some(other) => println!(
+            "[提示] 未知子命令 {}（list | start | stop | enable | disable | call）",
+            other
+        ),
+    }
+}
+
+/// 目的：列出常驻服务（模块 / 服务 / 适配器 / 状态；失败态带如实原因）。
+fn resident_list(ops: &Ops) {
+    match ops.residents.services() {
+        Ok(list) if list.is_empty() => println!("（没有声明任何常驻服务）"),
+        Ok(list) => {
+            for s in &list {
+                let note = if s.reason.is_empty() {
+                    String::new()
+                } else {
+                    format!("（{}）", s.reason)
+                };
+                println!(
+                    "  {:<24} {:<12} {}{}",
+                    format!("{}.{}", s.module, s.name),
+                    s.adapter,
+                    s.state.label(),
+                    note
+                );
+            }
+        }
+        Err(e) => println!("[错误] {}", e),
+    }
+}
+
+/// 目的：把一次动作的结果按 CLI 习惯打出来（发现的操作 / 回执 / 完成 / 错误）。
+fn act_and_print(ops: &Ops, call: ActionCall) {
+    match ops.actions.act(call) {
+        Ok(Acted::Done(v)) => {
+            if let Some(list) = v.get("operations").and_then(|o| o.as_array()) {
+                let names: Vec<&str> = list.iter().filter_map(|x| x.as_str()).collect();
+                println!("[完成] 发现操作：{}", names.join("、"));
+                return;
+            }
+            if let Some(out) = v.get("output").and_then(|s| s.as_str()) {
+                println!("{}", out);
+                if !v.get("ok").and_then(|b| b.as_bool()).unwrap_or(true) {
+                    println!("[失败] 服务返回 ok=false（回执见上）");
+                }
+                return;
+            }
+            println!("[完成]");
+        }
+        Ok(_) => println!("[完成]"),
+        Err(e) => println!("[错误] {}", e),
+    }
+}
+
 fn rewind_cmd(ops: &Ops, arg: &str) {
     let parts: Vec<&str> = arg.split_whitespace().collect();
     let usage = "[用法] rewind <会话> archive|delete <行id>  或  rewind <会话> restore <标记id>";
@@ -286,7 +450,7 @@ fn print_menu(ops: &Ops) {
             model_label(a.model.as_deref())
         );
     }
-    println!("命令：single [agent名…] | collab [agent名…|?] | proxy（决定权整块交给核心） | module [模块id.工具名 [json]]（不经 AI 直接用模块工具） | provider list|add|rm|discover | model list|add|rm | core <模型id> | rewind <会话> archive|delete <行id> | rewind <会话> restore <标记id> | rescan | webui | exit");
+    println!("命令：single [agent名…] | collab [agent名…|?] | proxy（决定权整块交给核心） | module [模块id.工具名 [json]]（不经 AI 直接用模块工具） | provider list|add|rm|discover | model list|add|rm | core <模型id> | rewind <会话> archive|delete <行id> | rewind <会话> restore <标记id> | resident list|start|stop|enable|disable|call <模块id> <服务名> [操作名] [json] | secret | rescan | webui | exit");
 }
 
 /// 模型标签（CLI 展示文案；核心默认是登记处的概念，不是提示词）。

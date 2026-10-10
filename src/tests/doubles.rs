@@ -22,11 +22,12 @@ use crate::capabilities::session::api::Live;
 use crate::capabilities::session::api::{HistoryView, SessionMeta};
 use crate::capabilities::session::ports::HistoryStore;
 use crate::capabilities::tools::ports::SystoolsSource;
-use crate::capabilities::tools::ports::{FileRead, SysIo, ToolRunner};
+use crate::capabilities::tools::ports::{FileRead, SysIo};
 use crate::capabilities::workspace::api::{Library, PackageManifest};
 use crate::capabilities::workspace::api::{Module, ModuleManifest};
 use crate::capabilities::workspace::ports::{ModuleSource, PackageSource, WorkStore, Workdirs};
 use crate::kernel::api::Tier;
+use crate::kernel::ports::ProcessRunner;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -676,7 +677,7 @@ pub(crate) fn run_builtin(
     io: &dyn crate::capabilities::tools::ports::SysIo,
     name: &str,
     args_json: &str,
-) -> crate::capabilities::tools::api::ToolOutcome {
+) -> crate::kernel::api::ToolOutcome {
     let mut obs = crate::capabilities::tools::api::Observations::default();
     crate::capabilities::tools::service::systool::execute(
         sb,
@@ -941,8 +942,8 @@ impl ModuleSource for VecSource {
 
 /// 无声围栏端口：测试里不碰任何 ACL（真实实现在 capabilities/tools/detail/confine）。
 pub(crate) struct NoFenceHost;
-impl crate::capabilities::tools::ports::FenceHost for NoFenceHost {
-    fn release(&self, _spec: &crate::capabilities::tools::api::FenceSpec) -> Result<(), String> {
+impl crate::kernel::ports::FenceHost for NoFenceHost {
+    fn release(&self, _spec: &crate::kernel::api::FenceSpec) -> Result<(), String> {
         Ok(())
     }
 }
@@ -965,8 +966,8 @@ impl RecordingFence {
         self
     }
 }
-impl crate::capabilities::tools::ports::FenceHost for RecordingFence {
-    fn release(&self, spec: &crate::capabilities::tools::api::FenceSpec) -> Result<(), String> {
+impl crate::kernel::ports::FenceHost for RecordingFence {
+    fn release(&self, spec: &crate::kernel::api::FenceSpec) -> Result<(), String> {
         if let Some(m) = &self.fail {
             return Err(m.clone());
         }
@@ -1020,6 +1021,8 @@ pub(crate) fn module_of(id: &str) -> Module {
             system: format!("你负责{}", id),
             runtimes: Vec::new(),
             tools: BTreeMap::new(),
+            services: Default::default(),
+            secrets: Default::default(),
         },
         root: abs(&[id]),
         has_userdata: false,
@@ -1222,9 +1225,9 @@ pub(crate) fn test_tools_svc() -> Arc<crate::capabilities::tools::service::Tools
 
 /// 同上，但指定三个端口（断言并发/落盘/撤权的那几条用例用）。
 pub(crate) fn test_tools_svc_with(
-    runner: Arc<dyn crate::capabilities::tools::ports::ToolRunner + Send + Sync>,
+    runner: Arc<dyn crate::kernel::ports::ProcessRunner>,
     io: Arc<InMemorySysIo>,
-    fence: Arc<dyn crate::capabilities::tools::ports::FenceHost + Send + Sync>,
+    fence: Arc<dyn crate::kernel::ports::FenceHost + Send + Sync>,
 ) -> Arc<crate::capabilities::tools::service::ToolsService> {
     let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let source =
@@ -1361,6 +1364,43 @@ pub(crate) fn agent_upsert(
         .agent_upsert(name, &modules, model, note, &roster)
 }
 
+/// 目的：注入指定常驻服务面与隐秘字段面的装配（动作面、会话回收、env 注入的端到端断言用）。
+pub(crate) fn core_with_services(
+    modules: Vec<Module>,
+    gateway: ScriptGateway,
+    runner: Arc<dyn crate::kernel::ports::ProcessRunner>,
+    residents: Arc<dyn crate::capabilities::residents::api::ResidentOps + Send + Sync>,
+    secrets: Arc<dyn crate::capabilities::secrets::api::SecretOps + Send + Sync>,
+) -> Conductor {
+    let gateway: Arc<dyn crate::capabilities::llm::ports::ChatGateway + Send + Sync> =
+        Arc::new(gateway);
+    let llm = test_llm(
+        Arc::clone(&gateway),
+        Arc::new(FakeCatalog::new(vec!["m".to_string()])),
+    );
+    Conductor::new(
+        registry_service(InMemorySettings::new(), Arc::clone(&llm)),
+        test_history(),
+        test_workspace(
+            Arc::new(VecSource(modules)),
+            Arc::new(InMemoryPackages::empty()),
+            Arc::new(InMemoryWorkspace::new()),
+        ),
+        llm,
+        test_tools_svc_with(
+            runner,
+            Arc::new(InMemorySysIo::new()),
+            Arc::new(NoFenceHost),
+        ),
+        test_prompt(),
+        test_tools_svc(),
+        Arc::new(crate::kernel::ports::NoopLog),
+        Arc::new(crate::kernel::detail::HostProbeAdapter),
+        residents,
+        secrets,
+    )
+}
+
 pub(crate) fn core_with(modules: Vec<Module>, gateway: ScriptGateway) -> Conductor {
     core_with_runner(modules, gateway, Arc::new(SilentRunner))
 }
@@ -1395,6 +1435,8 @@ pub(crate) fn core_with_workspace(
         test_tools_svc(),
         Arc::new(crate::kernel::ports::NoopLog),
         Arc::new(crate::kernel::detail::HostProbeAdapter),
+        Arc::new(crate::capabilities::residents::api::NoResidents),
+        Arc::new(crate::capabilities::secrets::api::NoSecrets),
     )
 }
 
@@ -1417,7 +1459,7 @@ pub(crate) fn core_with_io(
 pub(crate) fn core_with_runner(
     modules: Vec<Module>,
     gateway: ScriptGateway,
-    runner: Arc<impl ToolRunner + Send + Sync + 'static>,
+    runner: Arc<impl ProcessRunner + 'static>,
 ) -> Conductor {
     core_with_catalog(
         modules,
@@ -1431,7 +1473,7 @@ pub(crate) fn core_with_runner(
 pub(crate) fn core_with_catalog(
     modules: Vec<Module>,
     gateway: ScriptGateway,
-    runner: Arc<impl ToolRunner + Send + Sync + 'static>,
+    runner: Arc<impl ProcessRunner + 'static>,
     catalog: Arc<FakeCatalog>,
 ) -> Conductor {
     core_with_all(
@@ -1448,7 +1490,7 @@ pub(crate) fn core_with_catalog(
 pub(crate) fn core_with_all(
     modules: Vec<Module>,
     gateway: ScriptGateway,
-    runner: Arc<impl ToolRunner + Send + Sync + 'static>,
+    runner: Arc<impl ProcessRunner + 'static>,
     catalog: Arc<FakeCatalog>,
     history: Arc<InMemoryHistory>,
     io: Arc<InMemorySysIo>,
@@ -1468,7 +1510,7 @@ pub(crate) fn core_with_all(
 pub(crate) fn core_with_pkgs(
     modules: Vec<Module>,
     gateway: ScriptGateway,
-    runner: Arc<impl ToolRunner + Send + Sync + 'static>,
+    runner: Arc<impl ProcessRunner + 'static>,
     catalog: Arc<FakeCatalog>,
     history: Arc<InMemoryHistory>,
     io: Arc<InMemorySysIo>,
@@ -1491,6 +1533,8 @@ pub(crate) fn core_with_pkgs(
         test_tools_svc(),
         Arc::new(crate::kernel::ports::NoopLog),
         Arc::new(crate::kernel::detail::HostProbeAdapter),
+        Arc::new(crate::capabilities::residents::api::NoResidents),
+        Arc::new(crate::capabilities::secrets::api::NoSecrets),
     )
 }
 
@@ -1520,6 +1564,8 @@ pub(crate) fn core_with_settings(store: InMemorySettings) -> Conductor {
         test_tools_svc(),
         Arc::new(crate::kernel::ports::NoopLog),
         Arc::new(crate::kernel::detail::HostProbeAdapter),
+        Arc::new(crate::capabilities::residents::api::NoResidents),
+        Arc::new(crate::capabilities::secrets::api::NoSecrets),
     )
 }
 
@@ -1556,6 +1602,8 @@ pub(crate) fn core_with_io_gateway(
         test_tools_svc(),
         Arc::new(crate::kernel::ports::NoopLog),
         Arc::new(crate::kernel::detail::HostProbeAdapter),
+        Arc::new(crate::capabilities::residents::api::NoResidents),
+        Arc::new(crate::capabilities::secrets::api::NoSecrets),
     )
 }
 
@@ -1588,6 +1636,8 @@ pub(crate) fn core_with_gateway(
         test_tools_svc(),
         Arc::new(crate::kernel::ports::NoopLog),
         Arc::new(crate::kernel::detail::HostProbeAdapter),
+        Arc::new(crate::capabilities::residents::api::NoResidents),
+        Arc::new(crate::capabilities::secrets::api::NoSecrets),
     )
 }
 
@@ -1825,5 +1875,287 @@ impl ProxyHost for FakeProxyHost {
             }
             .to_string(),
         })
+    }
+}
+
+// ---------- 常驻服务（residents）的假适配器 ----------
+/// 目的：常驻服务的假适配器——不拉起任何进程，记录调用并按固定脚本提供操作。
+pub(crate) struct FakeServiceAdapter {
+    pub calls: Arc<Mutex<Vec<String>>>,
+    envs: Mutex<Vec<(String, String)>>,
+}
+
+impl FakeServiceAdapter {
+    pub(crate) fn new() -> FakeServiceAdapter {
+        FakeServiceAdapter {
+            calls: Arc::new(Mutex::new(Vec::new())),
+            envs: Mutex::new(Vec::new()),
+        }
+    }
+    /// 目的：start 时收到的注入项（断言 secrets 注入用）。
+    pub(crate) fn envs(&self) -> Vec<(String, String)> {
+        self.envs.lock().expect("锁").clone()
+    }
+}
+
+struct FakeServiceInstance {
+    calls: Arc<Mutex<Vec<String>>>,
+    env: Vec<(String, String)>,
+}
+
+impl crate::capabilities::residents::ports::ServiceInstance for FakeServiceInstance {
+    fn call(&mut self, op: &str, args: &serde_json::Value) -> Result<String, String> {
+        self.calls.lock().expect("锁").push(format!("call:{}", op));
+        let env: Vec<String> = self
+            .env
+            .iter()
+            .map(|(k, v)| format!("{}={}", k, v))
+            .collect();
+        Ok(format!("{} {} {}", op, args, env.join(",")))
+    }
+    fn stop(&mut self) {
+        self.calls.lock().expect("锁").push("stop".to_string());
+    }
+}
+
+impl crate::capabilities::residents::ports::ServiceAdapter for FakeServiceAdapter {
+    fn id(&self) -> &str {
+        "fake"
+    }
+    fn start(
+        &self,
+        spec: &crate::capabilities::residents::ports::LaunchSpec,
+    ) -> Result<
+        (
+            Box<dyn crate::capabilities::residents::ports::ServiceInstance>,
+            Vec<crate::capabilities::residents::api::Operation>,
+        ),
+        String,
+    > {
+        self.calls
+            .lock()
+            .expect("锁")
+            .push(format!("start:{}", spec.name));
+        self.envs.lock().expect("锁").extend(spec.env.clone());
+        Ok((
+            Box::new(FakeServiceInstance {
+                calls: Arc::clone(&self.calls),
+                env: spec.env.clone(),
+            }),
+            vec![crate::capabilities::residents::api::Operation {
+                name: "echo".to_string(),
+                description: "回显参数".to_string(),
+                params: None,
+            }],
+        ))
+    }
+}
+
+/// 目的：一启动就"死"的假适配器——实例调用恒失败且 is_alive = false（崩溃检测用例用）。
+pub(crate) struct DyingServiceAdapter;
+
+impl crate::capabilities::residents::ports::ServiceAdapter for DyingServiceAdapter {
+    fn id(&self) -> &str {
+        "dying"
+    }
+    fn start(
+        &self,
+        _spec: &crate::capabilities::residents::ports::LaunchSpec,
+    ) -> Result<
+        (
+            Box<dyn crate::capabilities::residents::ports::ServiceInstance>,
+            Vec<crate::capabilities::residents::api::Operation>,
+        ),
+        String,
+    > {
+        Ok((
+            Box::new(DyingServiceInstance),
+            vec![crate::capabilities::residents::api::Operation {
+                name: "boom".to_string(),
+                description: String::new(),
+                params: None,
+            }],
+        ))
+    }
+}
+
+struct DyingServiceInstance;
+
+impl crate::capabilities::residents::ports::ServiceInstance for DyingServiceInstance {
+    fn call(&mut self, _op: &str, _args: &serde_json::Value) -> Result<String, String> {
+        Err("服务进程已结束（EOF）".to_string())
+    }
+    fn stop(&mut self) {}
+    fn is_alive(&self) -> bool {
+        false
+    }
+}
+
+// ---------- 隐秘字段（secrets）的内存存储替身 ----------
+/// 目的：SecretStore 的内存替身——可观察写入次数与内容。
+pub(crate) struct InMemorySecretStore {
+    values: Mutex<BTreeMap<String, String>>,
+    saves: Mutex<usize>,
+}
+
+impl InMemorySecretStore {
+    pub(crate) fn new() -> InMemorySecretStore {
+        InMemorySecretStore {
+            values: Mutex::new(BTreeMap::new()),
+            saves: Mutex::new(0),
+        }
+    }
+    pub(crate) fn with(values: BTreeMap<String, String>) -> InMemorySecretStore {
+        InMemorySecretStore {
+            values: Mutex::new(values),
+            saves: Mutex::new(0),
+        }
+    }
+    pub(crate) fn saves(&self) -> usize {
+        *self.saves.lock().expect("锁")
+    }
+}
+
+impl crate::capabilities::secrets::ports::SecretStore for InMemorySecretStore {
+    fn load(&self) -> Result<BTreeMap<String, String>, String> {
+        Ok(self.values.lock().expect("锁").clone())
+    }
+    fn save(&self, values: &BTreeMap<String, String>) -> Result<(), String> {
+        *self.values.lock().expect("锁") = values.clone();
+        *self.saves.lock().expect("锁") += 1;
+        Ok(())
+    }
+}
+
+/// 目的：已构建的产品可执行文件（守门进程就是它自己）；没有就 None（跳过真实进程用例）。
+pub(crate) fn built_exe() -> Option<std::path::PathBuf> {
+    let me = std::env::current_exe().ok()?;
+    let profile_dir = me.parent()?.parent()?;
+    let name = if cfg!(windows) {
+        "solomni.exe"
+    } else {
+        "solomni"
+    };
+    let p = profile_dir.join(name);
+    p.is_file().then_some(p)
+}
+
+/// 目的：本机可用的 python（没有就 None，如实跳过需要解释器的用例）。
+pub(crate) fn python() -> Option<&'static str> {
+    for name in ["python", "python3"] {
+        if let Ok(o) = std::process::Command::new(name)
+            .arg("-c")
+            .arg("print(1)")
+            .output()
+        {
+            if o.status.success() {
+                return Some(name);
+            }
+        }
+    }
+    None
+}
+
+/// 目的：一个带给定常驻服务操作的最小成员工具环境（模型侧工具面用例用）。
+pub(crate) fn member_with_service_tools(
+    module: &str,
+    residents: Arc<dyn crate::capabilities::residents::api::ResidentOps + Send + Sync>,
+    op: crate::capabilities::session::api::ServiceOp,
+) -> crate::capabilities::session::api::MemberTools {
+    let sb = test_sandbox(module, &[]);
+    let mut modules = BTreeMap::new();
+    modules.insert(
+        module.to_string(),
+        crate::capabilities::session::domain::tools::ModuleTools {
+            root: abs(&["mods", module]),
+            commands: BTreeMap::new(),
+            books: BTreeMap::new(),
+            parallel: std::collections::BTreeSet::new(),
+            services: [(op.tool.clone(), op)].into_iter().collect(),
+        },
+    );
+    crate::capabilities::session::api::MemberTools {
+        mode: crate::capabilities::llm::api::ToolMode::Envelope,
+        modules,
+        observations: Default::default(),
+        llm: test_llm_demo(),
+        log: Arc::new(crate::kernel::ports::NoopLog),
+        tools: test_tools_svc_with(
+            Arc::new(SilentRunner),
+            Arc::new(InMemorySysIo::new()),
+            Arc::new(NoFenceHost),
+        ),
+        sandbox: sb.clone(),
+        builtin_tools: test_systools().tools,
+        unavailable: BTreeMap::new(),
+        fence: crate::kernel::api::FenceSpec::from_sandbox(&sb, false),
+        module_env: Default::default(),
+        reply_seq: 0,
+        line: Default::default(),
+        allowed: crate::capabilities::tools::api::names(),
+        role: "solo".to_string(),
+        with_modules: true,
+        notes: Default::default(),
+        handlers: Vec::new(),
+        residents,
+    }
+}
+
+/// 目的：给进程机制用的测试文案（提示词册适配器）。
+pub(crate) fn test_process_texts() -> Arc<dyn crate::kernel::ports::ProcessTexts> {
+    Arc::new(crate::capabilities::tools::detail::PromptProcessTexts::new(
+        test_prompt().tools(),
+    ))
+}
+
+// ---------- 常驻服务（MCP）的脚本化长驻会话替身 ----------
+/// 目的：脚本化的长驻会话替身——按脚本逐行应答，并记录收到的每一行与关闭调用。
+pub(crate) struct ScriptedHost {
+    pub sent: Arc<Mutex<Vec<String>>>,
+    replies: Mutex<Vec<String>>,
+}
+
+impl ScriptedHost {
+    pub(crate) fn new(replies: Vec<&str>) -> ScriptedHost {
+        ScriptedHost {
+            sent: Arc::new(Mutex::new(Vec::new())),
+            replies: Mutex::new(replies.into_iter().map(str::to_string).collect()),
+        }
+    }
+}
+
+struct ScriptedSession {
+    sent: Arc<Mutex<Vec<String>>>,
+    replies: Mutex<std::collections::VecDeque<String>>,
+}
+
+impl crate::kernel::ports::Session for ScriptedSession {
+    fn send(&mut self, line: &str) -> Result<(), String> {
+        self.sent.lock().expect("锁").push(line.to_string());
+        Ok(())
+    }
+    fn recv(&mut self) -> Result<String, String> {
+        self.replies
+            .lock()
+            .expect("锁")
+            .pop_front()
+            .ok_or_else(|| "脚本没有更多应答".to_string())
+    }
+    fn kill(&mut self) {
+        self.sent.lock().expect("锁").push("<kill>".to_string());
+    }
+}
+
+impl crate::kernel::ports::SessionHost for ScriptedHost {
+    fn open(
+        &self,
+        _spec: &crate::kernel::ports::SessionSpec,
+    ) -> Result<Box<dyn crate::kernel::ports::Session>, String> {
+        let replies: std::collections::VecDeque<String> =
+            self.replies.lock().expect("锁").clone().into();
+        Ok(Box::new(ScriptedSession {
+            sent: Arc::clone(&self.sent),
+            replies: Mutex::new(replies),
+        }))
     }
 }
