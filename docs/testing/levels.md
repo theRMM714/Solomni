@@ -57,8 +57,8 @@ cargo deny check
 - `cargo clippy --all-targets --all-features --keep-going -- -D warnings`；
 - `cargo check` 的 rustc 告警数；
 - `cargo tree --duplicates`；
-- 项目外写（env / 工具链）：借用系统工具链也不许写它的 home；跑完快照 `~/.cargo` / `~/.rustup` 等，新增即失败（零豁免）；
-- 供应链：`cargo audit` + `cargo deny check`（配置在 `deny.toml`）；CI 预编译装，本地不引第三方。
+- 项目外写（env / 工具链）——判据见 [quality-isolation.md](quality-isolation.md) 的「隔离、清理与副作用」；
+- 供应链：`cargo audit` + `cargo deny check`（配置在 `deny.toml`）——工具获取见 [quality-isolation.md](quality-isolation.md)。
 
 任何一项不过即 `quality-fail`。工具缺失（没装 rustfmt / clippy / cargo-audit / cargo-deny）或**取不到 advisory
 数据**记 `env-skip` 并写明怎么装——环境跳过不算通过。设计取舍类 lint 要**带理由窄 allow**，清单见

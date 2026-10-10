@@ -34,16 +34,17 @@
 - 编译：`cargo check --all-targets`；
 - 警告：`cargo clippy --all-targets --all-features -- -D warnings`；
 - 重复依赖：`cargo tree --duplicates`；
-- 供应链：`cargo audit`（已知 CVE）与 `cargo deny check`（许可证 / 禁用 / 来源，配置 `deny.toml`）；CI 用 `taiki-e/install-action` 预编译装，本地开发不引第三方、走 `cargo install` 到项目内；
+- 供应链：`cargo audit`（已知 CVE）与 `cargo deny check`（许可证 / 禁用 / 来源，配置 `deny.toml`）；
 - 测试目标登记、报告结构、缺口账格式；
 - 重复测试、重复 Fixture、重复 Fake 和跨层无理由重复断言；
-- 项目外写（env / 工具链）：借用系统工具链也不许写它的 home，缓存与临时必须留在项目内；
+- 项目外写（env / 工具链）：判据见「一、隔离、清理与副作用」的「项目外写」；
 - 未使用代码、死代码、无效分支和不必要包装层。
 
 ### 2.2 判定规则
 
 - 质量检查失败记录为 `quality-fail`，不能折算成 `pass`；
 - 工具缺失或环境不允许运行记录为 `env-skip`，不能静默跳过；
+- 工具获取：**第三方只进 CI**——CI 用 `taiki-e/install-action` 预编译装（供应链工具、突变测试的 `cargo-mutants` 都这样）；**本地开发不引第三方**，按 `run-tests.js` 的提示 `cargo install` 到项目内；
 - 尚未建立检查记录为 `gap`；
 - 依赖重复不一定是错误，必须有解释或后续治理记录；
 - 重复代码检查不得诱导新增抽象。先判断重复是否属于同一职责，再决定合并、保留或记录原因。
