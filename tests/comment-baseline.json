@@ -559,9 +559,7 @@
   },
   "src/capabilities/workspace/domain/module.rs": {
     "头块：槽外有行或自造槽": 3,
-    "头块：缺文件头": 1,
-    "条目：槽外有行或自造槽": 36,
-    "条目：首行不是目的": 26
+    "头块：缺文件头": 1
   },
   "src/capabilities/workspace/domain/packages.rs": {
     "头块：槽外有行或自造槽": 4,

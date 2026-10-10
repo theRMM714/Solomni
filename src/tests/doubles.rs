@@ -1021,6 +1021,8 @@ pub(crate) fn module_of(id: &str) -> Module {
             system: format!("你负责{}", id),
             runtimes: Vec::new(),
             tools: BTreeMap::new(),
+            services: Default::default(),
+            secrets: Default::default(),
         },
         root: abs(&[id]),
         has_userdata: false,
