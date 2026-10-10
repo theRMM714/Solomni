@@ -345,6 +345,13 @@ select.field-input { cursor: pointer; }
 .reg-empty { font-size: 12px; color: var(--fg-dim); }
 /* 会话级说明（代理身份 / 已停止 / 已关闭）：转录最上方一行，不冒充任何一方的发言。 */
 .agent-note { font-size: 12px; color: var(--fg-dim); border-left: 2px solid var(--accent); padding: 4px 8px; margin: 6px 0; white-space: pre-wrap; }
+.svc-sec { display: flex; flex-direction: column; gap: 8px; }
+.svc-title { font-weight: 600; font-size: 13px; }
+.svc-run { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; }
+.svc-name { font-size: 12px; color: var(--fg-dim); word-break: break-all; }
+.svc-out { margin: 0; font-size: 12px; white-space: pre-wrap; word-break: break-all; color: var(--fg-dim); }
+.svc-out:empty { display: none; }
+
 .reg-core { color: var(--ok); font-size: 11px; border: 1px solid var(--ok); border-radius: 4px; padding: 0 4px; margin-left: 6px; }
 .link-btn { background: none; border: none; color: var(--fg-dim); cursor: pointer; font-size: 12px; padding: 0; }
 .link-btn:hover { color: var(--accent); }
