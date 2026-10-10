@@ -102,6 +102,43 @@ fn residents_unknown_adapter_is_reported_with_available_names() {
     assert!(err.contains("未知适配器"), "{}", err);
 }
 
+/// `control_resident` 动作走统一动作面（参数校验 + 授权 + 分发）：start 返回发现的操作，stop 停实例。
+#[test]
+fn control_resident_action_starts_and_stops() {
+    use crate::capabilities::conductor::api::{ActionCall, Caller, ConductorHandle, Ops, Output};
+
+    let fake = Arc::new(FakeServiceAdapter::new());
+    let modules = vec![module_with_service("m1", "fake", true)];
+    let workspace = test_workspace(
+        Arc::new(VecSource(modules.clone())),
+        Arc::new(InMemoryPackages::empty()),
+        Arc::new(InMemoryWorkspace::new()),
+    );
+    let residents: Arc<dyn ResidentOps + Send + Sync> = Arc::new(ResidentsService::new(
+        vec![Arc::clone(&fake) as Arc<dyn ServiceAdapter + Send + Sync>],
+        workspace,
+    ));
+    let gateway = crate::tests::doubles::gw(BTreeMap::new(), Vec::new());
+    let handle = ConductorHandle::spawn(crate::tests::doubles::core_with_residents(
+        modules, gateway, residents,
+    ))
+    .expect("起核心线程");
+    let ops: Ops = crate::capabilities::conductor::api::Ops::from_handle(&handle);
+    let call = |action: &str| ActionCall {
+        id: "control_resident".to_string(),
+        args: serde_json::json!({ "module": "m1", "name": "svc", "action": action }),
+        caller: Caller::User,
+        out: Output::Final,
+    };
+
+    ops.actions.act(call("start")).expect("start 动作");
+    ops.actions.act(call("stop")).expect("stop 动作");
+    assert!(
+        fake.calls.lock().expect("锁").iter().any(|c| c == "stop"),
+        "动作面 stop 要停实例"
+    );
+}
+
 /// 没启动就调用：如实拒绝（不静默跑一次）。
 #[test]
 fn residents_call_requires_a_running_service() {

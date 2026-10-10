@@ -24,7 +24,7 @@
 
 - 新增/变更适配器端口 → [docs/testing/doubles.md](../testing/doubles.md) 的端口矩阵；真实适配器（MCP/ACP）在 `detail/`，只由组合根构造。
 - 模块的 `services:` 声明契约见 [MODULE_SPEC.md](../../MODULE_SPEC.md)；声明解析在 `workspace`。
-- 生产接线（动作面 / 租约回收 / 真实适配器）尚未接入：本能力的 API 目前只被契约测试驱动，按 `#![allow(dead_code)]` 如实标注。
+- 动作面（`control_resident`）与会话删除时的租约回收**已接入**；`ResidentOps::call`（模块工具面 `module.<id>.<service>.<op>`）与真实协议适配器（MCP / ACP）尚未接入，按 `#![allow(dead_code)]` 如实标注。
 
 ## 本目录
 

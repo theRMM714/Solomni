@@ -94,6 +94,15 @@ impl Conductor {
                 ),
             }
         }
+        // 常驻服务的会话租约随会话消失一起回收（与围栏释放同一时机）。
+        for sid in &subtree {
+            if let Err(e) = self.residents.reap(sid) {
+                self.log.warn(
+                    "conductor::history_delete",
+                    &format!("回收常驻服务租约未完成：{}", e),
+                );
+            }
+        }
         for sid in &subtree {
             self.sessions.remove(sid);
             // 会话没了，它的裁决队随会话一起消失（等待方与转录都不复存在）。

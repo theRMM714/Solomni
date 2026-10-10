@@ -2,7 +2,7 @@
 //! 管：值缓存与落盘、按模块解析注入项、按已知值脱敏；只认 SecretStore 端口与 Workspace 的清单事实。
 //! 不管：实际注入（消费方按 resolve 取）；通道密钥（registry）；字段声明解析（workspace）。
 //! 联动：api 见 `api.rs`，端口见 `ports.rs`；由 `main.rs` 装配。
-#![allow(dead_code)] // 生产消费点（env 注入与回执脱敏）随 Phase 1 剩余项接入；在此之前只被契约测试驱动。
+#![allow(dead_code)] // declared 已由 CLI 消费；set/clear/resolve/redact 随设置面与起进程时的 env 注入接入。
 
 use crate::capabilities::secrets::api::{SecretOps, SecretView};
 use crate::capabilities::secrets::ports::SecretStore;

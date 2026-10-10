@@ -3,7 +3,7 @@
 //! 不管：任何协议（全在适配器）；进程与围栏（在 kernel，随真实适配器接入）；
 //!   开关的落盘（随设置面接入，当前在内存、缺省取声明里的 enabled）。
 //! 联动：api 见 `api.rs`，端口见 `ports.rs`；由 `main.rs` 装配。
-#![allow(dead_code)] // 生产接线（动作面 / 租约回收）随 Phase 1 剩余项接入；在此之前只被契约测试驱动。
+#![allow(dead_code)] // 动作面与会话回收已接入；模块工具面接入前的调用路径只被契约测试驱动。
 
 use crate::capabilities::residents::api::{
     Operation, Receipt, ResidentOps, ServiceState, ServiceView,

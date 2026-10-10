@@ -2,7 +2,7 @@
 //! 管：ResidentOps 与它的 DTO（服务视图、操作、状态、回执）；未注入时的空实现 NoResidents。
 //! 不管：适配器端口（在 `ports.rs`，不进 api）；具体协议；模块声明的解析（在 workspace）。
 //! 联动：实现见 `service.rs`；由 `main.rs` 装配进 `Ops`，呈现层只经 `ResidentOps` 调用。
-#![allow(dead_code)] // 生产接线（动作面 / 租约回收 / 真实适配器）随 Phase 1 剩余项接入；在此之前只被契约测试驱动。
+#![allow(dead_code)] // 动作面与会话回收已接入；ResidentOps::call 随模块工具面接入，其余只被契约测试驱动。
 
 use crate::capabilities::workspace::api::Param;
 use std::collections::BTreeMap;

@@ -23,6 +23,8 @@ impl ConductorHandle {
         let book = core.systools_book();
         let texts = core.prompt_texts();
         let tools = core.tools_handle();
+        let residents = core.residents_handle();
+        let secrets = core.secrets_handle();
         let handle = ConductorHandle {
             tx,
             jobs,
@@ -32,6 +34,8 @@ impl ConductorHandle {
             book,
             texts,
             tools,
+            residents,
+            secrets,
         };
         // 注意：工作线程**绝不能**捕获取手柄（那会持有一个 Sender，通道永不闭合、线程永不退出）。
         std::thread::Builder::new()

@@ -1364,6 +1364,41 @@ pub(crate) fn agent_upsert(
         .agent_upsert(name, &modules, model, note, &roster)
 }
 
+/// 目的：注入指定常驻服务面的装配（control_resident 动作与会话回收的端到端断言用）。
+pub(crate) fn core_with_residents(
+    modules: Vec<Module>,
+    gateway: ScriptGateway,
+    residents: Arc<dyn crate::capabilities::residents::api::ResidentOps + Send + Sync>,
+) -> Conductor {
+    let gateway: Arc<dyn crate::capabilities::llm::ports::ChatGateway + Send + Sync> =
+        Arc::new(gateway);
+    let llm = test_llm(
+        Arc::clone(&gateway),
+        Arc::new(FakeCatalog::new(vec!["m".to_string()])),
+    );
+    Conductor::new(
+        registry_service(InMemorySettings::new(), Arc::clone(&llm)),
+        test_history(),
+        test_workspace(
+            Arc::new(VecSource(modules)),
+            Arc::new(InMemoryPackages::empty()),
+            Arc::new(InMemoryWorkspace::new()),
+        ),
+        llm,
+        test_tools_svc_with(
+            Arc::new(SilentRunner),
+            Arc::new(InMemorySysIo::new()),
+            Arc::new(NoFenceHost),
+        ),
+        test_prompt(),
+        test_tools_svc(),
+        Arc::new(crate::kernel::ports::NoopLog),
+        Arc::new(crate::kernel::detail::HostProbeAdapter),
+        residents,
+        Arc::new(crate::capabilities::secrets::api::NoSecrets),
+    )
+}
+
 pub(crate) fn core_with(modules: Vec<Module>, gateway: ScriptGateway) -> Conductor {
     core_with_runner(modules, gateway, Arc::new(SilentRunner))
 }
@@ -1398,6 +1433,8 @@ pub(crate) fn core_with_workspace(
         test_tools_svc(),
         Arc::new(crate::kernel::ports::NoopLog),
         Arc::new(crate::kernel::detail::HostProbeAdapter),
+        Arc::new(crate::capabilities::residents::api::NoResidents),
+        Arc::new(crate::capabilities::secrets::api::NoSecrets),
     )
 }
 
@@ -1494,6 +1531,8 @@ pub(crate) fn core_with_pkgs(
         test_tools_svc(),
         Arc::new(crate::kernel::ports::NoopLog),
         Arc::new(crate::kernel::detail::HostProbeAdapter),
+        Arc::new(crate::capabilities::residents::api::NoResidents),
+        Arc::new(crate::capabilities::secrets::api::NoSecrets),
     )
 }
 
@@ -1523,6 +1562,8 @@ pub(crate) fn core_with_settings(store: InMemorySettings) -> Conductor {
         test_tools_svc(),
         Arc::new(crate::kernel::ports::NoopLog),
         Arc::new(crate::kernel::detail::HostProbeAdapter),
+        Arc::new(crate::capabilities::residents::api::NoResidents),
+        Arc::new(crate::capabilities::secrets::api::NoSecrets),
     )
 }
 
@@ -1559,6 +1600,8 @@ pub(crate) fn core_with_io_gateway(
         test_tools_svc(),
         Arc::new(crate::kernel::ports::NoopLog),
         Arc::new(crate::kernel::detail::HostProbeAdapter),
+        Arc::new(crate::capabilities::residents::api::NoResidents),
+        Arc::new(crate::capabilities::secrets::api::NoSecrets),
     )
 }
 
@@ -1591,6 +1634,8 @@ pub(crate) fn core_with_gateway(
         test_tools_svc(),
         Arc::new(crate::kernel::ports::NoopLog),
         Arc::new(crate::kernel::detail::HostProbeAdapter),
+        Arc::new(crate::capabilities::residents::api::NoResidents),
+        Arc::new(crate::capabilities::secrets::api::NoSecrets),
     )
 }
 

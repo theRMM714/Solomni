@@ -877,5 +877,7 @@ pub(crate) fn native_core(
         test_tools_svc(),
         Arc::new(crate::kernel::ports::NoopLog),
         Arc::new(crate::kernel::detail::HostProbeAdapter),
+        Arc::new(crate::capabilities::residents::api::NoResidents),
+        Arc::new(crate::capabilities::secrets::api::NoSecrets),
     )
 }

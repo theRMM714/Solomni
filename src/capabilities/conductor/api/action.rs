@@ -368,6 +368,36 @@ impl ConductorHandle {
             "send_message" => {
                 SessionOps::say(self, &s("session_id"), &s("text"), out).map(Acted::Advanced)
             }
+            "control_resident" => {
+                let module = s("module");
+                let name = s("name");
+                let lease = s("lease");
+                match s("action").as_str() {
+                    "start" => {
+                        let list = self.residents.start(&module, &name, &lease)?;
+                        let names: Vec<&str> = list.iter().map(|o| o.name.as_str()).collect();
+                        Ok(Acted::Done(
+                            serde_json::json!({ "ok": true, "operations": names }),
+                        ))
+                    }
+                    "stop" => {
+                        self.residents.stop(&module, &name)?;
+                        Ok(Acted::Done(serde_json::json!({ "ok": true })))
+                    }
+                    "enable" => {
+                        self.residents.set_enabled(&module, &name, true)?;
+                        Ok(Acted::Done(serde_json::json!({ "ok": true })))
+                    }
+                    "disable" => {
+                        self.residents.set_enabled(&module, &name, false)?;
+                        Ok(Acted::Done(serde_json::json!({ "ok": true })))
+                    }
+                    other => Err(format!(
+                        "control_resident 不支持的动作：{}（可用：start / stop / enable / disable）",
+                        other
+                    )),
+                }
+            }
             "control_session" => {
                 let action = d::ControlAction::parse(&s("action"))?;
                 let reason = s("reason");

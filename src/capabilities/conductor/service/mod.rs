@@ -183,6 +183,10 @@ pub struct Conductor {
     log: Arc<dyn crate::kernel::ports::Log + Send + Sync>,
     /// 宿主能力探测（读环境、查路径存在性都在它后面；conductor 因此不碰 std::env 与文件系统）。
     probe: Arc<dyn crate::kernel::ports::HostProbe + Send + Sync>,
+    /// 常驻服务的统一管理面（**不持它的端口**）：动作面与会话回收经它。
+    residents: Arc<dyn crate::capabilities::residents::api::ResidentOps + Send + Sync>,
+    /// 隐秘字段的统一管理面：工具 / 服务起进程时按它解析注入项并脱敏。
+    secrets: Arc<dyn crate::capabilities::secrets::api::SecretOps + Send + Sync>,
     /// 提示词册能力：**册子本体在它里面**（只有一处），conductor 只按名字取段。
     /// 用 `Arc`：协作会话要与核心**共享**这一份（逐处克隆整本册子是白费）。
     prompt: Arc<dyn Prompt>,
@@ -224,6 +228,8 @@ impl Conductor {
         systools: Arc<dyn Tools>,
         log: Arc<dyn crate::kernel::ports::Log + Send + Sync>,
         probe: Arc<dyn crate::kernel::ports::HostProbe + Send + Sync>,
+        residents: Arc<dyn crate::capabilities::residents::api::ResidentOps + Send + Sync>,
+        secrets: Arc<dyn crate::capabilities::secrets::api::SecretOps + Send + Sync>,
     ) -> Conductor {
         Conductor {
             registry,
@@ -233,12 +239,28 @@ impl Conductor {
             tools,
             log,
             probe,
+            residents,
+            secrets,
             prompt,
             systools,
             sessions: HashMap::new(),
             desk: crate::capabilities::session::api::DecisionDesk::new(),
             running: std::collections::BTreeSet::new(),
         }
+    }
+
+    /// 目的：常驻服务面（手柄与核心共享同一份；动作与会话回收经它）。
+    pub(crate) fn residents_handle(
+        &self,
+    ) -> Arc<dyn crate::capabilities::residents::api::ResidentOps + Send + Sync> {
+        Arc::clone(&self.residents)
+    }
+
+    /// 目的：隐秘字段面（手柄与核心共享同一份）。
+    pub(crate) fn secrets_handle(
+        &self,
+    ) -> Arc<dyn crate::capabilities::secrets::api::SecretOps + Send + Sync> {
+        Arc::clone(&self.secrets)
     }
 
     /// 日志端口句柄：入站手柄（conductor::api）与组合根共用同一份事实记录。

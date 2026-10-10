@@ -245,6 +245,8 @@ fn main() {
         systools,
         std::sync::Arc::clone(&log),
         Arc::new(kernel::detail::HostProbeAdapter),
+        residents,
+        secrets,
     );
 
     // 隐藏模式：实测一条通道支不支持原生工具调用，并把确定结论写回 models.yaml（要真实网络）。
@@ -376,9 +378,7 @@ fn main() {
             std::process::exit(1);
         }
     };
-    let ops = capabilities::conductor::api::Ops::from_handle(&handle)
-        .with_residents(residents)
-        .with_secrets(secrets);
+    let ops = capabilities::conductor::api::Ops::from_handle(&handle);
 
     // 工具级确认要有地方被作答：网页有裁决卡，CLI 在生成中就地按选项答——两边都接上了。
     handle.allow_tool_cards();

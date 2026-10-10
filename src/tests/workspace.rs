@@ -579,6 +579,8 @@ pub(crate) fn vm_tier_is_refused_when_the_machine_cannot_carry_it() {
         test_tools_svc(),
         Arc::new(crate::kernel::ports::NoopLog),
         Arc::new(crate::kernel::detail::HostProbeAdapter),
+        Arc::new(crate::capabilities::residents::api::NoResidents),
+        Arc::new(crate::capabilities::secrets::api::NoSecrets),
     );
     // 创建路径的档位来自**用户的选择**（WorkSpec.tier；基础根留空）：成立与否随本机而定，
     // 这里钉的是**接线**——机器承载不了就必须拒绝，且什么都不留下。
@@ -621,6 +623,8 @@ pub(crate) fn vm_tier_is_refused_when_the_machine_cannot_carry_it() {
         test_tools_svc(),
         Arc::new(crate::kernel::ports::NoopLog),
         Arc::new(crate::kernel::detail::HostProbeAdapter),
+        Arc::new(crate::capabilities::residents::api::NoResidents),
+        Arc::new(crate::capabilities::secrets::api::NoSecrets),
     );
     let sid = core2
         .create_work(work("w", WorkMode::Single, &["a"]))
@@ -747,6 +751,8 @@ pub(crate) fn module_without_runtime_is_denied_with_reason() {
         test_tools_svc(),
         Arc::new(crate::kernel::ports::NoopLog),
         Arc::new(crate::kernel::detail::HostProbeAdapter),
+        Arc::new(crate::capabilities::residents::api::NoResidents),
+        Arc::new(crate::capabilities::secrets::api::NoSecrets),
     );
     // 虚拟机档现在一律不可选（guest 本体尚未接入），所以**创建**走本机档；
     // 建好之后把落盘档位改成 vm——这正是"档位承载检查"与"缺包不拦会话"两件事的交界：
