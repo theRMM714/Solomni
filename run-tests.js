@@ -18,11 +18,10 @@ const EXE = IS_WIN ? "solomni.exe" : "solomni";
 const PROFILE = process.argv.includes("--release") ? "release" : "debug";
 const BIN = path.join(ROOT, "target", PROFILE, EXE);
 const PLATFORM_TARGETS = ["cross-platform", "windows", "linux", "macos"];
-// 交叉类型检查：本机不编译的平台专属代码（#[cfg(windows)] / #[cfg(target_os = "macos")]）靠这些 target
-// 兜住类型错误——真实运行仍由对应平台的真机 CI 负责。**只查不装**：装 target 属环境准备（env.js / 手动），
-// 门禁不写系统工具链。macOS 的 C 依赖（ring）在 Linux 上没有 Apple SDK / 交叉 C 工具链，那类失败按 env-skip 如实标注；
-// 有 osxcross 一类工具链的环境会真的检查。
-const CROSS_TARGETS = ["x86_64-pc-windows-msvc", "aarch64-apple-darwin", "x86_64-apple-darwin"];
+// 交叉类型检查的 target 与开发环境清单**同源**（dev-tools.js，唯一真相）：setup-dev.js 按它装，这里按它查。
+// **只查不装**：装 target 是开发环境准备（node setup-dev.js），门禁不写系统工具链。
+// macOS 的 C 依赖（ring）在 Linux 上没有 Apple SDK / 交叉 C 工具链，那类失败按 env-skip 如实标注。
+const CROSS_TARGETS = require("./dev-tools.js").targets.map((t) => t.triple);
 // 默认串行（--test-threads=1）：套件里有依赖真实线程时序的用例，并行下仍会偶发
 // （见 tests/gaps.yaml 的 testing.parallel-flake）。--parallel 只在排查并发/隔离问题时用，不作门禁默认。
 const PARALLEL = process.argv.includes("--parallel");
@@ -918,7 +917,7 @@ function supplyChainCheck() {
   if (!has.length) {
     return {
       status: "env-skip",
-      detail: "cargo-audit / cargo-deny 未安装（装：cargo install --locked cargo-audit cargo-deny，落在项目内 .tools/ 或 platform/<os>/）",
+      detail: "cargo-audit / cargo-deny 未安装（装：node setup-dev.js，落在项目内 .tools/）",
       raw: null,
     };
   }
@@ -955,14 +954,14 @@ function supplyChainCheck() {
 function runCoverage() {
   if (!toolAvailable("llvm-cov")) {
     console.log("[覆盖率] env-skip：未安装 cargo-llvm-cov。");
-    console.log("  装：cargo install --locked cargo-llvm-cov；另需 rustup component add llvm-tools-preview");
+    console.log("  装：node setup-dev.js（cargo-llvm-cov + llvm-tools-preview 都落项目内）");
     process.exit(0);
   }
   // 缺 llvm-tools-preview 时 cargo-llvm-cov 会就地提示安装（非交互环境下自行往下走然后失败）：
   // 先问一句，缺就如实 env-skip，不把"没装组件"报成覆盖率失败。
   const comp = sh("rustup", ["component", "list", "--installed"]);
   if (comp.code === 0 && !/llvm-tools-preview/.test(comp.out)) {
-    console.log("[覆盖率] env-skip：缺 llvm-tools-preview 组件（装：rustup component add llvm-tools-preview）。");
+    console.log("[覆盖率] env-skip：缺 llvm-tools-preview 组件（装：node setup-dev.js）。");
     process.exit(0);
   }
   const outDir = path.join(ROOT, "target", "coverage");
@@ -971,7 +970,7 @@ function runCoverage() {
   const r = sh("cargo", args.concat(PARALLEL ? [] : ["--", "--test-threads=1"]));
   console.log(r.out.trim().split(/\r?\n/).slice(-40).join("\n"));
   if (r.code !== 0 && /llvm-tools|component download failed|Proceed\?/i.test(r.out)) {
-    console.log("[覆盖率] env-skip：缺 llvm-tools-preview 组件（装：rustup component add llvm-tools-preview）。");
+    console.log("[覆盖率] env-skip：缺 llvm-tools-preview 组件（装：node setup-dev.js）。");
     process.exit(0);
   }
   console.log("[覆盖率] 报告目录：" + path.relative(ROOT, outDir) + "（未覆盖不等于缺口，看过后决定补测或记 tests/gaps.yaml）");
@@ -1043,7 +1042,7 @@ function pushStep(obj) {
   announce("T0 格式（fmt --check）");
   if (!toolAvailable("fmt")) {
     announceDone("env-skip", "cargo-fmt 未安装");
-    pushStep({ step: "T0 格式（fmt --check）", status: "env-skip", detail: "cargo-fmt 未安装：rustup component add rustfmt" });
+    pushStep({ step: "T0 格式（fmt --check）", status: "env-skip", detail: "cargo-fmt 未安装：node setup-dev.js" });
   } else {
     const r = sh("cargo", ["fmt", "--all", "--", "--check", "--color", "never"]);
     const files = [...fmtDeviations(r.out)];
@@ -1060,7 +1059,7 @@ function pushStep(obj) {
   announce("T0 静态检查（clippy）");
   if (!toolAvailable("clippy")) {
     announceDone("env-skip", "cargo-clippy 未安装");
-    pushStep({ step: "T0 静态检查（clippy）", status: "env-skip", detail: "cargo-clippy 未安装：rustup component add clippy" });
+    pushStep({ step: "T0 静态检查（clippy）", status: "env-skip", detail: "cargo-clippy 未安装：node setup-dev.js" });
   } else {
     // --keep-going：-D warnings 会让首个失败的单元中断调度；加上它所有目标单元都编译完，计数才可复现。
     const r = sh("cargo", ["clippy", "--all-targets", "--all-features", "--keep-going", "--color", "never", "--", "-D", "warnings"]);

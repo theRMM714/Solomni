@@ -33,7 +33,8 @@
 - `src/presentation/web/assets/*.smoke.cjs` 前端冒烟测试；
 - `tests/gaps.yaml`（全局）与 `tests/<平台>/gaps.yaml`（平台）缺口账；
 - **谁做任务谁补测试**：做完就补上这次改动的用例并跑门禁，通过后同步文档（见 [AGENTS.md](AGENTS.md) 九）；
-- `node run-tests.js` 测试汇总入口（`node start.js -test` 是备好环境后的同一入口）；
+- `node run-tests.js` 测试汇总入口（`node start.js -test` 是备好环境后的同一入口）；开发环境先跑 `node setup-dev.js`
+  （条目清单 [dev-tools.js](dev-tools.js)，`--check` 只读校验；运行环境另见 [setup-runtime.js](setup-runtime.js)）；
 - `src/capabilities/llm/detail/fake_chat.rs` 中的 `FakeChat` 与 `DemoGateway`；
 - `src/tests/doubles.rs`（`InMemory*` / `FakeCatalog` / `VecSource` / `ScriptGateway` / `RecordingFence` / `TestPrompts` / `NoopLog`）与 `src/tests/builders.rs`（`RecordingRunner` / `ParallelRunner` / `SilentRunner` / 原生与截断通道替身 / 造会话与造名单的辅助）里的测试装配（替身支持失败注入，供 T2 复用）；
 - `src/tests/` 中的契约测试（T2）：

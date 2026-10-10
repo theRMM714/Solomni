@@ -136,6 +136,9 @@ MUTATION_SCOPE=capability MUTATION_CAPABILITY=repair node tests/ci-mutation.mjs
 
 入口与门禁共用同一份环境解析（[env.js](../../env.js)）：借用系统 `cargo` 可以，但 `CARGO_HOME` 与临时目录仍钉在项目内。
 
+**开发环境同步**：换机器 / 换人开发时跑 `node setup-dev.js`（`--check` 只读校验）。它统一用**项目内**工具链
+（`platform/<os>/rustup`、`platform/<os>/cargo`），组件、交叉 target 与项目内工具都装那里——**不写系统 `~/.rustup`、`~/.cargo`**；条目清单见 [dev-tools.js](../../dev-tools.js)。
+
 测试命令固定「只跑 `--bin solomni` + `--test-threads=1`」：**串行是刻意的**，并行会偶发
 （见 [tests/gaps.yaml](../../tests/gaps.yaml) 的 `testing.parallel-flake`）。`cargo-mutants` 按
 「工具获取」策略在 CI 预编译装（见 [quality-isolation.md](quality-isolation.md)；一次性临时环境，不改本机）。已知**等价变异体**在仓库根的 `.cargo/mutants.toml`

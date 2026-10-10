@@ -44,7 +44,7 @@
 
 - 质量检查失败记录为 `quality-fail`，不能折算成 `pass`；
 - 工具缺失或环境不允许运行记录为 `env-skip`，不能静默跳过；
-- 工具获取：**第三方只进 CI**——CI 用 `taiki-e/install-action` 预编译装（供应链工具、突变测试的 `cargo-mutants` 都这样）；**本地开发不引第三方**，按 `run-tests.js` 的提示 `cargo install` 到项目内；
+- 工具获取：**第三方只进 CI**——CI 用 `taiki-e/install-action` 预编译装（供应链工具、突变测试的 `cargo-mutants` 都这样）；**本地开发不引第三方**，用 `node setup-dev.js` 把清单（[dev-tools.js](../../dev-tools.js)）里的东西装进**项目内**（`cargo install --locked --root .tools`）；
 - 尚未建立检查记录为 `gap`；
 - 依赖重复不一定是错误，必须有解释或后续治理记录；
 - 重复代码检查不得诱导新增抽象。先判断重复是否属于同一职责，再决定合并、保留或记录原因。
