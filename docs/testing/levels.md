@@ -56,9 +56,9 @@ cargo deny check
 - `cargo fmt --all -- --check`；
 - `cargo clippy --all-targets --all-features --keep-going -- -D warnings`；
 - `cargo check` 的 rustc 告警数；
-- 交叉类型检查：对已装 target 跑 `cargo check --target <三元组>`——平台专属 `#[cfg]` 代码本机不编译，靠它兜住类型错误；
+- 交叉类型检查（**开发机专属**）：对已装 target 跑 `cargo check --target <三元组> --all-targets`——平台专属 `#[cfg]`（含测试代码）本机不编译，靠它兜住类型错误；
   target 清单与开发环境同源（`node setup-dev.js` 按 [dev-tools.js](../../dev-tools.js) 装）；
-  target 未装或本机缺该平台交叉 C 工具链 / SDK = `env-skip`，真实运行归该平台真机 CI；
+  target 未装或本机缺该平台交叉 C 工具链 / SDK = `env-skip`；**CI 上直接跳过这一步**（三平台矩阵各自原生 `--all-targets` 已覆盖本平台，记 `skip-platform`）；
 - `cargo tree --duplicates`；
 - 项目外写（env / 工具链）——判据见 [quality-isolation.md](quality-isolation.md) 的「隔离、清理与副作用」；
 - 供应链：`cargo audit` + `cargo deny check`（配置在 `deny.toml`）——工具获取见 [quality-isolation.md](quality-isolation.md)。

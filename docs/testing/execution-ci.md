@@ -34,7 +34,7 @@ node run-tests.js
 5. `T0 格式（fmt --check）`（硬失败）；
 6. `T0 静态检查（clippy）`（硬失败）；
 7. `T0 编译告警`（硬失败）；
-8. `T0 交叉类型检查（各已装 target）`（硬失败：平台专属 `#[cfg]` 代码本机不编译，用 `cargo check --target` 兜类型错误；target 未装或本机缺该平台交叉 C 工具链 / SDK = `env-skip`）；
+8. `T0 交叉类型检查（各已装 target）`（**开发机专属**：`cargo check --target … --all-targets` 兜平台专属 `#[cfg]`（含测试）的类型错误；target 未装或本机缺交叉 C 工具链 = `env-skip`；**CI 上记 `skip-platform` 直接跳过**，因为三平台矩阵各自原生 `--all-targets` 已覆盖）；
 9. `T0 依赖重复（cargo tree）`（硬失败）；
 10. `T0 供应链（audit/deny）`（工具缺失或取不到 advisory 数据 = env-skip）；
 11. `L1 单元（--bin solomni）`（默认串行；`--parallel` 改为并发，仅诊断用）；

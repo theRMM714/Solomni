@@ -1088,8 +1088,16 @@ function pushStep(obj) {
     });
   }
 
-  // ---- T0：交叉类型检查（平台专属代码本机不编译，用装好的 target 兜住类型错误） ----
-  {
+  // ---- T0：交叉类型检查（**开发机专属**：CI 由三平台矩阵各自原生编译 --all-targets 覆盖，这里不跑） ----
+  if (process.env.CI) {
+    announce("T0 交叉类型检查");
+    announceDone("skip-platform", "CI 各平台原生编译已覆盖");
+    pushStep({
+      step: "T0 交叉类型检查",
+      status: "skip-platform",
+      detail: "CI：三平台矩阵各自原生 cargo check --all-targets 已覆盖本平台；交叉检查是开发机补齐它平台的手段，这里不跑",
+    });
+  } else {
     const installed = installedTargets();
     for (const target of CROSS_TARGETS) {
       const label = "T0 交叉类型检查（" + target + "）";
