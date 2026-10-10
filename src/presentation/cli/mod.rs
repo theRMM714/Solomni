@@ -87,11 +87,41 @@ fn module_cmd(ops: &Ops, arg: &str) {
         .collect();
     let arg = arg.trim();
     if arg.is_empty() || arg == "list" {
-        if modules.is_empty() {
-            println!("（没有声明 tools 的模块；模块可以只写 system，不声明外部工具）");
-        }
-        for a in &modules {
-            println!("  {:<28} {}", a.id, first_line(&a.desc));
+        // 按**模块**分组：声明的 tools / services 就是它的独立入口；只写 system 的模块如实标注。
+        match ops.workspace.roster() {
+            Ok(roster) => {
+                for m in &roster.modules {
+                    let prefix = format!("module.{}.", m.manifest.id);
+                    let acts: Vec<_> = modules
+                        .iter()
+                        .filter(|a| a.id.starts_with(&prefix))
+                        .collect();
+                    let declares = !m.manifest.tools.is_empty() || !m.manifest.services.is_empty();
+                    if !declares {
+                        println!(
+                            "  {:<20} （只能经 AI 使用：没有声明 tools / services）",
+                            m.manifest.id
+                        );
+                        continue;
+                    }
+                    if acts.is_empty() {
+                        println!(
+                            "  {:<20} （声明的服务还没启动：先 resident start）",
+                            m.manifest.id
+                        );
+                        continue;
+                    }
+                    println!("  {}：", m.manifest.id);
+                    for a in acts {
+                        println!(
+                            "      {:<28} {}",
+                            a.id.trim_start_matches(&prefix),
+                            first_line(&a.desc)
+                        );
+                    }
+                }
+            }
+            Err(e) => println!("[错误] {}", e),
         }
         println!(
             "用法：module <模块id>.<工具名> [json 参数]（省略 = {{}}；可选 workspace = 工作目录）"
