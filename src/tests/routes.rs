@@ -63,6 +63,7 @@ fn fake_ops(fail: Option<&str>) -> Ops {
         events: EventBus::new(),
         log: Arc::new(super::doubles::NoopLogOps),
         residents: Arc::new(crate::capabilities::residents::api::NoResidents),
+        secrets: Arc::new(crate::capabilities::secrets::api::NoSecrets),
     }
 }
 

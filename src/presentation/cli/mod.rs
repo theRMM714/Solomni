@@ -42,6 +42,8 @@ pub fn run(ops: Ops, web_default_port: u16) -> CliExit {
             "rewind" => rewind_cmd(&ops, &arg),
             // 常驻服务：列清单（启停随动作面接入）。
             "resident" => resident_cmd(&ops),
+            // 隐秘字段：列声明（置值随设置面接入）。
+            "secret" => secret_cmd(&ops),
             // 直接用模块工具（不经 AI）：清单与动作 id 都来自核心的动作目录。
             "module" => module_cmd(&ops, &arg),
             "rescan" => print_roster(&ops),
@@ -131,6 +133,30 @@ fn module_cmd(ops: &Ops, arg: &str) {
 
 /// 命令行回档：给共享区与整棵子树都对齐到同一个点。
 /// 留档 = 标记 + 折叠（可恢复）；删除 = 真的截掉；恢复 = 删掉该标记及其后（不可恢复）。
+/// 目的：列出模块声明的隐秘字段（是否已配置）；置值随设置面接入。
+fn secret_cmd(ops: &Ops) {
+    match ops.secrets.declared() {
+        Ok(list) if list.is_empty() => println!("（没有声明任何隐秘字段）"),
+        Ok(list) => {
+            for s in &list {
+                let mark = if s.configured {
+                    "已配置"
+                } else {
+                    "未配置"
+                };
+                println!(
+                    "  {:<24} {:<16} {:<8} {}",
+                    format!("{}.{}", s.module, s.name),
+                    s.env,
+                    mark,
+                    s.desc
+                );
+            }
+        }
+        Err(e) => println!("[错误] {}", e),
+    }
+}
+
 /// 目的：列出常驻服务（模块 / 服务 / 适配器 / 状态）；启停随动作面接入。
 fn resident_cmd(ops: &Ops) {
     match ops.residents.services() {

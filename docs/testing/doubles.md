@@ -132,6 +132,7 @@ Fixture 必须：
 | `EnvelopeRepair` | `NoRepair` | 不适用 | 不适用（修复器遇不确定一律不修） | 不适用 | `UnambiguousRepair`（转义裸控制字符 + 补上缺的收尾括号；断在字符串中间、起了两段信封一律不修） | 已验收 |
 | `FenceHost`（kernel 共享） | `RecordingFence`、`NoFenceHost` | `released` | `fail_with` | 不适用 | `confine::FenceHostAdapter`（真机撤权在 `tests/windows/`） | 已验收 |
 | `ServiceAdapter`（residents） | `FakeServiceAdapter` | `calls`（start / call / stop） | 由替身注入启动失败 | 不适用 | 真实适配器（MCP / ACP）随 Phase 2 接入 | 契约测试已验收（`src/tests/residents.rs`）；生产接线未接入（`#![allow(dead_code)]` 如实标注） |
+| `SecretStore`（secrets） | `InMemorySecretStore` | `values`、写入次数 | 由替身注入失败 | 不适用 | `detail::YamlSecrets`（`.home/secrets.yaml`，unix 0600） | 契约测试已验收（`src/tests/secrets.rs`）；生产消费点未接入（`#![allow(dead_code)]` 如实标注） |
 | `Log` | `NoopLog` | 不记录（Stub） | 不适用 | 不适用 | `FileLog`（三个级别都落盘） | 已验收 |
 | `HostProbe` | `FixedProbe`（只按声明回答） | 不适用 | 不适用 | 不适用 | `HostProbeAdapter`（真实路径事实；PATH 上不存在的名字如实说没有） | 已验收 |
 

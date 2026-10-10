@@ -325,6 +325,8 @@ pub struct Ops {
     pub log: Arc<dyn LogOps + Send + Sync>,
     /// 目的：常驻服务的统一管理面——Phase 1 由组合根注入；from_handle 给的是空的 NoResidents。
     pub residents: Arc<dyn crate::capabilities::residents::api::ResidentOps + Send + Sync>,
+    /// 目的：隐秘字段的统一管理面——Phase 1 由组合根注入；from_handle 给的是空的 NoSecrets。
+    pub secrets: Arc<dyn crate::capabilities::secrets::api::SecretOps + Send + Sync>,
 }
 
 impl Ops {
@@ -340,6 +342,7 @@ impl Ops {
             actions: Arc::new(h.clone()),
             log: Arc::new(h.clone()),
             residents: Arc::new(crate::capabilities::residents::api::NoResidents),
+            secrets: Arc::new(crate::capabilities::secrets::api::NoSecrets),
         }
     }
 
@@ -349,6 +352,15 @@ impl Ops {
         residents: Arc<dyn crate::capabilities::residents::api::ResidentOps + Send + Sync>,
     ) -> Ops {
         self.residents = residents;
+        self
+    }
+
+    /// 目的：把组合根装配好的隐秘字段面换进来（from_handle 给的是空的 NoSecrets）。
+    pub fn with_secrets(
+        mut self,
+        secrets: Arc<dyn crate::capabilities::secrets::api::SecretOps + Send + Sync>,
+    ) -> Ops {
+        self.secrets = secrets;
         self
     }
 }

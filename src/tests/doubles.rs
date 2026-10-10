@@ -1889,3 +1889,39 @@ impl crate::capabilities::residents::ports::ServiceAdapter for FakeServiceAdapte
         ))
     }
 }
+
+// ---------- 隐秘字段（secrets）的内存存储替身 ----------
+/// 目的：SecretStore 的内存替身——可观察写入次数与内容。
+pub(crate) struct InMemorySecretStore {
+    values: Mutex<BTreeMap<String, String>>,
+    saves: Mutex<usize>,
+}
+
+impl InMemorySecretStore {
+    pub(crate) fn new() -> InMemorySecretStore {
+        InMemorySecretStore {
+            values: Mutex::new(BTreeMap::new()),
+            saves: Mutex::new(0),
+        }
+    }
+    pub(crate) fn with(values: BTreeMap<String, String>) -> InMemorySecretStore {
+        InMemorySecretStore {
+            values: Mutex::new(values),
+            saves: Mutex::new(0),
+        }
+    }
+    pub(crate) fn saves(&self) -> usize {
+        *self.saves.lock().expect("锁")
+    }
+}
+
+impl crate::capabilities::secrets::ports::SecretStore for InMemorySecretStore {
+    fn load(&self) -> Result<BTreeMap<String, String>, String> {
+        Ok(self.values.lock().expect("锁").clone())
+    }
+    fn save(&self, values: &BTreeMap<String, String>) -> Result<(), String> {
+        *self.values.lock().expect("锁") = values.clone();
+        *self.saves.lock().expect("锁") += 1;
+        Ok(())
+    }
+}

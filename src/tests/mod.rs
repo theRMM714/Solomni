@@ -19,6 +19,7 @@ mod prompt;
 mod registry;
 mod residents;
 mod routes;
+mod secrets;
 mod session;
 mod slate;
 mod taskchain;

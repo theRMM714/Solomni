@@ -186,7 +186,7 @@ fn main() {
         &systools_source,
         Arc::new(tools),
         Arc::new(io),
-        Arc::new(kernel::detail::confine::FenceHostAdapter::new(home)),
+        Arc::new(kernel::detail::confine::FenceHostAdapter::new(home.clone())),
     ) {
         Ok(svc) if capabilities::tools::api::Tools::problems(&svc).is_empty() => Arc::new(svc),
         Ok(svc) => {
@@ -217,6 +217,21 @@ fn main() {
     let residents: Arc<dyn capabilities::residents::api::ResidentOps + Send + Sync> = Arc::new(
         capabilities::residents::service::ResidentsService::new(Vec::new(), Arc::clone(&workspace)),
     );
+
+    // **隐秘字段能力**：值只落 .home/secrets.yaml；加载失败 = 装配失败（不静默空表）。
+    let secrets: Arc<dyn capabilities::secrets::api::SecretOps + Send + Sync> =
+        match capabilities::secrets::service::SecretsService::new(
+            Arc::clone(&workspace),
+            Arc::new(capabilities::secrets::detail::YamlSecrets::new(
+                home.join("secrets.yaml"),
+            )),
+        ) {
+            Ok(s) => Arc::new(s),
+            Err(e) => {
+                eprintln!("[装配失败] {}", e);
+                std::process::exit(1);
+            }
+        };
 
     let mut conductor = capabilities::conductor::service::Conductor::new(
         Box::new(registry),
@@ -361,7 +376,9 @@ fn main() {
             std::process::exit(1);
         }
     };
-    let ops = capabilities::conductor::api::Ops::from_handle(&handle).with_residents(residents);
+    let ops = capabilities::conductor::api::Ops::from_handle(&handle)
+        .with_residents(residents)
+        .with_secrets(secrets);
 
     // 工具级确认要有地方被作答：网页有裁决卡，CLI 在生成中就地按选项答——两边都接上了。
     handle.allow_tool_cards();
