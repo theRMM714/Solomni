@@ -7,14 +7,14 @@ on:
   workflow_dispatch:
     inputs:
       scope:
-        description: "范围：core（小而精，先跑这个）或 module（单模块抽查）"
+        description: "范围：core（小而精，先跑这个）或 capability（单能力抽查）"
         type: choice
         options:
           - core
-          - module
+          - capability
         default: core
-      module:
-        description: "scope=module 时测哪个模块（可选值见 tests/mutation-scope.json 的 modules；scope=core 时忽略）"
+      capability:
+        description: "scope=capability 时测哪个能力（可选值见 tests/mutation-scope.json 的 capabilities；scope=core 时忽略）"
         type: string
         default: repair
 
@@ -26,6 +26,10 @@ jobs:
     name: 突变测试
     runs-on: ubuntu-latest
     timeout-minutes: 150
+    # 借用 runner 自带 Rust，但缓存/安装落项目内（见 docs/testing/execution-ci.md）。
+    env:
+      CARGO_HOME: ${{ github.workspace }}/platform/ci/cargo
+      SOLOMNI_CARGO_HOME: ${{ github.workspace }}/platform/ci/cargo
     steps:
       - uses: actions/checkout@v7
 
@@ -33,12 +37,15 @@ jobs:
         with:
           node-version: "lts/*"
 
-      - name: 准备 Rust
+      - name: 准备 Rust（借用 runner 自带工具链，不写它的 home）
         run: |
-          rustup toolchain install stable --profile minimal
-          rustup default stable
           rustc --version
+          cargo --version
 
+      - name: 建项目内 CARGO_HOME（装工具与缓存都落这里）
+        run: mkdir -p platform/ci/cargo
+
+      # 装到项目内 CARGO_HOME/bin（job env 已把 CARGO_HOME 指过去），不写 runner 的 home。
       - name: 装 cargo-mutants（预编译，一次性环境）
         uses: taiki-e/install-action@v2
         with:
@@ -48,8 +55,7 @@ jobs:
         uses: actions/cache@v6
         with:
           path: |
-            ~/.cargo/registry
-            ~/.cargo/git
+            platform/ci/cargo
             target/debug
           key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
@@ -58,7 +64,7 @@ jobs:
       - name: 跑突变测试
         env:
           MUTATION_SCOPE: ${{ inputs.scope }}
-          MUTATION_MODULE: ${{ inputs.module }}
+          MUTATION_CAPABILITY: ${{ inputs.capability }}
         run: node tests/ci-mutation.mjs
 
       - name: 留产物（报告与 mutants.out；无论成败）

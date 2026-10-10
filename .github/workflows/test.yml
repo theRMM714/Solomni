@@ -31,6 +31,10 @@ jobs:
     runs-on: ${{ matrix.os }}
     # 比 e2e 宽：要额外编译 cargo-audit / cargo-deny（供应链门禁，见 docs/testing/levels.md 的 T0）。
     timeout-minutes: 45
+    # 借用 runner 自带 Rust，但缓存/安装落项目内（见 docs/testing/execution-ci.md）。
+    env:
+      CARGO_HOME: ${{ github.workspace }}/platform/ci/cargo
+      SOLOMNI_CARGO_HOME: ${{ github.workspace }}/platform/ci/cargo
     strategy:
       fail-fast: false
       matrix:
@@ -43,21 +47,25 @@ jobs:
         with:
           node-version: "lts/*"
 
-      - name: 准备 Rust（runner 自带工具链，不装项目外的任何东西）
+      # 只借 runner 自带 Rust（探测可用即用），不装、不改它的 home；只读它的 toolchain。
+      - name: 准备 Rust（借用 runner 自带工具链）
         run: |
-          rustup toolchain install stable --profile minimal
-          rustup default stable
           rustc --version
           cargo --version
 
       # 只缓存依赖与 debug 产物。不缓存 target/ 根：报告与日志来自本次运行，不能被上一次的缓存顶替。
+      - name: 建项目内 CARGO_HOME（缓存要求目录先存在）
+        if: ${{ !inputs.clean }}
+        shell: bash
+        run: mkdir -p platform/ci/cargo
+
+      # 只缓存项目内路径：缓存身份含 path，改路径即新缓存项（旧项自动淘汰，见 docs/testing/execution-ci.md）。
       - name: 缓存依赖与编译产物（inputs.clean 时跳过）
         if: ${{ !inputs.clean }}
         uses: actions/cache@v6
         with:
           path: |
-            ~/.cargo/registry
-            ~/.cargo/git
+            platform/ci/cargo
             target/debug
           key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
@@ -93,6 +101,9 @@ jobs:
     name: 端到端（${{ matrix.os }}）
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
+    env:
+      CARGO_HOME: ${{ github.workspace }}/platform/ci/cargo
+      SOLOMNI_CARGO_HOME: ${{ github.workspace }}/platform/ci/cargo
     strategy:
       fail-fast: false
       matrix:
@@ -104,20 +115,24 @@ jobs:
         with:
           node-version: "lts/*"
 
-      - name: 准备 Rust（runner 自带工具链，不装项目外的任何东西）
+      # 只借 runner 自带 Rust（探测可用即用），不装、不改它的 home；只读它的 toolchain。
+      - name: 准备 Rust（借用 runner 自带工具链）
         run: |
-          rustup toolchain install stable --profile minimal
-          rustup default stable
           rustc --version
           cargo --version
 
+      - name: 建项目内 CARGO_HOME（缓存要求目录先存在）
+        if: ${{ !inputs.clean }}
+        shell: bash
+        run: mkdir -p platform/ci/cargo
+
+      # 只缓存项目内路径：缓存身份含 path，改路径即新缓存项（旧项自动淘汰，见 docs/testing/execution-ci.md）。
       - name: 缓存依赖与编译产物（inputs.clean 时跳过）
         if: ${{ !inputs.clean }}
         uses: actions/cache@v6
         with:
           path: |
-            ~/.cargo/registry
-            ~/.cargo/git
+            platform/ci/cargo
             target/debug
           key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
           restore-keys: |

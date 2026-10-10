@@ -61,6 +61,7 @@ function run(cargoEnv) {
   log("platform " + process.platform + " " + process.arch);
   const cargo = ready.cargo;
   const cargoEnv = ready.env;
+  env.pinTemp(cargoEnv); // 临时文件不出项目
   const v = spawnSync(cargo, ["--version"], { cwd: ROOT, env: cargoEnv, encoding: "utf8" });
   if (v.error || v.status !== 0) die("cargo not runnable: " + (v.error && v.error.message));
   log(v.stdout.trim());

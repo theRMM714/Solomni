@@ -60,7 +60,7 @@
 | 细则正文（`docs/**`） | 该领域的门户（根文档）、`AGENTS.md` 文档路由表、其它文档里指向该节的引用 |
 | 门户的节标题或结构 | 该领域细则里的回引、`AGENTS.md` 文档路由表、`README.md` 文档表 |
 | 新增/删除/改名文档 | `AGENTS.md` 文档路由表、`README.md` 文档表、所有引用它的文档与代码注释 |
-| 代码里被文档机器比对的段落 | 该文档与比对它的测试（路由表 ↔ `src/tests/routes.rs`、提示词键表 ↔ `prompts/**`、`module-map.md` ↔ 磁盘、根 `*.md` ↔ 本表） |
+| 代码里被文档机器比对的段落 | 该文档与比对它的测试（路由表 ↔ `src/tests/routes.rs`、提示词键表 ↔ `prompts/**`、`unit-map.md` ↔ 磁盘、根 `*.md` ↔ 本表） |
 | `tests/gaps.yaml` 的条目 | `TESTING.md` 门户与 `docs/testing/gaps-acceptance.md` 的现状描述 |
 
 - 引用一律用**相对仓库根的路径**（`docs/testing/levels.md`），不写机器路径、不写绝对路径。
@@ -75,6 +75,8 @@
 | --- | --- | --- |
 | 发言与行动的主体 | **agent** | 智能体、AI、模型（模型是 agent 用到的东西） |
 | 能力的载体（一个文件夹 = 提示词 + 工具 + 工作区） | **模块**（方向性叙述里可以说"应用 / app"） | 插件、技能、skill |
+| 代码里按边界切分的一块（业务能力、机制、入口层、呈现层各算一个；`docs/<单元>/` 与之一一对应） | **单元**（unit） | 模块、组件 |
+| 业务边界（`src/capabilities/<名>/`；独立业务的判据见 `ARCHITECTURE.md` §九） | **能力**（capability） | 业务模块、模块 |
 | 一次任务里"用谁、怎么组合、谁拍板" | **形态**（single / collab / proxy） | 模式、架构、拓扑 |
 | 一次运行与它的落盘单元 | **会话**（session） | 对话、聊天 |
 | 挂在父会话 `children/` 下的会话 | **子会话**（强调"它是一场完整工作"时可写**子工作**） | 子 agent、子任务 |
@@ -164,23 +166,23 @@
 ### 细则（`docs/`）
 
 **先按单元找入口，再按事项找细则。** 每个业务与机制单元一个目录：目录里的 `README.md` 是它的唯一入口
-（管什么 / 不管什么、入站契约与状态归属、依赖图位置、改动时要同步什么），`module-map.md` 是逐文件职责（机器比对）。
+（管什么 / 不管什么、入站契约与状态归属、依赖图位置、改动时要同步什么），`unit-map.md` 是逐文件职责（机器比对）。
 
 | 单元 | 入口 | 该单元还有 |
 | --- | --- | --- |
-| `conductor`（协调业务） | `docs/conductor/README.md` | `module-map.md` |
-| `collab`（协作会话） | `docs/collab/README.md` | `module-map.md`、`task-chain.md` |
-| `session`（会话） | `docs/session/README.md` | `module-map.md`、`session-model.md` |
-| `tools`（工具与围栏） | `docs/tools/README.md` | `module-map.md`、`tools-and-roles.md` |
-| `permission`（权限） | `docs/permission/README.md` | `module-map.md` |
-| `llm`（模型通道与协议） | `docs/llm/README.md` | `module-map.md` |
-| `registry`（登记处） | `docs/registry/README.md` | `module-map.md` |
-| `workspace`（工作区与运行包） | `docs/workspace/README.md` | `module-map.md` |
-| `prompt`（提示词册） | `docs/prompt/README.md` | `module-map.md`、`prompts.md` |
-| `slate`（名单） | `docs/slate/README.md` | `module-map.md` |
-| `taskchain`（任务链） | `docs/taskchain/README.md` | `module-map.md` |
-| `kernel`（机制型业务） | `docs/kernel/README.md` | `module-map.md` |
-| 入口层（组合根 / 探针 / 守门进程） | `docs/entry/README.md` | `module-map.md` |
+| `conductor`（协调业务） | `docs/conductor/README.md` | `unit-map.md` |
+| `collab`（协作会话） | `docs/collab/README.md` | `unit-map.md`、`task-chain.md` |
+| `session`（会话） | `docs/session/README.md` | `unit-map.md`、`session-model.md` |
+| `tools`（工具与围栏） | `docs/tools/README.md` | `unit-map.md`、`tools-and-roles.md` |
+| `permission`（权限） | `docs/permission/README.md` | `unit-map.md` |
+| `llm`（模型通道与协议） | `docs/llm/README.md` | `unit-map.md` |
+| `registry`（登记处） | `docs/registry/README.md` | `unit-map.md` |
+| `workspace`（工作区与运行包） | `docs/workspace/README.md` | `unit-map.md` |
+| `prompt`（提示词册） | `docs/prompt/README.md` | `unit-map.md`、`prompts.md` |
+| `slate`（名单） | `docs/slate/README.md` | `unit-map.md` |
+| `taskchain`（任务链） | `docs/taskchain/README.md` | `unit-map.md` |
+| `kernel`（机制型业务） | `docs/kernel/README.md` | `unit-map.md` |
+| 入口层（组合根 / 探针 / 守门进程） | `docs/entry/README.md` | `unit-map.md` |
 | 前端 / 交付机制（`cli` 与 `web`） | `docs/presentation/README.md` | `contracts.md`、`cli/`、`web/` |
 | 横向：测试与质量 | `TESTING.md`（门户） | `docs/testing/README.md` 与六份细则 |
 

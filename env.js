@@ -3,7 +3,7 @@
  * Solomni 环境层：路径约定（platform/<os>、.tools/）、工具链探测、环境拼装与（征得同意的）项目内安装。
  * 管：工具链在哪、环境怎么拼、缺了怎么补；不管：构建、运行、测试编排（那些在 start.js / run-tests.js）。
  * 为什么单独一层：环境是“换机器 / 换开发环境”时唯一要改的地方；启动器与测试入口共用同一份解析，不再各写一遍。
- * 收敛规则：工具链一律落在项目内 platform/<os>/ 与 .tools/（AGENTS.md）；系统安装默认不动、不静默借用。
+ * 收敛规则：缓存与产物一律落在项目内 platform/<os>/ 与 .tools/（AGENTS.md）；系统工具链可只读借用，但不写它的 home。
  * CLI：node env.js（看状态）/ node env.js setup [--yes]（只建环境）/ node env.js --print-env（机器可读）。
  */
 "use strict";
@@ -54,7 +54,7 @@ function findProjectCargo() {
 }
 
 let ambientCache = null;
-/** 现成环境里的 cargo（仅测试入口在项目内缺失时回退；启动器不借用系统安装）。 */
+/** 现成环境里的 cargo（项目内缺失时的借用来源；借用只读，缓存与产物仍落项目内）。 */
 function findAmbientCargo() {
   if (ambientCache !== null) return ambientCache || null;
   // 直接扫 PATH（不依赖 where/which：受限环境里未必装了它们）。PATH 项可能带外层引号。
@@ -67,6 +67,16 @@ function findAmbientCargo() {
     .find((p) => { try { return fs.existsSync(p); } catch (e) { return false; } });
   ambientCache = found || "";
   return ambientCache || null;
+}
+
+/** 借用系统 cargo 前的可用性探测：跑得起来才算可用（rustup proxy 解析不到 toolchain 会失败）。 */
+function probeUsable(cargo) {
+  try {
+    const r = spawnSync(cargo, ["--version"], { stdio: "ignore", timeout: 15000 });
+    return !r.error && r.status === 0;
+  } catch (e) {
+    return false;
+  }
 }
 
 function locateDlltool() {
@@ -86,17 +96,37 @@ function binutilsReady(dir) {
 
 function composeEnv(cargo, source) {
   const env = Object.assign({}, process.env);
-  const front = [path.dirname(cargo)]
+  // 缓存与安装产物一律落项目内：无论借用系统工具链还是用项目内工具链，CARGO_HOME 都指项目内。
+  const cargoHome = process.env.SOLOMNI_CARGO_HOME || P_CARGO;
+  env.CARGO_HOME = cargoHome;
+  // RUSTUP_HOME 只在用项目内工具链时指项目内；借用系统 rustup proxy 时必须保留系统的（靠它找 toolchain），
+  // 且约定只读——门禁不跑会写它的 rustup 变更命令。
+  if (source !== "ambient") {
+    env.RUSTUP_HOME = process.env.SOLOMNI_RUSTUP_HOME || P_RUSTUP;
+  }
+  const front = [path.join(cargoHome, "bin"), path.dirname(cargo)]
     .concat(EXTRA_PATH)
     .concat(IS_WIN && fs.existsSync(WINLIBS_BIN) ? [WINLIBS_BIN] : [])
     .filter(Boolean);
   setEnvPath(env, front.concat([envPath(env)].filter(Boolean)).join(path.delimiter));
-  // 项目内 / 显式指定时把两个 home 明确指过去；回退到现成工具链时不改（继承原环境）。
-  if (source !== "ambient") {
-    env.RUSTUP_HOME = process.env.SOLOMNI_RUSTUP_HOME || P_RUSTUP;
-    env.CARGO_HOME = process.env.SOLOMNI_CARGO_HOME || P_CARGO;
-  }
   return env;
+}
+
+/**
+ * 把临时目录钉进项目内（缓存/临时不出项目；崩了也留在项目内，可检测可清）。
+ * 由入口层在建/跑之前调用，保持 resolve() 无副作用。返回钉住的目录；建不了返回 null（退回系统临时目录）。
+ */
+function pinTemp(env) {
+  const dir = path.join(ROOT, "target", "tmp");
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+  } catch (e) {
+    return null;
+  }
+  env.TMPDIR = dir;
+  env.TMP = dir;
+  env.TEMP = dir;
+  return dir;
 }
 
 /**
@@ -119,7 +149,7 @@ function resolve(opts) {
   if (!cargo) {
     if (requireProject) return null;
     const ac = findAmbientCargo();
-    if (!ac) return null;
+    if (!ac || !probeUsable(ac)) return null;
     cargo = ac;
     source = "ambient";
   }
@@ -143,7 +173,8 @@ function resolve(opts) {
  */
 async function ensure(opts) {
   const yes = !!(opts && opts.yes);
-  if (!resolve({ requireProject: true })) {
+  // 有可用工具链（项目内或系统）就借用；借用只读，缓存与产物仍落项目内。没有或有问题的才装进项目内。
+  if (!resolve({})) {
     await installRust({ yes });
   }
   if (IS_WIN) {
@@ -168,8 +199,8 @@ async function ensure(opts) {
       }
     }
   }
-  const r = resolve({ requireProject: true });
-  if (!r) die("environment not ready: cargo still not found under " + P_CARGO);
+  const r = resolve({});
+  if (!r) die("environment not ready: no usable cargo (project or PATH)");
   return r;
 }
 
@@ -437,7 +468,7 @@ async function main() {
 
 module.exports = {
   ROOT, IS_WIN, OS_KEY, PLATFORM_DIR, P_RUSTUP, P_CARGO, TOOLS, WINLIBS_BIN,
-  resolve, ensure, findProjectCargo, findAmbientCargo, envPath, setEnvPath,
+  resolve, ensure, pinTemp, findProjectCargo, findAmbientCargo, envPath, setEnvPath,
 };
 
 if (require.main === module) main();

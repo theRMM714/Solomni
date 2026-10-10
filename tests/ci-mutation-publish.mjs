@@ -19,7 +19,7 @@ if (!fs.existsSync(reportPath)) {
   process.exit(0);
 }
 const report = JSON.parse(fs.readFileSync(reportPath, "utf8"));
-const key = report.module ? report.scope + "-" + report.module : report.scope;
+const key = report.capability ? report.scope + "-" + report.capability : report.scope;
 
 const headers = { Authorization: "Bearer " + token, "User-Agent": "solomni-ci", Accept: "application/vnd.github+json" };
 const jsonHeaders = Object.assign({ "Content-Type": "application/json" }, headers);
@@ -65,7 +65,7 @@ const meta = {
   sha,
   at: new Date().toISOString(),
   scope: report.scope,
-  module: report.module,
+  capability: report.capability,
   status: report.status,
   exitCode: report.exitCode,
   summary: report.summary,

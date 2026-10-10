@@ -9,6 +9,7 @@
 const { spawnSync } = require("child_process");
 const fs = require("fs");
 const path = require("path");
+const os = require("os");
 
 const ROOT = __dirname;
 const IS_WIN = process.platform === "win32";
@@ -49,9 +50,11 @@ const GAP_FILES = [
 
 function buildEnv() {
   // 环境解析统一交给 env.js（与启动器同一份，换开发环境只改一处）；
-  // start.js -test 会带着现成环境进来，直接跑时这里解析项目内工具链、没有就继承现成环境。
-  const resolved = require("./env.js").resolve();
+  // start.js -test 会带着现成环境进来；直接跑时解析项目内工具链，没有就借用系统工具链（CARGO_HOME 仍指项目内）。
+  const envLayer = require("./env.js");
+  const resolved = envLayer.resolve();
   const e = Object.assign({}, resolved ? resolved.env : process.env);
+  envLayer.pinTemp(e); // 临时文件不出项目
   // 项目内工具区（AGENTS.md：工具链收敛在 platform/<os>/ 与 .tools/）：把 .tools/bin 放到 PATH 前，
   // cargo 子命令（cargo-audit / cargo-deny / cargo-llvm-cov）才找得到；没装就是 env-skip。
   const toolsBin = path.join(ROOT, ".tools", "bin");
@@ -63,6 +66,82 @@ function buildEnv() {
   e.SOLOMNI_FENCE_LIVE = FENCE_LIVE ? "1" : "0";
   e.SOLOMNI_FENCE_WRITE = FENCE_LIVE ? "1" : "0";
   return e;
+}
+
+// ---- 项目外写检测（只覆盖 env / 工具链；判据见 docs/testing/quality-isolation.md） ----
+// 借用系统工具链也不许把缓存/配置写进它的 home：CARGO_HOME 与 TMP 都已钉在项目内。
+// 这一层是运行期自检：快照若干项目外缓存根，跑完对比，新增/变化即硬失败（零豁免）。
+function outsideWatchRoots() {
+  const home = os.homedir();
+  const p = (x) => path.join(home, x);
+  return [
+    p(".cargo"),
+    p(path.join(".rustup", "settings.toml")),
+    p(path.join(".rustup", "downloads")),
+    p(path.join(".rustup", "tmp")),
+    p(path.join(".rustup", "update-hashes")),
+    p(".npm"),
+  ];
+}
+/** 递归记下目录树（目录/文件的 mtime 与大小）；封顶避免大目录拖慢门禁。 */
+function snapshotTree(abs, acc, budget) {
+  if (budget.n <= 0 || !fs.existsSync(abs)) return;
+  let st;
+  try { st = fs.lstatSync(abs); } catch (e) { return; }
+  acc[abs] = st.isDirectory() ? "d:" + st.mtimeMs : "f:" + st.mtimeMs + ":" + st.size;
+  budget.n--;
+  if (!st.isDirectory()) return;
+  let names;
+  try { names = fs.readdirSync(abs); } catch (e) { return; }
+  for (const n of names) {
+    if (budget.n <= 0) break;
+    snapshotTree(path.join(abs, n), acc, budget);
+  }
+}
+function outsideSnapshot() {
+  const acc = {};
+  const budget = { n: 20000 };
+  for (const r of outsideWatchRoots()) snapshotTree(r, acc, budget);
+  return acc;
+}
+function outsideDiff(before, after) {
+  const changed = [];
+  for (const k of new Set(Object.keys(before).concat(Object.keys(after)))) {
+    if (before[k] !== after[k]) changed.push(k + (before[k] === undefined ? "（新增）" : after[k] === undefined ? "（删除）" : "（变化）"));
+  }
+  return changed;
+}
+/** 自测：项目外写检测必须能分辨新增 / 删除 / 变化（门禁自己不可信就没有意义）。 */
+function outsideSelfTest() {
+  const bad = [];
+  const eqo = (name, got, want) => { if (got !== want) bad.push("项目外写自测失败：" + name + "：实际 " + got + "，期望 " + want); };
+  eqo("检出新增", outsideDiff({ a: "d:1" }, { a: "d:1", b: "f:2:3" }).length, 1);
+  eqo("检出删除", outsideDiff({ a: "d:1", b: "f:2:3" }, { a: "d:1" }).length, 1);
+  eqo("检出变化", outsideDiff({ a: "d:1" }, { a: "d:2" }).length, 1);
+  eqo("无变化不误报", outsideDiff({ a: "d:1" }, { a: "d:1" }).length, 0);
+  return bad;
+}
+/** 清掉上次崩溃残留在系统临时目录里的 solomni-*（pid 已不在 = 崩溃残留）。返回清掉的条目名。 */
+function sweepStaleTemp() {
+  const dir = os.tmpdir();
+  const swept = [];
+  let names;
+  try { names = fs.readdirSync(dir); } catch (e) { return swept; }
+  for (const n of names) {
+    if (!/^solomni-/.test(n)) continue;
+    const full = path.join(dir, n);
+    const m = n.match(/-(\d+)$/);
+    let stale = false;
+    if (m) {
+      try { process.kill(Number(m[1]), 0); stale = false; }
+      catch (e) { stale = e && e.code === "EPERM" ? false : true; }
+    } else {
+      try { stale = Date.now() - fs.statSync(full).mtimeMs > 60 * 60 * 1000; } catch (e) { stale = true; }
+    }
+    if (!stale) continue;
+    try { fs.rmSync(full, { recursive: true, force: true }); swept.push(n); } catch (e) { /* 清不掉就留着，报告里如实说 */ }
+  }
+  return swept;
 }
 
 let stepNo = 0;
@@ -319,7 +398,7 @@ function structuralAudit() {
     });
   }
 
-  // 模块地图与磁盘**双向一致**（`docs/<单元>/module-map.md` 是各单元逐文件职责的唯一权威；
+  // 单元地图与磁盘**双向一致**（`docs/<单元>/unit-map.md` 是各单元逐文件职责的唯一权威；
   // 表现层两个渠道各一份。所有地图文件的行合成一张表，再与磁盘比对）：
   // ① 每行第一格是仓库根相对路径（src/…），必须存在；② src/ 下每个 .rs 都要在**某一张**地图里有一行
   // （src/tests/** 归测试分区、纯 mod 声明的目录入口不要求逐行列出）。
@@ -329,19 +408,19 @@ function structuralAudit() {
     for (const e of fs.readdirSync(d, { withFileTypes: true })) {
       const p = path.join(d, e.name);
       if (e.isDirectory()) collectMaps(p);
-      else if (e.name === "module-map.md") mapFiles.push(p);
+      else if (e.name === "unit-map.md") mapFiles.push(p);
     }
   })(path.join(ROOT, "docs"));
-  if (!mapFiles.length) problems.push("找不到任何模块地图（docs/**/module-map.md）");
+  if (!mapFiles.length) problems.push("找不到任何单元地图（docs/**/unit-map.md）");
   const mapRows = [];
   for (const f of mapFiles) {
     for (const m of fs.readFileSync(f, "utf8").matchAll(new RegExp("^\\| " + BT + "([^" + BT + "]+)" + BT + " \\|", "gm"))) mapRows.push(m[1]);
   }
   const seenRows = new Set();
   for (const r of mapRows) {
-    if (seenRows.has(r)) problems.push("模块地图有重复行：" + r);
+    if (seenRows.has(r)) problems.push("单元地图有重复行：" + r);
     seenRows.add(r);
-    if (!fs.existsSync(path.join(ROOT, r))) problems.push("模块地图引用的文件不存在：" + r);
+    if (!fs.existsSync(path.join(ROOT, r))) problems.push("单元地图引用的文件不存在：" + r);
   }
   // 目录入口：只声明模块 / 重导出（不定义任何条目）的文件不必逐行入册。
   const isBarrel = (abs) => !/^(pub(\([^)]*\))? )?(fn|struct|enum|impl|trait|const|static|type|macro_rules!) /m.test(fs.readFileSync(abs, "utf8"));
@@ -353,7 +432,7 @@ function structuralAudit() {
       const r = rel(p);
       if (r.startsWith("src/tests/")) continue;
       if (e.name === "mod.rs" && isBarrel(p)) continue;
-      if (!seenRows.has(r)) problems.push("src 下的文件没进模块地图：" + r);
+      if (!seenRows.has(r)) problems.push("src 下的文件没进单元地图：" + r);
     }
   };
   collectSrc(path.join(ROOT, "src"));
@@ -454,6 +533,7 @@ function structuralAudit() {
 
   // 门禁解析器自测：门禁自己也要被测（解析器一坏就是静默全绿，见 gateParserSelfTest）。
   for (const b of gateParserSelfTest()) problems.push(b);
+  for (const b of outsideSelfTest()) problems.push(b);
   // #[ignore] 一律不许：跳过必须显式、可判（进缺口账或 env-skip），不能用测试框架的 ignore 藏起来。
   // 与报告里的 ignored 计数双保险（见 main 的 L1 与平台目标判定）。
   for (const d of [path.join(ROOT, "src"), path.join(ROOT, "tests")]) {
@@ -881,6 +961,9 @@ function main() {
     runCoverage();
     return;
   }
+  // 项目外缓存快照与上次崩溃残留清理（清零前先记，跑完再对）。
+  const outsideBefore = outsideSnapshot();
+  const tempSwept = sweepStaleTemp();
   const steps = [];
 /** 记一步：用时自动带上（步骤对象不关心时间时也不用写两遍）。 */
 function pushStep(obj) {
@@ -1082,6 +1165,19 @@ function pushStep(obj) {
       pushStep({ step: "L4 端到端", status: "gap", detail: "cross-platform.e2e.not-in-runner（编排尚未迁入）" });
     }
   }
+
+  // T0：项目外写检测（零豁免）。借用系统 cargo 也不许把 registry/git/bin 写进它的 home。
+  announce("T0 项目外写");
+  const outsideChanged = outsideDiff(outsideBefore, outsideSnapshot());
+  announceDone(outsideChanged.length ? "失败" : "完成", outsideChanged.length ? outsideChanged.length + " 处项目外写入" : (tempSwept.length ? "清理了上次残留 " + tempSwept.length + " 项" : ""));
+  pushStep({
+    step: "T0 项目外写",
+    status: outsideChanged.length ? "fail" : "pass",
+    detail: outsideChanged.length
+      ? "检测到项目外缓存/工具链目录被写：" + outsideChanged.join("、") + "（借用系统工具链也不许写它的 home；确认不是其它进程同写后重跑）"
+      : (tempSwept.length ? "系统临时目录清掉上次崩溃残留：" + tempSwept.join("、") : ""),
+    raw: null,
+  });
 
   // 只报不拦的时间预算：超预算标 [slow]（找慢步骤的基线，不改变成败）。
   for (const s of steps) {

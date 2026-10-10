@@ -58,11 +58,11 @@ presentation/{cli,web} ──▶ capabilities（含协调业务 conductor）─�
 端口只有一个持有者：**定义它的那个能力的 `service.rs`**（R12）。**例外**：`kernel` 的机制端口（`Log` / `HostProbe` / `ToolHandler` / `AskUser`）全项目共享。
 新增端口前先问一句：**这是 IO 或可替换点吗**？不是就别加 trait。
 
-## 三、模块地图与入站契约
+## 三、单元地图与入站契约
 
 这两块是查阅型细则，各只有一份：
 
-- 逐个文件讲某个单元（`capabilities/` 含 `conductor/`、`kernel/`、`entry/`、`presentation/`）各干什么：各单元自己的 `docs/<单元>/module-map.md`（单元划分与完整路由见 [AGENTS.md](AGENTS.md)「文档路由」）。
+- 逐个文件讲某个单元（`capabilities/` 含 `conductor/`、`kernel/`、`entry/`、`presentation/`）各干什么：各单元自己的 `docs/<单元>/unit-map.md`（单元划分与完整路由见 [AGENTS.md](AGENTS.md)「文档路由」）。
 - 呈现层入站契约与机器可读的 HTTP 路由目录：[docs/presentation/contracts.md](docs/presentation/contracts.md)
   （**路由表由 `src/tests/routes.rs` 直接读本文比对**，对不上就是测试失败）。
 - 系统工具总表、角色表与"谁能用哪些工具"：[docs/tools/tools-and-roles.md](docs/tools/tools-and-roles.md)
@@ -215,7 +215,7 @@ presentation/{cli,web} ──▶ capabilities（含协调业务 conductor）─�
 | **R5** | **并发模型不变式**：单线程命令队列 + 能力间同步调用，**核心状态不加锁** |
 | **R6** | **共享事实类型只属于 `kernel`**，禁止各业务复制 DTO |
 | **R7** | **不留兼容层**：项目是 GREEN FIELD，**只维护当前唯一实现**——旧实现直接删，不留转发壳或历史说明 |
-| **R8** | **文档同步**：改结构必须同一次改 `ARCHITECTURE.md` / `docs/<单元>/module-map.md` / 相关细则 / `AGENTS.md` 路由表 |
+| **R8** | **文档同步**：改结构必须同一次改 `ARCHITECTURE.md` / `docs/<单元>/unit-map.md` / 相关细则 / `AGENTS.md` 路由表 |
 | **R9** | **跨平台与路径**：一律 `PathBuf` 组件拼接；对外用 `/`；不假设平台 |
 | **R10** | **测试跟着业务分区走**：`capabilities/<名称>/` ↔ `src/tests/<名称>.rs`（用例多的按域分成子模块），单文件 ≤ 2000 行 |
 | **R11** | **测试入口 = 生产入口**：禁止 `#[cfg(test)]` 专用语义入口 |
@@ -232,7 +232,7 @@ presentation/{cli,web} ──▶ capabilities（含协调业务 conductor）─�
 - **coreCycles**：能力节点图无环；
 - **reverse** / **presentation**：能力不反向依赖入口层或呈现层；
 - **channelCross**：呈现层的两个渠道（`cli` 与 `web`）互不依赖；
-- **moduleMap** / **docRefs**：各单元的 `module-map.md` 合起来与磁盘**双向一致**；文档链接与代码注释里的 `docs/**.md` 引用都存在；
+- **unitMap** / **docRefs**：各单元的 `unit-map.md` 合起来与磁盘**双向一致**；文档链接与代码注释里的 `docs/**.md` 引用都存在；
 - **commentContract**：全仓 `.rs` 的文件头四槽（目的 / 管 / 不管 / 联动）、`pub` 项的条目槽（目的 / 参数 / 返回 / 错误 / 约束）与行内注释限量；存量（`文件 × 规则` → 计数）记在 `tests/comment-baseline.json`，门禁只减不增：新增与应销账都硬失败（见 §十）。
 
 **当前基线为空（零豁免）**：任一判据不成立即报错；豁免条目一旦不再成立，门禁报「基线豁免已过期」强制销账。

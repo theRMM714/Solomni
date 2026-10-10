@@ -48,15 +48,16 @@ cargo deny check
 `cargo tree --duplicates` 只检查依赖树中的重复版本，`cargo deny` 的 `bans` 与它同口径但更全面
 （许可证、禁用、来源）；它们都不等于源码重复检查。`clippy` 也不能替代业务测试。这些检查的职责必须分开记录。
 
-当前状态：七项全部并入 `node run-tests.js`（前六项零容忍硬失败，没有存量基线；供应链一项工具缺失即 `env-skip`）：
+当前状态：八项全部并入 `node run-tests.js`（前七项零容忍硬失败，没有存量基线；供应链一项工具缺失即 `env-skip`）：
 
 - `cargo check --all-targets`；
-- 结构审查（测试目标登记、孤儿测试文件、缺口账格式、模块地图双向一致、文档链接完整性、提示词键表与真相源表比对、根文档路由、
+- 结构审查（测试目标登记、孤儿测试文件、缺口账格式、单元地图双向一致、文档链接完整性、提示词键表与真相源表比对、根文档路由、
   **门禁解析器自测**与 **`#[ignore]` 禁令**）；
 - `cargo fmt --all -- --check`；
 - `cargo clippy --all-targets --all-features --keep-going -- -D warnings`；
 - `cargo check` 的 rustc 告警数；
 - `cargo tree --duplicates`；
+- 项目外写（env / 工具链）：借用系统工具链也不许写它的 home；跑完快照 `~/.cargo` / `~/.rustup` 等，新增即失败（零豁免）；
 - 供应链：`cargo audit` + `cargo deny check`（配置在 `deny.toml`）。
 
 任何一项不过即 `quality-fail`。工具缺失（没装 rustfmt / clippy / cargo-audit / cargo-deny）或**取不到 advisory
