@@ -1,0 +1,15 @@
+{
+  "scope": "core",
+  "capability": null,
+  "files": [
+    "src/capabilities/llm/detail/repair.rs",
+    "src/capabilities/registry/detail/yaml_settings.rs",
+    "src/capabilities/slate/service.rs"
+  ],
+  "timeoutSecs": 60,
+  "exitCode": 0,
+  "status": "all-caught",
+  "summary": "48 mutants tested in 16m: 45 caught, 3 unviable",
+  "ms": 943838,
+  "log": "target/logs/mutation-core.log"
+}
