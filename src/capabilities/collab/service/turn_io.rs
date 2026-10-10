@@ -85,7 +85,7 @@ impl CollabSession {
             sandbox: sb.clone(),
             builtin_tools: self.systools.book(),
             unavailable: std::collections::BTreeMap::new(),
-            fence: crate::capabilities::tools::api::FenceSpec::from_sandbox(&sb, false),
+            fence: crate::kernel::api::FenceSpec::from_sandbox(&sb, false),
             reply_seq: 0,
             line: Default::default(),
             allowed,

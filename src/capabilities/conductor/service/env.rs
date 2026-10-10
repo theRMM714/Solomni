@@ -106,7 +106,7 @@ impl Conductor {
             unavailable,
             // 围栏：可达范围 + 断网 + 环境白名单的落点，全部由该 agent 的沙箱派生（机制在 adapters）；
             // 只读根来自用户显式授权（`fence_read`），默认空。
-            fence: crate::capabilities::tools::api::FenceSpec::from_sandbox(sb, net)
+            fence: crate::kernel::api::FenceSpec::from_sandbox(sb, net)
                 .with_read_only(self.fence_read_roots()),
             // 从零开始；按落盘转录重建时由调用方按转录里的最大值续号（见 rebuild_session）。
             reply_seq: 0,

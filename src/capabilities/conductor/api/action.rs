@@ -323,7 +323,7 @@ impl ConductorHandle {
             }
         }
         let work = work.map(std::path::PathBuf::from);
-        let fence = crate::capabilities::tools::api::FenceSpec::standalone(
+        let fence = crate::kernel::api::FenceSpec::standalone(
             &module.root,
             work.as_deref(),
             module.has_userdata,

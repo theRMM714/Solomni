@@ -1179,8 +1179,7 @@ pub(crate) fn deleting_a_session_asks_the_fence_to_release_its_grants() {
         test_tools_svc_with(
             Arc::new(SilentRunner),
             Arc::new(InMemorySysIo::new()),
-            Arc::clone(&fence)
-                as Arc<dyn crate::capabilities::tools::ports::FenceHost + Send + Sync>,
+            Arc::clone(&fence) as Arc<dyn crate::kernel::ports::FenceHost + Send + Sync>,
         ),
         test_prompt(),
         test_tools_svc(),

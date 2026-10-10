@@ -209,7 +209,7 @@ fn builtin_tools_respect_the_scope() {
 /// `standalone` 的缺省工作目录同样按这条事实回退。
 #[test]
 fn fence_spec_scopes_module_dirs_and_userdata() {
-    use crate::capabilities::tools::api::FenceSpec;
+    use crate::kernel::api::FenceSpec;
     let mut sb = test_sandbox("a1", &[]);
     let module = abs(&["mods", "data"]);
     sb.modules.insert("data".to_string(), module.clone());
@@ -243,7 +243,7 @@ fn fence_spec_scopes_module_dirs_and_userdata() {
 /// `standalone` 的缺省工作目录按**注入的事实**回退：没有 userdata 时退回模块根，不派不存在的落点。
 #[test]
 fn standalone_falls_back_when_userdata_is_absent() {
-    use crate::capabilities::tools::api::FenceSpec;
+    use crate::kernel::api::FenceSpec;
     let module = abs(&["mods", "m0"]);
 
     let spec = FenceSpec::standalone(&module, None, false);
@@ -407,7 +407,7 @@ fn ask_tools_are_confirmed_before_execution() {
 fn tool_layer_ask_rides_the_decision_channel() {
     use crate::capabilities::conductor::api::{ConductorHandle, Ops, Output};
     use crate::capabilities::session::api::SessionEvent;
-    use crate::capabilities::tools::domain::fence::{OPT_FENCE_ABORT, OPT_FENCE_UNFENCED};
+    use crate::kernel::domain::fence::{OPT_FENCE_ABORT, OPT_FENCE_UNFENCED};
     use crate::tests::builders::AskingRunner;
     use crate::tests::doubles::{abs, core_with_runner, decl, gw, module_of};
     use crate::tests::prelude::*;

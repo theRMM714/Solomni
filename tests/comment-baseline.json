@@ -464,67 +464,9 @@
     "条目：槽外有行或自造槽": 9,
     "条目：首行不是目的": 2
   },
-  "src/capabilities/tools/detail/confine/linux.rs": {
-    "头块：槽外有行或自造槽": 4,
-    "头块：缺文件头": 1,
-    "条目：槽外有行或自造槽": 7,
-    "条目：首行不是目的": 3,
-    "行内：连续超过 2 行": 2
-  },
-  "src/capabilities/tools/detail/confine/macos.rs": {
-    "头块：槽外有行或自造槽": 5,
-    "头块：缺文件头": 1,
-    "条目：槽外有行或自造槽": 7,
-    "条目：首行不是目的": 3,
-    "行内：连续超过 2 行": 2
-  },
-  "src/capabilities/tools/detail/confine/mod.rs": {
-    "头块：槽外有行或自造槽": 5,
-    "头块：缺文件头": 1,
-    "条目：槽外有行或自造槽": 49,
-    "条目：首行不是目的": 27
-  },
-  "src/capabilities/tools/detail/confine/other.rs": {
-    "头块：槽外有行或自造槽": 1,
-    "头块：缺文件头": 1,
-    "条目：槽外有行或自造槽": 4,
-    "条目：首行不是目的": 2
-  },
-  "src/capabilities/tools/detail/confine/windows/acl.rs": {
-    "头块：槽外有行或自造槽": 3,
-    "头块：缺文件头": 1,
-    "条目：槽外有行或自造槽": 29,
-    "条目：首行不是目的": 9,
-    "行内：连续超过 2 行": 2
-  },
-  "src/capabilities/tools/detail/confine/windows/container.rs": {
-    "头块：槽外有行或自造槽": 3,
-    "头块：缺文件头": 1,
-    "条目：槽外有行或自造槽": 14,
-    "条目：首行不是目的": 9
-  },
-  "src/capabilities/tools/detail/confine/windows/mod.rs": {
-    "头块：槽外有行或自造槽": 9,
-    "头块：缺文件头": 1,
-    "条目：槽外有行或自造槽": 15,
-    "条目：首行不是目的": 12,
-    "行内：连续超过 2 行": 2
-  },
-  "src/capabilities/tools/detail/confine/windows/tests.rs": {
-    "头块：缺文件头": 1,
-    "行内：块注释": 1,
-    "行内：连续超过 2 行": 1
-  },
   "src/capabilities/tools/detail/mod.rs": {
     "头块：槽外有行或自造槽": 1,
     "头块：缺文件头": 1
-  },
-  "src/capabilities/tools/detail/proc_tools.rs": {
-    "头块：槽外有行或自造槽": 4,
-    "头块：缺文件头": 1,
-    "条目：槽外有行或自造槽": 10,
-    "条目：首行不是目的": 8,
-    "行内：后面是空行": 1
   },
   "src/capabilities/tools/detail/sys_io.rs": {
     "头块：槽外有行或自造槽": 3,
@@ -535,12 +477,6 @@
   "src/capabilities/tools/detail/yaml_systools.rs": {
     "头块：槽外有行或自造槽": 4,
     "头块：缺文件头": 1
-  },
-  "src/capabilities/tools/domain/fence.rs": {
-    "头块：槽外有行或自造槽": 6,
-    "头块：缺文件头": 1,
-    "条目：槽外有行或自造槽": 15,
-    "条目：首行不是目的": 11
   },
   "src/capabilities/tools/domain/patch.rs": {
     "头块：槽外有行或自造槽": 25,
@@ -569,12 +505,6 @@
   "src/capabilities/tools/mod.rs": {
     "头块：槽外有行或自造槽": 5,
     "头块：缺文件头": 1
-  },
-  "src/capabilities/tools/ports.rs": {
-    "头块：槽外有行或自造槽": 1,
-    "头块：缺文件头": 1,
-    "条目：槽外有行或自造槽": 12,
-    "条目：首行不是目的": 9
   },
   "src/capabilities/tools/service/mod.rs": {
     "头块：槽外有行或自造槽": 7,

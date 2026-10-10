@@ -18,8 +18,34 @@ impl Log for NoopLog {
     fn error(&self, _at: &str, _msg: &str) {}
 }
 
+use crate::kernel::domain::fence::FenceSpec;
 use crate::kernel::domain::types::{Ask, AskOutcome, ToolOutcome};
 use std::path::Path;
+
+/// 目的：外部进程回执里那些收尾标记的文案端口——进程机制不硬编码文案，由上层适配后注入。
+/// 约束：文案从哪来不由本端口决定（提示词册在 `capabilities/prompt`，由组合根适配后注入）；
+///   围栏拒绝/放行那 5 个方法只在 Windows 的容器围栏那一路用（unix 无使用点，如实放行死代码）。
+#[allow(dead_code)]
+pub trait ProcessTexts: Send + Sync {
+    /// stderr 段的头（工具进程有 stderr 时拼在回执里）。
+    fn stderr_header(&self) -> String;
+    /// 超时说明（到时连根杀树后补的那句）。
+    fn timeout(&self) -> String;
+    /// 围栏没装上（守门进程用固定退出码报明，命令没被执行）。
+    fn fence_failed(&self) -> String;
+    /// 输出截断的尾部说明（chars = 原字符数，limit = 上限）。
+    fn truncated(&self, chars: &str, limit: &str) -> String;
+    /// 必要落点授不上且不执行时的主句（part / path / why / fix 四段）。
+    fn fence_blocked(&self, part: &str, path: &str, why: &str, fix: &str) -> String;
+    /// 用户明确没有放行这次调用。
+    fn denied_by_user(&self) -> String;
+    /// 没人答、按声明默认项收场（option = 按哪个选项办的）。
+    fn no_answerer_defaulted(&self, part: &str, path: &str, option: &str) -> String;
+    /// 没人答、也没声明默认项。
+    fn no_answerer_refused(&self, part: &str, path: &str) -> String;
+    /// 无围栏跑一次时的如实标注（part / path / why）。
+    fn fence_unfenced(&self, part: &str, path: &str, why: &str) -> String;
+}
 
 /// 目的：**提问端口**——需要用户裁决的机制（围栏、工具执行层，今后任何 yes/no）经它推一条问题，
 ///   并**阻塞**等回答（走会话的**统一裁决通道**：同一条队、同一张卡、同一条回答命令）。
@@ -83,4 +109,27 @@ pub trait HostProbe: Send + Sync {
     fn has_exe(&self, name: &str) -> bool;
     /// 本机能不能起硬件虚拟化（只问事实，不起任何虚拟机）。
     fn hypervisor_available(&self) -> bool;
+}
+
+/// 目的：一次外部进程执行端口——机制（围栏安装、进程拉起、stdin 送参、超时杀树、截断）在适配层。
+/// 参数：`fence` = 这次执行的可达范围与网络；`command` = 模块声明的启动命令；`args_json` = 经 stdin 送进去的参数；
+///   `ask` = 这一趟的提问端口（围栏必要落点授不上时经它问用户；`None` = 没有可回答的前端）。
+/// 返回：一次执行的事实回执；成功与否看退出码，细节由适配层如实拼装。
+/// 约束：策略（哪个模块能调哪个工具、命令行映射、可达哪些根）由调用方派生后传入；本端口只做机制。
+pub trait ProcessRunner: Send + Sync {
+    fn run(
+        &self,
+        fence: &FenceSpec,
+        command: &str,
+        args_json: &str,
+        ask: Option<&dyn AskUser>,
+    ) -> ToolOutcome;
+}
+
+/// 目的：围栏授权释放端口——会话删除时由核心请求一次，把该会话各 agent 的围栏授权撤掉。
+/// 参数：`spec` = 该席的围栏（按 `lease` 区分同名 agent 的并发会话）。
+/// 返回：撤权失败或平台限制时如实报错。
+/// 约束：调用方只提出请求，不碰任何 ACL；本平台没有该机制时实现为空操作。
+pub trait FenceHost: Send + Sync {
+    fn release(&self, spec: &FenceSpec) -> Result<(), String>;
 }

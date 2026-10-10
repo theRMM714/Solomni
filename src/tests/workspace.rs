@@ -739,7 +739,7 @@ pub(crate) fn module_without_runtime_is_denied_with_reason() {
         ),
         llm,
         test_tools_svc_with(
-            Arc::clone(&runner) as Arc<dyn ToolRunner + Send + Sync>,
+            Arc::clone(&runner) as Arc<dyn ProcessRunner>,
             Arc::new(InMemorySysIo::new()),
             Arc::new(NoFenceHost),
         ),
@@ -1152,7 +1152,7 @@ pub(crate) fn work_delete_is_explicit_in_the_commit_request() {
 /// 这是"agent 绕不过 pull/commit 直接写共享区"的工具层证据，围栏层的证据由三平台探针给。
 #[test]
 pub(crate) fn read_only_shared_refuses_builtin_writes_and_leaves_the_fence() {
-    use crate::capabilities::tools::api::FenceSpec;
+    use crate::kernel::api::FenceSpec;
     let sb = test_sandbox_readonly("a", &[]);
     let io = InMemorySysIo::new();
     io.seed(&["demo", "work", "note.txt"], "内容");

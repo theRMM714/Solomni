@@ -16,10 +16,11 @@ use crate::capabilities::registry::api::{Provider, Settings};
 use crate::capabilities::registry::ports::SettingsStore;
 use crate::capabilities::session::api::{AgentMeta, SessionMeta};
 use crate::capabilities::session::ports::HistoryStore;
-use crate::capabilities::tools::api::FenceSpec;
-use crate::capabilities::tools::ports::{FenceHost, SysIo, ToolRunner};
+use crate::capabilities::tools::ports::SysIo;
 use crate::capabilities::workspace::api::ExecSpec;
 use crate::capabilities::workspace::ports::{ModuleSource, PackageSource, Workdirs};
+use crate::kernel::api::FenceSpec;
+use crate::kernel::ports::{FenceHost, ProcessRunner};
 use crate::kernel::ports::{Log, NoopLog};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -446,7 +447,7 @@ fn prompt_source_double_loads_the_builtin_book_and_propagates_failure() {
     );
 }
 
-// ---------- ToolRunner ----------
+// ---------- ProcessRunner ----------
 
 #[test]
 fn tool_runner_double_records_the_call_site_and_reports_failure_honestly() {

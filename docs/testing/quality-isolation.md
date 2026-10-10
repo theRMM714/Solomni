@@ -83,8 +83,8 @@
 | --- | --- | --- |
 | `capabilities/collab/service/{collab,pump,turn_io,round}.rs`、`capabilities/conductor/service/rewind.rs` | 14 | 协作状态机的 `disc` / 任务链 / 工具上下文：进入这段之前刚判过存在，`expect("disc 已确认存在")` 与其后的 `expect("上臂已判存在")` 是同一判断的延续；`rewind.rs` 的两处（`l.get("tool")` 与其后跳过被总结行的同一判断）同理 |
 | `capabilities/prompt/{domain/prompt.rs,domain/refs.rs,service.rs}` | 3 | 模板变量缺失 = **装配错误**（`prompts/` 或调用方写错），不在用户输入路径上；启动即炸好过渲染出半截文案 |
-| `capabilities/tools/detail/proc_tools.rs` | 3 | `Command` 已声明 `Stdio::piped()`，`child.stdin` / `stdout` / `stderr` 的 `take()` 必为 `Some` |
-| `capabilities/tools/detail/confine/macos.rs` | 2 | `CString::new` 的两个入参是不含 NUL 的字面量与临时路径 |
+| `kernel/detail/process.rs` | 3 | `Command` 已声明 `Stdio::piped()`，`child.stdin` / `stdout` / `stderr` 的 `take()` 必为 `Some` |
+| `kernel/detail/confine/macos.rs` | 2 | `CString::new` 的两个入参是不含 NUL 的字面量与临时路径 |
 | `capabilities/tools/service/systool.rs` | 1 | `pending.get(path)` 的键由上一行同一函数算出 |
 | `capabilities/collab/service/tool_loop.rs` | 1 | 每个工具调用在上一行都被配对写入了执行结果 |
 

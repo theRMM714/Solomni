@@ -1,3 +1,8 @@
+//! 目的：Windows 围栏的真机探针——AppContainer 授权、容器往返、ACL 台账与撤权。
+//! 管：需要改本机权限项（建 profile、写 ACL）的用例，--fence-live 才跑。
+//! 不管：非 Windows 平台的行为（见 tests/linux、tests/macos）。
+//! 联动：机制在 confine/windows/ 各文件；判据见 docs/tools/README.md。
+
 use super::super::Owner;
 use super::*;
 
@@ -124,7 +129,8 @@ fn profile_sweep_only_matches_our_prefix() {
 #[test]
 fn existing_ace_must_cover_the_rights_we_need() {
     assert!(
-        !rights_covered(0x0010_0000 /* SYNCHRONIZE */, RIGHTS_RO),
+        // 0x0010_0000 = SYNCHRONIZE
+        !rights_covered(0x0010_0000, RIGHTS_RO),
         "只有 SYNCHRONIZE 不算覆盖"
     );
     assert!(
@@ -636,13 +642,8 @@ fn container_roundtrip_sees_leaf_but_not_parent_content() {
         );
     }
 
-    // 2) 父目录能被**按名穿过**：从父目录按名字读到叶子里的文件——这正是父目录只拿"只读属性"
-    //    （RIGHTS_STAT）的那条口径：中间目录判不了存在性时，工具会以为"父目录不存在"而一路往上建
-    //    （真机 CI 上抓到过 `WinError 5: 'D:\'`）。
-    //    **不用 `if exist` / `attrib` / `dir` 当尺子**：前两个取属性要走父目录的**列举权**（设计上
-    //    刻意不给：给了就等于让容器枚举父目录里的其它格子）；`dir` 与 PowerShell 的 `Get-ChildItem`
-    //    在托管 runner 的容器里会被拒（真机实测：同一个叶子上 `for` 枚举与 python 的 `os.listdir` 都正常），
-    //    拿它们量会量错东西。
+    // 2) 父目录能被**按名穿过**（这正是「父目录只拿只读属性」那条口径）：从父目录按名字读到叶子里的文件。
+    //    不用 if exist / attrib / dir 当尺子——前两个要走父目录的列举权；dir 与 Get-ChildItem 在容器里会被拒。
     let code = run_in_container(sid, &spec, "type ..\\leaf\\data.txt > reach.txt 2>&1")
         .expect("容器进程应当能启动");
     let reach = std::fs::read_to_string(leaf.join("reach.txt")).unwrap_or_default();
@@ -896,7 +897,7 @@ fn container_runs_a_node_module_tool_with_realpath_skipped() {
     let sid = container_sid(&container).expect("派生容器 SID");
 
     // ① 运行期白名单这一层就要带上两个开关：机制不在这儿就位，容器里再补已经晚了。
-    let env = crate::capabilities::tools::detail::confine::fence_env(&spec, command);
+    let env = crate::kernel::detail::confine::fence_env(&spec, command);
     let opts = env
         .iter()
         .find(|(k, _)| k == "NODE_OPTIONS")

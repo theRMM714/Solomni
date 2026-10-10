@@ -48,14 +48,14 @@ presentation/{cli,web} ──▶ capabilities（含协调业务 conductor）─�
 | `PromptSource` | 提示词册加载（`prompts/`） | `YamlPrompts` |
 | `SystoolsSource` | 工具总表、角色表与保留名表的加载（`systools/`） | `YamlSystools` |
 | `ProxyHost` | 核心代理工具的外部动作（清单 / 建会话 / 转达 / 观察 / 消息倒查 / 生命周期） | `ProxyBridge`（队列桥；测试 `FakeProxyHost`） |
-| `ToolRunner` | 外部工具进程（围栏安装、拉起、stdin 送参、超时杀树、截断） | `ProcTools`（守门进程 = 本程序的 `--fence-run` 模式） |
+| `ProcessRunner` | 外部进程执行（围栏安装、拉起、stdin 送参、超时杀树、截断）；**kernel 共享机制端口** | `ProcTools`（守门进程 = 本程序的 `--fence-run` 模式） |
 | `EnvelopeRepair` | 手写信封不合法时的**无歧义**补救（改了字段含义就是错；拿不准就不修） | `UnambiguousRepair` |
-| `FenceHost` | 围栏授权的释放（删除会话时请求一次撤销） | `confine::FenceHostAdapter`（本平台无该机制时为空操作） |
+| `FenceHost` | 围栏授权的释放（删除会话时请求一次撤销）；**kernel 共享机制端口** | `confine::FenceHostAdapter`（本平台无该机制时为空操作） |
 | `Log` / `HostProbe` | 运行日志（三级）/ 宿主能力探测（**只问事实**：路径存在性、PATH 上的可执行文件、本机虚拟化能力） | `FileLog` / `HostProbeAdapter`（测试 `NoopLog` / `FixedProbe`） |
 | `ToolHandler` | **一类工具的执行者**（按名字认领）：内置、模块与核心自有工具因此走**同一条派发路径** | 各能力注入（工具能力管内置与模块；conductor 注入代理工具那个） |
 | `AskUser` | **请用户裁决的提问端口**：需要用户裁决的机制（工具执行层、围栏）推一条问题并**阻塞**等一个选项 id——走会话的**统一裁决通道**（不是第二条） | 会话侧实现（conductor 的 `SessionAsk`：卡片进那一条队、`answer_card` 作答；构不出可用选项时停会话 + 落警告） |
 
-端口只有一个持有者：**定义它的那个能力的 `service.rs`**（R12）。**例外**：`kernel` 的机制端口（`Log` / `HostProbe` / `ToolHandler` / `AskUser`）全项目共享。
+端口只有一个持有者：**定义它的那个能力的 `service.rs`**（R12）。**例外**：`kernel` 的机制端口（`Log` / `HostProbe` / `ToolHandler` / `AskUser` / `ProcessRunner` / `FenceHost`）全项目共享。
 新增端口前先问一句：**这是 IO 或可替换点吗**？不是就别加 trait。
 
 ## 三、单元地图与入站契约

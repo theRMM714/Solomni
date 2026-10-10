@@ -43,8 +43,8 @@ pub struct MemberTools {
     pub builtin_tools: crate::capabilities::tools::api::ToolBook,
     /// 模块 id → 它缺的运行包能力（本档位下该模块的工具不执行；空表 = 都能执行）。
     pub unavailable: BTreeMap<String, Vec<String>>,
-    /// 本成员工具进程的围栏（可达范围 + 断网）：策略在 conductor 派生，机制在 ToolRunner 适配层安装。
-    pub fence: crate::capabilities::tools::api::FenceSpec,
+    /// 本成员工具进程的围栏（可达范围 + 断网）：策略在 conductor 派生，机制在 ProcessRunner 适配层安装。
+    pub fence: crate::kernel::api::FenceSpec,
     /// **回复 id 计数器**：一次模型回复一个号，跨重启单调（重建时按转录里的最大值续号）。
     /// 转录行靠它分组（哪几行属于同一次回复），会话靠它按回复原子回档。
     pub reply_seq: u64,

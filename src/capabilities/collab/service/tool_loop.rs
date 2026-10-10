@@ -5,7 +5,7 @@
 use super::discussion::*;
 use crate::capabilities::llm::api::ToolInvoke;
 use crate::capabilities::session::api::{MemberTools, SessionEvent};
-use crate::capabilities::tools::api::ToolOutcome;
+use crate::kernel::api::ToolOutcome;
 /// 执行一次工具调用：内置优先；外部工具按模块走（模块为空时由 dispatch_external 如实报错）。
 /// 账本经**分支副本**回到本成员（见 run_branch）——串行与并发只有这一条执行路径。
 pub(crate) fn run_one(

@@ -1,6 +1,5 @@
 //! 入站能力面：**其它能力与呈现层只准用这里**（不许碰 `domain` / `ports`）。
 
-pub use crate::capabilities::tools::domain::fence::FenceSpec;
 pub use crate::capabilities::tools::domain::patch::{EditFault, Fault};
 pub use crate::capabilities::tools::domain::roles::{action_audit, RoleTable, SystemTools};
 pub use crate::capabilities::tools::domain::schema::{ArgFault, ToolBook, ToolSchema};
@@ -36,7 +35,7 @@ pub trait Tools: Send + Sync {
 }
 
 /// 工具能力的**执行面**（`service.rs` 实现）：别的能力要执行工具、要释放围栏授权，走这里；
-/// 三个出站端口（`ToolRunner` / `SysIo` / `FenceHost`）**只由它持有**（R12）。
+/// 出站端口 `SysIo` 由它持有（R12）；`ProcessRunner` / `FenceHost` 是 kernel 共享的机制端口。
 ///
 /// 为什么 `SysIo` 的读写不在这里：它只被本能力自己的 domain（内置工具实现）用，
 /// 别人要的是"跑一个工具"，不是"按路径读写文件"。
@@ -45,7 +44,7 @@ pub trait ToolExec: Send + Sync {
     /// 参数：`ask` = 这一趟的**提问端口**（围栏的必要落点授不上时经它问用户）；`None` = 没有可回答的前端。
     fn run_module(
         &self,
-        fence: &crate::capabilities::tools::api::FenceSpec,
+        fence: &crate::kernel::api::FenceSpec,
         command: &str,
         args_json: &str,
         ask: Option<&dyn crate::kernel::ports::AskUser>,
@@ -62,8 +61,5 @@ pub trait ToolExec: Send + Sync {
     ) -> ToolOutcome;
 
     /// 会话删除时请求一次：把该会话各 agent 的围栏授权撤掉（调用方只提出请求，不碰任何 ACL）。
-    fn release_fence(
-        &self,
-        spec: &crate::capabilities::tools::api::FenceSpec,
-    ) -> Result<(), String>;
+    fn release_fence(&self, spec: &crate::kernel::api::FenceSpec) -> Result<(), String>;
 }

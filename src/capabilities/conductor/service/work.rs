@@ -321,9 +321,8 @@ impl Conductor {
         match self.sandboxes(meta, &roster) {
             Ok(sandboxes) => {
                 for sb in &sandboxes.list {
-                    let spec =
-                        crate::capabilities::tools::api::FenceSpec::from_sandbox(sb, meta.exec.net)
-                            .with_read_only(self.fence_read_roots());
+                    let spec = crate::kernel::api::FenceSpec::from_sandbox(sb, meta.exec.net)
+                        .with_read_only(self.fence_read_roots());
                     if let Err(e) = self.tools.release_fence(&spec) {
                         self.log.warn(
                             "conductor::release_session_fences",

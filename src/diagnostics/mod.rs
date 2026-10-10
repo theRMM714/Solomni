@@ -4,7 +4,7 @@
 
 /// 自检：本机事实（平台 + 围栏能力 + 外部解释器）。只报事实，不猜、不改任何东西（围栏自检那个临时目录除外）。
 pub fn doctor() -> i32 {
-    let cap = crate::capabilities::tools::detail::confine::capability();
+    let cap = crate::kernel::detail::confine::capability();
     // 虚拟机档的逐项前置（**只读事实**）：这里按"没登记 QEMU、没指定基础根"问一次，
     // 也就是最朴素的情形——登记过的路径以会话配置界面为准（那里按会话选型问同一份清单）。
     let vm = crate::capabilities::workspace::api::vm_requirements(
@@ -67,18 +67,16 @@ pub fn https_check(args: &[String], i: usize) -> i32 {
 pub fn print_fence_env(args: &[String], flag: usize) -> i32 {
     let raw = args.get(flag + 1).cloned().unwrap_or_default();
     let command = command_after_separator(args);
-    match crate::capabilities::tools::detail::confine::FenceJob::from_json(&raw) {
+    match crate::kernel::detail::confine::FenceJob::from_json(&raw) {
         Ok(job) => {
-            for (k, v) in
-                crate::capabilities::tools::detail::confine::fence_env(&job.spec, &command)
-            {
+            for (k, v) in crate::kernel::detail::confine::fence_env(&job.spec, &command) {
                 println!("{}={}", k.to_string_lossy(), v.to_string_lossy());
             }
             0
         }
         Err(e) => {
             eprintln!("[围栏] {}", e);
-            crate::capabilities::tools::detail::confine::FENCE_FAILED
+            crate::kernel::detail::confine::FENCE_FAILED
         }
     }
 }
@@ -97,23 +95,23 @@ fn command_after_separator(args: &[String]) -> String {
 pub fn fence_verify(args: &[String], flag: usize) -> i32 {
     let raw = args.get(flag + 1).cloned().unwrap_or_default();
     let command = command_after_separator(args);
-    let job = match crate::capabilities::tools::detail::confine::FenceJob::from_json(&raw) {
+    let job = match crate::kernel::detail::confine::FenceJob::from_json(&raw) {
         Ok(j) => j,
         Err(e) => {
             eprintln!("[围栏] {}", e);
-            return crate::capabilities::tools::detail::confine::FENCE_FAILED;
+            return crate::kernel::detail::confine::FENCE_FAILED;
         }
     };
-    match crate::capabilities::tools::detail::confine::verify(&job.spec, &command) {
-        crate::capabilities::tools::detail::confine::FenceVerdict::Enforced => {
+    match crate::kernel::detail::confine::verify(&job.spec, &command) {
+        crate::kernel::detail::confine::FenceVerdict::Enforced => {
             println!("enforced");
             0
         }
-        crate::capabilities::tools::detail::confine::FenceVerdict::EnvUnavailable(why) => {
+        crate::kernel::detail::confine::FenceVerdict::EnvUnavailable(why) => {
             println!("env-unavailable {}", why);
             0
         }
-        crate::capabilities::tools::detail::confine::FenceVerdict::Broken(why) => {
+        crate::kernel::detail::confine::FenceVerdict::Broken(why) => {
             println!("broken {}", why);
             0
         }

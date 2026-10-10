@@ -22,11 +22,12 @@ use crate::capabilities::session::api::Live;
 use crate::capabilities::session::api::{HistoryView, SessionMeta};
 use crate::capabilities::session::ports::HistoryStore;
 use crate::capabilities::tools::ports::SystoolsSource;
-use crate::capabilities::tools::ports::{FileRead, SysIo, ToolRunner};
+use crate::capabilities::tools::ports::{FileRead, SysIo};
 use crate::capabilities::workspace::api::{Library, PackageManifest};
 use crate::capabilities::workspace::api::{Module, ModuleManifest};
 use crate::capabilities::workspace::ports::{ModuleSource, PackageSource, WorkStore, Workdirs};
 use crate::kernel::api::Tier;
+use crate::kernel::ports::ProcessRunner;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -676,7 +677,7 @@ pub(crate) fn run_builtin(
     io: &dyn crate::capabilities::tools::ports::SysIo,
     name: &str,
     args_json: &str,
-) -> crate::capabilities::tools::api::ToolOutcome {
+) -> crate::kernel::api::ToolOutcome {
     let mut obs = crate::capabilities::tools::api::Observations::default();
     crate::capabilities::tools::service::systool::execute(
         sb,
@@ -941,8 +942,8 @@ impl ModuleSource for VecSource {
 
 /// 无声围栏端口：测试里不碰任何 ACL（真实实现在 capabilities/tools/detail/confine）。
 pub(crate) struct NoFenceHost;
-impl crate::capabilities::tools::ports::FenceHost for NoFenceHost {
-    fn release(&self, _spec: &crate::capabilities::tools::api::FenceSpec) -> Result<(), String> {
+impl crate::kernel::ports::FenceHost for NoFenceHost {
+    fn release(&self, _spec: &crate::kernel::api::FenceSpec) -> Result<(), String> {
         Ok(())
     }
 }
@@ -965,8 +966,8 @@ impl RecordingFence {
         self
     }
 }
-impl crate::capabilities::tools::ports::FenceHost for RecordingFence {
-    fn release(&self, spec: &crate::capabilities::tools::api::FenceSpec) -> Result<(), String> {
+impl crate::kernel::ports::FenceHost for RecordingFence {
+    fn release(&self, spec: &crate::kernel::api::FenceSpec) -> Result<(), String> {
         if let Some(m) = &self.fail {
             return Err(m.clone());
         }
@@ -1222,9 +1223,9 @@ pub(crate) fn test_tools_svc() -> Arc<crate::capabilities::tools::service::Tools
 
 /// 同上，但指定三个端口（断言并发/落盘/撤权的那几条用例用）。
 pub(crate) fn test_tools_svc_with(
-    runner: Arc<dyn crate::capabilities::tools::ports::ToolRunner + Send + Sync>,
+    runner: Arc<dyn crate::kernel::ports::ProcessRunner>,
     io: Arc<InMemorySysIo>,
-    fence: Arc<dyn crate::capabilities::tools::ports::FenceHost + Send + Sync>,
+    fence: Arc<dyn crate::kernel::ports::FenceHost + Send + Sync>,
 ) -> Arc<crate::capabilities::tools::service::ToolsService> {
     let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let source =
@@ -1417,7 +1418,7 @@ pub(crate) fn core_with_io(
 pub(crate) fn core_with_runner(
     modules: Vec<Module>,
     gateway: ScriptGateway,
-    runner: Arc<impl ToolRunner + Send + Sync + 'static>,
+    runner: Arc<impl ProcessRunner + 'static>,
 ) -> Conductor {
     core_with_catalog(
         modules,
@@ -1431,7 +1432,7 @@ pub(crate) fn core_with_runner(
 pub(crate) fn core_with_catalog(
     modules: Vec<Module>,
     gateway: ScriptGateway,
-    runner: Arc<impl ToolRunner + Send + Sync + 'static>,
+    runner: Arc<impl ProcessRunner + 'static>,
     catalog: Arc<FakeCatalog>,
 ) -> Conductor {
     core_with_all(
@@ -1448,7 +1449,7 @@ pub(crate) fn core_with_catalog(
 pub(crate) fn core_with_all(
     modules: Vec<Module>,
     gateway: ScriptGateway,
-    runner: Arc<impl ToolRunner + Send + Sync + 'static>,
+    runner: Arc<impl ProcessRunner + 'static>,
     catalog: Arc<FakeCatalog>,
     history: Arc<InMemoryHistory>,
     io: Arc<InMemorySysIo>,
@@ -1468,7 +1469,7 @@ pub(crate) fn core_with_all(
 pub(crate) fn core_with_pkgs(
     modules: Vec<Module>,
     gateway: ScriptGateway,
-    runner: Arc<impl ToolRunner + Send + Sync + 'static>,
+    runner: Arc<impl ProcessRunner + 'static>,
     catalog: Arc<FakeCatalog>,
     history: Arc<InMemoryHistory>,
     io: Arc<InMemorySysIo>,

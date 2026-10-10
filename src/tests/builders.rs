@@ -249,10 +249,10 @@ pub(crate) fn roster() -> Vec<String> {
 /// 守护 runner：任何调用即失败（守护不该用工具的路径）。
 pub(crate) struct SilentRunner;
 
-impl ToolRunner for SilentRunner {
+impl ProcessRunner for SilentRunner {
     fn run(
         &self,
-        _fence: &crate::capabilities::tools::api::FenceSpec,
+        _fence: &crate::kernel::api::FenceSpec,
         _command: &str,
         _args: &str,
         _ask: Option<&dyn crate::kernel::ports::AskUser>,
@@ -278,10 +278,10 @@ impl RecordingRunner {
     }
 }
 
-impl ToolRunner for RecordingRunner {
+impl ProcessRunner for RecordingRunner {
     fn run(
         &self,
-        fence: &crate::capabilities::tools::api::FenceSpec,
+        fence: &crate::kernel::api::FenceSpec,
         command: &str,
         args_json: &str,
         _ask: Option<&dyn crate::kernel::ports::AskUser>,
@@ -321,10 +321,10 @@ impl ParallelRunner {
     }
 }
 
-impl ToolRunner for ParallelRunner {
+impl ProcessRunner for ParallelRunner {
     fn run(
         &self,
-        _fence: &crate::capabilities::tools::api::FenceSpec,
+        _fence: &crate::kernel::api::FenceSpec,
         command: &str,
         args_json: &str,
         _ask: Option<&dyn crate::kernel::ports::AskUser>,
@@ -361,10 +361,10 @@ impl AskingRunner {
     }
 }
 
-impl ToolRunner for AskingRunner {
+impl ProcessRunner for AskingRunner {
     fn run(
         &self,
-        fence: &crate::capabilities::tools::api::FenceSpec,
+        fence: &crate::kernel::api::FenceSpec,
         command: &str,
         args_json: &str,
         ask: Option<&dyn crate::kernel::ports::AskUser>,
@@ -384,11 +384,11 @@ impl ToolRunner for AskingRunner {
             detail: "模块目录（C:/mods/a）授不上：写 DACL 失败（错误码 5）".to_string(),
             options: vec![
                 (
-                    crate::capabilities::tools::domain::fence::OPT_FENCE_UNFENCED.to_string(),
+                    crate::kernel::domain::fence::OPT_FENCE_UNFENCED.to_string(),
                     "本轮无围栏跑一次".to_string(),
                 ),
                 (
-                    crate::capabilities::tools::domain::fence::OPT_FENCE_ABORT.to_string(),
+                    crate::kernel::domain::fence::OPT_FENCE_ABORT.to_string(),
                     "放弃这次调用".to_string(),
                 ),
             ],
@@ -423,7 +423,7 @@ pub(crate) const TOOL_CALL: &str =
 pub(crate) fn member_with_tools(
     id: &str,
     script: Vec<String>,
-    runner: Arc<impl ToolRunner + Send + Sync + 'static>,
+    runner: Arc<impl ProcessRunner + 'static>,
 ) -> Member {
     let mut commands = BTreeMap::new();
     commands.insert("grep".to_string(), "python tools/grep.py".to_string());
@@ -459,10 +459,7 @@ pub(crate) fn member_with_tools(
         sandbox: test_sandbox("m0", &[]),
         builtin_tools: test_systools().tools,
         unavailable: BTreeMap::new(),
-        fence: crate::capabilities::tools::api::FenceSpec::from_sandbox(
-            &test_sandbox("m0", &[]),
-            false,
-        ),
+        fence: crate::kernel::api::FenceSpec::from_sandbox(&test_sandbox("m0", &[]), false),
         reply_seq: 0,
         line: Default::default(),
         // 测试替身按"执行席"发放全部内置工具（角色表的越权校验另有专门用例）。
@@ -748,7 +745,7 @@ pub(crate) fn native_member(
         sandbox: sb.clone(),
         builtin_tools: test_systools().tools,
         unavailable: BTreeMap::new(),
-        fence: crate::capabilities::tools::api::FenceSpec::from_sandbox(&sb, false),
+        fence: crate::kernel::api::FenceSpec::from_sandbox(&sb, false),
         reply_seq: 0,
         line: Default::default(),
         // 测试替身按"执行席"发放全部内置工具（角色表的越权校验另有专门用例）。

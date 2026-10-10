@@ -1,16 +1,11 @@
-//! Windows 后端：AppContainer（文件系统与网络围栏）+ Job Object（进程树围栏）。
-//! 机制：按 agent 派生一个容器 SID → 把「可达范围」逐条授权给它
-//! （共享区与私有沙箱读写、模块目录读写、解释器安装目录只读+执行）
-//! → 用 STARTUPINFOEX 的 SECURITY_CAPABILITIES 启动工具（**不给任何 capability = 默认断网**）。
-//! 祖先目录不用授权：容器令牌自带 SeChangeNotifyPrivilege（绕过遍历检查），按名走到被放行的根不需要 FILE_TRAVERSE。
-//! 授权只落在用户自己拥有的目录上（不需要管理员）；撤销用同一套机制反向做。
-//! 授权与撤销由外层进程做（见 confine::prepare_fence），一次性做好并记在会话内存里；
-//! 守门进程只负责"按同一个名字派生同一个 SID 并把工具放进去"。
-//! 机制不可用时一律如实降级（stderr 说明 + 启动报告 fs/net=false），绝不假装有围栏。
+//! 目的：Windows 后端——AppContainer（文件系统与网络围栏）+ Job Object（进程树围栏）。
+//! 管：按 agent 派生容器 SID，逐条授权可达范围（共享区/沙箱/模块目录/解释器目录），再用 STARTUPINFOEX 启动工具（不给 capability = 断网）。
+//! 不管：祖先目录不用授权（容器令牌自带 SeChangeNotifyPrivilege）；授权只落在用户自己拥有的目录上。
+//! 联动：授权与撤销由外层进程做（见 confine::prepare_fence），守门进程只按同一个名字派生同一个 SID；机制不可用时一律如实降级。
 
 use super::{shell_command, Capability, FencePrep, FenceVerdict, FENCE_FAILED};
-use crate::capabilities::tools::api::FenceSpec;
-use crate::capabilities::tools::domain::fence::FencePart;
+use crate::kernel::api::FenceSpec;
+use crate::kernel::domain::fence::FencePart;
 use std::ffi::c_void;
 
 mod acl;
@@ -24,39 +19,38 @@ mod tests;
 use std::path::{Path, PathBuf};
 use windows_sys::Win32::Security::{ACL, PSID};
 
-/// 文件对象（SetNamedSecurityInfoW / GetNamedSecurityInfoW 的对象类型）。
+/// 目的：文件对象（SetNamedSecurityInfoW / GetNamedSecurityInfoW 的对象类型）。
 pub(crate) const SE_FILE_OBJECT: i32 = 1;
-// 权限位**只用具体位**：通用位（GENERIC_READ / WRITE / EXECUTE / ALL）的常量值极易记错，写错一个给出去的
-// 就是完全不同的权限。注意：标着 GENERIC_READ 的是 0x4000_0000（其实是 GENERIC_WRITE）、
-// 标着 GENERIC_EXECUTE 的是 0x1000_0000（其实是 GENERIC_ALL）——于是"只读"的解释器基线实际授出了全权。
+// 权限位**只用具体位**：通用位（GENERIC_*）的常量值极易记错，写错一个给出去的就是完全不同的权限——
+// 标着 GENERIC_READ 的其实是 GENERIC_WRITE、标着 GENERIC_EXECUTE 的其实是 GENERIC_ALL。
 pub(crate) const FILE_GENERIC_READ: u32 = 0x0012_0089;
 pub(crate) const FILE_GENERIC_WRITE: u32 = 0x0012_0116;
 pub(crate) const FILE_GENERIC_EXECUTE: u32 = 0x0012_00A0;
 pub(crate) const FILE_ALL_ACCESS: u32 = 0x001F_01FF;
-/// 目录里建/删子项（工具要能重写自己的产物）。
+/// 目的：目录里建/删子项（工具要能重写自己的产物）。
 pub(crate) const FILE_DELETE_CHILD: u32 = 0x0000_0040;
 pub(crate) const DELETE: u32 = 0x0001_0000;
 pub(crate) const WRITE_DAC: u32 = 0x0004_0000;
-/// 通用位：ACL 里存的可能是它们，也可能是内核展开后的具体位，比较覆盖关系时两者等价。
+/// 目的：通用位：ACL 里存的可能是它们，也可能是内核展开后的具体位，比较覆盖关系时两者等价。
 pub(crate) const GENERIC_READ: u32 = 0x8000_0000;
 pub(crate) const GENERIC_WRITE: u32 = 0x4000_0000;
 pub(crate) const GENERIC_EXECUTE: u32 = 0x2000_0000;
 pub(crate) const GENERIC_ALL: u32 = 0x1000_0000;
 
-/// 数据边界（会话目录、模块目录）→ 读写 + 删子项 + 写 DACL（撤权要用）。
+/// 目的：数据边界（会话目录、模块目录）→ 读写 + 删子项 + 写 DACL（撤权要用）。
 pub(crate) const RIGHTS_RW: u32 = FILE_GENERIC_READ
     | FILE_GENERIC_WRITE
     | FILE_GENERIC_EXECUTE
     | FILE_DELETE_CHILD
     | DELETE
     | WRITE_DAC;
-/// 只读 + 执行（解释器安装目录：脚本要跑就得读得到它）。
+/// 目的：只读 + 执行（解释器安装目录：脚本要跑就得读得到它）。
 pub(crate) const RIGHTS_RO: u32 = FILE_GENERIC_READ | FILE_GENERIC_EXECUTE;
-/// 只读属性：**能判断"这个目录在不在"**，但读不到内容、列不了目录。
-/// 数据边界的父目录只授这一位（理由见 grant_targets）。
+/// 目的：只读属性：**能判断"这个目录在不在"**，但读不到内容、列不了目录。
+///   数据边界的父目录只授这一位（理由见 grant_targets）。
 pub(crate) const RIGHTS_STAT: u32 = 0x0000_0080;
 
-/// 一次工具执行最多这么多进程（含 shell 与它拉起的子进程）。
+/// 目的：一次工具执行最多这么多进程（含 shell 与它拉起的子进程）。
 pub(crate) const MAX_PROCESSES: u32 = 32;
 
 extern "system" {
@@ -76,9 +70,9 @@ extern "system" {
     ) -> u32;
 }
 
-/// TREE_SEC_INFO_SET（递归设置）。
+/// 目的：TREE_SEC_INFO_SET（递归设置）。
 pub(crate) const TREE_SEC_INFO_SET: u32 = 1;
-/// ProgressInvokeNever（不回调进度）。
+/// 目的：ProgressInvokeNever（不回调进度）。
 pub(crate) const PROGRESS_INVOKE_NEVER: u32 = 1;
 
 pub fn capability() -> Capability {
@@ -138,7 +132,7 @@ fn self_check_scratch(sid: PSID, scratch: &Path) -> Result<(), String> {
     }
 }
 
-/// 本程序建的容器 profile 前缀（`container_name` 生成的就是它；`--fence-clean` 按它扫整族）。
+/// 目的：本程序建的容器 profile 前缀（`container_name` 生成的就是它；`--fence-clean` 按它扫整族）。
 pub(crate) const PROFILE_PREFIX: &str = "Solomni.Agent.";
 
 /// 目的：判断授权落点是不是**不存在**（派生与执行之间有竞态时兜底；不存在就跳过，不判整次失败）。
@@ -225,10 +219,8 @@ pub fn prepare_fence(spec: &FenceSpec, command: &str, home: &Path) -> FencePrep 
             }
         }
     }
-    // **祖先链不用授**：容器的令牌里有 SeChangeNotifyPrivilege（Bypass traverse checking，真机 whoami /priv
-    // 确认 Enabled），按名走到被放行的根不需要祖先上的 FILE_TRAVERSE。"给祖先授穿过"那一趟只在改写
-    // C:\、C:\Users 这种巨型目录的 DACL 时付出代价——Windows 会顺着整棵树重算继承，真机实测 ~90 s/条
-    // （CI 上两条 ACL 契约测试各 95 s，就是它）。删掉这一趟：授权面更小，也不再碰产品目录之外的系统目录。
+    // **祖先链不用授**：容器令牌自带 SeChangeNotifyPrivilege，按名走到被放行的根不需要 FILE_TRAVERSE。
+    // 给祖先授穿过要改写 C:\、C:\Users 这种巨型目录的 DACL（Windows 顺整棵树重算继承，真机实测 ~90 s/条）。
     free_sid(base);
 
     // 数据边界（会话目录、模块目录）→ 授给该 agent 自己的容器 SID（互相看不见）；
@@ -282,8 +274,8 @@ pub fn prepare_fence(spec: &FenceSpec, command: &str, home: &Path) -> FencePrep 
     prep
 }
 
-/// 本机能不能强制住容器围栏（**不写任何目录 ACL**）：建容器 profile + 派生容器 SID 就是容器能起来的全部前提。
-/// 三态：profile 建不起来（环境拒绝建）= 环境结论；profile 建得起来却派生不出 SID = 我们的步骤写错了。
+/// 目的：本机能不能强制住容器围栏（**不写任何目录 ACL**）：建容器 profile + 派生容器 SID 就是容器能起来的全部前提。
+///   三态：profile 建不起来（环境拒绝建）= 环境结论；profile 建得起来却派生不出 SID = 我们的步骤写错了。
 pub fn verify(spec: &FenceSpec, _command: &str) -> FenceVerdict {
     let name = container_name(spec);
     if let Err(e) = ensure_profile(&name) {
@@ -340,8 +332,8 @@ pub fn run_fenced(spec: &FenceSpec, prepared: bool, home: Option<&Path>, command
     }
 }
 
-/// 无围栏执行：容器不可用（外层没授权、profile 建不起来、容器起不来）时的如实降级——
-/// 命令仍交系统 shell 解释、cwd 仍是模块根，只是少了容器那层强制（启动报告里已说明能力等级）。
+/// 目的：无围栏执行：容器不可用（外层没授权、profile 建不起来、容器起不来）时的如实降级——
+///   命令仍交系统 shell 解释、cwd 仍是模块根，只是少了容器那层强制（启动报告里已说明能力等级）。
 pub(crate) fn run_unfenced(spec: &FenceSpec, command: &str) -> i32 {
     match shell_command(command).current_dir(&spec.cwd).status() {
         Ok(s) => s.code().unwrap_or(FENCE_FAILED),
