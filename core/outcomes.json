@@ -1,0 +1,3315 @@
+{
+  "outcomes": [
+    {
+      "scenario": "Baseline",
+      "summary": "Success",
+      "log_path": "log/baseline.log",
+      "diff_path": null,
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 11.19930462,
+          "process_status": "Success",
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=solomni@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 10.265333486,
+          "process_status": "Success",
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=solomni@0.1.0",
+            "--bin",
+            "solomni",
+            "--",
+            "--test-threads=1"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/capabilities/slate/service.rs:19:5: replace propose -> Result<Proposal, String> with Ok(Default::default())",
+          "package": "solomni",
+          "file": "src/capabilities/slate/service.rs",
+          "function": {
+            "function_name": "propose",
+            "return_type": "-> Result<Proposal, String>",
+            "span": {
+              "start": {
+                "line": 13,
+                "column": 1
+              },
+              "end": {
+                "line": 82,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 19,
+              "column": 5
+            },
+            "end": {
+              "line": 81,
+              "column": 7
+            }
+          },
+          "replacement": "Ok(Default::default())",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "Unviable",
+      "log_path": "log/src__capabilities__slate__service.rs_line_19_col_5.log",
+      "diff_path": "diff/src__capabilities__slate__service.rs_line_19_col_5.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 3.757355441,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=solomni@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/capabilities/llm/detail/repair.rs:24:9: replace <impl EnvelopeRepair for UnambiguousRepair>::repair -> RepairOutcome with Default::default()",
+          "package": "solomni",
+          "file": "src/capabilities/llm/detail/repair.rs",
+          "function": {
+            "function_name": "<impl EnvelopeRepair for UnambiguousRepair>::repair",
+            "return_type": "-> RepairOutcome",
+            "span": {
+              "start": {
+                "line": 23,
+                "column": 5
+              },
+              "end": {
+                "line": 56,
+                "column": 6
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 24,
+              "column": 9
+            },
+            "end": {
+              "line": 55,
+              "column": 10
+            }
+          },
+          "replacement": "Default::default()",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "Unviable",
+      "log_path": "log/src__capabilities__llm__detail__repair.rs_line_24_col_9.log",
+      "diff_path": "diff/src__capabilities__llm__detail__repair.rs_line_24_col_9.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 3.460010545,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=solomni@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/capabilities/llm/detail/repair.rs:26:13: delete match arm Malformed::RawControl{tail, ..} in <impl EnvelopeRepair for UnambiguousRepair>::repair",
+          "package": "solomni",
+          "file": "src/capabilities/llm/detail/repair.rs",
+          "function": {
+            "function_name": "<impl EnvelopeRepair for UnambiguousRepair>::repair",
+            "return_type": "-> RepairOutcome",
+            "span": {
+              "start": {
+                "line": 23,
+                "column": 5
+              },
+              "end": {
+                "line": 56,
+                "column": 6
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 26,
+              "column": 13
+            },
+            "end": {
+              "line": 44,
+              "column": 14
+            }
+          },
+          "replacement": "",
+          "genre": "MatchArm"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__capabilities__llm__detail__repair.rs_line_26_col_13.log",
+      "diff_path": "diff/src__capabilities__llm__detail__repair.rs_line_26_col_13.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 10.295936946,
+          "process_status": "Success",
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=solomni@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 9.864477224,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=solomni@0.1.0",
+            "--bin",
+            "solomni",
+            "--",
+            "--test-threads=1"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/capabilities/llm/detail/repair.rs:46:13: delete match arm Malformed::Unclosed(tail) in <impl EnvelopeRepair for UnambiguousRepair>::repair",
+          "package": "solomni",
+          "file": "src/capabilities/llm/detail/repair.rs",
+          "function": {
+            "function_name": "<impl EnvelopeRepair for UnambiguousRepair>::repair",
+            "return_type": "-> RepairOutcome",
+            "span": {
+              "start": {
+                "line": 23,
+                "column": 5
+              },
+              "end": {
+                "line": 56,
+                "column": 6
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 46,
+              "column": 13
+            },
+            "end": {
+              "line": 52,
+              "column": 15
+            }
+          },
+          "replacement": "",
+          "genre": "MatchArm"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__capabilities__llm__detail__repair.rs_line_46_col_13.log",
+      "diff_path": "diff/src__capabilities__llm__detail__repair.rs_line_46_col_13.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 10.231574353,
+          "process_status": "Success",
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=solomni@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 9.914569981,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=solomni@0.1.0",
+            "--bin",
+            "solomni",
+            "--",
+            "--test-threads=1"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/capabilities/llm/detail/repair.rs:33:32: replace match guard t.in_string with true in <impl EnvelopeRepair for UnambiguousRepair>::repair",
+          "package": "solomni",
+          "file": "src/capabilities/llm/detail/repair.rs",
+          "function": {
+            "function_name": "<impl EnvelopeRepair for UnambiguousRepair>::repair",
+            "return_type": "-> RepairOutcome",
+            "span": {
+              "start": {
+                "line": 23,
+                "column": 5
+              },
+              "end": {
+                "line": 56,
+                "column": 6
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 33,
+              "column": 32
+            },
+            "end": {
+              "line": 33,
+              "column": 43
+            }
+          },
+          "replacement": "true",
+          "genre": "MatchArmGuard"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__capabilities__llm__detail__repair.rs_line_33_col_32.log",
+      "diff_path": "diff/src__capabilities__llm__detail__repair.rs_line_33_col_32.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 10.33928103,
+          "process_status": "Success",
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=solomni@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 9.864620654,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=solomni@0.1.0",
+            "--bin",
+            "solomni",
+            "--",
+            "--test-threads=1"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/capabilities/llm/detail/repair.rs:33:32: replace match guard t.in_string with false in <impl EnvelopeRepair for UnambiguousRepair>::repair",
+          "package": "solomni",
+          "file": "src/capabilities/llm/detail/repair.rs",
+          "function": {
+            "function_name": "<impl EnvelopeRepair for UnambiguousRepair>::repair",
+            "return_type": "-> RepairOutcome",
+            "span": {
+              "start": {
+                "line": 23,
+                "column": 5
+              },
+              "end": {
+                "line": 56,
+                "column": 6
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 33,
+              "column": 32
+            },
+            "end": {
+              "line": 33,
+              "column": 43
+            }
+          },
+          "replacement": "false",
+          "genre": "MatchArmGuard"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__capabilities__llm__detail__repair.rs_line_33_col_32_001.log",
+      "diff_path": "diff/src__capabilities__llm__detail__repair.rs_line_33_col_32_001.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 10.394862618,
+          "process_status": "Success",
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=solomni@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 9.914593665,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=solomni@0.1.0",
+            "--bin",
+            "solomni",
+            "--",
+            "--test-threads=1"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/capabilities/llm/detail/repair.rs:34:32: replace match guard !t.missing.is_empty() with false in <impl EnvelopeRepair for UnambiguousRepair>::repair",
+          "package": "solomni",
+          "file": "src/capabilities/llm/detail/repair.rs",
+          "function": {
+            "function_name": "<impl EnvelopeRepair for UnambiguousRepair>::repair",
+            "return_type": "-> RepairOutcome",
+            "span": {
+              "start": {
+                "line": 23,
+                "column": 5
+              },
+              "end": {
+                "line": 56,
+                "column": 6
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 34,
+              "column": 32
+            },
+            "end": {
+              "line": 34,
+              "column": 53
+            }
+          },
+          "replacement": "false",
+          "genre": "MatchArmGuard"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__capabilities__llm__detail__repair.rs_line_34_col_32.log",
+      "diff_path": "diff/src__capabilities__llm__detail__repair.rs_line_34_col_32.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 10.484084958,
+          "process_status": "Success",
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=solomni@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 9.915049129,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=solomni@0.1.0",
+            "--bin",
+            "solomni",
+            "--",
+            "--test-threads=1"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/capabilities/llm/detail/repair.rs:34:32: delete ! in <impl EnvelopeRepair for UnambiguousRepair>::repair",
+          "package": "solomni",
+          "file": "src/capabilities/llm/detail/repair.rs",
+          "function": {
+            "function_name": "<impl EnvelopeRepair for UnambiguousRepair>::repair",
+            "return_type": "-> RepairOutcome",
+            "span": {
+              "start": {
+                "line": 23,
+                "column": 5
+              },
+              "end": {
+                "line": 56,
+                "column": 6
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 34,
+              "column": 32
+            },
+            "end": {
+              "line": 34,
+              "column": 33
+            }
+          },
+          "replacement": "",
+          "genre": "UnaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__capabilities__llm__detail__repair.rs_line_34_col_32_001.log",
+      "diff_path": "diff/src__capabilities__llm__detail__repair.rs_line_34_col_32_001.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 10.437834707,
+          "process_status": "Success",
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=solomni@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 9.914830884,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=solomni@0.1.0",
+            "--bin",
+            "solomni",
+            "--",
+            "--test-threads=1"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/capabilities/llm/detail/repair.rs:62:5: replace brace_fix -> Option<String> with None",
+          "package": "solomni",
+          "file": "src/capabilities/llm/detail/repair.rs",
+          "function": {
+            "function_name": "brace_fix",
+            "return_type": "-> Option<String>",
+            "span": {
+              "start": {
+                "line": 59,
+                "column": 1
+              },
+              "end": {
+                "line": 66,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 62,
+              "column": 5
+            },
+            "end": {
+              "line": 65,
+              "column": 45
+            }
+          },
+          "replacement": "None",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__capabilities__llm__detail__repair.rs_line_62_col_5.log",
+      "diff_path": "diff/src__capabilities__llm__detail__repair.rs_line_62_col_5.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 10.337411657,
+          "process_status": "Success",
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=solomni@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 9.964916394,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=solomni@0.1.0",
+            "--bin",
+            "solomni",
+            "--",
+            "--test-threads=1"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/capabilities/llm/detail/repair.rs:62:5: replace brace_fix -> Option<String> with Some(String::new())",
+          "package": "solomni",
+          "file": "src/capabilities/llm/detail/repair.rs",
+          "function": {
+            "function_name": "brace_fix",
+            "return_type": "-> Option<String>",
+            "span": {
+              "start": {
+                "line": 59,
+                "column": 1
+              },
+              "end": {
+                "line": 66,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 62,
+              "column": 5
+            },
+            "end": {
+              "line": 65,
+              "column": 45
+            }
+          },
+          "replacement": "Some(String::new())",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__capabilities__llm__detail__repair.rs_line_62_col_5_001.log",
+      "diff_path": "diff/src__capabilities__llm__detail__repair.rs_line_62_col_5_001.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 10.436969027,
+          "process_status": "Success",
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=solomni@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 9.965957854,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=solomni@0.1.0",
+            "--bin",
+            "solomni",
+            "--",
+            "--test-threads=1"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/capabilities/llm/detail/repair.rs:62:5: replace brace_fix -> Option<String> with Some(\"xyzzy\".into())",
+          "package": "solomni",
+          "file": "src/capabilities/llm/detail/repair.rs",
+          "function": {
+            "function_name": "brace_fix",
+            "return_type": "-> Option<String>",
+            "span": {
+              "start": {
+                "line": 59,
+                "column": 1
+              },
+              "end": {
+                "line": 66,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 62,
+              "column": 5
+            },
+            "end": {
+              "line": 65,
+              "column": 45
+            }
+          },
+          "replacement": "Some(\"xyzzy\".into())",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__capabilities__llm__detail__repair.rs_line_62_col_5_002.log",
+      "diff_path": "diff/src__capabilities__llm__detail__repair.rs_line_62_col_5_002.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 10.485460408,
+          "process_status": "Success",
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=solomni@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 9.915102975,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=solomni@0.1.0",
+            "--bin",
+            "solomni",
+            "--",
+            "--test-threads=1"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/capabilities/llm/detail/repair.rs:62:50: replace || with && in brace_fix",
+          "package": "solomni",
+          "file": "src/capabilities/llm/detail/repair.rs",
+          "function": {
+            "function_name": "brace_fix",
+            "return_type": "-> Option<String>",
+            "span": {
+              "start": {
+                "line": 59,
+                "column": 1
+              },
+              "end": {
+                "line": 66,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 62,
+              "column": 50
+            },
+            "end": {
+              "line": 62,
+              "column": 52
+            }
+          },
+          "replacement": "&&",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__capabilities__llm__detail__repair.rs_line_62_col_50.log",
+      "diff_path": "diff/src__capabilities__llm__detail__repair.rs_line_62_col_50.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 10.394455938,
+          "process_status": "Success",
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=solomni@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 9.964869891,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=solomni@0.1.0",
+            "--bin",
+            "solomni",
+            "--",
+            "--test-threads=1"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/capabilities/llm/detail/repair.rs:62:23: replace || with && in brace_fix",
+          "package": "solomni",
+          "file": "src/capabilities/llm/detail/repair.rs",
+          "function": {
+            "function_name": "brace_fix",
+            "return_type": "-> Option<String>",
+            "span": {
+              "start": {
+                "line": 59,
+                "column": 1
+              },
+              "end": {
+                "line": 66,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 62,
+              "column": 23
+            },
+            "end": {
+              "line": 62,
+              "column": 25
+            }
+          },
+          "replacement": "&&",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__capabilities__llm__detail__repair.rs_line_62_col_23.log",
+      "diff_path": "diff/src__capabilities__llm__detail__repair.rs_line_62_col_23.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 10.53827818,
+          "process_status": "Success",
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=solomni@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 9.914894864,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=solomni@0.1.0",
+            "--bin",
+            "solomni",
+            "--",
+            "--test-threads=1"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/capabilities/llm/detail/repair.rs:62:68: replace > with == in brace_fix",
+          "package": "solomni",
+          "file": "src/capabilities/llm/detail/repair.rs",
+          "function": {
+            "function_name": "brace_fix",
+            "return_type": "-> Option<String>",
+            "span": {
+              "start": {
+                "line": 59,
+                "column": 1
+              },
+              "end": {
+                "line": 66,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 62,
+              "column": 68
+            },
+            "end": {
+              "line": 62,
+              "column": 69
+            }
+          },
+          "replacement": "==",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__capabilities__llm__detail__repair.rs_line_62_col_68.log",
+      "diff_path": "diff/src__capabilities__llm__detail__repair.rs_line_62_col_68.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 10.34227302,
+          "process_status": "Success",
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=solomni@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 9.914894415,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=solomni@0.1.0",
+            "--bin",
+            "solomni",
+            "--",
+            "--test-threads=1"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/capabilities/llm/detail/repair.rs:62:68: replace > with < in brace_fix",
+          "package": "solomni",
+          "file": "src/capabilities/llm/detail/repair.rs",
+          "function": {
+            "function_name": "brace_fix",
+            "return_type": "-> Option<String>",
+            "span": {
+              "start": {
+                "line": 59,
+                "column": 1
+              },
+              "end": {
+                "line": 66,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 62,
+              "column": 68
+            },
+            "end": {
+              "line": 62,
+              "column": 69
+            }
+          },
+          "replacement": "<",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__capabilities__llm__detail__repair.rs_line_62_col_68_001.log",
+      "diff_path": "diff/src__capabilities__llm__detail__repair.rs_line_62_col_68_001.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 10.492504836,
+          "process_status": "Success",
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=solomni@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 9.914754982,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=solomni@0.1.0",
+            "--bin",
+            "solomni",
+            "--",
+            "--test-threads=1"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/capabilities/llm/detail/repair.rs:62:68: replace > with >= in brace_fix",
+          "package": "solomni",
+          "file": "src/capabilities/llm/detail/repair.rs",
+          "function": {
+            "function_name": "brace_fix",
+            "return_type": "-> Option<String>",
+            "span": {
+              "start": {
+                "line": 59,
+                "column": 1
+              },
+              "end": {
+                "line": 66,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 62,
+              "column": 68
+            },
+            "end": {
+              "line": 62,
+              "column": 69
+            }
+          },
+          "replacement": ">=",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__capabilities__llm__detail__repair.rs_line_62_col_68_002.log",
+      "diff_path": "diff/src__capabilities__llm__detail__repair.rs_line_62_col_68_002.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 10.349934104999999,
+          "process_status": "Success",
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=solomni@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 9.91487158,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=solomni@0.1.0",
+            "--bin",
+            "solomni",
+            "--",
+            "--test-threads=1"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/capabilities/llm/detail/repair.rs:69:5: replace nothing -> RepairOutcome with Default::default()",
+          "package": "solomni",
+          "file": "src/capabilities/llm/detail/repair.rs",
+          "function": {
+            "function_name": "nothing",
+            "return_type": "-> RepairOutcome",
+            "span": {
+              "start": {
+                "line": 68,
+                "column": 1
+              },
+              "end": {
+                "line": 73,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 69,
+              "column": 5
+            },
+            "end": {
+              "line": 72,
+              "column": 6
+            }
+          },
+          "replacement": "Default::default()",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "Unviable",
+      "log_path": "log/src__capabilities__llm__detail__repair.rs_line_69_col_5.log",
+      "diff_path": "diff/src__capabilities__llm__detail__repair.rs_line_69_col_5.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 3.507352251,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=solomni@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/capabilities/llm/detail/repair.rs:78:5: replace escape_controls -> (String, Vec<String>) with (String::new(), vec![])",
+          "package": "solomni",
+          "file": "src/capabilities/llm/detail/repair.rs",
+          "function": {
+            "function_name": "escape_controls",
+            "return_type": "-> (String, Vec<String>)",
+            "span": {
+              "start": {
+                "line": 75,
+                "column": 1
+              },
+              "end": {
+                "line": 127,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 78,
+              "column": 5
+            },
+            "end": {
+              "line": 126,
+              "column": 16
+            }
+          },
+          "replacement": "(String::new(), vec![])",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__capabilities__llm__detail__repair.rs_line_78_col_5.log",
+      "diff_path": "diff/src__capabilities__llm__detail__repair.rs_line_78_col_5.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 10.487733139,
+          "process_status": "Success",
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=solomni@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 9.915099574,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=solomni@0.1.0",
+            "--bin",
+            "solomni",
+            "--",
+            "--test-threads=1"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/capabilities/llm/detail/repair.rs:78:5: replace escape_controls -> (String, Vec<String>) with (String::new(), vec![String::new()])",
+          "package": "solomni",
+          "file": "src/capabilities/llm/detail/repair.rs",
+          "function": {
+            "function_name": "escape_controls",
+            "return_type": "-> (String, Vec<String>)",
+            "span": {
+              "start": {
+                "line": 75,
+                "column": 1
+              },
+              "end": {
+                "line": 127,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 78,
+              "column": 5
+            },
+            "end": {
+              "line": 126,
+              "column": 16
+            }
+          },
+          "replacement": "(String::new(), vec![String::new()])",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__capabilities__llm__detail__repair.rs_line_78_col_5_001.log",
+      "diff_path": "diff/src__capabilities__llm__detail__repair.rs_line_78_col_5_001.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 10.438824484,
+          "process_status": "Success",
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=solomni@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 9.864907577,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=solomni@0.1.0",
+            "--bin",
+            "solomni",
+            "--",
+            "--test-threads=1"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/capabilities/llm/detail/repair.rs:78:5: replace escape_controls -> (String, Vec<String>) with (String::new(), vec![\"xyzzy\".into()])",
+          "package": "solomni",
+          "file": "src/capabilities/llm/detail/repair.rs",
+          "function": {
+            "function_name": "escape_controls",
+            "return_type": "-> (String, Vec<String>)",
+            "span": {
+              "start": {
+                "line": 75,
+                "column": 1
+              },
+              "end": {
+                "line": 127,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 78,
+              "column": 5
+            },
+            "end": {
+              "line": 126,
+              "column": 16
+            }
+          },
+          "replacement": "(String::new(), vec![\"xyzzy\".into()])",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__capabilities__llm__detail__repair.rs_line_78_col_5_002.log",
+      "diff_path": "diff/src__capabilities__llm__detail__repair.rs_line_78_col_5_002.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 10.442128146,
+          "process_status": "Success",
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=solomni@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 9.864648083,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=solomni@0.1.0",
+            "--bin",
+            "solomni",
+            "--",
+            "--test-threads=1"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/capabilities/llm/detail/repair.rs:78:5: replace escape_controls -> (String, Vec<String>) with (\"xyzzy\".into(), vec![])",
+          "package": "solomni",
+          "file": "src/capabilities/llm/detail/repair.rs",
+          "function": {
+            "function_name": "escape_controls",
+            "return_type": "-> (String, Vec<String>)",
+            "span": {
+              "start": {
+                "line": 75,
+                "column": 1
+              },
+              "end": {
+                "line": 127,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 78,
+              "column": 5
+            },
+            "end": {
+              "line": 126,
+              "column": 16
+            }
+          },
+          "replacement": "(\"xyzzy\".into(), vec![])",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__capabilities__llm__detail__repair.rs_line_78_col_5_003.log",
+      "diff_path": "diff/src__capabilities__llm__detail__repair.rs_line_78_col_5_003.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 10.284377321000001,
+          "process_status": "Success",
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=solomni@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 9.864856756,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=solomni@0.1.0",
+            "--bin",
+            "solomni",
+            "--",
+            "--test-threads=1"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/capabilities/llm/detail/repair.rs:78:5: replace escape_controls -> (String, Vec<String>) with (\"xyzzy\".into(), vec![String::new()])",
+          "package": "solomni",
+          "file": "src/capabilities/llm/detail/repair.rs",
+          "function": {
+            "function_name": "escape_controls",
+            "return_type": "-> (String, Vec<String>)",
+            "span": {
+              "start": {
+                "line": 75,
+                "column": 1
+              },
+              "end": {
+                "line": 127,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 78,
+              "column": 5
+            },
+            "end": {
+              "line": 126,
+              "column": 16
+            }
+          },
+          "replacement": "(\"xyzzy\".into(), vec![String::new()])",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__capabilities__llm__detail__repair.rs_line_78_col_5_004.log",
+      "diff_path": "diff/src__capabilities__llm__detail__repair.rs_line_78_col_5_004.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 10.393443874,
+          "process_status": "Success",
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=solomni@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 9.864865706,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=solomni@0.1.0",
+            "--bin",
+            "solomni",
+            "--",
+            "--test-threads=1"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/capabilities/llm/detail/repair.rs:78:5: replace escape_controls -> (String, Vec<String>) with (\"xyzzy\".into(), vec![\"xyzzy\".into()])",
+          "package": "solomni",
+          "file": "src/capabilities/llm/detail/repair.rs",
+          "function": {
+            "function_name": "escape_controls",
+            "return_type": "-> (String, Vec<String>)",
+            "span": {
+              "start": {
+                "line": 75,
+                "column": 1
+              },
+              "end": {
+                "line": 127,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 78,
+              "column": 5
+            },
+            "end": {
+              "line": 126,
+              "column": 16
+            }
+          },
+          "replacement": "(\"xyzzy\".into(), vec![\"xyzzy\".into()])",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__capabilities__llm__detail__repair.rs_line_78_col_5_005.log",
+      "diff_path": "diff/src__capabilities__llm__detail__repair.rs_line_78_col_5_005.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 10.338862416,
+          "process_status": "Success",
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=solomni@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 9.864835035,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=solomni@0.1.0",
+            "--bin",
+            "solomni",
+            "--",
+            "--test-threads=1"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/capabilities/llm/detail/repair.rs:83:12: delete ! in escape_controls",
+          "package": "solomni",
+          "file": "src/capabilities/llm/detail/repair.rs",
+          "function": {
+            "function_name": "escape_controls",
+            "return_type": "-> (String, Vec<String>)",
+            "span": {
+              "start": {
+                "line": 75,
+                "column": 1
+              },
+              "end": {
+                "line": 127,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 83,
+              "column": 12
+            },
+            "end": {
+              "line": 83,
+              "column": 13
+            }
+          },
+          "replacement": "",
+          "genre": "UnaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__capabilities__llm__detail__repair.rs_line_83_col_12.log",
+      "diff_path": "diff/src__capabilities__llm__detail__repair.rs_line_83_col_12.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 10.545254547999999,
+          "process_status": "Success",
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=solomni@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 9.915565765,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=solomni@0.1.0",
+            "--bin",
+            "solomni",
+            "--",
+            "--test-threads=1"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/capabilities/llm/detail/repair.rs:84:18: replace == with != in escape_controls",
+          "package": "solomni",
+          "file": "src/capabilities/llm/detail/repair.rs",
+          "function": {
+            "function_name": "escape_controls",
+            "return_type": "-> (String, Vec<String>)",
+            "span": {
+              "start": {
+                "line": 75,
+                "column": 1
+              },
+              "end": {
+                "line": 127,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 84,
+              "column": 18
+            },
+            "end": {
+              "line": 84,
+              "column": 20
+            }
+          },
+          "replacement": "!=",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__capabilities__llm__detail__repair.rs_line_84_col_18.log",
+      "diff_path": "diff/src__capabilities__llm__detail__repair.rs_line_84_col_18.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 10.292456968,
+          "process_status": "Success",
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=solomni@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 9.914980564,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=solomni@0.1.0",
+            "--bin",
+            "solomni",
+            "--",
+            "--test-threads=1"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/capabilities/llm/detail/repair.rs:116:18: replace match guard (c as u32) < 0x20 with true in escape_controls",
+          "package": "solomni",
+          "file": "src/capabilities/llm/detail/repair.rs",
+          "function": {
+            "function_name": "escape_controls",
+            "return_type": "-> (String, Vec<String>)",
+            "span": {
+              "start": {
+                "line": 75,
+                "column": 1
+              },
+              "end": {
+                "line": 127,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 116,
+              "column": 18
+            },
+            "end": {
+              "line": 116,
+              "column": 35
+            }
+          },
+          "replacement": "true",
+          "genre": "MatchArmGuard"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__capabilities__llm__detail__repair.rs_line_116_col_18.log",
+      "diff_path": "diff/src__capabilities__llm__detail__repair.rs_line_116_col_18.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 10.287866413,
+          "process_status": "Success",
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=solomni@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 9.864718244,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=solomni@0.1.0",
+            "--bin",
+            "solomni",
+            "--",
+            "--test-threads=1"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/capabilities/llm/detail/repair.rs:116:18: replace match guard (c as u32) < 0x20 with false in escape_controls",
+          "package": "solomni",
+          "file": "src/capabilities/llm/detail/repair.rs",
+          "function": {
+            "function_name": "escape_controls",
+            "return_type": "-> (String, Vec<String>)",
+            "span": {
+              "start": {
+                "line": 75,
+                "column": 1
+              },
+              "end": {
+                "line": 127,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 116,
+              "column": 18
+            },
+            "end": {
+              "line": 116,
+              "column": 35
+            }
+          },
+          "replacement": "false",
+          "genre": "MatchArmGuard"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__capabilities__llm__detail__repair.rs_line_116_col_18_001.log",
+      "diff_path": "diff/src__capabilities__llm__detail__repair.rs_line_116_col_18_001.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 10.243292301,
+          "process_status": "Success",
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=solomni@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 9.914666728,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=solomni@0.1.0",
+            "--bin",
+            "solomni",
+            "--",
+            "--test-threads=1"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/capabilities/llm/detail/repair.rs:116:29: replace < with == in escape_controls",
+          "package": "solomni",
+          "file": "src/capabilities/llm/detail/repair.rs",
+          "function": {
+            "function_name": "escape_controls",
+            "return_type": "-> (String, Vec<String>)",
+            "span": {
+              "start": {
+                "line": 75,
+                "column": 1
+              },
+              "end": {
+                "line": 127,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 116,
+              "column": 29
+            },
+            "end": {
+              "line": 116,
+              "column": 30
+            }
+          },
+          "replacement": "==",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__capabilities__llm__detail__repair.rs_line_116_col_29.log",
+      "diff_path": "diff/src__capabilities__llm__detail__repair.rs_line_116_col_29.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 10.33728137,
+          "process_status": "Success",
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=solomni@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 9.864897342999999,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=solomni@0.1.0",
+            "--bin",
+            "solomni",
+            "--",
+            "--test-threads=1"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/capabilities/llm/detail/repair.rs:116:29: replace < with > in escape_controls",
+          "package": "solomni",
+          "file": "src/capabilities/llm/detail/repair.rs",
+          "function": {
+            "function_name": "escape_controls",
+            "return_type": "-> (String, Vec<String>)",
+            "span": {
+              "start": {
+                "line": 75,
+                "column": 1
+              },
+              "end": {
+                "line": 127,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 116,
+              "column": 29
+            },
+            "end": {
+              "line": 116,
+              "column": 30
+            }
+          },
+          "replacement": ">",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__capabilities__llm__detail__repair.rs_line_116_col_29_001.log",
+      "diff_path": "diff/src__capabilities__llm__detail__repair.rs_line_116_col_29_001.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 10.344206888,
+          "process_status": "Success",
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=solomni@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 9.96532224,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=solomni@0.1.0",
+            "--bin",
+            "solomni",
+            "--",
+            "--test-threads=1"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/capabilities/llm/detail/repair.rs:116:29: replace < with <= in escape_controls",
+          "package": "solomni",
+          "file": "src/capabilities/llm/detail/repair.rs",
+          "function": {
+            "function_name": "escape_controls",
+            "return_type": "-> (String, Vec<String>)",
+            "span": {
+              "start": {
+                "line": 75,
+                "column": 1
+              },
+              "end": {
+                "line": 127,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 116,
+              "column": 29
+            },
+            "end": {
+              "line": 116,
+              "column": 30
+            }
+          },
+          "replacement": "<=",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__capabilities__llm__detail__repair.rs_line_116_col_29_002.log",
+      "diff_path": "diff/src__capabilities__llm__detail__repair.rs_line_116_col_29_002.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 10.291552791,
+          "process_status": "Success",
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=solomni@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 9.915222377,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=solomni@0.1.0",
+            "--bin",
+            "solomni",
+            "--",
+            "--test-threads=1"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/capabilities/llm/detail/repair.rs:131:5: replace note with ()",
+          "package": "solomni",
+          "file": "src/capabilities/llm/detail/repair.rs",
+          "function": {
+            "function_name": "note",
+            "return_type": "",
+            "span": {
+              "start": {
+                "line": 129,
+                "column": 1
+              },
+              "end": {
+                "line": 134,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 131,
+              "column": 5
+            },
+            "end": {
+              "line": 133,
+              "column": 6
+            }
+          },
+          "replacement": "()",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__capabilities__llm__detail__repair.rs_line_131_col_5.log",
+      "diff_path": "diff/src__capabilities__llm__detail__repair.rs_line_131_col_5.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 10.348291146,
+          "process_status": "Success",
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=solomni@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 9.814442031,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=solomni@0.1.0",
+            "--bin",
+            "solomni",
+            "--",
+            "--test-threads=1"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/capabilities/llm/detail/repair.rs:131:8: delete ! in note",
+          "package": "solomni",
+          "file": "src/capabilities/llm/detail/repair.rs",
+          "function": {
+            "function_name": "note",
+            "return_type": "",
+            "span": {
+              "start": {
+                "line": 129,
+                "column": 1
+              },
+              "end": {
+                "line": 134,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 131,
+              "column": 8
+            },
+            "end": {
+              "line": 131,
+              "column": 9
+            }
+          },
+          "replacement": "",
+          "genre": "UnaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__capabilities__llm__detail__repair.rs_line_131_col_8.log",
+      "diff_path": "diff/src__capabilities__llm__detail__repair.rs_line_131_col_8.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 10.283723835,
+          "process_status": "Success",
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=solomni@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 9.914813358,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=solomni@0.1.0",
+            "--bin",
+            "solomni",
+            "--",
+            "--test-threads=1"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/capabilities/llm/detail/repair.rs:131:31: replace == with != in note",
+          "package": "solomni",
+          "file": "src/capabilities/llm/detail/repair.rs",
+          "function": {
+            "function_name": "note",
+            "return_type": "",
+            "span": {
+              "start": {
+                "line": 129,
+                "column": 1
+              },
+              "end": {
+                "line": 134,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 131,
+              "column": 31
+            },
+            "end": {
+              "line": 131,
+              "column": 33
+            }
+          },
+          "replacement": "!=",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__capabilities__llm__detail__repair.rs_line_131_col_31.log",
+      "diff_path": "diff/src__capabilities__llm__detail__repair.rs_line_131_col_31.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 10.33815208,
+          "process_status": "Success",
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=solomni@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 9.864897068,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=solomni@0.1.0",
+            "--bin",
+            "solomni",
+            "--",
+            "--test-threads=1"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/capabilities/registry/detail/yaml_settings.rs:58:9: replace YamlSettingsStore::write -> Result<(), String> with Ok(())",
+          "package": "solomni",
+          "file": "src/capabilities/registry/detail/yaml_settings.rs",
+          "function": {
+            "function_name": "YamlSettingsStore::write",
+            "return_type": "-> Result<(), String>",
+            "span": {
+              "start": {
+                "line": 56,
+                "column": 5
+              },
+              "end": {
+                "line": 68,
+                "column": 6
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 58,
+              "column": 9
+            },
+            "end": {
+              "line": 67,
+              "column": 15
+            }
+          },
+          "replacement": "Ok(())",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__capabilities__registry__detail__yaml_settings.rs_line_58_col_9.log",
+      "diff_path": "diff/src__capabilities__registry__detail__yaml_settings.rs_line_58_col_9.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 10.293038743,
+          "process_status": "Success",
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=solomni@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 9.864871243,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=solomni@0.1.0",
+            "--bin",
+            "solomni",
+            "--",
+            "--test-threads=1"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/capabilities/registry/detail/yaml_settings.rs:73:9: replace <impl SettingsStore for YamlSettingsStore>::load -> Result<Settings, String> with Ok(Default::default())",
+          "package": "solomni",
+          "file": "src/capabilities/registry/detail/yaml_settings.rs",
+          "function": {
+            "function_name": "<impl SettingsStore for YamlSettingsStore>::load",
+            "return_type": "-> Result<Settings, String>",
+            "span": {
+              "start": {
+                "line": 72,
+                "column": 5
+              },
+              "end": {
+                "line": 113,
+                "column": 6
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 73,
+              "column": 9
+            },
+            "end": {
+              "line": 112,
+              "column": 11
+            }
+          },
+          "replacement": "Ok(Default::default())",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__capabilities__registry__detail__yaml_settings.rs_line_73_col_9.log",
+      "diff_path": "diff/src__capabilities__registry__detail__yaml_settings.rs_line_73_col_9.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 10.588159716,
+          "process_status": "Success",
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=solomni@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 9.864455823,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=solomni@0.1.0",
+            "--bin",
+            "solomni",
+            "--",
+            "--test-threads=1"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/capabilities/registry/detail/yaml_settings.rs:79:23: replace match guard e.kind() == std::io::ErrorKind::NotFound with true in <impl SettingsStore for YamlSettingsStore>::load",
+          "package": "solomni",
+          "file": "src/capabilities/registry/detail/yaml_settings.rs",
+          "function": {
+            "function_name": "<impl SettingsStore for YamlSettingsStore>::load",
+            "return_type": "-> Result<Settings, String>",
+            "span": {
+              "start": {
+                "line": 72,
+                "column": 5
+              },
+              "end": {
+                "line": 113,
+                "column": 6
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 79,
+              "column": 23
+            },
+            "end": {
+              "line": 79,
+              "column": 63
+            }
+          },
+          "replacement": "true",
+          "genre": "MatchArmGuard"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__capabilities__registry__detail__yaml_settings.rs_line_79_col_23.log",
+      "diff_path": "diff/src__capabilities__registry__detail__yaml_settings.rs_line_79_col_23.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 10.291397879,
+          "process_status": "Success",
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=solomni@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 9.865403248,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=solomni@0.1.0",
+            "--bin",
+            "solomni",
+            "--",
+            "--test-threads=1"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/capabilities/registry/detail/yaml_settings.rs:79:23: replace match guard e.kind() == std::io::ErrorKind::NotFound with false in <impl SettingsStore for YamlSettingsStore>::load",
+          "package": "solomni",
+          "file": "src/capabilities/registry/detail/yaml_settings.rs",
+          "function": {
+            "function_name": "<impl SettingsStore for YamlSettingsStore>::load",
+            "return_type": "-> Result<Settings, String>",
+            "span": {
+              "start": {
+                "line": 72,
+                "column": 5
+              },
+              "end": {
+                "line": 113,
+                "column": 6
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 79,
+              "column": 23
+            },
+            "end": {
+              "line": 79,
+              "column": 63
+            }
+          },
+          "replacement": "false",
+          "genre": "MatchArmGuard"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__capabilities__registry__detail__yaml_settings.rs_line_79_col_23_001.log",
+      "diff_path": "diff/src__capabilities__registry__detail__yaml_settings.rs_line_79_col_23_001.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 10.303653336,
+          "process_status": "Success",
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=solomni@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 9.864585354,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=solomni@0.1.0",
+            "--bin",
+            "solomni",
+            "--",
+            "--test-threads=1"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/capabilities/registry/detail/yaml_settings.rs:79:32: replace == with != in <impl SettingsStore for YamlSettingsStore>::load",
+          "package": "solomni",
+          "file": "src/capabilities/registry/detail/yaml_settings.rs",
+          "function": {
+            "function_name": "<impl SettingsStore for YamlSettingsStore>::load",
+            "return_type": "-> Result<Settings, String>",
+            "span": {
+              "start": {
+                "line": 72,
+                "column": 5
+              },
+              "end": {
+                "line": 113,
+                "column": 6
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 79,
+              "column": 32
+            },
+            "end": {
+              "line": 79,
+              "column": 34
+            }
+          },
+          "replacement": "!=",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__capabilities__registry__detail__yaml_settings.rs_line_79_col_32.log",
+      "diff_path": "diff/src__capabilities__registry__detail__yaml_settings.rs_line_79_col_32.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 10.197342422,
+          "process_status": "Success",
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=solomni@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 9.914948485,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=solomni@0.1.0",
+            "--bin",
+            "solomni",
+            "--",
+            "--test-threads=1"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/capabilities/registry/detail/yaml_settings.rs:88:23: replace match guard e.kind() == std::io::ErrorKind::NotFound with true in <impl SettingsStore for YamlSettingsStore>::load",
+          "package": "solomni",
+          "file": "src/capabilities/registry/detail/yaml_settings.rs",
+          "function": {
+            "function_name": "<impl SettingsStore for YamlSettingsStore>::load",
+            "return_type": "-> Result<Settings, String>",
+            "span": {
+              "start": {
+                "line": 72,
+                "column": 5
+              },
+              "end": {
+                "line": 113,
+                "column": 6
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 88,
+              "column": 23
+            },
+            "end": {
+              "line": 88,
+              "column": 63
+            }
+          },
+          "replacement": "true",
+          "genre": "MatchArmGuard"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__capabilities__registry__detail__yaml_settings.rs_line_88_col_23.log",
+      "diff_path": "diff/src__capabilities__registry__detail__yaml_settings.rs_line_88_col_23.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 10.237874773,
+          "process_status": "Success",
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=solomni@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 9.914993985,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=solomni@0.1.0",
+            "--bin",
+            "solomni",
+            "--",
+            "--test-threads=1"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/capabilities/registry/detail/yaml_settings.rs:88:23: replace match guard e.kind() == std::io::ErrorKind::NotFound with false in <impl SettingsStore for YamlSettingsStore>::load",
+          "package": "solomni",
+          "file": "src/capabilities/registry/detail/yaml_settings.rs",
+          "function": {
+            "function_name": "<impl SettingsStore for YamlSettingsStore>::load",
+            "return_type": "-> Result<Settings, String>",
+            "span": {
+              "start": {
+                "line": 72,
+                "column": 5
+              },
+              "end": {
+                "line": 113,
+                "column": 6
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 88,
+              "column": 23
+            },
+            "end": {
+              "line": 88,
+              "column": 63
+            }
+          },
+          "replacement": "false",
+          "genre": "MatchArmGuard"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__capabilities__registry__detail__yaml_settings.rs_line_88_col_23_001.log",
+      "diff_path": "diff/src__capabilities__registry__detail__yaml_settings.rs_line_88_col_23_001.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 10.303283646,
+          "process_status": "Success",
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=solomni@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 9.864677523,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=solomni@0.1.0",
+            "--bin",
+            "solomni",
+            "--",
+            "--test-threads=1"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/capabilities/registry/detail/yaml_settings.rs:88:32: replace == with != in <impl SettingsStore for YamlSettingsStore>::load",
+          "package": "solomni",
+          "file": "src/capabilities/registry/detail/yaml_settings.rs",
+          "function": {
+            "function_name": "<impl SettingsStore for YamlSettingsStore>::load",
+            "return_type": "-> Result<Settings, String>",
+            "span": {
+              "start": {
+                "line": 72,
+                "column": 5
+              },
+              "end": {
+                "line": 113,
+                "column": 6
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 88,
+              "column": 32
+            },
+            "end": {
+              "line": 88,
+              "column": 34
+            }
+          },
+          "replacement": "!=",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__capabilities__registry__detail__yaml_settings.rs_line_88_col_32.log",
+      "diff_path": "diff/src__capabilities__registry__detail__yaml_settings.rs_line_88_col_32.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 10.084200755,
+          "process_status": "Success",
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=solomni@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 9.914989959,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=solomni@0.1.0",
+            "--bin",
+            "solomni",
+            "--",
+            "--test-threads=1"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/capabilities/registry/detail/yaml_settings.rs:94:23: replace match guard e.kind() == std::io::ErrorKind::NotFound with true in <impl SettingsStore for YamlSettingsStore>::load",
+          "package": "solomni",
+          "file": "src/capabilities/registry/detail/yaml_settings.rs",
+          "function": {
+            "function_name": "<impl SettingsStore for YamlSettingsStore>::load",
+            "return_type": "-> Result<Settings, String>",
+            "span": {
+              "start": {
+                "line": 72,
+                "column": 5
+              },
+              "end": {
+                "line": 113,
+                "column": 6
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 94,
+              "column": 23
+            },
+            "end": {
+              "line": 94,
+              "column": 63
+            }
+          },
+          "replacement": "true",
+          "genre": "MatchArmGuard"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__capabilities__registry__detail__yaml_settings.rs_line_94_col_23.log",
+      "diff_path": "diff/src__capabilities__registry__detail__yaml_settings.rs_line_94_col_23.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 10.232060188,
+          "process_status": "Success",
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=solomni@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 9.864805434,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=solomni@0.1.0",
+            "--bin",
+            "solomni",
+            "--",
+            "--test-threads=1"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/capabilities/registry/detail/yaml_settings.rs:94:23: replace match guard e.kind() == std::io::ErrorKind::NotFound with false in <impl SettingsStore for YamlSettingsStore>::load",
+          "package": "solomni",
+          "file": "src/capabilities/registry/detail/yaml_settings.rs",
+          "function": {
+            "function_name": "<impl SettingsStore for YamlSettingsStore>::load",
+            "return_type": "-> Result<Settings, String>",
+            "span": {
+              "start": {
+                "line": 72,
+                "column": 5
+              },
+              "end": {
+                "line": 113,
+                "column": 6
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 94,
+              "column": 23
+            },
+            "end": {
+              "line": 94,
+              "column": 63
+            }
+          },
+          "replacement": "false",
+          "genre": "MatchArmGuard"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__capabilities__registry__detail__yaml_settings.rs_line_94_col_23_001.log",
+      "diff_path": "diff/src__capabilities__registry__detail__yaml_settings.rs_line_94_col_23_001.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 10.395988293,
+          "process_status": "Success",
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=solomni@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 9.865062732,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=solomni@0.1.0",
+            "--bin",
+            "solomni",
+            "--",
+            "--test-threads=1"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/capabilities/registry/detail/yaml_settings.rs:94:32: replace == with != in <impl SettingsStore for YamlSettingsStore>::load",
+          "package": "solomni",
+          "file": "src/capabilities/registry/detail/yaml_settings.rs",
+          "function": {
+            "function_name": "<impl SettingsStore for YamlSettingsStore>::load",
+            "return_type": "-> Result<Settings, String>",
+            "span": {
+              "start": {
+                "line": 72,
+                "column": 5
+              },
+              "end": {
+                "line": 113,
+                "column": 6
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 94,
+              "column": 32
+            },
+            "end": {
+              "line": 94,
+              "column": 34
+            }
+          },
+          "replacement": "!=",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__capabilities__registry__detail__yaml_settings.rs_line_94_col_32.log",
+      "diff_path": "diff/src__capabilities__registry__detail__yaml_settings.rs_line_94_col_32.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 10.183450344,
+          "process_status": "Success",
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=solomni@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 9.914929317,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=solomni@0.1.0",
+            "--bin",
+            "solomni",
+            "--",
+            "--test-threads=1"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/capabilities/registry/detail/yaml_settings.rs:103:23: replace match guard e.kind() == std::io::ErrorKind::NotFound with true in <impl SettingsStore for YamlSettingsStore>::load",
+          "package": "solomni",
+          "file": "src/capabilities/registry/detail/yaml_settings.rs",
+          "function": {
+            "function_name": "<impl SettingsStore for YamlSettingsStore>::load",
+            "return_type": "-> Result<Settings, String>",
+            "span": {
+              "start": {
+                "line": 72,
+                "column": 5
+              },
+              "end": {
+                "line": 113,
+                "column": 6
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 103,
+              "column": 23
+            },
+            "end": {
+              "line": 103,
+              "column": 63
+            }
+          },
+          "replacement": "true",
+          "genre": "MatchArmGuard"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__capabilities__registry__detail__yaml_settings.rs_line_103_col_23.log",
+      "diff_path": "diff/src__capabilities__registry__detail__yaml_settings.rs_line_103_col_23.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 10.385367708,
+          "process_status": "Success",
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=solomni@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 9.914857516,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=solomni@0.1.0",
+            "--bin",
+            "solomni",
+            "--",
+            "--test-threads=1"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/capabilities/registry/detail/yaml_settings.rs:103:23: replace match guard e.kind() == std::io::ErrorKind::NotFound with false in <impl SettingsStore for YamlSettingsStore>::load",
+          "package": "solomni",
+          "file": "src/capabilities/registry/detail/yaml_settings.rs",
+          "function": {
+            "function_name": "<impl SettingsStore for YamlSettingsStore>::load",
+            "return_type": "-> Result<Settings, String>",
+            "span": {
+              "start": {
+                "line": 72,
+                "column": 5
+              },
+              "end": {
+                "line": 113,
+                "column": 6
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 103,
+              "column": 23
+            },
+            "end": {
+              "line": 103,
+              "column": 63
+            }
+          },
+          "replacement": "false",
+          "genre": "MatchArmGuard"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__capabilities__registry__detail__yaml_settings.rs_line_103_col_23_001.log",
+      "diff_path": "diff/src__capabilities__registry__detail__yaml_settings.rs_line_103_col_23_001.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 10.388068095,
+          "process_status": "Success",
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=solomni@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 9.865209349,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=solomni@0.1.0",
+            "--bin",
+            "solomni",
+            "--",
+            "--test-threads=1"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/capabilities/registry/detail/yaml_settings.rs:103:32: replace == with != in <impl SettingsStore for YamlSettingsStore>::load",
+          "package": "solomni",
+          "file": "src/capabilities/registry/detail/yaml_settings.rs",
+          "function": {
+            "function_name": "<impl SettingsStore for YamlSettingsStore>::load",
+            "return_type": "-> Result<Settings, String>",
+            "span": {
+              "start": {
+                "line": 72,
+                "column": 5
+              },
+              "end": {
+                "line": 113,
+                "column": 6
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 103,
+              "column": 32
+            },
+            "end": {
+              "line": 103,
+              "column": 34
+            }
+          },
+          "replacement": "!=",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__capabilities__registry__detail__yaml_settings.rs_line_103_col_32.log",
+      "diff_path": "diff/src__capabilities__registry__detail__yaml_settings.rs_line_103_col_32.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 10.249684213,
+          "process_status": "Success",
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=solomni@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 9.91474968,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=solomni@0.1.0",
+            "--bin",
+            "solomni",
+            "--",
+            "--test-threads=1"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/capabilities/registry/detail/yaml_settings.rs:116:9: replace <impl SettingsStore for YamlSettingsStore>::save -> Result<(), String> with Ok(())",
+          "package": "solomni",
+          "file": "src/capabilities/registry/detail/yaml_settings.rs",
+          "function": {
+            "function_name": "<impl SettingsStore for YamlSettingsStore>::save",
+            "return_type": "-> Result<(), String>",
+            "span": {
+              "start": {
+                "line": 115,
+                "column": 5
+              },
+              "end": {
+                "line": 138,
+                "column": 6
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 116,
+              "column": 9
+            },
+            "end": {
+              "line": 137,
+              "column": 15
+            }
+          },
+          "replacement": "Ok(())",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__capabilities__registry__detail__yaml_settings.rs_line_116_col_9.log",
+      "diff_path": "diff/src__capabilities__registry__detail__yaml_settings.rs_line_116_col_9.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 10.491109207,
+          "process_status": "Success",
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=solomni@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 9.914919484,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=solomni@0.1.0",
+            "--bin",
+            "solomni",
+            "--",
+            "--test-threads=1"
+          ]
+        }
+      ]
+    }
+  ],
+  "total_mutants": 48,
+  "missed": 0,
+  "caught": 45,
+  "timeout": 0,
+  "unviable": 3,
+  "success": 0,
+  "start_time": "2026-10-10T12:49:19.145240714Z",
+  "end_time": "2026-10-10T13:05:02.652493583Z",
+  "cargo_mutants_version": "27.1.0"
+}
