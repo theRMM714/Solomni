@@ -74,9 +74,10 @@ impl ToolExec for ToolsService {
         fence: &crate::kernel::api::FenceSpec,
         command: &str,
         args_json: &str,
+        env: &[(String, String)],
         ask: Option<&dyn crate::kernel::ports::AskUser>,
     ) -> ToolOutcome {
-        self.runner.run(fence, command, args_json, ask)
+        self.runner.run(fence, command, args_json, env, ask)
     }
 
     fn run_builtin(

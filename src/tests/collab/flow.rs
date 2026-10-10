@@ -382,6 +382,7 @@ pub(crate) fn core_operation_runs_readonly_verification_before_the_op() {
         builtin_tools: test_systools().tools,
         unavailable: BTreeMap::new(),
         fence: crate::kernel::api::FenceSpec::from_sandbox(&sb, false),
+        module_env: Default::default(),
         reply_seq: 0,
         line: Default::default(),
         allowed: vec!["read".to_string(), "plan".to_string()],

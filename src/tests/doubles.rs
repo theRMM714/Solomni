@@ -1368,6 +1368,7 @@ pub(crate) fn agent_upsert(
 pub(crate) fn core_with_services(
     modules: Vec<Module>,
     gateway: ScriptGateway,
+    runner: Arc<dyn crate::kernel::ports::ProcessRunner>,
     residents: Arc<dyn crate::capabilities::residents::api::ResidentOps + Send + Sync>,
     secrets: Arc<dyn crate::capabilities::secrets::api::SecretOps + Send + Sync>,
 ) -> Conductor {
@@ -1387,7 +1388,7 @@ pub(crate) fn core_with_services(
         ),
         llm,
         test_tools_svc_with(
-            Arc::new(SilentRunner),
+            runner,
             Arc::new(InMemorySysIo::new()),
             Arc::new(NoFenceHost),
         ),

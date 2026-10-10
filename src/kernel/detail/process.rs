@@ -68,6 +68,7 @@ impl ProcessRunner for ProcTools {
         fence: &FenceSpec,
         command: &str,
         args_json: &str,
+        env: &[(String, String)],
         ask: Option<&dyn crate::kernel::ports::AskUser>,
     ) -> ToolOutcome {
         // Windows：容器围栏要先把「可达范围」授权给容器 SID。
@@ -128,6 +129,10 @@ impl ProcessRunner for ProcTools {
         // 环境白名单：不继承父进程环境（密钥与无关凭据不进工具进程）；HOME/TEMP 落进该 agent 的私有沙箱。
         cmd.env_clear();
         for (k, v) in confine::fence_env(fence, command) {
+            cmd.env(k, v);
+        }
+        // 该模块隐私字段的注入项：只走环境，不进命令行（值也不进提示词 / 转录 / 日志）。
+        for (k, v) in env {
             cmd.env(k, v);
         }
         // 独立进程组：Unix 上超时/停止能杀整棵树；Windows 侧由守门进程的 Job Object 兜住。
@@ -650,6 +655,7 @@ mod tests {
             &spec_for(&dir),
             &format!("{} echo_stdin.py", py),
             "{\"k\":\"v\"}",
+            &[],
             None,
         );
         assert!(out.ok, "工具应当成功：{}", out.output);
@@ -680,7 +686,13 @@ mod tests {
         .expect("写脚本");
         std::env::set_var("SOLOMNI_PROBE_ENV_LEAK", "leak-me");
         let tools = real_runner(exe, &dir, 60);
-        let out = tools.run(&spec_for(&dir), &format!("{} echo_env.py", py), "{}", None);
+        let out = tools.run(
+            &spec_for(&dir),
+            &format!("{} echo_env.py", py),
+            "{}",
+            &[],
+            None,
+        );
         std::env::remove_var("SOLOMNI_PROBE_ENV_LEAK");
         assert!(out.ok, "工具应当成功：{}", out.output);
         assert!(
@@ -788,7 +800,7 @@ mod tests {
             std::fs::set_permissions(&script, perm).expect("加执行位");
         }
         let tools = real_runner(exe, &dir, 60);
-        let out = tools.run(&spec_for(&dir), command, "{}", None);
+        let out = tools.run(&spec_for(&dir), command, "{}", &[], None);
         assert!(out.ok, "带正斜杠的相对程序名必须能跑起来：{}", out.output);
         assert!(
             out.output.contains("PROBE-OK"),
@@ -817,7 +829,13 @@ mod tests {
         std::fs::write(dir.join("sleep60.py"), "import time\ntime.sleep(60)\n").expect("写脚本");
         let tools = real_runner(exe, &dir, 2);
         let started = Instant::now();
-        let out = tools.run(&spec_for(&dir), &format!("{} sleep60.py", py), "{}", None);
+        let out = tools.run(
+            &spec_for(&dir),
+            &format!("{} sleep60.py", py),
+            "{}",
+            &[],
+            None,
+        );
         assert!(!out.ok, "超时必须如实回执失败：{}", out.output);
         assert!(
             out.output.contains(&tools.texts.timeout()),
@@ -1022,7 +1040,7 @@ mod tests {
     fn missing_launcher_binary_is_reported_honestly() {
         let dir = crate::tests::scratch("proc-tools-missing-exe");
         let tools = real_runner(PathBuf::from("definitely-not-here-solomni"), &dir, 5);
-        let out = tools.run(&spec_for(&dir), "echo hi", "{}", None);
+        let out = tools.run(&spec_for(&dir), "echo hi", "{}", &[], None);
         assert!(!out.ok);
         assert!(out.output.contains("工具进程启动失败"), "{}", out.output);
         let _ = std::fs::remove_dir_all(&dir);

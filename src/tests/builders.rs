@@ -255,6 +255,7 @@ impl ProcessRunner for SilentRunner {
         _fence: &crate::kernel::api::FenceSpec,
         _command: &str,
         _args: &str,
+        _env: &[(String, String)],
         _ask: Option<&dyn crate::kernel::ports::AskUser>,
     ) -> ToolOutcome {
         panic!("不应调用工具");
@@ -278,12 +279,43 @@ impl RecordingRunner {
     }
 }
 
+/// 目的：记下每次调用注入项的 runner（断言隐私字段只经环境变量进工具进程）。
+pub(crate) struct EnvRecordingRunner {
+    pub(crate) envs: Mutex<Vec<Vec<(String, String)>>>,
+}
+
+impl EnvRecordingRunner {
+    pub(crate) fn new() -> EnvRecordingRunner {
+        EnvRecordingRunner {
+            envs: Mutex::new(Vec::new()),
+        }
+    }
+}
+
+impl ProcessRunner for EnvRecordingRunner {
+    fn run(
+        &self,
+        _fence: &crate::kernel::api::FenceSpec,
+        _command: &str,
+        args_json: &str,
+        env: &[(String, String)],
+        _ask: Option<&dyn crate::kernel::ports::AskUser>,
+    ) -> ToolOutcome {
+        self.envs.lock().expect("锁").push(env.to_vec());
+        ToolOutcome {
+            ok: true,
+            output: format!("跑完了 {}", args_json),
+        }
+    }
+}
+
 impl ProcessRunner for RecordingRunner {
     fn run(
         &self,
         fence: &crate::kernel::api::FenceSpec,
         command: &str,
         args_json: &str,
+        _env: &[(String, String)],
         _ask: Option<&dyn crate::kernel::ports::AskUser>,
     ) -> ToolOutcome {
         // 记下工具进程的工作目录（= 该模块的根）与命令、参数。
@@ -327,6 +359,7 @@ impl ProcessRunner for ParallelRunner {
         _fence: &crate::kernel::api::FenceSpec,
         command: &str,
         args_json: &str,
+        _env: &[(String, String)],
         _ask: Option<&dyn crate::kernel::ports::AskUser>,
     ) -> ToolOutcome {
         let now = self.active.fetch_add(1, Ordering::SeqCst) + 1;
@@ -367,6 +400,7 @@ impl ProcessRunner for AskingRunner {
         fence: &crate::kernel::api::FenceSpec,
         command: &str,
         args_json: &str,
+        _env: &[(String, String)],
         ask: Option<&dyn crate::kernel::ports::AskUser>,
     ) -> ToolOutcome {
         let Some(ask) = ask else {
@@ -460,6 +494,7 @@ pub(crate) fn member_with_tools(
         builtin_tools: test_systools().tools,
         unavailable: BTreeMap::new(),
         fence: crate::kernel::api::FenceSpec::from_sandbox(&test_sandbox("m0", &[]), false),
+        module_env: Default::default(),
         reply_seq: 0,
         line: Default::default(),
         // 测试替身按"执行席"发放全部内置工具（角色表的越权校验另有专门用例）。
@@ -746,6 +781,7 @@ pub(crate) fn native_member(
         builtin_tools: test_systools().tools,
         unavailable: BTreeMap::new(),
         fence: crate::kernel::api::FenceSpec::from_sandbox(&sb, false),
+        module_env: Default::default(),
         reply_seq: 0,
         line: Default::default(),
         // 测试替身按"执行席"发放全部内置工具（角色表的越权校验另有专门用例）。

@@ -101,6 +101,61 @@ fn secrets_load_existing_values() {
     assert_eq!(service.resolve("m1").expect("解析").len(), 1);
 }
 
+/// 一次性模块工具进程也注入该模块的隐秘字段（与常驻服务同一把尺子）。
+#[test]
+fn module_tool_process_gets_module_secrets() {
+    use crate::capabilities::conductor::api::{ActionCall, Caller, ConductorHandle, Ops, Output};
+    use crate::kernel::ports::ProcessRunner;
+    use crate::tests::builders::EnvRecordingRunner;
+    use crate::tests::doubles::{core_with_services, decl, gw};
+
+    let mut m = module_with_secret("m1", "token", "TOKEN");
+    m.manifest
+        .tools
+        .insert("echo".to_string(), decl("python tools/echo.py"));
+    let modules = vec![m];
+    let runner = Arc::new(EnvRecordingRunner::new());
+    let store = Arc::new(InMemorySecretStore::new());
+    let workspace = test_workspace(
+        Arc::new(VecSource(modules.clone())),
+        Arc::new(InMemoryPackages::empty()),
+        Arc::new(InMemoryWorkspace::new()),
+    );
+    let secrets = Arc::new(
+        SecretsService::new(
+            Arc::clone(&workspace),
+            Arc::clone(&store) as Arc<dyn SecretStore + Send + Sync>,
+        )
+        .expect("secrets"),
+    );
+    secrets.set("m1", "token", "s3cr3t").expect("置值");
+    let handle = ConductorHandle::spawn(core_with_services(
+        modules,
+        gw(BTreeMap::new(), Vec::new()),
+        Arc::clone(&runner) as Arc<dyn ProcessRunner>,
+        Arc::new(crate::capabilities::residents::api::NoResidents),
+        Arc::clone(&secrets) as Arc<dyn SecretOps + Send + Sync>,
+    ))
+    .expect("起核心线程");
+    let ops: Ops = crate::capabilities::conductor::api::Ops::from_handle(&handle);
+
+    ops.actions
+        .act(ActionCall {
+            id: "module.m1.echo".to_string(),
+            args: serde_json::json!({}),
+            caller: Caller::User,
+            out: Output::Final,
+        })
+        .expect("跑模块工具");
+    let envs = runner.envs.lock().expect("锁");
+    assert!(
+        envs.iter()
+            .any(|e| e.iter().any(|(k, v)| k == "TOKEN" && v == "s3cr3t")),
+        "工具进程要拿到该模块的隐秘字段：{:?}",
+        envs
+    );
+}
+
 /// 设置面动作：`set_secret` / `clear_secret` 走统一动作面（只给 user；值不回显）。
 #[test]
 fn secret_actions_set_and_clear() {
@@ -126,6 +181,7 @@ fn secret_actions_set_and_clear() {
     let handle = ConductorHandle::spawn(core_with_services(
         modules,
         gw(BTreeMap::new(), Vec::new()),
+        Arc::new(crate::tests::builders::SilentRunner),
         residents,
         Arc::clone(&secrets) as Arc<dyn SecretOps + Send + Sync>,
     ))

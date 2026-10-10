@@ -179,6 +179,7 @@ fn control_resident_action_starts_and_stops() {
     let handle = ConductorHandle::spawn(crate::tests::doubles::core_with_services(
         modules,
         gateway,
+        Arc::new(crate::tests::builders::SilentRunner),
         residents,
         Arc::new(crate::capabilities::secrets::api::NoSecrets),
     ))
@@ -222,6 +223,7 @@ fn service_operations_are_module_actions() {
     let handle = ConductorHandle::spawn(crate::tests::doubles::core_with_services(
         modules,
         gateway,
+        Arc::new(crate::tests::builders::SilentRunner),
         residents,
         Arc::new(crate::capabilities::secrets::api::NoSecrets),
     ))

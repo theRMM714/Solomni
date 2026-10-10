@@ -108,6 +108,16 @@ impl Conductor {
             // 只读根来自用户显式授权（`fence_read`），默认空。
             fence: crate::kernel::api::FenceSpec::from_sandbox(sb, net)
                 .with_read_only(self.fence_read_roots()),
+            // 各模块隐私字段的注入项：装配期按模块解析一次，起工具进程时只走环境（解析失败 = 该模块没有可用值）。
+            module_env: modules
+                .iter()
+                .map(|m| {
+                    (
+                        m.manifest.id.clone(),
+                        self.secrets.resolve(&m.manifest.id).unwrap_or_default(),
+                    )
+                })
+                .collect(),
             // 从零开始；按落盘转录重建时由调用方按转录里的最大值续号（见 rebuild_session）。
             reply_seq: 0,
             line: Default::default(),

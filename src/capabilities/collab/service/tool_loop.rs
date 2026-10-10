@@ -437,10 +437,15 @@ pub(crate) fn dispatch_external(
                     }
                 }
             }
+            let env = ctx
+                .module_env
+                .get(&module)
+                .map(|v| v.as_slice())
+                .unwrap_or(&[]);
             (
                 module,
                 ctx.tools
-                    .run_module(&ctx.fence.at(&mt.root), command, &inv.args_json, ask),
+                    .run_module(&ctx.fence.at(&mt.root), command, &inv.args_json, env, ask),
             )
         }
         None => {
