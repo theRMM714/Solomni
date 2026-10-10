@@ -960,7 +960,7 @@ function runCoverage() {
   // 缺 llvm-tools-preview 时 cargo-llvm-cov 会就地提示安装（非交互环境下自行往下走然后失败）：
   // 先问一句，缺就如实 env-skip，不把"没装组件"报成覆盖率失败。
   const comp = sh("rustup", ["component", "list", "--installed"]);
-  if (comp.code === 0 && !/llvm-tools-preview/.test(comp.out)) {
+  if (comp.code === 0 && !/llvm-tools/.test(comp.out)) {
     console.log("[覆盖率] env-skip：缺 llvm-tools-preview 组件（装：node setup-dev.js）。");
     process.exit(0);
   }

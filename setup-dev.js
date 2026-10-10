@@ -40,8 +40,9 @@ function lines(text) {
 function installedComponents(e) {
   return new Set(lines(probe("rustup", ["component", "list", "--installed"], e).text));
 }
-function componentPresent(set, name) {
-  return [...set].some((line) => line === name || line.startsWith(name + "-"));
+function componentPresent(set, name, listed) {
+  const names = [listed, name].filter(Boolean);
+  return [...set].some((line) => names.some((n) => line === n || line.startsWith(n + "-")));
 }
 function installedTargets(e) {
   return new Set(lines(probe("rustup", ["target", "list", "--installed"], e).text));
@@ -72,7 +73,7 @@ function probeRunnable(name, e) {
   const targets = installedTargets(e);
   const missing = [];
   for (const c of DEV.components) {
-    if (!componentPresent(comps, c.name)) missing.push({ kind: "component", id: c.name, why: c.why });
+    if (!componentPresent(comps, c.name, c.listed)) missing.push({ kind: "component", id: c.name, why: c.why });
   }
   for (const t of DEV.targets) {
     if (!targets.has(t.triple)) missing.push({ kind: "target", id: t.triple, why: t.why });

@@ -11,7 +11,8 @@ module.exports = {
   components: [
     { name: "rustfmt", why: "T0 格式（cargo fmt --check）" },
     { name: "clippy", why: "T0 静态检查（cargo clippy -D warnings）" },
-    { name: "llvm-tools-preview", why: "覆盖率发现模式（node run-tests.js --coverage）" },
+    // add 的名字是 llvm-tools-preview，装完后 component list 里登记为 llvm-tools（listed）。
+    { name: "llvm-tools-preview", listed: "llvm-tools", why: "覆盖率发现模式（node run-tests.js --coverage）" },
   ],
 
   // rustup target add + cargo check --target：平台专属 #[cfg] 本机不编译，靠它兜类型错误。
