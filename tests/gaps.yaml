@@ -31,6 +31,24 @@
     而代价是三套原生 API、每平台真机验证，且 CI 起不了 hypervisor（只能真机验 + env-skip）。
     项目成熟、需求更清楚时再做。
 
+- id: module.acp-adapter
+  scope: global
+  level: T3
+  why: |
+    「常驻服务」目前只实现了 MCP stdio 适配器（`residents/detail/mcp.rs`）：`module.yaml` 的
+    `services.<名>.adapter` 写 `acp` 会被如实拒收（未知适配器）——ACP（Agent Client Protocol）这类
+    按行 JSON-RPC 的 harness 拉不起来，MCP 之外的常驻服务对模块作者不可用。
+  how: |
+    1) 定 ACP 的握手 / 方法 / 回执映射：能共用长驻会话端口 `SessionHost` 与按行收发就共用，
+       不另造机制；协议形状只进 `residents/detail/` 的适配器，kernel 与 service 不认识 ACP；
+    2) 组合根注册该适配器（与 `mcp` 并列，`ServiceAdapter::id()` = `acp`）；
+    3) 契约用例（脚本化会话端口）+ 真实服务端到端（自足 fixture，缺依赖时如实 env-skip）；
+    4) 同步 docs/residents/README.md、docs/testing/doubles.md 端口矩阵、MODULE_SPEC。
+  accept: |
+    声明 `adapter: acp` 的模块能拉起、发现操作、调用并看回执；未知适配器仍如实列出可用名；
+    `node run-tests.js` 全绿。
+  blocked_by: 缺少实现
+
 - id: work.commit-history-ui
   scope: global
   level: T5
