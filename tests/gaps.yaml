@@ -31,21 +31,6 @@
     而代价是三套原生 API、每平台真机验证，且 CI 起不了 hypervisor（只能真机验 + env-skip）。
     项目成熟、需求更清楚时再做。
 
-- id: module.standalone-entry
-  scope: global
-  level: T5
-  why: |
-    **模块工具现在可以直接跑**（动作 id = `module.<模块id>.<工具名>`：CLI `module …`、Web `POST /api/actions/…`），
-    但那只是**工具级**入口：只写 `system`、不声明 `tools` 的模块仍没有独立入口，界面也没有"直接用模块"的清单与回执。
-    缺的是**模块级**契约（谁可独立运行、跑什么）与呈现面（列表 + 运行 + 看回执）。
-  how: |
-    1) 定契约：模块怎么声明自己的独立入口（`module.yaml` 加一节：不写 tools 的模块也能被直接跑）；
-    2) CLI 补模块级入口（工具级已有）；
-    3) GUI 加对应入口（列表 + 运行 + 看回执），与 CLI 共用同一份事实（清单是目录扫描的纯函数）；
-    4) T5 走一遍：不开 AI 会话，直接用模块跑一次，产物落在用户指定目录。
-  accept: 声明了独立入口的模块能不经 AI 直接跑通一次；没声明的模块在列表里如实标注"只能经 AI 使用"。
-  blocked_by: 缺少实现
-
 - id: work.commit-history-ui
   scope: global
   level: T5

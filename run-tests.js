@@ -653,8 +653,7 @@ function structuralAudit() {
 
   // ③ 根 *.md ↔ AGENTS.md 路由表：新增根文档必须同时进路由表。
   // 白名单只有 AGENTS.md 自己（路由表不列它）；出现不进路由表的临时工作清单时，在这里加名字并写明理由。
-  // 常驻服务适配计划.md：尚未实施的大计划（residents 能力 + 进程/围栏机制抽取）；落地完成后删除该文件并移除此项。
-  const rootDocAllow = ["AGENTS.md", "常驻服务适配计划.md"];
+  const rootDocAllow = ["AGENTS.md"];
   const agentsDoc = path.join(ROOT, "AGENTS.md");
   if (fs.existsSync(agentsDoc)) {
     const agentsText = fs.readFileSync(agentsDoc, "utf8");

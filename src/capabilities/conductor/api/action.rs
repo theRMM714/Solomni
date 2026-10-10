@@ -242,14 +242,11 @@ impl ConductorHandle {
         })
     }
 
-    /// 目的：模块 id → 它在当前档位下缺的运行包能力（空表 = 都能跑）。
-    /// 约束：与成员循环读同一把尺子（`runtime_report.missing`）——缺包 = 不执行，不静默降级。
-    fn missing_runtimes(&self) -> BTreeMap<String, Vec<String>> {
-        let tier = self
-            .call(|core| Ok(core.registry().app_settings().tier))
-            .unwrap_or_default();
-        ConductorOps::runtime_report(self, tier)
-            .map(|r| r.missing)
+    /// 目的：模块 id → 它在**当前设置档位**下缺的运行包能力（空表 = 都能跑）。
+    /// 约束：与成员循环读同一把尺子（`workspace::api::unavailable`，档位感知）——本机档不装载运行包，
+    ///   不因"没装包"拒绝本机解释器就能跑的工具；缺包 = 不执行，不静默降级。
+    fn unavailable_modules(&self) -> BTreeMap<String, Vec<String>> {
+        self.call(|core| Ok(core.unavailable_modules_now()))
             .unwrap_or_default()
     }
 
@@ -323,7 +320,7 @@ impl ConductorHandle {
         self.authorize_module(caller)?;
         let (module, tool, decl) = self.module_action(id)?;
         // 与成员循环同一把尺子：该能力不在包库里 = 该模块的工具不执行，并如实说明缺哪个能力。
-        if let Some(caps) = self.missing_runtimes().get(&module.manifest.id) {
+        if let Some(caps) = self.unavailable_modules().get(&module.manifest.id) {
             return Err(format!(
                 "模块 {} 的运行包 {} 未装载，不能直接跑它的工具；把包放进依赖文件夹 runtimes/（契约见 RUNTIME_SPEC.md）",
                 module.manifest.id,
@@ -648,7 +645,7 @@ impl ActionOps for ConductorHandle {
         // 会话里的模块工具由成员循环执行——那是同一个声明、同一个执行面的另一个适配器。
         if matches!(caller, Caller::User) {
             if let Ok(roster) = self.call(|core| Ok(core.scan())) {
-                let missing = self.missing_runtimes();
+                let missing = self.unavailable_modules();
                 for m in &roster.modules {
                     for (tool, decl) in &m.manifest.tools {
                         let mut params: Vec<ActionParamView> = match decl.schema() {
