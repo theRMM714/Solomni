@@ -11,6 +11,7 @@ mod conductor;
 mod detail;
 mod doubles;
 mod fakes;
+mod fence_reach;
 mod llm;
 mod mcp;
 mod permission;

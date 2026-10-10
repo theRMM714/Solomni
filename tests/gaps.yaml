@@ -31,20 +31,6 @@
     而代价是三套原生 API、每平台真机验证，且 CI 起不了 hypervisor（只能真机验 + env-skip）。
     项目成熟、需求更清楚时再做。
 
-- id: module.external-harness-fence-reach
-  scope: global
-  level: T3
-  why: |
-    MODULE_SPEC 允许把外部 harness 当模块的一个工具（`tools.<名>.command` 指向它的命令行）。
-    围栏目前只按运行包放行解释器目录，系统里已安装的 harness 可执行文件是否落在可达范围内
-    **没有验证过**；文档已按"开发方向"标注，不能停在"大概能跑"。
-  how: |
-    1) 写一个把外部命令行 harness 当工具的测试模块（命令落在模块目录内）；
-    2) 在授权围栏（`--fence-live`）下跑 T3 真实边界用例，记录可执行文件的可达性结论；
-    3) 若不可达，把可执行文件纳入运行包登记或围栏可达范围，再复跑。
-  accept: 授权围栏下该模块的工具跑通一次完整往返；或如实写明"必须把可执行文件放进模块目录"并落到文档与登记处。
-  blocked_by: 缺少观察面
-
 - id: module.standalone-entry
   scope: global
   level: T5
