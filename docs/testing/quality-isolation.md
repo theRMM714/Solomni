@@ -34,7 +34,7 @@
 - 编译：`cargo check --all-targets`；
 - 警告：`cargo clippy --all-targets --all-features -- -D warnings`；
 - 重复依赖：`cargo tree --duplicates`；
-- 供应链：`cargo audit`（已知 CVE）与 `cargo deny check`（许可证 / 禁用 / 来源，配置 `deny.toml`）；
+- 供应链：`cargo audit`（已知 CVE）与 `cargo deny check`（许可证 / 禁用 / 来源，配置 `deny.toml`）；CI 用 `taiki-e/install-action` 预编译装，本地开发不引第三方、走 `cargo install` 到项目内；
 - 测试目标登记、报告结构、缺口账格式；
 - 重复测试、重复 Fixture、重复 Fake 和跨层无理由重复断言；
 - 项目外写（env / 工具链）：借用系统工具链也不许写它的 home，缓存与临时必须留在项目内；

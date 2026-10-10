@@ -167,16 +167,18 @@ MUTATION_SCOPE=capability MUTATION_CAPABILITY=repair node tests/ci-mutation.mjs
 
 | job | 跑什么 | 对应入口 |
 | --- | --- | --- |
-| `quality` | T0 质量门禁 + 供应链（装 cargo-audit / cargo-deny）+ L1 单元 + 平台探针 + 前端冒烟（**跳过 L4**） | `node run-tests.js --fence-live --skip-e2e` |
+| `quality` | T0 质量门禁 + 供应链（**CI 预编译装** cargo-audit / cargo-deny）+ L1 单元 + 平台探针 + 前端冒烟（**跳过 L4**） | `node run-tests.js --fence-live --skip-e2e` |
 | `e2e` | L4 端到端（自己构建产品，与 `quality` 并行） | `node tests/ci-e2e.mjs`（CI 专用；本地整跑用 `node run-tests.js --fence-live`） |
 
 `publish-report` 把两个 job 的产物（`test-report-<os>` 与 `e2e-report-<os>`）用 `tests/ci-merge.mjs` 合并成该平台
 唯一的 `test-report.json`，再交给 `tests/ci-publish.mjs` 发布。**任一半缺报告都补一条 `fail` 步骤**——"没跑到"不能读成"通过"。
 
 `workflow_dispatch` 的 `clean` 输入（`true`）跳过 `actions/cache` 按干净机器跑；缓存只覆盖**项目内**路径
-（`platform/ci/cargo`：借用 runner 自带 Rust 时的 `CARGO_HOME`，含 registry / git / 安装的供应链工具；以及 `target/debug`），
+（`platform/ci/cargo`：借用 runner 自带 Rust 时的 `CARGO_HOME`，含 registry / git / 预编译装的供应链工具；以及 `target/debug`），
 **不缓存 `target/` 根**（报告与日志必须来自本次运行）。缓存身份包含 `path`，改路径即新缓存项、旧项自动淘汰，首次冷启动重下一次。
 CI 借 runner 自带 Rust（`CARGO_HOME` / `SOLOMNI_CARGO_HOME` 指项目内），不跑 `rustup` 安装——不写项目外。
+供应链工具在 CI 用 `taiki-e/install-action` **预编译装**（仅 CI；本地开发不引第三方，按 `run-tests.js` 的提示 `cargo install` 到项目内），
+安装用时经 `SOLOMNI_CI_PREINSTALL_MS` 带进门禁报告，在 `steps` 里以「CI 前置：供应链工具安装」出现——安装不在 `run-tests.js` 内，只能这样进报告。
 
 **为什么必须有 CI**——下面这些结论本地拿不到：
 

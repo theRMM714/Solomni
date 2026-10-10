@@ -45,7 +45,7 @@
 - **入站契约也是契约**：呈现层只依赖各能力的能力接口（见 [docs/presentation/contracts.md](docs/presentation/contracts.md)）与事件台（拿不到 `Core`、拿不到任何核心锁），
  所以它能被假实现整体替换——`routes.rs` 的 `FakeOps` 就是这么逐条测路由的。
 - T0 质量门禁已并入同一入口：编译、结构审查、格式、clippy、编译告警、依赖重复、**项目外写（env / 工具链）**零容忍硬失败；
-  供应链（`cargo audit` / `cargo deny`）同为硬失败，但工具缺失或取不到 advisory 数据时记 `env-skip`。
+  供应链（`cargo audit` / `cargo deny`）同为硬失败，但工具缺失或取不到 advisory 数据时记 `env-skip`（CI 预编译装，本地不引第三方、走 `cargo install` 到项目内）。
   结构审查里还含**门禁解析器自测**与 **`#[ignore]` 禁令**（报告里 `ignored > 0` 也算失败）；
   项目外写检测在跑完快照 `~/.cargo` / `~/.rustup` 等缓存根，新增即失败，并在启动时清理上次崩溃残留的 `solomni-*` 临时目录（见 [docs/testing/quality-isolation.md](docs/testing/quality-isolation.md)）。
 - 默认**串行**跑用例（`--parallel` 只在排查并发/隔离问题时用，见 [tests/gaps.yaml](tests/gaps.yaml) 的 `testing.parallel-flake`）；每步都有墙钟上限，超时即硬失败并把证据记进报告

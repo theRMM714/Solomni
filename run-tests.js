@@ -969,6 +969,11 @@ function main() {
 function pushStep(obj) {
   steps.push(Object.assign({ ms: Date.now() - stepStart }, obj));
 }
+  // CI 前置步骤（门禁之外执行，如预编译装供应链工具）的墙钟由 workflow 经环境变量带进来，进报告，免得只能靠感觉。
+  const preinstallMs = Number(process.env.SOLOMNI_CI_PREINSTALL_MS || 0);
+  if (preinstallMs > 0) {
+    pushStep({ step: "CI 前置：供应链工具安装", status: "pass", ms: preinstallMs, detail: "在 run-tests 之前完成（CI 墙钟）", raw: null });
+  }
   let doctor = null;
   announce("cargo build");
   console.log(FENCE_LIVE
