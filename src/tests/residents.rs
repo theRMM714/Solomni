@@ -158,6 +158,55 @@ fn residents_inject_module_secrets_and_redact_receipts() {
     );
 }
 
+/// 崩溃检测：服务进程结束时如实标失败、从运行态摘除，后续调用如实报"没在跑"，租约回收清掉失败态。
+#[test]
+fn residents_mark_failed_when_service_process_dies() {
+    use crate::tests::doubles::DyingServiceAdapter;
+
+    let workspace = test_workspace(
+        Arc::new(VecSource(vec![module_with_service("m1", "dying", true)])),
+        Arc::new(InMemoryPackages::empty()),
+        Arc::new(InMemoryWorkspace::new()),
+    );
+    let service = ResidentsService::new(
+        vec![Arc::new(DyingServiceAdapter) as Arc<dyn ServiceAdapter + Send + Sync>],
+        workspace,
+        Arc::new(crate::capabilities::secrets::api::NoSecrets),
+    );
+    service.start("m1", "svc", "lease-d").expect("启动");
+    assert_eq!(
+        service.services().expect("列服务")[0].state,
+        ServiceState::Ready
+    );
+
+    let receipt = service
+        .call("m1", "svc", "boom", &serde_json::json!({}))
+        .expect("调用给出回执");
+    assert!(
+        !receipt.ok && receipt.output.contains("已结束"),
+        "{}",
+        receipt.output
+    );
+    let view = &service.services().expect("列服务")[0];
+    assert!(
+        matches!(view.state, ServiceState::Failed(_)),
+        "进程死了要如实标失败：{:?}",
+        view.state
+    );
+
+    let err = service
+        .call("m1", "svc", "boom", &serde_json::json!({}))
+        .unwrap_err();
+    assert!(err.contains("没在跑"), "{}", err);
+
+    // 租约回收把失败态也清掉：会话没了，失败记录不该留。
+    service.reap("lease-d").expect("回收");
+    assert_eq!(
+        service.services().expect("列服务")[0].state,
+        ServiceState::Stopped
+    );
+}
+
 /// `control_resident` 动作走统一动作面（参数校验 + 授权 + 分发）：start 返回发现的操作，stop 停实例。
 #[test]
 fn control_resident_action_starts_and_stops() {

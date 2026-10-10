@@ -13,7 +13,9 @@
 ## 二、入站契约与状态归属
 
 `api`（`ResidentOps` + `ServiceView` / `Operation` / `ServiceState` / `Receipt` + 空实现 `NoResidents`）；出站端口 `ServiceAdapter` **只由 `service.rs` 持有**（R12）。
-状态在 `service.rs`：运行中的实例（key = 模块/服务）与用户开关；会话租约用于回收（`reap`）。
+状态在 `service.rs`：运行中的实例（key = 模块/服务）、**失败态**（起过但进程已结束 → `Failed`，带如实原因与租约）与用户开关；会话租约用于回收（`reap`）。
+**崩溃检测**：适配器按连接事实回答 `ServiceInstance::is_alive`；进程一结束，`call` 如实标 `Failed` 并从运行态摘除，后续调用如实报"没在跑"。
+**操作清单变化**：服务报告 `notifications/tools/list_changed` 时适配器交回新清单（`take_refreshed_operations`），运行态就地刷新，下一次装配的工具面随之反映。
 
 ## 三、依赖图位置（由源码的 `::api` 引用推导）
 
@@ -24,7 +26,7 @@
 
 - 新增/变更适配器端口 → [docs/testing/doubles.md](../testing/doubles.md) 的端口矩阵；真实适配器（MCP/ACP）在 `detail/`，只由组合根构造。
 - 模块的 `services:` 声明契约见 [MODULE_SPEC.md](../../MODULE_SPEC.md)；声明解析在 `workspace`。
-- 动作面（`control_resident`）、会话删除时的租约回收、起服务时按 `secrets::resolve` 注入 env 与回执脱敏、`ResidentOps::call`（经模块动作 `module.<id>.<service>.<op>`）、**MCP stdio 适配器**（`detail::McpAdapter`，长驻会话走 kernel 的 `SessionHost`）**都已接入**；**模型侧**工具面也已接入——已就绪服务的操作以 `<服务>.<操作>` 进成员工具面（原生声明与信封清单），调用路由到 `ResidentOps::call`。ACP 适配器尚未接入，按逐项 `#[allow(dead_code)]` 如实标注。
+- 动作面（`control_resident`）、会话删除时的租约回收、起服务时按 `secrets::resolve` 注入 env 与回执脱敏、`ResidentOps::call`（经模块动作 `module.<id>.<service>.<op>`）、**MCP stdio 适配器**（`detail::McpAdapter`，长驻会话走 kernel 的 `SessionHost`）**都已接入**；**模型侧**工具面也已接入——已就绪服务的操作以 `<服务>.<操作>` 进成员工具面（原生声明与信封清单），调用路由到 `ResidentOps::call`；崩溃检测与 MCP `tools/list_changed` 刷新也已接入。ACP 适配器尚未接入，按逐项 `#[allow(dead_code)]` 如实标注。
 
 ## 本目录
 

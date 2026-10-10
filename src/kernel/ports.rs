@@ -145,6 +145,10 @@ pub trait Session: Send {
     fn recv(&mut self) -> Result<String, String>;
     /// 目的：关闭这个会话（连根杀进程；可重复调用）。
     fn kill(&mut self);
+    /// 目的：这个会话此刻还活着吗（进程结束 / 管道断了 = false）；默认 true，实现按自己掌握的事实回答。
+    fn alive(&self) -> bool {
+        true
+    }
 }
 
 /// 目的：**长驻进程**执行端口——起一个守门进程并保住它，供按行协议长跑（与一次性的 `ProcessRunner` 并列）。

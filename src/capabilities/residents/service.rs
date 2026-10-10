@@ -36,6 +36,9 @@ pub struct ResidentsService {
     enabled: Mutex<BTreeMap<String, bool>>,
     /// 运行中的实例（key = 模块/服务）。
     running: Mutex<BTreeMap<String, Running>>,
+    /// 起过、但进程已经结束的服务（key = 模块/服务 → (如实原因, 会话租约)）：
+    /// 崩溃检测的落点——如实标失败，不装作还在跑。
+    failed: Mutex<BTreeMap<String, (String, String)>>,
 }
 
 impl ResidentsService {
@@ -55,6 +58,7 @@ impl ResidentsService {
             secrets,
             enabled: Mutex::new(BTreeMap::new()),
             running: Mutex::new(BTreeMap::new()),
+            failed: Mutex::new(BTreeMap::new()),
         }
     }
 
@@ -104,13 +108,17 @@ impl ResidentOps for ResidentsService {
                         self.adapter_ids()
                     );
                 }
-                let (state, operations) = match running.get(&k) {
-                    Some(run) => (ServiceState::Ready, run.operations.clone()),
-                    None if !self.is_enabled(&k, decl.enabled) => {
-                        (ServiceState::Disabled, Vec::new())
-                    }
-                    None => (ServiceState::Stopped, Vec::new()),
+                let failed = self.failed.lock().expect("锁");
+                let (state, operations) = if let Some(run) = running.get(&k) {
+                    (ServiceState::Ready, run.operations.clone())
+                } else if let Some((why, _)) = failed.get(&k) {
+                    (ServiceState::Failed(why.clone()), Vec::new())
+                } else if !self.is_enabled(&k, decl.enabled) {
+                    (ServiceState::Disabled, Vec::new())
+                } else {
+                    (ServiceState::Stopped, Vec::new())
                 };
+                drop(failed);
                 out.push(ServiceView {
                     module: m.manifest.id.clone(),
                     name: name.clone(),
@@ -160,6 +168,8 @@ impl ResidentOps for ResidentsService {
             fence,
         };
         let (instance, operations) = adapter.start(&spec)?;
+        // 重新启动清掉上一次的失败态。
+        self.failed.lock().expect("锁").remove(&k);
         self.running.lock().expect("锁").insert(
             k,
             Running {
@@ -174,6 +184,7 @@ impl ResidentOps for ResidentsService {
 
     fn stop(&self, module: &str, name: &str) -> Result<(), String> {
         let k = key(module, name);
+        self.failed.lock().expect("锁").remove(&k);
         if let Some(mut run) = self.running.lock().expect("锁").remove(&k) {
             run.instance.stop();
         }
@@ -200,25 +211,43 @@ impl ResidentOps for ResidentsService {
     ) -> Result<Receipt, String> {
         let k = key(module, name);
         let mut running = self.running.lock().expect("锁");
-        let run = running
-            .get_mut(&k)
-            .ok_or_else(|| format!("服务 {} 没在跑：先启动", k))?;
-        if !run.operations.iter().any(|o| o.name == op) {
-            let names: Vec<&str> = run.operations.iter().map(|o| o.name.as_str()).collect();
-            return Err(format!(
-                "服务（适配器 {}）没有操作 {}（可用：{}）",
-                run.adapter,
-                op,
-                names.join("、")
-            ));
-        }
-        let receipt = match run.instance.call(op, args) {
-            Ok(output) => Receipt { ok: true, output },
-            Err(e) => Receipt {
-                ok: false,
-                output: e,
-            },
+        let (receipt, alive, lease) = {
+            let run = running
+                .get_mut(&k)
+                .ok_or_else(|| format!("服务 {} 没在跑：先启动", k))?;
+            if !run.operations.iter().any(|o| o.name == op) {
+                let names: Vec<&str> = run.operations.iter().map(|o| o.name.as_str()).collect();
+                return Err(format!(
+                    "服务（适配器 {}）没有操作 {}（可用：{}）",
+                    run.adapter,
+                    op,
+                    names.join("、")
+                ));
+            }
+            let receipt = match run.instance.call(op, args) {
+                Ok(output) => Receipt { ok: true, output },
+                Err(e) => Receipt {
+                    ok: false,
+                    output: e,
+                },
+            };
+            // 服务报告操作清单变了（如 MCP tools/list_changed）：就地更新运行态，下一次工具面随之反映。
+            if let Some(ops) = run.instance.take_refreshed_operations() {
+                run.operations = ops;
+            }
+            // 崩溃检测：进程已结束就如实标失败，并从运行态摘除（再调用要重新启动）。
+            (receipt, run.instance.is_alive(), run.lease.clone())
         };
+        if !alive {
+            if let Some(mut dead) = running.remove(&k) {
+                dead.instance.stop();
+            }
+            self.failed
+                .lock()
+                .expect("锁")
+                .insert(k.clone(), ("服务进程已结束".to_string(), lease));
+        }
+        drop(running);
         // 回执出口按该模块的已知值脱敏（尽力而为；编码 / 变形挡不住，如实写在文档里）。
         let output = self.secrets.redact(module, &receipt.output)?;
         Ok(Receipt {
@@ -239,6 +268,11 @@ impl ResidentOps for ResidentsService {
                 run.instance.stop();
             }
         }
+        // 失败态也按租约回收：会话没了，它的失败记录不该留到下一次会话。
+        self.failed
+            .lock()
+            .expect("锁")
+            .retain(|_, (_, lease_of)| lease_of != lease);
         Ok(())
     }
 }

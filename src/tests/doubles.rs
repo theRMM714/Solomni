@@ -1951,6 +1951,46 @@ impl crate::capabilities::residents::ports::ServiceAdapter for FakeServiceAdapte
     }
 }
 
+/// 目的：一启动就"死"的假适配器——实例调用恒失败且 is_alive = false（崩溃检测用例用）。
+pub(crate) struct DyingServiceAdapter;
+
+impl crate::capabilities::residents::ports::ServiceAdapter for DyingServiceAdapter {
+    fn id(&self) -> &str {
+        "dying"
+    }
+    fn start(
+        &self,
+        _spec: &crate::capabilities::residents::ports::LaunchSpec,
+    ) -> Result<
+        (
+            Box<dyn crate::capabilities::residents::ports::ServiceInstance>,
+            Vec<crate::capabilities::residents::api::Operation>,
+        ),
+        String,
+    > {
+        Ok((
+            Box::new(DyingServiceInstance),
+            vec![crate::capabilities::residents::api::Operation {
+                name: "boom".to_string(),
+                description: String::new(),
+                params: None,
+            }],
+        ))
+    }
+}
+
+struct DyingServiceInstance;
+
+impl crate::capabilities::residents::ports::ServiceInstance for DyingServiceInstance {
+    fn call(&mut self, _op: &str, _args: &serde_json::Value) -> Result<String, String> {
+        Err("服务进程已结束（EOF）".to_string())
+    }
+    fn stop(&mut self) {}
+    fn is_alive(&self) -> bool {
+        false
+    }
+}
+
 // ---------- 隐秘字段（secrets）的内存存储替身 ----------
 /// 目的：SecretStore 的内存替身——可观察写入次数与内容。
 pub(crate) struct InMemorySecretStore {

@@ -56,6 +56,8 @@ struct FencedSession {
     child: Mutex<Child>,
     stdin: ChildStdin,
     stdout: BufReader<ChildStdout>,
+    /// 见过 EOF 或读错误 = 这个会话已经不可用了（崩溃检测的判据）。
+    eof: bool,
 }
 
 impl Session for FencedSession {
@@ -69,14 +71,22 @@ impl Session for FencedSession {
 
     fn recv(&mut self) -> Result<String, String> {
         let mut buf = String::new();
-        let n = self
-            .stdout
-            .read_line(&mut buf)
-            .map_err(|e| format!("读服务进程失败：{}", e))?;
+        let n = match self.stdout.read_line(&mut buf) {
+            Ok(n) => n,
+            Err(e) => {
+                self.eof = true;
+                return Err(format!("读服务进程失败：{}", e));
+            }
+        };
         if n == 0 {
+            self.eof = true;
             return Err("服务进程已结束（EOF）".to_string());
         }
         Ok(buf.trim_end_matches(['\r', '\n']).to_string())
+    }
+
+    fn alive(&self) -> bool {
+        !self.eof
     }
 
     fn kill(&mut self) {
@@ -168,6 +178,7 @@ impl SessionHost for ProcessSessions {
             child: Mutex::new(child),
             stdin,
             stdout: BufReader::new(stdout),
+            eof: false,
         }))
     }
 }

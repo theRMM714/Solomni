@@ -200,6 +200,33 @@ fn model_tool_face_exposes_started_service_ops() {
     );
 }
 
+/// 服务报告 tools/list_changed：下一次调用前刷新操作清单，并交回新清单（没有变化 = None）。
+#[test]
+fn mcp_refreshes_operations_on_list_changed() {
+    let host = Arc::new(ScriptedHost::new(vec![
+        r#"{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2024-11-05"}}"#,
+        r#"{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"echo"}]}}"#,
+        r#"{"jsonrpc":"2.0","method":"notifications/tools/list_changed"}"#,
+        r#"{"jsonrpc":"2.0","id":3,"result":{"content":[{"type":"text","text":"ok"}]}}"#,
+        r#"{"jsonrpc":"2.0","id":4,"result":{"tools":[{"name":"echo"},{"name":"add"}]}}"#,
+    ]));
+    let adapter = McpAdapter::new(host.clone() as Arc<dyn SessionHost + Send + Sync>);
+    let (mut instance, ops) = adapter.start(&launch()).expect("握手");
+    assert_eq!(ops.len(), 1);
+
+    let out = instance.call("echo", &json!({})).expect("调用");
+    assert_eq!(out, "ok");
+    let refreshed = instance
+        .take_refreshed_operations()
+        .expect("list_changed 后要交回新清单");
+    let names: Vec<&str> = refreshed.iter().map(|o| o.name.as_str()).collect();
+    assert_eq!(names, vec!["echo", "add"]);
+    assert!(
+        instance.take_refreshed_operations().is_none(),
+        "没有新变化就不该再交一次"
+    );
+}
+
 /// 服务回 JSON-RPC error：如实报错并带上服务给的消息。
 #[test]
 fn mcp_error_response_is_reported() {

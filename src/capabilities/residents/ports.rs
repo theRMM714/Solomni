@@ -27,6 +27,15 @@ pub trait ServiceInstance: Send {
     fn call(&mut self, op: &str, args: &serde_json::Value) -> Result<String, String>;
     /// 目的：关闭这个实例（连接与进程由适配器收尾）。
     fn stop(&mut self);
+    /// 目的：这个实例此刻还可调用吗（服务进程已结束 = false）；默认 true，适配器按连接事实回答。
+    fn is_alive(&self) -> bool {
+        true
+    }
+    /// 目的：服务报告操作清单变了时（如 MCP `notifications/tools/list_changed`），在这里交回新清单；
+    ///   没有变化 = `None`。生命周期侧据此更新运行态，下一次装配的工具面随之反映。
+    fn take_refreshed_operations(&mut self) -> Option<Vec<Operation>> {
+        None
+    }
 }
 
 /// 目的：协议适配器——一个适配器认领一种协议；它只由组合根构造并注入。
