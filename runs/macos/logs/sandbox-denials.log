@@ -1,0 +1,200 @@
+2026-10-10 18:31:34.892 E  kernel[0:55e4] [com.apple.sandbox.reporting:violation] 1 duplicate report for Sandbox: siriactionsd(360) deny(1) user-preference-read com.apple.appleaccount
+2026-10-10 18:31:34.892 E  kernel[0:55e4] [com.apple.sandbox.reporting:violation] Sandbox: businessservicesd(6425) deny(1) user-preference-read kcfpreferencesanyapplication
+2026-10-10 18:31:34.899 E  kernel[0:55e4] [com.apple.sandbox.reporting:violation] 19 duplicate reports for Sandbox: businessservicesd(6425) deny(1) user-preference-read kcfpreferencesanyapplication
+2026-10-10 18:31:34.899 E  kernel[0:55e4] [com.apple.sandbox.reporting:violation] Sandbox: businessservicesd(6425) deny(1) user-preference-read com.apple.facetime.bag
+2026-10-10 18:31:35.125 E  kernel[0:55e4] [com.apple.sandbox.reporting:violation] Sandbox: secd(324) deny(1) user-preference-write secd
+2026-10-10 18:31:35.815 E  kernel[0:55e4] [com.apple.sandbox.reporting:violation] Sandbox: businessservicesd(6425) deny(1) user-preference-read kcfpreferencesanyapplication
+2026-10-10 18:31:36.230 E  kernel[0:565e] [com.apple.sandbox.reporting:violation] 1 duplicate report for Sandbox: businessservicesd(6425) deny(1) user-preference-read kcfpreferencesanyapplication
+2026-10-10 18:31:36.230 Df kernel[0:565e] [com.apple.sandbox.reporting:violation] Sandbox: MessagesBlastDoorService(6427) allow sysctl-read kern.osproductversion
+2026-10-10 18:31:36.247 Df kernel[0:55e0] [com.apple.sandbox.reporting:violation] 1 duplicate report for Sandbox: MessagesBlastDoorService(6427) allow sysctl-read kern.osproductversion
+2026-10-10 18:31:36.247 E  kernel[0:55e0] [com.apple.sandbox.reporting:violation] Sandbox: MessagesBlastDoorService(6427) deny(1) mach-lookup com.apple.CoreServices.coreservicesd
+2026-10-10 18:31:36.247 Df launchd[1:55e0] [gui/501 [100002]:] denied lookup: name = com.apple.CoreServices.coreservicesd, flags = 0x9, requestor = MessagesBlastDo[6427], error = 159: Sandbox restriction
+2026-10-10 18:31:36.274 E  kernel[0:5213] [com.apple.sandbox.reporting:violation] Sandbox: MessagesBlastDoorService(6427) deny(1) mach-lookup com.apple.DiskArbitration.diskarbitrationd
+2026-10-10 18:31:36.274 Df launchd[1:5213] [gui/501 [100002]:] denied lookup: name = com.apple.DiskArbitration.diskarbitrationd, flags = 0x9, requestor = MessagesBlastDo[6427], error = 159: Sandbox restriction
+2026-10-10 18:31:36.300 E  kernel[0:565f] [com.apple.sandbox.reporting:violation] 1 duplicate report for Sandbox: MessagesBlastDoorService(6427) deny(1) mach-lookup com.apple.DiskArbitration.diskarbitrationd
+2026-10-10 18:31:36.300 E  kernel[0:565f] [com.apple.sandbox.reporting:violation] Sandbox: MessagesBlastDoorService(6427) deny(1) file-read-data /Users/runner/Library/Preferences/ByHost/.GlobalPreferences.AAD034A0-8D69-5E93-93D5-5E861619A921.plist
+2026-10-10 18:31:36.300 E  kernel[0:565f] [com.apple.sandbox.reporting:violation] Sandbox: MessagesBlastDoorService(6427) deny(1) file-read-data /Users/runner/Library/Preferences/.GlobalPreferences.plist
+2026-10-10 18:31:36.300 E  kernel[0:565f] [com.apple.sandbox.reporting:violation] Sandbox: MessagesBlastDoorService(6427) deny(1) file-read-data /Users/runner/Library/Preferences/.GlobalPreferences_m.plist
+2026-10-10 18:31:36.313 E  kernel[0:55e0] [com.apple.sandbox.reporting:violation] Sandbox: MessagesBlastDoorService(6427) deny(1) mach-lookup com.apple.analyticsd
+2026-10-10 18:31:36.313 Df launchd[1:55e0] [system:] denied lookup: name = com.apple.analyticsd, flags = 0x8, requestor = MessagesBlastDo[6427], error = 159: Sandbox restriction
+2026-10-10 18:31:36.343 Df kernel[0:565e] [com.apple.sandbox.reporting:violation] Sandbox: MessagesBlastDoorService(6427) allow sysctl-read hw.logicalcpu_max
+2026-10-10 18:31:36.346 Df kernel[0:565e] [com.apple.sandbox.reporting:violation] Sandbox: MessagesBlastDoorService(6427) allow sysctl-read hw.physicalcpu_max
+2026-10-10 18:31:51.942 E  kernel[0:5a75] [com.apple.sandbox.reporting:violation] Sandbox: spotlightknowledged(6851) deny(1) iokit-get-properties iokit-class:IOPlatformExpertDevice property:region-info
+2026-10-10 18:31:52.067 E  kernel[0:55e0] [com.apple.sandbox.reporting:violation] 1 duplicate report for Sandbox: spotlightknowledged(6851) deny(1) iokit-get-properties iokit-class:IOPlatformExpertDevice property:region-info
+2026-10-10 18:31:52.067 Df kernel[0:55e0] [com.apple.sandbox.reporting:violation] Sandbox: appleaccounttransparencyd(6850) allow mach-lookup com.apple.duetactivityscheduler
+2026-10-10 18:31:52.257 E  kernel[0:59c7] [com.apple.sandbox.reporting:violation] Sandbox: duetexpertd(457) deny(1) user-preference-read com.apple.triald
+2026-10-10 18:32:07.331 E  kernel[0:57ff] [com.apple.sandbox.reporting:violation] 34 duplicate reports for Sandbox: duetexpertd(457) deny(1) user-preference-read com.apple.triald
+2026-10-10 18:32:07.331 E  kernel[0:57ff] [com.apple.sandbox.reporting:violation] Sandbox: AuthenticationServicesAgent(5345) deny(1) user-preference-read com.apple.universalaccess
+2026-10-10 18:32:09.921 E  kernel[0:55e0] [com.apple.sandbox.reporting:violation] 2 duplicate reports for Sandbox: AuthenticationServicesAgent(5345) deny(1) user-preference-read com.apple.universalaccess
+2026-10-10 18:32:09.921 E  kernel[0:55e0] [com.apple.sandbox.reporting:violation] Sandbox: endpointsecurityd(98) deny(1) mach-lookup com.apple.distributed_notifications@1v3
+2026-10-10 18:32:09.921 Df launchd[1:55e0] [system:] denied lookup: name = com.apple.distributed_notifications@1v3, flags = 0x8, requestor = endpointsecurit[98], error = 159: Sandbox restriction
+2026-10-10 18:32:11.071 E  kernel[0:5f6d] [com.apple.sandbox.reporting:violation] Sandbox: symptomsd-diag(7307) deny(1) iokit-get-properties iokit-class:AppleVirtualPlatformARMPE property:UDID
+2026-10-10 18:32:11.354 E  kernel[0:55e0] [com.apple.sandbox.reporting:violation] Sandbox: symptomsd-diag(7307) deny(1) mach-lookup com.apple.metadata.mds
+2026-10-10 18:32:11.354 Df launchd[1:55e0] [system:] denied lookup: name = com.apple.metadata.mds, flags = 0x8, requestor = symptomsd-diag[7307], error = 159: Sandbox restriction
+2026-10-10 18:32:13.566 E  kernel[0:629f] [com.apple.sandbox.reporting:violation] 1 duplicate report for Sandbox: symptomsd-diag(7307) deny(1) mach-lookup com.apple.metadata.mds
+2026-10-10 18:32:19.840 E  kernel[0:5213] [com.apple.sandbox.reporting:violation] Sandbox: parsecd(453) deny(1) mach-lookup com.apple.apsd
+2026-10-10 18:32:19.840 Df launchd[1:5213] [system:] denied lookup: name = com.apple.apsd, flags = 0x8, requestor = parsecd[453], error = 159: Sandbox restriction
+2026-10-10 18:32:26.750 E  kernel[0:5a8d] [com.apple.sandbox.reporting:violation] Sandbox: mobileassetd(181) deny(1) file-read-data /Library/Preferences/com.apple.networkextension.uuidcache.plist
+2026-10-10 18:32:30.025 E  kernel[0:6788] [com.apple.sandbox.reporting:violation] 1 duplicate report for Sandbox: mobileassetd(181) deny(1) file-read-data /Library/Preferences/com.apple.networkextension.uuidcache.plist
+2026-10-10 18:33:17.093 E  kernel[0:76e2] [com.apple.sandbox.reporting:violation] Sandbox: sh(9344) deny(1) file-read-data /dev/dtracehelper
+2026-10-10 18:33:17.095 E  kernel[0:76e3] [com.apple.sandbox.reporting:violation] Sandbox: bash(9344) deny(1) file-read-data /dev/dtracehelper
+2026-10-10 18:33:17.096 E  kernel[0:76e3] [com.apple.sandbox.reporting:violation] Sandbox: bash(9344) deny(1) file-read-data /dev/tty
+2026-10-10 18:33:17.170 E  kernel[0:76fb] [com.apple.sandbox.reporting:violation] Sandbox: solomni-d9e9055ee3fddde1(9363) deny(1) file-read-data /Users/runner/work/Solomni/Solomni/target/tmp/solomni-seatbelt-selfcheck-9301
+2026-10-10 18:33:17.182 E  kernel[0:7700] [com.apple.sandbox.reporting:violation] Sandbox: solomni(9365) deny(1) file-read-data /Users/runner/work/Solomni/Solomni/target/test-scratch/contract/proc-tools-timeout/solomni-seatbelt-selfcheck-9364
+2026-10-10 18:33:17.191 E  kernel[0:7715] [com.apple.sandbox.reporting:violation] Sandbox: sh(9386) deny(1) file-read-data /dev/dtracehelper
+2026-10-10 18:33:17.192 E  kernel[0:7716] [com.apple.sandbox.reporting:violation] Sandbox: bash(9386) deny(1) file-read-data /dev/dtracehelper
+2026-10-10 18:33:17.192 E  kernel[0:7716] [com.apple.sandbox.reporting:violation] Sandbox: bash(9386) deny(1) file-read-data /dev/tty
+2026-10-10 18:33:17.197 E  kernel[0:7717] [com.apple.sandbox.reporting:violation] Sandbox: python3.14(9386) deny(1) file-read-data /dev/dtracehelper
+2026-10-10 18:33:17.199 E  kernel[0:7717] [com.apple.sandbox.reporting:violation] Sandbox: python3.14(9386) deny(1) file-read-data /dev/autofs_nowait
+2026-10-10 18:33:17.199 E  kernel[0:7717] [com.apple.sandbox.reporting:violation] Sandbox: python3.14(9386) deny(1) file-read-data /Users/runner/.CFUserTextEncoding
+2026-10-10 18:33:17.199 E  kernel[0:7717] [com.apple.sandbox.reporting:violation] Sandbox: python3.14(9386) deny(1) file-read-data /dev/autofs_nowait
+2026-10-10 18:33:17.199 E  kernel[0:7717] [com.apple.sandbox.reporting:violation] Sandbox: python3.14(9386) deny(1) file-read-data /Users/runner/.CFUserTextEncoding
+2026-10-10 18:33:17.203 E  kernel[0:7719] [com.apple.sandbox.reporting:violation] Sandbox: Python(9386) deny(1) file-read-data /dev/dtracehelper
+2026-10-10 18:33:19.241 E  kernel[0:7812] [com.apple.sandbox.reporting:violation] Sandbox: solomni(9484) deny(1) file-read-data /Users/runner/work/Solomni/Solomni/target/test-scratch/contract/proc-tools-stdin/solomni-seatbelt-selfcheck-9482
+2026-10-10 18:33:19.253 E  kernel[0:782f] [com.apple.sandbox.reporting:violation] Sandbox: sh(9509) deny(1) file-read-data /dev/dtracehelper
+2026-10-10 18:33:19.255 E  kernel[0:7832] [com.apple.sandbox.reporting:violation] Sandbox: bash(9509) deny(1) file-read-data /dev/dtracehelper
+2026-10-10 18:33:19.255 E  kernel[0:7832] [com.apple.sandbox.reporting:violation] Sandbox: bash(9509) deny(1) file-read-data /dev/tty
+2026-10-10 18:33:19.261 E  kernel[0:7834] [com.apple.sandbox.reporting:violation] Sandbox: python3.14(9509) deny(1) file-read-data /dev/dtracehelper
+2026-10-10 18:33:19.264 E  kernel[0:7834] [com.apple.sandbox.reporting:violation] Sandbox: python3.14(9509) deny(1) file-read-data /dev/autofs_nowait
+2026-10-10 18:33:19.264 E  kernel[0:7834] [com.apple.sandbox.reporting:violation] Sandbox: python3.14(9509) deny(1) file-read-data /Users/runner/.CFUserTextEncoding
+2026-10-10 18:33:19.264 E  kernel[0:7834] [com.apple.sandbox.reporting:violation] Sandbox: python3.14(9509) deny(1) file-read-data /dev/autofs_nowait
+2026-10-10 18:33:19.264 E  kernel[0:7834] [com.apple.sandbox.reporting:violation] Sandbox: python3.14(9509) deny(1) file-read-data /Users/runner/.CFUserTextEncoding
+2026-10-10 18:33:19.274 E  kernel[0:7839] [com.apple.sandbox.reporting:violation] Sandbox: Python(9509) deny(1) file-read-data /dev/dtracehelper
+2026-10-10 18:33:19.360 E  kernel[0:785f] [com.apple.sandbox.reporting:violation] Sandbox: solomni(9531) deny(1) file-read-data /Users/runner/work/Solomni/Solomni/target/test-scratch/contract/proc-tools-relative-program/solomni-seatbelt-selfcheck-9529
+2026-10-10 18:33:19.371 E  kernel[0:787c] [com.apple.sandbox.reporting:violation] Sandbox: sh(9556) deny(1) file-read-data /dev/dtracehelper
+2026-10-10 18:33:19.373 E  kernel[0:787e] [com.apple.sandbox.reporting:violation] Sandbox: bash(9556) deny(1) file-read-data /dev/dtracehelper
+2026-10-10 18:33:19.373 E  kernel[0:787e] [com.apple.sandbox.reporting:violation] Sandbox: bash(9556) deny(1) file-read-data /dev/tty
+2026-10-10 18:33:23.510 E  kernel[0:7bcb] [com.apple.sandbox.reporting:violation] Sandbox: solomni(9729) deny(1) file-read-data /Users/runner/work/Solomni/Solomni/target/test-scratch/contract/fence-reach/module/solomni-seatbelt-selfcheck-9727
+2026-10-10 18:33:23.519 E  kernel[0:7be0] [com.apple.sandbox.reporting:violation] Sandbox: sh(9750) deny(1) file-read-data /dev/dtracehelper
+2026-10-10 18:33:23.520 E  kernel[0:7be1] [com.apple.sandbox.reporting:violation] Sandbox: bash(9750) deny(1) file-read-data /dev/dtracehelper
+2026-10-10 18:33:23.520 E  kernel[0:7be1] [com.apple.sandbox.reporting:violation] Sandbox: bash(9750) deny(1) file-read-data /dev/tty
+2026-10-10 18:33:23.525 E  kernel[0:7be2] [com.apple.sandbox.reporting:violation] Sandbox: python3.14(9750) deny(1) file-read-data /dev/dtracehelper
+2026-10-10 18:33:23.527 E  kernel[0:7be2] [com.apple.sandbox.reporting:violation] Sandbox: python3.14(9750) deny(1) file-read-data /dev/autofs_nowait
+2026-10-10 18:33:23.527 E  kernel[0:7be2] [com.apple.sandbox.reporting:violation] Sandbox: python3.14(9750) deny(1) file-read-data /Users/runner/.CFUserTextEncoding
+2026-10-10 18:33:23.527 E  kernel[0:7be2] [com.apple.sandbox.reporting:violation] Sandbox: python3.14(9750) deny(1) file-read-data /dev/autofs_nowait
+2026-10-10 18:33:23.527 E  kernel[0:7be2] [com.apple.sandbox.reporting:violation] Sandbox: python3.14(9750) deny(1) file-read-data /Users/runner/.CFUserTextEncoding
+2026-10-10 18:33:23.531 E  kernel[0:7be3] [com.apple.sandbox.reporting:violation] Sandbox: Python(9750) deny(1) file-read-data /dev/dtracehelper
+2026-10-10 18:33:23.632 E  kernel[0:7be8] [com.apple.sandbox.reporting:violation] Sandbox: solomni(9752) deny(1) file-read-data /Users/runner/work/Solomni/Solomni/target/test-scratch/contract/fence-reach/module/solomni-seatbelt-selfcheck-9751
+2026-10-10 18:33:23.640 E  kernel[0:7bfd] [com.apple.sandbox.reporting:violation] Sandbox: sh(9773) deny(1) file-read-data /dev/dtracehelper
+2026-10-10 18:33:23.641 E  kernel[0:7bfe] [com.apple.sandbox.reporting:violation] Sandbox: bash(9773) deny(1) file-read-data /dev/dtracehelper
+2026-10-10 18:33:23.642 E  kernel[0:7bfe] [com.apple.sandbox.reporting:violation] Sandbox: bash(9773) deny(1) file-read-data /dev/tty
+2026-10-10 18:33:23.644 E  kernel[0:7bff] [com.apple.sandbox.reporting:violation] Sandbox: sh(9773) deny(1) file-read-data /dev/dtracehelper
+2026-10-10 18:33:23.645 E  kernel[0:7c00] [com.apple.sandbox.reporting:violation] Sandbox: bash(9773) deny(1) file-read-data /dev/dtracehelper
+2026-10-10 18:33:23.646 E  kernel[0:7c00] [com.apple.sandbox.reporting:violation] Sandbox: bash(9773) deny(1) file-read-data /dev/tty
+2026-10-10 18:33:23.647 E  kernel[0:7c00] [com.apple.sandbox.reporting:violation] Sandbox: bash(9773) deny(1) file-read-data /Users/runner/work/Solomni/Solomni/target/test-scratch/contract/fence-reach/outside/run.sh
+2026-10-10 18:33:23.733 E  kernel[0:7c05] [com.apple.sandbox.reporting:violation] Sandbox: solomni(9775) deny(1) file-read-data /Users/runner/work/Solomni/Solomni/target/test-scratch/contract/fence-reach/module/solomni-seatbelt-selfcheck-9774
+2026-10-10 18:33:23.742 E  kernel[0:7c1a] [com.apple.sandbox.reporting:violation] Sandbox: sh(9796) deny(1) file-read-data /dev/dtracehelper
+2026-10-10 18:33:23.743 E  kernel[0:7c1b] [com.apple.sandbox.reporting:violation] Sandbox: bash(9796) deny(1) file-read-data /dev/dtracehelper
+2026-10-10 18:33:23.744 E  kernel[0:7c1b] [com.apple.sandbox.reporting:violation] Sandbox: bash(9796) deny(1) file-read-data /dev/tty
+2026-10-10 18:33:23.748 E  kernel[0:7c1c] [com.apple.sandbox.reporting:violation] Sandbox: python3.14(9796) deny(1) file-read-data /dev/dtracehelper
+2026-10-10 18:33:23.750 E  kernel[0:7c1c] [com.apple.sandbox.reporting:violation] Sandbox: python3.14(9796) deny(1) file-read-data /dev/autofs_nowait
+2026-10-10 18:33:23.750 E  kernel[0:7c1c] [com.apple.sandbox.reporting:violation] Sandbox: python3.14(9796) deny(1) file-read-data /Users/runner/.CFUserTextEncoding
+2026-10-10 18:33:23.750 E  kernel[0:7c1c] [com.apple.sandbox.reporting:violation] Sandbox: python3.14(9796) deny(1) file-read-data /dev/autofs_nowait
+2026-10-10 18:33:23.750 E  kernel[0:7c1c] [com.apple.sandbox.reporting:violation] Sandbox: python3.14(9796) deny(1) file-read-data /Users/runner/.CFUserTextEncoding
+2026-10-10 18:33:23.753 E  kernel[0:7c1d] [com.apple.sandbox.reporting:violation] Sandbox: Python(9796) deny(1) file-read-data /dev/dtracehelper
+2026-10-10 18:33:23.761 E  kernel[0:7c1d] [com.apple.sandbox.reporting:violation] Sandbox: Python(9796) deny(1) file-read-data /Users/runner/work/Solomni/Solomni/target/test-scratch/contract/fence-reach/outside/secret.txt
+2026-10-10 18:33:24.042 E  kernel[0:7c49] [com.apple.sandbox.reporting:violation] Sandbox: solomni(9816) deny(1) file-read-data /Users/runner/work/Solomni/Solomni/solomni-seatbelt-selfcheck-9815
+2026-10-10 18:33:24.051 E  kernel[0:7c5e] [com.apple.sandbox.reporting:violation] Sandbox: sh(9837) deny(1) file-read-data /dev/dtracehelper
+2026-10-10 18:33:24.052 E  kernel[0:7c5f] [com.apple.sandbox.reporting:violation] Sandbox: bash(9837) deny(1) file-read-data /dev/dtracehelper
+2026-10-10 18:33:24.052 E  kernel[0:7c5f] [com.apple.sandbox.reporting:violation] Sandbox: bash(9837) deny(1) file-read-data /dev/tty
+2026-10-10 18:33:24.056 E  kernel[0:7c60] [com.apple.sandbox.reporting:violation] Sandbox: python3.14(9837) deny(1) file-read-data /dev/dtracehelper
+2026-10-10 18:33:24.058 E  kernel[0:7c60] [com.apple.sandbox.reporting:violation] Sandbox: python3.14(9837) deny(1) file-read-data /dev/autofs_nowait
+2026-10-10 18:33:24.058 E  kernel[0:7c60] [com.apple.sandbox.reporting:violation] Sandbox: python3.14(9837) deny(1) file-read-data /Users/runner/.CFUserTextEncoding
+2026-10-10 18:33:24.058 E  kernel[0:7c60] [com.apple.sandbox.reporting:violation] Sandbox: python3.14(9837) deny(1) file-read-data /dev/autofs_nowait
+2026-10-10 18:33:24.058 E  kernel[0:7c60] [com.apple.sandbox.reporting:violation] Sandbox: python3.14(9837) deny(1) file-read-data /Users/runner/.CFUserTextEncoding
+2026-10-10 18:33:24.062 E  kernel[0:7c61] [com.apple.sandbox.reporting:violation] Sandbox: Python(9837) deny(1) file-read-data /dev/dtracehelper
+2026-10-10 18:33:24.159 E  kernel[0:7c8e] [com.apple.sandbox.reporting:violation] Sandbox: solomni(9861) deny(1) file-read-data /Users/runner/work/Solomni/Solomni/solomni-seatbelt-selfcheck-9860
+2026-10-10 18:33:24.167 E  kernel[0:7ca6] [com.apple.sandbox.reporting:violation] Sandbox: sh(9882) deny(1) file-read-data /dev/dtracehelper
+2026-10-10 18:33:24.168 E  kernel[0:7ca7] [com.apple.sandbox.reporting:violation] Sandbox: bash(9882) deny(1) file-read-data /dev/dtracehelper
+2026-10-10 18:33:24.169 E  kernel[0:7ca7] [com.apple.sandbox.reporting:violation] Sandbox: bash(9882) deny(1) file-read-data /dev/tty
+2026-10-10 18:33:24.173 E  kernel[0:7ca8] [com.apple.sandbox.reporting:violation] Sandbox: python3.14(9882) deny(1) file-read-data /dev/dtracehelper
+2026-10-10 18:33:24.175 E  kernel[0:7ca8] [com.apple.sandbox.reporting:violation] Sandbox: python3.14(9882) deny(1) file-read-data /dev/autofs_nowait
+2026-10-10 18:33:24.175 E  kernel[0:7ca8] [com.apple.sandbox.reporting:violation] Sandbox: python3.14(9882) deny(1) file-read-data /Users/runner/.CFUserTextEncoding
+2026-10-10 18:33:24.175 E  kernel[0:7ca8] [com.apple.sandbox.reporting:violation] Sandbox: python3.14(9882) deny(1) file-read-data /dev/autofs_nowait
+2026-10-10 18:33:24.175 E  kernel[0:7ca8] [com.apple.sandbox.reporting:violation] Sandbox: python3.14(9882) deny(1) file-read-data /Users/runner/.CFUserTextEncoding
+2026-10-10 18:33:24.178 E  kernel[0:7ca9] [com.apple.sandbox.reporting:violation] Sandbox: Python(9882) deny(1) file-read-data /dev/dtracehelper
+2026-10-10 18:33:27.319 E  kernel[0:6e54] [com.apple.sandbox.reporting:violation] Sandbox: CGPDFService(9969) deny(1) mach-lookup com.apple.analyticsd
+2026-10-10 18:33:27.319 Df launchd[1:6e54] [system:] denied lookup: name = com.apple.analyticsd, flags = 0x8, requestor = CGPDFService[9969], error = 159: Sandbox restriction
+2026-10-10 18:33:27.320 E  kernel[0:7dd5] [com.apple.sandbox.reporting:violation] Sandbox: CGPDFService(9969) deny(1) file-read-data /Users/runner/Library/Preferences/.GlobalPreferences.plist
+2026-10-10 18:33:27.320 E  kernel[0:7dd5] [com.apple.sandbox.reporting:violation] Sandbox: CGPDFService(9969) deny(1) file-read-data /Users/runner/Library/Preferences/.GlobalPreferences_m.plist
+2026-10-10 18:33:51.141 E  kernel[0:2db0] [com.apple.sandbox.reporting:violation] Sandbox: voicebankingd(680) deny(1) mach-lookup com.apple.usymptomsd
+2026-10-10 18:33:51.141 Df launchd[1:2db0] [system:] denied lookup: name = com.apple.usymptomsd, flags = 0x8, requestor = voicebankingd[680], error = 159: Sandbox restriction
+2026-10-10 18:33:58.752 E  kernel[0:884a] [com.apple.sandbox.reporting:violation] 1 duplicate report for Sandbox: voicebankingd(680) deny(1) mach-lookup com.apple.usymptomsd
+2026-10-10 18:33:58.827 E  kernel[0:8866] [com.apple.sandbox.reporting:violation] Sandbox: solomni(10886) deny(1) file-read-data /Users/runner/work/Solomni/Solomni/target/test-scratch/tree/solomni-seatbelt-selfcheck-10885
+2026-10-10 18:33:58.840 E  kernel[0:887b] [com.apple.sandbox.reporting:violation] Sandbox: sh(10907) deny(1) file-read-data /dev/dtracehelper
+2026-10-10 18:33:58.841 E  kernel[0:887c] [com.apple.sandbox.reporting:violation] Sandbox: bash(10907) deny(1) file-read-data /dev/dtracehelper
+2026-10-10 18:33:58.842 E  kernel[0:887c] [com.apple.sandbox.reporting:violation] Sandbox: bash(10907) deny(1) file-read-data /dev/tty
+2026-10-10 18:33:58.847 E  kernel[0:887d] [com.apple.sandbox.reporting:violation] Sandbox: python3.14(10907) deny(1) file-read-data /dev/dtracehelper
+2026-10-10 18:33:58.849 E  kernel[0:887d] [com.apple.sandbox.reporting:violation] Sandbox: python3.14(10907) deny(1) file-read-data /dev/autofs_nowait
+2026-10-10 18:33:58.849 E  kernel[0:887d] [com.apple.sandbox.reporting:violation] Sandbox: python3.14(10907) deny(1) file-read-data /Users/runner/.CFUserTextEncoding
+2026-10-10 18:33:58.849 E  kernel[0:887d] [com.apple.sandbox.reporting:violation] Sandbox: python3.14(10907) deny(1) file-read-data /dev/autofs_nowait
+2026-10-10 18:33:58.849 E  kernel[0:887d] [com.apple.sandbox.reporting:violation] Sandbox: python3.14(10907) deny(1) file-read-data /Users/runner/.CFUserTextEncoding
+2026-10-10 18:33:58.853 E  kernel[0:887e] [com.apple.sandbox.reporting:violation] Sandbox: Python(10907) deny(1) file-read-data /dev/dtracehelper
+2026-10-10 18:33:58.904 E  kernel[0:8880] [com.apple.sandbox.reporting:violation] Sandbox: Python(10908) deny(1) file-read-data /dev/fd
+2026-10-10 18:33:59.051 E  kernel[0:8897] [com.apple.sandbox.reporting:violation] Sandbox: sh(10908) deny(1) file-read-data /dev/dtracehelper
+2026-10-10 18:33:59.052 E  kernel[0:8898] [com.apple.sandbox.reporting:violation] Sandbox: bash(10908) deny(1) file-read-data /dev/dtracehelper
+2026-10-10 18:33:59.052 E  kernel[0:8898] [com.apple.sandbox.reporting:violation] Sandbox: bash(10908) deny(1) file-read-data /dev/tty
+2026-10-10 18:33:59.055 E  kernel[0:889a] [com.apple.sandbox.reporting:violation] Sandbox: sleep(10910) deny(1) file-read-data /dev/dtracehelper
+2026-10-10 18:34:07.428 E  kernel[0:8ac8] [com.apple.sandbox.reporting:violation] Sandbox: solomni(11171) deny(1) file-read-data /Users/runner/work/Solomni/Solomni/target/test-scratch/ok/solomni-seatbelt-selfcheck-11170
+2026-10-10 18:34:07.446 E  kernel[0:8ade] [com.apple.sandbox.reporting:violation] Sandbox: sh(11192) deny(1) file-read-data /dev/dtracehelper
+2026-10-10 18:34:07.448 E  kernel[0:8adf] [com.apple.sandbox.reporting:violation] Sandbox: bash(11192) deny(1) file-read-data /dev/dtracehelper
+2026-10-10 18:34:07.449 E  kernel[0:8adf] [com.apple.sandbox.reporting:violation] Sandbox: bash(11192) deny(1) file-read-data /dev/tty
+2026-10-10 18:34:08.285 E  kernel[0:8c78] [com.apple.sandbox.reporting:violation] Sandbox: solomni(11305) deny(1) file-read-data /Users/runner/work/Solomni/Solomni/target/test-scratch/fence-inside/solomni-seatbelt-selfcheck-11304
+2026-10-10 18:34:08.305 E  kernel[0:8c8f] [com.apple.sandbox.reporting:violation] Sandbox: sh(11326) deny(1) file-read-data /dev/dtracehelper
+2026-10-10 18:34:08.307 E  kernel[0:8c90] [com.apple.sandbox.reporting:violation] Sandbox: bash(11326) deny(1) file-read-data /dev/dtracehelper
+2026-10-10 18:34:08.307 E  kernel[0:8c90] [com.apple.sandbox.reporting:violation] Sandbox: bash(11326) deny(1) file-read-data /dev/tty
+2026-10-10 18:34:08.325 E  kernel[0:8c94] [com.apple.sandbox.reporting:violation] Sandbox: solomni(11329) deny(1) file-read-data /Users/runner/work/Solomni/Solomni/target/test-scratch/fence-inside/solomni-seatbelt-selfcheck-11328
+2026-10-10 18:34:08.337 E  kernel[0:8ca9] [com.apple.sandbox.reporting:violation] Sandbox: sh(11350) deny(1) file-read-data /dev/dtracehelper
+2026-10-10 18:34:08.340 E  kernel[0:8caa] [com.apple.sandbox.reporting:violation] Sandbox: bash(11350) deny(1) file-read-data /dev/dtracehelper
+2026-10-10 18:34:08.340 E  kernel[0:8caa] [com.apple.sandbox.reporting:violation] Sandbox: bash(11350) deny(1) file-read-data /dev/tty
+2026-10-10 18:34:08.346 E  kernel[0:8cab] [com.apple.sandbox.reporting:violation] Sandbox: cat(11350) deny(1) file-read-data /dev/dtracehelper
+2026-10-10 18:34:08.346 E  kernel[0:8cab] [com.apple.sandbox.reporting:violation] Sandbox: cat(11350) deny(1) file-read-data /Users/runner/work/Solomni/Solomni/target/test-scratch/fence-outside/secret.txt
+2026-10-10 18:34:08.362 E  kernel[0:8caf] [com.apple.sandbox.reporting:violation] Sandbox: solomni(11353) deny(1) file-read-data /Users/runner/work/Solomni/Solomni/target/test-scratch/fence-module/solomni-seatbelt-selfcheck-11352
+2026-10-10 18:34:08.372 E  kernel[0:8cc4] [com.apple.sandbox.reporting:violation] Sandbox: sh(11374) deny(1) file-read-data /dev/dtracehelper
+2026-10-10 18:34:08.373 E  kernel[0:8cc5] [com.apple.sandbox.reporting:violation] Sandbox: bash(11374) deny(1) file-read-data /dev/dtracehelper
+2026-10-10 18:34:08.374 E  kernel[0:8cc5] [com.apple.sandbox.reporting:violation] Sandbox: bash(11374) deny(1) file-read-data /dev/tty
+2026-10-10 18:34:08.386 E  kernel[0:8cc8] [com.apple.sandbox.reporting:violation] Sandbox: solomni(11377) deny(1) file-read-data /Users/runner/work/Solomni/Solomni/target/test-scratch/fence-module/solomni-seatbelt-selfcheck-11376
+2026-10-10 18:34:08.394 E  kernel[0:8cdd] [com.apple.sandbox.reporting:violation] Sandbox: sh(11398) deny(1) file-read-data /dev/dtracehelper
+2026-10-10 18:34:08.395 E  kernel[0:8cde] [com.apple.sandbox.reporting:violation] Sandbox: bash(11398) deny(1) file-read-data /dev/dtracehelper
+2026-10-10 18:34:08.396 E  kernel[0:8cde] [com.apple.sandbox.reporting:violation] Sandbox: bash(11398) deny(1) file-read-data /dev/tty
+2026-10-10 18:34:08.397 E  kernel[0:8cde] [com.apple.sandbox.reporting:violation] Sandbox: bash(11398) deny(1) file-write-data /Users/runner/work/Solomni/Solomni/target/test-scratch/fence-module/script.py
+2026-10-10 18:34:08.409 E  kernel[0:8ce1] [com.apple.sandbox.reporting:violation] Sandbox: solomni(11401) deny(1) file-read-data /Users/runner/work/Solomni/Solomni/target/test-scratch/fence-module/solomni-seatbelt-selfcheck-11400
+2026-10-10 18:34:08.418 E  kernel[0:8cf8] [com.apple.sandbox.reporting:violation] Sandbox: sh(11424) deny(1) file-read-data /dev/dtracehelper
+2026-10-10 18:34:08.419 E  kernel[0:8cf9] [com.apple.sandbox.reporting:violation] Sandbox: bash(11424) deny(1) file-read-data /dev/dtracehelper
+2026-10-10 18:34:08.419 E  kernel[0:8cf9] [com.apple.sandbox.reporting:violation] Sandbox: bash(11424) deny(1) file-read-data /dev/tty
+2026-10-10 18:34:08.423 E  kernel[0:8cfc] [com.apple.sandbox.reporting:violation] Sandbox: cat(11424) deny(1) file-read-data /dev/dtracehelper
+2026-10-10 18:34:08.439 E  kernel[0:8cff] [com.apple.sandbox.reporting:violation] Sandbox: solomni(11427) deny(1) file-read-data /Users/runner/work/Solomni/Solomni/target/test-scratch/fence-module/solomni-seatbelt-selfcheck-11426
+2026-10-10 18:34:08.448 E  kernel[0:8d18] [com.apple.sandbox.reporting:violation] Sandbox: sh(11448) deny(1) file-read-data /dev/dtracehelper
+2026-10-10 18:34:08.449 E  kernel[0:8d19] [com.apple.sandbox.reporting:violation] Sandbox: bash(11448) deny(1) file-read-data /dev/dtracehelper
+2026-10-10 18:34:08.450 E  kernel[0:8d19] [com.apple.sandbox.reporting:violation] Sandbox: bash(11448) deny(1) file-read-data /dev/tty
+2026-10-10 18:34:08.463 E  kernel[0:8d21] [com.apple.sandbox.reporting:violation] Sandbox: solomni(11451) deny(1) file-read-data /Users/runner/work/Solomni/Solomni/target/test-scratch/fence-ro-inside/solomni-seatbelt-selfcheck-11450
+2026-10-10 18:34:08.471 E  kernel[0:8d36] [com.apple.sandbox.reporting:violation] Sandbox: sh(11472) deny(1) file-read-data /dev/dtracehelper
+2026-10-10 18:34:08.472 E  kernel[0:8d37] [com.apple.sandbox.reporting:violation] Sandbox: bash(11472) deny(1) file-read-data /dev/dtracehelper
+2026-10-10 18:34:08.473 E  kernel[0:8d37] [com.apple.sandbox.reporting:violation] Sandbox: bash(11472) deny(1) file-read-data /dev/tty
+2026-10-10 18:34:08.475 E  kernel[0:8d38] [com.apple.sandbox.reporting:violation] Sandbox: cat(11472) deny(1) file-read-data /dev/dtracehelper
+2026-10-10 18:34:08.486 E  kernel[0:8d3b] [com.apple.sandbox.reporting:violation] Sandbox: solomni(11475) deny(1) file-read-data /Users/runner/work/Solomni/Solomni/target/test-scratch/fence-ro-inside/solomni-seatbelt-selfcheck-11474
+2026-10-10 18:34:08.493 E  kernel[0:8d50] [com.apple.sandbox.reporting:violation] Sandbox: sh(11496) deny(1) file-read-data /dev/dtracehelper
+2026-10-10 18:34:08.495 E  kernel[0:8d51] [com.apple.sandbox.reporting:violation] Sandbox: bash(11496) deny(1) file-read-data /dev/dtracehelper
+2026-10-10 18:34:08.495 E  kernel[0:8d51] [com.apple.sandbox.reporting:violation] Sandbox: bash(11496) deny(1) file-read-data /dev/tty
+2026-10-10 18:34:08.496 E  kernel[0:8d51] [com.apple.sandbox.reporting:violation] Sandbox: bash(11496) deny(1) file-write-create /Users/runner/work/Solomni/Solomni/target/test-scratch/fence-ro-shared/should-not-exist.txt
+2026-10-10 18:34:08.507 E  kernel[0:8d54] [com.apple.sandbox.reporting:violation] Sandbox: solomni(11499) deny(1) file-read-data /Users/runner/work/Solomni/Solomni/target/test-scratch/fence-ro-inside/solomni-seatbelt-selfcheck-11498
+2026-10-10 18:34:08.516 E  kernel[0:8d69] [com.apple.sandbox.reporting:violation] Sandbox: sh(11520) deny(1) file-read-data /dev/dtracehelper
+2026-10-10 18:34:08.517 E  kernel[0:8d6a] [com.apple.sandbox.reporting:violation] Sandbox: bash(11520) deny(1) file-read-data /dev/dtracehelper
+2026-10-10 18:34:08.518 E  kernel[0:8d6a] [com.apple.sandbox.reporting:violation] Sandbox: bash(11520) deny(1) file-read-data /dev/tty
+2026-10-10 18:34:08.531 E  kernel[0:8d6e] [com.apple.sandbox.reporting:violation] Sandbox: solomni(11523) deny(1) file-read-data /Users/runner/work/Solomni/Solomni/target/test-scratch/shared-area-sandbox/solomni-seatbelt-selfcheck-11522
+2026-10-10 18:34:08.539 E  kernel[0:8d83] [com.apple.sandbox.reporting:violation] Sandbox: sh(11544) deny(1) file-read-data /dev/dtracehelper
+2026-10-10 18:34:08.540 E  kernel[0:8d84] [com.apple.sandbox.reporting:violation] Sandbox: bash(11544) deny(1) file-read-data /dev/dtracehelper
+2026-10-10 18:34:08.541 E  kernel[0:8d84] [com.apple.sandbox.reporting:violation] Sandbox: bash(11544) deny(1) file-read-data /dev/tty
+2026-10-10 18:34:08.552 E  kernel[0:8d87] [com.apple.sandbox.reporting:violation] Sandbox: solomni(11547) deny(1) file-read-data /Users/runner/work/Solomni/Solomni/target/test-scratch/shared-area-sandbox/solomni-seatbelt-selfcheck-11546
+2026-10-10 18:34:08.561 E  kernel[0:8d9d] [com.apple.sandbox.reporting:violation] Sandbox: sh(11568) deny(1) file-read-data /dev/dtracehelper
+2026-10-10 18:34:08.562 E  kernel[0:8d9e] [com.apple.sandbox.reporting:violation] Sandbox: bash(11568) deny(1) file-read-data /dev/dtracehelper
+2026-10-10 18:34:08.562 E  kernel[0:8d9e] [com.apple.sandbox.reporting:violation] Sandbox: bash(11568) deny(1) file-read-data /dev/tty
+2026-10-10 18:34:08.564 E  kernel[0:8d9e] [com.apple.sandbox.reporting:violation] Sandbox: bash(11568) deny(1) file-write-create /Users/runner/work/Solomni/Solomni/target/test-scratch/shared-area-work/pwn.txt
+2026-10-10 18:34:08.575 E  kernel[0:8da1] [com.apple.sandbox.reporting:violation] Sandbox: solomni(11571) deny(1) file-read-data /Users/runner/work/Solomni/Solomni/target/test-scratch/shared-area-sandbox/solomni-seatbelt-selfcheck-11570
+2026-10-10 18:34:08.584 E  kernel[0:8db8] [com.apple.sandbox.reporting:violation] Sandbox: sh(11593) deny(1) file-read-data /dev/dtracehelper
+2026-10-10 18:34:08.585 E  kernel[0:8db9] [com.apple.sandbox.reporting:violation] Sandbox: bash(11593) deny(1) file-read-data /dev/dtracehelper
+2026-10-10 18:34:08.585 E  kernel[0:8db9] [com.apple.sandbox.reporting:violation] Sandbox: bash(11593) deny(1) file-read-data /dev/tty
+2026-10-10 18:34:08.588 E  kernel[0:8dba] [com.apple.sandbox.reporting:violation] Sandbox: cat(11593) deny(1) file-read-data /dev/dtracehelper
+2026-10-10 18:34:08.589 E  kernel[0:8dba] [com.apple.sandbox.reporting:violation] Sandbox: cat(11593) deny(1) file-read-data /Users/runner/work/Solomni/Solomni/target/test-scratch/shared-area-work/planted.txt
+2026-10-10 18:34:08.601 E  kernel[0:8dbf] [com.apple.sandbox.reporting:violation] Sandbox: solomni(11596) deny(1) file-read-data /Users/runner/work/Solomni/Solomni/target/test-scratch/fence-verify/solomni-seatbelt-selfcheck-11595
+2026-10-10 18:34:10.079 Df log[11609:8e04] [com.apple.log:] log run noninteractively, parent: 11607 (sudo), args: 'log' 'show' '--last' '10m' '--style' 'compact' '--predicate' 'eventMessage CONTAINS "Sandbox"'
