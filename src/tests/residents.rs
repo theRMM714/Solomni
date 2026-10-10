@@ -40,6 +40,7 @@ fn svc(modules: Vec<Module>) -> (ResidentsService, Arc<FakeServiceAdapter>) {
     let service = ResidentsService::new(
         vec![Arc::clone(&fake) as Arc<dyn ServiceAdapter + Send + Sync>],
         workspace,
+        Arc::new(crate::capabilities::secrets::api::NoSecrets),
     );
     (service, fake)
 }
@@ -102,6 +103,61 @@ fn residents_unknown_adapter_is_reported_with_available_names() {
     assert!(err.contains("未知适配器"), "{}", err);
 }
 
+/// 起服务时注入该模块的隐秘字段（env），回执按已知值脱敏。
+#[test]
+fn residents_inject_module_secrets_and_redact_receipts() {
+    use crate::capabilities::secrets::api::SecretOps;
+    use crate::capabilities::secrets::ports::SecretStore;
+    use crate::capabilities::secrets::service::SecretsService;
+    use crate::capabilities::workspace::api::SecretDecl;
+    use crate::tests::doubles::InMemorySecretStore;
+
+    let mut modules = vec![module_with_service("m1", "fake", true)];
+    modules[0].manifest.secrets.insert(
+        "token".to_string(),
+        SecretDecl {
+            env: "TOKEN".to_string(),
+            desc: String::new(),
+        },
+    );
+    let fake = Arc::new(FakeServiceAdapter::new());
+    let workspace = test_workspace(
+        Arc::new(VecSource(modules)),
+        Arc::new(InMemoryPackages::empty()),
+        Arc::new(InMemoryWorkspace::new()),
+    );
+    let secrets = Arc::new(
+        SecretsService::new(
+            Arc::clone(&workspace),
+            Arc::new(InMemorySecretStore::new()) as Arc<dyn SecretStore + Send + Sync>,
+        )
+        .expect("secrets"),
+    );
+    secrets.set("m1", "token", "s3cr3t").expect("置值");
+    let service = ResidentsService::new(
+        vec![Arc::clone(&fake) as Arc<dyn ServiceAdapter + Send + Sync>],
+        workspace,
+        Arc::clone(&secrets) as Arc<dyn SecretOps + Send + Sync>,
+    );
+
+    service.start("m1", "svc", "").expect("启动");
+    assert!(
+        fake.envs()
+            .iter()
+            .any(|(k, v)| k == "TOKEN" && v == "s3cr3t"),
+        "起服务要注入该模块的隐秘字段：{:?}",
+        fake.envs()
+    );
+    let r = service
+        .call("m1", "svc", "echo", &serde_json::json!({}))
+        .expect("调用");
+    assert!(
+        !r.output.contains("s3cr3t") && r.output.contains("***"),
+        "回执要脱敏：{}",
+        r.output
+    );
+}
+
 /// `control_resident` 动作走统一动作面（参数校验 + 授权 + 分发）：start 返回发现的操作，stop 停实例。
 #[test]
 fn control_resident_action_starts_and_stops() {
@@ -117,6 +173,7 @@ fn control_resident_action_starts_and_stops() {
     let residents: Arc<dyn ResidentOps + Send + Sync> = Arc::new(ResidentsService::new(
         vec![Arc::clone(&fake) as Arc<dyn ServiceAdapter + Send + Sync>],
         workspace,
+        Arc::new(crate::capabilities::secrets::api::NoSecrets),
     ));
     let gateway = crate::tests::doubles::gw(BTreeMap::new(), Vec::new());
     let handle = ConductorHandle::spawn(crate::tests::doubles::core_with_residents(

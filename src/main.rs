@@ -213,11 +213,6 @@ fn main() {
             Arc::new(workstore),
         ));
 
-    // **常驻服务能力**：适配器注册表（Phase 1 为空——真实协议适配器随 MCP/ACP 接入）+ 工作区清单来源。
-    let residents: Arc<dyn capabilities::residents::api::ResidentOps + Send + Sync> = Arc::new(
-        capabilities::residents::service::ResidentsService::new(Vec::new(), Arc::clone(&workspace)),
-    );
-
     // **隐秘字段能力**：值只落 .home/secrets.yaml；加载失败 = 装配失败（不静默空表）。
     let secrets: Arc<dyn capabilities::secrets::api::SecretOps + Send + Sync> =
         match capabilities::secrets::service::SecretsService::new(
@@ -232,6 +227,14 @@ fn main() {
                 std::process::exit(1);
             }
         };
+
+    // **常驻服务能力**：适配器注册表（Phase 1 为空——真实协议适配器随 MCP/ACP 接入）+ 工作区清单来源 + 隐秘字段面。
+    let residents: Arc<dyn capabilities::residents::api::ResidentOps + Send + Sync> =
+        Arc::new(capabilities::residents::service::ResidentsService::new(
+            Vec::new(),
+            Arc::clone(&workspace),
+            Arc::clone(&secrets),
+        ));
 
     let mut conductor = capabilities::conductor::service::Conductor::new(
         Box::new(registry),

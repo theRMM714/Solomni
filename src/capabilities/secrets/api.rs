@@ -2,7 +2,7 @@
 //! 管：字段视图、置值 / 清值、按模块解析注入项、按已知值脱敏；未注入时的空实现 NoSecrets。
 //! 不管：存储机制（在 ports/detail）；模块声明解析（在 workspace）；实际注入子进程（消费方按 resolve 取）。
 //! 联动：实现见 `service.rs`；由 `main.rs` 装配进 `Ops`。
-#![allow(dead_code)] // 生产消费点（工具/服务的 env 注入与回执脱敏）随 Phase 1 剩余项接入；在此之前只被契约测试驱动。
+#![allow(dead_code)] // declared 由 CLI、resolve/redact 由 residents 消费；set/clear 随设置面接入。
 
 /// 目的：一个隐秘字段的视图（给设置面看；**只有标识，没有值**）。
 #[derive(Debug, Clone)]

@@ -1880,24 +1880,36 @@ impl ProxyHost for FakeProxyHost {
 /// 目的：常驻服务的假适配器——不拉起任何进程，记录调用并按固定脚本提供操作。
 pub(crate) struct FakeServiceAdapter {
     pub calls: Arc<Mutex<Vec<String>>>,
+    envs: Mutex<Vec<(String, String)>>,
 }
 
 impl FakeServiceAdapter {
     pub(crate) fn new() -> FakeServiceAdapter {
         FakeServiceAdapter {
             calls: Arc::new(Mutex::new(Vec::new())),
+            envs: Mutex::new(Vec::new()),
         }
+    }
+    /// 目的：start 时收到的注入项（断言 secrets 注入用）。
+    pub(crate) fn envs(&self) -> Vec<(String, String)> {
+        self.envs.lock().expect("锁").clone()
     }
 }
 
 struct FakeServiceInstance {
     calls: Arc<Mutex<Vec<String>>>,
+    env: Vec<(String, String)>,
 }
 
 impl crate::capabilities::residents::ports::ServiceInstance for FakeServiceInstance {
     fn call(&mut self, op: &str, args: &serde_json::Value) -> Result<String, String> {
         self.calls.lock().expect("锁").push(format!("call:{}", op));
-        Ok(format!("{} {}", op, args))
+        let env: Vec<String> = self
+            .env
+            .iter()
+            .map(|(k, v)| format!("{}={}", k, v))
+            .collect();
+        Ok(format!("{} {} {}", op, args, env.join(",")))
     }
     fn stop(&mut self) {
         self.calls.lock().expect("锁").push("stop".to_string());
@@ -1922,9 +1934,11 @@ impl crate::capabilities::residents::ports::ServiceAdapter for FakeServiceAdapte
             .lock()
             .expect("锁")
             .push(format!("start:{}", spec.name));
+        self.envs.lock().expect("锁").extend(spec.env.clone());
         Ok((
             Box::new(FakeServiceInstance {
                 calls: Arc::clone(&self.calls),
+                env: spec.env.clone(),
             }),
             vec![crate::capabilities::residents::api::Operation {
                 name: "echo".to_string(),

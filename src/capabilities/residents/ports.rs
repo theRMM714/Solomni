@@ -15,6 +15,8 @@ pub struct LaunchSpec {
     pub command: String,
     pub cwd: PathBuf,
     pub options: BTreeMap<String, String>,
+    /// 目的：该模块已配置的隐秘字段注入项（env 名 → 值）；只走进程环境，不进命令行。
+    pub env: Vec<(String, String)>,
 }
 
 /// 目的：一个已拉起的服务实例——适配器负责协议，manager 负责生命周期与串行调用。

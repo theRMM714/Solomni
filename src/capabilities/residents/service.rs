@@ -3,12 +3,13 @@
 //! 不管：任何协议（全在适配器）；进程与围栏（在 kernel，随真实适配器接入）；
 //!   开关的落盘（随设置面接入，当前在内存、缺省取声明里的 enabled）。
 //! 联动：api 见 `api.rs`，端口见 `ports.rs`；由 `main.rs` 装配。
-#![allow(dead_code)] // 动作面与会话回收已接入；模块工具面接入前的调用路径只被契约测试驱动。
+#![allow(dead_code)] // 动作面与会话回收已接入；call 随模块工具面接入，其余只被契约测试驱动。
 
 use crate::capabilities::residents::api::{
     Operation, Receipt, ResidentOps, ServiceState, ServiceView,
 };
 use crate::capabilities::residents::ports::{LaunchSpec, ServiceAdapter, ServiceInstance};
+use crate::capabilities::secrets::api::SecretOps;
 use crate::capabilities::workspace::api::{Module, Roster, ServiceDecl, Workspace};
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
@@ -30,6 +31,8 @@ struct Running {
 pub struct ResidentsService {
     adapters: BTreeMap<String, Arc<dyn ServiceAdapter + Send + Sync>>,
     workspace: Arc<dyn Workspace + Send + Sync>,
+    /// 隐秘字段面：起服务时解析注入项，回执出口按已知值脱敏。
+    secrets: Arc<dyn SecretOps + Send + Sync>,
     /// 用户开关（缺省取声明里的 enabled）；落盘随设置面接入。
     enabled: Mutex<BTreeMap<String, bool>>,
     /// 运行中的实例（key = 模块/服务）。
@@ -41,6 +44,7 @@ impl ResidentsService {
     pub fn new(
         adapters: Vec<Arc<dyn ServiceAdapter + Send + Sync>>,
         workspace: Arc<dyn Workspace + Send + Sync>,
+        secrets: Arc<dyn SecretOps + Send + Sync>,
     ) -> ResidentsService {
         let mut map = BTreeMap::new();
         for a in adapters {
@@ -49,6 +53,7 @@ impl ResidentsService {
         ResidentsService {
             adapters: map,
             workspace,
+            secrets,
             enabled: Mutex::new(BTreeMap::new()),
             running: Mutex::new(BTreeMap::new()),
         }
@@ -140,12 +145,15 @@ impl ResidentOps for ResidentsService {
                 self.adapter_ids()
             )
         })?;
+        // 该模块已配置的隐秘字段：只经环境变量注入该服务进程（值不进命令行）。
+        let env = self.secrets.resolve(module)?;
         let spec = LaunchSpec {
             module: module.to_string(),
             name: name.to_string(),
             command: decl.command.clone(),
             cwd: m.root.clone(),
             options: decl.options.clone(),
+            env,
         };
         let (instance, operations) = adapter.start(&spec)?;
         self.running.lock().expect("锁").insert(
@@ -200,13 +208,19 @@ impl ResidentOps for ResidentsService {
                 names.join("、")
             ));
         }
-        match run.instance.call(op, args) {
-            Ok(output) => Ok(Receipt { ok: true, output }),
-            Err(e) => Ok(Receipt {
+        let receipt = match run.instance.call(op, args) {
+            Ok(output) => Receipt { ok: true, output },
+            Err(e) => Receipt {
                 ok: false,
                 output: e,
-            }),
-        }
+            },
+        };
+        // 回执出口按该模块的已知值脱敏（尽力而为；编码 / 变形挡不住，如实写在文档里）。
+        let output = self.secrets.redact(module, &receipt.output)?;
+        Ok(Receipt {
+            ok: receipt.ok,
+            output,
+        })
     }
 
     fn reap(&self, lease: &str) -> Result<(), String> {

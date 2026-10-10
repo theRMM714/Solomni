@@ -24,7 +24,7 @@
 
 - 值存储的字段或文件形态 → [REGISTRY_SPEC.md](../../REGISTRY_SPEC.md) 的密钥边界；端口替身 → [docs/testing/doubles.md](../testing/doubles.md) 的端口矩阵。
 - 模块的 `secrets:` 声明契约见 [MODULE_SPEC.md](../../MODULE_SPEC.md)。
-- 生产消费点（工具 / 服务的 env 注入与回执脱敏）尚未接入：本能力目前只被契约测试驱动，按 `#![allow(dead_code)]` 如实标注。
+- 消费点：`declared` 由 CLI 的 `secret` 命令、`resolve`/`redact` 由 `residents`（起服务注入 env 与回执脱敏）消费；`set`/`clear` 随设置面接入，在此之前只被契约测试驱动（`#![allow(dead_code)]` 如实标注）。
 
 ## 本目录
 
