@@ -519,7 +519,7 @@ mod tests {
     fn broken_mechanism_refuses_execution_instead_of_degrading() {
         let texts = prompt_texts();
         let broken = refuse_when_broken(
-            &texts,
+            &*texts,
             confine::FenceVerdict::Broken("profile 写错".to_string()),
         )
         .expect("我们写错了必须拒绝执行");
@@ -530,12 +530,12 @@ mod tests {
             "回执用册子里的固定说法"
         );
         assert!(
-            refuse_when_broken(&texts, confine::FenceVerdict::Enforced).is_none(),
+            refuse_when_broken(&*texts, confine::FenceVerdict::Enforced).is_none(),
             "机制装上了就没有拒绝的理由"
         );
         assert!(
             refuse_when_broken(
-                &texts,
+                &*texts,
                 confine::FenceVerdict::EnvUnavailable("内核不支持".to_string())
             )
             .is_none(),
@@ -734,6 +734,7 @@ mod tests {
             &spec_for(&dir),
             &format!("{} echo_node_opts.js", node),
             "{}",
+            &[],
             None,
         );
         assert!(out.ok, "node 工具应当成功：{}", out.output);
@@ -755,6 +756,7 @@ mod tests {
                 &spec_for(&dir),
                 &format!("{} echo_node_opts.py", py),
                 "{}",
+                &[],
                 None,
             );
             assert!(out.ok, "python 工具应当成功：{}", out.output);
@@ -965,7 +967,7 @@ mod tests {
         let tools = real_runner_with_write(exe, &home);
         // ① 用户选"本轮无围栏跑一次"：命令真跑，回执**如实标为无围栏**。
         let ask = RecordingAsk::new(Some(OPT_FENCE_UNFENCED));
-        let out = tools.run(&spec, &command, "{}", Some(&ask));
+        let out = tools.run(&spec, &command, "{}", &[], Some(&ask));
         assert_eq!(
             ask.asked_ids(),
             vec![vec![
@@ -984,15 +986,8 @@ mod tests {
             "有选项就不该停会话"
         );
         assert!(
-            // 册子文案带占位符，渲染后才进回执：按**无占位符的前缀**断言，改文案不改这里。
-            out.output.contains(
-                tools
-                    .texts
-                    .tool_fence_unfenced
-                    .split("{{")
-                    .next()
-                    .unwrap_or("")
-            ),
+            // 册子文案带占位符，渲染后才进回执：只断言"如实标为无围栏"这个稳定事实，不复制整段文案。
+            out.output.contains("无围栏"),
             "回执要如实标为无围栏：{}",
             out.output
         );
@@ -1003,7 +998,7 @@ mod tests {
         );
         // ② 用户选"放弃这次调用"：不执行，回执写清哪一环、哪个目录、缺什么、怎么补。
         let ask = RecordingAsk::new(Some(OPT_FENCE_ABORT));
-        let out = tools.run(&spec, &command, "{}", Some(&ask));
+        let out = tools.run(&spec, &command, "{}", &[], Some(&ask));
         assert!(!out.ok, "放弃 = 不执行");
         assert!(
             !out.output.contains("RAN"),
@@ -1019,7 +1014,7 @@ mod tests {
             );
         }
         // ③ 没有可回答的前端（纯终端 / e2e）：没有可点的选项 = 不执行（fail-closed）。
-        let out = tools.run(&spec, &command, "{}", None);
+        let out = tools.run(&spec, &command, "{}", &[], None);
         assert!(!out.ok, "没有可回答的前端 = 不执行");
         assert!(
             !out.output.contains("RAN"),

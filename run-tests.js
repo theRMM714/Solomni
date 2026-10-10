@@ -1099,7 +1099,8 @@ function pushStep(obj) {
         pushStep({ step: label, status: "env-skip", detail: "未安装 " + target + "：rustup target add " + target });
         continue;
       }
-      const r = sh("cargo", ["check", "--target", target, "--color", "never"]);
+      // --all-targets：平台专属的**测试代码**本机也不编译，必须一起查（CI 就是在 Windows 上这样红的）。
+      const r = sh("cargo", ["check", "--target", target, "--all-targets", "--color", "never"]);
       if (r.code === 0) {
         announceDone("完成", "");
         pushStep({ step: label, status: "pass", detail: "" });
