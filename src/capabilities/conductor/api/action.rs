@@ -292,6 +292,26 @@ impl ConductorHandle {
         ))
     }
 
+    /// 目的：把 `module.<模块id>.<服务名>.<操作名>` 解析成**已声明**服务的操作（模块 id / 服务名都可能含 `.`，按声明逐段匹配）。
+    /// 返回：None = 不是常驻服务的操作（交给静态模块工具那条路）。
+    fn service_action(&self, id: &str) -> Result<Option<(String, String, String)>, String> {
+        let rest = id.strip_prefix("module.").unwrap_or("");
+        let roster = self.call(|core| Ok(core.scan()))?;
+        for m in &roster.modules {
+            let Some(after_m) = rest.strip_prefix(&format!("{}.", m.manifest.id)) else {
+                continue;
+            };
+            for name in m.manifest.services.keys() {
+                if let Some(op) = after_m.strip_prefix(&format!("{}.", name)) {
+                    if !op.is_empty() {
+                        return Ok(Some((m.manifest.id.clone(), name.clone(), op.to_string())));
+                    }
+                }
+            }
+        }
+        Ok(None)
+    }
+
     /// 目的：**人直接用模块工具**（无会话）：按 `module.yaml` 校验参数，给一份独立围栏，跑一次真命令。
     /// 约束：执行面与 agent 会话共用（`ToolExec::run_module`），只是围栏按模块目录 + 用户指定的工作目录派生。
     fn run_module_action(
@@ -349,6 +369,16 @@ impl ConductorHandle {
     ) -> Result<Acted, String> {
         // 模块工具动作（动态，来自清单）先于静态表分派。
         if id.starts_with("module.") {
+            // 静态模块工具优先（保持既有语义）；不是静态工具时，看它是不是已启动常驻服务的操作。
+            if self.module_action(id).is_err() {
+                if let Some((module, service, op)) = self.service_action(id)? {
+                    self.authorize_module(caller)?;
+                    let receipt = self.residents.call(&module, &service, &op, args)?;
+                    return Ok(Acted::Done(
+                        serde_json::json!({ "ok": receipt.ok, "output": receipt.output }),
+                    ));
+                }
+            }
             return self.run_module_action(caller, id, args);
         }
         let s = |k: &str| {
@@ -445,6 +475,15 @@ impl ConductorHandle {
                 Ok(Acted::Done(
                     serde_json::json!({ "ok": true, "uploaded": uploaded }),
                 ))
+            }
+            // 隐秘字段：值只进去、永不回显；不放模块工具面（agent 不需要写值）。
+            "set_secret" => {
+                self.secrets.set(&s("module"), &s("name"), &s("value"))?;
+                Ok(Acted::Done(serde_json::json!({ "ok": true })))
+            }
+            "clear_secret" => {
+                self.secrets.clear(&s("module"), &s("name"))?;
+                Ok(Acted::Done(serde_json::json!({ "ok": true })))
             }
             // 文件域 / 协作动词 / 核心操作这些动作由成员工具循环执行，不经分发器。
             // 登记处动作（供应商 / 密钥 / 模型 / agent / 设置）：产品级资源，只给人用。

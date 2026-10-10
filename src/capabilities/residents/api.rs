@@ -2,7 +2,6 @@
 //! 管：ResidentOps 与它的 DTO（服务视图、操作、状态、回执）；未注入时的空实现 NoResidents。
 //! 不管：适配器端口（在 `ports.rs`，不进 api）；具体协议；模块声明的解析（在 workspace）。
 //! 联动：实现见 `service.rs`；由 `main.rs` 装配进 `Ops`，呈现层只经 `ResidentOps` 调用。
-#![allow(dead_code)] // 动作面与会话回收已接入；ResidentOps::call 随模块工具面接入，其余只被契约测试驱动。
 
 use crate::capabilities::workspace::api::Param;
 use std::collections::BTreeMap;
@@ -15,6 +14,8 @@ pub struct Receipt {
 }
 
 /// 目的：一个由常驻服务提供的操作（名字 + 说明 + 可选参数契约）。
+#[allow(dead_code)]
+// 说明与参数契约由工具面 / 呈现层读取，随 Phase 2 接入；当前只被契约测试驱动。
 #[derive(Debug, Clone)]
 pub struct Operation {
     pub name: String,
@@ -23,6 +24,8 @@ pub struct Operation {
 }
 
 /// 目的：一个常驻服务此刻的状态。
+#[allow(dead_code)]
+// Failed 由启动失败的适配器构造，随真实适配器接入；当前只被契约测试驱动。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ServiceState {
     /// 用户关掉了：不启动。
@@ -48,6 +51,7 @@ impl ServiceState {
 }
 
 /// 目的：给呈现层与工具层看的服务视图（不携带任何协议细节）。
+#[allow(dead_code)] // operations 由工具面读取，随 Phase 2 接入；当前只被契约测试驱动。
 #[derive(Debug, Clone)]
 pub struct ServiceView {
     pub module: String,
@@ -78,7 +82,8 @@ pub trait ResidentOps: Send + Sync {
     fn reap(&self, lease: &str) -> Result<(), String>;
 }
 
-/// 目的：没有配置任何常驻服务时的空实现（组合根未注入时的默认；服务目录本就是空的，不是静默兜底）。
+/// 目的：没有配置任何常驻服务时的空实现（组合根总是注入真实实现，它供测试装配与未注入兜底）。
+#[allow(dead_code)] // 生产路径总注入真实实现；空实现只被测试装配使用。
 pub struct NoResidents;
 
 impl ResidentOps for NoResidents {

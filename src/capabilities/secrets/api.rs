@@ -2,7 +2,6 @@
 //! 管：字段视图、置值 / 清值、按模块解析注入项、按已知值脱敏；未注入时的空实现 NoSecrets。
 //! 不管：存储机制（在 ports/detail）；模块声明解析（在 workspace）；实际注入子进程（消费方按 resolve 取）。
 //! 联动：实现见 `service.rs`；由 `main.rs` 装配进 `Ops`。
-#![allow(dead_code)] // declared 由 CLI、resolve/redact 由 residents 消费；set/clear 随设置面接入。
 
 /// 目的：一个隐秘字段的视图（给设置面看；**只有标识，没有值**）。
 #[derive(Debug, Clone)]
@@ -32,7 +31,8 @@ pub trait SecretOps: Send + Sync {
     fn redact(&self, module: &str, text: &str) -> Result<String, String>;
 }
 
-/// 目的：没有配置隐秘字段存储时的空实现（组合根未注入时的默认；字段目录本就是空的）。
+/// 目的：没有配置隐秘字段存储时的空实现（组合根总是注入真实实现，它供测试装配与未注入兜底）。
+#[allow(dead_code)] // 生产路径总注入真实实现；空实现只被测试装配使用。
 pub struct NoSecrets;
 
 impl SecretOps for NoSecrets {

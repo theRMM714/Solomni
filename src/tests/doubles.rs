@@ -1364,11 +1364,12 @@ pub(crate) fn agent_upsert(
         .agent_upsert(name, &modules, model, note, &roster)
 }
 
-/// 目的：注入指定常驻服务面的装配（control_resident 动作与会话回收的端到端断言用）。
-pub(crate) fn core_with_residents(
+/// 目的：注入指定常驻服务面与隐秘字段面的装配（动作面、会话回收、env 注入的端到端断言用）。
+pub(crate) fn core_with_services(
     modules: Vec<Module>,
     gateway: ScriptGateway,
     residents: Arc<dyn crate::capabilities::residents::api::ResidentOps + Send + Sync>,
+    secrets: Arc<dyn crate::capabilities::secrets::api::SecretOps + Send + Sync>,
 ) -> Conductor {
     let gateway: Arc<dyn crate::capabilities::llm::ports::ChatGateway + Send + Sync> =
         Arc::new(gateway);
@@ -1395,7 +1396,7 @@ pub(crate) fn core_with_residents(
         Arc::new(crate::kernel::ports::NoopLog),
         Arc::new(crate::kernel::detail::HostProbeAdapter),
         residents,
-        Arc::new(crate::capabilities::secrets::api::NoSecrets),
+        secrets,
     )
 }
 

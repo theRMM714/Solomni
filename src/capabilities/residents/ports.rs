@@ -2,13 +2,13 @@
 //! 管：ServiceAdapter 与它拉起的 ServiceInstance 的形状；LaunchSpec 是策略侧给的事实。
 //! 不管：生命周期、租约、开关（在 manager/service）；具体协议实现（在 detail 适配器，只由组合根构造）。
 //! 联动：端口形状见本文件；由 service.rs 消费。
-#![allow(dead_code)] // 真实适配器随 MCP/ACP 接入；在此之前端口只被契约测试的假适配器实现。
 
 use crate::capabilities::residents::api::Operation;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 /// 目的：拉起一个服务实例所需的事实（策略在 manager：哪个模块的哪个服务、命令、工作目录、私有配置）。
+#[allow(dead_code)] // 字段由真实适配器（MCP / ACP）读取，随 Phase 2 接入；当前只被契约测试的假适配器驱动。
 pub struct LaunchSpec {
     pub module: String,
     pub name: String,

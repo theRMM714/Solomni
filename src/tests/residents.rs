@@ -176,8 +176,11 @@ fn control_resident_action_starts_and_stops() {
         Arc::new(crate::capabilities::secrets::api::NoSecrets),
     ));
     let gateway = crate::tests::doubles::gw(BTreeMap::new(), Vec::new());
-    let handle = ConductorHandle::spawn(crate::tests::doubles::core_with_residents(
-        modules, gateway, residents,
+    let handle = ConductorHandle::spawn(crate::tests::doubles::core_with_services(
+        modules,
+        gateway,
+        residents,
+        Arc::new(crate::capabilities::secrets::api::NoSecrets),
     ))
     .expect("起核心线程");
     let ops: Ops = crate::capabilities::conductor::api::Ops::from_handle(&handle);
@@ -194,6 +197,72 @@ fn control_resident_action_starts_and_stops() {
         fake.calls.lock().expect("锁").iter().any(|c| c == "stop"),
         "动作面 stop 要停实例"
     );
+}
+
+/// 已启动服务的操作走 `module.<id>.<service>.<op>` 动作（静态模块工具优先，其次常驻服务操作）。
+#[test]
+fn service_operations_are_module_actions() {
+    use crate::capabilities::conductor::api::{
+        Acted, ActionCall, Caller, ConductorHandle, Ops, Output,
+    };
+
+    let fake = Arc::new(FakeServiceAdapter::new());
+    let modules = vec![module_with_service("m1", "fake", true)];
+    let workspace = test_workspace(
+        Arc::new(VecSource(modules.clone())),
+        Arc::new(InMemoryPackages::empty()),
+        Arc::new(InMemoryWorkspace::new()),
+    );
+    let residents: Arc<dyn ResidentOps + Send + Sync> = Arc::new(ResidentsService::new(
+        vec![Arc::clone(&fake) as Arc<dyn ServiceAdapter + Send + Sync>],
+        workspace,
+        Arc::new(crate::capabilities::secrets::api::NoSecrets),
+    ));
+    let gateway = crate::tests::doubles::gw(BTreeMap::new(), Vec::new());
+    let handle = ConductorHandle::spawn(crate::tests::doubles::core_with_services(
+        modules,
+        gateway,
+        residents,
+        Arc::new(crate::capabilities::secrets::api::NoSecrets),
+    ))
+    .expect("起核心线程");
+    let ops: Ops = crate::capabilities::conductor::api::Ops::from_handle(&handle);
+
+    ops.actions
+        .act(ActionCall {
+            id: "control_resident".to_string(),
+            args: serde_json::json!({ "module": "m1", "name": "svc", "action": "start" }),
+            caller: Caller::User,
+            out: Output::Final,
+        })
+        .expect("启动服务");
+    let acted = ops
+        .actions
+        .act(ActionCall {
+            id: "module.m1.svc.echo".to_string(),
+            args: serde_json::json!({ "x": 1 }),
+            caller: Caller::User,
+            out: Output::Final,
+        })
+        .expect("调用服务操作");
+    match acted {
+        Acted::Done(v) => assert!(
+            v["output"].as_str().unwrap_or("").contains("echo"),
+            "回执应含操作名：{}",
+            v
+        ),
+        other => panic!("应为 Done，实际：{:?}", other),
+    }
+    let err = ops
+        .actions
+        .act(ActionCall {
+            id: "module.m1.svc.nope".to_string(),
+            args: serde_json::json!({}),
+            caller: Caller::User,
+            out: Output::Final,
+        })
+        .unwrap_err();
+    assert!(err.contains("没有操作"), "未知操作要如实拒绝：{}", err);
 }
 
 /// 没启动就调用：如实拒绝（不静默跑一次）。

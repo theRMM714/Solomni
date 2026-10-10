@@ -100,3 +100,59 @@ fn secrets_load_existing_values() {
     );
     assert_eq!(service.resolve("m1").expect("解析").len(), 1);
 }
+
+/// 设置面动作：`set_secret` / `clear_secret` 走统一动作面（只给 user；值不回显）。
+#[test]
+fn secret_actions_set_and_clear() {
+    use crate::capabilities::conductor::api::{ActionCall, Caller, ConductorHandle, Ops, Output};
+    use crate::tests::doubles::{core_with_services, gw};
+
+    let modules = vec![module_with_secret("m1", "token", "TOKEN")];
+    let store = Arc::new(InMemorySecretStore::new());
+    let workspace = test_workspace(
+        Arc::new(VecSource(modules.clone())),
+        Arc::new(InMemoryPackages::empty()),
+        Arc::new(InMemoryWorkspace::new()),
+    );
+    let secrets = Arc::new(
+        SecretsService::new(
+            Arc::clone(&workspace),
+            Arc::clone(&store) as Arc<dyn SecretStore + Send + Sync>,
+        )
+        .expect("secrets"),
+    );
+    let residents: Arc<dyn crate::capabilities::residents::api::ResidentOps + Send + Sync> =
+        Arc::new(crate::capabilities::residents::api::NoResidents);
+    let handle = ConductorHandle::spawn(core_with_services(
+        modules,
+        gw(BTreeMap::new(), Vec::new()),
+        residents,
+        Arc::clone(&secrets) as Arc<dyn SecretOps + Send + Sync>,
+    ))
+    .expect("起核心线程");
+    let ops: Ops = crate::capabilities::conductor::api::Ops::from_handle(&handle);
+    let call = |id: &str, args: serde_json::Value| ActionCall {
+        id: id.to_string(),
+        args,
+        caller: Caller::User,
+        out: Output::Final,
+    };
+
+    ops.actions
+        .act(call(
+            "set_secret",
+            serde_json::json!({ "module": "m1", "name": "token", "value": "v1" }),
+        ))
+        .expect("置值动作");
+    assert_eq!(
+        secrets.resolve("m1").expect("解析"),
+        vec![("TOKEN".to_string(), "v1".to_string())]
+    );
+    ops.actions
+        .act(call(
+            "clear_secret",
+            serde_json::json!({ "module": "m1", "name": "token" }),
+        ))
+        .expect("清值动作");
+    assert!(secrets.resolve("m1").expect("解析").is_empty());
+}
