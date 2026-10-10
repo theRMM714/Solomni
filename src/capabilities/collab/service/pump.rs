@@ -497,9 +497,8 @@ impl CollabSession {
             let mut member = Member::plain(&a.name, params, mode);
             // 围栏：可达范围 + 断网，由该 agent 的沙箱与 exec 段派生（机制在 adapters）；
             // 只读根来自用户显式授权（`fence_read`），默认空。
-            let fence =
-                crate::capabilities::tools::api::FenceSpec::from_sandbox(&sandbox, self.spec.net)
-                    .with_read_only(read_only_roots(&self.settings.app));
+            let fence = crate::kernel::api::FenceSpec::from_sandbox(&sandbox, self.spec.net)
+                .with_read_only(read_only_roots(&self.settings.app));
             // 工具说明块的素材（patch 语法 / 模块工具 / 模块参数）：装配期按这个 agent 的沙箱与模块算一次。
             let tool_notes =
                 crate::capabilities::tools::api::tool_notes(&*prompts, &sandbox, &modules);
@@ -521,6 +520,9 @@ impl CollabSession {
                     &self.spec, &modules, &library,
                 ),
                 fence,
+                // 讨论席不干活、拿不到模块工具，也就没有工具进程的注入项。
+                module_env: Default::default(),
+                residents: Arc::new(crate::capabilities::residents::api::NoResidents),
                 // 讨论席的系统工具面**由角色表发放**（越权校验的唯一判据）。
                 allowed: self
                     .systools

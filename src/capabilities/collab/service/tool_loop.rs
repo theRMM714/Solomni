@@ -5,7 +5,7 @@
 use super::discussion::*;
 use crate::capabilities::llm::api::ToolInvoke;
 use crate::capabilities::session::api::{MemberTools, SessionEvent};
-use crate::capabilities::tools::api::ToolOutcome;
+use crate::kernel::api::ToolOutcome;
 /// 执行一次工具调用：内置优先；外部工具按模块走（模块为空时由 dispatch_external 如实报错）。
 /// 账本经**分支副本**回到本成员（见 run_branch）——串行与并发只有这一条执行路径。
 pub(crate) fn run_one(
@@ -343,6 +343,30 @@ pub(crate) fn tool_decls(ctx: &MemberTools) -> ToolDecls {
             };
             decls.list.push(decl);
         }
+        // 已启动常驻服务的操作：与外部工具同一条声明路径（线上名里的点换成下划线，供应商函数名不收点）。
+        for tool in mt.services.keys() {
+            let flat = tool.replace('.', "_");
+            let mut wire_name = format!("{}_{}", id, flat);
+            let mut n = 2;
+            while taken.contains(&wire_name) {
+                wire_name = format!("{}_{}_{}", id, flat, n);
+                n += 1;
+            }
+            taken.push(wire_name.clone());
+            decls
+                .wire
+                .insert(wire_name.clone(), (Some(id.clone()), tool.clone()));
+            let op = &mt.services[tool];
+            decls.list.push(crate::capabilities::llm::api::ToolDecl {
+                name: wire_name.clone(),
+                description: if op.description.is_empty() {
+                    format!("模块 {} 的常驻服务 {} 操作 {}", id, op.service, op.op)
+                } else {
+                    op.description.clone()
+                },
+                parameters: serde_json::json!({ "type": "object", "additionalProperties": true }),
+            });
+        }
     }
     decls
 }
@@ -353,6 +377,9 @@ pub(crate) fn available_tools(ctx: &MemberTools) -> String {
     let mut list: Vec<String> = Vec::new();
     for (id, mt) in &ctx.modules {
         for name in mt.commands.keys() {
+            list.push(format!("{}.{}", id, name));
+        }
+        for name in mt.services.keys() {
             list.push(format!("{}.{}", id, name));
         }
     }
@@ -410,6 +437,30 @@ pub(crate) fn dispatch_external(
         );
         return (module.clone(), deny(ctx, why));
     }
+    // 常驻服务的操作：不走外部命令，转给常驻服务能力（服务进程已在它自己的围栏里跑着）。
+    if let Some(op) = mt.services.get(&inv.name) {
+        let args: serde_json::Value = match serde_json::from_str(&inv.args_json) {
+            Ok(a) => a,
+            Err(e) => {
+                let why = ctx.sandbox.texts.render(
+                    &ctx.sandbox.texts.bad_args_json,
+                    &[("error", e.to_string())],
+                );
+                return (module.clone(), deny(ctx, why));
+            }
+        };
+        let outcome = match ctx.residents.call(&module, &op.service, &op.op, &args) {
+            Ok(receipt) => ToolOutcome {
+                ok: receipt.ok,
+                output: receipt.output,
+            },
+            Err(e) => ToolOutcome {
+                ok: false,
+                output: e,
+            },
+        };
+        return (module.clone(), outcome);
+    }
     match mt.commands.get(&inv.name) {
         // 工具进程的工作目录 = 它所属模块的根目录；围栏按该模块的根收口。
         Some(command) => {
@@ -437,10 +488,15 @@ pub(crate) fn dispatch_external(
                     }
                 }
             }
+            let env = ctx
+                .module_env
+                .get(&module)
+                .map(|v| v.as_slice())
+                .unwrap_or(&[]);
             (
                 module,
                 ctx.tools
-                    .run_module(&ctx.fence.at(&mt.root), command, &inv.args_json, ask),
+                    .run_module(&ctx.fence.at(&mt.root), command, &inv.args_json, env, ask),
             )
         }
         None => {

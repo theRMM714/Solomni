@@ -82,6 +82,18 @@ impl Conductor {
         crate::capabilities::workspace::api::unavailable(spec, modules, &self.workspace.library())
     }
 
+    /// 目的：**当前设置档位**下不能执行工具的模块（人直接跑与动作目录共用）：本机档不装载运行包，一律可用。
+    /// 约束：与成员循环同一把尺子（`workspace::api::unavailable`，档位感知）——不用档位无关的 `absent`，
+    ///   否则本机档会因"没装运行包"误拒本机解释器就能跑的工具。
+    pub fn unavailable_modules_now(&self) -> BTreeMap<String, Vec<String>> {
+        let spec = crate::capabilities::workspace::api::ExecSpec {
+            tier: self.registry.app().tier,
+            ..crate::capabilities::workspace::api::ExecSpec::default()
+        };
+        let roster = self.workspace.roster();
+        self.unavailable_modules(&spec, &roster.modules)
+    }
+
     /// 配置视图：把「能改什么、现在是什么、缺什么」如实给出（每次读取都重扫模块清单与包库）。
     pub fn session_config(&self, sid: &str) -> Result<SessionConfig, String> {
         let (meta, events) = self.history_open(sid)?;
@@ -321,9 +333,8 @@ impl Conductor {
         match self.sandboxes(meta, &roster) {
             Ok(sandboxes) => {
                 for sb in &sandboxes.list {
-                    let spec =
-                        crate::capabilities::tools::api::FenceSpec::from_sandbox(sb, meta.exec.net)
-                            .with_read_only(self.fence_read_roots());
+                    let spec = crate::kernel::api::FenceSpec::from_sandbox(sb, meta.exec.net)
+                        .with_read_only(self.fence_read_roots());
                     if let Err(e) = self.tools.release_fence(&spec) {
                         self.log.warn(
                             "conductor::release_session_fences",

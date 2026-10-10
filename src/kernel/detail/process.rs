@@ -1,44 +1,44 @@
-//! 工具执行适配器：把本能力放行的工具命令拉进围栏里跑（实现 tools 自己的 ToolRunner 端口）。
-//! 机制边界：外层拉起**守门进程**（本程序的 --fence-run 模式）——围栏（可达范围、断网、进程树围栏、
-//! 环境白名单）由守门进程装进真正的工具进程；命令行来自 module.yaml，JSON 参数走 stdin（不进命令行，杜绝注入）；
-//! 截获 stdout/stderr、超时连根杀掉整棵树、输出截断。
+//! 目的：工具执行适配器——把本能力放行的工具命令拉进围栏里跑（实现 kernel 共享的 ProcessRunner 端口）。
+//! 管：外层拉起守门进程（本程序的 --fence-run 模式）；由它把围栏与环境白名单装进真正的工具进程；stdin 送参、stdout/stderr 截获、超时连根杀树、输出截断。
+//! 不管：命令行与可达范围的策略（由调用方派生后传入）；命令来自 module.yaml，JSON 参数走 stdin（不进命令行）。
+//! 联动：围栏机制在 confine；ProcessRunner 端口形状见 src/kernel/ports.rs。
 
-use crate::capabilities::tools::api::FenceSpec;
-use crate::capabilities::tools::api::ToolOutcome;
-use crate::capabilities::tools::detail::confine;
-use crate::capabilities::tools::ports::ToolRunner;
+use crate::kernel::api::FenceSpec;
+use crate::kernel::api::ToolOutcome;
+use crate::kernel::detail::confine;
+use crate::kernel::ports::{ProcessRunner, ProcessTexts};
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::thread;
 use std::time::{Duration, Instant};
 
 pub struct ProcTools {
-    /// 守门进程用的可执行文件（组合根注入当前程序路径）。
+    /// 目的：守门进程用的可执行文件（组合根注入当前程序路径）。
     pub exe: PathBuf,
-    /// 产品私有区（`.home/`）：围栏授权台账落在这里，供 `--fence-clean` 精确回收。
-    /// 只有 Windows 的容器围栏需要写目录 ACL，所以下面这三项只在本平台存在。
+    /// 目的：产品私有区（`.home/`）：围栏授权台账落在这里，供 `--fence-clean` 精确回收。
+    ///   只有 Windows 的容器围栏需要写目录 ACL，所以下面这三项只在本平台存在。
     #[cfg(windows)]
     pub home: PathBuf,
-    /// 是否允许在本机写权限（由组合根按设置与 `SOLOMNI_FENCE_WRITE` 注入；默认否）。
+    /// 目的：是否允许在本机写权限（由组合根按设置与 `SOLOMNI_FENCE_WRITE` 注入；默认否）。
     #[cfg(windows)]
     pub write_allowed: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    /// 「未授权」的提示只出一次，不刷屏。
+    /// 目的：「未授权」的提示只出一次，不刷屏。
     #[cfg(windows)]
     pub disclosed: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    /// 工具回执里那些收尾标记的文案（来自提示词册：它们随 [工具结果] 进模型上下文，所以不硬编码）。
-    /// **共享一份**（提示词能力给出的 `Arc`）：这里不再各存一份深拷贝。
-    pub texts: std::sync::Arc<crate::capabilities::prompt::api::ToolTexts>,
-    /// 单次工具执行的超时（到时连根杀掉整棵树，ok = false）。
+    /// 目的：工具回执里那些收尾标记的文案（由上层适配后经 kernel 端口注入：它们随 [工具结果] 进模型上下文）。
+    ///   **共享一份**（调用方给出的 `Arc`）：这里不再各存一份深拷贝。
+    pub texts: std::sync::Arc<dyn ProcessTexts>,
+    /// 目的：单次工具执行的超时（到时连根杀掉整棵树，ok = false）。
     pub timeout: Duration,
-    /// 回传给模型/轨迹的输出上限（字符数）。
+    /// 目的：回传给模型/轨迹的输出上限（字符数）。
     pub max_output_chars: usize,
 }
 
 impl ProcTools {
-    /// 组合根注入：当前可执行文件（守门进程就是它自己）、提示词册里的收尾标记、产品私有区与写权限开关。
+    /// 目的：组合根注入：当前可执行文件（守门进程就是它自己）、提示词册里的收尾标记、产品私有区与写权限开关。
     pub fn new(
         exe: PathBuf,
-        texts: std::sync::Arc<crate::capabilities::prompt::api::ToolTexts>,
+        texts: std::sync::Arc<dyn ProcessTexts>,
         home: PathBuf,
         write_allowed: std::sync::Arc<std::sync::atomic::AtomicBool>,
     ) -> ProcTools {
@@ -60,7 +60,7 @@ impl ProcTools {
     }
 }
 
-impl ToolRunner for ProcTools {
+impl ProcessRunner for ProcTools {
     // 提问端口只在 Windows 的容器围栏那一路用；unix 侧没有 prepare_fence，参数如实闲置。
     #[cfg_attr(not(windows), allow(unused_variables))]
     fn run(
@@ -68,6 +68,7 @@ impl ToolRunner for ProcTools {
         fence: &FenceSpec,
         command: &str,
         args_json: &str,
+        env: &[(String, String)],
         ask: Option<&dyn crate::kernel::ports::AskUser>,
     ) -> ToolOutcome {
         // Windows：容器围栏要先把「可达范围」授权给容器 SID。
@@ -100,7 +101,7 @@ impl ToolRunner for ProcTools {
             if !prepared && note.is_none() {
                 // 未授权时段先问机制：环境不允许就如实降级，我们写错了就拒绝执行（见 refuse_when_broken）。
                 if let Some(outcome) =
-                    refuse_when_broken(&self.texts, confine::verify(fence, command))
+                    refuse_when_broken(&*self.texts, confine::verify(fence, command))
                 {
                     return outcome;
                 }
@@ -128,6 +129,10 @@ impl ToolRunner for ProcTools {
         // 环境白名单：不继承父进程环境（密钥与无关凭据不进工具进程）；HOME/TEMP 落进该 agent 的私有沙箱。
         cmd.env_clear();
         for (k, v) in confine::fence_env(fence, command) {
+            cmd.env(k, v);
+        }
+        // 该模块隐私字段的注入项：只走环境，不进命令行（值也不进提示词 / 转录 / 日志）。
+        for (k, v) in env {
             cmd.env(k, v);
         }
         // 独立进程组：Unix 上超时/停止能杀整棵树；Windows 侧由守门进程的 Job Object 兜住。
@@ -210,14 +215,14 @@ impl ProcTools {
         &self,
         ask: Option<&dyn crate::kernel::ports::AskUser>,
         fence: &FenceSpec,
-        blocked: &crate::capabilities::tools::domain::fence::FenceBlocked,
+        blocked: &crate::kernel::domain::fence::FenceBlocked,
     ) -> FenceGo {
-        use crate::capabilities::tools::domain::fence::{self, OPT_FENCE_UNFENCED};
+        use crate::kernel::domain::fence::{fence_ask, OPT_FENCE_UNFENCED};
         let why = blocked.line();
         eprintln!("[围栏] 必要落点授不上（{}）：本次不许按无围栏跑", why);
         // 无围栏跑一次真能不能跑起来：判据是这次命令的起点在不在（domain 不读盘，所以在这里读）。
         let unfenced_possible = !fence.cwd.as_os_str().is_empty() && fence.cwd.is_dir();
-        let Some(request) = fence::fence_ask(blocked, &fence.agent, unfenced_possible) else {
+        let Some(request) = fence_ask(blocked, &fence.agent, unfenced_possible) else {
             // 构不出可用选项：不发起裁决，改为停掉这个会话 + 落一条警告。
             match ask {
                 Some(ask) => ask.halt(&why),
@@ -243,35 +248,22 @@ impl ProcTools {
     /// 参数：`outcome` 是这一问的如实收场；用户拒绝与"没人答"分别追加一句，模型看得出差别。
     fn fence_refusal(
         &self,
-        blocked: &crate::capabilities::tools::domain::fence::FenceBlocked,
+        blocked: &crate::kernel::domain::fence::FenceBlocked,
         outcome: &crate::kernel::api::AskOutcome,
     ) -> ToolOutcome {
         use crate::kernel::api::AskOutcome;
-        let texts = &self.texts;
         let path = where_text(blocked);
         let part = blocked.part.label().to_string();
-        let mut output = texts.render(
-            &texts.tool_fence_blocked,
-            &[
-                ("part", part.clone()),
-                ("path", path.clone()),
-                ("why", blocked.why.clone()),
-                ("fix", blocked.part.fix().to_string()),
-            ],
-        );
+        let mut output = self
+            .texts
+            .fence_blocked(&part, &path, &blocked.why, blocked.part.fix());
         let extra = match outcome {
             // 用户答了（选了"放弃"，或卡上的别的选项）：如实说用户没有放行这次调用。
-            AskOutcome::Chosen(_) => Some(texts.tool_denied_by_user.clone()),
+            AskOutcome::Chosen(_) => Some(self.texts.denied_by_user()),
             // 没人答、按声明默认项收场：如实说这一下**不是用户答的**、按哪个选项办的。
-            AskOutcome::Defaulted(id) => Some(texts.render(
-                &texts.tool_no_answerer_defaulted,
-                &[("part", part), ("path", path), ("option", id.clone())],
-            )),
+            AskOutcome::Defaulted(id) => Some(self.texts.no_answerer_defaulted(&part, &path, id)),
             // 没人答、也没声明默认项：如实说"没人答"，别让模型以为用户拒了。
-            AskOutcome::NoAnswer => Some(texts.render(
-                &texts.tool_no_answerer_refused,
-                &[("part", part), ("path", path)],
-            )),
+            AskOutcome::NoAnswer => Some(self.texts.no_answerer_refused(&part, &path)),
             // 用户按了停止（整队作废 = 拒绝）/ 构不出可用选项（端口已停会话 + 落警告）。
             AskOutcome::Stopped | AskOutcome::NoOptions => None,
         };
@@ -283,25 +275,15 @@ impl ProcTools {
     }
 
     /// 目的：无围栏跑一次时回执里的如实标注（模型下一轮看得到"这次没有容器那层强制"）。
-    fn fence_note(
-        &self,
-        blocked: &crate::capabilities::tools::domain::fence::FenceBlocked,
-    ) -> String {
-        let texts = &self.texts;
-        texts.render(
-            &texts.tool_fence_unfenced,
-            &[
-                ("part", blocked.part.label().to_string()),
-                ("path", where_text(blocked)),
-                ("why", blocked.why.clone()),
-            ],
-        )
+    fn fence_note(&self, blocked: &crate::kernel::domain::fence::FenceBlocked) -> String {
+        self.texts
+            .fence_unfenced(blocked.part.label(), &where_text(blocked), &blocked.why)
     }
 }
 
 /// 目的：这一环授不上的**哪个目录**：没有具体目录的一环（容器身份 / 授权台账）如实说没有。
 #[cfg(windows)]
-fn where_text(blocked: &crate::capabilities::tools::domain::fence::FenceBlocked) -> String {
+fn where_text(blocked: &crate::kernel::domain::fence::FenceBlocked) -> String {
     if blocked.path.as_os_str().is_empty() {
         "没有具体目录".to_string()
     } else {
@@ -309,12 +291,12 @@ fn where_text(blocked: &crate::capabilities::tools::domain::fence::FenceBlocked)
     }
 }
 
-/// 未授权时段遇到机制自检结论时的放行规矩：**只有本机装不上能降级**。
-/// 自检已确认机制有效却仍装不上 = 我们写错了——那种情况按无围栏跑，等于用户以为有围栏、实际什么都没有，
-/// 所以拒绝执行（命令不落进程），回执用提示词册里的固定说法（它随工具结果进模型上下文）。
+/// 目的：未授权时段遇到机制自检结论时的放行规矩——**只有本机装不上能降级**；
+///   自检已确认机制有效却仍装不上 = 我们写错了（按无围栏跑等于用户以为有围栏、实际什么都没有），
+///   所以拒绝执行（命令不落进程），回执用提示词册里的固定说法。
 #[cfg(windows)]
-fn refuse_when_broken(
-    texts: &crate::capabilities::prompt::api::ToolTexts,
+pub(crate) fn refuse_when_broken(
+    texts: &dyn ProcessTexts,
     verdict: confine::FenceVerdict,
 ) -> Option<ToolOutcome> {
     match verdict {
@@ -325,15 +307,15 @@ fn refuse_when_broken(
             );
             Some(ToolOutcome {
                 ok: false,
-                output: texts.tool_fence_failed.clone(),
+                output: texts.fence_failed(),
             })
         }
         confine::FenceVerdict::Enforced | confine::FenceVerdict::EnvUnavailable(_) => None,
     }
 }
 
-/// 杀掉整棵进程树：工具进程 fork 出来的子孙一并收掉（不留孤儿）。
-fn kill_tree(child: &mut std::process::Child) {
+/// 目的：杀掉整棵进程树——工具进程 fork 出来的子孙一并收掉（不留孤儿）。
+pub(crate) fn kill_tree(child: &mut std::process::Child) {
     #[cfg(unix)]
     {
         // 负 pid = 整个进程组（守门进程是组长，组员含 shell 与工具本身）。
@@ -372,19 +354,19 @@ impl ProcTools {
             if !output.is_empty() {
                 output.push('\n');
             }
-            output.push_str(&self.texts.tool_stderr_header);
+            output.push_str(&self.texts.stderr_header());
             output.push('\n');
             output.push_str(&err);
         }
         if timed_out {
             output.push('\n');
-            output.push_str(&self.texts.tool_timeout);
+            output.push_str(&self.texts.timeout());
         }
         // 围栏没装上：守门进程用固定退出码报明（命令没被执行），这里如实告诉模型。
         if code == Some(confine::FENCE_FAILED) {
             ok = false;
             output.push('\n');
-            output.push_str(&self.texts.tool_fence_failed);
+            output.push_str(&self.texts.fence_failed());
         }
         ToolOutcome {
             ok,
@@ -399,13 +381,9 @@ impl ProcTools {
             return s.to_string();
         }
         let head: String = s.chars().take(self.max_output_chars).collect();
-        let tail = self.texts.render(
-            &self.texts.tool_truncated,
-            &[
-                ("chars", count.to_string()),
-                ("limit", self.max_output_chars.to_string()),
-            ],
-        );
+        let tail = self
+            .texts
+            .truncated(&count.to_string(), &self.max_output_chars.to_string());
         format!("{}\n{}", head, tail)
     }
 }
@@ -413,7 +391,7 @@ impl ProcTools {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::capabilities::tools::api::FenceSpec;
+    use crate::kernel::api::FenceSpec;
     // 测试夹具按 &Path 收参（clippy 的 ptr_arg）：Path 显式写在测试模块里，
     // 顶层只按需导入 PathBuf——否则顶层会多出一次"只被 glob 用到"的导入。
     use std::path::{Path, PathBuf};
@@ -434,7 +412,7 @@ mod tests {
             net: false,
         };
         let env: Vec<(String, String)> =
-            crate::capabilities::tools::detail::confine::fence_env(&spec, "python tools/x.py")
+            crate::kernel::detail::confine::fence_env(&spec, "python tools/x.py")
                 .into_iter()
                 .map(|(k, v)| {
                     (
@@ -487,7 +465,9 @@ mod tests {
         let texts = prompts.tools();
         let tools = ProcTools::new(
             PathBuf::from("solomni"),
-            std::sync::Arc::clone(&texts),
+            std::sync::Arc::new(crate::capabilities::tools::detail::PromptProcessTexts::new(
+                std::sync::Arc::clone(&texts),
+            )),
             PathBuf::from("target").join("test-scratch"),
             std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         );
@@ -539,22 +519,23 @@ mod tests {
     fn broken_mechanism_refuses_execution_instead_of_degrading() {
         let texts = prompt_texts();
         let broken = refuse_when_broken(
-            &texts,
+            &*texts,
             confine::FenceVerdict::Broken("profile 写错".to_string()),
         )
         .expect("我们写错了必须拒绝执行");
         assert!(!broken.ok, "拒绝执行时 ok 必须为假");
         assert_eq!(
-            broken.output, texts.tool_fence_failed,
+            broken.output,
+            texts.fence_failed(),
             "回执用册子里的固定说法"
         );
         assert!(
-            refuse_when_broken(&texts, confine::FenceVerdict::Enforced).is_none(),
+            refuse_when_broken(&*texts, confine::FenceVerdict::Enforced).is_none(),
             "机制装上了就没有拒绝的理由"
         );
         assert!(
             refuse_when_broken(
-                &texts,
+                &*texts,
                 confine::FenceVerdict::EnvUnavailable("内核不支持".to_string())
             )
             .is_none(),
@@ -562,8 +543,7 @@ mod tests {
         );
     }
 
-    // ---------- 真实工具进程（T2 真实适配器边界；见 docs/testing/doubles.md 的 ToolRunner 行） ----------
-
+    // ---------- 真实工具进程（T2 真实适配器边界；见 docs/testing/doubles.md 的 ProcessRunner 行） ----------
     /// 已构建的产品可执行文件（守门进程就是它自己）：`cargo build` 之后才存在；没有就如实跳过。
     fn built_exe() -> Option<PathBuf> {
         let me = std::env::current_exe().ok()?;
@@ -612,7 +592,7 @@ mod tests {
         }
     }
 
-    fn prompt_texts() -> std::sync::Arc<crate::capabilities::prompt::api::ToolTexts> {
+    fn prompt_texts() -> std::sync::Arc<dyn crate::kernel::ports::ProcessTexts> {
         use crate::capabilities::prompt::api::Prompt;
         use crate::capabilities::prompt::ports::PromptSource;
         let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -621,7 +601,9 @@ mod tests {
         )
         .load()
         .expect("内置提示词册必须合法");
-        prompts.tools()
+        std::sync::Arc::new(crate::capabilities::tools::detail::PromptProcessTexts::new(
+            prompts.tools(),
+        ))
     }
 
     /// 造一个按「cwd = 隔离根」跑真工具的 runner（命令用裸文件名，避免命令行里出现引号）。
@@ -673,6 +655,7 @@ mod tests {
             &spec_for(&dir),
             &format!("{} echo_stdin.py", py),
             "{\"k\":\"v\"}",
+            &[],
             None,
         );
         assert!(out.ok, "工具应当成功：{}", out.output);
@@ -703,7 +686,13 @@ mod tests {
         .expect("写脚本");
         std::env::set_var("SOLOMNI_PROBE_ENV_LEAK", "leak-me");
         let tools = real_runner(exe, &dir, 60);
-        let out = tools.run(&spec_for(&dir), &format!("{} echo_env.py", py), "{}", None);
+        let out = tools.run(
+            &spec_for(&dir),
+            &format!("{} echo_env.py", py),
+            "{}",
+            &[],
+            None,
+        );
         std::env::remove_var("SOLOMNI_PROBE_ENV_LEAK");
         assert!(out.ok, "工具应当成功：{}", out.output);
         assert!(
@@ -745,6 +734,7 @@ mod tests {
             &spec_for(&dir),
             &format!("{} echo_node_opts.js", node),
             "{}",
+            &[],
             None,
         );
         assert!(out.ok, "node 工具应当成功：{}", out.output);
@@ -766,6 +756,7 @@ mod tests {
                 &spec_for(&dir),
                 &format!("{} echo_node_opts.py", py),
                 "{}",
+                &[],
                 None,
             );
             assert!(out.ok, "python 工具应当成功：{}", out.output);
@@ -811,7 +802,7 @@ mod tests {
             std::fs::set_permissions(&script, perm).expect("加执行位");
         }
         let tools = real_runner(exe, &dir, 60);
-        let out = tools.run(&spec_for(&dir), command, "{}", None);
+        let out = tools.run(&spec_for(&dir), command, "{}", &[], None);
         assert!(out.ok, "带正斜杠的相对程序名必须能跑起来：{}", out.output);
         assert!(
             out.output.contains("PROBE-OK"),
@@ -832,7 +823,7 @@ mod tests {
             eprintln!("[探针] 本机没有可用的 python，跳过超时杀树契约");
             return;
         };
-        if !crate::capabilities::tools::detail::confine::capability().tree {
+        if !crate::kernel::detail::confine::capability().tree {
             eprintln!("[探针] 本机进程树围栏不可用，跳过超时杀树契约");
             return;
         }
@@ -840,10 +831,16 @@ mod tests {
         std::fs::write(dir.join("sleep60.py"), "import time\ntime.sleep(60)\n").expect("写脚本");
         let tools = real_runner(exe, &dir, 2);
         let started = Instant::now();
-        let out = tools.run(&spec_for(&dir), &format!("{} sleep60.py", py), "{}", None);
+        let out = tools.run(
+            &spec_for(&dir),
+            &format!("{} sleep60.py", py),
+            "{}",
+            &[],
+            None,
+        );
         assert!(!out.ok, "超时必须如实回执失败：{}", out.output);
         assert!(
-            out.output.contains(&tools.texts.tool_timeout),
+            out.output.contains(&tools.texts.timeout()),
             "回执要带上超时标记：{}",
             out.output
         );
@@ -931,9 +928,7 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn unwritable_interpreter_dir_never_silently_runs_unfenced() {
-        use crate::capabilities::tools::domain::fence::{
-            FencePart, OPT_FENCE_ABORT, OPT_FENCE_UNFENCED,
-        };
+        use crate::kernel::domain::fence::{FencePart, OPT_FENCE_ABORT, OPT_FENCE_UNFENCED};
         if !fence_live() {
             eprintln!(
                 "[探针] 未开启真机围栏测试：本探针要写本机权限项，已跳过；要真跑加 --fence-live"
@@ -972,7 +967,7 @@ mod tests {
         let tools = real_runner_with_write(exe, &home);
         // ① 用户选"本轮无围栏跑一次"：命令真跑，回执**如实标为无围栏**。
         let ask = RecordingAsk::new(Some(OPT_FENCE_UNFENCED));
-        let out = tools.run(&spec, &command, "{}", Some(&ask));
+        let out = tools.run(&spec, &command, "{}", &[], Some(&ask));
         assert_eq!(
             ask.asked_ids(),
             vec![vec![
@@ -991,15 +986,8 @@ mod tests {
             "有选项就不该停会话"
         );
         assert!(
-            // 册子文案带占位符，渲染后才进回执：按**无占位符的前缀**断言，改文案不改这里。
-            out.output.contains(
-                tools
-                    .texts
-                    .tool_fence_unfenced
-                    .split("{{")
-                    .next()
-                    .unwrap_or("")
-            ),
+            // 册子文案带占位符，渲染后才进回执：只断言"如实标为无围栏"这个稳定事实，不复制整段文案。
+            out.output.contains("无围栏"),
             "回执要如实标为无围栏：{}",
             out.output
         );
@@ -1010,7 +998,7 @@ mod tests {
         );
         // ② 用户选"放弃这次调用"：不执行，回执写清哪一环、哪个目录、缺什么、怎么补。
         let ask = RecordingAsk::new(Some(OPT_FENCE_ABORT));
-        let out = tools.run(&spec, &command, "{}", Some(&ask));
+        let out = tools.run(&spec, &command, "{}", &[], Some(&ask));
         assert!(!out.ok, "放弃 = 不执行");
         assert!(
             !out.output.contains("RAN"),
@@ -1026,7 +1014,7 @@ mod tests {
             );
         }
         // ③ 没有可回答的前端（纯终端 / e2e）：没有可点的选项 = 不执行（fail-closed）。
-        let out = tools.run(&spec, &command, "{}", None);
+        let out = tools.run(&spec, &command, "{}", &[], None);
         assert!(!out.ok, "没有可回答的前端 = 不执行");
         assert!(
             !out.output.contains("RAN"),
@@ -1047,7 +1035,7 @@ mod tests {
     fn missing_launcher_binary_is_reported_honestly() {
         let dir = crate::tests::scratch("proc-tools-missing-exe");
         let tools = real_runner(PathBuf::from("definitely-not-here-solomni"), &dir, 5);
-        let out = tools.run(&spec_for(&dir), "echo hi", "{}", None);
+        let out = tools.run(&spec_for(&dir), "echo hi", "{}", &[], None);
         assert!(!out.ok);
         assert!(out.output.contains("工具进程启动失败"), "{}", out.output);
         let _ = std::fs::remove_dir_all(&dir);

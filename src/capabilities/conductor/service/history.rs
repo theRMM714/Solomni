@@ -78,10 +78,8 @@ impl Conductor {
                 Ok(sandboxes) => {
                     for sb in &sandboxes.list {
                         // 撤销要覆盖同一次授权写下的全部条目：读写根 + 用户授权的只读根。
-                        let spec = crate::capabilities::tools::api::FenceSpec::from_sandbox(
-                            sb, m.exec.net,
-                        )
-                        .with_read_only(self.fence_read_roots());
+                        let spec = crate::kernel::api::FenceSpec::from_sandbox(sb, m.exec.net)
+                            .with_read_only(self.fence_read_roots());
                         if let Err(e) = self.tools.release_fence(&spec) {
                             self.log.warn(
                                 "conductor::history_delete",
@@ -94,6 +92,15 @@ impl Conductor {
                     "conductor::history_delete",
                     &format!("取沙箱失败，未撤销授权：{}", e),
                 ),
+            }
+        }
+        // 常驻服务的会话租约随会话消失一起回收（与围栏释放同一时机）。
+        for sid in &subtree {
+            if let Err(e) = self.residents.reap(sid) {
+                self.log.warn(
+                    "conductor::history_delete",
+                    &format!("回收常驻服务租约未完成：{}", e),
+                );
             }
         }
         for sid in &subtree {

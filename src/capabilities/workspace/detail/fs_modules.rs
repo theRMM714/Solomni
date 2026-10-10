@@ -68,6 +68,14 @@ fn scan_dir(modules_dir: &Path, reserved: &[String]) -> Roster {
                     rejected.push(format!("{}: {}", dir_name, why));
                     continue;
                 }
+                if let Err(why) = crate::capabilities::workspace::api::check_services(&m) {
+                    rejected.push(format!("{}: {}", dir_name, why));
+                    continue;
+                }
+                if let Err(why) = crate::capabilities::workspace::api::check_secrets(&m) {
+                    rejected.push(format!("{}: {}", dir_name, why));
+                    continue;
+                }
                 // 载入即确保私有区存在：模块恒有一个可写的 userdata/（产品唯一的自动写盘，幂等）。
                 // 建不了不阻断加载（只读挂载、权限不足）：如实记一条，事实字段给"能不能用"。
                 let userdata = path.join("userdata");

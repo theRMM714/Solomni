@@ -242,14 +242,11 @@ impl ConductorHandle {
         })
     }
 
-    /// 目的：模块 id → 它在当前档位下缺的运行包能力（空表 = 都能跑）。
-    /// 约束：与成员循环读同一把尺子（`runtime_report.missing`）——缺包 = 不执行，不静默降级。
-    fn missing_runtimes(&self) -> BTreeMap<String, Vec<String>> {
-        let tier = self
-            .call(|core| Ok(core.registry().app_settings().tier))
-            .unwrap_or_default();
-        ConductorOps::runtime_report(self, tier)
-            .map(|r| r.missing)
+    /// 目的：模块 id → 它在**当前设置档位**下缺的运行包能力（空表 = 都能跑）。
+    /// 约束：与成员循环读同一把尺子（`workspace::api::unavailable`，档位感知）——本机档不装载运行包，
+    ///   不因"没装包"拒绝本机解释器就能跑的工具；缺包 = 不执行，不静默降级。
+    fn unavailable_modules(&self) -> BTreeMap<String, Vec<String>> {
+        self.call(|core| Ok(core.unavailable_modules_now()))
             .unwrap_or_default()
     }
 
@@ -292,6 +289,26 @@ impl ConductorHandle {
         ))
     }
 
+    /// 目的：把 `module.<模块id>.<服务名>.<操作名>` 解析成**已声明**服务的操作（模块 id / 服务名都可能含 `.`，按声明逐段匹配）。
+    /// 返回：None = 不是常驻服务的操作（交给静态模块工具那条路）。
+    fn service_action(&self, id: &str) -> Result<Option<(String, String, String)>, String> {
+        let rest = id.strip_prefix("module.").unwrap_or("");
+        let roster = self.call(|core| Ok(core.scan()))?;
+        for m in &roster.modules {
+            let Some(after_m) = rest.strip_prefix(&format!("{}.", m.manifest.id)) else {
+                continue;
+            };
+            for name in m.manifest.services.keys() {
+                if let Some(op) = after_m.strip_prefix(&format!("{}.", name)) {
+                    if !op.is_empty() {
+                        return Ok(Some((m.manifest.id.clone(), name.clone(), op.to_string())));
+                    }
+                }
+            }
+        }
+        Ok(None)
+    }
+
     /// 目的：**人直接用模块工具**（无会话）：按 `module.yaml` 校验参数，给一份独立围栏，跑一次真命令。
     /// 约束：执行面与 agent 会话共用（`ToolExec::run_module`），只是围栏按模块目录 + 用户指定的工作目录派生。
     fn run_module_action(
@@ -303,7 +320,7 @@ impl ConductorHandle {
         self.authorize_module(caller)?;
         let (module, tool, decl) = self.module_action(id)?;
         // 与成员循环同一把尺子：该能力不在包库里 = 该模块的工具不执行，并如实说明缺哪个能力。
-        if let Some(caps) = self.missing_runtimes().get(&module.manifest.id) {
+        if let Some(caps) = self.unavailable_modules().get(&module.manifest.id) {
             return Err(format!(
                 "模块 {} 的运行包 {} 未装载，不能直接跑它的工具；把包放进依赖文件夹 runtimes/（契约见 RUNTIME_SPEC.md）",
                 module.manifest.id,
@@ -323,17 +340,18 @@ impl ConductorHandle {
             }
         }
         let work = work.map(std::path::PathBuf::from);
-        let fence = crate::capabilities::tools::api::FenceSpec::standalone(
+        let fence = crate::kernel::api::FenceSpec::standalone(
             &module.root,
             work.as_deref(),
             module.has_userdata,
         );
         let args_json = serde_json::to_string(&module_args).unwrap_or_else(|_| "{}".to_string());
         // 人直接跑模块工具：这一趟**没有可回答的前端**（没有会话、没有裁决队），所以不给提问端口——
-        // 围栏的必要落点授不上时按 fail-closed 拒绝这次调用（回执写清哪一环、怎么补）。
+        // 围栏的必要落点授不上时按 fail-closed 拒绝；隐私字段只经环境变量注入（值不进命令行）。
+        let env = self.secrets.resolve(&module.manifest.id)?;
         let outcome = self
             .tools
-            .run_module(&fence, &decl.command, &args_json, None);
+            .run_module(&fence, &decl.command, &args_json, &env, None);
         Ok(Acted::Done(
             serde_json::json!({ "ok": outcome.ok, "output": outcome.output }),
         ))
@@ -349,6 +367,16 @@ impl ConductorHandle {
     ) -> Result<Acted, String> {
         // 模块工具动作（动态，来自清单）先于静态表分派。
         if id.starts_with("module.") {
+            // 静态模块工具优先（保持既有语义）；不是静态工具时，看它是不是已启动常驻服务的操作。
+            if self.module_action(id).is_err() {
+                if let Some((module, service, op)) = self.service_action(id)? {
+                    self.authorize_module(caller)?;
+                    let receipt = self.residents.call(&module, &service, &op, args)?;
+                    return Ok(Acted::Done(
+                        serde_json::json!({ "ok": receipt.ok, "output": receipt.output }),
+                    ));
+                }
+            }
             return self.run_module_action(caller, id, args);
         }
         let s = |k: &str| {
@@ -367,6 +395,36 @@ impl ConductorHandle {
             }
             "send_message" => {
                 SessionOps::say(self, &s("session_id"), &s("text"), out).map(Acted::Advanced)
+            }
+            "control_resident" => {
+                let module = s("module");
+                let name = s("name");
+                let lease = s("lease");
+                match s("action").as_str() {
+                    "start" => {
+                        let list = self.residents.start(&module, &name, &lease)?;
+                        let names: Vec<&str> = list.iter().map(|o| o.name.as_str()).collect();
+                        Ok(Acted::Done(
+                            serde_json::json!({ "ok": true, "operations": names }),
+                        ))
+                    }
+                    "stop" => {
+                        self.residents.stop(&module, &name)?;
+                        Ok(Acted::Done(serde_json::json!({ "ok": true })))
+                    }
+                    "enable" => {
+                        self.residents.set_enabled(&module, &name, true)?;
+                        Ok(Acted::Done(serde_json::json!({ "ok": true })))
+                    }
+                    "disable" => {
+                        self.residents.set_enabled(&module, &name, false)?;
+                        Ok(Acted::Done(serde_json::json!({ "ok": true })))
+                    }
+                    other => Err(format!(
+                        "control_resident 不支持的动作：{}（可用：start / stop / enable / disable）",
+                        other
+                    )),
+                }
             }
             "control_session" => {
                 let action = d::ControlAction::parse(&s("action"))?;
@@ -415,6 +473,15 @@ impl ConductorHandle {
                 Ok(Acted::Done(
                     serde_json::json!({ "ok": true, "uploaded": uploaded }),
                 ))
+            }
+            // 隐秘字段：值只进去、永不回显；不放模块工具面（agent 不需要写值）。
+            "set_secret" => {
+                self.secrets.set(&s("module"), &s("name"), &s("value"))?;
+                Ok(Acted::Done(serde_json::json!({ "ok": true })))
+            }
+            "clear_secret" => {
+                self.secrets.clear(&s("module"), &s("name"))?;
+                Ok(Acted::Done(serde_json::json!({ "ok": true })))
             }
             // 文件域 / 协作动词 / 核心操作这些动作由成员工具循环执行，不经分发器。
             // 登记处动作（供应商 / 密钥 / 模型 / agent / 设置）：产品级资源，只给人用。
@@ -578,7 +645,7 @@ impl ActionOps for ConductorHandle {
         // 会话里的模块工具由成员循环执行——那是同一个声明、同一个执行面的另一个适配器。
         if matches!(caller, Caller::User) {
             if let Ok(roster) = self.call(|core| Ok(core.scan())) {
-                let missing = self.missing_runtimes();
+                let missing = self.unavailable_modules();
                 for m in &roster.modules {
                     for (tool, decl) in &m.manifest.tools {
                         let mut params: Vec<ActionParamView> = match decl.schema() {
@@ -611,6 +678,22 @@ impl ActionOps for ConductorHandle {
                             params,
                             available,
                             reason,
+                        });
+                    }
+                }
+                // 已就绪常驻服务的操作：也是一条动态模块动作（id = module.<模块>.<服务>.<操作>）。
+                // 未启动的服务不出现（操作是跑起来才发现的）；呈现层因此不必另建一份清单。
+                for view in self.residents.services().unwrap_or_default() {
+                    if view.state != crate::capabilities::residents::api::ServiceState::Ready {
+                        continue;
+                    }
+                    for op in &view.operations {
+                        out.push(ActionView {
+                            id: format!("module.{}.{}.{}", view.module, view.name, op.name),
+                            desc: op.description.clone(),
+                            params: Vec::new(),
+                            available: true,
+                            reason: String::new(),
                         });
                     }
                 }

@@ -84,6 +84,8 @@
 | 那个唯一的程序 | **核心** | 内核、核心进程（`kernel` 是机制型业务单元，不是核心） |
 | 机器可读的事件流水 | **转录**（transcript） | 日志、聊天记录 |
 | 由核心实现 / 由模块声明的工具 | **系统工具 / 模块工具** | 内置工具（= 系统工具里的文件域那几个）、外部工具（= 模块工具） |
+| 模块声明的常驻外部服务（MCP / harness 等） | **常驻服务**（能力 `residents`） | 外部服务、后台进程、daemon |
+| 模块声明的隐秘信息（值归产品、只落 `.home/`） | **隐秘字段**（能力 `secrets`） | 密钥（除非确指通道密钥）、凭据、secret |
 
 引用细则一律写**文件 + 标题**（例如 `docs/session/session-model.md` 的「会话参数与对话分开」），
 不写深层节号（`§三之二` 这类会随节序失效）；顶层节号（`ARCHITECTURE.md` 的 §一 / §九）是稳定锚点，允许。
@@ -180,6 +182,8 @@
 | `workspace`（工作区与运行包） | `docs/workspace/README.md` | `unit-map.md` |
 | `prompt`（提示词册） | `docs/prompt/README.md` | `unit-map.md`、`prompts.md` |
 | `slate`（名单） | `docs/slate/README.md` | `unit-map.md` |
+| `residents`（常驻服务） | `docs/residents/README.md` | `unit-map.md` |
+| `secrets`（隐秘字段） | `docs/secrets/README.md` | `unit-map.md` |
 | `taskchain`（任务链） | `docs/taskchain/README.md` | `unit-map.md` |
 | `kernel`（机制型业务） | `docs/kernel/README.md` | `unit-map.md` |
 | 入口层（组合根 / 探针 / 守门进程） | `docs/entry/README.md` | `unit-map.md` |

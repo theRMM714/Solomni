@@ -21,7 +21,7 @@ pub use crate::capabilities::session::domain::session::{
     keep_whole_replies, stream_piece, summary_message, unique_work_name, AgentSession,
     SessionParams, TurnRun,
 };
-pub use crate::capabilities::session::domain::tools::{tool_table, MemberTools};
+pub use crate::capabilities::session::domain::tools::{tool_table, MemberTools, ServiceOp};
 
 // 核心操作回路 + 原生回灌消息：`service.rs` 实现（它驱动 IO，不是纯派生）。
 pub use crate::capabilities::session::service::{core_operation, reply_msgs};

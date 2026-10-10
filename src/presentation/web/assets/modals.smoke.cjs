@@ -162,6 +162,24 @@ if (!loadErrors.length) {
     return got.length === 1 && got[0].indexOf("[节点] 完成：n1") === 0 &&
       got[0].indexOf("语料抽好了") > 0 && got[0].indexOf("第二行") < 0;
   });
+  // ⑦ 模块与服务面板：按模块分组，无入口的模块如实标注，可跑入口给出「运行」。
+  check("模块与服务面板按模块分组并标注无入口", () => {
+    const got = vm.runInNewContext(`
+      (() => {
+        const ctx = openModal('测试', () => {});
+        renderModulesPanel(ctx,
+          [{ id: 'research', brief: '调研' }, { id: 'lonely', brief: '只有 system' }],
+          [{ id: 'control_resident', desc: '生命周期', params: [] },
+           { id: 'module.research.grep', desc: '搜索', params: [] }]);
+        const walk = (n, out) => { out.push(n); for (const c of (n.children || [])) walk(c, out); return out; };
+        const texts = walk($('#modal-root'), []).map((n) => n.textContent || '');
+        return texts.some((t) => t.indexOf('research') >= 0)
+          && texts.some((t) => t.indexOf('只能经 AI 使用') >= 0)
+          && texts.some((t) => t === '运行');
+      })()
+    `, sandbox);
+    return got;
+  });
 }
 
 const failed = results.filter((r) => !r[1]);

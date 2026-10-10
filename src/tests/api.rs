@@ -1155,34 +1155,48 @@ fn registry_actions_are_user_only_and_go_through_the_dispatcher() {
         .any(|a| a.id.starts_with("upsert_") || a.id == "set_settings"));
 }
 
-/// 缺运行包 = 不执行：直跑模块工具也要过与成员循环同一把尺子，目录里如实标不可用。
+/// 运行能力判定是**档位感知**的：本机档不装载运行包（一律可用，直跑真的执行）；
+/// 「缺包 = 不执行」是**虚拟机档**的判定，域层另有 `exec_vm_tier_reports_missing_ambiguous_and_unavailable`。
+/// 回归点：直跑曾用档位无关的 `absent`，在本机档因"没装包"误拒本机解释器就能跑的工具。
 #[test]
-fn module_action_refuses_when_its_runtime_package_is_missing() {
+fn module_action_on_host_tier_runs_even_without_runtime_packages() {
     let mut m = module_with_runtimes("harvest", &["python"]);
     m.manifest
         .tools
         .insert("scan".to_string(), decl("python tools/scan.py"));
-    let (_h, ops) = ops_with(vec![m], Vec::new());
-    let err = ops
-        .actions
-        .act(ActionCall {
-            id: "module.harvest.scan".to_string(),
-            args: serde_json::json!({}),
-            caller: Caller::User,
-            out: Output::Final,
-        })
-        .unwrap_err();
-    assert!(err.contains("运行包"), "{}", err);
+    let runner = Arc::new(crate::tests::builders::RecordingRunner::new("跑了", true));
+    let gateway = crate::tests::doubles::gw(std::collections::BTreeMap::new(), Vec::new());
+    let handle = ConductorHandle::spawn(crate::tests::doubles::core_with_runner(
+        vec![m],
+        gateway,
+        Arc::clone(&runner),
+    ))
+    .expect("起核心线程");
+    let ops = Ops::from_handle(&handle);
+
     let cat = ops.actions.catalog(&Caller::User, None).expect("目录");
     let e = cat
         .iter()
         .find(|a| a.id == "module.harvest.scan")
         .expect("模块工具进目录");
     assert!(
-        !e.available && e.reason.contains("运行能力"),
-        "available={} reason={}",
         e.available,
+        "本机档不装载运行包：声明了 runtimes 也该可用（reason={}）",
         e.reason
+    );
+
+    ops.actions
+        .act(ActionCall {
+            id: "module.harvest.scan".to_string(),
+            args: serde_json::json!({}),
+            caller: Caller::User,
+            out: Output::Final,
+        })
+        .expect("本机档直跑要放行");
+    assert_eq!(
+        runner.calls.lock().expect("锁").len(),
+        1,
+        "真的执行了一次（不是静默跳过）"
     );
 }
 

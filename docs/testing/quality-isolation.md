@@ -37,19 +37,20 @@
 - 供应链：`cargo audit`（已知 CVE）与 `cargo deny check`（许可证 / 禁用 / 来源，配置 `deny.toml`）；
 - 测试目标登记、报告结构、缺口账格式；
 - 重复测试、重复 Fixture、重复 Fake 和跨层无理由重复断言；
-- 项目外写（env / 工具链）：借用系统工具链也不许写它的 home，缓存与临时必须留在项目内；
+- 项目外写（env / 工具链）：判据见「一、隔离、清理与副作用」的「项目外写」；
 - 未使用代码、死代码、无效分支和不必要包装层。
 
 ### 2.2 判定规则
 
 - 质量检查失败记录为 `quality-fail`，不能折算成 `pass`；
 - 工具缺失或环境不允许运行记录为 `env-skip`，不能静默跳过；
+- 工具获取：**第三方只进 CI**——CI 用 `taiki-e/install-action` 预编译装（供应链工具、突变测试的 `cargo-mutants` 都这样）；**本地开发不引第三方**，用 `node setup-dev.js` 把清单（[dev-tools.js](../../dev-tools.js)）里的东西装进**项目内**（`cargo install --locked --root .tools`）；
 - 尚未建立检查记录为 `gap`；
 - 依赖重复不一定是错误，必须有解释或后续治理记录；
 - 重复代码检查不得诱导新增抽象。先判断重复是否属于同一职责，再决定合并、保留或记录原因。
 
 当前 `node run-tests.js` 已执行上述全部 T0 检查：编译、结构审查（含**门禁解析器自测**与 **`#[ignore]` 禁令**）、
-格式、clippy、编译告警、依赖重复**零容忍硬失败**——任何一项不过即 `quality-fail`，**没有存量基线**。
+格式、clippy、编译告警、交叉类型检查（已装 target）、依赖重复**零容忍硬失败**——任何一项不过即 `quality-fail`，**没有存量基线**。
 供应链（`cargo audit` / `cargo deny check`）同为硬失败，但**工具缺失或取不到 advisory 数据**记 `env-skip`。
 清单与判定见 [levels.md](levels.md) 的 T0 一节。
 
@@ -82,8 +83,8 @@
 | --- | --- | --- |
 | `capabilities/collab/service/{collab,pump,turn_io,round}.rs`、`capabilities/conductor/service/rewind.rs` | 14 | 协作状态机的 `disc` / 任务链 / 工具上下文：进入这段之前刚判过存在，`expect("disc 已确认存在")` 与其后的 `expect("上臂已判存在")` 是同一判断的延续；`rewind.rs` 的两处（`l.get("tool")` 与其后跳过被总结行的同一判断）同理 |
 | `capabilities/prompt/{domain/prompt.rs,domain/refs.rs,service.rs}` | 3 | 模板变量缺失 = **装配错误**（`prompts/` 或调用方写错），不在用户输入路径上；启动即炸好过渲染出半截文案 |
-| `capabilities/tools/detail/proc_tools.rs` | 3 | `Command` 已声明 `Stdio::piped()`，`child.stdin` / `stdout` / `stderr` 的 `take()` 必为 `Some` |
-| `capabilities/tools/detail/confine/macos.rs` | 2 | `CString::new` 的两个入参是不含 NUL 的字面量与临时路径 |
+| `kernel/detail/process.rs` | 3 | `Command` 已声明 `Stdio::piped()`，`child.stdin` / `stdout` / `stderr` 的 `take()` 必为 `Some` |
+| `kernel/detail/confine/macos.rs` | 2 | `CString::new` 的两个入参是不含 NUL 的字面量与临时路径 |
 | `capabilities/tools/service/systool.rs` | 1 | `pending.get(path)` 的键由上一行同一函数算出 |
 | `capabilities/collab/service/tool_loop.rs` | 1 | 每个工具调用在上一行都被配对写入了执行结果 |
 

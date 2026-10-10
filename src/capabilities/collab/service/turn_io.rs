@@ -85,7 +85,10 @@ impl CollabSession {
             sandbox: sb.clone(),
             builtin_tools: self.systools.book(),
             unavailable: std::collections::BTreeMap::new(),
-            fence: crate::capabilities::tools::api::FenceSpec::from_sandbox(&sb, false),
+            fence: crate::kernel::api::FenceSpec::from_sandbox(&sb, false),
+            // 核心核实用的是只读内置工具，没有模块工具进程，也就没有注入项。
+            module_env: Default::default(),
+            residents: Arc::new(crate::capabilities::residents::api::NoResidents),
             reply_seq: 0,
             line: Default::default(),
             allowed,

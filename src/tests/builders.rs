@@ -249,12 +249,13 @@ pub(crate) fn roster() -> Vec<String> {
 /// 守护 runner：任何调用即失败（守护不该用工具的路径）。
 pub(crate) struct SilentRunner;
 
-impl ToolRunner for SilentRunner {
+impl ProcessRunner for SilentRunner {
     fn run(
         &self,
-        _fence: &crate::capabilities::tools::api::FenceSpec,
+        _fence: &crate::kernel::api::FenceSpec,
         _command: &str,
         _args: &str,
+        _env: &[(String, String)],
         _ask: Option<&dyn crate::kernel::ports::AskUser>,
     ) -> ToolOutcome {
         panic!("不应调用工具");
@@ -278,12 +279,43 @@ impl RecordingRunner {
     }
 }
 
-impl ToolRunner for RecordingRunner {
+/// 目的：记下每次调用注入项的 runner（断言隐私字段只经环境变量进工具进程）。
+pub(crate) struct EnvRecordingRunner {
+    pub(crate) envs: Mutex<Vec<Vec<(String, String)>>>,
+}
+
+impl EnvRecordingRunner {
+    pub(crate) fn new() -> EnvRecordingRunner {
+        EnvRecordingRunner {
+            envs: Mutex::new(Vec::new()),
+        }
+    }
+}
+
+impl ProcessRunner for EnvRecordingRunner {
     fn run(
         &self,
-        fence: &crate::capabilities::tools::api::FenceSpec,
+        _fence: &crate::kernel::api::FenceSpec,
+        _command: &str,
+        args_json: &str,
+        env: &[(String, String)],
+        _ask: Option<&dyn crate::kernel::ports::AskUser>,
+    ) -> ToolOutcome {
+        self.envs.lock().expect("锁").push(env.to_vec());
+        ToolOutcome {
+            ok: true,
+            output: format!("跑完了 {}", args_json),
+        }
+    }
+}
+
+impl ProcessRunner for RecordingRunner {
+    fn run(
+        &self,
+        fence: &crate::kernel::api::FenceSpec,
         command: &str,
         args_json: &str,
+        _env: &[(String, String)],
         _ask: Option<&dyn crate::kernel::ports::AskUser>,
     ) -> ToolOutcome {
         // 记下工具进程的工作目录（= 该模块的根）与命令、参数。
@@ -321,12 +353,13 @@ impl ParallelRunner {
     }
 }
 
-impl ToolRunner for ParallelRunner {
+impl ProcessRunner for ParallelRunner {
     fn run(
         &self,
-        _fence: &crate::capabilities::tools::api::FenceSpec,
+        _fence: &crate::kernel::api::FenceSpec,
         command: &str,
         args_json: &str,
+        _env: &[(String, String)],
         _ask: Option<&dyn crate::kernel::ports::AskUser>,
     ) -> ToolOutcome {
         let now = self.active.fetch_add(1, Ordering::SeqCst) + 1;
@@ -361,12 +394,13 @@ impl AskingRunner {
     }
 }
 
-impl ToolRunner for AskingRunner {
+impl ProcessRunner for AskingRunner {
     fn run(
         &self,
-        fence: &crate::capabilities::tools::api::FenceSpec,
+        fence: &crate::kernel::api::FenceSpec,
         command: &str,
         args_json: &str,
+        _env: &[(String, String)],
         ask: Option<&dyn crate::kernel::ports::AskUser>,
     ) -> ToolOutcome {
         let Some(ask) = ask else {
@@ -384,11 +418,11 @@ impl ToolRunner for AskingRunner {
             detail: "模块目录（C:/mods/a）授不上：写 DACL 失败（错误码 5）".to_string(),
             options: vec![
                 (
-                    crate::capabilities::tools::domain::fence::OPT_FENCE_UNFENCED.to_string(),
+                    crate::kernel::domain::fence::OPT_FENCE_UNFENCED.to_string(),
                     "本轮无围栏跑一次".to_string(),
                 ),
                 (
-                    crate::capabilities::tools::domain::fence::OPT_FENCE_ABORT.to_string(),
+                    crate::kernel::domain::fence::OPT_FENCE_ABORT.to_string(),
                     "放弃这次调用".to_string(),
                 ),
             ],
@@ -423,7 +457,7 @@ pub(crate) const TOOL_CALL: &str =
 pub(crate) fn member_with_tools(
     id: &str,
     script: Vec<String>,
-    runner: Arc<impl ToolRunner + Send + Sync + 'static>,
+    runner: Arc<impl ProcessRunner + 'static>,
 ) -> Member {
     let mut commands = BTreeMap::new();
     commands.insert("grep".to_string(), "python tools/grep.py".to_string());
@@ -435,6 +469,7 @@ pub(crate) fn member_with_tools(
             commands,
             books: BTreeMap::new(),
             parallel: BTreeSet::new(),
+            services: BTreeMap::new(),
         },
     );
     let mut m = Member::new(
@@ -459,10 +494,9 @@ pub(crate) fn member_with_tools(
         sandbox: test_sandbox("m0", &[]),
         builtin_tools: test_systools().tools,
         unavailable: BTreeMap::new(),
-        fence: crate::capabilities::tools::api::FenceSpec::from_sandbox(
-            &test_sandbox("m0", &[]),
-            false,
-        ),
+        fence: crate::kernel::api::FenceSpec::from_sandbox(&test_sandbox("m0", &[]), false),
+        module_env: Default::default(),
+        residents: Arc::new(crate::capabilities::residents::api::NoResidents),
         reply_seq: 0,
         line: Default::default(),
         // 测试替身按"执行席"发放全部内置工具（角色表的越权校验另有专门用例）。
@@ -734,6 +768,7 @@ pub(crate) fn native_member(
             commands: BTreeMap::new(),
             books: BTreeMap::new(),
             parallel: BTreeSet::new(),
+            services: BTreeMap::new(),
         },
     );
     let sb = test_sandbox(id, &[]);
@@ -748,7 +783,9 @@ pub(crate) fn native_member(
         sandbox: sb.clone(),
         builtin_tools: test_systools().tools,
         unavailable: BTreeMap::new(),
-        fence: crate::capabilities::tools::api::FenceSpec::from_sandbox(&sb, false),
+        fence: crate::kernel::api::FenceSpec::from_sandbox(&sb, false),
+        module_env: Default::default(),
+        residents: Arc::new(crate::capabilities::residents::api::NoResidents),
         reply_seq: 0,
         line: Default::default(),
         // 测试替身按"执行席"发放全部内置工具（角色表的越权校验另有专门用例）。
@@ -880,5 +917,7 @@ pub(crate) fn native_core(
         test_tools_svc(),
         Arc::new(crate::kernel::ports::NoopLog),
         Arc::new(crate::kernel::detail::HostProbeAdapter),
+        Arc::new(crate::capabilities::residents::api::NoResidents),
+        Arc::new(crate::capabilities::secrets::api::NoSecrets),
     )
 }

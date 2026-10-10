@@ -375,7 +375,7 @@ pub(crate) fn a_writing_call_is_a_barrier_and_sees_the_merged_ledger() {
 pub(crate) fn module_tools_are_concurrent_only_when_declared() {
     use crate::capabilities::llm::api::ToolCall;
     /// 原生形态 + 模块 m0 声明外部工具 grep（线上名 m0_grep）；parallel 决定它是否可并发。
-    fn grep_member(runner: Arc<dyn ToolRunner + Send + Sync>, parallel: bool) -> Member {
+    fn grep_member(runner: Arc<dyn ProcessRunner>, parallel: bool) -> Member {
         let steps = vec![
             NativeStep::Calls(vec![
                 ToolCall {
@@ -415,10 +415,7 @@ pub(crate) fn module_tools_are_concurrent_only_when_declared() {
     let prompts = test_prompts();
     // ① 声明 parallel：两个调用真的并发
     let runner = Arc::new(ParallelRunner::new(40));
-    let mut m = grep_member(
-        Arc::clone(&runner) as Arc<dyn ToolRunner + Send + Sync>,
-        true,
-    );
+    let mut m = grep_member(Arc::clone(&runner) as Arc<dyn ProcessRunner>, true);
     let exec = run_execution(std::slice::from_mut(&mut m), "任务", &prompts);
     let peak = runner.peak_concurrent();
     assert!(
@@ -429,10 +426,7 @@ pub(crate) fn module_tools_are_concurrent_only_when_declared() {
     assert_eq!(exec.traces.get("a").map(|t| t.len()), Some(2));
     // ② 没声明：同样两个调用逐个跑
     let runner = Arc::new(ParallelRunner::new(5));
-    let mut m = grep_member(
-        Arc::clone(&runner) as Arc<dyn ToolRunner + Send + Sync>,
-        false,
-    );
+    let mut m = grep_member(Arc::clone(&runner) as Arc<dyn ProcessRunner>, false);
     let _ = run_execution(std::slice::from_mut(&mut m), "任务", &prompts);
     assert_eq!(
         runner.peak_concurrent(),

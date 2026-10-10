@@ -15,7 +15,7 @@ cargo clippy --all-targets --all-features -- -D warnings
 
 快速检查用于本地反馈，不替代完整入口。
 
-注意：`cargo test` 与 `cargo fmt --check`、`cargo clippy … -D warnings` **都预期全绿**——T0 八项全是零容忍硬失败，没有存量基线。
+注意：`cargo test` 与 `cargo fmt --check`、`cargo clippy … -D warnings` **都预期全绿**——T0 九项全是零容忍硬失败（交叉类型检查对已装 target 零容忍），没有存量基线。
 用例默认**串行**跑（套件含真实线程时序用例，并行仍会偶发，见 [tests/gaps.yaml](../../tests/gaps.yaml) 的 `testing.parallel-flake`）；排查并发 / 隔离问题时用 `node run-tests.js --parallel`。找测试盲区用 `node run-tests.js --coverage`
 （见下文「覆盖率发现模式」，只报不拦）。
 
@@ -34,13 +34,14 @@ node run-tests.js
 5. `T0 格式（fmt --check）`（硬失败）；
 6. `T0 静态检查（clippy）`（硬失败）；
 7. `T0 编译告警`（硬失败）；
-8. `T0 依赖重复（cargo tree）`（硬失败）；
-9. `T0 供应链（audit/deny）`（工具缺失或取不到 advisory 数据 = env-skip）；
-10. `L1 单元（--bin solomni）`（默认串行；`--parallel` 改为并发，仅诊断用）；
-11. 逐个运行 `cargo test --test cross-platform/windows/linux/macos`（同样默认串行）；
-12. 前端冒烟；
-13. 存在编排器时运行 L4 端到端（编排器会**现场构建 indexer**：编译器版本进日志，构建失败即失败）；
-14. 写入 `target/test-report.json` 并打印 `TEST-REPORT-OK` 或 `TEST-REPORT-FAIL`。
+8. `T0 交叉类型检查（各已装 target）`（**开发机专属**：`cargo check --target … --all-targets` 兜平台专属 `#[cfg]`（含测试）的类型错误；target 未装或本机缺交叉 C 工具链 = `env-skip`；**CI 上记 `skip-platform` 直接跳过**，因为三平台矩阵各自原生 `--all-targets` 已覆盖）；
+9. `T0 依赖重复（cargo tree）`（硬失败）；
+10. `T0 供应链（audit/deny）`（工具缺失或取不到 advisory 数据 = env-skip）；
+11. `L1 单元（--bin solomni）`（默认串行；`--parallel` 改为并发，仅诊断用）；
+12. 逐个运行 `cargo test --test cross-platform/windows/linux/macos`（同样默认串行）；
+13. 前端冒烟；
+14. 存在编排器时运行 L4 端到端（编排器会**现场构建 indexer**：编译器版本进日志，构建失败即失败）；
+15. 写入 `target/test-report.json` 并打印 `TEST-REPORT-OK` 或 `TEST-REPORT-FAIL`。
 
 每一步都有墙钟上限（默认 15 分钟，L4 20 分钟）：超时即硬失败，证据记进报告的 `timeouts`，不会把本地入口或
 CI job 拖到外层超时。每步用时记在报告的 `ms`，超预算的标 `[slow]`（只报不拦）。
@@ -135,9 +136,12 @@ MUTATION_SCOPE=capability MUTATION_CAPABILITY=repair node tests/ci-mutation.mjs
 
 入口与门禁共用同一份环境解析（[env.js](../../env.js)）：借用系统 `cargo` 可以，但 `CARGO_HOME` 与临时目录仍钉在项目内。
 
+**开发环境同步**：换机器 / 换人开发时跑 `node setup-dev.js`（`--check` 只读校验）。它统一用**项目内**工具链
+（`platform/<os>/rustup`、`platform/<os>/cargo`），组件、交叉 target 与项目内工具都装那里——**不写系统 `~/.rustup`、`~/.cargo`**；条目清单见 [dev-tools.js](../../dev-tools.js)。
+
 测试命令固定「只跑 `--bin solomni` + `--test-threads=1`」：**串行是刻意的**，并行会偶发
-（见 [tests/gaps.yaml](../../tests/gaps.yaml) 的 `testing.parallel-flake`）。工具在 CI 里用
-`taiki-e/install-action` 装（一次性临时环境，不改本机）。已知**等价变异体**在仓库根的 `.cargo/mutants.toml`
+（见 [tests/gaps.yaml](../../tests/gaps.yaml) 的 `testing.parallel-flake`）。`cargo-mutants` 按
+「工具获取」策略在 CI 预编译装（见 [quality-isolation.md](quality-isolation.md)；一次性临时环境，不改本机）。已知**等价变异体**在仓库根的 `.cargo/mutants.toml`
 的 `exclude_re` 里排除（每条都要写明为什么等价，当前 1 条）。
 
 退出码语义（cargo-mutants）：`0` 全捕获、`2` 有未捕获、`3` 有超时、`4` 基线就挂。
@@ -167,25 +171,27 @@ MUTATION_SCOPE=capability MUTATION_CAPABILITY=repair node tests/ci-mutation.mjs
 
 | job | 跑什么 | 对应入口 |
 | --- | --- | --- |
-| `quality` | T0 质量门禁 + 供应链（装 cargo-audit / cargo-deny）+ L1 单元 + 平台探针 + 前端冒烟（**跳过 L4**） | `node run-tests.js --fence-live --skip-e2e` |
+| `quality` | T0 质量门禁 + 供应链 + L1 单元 + 平台探针 + 前端冒烟（**跳过 L4**） | `node run-tests.js --fence-live --skip-e2e` |
 | `e2e` | L4 端到端（自己构建产品，与 `quality` 并行） | `node tests/ci-e2e.mjs`（CI 专用；本地整跑用 `node run-tests.js --fence-live`） |
 
 `publish-report` 把两个 job 的产物（`test-report-<os>` 与 `e2e-report-<os>`）用 `tests/ci-merge.mjs` 合并成该平台
 唯一的 `test-report.json`，再交给 `tests/ci-publish.mjs` 发布。**任一半缺报告都补一条 `fail` 步骤**——"没跑到"不能读成"通过"。
 
 `workflow_dispatch` 的 `clean` 输入（`true`）跳过 `actions/cache` 按干净机器跑；缓存只覆盖**项目内**路径
-（`platform/ci/cargo`：借用 runner 自带 Rust 时的 `CARGO_HOME`，含 registry / git / 安装的供应链工具；以及 `target/debug`），
+（`platform/ci/cargo`：借用 runner 自带 Rust 时的 `CARGO_HOME`，含 registry / git / 工具；以及 `target/debug`），
 **不缓存 `target/` 根**（报告与日志必须来自本次运行）。缓存身份包含 `path`，改路径即新缓存项、旧项自动淘汰，首次冷启动重下一次。
 CI 借 runner 自带 Rust（`CARGO_HOME` / `SOLOMNI_CARGO_HOME` 指项目内），不跑 `rustup` 安装——不写项目外。
+供应链工具在进门前预编译装（工具获取策略见 [quality-isolation.md](quality-isolation.md)）；
+安装用时经 `SOLOMNI_CI_PREINSTALL_MS` 带进门禁报告，在 `steps` 里以「CI 前置：供应链工具安装」出现——安装不在 `run-tests.js` 内，只能这样进报告。
 
 **为什么必须有 CI**——下面这些结论本地拿不到：
 
 | 场景 | 本地为什么不够 | CI 提供什么 |
 | --- | --- | --- |
-| 平台专属代码（`capabilities/tools/detail/confine/` 各平台文件、`tests/<平台>/`） | 平台目标的 `main.rs` 首行是 `#![cfg(target_os = …)]`：非本平台的目标整目标为空，代码根本不编译 | 三平台各编译并各跑一次 |
+| 平台专属代码（`kernel/detail/confine/` 各平台文件、`tests/<平台>/`） | 平台目标的 `main.rs` 首行是 `#![cfg(target_os = …)]`：非本平台的目标整目标为空，代码根本不编译 | 三平台各编译并各跑一次 |
 | 真机围栏（ACL / 容器 profile / Landlock / seatbelt） | 本地默认安全模式会跳过会改本机状态的探针 | 一次性 runner 上真跑，并验撤权与 profile 回收 |
 | HTTPS/TLS 出站链路 | 受限环境可能取不到系统 TLS 凭证（判据见 [levels.md](levels.md) 的 T4），本地只能 env-skip | 干净 runner 上真连公网端点 |
-| T0 八项（clippy 只编译当前平台的 `#[cfg]`、依赖图随平台变；供应链要联网装工具） | 本机只能代表本平台（判的是**平台差异**，不是「改了门禁就要派发」） | 三平台各自零容忍跑一遍 |
+| T0 九项（clippy 只编译当前平台的 `#[cfg]`；交叉类型检查在本机无目标或交叉 C 工具链时 env-skip；依赖图随平台变；供应链要联网装工具） | 本机只能代表本平台（判的是**平台差异**，不是「改了门禁就要派发」） | 三平台各自零容忍跑一遍 |
 | 三种语言的模块（python / node / C++）在真进程里跑 | 本机只代表本平台的解释器与编译器 | 三平台各跑一次真工具链路，indexer 现场编译 |
 | 发布前验收 | 本地通过 ≠ 三平台通过 | 三平台报告 + 三平台 `TEST-REPORT-ACCEPTED` |
 
@@ -248,7 +254,7 @@ git show origin/ci-report:runs/windows/logs/<某一步>.log  # 失败证据原�
 
 - `pass`：步骤完成；
 - `fail`：断言或命令失败（硬失败）；
-- `quality-fail`：T0 任一项不过（编译 / 结构审查 / 格式 / clippy / 编译告警 / 依赖重复）；
+- `quality-fail`：T0 任一项不过（编译 / 结构审查 / 格式 / clippy / 编译告警 / 交叉类型检查 / 依赖重复）；
 - `env-skip`：工具缺失等环境性跳过（步骤级），与 `envSkips`（探针级的 `[探针]` 行）并列；
 - `skip-platform`：当前平台不适用的空平台目标；
 - `gap`：入口没有找到应运行的部分。

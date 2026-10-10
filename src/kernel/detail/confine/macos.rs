@@ -1,18 +1,17 @@
-//! macOS 后端：seatbelt（sandbox_init）把「可达到哪些路径」变成内核强制。
-//! sandbox_init 是私有且已弃用的 ABI（如实写在这里，不假装它是公开接口）：
-//! 生成一份 profile 文本——默认拒绝一切，再逐条放行运行基线（只读）与 spec.rw（读写），
-//! spec.net 为假时连网络一起拒。装不上时如实降级（打印说明后照常执行），启动时已报告能力等级；
-//! 降级原因分两类并各自带标记：「本机 ABI 失效」是环境结论，「profile 被拒」是 profile 写错（探针硬失败）。
+//! 目的：macOS 后端——seatbelt（sandbox_init，私有且已弃用的 ABI）把「可达到哪些路径」变成内核强制。
+//! 管：生成 profile 文本——默认拒绝一切，再逐条放行运行基线（只读）与 spec.rw（读写）。
+//! 不管：网络——spec.net 为假时连网络一起拒；本档不承诺别的东西。
+//! 联动：装不上时如实降级（打印说明后照常执行）；降级原因分「本机 ABI 失效」（环境结论）与「profile 被拒」（写错，探针硬失败）。
 
 use super::{shell_command, Capability, FenceVerdict, FENCE_FAILED};
-use crate::capabilities::tools::api::FenceSpec;
+use crate::kernel::api::FenceSpec;
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int};
 use std::path::Path;
 
-/// 稳定标记：本机 seatbelt 机制有效（自检已过），但我们生成的 profile 被 sandbox_init 拒绝。
-/// 与「本机该私有 ABI 失效」是两回事——前者是 profile 写错（非法操作名/语法/转义），
-/// 探针据此响亮失败；后者才是环境结论，探针如实跳过。
+/// 目的：稳定标记：本机 seatbelt 机制有效（自检已过），但我们生成的 profile 被 sandbox_init 拒绝。
+///   与「本机该私有 ABI 失效」是两回事——前者是 profile 写错（非法操作名/语法/转义），
+///   探针据此响亮失败；后者才是环境结论，探针如实跳过。
 pub const PROFILE_REJECTED_MARK: &str = "seatbelt profile 被拒绝";
 
 extern "C" {
@@ -104,8 +103,8 @@ fn seatbelt_confines_probe() -> bool {
     verdict == 1
 }
 
-/// `_prepared`（外层是否已完成本机授权）与 `_home`（容器 profile 的台账落点）只有 Windows 的容器围栏用得上：
-/// macOS 的 seatbelt 在守门进程里自足，也没有容器 profile 这一步。
+/// 目的：`_prepared`（外层是否已完成本机授权）与 `_home`（容器 profile 的台账落点）只有 Windows 的容器围栏用得上：
+///   macOS 的 seatbelt 在守门进程里自足，也没有容器 profile 这一步。
 pub fn run_fenced(
     spec: &FenceSpec,
     _prepared: bool,
@@ -121,9 +120,8 @@ pub fn run_fenced(
     };
     let mut cmd = shell_command(command);
     cmd.current_dir(&spec.cwd);
-    // 孤儿防护：**不要**给工具另起进程组。守门进程自成一组（由拉起它的一侧设置），
-    // 杀那一组 = 连根杀整棵工具树——这与 Windows 的 Job Object 是同一套语义；
-    // 另起组会让工具逃出那一组，外部杀掉守门进程后它就变成孤儿（探针会抓住这种行为）。
+    // 孤儿防护：**不要**给工具另起进程组——守门进程自成一组（由拉起它的一侧设置），
+    // 杀那一组 = 连根杀整棵工具树（与 Windows 的 Job Object 同一套语义）；另起组会让工具逃出去变成孤儿。
     match cmd.status() {
         Ok(s) => match s.code() {
             Some(c) => {
@@ -148,8 +146,8 @@ pub fn run_fenced(
     }
 }
 
-/// 装围栏并**如实分类**结果：自检不过 = 本机环境结论（降级照跑）；自检过了还装不上 = 我们写错了。
-/// 探针早就按这两类分别处理（前者如实跳过、后者响亮失败），运行期在未授权时段也照这一份结论走。
+/// 目的：装围栏并**如实分类**结果：自检不过 = 本机环境结论（降级照跑）；自检过了还装不上 = 我们写错了。
+///   探针早就按这两类分别处理（前者如实跳过、后者响亮失败），运行期在未授权时段也照这一份结论走。
 pub fn verify(spec: &FenceSpec, command: &str) -> FenceVerdict {
     if !seatbelt_confines() {
         return FenceVerdict::EnvUnavailable(
@@ -215,14 +213,8 @@ fn install_profile(spec: &FenceSpec, command: &str) -> Result<(), String> {
 /// 只读范围 = 系统只读基线 + **命令里解释器的安装目录**（否则工具在围栏里起不来）；
 /// 另外给所有被放行路径的祖先目录放行"只读元数据"（路径解析要能按名穿过）。
 fn profile_text(spec: &FenceSpec, command: &str) -> String {
-    // 取舍写在这里：`file-read-metadata` 全局放行（只 stat：存在性/大小/时间戳），
-    // 因为**路径解析本身**就需要它——只给祖先目录放行不够（进程解析 /Users/... 时还要读中间符号链接项），
-    // 少了它连 shell 都起不来：工具进程会被信号 6 结束。
-    // 内容读取（file-read-data）仍然逐条放行，越界读照样拿不到内容。
-    // 与路径无关的放行：进程/加载器起来所需的全部内核操作。只有 process* + sysctl-read + mach-lookup 时，
-    // 加载器仍会 abort：工具进程被信号 6 结束、子进程一个字节都不输出；
-    // file-map-executable 必须**全局**放行——dyld 要把可执行文件与动态库 mmap 进内存，逐路径列举覆盖不全，
-    // 凡没列到的映射都直接 abort。它不构成越界读：映射仍要先拿到该路径的 file-read-data，内容读取照旧逐条放行。
+    // 取舍写在这里：`file-read-metadata` 全局放行（只 stat），因为路径解析本身需要它；内容读取（file-read-data）仍逐条放行。
+    // 另外 file-map-executable 必须全局放行——dyld 要 mmap 可执行文件与动态库，逐路径列举覆盖不全。
     let mut out = String::from(
         "(version 1)\n(deny default)\n(allow process*)\n(allow sysctl-read)\n(allow mach*)\n(allow ipc*)\n(allow signal)\n(allow system-socket)\n(allow system-fsctl)\n(allow system-info)\n(allow file-read-metadata)\n(allow file-read* (literal \"/\"))\n(allow file-map-executable)\n",
     );

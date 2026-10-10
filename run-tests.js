@@ -18,6 +18,10 @@ const EXE = IS_WIN ? "solomni.exe" : "solomni";
 const PROFILE = process.argv.includes("--release") ? "release" : "debug";
 const BIN = path.join(ROOT, "target", PROFILE, EXE);
 const PLATFORM_TARGETS = ["cross-platform", "windows", "linux", "macos"];
+// 交叉类型检查的 target 与开发环境清单**同源**（dev-tools.js，唯一真相）：setup-dev.js 按它装，这里按它查。
+// **只查不装**：装 target 是开发环境准备（node setup-dev.js），门禁不写系统工具链。
+// macOS 的 C 依赖（ring）在 Linux 上没有 Apple SDK / 交叉 C 工具链，那类失败按 env-skip 如实标注。
+const CROSS_TARGETS = require("./dev-tools.js").targets.map((t) => t.triple);
 // 默认串行（--test-threads=1）：套件里有依赖真实线程时序的用例，并行下仍会偶发
 // （见 tests/gaps.yaml 的 testing.parallel-flake）。--parallel 只在排查并发/隔离问题时用，不作门禁默认。
 const PARALLEL = process.argv.includes("--parallel");
@@ -28,6 +32,9 @@ const E2E_TIMEOUT_MS = 20 * 60 * 1000;
 const STEP_BUDGET_S = {
   "cargo build": 300,
   "T0 编译（--all-targets）": 300,
+  "T0 交叉类型检查（x86_64-pc-windows-msvc）": 600,
+  "T0 交叉类型检查（aarch64-apple-darwin）": 600,
+  "T0 交叉类型检查（x86_64-apple-darwin）": 600,
   "T0 静态检查（clippy）": 300,
   "L1 单元（--bin solomni）": 300,
   "目标 cross-platform": 300,
@@ -180,6 +187,21 @@ function sh(cmd, args, timeoutMs) {
     timedOut: timedOut,
     log: path.relative(ROOT, logFile),
   };
+}
+
+/** 已安装的交叉 target（rustup 不在或查不动 = null；门禁只查不装）。 */
+function installedTargets() {
+  const r = sh("rustup", ["target", "list", "--installed"]);
+  if (r.code !== 0) return null;
+  return r.out.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+}
+
+/** 交叉检查失败是不是"本机没有该平台的 C 工具链 / SDK"这类环境结论（只对 macOS 判定，别处一律当失败）。 */
+function crossEnvLimited(target, out) {
+  if (!target.includes("apple-darwin")) return false;
+  return /unrecognized command-line option '-arch'/.test(out)
+    || /-mmacosx-version-min/.test(out)
+    || /error occurred in cc-rs/.test(out);
 }
 
 /** 汇总 cargo 的 test result 行：一次运行可能有多条（多目标/多测试）。 */
@@ -895,7 +917,7 @@ function supplyChainCheck() {
   if (!has.length) {
     return {
       status: "env-skip",
-      detail: "cargo-audit / cargo-deny 未安装（装：cargo install --locked cargo-audit cargo-deny，落在项目内 .tools/ 或 platform/<os>/）",
+      detail: "cargo-audit / cargo-deny 未安装（装：node setup-dev.js，落在项目内 .tools/）",
       raw: null,
     };
   }
@@ -932,14 +954,14 @@ function supplyChainCheck() {
 function runCoverage() {
   if (!toolAvailable("llvm-cov")) {
     console.log("[覆盖率] env-skip：未安装 cargo-llvm-cov。");
-    console.log("  装：cargo install --locked cargo-llvm-cov；另需 rustup component add llvm-tools-preview");
+    console.log("  装：node setup-dev.js（cargo-llvm-cov + llvm-tools-preview 都落项目内）");
     process.exit(0);
   }
   // 缺 llvm-tools-preview 时 cargo-llvm-cov 会就地提示安装（非交互环境下自行往下走然后失败）：
   // 先问一句，缺就如实 env-skip，不把"没装组件"报成覆盖率失败。
   const comp = sh("rustup", ["component", "list", "--installed"]);
-  if (comp.code === 0 && !/llvm-tools-preview/.test(comp.out)) {
-    console.log("[覆盖率] env-skip：缺 llvm-tools-preview 组件（装：rustup component add llvm-tools-preview）。");
+  if (comp.code === 0 && !/llvm-tools/.test(comp.out)) {
+    console.log("[覆盖率] env-skip：缺 llvm-tools-preview 组件（装：node setup-dev.js）。");
     process.exit(0);
   }
   const outDir = path.join(ROOT, "target", "coverage");
@@ -948,7 +970,7 @@ function runCoverage() {
   const r = sh("cargo", args.concat(PARALLEL ? [] : ["--", "--test-threads=1"]));
   console.log(r.out.trim().split(/\r?\n/).slice(-40).join("\n"));
   if (r.code !== 0 && /llvm-tools|component download failed|Proceed\?/i.test(r.out)) {
-    console.log("[覆盖率] env-skip：缺 llvm-tools-preview 组件（装：rustup component add llvm-tools-preview）。");
+    console.log("[覆盖率] env-skip：缺 llvm-tools-preview 组件（装：node setup-dev.js）。");
     process.exit(0);
   }
   console.log("[覆盖率] 报告目录：" + path.relative(ROOT, outDir) + "（未覆盖不等于缺口，看过后决定补测或记 tests/gaps.yaml）");
@@ -969,6 +991,11 @@ function main() {
 function pushStep(obj) {
   steps.push(Object.assign({ ms: Date.now() - stepStart }, obj));
 }
+  // CI 前置步骤（门禁之外执行，如预编译装供应链工具）的墙钟由 workflow 经环境变量带进来，进报告，免得只能靠感觉。
+  const preinstallMs = Number(process.env.SOLOMNI_CI_PREINSTALL_MS || 0);
+  if (preinstallMs > 0) {
+    pushStep({ step: "CI 前置：供应链工具安装", status: "pass", ms: preinstallMs, detail: "在 run-tests 之前完成（CI 墙钟）", raw: null });
+  }
   let doctor = null;
   announce("cargo build");
   console.log(FENCE_LIVE
@@ -1015,7 +1042,7 @@ function pushStep(obj) {
   announce("T0 格式（fmt --check）");
   if (!toolAvailable("fmt")) {
     announceDone("env-skip", "cargo-fmt 未安装");
-    pushStep({ step: "T0 格式（fmt --check）", status: "env-skip", detail: "cargo-fmt 未安装：rustup component add rustfmt" });
+    pushStep({ step: "T0 格式（fmt --check）", status: "env-skip", detail: "cargo-fmt 未安装：node setup-dev.js" });
   } else {
     const r = sh("cargo", ["fmt", "--all", "--", "--check", "--color", "never"]);
     const files = [...fmtDeviations(r.out)];
@@ -1032,7 +1059,7 @@ function pushStep(obj) {
   announce("T0 静态检查（clippy）");
   if (!toolAvailable("clippy")) {
     announceDone("env-skip", "cargo-clippy 未安装");
-    pushStep({ step: "T0 静态检查（clippy）", status: "env-skip", detail: "cargo-clippy 未安装：rustup component add clippy" });
+    pushStep({ step: "T0 静态检查（clippy）", status: "env-skip", detail: "cargo-clippy 未安装：node setup-dev.js" });
   } else {
     // --keep-going：-D warnings 会让首个失败的单元中断调度；加上它所有目标单元都编译完，计数才可复现。
     const r = sh("cargo", ["clippy", "--all-targets", "--all-features", "--keep-going", "--color", "never", "--", "-D", "warnings"]);
@@ -1059,6 +1086,49 @@ function pushStep(obj) {
       detail: ok ? "" : "rustc 告警 " + got + " 条（cargo check 的原文见日志）",
       raw: ok ? null : check.out.slice(-1200),
     });
+  }
+
+  // ---- T0：交叉类型检查（**开发机专属**：CI 由三平台矩阵各自原生编译 --all-targets 覆盖，这里不跑） ----
+  if (process.env.CI) {
+    announce("T0 交叉类型检查");
+    announceDone("skip-platform", "CI 各平台原生编译已覆盖");
+    pushStep({
+      step: "T0 交叉类型检查",
+      status: "skip-platform",
+      detail: "CI：三平台矩阵各自原生 cargo check --all-targets 已覆盖本平台；交叉检查是开发机补齐它平台的手段，这里不跑",
+    });
+  } else {
+    const installed = installedTargets();
+    for (const target of CROSS_TARGETS) {
+      const label = "T0 交叉类型检查（" + target + "）";
+      announce(label);
+      if (!installed || !installed.includes(target)) {
+        announceDone("env-skip", "未安装该 target");
+        pushStep({ step: label, status: "env-skip", detail: "未安装 " + target + "：rustup target add " + target });
+        continue;
+      }
+      // --all-targets：平台专属的**测试代码**本机也不编译，必须一起查（CI 就是在 Windows 上这样红的）。
+      const r = sh("cargo", ["check", "--target", target, "--all-targets", "--color", "never"]);
+      if (r.code === 0) {
+        announceDone("完成", "");
+        pushStep({ step: label, status: "pass", detail: "" });
+      } else if (crossEnvLimited(target, r.out)) {
+        announceDone("env-skip", "本机没有该平台的 C 工具链 / SDK");
+        pushStep({
+          step: label,
+          status: "env-skip",
+          detail: "本机无法交叉编译 " + target + "（缺 Apple SDK / 交叉 C 工具链）：真实检查归该平台的真机 CI",
+        });
+      } else {
+        announceDone("失败", "编译失败");
+        pushStep({
+          step: label,
+          status: "fail",
+          detail: "交叉类型检查失败（平台专属代码本机不编译）：" + (r.error || "") + " 日志：" + r.log,
+          raw: r.out.slice(-1200),
+        });
+      }
+    }
   }
 
   announce("T0 依赖重复（cargo tree）");
