@@ -14,6 +14,7 @@ mod fakes;
 mod fence_reach;
 mod llm;
 mod mcp;
+mod modules;
 mod permission;
 mod ports;
 mod prelude;

@@ -82,6 +82,9 @@ pub struct ModuleManifest {
     pub id: String,
     pub brief: String,
     pub system: String,
+    /// 目的：作者默认的模块启用状态（缺省 true；用户覆盖落 `.home/modules.yaml`）。
+    #[serde(default = "default_true")]
+    pub enabled: bool,
     /// 目的：运行能力声明：本模块的工具需要哪些运行包能力（如 python / node / bash / c-c++）。
     ///   只声明能力名，不写版本——版本由用户在会话的执行档位里定（见 capabilities/workspace/domain/exec.rs 与 RUNTIME_SPEC.md）。
     #[serde(default)]
@@ -251,4 +254,9 @@ pub fn listing(roster: &Roster, texts: &crate::capabilities::prompt::api::ToolTe
         })
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+/// 目的：布尔字段的作者默认（缺省 true）。
+fn default_true() -> bool {
+    true
 }

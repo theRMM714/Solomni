@@ -253,6 +253,21 @@ impl Conductor {
         }
     }
 
+    /// 目的：模块的**有效**启用（用户覆盖 ?? 作者默认）。
+    pub fn module_enabled(&self, id: &str) -> bool {
+        self.modules.module_enabled(id)
+    }
+
+    /// 目的：服务的**有效**启用（模块停用 ⇒ false）。
+    pub fn service_enabled(&self, module: &str, service: &str) -> bool {
+        self.modules.service_enabled(module, service)
+    }
+
+    /// 目的：模块能力面（手柄与核心共享同一份；启停写面经它）。
+    pub(crate) fn modules_handle(&self) -> Arc<dyn Modules + Send + Sync> {
+        Arc::clone(&self.modules)
+    }
+
     /// 目的：常驻服务面（手柄与核心共享同一份；动作与会话回收经它）。
     pub(crate) fn residents_handle(
         &self,

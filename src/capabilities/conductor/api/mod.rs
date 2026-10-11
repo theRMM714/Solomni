@@ -289,6 +289,8 @@ pub struct ConductorHandle {
     residents: Arc<dyn crate::capabilities::residents::api::ResidentOps + Send + Sync>,
     /// 隐秘字段面（与核心共享同一份）：SecretOps 由它转发。
     secrets: Arc<dyn crate::capabilities::secrets::api::SecretOps + Send + Sync>,
+    /// 模块公地能力面（与核心共享同一份）：模块事实与启停写面由它转发。
+    modules: Arc<dyn crate::capabilities::modules::api::Modules + Send + Sync>,
 }
 
 /// 一次"要一个成员回合"的请求：泵在工作线程上让出，回头找主线程驱动（它才拿得到各 agent 的会话）。

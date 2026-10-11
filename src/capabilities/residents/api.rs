@@ -68,7 +68,10 @@ pub trait ResidentOps: Send + Sync {
     fn services(&self) -> Result<Vec<ServiceView>, String>;
     fn start(&self, module: &str, name: &str, lease: &str) -> Result<Vec<Operation>, String>;
     fn stop(&self, module: &str, name: &str) -> Result<(), String>;
-    fn set_enabled(&self, module: &str, name: &str, enabled: bool) -> Result<(), String>;
+    /// 目的：按有效启停把应开的服务都拉起（产品启动时调一次）；返回如实的结果行；默认空实现。
+    fn start_enabled(&self) -> Vec<String> {
+        Vec::new()
+    }
     fn call(
         &self,
         module: &str,
@@ -91,9 +94,6 @@ impl ResidentOps for NoResidents {
         Err(format!("没有配置任何常驻服务：{}/{}", module, name))
     }
     fn stop(&self, _module: &str, _name: &str) -> Result<(), String> {
-        Ok(())
-    }
-    fn set_enabled(&self, _module: &str, _name: &str, _enabled: bool) -> Result<(), String> {
         Ok(())
     }
     fn call(

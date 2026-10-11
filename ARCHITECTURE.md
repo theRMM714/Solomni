@@ -41,6 +41,7 @@ presentation/{cli,web} ──▶ capabilities（含协调业务 conductor）─�
 | `ModelCatalog` | 按端点与密钥列出一条通道当前可用的模型名 | `HttpModelCatalog` |
 | `SettingsStore` | 登记处持久化（providers / models / settings / agents 四个 yaml） | `YamlSettingsStore` |
 | `ModuleSource` | 模块清单来源（扫描 `modules/`） | `modules/detail::FsModules` |
+| `ModuleStateStore` | 模块与服务的启停覆盖落盘（`.home/modules.yaml`） | `modules/detail::YamlModuleState` |
 | `PackageSource` | 运行包库来源（扫描依赖文件夹 `runtimes/`） | `workspace/detail::FsPackages` |
 | `Workdirs` | 一次工作的共享区、各 agent 沙箱、版本库目录、文件清单、用量与寻址根 | `FsWorkspace` |
 | `WorkStore` | 共享区版本库的落盘：文件原语 + 内容寻址对象 + 提交记录 + 每个 agent 的拉取基线（并拒绝符号链接逃逸） | `FsWorkStore` |

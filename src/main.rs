@@ -206,10 +206,20 @@ fn main() {
     let toolexec: Arc<dyn capabilities::tools::api::ToolExec + Send + Sync> = tools_svc.clone();
     let systools: Arc<dyn capabilities::tools::api::Tools + Send + Sync> = tools_svc;
 
-    // **模块能力**：清单来源（扫描 modules/）只由它的 service 持有（R12）；它是模块事实的唯一上游。
-    let modules: Arc<dyn capabilities::modules::api::Modules + Send + Sync> = Arc::new(
-        capabilities::modules::service::ModulesService::new(Arc::new(source)),
-    );
+    // **模块能力**：清单来源与启停覆盖落盘只由它的 service 持有（R12）；它是模块事实的唯一上游。
+    let module_state =
+        capabilities::modules::detail::YamlModuleState::new(home.join("modules.yaml"));
+    let modules: Arc<dyn capabilities::modules::api::Modules + Send + Sync> =
+        match capabilities::modules::service::ModulesService::new(
+            Arc::new(source),
+            Arc::new(module_state),
+        ) {
+            Ok(m) => Arc::new(m),
+            Err(e) => {
+                eprintln!("[装配失败] {}", e);
+                std::process::exit(1);
+            }
+        };
 
     // **工作区能力**：运行包库 / 目录布局 / 版本库三个出站端口只由它的 service 持有（R12）。
     let workspace: Arc<dyn capabilities::workspace::api::Workspace + Send + Sync> =
@@ -234,7 +244,7 @@ fn main() {
             }
         };
 
-    // **常驻服务能力**：真实协议适配器（MCP stdio 走守门进程的长驻会话）+ 工作区清单来源 + 隐秘字段面。
+    // **常驻服务能力**：真实协议适配器（MCP stdio 走守门进程的长驻会话）+ 模块能力面 + 隐秘字段面。
     let residents: Arc<dyn capabilities::residents::api::ResidentOps + Send + Sync> =
         Arc::new(capabilities::residents::service::ResidentsService::new(
             vec![Arc::new(capabilities::residents::detail::McpAdapter::new(
@@ -253,6 +263,8 @@ fn main() {
             Arc::clone(&secrets),
         ));
 
+    // 启动时要按有效启停拉起常驻服务：留一份手柄（进程级租约，不属于任何会话）。
+    let residents_boot = Arc::clone(&residents);
     let mut conductor = capabilities::conductor::service::Conductor::new(
         Box::new(registry),
         Arc::new(capabilities::session::service::SessionService::new(
@@ -400,6 +412,11 @@ fn main() {
         }
     };
     let ops = capabilities::conductor::api::Ops::from_handle(&handle);
+
+    // 启动拉起：把所有**已启用**的常驻服务拉起来（进程级租约，不属于任何会话）。
+    for line in residents_boot.start_enabled() {
+        log.info("main::residents", &line);
+    }
 
     // 工具级确认要有地方被作答：网页有裁决卡，CLI 在生成中就地按选项答——两边都接上了。
     handle.allow_tool_cards();

@@ -448,12 +448,19 @@ tools:
   control_resident:
     capability: none              # 不碰文件：改的是常驻服务的生命周期
     callers: [user]               # 产品级资源，只给人用；agent 通过工具面使用已启动的实例
-    desc: 控制一个常驻服务的生命周期：start（拉起并发现操作）/ stop / enable / disable。服务清单是独立只读视图。
+    desc: 控制一个常驻服务的生命周期：start（拉起并发现操作）/ stop / enable（落盘启用并立即拉起）/ disable（立即停掉并落盘停用）。服务清单是独立只读视图。
     params:
       module: { type: string, required: true, non_empty: true, desc: 模块 id }
       name: { type: string, required: true, non_empty: true, desc: 服务名 }
       action: { type: string, required: true, non_empty: true, desc: start / stop / enable / disable }
       lease: { type: string, desc: 本次实例的会话租约；省略 = 无会话（进程级） }
+  set_module_enabled:
+    capability: none              # 不碰文件：改的是模块启停（落 .home/modules.yaml）
+    callers: [user]               # 产品级资源，只给人用
+    desc: 启用 / 停用整个模块（落 .home/modules.yaml）。停用 = 它的常驻服务立即停掉、后续选择不再出现它；已在跑的会话保留它已建好的工具面。
+    params:
+      module: { type: string, required: true, non_empty: true, desc: 模块 id }
+      enabled: { type: boolean, required: true, desc: true 启用 / false 停用 }
   send_message:
     capability: none
     callers: [user]

@@ -451,6 +451,11 @@ fn state_json(ops: &Ops, fence: &FenceInfo) -> Result<serde_json::Value, String>
         "modules": roster.modules.iter().map(|m| json!({
             "id": m.manifest.id,
             "brief": m.manifest.brief,
+            "enabled": ops.modules.module_enabled(&m.manifest.id).unwrap_or(false),
+            "services": m.manifest.services.keys().map(|n| json!({
+                "name": n,
+                "enabled": ops.modules.service_enabled(&m.manifest.id, n).unwrap_or(false),
+            })).collect::<Vec<_>>(),
         })).collect::<Vec<_>>(),
         "rejected": roster.rejected,
         // 本机工具围栏的实际能力（如实显示，不假装）：哪些维度真的被强制了。

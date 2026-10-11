@@ -39,6 +39,83 @@ fn svc(modules: Vec<Module>) -> (ResidentsService, Arc<FakeServiceAdapter>) {
     (service, fake)
 }
 
+/// 启动拉起：只拉起**有效启用**的服务（作者默认停用的不拉）。
+#[test]
+fn start_enabled_only_launches_services_that_are_on() {
+    let (on, _fake_on) = svc(vec![module_with_service("m1", "fake", true)]);
+    let lines = on.start_enabled();
+    assert_eq!(lines.len(), 1, "启用的服务要拉起：{:?}", lines);
+    assert!(lines[0].contains("已拉起"), "拉起要如实报告：{:?}", lines);
+
+    let (off, _fake_off) = svc(vec![module_with_service("m1", "fake", false)]);
+    assert!(off.start_enabled().is_empty(), "作者默认停用的服务不拉起");
+}
+
+/// control_resident 的 enable / disable 与 set_module_enabled 都落盘到 modules（启停归它）。
+#[test]
+fn enable_disable_and_module_toggle_persist_to_modules() {
+    use crate::capabilities::conductor::api::{ActionCall, Caller, ConductorHandle, Ops, Output};
+
+    let fake = Arc::new(FakeServiceAdapter::new());
+    let modules = vec![module_with_service("m1", "fake", true)];
+    let residents: Arc<dyn ResidentOps + Send + Sync> = Arc::new(ResidentsService::new(
+        vec![Arc::clone(&fake) as Arc<dyn ServiceAdapter + Send + Sync>],
+        test_modules(Arc::new(VecSource(modules.clone()))),
+        Arc::new(crate::capabilities::secrets::api::NoSecrets),
+    ));
+    let gateway = crate::tests::doubles::gw(BTreeMap::new(), Vec::new());
+    let handle = ConductorHandle::spawn(crate::tests::doubles::core_with_services(
+        modules,
+        gateway,
+        Arc::new(crate::tests::builders::SilentRunner),
+        residents,
+        Arc::new(crate::capabilities::secrets::api::NoSecrets),
+    ))
+    .expect("起核心线程");
+    let ops: Ops = crate::capabilities::conductor::api::Ops::from_handle(&handle);
+    let call = |id: &str, args: serde_json::Value| ActionCall {
+        id: id.to_string(),
+        args,
+        caller: Caller::User,
+        out: Output::Final,
+    };
+
+    ops.actions
+        .act(call(
+            "control_resident",
+            serde_json::json!({ "module": "m1", "name": "svc", "action": "disable" }),
+        ))
+        .expect("停用服务");
+    assert!(
+        !ops.modules.service_enabled("m1", "svc").expect("读服务"),
+        "disable 要落盘"
+    );
+    ops.actions
+        .act(call(
+            "control_resident",
+            serde_json::json!({ "module": "m1", "name": "svc", "action": "enable" }),
+        ))
+        .expect("启用服务");
+    assert!(
+        ops.modules.service_enabled("m1", "svc").expect("读服务"),
+        "enable 要落盘"
+    );
+    ops.actions
+        .act(call(
+            "set_module_enabled",
+            serde_json::json!({ "module": "m1", "enabled": false }),
+        ))
+        .expect("停用模块");
+    assert!(
+        !ops.modules.module_enabled("m1").expect("读模块"),
+        "模块停用要落盘"
+    );
+    assert!(
+        !ops.modules.service_enabled("m1", "svc").expect("读服务"),
+        "模块停用 ⇒ 服务有效停用"
+    );
+}
+
 /// 发现 → 启动 → 调用 → 租约回收；回执与状态如实。
 #[test]
 fn residents_start_call_stop_and_reap() {
@@ -80,7 +157,7 @@ fn residents_disabled_service_does_not_start() {
         ServiceState::Disabled
     );
     let err = service.start("m1", "svc", "").unwrap_err();
-    assert!(err.contains("禁用"), "{}", err);
+    assert!(err.contains("未启用"), "{}", err);
 }
 
 /// 未知适配器：列表如实标注并列出可用项；启动被拒。

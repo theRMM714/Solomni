@@ -12,7 +12,8 @@
 
 ## 二、入站契约与状态归属
 
-`api::ModulesOps`（只读面：清单事实，呈现层与消费方用）+ `api::Modules`（用例面）。出站端口 `ModuleSource` **只由 `service.rs` 持有**（R12）。
+`api::ModulesOps`（只读面：`roster` / `module_enabled` / `service_enabled`）+ `api::Modules`（用例面：再加 `set_module_enabled` / `set_service_enabled`）。出站端口 `ModuleSource` 与 `ModuleStateStore` **只由 `service.rs` 持有**（R12）。
+启停语义：有效值 = 用户覆盖（`.home/modules.yaml`）?? 作者默认（`module.yaml` 顶层 `enabled` 与 `services.<名>.enabled`）；**模块停用 ⇒ 它的服务一律有效地停用**。
 契约类型（`Module` / `ModuleManifest` / `Roster` / `ToolDecl` / `ServiceDecl` / `SecretDecl` / `Param` / `ParamType`）由本能力拥有，其它能力只经 `api` 引用。
 
 ## 三、依赖图位置（由源码的 `::api` 引用推导）
@@ -23,7 +24,7 @@
 ## 四、改动本单元时必须同步
 
 - `module.yaml` 契约 → [MODULE_SPEC.md](../../MODULE_SPEC.md)；`Param` / `ParamType` 被 `tools` 的 `ToolSchema` 消费。
-- 清单扫描 / 校验用例：`src/tests/workspace.rs`（模块部分）、`src/tests/detail.rs`。
+- 清单扫描 / 校验用例：`src/tests/modules.rs`；扫描适配器的契约在 `src/tests/detail.rs`。
 - 端口矩阵（`ModuleSource`）→ [docs/testing/doubles.md](../testing/doubles.md) 三。
 
 ## 本目录

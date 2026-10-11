@@ -6,14 +6,14 @@
 
 ## 一、管什么 / 不管什么
 
-**管**：常驻服务的注册表与生命周期（启停、开关、租约回收）、操作发现与调用的统一入口（`api::ResidentOps`）、协议适配器端口（`ports::ServiceAdapter`）。
+**管**：常驻服务的注册表与运行态（启动 / 停止、崩溃检测、租约回收）、操作发现与调用的统一入口（`api::ResidentOps`）、协议适配器端口（`ports::ServiceAdapter`）。
 
-**不管**：任何具体协议（MCP / ACP 全在适配器实现里，只由组合根构造）；进程与围栏机制（在 kernel）；开关落盘（随设置面接入）；模块声明的解析（在 `workspace`）。
+**不管**：任何具体协议（MCP / ACP 全在适配器实现里，只由组合根构造）；进程与围栏机制（在 kernel）；**启停有效值与落盘（归 `modules`）**；模块声明与契约（在 `modules`）。
 
 ## 二、入站契约与状态归属
 
 `api`（`ResidentOps` + `ServiceView` / `Operation` / `ServiceState` / `Receipt` + 空实现 `NoResidents`）；出站端口 `ServiceAdapter` **只由 `service.rs` 持有**（R12）。
-状态在 `service.rs`：运行中的实例（key = 模块/服务）、**失败态**（起过但进程已结束 → `Failed`，带如实原因与租约）与用户开关；会话租约用于回收（`reap`）。
+状态在 `service.rs`：运行中的实例（key = 模块/服务）、**失败态**（起过但进程已结束 → `Failed`，带如实原因与租约）；会话租约用于回收（`reap`）。启停的**有效值**由 `modules` 给（用户覆盖 ?? 作者默认；模块停用 ⇒ 它的服务停用），启动前先查它。
 **崩溃检测**：适配器按连接事实回答 `ServiceInstance::is_alive`；进程一结束，`call` 如实标 `Failed` 并从运行态摘除，后续调用如实报"没在跑"。
 **操作清单变化**：服务报告 `notifications/tools/list_changed` 时适配器交回新清单（`take_refreshed_operations`），运行态就地刷新，下一次装配的工具面随之反映。
 **可见面**：就绪服务的操作进动作目录（`GET /api/actions` 对 user 可见）与模型工具面（原生声明 + 信封清单）；CLI `resident list|start|stop|enable|disable|call` 是同一批动作的终端入口。

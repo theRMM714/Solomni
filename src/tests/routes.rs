@@ -438,6 +438,14 @@ impl ModulesOps for FakeOps {
             rejected: Vec::new(),
         })
     }
+    fn module_enabled(&self, _id: &str) -> Result<bool, String> {
+        self.guard()?;
+        Ok(false)
+    }
+    fn service_enabled(&self, _module: &str, _service: &str) -> Result<bool, String> {
+        self.guard()?;
+        Ok(false)
+    }
 }
 
 impl ConductorOps for FakeOps {

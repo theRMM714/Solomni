@@ -1020,6 +1020,7 @@ pub(crate) fn module_of(id: &str) -> Module {
             id: id.to_string(),
             brief: format!("{} 的简介", id),
             system: format!("你负责{}", id),
+            enabled: true,
             runtimes: Vec::new(),
             tools: BTreeMap::new(),
             services: Default::default(),
@@ -1344,17 +1345,54 @@ pub(crate) fn test_workspace_store(
     Arc::new(crate::capabilities::workspace::service::WorkspaceService::new(packages, dirs, store))
 }
 
-/// 目的：测试用的**模块能力面**——把清单来源装进 `ModulesService`（与生产同一条路，R12）。
+/// 目的：模块启停覆盖的内存存储（测试用；与 yaml 实现同一条端口）。
+#[derive(Default)]
+pub(crate) struct InMemoryModuleState {
+    state: Mutex<crate::capabilities::modules::domain::state::EnabledState>,
+}
+
+impl InMemoryModuleState {
+    /// 目的：空覆盖起步。
+    pub(crate) fn new() -> InMemoryModuleState {
+        InMemoryModuleState {
+            state: Mutex::new(Default::default()),
+        }
+    }
+}
+
+impl crate::capabilities::modules::ports::ModuleStateStore for InMemoryModuleState {
+    fn load(&self) -> Result<crate::capabilities::modules::domain::state::EnabledState, String> {
+        Ok(self.state.lock().expect("锁").clone())
+    }
+    fn save(
+        &self,
+        state: &crate::capabilities::modules::domain::state::EnabledState,
+    ) -> Result<(), String> {
+        *self.state.lock().expect("锁") = state.clone();
+        Ok(())
+    }
+}
+
+/// 目的：测试用的**模块能力面**——把清单来源与覆盖存储装进 `ModulesService`（与生产同一条路，R12）。
 pub(crate) fn test_modules(
     source: Arc<dyn ModuleSource + Send + Sync>,
 ) -> Arc<dyn crate::capabilities::modules::api::Modules + Send + Sync> {
-    Arc::new(crate::capabilities::modules::service::ModulesService::new(
-        source,
-    ))
+    test_modules_store(source, Arc::new(InMemoryModuleState::new()))
+}
+
+/// 目的：测试用的模块能力面（指定覆盖存储；断言落盘/有效值的用例用它）。
+pub(crate) fn test_modules_store(
+    source: Arc<dyn ModuleSource + Send + Sync>,
+    store: Arc<dyn crate::capabilities::modules::ports::ModuleStateStore + Send + Sync>,
+) -> Arc<dyn crate::capabilities::modules::api::Modules + Send + Sync> {
+    Arc::new(
+        crate::capabilities::modules::service::ModulesService::new(source, store)
+            .expect("装模块能力"),
+    )
 }
 
 /// 登记一个 agent（测试装配用）：**校验用的模块清单由调用方取一份**交给登记处——
-/// 清单归 workspace，登记处只认事实（见 ARCHITECTURE.md §九.3）。
+/// 清单归 modules，登记处只认事实（见 ARCHITECTURE.md §九.3）。
 pub(crate) fn agent_upsert(
     core: &mut Conductor,
     name: &str,

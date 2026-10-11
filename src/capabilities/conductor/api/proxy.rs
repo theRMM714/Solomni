@@ -319,6 +319,15 @@ impl crate::capabilities::modules::api::ModulesOps for ConductorHandle {
     fn roster(&self) -> Result<Roster, String> {
         self.call(|core| Ok(core.scan()))
     }
+    fn module_enabled(&self, id: &str) -> Result<bool, String> {
+        let id = id.to_string();
+        self.call(move |core| Ok(core.module_enabled(&id)))
+    }
+    fn service_enabled(&self, module: &str, service: &str) -> Result<bool, String> {
+        let module = module.to_string();
+        let service = service.to_string();
+        self.call(move |core| Ok(core.service_enabled(&module, &service)))
+    }
 }
 
 impl ConductorOps for ConductorHandle {
