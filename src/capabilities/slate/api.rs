@@ -1,11 +1,11 @@
 //! 入站能力面：**其它能力只准用这里**（本业务没有端口、也没有状态，所以只有 DTO 与用例签名）。
 
 use crate::capabilities::llm::api::{Chat, CompleteOpts, ToolMode};
+use crate::capabilities::modules::api::Roster;
 use crate::capabilities::prompt::api::Prompt;
 use crate::capabilities::registry::api::{Agents, ModelEntry};
 use crate::capabilities::session::api::{AgentMeta, MemberTools, SessionEvent};
 use crate::capabilities::tools::api::Tools;
-use crate::capabilities::workspace::api::Roster;
 use std::collections::BTreeMap;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;

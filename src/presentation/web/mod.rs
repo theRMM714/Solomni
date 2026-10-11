@@ -437,7 +437,7 @@ pub fn parse_mode(s: &str) -> Result<WorkMode, String> {
 
 /// 概览状态：模块清单 + 供应商/模型视图 + 核心默认 + 进行中会话（均无密钥）。
 fn state_json(ops: &Ops, fence: &FenceInfo) -> Result<serde_json::Value, String> {
-    let roster = ops.workspace.roster()?;
+    let roster = ops.modules.roster()?;
     // 会话形态取落盘 meta（单一真相）：只读一次盘，sessions 与 history 共用。
     let history = ops.history.list()?;
     // 会话快照带上"当前等用户裁决的那张卡"：它由核心的裁决队给（与推的 decision_card 同一份事实）。

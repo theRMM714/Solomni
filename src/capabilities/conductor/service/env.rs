@@ -19,7 +19,7 @@ impl Conductor {
     pub(crate) fn sandboxes(
         &self,
         meta: &SessionMeta,
-        roster: &crate::capabilities::workspace::api::Roster,
+        roster: &crate::capabilities::modules::api::Roster,
     ) -> Result<crate::capabilities::workspace::api::Sandboxes, String> {
         let names: Vec<String> = meta.agents.iter().map(|a| a.name.clone()).collect();
         // 沙箱锚在**顶层工作**上：整棵树不论嵌套多少层只有一个 work/（见 Conductor::work_root）。

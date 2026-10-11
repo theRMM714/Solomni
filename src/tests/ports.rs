@@ -11,6 +11,7 @@ use super::doubles::{
 };
 use crate::capabilities::llm::api::{Chat, CompleteOpts, Msg};
 use crate::capabilities::llm::ports::{ChatGateway, ModelCatalog};
+use crate::capabilities::modules::ports::ModuleSource;
 use crate::capabilities::prompt::ports::PromptSource;
 use crate::capabilities::registry::api::{Provider, Settings};
 use crate::capabilities::registry::ports::SettingsStore;
@@ -18,7 +19,7 @@ use crate::capabilities::session::api::{AgentMeta, SessionMeta};
 use crate::capabilities::session::ports::HistoryStore;
 use crate::capabilities::tools::ports::SysIo;
 use crate::capabilities::workspace::api::ExecSpec;
-use crate::capabilities::workspace::ports::{ModuleSource, PackageSource, Workdirs};
+use crate::capabilities::workspace::ports::{PackageSource, Workdirs};
 use crate::kernel::api::FenceSpec;
 use crate::kernel::ports::{FenceHost, ProcessRunner};
 use crate::kernel::ports::{Log, NoopLog};

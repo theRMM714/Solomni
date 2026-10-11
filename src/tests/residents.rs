@@ -3,13 +3,11 @@
 //! 不管：真实协议与进程（随 MCP/ACP 适配器接入）；模块声明解析（workspace 的用例）。
 //! 联动：能力见 src/capabilities/residents/；替身见 src/tests/doubles.rs。
 
+use crate::capabilities::modules::api::{Module, ServiceDecl};
 use crate::capabilities::residents::api::{ResidentOps, ServiceState};
 use crate::capabilities::residents::ports::ServiceAdapter;
 use crate::capabilities::residents::service::ResidentsService;
-use crate::capabilities::workspace::api::{Module, ServiceDecl};
-use crate::tests::doubles::{
-    module_of, test_workspace, FakeServiceAdapter, InMemoryPackages, InMemoryWorkspace, VecSource,
-};
+use crate::tests::doubles::{module_of, test_modules, FakeServiceAdapter, VecSource};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -32,11 +30,7 @@ fn module_with_service(id: &str, adapter: &str, enabled: bool) -> Module {
 /// 装好假适配器的常驻服务能力（清单来自真 WorkspaceService + 内存端口）。
 fn svc(modules: Vec<Module>) -> (ResidentsService, Arc<FakeServiceAdapter>) {
     let fake = Arc::new(FakeServiceAdapter::new());
-    let workspace = test_workspace(
-        Arc::new(VecSource(modules)),
-        Arc::new(InMemoryPackages::empty()),
-        Arc::new(InMemoryWorkspace::new()),
-    );
+    let workspace = test_modules(Arc::new(VecSource(modules)));
     let service = ResidentsService::new(
         vec![Arc::clone(&fake) as Arc<dyn ServiceAdapter + Send + Sync>],
         workspace,
@@ -106,10 +100,10 @@ fn residents_unknown_adapter_is_reported_with_available_names() {
 /// 起服务时注入该模块的隐秘字段（env），回执按已知值脱敏。
 #[test]
 fn residents_inject_module_secrets_and_redact_receipts() {
+    use crate::capabilities::modules::api::SecretDecl;
     use crate::capabilities::secrets::api::SecretOps;
     use crate::capabilities::secrets::ports::SecretStore;
     use crate::capabilities::secrets::service::SecretsService;
-    use crate::capabilities::workspace::api::SecretDecl;
     use crate::tests::doubles::InMemorySecretStore;
 
     let mut modules = vec![module_with_service("m1", "fake", true)];
@@ -121,11 +115,7 @@ fn residents_inject_module_secrets_and_redact_receipts() {
         },
     );
     let fake = Arc::new(FakeServiceAdapter::new());
-    let workspace = test_workspace(
-        Arc::new(VecSource(modules)),
-        Arc::new(InMemoryPackages::empty()),
-        Arc::new(InMemoryWorkspace::new()),
-    );
+    let workspace = test_modules(Arc::new(VecSource(modules)));
     let secrets = Arc::new(
         SecretsService::new(
             Arc::clone(&workspace),
@@ -163,11 +153,9 @@ fn residents_inject_module_secrets_and_redact_receipts() {
 fn residents_mark_failed_when_service_process_dies() {
     use crate::tests::doubles::DyingServiceAdapter;
 
-    let workspace = test_workspace(
-        Arc::new(VecSource(vec![module_with_service("m1", "dying", true)])),
-        Arc::new(InMemoryPackages::empty()),
-        Arc::new(InMemoryWorkspace::new()),
-    );
+    let workspace = test_modules(Arc::new(VecSource(vec![module_with_service(
+        "m1", "dying", true,
+    )])));
     let service = ResidentsService::new(
         vec![Arc::new(DyingServiceAdapter) as Arc<dyn ServiceAdapter + Send + Sync>],
         workspace,
@@ -214,11 +202,7 @@ fn control_resident_action_starts_and_stops() {
 
     let fake = Arc::new(FakeServiceAdapter::new());
     let modules = vec![module_with_service("m1", "fake", true)];
-    let workspace = test_workspace(
-        Arc::new(VecSource(modules.clone())),
-        Arc::new(InMemoryPackages::empty()),
-        Arc::new(InMemoryWorkspace::new()),
-    );
+    let workspace = test_modules(Arc::new(VecSource(modules.clone())));
     let residents: Arc<dyn ResidentOps + Send + Sync> = Arc::new(ResidentsService::new(
         vec![Arc::clone(&fake) as Arc<dyn ServiceAdapter + Send + Sync>],
         workspace,
@@ -258,11 +242,7 @@ fn service_operations_are_module_actions() {
 
     let fake = Arc::new(FakeServiceAdapter::new());
     let modules = vec![module_with_service("m1", "fake", true)];
-    let workspace = test_workspace(
-        Arc::new(VecSource(modules.clone())),
-        Arc::new(InMemoryPackages::empty()),
-        Arc::new(InMemoryWorkspace::new()),
-    );
+    let workspace = test_modules(Arc::new(VecSource(modules.clone())));
     let residents: Arc<dyn ResidentOps + Send + Sync> = Arc::new(ResidentsService::new(
         vec![Arc::clone(&fake) as Arc<dyn ServiceAdapter + Send + Sync>],
         workspace,
@@ -323,11 +303,7 @@ fn action_catalog_lists_ready_service_operations() {
 
     let fake = Arc::new(FakeServiceAdapter::new());
     let modules = vec![module_with_service("m1", "fake", true)];
-    let workspace = test_workspace(
-        Arc::new(VecSource(modules.clone())),
-        Arc::new(InMemoryPackages::empty()),
-        Arc::new(InMemoryWorkspace::new()),
-    );
+    let workspace = test_modules(Arc::new(VecSource(modules.clone())));
     let residents: Arc<dyn ResidentOps + Send + Sync> = Arc::new(ResidentsService::new(
         vec![Arc::clone(&fake) as Arc<dyn ServiceAdapter + Send + Sync>],
         workspace,

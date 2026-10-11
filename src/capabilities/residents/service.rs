@@ -4,12 +4,12 @@
 //!   开关的落盘（随设置面接入，当前在内存、缺省取声明里的 enabled）。
 //! 联动：api 见 `api.rs`，端口见 `ports.rs`；由 `main.rs` 装配。
 
+use crate::capabilities::modules::api::{Module, Modules, Roster, ServiceDecl};
 use crate::capabilities::residents::api::{
     Operation, Receipt, ResidentOps, ServiceState, ServiceView,
 };
 use crate::capabilities::residents::ports::{LaunchSpec, ServiceAdapter, ServiceInstance};
 use crate::capabilities::secrets::api::SecretOps;
-use crate::capabilities::workspace::api::{Module, Roster, ServiceDecl, Workspace};
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
@@ -29,7 +29,7 @@ struct Running {
 /// 目的：常驻服务能力——持适配器注册表与运行态，按统一 API 答话。
 pub struct ResidentsService {
     adapters: BTreeMap<String, Arc<dyn ServiceAdapter + Send + Sync>>,
-    workspace: Arc<dyn Workspace + Send + Sync>,
+    modules: Arc<dyn Modules + Send + Sync>,
     /// 隐秘字段面：起服务时解析注入项，回执出口按已知值脱敏。
     secrets: Arc<dyn SecretOps + Send + Sync>,
     /// 用户开关（缺省取声明里的 enabled）；落盘随设置面接入。
@@ -45,7 +45,7 @@ impl ResidentsService {
     /// 目的：组合根专用——注入适配器注册表与工作区用例面（只用来取模块清单）。
     pub fn new(
         adapters: Vec<Arc<dyn ServiceAdapter + Send + Sync>>,
-        workspace: Arc<dyn Workspace + Send + Sync>,
+        modules: Arc<dyn Modules + Send + Sync>,
         secrets: Arc<dyn SecretOps + Send + Sync>,
     ) -> ResidentsService {
         let mut map = BTreeMap::new();
@@ -54,7 +54,7 @@ impl ResidentsService {
         }
         ResidentsService {
             adapters: map,
-            workspace,
+            modules,
             secrets,
             enabled: Mutex::new(BTreeMap::new()),
             running: Mutex::new(BTreeMap::new()),
@@ -94,7 +94,7 @@ impl ResidentsService {
 
 impl ResidentOps for ResidentsService {
     fn services(&self) -> Result<Vec<ServiceView>, String> {
-        let roster = self.workspace.roster();
+        let roster = self.modules.roster();
         let running = self.running.lock().expect("锁");
         let mut out = Vec::new();
         for m in &roster.modules {
@@ -133,7 +133,7 @@ impl ResidentOps for ResidentsService {
     }
 
     fn start(&self, module: &str, name: &str, lease: &str) -> Result<Vec<Operation>, String> {
-        let roster = self.workspace.roster();
+        let roster = self.modules.roster();
         let (m, decl) = Self::locate(&roster, module, name)?;
         let k = key(module, name);
         if !self.is_enabled(&k, decl.enabled) {
@@ -192,7 +192,7 @@ impl ResidentOps for ResidentsService {
     }
 
     fn set_enabled(&self, module: &str, name: &str, enabled: bool) -> Result<(), String> {
-        let roster = self.workspace.roster();
+        let roster = self.modules.roster();
         Self::locate(&roster, module, name)?;
         let k = key(module, name);
         self.enabled.lock().expect("锁").insert(k, enabled);

@@ -43,7 +43,7 @@ pub(crate) fn scratch(name: &str) -> std::path::PathBuf {
 /// 起一个内存装配的核心手柄并把能力面拆成 `Ops`（契约测试共用）。
 /// 返回手柄是为了能观察事件台与测试注入；只用能力面的用例可以忽略它。
 pub(crate) fn ops_with(
-    modules: Vec<crate::capabilities::workspace::api::Module>,
+    modules: Vec<crate::capabilities::modules::api::Module>,
     core_script: Vec<&str>,
 ) -> (
     crate::capabilities::conductor::api::ConductorHandle,
@@ -249,7 +249,7 @@ impl crate::capabilities::llm::ports::ChatGateway for GatedGateway {
 
 /// 装配一个「生成阻塞到放行」的核心（观察"生成期间读接口不排队"）。
 pub(crate) fn gated_ops(
-    modules: Vec<crate::capabilities::workspace::api::Module>,
+    modules: Vec<crate::capabilities::modules::api::Module>,
 ) -> (
     crate::capabilities::conductor::api::ConductorHandle,
     crate::capabilities::conductor::api::Ops,
@@ -309,7 +309,7 @@ impl crate::capabilities::llm::ports::ChatGateway for SlowGateway {
 
 /// 装配一个「生成会一直跑到被停止」的核心（观察 is_running / stop / 编辑禁令）。
 pub(crate) fn slow_ops(
-    modules: Vec<crate::capabilities::workspace::api::Module>,
+    modules: Vec<crate::capabilities::modules::api::Module>,
 ) -> (
     crate::capabilities::conductor::api::ConductorHandle,
     crate::capabilities::conductor::api::Ops,

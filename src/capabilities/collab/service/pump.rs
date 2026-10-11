@@ -6,10 +6,10 @@
 use super::collab::*;
 use crate::capabilities::collab::service::discussion::{Discussion, Member, TurnOut, MAX_ROUNDS};
 use crate::capabilities::collab::service::synthesis::Execution;
+use crate::capabilities::modules::api::Module;
 use crate::capabilities::session::api::AgentMeta;
 use crate::capabilities::session::api::MemberTools;
 use crate::capabilities::session::api::{CheckView, LineView, Pending, SessionEvent};
-use crate::capabilities::workspace::api::Module;
 use std::sync::Arc;
 
 impl CollabSession {
@@ -437,7 +437,7 @@ impl CollabSession {
     /// 一个 agent = 一个成员：system 由它全部模块合成，工具 = 各模块外部工具的并集。
     pub(crate) fn assemble_members(&self) -> Result<(Vec<Member>, Vec<String>), String> {
         let prompts = self.prompts.clone();
-        let roster = self.workspace.roster();
+        let roster = self.modules.roster();
         let library = self.workspace.library();
         let mut members = Vec::new();
         let mut notes = Vec::new();

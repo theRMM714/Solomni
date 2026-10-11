@@ -8,7 +8,7 @@
 //! 同一份声明同时驱动两件事：模型侧说明（`render_for_prompt`）与调用校验（`check`），
 //! 所以"缺少 path / limit 不能大于 2000"这类文案不再硬编码在代码里。
 
-use crate::capabilities::workspace::api::{Param, ParamType};
+use crate::capabilities::modules::api::{Param, ParamType};
 use serde::Deserialize;
 use std::collections::BTreeMap;
 

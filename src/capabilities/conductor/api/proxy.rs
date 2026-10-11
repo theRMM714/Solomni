@@ -3,11 +3,11 @@
 //! 每个方法都是「克隆要用的东西 → 进队列执行 → 取回结果」，不做业务判断（判断在 `service/`）。
 
 use super::*;
+use crate::capabilities::modules::api::Roster;
 use crate::capabilities::registry::api::RegistryOps;
 use crate::capabilities::registry::api::{AgentView, AppSettings, ModelView, ProviderView};
 use crate::capabilities::session::api::Answered;
 use crate::capabilities::session::api::{HistoryView, RunState, SessionMeta};
-use crate::capabilities::workspace::api::Roster;
 pub use crate::kernel::api::Tier;
 use std::sync::Arc;
 
@@ -315,7 +315,7 @@ impl crate::capabilities::session::api::HistoryOps for ConductorHandle {
     }
 }
 
-impl crate::capabilities::workspace::api::WorkspaceOps for ConductorHandle {
+impl crate::capabilities::modules::api::ModulesOps for ConductorHandle {
     fn roster(&self) -> Result<Roster, String> {
         self.call(|core| Ok(core.scan()))
     }

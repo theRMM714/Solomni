@@ -23,6 +23,92 @@ pub fn keep_whole_replies(line_reply: &[u64], keep: usize) -> usize {
     keep
 }
 
+/// 目的：**身份块的系统提示**：把 `{{mechanism}}` / `{{env}}` / `{{tool_calling}}` 三件事按同一口径填进模板。
+///   模块只是能力包（没有"发言"这回事）；发言席是 agent，所以这份 system 按 agent 成文。
+///   env 由 tools 的 systool 按该 agent 的沙箱渲染后传入。
+///   **工具清单不在这里**：本回合能用哪些工具随回合注入（见 collab 的 engine::tools_block）。
+pub fn agent_system(
+    prompt: &dyn crate::capabilities::prompt::api::Prompt,
+    agent: &str,
+    modules: &[(String, String)],
+    env: &str,
+    mode: crate::capabilities::llm::api::ToolMode,
+    session_kind: &str,
+    role: &str,
+) -> String {
+    render_system(
+        prompt,
+        crate::capabilities::prompt::api::Segment::AgentSystem,
+        agent,
+        modules,
+        env,
+        mode,
+        session_kind,
+        role,
+    )
+}
+
+/// 目的：**角色身份块**（不是 agent 的核心身份）：渲染角色提示词段 + 环境 + 调用约定。
+///   代理会话（core_proxy）用它：它的身份是角色提示词（`prompts/roles/core_proxy.yaml`），
+///   不是"某个 agent 的模块能力包"；机制 / 环境 / 调用约定与 agent 身份同一份口径。
+#[allow(clippy::too_many_arguments)]
+pub fn role_system(
+    prompt: &dyn crate::capabilities::prompt::api::Prompt,
+    segment: crate::capabilities::prompt::api::Segment,
+    agent: &str,
+    env: &str,
+    mode: crate::capabilities::llm::api::ToolMode,
+    session_kind: &str,
+    role: &str,
+) -> String {
+    render_system(prompt, segment, agent, &[], env, mode, session_kind, role)
+}
+
+/// 两处身份（agent / 角色）**共用这一份装配**：模板不同，变量与取值口径完全相同——
+/// 各写一份必然漂移。
+#[allow(clippy::too_many_arguments)]
+fn render_system(
+    prompt: &dyn crate::capabilities::prompt::api::Prompt,
+    segment: crate::capabilities::prompt::api::Segment,
+    agent: &str,
+    modules: &[(String, String)],
+    env: &str,
+    mode: crate::capabilities::llm::api::ToolMode,
+    session_kind: &str,
+    role: &str,
+) -> String {
+    use crate::capabilities::prompt::api::Segment;
+    let parts = modules
+        .iter()
+        .map(|(id, system)| format!("\n== {} ==\n{}", id, system.trim()))
+        .collect::<Vec<_>>()
+        .join("");
+    // 机制说明**按（会话使用类型 × 角色）**从册子里取：对应关系是数据，这里只做匹配。
+    //（AI 不知道机制就只会写散文。）
+    let mechanism = prompt.mechanism(session_kind, role);
+    prompt.render(
+        segment,
+        &[
+            ("agent", agent.to_string()),
+            ("modules", parts),
+            ("mechanism", mechanism),
+            ("env", env.to_string()),
+            // 两套调用约定**互斥**：一个通道只用一套（同时教会让模型在正文里讲解参数而被误判成调用）
+            (
+                "tool_calling",
+                match mode {
+                    crate::capabilities::llm::api::ToolMode::Native => {
+                        prompt.text(Segment::ToolCallingNative).to_string()
+                    }
+                    crate::capabilities::llm::api::ToolMode::Envelope => {
+                        prompt.text(Segment::ToolCallingEnvelope).to_string()
+                    }
+                },
+            ),
+        ],
+    )
+}
+
 /// 会话参数：拼请求要的**前提**（身份、环境）。**不是对话**——不占对话列表的位置，
 /// 每次模型调用由驱动现渲染（见 `identity`）。
 ///
@@ -60,7 +146,7 @@ impl SessionParams {
     pub fn from_workspace(
         agent: &str,
         sb: &crate::capabilities::workspace::api::Sandbox,
-        modules: &[crate::capabilities::workspace::api::Module],
+        modules: &[crate::capabilities::modules::api::Module],
         session_kind: &str,
         role: &str,
     ) -> SessionParams {
@@ -89,7 +175,7 @@ impl SessionParams {
         let env = env_block(prompt, self);
         match self.role_system {
             // 角色身份（代理这类不是 agent 的核心）：同一份机制 / 环境 / 调用约定口径。
-            Some(seg) => crate::capabilities::workspace::api::role_system(
+            Some(seg) => role_system(
                 prompt,
                 seg,
                 &self.agent,
@@ -98,7 +184,7 @@ impl SessionParams {
                 &self.session_kind,
                 &self.role,
             ),
-            None => crate::capabilities::workspace::api::agent_system(
+            None => agent_system(
                 prompt,
                 &self.agent,
                 &self.modules,

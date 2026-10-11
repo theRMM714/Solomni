@@ -234,7 +234,7 @@ pub trait SessionOps: Send + Sync {
 /// 核心自己的用例（会话中心之外的那些）：运行报告与核心推荐。
 ///
 /// 它们留在 conductor 是因为**只有 conductor 同时拿着**清单、包库、宿主探测与各能力的面——它们是编排
-/// （§2.4 的脚本），没有独立状态，所以不配一个"能力"。清单事实本身归 `workspace::api::WorkspaceOps`。
+/// （§2.4 的脚本），没有独立状态，所以不配一个"能力"。清单事实本身归 `modules::api::ModulesOps`。
 pub trait ConductorOps: Send + Sync {
     /// 运行包与档位的运行报告（只报事实）。
     fn runtime_report(&self, tier: Tier) -> Result<RuntimeReport, String>;
@@ -321,7 +321,8 @@ pub struct Ops {
     pub core: Arc<dyn ConductorOps + Send + Sync>,
     pub registry: Arc<dyn crate::capabilities::registry::api::RegistryOps + Send + Sync>,
     pub history: Arc<dyn crate::capabilities::session::api::HistoryOps + Send + Sync>,
-    pub workspace: Arc<dyn crate::capabilities::workspace::api::WorkspaceOps + Send + Sync>,
+    /// 目的：模块公地的只读面（清单事实的上游是 `modules`）。
+    pub modules: Arc<dyn crate::capabilities::modules::api::ModulesOps + Send + Sync>,
     pub events: Arc<EventBus>,
     /// 动作能力：目录 + 分发（CLI 与 Web 共用同一份声明与同一处授权）。
     pub actions: Arc<dyn ActionOps + Send + Sync>,
@@ -341,7 +342,7 @@ impl Ops {
             core: Arc::new(h.clone()),
             registry: Arc::new(h.clone()),
             history: Arc::new(h.clone()),
-            workspace: Arc::new(h.clone()),
+            modules: Arc::new(h.clone()),
             events: h.events(),
             actions: Arc::new(h.clone()),
             log: Arc::new(h.clone()),

@@ -267,9 +267,9 @@ impl ConductorHandle {
         id: &str,
     ) -> Result<
         (
-            crate::capabilities::workspace::api::Module,
+            crate::capabilities::modules::api::Module,
             String,
-            crate::capabilities::workspace::api::ToolDecl,
+            crate::capabilities::modules::api::ToolDecl,
         ),
         String,
     > {

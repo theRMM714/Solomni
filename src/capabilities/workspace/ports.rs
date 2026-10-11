@@ -1,15 +1,9 @@
 //! 工作区与运行包的**出站端口**：目录布局与清单扫描（机制在适配层）。
 
-use crate::capabilities::workspace::domain::module::Roster;
 use crate::capabilities::workspace::domain::packages::Library;
 use crate::capabilities::workspace::domain::workspace::{WorkFiles, WorkRoots, WorkUsage};
 use crate::capabilities::workspace::domain::workstore::{Commit, Index};
 use std::path::Path;
-
-/// 模块清单来源端口。
-pub trait ModuleSource {
-    fn scan(&self) -> Roster;
-}
 
 /// 运行包库来源端口：扫描依赖文件夹（runtimes/）里的包清单。
 /// 「清单即事实」：每次调用重扫，放入即出现；清单校验、去重与冲突预检在本能力（packages::Library::build），

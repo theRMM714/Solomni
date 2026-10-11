@@ -114,7 +114,7 @@ fn main() {
     let workstore = capabilities::workspace::detail::FsWorkStore::new();
     // 保留名表（内置工具名）由**组合根**问一次工具能力后交进去：清单校验归 workspace，
     // 名字空间归 tools，两边不互相依赖。
-    let source = capabilities::workspace::detail::FsModules::new(
+    let source = capabilities::modules::detail::FsModules::new(
         root.join("modules"),
         capabilities::tools::api::names(),
     );
@@ -206,10 +206,14 @@ fn main() {
     let toolexec: Arc<dyn capabilities::tools::api::ToolExec + Send + Sync> = tools_svc.clone();
     let systools: Arc<dyn capabilities::tools::api::Tools + Send + Sync> = tools_svc;
 
-    // **工作区能力**：三个出站端口（清单 / 运行包库 / 目录布局）只由它的 service 持有（R12）。
+    // **模块能力**：清单来源（扫描 modules/）只由它的 service 持有（R12）；它是模块事实的唯一上游。
+    let modules: Arc<dyn capabilities::modules::api::Modules + Send + Sync> = Arc::new(
+        capabilities::modules::service::ModulesService::new(Arc::new(source)),
+    );
+
+    // **工作区能力**：运行包库 / 目录布局 / 版本库三个出站端口只由它的 service 持有（R12）。
     let workspace: Arc<dyn capabilities::workspace::api::Workspace + Send + Sync> =
         Arc::new(capabilities::workspace::service::WorkspaceService::new(
-            Arc::new(source),
             Arc::new(packages),
             Arc::new(workspace),
             Arc::new(workstore),
@@ -218,7 +222,7 @@ fn main() {
     // **隐秘字段能力**：值只落 .home/secrets.yaml；加载失败 = 装配失败（不静默空表）。
     let secrets: Arc<dyn capabilities::secrets::api::SecretOps + Send + Sync> =
         match capabilities::secrets::service::SecretsService::new(
-            Arc::clone(&workspace),
+            Arc::clone(&modules),
             Arc::new(capabilities::secrets::detail::YamlSecrets::new(
                 home.join("secrets.yaml"),
             )),
@@ -245,7 +249,7 @@ fn main() {
                 as Arc<
                     dyn capabilities::residents::ports::ServiceAdapter + Send + Sync,
                 >],
-            Arc::clone(&workspace),
+            Arc::clone(&modules),
             Arc::clone(&secrets),
         ));
 
@@ -255,6 +259,7 @@ fn main() {
             Arc::new(history),
         )),
         workspace,
+        Arc::clone(&modules),
         Arc::clone(&llm),
         toolexec,
         prompt,

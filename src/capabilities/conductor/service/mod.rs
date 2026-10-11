@@ -18,11 +18,11 @@ use crate::capabilities::collab::api::AfterTurn;
 use crate::capabilities::collab::api::CollabSession;
 use crate::capabilities::llm::api::Channel;
 use crate::capabilities::llm::api::Msg;
+use crate::capabilities::modules::api::{Module, Modules};
 use crate::capabilities::prompt::api::{Prompt, Segment};
 use crate::capabilities::registry::api::Registry;
 use crate::capabilities::session::api::{AgentMeta, HistoryView, RunState, SessionMeta};
 use crate::capabilities::tools::api::{ToolExec, Tools};
-use crate::capabilities::workspace::api::Module;
 use crate::kernel::api::SessionId;
 use crate::kernel::ports::Log;
 use std::collections::{BTreeMap, HashMap};
@@ -174,8 +174,10 @@ pub struct Conductor {
     registry: Box<dyn Registry>,
     /// 会话历史直连面（**不持它的端口**，R12）：造/读/写/删会话都走它。
     history: Arc<dyn History + Send + Sync>,
-    /// 工作区用例面（**不持它的端口**，R12）：清单事实、运行包库与工作区目录都走它。
+    /// 工作区用例面（**不持它的端口**，R12）：运行包库与工作区目录走它。
     workspace: Arc<dyn Workspace + Send + Sync>,
+    /// 目的：模块能力（**不持它的端口**，R12）——模块清单事实的唯一上游。
+    modules: Arc<dyn Modules + Send + Sync>,
     /// llm 用例面：按解析出来的通道造收发句柄 + 信封的无歧义修复（通道的**解析**在登记处能力）。
     llm: Arc<dyn Llm + Send + Sync>,
     /// 工具执行面（**不持它的端口**，R12）：跑外部/内置工具、释放围栏授权都走它。
@@ -222,6 +224,7 @@ impl Conductor {
         registry: Box<dyn Registry>,
         history: Arc<dyn History + Send + Sync>,
         workspace: Arc<dyn Workspace + Send + Sync>,
+        modules: Arc<dyn Modules + Send + Sync>,
         llm: Arc<dyn Llm + Send + Sync>,
         tools: Arc<dyn ToolExec + Send + Sync>,
         prompt: Arc<dyn Prompt>,
@@ -235,6 +238,7 @@ impl Conductor {
             registry,
             history,
             workspace,
+            modules,
             llm,
             tools,
             log,

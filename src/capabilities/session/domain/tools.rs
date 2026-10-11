@@ -136,7 +136,7 @@ impl MemberTools {
 /// **包含没有声明任何工具的模块**（命令表为空）——这样报错能区分「没有这个模块」与「这个模块没有这个工具」。
 /// 跨模块同名工具不再冲突：模块内名字唯一由 map 保证，跨模块由信封里的 module 消歧。
 pub fn tool_table(
-    modules: &[crate::capabilities::workspace::api::Module],
+    modules: &[crate::capabilities::modules::api::Module],
 ) -> BTreeMap<String, ModuleTools> {
     modules
         .iter()

@@ -17,7 +17,7 @@ pub(crate) fn roster_lists_modules() {
 #[test]
 pub(crate) fn shipped_modules_scan_clean() {
     // 随仓模块（modules/）是产品内容的一部分：清单必须全部合法、id 与目录一致。
-    let roster = crate::capabilities::workspace::detail::FsModules::new(
+    let roster = crate::capabilities::modules::detail::FsModules::new(
         PathBuf::from("modules"),
         crate::capabilities::tools::api::names(),
     )
@@ -189,15 +189,15 @@ pub(crate) fn package_manifest_check_rejects_illegal_forms() {
 pub(crate) fn module_runtimes_are_validated() {
     let mut m = module_of("a");
     m.manifest.runtimes = vec!["python".to_string(), "cc".to_string()];
-    assert!(crate::capabilities::workspace::api::check_runtimes(&m.manifest).is_ok());
+    assert!(crate::capabilities::modules::api::check_runtimes(&m.manifest).is_ok());
     m.manifest.runtimes = vec!["Python".to_string()];
     assert!(
-        crate::capabilities::workspace::api::check_runtimes(&m.manifest).is_err(),
+        crate::capabilities::modules::api::check_runtimes(&m.manifest).is_err(),
         "大写不合法"
     );
     m.manifest.runtimes = vec!["python".to_string(), "python".to_string()];
     assert!(
-        crate::capabilities::workspace::api::check_runtimes(&m.manifest)
+        crate::capabilities::modules::api::check_runtimes(&m.manifest)
             .unwrap_err()
             .contains("重复"),
         "重复声明要拒收"
@@ -211,7 +211,7 @@ pub(crate) fn module_tools_may_not_take_builtin_names() {
         .tools
         .insert("read_txt".to_string(), decl("python tools/read_txt.py"));
     assert!(
-        crate::capabilities::workspace::api::check_tools(
+        crate::capabilities::modules::api::check_tools(
             &m.manifest,
             &crate::capabilities::tools::api::names(),
         )
@@ -222,7 +222,7 @@ pub(crate) fn module_tools_may_not_take_builtin_names() {
         m.manifest
             .tools
             .insert(name.to_string(), decl("python tools/x.py"));
-        let why = crate::capabilities::workspace::api::check_tools(
+        let why = crate::capabilities::modules::api::check_tools(
             &m.manifest,
             &crate::capabilities::tools::api::names(),
         )
@@ -565,10 +565,10 @@ pub(crate) fn vm_tier_is_refused_when_the_machine_cannot_carry_it() {
         registry_service(InMemorySettings::with_tier(Tier::Vm), Arc::clone(&llm)),
         test_history(),
         test_workspace(
-            Arc::new(VecSource(vec![module_of("a")])),
             Arc::new(InMemoryPackages::empty()),
             Arc::new(InMemoryWorkspace::new()),
         ),
+        test_modules(Arc::new(VecSource(vec![module_of("a")]))),
         llm,
         test_tools_svc_with(
             Arc::new(SilentRunner),
@@ -609,10 +609,10 @@ pub(crate) fn vm_tier_is_refused_when_the_machine_cannot_carry_it() {
         registry_service(InMemorySettings::new(), Arc::clone(&llm2)),
         test_history(),
         test_workspace(
-            Arc::new(VecSource(vec![module_of("a")])),
             Arc::new(InMemoryPackages::empty()),
             Arc::new(InMemoryWorkspace::new()),
         ),
+        test_modules(Arc::new(VecSource(vec![module_of("a")]))),
         llm2,
         test_tools_svc_with(
             Arc::new(SilentRunner),
@@ -737,10 +737,10 @@ pub(crate) fn module_without_runtime_is_denied_with_reason() {
         registry_service(InMemorySettings::with_tier(Tier::Host), Arc::clone(&llm)),
         test_history_of(Arc::clone(&hist)),
         test_workspace(
-            Arc::new(VecSource(vec![mod_a])),
             Arc::new(InMemoryPackages::empty()),
             Arc::new(InMemoryWorkspace::new()),
         ),
+        test_modules(Arc::new(VecSource(vec![mod_a]))),
         llm,
         test_tools_svc_with(
             Arc::clone(&runner) as Arc<dyn ProcessRunner>,
@@ -887,7 +887,6 @@ fn work_ws() -> (WorkFace, Arc<InMemoryWorkspace>, Arc<InMemoryWorkStore>) {
     let dirs = Arc::new(InMemoryWorkspace::new());
     let store = Arc::new(InMemoryWorkStore::new());
     let ws = test_workspace_store(
-        Arc::new(VecSource(Vec::new())),
         Arc::new(InMemoryPackages::empty()),
         dirs.clone(),
         store.clone(),

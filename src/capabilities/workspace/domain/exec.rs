@@ -3,7 +3,7 @@
 //! 存两种东西：ExecSpec 进 meta.yaml 的 exec 段（会话选型）；ExecPlan 只在运行时派生、从不落盘。
 //! 谁定版本：模块只声明能力名（module.yaml 的 runtimes）；精确版本由用户定版，核心不替用户挑。
 
-use crate::capabilities::workspace::domain::module::Module;
+use crate::capabilities::modules::api::Module;
 use crate::capabilities::workspace::domain::packages::{Library, PackageManifest, KIND_SYSTEM};
 use crate::kernel::api::Tier;
 use crate::kernel::ports::HostProbe;

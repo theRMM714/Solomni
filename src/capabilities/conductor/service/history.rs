@@ -63,7 +63,7 @@ impl Conductor {
             }
         }
         // 撤围栏授权：子会话与父会话共用工作区，按工作根去重，避免对同一套根重复撤销。
-        let roster = self.workspace.roster();
+        let roster = self.modules.roster();
         let mut released: Vec<String> = Vec::new();
         for sid in &subtree {
             let Ok((m, _)) = self.history.load(sid) else {

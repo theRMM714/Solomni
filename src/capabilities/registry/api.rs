@@ -17,7 +17,7 @@ pub use crate::capabilities::registry::domain::providers::{
 };
 
 use crate::capabilities::llm::api::{Channel, ProbeOutcome, ReplayReport, ToolMode};
-use crate::capabilities::workspace::api::Roster;
+use crate::capabilities::modules::api::Roster;
 
 /// 登记处的**队列面**：呈现层经 `ConductorHandle`（核心自己的线程 + 命令队列）调它。
 ///

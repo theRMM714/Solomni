@@ -12,11 +12,11 @@ use crate::capabilities::conductor::api::{
     RuntimeReport, SessionConfig, SessionEdit, SessionView, TierChoices, WorkMode, WorkOpened,
     WorkSpec,
 };
+use crate::capabilities::modules::api::{ModulesOps, Roster};
 use crate::capabilities::registry::api::AgentView;
 use crate::capabilities::registry::api::RegistryOps;
 use crate::capabilities::registry::api::{AppSettings, ModelView, ProviderView};
 use crate::capabilities::session::api::{HistoryOps, HistoryView, SessionMeta};
-use crate::capabilities::workspace::api::{Roster, WorkspaceOps};
 use crate::kernel::api::Tier;
 use crate::presentation::web::routes::{self, ROUTES};
 use crate::presentation::web::{self, FenceInfo};
@@ -58,7 +58,7 @@ fn fake_ops(fail: Option<&str>) -> Ops {
         registry: f.clone(),
         history: f.clone(),
         core: f.clone(),
-        workspace: f.clone(),
+        modules: f.clone(),
         actions: f.clone(),
         events: EventBus::new(),
         log: Arc::new(super::doubles::NoopLogOps),
@@ -430,7 +430,7 @@ impl HistoryOps for FakeOps {
     }
 }
 
-impl WorkspaceOps for FakeOps {
+impl ModulesOps for FakeOps {
     fn roster(&self) -> Result<Roster, String> {
         self.guard()?;
         Ok(Roster {

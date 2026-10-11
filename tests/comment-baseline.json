@@ -521,12 +521,8 @@
   "src/capabilities/workspace/api.rs": {
     "头块：槽外有行或自造槽": 1,
     "头块：缺文件头": 1,
-    "条目：槽外有行或自造槽": 4,
-    "条目：首行不是目的": 2
-  },
-  "src/capabilities/workspace/detail/fs_modules.rs": {
-    "头块：槽外有行或自造槽": 2,
-    "头块：缺文件头": 1
+    "条目：槽外有行或自造槽": 2,
+    "条目：首行不是目的": 1
   },
   "src/capabilities/workspace/detail/fs_packages.rs": {
     "头块：槽外有行或自造槽": 3,
@@ -557,15 +553,11 @@
     "条目：槽外有行或自造槽": 1,
     "条目：首行不是目的": 1
   },
-  "src/capabilities/workspace/domain/module.rs": {
-    "头块：槽外有行或自造槽": 3,
-    "头块：缺文件头": 1
-  },
   "src/capabilities/workspace/domain/packages.rs": {
     "头块：槽外有行或自造槽": 4,
     "头块：缺文件头": 1,
-    "条目：槽外有行或自造槽": 26,
-    "条目：首行不是目的": 23
+    "条目：槽外有行或自造槽": 25,
+    "条目：首行不是目的": 22
   },
   "src/capabilities/workspace/domain/workspace.rs": {
     "头块：槽外有行或自造槽": 7,
@@ -587,8 +579,8 @@
   "src/capabilities/workspace/ports.rs": {
     "头块：槽外有行或自造槽": 1,
     "头块：缺文件头": 1,
-    "条目：槽外有行或自造槽": 11,
-    "条目：首行不是目的": 4
+    "条目：槽外有行或自造槽": 10,
+    "条目：首行不是目的": 3
   },
   "src/capabilities/workspace/service.rs": {
     "头块：槽外有行或自造槽": 7,

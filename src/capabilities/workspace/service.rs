@@ -1,5 +1,5 @@
 //! 工作区的**用例与端口持有者**：出站端口只在这里（R12）——
-//! 清单来源、运行包库来源、目录布局、共享区版本库。别的能力要清单事实或工作区目录，走 `api::Workspace`。
+//! 运行包库来源、目录布局、共享区版本库。别的能力要运行包或工作区目录，走 `api::Workspace`。
 //!
 //! 装配（new 出适配器）在组合根；这里只收注入的端口。
 //!
@@ -7,7 +7,7 @@
 //! pull / commit 的三方比较规则在 `domain::workstore`（纯逻辑），落盘在 `WorkStore` 端口后面。
 
 use crate::capabilities::workspace::api::{
-    Change, ChangeKind, CommitReport, CommitRequest, CommitSummary, Library, PullReport, Roster,
+    Change, ChangeKind, CommitReport, CommitRequest, CommitSummary, Library, PullReport,
     StatusEntry, StatusReport, WorkFiles, WorkRoots, WorkUsage, Workspace,
 };
 use crate::capabilities::workspace::domain::hash::content_hash;
@@ -15,7 +15,7 @@ use crate::capabilities::workspace::domain::workstore::{
     clean_rel, expand_paths, plan_commit, pull_verdict, status_of, Commit, CommitAnchor,
     ConflictAt, Index, PullVerdict, Tree,
 };
-use crate::capabilities::workspace::ports::{ModuleSource, PackageSource, WorkStore, Workdirs};
+use crate::capabilities::workspace::ports::{PackageSource, WorkStore, Workdirs};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -27,7 +27,6 @@ const RECENT_COMMITS: usize = 5;
 
 /// 工作区能力：持四个端口，按用例答话。
 pub struct WorkspaceService {
-    source: Arc<dyn ModuleSource + Send + Sync>,
     packages: Arc<dyn PackageSource + Send + Sync>,
     dirs: Arc<dyn Workdirs + Send + Sync>,
     store: Arc<dyn WorkStore + Send + Sync>,
@@ -39,13 +38,11 @@ pub struct WorkspaceService {
 impl WorkspaceService {
     /// 组合根专用。
     pub fn new(
-        source: Arc<dyn ModuleSource + Send + Sync>,
         packages: Arc<dyn PackageSource + Send + Sync>,
         dirs: Arc<dyn Workdirs + Send + Sync>,
         store: Arc<dyn WorkStore + Send + Sync>,
     ) -> WorkspaceService {
         WorkspaceService {
-            source,
             packages,
             dirs,
             store,
@@ -129,10 +126,6 @@ fn render_conflicts(conflicts: &[ConflictAt]) -> String {
 }
 
 impl Workspace for WorkspaceService {
-    fn roster(&self) -> Roster {
-        self.source.scan()
-    }
-
     fn library(&self) -> Library {
         self.packages.scan()
     }

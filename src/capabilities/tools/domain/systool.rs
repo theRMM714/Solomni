@@ -101,7 +101,7 @@ pub struct ToolNotes {
 pub fn tool_notes(
     prompt: &dyn Prompt,
     sb: &Sandbox,
-    modules: &[crate::capabilities::workspace::api::Module],
+    modules: &[crate::capabilities::modules::api::Module],
 ) -> ToolNotes {
     ToolNotes {
         patch_guide: prompt.render(

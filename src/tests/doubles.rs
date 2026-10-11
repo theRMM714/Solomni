@@ -13,6 +13,8 @@ use crate::capabilities::llm::api::Channel;
 use crate::capabilities::llm::api::{BoxedChat, Chat, Chunk, CompleteOpts, Completion, Msg};
 use crate::capabilities::llm::detail::fake_chat::FakeChat;
 use crate::capabilities::llm::ports::{ChatGateway, ModelCatalog};
+use crate::capabilities::modules::api::{Module, ModuleManifest};
+use crate::capabilities::modules::ports::ModuleSource;
 use crate::capabilities::prompt::api::Prompt;
 use crate::capabilities::prompt::domain::prompt::Prompts;
 use crate::capabilities::prompt::ports::PromptSource;
@@ -24,8 +26,7 @@ use crate::capabilities::session::ports::HistoryStore;
 use crate::capabilities::tools::ports::SystoolsSource;
 use crate::capabilities::tools::ports::{FileRead, SysIo};
 use crate::capabilities::workspace::api::{Library, PackageManifest};
-use crate::capabilities::workspace::api::{Module, ModuleManifest};
-use crate::capabilities::workspace::ports::{ModuleSource, PackageSource, WorkStore, Workdirs};
+use crate::capabilities::workspace::ports::{PackageSource, WorkStore, Workdirs};
 use crate::kernel::api::Tier;
 use crate::kernel::ports::ProcessRunner;
 use std::collections::BTreeMap;
@@ -690,8 +691,8 @@ pub(crate) fn run_builtin(
 }
 
 /// 测试用模块工具声明：只给启动命令（参数契约在需要的用例里另行声明）。
-pub(crate) fn decl(command: &str) -> crate::capabilities::workspace::domain::module::ToolDecl {
-    crate::capabilities::workspace::domain::module::ToolDecl {
+pub(crate) fn decl(command: &str) -> crate::capabilities::modules::api::ToolDecl {
+    crate::capabilities::modules::api::ToolDecl {
         command: command.to_string(),
         desc: String::new(),
         params: None,
@@ -703,7 +704,7 @@ pub(crate) fn decl(command: &str) -> crate::capabilities::workspace::domain::mod
 pub(crate) fn decl_with(
     command: &str,
     params_yaml: &str,
-) -> crate::capabilities::workspace::domain::module::ToolDecl {
+) -> crate::capabilities::modules::api::ToolDecl {
     let mut d = decl(command);
     d.params = Some(yaml_serde::from_str(params_yaml).expect("测试参数声明要能解析"));
     d
@@ -758,7 +759,7 @@ pub(crate) fn test_params(agent: &str) -> crate::capabilities::session::api::Ses
 /// 测试用工具说明块素材（patch 语法 + 给定的模块工具）。
 pub(crate) fn test_notes(
     sb: &crate::capabilities::workspace::api::Sandbox,
-    modules: &[crate::capabilities::workspace::api::Module],
+    modules: &[crate::capabilities::modules::api::Module],
 ) -> crate::capabilities::tools::api::ToolNotes {
     crate::capabilities::tools::api::tool_notes(&test_prompts(), sb, modules)
 }
@@ -932,8 +933,8 @@ impl ModelCatalog for FakeCatalog {
 pub(crate) struct VecSource(pub(crate) Vec<Module>);
 
 impl ModuleSource for VecSource {
-    fn scan(&self) -> crate::capabilities::workspace::api::Roster {
-        crate::capabilities::workspace::api::Roster {
+    fn scan(&self) -> crate::capabilities::modules::api::Roster {
+        crate::capabilities::modules::api::Roster {
             modules: self.0.clone(),
             rejected: Vec::new(),
         }
@@ -1329,24 +1330,27 @@ pub(crate) fn test_llm_demo() -> Arc<dyn crate::capabilities::llm::api::Llm + Se
 /// 测试用的 **workspace 能力面**：把四个端口装进 `WorkspaceService`（与生产同一条路，R12）。
 /// 版本库默认用内存替身；要观察主副本/提交记录的用例用 `test_workspace_store`。
 pub(crate) fn test_workspace(
-    source: Arc<dyn ModuleSource + Send + Sync>,
     packages: Arc<dyn PackageSource + Send + Sync>,
     dirs: Arc<dyn Workdirs + Send + Sync>,
 ) -> Arc<dyn crate::capabilities::workspace::api::Workspace + Send + Sync> {
-    test_workspace_store(source, packages, dirs, Arc::new(InMemoryWorkStore::new()))
+    test_workspace_store(packages, dirs, Arc::new(InMemoryWorkStore::new()))
 }
 
 pub(crate) fn test_workspace_store(
-    source: Arc<dyn ModuleSource + Send + Sync>,
     packages: Arc<dyn PackageSource + Send + Sync>,
     dirs: Arc<dyn Workdirs + Send + Sync>,
     store: Arc<dyn WorkStore + Send + Sync>,
 ) -> Arc<dyn crate::capabilities::workspace::api::Workspace + Send + Sync> {
-    Arc::new(
-        crate::capabilities::workspace::service::WorkspaceService::new(
-            source, packages, dirs, store,
-        ),
-    )
+    Arc::new(crate::capabilities::workspace::service::WorkspaceService::new(packages, dirs, store))
+}
+
+/// 目的：测试用的**模块能力面**——把清单来源装进 `ModulesService`（与生产同一条路，R12）。
+pub(crate) fn test_modules(
+    source: Arc<dyn ModuleSource + Send + Sync>,
+) -> Arc<dyn crate::capabilities::modules::api::Modules + Send + Sync> {
+    Arc::new(crate::capabilities::modules::service::ModulesService::new(
+        source,
+    ))
 }
 
 /// 登记一个 agent（测试装配用）：**校验用的模块清单由调用方取一份**交给登记处——
@@ -1382,10 +1386,10 @@ pub(crate) fn core_with_services(
         registry_service(InMemorySettings::new(), Arc::clone(&llm)),
         test_history(),
         test_workspace(
-            Arc::new(VecSource(modules)),
             Arc::new(InMemoryPackages::empty()),
             Arc::new(InMemoryWorkspace::new()),
         ),
+        test_modules(Arc::new(VecSource(modules))),
         llm,
         test_tools_svc_with(
             runner,
@@ -1420,11 +1424,8 @@ pub(crate) fn core_with_workspace(
     Conductor::new(
         registry_service(InMemorySettings::new(), Arc::clone(&llm)),
         test_history(),
-        test_workspace(
-            Arc::new(VecSource(modules)),
-            Arc::new(InMemoryPackages::empty()),
-            ws,
-        ),
+        test_workspace(Arc::new(InMemoryPackages::empty()), ws),
+        test_modules(Arc::new(VecSource(modules))),
         llm,
         test_tools_svc_with(
             Arc::new(SilentRunner),
@@ -1522,11 +1523,8 @@ pub(crate) fn core_with_pkgs(
     Conductor::new(
         registry_service(InMemorySettings::new(), Arc::clone(&llm)),
         test_history_of(history),
-        test_workspace(
-            Arc::new(VecSource(modules)),
-            packages,
-            Arc::new(InMemoryWorkspace::new()),
-        ),
+        test_workspace(packages, Arc::new(InMemoryWorkspace::new())),
+        test_modules(Arc::new(VecSource(modules))),
         llm,
         test_tools_svc_with(runner, io, Arc::new(NoFenceHost)),
         test_prompt(),
@@ -1550,10 +1548,10 @@ pub(crate) fn core_with_settings(store: InMemorySettings) -> Conductor {
         registry_service(store, Arc::clone(&llm)),
         test_history(),
         test_workspace(
-            Arc::new(VecSource(Vec::new())),
             Arc::new(InMemoryPackages::empty()),
             Arc::new(InMemoryWorkspace::new()),
         ),
+        test_modules(Arc::new(VecSource(Vec::new()))),
         llm,
         test_tools_svc_with(
             Arc::new(SilentRunner),
@@ -1592,10 +1590,10 @@ pub(crate) fn core_with_io_gateway(
         registry_service(InMemorySettings::new(), Arc::clone(&llm)),
         test_history(),
         test_workspace(
-            Arc::new(VecSource(modules)),
             Arc::new(InMemoryPackages::empty()),
             Arc::new(InMemoryWorkspace::new()),
         ),
+        test_modules(Arc::new(VecSource(modules))),
         llm,
         test_tools_svc_with(Arc::new(SilentRunner), io, Arc::new(NoFenceHost)),
         test_prompt(),
@@ -1622,10 +1620,10 @@ pub(crate) fn core_with_gateway(
         registry_service(InMemorySettings::new(), Arc::clone(&llm)),
         test_history(),
         test_workspace(
-            Arc::new(VecSource(modules)),
             Arc::new(InMemoryPackages::empty()),
             Arc::new(InMemoryWorkspace::new()),
         ),
+        test_modules(Arc::new(VecSource(modules))),
         llm,
         test_tools_svc_with(
             Arc::new(SilentRunner),

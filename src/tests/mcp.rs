@@ -136,13 +136,12 @@ fn model_tool_face_exposes_started_service_ops() {
         available_tools, dispatch_external, tool_decls,
     };
     use crate::capabilities::llm::api::ToolInvoke;
+    use crate::capabilities::modules::api::ServiceDecl;
     use crate::capabilities::residents::api::ResidentOps;
     use crate::capabilities::residents::service::ResidentsService;
     use crate::capabilities::session::api::ServiceOp;
-    use crate::capabilities::workspace::api::ServiceDecl;
     use crate::tests::doubles::{
-        member_with_service_tools, module_of, test_workspace, FakeServiceAdapter, InMemoryPackages,
-        InMemoryWorkspace, VecSource,
+        member_with_service_tools, module_of, test_modules, FakeServiceAdapter, VecSource,
     };
     use std::collections::BTreeMap;
 
@@ -160,11 +159,7 @@ fn model_tool_face_exposes_started_service_ops() {
     );
     let residents: Arc<dyn ResidentOps + Send + Sync> = Arc::new(ResidentsService::new(
         vec![Arc::clone(&fake) as Arc<dyn ServiceAdapter + Send + Sync>],
-        test_workspace(
-            Arc::new(VecSource(vec![m])),
-            Arc::new(InMemoryPackages::empty()),
-            Arc::new(InMemoryWorkspace::new()),
-        ),
+        test_modules(Arc::new(VecSource(vec![m]))),
         Arc::new(crate::capabilities::secrets::api::NoSecrets),
     ));
     let ops = residents.start("m0", "svc", "").expect("启动服务");
@@ -331,9 +326,9 @@ fn mcp_error_response_is_reported() {
 #[cfg(unix)]
 #[test]
 fn residents_mcp_service_end_to_end() {
+    use crate::capabilities::modules::api::ServiceDecl;
     use crate::capabilities::residents::api::ResidentOps;
     use crate::capabilities::residents::service::ResidentsService;
-    use crate::capabilities::workspace::api::ServiceDecl;
     use crate::kernel::detail::ProcessSessions;
     use crate::tests::doubles::{
         built_exe, module_of, python, test_workspace, InMemoryPackages, InMemoryWorkspace,
@@ -369,11 +364,7 @@ fn residents_mcp_service_end_to_end() {
             host,
             Arc::new(crate::kernel::ports::NoopLog),
         )) as Arc<dyn ServiceAdapter + Send + Sync>],
-        test_workspace(
-            Arc::new(VecSource(vec![m])),
-            Arc::new(InMemoryPackages::empty()),
-            Arc::new(InMemoryWorkspace::new()),
-        ),
+        test_modules(Arc::new(VecSource(vec![m]))),
         Arc::new(crate::capabilities::secrets::api::NoSecrets),
     ));
 
