@@ -330,10 +330,7 @@ fn residents_mcp_service_end_to_end() {
     use crate::capabilities::residents::api::ResidentOps;
     use crate::capabilities::residents::service::ResidentsService;
     use crate::kernel::detail::ProcessSessions;
-    use crate::tests::doubles::{
-        built_exe, module_of, python, test_workspace, InMemoryPackages, InMemoryWorkspace,
-        VecSource,
-    };
+    use crate::tests::doubles::{built_exe, module_of, python, test_modules, VecSource};
     use std::collections::BTreeMap;
 
     let (Some(exe), Some(py)) = (built_exe(), python()) else {
