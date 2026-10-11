@@ -233,17 +233,18 @@ fn main() {
     // **常驻服务能力**：真实协议适配器（MCP stdio 走守门进程的长驻会话）+ 工作区清单来源 + 隐秘字段面。
     let residents: Arc<dyn capabilities::residents::api::ResidentOps + Send + Sync> =
         Arc::new(capabilities::residents::service::ResidentsService::new(
-            vec![
-                Arc::new(capabilities::residents::detail::McpAdapter::new(Arc::new(
-                    kernel::detail::ProcessSessions::new(
-                        std::env::current_exe().unwrap_or_default(),
-                        std::sync::Arc::clone(&process_texts),
-                        home.clone(),
-                        std::sync::Arc::clone(&write_allowed),
-                    ),
-                )))
-                    as Arc<dyn capabilities::residents::ports::ServiceAdapter + Send + Sync>,
-            ],
+            vec![Arc::new(capabilities::residents::detail::McpAdapter::new(
+                Arc::new(kernel::detail::ProcessSessions::new(
+                    std::env::current_exe().unwrap_or_default(),
+                    std::sync::Arc::clone(&process_texts),
+                    home.clone(),
+                    std::sync::Arc::clone(&write_allowed),
+                )),
+                std::sync::Arc::clone(&log),
+            ))
+                as Arc<
+                    dyn capabilities::residents::ports::ServiceAdapter + Send + Sync,
+                >],
             Arc::clone(&workspace),
             Arc::clone(&secrets),
         ));

@@ -364,7 +364,10 @@ pub(crate) fn tool_decls(ctx: &MemberTools) -> ToolDecls {
                 } else {
                     op.description.clone()
                 },
-                parameters: serde_json::json!({ "type": "object", "additionalProperties": true }),
+                // 参数契约原样声明（服务给的 JSON Schema）：没有就退回"任意对象"，不编造。
+                parameters: op.parameters.clone().unwrap_or_else(
+                    || serde_json::json!({ "type": "object", "additionalProperties": true }),
+                ),
             });
         }
     }

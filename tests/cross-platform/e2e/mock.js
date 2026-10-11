@@ -175,10 +175,16 @@ http.createServer((req, res) => {
       }
     } else if (sys.includes('mcp-toolbox') && allUser.includes('MCP 工具箱')) {
       // MCP 常驻服务（L4）：操作以「模块 + 服务名.操作名」寻址；回执来自真进程，夹具只转述。
+      // **参数契约必须先声明给模型**（真实模型曾因看不到 text/key 而反复瞎试）：少了就如实拒绝，
+      // 让「服务操作被调用并成功」那条断言失败，而不是静默放行。
       // 收尾用**纯正文**（普通说话不必包成工具）：把服务给的摘要原样念回来。
-      content = sawToolResult
-        ? '服务算出的摘要：' + SHA_SOLOMNI
-        : JSON.stringify({ type: 'tool', module: 'mcp-toolbox', name: 'toolbox.sha256', args: { text: 'solomni' } });
+      if (!sys.includes('要摘要的文本')) {
+        content = '参数契约没有声明给我：toolbox.sha256 缺 text 的说明，无法调用。';
+      } else {
+        content = sawToolResult
+          ? '服务算出的摘要：' + SHA_SOLOMNI
+          : JSON.stringify({ type: 'tool', module: 'mcp-toolbox', name: 'toolbox.sha256', args: { text: 'solomni' } });
+      }
     } else if (sys.includes('你是核心代理')) {
       // 代理模式（T5 旅程）：核心代用户挑人 → 建子工作 → 转达，最后收尾。
       // 本场景排在"探针判支持原生"之后，所以用**原生**工具调用槽位（不是正文里的手写信封）。

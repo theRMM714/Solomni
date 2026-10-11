@@ -17,6 +17,7 @@
 **崩溃检测**：适配器按连接事实回答 `ServiceInstance::is_alive`；进程一结束，`call` 如实标 `Failed` 并从运行态摘除，后续调用如实报"没在跑"。
 **操作清单变化**：服务报告 `notifications/tools/list_changed` 时适配器交回新清单（`take_refreshed_operations`），运行态就地刷新，下一次装配的工具面随之反映。
 **可见面**：就绪服务的操作进动作目录（`GET /api/actions` 对 user 可见）与模型工具面（原生声明 + 信封清单）；CLI `resident list|start|stop|enable|disable|call` 是同一批动作的终端入口。
+**参数契约**：`Operation.parameters` 是服务给的 **JSON Schema 原样**（MCP 的 `inputSchema`）；核心**不解释、不校验**它——原生通道原样发进工具声明，信封通道渲染成参数说明（名字 / 类型 / 必填 / 缺省 / 可选值 / 说明）。参数错了由服务如实回绝（`isError`）。
 
 ## 三、依赖图位置（由源码的 `::api` 引用推导）
 
@@ -29,7 +30,7 @@
 - 模块的 `services:` 声明契约见 [MODULE_SPEC.md](../../MODULE_SPEC.md)；声明解析在 `workspace`。
 - 真机演示与回归载体：`modules/mcp-toolbox` + `demo/run-demo-mcp.mjs`（真实模型、真机）；
   `tests/cross-platform/e2e/` 的 mcp 场景（夹具 + Mock 供应商，进 CI）。
-- 已接入：动作面（`control_resident`）、会话删除时的租约回收、起服务时按 `secrets::resolve` 注入 env 与回执脱敏、`ResidentOps::call`（经模块动作 `module.<id>.<service>.<op>`）、**MCP stdio 适配器**（`detail::McpAdapter`，长驻会话走 kernel 的 `SessionHost`）、**模型侧工具面**（已就绪服务的操作以 `<服务>.<操作>` 进成员工具面，调用路由到 `ResidentOps::call`）、崩溃检测与 `tools/list_changed` 刷新。ACP 适配器尚未接入（见 `tests/gaps.yaml`）。
+- 已接入：动作面（`control_resident`）、会话删除时的租约回收、起服务时按 `secrets::resolve` 注入 env 与回执脱敏、`ResidentOps::call`（经模块动作 `module.<id>.<service>.<op>`）、**MCP stdio 适配器**（`detail::McpAdapter`，长驻会话走 kernel 的 `SessionHost`）、**模型侧工具面**（已就绪服务的操作以 `<服务>.<操作>` 进成员工具面，**参数契约原样声明**给模型，调用路由到 `ResidentOps::call`）、崩溃检测与 `tools/list_changed` 刷新。ACP 适配器尚未接入（见 `tests/gaps.yaml`）。
 
 ## 本目录
 

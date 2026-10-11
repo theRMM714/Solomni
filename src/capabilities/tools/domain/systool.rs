@@ -94,6 +94,8 @@ pub struct ToolNotes {
     pub patch_guide: String,
     pub module_tools: String,
     pub module_tool_params: String,
+    /// 目的：常驻服务操作的参数说明（服务给的 JSON Schema 渲染成行）；由装配方按**已就绪服务**现填。
+    pub service_params: String,
 }
 
 pub fn tool_notes(
@@ -115,6 +117,8 @@ pub fn tool_notes(
         module_tool_params: crate::capabilities::tools::domain::module_tools::module_tool_params(
             prompt, modules,
         ),
+        // 常驻服务操作的参数说明由装配方（conductor）按**已就绪服务**现填：这里看不到常驻服务。
+        service_params: String::new(),
     }
 }
 

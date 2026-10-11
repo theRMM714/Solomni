@@ -35,6 +35,8 @@ pub struct ServiceOp {
     pub op: String,
     /// 目的：给人/模型看的一句话说明（服务给的，可能为空）。
     pub description: String,
+    /// 目的：参数契约——服务给的 **JSON Schema 原样**（可能为空）；核心不校验，只声明给模型。
+    pub parameters: Option<serde_json::Value>,
 }
 
 /// 成员的工具执行环境：来自 module.yaml（按模块分组的放行表）+ 注入的执行端口 + 本成员的沙箱。
@@ -116,6 +118,9 @@ impl MemberTools {
         if with_modules {
             parts.push(self.notes.module_tools.clone());
             parts.push(self.notes.module_tool_params.clone());
+            if !self.notes.service_params.is_empty() {
+                parts.push(self.notes.service_params.clone());
+            }
         }
         if parts.is_empty() {
             return String::new();

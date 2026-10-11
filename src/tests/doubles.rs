@@ -1945,7 +1945,12 @@ impl crate::capabilities::residents::ports::ServiceAdapter for FakeServiceAdapte
             vec![crate::capabilities::residents::api::Operation {
                 name: "echo".to_string(),
                 description: "回显参数".to_string(),
-                params: None,
+                // 带一份 JSON Schema：工具面"原样声明"的断言要用它。
+                parameters: Some(serde_json::json!({
+                    "type": "object",
+                    "properties": { "x": { "type": "integer", "description": "一个整数" } },
+                    "required": ["x"]
+                })),
             }],
         ))
     }
@@ -1973,7 +1978,7 @@ impl crate::capabilities::residents::ports::ServiceAdapter for DyingServiceAdapt
             vec![crate::capabilities::residents::api::Operation {
                 name: "boom".to_string(),
                 description: String::new(),
-                params: None,
+                parameters: None,
             }],
         ))
     }
@@ -1988,6 +1993,48 @@ impl crate::capabilities::residents::ports::ServiceInstance for DyingServiceInst
     fn stop(&mut self) {}
     fn is_alive(&self) -> bool {
         false
+    }
+}
+
+/// 目的：记录型日志 Spy——按顺序记下 (级别, 位置, 文案)，供"事实被记进日志"的断言。
+#[derive(Default)]
+pub(crate) struct RecordingLog {
+    lines: std::sync::Mutex<Vec<(String, String, String)>>,
+}
+
+impl RecordingLog {
+    /// 目的：空记录。
+    pub(crate) fn new() -> RecordingLog {
+        RecordingLog::default()
+    }
+    /// 目的：全部记录里是否有一条文案包含给定片段。
+    pub(crate) fn has(&self, needle: &str) -> bool {
+        self.lines
+            .lock()
+            .expect("锁")
+            .iter()
+            .any(|(_, _, m)| m.contains(needle))
+    }
+}
+
+impl crate::kernel::ports::Log for RecordingLog {
+    fn info(&self, at: &str, msg: &str) {
+        self.lines
+            .lock()
+            .expect("锁")
+            .push(("info".to_string(), at.to_string(), msg.to_string()));
+    }
+    fn warn(&self, at: &str, msg: &str) {
+        self.lines
+            .lock()
+            .expect("锁")
+            .push(("warn".to_string(), at.to_string(), msg.to_string()));
+    }
+    fn error(&self, at: &str, msg: &str) {
+        self.lines
+            .lock()
+            .expect("锁")
+            .push(("error".to_string(), at.to_string(), msg.to_string()));
     }
 }
 
