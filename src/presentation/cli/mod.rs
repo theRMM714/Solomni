@@ -88,7 +88,7 @@ fn module_cmd(ops: &Ops, arg: &str) {
     let arg = arg.trim();
     if arg.is_empty() || arg == "list" {
         // 按**模块**分组：声明的 tools / services 就是它的独立入口；只写 system 的模块如实标注。
-        match ops.workspace.roster() {
+        match ops.modules.roster() {
             Ok(roster) => {
                 for m in &roster.modules {
                     let prefix = format!("module.{}.", m.manifest.id);
@@ -347,7 +347,7 @@ fn rewind_cmd(ops: &Ops, arg: &str) {
 }
 
 fn print_roster(ops: &Ops) {
-    let roster = match ops.workspace.roster() {
+    let roster = match ops.modules.roster() {
         Ok(r) => r,
         Err(e) => {
             println!("[错误] {}", e);

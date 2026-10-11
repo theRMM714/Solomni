@@ -60,6 +60,29 @@ function writeToolbox(py) {
 }
 
 
+/** MCP 夹具模块：声明一个 MCP 常驻服务，命令用本机探到的解释器名；服务本体就是仓库里那个 server.py。
+ * 为什么重写清单而不是直接复制真模块：真模块的命令写死 `python`，Linux / macOS 上通常只有 `python3`。 */
+function writeMcpModule(py) {
+  const dir = path.join(FIXTURE, "modules", "mcp-toolbox");
+  fs.mkdirSync(path.join(dir, "tools"), { recursive: true });
+  fs.cpSync(path.join(PRODUCT_ROOT, "modules", "mcp-toolbox", "tools", "server.py"), path.join(dir, "tools", "server.py"), { force: true });
+  const text = [
+    "id: mcp-toolbox",
+    "brief: e2e 夹具：声明一个 MCP 常驻服务，验证「服务操作进工具面并被调用」。",
+    "system: >-",
+    "  你手上有一个 MCP 工具箱（常驻服务 toolbox），操作有 toolbox.sha256 / toolbox.uuid / toolbox.now /",
+    "  toolbox.remember / toolbox.recall。需要摘要、随机标识或当前时间时用它们，不要凭空编造。",
+    "services:",
+    "  toolbox:",
+    "    adapter: mcp",
+    "    command: " + py + " tools/server.py",
+    "    desc: e2e 夹具 MCP 服务",
+    "    enabled: false",
+    "",
+  ].join("\n");
+  fs.writeFileSync(path.join(dir, "module.yaml"), text);
+}
+
 /** 把仓库里三个真模块（harvest=python / render=node / indexer=C++）复制进夹具。
  * 只复制源码与清单，不复制 build/ 与 userdata/（产物与私有状态不入夹具）。 */
 function copyRealModules() {
@@ -154,7 +177,9 @@ async function main() {
     force: true,
   });
   // 工具命令行按平台生成：Linux / macOS 上解释器通常叫 python3，Windows 上叫 python（写死一个必然在另一个平台挂）。
-  writeToolbox(interpreter());
+  const py = interpreter();
+  writeToolbox(py);
+  writeMcpModule(py);
   // 清运行期痕迹（夹具本身不动）。
   fs.rmSync(path.join(FIXTURE, "session"), { recursive: true, force: true });
   fs.rmSync(path.join(FIXTURE, "logs"), { recursive: true, force: true });

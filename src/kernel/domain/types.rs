@@ -38,6 +38,21 @@ impl Tier {
 /// 约束：登记处（设置项）与 `llm` 的出站调用参数共享它；设置项见 `AppSettings::llm_timeout_secs`。
 pub const DEFAULT_LLM_TIMEOUT_SECS: u64 = 300;
 
+/// 目的：**能力名**的合法写法（模块 `runtimes` 与运行包 `id` 两侧共享同一份文法）。
+/// 约束：小写字母或数字开头，其余小写字母、数字、`-` `_` `.`；长度 1..=64。
+pub fn valid_capability(name: &str) -> bool {
+    let mut it = name.chars();
+    match it.next() {
+        Some(c) if c.is_ascii_lowercase() || c.is_ascii_digit() => {}
+        _ => return false,
+    }
+    if name.len() > 64 {
+        return false;
+    }
+    name.chars()
+        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '-' | '_' | '.'))
+}
+
 /// 目的：前端唯一的会话标识 = 工作名（用户的命名，也是落盘目录名）。
 pub type SessionId = String;
 

@@ -162,23 +162,38 @@ if (!loadErrors.length) {
     return got.length === 1 && got[0].indexOf("[节点] 完成：n1") === 0 &&
       got[0].indexOf("语料抽好了") > 0 && got[0].indexOf("第二行") < 0;
   });
-  // ⑦ 模块与服务面板：按模块分组，无入口的模块如实标注，可跑入口给出「运行」。
-  check("模块与服务面板按模块分组并标注无入口", () => {
+  // ⑦ 模块与服务面板：只列模块；服务带开关与运行态；功能给「使用」，参数在子卡片里。
+  check("模块与服务面板只列模块、功能走「使用」子卡片", () => {
     const got = vm.runInNewContext(`
       (() => {
         const ctx = openModal('测试', () => {});
         renderModulesPanel(ctx,
-          [{ id: 'research', brief: '调研' }, { id: 'lonely', brief: '只有 system' }],
-          [{ id: 'control_resident', desc: '生命周期', params: [] },
-           { id: 'module.research.grep', desc: '搜索', params: [] }]);
+          [{ id: 'research', brief: '调研', enabled: true, services: [{ name: 'fs', enabled: false }] },
+           { id: 'lonely', brief: '只有 system', enabled: false, services: [] }],
+          [{ module: 'research', name: 'fs', adapter: 'mcp', state: '未启动' }],
+          [{ id: 'set_module_enabled', desc: '模块开关', params: [] },
+           { id: 'control_resident', desc: '服务开关', params: [] },
+           { id: 'module.research.grep', desc: '搜索', params: [] }],
+          async () => {});
         const walk = (n, out) => { out.push(n); for (const c of (n.children || [])) walk(c, out); return out; };
-        const texts = walk($('#modal-root'), []).map((n) => n.textContent || '');
-        return texts.some((t) => t.indexOf('research') >= 0)
-          && texts.some((t) => t.indexOf('只能经 AI 使用') >= 0)
-          && texts.some((t) => t === '运行');
+        const nodes = walk($('#modal-root'), []);
+        const texts = nodes.map((n) => n.textContent || '');
+        const labels = nodes.filter((n) => n.tagName === 'BUTTON').map((n) => n.textContent);
+        const listed = { use: labels.indexOf('使用') >= 0, run: labels.indexOf('运行') >= 0 };
+        openUseCard({ id: 'module.research.grep', desc: '搜索', params: [{ name: 'q', ty: 'string' }] });
+        const after = walk($('#modal-root'), []).filter((n) => n.tagName === 'BUTTON').map((n) => n.textContent);
+        return {
+          research: texts.some((t) => t.indexOf('research') >= 0),
+          service: texts.some((t) => t.indexOf('fs · mcp · 未启动') >= 0),
+          use: listed.use,
+          noRunInList: !listed.run,
+          noSysTools: texts.every((t) => t.indexOf('set_module_enabled') < 0 && t.indexOf('control_resident') < 0),
+          lonely: texts.some((t) => t.indexOf('只能经 AI 使用') >= 0),
+          subRun: after.indexOf('运行') >= 0,
+        };
       })()
     `, sandbox);
-    return got;
+    return got.research && got.service && got.use && got.noRunInList && got.noSysTools && got.lonely && got.subRun;
   });
 }
 

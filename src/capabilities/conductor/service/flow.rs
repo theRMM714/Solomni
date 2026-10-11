@@ -475,7 +475,7 @@ impl Conductor {
     }
 
     /// 清单即事实：每次调用重扫（策略在 conductor，机制在 ModuleSource）。
-    pub fn scan(&self) -> crate::capabilities::workspace::api::Roster {
-        self.workspace.roster()
+    pub fn scan(&self) -> crate::capabilities::modules::api::Roster {
+        self.modules.roster()
     }
 }

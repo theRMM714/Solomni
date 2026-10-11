@@ -30,10 +30,7 @@ pub fn propose(parties: &Parties<'_>, req: &mut Request<'_>) -> Result<Proposal,
             ),
             (
                 "modules",
-                crate::capabilities::workspace::api::listing(
-                    parties.roster,
-                    &parties.prompt.tools(),
-                ),
+                crate::capabilities::modules::api::listing(parties.roster, &parties.prompt.tools()),
             ),
             (
                 "models",

@@ -10,6 +10,7 @@ use super::pump::*;
 use crate::capabilities::collab::service::discussion::Discussion;
 use crate::capabilities::collab::service::synthesis::Execution;
 use crate::capabilities::llm::api::{Chat, Llm, Msg};
+use crate::capabilities::modules::api::Modules;
 use crate::capabilities::prompt::api::{Prompt, Segment};
 use crate::capabilities::registry::api::Settings;
 use crate::capabilities::session::api::AgentMeta;
@@ -137,8 +138,10 @@ pub struct CollabSession {
     pub(crate) systools: Arc<dyn crate::capabilities::tools::api::Tools>,
     /// llm 用例面（**不持它的端口**，R12）：按通道造句柄、修信封都走它。
     pub(crate) llm: Arc<dyn Llm + Send + Sync>,
-    /// 工作区用例面（**不持它的端口**，R12）：清单、运行包库与工作区目录都走它。
+    /// 工作区用例面（**不持它的端口**，R12）：运行包库与工作区目录走它。
     pub(crate) workspace: Arc<dyn Workspace + Send + Sync>,
+    /// 目的：模块能力（**不持它的端口**，R12）——清单事实的唯一上游。
+    pub(crate) modules: Arc<dyn Modules + Send + Sync>,
     /// 工具执行面（**不持它的端口**，R12）：跑外部/内置工具都走它。
     pub(crate) tools: Arc<dyn ToolExec + Send + Sync>,
     /// 运行日志（工具循环里"输出被长度截断"这类事实落盘）。
@@ -165,6 +168,7 @@ impl CollabSession {
     pub fn start(
         llm: Arc<dyn Llm + Send + Sync>,
         workspace: Arc<dyn Workspace + Send + Sync>,
+        modules: Arc<dyn Modules + Send + Sync>,
         settings: Settings,
         prompts: Arc<dyn Prompt>,
         systools: Arc<dyn crate::capabilities::tools::api::Tools>,
@@ -204,6 +208,7 @@ impl CollabSession {
             systools,
             llm,
             workspace,
+            modules,
             tools,
             log,
             spec,

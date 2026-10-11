@@ -440,13 +440,14 @@ pub(crate) fn declaration_shape_is_enforced_before_semantics() {
 pub(crate) fn the_real_bridge_reads_catalog_and_session_messages() {
     use crate::capabilities::conductor::ports::ProxyHost;
     use crate::capabilities::conductor::service::proxy::ProxyBridge;
-    use crate::capabilities::workspace::api::ModuleManifest;
+    use crate::capabilities::modules::api::ModuleManifest;
 
     let module = Module {
         manifest: ModuleManifest {
             id: "m1".to_string(),
             brief: "测试模块".to_string(),
             system: "你负责测试。".to_string(),
+            enabled: true,
             runtimes: Vec::new(),
             tools: BTreeMap::new(),
             services: Default::default(),
@@ -533,13 +534,14 @@ pub(crate) fn the_real_bridge_reads_catalog_and_session_messages() {
 pub(crate) fn the_real_bridge_creates_a_child_work() {
     use crate::capabilities::conductor::ports::ProxyHost;
     use crate::capabilities::conductor::service::proxy::ProxyBridge;
-    use crate::capabilities::workspace::api::ModuleManifest;
+    use crate::capabilities::modules::api::ModuleManifest;
 
     let module = Module {
         manifest: ModuleManifest {
             id: "m1".to_string(),
             brief: "测试模块".to_string(),
             system: "你负责测试。".to_string(),
+            enabled: true,
             runtimes: Vec::new(),
             tools: BTreeMap::new(),
             services: Default::default(),
@@ -597,7 +599,7 @@ pub(crate) fn the_real_bridge_creates_a_child_work() {
 pub(crate) fn the_proxy_handler_owns_and_runs_proxy_tools() {
     use crate::capabilities::conductor::ports::ProxyHost;
     use crate::capabilities::conductor::service::proxy::{ProxyBridge, ProxyHandler};
-    use crate::capabilities::workspace::api::ModuleManifest;
+    use crate::capabilities::modules::api::ModuleManifest;
     use crate::kernel::ports::ToolHandler;
 
     let module = Module {
@@ -605,6 +607,7 @@ pub(crate) fn the_proxy_handler_owns_and_runs_proxy_tools() {
             id: "m1".to_string(),
             brief: "测试模块".to_string(),
             system: "你负责测试。".to_string(),
+            enabled: true,
             runtimes: Vec::new(),
             tools: BTreeMap::new(),
             services: Default::default(),
@@ -696,12 +699,13 @@ pub(crate) fn the_proxy_session_rebuilds_from_disk() {
 /// 子会话停下 → 通知代理（只写一条通知行，**不转发子会话转录**）。
 #[test]
 pub(crate) fn a_finished_child_notifies_the_proxy_without_dumping_its_transcript() {
-    use crate::capabilities::workspace::api::ModuleManifest;
+    use crate::capabilities::modules::api::ModuleManifest;
     let module = Module {
         manifest: ModuleManifest {
             id: "m1".to_string(),
             brief: "测试模块".to_string(),
             system: "你负责测试。".to_string(),
+            enabled: true,
             runtimes: Vec::new(),
             tools: BTreeMap::new(),
             services: Default::default(),
@@ -751,13 +755,14 @@ pub(crate) fn a_finished_child_notifies_the_proxy_without_dumping_its_transcript
 pub(crate) fn run_state_gates_dispatch_and_survives_stop_close() {
     use crate::capabilities::conductor::ports::ProxyHost;
     use crate::capabilities::conductor::service::proxy::ProxyBridge;
-    use crate::capabilities::workspace::api::ModuleManifest;
+    use crate::capabilities::modules::api::ModuleManifest;
 
     let module = Module {
         manifest: ModuleManifest {
             id: "m1".to_string(),
             brief: "测试模块".to_string(),
             system: "你负责测试。".to_string(),
+            enabled: true,
             runtimes: Vec::new(),
             tools: BTreeMap::new(),
             services: Default::default(),
@@ -852,13 +857,14 @@ pub(crate) fn run_state_gates_dispatch_and_survives_stop_close() {
 pub(crate) fn relay_records_its_source_on_the_target() {
     use crate::capabilities::conductor::ports::ProxyHost;
     use crate::capabilities::conductor::service::proxy::ProxyBridge;
-    use crate::capabilities::workspace::api::ModuleManifest;
+    use crate::capabilities::modules::api::ModuleManifest;
 
     let module = Module {
         manifest: ModuleManifest {
             id: "m1".to_string(),
             brief: "测试模块".to_string(),
             system: "你负责测试。".to_string(),
+            enabled: true,
             runtimes: Vec::new(),
             tools: BTreeMap::new(),
             services: Default::default(),
@@ -895,13 +901,14 @@ pub(crate) fn relay_records_its_source_on_the_target() {
 pub(crate) fn the_real_bridge_creates_a_multi_agent_child_work() {
     use crate::capabilities::conductor::ports::ProxyHost;
     use crate::capabilities::conductor::service::proxy::ProxyBridge;
-    use crate::capabilities::workspace::api::ModuleManifest;
+    use crate::capabilities::modules::api::ModuleManifest;
 
     let module = |id: &str| Module {
         manifest: ModuleManifest {
             id: id.to_string(),
             brief: "测试模块".to_string(),
             system: "你负责测试。".to_string(),
+            enabled: true,
             runtimes: Vec::new(),
             tools: BTreeMap::new(),
             services: Default::default(),
@@ -955,13 +962,14 @@ pub(crate) fn the_real_bridge_creates_a_multi_agent_child_work() {
 /// 反过来，普通 agent 会话也不会沾上代理角色的话。
 #[test]
 pub(crate) fn the_proxy_identity_is_the_role_prompt() {
-    use crate::capabilities::workspace::api::ModuleManifest;
+    use crate::capabilities::modules::api::ModuleManifest;
 
     let module = Module {
         manifest: ModuleManifest {
             id: "m1".to_string(),
             brief: "测试模块".to_string(),
             system: "你负责测试。".to_string(),
+            enabled: true,
             runtimes: Vec::new(),
             tools: BTreeMap::new(),
             services: Default::default(),
@@ -1107,13 +1115,14 @@ pub(crate) fn create_work_with_proxy_mode_makes_a_delegated_session() {
 pub(crate) fn observe_reports_new_messages_since_the_last_cursor() {
     use crate::capabilities::conductor::ports::ProxyHost;
     use crate::capabilities::conductor::service::proxy::ProxyBridge;
-    use crate::capabilities::workspace::api::ModuleManifest;
+    use crate::capabilities::modules::api::ModuleManifest;
 
     let module = Module {
         manifest: ModuleManifest {
             id: "m1".to_string(),
             brief: "测试模块".to_string(),
             system: "你负责测试。".to_string(),
+            enabled: true,
             runtimes: Vec::new(),
             tools: BTreeMap::new(),
             services: Default::default(),
@@ -1171,13 +1180,14 @@ pub(crate) fn observe_reports_new_messages_since_the_last_cursor() {
 pub(crate) fn the_proxy_created_child_publishes_its_opening_facts() {
     use crate::capabilities::conductor::ports::ProxyHost;
     use crate::capabilities::conductor::service::proxy::ProxyBridge;
-    use crate::capabilities::workspace::api::ModuleManifest;
+    use crate::capabilities::modules::api::ModuleManifest;
 
     let module = |id: &str| Module {
         manifest: ModuleManifest {
             id: id.to_string(),
             brief: "测试模块".to_string(),
             system: "你负责测试。".to_string(),
+            enabled: true,
             runtimes: Vec::new(),
             tools: BTreeMap::new(),
             services: Default::default(),
@@ -1239,13 +1249,14 @@ pub(crate) fn the_proxy_created_child_publishes_its_opening_facts() {
 pub(crate) fn collab_child_send_lands_on_the_gate_it_awaits() {
     use crate::capabilities::conductor::ports::ProxyHost;
     use crate::capabilities::conductor::service::proxy::ProxyBridge;
-    use crate::capabilities::workspace::api::ModuleManifest;
+    use crate::capabilities::modules::api::ModuleManifest;
 
     let module = Module {
         manifest: ModuleManifest {
             id: "m1".to_string(),
             brief: "测试模块".to_string(),
             system: "你负责测试。".to_string(),
+            enabled: true,
             runtimes: Vec::new(),
             tools: BTreeMap::new(),
             services: Default::default(),

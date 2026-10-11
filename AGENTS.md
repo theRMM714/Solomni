@@ -179,6 +179,7 @@
 | `permission`（权限） | `docs/permission/README.md` | `unit-map.md` |
 | `llm`（模型通道与协议） | `docs/llm/README.md` | `unit-map.md` |
 | `registry`（登记处） | `docs/registry/README.md` | `unit-map.md` |
+| `modules`（模块公地） | `docs/modules/README.md` | `unit-map.md` |
 | `workspace`（工作区与运行包） | `docs/workspace/README.md` | `unit-map.md` |
 | `prompt`（提示词册） | `docs/prompt/README.md` | `unit-map.md`、`prompts.md` |
 | `slate`（名单） | `docs/slate/README.md` | `unit-map.md` |

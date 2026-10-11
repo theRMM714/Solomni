@@ -3034,60 +3034,120 @@ function eventError(err) {
 }
 
 /* ---------- 设置⑥：模块与服务（列表 + 运行 + 看回执） ---------- */
-/* 事实只有两份：模块清单（/api/state）与动作目录（/api/actions）——不在这里另写一份。
-   动作目录对 user 已含 module.<模块>.<工具>、就绪服务的 module.<模块>.<服务>.<操作> 与 control_resident。 */
+/* 事实只有两份：模块清单 + 服务运行态（/api/state）与动作目录（/api/actions）——不在这里另写一份。
+   只列 modules/ 下的模块；每个模块下面挂它的服务（带开关）与功能（每个功能一个「使用」子卡片）。
+   系统工具各回各的入口，不倒进这一块（模块的全局开关 set_module_enabled 挂在模块头上）。 */
 async function openModulesPanel() {
-  const ctx = openModal('模块与服务', () => {});
-  ctx.setMsg('加载中…');
-  let mods = [];
-  let actions = [];
-  try {
-    const st = await api('GET', '/api/state');
-    mods = st.modules || [];
-    const ac = await api('GET', '/api/actions');
-    actions = ac.actions || [];
-  } catch (e) {
-    ctx.setMsg('加载失败：' + e.message, true);
-    return;
-  }
-  // 隐秘字段的设置面另有入口：值不在这一块面板里回显。
-  actions = actions.filter((a) => a.id !== 'set_secret' && a.id !== 'clear_secret');
-  ctx.setMsg('');
-  renderModulesPanel(ctx, mods, actions);
+  const ctx = openModal('模块与服务', () => {}, true);
+  const load = async () => {
+    ctx.body.innerHTML = '';
+    ctx.setMsg('加载中…');
+    let mods = [];
+    let services = [];
+    let actions = [];
+    try {
+      const st = await api('GET', '/api/state');
+      mods = st.modules || [];
+      services = st.services || [];
+      const ac = await api('GET', '/api/actions');
+      // 隐秘字段的设置面另有入口：值不在这一块面板里回显。
+      actions = (ac.actions || []).filter((a) => a.id !== 'set_secret' && a.id !== 'clear_secret');
+    } catch (e) {
+      ctx.setMsg('加载失败：' + e.message, true);
+      return;
+    }
+    ctx.setMsg('');
+    renderModulesPanel(ctx, mods, services, actions, load);
+  };
+  await load();
 }
 
-/** 纯渲染（数据注入）：按模块分组列出可直跑的入口；没有入口的模块如实标注。 */
-function renderModulesPanel(ctx, mods, actions) {
-  const byModule = new Map(mods.map((m) => [m.id, []]));
-  const orphan = [];
-  for (const a of actions) {
-    let hit = false;
-    for (const m of mods) {
-      if (a.id.indexOf('module.' + m.id + '.') === 0) {
-        byModule.get(m.id).push(a);
-        hit = true;
-        break;
-      }
-    }
-    if (!hit && a.id !== 'control_resident') orphan.push(a);
-  }
-  const lifecycle = actions.find((a) => a.id === 'control_resident');
-  if (lifecycle) {
-    const sec = panelSection('常驻服务生命周期');
-    sec.appendChild(actionRunner(lifecycle));
-    ctx.body.appendChild(sec);
+/** 纯渲染（数据注入）：模块 → 服务（开关 + 运行态）→ 功能（「使用」按钮）。 */
+function renderModulesPanel(ctx, mods, services, actions, reload) {
+  if (!mods.length) {
+    ctx.body.appendChild(emptyHint('（modules/ 下没有模块）'));
+    return;
   }
   for (const m of mods) {
     const sec = panelSection(m.id + (m.brief ? ' · ' + m.brief : ''));
-    const acts = byModule.get(m.id) || [];
+    // 模块开关：停用会连带停掉它的常驻服务（核心侧级联）。
+    const head = document.createElement('div');
+    head.className = 'svc-row';
+    const state = document.createElement('span');
+    state.className = 'svc-state';
+    state.textContent = m.enabled ? '整体启用' : '整体停用';
+    head.appendChild(state);
+    const toggle = btn(m.enabled ? '停用模块' : '启用模块', 'btn');
+    toggle.onclick = () => fire(ctx, 'set_module_enabled', { module: m.id, enabled: !m.enabled }, reload);
+    head.appendChild(toggle);
+    sec.appendChild(head);
+
+    // 服务：模块声明的常驻服务（声明在 modules[].services，运行态在 services）。
+    sec.appendChild(cfgDiv('cfg-sec-title', '服务'));
+    const declared = m.services || [];
+    if (!declared.length) {
+      sec.appendChild(emptyHint('（没有声明常驻服务）'));
+    } else {
+      for (const s of declared) {
+        const rt = services.find((x) => x.module === m.id && x.name === s.name) || {};
+        const row = document.createElement('div');
+        row.className = 'svc-row';
+        const name = document.createElement('span');
+        name.className = 'svc-name';
+        name.textContent = s.name + (rt.adapter ? ' · ' + rt.adapter : '') +
+          ' · ' + (rt.state || (s.enabled ? '未启动' : '已禁用'));
+        row.appendChild(name);
+        const sw = btn(s.enabled ? '停用服务' : '启用服务', 'btn');
+        sw.onclick = () => fire(ctx, 'control_resident',
+          { module: m.id, name: s.name, action: s.enabled ? 'disable' : 'enable' }, reload);
+        row.appendChild(sw);
+        sec.appendChild(row);
+      }
+    }
+
+    // 功能：本模块的工具与服务操作（每个一行；参数与运行在子卡片里）。
+    sec.appendChild(cfgDiv('cfg-sec-title', '功能'));
+    const acts = actions.filter((a) => a.id.indexOf('module.' + m.id + '.') === 0);
     if (!acts.length) {
       sec.appendChild(emptyHint('（只能经 AI 使用：没有可直跑的 tools / services）'));
     } else {
-      for (const a of acts) sec.appendChild(actionRunner(a));
+      for (const a of acts) sec.appendChild(useRow(a));
     }
     ctx.body.appendChild(sec);
   }
-  for (const a of orphan) ctx.body.appendChild(actionRunner(a));
+}
+
+/** 功能一行：只显示名字与「使用」；参数与运行在子卡片里，列表不再平铺表单。 */
+function useRow(action) {
+  const row = document.createElement('div');
+  row.className = 'svc-row';
+  const name = document.createElement('span');
+  name.className = 'svc-name';
+  const short = action.id.replace(/^module\.[^.]+\./, '');
+  name.textContent = short + (action.desc ? ' — ' + action.desc : '');
+  row.appendChild(name);
+  const use = btn('使用', 'btn');
+  use.onclick = () => openUseCard(action);
+  row.appendChild(use);
+  return row;
+}
+
+/** 子卡片：一个功能的参数与运行（回执打在卡片里）。 */
+function openUseCard(action) {
+  const ctx = openModal(action.id, () => {});
+  if (action.desc) ctx.setMsg(action.desc);
+  ctx.body.appendChild(actionRunner(action));
+}
+
+/** 跑一条动作后再重绘面板：失败如实显示，成功按新状态重绘。 */
+async function fire(ctx, id, args, reload) {
+  try {
+    await api('POST', actionUrl(id), args);
+  } catch (e) {
+    ctx.setMsg('操作失败：' + e.message, true);
+    return;
+  }
+  await reload();
 }
 
 function panelSection(title) {

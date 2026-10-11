@@ -16,7 +16,7 @@
 
 ## 三、依赖图位置（由源码的 `::api` 引用推导）
 
-- 经 `::api` 用到：`kernel`、`llm`、`prompt`、`registry`、`residents`、`session`、`slate`、`taskchain`、`tools`、`workspace`
+- 经 `::api` 用到：`kernel`、`llm`、`modules`、`prompt`、`registry`、`residents`、`session`、`slate`、`taskchain`、`tools`、`workspace`
 - 谁在用我：`conductor`
 
 ## 四、改动本单元时必须同步

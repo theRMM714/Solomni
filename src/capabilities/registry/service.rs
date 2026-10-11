@@ -5,13 +5,13 @@
 //! 对外只经 `registry::api::Registry`：`conductor` 与呈现层拿不到 `settings` 字段。
 
 use crate::capabilities::llm::api::{Channel, Llm, ProbeOutcome, ReplayReport, ToolMode};
+use crate::capabilities::modules::api::Roster;
 use crate::capabilities::registry::api::{AgentView, ModelView, ProviderView, Registry};
 use crate::capabilities::registry::domain::agents;
 use crate::capabilities::registry::domain::providers::{
     AppSettings, ModelEntry, Provider, Settings, DEFAULT_CONTEXT_TOKENS,
 };
 use crate::capabilities::registry::ports::SettingsStore;
-use crate::capabilities::workspace::api::Roster;
 use crate::kernel::ports::Log;
 use std::sync::Arc;
 

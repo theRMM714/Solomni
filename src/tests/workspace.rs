@@ -1,43 +1,7 @@
-//! 工作区能力测试：清单 / 运行包库 / 执行档位与计划 / 沙箱寻址。
+//! 工作区能力测试：运行包库、执行档位与计划、沙箱寻址与共享区版本化。
 //! 归属判据：钉的是**本能力的不变式**；顺手经过别处只是路径，不是归属。
 use super::builders::*;
 use super::prelude::*;
-
-#[test]
-pub(crate) fn roster_lists_modules() {
-    let core = core_with(
-        vec![module_of("a"), module_of("b")],
-        gw(BTreeMap::new(), vec!["[]".into()]),
-    );
-    let r = core.scan();
-    let ids: Vec<_> = r.modules.iter().map(|m| m.manifest.id.clone()).collect();
-    assert_eq!(ids, vec!["a", "b"]);
-}
-
-#[test]
-pub(crate) fn shipped_modules_scan_clean() {
-    // 随仓模块（modules/）是产品内容的一部分：清单必须全部合法、id 与目录一致。
-    let roster = crate::capabilities::workspace::detail::FsModules::new(
-        PathBuf::from("modules"),
-        crate::capabilities::tools::api::names(),
-    )
-    .scan();
-    assert!(!roster.modules.is_empty(), "仓库应自带模块");
-    assert!(
-        roster.rejected.is_empty(),
-        "随仓清单必须全部合法：{:?}",
-        roster.rejected
-    );
-    // 随仓的三件就是演示工作流那三件：少了任何一件，演示就跑不起来。
-    let ids: Vec<&str> = roster
-        .modules
-        .iter()
-        .map(|m| m.manifest.id.as_str())
-        .collect();
-    for id in ["harvest", "indexer", "render"] {
-        assert!(ids.contains(&id), "随仓模块少了 {}（现在是 {:?}）", id, ids);
-    }
-}
 
 #[test]
 pub(crate) fn sandbox_resolve_accepts_only_absolute_paths_inside_roots() {
@@ -97,44 +61,6 @@ pub(crate) fn sandbox_resolve_accepts_only_absolute_paths_inside_roots() {
 }
 
 #[test]
-pub(crate) fn agent_system_carries_the_real_roots() {
-    // 提示词里给出的根必须是真实绝对路径（模型据此拼路径；外部工具也认它）。
-    let mut core = core_with(vec![module_of("a")], gw(BTreeMap::new(), vec!["[]".into()]));
-    let sid = core
-        .create_work(work("w", WorkMode::Single, &["a"]))
-        .unwrap()
-        .sid;
-    let system = &core.single_identity(&sid).expect("身份块");
-    assert!(
-        system.contains(&s(&["w", "work"])),
-        "system 要含共享区真实根：{}",
-        system
-    );
-    assert!(
-        system.contains(&s(&["w", "a"])),
-        "system 要含私有沙箱真实根：{}",
-        system
-    );
-    assert!(
-        system.contains(&format!("：{}", s(&["a"]))),
-        "system 要含模块目录真实根：{}",
-        system
-    );
-    // 路径写法要用真实根拼（模型照抄它）：环境块里的例子是**工作副本**（沙箱）。
-    assert!(
-        system.contains(&format!("{}/note.txt", s(&["w", "a"]))),
-        "路径写法要用真实根拼：{}",
-        system
-    );
-    // 护栏：提示词里不得出现任何解析不了的路径写法（模型会照抄它）
-    assert!(
-        !system.contains("work:/") && !system.contains("sandbox:/"),
-        "提示词只该给真实根：{}",
-        system
-    );
-}
-
-#[test]
 pub(crate) fn sandboxes_lookup_is_by_agent() {
     let boxes = crate::capabilities::workspace::api::Sandboxes {
         shared: abs(&["w", "work"]),
@@ -183,53 +109,6 @@ pub(crate) fn package_manifest_check_rejects_illegal_forms() {
         check(&pkg_yaml("id: a\nversion: 1\nprefix: opt/a\nrequires: [a]")).is_err(),
         "requires 不能依赖自己"
     );
-}
-
-#[test]
-pub(crate) fn module_runtimes_are_validated() {
-    let mut m = module_of("a");
-    m.manifest.runtimes = vec!["python".to_string(), "cc".to_string()];
-    assert!(crate::capabilities::workspace::api::check_runtimes(&m.manifest).is_ok());
-    m.manifest.runtimes = vec!["Python".to_string()];
-    assert!(
-        crate::capabilities::workspace::api::check_runtimes(&m.manifest).is_err(),
-        "大写不合法"
-    );
-    m.manifest.runtimes = vec!["python".to_string(), "python".to_string()];
-    assert!(
-        crate::capabilities::workspace::api::check_runtimes(&m.manifest)
-            .unwrap_err()
-            .contains("重复"),
-        "重复声明要拒收"
-    );
-}
-
-#[test]
-pub(crate) fn module_tools_may_not_take_builtin_names() {
-    let mut m = module_of("a");
-    m.manifest
-        .tools
-        .insert("read_txt".to_string(), decl("python tools/read_txt.py"));
-    assert!(
-        crate::capabilities::workspace::api::check_tools(
-            &m.manifest,
-            &crate::capabilities::tools::api::names(),
-        )
-        .is_ok(),
-        "普通工具名可用"
-    );
-    for name in ["read", "write", "search"] {
-        m.manifest
-            .tools
-            .insert(name.to_string(), decl("python tools/x.py"));
-        let why = crate::capabilities::workspace::api::check_tools(
-            &m.manifest,
-            &crate::capabilities::tools::api::names(),
-        )
-        .unwrap_err();
-        assert!(why.contains("保留名"), "内置工具名要拒收：{}", why);
-        m.manifest.tools.remove(name);
-    }
 }
 
 #[test]
@@ -565,10 +444,10 @@ pub(crate) fn vm_tier_is_refused_when_the_machine_cannot_carry_it() {
         registry_service(InMemorySettings::with_tier(Tier::Vm), Arc::clone(&llm)),
         test_history(),
         test_workspace(
-            Arc::new(VecSource(vec![module_of("a")])),
             Arc::new(InMemoryPackages::empty()),
             Arc::new(InMemoryWorkspace::new()),
         ),
+        test_modules(Arc::new(VecSource(vec![module_of("a")]))),
         llm,
         test_tools_svc_with(
             Arc::new(SilentRunner),
@@ -609,10 +488,10 @@ pub(crate) fn vm_tier_is_refused_when_the_machine_cannot_carry_it() {
         registry_service(InMemorySettings::new(), Arc::clone(&llm2)),
         test_history(),
         test_workspace(
-            Arc::new(VecSource(vec![module_of("a")])),
             Arc::new(InMemoryPackages::empty()),
             Arc::new(InMemoryWorkspace::new()),
         ),
+        test_modules(Arc::new(VecSource(vec![module_of("a")]))),
         llm2,
         test_tools_svc_with(
             Arc::new(SilentRunner),
@@ -737,10 +616,10 @@ pub(crate) fn module_without_runtime_is_denied_with_reason() {
         registry_service(InMemorySettings::with_tier(Tier::Host), Arc::clone(&llm)),
         test_history_of(Arc::clone(&hist)),
         test_workspace(
-            Arc::new(VecSource(vec![mod_a])),
             Arc::new(InMemoryPackages::empty()),
             Arc::new(InMemoryWorkspace::new()),
         ),
+        test_modules(Arc::new(VecSource(vec![mod_a]))),
         llm,
         test_tools_svc_with(
             Arc::clone(&runner) as Arc<dyn ProcessRunner>,
@@ -887,7 +766,6 @@ fn work_ws() -> (WorkFace, Arc<InMemoryWorkspace>, Arc<InMemoryWorkStore>) {
     let dirs = Arc::new(InMemoryWorkspace::new());
     let store = Arc::new(InMemoryWorkStore::new());
     let ws = test_workspace_store(
-        Arc::new(VecSource(Vec::new())),
         Arc::new(InMemoryPackages::empty()),
         dirs.clone(),
         store.clone(),

@@ -1,15 +1,15 @@
 //! 目的：常驻服务的注册表与生命周期——统一管理 API 的实现。
 //! 管：适配器注册表、运行中的实例、用户开关、租约回收；只认适配器端口与 `Workspace::roster` 的清单事实。
 //! 不管：任何协议（全在适配器）；进程与围栏（在 kernel，随真实适配器接入）；
-//!   开关的落盘（随设置面接入，当前在内存、缺省取声明里的 enabled）。
+//!   启停开关（归 modules：用户覆盖 ?? 作者默认）；本能力只按有效值跑。
 //! 联动：api 见 `api.rs`，端口见 `ports.rs`；由 `main.rs` 装配。
 
+use crate::capabilities::modules::api::{Module, Modules, Roster, ServiceDecl};
 use crate::capabilities::residents::api::{
     Operation, Receipt, ResidentOps, ServiceState, ServiceView,
 };
 use crate::capabilities::residents::ports::{LaunchSpec, ServiceAdapter, ServiceInstance};
 use crate::capabilities::secrets::api::SecretOps;
-use crate::capabilities::workspace::api::{Module, Roster, ServiceDecl, Workspace};
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
@@ -29,11 +29,9 @@ struct Running {
 /// 目的：常驻服务能力——持适配器注册表与运行态，按统一 API 答话。
 pub struct ResidentsService {
     adapters: BTreeMap<String, Arc<dyn ServiceAdapter + Send + Sync>>,
-    workspace: Arc<dyn Workspace + Send + Sync>,
+    modules: Arc<dyn Modules + Send + Sync>,
     /// 隐秘字段面：起服务时解析注入项，回执出口按已知值脱敏。
     secrets: Arc<dyn SecretOps + Send + Sync>,
-    /// 用户开关（缺省取声明里的 enabled）；落盘随设置面接入。
-    enabled: Mutex<BTreeMap<String, bool>>,
     /// 运行中的实例（key = 模块/服务）。
     running: Mutex<BTreeMap<String, Running>>,
     /// 起过、但进程已经结束的服务（key = 模块/服务 → (如实原因, 会话租约)）：
@@ -42,10 +40,10 @@ pub struct ResidentsService {
 }
 
 impl ResidentsService {
-    /// 目的：组合根专用——注入适配器注册表与工作区用例面（只用来取模块清单）。
+    /// 目的：组合根专用——注入适配器注册表与模块能力面（取清单与启停有效值）。
     pub fn new(
         adapters: Vec<Arc<dyn ServiceAdapter + Send + Sync>>,
-        workspace: Arc<dyn Workspace + Send + Sync>,
+        modules: Arc<dyn Modules + Send + Sync>,
         secrets: Arc<dyn SecretOps + Send + Sync>,
     ) -> ResidentsService {
         let mut map = BTreeMap::new();
@@ -54,9 +52,8 @@ impl ResidentsService {
         }
         ResidentsService {
             adapters: map,
-            workspace,
+            modules,
             secrets,
-            enabled: Mutex::new(BTreeMap::new()),
             running: Mutex::new(BTreeMap::new()),
             failed: Mutex::new(BTreeMap::new()),
         }
@@ -85,16 +82,11 @@ impl ResidentsService {
             .ok_or_else(|| format!("模块 {} 没有声明服务 {}", module, name))?;
         Ok((m, d))
     }
-
-    /// 目的：这个服务此刻开没开——用户开关优先，缺省取声明。
-    fn is_enabled(&self, k: &str, default: bool) -> bool {
-        *self.enabled.lock().expect("锁").get(k).unwrap_or(&default)
-    }
 }
 
 impl ResidentOps for ResidentsService {
     fn services(&self) -> Result<Vec<ServiceView>, String> {
-        let roster = self.workspace.roster();
+        let roster = self.modules.roster();
         let running = self.running.lock().expect("锁");
         let mut out = Vec::new();
         for m in &roster.modules {
@@ -113,7 +105,7 @@ impl ResidentOps for ResidentsService {
                     (ServiceState::Ready, run.operations.clone())
                 } else if let Some((why, _)) = failed.get(&k) {
                     (ServiceState::Failed(why.clone()), Vec::new())
-                } else if !self.is_enabled(&k, decl.enabled) {
+                } else if !self.modules.service_enabled(&m.manifest.id, name) {
                     (ServiceState::Disabled, Vec::new())
                 } else {
                     (ServiceState::Stopped, Vec::new())
@@ -133,11 +125,11 @@ impl ResidentOps for ResidentsService {
     }
 
     fn start(&self, module: &str, name: &str, lease: &str) -> Result<Vec<Operation>, String> {
-        let roster = self.workspace.roster();
+        let roster = self.modules.roster();
         let (m, decl) = Self::locate(&roster, module, name)?;
         let k = key(module, name);
-        if !self.is_enabled(&k, decl.enabled) {
-            return Err(format!("服务 {} 已禁用：先启用再启动", k));
+        if !self.modules.service_enabled(module, name) {
+            return Err(format!("服务 {} 未启用：先启用再启动", k));
         }
         {
             let running = self.running.lock().expect("锁");
@@ -191,15 +183,22 @@ impl ResidentOps for ResidentsService {
         Ok(())
     }
 
-    fn set_enabled(&self, module: &str, name: &str, enabled: bool) -> Result<(), String> {
-        let roster = self.workspace.roster();
-        Self::locate(&roster, module, name)?;
-        let k = key(module, name);
-        self.enabled.lock().expect("锁").insert(k, enabled);
-        if !enabled {
-            self.stop(module, name)?;
+    fn start_enabled(&self) -> Vec<String> {
+        let roster = self.modules.roster();
+        let mut out = Vec::new();
+        for m in &roster.modules {
+            for name in m.manifest.services.keys() {
+                if !self.modules.service_enabled(&m.manifest.id, name) {
+                    continue;
+                }
+                let k = format!("{}.{}", m.manifest.id, name);
+                match self.start(&m.manifest.id, name, "") {
+                    Ok(_) => out.push(format!("[常驻服务] 已拉起 {}", k)),
+                    Err(e) => out.push(format!("[常驻服务] {} 拉起失败：{}", k, e)),
+                }
+            }
         }
-        Ok(())
+        out
     }
 
     fn call(
@@ -210,11 +209,25 @@ impl ResidentOps for ResidentsService {
         args: &serde_json::Value,
     ) -> Result<Receipt, String> {
         let k = key(module, name);
+        // 可用性先判（**锁外**，与 start 的锁序一致：modules → running）：回执要如实说明为什么不可用，
+        // 模型据此学会不再调它（事实教学，不靠会话侧缓存或刷新）。
+        if !self.modules.module_enabled(module) {
+            return Err(format!("服务 {} 不可用：模块 {} 已停用", k, module));
+        }
+        if !self.modules.service_enabled(module, name) {
+            return Err(format!("服务 {} 不可用：已停用（需先启用）", k));
+        }
         let mut running = self.running.lock().expect("锁");
+        if !running.contains_key(&k) {
+            // 没在跑：区分"之前崩过"（failed 里有如实原因）与"从没起过"。
+            let last = self.failed.lock().expect("锁").get(&k).cloned();
+            return Err(match last {
+                Some((why, _)) => format!("服务 {} 不可用：进程已结束（上次：{}）", k, why),
+                None => format!("服务 {} 不可用：未启动", k),
+            });
+        }
         let (receipt, alive, lease) = {
-            let run = running
-                .get_mut(&k)
-                .ok_or_else(|| format!("服务 {} 没在跑：先启动", k))?;
+            let run = running.get_mut(&k).expect("刚查过存在");
             if !run.operations.iter().any(|o| o.name == op) {
                 let names: Vec<&str> = run.operations.iter().map(|o| o.name.as_str()).collect();
                 return Err(format!(

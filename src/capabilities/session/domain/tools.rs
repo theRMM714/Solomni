@@ -35,6 +35,8 @@ pub struct ServiceOp {
     pub op: String,
     /// 目的：给人/模型看的一句话说明（服务给的，可能为空）。
     pub description: String,
+    /// 目的：参数契约——服务给的 **JSON Schema 原样**（可能为空）；核心不校验，只声明给模型。
+    pub parameters: Option<serde_json::Value>,
 }
 
 /// 成员的工具执行环境：来自 module.yaml（按模块分组的放行表）+ 注入的执行端口 + 本成员的沙箱。
@@ -116,6 +118,9 @@ impl MemberTools {
         if with_modules {
             parts.push(self.notes.module_tools.clone());
             parts.push(self.notes.module_tool_params.clone());
+            if !self.notes.service_params.is_empty() {
+                parts.push(self.notes.service_params.clone());
+            }
         }
         if parts.is_empty() {
             return String::new();
@@ -131,7 +136,7 @@ impl MemberTools {
 /// **包含没有声明任何工具的模块**（命令表为空）——这样报错能区分「没有这个模块」与「这个模块没有这个工具」。
 /// 跨模块同名工具不再冲突：模块内名字唯一由 map 保证，跨模块由信封里的 module 消歧。
 pub fn tool_table(
-    modules: &[crate::capabilities::workspace::api::Module],
+    modules: &[crate::capabilities::modules::api::Module],
 ) -> BTreeMap<String, ModuleTools> {
     modules
         .iter()

@@ -2,10 +2,10 @@
 //! 只是"用户编排选择的存档"，不是能力注册表——能力仍在 modules/ 公地里。
 //! 落盘在 .home/agents.yaml（与 providers/models/settings 同处用户私有区）。
 
+use crate::capabilities::modules::api::Roster;
 use crate::capabilities::prompt::api::{Prompt, Segment};
 use crate::capabilities::registry::domain::providers::ModelEntry;
 use crate::capabilities::session::api::AgentMeta;
-use crate::capabilities::workspace::api::Roster;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 

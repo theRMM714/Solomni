@@ -1,15 +1,13 @@
 //! 目的：常驻服务的契约用例——注册表、生命周期、租约与假适配器。
 //! 管：发现 / 启动 / 调用 / 停止 / 回收，未知适配器与禁用的拒收，未启动即调用。
-//! 不管：真实协议与进程（随 MCP/ACP 适配器接入）；模块声明解析（workspace 的用例）。
+//! 不管：真实协议与进程（随 MCP/ACP 适配器接入）；模块声明与启停有效值（modules 的用例）。
 //! 联动：能力见 src/capabilities/residents/；替身见 src/tests/doubles.rs。
 
+use crate::capabilities::modules::api::{Module, ServiceDecl};
 use crate::capabilities::residents::api::{ResidentOps, ServiceState};
 use crate::capabilities::residents::ports::ServiceAdapter;
 use crate::capabilities::residents::service::ResidentsService;
-use crate::capabilities::workspace::api::{Module, ServiceDecl};
-use crate::tests::doubles::{
-    module_of, test_workspace, FakeServiceAdapter, InMemoryPackages, InMemoryWorkspace, VecSource,
-};
+use crate::tests::doubles::{module_of, test_modules, FakeServiceAdapter, VecSource};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -32,17 +30,125 @@ fn module_with_service(id: &str, adapter: &str, enabled: bool) -> Module {
 /// 装好假适配器的常驻服务能力（清单来自真 WorkspaceService + 内存端口）。
 fn svc(modules: Vec<Module>) -> (ResidentsService, Arc<FakeServiceAdapter>) {
     let fake = Arc::new(FakeServiceAdapter::new());
-    let workspace = test_workspace(
-        Arc::new(VecSource(modules)),
-        Arc::new(InMemoryPackages::empty()),
-        Arc::new(InMemoryWorkspace::new()),
-    );
+    let workspace = test_modules(Arc::new(VecSource(modules)));
     let service = ResidentsService::new(
         vec![Arc::clone(&fake) as Arc<dyn ServiceAdapter + Send + Sync>],
         workspace,
         Arc::new(crate::capabilities::secrets::api::NoSecrets),
     );
     (service, fake)
+}
+
+/// 调一个不可用的服务：回执按**真实原因**说明（未启动 / 已停用 / 模块停用）。
+#[test]
+fn calling_an_unavailable_service_reports_the_reason() {
+    let modules_face = test_modules(Arc::new(VecSource(vec![module_with_service(
+        "m1", "fake", true,
+    )])));
+    let residents: Arc<dyn ResidentOps + Send + Sync> = Arc::new(ResidentsService::new(
+        vec![Arc::new(FakeServiceAdapter::new()) as Arc<dyn ServiceAdapter + Send + Sync>],
+        Arc::clone(&modules_face),
+        Arc::new(crate::capabilities::secrets::api::NoSecrets),
+    ));
+    let args = serde_json::json!({});
+
+    let err = residents.call("m1", "svc", "op", &args).unwrap_err();
+    assert!(err.contains("未启动"), "{}", err);
+
+    // 起过再停：不是"从没起过"，但运行态已摘除，如实回未启动。
+    residents.start("m1", "svc", "").expect("启动");
+    residents.stop("m1", "svc").expect("停掉");
+    let err = residents.call("m1", "svc", "op", &args).unwrap_err();
+    assert!(err.contains("未启动"), "{}", err);
+
+    modules_face
+        .set_service_enabled("m1", "svc", false)
+        .expect("停用服务");
+    let err = residents.call("m1", "svc", "op", &args).unwrap_err();
+    assert!(err.contains("已停用"), "{}", err);
+
+    modules_face
+        .set_module_enabled("m1", false)
+        .expect("停用模块");
+    let err = residents.call("m1", "svc", "op", &args).unwrap_err();
+    assert!(err.contains("模块 m1 已停用"), "{}", err);
+}
+
+/// 启动拉起：只拉起**有效启用**的服务（作者默认停用的不拉）。
+#[test]
+fn start_enabled_only_launches_services_that_are_on() {
+    let (on, _fake_on) = svc(vec![module_with_service("m1", "fake", true)]);
+    let lines = on.start_enabled();
+    assert_eq!(lines.len(), 1, "启用的服务要拉起：{:?}", lines);
+    assert!(lines[0].contains("已拉起"), "拉起要如实报告：{:?}", lines);
+
+    let (off, _fake_off) = svc(vec![module_with_service("m1", "fake", false)]);
+    assert!(off.start_enabled().is_empty(), "作者默认停用的服务不拉起");
+}
+
+/// control_resident 的 enable / disable 与 set_module_enabled 都落盘到 modules（启停归它）。
+#[test]
+fn enable_disable_and_module_toggle_persist_to_modules() {
+    use crate::capabilities::conductor::api::{ActionCall, Caller, ConductorHandle, Ops, Output};
+
+    let fake = Arc::new(FakeServiceAdapter::new());
+    let modules = vec![module_with_service("m1", "fake", true)];
+    let residents: Arc<dyn ResidentOps + Send + Sync> = Arc::new(ResidentsService::new(
+        vec![Arc::clone(&fake) as Arc<dyn ServiceAdapter + Send + Sync>],
+        test_modules(Arc::new(VecSource(modules.clone()))),
+        Arc::new(crate::capabilities::secrets::api::NoSecrets),
+    ));
+    let gateway = crate::tests::doubles::gw(BTreeMap::new(), Vec::new());
+    let handle = ConductorHandle::spawn(crate::tests::doubles::core_with_services(
+        modules,
+        gateway,
+        Arc::new(crate::tests::builders::SilentRunner),
+        residents,
+        Arc::new(crate::capabilities::secrets::api::NoSecrets),
+    ))
+    .expect("起核心线程");
+    let ops: Ops = crate::capabilities::conductor::api::Ops::from_handle(&handle);
+    let call = |id: &str, args: serde_json::Value| ActionCall {
+        id: id.to_string(),
+        args,
+        caller: Caller::User,
+        out: Output::Final,
+    };
+
+    ops.actions
+        .act(call(
+            "control_resident",
+            serde_json::json!({ "module": "m1", "name": "svc", "action": "disable" }),
+        ))
+        .expect("停用服务");
+    assert!(
+        !ops.modules.service_enabled("m1", "svc").expect("读服务"),
+        "disable 要落盘"
+    );
+    ops.actions
+        .act(call(
+            "control_resident",
+            serde_json::json!({ "module": "m1", "name": "svc", "action": "enable" }),
+        ))
+        .expect("启用服务");
+    assert!(
+        ops.modules.service_enabled("m1", "svc").expect("读服务"),
+        "enable 要落盘"
+    );
+    ops.actions
+        .act(call(
+            "set_module_enabled",
+            serde_json::json!({ "module": "m1", "enabled": false }),
+        ))
+        .expect("停用模块");
+    assert!(
+        !ops.modules.module_enabled("m1").expect("读模块"),
+        "模块停用要落盘"
+    );
+    assert!(
+        !ops.modules.service_enabled("m1", "svc").expect("读服务"),
+        "模块停用 ⇒ 服务有效停用"
+    );
 }
 
 /// 发现 → 启动 → 调用 → 租约回收；回执与状态如实。
@@ -86,7 +192,7 @@ fn residents_disabled_service_does_not_start() {
         ServiceState::Disabled
     );
     let err = service.start("m1", "svc", "").unwrap_err();
-    assert!(err.contains("禁用"), "{}", err);
+    assert!(err.contains("未启用"), "{}", err);
 }
 
 /// 未知适配器：列表如实标注并列出可用项；启动被拒。
@@ -106,10 +212,10 @@ fn residents_unknown_adapter_is_reported_with_available_names() {
 /// 起服务时注入该模块的隐秘字段（env），回执按已知值脱敏。
 #[test]
 fn residents_inject_module_secrets_and_redact_receipts() {
+    use crate::capabilities::modules::api::SecretDecl;
     use crate::capabilities::secrets::api::SecretOps;
     use crate::capabilities::secrets::ports::SecretStore;
     use crate::capabilities::secrets::service::SecretsService;
-    use crate::capabilities::workspace::api::SecretDecl;
     use crate::tests::doubles::InMemorySecretStore;
 
     let mut modules = vec![module_with_service("m1", "fake", true)];
@@ -121,11 +227,7 @@ fn residents_inject_module_secrets_and_redact_receipts() {
         },
     );
     let fake = Arc::new(FakeServiceAdapter::new());
-    let workspace = test_workspace(
-        Arc::new(VecSource(modules)),
-        Arc::new(InMemoryPackages::empty()),
-        Arc::new(InMemoryWorkspace::new()),
-    );
+    let workspace = test_modules(Arc::new(VecSource(modules)));
     let secrets = Arc::new(
         SecretsService::new(
             Arc::clone(&workspace),
@@ -163,11 +265,9 @@ fn residents_inject_module_secrets_and_redact_receipts() {
 fn residents_mark_failed_when_service_process_dies() {
     use crate::tests::doubles::DyingServiceAdapter;
 
-    let workspace = test_workspace(
-        Arc::new(VecSource(vec![module_with_service("m1", "dying", true)])),
-        Arc::new(InMemoryPackages::empty()),
-        Arc::new(InMemoryWorkspace::new()),
-    );
+    let workspace = test_modules(Arc::new(VecSource(vec![module_with_service(
+        "m1", "dying", true,
+    )])));
     let service = ResidentsService::new(
         vec![Arc::new(DyingServiceAdapter) as Arc<dyn ServiceAdapter + Send + Sync>],
         workspace,
@@ -197,7 +297,7 @@ fn residents_mark_failed_when_service_process_dies() {
     let err = service
         .call("m1", "svc", "boom", &serde_json::json!({}))
         .unwrap_err();
-    assert!(err.contains("没在跑"), "{}", err);
+    assert!(err.contains("进程已结束"), "{}", err);
 
     // 租约回收把失败态也清掉：会话没了，失败记录不该留。
     service.reap("lease-d").expect("回收");
@@ -214,11 +314,7 @@ fn control_resident_action_starts_and_stops() {
 
     let fake = Arc::new(FakeServiceAdapter::new());
     let modules = vec![module_with_service("m1", "fake", true)];
-    let workspace = test_workspace(
-        Arc::new(VecSource(modules.clone())),
-        Arc::new(InMemoryPackages::empty()),
-        Arc::new(InMemoryWorkspace::new()),
-    );
+    let workspace = test_modules(Arc::new(VecSource(modules.clone())));
     let residents: Arc<dyn ResidentOps + Send + Sync> = Arc::new(ResidentsService::new(
         vec![Arc::clone(&fake) as Arc<dyn ServiceAdapter + Send + Sync>],
         workspace,
@@ -258,11 +354,7 @@ fn service_operations_are_module_actions() {
 
     let fake = Arc::new(FakeServiceAdapter::new());
     let modules = vec![module_with_service("m1", "fake", true)];
-    let workspace = test_workspace(
-        Arc::new(VecSource(modules.clone())),
-        Arc::new(InMemoryPackages::empty()),
-        Arc::new(InMemoryWorkspace::new()),
-    );
+    let workspace = test_modules(Arc::new(VecSource(modules.clone())));
     let residents: Arc<dyn ResidentOps + Send + Sync> = Arc::new(ResidentsService::new(
         vec![Arc::clone(&fake) as Arc<dyn ServiceAdapter + Send + Sync>],
         workspace,
@@ -323,11 +415,7 @@ fn action_catalog_lists_ready_service_operations() {
 
     let fake = Arc::new(FakeServiceAdapter::new());
     let modules = vec![module_with_service("m1", "fake", true)];
-    let workspace = test_workspace(
-        Arc::new(VecSource(modules.clone())),
-        Arc::new(InMemoryPackages::empty()),
-        Arc::new(InMemoryWorkspace::new()),
-    );
+    let workspace = test_modules(Arc::new(VecSource(modules.clone())));
     let residents: Arc<dyn ResidentOps + Send + Sync> = Arc::new(ResidentsService::new(
         vec![Arc::clone(&fake) as Arc<dyn ServiceAdapter + Send + Sync>],
         workspace,
@@ -376,5 +464,5 @@ fn residents_call_requires_a_running_service() {
     let err = service
         .call("m1", "svc", "echo", &serde_json::json!({}))
         .unwrap_err();
-    assert!(err.contains("没在跑"), "{}", err);
+    assert!(err.contains("未启动"), "{}", err);
 }

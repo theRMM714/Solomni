@@ -3,9 +3,6 @@
 //! 不管：适配器端口（在 `ports.rs`，不进 api）；具体协议；模块声明的解析（在 workspace）。
 //! 联动：实现见 `service.rs`；由 `main.rs` 装配进 `Ops`，呈现层只经 `ResidentOps` 调用。
 
-use crate::capabilities::workspace::api::Param;
-use std::collections::BTreeMap;
-
 /// 目的：一次服务操作的事实回执（ok = 成功；output 由适配器给出）。
 #[derive(Debug)]
 pub struct Receipt {
@@ -14,13 +11,13 @@ pub struct Receipt {
 }
 
 /// 目的：一个由常驻服务提供的操作（名字 + 说明 + 可选参数契约）。
-#[allow(dead_code)]
-// 说明与参数契约由工具面 / 呈现层读取，随 Phase 2 接入；当前只被契约测试驱动。
+/// 约束：`parameters` 是服务给的 **JSON Schema 原样**（MCP 的 `inputSchema`）；核心不解释、不校验它——
+///   服务是参数的权威，核心只把它声明给模型（原生槽位原样发、信封通道渲染摘要）。
 #[derive(Debug, Clone)]
 pub struct Operation {
     pub name: String,
     pub description: String,
-    pub params: Option<BTreeMap<String, Param>>,
+    pub parameters: Option<serde_json::Value>,
 }
 
 /// 目的：一个常驻服务此刻的状态。
@@ -51,7 +48,7 @@ impl ServiceState {
 }
 
 /// 目的：给呈现层与工具层看的服务视图（不携带任何协议细节）。
-#[allow(dead_code)] // operations 由工具面读取，随 Phase 2 接入；当前只被契约测试驱动。
+#[allow(dead_code)] // 部分字段只被呈现层或工具面读取，逐字段用途随注释。
 #[derive(Debug, Clone)]
 pub struct ServiceView {
     pub module: String,
@@ -71,7 +68,10 @@ pub trait ResidentOps: Send + Sync {
     fn services(&self) -> Result<Vec<ServiceView>, String>;
     fn start(&self, module: &str, name: &str, lease: &str) -> Result<Vec<Operation>, String>;
     fn stop(&self, module: &str, name: &str) -> Result<(), String>;
-    fn set_enabled(&self, module: &str, name: &str, enabled: bool) -> Result<(), String>;
+    /// 目的：按有效启停把应开的服务都拉起（产品启动时调一次）；返回如实的结果行；默认空实现。
+    fn start_enabled(&self) -> Vec<String> {
+        Vec::new()
+    }
     fn call(
         &self,
         module: &str,
@@ -94,9 +94,6 @@ impl ResidentOps for NoResidents {
         Err(format!("没有配置任何常驻服务：{}/{}", module, name))
     }
     fn stop(&self, _module: &str, _name: &str) -> Result<(), String> {
-        Ok(())
-    }
-    fn set_enabled(&self, _module: &str, _name: &str, _enabled: bool) -> Result<(), String> {
         Ok(())
     }
     fn call(

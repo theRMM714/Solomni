@@ -6,20 +6,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-/// 能力名/包 id 的合法写法：小写字母或数字开头，其余小写字母、数字、- _ .；长度 1..=64。
-pub fn valid_capability(name: &str) -> bool {
-    let mut it = name.chars();
-    match it.next() {
-        Some(c) if c.is_ascii_lowercase() || c.is_ascii_digit() => {}
-        _ => return false,
-    }
-    if name.len() > 64 {
-        return false;
-    }
-    name.chars()
-        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '-' | '_' | '.'))
-}
-
 /// kind 取值：包整体挂到自己的独立前缀（可重定位、只读、互不干扰）。
 pub const KIND_PREFIX: &str = "prefix";
 /// kind 取值：包会把文件写进 guest 系统路径（叠层，参与冲突预检）。
@@ -133,7 +119,7 @@ impl Library {
 
 /// 清单校验（纯逻辑；由 Library::build 调用）：非法 = 拒收并说明原因，不纠正。
 pub fn check_manifest(m: &PackageManifest) -> Result<(), String> {
-    if !valid_capability(&m.id) {
+    if !crate::kernel::api::valid_capability(&m.id) {
         return Err(
             "id 不合法（只允许小写字母、数字、- _ .，且以字母或数字开头，长度 1..=64）".to_string(),
         );
@@ -180,7 +166,7 @@ pub fn check_manifest(m: &PackageManifest) -> Result<(), String> {
         }
     }
     for r in &m.requires {
-        if !valid_capability(r) {
+        if !crate::kernel::api::valid_capability(r) {
             return Err(format!("requires 里的能力名不合法：{}", r));
         }
         if r == &m.id {

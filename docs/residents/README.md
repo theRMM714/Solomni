@@ -6,28 +6,32 @@
 
 ## 一、管什么 / 不管什么
 
-**管**：常驻服务的注册表与生命周期（启停、开关、租约回收）、操作发现与调用的统一入口（`api::ResidentOps`）、协议适配器端口（`ports::ServiceAdapter`）。
+**管**：常驻服务的注册表与运行态（启动 / 停止、崩溃检测、租约回收）、操作发现与调用的统一入口（`api::ResidentOps`）、协议适配器端口（`ports::ServiceAdapter`）。
 
-**不管**：任何具体协议（MCP / ACP 全在适配器实现里，只由组合根构造）；进程与围栏机制（在 kernel）；开关落盘（随设置面接入）；模块声明的解析（在 `workspace`）。
+**不管**：任何具体协议（MCP / ACP 全在适配器实现里，只由组合根构造）；进程与围栏机制（在 kernel）；**启停有效值与落盘（归 `modules`）**；模块声明与契约（在 `modules`）。
 
 ## 二、入站契约与状态归属
 
 `api`（`ResidentOps` + `ServiceView` / `Operation` / `ServiceState` / `Receipt` + 空实现 `NoResidents`）；出站端口 `ServiceAdapter` **只由 `service.rs` 持有**（R12）。
-状态在 `service.rs`：运行中的实例（key = 模块/服务）、**失败态**（起过但进程已结束 → `Failed`，带如实原因与租约）与用户开关；会话租约用于回收（`reap`）。
-**崩溃检测**：适配器按连接事实回答 `ServiceInstance::is_alive`；进程一结束，`call` 如实标 `Failed` 并从运行态摘除，后续调用如实报"没在跑"。
+状态在 `service.rs`：运行中的实例（key = 模块/服务）、**失败态**（起过但进程已结束 → `Failed`，带如实原因与租约）；会话租约用于回收（`reap`）。启停的**有效值**由 `modules` 给（用户覆盖 ?? 作者默认；模块停用 ⇒ 它的服务停用），启动前先查它。
+**崩溃检测**：适配器按连接事实回答 `ServiceInstance::is_alive`；进程一结束，`call` 如实标 `Failed` 并从运行态摘除。
+**不可用的回执**：`call` 先按 `modules` 的有效值判可用性，再按运行态给**真实原因**——`模块 <m> 已停用` / `已停用（需先启用）` / `进程已结束（上次：…）` / `未启动`。回执交给模型（工具循环把它当工具结果），不靠会话侧缓存或刷新。
 **操作清单变化**：服务报告 `notifications/tools/list_changed` 时适配器交回新清单（`take_refreshed_operations`），运行态就地刷新，下一次装配的工具面随之反映。
 **可见面**：就绪服务的操作进动作目录（`GET /api/actions` 对 user 可见）与模型工具面（原生声明 + 信封清单）；CLI `resident list|start|stop|enable|disable|call` 是同一批动作的终端入口。
+**参数契约**：`Operation.parameters` 是服务给的 **JSON Schema 原样**（MCP 的 `inputSchema`）；核心**不解释、不校验**它——原生通道原样发进工具声明，信封通道渲染成参数说明（名字 / 类型 / 必填 / 缺省 / 可选值 / 说明）。参数错了由服务如实回绝（`isError`）。
 
 ## 三、依赖图位置（由源码的 `::api` 引用推导）
 
-- 经 `::api` 用到：`kernel`（长驻进程机制）、`secrets`（起进程时解析隐秘字段）、`workspace`（取模块清单事实）
+- 经 `::api` 用到：`kernel`（长驻进程机制）、`modules`（取模块清单事实）、`secrets`（起进程时解析隐秘字段）
 - 谁在用我：`collab`、`conductor`、`session`（`Ops` 字段与成员工具面，由组合根注入）
 
 ## 四、改动本单元时必须同步
 
 - 新增/变更适配器端口 → [docs/testing/doubles.md](../testing/doubles.md) 的端口矩阵；真实适配器（当前 `mcp`）在 `detail/`，只由组合根构造。
 - 模块的 `services:` 声明契约见 [MODULE_SPEC.md](../../MODULE_SPEC.md)；声明解析在 `workspace`。
-- 已接入：动作面（`control_resident`）、会话删除时的租约回收、起服务时按 `secrets::resolve` 注入 env 与回执脱敏、`ResidentOps::call`（经模块动作 `module.<id>.<service>.<op>`）、**MCP stdio 适配器**（`detail::McpAdapter`，长驻会话走 kernel 的 `SessionHost`）、**模型侧工具面**（已就绪服务的操作以 `<服务>.<操作>` 进成员工具面，调用路由到 `ResidentOps::call`）、崩溃检测与 `tools/list_changed` 刷新。ACP 适配器尚未接入（见 `tests/gaps.yaml`）。
+- 真机演示与回归载体：`modules/mcp-toolbox` + `demo/run-demo-mcp.mjs`（真实模型、真机）；
+  `tests/cross-platform/e2e/` 的 mcp 场景（夹具 + Mock 供应商，进 CI）。
+- 已接入：动作面（`control_resident`）、会话删除时的租约回收、起服务时按 `secrets::resolve` 注入 env 与回执脱敏、`ResidentOps::call`（经模块动作 `module.<id>.<service>.<op>`）、**MCP stdio 适配器**（`detail::McpAdapter`，长驻会话走 kernel 的 `SessionHost`）、**模型侧工具面**（已就绪服务的操作以 `<服务>.<操作>` 进成员工具面，**参数契约原样声明**给模型，调用路由到 `ResidentOps::call`）、崩溃检测与 `tools/list_changed` 刷新。ACP 适配器尚未接入（见 `tests/gaps.yaml`）。
 
 ## 本目录
 

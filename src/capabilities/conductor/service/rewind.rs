@@ -261,7 +261,7 @@ impl Conductor {
         meta: &SessionMeta,
         events: &[serde_json::Value],
     ) -> Result<Session, String> {
-        let roster = self.workspace.roster();
+        let roster = self.modules.roster();
         let sandboxes = self.sandboxes(meta, &roster)?;
         // 整队的权威是**转录**：重建之前先把队清空并按已发出的卡号续号（内存里那一份不作数）。
         self.desk_of(&meta.name)
@@ -270,6 +270,7 @@ impl Conductor {
             "collab" => Ok(Session::Collab(CollabSession::restore(
                 Arc::clone(&self.llm),
                 Arc::clone(&self.workspace),
+                Arc::clone(&self.modules),
                 self.registry.snapshot(),
                 Arc::clone(&self.prompt),
                 Arc::clone(&self.systools),

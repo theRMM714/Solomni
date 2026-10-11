@@ -7,8 +7,8 @@ use crate::capabilities::conductor::api::{
     Acted, ActionCall, AgentInstance, Caller, SessionEdit, SessionEvent, WorkMode, WorkSpec,
 };
 use crate::capabilities::conductor::api::{ConductorHandle, Ops, Output};
+use crate::capabilities::modules::api::Module;
 use crate::capabilities::session::api::OPT_BEGIN;
-use crate::capabilities::workspace::api::Module;
 use crate::kernel::api::Tier;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -40,7 +40,7 @@ fn commands_run_on_the_core_thread_and_changes_are_visible() {
         providers.len()
     );
 
-    assert_eq!(ops.workspace.roster().expect("清单").modules.len(), 1);
+    assert_eq!(ops.modules.roster().expect("清单").modules.len(), 1);
     assert!(ops
         .core
         .runtime_report(Tier::Host)
@@ -603,7 +603,7 @@ fn a_panicking_command_does_not_take_the_core_down() {
     );
     // 核心仍然活着并且能继续服务（这才是接住 panic 的意义）。
     assert!(ops.registry.settings().is_ok(), "panic 之后必须还能服务");
-    assert!(ops.workspace.roster().is_ok());
+    assert!(ops.modules.roster().is_ok());
 }
 
 /// 压缩：发送视图变成「摘要 + 之后的内容」（转录完整）；压两次只有**一份**摘要（滚动）。

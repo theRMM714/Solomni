@@ -4,10 +4,6 @@ pub use crate::capabilities::workspace::domain::exec::{
     absent, declared, diagnose_text, plan, plan_summary, tier_readiness, tier_refusal, unavailable,
     vm_diagnoses, vm_requirements, Diagnosis, ExecSpec, VmInputs, VmRequirement,
 };
-pub use crate::capabilities::workspace::domain::module::{
-    agent_system, check_runtimes, check_secrets, check_services, check_tools, listing, role_system,
-    Module, ModuleManifest, Param, ParamType, Roster, SecretDecl, ServiceDecl, ToolDecl,
-};
 pub use crate::capabilities::workspace::domain::packages::{Library, PackageManifest};
 pub use crate::capabilities::workspace::domain::workspace::{
     safe_file_name, AreaUsage, Place, Sandbox, Sandboxes, WorkFiles, WorkRoots, WorkUsage,
@@ -17,17 +13,9 @@ pub use crate::capabilities::workspace::domain::workstore::{
     StatusReport,
 };
 
-/// 工作区的**队列面**：呈现层要的清单事实（模块公地 + 拒收原因）。
-/// 只报事实、不做选择——"挑哪些模块组合成一个 agent"是用户与核心的事。
-pub trait WorkspaceOps: Send + Sync {
-    fn roster(&self) -> Result<Roster, String>;
-}
-
-/// 工作区的**用例面**（`service.rs` 实现）：别的能力要清单事实、要工作区目录，走这里；
-/// 出站端口（`ModuleSource` / `PackageSource` / `Workdirs` / `WorkStore`）**只由它持有**（R12）。
+/// 工作区的**用例面**（`service.rs` 实现）：别的能力要运行包与工作区目录，走这里；
+/// 出站端口（`PackageSource` / `Workdirs` / `WorkStore`）**只由它持有**（R12）。
 pub trait Workspace: Send + Sync {
-    /// 模块公地：合法模块 + 拒收原因（清单即事实，每次重扫）。
-    fn roster(&self) -> Roster;
     /// 运行包库：可用的包清单（每次重扫）。
     fn library(&self) -> Library;
     /// 包库所在目录（界面上要如实告诉用户"把包放哪儿"）。

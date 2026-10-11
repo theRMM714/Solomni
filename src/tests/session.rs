@@ -4,6 +4,44 @@ use super::builders::*;
 use super::prelude::*;
 
 #[test]
+pub(crate) fn agent_system_carries_the_real_roots() {
+    // 提示词里给出的根必须是真实绝对路径（模型据此拼路径；外部工具也认它）。
+    let mut core = core_with(vec![module_of("a")], gw(BTreeMap::new(), vec!["[]".into()]));
+    let sid = core
+        .create_work(work("w", WorkMode::Single, &["a"]))
+        .unwrap()
+        .sid;
+    let system = &core.single_identity(&sid).expect("身份块");
+    assert!(
+        system.contains(&s(&["w", "work"])),
+        "system 要含共享区真实根：{}",
+        system
+    );
+    assert!(
+        system.contains(&s(&["w", "a"])),
+        "system 要含私有沙箱真实根：{}",
+        system
+    );
+    assert!(
+        system.contains(&format!("：{}", s(&["a"]))),
+        "system 要含模块目录真实根：{}",
+        system
+    );
+    // 路径写法要用真实根拼（模型照抄它）：环境块里的例子是**工作副本**（沙箱）。
+    assert!(
+        system.contains(&format!("{}/note.txt", s(&["w", "a"]))),
+        "路径写法要用真实根拼：{}",
+        system
+    );
+    // 护栏：提示词里不得出现任何解析不了的路径写法（模型会照抄它）
+    assert!(
+        !system.contains("work:/") && !system.contains("sandbox:/"),
+        "提示词只该给真实根：{}",
+        system
+    );
+}
+
+#[test]
 pub(crate) fn create_work_persists_and_history_replays() {
     let hist = Arc::new(InMemoryHistory::new());
     let mut core = core_with_all(
@@ -1171,10 +1209,10 @@ pub(crate) fn deleting_a_session_asks_the_fence_to_release_its_grants() {
         registry_service(InMemorySettings::new(), Arc::clone(&llm)),
         test_history_of(Arc::clone(&hist)),
         test_workspace(
-            Arc::new(VecSource(vec![module_of("a")])),
             Arc::new(InMemoryPackages::empty()),
             Arc::new(InMemoryWorkspace::new()),
         ),
+        test_modules(Arc::new(VecSource(vec![module_of("a")]))),
         llm,
         test_tools_svc_with(
             Arc::new(SilentRunner),

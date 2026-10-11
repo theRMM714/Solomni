@@ -8,7 +8,7 @@
 //! 同一份声明同时驱动两件事：模型侧说明（`render_for_prompt`）与调用校验（`check`），
 //! 所以"缺少 path / limit 不能大于 2000"这类文案不再硬编码在代码里。
 
-use crate::capabilities::workspace::api::{Param, ParamType};
+use crate::capabilities::modules::api::{Param, ParamType};
 use serde::Deserialize;
 use std::collections::BTreeMap;
 
@@ -220,6 +220,51 @@ impl ToolSchema {
     }
 }
 
+/// 目的：把一份**服务给的 JSON Schema 原样**渲染成模型侧的参数说明行（信封通道用；原生通道直接发这份 schema）。
+/// 返回：`properties` 每个参数一行（名字、类型、必填、缺省、可选值、说明）；没有 `properties` = 没有可列的参数；
+///   整份不是对象 schema 时如实给一行紧凑 JSON（不猜结构）。
+/// 约束：这是**说明**，不是校验——核心不按它拦调用（服务是参数的权威，见 `residents::api::Operation`）。
+pub fn json_schema_lines(schema: &serde_json::Value) -> Vec<String> {
+    let Some(root) = schema.as_object() else {
+        return vec![compact(schema)];
+    };
+    let Some(props) = root.get("properties").and_then(|v| v.as_object()) else {
+        return Vec::new();
+    };
+    let required: Vec<&str> = root
+        .get("required")
+        .and_then(|v| v.as_array())
+        .map(|a| a.iter().filter_map(|x| x.as_str()).collect())
+        .unwrap_or_default();
+    props
+        .iter()
+        .map(|(name, node)| {
+            let ty = node.get("type").and_then(|v| v.as_str()).unwrap_or("any");
+            let mut marks: Vec<String> = vec![ty.to_string()];
+            if required.contains(&name.as_str()) {
+                marks.push("必填".to_string());
+            }
+            if let Some(d) = node.get("default") {
+                marks.push(format!("缺省 {}", compact(d)));
+            }
+            if let Some(e) = node.get("enum").and_then(|v| v.as_array()) {
+                let items: Vec<String> = e.iter().map(compact).collect();
+                marks.push(format!("可选 {}", items.join(" / ")));
+            }
+            let desc = node
+                .get("description")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .trim();
+            if desc.is_empty() {
+                format!("- {}（{}）", name, marks.join("，"))
+            } else {
+                format!("- {}（{}）：{}", name, marks.join("，"), desc)
+            }
+        })
+        .collect()
+}
+
 /// 参数不符的**事实**（文案在册子里；本层只说发生了什么）。
 #[derive(Debug, Clone, PartialEq)]
 pub enum ArgFault {
@@ -278,6 +323,45 @@ params:
   limit: { type: integer, desc: 最多返回行数, max: 2000 }
 "#;
         yaml_serde::from_str(yaml).expect("声明必须能解析")
+    }
+
+    /// 服务给的 JSON Schema 原样渲染成说明行（信封通道用）：参数名、类型、必填、缺省、可选值、说明都出来。
+    #[test]
+    fn json_schema_lines_renders_service_contract() {
+        let schema = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "path": { "type": "string", "description": "真实绝对路径" },
+                "limit": { "type": "integer", "default": 10 },
+                "mode": { "type": "string", "enum": ["fast", "slow"] }
+            },
+            "required": ["path"]
+        });
+        let lines = json_schema_lines(&schema);
+        assert!(
+            lines
+                .iter()
+                .any(|l| l.contains("path") && l.contains("必填") && l.contains("真实绝对路径")),
+            "{:?}",
+            lines
+        );
+        assert!(
+            lines
+                .iter()
+                .any(|l| l.contains("limit") && l.contains("缺省 10")),
+            "{:?}",
+            lines
+        );
+        assert!(
+            lines
+                .iter()
+                .any(|l| l.contains("mode") && l.contains("可选 fast / slow")),
+            "{:?}",
+            lines
+        );
+        // 没有 properties = 没有可列的参数；整份不是对象 schema 时如实给紧凑 JSON。
+        assert!(json_schema_lines(&serde_json::json!({"type": "object"})).is_empty());
+        assert_eq!(json_schema_lines(&serde_json::json!("weird")).len(), 1);
     }
 
     #[test]

@@ -16,7 +16,7 @@
 
 ## 三、依赖图位置（由源码的 `::api` 引用推导）
 
-- 经 `::api` 用到：`conductor`、`registry`、`workspace`
+- 经 `::api` 用到：`conductor`、`modules`（经 `Ops` 字段）、`registry`
 - 谁在用我：（无）
 
 ## 四、改动本单元时必须同步

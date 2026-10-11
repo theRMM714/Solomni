@@ -11,7 +11,7 @@ impl Conductor {
     /// 运行能力报告：模块声明的能力、包库里的可用版本、缺失清单与虚拟机档诊断。
     /// 「清单即事实」：每次调用重扫模块清单与包库；本机档不装载运行包，missing 只作事实呈现。
     pub fn runtime_report(&self, tier: crate::kernel::api::Tier) -> RuntimeReport {
-        let roster = self.workspace.roster();
+        let roster = self.modules.roster();
         let lib = self.workspace.library();
         let spec = crate::capabilities::workspace::api::ExecSpec {
             tier,
@@ -90,7 +90,7 @@ impl Conductor {
             tier: self.registry.app().tier,
             ..crate::capabilities::workspace::api::ExecSpec::default()
         };
-        let roster = self.workspace.roster();
+        let roster = self.modules.roster();
         self.unavailable_modules(&spec, &roster.modules)
     }
 
@@ -329,7 +329,7 @@ impl Conductor {
     /// 撤掉一次会话按**给定 meta** 写下的围栏授权（权限或模块变更后调用）。
     /// 其它平台没有持久授权（release 是空操作）；Windows 撤 ACE，下一次 `prepare_fence` 按实际 ACE 重授。
     fn release_session_fences(&self, meta: &SessionMeta) {
-        let roster = self.workspace.roster();
+        let roster = self.modules.roster();
         match self.sandboxes(meta, &roster) {
             Ok(sandboxes) => {
                 for sb in &sandboxes.list {
@@ -711,6 +711,7 @@ impl Conductor {
                 let mut cs = CollabSession::start(
                     Arc::clone(&self.llm),
                     Arc::clone(&self.workspace),
+                    Arc::clone(&self.modules),
                     self.registry.snapshot(),
                     Arc::clone(&self.prompt),
                     Arc::clone(&self.systools),
