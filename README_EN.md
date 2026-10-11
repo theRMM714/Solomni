@@ -44,7 +44,7 @@ that is gone.
 | Thing | What it is |
 | --- | --- |
 | **Core** | The only program in the product (Rust). It provides the mechanisms: sessions and transcripts, task orchestration and acceptance, tool execution and fencing, the registry, rewind and compaction |
-| **Module** | A folder `modules/<id>/`: a `module.yaml` (responsibility prompt + tool declarations) plus the tools themselves — any language, anything that runs |
+| **Module** | A folder `modules/<id>/`: a `module.yaml` (responsibility prompt + tool declarations, optionally resident services and secret fields) plus the tools themselves — any language, anything that runs |
 | **Agent** | A name + the modules it holds + a model + its own sandbox. Whichever agent a module is loaded into, it speaks in that agent's name |
 | **Users** | People and agents. People use the interfaces (terminal / local web UI), agents use the module contract — the same modules, two doors |
 
@@ -55,8 +55,7 @@ that is gone.
   - **group collaboration**: several agents each holding one capability — form-up → discussion → a task chain
     is drafted → **review gate** (nothing starts until you approve) → execution per stage with concurrency →
     one acceptance pass per stage → final acceptance → delivery; on failure only the named nodes go back;
-  - **proxy**: hand the whole decision to the core, which picks people and creates child sessions; entered
-    from the API / scripts today.
+  - **proxy**: hand the whole decision to the core, which picks people and creates child sessions.
 - **Modules are drop-in**: a folder with a valid `module.yaml` under `modules/` appears; remove it and it is
   gone — no registration, no build, no restart.
 - **Sessions and history**: one directory per piece of work (`session/<name>/`); "rewind to here" on any line —
@@ -104,7 +103,7 @@ node start.js -webUI     # go straight to the local web UI (127.0.0.1:3081)
   out-of-project cache roots and fails if anything was written.
 - **You can run it without a provider**: it walks the flow with the built-in fake model and says so plainly.
 - Common flags: `--root <dir>` (product root), `--web-port <port>`, `--release`.
-- Commands at the prompt: `single [agent…]` / `collab [agent…|?]` / `proxy` (hand the whole decision to the core) / `module [module-id.tool [json]]` (run a module tool directly, without AI) / `webui`.
+- Commands at the prompt: `single [agent…]` / `collab [agent…|?]` / `proxy` (hand the whole decision to the core) / `module [module-id.tool [json]]` (run a module tool directly, without AI) / `resident list|start|stop|enable|disable|call` (resident services) / `secret` (secret fields) / `webui`.
 
 ### Add a provider and a model
 
@@ -129,8 +128,8 @@ tools:                       # optional: external tool table
       path: { type: string, required: true, desc: real absolute path to read }
 ```
 
-- **One calling convention**: a start command + arguments + a stdin/stdout receipt. Scripts, skills, MCP servers
-  and other harnesses are all instances of it.
+- **One calling convention for external tools**: a start command + arguments + a stdin/stdout receipt. Scripts,
+  skills and other harnesses are all instances of it; a long-running MCP server is not — declare it under `services`.
 - A tool process can reach: that agent's private sandbox + its own module directory; the shared main copy is not
   among them (pull before editing, commit when done); it accepts **real absolute paths** only, and anything outside is refused.
 - **Every module keeps a cross-task private area** `<module>/userdata/`: it is ensured to exist when the
@@ -160,18 +159,13 @@ The C++ module has to be compiled once (the artifact is not committed); the comm
 
 ## Not wired up yet
 
-- **The guest body for the VM tier**: selection, diagnostics, the mount plan and the per-item pre-checks are in
-  place, but the guest itself is not wired in, so the **VM tier cannot be selected at all** right now (the UI
-  lists what is missing and how to fix each item).
-- Credential custody for external tool services (module tools must not depend on credentials today), module
-  distribution and a marketplace, and wider concurrent dispatch.
-- Every unfinished item, how to fix it and its acceptance criteria have exactly one authority:
-  [tests/gaps.yaml](tests/gaps.yaml).
+Every unfinished item, how to fix it and its acceptance criteria have exactly one authority:
+[tests/gaps.yaml](tests/gaps.yaml); the planned core-proxy system tools are in [systool_gaps.yaml](systool_gaps.yaml).
 
 ## What it is not
 
 - Not a model or a provider: channels and keys are product resources, and models are replaceable.
-- Not a runtime that schedules resident processes: modules never sit around waiting; they work once per task.
+- Not a runtime that keeps modules resident: `tools` start a one-shot process per task; the `services` a module declares are resident services started and reaped by the core under your authorization.
 - Not a server: it binds `127.0.0.1` only — no server side, no account.
 
 **Quality**: `node run-tests.js` is the single entry point — T0 (format / compile / clippy / duplicate deps /

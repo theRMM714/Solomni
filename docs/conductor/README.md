@@ -16,7 +16,7 @@
 
 ## 三、依赖图位置（由源码的 `::api` 引用推导）
 
-- 经 `::api` 用到：`collab`、`kernel`、`llm`、`prompt`、`registry`、`session`、`slate`、`taskchain`、`tools`、`workspace`
+- 经 `::api` 用到：`collab`、`kernel`、`llm`、`permission`、`prompt`、`registry`、`residents`、`secrets`、`session`、`slate`、`taskchain`、`tools`、`workspace`
 - 谁在用我：`cli`、`web`
 
 ## 四、改动本单元时必须同步

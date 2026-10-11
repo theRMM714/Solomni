@@ -46,8 +46,8 @@
 ## 四、依赖图位置（由源码的 `::api` 引用推导）
 
 - 经 `::api` 用到：无（纯领域，不自持端口）；
-- 谁在用我：`registry`（全局默认）、`session`（逐 agent 覆盖）、`workspace`（落点判定）、
-  `tools`（围栏派生）、`conductor`（解析与装配）。
+- 谁在用我：`registry`（全局默认）、`session`（逐 agent 覆盖）、`workspace`（落点判定）、`conductor`（解析与装配）；
+  `tools` 不直接引用它，只消费派生后的生效态（`Sandbox.permissions`）。
 
 ## 五、改动本单元时必须同步
 

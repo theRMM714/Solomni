@@ -133,7 +133,7 @@ Fixture 必须：
 | `FenceHost`（kernel 共享） | `RecordingFence`、`NoFenceHost` | `released` | `fail_with` | 不适用 | `confine::FenceHostAdapter`（真机撤权在 `tests/windows/`） | 已验收 |
 | `ServiceAdapter`（residents） | `FakeServiceAdapter`、`DyingServiceAdapter`（一启动就"死"：调用恒失败且 `is_alive=false`，崩溃检测用） | `calls`（start / call / stop） | 由替身注入启动失败 | 不适用 | `detail::McpAdapter`（MCP stdio；真实服务端到端见 `src/tests/mcp.rs`）；ACP 未接入 | 已验收（`src/tests/residents.rs`、`src/tests/mcp.rs`） |
 | `SessionHost`（kernel 共享） | `ScriptedHost`（按脚本逐行应答；可演 `list_changed` 通知与 EOF） | `sent`（发出的每一行与关闭） | 脚本用尽 = 如实报错 | EOF / 读错误 = `alive()` 转 false（崩溃检测） | `ProcessSessions`（守门进程长跑；真实 MCP 服务端到端见 `src/tests/mcp.rs`，非 unix 或缺 python 时如实跳过） | 已验收 |
-| `SecretStore`（secrets） | `InMemorySecretStore` | `values`、写入次数 | 由替身注入失败 | 不适用 | `detail::YamlSecrets`（`.home/secrets.yaml`，unix 0600） | 契约测试已验收（`src/tests/secrets.rs`）；生产消费点未接入（`#![allow(dead_code)]` 如实标注） |
+| `SecretStore`（secrets） | `InMemorySecretStore` | `values`、写入次数 | 由替身注入失败 | 不适用 | `detail::YamlSecrets`（`.home/secrets.yaml`，unix 0600） | 契约测试已验收（`src/tests/secrets.rs`）；生产消费点已接入（CLI `secret`、常驻服务与一次性模块工具的 env 注入、常驻服务回执脱敏） |
 | `Log` | `NoopLog` | 不记录（Stub） | 不适用 | 不适用 | `FileLog`（三个级别都落盘） | 已验收 |
 | `HostProbe` | `FixedProbe`（只按声明回答） | 不适用 | 不适用 | 不适用 | `HostProbeAdapter`（真实路径事实；PATH 上不存在的名字如实说没有） | 已验收 |
 
