@@ -1,0 +1,3 @@
+src/capabilities/slate/service.rs:19:5: replace propose -> Result<Proposal, String> with Ok(Default::default())
+src/capabilities/llm/detail/repair.rs:24:9: replace <impl EnvelopeRepair for UnambiguousRepair>::repair -> RepairOutcome with Default::default()
+src/capabilities/llm/detail/repair.rs:69:5: replace nothing -> RepairOutcome with Default::default()
