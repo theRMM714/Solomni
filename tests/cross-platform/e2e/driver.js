@@ -3,6 +3,7 @@
 //       → 协作（非代拟）跑完交付 → 代拟（复用+组装）确认后名单写回 meta 并建出沙箱
 //       → 外部工具 cwd / 绝对路径 / 自由格式补丁 / 正文+信封 / 原生多调用（协议形状由假供应商核对）
 //       → 工具级确认（与本通道同形）：生成中停下等 allow / deny / full；快照带那张卡（刷新能重建）；full 本轮不再问
+//       → MCP 常驻服务：模块声明的服务操作进工具面，经真进程调用，回执与本地计算的摘要对账。
 //       → 代理模式：核心自己挑人、建子工作、转达，来源如实落档，停止即全停。
 const BASE = process.env.E2E_BASE || 'http://127.0.0.1:3099';
 // 假供应商端口由编排器指定：本机可能残留上一次的进程，固定端口会让驱动打到旧的那个。
@@ -678,6 +679,45 @@ async function approvePlan(name) {
   assert(ansF.status === 200, '回答 ask 后继续', ansF.text.slice(0, 200));
   const tF = joined(await all(nF));
   assert(tF.includes('用第一个方案'), '用户回答并入转录（进上下文）', tF.slice(-300));
+
+  /* ---------- MCP 常驻服务（L4）：模块声明的服务操作进模型工具面，经真进程被调用 ----------
+   * 顺序是**产品约束**：单 agent 会话的工具面在建工作时装配一次，所以服务必须先启动、再建工作。
+   * 夹具模块（mcp-toolbox）的命令由编排器按本机解释器名写入；服务本体就是仓库里的 tools/server.py。
+   */
+  {
+    const MCP_MODULE = 'mcp-toolbox';
+    const MCP_SERVICE = 'toolbox';
+    const expectedSha = require('crypto').createHash('sha256').update('solomni').digest('hex');
+    const mcpOpsWant = ['sha256', 'uuid', 'now', 'remember', 'recall'];
+    assert((await reg('control_resident', { module: MCP_MODULE, name: MCP_SERVICE, action: 'enable' })).status === 200,
+      '启用 MCP 常驻服务（声明 enabled=false，先经用户同意）');
+    const mcpStart = await reg('control_resident', { module: MCP_MODULE, name: MCP_SERVICE, action: 'start' });
+    const mcpOps = (mcpStart.json && mcpStart.json.operations) || [];
+    assert(mcpStart.status === 200 && mcpOpsWant.every((o) => mcpOps.includes(o)),
+      'MCP 服务拉起并发现操作（握手 + tools/list）', JSON.stringify(mcpOps));
+    const nameM = 'e2e-mcp-' + Date.now();
+    const cM = await api('POST', '/api/actions/create_session', {
+      name: nameM, mode: 'single',
+      agents: [{ name: '工具手', transient: true, modules: [MCP_MODULE], model: 'm1' }],
+    });
+    assert(cM.status === 200, '建「MCP 工具箱」工作（只有一个模块）', cM.text.slice(0, 200));
+    const sM = await act(nameM, 'send_message', { text: 'MCP 工具箱：算摘要并把回执念回来' });
+    assert(sM.status === 200, 'MCP 工作发言', sM.text.slice(0, 200));
+    const rowsM = (await all(nameM)).filter((x) => x.tool).map((x) => x.tool);
+    for (const r of rowsM) {
+      console.log('   工具 ' + (r.module || '') + '.' + r.name + (r.ok ? ' 成功' : ' 失败') + ' → '
+        + String(r.output || '').replace(/\s+/g, ' ').slice(0, 300));
+    }
+    const shaRow = rowsM.filter((r) => r.module === MCP_MODULE && r.name === 'toolbox.sha256').pop();
+    assert(!!shaRow && shaRow.ok === true,
+      '服务操作 toolbox.sha256 被调用并成功（经常驻服务路由）', JSON.stringify(shaRow || {}).slice(0, 300));
+    assert(!!shaRow && String(shaRow.output).includes(expectedSha),
+      '回执是服务真算出来的摘要（不是模型口述）', String((shaRow && shaRow.output) || ''));
+    const saidM = (await all(nameM)).filter((x) => x.kind === 'msg').map((x) => String(x.line || '')).join('\n');
+    assert(saidM.includes(expectedSha), '模型的发言带回了服务给的回执', saidM.slice(0, 300));
+    assert((await reg('control_resident', { module: MCP_MODULE, name: MCP_SERVICE, action: 'stop' })).status === 200,
+      '停止 MCP 服务');
+  }
 
 
   /* ---------- 真工具链路（L4）：三个真模块三个语言，真的在真进程里跑 ----------

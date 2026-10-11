@@ -27,6 +27,8 @@
 
 - 新增/变更适配器端口 → [docs/testing/doubles.md](../testing/doubles.md) 的端口矩阵；真实适配器（当前 `mcp`）在 `detail/`，只由组合根构造。
 - 模块的 `services:` 声明契约见 [MODULE_SPEC.md](../../MODULE_SPEC.md)；声明解析在 `workspace`。
+- 真机演示与回归载体：`modules/mcp-toolbox` + `demo/run-demo-mcp.mjs`（真实模型、真机）；
+  `tests/cross-platform/e2e/` 的 mcp 场景（夹具 + Mock 供应商，进 CI）。
 - 已接入：动作面（`control_resident`）、会话删除时的租约回收、起服务时按 `secrets::resolve` 注入 env 与回执脱敏、`ResidentOps::call`（经模块动作 `module.<id>.<service>.<op>`）、**MCP stdio 适配器**（`detail::McpAdapter`，长驻会话走 kernel 的 `SessionHost`）、**模型侧工具面**（已就绪服务的操作以 `<服务>.<操作>` 进成员工具面，调用路由到 `ResidentOps::call`）、崩溃检测与 `tools/list_changed` 刷新。ACP 适配器尚未接入（见 `tests/gaps.yaml`）。
 
 ## 本目录

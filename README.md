@@ -127,6 +127,7 @@ tools:                       # 可选：外部工具表
 
 演示是**真机测试**：走真实模型，会真的投喂资料、调工具、核产物。所以脚本开工前先核对条件——
 前两个演示要三个模块在清单里、indexer 已构建、登记处有供应商与一个可用的模型（用 `SOLOMNI_DEMO_MODEL` 指定，或用核心默认）；
+**MCP 演示**要 `mcp-toolbox` 在清单里、登记处有供应商与可用模型（它自带 `services` 声明，不需要预先构建）；
 **代理演示**要登记处有供应商、模型与**核心默认模型**，清单里至少有一个模块或一个已存 agent。
 **条件不齐就打印 `DEMO-SKIPPED` 与怎么补、以退出码 2 收场：不跑，也不用内置演示通道凑一遍。**
 
@@ -134,6 +135,7 @@ tools:                       # 可选：外部工具表
 node start.js -webUI
 node demo/run-demo.mjs         # 组合式：一个 agent 装三个模块（python / node / C++）
 node demo/run-demo-collab.mjs  # 小组协作：三个 agent 各持一份能力协商，走完整条流程
+node demo/run-demo-mcp.mjs     # MCP：单 agent 只装 mcp-toolbox，拉起常驻服务并真调它的操作
 node demo/run-demo-proxy.mjs   # 代理：只跟核心说话，它自己挑人、建子工作、被叫醒；停止即全停
 ```
 

@@ -2,6 +2,8 @@
 // 路径模型：核心会把"真实根目录"渲染进系统提示词，所以这里**从提示词里解析出根**再用（不在夹具里写死机器路径）。
 // 支持流式（j.stream）与非流式。
 const http = require('http');
+/** MCP 夹具算的那个摘要：服务真算一遍，夹具只原样转述（驱动据此断言"发言带回了回执"）。 */
+const SHA_SOLOMNI = require('crypto').createHash('sha256').update('solomni').digest('hex');
 /** 供应商这一侧看到的最后一条请求的消息形状：驱动据此断言"发回去的历史是不是协议形状"。 */
 let lastSeen = null;
 /** 返工会话里验收被调用的次数（第一次 fail，之后 pass）。 */
@@ -171,6 +173,12 @@ http.createServer((req, res) => {
       } else {
         content = '回报已经交了。';
       }
+    } else if (sys.includes('mcp-toolbox') && allUser.includes('MCP 工具箱')) {
+      // MCP 常驻服务（L4）：操作以「模块 + 服务名.操作名」寻址；回执来自真进程，夹具只转述。
+      // 收尾用**纯正文**（普通说话不必包成工具）：把服务给的摘要原样念回来。
+      content = sawToolResult
+        ? '服务算出的摘要：' + SHA_SOLOMNI
+        : JSON.stringify({ type: 'tool', module: 'mcp-toolbox', name: 'toolbox.sha256', args: { text: 'solomni' } });
     } else if (sys.includes('你是核心代理')) {
       // 代理模式（T5 旅程）：核心代用户挑人 → 建子工作 → 转达，最后收尾。
       // 本场景排在"探针判支持原生"之后，所以用**原生**工具调用槽位（不是正文里的手写信封）。

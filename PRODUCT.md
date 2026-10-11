@@ -107,7 +107,7 @@ agent 实例名不得占用 `work` / `children`（名单在 `systools/names.yaml
 
 ```text
 $ start.bat                 # Windows（或 node start.js）；macOS/Linux 用 ./start.sh
-[发现] harvest · indexer · render           <- 扫描 modules/，只报事实
+[发现] harvest · indexer · mcp-toolbox · render   <- 扫描 modules/，只报事实
 （菜单：编排入口 + 模块清单，brief 在此给用户看）
 ```
 启动层序负责工具链与构建（见 [README.md](README.md)）；核心启动后立即扫描 `modules/`。

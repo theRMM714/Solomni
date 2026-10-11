@@ -5,12 +5,15 @@
 //   ② 登记处里至少有一个供应商（端点 + 密钥）与一个模型；
 //   ③ 本次要用的模型定得下来：`SOLOMNI_DEMO_MODEL` 指定的在册，或有一个在册的核心默认模型。
 // 三条全过 = 返回 null；否则返回 { reason, hints }，调用方打印后以退出码 2 收场（条件不足 ≠ 演示失败）。
+//
+// MCP 演示（`demo/run-demo-mcp.mjs`）的前置是 `mcpPreflight`：① mcp-toolbox 模块在清单里；② 同上面第 ②③ 条。
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const NEEDED_MODULES = ["harvest", "render", "indexer"];
+const MCP_MODULE = "mcp-toolbox";
 
 /** indexer 的构建产物在不在（两个平台的名字都认）。 */
 function indexerBuilt() {
@@ -18,27 +21,11 @@ function indexerBuilt() {
   return existsSync(join(build, "indexer.exe")) || existsSync(join(build, "indexer"));
 }
 
-export function demoPreflight(state, model) {
-  const modules = (state && state.modules) || [];
+/** 登记处与本次要用的模型：缺供应商 / 缺模型 / 定不下模型都如实拒绝。 */
+function registryPreflight(state, model) {
   const providers = (state && state.providers) || [];
   const models = (state && state.models) || [];
   const core = (state && state.core) || "";
-  const missing = NEEDED_MODULES.filter((id) => !modules.some((m) => m && m.id === id));
-  if (missing.length) {
-    return {
-      reason: "模块清单里缺 " + missing.join("、"),
-      hints: [
-        "模块放进 modules/ 就出现（清单是目录扫描的纯函数）",
-        "indexer 是 C++：按 modules/indexer/README.md 的命令编译一次",
-      ],
-    };
-  }
-  if (!indexerBuilt()) {
-    return {
-      reason: "indexer 还没构建（找不到 modules/indexer/build/ 下的可执行文件）",
-      hints: ["按 modules/indexer/README.md 的命令编译一次（产物不入库，要本机自己建）"],
-    };
-  }
   if (!providers.length) {
     return {
       reason: "登记处里没有供应商",
@@ -71,6 +58,45 @@ export function demoPreflight(state, model) {
     };
   }
   return null;
+}
+
+export function demoPreflight(state, model) {
+  const modules = (state && state.modules) || [];
+  const missing = NEEDED_MODULES.filter((id) => !modules.some((m) => m && m.id === id));
+  if (missing.length) {
+    return {
+      reason: "模块清单里缺 " + missing.join("、"),
+      hints: [
+        "模块放进 modules/ 就出现（清单是目录扫描的纯函数）",
+        "indexer 是 C++：按 modules/indexer/README.md 的命令编译一次",
+      ],
+    };
+  }
+  if (!indexerBuilt()) {
+    return {
+      reason: "indexer 还没构建（找不到 modules/indexer/build/ 下的可执行文件）",
+      hints: ["按 modules/indexer/README.md 的命令编译一次（产物不入库，要本机自己建）"],
+    };
+  }
+  return registryPreflight(state, model);
+}
+
+/**
+ * MCP 演示（`demo/run-demo-mcp.mjs`）的前置：mcp-toolbox 模块在清单里，登记处有可用的模型。
+ * 模块带 `services` 声明不需要预先构建；真正拉起服务在演示里做（enable → start），失败会如实报。
+ */
+export function mcpPreflight(state, model) {
+  const modules = (state && state.modules) || [];
+  if (!modules.some((m) => m && m.id === MCP_MODULE)) {
+    return {
+      reason: "模块清单里缺 " + MCP_MODULE,
+      hints: [
+        "模块放进 modules/ 就出现（清单是目录扫描的纯函数）",
+        "它随仓库提供：确认 modules/mcp-toolbox/module.yaml 在（清单会重扫）",
+      ],
+    };
+  }
+  return registryPreflight(state, model);
 }
 
 /**
