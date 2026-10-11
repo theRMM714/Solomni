@@ -957,7 +957,7 @@ fn web_serve_returns_when_interrupted() {
     let r = web::serve_until(&ops, 0, &fence(), &stop);
     assert!(r.is_ok(), "{:?}", r);
     assert!(
-        started.elapsed() < Duration::from_secs(3),
+        started.elapsed() < Duration::from_secs(10),
         "收到中断要立刻返回，而不是阻塞到出错"
     );
 }

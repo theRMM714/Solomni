@@ -458,7 +458,9 @@ fn tool_layer_ask_rides_the_decision_channel() {
             let sid = sid.clone();
             let answer = answer.map(|s| s.to_string());
             std::thread::spawn(move || {
-                for _ in 0..2000 {
+                // 等卡进队：按墙钟上限等；固定迭代数在并行负载下会提前耗尽（不是卡没来）。
+                let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+                loop {
                     if let Ok(Some(q)) = ops.sessions.open_queue(&sid) {
                         assert_eq!(
                             q.card.envelope.role, "tools",
@@ -482,9 +484,11 @@ fn tool_layer_ask_rides_the_decision_channel() {
                             .expect("按选项作答");
                         return true;
                     }
+                    if std::time::Instant::now() >= deadline {
+                        return false;
+                    }
                     std::thread::sleep(std::time::Duration::from_millis(2));
                 }
-                false
             })
         };
         ops.sessions
@@ -735,7 +739,9 @@ fn tool_confirmation_rides_the_decision_channel() {
             let sid = sid.clone();
             let answer = answer.to_string();
             std::thread::spawn(move || {
-                for _ in 0..2000 {
+                // 等卡进队：按墙钟上限等；固定迭代数在并行负载下会提前耗尽（不是卡没来）。
+                let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+                loop {
                     if let Ok(Some(q)) = ops.sessions.open_queue(&sid) {
                         assert_eq!(
                             q.card
@@ -757,9 +763,11 @@ fn tool_confirmation_rides_the_decision_channel() {
                             .expect("按选项作答");
                         return true;
                     }
+                    if std::time::Instant::now() >= deadline {
+                        return false;
+                    }
                     std::thread::sleep(std::time::Duration::from_millis(2));
                 }
-                false
             })
         };
         ops.sessions

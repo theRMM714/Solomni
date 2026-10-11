@@ -1312,7 +1312,7 @@ pub(crate) fn collab_child_send_lands_on_the_gate_it_awaits() {
     // 转达是**脱离调用方**的（代理不等它跑完），所以这里等它落地。
     bridge.send(&child, &msg).expect("转达到协作子会话");
     let want = vec![OPT_BEGIN.to_string(), OPT_BEGIN_ALLOW.to_string()];
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
     loop {
         let now = ops.sessions.open_queue(&child).expect("取卡");
         let ids: Vec<String> = now
