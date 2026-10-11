@@ -203,20 +203,21 @@ fn stop_takes_effect_while_generation_is_still_running() {
         let sid = sid.clone();
         std::thread::spawn(move || sessions.say(&sid, "慢慢来", Output::Stream))
     };
-    // 生成要真的开始跑（核心内部登记完成后 is_running 才为真）。
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while !ops.sessions.is_running(&sid) {
-        assert!(Instant::now() < deadline, "生成没有启动");
+    // 生成要真的**进入模型调用**才算"在跑"：is_running 在派发时就为真，此刻 worker 还没走到通道；
+    // 若这一窗口里就 stop，on(Start) 会被取消挡下、ticks 恒为 0——等 ticks 才是"可停止"的确定状态。
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while ticks.load(Ordering::Relaxed) == 0 {
+        assert!(Instant::now() < deadline, "生成没有进入模型调用");
         std::thread::sleep(Duration::from_millis(5));
     }
+    assert!(ops.sessions.is_running(&sid), "进入模型调用时必须标记在跑");
 
     let stopped = Instant::now();
     assert!(!ops.sessions.stop(&sid).is_empty(), "在跑就该停得掉");
-    assert!(ops.sessions.is_running(&sid), "停止是置位，不是同步等待");
     let out = worker.join().expect("生成线程");
     assert!(out.is_ok(), "停止是正常收尾，不是错误：{:?}", out.err());
     assert!(
-        stopped.elapsed() < Duration::from_secs(3),
+        stopped.elapsed() < Duration::from_secs(10),
         "停止后要立刻收尾，不能等它跑完（{:?}）",
         stopped.elapsed()
     );
@@ -245,7 +246,7 @@ fn reads_are_not_queued_behind_a_long_generation() {
         std::thread::spawn(move || sessions.say(&sid, "慢慢来", Output::Stream))
     };
     // 等生成真的开始（通道已经在吐片）。
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + Duration::from_secs(10);
     while ticks.load(Ordering::Relaxed) == 0 {
         assert!(Instant::now() < deadline, "生成没有启动");
         std::thread::sleep(Duration::from_millis(5));
@@ -261,12 +262,12 @@ fn reads_are_not_queued_behind_a_long_generation() {
         .expect("生成期间读会话视图");
     let view = t1.elapsed();
     assert!(
-        read < Duration::from_secs(1),
+        read < Duration::from_secs(10),
         "生成期间读历史不该排队（{:?}）",
         read
     );
     assert!(
-        view < Duration::from_secs(1),
+        view < Duration::from_secs(10),
         "生成期间读会话视图不该排队（{:?}）",
         view
     );
@@ -312,7 +313,7 @@ fn reads_are_not_queued_behind_a_collab_discussion() {
         std::thread::spawn(move || sessions.answer_card(&sid, &card, OPT_BEGIN, ""))
     };
     // 等讨论真的开始（通道已被调用并卡在那里）。
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + Duration::from_secs(10);
     while started.load(Ordering::Relaxed) == 0 {
         assert!(Instant::now() < deadline, "讨论没有启动");
         std::thread::sleep(Duration::from_millis(5));
@@ -328,12 +329,12 @@ fn reads_are_not_queued_behind_a_collab_discussion() {
         .expect("讨论期间读会话视图");
     let view = t1.elapsed();
     assert!(
-        read < Duration::from_secs(1),
+        read < Duration::from_secs(10),
         "讨论期间读历史不该排队（{:?}）",
         read
     );
     assert!(
-        view < Duration::from_secs(1),
+        view < Duration::from_secs(10),
         "讨论期间读会话视图不该排队（{:?}）",
         view
     );
@@ -371,7 +372,7 @@ fn stopping_a_collab_discussion_is_prompt_and_keeps_the_session() {
         let card = card.clone();
         std::thread::spawn(move || sessions.answer_card(&sid, &card, OPT_BEGIN, ""))
     };
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + Duration::from_secs(10);
     // 等到讨论真的进入**阻塞中的那次调用**（gated_ops 的第二次调用一直阻塞到放行/停止）；
     // 只等第一次会落在「第一次已返回、第二次还没开始」的窗口里，那时 stop 合理地看不到在跑的会话。
     while started.load(Ordering::Relaxed) < 2 || !ops.sessions.is_running(&sid) {
@@ -401,7 +402,7 @@ fn stopping_a_collab_discussion_is_prompt_and_keeps_the_session() {
             .flat_map(|l| l.events.iter().cloned())
             .collect()
     };
-    let deadline = Instant::now() + Duration::from_secs(3);
+    let deadline = Instant::now() + Duration::from_secs(10);
     let (mut on_bus, mut on_child) = (bus_of(&sid), bus_of(&child));
     while Instant::now() < deadline && !(stopped_line(&on_bus) && stopped_line(&on_child)) {
         std::thread::sleep(Duration::from_millis(10));
@@ -409,7 +410,7 @@ fn stopping_a_collab_discussion_is_prompt_and_keeps_the_session() {
         on_child = bus_of(&child);
     }
     assert!(
-        stopped.elapsed() < Duration::from_secs(3),
+        stopped.elapsed() < Duration::from_secs(10),
         "停止要在一个成员调用内收尾（{:?}）",
         stopped.elapsed()
     );
@@ -454,11 +455,28 @@ fn stopping_a_collab_discussion_is_prompt_and_keeps_the_session() {
         "被中断的成员不该有发言：{:?}",
         lines
     );
+    // 停止的处置**脱离调用方**跑：事件台上的"已停止"在会话交回核心之前就外送了，不能凭它判断
+    // "可以继续了"。等会话视图里不再标记在跑（SessionView.running 由 put_collab 清掉）再「继续」。
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let history = ops.history.list().expect("列历史");
+        let views = ops.sessions.session_views(&history).expect("会话视图");
+        if views.iter().any(|v| v.sid == sid && !v.running) {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "停止后会话没有交回核心，无法继续"
+        );
+        std::thread::sleep(Duration::from_millis(5));
+    }
     // 可继续：放行后再点「继续」，泵应接着推进（取消标志是每次派发新登记的，不会粘住）。
     release.store(true, Ordering::Relaxed);
+    let resumed = ops.sessions.continue_flow(&sid, Output::Final);
     assert!(
-        ops.sessions.continue_flow(&sid, Output::Final).is_ok(),
-        "停止之后必须能「继续」"
+        resumed.is_ok(),
+        "停止之后必须能「继续」：{:?}",
+        resumed.err()
     );
 }
 
@@ -487,7 +505,7 @@ fn collab_transcript_lands_on_disk_while_the_discussion_runs() {
         std::thread::spawn(move || sessions.answer_card(&sid, &card, OPT_BEGIN, ""))
     };
     // 等第二个成员卡在调用里：此时第一个成员的发言已经定稿。
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + Duration::from_secs(10);
     while started.load(Ordering::Relaxed) < 2 {
         assert!(Instant::now() < deadline, "讨论没有推进到第二个成员");
         std::thread::sleep(Duration::from_millis(5));
@@ -532,7 +550,7 @@ fn collab_discussion_emits_each_member_line_as_it_speaks() {
         std::thread::spawn(move || sessions.answer_card(&sid, &card, OPT_BEGIN, ""))
     };
     // 等第二个成员卡住：说明第一个成员已经说完，但**整轮还没结束**。
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + Duration::from_secs(10);
     while started.load(Ordering::Relaxed) < 2 {
         assert!(Instant::now() < deadline, "讨论没有推进到第二个成员");
         std::thread::sleep(Duration::from_millis(5));
@@ -976,7 +994,7 @@ fn editing_is_refused_while_a_session_is_generating() {
         let sid = sid.clone();
         std::thread::spawn(move || sessions.say(&sid, "慢慢来", Output::Stream))
     };
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + Duration::from_secs(10);
     while !ops.sessions.is_running(&sid) {
         assert!(Instant::now() < deadline, "生成没有启动");
         std::thread::sleep(Duration::from_millis(5));

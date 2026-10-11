@@ -15,7 +15,7 @@
 | `src/kernel/domain/types.rs` |
 | `src/kernel/domain/fence.rs` | 围栏描述符（`FenceSpec`）与落点判据（`FencePart`/`FenceBlocked`/`fence_ask`）：纯数据 |
 | `src/kernel/domain/path.rs` |
-| `src/kernel/domain/jobs.rs` |
+| `src/kernel/domain/jobs.rs` | 生成中作业的取消表（`JobRegistry`）：同一会话每次生成各持一面旗，停止置位全部、摘旗按身份 |
 | `src/kernel/detail/file_log.rs` |
 | `src/kernel/detail/host_probe.rs` |
 | `src/kernel/detail/process.rs` | 外部进程执行机制（守门进程、stdin 送参、隐私字段 env 注入、超时杀树、截断），实现 `ProcessRunner` |

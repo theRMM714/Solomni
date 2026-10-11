@@ -1,6 +1,6 @@
 // 突变测试入口（手动；契约见 docs/testing/execution-ci.md 的「突变测试工作流」）。
 // 只圈 tests/mutation-scope.json 里的高价值纯逻辑文件；测试命令固定「只跑 bin + 串行」——
-// 串行是刻意的：套件里有依赖真实线程时序的用例，并行会偶发（见 tests/gaps.yaml 的 testing.parallel-flake）。
+// 串行便于逐条变异单独复现，与门禁的默认并行无关。
 // 本入口只作调查：不写 TEST-REPORT-*，不参与验收。
 import fs from "node:fs";
 import path from "node:path";
@@ -42,7 +42,7 @@ if (!files.length) die("范围为空：" + scope + (capabilityName ? ":" + capab
 
 const args = ["mutants", "--in-place", "--timeout", timeout, "--build-timeout", String(Number(timeout) * 2)];
 for (const f of files) args.push("-f", f);
-// 只跑 bin（不把 T3/T4 真进程用例拖进每个变异体）+ 串行（并行有已知偶发）。
+// 只跑 bin（不把 T3/T4 真进程用例拖进每个变异体）+ 串行（便于逐条变异单独复现）。
 args.push("--", "--bin", "solomni", "--", "--test-threads=1");
 
 const logFile = path.join(LOG_DIR, "mutation-" + scope + (capabilityName ? "-" + capabilityName : "") + ".log");

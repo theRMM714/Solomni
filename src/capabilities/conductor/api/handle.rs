@@ -283,6 +283,8 @@ impl ConductorHandle {
         let session = session;
         // 取消标志在**派发时**就登记：生成一开始「停止」就能生效（它不进命令队列）。
         let cancel = jobs.register(sid);
+        // 收尾时按这面旗的身份摘登记（同名的新生成可能已经登记了它自己那面）。
+        let job_flag = Arc::clone(&cancel);
         // **运行态**：这条会话开始干活，推给它自己的事件台——节点执行、单 agent 发言、继续都走这里，
         // 打开它的标签页要立刻看到占位与「停止」按钮，而不是等 3 秒的状态轮询。
         // 事实只进事件台；命令回包只给头部序号（谁要看谁自己订阅）。
@@ -352,7 +354,7 @@ impl ConductorHandle {
         // ③ 收尾：拿回会话 → 入台 → 交回核心（重新插入 + 转录落盘）。
         //    **所有状态变更仍只发生在核心线程上**：工作线程只跑生成，不碰核心状态。
         let joined = worker.join();
-        jobs.unregister(sid);
+        jobs.unregister(sid, &job_flag);
         // 运行态收尾：不管这一回合是跑完、崩了还是被用户停掉，都不再"在跑"。
         // seq 取**最后一批**（收尾这条）的序号：客户端按它去重（与逐轮外送同源）。
         let end_working = SessionEvent::Working { agent: None };
@@ -788,7 +790,7 @@ impl ConductorHandle {
         }) {
             Ok(s) => s,
             Err(e) => {
-                jobs.unregister(sid);
+                jobs.unregister(sid, &cancel);
                 return Err(e);
             }
         };
@@ -964,7 +966,7 @@ impl ConductorHandle {
         }
         drop(turn_tx);
         let joined = worker.join();
-        jobs.unregister(sid);
+        jobs.unregister(sid, &cancel);
         let (c, mut seq) = match joined {
             Ok(x) => x,
             Err(_) => {
