@@ -22,9 +22,9 @@ const PLATFORM_TARGETS = ["cross-platform", "windows", "linux", "macos"];
 // **只查不装**：装 target 是开发环境准备（node setup-dev.js），门禁不写系统工具链。
 // macOS 的 C 依赖（ring）在 Linux 上没有 Apple SDK / 交叉 C 工具链，那类失败按 env-skip 如实标注。
 const CROSS_TARGETS = require("./dev-tools.js").targets.map((t) => t.triple);
-// 默认串行（--test-threads=1）：套件里有依赖真实线程时序的用例，并行下仍会偶发
-// （见 tests/gaps.yaml 的 testing.parallel-flake）。--parallel 只在排查并发/隔离问题时用，不作门禁默认。
-const PARALLEL = process.argv.includes("--parallel");
+// 默认并行：线程时序敏感的用例已改为等"可停止/可观察"的确定状态，低核加压与正常并行都验过。
+// --serial 只在排查并发/隔离问题时用（加 --test-threads=1）。
+const SERIAL = process.argv.includes("--serial");
 // 每步墙钟上限：没有它，一个挂死的子进程会把本地入口永久卡住（CI 只能靠 job 级 30 分钟兜底）。
 const STEP_TIMEOUT_MS = 15 * 60 * 1000;
 const E2E_TIMEOUT_MS = 20 * 60 * 1000;
@@ -967,7 +967,7 @@ function runCoverage() {
   const outDir = path.join(ROOT, "target", "coverage");
   fs.mkdirSync(outDir, { recursive: true });
   const args = ["llvm-cov", "--workspace", "--all-targets", "--text", "--output-dir", outDir];
-  const r = sh("cargo", args.concat(PARALLEL ? [] : ["--", "--test-threads=1"]));
+  const r = sh("cargo", args.concat(SERIAL ? ["--", "--test-threads=1"] : []));
   console.log(r.out.trim().split(/\r?\n/).slice(-40).join("\n"));
   if (r.code !== 0 && /llvm-tools|component download failed|Proceed\?/i.test(r.out)) {
     console.log("[覆盖率] env-skip：缺 llvm-tools-preview 组件（装：node setup-dev.js）。");
@@ -1159,16 +1159,16 @@ function pushStep(obj) {
     raw: supply.raw,
   });
 
-  // L1：crate 内联单元测试（默认串行；--parallel 只在排查并发/隔离问题时用）
+  // L1：crate 内联单元测试（默认并行；--serial 只在排查并发/隔离问题时用）
   announce("L1 单元（--bin solomni）");
-  const unitArgs = ["test", "--color", "never", "--bin", "solomni", "--", "--nocapture"].concat(PARALLEL ? [] : ["--test-threads=1"]);
+  const unitArgs = ["test", "--color", "never", "--bin", "solomni", "--", "--nocapture"].concat(SERIAL ? ["--test-threads=1"] : []);
   const unit = sh("cargo", unitArgs);
   const uc = cargoCounts(unit.out);
   const unitOk = unit.code === 0 && uc.ignored === 0;
   const unitDetail =
     uc.passed + " passed / " + uc.failed + " failed" +
     (uc.ignored ? " / " + uc.ignored + " ignored（#[ignore] 被禁止）" : "") +
-    (PARALLEL ? "；--parallel" : "");
+    (SERIAL ? "；--serial" : "");
   announceDone(unitOk ? "完成" : "失败", unitDetail);
   pushStep({
     step: "L1 单元（--bin solomni）",
@@ -1181,7 +1181,7 @@ function pushStep(obj) {
   // L2/L3：四个按平台分的测试目标逐一点名（缺目标即失败：新增测试文件必须挂到目标上）
   for (const t of PLATFORM_TARGETS) {
     announce("目标 " + t);
-    const tArgs = ["test", "--color", "never", "--test", t, "--", "--nocapture"].concat(PARALLEL ? [] : ["--test-threads=1"]);
+    const tArgs = ["test", "--color", "never", "--test", t, "--", "--nocapture"].concat(SERIAL ? ["--test-threads=1"] : []);
     const r = sh("cargo", tArgs);
     const c = cargoCounts(r.out);
     const skips = skipsIn(r.out);

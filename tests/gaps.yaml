@@ -79,18 +79,21 @@
     未覆盖的生产路径逐条有补测或缺口结论。
   blocked_by: 缺少观察面（子进程插桩与合并尚未实现）
 
-- id: testing.parallel-flake
+- id: conductor.job-registry-overwrite
   scope: global
   level: T1
   why: |
-    套件里有依赖真实线程时序的 gated 用例（例如 src/tests/api.rs 的
-    stopping_a_collab_discussion_is_prompt_and_keeps_the_session：它要停的是一个"正在跑"的会话，
-    而 gated 通道第一次调用会立刻返回、第二次才阻塞）。把默认的 --test-threads=1 去掉改并行后实测会偶发：
-    修同步（等 started>=2 且 is_running）前 20 次里失败 3 次，修完 55 次里仍有 1 次。
+    「停止」按 sid 登记取消标志（src/kernel/domain/jobs.rs 的 JobRegistry），但 register 会**静默覆盖**
+    同名条目、unregister 不校验是不是自己那面旗。停止的处置是脱离调用方跑的：上一轮生成还在交回收尾
+    （unregister 之前）时同一 sid 又起了新一轮，新一轮登记的那面旗会被上一轮的 unregister 摘掉——
+    此后「停止」对这次生成不再生效。用例 stopping_a_collab_discussion_is_prompt_and_keeps_the_session
+    的并行偶发正是撞进了这个窗口（测试侧已改为等会话交回核心再继续，产品侧的登记竞态仍在）。
   how: |
-    1) 已把门禁默认改回串行（--parallel 只作诊断），门禁不再暴露这份不确定性；
-    2) 要真正支持并行：逐条收紧对线程时序敏感的用例（等"可停止/可观察"的确定状态，而不是"已启动"），
-       并给 <1s / <3s 这类墙上时钟断言留合理上限；判据是在 --parallel 下连续 50 次全绿。
+    1) 登记带身份：register 返回的旗与 sid 配对，unregister 只在"还是我这一面"时才移除
+       （例如 unregister_if(sid, &flag) 按 Arc 身份比对）；
+    2) register 遇到同名在跑时如实拒绝或返回既有旗，不静默覆盖；
+    3) 补一条契约用例：同名二次登记不得互相摘旗，停止只影响它登记的那一次。
   accept: |
-    --parallel 连续 50 次全绿；届时删除本条并把门禁默认切到并行。
-  blocked_by: 缺少观察面（时序断言需逐条定位，目前只确认了一条用例）
+    同名并发登记/注销下，停止对"当前这一次"始终生效；契约用例覆盖「静默覆盖」与「摘旗」两条路径；
+    node run-tests.js 全绿。
+  blocked_by: 缺少实现（register / unregister 当前无身份校验）

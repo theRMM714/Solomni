@@ -16,7 +16,7 @@ cargo clippy --all-targets --all-features -- -D warnings
 快速检查用于本地反馈，不替代完整入口。
 
 注意：`cargo test` 与 `cargo fmt --check`、`cargo clippy … -D warnings` **都预期全绿**——T0 九项全是零容忍硬失败（交叉类型检查对已装 target 零容忍），没有存量基线。
-用例默认**串行**跑（套件含真实线程时序用例，并行仍会偶发，见 [tests/gaps.yaml](../../tests/gaps.yaml) 的 `testing.parallel-flake`）；排查并发 / 隔离问题时用 `node run-tests.js --parallel`。找测试盲区用 `node run-tests.js --coverage`
+用例默认**并行**跑；排查并发 / 隔离问题时用 `node run-tests.js --serial`。找测试盲区用 `node run-tests.js --coverage`
 （见下文「覆盖率发现模式」，只报不拦）。
 
 ### 完整本地入口
@@ -37,8 +37,8 @@ node run-tests.js
 8. `T0 交叉类型检查（各已装 target）`（**开发机专属**：`cargo check --target … --all-targets` 兜平台专属 `#[cfg]`（含测试）的类型错误；target 未装或本机缺交叉 C 工具链 = `env-skip`；**CI 上记 `skip-platform` 直接跳过**，因为三平台矩阵各自原生 `--all-targets` 已覆盖）；
 9. `T0 依赖重复（cargo tree）`（硬失败）；
 10. `T0 供应链（audit/deny）`（工具缺失或取不到 advisory 数据 = env-skip）；
-11. `L1 单元（--bin solomni）`（默认串行；`--parallel` 改为并发，仅诊断用）；
-12. 逐个运行 `cargo test --test cross-platform/windows/linux/macos`（同样默认串行）；
+11. `L1 单元（--bin solomni）`（默认并行；`--serial` 改为串行，仅诊断用）；
+12. 逐个运行 `cargo test --test cross-platform/windows/linux/macos`（同样默认并行）；
 13. 前端冒烟；
 14. 存在编排器时运行 L4 端到端（编排器会**现场构建 indexer**：编译器版本进日志，构建失败即失败）；
 15. 写入 `target/test-report.json` 并打印 `TEST-REPORT-OK` 或 `TEST-REPORT-FAIL`。
@@ -138,8 +138,7 @@ MUTATION_SCOPE=capability MUTATION_CAPABILITY=repair node tests/ci-mutation.mjs
 **开发环境同步**：换机器 / 换人开发时跑 `node setup-dev.js`（`--check` 只读校验）。它统一用**项目内**工具链
 （`platform/<os>/rustup`、`platform/<os>/cargo`），组件、交叉 target 与项目内工具都装那里——**不写系统 `~/.rustup`、`~/.cargo`**；条目清单见 [dev-tools.js](../../dev-tools.js)。
 
-测试命令固定「只跑 `--bin solomni` + `--test-threads=1`」：**串行是刻意的**，并行会偶发
-（见 [tests/gaps.yaml](../../tests/gaps.yaml) 的 `testing.parallel-flake`）。`cargo-mutants` 按
+突变测试的测试命令固定「只跑 `--bin solomni`」并按串行跑（逐条变异单独复现，与门禁的默认并行无关）。`cargo-mutants` 按
 「工具获取」策略在 CI 预编译装（见 [quality-isolation.md](quality-isolation.md)；一次性临时环境，不改本机）。已知**等价变异体**在仓库根的 `.cargo/mutants.toml`
 的 `exclude_re` 里排除（每条都要写明为什么等价，当前 1 条）。
 
