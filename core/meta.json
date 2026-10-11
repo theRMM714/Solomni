@@ -1,0 +1,11 @@
+{
+  "run": "4",
+  "sha": "28b6c5d5ad979eef30814b5337ebcd55b5950a97",
+  "at": "2026-10-11T17:01:45.507Z",
+  "scope": "core",
+  "capability": null,
+  "status": "all-caught",
+  "exitCode": 0,
+  "summary": "48 mutants tested in 28m: 45 caught, 3 unviable",
+  "ms": 1684135
+}
