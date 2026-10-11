@@ -1,6 +1,6 @@
 //! 目的：常驻服务的契约用例——注册表、生命周期、租约与假适配器。
 //! 管：发现 / 启动 / 调用 / 停止 / 回收，未知适配器与禁用的拒收，未启动即调用。
-//! 不管：真实协议与进程（随 MCP/ACP 适配器接入）；模块声明解析（workspace 的用例）。
+//! 不管：真实协议与进程（随 MCP/ACP 适配器接入）；模块声明与启停有效值（modules 的用例）。
 //! 联动：能力见 src/capabilities/residents/；替身见 src/tests/doubles.rs。
 
 use crate::capabilities::modules::api::{Module, ServiceDecl};
@@ -37,6 +37,41 @@ fn svc(modules: Vec<Module>) -> (ResidentsService, Arc<FakeServiceAdapter>) {
         Arc::new(crate::capabilities::secrets::api::NoSecrets),
     );
     (service, fake)
+}
+
+/// 调一个不可用的服务：回执按**真实原因**说明（未启动 / 已停用 / 模块停用）。
+#[test]
+fn calling_an_unavailable_service_reports_the_reason() {
+    let modules_face = test_modules(Arc::new(VecSource(vec![module_with_service(
+        "m1", "fake", true,
+    )])));
+    let residents: Arc<dyn ResidentOps + Send + Sync> = Arc::new(ResidentsService::new(
+        vec![Arc::new(FakeServiceAdapter::new()) as Arc<dyn ServiceAdapter + Send + Sync>],
+        Arc::clone(&modules_face),
+        Arc::new(crate::capabilities::secrets::api::NoSecrets),
+    ));
+    let args = serde_json::json!({});
+
+    let err = residents.call("m1", "svc", "op", &args).unwrap_err();
+    assert!(err.contains("未启动"), "{}", err);
+
+    // 起过再停：不是"从没起过"，但运行态已摘除，如实回未启动。
+    residents.start("m1", "svc", "").expect("启动");
+    residents.stop("m1", "svc").expect("停掉");
+    let err = residents.call("m1", "svc", "op", &args).unwrap_err();
+    assert!(err.contains("未启动"), "{}", err);
+
+    modules_face
+        .set_service_enabled("m1", "svc", false)
+        .expect("停用服务");
+    let err = residents.call("m1", "svc", "op", &args).unwrap_err();
+    assert!(err.contains("已停用"), "{}", err);
+
+    modules_face
+        .set_module_enabled("m1", false)
+        .expect("停用模块");
+    let err = residents.call("m1", "svc", "op", &args).unwrap_err();
+    assert!(err.contains("模块 m1 已停用"), "{}", err);
 }
 
 /// 启动拉起：只拉起**有效启用**的服务（作者默认停用的不拉）。
@@ -262,7 +297,7 @@ fn residents_mark_failed_when_service_process_dies() {
     let err = service
         .call("m1", "svc", "boom", &serde_json::json!({}))
         .unwrap_err();
-    assert!(err.contains("没在跑"), "{}", err);
+    assert!(err.contains("进程已结束"), "{}", err);
 
     // 租约回收把失败态也清掉：会话没了，失败记录不该留。
     service.reap("lease-d").expect("回收");
@@ -429,5 +464,5 @@ fn residents_call_requires_a_running_service() {
     let err = service
         .call("m1", "svc", "echo", &serde_json::json!({}))
         .unwrap_err();
-    assert!(err.contains("没在跑"), "{}", err);
+    assert!(err.contains("未启动"), "{}", err);
 }

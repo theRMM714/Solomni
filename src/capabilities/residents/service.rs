@@ -209,11 +209,25 @@ impl ResidentOps for ResidentsService {
         args: &serde_json::Value,
     ) -> Result<Receipt, String> {
         let k = key(module, name);
+        // 可用性先判（**锁外**，与 start 的锁序一致：modules → running）：回执要如实说明为什么不可用，
+        // 模型据此学会不再调它（事实教学，不靠会话侧缓存或刷新）。
+        if !self.modules.module_enabled(module) {
+            return Err(format!("服务 {} 不可用：模块 {} 已停用", k, module));
+        }
+        if !self.modules.service_enabled(module, name) {
+            return Err(format!("服务 {} 不可用：已停用（需先启用）", k));
+        }
         let mut running = self.running.lock().expect("锁");
+        if !running.contains_key(&k) {
+            // 没在跑：区分"之前崩过"（failed 里有如实原因）与"从没起过"。
+            let last = self.failed.lock().expect("锁").get(&k).cloned();
+            return Err(match last {
+                Some((why, _)) => format!("服务 {} 不可用：进程已结束（上次：{}）", k, why),
+                None => format!("服务 {} 不可用：未启动", k),
+            });
+        }
         let (receipt, alive, lease) = {
-            let run = running
-                .get_mut(&k)
-                .ok_or_else(|| format!("服务 {} 没在跑：先启动", k))?;
+            let run = running.get_mut(&k).expect("刚查过存在");
             if !run.operations.iter().any(|o| o.name == op) {
                 let names: Vec<&str> = run.operations.iter().map(|o| o.name.as_str()).collect();
                 return Err(format!(

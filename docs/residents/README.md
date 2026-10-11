@@ -14,7 +14,8 @@
 
 `api`（`ResidentOps` + `ServiceView` / `Operation` / `ServiceState` / `Receipt` + 空实现 `NoResidents`）；出站端口 `ServiceAdapter` **只由 `service.rs` 持有**（R12）。
 状态在 `service.rs`：运行中的实例（key = 模块/服务）、**失败态**（起过但进程已结束 → `Failed`，带如实原因与租约）；会话租约用于回收（`reap`）。启停的**有效值**由 `modules` 给（用户覆盖 ?? 作者默认；模块停用 ⇒ 它的服务停用），启动前先查它。
-**崩溃检测**：适配器按连接事实回答 `ServiceInstance::is_alive`；进程一结束，`call` 如实标 `Failed` 并从运行态摘除，后续调用如实报"没在跑"。
+**崩溃检测**：适配器按连接事实回答 `ServiceInstance::is_alive`；进程一结束，`call` 如实标 `Failed` 并从运行态摘除。
+**不可用的回执**：`call` 先按 `modules` 的有效值判可用性，再按运行态给**真实原因**——`模块 <m> 已停用` / `已停用（需先启用）` / `进程已结束（上次：…）` / `未启动`。回执交给模型（工具循环把它当工具结果），不靠会话侧缓存或刷新。
 **操作清单变化**：服务报告 `notifications/tools/list_changed` 时适配器交回新清单（`take_refreshed_operations`），运行态就地刷新，下一次装配的工具面随之反映。
 **可见面**：就绪服务的操作进动作目录（`GET /api/actions` 对 user 可见）与模型工具面（原生声明 + 信封清单）；CLI `resident list|start|stop|enable|disable|call` 是同一批动作的终端入口。
 **参数契约**：`Operation.parameters` 是服务给的 **JSON Schema 原样**（MCP 的 `inputSchema`）；核心**不解释、不校验**它——原生通道原样发进工具声明，信封通道渲染成参数说明（名字 / 类型 / 必填 / 缺省 / 可选值 / 说明）。参数错了由服务如实回绝（`isError`）。
