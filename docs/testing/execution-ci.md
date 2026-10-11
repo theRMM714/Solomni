@@ -100,13 +100,12 @@ AppContainer 包 ACE（`S-1-15-2-*`）；**它不碰完整性标签**（脚本�
 产品收尾会把根内 DACL 按快照整体还原，但救不了已经失败的那一次运行）。两条边界互不相干：
 产品的快照/还原只带 `DACL_SECURITY_INFORMATION`（标签在 SACL），所以它既不碰标签、也修不了标签。
 
-> **工作区带 Low 标签时的一切围栏 / L4 结论都不可信**——实测（同一台机器、同一份代码）：标签在时
-> doctor 报 `fs=false`、读写 DACL 都 Error 5、python 在工具进程里不可达、围栏回收因 Node 管道 stdio 被拒
-> 被判成「本机留下了没人管的痕迹」；**把它清掉**之后同一条 `node run-tests.js --fence-live` 立刻
-> `391 passed / 0 failed`、doctor 报 `fs=true net=true tree=true`、真工具链全跑通，`--fence-live` 的真机探针
-> （容器往返、对象 ACE 往返、授权/撤销/台账/孤儿清扫）也在本机真跑通过。所以「卷不支持 ACL」「python 装得不对」
-> 这类结论都是误判。**注意：换普通或提权（`High`）的 shell 本身不解决**——映像是 Low 的，进程照样是 Low；
-> 要么不打标签，要么把标签清掉，要么把二进制搬出这棵树。
+> **工作区带 Low 标签时的一切围栏 / L4 结论都不可信**：标签在时 doctor 报 `fs=false`、读写 DACL 都 Error 5、
+> python 在工具进程里不可达、围栏回收因 Node 管道 stdio 被拒被判成「本机留下了没人管的痕迹」——这些都是
+> 同一标签造成的假失败，不是「卷不支持 ACL」或「python 装得不对」。清掉标签后同一条 `node run-tests.js --fence-live`
+> 应全绿（`0 failed`）、doctor 报 `fs=true net=true tree=true`，真机探针（容器往返、对象 ACE 往返、
+> 授权/撤销/台账/孤儿清扫）也应在本机真跑通过。**换普通或提权（`High`）的 shell 本身不解决**——映像是 Low 的，
+> 进程照样是 Low；要么不打标签，要么把标签清掉，要么把二进制搬出这棵树。
 
 ### 覆盖率发现模式（手动）
 
@@ -157,9 +156,7 @@ MUTATION_SCOPE=capability MUTATION_CAPABILITY=repair node tests/ci-mutation.mjs
 - **Actions 产物 `mutation-report`**（完整现场）：`target/mutation-report.json`、`target/logs/mutation-*.log`、
   `mutants.out/`；分支只留最近一次，历史看这里。
 
-首轮 **core** 已分诊：9 个真缺口补测、1 个等价变异体在 `.cargo/mutants.toml` 排除；复跑
-`45 caught / 3 unviable / 0 missed / 0 timeout` → `MUTATION-OK`。各 `capability` 可按需派发，首轮尚未逐个抽查；
-棘轮基线暂不建（core 已归零，等出现「已知容忍」的未捕获时再加）。
+**core** 范围已归零：`45 caught / 3 unviable / 0 missed / 0 timeout` → `MUTATION-OK`；等价变异体在 `.cargo/mutants.toml` 排除（当前 1 条）。各 `capability` 范围按需派发、尚未逐个抽查；棘轮基线暂不建（等出现「已知容忍」的未捕获时再加）。
 
 ### CI（GitHub Actions）：跨平台与真机的唯一事实来源
 

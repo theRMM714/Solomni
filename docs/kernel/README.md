@@ -23,7 +23,7 @@
 ## 三、依赖图位置（由源码的 `::api` 引用推导）
 
 - 经 `::api` 用到：（无——依赖图最底层或纯领域）
-- 谁在用我：`conductor`、`llm`、`prompt`、`registry`、`session`、`tools`、`workspace`
+- 谁在用我：`collab`、`conductor`、`llm`、`prompt`、`registry`、`residents`、`session`、`tools`、`workspace`
 
 ## 四、改动本单元时必须同步
 

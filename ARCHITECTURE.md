@@ -50,6 +50,8 @@ presentation/{cli,web} ──▶ capabilities（含协调业务 conductor）─�
 | `ProxyHost` | 核心代理工具的外部动作（清单 / 建会话 / 转达 / 观察 / 消息倒查 / 生命周期） | `ProxyBridge`（队列桥；测试 `FakeProxyHost`） |
 | `ProcessRunner` | 外部进程执行（围栏安装、拉起、stdin 送参、超时杀树、截断）；**kernel 共享机制端口** | `ProcTools`（守门进程 = 本程序的 `--fence-run` 模式） |
 | `EnvelopeRepair` | 手写信封不合法时的**无歧义**补救（改了字段含义就是错；拿不准就不修） | `UnambiguousRepair` |
+| `ServiceAdapter` | 一个常驻服务的协议适配器：拉起、发现操作、调用、关闭（按行协议走 kernel 的 `SessionHost`） | `residents/detail::McpAdapter`（MCP stdio） |
+| `SecretStore` | 模块隐秘字段的落盘（`.home/secrets.yaml`；值不进提示词、转录与日志） | `secrets/detail::YamlSecrets` |
 | `FenceHost` | 围栏授权的释放（删除会话时请求一次撤销）；**kernel 共享机制端口** | `confine::FenceHostAdapter`（本平台无该机制时为空操作） |
 | `Log` / `HostProbe` | 运行日志（三级）/ 宿主能力探测（**只问事实**：路径存在性、PATH 上的可执行文件、本机虚拟化能力） | `FileLog` / `HostProbeAdapter`（测试 `NoopLog` / `FixedProbe`） |
 | `ToolHandler` | **一类工具的执行者**（按名字认领）：内置、模块与核心自有工具因此走**同一条派发路径** | 各能力注入（工具能力管内置与模块；conductor 注入代理工具那个） |
