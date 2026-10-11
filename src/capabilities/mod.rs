@@ -11,6 +11,7 @@
 pub mod collab;
 pub mod conductor;
 pub mod llm;
+pub mod modules;
 pub mod permission;
 pub mod prompt;
 pub mod registry;

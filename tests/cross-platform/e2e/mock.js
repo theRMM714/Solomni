@@ -2,6 +2,8 @@
 // 路径模型：核心会把"真实根目录"渲染进系统提示词，所以这里**从提示词里解析出根**再用（不在夹具里写死机器路径）。
 // 支持流式（j.stream）与非流式。
 const http = require('http');
+/** MCP 夹具算的那个摘要：服务真算一遍，夹具只原样转述（驱动据此断言"发言带回了回执"）。 */
+const SHA_SOLOMNI = require('crypto').createHash('sha256').update('solomni').digest('hex');
 /** 供应商这一侧看到的最后一条请求的消息形状：驱动据此断言"发回去的历史是不是协议形状"。 */
 let lastSeen = null;
 /** 返工会话里验收被调用的次数（第一次 fail，之后 pass）。 */
@@ -170,6 +172,18 @@ http.createServer((req, res) => {
         content = env('submit_report', { summary: '语料、报告与索引都做好了', changes: 'corpus.jsonl、report.html 与 index.bin', open: '' });
       } else {
         content = '回报已经交了。';
+      }
+    } else if (sys.includes('mcp-toolbox') && allUser.includes('MCP 工具箱')) {
+      // MCP 常驻服务（L4）：操作以「模块 + 服务名.操作名」寻址；回执来自真进程，夹具只转述。
+      // **参数契约必须先声明给模型**（真实模型曾因看不到 text/key 而反复瞎试）：少了就如实拒绝，
+      // 让「服务操作被调用并成功」那条断言失败，而不是静默放行。
+      // 收尾用**纯正文**（普通说话不必包成工具）：把服务给的摘要原样念回来。
+      if (!sys.includes('要摘要的文本')) {
+        content = '参数契约没有声明给我：toolbox.sha256 缺 text 的说明，无法调用。';
+      } else {
+        content = sawToolResult
+          ? '服务算出的摘要：' + SHA_SOLOMNI
+          : JSON.stringify({ type: 'tool', module: 'mcp-toolbox', name: 'toolbox.sha256', args: { text: 'solomni' } });
       }
     } else if (sys.includes('你是核心代理')) {
       // 代理模式（T5 旅程）：核心代用户挑人 → 建子工作 → 转达，最后收尾。

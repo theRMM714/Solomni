@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 /// 目的：拉起一个服务实例所需的事实（策略在 manager：哪个模块的哪个服务、命令、工作目录、私有配置）。
-#[allow(dead_code)] // 字段由真实适配器（MCP / ACP）读取，随 Phase 2 接入；当前只被契约测试的假适配器驱动。
+#[allow(dead_code)] // `options` 只给具体适配器读（MCP 现在不读它）；其余字段生产路径都用。
 pub struct LaunchSpec {
     pub module: String,
     pub name: String,

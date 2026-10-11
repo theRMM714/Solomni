@@ -19,7 +19,7 @@ impl Conductor {
     pub(crate) fn sandboxes(
         &self,
         meta: &SessionMeta,
-        roster: &crate::capabilities::workspace::api::Roster,
+        roster: &crate::capabilities::modules::api::Roster,
     ) -> Result<crate::capabilities::workspace::api::Sandboxes, String> {
         let names: Vec<String> = meta.agents.iter().map(|a| a.name.clone()).collect();
         // 沙箱锚在**顶层工作**上：整棵树不论嵌套多少层只有一个 work/（见 Conductor::work_root）。
@@ -123,6 +123,38 @@ impl Conductor {
                     })
                     .collect();
                 notes.module_tools = format!("{}\n{}", notes.module_tools, lines.join("\n"));
+                // 这些操作**自带参数契约**（服务给的 JSON Schema 原样）：信封通道也要把参数说清，
+                // 否则模型只知道名字、只能瞎试参数（真实模型上真发生过）。
+                let mut param_lines: Vec<String> = Vec::new();
+                for (id, ops) in &started {
+                    for op in ops {
+                        let Some(schema) = &op.parameters else {
+                            continue;
+                        };
+                        let signature =
+                            crate::capabilities::tools::api::json_schema_lines(schema).join("\n");
+                        if signature.is_empty() {
+                            continue;
+                        }
+                        param_lines.push(texts.render(
+                            &texts.module_tool_params_line,
+                            &[
+                                ("module", id.clone()),
+                                ("tool", op.tool.clone()),
+                                ("signature", signature),
+                            ],
+                        ));
+                    }
+                }
+                if !param_lines.is_empty() {
+                    notes.service_params = format!(
+                        "{}\n{}",
+                        self.prompt.text(
+                            crate::capabilities::prompt::api::Segment::ModuleToolParamsHeader
+                        ),
+                        param_lines.join("\n")
+                    );
+                }
             }
         }
         crate::capabilities::session::api::MemberTools {
@@ -183,6 +215,7 @@ impl Conductor {
                         service: view.name.clone(),
                         op: op.name.clone(),
                         description: op.description.clone(),
+                        parameters: op.parameters.clone(),
                     },
                 );
             }

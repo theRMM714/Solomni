@@ -1,6 +1,7 @@
-//! 模块打包契约（module.yaml）与扫描结果。
-//! 目录遍历机制在本能力的 detail（ModuleSource 端口）；「清单即事实」的重扫策略由 service 执行。
-//! 模型选择是会话级决定（记录在会话里），模块清单不再承载模型/供应商偏好。
+//! 目的：模块打包契约（`module.yaml`）与清单的纯逻辑。
+//! 管：契约类型（`ModuleManifest` / `ToolDecl` / `ServiceDecl` / `SecretDecl` / `Param`）、校验、`listing`。
+//! 不管：目录遍历（在 `detail/`）；身份块渲染（归 `session`）；模型/供应商偏好（会话级决定）。
+//! 联动：契约文档见 MODULE_SPEC.md；由 `detail/fs_modules.rs` 调校验、`api.rs` 对外重导出。
 
 use serde::Deserialize;
 /// 目的：参数类型（只支持机器能判定的最小集合；不猜、不做隐式转换）。
@@ -81,6 +82,9 @@ pub struct ModuleManifest {
     pub id: String,
     pub brief: String,
     pub system: String,
+    /// 目的：作者默认的模块启用状态（缺省 true；用户覆盖落 `.home/modules.yaml`）。
+    #[serde(default = "default_true")]
+    pub enabled: bool,
     /// 目的：运行能力声明：本模块的工具需要哪些运行包能力（如 python / node / bash / c-c++）。
     ///   只声明能力名，不写版本——版本由用户在会话的执行档位里定（见 capabilities/workspace/domain/exec.rs 与 RUNTIME_SPEC.md）。
     #[serde(default)]
@@ -152,7 +156,7 @@ pub struct ToolDecl {
 pub fn check_runtimes(m: &ModuleManifest) -> Result<(), String> {
     let mut seen: Vec<&String> = Vec::new();
     for c in &m.runtimes {
-        if !crate::capabilities::workspace::domain::packages::valid_capability(c) {
+        if !crate::kernel::api::valid_capability(c) {
             return Err(format!(
                 "runtimes 里的能力名不合法：{}（只允许小写字母、数字、- _ .，且以字母或数字开头）",
                 c
@@ -184,7 +188,7 @@ pub fn check_tools(m: &ModuleManifest, reserved: &[String]) -> Result<(), String
 }
 
 /// 目的：常驻服务表的校验（纯逻辑；扫描模块时由适配层调用）：**只校验语法**。
-///   适配器名是否存在由 `residents` 在使用时按注册表判——`workspace` 不认识适配器。
+///   适配器名是否存在由 `residents` 在使用时按注册表判——模块能力不认识适配器。
 pub fn check_services(m: &ModuleManifest) -> Result<(), String> {
     for (name, decl) in &m.services {
         if name.trim().is_empty() {
@@ -228,92 +232,6 @@ pub struct Module {
     pub has_userdata: bool,
 }
 
-/// 目的：**身份块的系统提示**：把 `{{mechanism}}` / `{{env}}` / `{{tool_calling}}` 三件事按同一口径填进模板。
-///   模块只是能力包（没有"发言"这回事）；发言席是 agent，所以这份 system 按 agent 成文。
-///   env 由 tools 的 systool 按该 agent 的沙箱渲染后传入。
-///   **工具清单不在这里**：本回合能用哪些工具随回合注入（见 collab 的 engine::tools_block）。
-pub fn agent_system(
-    prompt: &dyn crate::capabilities::prompt::api::Prompt,
-    agent: &str,
-    modules: &[(String, String)],
-    env: &str,
-    mode: crate::capabilities::llm::api::ToolMode,
-    session_kind: &str,
-    role: &str,
-) -> String {
-    render_system(
-        prompt,
-        crate::capabilities::prompt::api::Segment::AgentSystem,
-        agent,
-        modules,
-        env,
-        mode,
-        session_kind,
-        role,
-    )
-}
-
-/// 目的：**角色身份块**（不是 agent 的核心身份）：渲染角色提示词段 + 环境 + 调用约定。
-///   代理会话（core_proxy）用它：它的身份是角色提示词（`prompts/roles/core_proxy.yaml`），
-///   不是"某个 agent 的模块能力包"；机制 / 环境 / 调用约定与 agent 身份同一份口径。
-#[allow(clippy::too_many_arguments)]
-pub fn role_system(
-    prompt: &dyn crate::capabilities::prompt::api::Prompt,
-    segment: crate::capabilities::prompt::api::Segment,
-    agent: &str,
-    env: &str,
-    mode: crate::capabilities::llm::api::ToolMode,
-    session_kind: &str,
-    role: &str,
-) -> String {
-    render_system(prompt, segment, agent, &[], env, mode, session_kind, role)
-}
-
-/// 两处身份（agent / 角色）**共用这一份装配**：模板不同，变量与取值口径完全相同——
-/// 各写一份必然漂移。
-#[allow(clippy::too_many_arguments)]
-fn render_system(
-    prompt: &dyn crate::capabilities::prompt::api::Prompt,
-    segment: crate::capabilities::prompt::api::Segment,
-    agent: &str,
-    modules: &[(String, String)],
-    env: &str,
-    mode: crate::capabilities::llm::api::ToolMode,
-    session_kind: &str,
-    role: &str,
-) -> String {
-    use crate::capabilities::prompt::api::Segment;
-    let parts = modules
-        .iter()
-        .map(|(id, system)| format!("\n== {} ==\n{}", id, system.trim()))
-        .collect::<Vec<_>>()
-        .join("");
-    // 机制说明**按（会话使用类型 × 角色）**从册子里取：对应关系是数据，这里只做匹配。
-    //（AI 不知道机制就只会写散文。）
-    let mechanism = prompt.mechanism(session_kind, role);
-    prompt.render(
-        segment,
-        &[
-            ("agent", agent.to_string()),
-            ("modules", parts),
-            ("mechanism", mechanism),
-            ("env", env.to_string()),
-            // 两套调用约定**互斥**：一个通道只用一套（同时教会让模型在正文里讲解参数而被误判成调用）
-            (
-                "tool_calling",
-                match mode {
-                    crate::capabilities::llm::api::ToolMode::Native => {
-                        prompt.text(Segment::ToolCallingNative).to_string()
-                    }
-                    crate::capabilities::llm::api::ToolMode::Envelope => {
-                        prompt.text(Segment::ToolCallingEnvelope).to_string()
-                    }
-                },
-            ),
-        ],
-    )
-}
-
 /// 目的：扫描结果：合法模块 + 拒收原因（校验，不是挑选——如实呈现）。
 pub struct Roster {
     pub modules: Vec<Module>,
@@ -336,4 +254,9 @@ pub fn listing(roster: &Roster, texts: &crate::capabilities::prompt::api::ToolTe
         })
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+/// 目的：布尔字段的作者默认（缺省 true）。
+fn default_true() -> bool {
+    true
 }

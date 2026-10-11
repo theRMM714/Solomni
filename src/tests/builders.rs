@@ -907,10 +907,10 @@ pub(crate) fn native_core(
         registry_service(InMemorySettings::new(), Arc::clone(&llm)),
         test_history_of(history),
         test_workspace(
-            Arc::new(VecSource(vec![module_of("a")])),
             Arc::new(InMemoryPackages::empty()),
             Arc::new(InMemoryWorkspace::new()),
         ),
+        test_modules(Arc::new(VecSource(vec![module_of("a")]))),
         llm,
         test_tools_svc_with(Arc::new(SilentRunner), io, Arc::new(NoFenceHost)),
         test_prompt(),

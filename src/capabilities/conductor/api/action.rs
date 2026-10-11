@@ -267,9 +267,9 @@ impl ConductorHandle {
         id: &str,
     ) -> Result<
         (
-            crate::capabilities::workspace::api::Module,
+            crate::capabilities::modules::api::Module,
             String,
-            crate::capabilities::workspace::api::ToolDecl,
+            crate::capabilities::modules::api::ToolDecl,
         ),
         String,
     > {
@@ -396,6 +396,24 @@ impl ConductorHandle {
             "send_message" => {
                 SessionOps::say(self, &s("session_id"), &s("text"), out).map(Acted::Advanced)
             }
+            "set_module_enabled" => {
+                let id = s("module");
+                let on = args
+                    .get("enabled")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                self.modules.set_module_enabled(&id, on)?;
+                // 模块下线 → 它的常驻服务全部停掉（服务不能再跑在一个已下线的模块上）。
+                if !on {
+                    let roster = self.modules.roster();
+                    if let Some(m) = roster.modules.iter().find(|m| m.manifest.id == id) {
+                        for name in m.manifest.services.keys() {
+                            let _ = self.residents.stop(&id, name);
+                        }
+                    }
+                }
+                Ok(Acted::Done(serde_json::json!({ "ok": true })))
+            }
             "control_resident" => {
                 let module = s("module");
                 let name = s("name");
@@ -413,11 +431,16 @@ impl ConductorHandle {
                         Ok(Acted::Done(serde_json::json!({ "ok": true })))
                     }
                     "enable" => {
-                        self.residents.set_enabled(&module, &name, true)?;
-                        Ok(Acted::Done(serde_json::json!({ "ok": true })))
+                        self.modules.set_service_enabled(&module, &name, true)?;
+                        let list = self.residents.start(&module, &name, &lease)?;
+                        let names: Vec<&str> = list.iter().map(|o| o.name.as_str()).collect();
+                        Ok(Acted::Done(
+                            serde_json::json!({ "ok": true, "operations": names }),
+                        ))
                     }
                     "disable" => {
-                        self.residents.set_enabled(&module, &name, false)?;
+                        self.residents.stop(&module, &name)?;
+                        self.modules.set_service_enabled(&module, &name, false)?;
                         Ok(Acted::Done(serde_json::json!({ "ok": true })))
                     }
                     other => Err(format!(

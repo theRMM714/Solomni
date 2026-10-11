@@ -199,6 +199,8 @@ T2 不替代：
 - **三种语言的模块在真进程里真的能用**：真模块（harvest=python / render=node / indexer=C++）按需复制进夹具，
   CI 里**现场编译 indexer**（编译器版本进日志；构建失败是**硬失败**，不 env-skip），
   再真跑 harvest.scan → render.report → indexer.build → indexer.query，断言报告按语料逐条列出目录、检索有命中；
+- **MCP 常驻服务**：夹具声明一个 `mcp-toolbox` 服务，先 `control_resident` enable + start，再建只装这一个模块的
+  单 agent 会话——服务操作进模型工具面、经真进程被调用，回执与本地算出的摘要对账（真机演示见 `demo/run-demo-mcp.mjs`）；
 - 代拟、回档和会话编辑；
 - **原生工具调用**：先在真二进制上探测（结论写回登记处），再跑一次"一次回复两个调用"，
   并让假供应商核对**发回去的历史就是协议形状**（一条助手消息带 `tool_calls` + 每条结果一条 `role:"tool"`）；

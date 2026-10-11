@@ -12,3 +12,5 @@ root/modules/*/userdata/
 root/modules/harvest/
 root/modules/render/
 root/modules/indexer/
+# MCP 夹具模块同样由编排器生成（清单按平台写解释器名、脚本从真模块复制）：不入库。
+root/modules/mcp-toolbox/

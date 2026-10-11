@@ -3,13 +3,11 @@
 //! 不管：文件落盘的真实实现（在 detail/yaml_secrets.rs，随后续真实消费点补契约）；实际注入子进程。
 //! 联动：能力见 src/capabilities/secrets/；替身见 src/tests/doubles.rs。
 
+use crate::capabilities::modules::api::{Module, SecretDecl};
 use crate::capabilities::secrets::api::SecretOps;
 use crate::capabilities::secrets::ports::SecretStore;
 use crate::capabilities::secrets::service::SecretsService;
-use crate::capabilities::workspace::api::{Module, SecretDecl};
-use crate::tests::doubles::{
-    module_of, test_workspace, InMemoryPackages, InMemorySecretStore, InMemoryWorkspace, VecSource,
-};
+use crate::tests::doubles::{module_of, test_modules, InMemorySecretStore, VecSource};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -29,11 +27,7 @@ fn module_with_secret(id: &str, name: &str, env: &str) -> Module {
 /// 装好内存存储的隐秘字段能力（清单来自真 WorkspaceService + 内存端口）。
 fn svc(modules: Vec<Module>) -> (SecretsService, Arc<InMemorySecretStore>) {
     let store = Arc::new(InMemorySecretStore::new());
-    let workspace = test_workspace(
-        Arc::new(VecSource(modules)),
-        Arc::new(InMemoryPackages::empty()),
-        Arc::new(InMemoryWorkspace::new()),
-    );
+    let workspace = test_modules(Arc::new(VecSource(modules)));
     let service = SecretsService::new(
         workspace,
         Arc::clone(&store) as Arc<dyn SecretStore + Send + Sync>,
@@ -84,11 +78,9 @@ fn secrets_load_existing_values() {
     let mut initial = BTreeMap::new();
     initial.insert("m1/token".to_string(), "old".to_string());
     let store = Arc::new(InMemorySecretStore::with(initial));
-    let workspace = test_workspace(
-        Arc::new(VecSource(vec![module_with_secret("m1", "token", "TOKEN")])),
-        Arc::new(InMemoryPackages::empty()),
-        Arc::new(InMemoryWorkspace::new()),
-    );
+    let workspace = test_modules(Arc::new(VecSource(vec![module_with_secret(
+        "m1", "token", "TOKEN",
+    )])));
     let service = SecretsService::new(
         workspace,
         Arc::clone(&store) as Arc<dyn SecretStore + Send + Sync>,
@@ -116,11 +108,7 @@ fn module_tool_process_gets_module_secrets() {
     let modules = vec![m];
     let runner = Arc::new(EnvRecordingRunner::new());
     let store = Arc::new(InMemorySecretStore::new());
-    let workspace = test_workspace(
-        Arc::new(VecSource(modules.clone())),
-        Arc::new(InMemoryPackages::empty()),
-        Arc::new(InMemoryWorkspace::new()),
-    );
+    let workspace = test_modules(Arc::new(VecSource(modules.clone())));
     let secrets = Arc::new(
         SecretsService::new(
             Arc::clone(&workspace),
@@ -164,11 +152,7 @@ fn secret_actions_set_and_clear() {
 
     let modules = vec![module_with_secret("m1", "token", "TOKEN")];
     let store = Arc::new(InMemorySecretStore::new());
-    let workspace = test_workspace(
-        Arc::new(VecSource(modules.clone())),
-        Arc::new(InMemoryPackages::empty()),
-        Arc::new(InMemoryWorkspace::new()),
-    );
+    let workspace = test_modules(Arc::new(VecSource(modules.clone())));
     let secrets = Arc::new(
         SecretsService::new(
             Arc::clone(&workspace),

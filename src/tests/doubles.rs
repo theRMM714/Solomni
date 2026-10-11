@@ -13,6 +13,8 @@ use crate::capabilities::llm::api::Channel;
 use crate::capabilities::llm::api::{BoxedChat, Chat, Chunk, CompleteOpts, Completion, Msg};
 use crate::capabilities::llm::detail::fake_chat::FakeChat;
 use crate::capabilities::llm::ports::{ChatGateway, ModelCatalog};
+use crate::capabilities::modules::api::{Module, ModuleManifest};
+use crate::capabilities::modules::ports::ModuleSource;
 use crate::capabilities::prompt::api::Prompt;
 use crate::capabilities::prompt::domain::prompt::Prompts;
 use crate::capabilities::prompt::ports::PromptSource;
@@ -24,8 +26,7 @@ use crate::capabilities::session::ports::HistoryStore;
 use crate::capabilities::tools::ports::SystoolsSource;
 use crate::capabilities::tools::ports::{FileRead, SysIo};
 use crate::capabilities::workspace::api::{Library, PackageManifest};
-use crate::capabilities::workspace::api::{Module, ModuleManifest};
-use crate::capabilities::workspace::ports::{ModuleSource, PackageSource, WorkStore, Workdirs};
+use crate::capabilities::workspace::ports::{PackageSource, WorkStore, Workdirs};
 use crate::kernel::api::Tier;
 use crate::kernel::ports::ProcessRunner;
 use std::collections::BTreeMap;
@@ -690,8 +691,8 @@ pub(crate) fn run_builtin(
 }
 
 /// 测试用模块工具声明：只给启动命令（参数契约在需要的用例里另行声明）。
-pub(crate) fn decl(command: &str) -> crate::capabilities::workspace::domain::module::ToolDecl {
-    crate::capabilities::workspace::domain::module::ToolDecl {
+pub(crate) fn decl(command: &str) -> crate::capabilities::modules::api::ToolDecl {
+    crate::capabilities::modules::api::ToolDecl {
         command: command.to_string(),
         desc: String::new(),
         params: None,
@@ -703,7 +704,7 @@ pub(crate) fn decl(command: &str) -> crate::capabilities::workspace::domain::mod
 pub(crate) fn decl_with(
     command: &str,
     params_yaml: &str,
-) -> crate::capabilities::workspace::domain::module::ToolDecl {
+) -> crate::capabilities::modules::api::ToolDecl {
     let mut d = decl(command);
     d.params = Some(yaml_serde::from_str(params_yaml).expect("测试参数声明要能解析"));
     d
@@ -758,7 +759,7 @@ pub(crate) fn test_params(agent: &str) -> crate::capabilities::session::api::Ses
 /// 测试用工具说明块素材（patch 语法 + 给定的模块工具）。
 pub(crate) fn test_notes(
     sb: &crate::capabilities::workspace::api::Sandbox,
-    modules: &[crate::capabilities::workspace::api::Module],
+    modules: &[crate::capabilities::modules::api::Module],
 ) -> crate::capabilities::tools::api::ToolNotes {
     crate::capabilities::tools::api::tool_notes(&test_prompts(), sb, modules)
 }
@@ -932,8 +933,8 @@ impl ModelCatalog for FakeCatalog {
 pub(crate) struct VecSource(pub(crate) Vec<Module>);
 
 impl ModuleSource for VecSource {
-    fn scan(&self) -> crate::capabilities::workspace::api::Roster {
-        crate::capabilities::workspace::api::Roster {
+    fn scan(&self) -> crate::capabilities::modules::api::Roster {
+        crate::capabilities::modules::api::Roster {
             modules: self.0.clone(),
             rejected: Vec::new(),
         }
@@ -1019,6 +1020,7 @@ pub(crate) fn module_of(id: &str) -> Module {
             id: id.to_string(),
             brief: format!("{} 的简介", id),
             system: format!("你负责{}", id),
+            enabled: true,
             runtimes: Vec::new(),
             tools: BTreeMap::new(),
             services: Default::default(),
@@ -1329,28 +1331,68 @@ pub(crate) fn test_llm_demo() -> Arc<dyn crate::capabilities::llm::api::Llm + Se
 /// 测试用的 **workspace 能力面**：把四个端口装进 `WorkspaceService`（与生产同一条路，R12）。
 /// 版本库默认用内存替身；要观察主副本/提交记录的用例用 `test_workspace_store`。
 pub(crate) fn test_workspace(
-    source: Arc<dyn ModuleSource + Send + Sync>,
     packages: Arc<dyn PackageSource + Send + Sync>,
     dirs: Arc<dyn Workdirs + Send + Sync>,
 ) -> Arc<dyn crate::capabilities::workspace::api::Workspace + Send + Sync> {
-    test_workspace_store(source, packages, dirs, Arc::new(InMemoryWorkStore::new()))
+    test_workspace_store(packages, dirs, Arc::new(InMemoryWorkStore::new()))
 }
 
 pub(crate) fn test_workspace_store(
-    source: Arc<dyn ModuleSource + Send + Sync>,
     packages: Arc<dyn PackageSource + Send + Sync>,
     dirs: Arc<dyn Workdirs + Send + Sync>,
     store: Arc<dyn WorkStore + Send + Sync>,
 ) -> Arc<dyn crate::capabilities::workspace::api::Workspace + Send + Sync> {
+    Arc::new(crate::capabilities::workspace::service::WorkspaceService::new(packages, dirs, store))
+}
+
+/// 目的：模块启停覆盖的内存存储（测试用；与 yaml 实现同一条端口）。
+#[derive(Default)]
+pub(crate) struct InMemoryModuleState {
+    state: Mutex<crate::capabilities::modules::domain::state::EnabledState>,
+}
+
+impl InMemoryModuleState {
+    /// 目的：空覆盖起步。
+    pub(crate) fn new() -> InMemoryModuleState {
+        InMemoryModuleState {
+            state: Mutex::new(Default::default()),
+        }
+    }
+}
+
+impl crate::capabilities::modules::ports::ModuleStateStore for InMemoryModuleState {
+    fn load(&self) -> Result<crate::capabilities::modules::domain::state::EnabledState, String> {
+        Ok(self.state.lock().expect("锁").clone())
+    }
+    fn save(
+        &self,
+        state: &crate::capabilities::modules::domain::state::EnabledState,
+    ) -> Result<(), String> {
+        *self.state.lock().expect("锁") = state.clone();
+        Ok(())
+    }
+}
+
+/// 目的：测试用的**模块能力面**——把清单来源与覆盖存储装进 `ModulesService`（与生产同一条路，R12）。
+pub(crate) fn test_modules(
+    source: Arc<dyn ModuleSource + Send + Sync>,
+) -> Arc<dyn crate::capabilities::modules::api::Modules + Send + Sync> {
+    test_modules_store(source, Arc::new(InMemoryModuleState::new()))
+}
+
+/// 目的：测试用的模块能力面（指定覆盖存储；断言落盘/有效值的用例用它）。
+pub(crate) fn test_modules_store(
+    source: Arc<dyn ModuleSource + Send + Sync>,
+    store: Arc<dyn crate::capabilities::modules::ports::ModuleStateStore + Send + Sync>,
+) -> Arc<dyn crate::capabilities::modules::api::Modules + Send + Sync> {
     Arc::new(
-        crate::capabilities::workspace::service::WorkspaceService::new(
-            source, packages, dirs, store,
-        ),
+        crate::capabilities::modules::service::ModulesService::new(source, store)
+            .expect("装模块能力"),
     )
 }
 
 /// 登记一个 agent（测试装配用）：**校验用的模块清单由调用方取一份**交给登记处——
-/// 清单归 workspace，登记处只认事实（见 ARCHITECTURE.md §九.3）。
+/// 清单归 modules，登记处只认事实（见 ARCHITECTURE.md §九.3）。
 pub(crate) fn agent_upsert(
     core: &mut Conductor,
     name: &str,
@@ -1382,10 +1424,10 @@ pub(crate) fn core_with_services(
         registry_service(InMemorySettings::new(), Arc::clone(&llm)),
         test_history(),
         test_workspace(
-            Arc::new(VecSource(modules)),
             Arc::new(InMemoryPackages::empty()),
             Arc::new(InMemoryWorkspace::new()),
         ),
+        test_modules(Arc::new(VecSource(modules))),
         llm,
         test_tools_svc_with(
             runner,
@@ -1420,11 +1462,8 @@ pub(crate) fn core_with_workspace(
     Conductor::new(
         registry_service(InMemorySettings::new(), Arc::clone(&llm)),
         test_history(),
-        test_workspace(
-            Arc::new(VecSource(modules)),
-            Arc::new(InMemoryPackages::empty()),
-            ws,
-        ),
+        test_workspace(Arc::new(InMemoryPackages::empty()), ws),
+        test_modules(Arc::new(VecSource(modules))),
         llm,
         test_tools_svc_with(
             Arc::new(SilentRunner),
@@ -1522,11 +1561,8 @@ pub(crate) fn core_with_pkgs(
     Conductor::new(
         registry_service(InMemorySettings::new(), Arc::clone(&llm)),
         test_history_of(history),
-        test_workspace(
-            Arc::new(VecSource(modules)),
-            packages,
-            Arc::new(InMemoryWorkspace::new()),
-        ),
+        test_workspace(packages, Arc::new(InMemoryWorkspace::new())),
+        test_modules(Arc::new(VecSource(modules))),
         llm,
         test_tools_svc_with(runner, io, Arc::new(NoFenceHost)),
         test_prompt(),
@@ -1550,10 +1586,10 @@ pub(crate) fn core_with_settings(store: InMemorySettings) -> Conductor {
         registry_service(store, Arc::clone(&llm)),
         test_history(),
         test_workspace(
-            Arc::new(VecSource(Vec::new())),
             Arc::new(InMemoryPackages::empty()),
             Arc::new(InMemoryWorkspace::new()),
         ),
+        test_modules(Arc::new(VecSource(Vec::new()))),
         llm,
         test_tools_svc_with(
             Arc::new(SilentRunner),
@@ -1592,10 +1628,10 @@ pub(crate) fn core_with_io_gateway(
         registry_service(InMemorySettings::new(), Arc::clone(&llm)),
         test_history(),
         test_workspace(
-            Arc::new(VecSource(modules)),
             Arc::new(InMemoryPackages::empty()),
             Arc::new(InMemoryWorkspace::new()),
         ),
+        test_modules(Arc::new(VecSource(modules))),
         llm,
         test_tools_svc_with(Arc::new(SilentRunner), io, Arc::new(NoFenceHost)),
         test_prompt(),
@@ -1622,10 +1658,10 @@ pub(crate) fn core_with_gateway(
         registry_service(InMemorySettings::new(), Arc::clone(&llm)),
         test_history(),
         test_workspace(
-            Arc::new(VecSource(modules)),
             Arc::new(InMemoryPackages::empty()),
             Arc::new(InMemoryWorkspace::new()),
         ),
+        test_modules(Arc::new(VecSource(modules))),
         llm,
         test_tools_svc_with(
             Arc::new(SilentRunner),
@@ -1945,7 +1981,12 @@ impl crate::capabilities::residents::ports::ServiceAdapter for FakeServiceAdapte
             vec![crate::capabilities::residents::api::Operation {
                 name: "echo".to_string(),
                 description: "回显参数".to_string(),
-                params: None,
+                // 带一份 JSON Schema：工具面"原样声明"的断言要用它。
+                parameters: Some(serde_json::json!({
+                    "type": "object",
+                    "properties": { "x": { "type": "integer", "description": "一个整数" } },
+                    "required": ["x"]
+                })),
             }],
         ))
     }
@@ -1973,7 +2014,7 @@ impl crate::capabilities::residents::ports::ServiceAdapter for DyingServiceAdapt
             vec![crate::capabilities::residents::api::Operation {
                 name: "boom".to_string(),
                 description: String::new(),
-                params: None,
+                parameters: None,
             }],
         ))
     }
@@ -1988,6 +2029,48 @@ impl crate::capabilities::residents::ports::ServiceInstance for DyingServiceInst
     fn stop(&mut self) {}
     fn is_alive(&self) -> bool {
         false
+    }
+}
+
+/// 目的：记录型日志 Spy——按顺序记下 (级别, 位置, 文案)，供"事实被记进日志"的断言。
+#[derive(Default)]
+pub(crate) struct RecordingLog {
+    lines: std::sync::Mutex<Vec<(String, String, String)>>,
+}
+
+impl RecordingLog {
+    /// 目的：空记录。
+    pub(crate) fn new() -> RecordingLog {
+        RecordingLog::default()
+    }
+    /// 目的：全部记录里是否有一条文案包含给定片段。
+    pub(crate) fn has(&self, needle: &str) -> bool {
+        self.lines
+            .lock()
+            .expect("锁")
+            .iter()
+            .any(|(_, _, m)| m.contains(needle))
+    }
+}
+
+impl crate::kernel::ports::Log for RecordingLog {
+    fn info(&self, at: &str, msg: &str) {
+        self.lines
+            .lock()
+            .expect("锁")
+            .push(("info".to_string(), at.to_string(), msg.to_string()));
+    }
+    fn warn(&self, at: &str, msg: &str) {
+        self.lines
+            .lock()
+            .expect("锁")
+            .push(("warn".to_string(), at.to_string(), msg.to_string()));
+    }
+    fn error(&self, at: &str, msg: &str) {
+        self.lines
+            .lock()
+            .expect("锁")
+            .push(("error".to_string(), at.to_string(), msg.to_string()));
     }
 }
 

@@ -3,9 +3,9 @@
 //! 不管：`module.yaml` 的读取与参数**声明形态**（`Param` / `ParamType` 归 `workspace`）——这里只消费，免得 `workspace → tools` 成环。
 //! 联动：由本能力的 `service/` 在装配工具面时调用；声明形态来自 `workspace::api`。
 
+use crate::capabilities::modules::api::{Module, ToolDecl};
 use crate::capabilities::prompt::api::{Prompt, Segment};
 use crate::capabilities::tools::domain::schema::ToolSchema;
-use crate::capabilities::workspace::api::{Module, ToolDecl};
 
 impl ToolDecl {
     /// 目的：把这个工具声明的参数契约转成工具能力认识的形态（校验与渲染共用）。

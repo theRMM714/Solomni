@@ -7,5 +7,5 @@ pub use crate::kernel::domain::fence::FenceSpec;
 pub use crate::kernel::domain::jobs::JobRegistry;
 pub use crate::kernel::domain::path::slash;
 pub use crate::kernel::domain::types::{
-    Ask, AskOutcome, SessionId, Tier, ToolOutcome, DEFAULT_LLM_TIMEOUT_SECS,
+    valid_capability, Ask, AskOutcome, SessionId, Tier, ToolOutcome, DEFAULT_LLM_TIMEOUT_SECS,
 };

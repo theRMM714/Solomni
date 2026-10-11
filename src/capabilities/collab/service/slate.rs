@@ -4,6 +4,7 @@
 use super::collab::*;
 use crate::capabilities::collab::service::discussion::Discussion;
 use crate::capabilities::llm::api::{CompleteOpts, Llm};
+use crate::capabilities::modules::api::Modules;
 use crate::capabilities::prompt::api::{Prompt, Segment};
 use crate::capabilities::registry::api::Settings;
 use crate::capabilities::session::api::SessionMeta;
@@ -17,7 +18,7 @@ use super::pump::*;
 impl CollabSession {
     /// 委托代拟：核心拟发言名单（**拟名单业务**的用例，与「推荐模型」同一条 `slate` 协议），交用户确认。
     pub(crate) fn draft_slate(&mut self, sink: &mut dyn FnMut(SessionEvent)) {
-        let roster = self.workspace.roster();
+        let roster = self.modules.roster();
         let mut verify = self.core_verify_tools("planner");
         sink(crate::capabilities::session::api::working("核心"));
         let proposal = crate::capabilities::slate::api::propose(
@@ -224,6 +225,7 @@ impl CollabSession {
     pub fn restore(
         llm: Arc<dyn Llm + Send + Sync>,
         workspace: Arc<dyn Workspace + Send + Sync>,
+        modules: Arc<dyn Modules + Send + Sync>,
         settings: Settings,
         prompts: Arc<dyn Prompt>,
         systools: Arc<dyn crate::capabilities::tools::api::Tools>,
@@ -257,6 +259,7 @@ impl CollabSession {
         // 形态要在 settings 被移进结构体之前算出来。
         let core_mode = settings.tool_mode_for(None);
         let mut s = CollabSession {
+            modules,
             delegated: meta.delegate,
             roster: meta.agents.clone(),
             task: st.task.clone().unwrap_or_default(),

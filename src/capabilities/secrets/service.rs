@@ -3,9 +3,9 @@
 //! 不管：实际注入（消费方按 resolve 取）；通道密钥（registry）；字段声明解析（workspace）。
 //! 联动：api 见 `api.rs`，端口见 `ports.rs`；由 `main.rs` 装配。
 
+use crate::capabilities::modules::api::{Modules, Roster, SecretDecl};
 use crate::capabilities::secrets::api::{SecretOps, SecretView};
 use crate::capabilities::secrets::ports::SecretStore;
-use crate::capabilities::workspace::api::{Roster, SecretDecl, Workspace};
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
@@ -16,7 +16,7 @@ fn key(module: &str, name: &str) -> String {
 
 /// 目的：隐秘字段能力——持值缓存与存储端口，按统一 API 答话。
 pub struct SecretsService {
-    workspace: Arc<dyn Workspace + Send + Sync>,
+    modules: Arc<dyn Modules + Send + Sync>,
     store: Arc<dyn SecretStore + Send + Sync>,
     values: Mutex<BTreeMap<String, String>>,
 }
@@ -24,12 +24,12 @@ pub struct SecretsService {
 impl SecretsService {
     /// 目的：组合根专用——注入工作区清单来源与存储端口；加载失败 = 装配失败（不静默空表）。
     pub fn new(
-        workspace: Arc<dyn Workspace + Send + Sync>,
+        modules: Arc<dyn Modules + Send + Sync>,
         store: Arc<dyn SecretStore + Send + Sync>,
     ) -> Result<SecretsService, String> {
         let values = store.load()?;
         Ok(SecretsService {
-            workspace,
+            modules,
             store,
             values: Mutex::new(values),
         })
@@ -73,7 +73,7 @@ impl SecretsService {
 
 impl SecretOps for SecretsService {
     fn declared(&self) -> Result<Vec<SecretView>, String> {
-        let roster = self.workspace.roster();
+        let roster = self.modules.roster();
         let values = self.values.lock().expect("锁");
         let mut out = Vec::new();
         for m in &roster.modules {
@@ -91,7 +91,7 @@ impl SecretOps for SecretsService {
     }
 
     fn set(&self, module: &str, name: &str, value: &str) -> Result<(), String> {
-        let roster = self.workspace.roster();
+        let roster = self.modules.roster();
         Self::locate(&roster, module, name)?;
         self.values
             .lock()
@@ -101,14 +101,14 @@ impl SecretOps for SecretsService {
     }
 
     fn clear(&self, module: &str, name: &str) -> Result<(), String> {
-        let roster = self.workspace.roster();
+        let roster = self.modules.roster();
         Self::locate(&roster, module, name)?;
         self.values.lock().expect("锁").remove(&key(module, name));
         self.persist()
     }
 
     fn resolve(&self, module: &str) -> Result<Vec<(String, String)>, String> {
-        let roster = self.workspace.roster();
+        let roster = self.modules.roster();
         if !roster.modules.iter().any(|m| m.manifest.id == module) {
             return Err(format!("清单里没有模块 {}", module));
         }
@@ -116,7 +116,7 @@ impl SecretOps for SecretsService {
     }
 
     fn redact(&self, module: &str, text: &str) -> Result<String, String> {
-        let roster = self.workspace.roster();
+        let roster = self.modules.roster();
         let mut out = text.to_string();
         for (_env, value) in self.module_values(module, &roster) {
             out = out.replace(&value, "***");

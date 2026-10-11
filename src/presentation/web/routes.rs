@@ -76,7 +76,7 @@ pub const ROUTES: &[Route] = &[
         id: "state",
         method: "GET",
         pattern: "/api/state",
-        capability: "WorkspaceOps::roster + SessionOps::session_views + RegistryOps + HistoryOps::list",
+        capability: "ModulesOps::roster + SessionOps::session_views + RegistryOps + HistoryOps::list",
         request: "—",
         response: "{modules,rejected,fence,providers,models,core,agents,settings,sessions,history}",
         statuses: &[200, 400],

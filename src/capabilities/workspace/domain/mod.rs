@@ -5,7 +5,6 @@
 
 pub mod exec;
 pub mod hash;
-pub mod module;
 pub mod packages;
 pub mod workspace;
 pub mod workstore;

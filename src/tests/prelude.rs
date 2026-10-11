@@ -33,13 +33,14 @@ pub use crate::capabilities::session::ports::HistoryStore;
 pub use crate::capabilities::tools::api::{ToolExec, ToolOutcome};
 pub use crate::kernel::ports::ProcessRunner;
 
-pub use crate::capabilities::workspace::api::Module;
+pub use crate::capabilities::modules::api::Module;
 
 pub use crate::capabilities::workspace::api::{self as exec, Diagnosis, ExecSpec};
 
 pub use crate::capabilities::workspace::api::{Library, PackageManifest};
 
-pub use crate::capabilities::workspace::ports::{ModuleSource, Workdirs};
+pub use crate::capabilities::modules::ports::ModuleSource;
+pub use crate::capabilities::workspace::ports::Workdirs;
 
 pub use crate::capabilities::conductor::api::{
     AgentInstance, ConfigAgent, DecisionCard, SessionEdit, SessionEvent, WorkMode, WorkSpec,

@@ -13,7 +13,7 @@ pub(crate) fn module_tool_params_are_declared_in_the_manifest_and_enforced_by_co
         ),
     );
     let prompts = test_prompts();
-    let system = crate::capabilities::workspace::api::agent_system(
+    let system = crate::capabilities::session::domain::session::agent_system(
         &prompts,
         "m0",
         &[(mod_m0.manifest.id.clone(), mod_m0.manifest.system.clone())],
