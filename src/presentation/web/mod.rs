@@ -457,6 +457,15 @@ fn state_json(ops: &Ops, fence: &FenceInfo) -> Result<serde_json::Value, String>
                 "enabled": ops.modules.service_enabled(&m.manifest.id, n).unwrap_or(false),
             })).collect::<Vec<_>>(),
         })).collect::<Vec<_>>(),
+        // 常驻服务的**运行态**：模块下的服务开关要显示“在不在跑”（模块声明在 modules[].services）。
+        "services": ops.residents.services()?.iter().map(|s| json!({
+            "module": s.module.clone(),
+            "name": s.name.clone(),
+            "adapter": s.adapter.clone(),
+            "state": s.state.label(),
+            "reason": s.reason.clone(),
+            "operations": s.operations.iter().map(|o| o.name.clone()).collect::<Vec<_>>(),
+        })).collect::<Vec<_>>(),
         "rejected": roster.rejected,
         // 本机工具围栏的实际能力（如实显示，不假装）：哪些维度真的被强制了。
         "fence": fence,
