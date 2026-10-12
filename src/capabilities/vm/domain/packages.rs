@@ -43,6 +43,9 @@ pub struct PackageManifest {
     /// 约束：也**不用于信任**——用户自造的包没有可信基准。
     #[serde(default)]
     pub files: Vec<FileFingerprint>,
+    /// 目的：扫描时记下的来源目录（包文件夹的真实路径）；不来自 yaml，装配阶段据此定位包内容。
+    #[serde(skip)]
+    pub source_dir: std::path::PathBuf,
 }
 
 /// 目的：一个文件的声明指纹。

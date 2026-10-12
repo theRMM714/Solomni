@@ -4,6 +4,7 @@
 //! 联动：契约见 docs/vm/README.md 与 RUNTIME_SPEC.md。
 use super::builders::*;
 use super::prelude::*;
+use crate::capabilities::vm::ports::PackageSource;
 
 #[test]
 pub(crate) fn package_manifest_check_rejects_illegal_forms() {
@@ -361,4 +362,20 @@ pub(crate) fn diagnose_text_spells_out_every_reason() {
         "{}",
         clash
     );
+}
+
+#[test]
+pub(crate) fn fs_packages_records_source_dir() {
+    let dir = crate::tests::scratch("vm-pkg-source");
+    let sub = dir.join("py");
+    std::fs::create_dir_all(&sub).expect("建包目录");
+    std::fs::write(
+        sub.join("package.yaml"),
+        "id: python\nversion: 3.12.4\nprefix: opt/rt/py\n",
+    )
+    .expect("写清单");
+    let lib = crate::capabilities::vm::detail::FsPackages::new(dir.clone()).scan();
+    assert_eq!(lib.packages.len(), 1, "一个包");
+    assert_eq!(lib.packages[0].source_dir, sub, "扫描要记下来源目录");
+    let _ = std::fs::remove_dir_all(&dir);
 }
