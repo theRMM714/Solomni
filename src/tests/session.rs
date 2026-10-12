@@ -1002,7 +1002,7 @@ pub(crate) fn edit_session_writes_meta_appends_config_record_and_rebuilds() {
     // 虚拟机档现在一律不可选（guest 本体尚未接入），所以**先把它做成已存在的虚拟机档会话**——
     // 已在 vm 档的会话只校验它自己那几项（基础根等），改模块/模型/网络照旧允许。
     hist.force_tier(&sid, Tier::Vm);
-    let base_dir = crate::tests::scratch("edit-session-base");
+    let base_dir = crate::tests::base_dir("edit-session-base");
     core.edit_session(
         &sid,
         SessionEdit {
@@ -1145,7 +1145,7 @@ pub(crate) fn edit_session_enforces_the_same_rules_as_creation() {
     let hist2 = Arc::new(InMemoryHistory::new());
     // 已经在虚拟机档上的会话（"留在 vm 档"这一路：只校验它自己那几项，不拿"本机能不能提供 vm 档"拦它）。
     // 基础根给一个真实存在的目录：留在 vm 档时仍然要校验用户填的那个路径。
-    let vm_base = crate::tests::scratch("edit-rules-vm-base");
+    let vm_base = crate::tests::base_dir("edit-rules-vm-base");
     seed_session(
         &hist2,
         "c",

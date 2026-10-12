@@ -82,6 +82,7 @@ files:                      # 包内文件指纹：用于可复现与呈现
 前置检测是**一份逐项清单**（`vm::vm_requirements`，界面与 `--doctor` 照抄同一份）：虚拟机监视器、guest 本体、QEMU、基础根，
 每项给出"现状 + 怎么补"。因为 guest 本体是所有机器共同缺的一项，**虚拟机档此刻一律不可选**（`vm::tier_readiness`）；
 QEMU 与基础根**用户自备**：`qemu_path` 是全局设置（默认兜底看 PATH），基础根是**会话级**的 `exec.base`（`meta.yaml`）；产品只检测与指路。
+基础根 = 一个目录：发行版 rootfs + `vmlinuz`（或 `bzImage`）+ 可选 `initrd.img`（判定在 `vm/domain/guest.rs`，就绪检测与界面照它如实报）。
 镜像方向：guest 在三平台统一为同一个 Linux 发行版（Debian stable 为默认基线）；接入时把默认下载链接记进 `links.yaml`。
 guest 与会话级装配属于产品路线图：现状、怎么补与验收标准见 `tests/gaps.yaml` 的 `fence.guest-tier-not-wired`。
 

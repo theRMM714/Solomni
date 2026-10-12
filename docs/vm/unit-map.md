@@ -10,5 +10,6 @@
 | `src/capabilities/vm/service.rs` | 用例与端口持有者：持 `PackageSource`（R12），实现 `Vm` |
 | `src/capabilities/vm/ports.rs` | 出站端口 `PackageSource`（扫描 runtimes/ 里的包清单） |
 | `src/capabilities/vm/domain/exec.rs` | 执行档位诊断、执行计划派生、承载判定与就绪检测（纯逻辑） |
+| `src/capabilities/vm/domain/guest.rs` | guest 基础根布局判定（rootfs + 内核 + 可选 initrd，纯逻辑） |
 | `src/capabilities/vm/domain/packages.rs` | 运行包契约（package.yaml）校验、去重、系统路径冲突预检与来源目录（纯逻辑） |
 | `src/capabilities/vm/detail/fs_packages.rs` | `PackageSource` 的磁盘实现：扫描 runtimes/ |

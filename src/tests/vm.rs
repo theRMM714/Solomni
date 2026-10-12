@@ -4,6 +4,7 @@
 //! 联动：契约见 docs/vm/README.md 与 RUNTIME_SPEC.md。
 use super::builders::*;
 use super::prelude::*;
+use crate::capabilities::vm::domain::guest::classify_base;
 use crate::capabilities::vm::ports::PackageSource;
 
 #[test]
@@ -159,7 +160,7 @@ pub(crate) fn vm_tier_readiness_gates_creation_and_editing() {
     assert!(why.contains("虚拟机档现在不可用"), "{}", why);
 
     // 基础根在场：base 这一项要认出来（其余项照旧按事实）。
-    let dir = crate::tests::scratch("tier-readiness");
+    let dir = crate::tests::base_dir("tier-readiness");
     let real = ExecSpec {
         tier: Tier::Vm,
         base: Some(dir.to_string_lossy().into_owned()),
@@ -377,5 +378,28 @@ pub(crate) fn fs_packages_records_source_dir() {
     let lib = crate::capabilities::vm::detail::FsPackages::new(dir.clone()).scan();
     assert_eq!(lib.packages.len(), 1, "一个包");
     assert_eq!(lib.packages[0].source_dir, sub, "扫描要记下来源目录");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+pub(crate) fn guest_base_requires_rootfs_and_kernel() {
+    let probe = crate::kernel::detail::HostProbeAdapter;
+    let dir = crate::tests::scratch("vm-guest-base");
+    // 空目录：缺内核。
+    assert!(classify_base(&dir, &probe).is_err(), "没有内核不算基础根");
+    // 放内核：可用，无 initrd。
+    std::fs::write(dir.join("vmlinuz"), b"x").expect("写内核");
+    let base = classify_base(&dir, &probe).expect("有内核就该可用");
+    assert_eq!(base.kernel, dir.join("vmlinuz"));
+    assert!(base.initrd.is_none(), "没放 initrd 就是没有");
+    // 放 initrd：一并认出来。
+    std::fs::write(dir.join("initrd.img"), b"x").expect("写 initrd");
+    let base = classify_base(&dir, &probe).expect("有 initrd 仍可用");
+    assert_eq!(base.initrd, Some(dir.join("initrd.img")));
+    // 不在场：不是一个目录。
+    assert!(
+        classify_base(&dir.join("nope"), &probe).is_err(),
+        "不在场要报出来"
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }

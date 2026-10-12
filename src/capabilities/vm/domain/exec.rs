@@ -287,24 +287,35 @@ fn qemu_requirement(registered: Option<&str>, probe: &dyn HostProbe) -> VmRequir
     }
 }
 
-/// 基础根检测：用户自备的最小系统所在目录（运行包之外的那一层）。
+/// 目的：基础根检测——用户自备的 guest 基础（rootfs 目录 + vmlinuz/bzImage）在不在、布局对不对。
 fn base_requirement(base: Option<&str>, probe: &dyn HostProbe) -> VmRequirement {
-    let met = match base.map(str::trim) {
-        None | Some("") => false,
-        Some(p) => probe.is_dir(Path::new(p)),
+    let checked = base.map(str::trim).filter(|p| !p.is_empty()).map(|p| {
+        (
+            p,
+            crate::capabilities::vm::domain::guest::classify_base(Path::new(p), probe),
+        )
+    });
+    let (met, detail) = match checked {
+        None => (false, "没有指定基础根".to_string()),
+        Some((p, Ok(b))) => (
+            true,
+            format!(
+                "基础根在场：{}（rootfs{}，内核 {}）",
+                p,
+                if b.initrd.is_some() { " + initrd" } else { "" },
+                b.kernel.file_name().unwrap_or_default().to_string_lossy()
+            ),
+        ),
+        Some((p, Err(why))) => (false, format!("基础根不可用：{}（{}）", p, why)),
     };
     VmRequirement {
         id: "base",
         met,
-        detail: match base.map(str::trim) {
-            None | Some("") => "没有指定基础根".to_string(),
-            Some(p) if met => format!("基础根在场：{}", p),
-            Some(p) => format!("基础根不在场：{}", p),
-        },
+        detail,
         how: if met {
             String::new()
         } else {
-            "自备一份最小系统（发行版基底 + 内核），把目录填进设置或会话的 base（本产品不预置、不下载镜像）"
+            "自备一份 guest 基础根：一个目录，里面是发行版 rootfs 与 vmlinuz（可选 initrd.img），把目录填进会话的 base（本产品不预置、不下载镜像）"
                 .to_string()
         },
     }

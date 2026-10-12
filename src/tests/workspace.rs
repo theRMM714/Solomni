@@ -279,7 +279,7 @@ pub(crate) fn module_without_runtime_is_denied_with_reason() {
     hist.force_tier(&sid, Tier::Vm);
     // 编辑一次会把内存里的会话丢掉；下一次访问按落盘 meta（已是 vm 档）重建，
     // 于是"工具可用性按 vm 档判"这条路才真的被走到。
-    let base_dir = crate::tests::scratch("module-without-runtime-base");
+    let base_dir = crate::tests::base_dir("module-without-runtime-base");
     let mut rebuild = edit_of(vec![("a", &["a"], "")]);
     rebuild.tier = "vm".to_string();
     rebuild.base = Some(base_dir.to_string_lossy().into_owned());

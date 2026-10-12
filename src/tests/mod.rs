@@ -30,7 +30,14 @@ mod tools;
 mod vm;
 mod workspace;
 
-/// 隔离落点：`target/test-scratch/contract/<name>`（target/ 不入库）。每次先清空再建。
+/// 目的：一个可用于虚拟机档的**基础根**——目录 + vmlinuz（要过基础根布局判定）。
+pub(crate) fn base_dir(name: &str) -> std::path::PathBuf {
+    let dir = scratch(name);
+    std::fs::write(dir.join("vmlinuz"), b"stub").expect("写内核");
+    dir
+}
+
+/// 目的：隔离落点 `target/test-scratch/contract/<name>`（target/ 不入库）。每次先清空再建。
 pub(crate) fn scratch(name: &str) -> std::path::PathBuf {
     let d = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("target")
