@@ -314,6 +314,10 @@ impl Conductor {
         self.history.save_meta(&new_meta)?;
         // 权限或模块可能变了：撤掉按**旧配置**写下的围栏授权；下一次工具执行按新配置重授（即时生效）。
         self.release_session_fences(&meta);
+        if new_meta.exec.tier == crate::kernel::api::Tier::Vm {
+            let sandboxes = self.sandboxes(&new_meta, &roster)?;
+            self.start_session_guest(&new_meta, &plan, &sandboxes)?;
+        }
         self.record_config(sid, &new_meta);
         // 内存里那份是按旧配置装的：丢掉它，下一次访问按新配置从转录重建（转录即状态，不丢内容）。
         self.sessions.remove(sid);
@@ -344,6 +348,48 @@ impl Conductor {
                 &format!("取沙箱失败，未撤销授权：{}", e),
             ),
         }
+    }
+
+    /// 目的：虚拟机档的会话级 guest——按执行计划与各 agent 沙箱装配挂载并拉起，失败即如实拒绝。
+    fn start_session_guest(
+        &self,
+        meta: &SessionMeta,
+        plan: &crate::capabilities::vm::api::ExecPlan,
+        sandboxes: &crate::capabilities::workspace::api::Sandboxes,
+    ) -> Result<(), String> {
+        let base_path = meta.exec.base.clone().unwrap_or_default();
+        let base = crate::capabilities::vm::api::classify_base(
+            std::path::Path::new(&base_path),
+            self.probe.as_ref(),
+        )?;
+        let mut rw: Vec<std::path::PathBuf> = Vec::new();
+        let mut ro: Vec<std::path::PathBuf> = Vec::new();
+        let mut ro_tree: Vec<std::path::PathBuf> = Vec::new();
+        for sb in &sandboxes.list {
+            let f = crate::kernel::api::FenceSpec::from_sandbox(sb, meta.exec.net)
+                .with_read_only(self.fence_read_roots());
+            rw.extend(f.rw);
+            ro.extend(f.ro);
+            ro_tree.extend(f.ro_tree);
+        }
+        let fence = crate::kernel::api::FenceSpec {
+            agent: String::new(),
+            lease: meta.name.clone(),
+            rw,
+            ro: ro.clone(),
+            ro_tree,
+            private: std::path::PathBuf::new(),
+            cwd: std::path::PathBuf::new(),
+            net: meta.exec.net,
+        };
+        let spec = crate::capabilities::vm::api::GuestSpec {
+            lease: meta.name.clone(),
+            arch: crate::capabilities::vm::api::GuestArch::host(),
+            base,
+            mounts: crate::capabilities::vm::api::mounts_from(plan, &fence),
+            net: meta.exec.net,
+        };
+        self.vm.guest_start(&spec)
     }
 
     /// 追加一条旁路配置记录：只作呈现与审计（不进模型上下文，回放与状态派生都跳过它）。
@@ -668,6 +714,9 @@ impl Conductor {
             "conductor::create_work",
             &crate::capabilities::vm::api::plan_summary(&plan),
         );
+        if meta.exec.tier == crate::kernel::api::Tier::Vm {
+            self.start_session_guest(&meta, &plan, &sandboxes)?;
+        }
 
         let (session, mut events) = match spec.mode {
             // 代理形态在函数开头就建好返回了：它没有 agent 名单，不走这条装配路。
@@ -692,8 +741,15 @@ impl Conductor {
                     .collect();
                 let channel = self.channel_of(a.model.as_deref());
                 let unavailable = self.unavailable_modules(&meta.exec, &chosen);
-                let (s, opened) =
-                    self.build_single(a, &chosen, channel, &sb, unavailable, meta.exec.net);
+                let (s, opened) = self.build_single(
+                    a,
+                    &chosen,
+                    channel,
+                    &sb,
+                    unavailable,
+                    meta.exec.net,
+                    meta.exec.tier,
+                );
                 (Session::Single(s), opened)
             }
             WorkMode::Collab => {

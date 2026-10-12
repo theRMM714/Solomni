@@ -2,9 +2,6 @@
 //! 管：QEMU 进程的启停、QGA 的 JSON 收发、命令回执与 base64 数据。
 //! 不管：基础根判定、挂载与 QEMU 参数派生（domain/guest.rs）。
 //! 联动：端口在 ports.rs；由组合根构造、service.rs 持有。
-//!   执行分派尚未接线（产品路线图见 tests/gaps.yaml）：后端先就位。
-
-#![allow(dead_code)]
 
 use crate::capabilities::vm::domain::guest::{qemu_args, qemu_exe, GuestRun, GuestSpec};
 use crate::capabilities::vm::ports::{Guest, GuestHost};

@@ -1,6 +1,6 @@
 # vm（虚拟机档）
 
-> 运行包库、执行档位与计划、就绪检测与诊断；guest 端口与 QEMU 后端已就位，执行分派尚未接线。
+> 运行包库、执行档位与计划、就绪检测与诊断；guest 端口、QEMU 后端与执行分派已就位，等真机验证。
 > 本目录是该单元的唯一细则入口：本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）→ 其它细则。
 > 分层与依赖方向见 [ARCHITECTURE.md](../../ARCHITECTURE.md) §一，业务边界判据见 §九；契约见 [RUNTIME_SPEC.md](../../RUNTIME_SPEC.md)。
 
@@ -13,17 +13,18 @@
 
 ## 二、入站契约与状态归属
 
-`api::Vm`（library / runtimes_dir）+ 档位与计划的纯函数（`plan` / `tier_readiness` / `tier_refusal` / `vm_requirements` / `vm_diagnoses` / …）。
-出站端口 `PackageSource` **只由 `service.rs` 持有**（R12）。`ExecSpec` 是共享事实（在 `kernel`），本能力只读它。
+`api::Vm`（library / runtimes_dir / **guest_start / guest_run / guest_stop**）+ 档位与计划的纯函数
+（`plan` / `tier_readiness` / `tier_refusal` / `vm_requirements` / `vm_diagnoses` / …）。
+出站端口 `PackageSource` / `GuestHost` **只由 `service.rs` 持有**（R12）。`ExecSpec` 是共享事实（在 `kernel`），本能力只读它。
 
-**当前状态**：guest 端口与 QEMU 后端已就位，**执行分派尚未接线**（会话跑工具时还没按档位把命令送进 guest）——
-就绪检测里的 `guest` 一项恒为未满足，虚拟机档因此一律不可选；现状、怎么补与验收标准见
-[tests/gaps.yaml](../../tests/gaps.yaml) 的 `fence.guest-tier-not-wired`。
+**当前状态**：guest 端口、QEMU 后端与**执行分派已就位**（会话在 `tier == Vm` 时把模块命令交给本能力的 guest；建会话时按
+计划与沙箱装配挂载并拉起，会话删除时销毁）。**真机验证通过前，就绪检测里的 `guest` 一项判否**，虚拟机档因此仍不可选；
+现状、怎么补与验收标准见 [tests/gaps.yaml](../../tests/gaps.yaml) 的 `fence.guest-tier-not-wired`。
 
 ## 三、依赖图位置（由源码的 `::api` 引用推导）
 
 - 经 `::api` 用到：`kernel`、`modules`
-- 谁在用我：`cli`、`collab`、`conductor`、入口层（`--doctor`）
+- 谁在用我：`cli`、`collab`、`conductor`、`session`（成员工具面带本能力的 guest 面）、入口层（`--doctor`）
 
 ## 四、改动本单元时必须同步
 

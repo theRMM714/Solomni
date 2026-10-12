@@ -607,7 +607,15 @@ impl Conductor {
         // 机制 / 环境 / 调用约定仍与 agent 身份同一份口径（见 workspace 的 render_system）。
         let mut params = SessionParams::from_workspace(d::SPEAKER, &sb, &[], "proxy", "core_proxy");
         params.role_system = Some(crate::capabilities::prompt::api::Segment::ProxySystem);
-        let tools = self.tools_env(&[], &sb, BTreeMap::new(), false, tool_mode, "core_proxy");
+        let tools = self.tools_env(
+            &[],
+            &sb,
+            BTreeMap::new(),
+            false,
+            tool_mode,
+            "core_proxy",
+            crate::kernel::api::Tier::Host,
+        );
         let mut s = AgentSession::new(
             d::SPEAKER,
             params,

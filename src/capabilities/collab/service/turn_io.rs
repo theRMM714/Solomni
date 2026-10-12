@@ -82,6 +82,8 @@ impl CollabSession {
             llm: Arc::clone(&self.llm),
             log: Arc::clone(&self.log),
             tools: Arc::clone(&self.tools),
+            tier: crate::kernel::api::Tier::Host,
+            vm: Arc::clone(&self.vm),
             sandbox: sb.clone(),
             builtin_tools: self.systools.book(),
             unavailable: std::collections::BTreeMap::new(),

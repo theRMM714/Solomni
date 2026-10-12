@@ -511,6 +511,8 @@ impl CollabSession {
                 llm: Arc::clone(&self.llm),
                 log: Arc::clone(&self.log),
                 tools: Arc::clone(&self.tools),
+                tier: self.spec.tier,
+                vm: Arc::clone(&self.vm),
                 sandbox,
                 builtin_tools: self.systools.book(),
                 reply_seq: self.reply_seq,

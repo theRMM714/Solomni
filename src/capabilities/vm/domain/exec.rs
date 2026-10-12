@@ -223,15 +223,13 @@ pub fn vm_requirements(vm: &VmInputs<'_>) -> Vec<VmRequirement> {
                 hypervisor_how().to_string()
             },
         },
-        // guest 本体尚未接入：所有机器共同缺的一项，虚拟机档现在谁都不能建。
-        // 在那之前不允许造出"隔离没多、能力反少"的会话；方向见 PRODUCT.md 与 RUNTIME_SPEC.md。
+        // guest 后端与执行分派都已就位，但**尚未在真机验证**：验证通过前就绪项判否，虚拟机档不放开。
+        // 有意收口：没验过就不让用户选，避免造出"隔离没多、能力反少"的会话。
         VmRequirement {
             id: "guest",
             met: false,
-            detail: "guest 本体尚未接入（工具进程仍在宿主上跑，没有真正的 guest）".to_string(),
-            how:
-                "等产品的 guest 接入（方向：平台原生虚拟化；QEMU 与镜像用户自备，产品只检测与指路）"
-                    .to_string(),
+            detail: "guest 后端与执行分派已就位，但尚未在真机验证（就绪项暂判否）".to_string(),
+            how: "真机上跑通一次 vm 档工具后再放开（现状与验收见 tests/gaps.yaml）".to_string(),
         },
         // QEMU：用户自备。没登记就看 PATH——检测的是"起得来 guest 的那件东西在不在"。
         qemu_requirement(vm.qemu, vm.probe),

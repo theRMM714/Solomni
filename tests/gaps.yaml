@@ -8,26 +8,24 @@
   scope: global
   level: T4
   why: |
-    虚拟机档的选型、诊断、装配计划、逐项前置检测、guest 端口与 QEMU 后端都已收进独立能力 vm，但**执行分派未接线**：
-    ExecPlan.packages 全仓没有任何执行消费点（create_work 只把它打进日志），选 vm 档实际仍按本机档跑。
-    这意味着当前产品不存在“用户不授权本机写权限也能拿到强隔离”的路径——未授权时文件系统与断网围栏都是关的。
-    因为 guest 本体是所有机器共同缺的一项，虚拟机档现在一律不可选（vm::tier_readiness），
-    界面逐项列出缺什么、每项怎么补。
+    虚拟机档的选型、诊断、装配计划、逐项前置检测、guest 端口、QEMU 后端与执行分派都已收进独立能力 vm；
+    但整条链路**尚未在真机验证**，因此就绪检测的 guest 一项暂判否、虚拟机档仍不可选（vm::tier_readiness）。
+    也就是说：现在产品还不存在“用户不授权本机写权限也能拿到强隔离”的可用路径——未验证前不放开，
+    避免造出“隔离没多、能力反少”的会话。界面照旧逐项列出缺什么、每项怎么补。
   how: |
-    方向已定（不再讨论）：guest 在**所有平台统一为同一个 Linux 发行版**（Debian stable 为默认基线；amd64 先行、
-    arm64 记缺口）；后端默认 QEMU（用户自备），不内置 QEMU、不随仓库分发镜像——产品只检测与指路，
-    接入时把默认下载链接记进 links.yaml 台账。要做的事（按顺序）：
-    1) vm 内部的 guest 端口：GuestImage / GuestSpec（rw、ro、ro_tree、private、cwd、net、lease）+ GuestHost
-       （start / exec / stop；后端自报前置）。FenceSpec 的 rw / ro 在 guest 内变成挂载，net 变成“给不给网卡”。
-    2) 默认后端 QemuGuest（平台 #[cfg] 只在 vm/detail/ 里）；镜像按 guest_image 设置或会话 exec.base 取，只读不转换。
-    3) 装配接线：消费 plan 的 packages（prefix 只读挂载；system 叠层留后续），会话级一个 guest，
-       会话删除时销毁 guest 与它的磁盘（与 --fence-clean 同哲学）。
+    方向已定：guest 在**所有平台统一为同一个 Linux 发行版**（Debian stable 为默认基线；amd64 先行、arm64 记缺口）；
+    后端默认 QEMU（用户自备），不内置 QEMU、不随仓库分发镜像——产品只检测与指路。已完成的接线：
+    1) vm 内部的 guest 端口（GuestBase / GuestMount / GuestSpec / GuestRun + GuestHost：start / exec / stop）
+       与 QEMU 后端（qemu-system-* + QGA），镜像只读不转换；
+    2) 装配：prefix 包按来源目录只读挂到 /<prefix>，围栏根按宿主原路径挂；会话级一个 guest；
+    3) 分派：会话在 vm 档把模块命令交给 guest；建会话时装配并拉起，会话删除时销毁。
+    剩余：真机验证（一次 vm 档工具调用 + 删除后销毁）；system 叠层、qcow2 → rootfs 转换、arm64 记后续缺口；
+    真机通过后把就绪检测的 guest 项放开并删除本条。
   accept: |
     在真机上选 vm 档跑一次工具：进程确实跑在 guest 内（可达范围与宿主隔离）；会话删除后 guest 与其磁盘被销毁；
     三平台探针覆盖“guest 可用 / 不可用”两种结论；届时删除本条并同步 PRODUCT.md / RUNTIME_SPEC.md / docs/vm/ 的当前状态。
   blocked_by: |
-    有意推迟（不是缺条件）：guest 相对现有围栏的独特价值只有“不授权本机写权限也能拿到强隔离”一条，
-    而代价是每平台真机验证，且 CI 起不了 hypervisor（只能真机验 + env-skip）。本阶段先把能力边界与契约冻结。
+    等真机验证（不是缺条件）：CI 起不了 hypervisor，只能真机跑 + env-skip；三平台验收见 accept。
 - id: module.acp-adapter
   scope: global
   level: T3

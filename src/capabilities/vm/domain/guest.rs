@@ -1,10 +1,7 @@
 //! 目的：guest 的纯逻辑——基础根布局判定、挂载清单与 QEMU 参数构造。
 //! 管：基础根是不是一份可用的 guest、宿主根到 guest 的挂载、一次启动的 QEMU 命令行。
 //! 不管：进程的启停与命令通道（后端 detail/）、包的选择与定版（domain/exec.rs）。
-//! 联动：被 service.rs 与 QEMU 适配器消费；契约见 docs/vm/README.md 与 RUNTIME_SPEC.md。
-//!   执行分派尚未接线（产品路线图见 tests/gaps.yaml）：契约先冻结。
-
-#![allow(dead_code)]
+//! 联动：被 service.rs、conductor 与 QEMU 适配器消费；契约见 docs/vm/README.md 与 RUNTIME_SPEC.md。
 
 use crate::capabilities::vm::domain::exec::ExecPlan;
 use crate::capabilities::vm::domain::packages::KIND_SYSTEM;
@@ -27,14 +24,6 @@ impl GuestArch {
             GuestArch::Arm64
         } else {
             GuestArch::Amd64
-        }
-    }
-
-    /// 目的：对外书写形式。
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            GuestArch::Amd64 => "amd64",
-            GuestArch::Arm64 => "arm64",
         }
     }
 }

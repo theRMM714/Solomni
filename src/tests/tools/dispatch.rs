@@ -369,3 +369,33 @@ pub(crate) fn tool_loop_runs_declared_tool() {
         "原始输出要留档（重建上下文用）"
     );
 }
+
+#[test]
+pub(crate) fn module_tools_go_into_the_guest_on_vm_tier() {
+    let runner = Arc::new(RecordingRunner {
+        calls: Mutex::new(Vec::new()),
+        out: "不该走本机".into(),
+        ok: true,
+    });
+    let mut m = member_with_tools(
+        "m0",
+        vec![
+            TOOL_CALL.into(),
+            "{\"type\":\"say\",\"text\":\"完成\"}".into(),
+        ],
+        Arc::clone(&runner),
+    );
+    let vm = Arc::new(crate::tests::doubles::RecordingVm::default());
+    {
+        let tools = m.tools.as_mut().expect("这一席有工具环境");
+        tools.tier = crate::kernel::api::Tier::Vm;
+        tools.vm = vm.clone();
+    }
+    let prompts = test_prompts();
+    let _ = run_execution(std::slice::from_mut(&mut m), "任务", &prompts);
+    assert!(
+        runner.calls.lock().expect("锁").is_empty(),
+        "虚拟机档不该在本机跑"
+    );
+    assert_eq!(vm.runs.lock().expect("锁").len(), 1, "模块命令要送进 guest");
+}

@@ -13,7 +13,6 @@ use std::sync::{Arc, Mutex};
 /// 目的：虚拟机档能力——持运行包库来源与 guest 后端，按会话租约管理 guest。
 pub struct VmService {
     packages: Arc<dyn PackageSource + Send + Sync>,
-    #[allow(dead_code)]
     guest: Arc<dyn GuestHost + Send + Sync>,
     guests: Mutex<BTreeMap<String, Box<dyn Guest>>>,
 }
@@ -74,7 +73,6 @@ impl Vm for VmService {
     }
 }
 
-#[allow(dead_code)]
 fn fail(why: &str) -> ToolOutcome {
     ToolOutcome {
         ok: false,

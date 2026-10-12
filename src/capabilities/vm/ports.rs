@@ -18,13 +18,11 @@ pub trait PackageSource {
 
 /// 目的：guest 后端端口——按规格拉起一个 guest。
 /// 约束：只做机制；挂哪些根、给不给网卡由调用方派生后传入。只有 `service.rs` 持有它（R12）。
-#[allow(dead_code)]
 pub trait GuestHost: Send + Sync {
     fn start(&self, spec: &GuestSpec) -> Result<Box<dyn Guest>, String>;
 }
 
 /// 目的：一个已拉起的 guest——在它里面跑命令、销毁它。
-#[allow(dead_code)]
 pub trait Guest: Send {
     fn exec(&mut self, run: &GuestRun) -> ToolOutcome;
     fn stop(&mut self);

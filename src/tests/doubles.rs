@@ -1401,6 +1401,43 @@ impl crate::capabilities::vm::ports::Guest for FakeGuest {
     }
 }
 
+/// 目的：vm 用例面的测试替身——记录 guest_run，恒成功（验证"命令送进了 guest"）。
+#[derive(Default)]
+pub(crate) struct RecordingVm {
+    pub runs: Mutex<Vec<String>>,
+}
+
+impl crate::capabilities::vm::api::Vm for RecordingVm {
+    fn library(&self) -> Library {
+        Library::default()
+    }
+
+    fn runtimes_dir(&self) -> std::path::PathBuf {
+        abs(&["runtimes"])
+    }
+
+    fn guest_start(
+        &self,
+        _spec: &crate::capabilities::vm::domain::guest::GuestSpec,
+    ) -> Result<(), String> {
+        Ok(())
+    }
+
+    fn guest_run(
+        &self,
+        _lease: &str,
+        run: &crate::capabilities::vm::domain::guest::GuestRun,
+    ) -> crate::kernel::api::ToolOutcome {
+        self.runs.lock().expect("锁").push(run.command.clone());
+        crate::kernel::api::ToolOutcome {
+            ok: true,
+            output: "guest".to_string(),
+        }
+    }
+
+    fn guest_stop(&self, _lease: &str) {}
+}
+
 /// 目的：测试用的 **vm 能力面**——把运行包库来源与 guest 替身装进 `VmService`（与生产同一条路，R12）。
 pub(crate) fn test_vm(
     packages: Arc<dyn PackageSource + Send + Sync>,
@@ -2228,6 +2265,8 @@ pub(crate) fn member_with_service_tools(
             Arc::new(InMemorySysIo::new()),
             Arc::new(NoFenceHost),
         ),
+        tier: crate::kernel::api::Tier::Host,
+        vm: test_vm(Arc::new(InMemoryPackages::empty())),
         sandbox: sb.clone(),
         builtin_tools: test_systools().tools,
         unavailable: BTreeMap::new(),
