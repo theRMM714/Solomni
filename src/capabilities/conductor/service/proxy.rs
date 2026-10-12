@@ -278,7 +278,8 @@ use crate::capabilities::conductor::api::ConductorHandle;
 use crate::capabilities::session::api::{
     AgentSession, Delegation, RunState, SessionEvent, SessionMeta, SessionParams,
 };
-use crate::capabilities::workspace::api::{ExecSpec, Sandbox};
+use crate::capabilities::workspace::api::Sandbox;
+use crate::kernel::api::ExecSpec;
 
 fn tool_mode_str(m: crate::capabilities::llm::api::ToolMode) -> String {
     match m {

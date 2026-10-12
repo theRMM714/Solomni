@@ -2,7 +2,7 @@
 
 pub use crate::capabilities::workspace::domain::exec::{
     absent, declared, diagnose_text, plan, plan_summary, tier_readiness, tier_refusal, unavailable,
-    vm_diagnoses, vm_requirements, Diagnosis, ExecSpec, VmInputs, VmRequirement,
+    vm_diagnoses, vm_requirements, Diagnosis, VmInputs, VmRequirement,
 };
 pub use crate::capabilities::workspace::domain::packages::{Library, PackageManifest};
 pub use crate::capabilities::workspace::domain::workspace::{

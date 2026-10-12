@@ -16,9 +16,9 @@ use crate::capabilities::registry::api::Settings;
 use crate::capabilities::session::api::AgentMeta;
 use crate::capabilities::session::api::{DecisionDoor, LineView, Pending, SessionEvent};
 use crate::capabilities::tools::api::ToolExec;
-use crate::capabilities::workspace::api::ExecSpec;
 use crate::capabilities::workspace::api::Sandboxes;
 use crate::capabilities::workspace::api::Workspace;
+use crate::kernel::api::ExecSpec;
 use std::sync::Arc;
 
 /// 节点验收的结论：逐节点 (node, ok, note)。

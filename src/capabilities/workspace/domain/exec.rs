@@ -5,28 +5,11 @@
 
 use crate::capabilities::modules::api::Module;
 use crate::capabilities::workspace::domain::packages::{Library, PackageManifest, KIND_SYSTEM};
-use crate::kernel::api::Tier;
+use crate::kernel::api::{ExecSpec, Tier};
 use crate::kernel::ports::HostProbe;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
-
-/// 会话的执行选型：档位 + 虚拟机基础根 + 能力定版 + 是否放行出站网络（默认否）。
-/// 进 meta.yaml 的 exec 段（缺字段的旧会话按默认 = 本机档读回）。
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct ExecSpec {
-    #[serde(default)]
-    pub tier: Tier,
-    /// 虚拟机档的基础根（运行包之外的最小系统）；本机档为空。
-    #[serde(default)]
-    pub base: Option<String>,
-    /// 能力名 → 精确版本（用户定版；多版本时不猜）。
-    #[serde(default)]
-    pub pins: BTreeMap<String, String>,
-    /// 是否放行出站网络（默认否：guest 无网卡）。
-    #[serde(default)]
-    pub net: bool,
-}
 
 /// 一条诊断：结构化事实（界面文案由呈现层渲染；模型侧文案在提示词册）。
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]

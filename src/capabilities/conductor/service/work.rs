@@ -13,9 +13,9 @@ impl Conductor {
     pub fn runtime_report(&self, tier: crate::kernel::api::Tier) -> RuntimeReport {
         let roster = self.modules.roster();
         let lib = self.workspace.library();
-        let spec = crate::capabilities::workspace::api::ExecSpec {
+        let spec = crate::kernel::api::ExecSpec {
             tier,
-            ..crate::capabilities::workspace::api::ExecSpec::default()
+            ..crate::kernel::api::ExecSpec::default()
         };
         let diagnoses = if tier == crate::kernel::api::Tier::Vm {
             crate::capabilities::workspace::api::vm_diagnoses(&roster.modules, &lib, &spec)
@@ -46,9 +46,9 @@ impl Conductor {
     pub fn tier_choices(&self) -> TierChoices {
         let default = self.registry.app().tier;
         // 裸虚拟机档探针：基础根属于会话选型（在会话的 exec 段里），创建时还没填，按未指定探。
-        let vm_probe = crate::capabilities::workspace::api::ExecSpec {
+        let vm_probe = crate::kernel::api::ExecSpec {
             tier: crate::kernel::api::Tier::Vm,
-            ..crate::capabilities::workspace::api::ExecSpec::default()
+            ..crate::kernel::api::ExecSpec::default()
         };
         let inputs = crate::capabilities::workspace::api::VmInputs {
             base: vm_probe.base.as_deref(),
@@ -76,7 +76,7 @@ impl Conductor {
     /// 本档位下不能执行工具的模块（模块 id → 缺的能力名）：建会话与重建时收口给工具环境。
     pub(crate) fn unavailable_modules(
         &self,
-        spec: &crate::capabilities::workspace::api::ExecSpec,
+        spec: &crate::kernel::api::ExecSpec,
         modules: &[Module],
     ) -> BTreeMap<String, Vec<String>> {
         crate::capabilities::workspace::api::unavailable(spec, modules, &self.workspace.library())
@@ -86,9 +86,9 @@ impl Conductor {
     /// 约束：与成员循环同一把尺子（`workspace::api::unavailable`，档位感知）——不用档位无关的 `absent`，
     ///   否则本机档会因"没装运行包"误拒本机解释器就能跑的工具。
     pub fn unavailable_modules_now(&self) -> BTreeMap<String, Vec<String>> {
-        let spec = crate::capabilities::workspace::api::ExecSpec {
+        let spec = crate::kernel::api::ExecSpec {
             tier: self.registry.app().tier,
-            ..crate::capabilities::workspace::api::ExecSpec::default()
+            ..crate::kernel::api::ExecSpec::default()
         };
         let roster = self.modules.roster();
         self.unavailable_modules(&spec, &roster.modules)
@@ -99,10 +99,10 @@ impl Conductor {
         let (meta, events) = self.history_open(sid)?;
         let tier = meta.exec.tier;
         // 虚拟机档的承载探针：用用户填的基础根（若有），否则问"裸虚拟机档"能不能成立。
-        let vm_probe = crate::capabilities::workspace::api::ExecSpec {
+        let vm_probe = crate::kernel::api::ExecSpec {
             tier: crate::kernel::api::Tier::Vm,
             base: meta.exec.base.clone(),
-            ..crate::capabilities::workspace::api::ExecSpec::default()
+            ..crate::kernel::api::ExecSpec::default()
         };
         Ok(SessionConfig {
             sid: meta.name.clone(),
@@ -257,7 +257,7 @@ impl Conductor {
             "vm" => crate::kernel::api::Tier::Vm,
             other => return Err(format!("未知执行档位：{}（只认 host / vm）", other)),
         };
-        let spec = crate::capabilities::workspace::api::ExecSpec {
+        let spec = crate::kernel::api::ExecSpec {
             tier,
             base: edit.base.clone(),
             pins: edit.pins.clone(),
@@ -630,9 +630,9 @@ impl Conductor {
             node: None,
             delegation: None,
             // 档位来自**用户在创建向导里的选择**（默认 = 设置里的档位）；承载不了由下面如实拒绝。
-            exec: crate::capabilities::workspace::api::ExecSpec {
+            exec: crate::kernel::api::ExecSpec {
                 tier: spec.tier,
-                ..crate::capabilities::workspace::api::ExecSpec::default()
+                ..crate::kernel::api::ExecSpec::default()
             },
             run: RunState::Active,
         };
