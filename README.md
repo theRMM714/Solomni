@@ -92,6 +92,8 @@ node run-tests.js        # 质量门禁 + 全量测试（见 TESTING.md）
 - 与运行环境分开的理由：只想跑产品的人不需要这些；门禁在只有运行环境的机器上仍能跑，缺的项如实 `env-skip`。
 - 环境是独立一层（[env.js](env.js)）：路径约定、工具链探测、环境拼装与安装都在这里；`node env.js` 看解析结果，`node env.js --print-env` 给机器读。
   `setup-runtime.js` / `setup-dev.js` 只编排；`node setup-runtime.js` 与 `node env.js setup` 等价。
+- **外部连接台账**：`links.yaml` 是项目自用、可能变的外部 URL 的唯一真相（当前：工具链引导源与 winlibs 上游发布源）；
+  改一处全仓生效。用户覆盖走 `.home/settings.yaml` 与环境变量，不改仓库里的台账。
 - **没有配供应商也能跑**：用内置假模型把流程演示一遍，并如实告知。
 - 常用参数：`--root <目录>`（换产品根）、`--web-port <端口>`、`--release`。
 - 终端提示符下的命令：`single [agent名…]` / `collab [agent名…|?]` / `proxy（决定权整块交给核心）` / `module [模块id.工具名 [json]]（不经 AI 直接用模块工具）` / `resident list|start|stop|enable|disable|call`（常驻服务） / `secret`（隐秘字段） / `webui`。
