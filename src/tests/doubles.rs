@@ -1344,11 +1344,71 @@ pub(crate) fn test_workspace_store(
     Arc::new(crate::capabilities::workspace::service::WorkspaceService::new(dirs, store))
 }
 
-/// 目的：测试用的 **vm 能力面**——把运行包库来源装进 `VmService`（与生产同一条路，R12）。
+/// 目的：guest 后端的测试替身——不起 QEMU，只记录 start / run / stop。
+#[derive(Clone, Default)]
+pub(crate) struct FakeGuestHost {
+    pub calls: Arc<Mutex<Vec<String>>>,
+}
+
+impl FakeGuestHost {
+    /// 目的：空记录起步。
+    pub(crate) fn new() -> FakeGuestHost {
+        FakeGuestHost::default()
+    }
+}
+
+impl crate::capabilities::vm::ports::GuestHost for FakeGuestHost {
+    fn start(
+        &self,
+        spec: &crate::capabilities::vm::domain::guest::GuestSpec,
+    ) -> Result<Box<dyn crate::capabilities::vm::ports::Guest>, String> {
+        self.calls
+            .lock()
+            .expect("锁")
+            .push(format!("start:{}", spec.lease));
+        Ok(Box::new(FakeGuest {
+            lease: spec.lease.clone(),
+            calls: self.calls.clone(),
+        }))
+    }
+}
+
+struct FakeGuest {
+    lease: String,
+    calls: Arc<Mutex<Vec<String>>>,
+}
+
+impl crate::capabilities::vm::ports::Guest for FakeGuest {
+    fn exec(
+        &mut self,
+        run: &crate::capabilities::vm::domain::guest::GuestRun,
+    ) -> crate::kernel::api::ToolOutcome {
+        self.calls
+            .lock()
+            .expect("锁")
+            .push(format!("run:{}:{}", self.lease, run.command));
+        crate::kernel::api::ToolOutcome {
+            ok: true,
+            output: "fake-guest".to_string(),
+        }
+    }
+
+    fn stop(&mut self) {
+        self.calls
+            .lock()
+            .expect("锁")
+            .push(format!("stop:{}", self.lease));
+    }
+}
+
+/// 目的：测试用的 **vm 能力面**——把运行包库来源与 guest 替身装进 `VmService`（与生产同一条路，R12）。
 pub(crate) fn test_vm(
     packages: Arc<dyn PackageSource + Send + Sync>,
 ) -> Arc<dyn crate::capabilities::vm::api::Vm + Send + Sync> {
-    Arc::new(crate::capabilities::vm::service::VmService::new(packages))
+    Arc::new(crate::capabilities::vm::service::VmService::new(
+        packages,
+        Arc::new(FakeGuestHost::new()),
+    ))
 }
 
 /// 目的：模块启停覆盖的内存存储（测试用；与 yaml 实现同一条端口）。

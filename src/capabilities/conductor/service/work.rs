@@ -323,6 +323,8 @@ impl Conductor {
     /// 撤掉一次会话按**给定 meta** 写下的围栏授权（权限或模块变更后调用）。
     /// 其它平台没有持久授权（release 是空操作）；Windows 撤 ACE，下一次 `prepare_fence` 按实际 ACE 重授。
     fn release_session_fences(&self, meta: &SessionMeta) {
+        // 会话删除/改配后：先销毁这个租约的 guest（幂等），再撤围栏授权。
+        self.vm.guest_stop(&meta.name);
         let roster = self.modules.roster();
         match self.sandboxes(meta, &roster) {
             Ok(sandboxes) => {

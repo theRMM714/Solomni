@@ -221,10 +221,12 @@ fn main() {
             }
         };
 
-    // **虚拟机档能力**：运行包库来源端口只由它的 service 持有（R12）。
-    let vm: Arc<dyn capabilities::vm::api::Vm + Send + Sync> = Arc::new(
-        capabilities::vm::service::VmService::new(Arc::new(packages)),
-    );
+    // **虚拟机档能力**：运行包库来源与 guest 后端两个出站端口只由它的 service 持有（R12）。
+    let vm: Arc<dyn capabilities::vm::api::Vm + Send + Sync> =
+        Arc::new(capabilities::vm::service::VmService::new(
+            Arc::new(packages),
+            Arc::new(capabilities::vm::detail::QemuGuest::new()),
+        ));
 
     // **工作区能力**：目录布局与版本库两个出站端口只由它的 service 持有（R12）。
     let workspace: Arc<dyn capabilities::workspace::api::Workspace + Send + Sync> =

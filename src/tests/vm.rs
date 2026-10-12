@@ -4,7 +4,10 @@
 //! 联动：契约见 docs/vm/README.md 与 RUNTIME_SPEC.md。
 use super::builders::*;
 use super::prelude::*;
-use crate::capabilities::vm::domain::guest::classify_base;
+use crate::capabilities::vm::api::Vm;
+use crate::capabilities::vm::domain::guest::{
+    classify_base, GuestArch, GuestBase, GuestRun, GuestSpec,
+};
 use crate::capabilities::vm::ports::PackageSource;
 
 #[test]
@@ -402,4 +405,104 @@ pub(crate) fn guest_base_requires_rootfs_and_kernel() {
         "不在场要报出来"
     );
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+pub(crate) fn guest_mounts_prefix_packages_and_fence_roots() {
+    use crate::capabilities::vm::domain::exec::{ExecPlan, PlannedPackage};
+    use crate::capabilities::vm::domain::guest::{mounts_from, qemu_args};
+    let plan = ExecPlan {
+        tier: Tier::Vm,
+        net: false,
+        base: None,
+        packages: vec![PlannedPackage {
+            id: "python".to_string(),
+            version: "3.12.4".to_string(),
+            kind: "prefix".to_string(),
+            prefix: "opt/rt/py".to_string(),
+            source_dir: std::path::PathBuf::from("/rt/py"),
+        }],
+    };
+    let fence = crate::kernel::api::FenceSpec::standalone(
+        std::path::Path::new("/mods/a"),
+        Some(std::path::Path::new("/work/x")),
+        false,
+    );
+    let mounts = mounts_from(&plan, &fence);
+    assert!(
+        mounts
+            .iter()
+            .any(|m| m.guest == "/opt/rt/py" && m.read_only),
+        "prefix 包只读挂到 /<prefix>：{:?}",
+        mounts
+    );
+    assert!(
+        mounts.iter().any(|m| m.guest == "/work/x" && !m.read_only),
+        "可写根按宿主原路径挂入：{:?}",
+        mounts
+    );
+    assert!(
+        mounts.iter().any(|m| m.guest == "/mods/a" && m.read_only),
+        "模块目录只读挂入：{:?}",
+        mounts
+    );
+    let spec = GuestSpec {
+        lease: "w".to_string(),
+        arch: GuestArch::host(),
+        base: GuestBase {
+            root: std::path::PathBuf::from("/base"),
+            kernel: std::path::PathBuf::from("/base/vmlinuz"),
+            initrd: Some(std::path::PathBuf::from("/base/initrd.img")),
+        },
+        mounts,
+        net: false,
+    };
+    let args = qemu_args(&spec, "host=127.0.0.1,port=1,server=on,wait=off");
+    assert!(args.contains(&"none".to_string()), "不给网卡");
+    assert!(
+        !args.iter().any(|a| a.contains("netdev")),
+        "没有网卡就没有 netdev"
+    );
+    assert!(
+        args.iter().any(|a| a.contains("root=base")),
+        "rootfs 走 9p 的 base 标签"
+    );
+    assert!(
+        args.iter().any(|a| a.contains("initrd.img")),
+        "initrd 要带上"
+    );
+}
+
+#[test]
+pub(crate) fn vm_service_holds_guests_by_lease() {
+    let host = Arc::new(crate::tests::doubles::FakeGuestHost::new());
+    let vm = crate::capabilities::vm::service::VmService::new(
+        Arc::new(InMemoryPackages::empty()),
+        host.clone(),
+    );
+    let spec = GuestSpec {
+        lease: "w".to_string(),
+        arch: GuestArch::host(),
+        base: GuestBase {
+            root: std::path::PathBuf::from("/base"),
+            kernel: std::path::PathBuf::from("/base/vmlinuz"),
+            initrd: None,
+        },
+        mounts: Vec::new(),
+        net: false,
+    };
+    vm.guest_start(&spec).expect("替身一定能起");
+    let run = GuestRun {
+        command: "echo hi".to_string(),
+        args_json: "{}".to_string(),
+        env: Vec::new(),
+        cwd: String::new(),
+    };
+    assert!(vm.guest_run("w", &run).ok, "有租约就能跑");
+    assert!(!vm.guest_run("nope", &run).ok, "没这个租约要如实失败");
+    vm.guest_stop("w");
+    let calls = host.calls.lock().expect("锁").clone();
+    assert!(calls.iter().any(|c| c == "start:w"), "{:?}", calls);
+    assert!(calls.iter().any(|c| c == "run:w:echo hi"), "{:?}", calls);
+    assert!(calls.iter().any(|c| c == "stop:w"), "{:?}", calls);
 }

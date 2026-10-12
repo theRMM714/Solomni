@@ -6,10 +6,11 @@
 
 | 文件 | 职责 |
 | --- | --- |
-| `src/capabilities/vm/api.rs` | 入站面：`Vm` 用例 trait（运行包库 / 包库目录）与档位、计划、诊断、就绪检测的重导出 |
-| `src/capabilities/vm/service.rs` | 用例与端口持有者：持 `PackageSource`（R12），实现 `Vm` |
-| `src/capabilities/vm/ports.rs` | 出站端口 `PackageSource`（扫描 runtimes/ 里的包清单） |
+| `src/capabilities/vm/api.rs` | 入站面：`Vm` 用例 trait（运行包库 / 包库目录 / guest 生命周期）与档位、计划、诊断、就绪检测的重导出 |
+| `src/capabilities/vm/service.rs` | 用例与端口持有者：持 `PackageSource` / `GuestHost`（R12），按租约管理 guest |
+| `src/capabilities/vm/ports.rs` | 出站端口 `PackageSource`（扫描 runtimes/ 包清单）与 `GuestHost`（起 / 跑 / 销毁 guest） |
 | `src/capabilities/vm/domain/exec.rs` | 执行档位诊断、执行计划派生、承载判定与就绪检测（纯逻辑） |
-| `src/capabilities/vm/domain/guest.rs` | guest 基础根布局判定（rootfs + 内核 + 可选 initrd，纯逻辑） |
+| `src/capabilities/vm/domain/guest.rs` | guest 基础根布局、挂载清单与 QEMU 参数（纯逻辑） |
 | `src/capabilities/vm/domain/packages.rs` | 运行包契约（package.yaml）校验、去重、系统路径冲突预检与来源目录（纯逻辑） |
 | `src/capabilities/vm/detail/fs_packages.rs` | `PackageSource` 的磁盘实现：扫描 runtimes/ |
+| `src/capabilities/vm/detail/qemu.rs` | `GuestHost` 的 QEMU 实现：拉起 qemu-system-*，经 QGA 执行与销毁 |

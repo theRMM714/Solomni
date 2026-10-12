@@ -121,6 +121,7 @@ Fixture 必须：
 | `ModuleSource`（modules） | `VecSource`（经 `test_modules` 装进 `ModulesService`） | 不适用 | 不适用（错误进 `rejected`） | 不适用 | `detail::FsModules` | 已验收 |
 | `ModuleStateStore`（modules） | `InMemoryModuleState`（经 `test_modules_store`） | 覆盖落盘可观察 | 不适用 | 不适用 | `detail::YamlModuleState` | 已验收 |
 | `PackageSource` | `InMemoryPackages` | 不适用 | 不适用（错误进 `rejected`） | 不适用 | `FsPackages` | 已验收；**持有者只有 `vm::service.rs`**（R12） |
+| `GuestHost`（vm） | `FakeGuestHost` | `calls`（start / run / stop） | 不适用（起不来是真实后端的错） | 不适用 | `QemuGuest`（真机验；CI 起不了 hypervisor） | 契约测试已验收；执行分派未接线 |
 | `Workdirs` | `InMemoryWorkspace` | 内存布局可观察 | `fail_with` | 不适用 | `FsWorkspace` | 已验收 |
 | `WorkStore` | `InMemoryWorkStore` | 内存文件 / 提交 / 基线可观察 | `fail_with` | 不适用 | `FsWorkStore`（含符号链接逃逸拒绝） | 已验收；**持有者只有 `workspace::service.rs`**（R12） |
 | `ModuleSource` / `ModuleStateStore` 的持有者 | ——（**只由 `modules::service.rs` 持有**；别的能力经 `modules::api::ModulesOps` 要清单与启停有效值） |

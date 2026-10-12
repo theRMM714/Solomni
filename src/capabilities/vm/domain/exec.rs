@@ -34,6 +34,8 @@ pub struct PlannedPackage {
     pub version: String,
     pub kind: String,
     pub prefix: String,
+    /// 目的：包内容所在目录（清单扫描时记下）；装配阶段用它把包挂进 guest。
+    pub source_dir: std::path::PathBuf,
 }
 
 /// 目的：执行计划：运行时派生，从不落盘（装配阶段按 (id, version) 去包里定位内容）。
@@ -412,6 +414,7 @@ pub fn plan(
                     version: p.version.clone(),
                     kind: p.kind.clone(),
                     prefix: p.prefix.clone(),
+                    source_dir: p.source_dir.clone(),
                 })
                 .collect();
             Ok(ExecPlan {
