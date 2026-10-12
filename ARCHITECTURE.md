@@ -43,6 +43,7 @@ presentation/{cli,web} ──▶ capabilities（含协调业务 conductor）─�
 | `ModuleSource` | 模块清单来源（扫描 `modules/`） | `modules/detail::FsModules` |
 | `ModuleStateStore` | 模块与服务的启停覆盖落盘（`.home/modules.yaml`） | `modules/detail::YamlModuleState` |
 | `PackageSource` | 运行包库来源（扫描依赖文件夹 `runtimes/`） | `vm/detail::FsPackages` |
+| `GuestHost` | 虚拟机档的 guest 后端：按规格拉起一个 guest（`Guest` 上再 exec / stop） | `vm/detail::QemuGuest`（QEMU + QGA；真机验） |
 | `Workdirs` | 一次工作的共享区、各 agent 沙箱、版本库目录、文件清单、用量与寻址根 | `FsWorkspace` |
 | `WorkStore` | 共享区版本库的落盘：文件原语 + 内容寻址对象 + 提交记录 + 每个 agent 的拉取基线（并拒绝符号链接逃逸） | `FsWorkStore` |
 | `SysIo` | 内置文件工具的读写机制（读严格 UTF-8、非法字节如实标注；写一律 UTF-8） | `FsSysIo` |

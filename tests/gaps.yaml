@@ -13,19 +13,24 @@
     也就是说：现在产品还不存在“用户不授权本机写权限也能拿到强隔离”的可用路径——未验证前不放开，
     避免造出“隔离没多、能力反少”的会话。界面照旧逐项列出缺什么、每项怎么补。
   how: |
-    方向已定：guest 在**所有平台统一为同一个 Linux 发行版**（Debian stable 为默认基线；amd64 先行、arm64 记缺口）；
-    后端默认 QEMU（用户自备），不内置 QEMU、不随仓库分发镜像——产品只检测与指路。已完成的接线：
+    方向已定：guest 在**所有平台统一为同一个 Linux 发行版**，默认基线是**官方最新 stable**
+    （当前 Debian 13.7 / trixie；amd64 先行、arm64 记缺口）。后端默认 QEMU（用户自备），
+    不内置 QEMU、不随仓库分发镜像——产品只检测与指路。已完成的接线：
     1) vm 内部的 guest 端口（GuestBase / GuestMount / GuestSpec / GuestRun + GuestHost：start / exec / stop）
        与 QEMU 后端（qemu-system-* + QGA），镜像只读不转换；
     2) 装配：prefix 包按来源目录只读挂到 /<prefix>，围栏根按宿主原路径挂；会话级一个 guest；
     3) 分派：会话在 vm 档把模块命令交给 guest；建会话时装配并拉起，会话删除时销毁。
-    剩余：真机验证（一次 vm 档工具调用 + 删除后销毁）；system 叠层、qcow2 → rootfs 转换、arm64 记后续缺口；
+    剩余：真机验收（见 accept）；system 叠层、qcow2 → rootfs 转换、arm64 记后续缺口；
     真机通过后把就绪检测的 guest 项放开并删除本条。
   accept: |
-    在真机上选 vm 档跑一次工具：进程确实跑在 guest 内（可达范围与宿主隔离）；会话删除后 guest 与其磁盘被销毁；
-    三平台探针覆盖“guest 可用 / 不可用”两种结论；届时删除本条并同步 PRODUCT.md / RUNTIME_SPEC.md / docs/vm/ 的当前状态。
+    在一台有 /dev/kvm 的机器上选 vm 档跑一次工具：进程确实跑在 guest 内（可达范围与宿主隔离）；
+    会话删除后 guest 与其磁盘被销毁；三平台探针覆盖“guest 可用 / 不可用”两种结论；
+    届时删除本条并同步 PRODUCT.md / RUNTIME_SPEC.md / docs/vm/ 的当前状态。
   blocked_by: |
-    等真机验证（不是缺条件）：CI 起不了 hypervisor，只能真机跑 + env-skip；三平台验收见 accept。
+    本机（WSL2 / Arch）没有 /dev/kvm、没有 QEMU，且 sudo 不可用装不了系统包，所以这里跑不了验收——
+    这不是代码缺条件，是验收环境缺条件。要在本机验，需先在 Windows 侧给 WSL2 开嵌套虚拟化
+    （.wslconfig 的 nestedVirtualization=true 后 wsl --shutdown，等 /dev/kvm 出现），再准备项目内可达的 QEMU
+    与 Debian 13 的 rootfs（含 vmlinuz / initrd）；否则换一台有 /dev/kvm 的 Linux 真机。
 - id: module.acp-adapter
   scope: global
   level: T3
