@@ -7,13 +7,12 @@ pub fn doctor() -> i32 {
     let cap = crate::kernel::detail::confine::capability();
     // 虚拟机档的逐项前置（**只读事实**）：这里按"没登记 QEMU、没指定基础根"问一次，
     // 也就是最朴素的情形——登记过的路径以会话配置界面为准（那里按会话选型问同一份清单）。
-    let vm = crate::capabilities::workspace::api::vm_requirements(
-        &crate::capabilities::workspace::api::VmInputs {
+    let vm =
+        crate::capabilities::vm::api::vm_requirements(&crate::capabilities::vm::api::VmInputs {
             base: None,
             qemu: None,
             probe: &crate::kernel::detail::HostProbeAdapter,
-        },
-    );
+        });
     let doc = serde_json::json!({
         "platform": std::env::consts::OS,
         "arch": std::env::consts::ARCH,

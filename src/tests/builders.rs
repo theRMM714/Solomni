@@ -906,10 +906,8 @@ pub(crate) fn native_core(
     Conductor::new(
         registry_service(InMemorySettings::new(), Arc::clone(&llm)),
         test_history_of(history),
-        test_workspace(
-            Arc::new(InMemoryPackages::empty()),
-            Arc::new(InMemoryWorkspace::new()),
-        ),
+        test_workspace(Arc::new(InMemoryWorkspace::new())),
+        test_vm(Arc::new(InMemoryPackages::empty())),
         test_modules(Arc::new(VecSource(vec![module_of("a")]))),
         llm,
         test_tools_svc_with(Arc::new(SilentRunner), io, Arc::new(NoFenceHost)),

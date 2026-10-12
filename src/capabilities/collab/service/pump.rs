@@ -438,7 +438,7 @@ impl CollabSession {
     pub(crate) fn assemble_members(&self) -> Result<(Vec<Member>, Vec<String>), String> {
         let prompts = self.prompts.clone();
         let roster = self.modules.roster();
-        let library = self.workspace.library();
+        let library = self.vm.library();
         let mut members = Vec::new();
         let mut notes = Vec::new();
         for a in &self.roster {
@@ -516,7 +516,7 @@ impl CollabSession {
                 reply_seq: self.reply_seq,
                 line: Default::default(),
                 // 本档位下不能执行工具的模块（缺运行包）：机制侧据此拒绝执行。
-                unavailable: crate::capabilities::workspace::api::unavailable(
+                unavailable: crate::capabilities::vm::api::unavailable(
                     &self.spec, &modules, &library,
                 ),
                 fence,

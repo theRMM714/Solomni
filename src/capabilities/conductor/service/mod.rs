@@ -12,6 +12,7 @@ use crate::capabilities::session::api::History;
 #[cfg(test)]
 pub(crate) use crate::capabilities::session::api::Live;
 use crate::capabilities::session::api::{Answered, GateTicket, SessionEvent};
+use crate::capabilities::vm::api::Vm;
 use crate::capabilities::workspace::api::Workspace;
 
 use crate::capabilities::collab::api::AfterTurn;
@@ -174,8 +175,10 @@ pub struct Conductor {
     registry: Box<dyn Registry>,
     /// 会话历史直连面（**不持它的端口**，R12）：造/读/写/删会话都走它。
     history: Arc<dyn History + Send + Sync>,
-    /// 工作区用例面（**不持它的端口**，R12）：运行包库与工作区目录走它。
+    /// 工作区用例面（**不持它的端口**，R12）：工作区目录与版本化走它。
     workspace: Arc<dyn Workspace + Send + Sync>,
+    /// 虚拟机档用例面（**不持它的端口**，R12）：运行包库与档位就绪检测走它。
+    vm: Arc<dyn Vm + Send + Sync>,
     /// 目的：模块能力（**不持它的端口**，R12）——模块清单事实的唯一上游。
     modules: Arc<dyn Modules + Send + Sync>,
     /// llm 用例面：按解析出来的通道造收发句柄 + 信封的无歧义修复（通道的**解析**在登记处能力）。
@@ -224,6 +227,7 @@ impl Conductor {
         registry: Box<dyn Registry>,
         history: Arc<dyn History + Send + Sync>,
         workspace: Arc<dyn Workspace + Send + Sync>,
+        vm: Arc<dyn Vm + Send + Sync>,
         modules: Arc<dyn Modules + Send + Sync>,
         llm: Arc<dyn Llm + Send + Sync>,
         tools: Arc<dyn ToolExec + Send + Sync>,
@@ -238,6 +242,7 @@ impl Conductor {
             registry,
             history,
             workspace,
+            vm,
             modules,
             llm,
             tools,

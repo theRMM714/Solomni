@@ -180,7 +180,8 @@
 | `llm`（模型通道与协议） | `docs/llm/README.md` | `unit-map.md` |
 | `registry`（登记处） | `docs/registry/README.md` | `unit-map.md` |
 | `modules`（模块公地） | `docs/modules/README.md` | `unit-map.md` |
-| `workspace`（工作区与运行包） | `docs/workspace/README.md` | `unit-map.md` |
+| `vm`（虚拟机档） | `docs/vm/README.md` | `unit-map.md` |
+| `workspace`（工作区） | `docs/workspace/README.md` | `unit-map.md` |
 | `prompt`（提示词册） | `docs/prompt/README.md` | `unit-map.md`、`prompts.md` |
 | `slate`（名单） | `docs/slate/README.md` | `unit-map.md` |
 | `residents`（常驻服务） | `docs/residents/README.md` | `unit-map.md` |

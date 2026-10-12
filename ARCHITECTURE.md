@@ -42,7 +42,7 @@ presentation/{cli,web} ──▶ capabilities（含协调业务 conductor）─�
 | `SettingsStore` | 登记处持久化（providers / models / settings / agents 四个 yaml） | `YamlSettingsStore` |
 | `ModuleSource` | 模块清单来源（扫描 `modules/`） | `modules/detail::FsModules` |
 | `ModuleStateStore` | 模块与服务的启停覆盖落盘（`.home/modules.yaml`） | `modules/detail::YamlModuleState` |
-| `PackageSource` | 运行包库来源（扫描依赖文件夹 `runtimes/`） | `workspace/detail::FsPackages` |
+| `PackageSource` | 运行包库来源（扫描依赖文件夹 `runtimes/`） | `vm/detail::FsPackages` |
 | `Workdirs` | 一次工作的共享区、各 agent 沙箱、版本库目录、文件清单、用量与寻址根 | `FsWorkspace` |
 | `WorkStore` | 共享区版本库的落盘：文件原语 + 内容寻址对象 + 提交记录 + 每个 agent 的拉取基线（并拒绝符号链接逃逸） | `FsWorkStore` |
 | `SysIo` | 内置文件工具的读写机制（读严格 UTF-8、非法字节如实标注；写一律 UTF-8） | `FsSysIo` |
@@ -141,7 +141,7 @@ presentation/{cli,web} ──▶ capabilities（含协调业务 conductor）─�
   拒绝、没人答、按停止（整队作废 = 拒绝）与**没有可回答的前端**一律不执行；**可选落点**（用户授权的只读根、
   父目录的只读属性、不存在的落点）授不上只记事实；判据与行为见 [docs/tools/README.md](docs/tools/README.md) 五。
   **装不上就如实报告能力等级；未授权不等于无围栏**（进程树、资源上限与环境白名单两种时段都生效）。平台细节见 [docs/tools/README.md](docs/tools/README.md) 与 `confine/` 的源码。
-- `capabilities/workspace/` 的 `packages` 是运行包契约与包库事实，`exec` 是执行档位与执行计划派生；两者都是纯逻辑。契约见 [RUNTIME_SPEC.md](RUNTIME_SPEC.md)。
+- `capabilities/vm/` 的 `packages` 是运行包契约与包库事实，`exec` 是执行档位、执行计划派生与就绪检测；两者都是纯逻辑。契约见 [RUNTIME_SPEC.md](RUNTIME_SPEC.md)。
   登记处四份 yaml 的字段与读写规则见 [REGISTRY_SPEC.md](REGISTRY_SPEC.md)。
 
 ## 七、可测性（架构约束）

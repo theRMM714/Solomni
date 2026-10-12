@@ -1,17 +1,17 @@
-//! 执行档位与执行计划（纯逻辑）：档位是会话选型，计划是"这次会话要装载哪些包"。
-//! 档位：本机（脚本跑在宿主，宿主自备解释器）/ 虚拟机（整台 guest，按模块声明装载运行包）。
-//! 存两种东西：ExecSpec 进 meta.yaml 的 exec 段（会话选型）；ExecPlan 只在运行时派生、从不落盘。
-//! 谁定版本：模块只声明能力名（module.yaml 的 runtimes）；精确版本由用户定版，核心不替用户挑。
+//! 目的：执行档位与执行计划的纯逻辑——档位诊断、计划派生、承载判定与就绪检测。
+//! 管：ExecSpec 的选型诊断（缺包 / 歧义 / 定版不存在 / 路径冲突）、ExecPlan 的装载顺序、本机能否承载虚拟机档。
+//! 不管：目录遍历与 guest 启动（在 detail/ 与 guest 后端）、会话档案（session）、实际的工具进程执行（tools）。
+//! 联动：契约见 docs/vm/README.md 与 RUNTIME_SPEC.md；ExecSpec 是 kernel 的共享事实；被 conductor 与呈现层经 api.rs 消费。
 
 use crate::capabilities::modules::api::Module;
-use crate::capabilities::workspace::domain::packages::{Library, PackageManifest, KIND_SYSTEM};
+use crate::capabilities::vm::domain::packages::{Library, PackageManifest, KIND_SYSTEM};
 use crate::kernel::api::{ExecSpec, Tier};
 use crate::kernel::ports::HostProbe;
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
-/// 一条诊断：结构化事实（界面文案由呈现层渲染；模型侧文案在提示词册）。
+/// 目的：一条诊断：结构化事实（界面文案由呈现层渲染；模型侧文案在提示词册）。
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub enum Diagnosis {
     /// 模块（含它的包的传递依赖）需要的能力，包库里没有任何包提供。
@@ -27,7 +27,7 @@ pub enum Diagnosis {
     Conflict { path: String, a: String, b: String },
 }
 
-/// 计划里的一项：已定版的包。
+/// 目的：计划里的一项：已定版的包。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PlannedPackage {
     pub id: String,
@@ -36,17 +36,17 @@ pub struct PlannedPackage {
     pub prefix: String,
 }
 
-/// 执行计划：运行时派生，从不落盘（装配阶段按 (id, version) 去包里定位内容）。
+/// 目的：执行计划：运行时派生，从不落盘（装配阶段按 (id, version) 去包里定位内容）。
 #[derive(Debug, Clone)]
 pub struct ExecPlan {
     pub tier: Tier,
     pub net: bool,
     pub base: Option<String>,
-    /// 装载顺序：先独立前缀（互不干扰），后写进系统路径的包（叠层）。
+    /// 目的：装载顺序：先独立前缀（互不干扰），后写进系统路径的包（叠层）。
     pub packages: Vec<PlannedPackage>,
 }
 
-/// 模块声明的能力（模块 id → 能力名，升序；去重）。
+/// 目的：模块声明的能力（模块 id → 能力名，升序；去重）。
 pub fn declared(modules: &[Module]) -> BTreeMap<String, Vec<String>> {
     let mut out: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for m in modules {
@@ -61,7 +61,7 @@ pub fn declared(modules: &[Module]) -> BTreeMap<String, Vec<String>> {
     out
 }
 
-/// 哪些模块声明的能力包库里没有（模块 id → 缺失的能力名）——档位无关的事实。
+/// 目的：哪些模块声明的能力包库里没有（模块 id → 缺失的能力名）——档位无关的事实。
 pub fn absent(modules: &[Module], lib: &Library) -> BTreeMap<String, Vec<String>> {
     let mut out: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for m in modules {
@@ -79,8 +79,8 @@ pub fn absent(modules: &[Module], lib: &Library) -> BTreeMap<String, Vec<String>
     out
 }
 
-/// 虚拟机档的诊断（空 = 可以成立）：缺包 / 多版本歧义 / 定版不存在 / 系统路径冲突。
-/// 传递依赖也在这里走完：包 requires 的能力缺失时，归到触发出它的模块上。
+/// 目的：虚拟机档的诊断（空 = 可以成立）：缺包 / 多版本歧义 / 定版不存在 / 系统路径冲突。
+/// 约束：传递依赖也在这里走完：包 requires 的能力缺失时，归到触发出它的模块上。
 pub fn vm_diagnoses(modules: &[Module], lib: &Library, spec: &ExecSpec) -> Vec<Diagnosis> {
     let mut out: Vec<Diagnosis> = Vec::new();
     let mut queue: Vec<(String, String)> = Vec::new();
@@ -131,7 +131,7 @@ pub fn vm_diagnoses(modules: &[Module], lib: &Library, spec: &ExecSpec) -> Vec<D
         }
     }
     let refs: Vec<&PackageManifest> = chosen.values().copied().collect();
-    for (path, a, b) in crate::capabilities::workspace::domain::packages::conflicts(&refs) {
+    for (path, a, b) in crate::capabilities::vm::domain::packages::conflicts(&refs) {
         out.push(Diagnosis::Conflict { path, a, b });
     }
     out.sort();
@@ -139,12 +139,12 @@ pub fn vm_diagnoses(modules: &[Module], lib: &Library, spec: &ExecSpec) -> Vec<D
     out
 }
 
-/// 执行档位的能力前置条件（本机档没有额外前置）。
-/// `RUNTIME_SPEC.md` 把「选型」与「本机能不能承载」分开：定版/缺包/冲突是选型，这里是承载。
-/// **逐项清单**（而不是几个布尔）：用户要看到的是"缺哪几项、每项怎么补"。
+/// 目的：执行档位的能力前置条件（本机档没有额外前置）。
+/// 约束：`RUNTIME_SPEC.md` 把「选型」与「本机能不能承载」分开：定版/缺包/冲突是选型，这里是承载。
+/// 约束：**逐项清单**（而不是几个布尔）：用户要看到的是"缺哪几项、每项怎么补"。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TierReadiness {
-    /// 虚拟机档的全部前置要求；本机档为空（没有额外前置）。
+    /// 目的：虚拟机档的全部前置要求；本机档为空（没有额外前置）。
     pub requirements: Vec<VmRequirement>,
 }
 
@@ -153,18 +153,18 @@ impl TierReadiness {
         self.requirements.iter().all(|r| r.met)
     }
 
-    /// 缺哪几项（空 = 齐了）：呈现层按它如实说明，不猜。
+    /// 目的：缺哪几项（空 = 齐了）：呈现层按它如实说明，不猜。
     pub fn unmet(&self) -> Vec<&VmRequirement> {
         self.requirements.iter().filter(|r| !r.met).collect()
     }
 
-    /// 缺什么（每项一句"现状"）：沿用给日志与拒绝理由用。
+    /// 目的：缺什么（每项一句"现状"）：沿用给日志与拒绝理由用。
     pub fn missing(&self) -> Vec<&str> {
         self.unmet().iter().map(|r| r.detail.as_str()).collect()
     }
 }
 
-/// 虚拟机监视器不可用时该怎么提示（各平台如实说各自的前置条件）。
+/// 目的：虚拟机监视器不可用时该怎么提示（各平台如实说各自的前置条件）。
 pub fn hypervisor_hint() -> &'static str {
     if cfg!(windows) {
         "本机虚拟机监视器不可用（要启用「虚拟机平台」组件）"
@@ -177,33 +177,33 @@ pub fn hypervisor_hint() -> &'static str {
     }
 }
 
-/// 虚拟机档的一项前置要求：**事实 + 怎么解决**（界面与 --doctor 照抄，不各自编话）。
+/// 目的：虚拟机档的一项前置要求：**事实 + 怎么解决**（界面与 --doctor 照抄，不各自编话）。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct VmRequirement {
-    /// 要求名（机器可读的稳定短名，界面/日志按它分支）。
+    /// 目的：要求名（机器可读的稳定短名，界面/日志按它分支）。
     pub id: &'static str,
-    /// 满没满足。
+    /// 目的：满没满足。
     pub met: bool,
-    /// 现状一句话（满足与不满足都要能读）。
+    /// 目的：现状一句话（满足与不满足都要能读）。
     pub detail: String,
-    /// 没满足时怎么解决（满足了就是空）。
+    /// 目的：没满足时怎么解决（满足了就是空）。
     pub how: String,
 }
 
-/// 虚拟机档检测的入参：会话选型 + 设置里登记的路径（None = 没登记，兜底看 PATH）+ 宿主探测端口。
+/// 目的：虚拟机档检测的入参：会话选型 + 设置里登记的路径（None = 没登记，兜底看 PATH）+ 宿主探测端口。
 pub struct VmInputs<'a> {
     pub base: Option<&'a str>,
     pub qemu: Option<&'a str>,
-    /// 本机事实探测（读环境、查路径存在性都在它后面，见 ports::HostProbe）。
+    /// 目的：本机事实探测（读环境、查路径存在性都在它后面，见 ports::HostProbe）。
     pub probe: &'a dyn HostProbe,
 }
 
 /// QEMU 可执行文件名（各平台同名；平台扩展名由适配层的探测实现处理）。
 const QEMU_BIN: &str = "qemu-system-x86_64";
 
-/// 虚拟机档的全部前置要求（**只读事实，不起任何虚拟机**）。
-/// 为什么做成清单：用户看到的必须是"缺哪几项、每项怎么补"，而不是一句笼统的"前置条件不具备"。
-/// base 与会话选型有关，qemu 登记在设置里（见 providers::AppSettings）。
+/// 目的：虚拟机档的全部前置要求（**只读事实，不起任何虚拟机**）。
+/// 约束：为什么做成清单：用户看到的必须是"缺哪几项、每项怎么补"，而不是一句笼统的"前置条件不具备"。
+/// 约束：base 与会话选型有关，qemu 登记在设置里（见 providers::AppSettings）。
 pub fn vm_requirements(vm: &VmInputs<'_>) -> Vec<VmRequirement> {
     let hyper = vm.probe.hypervisor_available();
     vec![
@@ -221,9 +221,8 @@ pub fn vm_requirements(vm: &VmInputs<'_>) -> Vec<VmRequirement> {
                 hypervisor_how().to_string()
             },
         },
-        // guest 本体尚未接入：这是**所有机器**共同缺的一项，所以虚拟机档现在谁都不能建。
-        // 方向已定（平台原生虚拟化；QEMU 与镜像用户自备、产品只检测与指路），实现推迟到项目成熟——
-        // 在那之前不允许造出"隔离没多、能力反少"的会话（见 PRODUCT.md 与 RUNTIME_SPEC.md）。
+        // guest 本体尚未接入：所有机器共同缺的一项，虚拟机档现在谁都不能建。
+        // 在那之前不允许造出"隔离没多、能力反少"的会话；方向见 PRODUCT.md 与 RUNTIME_SPEC.md。
         VmRequirement {
             id: "guest",
             met: false,
@@ -311,10 +310,10 @@ fn base_requirement(base: Option<&str>, probe: &dyn HostProbe) -> VmRequirement 
     }
 }
 
-/// 本机能不能承载这个档位（**只读事实，不碰任何东西**）。
-/// 虚拟机档的前置条件不具备时，虚拟机档**不允许创建或改入**——这是用户环境问题，不是选型问题；
-/// 界面的"能不能点"与「开始」的校验走同一个函数，两处不会各说各话。
-/// 判据**只有一份**：就是 vm_requirements 那份清单，逐项都满足才算承载得了。
+/// 目的：本机能不能承载这个档位（**只读事实，不碰任何东西**）。
+/// 约束：虚拟机档的前置条件不具备时，虚拟机档**不允许创建或改入**——这是用户环境问题，不是选型问题；
+/// 约束：界面的"能不能点"与「开始」的校验走同一个函数，两处不会各说各话。
+/// 约束：判据**只有一份**：就是 vm_requirements 那份清单，逐项都满足才算承载得了。
 pub fn tier_readiness(spec: &ExecSpec, qemu: Option<&str>, probe: &dyn HostProbe) -> TierReadiness {
     if spec.tier != Tier::Vm {
         return TierReadiness {
@@ -330,7 +329,7 @@ pub fn tier_readiness(spec: &ExecSpec, qemu: Option<&str>, probe: &dyn HostProbe
     }
 }
 
-/// 虚拟机档的可读拒绝理由（创建与编辑共用同一把尺子）。
+/// 目的：虚拟机档的可读拒绝理由（创建与编辑共用同一把尺子）。
 pub fn tier_refusal(spec: &ExecSpec, qemu: Option<&str>, probe: &dyn HostProbe) -> Option<String> {
     let readiness = tier_readiness(spec, qemu, probe);
     if readiness.ready() {
@@ -342,9 +341,9 @@ pub fn tier_refusal(spec: &ExecSpec, qemu: Option<&str>, probe: &dyn HostProbe) 
     ))
 }
 
-/// 派生执行计划：本机档不装载运行包（宿主自备解释器）。
-/// 虚拟机档只有**选型不成立**才拒绝（多版本未定版 / 定版不存在 / 系统路径冲突——用户要解决的选型问题）；
-/// **缺包不拦会话**：那只是该模块的工具不可用（由 unavailable 收口，降级而非崩溃）。
+/// 目的：派生执行计划：本机档不装载运行包（宿主自备解释器）。
+/// 约束：虚拟机档只有**选型不成立**才拒绝（多版本未定版 / 定版不存在 / 系统路径冲突——用户要解决的选型问题）；
+/// 约束：**缺包不拦会话**：那只是该模块的工具不可用（由 unavailable 收口，降级而非崩溃）。
 pub fn plan(
     spec: &ExecSpec,
     modules: &[Module],
@@ -414,8 +413,8 @@ pub fn plan(
     }
 }
 
-/// 本档位下不能执行工具的模块（模块 id → 缺失的能力名）：本机档不装载运行包，一律可用（空表）。
-/// 虚拟机档：装配不成立（歧义 / 定版不存在 / 冲突）时，凡声明了运行能力的模块都不能执行工具。
+/// 目的：本档位下不能执行工具的模块（模块 id → 缺失的能力名）：本机档不装载运行包，一律可用（空表）。
+/// 约束：虚拟机档：装配不成立（歧义 / 定版不存在 / 冲突）时，凡声明了运行能力的模块都不能执行工具。
 pub fn unavailable(
     spec: &ExecSpec,
     modules: &[Module],
@@ -453,7 +452,7 @@ pub fn unavailable(
     out
 }
 
-/// 诊断的可读说法（面向界面/CLI 的 Err，与 conductor 其它 Err 同一做法）。
+/// 目的：诊断的可读说法（面向界面/CLI 的 Err，与 conductor 其它 Err 同一做法）。
 pub fn diagnose_text(diags: &[Diagnosis]) -> String {
     let lines: Vec<String> = diags
         .iter()
@@ -488,7 +487,7 @@ pub fn diagnose_text(diags: &[Diagnosis]) -> String {
     lines.join("；")
 }
 
-/// 计划的一句话摘要（日志用）：只报事实，不含真实路径。
+/// 目的：计划的一句话摘要（日志用）：只报事实，不含真实路径。
 pub fn plan_summary(plan: &ExecPlan) -> String {
     let net = if plan.net { "放行" } else { "不放行" };
     if plan.tier == Tier::Host {

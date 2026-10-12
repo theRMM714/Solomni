@@ -10,8 +10,8 @@ use crate::capabilities::registry::api::Settings;
 use crate::capabilities::session::api::SessionMeta;
 use crate::capabilities::session::api::{DecisionDoor, LineView, Pending, SessionEvent};
 use crate::capabilities::tools::api::ToolExec;
+use crate::capabilities::vm::api::Vm;
 use crate::capabilities::workspace::api::Sandboxes;
-use crate::capabilities::workspace::api::Workspace;
 use std::sync::Arc;
 
 use super::pump::*;
@@ -224,7 +224,7 @@ impl CollabSession {
     #[allow(clippy::too_many_arguments)]
     pub fn restore(
         llm: Arc<dyn Llm + Send + Sync>,
-        workspace: Arc<dyn Workspace + Send + Sync>,
+        vm: Arc<dyn Vm + Send + Sync>,
         modules: Arc<dyn Modules + Send + Sync>,
         settings: Settings,
         prompts: Arc<dyn Prompt>,
@@ -287,7 +287,7 @@ impl CollabSession {
             prompts: prompts.clone(),
             systools: systools.clone(),
             llm,
-            workspace,
+            vm,
             tools,
             log,
             spec: meta.exec.clone(),

@@ -119,7 +119,7 @@ fn main() {
         capabilities::tools::api::names(),
     );
     // 运行包库：依赖文件夹 runtimes/（一个包 = 一个文件夹 + package.yaml）。
-    let packages = capabilities::workspace::detail::FsPackages::new(root.join("runtimes"));
+    let packages = capabilities::vm::detail::FsPackages::new(root.join("runtimes"));
     // 端点记忆：谁先通了就固定谁，后续会话不再反复探测候选。
     let memo = capabilities::llm::detail::endpoint::memo_new();
     // **llm 能力**：三个出站端口（通道工厂 / 模型目录 / 信封修复）只由它的 service 持有（R12）；
@@ -221,10 +221,14 @@ fn main() {
             }
         };
 
-    // **工作区能力**：运行包库 / 目录布局 / 版本库三个出站端口只由它的 service 持有（R12）。
+    // **虚拟机档能力**：运行包库来源端口只由它的 service 持有（R12）。
+    let vm: Arc<dyn capabilities::vm::api::Vm + Send + Sync> = Arc::new(
+        capabilities::vm::service::VmService::new(Arc::new(packages)),
+    );
+
+    // **工作区能力**：目录布局与版本库两个出站端口只由它的 service 持有（R12）。
     let workspace: Arc<dyn capabilities::workspace::api::Workspace + Send + Sync> =
         Arc::new(capabilities::workspace::service::WorkspaceService::new(
-            Arc::new(packages),
             Arc::new(workspace),
             Arc::new(workstore),
         ));
@@ -271,6 +275,7 @@ fn main() {
             Arc::new(history),
         )),
         workspace,
+        vm,
         Arc::clone(&modules),
         Arc::clone(&llm),
         toolexec,

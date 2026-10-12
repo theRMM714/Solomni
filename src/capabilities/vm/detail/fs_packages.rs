@@ -1,9 +1,10 @@
-//! 运行包库来源：扫描 runtimes/ 下每个含 package.yaml 的文件夹（实现 workspace 自己的 PackageSource 端口）。
-//! 目录遍历与 yaml 解析是机制；清单校验、去重、冲突预检在本能力的 domain（packages::Library::build）。
-//! 「清单即事实」：放在依赖文件夹里即出现，移出即消失——没有注册仪式。
+//! 目的：PackageSource 端口的磁盘实现——扫描 runtimes/ 下每个含 package.yaml 的文件夹。
+//! 管：目录遍历与 yaml 解析；清单即事实，放在依赖文件夹里即出现，移出即消失。
+//! 不管：清单校验、去重与冲突预检（在 domain/packages.rs）。
+//! 联动：端口在 ports.rs；只由组合根构造。
 
-use crate::capabilities::workspace::api::{Library, PackageManifest};
-use crate::capabilities::workspace::ports::PackageSource;
+use crate::capabilities::vm::domain::packages::{Library, PackageManifest};
+use crate::capabilities::vm::ports::PackageSource;
 use std::path::PathBuf;
 
 pub struct FsPackages {

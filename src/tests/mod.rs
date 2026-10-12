@@ -27,6 +27,7 @@ mod session;
 mod slate;
 mod taskchain;
 mod tools;
+mod vm;
 mod workspace;
 
 /// 隔离落点：`target/test-scratch/contract/<name>`（target/ 不入库）。每次先清空再建。

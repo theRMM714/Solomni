@@ -537,11 +537,9 @@ impl Conductor {
             ..ExecSpec::default()
         };
         // 与其余形态同一把尺子：虚拟机档的承载不成立就不建（用户环境问题，不是选型问题）。
-        if let Some(why) = crate::capabilities::workspace::api::tier_refusal(
-            &exec,
-            self.qemu_path(),
-            self.probe.as_ref(),
-        ) {
+        if let Some(why) =
+            crate::capabilities::vm::api::tier_refusal(&exec, self.qemu_path(), self.probe.as_ref())
+        {
             return Err(why);
         }
         let meta = SessionMeta {

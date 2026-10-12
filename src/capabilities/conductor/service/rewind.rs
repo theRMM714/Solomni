@@ -269,7 +269,7 @@ impl Conductor {
         match meta.mode.as_str() {
             "collab" => Ok(Session::Collab(CollabSession::restore(
                 Arc::clone(&self.llm),
-                Arc::clone(&self.workspace),
+                Arc::clone(&self.vm),
                 Arc::clone(&self.modules),
                 self.registry.snapshot(),
                 Arc::clone(&self.prompt),

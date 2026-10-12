@@ -35,10 +35,10 @@ pub use crate::kernel::ports::ProcessRunner;
 
 pub use crate::capabilities::modules::api::Module;
 
-pub use crate::capabilities::workspace::api::{self as exec, Diagnosis};
+pub use crate::capabilities::vm::api::{self as exec, Diagnosis};
 pub use crate::kernel::api::ExecSpec;
 
-pub use crate::capabilities::workspace::api::{Library, PackageManifest};
+pub use crate::capabilities::vm::domain::packages::{Library, PackageManifest};
 
 pub use crate::capabilities::modules::ports::ModuleSource;
 pub use crate::capabilities::workspace::ports::Workdirs;

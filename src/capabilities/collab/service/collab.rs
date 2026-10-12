@@ -16,8 +16,8 @@ use crate::capabilities::registry::api::Settings;
 use crate::capabilities::session::api::AgentMeta;
 use crate::capabilities::session::api::{DecisionDoor, LineView, Pending, SessionEvent};
 use crate::capabilities::tools::api::ToolExec;
+use crate::capabilities::vm::api::Vm;
 use crate::capabilities::workspace::api::Sandboxes;
-use crate::capabilities::workspace::api::Workspace;
 use crate::kernel::api::ExecSpec;
 use std::sync::Arc;
 
@@ -138,8 +138,8 @@ pub struct CollabSession {
     pub(crate) systools: Arc<dyn crate::capabilities::tools::api::Tools>,
     /// llm 用例面（**不持它的端口**，R12）：按通道造句柄、修信封都走它。
     pub(crate) llm: Arc<dyn Llm + Send + Sync>,
-    /// 工作区用例面（**不持它的端口**，R12）：运行包库与工作区目录走它。
-    pub(crate) workspace: Arc<dyn Workspace + Send + Sync>,
+    /// 虚拟机档用例面（**不持它的端口**，R12）：运行包库走它。
+    pub(crate) vm: Arc<dyn Vm + Send + Sync>,
     /// 目的：模块能力（**不持它的端口**，R12）——清单事实的唯一上游。
     pub(crate) modules: Arc<dyn Modules + Send + Sync>,
     /// 工具执行面（**不持它的端口**，R12）：跑外部/内置工具都走它。
@@ -167,7 +167,7 @@ impl CollabSession {
     #[allow(clippy::too_many_arguments)]
     pub fn start(
         llm: Arc<dyn Llm + Send + Sync>,
-        workspace: Arc<dyn Workspace + Send + Sync>,
+        vm: Arc<dyn Vm + Send + Sync>,
         modules: Arc<dyn Modules + Send + Sync>,
         settings: Settings,
         prompts: Arc<dyn Prompt>,
@@ -207,7 +207,7 @@ impl CollabSession {
             prompts,
             systools,
             llm,
-            workspace,
+            vm,
             modules,
             tools,
             log,

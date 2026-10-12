@@ -12,26 +12,26 @@ impl Conductor {
     /// 「清单即事实」：每次调用重扫模块清单与包库；本机档不装载运行包，missing 只作事实呈现。
     pub fn runtime_report(&self, tier: crate::kernel::api::Tier) -> RuntimeReport {
         let roster = self.modules.roster();
-        let lib = self.workspace.library();
+        let lib = self.vm.library();
         let spec = crate::kernel::api::ExecSpec {
             tier,
             ..crate::kernel::api::ExecSpec::default()
         };
         let diagnoses = if tier == crate::kernel::api::Tier::Vm {
-            crate::capabilities::workspace::api::vm_diagnoses(&roster.modules, &lib, &spec)
+            crate::capabilities::vm::api::vm_diagnoses(&roster.modules, &lib, &spec)
         } else {
             Vec::new()
         };
-        let readiness = crate::capabilities::workspace::api::tier_readiness(
+        let readiness = crate::capabilities::vm::api::tier_readiness(
             &spec,
             self.qemu_path(),
             self.probe.as_ref(),
         );
         RuntimeReport {
             tier: tier.as_str().to_string(),
-            declared: crate::capabilities::workspace::api::declared(&roster.modules),
+            declared: crate::capabilities::vm::api::declared(&roster.modules),
             available: lib.capability_versions(),
-            missing: crate::capabilities::workspace::api::absent(&roster.modules, &lib),
+            missing: crate::capabilities::vm::api::absent(&roster.modules, &lib),
             diagnoses,
             tier_ready: readiness.ready(),
             tier_missing: readiness.missing().iter().map(|s| s.to_string()).collect(),
@@ -50,26 +50,26 @@ impl Conductor {
             tier: crate::kernel::api::Tier::Vm,
             ..crate::kernel::api::ExecSpec::default()
         };
-        let inputs = crate::capabilities::workspace::api::VmInputs {
+        let inputs = crate::capabilities::vm::api::VmInputs {
             base: vm_probe.base.as_deref(),
             qemu: self.qemu_path(),
             probe: self.probe.as_ref(),
         };
         TierChoices {
             default: default.as_str().to_string(),
-            vm_available: crate::capabilities::workspace::api::tier_readiness(
+            vm_available: crate::capabilities::vm::api::tier_readiness(
                 &vm_probe,
                 self.qemu_path(),
                 self.probe.as_ref(),
             )
             .ready(),
-            vm_unavailable_reason: crate::capabilities::workspace::api::tier_refusal(
+            vm_unavailable_reason: crate::capabilities::vm::api::tier_refusal(
                 &vm_probe,
                 self.qemu_path(),
                 self.probe.as_ref(),
             )
             .unwrap_or_default(),
-            vm_requirements: crate::capabilities::workspace::api::vm_requirements(&inputs),
+            vm_requirements: crate::capabilities::vm::api::vm_requirements(&inputs),
         }
     }
 
@@ -79,11 +79,11 @@ impl Conductor {
         spec: &crate::kernel::api::ExecSpec,
         modules: &[Module],
     ) -> BTreeMap<String, Vec<String>> {
-        crate::capabilities::workspace::api::unavailable(spec, modules, &self.workspace.library())
+        crate::capabilities::vm::api::unavailable(spec, modules, &self.vm.library())
     }
 
     /// 目的：**当前设置档位**下不能执行工具的模块（人直接跑与动作目录共用）：本机档不装载运行包，一律可用。
-    /// 约束：与成员循环同一把尺子（`workspace::api::unavailable`，档位感知）——不用档位无关的 `absent`，
+    /// 约束：与成员循环同一把尺子（`vm::api::unavailable`，档位感知）——不用档位无关的 `absent`，
     ///   否则本机档会因"没装运行包"误拒本机解释器就能跑的工具。
     pub fn unavailable_modules_now(&self) -> BTreeMap<String, Vec<String>> {
         let spec = crate::kernel::api::ExecSpec {
@@ -124,14 +124,14 @@ impl Conductor {
             net: meta.exec.net,
             pins: meta.exec.pins.clone(),
             runtime: self.runtime_report(tier),
-            runtimes_dir: crate::kernel::api::slash(&self.workspace.runtimes_dir()),
-            tier_ready: crate::capabilities::workspace::api::tier_readiness(
+            runtimes_dir: crate::kernel::api::slash(&self.vm.runtimes_dir()),
+            tier_ready: crate::capabilities::vm::api::tier_readiness(
                 &meta.exec,
                 self.qemu_path(),
                 self.probe.as_ref(),
             )
             .ready(),
-            tier_missing: crate::capabilities::workspace::api::tier_readiness(
+            tier_missing: crate::capabilities::vm::api::tier_readiness(
                 &meta.exec,
                 self.qemu_path(),
                 self.probe.as_ref(),
@@ -142,20 +142,20 @@ impl Conductor {
             .collect(),
             // 虚拟机档能不能选**与当前档位无关**：本机档会话也要如实告诉用户 vm 现在不可用（界面据此禁用）。
             // 逐项清单一起给出：界面照抄"缺哪几项、每项怎么补"，不自己编话。
-            vm_available: crate::capabilities::workspace::api::tier_readiness(
+            vm_available: crate::capabilities::vm::api::tier_readiness(
                 &vm_probe,
                 self.qemu_path(),
                 self.probe.as_ref(),
             )
             .ready(),
-            vm_unavailable_reason: crate::capabilities::workspace::api::tier_refusal(
+            vm_unavailable_reason: crate::capabilities::vm::api::tier_refusal(
                 &vm_probe,
                 self.qemu_path(),
                 self.probe.as_ref(),
             )
             .unwrap_or_default(),
-            vm_requirements: crate::capabilities::workspace::api::vm_requirements(
-                &crate::capabilities::workspace::api::VmInputs {
+            vm_requirements: crate::capabilities::vm::api::vm_requirements(
+                &crate::capabilities::vm::api::VmInputs {
                     base: vm_probe.base.as_deref(),
                     qemu: self.qemu_path(),
                     probe: self.probe.as_ref(),
@@ -272,7 +272,7 @@ impl Conductor {
         if staying_vm {
             // 留在 vm 档：只校验用户这次填的基础根（填错路径就是填错路径），
             // 不拿"本机能不能提供 vm 档"去拦一条已经存在的会话。
-            let base_item = crate::capabilities::workspace::api::tier_readiness(
+            let base_item = crate::capabilities::vm::api::tier_readiness(
                 &spec,
                 self.qemu_path(),
                 self.probe.as_ref(),
@@ -285,11 +285,9 @@ impl Conductor {
                     return Err(format!("{}：{}", item.detail, item.how));
                 }
             }
-        } else if let Some(why) = crate::capabilities::workspace::api::tier_refusal(
-            &spec,
-            self.qemu_path(),
-            self.probe.as_ref(),
-        ) {
+        } else if let Some(why) =
+            crate::capabilities::vm::api::tier_refusal(&spec, self.qemu_path(), self.probe.as_ref())
+        {
             return Err(why);
         }
         let session_modules: Vec<Module> = roster
@@ -298,18 +296,14 @@ impl Conductor {
             .filter(|m| seen.iter().any(|id| id == &m.manifest.id))
             .cloned()
             .collect();
-        let plan = crate::capabilities::workspace::api::plan(
-            &spec,
-            &session_modules,
-            &self.workspace.library(),
-        )
-        .map_err(|diags| crate::capabilities::workspace::api::diagnose_text(&diags))?;
+        let plan = crate::capabilities::vm::api::plan(&spec, &session_modules, &self.vm.library())
+            .map_err(|diags| crate::capabilities::vm::api::diagnose_text(&diags))?;
         self.log.info(
             "conductor::edit_session",
             &format!(
                 "sid={}；{}",
                 sid,
-                crate::capabilities::workspace::api::plan_summary(&plan)
+                crate::capabilities::vm::api::plan_summary(&plan)
             ),
         );
 
@@ -453,7 +447,7 @@ impl Conductor {
                     .to_string();
                 // 记的档位来自落盘 meta（权威）：环境后来变了也要如实提示——**不拦打开**（记录是用户的）。
                 let exec = entry.map(|h| h.exec.clone()).unwrap_or_default();
-                let readiness = crate::capabilities::workspace::api::tier_readiness(
+                let readiness = crate::capabilities::vm::api::tier_readiness(
                     &exec,
                     self.qemu_path(),
                     self.probe.as_ref(),
@@ -638,7 +632,7 @@ impl Conductor {
         };
         // 承载校验：默认档位的前置条件不具备时**不允许创建虚拟机档会话**（用户环境问题，不是选型问题）。
         // 必须在建工作区之前收口——拒绝就该什么都不留下。
-        if let Some(why) = crate::capabilities::workspace::api::tier_refusal(
+        if let Some(why) = crate::capabilities::vm::api::tier_refusal(
             &meta.exec,
             self.qemu_path(),
             self.probe.as_ref(),
@@ -656,8 +650,7 @@ impl Conductor {
             .filter(|m| module_ids.iter().any(|id| id == &m.manifest.id))
             .cloned()
             .collect();
-        for (id, caps) in
-            crate::capabilities::workspace::api::absent(&session_modules, &self.workspace.library())
+        for (id, caps) in crate::capabilities::vm::api::absent(&session_modules, &self.vm.library())
         {
             self.log.warn(
                 "conductor::create_work",
@@ -666,15 +659,12 @@ impl Conductor {
         }
         // 执行选型的完整性检查（「开始」即冻结）：虚拟机档的选型不成立（多版本未定版 / 定版不存在 /
         // 路径冲突）如实拒绝；只是缺包的照常开始——那是该模块的工具不可用（降级而非崩溃）。装配阶段按同一份计划取包。
-        let plan = crate::capabilities::workspace::api::plan(
-            &meta.exec,
-            &session_modules,
-            &self.workspace.library(),
-        )
-        .map_err(|diags| crate::capabilities::workspace::api::diagnose_text(&diags))?;
+        let plan =
+            crate::capabilities::vm::api::plan(&meta.exec, &session_modules, &self.vm.library())
+                .map_err(|diags| crate::capabilities::vm::api::diagnose_text(&diags))?;
         self.log.info(
             "conductor::create_work",
-            &crate::capabilities::workspace::api::plan_summary(&plan),
+            &crate::capabilities::vm::api::plan_summary(&plan),
         );
 
         let (session, mut events) = match spec.mode {
@@ -710,7 +700,7 @@ impl Conductor {
                 let door = self.desk_of(&name);
                 let mut cs = CollabSession::start(
                     Arc::clone(&self.llm),
-                    Arc::clone(&self.workspace),
+                    Arc::clone(&self.vm),
                     Arc::clone(&self.modules),
                     self.registry.snapshot(),
                     Arc::clone(&self.prompt),
