@@ -109,6 +109,10 @@ pub trait HostProbe: Send + Sync {
     fn has_exe(&self, name: &str) -> bool;
     /// 本机能不能起硬件虚拟化（只问事实，不起任何虚拟机）。
     fn hypervisor_available(&self) -> bool;
+    /// 读一个小文本文件（清单这类）的全文；读不到（不在场或不可读）给 None。
+    fn read_text(&self, _path: &Path) -> Option<String> {
+        None
+    }
 }
 
 /// 目的：一次外部进程执行端口——机制（围栏安装、进程拉起、stdin 送参、超时杀树、截断）在适配层。

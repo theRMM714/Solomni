@@ -1,10 +1,5 @@
 //! 入站能力面：**其它能力与呈现层只准用这里**（不许碰 `domain` / `ports`）。
 
-pub use crate::capabilities::workspace::domain::exec::{
-    absent, declared, diagnose_text, plan, plan_summary, tier_readiness, tier_refusal, unavailable,
-    vm_diagnoses, vm_requirements, Diagnosis, ExecSpec, VmInputs, VmRequirement,
-};
-pub use crate::capabilities::workspace::domain::packages::{Library, PackageManifest};
 pub use crate::capabilities::workspace::domain::workspace::{
     safe_file_name, AreaUsage, Place, Sandbox, Sandboxes, WorkFiles, WorkRoots, WorkUsage,
 };
@@ -13,13 +8,9 @@ pub use crate::capabilities::workspace::domain::workstore::{
     StatusReport,
 };
 
-/// 工作区的**用例面**（`service.rs` 实现）：别的能力要运行包与工作区目录，走这里；
-/// 出站端口（`PackageSource` / `Workdirs` / `WorkStore`）**只由它持有**（R12）。
+/// 工作区的**用例面**（`service.rs` 实现）：别的能力要工作区目录与版本化，走这里；
+/// 出站端口（`Workdirs` / `WorkStore`）**只由它持有**（R12）。
 pub trait Workspace: Send + Sync {
-    /// 运行包库：可用的包清单（每次重扫）。
-    fn library(&self) -> Library;
-    /// 包库所在目录（界面上要如实告诉用户"把包放哪儿"）。
-    fn runtimes_dir(&self) -> std::path::PathBuf;
     /// 准备工作区：建 session/<工作名>/work 与每个 agent 的沙箱目录。
     fn prepare(&self, session: &str, agents: &[String]) -> Result<(), String>;
     /// work/ 下是否已有同名文件（上传同名冲突判定）。

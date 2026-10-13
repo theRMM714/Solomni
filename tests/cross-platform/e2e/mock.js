@@ -249,6 +249,10 @@ http.createServer((req, res) => {
           // 新模型：共享区对 agent 只读，外部工具要先 pull 进沙箱再读。
           // 注意：本块上面有一个局部变量也叫 env（read_txt 的信封），这里不能调那个辅助函数。
           content = JSON.stringify({ type: 'tool', name: 'work_pull', args: { paths: ['g.txt'] } });
+        } else if (user.includes('虚拟机档')) {
+          // 虚拟机档验收：读 guest 的 /etc/os-release，证明工具真在 guest 里跑（宿主不是 Debian）。
+          // 这条会话走**原生通道**：线上名 = {模块}_{工具}（协议里没有 module 字段）。
+          calls = [{ id: 'call_vm', type: 'function', function: { name: 'toolbox_read_txt', arguments: JSON.stringify({ path: '/etc/os-release' }) } }];
         } else if (user.includes('顺便')) {
           content = '我先看一下这个文件。' + JSON.stringify(env);
         } else {

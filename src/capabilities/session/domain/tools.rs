@@ -54,6 +54,10 @@ pub struct MemberTools {
     pub log: Arc<dyn crate::kernel::ports::Log + Send + Sync>,
     /// 工具执行面（**不持它的端口**，R12）：跑外部/内置工具都走它。
     pub tools: Arc<dyn ToolExec + Send + Sync>,
+    /// 目的：本会话的执行档位——工具执行者据此决定在本机跑还是送进 guest。
+    pub tier: crate::kernel::api::Tier,
+    /// 目的：虚拟机档的 guest 用例面（**不持它的端口**，R12）：guest 执行走它。
+    pub vm: Arc<dyn crate::capabilities::vm::api::Vm + Send + Sync>,
     /// 本成员的沙箱：内置文件工具的寻址与越界依据（权限收口在 conductor）。
     pub sandbox: crate::capabilities::workspace::api::Sandbox,
     /// 内置工具的参数契约（来自 `systools/tools.yaml` 的 tools）：说明与校验都按它来。

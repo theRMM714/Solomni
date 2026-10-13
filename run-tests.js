@@ -650,6 +650,47 @@ function structuralAudit() {
     }
   }
 
+  // ④ 外部连接台账 ↔ 消费点：links.yaml 的键与代码里 link(...) 的引用一一对应。
+  // 为什么机器查：台账多个没人用的键 = 死数据；少一个被引用的键 = 运行期才炸（env.js 是引导层，炸在这里没得救）。
+  const linksFile = path.join(ROOT, "links.yaml");
+  const linkDomains = ["rustup", "winlibs", "release", "guest"];
+  if (!fs.existsSync(linksFile)) {
+    problems.push("缺外部连接台账：links.yaml");
+  } else {
+    const declared = new Map();
+    for (const raw of fs.readFileSync(linksFile, "utf8").split(/\r?\n/)) {
+      const line = raw.trim();
+      if (!line || line.startsWith("#")) continue;
+      const m = line.match(/^([A-Za-z0-9_.-]+):\s*(\S+)\s*$/);
+      if (!m) { problems.push("links.yaml 不是扁平的 键: 值：" + raw); continue; }
+      const key = m[1];
+      if (!/^https:\/\//.test(m[2])) problems.push("links.yaml 的值必须是 https://：" + key);
+      if (!linkDomains.includes(key.split(".")[0])) problems.push("links.yaml 的域不在白名单（" + linkDomains.join(" / ") + "）：" + key);
+      if (declared.has(key)) problems.push("links.yaml 重复键：" + key);
+      declared.set(key, m[2]);
+    }
+    const used = new Set();
+    const scanLinkUses = (abs) => {
+      if (!fs.existsSync(abs)) return;
+      for (const m of fs.readFileSync(abs, "utf8").matchAll(/\blink\("([A-Za-z0-9_.-]+)"\)/g)) used.add(m[1]);
+    };
+    // 消费点：环境层与虚拟机档安装脚本（按平台拆过：setup-vm.js 是分发入口，各平台脚本与共享件都要扫）。
+    for (const consumer of ["env.js", "setup-vm.js", "setup-vm-common.js", "setup-vm-windows.js", "setup-vm-linux.js", "setup-vm-mac.js"]) {
+      scanLinkUses(path.join(ROOT, consumer));
+    }
+    const walkSrc = (d) => {
+      for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+        const p = path.join(d, e.name);
+        if (e.isDirectory()) walkSrc(p);
+        else if (e.name.endsWith(".rs")) scanLinkUses(p);
+      }
+    };
+    const srcDir = path.join(ROOT, "src");
+    if (fs.existsSync(srcDir)) walkSrc(srcDir);
+    for (const k of used) if (!declared.has(k)) problems.push("links.yaml 缺被引用的键：" + k);
+    for (const k of declared.keys()) if (!used.has(k)) problems.push("links.yaml 的键没有消费点（死数据）：" + k);
+  }
+
   // ③ 根 *.md ↔ AGENTS.md 路由表：新增根文档必须同时进路由表。
   // 白名单只有 AGENTS.md 自己（路由表不列它）；出现不进路由表的临时工作清单时，在这里加名字并写明理由。
   const rootDocAllow = ["AGENTS.md"];

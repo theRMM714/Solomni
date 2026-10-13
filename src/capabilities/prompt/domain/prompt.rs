@@ -82,7 +82,6 @@ pub enum Segment {
     AgentSystem,
     ToolCallingEnvelope,
     ToolCallingNative,
-    Env,
     PatchGuide,
     NoAgents,
     NoModel,
@@ -129,6 +128,40 @@ pub fn merge_book(docs: &[String]) -> Result<Prompts, String> {
             ));
         }
     }
+    // 环境册自检：每条只写 host 或 guest 之一、值在全表里；全表里每个值都要有条目（不静默漏发一份环境）。
+    for e in &core.envs {
+        match (&e.host, &e.guest) {
+            (Some(h), None) => {
+                if !core.env_hosts.iter().any(|x| x == h) {
+                    return Err(format!("环境册非法：宿主平台不在 env_hosts 里：{}", h));
+                }
+            }
+            (None, Some(g)) => {
+                if !core.env_guests.iter().any(|x| x == g) {
+                    return Err(format!("环境册非法：guest os 不在 env_guests 里：{}", g));
+                }
+            }
+            _ => return Err("环境册非法：每条只写 host 或 guest 之一".to_string()),
+        }
+    }
+    for h in &core.env_hosts {
+        if !core
+            .envs
+            .iter()
+            .any(|e| e.host.as_deref() == Some(h.as_str()))
+        {
+            return Err(format!("环境册非法：宿主平台没有对应的工作环境：{}", h));
+        }
+    }
+    for g in &core.env_guests {
+        if !core
+            .envs
+            .iter()
+            .any(|e| e.guest.as_deref() == Some(g.as_str()))
+        {
+            return Err(format!("环境册非法：guest os 没有对应的工作环境：{}", g));
+        }
+    }
     Ok(Prompts {
         core,
         tools: std::sync::Arc::new(tools),
@@ -172,9 +205,12 @@ pub struct CoreTexts {
     pub tool_calling_envelope: String,
     /// 工具调用约定：原生工具调用（native 形态）；与上一条**互斥**，一个通道只用一套。
     pub tool_calling_native: String,
-    /// **工作环境块**：真实根目录与路径规矩。变量：work_name, agent, work_root, sandbox_root, module_roots。
-    /// 这里**不列工具**——能用哪些工具由核心按这一回合的身份从角色表现渲染、随回合注入。
-    pub env: String,
+    /// 目的：工作环境册的**宿主平台全表**（本机档按它匹配与校验）。
+    pub env_hosts: Vec<String>,
+    /// 目的：工作环境册的 **guest os 全表**（虚拟机档按它匹配与校验）。
+    pub env_guests: Vec<String>,
+    /// 目的：**工作环境册**——每条按宿主平台或 guest 的 os 分发（见 `env_for`）；变量 work_name / agent / work_root / sandbox_root / module_roots。
+    pub envs: Vec<EnvBlock>,
     /// patch 通道的写法说明（模型侧）；变量：work_root, sandbox_root
     pub patch_guide: String,
     /// 登记处还没有 agent 时的说明（拟名单的 {{agents}} 取值）。
@@ -527,6 +563,16 @@ pub struct SlatePrompts {
     pub mode_collab: String,
 }
 
+/// 目的：一条工作环境说明——`host`（宿主平台）或 `guest`（guest 的 os）恰有其一（见 `CoreTexts::env_for`）。
+#[derive(Debug, Clone, Deserialize)]
+pub struct EnvBlock {
+    #[serde(default)]
+    pub host: Option<String>,
+    #[serde(default)]
+    pub guest: Option<String>,
+    pub text: String,
+}
+
 /// 一条机制说明：**会话使用类型与适用角色同时对上**才注入（见 `CoreTexts::mechanisms_for`）。
 #[derive(Debug, Clone, Deserialize)]
 pub struct Mechanism {
@@ -555,6 +601,19 @@ impl CoreTexts {
             .join("\n\n")
     }
 
+    /// 目的：按（宿主平台，guest 的 os）取工作环境块——虚拟机档传 guest，本机档传 None；只拿匹配的条目按声明顺序拼接（装载时校验全表覆盖）。
+    pub fn env_for(&self, host: &str, guest: Option<&str>) -> String {
+        self.envs
+            .iter()
+            .filter(|e| match guest {
+                Some(g) => e.guest.as_deref() == Some(g),
+                None => e.host.as_deref() == Some(host),
+            })
+            .map(|e| e.text.trim().to_string())
+            .collect::<Vec<_>>()
+            .join("\n\n")
+    }
+
     /// **按名字取一段原文**：册子的布局只在这里露面（新加一段 = 这里加一支 match）。
     pub fn segment(&self, seg: Segment) -> &str {
         match seg {
@@ -579,7 +638,6 @@ impl CoreTexts {
             Segment::AgentSystem => &self.agent.system,
             Segment::ToolCallingEnvelope => &self.tool_calling_envelope,
             Segment::ToolCallingNative => &self.tool_calling_native,
-            Segment::Env => &self.env,
             Segment::PatchGuide => &self.patch_guide,
             Segment::NoAgents => &self.no_agents,
             Segment::NoModel => &self.no_model,

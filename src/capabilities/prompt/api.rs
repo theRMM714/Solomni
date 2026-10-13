@@ -24,6 +24,10 @@ pub trait Prompt: Send + Sync {
     /// 按册子声明顺序拼接（没配 = 空串）。对应关系在 `prompts/shared/mechanisms.yaml`，这里只做匹配。
     fn mechanism(&self, session: &str, role: &str) -> String;
 
+    /// 按（**宿主平台**，**guest 的 os**）取工作环境块并渲染：虚拟机档传 guest，本机档传 None。
+    /// 对应关系在 `prompts/shared/tools.yaml` 的 `envs`，这里只做匹配；变量与 `render` 同一套。
+    fn env(&self, host: &str, guest: Option<&str>, vars: Vars) -> String;
+
     /// 工具与路径的模型侧文案（~100 条模板）：**共享一份**——调用方拿 `Arc`，不深拷贝。
     fn tools(&self) -> Arc<ToolTexts>;
 

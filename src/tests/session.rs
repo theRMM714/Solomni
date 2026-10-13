@@ -3,6 +3,43 @@
 use super::builders::*;
 use super::prelude::*;
 
+/// 目的：工作环境块按会话的环境给路径——虚拟机档给 guest 拼法，并说清是哪种 guest。
+#[test]
+pub(crate) fn env_block_renders_guest_paths_in_vm_tier() {
+    use crate::capabilities::session::domain::session::env_block;
+    let prompt = test_prompts();
+    let host = super::doubles::test_params("a");
+    let host_block = env_block(&prompt, &host);
+    assert!(
+        host_block.contains("【工作环境】"),
+        "本机档要有环境块：{}",
+        host_block
+    );
+
+    let guest = super::doubles::test_params("a")
+        .with_guest(Some(crate::capabilities::vm::api::GuestOs::Linux));
+    let guest_block = env_block(&prompt, &guest);
+    assert!(
+        guest_block.contains("Linux guest"),
+        "虚拟机档要说清是哪种 guest：{}",
+        guest_block
+    );
+    if cfg!(windows) {
+        assert!(
+            guest_block.contains("/solomni-host/"),
+            "路径要按 guest 拼法给（镜像根）：{}",
+            guest_block
+        );
+        // 示例里为了讲清楚映射会提到宿主路径；要断言的是**真实的沙箱根**不再以宿主拼法出现。
+        let host_private = host.private.display().to_string();
+        assert!(
+            !host_private.is_empty() && !guest_block.contains(&host_private),
+            "不该把宿主拼法的沙箱路径给模型：{}",
+            guest_block
+        );
+    }
+}
+
 #[test]
 pub(crate) fn agent_system_carries_the_real_roots() {
     // 提示词里给出的根必须是真实绝对路径（模型据此拼路径；外部工具也认它）。
@@ -1002,7 +1039,7 @@ pub(crate) fn edit_session_writes_meta_appends_config_record_and_rebuilds() {
     // 虚拟机档现在一律不可选（guest 本体尚未接入），所以**先把它做成已存在的虚拟机档会话**——
     // 已在 vm 档的会话只校验它自己那几项（基础根等），改模块/模型/网络照旧允许。
     hist.force_tier(&sid, Tier::Vm);
-    let base_dir = crate::tests::scratch("edit-session-base");
+    let base_dir = crate::tests::base_dir("edit-session-base");
     core.edit_session(
         &sid,
         SessionEdit {
@@ -1145,7 +1182,7 @@ pub(crate) fn edit_session_enforces_the_same_rules_as_creation() {
     let hist2 = Arc::new(InMemoryHistory::new());
     // 已经在虚拟机档上的会话（"留在 vm 档"这一路：只校验它自己那几项，不拿"本机能不能提供 vm 档"拦它）。
     // 基础根给一个真实存在的目录：留在 vm 档时仍然要校验用户填的那个路径。
-    let vm_base = crate::tests::scratch("edit-rules-vm-base");
+    let vm_base = crate::tests::base_dir("edit-rules-vm-base");
     seed_session(
         &hist2,
         "c",
@@ -1208,10 +1245,8 @@ pub(crate) fn deleting_a_session_asks_the_fence_to_release_its_grants() {
     let mut core = Conductor::new(
         registry_service(InMemorySettings::new(), Arc::clone(&llm)),
         test_history_of(Arc::clone(&hist)),
-        test_workspace(
-            Arc::new(InMemoryPackages::empty()),
-            Arc::new(InMemoryWorkspace::new()),
-        ),
+        test_workspace(Arc::new(InMemoryWorkspace::new())),
+        test_vm(Arc::new(InMemoryPackages::empty())),
         test_modules(Arc::new(VecSource(vec![module_of("a")]))),
         llm,
         test_tools_svc_with(

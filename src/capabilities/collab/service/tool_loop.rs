@@ -496,11 +496,32 @@ pub(crate) fn dispatch_external(
                 .get(&module)
                 .map(|v| v.as_slice())
                 .unwrap_or(&[]);
-            (
-                module,
-                ctx.tools
-                    .run_module(&ctx.fence.at(&mt.root), command, &inv.args_json, env, ask),
-            )
+            if ctx.tier == crate::kernel::api::Tier::Vm {
+                // 虚拟机档：命令送进这个会话的 guest（挂载与网络在起 guest 时已经定下）。
+                (
+                    module,
+                    ctx.vm.guest_run(
+                        &ctx.fence.lease,
+                        &crate::capabilities::vm::api::GuestRun {
+                            command: command.to_string(),
+                            args_json: inv.args_json.clone(),
+                            env: env.to_vec(),
+                            cwd: mt.root.display().to_string(),
+                        },
+                    ),
+                )
+            } else {
+                (
+                    module,
+                    ctx.tools.run_module(
+                        &ctx.fence.at(&mt.root),
+                        command,
+                        &inv.args_json,
+                        env,
+                        ask,
+                    ),
+                )
+            }
         }
         None => {
             let why = ctx.sandbox.texts.render(

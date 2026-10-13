@@ -41,6 +41,8 @@ cargo deny check
 - 是否存在重复测试、重复 Fixture、重复测试替身或无理由的跨层重复断言；
 - **"某份文档列出另一处清单"的段落是否还与盘上一致**：提示词键表 ↔ `prompts/**`（每份 yaml 的顶层键双向比对）、
   `systools/**` 是否被门户或细则提到、根目录 `*.md` 是否都进了 `AGENTS.md` 的路由表；
+- **外部连接台账（`links.yaml`）是否与消费点一一对应**：值必须是 `https://`、域在白名单内、键不重复；
+  代码里 `link(...)` 引用的键都在台账里，台账里也没有没人用的键（新增外链要连同消费点一起进）；
 - **门禁自己是否可信**：解析器自测（`run-tests.js` 的 `gateParserSelfTest`）必须过——`cargo tree --duplicates`
   退出码恒为 0，解析器坏掉就是静默全绿；
 - **是否存在 `#[ignore]` 或未授权的跳过**：`#[ignore]` 一律禁止，报告里 `ignored > 0` 即失败。
@@ -51,7 +53,7 @@ cargo deny check
 当前状态：九项全部并入 `node run-tests.js`（前八项零容忍硬失败，没有存量基线；交叉类型检查在 target 未装或本机缺该平台交叉 C 工具链时 `env-skip`，供应链一项工具缺失即 `env-skip`）：
 
 - `cargo check --all-targets`；
-- 结构审查（测试目标登记、孤儿测试文件、缺口账格式、单元地图双向一致、文档链接完整性、提示词键表与真相源表比对、根文档路由、
+- 结构审查（测试目标登记、孤儿测试文件、缺口账格式、单元地图双向一致、文档链接完整性、提示词键表与真相源表比对、根文档路由、外部连接台账、
   **门禁解析器自测**与 **`#[ignore]` 禁令**）；
 - `cargo fmt --all -- --check`；
 - `cargo clippy --all-targets --all-features --keep-going -- -D warnings`；

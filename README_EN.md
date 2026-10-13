@@ -50,18 +50,18 @@ that is gone.
 
 ## What works today
 
-- **Three forms** (chosen per piece of work):
+- **Three forms** (chosen when you create a piece of work):
   - **single agent**: one AI holding several module capabilities, working directly;
   - **group collaboration**: several agents each holding one capability — form-up → discussion → a task chain
     is drafted → **review gate** (nothing starts until you approve) → execution per stage with concurrency →
     one acceptance pass per stage → final acceptance → delivery; on failure only the named nodes go back;
-  - **proxy**: hand the whole decision to the core, which picks people and creates child sessions.
+  - **proxy**: hand the whole decision to the core, which picks people, creates child sessions and answers the gates for you.
 - **Modules are drop-in**: a folder with a valid `module.yaml` under `modules/` appears; remove it and it is
   gone — no registration, no build, no restart.
 - **Sessions and history**: one directory per piece of work (`session/<name>/`); "rewind to here" on any line —
   **archive** (recoverable) / **delete** (real truncation) / **restore** — and the shared area comes back with it,
   anchored by commit line; transcripts are replayable, context is compactable; child sessions live under the
-  parent's `children/` (nesting is allowed) and the whole tree shares **one** work area.
+  parent's `children/` (nesting is allowed) and the whole tree shares **one** work area (versioned: `work_pull` / `work_commit`).
 - **Three isolation layers**: path checks inside the built-in tools → every tool process runs behind the gate
   process (environment allowlist / process tree / timeout kills the whole tree) → platform fences
   (Windows AppContainer, Linux Landlock, macOS seatbelt). If a mechanism cannot be installed, the capability
@@ -69,6 +69,14 @@ that is gone.
   **optional**: an optional target that cannot be granted is only recorded, while a **required** one is never
   degraded silently — it raises a card offering "run this once unfenced / drop the call", and with no front end
   able to answer, the call is refused (the command is never started).
+- **Two execution tiers**: the **host tier** (default — scripts run directly on the host) and the **vm tier**
+  (module tools run inside a guest, isolated from host processes). The vm tier is pluggable along
+  **host × engine × guest × channel × share**: Linux (QEMU/KVM + 9p) and Windows (QEMU/WHPX + QGA copy) are already
+  verified on real machines, macOS is still missing (see [tests/gaps.yaml](tests/gaps.yaml)). `node setup-vm.js`
+  installs QEMU and a Debian guest into the project's `.vm/` per platform; host paths and guest paths are converted
+  by **one bridge** (identity when both sides share a dialect, a mirror root otherwise), and the working-environment
+  prompt hands the model guest-spelled paths. Details in [docs/vm/README.md](docs/vm/README.md); runtime package
+  contract in [RUNTIME_SPEC.md](RUNTIME_SPEC.md).
 - **Registry**: four YAML files for providers / models / agents / settings, all under `.home/`, managed from
   the UI. Keys live only in the local registry and in the core's outbound calls (boundaries in
   [REGISTRY_SPEC.md](REGISTRY_SPEC.md)).
@@ -83,24 +91,47 @@ that is gone.
 
 ## Install and run
 
-Requirements: **Node** (to run the launcher) and **Rust** (to build the core).
+Requirements: **Node** (to run the launcher) and **Rust** (to build the core). The environment has two layers:
+the **runtime environment** (just running the product) and the **dev environment** (changing code / running gates).
+
+### Runtime environment
 
 ```bash
-node env.js setup        # prepare the environment only: platform/<os>/ and .tools/; borrows a usable Rust
+node setup-runtime.js    # prepare the runtime environment: platform/<os>/ and .tools/ inside the project; borrows a usable Rust read-only
 node start.js            # any platform; on Windows also start.bat, on macOS / Linux also ./start.sh
 node start.js -webUI     # go straight to the local web UI (127.0.0.1:3081)
+node setup-vm.js --check # optional: read-only check of the vm tier (QEMU / guest image / guest agent and runtimes)
+node setup-vm.js         # optional: install QEMU and a Debian guest into the project's .vm/ (per platform; asks before downloading)
 ```
 
-- The environment is its own layer ([env.js](env.js)): path conventions (`platform/<os>/`, `.tools/`), toolchain
-  detection, environment composition and installation all live there. The launcher only orchestrates build/run, and
-  `run-tests.js` resolves its environment from the same place — **switching dev environments means editing one file**.
-  `node env.js` shows the resolved environment; `node env.js --print-env` prints it machine-readable.
 - Toolchain and caches stay **inside the project**: a usable Rust is **borrowed read-only** (caches and artifacts
   still land under `platform/<os>/`); only when none is usable does it ask for consent and install into the
   project, never touching the system; with **no interactive terminal** it skips the install, prints the manual
   steps, and exits. Borrowing means the system `~/.cargo/config.toml` (mirrors / credentials) is not read and
   deps are re-downloaded into the project — the price of "no writes outside"; the gate also snapshots
   out-of-project cache roots and fails if anything was written.
+
+### Dev environment
+
+```bash
+node setup-dev.js        # install the dev environment: dev uses the **project-local** toolchain, artifacts land only under platform/<os>/ and .tools/
+node setup-dev.js --check  # read-only check: lists what is missing, exits non-zero if anything is
+node run-tests.js        # quality gate + full test run (see TESTING.md)
+```
+
+- The **item inventory** of the dev environment is [dev-tools.js](dev-tools.js) (the single authority): `setup-dev.js`
+  installs per it, `run-tests.js` checks / `env-skip`s per it. It covers Rust components
+  (rustfmt / clippy / llvm-tools-preview), cross targets (Windows + macOS) and project-local tools
+  (cargo-audit / cargo-deny / cargo-llvm-cov).
+- Why it is separate from the runtime environment: people who only run the product do not need any of it, and the
+  gate still runs on a runtime-only machine — missing items are reported as `env-skip`, never silently.
+- The environment is its own layer ([env.js](env.js)): path conventions, toolchain detection, environment
+  composition and installation all live there; `node env.js` shows the resolved environment and
+  `node env.js --print-env` prints it machine-readable. `setup-runtime.js` / `setup-dev.js` only orchestrate;
+  `node setup-runtime.js` and `node env.js setup` are equivalent.
+- **Outbound-link ledger**: `links.yaml` is the single authority for external URLs the project uses and that may
+  change (currently: toolchain bootstrap sources and the winlibs upstream release source); edit it once and the whole
+  repository follows. User overrides go through `.home/settings.yaml` and environment variables, not the ledger.
 - **You can run it without a provider**: it walks the flow with the built-in fake model and says so plainly.
 - Common flags: `--root <dir>` (product root), `--web-port <port>`, `--release`.
 - Commands at the prompt: `single [agent…]` / `collab [agent…|?]` / `proxy` (hand the whole decision to the core) / `module [module-id.tool [json]]` (run a module tool directly, without AI) / `resident list|start|stop|enable|disable|call` (resident services) / `secret` (secret fields) / `webui`.

@@ -8,29 +8,75 @@
   scope: global
   level: T4
   why: |
-    虚拟机档的选型、诊断、装配计划与**逐项前置检测**都已就位，但 guest 本体未接入：ExecPlan.packages
-    全仓没有任何执行消费点（create_work 只把它打进日志），选 vm 档实际仍按本机档跑。这意味着当前产品
-    **不存在**"用户不授权本机写权限也能拿到强隔离"的路径——未授权时文件系统与断网围栏都是关的。
-    因为 guest 本体是**所有机器**共同缺的一项，虚拟机档现在一律不可选（exec::tier_readiness），
-    界面逐项列出缺什么、每项怎么补。
+    虚拟机档的**五轴组合**（宿主 × VmEngine × GuestImage × GuestChannel × ShareBackend）已落地，执行分派已接线：
+    Linux（QEMU/KVM + 9p）与 Windows（QEMU/WHPX + QGA 复制）已真机验收（引擎级探针 + e2e 的 vm 会话场景都过）。
+    macOS 的组合还没验，且它要的两块也还没做：Apple vz 引擎与自研 agent（vm.macos-vz-engine）、QEMU 取包
+    （vm.qemu-provisioning-macos）、virtiofsd（vm.share-virtiofs-linux）。未验平台在 vm::tier_readiness 上把 guest 项判否。
   how: |
-    方向已定（不再讨论）：走**平台原生虚拟化**（Windows 虚拟机平台 / Linux KVM / macOS 虚拟化框架），
-    **不内置 QEMU、不随仓库分发镜像**——QEMU 与镜像用户自备，产品只检测与指路
-    （设置项 qemu_path 与 base；这样不背 GPL 源码分发义务、仓库也不膨胀）。
-    要做的事，按顺序：
-    1) 把 guest 抽象成端口（core/ports.rs，与 ToolRunner / FenceHost 同层）：start / exec / stop，
-       由适配层按平台实现；core 依旧无 IO。FenceSpec 的 rw / ro 在 guest 内变成挂载，net 变成"给不给网卡"。
-    2) 三平台后端各一套：Linux QEMU+KVM；macOS Virtualization.framework；Windows 虚拟机平台 / HCS。
-    3) 装配接线：消费 exec::plan 的 packages（prefix 只读共享、system 叠层），会话级一个 guest，
-       会话删除时销毁 guest 与它的磁盘（与 --fence-clean 同哲学）。
+    在 macOS 真机上按顺序补齐并验收：先用 QEMU/HVF + 9p 把备选链跑通（依赖取包），再上 Apple vz + 原生 virtiofs + 自研 agent（vsock）。
+    依赖由 setup-vm.js 按平台装进项目内 .vm/，下载源进 links.yaml；产品不自带、不分发。
+    契约与组合矩阵见 docs/vm/README.md 的「多平台组合」。
   accept: |
-    在真机上选 vm 档跑一次工具：进程确实跑在 guest 内（可达范围与宿主隔离）；会话删除后 guest 与其磁盘被销毁；
-    三平台探针覆盖"guest 可用 / 不可用"两种结论；届时删除本条并同步 PRODUCT.md / RUNTIME_SPEC.md 的当前状态。
+    每个组合单独判定：vm 档会话里模块工具真在 guest 内跑（进程与宿主隔离）、删会话即销毁 guest 与其磁盘；
+    就绪面板按组合逐项列出缺什么、每项怎么补；每平台探针覆盖"组合可用 / 不可用"两种结论。
+    Linux 与 Windows 已验；macOS 通过后销账，全部通过后删除本条，并同步 PRODUCT.md / RUNTIME_SPEC.md / docs/vm/ 的当前状态。
   blocked_by: |
-    有意推迟（不是缺条件）：guest 相对现有围栏的独特价值只有"不授权本机写权限也能拿到强隔离"一条，
-    而代价是三套原生 API、每平台真机验证，且 CI 起不了 hypervisor（只能真机验 + env-skip）。
-    项目成熟、需求更清楚时再做。
-
+    需要一台 macOS 机器（验收环境）。macOS 侧的取包、virtiofsd、vz 引擎与自研 agent 分别在
+    vm.qemu-provisioning-macos / vm.share-virtiofs-linux / vm.macos-vz-engine 三条缺口里。
+- id: vm.share-realtime-windows
+  scope: global
+  level: T4
+  why: |
+    Windows 宿主没有 9p / virtiofs（QEMU 的 virtfs 只在 Linux / macOS / FreeBSD 构建），所以 Windows 上宿主↔guest
+    目前用 QGA 复制兜底（每趟 tar 打包/解包），不是实时共享；大目录与高频写会慢，执行后还要把可写树整棵回拷。
+  how: |
+    做 A 方案：宿主侧用户态 SMB3 服务 + QEMU guestfwd 隧道，guest 用 mount -t cifs 挂载（免管理员、可热挂载），
+    作为 Windows 的实时共享档。共享端口（ShareBackend / ShareGuard / sync_in / sync_out）已就绪，只需新增适配器与就绪项。
+  accept: |
+    Windows 真机 vm 档会话里，guest 对共享目录的写入在宿主即时可见（不必等执行结束），且不需要管理员权限。
+  blocked_by: |
+    缺一个用户态 SMB3 实现；guest 侧（cifs-utils）与 guestfwd 隧道要一起验。
+- id: vm.share-virtiofs-linux
+  scope: global
+  level: T4
+  why: |
+    Linux 宿主当前用 9p；virtiofs 是 Linux 宿主上最快的实时共享，但需要 virtiofsd（用户态 vhost-user 守护进程，
+    每设备一个），产品目前不检测、不起停它。
+  how: |
+    在 ShareBackend 下加 VirtioFsShare：探测 virtiofsd、按挂载起停守护进程（ShareGuard 已能持外部资源），
+    QEMU 参数用 vhost-user-fs-pci，guest 端 mount -t virtiofs；作为 Linux 默认，9p 留作回退。
+    注意 virtiofsd 有两套不兼容的 CLI（C 版 -o source= / vhost_user_socket=，Rust 版 --shared-dir / --socket-path），
+    必须在 Linux 真机上钉定一套（或探测用法）再写——凭空写会得到跑不起来的代码。
+  accept: |
+    Linux 真机 vm 档会话走 virtiofs，工具在 guest 里读写共享目录；virtiofsd 随会话起停、删会话后不残留。
+  blocked_by: |
+    需要 Linux 真机钉定 virtiofsd 的 CLI 用法；setup-vm-linux.js 尚未替用户取 virtiofsd。
+- id: vm.qemu-provisioning-macos
+  scope: global
+  level: T4
+  why: |
+    Windows 已由 setup-vm-windows.js 取 MSYS2 的 mingw64 QEMU 闭包装进项目内 .vm/qemu/（不跑安装程序、不写注册表）；
+    macOS 仍是骨架（setup-vm-mac.js 只探测与指路），QEMU 要用户自行安装，产品只检测与指路。
+  how: |
+    macOS 按平台加取包（Homebrew 或官方包）解到 .vm/qemu/；下载源记进 links.yaml；只写项目内、下载要用户同意（--yes）。
+  accept: |
+    macOS 上 node setup-vm.js 能把 QEMU 装进项目内 .vm/ 并被就绪检测认出来，且不需要管理员权限。
+  blocked_by: |
+    需要一台 macOS 机器确定可用来源后写适配。
+- id: vm.macos-vz-engine
+  scope: global
+  level: T4
+  why: |
+    macOS 的默认组合是 Apple vz（Virtualization.framework）+ 原生 virtiofs + 自研 guest agent（vsock 通道）——
+    比 QEMU/HVF 更省、更贴近系统；现在既没有 VzEngine，也没有自研 agent 与它的通道实现。
+  how: |
+    1) 加 VzEngine 实现 VmEngine（机器 / 磁盘 / 网卡 / 目录共享 / 加速器，走 Virtualization.framework 的绑定）；
+    2) 加自研 guest agent + vsock 通道（GuestChannel 的第三个实现）；
+    3) 在 macOS 真机上钉定 API 与镜像格式（vz 对磁盘与共享目录的要求与 QEMU 不同）再写适配。
+  accept: |
+    macOS 真机 vm 档会话跑通（模块工具在 guest 内执行、删会话销毁 guest），e2e 的 vm 场景在该平台通过。
+  blocked_by: |
+    需要一台 macOS 机器才能钉定 API 与验收。
 - id: module.acp-adapter
   scope: global
   level: T3
