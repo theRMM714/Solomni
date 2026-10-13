@@ -5,20 +5,21 @@
  * 不管：产品对 VM 档的检测 / 装配（在 src/capabilities/vm/）；Linux / macOS 的环境在 setup-vm-linux.js / setup-vm-mac.js。
  * 用法：node setup-vm-windows.js [--check] [--yes] [--offline]
  * 约束：只写项目内 .vm/；下载前要用户同意（--yes 或交互确认）；不写系统目录、不装系统包、不碰注册表。
- * 下载源：QEMU 走本机 MSYS2 的包库（或 links.yaml 的 msys2.mirror），镜像走 links.yaml 的 guest.debian.qcow2。
+ * 下载源：QEMU 走本机 MSYS2 的包库，镜像走 links.yaml 的 guest.debian.qcow2。
  */
 "use strict";
 const fs = require("fs");
 const http = require("http");
+const net = require("net");
 const path = require("path");
-const { spawn, spawnSync } = require("child_process");
+const { spawn } = require("child_process");
 const c = require("./setup-vm-common.js");
 
 const CHECK = process.argv.includes("--check");
 const YES = process.argv.includes("--yes");
 const OFFLINE = process.argv.includes("--offline");
 c.setOffline(OFFLINE);
-const { ROOT, VM, QEMU, BASE, CACHE, log, bad, die, ask, exists, lexists, link, capture, curlDownload, unpackArchive } = c;
+const { ROOT, VM, QEMU, BASE, CACHE, log, bad, die, ask, exists, link, capture, curlDownload, unpackArchive } = c;
 
 const QEMU_PKG = "mingw-w64-x86_64-qemu";
 const PACMAN_CANDIDATES = ["C:\\msys64\\usr\\bin\\pacman.exe", "C:\\msys64\\usr\\bin\\pacman"];
@@ -129,75 +130,114 @@ function ensureGuestImage() {
   if (!exists(guestYaml())) writeGuestYaml();
 }
 
-// ---- 首启装 qemu-guest-agent ----
-const USER_DATA = (port) =>
+// ---- cloud-init 数据源（只发 user-data / meta-data）----
+// 首启要做两件事：装上 qemu-guest-agent，并让它随设备出现而启动（Debian 的 unit 绑定 virtio-serial 端口）。
+const USER_DATA = () =>
   [
     "#cloud-config",
-    "package_update: true",
-    "packages:",
-    "  - qemu-guest-agent",
     "runcmd:",
-    // 信号用 python3（cloud-init 自己的运行时，必然在），不赌镜像里有没有 curl / wget。
     "  - >-",
-    "    systemctl enable --now qemu-guest-agent >/dev/null 2>&1 &&",
-    "    python3 -c \"import urllib.request as u; u.urlopen('http://10.0.2.2:" + port + "/done').read()\" ||",
-    "    python3 -c \"import urllib.request as u; u.urlopen('http://10.0.2.2:" + port + "/failed').read()\"",
-    "  - touch /etc/cloud/cloud-init.disabled",
-    "  - poweroff",
+    "    dpkg -s qemu-guest-agent >/dev/null 2>&1 || (apt-get update -o Acquire::Languages=none &&",
+    "    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends qemu-guest-agent);",
+    "    systemctl enable qemu-guest-agent >/dev/null 2>&1; systemctl start qemu-guest-agent >/dev/null 2>&1; true",
     "",
   ].join("\n");
 const META_DATA = "instance-id: solomni-provision\nlocal-hostname: solomni-guest\n";
 
 function startSeedServer() {
-  const state = { result: null };
   const server = http.createServer((req, res) => {
     const u = req.url.split("?")[0];
-    if (u === "/done") { state.result = "done"; res.writeHead(200); res.end("ok"); return; }
-    if (u === "/failed") { state.result = "failed"; res.writeHead(200); res.end("ok"); return; }
-    if (u === "/user-data") { res.writeHead(200); res.end(USER_DATA(server.address().port)); return; }
+    if (u === "/user-data") { res.writeHead(200); res.end(USER_DATA()); return; }
     if (u === "/meta-data") { res.writeHead(200); res.end(META_DATA); return; }
     res.writeHead(404); res.end("");
   });
-  return new Promise((resolve) => {
-    server.listen(0, "0.0.0.0", () => resolve({ server, state }));
+  return new Promise((resolve) => server.listen(0, "0.0.0.0", () => resolve({ server })));
+}
+
+// ---- QGA 最小客户端：判据是"guest 里的 agent 真能握手"，不是 cloud-init 的回执 ----
+function qgaCall(port, payload, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const s = net.connect({ host: "127.0.0.1", port });
+    let buf = "";
+    const finish = (err, val) => { try { s.destroy(); } catch (e) {} if (err) reject(err); else resolve(val); };
+    s.setTimeout(timeoutMs || 5000, () => finish(new Error("QGA 超时")));
+    s.on("error", (e) => finish(e));
+    s.on("connect", () => s.write(JSON.stringify(payload) + "\n"));
+    s.on("data", (d) => {
+      buf += d.toString("utf8");
+      let i;
+      while ((i = buf.indexOf("\n")) >= 0) {
+        const line = buf.slice(0, i);
+        buf = buf.slice(i + 1);
+        if (!line.trim()) continue;
+        let msg;
+        try { msg = JSON.parse(line); } catch (e) { continue; }
+        if (msg.error) return finish(new Error(msg.error.desc || "QGA 报错"));
+        return finish(null, msg.return);
+      }
+    });
   });
 }
-function provisionAgent() {
+async function qgaSync(port) {
+  const id = Math.floor(Math.random() * 1000000000) + 1;
+  const back = await qgaCall(port, { execute: "guest-sync", arguments: { id } }, 5000);
+  if (Number(back) !== id) throw new Error("QGA 同步号对不上：" + back);
+}
+function freePort() {
+  return new Promise((resolve, reject) => {
+    const s = net.createServer();
+    s.on("error", reject);
+    s.listen(0, "127.0.0.1", () => {
+      const p = s.address().port;
+      s.close(() => resolve(p));
+    });
+  });
+}
+
+async function provisionAgent() {
   if (agentReady()) { log("qemu-guest-agent 已在镜像里：" + path.relative(ROOT, agentMarker())); return; }
   if (!qemuReady()) die("先装 QEMU（重跑不加 --check）。");
   if (!exists(guestImage())) die("先下载 guest 镜像（重跑不加 --check）。");
-  return startSeedServer().then(
-    ({ server, state }) =>
-      new Promise((resolve) => {
-        const port = server.address().port;
-        const accel = process.env.SOLOMNI_QEMU_ACCEL || "whpx:tcg";
-        log("首启 guest 装 qemu-guest-agent（cloud-init 数据源 http://10.0.2.2:" + port + "/，加速 " + accel + "）");
-        const args = [
-          "-m", "2048", "-smp", "2", "-machine", "accel=" + accel,
-          "-display", "none", "-no-reboot",
-          "-drive", "file=" + guestImage() + ",if=virtio",
-          "-netdev", "user,id=net0", "-device", "virtio-net-pci,netdev=net0",
-          "-smbios", "type=1,serial=ds=nocloud-net;s=http://10.0.2.2:" + port + "/",
-          "-serial", "stdio",
-        ];
-        const child = spawn(qemuExe(), args, { cwd: ROOT, stdio: "inherit" });
-        const timer = setTimeout(() => {
-          bad("首启超时（" + Math.round(PROVISION_TIMEOUT_MS / 60000) + " 分钟）：已中止。可重跑；镜像里若已装上 agent 就会跳过。");
-          try { child.kill(); } catch (e) {}
-        }, PROVISION_TIMEOUT_MS);
-        child.on("exit", () => {
-          clearTimeout(timer);
-          server.close();
-          if (state.result === "done") {
-            fs.writeFileSync(agentMarker(), "qemu-guest-agent installed by setup-vm-windows.js\n");
-            log("guest 里已装好 qemu-guest-agent：" + path.relative(ROOT, agentMarker()));
-          } else {
-            bad("首启结束但没收到 agent 安装成功的信号（收到：" + state.result + "）。可重跑，或进 guest 手动装 qemu-guest-agent。");
-          }
-          resolve();
-        });
-      })
-  );
+
+  const { server } = await startSeedServer();
+  const port = await freePort();
+  const accel = process.env.SOLOMNI_QEMU_ACCEL || "whpx:tcg";
+  log("首启 guest：cloud-init 装 qemu-guest-agent，装好后用 QGA 握手确认（数据源端口 " + server.address().port + "，QGA 端口 " + port + "，加速 " + accel + "）");
+  const args = [
+    "-m", "2048", "-smp", "2", "-machine", "accel=" + accel,
+    "-display", "none", "-no-reboot",
+    "-drive", "file=" + guestImage() + ",if=virtio",
+    "-netdev", "user,id=net0", "-device", "virtio-net-pci,netdev=net0",
+    "-smbios", "type=1,serial=ds=nocloud-net;s=http://10.0.2.2:" + server.address().port + "/",
+    "-chardev", "socket,id=qga0,host=127.0.0.1,port=" + port + ",server=on,wait=off",
+    "-device", "virtio-serial-pci",
+    "-device", "virtserialport,chardev=qga0,name=org.qemu.guest_agent.0",
+    "-serial", "stdio",
+  ];
+  const child = spawn(qemuExe(), args, { cwd: ROOT, stdio: "inherit" });
+  let exited = false;
+  child.on("exit", () => { exited = true; });
+
+  const deadline = Date.now() + PROVISION_TIMEOUT_MS;
+  let ok = false;
+  while (!exited && Date.now() < deadline) {
+    try { await qgaSync(port); ok = true; break; } catch (e) { /* 还没起来 */ }
+    await new Promise((r) => setTimeout(r, 5000));
+  }
+  if (ok) {
+    log("QGA 握手成功：qemu-guest-agent 在 guest 里活着");
+    try {
+      await qgaCall(port, { execute: "guest-exec", arguments: { path: "/bin/sh", arg: ["-c", "touch /etc/cloud/cloud-init.disabled"], "capture-output": false } }, 15000);
+    } catch (e) {}
+    fs.writeFileSync(agentMarker(), "QGA guest-sync 通过（setup-vm-windows.js）\n");
+    try { await qgaCall(port, { execute: "guest-shutdown", arguments: { mode: "powerdown" } }, 15000); } catch (e) {}
+    for (let i = 0; i < 90 && !exited; i++) await new Promise((r) => setTimeout(r, 1000));
+    if (!exited) { try { child.kill(); } catch (e) {} }
+  } else {
+    bad("没等到 guest 里的 qemu-guest-agent（超时或 QEMU 提前退出）——可重跑；宿主 WHPX 不可用时会明显变慢。");
+    try { child.kill(); } catch (e) {}
+  }
+  server.close();
 }
 
 (async () => {
@@ -205,18 +245,19 @@ function provisionAgent() {
     const qk = qemuReady(), gk = guestReady(), ak = agentReady();
     log("QEMU：" + (qk ? "就绪（" + path.relative(ROOT, qemuExe()) + "）" : "缺"));
     log("guest 镜像：" + (gk ? "就绪（" + path.relative(ROOT, guestImage()) + "）" : "缺"));
-    log("镜像里的 qemu-guest-agent：" + (ak ? "就绪" : "缺"));
+    log("镜像里的 qemu-guest-agent：" + (ak ? "已确认（QGA 握手）" : "缺"));
     if (!qk || !gk || !ak) {
       log("怎么补：跑 node setup-vm-windows.js --yes");
       process.exit(1);
     }
     process.exit(0);
   }
-  const need = !qemuReady() || !guestReady() || !agentReady();
-  if (need && !YES) {
-    if (!process.stdin.isTTY) die("无交互终端：不擅自下载。重跑加 --yes。");
-    const a = await ask("要把 QEMU（MSYS2 包闭包，约 200 MB）与 Debian guest 镜像（约 326 MB）装到项目内 .vm/ 吗？[y/N] ");
-    if (a.trim().toLowerCase() !== "y") die("已取消。");
+  if (!qemuReady() || !guestReady() || !agentReady()) {
+    if (!YES) {
+      if (!process.stdin.isTTY) die("无交互终端：不擅自下载。重跑加 --yes。");
+      const a = await ask("要把 QEMU（MSYS2 包闭包，约 200 MB）与 Debian guest 镜像（约 326 MB）装到项目内 .vm/ 吗？[y/N] ");
+      if (a.trim().toLowerCase() !== "y") die("已取消。");
+    }
   }
   fs.mkdirSync(VM, { recursive: true });
   ensureQemu();

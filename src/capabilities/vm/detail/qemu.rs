@@ -13,17 +13,17 @@ use std::net::{TcpListener, TcpStream};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
-/// 目的：QEMU 的加速器有序表（按平台）：本平台的硬件加速排前，TCG 兜底。
+/// 目的：QEMU 的加速器有序表（按平台）：本平台的硬件加速排前，TCG 兜底；值是 -machine 的 accel=… 参数。
 /// 约束：QEMU 会把本平台不认识的加速器记为 invalid 并继续试下一项，所以同一份参数可跨平台复用。
 pub fn accelerators() -> &'static str {
     if cfg!(windows) {
-        "whpx:tcg"
+        "accel=whpx:tcg"
     } else if cfg!(target_os = "macos") {
-        "hvf:tcg"
+        "accel=hvf:tcg"
     } else if cfg!(target_os = "linux") {
-        "kvm:tcg"
+        "accel=kvm:tcg"
     } else {
-        "tcg"
+        "accel=tcg"
     }
 }
 

@@ -23,15 +23,15 @@
 按平台的组合回退链是数据（`default_combos` / `choose_combo`），加速器按平台给（`kvm:tcg` / `whpx:tcg` / `hvf:tcg`），共享要隧道时给 `restrict=on` 网卡。
 执行分派已接线（会话在 `tier == Vm` 时把模块命令交给 guest；建会话时装配并拉起，会话删除时销毁）；就绪项 `guest` 按**已验平台数据表**放开（当前只有 Linux），并带上本平台的默认组合（`default_combos`）。
 
-**实施中（外部依赖未就位）**：Linux 侧已在 KVM 下跑通真机探针与产品级会话验收；Windows / macOS 的真机验收有待——
-Windows 还缺可启动的 guest 磁盘镜像包与非 Linux 的 QEMU 取包（见 [tests/gaps.yaml](../../tests/gaps.yaml) 的
-`vm.guest-disk-image-package` / `vm.qemu-provisioning-nonlinux`）；virtiofs（Linux 性能档）、SMB 实时共享（Windows）、
-macOS Apple vz 引擎与自研 agent + vsock 通道都仍是缺口。契约与组合矩阵见本页「五」，现状与验收见
+**实施中（外部依赖未就位）**：Linux 侧已在 KVM 下跑通真机探针与产品级会话验收；Windows 的环境已能一键装进项目内、
+引擎级真机探针已通过，但会话级被宿主↔guest 路径一致挡住（见 [tests/gaps.yaml](../../tests/gaps.yaml) 的
+`vm.host-path-parity-windows`）；macOS 缺取包（`vm.qemu-provisioning-macos`）与 virtiofsd；
+virtiofs（Linux 性能档）、SMB 实时共享（Windows）、macOS Apple vz 引擎与自研 agent + vsock 通道都仍是缺口。契约与组合矩阵见本页「五」，现状与验收见
 [tests/gaps.yaml](../../tests/gaps.yaml) 的 `fence.guest-tier-not-wired`。
 
 `node setup-vm.js` 按平台分发（共享件 `setup-vm-common.js`）：Linux 装 QEMU 与 Debian 基础根（目录 rootfs + 内核 + 9p initrd）；
-Windows 装 MSYS2 的 QEMU 闭包、下 Debian cloud qcow2、首启经 cloud-init 装 `qemu-guest-agent`；macOS 暂是骨架。只写项目内，下载源在 `links.yaml`，需用户同意。据此在 **KVM** 下跑通真机探针与产品级会话验收（设 `SOLOMNI_VM_LIVE=1` +
-`SOLOMNI_VM_QEMU` / `SOLOMNI_VM_BASE` 指向 `.vm/`，默认 `[探针]` 跳过）：guest 真启动、额外 9p 共享挂进 guest、经 QGA 在 guest 里跑模块工具、删会话即销毁 guest。
+Windows 装 MSYS2 的 QEMU 闭包、下 Debian cloud qcow2、首启经 cloud-init 装 `qemu-guest-agent`；macOS 暂是骨架。只写项目内，下载源在 `links.yaml`，需用户同意。据此在 **KVM** 下跑通真机探针与产品级会话验收，在 **WHPX** 下跑通引擎级真机探针（设 `SOLOMNI_VM_LIVE=1` +
+`SOLOMNI_VM_QEMU` / `SOLOMNI_VM_BASE` 指向 `.vm/`，默认 `[探针]` 跳过）：guest 真启动、共享按平台进 guest（9p 挂载 / QGA 复制）、经 QGA 在 guest 里跑模块工具、删会话即销毁 guest。
 
 ## 三、依赖图位置（由源码的 `::api` 引用推导）
 

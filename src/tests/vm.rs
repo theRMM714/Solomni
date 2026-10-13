@@ -565,13 +565,13 @@ pub(crate) fn accelerators_and_nic_follow_the_platform_and_share_need() {
         engine_path: None,
     };
     let expected = if cfg!(windows) {
-        "whpx:tcg"
+        "accel=whpx:tcg"
     } else if cfg!(target_os = "macos") {
-        "hvf:tcg"
+        "accel=hvf:tcg"
     } else if cfg!(target_os = "linux") {
-        "kvm:tcg"
+        "accel=kvm:tcg"
     } else {
-        "tcg"
+        "accel=tcg"
     };
     assert_eq!(accelerators(), expected, "加速器表按平台给");
 
@@ -1077,7 +1077,7 @@ pub(crate) fn verified_platforms_are_a_data_table() {
     );
     assert!(
         !crate::capabilities::vm::domain::exec::host_verified("windows"),
-        "Windows 待验"
+        "Windows 待验（宿主↔guest 路径一致未解决，见 tests/gaps.yaml）"
     );
     assert!(
         !crate::capabilities::vm::domain::exec::host_verified("macos"),
@@ -1134,7 +1134,7 @@ pub(crate) fn vm_live_guest_runs_command_inside_guest() {
     }
     let probe = crate::kernel::detail::HostProbeAdapter;
     let image = classify_base(std::path::Path::new(base_dir.trim()), &probe).expect("基础根要可用");
-    // 额外 9p 共享也要真挂进 guest（QEMU 不替 guest 挂）：用一份带标记的临时目录验证。
+    // 额外共享要真进 guest：用一份带标记的临时目录验证（9p 靠挂载，copy 靠同步）。
     let share = crate::tests::scratch("vm-live-share");
     std::fs::create_dir_all(&share).expect("建共享目录");
     std::fs::write(share.join("marker.txt"), "SHARE_MARKER").expect("写标记");
@@ -1151,11 +1151,22 @@ pub(crate) fn vm_live_guest_runs_command_inside_guest() {
         net: false,
         engine_path: Some(qemu),
     };
-    let plan = crate::capabilities::vm::detail::NinePShare::new()
+    // 共享后端按平台选（与组合根一致）：Windows 宿主没有 virtfs，用 QGA 复制；其余平台用 9p。
+    let use_copy = std::env::consts::OS == "windows" || !spec.image.clients.nine_p;
+    let nine = crate::capabilities::vm::detail::NinePShare::new();
+    let copy = crate::capabilities::vm::detail::CopyShare::new();
+    let backend: &dyn crate::capabilities::vm::ports::ShareBackend =
+        if use_copy { &copy } else { &nine };
+    let (plan, _guard) = backend
         .prepare("qemu", &spec.mounts)
-        .expect("9p 计划要能派生")
-        .0;
+        .expect("共享计划要能派生");
     let mut guest = engine.boot(&spec, &plan).expect("起 guest");
+    if use_copy {
+        // 复制后端没有"挂载"：进去之前先把宿主目录同步到 guest，marker 才在里面。
+        backend
+            .sync_in(guest.channel(), &spec.mounts)
+            .expect("同步宿主目录进去要成功");
+    }
     let run = GuestRun {
         command: format!(
             "cat /etc/os-release; test -e '{}' && echo HOST_VISIBLE || echo HOST_HIDDEN; cat {}/marker.txt; echo VM_LIVE_OK",
@@ -1172,7 +1183,7 @@ pub(crate) fn vm_live_guest_runs_command_inside_guest() {
     assert!(out.output.contains("VM_LIVE_OK"), "输出：{}", out.output);
     assert!(
         out.output.contains("Debian GNU/Linux"),
-        "要在 guest 的 os-release 里证明真跑在 guest 内（宿主是 Arch）：{}",
+        "要在 guest 的 os-release 里证明真跑在 guest 内：{}",
         out.output
     );
     assert!(

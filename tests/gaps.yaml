@@ -9,9 +9,9 @@
   level: T4
   why: |
     虚拟机档已把选型、诊断、装配计划、逐项前置检测、guest 端口、QEMU 后端与执行分派收进独立能力 vm，
-    Linux 已在真机（KVM + 9p 基础根）跑通；但当前实现把"单一 Debian guest + QEMU + 9p + 仅 Linux 放行"写死：
-    QEMU 的 9p/virtfs 只在 Linux / macOS / FreeBSD 宿主构建（Windows 宿主没有），macOS 宿主也没有 virtiofsd，
-    所以 Windows / macOS 既跑不通也验不了（vm::tier_readiness 在那两平台把 guest 项判否）。
+    Linux 已在真机（KVM + 9p 基础根）跑通；Windows 的环境（QEMU/WHPX + Debian cloud 磁盘镜像 + QGA 复制）
+    已能一键装进项目内并通过引擎级真机探针，但**会话级**被"宿主↔guest 路径一致"挡住（见 vm.host-path-parity-windows）；
+    macOS 缺 virtiofsd 与取包，未验（vm::tier_readiness 在未验平台把 guest 项判否）。
   how: |
     方向已批准：guest 做成**四轴可扩展组合**——宿主 × VmEngine（默认 QEMU；macOS 后续 Apple vz）×
     GuestImage（默认 Debian，后续用户自备）× GuestChannel（默认 QGA；后续自研 agent + vsock）×
@@ -20,9 +20,10 @@
        组合回退链是数据（default_combos/choose_combo）；已验平台是数据表（host_verified）；root 支持磁盘镜像；
        共享加了 QGA 复制后端（三平台通用）；GuestImage 带 id/agent/共享客户端能力，可放 guest.yaml；
        非 Linux 的 setup-vm 走预生成磁盘镜像包下载。
-    1) 三平台 QEMU 组合真机跑通（待外部资产）：Linux QEMU/KVM + virtiofs（缺 virtiofsd 落 9p）、macOS QEMU/HVF + 9p、
-       Windows QEMU/WHPX + copy（SMB over guestfwd 见 vm.share-realtime-windows）；guest 用 restrict=on 网卡
-       （出站全断，guestfwd 内部隧道可用）。缺可启动的 guest 磁盘镜像包（vm.guest-disk-image-package）与非 Linux 的 QEMU 取包（vm.qemu-provisioning-nonlinux）。
+    1) 三平台 QEMU 组合真机跑通：Linux QEMU/KVM + 9p 已验（virtiofs 见 vm.share-virtiofs-linux）；
+       Windows QEMU/WHPX + copy 的环境已就位（setup-vm-windows.js 取 MSYS2 闭包 + Debian cloud qcow2 + cloud-init 装 QGA，
+       QGA 握手判成功），引擎级真机探针已通过，会话级卡在宿主↔guest 路径一致（vm.host-path-parity-windows）；
+       macOS 待取包（vm.qemu-provisioning-macos）与 virtiofsd。
     2) macOS 新增 Apple vz 引擎 + 原生 virtiofs + 自研 guest agent（vsock 通道）。
     3) 多 guest：用户自备镜像契约，再谈非 Linux guest。
     依赖由 setup-vm.js 按平台装进项目内 .vm/，下载源进 links.yaml；产品不自带、不分发。
@@ -63,34 +64,36 @@
   accept: |
     Linux 真机 vm 档会话走 virtiofs，工具在 guest 里读写共享目录；virtiofsd 随会话起停、删会话后不残留。
   blocked_by: |
-    virtiofsd 用户自备（setup-vm.js 按平台取包）尚未做。
-- id: vm.guest-disk-image-package
+    virtiofsd 用户自备（setup-vm-linux.js 按平台取包）尚未做。
+- id: vm.qemu-provisioning-macos
   scope: global
   level: T4
   why: |
-    Windows / macOS 宿主没有 9p（QEMU 的 virtfs 只在 Linux / macOS / FreeBSD 构建），root 必须用磁盘镜像；
-    而装配出"带 qemu-guest-agent 的可启动磁盘镜像"需要 Linux 工具（debugfs / mkinitramfs / chroot），
-    Windows / macOS 上做不了。现在 classify_base 已支持磁盘根、setup-vm.js 也认这种布局，缺的是镜像本身与非 Linux 的下载路径。
+    Windows 已由 setup-vm-windows.js 取 MSYS2 的 mingw64 QEMU 闭包装进项目内 .vm/qemu/（不跑安装程序、不写注册表）；
+    macOS 仍是骨架（setup-vm-mac.js 只探测与指路），QEMU 要用户自行安装，产品只检测与指路。
   how: |
-    在 CI / Linux 侧用 setup-vm.js 的产物生成镜像包（rootfs.ext4 + vmlinuz + initrd.img，qemu-ga 预装），发布为 release 资产；
-    下载源记进 links.yaml；setup-vm.js 在 Windows / macOS 下载并解到 .vm/guest/base/（下载要用户同意 --yes）；就绪检测照 classify_base 如实报。
+    macOS 按平台加取包（Homebrew 或官方包）解到 .vm/qemu/；下载源记进 links.yaml；只写项目内、下载要用户同意（--yes）。
   accept: |
-    Windows / macOS 上 node setup-vm.js --check 在镜像装好后报"磁盘镜像 rootfs 就绪"，vm 档会话能起 guest 并跑工具。
+    macOS 上 node setup-vm.js 能把 QEMU 装进项目内 .vm/ 并被就绪检测认出来，且不需要管理员权限。
   blocked_by: |
-    需要先在 Linux 侧产出并发布镜像资产，再做非 Linux 的下载与解包。
-- id: vm.qemu-provisioning-nonlinux
+    需要一台 macOS 机器确定可用来源后写适配。
+- id: vm.host-path-parity-windows
   scope: global
   level: T4
   why: |
-    setup-vm.js 只在 Linux（Arch 系）用 pacman 取 QEMU；Windows / macOS 上 QEMU 仍要用户自行安装，产品只检测与指路。
-    要做到"脚本一键补齐环境"，这两平台还需要各自的 QEMU 取包路径。
+    围栏根按"宿主原路径"挂进 guest（mounts_from 的约束：模块命令与参数里的真实路径因此仍然成立）——这在 POSIX
+    宿主上成立，Windows 宿主上不成立：guest 是 Linux，宿主盘符路径既不是合法 guest 路径，共享后端也打不开它。
+    证据：Windows 上设 SOLOMNI_VM_LIVE / SOLOMNI_VM_QEMU / SOLOMNI_VM_BASE 跑 e2e 的 vm 场景，就绪放行、
+    guest 起来、工具分派都对，但 sync_in 把 modules/toolbox/userdata 的宿主路径当 guest 路径交给 guest 的 tar，
+    失败在 tar 报 Cannot open: No such file or directory。
   how: |
-    按平台加取包：Windows 取便携构建（w64 包）解到 .vm/qemu/；macOS 走 Homebrew 或官方包。
-    下载源记进 links.yaml；仍然只写项目内、下载要用户同意（--yes）。
+    定一条宿主↔guest 路径映射：guest 侧给一个镜像根（如 /solomni-host/<盘>/…），挂载、env、命令参数与 cwd
+    全走同一个映射函数；或另选方案（非 POSIX 宿主的围栏根挂到 guest 固定树，且模块命令只拿 guest 路径）。
+    映射必须与"模块命令与参数里的真实路径"这条现有契约一起定，不能只改挂载点。
   accept: |
-    Windows / macOS 上 node setup-vm.js 能把 QEMU 装进项目内 .vm/ 并被就绪检测认出来，且不需要管理员权限。
+    Windows 真机 vm 档会话里模块工具在 guest 内跑通（e2e 的 vm 场景通过），且工具拿宿主路径时的行为如实可预期。
   blocked_by: |
-    需要确定各平台可用的便携 QEMU 源并加进 links.yaml。
+    方案要用户拍板（映射根怎么选、工具参数里的宿主路径怎么处理），改动落在 mounts_from 与命令装配两处。
 - id: module.acp-adapter
   scope: global
   level: T3
