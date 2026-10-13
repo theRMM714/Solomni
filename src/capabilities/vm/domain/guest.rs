@@ -37,14 +37,67 @@ pub enum GuestRoot {
     Disk(PathBuf),
 }
 
-/// 目的：一份 guest 镜像（四轴里的 guest 轴）——根（目录或磁盘镜像）+ 内核（可选 initrd）。
+/// 目的：guest 镜像里装的命令通道 agent（命令通道按它选实现）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GuestAgent {
+    /// QEMU guest agent（QGA），走 virtio-serial。
+    Qga,
+}
+
+/// 目的：guest 里具备哪些共享客户端——决定哪个共享后端能落上去（缺客户端就是缺，不假装）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GuestClients {
+    /// 目的：9p2000.L 客户端（Linux 内核自带）。
+    pub nine_p: bool,
+    /// 目的：virtio-fs 客户端（Linux 内核 ≥5.4 自带）。
+    pub virtio_fs: bool,
+    /// 目的：CIFS 客户端（要镜像装 cifs-utils）。
+    pub cifs: bool,
+}
+
+impl GuestClients {
+    /// 目的：默认 Debian guest 具备的客户端（9p + virtio-fs；CIFS 要镜像显式装 cifs-utils）。
+    pub const fn debian() -> GuestClients {
+        GuestClients {
+            nine_p: true,
+            virtio_fs: true,
+            cifs: false,
+        }
+    }
+}
+
+/// 目的：一份 guest 镜像（四轴里的 guest 轴）——根（目录或磁盘镜像）+ 内核（可选 initrd）+ agent 与共享客户端能力。
 /// 约束：磁盘镜像与更多 guest 见 docs/vm/README.md 的「多平台组合」。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GuestImage {
+    /// 目的：镜像名（诊断与日志用；默认取基础根目录名）。
+    pub id: String,
     pub arch: GuestArch,
     pub root: GuestRoot,
     pub kernel: PathBuf,
     pub initrd: Option<PathBuf>,
+    pub agent: GuestAgent,
+    pub clients: GuestClients,
+}
+
+impl GuestImage {
+    /// 目的：一份 Linux guest 镜像——默认 QGA 命令通道与 Debian 的共享客户端能力。
+    pub fn linux(
+        id: &str,
+        root: GuestRoot,
+        kernel: PathBuf,
+        initrd: Option<PathBuf>,
+    ) -> GuestImage {
+        GuestImage {
+            id: id.to_string(),
+            arch: GuestArch::host(),
+            root,
+            kernel,
+            initrd,
+            agent: GuestAgent::Qga,
+            clients: GuestClients::debian(),
+        }
+    }
 }
 
 /// 目的：guest 里的一处挂载（宿主路径 → guest 路径；只读或可写）。
@@ -108,12 +161,11 @@ pub fn classify_base(base: &Path, probe: &dyn HostProbe) -> Result<GuestImage, S
         Some(image) => GuestRoot::Disk(image),
         None => GuestRoot::Dir(base.to_path_buf()),
     };
-    Ok(GuestImage {
-        arch: GuestArch::host(),
-        root,
-        kernel,
-        initrd,
-    })
+    let id = base
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "guest".to_string());
+    Ok(GuestImage::linux(&id, root, kernel, initrd))
 }
 
 /// 目的：把执行计划与围栏翻成 guest 挂载——prefix 包只读挂到 /<prefix>，围栏根按宿主原路径挂。

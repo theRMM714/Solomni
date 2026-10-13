@@ -3,7 +3,7 @@
 //! 不管：命令通道与 QGA 细节（detail/qemu.rs）、镜像判定与挂载清单（domain/guest.rs）。
 //! 联动：实现 ports::ShareBackend；由组合根构造、service.rs 持有；实时共享方案见 tests/gaps.yaml。
 
-use crate::capabilities::vm::domain::guest::{GuestImage, GuestMount, GuestRun};
+use crate::capabilities::vm::domain::guest::{GuestAgent, GuestImage, GuestMount, GuestRun};
 use crate::capabilities::vm::ports::{
     GuestChannel, NoShareGuard, ShareBackend, ShareGuard, SharePlan,
 };
@@ -26,9 +26,9 @@ impl ShareBackend for CopyShare {
         "copy"
     }
 
-    /// 约束：任何能走命令通道且通道支持文件搬运的引擎都行；当前只有 QEMU/QGA 实现了 put_file / get_file。
-    fn supports(&self, engine: &str, _guest: &GuestImage) -> bool {
-        engine == "qemu"
+    /// 约束：只有 QEMU/QGA 这条通道实现了 put_file / get_file，所以 guest 要声明 QGA agent。
+    fn supports(&self, engine: &str, guest: &GuestImage) -> bool {
+        engine == "qemu" && matches!(guest.agent, GuestAgent::Qga)
     }
 
     fn prepare(

@@ -6,7 +6,7 @@ use super::builders::*;
 use super::prelude::*;
 use crate::capabilities::vm::api::Vm;
 use crate::capabilities::vm::domain::guest::{
-    classify_base, GuestArch, GuestImage, GuestMount, GuestRoot, GuestRun, GuestSpec,
+    classify_base, GuestImage, GuestMount, GuestRoot, GuestRun, GuestSpec,
 };
 use crate::capabilities::vm::ports::{PackageSource, ShareBackend, VmEngine};
 
@@ -461,12 +461,12 @@ pub(crate) fn guest_mounts_prefix_packages_and_fence_roots() {
         .0;
     let spec = GuestSpec {
         lease: "w".to_string(),
-        image: GuestImage {
-            arch: GuestArch::host(),
-            root: GuestRoot::Dir(std::path::PathBuf::from("/base")),
-            kernel: std::path::PathBuf::from("/base/vmlinuz"),
-            initrd: Some(std::path::PathBuf::from("/base/initrd.img")),
-        },
+        image: GuestImage::linux(
+            "test",
+            GuestRoot::Dir(std::path::PathBuf::from("/base")),
+            std::path::PathBuf::from("/base/vmlinuz"),
+            Some(std::path::PathBuf::from("/base/initrd.img")),
+        ),
         mounts,
         net: false,
         engine_path: None,
@@ -544,12 +544,12 @@ pub(crate) fn accelerators_and_nic_follow_the_platform_and_share_need() {
     use crate::capabilities::vm::detail::qemu::{accelerators, engine_args};
     let spec = |net: bool| GuestSpec {
         lease: "w".to_string(),
-        image: GuestImage {
-            arch: GuestArch::host(),
-            root: GuestRoot::Dir(std::path::PathBuf::from("/base")),
-            kernel: std::path::PathBuf::from("/base/vmlinuz"),
-            initrd: None,
-        },
+        image: GuestImage::linux(
+            "test",
+            GuestRoot::Dir(std::path::PathBuf::from("/base")),
+            std::path::PathBuf::from("/base/vmlinuz"),
+            None,
+        ),
         mounts: Vec::new(),
         net,
         engine_path: None,
@@ -596,12 +596,12 @@ pub(crate) fn disk_root_uses_a_virtio_disk_not_9p() {
     use crate::capabilities::vm::detail::qemu::engine_args;
     let spec = GuestSpec {
         lease: "w".to_string(),
-        image: GuestImage {
-            arch: GuestArch::host(),
-            root: GuestRoot::Disk(std::path::PathBuf::from("/img/root.qcow2")),
-            kernel: std::path::PathBuf::from("/img/vmlinuz"),
-            initrd: None,
-        },
+        image: GuestImage::linux(
+            "test",
+            GuestRoot::Disk(std::path::PathBuf::from("/img/root.qcow2")),
+            std::path::PathBuf::from("/img/vmlinuz"),
+            None,
+        ),
         mounts: Vec::new(),
         net: false,
         engine_path: None,
@@ -636,12 +636,12 @@ pub(crate) fn share_syncs_around_each_run_and_releases_on_stop() {
     );
     let spec = GuestSpec {
         lease: "w".to_string(),
-        image: GuestImage {
-            arch: GuestArch::host(),
-            root: GuestRoot::Dir(std::path::PathBuf::from("/base")),
-            kernel: std::path::PathBuf::from("/base/vmlinuz"),
-            initrd: None,
-        },
+        image: GuestImage::linux(
+            "test",
+            GuestRoot::Dir(std::path::PathBuf::from("/base")),
+            std::path::PathBuf::from("/base/vmlinuz"),
+            None,
+        ),
         mounts: Vec::new(),
         net: false,
         engine_path: None,
@@ -750,6 +750,41 @@ pub(crate) fn disk_image_base_is_classified_as_a_disk_root() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// 目的：判出来的镜像带默认 agent 与共享客户端能力；缺客户端就不落对应后端。
+#[test]
+pub(crate) fn guest_image_carries_agent_and_client_capabilities() {
+    use crate::capabilities::vm::ports::ShareBackend;
+    let probe = crate::kernel::detail::HostProbeAdapter;
+    let dir = crate::tests::scratch("vm-guest-clients");
+    std::fs::write(dir.join("vmlinuz"), b"x").expect("写内核");
+    let image = classify_base(&dir, &probe).expect("可用");
+    assert_eq!(
+        image.agent,
+        crate::capabilities::vm::domain::guest::GuestAgent::Qga,
+        "默认走 QGA 通道"
+    );
+    assert!(
+        image.clients.nine_p && image.clients.virtio_fs,
+        "Debian 默认带 9p 与 virtiofs 客户端"
+    );
+    assert!(
+        !image.clients.cifs,
+        "默认不带 CIFS 客户端（要镜像装 cifs-utils）"
+    );
+    assert!(!image.id.is_empty(), "镜像名要有");
+
+    let nine = crate::capabilities::vm::detail::NinePShare::new();
+    assert!(nine.supports("qemu", &image), "带 9p 客户端就能落 9p");
+    let mut without_nine = image.clone();
+    without_nine.clients.nine_p = false;
+    assert!(
+        !nine.supports("qemu", &without_nine),
+        "没声明 9p 客户端就不落 9p"
+    );
+    assert!(!nine.supports("vz", &image), "9p 只落在 qemu 上");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// 目的：按平台的组合回退链是数据；引擎 / 共享不在场时逐档回退，都缺才没有组合。
 #[test]
 pub(crate) fn default_combos_follow_the_platform_and_fall_back() {
@@ -814,12 +849,12 @@ pub(crate) fn vm_service_holds_guests_by_lease() {
     );
     let spec = GuestSpec {
         lease: "w".to_string(),
-        image: GuestImage {
-            arch: GuestArch::host(),
-            root: GuestRoot::Dir(std::path::PathBuf::from("/base")),
-            kernel: std::path::PathBuf::from("/base/vmlinuz"),
-            initrd: None,
-        },
+        image: GuestImage::linux(
+            "test",
+            GuestRoot::Dir(std::path::PathBuf::from("/base")),
+            std::path::PathBuf::from("/base/vmlinuz"),
+            None,
+        ),
         mounts: Vec::new(),
         net: false,
         engine_path: None,
