@@ -18,7 +18,7 @@
 （`plan` / `tier_readiness` / `tier_refusal` / `vm_requirements` / `vm_diagnoses` / …）。
 出站端口 `PackageSource` / `VmEngine` / `ShareBackend` **只由 `service.rs` 持有**（R12）；`GuestVm` / `GuestChannel` 由引擎在 boot 时交出。`ExecSpec` 是共享事实（在 `kernel`），本能力只读它。
 
-**当前状态**：四轴已按可插的形状落地——`QemuEngine`（当前唯一引擎）、`GuestImage`（基础根里可放 `guest.yaml` 声明 id / arch / agent / clients）、
+**当前状态**：四轴已按可插的形状落地——`QemuEngine`（当前唯一引擎）、`GuestImage`（基础根里可放 `guest.yaml` 声明 id / arch / agent / os / clients）、
 `QgaChannel`（QEMU virtio-serial）、`NinePShare`（Linux / macOS 的目录根）与 `CopyShare`（QGA 复制，三平台通用）。
 按平台的组合回退链是数据（`default_combos` / `choose_combo`），加速器按平台给（`kvm:tcg` / `whpx:tcg` / `hvf:tcg`），共享要隧道时给 `restrict=on` 网卡。
 执行分派已接线（会话在 `tier == Vm` 时把模块命令交给 guest；建会话时装配并拉起，会话删除时销毁）；就绪项 `guest` 按**已验平台数据表**放开（当前只有 Linux），并带上本平台的默认组合（`default_combos`）。
@@ -64,7 +64,7 @@ Windows 装 MSYS2 的 QEMU 闭包、下 Debian cloud qcow2、首启经 cloud-ini
 
 - root 一律磁盘镜像（qcow2/raw），不再用共享文件系统当根；guest 有 `restrict=on` 的网卡（出站全断，`guestfwd` 内部隧道可用）。
 - 就绪检测按**组合**逐项报"现状 + 怎么补"；"验过没有"是组合台账（数据），不再用平台 `cfg`。
-- 用户自备 guest 可在基础根目录放一份 `guest.yaml` 声明画像（`id` / `arch` / `agent` / `clients: [9p, virtiofs, cifs]`）；缺省按目录名与 Debian 默认（9p + virtiofs），不认识的值如实拒收。
+- 用户自备 guest 可在基础根目录放一份 `guest.yaml` 声明画像（`id` / `arch` / `agent` / `os` / `clients: [9p, virtiofs, cifs]`）；缺省按目录名与 Debian 默认（linux + QGA + 9p + virtiofs），不认识的值如实拒收。
 - 依赖（QEMU / `virtiofsd` / 镜像）用户自备，由 `setup-vm.js` 按平台分发装进项目内 `.vm/`；下载源一律进 `links.yaml`。
 
 ## 本目录

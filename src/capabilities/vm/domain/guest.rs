@@ -5,6 +5,7 @@
 
 use crate::capabilities::vm::domain::exec::ExecPlan;
 use crate::capabilities::vm::domain::packages::KIND_SYSTEM;
+use crate::capabilities::vm::domain::paths::{PathBridge, PathDialect};
 use crate::kernel::api::FenceSpec;
 use crate::kernel::ports::HostProbe;
 use serde::Deserialize;
@@ -36,6 +37,37 @@ pub enum GuestRoot {
     Dir(PathBuf),
     /// 磁盘镜像根（qcow2 / raw）：宿主只是普通文件 I/O，三平台与各引擎通用（Windows 宿主没有 9p）。
     Disk(PathBuf),
+}
+
+/// 目的：guest 的 OS——决定它认识的路径拼法（路径桥按它选方言），也是以后接非 Linux guest 的钥匙。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GuestOs {
+    Linux,
+    Macos,
+    Windows,
+}
+
+impl GuestOs {
+    /// 目的：这个 OS 的路径方言。
+    pub fn dialect(&self) -> PathDialect {
+        match self {
+            GuestOs::Windows => PathDialect::Windows,
+            GuestOs::Linux | GuestOs::Macos => PathDialect::Posix,
+        }
+    }
+
+    /// 目的：解析 guest.yaml 的 os；不认识如实拒收。
+    pub fn parse(s: &str) -> Result<GuestOs, String> {
+        match s {
+            "linux" => Ok(GuestOs::Linux),
+            "macos" => Ok(GuestOs::Macos),
+            "windows" => Ok(GuestOs::Windows),
+            other => Err(format!(
+                "guest.yaml 里的 os 不认识：{}（认 linux / macos / windows）",
+                other
+            )),
+        }
+    }
 }
 
 /// 目的：guest 镜像里装的命令通道 agent（命令通道按它选实现）。
@@ -74,6 +106,8 @@ pub struct GuestImage {
     /// 目的：镜像名（诊断与日志用；默认取基础根目录名）。
     pub id: String,
     pub arch: GuestArch,
+    /// 目的：guest 的 OS（路径桥按它选方言；缺省 linux）。
+    pub os: GuestOs,
     pub root: GuestRoot,
     pub kernel: Option<PathBuf>,
     pub initrd: Option<PathBuf>,
@@ -92,12 +126,18 @@ impl GuestImage {
         GuestImage {
             id: id.to_string(),
             arch: GuestArch::host(),
+            os: GuestOs::Linux,
             root,
             kernel,
             initrd,
             agent: GuestAgent::Qga,
             clients: GuestClients::debian(),
         }
+    }
+
+    /// 目的：这份镜像在本机（宿主）上的路径桥——宿主路径与 guest 路径的换算只此一座。
+    pub fn bridge(&self) -> PathBridge {
+        PathBridge::new(std::env::consts::OS, self.os.dialect())
     }
 }
 
@@ -140,6 +180,8 @@ struct GuestManifest {
     arch: Option<String>,
     #[serde(default)]
     agent: Option<String>,
+    #[serde(default)]
+    os: Option<String>,
     #[serde(default)]
     clients: Option<Vec<String>>,
 }
@@ -247,16 +289,21 @@ pub fn classify_base(base: &Path, probe: &dyn HostProbe) -> Result<GuestImage, S
             c
         }
     };
+    let os = match manifest.as_ref().and_then(|m| m.os.as_deref()) {
+        None => GuestOs::Linux,
+        Some(s) => GuestOs::parse(s)?,
+    };
     let mut image = GuestImage::linux(&id, root, kernel, initrd);
     image.arch = arch;
+    image.os = os;
     image.agent = agent;
     image.clients = clients;
     Ok(image)
 }
 
-/// 目的：把执行计划与围栏翻成 guest 挂载——prefix 包只读挂到 /<prefix>，围栏根按宿主原路径挂。
-/// 约束：围栏根在 guest 里保持宿主原路径，模块命令与参数里的真实路径因此仍然成立；system 叠层不做。
-pub fn mounts_from(plan: &ExecPlan, fence: &FenceSpec) -> Vec<GuestMount> {
+/// 目的：把执行计划与围栏翻成 guest 挂载——prefix 包只读挂到 /<prefix>，围栏根按路径桥给的 guest 路径挂。
+/// 约束：围栏根走 PathBridge（同方言时就是宿主原路径，模块命令与参数里的真实路径因此仍然成立；跨方言时是镜像根）；system 叠层不做。
+pub fn mounts_from(plan: &ExecPlan, fence: &FenceSpec, bridge: &PathBridge) -> Vec<GuestMount> {
     let mut seen: BTreeSet<String> = BTreeSet::new();
     let mut out: Vec<GuestMount> = Vec::new();
     for p in &plan.packages {
@@ -280,7 +327,7 @@ pub fn mounts_from(plan: &ExecPlan, fence: &FenceSpec) -> Vec<GuestMount> {
     ];
     for (list, read_only) in roots {
         for host in list {
-            let guest = host.to_string_lossy().into_owned();
+            let guest = bridge.to_guest(host);
             if !seen.insert(guest.clone()) {
                 continue;
             }

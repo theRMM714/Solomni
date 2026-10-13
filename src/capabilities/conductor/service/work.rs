@@ -382,10 +382,13 @@ impl Conductor {
             cwd: std::path::PathBuf::new(),
             net: meta.exec.net,
         };
+        // 挂载点走这座桥：同方言时是宿主原路径，跨方言时是 guest 镜像根（命令装配与工作环境提示词用同一座）。
+        let bridge = image.bridge();
+        let mounts = crate::capabilities::vm::api::mounts_from(plan, &fence, &bridge);
         let spec = crate::capabilities::vm::api::GuestSpec {
             lease: meta.name.clone(),
             image,
-            mounts: crate::capabilities::vm::api::mounts_from(plan, &fence),
+            mounts,
             net: meta.exec.net,
             engine_path: self.qemu_path().map(str::to_string),
         };

@@ -426,6 +426,73 @@ pub(crate) fn guest_base_requires_rootfs_and_kernel() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// 目的：路径桥同方言恒等；跨方言把宿主路径编进 guest 镜像根（非法字符转义）。
+#[test]
+pub(crate) fn path_bridge_maps_host_paths_into_the_guest() {
+    use crate::capabilities::vm::domain::paths::{PathBridge, PathDialect};
+    let id_posix = PathBridge::new("linux", PathDialect::Posix);
+    assert_eq!(
+        id_posix.to_guest(std::path::Path::new("/work/x")),
+        "/work/x",
+        "Linux 宿主 + POSIX guest 是同方言：原样"
+    );
+    let id_win = PathBridge::new("windows", PathDialect::Windows);
+    assert_eq!(
+        id_win.to_guest(std::path::Path::new("D:\\work")),
+        "D:\\work",
+        "Windows 宿主 + Windows guest 是同方言：原样"
+    );
+
+    let b = PathBridge::new("windows", PathDialect::Posix);
+    assert_eq!(
+        b.to_guest(std::path::Path::new("D:\\AIproject\\Solomni\\work")),
+        "/solomni-host/d/AIproject/Solomni/work",
+        "Windows 宿主编进 POSIX 镜像根"
+    );
+
+    let w = PathBridge::new("linux", PathDialect::Windows);
+    assert_eq!(
+        w.to_guest(std::path::Path::new("/home/u/a:b")),
+        "C:\\solomni-host\\home\\u\\a%3Ab",
+        "Windows guest 走 Windows 镜像根并把 : 转义"
+    );
+}
+
+/// 目的：围栏根经桥落到 guest——跨方言时是镜像根，不再是宿主原路径。
+#[test]
+pub(crate) fn fence_roots_follow_the_bridge() {
+    use crate::capabilities::vm::domain::exec::ExecPlan;
+    use crate::capabilities::vm::domain::guest::mounts_from;
+    use crate::capabilities::vm::domain::paths::{PathBridge, PathDialect};
+    let plan = ExecPlan {
+        tier: Tier::Vm,
+        net: false,
+        base: None,
+        packages: Vec::new(),
+    };
+    let fence = crate::kernel::api::FenceSpec::standalone(
+        std::path::Path::new("D:\\mods\\a"),
+        Some(std::path::Path::new("D:\\work\\x")),
+        false,
+    );
+    let bridge = PathBridge::new("windows", PathDialect::Posix);
+    let mounts = mounts_from(&plan, &fence, &bridge);
+    assert!(
+        mounts
+            .iter()
+            .any(|m| m.guest == "/solomni-host/d/mods/a" && m.read_only),
+        "只读模块目录按镜像根挂：{:?}",
+        mounts
+    );
+    assert!(
+        mounts
+            .iter()
+            .any(|m| m.guest == "/solomni-host/d/work/x" && !m.read_only),
+        "可写根按镜像根挂：{:?}",
+        mounts
+    );
+}
+
 #[test]
 pub(crate) fn guest_mounts_prefix_packages_and_fence_roots() {
     use crate::capabilities::vm::domain::exec::{ExecPlan, PlannedPackage};
@@ -447,7 +514,12 @@ pub(crate) fn guest_mounts_prefix_packages_and_fence_roots() {
         Some(std::path::Path::new("/work/x")),
         false,
     );
-    let mounts = mounts_from(&plan, &fence);
+    // 恒等桥（宿主与 guest 同方言）：这条用例判的是"prefix 与围栏根各自挂到哪"，不是跨方言换算。
+    let bridge = crate::capabilities::vm::domain::paths::PathBridge::new(
+        "linux",
+        crate::capabilities::vm::domain::paths::PathDialect::Posix,
+    );
+    let mounts = mounts_from(&plan, &fence, &bridge);
     assert!(
         mounts
             .iter()
@@ -965,7 +1037,7 @@ pub(crate) fn copy_share_syncs_both_ways_through_the_channel() {
     let _ = std::fs::remove_dir_all(&dst);
 }
 
-/// 目的：guest.yaml 能声明 id / arch / agent / 共享客户端；不认识的值如实拒收。
+/// 目的：guest.yaml 能声明 id / arch / agent / os / 共享客户端；不认识的值如实拒收。
 #[test]
 pub(crate) fn guest_manifest_declares_the_image_and_rejects_unknowns() {
     let probe = crate::kernel::detail::HostProbeAdapter;
@@ -992,6 +1064,26 @@ pub(crate) fn guest_manifest_declares_the_image_and_rejects_unknowns() {
 
     std::fs::write(dir.join("guest.yaml"), "arch: riscv\n").expect("写坏 arch");
     assert!(classify_base(&dir, &probe).is_err(), "不认识的 arch 要拒收");
+
+    // os 决定路径方言（路径桥按它选）；同方言才恒等。
+    std::fs::write(dir.join("guest.yaml"), "os: windows\n").expect("写 os");
+    let w = classify_base(&dir, &probe).expect("os 合法");
+    assert_eq!(
+        w.os.dialect(),
+        crate::capabilities::vm::domain::paths::PathDialect::Windows,
+        "os: windows 给出 Windows 方言"
+    );
+    assert_eq!(
+        w.bridge().to_guest(std::path::Path::new(if cfg!(windows) {
+            "D:\\g"
+        } else {
+            "/g"
+        })),
+        if cfg!(windows) { "D:\\g" } else { "/g" },
+        "Windows guest 在 Windows 宿主上是同方言（原样）"
+    );
+    std::fs::write(dir.join("guest.yaml"), "os: plan9\n").expect("写坏 os");
+    assert!(classify_base(&dir, &probe).is_err(), "不认识的 os 要拒收");
 
     let _ = std::fs::remove_dir_all(&dir);
 }

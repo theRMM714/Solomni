@@ -76,7 +76,7 @@ files:                      # 包内文件指纹：用于可复现与呈现
     这是用户环境问题，不是选型问题
 
 当前状态：选型、诊断、装配计划、逐项前置检测与 guest 本体都已就位，并做成**四轴可插**的形状——
-宿主 × `VmEngine`（当前只有 `QemuEngine`）× `GuestImage`（基础根里可放 `guest.yaml` 声明 id / arch / agent / clients）×
+宿主 × `VmEngine`（当前只有 `QemuEngine`）× `GuestImage`（基础根里可放 `guest.yaml` 声明 id / arch / agent / os / clients）×
 `GuestChannel`（当前 QGA）× `ShareBackend`（`NinePShare` 与 `CopyShare`）。按平台的组合回退链是数据（`default_combos` / `choose_combo`），
 加速器按平台给（`kvm:tcg` / `whpx:tcg` / `hvf:tcg`），root 支持目录（QEMU 9p）与磁盘镜像两种。整条业务住在独立能力 `vm`
 （逐文件职责见 [docs/vm/README.md](docs/vm/README.md)）；执行分派已接线（会话在 vm 档把模块命令交给 guest，建会话时装配并拉起，删除时销毁）；
@@ -84,7 +84,7 @@ files:                      # 包内文件指纹：用于可复现与呈现
 
 前置检测是**一份逐项清单**（`vm::vm_requirements`，界面与 `--doctor` 照抄同一份）：虚拟机监视器、guest 本体、QEMU（引擎）、基础根，
 每项给出"现状 + 怎么补"。依赖（QEMU / `virtiofsd` / 镜像）**用户自备**，由 `setup-vm.js`（按平台分发到 `setup-vm-windows.js` / `setup-vm-linux.js` / `setup-vm-mac.js`，共享件 `setup-vm-common.js`）装进项目内 `.vm/`（下载源在 `links.yaml`，需用户同意）；产品只检测与指路。
-基础根 = 一个目录：发行版 rootfs（目录，或 `rootfs.ext4` / `*.qcow2` 磁盘镜像）+ `vmlinuz`（可选 `initrd.img`）；**目录根必须给内核**（直启），**磁盘镜像可自带引导**（不给内核也行）；目录里可放一份 `guest.yaml` 声明画像，缺省按目录名与 Debian 默认，不认识的值如实拒收。
+基础根 = 一个目录：发行版 rootfs（目录，或 `rootfs.ext4` / `*.qcow2` 磁盘镜像）+ `vmlinuz`（可选 `initrd.img`）；**目录根必须给内核**（直启），**磁盘镜像可自带引导**（不给内核也行）；目录里可放一份 `guest.yaml` 声明画像（id / arch / agent / os / clients），缺省按目录名与 Debian 默认（os 缺省 linux），不认识的值如实拒收。
 
 **实施中（外部依赖未就位）**：Linux 已在 KVM 下跑通真机探针与产品级会话验收（`vm_live_guest_runs_command_inside_guest`；e2e 的 `SOLOMNI_VM_BASE` 场景）；
 Windows 的环境已能一键装进项目内（MSYS2 闭包 QEMU + Debian cloud qcow2 + cloud-init 装 `qemu-guest-agent`），引擎级真机探针已通过，但会话级被宿主↔guest 路径一致挡住（见 `tests/gaps.yaml` 的 `vm.host-path-parity-windows`）；
