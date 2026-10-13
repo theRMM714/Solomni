@@ -750,6 +750,23 @@ pub(crate) fn disk_image_base_is_classified_as_a_disk_root() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// 目的：已验平台是数据表（不是平台 cfg）：Linux 已验，Windows / macOS 未验。
+#[test]
+pub(crate) fn verified_platforms_are_a_data_table() {
+    assert!(
+        crate::capabilities::vm::domain::exec::host_verified("linux"),
+        "Linux 已真机验收"
+    );
+    assert!(
+        !crate::capabilities::vm::domain::exec::host_verified("windows"),
+        "Windows 待验"
+    );
+    assert!(
+        !crate::capabilities::vm::domain::exec::host_verified("macos"),
+        "macOS 待验"
+    );
+}
+
 #[test]
 pub(crate) fn vm_service_holds_guests_by_lease() {
     let engine = Arc::new(crate::tests::doubles::FakeEngine::new());

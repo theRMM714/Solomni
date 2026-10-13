@@ -56,6 +56,8 @@
   how: |
     在 ShareBackend 下加 VirtioFsShare：探测 virtiofsd、按挂载起停守护进程（ShareGuard 已能持外部资源），
     QEMU 参数用 vhost-user-fs-pci，guest 端 mount -t virtiofs；作为 Linux 默认，9p 留作回退。
+    注意 virtiofsd 有两套不兼容的 CLI（C 版 -o source= / vhost_user_socket=，Rust 版 --shared-dir / --socket-path），
+    必须在 Linux 真机上钉定一套（或探测用法）再写——凭空写会得到跑不起来的代码。
   accept: |
     Linux 真机 vm 档会话走 virtiofs，工具在 guest 里读写共享目录；virtiofsd 随会话起停、删会话后不残留。
   blocked_by: |

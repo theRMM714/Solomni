@@ -260,10 +260,18 @@ fn hypervisor_kind() -> &'static str {
     }
 }
 
-/// 目的：本平台的 guest 后端是否已经过真机验收（Linux 已验；Windows / macOS 待验）。
-/// 约束：记录的是"验过没有"的事实，不是环境探测；新平台真机通过后在这里加进已验集合，并同步 tests/gaps.yaml。
+/// 目的：已通过真机验收的宿主平台（**数据，不是平台 cfg**）——新平台验收后在这里加一行，并同步 tests/gaps.yaml。
+const VERIFIED_HOSTS: &[&str] = &["linux"];
+
+/// 目的：给定宿主平台名（std::env::consts::OS），这个平台的 guest 后端是否已真机验收。
+pub fn host_verified(host: &str) -> bool {
+    VERIFIED_HOSTS.contains(&host)
+}
+
+/// 目的：本平台的 guest 后端是否已经过真机验收。
+/// 约束：记录的是"验过没有"的事实，不是环境探测。
 fn guest_backend_verified() -> bool {
-    cfg!(target_os = "linux")
+    host_verified(std::env::consts::OS)
 }
 
 /// 虚拟机监视器不可用时的解决指引（各平台说各自的办法）。
