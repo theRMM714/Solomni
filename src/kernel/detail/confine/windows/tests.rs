@@ -1252,7 +1252,9 @@ fn journal_failure_blocks_the_acl_write() {
 /// 其余条目与整份 DACL 不受影响；台账外的根外残留也能按 SID + 路径撤掉并如实标注它不在台账里。
 #[test]
 fn ledger_catalog_and_per_item_disposal_keep_the_rest_untouched() {
-    let base = std::env::temp_dir().join(format!("solomni-grant-probe-{}", std::process::id()));
+    // 独立临时目录名：另一个用例（第 280 行起）也以 solomni-grant-probe-<pid> 为根，
+    // 并行跑会共享同一份台账，必须错开（否则台账条数被对方写脏）。
+    let base = std::env::temp_dir().join(format!("solomni-grant-catalog-{}", std::process::id()));
     let inside = base.join("inside");
     let outside =
         std::env::temp_dir().join(format!("solomni-grant-outside-{}", std::process::id()));
