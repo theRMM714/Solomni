@@ -170,6 +170,36 @@ pub struct GuestRun {
     pub cwd: String,
 }
 
+/// 目的：把一次 guest 运行的路径译成 guest 拼法——只译**工作目录**与**本机路径型环境变量**（同方言原样）。
+/// 约束：命令与参数不动——模型看到的工作环境块给的就是 guest 拼法（见 prompts/shared/tools.yaml 的 envs）。
+pub fn translate_run(run: &GuestRun, os: GuestOs) -> GuestRun {
+    let bridge = PathBridge::new(std::env::consts::OS, os.dialect());
+    GuestRun {
+        command: run.command.clone(),
+        args_json: run.args_json.clone(),
+        env: run
+            .env
+            .iter()
+            .map(|(k, v)| {
+                let is_path = Path::new(v).is_absolute();
+                (
+                    k.clone(),
+                    if is_path {
+                        bridge.to_guest(Path::new(v))
+                    } else {
+                        v.clone()
+                    },
+                )
+            })
+            .collect(),
+        cwd: if run.cwd.trim().is_empty() {
+            run.cwd.clone()
+        } else {
+            bridge.to_guest(Path::new(&run.cwd))
+        },
+    }
+}
+
 /// 目的：guest 清单（guest.yaml，可选）——用户自备镜像对世界的自我介绍；不认识的值如实拒收。
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]

@@ -5,7 +5,7 @@
 //! 联动：端口在 ports.rs；被 api::Vm 的调用方消费。
 
 use crate::capabilities::vm::api::{Library, Vm};
-use crate::capabilities::vm::domain::guest::{GuestMount, GuestRun, GuestSpec};
+use crate::capabilities::vm::domain::guest::{GuestMount, GuestOs, GuestRun, GuestSpec};
 use crate::capabilities::vm::ports::{GuestVm, PackageSource, ShareBackend, ShareGuard, VmEngine};
 use crate::kernel::api::ToolOutcome;
 use std::collections::BTreeMap;
@@ -16,6 +16,8 @@ struct Lease {
     vm: Box<dyn GuestVm>,
     guard: Box<dyn ShareGuard>,
     mounts: Vec<GuestMount>,
+    /// 这份 guest 是什么 OS：命令路径按它译成 guest 拼法。
+    os: GuestOs,
 }
 
 /// 目的：虚拟机档能力——持运行包库来源、VM 引擎与共享后端，按会话租约管理 guest。
@@ -78,6 +80,7 @@ impl Vm for VmService {
                 vm,
                 guard,
                 mounts: spec.mounts.clone(),
+                os: spec.image.os,
             },
         );
         Ok(())
@@ -91,10 +94,11 @@ impl Vm for VmService {
         let Some(entry) = guests.get_mut(lease) else {
             return fail(&format!("这次会话没有活着的 guest（租约 {}）", lease));
         };
+        let translated = crate::capabilities::vm::domain::guest::translate_run(run, entry.os);
         if let Err(why) = self.share.sync_in(entry.vm.channel(), &entry.mounts) {
             return fail(&format!("共享同步（进去）失败：{}", why));
         }
-        let out = entry.vm.channel().exec(run);
+        let out = entry.vm.channel().exec(&translated);
         if let Err(why) = self.share.sync_out(entry.vm.channel(), &entry.mounts) {
             return fail(&format!("共享同步（回来）失败：{}", why));
         }

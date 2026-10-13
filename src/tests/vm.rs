@@ -426,6 +426,46 @@ pub(crate) fn guest_base_requires_rootfs_and_kernel() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// 目的：命令装配按 guest 方言译路径——工作目录与本机路径型环境变量改成 guest 拼法，命令与非路径变量不动。
+#[test]
+pub(crate) fn translate_run_maps_paths_to_the_guest_dialect() {
+    use crate::capabilities::vm::domain::guest::{translate_run, GuestOs, GuestRun};
+    let run = GuestRun {
+        command: "read_txt".to_string(),
+        args_json: "{}".to_string(),
+        env: vec![
+            ("HOME".to_string(), "D:\\work\\home".to_string()),
+            ("LANG".to_string(), "C.UTF-8".to_string()),
+        ],
+        cwd: "D:\\work\\mod".to_string(),
+    };
+    let out = translate_run(&run, GuestOs::Linux);
+    if cfg!(windows) {
+        assert_eq!(
+            out.cwd, "/solomni-host/d/work/mod",
+            "工作目录译成 guest 拼法"
+        );
+        assert_eq!(
+            out.env[0].1, "/solomni-host/d/work/home",
+            "路径型环境变量也译"
+        );
+    } else {
+        assert_eq!(
+            out.cwd, "D:\\work\\mod",
+            "POSIX 宿主 + POSIX guest 同方言：原样"
+        );
+    }
+    assert_eq!(out.env[1].1, "C.UTF-8", "非路径变量不动");
+    assert_eq!(out.command, run.command, "命令不动");
+    assert_eq!(
+        out.args_json, run.args_json,
+        "参数不动（模型给的就是 guest 拼法）"
+    );
+
+    let same = translate_run(&run, GuestOs::Windows);
+    assert_eq!(same.cwd, "D:\\work\\mod", "同方言恒等");
+}
+
 /// 目的：路径桥同方言恒等；跨方言把宿主路径编进 guest 镜像根（非法字符转义）。
 #[test]
 pub(crate) fn path_bridge_maps_host_paths_into_the_guest() {
