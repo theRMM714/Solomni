@@ -224,8 +224,10 @@ pub fn env_block(
             .collect::<Vec<_>>()
             .join("\n")
     };
-    prompt.render(
-        Segment::Env,
+    // 工作环境按**环境**分发：本机档按宿主平台选；虚拟机档按 guest 的 os 选（guest 轴接上后传 Some）。
+    prompt.env(
+        std::env::consts::OS,
+        None,
         &[
             ("work_name", p.work_name.clone()),
             ("agent", p.agent.clone()),

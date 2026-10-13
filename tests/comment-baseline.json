@@ -297,8 +297,8 @@
   "src/capabilities/prompt/domain/prompt.rs": {
     "头块：槽外有行或自造槽": 3,
     "头块：缺文件头": 1,
-    "条目：槽外有行或自造槽": 163,
-    "条目：首行不是目的": 146
+    "条目：槽外有行或自造槽": 161,
+    "条目：首行不是目的": 145
   },
   "src/capabilities/prompt/domain/refs.rs": {
     "头块：槽外有行或自造槽": 5,
