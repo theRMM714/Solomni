@@ -16,19 +16,22 @@
 
 `api::Vm`（library / runtimes_dir / **guest_start / guest_run / guest_stop**）+ 档位与计划的纯函数
 （`plan` / `tier_readiness` / `tier_refusal` / `vm_requirements` / `vm_diagnoses` / …）。
-出站端口 `PackageSource` / `GuestHost` **只由 `service.rs` 持有**（R12）。`ExecSpec` 是共享事实（在 `kernel`），本能力只读它。
+出站端口 `PackageSource` / `VmEngine` / `ShareBackend` **只由 `service.rs` 持有**（R12）；`GuestVm` / `GuestChannel` 由引擎在 boot 时交出。`ExecSpec` 是共享事实（在 `kernel`），本能力只读它。
 
-**当前状态**：单一 Debian guest、QEMU 后端、9p 共享与**执行分派已就位**（会话在 `tier == Vm` 时把模块命令交给本能力的 guest；
-建会话时按计划与沙箱装配挂载并拉起，会话删除时销毁）；guest 有 `-nic none`，root 走 9p，就绪项 `guest` 仅 Linux 放行。
+**当前状态**：四轴已按可插的形状落地——`QemuEngine`（当前唯一引擎）、`GuestImage`（基础根里可放 `guest.yaml` 声明 id / arch / agent / clients）、
+`QgaChannel`（QEMU virtio-serial）、`NinePShare`（Linux / macOS 的目录根）与 `CopyShare`（QGA 复制，三平台通用）。
+按平台的组合回退链是数据（`default_combos` / `choose_combo`），加速器按平台给（`kvm:tcg` / `whpx:tcg` / `hvf:tcg`），共享要隧道时给 `restrict=on` 网卡。
+执行分派已接线（会话在 `tier == Vm` 时把模块命令交给 guest；建会话时装配并拉起，会话删除时销毁）；就绪项 `guest` 按**已验平台数据表**放开（当前只有 Linux）。
 
-**已批准、实施中**：把 guest 做成四轴可扩展组合——宿主 × `VmEngine`（默认 QEMU；macOS 后续 Apple vz）× `GuestImage`
-（默认 Debian，后续用户自备）× `GuestChannel`（默认 QGA；后续自研 agent + vsock）× `ShareBackend`（virtiofs / 9p / SMB / copy），
-各平台默认吃当前最强组合并逐级回退；root 改为磁盘镜像。契约与组合矩阵见本页「五」，现状与验收见
+**实施中（外部依赖未就位）**：Linux 侧已在 KVM 下跑通真机探针与产品级会话验收；Windows / macOS 的真机验收有待——
+Windows 还缺可启动的 guest 磁盘镜像包与非 Linux 的 QEMU 取包（见 [tests/gaps.yaml](../../tests/gaps.yaml) 的
+`vm.guest-disk-image-package` / `vm.qemu-provisioning-nonlinux`）；virtiofs（Linux 性能档）、SMB 实时共享（Windows）、
+macOS Apple vz 引擎与自研 agent + vsock 通道都仍是缺口。契约与组合矩阵见本页「五」，现状与验收见
 [tests/gaps.yaml](../../tests/gaps.yaml) 的 `fence.guest-tier-not-wired`。
 
 Linux 侧可用 `node setup-vm.js` 把 QEMU 与 Debian 基础根装进项目内 `.vm/`（只写项目内，下载源在 `links.yaml` 的 `guest.*`，需用户同意）；
-据此在 **KVM** 下跑通真机探针与产品级会话验收（设 `SOLOMNI_VM_LIVE=1` + `SOLOMNI_VM_QEMU` / `SOLOMNI_VM_BASE` 指向 `.vm/`，默认 `[探针]` 跳过）：
-guest 真启动、额外 9p 共享挂进 guest、经 QGA 在 guest 里跑模块工具、删会话即销毁 guest；**Windows / macOS 尚未真机验收**。
+非 Linux 侧它改从预生成的磁盘镜像包解包（资产待发布）。据此在 **KVM** 下跑通真机探针与产品级会话验收（设 `SOLOMNI_VM_LIVE=1` +
+`SOLOMNI_VM_QEMU` / `SOLOMNI_VM_BASE` 指向 `.vm/`，默认 `[探针]` 跳过）：guest 真启动、额外 9p 共享挂进 guest、经 QGA 在 guest 里跑模块工具、删会话即销毁 guest。
 
 ## 三、依赖图位置（由源码的 `::api` 引用推导）
 

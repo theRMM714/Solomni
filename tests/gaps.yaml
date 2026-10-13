@@ -16,11 +16,13 @@
     方向已批准：guest 做成**四轴可扩展组合**——宿主 × VmEngine（默认 QEMU；macOS 后续 Apple vz）×
     GuestImage（默认 Debian，后续用户自备）× GuestChannel（默认 QGA；后续自研 agent + vsock）×
     ShareBackend（virtiofs / 9p / SMB / copy）；各平台默认吃当前最强组合并逐级回退。分阶段：
-    0) 抽象落地（不改行为）：拆出四个端口与数据，现有 QEMU+9p 原样迁到适配器；root 改磁盘镜像（qcow2/raw）；
-       就绪门改成按组合逐项报；"验过没有"改成组合台账（数据），不再用平台 cfg。
-    1) 三平台 QEMU 组合真机跑通：Linux QEMU/KVM + virtiofs（缺 virtiofsd 落 9p）、macOS QEMU/HVF + 9p、
-       Windows QEMU/WHPX + SMB over guestfwd（自带用户态 SMB 服务，免管理员）；guest 用 restrict=on 网卡
-       （出站全断，guestfwd 内部隧道可用）。
+    0) 已完成：四端口（VmEngine/GuestVm/GuestChannel、ShareBackend/SharePlan/ShareGuard）落地，QEMU+9p 迁到适配器；
+       组合回退链是数据（default_combos/choose_combo）；已验平台是数据表（host_verified）；root 支持磁盘镜像；
+       共享加了 QGA 复制后端（三平台通用）；GuestImage 带 id/agent/共享客户端能力，可放 guest.yaml；
+       非 Linux 的 setup-vm 走预生成磁盘镜像包下载。
+    1) 三平台 QEMU 组合真机跑通（待外部资产）：Linux QEMU/KVM + virtiofs（缺 virtiofsd 落 9p）、macOS QEMU/HVF + 9p、
+       Windows QEMU/WHPX + copy（SMB over guestfwd 见 vm.share-realtime-windows）；guest 用 restrict=on 网卡
+       （出站全断，guestfwd 内部隧道可用）。缺可启动的 guest 磁盘镜像包（vm.guest-disk-image-package）与非 Linux 的 QEMU 取包（vm.qemu-provisioning-nonlinux）。
     2) macOS 新增 Apple vz 引擎 + 原生 virtiofs + 自研 guest agent（vsock 通道）。
     3) 多 guest：用户自备镜像契约，再谈非 Linux guest。
     依赖由 setup-vm.js 按平台装进项目内 .vm/，下载源进 links.yaml；产品不自带、不分发。
