@@ -148,6 +148,9 @@ pub fn qemu_args(spec: &GuestSpec, channel_opts: &str) -> Vec<String> {
         "2048",
         "-smp",
         "2",
+        // 有 KVM 就用 KVM，没有就退回 TCG（软件模拟）：机器上有 /dev/kvm 时不能再默默跑 TCG。
+        "-machine",
+        "accel=kvm:tcg",
         "-display",
         "none",
         "-no-reboot",

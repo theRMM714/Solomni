@@ -87,7 +87,7 @@ QEMU 与基础根**用户自备**：`qemu_path` 是全局设置（登记了就�
 基础根 = 一个目录：发行版 rootfs + `vmlinuz`（或 `bzImage`）+ 可选 `initrd.img`（判定在 `vm/domain/guest.rs`，就绪检测与界面照它如实报）。
 镜像方向：guest 在三平台统一为同一个 Linux 发行版（Debian stable 为默认基线）；接入时把默认下载链接记进 `links.yaml`。
 guest 与会话级装配属于产品路线图：现状、怎么补与验收标准见 `tests/gaps.yaml` 的 `fence.guest-tier-not-wired`。
-Linux 侧已用 `setup-vm.js` 装出的基础根在 TCG 下跑通整条 guest 机制（guest 启动 + QGA `guest-exec`）；**尚缺 `/dev/kvm` 真机验收与 Windows / macOS**，就绪项仍判否。
+Linux 侧已用 `setup-vm.js` 装出的基础根在 **KVM** 下跑通真机探针（`vm_live_guest_runs_command_inside_guest`：guest 启动 + QGA `guest-exec` + 宿主路径不可达）；**尚缺产品级会话验收与 Windows / macOS**，就绪项仍判否。
 
 ## 六、校验与拒收
 

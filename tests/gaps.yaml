@@ -21,19 +21,19 @@
        与 QEMU 后端（qemu-system-* + QGA），镜像只读不转换；登记的 qemu_path 已接到实际启动（空则兜底 PATH）；
     2) 装配：prefix 包按来源目录只读挂到 /<prefix>，围栏根按宿主原路径挂；会话级一个 guest；
     3) 分派：会话在 vm 档把模块命令交给 guest；建会话时装配并拉起，会话删除时销毁。
-    Linux 侧已用 `setup-vm.js` 装出的基础根在 TCG 下跑通整条 guest 机制（guest 启动 + QGA `guest-exec` 成功）：
-    基础根必须预处理（fstab 去掉 PARTUUID 条目、mask systemd-remount-fs、装 qemu-guest-agent、用带 9p 的通用内核与 initrd），
-    否则 cloud 镜像会掉进 emergency。
-    剩余：/dev/kvm 真机验收（本机 WSL2 重启后 /dev/kvm 才出现）、Windows / macOS 真机、产品级会话流程；
+    Linux 侧已用 `setup-vm.js` 装出的基础根在 **KVM** 下跑通真机探针（`vm_live_guest_runs_command_inside_guest`：guest 启动 + QGA `guest-exec` + 宿主路径不可达）：
+    基础根必须预处理（fstab 去掉 PARTUUID 条目、mask systemd-remount-fs、装 qemu-guest-agent、用带 9p 的通用内核与 initrd），否则 cloud 镜像会掉进 emergency；
+    `qemu_args` 已显式 `-machine accel=kvm:tcg`（有 KVM 用 KVM、没有退回 TCG）。
+    剩余：产品级会话验收（就绪检测的 guest 项仍有意判否，放开并跑通会话才销本条）、Windows / macOS 真机；
     system 叠层、qcow2 → rootfs 转换、arm64 记后续缺口；真机通过后把就绪检测的 guest 项放开并删除本条。
   accept: |
     在一台有 /dev/kvm 的机器上选 vm 档跑一次工具：进程确实跑在 guest 内（可达范围与宿主隔离）；
     会话删除后 guest 与其磁盘被销毁；三平台探针覆盖“guest 可用 / 不可用”两种结论；
     届时删除本条并同步 PRODUCT.md / RUNTIME_SPEC.md / docs/vm/ 的当前状态。
   blocked_by: |
-    本机（WSL2 / Arch）没有 /dev/kvm：嵌套虚拟化已开，但 WSL 未重启（重启当前会话会中断）所以 /dev/kvm 还没出现，
-    产品就绪检测因此仍判否。QEMU 与 Debian 13 基础根已由 `node setup-vm.js` 装到项目内 `.vm/`（只写项目内、下载源在 links.yaml），
-    Linux 机制已在 TCG 下验证通过。要销本条还差：重启 WSL 后 /dev/kvm 出现并在 vm 档跑一次产品级会话；Windows / macOS 各自真机验证。
+    已无环境阻塞：本机 WSL2 的 /dev/kvm 已出现，QEMU 与 Debian 13 基础根已由 `node setup-vm.js` 装到项目内 `.vm/`，
+    Linux 真机探针在 KVM 下已跑通（`vm_live_guest_runs_command_inside_guest`）。要销本条还差：
+    就绪检测的 guest 项放开后的产品级会话验收，以及 Windows / macOS 各自真机验证。
 - id: module.acp-adapter
   scope: global
   level: T3

@@ -8,7 +8,7 @@ use crate::capabilities::vm::api::Vm;
 use crate::capabilities::vm::domain::guest::{
     classify_base, GuestArch, GuestBase, GuestRun, GuestSpec,
 };
-use crate::capabilities::vm::ports::PackageSource;
+use crate::capabilities::vm::ports::{GuestHost, PackageSource};
 
 #[test]
 pub(crate) fn package_manifest_check_rejects_illegal_forms() {
@@ -468,6 +468,15 @@ pub(crate) fn guest_mounts_prefix_packages_and_fence_roots() {
         args.iter().any(|a| a.contains("root=base")),
         "rootfs 走 9p 的 base 标签"
     );
+    let accel = args
+        .iter()
+        .position(|a| a.as_str() == "-machine")
+        .map(|i| args[i + 1].as_str());
+    assert_eq!(
+        accel,
+        Some("accel=kvm:tcg"),
+        "有 KVM 就用 KVM，没有退回 TCG"
+    );
     let serial = args
         .iter()
         .position(|a| a.as_str() == "-serial")
@@ -516,4 +525,52 @@ pub(crate) fn vm_service_holds_guests_by_lease() {
     assert!(calls.iter().any(|c| c == "start:w"), "{:?}", calls);
     assert!(calls.iter().any(|c| c == "run:w:echo hi"), "{:?}", calls);
     assert!(calls.iter().any(|c| c == "stop:w"), "{:?}", calls);
+}
+
+/// 目的：真机验收（默认跳过）：用项目内 QEMU 与基础根真起一个 guest，在它里面跑命令。
+/// 约束：只在 SOLOMNI_VM_LIVE=1 且 SOLOMNI_VM_QEMU / SOLOMNI_VM_BASE 指向真东西时执行；否则打印 [探针] 如实跳过。
+#[test]
+pub(crate) fn vm_live_guest_runs_command_inside_guest() {
+    let live = std::env::var("SOLOMNI_VM_LIVE").as_deref() == Ok("1");
+    let qemu = std::env::var("SOLOMNI_VM_QEMU").unwrap_or_default();
+    let base_dir = std::env::var("SOLOMNI_VM_BASE").unwrap_or_default();
+    if !live || qemu.trim().is_empty() || base_dir.trim().is_empty() {
+        eprintln!("[探针] 未开启虚拟机档真机验收：设 SOLOMNI_VM_LIVE=1、SOLOMNI_VM_QEMU、SOLOMNI_VM_BASE 后重跑");
+        return;
+    }
+    let probe = crate::kernel::detail::HostProbeAdapter;
+    let base = classify_base(std::path::Path::new(base_dir.trim()), &probe).expect("基础根要可用");
+    let host = crate::capabilities::vm::detail::QemuGuest::new();
+    let spec = GuestSpec {
+        lease: "vm-live".to_string(),
+        arch: GuestArch::host(),
+        base,
+        mounts: Vec::new(),
+        net: false,
+        qemu_path: Some(qemu),
+    };
+    let mut guest = host.start(&spec).expect("起 guest");
+    let run = GuestRun {
+        command: format!(
+            "cat /etc/os-release; test -e '{}' && echo HOST_VISIBLE || echo HOST_HIDDEN; echo VM_LIVE_OK",
+            std::env::current_dir().expect("cwd").display()
+        ),
+        args_json: "{}".to_string(),
+        env: Vec::new(),
+        cwd: String::new(),
+    };
+    let out = guest.exec(&run);
+    guest.stop();
+    assert!(out.ok, "guest 里执行要成功：{}", out.output);
+    assert!(out.output.contains("VM_LIVE_OK"), "输出：{}", out.output);
+    assert!(
+        out.output.contains("Debian GNU/Linux"),
+        "要在 guest 的 os-release 里证明真跑在 guest 内（宿主是 Arch）：{}",
+        out.output
+    );
+    assert!(
+        out.output.contains("HOST_HIDDEN"),
+        "宿主的项目根不该在 guest 里可达：{}",
+        out.output
+    );
 }
