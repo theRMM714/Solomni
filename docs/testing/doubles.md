@@ -122,7 +122,7 @@ Fixture 必须：
 | `ModuleSource`（modules） | `VecSource`（经 `test_modules` 装进 `ModulesService`） | 不适用 | 不适用（错误进 `rejected`） | 不适用 | `detail::FsModules` | 已验收 |
 | `ModuleStateStore`（modules） | `InMemoryModuleState`（经 `test_modules_store`） | 覆盖落盘可观察 | 不适用 | 不适用 | `detail::YamlModuleState` | 已验收 |
 | `PackageSource` | `InMemoryPackages` | 不适用 | 不适用（错误进 `rejected`） | 不适用 | `FsPackages` | 已验收；**持有者只有 `vm::service.rs`**（R12） |
-| `VmEngine`（vm） | `FakeEngine` | `calls`（start / stop） | 不适用（起不来是真实后端的错） | 不适用 | `QemuEngine`（真机验：`vm_live_guest_runs_command_inside_guest` 在 KVM / WHPX 下真起 guest、按平台同步或挂载额外共享、验宿主路径不可达；e2e 的 `SOLOMNI_VM_BASE` 场景在 vm 档会话里真跑模块工具并验删会话销毁 guest（Windows 的会话级缺口见 tests/gaps.yaml 的 vm.host-path-parity-windows）；环境由 `setup-vm.js`（按平台分发）装入 `.vm/`，默认 `[探针]` 跳过） | 契约测试与执行分派已验收；真机探针已跑通（Linux KVM / Windows WHPX），产品级会话验收已跑通（Linux KVM） |
+| `VmEngine`（vm） | `FakeEngine` | `calls`（start / stop） | 不适用（起不来是真实后端的错） | 不适用 | `QemuEngine`（真机验：`vm_live_guest_runs_command_inside_guest` 在 KVM / WHPX 下真起 guest、按平台同步或挂载额外共享、验宿主路径不可达；e2e 的 `SOLOMNI_VM_BASE` 场景在 vm 档会话里真跑模块工具并验删会话销毁 guest（Windows 的会话级缺口见 tests/gaps.yaml 的 vm.guest-module-runtime）；环境由 `setup-vm.js`（按平台分发）装入 `.vm/`，默认 `[探针]` 跳过） | 契约测试与执行分派已验收；真机探针已跑通（Linux KVM / Windows WHPX），产品级会话验收已跑通（Linux KVM） |
 | `GuestChannel`（vm） | `FakeChannel`（经 `FakeEngine`） | `calls`（run） | 不适用 | 不适用 | `QemuHandle`（QGA 通道，随 `QemuEngine.boot` 起） | 契约测试已验收 |
 | `ShareBackend`（vm） | `FakeShare` | 计划可观察（恒空） | 不适用 | 不适用 | `NinePShare`（`src/tests/vm.rs` 钉住 -fsdev / -device 与 guest 端 mount 脚本；真机验同 vm 探针） | 契约测试已验收 |
 | `Workdirs` | `InMemoryWorkspace` | 内存布局可观察 | `fail_with` | 不适用 | `FsWorkspace` | 已验收 |

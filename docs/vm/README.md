@@ -24,8 +24,8 @@
 执行分派已接线（会话在 `tier == Vm` 时把模块命令交给 guest；建会话时装配并拉起，会话删除时销毁）；就绪项 `guest` 按**已验平台数据表**放开（当前只有 Linux），并带上本平台的默认组合（`default_combos`）。
 
 **实施中（外部依赖未就位）**：Linux 侧已在 KVM 下跑通真机探针与产品级会话验收；Windows 的环境已能一键装进项目内、
-引擎级真机探针已通过，但会话级被宿主↔guest 路径一致挡住（见 [tests/gaps.yaml](../../tests/gaps.yaml) 的
-`vm.host-path-parity-windows`）；macOS 缺取包（`vm.qemu-provisioning-macos`）与 virtiofsd；
+引擎级真机探针已通过，路径桥已打通挂载点与命令 cwd，会话级还缺"模块的运行包要在 guest 内可用"（见
+[tests/gaps.yaml](../../tests/gaps.yaml) 的 `vm.guest-module-runtime`）；macOS 缺取包（`vm.qemu-provisioning-macos`）与 virtiofsd；
 virtiofs（Linux 性能档）、SMB 实时共享（Windows）、macOS Apple vz 引擎与自研 agent + vsock 通道都仍是缺口。契约与组合矩阵见本页「五」，现状与验收见
 [tests/gaps.yaml](../../tests/gaps.yaml) 的 `fence.guest-tier-not-wired`。
 

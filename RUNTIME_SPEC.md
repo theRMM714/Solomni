@@ -87,7 +87,7 @@ files:                      # 包内文件指纹：用于可复现与呈现
 基础根 = 一个目录：发行版 rootfs（目录，或 `rootfs.ext4` / `*.qcow2` 磁盘镜像）+ `vmlinuz`（可选 `initrd.img`）；**目录根必须给内核**（直启），**磁盘镜像可自带引导**（不给内核也行）；目录里可放一份 `guest.yaml` 声明画像（id / arch / agent / os / clients），缺省按目录名与 Debian 默认（os 缺省 linux），不认识的值如实拒收。
 
 **实施中（外部依赖未就位）**：Linux 已在 KVM 下跑通真机探针与产品级会话验收（`vm_live_guest_runs_command_inside_guest`；e2e 的 `SOLOMNI_VM_BASE` 场景）；
-Windows 的环境已能一键装进项目内（MSYS2 闭包 QEMU + Debian cloud qcow2 + cloud-init 装 `qemu-guest-agent`），引擎级真机探针已通过，但会话级被宿主↔guest 路径一致挡住（见 `tests/gaps.yaml` 的 `vm.host-path-parity-windows`）；
+Windows 的环境已能一键装进项目内（MSYS2 闭包 QEMU + Debian cloud qcow2 + cloud-init 装 `qemu-guest-agent`），引擎级真机探针已通过，路径桥已打通挂载点与命令 cwd，会话级还缺"模块的运行包要在 guest 内可用"（见 `tests/gaps.yaml` 的 `vm.guest-module-runtime`）；
 macOS 缺取包（`vm.qemu-provisioning-macos`）与 virtiofsd；virtiofs（Linux 性能档）、SMB 实时共享（Windows）、macOS Apple vz 引擎与自研 agent + vsock 通道仍是缺口；
 现状、怎么补与验收标准见 `tests/gaps.yaml` 的 `fence.guest-tier-not-wired`。
 

@@ -1209,7 +1209,7 @@ pub(crate) fn verified_platforms_are_a_data_table() {
     );
     assert!(
         !crate::capabilities::vm::domain::exec::host_verified("windows"),
-        "Windows 待验（宿主↔guest 路径一致未解决，见 tests/gaps.yaml）"
+        "Windows 待验（路径桥已通，会话级缺 guest 内的模块运行包，见 tests/gaps.yaml）"
     );
     assert!(
         !crate::capabilities::vm::domain::exec::host_verified("macos"),

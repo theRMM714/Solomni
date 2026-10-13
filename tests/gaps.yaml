@@ -10,7 +10,7 @@
   why: |
     虚拟机档已把选型、诊断、装配计划、逐项前置检测、guest 端口、QEMU 后端与执行分派收进独立能力 vm，
     Linux 已在真机（KVM + 9p 基础根）跑通；Windows 的环境（QEMU/WHPX + Debian cloud 磁盘镜像 + QGA 复制）
-    已能一键装进项目内并通过引擎级真机探针，但**会话级**被"宿主↔guest 路径一致"挡住（见 vm.host-path-parity-windows）；
+    已能一键装进项目内并通过引擎级真机探针；路径桥已打通挂载点与命令 cwd，**会话级**还缺"模块的运行包要在 guest 内可用"（见 vm.guest-module-runtime）；
     macOS 缺 virtiofsd 与取包，未验（vm::tier_readiness 在未验平台把 guest 项判否）。
   how: |
     方向已批准：guest 做成**四轴可扩展组合**——宿主 × VmEngine（默认 QEMU；macOS 后续 Apple vz）×
@@ -22,7 +22,7 @@
        非 Linux 的 setup-vm 走预生成磁盘镜像包下载。
     1) 三平台 QEMU 组合真机跑通：Linux QEMU/KVM + 9p 已验（virtiofs 见 vm.share-virtiofs-linux）；
        Windows QEMU/WHPX + copy 的环境已就位（setup-vm-windows.js 取 MSYS2 闭包 + Debian cloud qcow2 + cloud-init 装 QGA，
-       QGA 握手判成功），引擎级真机探针已通过，会话级卡在宿主↔guest 路径一致（vm.host-path-parity-windows）；
+       QGA 握手判成功），引擎级真机探针已通过，会话级卡在 guest 内的模块运行包（vm.guest-module-runtime）；
        macOS 待取包（vm.qemu-provisioning-macos）与 virtiofsd。
     2) macOS 新增 Apple vz 引擎 + 原生 virtiofs + 自研 guest agent（vsock 通道）。
     3) 多 guest：用户自备镜像契约，再谈非 Linux guest。
@@ -77,23 +77,23 @@
     macOS 上 node setup-vm.js 能把 QEMU 装进项目内 .vm/ 并被就绪检测认出来，且不需要管理员权限。
   blocked_by: |
     需要一台 macOS 机器确定可用来源后写适配。
-- id: vm.host-path-parity-windows
+- id: vm.guest-module-runtime
   scope: global
   level: T4
   why: |
-    围栏根按"宿主原路径"挂进 guest（mounts_from 的约束：模块命令与参数里的真实路径因此仍然成立）——这在 POSIX
-    宿主上成立，Windows 宿主上不成立：guest 是 Linux，宿主盘符路径既不是合法 guest 路径，共享后端也打不开它。
-    证据：Windows 上设 SOLOMNI_VM_LIVE / SOLOMNI_VM_QEMU / SOLOMNI_VM_BASE 跑 e2e 的 vm 场景，就绪放行、
-    guest 起来、工具分派都对，但 sync_in 把 modules/toolbox/userdata 的宿主路径当 guest 路径交给 guest 的 tar，
-    失败在 tar 报 Cannot open: No such file or directory。
+    模块工具在 guest 里执行，它需要的运行包（python / node）也必须在 **guest 内**可用；本机 externals（PATH 上的
+    python 等）不跨 guest 边界。证据：Windows 真机 e2e 的 vm 场景已经走到"工具在 guest 里执行"（路径桥让挂载点与
+    命令 cwd 都落到 guest 拼法），随后失败在 /bin/sh: 1: python: not found——项目 runtimes/ 里只有 .gitkeep，
+    python 是从宿主 PATH 找到的。
   how: |
-    定一条宿主↔guest 路径映射：guest 侧给一个镜像根（如 /solomni-host/<盘>/…），挂载、env、命令参数与 cwd
-    全走同一个映射函数；或另选方案（非 POSIX 宿主的围栏根挂到 guest 固定树，且模块命令只拿 guest 路径）。
-    映射必须与"模块命令与参数里的真实路径"这条现有契约一起定，不能只改挂载点。
+    两条路（可并用）：(1) guest 侧运行包——按 guest 的 arch/os 分发（镜像预装，或 runtimes/<name> 按平台分子目录，
+    vm 档只挂与 guest 匹配的那份）；(2) env 里的宿主路径要按**挂载表**译（挂载点与镜像根不是一回事），
+    把运行包的 guest 路径写进 PATH。
   accept: |
-    Windows 真机 vm 档会话里模块工具在 guest 内跑通（e2e 的 vm 场景通过），且工具拿宿主路径时的行为如实可预期。
+    Windows / Linux 真机 vm 档会话里，用 python / node 的模块工具在 guest 内跑通（e2e 的 vm 场景通过），
+    且宿主上没有对应运行包时如实报缺、不假装。
   blocked_by: |
-    方案要用户拍板（映射根怎么选、工具参数里的宿主路径怎么处理），改动落在 mounts_from 与命令装配两处。
+    运行包按平台分发的布局要用户拍板（镜像预装，还是运行包按 guest 平台分包）。
 - id: module.acp-adapter
   scope: global
   level: T3
