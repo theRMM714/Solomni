@@ -73,19 +73,35 @@ impl Conductor {
         }
     }
 
-    /// 目的：这次虚拟机档会话的 guest 平台名（os-arch）；本机档或基础根判不出来给空串。
-    fn guest_platform_of(&self, spec: &crate::kernel::api::ExecSpec) -> String {
+    /// 目的：这次会话的 guest 镜像（本机档或基础根判不出来 = None）——平台名与 guest OS 都从它派生。
+    fn guest_image_of(
+        &self,
+        spec: &crate::kernel::api::ExecSpec,
+    ) -> Option<crate::capabilities::vm::api::GuestImage> {
         if spec.tier != crate::kernel::api::Tier::Vm {
-            return String::new();
+            return None;
         }
         let base = spec.base.clone().unwrap_or_default();
-        match crate::capabilities::vm::api::classify_base(
+        crate::capabilities::vm::api::classify_base(
             std::path::Path::new(&base),
             self.probe.as_ref(),
-        ) {
-            Ok(image) => crate::capabilities::vm::api::guest_platform(image.os, image.arch),
-            Err(_) => String::new(),
-        }
+        )
+        .ok()
+    }
+
+    /// 目的：这次虚拟机档会话的 guest 平台名（os-arch）；本机档或判不出来给空串。
+    fn guest_platform_of(&self, spec: &crate::kernel::api::ExecSpec) -> String {
+        self.guest_image_of(spec)
+            .map(|image| crate::capabilities::vm::api::guest_platform(image.os, image.arch))
+            .unwrap_or_default()
+    }
+
+    /// 目的：这次虚拟机档会话的 guest OS（本机档或判不出来 = None）——工作环境块按它选 guest 档。
+    pub(crate) fn guest_os_of(
+        &self,
+        spec: &crate::kernel::api::ExecSpec,
+    ) -> Option<crate::capabilities::vm::api::GuestOs> {
+        self.guest_image_of(spec).map(|image| image.os)
     }
 
     /// 目的：这次会话该用的包库——按 guest 平台筛过（分平台包只留与 guest 匹配的那份）。
@@ -775,6 +791,7 @@ impl Conductor {
                     .collect();
                 let channel = self.channel_of(a.model.as_deref());
                 let unavailable = self.unavailable_modules(&meta.exec, &chosen);
+                let guest = self.guest_os_of(&meta.exec);
                 let (s, opened) = self.build_single(
                     a,
                     &chosen,
@@ -783,6 +800,7 @@ impl Conductor {
                     unavailable,
                     meta.exec.net,
                     meta.exec.tier,
+                    guest,
                 );
                 (Session::Single(s), opened)
             }

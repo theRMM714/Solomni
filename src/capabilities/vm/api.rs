@@ -8,8 +8,12 @@ pub use crate::capabilities::vm::domain::exec::{
     tier_refusal, unavailable, vm_diagnoses, vm_requirements, Diagnosis, ExecPlan, VmInputs,
     VmRequirement,
 };
-pub use crate::capabilities::vm::domain::guest::{classify_base, mounts_from, GuestRun, GuestSpec};
+pub use crate::capabilities::vm::domain::guest::GuestOs;
+pub use crate::capabilities::vm::domain::guest::{
+    classify_base, mounts_from, GuestImage, GuestRun, GuestSpec,
+};
 pub use crate::capabilities::vm::domain::packages::{library_for_guest, Library};
+pub use crate::capabilities::vm::domain::paths::PathBridge;
 
 /// 目的：虚拟机档的**用例面**（`service.rs` 实现）——运行包库、包库目录与 guest 生命周期走这里。
 /// 约束：出站端口 `PackageSource` / `VmEngine` / `ShareBackend` 只由 `service.rs` 持有（R12）。

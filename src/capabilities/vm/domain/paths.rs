@@ -43,6 +43,11 @@ impl PathBridge {
         }
     }
 
+    /// 目的：按会话环境造桥——没有 guest（本机档）时按宿主自己的方言造（恒等）。
+    pub fn for_session(host: &str, guest: Option<PathDialect>) -> PathBridge {
+        PathBridge::new(host, guest.unwrap_or_else(|| host_dialect(host)))
+    }
+
     /// 目的：宿主路径 → guest 路径；恒等时原样给。
     pub fn to_guest(self, host: &Path) -> String {
         if self.identity {

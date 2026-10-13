@@ -319,7 +319,8 @@ impl Conductor {
                     &modules,
                     &self.session_kind_of(meta)?,
                     &self.role_of(meta)?,
-                );
+                )
+                .with_guest(self.guest_os_of(&meta.exec));
                 let (chat, note) = self.llm.member_channel(channel.as_ref(), &a.name);
                 let texts = self.prompt.tools();
                 let (history, marks, line_reply, compacted_upto) =
