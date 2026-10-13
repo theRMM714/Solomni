@@ -6,7 +6,7 @@ use super::builders::*;
 use super::prelude::*;
 use crate::capabilities::vm::api::Vm;
 use crate::capabilities::vm::domain::guest::{
-    classify_base, GuestArch, GuestBase, GuestRun, GuestSpec,
+    classify_base, GuestArch, GuestBase, GuestMount, GuestRun, GuestSpec,
 };
 use crate::capabilities::vm::ports::{GuestHost, PackageSource};
 
@@ -131,7 +131,7 @@ pub(crate) fn vm_tier_readiness_gates_creation_and_editing() {
     )
     .is_none());
 
-    // 虚拟机档：guest 本体尚未接入是**所有机器**共同缺的一项，所以现在谁都不能建。
+    // 虚拟机档：guest 本体按**已验证平台**放开（Linux 已验，Windows / macOS 待验），其余项按事实；这里基础根是假的。
     let ghost = ExecSpec {
         tier: Tier::Vm,
         base: Some("definitely-not-a-real-base-root".to_string()),
@@ -139,12 +139,18 @@ pub(crate) fn vm_tier_readiness_gates_creation_and_editing() {
     };
     let r = exec::tier_readiness(&ghost, None, &crate::kernel::detail::HostProbeAdapter);
     assert!(!r.ready(), "前置不齐就不成立：{:?}", r);
-    let unmet: Vec<&str> = r.unmet().iter().map(|x| x.id).collect();
-    assert!(
-        unmet.contains(&"guest"),
-        "guest 未接入要如实列出：{:?}",
-        unmet
+    let guest_item = r
+        .requirements
+        .iter()
+        .find(|x| x.id == "guest")
+        .expect("清单里要有 guest 这一项");
+    assert_eq!(
+        guest_item.met,
+        cfg!(target_os = "linux"),
+        "guest 项按已验证平台放开：{:?}",
+        guest_item
     );
+    let unmet: Vec<&str> = r.unmet().iter().map(|x| x.id).collect();
     assert!(
         unmet.contains(&"base"),
         "填错的基础根要如实列出：{:?}",
@@ -162,22 +168,25 @@ pub(crate) fn vm_tier_readiness_gates_creation_and_editing() {
         .expect("不成立就要给可读理由");
     assert!(why.contains("虚拟机档现在不可用"), "{}", why);
 
-    // 基础根在场：base 这一项要认出来（其余项照旧按事实）。
+    // 基础根在场：base 这一项要认出来；再故意登记一个不存在的 QEMU 路径，验证仍不成立（不随机器变）。
     let dir = crate::tests::base_dir("tier-readiness");
     let real = ExecSpec {
         tier: Tier::Vm,
         base: Some(dir.to_string_lossy().into_owned()),
         ..Default::default()
     };
-    let r2 = exec::tier_readiness(&real, None, &crate::kernel::detail::HostProbeAdapter);
+    let r2 = exec::tier_readiness(
+        &real,
+        Some("definitely-not-qemu.exe"),
+        &crate::kernel::detail::HostProbeAdapter,
+    );
     let base_item = r2
         .requirements
         .iter()
         .find(|x| x.id == "base")
         .expect("清单里要有基础根这一项");
     assert!(base_item.met, "在场的基础根要认出来：{:?}", base_item);
-    // 严格：guest 未接入时**任何机器**都不能建虚拟机档会话。
-    assert!(!r2.ready(), "guest 未接入期间一律不可用");
+    assert!(!r2.ready(), "缺 QEMU 一项就不成立");
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -468,6 +477,11 @@ pub(crate) fn guest_mounts_prefix_packages_and_fence_roots() {
         args.iter().any(|a| a.contains("root=base")),
         "rootfs 走 9p 的 base 标签"
     );
+    assert!(
+        args.iter()
+            .any(|a| a.starts_with("local,id=fsbase,") && !a.contains("readonly=on")),
+        "基础根共享要可写（内核 root=... rw，额外挂载点也要建得出来）"
+    );
     let accel = args
         .iter()
         .position(|a| a.as_str() == "-machine")
@@ -540,20 +554,30 @@ pub(crate) fn vm_live_guest_runs_command_inside_guest() {
     }
     let probe = crate::kernel::detail::HostProbeAdapter;
     let base = classify_base(std::path::Path::new(base_dir.trim()), &probe).expect("基础根要可用");
+    // 额外 9p 共享也要真挂进 guest（QEMU 不替 guest 挂）：用一份带标记的临时目录验证。
+    let share = crate::tests::scratch("vm-live-share");
+    std::fs::create_dir_all(&share).expect("建共享目录");
+    std::fs::write(share.join("marker.txt"), "SHARE_MARKER").expect("写标记");
+    let guest_dir = "/solomni-vm-live-share";
     let host = crate::capabilities::vm::detail::QemuGuest::new();
     let spec = GuestSpec {
         lease: "vm-live".to_string(),
         arch: GuestArch::host(),
         base,
-        mounts: Vec::new(),
+        mounts: vec![GuestMount {
+            host: share.clone(),
+            guest: guest_dir.to_string(),
+            read_only: true,
+        }],
         net: false,
         qemu_path: Some(qemu),
     };
     let mut guest = host.start(&spec).expect("起 guest");
     let run = GuestRun {
         command: format!(
-            "cat /etc/os-release; test -e '{}' && echo HOST_VISIBLE || echo HOST_HIDDEN; echo VM_LIVE_OK",
-            std::env::current_dir().expect("cwd").display()
+            "cat /etc/os-release; test -e '{}' && echo HOST_VISIBLE || echo HOST_HIDDEN; cat {}/marker.txt; echo VM_LIVE_OK",
+            std::env::current_dir().expect("cwd").display(),
+            guest_dir
         ),
         args_json: "{}".to_string(),
         env: Vec::new(),
@@ -573,4 +597,10 @@ pub(crate) fn vm_live_guest_runs_command_inside_guest() {
         "宿主的项目根不该在 guest 里可达：{}",
         out.output
     );
+    assert!(
+        out.output.contains("SHARE_MARKER"),
+        "额外 9p 共享要真挂进 guest：{}",
+        out.output
+    );
+    let _ = std::fs::remove_dir_all(&share);
 }

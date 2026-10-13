@@ -9,9 +9,8 @@
   level: T4
   why: |
     虚拟机档的选型、诊断、装配计划、逐项前置检测、guest 端口、QEMU 后端与执行分派都已收进独立能力 vm；
-    但整条链路**尚未在真机验证**，因此就绪检测的 guest 一项暂判否、虚拟机档仍不可选（vm::tier_readiness）。
-    也就是说：现在产品还不存在“用户不授权本机写权限也能拿到强隔离”的可用路径——未验证前不放开，
-    避免造出“隔离没多、能力反少”的会话。界面照旧逐项列出缺什么、每项怎么补。
+    Linux 已在真机上跑通（就绪项按平台放开，Linux 可选 vm 档）；Windows / macOS 尚未真机验收，那两平台的就绪项判否、
+    虚拟机档仍不可选（vm::tier_readiness）。界面照旧逐项列出缺什么、每项怎么补。
   how: |
     方向已定：guest 在**所有平台统一为同一个 Linux 发行版**，默认基线是**官方最新 stable**
     （当前 Debian 13.7 / trixie；amd64 先行、arm64 记缺口）。后端默认 QEMU（用户自备），
@@ -21,19 +20,19 @@
        与 QEMU 后端（qemu-system-* + QGA），镜像只读不转换；登记的 qemu_path 已接到实际启动（空则兜底 PATH）；
     2) 装配：prefix 包按来源目录只读挂到 /<prefix>，围栏根按宿主原路径挂；会话级一个 guest；
     3) 分派：会话在 vm 档把模块命令交给 guest；建会话时装配并拉起，会话删除时销毁。
-    Linux 侧已用 `setup-vm.js` 装出的基础根在 **KVM** 下跑通真机探针（`vm_live_guest_runs_command_inside_guest`：guest 启动 + QGA `guest-exec` + 宿主路径不可达）：
+    Linux 侧已用 `setup-vm.js` 装出的基础根在 **KVM** 下跑通真机探针：
     基础根必须预处理（fstab 去掉 PARTUUID 条目、mask systemd-remount-fs、装 qemu-guest-agent、用带 9p 的通用内核与 initrd），否则 cloud 镜像会掉进 emergency；
-    `qemu_args` 已显式 `-machine accel=kvm:tcg`（有 KVM 用 KVM、没有退回 TCG）。
-    剩余：产品级会话验收（就绪检测的 guest 项仍有意判否，放开并跑通会话才销本条）、Windows / macOS 真机；
-    system 叠层、qcow2 → rootfs 转换、arm64 记后续缺口；真机通过后把就绪检测的 guest 项放开并删除本条。
+    `qemu_args` 已显式 `-machine accel=kvm:tcg`（有 KVM 用 KVM、没有退回 TCG）；装配侧补上了"接上 QGA 后把额外 9p 共享逐个挂到宿主原路径"
+    与"基础根按读写共享"（否则模块目录在 guest 里不存在，工具 cwd 进不去）；删会话会销毁该租约的 guest。
+    产品级会话验收见 e2e 的 `SOLOMNI_VM_BASE` 场景（vm 档会话里模块工具真在 guest 里跑、删会话即销毁 guest；opt-in，默认 [探针] 跳过）：已在 KVM 下跑通（E2E-OK）。
+    剩余：Windows / macOS 真机；system 叠层、qcow2 → rootfs 转换、arm64 记后续缺口；三方都通过后删除本条。
   accept: |
     在一台有 /dev/kvm 的机器上选 vm 档跑一次工具：进程确实跑在 guest 内（可达范围与宿主隔离）；
     会话删除后 guest 与其磁盘被销毁；三平台探针覆盖“guest 可用 / 不可用”两种结论；
     届时删除本条并同步 PRODUCT.md / RUNTIME_SPEC.md / docs/vm/ 的当前状态。
   blocked_by: |
-    已无环境阻塞：本机 WSL2 的 /dev/kvm 已出现，QEMU 与 Debian 13 基础根已由 `node setup-vm.js` 装到项目内 `.vm/`，
-    Linux 真机探针在 KVM 下已跑通（`vm_live_guest_runs_command_inside_guest`）。要销本条还差：
-    就绪检测的 guest 项放开后的产品级会话验收，以及 Windows / macOS 各自真机验证。
+    只剩非 Linux 平台：Linux 已收口（真机探针与产品级会话验收都在 KVM 下跑通，就绪项已按平台放开）。
+    要销本条还差 Windows / macOS 各自真机验收。
 - id: module.acp-adapter
   scope: global
   level: T3

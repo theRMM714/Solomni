@@ -44,11 +44,33 @@ impl GuestHost for QemuGuest {
         drop(listener);
         let stream = connect_within(port, Duration::from_secs(30))?;
         let writer = stream.try_clone().map_err(|e| e.to_string())?;
-        Ok(Box::new(QemuHandle {
+        let mut handle = QemuHandle {
             child: Some(child),
             reader: BufReader::new(stream),
             writer,
-        }))
+        };
+        // QEMU 只把额外 9p 共享接进来，不会替 guest 挂：接上 QGA 后逐个挂到宿主原路径。
+        // 约束：挂载点要在 guest 根里建得出来——基础根因此按读写共享（与内核 root=... rw 一致）。
+        for (i, m) in spec.mounts.iter().enumerate() {
+            let ro = if m.read_only { ",ro" } else { "" };
+            let script = format!(
+                "mkdir -p '{g}' && mount -t 9p -o trans=virtio,version=9p2000.L{ro} m{i} '{g}'",
+                g = m.guest,
+                ro = ro,
+                i = i
+            );
+            let out = handle.exec(&GuestRun {
+                command: script,
+                args_json: "{}".to_string(),
+                env: Vec::new(),
+                cwd: String::new(),
+            });
+            if !out.ok {
+                handle.stop();
+                return Err(format!("把 {} 挂进 guest 失败：{}", m.guest, out.output));
+            }
+        }
+        Ok(Box::new(handle))
     }
 }
 

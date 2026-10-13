@@ -223,15 +223,23 @@ function linkKernel() {
   const i = path.join(BASE, "initrd.img");
   if (!lexists(i)) fs.symlinkSync("boot/initrd.img-" + GUEST_KERNEL_ABI, i);
 }
+function ensurePythonAlias() {
+  // Debian 只提供 python3；模块工具命令常写 `python`，给 guest 补上这个别名（等价 python-is-python3）。
+  const py3 = path.join(BASE, "usr", "bin", "python3");
+  const py = path.join(BASE, "usr", "bin", "python");
+  if (exists(py3) && !lexists(py)) fs.symlinkSync("python3", py);
+}
 function ensureBase() {
-  if (baseReady()) { log("guest 基础根已就绪：" + path.relative(ROOT, BASE)); return; }
-  ensureImage();
-  ensureRootfs();
-  ensureKernel();
-  ensureQga();
-  sanitizeBase();
-  ensureInitrd();
-  linkKernel();
+  if (!baseReady()) {
+    ensureImage();
+    ensureRootfs();
+    ensureKernel();
+    ensureQga();
+    sanitizeBase();
+    ensureInitrd();
+    linkKernel();
+  }
+  ensurePythonAlias();
   if (!baseReady()) die("基础根还没就绪，请检查 .vm/guest/base");
   log("guest 基础根就绪：" + path.relative(ROOT, BASE));
 }

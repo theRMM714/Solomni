@@ -223,13 +223,22 @@ pub fn vm_requirements(vm: &VmInputs<'_>) -> Vec<VmRequirement> {
                 hypervisor_how().to_string()
             },
         },
-        // guest 后端与执行分派都已就位，但**尚未在真机验证**：验证通过前就绪项判否，虚拟机档不放开。
-        // 有意收口：没验过就不让用户选，避免造出"隔离没多、能力反少"的会话。
+        // guest 本体：产品侧的后端与执行分派已就位；**逐平台**真机验收通过后才放开。
+        // 约束：这是"验过没有"的事实，不是环境探测——环境项是上面的 hypervisor / qemu / base。
         VmRequirement {
             id: "guest",
-            met: false,
-            detail: "guest 后端与执行分派已就位，但尚未在真机验证（就绪项暂判否）".to_string(),
-            how: "真机上跑通一次 vm 档工具后再放开（现状与验收见 tests/gaps.yaml）".to_string(),
+            met: guest_backend_verified(),
+            detail: if guest_backend_verified() {
+                "guest 后端已就位，本平台已通过真机验收".to_string()
+            } else {
+                "guest 后端已就位，但本平台尚未真机验收（就绪项判否）".to_string()
+            },
+            how: if guest_backend_verified() {
+                String::new()
+            } else {
+                "在该平台真机上跑通一次 vm 档工具后再放开（现状与验收见 tests/gaps.yaml）"
+                    .to_string()
+            },
         },
         // QEMU：用户自备。没登记就看 PATH——检测的是"起得来 guest 的那件东西在不在"。
         qemu_requirement(vm.qemu, vm.probe),
@@ -249,6 +258,12 @@ fn hypervisor_kind() -> &'static str {
     } else {
         "未知"
     }
+}
+
+/// 目的：本平台的 guest 后端是否已经过真机验收（Linux 已验；Windows / macOS 待验）。
+/// 约束：记录的是"验过没有"的事实，不是环境探测；新平台真机通过后在这里加进已验集合，并同步 tests/gaps.yaml。
+fn guest_backend_verified() -> bool {
+    cfg!(target_os = "linux")
 }
 
 /// 虚拟机监视器不可用时的解决指引（各平台说各自的办法）。

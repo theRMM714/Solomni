@@ -169,7 +169,8 @@ pub fn qemu_args(spec: &GuestSpec, channel_opts: &str) -> Vec<String> {
     }
     a.push("-fsdev".to_string());
     a.push(format!(
-        "local,id=fsbase,path={},security_model=none,readonly=on",
+        // 基础根共享**可写**：内核按 root=... rw 挂它，额外 9p 挂载点也要在 guest 根里建得出来。
+        "local,id=fsbase,path={},security_model=none",
         spec.base.root.display()
     ));
     a.push("-device".to_string());

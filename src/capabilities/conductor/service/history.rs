@@ -103,6 +103,10 @@ impl Conductor {
                 );
             }
         }
+        // 虚拟机档：这些租约的 guest 随会话删除一起销毁（幂等；与围栏释放、常驻服务回收同一时机）。
+        for sid in &subtree {
+            self.vm.guest_stop(sid);
+        }
         for sid in &subtree {
             self.sessions.remove(sid);
             // 会话没了，它的裁决队随会话一起消失（等待方与转录都不复存在）。

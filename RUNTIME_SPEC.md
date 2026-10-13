@@ -81,13 +81,13 @@ files:                      # 包内文件指纹：用于可复现与呈现
 但整条链路**尚未真机验证**，就绪项暂判否，虚拟机档仍不可选。
 
 前置检测是**一份逐项清单**（`vm::vm_requirements`，界面与 `--doctor` 照抄同一份）：虚拟机监视器、guest 本体、QEMU、基础根，
-每项给出"现状 + 怎么补"。因为 guest 本体是所有机器共同缺的一项，**虚拟机档此刻一律不可选**（`vm::tier_readiness`）；
+每项给出"现状 + 怎么补"。guest 本体按**已验证平台**放开（Linux 已验；Windows / macOS 待验），其余项按事实（`vm::tier_readiness`）；
 QEMU 与基础根**用户自备**：`qemu_path` 是全局设置（登记了就用登记路径启动，空则兜底看 PATH），基础根是**会话级**的 `exec.base`（`meta.yaml`）；产品只检测与指路。
 项目另给一个**只写项目内**的一键补齐手段 `setup-vm.js`（QEMU 与 Debian guest 基础根落 `.vm/`，下载源在 `links.yaml` 的 `guest.*`，需用户同意；当前只做 Linux）。
 基础根 = 一个目录：发行版 rootfs + `vmlinuz`（或 `bzImage`）+ 可选 `initrd.img`（判定在 `vm/domain/guest.rs`，就绪检测与界面照它如实报）。
 镜像方向：guest 在三平台统一为同一个 Linux 发行版（Debian stable 为默认基线）；接入时把默认下载链接记进 `links.yaml`。
 guest 与会话级装配属于产品路线图：现状、怎么补与验收标准见 `tests/gaps.yaml` 的 `fence.guest-tier-not-wired`。
-Linux 侧已用 `setup-vm.js` 装出的基础根在 **KVM** 下跑通真机探针（`vm_live_guest_runs_command_inside_guest`：guest 启动 + QGA `guest-exec` + 宿主路径不可达）；**尚缺产品级会话验收与 Windows / macOS**，就绪项仍判否。
+Linux 侧已用 `setup-vm.js` 装出的基础根在 **KVM** 下跑通真机探针与产品级会话验收（`vm_live_guest_runs_command_inside_guest`；e2e 的 `SOLOMNI_VM_BASE` 场景：vm 档会话里模块工具真在 guest 里跑、删会话即销毁 guest）。装配侧补上了"接上 QGA 后把额外 9p 共享逐个挂到宿主原路径"与"基础根按读写共享"（否则模块目录在 guest 里不存在）。**Windows / macOS 尚未真机验收**，`guest` 项在那两平台判否。
 
 ## 六、校验与拒收
 

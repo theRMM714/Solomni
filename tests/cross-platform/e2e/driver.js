@@ -856,6 +856,41 @@ async function approvePlan(name) {
     const running = ((st2.json && st2.json.sessions) || []).filter((s) => s.running).map((s) => s.sid);
     assert(running.length === 0, '停止即全停：相关会话都不再跑', JSON.stringify(running));
   }
+  // 虚拟机档真机会话（opt-in）：工具真在 guest 里跑，删会话后 guest 销毁。
+  const vmBase = process.env.SOLOMNI_VM_BASE || '';
+  if (!vmBase) {
+    console.log('    [探针] 未开启虚拟机档会话验收：设 SOLOMNI_VM_LIVE=1、SOLOMNI_VM_QEMU、SOLOMNI_VM_BASE 后重跑');
+  } else {
+    const nameVm = 'e2e-vm-' + Date.now();
+    const cv = await api('POST', '/api/actions/create_session', {
+      name: nameVm, mode: 'single',
+      agents: [{ name: '探针兵', transient: true, modules: ['toolbox'], model: 'm1' }],
+    });
+    assert(cv.status === 200, '建虚拟机档工作（先本机档）', cv.text.slice(0, 200));
+    const ev = await act(nameVm, 'edit_session', {
+      agents: [{ name: '探针兵', modules: ['toolbox'], model: 'm1' }],
+      tier: 'vm', base: vmBase, net: false,
+    });
+    assert(ev.status === 200, '改入虚拟机档（就绪检测放行）', ev.text.slice(0, 240));
+    const saidVm = await act(nameVm, 'send_message', { text: '虚拟机档读一下' });
+    assert(saidVm.status === 200, '虚拟机档发言', saidVm.text.slice(0, 200));
+    const lv = await lines(nameVm);
+    const tv = (lv.filter((x) => x.tool).pop() || {}).tool || {};
+    assert(tv.module === 'toolbox' && tv.name === 'read_txt' && tv.ok === true, 'vm 档工具在 guest 里成功（落成 tool 行）', JSON.stringify(tv).slice(0, 300));
+    assert(String(tv.output || '').includes('Debian GNU/Linux'), '工具读到的是 guest 的 os-release（宿主不是 Debian）', String(tv.output).slice(0, 240));
+    // 删除会话：核心销毁该租约的 guest。
+    const del = await api('POST', '/api/history/' + encodeURIComponent(nameVm) + '/delete', {});
+    assert(del.status === 200, '删除会话', del.text.slice(0, 200));
+    await new Promise((res) => setTimeout(res, 1500));
+    assert(!fs.existsSync(dir(nameVm)), '删除会话后目录清掉', nameVm);
+    const pg = require('child_process').spawnSync('pgrep', ['-af', 'qemu-system'], { encoding: 'utf8' });
+    if (pg.error) {
+      console.log('    [探针] 本平台没有 pgrep，跳过"guest 进程已销毁"的进程级断言');
+    } else {
+      const alive = (pg.stdout || '').split('\n').filter((l) => l.includes(vmBase));
+      assert(alive.length === 0, '删除会话后 guest 进程销毁', alive.join(' | ').slice(0, 240));
+    }
+  }
   console.log((failed ? 'E2E-FAILED failed=' + failed : 'E2E-DONE exitCode=0'));
   process.exitCode = failed ? 1 : 0;
 })().catch((e) => { console.log('FAIL 驱动异常 :: ' + e.message); process.exitCode = 1; });
