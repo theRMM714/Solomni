@@ -1386,14 +1386,16 @@ impl crate::capabilities::vm::ports::VmEngine for FakeEngine {
     }
 }
 
-/// 目的：共享后端的测试替身——恒可落、计划为空（9p 的真实派生在 vm 用例里验）。
+/// 目的：共享后端的测试替身——恒可落、计划为空；记录 prepare / sync_in / sync_out / release。
 #[derive(Clone, Default)]
-pub(crate) struct FakeShare;
+pub(crate) struct FakeShare {
+    pub calls: Arc<Mutex<Vec<String>>>,
+}
 
 impl FakeShare {
-    /// 目的：空实现起步。
+    /// 目的：空记录起步。
     pub(crate) fn new() -> FakeShare {
-        FakeShare
+        FakeShare::default()
     }
 }
 
@@ -1410,17 +1412,58 @@ impl crate::capabilities::vm::ports::ShareBackend for FakeShare {
         true
     }
 
-    fn plan(
+    fn prepare(
         &self,
         _engine: &str,
         _mounts: &[crate::capabilities::vm::domain::guest::GuestMount],
-    ) -> Result<crate::capabilities::vm::ports::SharePlan, String> {
-        Ok(crate::capabilities::vm::ports::SharePlan {
-            kind: "fake",
-            engine_args: Vec::new(),
-            guest_scripts: Vec::new(),
-            needs_net: false,
-        })
+    ) -> Result<
+        (
+            crate::capabilities::vm::ports::SharePlan,
+            Box<dyn crate::capabilities::vm::ports::ShareGuard>,
+        ),
+        String,
+    > {
+        self.calls.lock().expect("锁").push("prepare".to_string());
+        Ok((
+            crate::capabilities::vm::ports::SharePlan {
+                kind: "fake",
+                engine_args: Vec::new(),
+                guest_scripts: Vec::new(),
+                needs_net: false,
+            },
+            Box::new(FakeGuard {
+                calls: self.calls.clone(),
+            }),
+        ))
+    }
+
+    fn sync_in(
+        &self,
+        _channel: &mut dyn crate::capabilities::vm::ports::GuestChannel,
+        _mounts: &[crate::capabilities::vm::domain::guest::GuestMount],
+    ) -> Result<(), String> {
+        self.calls.lock().expect("锁").push("sync_in".to_string());
+        Ok(())
+    }
+
+    fn sync_out(
+        &self,
+        _channel: &mut dyn crate::capabilities::vm::ports::GuestChannel,
+        _mounts: &[crate::capabilities::vm::domain::guest::GuestMount],
+    ) -> Result<(), String> {
+        self.calls.lock().expect("锁").push("sync_out".to_string());
+        Ok(())
+    }
+}
+
+/// 目的：共享凭据替身——释放记录一笔。
+struct FakeGuard {
+    calls: Arc<Mutex<Vec<String>>>,
+}
+
+impl crate::capabilities::vm::ports::ShareGuard for FakeGuard {
+    fn release(&mut self) {
+        self.calls.lock().expect("锁").push("release".to_string());
     }
 }
 

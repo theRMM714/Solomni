@@ -456,8 +456,9 @@ pub(crate) fn guest_mounts_prefix_packages_and_fence_roots() {
         mounts
     );
     let share = crate::capabilities::vm::detail::NinePShare::new()
-        .plan("qemu", &mounts)
-        .expect("9p 计划要能派生");
+        .prepare("qemu", &mounts)
+        .expect("9p 计划要能派生")
+        .0;
     let spec = GuestSpec {
         lease: "w".to_string(),
         image: GuestImage {
@@ -623,6 +624,48 @@ pub(crate) fn disk_root_uses_a_virtio_disk_not_9p() {
     );
 }
 
+/// 目的：同一租约里 guest 与共享凭据同生命周期；每次执行前后走共享的同步钩子。
+#[test]
+pub(crate) fn share_syncs_around_each_run_and_releases_on_stop() {
+    let engine = Arc::new(crate::tests::doubles::FakeEngine::new());
+    let share = Arc::new(crate::tests::doubles::FakeShare::new());
+    let vm = crate::capabilities::vm::service::VmService::new(
+        Arc::new(InMemoryPackages::empty()),
+        engine.clone(),
+        share.clone(),
+    );
+    let spec = GuestSpec {
+        lease: "w".to_string(),
+        image: GuestImage {
+            arch: GuestArch::host(),
+            root: GuestRoot::Dir(std::path::PathBuf::from("/base")),
+            kernel: std::path::PathBuf::from("/base/vmlinuz"),
+            initrd: None,
+        },
+        mounts: Vec::new(),
+        net: false,
+        engine_path: None,
+    };
+    vm.guest_start(&spec).expect("起 guest");
+    let run = GuestRun {
+        command: "echo hi".to_string(),
+        args_json: "{}".to_string(),
+        env: Vec::new(),
+        cwd: String::new(),
+    };
+    assert!(vm.guest_run("w", &run).ok, "执行要成功");
+    vm.guest_stop("w");
+    let calls = share.calls.lock().expect("锁").clone();
+    assert_eq!(
+        calls,
+        vec!["prepare", "sync_in", "sync_out", "release"],
+        "共享钩子顺序：装配 → 进去 → 回来 → 释放"
+    );
+    let ecalls = engine.calls.lock().expect("锁").clone();
+    assert!(ecalls.iter().any(|c| c == "run:w:echo hi"), "{:?}", ecalls);
+    assert!(ecalls.iter().any(|c| c == "stop:w"), "{:?}", ecalls);
+}
+
 #[test]
 pub(crate) fn vm_service_holds_guests_by_lease() {
     let engine = Arc::new(crate::tests::doubles::FakeEngine::new());
@@ -690,8 +733,9 @@ pub(crate) fn vm_live_guest_runs_command_inside_guest() {
         engine_path: Some(qemu),
     };
     let plan = crate::capabilities::vm::detail::NinePShare::new()
-        .plan("qemu", &spec.mounts)
-        .expect("9p 计划要能派生");
+        .prepare("qemu", &spec.mounts)
+        .expect("9p 计划要能派生")
+        .0;
     let mut guest = engine.boot(&spec, &plan).expect("起 guest");
     let run = GuestRun {
         command: format!(

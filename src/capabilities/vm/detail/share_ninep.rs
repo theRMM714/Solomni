@@ -4,7 +4,7 @@
 //! 联动：实现 ports::ShareBackend；由组合根构造、service.rs 持有。
 
 use crate::capabilities::vm::domain::guest::{GuestImage, GuestMount};
-use crate::capabilities::vm::ports::{ShareBackend, SharePlan};
+use crate::capabilities::vm::ports::{NoShareGuard, ShareBackend, ShareGuard, SharePlan};
 
 /// 目的：9p 共享后端（QEMU 的 virtfs；Linux / macOS 宿主可用，Windows 宿主没有）。
 pub struct NinePShare;
@@ -26,7 +26,11 @@ impl ShareBackend for NinePShare {
         engine == "qemu"
     }
 
-    fn plan(&self, _engine: &str, mounts: &[GuestMount]) -> Result<SharePlan, String> {
+    fn prepare(
+        &self,
+        _engine: &str,
+        mounts: &[GuestMount],
+    ) -> Result<(SharePlan, Box<dyn ShareGuard>), String> {
         let mut engine_args: Vec<String> = Vec::new();
         let mut guest_scripts: Vec<String> = Vec::new();
         for (i, m) in mounts.iter().enumerate() {
@@ -48,11 +52,14 @@ impl ShareBackend for NinePShare {
                 i = i
             ));
         }
-        Ok(SharePlan {
-            kind: "9p",
-            engine_args,
-            guest_scripts,
-            needs_net: false,
-        })
+        Ok((
+            SharePlan {
+                kind: "9p",
+                engine_args,
+                guest_scripts,
+                needs_net: false,
+            },
+            Box::new(NoShareGuard),
+        ))
     }
 }

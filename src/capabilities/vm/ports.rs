@@ -30,14 +30,47 @@ pub struct SharePlan {
     pub needs_net: bool,
 }
 
+/// 目的：一次共享装配的凭据——后端可能要在 guest 存活期间持有外部资源（如 virtiofsd 进程），
+///   由 service 与 guest 同生命周期持有，销毁 guest 时一起释放。
+pub trait ShareGuard: Send {
+    fn release(&mut self);
+}
+
+/// 目的：没有外部资源的共享凭据（9p / QEMU 内置 virtiofs 这类）。
+pub struct NoShareGuard;
+
+impl ShareGuard for NoShareGuard {
+    fn release(&mut self) {}
+}
+
 /// 目的：宿主↔guest 的共享后端（virtiofs / 9p / SMB / copy）。只有 service.rs 持有它（R12）。
 pub trait ShareBackend: Send + Sync {
     /// 目的：后端稳定短名（诊断与日志用）。
     fn id(&self) -> &'static str;
     /// 目的：本后端能不能把共享落到这台引擎 / 这份 guest 上（纯事实）。
     fn supports(&self, engine: &str, guest: &GuestImage) -> bool;
-    /// 目的：派生共享计划（引擎参数 + guest 端挂载命令）。
-    fn plan(&self, engine: &str, mounts: &[GuestMount]) -> Result<SharePlan, String>;
+    /// 目的：装配共享——产出计划与（可能的）外部资源凭据。
+    fn prepare(
+        &self,
+        engine: &str,
+        mounts: &[GuestMount],
+    ) -> Result<(SharePlan, Box<dyn ShareGuard>), String>;
+    /// 目的：guest 起来后、每次执行前的同步（copy 这类后端在这里拷进去）；默认无操作。
+    fn sync_in(
+        &self,
+        _channel: &mut dyn GuestChannel,
+        _mounts: &[GuestMount],
+    ) -> Result<(), String> {
+        Ok(())
+    }
+    /// 目的：每次执行后的回拷（copy 这类后端在这里拷回来）；默认无操作。
+    fn sync_out(
+        &self,
+        _channel: &mut dyn GuestChannel,
+        _mounts: &[GuestMount],
+    ) -> Result<(), String> {
+        Ok(())
+    }
 }
 
 /// 目的：VM 引擎端口——探测承载、拉起 / 销毁一台 guest。只有 service.rs 持有它（R12）。
