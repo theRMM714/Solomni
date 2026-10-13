@@ -1,41 +1,120 @@
-//! 目的：GuestHost 的 QEMU 实现——拉起 qemu-system-*，经 QGA 通道执行与销毁。
-//! 管：QEMU 进程的启停、QGA 的 JSON 收发、命令回执与 base64 数据。
-//! 不管：基础根判定、挂载与 QEMU 参数派生（domain/guest.rs）。
+//! 目的：VmEngine / GuestChannel 的 QEMU 实现——拉起 qemu-system-*，经 QGA 执行与销毁。
+//! 管：QEMU 进程的启停、QEMU 基础参数（含 rootfs 的 9p 根共享与 QGA 串口）、JSON 收发、命令回执与 base64 数据。
+//! 不管：共享后端的额外参数（detail/share_ninep.rs）、镜像判定与挂载清单（domain/guest.rs）。
 //! 联动：端口在 ports.rs；由组合根构造、service.rs 持有。
 
-use crate::capabilities::vm::domain::guest::{qemu_args, qemu_exe, GuestRun, GuestSpec};
-use crate::capabilities::vm::ports::{Guest, GuestHost};
+use crate::capabilities::vm::domain::guest::{GuestArch, GuestImage, GuestRun, GuestSpec};
+use crate::capabilities::vm::ports::{GuestChannel, GuestVm, SharePlan, VmEngine};
 use crate::kernel::api::ToolOutcome;
 use std::io::{BufRead, BufReader, Write};
 use std::net::{TcpListener, TcpStream};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
-/// 目的：QEMU 后端——每次 start 拉起一个 qemu-system-* 进程并接上 QGA 通道。
-pub struct QemuGuest;
-
-impl QemuGuest {
-    /// 目的：组合根专用。
-    pub fn new() -> QemuGuest {
-        QemuGuest
+/// 目的：QEMU 可执行文件名（架构不同名字不同）。
+pub fn qemu_exe(arch: GuestArch) -> &'static str {
+    match arch {
+        GuestArch::Amd64 => "qemu-system-x86_64",
+        GuestArch::Arm64 => "qemu-system-aarch64",
     }
 }
 
-impl GuestHost for QemuGuest {
-    fn start(&self, spec: &GuestSpec) -> Result<Box<dyn Guest>, String> {
+/// 目的：QEMU 引擎——每次 boot 拉起一个 qemu-system-* 进程并接上 QGA 通道。
+pub struct QemuEngine;
+
+impl QemuEngine {
+    /// 目的：组合根专用。
+    pub fn new() -> QemuEngine {
+        QemuEngine
+    }
+}
+
+/// 目的：除共享之外的一次启动参数（不含可执行文件本身）——机器、加速器、内核、串口与 QGA 通道。
+/// 参数：channel_opts 是 QGA chardev 的补充选项（形如 host=127.0.0.1,port=N,server=on,wait=off）。
+/// 约束：rootfs 经 virtio-9p 的 base 标签挂成根——阶段 0 的根仍是目录；磁盘镜像见 docs/vm/README.md 的「多平台组合」。
+pub fn engine_args(spec: &GuestSpec, channel_opts: &str) -> Vec<String> {
+    let mut a: Vec<String> = Vec::new();
+    for v in [
+        "-m",
+        "2048",
+        "-smp",
+        "2",
+        // 阶段 0 维持现状：有 KVM 就用 KVM，没有就退回 TCG。按平台的加速器表见阶段 1。
+        "-machine",
+        "accel=kvm:tcg",
+        "-display",
+        "none",
+        "-no-reboot",
+        "-nodefaults",
+        // -nodefaults 连默认串口一起去掉；console=ttyS0 要有对应设备，所以显式给一个。
+        "-serial",
+        "stdio",
+    ] {
+        a.push(v.to_string());
+    }
+    a.push("-kernel".to_string());
+    a.push(spec.image.kernel.display().to_string());
+    if let Some(initrd) = &spec.image.initrd {
+        a.push("-initrd".to_string());
+        a.push(initrd.display().to_string());
+    }
+    a.push("-fsdev".to_string());
+    a.push(format!(
+        // 基础根共享**可写**：内核按 root=... rw 挂它，额外 9p 挂载点也要在 guest 根里建得出来。
+        "local,id=fsbase,path={},security_model=none",
+        spec.image.root.display()
+    ));
+    a.push("-device".to_string());
+    a.push("virtio-9p-pci,fsdev=fsbase,mount_tag=base".to_string());
+    a.push("-append".to_string());
+    a.push(
+        "console=ttyS0 root=base rootfstype=9p rootflags=trans=virtio,version=9p2000.L rw"
+            .to_string(),
+    );
+    a.push("-chardev".to_string());
+    a.push(format!("socket,id=ch0,{}", channel_opts));
+    a.push("-device".to_string());
+    a.push("virtio-serial-pci".to_string());
+    a.push("-device".to_string());
+    a.push("virtserialport,chardev=ch0,name=org.qemu.guest_agent.0".to_string());
+    if spec.net {
+        a.push("-netdev".to_string());
+        a.push("user,id=n0".to_string());
+        a.push("-device".to_string());
+        a.push("virtio-net-pci,netdev=n0".to_string());
+    } else {
+        a.push("-nic".to_string());
+        a.push("none".to_string());
+    }
+    a
+}
+
+impl VmEngine for QemuEngine {
+    fn id(&self) -> &'static str {
+        "qemu"
+    }
+
+    /// 约束：QEMU 能承载任何架构匹配的 guest 镜像；共享能不能落由 ShareBackend 自己声明。
+    fn supports(&self, guest: &GuestImage) -> bool {
+        guest.arch == GuestArch::host()
+    }
+
+    fn boot(&self, spec: &GuestSpec, share: &SharePlan) -> Result<Box<dyn GuestVm>, String> {
         let listener =
             TcpListener::bind("127.0.0.1:0").map_err(|e| format!("占不到 QGA 端口：{}", e))?;
         let port = listener.local_addr().map_err(|e| e.to_string())?.port();
         let opts = format!("host=127.0.0.1,port={},server=on,wait=off", port);
         let exe = spec
-            .qemu_path
+            .engine_path
             .as_deref()
             .map(str::trim)
             .filter(|p| !p.is_empty())
             .map(str::to_string)
-            .unwrap_or_else(|| qemu_exe(spec.arch).to_string());
+            .unwrap_or_else(|| qemu_exe(spec.image.arch).to_string());
+        let mut args = engine_args(spec, &opts);
+        args.extend(share.engine_args.iter().cloned());
         let child = Command::new(&exe)
-            .args(qemu_args(spec, &opts))
+            .args(&args)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -49,25 +128,17 @@ impl GuestHost for QemuGuest {
             reader: BufReader::new(stream),
             writer,
         };
-        // QEMU 只把额外 9p 共享接进来，不会替 guest 挂：接上 QGA 后逐个挂到宿主原路径。
-        // 约束：挂载点要在 guest 根里建得出来——基础根因此按读写共享（与内核 root=... rw 一致）。
-        for (i, m) in spec.mounts.iter().enumerate() {
-            let ro = if m.read_only { ",ro" } else { "" };
-            let script = format!(
-                "mkdir -p '{g}' && mount -t 9p -o trans=virtio,version=9p2000.L{ro} m{i} '{g}'",
-                g = m.guest,
-                ro = ro,
-                i = i
-            );
+        // QEMU 只把额外共享接进来，不替 guest 挂：接上 QGA 后按共享计划逐个挂到 guest 路径。
+        for script in &share.guest_scripts {
             let out = handle.exec(&GuestRun {
-                command: script,
+                command: script.clone(),
                 args_json: "{}".to_string(),
                 env: Vec::new(),
                 cwd: String::new(),
             });
             if !out.ok {
                 handle.stop();
-                return Err(format!("把 {} 挂进 guest 失败：{}", m.guest, out.output));
+                return Err(format!("把共享挂进 guest 失败：{}", out.output));
             }
         }
         Ok(Box::new(handle))
@@ -132,7 +203,7 @@ impl QemuHandle {
     }
 }
 
-impl Guest for QemuHandle {
+impl GuestChannel for QemuHandle {
     fn exec(&mut self, run: &GuestRun) -> ToolOutcome {
         if let Err(why) = self.sync() {
             return fail(&why);
@@ -211,6 +282,12 @@ impl Guest for QemuHandle {
             }
             std::thread::sleep(Duration::from_millis(20));
         }
+    }
+}
+
+impl GuestVm for QemuHandle {
+    fn channel(&mut self) -> &mut dyn GuestChannel {
+        self
     }
 
     fn stop(&mut self) {

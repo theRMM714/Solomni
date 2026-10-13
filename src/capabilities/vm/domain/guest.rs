@@ -1,7 +1,7 @@
-//! 目的：guest 的纯逻辑——基础根布局判定、挂载清单与 QEMU 参数构造。
-//! 管：基础根是不是一份可用的 guest、宿主根到 guest 的挂载、一次启动的 QEMU 命令行。
-//! 不管：进程的启停与命令通道（后端 detail/）、包的选择与定版（domain/exec.rs）。
-//! 联动：被 service.rs、conductor 与 QEMU 适配器消费；契约见 docs/vm/README.md 与 RUNTIME_SPEC.md。
+//! 目的：guest 的纯逻辑——镜像布局判定与挂载清单。
+//! 管：一份 guest 镜像是不是可用、宿主根到 guest 的挂载清单。
+//! 不管：进程的启停与命令通道（detail/ 的引擎与通道）、引擎参数（detail/ 的适配器）。
+//! 联动：被 service.rs 与 detail/ 消费；契约见 docs/vm/README.md 与 RUNTIME_SPEC.md。
 
 use crate::capabilities::vm::domain::exec::ExecPlan;
 use crate::capabilities::vm::domain::packages::KIND_SYSTEM;
@@ -28,9 +28,11 @@ impl GuestArch {
     }
 }
 
-/// 目的：一份用户自备的 guest 基础根——rootfs 目录 + 内核（可选 initrd）。
+/// 目的：一份 guest 镜像（四轴里的 guest 轴）——基础根目录 + 内核（可选 initrd）。
+/// 约束：阶段 0 的 root 仍是目录（QEMU 用 9p 当根）；磁盘镜像与更多 guest 见 docs/vm/README.md 的「多平台组合」。
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct GuestBase {
+pub struct GuestImage {
+    pub arch: GuestArch,
     pub root: PathBuf,
     pub kernel: PathBuf,
     pub initrd: Option<PathBuf>,
@@ -44,17 +46,16 @@ pub struct GuestMount {
     pub read_only: bool,
 }
 
-/// 目的：一次 guest 启动的规格（基础根 + 挂载 + 网络 + 会话租约）。
+/// 目的：一次 guest 启动的规格（镜像 + 挂载 + 网络 + 会话租约 + 引擎路径登记）。
 #[derive(Debug, Clone)]
 pub struct GuestSpec {
     pub lease: String,
-    pub arch: GuestArch,
-    pub base: GuestBase,
+    pub image: GuestImage,
     pub mounts: Vec<GuestMount>,
     pub net: bool,
-    /// 目的：设置里登记的 QEMU 可执行文件路径（空 = 兜底按 PATH 找，名字由 arch 定）。
+    /// 目的：设置里登记的**引擎**可执行文件路径（空 = 兜底按 PATH 找，名字由 arch 定）。
     /// 约束：与就绪检测共用同一份登记——检测说"按登记路径找到"，启动就必须走同一个路径。
-    pub qemu_path: Option<String>,
+    pub engine_path: Option<String>,
 }
 
 /// 目的：在 guest 里跑一次工具（命令 + 参数 + 环境 + 工作目录）。
@@ -66,17 +67,9 @@ pub struct GuestRun {
     pub cwd: String,
 }
 
-/// 目的：QEMU 可执行文件名（架构不同名字不同）。
-pub fn qemu_exe(arch: GuestArch) -> &'static str {
-    match arch {
-        GuestArch::Amd64 => "qemu-system-x86_64",
-        GuestArch::Arm64 => "qemu-system-aarch64",
-    }
-}
-
-/// 目的：把基础根目录判成 guest 基础（rootfs 目录 + vmlinuz/bzImage + 可选 initrd）。
-/// 返回：判定出来的基础；不到一处可用的布局时给一句缺什么。
-pub fn classify_base(base: &Path, probe: &dyn HostProbe) -> Result<GuestBase, String> {
+/// 目的：把基础根目录判成一份可用的 guest 镜像（rootfs 目录 + vmlinuz/bzImage + 可选 initrd）。
+/// 返回：判定出来的镜像；不到一处可用的布局时给一句缺什么。
+pub fn classify_base(base: &Path, probe: &dyn HostProbe) -> Result<GuestImage, String> {
     if !probe.is_dir(base) {
         return Err("基础根不在场（不是一个目录）".to_string());
     }
@@ -91,7 +84,8 @@ pub fn classify_base(base: &Path, probe: &dyn HostProbe) -> Result<GuestBase, St
         .iter()
         .map(|n| base.join(n))
         .find(|p| probe.is_file(p));
-    Ok(GuestBase {
+    Ok(GuestImage {
+        arch: GuestArch::host(),
         root: base.to_path_buf(),
         kernel,
         initrd,
@@ -136,76 +130,4 @@ pub fn mounts_from(plan: &ExecPlan, fence: &FenceSpec) -> Vec<GuestMount> {
         }
     }
     out
-}
-
-/// 目的：一次启动的 QEMU 参数（不含可执行文件本身）。
-/// 参数：channel_opts 是 QGA chardev 的补充选项（形如 host=127.0.0.1,port=N,server=on,wait=off）。
-/// 约束：rootfs 经 virtio-9p 的 base 标签挂成根；net 为假时完全不给网卡。
-pub fn qemu_args(spec: &GuestSpec, channel_opts: &str) -> Vec<String> {
-    let mut a: Vec<String> = Vec::new();
-    for v in [
-        "-m",
-        "2048",
-        "-smp",
-        "2",
-        // 有 KVM 就用 KVM，没有就退回 TCG（软件模拟）：机器上有 /dev/kvm 时不能再默默跑 TCG。
-        "-machine",
-        "accel=kvm:tcg",
-        "-display",
-        "none",
-        "-no-reboot",
-        "-nodefaults",
-        // -nodefaults 连默认串口一起去掉；console=ttyS0 要有对应设备，所以显式给一个。
-        "-serial",
-        "stdio",
-    ] {
-        a.push(v.to_string());
-    }
-    a.push("-kernel".to_string());
-    a.push(spec.base.kernel.display().to_string());
-    if let Some(initrd) = &spec.base.initrd {
-        a.push("-initrd".to_string());
-        a.push(initrd.display().to_string());
-    }
-    a.push("-fsdev".to_string());
-    a.push(format!(
-        // 基础根共享**可写**：内核按 root=... rw 挂它，额外 9p 挂载点也要在 guest 根里建得出来。
-        "local,id=fsbase,path={},security_model=none",
-        spec.base.root.display()
-    ));
-    a.push("-device".to_string());
-    a.push("virtio-9p-pci,fsdev=fsbase,mount_tag=base".to_string());
-    a.push("-append".to_string());
-    a.push(
-        "console=ttyS0 root=base rootfstype=9p rootflags=trans=virtio,version=9p2000.L rw"
-            .to_string(),
-    );
-    for (i, m) in spec.mounts.iter().enumerate() {
-        let ro = if m.read_only { ",readonly=on" } else { "" };
-        a.push("-fsdev".to_string());
-        a.push(format!(
-            "local,id=fs{},path={},security_model=none{}",
-            i,
-            m.host.display(),
-            ro
-        ));
-        a.push("-device".to_string());
-        a.push(format!("virtio-9p-pci,fsdev=fs{},mount_tag=m{}", i, i));
-    }
-    a.push("-chardev".to_string());
-    a.push(format!("socket,id=ch0,{}", channel_opts));
-    a.push("-device".to_string());
-    a.push("virtio-serial-pci".to_string());
-    a.push("-device".to_string());
-    a.push("virtserialport,chardev=ch0,name=org.qemu.guest_agent.0".to_string());
-    if spec.net {
-        a.push("-netdev".to_string());
-        a.push("user,id=n0".to_string());
-        a.push("-device".to_string());
-        a.push("virtio-net-pci,netdev=n0".to_string());
-    } else {
-        a.push("-nic".to_string());
-        a.push("none".to_string());
-    }
-    a
 }

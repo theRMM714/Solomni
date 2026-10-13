@@ -6,9 +6,9 @@ use super::builders::*;
 use super::prelude::*;
 use crate::capabilities::vm::api::Vm;
 use crate::capabilities::vm::domain::guest::{
-    classify_base, GuestArch, GuestBase, GuestMount, GuestRun, GuestSpec,
+    classify_base, GuestArch, GuestImage, GuestMount, GuestRun, GuestSpec,
 };
-use crate::capabilities::vm::ports::{GuestHost, PackageSource};
+use crate::capabilities::vm::ports::{PackageSource, ShareBackend, VmEngine};
 
 #[test]
 pub(crate) fn package_manifest_check_rejects_illegal_forms() {
@@ -419,7 +419,7 @@ pub(crate) fn guest_base_requires_rootfs_and_kernel() {
 #[test]
 pub(crate) fn guest_mounts_prefix_packages_and_fence_roots() {
     use crate::capabilities::vm::domain::exec::{ExecPlan, PlannedPackage};
-    use crate::capabilities::vm::domain::guest::{mounts_from, qemu_args};
+    use crate::capabilities::vm::domain::guest::mounts_from;
     let plan = ExecPlan {
         tier: Tier::Vm,
         net: false,
@@ -455,19 +455,25 @@ pub(crate) fn guest_mounts_prefix_packages_and_fence_roots() {
         "模块目录只读挂入：{:?}",
         mounts
     );
+    let share = crate::capabilities::vm::detail::NinePShare::new()
+        .plan("qemu", &mounts)
+        .expect("9p 计划要能派生");
     let spec = GuestSpec {
         lease: "w".to_string(),
-        arch: GuestArch::host(),
-        base: GuestBase {
+        image: GuestImage {
+            arch: GuestArch::host(),
             root: std::path::PathBuf::from("/base"),
             kernel: std::path::PathBuf::from("/base/vmlinuz"),
             initrd: Some(std::path::PathBuf::from("/base/initrd.img")),
         },
         mounts,
         net: false,
-        qemu_path: None,
+        engine_path: None,
     };
-    let args = qemu_args(&spec, "host=127.0.0.1,port=1,server=on,wait=off");
+    let args = crate::capabilities::vm::detail::qemu::engine_args(
+        &spec,
+        "host=127.0.0.1,port=1,server=on,wait=off",
+    );
     assert!(args.contains(&"none".to_string()), "不给网卡");
     assert!(
         !args.iter().any(|a| a.contains("netdev")),
@@ -504,26 +510,51 @@ pub(crate) fn guest_mounts_prefix_packages_and_fence_roots() {
         args.iter().any(|a| a.contains("initrd.img")),
         "initrd 要带上"
     );
+
+    // 共享后端：9p 把额外挂载翻成 -fsdev/-device 与 guest 端 mount 脚本。
+    assert_eq!(share.kind, "9p");
+    assert!(
+        share
+            .engine_args
+            .iter()
+            .any(|a| a.contains("virtio-9p-pci,fsdev=fs0,mount_tag=m0")),
+        "额外挂载要接成 virtio-9p 设备：{:?}",
+        share.engine_args
+    );
+    assert!(
+        share
+            .guest_scripts
+            .iter()
+            .any(|s| s.contains("mount -t 9p") && s.contains("m0")),
+        "guest 端要给出 9p 挂载命令：{:?}",
+        share.guest_scripts
+    );
+    assert!(
+        share.guest_scripts.iter().any(|s| s.contains(",ro")),
+        "只读挂载脚本要带 ro：{:?}",
+        share.guest_scripts
+    );
 }
 
 #[test]
 pub(crate) fn vm_service_holds_guests_by_lease() {
-    let host = Arc::new(crate::tests::doubles::FakeGuestHost::new());
+    let engine = Arc::new(crate::tests::doubles::FakeEngine::new());
     let vm = crate::capabilities::vm::service::VmService::new(
         Arc::new(InMemoryPackages::empty()),
-        host.clone(),
+        engine.clone(),
+        Arc::new(crate::tests::doubles::FakeShare::new()),
     );
     let spec = GuestSpec {
         lease: "w".to_string(),
-        arch: GuestArch::host(),
-        base: GuestBase {
+        image: GuestImage {
+            arch: GuestArch::host(),
             root: std::path::PathBuf::from("/base"),
             kernel: std::path::PathBuf::from("/base/vmlinuz"),
             initrd: None,
         },
         mounts: Vec::new(),
         net: false,
-        qemu_path: None,
+        engine_path: None,
     };
     vm.guest_start(&spec).expect("替身一定能起");
     let run = GuestRun {
@@ -535,7 +566,7 @@ pub(crate) fn vm_service_holds_guests_by_lease() {
     assert!(vm.guest_run("w", &run).ok, "有租约就能跑");
     assert!(!vm.guest_run("nope", &run).ok, "没这个租约要如实失败");
     vm.guest_stop("w");
-    let calls = host.calls.lock().expect("锁").clone();
+    let calls = engine.calls.lock().expect("锁").clone();
     assert!(calls.iter().any(|c| c == "start:w"), "{:?}", calls);
     assert!(calls.iter().any(|c| c == "run:w:echo hi"), "{:?}", calls);
     assert!(calls.iter().any(|c| c == "stop:w"), "{:?}", calls);
@@ -553,26 +584,28 @@ pub(crate) fn vm_live_guest_runs_command_inside_guest() {
         return;
     }
     let probe = crate::kernel::detail::HostProbeAdapter;
-    let base = classify_base(std::path::Path::new(base_dir.trim()), &probe).expect("基础根要可用");
+    let image = classify_base(std::path::Path::new(base_dir.trim()), &probe).expect("基础根要可用");
     // 额外 9p 共享也要真挂进 guest（QEMU 不替 guest 挂）：用一份带标记的临时目录验证。
     let share = crate::tests::scratch("vm-live-share");
     std::fs::create_dir_all(&share).expect("建共享目录");
     std::fs::write(share.join("marker.txt"), "SHARE_MARKER").expect("写标记");
     let guest_dir = "/solomni-vm-live-share";
-    let host = crate::capabilities::vm::detail::QemuGuest::new();
+    let engine = crate::capabilities::vm::detail::QemuEngine::new();
     let spec = GuestSpec {
         lease: "vm-live".to_string(),
-        arch: GuestArch::host(),
-        base,
+        image,
         mounts: vec![GuestMount {
             host: share.clone(),
             guest: guest_dir.to_string(),
             read_only: true,
         }],
         net: false,
-        qemu_path: Some(qemu),
+        engine_path: Some(qemu),
     };
-    let mut guest = host.start(&spec).expect("起 guest");
+    let plan = crate::capabilities::vm::detail::NinePShare::new()
+        .plan("qemu", &spec.mounts)
+        .expect("9p 计划要能派生");
+    let mut guest = engine.boot(&spec, &plan).expect("起 guest");
     let run = GuestRun {
         command: format!(
             "cat /etc/os-release; test -e '{}' && echo HOST_VISIBLE || echo HOST_HIDDEN; cat {}/marker.txt; echo VM_LIVE_OK",
@@ -583,7 +616,7 @@ pub(crate) fn vm_live_guest_runs_command_inside_guest() {
         env: Vec::new(),
         cwd: String::new(),
     };
-    let out = guest.exec(&run);
+    let out = guest.channel().exec(&run);
     guest.stop();
     assert!(out.ok, "guest 里执行要成功：{}", out.output);
     assert!(out.output.contains("VM_LIVE_OK"), "输出：{}", out.output);

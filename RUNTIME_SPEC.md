@@ -75,19 +75,20 @@ files:                      # 包内文件指纹：用于可复现与呈现
     配置界面禁用并说明缺什么（`vm::tier_readiness` / `tier_refusal`：创建、编辑与界面走同一把尺子）——
     这是用户环境问题，不是选型问题
 
-当前状态：虚拟机档的**选型、诊断、装配计划、逐项前置检测、guest 端口与 QEMU 后端已就位**
-（有单元测试钉住顺序、定版、冲突预检、承载判定、挂载清单与 QEMU 参数），整条业务住在独立能力 `vm`
-（逐文件职责见 [docs/vm/README.md](docs/vm/README.md)）；**执行分派已接线**（会话在 vm 档把模块命令交给 guest，建会话时装配并拉起，删除时销毁），
-但整条链路**尚未真机验证**，就绪项暂判否，虚拟机档仍不可选。
+当前状态：单一 Debian guest、QEMU 后端与 9p 共享已就位（有单元测试钉住顺序、定版、冲突预检、承载判定、挂载清单与 QEMU 参数），
+整条业务住在独立能力 `vm`（逐文件职责见 [docs/vm/README.md](docs/vm/README.md)）；执行分派已接线（会话在 vm 档把模块命令交给 guest，建会话时装配并拉起，删除时销毁），
+guest 有 `-nic none`、root 走 9p，就绪项 `guest` 仅 Linux 放行（Windows / macOS 判否）。
 
-前置检测是**一份逐项清单**（`vm::vm_requirements`，界面与 `--doctor` 照抄同一份）：虚拟机监视器、guest 本体、QEMU、基础根，
-每项给出"现状 + 怎么补"。guest 本体按**已验证平台**放开（Linux 已验；Windows / macOS 待验），其余项按事实（`vm::tier_readiness`）；
-QEMU 与基础根**用户自备**：`qemu_path` 是全局设置（登记了就用登记路径启动，空则兜底看 PATH），基础根是**会话级**的 `exec.base`（`meta.yaml`）；产品只检测与指路。
-项目另给一个**只写项目内**的一键补齐手段 `setup-vm.js`（QEMU 与 Debian guest 基础根落 `.vm/`，下载源在 `links.yaml` 的 `guest.*`，需用户同意；当前只做 Linux）。
-基础根 = 一个目录：发行版 rootfs + `vmlinuz`（或 `bzImage`）+ 可选 `initrd.img`（判定在 `vm/domain/guest.rs`，就绪检测与界面照它如实报）。
-镜像方向：guest 在三平台统一为同一个 Linux 发行版（Debian stable 为默认基线）；接入时把默认下载链接记进 `links.yaml`。
-guest 与会话级装配属于产品路线图：现状、怎么补与验收标准见 `tests/gaps.yaml` 的 `fence.guest-tier-not-wired`。
-Linux 侧已用 `setup-vm.js` 装出的基础根在 **KVM** 下跑通真机探针与产品级会话验收（`vm_live_guest_runs_command_inside_guest`；e2e 的 `SOLOMNI_VM_BASE` 场景：vm 档会话里模块工具真在 guest 里跑、删会话即销毁 guest）。装配侧补上了"接上 QGA 后把额外 9p 共享逐个挂到宿主原路径"与"基础根按读写共享"（否则模块目录在 guest 里不存在）。**Windows / macOS 尚未真机验收**，`guest` 项在那两平台判否。
+**已批准、实施中**：虚拟机档改为**四轴可扩展组合**——宿主 × `VmEngine`（默认 QEMU；macOS 后续 Apple vz）× `GuestImage`
+（默认 Debian，后续用户自备）× `GuestChannel`（默认 QGA；后续自研 agent + vsock）× `ShareBackend`（virtiofs / 9p / SMB / copy）。
+各平台默认吃当前最强组合并逐级回退（Linux `QEMU/virtiofs`、macOS `vz/原生 virtiofs`、Windows `QEMU/WHPX + SMB over guestfwd`）；
+root 改为磁盘镜像；guest 有 `restrict=on` 网卡。契约与矩阵见 [docs/vm/README.md](docs/vm/README.md) 的「多平台组合」。
+
+前置检测是**一份逐项清单**（`vm::vm_requirements`，界面与 `--doctor` 照抄同一份），按**组合**报"现状 + 怎么补"。
+依赖（QEMU / `virtiofsd` / 镜像）**用户自备**，由 `setup-vm.js` 按平台装进项目内 `.vm/`（下载源在 `links.yaml`，需用户同意）；产品只检测与指路。
+guest 镜像从"一个目录（rootfs + 内核）"扩展为镜像描述（id / arch / root 磁盘镜像 / kernel / initrd / agent / 声明的共享客户端能力）。
+Linux 侧已在 KVM 下跑通真机探针与产品级会话验收（`vm_live_guest_runs_command_inside_guest`；e2e 的 `SOLOMNI_VM_BASE` 场景）；
+现状、怎么补与验收标准见 `tests/gaps.yaml` 的 `fence.guest-tier-not-wired`。
 
 ## 六、校验与拒收
 

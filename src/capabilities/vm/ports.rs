@@ -1,29 +1,60 @@
 //! 目的：vm 能力的出站端口。
-//! 管：PackageSource（扫描 runtimes/ 包清单）与 GuestHost（起 / 跑 / 销毁 guest）。
-//! 不管：清单校验与冲突预检（domain/packages.rs）、挂载与 QEMU 参数的派生（domain/guest.rs）。
-//! 联动：由 service.rs 持有（R12）；实现是 detail/fs_packages.rs 与 detail/qemu.rs。
+//! 管：PackageSource（扫描 runtimes/ 包清单）、VmEngine / GuestVm / GuestChannel（起 / 跑 / 销毁 guest）与 ShareBackend（宿主↔guest 共享）。
+//! 不管：清单校验与冲突预检（domain/packages.rs）、镜像判定与挂载清单（domain/guest.rs）、引擎参数（detail/）。
+//! 联动：由 service.rs 持有（R12）；实现是 detail/fs_packages.rs、detail/qemu.rs 与 detail/share_ninep.rs。
 
-use crate::capabilities::vm::domain::guest::{GuestRun, GuestSpec};
+use crate::capabilities::vm::domain::guest::{GuestImage, GuestMount, GuestRun, GuestSpec};
 use crate::capabilities::vm::domain::packages::Library;
 use crate::kernel::api::ToolOutcome;
 
 /// 目的：运行包库来源端口——扫描依赖文件夹（runtimes/）里的包清单。
 /// 约束：「清单即事实」，每次调用重扫，放入即出现；清单校验、去重与冲突预检在本能力（packages::Library::build），
-///   目录遍历与 yaml 解析在适配层。只有 `service.rs` 持有它（R12）。
+///   目录遍历与 yaml 解析在适配层。只有 service.rs 持有它（R12）。
 pub trait PackageSource {
     fn scan(&self) -> Library;
     /// 包库所在目录（配置界面要把"把包放哪儿"如实告诉用户）。
     fn dir(&self) -> std::path::PathBuf;
 }
 
-/// 目的：guest 后端端口——按规格拉起一个 guest。
-/// 约束：只做机制；挂哪些根、给不给网卡由调用方派生后传入。只有 `service.rs` 持有它（R12）。
-pub trait GuestHost: Send + Sync {
-    fn start(&self, spec: &GuestSpec) -> Result<Box<dyn Guest>, String>;
+/// 目的：共享计划——把一次启动要挂的宿主目录翻成引擎参数与 guest 端挂载命令。
+/// 约束：与引擎解耦是"尽量"：engine_args 由后端按调用方给的引擎 id 生成（同一后端可服务多引擎）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SharePlan {
+    /// 目的：后端稳定短名（"9p" 等），日志与诊断用。
+    pub kind: &'static str,
+    /// 目的：交给引擎的额外参数（QEMU 的 -fsdev / -device 等）。
+    pub engine_args: Vec<String>,
+    /// 目的：接上命令通道后在 guest 里逐条执行的挂载命令。
+    pub guest_scripts: Vec<String>,
 }
 
-/// 目的：一个已拉起的 guest——在它里面跑命令、销毁它。
-pub trait Guest: Send {
-    fn exec(&mut self, run: &GuestRun) -> ToolOutcome;
+/// 目的：宿主↔guest 的共享后端（virtiofs / 9p / SMB / copy）。只有 service.rs 持有它（R12）。
+pub trait ShareBackend: Send + Sync {
+    /// 目的：后端稳定短名（诊断与日志用）。
+    fn id(&self) -> &'static str;
+    /// 目的：本后端能不能把共享落到这台引擎 / 这份 guest 上（纯事实）。
+    fn supports(&self, engine: &str, guest: &GuestImage) -> bool;
+    /// 目的：派生共享计划（引擎参数 + guest 端挂载命令）。
+    fn plan(&self, engine: &str, mounts: &[GuestMount]) -> Result<SharePlan, String>;
+}
+
+/// 目的：VM 引擎端口——探测承载、拉起 / 销毁一台 guest。只有 service.rs 持有它（R12）。
+pub trait VmEngine: Send + Sync {
+    /// 目的：引擎稳定短名（"qemu" / "vz"）。
+    fn id(&self) -> &'static str;
+    /// 目的：本引擎能不能承载这份 guest 镜像（纯事实）。
+    fn supports(&self, guest: &GuestImage) -> bool;
+    /// 目的：按规格与共享计划拉起一台 guest。
+    fn boot(&self, spec: &GuestSpec, share: &SharePlan) -> Result<Box<dyn GuestVm>, String>;
+}
+
+/// 目的：一台已拉起的 guest——给出命令通道并销毁它。
+pub trait GuestVm: Send {
+    fn channel(&mut self) -> &mut dyn GuestChannel;
     fn stop(&mut self);
+}
+
+/// 目的：在 guest 里执行命令的通道（QGA / 自研 agent）。
+pub trait GuestChannel: Send {
+    fn exec(&mut self, run: &GuestRun) -> ToolOutcome;
 }

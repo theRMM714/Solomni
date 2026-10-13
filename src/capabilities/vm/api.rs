@@ -7,13 +7,11 @@ pub use crate::capabilities::vm::domain::exec::{
     absent, declared, diagnose_text, plan, plan_summary, tier_readiness, tier_refusal, unavailable,
     vm_diagnoses, vm_requirements, Diagnosis, ExecPlan, VmInputs, VmRequirement,
 };
-pub use crate::capabilities::vm::domain::guest::{
-    classify_base, mounts_from, GuestArch, GuestRun, GuestSpec,
-};
+pub use crate::capabilities::vm::domain::guest::{classify_base, mounts_from, GuestRun, GuestSpec};
 pub use crate::capabilities::vm::domain::packages::Library;
 
 /// 目的：虚拟机档的**用例面**（`service.rs` 实现）——运行包库、包库目录与 guest 生命周期走这里。
-/// 约束：出站端口 `PackageSource` / `GuestHost` 只由 `service.rs` 持有（R12）。
+/// 约束：出站端口 `PackageSource` / `VmEngine` / `ShareBackend` 只由 `service.rs` 持有（R12）。
 pub trait Vm: Send + Sync {
     /// 运行包库：可用的包清单（每次重扫）。
     fn library(&self) -> Library;

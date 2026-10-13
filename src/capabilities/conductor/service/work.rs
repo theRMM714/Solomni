@@ -358,7 +358,7 @@ impl Conductor {
         sandboxes: &crate::capabilities::workspace::api::Sandboxes,
     ) -> Result<(), String> {
         let base_path = meta.exec.base.clone().unwrap_or_default();
-        let base = crate::capabilities::vm::api::classify_base(
+        let image = crate::capabilities::vm::api::classify_base(
             std::path::Path::new(&base_path),
             self.probe.as_ref(),
         )?;
@@ -384,11 +384,10 @@ impl Conductor {
         };
         let spec = crate::capabilities::vm::api::GuestSpec {
             lease: meta.name.clone(),
-            arch: crate::capabilities::vm::api::GuestArch::host(),
-            base,
+            image,
             mounts: crate::capabilities::vm::api::mounts_from(plan, &fence),
             net: meta.exec.net,
-            qemu_path: self.qemu_path().map(str::to_string),
+            engine_path: self.qemu_path().map(str::to_string),
         };
         self.vm.guest_start(&spec)
     }

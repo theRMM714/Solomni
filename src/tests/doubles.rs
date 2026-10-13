@@ -1344,41 +1344,97 @@ pub(crate) fn test_workspace_store(
     Arc::new(crate::capabilities::workspace::service::WorkspaceService::new(dirs, store))
 }
 
-/// 目的：guest 后端的测试替身——不起 QEMU，只记录 start / run / stop。
+/// 目的：VM 引擎的测试替身——不起真 VM，只记录 start / run / stop。
 #[derive(Clone, Default)]
-pub(crate) struct FakeGuestHost {
+pub(crate) struct FakeEngine {
     pub calls: Arc<Mutex<Vec<String>>>,
 }
 
-impl FakeGuestHost {
+impl FakeEngine {
     /// 目的：空记录起步。
-    pub(crate) fn new() -> FakeGuestHost {
-        FakeGuestHost::default()
+    pub(crate) fn new() -> FakeEngine {
+        FakeEngine::default()
     }
 }
 
-impl crate::capabilities::vm::ports::GuestHost for FakeGuestHost {
-    fn start(
+impl crate::capabilities::vm::ports::VmEngine for FakeEngine {
+    fn id(&self) -> &'static str {
+        "fake"
+    }
+
+    fn supports(&self, _guest: &crate::capabilities::vm::domain::guest::GuestImage) -> bool {
+        true
+    }
+
+    fn boot(
         &self,
         spec: &crate::capabilities::vm::domain::guest::GuestSpec,
-    ) -> Result<Box<dyn crate::capabilities::vm::ports::Guest>, String> {
+        _share: &crate::capabilities::vm::ports::SharePlan,
+    ) -> Result<Box<dyn crate::capabilities::vm::ports::GuestVm>, String> {
         self.calls
             .lock()
             .expect("锁")
             .push(format!("start:{}", spec.lease));
-        Ok(Box::new(FakeGuest {
+        Ok(Box::new(FakeVm {
+            channel: FakeChannel {
+                lease: spec.lease.clone(),
+                calls: self.calls.clone(),
+            },
             lease: spec.lease.clone(),
             calls: self.calls.clone(),
         }))
     }
 }
 
-struct FakeGuest {
+/// 目的：共享后端的测试替身——恒可落、计划为空（9p 的真实派生在 vm 用例里验）。
+#[derive(Clone, Default)]
+pub(crate) struct FakeShare;
+
+impl FakeShare {
+    /// 目的：空实现起步。
+    pub(crate) fn new() -> FakeShare {
+        FakeShare
+    }
+}
+
+impl crate::capabilities::vm::ports::ShareBackend for FakeShare {
+    fn id(&self) -> &'static str {
+        "fake"
+    }
+
+    fn supports(
+        &self,
+        _engine: &str,
+        _guest: &crate::capabilities::vm::domain::guest::GuestImage,
+    ) -> bool {
+        true
+    }
+
+    fn plan(
+        &self,
+        _engine: &str,
+        _mounts: &[crate::capabilities::vm::domain::guest::GuestMount],
+    ) -> Result<crate::capabilities::vm::ports::SharePlan, String> {
+        Ok(crate::capabilities::vm::ports::SharePlan {
+            kind: "fake",
+            engine_args: Vec::new(),
+            guest_scripts: Vec::new(),
+        })
+    }
+}
+
+struct FakeVm {
+    channel: FakeChannel,
     lease: String,
     calls: Arc<Mutex<Vec<String>>>,
 }
 
-impl crate::capabilities::vm::ports::Guest for FakeGuest {
+struct FakeChannel {
+    lease: String,
+    calls: Arc<Mutex<Vec<String>>>,
+}
+
+impl crate::capabilities::vm::ports::GuestChannel for FakeChannel {
     fn exec(
         &mut self,
         run: &crate::capabilities::vm::domain::guest::GuestRun,
@@ -1391,6 +1447,12 @@ impl crate::capabilities::vm::ports::Guest for FakeGuest {
             ok: true,
             output: "fake-guest".to_string(),
         }
+    }
+}
+
+impl crate::capabilities::vm::ports::GuestVm for FakeVm {
+    fn channel(&mut self) -> &mut dyn crate::capabilities::vm::ports::GuestChannel {
+        &mut self.channel
     }
 
     fn stop(&mut self) {
@@ -1444,7 +1506,8 @@ pub(crate) fn test_vm(
 ) -> Arc<dyn crate::capabilities::vm::api::Vm + Send + Sync> {
     Arc::new(crate::capabilities::vm::service::VmService::new(
         packages,
-        Arc::new(FakeGuestHost::new()),
+        Arc::new(FakeEngine::new()),
+        Arc::new(FakeShare::new()),
     ))
 }
 

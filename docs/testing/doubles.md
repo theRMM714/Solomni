@@ -32,7 +32,7 @@ Fake 必须：
 | `src/capabilities/llm/detail/fake_chat.rs:DemoGateway` | 演示/回落网关 | 契约已就位（两类通道 / 回落告知 / 无网络无密钥） |
 | `src/tests/doubles.rs:InMemorySettings`、`InMemoryHistory`、`InMemoryWorkspace`、`InMemorySysIo`、`InMemoryWorkStore`、`InMemoryModuleState` | 内存 Fake | 已被核心测试装配使用；端口矩阵已登记（见 §三，已验收） |
 | `src/tests/doubles.rs:InMemoryPackages` | 包库 Fake | 已被核心测试使用；端口矩阵已登记（见 §三，已验收） |
-| `src/tests/doubles.rs:FakeGuestHost`、`RecordingVm` | guest 后端 Fake（记录 start / run / stop）、vm 用例面替身（记录 guest_run） | 已被 vm 契约测试使用；端口矩阵已登记（见 §三） |
+| `src/tests/doubles.rs:FakeEngine`、`FakeShare`、`RecordingVm` | VM 引擎 Fake（记录 start / run / stop）、共享后端 Fake（空计划）、vm 用例面替身（记录 guest_run） | 已被 vm 契约测试使用；端口矩阵已登记（见 §三） |
 | `src/tests/doubles.rs:FakeCatalog` | 模型目录 Fake + 调用记录（`seen`） | 已被核心测试使用；端口矩阵已登记（见 §三，已验收） |
 | `src/tests/doubles.rs:VecSource` | 模块清单 Fake | 已被核心测试使用；端口矩阵已登记（见 §三，已验收） |
 | `src/tests/doubles.rs:ScriptGateway`、`SharedScript` | 脚本网关 Fake | 已被核心测试使用；端口矩阵已登记（失败注入：无通道回落如实告知） |
@@ -122,7 +122,9 @@ Fixture 必须：
 | `ModuleSource`（modules） | `VecSource`（经 `test_modules` 装进 `ModulesService`） | 不适用 | 不适用（错误进 `rejected`） | 不适用 | `detail::FsModules` | 已验收 |
 | `ModuleStateStore`（modules） | `InMemoryModuleState`（经 `test_modules_store`） | 覆盖落盘可观察 | 不适用 | 不适用 | `detail::YamlModuleState` | 已验收 |
 | `PackageSource` | `InMemoryPackages` | 不适用 | 不适用（错误进 `rejected`） | 不适用 | `FsPackages` | 已验收；**持有者只有 `vm::service.rs`**（R12） |
-| `GuestHost`（vm） | `FakeGuestHost` | `calls`（start / run / stop） | 不适用（起不来是真实后端的错） | 不适用 | `QemuGuest`（真机验：`vm_live_guest_runs_command_inside_guest` 在 KVM 下真起 guest、挂额外共享、验宿主路径不可达；e2e 的 `SOLOMNI_VM_BASE` 场景在 vm 档会话里真跑模块工具并验删会话销毁 guest；环境由 `setup-vm.js` 装入 `.vm/`，默认 `[探针]` 跳过） | 契约测试与执行分派已验收；真机探针与产品级会话验收已跑通（Linux KVM） |
+| `VmEngine`（vm） | `FakeEngine` | `calls`（start / stop） | 不适用（起不来是真实后端的错） | 不适用 | `QemuEngine`（真机验：`vm_live_guest_runs_command_inside_guest` 在 KVM 下真起 guest、挂额外共享、验宿主路径不可达；e2e 的 `SOLOMNI_VM_BASE` 场景在 vm 档会话里真跑模块工具并验删会话销毁 guest；环境由 `setup-vm.js` 装入 `.vm/`，默认 `[探针]` 跳过） | 契约测试与执行分派已验收；真机探针与产品级会话验收已跑通（Linux KVM） |
+| `GuestChannel`（vm） | `FakeChannel`（经 `FakeEngine`） | `calls`（run） | 不适用 | 不适用 | `QemuHandle`（QGA 通道，随 `QemuEngine.boot` 起） | 契约测试已验收 |
+| `ShareBackend`（vm） | `FakeShare` | 计划可观察（恒空） | 不适用 | 不适用 | `NinePShare`（`src/tests/vm.rs` 钉住 -fsdev / -device 与 guest 端 mount 脚本；真机验同 vm 探针） | 契约测试已验收 |
 | `Workdirs` | `InMemoryWorkspace` | 内存布局可观察 | `fail_with` | 不适用 | `FsWorkspace` | 已验收 |
 | `WorkStore` | `InMemoryWorkStore` | 内存文件 / 提交 / 基线可观察 | `fail_with` | 不适用 | `FsWorkStore`（含符号链接逃逸拒绝） | 已验收；**持有者只有 `workspace::service.rs`**（R12） |
 | `ModuleSource` / `ModuleStateStore` 的持有者 | ——（**只由 `modules::service.rs` 持有**；别的能力经 `modules::api::ModulesOps` 要清单与启停有效值） |
