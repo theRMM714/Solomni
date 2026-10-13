@@ -1,7 +1,7 @@
 # vm（虚拟机档）
 
-> 运行包库、执行档位与计划、就绪检测与诊断；guest 端口、QEMU 后端与执行分派已就位。
-> 多平台组合（宿主 × 引擎 × guest × 通道 × 共享）为**已批准方向，实施中**（见「五」）。
+> 运行包库、执行档位与计划、就绪检测与诊断；guest 端口、引擎后端与执行分派已就位。
+> 五轴组合（宿主 × 引擎 × guest × 通道 × 共享）已落地：Linux 与 Windows 已真机验收，macOS 尚未做（见「五」与 `tests/gaps.yaml`）。
 > 本目录是该单元的唯一细则入口：本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）→ 其它细则。
 > 分层与依赖方向见 [ARCHITECTURE.md](../../ARCHITECTURE.md) §一，业务边界判据见 §九；契约见 [RUNTIME_SPEC.md](../../RUNTIME_SPEC.md)。
 
@@ -18,15 +18,15 @@
 （`plan` / `tier_readiness` / `tier_refusal` / `vm_requirements` / `vm_diagnoses` / …）。
 出站端口 `PackageSource` / `VmEngine` / `ShareBackend` **只由 `service.rs` 持有**（R12）；`GuestVm` / `GuestChannel` 由引擎在 boot 时交出。`ExecSpec` 是共享事实（在 `kernel`），本能力只读它。
 
-**当前状态**：四轴已按可插的形状落地——`QemuEngine`（当前唯一引擎）、`GuestImage`（基础根里可放 `guest.yaml` 声明 id / arch / agent / os / clients）、
-`QgaChannel`（QEMU virtio-serial）、`NinePShare`（Linux / macOS 的目录根）与 `CopyShare`（QGA 复制，三平台通用）。
-按平台的组合回退链是数据（`default_combos` / `choose_combo`），加速器按平台给（`kvm:tcg` / `whpx:tcg` / `hvf:tcg`），共享要隧道时给 `restrict=on` 网卡。
-执行分派已接线（会话在 `tier == Vm` 时把模块命令交给 guest；建会话时装配并拉起，会话删除时销毁）；就绪项 `guest` 按**已验平台数据表**放开（当前 Linux / Windows），并带上本平台上**已实现**的组合。
+**当前状态**：五轴已按可插的形状落地——`QemuEngine`（当前唯一引擎）、`GuestImage`（基础根里可放 `guest.yaml` 声明 id / arch / os / agent / clients）、
+`QgaChannel`（QEMU virtio-serial）、`NinePShare`（目录根）与 `CopyShare`（QGA 复制，三平台通用）。
+按平台的组合回退链是数据（`default_combos` / `choose_combo`），加速器按平台给（`accel=kvm:tcg` / `accel=whpx:tcg` / `accel=hvf:tcg`），共享要隧道时给 `restrict=on` 网卡。
+执行分派已接线（会话在 `tier == Vm` 时把模块命令交给 guest；建会话时装配并拉起，会话删除时销毁）；就绪项 `guest` 按**已验平台数据表**（`VERIFIED_HOSTS`）放开，并带上本平台上**已实现**的组合。
 
-**实施中（外部依赖未就位）**：Linux 侧已在 KVM 下跑通真机探针与产品级会话验收；Windows 已真机跑通（引擎级探针与
-e2e 的 vm 场景都过——guest 真起、工具在 guest 内执行、删会话销毁 guest；镜像经维护启动预装 python3 / nodejs）；
-macOS 缺取包（`vm.qemu-provisioning-macos`）与 virtiofsd；
-virtiofs（Linux 性能档）、SMB 实时共享（Windows）、macOS Apple vz 引擎与自研 agent + vsock 通道都仍是缺口。契约与组合矩阵见本页「五」，现状与验收见
+**当前状态**：Linux（QEMU/KVM + 9p）与 Windows（QEMU/WHPX + QGA 复制）已真机验收——引擎级探针与 e2e 的 vm 会话场景都过
+（guest 真起、工具在 guest 内执行、删会话销毁 guest；Windows 的镜像经维护启动预装 python3 / nodejs）。
+macOS 缺取包（`vm.qemu-provisioning-macos`）与 virtiofsd；virtiofs（Linux 性能档）、SMB 实时共享（Windows）、
+macOS Apple vz 引擎与自研 agent + vsock 通道仍是缺口。契约与组合矩阵见本页「五」，缺口与验收标准见
 [tests/gaps.yaml](../../tests/gaps.yaml) 的 `fence.guest-tier-not-wired`。
 
 `node setup-vm.js` 按平台分发（共享件 `setup-vm-common.js`）：Linux 装 QEMU 与 Debian 基础根（目录 rootfs + 内核 + 9p initrd）；
@@ -43,9 +43,9 @@ Windows 装 MSYS2 的 QEMU 闭包、下 Debian cloud qcow2、首启经 cloud-ini
 - `package.yaml` 契约 → [RUNTIME_SPEC.md](../../RUNTIME_SPEC.md)；本能力的用例测试在 `src/tests/vm.rs`。
 - 新增端口或替身 → [docs/testing/doubles.md](../testing/doubles.md) 的端口矩阵。
 
-## 五、多平台组合（已批准，实施中）
+## 五、多平台组合（已落地）
 
-目标：三平台各自吃到当前最强组合，且引擎 / 通道 / 共享 / guest 四轴都可插——"统一 Debian guest"只是**默认实例**，不是硬约束。
+目标：三平台各自吃到当前最强组合，且宿主 / 引擎 / guest / 通道 / 共享**五轴都可插**——"统一 Debian guest"只是**默认实例**，不是硬约束。
 
 | 端口 / 数据 | 职责 | 适配器（默认在前） |
 | --- | --- | --- |
@@ -58,12 +58,12 @@ Windows 装 MSYS2 的 QEMU 闭包、下 Debian cloud qcow2、首启经 cloud-ini
 
 | 宿主 | 引擎 | 共享 | 加速 | 回退链 |
 | --- | --- | --- | --- | --- |
-| Linux | QEMU | virtiofs（需 `virtiofsd`） | `kvm:tcg` | virtiofs → 9p → smb → copy |
-| macOS | Apple vz（阶段二） | 原生 virtiofs | Hypervisor.framework | vz → QEMU/HVF+9p → smb → copy |
-| Windows | QEMU | copy（**已验**）；SMB over guestfwd 待做 | `whpx:tcg` | smb → copy |
+| Linux | QEMU | 9p（**已验**）；virtiofs 待做 | `accel=kvm:tcg` | virtiofs → 9p → smb → copy |
+| macOS | Apple vz（后续） | 原生 virtiofs | Hypervisor.framework | vz → QEMU/HVF+9p → smb → copy |
+| Windows | QEMU | copy（**已验**）；SMB over guestfwd 待做 | `accel=whpx:tcg` | smb → copy |
 
-- root 一律磁盘镜像（qcow2/raw），不再用共享文件系统当根；guest 有 `restrict=on` 的网卡（出站全断，`guestfwd` 内部隧道可用）。
-- 就绪检测按**组合**逐项报"现状 + 怎么补"；"验过没有"是组合台账（数据），不再用平台 `cfg`。
+- root 用磁盘镜像（qcow2/raw）；需要共享时 guest 拿 `restrict=on` 的网卡（出站全断，`guestfwd` 内部隧道可用）。
+- 就绪检测按**组合**逐项报"现状 + 怎么补"；"验过没有"是数据表（`VERIFIED_HOSTS`），不是平台 `cfg`。
 - **路径桥**（`domain/paths.rs`）：宿主路径 ↔ guest 路径只有一座桥——宿主与 guest 同方言时**恒等**（宿主路径原样在 guest 里成立），跨方言时编进镜像根（宿主 `D:\a\b` → POSIX guest `/solomni-host/d/a/b`；POSIX 宿主 → Windows guest `C:\solomni-host\…`，非法字符转义）。挂载点与命令装配（`cwd` / 路径型 `env`）都走它。
 - **工作环境提示词按环境分发**（`prompts/shared/tools.yaml` 的 `env_hosts` / `env_guests` / `envs`）：本机档按宿主平台给，虚拟机档按 guest 的 os 给——虚拟机档给出的路径就是 guest 内路径，模型据此拼参数。
 - 用户自备 guest 可在基础根目录放一份 `guest.yaml` 声明画像（`id` / `arch` / `agent` / `os` / `clients: [9p, virtiofs, cifs]`）；缺省按目录名与 Debian 默认（linux + QGA + 9p + virtiofs），不认识的值如实拒收。

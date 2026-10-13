@@ -231,7 +231,7 @@ fn run_rounds(
     let rounds = run(s, spec, live, &mut on_round, sink);
     s.next_line = next_line.get();
 
-    // 只补记账（不再构造行、不再外送）：顺序与旧逻辑逐字对应。
+    // 只补记账（不构造行、不外送）：顺序与出账时序一致。
     for (round, views) in rounds.iter().zip(per_round.into_inner()) {
         if error.borrow().is_some() {
             break;
@@ -259,7 +259,7 @@ fn run_rounds(
                 }
             }
             None => {
-                // 与旧逻辑同一时序：先扩展历史，再记这一行的 mark。
+                // 与出账同一时序：先扩展历史，再记这一行的 mark。
                 for m in &round.text_msgs {
                     s.dialogue.push(m.clone());
                 }

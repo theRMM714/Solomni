@@ -8,37 +8,21 @@
   scope: global
   level: T4
   why: |
-    虚拟机档已把选型、诊断、装配计划、逐项前置检测、guest 端口、QEMU 后端与执行分派收进独立能力 vm，
-    Linux 已在真机（KVM + 9p 基础根）跑通；Windows 的环境（QEMU/WHPX + Debian cloud 磁盘镜像 + QGA 复制）
-    已能一键装进项目内并**真机跑通**（引擎级探针 + e2e 的 vm 场景都过：guest 真起、工具在 guest 内执行、删会话销毁 guest）；
-    macOS 缺 virtiofsd 与取包，未验；
-    macOS 缺 virtiofsd 与取包，未验（vm::tier_readiness 在未验平台把 guest 项判否）。
+    虚拟机档的**五轴组合**（宿主 × VmEngine × GuestImage × GuestChannel × ShareBackend）已落地，执行分派已接线：
+    Linux（QEMU/KVM + 9p）与 Windows（QEMU/WHPX + QGA 复制）已真机验收（引擎级探针 + e2e 的 vm 会话场景都过）。
+    macOS 的组合还没验，且它要的两块也还没做：Apple vz 引擎与自研 agent（vm.macos-vz-engine）、QEMU 取包
+    （vm.qemu-provisioning-macos）、virtiofsd（vm.share-virtiofs-linux）。未验平台在 vm::tier_readiness 上把 guest 项判否。
   how: |
-    方向已批准：guest 做成**四轴可扩展组合**——宿主 × VmEngine（默认 QEMU；macOS 后续 Apple vz）×
-    GuestImage（默认 Debian，后续用户自备）× GuestChannel（默认 QGA；后续自研 agent + vsock）×
-    ShareBackend（virtiofs / 9p / SMB / copy）；各平台默认吃当前最强组合并逐级回退。分阶段：
-    0) 已完成：四端口（VmEngine/GuestVm/GuestChannel、ShareBackend/SharePlan/ShareGuard）落地，QEMU+9p 迁到适配器；
-       组合回退链是数据（default_combos/choose_combo）；已验平台是数据表（host_verified）；root 支持磁盘镜像；
-       共享加了 QGA 复制后端（三平台通用）；GuestImage 带 id/agent/共享客户端能力，可放 guest.yaml；
-       非 Linux 的 setup-vm 走预生成磁盘镜像包下载。
-    1) 三平台 QEMU 组合真机跑通：Linux QEMU/KVM + 9p 已验（virtiofs 见 vm.share-virtiofs-linux）；
-       Windows QEMU/WHPX + copy 的环境已就位（setup-vm-windows.js 取 MSYS2 闭包 + Debian cloud qcow2 + cloud-init 装 QGA，
-       QGA 握手判成功），路径桥让挂载点与命令 cwd 落到 guest 拼法，镜像经维护启动预装 python3 / python / nodejs，
-       引擎级探针与 e2e 的 vm 场景都已通过（运行包按 guest 平台分包见 vm.runtime-per-guest-platform）；
-       macOS 待取包（vm.qemu-provisioning-macos）与 virtiofsd。
-    2) macOS 新增 Apple vz 引擎 + 原生 virtiofs + 自研 guest agent（vsock 通道）。
-    3) 多 guest：用户自备镜像契约，再谈非 Linux guest。
+    在 macOS 真机上按顺序补齐并验收：先用 QEMU/HVF + 9p 把备选链跑通（依赖取包），再上 Apple vz + 原生 virtiofs + 自研 agent（vsock）。
     依赖由 setup-vm.js 按平台装进项目内 .vm/，下载源进 links.yaml；产品不自带、不分发。
     契约与组合矩阵见 docs/vm/README.md 的「多平台组合」。
   accept: |
     每个组合单独判定：vm 档会话里模块工具真在 guest 内跑（进程与宿主隔离）、删会话即销毁 guest 与其磁盘；
     就绪面板按组合逐项列出缺什么、每项怎么补；每平台探针覆盖"组合可用 / 不可用"两种结论。
-    Linux（QEMU/9p）与 Windows（QEMU/WHPX + copy）已验；macOS 组合通过后销账，全部通过后删除本条，
-    并同步 PRODUCT.md / RUNTIME_SPEC.md / docs/vm/ 的当前状态。
+    Linux 与 Windows 已验；macOS 通过后销账，全部通过后删除本条，并同步 PRODUCT.md / RUNTIME_SPEC.md / docs/vm/ 的当前状态。
   blocked_by: |
-    阶段 0 已落地（四端口抽象）；阶段 1 三平台 QEMU 组合与 Windows / macOS 真机验收尚未做。
-    共享：Windows 走 QGA 复制兜底（实时共享见 vm.share-realtime-windows，Linux 性能档见 vm.share-virtiofs-linux）。
-    阶段 2-3（macOS vz、多 guest）在阶段 1 之后。
+    需要一台 macOS 机器（验收环境）。macOS 侧的取包、virtiofsd、vz 引擎与自研 agent 分别在
+    vm.qemu-provisioning-macos / vm.share-virtiofs-linux / vm.macos-vz-engine 三条缺口里。
 - id: vm.share-realtime-windows
   scope: global
   level: T4
@@ -51,7 +35,7 @@
   accept: |
     Windows 真机 vm 档会话里，guest 对共享目录的写入在宿主即时可见（不必等执行结束），且不需要管理员权限。
   blocked_by: |
-    先要有可启动的 Windows 侧 guest 磁盘镜像（见 fence.guest-tier-not-wired），以及一个用户态 SMB3 实现。
+    缺一个用户态 SMB3 实现；guest 侧（cifs-utils）与 guestfwd 隧道要一起验。
 - id: vm.share-virtiofs-linux
   scope: global
   level: T4
@@ -66,7 +50,7 @@
   accept: |
     Linux 真机 vm 档会话走 virtiofs，工具在 guest 里读写共享目录；virtiofsd 随会话起停、删会话后不残留。
   blocked_by: |
-    virtiofsd 用户自备（setup-vm-linux.js 按平台取包）尚未做。
+    需要 Linux 真机钉定 virtiofsd 的 CLI 用法；setup-vm-linux.js 尚未替用户取 virtiofsd。
 - id: vm.qemu-provisioning-macos
   scope: global
   level: T4
@@ -79,6 +63,20 @@
     macOS 上 node setup-vm.js 能把 QEMU 装进项目内 .vm/ 并被就绪检测认出来，且不需要管理员权限。
   blocked_by: |
     需要一台 macOS 机器确定可用来源后写适配。
+- id: vm.macos-vz-engine
+  scope: global
+  level: T4
+  why: |
+    macOS 的默认组合是 Apple vz（Virtualization.framework）+ 原生 virtiofs + 自研 guest agent（vsock 通道）——
+    比 QEMU/HVF 更省、更贴近系统；现在既没有 VzEngine，也没有自研 agent 与它的通道实现。
+  how: |
+    1) 加 VzEngine 实现 VmEngine（机器 / 磁盘 / 网卡 / 目录共享 / 加速器，走 Virtualization.framework 的绑定）；
+    2) 加自研 guest agent + vsock 通道（GuestChannel 的第三个实现）；
+    3) 在 macOS 真机上钉定 API 与镜像格式（vz 对磁盘与共享目录的要求与 QEMU 不同）再写适配。
+  accept: |
+    macOS 真机 vm 档会话跑通（模块工具在 guest 内执行、删会话销毁 guest），e2e 的 vm 场景在该平台通过。
+  blocked_by: |
+    需要一台 macOS 机器才能钉定 API 与验收。
 - id: module.acp-adapter
   scope: global
   level: T3

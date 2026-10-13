@@ -56,6 +56,11 @@ Solomni 是一个**跑在自己机器上的 agent 运行环境（AgentOS）**：
   平台围栏（Windows AppContainer、Linux Landlock、macOS seatbelt）。装不上就如实报告能力等级，不假装有。
   围栏的授权落点分**必要**与**可选**：可选落点授不上只记事实；**必要落点授不上绝不静默降级**——
   弹一张卡让你选「本轮无围栏跑一次 / 放弃这次调用」，没有可回答的前端就拒绝执行（命令不落进程）。
+- **两档执行**：**本机档**（默认，脚本直接在宿主上跑）与**虚拟机档**（模块工具在 guest 里跑，进程与宿主隔离）。
+  虚拟机档按**宿主 × 引擎 × guest × 通道 × 共享**五轴可插：Linux（QEMU/KVM + 9p）与 Windows（QEMU/WHPX + QGA 复制）
+  已真机跑通，macOS 尚未做（见 [tests/gaps.yaml](tests/gaps.yaml)）。`node setup-vm.js` 按平台把 QEMU 与 Debian guest
+  一键装进项目内 `.vm/`；宿主路径与 guest 路径由**同一座桥**换算（同方言恒等，跨方言编进镜像根），工作环境提示词
+  给出的就是 guest 拼法。细节见 [docs/vm/README.md](docs/vm/README.md)，运行包契约见 [RUNTIME_SPEC.md](RUNTIME_SPEC.md)。
 - **登记处**：供应商 / 模型 / agent / 设置四份 YAML，全在 `.home/`，由界面管理。
   密钥只在本机登记处与核心的出站调用里（边界见 [REGISTRY_SPEC.md](REGISTRY_SPEC.md)）。
 - **两种交互面**：终端转录中心（默认）与本地网页（`-webUI`，只绑 `127.0.0.1`，默认 3081）。
@@ -74,6 +79,8 @@ Solomni 是一个**跑在自己机器上的 agent 运行环境（AgentOS）**：
 node setup-runtime.js    # 准备运行环境：项目内 platform/<os>/ 与 .tools/；有可用 Rust 则只读借用
 node start.js            # 任意平台；Windows 也可双击 start.bat，macOS / Linux 也可 ./start.sh
 node start.js -webUI     # 直接进本地网页（127.0.0.1:3081）
+node setup-vm.js --check # 可选：虚拟机档只读校验（QEMU / guest 镜像 / guest 里的 agent 与运行包）
+node setup-vm.js         # 可选：把 QEMU 与 Debian guest 装进项目内 .vm/（按平台分发；下载前会问）
 ```
 
 - 工具链与缓存收敛在**项目内**：检测到可用的 Rust 就**只读借用**，缓存与产物仍落 `platform/<os>/`；没有或有问题的才先征求同意装进项目内，不动系统；**无交互终端时不做安装**，打印手动步骤后退出。

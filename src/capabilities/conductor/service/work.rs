@@ -540,7 +540,7 @@ impl Conductor {
                     .map(|h| h.run.as_str())
                     .unwrap_or("active")
                     .to_string();
-                // 记的档位来自落盘 meta（权威）：环境后来变了也要如实提示——**不拦打开**（记录是用户的）。
+                // 记的档位来自落盘 meta（权威）：环境变了也要如实提示——**不拦打开**（记录是用户的）。
                 let exec = entry.map(|h| h.exec.clone()).unwrap_or_default();
                 let readiness = crate::capabilities::vm::api::tier_readiness(
                     &exec,

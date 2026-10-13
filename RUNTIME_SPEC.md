@@ -79,21 +79,23 @@ files:                      # 包内文件指纹：用于可复现与呈现
     配置界面禁用并说明缺什么（`vm::tier_readiness` / `tier_refusal`：创建、编辑与界面走同一把尺子）——
     这是用户环境问题，不是选型问题
 
-当前状态：选型、诊断、装配计划、逐项前置检测与 guest 本体都已就位，并做成**四轴可插**的形状——
-宿主 × `VmEngine`（当前只有 `QemuEngine`）× `GuestImage`（基础根里可放 `guest.yaml` 声明 id / arch / agent / os / clients）×
-`GuestChannel`（当前 QGA）× `ShareBackend`（`NinePShare` 与 `CopyShare`）。按平台的组合回退链是数据（`default_combos` / `choose_combo`），
-加速器按平台给（`kvm:tcg` / `whpx:tcg` / `hvf:tcg`），root 支持目录（QEMU 9p）与磁盘镜像两种。整条业务住在独立能力 `vm`
-（逐文件职责见 [docs/vm/README.md](docs/vm/README.md)）；执行分派已接线（会话在 vm 档把模块命令交给 guest，建会话时装配并拉起，删除时销毁）；
-就绪项 `guest` 按**已验平台数据表**放开（当前只有 Linux），并带上本平台的默认组合（`default_combos`）。
+当前状态：选型、诊断、装配计划、逐项前置检测、guest 生命周期与**执行分派**都已就位，并按**五轴组合**做成可插的形状——
+宿主 × `VmEngine`（当前 `QemuEngine`）× `GuestImage`（基础根里可放 `guest.yaml` 声明 id / arch / os / agent / clients）×
+`GuestChannel`（当前 QGA）× `ShareBackend`（`NinePShare` / `CopyShare`）。按平台的组合回退链是数据（`default_combos` / `choose_combo`），
+加速器按平台给（`accel=kvm:tcg` / `accel=whpx:tcg` / `accel=hvf:tcg`），root 支持目录（QEMU 9p）与磁盘镜像两种。
+宿主路径 ↔ guest 路径只有一座桥（`domain/paths.rs`：同方言恒等，跨方言编进镜像根），**挂载点、命令 `cwd` / 路径型 `env`、
+工作环境提示词三处共用它**；运行包按 guest 平台分包（`runtimes/<id>/<os>-<arch>/`）。整条业务住在独立能力 `vm`
+（逐文件职责见 [docs/vm/README.md](docs/vm/README.md)）；就绪项 `guest` 按**已验平台数据表**（`VERIFIED_HOSTS`）放开，并带上本平台**已实现**的组合。
 
 前置检测是**一份逐项清单**（`vm::vm_requirements`，界面与 `--doctor` 照抄同一份）：虚拟机监视器、guest 本体、QEMU（引擎）、基础根，
 每项给出"现状 + 怎么补"。依赖（QEMU / `virtiofsd` / 镜像）**用户自备**，由 `setup-vm.js`（按平台分发到 `setup-vm-windows.js` / `setup-vm-linux.js` / `setup-vm-mac.js`，共享件 `setup-vm-common.js`）装进项目内 `.vm/`（下载源在 `links.yaml`，需用户同意）；产品只检测与指路。
 基础根 = 一个目录：发行版 rootfs（目录，或 `rootfs.ext4` / `*.qcow2` 磁盘镜像）+ `vmlinuz`（可选 `initrd.img`）；**目录根必须给内核**（直启），**磁盘镜像可自带引导**（不给内核也行）；目录里可放一份 `guest.yaml` 声明画像（id / arch / agent / os / clients），缺省按目录名与 Debian 默认（os 缺省 linux），不认识的值如实拒收。
 
-**实施中（外部依赖未就位）**：Linux 已在 KVM 下跑通真机探针与产品级会话验收（`vm_live_guest_runs_command_inside_guest`；e2e 的 `SOLOMNI_VM_BASE` 场景）；
-Windows 已真机跑通（MSYS2 闭包 QEMU + Debian cloud qcow2 + cloud-init 装 `qemu-guest-agent`，维护启动预装 python3 / nodejs；引擎级探针与 e2e 的 vm 场景都过）；
-macOS 缺取包（`vm.qemu-provisioning-macos`）与 virtiofsd；virtiofs（Linux 性能档）、SMB 实时共享（Windows）、macOS Apple vz 引擎与自研 agent + vsock 通道仍是缺口；
-现状、怎么补与验收标准见 `tests/gaps.yaml` 的 `fence.guest-tier-not-wired`。
+**已真机验收**：Linux（QEMU/KVM + 9p）与 Windows（QEMU/WHPX + QGA 复制）——引擎级探针（`vm_live_guest_runs_command_inside_guest`）
+与 e2e 的 `SOLOMNI_VM_BASE` 会话场景都过；Windows 侧由 `setup-vm-windows.js` 取 MSYS2 闭包 QEMU、下 Debian cloud qcow2、
+cloud-init 装 `qemu-guest-agent`，维护启动预装 python3 / nodejs。
+**尚未做**（唯一权威见 `tests/gaps.yaml`）：macOS 的 QEMU 取包与 virtiofsd、Apple vz 引擎 + 自研 agent（vsock 通道）、
+Linux 的 virtiofs 性能档、Windows 的 SMB 实时共享。
 
 ## 六、校验与拒收
 
