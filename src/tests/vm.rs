@@ -516,17 +516,22 @@ pub(crate) fn packages_split_by_guest_platform() {
 /// 目的：命令装配按 guest 方言译路径——工作目录与本机路径型环境变量改成 guest 拼法，命令与非路径变量不动。
 #[test]
 pub(crate) fn translate_run_maps_paths_to_the_guest_dialect() {
-    use crate::capabilities::vm::domain::guest::{translate_run, GuestOs, GuestRun};
-    // 一份挂载表：包目录挂在 /opt/rt/py，围栏根挂在镜像根位置——env 里的宿主路径要按它译。
+    use crate::capabilities::vm::domain::guest::{translate_run, GuestMount, GuestOs, GuestRun};
+    // 挂载点用**宿主自己的写法**（宿主路径只能由宿主解析），guest 路径由我们给——断言因此三平台一致。
+    let (rt, work) = if cfg!(windows) {
+        ("D:\\rt\\py", "D:\\work")
+    } else {
+        ("/rt/py", "/work")
+    };
     let mounts = vec![
-        crate::capabilities::vm::domain::guest::GuestMount {
-            host: std::path::PathBuf::from("D:\\rt\\py"),
+        GuestMount {
+            host: std::path::PathBuf::from(rt),
             guest: "/opt/rt/py".to_string(),
             read_only: true,
         },
-        crate::capabilities::vm::domain::guest::GuestMount {
-            host: std::path::PathBuf::from("D:\\work"),
-            guest: "/solomni-host/d/work".to_string(),
+        GuestMount {
+            host: std::path::PathBuf::from(work),
+            guest: "/guest/work".to_string(),
             read_only: false,
         },
     ];
@@ -534,27 +539,20 @@ pub(crate) fn translate_run_maps_paths_to_the_guest_dialect() {
         command: "read_txt".to_string(),
         args_json: "{}".to_string(),
         env: vec![
-            ("PATH".to_string(), "D:\\rt\\py\\bin".to_string()),
+            ("PATH".to_string(), format!("{}/bin", rt)),
             ("LANG".to_string(), "C.UTF-8".to_string()),
         ],
-        cwd: "D:\\work\\mod".to_string(),
+        cwd: format!("{}/mod", work),
     };
     let out = translate_run(&run, GuestOs::Linux, &mounts);
-    if cfg!(windows) {
-        assert_eq!(
-            out.cwd, "/solomni-host/d/work/mod",
-            "工作目录按挂载表译成 guest 拼法"
-        );
-        assert_eq!(
-            out.env[0].1, "/opt/rt/py/bin",
-            "包目录型环境变量按**挂载点**译（不是镜像根）"
-        );
-    } else {
-        assert_eq!(
-            out.cwd, "D:\\work\\mod",
-            "POSIX 宿主 + POSIX guest 同方言：原样"
-        );
-    }
+    assert_eq!(
+        out.cwd, "/guest/work/mod",
+        "工作目录按挂载表译成 guest 拼法"
+    );
+    assert_eq!(
+        out.env[0].1, "/opt/rt/py/bin",
+        "包目录型环境变量按**挂载点**译（不是镜像根）"
+    );
     assert_eq!(out.env[1].1, "C.UTF-8", "非路径变量不动");
     assert_eq!(out.command, run.command, "命令不动");
     assert_eq!(
@@ -562,23 +560,28 @@ pub(crate) fn translate_run_maps_paths_to_the_guest_dialect() {
         "参数不动（模型给的就是 guest 拼法）"
     );
 
-    // 挂载表优先于方言：命中的挂载点就是 guest 里那个路径。
+    // 挂载表优先于方言：guest 换成 Windows，命中的还是同一个挂载点。
     let same = translate_run(&run, GuestOs::Windows, &mounts);
-    assert_eq!(same.cwd, "/solomni-host/d/work/mod", "挂载表优先");
+    assert_eq!(same.cwd, "/guest/work/mod", "挂载表优先");
 
-    // 不在任何挂载里的宿主路径才走镜像根。
+    // 不在任何挂载里的宿主路径：同方言原样，跨方言才走镜像根。
     let loose = translate_run(
         &GuestRun {
             command: "x".to_string(),
             args_json: "{}".to_string(),
             env: Vec::new(),
-            cwd: "D:\\other\\x".to_string(),
+            cwd: format!("{}-outside", work),
         },
         GuestOs::Linux,
         &mounts,
     );
     if cfg!(windows) {
-        assert_eq!(loose.cwd, "/solomni-host/d/other/x", "不在挂载里就走镜像根");
+        assert_eq!(
+            loose.cwd, "/solomni-host/d/work-outside",
+            "不在挂载里就走镜像根"
+        );
+    } else {
+        assert_eq!(loose.cwd, format!("{}-outside", work), "同方言：原样");
     }
 }
 
@@ -599,19 +602,25 @@ pub(crate) fn path_bridge_maps_host_paths_into_the_guest() {
         "Windows 宿主 + Windows guest 是同方言：原样"
     );
 
-    let b = PathBridge::new("windows", PathDialect::Posix);
-    assert_eq!(
-        b.to_guest(std::path::Path::new("D:\\AIproject\\Solomni\\work")),
-        "/solomni-host/d/AIproject/Solomni/work",
-        "Windows 宿主编进 POSIX 镜像根"
-    );
-
+    // POSIX 宿主 → Windows guest：镜像根 + 非法字符转义（与宿主是哪个平台无关）。
     let w = PathBridge::new("linux", PathDialect::Windows);
     assert_eq!(
         w.to_guest(std::path::Path::new("/home/u/a:b")),
         "C:\\solomni-host\\home\\u\\a%3Ab",
         "Windows guest 走 Windows 镜像根并把 : 转义"
     );
+
+    // Windows 宿主 → POSIX guest：宿主路径由**宿主自己**解析，所以这条只在 Windows 上判
+    //（POSIX 上 "D:\\x" 是一个普通组件，拿它当 Windows 路径断言是错的）。
+    #[cfg(windows)]
+    {
+        let b = PathBridge::new("windows", PathDialect::Posix);
+        assert_eq!(
+            b.to_guest(std::path::Path::new("D:\\AIproject\\Solomni\\work")),
+            "/solomni-host/d/AIproject/Solomni/work",
+            "Windows 宿主编进 POSIX 镜像根"
+        );
+    }
 }
 
 /// 目的：围栏根经桥落到 guest——跨方言时是镜像根，不再是宿主原路径。
@@ -626,24 +635,37 @@ pub(crate) fn fence_roots_follow_the_bridge() {
         base: None,
         packages: Vec::new(),
     };
+    // 跨方言那一侧按宿主取（宿主路径只能由宿主自己解析）：断言的都是"围栏根按桥落到 guest 镜像根"。
+    let (mods, work, bridge, want_mods, want_work) = if cfg!(windows) {
+        (
+            "D:\\mods\\a",
+            "D:\\work\\x",
+            PathBridge::new("windows", PathDialect::Posix),
+            "/solomni-host/d/mods/a",
+            "/solomni-host/d/work/x",
+        )
+    } else {
+        (
+            "/mods/a",
+            "/work/x",
+            PathBridge::new("linux", PathDialect::Windows),
+            "C:\\solomni-host\\mods\\a",
+            "C:\\solomni-host\\work\\x",
+        )
+    };
     let fence = crate::kernel::api::FenceSpec::standalone(
-        std::path::Path::new("D:\\mods\\a"),
-        Some(std::path::Path::new("D:\\work\\x")),
+        std::path::Path::new(mods),
+        Some(std::path::Path::new(work)),
         false,
     );
-    let bridge = PathBridge::new("windows", PathDialect::Posix);
     let mounts = mounts_from(&plan, &fence, &bridge);
     assert!(
-        mounts
-            .iter()
-            .any(|m| m.guest == "/solomni-host/d/mods/a" && m.read_only),
+        mounts.iter().any(|m| m.guest == want_mods && m.read_only),
         "只读模块目录按镜像根挂：{:?}",
         mounts
     );
     assert!(
-        mounts
-            .iter()
-            .any(|m| m.guest == "/solomni-host/d/work/x" && !m.read_only),
+        mounts.iter().any(|m| m.guest == want_work && !m.read_only),
         "可写根按镜像根挂：{:?}",
         mounts
     );
@@ -1229,15 +1251,7 @@ pub(crate) fn guest_manifest_declares_the_image_and_rejects_unknowns() {
         crate::capabilities::vm::domain::paths::PathDialect::Windows,
         "os: windows 给出 Windows 方言"
     );
-    assert_eq!(
-        w.bridge().to_guest(std::path::Path::new(if cfg!(windows) {
-            "D:\\g"
-        } else {
-            "/g"
-        })),
-        if cfg!(windows) { "D:\\g" } else { "/g" },
-        "Windows guest 在 Windows 宿主上是同方言（原样）"
-    );
+    // 具体换算由路径桥自己的用例锁（宿主路径的解析随平台而变，这里只判方言）。
     std::fs::write(dir.join("guest.yaml"), "os: plan9\n").expect("写坏 os");
     assert!(classify_base(&dir, &probe).is_err(), "不认识的 os 要拒收");
 
