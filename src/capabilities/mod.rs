@@ -21,4 +21,5 @@ pub mod session;
 pub mod slate;
 pub mod taskchain;
 pub mod tools;
+pub mod vm;
 pub mod workspace;

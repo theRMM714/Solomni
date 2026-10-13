@@ -269,7 +269,7 @@ impl Conductor {
         match meta.mode.as_str() {
             "collab" => Ok(Session::Collab(CollabSession::restore(
                 Arc::clone(&self.llm),
-                Arc::clone(&self.workspace),
+                Arc::clone(&self.vm),
                 Arc::clone(&self.modules),
                 self.registry.snapshot(),
                 Arc::clone(&self.prompt),
@@ -319,7 +319,8 @@ impl Conductor {
                     &modules,
                     &self.session_kind_of(meta)?,
                     &self.role_of(meta)?,
-                );
+                )
+                .with_guest(self.guest_os_of(&meta.exec));
                 let (chat, note) = self.llm.member_channel(channel.as_ref(), &a.name);
                 let texts = self.prompt.tools();
                 let (history, marks, line_reply, compacted_upto) =
@@ -328,8 +329,15 @@ impl Conductor {
                 // 身份与角色**同一把尺子**（重建与实时不能各写一份，见 Conductor::role_of）：
                 // 协作派生的成员 / 节点 = executor（拿得到回报工具）；其余单 agent 工作 = solo。
                 let role = self.role_of(meta)?;
-                let mut tools =
-                    self.tools_env(&modules, &sb, unavailable, meta.exec.net, mode, &role);
+                let mut tools = self.tools_env(
+                    &modules,
+                    &sb,
+                    unavailable,
+                    meta.exec.net,
+                    mode,
+                    &role,
+                    meta.exec.tier,
+                );
                 // 回复 id 跨重启单调：从转录里的最大值续号，否则新回复会与旧回复并成一组。
                 tools.reply_seq = crate::capabilities::session::api::max_reply(events);
                 Ok(Session::Single(

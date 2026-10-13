@@ -523,9 +523,9 @@ pub struct RuntimeReport {
     /// 模块 id → 包库里没有的能力（档位无关的事实）。
     pub missing: BTreeMap<String, Vec<String>>,
     /// 虚拟机档下不能成立的诊断；本机档为空。
-    pub diagnoses: Vec<crate::capabilities::workspace::api::Diagnosis>,
+    pub diagnoses: Vec<crate::capabilities::vm::api::Diagnosis>,
     /// 本机能不能承载**当前档位**（虚拟机档的前置条件；本机档恒为可）。
-    /// 界面据此决定虚拟机档能不能选，并与「开始」/编辑的校验同源（`crate::capabilities::workspace::api::tier_readiness`）。
+    /// 界面据此决定虚拟机档能不能选，并与「开始」/编辑的校验同源（`crate::capabilities::vm::api::tier_readiness`）。
     pub tier_ready: bool,
     /// 承载不了时缺什么（空 = 齐了）。
     pub tier_missing: Vec<String>,
@@ -545,7 +545,7 @@ pub struct TierChoices {
     /// 不能选时的理由（能选 = 空）。
     pub vm_unavailable_reason: String,
     /// 虚拟机档的**逐项前置**（缺哪几项、每项怎么补）：界面照抄，不自己编话。
-    pub vm_requirements: Vec<crate::capabilities::workspace::api::VmRequirement>,
+    pub vm_requirements: Vec<crate::capabilities::vm::api::VmRequirement>,
 }
 
 /// 配置界面里的一个 agent（名字冻结时仍要显示）。
@@ -583,7 +583,7 @@ pub struct SessionConfig {
     /// 虚拟机档为什么不能选（`vm_available` 为真时为空）。
     pub vm_unavailable_reason: String,
     /// 虚拟机档的**逐项前置**（缺哪几项、每项怎么补）：界面照抄，不自己编话。
-    pub vm_requirements: Vec<crate::capabilities::workspace::api::VmRequirement>,
+    pub vm_requirements: Vec<crate::capabilities::vm::api::VmRequirement>,
     /// 运行能力报告（模块声明 / 包库可用 / 缺包 / 虚拟机档诊断 / 拒收原因）。
     pub runtime: RuntimeReport,
     /// 依赖文件夹（把运行包放进这里；真实路径，给用户看）。

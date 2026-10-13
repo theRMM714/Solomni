@@ -52,6 +52,11 @@ impl HostProbe for HostProbeAdapter {
         find_exe(name).is_some()
     }
 
+    /// 读一个小文本文件（清单这类）的全文；读不到给 None。
+    fn read_text(&self, path: &Path) -> Option<String> {
+        std::fs::read_to_string(path).ok()
+    }
+
     /// 虚拟机监视器在场吗（只问事实，不起任何虚拟机）。
     fn hypervisor_available(&self) -> bool {
         if cfg!(windows) {

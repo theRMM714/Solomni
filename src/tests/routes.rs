@@ -109,7 +109,7 @@ fn meta(name: &str) -> SessionMeta {
         task: None,
         ts: 1,
         agents: Vec::new(),
-        exec: crate::capabilities::workspace::api::ExecSpec::default(),
+        exec: crate::kernel::api::ExecSpec::default(),
         parent: None,
         node: None,
         delegation: None,

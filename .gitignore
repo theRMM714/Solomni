@@ -21,6 +21,9 @@
 /.tools/
 /.home/
 
+# ---- 虚拟机档本地环境（QEMU / guest 基础根 / 下载缓存，由 setup-vm.js 装到项目内，不入库）----
+/.vm/
+
 # ---- 模块的编译产物（例如 C++ 模块构建出来的可执行文件）----
 # 源码与构建说明入库，产物不入库：modules/<id>/build/ 由模块自己的 README 一行命令生成。
 modules/*/build/

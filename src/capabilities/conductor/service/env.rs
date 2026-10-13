@@ -80,6 +80,9 @@ impl Conductor {
     /// 工具环境：内置文件工具永远可用；外部工具按模块分组放行（模块 id → 目录 + 工具表）。
     /// unavailable：本档位下缺运行包、不能执行工具的模块（机制侧据此拒绝执行，并如实报缺哪个能力）。
     /// net：会话是否放行出站网络（exec 段；默认否），随围栏交给机制层。
+    // 会话装配把"这一席的工具面"一次说全（模块 / 沙箱 / 缺包 / 网络 / 形态 / 角色 / 档位）。
+    // 这是有意的设计取舍（见 docs/testing/quality-isolation.md 的 allow 清单），不是没修。
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn tools_env(
         &self,
         modules: &[Module],
@@ -89,6 +92,7 @@ impl Conductor {
         mode: crate::capabilities::llm::api::ToolMode,
         // 这一席的身份：用户建的单 agent 会话 = solo，协作子会话 = executor（见 systools/roles.yaml）。
         role: &str,
+        tier: crate::kernel::api::Tier,
     ) -> crate::capabilities::session::api::MemberTools {
         // 角色表发放的系统工具 id 清单（工具面的名字部分）；核心自有工具按它决定装不装。
         let allowed = self.role_tools(role);
@@ -164,6 +168,8 @@ impl Conductor {
             llm: Arc::clone(&self.llm),
             log: Arc::clone(&self.log),
             tools: Arc::clone(&self.tools),
+            tier,
+            vm: Arc::clone(&self.vm),
             sandbox: sb.clone(),
             builtin_tools: self.systools.book(),
 
@@ -271,6 +277,9 @@ impl Conductor {
     }
 
     /// 装配单 agent 会话（不插入会话中心；插入与落盘由 create_work 统一做）。
+    // 会话装配把这一场单 agent 会话一次说全；收口成参数对象只是把参数挪个地方。
+    // 这是有意的设计取舍（见 docs/testing/quality-isolation.md 的 allow 清单），不是没修。
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn build_single(
         &self,
         a: &AgentMeta,
@@ -279,6 +288,8 @@ impl Conductor {
         sb: &crate::capabilities::workspace::api::Sandbox,
         unavailable: BTreeMap<String, Vec<String>>,
         net: bool,
+        tier: crate::kernel::api::Tier,
+        guest: Option<crate::capabilities::vm::api::GuestOs>,
     ) -> (
         crate::capabilities::session::api::AgentSession,
         Vec<SessionEvent>,
@@ -305,9 +316,10 @@ impl Conductor {
         // **会话参数**：身份块每回合由它现渲染（不存进消息列表）。
         let params = crate::capabilities::session::api::SessionParams::from_workspace(
             &a.name, sb, modules, "single", "solo",
-        );
+        )
+        .with_guest(guest);
         // 单 agent 工作：用户自己开的那场对话（不是任务链的节点）——身份是 solo。
-        let tools = self.tools_env(modules, sb, unavailable, net, mode, "solo");
+        let tools = self.tools_env(modules, sb, unavailable, net, mode, "solo", tier);
         let mut s = crate::capabilities::session::api::AgentSession::new(
             &a.name,
             params,

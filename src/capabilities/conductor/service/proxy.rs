@@ -278,7 +278,8 @@ use crate::capabilities::conductor::api::ConductorHandle;
 use crate::capabilities::session::api::{
     AgentSession, Delegation, RunState, SessionEvent, SessionMeta, SessionParams,
 };
-use crate::capabilities::workspace::api::{ExecSpec, Sandbox};
+use crate::capabilities::workspace::api::Sandbox;
+use crate::kernel::api::ExecSpec;
 
 fn tool_mode_str(m: crate::capabilities::llm::api::ToolMode) -> String {
     match m {
@@ -536,11 +537,9 @@ impl Conductor {
             ..ExecSpec::default()
         };
         // 与其余形态同一把尺子：虚拟机档的承载不成立就不建（用户环境问题，不是选型问题）。
-        if let Some(why) = crate::capabilities::workspace::api::tier_refusal(
-            &exec,
-            self.qemu_path(),
-            self.probe.as_ref(),
-        ) {
+        if let Some(why) =
+            crate::capabilities::vm::api::tier_refusal(&exec, self.qemu_path(), self.probe.as_ref())
+        {
             return Err(why);
         }
         let meta = SessionMeta {
@@ -608,7 +607,15 @@ impl Conductor {
         // 机制 / 环境 / 调用约定仍与 agent 身份同一份口径（见 workspace 的 render_system）。
         let mut params = SessionParams::from_workspace(d::SPEAKER, &sb, &[], "proxy", "core_proxy");
         params.role_system = Some(crate::capabilities::prompt::api::Segment::ProxySystem);
-        let tools = self.tools_env(&[], &sb, BTreeMap::new(), false, tool_mode, "core_proxy");
+        let tools = self.tools_env(
+            &[],
+            &sb,
+            BTreeMap::new(),
+            false,
+            tool_mode,
+            "core_proxy",
+            crate::kernel::api::Tier::Host,
+        );
         let mut s = AgentSession::new(
             d::SPEAKER,
             params,

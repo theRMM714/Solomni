@@ -10,6 +10,43 @@ pub(crate) fn prompt_render_replaces_and_rejects_missing() {
     assert!(render("{{missing}}", &[]).is_err());
 }
 
+/// 目的：工作环境册按环境分发——三平台各有本机档、guest 档覆盖全表，内容各不相同。
+#[test]
+pub(crate) fn prompt_env_book_distributes_by_environment() {
+    let p = test_prompts();
+    assert_eq!(p.core.env_hosts.len(), 3, "三平台各一份本机档");
+    assert!(!p.core.env_guests.is_empty(), "guest os 全表不能空");
+    for h in &p.core.env_hosts {
+        let block = p.core.env_for(h, None);
+        assert!(!block.trim().is_empty(), "宿主平台 {} 要有环境块", h);
+        assert!(block.contains("{{work_root}}"), "环境块要带路径变量：{}", h);
+    }
+    let lin = p.core.env_for("linux", None);
+    let win = p.core.env_for("windows", None);
+    let mac = p.core.env_for("macos", None);
+    assert_ne!(lin, win, "不同宿主平台给不同环境块");
+    assert_ne!(lin, mac, "不同宿主平台给不同环境块");
+    assert!(
+        win.contains("Windows"),
+        "Windows 宿主的环境块要说清路径写法：{}",
+        win
+    );
+    let guest = p.core.env_for("linux", Some("linux"));
+    assert!(
+        guest.contains("Linux guest"),
+        "虚拟机档要说清给的是 guest 内路径：{}",
+        guest
+    );
+    assert!(p
+        .core
+        .env_for("linux", Some("windows"))
+        .contains("Windows guest"));
+    assert!(
+        p.core.env_for("linux", Some("nope")).is_empty(),
+        "没有的环境不瞎拼（非法值由装载时校验挡住）"
+    );
+}
+
 #[test]
 pub(crate) fn prompt_book_loads_from_yaml() {
     let p = test_prompts();

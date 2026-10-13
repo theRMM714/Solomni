@@ -25,8 +25,9 @@ use crate::capabilities::session::api::{HistoryView, SessionMeta};
 use crate::capabilities::session::ports::HistoryStore;
 use crate::capabilities::tools::ports::SystoolsSource;
 use crate::capabilities::tools::ports::{FileRead, SysIo};
-use crate::capabilities::workspace::api::{Library, PackageManifest};
-use crate::capabilities::workspace::ports::{PackageSource, WorkStore, Workdirs};
+use crate::capabilities::vm::domain::packages::{Library, PackageManifest};
+use crate::capabilities::vm::ports::PackageSource;
+use crate::capabilities::workspace::ports::{WorkStore, Workdirs};
 use crate::kernel::api::Tier;
 use crate::kernel::ports::ProcessRunner;
 use std::collections::BTreeMap;
@@ -1328,21 +1329,230 @@ pub(crate) fn test_llm_demo() -> Arc<dyn crate::capabilities::llm::api::Llm + Se
     test_llm_with_repair(Arc::new(NoRepair))
 }
 
-/// 测试用的 **workspace 能力面**：把四个端口装进 `WorkspaceService`（与生产同一条路，R12）。
+/// 测试用的 **workspace 能力面**：把两个出站端口装进 `WorkspaceService`（与生产同一条路，R12）。
 /// 版本库默认用内存替身；要观察主副本/提交记录的用例用 `test_workspace_store`。
 pub(crate) fn test_workspace(
-    packages: Arc<dyn PackageSource + Send + Sync>,
     dirs: Arc<dyn Workdirs + Send + Sync>,
 ) -> Arc<dyn crate::capabilities::workspace::api::Workspace + Send + Sync> {
-    test_workspace_store(packages, dirs, Arc::new(InMemoryWorkStore::new()))
+    test_workspace_store(dirs, Arc::new(InMemoryWorkStore::new()))
 }
 
 pub(crate) fn test_workspace_store(
-    packages: Arc<dyn PackageSource + Send + Sync>,
     dirs: Arc<dyn Workdirs + Send + Sync>,
     store: Arc<dyn WorkStore + Send + Sync>,
 ) -> Arc<dyn crate::capabilities::workspace::api::Workspace + Send + Sync> {
-    Arc::new(crate::capabilities::workspace::service::WorkspaceService::new(packages, dirs, store))
+    Arc::new(crate::capabilities::workspace::service::WorkspaceService::new(dirs, store))
+}
+
+/// 目的：VM 引擎的测试替身——不起真 VM，只记录 start / run / stop。
+#[derive(Clone, Default)]
+pub(crate) struct FakeEngine {
+    pub calls: Arc<Mutex<Vec<String>>>,
+}
+
+impl FakeEngine {
+    /// 目的：空记录起步。
+    pub(crate) fn new() -> FakeEngine {
+        FakeEngine::default()
+    }
+}
+
+impl crate::capabilities::vm::ports::VmEngine for FakeEngine {
+    fn id(&self) -> &'static str {
+        "fake"
+    }
+
+    fn supports(&self, _guest: &crate::capabilities::vm::domain::guest::GuestImage) -> bool {
+        true
+    }
+
+    fn boot(
+        &self,
+        spec: &crate::capabilities::vm::domain::guest::GuestSpec,
+        _share: &crate::capabilities::vm::ports::SharePlan,
+    ) -> Result<Box<dyn crate::capabilities::vm::ports::GuestVm>, String> {
+        self.calls
+            .lock()
+            .expect("锁")
+            .push(format!("start:{}", spec.lease));
+        Ok(Box::new(FakeVm {
+            channel: FakeChannel {
+                lease: spec.lease.clone(),
+                calls: self.calls.clone(),
+            },
+            lease: spec.lease.clone(),
+            calls: self.calls.clone(),
+        }))
+    }
+}
+
+/// 目的：共享后端的测试替身——恒可落、计划为空；记录 prepare / sync_in / sync_out / release。
+#[derive(Clone, Default)]
+pub(crate) struct FakeShare {
+    pub calls: Arc<Mutex<Vec<String>>>,
+}
+
+impl FakeShare {
+    /// 目的：空记录起步。
+    pub(crate) fn new() -> FakeShare {
+        FakeShare::default()
+    }
+}
+
+impl crate::capabilities::vm::ports::ShareBackend for FakeShare {
+    fn id(&self) -> &'static str {
+        "fake"
+    }
+
+    fn supports(
+        &self,
+        _engine: &str,
+        _guest: &crate::capabilities::vm::domain::guest::GuestImage,
+    ) -> bool {
+        true
+    }
+
+    fn prepare(
+        &self,
+        _engine: &str,
+        _mounts: &[crate::capabilities::vm::domain::guest::GuestMount],
+    ) -> Result<
+        (
+            crate::capabilities::vm::ports::SharePlan,
+            Box<dyn crate::capabilities::vm::ports::ShareGuard>,
+        ),
+        String,
+    > {
+        self.calls.lock().expect("锁").push("prepare".to_string());
+        Ok((
+            crate::capabilities::vm::ports::SharePlan {
+                kind: "fake",
+                engine_args: Vec::new(),
+                guest_scripts: Vec::new(),
+                needs_net: false,
+            },
+            Box::new(FakeGuard {
+                calls: self.calls.clone(),
+            }),
+        ))
+    }
+
+    fn sync_in(
+        &self,
+        _channel: &mut dyn crate::capabilities::vm::ports::GuestChannel,
+        _mounts: &[crate::capabilities::vm::domain::guest::GuestMount],
+    ) -> Result<(), String> {
+        self.calls.lock().expect("锁").push("sync_in".to_string());
+        Ok(())
+    }
+
+    fn sync_out(
+        &self,
+        _channel: &mut dyn crate::capabilities::vm::ports::GuestChannel,
+        _mounts: &[crate::capabilities::vm::domain::guest::GuestMount],
+    ) -> Result<(), String> {
+        self.calls.lock().expect("锁").push("sync_out".to_string());
+        Ok(())
+    }
+}
+
+/// 目的：共享凭据替身——释放记录一笔。
+struct FakeGuard {
+    calls: Arc<Mutex<Vec<String>>>,
+}
+
+impl crate::capabilities::vm::ports::ShareGuard for FakeGuard {
+    fn release(&mut self) {
+        self.calls.lock().expect("锁").push("release".to_string());
+    }
+}
+
+struct FakeVm {
+    channel: FakeChannel,
+    lease: String,
+    calls: Arc<Mutex<Vec<String>>>,
+}
+
+struct FakeChannel {
+    lease: String,
+    calls: Arc<Mutex<Vec<String>>>,
+}
+
+impl crate::capabilities::vm::ports::GuestChannel for FakeChannel {
+    fn exec(
+        &mut self,
+        run: &crate::capabilities::vm::domain::guest::GuestRun,
+    ) -> crate::kernel::api::ToolOutcome {
+        self.calls
+            .lock()
+            .expect("锁")
+            .push(format!("run:{}:{}", self.lease, run.command));
+        crate::kernel::api::ToolOutcome {
+            ok: true,
+            output: "fake-guest".to_string(),
+        }
+    }
+}
+
+impl crate::capabilities::vm::ports::GuestVm for FakeVm {
+    fn channel(&mut self) -> &mut dyn crate::capabilities::vm::ports::GuestChannel {
+        &mut self.channel
+    }
+
+    fn stop(&mut self) {
+        self.calls
+            .lock()
+            .expect("锁")
+            .push(format!("stop:{}", self.lease));
+    }
+}
+
+/// 目的：vm 用例面的测试替身——记录 guest_run，恒成功（验证"命令送进了 guest"）。
+#[derive(Default)]
+pub(crate) struct RecordingVm {
+    pub runs: Mutex<Vec<String>>,
+}
+
+impl crate::capabilities::vm::api::Vm for RecordingVm {
+    fn library(&self) -> Library {
+        Library::default()
+    }
+
+    fn runtimes_dir(&self) -> std::path::PathBuf {
+        abs(&["runtimes"])
+    }
+
+    fn guest_start(
+        &self,
+        _spec: &crate::capabilities::vm::domain::guest::GuestSpec,
+    ) -> Result<(), String> {
+        Ok(())
+    }
+
+    fn guest_run(
+        &self,
+        _lease: &str,
+        run: &crate::capabilities::vm::domain::guest::GuestRun,
+    ) -> crate::kernel::api::ToolOutcome {
+        self.runs.lock().expect("锁").push(run.command.clone());
+        crate::kernel::api::ToolOutcome {
+            ok: true,
+            output: "guest".to_string(),
+        }
+    }
+
+    fn guest_stop(&self, _lease: &str) {}
+}
+
+/// 目的：测试用的 **vm 能力面**——把运行包库来源与 guest 替身装进 `VmService`（与生产同一条路，R12）。
+pub(crate) fn test_vm(
+    packages: Arc<dyn PackageSource + Send + Sync>,
+) -> Arc<dyn crate::capabilities::vm::api::Vm + Send + Sync> {
+    Arc::new(crate::capabilities::vm::service::VmService::new(
+        packages,
+        Arc::new(FakeEngine::new()),
+        Arc::new(FakeShare::new()),
+    ))
 }
 
 /// 目的：模块启停覆盖的内存存储（测试用；与 yaml 实现同一条端口）。
@@ -1423,10 +1633,8 @@ pub(crate) fn core_with_services(
     Conductor::new(
         registry_service(InMemorySettings::new(), Arc::clone(&llm)),
         test_history(),
-        test_workspace(
-            Arc::new(InMemoryPackages::empty()),
-            Arc::new(InMemoryWorkspace::new()),
-        ),
+        test_workspace(Arc::new(InMemoryWorkspace::new())),
+        test_vm(Arc::new(InMemoryPackages::empty())),
         test_modules(Arc::new(VecSource(modules))),
         llm,
         test_tools_svc_with(
@@ -1462,7 +1670,8 @@ pub(crate) fn core_with_workspace(
     Conductor::new(
         registry_service(InMemorySettings::new(), Arc::clone(&llm)),
         test_history(),
-        test_workspace(Arc::new(InMemoryPackages::empty()), ws),
+        test_workspace(ws),
+        test_vm(Arc::new(InMemoryPackages::empty())),
         test_modules(Arc::new(VecSource(modules))),
         llm,
         test_tools_svc_with(
@@ -1561,7 +1770,8 @@ pub(crate) fn core_with_pkgs(
     Conductor::new(
         registry_service(InMemorySettings::new(), Arc::clone(&llm)),
         test_history_of(history),
-        test_workspace(packages, Arc::new(InMemoryWorkspace::new())),
+        test_workspace(Arc::new(InMemoryWorkspace::new())),
+        test_vm(packages),
         test_modules(Arc::new(VecSource(modules))),
         llm,
         test_tools_svc_with(runner, io, Arc::new(NoFenceHost)),
@@ -1585,10 +1795,8 @@ pub(crate) fn core_with_settings(store: InMemorySettings) -> Conductor {
     Conductor::new(
         registry_service(store, Arc::clone(&llm)),
         test_history(),
-        test_workspace(
-            Arc::new(InMemoryPackages::empty()),
-            Arc::new(InMemoryWorkspace::new()),
-        ),
+        test_workspace(Arc::new(InMemoryWorkspace::new())),
+        test_vm(Arc::new(InMemoryPackages::empty())),
         test_modules(Arc::new(VecSource(Vec::new()))),
         llm,
         test_tools_svc_with(
@@ -1627,10 +1835,8 @@ pub(crate) fn core_with_io_gateway(
     Conductor::new(
         registry_service(InMemorySettings::new(), Arc::clone(&llm)),
         test_history(),
-        test_workspace(
-            Arc::new(InMemoryPackages::empty()),
-            Arc::new(InMemoryWorkspace::new()),
-        ),
+        test_workspace(Arc::new(InMemoryWorkspace::new())),
+        test_vm(Arc::new(InMemoryPackages::empty())),
         test_modules(Arc::new(VecSource(modules))),
         llm,
         test_tools_svc_with(Arc::new(SilentRunner), io, Arc::new(NoFenceHost)),
@@ -1657,10 +1863,8 @@ pub(crate) fn core_with_gateway(
     Conductor::new(
         registry_service(InMemorySettings::new(), Arc::clone(&llm)),
         test_history(),
-        test_workspace(
-            Arc::new(InMemoryPackages::empty()),
-            Arc::new(InMemoryWorkspace::new()),
-        ),
+        test_workspace(Arc::new(InMemoryWorkspace::new())),
+        test_vm(Arc::new(InMemoryPackages::empty())),
         test_modules(Arc::new(VecSource(modules))),
         llm,
         test_tools_svc_with(
@@ -2168,6 +2372,8 @@ pub(crate) fn member_with_service_tools(
             Arc::new(InMemorySysIo::new()),
             Arc::new(NoFenceHost),
         ),
+        tier: crate::kernel::api::Tier::Host,
+        vm: test_vm(Arc::new(InMemoryPackages::empty())),
         sandbox: sb.clone(),
         builtin_tools: test_systools().tools,
         unavailable: BTreeMap::new(),

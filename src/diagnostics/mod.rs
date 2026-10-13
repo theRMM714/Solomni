@@ -2,18 +2,36 @@
 //! 退出码按各模式的约定（多数恒 0：**判定归调用方**，这里只报事实）。
 //! 隐藏模式：用户经文档知道它们，不列进面向用户的帮助。
 
+pub mod unpack;
+
+/// 目的：把归档解到目录（跨平台纯 Rust，不依赖用户装解压工具；用法 solomni --unpack <archive> <dest>）。
+pub fn unpack_cli(args: &[String], i: usize) -> i32 {
+    let archive = args.get(i + 1).cloned().unwrap_or_default();
+    let dest = args.get(i + 2).cloned().unwrap_or_default();
+    if archive.is_empty() || dest.is_empty() {
+        eprintln!("用法：solomni --unpack <archive> <dest>");
+        return 2;
+    }
+    match unpack::extract(std::path::Path::new(&archive), std::path::Path::new(&dest)) {
+        Ok(()) => 0,
+        Err(e) => {
+            eprintln!("[解包] {}", e);
+            1
+        }
+    }
+}
+
 /// 自检：本机事实（平台 + 围栏能力 + 外部解释器）。只报事实，不猜、不改任何东西（围栏自检那个临时目录除外）。
 pub fn doctor() -> i32 {
     let cap = crate::kernel::detail::confine::capability();
     // 虚拟机档的逐项前置（**只读事实**）：这里按"没登记 QEMU、没指定基础根"问一次，
     // 也就是最朴素的情形——登记过的路径以会话配置界面为准（那里按会话选型问同一份清单）。
-    let vm = crate::capabilities::workspace::api::vm_requirements(
-        &crate::capabilities::workspace::api::VmInputs {
+    let vm =
+        crate::capabilities::vm::api::vm_requirements(&crate::capabilities::vm::api::VmInputs {
             base: None,
             qemu: None,
             probe: &crate::kernel::detail::HostProbeAdapter,
-        },
-    );
+        });
     let doc = serde_json::json!({
         "platform": std::env::consts::OS,
         "arch": std::env::consts::ARCH,

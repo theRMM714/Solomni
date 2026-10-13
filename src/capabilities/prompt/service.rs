@@ -25,6 +25,11 @@ impl Prompt for Prompts {
         self.core.mechanisms_for(session, role)
     }
 
+    fn env(&self, host: &str, guest: Option<&str>, vars: Vars) -> String {
+        render(&self.core.env_for(host, guest), vars)
+            .expect("提示词渲染失败：变量缺失属于装配错误，须修复 prompts/ 或调用方")
+    }
+
     fn tools(&self) -> Arc<ToolTexts> {
         Arc::clone(&self.tools)
     }

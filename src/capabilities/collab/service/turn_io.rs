@@ -82,6 +82,8 @@ impl CollabSession {
             llm: Arc::clone(&self.llm),
             log: Arc::clone(&self.log),
             tools: Arc::clone(&self.tools),
+            tier: crate::kernel::api::Tier::Host,
+            vm: Arc::clone(&self.vm),
             sandbox: sb.clone(),
             builtin_tools: self.systools.book(),
             unavailable: std::collections::BTreeMap::new(),
@@ -200,7 +202,7 @@ impl CollabSession {
     /// "先说一句"这一条的处理：他的话进主会话当反馈，再由核心 AI 判**是否明确**。
     /// 明确才开工 / 重派；模糊就不动、关卡继续挂着（这一条已经答过，续一张新的接着问）。
     /// 返回：明确到可以放行 = true。
-    /// 参数：advice = 原来那一关带着的建议（续的新卡要带上它，别让建议随出队丢掉）。
+    /// 参数：advice = 上一关带着的建议（续的新卡要带上它，别让建议随出队丢掉）。
     fn judge_note(
         &mut self,
         p: &Pending,

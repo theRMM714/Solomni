@@ -188,6 +188,12 @@ async function main() {
   const home = path.join(FIXTURE, ".home");
   fs.rmSync(home, { recursive: true, force: true });
   fs.mkdirSync(home, { recursive: true });
+  // 虚拟机档真机验收：QEMU 路径由环境变量给（机器相关，不写进仓库），起服务前落进 settings.yaml。
+  const vmQemu = process.env.SOLOMNI_VM_QEMU || "";
+  if (vmQemu) {
+    fs.writeFileSync(path.join(home, "settings.yaml"), "qemu_path: " + JSON.stringify(vmQemu) + "\n");
+    console.log("[e2e] 已登记 qemu_path：" + vmQemu);
+  }
   fs.rmSync(path.join(FIXTURE, "modules", "toolbox", "userdata"), { recursive: true, force: true });
 
   // 三个真模块（python / node / C++）按需复制进夹具：**每次跑都从仓库源码重新复制**，

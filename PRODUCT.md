@@ -81,9 +81,12 @@ agent 实例名不得占用 `work` / `children`（名单在 `systools/names.yaml
   按行**精确物化**：任一提交点都能还原出当时的共享区内容，回档也把共享区一起带回那一刻
   （见 [docs/session/session-model.md](docs/session/session-model.md) 的五）。
 - **执行档位**（`exec` 段）：本机档（默认）= 脚本直接在宿主上跑；虚拟机档 = 一整套 guest。
-  虚拟机档的选型、诊断、装配计划与逐项前置检测都已就位，但 **guest 本体未接入**，所以此刻**任何机器都不允许创建或改入**——
-  创建向导与配置界面直接禁用并逐项列出缺什么、每项怎么补；已存在的会话不拦打开（列表标注"虚拟机档不可用"，本次按本机档执行）。
-  QEMU 与镜像用户自备，产品只检测与指路（契约见 [RUNTIME_SPEC.md](RUNTIME_SPEC.md)）。
+  虚拟机档的选型、诊断、装配计划、逐项前置检测、guest 端口、QEMU 后端与**执行分派**都已就位
+  （建会话时按计划与沙箱装配挂载并拉起 guest，工具命令送进 guest，会话删除时销毁）；
+  **按组合放开**：guest 做成五轴可扩展组合（宿主 × 引擎 × guest × 通道 × 共享），各平台默认吃当前最强组合并逐级回退；
+  Linux（QEMU/KVM + 9p）与 Windows（QEMU/WHPX + QGA 复制）已真机验收，macOS 的组合待验收（未验收的组合禁用并逐项列出缺什么、每项怎么补）；
+  未开放组合上已存在的会话不拦打开（列表标注"虚拟机档不可用"，本次按本机档执行）。
+  guest 默认 Debian stable（当前 13.7 / trixie），方向是适配更多 guest 以供用户自定义；QEMU 等依赖用户自备，产品只检测与指路，项目另给只写项目内的一键补齐手段 `setup-vm.js`（按平台分发，契约见 [RUNTIME_SPEC.md](RUNTIME_SPEC.md)）。
 - **运行能力**：模块用 `runtimes` 声明工具需要哪些运行包，包放在 `runtimes/`（放入即出现）；
   缺包 = 该模块的工具不执行并如实说明缺什么，**不是**会话崩溃。
 - **三层隔离，各说各的实际强度**：
@@ -231,6 +234,6 @@ $ start.bat                 # Windows（或 node start.js）；macOS/Linux 用 .
 **测试相关的未完成项不在本文维护**：唯一真相是 `tests/gaps.yaml`（全局）与 `tests/<平台>/gaps.yaml`（平台），
 入口与判定见 [TESTING.md](TESTING.md) 与 `docs/testing/`。产品侧仍待接入的能力：
 
-- **虚拟机档 guest 本体**（见 `tests/gaps.yaml` 与 [RUNTIME_SPEC.md](RUNTIME_SPEC.md)）；
+- **虚拟机档的多平台组合**（Linux 与 Windows 已真机验收；macOS 待取包与 virtiofsd；五轴可扩展；缺口清单与验收标准见 `tests/gaps.yaml`，契约见 [RUNTIME_SPEC.md](RUNTIME_SPEC.md)）；
 - 混合拓扑（部分能力合成一个 agent、其余各持一份并协商）、执行期并行调度的进一步放开；
 - 模块分发（打包 / 签名 / 市场）、供应商管理界面（密钥轮换 / 用量统计）。

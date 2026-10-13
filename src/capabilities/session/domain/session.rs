@@ -138,6 +138,8 @@ pub struct SessionParams {
     pub session_kind: String,
     /// 这一席的**角色**（solo / executor / discussant / core_proxy…）：机制册的第二把钥匙。
     pub role: String,
+    /// 目的：这场会话跑在哪种 guest 里（本机档 = None）——工作环境块按它选 guest 档，路径按 guest 拼法渲染。
+    pub guest: Option<crate::capabilities::vm::api::GuestOs>,
 }
 
 impl SessionParams {
@@ -163,7 +165,17 @@ impl SessionParams {
             role_system: None,
             session_kind: session_kind.to_string(),
             role: role.to_string(),
+            guest: None,
         }
+    }
+
+    /// 目的：把"这场会话跑在哪种 guest 里"接上（本机档传 None）——工作环境块与路径拼法按它选。
+    pub fn with_guest(
+        mut self,
+        guest: Option<crate::capabilities::vm::api::GuestOs>,
+    ) -> SessionParams {
+        self.guest = guest;
+        self
     }
 
     /// 身份块：**每次调用现渲染**（模板与文案取当前提示词册，通道形态取当前登记处）。
@@ -206,6 +218,14 @@ pub fn env_block(
     p: &SessionParams,
 ) -> String {
     use crate::capabilities::prompt::api::Segment;
+    // 路径按**这场会话的环境**渲染：本机档 = 宿主拼法；虚拟机档 = guest 拼法（与挂载、命令装配同一座桥）。
+    let bridge = crate::capabilities::vm::api::PathBridge::for_session(
+        std::env::consts::OS,
+        p.guest.map(|g| g.dialect()),
+    );
+    let in_guest = |path: &std::path::Path| -> String {
+        crate::kernel::api::slash(std::path::Path::new(&bridge.to_guest(path)))
+    };
     let texts = prompt.tools();
     let module_roots = if p.module_dirs.is_empty() {
         prompt.text(Segment::NoModuleDirs).to_string()
@@ -215,22 +235,21 @@ pub fn env_block(
             .map(|(id, root)| {
                 texts.render(
                     &texts.module_root_line,
-                    &[
-                        ("id", id.clone()),
-                        ("root", crate::kernel::api::slash(root)),
-                    ],
+                    &[("id", id.clone()), ("root", in_guest(root))],
                 )
             })
             .collect::<Vec<_>>()
             .join("\n")
     };
-    prompt.render(
-        Segment::Env,
+    // 工作环境按**环境**分发：本机档按宿主平台选；虚拟机档按 guest 的 os 选。
+    prompt.env(
+        std::env::consts::OS,
+        p.guest.map(|g| g.as_str()),
         &[
             ("work_name", p.work_name.clone()),
             ("agent", p.agent.clone()),
-            ("work_root", crate::kernel::api::slash(&p.shared)),
-            ("sandbox_root", crate::kernel::api::slash(&p.private)),
+            ("work_root", in_guest(&p.shared)),
+            ("sandbox_root", in_guest(&p.private)),
             ("module_roots", module_roots),
         ],
     )

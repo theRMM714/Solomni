@@ -33,6 +33,10 @@ fn main() {
     if let Some(i) = args.iter().position(|a| a == "--https-check") {
         std::process::exit(diagnostics::https_check(&args, i));
     }
+    // 隐藏模式：把归档解到目录（跨平台纯 Rust）——setup-vm-*.js 用它，不依赖用户装了什么解压工具。
+    if let Some(i) = args.iter().position(|a| a == "--unpack") {
+        std::process::exit(diagnostics::unpack_cli(&args, i));
+    }
     // 环境白名单（机器可读）：把运行期交给工具进程的环境逐行交出来——探针据此在**同一个环境**里驱动
     // 守门进程，不另抄一份（抄一份会漂移，也会漏掉只有真实环境才暴露的问题）。
     if let Some(i) = args.iter().position(|a| a == "--print-fence-env") {
@@ -119,7 +123,7 @@ fn main() {
         capabilities::tools::api::names(),
     );
     // 运行包库：依赖文件夹 runtimes/（一个包 = 一个文件夹 + package.yaml）。
-    let packages = capabilities::workspace::detail::FsPackages::new(root.join("runtimes"));
+    let packages = capabilities::vm::detail::FsPackages::new(root.join("runtimes"));
     // 端点记忆：谁先通了就固定谁，后续会话不再反复探测候选。
     let memo = capabilities::llm::detail::endpoint::memo_new();
     // **llm 能力**：三个出站端口（通道工厂 / 模型目录 / 信封修复）只由它的 service 持有（R12）；
@@ -221,10 +225,28 @@ fn main() {
             }
         };
 
-    // **工作区能力**：运行包库 / 目录布局 / 版本库三个出站端口只由它的 service 持有（R12）。
+    // **虚拟机档能力**：运行包库来源、VM 引擎与共享后端三个出站端口只由它的 service 持有（R12）。
+    // 共享后端按平台的组合回退链选：目前在场的是 QEMU + 9p / copy（virtiofs / SMB 见 tests/gaps.yaml）。
+    let picked = capabilities::vm::domain::exec::choose_combo(
+        capabilities::vm::domain::exec::default_combos(std::env::consts::OS),
+        &|engine| engine == "qemu",
+        &|_engine, share| capabilities::vm::domain::exec::IMPLEMENTED_SHARES.contains(&share),
+    );
+    let share: Arc<dyn capabilities::vm::ports::ShareBackend + Send + Sync> =
+        match picked.map(|c| c.share) {
+            Some("copy") => Arc::new(capabilities::vm::detail::CopyShare::new()),
+            _ => Arc::new(capabilities::vm::detail::NinePShare::new()),
+        };
+    let vm: Arc<dyn capabilities::vm::api::Vm + Send + Sync> =
+        Arc::new(capabilities::vm::service::VmService::new(
+            Arc::new(packages),
+            Arc::new(capabilities::vm::detail::QemuEngine::new()),
+            share,
+        ));
+
+    // **工作区能力**：目录布局与版本库两个出站端口只由它的 service 持有（R12）。
     let workspace: Arc<dyn capabilities::workspace::api::Workspace + Send + Sync> =
         Arc::new(capabilities::workspace::service::WorkspaceService::new(
-            Arc::new(packages),
             Arc::new(workspace),
             Arc::new(workstore),
         ));
@@ -271,6 +293,7 @@ fn main() {
             Arc::new(history),
         )),
         workspace,
+        vm,
         Arc::clone(&modules),
         Arc::clone(&llm),
         toolexec,

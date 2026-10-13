@@ -21,13 +21,35 @@ const P_RUSTUP = path.join(PLATFORM_DIR, "rustup");
 const P_CARGO = path.join(PLATFORM_DIR, "cargo");
 const TOOLS = path.join(ROOT, ".tools");
 const WINLIBS_BIN = path.join(TOOLS, "mingw64", "bin");
-// 第三方再分发的发布源（winlibs zip）；占位仓库，发布后填实。
-const REL_BASE = "https://github.com/theRMM714/Solomni/releases/download/dependencies/";
 // winlibs.zip 的 SHA256；空 = 首次下载打印哈希供固定。
 const WINLIBS_SHA256 = "c1f52294597c0b73786b2a78eb5d176d89226d2f21875eab75e783a8b1cefcc4";
 
 const log = (m) => console.log("[env] " + m);
 const die = (m) => { console.error("[env] " + m); process.exit(1); };
+
+// 外部连接台账（唯一真相）：项目自用、可能变的外部 URL 都在 links.yaml。
+// 读法只认扁平的"键: 值"（与 tests/gaps.yaml 同一手法）：不引 YAML 依赖；缺键/坏行如实报错。
+const LINKS = readLinks(path.join(ROOT, "links.yaml"));
+
+function readLinks(file) {
+  if (!fs.existsSync(file)) die("missing links.yaml (external links ledger): " + file);
+  const out = {};
+  for (const raw of fs.readFileSync(file, "utf8").split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line || line.startsWith("#")) continue;
+    const m = line.match(/^([A-Za-z0-9_.-]+):\s*(\S+)\s*$/);
+    if (!m) die("links.yaml line is not key: value: " + raw);
+    if (out[m[1]] !== undefined) die("links.yaml duplicate key: " + m[1]);
+    out[m[1]] = m[2];
+  }
+  return out;
+}
+
+function link(key) {
+  const v = LINKS[key];
+  if (!v) die("links.yaml missing key: " + key);
+  return v;
+}
 // 预检找到的 dlltool 目录；由 ensure() 填，resolve() 拼进 PATH。
 let EXTRA_PATH = [];
 
@@ -285,7 +307,7 @@ function upstreamWinlibsUrl() {
   // 上游资产名带版本，latest/download/winlibs.zip 必然 404；用 API 解析真实文件名。
   const q = [
     "$ErrorActionPreference = 'Stop'",
-    "$r = Invoke-RestMethod 'https://api.github.com/repos/brechtsanders/winlibs_mingw/releases/latest'",
+    "$r = Invoke-RestMethod '" + link("winlibs.upstream.api") + "'",
     "$a = $r.assets | Where-Object { $_.name -match 'x86_64' -and $_.name -match 'seh' -and $_.name -match '[.]zip$' -and $_.name -notmatch 'llvm' } | Select-Object -First 1",
     "if (-not $a) { $a = $r.assets | Where-Object { $_.name -match 'x86_64' -and $_.name -match '[.]zip$' } | Select-Object -First 1 }",
     "Write-Output $a.browser_download_url"
@@ -383,7 +405,7 @@ async function installWinlibs() {
     }
   }
   if (!fs.existsSync(zip)) {
-    const rel = REL_BASE.replace(/\/+$/, "");
+    const rel = link("release.base").replace(/\/+$/, "");
     const ours = rel + "/winlibs.zip";
     const candidates = [ours].concat(mirrorVariants(ours));
     const upstream = await upstreamWinlibsUrl();
@@ -399,7 +421,7 @@ async function installWinlibs() {
     const ok = download(url, zip) ? zipLooksValid(zip) : false;
     if (ok === false) {
       log("download still incomplete or corrupt - re-run to resume, or download manually:");
-      die("  get a winlibs x86_64 seh zip from https://github.com/brechtsanders/winlibs_mingw/releases");
+      die("  get a winlibs x86_64 seh zip from " + link("winlibs.upstream.releases"));
     }
     checkWinlibsHash(zip);
   }
@@ -427,14 +449,14 @@ async function installRust(opts) {
     // GNU 工具链自带链接器，不需要 Visual Studio Build Tools；--no-modify-path 不动系统 PATH。
     const initExe = path.join(TOOLS, "rustup-init.exe");
     fs.mkdirSync(TOOLS, { recursive: true });
-    if (!download("https://win.rustup.rs/x86_64", initExe)) die("rustup-init download failed. Check network / proxy.");
+    if (!download(link("rustup.init.windows"), initExe)) die("rustup-init download failed. Check network / proxy.");
     const init = spawnSync(initExe,
       ["-y", "--default-toolchain", "stable-x86_64-pc-windows-gnu", "--no-modify-path"],
       { stdio: "inherit", env: installEnv });
     if (init.status !== 0) die("rustup install failed.");
   } else {
     const r = spawnSync("sh",
-      ["-c", "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path"],
+      ["-c", "curl --proto '=https' --tlsv1.2 -sSf " + link("rustup.init.unix") + " | sh -s -- -y --no-modify-path"],
       { stdio: "inherit", env: installEnv });
     if (r.status !== 0) die("rustup install failed. Check network / curl availability.");
   }
@@ -484,6 +506,7 @@ async function main() {
 module.exports = {
   ROOT, IS_WIN, OS_KEY, PLATFORM_DIR, P_RUSTUP, P_CARGO, TOOLS, WINLIBS_BIN,
   resolve, ensure, ensureProject, pinTemp, findProjectCargo, findAmbientCargo, envPath, setEnvPath,
+  link,
 };
 
 if (require.main === module) main();

@@ -1,6 +1,6 @@
 //! 出站 HTTP 代理构建（机制）：**唯一**装配 TLS 与超时的地方。
 //! Windows 走系统 schannel（native-tls）——ureq 3 的 native-tls **不会自动被选中**（默认是 rustls），
-//! 必须显式写进 TlsConfig，否则 HTTPS 会以"该 TLS 后端没启用"报错（旧版踩过同类坑）。
+//! 必须显式写进 TlsConfig，否则 HTTPS 会以"该 TLS 后端没启用"报错。
 //! 非 Windows 走 rustls（默认后端，无需显式指定）。
 //! ureq 3 默认把 4xx/5xx 变成**不带响应体**的 Error；这里关掉（http_status_as_error(false)），
 //! 由 finish_request 统一判状态——这样错误文案里才留得住供应商自己的原话。
@@ -21,7 +21,7 @@ pub fn agent(connect_secs: u64, total_secs: u64) -> ureq::Agent {
     let builder = builder.tls_config(
         ureq::tls::TlsConfig::builder()
             .provider(ureq::tls::TlsProvider::NativeTls)
-            // native-tls 的 PlatformVerifier = 系统证书库（与旧版的 TlsConnector::new() 同源）。
+            // native-tls 的 PlatformVerifier = 系统证书库。
             .root_certs(ureq::tls::RootCerts::PlatformVerifier)
             .build(),
     );

@@ -1,0 +1,19 @@
+# 外部连接台账（唯一真相）：项目自用、可能变的外部 URL 都放这里，改一处全仓生效。
+#
+# 规矩：
+# - 扁平的一行一个键：域.用途: https://...
+# - 值必须是 https://；域限于 rustup / winlibs / release / guest（加域要同时改 tests 里的白名单）。
+# - 只收"项目自用、可能变"的指路 / 下载源；用户自己配的（providers、qemu_path、guest_image）
+#   与项目内稳定的东西不在这里。用户想换下载源：走设置与环境变量（如 SOLOMNI_GH_MIRROR），不改本文件。
+# - 代码里用 link("键") 引用（Rust 侧 links.link("键")）；Rust 与 Node 都按这一行读。
+#   tests 的结构审查比对"台账的键 ↔ 代码里 link(...) 的引用"：没人用的键进不来，引用了没声明的键也过不去。
+rustup.init.windows: https://win.rustup.rs/x86_64
+rustup.init.unix: https://sh.rustup.rs
+winlibs.upstream.releases: https://github.com/brechtsanders/winlibs_mingw/releases
+winlibs.upstream.api: https://api.github.com/repos/brechtsanders/winlibs_mingw/releases/latest
+guest.debian.image: https://cdimage.debian.org/cdimage/cloud/trixie/latest/debian-13-genericcloud-amd64.tar.xz
+# 直接用磁盘镜像（qcow2）：不用解 tar.xz，firmware 引导即可（Windows / macOS 宿主没有 9p，root 必须是磁盘）。
+guest.debian.qcow2: https://cdimage.debian.org/cdimage/cloud/trixie/latest/debian-13-genericcloud-amd64.qcow2
+guest.debian.pool: https://deb.debian.org/debian/pool/main/q/qemu/
+guest.debian.linux: https://deb.debian.org/debian/pool/main/l/linux/
+release.base: https://github.com/theRMM714/Solomni/releases/download/dependencies/

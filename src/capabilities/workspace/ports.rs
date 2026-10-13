@@ -1,18 +1,8 @@
-//! 工作区与运行包的**出站端口**：目录布局与清单扫描（机制在适配层）。
+//! 工作区的**出站端口**：目录布局与共享区版本库（机制在适配层）。
 
-use crate::capabilities::workspace::domain::packages::Library;
 use crate::capabilities::workspace::domain::workspace::{WorkFiles, WorkRoots, WorkUsage};
 use crate::capabilities::workspace::domain::workstore::{Commit, Index};
 use std::path::Path;
-
-/// 运行包库来源端口：扫描依赖文件夹（runtimes/）里的包清单。
-/// 「清单即事实」：每次调用重扫，放入即出现；清单校验、去重与冲突预检在本能力（packages::Library::build），
-/// 目录遍历与 yaml 解析在适配层。
-pub trait PackageSource {
-    fn scan(&self) -> Library;
-    /// 包库所在目录（配置界面要把"把包放哪儿"如实告诉用户）。
-    fn dir(&self) -> std::path::PathBuf;
-}
 
 /// 工作区**目录布局**端口：一次工作的 work 目录与各 agent 沙箱（机制在适配层）。
 /// 本能力只说"哪次工作、哪些 agent"，不碰路径拼接细节。**只有 `service.rs` 持有它**（R12）。
