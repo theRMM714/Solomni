@@ -799,6 +799,111 @@ pub(crate) fn disk_image_base_is_classified_as_a_disk_root() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// 目的：复制共享的进 / 出同步真跑一遍——宿主 tar 打包、经通道搬运、guest 端命令、回拷解包。
+#[test]
+pub(crate) fn copy_share_syncs_both_ways_through_the_channel() {
+    use crate::capabilities::vm::detail::copy::{host_tar, CopyShare};
+    use crate::capabilities::vm::ports::{GuestChannel, ShareBackend};
+
+    struct RecordingChannel {
+        execs: Vec<String>,
+        puts: Vec<(String, usize)>,
+        gets: Vec<String>,
+        preset_get: Vec<u8>,
+    }
+    impl GuestChannel for RecordingChannel {
+        fn exec(&mut self, run: &GuestRun) -> crate::kernel::api::ToolOutcome {
+            self.execs.push(run.command.clone());
+            crate::kernel::api::ToolOutcome {
+                ok: true,
+                output: String::new(),
+            }
+        }
+        fn put_file(&mut self, path: &str, bytes: &[u8]) -> Result<(), String> {
+            self.puts.push((path.to_string(), bytes.len()));
+            Ok(())
+        }
+        fn get_file(&mut self, path: &str) -> Result<Vec<u8>, String> {
+            self.gets.push(path.to_string());
+            Ok(self.preset_get.clone())
+        }
+    }
+    fn channel(preset_get: Vec<u8>) -> RecordingChannel {
+        RecordingChannel {
+            execs: Vec::new(),
+            puts: Vec::new(),
+            gets: Vec::new(),
+            preset_get,
+        }
+    }
+
+    let share = CopyShare::new();
+
+    // 进去：宿主目录打成 tar，经通道写进 guest，再在 guest 里解开。
+    let src = crate::tests::scratch("copy-sync-in");
+    std::fs::write(src.join("a.txt"), b"hello-in").expect("写宿主文件");
+    let mut ch = channel(Vec::new());
+    let mounts = vec![GuestMount {
+        host: src.clone(),
+        guest: "/work".to_string(),
+        read_only: false,
+    }];
+    share.sync_in(&mut ch, &mounts).expect("进去要成功");
+    assert_eq!(ch.puts.len(), 1, "要把 tar 写进 guest：{:?}", ch.puts);
+    assert!(ch.puts[0].1 > 0, "tar 不该是空的");
+    assert!(
+        ch.execs
+            .iter()
+            .any(|c| c.contains("tar -xf") && c.contains("'/work'")),
+        "guest 端要有解包命令：{:?}",
+        ch.execs
+    );
+
+    // 回来：guest 打包（通道给出 tar 字节），宿主解到可写挂载目录。
+    let guest_dir = crate::tests::scratch("copy-sync-out-guest");
+    std::fs::write(guest_dir.join("b.txt"), b"hello-out").expect("写 guest 文件");
+    let preset = host_tar(&guest_dir).expect("打包");
+    let dst = crate::tests::scratch("copy-sync-out-host");
+    let mut ch2 = channel(preset);
+    let mounts2 = vec![GuestMount {
+        host: dst.clone(),
+        guest: "/other".to_string(),
+        read_only: false,
+    }];
+    share.sync_out(&mut ch2, &mounts2).expect("回来要成功");
+    assert!(
+        ch2.execs
+            .iter()
+            .any(|c| c.contains("tar -cf") && c.contains("'/other'")),
+        "guest 端要有打包命令：{:?}",
+        ch2.execs
+    );
+    assert_eq!(
+        std::fs::read(dst.join("b.txt")).expect("回拷的文件"),
+        b"hello-out".to_vec(),
+        "可写目录要回拷"
+    );
+
+    // 只读挂载不回来（不打包、不取文件）。
+    let mut ch3 = channel(Vec::new());
+    let mounts3 = vec![GuestMount {
+        host: dst.clone(),
+        guest: "/ro".to_string(),
+        read_only: true,
+    }];
+    share.sync_out(&mut ch3, &mounts3).expect("只读跳过");
+    assert!(
+        ch3.gets.is_empty() && ch3.execs.is_empty(),
+        "只读挂载不回拷：{:?} {:?}",
+        ch3.gets,
+        ch3.execs
+    );
+
+    let _ = std::fs::remove_dir_all(&src);
+    let _ = std::fs::remove_dir_all(&guest_dir);
+    let _ = std::fs::remove_dir_all(&dst);
+}
+
 /// 目的：guest.yaml 能声明 id / arch / agent / 共享客户端；不认识的值如实拒收。
 #[test]
 pub(crate) fn guest_manifest_declares_the_image_and_rejects_unknowns() {
