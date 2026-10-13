@@ -172,8 +172,7 @@ pub struct GuestRun {
 
 /// 目的：把一次 guest 运行的路径译成 guest 拼法——只译**工作目录**与**本机路径型环境变量**（同方言原样）。
 /// 约束：命令与参数不动——模型看到的工作环境块给的就是 guest 拼法（见 prompts/shared/tools.yaml 的 envs）。
-pub fn translate_run(run: &GuestRun, os: GuestOs) -> GuestRun {
-    let bridge = PathBridge::new(std::env::consts::OS, os.dialect());
+pub fn translate_run(run: &GuestRun, os: GuestOs, mounts: &[GuestMount]) -> GuestRun {
     GuestRun {
         command: run.command.clone(),
         args_json: run.args_json.clone(),
@@ -185,7 +184,7 @@ pub fn translate_run(run: &GuestRun, os: GuestOs) -> GuestRun {
                 (
                     k.clone(),
                     if is_path {
-                        bridge.to_guest(Path::new(v))
+                        to_guest_path(Path::new(v), os, mounts)
                     } else {
                         v.clone()
                     },
@@ -195,9 +194,26 @@ pub fn translate_run(run: &GuestRun, os: GuestOs) -> GuestRun {
         cwd: if run.cwd.trim().is_empty() {
             run.cwd.clone()
         } else {
-            bridge.to_guest(Path::new(&run.cwd))
+            to_guest_path(Path::new(&run.cwd), os, mounts)
         },
     }
+}
+
+/// 目的：一条宿主路径 → guest 路径——**先按挂载表**（包目录挂在 /<prefix>，围栏根挂在它的 guest 点），
+/// 不在任何挂载里才用镜像根（跨方言）或原样（同方言）。
+fn to_guest_path(host: &Path, os: GuestOs, mounts: &[GuestMount]) -> String {
+    for m in mounts {
+        if let Ok(rel) = host.strip_prefix(&m.host) {
+            let rel = rel.to_string_lossy().replace('\\', "/");
+            let base = m.guest.trim_end_matches('/');
+            return if rel.is_empty() {
+                base.to_string()
+            } else {
+                format!("{}/{}", base, rel)
+            };
+        }
+    }
+    PathBridge::new(std::env::consts::OS, os.dialect()).to_guest(host)
 }
 
 /// 目的：guest 清单（guest.yaml，可选）——用户自备镜像对世界的自我介绍；不认识的值如实拒收。

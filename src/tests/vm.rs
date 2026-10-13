@@ -436,24 +436,37 @@ pub(crate) fn guest_base_requires_rootfs_and_kernel() {
 #[test]
 pub(crate) fn translate_run_maps_paths_to_the_guest_dialect() {
     use crate::capabilities::vm::domain::guest::{translate_run, GuestOs, GuestRun};
+    // 一份挂载表：包目录挂在 /opt/rt/py，围栏根挂在镜像根位置——env 里的宿主路径要按它译。
+    let mounts = vec![
+        crate::capabilities::vm::domain::guest::GuestMount {
+            host: std::path::PathBuf::from("D:\\rt\\py"),
+            guest: "/opt/rt/py".to_string(),
+            read_only: true,
+        },
+        crate::capabilities::vm::domain::guest::GuestMount {
+            host: std::path::PathBuf::from("D:\\work"),
+            guest: "/solomni-host/d/work".to_string(),
+            read_only: false,
+        },
+    ];
     let run = GuestRun {
         command: "read_txt".to_string(),
         args_json: "{}".to_string(),
         env: vec![
-            ("HOME".to_string(), "D:\\work\\home".to_string()),
+            ("PATH".to_string(), "D:\\rt\\py\\bin".to_string()),
             ("LANG".to_string(), "C.UTF-8".to_string()),
         ],
         cwd: "D:\\work\\mod".to_string(),
     };
-    let out = translate_run(&run, GuestOs::Linux);
+    let out = translate_run(&run, GuestOs::Linux, &mounts);
     if cfg!(windows) {
         assert_eq!(
             out.cwd, "/solomni-host/d/work/mod",
-            "工作目录译成 guest 拼法"
+            "工作目录按挂载表译成 guest 拼法"
         );
         assert_eq!(
-            out.env[0].1, "/solomni-host/d/work/home",
-            "路径型环境变量也译"
+            out.env[0].1, "/opt/rt/py/bin",
+            "包目录型环境变量按**挂载点**译（不是镜像根）"
         );
     } else {
         assert_eq!(
@@ -468,8 +481,24 @@ pub(crate) fn translate_run_maps_paths_to_the_guest_dialect() {
         "参数不动（模型给的就是 guest 拼法）"
     );
 
-    let same = translate_run(&run, GuestOs::Windows);
-    assert_eq!(same.cwd, "D:\\work\\mod", "同方言恒等");
+    // 挂载表优先于方言：命中的挂载点就是 guest 里那个路径。
+    let same = translate_run(&run, GuestOs::Windows, &mounts);
+    assert_eq!(same.cwd, "/solomni-host/d/work/mod", "挂载表优先");
+
+    // 不在任何挂载里的宿主路径才走镜像根。
+    let loose = translate_run(
+        &GuestRun {
+            command: "x".to_string(),
+            args_json: "{}".to_string(),
+            env: Vec::new(),
+            cwd: "D:\\other\\x".to_string(),
+        },
+        GuestOs::Linux,
+        &mounts,
+    );
+    if cfg!(windows) {
+        assert_eq!(loose.cwd, "/solomni-host/d/other/x", "不在挂载里就走镜像根");
+    }
 }
 
 /// 目的：路径桥同方言恒等；跨方言把宿主路径编进 guest 镜像根（非法字符转义）。

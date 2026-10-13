@@ -94,7 +94,8 @@ impl Vm for VmService {
         let Some(entry) = guests.get_mut(lease) else {
             return fail(&format!("这次会话没有活着的 guest（租约 {}）", lease));
         };
-        let translated = crate::capabilities::vm::domain::guest::translate_run(run, entry.os);
+        let translated =
+            crate::capabilities::vm::domain::guest::translate_run(run, entry.os, &entry.mounts);
         if let Err(why) = self.share.sync_in(entry.vm.channel(), &entry.mounts) {
             return fail(&format!("共享同步（进去）失败：{}", why));
         }
