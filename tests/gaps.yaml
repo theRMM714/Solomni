@@ -79,21 +79,6 @@
     macOS 上 node setup-vm.js 能把 QEMU 装进项目内 .vm/ 并被就绪检测认出来，且不需要管理员权限。
   blocked_by: |
     需要一台 macOS 机器确定可用来源后写适配。
-- id: vm.runtime-per-guest-platform
-  scope: global
-  level: T4
-  why: |
-    镜像预装（setup-vm-windows.js 的维护启动：经 QGA 在 guest 里装 python3 / python-is-python3 / nodejs）已让
-    Windows 的 vm 档会话真机跑通；但 runtimes/ 现在不分平台：用户要特定版本时，宿主那包与 guest 的 arch/os 可能
-    对不上（Linux guest 要 ELF，Windows 宿主目录里放的是 exe），而现在只会把宿主那份挂进 guest。
-  how: |
-    runtimes/<name> 按平台分子目录（如 <name>/<os>-<arch>/），vm 档只挂与 guest 匹配的那份；env 里的宿主路径按
-    **挂载表**译（挂载点与镜像根不是一回事），把运行包的 guest 挂载点写进 PATH；缺对应平台那份时如实报缺。
-  accept: |
-    用户给 runtimes/<name> 放多平台分包后，vm 档只挂与 guest 匹配的那份，模块工具在 guest 内跑通；
-    没有匹配分包时如实报缺，不挂错的那份。
-  blocked_by: |
-    分包目录命名与"镜像预装 vs 分包"的优先关系要在实现时定；不影响当前"镜像预装即可用"的验收。
 - id: module.acp-adapter
   scope: global
   level: T3

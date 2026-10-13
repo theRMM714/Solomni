@@ -432,6 +432,87 @@ pub(crate) fn guest_base_requires_rootfs_and_kernel() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// 目的：运行包按 guest 平台分包——平台子目录名的认法、按 guest 筛库、平台名拼法。
+#[test]
+pub(crate) fn packages_split_by_guest_platform() {
+    use crate::capabilities::vm::domain::packages::{
+        is_platform_dir_name, library_for_guest, Library, PackageManifest,
+    };
+    assert!(is_platform_dir_name("linux-x86_64"));
+    assert!(is_platform_dir_name("windows-aarch64"));
+    assert!(!is_platform_dir_name("linux"), "要 os-arch 两段");
+    assert!(
+        !is_platform_dir_name("linux-riscv64"),
+        "不认的架构不算平台目录"
+    );
+    assert!(!is_platform_dir_name("bin"), "普通内容目录不算平台目录");
+
+    let mk = |id: &str, src: &str, dirs: Vec<(&str, &str)>| PackageManifest {
+        id: id.to_string(),
+        version: "1".to_string(),
+        kind: "prefix".to_string(),
+        prefix: format!("opt/rt/{}", id),
+        provides_paths: Vec::new(),
+        requires: Vec::new(),
+        license: Vec::new(),
+        note: String::new(),
+        files: Vec::new(),
+        source_dir: std::path::PathBuf::from(src),
+        platform_dirs: dirs
+            .into_iter()
+            .map(|(k, v)| (k.to_string(), std::path::PathBuf::from(v)))
+            .collect(),
+    };
+    let lib = Library {
+        packages: vec![
+            mk(
+                "python",
+                "/rt/python",
+                vec![
+                    ("linux-x86_64", "/rt/python/linux-x86_64"),
+                    ("windows-x86_64", "/rt/python/windows-x86_64"),
+                ],
+            ),
+            mk("plain", "/rt/plain", Vec::new()),
+        ],
+        rejected: Vec::new(),
+    };
+    let g = library_for_guest(&lib, "linux-x86_64");
+    assert_eq!(
+        g.packages.len(),
+        2,
+        "匹配的与不分平台的都留：{:?}",
+        g.packages
+    );
+    assert_eq!(
+        g.packages
+            .iter()
+            .find(|p| p.id == "python")
+            .expect("python 在")
+            .source_dir,
+        std::path::PathBuf::from("/rt/python/linux-x86_64"),
+        "source_dir 指到匹配的平台子目录"
+    );
+    let w = library_for_guest(&lib, "windows-aarch64");
+    assert!(
+        w.packages.iter().all(|p| p.id != "python"),
+        "没有匹配分包 → 这个包在 guest 上不可用（诊断会如实报缺）"
+    );
+    assert!(
+        w.packages.iter().any(|p| p.id == "plain"),
+        "不分平台的包照旧"
+    );
+
+    assert_eq!(
+        crate::capabilities::vm::domain::exec::guest_platform(
+            crate::capabilities::vm::domain::guest::GuestOs::Linux,
+            crate::capabilities::vm::domain::guest::GuestArch::Arm64
+        ),
+        "linux-aarch64",
+        "平台名是 os-arch，架构用 x86_64 / aarch64"
+    );
+}
+
 /// 目的：命令装配按 guest 方言译路径——工作目录与本机路径型环境变量改成 guest 拼法，命令与非路径变量不动。
 #[test]
 pub(crate) fn translate_run_maps_paths_to_the_guest_dialect() {

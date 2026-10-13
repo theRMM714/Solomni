@@ -20,7 +20,11 @@
 runtimes/<包文件夹>/
   package.yaml
   ...包内容（二进制、库、脚本，按 kind 组织，见下）
+  <os>-<arch>/     # 可选：按 guest 平台分包（os ∈ linux/macos/windows，arch ∈ x86_64/aarch64）
 ```
+
+**按 guest 平台分包**：包目录下放 `<os>-<arch>/` 子目录时，虚拟机档只挂与 **guest 平台**匹配的那一份（那个子目录就是包内容根，`prefix` 不变）；
+有分包但没有匹配 guest 的那份 = 这个包在该 guest 上不可用，诊断如实报"缺哪个能力"，**不挂错的那份**。没有平台子目录 = 整包通用（本机档与不分平台的 guest 共用）。
 
 `package.yaml` 字段：
 
@@ -87,7 +91,7 @@ files:                      # 包内文件指纹：用于可复现与呈现
 基础根 = 一个目录：发行版 rootfs（目录，或 `rootfs.ext4` / `*.qcow2` 磁盘镜像）+ `vmlinuz`（可选 `initrd.img`）；**目录根必须给内核**（直启），**磁盘镜像可自带引导**（不给内核也行）；目录里可放一份 `guest.yaml` 声明画像（id / arch / agent / os / clients），缺省按目录名与 Debian 默认（os 缺省 linux），不认识的值如实拒收。
 
 **实施中（外部依赖未就位）**：Linux 已在 KVM 下跑通真机探针与产品级会话验收（`vm_live_guest_runs_command_inside_guest`；e2e 的 `SOLOMNI_VM_BASE` 场景）；
-Windows 已真机跑通（MSYS2 闭包 QEMU + Debian cloud qcow2 + cloud-init 装 `qemu-guest-agent`，维护启动预装 python3 / nodejs；引擎级探针与 e2e 的 vm 场景都过）；运行包按 guest 平台分包仍是缺口（见 `tests/gaps.yaml` 的 `vm.runtime-per-guest-platform`）；
+Windows 已真机跑通（MSYS2 闭包 QEMU + Debian cloud qcow2 + cloud-init 装 `qemu-guest-agent`，维护启动预装 python3 / nodejs；引擎级探针与 e2e 的 vm 场景都过）；
 macOS 缺取包（`vm.qemu-provisioning-macos`）与 virtiofsd；virtiofs（Linux 性能档）、SMB 实时共享（Windows）、macOS Apple vz 引擎与自研 agent + vsock 通道仍是缺口；
 现状、怎么补与验收标准见 `tests/gaps.yaml` 的 `fence.guest-tier-not-wired`。
 

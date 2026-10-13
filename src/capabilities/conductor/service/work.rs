@@ -73,13 +73,40 @@ impl Conductor {
         }
     }
 
+    /// 目的：这次虚拟机档会话的 guest 平台名（os-arch）；本机档或基础根判不出来给空串。
+    fn guest_platform_of(&self, spec: &crate::kernel::api::ExecSpec) -> String {
+        if spec.tier != crate::kernel::api::Tier::Vm {
+            return String::new();
+        }
+        let base = spec.base.clone().unwrap_or_default();
+        match crate::capabilities::vm::api::classify_base(
+            std::path::Path::new(&base),
+            self.probe.as_ref(),
+        ) {
+            Ok(image) => crate::capabilities::vm::api::guest_platform(image.os, image.arch),
+            Err(_) => String::new(),
+        }
+    }
+
+    /// 目的：这次会话该用的包库——按 guest 平台筛过（分平台包只留与 guest 匹配的那份）。
+    fn library_for(
+        &self,
+        spec: &crate::kernel::api::ExecSpec,
+    ) -> crate::capabilities::vm::api::Library {
+        crate::capabilities::vm::api::library_for_guest(
+            &self.vm.library(),
+            &self.guest_platform_of(spec),
+        )
+    }
+
     /// 本档位下不能执行工具的模块（模块 id → 缺的能力名）：建会话与重建时收口给工具环境。
     pub(crate) fn unavailable_modules(
         &self,
         spec: &crate::kernel::api::ExecSpec,
         modules: &[Module],
     ) -> BTreeMap<String, Vec<String>> {
-        crate::capabilities::vm::api::unavailable(spec, modules, &self.vm.library())
+        let lib = self.library_for(spec);
+        crate::capabilities::vm::api::unavailable(spec, modules, &lib)
     }
 
     /// 目的：**当前设置档位**下不能执行工具的模块（人直接跑与动作目录共用）：本机档不装载运行包，一律可用。
@@ -296,8 +323,9 @@ impl Conductor {
             .filter(|m| seen.iter().any(|id| id == &m.manifest.id))
             .cloned()
             .collect();
-        let plan = crate::capabilities::vm::api::plan(&spec, &session_modules, &self.vm.library())
-            .map_err(|diags| crate::capabilities::vm::api::diagnose_text(&diags))?;
+        let plan =
+            crate::capabilities::vm::api::plan(&spec, &session_modules, &self.library_for(&spec))
+                .map_err(|diags| crate::capabilities::vm::api::diagnose_text(&diags))?;
         self.log.info(
             "conductor::edit_session",
             &format!(
@@ -710,9 +738,12 @@ impl Conductor {
         }
         // 执行选型的完整性检查（「开始」即冻结）：虚拟机档的选型不成立（多版本未定版 / 定版不存在 /
         // 路径冲突）如实拒绝；只是缺包的照常开始——那是该模块的工具不可用（降级而非崩溃）。装配阶段按同一份计划取包。
-        let plan =
-            crate::capabilities::vm::api::plan(&meta.exec, &session_modules, &self.vm.library())
-                .map_err(|diags| crate::capabilities::vm::api::diagnose_text(&diags))?;
+        let plan = crate::capabilities::vm::api::plan(
+            &meta.exec,
+            &session_modules,
+            &self.library_for(&meta.exec),
+        )
+        .map_err(|diags| crate::capabilities::vm::api::diagnose_text(&diags))?;
         self.log.info(
             "conductor::create_work",
             &crate::capabilities::vm::api::plan_summary(&plan),

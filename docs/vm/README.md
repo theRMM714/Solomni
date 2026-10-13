@@ -25,7 +25,6 @@
 
 **实施中（外部依赖未就位）**：Linux 侧已在 KVM 下跑通真机探针与产品级会话验收；Windows 已真机跑通（引擎级探针与
 e2e 的 vm 场景都过——guest 真起、工具在 guest 内执行、删会话销毁 guest；镜像经维护启动预装 python3 / nodejs）；
-运行包按 guest 平台分包仍是缺口（见 [tests/gaps.yaml](../../tests/gaps.yaml) 的 `vm.runtime-per-guest-platform`）；
 macOS 缺取包（`vm.qemu-provisioning-macos`）与 virtiofsd；
 virtiofs（Linux 性能档）、SMB 实时共享（Windows）、macOS Apple vz 引擎与自研 agent + vsock 通道都仍是缺口。契约与组合矩阵见本页「五」，现状与验收见
 [tests/gaps.yaml](../../tests/gaps.yaml) 的 `fence.guest-tier-not-wired`。

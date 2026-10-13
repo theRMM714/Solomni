@@ -46,6 +46,38 @@ pub struct PackageManifest {
     /// 目的：扫描时记下的来源目录（包文件夹的真实路径）；不来自 yaml，装配阶段据此定位包内容。
     #[serde(skip)]
     pub source_dir: std::path::PathBuf,
+    /// 目的：扫描时认出的**平台子目录**（键 = 「os-arch」，值 = 那个子目录的真实路径）；空 = 这个包不分平台（整包通用）；不来自 yaml。
+    #[serde(skip, default)]
+    pub platform_dirs: BTreeMap<String, std::path::PathBuf>,
+}
+
+/// 目的：平台子目录名的写法（os-arch）——认了才能当"分平台包"用；不认的子目录当普通内容。
+pub fn is_platform_dir_name(name: &str) -> bool {
+    let Some((os, arch)) = name.split_once('-') else {
+        return false;
+    };
+    matches!(os, "linux" | "macos" | "windows") && matches!(arch, "x86_64" | "aarch64")
+}
+
+/// 目的：按 guest 平台筛一遍包库——有平台分包的只留与 guest 匹配的那份（source_dir 指过去）；有分包但没有匹配那份的包从库里去掉，于是"缺能力"由诊断如实报出（不挂错的那份）。
+pub fn library_for_guest(lib: &Library, platform: &str) -> Library {
+    let mut packages = Vec::new();
+    for p in &lib.packages {
+        if p.platform_dirs.is_empty() {
+            packages.push(p.clone());
+            continue;
+        }
+        let Some(dir) = p.platform_dirs.get(platform) else {
+            continue;
+        };
+        let mut q = p.clone();
+        q.source_dir = dir.clone();
+        packages.push(q);
+    }
+    Library {
+        packages,
+        rejected: lib.rejected.clone(),
+    }
 }
 
 /// 目的：一个文件的声明指纹。

@@ -20,6 +20,14 @@ pub enum GuestArch {
 }
 
 impl GuestArch {
+    /// 目的：平台名里用的架构写法（amd64 → x86_64；arm64 → aarch64）。
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            GuestArch::Amd64 => "x86_64",
+            GuestArch::Arm64 => "aarch64",
+        }
+    }
+
     /// 目的：本机能虚拟化的架构（x86_64 → amd64；aarch64 → arm64）。
     pub fn host() -> GuestArch {
         if cfg!(target_arch = "aarch64") {
@@ -53,6 +61,15 @@ impl GuestOs {
         match self {
             GuestOs::Windows => PathDialect::Windows,
             GuestOs::Linux | GuestOs::Macos => PathDialect::Posix,
+        }
+    }
+
+    /// 目的：平台名里用的 os 写法（也是 guest.yaml 的 os 取值与工作环境册 env_guests 的键）。
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            GuestOs::Linux => "linux",
+            GuestOs::Macos => "macos",
+            GuestOs::Windows => "windows",
         }
     }
 

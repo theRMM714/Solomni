@@ -50,6 +50,21 @@ impl PackageSource for FsPackages {
             match yaml_serde::from_str::<PackageManifest>(&text) {
                 Ok(mut m) => {
                     m.source_dir = path.clone();
+                    // 认平台子目录（os-arch）：分平台包里只挂与 guest 匹配的那份（见 library_for_guest）。
+                    if let Ok(subs) = std::fs::read_dir(&path) {
+                        for sub in subs.flatten() {
+                            let sub_path = sub.path();
+                            if !sub_path.is_dir() {
+                                continue;
+                            }
+                            let name = sub.file_name().to_string_lossy().to_string();
+                            if crate::capabilities::vm::domain::packages::is_platform_dir_name(
+                                &name,
+                            ) {
+                                m.platform_dirs.insert(name, sub_path);
+                            }
+                        }
+                    }
                     found.push(m);
                 }
                 Err(e) => rejected.push(format!("{}：package.yaml 非法（{}）", folder, e)),

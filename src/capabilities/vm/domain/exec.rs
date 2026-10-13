@@ -336,6 +336,14 @@ pub fn default_combos(host: &str) -> &'static [Combo] {
     }
 }
 
+/// 目的：guest 的平台名（os-arch，如 linux-x86_64）——运行包按它选分平台子目录。
+pub fn guest_platform(
+    os: crate::capabilities::vm::domain::guest::GuestOs,
+    arch: crate::capabilities::vm::domain::guest::GuestArch,
+) -> String {
+    format!("{}-{}", os.as_str(), arch.as_str())
+}
+
 /// 目的：在排好的顺序里挑第一个"引擎与共享都在场"的组合（在不在场由调用方给）。
 /// 返回：选中的组合；都不在场就是 None。
 pub fn choose_combo<'a>(
