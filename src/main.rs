@@ -222,12 +222,17 @@ fn main() {
         };
 
     // **虚拟机档能力**：运行包库来源、VM 引擎与共享后端三个出站端口只由它的 service 持有（R12）。
-    // 共享后端按平台选：Windows 用 QGA 复制（宿主没有 9p / virtiofs），Linux / macOS 用 QEMU 自带的 9p。
-    let share: Arc<dyn capabilities::vm::ports::ShareBackend + Send + Sync> = if cfg!(windows) {
-        Arc::new(capabilities::vm::detail::CopyShare::new())
-    } else {
-        Arc::new(capabilities::vm::detail::NinePShare::new())
-    };
+    // 共享后端按平台的组合回退链选：目前在场的是 QEMU + 9p / copy（virtiofs / SMB 见 tests/gaps.yaml）。
+    let picked = capabilities::vm::domain::exec::choose_combo(
+        capabilities::vm::domain::exec::default_combos(std::env::consts::OS),
+        &|engine| engine == "qemu",
+        &|_engine, share| share == "9p" || share == "copy",
+    );
+    let share: Arc<dyn capabilities::vm::ports::ShareBackend + Send + Sync> =
+        match picked.map(|c| c.share) {
+            Some("copy") => Arc::new(capabilities::vm::detail::CopyShare::new()),
+            _ => Arc::new(capabilities::vm::detail::NinePShare::new()),
+        };
     let vm: Arc<dyn capabilities::vm::api::Vm + Send + Sync> =
         Arc::new(capabilities::vm::service::VmService::new(
             Arc::new(packages),

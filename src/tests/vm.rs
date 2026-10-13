@@ -750,6 +750,43 @@ pub(crate) fn disk_image_base_is_classified_as_a_disk_root() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// 目的：按平台的组合回退链是数据；引擎 / 共享不在场时逐档回退，都缺才没有组合。
+#[test]
+pub(crate) fn default_combos_follow_the_platform_and_fall_back() {
+    use crate::capabilities::vm::domain::exec::{choose_combo, default_combos};
+    let ids = |host: &str| {
+        default_combos(host)
+            .iter()
+            .map(|c| format!("{}/{}", c.engine, c.share))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(ids("linux")[0], "qemu/virtiofs");
+    assert_eq!(ids("macos")[0], "vz/virtiofs");
+    assert_eq!(ids("windows")[0], "qemu/smb");
+
+    let engine_ok = |e: &str| e == "qemu";
+    let share_ok = |_e: &str, s: &str| s == "9p" || s == "copy";
+    let linux = choose_combo(default_combos("linux"), &engine_ok, &share_ok)
+        .map(|c| format!("{}/{}", c.engine, c.share));
+    assert_eq!(
+        linux.as_deref(),
+        Some("qemu/9p"),
+        "virtiofs 不在场就退到 9p"
+    );
+
+    let copy_only = |_e: &str, s: &str| s == "copy";
+    let win = choose_combo(default_combos("windows"), &engine_ok, &copy_only)
+        .map(|c| format!("{}/{}", c.engine, c.share));
+    assert_eq!(
+        win.as_deref(),
+        Some("qemu/copy"),
+        "Windows 上 smb 不在场就退到 copy"
+    );
+
+    let none = choose_combo(default_combos("windows"), &|_e| false, &|_e, _s| true);
+    assert!(none.is_none(), "引擎不在场就没有组合");
+}
+
 /// 目的：已验平台是数据表（不是平台 cfg）：Linux 已验，Windows / macOS 未验。
 #[test]
 pub(crate) fn verified_platforms_are_a_data_table() {

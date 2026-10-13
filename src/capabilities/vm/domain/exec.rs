@@ -268,6 +268,78 @@ pub fn host_verified(host: &str) -> bool {
     VERIFIED_HOSTS.contains(&host)
 }
 
+/// 目的：一个可选的后端组合（引擎 + 共享后端）——按平台排成回退链，前面的排前。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Combo {
+    pub engine: &'static str,
+    pub share: &'static str,
+}
+
+const LINUX_COMBOS: &[Combo] = &[
+    Combo {
+        engine: "qemu",
+        share: "virtiofs",
+    },
+    Combo {
+        engine: "qemu",
+        share: "9p",
+    },
+    Combo {
+        engine: "qemu",
+        share: "copy",
+    },
+];
+const MACOS_COMBOS: &[Combo] = &[
+    Combo {
+        engine: "vz",
+        share: "virtiofs",
+    },
+    Combo {
+        engine: "qemu",
+        share: "9p",
+    },
+    Combo {
+        engine: "qemu",
+        share: "copy",
+    },
+];
+const WINDOWS_COMBOS: &[Combo] = &[
+    Combo {
+        engine: "qemu",
+        share: "smb",
+    },
+    Combo {
+        engine: "qemu",
+        share: "copy",
+    },
+];
+const FALLBACK_COMBOS: &[Combo] = &[Combo {
+    engine: "qemu",
+    share: "copy",
+}];
+
+/// 目的：某个宿主平台上按"性能优先"排好的组合顺序（回退在后面）；未列出的平台用兜底表。
+pub fn default_combos(host: &str) -> &'static [Combo] {
+    match host {
+        "linux" => LINUX_COMBOS,
+        "macos" => MACOS_COMBOS,
+        "windows" => WINDOWS_COMBOS,
+        _ => FALLBACK_COMBOS,
+    }
+}
+
+/// 目的：在排好的顺序里挑第一个"引擎与共享都在场"的组合（在不在场由调用方给）。
+/// 返回：选中的组合；都不在场就是 None。
+pub fn choose_combo<'a>(
+    order: &'a [Combo],
+    engine_ok: &dyn Fn(&str) -> bool,
+    share_ok: &dyn Fn(&str, &str) -> bool,
+) -> Option<&'a Combo> {
+    order
+        .iter()
+        .find(|c| engine_ok(c.engine) && share_ok(c.engine, c.share))
+}
+
 /// 目的：本平台的 guest 后端是否已经过真机验收。
 /// 约束：记录的是"验过没有"的事实，不是环境探测。
 fn guest_backend_verified() -> bool {
