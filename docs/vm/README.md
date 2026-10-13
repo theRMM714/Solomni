@@ -21,7 +21,7 @@
 **当前状态**：四轴已按可插的形状落地——`QemuEngine`（当前唯一引擎）、`GuestImage`（基础根里可放 `guest.yaml` 声明 id / arch / agent / clients）、
 `QgaChannel`（QEMU virtio-serial）、`NinePShare`（Linux / macOS 的目录根）与 `CopyShare`（QGA 复制，三平台通用）。
 按平台的组合回退链是数据（`default_combos` / `choose_combo`），加速器按平台给（`kvm:tcg` / `whpx:tcg` / `hvf:tcg`），共享要隧道时给 `restrict=on` 网卡。
-执行分派已接线（会话在 `tier == Vm` 时把模块命令交给 guest；建会话时装配并拉起，会话删除时销毁）；就绪项 `guest` 按**已验平台数据表**放开（当前只有 Linux）。
+执行分派已接线（会话在 `tier == Vm` 时把模块命令交给 guest；建会话时装配并拉起，会话删除时销毁）；就绪项 `guest` 按**已验平台数据表**放开（当前只有 Linux），并带上本平台的默认组合（`default_combos`）。
 
 **实施中（外部依赖未就位）**：Linux 侧已在 KVM 下跑通真机探针与产品级会话验收；Windows / macOS 的真机验收有待——
 Windows 还缺可启动的 guest 磁盘镜像包与非 Linux 的 QEMU 取包（见 [tests/gaps.yaml](../../tests/gaps.yaml) 的

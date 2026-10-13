@@ -80,7 +80,7 @@ files:                      # 包内文件指纹：用于可复现与呈现
 `GuestChannel`（当前 QGA）× `ShareBackend`（`NinePShare` 与 `CopyShare`）。按平台的组合回退链是数据（`default_combos` / `choose_combo`），
 加速器按平台给（`kvm:tcg` / `whpx:tcg` / `hvf:tcg`），root 支持目录（QEMU 9p）与磁盘镜像两种。整条业务住在独立能力 `vm`
 （逐文件职责见 [docs/vm/README.md](docs/vm/README.md)）；执行分派已接线（会话在 vm 档把模块命令交给 guest，建会话时装配并拉起，删除时销毁）；
-就绪项 `guest` 按**已验平台数据表**放开（当前只有 Linux）。
+就绪项 `guest` 按**已验平台数据表**放开（当前只有 Linux），并带上本平台的默认组合（`default_combos`）。
 
 前置检测是**一份逐项清单**（`vm::vm_requirements`，界面与 `--doctor` 照抄同一份）：虚拟机监视器、guest 本体、QEMU（引擎）、基础根，
 每项给出"现状 + 怎么补"。依赖（QEMU / `virtiofsd` / 镜像）**用户自备**，由 `setup-vm.js` 按平台装进项目内 `.vm/`（下载源在 `links.yaml`，需用户同意）；产品只检测与指路。

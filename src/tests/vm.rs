@@ -150,6 +150,16 @@ pub(crate) fn vm_tier_readiness_gates_creation_and_editing() {
         "guest 项按已验证平台放开：{:?}",
         guest_item
     );
+    let combo = {
+        let c = crate::capabilities::vm::domain::exec::default_combos(std::env::consts::OS)[0];
+        format!("{}/{}", c.engine, c.share)
+    };
+    assert!(
+        guest_item.detail.contains(&combo),
+        "就绪说明要带上本平台默认组合 {}：{:?}",
+        combo,
+        guest_item
+    );
     let unmet: Vec<&str> = r.unmet().iter().map(|x| x.id).collect();
     assert!(
         unmet.contains(&"base"),

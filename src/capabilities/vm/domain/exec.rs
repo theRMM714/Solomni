@@ -229,15 +229,23 @@ pub fn vm_requirements(vm: &VmInputs<'_>) -> Vec<VmRequirement> {
             id: "guest",
             met: guest_backend_verified(),
             detail: if guest_backend_verified() {
-                "guest 后端已就位，本平台已通过真机验收".to_string()
+                format!(
+                    "guest 后端已就位，本平台默认组合 {} 已通过真机验收",
+                    default_combo_label()
+                )
             } else {
-                "guest 后端已就位，但本平台尚未真机验收（就绪项判否）".to_string()
+                format!(
+                    "guest 后端已就位，但本平台默认组合 {} 尚未真机验收（就绪项判否）",
+                    default_combo_label()
+                )
             },
             how: if guest_backend_verified() {
                 String::new()
             } else {
-                "在该平台真机上跑通一次 vm 档工具后再放开（现状与验收见 tests/gaps.yaml）"
-                    .to_string()
+                format!(
+                    "在该平台真机上跑通一次 vm 档工具（默认组合 {}）后再放开（现状与验收见 tests/gaps.yaml）",
+                    default_combo_label()
+                )
             },
         },
         // QEMU：用户自备。没登记就看 PATH——检测的是"起得来 guest 的那件东西在不在"。
@@ -344,6 +352,14 @@ pub fn choose_combo<'a>(
 /// 约束：记录的是"验过没有"的事实，不是环境探测。
 fn guest_backend_verified() -> bool {
     host_verified(std::env::consts::OS)
+}
+
+/// 目的：本平台默认组合的可读标签（"引擎/共享"），用于就绪说明里说清"验的是哪一套"。
+fn default_combo_label() -> String {
+    default_combos(std::env::consts::OS)
+        .first()
+        .map(|c| format!("{}/{}", c.engine, c.share))
+        .unwrap_or_else(|| "未定".to_string())
 }
 
 /// 虚拟机监视器不可用时的解决指引（各平台说各自的办法）。
