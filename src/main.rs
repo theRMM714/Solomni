@@ -222,11 +222,17 @@ fn main() {
         };
 
     // **虚拟机档能力**：运行包库来源、VM 引擎与共享后端三个出站端口只由它的 service 持有（R12）。
+    // 共享后端按平台选：Windows 用 QGA 复制（宿主没有 9p / virtiofs），Linux / macOS 用 QEMU 自带的 9p。
+    let share: Arc<dyn capabilities::vm::ports::ShareBackend + Send + Sync> = if cfg!(windows) {
+        Arc::new(capabilities::vm::detail::CopyShare::new())
+    } else {
+        Arc::new(capabilities::vm::detail::NinePShare::new())
+    };
     let vm: Arc<dyn capabilities::vm::api::Vm + Send + Sync> =
         Arc::new(capabilities::vm::service::VmService::new(
             Arc::new(packages),
             Arc::new(capabilities::vm::detail::QemuEngine::new()),
-            Arc::new(capabilities::vm::detail::NinePShare::new()),
+            share,
         ));
 
     // **工作区能力**：目录布局与版本库两个出站端口只由它的 service 持有（R12）。

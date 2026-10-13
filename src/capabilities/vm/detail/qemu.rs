@@ -235,6 +235,27 @@ impl QemuHandle {
         }
         Err("QGA 同步不上".to_string())
     }
+
+    /// 目的：打开 guest 里的一个文件，拿回 QGA 句柄。
+    fn file_open(&mut self, path: &str, mode: &str) -> Result<i64, String> {
+        self.send(&serde_json::json!({
+            "execute":"guest-file-open",
+            "arguments":{"path":path,"mode":mode}
+        }))?;
+        let v = self.recv()?;
+        v.get("return")
+            .and_then(|r| r.as_i64())
+            .ok_or_else(|| "QGA 没给出文件句柄".to_string())
+    }
+
+    /// 目的：关掉 guest 文件句柄（回包不关心）。
+    fn file_close(&mut self, handle: i64) {
+        let _ = self.send(&serde_json::json!({
+            "execute":"guest-file-close",
+            "arguments":{"handle":handle}
+        }));
+        let _ = self.recv();
+    }
 }
 
 impl GuestChannel for QemuHandle {
@@ -317,6 +338,85 @@ impl GuestChannel for QemuHandle {
             std::thread::sleep(Duration::from_millis(20));
         }
     }
+
+    /// 目的：把字节分块写进 guest 文件（QGA guest-file-write，base64）。
+    fn put_file(&mut self, path: &str, bytes: &[u8]) -> Result<(), String> {
+        self.sync()?;
+        let handle = self.file_open(path, "wb")?;
+        let mut off = 0;
+        while off < bytes.len() {
+            let end = (off + 3072).min(bytes.len());
+            let encoded = b64_bytes(&bytes[off..end]);
+            if let Err(why) = self.send(&serde_json::json!({
+                "execute":"guest-file-write",
+                "arguments":{"handle":handle,"buf-b64":encoded}
+            })) {
+                self.file_close(handle);
+                return Err(why);
+            }
+            let v = match self.recv() {
+                Ok(v) => v,
+                Err(why) => {
+                    self.file_close(handle);
+                    return Err(why);
+                }
+            };
+            let n = v
+                .get("return")
+                .and_then(|r| r.get("count"))
+                .and_then(|c| c.as_i64())
+                .unwrap_or(0);
+            if n <= 0 {
+                self.file_close(handle);
+                return Err("QGA 写 guest 文件返回 0 字节".to_string());
+            }
+            off += n as usize;
+        }
+        self.file_close(handle);
+        Ok(())
+    }
+
+    /// 目的：把 guest 文件按块读回来（QGA guest-file-read，base64）。
+    fn get_file(&mut self, path: &str) -> Result<Vec<u8>, String> {
+        self.sync()?;
+        let handle = self.file_open(path, "rb")?;
+        let mut out: Vec<u8> = Vec::new();
+        loop {
+            if let Err(why) = self.send(&serde_json::json!({
+                "execute":"guest-file-read",
+                "arguments":{"handle":handle,"count":65536}
+            })) {
+                self.file_close(handle);
+                return Err(why);
+            }
+            let v = match self.recv() {
+                Ok(v) => v,
+                Err(why) => {
+                    self.file_close(handle);
+                    return Err(why);
+                }
+            };
+            let ret = match v.get("return") {
+                Some(r) => r,
+                None => {
+                    self.file_close(handle);
+                    return Err("QGA 读文件回包里没有 return".to_string());
+                }
+            };
+            let n = ret.get("count").and_then(|c| c.as_i64()).unwrap_or(0);
+            if n <= 0 {
+                break;
+            }
+            if let Some(s) = ret.get("buf-b64").and_then(|d| d.as_str()) {
+                out.extend(unb64(s));
+            }
+            if n < 65536 {
+                break;
+            }
+        }
+        self.file_close(handle);
+        Ok(out)
+    }
 }
 
 impl GuestVm for QemuHandle {
@@ -343,8 +443,12 @@ fn fail(why: &str) -> ToolOutcome {
 const B64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
 fn b64(s: &str) -> String {
+    b64_bytes(s.as_bytes())
+}
+
+fn b64_bytes(data: &[u8]) -> String {
     let mut out = String::new();
-    for chunk in s.as_bytes().chunks(3) {
+    for chunk in data.chunks(3) {
         let b = [
             chunk[0],
             *chunk.get(1).unwrap_or(&0),

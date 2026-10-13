@@ -31,8 +31,35 @@
     Linux（QEMU/virtiofs）已验；Windows / macOS 各自组合通过后按组合销账，全部通过后删除本条，
     并同步 PRODUCT.md / RUNTIME_SPEC.md / docs/vm/ 的当前状态。
   blocked_by: |
-    阶段 0-1 待实施：抽象改造、三平台 QEMU 组合与 Windows / macOS 真机验收尚未做。
+    阶段 0 已落地（四端口抽象）；阶段 1 三平台 QEMU 组合与 Windows / macOS 真机验收尚未做。
+    共享：Windows 走 QGA 复制兜底（实时共享见 vm.share-realtime-windows，Linux 性能档见 vm.share-virtiofs-linux）。
     阶段 2-3（macOS vz、多 guest）在阶段 1 之后。
+- id: vm.share-realtime-windows
+  scope: global
+  level: T4
+  why: |
+    Windows 宿主没有 9p / virtiofs（QEMU 的 virtfs 只在 Linux / macOS / FreeBSD 构建），所以 Windows 上宿主↔guest
+    目前用 QGA 复制兜底（每趟 tar 打包/解包），不是实时共享；大目录与高频写会慢，执行后还要把可写树整棵回拷。
+  how: |
+    做 A 方案：宿主侧用户态 SMB3 服务 + QEMU guestfwd 隧道，guest 用 mount -t cifs 挂载（免管理员、可热挂载），
+    作为 Windows 的实时共享档。共享端口（ShareBackend / ShareGuard / sync_in / sync_out）已就绪，只需新增适配器与就绪项。
+  accept: |
+    Windows 真机 vm 档会话里，guest 对共享目录的写入在宿主即时可见（不必等执行结束），且不需要管理员权限。
+  blocked_by: |
+    先要有可启动的 Windows 侧 guest 磁盘镜像（见 fence.guest-tier-not-wired），以及一个用户态 SMB3 实现。
+- id: vm.share-virtiofs-linux
+  scope: global
+  level: T4
+  why: |
+    Linux 宿主当前用 9p；virtiofs 是 Linux 宿主上最快的实时共享，但需要 virtiofsd（用户态 vhost-user 守护进程，
+    每设备一个），产品目前不检测、不起停它。
+  how: |
+    在 ShareBackend 下加 VirtioFsShare：探测 virtiofsd、按挂载起停守护进程（ShareGuard 已能持外部资源），
+    QEMU 参数用 vhost-user-fs-pci，guest 端 mount -t virtiofs；作为 Linux 默认，9p 留作回退。
+  accept: |
+    Linux 真机 vm 档会话走 virtiofs，工具在 guest 里读写共享目录；virtiofsd 随会话起停、删会话后不残留。
+  blocked_by: |
+    virtiofsd 用户自备（setup-vm.js 按平台取包）尚未做。
 - id: module.acp-adapter
   scope: global
   level: T3

@@ -92,4 +92,12 @@ pub trait GuestVm: Send {
 /// 目的：在 guest 里执行命令的通道（QGA / 自研 agent）。
 pub trait GuestChannel: Send {
     fn exec(&mut self, run: &GuestRun) -> ToolOutcome;
+    /// 目的：把一段字节写进 guest 的一个文件（copy 这类后端用）；默认：这条通道不支持。
+    fn put_file(&mut self, _path: &str, _bytes: &[u8]) -> Result<(), String> {
+        Err("这条命令通道不支持写入 guest 文件".to_string())
+    }
+    /// 目的：把 guest 一个文件的字节取回来（copy 这类后端用）；默认：这条通道不支持。
+    fn get_file(&mut self, _path: &str) -> Result<Vec<u8>, String> {
+        Err("这条命令通道不支持读取 guest 文件".to_string())
+    }
 }

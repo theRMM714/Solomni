@@ -49,7 +49,7 @@ guest 真启动、额外 9p 共享挂进 guest、经 QGA 在 guest 里跑模块�
 | `VmEngine` | 探测可用性、拉 / 停 VM、加速器、磁盘、网卡 | `QemuEngine`（三平台）、`VzEngine`（macOS，后续） |
 | `GuestImage` | 镜像描述：id / arch / root 磁盘镜像 / kernel / initrd / agent / 声明的共享客户端能力 | `debian-13`（默认）、用户自备（后续） |
 | `GuestChannel` | 在 guest 里执行、文件读写、销毁 | `QgaChannel`（QEMU virtio-serial，默认）、`AgentVsockChannel`（后续） |
-| `ShareBackend` | 宿主↔guest 共享，声明支持的引擎与 guest | `VirtioFsShare` / `NinePShare` / `SmbShare` / `QgaCopyShare` |
+| `ShareBackend` | 宿主↔guest 共享，声明支持的引擎与 guest | 已就位：`NinePShare`、`CopyShare`；待做：`VirtioFsShare`、`SmbShare` |
 
 各平台默认与回退（性能优先）：
 

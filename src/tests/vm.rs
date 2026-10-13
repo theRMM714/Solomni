@@ -666,6 +666,41 @@ pub(crate) fn share_syncs_around_each_run_and_releases_on_stop() {
     assert!(ecalls.iter().any(|c| c == "stop:w"), "{:?}", ecalls);
 }
 
+/// 目的：复制后端不产生引擎参数，只在 guest 里建目录；宿主侧 tar 打包/解包真跑通。
+#[test]
+pub(crate) fn copy_share_plans_mkdirs_and_tar_round_trips_on_the_host() {
+    use crate::capabilities::vm::detail::copy::{host_tar, host_untar, CopyShare};
+    use crate::capabilities::vm::ports::ShareBackend;
+    let share = CopyShare::new();
+    let mounts = vec![GuestMount {
+        host: std::path::PathBuf::from("/host/work"),
+        guest: "/work".to_string(),
+        read_only: false,
+    }];
+    let (plan, _guard) = share.prepare("qemu", &mounts).expect("复制计划");
+    assert_eq!(plan.kind, "copy");
+    assert!(
+        plan.engine_args.is_empty(),
+        "复制后端没有引擎参数：{:?}",
+        plan.engine_args
+    );
+    assert_eq!(plan.guest_scripts, vec!["mkdir -p '/work'".to_string()]);
+    assert!(!plan.needs_net, "复制后端不需要网卡");
+
+    let src = crate::tests::scratch("copy-tar-src");
+    let dst = crate::tests::scratch("copy-tar-dst");
+    std::fs::write(src.join("a.txt"), b"hello-copy").expect("写文件");
+    let tar = host_tar(&src).expect("打包");
+    assert!(!tar.is_empty(), "tar 不该是空的");
+    host_untar(&dst, &tar).expect("解包");
+    assert_eq!(
+        std::fs::read(dst.join("a.txt")).expect("读回来"),
+        b"hello-copy".to_vec()
+    );
+    let _ = std::fs::remove_dir_all(&src);
+    let _ = std::fs::remove_dir_all(&dst);
+}
+
 #[test]
 pub(crate) fn vm_service_holds_guests_by_lease() {
     let engine = Arc::new(crate::tests::doubles::FakeEngine::new());
