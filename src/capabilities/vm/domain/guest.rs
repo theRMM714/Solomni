@@ -7,6 +7,7 @@ use crate::capabilities::vm::domain::exec::ExecPlan;
 use crate::capabilities::vm::domain::packages::KIND_SYSTEM;
 use crate::kernel::api::FenceSpec;
 use crate::kernel::ports::HostProbe;
+use serde::Deserialize;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
@@ -129,6 +130,34 @@ pub struct GuestRun {
     pub cwd: String,
 }
 
+/// 目的：guest 清单（guest.yaml，可选）——用户自备镜像对世界的自我介绍；不认识的值如实拒收。
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct GuestManifest {
+    #[serde(default)]
+    id: Option<String>,
+    #[serde(default)]
+    arch: Option<String>,
+    #[serde(default)]
+    agent: Option<String>,
+    #[serde(default)]
+    clients: Option<Vec<String>>,
+}
+
+/// 目的：读基础根目录里的 guest.yaml（可选）。
+fn read_manifest(base: &Path, probe: &dyn HostProbe) -> Result<Option<GuestManifest>, String> {
+    let path = base.join("guest.yaml");
+    if !probe.is_file(&path) {
+        return Ok(None);
+    }
+    let text = probe
+        .read_text(&path)
+        .ok_or_else(|| "guest.yaml 读不了".to_string())?;
+    yaml_serde::from_str::<GuestManifest>(&text)
+        .map(Some)
+        .map_err(|e| format!("guest.yaml 非法（{}）", e))
+}
+
 /// 目的：把基础根目录判成一份可用的 guest 镜像（rootfs 目录 + vmlinuz/bzImage + 可选 initrd）。
 /// 返回：判定出来的镜像；不到一处可用的布局时给一句缺什么。
 pub fn classify_base(base: &Path, probe: &dyn HostProbe) -> Result<GuestImage, String> {
@@ -161,11 +190,65 @@ pub fn classify_base(base: &Path, probe: &dyn HostProbe) -> Result<GuestImage, S
         Some(image) => GuestRoot::Disk(image),
         None => GuestRoot::Dir(base.to_path_buf()),
     };
-    let id = base
-        .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "guest".to_string());
-    Ok(GuestImage::linux(&id, root, kernel, initrd))
+    let manifest = read_manifest(base, probe)?;
+    let id = manifest
+        .as_ref()
+        .and_then(|m| m.id.clone())
+        .unwrap_or_else(|| {
+            base.file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "guest".to_string())
+        });
+    let arch = match manifest.as_ref().and_then(|m| m.arch.as_deref()) {
+        None => GuestArch::host(),
+        Some("amd64") => GuestArch::Amd64,
+        Some("arm64") => GuestArch::Arm64,
+        Some(other) => {
+            return Err(format!(
+                "guest.yaml 里的 arch 不认识：{}（认 amd64 / arm64）",
+                other
+            ))
+        }
+    };
+    let agent = match manifest.as_ref().and_then(|m| m.agent.as_deref()) {
+        None => GuestAgent::Qga,
+        Some("qga") => GuestAgent::Qga,
+        Some(other) => {
+            return Err(format!(
+                "guest.yaml 里的 agent 不认识：{}（当前只认 qga）",
+                other
+            ))
+        }
+    };
+    let clients = match manifest.as_ref().and_then(|m| m.clients.as_deref()) {
+        None => GuestClients::debian(),
+        Some(list) => {
+            let mut c = GuestClients {
+                nine_p: false,
+                virtio_fs: false,
+                cifs: false,
+            };
+            for name in list {
+                match name.as_str() {
+                    "9p" => c.nine_p = true,
+                    "virtiofs" => c.virtio_fs = true,
+                    "cifs" => c.cifs = true,
+                    other => {
+                        return Err(format!(
+                            "guest.yaml 里的共享客户端不认识：{}（认 9p / virtiofs / cifs）",
+                            other
+                        ))
+                    }
+                }
+            }
+            c
+        }
+    };
+    let mut image = GuestImage::linux(&id, root, kernel, initrd);
+    image.arch = arch;
+    image.agent = agent;
+    image.clients = clients;
+    Ok(image)
 }
 
 /// 目的：把执行计划与围栏翻成 guest 挂载——prefix 包只读挂到 /<prefix>，围栏根按宿主原路径挂。

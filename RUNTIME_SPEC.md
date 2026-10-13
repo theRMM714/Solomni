@@ -86,7 +86,7 @@ root 改为磁盘镜像；guest 有 `restrict=on` 网卡。契约与矩阵见 [d
 
 前置检测是**一份逐项清单**（`vm::vm_requirements`，界面与 `--doctor` 照抄同一份），按**组合**报"现状 + 怎么补"。
 依赖（QEMU / `virtiofsd` / 镜像）**用户自备**，由 `setup-vm.js` 按平台装进项目内 `.vm/`（下载源在 `links.yaml`，需用户同意）；产品只检测与指路。
-guest 镜像从"一个目录（rootfs + 内核）"扩展为镜像描述（id / arch / root 磁盘镜像 / kernel / initrd / agent / 声明的共享客户端能力）。
+guest 镜像从"一个目录（rootfs + 内核）"扩展为镜像描述（id / arch / root 磁盘镜像 / kernel / initrd / agent / 声明的共享客户端能力）；基础根目录里可放一份 `guest.yaml` 声明这些（`id` / `arch` / `agent` / `clients: [9p, virtiofs, cifs]`），缺省按目录名与 Debian 默认，不认识的值如实拒收。
 Linux 侧已在 KVM 下跑通真机探针与产品级会话验收（`vm_live_guest_runs_command_inside_guest`；e2e 的 `SOLOMNI_VM_BASE` 场景）；
 现状、怎么补与验收标准见 `tests/gaps.yaml` 的 `fence.guest-tier-not-wired`。
 

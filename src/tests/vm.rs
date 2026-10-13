@@ -750,6 +750,37 @@ pub(crate) fn disk_image_base_is_classified_as_a_disk_root() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// 目的：guest.yaml 能声明 id / arch / agent / 共享客户端；不认识的值如实拒收。
+#[test]
+pub(crate) fn guest_manifest_declares_the_image_and_rejects_unknowns() {
+    let probe = crate::kernel::detail::HostProbeAdapter;
+    let dir = crate::tests::scratch("vm-guest-manifest");
+    std::fs::write(dir.join("vmlinuz"), b"x").expect("写内核");
+    std::fs::write(
+        dir.join("guest.yaml"),
+        "id: custom-13\narch: arm64\nagent: qga\nclients: [cifs]\n",
+    )
+    .expect("写清单");
+    let image = classify_base(&dir, &probe).expect("清单合法");
+    assert_eq!(image.id, "custom-13");
+    assert_eq!(
+        image.arch,
+        crate::capabilities::vm::domain::guest::GuestArch::Arm64
+    );
+    assert!(image.clients.cifs && !image.clients.nine_p, "按清单声明");
+
+    std::fs::write(dir.join("guest.yaml"), "clients: [smb]\n").expect("写坏清单");
+    assert!(
+        classify_base(&dir, &probe).is_err(),
+        "不认识的共享客户端要如实拒收"
+    );
+
+    std::fs::write(dir.join("guest.yaml"), "arch: riscv\n").expect("写坏 arch");
+    assert!(classify_base(&dir, &probe).is_err(), "不认识的 arch 要拒收");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// 目的：判出来的镜像带默认 agent 与共享客户端能力；缺客户端就不落对应后端。
 #[test]
 pub(crate) fn guest_image_carries_agent_and_client_capabilities() {
