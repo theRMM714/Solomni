@@ -312,15 +312,22 @@ fn base_requirement(base: Option<&str>, probe: &dyn HostProbe) -> VmRequirement 
     });
     let (met, detail) = match checked {
         None => (false, "没有指定基础根".to_string()),
-        Some((p, Ok(b))) => (
-            true,
-            format!(
-                "基础根在场：{}（rootfs{}，内核 {}）",
-                p,
-                if b.initrd.is_some() { " + initrd" } else { "" },
-                b.kernel.file_name().unwrap_or_default().to_string_lossy()
-            ),
-        ),
+        Some((p, Ok(b))) => {
+            let root = match &b.root {
+                crate::capabilities::vm::domain::guest::GuestRoot::Dir(_) => "目录 rootfs",
+                crate::capabilities::vm::domain::guest::GuestRoot::Disk(_) => "磁盘镜像 rootfs",
+            };
+            (
+                true,
+                format!(
+                    "基础根在场：{}（{}，内核 {}{}）",
+                    p,
+                    root,
+                    b.kernel.file_name().unwrap_or_default().to_string_lossy(),
+                    if b.initrd.is_some() { " + initrd" } else { "" }
+                ),
+            )
+        }
         Some((p, Err(why))) => (false, format!("基础根不可用：{}（{}）", p, why)),
     };
     VmRequirement {
@@ -330,7 +337,7 @@ fn base_requirement(base: Option<&str>, probe: &dyn HostProbe) -> VmRequirement 
         how: if met {
             String::new()
         } else {
-            "自备一份 guest 基础根：一个目录，里面是发行版 rootfs 与 vmlinuz（可选 initrd.img），把目录填进会话的 base（本产品不预置、不下载镜像）"
+            "自备一份 guest 基础根：一个目录，里面是发行版 rootfs（目录，或 rootfs.ext4 / *.qcow2 磁盘镜像）与 vmlinuz（可选 initrd.img），把目录填进会话的 base（本产品不预置、不下载镜像）"
                 .to_string()
         },
     }

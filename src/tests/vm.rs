@@ -701,6 +701,55 @@ pub(crate) fn copy_share_plans_mkdirs_and_tar_round_trips_on_the_host() {
     let _ = std::fs::remove_dir_all(&dst);
 }
 
+/// 目的：目录里放着 rootfs 磁盘镜像时判成磁盘根（三平台通用），就绪项如实说明，引擎参数走 virtio 磁盘。
+#[test]
+pub(crate) fn disk_image_base_is_classified_as_a_disk_root() {
+    let probe = crate::kernel::detail::HostProbeAdapter;
+    let dir = crate::tests::scratch("vm-guest-disk");
+    std::fs::write(dir.join("vmlinuz"), b"x").expect("写内核");
+    std::fs::write(dir.join("rootfs.ext4"), b"img").expect("写磁盘镜像");
+    let image = classify_base(&dir, &probe).expect("磁盘布局可用");
+    assert!(
+        matches!(image.root, GuestRoot::Disk(_)),
+        "有磁盘镜像就判成磁盘根：{:?}",
+        image.root
+    );
+    let spec = ExecSpec {
+        tier: Tier::Vm,
+        base: Some(dir.to_string_lossy().into_owned()),
+        ..Default::default()
+    };
+    let req = exec::tier_readiness(&spec, None, &probe);
+    let base_item = req
+        .requirements
+        .iter()
+        .find(|r| r.id == "base")
+        .expect("清单里要有基础根这一项");
+    assert!(
+        base_item.met && base_item.detail.contains("磁盘镜像"),
+        "就绪项要说明是磁盘根：{:?}",
+        base_item
+    );
+    let args = crate::capabilities::vm::detail::qemu::engine_args(
+        &GuestSpec {
+            lease: "w".to_string(),
+            image,
+            mounts: Vec::new(),
+            net: false,
+            engine_path: None,
+        },
+        "opts",
+        false,
+    );
+    assert!(
+        args.iter()
+            .any(|a| a.starts_with("file=") && a.ends_with(",if=virtio")),
+        "磁盘根要接成 virtio 磁盘：{:?}",
+        args
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 pub(crate) fn vm_service_holds_guests_by_lease() {
     let engine = Arc::new(crate::tests::doubles::FakeEngine::new());

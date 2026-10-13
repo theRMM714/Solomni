@@ -33,10 +33,7 @@ impl GuestArch {
 pub enum GuestRoot {
     /// 目录根：QEMU 的 virtfs 把它挂成 guest 的 /；Windows 宿主没有 virtfs。
     Dir(PathBuf),
-    /// 磁盘镜像根（qcow2 / raw）：宿主只是普通文件 I/O，三平台与各引擎通用。
-    /// 约束：当前生产路径仍用目录根（classify_base）；磁盘根由阶段 1 的按平台取包与阶段 2 的 vz 消费，
-    ///   在那之前只有用例构造它——如实放行死代码，不为了消告警造无意义的构造点。
-    #[allow(dead_code)]
+    /// 磁盘镜像根（qcow2 / raw）：宿主只是普通文件 I/O，三平台与各引擎通用（Windows 宿主没有 9p）。
     Disk(PathBuf),
 }
 
@@ -96,9 +93,24 @@ pub fn classify_base(base: &Path, probe: &dyn HostProbe) -> Result<GuestImage, S
         .iter()
         .map(|n| base.join(n))
         .find(|p| probe.is_file(p));
+    // 目录里放着 rootfs 磁盘镜像就用磁盘根（三平台通用），否则用目录根（QEMU 的 virtfs 把它挂成 /）。
+    let disk = [
+        "rootfs.ext4",
+        "rootfs.qcow2",
+        "disk.qcow2",
+        "disk.raw",
+        "rootdisk.qcow2",
+    ]
+    .iter()
+    .map(|n| base.join(n))
+    .find(|p| probe.is_file(p));
+    let root = match disk {
+        Some(image) => GuestRoot::Disk(image),
+        None => GuestRoot::Dir(base.to_path_buf()),
+    };
     Ok(GuestImage {
         arch: GuestArch::host(),
-        root: GuestRoot::Dir(base.to_path_buf()),
+        root,
         kernel,
         initrd,
     })

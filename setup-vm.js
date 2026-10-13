@@ -131,6 +131,11 @@ function fstabSanitized() {
   const f = path.join(BASE, "etc", "fstab");
   return exists(f) && !fs.readFileSync(f, "utf8").includes("PARTUUID=");
 }
+// 磁盘镜像根（三平台通用）：目录里是 rootfs 磁盘镜像 + 内核 + initrd。Windows / macOS 走这条（宿主没有 9p）。
+function diskBaseReady() {
+  const disk = ["rootfs.ext4", "rootfs.qcow2", "disk.qcow2", "disk.raw"].some((n) => exists(path.join(BASE, n)));
+  return disk && lexists(path.join(BASE, "vmlinuz")) && lexists(path.join(BASE, "initrd.img"));
+}
 function baseReady() {
   return lexists(path.join(BASE, "vmlinuz"))
     && lexists(path.join(BASE, "initrd.img"))
@@ -246,10 +251,11 @@ function ensureBase() {
 
 (async () => {
   if (CHECK) {
-    const qk = qemuReady(), bk = baseReady();
+    const qk = qemuReady(), bk = baseReady(), dk = diskBaseReady();
     log("QEMU：" + (qk ? "就绪（" + path.relative(ROOT, qemuWrapperPath()) + "）" : "缺（跑 node setup-vm.js 装到项目内）"));
-    log("guest 基础根：" + (bk ? "就绪（" + path.relative(ROOT, BASE) + "）" : "缺（跑 node setup-vm.js 装到项目内）"));
-    if (!qk || !bk) process.exit(1);
+    const layout = bk ? "目录 rootfs" : dk ? "磁盘镜像 rootfs" : "";
+    log("guest 基础根：" + (layout ? "就绪：" + layout + "（" + path.relative(ROOT, BASE) + "）" : "缺（Linux 可跑 node setup-vm.js 装；Windows / macOS 需下载预生成的磁盘镜像）"));
+    if (!qk || (!bk && !dk)) process.exit(1);
     return;
   }
   if (process.platform !== "linux") die("本次只做了 Linux 取包；Windows / macOS 请在相应主机上补齐（见 docs/vm/README.md）。");
