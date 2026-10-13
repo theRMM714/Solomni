@@ -60,6 +60,20 @@
     Linux 真机 vm 档会话走 virtiofs，工具在 guest 里读写共享目录；virtiofsd 随会话起停、删会话后不残留。
   blocked_by: |
     virtiofsd 用户自备（setup-vm.js 按平台取包）尚未做。
+- id: vm.guest-disk-image-package
+  scope: global
+  level: T4
+  why: |
+    Windows / macOS 宿主没有 9p（QEMU 的 virtfs 只在 Linux / macOS / FreeBSD 构建），root 必须用磁盘镜像；
+    而装配出"带 qemu-guest-agent 的可启动磁盘镜像"需要 Linux 工具（debugfs / mkinitramfs / chroot），
+    Windows / macOS 上做不了。现在 classify_base 已支持磁盘根、setup-vm.js 也认这种布局，缺的是镜像本身与非 Linux 的下载路径。
+  how: |
+    在 CI / Linux 侧用 setup-vm.js 的产物生成镜像包（rootfs.ext4 + vmlinuz + initrd.img，qemu-ga 预装），发布为 release 资产；
+    下载源记进 links.yaml；setup-vm.js 在 Windows / macOS 下载并解到 .vm/guest/base/（下载要用户同意 --yes）；就绪检测照 classify_base 如实报。
+  accept: |
+    Windows / macOS 上 node setup-vm.js --check 在镜像装好后报"磁盘镜像 rootfs 就绪"，vm 档会话能起 guest 并跑工具。
+  blocked_by: |
+    需要先在 Linux 侧产出并发布镜像资产，再做非 Linux 的下载与解包。
 - id: module.acp-adapter
   scope: global
   level: T3
