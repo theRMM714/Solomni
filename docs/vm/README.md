@@ -21,6 +21,9 @@
 计划与沙箱装配挂载并拉起，会话删除时销毁）。**真机验证通过前，就绪检测里的 `guest` 一项判否**，虚拟机档因此仍不可选；
 现状、怎么补与验收标准见 [tests/gaps.yaml](../../tests/gaps.yaml) 的 `fence.guest-tier-not-wired`。
 
+Linux 侧可用 `node setup-vm.js` 把 QEMU 与 Debian 基础根装进项目内 `.vm/`（只写项目内，下载源在 `links.yaml` 的 `guest.*`，需用户同意），
+已据此在 TCG 下真机启动 guest、经 QGA 跑通命令；**尚缺 `/dev/kvm` 真机验收与 Windows / macOS**，就绪项仍判否。
+
 ## 三、依赖图位置（由源码的 `::api` 引用推导）
 
 - 经 `::api` 用到：`kernel`、`modules`

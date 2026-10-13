@@ -11,4 +11,7 @@ rustup.init.windows: https://win.rustup.rs/x86_64
 rustup.init.unix: https://sh.rustup.rs
 winlibs.upstream.releases: https://github.com/brechtsanders/winlibs_mingw/releases
 winlibs.upstream.api: https://api.github.com/repos/brechtsanders/winlibs_mingw/releases/latest
+guest.debian.image: https://cdimage.debian.org/cdimage/cloud/trixie/latest/debian-13-genericcloud-amd64.tar.xz
+guest.debian.pool: https://deb.debian.org/debian/pool/main/q/qemu/
+guest.debian.linux: https://deb.debian.org/debian/pool/main/l/linux/
 release.base: https://github.com/theRMM714/Solomni/releases/download/dependencies/

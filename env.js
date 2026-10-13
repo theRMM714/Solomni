@@ -506,6 +506,7 @@ async function main() {
 module.exports = {
   ROOT, IS_WIN, OS_KEY, PLATFORM_DIR, P_RUSTUP, P_CARGO, TOOLS, WINLIBS_BIN,
   resolve, ensure, ensureProject, pinTemp, findProjectCargo, findAmbientCargo, envPath, setEnvPath,
+  link,
 };
 
 if (require.main === module) main();
