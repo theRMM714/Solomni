@@ -74,6 +74,19 @@
     Windows / macOS 上 node setup-vm.js --check 在镜像装好后报"磁盘镜像 rootfs 就绪"，vm 档会话能起 guest 并跑工具。
   blocked_by: |
     需要先在 Linux 侧产出并发布镜像资产，再做非 Linux 的下载与解包。
+- id: vm.qemu-provisioning-nonlinux
+  scope: global
+  level: T4
+  why: |
+    setup-vm.js 只在 Linux（Arch 系）用 pacman 取 QEMU；Windows / macOS 上 QEMU 仍要用户自行安装，产品只检测与指路。
+    要做到"脚本一键补齐环境"，这两平台还需要各自的 QEMU 取包路径。
+  how: |
+    按平台加取包：Windows 取便携构建（w64 包）解到 .vm/qemu/；macOS 走 Homebrew 或官方包。
+    下载源记进 links.yaml；仍然只写项目内、下载要用户同意（--yes）。
+  accept: |
+    Windows / macOS 上 node setup-vm.js 能把 QEMU 装进项目内 .vm/ 并被就绪检测认出来，且不需要管理员权限。
+  blocked_by: |
+    需要确定各平台可用的便携 QEMU 源并加进 links.yaml。
 - id: module.acp-adapter
   scope: global
   level: T3

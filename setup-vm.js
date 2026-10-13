@@ -2,7 +2,7 @@
 /**
  * 虚拟机档本地环境安装：把 QEMU 与 guest 基础根装到项目内 .vm/（不改系统、不装系统包），供 Linux 真机验收用。
  * 管：QEMU（Arch 走 pacman -Sp 取依赖闭包）、Debian 13 基础根（cloud 镜像 → rootfs 目录 + 通用内核 + 9p initrd + qemu-guest-agent）、QEMU 包装脚本。
- * 不管：产品对 VM 档的检测 / 装配（在 src/capabilities/vm/）；Windows / macOS 的取包方式（本次先做 Linux，后补）。
+ * 不管：产品对 VM 档的检测 / 装配（在 src/capabilities/vm/）；Windows / macOS 的 QEMU 取包（那两平台 QEMU 用户自备）。
  * 用法：node setup-vm.js [--check] [--yes] [--offline]
  * 约束：只写项目内 .vm/；下载前要用户同意（--yes 或交互确认）；不碰系统包管理器、不写系统目录。
  * 下载源全部走 links.yaml（guest.*）：换源只改台账，不改本文件。
@@ -234,6 +234,21 @@ function ensurePythonAlias() {
   const py = path.join(BASE, "usr", "bin", "python");
   if (exists(py3) && !lexists(py)) fs.symlinkSync("python3", py);
 }
+// guest 磁盘镜像包：给没有 9p 的宿主（Windows / macOS）用——root 必须是磁盘镜像。
+// 包内布局与 classify_base 认的一致：rootfs 磁盘镜像 + vmlinuz + initrd.img。
+function diskArch() {
+  return process.arch === "arm64" ? "arm64" : "amd64";
+}
+function ensureDiskBase() {
+  if (diskBaseReady()) { log("guest 磁盘镜像已在项目内：" + path.relative(ROOT, BASE)); return; }
+  const name = "debian-13-vm-" + diskArch() + ".tar.gz";
+  const pkg = path.join(CACHE, name);
+  if (!curlDownload(env.link("guest.debian.disk") + name, pkg)) die("guest 磁盘镜像包下载失败（源见 links.yaml 的 guest.debian.disk）");
+  fs.mkdirSync(BASE, { recursive: true });
+  if (!run("tar", ["-xzf", pkg, "-C", BASE])) die("解 guest 磁盘镜像包失败");
+  if (!diskBaseReady()) die("镜像包解开后布局不对（要 rootfs 磁盘镜像 + vmlinuz + initrd.img）");
+  log("guest 磁盘镜像就绪：" + path.relative(ROOT, BASE));
+}
 function ensureBase() {
   if (!baseReady()) {
     ensureImage();
@@ -258,7 +273,20 @@ function ensureBase() {
     if (!qk || (!bk && !dk)) process.exit(1);
     return;
   }
-  if (process.platform !== "linux") die("本次只做了 Linux 取包；Windows / macOS 请在相应主机上补齐（见 docs/vm/README.md）。");
+  if (process.platform !== "linux") {
+    // Windows / macOS：QEMU 用户自备；guest 走预生成的磁盘镜像包（宿主没有 9p，root 必须是磁盘）。
+    const needDisk = !diskBaseReady();
+    if (needDisk && !YES) {
+      if (!process.stdin.isTTY) die("无交互终端：不擅自下载。重跑加 --yes，或把镜像包放到 .vm/guest/base/ 后重跑。");
+      const a = await ask("要把 guest 磁盘镜像（Debian，约 400 MB）下载到项目内 .vm/ 吗？[y/N] ");
+      if (a.trim().toLowerCase() !== "y") die("已取消。");
+    }
+    fs.mkdirSync(VM, { recursive: true });
+    ensureDiskBase();
+    log("QEMU 请自行安装并放进 PATH，或在设置里登记 qemu_path（本产品不自带、不下载 QEMU）。");
+    log("登记方式：会话 exec.base → " + path.relative(ROOT, BASE));
+    return;
+  }
   const needDownload = !qemuReady() || !baseReady();
   if (needDownload && !YES) {
     if (!process.stdin.isTTY) die("无交互终端：不擅自下载。重跑加 --yes，或先手动准备。");
@@ -271,5 +299,5 @@ function ensureBase() {
   log("全部就绪。登记方式：");
   log("  · 设置 qemu_path → " + path.relative(ROOT, qemuWrapperPath()));
   log("  · 会话 exec.base → " + path.relative(ROOT, BASE));
-  log("（注意：产品当前把基础根按只读 9p 挂载，guest 根因此还不能写；见 tests/gaps.yaml 的 fence.guest-tier-not-wired。）");
+  log("  · 非 Linux（Windows / macOS）：QEMU 用户自备，guest 用预生成的磁盘镜像包（源见 links.yaml 的 guest.debian.disk）。");
 })();

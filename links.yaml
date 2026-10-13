@@ -15,3 +15,6 @@ guest.debian.image: https://cdimage.debian.org/cdimage/cloud/trixie/latest/debia
 guest.debian.pool: https://deb.debian.org/debian/pool/main/q/qemu/
 guest.debian.linux: https://deb.debian.org/debian/pool/main/l/linux/
 release.base: https://github.com/theRMM714/Solomni/releases/download/dependencies/
+# Windows / macOS 宿主没有 9p 的 QEMU，root 用预生成的 Debian 磁盘镜像包（tar.gz：rootfs 镜像 + 内核 + initrd，qemu-ga 预装）。
+# 由 CI / Linux 侧用 setup-vm.js 的产物生成后发布到这里；Windows / macOS 只下载解包。资产未发布前下载会失败（见 tests/gaps.yaml）。
+guest.debian.disk: https://github.com/theRMM714/Solomni/releases/download/dependencies/
