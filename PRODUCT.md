@@ -86,7 +86,7 @@ agent 实例名不得占用 `work` / `children`（名单在 `systools/names.yaml
   **按组合放开**：guest 做成四轴可扩展组合（宿主 × 引擎 × guest × 通道 × 共享，**实施中**），各平台默认吃当前最强组合并逐级回退；
   Linux（QEMU/virtiofs）已真机验收，Windows / macOS 待各自组合验收（未验收的组合禁用并逐项列出缺什么、每项怎么补）；
   未开放组合上已存在的会话不拦打开（列表标注"虚拟机档不可用"，本次按本机档执行）。
-  guest 默认 Debian stable（当前 13.7 / trixie），方向是适配更多 guest 以供用户自定义；QEMU 等依赖用户自备，产品只检测与指路，项目另给只写项目内的一键补齐手段 `setup-vm.js`（契约见 [RUNTIME_SPEC.md](RUNTIME_SPEC.md)）。
+  guest 默认 Debian stable（当前 13.7 / trixie），方向是适配更多 guest 以供用户自定义；QEMU 等依赖用户自备，产品只检测与指路，项目另给只写项目内的一键补齐手段 `setup-vm.js`（按平台分发，契约见 [RUNTIME_SPEC.md](RUNTIME_SPEC.md)）。
 - **运行能力**：模块用 `runtimes` 声明工具需要哪些运行包，包放在 `runtimes/`（放入即出现）；
   缺包 = 该模块的工具不执行并如实说明缺什么，**不是**会话崩溃。
 - **三层隔离，各说各的实际强度**：

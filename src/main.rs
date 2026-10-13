@@ -33,6 +33,10 @@ fn main() {
     if let Some(i) = args.iter().position(|a| a == "--https-check") {
         std::process::exit(diagnostics::https_check(&args, i));
     }
+    // 隐藏模式：把归档解到目录（跨平台纯 Rust）——setup-vm-*.js 用它，不依赖用户装了什么解压工具。
+    if let Some(i) = args.iter().position(|a| a == "--unpack") {
+        std::process::exit(diagnostics::unpack_cli(&args, i));
+    }
     // 环境白名单（机器可读）：把运行期交给工具进程的环境逐行交出来——探针据此在**同一个环境**里驱动
     // 守门进程，不另抄一份（抄一份会漂移，也会漏掉只有真实环境才暴露的问题）。
     if let Some(i) = args.iter().position(|a| a == "--print-fence-env") {

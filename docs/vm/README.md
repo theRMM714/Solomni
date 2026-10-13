@@ -29,8 +29,8 @@ Windows 还缺可启动的 guest 磁盘镜像包与非 Linux 的 QEMU 取包（�
 macOS Apple vz 引擎与自研 agent + vsock 通道都仍是缺口。契约与组合矩阵见本页「五」，现状与验收见
 [tests/gaps.yaml](../../tests/gaps.yaml) 的 `fence.guest-tier-not-wired`。
 
-Linux 侧可用 `node setup-vm.js` 把 QEMU 与 Debian 基础根装进项目内 `.vm/`（只写项目内，下载源在 `links.yaml` 的 `guest.*`，需用户同意）；
-非 Linux 侧它改从预生成的磁盘镜像包解包（资产待发布）。据此在 **KVM** 下跑通真机探针与产品级会话验收（设 `SOLOMNI_VM_LIVE=1` +
+`node setup-vm.js` 按平台分发（共享件 `setup-vm-common.js`）：Linux 装 QEMU 与 Debian 基础根（目录 rootfs + 内核 + 9p initrd）；
+Windows 装 MSYS2 的 QEMU 闭包、下 Debian cloud qcow2、首启经 cloud-init 装 `qemu-guest-agent`；macOS 暂是骨架。只写项目内，下载源在 `links.yaml`，需用户同意。据此在 **KVM** 下跑通真机探针与产品级会话验收（设 `SOLOMNI_VM_LIVE=1` +
 `SOLOMNI_VM_QEMU` / `SOLOMNI_VM_BASE` 指向 `.vm/`，默认 `[探针]` 跳过）：guest 真启动、额外 9p 共享挂进 guest、经 QGA 在 guest 里跑模块工具、删会话即销毁 guest。
 
 ## 三、依赖图位置（由源码的 `::api` 引用推导）
@@ -65,7 +65,7 @@ Linux 侧可用 `node setup-vm.js` 把 QEMU 与 Debian 基础根装进项目内 
 - root 一律磁盘镜像（qcow2/raw），不再用共享文件系统当根；guest 有 `restrict=on` 的网卡（出站全断，`guestfwd` 内部隧道可用）。
 - 就绪检测按**组合**逐项报"现状 + 怎么补"；"验过没有"是组合台账（数据），不再用平台 `cfg`。
 - 用户自备 guest 可在基础根目录放一份 `guest.yaml` 声明画像（`id` / `arch` / `agent` / `clients: [9p, virtiofs, cifs]`）；缺省按目录名与 Debian 默认（9p + virtiofs），不认识的值如实拒收。
-- 依赖（QEMU / `virtiofsd` / 镜像）用户自备，由 `setup-vm.js` 按平台装进项目内 `.vm/`；下载源一律进 `links.yaml`。
+- 依赖（QEMU / `virtiofsd` / 镜像）用户自备，由 `setup-vm.js` 按平台分发装进项目内 `.vm/`；下载源一律进 `links.yaml`。
 
 ## 本目录
 

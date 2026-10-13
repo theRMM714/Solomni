@@ -2,6 +2,25 @@
 //! 退出码按各模式的约定（多数恒 0：**判定归调用方**，这里只报事实）。
 //! 隐藏模式：用户经文档知道它们，不列进面向用户的帮助。
 
+pub mod unpack;
+
+/// 目的：把归档解到目录（跨平台纯 Rust，不依赖用户装解压工具；用法 solomni --unpack <archive> <dest>）。
+pub fn unpack_cli(args: &[String], i: usize) -> i32 {
+    let archive = args.get(i + 1).cloned().unwrap_or_default();
+    let dest = args.get(i + 2).cloned().unwrap_or_default();
+    if archive.is_empty() || dest.is_empty() {
+        eprintln!("用法：solomni --unpack <archive> <dest>");
+        return 2;
+    }
+    match unpack::extract(std::path::Path::new(&archive), std::path::Path::new(&dest)) {
+        Ok(()) => 0,
+        Err(e) => {
+            eprintln!("[解包] {}", e);
+            1
+        }
+    }
+}
+
 /// 自检：本机事实（平台 + 围栏能力 + 外部解释器）。只报事实，不猜、不改任何东西（围栏自检那个临时目录除外）。
 pub fn doctor() -> i32 {
     let cap = crate::kernel::detail::confine::capability();

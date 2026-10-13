@@ -674,8 +674,10 @@ function structuralAudit() {
       if (!fs.existsSync(abs)) return;
       for (const m of fs.readFileSync(abs, "utf8").matchAll(/\blink\("([A-Za-z0-9_.-]+)"\)/g)) used.add(m[1]);
     };
-    // 消费点：环境层与虚拟机档安装脚本（新增消费者要一起进来，否则台账键被判成死数据）。
-    for (const consumer of ["env.js", "setup-vm.js"]) scanLinkUses(path.join(ROOT, consumer));
+    // 消费点：环境层与虚拟机档安装脚本（按平台拆过：setup-vm.js 是分发入口，各平台脚本与共享件都要扫）。
+    for (const consumer of ["env.js", "setup-vm.js", "setup-vm-common.js", "setup-vm-windows.js", "setup-vm-linux.js", "setup-vm-mac.js"]) {
+      scanLinkUses(path.join(ROOT, consumer));
+    }
     const walkSrc = (d) => {
       for (const e of fs.readdirSync(d, { withFileTypes: true })) {
         const p = path.join(d, e.name);
