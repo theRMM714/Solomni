@@ -10,7 +10,8 @@
   why: |
     虚拟机档已把选型、诊断、装配计划、逐项前置检测、guest 端口、QEMU 后端与执行分派收进独立能力 vm，
     Linux 已在真机（KVM + 9p 基础根）跑通；Windows 的环境（QEMU/WHPX + Debian cloud 磁盘镜像 + QGA 复制）
-    已能一键装进项目内并通过引擎级真机探针；路径桥已打通挂载点与命令 cwd，**会话级**还缺"模块的运行包要在 guest 内可用"（见 vm.guest-module-runtime）；
+    已能一键装进项目内并**真机跑通**（引擎级探针 + e2e 的 vm 场景都过：guest 真起、工具在 guest 内执行、删会话销毁 guest）；
+    macOS 缺 virtiofsd 与取包，未验；
     macOS 缺 virtiofsd 与取包，未验（vm::tier_readiness 在未验平台把 guest 项判否）。
   how: |
     方向已批准：guest 做成**四轴可扩展组合**——宿主 × VmEngine（默认 QEMU；macOS 后续 Apple vz）×
@@ -22,7 +23,8 @@
        非 Linux 的 setup-vm 走预生成磁盘镜像包下载。
     1) 三平台 QEMU 组合真机跑通：Linux QEMU/KVM + 9p 已验（virtiofs 见 vm.share-virtiofs-linux）；
        Windows QEMU/WHPX + copy 的环境已就位（setup-vm-windows.js 取 MSYS2 闭包 + Debian cloud qcow2 + cloud-init 装 QGA，
-       QGA 握手判成功），引擎级真机探针已通过，会话级卡在 guest 内的模块运行包（vm.guest-module-runtime）；
+       QGA 握手判成功），路径桥让挂载点与命令 cwd 落到 guest 拼法，镜像经维护启动预装 python3 / python / nodejs，
+       引擎级探针与 e2e 的 vm 场景都已通过（运行包按 guest 平台分包见 vm.runtime-per-guest-platform）；
        macOS 待取包（vm.qemu-provisioning-macos）与 virtiofsd。
     2) macOS 新增 Apple vz 引擎 + 原生 virtiofs + 自研 guest agent（vsock 通道）。
     3) 多 guest：用户自备镜像契约，再谈非 Linux guest。
@@ -31,7 +33,7 @@
   accept: |
     每个组合单独判定：vm 档会话里模块工具真在 guest 内跑（进程与宿主隔离）、删会话即销毁 guest 与其磁盘；
     就绪面板按组合逐项列出缺什么、每项怎么补；每平台探针覆盖"组合可用 / 不可用"两种结论。
-    Linux（QEMU/virtiofs）已验；Windows / macOS 各自组合通过后按组合销账，全部通过后删除本条，
+    Linux（QEMU/9p）与 Windows（QEMU/WHPX + copy）已验；macOS 组合通过后销账，全部通过后删除本条，
     并同步 PRODUCT.md / RUNTIME_SPEC.md / docs/vm/ 的当前状态。
   blocked_by: |
     阶段 0 已落地（四端口抽象）；阶段 1 三平台 QEMU 组合与 Windows / macOS 真机验收尚未做。
@@ -77,23 +79,21 @@
     macOS 上 node setup-vm.js 能把 QEMU 装进项目内 .vm/ 并被就绪检测认出来，且不需要管理员权限。
   blocked_by: |
     需要一台 macOS 机器确定可用来源后写适配。
-- id: vm.guest-module-runtime
+- id: vm.runtime-per-guest-platform
   scope: global
   level: T4
   why: |
-    模块工具在 guest 里执行，它需要的运行包（python / node）也必须在 **guest 内**可用；本机 externals（PATH 上的
-    python 等）不跨 guest 边界。证据：Windows 真机 e2e 的 vm 场景已经走到"工具在 guest 里执行"（路径桥让挂载点与
-    命令 cwd 都落到 guest 拼法），随后失败在 /bin/sh: 1: python: not found——项目 runtimes/ 里只有 .gitkeep，
-    python 是从宿主 PATH 找到的。
+    镜像预装（setup-vm-windows.js 的维护启动：经 QGA 在 guest 里装 python3 / python-is-python3 / nodejs）已让
+    Windows 的 vm 档会话真机跑通；但 runtimes/ 现在不分平台：用户要特定版本时，宿主那包与 guest 的 arch/os 可能
+    对不上（Linux guest 要 ELF，Windows 宿主目录里放的是 exe），而现在只会把宿主那份挂进 guest。
   how: |
-    两条路（可并用）：(1) guest 侧运行包——按 guest 的 arch/os 分发（镜像预装，或 runtimes/<name> 按平台分子目录，
-    vm 档只挂与 guest 匹配的那份）；(2) env 里的宿主路径要按**挂载表**译（挂载点与镜像根不是一回事），
-    把运行包的 guest 路径写进 PATH。
+    runtimes/<name> 按平台分子目录（如 <name>/<os>-<arch>/），vm 档只挂与 guest 匹配的那份；env 里的宿主路径按
+    **挂载表**译（挂载点与镜像根不是一回事），把运行包的 guest 挂载点写进 PATH；缺对应平台那份时如实报缺。
   accept: |
-    Windows / Linux 真机 vm 档会话里，用 python / node 的模块工具在 guest 内跑通（e2e 的 vm 场景通过），
-    且宿主上没有对应运行包时如实报缺、不假装。
+    用户给 runtimes/<name> 放多平台分包后，vm 档只挂与 guest 匹配的那份，模块工具在 guest 内跑通；
+    没有匹配分包时如实报缺，不挂错的那份。
   blocked_by: |
-    运行包按平台分发的布局要用户拍板（镜像预装，还是运行包按 guest 平台分包）。
+    分包目录命名与"镜像预装 vs 分包"的优先关系要在实现时定；不影响当前"镜像预装即可用"的验收。
 - id: module.acp-adapter
   scope: global
   level: T3

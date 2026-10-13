@@ -31,6 +31,8 @@ const guestImage = () => path.join(BASE, "rootfs.qcow2");
 const guestYaml = () => path.join(BASE, "guest.yaml");
 const agentMarker = () => path.join(BASE, ".qga-ready");
 const agentReady = () => exists(agentMarker());
+const runtimesMarker = () => path.join(BASE, ".runtimes-ready");
+const runtimesReady = () => exists(runtimesMarker());
 const guestReady = () => exists(guestImage()) && exists(guestYaml());
 
 function writeGuestYaml() {
@@ -194,65 +196,118 @@ function freePort() {
   });
 }
 
-async function provisionAgent() {
-  if (agentReady()) { log("qemu-guest-agent 已在镜像里：" + path.relative(ROOT, agentMarker())); return; }
+// ---- 一次"维护启动"：起 guest、等 QGA 握手、把活交给 work(port)，然后关机 ----
+async function withGuest(label, needSeed, work) {
   if (!qemuReady()) die("先装 QEMU（重跑不加 --check）。");
   if (!exists(guestImage())) die("先下载 guest 镜像（重跑不加 --check）。");
-
   const { server } = await startSeedServer();
   const port = await freePort();
   const accel = process.env.SOLOMNI_QEMU_ACCEL || "whpx:tcg";
-  log("首启 guest：cloud-init 装 qemu-guest-agent，装好后用 QGA 握手确认（数据源端口 " + server.address().port + "，QGA 端口 " + port + "，加速 " + accel + "）");
+  log(label + "（QGA 端口 " + port + "，加速 " + accel + "）");
   const args = [
     "-m", "2048", "-smp", "2", "-machine", "accel=" + accel,
     "-display", "none", "-no-reboot",
     "-drive", "file=" + guestImage() + ",if=virtio",
     "-netdev", "user,id=net0", "-device", "virtio-net-pci,netdev=net0",
-    "-smbios", "type=1,serial=ds=nocloud-net;s=http://10.0.2.2:" + server.address().port + "/",
+  ];
+  if (needSeed) {
+    args.push("-smbios", "type=1,serial=ds=nocloud-net;s=http://10.0.2.2:" + server.address().port + "/");
+  }
+  args.push(
     "-chardev", "socket,id=qga0,host=127.0.0.1,port=" + port + ",server=on,wait=off",
     "-device", "virtio-serial-pci",
     "-device", "virtserialport,chardev=qga0,name=org.qemu.guest_agent.0",
-    "-serial", "stdio",
-  ];
+    "-serial", "stdio"
+  );
   const child = spawn(qemuExe(), args, { cwd: ROOT, stdio: "inherit" });
   let exited = false;
   child.on("exit", () => { exited = true; });
-
   const deadline = Date.now() + PROVISION_TIMEOUT_MS;
-  let ok = false;
+  let up = false;
   while (!exited && Date.now() < deadline) {
-    try { await qgaSync(port); ok = true; break; } catch (e) { /* 还没起来 */ }
+    try { await qgaSync(port); up = true; break; } catch (e) { /* 还没起来 */ }
     await new Promise((r) => setTimeout(r, 5000));
   }
-  if (ok) {
+  let ok = false;
+  if (up) {
     log("QGA 握手成功：qemu-guest-agent 在 guest 里活着");
-    try {
-      await qgaCall(port, { execute: "guest-exec", arguments: { path: "/bin/sh", arg: ["-c", "touch /etc/cloud/cloud-init.disabled"], "capture-output": false } }, 15000);
-    } catch (e) {}
-    fs.writeFileSync(agentMarker(), "QGA guest-sync 通过（setup-vm-windows.js）\n");
-    try { await qgaCall(port, { execute: "guest-shutdown", arguments: { mode: "powerdown" } }, 15000); } catch (e) {}
-    for (let i = 0; i < 90 && !exited; i++) await new Promise((r) => setTimeout(r, 1000));
-    if (!exited) { try { child.kill(); } catch (e) {} }
+    ok = await work(port);
   } else {
     bad("没等到 guest 里的 qemu-guest-agent（超时或 QEMU 提前退出）——可重跑；宿主 WHPX 不可用时会明显变慢。");
-    try { child.kill(); } catch (e) {}
   }
+  try { await qgaCall(port, { execute: "guest-shutdown", arguments: { mode: "powerdown" } }, 15000); } catch (e) {}
+  for (let i = 0; i < 90 && !exited; i++) await new Promise((r) => setTimeout(r, 1000));
+  if (!exited) { try { child.kill(); } catch (e) {} }
   server.close();
+  return ok;
+}
+
+// ---- 在 guest 里跑一条命令并等它结束（QGA guest-exec + guest-exec-status）----
+async function qgaExec(port, argv, budgetMs) {
+  const started = await qgaCall(port, { execute: "guest-exec", arguments: { path: argv[0], arg: argv.slice(1), "capture-output": true } }, 15000);
+  const pid = started && started.pid;
+  if (!pid) return false;
+  const deadline = Date.now() + (budgetMs || 20 * 60 * 1000);
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 5000));
+    const st = await qgaCall(port, { execute: "guest-exec-status", arguments: { pid } }, 15000);
+    if (st && st.exited) {
+      if (Number(st.exitcode) !== 0) {
+        const out = Buffer.from(String(st["out-data"] || ""), "base64").toString("utf8");
+        bad("guest 里的命令非零退出（" + st.exitcode + "）：" + out.slice(-400));
+      }
+      return Number(st.exitcode) === 0;
+    }
+  }
+  return false;
+}
+
+async function provisionAgent() {
+  if (agentReady()) { log("qemu-guest-agent 已在镜像里：" + path.relative(ROOT, agentMarker())); return; }
+  const ok = await withGuest("首启 guest：cloud-init 装 qemu-guest-agent，装好后用 QGA 握手确认", true, async (port) => {
+    // agent 活着之后顺手把 cloud-init 关掉（以后启动更快）；补装运行包走下面的维护启动。
+    try { await qgaExec(port, ["/bin/sh", "-c", "touch /etc/cloud/cloud-init.disabled"], 30000); } catch (e) {}
+    return true;
+  });
+  if (ok) {
+    fs.writeFileSync(agentMarker(), "QGA guest-sync 通过（setup-vm-windows.js）\n");
+    log("guest 里已确认 qemu-guest-agent：" + path.relative(ROOT, agentMarker()));
+  }
+}
+
+// ---- 镜像预装运行包（1+2 的 1）：模块工具在 guest 里要用的 python / node ----
+async function ensureGuestRuntimes() {
+  if (runtimesReady()) { log("guest 运行包已在镜像里：" + path.relative(ROOT, runtimesMarker())); return; }
+  if (!agentReady()) die("先确认 guest 里的 qemu-guest-agent（重跑不加 --check）。");
+  const ok = await withGuest("维护启动：经 QGA 在 guest 里装运行包（python3 / python / nodejs）", false, async (port) => {
+    // 镜像里已有首启留下的 apt 索引：先不 update 直接装；装不上再 update 重试（update 在 TCG 下很慢）。
+    const cmd =
+      "DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends python3 python-is-python3 nodejs || " +
+      "(apt-get update -o Acquire::Languages=none && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends python3 python-is-python3 nodejs)";
+    return await qgaExec(port, ["/bin/sh", "-c", cmd]);
+  });
+  if (ok) {
+    fs.writeFileSync(runtimesMarker(), "python3 / python / nodejs（setup-vm-windows.js）\n");
+    log("guest 运行包已装好：" + path.relative(ROOT, runtimesMarker()));
+  } else {
+    bad("guest 运行包没装成——可重跑（维护启动会重试）。");
+  }
 }
 
 (async () => {
   if (CHECK) {
-    const qk = qemuReady(), gk = guestReady(), ak = agentReady();
+    const qk = qemuReady(), gk = guestReady(), ak = agentReady(), rk = runtimesReady();
     log("QEMU：" + (qk ? "就绪（" + path.relative(ROOT, qemuExe()) + "）" : "缺"));
     log("guest 镜像：" + (gk ? "就绪（" + path.relative(ROOT, guestImage()) + "）" : "缺"));
     log("镜像里的 qemu-guest-agent：" + (ak ? "已确认（QGA 握手）" : "缺"));
-    if (!qk || !gk || !ak) {
+    log("镜像里的运行包（python3 / python / nodejs）：" + (rk ? "已装" : "缺"));
+    if (!qk || !gk || !ak || !rk) {
       log("怎么补：跑 node setup-vm-windows.js --yes");
       process.exit(1);
     }
     process.exit(0);
   }
-  if (!qemuReady() || !guestReady() || !agentReady()) {
+  if (!qemuReady() || !guestReady() || !agentReady() || !runtimesReady()) {
     if (!YES) {
       if (!process.stdin.isTTY) die("无交互终端：不擅自下载。重跑加 --yes。");
       const a = await ask("要把 QEMU（MSYS2 包闭包，约 200 MB）与 Debian guest 镜像（约 326 MB）装到项目内 .vm/ 吗？[y/N] ");
@@ -263,6 +318,7 @@ async function provisionAgent() {
   ensureQemu();
   ensureGuestImage();
   await provisionAgent();
+  await ensureGuestRuntimes();
   log("全部就绪。登记方式：");
   log("  · 设置 qemu_path → " + path.relative(ROOT, qemuExe()));
   log("  · 会话 exec.base → " + path.relative(ROOT, BASE));

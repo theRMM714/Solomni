@@ -269,7 +269,7 @@ fn hypervisor_kind() -> &'static str {
 }
 
 /// 目的：已通过真机验收的宿主平台（**数据，不是平台 cfg**）——新平台验收后在这里加一行，并同步 tests/gaps.yaml。
-const VERIFIED_HOSTS: &[&str] = &["linux"];
+const VERIFIED_HOSTS: &[&str] = &["linux", "windows"];
 
 /// 目的：给定宿主平台名（std::env::consts::OS），这个平台的 guest 后端是否已真机验收。
 pub fn host_verified(host: &str) -> bool {
@@ -354,10 +354,14 @@ fn guest_backend_verified() -> bool {
     host_verified(std::env::consts::OS)
 }
 
-/// 目的：本平台默认组合的可读标签（"引擎/共享"），用于就绪说明里说清"验的是哪一套"。
+/// 目的：已经实现的共享后端（组合选择与就绪说明**共用同一份**，避免"说要验 A、实际跑 B"）。
+pub const IMPLEMENTED_SHARES: &[&str] = &["9p", "copy"];
+
+/// 目的：本平台**已实现**组合的可读标签（"引擎/共享"），用于就绪说明里说清"验的是哪一套"。
 fn default_combo_label() -> String {
     default_combos(std::env::consts::OS)
-        .first()
+        .iter()
+        .find(|c| c.engine == "qemu" && IMPLEMENTED_SHARES.contains(&c.share))
         .map(|c| format!("{}/{}", c.engine, c.share))
         .unwrap_or_else(|| "未定".to_string())
 }

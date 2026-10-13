@@ -230,7 +230,7 @@ fn main() {
     let picked = capabilities::vm::domain::exec::choose_combo(
         capabilities::vm::domain::exec::default_combos(std::env::consts::OS),
         &|engine| engine == "qemu",
-        &|_engine, share| share == "9p" || share == "copy",
+        &|_engine, share| capabilities::vm::domain::exec::IMPLEMENTED_SHARES.contains(&share),
     );
     let share: Arc<dyn capabilities::vm::ports::ShareBackend + Send + Sync> =
         match picked.map(|c| c.share) {

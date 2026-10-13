@@ -21,11 +21,12 @@
 **当前状态**：四轴已按可插的形状落地——`QemuEngine`（当前唯一引擎）、`GuestImage`（基础根里可放 `guest.yaml` 声明 id / arch / agent / os / clients）、
 `QgaChannel`（QEMU virtio-serial）、`NinePShare`（Linux / macOS 的目录根）与 `CopyShare`（QGA 复制，三平台通用）。
 按平台的组合回退链是数据（`default_combos` / `choose_combo`），加速器按平台给（`kvm:tcg` / `whpx:tcg` / `hvf:tcg`），共享要隧道时给 `restrict=on` 网卡。
-执行分派已接线（会话在 `tier == Vm` 时把模块命令交给 guest；建会话时装配并拉起，会话删除时销毁）；就绪项 `guest` 按**已验平台数据表**放开（当前只有 Linux），并带上本平台的默认组合（`default_combos`）。
+执行分派已接线（会话在 `tier == Vm` 时把模块命令交给 guest；建会话时装配并拉起，会话删除时销毁）；就绪项 `guest` 按**已验平台数据表**放开（当前 Linux / Windows），并带上本平台上**已实现**的组合。
 
-**实施中（外部依赖未就位）**：Linux 侧已在 KVM 下跑通真机探针与产品级会话验收；Windows 的环境已能一键装进项目内、
-引擎级真机探针已通过，路径桥已打通挂载点与命令 cwd，会话级还缺"模块的运行包要在 guest 内可用"（见
-[tests/gaps.yaml](../../tests/gaps.yaml) 的 `vm.guest-module-runtime`）；macOS 缺取包（`vm.qemu-provisioning-macos`）与 virtiofsd；
+**实施中（外部依赖未就位）**：Linux 侧已在 KVM 下跑通真机探针与产品级会话验收；Windows 已真机跑通（引擎级探针与
+e2e 的 vm 场景都过——guest 真起、工具在 guest 内执行、删会话销毁 guest；镜像经维护启动预装 python3 / nodejs）；
+运行包按 guest 平台分包仍是缺口（见 [tests/gaps.yaml](../../tests/gaps.yaml) 的 `vm.runtime-per-guest-platform`）；
+macOS 缺取包（`vm.qemu-provisioning-macos`）与 virtiofsd；
 virtiofs（Linux 性能档）、SMB 实时共享（Windows）、macOS Apple vz 引擎与自研 agent + vsock 通道都仍是缺口。契约与组合矩阵见本页「五」，现状与验收见
 [tests/gaps.yaml](../../tests/gaps.yaml) 的 `fence.guest-tier-not-wired`。
 
@@ -60,7 +61,7 @@ Windows 装 MSYS2 的 QEMU 闭包、下 Debian cloud qcow2、首启经 cloud-ini
 | --- | --- | --- | --- | --- |
 | Linux | QEMU | virtiofs（需 `virtiofsd`） | `kvm:tcg` | virtiofs → 9p → smb → copy |
 | macOS | Apple vz（阶段二） | 原生 virtiofs | Hypervisor.framework | vz → QEMU/HVF+9p → smb → copy |
-| Windows | QEMU | SMB over guestfwd | `whpx:tcg` | smb → copy |
+| Windows | QEMU | copy（**已验**）；SMB over guestfwd 待做 | `whpx:tcg` | smb → copy |
 
 - root 一律磁盘镜像（qcow2/raw），不再用共享文件系统当根；guest 有 `restrict=on` 的网卡（出站全断，`guestfwd` 内部隧道可用）。
 - 就绪检测按**组合**逐项报"现状 + 怎么补"；"验过没有"是组合台账（数据），不再用平台 `cfg`。

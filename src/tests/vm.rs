@@ -146,12 +146,18 @@ pub(crate) fn vm_tier_readiness_gates_creation_and_editing() {
         .expect("清单里要有 guest 这一项");
     assert_eq!(
         guest_item.met,
-        cfg!(target_os = "linux"),
-        "guest 项按已验证平台放开：{:?}",
+        crate::capabilities::vm::domain::exec::host_verified(std::env::consts::OS),
+        "guest 项按已验平台数据表放开：{:?}",
         guest_item
     );
     let combo = {
-        let c = crate::capabilities::vm::domain::exec::default_combos(std::env::consts::OS)[0];
+        let c = crate::capabilities::vm::domain::exec::default_combos(std::env::consts::OS)
+            .iter()
+            .find(|c| {
+                c.engine == "qemu"
+                    && crate::capabilities::vm::domain::exec::IMPLEMENTED_SHARES.contains(&c.share)
+            })
+            .expect("本平台要有已实现的组合");
         format!("{}/{}", c.engine, c.share)
     };
     assert!(
@@ -1208,8 +1214,8 @@ pub(crate) fn verified_platforms_are_a_data_table() {
         "Linux 已真机验收"
     );
     assert!(
-        !crate::capabilities::vm::domain::exec::host_verified("windows"),
-        "Windows 待验（路径桥已通，会话级缺 guest 内的模块运行包，见 tests/gaps.yaml）"
+        crate::capabilities::vm::domain::exec::host_verified("windows"),
+        "Windows 已真机验收（QEMU/WHPX + QGA 复制；e2e 的 vm 场景通过）"
     );
     assert!(
         !crate::capabilities::vm::domain::exec::host_verified("macos"),
