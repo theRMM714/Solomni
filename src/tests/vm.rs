@@ -6,7 +6,7 @@ use super::builders::*;
 use super::prelude::*;
 use crate::capabilities::vm::api::Vm;
 use crate::capabilities::vm::domain::guest::{
-    classify_base, GuestArch, GuestImage, GuestMount, GuestRun, GuestSpec,
+    classify_base, GuestArch, GuestImage, GuestMount, GuestRoot, GuestRun, GuestSpec,
 };
 use crate::capabilities::vm::ports::{PackageSource, ShareBackend, VmEngine};
 
@@ -462,7 +462,7 @@ pub(crate) fn guest_mounts_prefix_packages_and_fence_roots() {
         lease: "w".to_string(),
         image: GuestImage {
             arch: GuestArch::host(),
-            root: std::path::PathBuf::from("/base"),
+            root: GuestRoot::Dir(std::path::PathBuf::from("/base")),
             kernel: std::path::PathBuf::from("/base/vmlinuz"),
             initrd: Some(std::path::PathBuf::from("/base/initrd.img")),
         },
@@ -473,6 +473,7 @@ pub(crate) fn guest_mounts_prefix_packages_and_fence_roots() {
     let args = crate::capabilities::vm::detail::qemu::engine_args(
         &spec,
         "host=127.0.0.1,port=1,server=on,wait=off",
+        false,
     );
     assert!(args.contains(&"none".to_string()), "不给网卡");
     assert!(
@@ -494,8 +495,8 @@ pub(crate) fn guest_mounts_prefix_packages_and_fence_roots() {
         .map(|i| args[i + 1].as_str());
     assert_eq!(
         accel,
-        Some("accel=kvm:tcg"),
-        "有 KVM 就用 KVM，没有退回 TCG"
+        Some(crate::capabilities::vm::detail::qemu::accelerators()),
+        "加速器按平台给（本平台硬件加速优先，TCG 兜底）"
     );
     let serial = args
         .iter()
@@ -536,6 +537,92 @@ pub(crate) fn guest_mounts_prefix_packages_and_fence_roots() {
     );
 }
 
+/// 目的：加速器表按平台给；网卡随共享后端需要而变——放行出站给普通网卡，共享隧道给受限网卡，都不要就不给。
+#[test]
+pub(crate) fn accelerators_and_nic_follow_the_platform_and_share_need() {
+    use crate::capabilities::vm::detail::qemu::{accelerators, engine_args};
+    let spec = |net: bool| GuestSpec {
+        lease: "w".to_string(),
+        image: GuestImage {
+            arch: GuestArch::host(),
+            root: GuestRoot::Dir(std::path::PathBuf::from("/base")),
+            kernel: std::path::PathBuf::from("/base/vmlinuz"),
+            initrd: None,
+        },
+        mounts: Vec::new(),
+        net,
+        engine_path: None,
+    };
+    let expected = if cfg!(windows) {
+        "whpx:tcg"
+    } else if cfg!(target_os = "macos") {
+        "hvf:tcg"
+    } else if cfg!(target_os = "linux") {
+        "kvm:tcg"
+    } else {
+        "tcg"
+    };
+    assert_eq!(accelerators(), expected, "加速器表按平台给");
+
+    let plain = engine_args(&spec(false), "opts", false);
+    assert!(
+        plain.contains(&"none".to_string()) && !plain.iter().any(|a| a.contains("netdev")),
+        "没有隧道需求就不给网卡：{:?}",
+        plain
+    );
+    let tunnel = engine_args(&spec(false), "opts", true);
+    assert!(
+        tunnel.iter().any(|a| a == "user,id=n0,restrict=on"),
+        "共享隧道要受限网卡（出站全断）：{:?}",
+        tunnel
+    );
+    let online = engine_args(&spec(true), "opts", false);
+    assert!(
+        online.iter().any(|a| a == "user,id=n0"),
+        "放行出站时给普通 user 网卡：{:?}",
+        online
+    );
+    assert!(
+        !online.iter().any(|a| a.contains("restrict=on")),
+        "放行出站不设受限：{:?}",
+        online
+    );
+}
+
+/// 目的：磁盘镜像根走 virtio 磁盘（三平台通用），不再依赖 9p 的 base 标签。
+#[test]
+pub(crate) fn disk_root_uses_a_virtio_disk_not_9p() {
+    use crate::capabilities::vm::detail::qemu::engine_args;
+    let spec = GuestSpec {
+        lease: "w".to_string(),
+        image: GuestImage {
+            arch: GuestArch::host(),
+            root: GuestRoot::Disk(std::path::PathBuf::from("/img/root.qcow2")),
+            kernel: std::path::PathBuf::from("/img/vmlinuz"),
+            initrd: None,
+        },
+        mounts: Vec::new(),
+        net: false,
+        engine_path: None,
+    };
+    let args = engine_args(&spec, "opts", false);
+    assert!(
+        args.iter().any(|a| a == "file=/img/root.qcow2,if=virtio"),
+        "磁盘根要接成 virtio 磁盘：{:?}",
+        args
+    );
+    assert!(
+        args.iter().any(|a| a.contains("root=/dev/vda")),
+        "内核命令行指向磁盘根：{:?}",
+        args
+    );
+    assert!(
+        !args.iter().any(|a| a.contains("fsbase")),
+        "磁盘根不该再有 9p 基础根共享：{:?}",
+        args
+    );
+}
+
 #[test]
 pub(crate) fn vm_service_holds_guests_by_lease() {
     let engine = Arc::new(crate::tests::doubles::FakeEngine::new());
@@ -548,7 +635,7 @@ pub(crate) fn vm_service_holds_guests_by_lease() {
         lease: "w".to_string(),
         image: GuestImage {
             arch: GuestArch::host(),
-            root: std::path::PathBuf::from("/base"),
+            root: GuestRoot::Dir(std::path::PathBuf::from("/base")),
             kernel: std::path::PathBuf::from("/base/vmlinuz"),
             initrd: None,
         },

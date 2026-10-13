@@ -28,12 +28,24 @@ impl GuestArch {
     }
 }
 
-/// 目的：一份 guest 镜像（四轴里的 guest 轴）——基础根目录 + 内核（可选 initrd）。
-/// 约束：阶段 0 的 root 仍是目录（QEMU 用 9p 当根）；磁盘镜像与更多 guest 见 docs/vm/README.md 的「多平台组合」。
+/// 目的：guest 根的承载方式——目录（QEMU 经 9p 当根，仅 Linux / macOS 宿主）或磁盘镜像（三平台通用）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GuestRoot {
+    /// 目录根：QEMU 的 virtfs 把它挂成 guest 的 /；Windows 宿主没有 virtfs。
+    Dir(PathBuf),
+    /// 磁盘镜像根（qcow2 / raw）：宿主只是普通文件 I/O，三平台与各引擎通用。
+    /// 约束：当前生产路径仍用目录根（classify_base）；磁盘根由阶段 1 的按平台取包与阶段 2 的 vz 消费，
+    ///   在那之前只有用例构造它——如实放行死代码，不为了消告警造无意义的构造点。
+    #[allow(dead_code)]
+    Disk(PathBuf),
+}
+
+/// 目的：一份 guest 镜像（四轴里的 guest 轴）——根（目录或磁盘镜像）+ 内核（可选 initrd）。
+/// 约束：磁盘镜像与更多 guest 见 docs/vm/README.md 的「多平台组合」。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GuestImage {
     pub arch: GuestArch,
-    pub root: PathBuf,
+    pub root: GuestRoot,
     pub kernel: PathBuf,
     pub initrd: Option<PathBuf>,
 }
@@ -86,7 +98,7 @@ pub fn classify_base(base: &Path, probe: &dyn HostProbe) -> Result<GuestImage, S
         .find(|p| probe.is_file(p));
     Ok(GuestImage {
         arch: GuestArch::host(),
-        root: base.to_path_buf(),
+        root: GuestRoot::Dir(base.to_path_buf()),
         kernel,
         initrd,
     })

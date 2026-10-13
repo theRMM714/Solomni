@@ -52,6 +52,7 @@ impl ShareBackend for NinePShare {
             kind: "9p",
             engine_args,
             guest_scripts,
+            needs_net: false,
         })
     }
 }

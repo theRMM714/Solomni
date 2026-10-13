@@ -1419,6 +1419,7 @@ impl crate::capabilities::vm::ports::ShareBackend for FakeShare {
             kind: "fake",
             engine_args: Vec::new(),
             guest_scripts: Vec::new(),
+            needs_net: false,
         })
     }
 }

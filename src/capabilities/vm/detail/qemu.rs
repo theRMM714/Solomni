@@ -3,13 +3,29 @@
 //! 不管：共享后端的额外参数（detail/share_ninep.rs）、镜像判定与挂载清单（domain/guest.rs）。
 //! 联动：端口在 ports.rs；由组合根构造、service.rs 持有。
 
-use crate::capabilities::vm::domain::guest::{GuestArch, GuestImage, GuestRun, GuestSpec};
+use crate::capabilities::vm::domain::guest::{
+    GuestArch, GuestImage, GuestRoot, GuestRun, GuestSpec,
+};
 use crate::capabilities::vm::ports::{GuestChannel, GuestVm, SharePlan, VmEngine};
 use crate::kernel::api::ToolOutcome;
 use std::io::{BufRead, BufReader, Write};
 use std::net::{TcpListener, TcpStream};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
+
+/// 目的：QEMU 的加速器有序表（按平台）：本平台的硬件加速排前，TCG 兜底。
+/// 约束：QEMU 会把本平台不认识的加速器记为 invalid 并继续试下一项，所以同一份参数可跨平台复用。
+pub fn accelerators() -> &'static str {
+    if cfg!(windows) {
+        "whpx:tcg"
+    } else if cfg!(target_os = "macos") {
+        "hvf:tcg"
+    } else if cfg!(target_os = "linux") {
+        "kvm:tcg"
+    } else {
+        "tcg"
+    }
+}
 
 /// 目的：QEMU 可执行文件名（架构不同名字不同）。
 pub fn qemu_exe(arch: GuestArch) -> &'static str {
@@ -30,18 +46,17 @@ impl QemuEngine {
 }
 
 /// 目的：除共享之外的一次启动参数（不含可执行文件本身）——机器、加速器、内核、串口与 QGA 通道。
-/// 参数：channel_opts 是 QGA chardev 的补充选项（形如 host=127.0.0.1,port=N,server=on,wait=off）。
-/// 约束：rootfs 经 virtio-9p 的 base 标签挂成根——阶段 0 的根仍是目录；磁盘镜像见 docs/vm/README.md 的「多平台组合」。
-pub fn engine_args(spec: &GuestSpec, channel_opts: &str) -> Vec<String> {
+/// 参数：channel_opts 是 QGA chardev 的补充选项；share_needs_net = 共享后端要不要 guest 有（受限）网卡。
+/// 约束：rootfs 经 virtio-9p 的 base 标签挂成根——当前的根仍是目录；磁盘镜像见 docs/vm/README.md 的「多平台组合」。
+pub fn engine_args(spec: &GuestSpec, channel_opts: &str, share_needs_net: bool) -> Vec<String> {
     let mut a: Vec<String> = Vec::new();
     for v in [
         "-m",
         "2048",
         "-smp",
         "2",
-        // 阶段 0 维持现状：有 KVM 就用 KVM，没有就退回 TCG。按平台的加速器表见阶段 1。
         "-machine",
-        "accel=kvm:tcg",
+        accelerators(),
         "-display",
         "none",
         "-no-reboot",
@@ -58,28 +73,41 @@ pub fn engine_args(spec: &GuestSpec, channel_opts: &str) -> Vec<String> {
         a.push("-initrd".to_string());
         a.push(initrd.display().to_string());
     }
-    a.push("-fsdev".to_string());
-    a.push(format!(
-        // 基础根共享**可写**：内核按 root=... rw 挂它，额外 9p 挂载点也要在 guest 根里建得出来。
-        "local,id=fsbase,path={},security_model=none",
-        spec.image.root.display()
-    ));
-    a.push("-device".to_string());
-    a.push("virtio-9p-pci,fsdev=fsbase,mount_tag=base".to_string());
-    a.push("-append".to_string());
-    a.push(
-        "console=ttyS0 root=base rootfstype=9p rootflags=trans=virtio,version=9p2000.L rw"
-            .to_string(),
-    );
+    match &spec.image.root {
+        GuestRoot::Dir(dir) => {
+            a.push("-fsdev".to_string());
+            a.push(format!(
+                // 目录根共享**可写**：内核按 root=... rw 挂它，额外 9p 挂载点也要在 guest 根里建得出来。
+                "local,id=fsbase,path={},security_model=none",
+                dir.display()
+            ));
+            a.push("-device".to_string());
+            a.push("virtio-9p-pci,fsdev=fsbase,mount_tag=base".to_string());
+            a.push("-append".to_string());
+            a.push(
+                "console=ttyS0 root=base rootfstype=9p rootflags=trans=virtio,version=9p2000.L rw"
+                    .to_string(),
+            );
+        }
+        GuestRoot::Disk(image) => {
+            a.push("-drive".to_string());
+            a.push(format!("file={},if=virtio", image.display()));
+            a.push("-append".to_string());
+            a.push("console=ttyS0 root=/dev/vda rw".to_string());
+        }
+    }
     a.push("-chardev".to_string());
     a.push(format!("socket,id=ch0,{}", channel_opts));
     a.push("-device".to_string());
     a.push("virtio-serial-pci".to_string());
     a.push("-device".to_string());
     a.push("virtserialport,chardev=ch0,name=org.qemu.guest_agent.0".to_string());
-    if spec.net {
+    // 网卡三种情形：放行出站 = 普通 user 网卡；共享要隧道 = restrict=on 的受限网卡（出站全断、
+    // guestfwd/hostfwd 内部隧道可用）；两者都不是 = 干脆不给网卡。
+    if spec.net || share_needs_net {
+        let restrict = if spec.net { "" } else { ",restrict=on" };
         a.push("-netdev".to_string());
-        a.push("user,id=n0".to_string());
+        a.push(format!("user,id=n0{}", restrict));
         a.push("-device".to_string());
         a.push("virtio-net-pci,netdev=n0".to_string());
     } else {
@@ -94,9 +122,15 @@ impl VmEngine for QemuEngine {
         "qemu"
     }
 
-    /// 约束：QEMU 能承载任何架构匹配的 guest 镜像；共享能不能落由 ShareBackend 自己声明。
+    /// 约束：架构要匹配；目录根靠 9p，只有 Linux / macOS 宿主的 QEMU 有 virtfs；磁盘根三平台通用。
     fn supports(&self, guest: &GuestImage) -> bool {
-        guest.arch == GuestArch::host()
+        if guest.arch != GuestArch::host() {
+            return false;
+        }
+        match &guest.root {
+            GuestRoot::Dir(_) => cfg!(target_os = "linux") || cfg!(target_os = "macos"),
+            GuestRoot::Disk(_) => true,
+        }
     }
 
     fn boot(&self, spec: &GuestSpec, share: &SharePlan) -> Result<Box<dyn GuestVm>, String> {
@@ -111,7 +145,7 @@ impl VmEngine for QemuEngine {
             .filter(|p| !p.is_empty())
             .map(str::to_string)
             .unwrap_or_else(|| qemu_exe(spec.image.arch).to_string());
-        let mut args = engine_args(spec, &opts);
+        let mut args = engine_args(spec, &opts, share.needs_net);
         args.extend(share.engine_args.iter().cloned());
         let child = Command::new(&exe)
             .args(&args)

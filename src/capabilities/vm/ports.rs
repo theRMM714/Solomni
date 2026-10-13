@@ -26,6 +26,8 @@ pub struct SharePlan {
     pub engine_args: Vec<String>,
     /// 目的：接上命令通道后在 guest 里逐条执行的挂载命令。
     pub guest_scripts: Vec<String>,
+    /// 目的：本后端是否需要 guest 有网卡（guestfwd / SMB 这类隧道要）；9p / virtiofs 不需要。
+    pub needs_net: bool,
 }
 
 /// 目的：宿主↔guest 的共享后端（virtiofs / 9p / SMB / copy）。只有 service.rs 持有它（R12）。
