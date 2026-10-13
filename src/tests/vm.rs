@@ -799,6 +799,57 @@ pub(crate) fn disk_image_base_is_classified_as_a_disk_root() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// 目的：装配前的两道如实拒绝——引擎承载不了这份 guest、共享后端落不到这台引擎/guest 上。
+#[test]
+pub(crate) fn vm_service_refuses_unfit_engine_and_share_with_a_reason() {
+    use crate::capabilities::vm::detail::{NinePShare, QemuEngine};
+    use crate::capabilities::vm::domain::guest::GuestArch;
+    let svc = crate::capabilities::vm::service::VmService::new(
+        Arc::new(InMemoryPackages::empty()),
+        Arc::new(QemuEngine::new()),
+        Arc::new(NinePShare::new()),
+    );
+
+    // 引擎承载不了：架构不匹配（磁盘根让 supports 的根类型判定通过，只剩架构这一条）。
+    let mut wrong_arch = GuestImage::linux(
+        "t",
+        GuestRoot::Disk(std::path::PathBuf::from("/img/root.qcow2")),
+        None,
+        None,
+    );
+    wrong_arch.arch = match GuestArch::host() {
+        GuestArch::Amd64 => GuestArch::Arm64,
+        GuestArch::Arm64 => GuestArch::Amd64,
+    };
+    let spec = GuestSpec {
+        lease: "w".to_string(),
+        image: wrong_arch,
+        mounts: Vec::new(),
+        net: false,
+        engine_path: None,
+    };
+    let why = svc.guest_start(&spec).expect_err("架构不匹配要被拒绝");
+    assert!(why.contains("承载不了"), "{}", why);
+
+    // 共享落不上：引擎能承载，但 guest 没声明 9p 客户端。
+    let mut no_nine = GuestImage::linux(
+        "t",
+        GuestRoot::Disk(std::path::PathBuf::from("/img/root.qcow2")),
+        None,
+        None,
+    );
+    no_nine.clients.nine_p = false;
+    let spec2 = GuestSpec {
+        lease: "w".to_string(),
+        image: no_nine,
+        mounts: Vec::new(),
+        net: false,
+        engine_path: None,
+    };
+    let why2 = svc.guest_start(&spec2).expect_err("共享落不上要被拒绝");
+    assert!(why2.contains("落不到引擎"), "{}", why2);
+}
+
 /// 目的：复制共享的进 / 出同步真跑一遍——宿主 tar 打包、经通道搬运、guest 端命令、回拷解包。
 #[test]
 pub(crate) fn copy_share_syncs_both_ways_through_the_channel() {
