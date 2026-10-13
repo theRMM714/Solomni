@@ -67,11 +67,14 @@ pub fn engine_args(spec: &GuestSpec, channel_opts: &str, share_needs_net: bool) 
     ] {
         a.push(v.to_string());
     }
-    a.push("-kernel".to_string());
-    a.push(spec.image.kernel.display().to_string());
-    if let Some(initrd) = &spec.image.initrd {
-        a.push("-initrd".to_string());
-        a.push(initrd.display().to_string());
+    // 有内核就直启（-kernel / -initrd / -append）；没有内核的磁盘根靠镜像自带的引导（固件启动）。
+    if let Some(kernel) = &spec.image.kernel {
+        a.push("-kernel".to_string());
+        a.push(kernel.display().to_string());
+        if let Some(initrd) = &spec.image.initrd {
+            a.push("-initrd".to_string());
+            a.push(initrd.display().to_string());
+        }
     }
     match &spec.image.root {
         GuestRoot::Dir(dir) => {
@@ -92,8 +95,10 @@ pub fn engine_args(spec: &GuestSpec, channel_opts: &str, share_needs_net: bool) 
         GuestRoot::Disk(image) => {
             a.push("-drive".to_string());
             a.push(format!("file={},if=virtio", image.display()));
-            a.push("-append".to_string());
-            a.push("console=ttyS0 root=/dev/vda rw".to_string());
+            if spec.image.kernel.is_some() {
+                a.push("-append".to_string());
+                a.push("console=ttyS0 root=/dev/vda rw".to_string());
+            }
         }
     }
     a.push("-chardev".to_string());

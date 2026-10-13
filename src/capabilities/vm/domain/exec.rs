@@ -403,7 +403,11 @@ fn base_requirement(base: Option<&str>, probe: &dyn HostProbe) -> VmRequirement 
                     "基础根在场：{}（{}，内核 {}{}）",
                     p,
                     root,
-                    b.kernel.file_name().unwrap_or_default().to_string_lossy(),
+                    b.kernel
+                        .as_deref()
+                        .and_then(|k| k.file_name())
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| "自带引导".to_string()),
                     if b.initrd.is_some() { " + initrd" } else { "" }
                 ),
             )

@@ -402,7 +402,7 @@ pub(crate) fn guest_base_requires_rootfs_and_kernel() {
     // 放内核：可用，无 initrd。
     std::fs::write(dir.join("vmlinuz"), b"x").expect("写内核");
     let base = classify_base(&dir, &probe).expect("有内核就该可用");
-    assert_eq!(base.kernel, dir.join("vmlinuz"));
+    assert_eq!(base.kernel, Some(dir.join("vmlinuz")));
     assert!(base.initrd.is_none(), "没放 initrd 就是没有");
     // 放 initrd：一并认出来。
     std::fs::write(dir.join("initrd.img"), b"x").expect("写 initrd");
@@ -464,7 +464,7 @@ pub(crate) fn guest_mounts_prefix_packages_and_fence_roots() {
         image: GuestImage::linux(
             "test",
             GuestRoot::Dir(std::path::PathBuf::from("/base")),
-            std::path::PathBuf::from("/base/vmlinuz"),
+            Some(std::path::PathBuf::from("/base/vmlinuz")),
             Some(std::path::PathBuf::from("/base/initrd.img")),
         ),
         mounts,
@@ -547,7 +547,7 @@ pub(crate) fn accelerators_and_nic_follow_the_platform_and_share_need() {
         image: GuestImage::linux(
             "test",
             GuestRoot::Dir(std::path::PathBuf::from("/base")),
-            std::path::PathBuf::from("/base/vmlinuz"),
+            Some(std::path::PathBuf::from("/base/vmlinuz")),
             None,
         ),
         mounts: Vec::new(),
@@ -590,6 +590,55 @@ pub(crate) fn accelerators_and_nic_follow_the_platform_and_share_need() {
     );
 }
 
+/// 目的：磁盘镜像根可以没有内核（靠镜像自带引导）；目录根没有内核则如实拒收。
+#[test]
+pub(crate) fn disk_base_may_boot_without_a_kernel() {
+    let probe = crate::kernel::detail::HostProbeAdapter;
+    let dir = crate::tests::scratch("vm-guest-nokernel");
+    std::fs::write(dir.join("rootfs.ext4"), b"img").expect("写磁盘镜像");
+    let image = classify_base(&dir, &probe).expect("磁盘根可以没有内核");
+    assert!(image.kernel.is_none(), "没有 vmlinuz 就是 None");
+    assert!(
+        matches!(image.root, GuestRoot::Disk(_)),
+        "同目录里的磁盘镜像仍判成磁盘根"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// 目的：没有内核的磁盘根不传 -kernel / -append，交给镜像自带引导（固件启动）。
+#[test]
+pub(crate) fn disk_root_without_kernel_boots_via_firmware() {
+    use crate::capabilities::vm::detail::qemu::engine_args;
+    let spec = GuestSpec {
+        lease: "w".to_string(),
+        image: GuestImage::linux(
+            "test",
+            GuestRoot::Disk(std::path::PathBuf::from("/img/root.qcow2")),
+            None,
+            None,
+        ),
+        mounts: Vec::new(),
+        net: false,
+        engine_path: None,
+    };
+    let args = engine_args(&spec, "opts", false);
+    assert!(
+        !args.iter().any(|a| a == "-kernel"),
+        "没有内核就不传 -kernel：{:?}",
+        args
+    );
+    assert!(
+        !args.iter().any(|a| a == "-append"),
+        "没有内核就不传 -append：{:?}",
+        args
+    );
+    assert!(
+        args.iter().any(|a| a == "file=/img/root.qcow2,if=virtio"),
+        "磁盘根照给：{:?}",
+        args
+    );
+}
+
 /// 目的：磁盘镜像根走 virtio 磁盘（三平台通用），不再依赖 9p 的 base 标签。
 #[test]
 pub(crate) fn disk_root_uses_a_virtio_disk_not_9p() {
@@ -599,7 +648,7 @@ pub(crate) fn disk_root_uses_a_virtio_disk_not_9p() {
         image: GuestImage::linux(
             "test",
             GuestRoot::Disk(std::path::PathBuf::from("/img/root.qcow2")),
-            std::path::PathBuf::from("/img/vmlinuz"),
+            Some(std::path::PathBuf::from("/img/vmlinuz")),
             None,
         ),
         mounts: Vec::new(),
@@ -639,7 +688,7 @@ pub(crate) fn share_syncs_around_each_run_and_releases_on_stop() {
         image: GuestImage::linux(
             "test",
             GuestRoot::Dir(std::path::PathBuf::from("/base")),
-            std::path::PathBuf::from("/base/vmlinuz"),
+            Some(std::path::PathBuf::from("/base/vmlinuz")),
             None,
         ),
         mounts: Vec::new(),
@@ -883,7 +932,7 @@ pub(crate) fn vm_service_holds_guests_by_lease() {
         image: GuestImage::linux(
             "test",
             GuestRoot::Dir(std::path::PathBuf::from("/base")),
-            std::path::PathBuf::from("/base/vmlinuz"),
+            Some(std::path::PathBuf::from("/base/vmlinuz")),
             None,
         ),
         mounts: Vec::new(),

@@ -75,7 +75,7 @@ pub struct GuestImage {
     pub id: String,
     pub arch: GuestArch,
     pub root: GuestRoot,
-    pub kernel: PathBuf,
+    pub kernel: Option<PathBuf>,
     pub initrd: Option<PathBuf>,
     pub agent: GuestAgent,
     pub clients: GuestClients,
@@ -86,7 +86,7 @@ impl GuestImage {
     pub fn linux(
         id: &str,
         root: GuestRoot,
-        kernel: PathBuf,
+        kernel: Option<PathBuf>,
         initrd: Option<PathBuf>,
     ) -> GuestImage {
         GuestImage {
@@ -168,9 +168,6 @@ pub fn classify_base(base: &Path, probe: &dyn HostProbe) -> Result<GuestImage, S
         .iter()
         .map(|n| base.join(n))
         .find(|p| probe.is_file(p));
-    let Some(kernel) = kernel else {
-        return Err("基础根里没有 vmlinuz / bzImage".to_string());
-    };
     let initrd = ["initrd.img", "initrd", "initramfs.img"]
         .iter()
         .map(|n| base.join(n))
@@ -190,6 +187,12 @@ pub fn classify_base(base: &Path, probe: &dyn HostProbe) -> Result<GuestImage, S
         Some(image) => GuestRoot::Disk(image),
         None => GuestRoot::Dir(base.to_path_buf()),
     };
+    // 目录根必须直启内核；只有磁盘镜像可以靠自身引导（不传 -kernel / -append）。
+    if kernel.is_none() && matches!(&root, GuestRoot::Dir(_)) {
+        return Err(
+            "基础根里没有 vmlinuz / bzImage（目录根必须直启内核；磁盘镜像可自带引导）".to_string(),
+        );
+    }
     let manifest = read_manifest(base, probe)?;
     let id = manifest
         .as_ref()
