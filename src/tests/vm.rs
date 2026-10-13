@@ -456,6 +456,7 @@ pub(crate) fn guest_mounts_prefix_packages_and_fence_roots() {
         },
         mounts,
         net: false,
+        qemu_path: None,
     };
     let args = qemu_args(&spec, "host=127.0.0.1,port=1,server=on,wait=off");
     assert!(args.contains(&"none".to_string()), "不给网卡");
@@ -466,6 +467,15 @@ pub(crate) fn guest_mounts_prefix_packages_and_fence_roots() {
     assert!(
         args.iter().any(|a| a.contains("root=base")),
         "rootfs 走 9p 的 base 标签"
+    );
+    let serial = args
+        .iter()
+        .position(|a| a.as_str() == "-serial")
+        .map(|i| args[i + 1].as_str());
+    assert_eq!(
+        serial,
+        Some("stdio"),
+        "console=ttyS0 要有对应串口设备（-nodefaults 会去掉默认串口）"
     );
     assert!(
         args.iter().any(|a| a.contains("initrd.img")),
@@ -490,6 +500,7 @@ pub(crate) fn vm_service_holds_guests_by_lease() {
         },
         mounts: Vec::new(),
         net: false,
+        qemu_path: None,
     };
     vm.guest_start(&spec).expect("替身一定能起");
     let run = GuestRun {

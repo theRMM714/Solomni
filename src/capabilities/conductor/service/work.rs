@@ -388,6 +388,7 @@ impl Conductor {
             base,
             mounts: crate::capabilities::vm::api::mounts_from(plan, &fence),
             net: meta.exec.net,
+            qemu_path: self.qemu_path().map(str::to_string),
         };
         self.vm.guest_start(&spec)
     }

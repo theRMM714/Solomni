@@ -52,6 +52,9 @@ pub struct GuestSpec {
     pub base: GuestBase,
     pub mounts: Vec<GuestMount>,
     pub net: bool,
+    /// 目的：设置里登记的 QEMU 可执行文件路径（空 = 兜底按 PATH 找，名字由 arch 定）。
+    /// 约束：与就绪检测共用同一份登记——检测说"按登记路径找到"，启动就必须走同一个路径。
+    pub qemu_path: Option<String>,
 }
 
 /// 目的：在 guest 里跑一次工具（命令 + 参数 + 环境 + 工作目录）。
@@ -145,9 +148,13 @@ pub fn qemu_args(spec: &GuestSpec, channel_opts: &str) -> Vec<String> {
         "2048",
         "-smp",
         "2",
-        "-nographic",
+        "-display",
+        "none",
         "-no-reboot",
         "-nodefaults",
+        // -nodefaults 连默认串口一起去掉；console=ttyS0 要有对应设备，所以显式给一个。
+        "-serial",
+        "stdio",
     ] {
         a.push(v.to_string());
     }

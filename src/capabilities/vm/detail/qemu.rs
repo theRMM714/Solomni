@@ -27,13 +27,20 @@ impl GuestHost for QemuGuest {
             TcpListener::bind("127.0.0.1:0").map_err(|e| format!("占不到 QGA 端口：{}", e))?;
         let port = listener.local_addr().map_err(|e| e.to_string())?.port();
         let opts = format!("host=127.0.0.1,port={},server=on,wait=off", port);
-        let child = Command::new(qemu_exe(spec.arch))
+        let exe = spec
+            .qemu_path
+            .as_deref()
+            .map(str::trim)
+            .filter(|p| !p.is_empty())
+            .map(str::to_string)
+            .unwrap_or_else(|| qemu_exe(spec.arch).to_string());
+        let child = Command::new(&exe)
             .args(qemu_args(spec, &opts))
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn()
-            .map_err(|e| format!("起不了 QEMU（{}）：{}", qemu_exe(spec.arch), e))?;
+            .map_err(|e| format!("起不了 QEMU（{}）：{}", exe, e))?;
         drop(listener);
         let stream = connect_within(port, Duration::from_secs(30))?;
         let writer = stream.try_clone().map_err(|e| e.to_string())?;
