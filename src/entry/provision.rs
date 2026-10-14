@@ -1,11 +1,13 @@
-//! 目的：入口层的依赖补齐机制——依赖清单、下载源解析与"本机缺什么"的状态报告。
-//! 管：内嵌 `dependencies.yaml`（依赖清单）与 `links.yaml`（下载源台账）的解析、按本机筛选与状态。
-//! 不管：实际下载 / 解包与作业编排（后续增量）、虚拟机档的能力语义（在 capabilities/vm）。
-//! 联动：清单与台账的唯一真相在仓库根，产品里**编译期内嵌**；命令行入口是 `--provision`。
+//! 目的：入口层的依赖补齐机制——依赖清单、下载源解析、状态报告与下载安装作业。
+//! 管：内嵌 `dependencies.yaml`（清单）与 `links.yaml`（台账）的解析、按本机筛选、下载缓存、解包落盘与作业状态。
+//! 不管：虚拟机档的能力语义（在 capabilities/vm）；界面怎么展示（在 presentation）。
+//! 联动：清单与台账的唯一真相在仓库根，产品里**编译期内嵌**；命令行入口是 `--provision`，作业经 `Provisioner`。
 
 use crate::kernel::ports::HostProbe;
 use serde::Deserialize;
 use std::collections::BTreeMap;
+use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
 
 /// 清单与台账在构建期嵌进二进制：分发的二进制不依赖仓库里的文件，读到的仍是同一份真相。
@@ -109,6 +111,114 @@ pub fn status(
     Ok(out)
 }
 
+/// 目的：依赖补齐的执行体——持产品根；底层同步补齐走它（作业与 Web 面在 provision 能力那一步）。
+pub struct Provisioner {
+    root: PathBuf,
+}
+
+impl Provisioner {
+    /// 目的：以产品根建一个执行体。
+    pub fn new(root: &Path) -> Provisioner {
+        Provisioner {
+            root: root.to_path_buf(),
+        }
+    }
+
+    /// 目的：同步补齐：逐条下载 / 解包 / 校验，进度逐行回调。
+    pub fn ensure(&self, ids: &[String], on_line: &mut dyn FnMut(&str)) -> Result<(), String> {
+        run_ensure(&self.root, ids, on_line)
+    }
+}
+
+/// 目的：补齐的执行核心——选中依赖、逐条下载(带缓存) + 解包 + 校验；作业与同步入口共用。
+fn run_ensure(root: &Path, ids: &[String], on_line: &mut dyn FnMut(&str)) -> Result<(), String> {
+    let all = deps()?;
+    let links = links()?;
+    let all = for_host(&all, std::env::consts::OS, std::env::consts::ARCH);
+    run(root, &all, &links, ids, on_line)
+}
+
+/// 目的：在给定的依赖清单上执行补齐（清单/台账由调用方给，便于用例注入）。
+fn run(
+    root: &Path,
+    all: &[Dep],
+    links: &BTreeMap<String, String>,
+    ids: &[String],
+    on_line: &mut dyn FnMut(&str),
+) -> Result<(), String> {
+    let picked: Vec<&Dep> = if ids.is_empty() {
+        all.iter().collect()
+    } else {
+        all.iter()
+            .filter(|d| ids.iter().any(|x| x == &d.id))
+            .collect()
+    };
+    if picked.is_empty() {
+        return Err("没有匹配的依赖 id（用 --provision 看清单）".to_string());
+    }
+    let agent = crate::capabilities::llm::detail::http_agent::agent(15, 7200);
+    let cache = root.join(".vm").join("cache");
+    fs::create_dir_all(&cache).map_err(|e| format!("建缓存目录失败：{}", e))?;
+    for dep in picked {
+        let url = source_url(&dep.source, links)?;
+        let asset = asset_name(&url);
+        let cached = cache.join(&asset);
+        if cached.is_file() {
+            on_line(&format!("{}：用缓存 {}", dep.id, asset));
+        } else {
+            on_line(&format!("{}：下载 {}", dep.id, url));
+            download(&agent, &url, &cached, on_line)?;
+        }
+        let dest = under(root, &dep.install);
+        fs::create_dir_all(&dest).map_err(|e| format!("建安装目录 {} 失败：{}", dep.install, e))?;
+        crate::diagnostics::unpack::extract_into(&cached, &dest, dep.strip)
+            .map_err(|e| format!("{}：解包失败：{}", dep.id, e))?;
+        let probe = under(root, &dep.probe);
+        if !(probe.is_file() || probe.is_dir()) {
+            return Err(format!("{}：装完仍找不到 {}", dep.id, dep.probe));
+        }
+        on_line(&format!("{}：就绪（{}）", dep.id, dep.install));
+    }
+    Ok(())
+}
+
+/// 目的：从 URL 取末段做缓存文件名（去掉查询串与锚点）。
+fn asset_name(url: &str) -> String {
+    url.split(['?', '#'])
+        .next()
+        .unwrap_or(url)
+        .rsplit('/')
+        .next()
+        .unwrap_or("asset")
+        .to_string()
+}
+
+/// 目的：把 URL 下到目标文件——先写 .part 再改名，避免半截文件被当成缓存。
+fn download(
+    agent: &ureq::Agent,
+    url: &str,
+    dest: &Path,
+    on_line: &mut dyn FnMut(&str),
+) -> Result<(), String> {
+    let resp = agent
+        .get(url)
+        .call()
+        .map_err(|e| format!("下载失败（{}）：{}", url, e))?;
+    if !resp.status().is_success() {
+        return Err(format!("下载 {} 返回 {}", url, resp.status().as_u16()));
+    }
+    let body = resp.into_body();
+    let mut reader = body.into_reader();
+    let tmp = dest.with_extension("part");
+    let mut f = fs::File::create(&tmp).map_err(|e| format!("建 {} 失败：{}", tmp.display(), e))?;
+    let n =
+        io::copy(&mut reader, &mut f).map_err(|e| format!("写 {} 失败：{}", tmp.display(), e))?;
+    drop(f);
+    fs::rename(&tmp, dest).map_err(|e| format!("改名 {} 失败：{}", dest.display(), e))?;
+    on_line(&format!("下载完成：{} 字节", n));
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -156,5 +266,72 @@ mod tests {
         let q = items2.iter().find(|s| s.dep.id == "vm.qemu.linux").unwrap();
         assert!(q.present, "probe 在场就该判在位");
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// 目的：补齐内核——缓存命中时只解包不下载，装完按 probe 校验（不依赖网络）。
+    #[test]
+    fn install_core_uses_cache_and_checks_probe() {
+        let root = crate::tests::scratch("provision-install");
+        let cache = root.join(".vm").join("cache");
+        fs::create_dir_all(&cache).expect("建缓存");
+        let tar_path = cache.join("a.tar");
+        {
+            let f = fs::File::create(&tar_path).expect("建 tar");
+            let mut b = tar::Builder::new(f);
+            let mut h = tar::Header::new_gnu();
+            h.set_size(5);
+            h.set_mode(0o644);
+            h.set_cksum();
+            b.append_data(&mut h, "f.txt", &b"hello"[..])
+                .expect("写文件");
+            b.finish().expect("收尾");
+        }
+        let dep = Dep {
+            id: "x".to_string(),
+            os: "any".to_string(),
+            arch: "any".to_string(),
+            install: ".vm/x".to_string(),
+            probe: ".vm/x/f.txt".to_string(),
+            source: "release:a.tar".to_string(),
+            strip: 0,
+            size_mb: 0,
+            note: String::new(),
+        };
+        let mut links = BTreeMap::new();
+        links.insert(
+            "release.base".to_string(),
+            "https://example.invalid".to_string(),
+        );
+        let mut lines: Vec<String> = Vec::new();
+        run(&root, &[dep], &links, &[], &mut |l| {
+            lines.push(l.to_string())
+        })
+        .expect("从缓存装");
+        assert!(
+            root.join(".vm").join("x").join("f.txt").is_file(),
+            "装完 probe 要在：{:?}",
+            lines
+        );
+        assert!(lines.iter().any(|l| l.contains("用缓存")), "{:?}", lines);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// 目的：给不存在的 id 要如实拒绝，且不碰网络。
+    #[test]
+    fn unknown_dep_id_is_refused() {
+        let root = crate::tests::scratch("provision-missing");
+        let p = Provisioner::new(&root);
+        let err = p
+            .ensure(&["不存在".to_string()], &mut |_| {})
+            .expect_err("不存在的 id 要拒");
+        assert!(err.contains("没有匹配"), "{}", err);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// 目的：缓存文件名取 URL 末段，去掉查询串。
+    #[test]
+    fn asset_name_takes_last_path_segment() {
+        assert_eq!(asset_name("https://x/a/b.tar.zst?q=1"), "b.tar.zst");
+        assert_eq!(asset_name("https://x/y.zip#frag"), "y.zip");
     }
 }

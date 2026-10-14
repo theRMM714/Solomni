@@ -65,7 +65,7 @@ fn main() {
     let home = root.join(".home");
     // 隐藏模式：依赖补齐的状态（机器可读，只报事实）——缺什么、装到哪、从哪来。
     if args.iter().any(|a| a == "--provision") {
-        std::process::exit(diagnostics::provision(&root));
+        std::process::exit(diagnostics::provision(&root, &args));
     }
     // 隐藏模式：按条处置围栏台账（列清单 / 还原一条 / 撤一条 / 删一个 profile）——比整体收尾更细，
     // 所以排在 --fence-clean 之前；两者共用同一份台账与同一套 ACE 读法（见 docs/tools/README.md）。

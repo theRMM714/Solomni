@@ -52,8 +52,34 @@ pub fn doctor() -> i32 {
     0
 }
 
-/// 目的：隐藏模式——依赖补齐的**状态**（机器可读）：缺什么、装到哪、从哪来；只报事实，判定归调用方。
-pub fn provision(root: &std::path::Path) -> i32 {
+/// 目的：隐藏模式——依赖补齐：不带 `--ensure` 报状态（机器可读）；带 `--ensure[=id,…] --yes` 真下载安装。
+pub fn provision(root: &std::path::Path, args: &[String]) -> i32 {
+    let ids: Vec<String> = args
+        .iter()
+        .find_map(|a| a.strip_prefix("--ensure="))
+        .map(|s| {
+            s.split(',')
+                .filter(|x| !x.is_empty())
+                .map(|x| x.to_string())
+                .collect()
+        })
+        .unwrap_or_default();
+    if args.iter().any(|a| a == "--ensure") || !ids.is_empty() {
+        if !args.iter().any(|a| a == "--yes") {
+            eprintln!(
+                "[依赖补齐] 会从网络下载并写进项目内。确认后加 --yes（先用 --provision 看清单）。"
+            );
+            return 2;
+        }
+        let p = crate::entry::provision::Provisioner::new(root);
+        return match p.ensure(&ids, &mut |line| eprintln!("[依赖补齐] {}", line)) {
+            Ok(()) => 0,
+            Err(e) => {
+                eprintln!("[依赖补齐] {}", e);
+                1
+            }
+        };
+    }
     match crate::entry::provision::status(
         root,
         std::env::consts::OS,
