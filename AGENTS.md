@@ -182,6 +182,7 @@
 | `modules`（模块公地） | `docs/modules/README.md` | `unit-map.md` |
 | `vm`（虚拟机档） | `docs/vm/README.md` | `unit-map.md` |
 | `workspace`（工作区） | `docs/workspace/README.md` | `unit-map.md` |
+| `provision`（依赖补齐） | `docs/provision/README.md` | `unit-map.md` |
 | `prompt`（提示词册） | `docs/prompt/README.md` | `unit-map.md`、`prompts.md` |
 | `slate`（名单） | `docs/slate/README.md` | `unit-map.md` |
 | `residents`（常驻服务） | `docs/residents/README.md` | `unit-map.md` |

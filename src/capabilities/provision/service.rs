@@ -1,18 +1,20 @@
-//! 目的：入口层的依赖补齐机制——依赖清单、下载源解析、状态报告与下载安装作业。
-//! 管：内嵌 `dependencies.yaml`（清单）与 `links.yaml`（台账）的解析、按本机筛选、下载缓存、解包落盘与作业状态。
-//! 不管：虚拟机档的能力语义（在 capabilities/vm）；界面怎么展示（在 presentation）。
-//! 联动：清单与台账的唯一真相在仓库根，产品里**编译期内嵌**；命令行入口是 `--provision`，作业经 `Provisioner`。
+//! 目的：依赖补齐能力的实现——清单解析、状态、下载缓存、解包落盘与一次后台作业。
+//! 管：内嵌 dependencies.yaml（清单）与 links.yaml（台账）的解析、按本机筛选、下载 / 解包 / 校验、作业状态与取消。
+//! 不管：虚拟机档的能力语义（在 vm）；界面怎么展示（在 presentation）。
+//! 联动：呈现层经 api::Provision 用它；组合根构造它；下载走 kernel::detail::outbound，解包走 kernel::detail::unpack。
 
-use crate::kernel::ports::HostProbe;
+use super::api::{DepStatus, JobState, Provision};
 use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
 /// 清单与台账在构建期嵌进二进制：分发的二进制不依赖仓库里的文件，读到的仍是同一份真相。
-const DEPS_YAML: &str = include_str!("../../dependencies.yaml");
-const LINKS_YAML: &str = include_str!("../../links.yaml");
+const DEPS_YAML: &str = include_str!("../../../dependencies.yaml");
+const LINKS_YAML: &str = include_str!("../../../links.yaml");
 
 #[derive(Debug, Clone, Deserialize)]
 struct DepsFile {
@@ -35,16 +37,6 @@ pub struct Dep {
     pub size_mb: u64,
     #[serde(default)]
     pub note: String,
-}
-
-/// 目的：一条依赖在本机的状态——在不在场、装到哪、从哪个 URL 来。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DepStatus {
-    pub dep: Dep,
-    pub present: bool,
-    pub path: PathBuf,
-    /// 目的：解析出来的下载 URL（`release:` 前缀换成 `release.base`）；解析不了给 None。
-    pub url: Option<String>,
 }
 
 /// 目的：解析内嵌的依赖清单。
@@ -90,52 +82,108 @@ pub fn for_host(deps: &[Dep], os: &str, arch: &str) -> Vec<Dep> {
         .collect()
 }
 
-/// 目的：本机每一条依赖的状态——probe 指向的路径存在即在位；URL 解析失败如实标 None。
-pub fn status(
-    root: &Path,
-    os: &str,
-    arch: &str,
-    probe: &dyn HostProbe,
-) -> Result<Vec<DepStatus>, String> {
-    let links = links()?;
-    let mut out = Vec::new();
-    for dep in for_host(&deps()?, os, arch) {
-        let path = under(root, &dep.probe);
-        out.push(DepStatus {
-            present: probe.is_file(&path) || probe.is_dir(&path),
-            url: source_url(&dep.source, &links).ok(),
-            path,
-            dep,
-        });
-    }
-    Ok(out)
-}
-
-/// 目的：依赖补齐的执行体——持产品根；底层同步补齐走它（作业与 Web 面在 provision 能力那一步）。
-pub struct Provisioner {
+/// 目的：依赖补齐的实现——持产品根、作业状态与取消旗；下载 / 解包在下面同一文件。
+pub struct ProvisionService {
     root: PathBuf,
+    job: Arc<Mutex<JobState>>,
+    cancel: Arc<AtomicBool>,
 }
 
-impl Provisioner {
-    /// 目的：以产品根建一个执行体。
-    pub fn new(root: &Path) -> Provisioner {
-        Provisioner {
+impl ProvisionService {
+    /// 目的：以产品根建一个实现（进程内一个就够；作业状态是进程内的）。
+    pub fn new(root: &Path) -> ProvisionService {
+        ProvisionService {
             root: root.to_path_buf(),
+            job: Arc::new(Mutex::new(JobState::default())),
+            cancel: Arc::new(AtomicBool::new(false)),
         }
     }
 
-    /// 目的：同步补齐：逐条下载 / 解包 / 校验，进度逐行回调。
+    /// 目的：同步补齐（CLI 用）：逐条下载 / 解包 / 校验，进度逐行回调。
     pub fn ensure(&self, ids: &[String], on_line: &mut dyn FnMut(&str)) -> Result<(), String> {
-        run_ensure(&self.root, ids, on_line)
+        run_ensure(&self.root, ids, &self.cancel, on_line)
+    }
+}
+
+impl Provision for ProvisionService {
+    fn status(&self) -> Result<Vec<DepStatus>, String> {
+        let links = links()?;
+        let mut out = Vec::new();
+        for dep in for_host(&deps()?, std::env::consts::OS, std::env::consts::ARCH) {
+            let probe = under(&self.root, &dep.probe);
+            let url = source_url(&dep.source, &links).ok();
+            out.push(DepStatus {
+                id: dep.id,
+                present: probe.is_file() || probe.is_dir(),
+                install: dep.install,
+                probe: dep.probe,
+                source: dep.source,
+                url,
+                size_mb: dep.size_mb,
+                note: dep.note,
+            });
+        }
+        Ok(out)
+    }
+
+    fn job(&self) -> JobState {
+        self.job.lock().map(|j| j.clone()).unwrap_or_default()
+    }
+
+    fn start(&self, ids: Vec<String>) -> Result<(), String> {
+        {
+            let mut j = self.job.lock().map_err(|_| "作业状态锁坏了".to_string())?;
+            if j.running {
+                return Err("已有补齐作业在跑".to_string());
+            }
+            *j = JobState {
+                running: true,
+                current: String::new(),
+                lines: Vec::new(),
+                error: None,
+            };
+        }
+        self.cancel.store(false, Ordering::Relaxed);
+        let root = self.root.clone();
+        let job = Arc::clone(&self.job);
+        let cancel = Arc::clone(&self.cancel);
+        std::thread::spawn(move || {
+            let sink = Arc::clone(&job);
+            let mut on_line = move |line: &str| {
+                if let Ok(mut j) = sink.lock() {
+                    j.lines.push(line.to_string());
+                    if j.lines.len() > 200 {
+                        j.lines.remove(0);
+                    }
+                }
+            };
+            let r = run_ensure(&root, &ids, &cancel, &mut on_line);
+            if let Ok(mut j) = job.lock() {
+                j.running = false;
+                if let Err(e) = r {
+                    j.error = Some(e);
+                }
+            }
+        });
+        Ok(())
+    }
+
+    fn cancel(&self) {
+        self.cancel.store(true, Ordering::Relaxed);
     }
 }
 
 /// 目的：补齐的执行核心——选中依赖、逐条下载(带缓存) + 解包 + 校验；作业与同步入口共用。
-fn run_ensure(root: &Path, ids: &[String], on_line: &mut dyn FnMut(&str)) -> Result<(), String> {
+fn run_ensure(
+    root: &Path,
+    ids: &[String],
+    cancel: &AtomicBool,
+    on_line: &mut dyn FnMut(&str),
+) -> Result<(), String> {
     let all = deps()?;
     let links = links()?;
     let all = for_host(&all, std::env::consts::OS, std::env::consts::ARCH);
-    run(root, &all, &links, ids, on_line)
+    run(root, &all, &links, ids, cancel, on_line)
 }
 
 /// 目的：在给定的依赖清单上执行补齐（清单/台账由调用方给，便于用例注入）。
@@ -144,6 +192,7 @@ fn run(
     all: &[Dep],
     links: &BTreeMap<String, String>,
     ids: &[String],
+    cancel: &AtomicBool,
     on_line: &mut dyn FnMut(&str),
 ) -> Result<(), String> {
     let picked: Vec<&Dep> = if ids.is_empty() {
@@ -156,10 +205,14 @@ fn run(
     if picked.is_empty() {
         return Err("没有匹配的依赖 id（用 --provision 看清单）".to_string());
     }
-    let agent = crate::capabilities::llm::detail::http_agent::agent(15, 7200);
+    let agent = crate::kernel::detail::outbound::agent(15, 7200);
     let cache = root.join(".vm").join("cache");
     fs::create_dir_all(&cache).map_err(|e| format!("建缓存目录失败：{}", e))?;
     for dep in picked {
+        if cancel.load(Ordering::Relaxed) {
+            on_line("已取消");
+            return Ok(());
+        }
         let url = source_url(&dep.source, links)?;
         let asset = asset_name(&url);
         let cached = cache.join(&asset);
@@ -222,7 +275,6 @@ fn download(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tests::doubles::FixedProbe;
 
     /// 目的：内嵌清单与台账必须自洽——每条依赖的下载源都解析得成 https。
     #[test]
@@ -247,25 +299,43 @@ mod tests {
         assert!(q.source.starts_with("release:"), "自托管包用 release: 前缀");
     }
 
-    /// 目的：按本机筛出的状态——平台不匹配的不出现，probe 在场才判在位。
+    /// 目的：清单按本机 os/arch 筛（含 any）；平台不匹配的不出现。
     #[test]
-    fn host_filter_and_status_report_presence() {
-        let root = crate::tests::scratch("provision-status");
-        let probe = FixedProbe::default();
-        let items = status(&root, "linux", "x86_64", &probe).expect("状态");
-        let ids: Vec<&str> = items.iter().map(|s| s.dep.id.as_str()).collect();
+    fn host_filter_selects_only_this_platform() {
+        let all = deps().expect("清单可解析");
+        let linux = for_host(&all, "linux", "x86_64");
+        let ids: Vec<&str> = linux.iter().map(|d| d.id.as_str()).collect();
         assert!(ids.contains(&"vm.qemu.linux") && ids.contains(&"vm.virtiofsd.linux"));
         assert!(!ids.contains(&"vm.qemu.windows"), "windows 条目不该出现");
-        assert!(items.iter().all(|s| !s.present), "什么都没声明 = 全缺");
-        assert!(items.iter().all(|s| s.url.is_some()), "每条都要有 URL");
+        assert!(ids.contains(&"vm.guest.rootfs"), "any 条目哪个平台都在");
+    }
 
-        let want = under(&root, ".vm/qemu/bin/qemu-system-x86_64");
-        let mut probe2 = FixedProbe::default();
-        probe2.files.push(want);
-        let items2 = status(&root, "linux", "x86_64", &probe2).expect("状态");
-        let q = items2.iter().find(|s| s.dep.id == "vm.qemu.linux").unwrap();
-        assert!(q.present, "probe 在场就该判在位");
-        let _ = std::fs::remove_dir_all(&root);
+    /// 目的：状态读真实文件系统——probe 在场才判在位。
+    #[test]
+    fn status_reads_real_filesystem() {
+        let root = crate::tests::scratch("provision-status");
+        let svc = ProvisionService::new(&root);
+        let items = svc.status().expect("状态");
+        assert!(
+            items.iter().all(|s| !s.present),
+            "空根下都算缺：{:?}",
+            items
+        );
+        // 按当前平台挑一条，把 probe 造出来（macOS 无清单条目，跳过）。
+        let host = for_host(
+            &deps().expect("清单"),
+            std::env::consts::OS,
+            std::env::consts::ARCH,
+        );
+        if let Some(dep) = host.into_iter().next() {
+            let probe = under(&root, &dep.probe);
+            fs::create_dir_all(probe.parent().expect("probe 有父目录")).expect("建目录");
+            fs::write(&probe, b"x").expect("写 probe");
+            let items = svc.status().expect("状态");
+            let hit = items.iter().find(|s| s.id == dep.id).expect("条目在");
+            assert!(hit.present, "probe 在场就该判在位：{}", dep.probe);
+        }
+        let _ = fs::remove_dir_all(&root);
     }
 
     /// 目的：补齐内核——缓存命中时只解包不下载，装完按 probe 校验（不依赖网络）。
@@ -303,9 +373,14 @@ mod tests {
             "https://example.invalid".to_string(),
         );
         let mut lines: Vec<String> = Vec::new();
-        run(&root, &[dep], &links, &[], &mut |l| {
-            lines.push(l.to_string())
-        })
+        run(
+            &root,
+            &[dep],
+            &links,
+            &[],
+            &AtomicBool::new(false),
+            &mut |l| lines.push(l.to_string()),
+        )
         .expect("从缓存装");
         assert!(
             root.join(".vm").join("x").join("f.txt").is_file(),
@@ -320,7 +395,7 @@ mod tests {
     #[test]
     fn unknown_dep_id_is_refused() {
         let root = crate::tests::scratch("provision-missing");
-        let p = Provisioner::new(&root);
+        let p = ProvisionService::new(&root);
         let err = p
             .ensure(&["不存在".to_string()], &mut |_| {})
             .expect_err("不存在的 id 要拒");

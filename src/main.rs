@@ -448,7 +448,9 @@ fn main() {
             std::process::exit(1);
         }
     };
-    let ops = capabilities::conductor::api::Ops::from_handle(&handle);
+    let mut ops = capabilities::conductor::api::Ops::from_handle(&handle);
+    // 依赖补齐面：组合根注入（能力面默认未接入，这里换成真实现）。
+    ops.provision = std::sync::Arc::new(capabilities::provision::ProvisionService::new(&root));
 
     // 启动拉起：把所有**已启用**的常驻服务拉起来（进程级租约，不属于任何会话）。
     for line in residents_boot.start_enabled() {

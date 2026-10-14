@@ -10,7 +10,6 @@
 | 文件 | 职责 |
 | --- | --- |
 | `src/entry/mod.rs` |
-| `src/entry/provision.rs` | 依赖补齐的入口层机制：内嵌依赖清单与下载源台账、按本机筛状态、解析下载 URL（`--provision`） |
 | `src/entry/root.rs` |
 | `src/main.rs` |
 | `src/diagnostics/mod.rs` |

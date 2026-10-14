@@ -106,6 +106,9 @@
 | GET | `/api/history/{name}` | `HistoryOps::open` | — | `{meta,events,live,head}` | 200, 404 |
 | POST | `/api/history/{name}/delete` | `HistoryOps::delete` | — | `{ok}` | 200, 400 |
 | GET | `/api/tiers` | `ConductorOps::tier_choices` | — | `{tiers:{default,vm_available,vm_unavailable_reason,vm_requirements}}` | 200, 400 |
+| GET | `/api/setup/status` | `Provision::status + job` | — | `{deps:[{id,present,install,probe,source,url,size_mb,note}],job,missing}` | 200, 400 |
+| POST | `/api/setup/ensure` | `Provision::status + start` | `{deps?:[id],confirm?:bool}` | `{preview:[{id,url,size_mb,present}]}` / `{ok,deps}` | 200, 400 |
+| DELETE | `/api/setup/job` | `Provision::cancel` | — | `{ok}` | 200 |
 | POST | `/api/suggest-models` | `ConductorOps::suggest_models` | `{task,mode}` | `{ok,agents}` | 200, 400 |
 <!-- ROUTES:END -->
 

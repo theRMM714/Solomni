@@ -72,7 +72,7 @@ pub fn provision(root: &std::path::Path, args: &[String]) -> i32 {
             );
             return 2;
         }
-        let p = crate::entry::provision::Provisioner::new(root);
+        let p = crate::capabilities::provision::ProvisionService::new(root);
         return match p.ensure(&ids, &mut |line| eprintln!("[依赖补齐] {}", line)) {
             Ok(()) => 0,
             Err(e) => {
@@ -81,12 +81,9 @@ pub fn provision(root: &std::path::Path, args: &[String]) -> i32 {
             }
         };
     }
-    match crate::entry::provision::status(
-        root,
-        std::env::consts::OS,
-        std::env::consts::ARCH,
-        &crate::kernel::detail::HostProbeAdapter,
-    ) {
+    use crate::capabilities::provision::api::Provision;
+    let svc = crate::capabilities::provision::ProvisionService::new(root);
+    match svc.status() {
         Ok(items) => {
             let missing = items.iter().filter(|s| !s.present).count();
             let doc = serde_json::json!({
@@ -94,14 +91,14 @@ pub fn provision(root: &std::path::Path, args: &[String]) -> i32 {
                 "arch": std::env::consts::ARCH,
                 "missing": missing,
                 "deps": items.iter().map(|s| serde_json::json!({
-                    "id": s.dep.id,
+                    "id": s.id,
                     "present": s.present,
-                    "note": s.dep.note,
-                    "install": s.dep.install,
-                    "probe": s.path.to_string_lossy(),
-                    "source": s.dep.source,
+                    "note": s.note,
+                    "install": s.install,
+                    "probe": s.probe,
+                    "source": s.source,
                     "url": s.url,
-                    "size_mb": s.dep.size_mb,
+                    "size_mb": s.size_mb,
                 })).collect::<Vec<_>>(),
             });
             println!("{}", doc);

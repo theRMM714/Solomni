@@ -51,6 +51,39 @@ impl FakeOps {
     }
 }
 
+/// 假补齐面：状态随 `fail` 走；起作业立刻成功（不真下载）。
+struct FakeProvision {
+    fail: Option<String>,
+}
+
+impl FakeProvision {
+    fn new(fail: Option<&str>) -> FakeProvision {
+        FakeProvision {
+            fail: fail.map(|s| s.to_string()),
+        }
+    }
+
+    fn guard(&self) -> Result<(), String> {
+        match &self.fail {
+            Some(m) => Err(m.clone()),
+            None => Ok(()),
+        }
+    }
+}
+
+impl crate::capabilities::provision::api::Provision for FakeProvision {
+    fn status(&self) -> Result<Vec<crate::capabilities::provision::api::DepStatus>, String> {
+        self.guard().map(|_| Vec::new())
+    }
+    fn job(&self) -> crate::capabilities::provision::api::JobState {
+        Default::default()
+    }
+    fn start(&self, _ids: Vec<String>) -> Result<(), String> {
+        self.guard()
+    }
+    fn cancel(&self) {}
+}
+
 fn fake_ops(fail: Option<&str>) -> Ops {
     let f = Arc::new(FakeOps::new(fail));
     Ops {
@@ -64,6 +97,7 @@ fn fake_ops(fail: Option<&str>) -> Ops {
         log: Arc::new(super::doubles::NoopLogOps),
         residents: Arc::new(crate::capabilities::residents::api::NoResidents),
         secrets: Arc::new(crate::capabilities::secrets::api::NoSecrets),
+        provision: Arc::new(FakeProvision::new(fail)),
     }
 }
 
@@ -647,7 +681,7 @@ fn documented_route_table_matches_the_catalog() {
             continue;
         }
         let method = cells[1];
-        if !matches!(method, "GET" | "POST") {
+        if !matches!(method, "GET" | "POST" | "DELETE") {
             continue; // 表头与分隔行
         }
         documented.push((method.to_string(), cells[2].trim_matches('`').to_string()));
@@ -749,8 +783,8 @@ fn demo_scripts_only_call_catalogued_paths() {
 fn every_api_route_reports_capability_failure_as_4xx() {
     let ops = fake_ops(Some("假能力面：一律失败"));
     for route in ROUTES {
-        if route.capability == "静态资源" || route.id == "events" {
-            continue; // 这两类不碰能力
+        if route.capability == "静态资源" || route.id == "events" || route.id == "setup.job" {
+            continue; // 静态资源不碰能力；取消是即发即忘，不读状态
         }
         let (code, text) = call(&ops, route.method, &sample_url(route), sample_body(route));
         assert!(
@@ -909,6 +943,9 @@ fn success_shapes_are_pinned_per_route() {
             200,
             "\"agents\"",
         ),
+        ("GET", "/api/setup/status", "", 200, "\"deps\""),
+        ("POST", "/api/setup/ensure", "{}", 200, "\"preview\""),
+        ("DELETE", "/api/setup/job", "", 200, "\"ok\""),
     ];
     for (method, url, body, want_code, needle) in &cases {
         let (code, text) = call(&ops, method, url, body);
