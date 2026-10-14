@@ -7,6 +7,7 @@
 #   install  装到产品根下的哪个目录（相对路径，用 / 分段）
 #   probe    判"在不在场"的那个路径（相对产品根；文件或目录存在即在位）
 #   source   下载源：links.yaml 的键，或 release:<资产名>（= links.yaml 的 release.base + 资产名，项目自托管便携包）
+#   strip    解包时剥掉归档里的前 N 段目录（缺省 0）
 #   size_mb  大致体积（提示与带宽预估）
 #   note     一句话
 #
@@ -20,15 +21,16 @@ deps:
     probe: .vm/qemu/bin/qemu-system-x86_64
     source: release:qemu-linux-x86_64.tar.zst
     size_mb: 130
-    note: Linux 虚拟机档的 QEMU（Arch 闭包解包后的整棵 .vm/qemu，含固件与依赖库与包装脚本）
+    note: Linux 虚拟机档的 QEMU（Arch 闭包解包后的整棵 .vm/qemu，含固件与依赖库与包装脚本）——**待上传**（release 里的 qemu-11.1.2.tar.xz 是 GPL 对应源码，不是可运行包）
   - id: vm.virtiofsd.linux
     os: linux
     arch: x86_64
     install: .vm/virtiofsd
-    probe: .vm/virtiofsd/usr/lib/virtiofsd
-    source: release:virtiofsd-linux-x86_64.tar.zst
+    probe: .vm/virtiofsd/virtiofsd
+    source: release:virtiofsd-4bfa7125.zip
+    strip: 4
     size_mb: 3
-    note: Linux 默认共享档的外部守护进程（Rust 版 virtiofsd）
+    note: Linux 默认共享档的外部守护进程（Rust 版 virtiofsd，musl 静态；zip 里带 target/…/release 前缀，剥 4 段）
   - id: vm.qemu.windows
     os: windows
     arch: x86_64
@@ -36,7 +38,7 @@ deps:
     probe: .vm/qemu/mingw64/bin/qemu-system-x86_64.exe
     source: release:qemu-windows-x86_64.tar.zst
     size_mb: 250
-    note: Windows 虚拟机档的 QEMU（MSYS2 mingw64 闭包）
+    note: Windows 虚拟机档的 QEMU（MSYS2 mingw64 闭包）——**待上传**
   - id: build.winlibs.windows
     os: windows
     arch: x86_64

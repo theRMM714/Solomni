@@ -26,6 +26,9 @@ pub struct Dep {
     pub install: String,
     pub probe: String,
     pub source: String,
+    /// 目的：解包时剥掉归档里的前 N 段目录（便携包常带一层包装目录）；缺省 0。
+    #[serde(default)]
+    pub strip: usize,
     #[serde(default)]
     pub size_mb: u64,
     #[serde(default)]
