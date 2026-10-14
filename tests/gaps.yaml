@@ -76,10 +76,10 @@
     rootfs + 通用内核 + 9p initrd + qemu-guest-agent）都能按需装进项目内；**Windows 的 QEMU 便携包（Arch 交叉编译）也已自托管、
     可按需装进项目内**；winlibs 已移出运行期清单、改指上游钉死资产。
     剩下：Windows 的 guest 安装不是静态配方（下 qcow2 后要真起一台 guest，经 cloud-init 装 qemu-guest-agent、再用 QGA 装运行包），
-    仍只在 setup-vm-windows.js 里；setup-vm*.js 还在（两套实现）；自动发现只在**主程序启动**时做
+    这段运行期编排仍只在 setup-vm-windows.js 里（Rust 侧还没接；引擎也还不支持 cloud-init 种子）；setup-vm*.js 还在（两套实现）；自动发现只在**主程序启动**时做
     （同进程内新装的包要下次启动才生效）；三平台"可用 / 缺件 / 补齐后可用"的探针覆盖也还没有。
   how: |
-    1) Windows guest 的安装编排（qcow2 + guest.yaml + 首启经 cloud-init/QGA 装 agent 与运行包）搬进 Rust；
+    1) Windows guest：qcow2 + guest.yaml 已由 Rust 装好（kind guest-disk）；**首启经 cloud-init 装 qemu-guest-agent、再用 QGA 装运行包**这段运行期编排待定方案（见下）；
     2) setup-vm*.js 删除或薄壳化（不留两套实现）；
     3) 三平台探针覆盖"可用 / 缺件 / 补齐后可用"，macOS 保持检测 + 指路；
     4) 补齐后的自动发现做到**同进程即时生效**（进度已是 seq + 长轮询）。

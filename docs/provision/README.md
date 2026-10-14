@@ -13,7 +13,7 @@
 ## 二、入站契约与状态归属
 
 - 入站契约在 [`api.rs`](api.rs)：`Provision`（`status` / `job` / `start` / `cancel`）+ DTO（`DepStatus` / `JobState`）；`NoProvision` 是未接入的默认实现（如实失败，不假装可用）。
-- 安装方式（清单 `kind`）：`archive`（默认，解归档）/ `appimage`（自带 `--appimage-extract`，不依赖 FUSE）/ `file`（单文件直下，按 probe 的文件名落盘）/ `guest-rootfs`（Linux guest 基础根多步构造：cloud 镜像 → rootfs + 通用内核 + 9p initrd + qemu-guest-agent；调 `tar` / `sfdisk` / `dd` / `debugfs` / `ar` / `unshare`，只写项目内）。
+- 安装方式（清单 `kind`）：`archive`（默认，解归档）/ `appimage`（自带 `--appimage-extract`，不依赖 FUSE）/ `file`（单文件直下，按 probe 的文件名落盘）/ `guest-disk`（单文件 + `guest.yaml` 画像）/ `guest-rootfs`（Linux guest 基础根多步构造：cloud 镜像 → rootfs + 通用内核 + 9p initrd + qemu-guest-agent；调 `tar` / `sfdisk` / `dd` / `debugfs` / `ar` / `unshare`，只写项目内）。
 - 补齐后：主程序**启动时**自动采用项目内补齐的可执行文件（`qemu_path` / `virtiofsd_path` 未登记时；显式登记优先）；同进程内新装的包下次启动生效。
 - 进度：作业状态带单调 `seq`；`GET /api/setup/status?since=N&wait=1` 是长轮询（最多 20s），拿到新行即回，前端按 `seq` 增量取。
 - 状态归属：清单与台账的唯一真相在仓库根 `dependencies.yaml` / `links.yaml`，产品里**编译期内嵌**；作业状态是**进程内**的（不落盘，进程重启即清空）。

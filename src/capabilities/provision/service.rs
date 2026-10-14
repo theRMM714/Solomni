@@ -245,6 +245,8 @@ fn run(
                 .map_err(|e| format!("{}：{}", dep.id, e))?,
             "file" => install_file(&cached, &dest, &dep.probe)
                 .map_err(|e| format!("{}：{}", dep.id, e))?,
+            "guest-disk" => install_guest_disk(&cached, &dest, &dep.probe, on_line)
+                .map_err(|e| format!("{}：{}", dep.id, e))?,
             "guest-rootfs" => install_guest_rootfs(root, dep, &cached, &agent, on_line)
                 .map_err(|e| format!("{}：{}", dep.id, e))?,
             _ => crate::kernel::detail::unpack::extract_into(&cached, &dest, dep.strip)
@@ -361,6 +363,26 @@ fn install_appimage(
     }
     let _ = fs::remove_dir_all(dest.join("AppDir"));
     let _ = fs::remove_file(dest.join("squashfs-root"));
+    Ok(())
+}
+
+/// 目的：Windows 宿主的 guest 磁盘——qcow2 单文件落盘，并写一份 guest.yaml 画像（命令通道 QGA）。
+fn install_guest_disk(
+    cached: &Path,
+    dest: &Path,
+    probe: &str,
+    on_line: &mut dyn FnMut(&str),
+) -> Result<(), String> {
+    install_file(cached, dest, probe)?;
+    let yaml = dest.join("guest.yaml");
+    if !yaml.is_file() {
+        fs::write(
+            &yaml,
+            "# 由产品生成：这份镜像的命令通道是 QGA，共享客户端按镜像打包情况声明。\n\nid: debian-13-genericcloud-amd64\narch: amd64\nagent: qga\nclients: [9p, virtiofs]\n",
+        )
+        .map_err(|e| format!("写 guest.yaml 失败：{}", e))?;
+        on_line("写 guest.yaml（QGA 通道画像）");
+    }
     Ok(())
 }
 
@@ -833,6 +855,46 @@ mod tests {
             .join("base")
             .join("rootfs.qcow2")
             .is_file());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// 目的：Windows guest 磁盘——qcow2 落盘并写 guest.yaml 画像。
+    #[test]
+    fn guest_disk_install_writes_guest_yaml() {
+        let root = crate::tests::scratch("provision-disk");
+        let cache = root.join(".vm").join("cache");
+        fs::create_dir_all(&cache).expect("建缓存");
+        fs::write(cache.join("d.qcow2"), b"qcow2").expect("写缓存");
+        let dep = Dep {
+            id: "g".to_string(),
+            os: "windows".to_string(),
+            arch: "x86_64".to_string(),
+            kind: "guest-disk".to_string(),
+            install: ".vm/guest/base".to_string(),
+            probe: ".vm/guest/base/rootfs.qcow2".to_string(),
+            source: "release:d.qcow2".to_string(),
+            strip: 0,
+            size_mb: 0,
+            note: String::new(),
+        };
+        let mut links = BTreeMap::new();
+        links.insert(
+            "release.base".to_string(),
+            "https://example.invalid".to_string(),
+        );
+        run(
+            &root,
+            &[dep],
+            &links,
+            &[],
+            &AtomicBool::new(false),
+            &mut |_| {},
+        )
+        .expect("guest-disk 安装");
+        let base = root.join(".vm").join("guest").join("base");
+        assert!(base.join("rootfs.qcow2").is_file());
+        let y = fs::read_to_string(base.join("guest.yaml")).expect("guest.yaml");
+        assert!(y.contains("agent: qga"), "{}", y);
         let _ = fs::remove_dir_all(&root);
     }
 

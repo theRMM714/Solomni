@@ -55,9 +55,9 @@ deps:
   - id: vm.guest.windows
     os: windows
     arch: x86_64
-    kind: file
+    kind: guest-disk
     install: .vm/guest/base
     probe: .vm/guest/base/rootfs.qcow2
     source: guest.debian.qcow2
     size_mb: 330
-    note: Windows 宿主用的 Debian cloud qcow2（单文件直下）；首启装 qemu-guest-agent 仍要 setup-vm-windows.js（待搬进 Rust）
+    note: Windows 宿主用的 Debian cloud qcow2（单文件直下 + 写 guest.yaml 画像）；镜像里装 qemu-guest-agent / 运行包仍是运行期编排（待定方案）
