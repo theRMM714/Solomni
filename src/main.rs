@@ -226,14 +226,24 @@ fn main() {
         };
 
     // **虚拟机档能力**：运行包库来源、VM 引擎与共享后端三个出站端口只由它的 service 持有（R12）。
-    // 共享后端按平台的组合回退链选：目前在场的是 QEMU + 9p / copy（virtiofs / SMB 见 tests/gaps.yaml）。
+    // 共享后端按平台的组合回退链选：与就绪检测共用 share_available——virtiofsd 不在场时如实退到 9p / copy。
+    let virtiofsd = capabilities::registry::api::Registry::app(&registry)
+        .virtiofsd_path
+        .clone();
     let picked = capabilities::vm::domain::exec::choose_combo(
         capabilities::vm::domain::exec::default_combos(std::env::consts::OS),
         &|engine| engine == "qemu",
-        &|_engine, share| capabilities::vm::domain::exec::IMPLEMENTED_SHARES.contains(&share),
+        &|_engine, share| {
+            capabilities::vm::domain::exec::share_available(
+                share,
+                Some(virtiofsd.as_str()),
+                &kernel::detail::HostProbeAdapter,
+            )
+        },
     );
     let share: Arc<dyn capabilities::vm::ports::ShareBackend + Send + Sync> =
         match picked.map(|c| c.share) {
+            Some("virtiofs") => Arc::new(capabilities::vm::detail::VirtioFsShare::new()),
             Some("copy") => Arc::new(capabilities::vm::detail::CopyShare::new()),
             _ => Arc::new(capabilities::vm::detail::NinePShare::new()),
         };

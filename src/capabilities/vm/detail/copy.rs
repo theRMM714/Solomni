@@ -35,6 +35,7 @@ impl ShareBackend for CopyShare {
         &self,
         _engine: &str,
         mounts: &[GuestMount],
+        _share_tool: Option<&str>,
     ) -> Result<(SharePlan, Box<dyn ShareGuard>), String> {
         // 复制后端没有引擎参数；只需在 guest 里把挂载点建出来（内容由 sync_in 拷进去）。
         let guest_scripts = mounts
@@ -47,6 +48,7 @@ impl ShareBackend for CopyShare {
                 engine_args: Vec::new(),
                 guest_scripts,
                 needs_net: false,
+                needs_shared_mem: false,
             },
             Box::new(NoShareGuard),
         ))

@@ -9,9 +9,9 @@
   level: T4
   why: |
     虚拟机档的**五轴组合**（宿主 × VmEngine × GuestImage × GuestChannel × ShareBackend）已落地，执行分派已接线：
-    Linux（QEMU/KVM + 9p）与 Windows（QEMU/WHPX + QGA 复制）已真机验收（引擎级探针 + e2e 的 vm 会话场景都过）。
+    Linux（QEMU/KVM + virtiofs，缺 virtiofsd 时退 9p）与 Windows（QEMU/WHPX + QGA 复制）已真机验收（引擎级探针 + e2e 的 vm 会话场景都过）。
     macOS 的组合还没验，且它要的两块也还没做：Apple vz 引擎与自研 agent（vm.macos-vz-engine）、QEMU 取包
-    （vm.qemu-provisioning-macos）、virtiofsd（vm.share-virtiofs-linux）。未验平台在 vm::tier_readiness 上把 guest 项判否。
+    （vm.qemu-provisioning-macos）。未验平台在 vm::tier_readiness 上把 guest 项判否。
   how: |
     在 macOS 真机上按顺序补齐并验收：先用 QEMU/HVF + 9p 把备选链跑通（依赖取包），再上 Apple vz + 原生 virtiofs + 自研 agent（vsock）。
     依赖由 setup-vm.js 按平台装进项目内 .vm/，下载源进 links.yaml；产品不自带、不分发。
@@ -21,8 +21,8 @@
     就绪面板按组合逐项列出缺什么、每项怎么补；每平台探针覆盖"组合可用 / 不可用"两种结论。
     Linux 与 Windows 已验；macOS 通过后销账，全部通过后删除本条，并同步 PRODUCT.md / RUNTIME_SPEC.md / docs/vm/ 的当前状态。
   blocked_by: |
-    需要一台 macOS 机器（验收环境）。macOS 侧的取包、virtiofsd、vz 引擎与自研 agent 分别在
-    vm.qemu-provisioning-macos / vm.share-virtiofs-linux / vm.macos-vz-engine 三条缺口里。
+    需要一台 macOS 机器（验收环境）。macOS 侧的取包、vz 引擎与自研 agent 分别在
+    vm.qemu-provisioning-macos / vm.macos-vz-engine 两条缺口里。
 - id: vm.share-realtime-windows
   scope: global
   level: T4
@@ -36,21 +36,6 @@
     Windows 真机 vm 档会话里，guest 对共享目录的写入在宿主即时可见（不必等执行结束），且不需要管理员权限。
   blocked_by: |
     缺一个用户态 SMB3 实现；guest 侧（cifs-utils）与 guestfwd 隧道要一起验。
-- id: vm.share-virtiofs-linux
-  scope: global
-  level: T4
-  why: |
-    Linux 宿主当前用 9p；virtiofs 是 Linux 宿主上最快的实时共享，但需要 virtiofsd（用户态 vhost-user 守护进程，
-    每设备一个），产品目前不检测、不起停它。
-  how: |
-    在 ShareBackend 下加 VirtioFsShare：探测 virtiofsd、按挂载起停守护进程（ShareGuard 已能持外部资源），
-    QEMU 参数用 vhost-user-fs-pci，guest 端 mount -t virtiofs；作为 Linux 默认，9p 留作回退。
-    注意 virtiofsd 有两套不兼容的 CLI（C 版 -o source= / vhost_user_socket=，Rust 版 --shared-dir / --socket-path），
-    必须在 Linux 真机上钉定一套（或探测用法）再写——凭空写会得到跑不起来的代码。
-  accept: |
-    Linux 真机 vm 档会话走 virtiofs，工具在 guest 里读写共享目录；virtiofsd 随会话起停、删会话后不残留。
-  blocked_by: |
-    需要 Linux 真机钉定 virtiofsd 的 CLI 用法；setup-vm-linux.js 尚未替用户取 virtiofsd。
 - id: vm.qemu-provisioning-macos
   scope: global
   level: T4

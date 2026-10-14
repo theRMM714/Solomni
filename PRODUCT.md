@@ -234,6 +234,6 @@ $ start.bat                 # Windows（或 node start.js）；macOS/Linux 用 .
 **测试相关的未完成项不在本文维护**：唯一真相是 `tests/gaps.yaml`（全局）与 `tests/<平台>/gaps.yaml`（平台），
 入口与判定见 [TESTING.md](TESTING.md) 与 `docs/testing/`。产品侧仍待接入的能力：
 
-- **虚拟机档的多平台组合**（Linux 与 Windows 已真机验收；macOS 待取包与 virtiofsd；五轴可扩展；缺口清单与验收标准见 `tests/gaps.yaml`，契约见 [RUNTIME_SPEC.md](RUNTIME_SPEC.md)）；
+- **虚拟机档的多平台组合**（Linux 与 Windows 已真机验收；macOS 待取包与 vz 引擎；五轴可扩展；缺口清单与验收标准见 `tests/gaps.yaml`，契约见 [RUNTIME_SPEC.md](RUNTIME_SPEC.md)）；
 - 混合拓扑（部分能力合成一个 agent、其余各持一份并协商）、执行期并行调度的进一步放开；
 - 模块分发（打包 / 签名 / 市场）、供应商管理界面（密钥轮换 / 用量统计）。

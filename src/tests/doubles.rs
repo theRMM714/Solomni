@@ -1416,6 +1416,7 @@ impl crate::capabilities::vm::ports::ShareBackend for FakeShare {
         &self,
         _engine: &str,
         _mounts: &[crate::capabilities::vm::domain::guest::GuestMount],
+        _share_tool: Option<&str>,
     ) -> Result<
         (
             crate::capabilities::vm::ports::SharePlan,
@@ -1430,6 +1431,7 @@ impl crate::capabilities::vm::ports::ShareBackend for FakeShare {
                 engine_args: Vec::new(),
                 guest_scripts: Vec::new(),
                 needs_net: false,
+                needs_shared_mem: false,
             },
             Box::new(FakeGuard {
                 calls: self.calls.clone(),

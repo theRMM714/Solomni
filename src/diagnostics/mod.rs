@@ -30,6 +30,7 @@ pub fn doctor() -> i32 {
         crate::capabilities::vm::api::vm_requirements(&crate::capabilities::vm::api::VmInputs {
             base: None,
             qemu: None,
+            share_tool: None,
             probe: &crate::kernel::detail::HostProbeAdapter,
         });
     let doc = serde_json::json!({

@@ -30,6 +30,7 @@ impl ShareBackend for NinePShare {
         &self,
         _engine: &str,
         mounts: &[GuestMount],
+        _share_tool: Option<&str>,
     ) -> Result<(SharePlan, Box<dyn ShareGuard>), String> {
         let mut engine_args: Vec<String> = Vec::new();
         let mut guest_scripts: Vec<String> = Vec::new();
@@ -58,6 +59,7 @@ impl ShareBackend for NinePShare {
                 engine_args,
                 guest_scripts,
                 needs_net: false,
+                needs_shared_mem: false,
             },
             Box::new(NoShareGuard),
         ))

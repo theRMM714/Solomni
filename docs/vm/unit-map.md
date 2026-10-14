@@ -17,3 +17,4 @@
 | `src/capabilities/vm/detail/qemu.rs` | `VmEngine` / `GuestChannel` 的 QEMU 实现：拉起 qemu-system-*，经 QGA 执行与销毁（含文件搬运） |
 | `src/capabilities/vm/detail/copy.rs` | `ShareBackend` 的 QGA 复制实现：建目录脚本与宿主侧 tar 打包/解包（实时共享见 gaps） |
 | `src/capabilities/vm/detail/share_ninep.rs` | `ShareBackend` 的 9p 实现：-fsdev / -device 参数与 guest 端 mount 脚本 |
+| `src/capabilities/vm/detail/share_virtiofs.rs` | `ShareBackend` 的 virtiofs 实现：起停 virtiofsd（vhost-user 守护进程，按进程组清理）、-chardev / vhost-user-fs-pci 参数与 guest 端 mount 脚本 |

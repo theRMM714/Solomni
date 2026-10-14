@@ -1,7 +1,7 @@
 //! 目的：vm 能力的出站端口。
 //! 管：PackageSource（扫描 runtimes/ 包清单）、VmEngine / GuestVm / GuestChannel（起 / 跑 / 销毁 guest）与 ShareBackend（宿主↔guest 共享）。
 //! 不管：清单校验与冲突预检（domain/packages.rs）、镜像判定与挂载清单（domain/guest.rs）、引擎参数（detail/）。
-//! 联动：由 service.rs 持有（R12）；实现是 detail/fs_packages.rs、detail/qemu.rs 与 detail/share_ninep.rs。
+//! 联动：由 service.rs 持有（R12）；实现是 detail/fs_packages.rs、detail/qemu.rs 与 detail/share_*.rs。
 
 use crate::capabilities::vm::domain::guest::{GuestImage, GuestMount, GuestRun, GuestSpec};
 use crate::capabilities::vm::domain::packages::Library;
@@ -28,6 +28,8 @@ pub struct SharePlan {
     pub guest_scripts: Vec<String>,
     /// 目的：本后端是否需要 guest 有网卡（guestfwd / SMB 这类隧道要）；9p / virtiofs 不需要。
     pub needs_net: bool,
+    /// 目的：本后端的设备要不要 QEMU 的**共享内存**后端（vhost-user 这类要）；9p / copy 不需要。
+    pub needs_shared_mem: bool,
 }
 
 /// 目的：一次共享装配的凭据——后端可能要在 guest 存活期间持有外部资源（如 virtiofsd 进程），
@@ -50,10 +52,12 @@ pub trait ShareBackend: Send + Sync {
     /// 目的：本后端能不能把共享落到这台引擎 / 这份 guest 上（纯事实）。
     fn supports(&self, engine: &str, guest: &GuestImage) -> bool;
     /// 目的：装配共享——产出计划与（可能的）外部资源凭据。
+    /// 参数：share_tool = 设置里登记的、本后端要用的外部可执行文件路径（None = 兜底看 PATH；不需要外部工具的档忽略它）。
     fn prepare(
         &self,
         engine: &str,
         mounts: &[GuestMount],
+        share_tool: Option<&str>,
     ) -> Result<(SharePlan, Box<dyn ShareGuard>), String>;
     /// 目的：guest 起来后、每次执行前的同步（copy 这类后端在这里拷进去）；默认无操作。
     fn sync_in(

@@ -45,14 +45,33 @@ impl QemuEngine {
     }
 }
 
-/// 目的：除共享之外的一次启动参数（不含可执行文件本身）——机器、加速器、内核、串口与 QGA 通道。
-/// 参数：channel_opts 是 QGA chardev 的补充选项；share_needs_net = 共享后端要不要 guest 有（受限）网卡。
+/// 目的：guest 内存大小（MiB）——`-m` 与共享内存后端（vhost-user 要）必须同一尺寸，所以只写一处。
+pub const GUEST_MEM_MB: u32 = 2048;
+
+/// 目的：除共享之外的一次启动参数（不含可执行文件本身）——机器、加速器、内存、内核、串口与 QGA 通道。
+/// 参数：channel_opts 是 QGA chardev 的补充选项；share_needs_net = 共享后端要不要 guest 有（受限）网卡；
+///   share_needs_mem = 共享后端要不要 guest RAM 是**可共享内存**（vhost-user 设备，如 virtiofs）。
 /// 约束：rootfs 经 virtio-9p 的 base 标签挂成根——当前的根仍是目录；磁盘镜像见 docs/vm/README.md 的「多平台组合」。
-pub fn engine_args(spec: &GuestSpec, channel_opts: &str, share_needs_net: bool) -> Vec<String> {
+pub fn engine_args(
+    spec: &GuestSpec,
+    channel_opts: &str,
+    share_needs_net: bool,
+    share_needs_mem: bool,
+) -> Vec<String> {
     let mut a: Vec<String> = Vec::new();
+    a.push("-m".to_string());
+    a.push(GUEST_MEM_MB.to_string());
+    // vhost-user 设备（virtiofs）要求 guest RAM 是可共享内存：给一个同尺寸的 memfd 后端，挂到唯一 numa 节点。
+    if share_needs_mem {
+        a.push("-object".to_string());
+        a.push(format!(
+            "memory-backend-memfd,id=solomni-mem,size={}M,share=on",
+            GUEST_MEM_MB
+        ));
+        a.push("-numa".to_string());
+        a.push("node,memdev=solomni-mem".to_string());
+    }
     for v in [
-        "-m",
-        "2048",
         "-smp",
         "2",
         "-machine",
@@ -150,7 +169,7 @@ impl VmEngine for QemuEngine {
             .filter(|p| !p.is_empty())
             .map(str::to_string)
             .unwrap_or_else(|| qemu_exe(spec.image.arch).to_string());
-        let mut args = engine_args(spec, &opts, share.needs_net);
+        let mut args = engine_args(spec, &opts, share.needs_net, share.needs_shared_mem);
         args.extend(share.engine_args.iter().cloned());
         let child = Command::new(&exe)
             .args(&args)

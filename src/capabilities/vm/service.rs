@@ -64,7 +64,9 @@ impl Vm for VmService {
                 self.engine.id()
             ));
         }
-        let (plan, guard) = self.share.prepare(self.engine.id(), &spec.mounts)?;
+        let (plan, guard) =
+            self.share
+                .prepare(self.engine.id(), &spec.mounts, spec.share_path.as_deref())?;
         let mut guests = self
             .guests
             .lock()

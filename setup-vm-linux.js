@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * 虚拟机档本地环境安装（**Linux**）：把 QEMU 与 guest 基础根装到项目内 .vm/（不改系统、不装系统包）。
- * 管：QEMU（Arch 走 pacman -Sp 取依赖闭包）、Debian 13 基础根（cloud 镜像 → rootfs 目录 + 通用内核 + 9p initrd + qemu-guest-agent）、QEMU 包装脚本。
+ * 管：QEMU（Arch 走 pacman -Sp 取依赖闭包）、virtiofsd（Linux 默认共享档的外部守护进程）、Debian 13 基础根（cloud 镜像 → rootfs 目录 + 通用内核 + 9p initrd + qemu-guest-agent）、QEMU 包装脚本。
  * 不管：产品对 VM 档的检测 / 装配（在 src/capabilities/vm/）；Windows / macOS 的环境在 setup-vm-windows.js / setup-vm-mac.js。
  * 用法：node setup-vm-linux.js [--check] [--yes] [--offline]
  * 约束：只写项目内 .vm/；下载前要用户同意（--yes 或交互确认）；不碰系统包管理器、不写系统目录。
@@ -17,6 +17,7 @@ const env = require("./env.js");
 const ROOT = __dirname;
 const VM = path.join(ROOT, ".vm");
 const QEMU = path.join(VM, "qemu");
+const VIRTIOFSD = path.join(VM, "virtiofsd");
 const GUEST = path.join(VM, "guest");
 const BASE = path.join(GUEST, "base");
 const CACHE = path.join(VM, "cache");
@@ -124,6 +125,38 @@ function ensureQemu() {
   fs.chmodSync(qemuWrapperPath(), 0o755);
   if (!capture(qemuWrapperPath(), ["-version"]).ok) die("QEMU 装好了但起不来：" + qemuWrapperPath());
   log("QEMU 就绪：" + path.relative(ROOT, qemuWrapperPath()));
+}
+
+// ---- virtiofsd（Linux 默认共享档的外部守护进程；缺了自动退 9p）----
+function virtiofsdBin() { return path.join(VIRTIOFSD, "usr", "lib", "virtiofsd"); }
+function virtiofsdReady() { return lexists(virtiofsdBin()); }
+function ensureVirtiofsd() {
+  if (virtiofsdReady()) { log("virtiofsd 已在项目内：" + path.relative(ROOT, virtiofsdBin())); return true; }
+  const urls = capture("pacman", ["-Sp", "virtiofsd"]);
+  if (!urls.ok || !urls.text.includes("https://")) {
+    bad("没找到 virtiofsd 的包源：Linux 仍可用 9p 共享；要 virtiofs 请自行把它放进 PATH 并在设置里登记 virtiofsd_path。");
+    return false;
+  }
+  const list = urls.text.split(/\r?\n/).map((s) => s.trim()).filter((s) => s.startsWith("https://"));
+  fs.mkdirSync(PKGS, { recursive: true });
+  for (const u of list) {
+    const dest = path.join(PKGS, path.basename(new URL(u).pathname));
+    if (!curlDownload(u, dest)) { bad("下载失败：" + u); return false; }
+  }
+  fs.mkdirSync(VIRTIOFSD, { recursive: true });
+  for (const f of fs.readdirSync(PKGS)) {
+    if (!f.startsWith("virtiofsd-") || !f.endsWith(".pkg.tar.zst")) continue;
+    if (!run("sh", ["-c", "zstd -dc " + q(path.join(PKGS, f)) + " | tar -xf - -C " + q(VIRTIOFSD) + " --no-same-owner"])) {
+      bad("virtiofsd 解包失败：" + f);
+      return false;
+    }
+  }
+  if (!capture(virtiofsdBin(), ["--version"]).ok) {
+    bad("virtiofsd 装好了但起不来：" + path.relative(ROOT, virtiofsdBin()));
+    return false;
+  }
+  log("virtiofsd 就绪：" + path.relative(ROOT, virtiofsdBin()));
+  return true;
 }
 
 // ---- guest 基础根 ----
@@ -246,23 +279,26 @@ function ensureBase() {
 
 (async () => {
   if (CHECK) {
-    const qk = qemuReady(), bk = baseReady();
+    const qk = qemuReady(), vk = virtiofsdReady(), bk = baseReady();
     log("QEMU：" + (qk ? "就绪（" + path.relative(ROOT, qemuWrapperPath()) + "）" : "缺（跑 node setup-vm-linux.js 装到项目内）"));
+    log("virtiofsd：" + (vk ? "就绪（" + path.relative(ROOT, virtiofsdBin()) + "）" : "缺（跑 node setup-vm-linux.js 装到项目内；缺了自动退 9p）"));
     log("guest 基础根：" + (bk ? "就绪（" + path.relative(ROOT, BASE) + "）" : "缺（跑 node setup-vm-linux.js 装到项目内）"));
     if (!qk || !bk) process.exit(1);
     return;
   }
-  const needDownload = !qemuReady() || !baseReady();
+  const needDownload = !qemuReady() || !virtiofsdReady() || !baseReady();
   if (needDownload && !YES) {
     if (!process.stdin.isTTY) die("无交互终端：不擅自下载。重跑加 --yes，或先手动准备。");
-    const a = await ask("要把 QEMU 与 Debian guest 基础根下载到项目内 .vm/（约 400 MB，只写项目内）吗？[y/N] ");
+    const a = await ask("要把 QEMU、virtiofsd 与 Debian guest 基础根下载到项目内 .vm/（约 400 MB，只写项目内）吗？[y/N] ");
     if (a.trim().toLowerCase() !== "y") die("已取消。");
   }
   fs.mkdirSync(VM, { recursive: true });
   ensureQemu();
+  const vfOk = ensureVirtiofsd();
   ensureBase();
   log("全部就绪。登记方式：");
   log("  · 设置 qemu_path → " + path.relative(ROOT, qemuWrapperPath()));
+  log("  · 设置 virtiofsd_path → " + (vfOk ? path.relative(ROOT, virtiofsdBin()) : "（缺；Linux 会用 9p 共享）"));
   log("  · 会话 exec.base → " + path.relative(ROOT, BASE));
 
 })();

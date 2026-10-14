@@ -196,6 +196,8 @@ pub struct VmRequirement {
 pub struct VmInputs<'a> {
     pub base: Option<&'a str>,
     pub qemu: Option<&'a str>,
+    /// 目的：设置里登记的**共享后端外部工具**路径（如 virtiofsd；None = 兜底看 PATH）。
+    pub share_tool: Option<&'a str>,
     /// 目的：本机事实探测（读环境、查路径存在性都在它后面，见 ports::HostProbe）。
     pub probe: &'a dyn HostProbe,
 }
@@ -208,6 +210,7 @@ const QEMU_BIN: &str = "qemu-system-x86_64";
 /// 约束：base 与会话选型有关，qemu 登记在设置里（见 providers::AppSettings）。
 pub fn vm_requirements(vm: &VmInputs<'_>) -> Vec<VmRequirement> {
     let hyper = vm.probe.hypervisor_available();
+    let combo = effective_combo_label(vm.share_tool, vm.probe);
     vec![
         VmRequirement {
             id: "hypervisor",
@@ -229,14 +232,11 @@ pub fn vm_requirements(vm: &VmInputs<'_>) -> Vec<VmRequirement> {
             id: "guest",
             met: guest_backend_verified(),
             detail: if guest_backend_verified() {
-                format!(
-                    "guest 后端已就位，本平台默认组合 {} 已通过真机验收",
-                    default_combo_label()
-                )
+                format!("guest 后端已就位，本平台默认组合 {} 已通过真机验收", combo)
             } else {
                 format!(
                     "guest 后端已就位，但本平台默认组合 {} 尚未真机验收（就绪项判否）",
-                    default_combo_label()
+                    combo
                 )
             },
             how: if guest_backend_verified() {
@@ -244,10 +244,12 @@ pub fn vm_requirements(vm: &VmInputs<'_>) -> Vec<VmRequirement> {
             } else {
                 format!(
                     "在该平台真机上跑通一次 vm 档工具（默认组合 {}）后再放开（现状与验收见 tests/gaps.yaml）",
-                    default_combo_label()
+                    combo
                 )
             },
         },
+        // 共享档：只作事实呈现（**不参与 ready**）——缺 virtiofsd 时组合自动回退 9p，虚拟机档仍可用。
+        share_requirement(vm.share_tool, vm.probe, &combo),
         // QEMU：用户自备。没登记就看 PATH——检测的是"起得来 guest 的那件东西在不在"。
         qemu_requirement(vm.qemu, vm.probe),
         // 基础根：用户自备（发行版基底 + 内核所在目录）。本机档为空 = 不适用。
@@ -363,15 +365,81 @@ fn guest_backend_verified() -> bool {
 }
 
 /// 目的：已经实现的共享后端（组合选择与就绪说明**共用同一份**，避免"说要验 A、实际跑 B"）。
-pub const IMPLEMENTED_SHARES: &[&str] = &["9p", "copy"];
+pub const IMPLEMENTED_SHARES: &[&str] = &["9p", "copy", "virtiofs"];
 
-/// 目的：本平台**已实现**组合的可读标签（"引擎/共享"），用于就绪说明里说清"验的是哪一套"。
-fn default_combo_label() -> String {
+/// 目的：共享档 virtiofs 要用的外部守护进程名（探测 PATH 与设置登记都用它；只支持 Rust 版 CLI）。
+pub const VIRTIOFSD_BIN: &str = "virtiofsd";
+
+/// 目的：某个共享档要用的外部工具名（None = 不需要外部工具）。
+pub fn share_tool_of(share: &str) -> Option<&'static str> {
+    match share {
+        "virtiofs" => Some(VIRTIOFSD_BIN),
+        _ => None,
+    }
+}
+
+/// 目的：一个外部工具在不在场——登记路径优先（登记了就必须是那个文件），否则看 PATH。
+fn tool_available(name: &str, registered: Option<&str>, probe: &dyn HostProbe) -> bool {
+    match registered.map(str::trim) {
+        Some(p) if !p.is_empty() => probe.is_file(Path::new(p)),
+        _ => probe.has_exe(name),
+    }
+}
+
+/// 目的：某个共享档在不在场：先要是已实现的档，再要它要的外部工具在场（不需要工具的档恒在场）。
+/// 约束：组合选择（组合根）与就绪说明共用这一份，避免"说要验 A、实际跑 B"。
+pub fn share_available(share: &str, share_tool: Option<&str>, probe: &dyn HostProbe) -> bool {
+    if !IMPLEMENTED_SHARES.contains(&share) {
+        return false;
+    }
+    match share_tool_of(share) {
+        None => true,
+        Some(name) => tool_available(name, share_tool, probe),
+    }
+}
+
+/// 目的：本平台**实际会选**的已实现组合标签（"引擎/共享"）：引擎 qemu 在、共享档在场，按回退链取第一个。
+fn effective_combo_label(share_tool: Option<&str>, probe: &dyn HostProbe) -> String {
     default_combos(std::env::consts::OS)
         .iter()
-        .find(|c| c.engine == "qemu" && IMPLEMENTED_SHARES.contains(&c.share))
+        .find(|c| c.engine == "qemu" && share_available(c.share, share_tool, probe))
         .map(|c| format!("{}/{}", c.engine, c.share))
         .unwrap_or_else(|| "未定".to_string())
+}
+
+/// 目的：共享档的现状——本平台实现链里性能最高的那一档在不在场、不在就回退到下一档。
+/// 约束：**恒 met、不参与承载判定**——缺 virtiofsd 时组合自动回退 9p，虚拟机档照样可用；
+///   所以"怎么补"写在 detail 里（met 恒真，how 按约定留空），不把性能档的缺失误报成档位不可用。
+fn share_requirement(
+    share_tool: Option<&str>,
+    probe: &dyn HostProbe,
+    effective_combo: &str,
+) -> VmRequirement {
+    let top = default_combos(std::env::consts::OS)
+        .iter()
+        .find(|c| c.engine == "qemu" && IMPLEMENTED_SHARES.contains(&c.share));
+    let detail = match top {
+        None => "本平台还没有已实现的共享档".to_string(),
+        Some(c) => match share_tool_of(c.share) {
+            None => format!("共享档 {}（不需要外部工具）", c.share),
+            Some(name) => {
+                if share_available(c.share, share_tool, probe) {
+                    format!("共享档 {} 可用（找到 {}）", c.share, name)
+                } else {
+                    format!(
+                        "共享档 {} 不在场（没找到 {}）：已按组合回退到 {}；把 {} 放进 PATH，或在设置里登记它的完整路径即可启用",
+                        c.share, name, effective_combo, name
+                    )
+                }
+            }
+        },
+    };
+    VmRequirement {
+        id: "share",
+        met: true,
+        detail,
+        how: String::new(),
+    }
 }
 
 /// 虚拟机监视器不可用时的解决指引（各平台说各自的办法）。
@@ -459,7 +527,12 @@ fn base_requirement(base: Option<&str>, probe: &dyn HostProbe) -> VmRequirement 
 /// 约束：虚拟机档的前置条件不具备时，虚拟机档**不允许创建或改入**——这是用户环境问题，不是选型问题；
 /// 约束：界面的"能不能点"与「开始」的校验走同一个函数，两处不会各说各话。
 /// 约束：判据**只有一份**：就是 vm_requirements 那份清单，逐项都满足才算承载得了。
-pub fn tier_readiness(spec: &ExecSpec, qemu: Option<&str>, probe: &dyn HostProbe) -> TierReadiness {
+pub fn tier_readiness(
+    spec: &ExecSpec,
+    qemu: Option<&str>,
+    share_tool: Option<&str>,
+    probe: &dyn HostProbe,
+) -> TierReadiness {
     if spec.tier != Tier::Vm {
         return TierReadiness {
             requirements: Vec::new(),
@@ -469,14 +542,20 @@ pub fn tier_readiness(spec: &ExecSpec, qemu: Option<&str>, probe: &dyn HostProbe
         requirements: vm_requirements(&VmInputs {
             base: spec.base.as_deref(),
             qemu,
+            share_tool,
             probe,
         }),
     }
 }
 
 /// 目的：虚拟机档的可读拒绝理由（创建与编辑共用同一把尺子）。
-pub fn tier_refusal(spec: &ExecSpec, qemu: Option<&str>, probe: &dyn HostProbe) -> Option<String> {
-    let readiness = tier_readiness(spec, qemu, probe);
+pub fn tier_refusal(
+    spec: &ExecSpec,
+    qemu: Option<&str>,
+    share_tool: Option<&str>,
+    probe: &dyn HostProbe,
+) -> Option<String> {
+    let readiness = tier_readiness(spec, qemu, share_tool, probe);
     if readiness.ready() {
         return None;
     }

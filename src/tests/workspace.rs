@@ -110,7 +110,14 @@ pub(crate) fn vm_tier_is_refused_when_the_machine_cannot_carry_it() {
     let mut vm_spec = work("vm-default", WorkMode::Single, &["a"]);
     vm_spec.tier = Tier::Vm;
     let opened = core.create_work(vm_spec);
-    if exec::tier_readiness(&default_vm, None, &crate::kernel::detail::HostProbeAdapter).ready() {
+    if exec::tier_readiness(
+        &default_vm,
+        None,
+        None,
+        &crate::kernel::detail::HostProbeAdapter,
+    )
+    .ready()
+    {
         opened.expect("本机能承载虚拟机档时不该拒绝");
     } else {
         let err = opened.expect_err("本机承载不了虚拟机档就不许建");

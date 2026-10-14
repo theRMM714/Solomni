@@ -124,7 +124,7 @@ Fixture 必须：
 | `PackageSource` | `InMemoryPackages` | 不适用 | 不适用（错误进 `rejected`） | 不适用 | `FsPackages` | 已验收；**持有者只有 `vm::service.rs`**（R12） |
 | `VmEngine`（vm） | `FakeEngine` | `calls`（start / stop） | 不适用（起不来是真实后端的错） | 不适用 | `QemuEngine`（真机验：`vm_live_guest_runs_command_inside_guest` 在 KVM / WHPX 下真起 guest、按平台同步或挂载额外共享、验宿主路径不可达；e2e 的 `SOLOMNI_VM_BASE` 场景在 vm 档会话里真跑模块工具并验删会话销毁 guest（Windows 的会话级验收已通过）；环境由 `setup-vm.js`（按平台分发）装入 `.vm/`，默认 `[探针]` 跳过） | 契约测试与执行分派已验收；真机探针与产品级会话验收都已跑通（Linux KVM / Windows WHPX） |
 | `GuestChannel`（vm） | `FakeChannel`（经 `FakeEngine`） | `calls`（run） | 不适用 | 不适用 | `QemuHandle`（QGA 通道，随 `QemuEngine.boot` 起） | 契约测试已验收 |
-| `ShareBackend`（vm） | `FakeShare` | 计划可观察（恒空） | 不适用 | 不适用 | `NinePShare`（`src/tests/vm.rs` 钉住 -fsdev / -device 与 guest 端 mount 脚本；真机验同 vm 探针） | 契约测试已验收 |
+| `ShareBackend`（vm） | `FakeShare` | 计划可观察（恒空） | 不适用 | 不适用 | `NinePShare` / `VirtioFsShare` / `CopyShare`（`src/tests/vm.rs` 钉住各自的引擎参数与 guest 端命令；virtiofsd 的起停与清理用假守护进程验；真机验同 vm 探针） | 契约测试已验收；Linux 真机（virtiofs）与 Windows（QGA 复制）都已跑通 |
 | `Workdirs` | `InMemoryWorkspace` | 内存布局可观察 | `fail_with` | 不适用 | `FsWorkspace` | 已验收 |
 | `WorkStore` | `InMemoryWorkStore` | 内存文件 / 提交 / 基线可观察 | `fail_with` | 不适用 | `FsWorkStore`（含符号链接逃逸拒绝） | 已验收；**持有者只有 `workspace::service.rs`**（R12） |
 | `ModuleSource` / `ModuleStateStore` 的持有者 | ——（**只由 `modules::service.rs` 持有**；别的能力经 `modules::api::ModulesOps` 要清单与启停有效值） |

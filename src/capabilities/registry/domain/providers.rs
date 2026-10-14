@@ -62,6 +62,10 @@ pub struct AppSettings {
     /// 产品不自带、不下载 QEMU，只检测与指路。
     #[serde(default)]
     pub qemu_path: String,
+    /// 目的：虚拟机档**共享后端**要用的外部工具路径（如 Linux 上的 virtiofsd；默认空 = 兜底看 PATH）。
+    /// 约束：产品不自带、不下载，只检测与指路；不需要外部工具的共享档（9p / 复制）忽略它。
+    #[serde(default)]
+    pub virtiofsd_path: String,
     /// **单次模型调用的总预算（秒）**，全局通用（讨论、执行、验收、单 agent 都用它）。
     /// 默认给得比较宽：非流式下供应商要等整段生成完才发响应头，长回复本来就要几十秒；
     /// 预算用尽 = 中断这一轮并如实告知（用户可以点「继续」重试），不是把会话作废。
@@ -106,6 +110,7 @@ impl Default for AppSettings {
             fence_write: false,
             fence_read: Vec::new(),
             qemu_path: String::new(),
+            virtiofsd_path: String::new(),
             llm_timeout_secs: crate::kernel::api::DEFAULT_LLM_TIMEOUT_SECS,
             compact_at_percent: 70,
             discuss_remind_cap: 3,

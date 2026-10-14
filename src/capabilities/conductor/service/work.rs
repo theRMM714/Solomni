@@ -25,6 +25,7 @@ impl Conductor {
         let readiness = crate::capabilities::vm::api::tier_readiness(
             &spec,
             self.qemu_path(),
+            self.virtiofsd_path(),
             self.probe.as_ref(),
         );
         RuntimeReport {
@@ -53,6 +54,7 @@ impl Conductor {
         let inputs = crate::capabilities::vm::api::VmInputs {
             base: vm_probe.base.as_deref(),
             qemu: self.qemu_path(),
+            share_tool: self.virtiofsd_path(),
             probe: self.probe.as_ref(),
         };
         TierChoices {
@@ -60,12 +62,14 @@ impl Conductor {
             vm_available: crate::capabilities::vm::api::tier_readiness(
                 &vm_probe,
                 self.qemu_path(),
+                self.virtiofsd_path(),
                 self.probe.as_ref(),
             )
             .ready(),
             vm_unavailable_reason: crate::capabilities::vm::api::tier_refusal(
                 &vm_probe,
                 self.qemu_path(),
+                self.virtiofsd_path(),
                 self.probe.as_ref(),
             )
             .unwrap_or_default(),
@@ -171,12 +175,14 @@ impl Conductor {
             tier_ready: crate::capabilities::vm::api::tier_readiness(
                 &meta.exec,
                 self.qemu_path(),
+                self.virtiofsd_path(),
                 self.probe.as_ref(),
             )
             .ready(),
             tier_missing: crate::capabilities::vm::api::tier_readiness(
                 &meta.exec,
                 self.qemu_path(),
+                self.virtiofsd_path(),
                 self.probe.as_ref(),
             )
             .missing()
@@ -188,12 +194,14 @@ impl Conductor {
             vm_available: crate::capabilities::vm::api::tier_readiness(
                 &vm_probe,
                 self.qemu_path(),
+                self.virtiofsd_path(),
                 self.probe.as_ref(),
             )
             .ready(),
             vm_unavailable_reason: crate::capabilities::vm::api::tier_refusal(
                 &vm_probe,
                 self.qemu_path(),
+                self.virtiofsd_path(),
                 self.probe.as_ref(),
             )
             .unwrap_or_default(),
@@ -201,6 +209,7 @@ impl Conductor {
                 &crate::capabilities::vm::api::VmInputs {
                     base: vm_probe.base.as_deref(),
                     qemu: self.qemu_path(),
+                    share_tool: self.virtiofsd_path(),
                     probe: self.probe.as_ref(),
                 },
             ),
@@ -318,6 +327,7 @@ impl Conductor {
             let base_item = crate::capabilities::vm::api::tier_readiness(
                 &spec,
                 self.qemu_path(),
+                self.virtiofsd_path(),
                 self.probe.as_ref(),
             )
             .requirements
@@ -328,9 +338,12 @@ impl Conductor {
                     return Err(format!("{}：{}", item.detail, item.how));
                 }
             }
-        } else if let Some(why) =
-            crate::capabilities::vm::api::tier_refusal(&spec, self.qemu_path(), self.probe.as_ref())
-        {
+        } else if let Some(why) = crate::capabilities::vm::api::tier_refusal(
+            &spec,
+            self.qemu_path(),
+            self.virtiofsd_path(),
+            self.probe.as_ref(),
+        ) {
             return Err(why);
         }
         let session_modules: Vec<Module> = roster
@@ -435,6 +448,7 @@ impl Conductor {
             mounts,
             net: meta.exec.net,
             engine_path: self.qemu_path().map(str::to_string),
+            share_path: self.virtiofsd_path().map(str::to_string),
         };
         self.vm.guest_start(&spec)
     }
@@ -484,6 +498,16 @@ impl Conductor {
     /// 设置里登记的 QEMU 可执行文件路径（默认空 = 兜底看 PATH）。产品不自带、不下载 QEMU。
     pub(crate) fn qemu_path(&self) -> Option<&str> {
         let p = self.registry.app().qemu_path.trim();
+        if p.is_empty() {
+            None
+        } else {
+            Some(p)
+        }
+    }
+
+    /// 目的：设置里登记的共享后端外部工具路径（如 virtiofsd；默认空 = 兜底看 PATH）。产品不自带、不下载。
+    pub(crate) fn virtiofsd_path(&self) -> Option<&str> {
+        let p = self.registry.app().virtiofsd_path.trim();
         if p.is_empty() {
             None
         } else {
@@ -545,6 +569,7 @@ impl Conductor {
                 let readiness = crate::capabilities::vm::api::tier_readiness(
                     &exec,
                     self.qemu_path(),
+                    self.virtiofsd_path(),
                     self.probe.as_ref(),
                 );
                 // 「改需求」能力位：有本次需求行才给。在表里看会话种类；不在表里（生成中/未打开）
@@ -730,6 +755,7 @@ impl Conductor {
         if let Some(why) = crate::capabilities::vm::api::tier_refusal(
             &meta.exec,
             self.qemu_path(),
+            self.virtiofsd_path(),
             self.probe.as_ref(),
         ) {
             return Err(why);
