@@ -37,10 +37,11 @@ deps:
     os: windows
     arch: x86_64
     install: .vm/qemu
-    probe: .vm/qemu/mingw64/bin/qemu-system-x86_64.exe
-    source: release:qemu-windows-x86_64.tar.zst
-    size_mb: 250
-    note: Windows 虚拟机档的 QEMU（MSYS2 mingw64 闭包）——**待上传**
+    probe: .vm/qemu/bin/qemu-system-x86_64.exe
+    source: release:qemu-windows-x86_64-11.1.1.tar.zst
+    strip: 1
+    size_mb: 32
+    note: Windows 虚拟机档的 QEMU（Arch 上 MinGW-w64 交叉编译的便携包；DLL 与固件都在包内，引擎按便携布局指 -L）
 
   - id: vm.guest.linux
     os: linux

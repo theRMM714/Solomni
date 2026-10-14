@@ -73,20 +73,20 @@
   why: |
     用户路径要"一个二进制开箱即用"。补齐能力的清单 / 状态 / 下载 / 解包（含 AppImage）与 CLI、Web 面已经落到 Rust
     （capabilities/provision）；Linux 的 QEMU 可运行包（AppImage）、virtiofsd 与 **guest 基础根的多步构造**（cloud 镜像 →
-    rootfs + 通用内核 + 9p initrd + qemu-guest-agent）都能按需装进项目内；winlibs 已移出运行期清单、改指上游钉死资产。
-    剩下：Windows 的 guest 安装不是静态配方（要真起一台 guest，经 cloud-init 装 qemu-guest-agent、再用 QGA 装运行包），
-    仍只在 setup-vm-windows.js 里，且要 Windows 上能跑 QEMU；setup-vm*.js 还在（两套实现）；自动发现只在**主程序启动**时做
-    （同进程内新装的包要下次启动才生效）；三平台"可用 / 缺件 / 补齐后可用"的探针覆盖也还没有；Windows 的可运行 QEMU 包仍缺。
+    rootfs + 通用内核 + 9p initrd + qemu-guest-agent）都能按需装进项目内；**Windows 的 QEMU 便携包（Arch 交叉编译）也已自托管、
+    可按需装进项目内**；winlibs 已移出运行期清单、改指上游钉死资产。
+    剩下：Windows 的 guest 安装不是静态配方（下 qcow2 后要真起一台 guest，经 cloud-init 装 qemu-guest-agent、再用 QGA 装运行包），
+    仍只在 setup-vm-windows.js 里；setup-vm*.js 还在（两套实现）；自动发现只在**主程序启动**时做
+    （同进程内新装的包要下次启动才生效）；三平台"可用 / 缺件 / 补齐后可用"的探针覆盖也还没有。
   how: |
-    1) Windows guest 的安装编排搬进 Rust（等 Windows 可运行 QEMU 包到位）；
+    1) Windows guest 的安装编排（qcow2 + guest.yaml + 首启经 cloud-init/QGA 装 agent 与运行包）搬进 Rust；
     2) setup-vm*.js 删除或薄壳化（不留两套实现）；
     3) 三平台探针覆盖"可用 / 缺件 / 补齐后可用"，macOS 保持检测 + 指路；
     4) 补齐后的自动发现做到**同进程即时生效**（进度已是 seq + 长轮询）。
   accept: |
     在一台没有 Node、也没有仓库脚本的机器上，二进制能查状态、经用户确认后把 VM 依赖下载解包进项目内，
     完成后能力检查变绿；全程不调用 node、不写项目外、下载源全部来自内嵌清单。三平台探针覆盖"可用 / 缺件 / 补齐后可用"。
-  blocked_by: |
-    Windows 的可运行 QEMU 包需要一台 Windows/MSYS2 机器产出并自托管；其余为实现缺口。
+  blocked_by: 缺少实现
 - id: module.acp-adapter
   scope: global
   level: T3
