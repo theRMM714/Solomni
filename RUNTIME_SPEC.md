@@ -88,7 +88,7 @@ files:                      # 包内文件指纹：用于可复现与呈现
 （逐文件职责见 [docs/vm/README.md](docs/vm/README.md)）；就绪项 `guest` 按**已验平台数据表**（`VERIFIED_HOSTS`）放开，并带上本平台**已实现**的组合。
 
 前置检测是**一份逐项清单**（`vm::vm_requirements`，界面与 `--doctor` 照抄同一份）：虚拟机监视器、guest 本体、共享档、QEMU（引擎）、基础根，
-每项给出"现状 + 怎么补"（共享档缺 `virtiofsd` 只作事实呈现、不拦档：自动退 9p）。依赖（QEMU / `virtiofsd` / 镜像）**用户自备**，由 `setup-vm.js`（按平台分发到 `setup-vm-windows.js` / `setup-vm-linux.js` / `setup-vm-mac.js`，共享件 `setup-vm-common.js`）装进项目内 `.vm/`（下载源在 `links.yaml`，需用户同意）；产品只检测与指路，`qemu_path` / `virtiofsd_path` 可登记。
+每项给出"现状 + 怎么补"（共享档缺 `virtiofsd` 只作事实呈现、不拦档：自动退 9p）。依赖（QEMU / `virtiofsd` / 镜像）**不预置、不分发**，由 `setup-vm.js`（按平台分发到 `setup-vm-windows.js` / `setup-vm-linux.js` / `setup-vm-mac.js`，共享件 `setup-vm-common.js`）按平台下载并解包进项目内 `.vm/`（下载源在 `links.yaml`，需用户同意）；产品检测、指路并给出补齐入口，`qemu_path` / `virtiofsd_path` 可登记。
 基础根 = 一个目录：发行版 rootfs（目录，或 `rootfs.ext4` / `*.qcow2` 磁盘镜像）+ `vmlinuz`（可选 `initrd.img`）；**目录根必须给内核**（直启），**磁盘镜像可自带引导**（不给内核也行）；目录里可放一份 `guest.yaml` 声明画像（id / arch / agent / os / clients），缺省按目录名与 Debian 默认（os 缺省 linux），不认识的值如实拒收。
 
 **已真机验收**：Linux（QEMU/KVM + virtiofs，默认共享档；缺 `virtiofsd` 时退 9p）与 Windows（QEMU/WHPX + QGA 复制）——引擎级探针（`vm_live_guest_runs_command_inside_guest`）

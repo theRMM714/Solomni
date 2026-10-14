@@ -250,9 +250,9 @@ pub fn vm_requirements(vm: &VmInputs<'_>) -> Vec<VmRequirement> {
         },
         // 共享档：只作事实呈现（**不参与 ready**）——缺 virtiofsd 时组合自动回退 9p，虚拟机档仍可用。
         share_requirement(vm.share_tool, vm.probe, &combo),
-        // QEMU：用户自备。没登记就看 PATH——检测的是"起得来 guest 的那件东西在不在"。
+        // QEMU：不预置、不分发（可由 setup 脚本装进项目内）。没登记就看 PATH——检测那件东西在不在。
         qemu_requirement(vm.qemu, vm.probe),
-        // 基础根：用户自备（发行版基底 + 内核所在目录）。本机档为空 = 不适用。
+        // 基础根：不预置、不分发（发行版基底 + 内核所在目录）。本机档为空 = 不适用。
         base_requirement(vm.base, vm.probe),
     ]
 }
@@ -455,7 +455,7 @@ fn hypervisor_how() -> &'static str {
     }
 }
 
-/// QEMU 检测：登记了就用登记的路径，没登记就看 PATH（产品不自带 QEMU，也不下载）。
+/// QEMU 检测：登记了就用登记的路径，没登记就看 PATH（依赖不预置、不分发，可由 setup 脚本装进项目内）。
 fn qemu_requirement(registered: Option<&str>, probe: &dyn HostProbe) -> VmRequirement {
     let (found, where_from) = match registered.map(str::trim) {
         Some(p) if !p.is_empty() => (probe.is_file(Path::new(p)), "设置里登记的路径"),
@@ -472,13 +472,13 @@ fn qemu_requirement(registered: Option<&str>, probe: &dyn HostProbe) -> VmRequir
         how: if found {
             String::new()
         } else {
-            "自行安装 QEMU 并放进 PATH，或在设置里登记它的完整路径（本产品不自带、不下载 QEMU）"
+            "自行安装 QEMU 并放进 PATH，或在设置里登记它的完整路径；也可跑 node setup-vm.js 把它下载进项目内（需用户同意）"
                 .to_string()
         },
     }
 }
 
-/// 目的：基础根检测——用户自备的 guest 基础（rootfs 目录 + vmlinuz/bzImage）在不在、布局对不对。
+/// 目的：基础根检测——不预置的 guest 基础（rootfs 目录 + vmlinuz/bzImage）在不在、布局对不对。
 fn base_requirement(base: Option<&str>, probe: &dyn HostProbe) -> VmRequirement {
     let checked = base.map(str::trim).filter(|p| !p.is_empty()).map(|p| {
         (
@@ -517,7 +517,7 @@ fn base_requirement(base: Option<&str>, probe: &dyn HostProbe) -> VmRequirement 
         how: if met {
             String::new()
         } else {
-            "自备一份 guest 基础根：一个目录，里面是发行版 rootfs（目录，或 rootfs.ext4 / *.qcow2 磁盘镜像）与 vmlinuz（可选 initrd.img），把目录填进会话的 base（本产品不预置、不下载镜像）"
+            "自备一份 guest 基础根：一个目录，里面是发行版 rootfs（目录，或 rootfs.ext4 / *.qcow2 磁盘镜像）与 vmlinuz（可选 initrd.img），把目录填进会话的 base（可跑 node setup-vm.js 把 Debian 基础根下载进项目内；需用户同意）"
                 .to_string()
         },
     }

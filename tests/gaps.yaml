@@ -14,7 +14,7 @@
     （vm.qemu-provisioning-macos）。未验平台在 vm::tier_readiness 上把 guest 项判否。
   how: |
     在 macOS 真机上按顺序补齐并验收：先用 QEMU/HVF + 9p 把备选链跑通（依赖取包），再上 Apple vz + 原生 virtiofs + 自研 agent（vsock）。
-    依赖由 setup-vm.js 按平台装进项目内 .vm/，下载源进 links.yaml；产品不自带、不分发。
+    依赖不预置、不分发；由 setup-vm.js 按平台下载并解包进项目内 .vm/（下载源在 links.yaml，需用户同意）。
     契约与组合矩阵见 docs/vm/README.md 的「多平台组合」。
   accept: |
     每个组合单独判定：vm 档会话里模块工具真在 guest 内跑（进程与宿主隔离）、删会话即销毁 guest 与其磁盘；
@@ -23,6 +23,24 @@
   blocked_by: |
     需要一台 macOS 机器（验收环境）。macOS 侧的取包、vz 引擎与自研 agent 分别在
     vm.qemu-provisioning-macos / vm.macos-vz-engine 两条缺口里。
+- id: vm.ui-tier-switch-blocked
+  scope: global
+  level: T3
+  why: |
+    Web 上无法把一条本机档会话切到虚拟机档。vm_available（"能不能选"）用了与"这条会话选型是否完整"同一把尺子，
+    把会话级的 base 也算进去：新会话 base 为空 → vm_available=false → 界面禁用虚拟机档；而 base 输入框只在选中
+    虚拟机档后才显示，于是互相卡死。新建向导更直接：它没有 base 输入，base 项必然判否，虚拟机档单选永远禁用。
+    后端 API 是通的（e2e 走 edit_session 才验得过）。
+  how: |
+    1) 把"机器能力"（hypervisor / guest 后端 / 引擎 / 共享）与"会话选型"（base 等）拆开：vm_available 只用前者，
+       保存 /「开始」再用含 base 的严格判据并如实拒绝；
+    2) base 输入在虚拟机档可选时可见（或常显）；新建向导要么加 base 字段并允许直接建 VM（WorkSpec 加 base），
+       要么明确引导"先建本机档、再到会话配置切档"（前提是配置面不再死锁）；
+    3) 路由与契约同步 docs/presentation/contracts.md 与 routes 测试。
+  accept: |
+    机器能力齐、base 为空的会话，会话配置里虚拟机档可选、能填 base 并保存成功；缺 base 时保存被如实拒绝并说清填哪；
+    新建向导给出可执行路径（当场填 base 或明确指引）；用例钉住"机器能力齐但 base 空"这一态。
+  blocked_by: 缺少实现
 - id: vm.share-realtime-windows
   scope: global
   level: T4
@@ -41,13 +59,17 @@
   level: T4
   why: |
     Windows 已由 setup-vm-windows.js 取 MSYS2 的 mingw64 QEMU 闭包装进项目内 .vm/qemu/（不跑安装程序、不写注册表）；
-    macOS 仍是骨架（setup-vm-mac.js 只探测与指路），QEMU 要用户自行安装，产品只检测与指路。
+    macOS 仍是骨架（setup-vm-mac.js 只探测与指路），QEMU 要用户自行安装。已定方向：macOS 本期保持"检测 + 指路 + 手动"，
+    不在本期做自动补齐；统一的自动补齐见 setup.pure-rust-provisioning。
   how: |
-    macOS 按平台加取包（Homebrew 或官方包）解到 .vm/qemu/；下载源记进 links.yaml；只写项目内、下载要用户同意（--yes）。
+    本期只做检测与指路：缺什么、怎么装，如实列出，不假装可自动装。
+    将来若做自动补齐：按平台取包（Homebrew 或官方包）解到 .vm/qemu/，只写项目内、下载要用户同意，来源进 links.yaml；
+    具体来源需要一台 macOS 真机确定。macOS 的 QEMU 是 .app / 框架形态，打包与落地方式要和 Linux / Windows 分开设计。
   accept: |
-    macOS 上 node setup-vm.js 能把 QEMU 装进项目内 .vm/ 并被就绪检测认出来，且不需要管理员权限。
+    本期：macOS 上就绪检测如实报"QEMU 不在场 + 怎么补"，不把"未实现自动补齐"写成能力。
+    将来：macOS 上能把 QEMU 装进项目内 .vm/ 并被就绪检测认出来，且不需要管理员权限。
   blocked_by: |
-    需要一台 macOS 机器确定可用来源后写适配。
+    本期不做（macOS 保持检测 + 指路）；自动补齐并入 setup.pure-rust-provisioning，且需要一台 macOS 机器确定来源。
 - id: vm.macos-vz-engine
   scope: global
   level: T4
@@ -62,6 +84,26 @@
     macOS 真机 vm 档会话跑通（模块工具在 guest 内执行、删会话销毁 guest），e2e 的 vm 场景在该平台通过。
   blocked_by: |
     需要一台 macOS 机器才能钉定 API 与验收。
+- id: setup.pure-rust-provisioning
+  scope: global
+  level: T4
+  why: |
+    用户路径要"一个二进制开箱即用"，但依赖补齐整块还压在 Node 脚本上（setup-vm*.js），且下载源 links.yaml
+    只被 Node 读、src 里零引用；Linux 取包还只覆盖 Arch（pacman）。开发用 Node 没问题，用户二进制必须纯 Rust、
+    不依赖 Node 与仓库脚本。
+  how: |
+    1) 入口层加"依赖补齐"机制：端口 Provisioner（status / ensure(targets, confirm)）+ Rust 适配器 + 独立作业线程；
+       CLI 加隐藏模式 --provision；Web 加 /api/setup/status、/api/setup/ensure、/api/setup/job（进度走 /api/events）；
+    2) 下载源与依赖清单内嵌进二进制（links.yaml 走 include_str!，Rust 真读）；下载与解包全 Rust
+       （ureq + tar / ruzstd / flate2，补 .tar.xz；.deb 用 ar 解析或改走便携包），只写项目内；
+    3) 来源分两级（渠道统一、来源可上游）：上游稳定可直取的指上游（guest 镜像 / Rust 工具链 / virtiofsd）；
+       上游不稳定的自托管原样产物（winlibs 已有；必要时 QEMU 闭包），并维护 dependencies/THIRD-PARTY-NOTICES.md
+       （许可证 + 对应源码 URL / GPL 书面 offer）；guest 镜像不自托管；
+    4) setup-vm*.js 逻辑进 Rust 后薄壳化或删除（避免两套实现）；macOS 保持检测 + 指路。
+  accept: |
+    在一台没有 Node、也没有仓库脚本的机器上，二进制能查状态、经用户确认后把 VM 依赖下载解包进项目内，
+    完成后能力检查变绿；全程不调用 node、不写项目外、下载源全部来自内嵌清单。三平台探针覆盖"可用 / 缺件 / 补齐后可用"。
+  blocked_by: 缺少实现
 - id: module.acp-adapter
   scope: global
   level: T3

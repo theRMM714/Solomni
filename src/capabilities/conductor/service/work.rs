@@ -495,7 +495,7 @@ impl Conductor {
         }
     }
 
-    /// 设置里登记的 QEMU 可执行文件路径（默认空 = 兜底看 PATH）。产品不自带、不下载 QEMU。
+    /// 设置里登记的 QEMU 可执行文件路径（默认空 = 兜底看 PATH，或由 setup 脚本装进项目内）。
     pub(crate) fn qemu_path(&self) -> Option<&str> {
         let p = self.registry.app().qemu_path.trim();
         if p.is_empty() {
@@ -505,7 +505,7 @@ impl Conductor {
         }
     }
 
-    /// 目的：设置里登记的共享后端外部工具路径（如 virtiofsd；默认空 = 兜底看 PATH）。产品不自带、不下载。
+    /// 目的：设置里登记的共享后端外部工具路径（如 virtiofsd；默认空 = 兜底看 PATH，或由 setup 脚本装进项目内）。
     pub(crate) fn virtiofsd_path(&self) -> Option<&str> {
         let p = self.registry.app().virtiofsd_path.trim();
         if p.is_empty() {

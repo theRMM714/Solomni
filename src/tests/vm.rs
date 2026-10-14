@@ -213,7 +213,7 @@ pub(crate) fn vm_tier_readiness_gates_creation_and_editing() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// 目的：QEMU 检测——登记了就用登记的路径，没登记就看 PATH；产品不自带、不下载。
+/// 目的：QEMU 检测——登记了就用登记的路径，没登记就看 PATH；依赖不预置、不分发。
 #[test]
 pub(crate) fn vm_requirements_report_qemu_registration() {
     let base = crate::tests::scratch("vm-req-qemu");

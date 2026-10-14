@@ -58,12 +58,12 @@ pub struct AppSettings {
     /// 授权落在用户自己的目录上；本程序只加只读 ACE，不给写权限。
     #[serde(default)]
     pub fence_read: Vec<String>,
-    /// 虚拟机档用的 QEMU 可执行文件路径（用户自备；默认空 = 兜底看 PATH）。
-    /// 产品不自带、不下载 QEMU，只检测与指路。
+    /// 虚拟机档用的 QEMU 可执行文件路径（默认空 = 兜底看 PATH，或由 setup 脚本装进项目内）。
+    /// 依赖不预置、不分发；setup 脚本按平台下载进项目内，产品检测与指路。
     #[serde(default)]
     pub qemu_path: String,
     /// 目的：虚拟机档**共享后端**要用的外部工具路径（如 Linux 上的 virtiofsd；默认空 = 兜底看 PATH）。
-    /// 约束：产品不自带、不下载，只检测与指路；不需要外部工具的共享档（9p / 复制）忽略它。
+    /// 约束：依赖不预置、不分发，setup 脚本按平台下载进项目内；不需要外部工具的共享档（9p / 复制）忽略它。
     #[serde(default)]
     pub virtiofsd_path: String,
     /// **单次模型调用的总预算（秒）**，全局通用（讨论、执行、验收、单 agent 都用它）。

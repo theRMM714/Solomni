@@ -100,8 +100,8 @@ show_reasoning: true   # 思维链显示（默认 true；界面上永远默认�
 tier: host             # 默认执行档位：host（本机）| vm（虚拟机）（默认 host）
 fence_write: false     # 是否允许围栏在本机写权限（默认 false：不动本机任何权限项）
 fence_read: []         # 用户显式授权的只读根（默认空：一个都不放行）
-qemu_path: ""          # 虚拟机档用的 QEMU 可执行文件路径（用户自备；默认空 = 兜底看 PATH）
-virtiofsd_path: ""     # 虚拟机档共享后端要用的外部工具路径（如 virtiofsd；默认空 = 兜底看 PATH）
+qemu_path: ""          # 虚拟机档用的 QEMU 可执行文件路径（默认空 = 兜底看 PATH，或由 setup 脚本装进项目内）
+virtiofsd_path: ""     # 虚拟机档共享后端要用的外部工具路径（如 virtiofsd；默认空 = 兜底看 PATH，或由 setup 脚本装进项目内）
 llm_timeout_secs: 300  # 单次模型调用的总预算（秒），全局通用（讨论/执行/验收/单 agent）
 compact_at_percent: 70 # 上下文用到模型窗口的百分之多少就自动压一次（0 = 关）
 discuss_remind_cap: 3  # 讨论里一轮内对同一个成员最多提醒几次（提醒 = "你还没用动词表态"）
