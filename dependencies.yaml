@@ -1,0 +1,55 @@
+# 依赖清单：**不预置、不分发**的大体积依赖的唯一真相（产品 Rust 侧编译期内嵌；脚本可直接读同一份）。
+#
+# 字段：
+#   id       稳定短名（报告与缺口引用）
+#   os       linux / windows / macos / any（按宿主平台筛）
+#   arch     x86_64 / aarch64 / any
+#   install  装到产品根下的哪个目录（相对路径，用 / 分段）
+#   probe    判"在不在场"的那个路径（相对产品根；文件或目录存在即在位）
+#   source   下载源：links.yaml 的键，或 release:<资产名>（= links.yaml 的 release.base + 资产名，项目自托管便携包）
+#   size_mb  大致体积（提示与带宽预估）
+#   note     一句话
+#
+# 规则：这里只收"不预置、不分发、按需下载"的依赖；guest 镜像按已定方向**不自托管**（指上游 cdimage）。
+# 自托管的便携包一律保持**原样**，并登记进 dependencies/THIRD-PARTY-NOTICES.md（许可证 + 对应源码）。
+deps:
+  - id: vm.qemu.linux
+    os: linux
+    arch: x86_64
+    install: .vm/qemu
+    probe: .vm/qemu/bin/qemu-system-x86_64
+    source: release:qemu-linux-x86_64.tar.zst
+    size_mb: 130
+    note: Linux 虚拟机档的 QEMU（Arch 闭包解包后的整棵 .vm/qemu，含固件与依赖库与包装脚本）
+  - id: vm.virtiofsd.linux
+    os: linux
+    arch: x86_64
+    install: .vm/virtiofsd
+    probe: .vm/virtiofsd/usr/lib/virtiofsd
+    source: release:virtiofsd-linux-x86_64.tar.zst
+    size_mb: 3
+    note: Linux 默认共享档的外部守护进程（Rust 版 virtiofsd）
+  - id: vm.qemu.windows
+    os: windows
+    arch: x86_64
+    install: .vm/qemu
+    probe: .vm/qemu/mingw64/bin/qemu-system-x86_64.exe
+    source: release:qemu-windows-x86_64.tar.zst
+    size_mb: 250
+    note: Windows 虚拟机档的 QEMU（MSYS2 mingw64 闭包）
+  - id: build.winlibs.windows
+    os: windows
+    arch: x86_64
+    install: .tools
+    probe: .tools/mingw64/bin/dlltool.exe
+    source: release:winlibs.zip
+    size_mb: 261
+    note: Windows 上构建 C++ 模块用的 MinGW-w64（已自托管）
+  - id: vm.guest.rootfs
+    os: any
+    arch: x86_64
+    install: .vm/guest/base
+    probe: .vm/guest/base/vmlinuz
+    source: guest.debian.image
+    size_mb: 230
+    note: Debian 基础根（上游 cdimage；按已定方向不自托管）

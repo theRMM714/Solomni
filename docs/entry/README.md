@@ -6,13 +6,13 @@
 
 ## 一、管什么 / 不管什么
 
-**管**：入口层共用机制（产品根规范化）+ 组合根（`main.rs`：`new` 出所有适配器并注入）+ 机器可读探针（`diagnostics/`）+ 围栏守门进程（`guard/`，**第二个程序入口**）。
+**管**：入口层共用机制（产品根规范化 + 依赖补齐的清单/状态，`provision`）+ 组合根（`main.rs`：`new` 出所有适配器并注入）+ 机器可读探针（`diagnostics/`）+ 围栏守门进程（`guard/`，**第二个程序入口**）。
 
 **不管**：除装配与探针外无业务；**任何能力都不许依赖它**（门禁判定）。
 
 ## 二、入站契约与状态归属
 
-探针命令行（`--doctor` / `--https-check` / `--print-routes` / `--print-fence-env` / `--fence-verify`，多数**恒退出 0**——判定归调用方）；围栏收尾与按条处置（`--fence-clean` 整体收尾，`--fence-reconcile` 按归属对账回收陈旧授权（启动期也自动跑一次），`--fence-ledger` 列清单 / `--fence-restore` 还原一条 / `--fence-revoke` 撤一条 / `--fence-profile-rm` 删一个 profile，都是隐藏模式、用户经文档知道）；守门进程协议（`--fence-run`，内部协议，模块作者不接触）。
+探针命令行（`--doctor` / `--provision` / `--https-check` / `--print-routes` / `--print-fence-env` / `--fence-verify`，多数**恒退出 0**——判定归调用方；`--provision` 报依赖清单里的"缺什么、装到哪、从哪来"，下载源来自编译期内嵌的 `dependencies.yaml` + `links.yaml`）；围栏收尾与按条处置（`--fence-clean` 整体收尾，`--fence-reconcile` 按归属对账回收陈旧授权（启动期也自动跑一次），`--fence-ledger` 列清单 / `--fence-restore` 还原一条 / `--fence-revoke` 撤一条 / `--fence-profile-rm` 删一个 profile，都是隐藏模式、用户经文档知道）；守门进程协议（`--fence-run`，内部协议，模块作者不接触）。
 
 ## 三、依赖图位置（由源码的 `::api` 引用推导）
 

@@ -52,6 +52,41 @@ pub fn doctor() -> i32 {
     0
 }
 
+/// 目的：隐藏模式——依赖补齐的**状态**（机器可读）：缺什么、装到哪、从哪来；只报事实，判定归调用方。
+pub fn provision(root: &std::path::Path) -> i32 {
+    match crate::entry::provision::status(
+        root,
+        std::env::consts::OS,
+        std::env::consts::ARCH,
+        &crate::kernel::detail::HostProbeAdapter,
+    ) {
+        Ok(items) => {
+            let missing = items.iter().filter(|s| !s.present).count();
+            let doc = serde_json::json!({
+                "platform": std::env::consts::OS,
+                "arch": std::env::consts::ARCH,
+                "missing": missing,
+                "deps": items.iter().map(|s| serde_json::json!({
+                    "id": s.dep.id,
+                    "present": s.present,
+                    "note": s.dep.note,
+                    "install": s.dep.install,
+                    "probe": s.path.to_string_lossy(),
+                    "source": s.dep.source,
+                    "url": s.url,
+                    "size_mb": s.dep.size_mb,
+                })).collect::<Vec<_>>(),
+            });
+            println!("{}", doc);
+            0
+        }
+        Err(e) => {
+            eprintln!("[依赖检查] {}", e);
+            1
+        }
+    }
+}
+
 /// 隐藏模式：用**产品自己的出站代理**（含按平台装配的 TLS）打一次最小 HTTPS 请求，如实报结论。
 /// 四态机器可读：ok（通）/ no-net（环境连不上外网）/ env-tls（本进程取不到系统 TLS 凭证，如沙箱挡住凭证存储）/
 /// tls-fail|fail（我们链路坏了）。

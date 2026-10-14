@@ -9,7 +9,7 @@ mod cli;
 mod collab;
 mod conductor;
 mod detail;
-mod doubles;
+pub(crate) mod doubles;
 mod fakes;
 mod fence_reach;
 mod llm;
