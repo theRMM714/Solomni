@@ -68,7 +68,7 @@ Windows 装 MSYS2 的 QEMU 闭包、下 Debian cloud qcow2、首启经 cloud-ini
 - **路径桥**（`domain/paths.rs`）：宿主路径 ↔ guest 路径只有一座桥——宿主与 guest 同方言时**恒等**（宿主路径原样在 guest 里成立），跨方言时编进镜像根（宿主 `D:\a\b` → POSIX guest `/solomni-host/d/a/b`；POSIX 宿主 → Windows guest `C:\solomni-host\…`，非法字符转义）。挂载点与命令装配（`cwd` / 路径型 `env`）都走它。
 - **工作环境提示词按环境分发**（`prompts/shared/tools.yaml` 的 `env_hosts` / `env_guests` / `envs`）：本机档按宿主平台给，虚拟机档按 guest 的 os 给——虚拟机档给出的路径就是 guest 内路径，模型据此拼参数。
 - 用户自备 guest 可在基础根目录放一份 `guest.yaml` 声明画像（`id` / `arch` / `agent` / `os` / `clients: [9p, virtiofs, cifs]`）；缺省按目录名与 Debian 默认（linux + QGA + 9p + virtiofs），不认识的值如实拒收。
-- 依赖（QEMU / `virtiofsd` / 镜像）**不预置、不分发**，由 `setup-vm.js` 按平台下载并解包进项目内 `.vm/`（下载源一律进 `links.yaml`，需用户同意）；`qemu_path` / `virtiofsd_path` 可在设置里登记，`setup-vm-linux.js` 会给出登记的路径。
+- 依赖（QEMU / `virtiofsd` / 镜像）**不预置、不分发**，由 `provision` 能力按清单下载并解包进项目内 `.vm/`（清单 `dependencies.yaml`、下载源 `links.yaml`，需用户同意）：CLI `solomni --provision`，Web `/api/setup/status|ensure|job`。设置里没登记 `qemu_path` / `virtiofsd_path` 时，**启动即自动采用**项目内补齐的可执行文件（显式登记优先）。
 
 ## 本目录
 

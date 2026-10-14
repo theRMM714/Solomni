@@ -145,7 +145,7 @@ fn main() {
             Arc::new(capabilities::llm::detail::UnambiguousRepair),
         ));
     // **登记处能力**：四份 yaml 的状态与用例都在它里面（conductor 只按 `Registry` 用它，看不见字段）。
-    let registry = match capabilities::registry::service::RegistryService::new(
+    let mut registry = match capabilities::registry::service::RegistryService::new(
         Arc::new(store),
         Arc::clone(&llm),
         Arc::clone(&log),
@@ -156,6 +156,19 @@ fn main() {
             std::process::exit(1);
         }
     };
+    // 依赖补齐后的**自动发现**：设置里没登记时，把装到项目内的可运行包直接当登记值（显式登记优先）。
+    // 只填内存、不写用户的 settings.yaml；同进程内新装的包要下次启动才生效（Web 的 setup 作业即属此列）。
+    let installed = capabilities::provision::api::Provision::status(
+        &capabilities::provision::ProvisionService::new(&root),
+    )
+    .unwrap_or_default();
+    let picked = |prefix: &str| {
+        installed
+            .iter()
+            .find(|d| d.present && d.id.starts_with(prefix))
+            .map(|d| d.probe.clone())
+    };
+    registry.apply_discovered(picked("vm.qemu."), picked("vm.virtiofsd."));
     let prompt_source =
         capabilities::prompt::detail::yaml_prompts::YamlPrompts::new(root.join("prompts"));
     // **提示词册能力**：册子只在这里装载一次、也只被它持有；conductor 与工具执行
