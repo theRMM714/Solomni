@@ -7,6 +7,7 @@
 #   install  装到产品根下的哪个目录（相对路径，用 / 分段）
 #   probe    判"在不在场"的那个路径（相对产品根；文件或目录存在即在位）
 #   source   下载源：links.yaml 的键，或 release:<资产名>（= links.yaml 的 release.base + 资产名，项目自托管便携包）
+#   kind     安装方式：archive（默认，解归档）/ appimage / file（单文件直下）/ guest-rootfs（多步构造）
 #   strip    解包时剥掉归档里的前 N 段目录（缺省 0）
 #   size_mb  大致体积（提示与带宽预估）
 #   note     一句话
@@ -17,6 +18,7 @@ deps:
   - id: vm.qemu.linux
     os: linux
     arch: x86_64
+    kind: appimage
     install: .vm/qemu
     probe: .vm/qemu/bin/qemu-system-x86_64
     source: release:QEMU-11.1.1-4-anylinux-x86_64.AppImage
@@ -40,11 +42,21 @@ deps:
     size_mb: 250
     note: Windows 虚拟机档的 QEMU（MSYS2 mingw64 闭包）——**待上传**
 
-  - id: vm.guest.rootfs
-    os: any
+  - id: vm.guest.linux
+    os: linux
     arch: x86_64
+    kind: guest-rootfs
     install: .vm/guest/base
     probe: .vm/guest/base/vmlinuz
     source: guest.debian.image
-    size_mb: 230
-    note: Debian 基础根（上游 cdimage；按已定方向不自托管）
+    size_mb: 400
+    note: Debian 13 基础根（cloud 镜像 → rootfs 目录 + 通用内核 + 9p initrd + qemu-guest-agent）；需要 sfdisk / dd / debugfs / ar / unshare
+  - id: vm.guest.windows
+    os: windows
+    arch: x86_64
+    kind: file
+    install: .vm/guest/base
+    probe: .vm/guest/base/rootfs.qcow2
+    source: guest.debian.qcow2
+    size_mb: 330
+    note: Windows 宿主用的 Debian cloud qcow2（单文件直下）；首启装 qemu-guest-agent 仍要 setup-vm-windows.js（待搬进 Rust）

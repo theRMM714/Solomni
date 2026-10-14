@@ -21,7 +21,12 @@ struct DepsFile {
     deps: Vec<Dep>,
 }
 
-/// 目的：一条依赖——它是什么、装到哪、怎么判在场、从哪来。
+/// 目的：缺省安装方式——解归档。
+fn default_kind() -> String {
+    "archive".to_string()
+}
+
+/// 目的：一条依赖——它是什么、装到哪、怎么判在场、从哪来、怎么装。
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 pub struct Dep {
     pub id: String,
@@ -30,6 +35,9 @@ pub struct Dep {
     pub install: String,
     pub probe: String,
     pub source: String,
+    /// 目的：安装方式：archive（默认，解归档）/ appimage / file（单文件直下）/ guest-rootfs（多步构造）。
+    #[serde(default = "default_kind")]
+    pub kind: String,
     /// 目的：解包时剥掉归档里的前 N 段目录（便携包常带一层包装目录）；缺省 0。
     #[serde(default)]
     pub strip: usize,
@@ -232,15 +240,15 @@ fn run(
         }
         let dest = under(root, &dep.install);
         fs::create_dir_all(&dest).map_err(|e| format!("建安装目录 {} 失败：{}", dep.install, e))?;
-        let lower = cached
-            .file_name()
-            .map(|s| s.to_string_lossy().to_lowercase())
-            .unwrap_or_default();
-        if lower.ends_with(".appimage") {
-            install_appimage(&cached, &dest, on_line).map_err(|e| format!("{}：{}", dep.id, e))?;
-        } else {
-            crate::kernel::detail::unpack::extract_into(&cached, &dest, dep.strip)
-                .map_err(|e| format!("{}：解包失败：{}", dep.id, e))?;
+        match dep.kind.as_str() {
+            "appimage" => install_appimage(&cached, &dest, on_line)
+                .map_err(|e| format!("{}：{}", dep.id, e))?,
+            "file" => install_file(&cached, &dest, &dep.probe)
+                .map_err(|e| format!("{}：{}", dep.id, e))?,
+            "guest-rootfs" => install_guest_rootfs(root, dep, &cached, &agent, on_line)
+                .map_err(|e| format!("{}：{}", dep.id, e))?,
+            _ => crate::kernel::detail::unpack::extract_into(&cached, &dest, dep.strip)
+                .map_err(|e| format!("{}：解包失败：{}", dep.id, e))?,
         }
         let probe = under(root, &dep.probe);
         if !(probe.is_file() || probe.is_dir()) {
@@ -285,6 +293,16 @@ fn download(
     drop(f);
     fs::rename(&tmp, dest).map_err(|e| format!("改名 {} 失败：{}", dest.display(), e))?;
     on_line(&format!("下载完成：{} 字节", n));
+    Ok(())
+}
+
+/// 目的：单文件依赖——把缓存里的文件按 probe 的文件名放进安装目录（如 guest 的 qcow2）。
+fn install_file(cached: &Path, dest: &Path, probe: &str) -> Result<(), String> {
+    let name = Path::new(probe)
+        .file_name()
+        .ok_or_else(|| format!("probe 没有文件名：{}", probe))?;
+    let to = dest.join(name);
+    fs::copy(cached, &to).map_err(|e| format!("复制到 {} 失败：{}", to.display(), e))?;
     Ok(())
 }
 
@@ -346,9 +364,469 @@ fn install_appimage(
     Ok(())
 }
 
+/// 目的：建软链（只 Unix 有；Windows 上如实报不支持）。
+#[cfg(unix)]
+fn symlink(target: &str, link: &Path) -> std::io::Result<()> {
+    std::os::unix::fs::symlink(target, link)
+}
+
+#[cfg(not(unix))]
+fn symlink(_target: &str, _link: &Path) -> std::io::Result<()> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "本平台不支持软链",
+    ))
+}
+
+/// 目的：跑一个外部工具并判成功；失败给一句人话。
+fn run_tool(cmd: &mut std::process::Command, name: &str) -> Result<(), String> {
+    let st = cmd
+        .status()
+        .map_err(|e| format!("跑不了 {}（缺这个系统工具？）：{}", name, e))?;
+    if !st.success() {
+        return Err(format!("{} 失败", name));
+    }
+    Ok(())
+}
+
+/// 目的：从 GPT 里取 Linux root 分区（type GUID 优先，退第一个）的 (start, size)，单位 512 字节扇区。
+fn root_partition(disk: &Path) -> Result<(u64, u64), String> {
+    let out = std::process::Command::new("sfdisk")
+        .arg("-J")
+        .arg(disk)
+        .output()
+        .map_err(|e| format!("跑不了 sfdisk（需要 util-linux）：{}", e))?;
+    if !out.status.success() {
+        return Err("sfdisk 读分区表失败".to_string());
+    }
+    let table: serde_json::Value =
+        serde_json::from_slice(&out.stdout).map_err(|e| format!("sfdisk 输出不是 JSON：{}", e))?;
+    let parts = table
+        .get("partitiontable")
+        .and_then(|t| t.get("partitions"))
+        .and_then(|p| p.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let root = parts
+        .iter()
+        .find(|p| {
+            p.get("type").and_then(|t| t.as_str()) == Some("4F68BCE3-E8CD-4DB1-96E7-FBCAF984B709")
+        })
+        .or_else(|| parts.first())
+        .ok_or_else(|| "cloud 镜像里没有分区".to_string())?;
+    let start = root
+        .get("start")
+        .and_then(|v| v.as_u64())
+        .ok_or_else(|| "分区缺 start".to_string())?;
+    let size = root
+        .get("size")
+        .and_then(|v| v.as_u64())
+        .ok_or_else(|| "分区缺 size".to_string())?;
+    Ok((start, size))
+}
+
+/// 目的：取一个目录页的纯文本（列 Debian 包名用）。
+fn get_text(agent: &ureq::Agent, url: &str) -> Result<String, String> {
+    let resp = agent
+        .get(url)
+        .call()
+        .map_err(|e| format!("取 {} 失败：{}", url, e))?;
+    if !resp.status().is_success() {
+        return Err(format!("取 {} 返回 {}", url, resp.status().as_u16()));
+    }
+    let mut body = resp.into_body();
+    body.read_to_string()
+        .map_err(|e| format!("读 {} 响应失败：{}", url, e))
+}
+
+/// 目的：把版本号里的数字段零填充，得到一个可字典序比较的键（数字感知排序）。
+fn version_key(s: &str) -> String {
+    let mut out = String::new();
+    let mut num = String::new();
+    for c in s.chars() {
+        if c.is_ascii_digit() {
+            num.push(c);
+        } else {
+            if !num.is_empty() {
+                out.push_str(&format!("{:0>12}", num));
+                num.clear();
+            }
+            out.push(c);
+        }
+    }
+    if !num.is_empty() {
+        out.push_str(&format!("{:0>12}", num));
+    }
+    out
+}
+
+/// 目的：从目录页里挑出候选 .deb 名（前缀 + 必须包含两段判据），按版本号取最新。
+fn pick_deb(text: &str, prefix: &str, must_contain: &str) -> Option<String> {
+    let mut names: Vec<String> = Vec::new();
+    for tok in text.split(|c: char| {
+        !(c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '_' | '.' | '~' | ':'))
+    }) {
+        if tok.starts_with(prefix)
+            && tok.ends_with(".deb")
+            && tok.contains(must_contain)
+            && !names.iter().any(|n| n == tok)
+        {
+            names.push(tok.to_string());
+        }
+    }
+    names.into_iter().max_by_key(|n| version_key(n))
+}
+
+/// 目的：把 .deb 的 data.tar.* 解进目标（先 ar 取成员，不跑 maintainer 脚本）。
+fn extract_deb(deb: &Path, dest: &Path, cache: &Path) -> Result<(), String> {
+    let tmp = cache.join("deb-x");
+    let _ = fs::remove_dir_all(&tmp);
+    fs::create_dir_all(&tmp).map_err(|e| format!("建 {} 失败：{}", tmp.display(), e))?;
+    let st = std::process::Command::new("ar")
+        .arg("x")
+        .arg(deb)
+        .current_dir(&tmp)
+        .status()
+        .map_err(|e| format!("跑不了 ar（需要 binutils）：{}", e))?;
+    if !st.success() {
+        return Err("ar 解 .deb 失败".to_string());
+    }
+    let data = fs::read_dir(&tmp)
+        .map_err(|e| format!("读 {} 失败：{}", tmp.display(), e))?
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .find(|p| {
+            p.file_name()
+                .map(|n| n.to_string_lossy().starts_with("data.tar"))
+                .unwrap_or(false)
+        })
+        .ok_or_else(|| ".deb 里没有 data.tar.*".to_string())?;
+    let r = crate::kernel::detail::unpack::extract(&data, dest);
+    let _ = fs::remove_dir_all(&tmp);
+    r
+}
+
+/// 目的：基础根里已装内核的 ABI（boot/vmlinuz-* 的后缀）。
+fn guest_abi(base: &Path) -> Option<String> {
+    let boot = base.join("boot");
+    let mut found: Option<String> = None;
+    for e in fs::read_dir(&boot).ok()?.filter_map(|e| e.ok()) {
+        let n = e.file_name().to_string_lossy().into_owned();
+        if let Some(rest) = n.strip_prefix("vmlinuz-") {
+            found = Some(rest.to_string());
+        }
+    }
+    found
+}
+
+/// 目的：装入 Debian 通用内核（带 9p 的那些模块），返回内核 ABI。
+fn ensure_guest_kernel(
+    cache: &Path,
+    base: &Path,
+    agent: &ureq::Agent,
+    on_line: &mut dyn FnMut(&str),
+) -> Result<String, String> {
+    if let Some(abi) = guest_abi(base) {
+        return Ok(abi);
+    }
+    let url = links()?
+        .get("guest.debian.linux")
+        .cloned()
+        .ok_or_else(|| "links.yaml 缺 guest.debian.linux".to_string())?;
+    let listing = get_text(agent, &url)?;
+    let name = pick_deb(&listing, "linux-image-", "-amd64-unsigned_")
+        .filter(|n| n.ends_with("_amd64.deb"))
+        .ok_or_else(|| "kernel 源里没找到 amd64 内核包".to_string())?;
+    let deb = cache.join(&name);
+    if !deb.is_file() {
+        download(agent, &format!("{}{}", url, name), &deb, on_line)?;
+    }
+    on_line(&format!("装入通用内核：{}", name));
+    extract_deb(&deb, base, cache)?;
+    guest_abi(base).ok_or_else(|| "内核解包后没找到 boot/vmlinuz-*".to_string())
+}
+
+/// 目的：装入 qemu-guest-agent 并让它随 virtio-serial 端口出现而启动。
+fn ensure_guest_qga(
+    cache: &Path,
+    base: &Path,
+    agent: &ureq::Agent,
+    on_line: &mut dyn FnMut(&str),
+) -> Result<(), String> {
+    if !base.join("usr").join("sbin").join("qemu-ga").is_file() {
+        let url = links()?
+            .get("guest.debian.pool")
+            .cloned()
+            .ok_or_else(|| "links.yaml 缺 guest.debian.pool".to_string())?;
+        let listing = get_text(agent, &url)?;
+        let name = pick_deb(&listing, "qemu-guest-agent_", "amd64.deb")
+            .ok_or_else(|| "qemu 源里没找到 guest agent 包".to_string())?;
+        let deb = cache.join(&name);
+        if !deb.is_file() {
+            download(agent, &format!("{}{}", url, name), &deb, on_line)?;
+        }
+        on_line(&format!("装入 qemu-guest-agent：{}", name));
+        extract_deb(&deb, base, cache)?;
+    }
+    let wants = base
+        .join("etc")
+        .join("systemd")
+        .join("system")
+        .join("multi-user.target.wants");
+    fs::create_dir_all(&wants).map_err(|e| format!("建 {} 失败：{}", wants.display(), e))?;
+    let unit = wants.join("qemu-guest-agent.service");
+    if !unit.exists() {
+        symlink("/usr/lib/systemd/system/qemu-guest-agent.service", &unit)
+            .map_err(|e| format!("建 qemu-guest-agent.service 软链失败：{}", e))?;
+    }
+    Ok(())
+}
+
+/// 目的：清掉 cloud 镜像留下的、在 9p 根下会掉进 emergency 的东西。
+fn sanitize_guest_base(base: &Path) -> Result<(), String> {
+    fs::write(
+        base.join("etc").join("fstab"),
+        "# guest root 由内核命令行给出（9p），这里不写 fstab 条目。
+",
+    )
+    .map_err(|e| format!("写 fstab 失败：{}", e))?;
+    let mask = base
+        .join("etc")
+        .join("systemd")
+        .join("system")
+        .join("systemd-remount-fs.service");
+    if !mask.exists() {
+        fs::create_dir_all(mask.parent().expect("有父目录")).map_err(|e| e.to_string())?;
+        symlink("/dev/null", &mask).map_err(|e| format!("mask remount 失败：{}", e))?;
+    }
+    Ok(())
+}
+
+/// 目的：在 guest 里生成带 9p 模块的 initrd（chroot 走非特权用户命名空间，不需要 root）。
+fn ensure_guest_initrd(
+    base: &Path,
+    abi: &str,
+    on_line: &mut dyn FnMut(&str),
+) -> Result<(), String> {
+    let conf = base.join("etc").join("initramfs-tools").join("modules");
+    fs::create_dir_all(conf.parent().expect("有父目录")).map_err(|e| e.to_string())?;
+    let mut lines: Vec<String> = fs::read_to_string(&conf)
+        .unwrap_or_default()
+        .lines()
+        .map(|s| s.to_string())
+        .filter(|s| !s.trim().is_empty())
+        .collect();
+    for m in [
+        "9p",
+        "9pnet",
+        "9pnet_virtio",
+        "virtio",
+        "virtio_pci",
+        "virtio_ring",
+    ] {
+        if !lines.iter().any(|l| l == m) {
+            lines.push(m.to_string());
+        }
+    }
+    fs::write(
+        &conf,
+        format!(
+            "{}
+",
+            lines.join(
+                "
+"
+            )
+        ),
+    )
+    .map_err(|e| format!("写 {} 失败：{}", conf.display(), e))?;
+    let script = base.join("tmp").join("solomni-initrd.sh");
+    fs::create_dir_all(script.parent().expect("有父目录")).map_err(|e| e.to_string())?;
+    fs::write(
+        &script,
+        format!(
+            "#!/bin/bash
+set -e
+depmod {0}
+mkinitramfs -o /boot/initrd.img-{0} {0}
+",
+            abi
+        ),
+    )
+    .map_err(|e| format!("写 initrd 脚本失败：{}", e))?;
+    on_line("在 chroot（用户命名空间，无需 root）里生成带 9p 的 initrd");
+    let inner = format!(
+        "mount --bind /proc {0} 2>/dev/null || true; chroot {1} /bin/bash /tmp/solomni-initrd.sh",
+        base.join("proc").display(),
+        base.display()
+    );
+    let st = std::process::Command::new("unshare")
+        .args(["-r", "-m", "sh", "-c", &inner])
+        .status()
+        .map_err(|e| {
+            format!(
+                "跑不了 unshare（需要 util-linux 且内核允许非特权用户命名空间）：{}",
+                e
+            )
+        })?;
+    let _ = fs::remove_file(&script);
+    if !st.success() {
+        return Err("生成 initrd 失败（需要内核允许非特权用户命名空间）".to_string());
+    }
+    if !base
+        .join("boot")
+        .join(format!("initrd.img-{}", abi))
+        .is_file()
+    {
+        return Err("initrd 没生成出来".to_string());
+    }
+    Ok(())
+}
+
+/// 目的：vmlinuz / initrd.img 这两个稳定软链指向当前 ABI。
+fn link_guest_kernel(base: &Path, abi: &str) -> Result<(), String> {
+    let v = base.join("vmlinuz");
+    if !v.exists() {
+        symlink(&format!("boot/vmlinuz-{}", abi), &v)
+            .map_err(|e| format!("建 vmlinuz 软链失败：{}", e))?;
+    }
+    let i = base.join("initrd.img");
+    if !i.exists() {
+        symlink(&format!("boot/initrd.img-{}", abi), &i)
+            .map_err(|e| format!("建 initrd.img 软链失败：{}", e))?;
+    }
+    Ok(())
+}
+
+/// 目的：Linux guest 基础根的多步构造——cloud 镜像 → rootfs 目录 + 通用内核 + 9p initrd + qemu-guest-agent。
+/// 约束：只写项目内；调系统工具（sfdisk / dd / debugfs / ar / unshare），不依赖任何 Node 脚本。
+/// 联动：源在 links.yaml 的 guest.*；镜像 tar 已由调用方下到缓存。
+fn install_guest_rootfs(
+    root: &Path,
+    dep: &Dep,
+    image_tar: &Path,
+    agent: &ureq::Agent,
+    on_line: &mut dyn FnMut(&str),
+) -> Result<(), String> {
+    let base = under(root, &dep.install);
+    let cache = root.join(".vm").join("cache");
+    fs::create_dir_all(&base).map_err(|e| format!("建 {} 失败：{}", base.display(), e))?;
+    let disk = cache.join("disk.raw");
+    if !disk.is_file() {
+        on_line("解开 cloud 镜像 tar（disk.raw）");
+        let x = cache.join("image-x");
+        let _ = fs::remove_dir_all(&x);
+        fs::create_dir_all(&x).map_err(|e| format!("建 {} 失败：{}", x.display(), e))?;
+        crate::kernel::detail::unpack::extract(image_tar, &x)?;
+        let found = fs::read_dir(&x)
+            .map_err(|e| format!("读 {} 失败：{}", x.display(), e))?
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .find(|p| p.file_name().map(|n| n == "disk.raw").unwrap_or(false))
+            .ok_or_else(|| "cloud 镜像 tar 里没有 disk.raw".to_string())?;
+        fs::rename(&found, &disk).map_err(|e| format!("搬 disk.raw 失败：{}", e))?;
+        let _ = fs::remove_dir_all(&x);
+    } else {
+        on_line("用已有 disk.raw（缓存）");
+    }
+    let rootfs = cache.join("rootfs.ext4");
+    if !rootfs.is_file() {
+        on_line("从 GPT 取 root 分区（sfdisk + dd）");
+        let (start, size) = root_partition(&disk)?;
+        run_tool(
+            std::process::Command::new("dd")
+                .arg(format!("if={}", disk.display()))
+                .arg(format!("of={}", rootfs.display()))
+                .arg("bs=512")
+                .arg(format!("skip={}", start))
+                .arg(format!("count={}", size))
+                .arg("status=none"),
+            "dd",
+        )?;
+    }
+    if !base.join("etc").join("os-release").is_file() {
+        on_line("把 rootfs 解到 .vm/guest/base（debugfs rdump）");
+        run_tool(
+            std::process::Command::new("debugfs")
+                .arg("-R")
+                .arg(format!("rdump / {}", base.display()))
+                .arg(&rootfs),
+            "debugfs",
+        )?;
+    }
+    let abi = ensure_guest_kernel(&cache, &base, agent, on_line)?;
+    ensure_guest_qga(&cache, &base, agent, on_line)?;
+    sanitize_guest_base(&base)?;
+    ensure_guest_initrd(&base, &abi, on_line)?;
+    link_guest_kernel(&base, &abi)?;
+    #[cfg(unix)]
+    {
+        let py3 = base.join("usr").join("bin").join("python3");
+        let py = base.join("usr").join("bin").join("python");
+        if py3.is_file() && !py.exists() {
+            let _ = std::os::unix::fs::symlink("python3", &py);
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 目的：目录页里按版本挑最新 .deb（数字感知，不受字典序影响）。
+    #[test]
+    fn picks_newest_deb_numerically() {
+        let listing = r#"<a href="linux-image-6.9.0-amd64-unsigned_6.9.0-1_amd64.deb">x</a>
+<a href="linux-image-6.12.111+deb13-amd64-unsigned_6.12.111-1_amd64.deb">y</a>"#;
+        let got = pick_deb(listing, "linux-image-", "-amd64-unsigned_").expect("有候选");
+        assert_eq!(
+            got,
+            "linux-image-6.12.111+deb13-amd64-unsigned_6.12.111-1_amd64.deb"
+        );
+    }
+
+    /// 目的：单文件安装按 probe 的文件名落进安装目录。
+    #[test]
+    fn install_file_uses_probe_name() {
+        let root = crate::tests::scratch("provision-file");
+        let cache = root.join(".vm").join("cache");
+        fs::create_dir_all(&cache).expect("建缓存");
+        fs::write(cache.join("a.bin"), b"qcow2").expect("写缓存");
+        let dep = Dep {
+            id: "g".to_string(),
+            os: "any".to_string(),
+            arch: "any".to_string(),
+            kind: "file".to_string(),
+            install: ".vm/guest/base".to_string(),
+            probe: ".vm/guest/base/rootfs.qcow2".to_string(),
+            source: "release:a.bin".to_string(),
+            strip: 0,
+            size_mb: 0,
+            note: String::new(),
+        };
+        let mut links = BTreeMap::new();
+        links.insert(
+            "release.base".to_string(),
+            "https://example.invalid".to_string(),
+        );
+        run(
+            &root,
+            &[dep],
+            &links,
+            &[],
+            &AtomicBool::new(false),
+            &mut |_| {},
+        )
+        .expect("单文件安装");
+        assert!(root
+            .join(".vm")
+            .join("guest")
+            .join("base")
+            .join("rootfs.qcow2")
+            .is_file());
+        let _ = fs::remove_dir_all(&root);
+    }
 
     /// 目的：进度序号单调递增；行窗口只留最近 200 行（前端按 seq 增量取）。
     #[test]
@@ -403,7 +881,8 @@ mod tests {
         let ids: Vec<&str> = linux.iter().map(|d| d.id.as_str()).collect();
         assert!(ids.contains(&"vm.qemu.linux") && ids.contains(&"vm.virtiofsd.linux"));
         assert!(!ids.contains(&"vm.qemu.windows"), "windows 条目不该出现");
-        assert!(ids.contains(&"vm.guest.rootfs"), "any 条目哪个平台都在");
+        assert!(ids.contains(&"vm.guest.linux"), "linux guest 在 linux 上");
+        assert!(!ids.contains(&"vm.guest.windows"), "windows guest 不该出现");
     }
 
     /// 目的：状态读真实文件系统——probe 在场才判在位。
@@ -456,6 +935,7 @@ mod tests {
             id: "x".to_string(),
             os: "any".to_string(),
             arch: "any".to_string(),
+            kind: "archive".to_string(),
             install: ".vm/x".to_string(),
             probe: ".vm/x/f.txt".to_string(),
             source: "release:a.tar".to_string(),
