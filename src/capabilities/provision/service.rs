@@ -142,6 +142,7 @@ impl Provision for ProvisionService {
             *j = JobState {
                 running: true,
                 current: String::new(),
+                seq: 0,
                 lines: Vec::new(),
                 error: None,
             };
@@ -152,14 +153,7 @@ impl Provision for ProvisionService {
         let cancel = Arc::clone(&self.cancel);
         std::thread::spawn(move || {
             let sink = Arc::clone(&job);
-            let mut on_line = move |line: &str| {
-                if let Ok(mut j) = sink.lock() {
-                    j.lines.push(line.to_string());
-                    if j.lines.len() > 200 {
-                        j.lines.remove(0);
-                    }
-                }
-            };
+            let mut on_line = move |line: &str| push_line(&sink, line);
             let r = run_ensure(&root, &ids, &cancel, &mut on_line);
             if let Ok(mut j) = job.lock() {
                 j.running = false;
@@ -173,6 +167,17 @@ impl Provision for ProvisionService {
 
     fn cancel(&self) {
         self.cancel.store(true, Ordering::Relaxed);
+    }
+}
+
+/// 目的：把一行进度写进作业状态——`seq` 单调递增（前端按它增量取），行窗口只留最近 200 行。
+fn push_line(job: &Mutex<JobState>, line: &str) {
+    if let Ok(mut j) = job.lock() {
+        j.seq += 1;
+        j.lines.push(line.to_string());
+        if j.lines.len() > 200 {
+            j.lines.remove(0);
+        }
     }
 }
 
@@ -344,6 +349,20 @@ fn install_appimage(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 目的：进度序号单调递增；行窗口只留最近 200 行（前端按 seq 增量取）。
+    #[test]
+    fn push_line_keeps_seq_and_window() {
+        let j = Mutex::new(JobState::default());
+        for i in 0..205 {
+            push_line(&j, &format!("line {}", i));
+        }
+        let s = j.lock().expect("锁");
+        assert_eq!(s.seq, 205);
+        assert_eq!(s.lines.len(), 200);
+        assert_eq!(s.lines.first().map(String::as_str), Some("line 5"));
+        assert_eq!(s.lines.last().map(String::as_str), Some("line 204"));
+    }
 
     /// 目的：内嵌清单与台账必须自洽——每条依赖的下载源都解析得成 https。
     #[test]

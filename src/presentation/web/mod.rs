@@ -400,17 +400,39 @@ pub(crate) fn route(
         },
 
         // ---- 依赖补齐（开箱即用的 setup 面） ----
-        "setup.status" => match ops.provision.status() {
-            Ok(deps) => {
-                let missing = deps.iter().filter(|d| !d.present).count();
-                ok_json(json!({
-                    "deps": deps,
-                    "job": ops.provision.job(),
-                    "missing": missing,
-                }))
+        "setup.status" => {
+            // 长轮询：`?since=N` 客户端已见的进度序号，`&wait=1` 挂起等新行（最多 20s，与事件台同一套）。
+            let q = url.split('?').nth(1).unwrap_or("");
+            let mut since = 0u64;
+            let mut wait = false;
+            for pair in q.split('&') {
+                let mut kv = pair.splitn(2, '=');
+                match (kv.next(), kv.next()) {
+                    (Some("since"), v) => {
+                        since = v.and_then(|x| x.parse::<u64>().ok()).unwrap_or(0)
+                    }
+                    (Some("wait"), v) => wait = v == Some("1") || v == Some("true"),
+                    _ => {}
+                }
             }
-            Err(e) => complaint(400, e),
-        },
+            if wait {
+                let deadline = Instant::now() + POLL_WAIT;
+                while ops.provision.job().seq <= since && Instant::now() < deadline {
+                    std::thread::sleep(POLL_TICK);
+                }
+            }
+            match ops.provision.status() {
+                Ok(deps) => {
+                    let missing = deps.iter().filter(|d| !d.present).count();
+                    ok_json(json!({
+                        "deps": deps,
+                        "job": ops.provision.job(),
+                        "missing": missing,
+                    }))
+                }
+                Err(e) => complaint(400, e),
+            }
+        }
         "setup.ensure" => {
             let req = match parse_body(body) {
                 Ok(v) => v,

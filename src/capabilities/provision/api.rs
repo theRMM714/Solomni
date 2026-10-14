@@ -23,6 +23,8 @@ pub struct DepStatus {
 pub struct JobState {
     pub running: bool,
     pub current: String,
+    /// 目的：进度行的**单调序号**（前端按它增量取；`lines` 只留最近若干行，序号不会回退）。
+    pub seq: u64,
     pub lines: Vec<String>,
     pub error: Option<String>,
 }

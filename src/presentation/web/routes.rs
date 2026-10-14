@@ -177,10 +177,10 @@ pub const ROUTES: &[Route] = &[
         method: "GET",
         pattern: "/api/setup/status",
         capability: "Provision::status + job",
-        request: "—",
-        response: "{deps:[{id,present,install,probe,source,url,size_mb,note}],job,missing}",
+        request: "查询 since / wait",
+        response: "{deps:[{id,present,install,probe,source,url,size_mb,note}],job:{running,seq,lines,error},missing}",
         statuses: &[200, 400],
-        note: "依赖补齐的只读状态：缺什么、装到哪、从哪来，外加当前作业快照",
+        note: "依赖补齐的状态 + 作业进度：`wait=1` 挂起等新行（长轮询，最多 20s），`since` 是已见的进度序号",
     },
     Route {
         id: "setup.ensure",
