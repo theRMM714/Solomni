@@ -297,6 +297,14 @@ mod tests {
         }
         let q = deps.iter().find(|d| d.id == "vm.qemu.linux").unwrap();
         assert!(q.source.starts_with("release:"), "自托管包用 release: 前缀");
+        let v = deps
+            .iter()
+            .find(|d| d.id == "vm.virtiofsd.linux")
+            .expect("virtiofsd 在清单里");
+        assert_eq!(
+            v.strip, 3,
+            "zip 里 target/<三斜杠>/release/<bin> 四段，剥 3 段"
+        );
     }
 
     /// 目的：清单按本机 os/arch 筛（含 any）；平台不匹配的不出现。

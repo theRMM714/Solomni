@@ -28,7 +28,7 @@ deps:
     install: .vm/virtiofsd
     probe: .vm/virtiofsd/virtiofsd
     source: release:virtiofsd-4bfa7125.zip
-    strip: 4
+    strip: 3
     size_mb: 3
     note: Linux 默认共享档的外部守护进程（Rust 版 virtiofsd，musl 静态；zip 里带 target/…/release 前缀，剥 4 段）
   - id: vm.qemu.windows
