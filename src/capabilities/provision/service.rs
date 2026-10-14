@@ -717,7 +717,15 @@ fn install_guest_rootfs(
         let x = cache.join("image-x");
         let _ = fs::remove_dir_all(&x);
         fs::create_dir_all(&x).map_err(|e| format!("建 {} 失败：{}", x.display(), e))?;
-        crate::kernel::detail::unpack::extract(image_tar, &x)?;
+        // 2 GB 的 disk.raw 在 tar 里是 **GNU sparse**：用系统 tar 展开（纯 Rust 解包暂不支持稀疏项）。
+        run_tool(
+            std::process::Command::new("tar")
+                .arg("-xf")
+                .arg(image_tar)
+                .arg("-C")
+                .arg(&x),
+            "tar",
+        )?;
         let found = fs::read_dir(&x)
             .map_err(|e| format!("读 {} 失败：{}", x.display(), e))?
             .filter_map(|e| e.ok())
