@@ -89,6 +89,7 @@ pub(crate) fn single_work(
         task: None,
         delegate: false,
         tier: crate::kernel::api::Tier::Host,
+        base: None,
     }
 }
 

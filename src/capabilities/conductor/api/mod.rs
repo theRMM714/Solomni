@@ -489,6 +489,9 @@ pub struct WorkSpec {
     pub delegate: bool,
     /// 执行档位（用户在创建向导里选的；默认 = 设置里的档位）。承载不了就由 create_work 如实拒绝。
     pub tier: Tier,
+
+    /// 目的：虚拟机档的基础根（可省 = 空；会话建好后也可在会话配置里改）。
+    pub base: Option<String>,
 }
 
 /// 创建工作后的结果：最终实例名（重名已加尾号）、名单，以及**开场事实**。

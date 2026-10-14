@@ -70,6 +70,73 @@ pub(crate) fn sandboxes_lookup_is_by_agent() {
     assert!(boxes.for_agent("a").is_none(), "沙箱不再按模块 id 反查");
 }
 
+/// 目的：虚拟机档"能不能选"只看**机器能力**，与会话级 base 无关——Web 换档死锁的回归锚。
+/// 约束：base 只在保存 /「开始」时校验（构造承载判据时合并进去）。
+#[test]
+pub(crate) fn vm_availability_is_machine_only_and_base_is_session_level() {
+    use crate::capabilities::vm::domain::exec::host_verified;
+    use crate::tests::doubles::{core_with_gateway_probe, FixedProbe};
+    // 一个对的基础根：目录 + vmlinuz（探测替身只按声明回答，这两条也要登记）。
+    let base = crate::tests::base_dir("vm-avail-base");
+    // 机器能力齐：有虚拟机监视器，PATH 里有 QEMU 与 virtiofsd（guest 项按已验平台数据表）。
+    let mut probe = FixedProbe {
+        hypervisor: true,
+        ..Default::default()
+    };
+    probe.exes.push("qemu-system-x86_64".to_string());
+    probe.exes.push("virtiofsd".to_string());
+    probe.dirs.push(base.clone());
+    probe.files.push(base.join("vmlinuz"));
+    let mut core = core_with_gateway_probe(
+        vec![module_of("a")],
+        gw(BTreeMap::new(), Vec::new()),
+        Arc::new(probe),
+    );
+    let choices = core.tier_choices();
+    let expected = host_verified(std::env::consts::OS);
+    assert_eq!(
+        choices.vm_available, expected,
+        "vm_available 只看机器能力：{:?}",
+        choices.vm_requirements
+    );
+    assert!(
+        !choices.vm_requirements.iter().any(|r| r.id == "base"),
+        "机器能力清单不含会话级 base：{:?}",
+        choices.vm_requirements
+    );
+    if !expected {
+        return;
+    }
+    // 建一条本机档会话（没有 base）：会话配置仍说虚拟机档可选——base 只在保存/开始时校验。
+    let spec = crate::tests::single_work("wl", &["a"]);
+    core.create_work(spec).expect("建本机档会话");
+    let cfg = core.session_config("wl").expect("配置视图");
+    assert!(cfg.base.is_none(), "新会话没有 base");
+    assert!(
+        cfg.vm_available,
+        "机器能力齐就该能选：{:?}",
+        cfg.vm_requirements
+    );
+    assert!(
+        !cfg.vm_requirements.iter().any(|r| r.id == "base"),
+        "配置视图的机器能力清单也不含 base：{:?}",
+        cfg.vm_requirements
+    );
+    // 建虚拟机档：base 没填 → 如实拒绝；填了 → 建得起来（base 是会话级，不是机器能力）。
+    let mut no_base = crate::tests::single_work("wv", &["a"]);
+    no_base.tier = Tier::Vm;
+    let err = core
+        .create_work(no_base)
+        .expect_err("虚拟机档缺 base 要如实拒绝");
+    assert!(err.contains("基础根"), "{}", err);
+    let mut with_base = crate::tests::single_work("wv2", &["a"]);
+    with_base.tier = Tier::Vm;
+    with_base.base = Some(base.to_string_lossy().into_owned());
+    core.create_work(with_base)
+        .expect("机器能力齐 + base 在场就该建得起来");
+    let _ = std::fs::remove_dir_all(&base);
+}
+
 /// 虚拟机档的承载校验：前置条件不具备时，**创建与编辑都如实拒绝**（用户环境问题，不是选型问题）。
 /// 与界面上的"能不能选"同源（`exec::tier_readiness`），两处不会各说各话。
 #[test]

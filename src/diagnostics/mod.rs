@@ -28,7 +28,6 @@ pub fn doctor() -> i32 {
     // 也就是最朴素的情形——登记过的路径以会话配置界面为准（那里按会话选型问同一份清单）。
     let vm =
         crate::capabilities::vm::api::vm_requirements(&crate::capabilities::vm::api::VmInputs {
-            base: None,
             qemu: None,
             share_tool: None,
             probe: &crate::kernel::detail::HostProbeAdapter,

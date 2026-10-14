@@ -4,9 +4,9 @@
 //! 联动：被 conductor / collab / cli 与入口层消费。
 
 pub use crate::capabilities::vm::domain::exec::{
-    absent, declared, diagnose_text, guest_platform, plan, plan_summary, tier_readiness,
-    tier_refusal, unavailable, vm_diagnoses, vm_requirements, Diagnosis, ExecPlan, VmInputs,
-    VmRequirement,
+    absent, capability_refusal, declared, diagnose_text, guest_platform, plan, plan_summary,
+    tier_readiness, tier_refusal, unavailable, vm_capability, vm_diagnoses, vm_requirements,
+    Diagnosis, ExecPlan, VmInputs, VmRequirement,
 };
 pub use crate::capabilities::vm::domain::guest::GuestOs;
 pub use crate::capabilities::vm::domain::guest::{

@@ -75,9 +75,11 @@ files:                      # 包内文件指纹：用于可复现与呈现
   - **缺包** = 该模块的工具不可用（回执如实说明缺哪个能力），会话照常——降级，不是失败
   - **选型不成立**（同一能力多版本而用户没定版 / 定版指定的版本不在库里 / 两个包写进同一处路径）=
     「开始」那一刻如实拒绝，由用户解决选型后再开始
-  - **本机承载不了**（基础根不在场，或本机没有虚拟机监视器）= 虚拟机档**不允许创建或改入**，
-    配置界面禁用并说明缺什么（`vm::tier_readiness` / `tier_refusal`：创建、编辑与界面走同一把尺子）——
-    这是用户环境问题，不是选型问题
+  - **本机承载不了**（本机没有虚拟机监视器 / guest 后端未验 / 引擎或共享档不在场）= 虚拟机档**不允许创建或改入**，
+    配置界面禁用并说明缺什么——这是用户环境问题，不是选型问题
+
+虚拟机档的判据分两层：**机器能力**（虚拟机监视器 / guest 后端 / 引擎 / 共享档，`vm::vm_capability`）决定界面能不能**选**；
+**基础根（base）是会话级**，在创建（`create_session` 的 `base`）或会话配置里给，保存 /「开始」时与机器能力合并成严格判据（`vm::tier_readiness` / `tier_refusal`）。
 
 当前状态：选型、诊断、装配计划、逐项前置检测、guest 生命周期与**执行分派**都已就位，并按**五轴组合**做成可插的形状——
 宿主 × `VmEngine`（当前 `QemuEngine`）× `GuestImage`（基础根里可放 `guest.yaml` 声明 id / arch / os / agent / clients）×
@@ -87,7 +89,8 @@ files:                      # 包内文件指纹：用于可复现与呈现
 工作环境提示词三处共用它**；运行包按 guest 平台分包（`runtimes/<id>/<os>-<arch>/`）。整条业务住在独立能力 `vm`
 （逐文件职责见 [docs/vm/README.md](docs/vm/README.md)）；就绪项 `guest` 按**已验平台数据表**（`VERIFIED_HOSTS`）放开，并带上本平台**已实现**的组合。
 
-前置检测是**一份逐项清单**（`vm::vm_requirements`，界面与 `--doctor` 照抄同一份）：虚拟机监视器、guest 本体、共享档、QEMU（引擎）、基础根，
+前置检测是**一份逐项清单**（机器能力 `vm::vm_requirements`，界面与 `--doctor` 照抄同一份）：虚拟机监视器、guest 本体、共享档、QEMU（引擎）；
+基础根（会话级）在保存 /「开始」时合并进来，
 每项给出"现状 + 怎么补"（共享档缺 `virtiofsd` 只作事实呈现、不拦档：自动退 9p）。依赖（QEMU / `virtiofsd` / 镜像）**不预置、不分发**，由 `setup-vm.js`（按平台分发到 `setup-vm-windows.js` / `setup-vm-linux.js` / `setup-vm-mac.js`，共享件 `setup-vm-common.js`）按平台下载并解包进项目内 `.vm/`（下载源在 `links.yaml`，需用户同意）；产品检测、指路并给出补齐入口，`qemu_path` / `virtiofsd_path` 可登记。
 基础根 = 一个目录：发行版 rootfs（目录，或 `rootfs.ext4` / `*.qcow2` 磁盘镜像）+ `vmlinuz`（可选 `initrd.img`）；**目录根必须给内核**（直启），**磁盘镜像可自带引导**（不给内核也行）；目录里可放一份 `guest.yaml` 声明画像（id / arch / agent / os / clients），缺省按目录名与 Debian 默认（os 缺省 linux），不认识的值如实拒收。
 

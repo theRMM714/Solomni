@@ -366,6 +366,8 @@ pub struct NewSession {
     pub name: Option<String>,
     /// 目的：执行档位——给了就用它，没给由宿主按父会话或设置定。
     pub tier: Option<String>,
+    /// 目的：虚拟机档的基础根——给了就用它，没给由宿主按父会话定（顶层为空，建好后在会话配置里填）。
+    pub base: Option<String>,
     /// 父会话：由**机制**从调用上下文填，不从模型参数取（模型不能自选父）。
     pub parent: Option<String>,
 }
@@ -413,6 +415,9 @@ pub struct CreateArgs {
     /// 目的：执行档位 host / vm（可省 = 由宿主按父会话或设置定）。
     #[serde(default)]
     pub tier: Option<String>,
+    /// 目的：虚拟机档的基础根（可省 = 子会话沿用父会话，顶层为空、建好后在会话配置里填）。
+    #[serde(default)]
+    pub base: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -493,6 +498,11 @@ pub fn resolve_new_session(args: &CreateArgs, catalog: &Catalog) -> Result<NewSe
         .filter(|s| !s.is_empty());
     let tier = args
         .tier
+        .as_ref()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    let base = args
+        .base
         .as_ref()
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty());
@@ -579,6 +589,7 @@ pub fn resolve_new_session(args: &CreateArgs, catalog: &Catalog) -> Result<NewSe
         request_id,
         name,
         tier,
+        base,
         parent: None,
     })
 }

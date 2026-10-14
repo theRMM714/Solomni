@@ -46,34 +46,20 @@ impl Conductor {
     /// 虚拟机档的承载探针是**与某条会话无关**的事实。
     pub fn tier_choices(&self) -> TierChoices {
         let default = self.registry.app().tier;
-        // 裸虚拟机档探针：基础根属于会话选型（在会话的 exec 段里），创建时还没填，按未指定探。
-        let vm_probe = crate::kernel::api::ExecSpec {
-            tier: crate::kernel::api::Tier::Vm,
-            ..crate::kernel::api::ExecSpec::default()
-        };
+        // 这是**与某条会话无关**的机器能力：base 属于会话选型，不在这里判（创建时另行收集）。
         let inputs = crate::capabilities::vm::api::VmInputs {
-            base: vm_probe.base.as_deref(),
             qemu: self.qemu_path(),
             share_tool: self.virtiofsd_path(),
             probe: self.probe.as_ref(),
         };
+        let cap = crate::capabilities::vm::api::vm_capability(&inputs);
+        let available = cap.ready();
         TierChoices {
             default: default.as_str().to_string(),
-            vm_available: crate::capabilities::vm::api::tier_readiness(
-                &vm_probe,
-                self.qemu_path(),
-                self.virtiofsd_path(),
-                self.probe.as_ref(),
-            )
-            .ready(),
-            vm_unavailable_reason: crate::capabilities::vm::api::tier_refusal(
-                &vm_probe,
-                self.qemu_path(),
-                self.virtiofsd_path(),
-                self.probe.as_ref(),
-            )
-            .unwrap_or_default(),
-            vm_requirements: crate::capabilities::vm::api::vm_requirements(&inputs),
+            vm_available: available,
+            vm_unavailable_reason: crate::capabilities::vm::api::capability_refusal(&inputs)
+                .unwrap_or_default(),
+            vm_requirements: cap.requirements,
         }
     }
 
@@ -145,12 +131,17 @@ impl Conductor {
     pub fn session_config(&self, sid: &str) -> Result<SessionConfig, String> {
         let (meta, events) = self.history_open(sid)?;
         let tier = meta.exec.tier;
-        // 虚拟机档的承载探针：用用户填的基础根（若有），否则问"裸虚拟机档"能不能成立。
-        let vm_probe = crate::kernel::api::ExecSpec {
-            tier: crate::kernel::api::Tier::Vm,
-            base: meta.exec.base.clone(),
-            ..crate::kernel::api::ExecSpec::default()
+        // 机器能力（与某条会话无关）：界面据此决定虚拟机档能不能**选**；base 是会话级，另行校验。
+        let inputs = crate::capabilities::vm::api::VmInputs {
+            qemu: self.qemu_path(),
+            share_tool: self.virtiofsd_path(),
+            probe: self.probe.as_ref(),
         };
+        let cap = crate::capabilities::vm::api::vm_capability(&inputs);
+        let vm_available = cap.ready();
+        let vm_reason =
+            crate::capabilities::vm::api::capability_refusal(&inputs).unwrap_or_default();
+        let vm_requirements = cap.requirements;
         Ok(SessionConfig {
             sid: meta.name.clone(),
             mode: meta.mode.clone(),
@@ -191,28 +182,9 @@ impl Conductor {
             .collect(),
             // 虚拟机档能不能选**与当前档位无关**：本机档会话也要如实告诉用户 vm 现在不可用（界面据此禁用）。
             // 逐项清单一起给出：界面照抄"缺哪几项、每项怎么补"，不自己编话。
-            vm_available: crate::capabilities::vm::api::tier_readiness(
-                &vm_probe,
-                self.qemu_path(),
-                self.virtiofsd_path(),
-                self.probe.as_ref(),
-            )
-            .ready(),
-            vm_unavailable_reason: crate::capabilities::vm::api::tier_refusal(
-                &vm_probe,
-                self.qemu_path(),
-                self.virtiofsd_path(),
-                self.probe.as_ref(),
-            )
-            .unwrap_or_default(),
-            vm_requirements: crate::capabilities::vm::api::vm_requirements(
-                &crate::capabilities::vm::api::VmInputs {
-                    base: vm_probe.base.as_deref(),
-                    qemu: self.qemu_path(),
-                    share_tool: self.virtiofsd_path(),
-                    probe: self.probe.as_ref(),
-                },
-            ),
+            vm_available,
+            vm_unavailable_reason: vm_reason,
+            vm_requirements,
         })
     }
 
@@ -746,6 +718,7 @@ impl Conductor {
             // 档位来自**用户在创建向导里的选择**（默认 = 设置里的档位）；承载不了由下面如实拒绝。
             exec: crate::kernel::api::ExecSpec {
                 tier: spec.tier,
+                base: spec.base.clone(),
                 ..crate::kernel::api::ExecSpec::default()
             },
             run: RunState::Active,

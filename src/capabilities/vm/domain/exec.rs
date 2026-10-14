@@ -194,7 +194,6 @@ pub struct VmRequirement {
 
 /// 目的：虚拟机档检测的入参：会话选型 + 设置里登记的路径（None = 没登记，兜底看 PATH）+ 宿主探测端口。
 pub struct VmInputs<'a> {
-    pub base: Option<&'a str>,
     pub qemu: Option<&'a str>,
     /// 目的：设置里登记的**共享后端外部工具**路径（如 virtiofsd；None = 兜底看 PATH）。
     pub share_tool: Option<&'a str>,
@@ -205,9 +204,9 @@ pub struct VmInputs<'a> {
 /// QEMU 可执行文件名（各平台同名；平台扩展名由适配层的探测实现处理）。
 const QEMU_BIN: &str = "qemu-system-x86_64";
 
-/// 目的：虚拟机档的全部前置要求（**只读事实，不起任何虚拟机**）。
+/// 目的：虚拟机档的**机器能力**清单（**只读事实，不起任何虚拟机**）——与某条会话无关。
 /// 约束：为什么做成清单：用户看到的必须是"缺哪几项、每项怎么补"，而不是一句笼统的"前置条件不具备"。
-/// 约束：base 与会话选型有关，qemu 登记在设置里（见 providers::AppSettings）。
+/// 约束：base 属于**会话选型**，不在这里；含 base 的严格判据见 tier_readiness。
 pub fn vm_requirements(vm: &VmInputs<'_>) -> Vec<VmRequirement> {
     let hyper = vm.probe.hypervisor_available();
     let combo = effective_combo_label(vm.share_tool, vm.probe);
@@ -252,8 +251,6 @@ pub fn vm_requirements(vm: &VmInputs<'_>) -> Vec<VmRequirement> {
         share_requirement(vm.share_tool, vm.probe, &combo),
         // QEMU：不预置、不分发（可由 setup 脚本装进项目内）。没登记就看 PATH——检测那件东西在不在。
         qemu_requirement(vm.qemu, vm.probe),
-        // 基础根：不预置、不分发（发行版基底 + 内核所在目录）。本机档为空 = 不适用。
-        base_requirement(vm.base, vm.probe),
     ]
 }
 
@@ -523,10 +520,29 @@ fn base_requirement(base: Option<&str>, probe: &dyn HostProbe) -> VmRequirement 
     }
 }
 
+/// 目的：机器能力的就绪视图（不含会话级 base）：界面据此决定虚拟机档能不能**选**。
+pub fn vm_capability(vm: &VmInputs<'_>) -> TierReadiness {
+    TierReadiness {
+        requirements: vm_requirements(vm),
+    }
+}
+
+/// 目的：机器能力不足时的可读拒绝理由（与 tier_refusal 同一套文案，判据只到机器能力）。
+pub fn capability_refusal(vm: &VmInputs<'_>) -> Option<String> {
+    let cap = vm_capability(vm);
+    if cap.ready() {
+        return None;
+    }
+    Some(format!(
+        "虚拟机档现在不可用（{}）：请换本机档。各项前置与怎么补见配置界面的「虚拟机档前置」与 --doctor",
+        cap.missing().join("；")
+    ))
+}
+
 /// 目的：本机能不能承载这个档位（**只读事实，不碰任何东西**）。
 /// 约束：虚拟机档的前置条件不具备时，虚拟机档**不允许创建或改入**——这是用户环境问题，不是选型问题；
 /// 约束：界面的"能不能点"与「开始」的校验走同一个函数，两处不会各说各话。
-/// 约束：判据**只有一份**：就是 vm_requirements 那份清单，逐项都满足才算承载得了。
+/// 约束：判据**只有一份**：机器能力清单（vm_requirements）+ 这条会话的 base；逐项都满足才算承载得了。
 pub fn tier_readiness(
     spec: &ExecSpec,
     qemu: Option<&str>,
@@ -538,14 +554,14 @@ pub fn tier_readiness(
             requirements: Vec::new(),
         };
     }
-    TierReadiness {
-        requirements: vm_requirements(&VmInputs {
-            base: spec.base.as_deref(),
-            qemu,
-            share_tool,
-            probe,
-        }),
-    }
+    let mut requirements = vm_requirements(&VmInputs {
+        qemu,
+        share_tool,
+        probe,
+    });
+    // base 是这条会话的选型，不是机器能力：保存 /「开始」时才要求它。
+    requirements.push(base_requirement(spec.base.as_deref(), probe));
+    TierReadiness { requirements }
 }
 
 /// 目的：虚拟机档的可读拒绝理由（创建与编辑共用同一把尺子）。

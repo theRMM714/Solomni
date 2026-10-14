@@ -246,6 +246,9 @@ tools:
       tier:
         type: string
         desc: 执行档位 host / vm；省略 = 子会话沿用父会话，顶层用设置里的默认档
+      base:
+        type: string
+        desc: 虚拟机档的基础根（guest rootfs 目录或磁盘镜像所在目录）；省略 = 子会话沿用父会话，顶层建好后可在会话配置里填
       request_id:
         type: string
         desc: 幂等标识（核心代理必填）：同一个 request_id 重放不会重复创建

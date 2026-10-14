@@ -15,13 +15,14 @@
 ## 二、入站契约与状态归属
 
 `api::Vm`（library / runtimes_dir / **guest_start / guest_run / guest_stop**）+ 档位与计划的纯函数
-（`plan` / `tier_readiness` / `tier_refusal` / `vm_requirements` / `vm_diagnoses` / …）。
+（`plan` / `tier_readiness` / `tier_refusal` / `vm_requirements` / `vm_capability` / `capability_refusal` / `vm_diagnoses` / …）。
 出站端口 `PackageSource` / `VmEngine` / `ShareBackend` **只由 `service.rs` 持有**（R12）；`GuestVm` / `GuestChannel` 由引擎在 boot 时交出。`ExecSpec` 是共享事实（在 `kernel`），本能力只读它。
 
 **当前状态**：五轴已按可插的形状落地——`QemuEngine`（当前唯一引擎）、`GuestImage`（基础根里可放 `guest.yaml` 声明 id / arch / os / agent / clients）、
 `QgaChannel`（QEMU virtio-serial）、`NinePShare`（目录根）、`CopyShare`（QGA 复制，三平台通用）与 `VirtioFsShare`（QEMU vhost-user-fs，Linux/macOS 宿主）。
 按平台的组合回退链是数据（`default_combos` / `choose_combo`），加速器按平台给（`accel=kvm:tcg` / `accel=whpx:tcg` / `accel=hvf:tcg`），共享要隧道时给 `restrict=on` 网卡。
 执行分派已接线（会话在 `tier == Vm` 时把模块命令交给 guest；建会话时装配并拉起，会话删除时销毁）；就绪项 `guest` 按**已验平台数据表**（`VERIFIED_HOSTS`）放开，并带上本平台上**已实现**的组合。
+判据分两层：**机器能力**（`vm_capability`：hypervisor / guest 后端 / 引擎 / 共享档）决定虚拟机档能不能**选**；**base 是会话级**，创建或会话配置里给，保存 /「开始」时才合并进严格判据（`tier_readiness`）。
 
 **当前状态**：Linux（QEMU/KVM + virtiofs，默认共享档；缺 virtiofsd 时自动退 9p）与 Windows（QEMU/WHPX + QGA 复制）已真机验收——引擎级探针与 e2e 的 vm 会话场景都过
 （guest 真起、工具在 guest 内执行、共享目录实时读写、删会话销毁 guest 与 virtiofsd；Windows 的镜像经维护启动预装 python3 / nodejs）。

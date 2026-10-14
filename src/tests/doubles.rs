@@ -1091,6 +1091,7 @@ pub(crate) fn work(name: &str, mode: WorkMode, modules: &[&str]) -> WorkSpec {
         task: None,
         delegate: false,
         tier: crate::kernel::api::Tier::Host,
+        base: None,
     }
 }
 
@@ -1856,6 +1857,19 @@ pub(crate) fn core_with_gateway(
     modules: Vec<Module>,
     gateway: impl ChatGateway + Send + Sync + 'static,
 ) -> Conductor {
+    core_with_gateway_probe(
+        modules,
+        gateway,
+        Arc::new(crate::kernel::detail::HostProbeAdapter),
+    )
+}
+
+/// 目的：同 core_with_gateway，但注入指定的宿主探测（机器能力/依赖在场与否要可控的用例用它）。
+pub(crate) fn core_with_gateway_probe(
+    modules: Vec<Module>,
+    gateway: impl ChatGateway + Send + Sync + 'static,
+    probe: Arc<dyn crate::kernel::ports::HostProbe + Send + Sync>,
+) -> Conductor {
     let gateway: Arc<dyn crate::capabilities::llm::ports::ChatGateway + Send + Sync> =
         Arc::new(gateway);
     let llm = test_llm(
@@ -1877,7 +1891,7 @@ pub(crate) fn core_with_gateway(
         test_prompt(),
         test_tools_svc(),
         Arc::new(crate::kernel::ports::NoopLog),
-        Arc::new(crate::kernel::detail::HostProbeAdapter),
+        probe,
         Arc::new(crate::capabilities::residents::api::NoResidents),
         Arc::new(crate::capabilities::secrets::api::NoSecrets),
     )

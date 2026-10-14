@@ -23,24 +23,7 @@
   blocked_by: |
     需要一台 macOS 机器（验收环境）。macOS 侧的取包、vz 引擎与自研 agent 分别在
     vm.qemu-provisioning-macos / vm.macos-vz-engine 两条缺口里。
-- id: vm.ui-tier-switch-blocked
-  scope: global
-  level: T3
-  why: |
-    Web 上无法把一条本机档会话切到虚拟机档。vm_available（"能不能选"）用了与"这条会话选型是否完整"同一把尺子，
-    把会话级的 base 也算进去：新会话 base 为空 → vm_available=false → 界面禁用虚拟机档；而 base 输入框只在选中
-    虚拟机档后才显示，于是互相卡死。新建向导更直接：它没有 base 输入，base 项必然判否，虚拟机档单选永远禁用。
-    后端 API 是通的（e2e 走 edit_session 才验得过）。
-  how: |
-    1) 把"机器能力"（hypervisor / guest 后端 / 引擎 / 共享）与"会话选型"（base 等）拆开：vm_available 只用前者，
-       保存 /「开始」再用含 base 的严格判据并如实拒绝；
-    2) base 输入在虚拟机档可选时可见（或常显）；新建向导要么加 base 字段并允许直接建 VM（WorkSpec 加 base），
-       要么明确引导"先建本机档、再到会话配置切档"（前提是配置面不再死锁）；
-    3) 路由与契约同步 docs/presentation/contracts.md 与 routes 测试。
-  accept: |
-    机器能力齐、base 为空的会话，会话配置里虚拟机档可选、能填 base 并保存成功；缺 base 时保存被如实拒绝并说清填哪；
-    新建向导给出可执行路径（当场填 base 或明确指引）；用例钉住"机器能力齐但 base 空"这一态。
-  blocked_by: 缺少实现
+
 - id: vm.share-realtime-windows
   scope: global
   level: T4

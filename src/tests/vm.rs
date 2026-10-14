@@ -1335,6 +1335,48 @@ pub(crate) fn guest_image_carries_agent_and_client_capabilities() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// 目的：机器能力与会话选型分开——vm_capability 不问 base；tier_readiness（保存/开始）才要求 base。
+#[test]
+pub(crate) fn vm_capability_is_machine_only_while_session_readiness_needs_base() {
+    use crate::capabilities::vm::api::{vm_capability, VmInputs};
+    use crate::tests::doubles::FixedProbe;
+    let qemu = std::path::PathBuf::from("/opt/qemu-system-x86_64");
+    let mut probe = FixedProbe {
+        hypervisor: true,
+        ..Default::default()
+    };
+    probe.files.push(qemu.clone());
+    probe.exes.push("virtiofsd".to_string());
+    let q = qemu.to_string_lossy().into_owned();
+    let cap = vm_capability(&VmInputs {
+        qemu: Some(q.as_str()),
+        share_tool: None,
+        probe: &probe,
+    });
+    assert!(cap.ready(), "机器能力齐就该 ready：{:?}", cap.requirements);
+    assert!(
+        !cap.requirements.iter().any(|r| r.id == "base"),
+        "机器能力清单不含会话级 base：{:?}",
+        cap.requirements
+    );
+    let spec = ExecSpec {
+        tier: Tier::Vm,
+        base: None,
+        ..Default::default()
+    };
+    let session = exec::tier_readiness(&spec, Some(q.as_str()), None, &probe);
+    assert!(
+        !session.ready(),
+        "base 没填，会话级判据不成立：{:?}",
+        session.requirements
+    );
+    assert!(
+        session.unmet().iter().any(|r| r.id == "base"),
+        "{:?}",
+        session.requirements
+    );
+}
+
 /// 目的：virtiofs 共享后端只在 QEMU + 声明了 virtiofs 客户端的 guest 上落地（缺客户端就是缺，不假装）。
 #[test]
 pub(crate) fn virtiofs_share_supports_only_qemu_with_virtiofs_client() {

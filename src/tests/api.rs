@@ -951,6 +951,7 @@ fn single_mode_merges_multiple_agents_into_one_transient() {
             task: None,
             delegate: false,
             tier: crate::kernel::api::Tier::Host,
+            base: None,
         })
         .expect("建工作");
     assert_eq!(

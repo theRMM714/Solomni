@@ -238,6 +238,10 @@ impl ConductorHandle {
                 .get("tier")
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string()),
+            base: args
+                .get("base")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string()),
             parent: None,
         })
     }

@@ -170,7 +170,7 @@ pub const ROUTES: &[Route] = &[
         request: "—",
         response: "{tiers:{default,vm_available,vm_unavailable_reason,vm_requirements}}",
         statuses: &[200, 400],
-        note: "新建工作的档位选择：默认档 + 虚拟机档可用性与逐项前置",
+        note: "新建工作的档位选择：默认档 + 虚拟机档的**机器能力**可用性与逐项前置（base 是会话级，不在这里判）",
     },
     Route {
         id: "suggest",
