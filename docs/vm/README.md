@@ -26,12 +26,13 @@
 
 **当前状态**：Linux（QEMU/KVM + virtiofs，默认共享档；缺 virtiofsd 时自动退 9p）与 Windows（QEMU/WHPX + QGA 复制）已真机验收——引擎级探针与 e2e 的 vm 会话场景都过
 （guest 真起、工具在 guest 内执行、共享目录实时读写、删会话销毁 guest 与 virtiofsd；Windows 的镜像经维护启动预装 python3 / nodejs）。
-macOS 缺取包（`vm.qemu-provisioning-macos`）；SMB 实时共享（Windows）、
-macOS Apple vz 引擎与自研 agent + vsock 通道仍是缺口。契约与组合矩阵见本页「五」，缺口与验收标准见
+macOS 缺取包（`vm.qemu-provisioning-macos`）；SMB 实时共享（Windows，`vm.share-realtime-windows`）与 Windows guest 的运行期编排
+（`setup.pure-rust-provisioning`）、macOS Apple vz 引擎与自研 agent + vsock 通道仍是缺口。契约与组合矩阵见本页「五」，缺口与验收标准见
 [tests/gaps.yaml](../../tests/gaps.yaml) 的 `fence.guest-tier-not-wired`。
 
-`node setup-vm.js` 按平台分发（共享件 `setup-vm-common.js`）：Linux 装 QEMU、virtiofsd 与 Debian 基础根（目录 rootfs + 内核 + 9p initrd）；
-Windows 装 MSYS2 的 QEMU 闭包、下 Debian cloud qcow2、首启经 cloud-init 装 `qemu-guest-agent`；macOS 暂是骨架。只写项目内，下载源在 `links.yaml`，需用户同意。据此在 **KVM** 下跑通真机探针与产品级会话验收，在 **WHPX** 下跑通引擎级真机探针（设 `SOLOMNI_VM_LIVE=1` +
+依赖由 `provision` 能力按清单（`dependencies.yaml` + `links.yaml`，需用户同意、只写项目内）装进 `.vm/`：Linux 装 QEMU（pkgforge Anylinux AppImage）、
+virtiofsd 与 Debian 基础根（目录 rootfs + 内核 + 9p initrd + qemu-guest-agent）；Windows 装 Arch 上 MinGW-w64 交叉编译的 QEMU 便携包 + Debian cloud qcow2 + `guest.yaml`；
+Windows guest 的 agent / 运行包仍靠 `setup-vm-windows.js` 首启编排（见 `setup.pure-rust-provisioning`），macOS 保持检测 + 指路。据此在 **KVM** 下跑通真机探针与产品级会话验收，在 **WHPX** 下跑通引擎级真机探针（设 `SOLOMNI_VM_LIVE=1` +
 `SOLOMNI_VM_QEMU` / `SOLOMNI_VM_BASE` / `SOLOMNI_VM_VIRTIOFSD` 指向 `.vm/`，默认 `[探针]` 跳过）：guest 真启动、共享按后端进 guest（virtiofs / 9p 挂载 / QGA 复制）、经 QGA 在 guest 里跑模块工具、删会话即销毁 guest 与 virtiofsd。
 
 ## 三、依赖图位置（由源码的 `::api` 引用推导）

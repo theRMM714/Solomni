@@ -14,7 +14,7 @@
     （vm.qemu-provisioning-macos）。未验平台在 vm::tier_readiness 上把 guest 项判否。
   how: |
     在 macOS 真机上按顺序补齐并验收：先用 QEMU/HVF + 9p 把备选链跑通（依赖取包），再上 Apple vz + 原生 virtiofs + 自研 agent（vsock）。
-    依赖不预置、不分发；由 setup-vm.js 按平台下载并解包进项目内 .vm/（下载源在 links.yaml，需用户同意）。
+    依赖不预置、不分发；Linux / Windows 已由 provision 能力按清单（dependencies.yaml + links.yaml，需用户同意）装进项目内 .vm/；macOS 仍是检测 + 指路。
     契约与组合矩阵见 docs/vm/README.md 的「多平台组合」。
   accept: |
     每个组合单独判定：vm 档会话里模块工具真在 guest 内跑（进程与宿主隔离）、删会话即销毁 guest 与其磁盘；
@@ -36,14 +36,15 @@
   accept: |
     Windows 真机 vm 档会话里，guest 对共享目录的写入在宿主即时可见（不必等执行结束），且不需要管理员权限。
   blocked_by: |
-    缺一个用户态 SMB3 实现；guest 侧（cifs-utils）与 guestfwd 隧道要一起验。
+    缺一个用户态 SMB3 实现；guest 侧（cifs-utils）与 guestfwd 隧道要一起在 Windows 真机验（与 setup.pure-rust-provisioning 同批）。
 - id: vm.qemu-provisioning-macos
   scope: global
   level: T4
   why: |
-    Windows 已由 setup-vm-windows.js 取 MSYS2 的 mingw64 QEMU 闭包装进项目内 .vm/qemu/（不跑安装程序、不写注册表）；
+    Windows 与 Linux 的 QEMU 已由 provision 能力装进项目内 .vm/qemu/（Windows 是 Arch 上 MinGW-w64 交叉编译的便携包，
+    Linux 是 pkgforge Anylinux AppImage；来源在 dependencies.yaml + links.yaml）；
     macOS 仍是骨架（setup-vm-mac.js 只探测与指路），QEMU 要用户自行安装。已定方向：macOS 本期保持"检测 + 指路 + 手动"，
-    不在本期做自动补齐；统一的自动补齐见 setup.pure-rust-provisioning。
+    不在本期做自动补齐；将来做需要 macOS 真机确定来源与 .app / 框架形态。
   how: |
     本期只做检测与指路：缺什么、怎么装，如实列出，不假装可自动装。
     将来若做自动补齐：按平台取包（Homebrew 或官方包）解到 .vm/qemu/，只写项目内、下载要用户同意，来源进 links.yaml；
@@ -52,7 +53,7 @@
     本期：macOS 上就绪检测如实报"QEMU 不在场 + 怎么补"，不把"未实现自动补齐"写成能力。
     将来：macOS 上能把 QEMU 装进项目内 .vm/ 并被就绪检测认出来，且不需要管理员权限。
   blocked_by: |
-    本期不做（macOS 保持检测 + 指路）；自动补齐并入 setup.pure-rust-provisioning，且需要一台 macOS 机器确定来源。
+    本期不做（macOS 保持检测 + 指路）；将来做需要一台 macOS 机器确定来源与 .app / 框架形态的落地方式。
 - id: vm.macos-vz-engine
   scope: global
   level: T4
@@ -71,22 +72,22 @@
   scope: global
   level: T4
   why: |
-    用户路径要"一个二进制开箱即用"。补齐能力的清单 / 状态 / 下载 / 解包（含 AppImage）与 CLI、Web 面已经落到 Rust
-    （capabilities/provision）；Linux 的 QEMU 可运行包（AppImage）、virtiofsd 与 **guest 基础根的多步构造**（cloud 镜像 →
-    rootfs + 通用内核 + 9p initrd + qemu-guest-agent）都能按需装进项目内；**Windows 的 QEMU 便携包（Arch 交叉编译）也已自托管、
-    可按需装进项目内**；winlibs 已移出运行期清单、改指上游钉死资产。
-    剩下：Windows 的 guest 安装不是静态配方（下 qcow2 后要真起一台 guest，经 cloud-init 装 qemu-guest-agent、再用 QGA 装运行包），
-    这段运行期编排仍只在 setup-vm-windows.js 里（Rust 侧还没接；引擎也还不支持 cloud-init 种子）；setup-vm*.js 还在（两套实现）；自动发现只在**主程序启动**时做
-    （同进程内新装的包要下次启动才生效）；三平台"可用 / 缺件 / 补齐后可用"的探针覆盖也还没有。
+    **这条缺口现在只覆盖 Windows 侧**。Linux 侧已收口并有真机验证：补齐能力（capabilities/provision）把清单 / 状态 / 下载 / 解包
+    （含 AppImage）与 CLI、Web 面都放在 Rust；QEMU 可运行包（AppImage）、virtiofsd、guest 基础根的多步构造（cloud 镜像 →
+    rootfs + 通用内核 + 9p initrd + qemu-guest-agent）都能按需装进项目内；winlibs 已移出运行期清单、改指上游钉死资产；
+    `--provision` 全程不调 Node。
+    Windows 的 guest 安装**不是静态配方**：下 qcow2 后要真起一台 guest，经 cloud-init（NoCloud 种子）装 qemu-guest-agent、
+    再用 QGA 装 python3 / python-is-python3 / nodejs；这段运行期编排仍只在 setup-vm-windows.js 里（Rust 侧没接；引擎也还不支持 cloud-init 种子）。
+    Windows 的实时共享另立 `vm.share-realtime-windows`，两者在 Windows 真机一起验。
   how: |
-    1) Windows guest：qcow2 + guest.yaml 已由 Rust 装好（kind guest-disk）；**首启经 cloud-init 装 qemu-guest-agent、再用 QGA 装运行包**这段运行期编排待定方案（见下）；
-    2) setup-vm*.js 删除或薄壳化（不留两套实现）；
-    3) 三平台探针覆盖"可用 / 缺件 / 补齐后可用"，macOS 保持检测 + 指路；
-    4) 补齐后的自动发现做到**同进程即时生效**（进度已是 seq + 长轮询）。
+    1) Windows guest 的运行期编排搬进 Rust：引擎加 cloud-init 种子（`-smbios` + 宿主小 HTTP）→ 首启装 agent → 维护启动经 QGA 装运行包；
+       qcow2 + guest.yaml 已由 Rust 装好（kind guest-disk）；
+    2) 编排搬完后删除或薄壳化 setup-vm-windows.js（Linux 的 setup-vm-linux.js 已多余，可先删），不留两套实现。
   accept: |
-    在一台没有 Node、也没有仓库脚本的机器上，二进制能查状态、经用户确认后把 VM 依赖下载解包进项目内，
-    完成后能力检查变绿；全程不调用 node、不写项目外、下载源全部来自内嵌清单。三平台探针覆盖"可用 / 缺件 / 补齐后可用"。
-  blocked_by: 缺少实现
+    在一台**没有 Node、也没有仓库脚本**的 Windows 机器上，二进制能查状态、经用户确认后把 QEMU 与 guest（含 agent 与运行包）备好，
+    完成后能力检查变绿；全程不调用 node、不写项目外、下载源全部来自内嵌清单。Linux 侧同判据已达成。
+  blocked_by: |
+    Windows 真机与 WHPX 验收（与 vm.share-realtime-windows 同一批）。
 - id: module.acp-adapter
   scope: global
   level: T3
@@ -129,7 +130,8 @@
     1) 三平台各自跑一次（与 T4 平台探针同一矩阵）；
     2) 若要把子进程计入：产品构建也用同一插桩（-C instrument-coverage），LLVM_PROFILE_FILE 带 %p
        传播到子进程，收尾合并 profraw；
-    3) 产出"未覆盖清单"后逐条决定补测或记缺口。
+    3) 产出"未覆盖清单"后逐条决定补测或记缺口；补齐能力的"可用 / 缺件 / 补齐后可用"三态探针也按平台各覆盖一次
+       （Linux 已有真机验证；Windows / macOS 待各自平台）。
   accept: |
     三平台各有一份覆盖率报告，且报告明确标注"仅进程内 / 仅当前平台"或已聚合子进程；
     未覆盖的生产路径逐条有补测或缺口结论。
