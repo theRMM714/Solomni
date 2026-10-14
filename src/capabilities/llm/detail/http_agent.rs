@@ -1,31 +1,12 @@
-//! 出站 HTTP 代理构建（机制）：**唯一**装配 TLS 与超时的地方。
-//! Windows 走系统 schannel（native-tls）——ureq 3 的 native-tls **不会自动被选中**（默认是 rustls），
-//! 必须显式写进 TlsConfig，否则 HTTPS 会以"该 TLS 后端没启用"报错。
-//! 非 Windows 走 rustls（默认后端，无需显式指定）。
+//! 出站 HTTP 的 llm 侧包装：代理与 TLS 机制在 kernel/outbound（这里只按 llm 的预算构建）。
 //! ureq 3 默认把 4xx/5xx 变成**不带响应体**的 Error；这里关掉（http_status_as_error(false)），
 //! 由 finish_request 统一判状态——这样错误文案里才留得住供应商自己的原话。
 
 use std::time::Duration;
 
-/// 构建带连接/总超时的代理；TLS 后端按平台显式装配。
+/// 构建带连接/总超时的代理；TLS 后端按平台显式装配（实现在 kernel/outbound）。
 pub fn agent(connect_secs: u64, total_secs: u64) -> ureq::Agent {
-    let builder = ureq::Agent::config_builder()
-        .timeout_connect(Some(Duration::from_secs(connect_secs)))
-        // 供应商接了连接却不发响应头时快速失败（ureq 3 没有"单次读取"这一档；
-        // 响应体的整体预算由 timeout_global 兜底，长流式回复因此不受影响）。
-        .timeout_recv_response(Some(Duration::from_secs(60)))
-        .timeout_global(Some(Duration::from_secs(total_secs)))
-        // 4xx/5xx 当数据不当错误：见 finish_request。
-        .http_status_as_error(false);
-    #[cfg(windows)]
-    let builder = builder.tls_config(
-        ureq::tls::TlsConfig::builder()
-            .provider(ureq::tls::TlsProvider::NativeTls)
-            // native-tls 的 PlatformVerifier = 系统证书库。
-            .root_certs(ureq::tls::RootCerts::PlatformVerifier)
-            .build(),
-    );
-    builder.build().into()
+    crate::kernel::detail::outbound::agent(connect_secs, total_secs)
 }
 
 /// 一次模型调用的出站代理：连接 10 秒；**等响应头 / 读响应体 / 整体预算**都用同一个预算。
@@ -39,23 +20,17 @@ pub fn agent_for_llm(timeout_secs: u64) -> ureq::Agent {
         .timeout_recv_body(budget)
         .timeout_global(budget)
         .http_status_as_error(false);
-    #[cfg(windows)]
-    let builder = builder.tls_config(
-        ureq::tls::TlsConfig::builder()
-            .provider(ureq::tls::TlsProvider::NativeTls)
-            .root_certs(ureq::tls::RootCerts::PlatformVerifier)
-            .build(),
-    );
+    let builder = if let Some(tls) = crate::kernel::detail::outbound::tls_config() {
+        builder.tls_config(tls)
+    } else {
+        builder
+    };
     builder.build().into()
 }
 
 /// 这条构建实际用的 TLS 后端（编译期事实）：探针与自检据此如实报出来，不靠人猜。
 pub fn tls_backend() -> &'static str {
-    if cfg!(windows) {
-        "native-tls"
-    } else {
-        "rustls"
-    }
+    crate::kernel::detail::outbound::tls_backend()
 }
 
 /// 本进程**取不到系统 TLS 凭证**时的稳定错误码（Windows schannel 的 `SEC_E_NO_CREDENTIALS`）。

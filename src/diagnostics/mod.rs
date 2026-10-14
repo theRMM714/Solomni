@@ -2,8 +2,6 @@
 //! 退出码按各模式的约定（多数恒 0：**判定归调用方**，这里只报事实）。
 //! 隐藏模式：用户经文档知道它们，不列进面向用户的帮助。
 
-pub mod unpack;
-
 /// 目的：把归档解到目录（跨平台纯 Rust，不依赖用户装解压工具；用法 solomni --unpack <archive> <dest>）。
 pub fn unpack_cli(args: &[String], i: usize) -> i32 {
     let archive = args.get(i + 1).cloned().unwrap_or_default();
@@ -12,7 +10,10 @@ pub fn unpack_cli(args: &[String], i: usize) -> i32 {
         eprintln!("用法：solomni --unpack <archive> <dest>");
         return 2;
     }
-    match unpack::extract(std::path::Path::new(&archive), std::path::Path::new(&dest)) {
+    match crate::kernel::detail::unpack::extract(
+        std::path::Path::new(&archive),
+        std::path::Path::new(&dest),
+    ) {
         Ok(()) => 0,
         Err(e) => {
             eprintln!("[解包] {}", e);

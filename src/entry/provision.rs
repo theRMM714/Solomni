@@ -171,7 +171,7 @@ fn run(
         }
         let dest = under(root, &dep.install);
         fs::create_dir_all(&dest).map_err(|e| format!("建安装目录 {} 失败：{}", dep.install, e))?;
-        crate::diagnostics::unpack::extract_into(&cached, &dest, dep.strip)
+        crate::kernel::detail::unpack::extract_into(&cached, &dest, dep.strip)
             .map_err(|e| format!("{}：解包失败：{}", dep.id, e))?;
         let probe = under(root, &dep.probe);
         if !(probe.is_file() || probe.is_dir()) {
