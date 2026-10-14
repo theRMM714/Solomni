@@ -130,7 +130,7 @@ node run-tests.js        # quality gate + full test run (see TESTING.md)
   `node env.js --print-env` prints it machine-readable. `setup-runtime.js` / `setup-dev.js` only orchestrate;
   `node setup-runtime.js` and `node env.js setup` are equivalent.
 - **Outbound-link ledger**: `links.yaml` is the single authority for external URLs the project uses and that may
-  change (currently: toolchain bootstrap sources and the winlibs upstream release source); edit it once and the whole
+  change (currently: toolchain bootstrap sources, the pinned winlibs upstream asset, the self-hosted dependencies release prefix, and guest image sources); edit it once and the whole
   repository follows. User overrides go through `.home/settings.yaml` and environment variables, not the ledger.
 - **You can run it without a provider**: it walks the flow with the built-in fake model and says so plainly.
 - Common flags: `--root <dir>` (product root), `--web-port <port>`, `--release`.

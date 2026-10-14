@@ -10,6 +10,7 @@ use crate::capabilities::vm::ports::{GuestChannel, GuestVm, SharePlan, VmEngine}
 use crate::kernel::api::ToolOutcome;
 use std::io::{BufRead, BufReader, Write};
 use std::net::{TcpListener, TcpStream};
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
@@ -170,6 +171,12 @@ impl VmEngine for QemuEngine {
             .map(str::to_string)
             .unwrap_or_else(|| qemu_exe(spec.image.arch).to_string());
         let mut args = engine_args(spec, &opts, share.needs_net, share.needs_shared_mem);
+        // 便携包把固件放在可执行文件旁（`bin/` 的兄弟 `share/qemu`）：显式 `-L` 指过去，
+        // 否则 QEMU 只按编译期前缀找，便携布局下会报 "could not load PC BIOS"。
+        if let Some(fw) = firmware_dir(&exe) {
+            args.insert(0, fw.display().to_string());
+            args.insert(0, "-L".to_string());
+        }
         args.extend(share.engine_args.iter().cloned());
         let child = Command::new(&exe)
             .args(&args)
@@ -200,6 +207,17 @@ impl VmEngine for QemuEngine {
             }
         }
         Ok(Box::new(handle))
+    }
+}
+
+/// 目的：便携 QEMU 的固件目录——可执行文件的 `bin/` 的兄弟 `share/qemu`（存在才算）。
+fn firmware_dir(exe: &str) -> Option<PathBuf> {
+    let bin = Path::new(exe).parent()?;
+    let dir = bin.parent()?.join("share").join("qemu");
+    if dir.is_dir() {
+        Some(dir)
+    } else {
+        None
     }
 }
 
@@ -520,4 +538,25 @@ fn unb64(s: &str) -> Vec<u8> {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 目的：便携包的固件目录认 `bin/` 的兄弟 `share/qemu`；没有就给 None（不瞎指）。
+    #[test]
+    fn firmware_dir_is_beside_bin() {
+        let root = crate::tests::scratch("qemu-fw");
+        std::fs::create_dir_all(root.join("bin")).expect("建 bin");
+        std::fs::create_dir_all(root.join("share").join("qemu")).expect("建固件目录");
+        let exe = root.join("bin").join("qemu-system-x86_64");
+        let fw = firmware_dir(&exe.to_string_lossy()).expect("有固件目录");
+        assert_eq!(fw, root.join("share").join("qemu"));
+        assert!(
+            firmware_dir("/nonexistent/bin/qemu-system-x86_64").is_none(),
+            "没有固件目录就不能瞎指 -L"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }

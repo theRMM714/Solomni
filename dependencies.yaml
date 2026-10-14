@@ -19,9 +19,9 @@ deps:
     arch: x86_64
     install: .vm/qemu
     probe: .vm/qemu/bin/qemu-system-x86_64
-    source: release:qemu-linux-x86_64.tar.zst
-    size_mb: 130
-    note: Linux 虚拟机档的 QEMU（Arch 闭包解包后的整棵 .vm/qemu，含固件与依赖库与包装脚本）——**待上传**（release 里的 qemu-11.1.2.tar.xz 是 GPL 对应源码，不是可运行包）
+    source: release:QEMU-11.1.1-4-anylinux-x86_64.AppImage
+    size_mb: 165
+    note: Linux 虚拟机档的 QEMU（pkgforge Anylinux AppImage，自带 sharun 兼容层；`--appimage-extract` 解包后约 1.7 GB，含全部 guest 目标）
   - id: vm.virtiofsd.linux
     os: linux
     arch: x86_64
@@ -30,7 +30,7 @@ deps:
     source: release:virtiofsd-4bfa7125.zip
     strip: 3
     size_mb: 3
-    note: Linux 默认共享档的外部守护进程（Rust 版 virtiofsd，musl 静态；zip 里带 target/…/release 前缀，剥 4 段）
+    note: Linux 默认共享档的外部守护进程（Rust 版 virtiofsd，musl 静态；zip 里带 target/…/release 前缀，剥 3 段）
   - id: vm.qemu.windows
     os: windows
     arch: x86_64
@@ -39,14 +39,7 @@ deps:
     source: release:qemu-windows-x86_64.tar.zst
     size_mb: 250
     note: Windows 虚拟机档的 QEMU（MSYS2 mingw64 闭包）——**待上传**
-  - id: build.winlibs.windows
-    os: windows
-    arch: x86_64
-    install: .tools
-    probe: .tools/mingw64/bin/dlltool.exe
-    source: release:winlibs.zip
-    size_mb: 261
-    note: Windows 上构建 C++ 模块用的 MinGW-w64（已自托管）
+
   - id: vm.guest.rootfs
     os: any
     arch: x86_64

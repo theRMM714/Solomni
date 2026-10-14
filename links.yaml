@@ -10,7 +10,7 @@
 rustup.init.windows: https://win.rustup.rs/x86_64
 rustup.init.unix: https://sh.rustup.rs
 winlibs.upstream.releases: https://github.com/brechtsanders/winlibs_mingw/releases
-winlibs.upstream.api: https://api.github.com/repos/brechtsanders/winlibs_mingw/releases/latest
+winlibs.upstream.asset: https://github.com/brechtsanders/winlibs_mingw/releases/download/16.2.0posix-14.0.0-ucrt-r2/winlibs-x86_64-posix-seh-gcc-16.2.0-mingw-w64ucrt-14.0.0-r2.zip
 guest.debian.image: https://cdimage.debian.org/cdimage/cloud/trixie/latest/debian-13-genericcloud-amd64.tar.xz
 # 直接用磁盘镜像（qcow2）：不用解 tar.xz，firmware 引导即可（Windows / macOS 宿主没有 9p，root 必须是磁盘）。
 guest.debian.qcow2: https://cdimage.debian.org/cdimage/cloud/trixie/latest/debian-13-genericcloud-amd64.qcow2

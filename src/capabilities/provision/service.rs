@@ -54,15 +54,18 @@ pub fn links() -> Result<BTreeMap<String, String>, String> {
 /// 目的：把 source 解析成可下载的 URL——`release:<资产名>` 走自托管包，其余按 links.yaml 的键。
 pub fn source_url(source: &str, links: &BTreeMap<String, String>) -> Result<String, String> {
     if let Some(asset) = source.strip_prefix("release:") {
-        let base = links
-            .get("release.base")
-            .ok_or_else(|| "links.yaml 缺 release.base".to_string())?;
+        let base = link("release.base").ok_or_else(|| "links.yaml 缺 release.base".to_string())?;
         return Ok(format!("{}/{}", base.trim_end_matches('/'), asset));
     }
     links
         .get(source)
         .cloned()
         .ok_or_else(|| format!("links.yaml 里没有这个键：{}", source))
+}
+
+/// 目的：按台账键取 URL——Rust 侧与 Node 侧读同一份台账；这里也是台账消费点（T0 扫 `link("键")`）。
+fn link(key: &str) -> Option<String> {
+    links().ok().and_then(|m| m.get(key).cloned())
 }
 
 /// 目的：按组件把清单里的相对路径落到产品根下（不用字符串拼分隔符）。
@@ -224,8 +227,16 @@ fn run(
         }
         let dest = under(root, &dep.install);
         fs::create_dir_all(&dest).map_err(|e| format!("建安装目录 {} 失败：{}", dep.install, e))?;
-        crate::kernel::detail::unpack::extract_into(&cached, &dest, dep.strip)
-            .map_err(|e| format!("{}：解包失败：{}", dep.id, e))?;
+        let lower = cached
+            .file_name()
+            .map(|s| s.to_string_lossy().to_lowercase())
+            .unwrap_or_default();
+        if lower.ends_with(".appimage") {
+            install_appimage(&cached, &dest, on_line).map_err(|e| format!("{}：{}", dep.id, e))?;
+        } else {
+            crate::kernel::detail::unpack::extract_into(&cached, &dest, dep.strip)
+                .map_err(|e| format!("{}：解包失败：{}", dep.id, e))?;
+        }
         let probe = under(root, &dep.probe);
         if !(probe.is_file() || probe.is_dir()) {
             return Err(format!("{}：装完仍找不到 {}", dep.id, dep.probe));
@@ -269,6 +280,64 @@ fn download(
     drop(f);
     fs::rename(&tmp, dest).map_err(|e| format!("改名 {} 失败：{}", dest.display(), e))?;
     on_line(&format!("下载完成：{} 字节", n));
+    Ok(())
+}
+
+/// 目的：AppImage 便携包——跑它自带的 `--appimage-extract`（不依赖 FUSE），把解出的 AppDir 内容搬进安装目录。
+/// 约束：`bin/` 里的 applet 按 argv[0] 解析 `../shared/bin/<名>`，所以**保持原布局**、不做包装脚本。
+fn install_appimage(
+    archive: &Path,
+    dest: &Path,
+    on_line: &mut dyn FnMut(&str),
+) -> Result<(), String> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = fs::metadata(archive)
+            .map_err(|e| format!("看不了 {}：{}", archive.display(), e))?
+            .permissions()
+            .mode();
+        fs::set_permissions(archive, fs::Permissions::from_mode(mode | 0o111))
+            .map_err(|e| format!("加执行位失败：{}", e))?;
+    }
+    // 解到安装目录里（同一文件系统，随后原地搬移，避免跨设备 rename）。
+    let _ = fs::remove_dir_all(dest.join("AppDir"));
+    let _ = fs::remove_file(dest.join("squashfs-root"));
+    on_line("解包 AppImage（--appimage-extract，不依赖 FUSE）");
+    let out = std::process::Command::new(archive)
+        .arg("--appimage-extract")
+        .current_dir(dest)
+        .output()
+        .map_err(|e| format!("跑不了 AppImage 解包（{}）：{}", archive.display(), e))?;
+    if !out.status.success() {
+        let msg: String = String::from_utf8_lossy(&out.stderr)
+            .chars()
+            .take(200)
+            .collect();
+        return Err(format!("AppImage 解包失败：{}", msg));
+    }
+    // pkgforge 的运行时解到 AppDir/（另留一个 squashfs-root 软链）；两种布局都认。
+    let root = dest.join("AppDir");
+    let root = if root.is_dir() {
+        root
+    } else {
+        dest.join("squashfs-root")
+    };
+    if !root.is_dir() {
+        return Err("AppImage 解包后没找到 AppDir / squashfs-root".to_string());
+    }
+    for entry in fs::read_dir(&root).map_err(|e| format!("读 {} 失败：{}", root.display(), e))?
+    {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let to = dest.join(entry.file_name());
+        if to.exists() {
+            continue; // 重复安装时幂等：已在场的不覆盖
+        }
+        fs::rename(entry.path(), &to)
+            .map_err(|e| format!("搬 {} 失败：{}", entry.file_name().to_string_lossy(), e))?;
+    }
+    let _ = fs::remove_dir_all(dest.join("AppDir"));
+    let _ = fs::remove_file(dest.join("squashfs-root"));
     Ok(())
 }
 

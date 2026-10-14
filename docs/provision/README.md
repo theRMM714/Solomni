@@ -13,6 +13,7 @@
 ## 二、入站契约与状态归属
 
 - 入站契约在 [`api.rs`](api.rs)：`Provision`（`status` / `job` / `start` / `cancel`）+ DTO（`DepStatus` / `JobState`）；`NoProvision` 是未接入的默认实现（如实失败，不假装可用）。
+- 解包：归档（tar / gz / zst / xz / zip）走 `kernel::detail::unpack`；`.AppImage` 走它自带的 `--appimage-extract`（不依赖 FUSE，保持原布局，不做包装脚本）。
 - 状态归属：清单与台账的唯一真相在仓库根 `dependencies.yaml` / `links.yaml`，产品里**编译期内嵌**；作业状态是**进程内**的（不落盘，进程重启即清空）。
 - 呈现层：CLI `--provision`（`src/diagnostics/`，`--ensure[=id,…] --yes` 才真下载）+ Web `GET /api/setup/status` / `POST /api/setup/ensure` / `DELETE /api/setup/job`（路由表见 [docs/presentation/contracts.md](../presentation/contracts.md)）。
 

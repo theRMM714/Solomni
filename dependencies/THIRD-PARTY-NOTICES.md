@@ -1,24 +1,33 @@
-# 第三方依赖声明（自托管便携包）
+# Third-Party Notices
 
-本目录记录项目自托管在 GitHub Release（tag `dependencies`）里的第三方依赖的开源许可与对应源码义务。
-`links.yaml` 的 `release.base` 指向该 release；`dependencies.yaml` 是产品读取的依赖清单。
+本文件记录了本项目自托管分发的第三方依赖包，以及它们的许可证和对应源码信息。
 
-规则：自托管包一律**原样分发**，不改内容、不重新打包内部文件；新增包必须同步本文件与 `dependencies.yaml`。
+---
 
-## winlibs（winlibs.zip）
-- 内容：MinGW-w64（GCC + binutils）便携工具链
-- 许可：GPLv3（含 GCC Runtime Library Exception）+ GPL（binutils）
-- 上游与对应源码：https://github.com/brechtsanders/winlibs_mingw/releases
-- 说明：按上游同样的产物原样再分发；对应源码可从上游同一版本取得。
+## 1. QEMU (AppImage 二进制)
 
-## virtiofsd（virtiofsd-4bfa7125.zip）
-- 版本：v1.14.0（commit 4bfa7125）
-- 许可：Apache-2.0（上游另提供 BSD-3-Clause 双许可）
-- 上游与对应源码：https://gitlab.com/virtio-fs/virtiofsd
-- 说明：Apache-2.0 无 GPL 对应源码义务；再分发时随包附许可文本。
+- **Binary Asset**: `QEMU-11.1.1-4-anylinux-x86_64.AppImage`
+- **Version**: QEMU 11.1.1-4 (pkgforge 打包版本)
+- **License**: GPL-2.0 (GNU General Public License v2.0)
+- **Corresponding Source Code**:
+  - QEMU 官方源码: `qemu-11.1.1.tar.xz` (已随本 Release 提供)
+  - 打包脚本源码: `QEMU-AppImage-11.1.1-4-2026-10-01_1790875330.tar.gz` (已随本 Release 提供)
+- **Written Offer**: 对于包含 GPL 授权的二进制，项目在此提供有效期至少三年的书面 Offer。任何第三方可通过本页面获取完整的对应源码。由于对应源码已随本 Release 直接提供，通常无需通过书面 Offer 获取。
 
-## QEMU（可运行的分平台包待上传；对应源码已在本 release）
-- 版本：11.1.2
-- 许可：GPL-2.0
-- 对应源码：本 release 的 `qemu-11.1.2.tar.xz`（QEMU 11.1.2 源码 tarball）
-- 说明：可运行的便携包（`qemu-linux-x86_64.tar.zst` / `qemu-windows-x86_64.tar.zst`）与原样再分发的二进制一同提供对应源码，满足 GPLv2 第 3 条的源码提供义务。
+## 2. virtiofsd (Rust 版)
+
+- **Binary Asset**: `virtiofsd-4bfa7125.zip`
+- **Version**: v1.14.0 (commit 4bfa7125)
+- **License**: Apache-2.0 (另有上游 BSD-3-Clause 双许可)
+- **Source Code**: https://gitlab.com/virtio-fs/virtiofsd
+- **Note**: 根据 Apache-2.0 许可证要求，已附上许可证副本。无 GPL 源码提供义务。
+
+---
+
+## 附：GPL 源码获取说明
+
+对于本 Release 中包含 GPL 授权的二进制文件（目前为 QEMU AppImage），根据 GPLv2 第 3(a) 条，其完整的对应源码已在本 Release 页面的资产（Assets）中提供，任何接收该二进制文件的第三方均可直接从本页面下载获取。
+
+本 Release 提供的对应源码包括：
+- `qemu-11.1.1.tar.xz`（QEMU 官方源码）
+- `QEMU-AppImage-11.1.1-4-2026-10-01_1790875330.tar.gz`（打包脚本源码）
