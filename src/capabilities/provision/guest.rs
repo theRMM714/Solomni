@@ -17,7 +17,7 @@ const USER_DATA: &str = "#cloud-config\nruncmd:\n  - >-\n    dpkg -s qemu-guest-
 const META_DATA: &str = "instance-id: solomni-provision\nlocal-hostname: solomni-guest\n";
 
 /// 目的：维护启动要装的运行包——模块工具在 guest 里要用的解释器，以及共享要用的 cifs-utils。
-const RUNTIME_PKGS: &str = "python3 python-is-python3 nodejs cifs-utils";
+const RUNTIME_PKGS: &str = "python3 nodejs cifs-utils";
 
 /// 目的：一次 guest 运行（命令交给 guest 的 /bin/sh；args/env/cwd 都空）。
 fn sh(command: &str) -> GuestRun {
@@ -132,8 +132,9 @@ pub(super) fn install_guest_runtime(
             return Err("等维护启动的 qemu-guest-agent 超时".to_string());
         }
         // 镜像里已有首启留下的 apt 索引：先不 update 直接装；装不上再 update 重试（update 很慢）。
+        // python-is-python3 在 Debian trixie 已经没有，python 命令自己补一个符号链接。
         let cmd = format!(
-            "DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends {p} || (apt-get update -o Acquire::Languages=none && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends {p})",
+            "DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends {p} || (apt-get update -o Acquire::Languages=none && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends {p}); command -v python >/dev/null 2>&1 || ln -sf /usr/bin/python3 /usr/bin/python",
             p = RUNTIME_PKGS
         );
         let out = vm.guest_run(&lease, &sh(&cmd));

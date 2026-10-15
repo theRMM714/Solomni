@@ -69,7 +69,7 @@ deps:
     probe: .vm/guest/base/.runtimes-ready
     source: guest.debian.qcow2
     size_mb: 0
-    note: Windows guest 的运行期编排（首启 cloud-init 装 qemu-guest-agent → 维护启动装 python3 / python-is-python3 / nodejs / cifs-utils）；镜像源与 vm.guest.windows 同一份 qcow2（走缓存）
+    note: Windows guest 的运行期编排（首启 cloud-init 装 qemu-guest-agent → 维护启动装 python3 / python / nodejs / cifs-utils）；镜像源与 vm.guest.windows 同一份 qcow2（走缓存）
 
   - id: vm.smbd.windows
     os: windows

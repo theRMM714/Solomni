@@ -20,16 +20,19 @@
 - **Version**: QEMU 11.1.1
 - **License**: GPL-2.0 (GNU General Public License v2.0)
 - **Corresponding Source Code**: `qemu-11.1.1.tar.xz` (已随本 Release 提供)
-- **编译方式**: 从 QEMU 官方源码 `qemu-11.1.1.tar.xz`，在 Arch Linux 上使用 MinGW-w64 交叉编译工具链编译生成。
+- **编译方式**: 从 QEMU 官方源码 `qemu-11.1.1.tar.xz`，用 MSYS2（mingw-w64）工具链构建，`--enable-slirp`（user 网卡 / guestfwd 必需）；固件取自源码自带的预编译 `pc-bios/`，按真实文件打包（不留软链）。
 - **打包的依赖库**（均为独立许可证，不影响 QEMU 自身的 GPL 状态）：
   - `libglib-2.0-0.dll` / `libgio-2.0-0.dll` / `libgobject-2.0-0.dll` / `libgmodule-2.0-0.dll` — LGPL-2.1
   - `libpixman-1-0.dll` — MIT
-  - `SDL2.dll` — zlib
+  - `libslirp-0.dll` — BSD-3-Clause
+  - `libzstd.dll` — BSD-3-Clause / GPL-2.0 双许可（本项目按 BSD-3-Clause 使用）
+  - `libbz2-1.dll` — BSD-3-Clause
+  - `libncursesw6.dll` — X11 License
   - `zlib1.dll` — zlib
   - `libffi-8.dll` — MIT
   - `libpcre2-8-0.dll` — BSD-3-Clause
   - `libiconv-2.dll` / `libintl-8.dll` — LGPL-2.1
-  - `libwinpthread-1.dll` / `libgcc_s_seh-1.dll` / `libssp-0.dll` — GCC Runtime Library Exception
+  - `libwinpthread-1.dll` — GCC Runtime Library Exception
 - **Note**: 对应源码已随本 Release 直接提供，通常无需通过书面 Offer 获取。
 
 ## 3. virtiofsd (Rust 版)
@@ -80,16 +83,19 @@ This file documents the third-party dependency bundles self-hosted and distribut
 - **Version**: QEMU 11.1.1
 - **License**: GPL-2.0 (GNU General Public License v2.0)
 - **Corresponding Source Code**: `qemu-11.1.1.tar.xz` (Provided as part of this Release)
-- **Build Method**: Cross-compiled from the official QEMU source `qemu-11.1.1.tar.xz` on Arch Linux using the MinGW-w64 cross-compilation toolchain.
+- **Build Method**: Built from the official QEMU source `qemu-11.1.1.tar.xz` with the MSYS2 (mingw-w64) toolchain, `--enable-slirp` (required for the user-mode network backend / guestfwd); firmware comes from the prebuilt `pc-bios/` shipped in the source and is packaged as real files (no symlinks).
 - **Bundled Dependency Libraries** (independent licenses; do not affect QEMU's own GPL status):
   - `libglib-2.0-0.dll` / `libgio-2.0-0.dll` / `libgobject-2.0-0.dll` / `libgmodule-2.0-0.dll` — LGPL-2.1
   - `libpixman-1-0.dll` — MIT
-  - `SDL2.dll` — zlib
+  - `libslirp-0.dll` — BSD-3-Clause
+  - `libzstd.dll` — BSD-3-Clause / GPL-2.0 dual-licensed (used here under BSD-3-Clause)
+  - `libbz2-1.dll` — BSD-3-Clause
+  - `libncursesw6.dll` — X11 License
   - `zlib1.dll` — zlib
   - `libffi-8.dll` — MIT
   - `libpcre2-8-0.dll` — BSD-3-Clause
   - `libiconv-2.dll` / `libintl-8.dll` — LGPL-2.1
-  - `libwinpthread-1.dll` / `libgcc_s_seh-1.dll` / `libssp-0.dll` — GCC Runtime Library Exception
+  - `libwinpthread-1.dll` — GCC Runtime Library Exception
 - **Note**: The Corresponding Source is already provided directly in this Release.
 
 ## 3. virtiofsd (Rust Version)
