@@ -15,7 +15,7 @@
 | --- | --- | --- |
 | `shared/mechanisms.yaml` | `session_kinds` / `mechanisms[].session` / `mechanisms[].roles` / `mechanisms[].text` | **机制说明按（会话使用类型 × 适用角色）分发**：一个会话的身份块把**同时**匹配它类型与角色的条目按声明顺序拼起来（`{{mechanism}}`）。`session_kinds` 是类型全表，`roles` 校验落在角色表（`systools/roles.yaml`）——对应关系全在数据里，代码只做匹配（`CoreTexts::mechanisms_for`） |
 | `shared/protocol.yaml` | `chat_protocol` | 讨论约定（讨论席与执行席一起注入，可自由演化） |
-| `shared/tools.yaml` | `env_hosts` / `env_guests` / `envs[].host\|guest\|text` | **工作环境按环境分发**：本机档按宿主平台（`env_hosts`：linux / windows / macos），虚拟机档按 guest 的 os（`env_guests`）；每条只写 host 或 guest 之一，装载时校验全表覆盖（不静默漏发一份环境）。文本变量：work_name / agent / work_root / sandbox_root / module_roots——虚拟机档给的是 **guest 内路径** |
+| `shared/tools.yaml` | `env_hosts` / `env_guests` / `envs[].host\|guest\|text` | **工作环境按环境分发**：本机档按宿主平台（`env_hosts`：linux / windows / macos），虚拟机档按 guest 的 os（`env_guests`）；每条只写 host 或 guest 之一，装载时校验全表覆盖（不静默漏发一份环境）。文本变量：work_name / agent / work_root / sandbox_root / module_roots / path_rules——虚拟机档给的是 **guest 内路径**；路径规矩只有一处（`texts.yaml` 的 `tool_texts.path_rules`，`env_block` 用它渲染后插进每个环境块） |
 | | `patch_guide` | 自由格式补丁的写法（每块以 `*** End File` 收尾、SEARCH 要整行一致、一次可多块、整体原子） |
 | | `tool_calling_envelope` / `tool_calling_native` | 工具调用约定**两套，互斥**：一个通道只用一套，由通道形态决定注入哪套 |
 | `shared/texts.yaml` | `no_agents` / `no_model` / `no_module_dirs` / `no_module_tools` / `no_module_tool_params` | 空态说法 |

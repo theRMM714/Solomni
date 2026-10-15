@@ -60,7 +60,7 @@ tools:                  # 【可选】外部工具表：工具名 → 声明
       path:
         type: string                    # string / integer / number / boolean
         required: true                  # 缺了就是参数错（核心拒收，不启动进程）
-        desc: 要读取的真实绝对路径
+        desc: 要读取的路径（用【工作环境】的写法）
 services:               # 【可选】常驻服务：服务名 → 声明（用哪个适配器拉起 + 启动命令）
   fs:
     adapter: mcp        # 组合根注册的适配器名（当前已注册 mcp：stdio 长驻会话）；未知 = 拒收并列出可用名

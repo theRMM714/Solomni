@@ -14,7 +14,7 @@ tools:
       path:
         type: string
         required: true
-        desc: 要读取的真实绝对路径
+        desc: 要读取的路径
       offset:
         type: integer
         min: 1
@@ -34,7 +34,7 @@ tools:
       path:
         type: string
         required: true
-        desc: 要写入的真实绝对路径
+        desc: 要写入的路径
       content:
         type: string
         required: true
@@ -47,7 +47,7 @@ tools:
       path:
         type: string
         required: true
-        desc: 要修改的真实绝对路径
+        desc: 要修改的路径
       old_string:
         type: string
         required: true
@@ -73,7 +73,7 @@ tools:
       path:
         type: string
         required: true
-        desc: 要列的目录的真实绝对路径
+        desc: 要列出的目录
   search:
     capability: fs-read        # 权限收口依据：碰文件系统的系统工具照样受沙箱/围栏约束
     callers: [user, discussant, executor, solo, core_proxy, planner, orchestrator]   # 谁能调它：user（经呈现层）/ 角色 id；与 roles.yaml 的工具面双向一致
@@ -83,7 +83,7 @@ tools:
       path:
         type: string
         required: true
-        desc: 要搜索的真实绝对路径
+        desc: 要搜索的路径
       keyword:
         type: string
         required: true

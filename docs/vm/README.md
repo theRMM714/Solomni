@@ -73,8 +73,8 @@ Windows guest 的 agent / 运行包由 provision 能力的 `guest-runtime` 编�
 
 - root 用磁盘镜像（qcow2/raw）；需要共享时 guest 拿 `restrict=on` 的网卡（出站全断，`guestfwd` 内部隧道可用）。
 - 就绪检测按**组合**逐项报"现状 + 怎么补"；"验过没有"是数据表（`VERIFIED_HOSTS`），不是平台 `cfg`。
-- **路径桥**（`domain/paths.rs`）：宿主路径 ↔ guest 路径只有一座桥——宿主与 guest 同方言时**恒等**（宿主路径原样在 guest 里成立），跨方言时编进镜像根（宿主 `D:\a\b` → POSIX guest `/solomni-host/d/a/b`；POSIX 宿主 → Windows guest `C:\solomni-host\…`，非法字符转义）。挂载点与命令装配（`cwd` / 路径型 `env`）都走它。
-- **工作环境提示词按环境分发**（`prompts/shared/tools.yaml` 的 `env_hosts` / `env_guests` / `envs`）：本机档按宿主平台给，虚拟机档按 guest 的 os 给——虚拟机档给出的路径就是 guest 内路径，模型据此拼参数。
+- **路径桥**（`domain/paths.rs`）：宿主路径 ↔ guest 路径只有一座桥——宿主与 guest 同方言时**恒等**（宿主路径原样在 guest 里成立），跨方言时编进镜像根（宿主 `D:\a\b` → POSIX guest `/solomni-host/d/a/b`；POSIX 宿主 → Windows guest `C:\solomni-host\…`，非法字符转义）。挂载点与命令装配（`cwd` / 路径型 `env`）都走它。**反向也走它**：系统工具跑在宿主侧，靠它把模型给的 guest 写法译回宿主路径（`PathCodec`，见 [docs/tools/tools-and-roles.md](../tools/tools-and-roles.md) 的「路径模型」）。
+- **工作环境提示词按环境分发**（`prompts/shared/tools.yaml` 的 `env_hosts` / `env_guests` / `envs`）：本机档按宿主平台给，虚拟机档按 guest 的 os 给——虚拟机档给出的路径就是 guest 内路径；**系统工具与模块工具同一套写法**（路径规矩只在提示词册的 `tool_texts.path_rules` 里说一次，核心在寻址前翻译）。
 - 用户自备 guest 可在基础根目录放一份 `guest.yaml` 声明画像（`id` / `arch` / `agent` / `os` / `clients: [9p, virtiofs, cifs]` / `runtimes: [python, node]`——后者是**镜像自带**的运行能力，选型诊断据此不必再要 `runtimes/` 包）；缺省按目录名与 Debian 默认（linux + QGA + 9p + virtiofs），不认识的值如实拒收。
 - 依赖（QEMU / `virtiofsd` / SMB helper / 镜像）**不预置、不分发**，由 `provision` 能力按清单下载并解包进项目内 `.vm/`（清单 `dependencies.yaml`、下载源 `links.yaml`，需用户同意）：CLI `solomni --provision`，Web `/api/setup/status|ensure|job`。设置里没登记 `qemu_path` / `virtiofsd_path` 时，**启动即自动采用**项目内补齐的可执行文件（显式登记优先）。
 

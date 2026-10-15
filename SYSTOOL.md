@@ -22,7 +22,7 @@
 | 工具面怎么合成、每回合给谁、越权怎么判 | [docs/tools/tools-and-roles.md](docs/tools/tools-and-roles.md) 的「可用工具面」「越权校验」 |
 | 核心操作为什么必须走工具调用、载荷形状 | 同上的「核心操作必须走工具调用」 |
 | 提示词按角色怎么分配 | 同上的「提示词按角色分配」 |
-| 路径模型（占位符 → 真实绝对路径、越界拒绝、编码、`@` 引用） | 同上的「路径模型」 |
+| 路径模型（占位符 → 本环境写法、越界拒绝、编码、`@` 引用） | 同上的「路径模型」 |
 | 回报与验收的语义（`submit_report` / `node_verdict` / `checklist` / `verdict`） | 同上的「可用工具面」；链的流程见 [docs/collab/task-chain.md](docs/collab/task-chain.md) |
 | 围栏与能力等级（守门进程、平台后端、降级） | [ARCHITECTURE.md](ARCHITECTURE.md) 的「跨平台机制」；探针见 [TESTING.md](TESTING.md) |
 | 模块工具怎么声明 | [MODULE_SPEC.md](MODULE_SPEC.md) |
