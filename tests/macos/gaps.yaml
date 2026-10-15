@@ -1,5 +1,5 @@
 # macos 平台的缺口账（当前状态：条目存在 = 这条测试还没有；补上就删条目）。
 #
 # 当前为空：本平台围栏探针（tests/macos/probes/fence.rs）与整仓全量测试都已在真机跑通。
-# 探针不会再被"装不上"掩盖：profile 被 sandbox_init 拒绝会直接 panic（那是 profile 写错），
-# 只有"本机该私有 ABI 失效"才是环境结论、如实跳过，并出现在报告的 envSkips 里。
+# 探针只在"本机该私有 ABI 失效"时如实跳过，并出现在报告的 envSkips 里；
+# profile 被 sandbox_init 拒绝会直接 panic（那是 profile 写错）。

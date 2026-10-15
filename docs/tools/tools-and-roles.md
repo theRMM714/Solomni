@@ -20,7 +20,7 @@ tools:
       path:
         type: string
         required: true
-        desc: 要读取的真实绝对路径
+        desc: 要读取的路径（用【工作环境】的写法）
 ```
 
 - **`capability` 决定收口，不按"系统 / 模块"一刀切**：`read` / `list` / `search` / `write` / `edit` / `patch` 虽都是系统工具，
@@ -129,10 +129,15 @@ roles:
 - **核心可以先核实**：模型先请求 `read` / `search` 时，核心执行并把结果回灌，然后再要那一次核心操作调用；
   它用的是**只读**小环境（根 = 本次工作的共享区，只发声明里 `capability: fs-read` 的工具）。没有这条回路，模型一想核实就会被判"没有调用 X"而整步中断。
 
-## 五、路径模型：工具只看到真实绝对路径
+## 五、路径模型：工具用本环境的写法
 
 仓库里（代码、提示词册、`module.yaml`、文档）一律只用**占位符**，运行时由核心取真实目录替换进提示词——
 仓库永不出现机器路径；系统工具与模块自带的外部工具**用同一套路径语言**（布局见 [session-model.md](../session/session-model.md) 一）：
+
+- **一种写法，一处说明**：模型对本环境用绝对路径——本机档是宿主路径，虚拟机档是 guest 内路径（路径桥渲染）；
+  规矩只在提示词册的 `tool_texts.path_rules` 里说一次（见 [prompts.md](../prompt/prompts.md)）。
+  虚拟机档的 guest 写法由核心在**寻址前**译回宿主路径（`kernel::ports::PathCodec`），再过下面的允许根校验——
+  **翻译不改变安全边界**（越界、`..`、相对路径照样拒，拒绝时按本环境写法列出允许的根）。
 
 | 占位符 | 运行时替换为 | 可达范围 |
 | --- | --- | --- |
@@ -145,7 +150,7 @@ roles:
   `work_commit` 只接受白名单内的相对路径（越界**整条拒绝**），`work_pull` 只拉白名单内的路径。语义见 [docs/permission/README.md](../permission/README.md)。
 - **编码**：读严格 UTF-8（非法字节按替换字符呈现并如实标注——**本程序不猜编码**）；写一律 UTF-8。
 - **用户也能引用**：输入框里用 `@` 挑文件（`@work:相对路径` / `@sandbox:<agent>/相对路径`，**给人用**），
-  核心替换成真实绝对路径之后才进转录与上下文；引用别人的私有沙箱时如实说明无权读取，且不泄漏对方的真实路径。
+  核心替换成**宿主真实绝对路径**之后才进转录与上下文（`@` 是给人用的写法，不经路径桥）；引用别人的私有沙箱时如实说明无权读取，且不泄漏对方的真实路径。
 
 ## 六、提示词按角色分配
 
@@ -187,7 +192,7 @@ prompts/
 | 场景 | 约定 |
 | --- | --- |
 | 代理工具 | 六个工具 + `core_proxy` 角色 + 队列桥宿主都已接上真实会话；委托是**全权**（`granularity=full`）；路径的白/黑名单与模块写授权已落在会话权限（[docs/permission/README.md](../permission/README.md)），工具级确认（`ask` 粒度）也已接入——命中 `ask` 表的调用在执行前经统一裁决通道让用户选 `allow` / `deny` / `full`。孩子不把转录推给代理：门的通知、意外停止通知 + `read_session_messages` 主动倒查 |
-| 建会话 = 建 + 写开头 + 开工 | `create_session` 一份声明两处调用：**人经呈现层**给 `name` / `mode` / `agents`（可省 `tier`）先建出会话，后续用 `send_message` 发言推进；**核心代理**给 `mode`（single / collab）+ `agents`（只写身份：`ref` 或 `name`+`modules`+`model`）+ `task`，**建好就开工**（single 以 task 为第一句，collab 以它当本次需求）。后续补充 / 返工 / 代答门仍走 `send_session_message`（**代答要显式给 `reply` = 那张卡上的选项 id**；给不出就不作代答，不替用户猜） |
+| 建会话 = 建 + 写开头 + 开工 | `create_session` 一份声明两处调用：**人经呈现层**给 `name` / `mode` / `agents`（可省 `tier`；虚拟机档时给 `base`）先建出会话，后续用 `send_message` 发言推进；**核心代理**给 `mode`（single / collab）+ `agents`（只写身份：`ref` 或 `name`+`modules`+`model`）+ `task`，**建好就开工**（single 以 task 为第一句，collab 以它当本次需求）。后续补充 / 返工 / 代答门仍走 `send_session_message`（**代答要显式给 `reply` = 那张卡上的选项 id**；给不出就不作代答，不替用户猜） |
 | 代理工具的生命周期 | `stop` = 把整棵子树落成 `stopped`（拦住派发与唤醒）再**级联中断**在跑的生成，会话上的停止按钮就是这一下；`continue` = 解冻并按形态唤醒接着走；`close` 是终态。停止 / 继续是一对逆操作，没有单独的暂停；都不改写历史 |
 | 代理模式下的子会话审查关卡 | 不问用户：作为**门**交给核心判断，核心用 `send_session_message(kind=user_reply, reply=<选项 id>)` 回答 |
 | 代理模式下子会话的转录 | **不转发给核心**：核心只拿门的通知与意外停止通知，正文经 `read_session_messages`（0 = 最新）主动倒查 |

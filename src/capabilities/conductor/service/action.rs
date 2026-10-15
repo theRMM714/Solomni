@@ -67,6 +67,19 @@ impl Conductor {
                 None => self.registry.app_settings().tier,
             },
         };
+        // base：点名就用它；否则子会话沿用父会话，顶层为空（建好后在会话配置里填）。
+        let vm_base = match spec
+            .base
+            .as_deref()
+            .map(str::trim)
+            .filter(|b| !b.is_empty())
+        {
+            Some(b) => Some(b.to_string()),
+            None => match &parent {
+                Some(p) => self.history.meta(p)?.exec.base.clone(),
+                None => None,
+            },
+        };
         // 本次需求：协作必须有；单 agent 的"开头"由调用方在开工那一刻给（见 create_session_call）。
         let task = if mode == WorkMode::Collab {
             let t = spec.task.trim();
@@ -86,6 +99,7 @@ impl Conductor {
             task,
             delegate,
             tier,
+            base: vm_base,
         };
         // 有父 = 子工作（`create_work_inner` 直接给 parent）；没有父 = 顶层会话，走同一个入口包装。
         let opened = match parent.as_deref() {

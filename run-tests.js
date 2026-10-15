@@ -473,7 +473,7 @@ function structuralAudit() {
   // 注释契约（ARCHITECTURE.md 十）：判定与棘轮比对只有一处——run-hygiene.js 的 scanCommentContract
   // 与 compareContract。棘轮**只减不增**：新文件零容忍（快照里没有 = 从 0 起算），老文件同类变多也是新增；
   // 变少 = 应销账，同样硬失败（收紧只能往下，见 --tighten）。
-  const { scanCommentContract, compareContract, ratchetSelfTest } = require("./run-hygiene.js");
+  const { scanCommentContract, compareContract, ratchetSelfTest, commentLexerSelfTest } = require("./run-hygiene.js");
   const COMMENT_BASELINE = path.join(ROOT, "tests", "comment-baseline.json");
   const contractNow = scanCommentContract().byFileRule;
   if (!fs.existsSync(COMMENT_BASELINE)) {
@@ -486,6 +486,7 @@ function structuralAudit() {
     for (const s of stale) problems.push("注释契约快照应销账（现在变少了）：" + s + "（收紧：node run-hygiene.js --tighten）");
   }
   for (const b of ratchetSelfTest()) problems.push("棘轮自测失败：" + b);
+  for (const b of commentLexerSelfTest()) problems.push("注释词法自测失败：" + b);
   // 文档分层（AGENTS.md「文档分层与同步」）：门户引用 docs/ 下的细则，细则引用彼此——
   // 两边都要真实存在。只查引用不查正文，避免把文档写法变成门禁。
   // **相对解析**：链接按所在文件的目录解析（门户在根、细则在 docs/<领域>/），所以 docs/ 内部写错的同级引用也会被抓到。
@@ -653,7 +654,7 @@ function structuralAudit() {
   // ④ 外部连接台账 ↔ 消费点：links.yaml 的键与代码里 link(...) 的引用一一对应。
   // 为什么机器查：台账多个没人用的键 = 死数据；少一个被引用的键 = 运行期才炸（env.js 是引导层，炸在这里没得救）。
   const linksFile = path.join(ROOT, "links.yaml");
-  const linkDomains = ["rustup", "winlibs", "release", "guest"];
+  const linkDomains = ["rustup", "winlibs", "release", "guest", "smbd"];
   if (!fs.existsSync(linksFile)) {
     problems.push("缺外部连接台账：links.yaml");
   } else {
@@ -674,9 +675,14 @@ function structuralAudit() {
       if (!fs.existsSync(abs)) return;
       for (const m of fs.readFileSync(abs, "utf8").matchAll(/\blink\("([A-Za-z0-9_.-]+)"\)/g)) used.add(m[1]);
     };
-    // 消费点：环境层与虚拟机档安装脚本（按平台拆过：setup-vm.js 是分发入口，各平台脚本与共享件都要扫）。
-    for (const consumer of ["env.js", "setup-vm.js", "setup-vm-common.js", "setup-vm-windows.js", "setup-vm-linux.js", "setup-vm-mac.js"]) {
-      scanLinkUses(path.join(ROOT, consumer));
+    // 消费点：环境层（rustup 安装）与依赖清单的 source（产品侧下载源都在 dependencies.yaml；
+    // release:<资产> 走 release.base，不在这里当键）。
+    scanLinkUses(path.join(ROOT, "env.js"));
+    const depsFile = path.join(ROOT, "dependencies.yaml");
+    if (fs.existsSync(depsFile)) {
+      for (const m of fs.readFileSync(depsFile, "utf8").matchAll(/^\s*source:\s*([A-Za-z0-9_.:-]+)\s*$/gm)) {
+        if (!m[1].includes(":")) used.add(m[1]);
+      }
     }
     const walkSrc = (d) => {
       for (const e of fs.readdirSync(d, { withFileTypes: true })) {

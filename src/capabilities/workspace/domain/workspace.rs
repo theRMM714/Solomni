@@ -66,6 +66,9 @@ pub struct Sandbox {
     /// 模型侧文案（来自 prompts/）：**共享一份**（提示词能力给的 `Arc`），不是状态、也不深拷贝。
     /// 路径拒绝文案由**本模块自己**渲染，所以这条是正常的业务间依赖（经 prompt 的能力面）。
     pub texts: std::sync::Arc<ToolTexts>,
+    /// 目的：这场会话的路径翻译器（虚拟机档 guest ↔ 宿主；本机档 None = 恒等）。
+    /// 约束：只用来把模型给的写法译成宿主路径**再校验**；安全判断仍然只有 `resolve` 一处。
+    pub path_codec: Option<std::sync::Arc<dyn crate::kernel::ports::PathCodec>>,
 }
 
 impl Sandbox {
@@ -83,21 +86,35 @@ impl Sandbox {
         if spec.is_empty() {
             return Err(deny(self.texts.path_empty.clone()));
         }
-        let p = Path::new(spec);
-        if !p.is_absolute() {
+        // 模型侧写法 → 宿主写法（虚拟机档 guest→宿主；本机档恒等）。翻译只影响寻址；安全判断仍在下面。
+        let host: PathBuf = match self.path_codec.as_ref() {
+            Some(codec) => match codec.to_host(spec) {
+                Some(p) => p,
+                // 认不出本环境的写法：按"不在允许根里"如实拒绝，并把允许的根列回去。
+                None => {
+                    return Err(deny(self.texts.render(
+                        &self.texts.path_outside_roots,
+                        &[("path", spec.to_string())],
+                    )))
+                }
+            },
+            None => PathBuf::from(spec),
+        };
+        if !host.is_absolute() {
             return Err(deny(self.texts.render(
                 &self.texts.path_need_absolute,
                 &[("path", spec.to_string())],
             )));
         }
         // 空段（连续分隔符）：components() 会吞掉，这里如实挡掉。
-        let flat = spec.replace('\\', "/");
+        let flat = host.to_string_lossy().replace('\\', "/");
         if flat.trim_start_matches('/').contains("//") {
             return Err(deny(self.texts.render(
                 &self.texts.path_empty_segment,
                 &[("path", spec.to_string())],
             )));
         }
+        let p: &Path = &host;
         let mut norm = PathBuf::new();
         for c in p.components() {
             match c {
@@ -225,18 +242,30 @@ impl Sandbox {
         v
     }
 
-    /// 允许的根目录清单（错误文案里列全，模型照着改）。
+    /// 目的：宿主路径 → 该环境里给模型看的写法（有翻译器就译，没有就是宿主写法）。
+    fn in_view(&self, host: &Path) -> String {
+        match self.path_codec.as_ref() {
+            Some(codec) => codec.to_view(host),
+            None => slash(host),
+        }
+    }
+
+    /// 允许的根目录清单（错误文案里列全，模型照着改）——按本环境的写法给。
     pub fn roots_listing(&self) -> String {
         let mut lines = vec![
-            self.texts
-                .render(&self.texts.roots_shared, &[("root", slash(&self.shared))]),
-            self.texts
-                .render(&self.texts.roots_private, &[("root", slash(&self.private))]),
+            self.texts.render(
+                &self.texts.roots_shared,
+                &[("root", self.in_view(&self.shared))],
+            ),
+            self.texts.render(
+                &self.texts.roots_private,
+                &[("root", self.in_view(&self.private))],
+            ),
         ];
         for (id, root) in &self.modules {
             lines.push(self.texts.render(
                 &self.texts.roots_module,
-                &[("id", id.clone()), ("root", slash(root))],
+                &[("id", id.clone()), ("root", self.in_view(root))],
             ));
         }
         lines.join("\n")

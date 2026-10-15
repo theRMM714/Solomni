@@ -1,11 +1,4 @@
 # 跨平台层的缺口账（当前状态：条目存在 = 这条测试还没有；补上就删条目）。
 #
-# 「删会话即请求撤销授权」的接线已完成（由 src/tests/core.rs 的
-# deleting_a_session_asks_the_fence_to_release_its_grants 钉住）；真实撤权机制是否生效另记在
-# tests/windows/gaps.yaml。
-#
-# 当前为空。原先那条环境条目已查清并销账：
-# 让门禁得出一串假失败的不是「受限令牌会话」，而是 DSH 的 Windows 写沙箱后端
-#（@deepseek-ai/dsh-sandbox-windows-acl）在授写权时给授权根打上的 Low 完整性标签
-#（SYSTEM_MANDATORY_LABEL_ACE、可继承、dispose() 不撤销）。判据、后果与处置见
-# docs/testing/execution-ci.md 的「真机入口」一节。
+# 当前为空。跑门禁前的工作区完整性前提（DSH 的 Windows 写沙箱后端会给授权根打 Low 完整性标签）
+# 见 docs/testing/execution-ci.md 的「真机入口」一节。

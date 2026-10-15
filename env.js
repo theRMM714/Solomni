@@ -303,19 +303,6 @@ function checkWinlibsHash(zip) {
   log("sha256 verified");
 }
 
-function upstreamWinlibsUrl() {
-  // 上游资产名带版本，latest/download/winlibs.zip 必然 404；用 API 解析真实文件名。
-  const q = [
-    "$ErrorActionPreference = 'Stop'",
-    "$r = Invoke-RestMethod '" + link("winlibs.upstream.api") + "'",
-    "$a = $r.assets | Where-Object { $_.name -match 'x86_64' -and $_.name -match 'seh' -and $_.name -match '[.]zip$' -and $_.name -notmatch 'llvm' } | Select-Object -First 1",
-    "if (-not $a) { $a = $r.assets | Where-Object { $_.name -match 'x86_64' -and $_.name -match '[.]zip$' } | Select-Object -First 1 }",
-    "Write-Output $a.browser_download_url"
-  ].join("; ");
-  const got = spawnSync("powershell", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", q], { encoding: "utf8" });
-  const url = (got.stdout || "").trim();
-  return /^https:/.test(url) ? url : null;
-}
 
 function probeOnce(url) {
   // 一次 2MB 的范围 GET，回 { code, speed }；code 000 = 网络层失败（DNS/重置/超时）。
@@ -405,13 +392,11 @@ async function installWinlibs() {
     }
   }
   if (!fs.existsSync(zip)) {
-    const rel = link("release.base").replace(/\/+$/, "");
-    const ours = rel + "/winlibs.zip";
-    const candidates = [ours].concat(mirrorVariants(ours));
-    const upstream = await upstreamWinlibsUrl();
-    if (upstream) candidates.push(upstream, ...mirrorVariants(upstream));
+    // 上游资产名带版本：台账里钉死一个 release 的完整 URL，不再走 GitHub API（也就没有限流）。
+    const upstream = link("winlibs.upstream.asset");
+    const candidates = [upstream].concat(mirrorVariants(upstream));
     const extraMirror = (process.env.SOLOMNI_GH_MIRROR || "").replace(/\/+$/, "");
-    if (extraMirror) candidates.push(extraMirror + "/" + (upstream || ours).replace("https://github.com/", ""));
+    if (extraMirror) candidates.push(extraMirror + "/" + upstream.replace("https://github.com/", ""));
     const seen = [];
     for (const c of candidates) if (seen.indexOf(c) < 0) seen.push(c);
     const url = await pickFastest(seen);

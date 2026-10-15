@@ -241,6 +241,9 @@ pub fn env_block(
             .collect::<Vec<_>>()
             .join("\n")
     };
+    let sandbox_root = in_guest(&p.private);
+    // 路径写法只有一处（册子里的 path_rules）：它自己也要用真实根渲染出例子，再插进环境块。
+    let path_rules = texts.render(&texts.path_rules, &[("sandbox_root", sandbox_root.clone())]);
     // 工作环境按**环境**分发：本机档按宿主平台选；虚拟机档按 guest 的 os 选。
     prompt.env(
         std::env::consts::OS,
@@ -249,8 +252,9 @@ pub fn env_block(
             ("work_name", p.work_name.clone()),
             ("agent", p.agent.clone()),
             ("work_root", in_guest(&p.shared)),
-            ("sandbox_root", in_guest(&p.private)),
+            ("sandbox_root", sandbox_root),
             ("module_roots", module_roots),
+            ("path_rules", path_rules),
         ],
     )
 }

@@ -231,6 +231,8 @@ pub struct CoreTexts {
 /// 随沙箱/工具环境注入 conductor 的纯逻辑（与 RefsPrompts 同一套做法），本身不是状态。
 #[derive(Debug, Clone, Deserialize)]
 pub struct ToolTexts {
+    /// 目的：路径写法的**唯一一处**说明（env_block 把它插进每个环境块；工具说明与模块声明不再各写一份）。
+    pub path_rules: String,
     // —— 路径校验（workspace::resolve）——
     pub path_empty: String,
     /// 变量：path

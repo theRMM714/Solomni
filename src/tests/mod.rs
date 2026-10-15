@@ -9,7 +9,7 @@ mod cli;
 mod collab;
 mod conductor;
 mod detail;
-mod doubles;
+pub(crate) mod doubles;
 mod fakes;
 mod fence_reach;
 mod llm;
@@ -89,6 +89,7 @@ pub(crate) fn single_work(
         task: None,
         delegate: false,
         tier: crate::kernel::api::Tier::Host,
+        base: None,
     }
 }
 

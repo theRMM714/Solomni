@@ -58,9 +58,9 @@ tools:                  # 【可选】外部工具表：工具名 → 声明
     parallel: true                      # 【可选】声明可并发（只读、无副作用才写）
     params:                             # 【可选】参数契约：不写 = 核心不校验，args 原样交给工具
       path:
-        type: string                    # string / integer / number / boolean
+        type: string                    # string / integer / number / boolean / array / object
         required: true                  # 缺了就是参数错（核心拒收，不启动进程）
-        desc: 要读取的真实绝对路径
+        desc: 要读取的路径（用【工作环境】的写法）
 services:               # 【可选】常驻服务：服务名 → 声明（用哪个适配器拉起 + 启动命令）
   fs:
     adapter: mcp        # 组合根注册的适配器名（当前已注册 mcp：stdio 长驻会话）；未知 = 拒收并列出可用名
@@ -116,7 +116,7 @@ secrets:                # 【可选】隐秘字段：字段名 → 注入该模�
 
 ## 四、工具执行
 
-工具属于模块，使用权跟着装了它的 agent：**执行阶段与单 agent 的对话**里都能用；讨论阶段不接工具（讨论只出主意）。
+工具属于模块，使用权跟着装了它的 agent：**执行阶段与单 agent 的对话**里都能用；讨论阶段只发只读核实工具（`read` / `list` / `search`），不给模块工具。
 
 - **调用**：模块 AI 发 `tool` 信封；参数是 JSON 对象，经 stdin 送入工具进程（不进命令行，杜绝注入）。
 - **编码**：stdin 与 stdout **统一 UTF-8**（核心为子进程强制；否则 Windows 上中文参数会被按系统代码页解坏）。
@@ -148,7 +148,7 @@ secrets:                # 【可选】隐秘字段：字段名 → 注入该模�
   不经 AI 会话也能跑：CLI `module <模块id>.<工具名> [json 参数]`，Web `POST /api/actions/module.<模块id>.<工具名>`
   （清单见 `GET /api/actions`）。参数仍按本模块 `params` 校验；可选 `workspace` 给一份工作目录（缺省 = 模块自己的 `userdata/`）；
   围栏与 agent 会话同一口径（模块目录递归只读、`userdata/` 可写）。两条路径的审计记录同一处格式化。
-  **缺运行包 = 不执行**（与成员循环同一把尺子）：没关系，产品会如实说明缺哪个能力，不静默降级。
+  **缺运行包 = 不执行**（与成员循环同一把尺子）：本机档如实说明缺哪个能力、不静默降级；虚拟机档在「开始」前就**拒绝创建**（见 [RUNTIME_SPEC.md](RUNTIME_SPEC.md) §五）——没有工具用户完不成工作。
 
 ## 五、模块测试交付
 

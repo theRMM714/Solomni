@@ -1448,7 +1448,7 @@ function renameUpload(sid, name, b64, alt) {
 async function openWizard() {
   // single 形态：w.modules = 勾选的模块；w.agentPick = 复用的登记处 agent
   // （null = 用勾选的模块组临时 agent，名字见 w.agentName）。
-  const w = { mode: 'single', modules: [], agentPick: null, agentName: '', agents: [], task: '', tier: 'host' };
+  const w = { mode: 'single', modules: [], agentPick: null, agentName: '', agents: [], task: '', tier: 'host', base: '' };
   const ed = { open: false, name: '', modules: [], model: null, note: '' };
   // 档位选择：默认档与虚拟机档可用性由后端给（GET /api/tiers，与「开始」的校验同源）。
   let tiers = null;
@@ -1460,8 +1460,8 @@ async function openWizard() {
   const hostR = cfgRadio('本机档 —— 脚本直接在宿主上跑：宿主自备解释器；隔离就是宿主本身（默认）。', w.tier !== 'vm', 'wf-tier');
   const vmOk = !!(tiers && tiers.vm_available);
   const vmR = cfgRadio('虚拟机档 —— 一整套 guest，隔离更强；按模块声明装载运行包，依赖 guest 本体。', w.tier === 'vm', 'wf-tier', !vmOk);
-  hostR.box.addEventListener('change', () => { if (hostR.box.checked) w.tier = 'host'; });
-  vmR.box.addEventListener('change', () => { if (vmR.box.checked) w.tier = 'vm'; });
+  hostR.box.addEventListener('change', () => { if (hostR.box.checked) { w.tier = 'host'; syncWizardTier(); } });
+  vmR.box.addEventListener('change', () => { if (vmR.box.checked) { w.tier = 'vm'; syncWizardTier(); } });
   tierField.appendChild(tierLabel); tierField.appendChild(hostR.wrap); tierField.appendChild(vmR.wrap);
   if (!vmOk) {
     const reqs = (tiers && tiers.vm_requirements) || [];
@@ -1473,6 +1473,14 @@ async function openWizard() {
     ));
   }
 
+  // 虚拟机档在**创建时**就要给基础根（base 是会话级；机器能力已在上面判过）。
+  const baseIn = textInput('base：虚拟机的基础根（guest rootfs 目录，或含 rootfs 磁盘镜像的目录）');
+  baseIn.value = w.base;
+  baseIn.addEventListener('input', () => { w.base = baseIn.value; });
+  const baseField = field('虚拟机基础根 base', baseIn);
+  function syncWizardTier() {
+    baseField.className = w.tier === 'vm' ? 'wf-field' : 'wf-field hidden';
+  }
   openModal('新建工作', (c) => {
     const nameIn = textInput('工作名称（必填，会话落盘目录名）');
     const modeSel = selectInput([
@@ -1826,10 +1834,15 @@ async function openWizard() {
       const name = nameIn.value.trim();
       if (!name) { c.setMsg('工作名称必填', true); return; }
       const task = taskIn.value.trim();
+      const vmBase = (w.base || '').trim();
+      if (w.tier === 'vm' && !vmBase) {
+        c.setMsg('虚拟机档要填基础根 base（guest rootfs 所在目录）；也可以先建本机档，建好后在会话配置里切到虚拟机档并填。', true);
+        return;
+      }
       let agents;
       if (w.mode === 'proxy') {
         // 代理：没有名单、没有需求——选这个形态就是**授予全权**（后端建 mode=proxy 的会话）。
-        await submit({ name, mode: 'proxy', agents: [], tier: w.tier });
+        await submit({ name, mode: 'proxy', agents: [], tier: w.tier, base: w.tier === 'vm' ? vmBase : null });
         return;
       }
       if (w.mode === 'single') {
@@ -1859,6 +1872,7 @@ async function openWizard() {
       const names = agents.map((a) => a.name);
       const dup = names.filter((n, i) => names.indexOf(n) !== i)[0];
       const body = { name, mode: w.mode, agents, tier: w.tier };
+      if (w.tier === 'vm') body.base = vmBase;
       if (task) body.task = task;
       if (dup) {
         choiceModal('agent 重名', '本次工作里有同名 agent「' + dup + '」。', [
@@ -1874,6 +1888,7 @@ async function openWizard() {
     c.body.appendChild(field('形态', modeSel));
     c.body.appendChild(modeHint);
     c.body.appendChild(tierField);
+    c.body.appendChild(baseField);
     c.body.appendChild(partWrap);
     c.body.appendChild(modelWrap);
     c.body.appendChild(taskField);
@@ -1881,7 +1896,7 @@ async function openWizard() {
     c.body.appendChild(createBtn);
     c.body.appendChild(cancelBtn);
 
-    renderParts(); renderModels();
+    renderParts(); renderModels(); syncWizardTier();
   }, true);
 }
 

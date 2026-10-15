@@ -1,0 +1,82 @@
+# 依赖清单：**不预置、不分发**的大体积依赖的唯一真相（产品 Rust 侧编译期内嵌；脚本可直接读同一份）。
+#
+# 字段：
+#   id       稳定短名（报告与缺口引用）
+#   os       linux / windows / macos / any（按宿主平台筛）
+#   arch     x86_64 / aarch64 / any
+#   install  装到产品根下的哪个目录（相对路径，用 / 分段）
+#   probe    判"在不在场"的那个路径（相对产品根；文件或目录存在即在位）
+#   source   下载源：links.yaml 的键，或 release:<资产名>（= links.yaml 的 release.base + 资产名，项目自托管便携包）
+#   kind     安装方式：archive（默认，解归档）/ appimage / file（单文件直下）/ guest-rootfs（多步构造）
+#   strip    解包时剥掉归档里的前 N 段目录（缺省 0）
+#   size_mb  大致体积（提示与带宽预估）
+#   note     一句话
+#
+# 规则：这里只收"不预置、不分发、按需下载"的依赖；guest 镜像按已定方向**不自托管**（指上游 cdimage）。
+# 自托管的便携包一律保持**原样**，并登记进 dependencies/THIRD-PARTY-NOTICES.md（许可证 + 对应源码）。
+deps:
+  - id: vm.qemu.linux
+    os: linux
+    arch: x86_64
+    kind: appimage
+    install: .vm/qemu
+    probe: .vm/qemu/bin/qemu-system-x86_64
+    source: release:QEMU-11.1.1-4-anylinux-x86_64.AppImage
+    size_mb: 165
+    note: Linux 虚拟机档的 QEMU（pkgforge Anylinux AppImage，自带 sharun 兼容层；`--appimage-extract` 解包后约 1.7 GB，含全部 guest 目标）
+  - id: vm.virtiofsd.linux
+    os: linux
+    arch: x86_64
+    install: .vm/virtiofsd
+    probe: .vm/virtiofsd/virtiofsd
+    source: release:virtiofsd-4bfa7125.zip
+    strip: 3
+    size_mb: 3
+    note: Linux 默认共享档的外部守护进程（Rust 版 virtiofsd，musl 静态；zip 里带 target/…/release 前缀，剥 3 段）
+  - id: vm.qemu.windows
+    os: windows
+    arch: x86_64
+    install: .vm/qemu
+    probe: .vm/qemu/bin/qemu-system-x86_64.exe
+    source: release:qemu-windows-x86_64-11.1.1.tar.zst
+    strip: 1
+    size_mb: 32
+    note: Windows 虚拟机档的 QEMU（官方源码在 MSYS2（mingw-w64）下自建的便携包，--enable-slirp；DLL 与固件都在包内，引擎按便携布局指 -L）
+
+  - id: vm.guest.linux
+    os: linux
+    arch: x86_64
+    kind: guest-rootfs
+    install: .vm/guest/base
+    probe: .vm/guest/base/vmlinuz
+    source: guest.debian.image
+    size_mb: 400
+    note: Debian 13 基础根（cloud 镜像 → rootfs 目录 + 通用内核 + 9p initrd + qemu-guest-agent）；需要 sfdisk / dd / debugfs / ar / unshare
+  - id: vm.guest.windows
+    os: windows
+    arch: x86_64
+    kind: guest-disk
+    install: .vm/guest/base
+    probe: .vm/guest/base/rootfs.qcow2
+    source: guest.debian.qcow2
+    size_mb: 330
+    note: Windows 宿主用的 Debian cloud qcow2（单文件直下 + 写 guest.yaml 画像）；agent 与运行包由 vm.guest-runtime.windows 的 Rust 编排装上
+  - id: vm.guest-runtime.windows
+    os: windows
+    arch: x86_64
+    kind: guest-runtime
+    install: .vm/guest/base
+    probe: .vm/guest/base/.runtimes-ready
+    source: guest.debian.qcow2
+    size_mb: 0
+    note: Windows guest 的运行期编排（首启 cloud-init 装 qemu-guest-agent → 维护启动先整份刷新 apt lists，再装必需的 python3 / cifs-utils 与 NodeSource 的 node → 逐个自证 python -V / node --version，只把自证过的写进 guest.yaml 的 runtimes）；镜像源与 vm.guest.windows 同一份 qcow2（走缓存）
+
+  - id: vm.smbd.windows
+    os: windows
+    arch: x86_64
+    kind: file
+    install: .vm/smbd
+    probe: .vm/smbd/smbd.exe
+    source: smbd.windows
+    size_mb: 1
+    note: 宿主侧用户态 SMB 共享服务（独立 fork 仓的预编译 helper；Windows 没有 9p / virtiofs，SMB 经 guestfwd 做实时共享）

@@ -2,8 +2,6 @@
 //! 退出码按各模式的约定（多数恒 0：**判定归调用方**，这里只报事实）。
 //! 隐藏模式：用户经文档知道它们，不列进面向用户的帮助。
 
-pub mod unpack;
-
 /// 目的：把归档解到目录（跨平台纯 Rust，不依赖用户装解压工具；用法 solomni --unpack <archive> <dest>）。
 pub fn unpack_cli(args: &[String], i: usize) -> i32 {
     let archive = args.get(i + 1).cloned().unwrap_or_default();
@@ -12,7 +10,10 @@ pub fn unpack_cli(args: &[String], i: usize) -> i32 {
         eprintln!("用法：solomni --unpack <archive> <dest>");
         return 2;
     }
-    match unpack::extract(std::path::Path::new(&archive), std::path::Path::new(&dest)) {
+    match crate::kernel::detail::unpack::extract(
+        std::path::Path::new(&archive),
+        std::path::Path::new(&dest),
+    ) {
         Ok(()) => 0,
         Err(e) => {
             eprintln!("[解包] {}", e);
@@ -28,8 +29,8 @@ pub fn doctor() -> i32 {
     // 也就是最朴素的情形——登记过的路径以会话配置界面为准（那里按会话选型问同一份清单）。
     let vm =
         crate::capabilities::vm::api::vm_requirements(&crate::capabilities::vm::api::VmInputs {
-            base: None,
             qemu: None,
+            share_tool: None,
             probe: &crate::kernel::detail::HostProbeAdapter,
         });
     let doc = serde_json::json!({
@@ -50,6 +51,79 @@ pub fn doctor() -> i32 {
     });
     println!("{}", doc);
     0
+}
+
+/// 目的：给 `--provision` 的补齐作业装配 vm 能力面（guest-runtime 的运行期编排要起 guest）。
+/// 约束：只用于补齐——共享档用 QGA 复制（与挂载无关），引擎路径由编排条目自己给。
+fn provisioning_vm(
+    root: &std::path::Path,
+) -> std::sync::Arc<dyn crate::capabilities::vm::api::Vm + Send + Sync> {
+    std::sync::Arc::new(crate::capabilities::vm::service::VmService::new(
+        std::sync::Arc::new(crate::capabilities::vm::detail::FsPackages::new(
+            root.join("runtimes"),
+        )),
+        std::sync::Arc::new(crate::capabilities::vm::detail::QemuEngine::new()),
+        std::sync::Arc::new(crate::capabilities::vm::detail::CopyShare::new()),
+    ))
+}
+
+/// 目的：隐藏模式——依赖补齐：不带 `--ensure` 报状态（机器可读）；带 `--ensure[=id,…] --yes` 真下载安装。
+pub fn provision(root: &std::path::Path, args: &[String]) -> i32 {
+    let ids: Vec<String> = args
+        .iter()
+        .find_map(|a| a.strip_prefix("--ensure="))
+        .map(|s| {
+            s.split(',')
+                .filter(|x| !x.is_empty())
+                .map(|x| x.to_string())
+                .collect()
+        })
+        .unwrap_or_default();
+    if args.iter().any(|a| a == "--ensure") || !ids.is_empty() {
+        if !args.iter().any(|a| a == "--yes") {
+            eprintln!(
+                "[依赖补齐] 会从网络下载并写进项目内。确认后加 --yes（先用 --provision 看清单）。"
+            );
+            return 2;
+        }
+        let p =
+            crate::capabilities::provision::ProvisionService::with_vm(root, provisioning_vm(root));
+        return match p.ensure(&ids, &mut |line| eprintln!("[依赖补齐] {}", line)) {
+            Ok(()) => 0,
+            Err(e) => {
+                eprintln!("[依赖补齐] {}", e);
+                1
+            }
+        };
+    }
+    use crate::capabilities::provision::api::Provision;
+    let svc = crate::capabilities::provision::ProvisionService::new(root);
+    match svc.status() {
+        Ok(items) => {
+            let missing = items.iter().filter(|s| !s.present).count();
+            let doc = serde_json::json!({
+                "platform": std::env::consts::OS,
+                "arch": std::env::consts::ARCH,
+                "missing": missing,
+                "deps": items.iter().map(|s| serde_json::json!({
+                    "id": s.id,
+                    "present": s.present,
+                    "note": s.note,
+                    "install": s.install,
+                    "probe": s.probe,
+                    "source": s.source,
+                    "url": s.url,
+                    "size_mb": s.size_mb,
+                })).collect::<Vec<_>>(),
+            });
+            println!("{}", doc);
+            0
+        }
+        Err(e) => {
+            eprintln!("[依赖检查] {}", e);
+            1
+        }
+    }
 }
 
 /// 隐藏模式：用**产品自己的出站代理**（含按平台装配的 TLS）打一次最小 HTTPS 请求，如实报结论。

@@ -12,7 +12,7 @@
 | 东西 | 定义在 | 形态 |
 | --- | --- | --- |
 | 能力接口 | **各能力自己的 `api.rs`** | `SessionOps` / `ConductorOps` / `ActionOps` / `LogOps` 定义在 `capabilities/conductor/api/mod.rs`（会话中心、核心自己的用例与**动作目录 / 分发**）；`RegistryOps` 在 `capabilities/registry/api.rs`、`HistoryOps` 在 `capabilities/session/api.rs`、`WorkspaceOps` 在 `capabilities/workspace/api.rs`。**全 `&self`、可替换成假实现**；实现都是 `capabilities/conductor/api/proxy.rs` 里的队列代理（`ConductorHandle`）|
-| 事件台 | `capabilities/conductor/api.rs` | `EventBus`：核心独占生产，任意数量的消费者按序号增量取 |
+| 事件台 | `capabilities/conductor/api/mod.rs` | `EventBus`：核心独占生产，任意数量的消费者按序号增量取 |
 
 规则：
 
@@ -106,6 +106,9 @@
 | GET | `/api/history/{name}` | `HistoryOps::open` | — | `{meta,events,live,head}` | 200, 404 |
 | POST | `/api/history/{name}/delete` | `HistoryOps::delete` | — | `{ok}` | 200, 400 |
 | GET | `/api/tiers` | `ConductorOps::tier_choices` | — | `{tiers:{default,vm_available,vm_unavailable_reason,vm_requirements}}` | 200, 400 |
+| GET | `/api/setup/status` | `Provision::status + job` | 查询 `since` / `wait` | `{deps:[{id,present,install,probe,source,url,size_mb,note}],job:{running,seq,lines,error},missing}` | 200, 400 |
+| POST | `/api/setup/ensure` | `Provision::status + start` | `{deps?:[id],confirm?:bool}` | `{preview:[{id,url,size_mb,present}]}` / `{ok,deps}` | 200, 400 |
+| DELETE | `/api/setup/job` | `Provision::cancel` | — | `{ok}` | 200 |
 | POST | `/api/suggest-models` | `ConductorOps::suggest_models` | `{task,mode}` | `{ok,agents}` | 200, 400 |
 <!-- ROUTES:END -->
 
