@@ -34,6 +34,12 @@ virtiofsd 与 Debian 基础根（目录 rootfs + 内核 + 9p initrd + qemu-guest
 Windows guest 的 agent / 运行包由 provision 能力的 `guest-runtime` 编排（cloud-init 种子 → 维护启动经 QGA 装包）在 Rust 侧装上，macOS 保持检测 + 指路。据此在 **KVM** 下跑通真机探针与产品级会话验收，在 **WHPX** 下跑通引擎级真机探针（设 `SOLOMNI_VM_LIVE=1` +
 `SOLOMNI_VM_QEMU` / `SOLOMNI_VM_BASE` / `SOLOMNI_VM_VIRTIOFSD` / `SOLOMNI_VM_SMBD` 指向 `.vm/`，默认 `[探针]` 跳过）：guest 真启动、共享按后端进 guest（virtiofs / 9p 挂载 / SMB guestfwd / QGA 复制）、经 QGA 在 guest 里跑模块工具、删会话即销毁 guest 与 virtiofsd。
 
+**并发**：每条会话一条租约、一台 guest（固定 `-m 2048 -smp 2`）；同时台上限是设置项 `max_guests`（默认 2，0 = 不限制），
+到上限如实拒绝（同一租约重启不占新名额，见 [REGISTRY_SPEC.md](../../REGISTRY_SPEC.md) 与 `domain/exec.rs` 的 `admit_guest`）。
+会话启动时用 qemu-img 在基础镜像上建一份**每租约可写层**（`.vm/overlays/<租约>.qcow2`），删会话即丢——多台并发**不同写一份基础镜像**；
+供给编排仍直写基础镜像（它要改的就是镜像本身，`GuestSpec.isolated = false`）。执行路径上，guest 表锁只用来取租约，
+`exec` 在该租约自己的锁下跑：**跨租约并行、同一租约串行**；工作区版本库的写闸同理按工作分。
+
 ## 三、依赖图位置（由源码的 `::api` 引用推导）
 
 - 经 `::api` 用到：`kernel`、`modules`

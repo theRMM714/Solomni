@@ -36,13 +36,24 @@ pub fn qemu_exe(arch: GuestArch) -> &'static str {
     }
 }
 
-/// 目的：QEMU 引擎——每次 boot 拉起一个 qemu-system-* 进程并接上 QGA 通道。
-pub struct QemuEngine;
+/// 目的：QEMU 引擎——每次 boot 拉起一个 qemu-system-* 进程并接上 QGA 通道；
+///   要每租约可写层时先用同目录的 qemu-img 在基础镜像上建一份 qcow2 覆盖（多台并发不能同写一份基础镜像）。
+pub struct QemuEngine {
+    /// 每租约可写层的落点（组合根注入；None = 不提供可写层——供给编排改的正是基础镜像本身）。
+    overlay_dir: Option<PathBuf>,
+}
 
 impl QemuEngine {
-    /// 目的：组合根专用。
+    /// 目的：组合根专用（不带可写层：供给编排与测试用）。
     pub fn new() -> QemuEngine {
-        QemuEngine
+        QemuEngine { overlay_dir: None }
+    }
+
+    /// 目的：组合根专用（带每租约可写层的落点：会话的 guest 盘写在这里，删会话即丢）。
+    pub fn with_overlay_dir(dir: PathBuf) -> QemuEngine {
+        QemuEngine {
+            overlay_dir: Some(dir),
+        }
     }
 }
 
@@ -183,6 +194,25 @@ impl VmEngine for QemuEngine {
             .filter(|p| !p.is_empty())
             .map(str::to_string)
             .unwrap_or_else(|| qemu_exe(spec.image.arch).to_string());
+        // 每租约可写层：会话不直写基础镜像（多台并发会同写一份）；供给编排要改基础镜像本身，isolated = false。
+        let overlay = match (&spec.image.root, spec.isolated) {
+            (GuestRoot::Disk(base), true) => {
+                let dir = self
+                    .overlay_dir
+                    .as_ref()
+                    .ok_or("这次启动要每租约可写层，但引擎没配可写层目录".to_string())?;
+                std::fs::create_dir_all(dir)
+                    .map_err(|e| format!("建可写层目录失败（{}）：{}", dir.display(), e))?;
+                let path = dir.join(format!("{}.qcow2", lease_file_name(&spec.lease)));
+                let _ = std::fs::remove_file(&path);
+                create_overlay(&exe, base, &path)?;
+                Some(path)
+            }
+            _ => None,
+        };
+        // 有效启动规格：有可写层就用它当根，基础镜像退成只读后备（内核 / initrd 仍取自基础根）。
+        let mut effective = spec.clone();
+        effective.image = with_overlay(&spec.image, overlay.as_deref());
         // 首启种子：宿主起一个小 HTTP 服务，经 -smbios 告诉 cloud-init 去哪取 user-data / meta-data。
         let seed = match &spec.seed {
             Some(docs) => {
@@ -195,7 +225,7 @@ impl VmEngine for QemuEngine {
         };
         let seed_url = seed.as_ref().map(SeedServer::url);
         let mut args = engine_args(
-            spec,
+            &effective,
             &opts,
             share.needs_net,
             share.needs_shared_mem,
@@ -221,10 +251,13 @@ impl VmEngine for QemuEngine {
         let stream = match connect_within(port, Duration::from_secs(30)) {
             Ok(s) => s,
             Err(e) => {
-                // 连不上就把刚拉起的 QEMU 收掉，别留孤儿进程。
+                // 连不上就把刚拉起的 QEMU 与刚建的可写层都收掉，别留孤儿。
                 let mut c = child;
                 let _ = c.kill();
                 let _ = c.wait();
+                if let Some(path) = &overlay {
+                    let _ = std::fs::remove_file(path);
+                }
                 return Err(e);
             }
         };
@@ -238,6 +271,7 @@ impl VmEngine for QemuEngine {
             reader: BufReader::new(stream),
             writer,
             seed,
+            overlay,
         };
         // agent 要等内核起来才通；投种子时（首启装 agent）不等，交给编排轮询，其余情况先等到就绪再挂载/回命令。
         if spec.seed.is_none() {
@@ -281,6 +315,83 @@ fn firmware_dir(exe: &str) -> Option<PathBuf> {
     }
 }
 
+/// 目的：可写层文件名——租约名可能含路径分隔符或怪字符，这里只留字母数字与 `-_.`。
+fn lease_file_name(lease: &str) -> String {
+    lease
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.') {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
+/// 目的：把镜像的根换成可写层（None = 原样）；有效启动规格由它派生。
+fn with_overlay(image: &GuestImage, overlay: Option<&Path>) -> GuestImage {
+    let mut out = image.clone();
+    if let Some(path) = overlay {
+        out.root = GuestRoot::Disk(path.to_path_buf());
+    }
+    out
+}
+
+/// 目的：基础镜像的格式——qemu-img 建可写层要显式给 `-F`，否则 raw（ext4 这类）会被按扩展名猜错。
+fn backing_format(base: &Path) -> &'static str {
+    let ext = base
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|s| s.to_ascii_lowercase());
+    match ext.as_deref() {
+        Some("qcow2") => "qcow2",
+        _ => "raw",
+    }
+}
+
+/// 目的：同目录的 qemu-img 可执行文件名（便携包里与 qemu-system-* 并排）。
+fn qemu_img_for(engine_exe: &str) -> String {
+    let name = if cfg!(windows) {
+        "qemu-img.exe"
+    } else {
+        "qemu-img"
+    };
+    match Path::new(engine_exe).parent() {
+        Some(dir) if !dir.as_os_str().is_empty() => dir.join(name).to_string_lossy().into_owned(),
+        _ => name.to_string(),
+    }
+}
+
+/// 目的：在基础镜像上建一份每租约可写层（qcow2 覆盖）。
+/// 约束：base 转绝对路径——覆盖文件里的后备路径是相对**覆盖文件所在目录**解析的。
+fn create_overlay(engine_exe: &str, base: &Path, overlay: &Path) -> Result<(), String> {
+    let base_abs =
+        std::path::absolute(base).map_err(|e| format!("基础镜像路径取绝对失败：{}", e))?;
+    let out = Command::new(qemu_img_for(engine_exe))
+        .arg("create")
+        .arg("-f")
+        .arg("qcow2")
+        .arg("-b")
+        .arg(&base_abs)
+        .arg("-F")
+        .arg(backing_format(base))
+        .arg(overlay)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .map_err(|e| format!("起不了 qemu-img（{}）：{}", qemu_img_for(engine_exe), e))?;
+    if !out.status.success() {
+        return Err(format!(
+            "建可写层失败：{}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        ));
+    }
+    Ok(())
+}
+
 fn connect_within(port: u16, budget: Duration) -> Result<TcpStream, String> {
     let deadline = Instant::now() + budget;
     loop {
@@ -302,6 +413,8 @@ struct QemuHandle {
     writer: TcpStream,
     /// 首启种子服务；正常会话启动是 None。
     seed: Option<SeedServer>,
+    /// 每租约可写层文件；stop / Drop 时删掉（删会话即丢写层）。
+    overlay: Option<PathBuf>,
 }
 
 /// 目的：首启种子的小 HTTP 服务（cloud-init NoCloud net）——只在这次 boot 期间活着，随 guest 一起收掉。
@@ -602,11 +715,14 @@ impl GuestVm for QemuHandle {
             let _ = c.kill();
             let _ = c.wait();
         }
+        if let Some(path) = self.overlay.take() {
+            let _ = std::fs::remove_file(&path);
+        }
     }
 }
 
 impl Drop for QemuHandle {
-    /// 目的：兜底收尾——种子服务与 QEMU 进程都不能因为提前 drop 而漏掉。
+    /// 目的：兜底收尾——种子服务、QEMU 进程与可写层都不能因为提前 drop 而漏掉。
     fn drop(&mut self) {
         if let Some(mut s) = self.seed.take() {
             s.stop();
@@ -614,6 +730,9 @@ impl Drop for QemuHandle {
         if let Some(mut c) = self.child.take() {
             let _ = c.kill();
             let _ = c.wait();
+        }
+        if let Some(path) = self.overlay.take() {
+            let _ = std::fs::remove_file(&path);
         }
     }
 }
@@ -760,6 +879,7 @@ mod tests {
             engine_path: None,
             share_path: None,
             seed: None,
+            isolated: false,
         };
         let with = engine_args(&spec, "opts", false, false, Some("http://10.0.2.2:9/"), &[]);
         assert!(
@@ -770,5 +890,42 @@ mod tests {
         );
         let without = engine_args(&spec, "opts", false, false, None, &[]);
         assert!(!without.iter().any(|a| a == "-smbios"), "{:?}", without);
+    }
+
+    /// 目的：有可写层就把镜像的根换成它（内核仍取自基础根）；没有就原样。
+    #[test]
+    fn overlay_replaces_the_disk_root() {
+        let base = std::path::PathBuf::from("/img/root.qcow2");
+        let kernel = std::path::PathBuf::from("/img/vmlinuz");
+        let image = GuestImage::linux(
+            "t",
+            GuestRoot::Disk(base.clone()),
+            Some(kernel.clone()),
+            None,
+        );
+        let with = with_overlay(&image, Some(Path::new("/ov/x.qcow2")));
+        assert_eq!(
+            with.root,
+            GuestRoot::Disk(std::path::PathBuf::from("/ov/x.qcow2"))
+        );
+        assert_eq!(with.kernel, Some(kernel), "内核仍取自基础根");
+        assert_eq!(with_overlay(&image, None).root, GuestRoot::Disk(base));
+    }
+
+    /// 目的：后备格式按扩展名认——qcow2 是 qcow2，ext4 / raw 这类按 raw（否则 qemu-img 会猜错）。
+    #[test]
+    fn backing_format_reads_the_extension() {
+        assert_eq!(backing_format(Path::new("/x/rootfs.qcow2")), "qcow2");
+        assert_eq!(backing_format(Path::new("/x/ROOTFS.QCOW2")), "qcow2");
+        assert_eq!(backing_format(Path::new("/x/rootfs.ext4")), "raw");
+        assert_eq!(backing_format(Path::new("/x/disk")), "raw");
+    }
+
+    /// 目的：可写层文件名不把租约名里的路径分隔符带进目录（否则会写到别的目录去）。
+    #[test]
+    fn overlay_file_name_is_safe() {
+        assert_eq!(lease_file_name("demo-1"), "demo-1");
+        assert_eq!(lease_file_name("a/b\\c"), "a_b_c");
+        assert_eq!(lease_file_name("会话"), "__");
     }
 }

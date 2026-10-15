@@ -190,6 +190,9 @@ pub struct GuestSpec {
     /// 目的：首启要投喂的 cloud-init 种子；None = 不投种子（正常会话启动）。
     /// 约束：投种子要求 `net = true`（guest 要能连到宿主的小 HTTP 服务）。
     pub seed: Option<SeedDocs>,
+    /// 目的：要不要给这次启动一份**每租约可写层**（会话要：多台并发不能同写一份基础镜像）。
+    /// 约束：只有磁盘根建得了可写层（目录根忽略它）；供给编排要改的正是基础镜像本身，填 false。
+    pub isolated: bool,
 }
 
 /// 目的：在 guest 里跑一次工具（命令 + 参数 + 环境 + 工作目录）。

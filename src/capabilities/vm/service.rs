@@ -25,7 +25,8 @@ pub struct VmService {
     packages: Arc<dyn PackageSource + Send + Sync>,
     engine: Arc<dyn VmEngine + Send + Sync>,
     share: Arc<dyn ShareBackend + Send + Sync>,
-    guests: Mutex<BTreeMap<String, Lease>>,
+    /// 租约 → 该租约的活体。每个活体自己一把锁：表锁只用来取/插，执行在**该租约自己的锁**下跑。
+    guests: Mutex<BTreeMap<String, Arc<Mutex<Lease>>>>,
 }
 
 impl VmService {
@@ -67,60 +68,65 @@ impl Vm for VmService {
         let (plan, guard) =
             self.share
                 .prepare(self.engine.id(), &spec.mounts, spec.share_path.as_deref())?;
-        let mut guests = self
+        // 拉起放在表锁之外：boot 要等 agent 起来（有界但可能要几十秒），别把别的租约的执行挡在表锁后面。
+        let vm = self.engine.boot(spec, &plan)?;
+        let entry = Arc::new(Mutex::new(Lease {
+            vm,
+            guard,
+            mounts: spec.mounts.clone(),
+            os: spec.image.os,
+        }));
+        let previous = self
             .guests
             .lock()
-            .map_err(|_| "guest 表锁坏了".to_string())?;
-        if let Some(mut old) = guests.remove(&spec.lease) {
-            old.vm.stop();
-            old.guard.release();
+            .map_err(|_| "guest 表锁坏了".to_string())?
+            .insert(spec.lease.clone(), entry);
+        // 同一租约重启：等它的在途执行收尾，再销毁旧的（幂等）。
+        if let Some(old) = previous {
+            stop_lease(&old);
         }
-        let vm = self.engine.boot(spec, &plan)?;
-        guests.insert(
-            spec.lease.clone(),
-            Lease {
-                vm,
-                guard,
-                mounts: spec.mounts.clone(),
-                os: spec.image.os,
-            },
-        );
         Ok(())
     }
 
     fn guest_run(&self, lease: &str, run: &GuestRun) -> ToolOutcome {
-        let mut guests = match self.guests.lock() {
-            Ok(g) => g,
+        let entry = match self.guests.lock() {
+            Ok(guests) => guests.get(lease).cloned(),
             Err(_) => return fail("guest 表锁坏了"),
         };
-        let Some(entry) = guests.get_mut(lease) else {
+        let Some(entry) = entry else {
             return fail(&format!("这次会话没有活着的 guest（租约 {}）", lease));
         };
+        // 全局表锁只用来取 entry；执行在该租约自己的锁下跑——跨租约因此真并行（同一租约仍串行）。
+        let mut held = entry.lock().unwrap_or_else(|e| e.into_inner());
+        let held = &mut *held;
         let translated =
-            crate::capabilities::vm::domain::guest::translate_run(run, entry.os, &entry.mounts);
-        if let Err(why) = self.share.sync_in(entry.vm.channel(), &entry.mounts) {
+            crate::capabilities::vm::domain::guest::translate_run(run, held.os, &held.mounts);
+        if let Err(why) = self.share.sync_in(held.vm.channel(), &held.mounts) {
             return fail(&format!("共享同步（进去）失败：{}", why));
         }
-        let out = entry.vm.channel().exec(&translated);
-        if let Err(why) = self.share.sync_out(entry.vm.channel(), &entry.mounts) {
+        let out = held.vm.channel().exec(&translated);
+        if let Err(why) = self.share.sync_out(held.vm.channel(), &held.mounts) {
             return fail(&format!("共享同步（回来）失败：{}", why));
         }
         out
     }
 
     fn guest_wait_agent(&self, lease: &str, timeout: std::time::Duration) -> bool {
+        let entry = match self.guests.lock() {
+            Ok(guests) => guests.get(lease).cloned(),
+            Err(_) => return false,
+        };
+        let Some(entry) = entry else {
+            return false;
+        };
         let deadline = std::time::Instant::now() + timeout;
         loop {
-            match self.guests.lock() {
-                Ok(mut guests) => match guests.get_mut(lease) {
-                    Some(entry) => {
-                        if entry.vm.channel().ping() {
-                            return true;
-                        }
-                    }
-                    None => return false,
-                },
-                Err(_) => return false,
+            // 每探一次短拿一次租约锁：探针不长时间挡住同一租约的其它调用。
+            {
+                let mut held = entry.lock().unwrap_or_else(|e| e.into_inner());
+                if held.vm.channel().ping() {
+                    return true;
+                }
             }
             if std::time::Instant::now() >= deadline {
                 return false;
@@ -130,13 +136,28 @@ impl Vm for VmService {
     }
 
     fn guest_stop(&self, lease: &str) {
-        if let Ok(mut guests) = self.guests.lock() {
-            if let Some(mut entry) = guests.remove(lease) {
-                entry.vm.stop();
-                entry.guard.release();
-            }
+        let entry = match self.guests.lock() {
+            Ok(mut guests) => guests.remove(lease),
+            Err(_) => None,
+        };
+        if let Some(entry) = entry {
+            stop_lease(&entry);
         }
     }
+
+    fn guest_leases(&self) -> Vec<String> {
+        self.guests
+            .lock()
+            .map(|g| g.keys().cloned().collect())
+            .unwrap_or_default()
+    }
+}
+
+/// 目的：销毁一份租约（杀 guest + 放共享凭据）；等它的在途执行收尾，幂等。
+fn stop_lease(entry: &Arc<Mutex<Lease>>) {
+    let mut held = entry.lock().unwrap_or_else(|e| e.into_inner());
+    held.vm.stop();
+    held.guard.release();
 }
 
 fn fail(why: &str) -> ToolOutcome {

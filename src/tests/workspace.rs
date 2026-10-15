@@ -817,3 +817,18 @@ pub(crate) fn agent_sandboxes_from_a_work_are_read_only_for_the_shared_area() {
     let (place, path) = sb.resolve(&p(&["w", "work", "x.txt"])).unwrap();
     assert!(!sb.can_write(&place, &path));
 }
+
+/// 目的：版本库写闸按**工作**分：不同工作互不阻塞，同一个工作严格串行。
+#[test]
+pub(crate) fn version_gate_is_per_work() {
+    let ws = crate::capabilities::workspace::service::WorkspaceService::new(
+        Arc::new(InMemoryWorkspace::new()),
+        Arc::new(InMemoryWorkStore::new()),
+    );
+    let a = ws.gate("a");
+    let b = ws.gate("b");
+    let _hold_a = a.lock().unwrap_or_else(|e| e.into_inner());
+    assert!(b.try_lock().is_ok(), "不同工作互不阻塞");
+    let a2 = ws.gate("a");
+    assert!(a2.try_lock().is_err(), "同一个工作要串行");
+}

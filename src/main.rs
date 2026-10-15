@@ -278,7 +278,9 @@ fn main() {
     let vm: Arc<dyn capabilities::vm::api::Vm + Send + Sync> =
         Arc::new(capabilities::vm::service::VmService::new(
             Arc::new(packages),
-            Arc::new(capabilities::vm::detail::QemuEngine::new()),
+            Arc::new(capabilities::vm::detail::QemuEngine::with_overlay_dir(
+                root.join(".vm").join("overlays"),
+            )),
             share,
         ));
 

@@ -4,9 +4,9 @@
 //! 联动：被 conductor / collab / cli 与入口层消费。
 
 pub use crate::capabilities::vm::domain::exec::{
-    absent, capability_refusal, declared, diagnose_text, guest_platform, plan, plan_summary,
-    tier_readiness, tier_refusal, unavailable, vm_capability, vm_diagnoses, vm_requirements,
-    Diagnosis, ExecPlan, VmInputs, VmRequirement,
+    absent, admit_guest, capability_refusal, declared, diagnose_text, guest_platform, plan,
+    plan_summary, tier_readiness, tier_refusal, unavailable, vm_capability, vm_diagnoses,
+    vm_requirements, Diagnosis, ExecPlan, VmInputs, VmRequirement,
 };
 pub use crate::capabilities::vm::domain::guest::{
     classify_base, mounts_from, GuestImage, GuestRun, GuestSpec, SeedDocs,
@@ -32,4 +32,6 @@ pub trait Vm: Send + Sync {
     fn guest_wait_agent(&self, lease: &str, timeout: std::time::Duration) -> bool;
     /// 销毁该租约的 guest 与它的磁盘（幂等）。
     fn guest_stop(&self, lease: &str);
+    /// 目的：此刻活着的租约名（并发上限判断用；按名字升序）。
+    fn guest_leases(&self) -> Vec<String>;
 }

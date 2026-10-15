@@ -70,6 +70,10 @@ pub struct AppSettings {
     /// 约束：不预置、不分发，由 provision 能力按清单装进项目内；只有 smb 共享档用它。
     #[serde(default)]
     pub smbd_path: String,
+    /// 目的：虚拟机档同时最多几台 guest（0 = 不限制）。
+    /// 约束：每台固定 `-m 2048 -smp 2`；同时开太多会把宿主的 CPU / 内存吃光。默认 2，见 docs/vm/README.md 的「并发」。
+    #[serde(default = "default_max_guests")]
+    pub max_guests: u32,
     /// **单次模型调用的总预算（秒）**，全局通用（讨论、执行、验收、单 agent 都用它）。
     /// 默认给得比较宽：非流式下供应商要等整段生成完才发响应头，长回复本来就要几十秒；
     /// 预算用尽 = 中断这一轮并如实告知（用户可以点「继续」重试），不是把会话作废。
@@ -91,6 +95,11 @@ pub struct AppSettings {
 
 fn default_discuss_remind_cap() -> u32 {
     3
+}
+
+/// 目的：max_guests 的默认值（2 台）。
+fn default_max_guests() -> u32 {
+    2
 }
 
 fn default_compact_percent() -> u8 {
@@ -116,6 +125,7 @@ impl Default for AppSettings {
             qemu_path: String::new(),
             virtiofsd_path: String::new(),
             smbd_path: String::new(),
+            max_guests: 2,
             llm_timeout_secs: crate::kernel::api::DEFAULT_LLM_TIMEOUT_SECS,
             compact_at_percent: 70,
             discuss_remind_cap: 3,

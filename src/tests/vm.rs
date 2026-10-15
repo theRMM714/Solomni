@@ -741,6 +741,7 @@ pub(crate) fn guest_mounts_prefix_packages_and_fence_roots() {
         engine_path: None,
         share_path: None,
         seed: None,
+        isolated: false,
     };
     let args = crate::capabilities::vm::detail::qemu::engine_args(
         &spec,
@@ -829,6 +830,7 @@ pub(crate) fn accelerators_and_nic_follow_the_platform_and_share_need() {
         engine_path: None,
         share_path: None,
         seed: None,
+        isolated: false,
     };
     let expected = if cfg!(windows) {
         "accel=whpx:tcg"
@@ -921,6 +923,7 @@ pub(crate) fn disk_root_without_kernel_boots_via_firmware() {
         engine_path: None,
         share_path: None,
         seed: None,
+        isolated: false,
     };
     let args = engine_args(&spec, "opts", false, false, None, &[]);
     assert!(
@@ -957,6 +960,7 @@ pub(crate) fn disk_root_uses_a_virtio_disk_not_9p() {
         engine_path: None,
         share_path: None,
         seed: None,
+        isolated: false,
     };
     let args = engine_args(&spec, "opts", false, false, None, &[]);
     assert!(
@@ -999,6 +1003,7 @@ pub(crate) fn share_syncs_around_each_run_and_releases_on_stop() {
         engine_path: None,
         share_path: None,
         seed: None,
+        isolated: false,
     };
     vm.guest_start(&spec).expect("起 guest");
     let run = GuestRun {
@@ -1093,6 +1098,7 @@ pub(crate) fn disk_image_base_is_classified_as_a_disk_root() {
             engine_path: None,
             share_path: None,
             seed: None,
+            isolated: false,
         },
         "opts",
         false,
@@ -1139,6 +1145,7 @@ pub(crate) fn vm_service_refuses_unfit_engine_and_share_with_a_reason() {
         engine_path: None,
         share_path: None,
         seed: None,
+        isolated: false,
     };
     let why = svc.guest_start(&spec).expect_err("架构不匹配要被拒绝");
     assert!(why.contains("承载不了"), "{}", why);
@@ -1159,6 +1166,7 @@ pub(crate) fn vm_service_refuses_unfit_engine_and_share_with_a_reason() {
         engine_path: None,
         share_path: None,
         seed: None,
+        isolated: false,
     };
     let why2 = svc.guest_start(&spec2).expect_err("共享落不上要被拒绝");
     assert!(why2.contains("落不到引擎"), "{}", why2);
@@ -1657,6 +1665,7 @@ pub(crate) fn vm_service_holds_guests_by_lease() {
         engine_path: None,
         share_path: None,
         seed: None,
+        isolated: false,
     };
     vm.guest_start(&spec).expect("替身一定能起");
     let run = GuestRun {
@@ -1692,7 +1701,9 @@ pub(crate) fn vm_live_guest_runs_command_inside_guest() {
     std::fs::create_dir_all(&share).expect("建共享目录");
     std::fs::write(share.join("marker.txt"), "SHARE_MARKER").expect("写标记");
     let guest_dir = "/solomni-vm-live-share";
-    let engine = crate::capabilities::vm::detail::QemuEngine::new();
+    // 会话走**每租约可写层**（与产品同一条路）：基础镜像只读，可写层落在临时目录、随 guest 一起删。
+    let overlay_dir = crate::tests::scratch("vm-live-overlays");
+    let engine = crate::capabilities::vm::detail::QemuEngine::with_overlay_dir(overlay_dir.clone());
     let virtiofsd = std::env::var("SOLOMNI_VM_VIRTIOFSD")
         .ok()
         .filter(|p| !p.trim().is_empty());
@@ -1711,6 +1722,7 @@ pub(crate) fn vm_live_guest_runs_command_inside_guest() {
         engine_path: Some(qemu),
         share_path: virtiofsd.clone(),
         seed: None,
+        isolated: true,
     };
     // 共享后端按平台与在场情况选（与组合根同一份判据）：smb(Windows) > virtiofs > copy(QGA) > 9p。
     let nine = crate::capabilities::vm::detail::NinePShare::new();
@@ -1740,6 +1752,12 @@ pub(crate) fn vm_live_guest_runs_command_inside_guest() {
         .prepare("qemu", &spec.mounts, tool)
         .expect("共享计划要能派生");
     let mut guest = engine.boot(&spec, &plan).expect("起 guest");
+    let overlay = overlay_dir.join("vm-live.qcow2");
+    assert!(
+        overlay.is_file(),
+        "每租约可写层要建出来：{}",
+        overlay.display()
+    );
     if use_copy {
         // 复制后端没有"挂载"：进去之前先把宿主目录同步到 guest，marker 才在里面。
         backend
@@ -1776,6 +1794,11 @@ pub(crate) fn vm_live_guest_runs_command_inside_guest() {
         );
     }
     guest.stop();
+    assert!(
+        !overlay.is_file(),
+        "删租约要把可写层删掉：{}",
+        overlay.display()
+    );
     // 删租约 = 守护进程与套接字都不留（与产品 service 释放的是同一份凭据）。
     guard.release();
     if use_virtiofs {
@@ -1822,4 +1845,114 @@ pub(crate) fn vm_live_guest_runs_command_inside_guest() {
         out.output
     );
     let _ = std::fs::remove_dir_all(&share);
+}
+
+/// 目的：并发准入——到上限拒绝、同一租约重启放行、0 = 不限制。
+#[test]
+pub(crate) fn guest_admission_caps_concurrency() {
+    let two = vec!["a".to_string(), "b".to_string()];
+    assert!(
+        exec::admit_guest(&two, "a", 2).is_ok(),
+        "同一租约重启不占新名额"
+    );
+    assert!(exec::admit_guest(&two, "c", 2).is_err(), "到上限要拒");
+    assert!(exec::admit_guest(&two, "c", 3).is_ok(), "没到上限放行");
+    assert!(exec::admit_guest(&two, "c", 0).is_ok(), "0 = 不限制");
+    assert!(exec::admit_guest(&[], "c", 2).is_ok());
+}
+
+/// 目的：跨租约的执行要真并行——老的表锁把两个租约串起来（前一个跑完才轮到后一个）；
+///   这里两个租约的 exec 必须见面（各自最多等对方 3 秒）。
+#[test]
+pub(crate) fn guests_on_different_leases_run_concurrently() {
+    use crate::capabilities::vm::api::Vm;
+    use crate::capabilities::vm::ports::{GuestChannel, GuestVm, SharePlan, VmEngine};
+    use std::sync::atomic::AtomicBool;
+
+    #[derive(Clone)]
+    struct Rv {
+        in_flight: Arc<AtomicUsize>,
+        met: Arc<AtomicBool>,
+    }
+    struct RvChan(Rv);
+    impl GuestChannel for RvChan {
+        fn exec(&mut self, _run: &GuestRun) -> ToolOutcome {
+            self.0.in_flight.fetch_add(1, Ordering::SeqCst);
+            let deadline = std::time::Instant::now() + Duration::from_secs(3);
+            while std::time::Instant::now() < deadline {
+                if self.0.in_flight.load(Ordering::SeqCst) >= 2 {
+                    self.0.met.store(true, Ordering::SeqCst);
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            self.0.in_flight.fetch_sub(1, Ordering::SeqCst);
+            ToolOutcome {
+                ok: true,
+                output: "ok".to_string(),
+            }
+        }
+    }
+    struct RvVm(RvChan);
+    impl GuestVm for RvVm {
+        fn channel(&mut self) -> &mut dyn GuestChannel {
+            &mut self.0
+        }
+        fn stop(&mut self) {}
+    }
+    struct RvEngine(Rv);
+    impl VmEngine for RvEngine {
+        fn id(&self) -> &'static str {
+            "rv"
+        }
+        fn supports(&self, _guest: &GuestImage) -> bool {
+            true
+        }
+        fn boot(&self, _spec: &GuestSpec, _share: &SharePlan) -> Result<Box<dyn GuestVm>, String> {
+            Ok(Box::new(RvVm(RvChan(self.0.clone()))))
+        }
+    }
+
+    let rv = Rv {
+        in_flight: Arc::new(AtomicUsize::new(0)),
+        met: Arc::new(AtomicBool::new(false)),
+    };
+    let vm = crate::capabilities::vm::service::VmService::new(
+        Arc::new(InMemoryPackages::empty()),
+        Arc::new(RvEngine(rv.clone())),
+        Arc::new(FakeShare::new()),
+    );
+    for lease in ["lease-a", "lease-b"] {
+        let image = GuestImage::linux("t", GuestRoot::Dir(PathBuf::from("/x")), None, None);
+        vm.guest_start(&GuestSpec {
+            lease: lease.to_string(),
+            image,
+            mounts: Vec::new(),
+            net: false,
+            engine_path: None,
+            share_path: None,
+            seed: None,
+            isolated: false,
+        })
+        .expect("拉起");
+    }
+    let run = GuestRun {
+        command: "true".to_string(),
+        args_json: "{}".to_string(),
+        env: Vec::new(),
+        cwd: String::new(),
+    };
+    std::thread::scope(|s| {
+        for lease in ["lease-a", "lease-b"] {
+            let vm = &vm;
+            let run = &run;
+            s.spawn(move || {
+                let _ = vm.guest_run(lease, run);
+            });
+        }
+    });
+    assert!(
+        rv.met.load(Ordering::SeqCst),
+        "两个租约的 exec 要同时在飞（跨租约没被串行化）"
+    );
 }

@@ -96,6 +96,8 @@ pub(super) fn install_guest_runtime(
                 user_data: USER_DATA.to_string(),
                 meta_data: META_DATA.to_string(),
             }),
+            // 供给编排要改的就是基础镜像本身（装 agent / 装运行包），不能写进会被丢掉的可写层。
+            isolated: false,
         };
         if let Err(e) = vm.guest_start(&spec) {
             return Err(format!("首启 guest 起不来：{}", e));
@@ -123,6 +125,7 @@ pub(super) fn install_guest_runtime(
             engine_path: Some(engine_path),
             share_path: None,
             seed: None,
+            isolated: false,
         };
         if let Err(e) = vm.guest_start(&spec) {
             return Err(format!("维护启动起不来：{}", e));

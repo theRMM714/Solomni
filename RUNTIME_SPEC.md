@@ -97,6 +97,7 @@ files:                      # 包内文件指纹：用于可复现与呈现
 **已真机验收**：Linux（QEMU/KVM + virtiofs，默认共享档；缺 `virtiofsd` 时退 9p）与 Windows（QEMU/WHPX + SMB guestfwd 实时共享；缺 `smbd` 时退 QGA 复制）——引擎级探针（`vm_live_guest_runs_command_inside_guest`）
 与 e2e 的 `SOLOMNI_VM_BASE` 会话场景都过；Windows 侧的 QEMU 与 Debian cloud qcow2 由 provision 能力按清单装入，
 首启经 cloud-init 装 `qemu-guest-agent`、维护启动经 QGA 装 python3 / nodejs / cifs-utils——整段编排在 Rust 侧。
+多台虚拟机档会话并发时各写自己的**每租约可写层**（不共写基础镜像），同时台上限 `max_guests`（见 [docs/vm/README.md](docs/vm/README.md) 的「并发」）。
 **尚未做**（唯一权威见 `tests/gaps.yaml`）：macOS 的 QEMU 取包、Apple vz 引擎 + 自研 agent（vsock 通道）。
 
 ## 六、校验与拒收

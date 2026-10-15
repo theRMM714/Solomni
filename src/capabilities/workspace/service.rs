@@ -29,9 +29,9 @@ const RECENT_COMMITS: usize = 5;
 pub struct WorkspaceService {
     dirs: Arc<dyn Workdirs + Send + Sync>,
     store: Arc<dyn WorkStore + Send + Sync>,
-    /// 版本库写入的串行闸：多个 agent 会话可能在各自的工作线程上同时提交 / 拉取。
-    /// 它保护的是**版本库状态**（head、基线、对象），不是核心状态。
-    version_lock: Mutex<()>,
+    /// 版本库写入的串行闸（**每个工作一把**）：不同工作互不相干、可并行；同一个工作的
+    /// 提交 / 拉取 / 回档严格串行。它保护的是**版本库状态**（head、基线、对象），不是核心状态。
+    version_gates: Mutex<BTreeMap<String, Arc<Mutex<()>>>>,
 }
 
 impl WorkspaceService {
@@ -43,7 +43,7 @@ impl WorkspaceService {
         WorkspaceService {
             dirs,
             store,
-            version_lock: Mutex::new(()),
+            version_gates: Mutex::new(BTreeMap::new()),
         }
     }
 
@@ -64,8 +64,14 @@ impl WorkspaceService {
         Ok((roots.shared, roots.store, sandbox))
     }
 
-    fn lock(&self) -> std::sync::MutexGuard<'_, ()> {
-        self.version_lock.lock().unwrap_or_else(|e| e.into_inner())
+    /// 目的：取某个工作的版本库写闸（没有就建一个）。
+    /// 约束：返回的 `Arc` 要活到闸用完——调用方先拿它，再 `lock()`，别把它当临时值。
+    pub(crate) fn gate(&self, work: &str) -> Arc<Mutex<()>> {
+        let mut gates = self.version_gates.lock().unwrap_or_else(|e| e.into_inner());
+        gates
+            .entry(work.to_string())
+            .or_insert_with(|| Arc::new(Mutex::new(())))
+            .clone()
     }
 
     /// 把主副本物化到某个提交点（None = 清空），head 同步。
@@ -147,7 +153,8 @@ impl Workspace for WorkspaceService {
         if paths.is_empty() {
             return Err("work_pull 要给出要拉取的路径（文件或文件夹）".to_string());
         }
-        let _g = self.lock();
+        let gate = self.gate(work);
+        let _g = gate.lock().unwrap_or_else(|e| e.into_inner());
         let (_, store, sandbox) = self.agent_roots(work, agent)?;
         let (head, tree) = self.head_tree(&store)?;
         let Some(head) = head else {
@@ -198,7 +205,8 @@ impl Workspace for WorkspaceService {
         if msg.is_empty() {
             return Err("提交说明不能为空".to_string());
         }
-        let _g = self.lock();
+        let gate = self.gate(work);
+        let _g = gate.lock().unwrap_or_else(|e| e.into_inner());
         let (shared, store, sandbox) = self.agent_roots(work, agent)?;
         let (head_id, tree) = self.head_tree(&store)?;
         let index: Index = self.store.read_index(&store, agent)?;
@@ -305,7 +313,8 @@ impl Workspace for WorkspaceService {
         if rel.contains('/') {
             return Err(format!("用户投喂只收顶层文件名：{}", rel));
         }
-        let _g = self.lock();
+        let gate = self.gate(work);
+        let _g = gate.lock().unwrap_or_else(|e| e.into_inner());
         let (_, store) = self.work_roots(work)?;
         let (head_id, tree) = self.head_tree(&store)?;
         let hash = content_hash(bytes);
@@ -406,7 +415,8 @@ impl Workspace for WorkspaceService {
     }
 
     fn work_restore(&self, work: &str, commit: u64) -> Result<(), String> {
-        let _g = self.lock();
+        let gate = self.gate(work);
+        let _g = gate.lock().unwrap_or_else(|e| e.into_inner());
         let (shared, store) = self.work_roots(work)?;
         if self.store.read_commit(&store, commit)?.is_none() {
             return Err(format!("没有提交点 {}", commit));
@@ -424,7 +434,8 @@ impl Workspace for WorkspaceService {
         work: &str,
         keep_by_agent: &BTreeMap<String, u64>,
     ) -> Result<Option<u64>, String> {
-        let _g = self.lock();
+        let gate = self.gate(work);
+        let _g = gate.lock().unwrap_or_else(|e| e.into_inner());
         let (shared, store) = self.work_roots(work)?;
         // 提交按 id 升序：取"各会话都还没越过自己保留行"的最后一个提交点。
         let mut target = None;
@@ -449,13 +460,15 @@ impl Workspace for WorkspaceService {
     }
 
     fn work_restore_point(&self, work: &str, commit: Option<u64>) -> Result<(), String> {
-        let _g = self.lock();
+        let gate = self.gate(work);
+        let _g = gate.lock().unwrap_or_else(|e| e.into_inner());
         let (shared, store) = self.work_roots(work)?;
         WorkspaceService::materialize(self.store.as_ref(), &shared, &store, commit)
     }
 
     fn work_discard_after(&self, work: &str, keep: Option<u64>) -> Result<(), String> {
-        let _g = self.lock();
+        let gate = self.gate(work);
+        let _g = gate.lock().unwrap_or_else(|e| e.into_inner());
         let (shared, store) = self.work_roots(work)?;
         // 保留 keep 的祖先链；其余提交记录真的删掉（删除 / 恢复的"丢弃历史"）。
         let mut keep_set: BTreeSet<u64> = BTreeSet::new();

@@ -103,6 +103,7 @@ fence_read: []         # 用户显式授权的只读根（默认空：一个都�
 qemu_path: ""          # 虚拟机档用的 QEMU 可执行文件路径（默认空 = 启动时自动采用项目内补齐的可运行包；否则兜底看 PATH。显式登记优先）
 virtiofsd_path: ""     # 虚拟机档共享后端要用的外部工具路径（如 virtiofsd；默认同 qemu_path）
 smbd_path: ""          # 虚拟机档 smb 共享档要用的外部 helper 路径（默认空 = 启动时自动采用项目内补齐的 helper；否则兜底看 PATH）
+max_guests: 2          # 虚拟机档同时最多几台 guest（0 = 不限制；每台固定 -m 2048 -smp 2）
 llm_timeout_secs: 300  # 单次模型调用的总预算（秒），全局通用（讨论/执行/验收/单 agent）
 compact_at_percent: 70 # 上下文用到模型窗口的百分之多少就自动压一次（0 = 关）
 discuss_remind_cap: 3  # 讨论里一轮内对同一个成员最多提醒几次（提醒 = "你还没用动词表态"）

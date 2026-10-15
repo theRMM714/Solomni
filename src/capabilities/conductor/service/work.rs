@@ -386,6 +386,12 @@ impl Conductor {
         plan: &crate::capabilities::vm::api::ExecPlan,
         sandboxes: &crate::capabilities::workspace::api::Sandboxes,
     ) -> Result<(), String> {
+        // 并发闸门：每台 guest 固定 -m 2048 -smp 2，按设置里的上限如实拒绝（同一租约重启不占新名额）。
+        crate::capabilities::vm::api::admit_guest(
+            &self.vm.guest_leases(),
+            &meta.name,
+            self.registry.app().max_guests,
+        )?;
         let base_path = meta.exec.base.clone().unwrap_or_default();
         let image = crate::capabilities::vm::api::classify_base(
             std::path::Path::new(&base_path),
@@ -422,6 +428,8 @@ impl Conductor {
             engine_path: self.qemu_path().map(str::to_string),
             share_path: self.share_tool_path().map(str::to_string),
             seed: None,
+            // 会话要每租约可写层：多台并发不能同写一份基础镜像。
+            isolated: true,
         };
         self.vm.guest_start(&spec)
     }

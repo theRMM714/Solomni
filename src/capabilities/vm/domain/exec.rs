@@ -585,6 +585,22 @@ pub fn tier_refusal(
     ))
 }
 
+/// 目的：虚拟机档的并发准入——每台 guest 都是实打实的资源（固定 `-m 2048 -smp 2`），
+///   到上限就如实拒绝；**同一租约重启不占新名额**；上限 0 = 不限制。
+pub fn admit_guest(running: &[String], lease: &str, max: u32) -> Result<(), String> {
+    if max == 0 || running.iter().any(|l| l == lease) {
+        return Ok(());
+    }
+    if running.len() >= max as usize {
+        return Err(format!(
+            "虚拟机档同时最多 {} 台（现在 {} 台）：先删掉、或把别的虚拟机档会话切回本机档",
+            max,
+            running.len()
+        ));
+    }
+    Ok(())
+}
+
 /// 目的：派生执行计划：本机档不装载运行包（宿主自备解释器）。
 /// 约束：虚拟机档只有**选型不成立**才拒绝（多版本未定版 / 定版不存在 / 系统路径冲突——用户要解决的选型问题）；
 /// 约束：**缺包不拦会话**：那只是该模块的工具不可用（由 unavailable 收口，降级而非崩溃）。

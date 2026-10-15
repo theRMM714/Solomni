@@ -1520,6 +1520,8 @@ impl crate::capabilities::vm::ports::GuestVm for FakeVm {
 #[derive(Default)]
 pub(crate) struct RecordingVm {
     pub runs: Mutex<Vec<String>>,
+    /// 目的：已拉起的租约（`guest_leases` 的事实来源；`guest_start` 记、`guest_stop` 删）。
+    pub leases: Mutex<Vec<String>>,
 }
 
 impl crate::capabilities::vm::api::Vm for RecordingVm {
@@ -1533,8 +1535,9 @@ impl crate::capabilities::vm::api::Vm for RecordingVm {
 
     fn guest_start(
         &self,
-        _spec: &crate::capabilities::vm::domain::guest::GuestSpec,
+        spec: &crate::capabilities::vm::domain::guest::GuestSpec,
     ) -> Result<(), String> {
+        self.leases.lock().expect("锁").push(spec.lease.clone());
         Ok(())
     }
 
@@ -1554,7 +1557,13 @@ impl crate::capabilities::vm::api::Vm for RecordingVm {
         true
     }
 
-    fn guest_stop(&self, _lease: &str) {}
+    fn guest_stop(&self, lease: &str) {
+        self.leases.lock().expect("锁").retain(|l| l != lease);
+    }
+
+    fn guest_leases(&self) -> Vec<String> {
+        self.leases.lock().expect("锁").clone()
+    }
 }
 
 /// 目的：测试用的 **vm 能力面**——把运行包库来源与 guest 替身装进 `VmService`（与生产同一条路，R12）。
