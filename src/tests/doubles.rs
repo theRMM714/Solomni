@@ -733,6 +733,7 @@ pub(crate) fn test_sandbox(
         modules_with_userdata: std::collections::BTreeSet::new(),
         permissions: Default::default(),
         texts: test_prompts().tools(),
+        path_codec: None,
     }
 }
 

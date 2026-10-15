@@ -1976,3 +1976,42 @@ pub(crate) fn guests_on_different_leases_run_concurrently() {
         "两个租约的 exec 要同时在飞（跨租约没被串行化）"
     );
 }
+
+/// 目的：路径桥的**反向**——guest 写法译回宿主；不在镜像根里、也不是宿主绝对路径要拒。
+#[test]
+pub(crate) fn path_bridge_round_trips_guest_and_host() {
+    use crate::capabilities::vm::api::PathBridge;
+    use crate::capabilities::vm::domain::paths::{guest_to_host, PathDialect};
+    use std::path::Path;
+    if cfg!(windows) {
+        let b = PathBridge::new("windows", PathDialect::Posix);
+        let host = Path::new(r"D:\a\b");
+        let g = b.to_guest(host);
+        assert_eq!(g, "/solomni-host/d/a/b");
+        assert_eq!(
+            guest_to_host(b, &g),
+            Some(host.to_path_buf()),
+            "镜像路径要能解回来"
+        );
+        assert_eq!(
+            guest_to_host(b, "/etc/passwd"),
+            None,
+            "不在镜像根里、也不是宿主绝对路径"
+        );
+        assert_eq!(
+            guest_to_host(b, r"D:\a\b"),
+            Some(host.to_path_buf()),
+            "宿主写法直通"
+        );
+    } else {
+        // POSIX 宿主 + Windows guest：编进 C:\solomni-host\...，非法字符转义且可逆。
+        let b = PathBridge::new("linux", PathDialect::Windows);
+        let host = Path::new("/home/u/a");
+        let g = b.to_guest(host);
+        assert_eq!(g, "C:\\solomni-host\\home\\u\\a");
+        assert_eq!(guest_to_host(b, &g), Some(host.to_path_buf()));
+        // 同方言（本机档）恒等。
+        let id = PathBridge::new("linux", PathDialect::Posix);
+        assert_eq!(guest_to_host(id, "/work/x"), Some(PathBuf::from("/work/x")));
+    }
+}

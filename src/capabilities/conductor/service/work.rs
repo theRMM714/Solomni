@@ -107,6 +107,21 @@ impl Conductor {
             .unwrap_or_default()
     }
 
+    /// 目的：这场会话的路径翻译器（虚拟机档 guest↔宿主；本机档 None = 恒等）。
+    /// 约束：它只把模型给的写法译成宿主路径**再送寻址**；安全判断仍在 `workspace::Sandbox::resolve`。
+    pub(crate) fn path_codec_of(
+        &self,
+        spec: &crate::kernel::api::ExecSpec,
+    ) -> Option<std::sync::Arc<dyn crate::kernel::ports::PathCodec>> {
+        let guest = self.guest_os_of(spec)?;
+        Some(std::sync::Arc::new(
+            crate::capabilities::vm::api::PathBridge::for_session(
+                std::env::consts::OS,
+                Some(guest.dialect()),
+            ),
+        ))
+    }
+
     /// 目的：这次虚拟机档会话的 guest OS（本机档或判不出来 = None）——工作环境块按它选 guest 档。
     pub(crate) fn guest_os_of(
         &self,

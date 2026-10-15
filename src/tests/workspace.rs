@@ -807,3 +807,33 @@ pub(crate) fn version_gate_is_per_work() {
     let a2 = ws.gate("a");
     assert!(a2.try_lock().is_err(), "同一个工作要串行");
 }
+
+/// 目的：虚拟机档下模型给的 guest 写法要能寻址——译成宿主路径**再过同一道根校验**；越界仍拒。
+#[test]
+pub(crate) fn sandbox_resolves_guest_written_paths() {
+    use crate::capabilities::vm::api::PathBridge;
+    use crate::capabilities::vm::domain::paths::PathDialect;
+    use crate::capabilities::workspace::api::Place;
+    // 跨方言才有翻译（同方言时桥是恒等，走的是宿主写法那条路）。
+    let guest = if cfg!(windows) {
+        PathDialect::Posix
+    } else {
+        PathDialect::Windows
+    };
+    let bridge = PathBridge::new(std::env::consts::OS, guest);
+    let mut sb = test_sandbox("a1", &["data"]);
+    sb.path_codec = Some(Arc::new(bridge));
+    // 私有沙箱在 guest 里的写法要认，并落回宿主私有沙箱。
+    let guest_note = format!("{}/note.txt", bridge.to_guest(&sb.private));
+    let (place, path) = sb.resolve(&guest_note).expect("guest 写法该认");
+    assert_eq!(place, Place::Private);
+    assert_eq!(path, sb.private.join("note.txt"));
+    // 宿主写法直通（系统工具跑在宿主侧，本来就成立）。
+    let host_note = sb.private.join("host.txt").to_string_lossy().into_owned();
+    let (place, _) = sb.resolve(&host_note).expect("宿主写法也认");
+    assert_eq!(place, Place::Private);
+    // 镜像根下、但不在任何允许根里的路径：翻译得出来也要被根校验拒。
+    let outside = bridge.to_guest(&abs(&["elsewhere", "x.txt"]));
+    let why = sb.resolve(&outside).expect_err("越界要拒");
+    assert!(why.contains("允许的根目录"), "{}", why);
+}
