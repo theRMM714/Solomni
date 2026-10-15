@@ -2,7 +2,7 @@
 
 > 本文是**提示词册结构与键清单的唯一权威**：每份文件里有什么键、每个键干什么。
 > 规则（谁写、占位符、缺键报错、什么不进册子）见 [ARCHITECTURE.md](../../ARCHITECTURE.md) 的「五、提示词册」；
-> "哪个角色用哪份提示词、拿哪些工具"见 [tools-and-roles.md](../tools/tools-and-roles.md) 四；
+> "哪个角色用哪份提示词、拿哪些工具"见 [tools-and-roles.md](../tools/tools-and-roles.md) 的「提示词按角色分配」；
 > 模块自己的职责提示词（`module.yaml` 的 `system`）见 [MODULE_SPEC.md](../../MODULE_SPEC.md)。
 
 **当前状态：已落地。** 册子按**共享 / 角色**两个目录切分；加载经 `PromptSource` 端口（`capabilities/prompt/ports.rs`，实现在 `capabilities/prompt/detail/yaml_prompts.rs`），
@@ -30,7 +30,7 @@
 | | `verdict.*` | 判定用户那一句是否明确（明确才开工 / 放行，`collab::judge_clear`） |
 | `roles/executor.yaml` | `execute.user` | 执行任务 |
 | `roles/orchestrator.yaml` | `review.system` / `review.user` | 总验收与推进 |
-| `roles/core_proxy.yaml` | `proxy.system` | 核心代理的身份提示词（在用户授予的任务级授权范围内代用户决定与转达；工具面由角色表按回合注入）。代理会话**不是 agent**：它的身份块渲染这一段（`{{mechanism}}` 取 `mechanisms.proxy`，`{{env}}` / `{{tool_calling}}` 与 agent 身份同一份口径，见 `workspace::api::role_system`），不是模块能力包 |
+| `roles/core_proxy.yaml` | `proxy.system` | 核心代理的身份提示词（在用户授予的任务级授权范围内代用户决定与转达；工具面由角色表按回合注入）。代理会话**不是 agent**：它的身份块渲染这一段（`{{mechanism}}` 取 `mechanisms.proxy`，`{{env}}` / `{{tool_calling}}` 与 agent 身份同一份口径，见 session 的角色身份块 `session::domain::session::role_system`），不是模块能力包 |
 
 > `solo`（用户建的单 agent 工作）的工具面**复用 `roles/executor.yaml`**：它不发回报工具，而 `execute.user` 那段
 > 只在协作的派发行上渲染——所以没有第二份文件，也没有复述。

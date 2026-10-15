@@ -12,7 +12,7 @@
 
 ## 二、入站契约与状态归属
 
-`api`（`TaskChain` / `TaskNode` / `NodeStatus` / `Acceptance` + 阶段 / 就绪 / 验收判定）。三个消费者：`collab` 驱动、`session` 线格式携带、`web` 渲染。
+`api`（`TaskChain` / `TaskNode` / `NodeStatus` / `Acceptance` + 阶段 / 就绪 / 验收判定）。三个消费者：`collab` 驱动、`conductor` 推进、`session` 线格式携带。
 
 ## 三、依赖图位置（由源码的 `::api` 引用推导）
 

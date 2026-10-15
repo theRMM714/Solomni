@@ -28,7 +28,7 @@
   scope: global
   level: T4
   why: |
-    Windows 与 Linux 的 QEMU 已由 provision 能力装进项目内 .vm/qemu/（Windows 是 Arch 上 MinGW-w64 交叉编译的便携包，
+    Windows 与 Linux 的 QEMU 已由 provision 能力装进项目内 .vm/qemu/（Windows 是官方源码在 MSYS2（mingw-w64）下自建的便携包，
     Linux 是 pkgforge Anylinux AppImage；来源在 dependencies.yaml + links.yaml）；
     macOS 仍是检测 + 指路（provision 能力只报缺什么、怎么装），QEMU 要用户自行安装。已定方向：macOS 本期保持"检测 + 指路 + 手动"，
     不在本期做自动补齐；将来做需要 macOS 真机确定来源与 .app / 框架形态。

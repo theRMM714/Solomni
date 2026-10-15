@@ -9,6 +9,8 @@
 
 ```text
 tests/
+ fixtures/
+ mcp_echo.py # MCP 端到端用的假服务
  helpers/
  probe.rs # T4 共用探针设施
  https_probe.rs # T4 HTTPS/TLS 探针（三平台目标共用这一份正文）
@@ -36,10 +38,12 @@ tests/
 ci-mutation.mjs # 突变测试入口（core / capability 两个范围；范围见 tests/mutation-scope.json）
 ci-mutation-publish.mjs # 把突变小结发到 ci-mutation 滚动分支（各推各的，不碰 ci-report）
 mutation-scope.json # 突变测试范围（文件级清单；core + 各能力）
+comment-baseline.json # 注释契约棘轮基线（run-hygiene.js）
+dependency-baseline.json # 依赖方向门禁的基线
 ```
 
 单元层与 `capabilities/` **同构**：T1 用例按业务分文件——`taskchain.rs` / `prompt.rs` / `registry.rs` /
-`llm.rs` / `workspace.rs` / `session.rs` / `slate.rs`，加**协调业务**自己的 `conductor.rs`；用例多的能力按域分目录（`tools/` 与 `collab/` 各四个子模块）
+`llm.rs` / `workspace.rs` / `session.rs` / `slate.rs` / `modules.rs` / `vm.rs`，加**协调业务**自己的 `conductor.rs`；用例多的能力按域分目录（`tools/` 与 `collab/` 各五个子模块）
 （会话中心与跨能力编排）；契约测试 `ports.rs` / `fakes.rs` / `detail.rs` / `api.rs` / `cli.rs` / `routes.rs`；
 共享支撑 `doubles.rs`（端口替身）/ `builders.rs`（测试装配脚手架）/ `prelude.rs`（公共前置重导出）。
 **判据**：用例落到"它钉住的那个不变式"所属的文件；顺手经过别的能力只是路径，不是归属。

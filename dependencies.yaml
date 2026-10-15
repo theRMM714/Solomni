@@ -41,7 +41,7 @@ deps:
     source: release:qemu-windows-x86_64-11.1.1.tar.zst
     strip: 1
     size_mb: 32
-    note: Windows 虚拟机档的 QEMU（Arch 上 MinGW-w64 交叉编译的便携包；DLL 与固件都在包内，引擎按便携布局指 -L）
+    note: Windows 虚拟机档的 QEMU（官方源码在 MSYS2（mingw-w64）下自建的便携包，--enable-slirp；DLL 与固件都在包内，引擎按便携布局指 -L）
 
   - id: vm.guest.linux
     os: linux

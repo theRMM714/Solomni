@@ -8,36 +8,35 @@ Solomni is an **agent runtime environment (AgentOS) that runs on your own machin
 ## Why you need it
 
 **① You have a tool or a workflow, and you want AI to use it.**
-The usual route is to wrap it as a plugin for one specific product — and then it is tied to that product: switch agents
-or platforms and you wrap it again, while the tool itself grows a shell coupled to the host. Here you **adapt it to the
-contract once**: a folder plus a `module.yaml` (responsibility prompt + tool declarations), with the command it already
-had; some things need a small change on their own side (putting an executable inside the module folder, agreeing on how
-arguments are passed and how the receipt looks), but that change stays on their side — no restructuring, no SDK. Once
-adapted, **nothing is left behind**: **outside the contract the two sides depend on nothing from each other** — take the
-platform away and the tool still runs as it did; take the tool away and the platform keeps running. The same capability is
-used by people through the UI and by agents through the contract from a single declaration — no two entry points to maintain.
+Wrapping it as a plugin for one specific product ties it to that product: switch agents or platforms and you wrap it
+again, while the tool itself grows a shell coupled to the host. Here you **adapt it to the contract once**: a folder
+plus a `module.yaml` (responsibility prompt + tool declarations), with the command it already had. The change stays on
+the module's own side (for example, putting an executable inside the module folder, or agreeing on how arguments are
+passed and how the receipt looks) — no restructuring of this repository, no SDK. The result is that **outside the
+contract the two sides depend on nothing from each other**: take the platform away and the tool still runs as it did;
+take the tool away and the platform keeps running. The same capability is used by people through the UI and by agents
+through the contract, from a single declaration — no two entry points to maintain.
 
 **② Several agents working on one job.**
 A shared workspace has concrete problems by default: they overwrite each other, ownership of artifacts is unclear, and
 someone builds on another's unfinished output as if it were fact. Here every agent has **its own sandbox**
 (`session/<name>/<agent-instance>/`), which is also its **working copy** of the shared area; the shared area `work/`
-is the **main copy and read-only for agents** — pull what you need with `work_pull`, edit in the sandbox, then commit
+is the **main copy and read-only for agents**. Pull what you need with `work_pull`, edit in the sandbox, then commit
 with `work_commit`. Commits use a file-level three-way comparison, so a conflict rejects the whole commit and names
 each path instead of silently overwriting; any commit point can be restored. The only two roads across agents are that
-shared area and the transcript that enters the context — artifacts land in their owner's cell, so rework can find the
-person; capabilities are isolated too, a module's directory belongs only to the agent that holds it.
-(Finer-grained "who may write which part" is enforced by session permissions: per-agent read and commit
-allow-/block-lists, module directories read-only by default — see
-[docs/permission/README.md](docs/permission/README.md).)
+shared area and the transcript that enters the context: artifacts land in their owner's cell, so rework can find the
+person, and a module's directory belongs only to the agent that holds it. Finer-grained "who may write which part" is
+enforced by session permissions: per-agent read and commit allow-/block-lists, with module directories read-only by
+default (see [docs/permission/README.md](docs/permission/README.md)).
 
 **③ When something goes wrong, you need to know what it saw and why it decided that.**
-The transcript is **append-only** (delete/restore are explicit actions that really rewrite the log). On any line,
+The transcript is **append-only**; delete and restore are explicit actions that really rewrite the log. On any line,
 "rewind to here" offers: **archive** — append a marker and collapse the earlier lines (all bytes kept, recoverable);
 **delete** — really truncate to that point; **restore** — truncate at the marker, discarding work done since. Line ids
-are monotonic and never reused, replay is reproducible, so **a rebuild matches the live run line by line**; the shared
-area comes back to that moment too, via the `(agent, line)` anchor on each commit, with the whole subtree synchronized.
-A delivery can be replayed from disk — what the AI did is an auditable, reproducible engineering artifact, not a chat
-that is gone.
+are monotonic and never reused, and replay is reproducible, so **a rebuild matches the live run line by line**. The
+shared area comes back to that moment too, via the `(agent, line)` anchor on each commit, with the whole subtree
+synchronized. A delivery can be replayed from disk — what the AI did is an auditable, reproducible engineering
+artifact, not a chat that is gone.
 
 ## What it is made of
 
@@ -71,11 +70,11 @@ that is gone.
   able to answer, the call is refused (the command is never started).
 - **Two execution tiers**: the **host tier** (default — scripts run directly on the host) and the **vm tier**
   (module tools run inside a guest, isolated from host processes). The vm tier is pluggable along
-  **host × engine × guest × channel × share**: Linux (QEMU/KVM + 9p) and Windows (QEMU/WHPX + SMB over guestfwd, falling back to QGA copy) are already
+  **host × engine × guest × channel × share**: Linux (QEMU/KVM + virtiofs, falling back to 9p when virtiofsd is absent) and Windows (QEMU/WHPX + SMB over guestfwd, falling back to QGA copy) are already
   verified on real machines, macOS is still missing (see [tests/gaps.yaml](tests/gaps.yaml)). `node start.js --provision --ensure --yes`
   installs QEMU and a Debian guest into the project's `.vm/` (`--yes` confirms the download); host paths and guest paths are converted
-  by **one bridge** (identity when both sides share a dialect, a mirror root otherwise), and the working-environment
-  prompt hands the model guest-spelled paths. Details in [docs/vm/README.md](docs/vm/README.md); runtime package
+  by **one bridge**, in both directions (identity when both sides share a dialect, a mirror root otherwise), and the working-environment
+  prompt states **one spelling per environment** — system tools translate a guest spelling back to a host path before checking it. Details in [docs/vm/README.md](docs/vm/README.md); runtime package
   contract in [RUNTIME_SPEC.md](RUNTIME_SPEC.md).
 - **Registry**: four YAML files for providers / models / agents / settings, all under `.home/`, managed from
   the UI. Keys live only in the local registry and in the core's outbound calls (boundaries in
@@ -130,7 +129,7 @@ node run-tests.js        # quality gate + full test run (see TESTING.md)
   `node env.js --print-env` prints it machine-readable. `setup-runtime.js` / `setup-dev.js` only orchestrate;
   `node setup-runtime.js` and `node env.js setup` are equivalent.
 - **Outbound-link ledger**: `links.yaml` is the single authority for external URLs the project uses and that may
-  change (currently: toolchain bootstrap sources, the pinned winlibs upstream asset, the self-hosted dependencies release prefix, and guest image sources); edit it once and the whole
+  change (currently: toolchain bootstrap sources, the pinned winlibs upstream asset, the self-hosted dependencies release prefix, guest image sources, and the SMB helper asset); edit it once and the whole
   repository follows. User overrides go through `.home/settings.yaml` and environment variables, not the ledger.
 - **You can run it without a provider**: it walks the flow with the built-in fake model and says so plainly.
 - Common flags: `--root <dir>` (product root), `--web-port <port>`, `--release`.
@@ -156,13 +155,14 @@ tools:                       # optional: external tool table
   read_txt:
     command: python tools/read_txt.py   # working directory = the module root
     params:
-      path: { type: string, required: true, desc: real absolute path to read }
+      path: { type: string, required: true, desc: path written the way this environment spells it }
 ```
 
 - **One calling convention for external tools**: a start command + arguments + a stdin/stdout receipt. Scripts,
   skills and other harnesses are all instances of it; a long-running MCP server is not — declare it under `services`.
 - A tool process can reach: that agent's private sandbox + its own module directory; the shared main copy is not
-  among them (pull before editing, commit when done); it accepts **real absolute paths** only, and anything outside is refused.
+  among them (pull before editing, commit when done); it accepts paths written **the way this environment spells them**
+  (host tier = host paths, vm tier = guest paths), and anything outside the allowed roots is refused.
 - **Every module keeps a cross-task private area** `<module>/userdata/`: it is ensured to exist when the
   module is loaded (directory only, idempotent; failure never blocks loading, it is just reported — that seat then
   has no private landing). Module directories are read-only by default, `userdata/` excepted.
@@ -175,7 +175,7 @@ checks real artifacts. So it verifies the preconditions first. The first two scr
 the roster, the indexer built, and a provider plus a usable model (`SOLOMNI_DEMO_MODEL`, or the core default);
 the **MCP** script needs `mcp-toolbox` in the roster plus a provider and a usable model (it declares its
 `services` itself, so nothing has to be built); the **proxy** script needs a provider, a model and a **core
-default model**, plus at least one module or a stored agent; the **VM** script needs `harvest` in the roster, a
+default model** (it picks the roster itself and may assemble a zero-module agent); the **VM** script needs `harvest` in the roster, a
 usable model, and a guest base that declares the runtime it ships (`runtimes` in `guest.yaml`) — a missing
 runtime is refused at creation time.
 **When a precondition is missing it prints `DEMO-SKIPPED` with how to fix it and exits with code 2** — it never
@@ -205,7 +205,8 @@ Every unfinished item, how to fix it and its acceptance criteria have exactly on
 - Not a server: it binds `127.0.0.1` only — no server side, no account.
 
 **Quality**: `node run-tests.js` is the single entry point — T0 (format / compile / clippy / duplicate deps /
-structural review, zero tolerance) + unit + cross-platform integration + frontend smoke + end-to-end; the
+structural review / cross-target type check / out-of-project writes / supply chain, zero tolerance; supply-chain
+tools report `env-skip` when absent) + unit + cross-platform integration + frontend smoke + end-to-end; the
 real-machine fence probes run on three CI platforms (see [TESTING.md](TESTING.md)).
 
 ## Document guide
