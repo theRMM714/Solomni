@@ -16,8 +16,11 @@ const USER_DATA: &str = "#cloud-config\nruncmd:\n  - >-\n    dpkg -s qemu-guest-
 /// 目的：首启 cloud-init 的 meta-data（固定 instance-id，避免每次启动重跑）。
 const META_DATA: &str = "instance-id: solomni-provision\nlocal-hostname: solomni-guest\n";
 
-/// 目的：维护启动要装的运行包——模块工具在 guest 里要用的解释器，以及共享要用的 cifs-utils。
-const RUNTIME_PKGS: &str = "python3 nodejs cifs-utils";
+/// 目的：维护启动**必须**装上的运行包——模块工具基线（python）与共享要用的 cifs-utils。
+const REQUIRED_PKGS: &str = "python3 cifs-utils";
+
+/// 目的：维护启动**尽量**装上的运行包——镜像源里不可得就如实不声明（声明必须属实）。
+const OPTIONAL_PKGS: &str = "nodejs";
 
 /// 目的：一次 guest 运行（命令交给 guest 的 /bin/sh；args/env/cwd 都空）。
 fn sh(command: &str) -> GuestRun {
@@ -29,18 +32,21 @@ fn sh(command: &str) -> GuestRun {
     }
 }
 
-/// 目的：按镜像画像重写 guest.yaml——运行期编排装完 cifs-utils 之后，共享客户端如实声明为 cifs。
-fn write_guest_yaml(base: &Path, image: &GuestImage) -> Result<(), String> {
+/// 目的：按镜像画像重写 guest.yaml——共享客户端如实声明为 cifs，运行能力只列**自证过**的那些。
+/// 参数：runtimes = 编排在 guest 里逐个自证可用的能力名（没列 = 镜像里确实没有）。
+fn write_guest_yaml(base: &Path, image: &GuestImage, runtimes: &[String]) -> Result<(), String> {
     // arch 要用 guest.yaml 认的写法（amd64 / arm64），不是平台三元组（x86_64 / aarch64）。
     let arch = match image.arch {
         GuestArch::Amd64 => "amd64",
         GuestArch::Arm64 => "arm64",
     };
+    let list = runtimes.join(", ");
     let text = format!(
-        "# 由产品生成：命令通道 QGA；共享客户端 cifs；运行能力 python / node（都由运行期编排装进镜像，\n# 虚拟机档的选型诊断据此认定这两个能力已满足，不必再往 runtimes/ 放包）。\n\nid: {}\narch: {}\nos: {}\nagent: qga\nclients: [cifs]\nruntimes: [python, node]\n",
-        image.id,
-        arch,
-        image.os.as_str()
+        "# 由产品生成：命令通道 QGA；共享客户端 cifs；运行能力 [{list}]（运行期编排装好并逐个自证过的；\n# 这里没列的 = 镜像里确实没有。虚拟机档的选型诊断据此认定列出的能力已满足，不必再往 runtimes/ 放包）。\n\nid: {id}\narch: {arch}\nos: {os}\nagent: qga\nclients: [cifs]\nruntimes: [{list}]\n",
+        list = list,
+        id = image.id,
+        arch = arch,
+        os = image.os.as_str()
     );
     std::fs::write(base.join("guest.yaml"), text).map_err(|e| format!("写 guest.yaml 失败：{}", e))
 }
@@ -107,7 +113,7 @@ pub(super) fn install_guest_runtime(
             return Err("等首启 guest 的 qemu-guest-agent 超时".to_string());
         }
         // agent 活着之后顺手关掉 cloud-init；失败不影响"agent 已确认"这个事实。
-        let _ = vm.guest_run(&lease, &sh("touch /etc/cloud/cloud-init.disabled"));
+        let _ = vm.guest_run(&lease, &sh("touch /etc/cloud/cloud-init.disabled; sync"));
         vm.guest_stop(&lease);
         std::fs::write(&qga_marker, "QGA guest-sync 通过（产品 Rust 编排）\n")
             .map_err(|e| format!("写 {} 失败：{}", qga_marker.display(), e))?;
@@ -116,7 +122,7 @@ pub(super) fn install_guest_runtime(
 
     // 维护启动：装运行包与 cifs-utils；装完把 guest.yaml 的共享客户端写成 cifs。
     if !runtimes_marker.is_file() || !image.clients.cifs {
-        on_line("维护启动：经 QGA 在 guest 里装运行包（python3 / python / nodejs / cifs-utils）");
+        on_line("维护启动：经 QGA 在 guest 里装运行包（必需 python3 / cifs-utils；可选 nodejs）并逐个自证");
         let spec = GuestSpec {
             lease: lease.clone(),
             image: image.clone(),
@@ -134,24 +140,48 @@ pub(super) fn install_guest_runtime(
             vm.guest_stop(&lease);
             return Err("等维护启动的 qemu-guest-agent 超时".to_string());
         }
-        // 镜像里已有首启留下的 apt 索引：先不 update 直接装；装不上再 update 重试（update 很慢）。
-        // python-is-python3 在 Debian trixie 已经没有，python 命令自己补一个符号链接。
+        // 镜像里已有首启留下的 apt 索引：先不 update 直接装，装不上再 update 重试（update 很慢）；
+        // python-is-python3 在 trixie 已没有，python 符号链接自己补。必需包装不上如实失败，可选包尽力、装不上不声明。
         let cmd = format!(
-            "DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends {p} || (apt-get update -o Acquire::Languages=none && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends {p}); command -v python >/dev/null 2>&1 || ln -sf /usr/bin/python3 /usr/bin/python",
-            p = RUNTIME_PKGS
+            "DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends {req} || (apt-get update -o Acquire::Languages=none && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends {req}); DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends {opt} || true; command -v python >/dev/null 2>&1 || ln -sf /usr/bin/python3 /usr/bin/python; sync",
+            req = REQUIRED_PKGS,
+            opt = OPTIONAL_PKGS
         );
         let out = vm.guest_run(&lease, &sh(&cmd));
+        // 自证：python 必须通（模块工具的基线）；node 可选，通才写进声明。
+        let python_ok = out.ok && vm.guest_run(&lease, &sh("python -V >/dev/null 2>&1")).ok;
+        let node_ok = vm
+            .guest_run(&lease, &sh("node --version >/dev/null 2>&1"))
+            .ok;
         vm.guest_stop(&lease);
-        if !out.ok {
-            return Err(format!("guest 运行包没装成：{}", out.output));
+        if !python_ok {
+            return Err(format!(
+                "guest 运行包没装成（python 不可用）：{}",
+                out.output
+            ));
         }
-        write_guest_yaml(&base, &image)?;
+        let mut proven = vec!["python".to_string()];
+        if node_ok {
+            proven.push("node".to_string());
+        }
+        write_guest_yaml(&base, &image, &proven)?;
         std::fs::write(
             &runtimes_marker,
-            "python3 / python / nodejs / cifs-utils（产品 Rust 编排）\n",
+            format!(
+                "产品 Rust 编排：python3 / python 已自证可用{}；cifs-utils 已装\n",
+                if node_ok {
+                    "，node 也已自证可用"
+                } else {
+                    "；node 在这个镜像源里装不上，未声明"
+                }
+            ),
         )
         .map_err(|e| format!("写 {} 失败：{}", runtimes_marker.display(), e))?;
-        on_line("guest 运行包与 cifs-utils 已装好");
+        on_line(if node_ok {
+            "guest 运行包与 cifs-utils 已装好（python / node 都自证可用）"
+        } else {
+            "guest 运行包与 cifs-utils 已装好（python 自证可用；node 装不上，未声明）"
+        });
     }
     Ok(())
 }

@@ -478,6 +478,42 @@ impl Drop for SeedServer {
 }
 
 impl QemuHandle {
+    /// 目的：优雅收尾——请 guest 自己断电，**等它落盘退出**（超时才杀）；再收种子服务与可写层。
+    /// 约束：guest-shutdown 是异步的——不等它，guest 里刚要落盘的元数据（如刚建的 python 符号链接）会丢。
+    fn shutdown_and_wait(&mut self) {
+        let asked = self
+            .send(&serde_json::json!({"execute":"guest-shutdown"}))
+            .is_ok();
+        if let Some(mut s) = self.seed.take() {
+            s.stop();
+        }
+        if let Some(mut c) = self.child.take() {
+            let mut waited = false;
+            if asked {
+                let deadline = Instant::now() + Duration::from_secs(8);
+                loop {
+                    match c.try_wait() {
+                        Ok(Some(_)) => {
+                            waited = true;
+                            break;
+                        }
+                        Ok(None) if Instant::now() < deadline => {
+                            std::thread::sleep(Duration::from_millis(100));
+                        }
+                        _ => break,
+                    }
+                }
+            }
+            if !waited {
+                let _ = c.kill();
+                let _ = c.wait();
+            }
+        }
+        if let Some(path) = self.overlay.take() {
+            let _ = std::fs::remove_file(&path);
+        }
+    }
+
     fn send(&mut self, v: &serde_json::Value) -> Result<(), String> {
         let mut line = v.to_string();
         line.push('\n');
@@ -707,33 +743,14 @@ impl GuestVm for QemuHandle {
     }
 
     fn stop(&mut self) {
-        let _ = self.send(&serde_json::json!({"execute":"guest-shutdown"}));
-        if let Some(mut s) = self.seed.take() {
-            s.stop();
-        }
-        if let Some(mut c) = self.child.take() {
-            let _ = c.kill();
-            let _ = c.wait();
-        }
-        if let Some(path) = self.overlay.take() {
-            let _ = std::fs::remove_file(&path);
-        }
+        self.shutdown_and_wait();
     }
 }
 
 impl Drop for QemuHandle {
-    /// 目的：兜底收尾——种子服务、QEMU 进程与可写层都不能因为提前 drop 而漏掉。
+    /// 目的：兜底收尾——种子服务、QEMU 进程与可写层都不能因为提前 drop 而漏掉；同样先请 guest 优雅断电。
     fn drop(&mut self) {
-        if let Some(mut s) = self.seed.take() {
-            s.stop();
-        }
-        if let Some(mut c) = self.child.take() {
-            let _ = c.kill();
-            let _ = c.wait();
-        }
-        if let Some(path) = self.overlay.take() {
-            let _ = std::fs::remove_file(&path);
-        }
+        self.shutdown_and_wait();
     }
 }
 
