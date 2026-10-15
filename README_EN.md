@@ -71,9 +71,9 @@ that is gone.
   able to answer, the call is refused (the command is never started).
 - **Two execution tiers**: the **host tier** (default — scripts run directly on the host) and the **vm tier**
   (module tools run inside a guest, isolated from host processes). The vm tier is pluggable along
-  **host × engine × guest × channel × share**: Linux (QEMU/KVM + 9p) and Windows (QEMU/WHPX + QGA copy) are already
-  verified on real machines, macOS is still missing (see [tests/gaps.yaml](tests/gaps.yaml)). `node setup-vm.js`
-  installs QEMU and a Debian guest into the project's `.vm/` per platform; host paths and guest paths are converted
+  **host × engine × guest × channel × share**: Linux (QEMU/KVM + 9p) and Windows (QEMU/WHPX + SMB over guestfwd, falling back to QGA copy) are already
+  verified on real machines, macOS is still missing (see [tests/gaps.yaml](tests/gaps.yaml)). `node start.js --provision --ensure --yes`
+  installs QEMU and a Debian guest into the project's `.vm/` (`--yes` confirms the download); host paths and guest paths are converted
   by **one bridge** (identity when both sides share a dialect, a mirror root otherwise), and the working-environment
   prompt hands the model guest-spelled paths. Details in [docs/vm/README.md](docs/vm/README.md); runtime package
   contract in [RUNTIME_SPEC.md](RUNTIME_SPEC.md).
@@ -100,8 +100,8 @@ the **runtime environment** (just running the product) and the **dev environment
 node setup-runtime.js    # prepare the runtime environment: platform/<os>/ and .tools/ inside the project; borrows a usable Rust read-only
 node start.js            # any platform; on Windows also start.bat, on macOS / Linux also ./start.sh
 node start.js -webUI     # go straight to the local web UI (127.0.0.1:3081)
-node setup-vm.js --check # optional: read-only check of the vm tier (QEMU / guest image / guest agent and runtimes)
-node setup-vm.js         # optional: install QEMU and a Debian guest into the project's .vm/ (per platform; asks before downloading)
+node start.js --provision                # optional: read-only vm tier status (JSON: QEMU / guest image / agent and runtimes)
+node start.js --provision --ensure --yes # optional: install QEMU and a Debian guest into the project's .vm/ (--yes confirms the download)
 ```
 
 - Toolchain and caches stay **inside the project**: a usable Rust is **borrowed read-only** (caches and artifacts

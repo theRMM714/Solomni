@@ -108,6 +108,27 @@ impl Vm for VmService {
         out
     }
 
+    fn guest_wait_agent(&self, lease: &str, timeout: std::time::Duration) -> bool {
+        let deadline = std::time::Instant::now() + timeout;
+        loop {
+            match self.guests.lock() {
+                Ok(mut guests) => match guests.get_mut(lease) {
+                    Some(entry) => {
+                        if entry.vm.channel().ping() {
+                            return true;
+                        }
+                    }
+                    None => return false,
+                },
+                Err(_) => return false,
+            }
+            if std::time::Instant::now() >= deadline {
+                return false;
+            }
+            std::thread::sleep(std::time::Duration::from_secs(2));
+        }
+    }
+
     fn guest_stop(&self, lease: &str) {
         if let Ok(mut guests) = self.guests.lock() {
             if let Some(mut entry) = guests.remove(lease) {

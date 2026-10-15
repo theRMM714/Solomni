@@ -95,6 +95,7 @@ impl ShareBackend for VirtioFsShare {
             SharePlan {
                 kind: "virtiofs",
                 engine_args,
+                net_options: Vec::new(),
                 guest_scripts,
                 needs_net: false,
                 // 有 vhost-user 设备才要共享内存；没有挂载就没有设备。

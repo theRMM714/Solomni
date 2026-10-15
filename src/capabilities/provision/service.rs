@@ -4,6 +4,7 @@
 //! 联动：呈现层经 api::Provision 用它；组合根构造它；下载走 kernel::detail::outbound，解包走 kernel::detail::unpack。
 
 use super::api::{DepStatus, JobState, Provision};
+use crate::capabilities::vm::api::Vm;
 use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::fs;
@@ -77,7 +78,7 @@ fn link(key: &str) -> Option<String> {
 }
 
 /// 目的：按组件把清单里的相对路径落到产品根下（不用字符串拼分隔符）。
-fn under(root: &Path, rel: &str) -> PathBuf {
+pub(super) fn under(root: &Path, rel: &str) -> PathBuf {
     let mut out = root.to_path_buf();
     for seg in rel.split('/').filter(|s| !s.is_empty()) {
         out.push(seg);
@@ -93,26 +94,37 @@ pub fn for_host(deps: &[Dep], os: &str, arch: &str) -> Vec<Dep> {
         .collect()
 }
 
-/// 目的：依赖补齐的实现——持产品根、作业状态与取消旗；下载 / 解包在下面同一文件。
+/// 目的：依赖补齐的实现——持产品根、作业状态、取消旗与（可选的）vm 能力面；下载 / 解包在下面同一文件。
 pub struct ProvisionService {
     root: PathBuf,
     job: Arc<Mutex<JobState>>,
     cancel: Arc<AtomicBool>,
+    /// Windows guest 的运行期编排要起 guest；组合根或 --provision 入口注入；只查状态时可为 None。
+    vm: Option<Arc<dyn Vm + Send + Sync>>,
 }
 
 impl ProvisionService {
-    /// 目的：以产品根建一个实现（进程内一个就够；作业状态是进程内的）。
+    /// 目的：以产品根建一个实现（只查状态、或只装不启动 guest 的条目用；guest-runtime 会被如实拒绝）。
     pub fn new(root: &Path) -> ProvisionService {
         ProvisionService {
             root: root.to_path_buf(),
             job: Arc::new(Mutex::new(JobState::default())),
             cancel: Arc::new(AtomicBool::new(false)),
+            vm: None,
+        }
+    }
+
+    /// 目的：带 vm 能力面的实现（组合根 / --provision 入口用）；guest-runtime 编排需要它。
+    pub fn with_vm(root: &Path, vm: Arc<dyn Vm + Send + Sync>) -> ProvisionService {
+        ProvisionService {
+            vm: Some(vm),
+            ..ProvisionService::new(root)
         }
     }
 
     /// 目的：同步补齐（CLI 用）：逐条下载 / 解包 / 校验，进度逐行回调。
     pub fn ensure(&self, ids: &[String], on_line: &mut dyn FnMut(&str)) -> Result<(), String> {
-        run_ensure(&self.root, ids, &self.cancel, on_line)
+        run_ensure(&self.root, ids, &self.cancel, on_line, self.vm.as_deref())
     }
 }
 
@@ -159,10 +171,11 @@ impl Provision for ProvisionService {
         let root = self.root.clone();
         let job = Arc::clone(&self.job);
         let cancel = Arc::clone(&self.cancel);
+        let vm = self.vm.clone();
         std::thread::spawn(move || {
             let sink = Arc::clone(&job);
             let mut on_line = move |line: &str| push_line(&sink, line);
-            let r = run_ensure(&root, &ids, &cancel, &mut on_line);
+            let r = run_ensure(&root, &ids, &cancel, &mut on_line, vm.as_deref());
             if let Ok(mut j) = job.lock() {
                 j.running = false;
                 if let Err(e) = r {
@@ -195,11 +208,12 @@ fn run_ensure(
     ids: &[String],
     cancel: &AtomicBool,
     on_line: &mut dyn FnMut(&str),
+    vm: Option<&(dyn Vm + Send + Sync)>,
 ) -> Result<(), String> {
     let all = deps()?;
     let links = links()?;
     let all = for_host(&all, std::env::consts::OS, std::env::consts::ARCH);
-    run(root, &all, &links, ids, cancel, on_line)
+    run(root, &all, &links, ids, cancel, on_line, vm)
 }
 
 /// 目的：在给定的依赖清单上执行补齐（清单/台账由调用方给，便于用例注入）。
@@ -210,6 +224,7 @@ fn run(
     ids: &[String],
     cancel: &AtomicBool,
     on_line: &mut dyn FnMut(&str),
+    vm: Option<&(dyn Vm + Send + Sync)>,
 ) -> Result<(), String> {
     let picked: Vec<&Dep> = if ids.is_empty() {
         all.iter().collect()
@@ -232,11 +247,14 @@ fn run(
         let url = source_url(&dep.source, links)?;
         let asset = asset_name(&url);
         let cached = cache.join(&asset);
-        if cached.is_file() {
-            on_line(&format!("{}：用缓存 {}", dep.id, asset));
-        } else {
-            on_line(&format!("{}：下载 {}", dep.id, url));
-            download(&agent, &url, &cached, on_line)?;
+        // 运行期编排自己不下东西：它要的镜像必须已由 guest-disk 装好；缺了编排会如实拒绝。
+        if dep.kind != "guest-runtime" {
+            if cached.is_file() {
+                on_line(&format!("{}：用缓存 {}", dep.id, asset));
+            } else {
+                on_line(&format!("{}：下载 {}", dep.id, url));
+                download(&agent, &url, &cached, on_line)?;
+            }
         }
         let dest = under(root, &dep.install);
         fs::create_dir_all(&dest).map_err(|e| format!("建安装目录 {} 失败：{}", dep.install, e))?;
@@ -248,6 +266,8 @@ fn run(
             "guest-disk" => install_guest_disk(&cached, &dest, &dep.probe, on_line)
                 .map_err(|e| format!("{}：{}", dep.id, e))?,
             "guest-rootfs" => install_guest_rootfs(root, dep, &cached, &agent, on_line)
+                .map_err(|e| format!("{}：{}", dep.id, e))?,
+            "guest-runtime" => super::guest::install_guest_runtime(root, dep, vm, on_line)
                 .map_err(|e| format!("{}：{}", dep.id, e))?,
             _ => crate::kernel::detail::unpack::extract_into(&cached, &dest, dep.strip)
                 .map_err(|e| format!("{}：解包失败：{}", dep.id, e))?,
@@ -373,12 +393,21 @@ fn install_guest_disk(
     probe: &str,
     on_line: &mut dyn FnMut(&str),
 ) -> Result<(), String> {
-    install_file(cached, dest, probe)?;
+    // 磁盘是**可变状态**（guest 里已经装过 agent / 运行包），不能拿缓存里的原始镜像覆盖它；
+    // 只有不在场时才落盘。运行期编排（guest-runtime）负责把它编到可用。
+    let name = Path::new(probe)
+        .file_name()
+        .ok_or_else(|| format!("probe 没有文件名：{}", probe))?;
+    if dest.join(name).is_file() {
+        on_line("guest 镜像已在场，不覆盖（运行期状态在里面）");
+    } else {
+        install_file(cached, dest, probe)?;
+    }
     let yaml = dest.join("guest.yaml");
     if !yaml.is_file() {
         fs::write(
             &yaml,
-            "# 由产品生成：这份镜像的命令通道是 QGA，共享客户端按镜像打包情况声明。\n\nid: debian-13-genericcloud-amd64\narch: amd64\nagent: qga\nclients: [9p, virtiofs]\n",
+            "# 由产品生成：命令通道 QGA；共享客户端由运行期编排装好 cifs-utils 后声明（见 guest-runtime）。\n\nid: debian-13-genericcloud-amd64\narch: amd64\nagent: qga\nclients: []\n",
         )
         .map_err(|e| format!("写 guest.yaml 失败：{}", e))?;
         on_line("写 guest.yaml（QGA 通道画像）");
@@ -551,10 +580,8 @@ fn ensure_guest_kernel(
     if let Some(abi) = guest_abi(base) {
         return Ok(abi);
     }
-    let url = links()?
-        .get("guest.debian.linux")
-        .cloned()
-        .ok_or_else(|| "links.yaml 缺 guest.debian.linux".to_string())?;
+    let url =
+        link("guest.debian.linux").ok_or_else(|| "links.yaml 缺 guest.debian.linux".to_string())?;
     let listing = get_text(agent, &url)?;
     let name = pick_deb(&listing, "linux-image-", "-amd64-unsigned_")
         .filter(|n| n.ends_with("_amd64.deb"))
@@ -576,9 +603,7 @@ fn ensure_guest_qga(
     on_line: &mut dyn FnMut(&str),
 ) -> Result<(), String> {
     if !base.join("usr").join("sbin").join("qemu-ga").is_file() {
-        let url = links()?
-            .get("guest.debian.pool")
-            .cloned()
+        let url = link("guest.debian.pool")
             .ok_or_else(|| "links.yaml 缺 guest.debian.pool".to_string())?;
         let listing = get_text(agent, &url)?;
         let name = pick_deb(&listing, "qemu-guest-agent_", "amd64.deb")
@@ -847,6 +872,7 @@ mod tests {
             &[],
             &AtomicBool::new(false),
             &mut |_| {},
+            None,
         )
         .expect("单文件安装");
         assert!(root
@@ -889,6 +915,7 @@ mod tests {
             &[],
             &AtomicBool::new(false),
             &mut |_| {},
+            None,
         )
         .expect("guest-disk 安装");
         let base = root.join(".vm").join("guest").join("base");
@@ -1026,6 +1053,7 @@ mod tests {
             &[],
             &AtomicBool::new(false),
             &mut |l| lines.push(l.to_string()),
+            None,
         )
         .expect("从缓存装");
         assert!(

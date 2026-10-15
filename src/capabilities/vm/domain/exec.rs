@@ -362,15 +362,19 @@ fn guest_backend_verified() -> bool {
 }
 
 /// 目的：已经实现的共享后端（组合选择与就绪说明**共用同一份**，避免"说要验 A、实际跑 B"）。
-pub const IMPLEMENTED_SHARES: &[&str] = &["9p", "copy", "virtiofs"];
+pub const IMPLEMENTED_SHARES: &[&str] = &["9p", "copy", "virtiofs", "smb"];
 
 /// 目的：共享档 virtiofs 要用的外部守护进程名（探测 PATH 与设置登记都用它；只支持 Rust 版 CLI）。
 pub const VIRTIOFSD_BIN: &str = "virtiofsd";
+
+/// 目的：共享档 smb 要用的外部 helper 名（探测 PATH 与设置登记都用它；Windows 上补 .exe 由宿主探测处理）。
+pub const SMBD_BIN: &str = "smbd";
 
 /// 目的：某个共享档要用的外部工具名（None = 不需要外部工具）。
 pub fn share_tool_of(share: &str) -> Option<&'static str> {
     match share {
         "virtiofs" => Some(VIRTIOFSD_BIN),
+        "smb" => Some(SMBD_BIN),
         _ => None,
     }
 }
@@ -469,7 +473,7 @@ fn qemu_requirement(registered: Option<&str>, probe: &dyn HostProbe) -> VmRequir
         how: if found {
             String::new()
         } else {
-            "自行安装 QEMU 并放进 PATH，或在设置里登记它的完整路径；也可跑 node setup-vm.js 把它下载进项目内（需用户同意）"
+            "自行安装 QEMU 并放进 PATH，或在设置里登记它的完整路径；也可跑 solomni --provision --ensure --yes 把它下载进项目内（需用户同意）"
                 .to_string()
         },
     }
@@ -514,7 +518,7 @@ fn base_requirement(base: Option<&str>, probe: &dyn HostProbe) -> VmRequirement 
         how: if met {
             String::new()
         } else {
-            "自备一份 guest 基础根：一个目录，里面是发行版 rootfs（目录，或 rootfs.ext4 / *.qcow2 磁盘镜像）与 vmlinuz（可选 initrd.img），把目录填进会话的 base（可跑 node setup-vm.js 把 Debian 基础根下载进项目内；需用户同意）"
+            "自备一份 guest 基础根：一个目录，里面是发行版 rootfs（目录，或 rootfs.ext4 / *.qcow2 磁盘镜像）与 vmlinuz（可选 initrd.img），把目录填进会话的 base（可跑 solomni --provision --ensure --yes 把 Debian 基础根下载进项目内；需用户同意）"
                 .to_string()
         },
     }

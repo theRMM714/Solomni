@@ -617,6 +617,7 @@ impl ConductorHandle {
             permissions: current.permissions.clone(),
             qemu_path: current.qemu_path.clone(),
             virtiofsd_path: current.virtiofsd_path.clone(),
+            smbd_path: current.smbd_path.clone(),
             llm_timeout_secs: num("llm_timeout_secs").unwrap_or(current.llm_timeout_secs),
             compact_at_percent: num("compact_at_percent")
                 .map(|v| v as u8)

@@ -52,9 +52,15 @@ impl RegistryService {
 
     /// 目的：**未登记**时采用依赖补齐装到项目内的可运行包（显式登记优先）。
     /// 约束：只填内存、不落盘——用户显式登记的路径永远优先，且这里不改用户的 `settings.yaml`。
-    pub fn apply_discovered(&mut self, qemu: Option<String>, virtiofsd: Option<String>) {
+    pub fn apply_discovered(
+        &mut self,
+        qemu: Option<String>,
+        virtiofsd: Option<String>,
+        smbd: Option<String>,
+    ) {
         fill_if_empty(&mut self.settings.app.qemu_path, qemu);
         fill_if_empty(&mut self.settings.app.virtiofsd_path, virtiofsd);
+        fill_if_empty(&mut self.settings.app.smbd_path, smbd);
     }
 
     /// 落盘并把失败如实记进日志（写方法共用这一句）。

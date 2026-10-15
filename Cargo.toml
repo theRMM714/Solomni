@@ -14,7 +14,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tiny_http = "0.12"
 yaml_serde = "0.10"
-# 跨平台解包（setup-vm-*.js 用；纯 Rust，不依赖用户装了什么解压工具）：tar 容器 + zstd / gzip 解码。
+# 跨平台解包（provision 能力用它解归档；纯 Rust，不依赖用户装了什么解压工具）：tar 容器 + zstd / gzip 解码。
 tar = "0.4"
 ruzstd = "0.9"
 flate2 = "1"

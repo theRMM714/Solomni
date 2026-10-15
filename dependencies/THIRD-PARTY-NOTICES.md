@@ -40,6 +40,14 @@
 - **Source Code**: https://gitlab.com/virtio-fs/virtiofsd
 - **Note**: 根据 Apache-2.0 许可证要求，已附上许可证副本。无 GPL 源码提供义务。
 
+## 4. smbd（SMB 共享 helper，独立仓）
+
+- **Binary Asset**: `smbd-windows-x86_64.exe`
+- **Version**: v0.0.1（独立仓 tag）
+- **License**: MIT（上游 rust-smb-server 亦为 MIT）
+- **Source Code**: https://github.com/theRMM714/rust-smb-server-win
+- **Note**: 上游 `paltaio/rust-smb-server`（MIT）+ 本项目补丁（Windows 定位 IO、`unlink` 目录识别、delete-on-close 错误传播）与 helper CLI，由该仓 CI 构建并发布资产；Solomni 只按 URL 下载，不携带其提交史。
+
 ---
 
 ## 附：GPL 源码获取说明
@@ -91,6 +99,14 @@ This file documents the third-party dependency bundles self-hosted and distribut
 - **License**: Apache-2.0 (also dual-licensed upstream under BSD-3-Clause)
 - **Source Code**: https://gitlab.com/virtio-fs/virtiofsd
 - **Note**: A copy of the license is included as required by the Apache-2.0 License. There is no GPL source provision obligation.
+
+## 4. smbd (SMB share helper, separate repository)
+
+- **Binary Asset**: `smbd-windows-x86_64.exe`
+- **Version**: v0.0.1 (tag in the separate repository)
+- **License**: MIT (upstream rust-smb-server is MIT as well)
+- **Source Code**: https://github.com/theRMM714/rust-smb-server-win
+- **Note**: Upstream `paltaio/rust-smb-server` (MIT) plus this project's patches (Windows positional IO, directory-aware `unlink`, delete-on-close error propagation) and the helper CLI; the asset is built and published by that repository's CI, and Solomni only downloads it by URL.
 
 ---
 

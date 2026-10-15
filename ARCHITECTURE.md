@@ -44,7 +44,7 @@ presentation/{cli,web} ──▶ capabilities（含协调业务 conductor）─�
 | `ModuleStateStore` | 模块与服务的启停覆盖落盘（`.home/modules.yaml`） | `modules/detail::YamlModuleState` |
 | `PackageSource` | 运行包库来源（扫描依赖文件夹 `runtimes/`） | `vm/detail::FsPackages` |
 | `VmEngine` / `GuestVm` / `GuestChannel` | 虚拟机档的引擎：按规格拉起一台 guest、在它里面执行、销毁；通道是在 guest 里执行的入口 | `vm/detail::QemuEngine` + `QemuHandle`（QEMU + QGA） |
-| `ShareBackend` | 宿主↔guest 的共享：声明能落哪些引擎 / guest，产出引擎参数与 guest 端挂载命令，并可持有外部资源（`ShareGuard`） | `vm/detail::VirtioFsShare`（vhost-user-fs + virtiofsd）/ `NinePShare`（9p）/ `CopyShare`（QGA 复制） |
+| `ShareBackend` | 宿主↔guest 的共享：声明能落哪些引擎 / guest，产出引擎参数、netdev 附加选项与 guest 端挂载命令，并可持有外部资源（`ShareGuard`） | `vm/detail::VirtioFsShare`（vhost-user-fs + virtiofsd）/ `NinePShare`（9p）/ `CopyShare`（QGA 复制）/ `SmbShare`（用户态 SMB helper + guestfwd，Windows 实时共享） |
 | `Workdirs` | 一次工作的共享区、各 agent 沙箱、版本库目录、文件清单、用量与寻址根 | `FsWorkspace` |
 | `WorkStore` | 共享区版本库的落盘：文件原语 + 内容寻址对象 + 提交记录 + 每个 agent 的拉取基线（并拒绝符号链接逃逸） | `FsWorkStore` |
 | `SysIo` | 内置文件工具的读写机制（读严格 UTF-8、非法字节如实标注；写一律 UTF-8） | `FsSysIo` |

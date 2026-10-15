@@ -60,4 +60,23 @@ deps:
     probe: .vm/guest/base/rootfs.qcow2
     source: guest.debian.qcow2
     size_mb: 330
-    note: Windows 宿主用的 Debian cloud qcow2（单文件直下 + 写 guest.yaml 画像）；镜像里装 qemu-guest-agent / 运行包仍是运行期编排（待定方案）
+    note: Windows 宿主用的 Debian cloud qcow2（单文件直下 + 写 guest.yaml 画像）；agent 与运行包由 vm.guest-runtime.windows 的 Rust 编排装上
+  - id: vm.guest-runtime.windows
+    os: windows
+    arch: x86_64
+    kind: guest-runtime
+    install: .vm/guest/base
+    probe: .vm/guest/base/.runtimes-ready
+    source: guest.debian.qcow2
+    size_mb: 0
+    note: Windows guest 的运行期编排（首启 cloud-init 装 qemu-guest-agent → 维护启动装 python3 / python-is-python3 / nodejs / cifs-utils）；镜像源与 vm.guest.windows 同一份 qcow2（走缓存）
+
+  - id: vm.smbd.windows
+    os: windows
+    arch: x86_64
+    kind: file
+    install: .vm/smbd
+    probe: .vm/smbd/smbd.exe
+    source: smbd.windows
+    size_mb: 1
+    note: 宿主侧用户态 SMB 共享服务（独立 fork 仓的预编译 helper；Windows 没有 9p / virtiofs，SMB 经 guestfwd 做实时共享）

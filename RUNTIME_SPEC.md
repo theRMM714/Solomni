@@ -91,14 +91,13 @@ files:                      # 包内文件指纹：用于可复现与呈现
 
 前置检测是**一份逐项清单**（机器能力 `vm::vm_requirements`，界面与 `--doctor` 照抄同一份）：虚拟机监视器、guest 本体、共享档、QEMU（引擎）；
 基础根（会话级）在保存 /「开始」时合并进来，
-每项给出"现状 + 怎么补"（共享档缺 `virtiofsd` 只作事实呈现、不拦档：自动退 9p）。依赖（QEMU / `virtiofsd` / 镜像）**不预置、不分发**，由 `setup-vm.js`（按平台分发到 `setup-vm-windows.js` / `setup-vm-linux.js` / `setup-vm-mac.js`，共享件 `setup-vm-common.js`）按平台下载并解包进项目内 `.vm/`（下载源在 `links.yaml`，需用户同意）；产品检测、指路并给出补齐入口，`qemu_path` / `virtiofsd_path` 可登记。
+每项给出"现状 + 怎么补"（共享档缺外部工具只作事实呈现、不拦档：Linux 缺 `virtiofsd` 退 9p，Windows 缺 `smbd` 退 QGA 复制）。依赖（QEMU / `virtiofsd` / 镜像 / SMB helper）**不预置、不分发**，由 provision 能力按 `dependencies.yaml` + `links.yaml` 下载并解包进项目内 `.vm/`（需用户同意；入口 `solomni --provision --ensure --yes`）；产品检测、指路并给出补齐入口，`qemu_path` / `virtiofsd_path` 可登记。Windows guest 的 agent 与运行包由 `kind: guest-runtime` 的运行期编排（cloud-init 种子 → 维护启动经 QGA 装包）在 Rust 侧装上，不再依赖仓库脚本。
 基础根 = 一个目录：发行版 rootfs（目录，或 `rootfs.ext4` / `*.qcow2` 磁盘镜像）+ `vmlinuz`（可选 `initrd.img`）；**目录根必须给内核**（直启），**磁盘镜像可自带引导**（不给内核也行）；目录里可放一份 `guest.yaml` 声明画像（id / arch / agent / os / clients），缺省按目录名与 Debian 默认（os 缺省 linux），不认识的值如实拒收。
 
-**已真机验收**：Linux（QEMU/KVM + virtiofs，默认共享档；缺 `virtiofsd` 时退 9p）与 Windows（QEMU/WHPX + QGA 复制）——引擎级探针（`vm_live_guest_runs_command_inside_guest`）
-与 e2e 的 `SOLOMNI_VM_BASE` 会话场景都过；Windows 侧由 `setup-vm-windows.js` 取 MSYS2 闭包 QEMU、下 Debian cloud qcow2、
-cloud-init 装 `qemu-guest-agent`，维护启动预装 python3 / nodejs。
-**尚未做**（唯一权威见 `tests/gaps.yaml`）：macOS 的 QEMU 取包、Apple vz 引擎 + 自研 agent（vsock 通道）、
-Windows 的 SMB 实时共享。
+**已真机验收**：Linux（QEMU/KVM + virtiofs，默认共享档；缺 `virtiofsd` 时退 9p）与 Windows（QEMU/WHPX + SMB guestfwd 实时共享；缺 `smbd` 时退 QGA 复制）——引擎级探针（`vm_live_guest_runs_command_inside_guest`）
+与 e2e 的 `SOLOMNI_VM_BASE` 会话场景都过；Windows 侧的 QEMU 与 Debian cloud qcow2 由 provision 能力按清单装入，
+首启经 cloud-init 装 `qemu-guest-agent`、维护启动经 QGA 装 python3 / nodejs / cifs-utils——整段编排在 Rust 侧。
+**尚未做**（唯一权威见 `tests/gaps.yaml`）：macOS 的 QEMU 取包、Apple vz 引擎 + 自研 agent（vsock 通道）。
 
 ## 六、校验与拒收
 

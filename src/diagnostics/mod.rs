@@ -53,6 +53,20 @@ pub fn doctor() -> i32 {
     0
 }
 
+/// 目的：给 `--provision` 的补齐作业装配 vm 能力面（guest-runtime 的运行期编排要起 guest）。
+/// 约束：只用于补齐——共享档用 QGA 复制（与挂载无关），引擎路径由编排条目自己给。
+fn provisioning_vm(
+    root: &std::path::Path,
+) -> std::sync::Arc<dyn crate::capabilities::vm::api::Vm + Send + Sync> {
+    std::sync::Arc::new(crate::capabilities::vm::service::VmService::new(
+        std::sync::Arc::new(crate::capabilities::vm::detail::FsPackages::new(
+            root.join("runtimes"),
+        )),
+        std::sync::Arc::new(crate::capabilities::vm::detail::QemuEngine::new()),
+        std::sync::Arc::new(crate::capabilities::vm::detail::CopyShare::new()),
+    ))
+}
+
 /// 目的：隐藏模式——依赖补齐：不带 `--ensure` 报状态（机器可读）；带 `--ensure[=id,…] --yes` 真下载安装。
 pub fn provision(root: &std::path::Path, args: &[String]) -> i32 {
     let ids: Vec<String> = args
@@ -72,7 +86,8 @@ pub fn provision(root: &std::path::Path, args: &[String]) -> i32 {
             );
             return 2;
         }
-        let p = crate::capabilities::provision::ProvisionService::new(root);
+        let p =
+            crate::capabilities::provision::ProvisionService::with_vm(root, provisioning_vm(root));
         return match p.ensure(&ids, &mut |line| eprintln!("[依赖补齐] {}", line)) {
             Ok(()) => 0,
             Err(e) => {

@@ -10,4 +10,5 @@
 | --- | --- |
 | `src/capabilities/provision/mod.rs` | 能力入口：模块与公开面（`ProvisionService`） |
 | `src/capabilities/provision/api.rs` | 入站契约：`Provision` trait + `DepStatus` / `JobState` DTO + `NoProvision` |
-| `src/capabilities/provision/service.rs` | 实现：清单 / 台账解析、本机状态、下载缓存、解包落盘、作业与取消 |
+| `src/capabilities/provision/service.rs` | 实现：清单 / 台账解析、本机状态、下载缓存、解包落盘、作业与取消；`run` 持有可选的 vm 能力面 |
+| `src/capabilities/provision/guest.rs` | Windows guest 的运行期编排：cloud-init 种子首启装 agent → 维护启动经 QGA 装运行包（含 cifs-utils），落 `.qga-ready` / `.runtimes-ready` 并改写 `guest.yaml` 的共享客户端 |

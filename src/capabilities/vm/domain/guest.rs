@@ -166,7 +166,15 @@ pub struct GuestMount {
     pub read_only: bool,
 }
 
-/// 目的：一次 guest 启动的规格（镜像 + 挂载 + 网络 + 会话租约 + 引擎路径登记）。
+/// 目的：首启要经 cloud-init 投喂的种子文档（NoCloud net 数据源：`/user-data` 与 `/meta-data`）。
+/// 约束：内容由调用方（供给编排）给，域内不生成；只被支持种子的引擎消费。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SeedDocs {
+    pub user_data: String,
+    pub meta_data: String,
+}
+
+/// 目的：一次 guest 启动的规格（镜像 + 挂载 + 网络 + 会话租约 + 引擎路径登记 + 首启种子）。
 #[derive(Debug, Clone)]
 pub struct GuestSpec {
     pub lease: String,
@@ -179,6 +187,9 @@ pub struct GuestSpec {
     /// 目的：设置里登记的**共享后端**要用的外部可执行文件路径（如 virtiofsd；空 = 兜底按 PATH 找）。
     /// 约束：与 qemu_path 同样与就绪检测共用一份登记；不需要外部工具的共享档忽略它。
     pub share_path: Option<String>,
+    /// 目的：首启要投喂的 cloud-init 种子；None = 不投种子（正常会话启动）。
+    /// 约束：投种子要求 `net = true`（guest 要能连到宿主的小 HTTP 服务）。
+    pub seed: Option<SeedDocs>,
 }
 
 /// 目的：在 guest 里跑一次工具（命令 + 参数 + 环境 + 工作目录）。

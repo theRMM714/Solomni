@@ -15,6 +15,7 @@
 | `src/capabilities/vm/domain/packages.rs` | 运行包契约（package.yaml）校验、去重、系统路径冲突预检与来源目录（纯逻辑） |
 | `src/capabilities/vm/detail/fs_packages.rs` | `PackageSource` 的磁盘实现：扫描 runtimes/ |
 | `src/capabilities/vm/detail/qemu.rs` | `VmEngine` / `GuestChannel` 的 QEMU 实现：拉起 qemu-system-*，经 QGA 执行与销毁（含文件搬运） |
-| `src/capabilities/vm/detail/copy.rs` | `ShareBackend` 的 QGA 复制实现：建目录脚本与宿主侧 tar 打包/解包（实时共享见 gaps） |
+| `src/capabilities/vm/detail/copy.rs` | `ShareBackend` 的 QGA 复制实现：建目录脚本与宿主侧 tar 打包/解包（按趟同步；实时共享是 `share_smb.rs` / `share_virtiofs.rs`） |
 | `src/capabilities/vm/detail/share_ninep.rs` | `ShareBackend` 的 9p 实现：-fsdev / -device 参数与 guest 端 mount 脚本 |
 | `src/capabilities/vm/detail/share_virtiofs.rs` | `ShareBackend` 的 virtiofs 实现：起停 virtiofsd（vhost-user 守护进程，按进程组清理）、-chardev / vhost-user-fs-pci 参数与 guest 端 mount 脚本 |
+| `src/capabilities/vm/detail/share_smb.rs` | `ShareBackend` 的 SMB 实现：探测/起停用户态 smbd helper（匿名共享，凭据随租约回收）、guestfwd 隧道参数与 guest 端 mount -t cifs 脚本 |

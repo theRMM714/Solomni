@@ -4,7 +4,7 @@
 //! 联动：端口在 ports.rs；由组合根构造、service.rs 持有。
 
 use crate::capabilities::vm::domain::guest::{
-    GuestArch, GuestImage, GuestRoot, GuestRun, GuestSpec,
+    GuestArch, GuestImage, GuestRoot, GuestRun, GuestSpec, SeedDocs,
 };
 use crate::capabilities::vm::ports::{GuestChannel, GuestVm, SharePlan, VmEngine};
 use crate::kernel::api::ToolOutcome;
@@ -49,15 +49,18 @@ impl QemuEngine {
 /// 目的：guest 内存大小（MiB）——`-m` 与共享内存后端（vhost-user 要）必须同一尺寸，所以只写一处。
 pub const GUEST_MEM_MB: u32 = 2048;
 
-/// 目的：除共享之外的一次启动参数（不含可执行文件本身）——机器、加速器、内存、内核、串口与 QGA 通道。
+/// 目的：除共享之外的一次启动参数（不含可执行文件本身）——机器、加速器、内存、内核、串口、QGA 通道与首启种子。
 /// 参数：channel_opts 是 QGA chardev 的补充选项；share_needs_net = 共享后端要不要 guest 有（受限）网卡；
-///   share_needs_mem = 共享后端要不要 guest RAM 是**可共享内存**（vhost-user 设备，如 virtiofs）。
+///   share_needs_mem = 共享后端要不要 guest RAM 是**可共享内存**（vhost-user 设备，如 virtiofs）；
+///   seed_url = 首启 cloud-init 的 NoCloud net 种子根 URL（None = 不投种子）。
 /// 约束：rootfs 经 virtio-9p 的 base 标签挂成根——当前的根仍是目录；磁盘镜像见 docs/vm/README.md 的「多平台组合」。
 pub fn engine_args(
     spec: &GuestSpec,
     channel_opts: &str,
     share_needs_net: bool,
     share_needs_mem: bool,
+    seed_url: Option<&str>,
+    net_options: &[String],
 ) -> Vec<String> {
     let mut a: Vec<String> = Vec::new();
     a.push("-m".to_string());
@@ -121,6 +124,11 @@ pub fn engine_args(
             }
         }
     }
+    // 首启种子：SMBIOS type 1 的 serial 是 cloud-init NoCloud 认识的数据源指路（ds=nocloud-net;s=<URL>）。
+    if let Some(url) = seed_url {
+        a.push("-smbios".to_string());
+        a.push(format!("type=1,serial=ds=nocloud-net;s={}", url));
+    }
     a.push("-chardev".to_string());
     a.push(format!("socket,id=ch0,{}", channel_opts));
     a.push("-device".to_string());
@@ -131,8 +139,13 @@ pub fn engine_args(
     // guestfwd/hostfwd 内部隧道可用）；两者都不是 = 干脆不给网卡。
     if spec.net || share_needs_net {
         let restrict = if spec.net { "" } else { ",restrict=on" };
+        let extra = if net_options.is_empty() {
+            String::new()
+        } else {
+            format!(",{}", net_options.join(","))
+        };
         a.push("-netdev".to_string());
-        a.push(format!("user,id=n0{}", restrict));
+        a.push(format!("user,id=n0{}{}", restrict, extra));
         a.push("-device".to_string());
         a.push("virtio-net-pci,netdev=n0".to_string());
     } else {
@@ -170,7 +183,25 @@ impl VmEngine for QemuEngine {
             .filter(|p| !p.is_empty())
             .map(str::to_string)
             .unwrap_or_else(|| qemu_exe(spec.image.arch).to_string());
-        let mut args = engine_args(spec, &opts, share.needs_net, share.needs_shared_mem);
+        // 首启种子：宿主起一个小 HTTP 服务，经 -smbios 告诉 cloud-init 去哪取 user-data / meta-data。
+        let seed = match &spec.seed {
+            Some(docs) => {
+                if !spec.net {
+                    return Err("投 cloud-init 种子要求 guest 有网卡（net = true）".to_string());
+                }
+                Some(SeedServer::start(docs)?)
+            }
+            None => None,
+        };
+        let seed_url = seed.as_ref().map(SeedServer::url);
+        let mut args = engine_args(
+            spec,
+            &opts,
+            share.needs_net,
+            share.needs_shared_mem,
+            seed_url.as_deref(),
+            &share.net_options,
+        );
         // 便携包把固件放在可执行文件旁（`bin/` 的兄弟 `share/qemu`）：显式 `-L` 指过去，
         // 否则 QEMU 只按编译期前缀找，便携布局下会报 "could not load PC BIOS"。
         if let Some(fw) = firmware_dir(&exe) {
@@ -182,17 +213,46 @@ impl VmEngine for QemuEngine {
             .args(&args)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
+            // stderr 继承：QEMU 起不来时（固件缺失这类）错误要能看见，不能吞进 null。
+            .stderr(Stdio::inherit())
             .spawn()
             .map_err(|e| format!("起不了 QEMU（{}）：{}", exe, e))?;
         drop(listener);
-        let stream = connect_within(port, Duration::from_secs(30))?;
+        let stream = match connect_within(port, Duration::from_secs(30)) {
+            Ok(s) => s,
+            Err(e) => {
+                // 连不上就把刚拉起的 QEMU 收掉，别留孤儿进程。
+                let mut c = child;
+                let _ = c.kill();
+                let _ = c.wait();
+                return Err(e);
+            }
+        };
+        // 读超时：agent 还没起时不能让 read_line 干等——首启轮询与运行期失败都要有界。
+        stream
+            .set_read_timeout(Some(Duration::from_secs(10)))
+            .map_err(|e| format!("给 QGA 通道设读超时失败：{}", e))?;
         let writer = stream.try_clone().map_err(|e| e.to_string())?;
         let mut handle = QemuHandle {
             child: Some(child),
             reader: BufReader::new(stream),
             writer,
+            seed,
         };
+        // agent 要等内核起来才通；投种子时（首启装 agent）不等，交给编排轮询，其余情况先等到就绪再挂载/回命令。
+        if spec.seed.is_none() {
+            let deadline = Instant::now() + Duration::from_secs(300);
+            loop {
+                if handle.ping() {
+                    break;
+                }
+                if Instant::now() >= deadline {
+                    handle.stop();
+                    return Err("等 guest 里的 qemu-guest-agent 超时".to_string());
+                }
+                std::thread::sleep(Duration::from_secs(1));
+            }
+        }
         // QEMU 只把额外共享接进来，不替 guest 挂：接上 QGA 后按共享计划逐个挂到 guest 路径。
         for script in &share.guest_scripts {
             let out = handle.exec(&GuestRun {
@@ -240,6 +300,68 @@ struct QemuHandle {
     child: Option<Child>,
     reader: BufReader<TcpStream>,
     writer: TcpStream,
+    /// 首启种子服务；正常会话启动是 None。
+    seed: Option<SeedServer>,
+}
+
+/// 目的：首启种子的小 HTTP 服务（cloud-init NoCloud net）——只在这次 boot 期间活着，随 guest 一起收掉。
+struct SeedServer {
+    server: std::sync::Arc<tiny_http::Server>,
+    thread: Option<std::thread::JoinHandle<()>>,
+    port: u16,
+}
+
+impl SeedServer {
+    /// 目的：绑 127.0.0.1 的随机端口起服务；路径只认 `/user-data` 与 `/meta-data`，其余 404。
+    fn start(docs: &SeedDocs) -> Result<SeedServer, String> {
+        let server = std::sync::Arc::new(
+            tiny_http::Server::http("127.0.0.1:0")
+                .map_err(|e| format!("种子服务占不到端口：{}", e))?,
+        );
+        let port = server
+            .server_addr()
+            .to_ip()
+            .map(|a| a.port())
+            .ok_or_else(|| "种子服务没有 TCP 端口".to_string())?;
+        let user_data = docs.user_data.clone();
+        let meta_data = docs.meta_data.clone();
+        let worker = std::sync::Arc::clone(&server);
+        let thread = std::thread::spawn(move || {
+            for req in worker.incoming_requests() {
+                let path = req.url().split(['?', '#']).next().unwrap_or("").to_string();
+                let resp = match path.as_str() {
+                    "/user-data" => tiny_http::Response::from_string(user_data.clone()),
+                    "/meta-data" => tiny_http::Response::from_string(meta_data.clone()),
+                    _ => tiny_http::Response::from_string("").with_status_code(404),
+                };
+                let _ = req.respond(resp);
+            }
+        });
+        Ok(SeedServer {
+            server,
+            thread: Some(thread),
+            port,
+        })
+    }
+
+    /// 目的：cloud-init NoCloud net 的种子 URL（guest 经 slirp 的 10.0.2.2 访问宿主）。
+    fn url(&self) -> String {
+        format!("http://10.0.2.2:{}/", self.port)
+    }
+
+    /// 目的：停服务并等线程退出（幂等）。
+    fn stop(&mut self) {
+        self.server.unblock();
+        if let Some(t) = self.thread.take() {
+            let _ = t.join();
+        }
+    }
+}
+
+impl Drop for SeedServer {
+    fn drop(&mut self) {
+        self.stop();
+    }
 }
 
 impl QemuHandle {
@@ -301,6 +423,11 @@ impl QemuHandle {
 }
 
 impl GuestChannel for QemuHandle {
+    /// 目的：QGA 就绪探测——同步握手能过一次就算通道已就绪（读超时保证有界）。
+    fn ping(&mut self) -> bool {
+        self.sync().is_ok()
+    }
+
     fn exec(&mut self, run: &GuestRun) -> ToolOutcome {
         if let Err(why) = self.sync() {
             return fail(&why);
@@ -468,6 +595,22 @@ impl GuestVm for QemuHandle {
 
     fn stop(&mut self) {
         let _ = self.send(&serde_json::json!({"execute":"guest-shutdown"}));
+        if let Some(mut s) = self.seed.take() {
+            s.stop();
+        }
+        if let Some(mut c) = self.child.take() {
+            let _ = c.kill();
+            let _ = c.wait();
+        }
+    }
+}
+
+impl Drop for QemuHandle {
+    /// 目的：兜底收尾——种子服务与 QEMU 进程都不能因为提前 drop 而漏掉。
+    fn drop(&mut self) {
+        if let Some(mut s) = self.seed.take() {
+            s.stop();
+        }
         if let Some(mut c) = self.child.take() {
             let _ = c.kill();
             let _ = c.wait();
@@ -558,5 +701,74 @@ mod tests {
             "没有固件目录就不能瞎指 -L"
         );
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// 目的：首启种子服务只认 `/user-data` 与 `/meta-data`，其余 404；是真的本机 HTTP。
+    #[test]
+    fn seed_server_serves_cloud_init_documents() {
+        fn http_get(port: u16, path: &str) -> (u16, String) {
+            use std::io::{Read, Write};
+            let mut s = std::net::TcpStream::connect(("127.0.0.1", port)).expect("连种子服务");
+            s.set_read_timeout(Some(Duration::from_secs(3)))
+                .expect("读超时");
+            write!(s, "GET {} HTTP/1.0\r\nHost: x\r\n\r\n", path).expect("写请求");
+            let mut buf = String::new();
+            let _ = s.read_to_string(&mut buf);
+            let status = buf
+                .split_whitespace()
+                .nth(1)
+                .and_then(|c| c.parse().ok())
+                .unwrap_or(0);
+            let body = buf.split("\r\n\r\n").nth(1).unwrap_or("").to_string();
+            (status, body)
+        }
+        let mut server = SeedServer::start(&SeedDocs {
+            user_data: "#cloud-config\nruncmd: [true]\n".to_string(),
+            meta_data: "instance-id: t\n".to_string(),
+        })
+        .expect("起种子服务");
+        assert!(
+            server.url().starts_with("http://10.0.2.2:"),
+            "{}",
+            server.url()
+        );
+        let (s1, b1) = http_get(server.port, "/user-data");
+        assert_eq!(s1, 200);
+        assert!(b1.contains("#cloud-config"), "{}", b1);
+        let (s2, b2) = http_get(server.port, "/meta-data");
+        assert_eq!(s2, 200);
+        assert!(b2.contains("instance-id"), "{}", b2);
+        let (s3, _) = http_get(server.port, "/nope");
+        assert_eq!(s3, 404);
+        server.stop();
+    }
+
+    /// 目的：有种子就给 -smbios 数据源指路；没有种子就不给。
+    #[test]
+    fn seed_url_adds_smbios_datasource() {
+        let image = GuestImage::linux(
+            "t",
+            GuestRoot::Disk(std::path::PathBuf::from("/img/root.qcow2")),
+            None,
+            None,
+        );
+        let spec = GuestSpec {
+            lease: "w".to_string(),
+            image,
+            mounts: Vec::new(),
+            net: true,
+            engine_path: None,
+            share_path: None,
+            seed: None,
+        };
+        let with = engine_args(&spec, "opts", false, false, Some("http://10.0.2.2:9/"), &[]);
+        assert!(
+            with.windows(2)
+                .any(|w| w[0] == "-smbios" && w[1].contains("ds=nocloud-net;s=http://10.0.2.2:9/")),
+            "{:?}",
+            with
+        );
+        let without = engine_args(&spec, "opts", false, false, None, &[]);
+        assert!(!without.iter().any(|a| a == "-smbios"), "{:?}", without);
     }
 }

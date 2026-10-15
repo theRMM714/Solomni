@@ -653,7 +653,7 @@ function structuralAudit() {
   // ④ 外部连接台账 ↔ 消费点：links.yaml 的键与代码里 link(...) 的引用一一对应。
   // 为什么机器查：台账多个没人用的键 = 死数据；少一个被引用的键 = 运行期才炸（env.js 是引导层，炸在这里没得救）。
   const linksFile = path.join(ROOT, "links.yaml");
-  const linkDomains = ["rustup", "winlibs", "release", "guest"];
+  const linkDomains = ["rustup", "winlibs", "release", "guest", "smbd"];
   if (!fs.existsSync(linksFile)) {
     problems.push("缺外部连接台账：links.yaml");
   } else {
@@ -674,9 +674,14 @@ function structuralAudit() {
       if (!fs.existsSync(abs)) return;
       for (const m of fs.readFileSync(abs, "utf8").matchAll(/\blink\("([A-Za-z0-9_.-]+)"\)/g)) used.add(m[1]);
     };
-    // 消费点：环境层与虚拟机档安装脚本（按平台拆过：setup-vm.js 是分发入口，各平台脚本与共享件都要扫）。
-    for (const consumer of ["env.js", "setup-vm.js", "setup-vm-common.js", "setup-vm-windows.js", "setup-vm-linux.js", "setup-vm-mac.js"]) {
-      scanLinkUses(path.join(ROOT, consumer));
+    // 消费点：环境层（rustup 安装）与依赖清单的 source（产品侧下载源都在 dependencies.yaml；
+    // release:<资产> 走 release.base，不在这里当键）。
+    scanLinkUses(path.join(ROOT, "env.js"));
+    const depsFile = path.join(ROOT, "dependencies.yaml");
+    if (fs.existsSync(depsFile)) {
+      for (const m of fs.readFileSync(depsFile, "utf8").matchAll(/^\s*source:\s*([A-Za-z0-9_.:-]+)\s*$/gm)) {
+        if (!m[1].includes(":")) used.add(m[1]);
+      }
     }
     const walkSrc = (d) => {
       for (const e of fs.readdirSync(d, { withFileTypes: true })) {

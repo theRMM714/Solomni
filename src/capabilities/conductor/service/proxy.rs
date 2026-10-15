@@ -540,7 +540,7 @@ impl Conductor {
         if let Some(why) = crate::capabilities::vm::api::tier_refusal(
             &exec,
             self.qemu_path(),
-            self.virtiofsd_path(),
+            self.share_tool_path(),
             self.probe.as_ref(),
         ) {
             return Err(why);

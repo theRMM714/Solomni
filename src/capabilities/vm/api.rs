@@ -8,10 +8,10 @@ pub use crate::capabilities::vm::domain::exec::{
     tier_readiness, tier_refusal, unavailable, vm_capability, vm_diagnoses, vm_requirements,
     Diagnosis, ExecPlan, VmInputs, VmRequirement,
 };
-pub use crate::capabilities::vm::domain::guest::GuestOs;
 pub use crate::capabilities::vm::domain::guest::{
-    classify_base, mounts_from, GuestImage, GuestRun, GuestSpec,
+    classify_base, mounts_from, GuestImage, GuestRun, GuestSpec, SeedDocs,
 };
+pub use crate::capabilities::vm::domain::guest::{GuestArch, GuestOs};
 pub use crate::capabilities::vm::domain::packages::{library_for_guest, Library};
 pub use crate::capabilities::vm::domain::paths::PathBridge;
 
@@ -26,6 +26,10 @@ pub trait Vm: Send + Sync {
     fn guest_start(&self, spec: &GuestSpec) -> Result<(), String>;
     /// 在该租约的 guest 里跑一次工具（没有这个 guest = 如实失败）。
     fn guest_run(&self, lease: &str, run: &GuestRun) -> crate::kernel::api::ToolOutcome;
+    /// 目的：等 guest 的命令通道就绪（首启装 agent 期间轮询它）。
+    /// 返回：到期限仍不通给 false；租约不在场也给 false。
+    /// 约束：必须**有界**返回，不能在没有 agent 时干等。
+    fn guest_wait_agent(&self, lease: &str, timeout: std::time::Duration) -> bool;
     /// 销毁该租约的 guest 与它的磁盘（幂等）。
     fn guest_stop(&self, lease: &str);
 }

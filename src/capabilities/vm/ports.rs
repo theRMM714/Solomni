@@ -24,6 +24,8 @@ pub struct SharePlan {
     pub kind: &'static str,
     /// 目的：交给引擎的额外参数（QEMU 的 -fsdev / -device 等）。
     pub engine_args: Vec<String>,
+    /// 目的：要并进引擎那条 `-netdev user,…` 的附加选项（如 SMB 走 guestfwd 隧道）；没有就是空。
+    pub net_options: Vec<String>,
     /// 目的：接上命令通道后在 guest 里逐条执行的挂载命令。
     pub guest_scripts: Vec<String>,
     /// 目的：本后端是否需要 guest 有网卡（guestfwd / SMB 这类隧道要）；9p / virtiofs 不需要。
@@ -96,6 +98,11 @@ pub trait GuestVm: Send {
 /// 目的：在 guest 里执行命令的通道（QGA / 自研 agent）。
 pub trait GuestChannel: Send {
     fn exec(&mut self, run: &GuestRun) -> ToolOutcome;
+    /// 目的：探一下 guest 里的命令通道是否已就绪（agent 已起）。默认：这条通道不知道，回 false。
+    /// 约束：必须**有界**返回——不能在没有 agent 时干等（首启装 agent 期间要轮询它）。
+    fn ping(&mut self) -> bool {
+        false
+    }
     /// 目的：把一段字节写进 guest 的一个文件（copy 这类后端用）；默认：这条通道不支持。
     fn put_file(&mut self, _path: &str, _bytes: &[u8]) -> Result<(), String> {
         Err("这条命令通道不支持写入 guest 文件".to_string())

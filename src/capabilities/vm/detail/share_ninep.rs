@@ -57,6 +57,7 @@ impl ShareBackend for NinePShare {
             SharePlan {
                 kind: "9p",
                 engine_args,
+                net_options: Vec::new(),
                 guest_scripts,
                 needs_net: false,
                 needs_shared_mem: false,

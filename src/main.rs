@@ -33,7 +33,7 @@ fn main() {
     if let Some(i) = args.iter().position(|a| a == "--https-check") {
         std::process::exit(diagnostics::https_check(&args, i));
     }
-    // 隐藏模式：把归档解到目录（跨平台纯 Rust）——setup-vm-*.js 用它，不依赖用户装了什么解压工具。
+    // 隐藏模式：把归档解到目录（跨平台纯 Rust）——provision 能力用它解归档，不依赖用户装了什么解压工具。
     if let Some(i) = args.iter().position(|a| a == "--unpack") {
         std::process::exit(diagnostics::unpack_cli(&args, i));
     }
@@ -168,7 +168,11 @@ fn main() {
             .find(|d| d.present && d.id.starts_with(prefix))
             .map(|d| d.probe.clone())
     };
-    registry.apply_discovered(picked("vm.qemu."), picked("vm.virtiofsd."));
+    registry.apply_discovered(
+        picked("vm.qemu."),
+        picked("vm.virtiofsd."),
+        picked("vm.smbd."),
+    );
     let prompt_source =
         capabilities::prompt::detail::yaml_prompts::YamlPrompts::new(root.join("prompts"));
     // **提示词册能力**：册子只在这里装载一次、也只被它持有；conductor 与工具执行
@@ -244,22 +248,29 @@ fn main() {
 
     // **虚拟机档能力**：运行包库来源、VM 引擎与共享后端三个出站端口只由它的 service 持有（R12）。
     // 共享后端按平台的组合回退链选：与就绪检测共用 share_available——virtiofsd 不在场时如实退到 9p / copy。
-    let virtiofsd = capabilities::registry::api::Registry::app(&registry)
-        .virtiofsd_path
-        .clone();
+    let app = capabilities::registry::api::Registry::app(&registry);
+    let virtiofsd = app.virtiofsd_path.clone();
+    let smbd = app.smbd_path.clone();
+    // 组合选择与就绪检测共用同一份判据：本平台共享档要用的外部工具（Windows = smbd，其余 = virtiofsd）。
+    let share_tool = if std::env::consts::OS == "windows" {
+        smbd.clone()
+    } else {
+        virtiofsd.clone()
+    };
     let picked = capabilities::vm::domain::exec::choose_combo(
         capabilities::vm::domain::exec::default_combos(std::env::consts::OS),
         &|engine| engine == "qemu",
         &|_engine, share| {
             capabilities::vm::domain::exec::share_available(
                 share,
-                Some(virtiofsd.as_str()),
+                Some(share_tool.as_str()),
                 &kernel::detail::HostProbeAdapter,
             )
         },
     );
     let share: Arc<dyn capabilities::vm::ports::ShareBackend + Send + Sync> =
         match picked.map(|c| c.share) {
+            Some("smb") => Arc::new(capabilities::vm::detail::SmbShare::new()),
             Some("virtiofs") => Arc::new(capabilities::vm::detail::VirtioFsShare::new()),
             Some("copy") => Arc::new(capabilities::vm::detail::CopyShare::new()),
             _ => Arc::new(capabilities::vm::detail::NinePShare::new()),
@@ -320,7 +331,7 @@ fn main() {
             Arc::new(history),
         )),
         workspace,
-        vm,
+        Arc::clone(&vm),
         Arc::clone(&modules),
         Arc::clone(&llm),
         toolexec,
@@ -463,7 +474,10 @@ fn main() {
     };
     let mut ops = capabilities::conductor::api::Ops::from_handle(&handle);
     // 依赖补齐面：组合根注入（能力面默认未接入，这里换成真实现）。
-    ops.provision = std::sync::Arc::new(capabilities::provision::ProvisionService::new(&root));
+    ops.provision = std::sync::Arc::new(capabilities::provision::ProvisionService::with_vm(
+        &root,
+        Arc::clone(&vm),
+    ));
 
     // 启动拉起：把所有**已启用**的常驻服务拉起来（进程级租约，不属于任何会话）。
     for line in residents_boot.start_enabled() {

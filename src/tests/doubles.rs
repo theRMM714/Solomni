@@ -1430,6 +1430,7 @@ impl crate::capabilities::vm::ports::ShareBackend for FakeShare {
             crate::capabilities::vm::ports::SharePlan {
                 kind: "fake",
                 engine_args: Vec::new(),
+                net_options: Vec::new(),
                 guest_scripts: Vec::new(),
                 needs_net: false,
                 needs_shared_mem: false,
@@ -1482,6 +1483,11 @@ struct FakeChannel {
 }
 
 impl crate::capabilities::vm::ports::GuestChannel for FakeChannel {
+    /// 目的：替身通道就当 agent 已在——等待用例不必真等。
+    fn ping(&mut self) -> bool {
+        true
+    }
+
     fn exec(
         &mut self,
         run: &crate::capabilities::vm::domain::guest::GuestRun,
@@ -1542,6 +1548,10 @@ impl crate::capabilities::vm::api::Vm for RecordingVm {
             ok: true,
             output: "guest".to_string(),
         }
+    }
+
+    fn guest_wait_agent(&self, _lease: &str, _timeout: std::time::Duration) -> bool {
+        true
     }
 
     fn guest_stop(&self, _lease: &str) {}

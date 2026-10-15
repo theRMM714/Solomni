@@ -740,12 +740,15 @@ pub(crate) fn guest_mounts_prefix_packages_and_fence_roots() {
         net: false,
         engine_path: None,
         share_path: None,
+        seed: None,
     };
     let args = crate::capabilities::vm::detail::qemu::engine_args(
         &spec,
         "host=127.0.0.1,port=1,server=on,wait=off",
         false,
         false,
+        None,
+        &[],
     );
     assert!(args.contains(&"none".to_string()), "不给网卡");
     assert!(
@@ -825,6 +828,7 @@ pub(crate) fn accelerators_and_nic_follow_the_platform_and_share_need() {
         net,
         engine_path: None,
         share_path: None,
+        seed: None,
     };
     let expected = if cfg!(windows) {
         "accel=whpx:tcg"
@@ -837,19 +841,19 @@ pub(crate) fn accelerators_and_nic_follow_the_platform_and_share_need() {
     };
     assert_eq!(accelerators(), expected, "加速器表按平台给");
 
-    let plain = engine_args(&spec(false), "opts", false, false);
+    let plain = engine_args(&spec(false), "opts", false, false, None, &[]);
     assert!(
         plain.contains(&"none".to_string()) && !plain.iter().any(|a| a.contains("netdev")),
         "没有隧道需求就不给网卡：{:?}",
         plain
     );
-    let tunnel = engine_args(&spec(false), "opts", true, false);
+    let tunnel = engine_args(&spec(false), "opts", true, false, None, &[]);
     assert!(
         tunnel.iter().any(|a| a == "user,id=n0,restrict=on"),
         "共享隧道要受限网卡（出站全断）：{:?}",
         tunnel
     );
-    let online = engine_args(&spec(true), "opts", false, false);
+    let online = engine_args(&spec(true), "opts", false, false, None, &[]);
     assert!(
         online.iter().any(|a| a == "user,id=n0"),
         "放行出站时给普通 user 网卡：{:?}",
@@ -862,7 +866,7 @@ pub(crate) fn accelerators_and_nic_follow_the_platform_and_share_need() {
     );
 
     // vhost-user 设备（virtiofs）要 guest RAM 可共享：同尺寸 memfd 后端 + 唯一 numa 节点。
-    let shared = engine_args(&spec(false), "opts", false, true);
+    let shared = engine_args(&spec(false), "opts", false, true, None, &[]);
     let want_mem = format!(
         "memory-backend-memfd,id=solomni-mem,size={}M,share=on",
         crate::capabilities::vm::detail::qemu::GUEST_MEM_MB
@@ -878,7 +882,7 @@ pub(crate) fn accelerators_and_nic_follow_the_platform_and_share_need() {
         shared
     );
     assert!(
-        !engine_args(&spec(false), "opts", false, false)
+        !engine_args(&spec(false), "opts", false, false, None, &[])
             .iter()
             .any(|a| a.contains("memory-backend-memfd")),
         "不需要共享内存时不加 memfd 后端"
@@ -916,8 +920,9 @@ pub(crate) fn disk_root_without_kernel_boots_via_firmware() {
         net: false,
         engine_path: None,
         share_path: None,
+        seed: None,
     };
-    let args = engine_args(&spec, "opts", false, false);
+    let args = engine_args(&spec, "opts", false, false, None, &[]);
     assert!(
         !args.iter().any(|a| a == "-kernel"),
         "没有内核就不传 -kernel：{:?}",
@@ -951,8 +956,9 @@ pub(crate) fn disk_root_uses_a_virtio_disk_not_9p() {
         net: false,
         engine_path: None,
         share_path: None,
+        seed: None,
     };
-    let args = engine_args(&spec, "opts", false, false);
+    let args = engine_args(&spec, "opts", false, false, None, &[]);
     assert!(
         args.iter().any(|a| a == "file=/img/root.qcow2,if=virtio"),
         "磁盘根要接成 virtio 磁盘：{:?}",
@@ -992,6 +998,7 @@ pub(crate) fn share_syncs_around_each_run_and_releases_on_stop() {
         net: false,
         engine_path: None,
         share_path: None,
+        seed: None,
     };
     vm.guest_start(&spec).expect("起 guest");
     let run = GuestRun {
@@ -1085,10 +1092,13 @@ pub(crate) fn disk_image_base_is_classified_as_a_disk_root() {
             net: false,
             engine_path: None,
             share_path: None,
+            seed: None,
         },
         "opts",
         false,
         false,
+        None,
+        &[],
     );
     assert!(
         args.iter()
@@ -1128,6 +1138,7 @@ pub(crate) fn vm_service_refuses_unfit_engine_and_share_with_a_reason() {
         net: false,
         engine_path: None,
         share_path: None,
+        seed: None,
     };
     let why = svc.guest_start(&spec).expect_err("架构不匹配要被拒绝");
     assert!(why.contains("承载不了"), "{}", why);
@@ -1147,6 +1158,7 @@ pub(crate) fn vm_service_refuses_unfit_engine_and_share_with_a_reason() {
         net: false,
         engine_path: None,
         share_path: None,
+        seed: None,
     };
     let why2 = svc.guest_start(&spec2).expect_err("共享落不上要被拒绝");
     assert!(why2.contains("落不到引擎"), "{}", why2);
@@ -1551,12 +1563,23 @@ pub(crate) fn share_availability_gates_the_effective_combo() {
         .iter()
         .find(|x| x.id == "share")
         .expect("清单里要有共享档这一项");
-    assert!(share.met, "共享档缺失不该拦住虚拟机档（有 9p 回退）");
-    assert!(
-        share.detail.contains("9p") && share.detail.contains("virtiofsd"),
-        "要说清回退到 9p 与怎么补：{:?}",
-        share
-    );
+    assert!(share.met, "共享档缺失不该拦住虚拟机档（有回退档）");
+    if cfg!(windows) {
+        // Windows 的已实现链是 smb → copy：缺 smbd 时退回 copy，说明里要同时给出 smb/smbd 与回退。
+        assert!(
+            share.detail.contains("smb")
+                && share.detail.contains("smbd")
+                && share.detail.contains("copy"),
+            "要说清回退到 copy 与怎么补 smbd：{:?}",
+            share
+        );
+    } else {
+        assert!(
+            share.detail.contains("9p") && share.detail.contains("virtiofsd"),
+            "要说清回退到 9p 与怎么补：{:?}",
+            share
+        );
+    }
 }
 
 /// 目的：按平台的组合回退链是数据；引擎 / 共享不在场时逐档回退，都缺才没有组合。
@@ -1633,6 +1656,7 @@ pub(crate) fn vm_service_holds_guests_by_lease() {
         net: false,
         engine_path: None,
         share_path: None,
+        seed: None,
     };
     vm.guest_start(&spec).expect("替身一定能起");
     let run = GuestRun {
@@ -1672,6 +1696,9 @@ pub(crate) fn vm_live_guest_runs_command_inside_guest() {
     let virtiofsd = std::env::var("SOLOMNI_VM_VIRTIOFSD")
         .ok()
         .filter(|p| !p.trim().is_empty());
+    let smbd = std::env::var("SOLOMNI_VM_SMBD")
+        .ok()
+        .filter(|p| !p.trim().is_empty());
     let spec = GuestSpec {
         lease: "vm-live".to_string(),
         image,
@@ -1683,23 +1710,34 @@ pub(crate) fn vm_live_guest_runs_command_inside_guest() {
         net: false,
         engine_path: Some(qemu),
         share_path: virtiofsd.clone(),
+        seed: None,
     };
-    // 共享后端按平台与在场情况选（与组合根同一份判据）：virtiofs > copy(Windows/QGA) > 9p。
+    // 共享后端按平台与在场情况选（与组合根同一份判据）：smb(Windows) > virtiofs > copy(QGA) > 9p。
     let nine = crate::capabilities::vm::detail::NinePShare::new();
     let copy = crate::capabilities::vm::detail::CopyShare::new();
     let virtiofs = crate::capabilities::vm::detail::VirtioFsShare::new();
-    let use_virtiofs = virtiofsd.is_some() && spec.image.clients.virtio_fs;
-    let use_copy =
-        !use_virtiofs && (std::env::consts::OS == "windows" || !spec.image.clients.nine_p);
-    let backend: &dyn crate::capabilities::vm::ports::ShareBackend = if use_virtiofs {
+    let smb = crate::capabilities::vm::detail::SmbShare::new();
+    let use_smb = std::env::consts::OS == "windows" && spec.image.clients.cifs && smbd.is_some();
+    let use_virtiofs = !use_smb && virtiofsd.is_some() && spec.image.clients.virtio_fs;
+    let use_copy = !use_smb
+        && !use_virtiofs
+        && (std::env::consts::OS == "windows" || !spec.image.clients.nine_p);
+    let backend: &dyn crate::capabilities::vm::ports::ShareBackend = if use_smb {
+        &smb
+    } else if use_virtiofs {
         &virtiofs
     } else if use_copy {
         &copy
     } else {
         &nine
     };
+    let tool = if use_smb {
+        smbd.as_deref()
+    } else {
+        virtiofsd.as_deref()
+    };
     let (plan, mut guard) = backend
-        .prepare("qemu", &spec.mounts, virtiofsd.as_deref())
+        .prepare("qemu", &spec.mounts, tool)
         .expect("共享计划要能派生");
     let mut guest = engine.boot(&spec, &plan).expect("起 guest");
     if use_copy {
@@ -1726,12 +1764,13 @@ pub(crate) fn vm_live_guest_runs_command_inside_guest() {
             .sync_out(guest.channel(), &spec.mounts)
             .expect("回拷 guest 目录要成功");
     }
-    if use_virtiofs {
+    if use_virtiofs || use_smb {
         // 实时共享：**不等任何回拷**，宿主此刻就该看得到 guest 写的内容。
         let written = std::fs::read_to_string(share.join("from-guest.txt")).unwrap_or_default();
         assert!(
             written.contains("VM_LIVE_OK"),
-            "virtiofs 要实时可见：宿主读到 {:?}（guest 输出：{}）",
+            "{} 要实时可见：宿主读到 {:?}（guest 输出：{}）",
+            backend.id(),
             written,
             out.output
         );

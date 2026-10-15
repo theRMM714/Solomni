@@ -17,3 +17,5 @@ guest.debian.qcow2: https://cdimage.debian.org/cdimage/cloud/trixie/latest/debia
 guest.debian.pool: https://deb.debian.org/debian/pool/main/q/qemu/
 guest.debian.linux: https://deb.debian.org/debian/pool/main/l/linux/
 release.base: https://github.com/theRMM714/Solomni/releases/download/dependencies/
+# Windows 的 SMB 共享 helper：独立 fork 仓自己发 Release 资产（源码 + 预编译 smbd.exe）。
+smbd.windows: https://github.com/theRMM714/rust-smb-server-win/releases/download/v0.0.1/smbd-windows-x86_64.exe
