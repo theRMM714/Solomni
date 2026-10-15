@@ -733,6 +733,7 @@ pub(crate) fn test_sandbox(
         modules_with_userdata: std::collections::BTreeSet::new(),
         permissions: Default::default(),
         texts: test_prompts().tools(),
+        path_codec: None,
     }
 }
 
@@ -1091,6 +1092,7 @@ pub(crate) fn work(name: &str, mode: WorkMode, modules: &[&str]) -> WorkSpec {
         task: None,
         delegate: false,
         tier: crate::kernel::api::Tier::Host,
+        base: None,
     }
 }
 
@@ -1416,6 +1418,7 @@ impl crate::capabilities::vm::ports::ShareBackend for FakeShare {
         &self,
         _engine: &str,
         _mounts: &[crate::capabilities::vm::domain::guest::GuestMount],
+        _share_tool: Option<&str>,
     ) -> Result<
         (
             crate::capabilities::vm::ports::SharePlan,
@@ -1428,8 +1431,10 @@ impl crate::capabilities::vm::ports::ShareBackend for FakeShare {
             crate::capabilities::vm::ports::SharePlan {
                 kind: "fake",
                 engine_args: Vec::new(),
+                net_options: Vec::new(),
                 guest_scripts: Vec::new(),
                 needs_net: false,
+                needs_shared_mem: false,
             },
             Box::new(FakeGuard {
                 calls: self.calls.clone(),
@@ -1479,6 +1484,11 @@ struct FakeChannel {
 }
 
 impl crate::capabilities::vm::ports::GuestChannel for FakeChannel {
+    /// 目的：替身通道就当 agent 已在——等待用例不必真等。
+    fn ping(&mut self) -> bool {
+        true
+    }
+
     fn exec(
         &mut self,
         run: &crate::capabilities::vm::domain::guest::GuestRun,
@@ -1511,6 +1521,8 @@ impl crate::capabilities::vm::ports::GuestVm for FakeVm {
 #[derive(Default)]
 pub(crate) struct RecordingVm {
     pub runs: Mutex<Vec<String>>,
+    /// 目的：已拉起的租约（`guest_leases` 的事实来源；`guest_start` 记、`guest_stop` 删）。
+    pub leases: Mutex<Vec<String>>,
 }
 
 impl crate::capabilities::vm::api::Vm for RecordingVm {
@@ -1524,8 +1536,9 @@ impl crate::capabilities::vm::api::Vm for RecordingVm {
 
     fn guest_start(
         &self,
-        _spec: &crate::capabilities::vm::domain::guest::GuestSpec,
+        spec: &crate::capabilities::vm::domain::guest::GuestSpec,
     ) -> Result<(), String> {
+        self.leases.lock().expect("锁").push(spec.lease.clone());
         Ok(())
     }
 
@@ -1541,7 +1554,17 @@ impl crate::capabilities::vm::api::Vm for RecordingVm {
         }
     }
 
-    fn guest_stop(&self, _lease: &str) {}
+    fn guest_wait_agent(&self, _lease: &str, _timeout: std::time::Duration) -> bool {
+        true
+    }
+
+    fn guest_stop(&self, lease: &str) {
+        self.leases.lock().expect("锁").retain(|l| l != lease);
+    }
+
+    fn guest_leases(&self) -> Vec<String> {
+        self.leases.lock().expect("锁").clone()
+    }
 }
 
 /// 目的：测试用的 **vm 能力面**——把运行包库来源与 guest 替身装进 `VmService`（与生产同一条路，R12）。
@@ -1854,6 +1877,19 @@ pub(crate) fn core_with_gateway(
     modules: Vec<Module>,
     gateway: impl ChatGateway + Send + Sync + 'static,
 ) -> Conductor {
+    core_with_gateway_probe(
+        modules,
+        gateway,
+        Arc::new(crate::kernel::detail::HostProbeAdapter),
+    )
+}
+
+/// 目的：同 core_with_gateway，但注入指定的宿主探测（机器能力/依赖在场与否要可控的用例用它）。
+pub(crate) fn core_with_gateway_probe(
+    modules: Vec<Module>,
+    gateway: impl ChatGateway + Send + Sync + 'static,
+    probe: Arc<dyn crate::kernel::ports::HostProbe + Send + Sync>,
+) -> Conductor {
     let gateway: Arc<dyn crate::capabilities::llm::ports::ChatGateway + Send + Sync> =
         Arc::new(gateway);
     let llm = test_llm(
@@ -1875,7 +1911,7 @@ pub(crate) fn core_with_gateway(
         test_prompt(),
         test_tools_svc(),
         Arc::new(crate::kernel::ports::NoopLog),
-        Arc::new(crate::kernel::detail::HostProbeAdapter),
+        probe,
         Arc::new(crate::capabilities::residents::api::NoResidents),
         Arc::new(crate::capabilities::secrets::api::NoSecrets),
     )

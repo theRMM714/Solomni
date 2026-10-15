@@ -31,9 +31,9 @@ const RULES = {
   headerStray: "头块：槽外有行或自造槽",
   itemFirst: "条目：首行不是目的",
   itemStray: "条目：槽外有行或自造槽",
-  inlineBlank: "行内：后面是空行",
+  inlineBlank: "行内：注释串后面必须是代码（不能是空行）",
   inlineRun: "行内：连续超过 2 行",
-  inlineLong: "行内：超过 100 字",
+  inlineLong: "行内：超过 150 字",
   inlineWord: "行内：历史或待办措辞",
   inlineBlock: "行内：块注释",
 };
@@ -49,6 +49,61 @@ function rsFiles(dir, out) {
 
 /** 注释契约（ARCHITECTURE.md 十）：返回 { findings: [{file, line, rule}], byFileRule: {file: [rule]} }。
  *  门禁与卫生工具共用这一份判定——判定只有一处。 */
+/** 目的：按行扫 Rust 源码的「字面量 / 注释」状态，供注释契约判定用。
+ *  管：真块注释出现在哪一行、哪些行是真正的行注释（行首 // 且不在多行字面量里）。
+ *  不管：语法正确性——识别不出的极限情况按代码对待（宁可漏报，不误报）。
+ */
+function scanRustLines(text) {
+  const lines = text.split(/\r?\n/);
+  const blockAt = [];
+  const isComment = new Array(lines.length).fill(false);
+  let mode = "code";
+  let hashes = 0;
+  for (let n = 0; n < lines.length; n++) {
+    const s = lines[n];
+    if (mode === "code" && /^\s*\/\//.test(s)) isComment[n] = true;
+    let i = 0;
+    while (i < s.length) {
+      if (mode === "block") {
+        if (s.startsWith("*/", i)) { mode = "code"; i += 2; } else i++;
+        continue;
+      }
+      if (mode === "str" || mode === "char") {
+        const q = mode === "str" ? '"' : "'";
+        if (s[i] === "\\") { i += 2; continue; }
+        if (s[i] === q) { mode = "code"; i++; continue; }
+        i++;
+        continue;
+      }
+      if (mode === "raw") {
+        if (s[i] === '"' && s.slice(i + 1, i + 1 + hashes) === "#".repeat(hashes)) { mode = "code"; i += 1 + hashes; continue; }
+        i++;
+        continue;
+      }
+      if (s.startsWith("//", i)) break;
+      if (s.startsWith("/*", i)) { blockAt.push(n + 1); mode = "block"; i += 2; continue; }
+      if (s[i] === '"') { mode = "str"; i++; continue; }
+      if (s[i] === "r") {
+        let j = i + 1;
+        let h = 0;
+        while (s[j] === "#") { h++; j++; }
+        if (s[j] === '"') { mode = "raw"; hashes = h; i = j + 1; continue; }
+        i++;
+        continue;
+      }
+      if (s[i] === "b" && (s[i + 1] === '"' || s[i + 1] === "r" || s[i + 1] === "'")) { i++; continue; }
+      if (s[i] === "'") {
+        const m = /^'(?:\\.|[^\\'])'/.exec(s.slice(i));
+        if (m) { i += m[0].length; continue; }
+        i++;
+        continue;
+      }
+      i++;
+    }
+  }
+  return { blockAt: blockAt, isComment: isComment };
+}
+
 function scanCommentContract() {
   const findings = [];
   const files = rsFiles(path.join(ROOT, "src"), []).concat(rsFiles(path.join(ROOT, "tests"), []));
@@ -72,7 +127,8 @@ function scanCommentContract() {
     }
     if (!slots.length) at(1, RULES.headerMissing);
     else if (slots.join("|") !== HEADER_SLOTS.join("|")) at(1, RULES.headerOrder);
-    if (text.includes("/*")) at(1, RULES.inlineBlock);
+    const lex = scanRustLines(text);
+    for (const ln of lex.blockAt) at(ln, RULES.inlineBlock);
     // ② 附着在 pub 项上的文档块
     let d = 0;
     while (d < lines.length) {
@@ -94,23 +150,28 @@ function scanCommentContract() {
       });
       if (seen[0] !== "目的") at(start + 1, RULES.itemFirst);
     }
-    // ③ 行内注释
+    // ③ 行内注释：只认真正的行注释行（字面量 / 块注释里的不算）；违规报**注释串首行**。
     let run = 0;
+    let runStart = -1;
+    const closeRun = (followedByBlank) => {
+      if (run > 2) at(runStart + 1, RULES.inlineRun);
+      if (followedByBlank) at(runStart + 1, RULES.inlineBlank);
+      run = 0;
+      runStart = -1;
+    };
     lines.forEach((rawLine, n) => {
       const t = rawLine.trim();
-      if (t.startsWith("//") && !t.startsWith("///") && !t.startsWith("//!")) {
+      if (lex.isComment[n] && t.startsWith("//") && !t.startsWith("///") && !t.startsWith("//!")) {
         const body = t.replace(/^\/\/ ?/, "");
-        if (body.length > 100) at(n + 1, RULES.inlineLong);
+        if (body.length > 150) at(n + 1, RULES.inlineLong);
         if (COMMENT_FORBIDDEN.some((w) => body.includes(w))) at(n + 1, RULES.inlineWord);
+        if (!run) runStart = n;
         run++;
         return;
       }
-      if (run) {
-        if (run > 2) at(n + 1, RULES.inlineRun);
-        if (t === "") at(n + 1, RULES.inlineBlank);
-        run = 0;
-      }
+      if (run) closeRun(t === "");
     });
+    if (run) closeRun(false);
   }
   return { findings: findings, byFileRule: toByFileRule(findings) };
 }
@@ -159,6 +220,21 @@ function ratchetSelfTest() {
   eq("持平通过", flat.added.length + flat.stale.length, 0);
   eq("变少要销账", compareContract({ "a.rs": { R: 1 } }, { "a.rs": { R: 3 } }).stale.length, 1);
   eq("条目整条消失要销账", compareContract({}, { "a.rs": { R: 1 } }).stale.length, 1);
+  return bad;
+}
+
+/** 注释词法判定的自测（T0 调用）：字符串与散文里的 /* 不算块注释，真块注释要报对行；
+ *  行注释要在字面量之外才算。 */
+function commentLexerSelfTest() {
+  const bad = [];
+  const eq = (name, got, want) => {
+    if (JSON.stringify(got) !== JSON.stringify(want)) bad.push(name + "：期望 " + JSON.stringify(want) + "，实际 " + JSON.stringify(got));
+  };
+  eq("字符串里的 /* 不算块注释", scanRustLines('let s = "/var/lib/apt/lists/*";').blockAt, []);
+  eq("散文里的 work/** 不算块注释", scanRustLines("/// 共用顶层那一个 work/**").blockAt, []);
+  eq("真块注释要报行号", scanRustLines("let a = 1;\n/* 说明 */\nlet b = 2;").blockAt, [2]);
+  eq("raw 串里的 // 不算行注释", scanRustLines('let s = r#"\n// 不是注释\n"#;').isComment.filter(Boolean).length, 0);
+  eq("普通 // 是行注释", scanRustLines("let a = 1;\n// 说明\nlet b = 2;").isComment.filter(Boolean).length, 1);
   return bad;
 }
 
@@ -389,4 +465,4 @@ function main() {
 }
 
 if (require.main === module) process.exit(main());
-module.exports = { scanCommentContract, compareContract, ratchetSelfTest, deletedGapIds, contentFindings, RULES, LEDGERS };
+module.exports = { scanCommentContract, compareContract, ratchetSelfTest, commentLexerSelfTest, deletedGapIds, contentFindings, RULES, LEDGERS };

@@ -44,7 +44,7 @@ presentation/{cli,web} ──▶ capabilities（含协调业务 conductor）─�
 | `ModuleStateStore` | 模块与服务的启停覆盖落盘（`.home/modules.yaml`） | `modules/detail::YamlModuleState` |
 | `PackageSource` | 运行包库来源（扫描依赖文件夹 `runtimes/`） | `vm/detail::FsPackages` |
 | `VmEngine` / `GuestVm` / `GuestChannel` | 虚拟机档的引擎：按规格拉起一台 guest、在它里面执行、销毁；通道是在 guest 里执行的入口 | `vm/detail::QemuEngine` + `QemuHandle`（QEMU + QGA） |
-| `ShareBackend` | 宿主↔guest 的共享：声明能落哪些引擎 / guest，产出引擎参数与 guest 端挂载命令，并可持有外部资源（`ShareGuard`） | `vm/detail::NinePShare`（9p）/ `CopyShare`（QGA 复制） |
+| `ShareBackend` | 宿主↔guest 的共享：声明能落哪些引擎 / guest，产出引擎参数、netdev 附加选项与 guest 端挂载命令，并可持有外部资源（`ShareGuard`） | `vm/detail::VirtioFsShare`（vhost-user-fs + virtiofsd）/ `NinePShare`（9p）/ `CopyShare`（QGA 复制）/ `SmbShare`（用户态 SMB helper + guestfwd，Windows 实时共享） |
 | `Workdirs` | 一次工作的共享区、各 agent 沙箱、版本库目录、文件清单、用量与寻址根 | `FsWorkspace` |
 | `WorkStore` | 共享区版本库的落盘：文件原语 + 内容寻址对象 + 提交记录 + 每个 agent 的拉取基线（并拒绝符号链接逃逸） | `FsWorkStore` |
 | `SysIo` | 内置文件工具的读写机制（读严格 UTF-8、非法字节如实标注；写一律 UTF-8） | `FsSysIo` |
@@ -57,11 +57,11 @@ presentation/{cli,web} ──▶ capabilities（含协调业务 conductor）─�
 | `ServiceAdapter` | 一个常驻服务的协议适配器：拉起、发现操作、调用、关闭（按行协议走 kernel 的 `SessionHost`） | `residents/detail::McpAdapter`（MCP stdio） |
 | `SecretStore` | 模块隐秘字段的落盘（`.home/secrets.yaml`；值不进提示词、转录与日志） | `secrets/detail::YamlSecrets` |
 | `FenceHost` | 围栏授权的释放（删除会话时请求一次撤销）；**kernel 共享机制端口** | `confine::FenceHostAdapter`（本平台无该机制时为空操作） |
-| `Log` / `HostProbe` | 运行日志（三级）/ 宿主能力探测（**只问事实**：路径存在性、PATH 上的可执行文件、本机虚拟化能力） | `FileLog` / `HostProbeAdapter`（测试 `NoopLog` / `FixedProbe`） |
+| `Log` / `HostProbe` / `PathCodec` / `ProcessTexts` | 运行日志（三级）/ 宿主能力探测（**只问事实**：路径存在性、PATH 上的可执行文件、本机虚拟化能力）/ 模型侧路径 ↔ 宿主路径的翻译 / 外部进程回执的收尾文案 | `FileLog` / `HostProbeAdapter` / `vm` 的路径桥 / `tools::PromptProcessTexts`（测试 `NoopLog` / `FixedProbe`） |
 | `ToolHandler` | **一类工具的执行者**（按名字认领）：内置、模块与核心自有工具因此走**同一条派发路径** | 各能力注入（工具能力管内置与模块；conductor 注入代理工具那个） |
 | `AskUser` | **请用户裁决的提问端口**：需要用户裁决的机制（工具执行层、围栏）推一条问题并**阻塞**等一个选项 id——走会话的**统一裁决通道**（不是第二条） | 会话侧实现（conductor 的 `SessionAsk`：卡片进那一条队、`answer_card` 作答；构不出可用选项时停会话 + 落警告） |
 
-端口只有一个持有者：**定义它的那个能力的 `service.rs`**（R12）。**例外**：`kernel` 的机制端口（`Log` / `HostProbe` / `ToolHandler` / `AskUser` / `ProcessRunner` / `FenceHost`）全项目共享。
+端口只有一个持有者：**定义它的那个能力的 `service.rs`**（R12）。**例外**：`kernel` 的机制端口（`Log` / `HostProbe` / `ToolHandler` / `AskUser` / `ProcessRunner` / `FenceHost` / `PathCodec` / `ProcessTexts` / `SessionHost`）全项目共享。
 新增端口前先问一句：**这是 IO 或可替换点吗**？不是就别加 trait。
 
 ## 三、单元地图与入站契约
@@ -287,9 +287,9 @@ presentation/{cli,web} ──▶ capabilities（含协调业务 conductor）─�
 
 行内注释只回答"就地为什么"，而且必须**紧贴**它解释的那一行：
 
-- 连续 `//` ≤ 2 行、单行 ≤ 100 字；中间不许空行，后面必须紧跟代码（成段说明属于文件头或 `///`）；
+- 连续 `//` ≤ 2 行、单行 ≤ 150 字；中间不许空行，后面必须紧跟代码（成段说明属于文件头或 `///`）；
 - 契约、边界、机制位置这类信息只能进文件头或条目的 `///`；
-- 禁块注释 `/* */`；
+- 禁块注释 `/* */`（判定按词法：字符串、glob、散文里的 `/*` 不算）；
 - 历史措辞（曾经 / 原来 / 旧版 / 旧实现 / 改成 / 先是 / 后来 / 以前 / 与旧逻辑）与显式待办标记（TODO / FIXME / 待补）一律不许出现。
   词表只收**叙事性**词：领域词（`临时 agent`、`后续片段`、`本地遗留`、`暂未暴露`）不算——它们描述的是当前状态。
 

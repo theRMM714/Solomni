@@ -82,8 +82,14 @@ pub fn absent(modules: &[Module], lib: &Library) -> BTreeMap<String, Vec<String>
 }
 
 /// 目的：虚拟机档的诊断（空 = 可以成立）：缺包 / 多版本歧义 / 定版不存在 / 系统路径冲突。
+/// 参数：guest_runtimes = guest 镜像**自带**的运行能力名——镜像里已经有的不必再放 `runtimes/` 包，不算缺。
 /// 约束：传递依赖也在这里走完：包 requires 的能力缺失时，归到触发出它的模块上。
-pub fn vm_diagnoses(modules: &[Module], lib: &Library, spec: &ExecSpec) -> Vec<Diagnosis> {
+pub fn vm_diagnoses(
+    modules: &[Module],
+    lib: &Library,
+    spec: &ExecSpec,
+    guest_runtimes: &[String],
+) -> Vec<Diagnosis> {
     let mut out: Vec<Diagnosis> = Vec::new();
     let mut queue: Vec<(String, String)> = Vec::new();
     for m in modules {
@@ -99,6 +105,10 @@ pub fn vm_diagnoses(modules: &[Module], lib: &Library, spec: &ExecSpec) -> Vec<D
         }
         let versions = lib.versions_of(&cap);
         if versions.is_empty() {
+            if guest_runtimes.iter().any(|g| g == &cap) {
+                // guest 镜像自带这个能力：不必再放 runtimes/ 包，也不算缺。
+                continue;
+            }
             out.push(Diagnosis::Missing {
                 module,
                 capability: cap,
@@ -194,8 +204,9 @@ pub struct VmRequirement {
 
 /// 目的：虚拟机档检测的入参：会话选型 + 设置里登记的路径（None = 没登记，兜底看 PATH）+ 宿主探测端口。
 pub struct VmInputs<'a> {
-    pub base: Option<&'a str>,
     pub qemu: Option<&'a str>,
+    /// 目的：设置里登记的**共享后端外部工具**路径（如 virtiofsd；None = 兜底看 PATH）。
+    pub share_tool: Option<&'a str>,
     /// 目的：本机事实探测（读环境、查路径存在性都在它后面，见 ports::HostProbe）。
     pub probe: &'a dyn HostProbe,
 }
@@ -203,11 +214,12 @@ pub struct VmInputs<'a> {
 /// QEMU 可执行文件名（各平台同名；平台扩展名由适配层的探测实现处理）。
 const QEMU_BIN: &str = "qemu-system-x86_64";
 
-/// 目的：虚拟机档的全部前置要求（**只读事实，不起任何虚拟机**）。
+/// 目的：虚拟机档的**机器能力**清单（**只读事实，不起任何虚拟机**）——与某条会话无关。
 /// 约束：为什么做成清单：用户看到的必须是"缺哪几项、每项怎么补"，而不是一句笼统的"前置条件不具备"。
-/// 约束：base 与会话选型有关，qemu 登记在设置里（见 providers::AppSettings）。
+/// 约束：base 属于**会话选型**，不在这里；含 base 的严格判据见 tier_readiness。
 pub fn vm_requirements(vm: &VmInputs<'_>) -> Vec<VmRequirement> {
     let hyper = vm.probe.hypervisor_available();
+    let combo = effective_combo_label(vm.share_tool, vm.probe);
     vec![
         VmRequirement {
             id: "hypervisor",
@@ -229,14 +241,11 @@ pub fn vm_requirements(vm: &VmInputs<'_>) -> Vec<VmRequirement> {
             id: "guest",
             met: guest_backend_verified(),
             detail: if guest_backend_verified() {
-                format!(
-                    "guest 后端已就位，本平台默认组合 {} 已通过真机验收",
-                    default_combo_label()
-                )
+                format!("guest 后端已就位，本平台默认组合 {} 已通过真机验收", combo)
             } else {
                 format!(
                     "guest 后端已就位，但本平台默认组合 {} 尚未真机验收（就绪项判否）",
-                    default_combo_label()
+                    combo
                 )
             },
             how: if guest_backend_verified() {
@@ -244,14 +253,14 @@ pub fn vm_requirements(vm: &VmInputs<'_>) -> Vec<VmRequirement> {
             } else {
                 format!(
                     "在该平台真机上跑通一次 vm 档工具（默认组合 {}）后再放开（现状与验收见 tests/gaps.yaml）",
-                    default_combo_label()
+                    combo
                 )
             },
         },
-        // QEMU：用户自备。没登记就看 PATH——检测的是"起得来 guest 的那件东西在不在"。
+        // 共享档：只作事实呈现（**不参与 ready**）——缺 virtiofsd 时组合自动回退 9p，虚拟机档仍可用。
+        share_requirement(vm.share_tool, vm.probe, &combo),
+        // QEMU：不预置、不分发（可由 setup 脚本装进项目内）。没登记就看 PATH——检测那件东西在不在。
         qemu_requirement(vm.qemu, vm.probe),
-        // 基础根：用户自备（发行版基底 + 内核所在目录）。本机档为空 = 不适用。
-        base_requirement(vm.base, vm.probe),
     ]
 }
 
@@ -363,15 +372,85 @@ fn guest_backend_verified() -> bool {
 }
 
 /// 目的：已经实现的共享后端（组合选择与就绪说明**共用同一份**，避免"说要验 A、实际跑 B"）。
-pub const IMPLEMENTED_SHARES: &[&str] = &["9p", "copy"];
+pub const IMPLEMENTED_SHARES: &[&str] = &["9p", "copy", "virtiofs", "smb"];
 
-/// 目的：本平台**已实现**组合的可读标签（"引擎/共享"），用于就绪说明里说清"验的是哪一套"。
-fn default_combo_label() -> String {
+/// 目的：共享档 virtiofs 要用的外部守护进程名（探测 PATH 与设置登记都用它；只支持 Rust 版 CLI）。
+pub const VIRTIOFSD_BIN: &str = "virtiofsd";
+
+/// 目的：共享档 smb 要用的外部 helper 名（探测 PATH 与设置登记都用它；Windows 上补 .exe 由宿主探测处理）。
+pub const SMBD_BIN: &str = "smbd";
+
+/// 目的：某个共享档要用的外部工具名（None = 不需要外部工具）。
+pub fn share_tool_of(share: &str) -> Option<&'static str> {
+    match share {
+        "virtiofs" => Some(VIRTIOFSD_BIN),
+        "smb" => Some(SMBD_BIN),
+        _ => None,
+    }
+}
+
+/// 目的：一个外部工具在不在场——登记路径优先（登记了就必须是那个文件），否则看 PATH。
+fn tool_available(name: &str, registered: Option<&str>, probe: &dyn HostProbe) -> bool {
+    match registered.map(str::trim) {
+        Some(p) if !p.is_empty() => probe.is_file(Path::new(p)),
+        _ => probe.has_exe(name),
+    }
+}
+
+/// 目的：某个共享档在不在场：先要是已实现的档，再要它要的外部工具在场（不需要工具的档恒在场）。
+/// 约束：组合选择（组合根）与就绪说明共用这一份，避免"说要验 A、实际跑 B"。
+pub fn share_available(share: &str, share_tool: Option<&str>, probe: &dyn HostProbe) -> bool {
+    if !IMPLEMENTED_SHARES.contains(&share) {
+        return false;
+    }
+    match share_tool_of(share) {
+        None => true,
+        Some(name) => tool_available(name, share_tool, probe),
+    }
+}
+
+/// 目的：本平台**实际会选**的已实现组合标签（"引擎/共享"）：引擎 qemu 在、共享档在场，按回退链取第一个。
+fn effective_combo_label(share_tool: Option<&str>, probe: &dyn HostProbe) -> String {
     default_combos(std::env::consts::OS)
         .iter()
-        .find(|c| c.engine == "qemu" && IMPLEMENTED_SHARES.contains(&c.share))
+        .find(|c| c.engine == "qemu" && share_available(c.share, share_tool, probe))
         .map(|c| format!("{}/{}", c.engine, c.share))
         .unwrap_or_else(|| "未定".to_string())
+}
+
+/// 目的：共享档的现状——本平台实现链里性能最高的那一档在不在场、不在就回退到下一档。
+/// 约束：**恒 met、不参与承载判定**——缺 virtiofsd 时组合自动回退 9p，虚拟机档照样可用；
+///   所以"怎么补"写在 detail 里（met 恒真，how 按约定留空），不把性能档的缺失误报成档位不可用。
+fn share_requirement(
+    share_tool: Option<&str>,
+    probe: &dyn HostProbe,
+    effective_combo: &str,
+) -> VmRequirement {
+    let top = default_combos(std::env::consts::OS)
+        .iter()
+        .find(|c| c.engine == "qemu" && IMPLEMENTED_SHARES.contains(&c.share));
+    let detail = match top {
+        None => "本平台还没有已实现的共享档".to_string(),
+        Some(c) => match share_tool_of(c.share) {
+            None => format!("共享档 {}（不需要外部工具）", c.share),
+            Some(name) => {
+                if share_available(c.share, share_tool, probe) {
+                    format!("共享档 {} 可用（找到 {}）", c.share, name)
+                } else {
+                    format!(
+                        "共享档 {} 不在场（没找到 {}）：已按组合回退到 {}；把 {} 放进 PATH，或在设置里登记它的完整路径即可启用",
+                        c.share, name, effective_combo, name
+                    )
+                }
+            }
+        },
+    };
+    VmRequirement {
+        id: "share",
+        met: true,
+        detail,
+        how: String::new(),
+    }
 }
 
 /// 虚拟机监视器不可用时的解决指引（各平台说各自的办法）。
@@ -387,7 +466,7 @@ fn hypervisor_how() -> &'static str {
     }
 }
 
-/// QEMU 检测：登记了就用登记的路径，没登记就看 PATH（产品不自带 QEMU，也不下载）。
+/// QEMU 检测：登记了就用登记的路径，没登记就看 PATH（依赖不预置、不分发，可由 setup 脚本装进项目内）。
 fn qemu_requirement(registered: Option<&str>, probe: &dyn HostProbe) -> VmRequirement {
     let (found, where_from) = match registered.map(str::trim) {
         Some(p) if !p.is_empty() => (probe.is_file(Path::new(p)), "设置里登记的路径"),
@@ -404,13 +483,13 @@ fn qemu_requirement(registered: Option<&str>, probe: &dyn HostProbe) -> VmRequir
         how: if found {
             String::new()
         } else {
-            "自行安装 QEMU 并放进 PATH，或在设置里登记它的完整路径（本产品不自带、不下载 QEMU）"
+            "自行安装 QEMU 并放进 PATH，或在设置里登记它的完整路径；也可跑 solomni --provision --ensure --yes 把它下载进项目内（需用户同意）"
                 .to_string()
         },
     }
 }
 
-/// 目的：基础根检测——用户自备的 guest 基础（rootfs 目录 + vmlinuz/bzImage）在不在、布局对不对。
+/// 目的：基础根检测——不预置的 guest 基础（rootfs 目录 + vmlinuz/bzImage）在不在、布局对不对。
 fn base_requirement(base: Option<&str>, probe: &dyn HostProbe) -> VmRequirement {
     let checked = base.map(str::trim).filter(|p| !p.is_empty()).map(|p| {
         (
@@ -449,34 +528,64 @@ fn base_requirement(base: Option<&str>, probe: &dyn HostProbe) -> VmRequirement 
         how: if met {
             String::new()
         } else {
-            "自备一份 guest 基础根：一个目录，里面是发行版 rootfs（目录，或 rootfs.ext4 / *.qcow2 磁盘镜像）与 vmlinuz（可选 initrd.img），把目录填进会话的 base（本产品不预置、不下载镜像）"
+            "自备一份 guest 基础根：一个目录，里面是发行版 rootfs（目录，或 rootfs.ext4 / *.qcow2 磁盘镜像）与 vmlinuz（可选 initrd.img），把目录填进会话的 base（可跑 solomni --provision --ensure --yes 把 Debian 基础根下载进项目内；需用户同意）"
                 .to_string()
         },
     }
 }
 
+/// 目的：机器能力的就绪视图（不含会话级 base）：界面据此决定虚拟机档能不能**选**。
+pub fn vm_capability(vm: &VmInputs<'_>) -> TierReadiness {
+    TierReadiness {
+        requirements: vm_requirements(vm),
+    }
+}
+
+/// 目的：机器能力不足时的可读拒绝理由（与 tier_refusal 同一套文案，判据只到机器能力）。
+pub fn capability_refusal(vm: &VmInputs<'_>) -> Option<String> {
+    let cap = vm_capability(vm);
+    if cap.ready() {
+        return None;
+    }
+    Some(format!(
+        "虚拟机档现在不可用（{}）：请换本机档。各项前置与怎么补见配置界面的「虚拟机档前置」与 --doctor",
+        cap.missing().join("；")
+    ))
+}
+
 /// 目的：本机能不能承载这个档位（**只读事实，不碰任何东西**）。
 /// 约束：虚拟机档的前置条件不具备时，虚拟机档**不允许创建或改入**——这是用户环境问题，不是选型问题；
 /// 约束：界面的"能不能点"与「开始」的校验走同一个函数，两处不会各说各话。
-/// 约束：判据**只有一份**：就是 vm_requirements 那份清单，逐项都满足才算承载得了。
-pub fn tier_readiness(spec: &ExecSpec, qemu: Option<&str>, probe: &dyn HostProbe) -> TierReadiness {
+/// 约束：判据**只有一份**：机器能力清单（vm_requirements）+ 这条会话的 base；逐项都满足才算承载得了。
+pub fn tier_readiness(
+    spec: &ExecSpec,
+    qemu: Option<&str>,
+    share_tool: Option<&str>,
+    probe: &dyn HostProbe,
+) -> TierReadiness {
     if spec.tier != Tier::Vm {
         return TierReadiness {
             requirements: Vec::new(),
         };
     }
-    TierReadiness {
-        requirements: vm_requirements(&VmInputs {
-            base: spec.base.as_deref(),
-            qemu,
-            probe,
-        }),
-    }
+    let mut requirements = vm_requirements(&VmInputs {
+        qemu,
+        share_tool,
+        probe,
+    });
+    // base 是这条会话的选型，不是机器能力：保存 /「开始」时才要求它。
+    requirements.push(base_requirement(spec.base.as_deref(), probe));
+    TierReadiness { requirements }
 }
 
 /// 目的：虚拟机档的可读拒绝理由（创建与编辑共用同一把尺子）。
-pub fn tier_refusal(spec: &ExecSpec, qemu: Option<&str>, probe: &dyn HostProbe) -> Option<String> {
-    let readiness = tier_readiness(spec, qemu, probe);
+pub fn tier_refusal(
+    spec: &ExecSpec,
+    qemu: Option<&str>,
+    share_tool: Option<&str>,
+    probe: &dyn HostProbe,
+) -> Option<String> {
+    let readiness = tier_readiness(spec, qemu, share_tool, probe);
     if readiness.ready() {
         return None;
     }
@@ -486,13 +595,31 @@ pub fn tier_refusal(spec: &ExecSpec, qemu: Option<&str>, probe: &dyn HostProbe) 
     ))
 }
 
+/// 目的：虚拟机档的并发准入——每台 guest 都是实打实的资源（固定 `-m 2048 -smp 2`），
+///   到上限就如实拒绝；**同一租约重启不占新名额**；上限 0 = 不限制。
+pub fn admit_guest(running: &[String], lease: &str, max: u32) -> Result<(), String> {
+    if max == 0 || running.iter().any(|l| l == lease) {
+        return Ok(());
+    }
+    if running.len() >= max as usize {
+        return Err(format!(
+            "虚拟机档同时最多 {} 台（现在 {} 台）：先删掉、或把别的虚拟机档会话切回本机档",
+            max,
+            running.len()
+        ));
+    }
+    Ok(())
+}
+
 /// 目的：派生执行计划：本机档不装载运行包（宿主自备解释器）。
-/// 约束：虚拟机档只有**选型不成立**才拒绝（多版本未定版 / 定版不存在 / 系统路径冲突——用户要解决的选型问题）；
-/// 约束：**缺包不拦会话**：那只是该模块的工具不可用（由 unavailable 收口，降级而非崩溃）。
+/// 约束：虚拟机档**任何诊断都拒绝**——选型不成立（多版本未定版 / 定版不存在 / 系统路径冲突）与
+///   **缺包**都算：没有工具用户完不成工作，与其拉一台跑不了工具的 guest，不如在选型这步如实拒绝。
+/// 约束：guest 自带的运行能力（`guest_runtimes`）不算缺（镜像里已经有解释器）。
 pub fn plan(
     spec: &ExecSpec,
     modules: &[Module],
     lib: &Library,
+    guest_runtimes: &[String],
 ) -> Result<ExecPlan, Vec<Diagnosis>> {
     match spec.tier {
         Tier::Host => Ok(ExecPlan {
@@ -502,12 +629,9 @@ pub fn plan(
             packages: Vec::new(),
         }),
         Tier::Vm => {
-            let hard: Vec<Diagnosis> = vm_diagnoses(modules, lib, spec)
-                .into_iter()
-                .filter(|d| !matches!(d, Diagnosis::Missing { .. }))
-                .collect();
-            if !hard.is_empty() {
-                return Err(hard);
+            let diags = vm_diagnoses(modules, lib, spec, guest_runtimes);
+            if !diags.is_empty() {
+                return Err(diags);
             }
             let mut chosen: Vec<&PackageManifest> = Vec::new();
             let mut seen: BTreeSet<String> = BTreeSet::new();
@@ -560,17 +684,19 @@ pub fn plan(
 }
 
 /// 目的：本档位下不能执行工具的模块（模块 id → 缺失的能力名）：本机档不装载运行包，一律可用（空表）。
-/// 约束：虚拟机档：装配不成立（歧义 / 定版不存在 / 冲突）时，凡声明了运行能力的模块都不能执行工具。
+/// 约束：虚拟机档：缺包 / 装配不成立（歧义 / 定版不存在 / 冲突）时，凡声明了运行能力的模块都不能执行工具。
+/// 约束：guest 自带的运行能力不算缺（镜像里已经有解释器）——与 `plan` 同一把尺子。
 pub fn unavailable(
     spec: &ExecSpec,
     modules: &[Module],
     lib: &Library,
+    guest_runtimes: &[String],
 ) -> BTreeMap<String, Vec<String>> {
     let mut out: BTreeMap<String, Vec<String>> = BTreeMap::new();
     if spec.tier != Tier::Vm {
         return out;
     }
-    let diags = vm_diagnoses(modules, lib, spec);
+    let diags = vm_diagnoses(modules, lib, spec, guest_runtimes);
     if diags.is_empty() {
         return out;
     }
@@ -605,7 +731,7 @@ pub fn diagnose_text(diags: &[Diagnosis]) -> String {
         .map(|d| match d {
             Diagnosis::Missing { module, capability } => {
                 format!(
-                    "模块 {} 需要运行包 {}，包库里没有（把它放进依赖文件夹 runtimes/）",
+                    "模块 {} 需要运行包 {}：包库里没有、guest 镜像也没声明自带（把它放进依赖文件夹 runtimes/，或在 guest.yaml 的 runtimes 里声明）",
                     module, capability
                 )
             }

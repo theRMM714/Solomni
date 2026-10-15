@@ -18,6 +18,7 @@
 - 不擅自引入版本迁移、版本号规划或兼容策略。
 - 项目内工具链和环境应该始终使用最新稳定版，如版本落后应向用户说明，获得授权后进行更新。
 - 默认同时支持 Windows、macOS、Linux；设计和实现必须先确认跨平台成立。
+- 发行版二进制为纯RUST，避免让用户安装环境，需要让用户开箱即用。
 - git推送前进行检查和脱敏，文档，代码，注释中不允许出现任何用户相关信息，和项目无关的一律算用户信息
 
 ## 三、路径硬约束
@@ -182,6 +183,7 @@
 | `modules`（模块公地） | `docs/modules/README.md` | `unit-map.md` |
 | `vm`（虚拟机档） | `docs/vm/README.md` | `unit-map.md` |
 | `workspace`（工作区） | `docs/workspace/README.md` | `unit-map.md` |
+| `provision`（依赖补齐） | `docs/provision/README.md` | `unit-map.md` |
 | `prompt`（提示词册） | `docs/prompt/README.md` | `unit-map.md`、`prompts.md` |
 | `slate`（名单） | `docs/slate/README.md` | `unit-map.md` |
 | `residents`（常驻服务） | `docs/residents/README.md` | `unit-map.md` |

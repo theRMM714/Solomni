@@ -70,6 +70,73 @@ pub(crate) fn sandboxes_lookup_is_by_agent() {
     assert!(boxes.for_agent("a").is_none(), "沙箱不再按模块 id 反查");
 }
 
+/// 目的：虚拟机档"能不能选"只看**机器能力**，与会话级 base 无关——Web 换档死锁的回归锚。
+/// 约束：base 只在保存 /「开始」时校验（构造承载判据时合并进去）。
+#[test]
+pub(crate) fn vm_availability_is_machine_only_and_base_is_session_level() {
+    use crate::capabilities::vm::domain::exec::host_verified;
+    use crate::tests::doubles::{core_with_gateway_probe, FixedProbe};
+    // 一个对的基础根：目录 + vmlinuz（探测替身只按声明回答，这两条也要登记）。
+    let base = crate::tests::base_dir("vm-avail-base");
+    // 机器能力齐：有虚拟机监视器，PATH 里有 QEMU 与 virtiofsd（guest 项按已验平台数据表）。
+    let mut probe = FixedProbe {
+        hypervisor: true,
+        ..Default::default()
+    };
+    probe.exes.push("qemu-system-x86_64".to_string());
+    probe.exes.push("virtiofsd".to_string());
+    probe.dirs.push(base.clone());
+    probe.files.push(base.join("vmlinuz"));
+    let mut core = core_with_gateway_probe(
+        vec![module_of("a")],
+        gw(BTreeMap::new(), Vec::new()),
+        Arc::new(probe),
+    );
+    let choices = core.tier_choices();
+    let expected = host_verified(std::env::consts::OS);
+    assert_eq!(
+        choices.vm_available, expected,
+        "vm_available 只看机器能力：{:?}",
+        choices.vm_requirements
+    );
+    assert!(
+        !choices.vm_requirements.iter().any(|r| r.id == "base"),
+        "机器能力清单不含会话级 base：{:?}",
+        choices.vm_requirements
+    );
+    if !expected {
+        return;
+    }
+    // 建一条本机档会话（没有 base）：会话配置仍说虚拟机档可选——base 只在保存/开始时校验。
+    let spec = crate::tests::single_work("wl", &["a"]);
+    core.create_work(spec).expect("建本机档会话");
+    let cfg = core.session_config("wl").expect("配置视图");
+    assert!(cfg.base.is_none(), "新会话没有 base");
+    assert!(
+        cfg.vm_available,
+        "机器能力齐就该能选：{:?}",
+        cfg.vm_requirements
+    );
+    assert!(
+        !cfg.vm_requirements.iter().any(|r| r.id == "base"),
+        "配置视图的机器能力清单也不含 base：{:?}",
+        cfg.vm_requirements
+    );
+    // 建虚拟机档：base 没填 → 如实拒绝；填了 → 建得起来（base 是会话级，不是机器能力）。
+    let mut no_base = crate::tests::single_work("wv", &["a"]);
+    no_base.tier = Tier::Vm;
+    let err = core
+        .create_work(no_base)
+        .expect_err("虚拟机档缺 base 要如实拒绝");
+    assert!(err.contains("基础根"), "{}", err);
+    let mut with_base = crate::tests::single_work("wv2", &["a"]);
+    with_base.tier = Tier::Vm;
+    with_base.base = Some(base.to_string_lossy().into_owned());
+    core.create_work(with_base)
+        .expect("机器能力齐 + base 在场就该建得起来");
+    let _ = std::fs::remove_dir_all(&base);
+}
+
 /// 虚拟机档的承载校验：前置条件不具备时，**创建与编辑都如实拒绝**（用户环境问题，不是选型问题）。
 /// 与界面上的"能不能选"同源（`exec::tier_readiness`），两处不会各说各话。
 #[test]
@@ -110,7 +177,14 @@ pub(crate) fn vm_tier_is_refused_when_the_machine_cannot_carry_it() {
     let mut vm_spec = work("vm-default", WorkMode::Single, &["a"]);
     vm_spec.tier = Tier::Vm;
     let opened = core.create_work(vm_spec);
-    if exec::tier_readiness(&default_vm, None, &crate::kernel::detail::HostProbeAdapter).ready() {
+    if exec::tier_readiness(
+        &default_vm,
+        None,
+        None,
+        &crate::kernel::detail::HostProbeAdapter,
+    )
+    .ready()
+    {
         opened.expect("本机能承载虚拟机档时不该拒绝");
     } else {
         let err = opened.expect_err("本机承载不了虚拟机档就不许建");
@@ -223,7 +297,7 @@ pub(crate) fn runtime_report_is_tier_aware() {
 
 #[test]
 pub(crate) fn module_without_runtime_is_denied_with_reason() {
-    // 虚拟机档 + 空包库：模块声明的运行包没装载 → 工具不落进程，回执如实说缺哪个能力。
+    // 虚拟机档 + 空包库：模块声明的运行包没人提供 → 改入那一刻如实拒绝（缺包不再降级）。
     let mut member = BTreeMap::new();
     member.insert(
         "a".to_string(),
@@ -269,51 +343,26 @@ pub(crate) fn module_without_runtime_is_denied_with_reason() {
         Arc::new(crate::capabilities::residents::api::NoResidents),
         Arc::new(crate::capabilities::secrets::api::NoSecrets),
     );
-    // 虚拟机档现在一律不可选（guest 本体尚未接入），所以**创建**走本机档；
-    // 建好之后把落盘档位改成 vm——这正是"档位承载检查"与"缺包不拦会话"两件事的交界：
-    // 已存在的会话照常打开、按 vm 档判工具可用性。
+    // 虚拟机档 + 空包库 + 基础根没声明运行能力：模块声明的 python 没人提供 →
+    // **改入那一刻就拒绝**（不再降级：没有工具用户完不成工作），一个进程都不落。
     let sid = core
         .create_work(work("w", WorkMode::Single, &["a"]))
         .unwrap()
         .sid;
     hist.force_tier(&sid, Tier::Vm);
-    // 编辑一次会把内存里的会话丢掉；下一次访问按落盘 meta（已是 vm 档）重建，
-    // 于是"工具可用性按 vm 档判"这条路才真的被走到。
     let base_dir = crate::tests::base_dir("module-without-runtime-base");
     let mut rebuild = edit_of(vec![("a", &["a"], "")]);
     rebuild.tier = "vm".to_string();
     rebuild.base = Some(base_dir.to_string_lossy().into_owned());
-    core.edit_session(&sid, rebuild).unwrap();
-    // 访问一次（前端打开会话就是这一步）把会话按新配置重建；single_say 只认内存里已建好的会话。
-    with_live(|l| core.continue_flow(&sid, l)).unwrap();
-    let events = with_live(|l| core.single_say(&sid, "干活", l)).unwrap();
+    let refused = core.edit_session(&sid, rebuild).unwrap_err();
+    assert!(
+        refused.contains("python") && refused.contains("runtimes/"),
+        "要说清缺哪个能力、怎么补：{}",
+        refused
+    );
     assert!(
         runner.calls.lock().expect("锁").is_empty(),
-        "缺运行包时不落进程"
-    );
-    let texts = test_prompts().tools();
-    let expect = texts.render(
-        &texts.module_unavailable,
-        &[
-            ("module", "a".to_string()),
-            ("capability", "python".to_string()),
-        ],
-    );
-    let feedback = core
-        .single_history(&sid)
-        .unwrap()
-        .iter()
-        .find(|m| m.role == "user" && m.content.contains("[工具结果] a.grep"))
-        .map(|m| m.content.clone())
-        .unwrap_or_default();
-    assert!(feedback.contains(&expect), "回执要用册子文案：{}", feedback);
-    let lines = tool_line_texts(&events);
-    assert!(
-        lines
-            .iter()
-            .any(|l| l.contains("grep") && l.contains("失败")),
-        "失败也要发 tool 行：{:?}",
-        lines
+        "拒绝时不落任何进程"
     );
     // 同一个模块在本机档照旧执行（本机档不装载运行包）。
     let mut member2 = BTreeMap::new();
@@ -742,4 +791,49 @@ pub(crate) fn agent_sandboxes_from_a_work_are_read_only_for_the_shared_area() {
     assert!(!sb.shared_writable, "生产里 agent 沙箱默认只读共享区");
     let (place, path) = sb.resolve(&p(&["w", "work", "x.txt"])).unwrap();
     assert!(!sb.can_write(&place, &path));
+}
+
+/// 目的：版本库写闸按**工作**分：不同工作互不阻塞，同一个工作严格串行。
+#[test]
+pub(crate) fn version_gate_is_per_work() {
+    let ws = crate::capabilities::workspace::service::WorkspaceService::new(
+        Arc::new(InMemoryWorkspace::new()),
+        Arc::new(InMemoryWorkStore::new()),
+    );
+    let a = ws.gate("a");
+    let b = ws.gate("b");
+    let _hold_a = a.lock().unwrap_or_else(|e| e.into_inner());
+    assert!(b.try_lock().is_ok(), "不同工作互不阻塞");
+    let a2 = ws.gate("a");
+    assert!(a2.try_lock().is_err(), "同一个工作要串行");
+}
+
+/// 目的：虚拟机档下模型给的 guest 写法要能寻址——译成宿主路径**再过同一道根校验**；越界仍拒。
+#[test]
+pub(crate) fn sandbox_resolves_guest_written_paths() {
+    use crate::capabilities::vm::api::PathBridge;
+    use crate::capabilities::vm::domain::paths::PathDialect;
+    use crate::capabilities::workspace::api::Place;
+    // 跨方言才有翻译（同方言时桥是恒等，走的是宿主写法那条路）。
+    let guest = if cfg!(windows) {
+        PathDialect::Posix
+    } else {
+        PathDialect::Windows
+    };
+    let bridge = PathBridge::new(std::env::consts::OS, guest);
+    let mut sb = test_sandbox("a1", &["data"]);
+    sb.path_codec = Some(Arc::new(bridge));
+    // 私有沙箱在 guest 里的写法要认，并落回宿主私有沙箱。
+    let guest_note = format!("{}/note.txt", bridge.to_guest(&sb.private));
+    let (place, path) = sb.resolve(&guest_note).expect("guest 写法该认");
+    assert_eq!(place, Place::Private);
+    assert_eq!(path, sb.private.join("note.txt"));
+    // 宿主写法直通（系统工具跑在宿主侧，本来就成立）。
+    let host_note = sb.private.join("host.txt").to_string_lossy().into_owned();
+    let (place, _) = sb.resolve(&host_note).expect("宿主写法也认");
+    assert_eq!(place, Place::Private);
+    // 镜像根下、但不在任何允许根里的路径：翻译得出来也要被根校验拒。
+    let outside = bridge.to_guest(&abs(&["elsewhere", "x.txt"]));
+    let why = sb.resolve(&outside).expect_err("越界要拒");
+    assert!(why.contains("允许的根目录"), "{}", why);
 }

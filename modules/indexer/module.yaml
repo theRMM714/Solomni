@@ -9,7 +9,7 @@ system: >-
   （要用的 corpus.jsonl 先 work_pull 到沙箱），收尾用 work_commit 提交回共享区，不要写进模块的 userdata/
   （那是模块自己的跨任务私有状态）。
   用法：
-  - build：args {"corpus":"<corpus.jsonl 的真实绝对路径>","out":"<index.bin 的输出路径>"}；建完记住产物路径。
+  - build：args {"corpus":"<corpus.jsonl 路径>","out":"<index.bin 的输出路径>"}；路径用【工作环境】给出的写法；建完记住产物路径。
   - query：args {"index":"<index.bin 路径>","q":"检索词","limit":10}；limit 为 1..50，缺省 10；只读、可并发。
   - dups：args {"corpus":"<corpus.jsonl 路径>","threshold":0.6}；threshold 为 0..1，缺省 0.6；只读、可并发。
   分词是 ASCII 词（长度 >= 2，转小写）+ 中文相邻二元组；中文查询词请给两个字以上的连续片段（例如「检索」），
@@ -25,11 +25,11 @@ tools:
       corpus:
         type: string
         required: true
-        desc: corpus.jsonl 的真实绝对路径（work_pull 到沙箱里的副本）
+        desc: corpus.jsonl 的路径（用【工作环境】的写法；work_pull 到沙箱里的副本）
       out:
         type: string
         required: true
-        desc: 索引产物 index.bin 的路径（真实绝对路径；写在你的沙箱里）
+        desc: 索引产物 index.bin 的路径（用【工作环境】的写法；写在你的沙箱里）
   query:
     command: build/indexer query
     parallel: true
@@ -58,7 +58,7 @@ tools:
       corpus:
         type: string
         required: true
-        desc: corpus.jsonl 的真实绝对路径（work_pull 到沙箱里的副本）
+        desc: corpus.jsonl 的路径（用【工作环境】的写法；work_pull 到沙箱里的副本）
       threshold:
         type: number
         default: 0.6

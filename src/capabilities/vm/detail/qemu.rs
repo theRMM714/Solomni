@@ -4,12 +4,13 @@
 //! 联动：端口在 ports.rs；由组合根构造、service.rs 持有。
 
 use crate::capabilities::vm::domain::guest::{
-    GuestArch, GuestImage, GuestRoot, GuestRun, GuestSpec,
+    GuestArch, GuestImage, GuestRoot, GuestRun, GuestSpec, SeedDocs,
 };
 use crate::capabilities::vm::ports::{GuestChannel, GuestVm, SharePlan, VmEngine};
 use crate::kernel::api::ToolOutcome;
 use std::io::{BufRead, BufReader, Write};
 use std::net::{TcpListener, TcpStream};
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
@@ -35,24 +36,57 @@ pub fn qemu_exe(arch: GuestArch) -> &'static str {
     }
 }
 
-/// 目的：QEMU 引擎——每次 boot 拉起一个 qemu-system-* 进程并接上 QGA 通道。
-pub struct QemuEngine;
+/// 目的：QEMU 引擎——每次 boot 拉起一个 qemu-system-* 进程并接上 QGA 通道；
+///   要每租约可写层时先用同目录的 qemu-img 在基础镜像上建一份 qcow2 覆盖（多台并发不能同写一份基础镜像）。
+pub struct QemuEngine {
+    /// 每租约可写层的落点（组合根注入；None = 不提供可写层——供给编排改的正是基础镜像本身）。
+    overlay_dir: Option<PathBuf>,
+}
 
 impl QemuEngine {
-    /// 目的：组合根专用。
+    /// 目的：组合根专用（不带可写层：供给编排与测试用）。
     pub fn new() -> QemuEngine {
-        QemuEngine
+        QemuEngine { overlay_dir: None }
+    }
+
+    /// 目的：组合根专用（带每租约可写层的落点：会话的 guest 盘写在这里，删会话即丢）。
+    pub fn with_overlay_dir(dir: PathBuf) -> QemuEngine {
+        QemuEngine {
+            overlay_dir: Some(dir),
+        }
     }
 }
 
-/// 目的：除共享之外的一次启动参数（不含可执行文件本身）——机器、加速器、内核、串口与 QGA 通道。
-/// 参数：channel_opts 是 QGA chardev 的补充选项；share_needs_net = 共享后端要不要 guest 有（受限）网卡。
+/// 目的：guest 内存大小（MiB）——`-m` 与共享内存后端（vhost-user 要）必须同一尺寸，所以只写一处。
+pub const GUEST_MEM_MB: u32 = 2048;
+
+/// 目的：除共享之外的一次启动参数（不含可执行文件本身）——机器、加速器、内存、内核、串口、QGA 通道与首启种子。
+/// 参数：channel_opts 是 QGA chardev 的补充选项；share_needs_net = 共享后端要不要 guest 有（受限）网卡；
+///   share_needs_mem = 共享后端要不要 guest RAM 是**可共享内存**（vhost-user 设备，如 virtiofs）；
+///   seed_url = 首启 cloud-init 的 NoCloud net 种子根 URL（None = 不投种子）。
 /// 约束：rootfs 经 virtio-9p 的 base 标签挂成根——当前的根仍是目录；磁盘镜像见 docs/vm/README.md 的「多平台组合」。
-pub fn engine_args(spec: &GuestSpec, channel_opts: &str, share_needs_net: bool) -> Vec<String> {
+pub fn engine_args(
+    spec: &GuestSpec,
+    channel_opts: &str,
+    share_needs_net: bool,
+    share_needs_mem: bool,
+    seed_url: Option<&str>,
+    net_options: &[String],
+) -> Vec<String> {
     let mut a: Vec<String> = Vec::new();
+    a.push("-m".to_string());
+    a.push(GUEST_MEM_MB.to_string());
+    // vhost-user 设备（virtiofs）要求 guest RAM 是可共享内存：给一个同尺寸的 memfd 后端，挂到唯一 numa 节点。
+    if share_needs_mem {
+        a.push("-object".to_string());
+        a.push(format!(
+            "memory-backend-memfd,id=solomni-mem,size={}M,share=on",
+            GUEST_MEM_MB
+        ));
+        a.push("-numa".to_string());
+        a.push("node,memdev=solomni-mem".to_string());
+    }
     for v in [
-        "-m",
-        "2048",
         "-smp",
         "2",
         "-machine",
@@ -101,6 +135,11 @@ pub fn engine_args(spec: &GuestSpec, channel_opts: &str, share_needs_net: bool) 
             }
         }
     }
+    // 首启种子：SMBIOS type 1 的 serial 是 cloud-init NoCloud 认识的数据源指路（ds=nocloud-net;s=<URL>）。
+    if let Some(url) = seed_url {
+        a.push("-smbios".to_string());
+        a.push(format!("type=1,serial=ds=nocloud-net;s={}", url));
+    }
     a.push("-chardev".to_string());
     a.push(format!("socket,id=ch0,{}", channel_opts));
     a.push("-device".to_string());
@@ -111,8 +150,13 @@ pub fn engine_args(spec: &GuestSpec, channel_opts: &str, share_needs_net: bool) 
     // guestfwd/hostfwd 内部隧道可用）；两者都不是 = 干脆不给网卡。
     if spec.net || share_needs_net {
         let restrict = if spec.net { "" } else { ",restrict=on" };
+        let extra = if net_options.is_empty() {
+            String::new()
+        } else {
+            format!(",{}", net_options.join(","))
+        };
         a.push("-netdev".to_string());
-        a.push(format!("user,id=n0{}", restrict));
+        a.push(format!("user,id=n0{}{}", restrict, extra));
         a.push("-device".to_string());
         a.push("virtio-net-pci,netdev=n0".to_string());
     } else {
@@ -150,23 +194,99 @@ impl VmEngine for QemuEngine {
             .filter(|p| !p.is_empty())
             .map(str::to_string)
             .unwrap_or_else(|| qemu_exe(spec.image.arch).to_string());
-        let mut args = engine_args(spec, &opts, share.needs_net);
+        // 每租约可写层：会话不直写基础镜像（多台并发会同写一份）；供给编排要改基础镜像本身，isolated = false。
+        let overlay = match (&spec.image.root, spec.isolated) {
+            (GuestRoot::Disk(base), true) => {
+                let dir = self
+                    .overlay_dir
+                    .as_ref()
+                    .ok_or("这次启动要每租约可写层，但引擎没配可写层目录".to_string())?;
+                std::fs::create_dir_all(dir)
+                    .map_err(|e| format!("建可写层目录失败（{}）：{}", dir.display(), e))?;
+                let path = dir.join(format!("{}.qcow2", lease_file_name(&spec.lease)));
+                let _ = std::fs::remove_file(&path);
+                create_overlay(&exe, base, &path)?;
+                Some(path)
+            }
+            _ => None,
+        };
+        // 有效启动规格：有可写层就用它当根，基础镜像退成只读后备（内核 / initrd 仍取自基础根）。
+        let mut effective = spec.clone();
+        effective.image = with_overlay(&spec.image, overlay.as_deref());
+        // 首启种子：宿主起一个小 HTTP 服务，经 -smbios 告诉 cloud-init 去哪取 user-data / meta-data。
+        let seed = match &spec.seed {
+            Some(docs) => {
+                if !spec.net {
+                    return Err("投 cloud-init 种子要求 guest 有网卡（net = true）".to_string());
+                }
+                Some(SeedServer::start(docs)?)
+            }
+            None => None,
+        };
+        let seed_url = seed.as_ref().map(SeedServer::url);
+        let mut args = engine_args(
+            &effective,
+            &opts,
+            share.needs_net,
+            share.needs_shared_mem,
+            seed_url.as_deref(),
+            &share.net_options,
+        );
+        // 便携包把固件放在可执行文件旁（`bin/` 的兄弟 `share/qemu`）：显式 `-L` 指过去，
+        // 否则 QEMU 只按编译期前缀找，便携布局下会报 "could not load PC BIOS"。
+        if let Some(fw) = firmware_dir(&exe) {
+            args.insert(0, fw.display().to_string());
+            args.insert(0, "-L".to_string());
+        }
         args.extend(share.engine_args.iter().cloned());
         let child = Command::new(&exe)
             .args(&args)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
+            // stderr 继承：QEMU 起不来时（固件缺失这类）错误要能看见，不能吞进 null。
+            .stderr(Stdio::inherit())
             .spawn()
             .map_err(|e| format!("起不了 QEMU（{}）：{}", exe, e))?;
         drop(listener);
-        let stream = connect_within(port, Duration::from_secs(30))?;
+        let stream = match connect_within(port, Duration::from_secs(30)) {
+            Ok(s) => s,
+            Err(e) => {
+                // 连不上就把刚拉起的 QEMU 与刚建的可写层都收掉，别留孤儿。
+                let mut c = child;
+                let _ = c.kill();
+                let _ = c.wait();
+                if let Some(path) = &overlay {
+                    let _ = std::fs::remove_file(path);
+                }
+                return Err(e);
+            }
+        };
+        // 读超时：agent 还没起时不能让 read_line 干等——首启轮询与运行期失败都要有界。
+        stream
+            .set_read_timeout(Some(Duration::from_secs(10)))
+            .map_err(|e| format!("给 QGA 通道设读超时失败：{}", e))?;
         let writer = stream.try_clone().map_err(|e| e.to_string())?;
         let mut handle = QemuHandle {
             child: Some(child),
             reader: BufReader::new(stream),
             writer,
+            seed,
+            overlay,
         };
+        // agent 要等内核起来才通；投种子时（首启装 agent）不等，交给编排轮询，其余情况先等到就绪再挂载/回命令。
+        if spec.seed.is_none() {
+            let deadline = Instant::now() + Duration::from_secs(300);
+            loop {
+                if handle.ping() {
+                    break;
+                }
+                if Instant::now() >= deadline {
+                    handle.stop();
+                    return Err("等 guest 里的 qemu-guest-agent 超时".to_string());
+                }
+                std::thread::sleep(Duration::from_secs(1));
+            }
+        }
         // QEMU 只把额外共享接进来，不替 guest 挂：接上 QGA 后按共享计划逐个挂到 guest 路径。
         for script in &share.guest_scripts {
             let out = handle.exec(&GuestRun {
@@ -182,6 +302,94 @@ impl VmEngine for QemuEngine {
         }
         Ok(Box::new(handle))
     }
+}
+
+/// 目的：便携 QEMU 的固件目录——可执行文件的 `bin/` 的兄弟 `share/qemu`（存在才算）。
+fn firmware_dir(exe: &str) -> Option<PathBuf> {
+    let bin = Path::new(exe).parent()?;
+    let dir = bin.parent()?.join("share").join("qemu");
+    if dir.is_dir() {
+        Some(dir)
+    } else {
+        None
+    }
+}
+
+/// 目的：可写层文件名——租约名可能含路径分隔符或怪字符，这里只留字母数字与 `-_.`。
+fn lease_file_name(lease: &str) -> String {
+    lease
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.') {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
+/// 目的：把镜像的根换成可写层（None = 原样）；有效启动规格由它派生。
+fn with_overlay(image: &GuestImage, overlay: Option<&Path>) -> GuestImage {
+    let mut out = image.clone();
+    if let Some(path) = overlay {
+        out.root = GuestRoot::Disk(path.to_path_buf());
+    }
+    out
+}
+
+/// 目的：基础镜像的格式——qemu-img 建可写层要显式给 `-F`，否则 raw（ext4 这类）会被按扩展名猜错。
+fn backing_format(base: &Path) -> &'static str {
+    let ext = base
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|s| s.to_ascii_lowercase());
+    match ext.as_deref() {
+        Some("qcow2") => "qcow2",
+        _ => "raw",
+    }
+}
+
+/// 目的：同目录的 qemu-img 可执行文件名（便携包里与 qemu-system-* 并排）。
+fn qemu_img_for(engine_exe: &str) -> String {
+    let name = if cfg!(windows) {
+        "qemu-img.exe"
+    } else {
+        "qemu-img"
+    };
+    match Path::new(engine_exe).parent() {
+        Some(dir) if !dir.as_os_str().is_empty() => dir.join(name).to_string_lossy().into_owned(),
+        _ => name.to_string(),
+    }
+}
+
+/// 目的：在基础镜像上建一份每租约可写层（qcow2 覆盖）。
+/// 约束：base 转绝对路径——覆盖文件里的后备路径是相对**覆盖文件所在目录**解析的。
+fn create_overlay(engine_exe: &str, base: &Path, overlay: &Path) -> Result<(), String> {
+    let base_abs =
+        std::path::absolute(base).map_err(|e| format!("基础镜像路径取绝对失败：{}", e))?;
+    let out = Command::new(qemu_img_for(engine_exe))
+        .arg("create")
+        .arg("-f")
+        .arg("qcow2")
+        .arg("-b")
+        .arg(&base_abs)
+        .arg("-F")
+        .arg(backing_format(base))
+        .arg(overlay)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .map_err(|e| format!("起不了 qemu-img（{}）：{}", qemu_img_for(engine_exe), e))?;
+    if !out.status.success() {
+        return Err(format!(
+            "建可写层失败：{}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        ));
+    }
+    Ok(())
 }
 
 fn connect_within(port: u16, budget: Duration) -> Result<TcpStream, String> {
@@ -203,9 +411,109 @@ struct QemuHandle {
     child: Option<Child>,
     reader: BufReader<TcpStream>,
     writer: TcpStream,
+    /// 首启种子服务；正常会话启动是 None。
+    seed: Option<SeedServer>,
+    /// 每租约可写层文件；stop / Drop 时删掉（删会话即丢写层）。
+    overlay: Option<PathBuf>,
+}
+
+/// 目的：首启种子的小 HTTP 服务（cloud-init NoCloud net）——只在这次 boot 期间活着，随 guest 一起收掉。
+struct SeedServer {
+    server: std::sync::Arc<tiny_http::Server>,
+    thread: Option<std::thread::JoinHandle<()>>,
+    port: u16,
+}
+
+impl SeedServer {
+    /// 目的：绑 127.0.0.1 的随机端口起服务；路径只认 `/user-data` 与 `/meta-data`，其余 404。
+    fn start(docs: &SeedDocs) -> Result<SeedServer, String> {
+        let server = std::sync::Arc::new(
+            tiny_http::Server::http("127.0.0.1:0")
+                .map_err(|e| format!("种子服务占不到端口：{}", e))?,
+        );
+        let port = server
+            .server_addr()
+            .to_ip()
+            .map(|a| a.port())
+            .ok_or_else(|| "种子服务没有 TCP 端口".to_string())?;
+        let user_data = docs.user_data.clone();
+        let meta_data = docs.meta_data.clone();
+        let worker = std::sync::Arc::clone(&server);
+        let thread = std::thread::spawn(move || {
+            for req in worker.incoming_requests() {
+                let path = req.url().split(['?', '#']).next().unwrap_or("").to_string();
+                let resp = match path.as_str() {
+                    "/user-data" => tiny_http::Response::from_string(user_data.clone()),
+                    "/meta-data" => tiny_http::Response::from_string(meta_data.clone()),
+                    _ => tiny_http::Response::from_string("").with_status_code(404),
+                };
+                let _ = req.respond(resp);
+            }
+        });
+        Ok(SeedServer {
+            server,
+            thread: Some(thread),
+            port,
+        })
+    }
+
+    /// 目的：cloud-init NoCloud net 的种子 URL（guest 经 slirp 的 10.0.2.2 访问宿主）。
+    fn url(&self) -> String {
+        format!("http://10.0.2.2:{}/", self.port)
+    }
+
+    /// 目的：停服务并等线程退出（幂等）。
+    fn stop(&mut self) {
+        self.server.unblock();
+        if let Some(t) = self.thread.take() {
+            let _ = t.join();
+        }
+    }
+}
+
+impl Drop for SeedServer {
+    fn drop(&mut self) {
+        self.stop();
+    }
 }
 
 impl QemuHandle {
+    /// 目的：优雅收尾——请 guest 自己断电，**等它落盘退出**（超时才杀）；再收种子服务与可写层。
+    /// 约束：guest-shutdown 是异步的——不等它，guest 里刚要落盘的元数据（如刚建的 python 符号链接）会丢。
+    fn shutdown_and_wait(&mut self) {
+        let asked = self
+            .send(&serde_json::json!({"execute":"guest-shutdown"}))
+            .is_ok();
+        if let Some(mut s) = self.seed.take() {
+            s.stop();
+        }
+        if let Some(mut c) = self.child.take() {
+            let mut waited = false;
+            if asked {
+                let deadline = Instant::now() + Duration::from_secs(8);
+                loop {
+                    match c.try_wait() {
+                        Ok(Some(_)) => {
+                            waited = true;
+                            break;
+                        }
+                        Ok(None) if Instant::now() < deadline => {
+                            std::thread::sleep(Duration::from_millis(100));
+                        }
+                        _ => break,
+                    }
+                }
+            }
+            if !waited {
+                let _ = c.kill();
+                let _ = c.wait();
+            }
+        }
+        if let Some(path) = self.overlay.take() {
+            let _ = std::fs::remove_file(&path);
+        }
+    }
+
     fn send(&mut self, v: &serde_json::Value) -> Result<(), String> {
         let mut line = v.to_string();
         line.push('\n');
@@ -264,6 +572,11 @@ impl QemuHandle {
 }
 
 impl GuestChannel for QemuHandle {
+    /// 目的：QGA 就绪探测——同步握手能过一次就算通道已就绪（读超时保证有界）。
+    fn ping(&mut self) -> bool {
+        self.sync().is_ok()
+    }
+
     fn exec(&mut self, run: &GuestRun) -> ToolOutcome {
         if let Err(why) = self.sync() {
             return fail(&why);
@@ -430,11 +743,14 @@ impl GuestVm for QemuHandle {
     }
 
     fn stop(&mut self) {
-        let _ = self.send(&serde_json::json!({"execute":"guest-shutdown"}));
-        if let Some(mut c) = self.child.take() {
-            let _ = c.kill();
-            let _ = c.wait();
-        }
+        self.shutdown_and_wait();
+    }
+}
+
+impl Drop for QemuHandle {
+    /// 目的：兜底收尾——种子服务、QEMU 进程与可写层都不能因为提前 drop 而漏掉；同样先请 guest 优雅断电。
+    fn drop(&mut self) {
+        self.shutdown_and_wait();
     }
 }
 
@@ -501,4 +817,132 @@ fn unb64(s: &str) -> Vec<u8> {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 目的：便携包的固件目录认 `bin/` 的兄弟 `share/qemu`；没有就给 None（不瞎指）。
+    #[test]
+    fn firmware_dir_is_beside_bin() {
+        let root = crate::tests::scratch("qemu-fw");
+        std::fs::create_dir_all(root.join("bin")).expect("建 bin");
+        std::fs::create_dir_all(root.join("share").join("qemu")).expect("建固件目录");
+        let exe = root.join("bin").join("qemu-system-x86_64");
+        let fw = firmware_dir(&exe.to_string_lossy()).expect("有固件目录");
+        assert_eq!(fw, root.join("share").join("qemu"));
+        assert!(
+            firmware_dir("/nonexistent/bin/qemu-system-x86_64").is_none(),
+            "没有固件目录就不能瞎指 -L"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// 目的：首启种子服务只认 `/user-data` 与 `/meta-data`，其余 404；是真的本机 HTTP。
+    #[test]
+    fn seed_server_serves_cloud_init_documents() {
+        fn http_get(port: u16, path: &str) -> (u16, String) {
+            use std::io::{Read, Write};
+            let mut s = std::net::TcpStream::connect(("127.0.0.1", port)).expect("连种子服务");
+            s.set_read_timeout(Some(Duration::from_secs(3)))
+                .expect("读超时");
+            write!(s, "GET {} HTTP/1.0\r\nHost: x\r\n\r\n", path).expect("写请求");
+            let mut buf = String::new();
+            let _ = s.read_to_string(&mut buf);
+            let status = buf
+                .split_whitespace()
+                .nth(1)
+                .and_then(|c| c.parse().ok())
+                .unwrap_or(0);
+            let body = buf.split("\r\n\r\n").nth(1).unwrap_or("").to_string();
+            (status, body)
+        }
+        let mut server = SeedServer::start(&SeedDocs {
+            user_data: "#cloud-config\nruncmd: [true]\n".to_string(),
+            meta_data: "instance-id: t\n".to_string(),
+        })
+        .expect("起种子服务");
+        assert!(
+            server.url().starts_with("http://10.0.2.2:"),
+            "{}",
+            server.url()
+        );
+        let (s1, b1) = http_get(server.port, "/user-data");
+        assert_eq!(s1, 200);
+        assert!(b1.contains("#cloud-config"), "{}", b1);
+        let (s2, b2) = http_get(server.port, "/meta-data");
+        assert_eq!(s2, 200);
+        assert!(b2.contains("instance-id"), "{}", b2);
+        let (s3, _) = http_get(server.port, "/nope");
+        assert_eq!(s3, 404);
+        server.stop();
+    }
+
+    /// 目的：有种子就给 -smbios 数据源指路；没有种子就不给。
+    #[test]
+    fn seed_url_adds_smbios_datasource() {
+        let image = GuestImage::linux(
+            "t",
+            GuestRoot::Disk(std::path::PathBuf::from("/img/root.qcow2")),
+            None,
+            None,
+        );
+        let spec = GuestSpec {
+            lease: "w".to_string(),
+            image,
+            mounts: Vec::new(),
+            net: true,
+            engine_path: None,
+            share_path: None,
+            seed: None,
+            isolated: false,
+        };
+        let with = engine_args(&spec, "opts", false, false, Some("http://10.0.2.2:9/"), &[]);
+        assert!(
+            with.windows(2)
+                .any(|w| w[0] == "-smbios" && w[1].contains("ds=nocloud-net;s=http://10.0.2.2:9/")),
+            "{:?}",
+            with
+        );
+        let without = engine_args(&spec, "opts", false, false, None, &[]);
+        assert!(!without.iter().any(|a| a == "-smbios"), "{:?}", without);
+    }
+
+    /// 目的：有可写层就把镜像的根换成它（内核仍取自基础根）；没有就原样。
+    #[test]
+    fn overlay_replaces_the_disk_root() {
+        let base = std::path::PathBuf::from("/img/root.qcow2");
+        let kernel = std::path::PathBuf::from("/img/vmlinuz");
+        let image = GuestImage::linux(
+            "t",
+            GuestRoot::Disk(base.clone()),
+            Some(kernel.clone()),
+            None,
+        );
+        let with = with_overlay(&image, Some(Path::new("/ov/x.qcow2")));
+        assert_eq!(
+            with.root,
+            GuestRoot::Disk(std::path::PathBuf::from("/ov/x.qcow2"))
+        );
+        assert_eq!(with.kernel, Some(kernel), "内核仍取自基础根");
+        assert_eq!(with_overlay(&image, None).root, GuestRoot::Disk(base));
+    }
+
+    /// 目的：后备格式按扩展名认——qcow2 是 qcow2，ext4 / raw 这类按 raw（否则 qemu-img 会猜错）。
+    #[test]
+    fn backing_format_reads_the_extension() {
+        assert_eq!(backing_format(Path::new("/x/rootfs.qcow2")), "qcow2");
+        assert_eq!(backing_format(Path::new("/x/ROOTFS.QCOW2")), "qcow2");
+        assert_eq!(backing_format(Path::new("/x/rootfs.ext4")), "raw");
+        assert_eq!(backing_format(Path::new("/x/disk")), "raw");
+    }
+
+    /// 目的：可写层文件名不把租约名里的路径分隔符带进目录（否则会写到别的目录去）。
+    #[test]
+    fn overlay_file_name_is_safe() {
+        assert_eq!(lease_file_name("demo-1"), "demo-1");
+        assert_eq!(lease_file_name("a/b\\c"), "a_b_c");
+        assert_eq!(lease_file_name("会话"), "__");
+    }
 }

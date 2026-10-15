@@ -11,27 +11,42 @@ impl Conductor {
     /// 运行能力报告：模块声明的能力、包库里的可用版本、缺失清单与虚拟机档诊断。
     /// 「清单即事实」：每次调用重扫模块清单与包库；本机档不装载运行包，missing 只作事实呈现。
     pub fn runtime_report(&self, tier: crate::kernel::api::Tier) -> RuntimeReport {
-        let roster = self.modules.roster();
-        let lib = self.vm.library();
-        let spec = crate::kernel::api::ExecSpec {
+        self.runtime_report_for(&crate::kernel::api::ExecSpec {
             tier,
             ..crate::kernel::api::ExecSpec::default()
-        };
-        let diagnoses = if tier == crate::kernel::api::Tier::Vm {
-            crate::capabilities::vm::api::vm_diagnoses(&roster.modules, &lib, &spec)
+        })
+    }
+
+    /// 目的：这份执行规格下的运行能力报告——会话配置用（base 在场时把 guest 自带的运行能力并进来）。
+    pub(crate) fn runtime_report_for(&self, spec: &crate::kernel::api::ExecSpec) -> RuntimeReport {
+        let roster = self.modules.roster();
+        let lib = self.vm.library();
+        let guest_runtimes = self.guest_runtimes_of(spec);
+        let vm = spec.tier == crate::kernel::api::Tier::Vm;
+        let diagnoses = if vm {
+            crate::capabilities::vm::api::vm_diagnoses(&roster.modules, &lib, spec, &guest_runtimes)
         } else {
             Vec::new()
         };
+        // 「缺什么」按**这份规格**算：guest 自带的运行能力不算缺（与 plan / unavailable 同一把尺子）。
+        let mut missing = crate::capabilities::vm::api::absent(&roster.modules, &lib);
+        if vm {
+            for caps in missing.values_mut() {
+                caps.retain(|c| !guest_runtimes.iter().any(|g| g == c));
+            }
+            missing.retain(|_, caps| !caps.is_empty());
+        }
         let readiness = crate::capabilities::vm::api::tier_readiness(
-            &spec,
+            spec,
             self.qemu_path(),
+            self.share_tool_path(),
             self.probe.as_ref(),
         );
         RuntimeReport {
-            tier: tier.as_str().to_string(),
+            tier: spec.tier.as_str().to_string(),
             declared: crate::capabilities::vm::api::declared(&roster.modules),
             available: lib.capability_versions(),
-            missing: crate::capabilities::vm::api::absent(&roster.modules, &lib),
+            missing,
             diagnoses,
             tier_ready: readiness.ready(),
             tier_missing: readiness.missing().iter().map(|s| s.to_string()).collect(),
@@ -40,36 +55,32 @@ impl Conductor {
         }
     }
 
+    /// 目的：这份规格的 guest 镜像自带哪些运行能力（本机档或判不出来 = 空）。
+    fn guest_runtimes_of(&self, spec: &crate::kernel::api::ExecSpec) -> Vec<String> {
+        self.guest_image_of(spec)
+            .map(|image| image.runtimes)
+            .unwrap_or_default()
+    }
+
     /// 新建工作的**档位选择**（默认档 + 虚拟机档可用性与逐项前置）：与「开始」的校验同源。
     /// 为什么单独一条读面：创建向导还没有 sid，拿不到会话配置视图；而设置里的默认档与
     /// 虚拟机档的承载探针是**与某条会话无关**的事实。
     pub fn tier_choices(&self) -> TierChoices {
         let default = self.registry.app().tier;
-        // 裸虚拟机档探针：基础根属于会话选型（在会话的 exec 段里），创建时还没填，按未指定探。
-        let vm_probe = crate::kernel::api::ExecSpec {
-            tier: crate::kernel::api::Tier::Vm,
-            ..crate::kernel::api::ExecSpec::default()
-        };
+        // 这是**与某条会话无关**的机器能力：base 属于会话选型，不在这里判（创建时另行收集）。
         let inputs = crate::capabilities::vm::api::VmInputs {
-            base: vm_probe.base.as_deref(),
             qemu: self.qemu_path(),
+            share_tool: self.share_tool_path(),
             probe: self.probe.as_ref(),
         };
+        let cap = crate::capabilities::vm::api::vm_capability(&inputs);
+        let available = cap.ready();
         TierChoices {
             default: default.as_str().to_string(),
-            vm_available: crate::capabilities::vm::api::tier_readiness(
-                &vm_probe,
-                self.qemu_path(),
-                self.probe.as_ref(),
-            )
-            .ready(),
-            vm_unavailable_reason: crate::capabilities::vm::api::tier_refusal(
-                &vm_probe,
-                self.qemu_path(),
-                self.probe.as_ref(),
-            )
-            .unwrap_or_default(),
-            vm_requirements: crate::capabilities::vm::api::vm_requirements(&inputs),
+            vm_available: available,
+            vm_unavailable_reason: crate::capabilities::vm::api::capability_refusal(&inputs)
+                .unwrap_or_default(),
+            vm_requirements: cap.requirements,
         }
     }
 
@@ -94,6 +105,21 @@ impl Conductor {
         self.guest_image_of(spec)
             .map(|image| crate::capabilities::vm::api::guest_platform(image.os, image.arch))
             .unwrap_or_default()
+    }
+
+    /// 目的：这场会话的路径翻译器（虚拟机档 guest↔宿主；本机档 None = 恒等）。
+    /// 约束：它只把模型给的写法译成宿主路径**再送寻址**；安全判断仍在 `workspace::Sandbox::resolve`。
+    pub(crate) fn path_codec_of(
+        &self,
+        spec: &crate::kernel::api::ExecSpec,
+    ) -> Option<std::sync::Arc<dyn crate::kernel::ports::PathCodec>> {
+        let guest = self.guest_os_of(spec)?;
+        Some(std::sync::Arc::new(
+            crate::capabilities::vm::api::PathBridge::for_session(
+                std::env::consts::OS,
+                Some(guest.dialect()),
+            ),
+        ))
     }
 
     /// 目的：这次虚拟机档会话的 guest OS（本机档或判不出来 = None）——工作环境块按它选 guest 档。
@@ -122,7 +148,8 @@ impl Conductor {
         modules: &[Module],
     ) -> BTreeMap<String, Vec<String>> {
         let lib = self.library_for(spec);
-        crate::capabilities::vm::api::unavailable(spec, modules, &lib)
+        let guest_runtimes = self.guest_runtimes_of(spec);
+        crate::capabilities::vm::api::unavailable(spec, modules, &lib, &guest_runtimes)
     }
 
     /// 目的：**当前设置档位**下不能执行工具的模块（人直接跑与动作目录共用）：本机档不装载运行包，一律可用。
@@ -141,12 +168,17 @@ impl Conductor {
     pub fn session_config(&self, sid: &str) -> Result<SessionConfig, String> {
         let (meta, events) = self.history_open(sid)?;
         let tier = meta.exec.tier;
-        // 虚拟机档的承载探针：用用户填的基础根（若有），否则问"裸虚拟机档"能不能成立。
-        let vm_probe = crate::kernel::api::ExecSpec {
-            tier: crate::kernel::api::Tier::Vm,
-            base: meta.exec.base.clone(),
-            ..crate::kernel::api::ExecSpec::default()
+        // 机器能力（与某条会话无关）：界面据此决定虚拟机档能不能**选**；base 是会话级，另行校验。
+        let inputs = crate::capabilities::vm::api::VmInputs {
+            qemu: self.qemu_path(),
+            share_tool: self.share_tool_path(),
+            probe: self.probe.as_ref(),
         };
+        let cap = crate::capabilities::vm::api::vm_capability(&inputs);
+        let vm_available = cap.ready();
+        let vm_reason =
+            crate::capabilities::vm::api::capability_refusal(&inputs).unwrap_or_default();
+        let vm_requirements = cap.requirements;
         Ok(SessionConfig {
             sid: meta.name.clone(),
             mode: meta.mode.clone(),
@@ -166,17 +198,19 @@ impl Conductor {
             base: meta.exec.base.clone(),
             net: meta.exec.net,
             pins: meta.exec.pins.clone(),
-            runtime: self.runtime_report(tier),
+            runtime: self.runtime_report_for(&meta.exec),
             runtimes_dir: crate::kernel::api::slash(&self.vm.runtimes_dir()),
             tier_ready: crate::capabilities::vm::api::tier_readiness(
                 &meta.exec,
                 self.qemu_path(),
+                self.share_tool_path(),
                 self.probe.as_ref(),
             )
             .ready(),
             tier_missing: crate::capabilities::vm::api::tier_readiness(
                 &meta.exec,
                 self.qemu_path(),
+                self.share_tool_path(),
                 self.probe.as_ref(),
             )
             .missing()
@@ -185,25 +219,9 @@ impl Conductor {
             .collect(),
             // 虚拟机档能不能选**与当前档位无关**：本机档会话也要如实告诉用户 vm 现在不可用（界面据此禁用）。
             // 逐项清单一起给出：界面照抄"缺哪几项、每项怎么补"，不自己编话。
-            vm_available: crate::capabilities::vm::api::tier_readiness(
-                &vm_probe,
-                self.qemu_path(),
-                self.probe.as_ref(),
-            )
-            .ready(),
-            vm_unavailable_reason: crate::capabilities::vm::api::tier_refusal(
-                &vm_probe,
-                self.qemu_path(),
-                self.probe.as_ref(),
-            )
-            .unwrap_or_default(),
-            vm_requirements: crate::capabilities::vm::api::vm_requirements(
-                &crate::capabilities::vm::api::VmInputs {
-                    base: vm_probe.base.as_deref(),
-                    qemu: self.qemu_path(),
-                    probe: self.probe.as_ref(),
-                },
-            ),
+            vm_available,
+            vm_unavailable_reason: vm_reason,
+            vm_requirements,
         })
     }
 
@@ -318,6 +336,7 @@ impl Conductor {
             let base_item = crate::capabilities::vm::api::tier_readiness(
                 &spec,
                 self.qemu_path(),
+                self.share_tool_path(),
                 self.probe.as_ref(),
             )
             .requirements
@@ -328,9 +347,12 @@ impl Conductor {
                     return Err(format!("{}：{}", item.detail, item.how));
                 }
             }
-        } else if let Some(why) =
-            crate::capabilities::vm::api::tier_refusal(&spec, self.qemu_path(), self.probe.as_ref())
-        {
+        } else if let Some(why) = crate::capabilities::vm::api::tier_refusal(
+            &spec,
+            self.qemu_path(),
+            self.share_tool_path(),
+            self.probe.as_ref(),
+        ) {
             return Err(why);
         }
         let session_modules: Vec<Module> = roster
@@ -339,9 +361,13 @@ impl Conductor {
             .filter(|m| seen.iter().any(|id| id == &m.manifest.id))
             .cloned()
             .collect();
-        let plan =
-            crate::capabilities::vm::api::plan(&spec, &session_modules, &self.library_for(&spec))
-                .map_err(|diags| crate::capabilities::vm::api::diagnose_text(&diags))?;
+        let plan = crate::capabilities::vm::api::plan(
+            &spec,
+            &session_modules,
+            &self.library_for(&spec),
+            &self.guest_runtimes_of(&spec),
+        )
+        .map_err(|diags| crate::capabilities::vm::api::diagnose_text(&diags))?;
         self.log.info(
             "conductor::edit_session",
             &format!(
@@ -401,6 +427,12 @@ impl Conductor {
         plan: &crate::capabilities::vm::api::ExecPlan,
         sandboxes: &crate::capabilities::workspace::api::Sandboxes,
     ) -> Result<(), String> {
+        // 并发闸门：每台 guest 固定 -m 2048 -smp 2，按设置里的上限如实拒绝（同一租约重启不占新名额）。
+        crate::capabilities::vm::api::admit_guest(
+            &self.vm.guest_leases(),
+            &meta.name,
+            self.registry.app().max_guests,
+        )?;
         let base_path = meta.exec.base.clone().unwrap_or_default();
         let image = crate::capabilities::vm::api::classify_base(
             std::path::Path::new(&base_path),
@@ -435,6 +467,10 @@ impl Conductor {
             mounts,
             net: meta.exec.net,
             engine_path: self.qemu_path().map(str::to_string),
+            share_path: self.share_tool_path().map(str::to_string),
+            seed: None,
+            // 会话要每租约可写层：多台并发不能同写一份基础镜像。
+            isolated: true,
         };
         self.vm.guest_start(&spec)
     }
@@ -481,13 +517,43 @@ impl Conductor {
         }
     }
 
-    /// 设置里登记的 QEMU 可执行文件路径（默认空 = 兜底看 PATH）。产品不自带、不下载 QEMU。
+    /// 设置里登记的 QEMU 可执行文件路径（默认空 = 兜底看 PATH，或由 provision 能力装进项目内）。
     pub(crate) fn qemu_path(&self) -> Option<&str> {
         let p = self.registry.app().qemu_path.trim();
         if p.is_empty() {
             None
         } else {
             Some(p)
+        }
+    }
+
+    /// 目的：设置里登记的 virtiofs 守护进程路径（默认空 = 兜底看 PATH，或由 provision 能力装进项目内）。
+    pub(crate) fn virtiofsd_path(&self) -> Option<&str> {
+        let p = self.registry.app().virtiofsd_path.trim();
+        if p.is_empty() {
+            None
+        } else {
+            Some(p)
+        }
+    }
+
+    /// 目的：设置里登记的 SMB helper 路径（默认空 = 兜底看 PATH，或由 provision 能力装进项目内）。
+    pub(crate) fn smbd_path(&self) -> Option<&str> {
+        let p = self.registry.app().smbd_path.trim();
+        if p.is_empty() {
+            None
+        } else {
+            Some(p)
+        }
+    }
+
+    /// 目的：本平台共享档要用的外部工具路径（Windows = smbd；其余 = virtiofsd）；都不在场给 None。
+    /// 约束：组合选择与就绪检测共用这一份，避免"说要验 A、实际跑 B"。
+    pub(crate) fn share_tool_path(&self) -> Option<&str> {
+        if cfg!(windows) {
+            self.smbd_path()
+        } else {
+            self.virtiofsd_path()
         }
     }
 
@@ -545,6 +611,7 @@ impl Conductor {
                 let readiness = crate::capabilities::vm::api::tier_readiness(
                     &exec,
                     self.qemu_path(),
+                    self.share_tool_path(),
                     self.probe.as_ref(),
                 );
                 // 「改需求」能力位：有本次需求行才给。在表里看会话种类；不在表里（生成中/未打开）
@@ -721,6 +788,7 @@ impl Conductor {
             // 档位来自**用户在创建向导里的选择**（默认 = 设置里的档位）；承载不了由下面如实拒绝。
             exec: crate::kernel::api::ExecSpec {
                 tier: spec.tier,
+                base: spec.base.clone(),
                 ..crate::kernel::api::ExecSpec::default()
             },
             run: RunState::Active,
@@ -730,6 +798,7 @@ impl Conductor {
         if let Some(why) = crate::capabilities::vm::api::tier_refusal(
             &meta.exec,
             self.qemu_path(),
+            self.share_tool_path(),
             self.probe.as_ref(),
         ) {
             return Err(why);
@@ -738,7 +807,7 @@ impl Conductor {
         // （失败即失败，不假装已建；代拟确认名单时再补建。）
         self.workspace.prepare(&root, &agent_names)?;
         let sandboxes = self.sandboxes(&meta, &roster)?;
-        // 扫描事实如实埋点：本会话用到的模块里，哪些声明的运行包不在包库（缺包不等于崩溃，工具按档位不可用）。
+        // 扫描事实如实埋点：本会话用到的模块里，哪些声明的运行包不在包库（缺包同样会在下面按计划拒绝，文件与 guest 声明都看）。
         let session_modules: Vec<Module> = roster
             .modules
             .iter()
@@ -753,11 +822,12 @@ impl Conductor {
             );
         }
         // 执行选型的完整性检查（「开始」即冻结）：虚拟机档的选型不成立（多版本未定版 / 定版不存在 /
-        // 路径冲突）如实拒绝；只是缺包的照常开始——那是该模块的工具不可用（降级而非崩溃）。装配阶段按同一份计划取包。
+        // 路径冲突）如实拒绝；**缺包同样拒绝**（没有工具用户完不成工作，不降级）。装配阶段按同一份计划取包。
         let plan = crate::capabilities::vm::api::plan(
             &meta.exec,
             &session_modules,
             &self.library_for(&meta.exec),
+            &self.guest_runtimes_of(&meta.exec),
         )
         .map_err(|diags| crate::capabilities::vm::api::diagnose_text(&diags))?;
         self.log.info(

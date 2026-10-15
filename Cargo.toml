@@ -14,10 +14,12 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tiny_http = "0.12"
 yaml_serde = "0.10"
-# 跨平台解包（setup-vm-*.js 用；纯 Rust，不依赖用户装了什么解压工具）：tar 容器 + zstd / gzip 解码。
+# 跨平台解包（provision 能力用它解归档；纯 Rust，不依赖用户装了什么解压工具）：tar 容器 + zstd / gzip 解码。
 tar = "0.4"
 ruzstd = "0.9"
 flate2 = "1"
+zip = { version = "9.0.3", default-features = false, features = ["deflate"] }
+lzma-rs = "0.3.0"
 
 [target.'cfg(windows)'.dependencies]
 # Windows：TLS 走系统 schannel（native-tls），避开 ring 的 C 编译器依赖（GNU 工具链无 gcc 时构建失败）。

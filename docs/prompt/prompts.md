@@ -2,7 +2,7 @@
 
 > 本文是**提示词册结构与键清单的唯一权威**：每份文件里有什么键、每个键干什么。
 > 规则（谁写、占位符、缺键报错、什么不进册子）见 [ARCHITECTURE.md](../../ARCHITECTURE.md) 的「五、提示词册」；
-> "哪个角色用哪份提示词、拿哪些工具"见 [tools-and-roles.md](../tools/tools-and-roles.md) 四；
+> "哪个角色用哪份提示词、拿哪些工具"见 [tools-and-roles.md](../tools/tools-and-roles.md) 的「提示词按角色分配」；
 > 模块自己的职责提示词（`module.yaml` 的 `system`）见 [MODULE_SPEC.md](../../MODULE_SPEC.md)。
 
 **当前状态：已落地。** 册子按**共享 / 角色**两个目录切分；加载经 `PromptSource` 端口（`capabilities/prompt/ports.rs`，实现在 `capabilities/prompt/detail/yaml_prompts.rs`），
@@ -15,7 +15,7 @@
 | --- | --- | --- |
 | `shared/mechanisms.yaml` | `session_kinds` / `mechanisms[].session` / `mechanisms[].roles` / `mechanisms[].text` | **机制说明按（会话使用类型 × 适用角色）分发**：一个会话的身份块把**同时**匹配它类型与角色的条目按声明顺序拼起来（`{{mechanism}}`）。`session_kinds` 是类型全表，`roles` 校验落在角色表（`systools/roles.yaml`）——对应关系全在数据里，代码只做匹配（`CoreTexts::mechanisms_for`） |
 | `shared/protocol.yaml` | `chat_protocol` | 讨论约定（讨论席与执行席一起注入，可自由演化） |
-| `shared/tools.yaml` | `env_hosts` / `env_guests` / `envs[].host\|guest\|text` | **工作环境按环境分发**：本机档按宿主平台（`env_hosts`：linux / windows / macos），虚拟机档按 guest 的 os（`env_guests`）；每条只写 host 或 guest 之一，装载时校验全表覆盖（不静默漏发一份环境）。文本变量：work_name / agent / work_root / sandbox_root / module_roots——虚拟机档给的是 **guest 内路径** |
+| `shared/tools.yaml` | `env_hosts` / `env_guests` / `envs[].host\|guest\|text` | **工作环境按环境分发**：本机档按宿主平台（`env_hosts`：linux / windows / macos），虚拟机档按 guest 的 os（`env_guests`）；每条只写 host 或 guest 之一，装载时校验全表覆盖（不静默漏发一份环境）。文本变量：work_name / agent / work_root / sandbox_root / module_roots / path_rules——虚拟机档给的是 **guest 内路径**；路径规矩只有一处（`texts.yaml` 的 `tool_texts.path_rules`，`env_block` 用它渲染后插进每个环境块） |
 | | `patch_guide` | 自由格式补丁的写法（每块以 `*** End File` 收尾、SEARCH 要整行一致、一次可多块、整体原子） |
 | | `tool_calling_envelope` / `tool_calling_native` | 工具调用约定**两套，互斥**：一个通道只用一套，由通道形态决定注入哪套 |
 | `shared/texts.yaml` | `no_agents` / `no_model` / `no_module_dirs` / `no_module_tools` / `no_module_tool_params` | 空态说法 |
@@ -30,7 +30,7 @@
 | | `verdict.*` | 判定用户那一句是否明确（明确才开工 / 放行，`collab::judge_clear`） |
 | `roles/executor.yaml` | `execute.user` | 执行任务 |
 | `roles/orchestrator.yaml` | `review.system` / `review.user` | 总验收与推进 |
-| `roles/core_proxy.yaml` | `proxy.system` | 核心代理的身份提示词（在用户授予的任务级授权范围内代用户决定与转达；工具面由角色表按回合注入）。代理会话**不是 agent**：它的身份块渲染这一段（`{{mechanism}}` 取 `mechanisms.proxy`，`{{env}}` / `{{tool_calling}}` 与 agent 身份同一份口径，见 `workspace::api::role_system`），不是模块能力包 |
+| `roles/core_proxy.yaml` | `proxy.system` | 核心代理的身份提示词（在用户授予的任务级授权范围内代用户决定与转达；工具面由角色表按回合注入）。代理会话**不是 agent**：它的身份块渲染这一段（`{{mechanism}}` 取 `mechanisms.proxy`，`{{env}}` / `{{tool_calling}}` 与 agent 身份同一份口径，见 session 的角色身份块 `session::domain::session::role_system`），不是模块能力包 |
 
 > `solo`（用户建的单 agent 工作）的工具面**复用 `roles/executor.yaml`**：它不发回报工具，而 `execute.user` 那段
 > 只在协作的派发行上渲染——所以没有第二份文件，也没有复述。

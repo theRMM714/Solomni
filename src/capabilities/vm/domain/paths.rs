@@ -1,9 +1,9 @@
 //! 目的：宿主路径 → guest 路径的桥（纯逻辑）——按 guest 方言给拼法，同方言走恒等。
-//! 管：把宿主路径编成 guest 能用的路径（跨方言时编进镜像根；单射，可逆的编码规则集中在这里）。
-//! 不管：反向解回（有消费点再加）、谁在什么时候用它（挂载 / 命令装配 / 提示词各自调用）、文件是否真存在。
+//! 管：宿主路径与 guest 路径两个方向的互换（跨方言时编进镜像根；单射、可逆的编码规则集中在这里）——系统工具跑在宿主侧，靠反向把模型给的 guest 写法译回宿主路径再校验。
+//! 不管：谁在什么时候用它（挂载 / 命令装配 / 提示词 / 系统工具的寻址各自调用）、文件是否真存在。
 //! 联动：GuestImage 的 os 决定 guest 方言；mounts_from 与命令装配共用同一座桥。
 
-use std::path::{Component, Path};
+use std::path::{Component, Path, PathBuf};
 
 /// 目的：路径方言——决定分隔符与根的写法。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -106,6 +106,104 @@ fn windows_mirror(host: &Path) -> String {
         }
     }
     out
+}
+
+/// 目的：guest 路径 → 宿主路径——`to_guest` 的逆；认不出（不在镜像根里、也不是宿主绝对路径）给 None。
+/// 约束：只做编码逆变换与写法识别，不做安全判断（是否落在允许根内由寻址层判）。
+pub fn guest_to_host(bridge: PathBridge, guest: &str) -> Option<PathBuf> {
+    if bridge.identity {
+        return Some(PathBuf::from(guest));
+    }
+    let mirrored = match bridge.guest {
+        PathDialect::Posix => posix_unmirror(guest),
+        PathDialect::Windows => windows_unmirror(guest),
+    };
+    // 宿主写法直通：系统工具在宿主侧跑，宿主绝对路径本来就成立（提示词教的是 guest 写法，但两种都认）。
+    mirrored.or_else(|| {
+        let p = PathBuf::from(guest);
+        p.is_absolute().then_some(p)
+    })
+}
+
+/// 目的：POSIX guest 的镜像路径解回 Windows 宿主路径（`/solomni-host/d/a/b` → `D:\a\b`）。
+fn posix_unmirror(guest: &str) -> Option<PathBuf> {
+    let rest = guest.strip_prefix(POSIX_MIRROR)?.strip_prefix('/')?;
+    let mut parts = rest.split('/');
+    let drive = parts.next()?;
+    if drive.len() != 1 || !drive.as_bytes()[0].is_ascii_alphabetic() {
+        return None;
+    }
+    let mut out = String::new();
+    out.push_str(&drive.to_ascii_uppercase());
+    out.push(':');
+    for seg in parts {
+        out.push('\\');
+        out.push_str(seg);
+    }
+    Some(PathBuf::from(out))
+}
+
+/// 目的：Windows guest 的镜像路径解回 POSIX 宿主路径（`C:\solomni-host\home\u\a` → `/home/u/a`）。
+/// 约束：走到这里宿主必是 POSIX（同方言时桥是恒等，不会解镜像），所以结果拼成**绝对** POSIX 路径——
+///   逐段 `push` 会得到相对路径，`resolve` 会以「需要绝对路径」拒掉。
+fn windows_unmirror(guest: &str) -> Option<PathBuf> {
+    let rest = guest.strip_prefix(WINDOWS_MIRROR)?;
+    let rest = rest.trim_start_matches('\\');
+    if rest.is_empty() {
+        return None;
+    }
+    let mut segs: Vec<String> = Vec::new();
+    for seg in rest.split('\\') {
+        if seg.is_empty() {
+            continue;
+        }
+        segs.push(win_unescape(seg)?);
+    }
+    if segs.is_empty() {
+        return None;
+    }
+    Some(PathBuf::from(format!("/{}", segs.join("/"))))
+}
+
+/// 目的：`win_escape` 的逆——只认它编过的那几个字符（其它 %XX 一律不认，避免歧义）。
+fn win_unescape(s: &str) -> Option<String> {
+    let mut out = String::new();
+    let mut it = s.chars();
+    while let Some(c) = it.next() {
+        if c != '%' {
+            out.push(c);
+            continue;
+        }
+        let h1 = it.next()?;
+        let h2 = it.next()?;
+        let byte = u8::from_str_radix(&format!("{h1}{h2}"), 16).ok()?;
+        let ch = match byte {
+            b'%' => '%',
+            b':' => ':',
+            b'*' => '*',
+            b'?' => '?',
+            b'"' => '"',
+            b'<' => '<',
+            b'>' => '>',
+            b'|' => '|',
+            b'\\' => '\\',
+            b'/' => '/',
+            _ => return None,
+        };
+        out.push(ch);
+    }
+    Some(out)
+}
+
+/// 目的：这座桥就是本会话的路径翻译器（模型侧 ↔ 宿主），系统工具的寻址按它翻译后再校验。
+impl crate::kernel::ports::PathCodec for PathBridge {
+    fn to_host(&self, raw: &str) -> Option<PathBuf> {
+        guest_to_host(*self, raw)
+    }
+
+    fn to_view(&self, host: &Path) -> String {
+        (*self).to_guest(host)
+    }
 }
 
 /// 目的：把 POSIX 名字里 Windows 不认的字符转义成 %XX（% 自己先转，保证可逆）。

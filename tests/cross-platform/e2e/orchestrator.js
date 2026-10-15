@@ -190,9 +190,14 @@ async function main() {
   fs.mkdirSync(home, { recursive: true });
   // 虚拟机档真机验收：QEMU 路径由环境变量给（机器相关，不写进仓库），起服务前落进 settings.yaml。
   const vmQemu = process.env.SOLOMNI_VM_QEMU || "";
-  if (vmQemu) {
-    fs.writeFileSync(path.join(home, "settings.yaml"), "qemu_path: " + JSON.stringify(vmQemu) + "\n");
-    console.log("[e2e] 已登记 qemu_path：" + vmQemu);
+  const vmVirtiofsd = process.env.SOLOMNI_VM_VIRTIOFSD || "";
+  if (vmQemu || vmVirtiofsd) {
+    const lines = [];
+    if (vmQemu) lines.push("qemu_path: " + JSON.stringify(vmQemu));
+    if (vmVirtiofsd) lines.push("virtiofsd_path: " + JSON.stringify(vmVirtiofsd));
+    fs.writeFileSync(path.join(home, "settings.yaml"), lines.join("\n") + "\n");
+    if (vmQemu) console.log("[e2e] 已登记 qemu_path：" + vmQemu);
+    if (vmVirtiofsd) console.log("[e2e] 已登记 virtiofsd_path：" + vmVirtiofsd);
   }
   fs.rmSync(path.join(FIXTURE, "modules", "toolbox", "userdata"), { recursive: true, force: true });
 

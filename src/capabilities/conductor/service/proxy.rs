@@ -537,9 +537,12 @@ impl Conductor {
             ..ExecSpec::default()
         };
         // 与其余形态同一把尺子：虚拟机档的承载不成立就不建（用户环境问题，不是选型问题）。
-        if let Some(why) =
-            crate::capabilities::vm::api::tier_refusal(&exec, self.qemu_path(), self.probe.as_ref())
-        {
+        if let Some(why) = crate::capabilities::vm::api::tier_refusal(
+            &exec,
+            self.qemu_path(),
+            self.share_tool_path(),
+            self.probe.as_ref(),
+        ) {
             return Err(why);
         }
         let meta = SessionMeta {
@@ -590,6 +593,8 @@ impl Conductor {
                 ..self.registry.app().permissions.clone()
             },
             texts: self.prompt.tools(),
+            // 代理发言席自己住在宿主上（文件工具也跑在宿主），不需要 guest 翻译。
+            path_codec: None,
         };
         let channel = self.registry.core_channel();
         let tool_mode = if channel.is_some() {

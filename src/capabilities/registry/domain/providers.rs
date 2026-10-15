@@ -58,10 +58,22 @@ pub struct AppSettings {
     /// 授权落在用户自己的目录上；本程序只加只读 ACE，不给写权限。
     #[serde(default)]
     pub fence_read: Vec<String>,
-    /// 虚拟机档用的 QEMU 可执行文件路径（用户自备；默认空 = 兜底看 PATH）。
-    /// 产品不自带、不下载 QEMU，只检测与指路。
+    /// 虚拟机档用的 QEMU 可执行文件路径（默认空 = 兜底看 PATH，或由 setup 脚本装进项目内）。
+    /// 依赖不预置、不分发；setup 脚本按平台下载进项目内，产品检测与指路。
     #[serde(default)]
     pub qemu_path: String,
+    /// 目的：虚拟机档**共享后端**要用的外部工具路径（如 Linux 上的 virtiofsd；默认空 = 兜底看 PATH）。
+    /// 约束：依赖不预置、不分发，由 provision 能力按清单装进项目内；不需要外部工具的共享档（9p / 复制）忽略它。
+    #[serde(default)]
+    pub virtiofsd_path: String,
+    /// 目的：虚拟机档 **smb 共享档**要用的外部 helper 路径（用户态 SMB 服务；默认空 = 兜底看 PATH）。
+    /// 约束：不预置、不分发，由 provision 能力按清单装进项目内；只有 smb 共享档用它。
+    #[serde(default)]
+    pub smbd_path: String,
+    /// 目的：虚拟机档同时最多几台 guest（0 = 不限制）。
+    /// 约束：每台固定 `-m 2048 -smp 2`；同时开太多会把宿主的 CPU / 内存吃光。默认 2，见 docs/vm/README.md 的「并发」。
+    #[serde(default = "default_max_guests")]
+    pub max_guests: u32,
     /// **单次模型调用的总预算（秒）**，全局通用（讨论、执行、验收、单 agent 都用它）。
     /// 默认给得比较宽：非流式下供应商要等整段生成完才发响应头，长回复本来就要几十秒；
     /// 预算用尽 = 中断这一轮并如实告知（用户可以点「继续」重试），不是把会话作废。
@@ -85,6 +97,11 @@ fn default_discuss_remind_cap() -> u32 {
     3
 }
 
+/// 目的：max_guests 的默认值（2 台）。
+fn default_max_guests() -> u32 {
+    2
+}
+
 fn default_compact_percent() -> u8 {
     70
 }
@@ -106,6 +123,9 @@ impl Default for AppSettings {
             fence_write: false,
             fence_read: Vec::new(),
             qemu_path: String::new(),
+            virtiofsd_path: String::new(),
+            smbd_path: String::new(),
+            max_guests: 2,
             llm_timeout_secs: crate::kernel::api::DEFAULT_LLM_TIMEOUT_SECS,
             compact_at_percent: 70,
             discuss_remind_cap: 3,

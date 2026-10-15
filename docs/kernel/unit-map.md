@@ -18,6 +18,8 @@
 | `src/kernel/domain/jobs.rs` | 生成中作业的取消表（`JobRegistry`）：同一会话每次生成各持一面旗，停止置位全部、摘旗按身份 |
 | `src/kernel/detail/file_log.rs` |
 | `src/kernel/detail/host_probe.rs` |
+| `src/kernel/detail/outbound.rs` | 出站 HTTPS 的共享机制：唯一一处 TLS 后端装配与通用 ureq 代理 |
+| `src/kernel/detail/unpack.rs` | 归档解包机制：tar / tar.gz / tar.zst / tar.xz / zip 解到目录，支持 strip 与宽容链接 |
 | `src/kernel/detail/process.rs` | 外部进程执行机制（守门进程、stdin 送参、隐私字段 env 注入、超时杀树、截断），实现 `ProcessRunner` |
 | `src/kernel/detail/session.rs` | 长驻外部进程机制（守门进程长跑、按行收发、关闭杀树、Windows 容器预授权），实现 `SessionHost` |
 | `src/kernel/detail/confine/mod.rs` | 围栏机制入口（策略由调用方传入；实现 `FenceHost` 释放） |

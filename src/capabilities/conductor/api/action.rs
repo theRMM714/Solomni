@@ -238,6 +238,10 @@ impl ConductorHandle {
                 .get("tier")
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string()),
+            base: args
+                .get("base")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string()),
             parent: None,
         })
     }
@@ -612,6 +616,11 @@ impl ConductorHandle {
             fence_read: current.fence_read.clone(),
             permissions: current.permissions.clone(),
             qemu_path: current.qemu_path.clone(),
+            virtiofsd_path: current.virtiofsd_path.clone(),
+            smbd_path: current.smbd_path.clone(),
+            max_guests: num("max_guests")
+                .map(|v| v as u32)
+                .unwrap_or(current.max_guests),
             llm_timeout_secs: num("llm_timeout_secs").unwrap_or(current.llm_timeout_secs),
             compact_at_percent: num("compact_at_percent")
                 .map(|v| v as u8)

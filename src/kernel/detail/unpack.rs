@@ -1,42 +1,75 @@
 //! 目的：归档解包的机制——跨平台、纯 Rust，不依赖用户装了什么解压工具。
-//! 管：按后缀认容器与压缩（tar / tar.gz / tgz / tar.zst / tzst），解到目标目录；软/硬链接建不了就退化成复制。
-//! 不管：下载与网络（在 setup-vm-*.js）、归档的来源与布局（调用方定）。
-//! 联动：入口层的隐藏模式 --unpack 走它（src/diagnostics/mod.rs）。
+//! 管：按后缀认容器与压缩（tar / tar.gz / tgz / tar.zst / tzst / tar.xz / txz / zip），解到目标目录；
+//!   软/硬链接建不了就退化成复制；`strip` 可按段剥掉归档里的顶层目录。
+//! 不管：下载与网络、归档的来源与布局（调用方定）。
+//! 联动：入口层的隐藏模式 --unpack 走 extract；依赖补齐走 extract_into（带 strip）。
 
 use std::fs::{self, File};
 use std::io::{self, Read};
 use std::path::{Component, Path, PathBuf};
 
-/// 目的：把归档解到目录（按后缀认 tar / tar.gz(tgz) / tar.zst(tzst)）。
+/// 目的：把归档解到目录（按后缀认 tar / tar.gz(tgz) / tar.zst(tzst) / tar.xz(txz) / zip），不剥层。
 /// 返回：成功给 Ok；后缀不认识或解码失败给一句为什么。
 pub fn extract(archive: &Path, dest: &Path) -> Result<(), String> {
+    extract_into(archive, dest, 0)
+}
+
+/// 目的：同 extract，但可按段剥掉归档里的顶层目录（`strip` 段）——依赖补齐的便携包常带一层包装目录。
+pub fn extract_into(archive: &Path, dest: &Path, strip: usize) -> Result<(), String> {
     let name = archive
         .file_name()
         .map(|n| n.to_string_lossy().to_lowercase())
         .unwrap_or_default();
+    fs::create_dir_all(dest).map_err(|e| format!("建不了目标目录 {}：{}", dest.display(), e))?;
+    if name.ends_with(".zip") {
+        return unpack_zip(archive, dest, strip);
+    }
     let file =
         File::open(archive).map_err(|e| format!("打不开归档 {}：{}", archive.display(), e))?;
-    fs::create_dir_all(dest).map_err(|e| format!("建不了目标目录 {}：{}", dest.display(), e))?;
     if name.ends_with(".tar.zst") || name.ends_with(".tzst") {
         let mut file = file;
         let dec = ruzstd::decoding::StreamingDecoder::new(&mut file)
             .map_err(|e| format!("不是有效的 zstd（{}）：{}", archive.display(), e))?;
-        unpack_tar(dec, dest)
+        unpack_tar(dec, dest, strip)
     } else if name.ends_with(".tar.gz") || name.ends_with(".tgz") {
-        unpack_tar(flate2::read::GzDecoder::new(file), dest)
+        unpack_tar(flate2::read::GzDecoder::new(file), dest, strip)
     } else if name.ends_with(".tar") {
-        unpack_tar(file, dest)
+        unpack_tar(file, dest, strip)
+    } else if name.ends_with(".tar.xz") || name.ends_with(".txz") {
+        // xz 没有现成的 Read 适配：先解到临时 tar，再走同一条 tar 解包路径（解完即删）。
+        let tmp = xz_temp();
+        {
+            let mut file = std::io::BufReader::new(file);
+            let mut out = File::create(&tmp)
+                .map_err(|e| format!("建不了临时文件 {}：{}", tmp.display(), e))?;
+            lzma_rs::xz_decompress(&mut file, &mut out)
+                .map_err(|e| format!("xz 解压失败（{}）：{:?}", archive.display(), e))?;
+        }
+        let r = File::open(&tmp)
+            .map_err(|e| format!("打不开临时文件 {}：{}", tmp.display(), e))
+            .and_then(|f| unpack_tar(f, dest, strip));
+        let _ = fs::remove_file(&tmp);
+        r
     } else {
         Err(format!(
-            "不认识的归档后缀：{}（认 .tar / .tar.gz / .tgz / .tar.zst / .tzst）",
+            "不认识的归档后缀：{}（认 .tar / .tar.gz / .tgz / .tar.zst / .tzst / .tar.xz / .txz / .zip）",
             name
         ))
     }
 }
 
+/// 目的：一个唯一的临时 tar 路径（xz 中转用；进程号 + 时间纳秒，避免并发相撞）。
+fn xz_temp() -> PathBuf {
+    let n = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    std::env::temp_dir().join(format!("solomni-xz-{}-{}.tar", std::process::id(), n))
+}
+
 /// 目的：解 tar 本体——**宽容链接**：宿主建不了链接（Windows 没建链特权）就退化成复制；
 /// 链接目标还没解出来就先记账、解完再补（MSYS2 包里大量同目录软链）。
-fn unpack_tar<R: Read>(reader: R, dest: &Path) -> Result<(), String> {
+fn unpack_tar<R: Read>(reader: R, dest: &Path, strip: usize) -> Result<(), String> {
     let mut ar = tar::Archive::new(reader);
     let entries = ar.entries().map_err(|e| format!("读 tar 失败：{}", e))?;
     let mut pending: Vec<(PathBuf, PathBuf)> = Vec::new();
@@ -50,6 +83,9 @@ fn unpack_tar<R: Read>(reader: R, dest: &Path) -> Result<(), String> {
         if !safe_rel(&rel) {
             continue;
         }
+        let Some(rel) = strip_rel(&rel, strip) else {
+            continue;
+        };
         let out = dest.join(&rel);
         let kind = e.header().entry_type();
         if kind == tar::EntryType::Directory {
@@ -108,6 +144,65 @@ fn unpack_tar<R: Read>(reader: R, dest: &Path) -> Result<(), String> {
             }
         }
         pending = left;
+    }
+    Ok(())
+}
+
+/// 目的：剥掉归档路径的前 `strip` 段；剥完什么都不剩（或只剩空段）给 None（跳过这一项）。
+fn strip_rel(rel: &Path, strip: usize) -> Option<PathBuf> {
+    if strip == 0 {
+        return Some(rel.to_path_buf());
+    }
+    let comps: Vec<Component> = rel.components().collect();
+    if comps.len() <= strip {
+        return None;
+    }
+    let mut out = PathBuf::new();
+    for c in &comps[strip..] {
+        out.push(c.as_os_str());
+    }
+    if out.as_os_str().is_empty() {
+        None
+    } else {
+        Some(out)
+    }
+}
+
+/// 目的：解 zip 本体——目录/普通文件按条写；unix 权限位（可执行位）按归档保留。
+fn unpack_zip(archive: &Path, dest: &Path, strip: usize) -> Result<(), String> {
+    let file =
+        File::open(archive).map_err(|e| format!("打不开归档 {}：{}", archive.display(), e))?;
+    let mut z = zip::ZipArchive::new(file)
+        .map_err(|e| format!("不是有效的 zip（{}）：{}", archive.display(), e))?;
+    for i in 0..z.len() {
+        let mut e = z.by_index(i).map_err(|x| format!("读归档项失败：{}", x))?;
+        let Some(rel) = e.enclosed_name().map(|p| p.to_path_buf()) else {
+            continue;
+        };
+        if !safe_rel(&rel) {
+            continue;
+        }
+        let Some(rel) = strip_rel(&rel, strip) else {
+            continue;
+        };
+        let out = dest.join(&rel);
+        if e.is_dir() {
+            fs::create_dir_all(&out).map_err(|x| format!("建目录 {}：{}", out.display(), x))?;
+            continue;
+        }
+        if let Some(parent) = out.parent() {
+            fs::create_dir_all(parent)
+                .map_err(|x| format!("建目录 {}：{}", parent.display(), x))?;
+        }
+        let mut f = write_file(&out)?;
+        io::copy(&mut e, &mut f).map_err(|x| format!("写 {}：{}", out.display(), x))?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            if let Some(mode) = e.unix_mode() {
+                let _ = fs::set_permissions(&out, fs::Permissions::from_mode(mode));
+            }
+        }
     }
     Ok(())
 }
@@ -249,6 +344,69 @@ mod tests {
         assert!(
             extract(&p, &dir.join("o")).is_err(),
             "不认识的归档后缀要如实拒收"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// 目的：zip 解包 + `strip` 剥一层——落点正确，unix 可执行位保留。
+    #[test]
+    fn extracts_zip_and_strips_leading_dir() {
+        use std::io::Write;
+        let dir = temp("zip");
+        let zip_path = dir.join("x.zip");
+        {
+            let f = File::create(&zip_path).expect("建 zip");
+            let mut w = zip::ZipWriter::new(f);
+            let opts = zip::write::SimpleFileOptions::default()
+                .compression_method(zip::CompressionMethod::Stored)
+                .unix_permissions(0o755);
+            w.add_directory("pkg/", opts).expect("目录项");
+            w.start_file("pkg/a/b.txt", opts).expect("文件项");
+            w.write_all(b"zipped").expect("写内容");
+            w.finish().expect("收尾");
+        }
+        let out = dir.join("out");
+        extract_into(&zip_path, &out, 1).expect("解 zip 并剥一层");
+        assert_eq!(
+            fs::read(out.join("a").join("b.txt")).expect("读回"),
+            b"zipped".to_vec()
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = fs::metadata(out.join("a").join("b.txt"))
+                .unwrap()
+                .permissions()
+                .mode();
+            assert_eq!(mode & 0o111, 0o111, "可执行位要保留：{:o}", mode);
+        }
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// 目的：tar.xz 解包（先把 tar 压成 xz，再解回来）。
+    #[test]
+    fn extracts_tar_xz() {
+        let dir = temp("xz");
+        fs::write(dir.join("a.txt"), b"xzdata").expect("写");
+        let tar_path = dir.join("x.tar");
+        {
+            let f = File::create(&tar_path).expect("建 tar");
+            let mut b = tar::Builder::new(f);
+            b.append_path_with_name(dir.join("a.txt"), "a.txt")
+                .expect("打包");
+            b.finish().expect("收尾");
+        }
+        let xz_path = dir.join("x.tar.xz");
+        {
+            let mut input = std::io::BufReader::new(File::open(&tar_path).expect("开 tar"));
+            let mut out = File::create(&xz_path).expect("建 xz");
+            lzma_rs::xz_compress(&mut input, &mut out).expect("压 xz");
+        }
+        let out = dir.join("out");
+        extract(&xz_path, &out).expect("解 tar.xz");
+        assert_eq!(
+            fs::read(out.join("a.txt")).expect("读回"),
+            b"xzdata".to_vec()
         );
         let _ = fs::remove_dir_all(&dir);
     }

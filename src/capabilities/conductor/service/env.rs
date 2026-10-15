@@ -54,6 +54,8 @@ impl Conductor {
                 modules_with_userdata,
                 permissions: self.permissions_for(meta, &a.name),
                 texts: self.prompt.tools(),
+                // 虚拟机档给 guest↔宿主翻译器：system 工具跑在宿主侧，但收模型给的 guest 写法。
+                path_codec: self.path_codec_of(&meta.exec),
             });
         }
         Ok(crate::capabilities::workspace::api::Sandboxes {

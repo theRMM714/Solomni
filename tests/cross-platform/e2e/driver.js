@@ -878,6 +878,12 @@ async function approvePlan(name) {
     const tv = (lv.filter((x) => x.tool).pop() || {}).tool || {};
     assert(tv.module === 'toolbox' && tv.name === 'read_txt' && tv.ok === true, 'vm 档工具在 guest 里成功（落成 tool 行）', JSON.stringify(tv).slice(0, 300));
     assert(String(tv.output || '').includes('Debian GNU/Linux'), '工具读到的是 guest 的 os-release（宿主不是 Debian）', String(tv.output).slice(0, 240));
+    // virtiofs 档：会话活着时守护进程要在跑（登记了 virtiofsd 才会选它，与组合根同一份判据）。
+    if (process.env.SOLOMNI_VM_VIRTIOFSD) {
+      const vfp = require('child_process').spawnSync('pgrep', ['-af', 'virtiofsd'], { encoding: 'utf8' });
+      const vfAlive = (vfp.stdout || '').split('\n').filter((l) => l.includes('--socket-path') && l.includes('solomni-virtiofs-'));
+      assert(vfAlive.length > 0, 'virtiofs 档下会话期 virtiofsd 要在跑', vfAlive.join(' | ').slice(0, 240));
+    }
     // 删除会话：核心销毁该租约的 guest。
     const del = await api('POST', '/api/history/' + encodeURIComponent(nameVm) + '/delete', {});
     assert(del.status === 200, '删除会话', del.text.slice(0, 200));
@@ -889,6 +895,11 @@ async function approvePlan(name) {
     } else {
       const alive = (pg.stdout || '').split('\n').filter((l) => l.includes(vmBase));
       assert(alive.length === 0, '删除会话后 guest 进程销毁', alive.join(' | ').slice(0, 240));
+    }
+    if (process.env.SOLOMNI_VM_VIRTIOFSD) {
+      const vfp = require('child_process').spawnSync('pgrep', ['-af', 'virtiofsd'], { encoding: 'utf8' });
+      const vfAlive = (vfp.stdout || '').split('\n').filter((l) => l.includes('--socket-path') && l.includes('solomni-virtiofs-'));
+      assert(vfAlive.length === 0, '删除会话后 virtiofsd 进程销毁', vfAlive.join(' | ').slice(0, 240));
     }
   }
   console.log((failed ? 'E2E-FAILED failed=' + failed : 'E2E-DONE exitCode=0'));

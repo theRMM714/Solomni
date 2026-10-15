@@ -130,6 +130,9 @@ pub struct GuestImage {
     pub initrd: Option<PathBuf>,
     pub agent: GuestAgent,
     pub clients: GuestClients,
+    /// 目的：guest 镜像**自带**的运行能力名（guest.yaml 的 `runtimes`，如 python / node）。
+    /// 约束：虚拟机档的选型诊断把它并进包库一起看——镜像里已经有的解释器不必再放 `runtimes/` 包。缺省空表。
+    pub runtimes: Vec<String>,
 }
 
 impl GuestImage {
@@ -149,6 +152,7 @@ impl GuestImage {
             initrd,
             agent: GuestAgent::Qga,
             clients: GuestClients::debian(),
+            runtimes: Vec::new(),
         }
     }
 
@@ -166,7 +170,15 @@ pub struct GuestMount {
     pub read_only: bool,
 }
 
-/// 目的：一次 guest 启动的规格（镜像 + 挂载 + 网络 + 会话租约 + 引擎路径登记）。
+/// 目的：首启要经 cloud-init 投喂的种子文档（NoCloud net 数据源：`/user-data` 与 `/meta-data`）。
+/// 约束：内容由调用方（供给编排）给，域内不生成；只被支持种子的引擎消费。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SeedDocs {
+    pub user_data: String,
+    pub meta_data: String,
+}
+
+/// 目的：一次 guest 启动的规格（镜像 + 挂载 + 网络 + 会话租约 + 引擎路径登记 + 首启种子）。
 #[derive(Debug, Clone)]
 pub struct GuestSpec {
     pub lease: String,
@@ -176,6 +188,15 @@ pub struct GuestSpec {
     /// 目的：设置里登记的**引擎**可执行文件路径（空 = 兜底按 PATH 找，名字由 arch 定）。
     /// 约束：与就绪检测共用同一份登记——检测说"按登记路径找到"，启动就必须走同一个路径。
     pub engine_path: Option<String>,
+    /// 目的：设置里登记的**共享后端**要用的外部可执行文件路径（如 virtiofsd；空 = 兜底按 PATH 找）。
+    /// 约束：与 qemu_path 同样与就绪检测共用一份登记；不需要外部工具的共享档忽略它。
+    pub share_path: Option<String>,
+    /// 目的：首启要投喂的 cloud-init 种子；None = 不投种子（正常会话启动）。
+    /// 约束：投种子要求 `net = true`（guest 要能连到宿主的小 HTTP 服务）。
+    pub seed: Option<SeedDocs>,
+    /// 目的：要不要给这次启动一份**每租约可写层**（会话要：多台并发不能同写一份基础镜像）。
+    /// 约束：只有磁盘根建得了可写层（目录根忽略它）；供给编排要改的正是基础镜像本身，填 false。
+    pub isolated: bool,
 }
 
 /// 目的：在 guest 里跑一次工具（命令 + 参数 + 环境 + 工作目录）。
@@ -247,6 +268,9 @@ struct GuestManifest {
     os: Option<String>,
     #[serde(default)]
     clients: Option<Vec<String>>,
+    /// 目的：镜像自带的运行能力名（如 python / node）；进虚拟机档选型诊断。
+    #[serde(default)]
+    runtimes: Option<Vec<String>>,
 }
 
 /// 目的：读基础根目录里的 guest.yaml（可选）。
@@ -361,6 +385,12 @@ pub fn classify_base(base: &Path, probe: &dyn HostProbe) -> Result<GuestImage, S
     image.os = os;
     image.agent = agent;
     image.clients = clients;
+    image.runtimes = manifest
+        .as_ref()
+        .and_then(|m| m.runtimes.clone())
+        .unwrap_or_default();
+    image.runtimes.sort();
+    image.runtimes.dedup();
     Ok(image)
 }
 

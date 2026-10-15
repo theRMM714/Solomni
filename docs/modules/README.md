@@ -19,7 +19,7 @@
 ## 三、依赖图位置（由源码的 `::api` 引用推导）
 
 - 经 `::api` 用到：`kernel`（能力名文法 / 机制）、`prompt`（清单文本）
-- 谁在用我：`collab`、`conductor`、`registry`、`residents`、`secrets`、`session`、`slate`、`tools`、`workspace`，以及 `cli` / `web`（经 `Ops`）
+- 谁在用我：`collab`、`conductor`、`registry`、`residents`、`secrets`、`session`、`slate`、`tools`、`vm`
 
 ## 四、改动本单元时必须同步
 

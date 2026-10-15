@@ -399,6 +399,86 @@ pub(crate) fn route(
             Err(e) => complaint(400, e),
         },
 
+        // ---- 依赖补齐（开箱即用的 setup 面） ----
+        "setup.status" => {
+            // 长轮询：`?since=N` 客户端已见的进度序号，`&wait=1` 挂起等新行（最多 20s，与事件台同一套）。
+            let q = url.split('?').nth(1).unwrap_or("");
+            let mut since = 0u64;
+            let mut wait = false;
+            for pair in q.split('&') {
+                let mut kv = pair.splitn(2, '=');
+                match (kv.next(), kv.next()) {
+                    (Some("since"), v) => {
+                        since = v.and_then(|x| x.parse::<u64>().ok()).unwrap_or(0)
+                    }
+                    (Some("wait"), v) => wait = v == Some("1") || v == Some("true"),
+                    _ => {}
+                }
+            }
+            if wait {
+                let deadline = Instant::now() + POLL_WAIT;
+                while ops.provision.job().seq <= since && Instant::now() < deadline {
+                    std::thread::sleep(POLL_TICK);
+                }
+            }
+            match ops.provision.status() {
+                Ok(deps) => {
+                    let missing = deps.iter().filter(|d| !d.present).count();
+                    ok_json(json!({
+                        "deps": deps,
+                        "job": ops.provision.job(),
+                        "missing": missing,
+                    }))
+                }
+                Err(e) => complaint(400, e),
+            }
+        }
+        "setup.ensure" => {
+            let req = match parse_body(body) {
+                Ok(v) => v,
+                Err(e) => return complaint(400, e),
+            };
+            let ids: Vec<String> = req
+                .get("deps")
+                .and_then(|v| v.as_array())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|x| x.as_str().map(|s| s.to_string()))
+                        .collect()
+                })
+                .unwrap_or_default();
+            let confirm = req
+                .get("confirm")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            match ops.provision.status() {
+                Ok(all) => {
+                    let picked: Vec<_> = all
+                        .iter()
+                        .filter(|d| ids.is_empty() || ids.iter().any(|x| x == &d.id))
+                        .collect();
+                    if !confirm {
+                        ok_json(json!({
+                            "preview": picked.iter().map(|d| json!({
+                                "id": d.id, "url": d.url, "size_mb": d.size_mb, "present": d.present,
+                            })).collect::<Vec<_>>(),
+                            "note": "确认后按 deps 起下载安装作业（只写项目内）",
+                        }))
+                    } else {
+                        match ops.provision.start(ids.clone()) {
+                            Ok(()) => ok_json(json!({ "ok": true, "deps": ids })),
+                            Err(e) => complaint(400, e),
+                        }
+                    }
+                }
+                Err(e) => complaint(400, e),
+            }
+        }
+        "setup.job" => {
+            ops.provision.cancel();
+            ok_json(json!({ "ok": true }))
+        }
+
         // ---- 核心推荐模型 ----
         "suggest" => {
             let req = match parse_body(body) {

@@ -20,7 +20,18 @@ impl Log for NoopLog {
 
 use crate::kernel::domain::fence::FenceSpec;
 use crate::kernel::domain::types::{Ask, AskOutcome, ToolOutcome};
-use std::path::Path;
+use std::path::{Path, PathBuf};
+
+/// 目的：模型侧路径 ↔ 宿主路径的翻译（虚拟机档 guest ↔ 宿主；本机档恒等）。
+/// 约束：**只翻译，不做安全判断**——翻译结果仍要过允许根校验（`workspace::Sandbox::resolve`）。
+/// 约束：认不出本环境写法的路径回 None（调用方按"不在允许根里"如实拒绝）；也允许宿主写法直通
+///   （系统工具跑在宿主侧，宿主绝对路径本来就成立）。
+pub trait PathCodec: Send + Sync + std::fmt::Debug {
+    /// 模型给的路径 → 宿主路径；认不出回 None。
+    fn to_host(&self, raw: &str) -> Option<PathBuf>;
+    /// 宿主路径 → 该环境里给模型看的写法（回执与允许根清单用）。
+    fn to_view(&self, host: &Path) -> String;
+}
 
 /// 目的：外部进程回执里那些收尾标记的文案端口——进程机制不硬编码文案，由上层适配后注入。
 /// 约束：文案从哪来不由本端口决定（提示词册在 `capabilities/prompt`，由组合根适配后注入）；

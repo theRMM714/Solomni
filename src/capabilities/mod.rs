@@ -14,6 +14,7 @@ pub mod llm;
 pub mod modules;
 pub mod permission;
 pub mod prompt;
+pub mod provision;
 pub mod registry;
 pub mod residents;
 pub mod secrets;

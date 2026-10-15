@@ -334,6 +334,8 @@ pub struct Ops {
     pub residents: Arc<dyn crate::capabilities::residents::api::ResidentOps + Send + Sync>,
     /// 目的：隐秘字段的统一管理面（组合根注入的同一份，经核心手柄转发）。
     pub secrets: Arc<dyn crate::capabilities::secrets::api::SecretOps + Send + Sync>,
+    /// 目的：依赖补齐的统一面（组合根注入；默认未接入，如实失败不假装可用）。
+    pub provision: Arc<dyn crate::capabilities::provision::api::Provision + Send + Sync>,
 }
 
 impl Ops {
@@ -350,6 +352,7 @@ impl Ops {
             log: Arc::new(h.clone()),
             residents: Arc::clone(&h.residents),
             secrets: Arc::clone(&h.secrets),
+            provision: Arc::new(crate::capabilities::provision::api::NoProvision),
         }
     }
 }
@@ -489,6 +492,9 @@ pub struct WorkSpec {
     pub delegate: bool,
     /// 执行档位（用户在创建向导里选的；默认 = 设置里的档位）。承载不了就由 create_work 如实拒绝。
     pub tier: Tier,
+
+    /// 目的：虚拟机档的基础根（可省 = 空；会话建好后也可在会话配置里改）。
+    pub base: Option<String>,
 }
 
 /// 创建工作后的结果：最终实例名（重名已加尾号）、名单，以及**开场事实**。

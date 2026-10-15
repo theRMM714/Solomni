@@ -15,6 +15,15 @@ use crate::capabilities::registry::ports::SettingsStore;
 use crate::kernel::ports::Log;
 use std::sync::Arc;
 
+/// 目的：只在目标为空时用发现值填上（已登记的一律保留）。
+fn fill_if_empty(target: &mut String, found: Option<String>) {
+    if target.trim().is_empty() {
+        if let Some(p) = found {
+            *target = p;
+        }
+    }
+}
+
 /// 登记处能力：持四份 yaml 的内存形态，按用例读写、改完即落盘。
 pub struct RegistryService {
     /// **状态**：登记处的内存形态。私有——别的能力只经 `Registry` 读。
@@ -39,6 +48,19 @@ impl RegistryService {
             llm,
             log,
         })
+    }
+
+    /// 目的：**未登记**时采用依赖补齐装到项目内的可运行包（显式登记优先）。
+    /// 约束：只填内存、不落盘——用户显式登记的路径永远优先，且这里不改用户的 `settings.yaml`。
+    pub fn apply_discovered(
+        &mut self,
+        qemu: Option<String>,
+        virtiofsd: Option<String>,
+        smbd: Option<String>,
+    ) {
+        fill_if_empty(&mut self.settings.app.qemu_path, qemu);
+        fill_if_empty(&mut self.settings.app.virtiofsd_path, virtiofsd);
+        fill_if_empty(&mut self.settings.app.smbd_path, smbd);
     }
 
     /// 落盘并把失败如实记进日志（写方法共用这一句）。
@@ -325,5 +347,24 @@ impl Registry for RegistryService {
             ),
         }
         outcome
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::fill_if_empty;
+
+    /// 目的：显式登记优先；只在空（未登记）时才采用发现值；没有发现值不动。
+    #[test]
+    fn discovered_fills_only_when_unset() {
+        let mut explicit = "/opt/qemu".to_string();
+        fill_if_empty(&mut explicit, Some("/project/.vm/qemu".to_string()));
+        assert_eq!(explicit, "/opt/qemu", "显式登记优先");
+        let mut empty = String::new();
+        fill_if_empty(&mut empty, Some("/project/.vm/qemu".to_string()));
+        assert_eq!(empty, "/project/.vm/qemu");
+        let mut blank = "  ".to_string();
+        fill_if_empty(&mut blank, None);
+        assert_eq!(blank, "  ", "没有发现值就不动");
     }
 }

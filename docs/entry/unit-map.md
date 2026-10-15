@@ -13,5 +13,4 @@
 | `src/entry/root.rs` |
 | `src/main.rs` |
 | `src/diagnostics/mod.rs` |
-| `src/diagnostics/unpack.rs` |
 | `src/guard/mod.rs` |
