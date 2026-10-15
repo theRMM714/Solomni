@@ -19,8 +19,9 @@ const META_DATA: &str = "instance-id: solomni-provision\nlocal-hostname: solomni
 /// 目的：维护启动**必须**装上的运行包——模块工具基线（python）与共享要用的 cifs-utils。
 const REQUIRED_PKGS: &str = "python3 cifs-utils";
 
-/// 目的：维护启动**尽量**装上的运行包——镜像源里不可得就如实不声明（声明必须属实）。
-const OPTIONAL_PKGS: &str = "nodejs";
+/// 目的：guest 里的 node 从 **NodeSource** 装——Debian trixie 的 nodejs 依赖 node-corepack，镜像源里不可得。
+/// 约束：尽力而为（装不上就不声明）；装完由调用方自证（node --version）。
+const NODE_INSTALL: &str = "DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends curl ca-certificates gnupg || true; curl -fsSL https://deb.nodesource.com/setup_22.x -o /tmp/nodesource_setup.sh || true; bash /tmp/nodesource_setup.sh || true; DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends nodejs || true";
 
 /// 目的：一次 guest 运行（命令交给 guest 的 /bin/sh；args/env/cwd 都空）。
 fn sh(command: &str) -> GuestRun {
@@ -122,7 +123,9 @@ pub(super) fn install_guest_runtime(
 
     // 维护启动：装运行包与 cifs-utils；装完把 guest.yaml 的共享客户端写成 cifs。
     if !runtimes_marker.is_file() || !image.clients.cifs {
-        on_line("维护启动：经 QGA 在 guest 里装运行包（必需 python3 / cifs-utils；可选 nodejs）并逐个自证");
+        on_line(
+            "维护启动：经 QGA 装运行包（必需 python3 / cifs-utils；node 走 NodeSource）并逐个自证",
+        );
         let spec = GuestSpec {
             lease: lease.clone(),
             image: image.clone(),
@@ -140,12 +143,12 @@ pub(super) fn install_guest_runtime(
             vm.guest_stop(&lease);
             return Err("等维护启动的 qemu-guest-agent 超时".to_string());
         }
-        // 镜像里已有首启留下的 apt 索引：先不 update 直接装，装不上再 update 重试（update 很慢）；
-        // python-is-python3 在 trixie 已没有，python 符号链接自己补。必需包装不上如实失败，可选包尽力、装不上不声明。
+        // 镜像里可能残留不完整的 apt lists（首启中途中断过）：整份刷新一遍再装，避免「包明明在却算不可安装」。
+        // python-is-python3 在 trixie 已没有，python 符号链接自己补。必需包装不上如实失败；node 走 NodeSource，尽力。
         let cmd = format!(
-            "DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends {req} || (apt-get update -o Acquire::Languages=none && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends {req}); DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends {opt} || true; command -v python >/dev/null 2>&1 || ln -sf /usr/bin/python3 /usr/bin/python; sync",
+            "rm -rf /var/lib/apt/lists; mkdir -p /var/lib/apt/lists; DEBIAN_FRONTEND=noninteractive apt-get update -o Acquire::Languages=none || true; DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends {req} || true; {node}; command -v python >/dev/null 2>&1 || ln -sf /usr/bin/python3 /usr/bin/python; sync",
             req = REQUIRED_PKGS,
-            opt = OPTIONAL_PKGS
+            node = NODE_INSTALL
         );
         let out = vm.guest_run(&lease, &sh(&cmd));
         // 自证：python 必须通（模块工具的基线）；node 可选，通才写进声明。
@@ -177,6 +180,14 @@ pub(super) fn install_guest_runtime(
             ),
         )
         .map_err(|e| format!("写 {} 失败：{}", runtimes_marker.display(), e))?;
+        if !node_ok {
+            let tail: String = {
+                let s = out.output.as_str();
+                let n = s.chars().count();
+                s.chars().skip(n.saturating_sub(1200)).collect()
+            };
+            on_line(&format!("node 未声明的编排输出（尾段）：{}", tail));
+        }
         on_line(if node_ok {
             "guest 运行包与 cifs-utils 已装好（python / node 都自证可用）"
         } else {
@@ -270,6 +281,11 @@ mod tests {
         assert!(
             runs.iter().any(|c| c.contains("cifs-utils")),
             "运行包清单要带 cifs-utils：{:?}",
+            runs
+        );
+        assert!(
+            runs.iter().any(|c| c.contains("deb.nodesource.com")),
+            "node 要从 NodeSource 装（Debian trixie 的 nodejs 依赖 node-corepack，装不上）：{:?}",
             runs
         );
         let _ = std::fs::remove_dir_all(&root);

@@ -27,7 +27,7 @@
 缺任何一项都**如实拒绝、先预检再启动**（不拉一台跑不了工具的 guest）：`plan` 对缺包同样返回拒绝，`diagnose_text` 给出「把包放进 `runtimes/`、或让镜像声明」的说法。
 
 **当前状态**：Linux（QEMU/KVM + virtiofs，默认共享档；缺 virtiofsd 时自动退 9p）与 Windows（QEMU/WHPX + SMB guestfwd 实时共享，缺 smbd 时自动退 QGA 复制）已真机验收——引擎级探针与 e2e 的 vm 会话场景都过
-（guest 真起、工具在 guest 内执行、共享目录实时读写、删会话销毁 guest 与 virtiofsd；Windows 的镜像经 `guest-runtime` 编排预装 python3 / nodejs / cifs-utils）。
+（guest 真起、工具在 guest 内执行、共享目录实时读写、删会话销毁 guest 与 virtiofsd；Windows 的镜像经 `guest-runtime` 编排预装 python3 / cifs-utils 与 NodeSource 的 node——逐个自证后才写进 guest.yaml）。
 macOS 缺取包（`vm.qemu-provisioning-macos`）与 macOS Apple vz 引擎 + 自研 agent（vsock 通道）仍是缺口。契约与组合矩阵见本页「五」，缺口与验收标准见
 [tests/gaps.yaml](../../tests/gaps.yaml) 的 `fence.guest-tier-not-wired`。
 
