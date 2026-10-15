@@ -473,7 +473,7 @@ function structuralAudit() {
   // 注释契约（ARCHITECTURE.md 十）：判定与棘轮比对只有一处——run-hygiene.js 的 scanCommentContract
   // 与 compareContract。棘轮**只减不增**：新文件零容忍（快照里没有 = 从 0 起算），老文件同类变多也是新增；
   // 变少 = 应销账，同样硬失败（收紧只能往下，见 --tighten）。
-  const { scanCommentContract, compareContract, ratchetSelfTest } = require("./run-hygiene.js");
+  const { scanCommentContract, compareContract, ratchetSelfTest, commentLexerSelfTest } = require("./run-hygiene.js");
   const COMMENT_BASELINE = path.join(ROOT, "tests", "comment-baseline.json");
   const contractNow = scanCommentContract().byFileRule;
   if (!fs.existsSync(COMMENT_BASELINE)) {
@@ -486,6 +486,7 @@ function structuralAudit() {
     for (const s of stale) problems.push("注释契约快照应销账（现在变少了）：" + s + "（收紧：node run-hygiene.js --tighten）");
   }
   for (const b of ratchetSelfTest()) problems.push("棘轮自测失败：" + b);
+  for (const b of commentLexerSelfTest()) problems.push("注释词法自测失败：" + b);
   // 文档分层（AGENTS.md「文档分层与同步」）：门户引用 docs/ 下的细则，细则引用彼此——
   // 两边都要真实存在。只查引用不查正文，避免把文档写法变成门禁。
   // **相对解析**：链接按所在文件的目录解析（门户在根、细则在 docs/<领域>/），所以 docs/ 内部写错的同级引用也会被抓到。
