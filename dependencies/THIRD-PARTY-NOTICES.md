@@ -49,7 +49,7 @@
 - **Version**: v0.0.1（独立仓 tag）
 - **License**: MIT（上游 rust-smb-server 亦为 MIT）
 - **Source Code**: https://github.com/theRMM714/rust-smb-server-win
-- **Note**: 上游 `paltaio/rust-smb-server`（MIT）+ 本项目补丁（Windows 定位 IO、`unlink` 目录识别、delete-on-close 错误传播）与 helper CLI，由该仓 CI 构建并发布资产；Solomni 只按 URL 下载，不携带其提交史。
+- **Note**: 上游 [paltaio/rust-smb-server](https://github.com/paltaio/rust-smb-server)（MIT）+ 本仓补丁（Windows 定位 IO、`unlink` 目录识别、delete-on-close 错误传播）与 helper CLI，由该仓 CI 构建并发布资产；Solomni 只按 URL 下载，不携带其提交史。
 
 ---
 
