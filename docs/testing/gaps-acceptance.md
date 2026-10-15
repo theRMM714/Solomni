@@ -77,13 +77,13 @@ dependency-baseline.json # 依赖方向门禁的基线
 
 ```yaml
 - id: fake-chat.contract-tests
- scope: global
- level: T2
- why: 说明为什么该行为是必须验证的契约
- how: |
- 写出可直接执行的命令或实现步骤
- accept: 可判定的通过条件
- blocked_by: 无 | 平台不可用 | 环境不允许 | 缺少观察面 | 缺少实现
+  scope: global
+  level: T2
+  why: 说明为什么该行为是必须验证的契约
+  how: |
+    写出可直接执行的命令或实现步骤
+  accept: 可判定的通过条件
+  blocked_by: 无 | 平台不可用 | 环境不允许 | 缺少观察面 | 缺少实现
 ```
 
 每条缺口必须有：稳定 id、范围、层级、必要性、执行方法、验收条件和阻塞原因。补齐后删除条目，不保留完成历史。
