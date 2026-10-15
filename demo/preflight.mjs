@@ -7,13 +7,14 @@
 // 三条全过 = 返回 null；否则返回 { reason, hints }，调用方打印后以退出码 2 收场（条件不足 ≠ 演示失败）。
 //
 // MCP 演示（`demo/run-demo-mcp.mjs`）的前置是 `mcpPreflight`：① mcp-toolbox 模块在清单里；② 同上面第 ②③ 条。
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const NEEDED_MODULES = ["harvest", "render", "indexer"];
 const MCP_MODULE = "mcp-toolbox";
+const VM_MODULE = "harvest";
 
 /** indexer 的构建产物在不在（两个平台的名字都认）。 */
 function indexerBuilt() {
@@ -22,7 +23,7 @@ function indexerBuilt() {
 }
 
 /** 登记处与本次要用的模型：缺供应商 / 缺模型 / 定不下模型都如实拒绝。 */
-function registryPreflight(state, model) {
+export function registryPreflight(state, model) {
   const providers = (state && state.providers) || [];
   const models = (state && state.models) || [];
   const core = (state && state.core) || "";
@@ -134,6 +135,48 @@ export function proxyPreflight(state) {
     };
   }
   return null;
+}
+
+/**
+ * 虚拟机档演示（`demo/run-demo-vm.mjs`）的前置：① harvest 模块在清单里（它跑 python）；
+ * ② 基础根在场，且 guest 画像**声明自带 python**（`guest.yaml` 的 `runtimes`）——虚拟机档的静态预检
+ * 就按"包库 + guest 自带"两处判缺不缺包，演示也必须先有这一条；③ 同上面的供应商 / 模型。
+ *
+ * 缺包时核心会在**创建那一刻**拒绝（不拉一台跑不了工具的 guest）；这里把最容易缺的几项提前说清。
+ */
+export function vmPreflight(state, model, base) {
+  const modules = (state && state.modules) || [];
+  if (!modules.some((m) => m && m.id === VM_MODULE)) {
+    return {
+      reason: "模块清单里缺 " + VM_MODULE,
+      hints: ["模块放进 modules/ 就出现（清单是目录扫描的纯函数）"],
+    };
+  }
+  const dir = base && base.trim();
+  if (!dir) {
+    return {
+      reason: "没有给虚拟机档的基础根",
+      hints: ["用 SOLOMNI_DEMO_VM_BASE=<基础根目录> 指定（默认 .vm/guest/base）"],
+    };
+  }
+  if (!existsSync(dir)) {
+    return {
+      reason: "基础根不在场：" + dir,
+      hints: ["先补齐依赖：solomni --provision --ensure --yes（QEMU + guest 镜像 + guest-runtime）"],
+    };
+  }
+  const yaml = join(dir, "guest.yaml");
+  const text = existsSync(yaml) ? readFileSync(yaml, "utf8") : "";
+  if (!/runtimes:\s*\[[^\]]*\bpython\b/.test(text)) {
+    return {
+      reason: "guest 画像没有声明自带 python：" + yaml,
+      hints: [
+        "让运行期编排把装好的能力写进 guest.yaml 的 runtimes（solomni --provision --ensure=vm.guest-runtime.windows --yes）",
+        "或自己往 runtimes/ 放一个 python 包（虚拟机档的选型诊断两处都认）",
+      ],
+    };
+  }
+  return registryPreflight(state, model);
 }
 
 /** 打印条件不足的原因与出路；退出码 2 = 条件不足（不是演示失败）。 */

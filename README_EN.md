@@ -175,7 +175,9 @@ checks real artifacts. So it verifies the preconditions first. The first two scr
 the roster, the indexer built, and a provider plus a usable model (`SOLOMNI_DEMO_MODEL`, or the core default);
 the **MCP** script needs `mcp-toolbox` in the roster plus a provider and a usable model (it declares its
 `services` itself, so nothing has to be built); the **proxy** script needs a provider, a model and a **core
-default model**, plus at least one module or a stored agent.
+default model**, plus at least one module or a stored agent; the **VM** script needs `harvest` in the roster, a
+usable model, and a guest base that declares the runtime it ships (`runtimes` in `guest.yaml`) — a missing
+runtime is refused at creation time.
 **When a precondition is missing it prints `DEMO-SKIPPED` with how to fix it and exits with code 2** — it never
 runs the flow on the built-in demo channel just to look successful.
 
@@ -185,6 +187,7 @@ node demo/run-demo.mjs         # composite: one agent holding three modules (pyt
 node demo/run-demo-collab.mjs  # collaboration: three agents with separate powers, end to end
 node demo/run-demo-mcp.mjs     # MCP: one agent holding only mcp-toolbox, starts the resident service and calls it
 node demo/run-demo-proxy.mjs   # proxy: talk to the core only; it picks people, one stop stops the tree
+node demo/run-demo-vm.mjs      # VM tier: one agent running harvest inside the guest; artifacts land on the host live
 ```
 
 The C++ module has to be compiled once (the artifact is not committed); the command and the reason are in

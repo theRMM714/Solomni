@@ -123,11 +123,11 @@ tools:                       # 可选：外部工具表
   read_txt:
     command: python tools/read_txt.py   # 工作目录 = 本模块根目录
     params:
-      path: { type: string, required: true, desc: 要读的真实绝对路径 }
+      path: { type: string, required: true, desc: 要读的路径（用【工作环境】的写法） }
 ```
 
 - **外部工具的调用约定只有一条**：一条启动命令 + 参数 + stdin/stdout 回执。脚本、skill、别的 harness 都是它的实例；长驻的 MCP 服务不在此列，写进 `services`。
-- 工具进程的可达范围 = 该 agent 的私有沙箱 + 它自己的模块目录；共享区主副本不在其中（要改先 `work_pull`，改完 `work_commit`）；只收**真实绝对路径**，越界即拒绝。
+- 工具进程的可达范围 = 该 agent 的私有沙箱 + 它自己的模块目录；共享区主副本不在其中（要改先 `work_pull`，改完 `work_commit`）；路径用**本环境的写法**（见【工作环境】），越界即拒绝。
 - **每个模块有一个恒可写的跨任务私有区** `<module>/userdata/`：载入模块时确保它存在（只建目录、幂等；
   建不了不阻断加载，只是如实标注那一席拿不到私有落点）；模块目录默认只读，`userdata/` 例外。
 - 能跑通就是合法模块；跑不通时核心如实报错，不猜、不兜底。
@@ -138,6 +138,7 @@ tools:                       # 可选：外部工具表
 前两个演示要三个模块在清单里、indexer 已构建、登记处有供应商与一个可用的模型（用 `SOLOMNI_DEMO_MODEL` 指定，或用核心默认）；
 **MCP 演示**要 `mcp-toolbox` 在清单里、登记处有供应商与可用模型（它自带 `services` 声明，不需要预先构建）；
 **代理演示**要登记处有供应商、模型与**核心默认模型**，清单里至少有一个模块或一个已存 agent。
+**虚拟机档演示**要 `harvest` 在清单里、登记处有可用模型，且基础根在场、guest 画像声明自带 python（`guest.yaml` 的 `runtimes`；缺包时核心会在创建那一刻拒绝）。
 **条件不齐就打印 `DEMO-SKIPPED` 与怎么补、以退出码 2 收场：不跑，也不用内置演示通道凑一遍。**
 
 ```bash
@@ -146,6 +147,7 @@ node demo/run-demo.mjs         # 组合式：一个 agent 装三个模块（pyth
 node demo/run-demo-collab.mjs  # 小组协作：三个 agent 各持一份能力协商，走完整条流程
 node demo/run-demo-mcp.mjs     # MCP：单 agent 只装 mcp-toolbox，拉起常驻服务并真调它的操作
 node demo/run-demo-proxy.mjs   # 代理：只跟核心说话，它自己挑人、建子工作、被叫醒；停止即全停
+node demo/run-demo-vm.mjs      # 虚拟机档：单 agent 在 guest 里跑 harvest，产物经实时共享直接落宿主
 ```
 
 C++ 模块要先编译一次（产物不入库），命令与理由见 [modules/indexer/README.md](modules/indexer/README.md)——前置检查会替你确认这一步。
