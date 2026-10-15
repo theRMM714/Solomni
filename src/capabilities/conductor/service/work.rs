@@ -11,34 +11,55 @@ impl Conductor {
     /// 运行能力报告：模块声明的能力、包库里的可用版本、缺失清单与虚拟机档诊断。
     /// 「清单即事实」：每次调用重扫模块清单与包库；本机档不装载运行包，missing 只作事实呈现。
     pub fn runtime_report(&self, tier: crate::kernel::api::Tier) -> RuntimeReport {
-        let roster = self.modules.roster();
-        let lib = self.vm.library();
-        let spec = crate::kernel::api::ExecSpec {
+        self.runtime_report_for(&crate::kernel::api::ExecSpec {
             tier,
             ..crate::kernel::api::ExecSpec::default()
-        };
-        let diagnoses = if tier == crate::kernel::api::Tier::Vm {
-            crate::capabilities::vm::api::vm_diagnoses(&roster.modules, &lib, &spec)
+        })
+    }
+
+    /// 目的：这份执行规格下的运行能力报告——会话配置用（base 在场时把 guest 自带的运行能力并进来）。
+    pub(crate) fn runtime_report_for(&self, spec: &crate::kernel::api::ExecSpec) -> RuntimeReport {
+        let roster = self.modules.roster();
+        let lib = self.vm.library();
+        let guest_runtimes = self.guest_runtimes_of(spec);
+        let vm = spec.tier == crate::kernel::api::Tier::Vm;
+        let diagnoses = if vm {
+            crate::capabilities::vm::api::vm_diagnoses(&roster.modules, &lib, spec, &guest_runtimes)
         } else {
             Vec::new()
         };
+        // 「缺什么」按**这份规格**算：guest 自带的运行能力不算缺（与 plan / unavailable 同一把尺子）。
+        let mut missing = crate::capabilities::vm::api::absent(&roster.modules, &lib);
+        if vm {
+            for caps in missing.values_mut() {
+                caps.retain(|c| !guest_runtimes.iter().any(|g| g == c));
+            }
+            missing.retain(|_, caps| !caps.is_empty());
+        }
         let readiness = crate::capabilities::vm::api::tier_readiness(
-            &spec,
+            spec,
             self.qemu_path(),
             self.share_tool_path(),
             self.probe.as_ref(),
         );
         RuntimeReport {
-            tier: tier.as_str().to_string(),
+            tier: spec.tier.as_str().to_string(),
             declared: crate::capabilities::vm::api::declared(&roster.modules),
             available: lib.capability_versions(),
-            missing: crate::capabilities::vm::api::absent(&roster.modules, &lib),
+            missing,
             diagnoses,
             tier_ready: readiness.ready(),
             tier_missing: readiness.missing().iter().map(|s| s.to_string()).collect(),
             rejected: roster.rejected.clone(),
             rejected_packages: lib.rejected.clone(),
         }
+    }
+
+    /// 目的：这份规格的 guest 镜像自带哪些运行能力（本机档或判不出来 = 空）。
+    fn guest_runtimes_of(&self, spec: &crate::kernel::api::ExecSpec) -> Vec<String> {
+        self.guest_image_of(spec)
+            .map(|image| image.runtimes)
+            .unwrap_or_default()
     }
 
     /// 新建工作的**档位选择**（默认档 + 虚拟机档可用性与逐项前置）：与「开始」的校验同源。
@@ -112,7 +133,8 @@ impl Conductor {
         modules: &[Module],
     ) -> BTreeMap<String, Vec<String>> {
         let lib = self.library_for(spec);
-        crate::capabilities::vm::api::unavailable(spec, modules, &lib)
+        let guest_runtimes = self.guest_runtimes_of(spec);
+        crate::capabilities::vm::api::unavailable(spec, modules, &lib, &guest_runtimes)
     }
 
     /// 目的：**当前设置档位**下不能执行工具的模块（人直接跑与动作目录共用）：本机档不装载运行包，一律可用。
@@ -161,7 +183,7 @@ impl Conductor {
             base: meta.exec.base.clone(),
             net: meta.exec.net,
             pins: meta.exec.pins.clone(),
-            runtime: self.runtime_report(tier),
+            runtime: self.runtime_report_for(&meta.exec),
             runtimes_dir: crate::kernel::api::slash(&self.vm.runtimes_dir()),
             tier_ready: crate::capabilities::vm::api::tier_readiness(
                 &meta.exec,
@@ -324,9 +346,13 @@ impl Conductor {
             .filter(|m| seen.iter().any(|id| id == &m.manifest.id))
             .cloned()
             .collect();
-        let plan =
-            crate::capabilities::vm::api::plan(&spec, &session_modules, &self.library_for(&spec))
-                .map_err(|diags| crate::capabilities::vm::api::diagnose_text(&diags))?;
+        let plan = crate::capabilities::vm::api::plan(
+            &spec,
+            &session_modules,
+            &self.library_for(&spec),
+            &self.guest_runtimes_of(&spec),
+        )
+        .map_err(|diags| crate::capabilities::vm::api::diagnose_text(&diags))?;
         self.log.info(
             "conductor::edit_session",
             &format!(
@@ -766,7 +792,7 @@ impl Conductor {
         // （失败即失败，不假装已建；代拟确认名单时再补建。）
         self.workspace.prepare(&root, &agent_names)?;
         let sandboxes = self.sandboxes(&meta, &roster)?;
-        // 扫描事实如实埋点：本会话用到的模块里，哪些声明的运行包不在包库（缺包不等于崩溃，工具按档位不可用）。
+        // 扫描事实如实埋点：本会话用到的模块里，哪些声明的运行包不在包库（缺包同样会在下面按计划拒绝，文件与 guest 声明都看）。
         let session_modules: Vec<Module> = roster
             .modules
             .iter()
@@ -781,11 +807,12 @@ impl Conductor {
             );
         }
         // 执行选型的完整性检查（「开始」即冻结）：虚拟机档的选型不成立（多版本未定版 / 定版不存在 /
-        // 路径冲突）如实拒绝；只是缺包的照常开始——那是该模块的工具不可用（降级而非崩溃）。装配阶段按同一份计划取包。
+        // 路径冲突）如实拒绝；**缺包同样拒绝**（没有工具用户完不成工作，不降级）。装配阶段按同一份计划取包。
         let plan = crate::capabilities::vm::api::plan(
             &meta.exec,
             &session_modules,
             &self.library_for(&meta.exec),
+            &self.guest_runtimes_of(&meta.exec),
         )
         .map_err(|diags| crate::capabilities::vm::api::diagnose_text(&diags))?;
         self.log.info(

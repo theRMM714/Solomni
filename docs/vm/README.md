@@ -18,11 +18,13 @@
 （`plan` / `tier_readiness` / `tier_refusal` / `vm_requirements` / `vm_capability` / `capability_refusal` / `vm_diagnoses` / …）。
 出站端口 `PackageSource` / `VmEngine` / `ShareBackend` **只由 `service.rs` 持有**（R12）；`GuestVm` / `GuestChannel` 由引擎在 boot 时交出。`ExecSpec` 是共享事实（在 `kernel`），本能力只读它。
 
-**当前状态**：五轴已按可插的形状落地——`QemuEngine`（当前唯一引擎）、`GuestImage`（基础根里可放 `guest.yaml` 声明 id / arch / os / agent / clients）、
+**当前状态**：五轴已按可插的形状落地——`QemuEngine`（当前唯一引擎）、`GuestImage`（基础根里可放 `guest.yaml` 声明 id / arch / os / agent / clients / runtimes）、
 `QgaChannel`（QEMU virtio-serial）、`NinePShare`（目录根）、`CopyShare`（QGA 复制，三平台通用）、`VirtioFsShare`（QEMU vhost-user-fs，Linux/macOS 宿主）与 `SmbShare`（用户态 SMB helper + guestfwd 隧道，Windows 宿主的实时共享档）。
 按平台的组合回退链是数据（`default_combos` / `choose_combo`），加速器按平台给（`accel=kvm:tcg` / `accel=whpx:tcg` / `accel=hvf:tcg`），共享要隧道时给 `restrict=on` 网卡。
 执行分派已接线（会话在 `tier == Vm` 时把模块命令交给 guest；建会话时装配并拉起，会话删除时销毁）；就绪项 `guest` 按**已验平台数据表**（`VERIFIED_HOSTS`）放开，并带上本平台上**已实现**的组合。
 判据分两层：**机器能力**（`vm_capability`：hypervisor / guest 后端 / 引擎 / 共享档）决定虚拟机档能不能**选**；**base 是会话级**，创建或会话配置里给，保存 /「开始」时才合并进严格判据（`tier_readiness`）。
+**静态预检**在「开始」那一刻一次走完：机器能力 × base × guest 自带的运行能力（`guest.yaml` 的 `runtimes`）× 模块声明 × 包库——
+缺任何一项都**如实拒绝、先预检再启动**（不拉一台跑不了工具的 guest）：`plan` 对缺包同样返回拒绝，`diagnose_text` 给出「把包放进 `runtimes/`、或让镜像声明」的说法。
 
 **当前状态**：Linux（QEMU/KVM + virtiofs，默认共享档；缺 virtiofsd 时自动退 9p）与 Windows（QEMU/WHPX + SMB guestfwd 实时共享，缺 smbd 时自动退 QGA 复制）已真机验收——引擎级探针与 e2e 的 vm 会话场景都过
 （guest 真起、工具在 guest 内执行、共享目录实时读写、删会话销毁 guest 与 virtiofsd；Windows 的镜像经 `guest-runtime` 编排预装 python3 / nodejs / cifs-utils）。
@@ -73,7 +75,7 @@ Windows guest 的 agent / 运行包由 provision 能力的 `guest-runtime` 编�
 - 就绪检测按**组合**逐项报"现状 + 怎么补"；"验过没有"是数据表（`VERIFIED_HOSTS`），不是平台 `cfg`。
 - **路径桥**（`domain/paths.rs`）：宿主路径 ↔ guest 路径只有一座桥——宿主与 guest 同方言时**恒等**（宿主路径原样在 guest 里成立），跨方言时编进镜像根（宿主 `D:\a\b` → POSIX guest `/solomni-host/d/a/b`；POSIX 宿主 → Windows guest `C:\solomni-host\…`，非法字符转义）。挂载点与命令装配（`cwd` / 路径型 `env`）都走它。
 - **工作环境提示词按环境分发**（`prompts/shared/tools.yaml` 的 `env_hosts` / `env_guests` / `envs`）：本机档按宿主平台给，虚拟机档按 guest 的 os 给——虚拟机档给出的路径就是 guest 内路径，模型据此拼参数。
-- 用户自备 guest 可在基础根目录放一份 `guest.yaml` 声明画像（`id` / `arch` / `agent` / `os` / `clients: [9p, virtiofs, cifs]`）；缺省按目录名与 Debian 默认（linux + QGA + 9p + virtiofs），不认识的值如实拒收。
+- 用户自备 guest 可在基础根目录放一份 `guest.yaml` 声明画像（`id` / `arch` / `agent` / `os` / `clients: [9p, virtiofs, cifs]` / `runtimes: [python, node]`——后者是**镜像自带**的运行能力，选型诊断据此不必再要 `runtimes/` 包）；缺省按目录名与 Debian 默认（linux + QGA + 9p + virtiofs），不认识的值如实拒收。
 - 依赖（QEMU / `virtiofsd` / SMB helper / 镜像）**不预置、不分发**，由 `provision` 能力按清单下载并解包进项目内 `.vm/`（清单 `dependencies.yaml`、下载源 `links.yaml`，需用户同意）：CLI `solomni --provision`，Web `/api/setup/status|ensure|job`。设置里没登记 `qemu_path` / `virtiofsd_path` 时，**启动即自动采用**项目内补齐的可执行文件（显式登记优先）。
 
 ## 本目录

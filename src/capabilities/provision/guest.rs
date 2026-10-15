@@ -37,7 +37,7 @@ fn write_guest_yaml(base: &Path, image: &GuestImage) -> Result<(), String> {
         GuestArch::Arm64 => "arm64",
     };
     let text = format!(
-        "# 由产品生成：命令通道 QGA；共享客户端 cifs（镜像里已由运行期编排装好 cifs-utils）。\n\nid: {}\narch: {}\nos: {}\nagent: qga\nclients: [cifs]\n",
+        "# 由产品生成：命令通道 QGA；共享客户端 cifs；运行能力 python / node（都由运行期编排装进镜像，\n# 虚拟机档的选型诊断据此认定这两个能力已满足，不必再往 runtimes/ 放包）。\n\nid: {}\narch: {}\nos: {}\nagent: qga\nclients: [cifs]\nruntimes: [python, node]\n",
         image.id,
         arch,
         image.os.as_str()
@@ -219,17 +219,23 @@ mod tests {
         assert!(base.join(".runtimes-ready").is_file(), "运行包标记要落");
         let y = std::fs::read_to_string(base.join("guest.yaml")).expect("yaml");
         assert!(y.contains("clients: [cifs]"), "{}", y);
+        assert!(y.contains("runtimes: [python, node]"), "{}", y);
         assert!(
             y.contains("arch: amd64"),
             "arch 要用 guest.yaml 认的写法：{}",
             y
         );
-        // 写出的 guest.yaml 必须仍可被识别（arch 写法错了就会在这里炸）。
-        crate::capabilities::vm::api::classify_base(
+        // 写出的 guest.yaml 必须仍可被识别（arch 写法错了就会在这里炸），并如实声明装好的运行能力。
+        let image = crate::capabilities::vm::api::classify_base(
             &base,
             &crate::kernel::detail::HostProbeAdapter,
         )
         .expect("运行期编排写出的 guest.yaml 要仍可识别");
+        assert_eq!(
+            image.runtimes,
+            vec!["node".to_string(), "python".to_string()],
+            "镜像要如实声明它装好的运行能力"
+        );
         let runs = vm.runs.lock().expect("锁").clone();
         assert!(
             runs.iter().any(|c| c.contains("cifs-utils")),

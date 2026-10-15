@@ -12,7 +12,7 @@
 - 精确版本由用户在会话的执行档位里定（`meta.yaml` 的 `exec.pins`）；库里同一能力有多个版本而用户没定版 = 核心如实报"需定版"，**不替用户挑**
 - 包放在依赖文件夹 `runtimes/` 下：放入即出现，移出即消失——与模块清单同一个事实模型，没有注册仪式
   （该目录在 `.gitignore` 里：包内容多为二进制，只提交源码与文档）
-- **缺包不是崩溃**：该模块的工具不执行，回执如实说明缺哪个能力；讨论与其它模块照常
+- **缺包不是崩溃，但也不能装看不见**：本机档脚本跑不了就如实报错；虚拟机档在「开始」前**如实拒绝**（没有工具用户完不成工作），不静默降级
 
 ## 一、一个包 = 一个文件夹
 
@@ -72,7 +72,8 @@ files:                      # 包内文件指纹：用于可复现与呈现
 - **本机档**（默认）：脚本直接在宿主上跑，**不装载运行包**；解释器由宿主自备，命令失败如实报错。
 - **虚拟机档**：会话选定后，`vm` 能力做**选型诊断**并派生**装配计划**（装载顺序、基础根、是否放行网络）。
   三类情况分开处理：
-  - **缺包** = 该模块的工具不可用（回执如实说明缺哪个能力），会话照常——降级，不是失败
+  - **缺包** = 该模块的工具跑不了：虚拟机档在「开始」那一刻**如实拒绝**（不拉一台跑不了工具的 guest——
+    没有工具，用户完不成工作，降级对他没有意义）。能力由两处之一满足：`runtimes/` 包库，或 guest 镜像**自带**（`guest.yaml` 的 `runtimes`）
   - **选型不成立**（同一能力多版本而用户没定版 / 定版指定的版本不在库里 / 两个包写进同一处路径）=
     「开始」那一刻如实拒绝，由用户解决选型后再开始
   - **本机承载不了**（本机没有虚拟机监视器 / guest 后端未验 / 引擎或共享档不在场）= 虚拟机档**不允许创建或改入**，
@@ -82,7 +83,7 @@ files:                      # 包内文件指纹：用于可复现与呈现
 **基础根（base）是会话级**，在创建（`create_session` 的 `base`）或会话配置里给，保存 /「开始」时与机器能力合并成严格判据（`vm::tier_readiness` / `tier_refusal`）。
 
 当前状态：选型、诊断、装配计划、逐项前置检测、guest 生命周期与**执行分派**都已就位，并按**五轴组合**做成可插的形状——
-宿主 × `VmEngine`（当前 `QemuEngine`）× `GuestImage`（基础根里可放 `guest.yaml` 声明 id / arch / os / agent / clients）×
+宿主 × `VmEngine`（当前 `QemuEngine`）× `GuestImage`（基础根里可放 `guest.yaml` 声明 id / arch / os / agent / clients / runtimes）×
 `GuestChannel`（当前 QGA）× `ShareBackend`（`VirtioFsShare` / `NinePShare` / `CopyShare`）。按平台的组合回退链是数据（`default_combos` / `choose_combo`），
 加速器按平台给（`accel=kvm:tcg` / `accel=whpx:tcg` / `accel=hvf:tcg`），root 支持目录（QEMU 9p）与磁盘镜像两种。
 宿主路径 ↔ guest 路径只有一座桥（`domain/paths.rs`：同方言恒等，跨方言编进镜像根），**挂载点、命令 `cwd` / 路径型 `env`、
@@ -91,8 +92,9 @@ files:                      # 包内文件指纹：用于可复现与呈现
 
 前置检测是**一份逐项清单**（机器能力 `vm::vm_requirements`，界面与 `--doctor` 照抄同一份）：虚拟机监视器、guest 本体、共享档、QEMU（引擎）；
 基础根（会话级）在保存 /「开始」时合并进来，
-每项给出"现状 + 怎么补"（共享档缺外部工具只作事实呈现、不拦档：Linux 缺 `virtiofsd` 退 9p，Windows 缺 `smbd` 退 QGA 复制）。依赖（QEMU / `virtiofsd` / 镜像 / SMB helper）**不预置、不分发**，由 provision 能力按 `dependencies.yaml` + `links.yaml` 下载并解包进项目内 `.vm/`（需用户同意；入口 `solomni --provision --ensure --yes`）；产品检测、指路并给出补齐入口，`qemu_path` / `virtiofsd_path` 可登记。Windows guest 的 agent 与运行包由 `kind: guest-runtime` 的运行期编排（cloud-init 种子 → 维护启动经 QGA 装包）在 Rust 侧装上，不再依赖仓库脚本。
-基础根 = 一个目录：发行版 rootfs（目录，或 `rootfs.ext4` / `*.qcow2` 磁盘镜像）+ `vmlinuz`（可选 `initrd.img`）；**目录根必须给内核**（直启），**磁盘镜像可自带引导**（不给内核也行）；目录里可放一份 `guest.yaml` 声明画像（id / arch / agent / os / clients），缺省按目录名与 Debian 默认（os 缺省 linux），不认识的值如实拒收。
+每项给出"现状 + 怎么补"（共享档缺外部工具只作事实呈现、不拦档：Linux 缺 `virtiofsd` 退 9p，Windows 缺 `smbd` 退 QGA 复制）。依赖（QEMU / `virtiofsd` / 镜像 / SMB helper）**不预置、不分发**，由 provision 能力按 `dependencies.yaml` + `links.yaml` 下载并解包进项目内 `.vm/`（需用户同意；入口 `solomni --provision --ensure --yes`）；产品检测、指路并给出补齐入口，`qemu_path` / `virtiofsd_path` 可登记。Windows guest 的 agent 与运行包由 `kind: guest-runtime` 的运行期编排（cloud-init 种子 → 维护启动经 QGA 装包）在 Rust 侧装上，不再依赖仓库脚本，
+并把装好的能力如实写进 `guest.yaml` 的 `runtimes: [python, node]`。
+基础根 = 一个目录：发行版 rootfs（目录，或 `rootfs.ext4` / `*.qcow2` 磁盘镜像）+ `vmlinuz`（可选 `initrd.img`）；**目录根必须给内核**（直启），**磁盘镜像可自带引导**（不给内核也行）；目录里可放一份 `guest.yaml` 声明画像（id / arch / agent / os / clients / runtimes——`runtimes` 是镜像**自带**的运行能力名，如 python / node，选型诊断据此不必再要 `runtimes/` 包），缺省按目录名与 Debian 默认（os 缺省 linux），不认识的值如实拒收。
 
 **已真机验收**：Linux（QEMU/KVM + virtiofs，默认共享档；缺 `virtiofsd` 时退 9p）与 Windows（QEMU/WHPX + SMB guestfwd 实时共享；缺 `smbd` 时退 QGA 复制）——引擎级探针（`vm_live_guest_runs_command_inside_guest`）
 与 e2e 的 `SOLOMNI_VM_BASE` 会话场景都过；Windows 侧的 QEMU 与 Debian cloud qcow2 由 provision 能力按清单装入，

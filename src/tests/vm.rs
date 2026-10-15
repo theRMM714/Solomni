@@ -260,7 +260,7 @@ pub(crate) fn vm_requirements_report_qemu_registration() {
 #[test]
 pub(crate) fn exec_host_tier_ignores_packages() {
     let modules = vec![module_with_runtimes("a", &["python"])];
-    let plan = exec::plan(&ExecSpec::default(), &modules, &Library::default())
+    let plan = exec::plan(&ExecSpec::default(), &modules, &Library::default(), &[])
         .expect("本机档不装载运行包，不会因缺包失败");
     assert_eq!(plan.tier, Tier::Host);
     assert!(plan.packages.is_empty());
@@ -280,37 +280,49 @@ pub(crate) fn exec_vm_tier_reports_missing_ambiguous_and_unavailable() {
     let empty = Library::default();
     let spec = vm_spec();
     assert_eq!(
-        exec::vm_diagnoses(&modules, &empty, &spec),
+        exec::vm_diagnoses(&modules, &empty, &spec, &[]),
         vec![Diagnosis::Missing {
             module: "a".to_string(),
             capability: "python".to_string()
         }]
     );
-    let un = exec::unavailable(&spec, &modules, &empty);
+    let un = exec::unavailable(&spec, &modules, &empty, &[]);
     assert_eq!(
         un.get("a"),
         Some(&vec!["python".to_string()]),
         "虚拟机档缺包 = 该模块工具不可用"
     );
     assert!(
-        exec::unavailable(&ExecSpec::default(), &modules, &empty).is_empty(),
+        exec::unavailable(&ExecSpec::default(), &modules, &empty, &[]).is_empty(),
         "本机档一律可用"
     );
-    // 缺包不拦会话：计划里没有可装载的包，那一步的降级由 unavailable 收口。
-    let partial = exec::plan(&spec, &modules, &empty).expect("缺包不该拦会话");
-    assert!(partial.packages.is_empty());
-    let said = exec::diagnose_text(&exec::vm_diagnoses(&modules, &empty, &spec));
+    // 缺包 = **不创建**（不再降级）：没有工具用户完不成工作，与其拉一台跑不了工具的 guest，不如选型这步如实拒。
+    let refused = exec::plan(&spec, &modules, &empty, &[]).unwrap_err();
+    assert!(
+        matches!(refused.as_slice(), [Diagnosis::Missing { .. }]),
+        "{:?}",
+        refused
+    );
+    let said = exec::diagnose_text(&exec::vm_diagnoses(&modules, &empty, &spec, &[]));
     assert!(
         said.contains("runtimes/"),
         "缺包的说法要告诉用户把包放哪：{}",
         said
     );
+    // guest 镜像自带的能力不算缺（镜像里已经有解释器）：诊断空、工具可用、计划成立。
+    let guest = vec!["python".to_string()];
+    assert!(exec::vm_diagnoses(&modules, &empty, &spec, &guest).is_empty());
+    assert!(exec::unavailable(&spec, &modules, &empty, &guest).is_empty());
+    assert!(exec::plan(&spec, &modules, &empty, &guest)
+        .expect("guest 自带就不算缺")
+        .packages
+        .is_empty());
     // 多版本且未定版 = 不替用户选
     let two = Library::build(
         vec![pkg("python", "3.12.4"), pkg("python", "3.11.9")],
         Vec::new(),
     );
-    assert!(exec::vm_diagnoses(&modules, &two, &spec)
+    assert!(exec::vm_diagnoses(&modules, &two, &spec, &[])
         .iter()
         .any(|d| matches!(d, Diagnosis::Ambiguous { .. })));
     // 定版指定的版本不在库里 = 如实报
@@ -318,11 +330,11 @@ pub(crate) fn exec_vm_tier_reports_missing_ambiguous_and_unavailable() {
         pins: BTreeMap::from([("python".to_string(), "9.9".to_string())]),
         ..vm_spec()
     };
-    assert!(exec::vm_diagnoses(&modules, &two, &bad)
+    assert!(exec::vm_diagnoses(&modules, &two, &bad, &[])
         .iter()
         .any(|d| matches!(d, Diagnosis::UnknownPin { .. })));
     // 多版本未定版 = 选型不成立：派生计划如实拒绝（这是用户要解决的选型问题，不是"缺包"）
-    let refused = exec::plan(&spec, &modules, &two).unwrap_err();
+    let refused = exec::plan(&spec, &modules, &two, &[]).unwrap_err();
     assert!(
         exec::diagnose_text(&refused).contains("多个版本"),
         "{}",
@@ -333,8 +345,11 @@ pub(crate) fn exec_vm_tier_reports_missing_ambiguous_and_unavailable() {
         pins: BTreeMap::from([("python".to_string(), "3.12.4".to_string())]),
         ..vm_spec()
     };
-    assert!(exec::vm_diagnoses(&modules, &two, &ok).is_empty());
-    assert_eq!(exec::plan(&ok, &modules, &two).unwrap().packages.len(), 1);
+    assert!(exec::vm_diagnoses(&modules, &two, &ok, &[]).is_empty());
+    assert_eq!(
+        exec::plan(&ok, &modules, &two, &[]).unwrap().packages.len(),
+        1
+    );
 }
 
 #[test]
@@ -348,7 +363,7 @@ pub(crate) fn exec_vm_plan_pins_versions_and_orders_prefix_before_system() {
         Vec::new(),
     );
     let modules = vec![module_with_runtimes("a", &["python", "cc"])];
-    let plan = exec::plan(&vm_spec(), &modules, &lib).expect("虚拟机档可成立");
+    let plan = exec::plan(&vm_spec(), &modules, &lib, &[]).expect("虚拟机档可成立");
     let ids: Vec<&str> = plan.packages.iter().map(|p| p.id.as_str()).collect();
     assert_eq!(
         ids,
@@ -1277,7 +1292,7 @@ pub(crate) fn copy_share_syncs_both_ways_through_the_channel() {
     let _ = std::fs::remove_dir_all(&dst);
 }
 
-/// 目的：guest.yaml 能声明 id / arch / agent / os / 共享客户端；不认识的值如实拒收。
+/// 目的：guest.yaml 能声明 id / arch / agent / os / 共享客户端 / 自带运行能力；不认识的值如实拒收。
 #[test]
 pub(crate) fn guest_manifest_declares_the_image_and_rejects_unknowns() {
     let probe = crate::kernel::detail::HostProbeAdapter;
@@ -1285,11 +1300,16 @@ pub(crate) fn guest_manifest_declares_the_image_and_rejects_unknowns() {
     std::fs::write(dir.join("vmlinuz"), b"x").expect("写内核");
     std::fs::write(
         dir.join("guest.yaml"),
-        "id: custom-13\narch: arm64\nagent: qga\nclients: [cifs]\n",
+        "id: custom-13\narch: arm64\nagent: qga\nclients: [cifs]\nruntimes: [python, node]\n",
     )
     .expect("写清单");
     let image = classify_base(&dir, &probe).expect("清单合法");
     assert_eq!(image.id, "custom-13");
+    assert_eq!(
+        image.runtimes,
+        vec!["node".to_string(), "python".to_string()],
+        "镜像自带的运行能力要读出来（升序去重）"
+    );
     assert_eq!(
         image.arch,
         crate::capabilities::vm::domain::guest::GuestArch::Arm64

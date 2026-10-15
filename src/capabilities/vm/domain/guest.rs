@@ -130,6 +130,9 @@ pub struct GuestImage {
     pub initrd: Option<PathBuf>,
     pub agent: GuestAgent,
     pub clients: GuestClients,
+    /// 目的：guest 镜像**自带**的运行能力名（guest.yaml 的 `runtimes`，如 python / node）。
+    /// 约束：虚拟机档的选型诊断把它并进包库一起看——镜像里已经有的解释器不必再放 `runtimes/` 包。缺省空表。
+    pub runtimes: Vec<String>,
 }
 
 impl GuestImage {
@@ -149,6 +152,7 @@ impl GuestImage {
             initrd,
             agent: GuestAgent::Qga,
             clients: GuestClients::debian(),
+            runtimes: Vec::new(),
         }
     }
 
@@ -264,6 +268,9 @@ struct GuestManifest {
     os: Option<String>,
     #[serde(default)]
     clients: Option<Vec<String>>,
+    /// 目的：镜像自带的运行能力名（如 python / node）；进虚拟机档选型诊断。
+    #[serde(default)]
+    runtimes: Option<Vec<String>>,
 }
 
 /// 目的：读基础根目录里的 guest.yaml（可选）。
@@ -378,6 +385,12 @@ pub fn classify_base(base: &Path, probe: &dyn HostProbe) -> Result<GuestImage, S
     image.os = os;
     image.agent = agent;
     image.clients = clients;
+    image.runtimes = manifest
+        .as_ref()
+        .and_then(|m| m.runtimes.clone())
+        .unwrap_or_default();
+    image.runtimes.sort();
+    image.runtimes.dedup();
     Ok(image)
 }
 

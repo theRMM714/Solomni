@@ -297,7 +297,7 @@ pub(crate) fn runtime_report_is_tier_aware() {
 
 #[test]
 pub(crate) fn module_without_runtime_is_denied_with_reason() {
-    // 虚拟机档 + 空包库：模块声明的运行包没装载 → 工具不落进程，回执如实说缺哪个能力。
+    // 虚拟机档 + 空包库：模块声明的运行包没人提供 → 改入那一刻如实拒绝（缺包不再降级）。
     let mut member = BTreeMap::new();
     member.insert(
         "a".to_string(),
@@ -343,51 +343,26 @@ pub(crate) fn module_without_runtime_is_denied_with_reason() {
         Arc::new(crate::capabilities::residents::api::NoResidents),
         Arc::new(crate::capabilities::secrets::api::NoSecrets),
     );
-    // 虚拟机档现在一律不可选（guest 本体尚未接入），所以**创建**走本机档；
-    // 建好之后把落盘档位改成 vm——这正是"档位承载检查"与"缺包不拦会话"两件事的交界：
-    // 已存在的会话照常打开、按 vm 档判工具可用性。
+    // 虚拟机档 + 空包库 + 基础根没声明运行能力：模块声明的 python 没人提供 →
+    // **改入那一刻就拒绝**（不再降级：没有工具用户完不成工作），一个进程都不落。
     let sid = core
         .create_work(work("w", WorkMode::Single, &["a"]))
         .unwrap()
         .sid;
     hist.force_tier(&sid, Tier::Vm);
-    // 编辑一次会把内存里的会话丢掉；下一次访问按落盘 meta（已是 vm 档）重建，
-    // 于是"工具可用性按 vm 档判"这条路才真的被走到。
     let base_dir = crate::tests::base_dir("module-without-runtime-base");
     let mut rebuild = edit_of(vec![("a", &["a"], "")]);
     rebuild.tier = "vm".to_string();
     rebuild.base = Some(base_dir.to_string_lossy().into_owned());
-    core.edit_session(&sid, rebuild).unwrap();
-    // 访问一次（前端打开会话就是这一步）把会话按新配置重建；single_say 只认内存里已建好的会话。
-    with_live(|l| core.continue_flow(&sid, l)).unwrap();
-    let events = with_live(|l| core.single_say(&sid, "干活", l)).unwrap();
+    let refused = core.edit_session(&sid, rebuild).unwrap_err();
+    assert!(
+        refused.contains("python") && refused.contains("runtimes/"),
+        "要说清缺哪个能力、怎么补：{}",
+        refused
+    );
     assert!(
         runner.calls.lock().expect("锁").is_empty(),
-        "缺运行包时不落进程"
-    );
-    let texts = test_prompts().tools();
-    let expect = texts.render(
-        &texts.module_unavailable,
-        &[
-            ("module", "a".to_string()),
-            ("capability", "python".to_string()),
-        ],
-    );
-    let feedback = core
-        .single_history(&sid)
-        .unwrap()
-        .iter()
-        .find(|m| m.role == "user" && m.content.contains("[工具结果] a.grep"))
-        .map(|m| m.content.clone())
-        .unwrap_or_default();
-    assert!(feedback.contains(&expect), "回执要用册子文案：{}", feedback);
-    let lines = tool_line_texts(&events);
-    assert!(
-        lines
-            .iter()
-            .any(|l| l.contains("grep") && l.contains("失败")),
-        "失败也要发 tool 行：{:?}",
-        lines
+        "拒绝时不落任何进程"
     );
     // 同一个模块在本机档照旧执行（本机档不装载运行包）。
     let mut member2 = BTreeMap::new();

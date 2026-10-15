@@ -82,8 +82,14 @@ pub fn absent(modules: &[Module], lib: &Library) -> BTreeMap<String, Vec<String>
 }
 
 /// 目的：虚拟机档的诊断（空 = 可以成立）：缺包 / 多版本歧义 / 定版不存在 / 系统路径冲突。
+/// 参数：guest_runtimes = guest 镜像**自带**的运行能力名——镜像里已经有的不必再放 `runtimes/` 包，不算缺。
 /// 约束：传递依赖也在这里走完：包 requires 的能力缺失时，归到触发出它的模块上。
-pub fn vm_diagnoses(modules: &[Module], lib: &Library, spec: &ExecSpec) -> Vec<Diagnosis> {
+pub fn vm_diagnoses(
+    modules: &[Module],
+    lib: &Library,
+    spec: &ExecSpec,
+    guest_runtimes: &[String],
+) -> Vec<Diagnosis> {
     let mut out: Vec<Diagnosis> = Vec::new();
     let mut queue: Vec<(String, String)> = Vec::new();
     for m in modules {
@@ -99,6 +105,10 @@ pub fn vm_diagnoses(modules: &[Module], lib: &Library, spec: &ExecSpec) -> Vec<D
         }
         let versions = lib.versions_of(&cap);
         if versions.is_empty() {
+            if guest_runtimes.iter().any(|g| g == &cap) {
+                // guest 镜像自带这个能力：不必再放 runtimes/ 包，也不算缺。
+                continue;
+            }
             out.push(Diagnosis::Missing {
                 module,
                 capability: cap,
@@ -602,12 +612,14 @@ pub fn admit_guest(running: &[String], lease: &str, max: u32) -> Result<(), Stri
 }
 
 /// 目的：派生执行计划：本机档不装载运行包（宿主自备解释器）。
-/// 约束：虚拟机档只有**选型不成立**才拒绝（多版本未定版 / 定版不存在 / 系统路径冲突——用户要解决的选型问题）；
-/// 约束：**缺包不拦会话**：那只是该模块的工具不可用（由 unavailable 收口，降级而非崩溃）。
+/// 约束：虚拟机档**任何诊断都拒绝**——选型不成立（多版本未定版 / 定版不存在 / 系统路径冲突）与
+///   **缺包**都算：没有工具用户完不成工作，与其拉一台跑不了工具的 guest，不如在选型这步如实拒绝。
+/// 约束：guest 自带的运行能力（`guest_runtimes`）不算缺（镜像里已经有解释器）。
 pub fn plan(
     spec: &ExecSpec,
     modules: &[Module],
     lib: &Library,
+    guest_runtimes: &[String],
 ) -> Result<ExecPlan, Vec<Diagnosis>> {
     match spec.tier {
         Tier::Host => Ok(ExecPlan {
@@ -617,12 +629,9 @@ pub fn plan(
             packages: Vec::new(),
         }),
         Tier::Vm => {
-            let hard: Vec<Diagnosis> = vm_diagnoses(modules, lib, spec)
-                .into_iter()
-                .filter(|d| !matches!(d, Diagnosis::Missing { .. }))
-                .collect();
-            if !hard.is_empty() {
-                return Err(hard);
+            let diags = vm_diagnoses(modules, lib, spec, guest_runtimes);
+            if !diags.is_empty() {
+                return Err(diags);
             }
             let mut chosen: Vec<&PackageManifest> = Vec::new();
             let mut seen: BTreeSet<String> = BTreeSet::new();
@@ -675,17 +684,19 @@ pub fn plan(
 }
 
 /// 目的：本档位下不能执行工具的模块（模块 id → 缺失的能力名）：本机档不装载运行包，一律可用（空表）。
-/// 约束：虚拟机档：装配不成立（歧义 / 定版不存在 / 冲突）时，凡声明了运行能力的模块都不能执行工具。
+/// 约束：虚拟机档：缺包 / 装配不成立（歧义 / 定版不存在 / 冲突）时，凡声明了运行能力的模块都不能执行工具。
+/// 约束：guest 自带的运行能力不算缺（镜像里已经有解释器）——与 `plan` 同一把尺子。
 pub fn unavailable(
     spec: &ExecSpec,
     modules: &[Module],
     lib: &Library,
+    guest_runtimes: &[String],
 ) -> BTreeMap<String, Vec<String>> {
     let mut out: BTreeMap<String, Vec<String>> = BTreeMap::new();
     if spec.tier != Tier::Vm {
         return out;
     }
-    let diags = vm_diagnoses(modules, lib, spec);
+    let diags = vm_diagnoses(modules, lib, spec, guest_runtimes);
     if diags.is_empty() {
         return out;
     }
@@ -720,7 +731,7 @@ pub fn diagnose_text(diags: &[Diagnosis]) -> String {
         .map(|d| match d {
             Diagnosis::Missing { module, capability } => {
                 format!(
-                    "模块 {} 需要运行包 {}，包库里没有（把它放进依赖文件夹 runtimes/）",
+                    "模块 {} 需要运行包 {}：包库里没有、guest 镜像也没声明自带（把它放进依赖文件夹 runtimes/，或在 guest.yaml 的 runtimes 里声明）",
                     module, capability
                 )
             }

@@ -517,9 +517,13 @@ impl CollabSession {
                 builtin_tools: self.systools.book(),
                 reply_seq: self.reply_seq,
                 line: Default::default(),
-                // 本档位下不能执行工具的模块（缺运行包）：机制侧据此拒绝执行。
+                // 本档位下不能执行工具的模块（缺运行包）：机制侧据此拒绝执行。guest 自带的运行能力由执行侧收口
+                // （conductor 的 unavailable_modules 有会话的 base 与 probe）；讨论席拿不到模块工具，这里按包库事实给即可。
                 unavailable: crate::capabilities::vm::api::unavailable(
-                    &self.spec, &modules, &library,
+                    &self.spec,
+                    &modules,
+                    &library,
+                    &[],
                 ),
                 fence,
                 // 讨论席不干活、拿不到模块工具，也就没有工具进程的注入项。
