@@ -1393,7 +1393,20 @@ pub(crate) fn vm_capability_is_machine_only_while_session_readiness_needs_base()
         share_tool: None,
         probe: &probe,
     });
-    assert!(cap.ready(), "机器能力齐就该 ready：{:?}", cap.requirements);
+    if cfg!(any(target_os = "windows", target_os = "linux")) {
+        assert!(
+            cap.ready(),
+            "已验平台的机器能力齐就该 ready：{:?}",
+            cap.requirements
+        );
+    } else {
+        // macOS：组合还没真机验收，guest 项按数据表判否——这正是「机器能力」与「已验平台」分开的体现。
+        assert!(
+            cap.requirements.iter().any(|r| r.id == "guest" && !r.met),
+            "未验平台的 guest 项要判否：{:?}",
+            cap.requirements
+        );
+    }
     assert!(
         !cap.requirements.iter().any(|r| r.id == "base"),
         "机器能力清单不含会话级 base：{:?}",
@@ -1602,11 +1615,16 @@ pub(crate) fn share_availability_gates_the_effective_combo() {
             share
         );
     } else {
-        assert!(
-            share.detail.contains("9p") && share.detail.contains("virtiofsd"),
-            "要说清回退到 9p 与怎么补：{:?}",
-            share
-        );
+        // Linux：virtiofs 优先，缺 virtiofsd 时退回 9p；macOS：默认链是 vz/virtiofs（vz 未实现），
+        // 实际落到 qemu/9p——9p 不需要外部工具，没有「怎么补」可写。
+        assert!(share.detail.contains("9p"), "要说清落到 9p：{:?}", share);
+        if cfg!(target_os = "linux") {
+            assert!(
+                share.detail.contains("virtiofsd"),
+                "要说清怎么补 virtiofsd：{:?}",
+                share
+            );
+        }
     }
 }
 
@@ -1983,6 +2001,20 @@ pub(crate) fn path_bridge_round_trips_guest_and_host() {
     use crate::capabilities::vm::api::PathBridge;
     use crate::capabilities::vm::domain::paths::{guest_to_host, PathDialect};
     use std::path::Path;
+    // POSIX 宿主 + Windows guest：桥按**构造的**宿主平台判，与真实平台无关，所以任何平台都跑——
+    // CI 的 POSIX 宿主就靠它；只写进 cfg(unix) 分支会让 Windows 本地漏判（丢根就是这么漏过去的）。
+    let l = PathBridge::new("linux", PathDialect::Windows);
+    let posix = Path::new("/home/u/a");
+    let g = l.to_guest(posix);
+    assert_eq!(g, "C:\\solomni-host\\home\\u\\a");
+    assert_eq!(
+        guest_to_host(l, &g),
+        Some(posix.to_path_buf()),
+        "解出来要落回同一个绝对路径"
+    );
+    // 同方言（本机档）恒等。
+    let id = PathBridge::new("linux", PathDialect::Posix);
+    assert_eq!(guest_to_host(id, "/work/x"), Some(PathBuf::from("/work/x")));
     if cfg!(windows) {
         let b = PathBridge::new("windows", PathDialect::Posix);
         let host = Path::new(r"D:\a\b");
@@ -2003,15 +2035,5 @@ pub(crate) fn path_bridge_round_trips_guest_and_host() {
             Some(host.to_path_buf()),
             "宿主写法直通"
         );
-    } else {
-        // POSIX 宿主 + Windows guest：编进 C:\solomni-host\...，非法字符转义且可逆。
-        let b = PathBridge::new("linux", PathDialect::Windows);
-        let host = Path::new("/home/u/a");
-        let g = b.to_guest(host);
-        assert_eq!(g, "C:\\solomni-host\\home\\u\\a");
-        assert_eq!(guest_to_host(b, &g), Some(host.to_path_buf()));
-        // 同方言（本机档）恒等。
-        let id = PathBridge::new("linux", PathDialect::Posix);
-        assert_eq!(guest_to_host(id, "/work/x"), Some(PathBuf::from("/work/x")));
     }
 }

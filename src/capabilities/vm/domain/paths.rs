@@ -144,20 +144,25 @@ fn posix_unmirror(guest: &str) -> Option<PathBuf> {
 }
 
 /// 目的：Windows guest 的镜像路径解回 POSIX 宿主路径（`C:\solomni-host\home\u\a` → `/home/u/a`）。
+/// 约束：走到这里宿主必是 POSIX（同方言时桥是恒等，不会解镜像），所以结果拼成**绝对** POSIX 路径——
+///   逐段 `push` 会得到相对路径，`resolve` 会以「需要绝对路径」拒掉。
 fn windows_unmirror(guest: &str) -> Option<PathBuf> {
     let rest = guest.strip_prefix(WINDOWS_MIRROR)?;
     let rest = rest.trim_start_matches('\\');
     if rest.is_empty() {
         return None;
     }
-    let mut out = PathBuf::new();
+    let mut segs: Vec<String> = Vec::new();
     for seg in rest.split('\\') {
         if seg.is_empty() {
             continue;
         }
-        out.push(win_unescape(seg)?);
+        segs.push(win_unescape(seg)?);
     }
-    Some(out)
+    if segs.is_empty() {
+        return None;
+    }
+    Some(PathBuf::from(format!("/{}", segs.join("/"))))
 }
 
 /// 目的：`win_escape` 的逆——只认它编过的那几个字符（其它 %XX 一律不认，避免歧义）。
