@@ -108,19 +108,18 @@
   scope: global
   level: T3
   why: |
-    运行包（`runtimes/`）这条通道还剩两半没铺完（预检与 prefix 包进 PATH 已做）：
-    ① `kind: system` 的"写进 guest 系统路径"没做（`mounts_from` 里明写"system 叠层不做"并跳过它）——
-    这类包声明的 `provides_paths` 因此既不叠层也不复制，只有冲突预检认得它；
-    ② 本机档完全不装载运行包（`plan` 对 `Host` 直接 `packages: Vec::new()`，注释是"宿主自备解释器"）——
-    host 档把包放进 `runtimes/` 对执行没有任何影响（既不进 PATH，也不进围栏可达范围）。
+    运行包（`runtimes/`）这条通道还差**本机档**这一半：`plan` 对 `Host` 直接 `packages: Vec::new()`
+    （注释是"本机档不装载运行包（宿主自备解释器）"），所以 host 档把包放进 `runtimes/` 对执行没有任何影响——
+    既不进 PATH、也不进围栏可达范围。
+    虚拟机档已齐：prefix 包的 `<prefix>/bin/*` 软链进 `/usr/local/bin`；system 包的 `provides_paths`
+    以"叠写进系统路径 + 已叠标记"落地（复制合并，不挂载覆盖——挂载会把 guest 原有的 `usr/bin` / `usr/lib` 整棵盖掉）。
   how: |
-    1) `kind: system`：定"叠层"的实现（按 `provides_paths` 写进 guest 系统路径，或在装配期解进虚拟根、可缓存），
-    并让冲突预检与它对齐。
-    2) 本机档：装载运行包（包目录进围栏可达范围 + `<pkg>/bin` 进 PATH），或在文档与界面上明确"本机档 = 宿主自备"。
-    3) done：`kind: prefix` 的 `<prefix>/bin/*` 已在起 guest 后软链进 `/usr/local/bin`（`package_setup_scripts`）。
-    4) 与 `vm/domain/guest.rs` 的 `mounts_from`、docs/vm/README.md 与 RUNTIME_SPEC.md 的契约同步。
+    先定 host 档策略（待用户决定）：(a) 装载运行包——包目录进围栏的只读子树、`<pkg>/bin` 进工具进程 PATH，
+    预检与执行才对得上；(b) 维持"本机档 = 宿主自备"——那就别让预检拿包库满足 host 档的能力，并在文档与界面写清。
+    定了 (a) 的落法：`Sandbox` 带上"这次装载的运行包目录"这一事实（造沙箱处从计划取），`from_sandbox` 映射成
+    只读子树 + PATH 目录，`fence_env` 据此拼 PATH。注意编译包（工具链）不走这条路——见下面的现状。
   accept: |
-    包库里各放一个 prefix 与 system 的包：两档会话里模块工具的**裸名命令**都能直接跑起来（prefix 已可，system 待补）；
-    缺包时建会话仍如实拒绝；机制不可用的平台（Landlock 装不上等）降级路径照旧如实说明。
+    包库里放一个提供能力的 prefix 包：本机档会话里模块工具的**裸名命令**直接跑起来（走的正是包里的那份），
+    或按 (b) 明确"host 档不认包库"且预检不再因此判"能力齐了"。
   blocked_by: |
-    无（已定方案、尚未实施：按"判据 → 装配 → 就地编"的顺序，排在入口判据之后做）。
+    无（等用户定 host 档策略：装载还是"宿主自备"）。

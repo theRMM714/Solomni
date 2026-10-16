@@ -369,33 +369,63 @@ pub(crate) fn exec_entry_missing_refuses_before_any_tier() {
     .expect("本机档照旧可成立");
 }
 #[test]
-pub(crate) fn package_setup_scripts_link_prefix_bins_only() {
+pub(crate) fn package_setup_scripts_apply_prefix_bins_and_system_payloads() {
     use crate::capabilities::vm::domain::exec::{ExecPlan, PlannedPackage};
-    let pkg = |id: &str, kind: &str, prefix: &str| PlannedPackage {
+    let pkg = |id: &str, kind: &str, prefix: &str, rels: &[&str]| PlannedPackage {
         id: id.to_string(),
         version: "1".to_string(),
         kind: kind.to_string(),
         prefix: prefix.to_string(),
         source_dir: std::path::PathBuf::from(format!("/pkgs/{}", id)),
+        provides_paths: rels.iter().map(|s| s.to_string()).collect(),
     };
     let plan = ExecPlan {
         tier: Tier::Vm,
         net: false,
         guest: Some("debian".to_string()),
-        packages: vec![pkg("cc", "prefix", "opt/cc"), pkg("sys", "system", "")],
+        packages: vec![
+            pkg("cc", "prefix", "opt/cc", &[]),
+            pkg("tools", "system", "", &["usr/bin", "usr/share/tools"]),
+            pkg("empty", "system", "", &[]),
+        ],
     };
     let scripts = crate::capabilities::vm::api::package_setup_scripts(&plan);
-    assert_eq!(scripts.len(), 1, "只给 prefix 包建软链：{:?}", scripts);
-    assert!(scripts[0].contains("/opt/cc/bin"), "{}", scripts[0]);
-    assert!(scripts[0].contains("/usr/local/bin"), "{}", scripts[0]);
-    // 空计划：一条脚本都没有（不产生空跑的命令）。
-    let empty = ExecPlan {
-        tier: Tier::Vm,
-        net: false,
-        guest: None,
-        packages: Vec::new(),
-    };
-    assert!(crate::capabilities::vm::api::package_setup_scripts(&empty).is_empty());
+    assert_eq!(
+        scripts.len(),
+        2,
+        "prefix 一条 + system 一条；没有 provides_paths 的不生成：{:?}",
+        scripts
+    );
+    // prefix 包：把 <prefix>/bin 软链进 PATH。
+    assert!(
+        scripts[0].contains("/opt/cc/bin") && scripts[0].contains("/usr/local/bin"),
+        "{}",
+        scripts[0]
+    );
+    // system 包：从只读载荷根按 provides_paths 叠写，并落"已叠"标记。
+    let sys = &scripts[1];
+    assert!(sys.contains("solomni-packages/tools"), "{}", sys);
+    assert!(sys.contains("/usr/bin"), "{}", sys);
+    assert!(sys.contains("usr/share/tools"), "{}", sys);
+    assert!(
+        sys.contains("/var/lib/solomni/packages/tools@1"),
+        "标记：{}",
+        sys
+    );
+    // 生成的脚本必须是合法 shell（引号与拼接错了在这里就露）。
+    #[cfg(unix)]
+    {
+        use std::io::Write;
+        let path = crate::tests::scratch("pkg-setup-script").join("apply.sh");
+        let mut f = std::fs::File::create(&path).expect("建脚本");
+        f.write_all(scripts.join("\n").as_bytes()).expect("写脚本");
+        let st = std::process::Command::new("sh")
+            .arg("-n")
+            .arg(&path)
+            .status()
+            .expect("跑 sh -n");
+        assert!(st.success(), "生成的装配脚本要能过 sh -n：{:?}", scripts);
+    }
 }
 #[test]
 pub(crate) fn exec_host_tier_ignores_packages() {
@@ -858,6 +888,7 @@ pub(crate) fn guest_mounts_prefix_packages_and_fence_roots() {
             kind: "prefix".to_string(),
             prefix: "opt/rt/py".to_string(),
             source_dir: std::path::PathBuf::from("/rt/py"),
+            provides_paths: Vec::new(),
         }],
     };
     let fence = crate::kernel::api::FenceSpec::standalone(
