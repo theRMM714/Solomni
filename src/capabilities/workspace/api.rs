@@ -1,5 +1,6 @@
 //! 入站能力面：**其它能力与呈现层只准用这里**（不许碰 `domain` / `ports`）。
 
+pub use crate::capabilities::workspace::domain::hash::content_hash;
 pub use crate::capabilities::workspace::domain::workspace::{
     safe_file_name, AreaUsage, Place, Sandbox, Sandboxes, WorkFiles, WorkRoots, WorkUsage,
 };

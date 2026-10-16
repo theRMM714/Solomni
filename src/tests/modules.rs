@@ -5,6 +5,56 @@
 use super::prelude::*;
 
 #[test]
+pub(crate) fn build_decl_is_validated_and_survives_the_scan() {
+    use crate::capabilities::modules::api::{check_build, BuildDecl};
+    let mut m = module_of("idx").manifest;
+    assert!(check_build(&m).is_ok(), "没写 build 段是合法的");
+    m.build = Some(BuildDecl {
+        command: String::new(),
+        needs: Vec::new(),
+        net: false,
+    });
+    assert!(check_build(&m).is_err(), "有 build 段但没写 command = 拒收");
+    m.build = Some(BuildDecl {
+        command: "make".to_string(),
+        needs: vec!["cc".to_string(), "cc".to_string()],
+        net: false,
+    });
+    assert!(check_build(&m).is_err(), "needs 重复 = 拒收");
+    m.build = Some(BuildDecl {
+        command: "make".to_string(),
+        needs: vec!["C++".to_string()],
+        net: false,
+    });
+    assert!(check_build(&m).is_err(), "能力名不合法 = 拒收");
+    m.build = Some(BuildDecl {
+        command: "make all".to_string(),
+        needs: vec!["cc".to_string()],
+        net: true,
+    });
+    assert!(check_build(&m).is_ok(), "{}", "正常的构建声明要过");
+}
+
+#[test]
+pub(crate) fn shipped_indexer_declares_its_build() {
+    // 随仓的 indexer 是编译型模块：`build:` 段必须被扫出来（产品据此能替它编）。
+    let roster = crate::capabilities::modules::detail::FsModules::new(
+        PathBuf::from("modules"),
+        crate::capabilities::tools::api::names(),
+    )
+    .scan();
+    let idx = roster
+        .modules
+        .iter()
+        .find(|m| m.manifest.id == "indexer")
+        .expect("随仓有 indexer");
+    let b = idx.manifest.build.as_ref().expect("indexer 要声明 build");
+    assert!(b.command.contains("indexer.cpp"), "{}", b.command);
+    assert!(b.command.contains("build/indexer"), "{}", b.command);
+    assert_eq!(b.needs, vec!["cc".to_string()]);
+    assert!(!b.net, "构建不需要出网");
+}
+#[test]
 pub(crate) fn local_entry_only_accepts_relative_paths() {
     use crate::capabilities::modules::api::local_entry;
     assert_eq!(local_entry("build/indexer build"), Some("build/indexer"));

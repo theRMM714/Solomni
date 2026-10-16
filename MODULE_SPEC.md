@@ -120,6 +120,29 @@ secrets:                # 【可选】隐秘字段：字段名 → 注入该模�
 模块作者只需记住一件事：**回报不是要模块自己手写的 JSON 块**。工具怎么声明、谁能调、载荷什么形状，
 唯一权威在 [docs/tools/tools-and-roles.md](docs/tools/tools-and-roles.md)（声明在 `systools/tools.yaml`）。
 
+## 四之前：编译型模块的构建（`build:` 段）
+
+模块可以是**任何语言**：脚本型（`runtimes: [python]` + `tools.<名>.command`）就够了；要编译的模块在清单里声明**构建方法**：
+
+```yaml
+build:                  # 【可选】系统在**目标环境**里照它把产物编出来
+  command: mkdir -p build && g++ -O2 -std=c++17 -static-libgcc -static-libstdc++ tools/src/indexer.cpp -o build/indexer
+  needs: [cc]           # 【可选】构建期能力名（工具链）；本机档 = 宿主 PATH 上要有它
+  net: false            # 【可选】构建期要不要出站网络（缺省 false）
+tools:
+  build:
+    command: build/indexer build     # 相对路径入口 = 模块内的产物（见下）
+```
+
+- **谁编**：**系统**（不是 agent）——`solomni --build=<模块 id>`。产品在**目标环境**里跑 `command`
+  （本机档在宿主；虚拟机档在 guest，尚未接线，见缺口 `module.build-in-guest`），围栏由产品给
+  （只写模块目录与状态目录、按 `net` 声明）；**工具链不进 agent 的工具围栏**。
+- **入口判据**：`tools.<名>.command` 的首个 token 是**相对路径**时，它就是模块内的产物，模块目录下必须有那个
+  **能直接跑**的文件（unix 还要求可执行位）；不在场就在「开始」那一刻**拒绝**，模块声明了 `build` 就顺带指到 `--build`。
+- **缓存**：状态落 `.vm/build-state/<模块>.json`（源指纹 + 命令 + 能力 + 网络 + 目标）；指纹一致且入口在场就跳过重编。
+- **产物**：写进模块目录（`build/` 已在 `.gitignore` 里）；agent 看得见产物、看不见工具链。
+- **本机档**：`needs` 由宿主 PATH 决定（运行包库只服务虚拟机档）；缺工具如实拒绝，并给"装工具链 / 自己编 / 让作者发产物"三条出路。
+
 ## 四、工具执行
 
 工具属于模块，使用权跟着装了它的 agent：**执行阶段与单 agent 的对话**里都能用；讨论阶段只发只读核实工具（`read` / `list` / `search`），不给模块工具。

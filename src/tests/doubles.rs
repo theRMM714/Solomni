@@ -1019,6 +1019,7 @@ prefix: opt/rt/{}-{}",
 pub(crate) fn module_of(id: &str) -> Module {
     Module {
         manifest: ModuleManifest {
+            build: None,
             id: id.to_string(),
             brief: format!("{} 的简介", id),
             system: format!("你负责{}", id),

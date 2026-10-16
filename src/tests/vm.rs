@@ -330,6 +330,7 @@ pub(crate) fn exec_entry_missing_refuses_before_any_tier() {
         module: "a".to_string(),
         tool: "build".to_string(),
         command: "build/indexer".to_string(),
+        buildable: true,
     }];
     // 本机档：入口判据是唯一要说的。
     let host = exec::plan(
@@ -354,8 +355,8 @@ pub(crate) fn exec_entry_missing_refuses_before_any_tier() {
     );
     let said = exec::diagnose_text(&vm);
     assert!(
-        said.contains("build/indexer") && said.contains("README"),
-        "{}",
+        said.contains("build/indexer") && said.contains("--build=a"),
+        "模块声明了构建方法时，拒绝理由要指到 --build：{}",
         said
     );
     // 没有这份事实时照旧成立：入口判据不牵连别的东西。

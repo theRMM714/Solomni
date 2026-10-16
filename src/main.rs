@@ -67,6 +67,13 @@ fn main() {
     if args.iter().any(|a| a == "--provision") {
         std::process::exit(diagnostics::provision(&root, &args));
     }
+    // 隐藏模式：构建一个模块声明的产物（**系统动作**：在目标环境里跑 module.yaml 的 build.command）。
+    if let Some(i) = args
+        .iter()
+        .position(|a| a == "--build" || a.starts_with("--build="))
+    {
+        std::process::exit(diagnostics::build(&root, &args, i));
+    }
     // 隐藏模式：按条处置围栏台账（列清单 / 还原一条 / 撤一条 / 删一个 profile）——比整体收尾更细，
     // 所以排在 --fence-clean 之前；两者共用同一份台账与同一套 ACE 读法（见 docs/tools/README.md）。
     if let Some(code) = guard::fence_grant(&args, &root) {

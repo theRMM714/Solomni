@@ -214,3 +214,238 @@ pub fn fence_verify(args: &[String], flag: usize) -> i32 {
 pub fn print_routes() {
     println!("{}", crate::presentation::web::routes::catalog_json());
 }
+
+/// 目的：隐藏模式——**构建一个模块声明的产物**（系统动作：在目标环境里跑 `module.yaml` 的 `build.command`）。
+/// 参数：root = 产品根；args = 原始参数；i = `--build` 的位置（`--build=<模块 id>`；可选 `--guest=<虚拟根>`）。
+/// 约束：只写项目内；本机档用**产品自己写的**受限围栏跑（只写模块目录与状态目录、按声明的 net），
+///   工具链只是宿主 PATH 上的东西——**不进 agent 的工具围栏**；
+///   模块契约与状态落点见 MODULE_SPEC 的「构建」与 `.vm/build-state/<模块>.json`。
+pub fn build(root: &std::path::Path, args: &[String], i: usize) -> i32 {
+    let id = match args[i].strip_prefix("--build=") {
+        Some(v) if !v.is_empty() => v.to_string(),
+        _ => args.get(i + 1).cloned().unwrap_or_default(),
+    };
+    if id.is_empty() {
+        eprintln!("用法：solomni --build=<模块 id> [--guest=<虚拟根>]");
+        return 2;
+    }
+    if let Some(guest) = args.iter().find_map(|a| a.strip_prefix("--guest=")) {
+        eprintln!("[构建] 在虚拟根（{}）里构建还没接线：先在本机构建，或自己按模块 README 编；缺口见 tests/gaps.yaml", guest);
+        return 2;
+    }
+    let runner = match build_runner(root) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("[构建] 执行器起不来：{}", e);
+            return 1;
+        }
+    };
+    build_module(root, &id, &runner)
+}
+
+/// 目的：构建一个模块（CLI 与用例共用）：查模块、查构建期能力、看缓存、跑命令、复验入口、落状态。
+/// 参数：root = 产品根；id = 模块 id；runner = 执行器（生产是守门进程，用例可注入替身）——
+///   构建命令经它跑在**产品给的**围栏里（只写模块目录与状态目录、按声明的 net）。
+pub fn build_module(
+    root: &std::path::Path,
+    id: &str,
+    runner: &dyn crate::kernel::ports::ProcessRunner,
+) -> i32 {
+    use crate::capabilities::modules::ports::ModuleSource;
+    let roster = crate::capabilities::modules::detail::FsModules::new(
+        root.join("modules"),
+        crate::capabilities::tools::api::names(),
+    )
+    .scan();
+    let Some(module) = roster.modules.iter().find(|m| m.manifest.id == id) else {
+        eprintln!("[构建] 没有模块「{}」（清单被拒收的话见 --doctor）", id);
+        return 2;
+    };
+    let Some(decl) = module.manifest.build.clone() else {
+        eprintln!("[构建] 模块「{}」没声明 build 段：在 module.yaml 里写 build.command（见 MODULE_SPEC 的「构建」）", id);
+        return 2;
+    };
+    let probe = crate::kernel::detail::host_probe::HostProbeAdapter;
+    use crate::kernel::ports::HostProbe;
+    // 构建期能力：本机档就是宿主 PATH 上有没有那个工具（包库只服务虚拟机档）。
+    let missing: Vec<&str> = decl
+        .needs
+        .iter()
+        .filter(|c| !probe.has_exe(c))
+        .map(|c| c.as_str())
+        .collect();
+    if !missing.is_empty() {
+        eprintln!(
+            "[构建] 本机没有这些构建期工具：{}（装工具链、自己编好放进来，或让作者发产物）",
+            missing.join("、")
+        );
+        return 1;
+    }
+    let state_dir = root.join(".vm").join("build-state");
+    let state_path = state_dir.join(format!("{}.json", id));
+    let fingerprint = match source_fingerprint(&module.root, &decl) {
+        Ok(f) => f,
+        Err(e) => {
+            eprintln!("[构建] 算源指纹失败：{}", e);
+            return 1;
+        }
+    };
+    let entries = || {
+        crate::capabilities::vm::api::missing_entries(std::slice::from_ref(module), &|p| {
+            probe.is_executable(p)
+        })
+    };
+    if let Some(prev) = read_build_state(&state_path) {
+        if prev.fingerprint == fingerprint && entries().is_empty() {
+            println!(
+                "[构建] {} 已是最新，跳过（状态 {}）",
+                id,
+                state_path.display()
+            );
+            return 0;
+        }
+    }
+    // 跑构建：围栏由产品给（只写模块目录与状态目录；不写本机任何权限项）。
+    let home = state_dir.join(id).join("home");
+    if let Err(e) = std::fs::create_dir_all(&home) {
+        eprintln!("[构建] 建状态目录失败：{}", e);
+        return 1;
+    }
+    let fence = crate::kernel::api::FenceSpec {
+        agent: format!("build:{}", id),
+        lease: String::new(),
+        rw: vec![module.root.clone(), state_dir.join(id)],
+        ro: Vec::new(),
+        ro_tree: Vec::new(),
+        private: home,
+        cwd: module.root.clone(),
+        net: decl.net,
+    };
+    println!(
+        "[构建] {}：在模块根跑声明的构建命令（出站网络：{}）",
+        id,
+        if decl.net { "放行" } else { "不放行" }
+    );
+    let out =
+        crate::kernel::ports::ProcessRunner::run(runner, &fence, &decl.command, "{}", &[], None);
+    print!("{}", out.output);
+    if !out.ok {
+        eprintln!("[构建] {} 的构建命令失败（不落状态，下次重试）", id);
+        return 1;
+    }
+    // 构建完了入口必须真在：否则等于白编——入口判据不认，会话照样起不来。
+    let left = entries();
+    if !left.is_empty() {
+        eprintln!(
+            "[构建] 命令跑通了，但入口仍不在场：{}——检查 build.command 把产物写到哪了",
+            left.iter()
+                .map(|e| format!("{}（工具 {}）", e.command, e.tool))
+                .collect::<Vec<_>>()
+                .join("、")
+        );
+        return 1;
+    }
+    let state = BuildState {
+        module: id.to_string(),
+        target: "host".to_string(),
+        fingerprint,
+    };
+    let text = match serde_json::to_string_pretty(&state) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("[构建] 状态序列化失败：{}", e);
+            return 1;
+        }
+    };
+    if let Err(e) = std::fs::write(&state_path, format!("{}\n", text)) {
+        eprintln!("[构建] 写状态失败（{}）：{}", state_path.display(), e);
+        return 1;
+    }
+    println!("[构建] {} 构建完成（状态 {}）", id, state_path.display());
+    0
+}
+
+/// 目的：构建状态（`.vm/build-state/<模块>.json`）——指纹一致且入口在场就跳过重编。
+#[derive(serde::Serialize, serde::Deserialize)]
+struct BuildState {
+    module: String,
+    target: String,
+    fingerprint: String,
+}
+
+/// 目的：读构建状态；读不到（首次）或格式不认识都给 None（那就重编）。
+fn read_build_state(path: &std::path::Path) -> Option<BuildState> {
+    let text = std::fs::read_to_string(path).ok()?;
+    serde_json::from_str(&text).ok()
+}
+
+/// 目的：模块的**源指纹**（构建命令 + 能力 + 网络 + 全部源文件的相对路径与内容）——变了才重编。
+/// 约束：跳过 `build/`（产物本身）与 `userdata/`（跨任务私有状态，不是源）。
+fn source_fingerprint(
+    module_root: &std::path::Path,
+    decl: &crate::capabilities::modules::api::BuildDecl,
+) -> Result<String, String> {
+    let mut buf: Vec<u8> = Vec::new();
+    buf.extend_from_slice(decl.command.as_bytes());
+    buf.push(0);
+    buf.extend_from_slice(decl.needs.join(",").as_bytes());
+    buf.push(0);
+    buf.push(if decl.net { b'1' } else { b'0' });
+    buf.push(0);
+    collect_sources(module_root, module_root, &mut buf)?;
+    Ok(crate::capabilities::workspace::api::content_hash(&buf))
+}
+
+/// 目的：把模块根下的源文件按相对路径 + 内容收进指纹缓冲；`build/` 与 `userdata/` 跳过。
+fn collect_sources(
+    root: &std::path::Path,
+    dir: &std::path::Path,
+    buf: &mut Vec<u8>,
+) -> Result<(), String> {
+    let mut entries: Vec<std::path::PathBuf> = std::fs::read_dir(dir)
+        .map_err(|e| format!("读 {} 失败：{}", dir.display(), e))?
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .collect();
+    entries.sort();
+    for path in entries {
+        let rel = path
+            .strip_prefix(root)
+            .unwrap_or(&path)
+            .to_string_lossy()
+            .into_owned();
+        let top = rel.split(['/', '\\']).next().unwrap_or("");
+        if top == "build" || top == "userdata" {
+            continue;
+        }
+        if path.is_dir() {
+            collect_sources(root, &path, buf)?;
+            continue;
+        }
+        buf.extend_from_slice(rel.as_bytes());
+        buf.push(0);
+        buf.extend_from_slice(
+            &std::fs::read(&path).map_err(|e| format!("读 {} 失败：{}", path.display(), e))?,
+        );
+        buf.push(0);
+    }
+    Ok(())
+}
+
+/// 目的：构建用的执行器——与外层工具执行同一套守门进程机制（围栏在它里面装）。
+fn build_runner(
+    root: &std::path::Path,
+) -> Result<crate::kernel::detail::process::ProcTools, String> {
+    let source =
+        crate::capabilities::prompt::detail::yaml_prompts::YamlPrompts::new(root.join("prompts"));
+    let prompt = crate::capabilities::prompt::service::load(&source)?;
+    let texts: std::sync::Arc<dyn crate::kernel::ports::ProcessTexts> = std::sync::Arc::new(
+        crate::capabilities::tools::detail::PromptProcessTexts::new(prompt.tools()),
+    );
+    Ok(crate::kernel::detail::process::ProcTools::new(
+        std::env::current_exe().unwrap_or_default(),
+        texts,
+        root.join(".home"),
+        std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+    ))
+}

@@ -7,6 +7,12 @@
 
 ## 构建（首次使用前一次）
 
+模块清单已声明 `build:`，**首选让产品编**（本机档在宿主上跑同一条命令，产物落 `build/`，可重复执行）：
+
+    solomni --build=indexer
+
+手动编也行（下面的命令与清单里的一致）：
+
 Windows（项目自带 mingw，g++ 16.2.0）：
 
     g++ -O2 -std=c++17 -Wall -Wextra -static -static-libgcc -static-libstdc++ modules/indexer/tools/src/indexer.cpp -o modules/indexer/build/indexer.exe

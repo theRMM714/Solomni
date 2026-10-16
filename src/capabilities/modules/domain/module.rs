@@ -82,6 +82,10 @@ pub struct ModuleManifest {
     pub id: String,
     pub brief: String,
     pub system: String,
+    /// 目的：模块声明的**构建方法**（可选）：系统在**目标环境**里照它把产物编出来（见 MODULE_SPEC 的「构建」）。
+    /// 约束：有这一段时 `command` 必填；构建是**系统动作**，不进 agent 的工具围栏。
+    #[serde(default)]
+    pub build: Option<BuildDecl>,
     /// 目的：作者默认的模块启用状态（缺省 true；用户覆盖落 `.home/modules.yaml`）。
     #[serde(default = "default_true")]
     pub enabled: bool,
@@ -244,6 +248,43 @@ pub fn local_entry(command: &str) -> Option<&str> {
     } else {
         None
     }
+}
+
+/// 目的：模块声明的构建方法（`build:` 段）——系统在目标环境里跑 `command`，把产物编进模块目录。
+#[derive(Debug, Clone, Deserialize, serde::Serialize, PartialEq, Eq)]
+pub struct BuildDecl {
+    /// 目的：构建命令（cwd = 模块根；产物应落在模块目录里，例如 `build/indexer`）。
+    pub command: String,
+    /// 目的：构建期要的能力名（工具链，如 `cc` / `rustc`；同一套能力词汇，格式同 `runtimes`）。
+    #[serde(default)]
+    pub needs: Vec<String>,
+    /// 目的：构建期要不要出站网络（缺省 false；要下载依赖的构建显式声明）。
+    #[serde(default)]
+    pub net: bool,
+}
+
+/// 目的：构建声明的校验（纯逻辑；扫描模块时由适配层调用）：命令必填、能力名合法且不重复。
+pub fn check_build(m: &ModuleManifest) -> Result<(), String> {
+    let Some(b) = &m.build else {
+        return Ok(());
+    };
+    if b.command.trim().is_empty() {
+        return Err("build 段没写 command（构建命令）".to_string());
+    }
+    let mut seen: Vec<&String> = Vec::new();
+    for c in &b.needs {
+        if !crate::kernel::api::valid_capability(c) {
+            return Err(format!(
+                "build.needs 里的能力名不合法：{}（只允许小写字母、数字、- _ .，且以字母或数字开头）",
+                c
+            ));
+        }
+        if seen.contains(&c) {
+            return Err(format!("build.needs 里重复声明了：{}", c));
+        }
+        seen.push(c);
+    }
+    Ok(())
 }
 
 /// 目的：扫描结果：合法模块 + 拒收原因（校验，不是挑选——如实呈现）。

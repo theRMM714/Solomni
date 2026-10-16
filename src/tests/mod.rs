@@ -9,6 +9,7 @@ mod cli;
 mod collab;
 mod conductor;
 mod detail;
+mod diagnostics;
 pub(crate) mod doubles;
 mod fakes;
 mod fence_reach;

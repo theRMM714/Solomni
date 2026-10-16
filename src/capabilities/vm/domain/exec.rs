@@ -30,6 +30,8 @@ pub enum Diagnosis {
         module: String,
         tool: String,
         command: String,
+        /// 目的：这个模块声明了 `build:`（系统可以照它在目标环境里编出来）——拒绝理由据此指路。
+        buildable: bool,
     },
 }
 
@@ -40,6 +42,8 @@ pub struct MissingEntry {
     pub tool: String,
     /// 目的：命令里写的相对入口（如 `build/indexer`）。
     pub command: String,
+    /// 目的：这个模块声明了 `build:`（见 MODULE_SPEC）——拒绝理由里就能给出"怎么编"的路。
+    pub buildable: bool,
 }
 
 /// 目的：按宿主事实挑出"入口不在场"的模块工具——相对路径入口必须存在且**能直接执行**。
@@ -60,6 +64,7 @@ pub fn missing_entries(
                     module: m.manifest.id.clone(),
                     tool: tool.clone(),
                     command: entry.to_string(),
+                    buildable: m.manifest.build.is_some(),
                 });
             }
         }
@@ -717,6 +722,7 @@ pub fn plan(
             module: m.module.clone(),
             tool: m.tool.clone(),
             command: m.command.clone(),
+            buildable: m.buildable,
         })
         .collect();
     match spec.tier {
@@ -863,11 +869,14 @@ pub fn diagnose_text(diags: &[Diagnosis]) -> String {
                 module,
                 tool,
                 command,
+                buildable,
             } => {
-                format!(
-                    "模块 {} 的工具 {} 入口不在场：{}（模块要自带这个产物，或先按模块自己的 README 构建一次）",
-                    module, tool, command
-                )
+                let how = if *buildable {
+                    format!("跑 solomni --build={} 让系统照模块声明的构建方法编一次", module)
+                } else {
+                    "模块要自带这个产物，或先按模块自己的 README 构建一次".to_string()
+                };
+                format!("模块 {} 的工具 {} 入口不在场：{}（{}）", module, tool, command, how)
             }
         })
         .collect();

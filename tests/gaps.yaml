@@ -103,3 +103,21 @@
     三平台各有一份覆盖率报告，且报告明确标注"仅进程内 / 仅当前平台"或已聚合子进程；
     未覆盖的生产路径逐条有补测或缺口结论。
   blocked_by: 缺少观察面（子进程插桩与合并尚未实现）
+
+- id: module.build-in-guest
+  scope: global
+  level: T3
+  why: |
+    模块的 `build:` 段只在**本机档**接线了：`solomni --build=<模块 id>` 在宿主上跑构建命令（围栏由产品给、
+    产物落模块目录、状态落 `.vm/build-state/`、入口判据随后复验）。虚拟机档（在 guest 里为**目标 ABI** 构建）还没有，
+    `--guest=<虚拟根>` 目前如实拒绝。缺它的后果很实际：Windows / macOS 宿主的工具链产不出 Linux ELF，
+    那几个平台上的编译型模块在本机档编不出能在 guest 里跑的产物。
+  how: |
+    复用 provision 的 guest 生命周期：解析虚拟根 → 把模块目录（rw）与构建期能力包（只读）挂进去 → 起 guest →
+    在模块根跑 `build.command` → 复验入口 → 收尾 → 落同一份状态（target = 虚拟根名）。`needs` 由 guest 自带
+    或包库（system 叠写 / prefix 进 PATH 都已就位）满足。
+  accept: |
+    在一台本机没有 C++ 工具链的宿主上，`solomni --build=indexer --guest=debian` 能在 guest 里编出产物，
+    入口判据随后放行；guest 里没有工具链时如实拒绝并指出怎么补。
+  blocked_by: |
+    无（等排期；本机档已可用）。
