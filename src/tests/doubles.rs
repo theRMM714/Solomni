@@ -1292,6 +1292,8 @@ pub(crate) struct FixedProbe {
     pub hypervisor: bool,
     /// 目的：在场的**虚拟根目录**（`.vm/guest/<名>`）——路径落在它下面也算在场（目录内容由用例声明的文件表达）。
     pub guests: Vec<std::path::PathBuf>,
+    /// 目的：`files` 里"在但**不可执行**"的那些（权限位丢了的场景）——真实适配器按可执行位判。
+    pub not_executable: Vec<std::path::PathBuf>,
 }
 
 impl crate::kernel::ports::HostProbe for FixedProbe {
@@ -1300,6 +1302,9 @@ impl crate::kernel::ports::HostProbe for FixedProbe {
     }
     fn is_dir(&self, path: &std::path::Path) -> bool {
         self.dirs.iter().any(|p| p == path) || self.guests.iter().any(|g| path.starts_with(g))
+    }
+    fn is_executable(&self, path: &std::path::Path) -> bool {
+        self.is_file(path) && !self.not_executable.iter().any(|p| p == path)
     }
     fn has_exe(&self, name: &str) -> bool {
         self.exes.iter().any(|n| n == name)

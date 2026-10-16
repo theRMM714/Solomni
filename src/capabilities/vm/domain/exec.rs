@@ -454,7 +454,9 @@ pub fn share_tool_of(share: &str) -> Option<&'static str> {
 /// 目的：一个外部工具在不在场——登记路径优先（登记了就必须是那个文件），否则看 PATH。
 fn tool_available(name: &str, registered: Option<&str>, probe: &dyn HostProbe) -> bool {
     match registered.map(str::trim) {
-        Some(p) if !p.is_empty() => probe.is_file(Path::new(p)),
+        // 登记了就以登记的为准，而且得**能直接执行**——只在场（比如权限位丢了）不算可用，
+        // 否则组合会选它、到启动那一步才炸；这里如实判"不在场"，让回退链与就绪文案说真话。
+        Some(p) if !p.is_empty() => probe.is_executable(Path::new(p)),
         _ => probe.has_exe(name),
     }
 }
@@ -499,10 +501,22 @@ fn share_requirement(
                 if share_available(c.share, share_tool, probe) {
                     format!("共享档 {} 可用（找到 {}）", c.share, name)
                 } else {
-                    format!(
-                        "共享档 {} 不在场（没找到 {}）：已按组合回退到 {}；把 {} 放进 PATH，或在设置里登记它的完整路径即可启用",
-                        c.share, name, effective_combo, name
-                    )
+                    match share_tool.map(str::trim) {
+                        Some(p)
+                            if !p.is_empty()
+                                && probe.is_file(Path::new(p))
+                                && !probe.is_executable(Path::new(p)) =>
+                        {
+                            format!(
+                                "共享档 {} 登记的那个不能执行（{}）：已按组合回退到 {}；给它执行位，或换成 PATH 上的 {} 即可启用",
+                                c.share, p, effective_combo, name
+                            )
+                        }
+                        _ => format!(
+                            "共享档 {} 不在场（没找到 {}）：已按组合回退到 {}；把 {} 放进 PATH，或在设置里登记它的完整路径即可启用",
+                            c.share, name, effective_combo, name
+                        ),
+                    }
                 }
             }
         },

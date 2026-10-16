@@ -1832,7 +1832,51 @@ pub(crate) fn share_availability_gates_the_effective_combo() {
         ),
         "登记了路径就必须是那个文件（登记优先于 PATH）"
     );
+    // 文件在、但不可执行（权限位丢了）：不算可用——否则组合选它，到启动那一步才炸。
+    let noexec = std::path::PathBuf::from("/vm/virtiofsd");
+    let mut plain = FixedProbe::default();
+    plain.files.push(noexec.clone());
+    plain.not_executable.push(noexec.clone());
+    assert!(
+        !share_available("virtiofs", Some(noexec.to_string_lossy().as_ref()), &plain),
+        "登记的那个不可执行就不算在场（如实回退，别到启动才失败）"
+    );
+    let mut exec_ok = FixedProbe::default();
+    exec_ok.files.push(noexec.clone());
+    assert!(
+        share_available(
+            "virtiofs",
+            Some(noexec.to_string_lossy().as_ref()),
+            &exec_ok
+        ),
+        "能执行才算在场"
+    );
 
+    // 登记了但不可执行：就绪文案要说清"不能执行"（与"没找到"是两回事，补法也不同）。
+    if cfg!(target_os = "linux") {
+        let r = exec::tier_readiness(
+            &crate::tests::root_dir(),
+            &ExecSpec {
+                tier: Tier::Vm,
+                guest: None,
+                ..Default::default()
+            },
+            None,
+            Some(noexec.to_string_lossy().as_ref()),
+            &plain,
+        );
+        let detail = &r
+            .requirements
+            .iter()
+            .find(|x| x.id == "share")
+            .expect("共享档这一项要在")
+            .detail;
+        assert!(
+            detail.contains("不能执行") && detail.contains("9p"),
+            "要说清登记的那个不能执行、已回退：{:?}",
+            detail
+        );
+    }
     // 就绪项：没有 virtiofsd 时 share 项仍 met（不拦档），但要说清回退与怎么补。
     let spec = ExecSpec {
         tier: Tier::Vm,
