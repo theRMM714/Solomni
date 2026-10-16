@@ -63,7 +63,7 @@ const CFG = {
   agents: [{ name: "调研员", modules: ["research"], model: "m1" }],
   tier: "vm", guest: "debian", net: true,
   guests: [
-    { guest: "debian", label: "debian-13-genericcloud-amd64", os: "linux", arch: "amd64", ready: true, missing: [], install: ".vm/guest/debian" },
+    { guest: "debian", label: "debian-13-genericcloud-amd64", os: "linux", arch: "amd64", ready: true, missing: [], install: ".vm/guest/debian", runtimes: ["python"] },
     { guest: "windows", label: "debian-13-genericcloud-amd64", os: "linux", arch: "amd64", ready: false, missing: ["vm.guest-runtime.windows"], install: ".vm/guest/windows" },
   ],
   pins: { python: "3.12", ruby: "3.2" },
@@ -209,6 +209,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   check("config: 虚拟机档可选时不渲染前置清单（那是禁用态的事）",
     t.indexOf("虚拟机档前置") < 0);
   check("config: 虚拟机档给出虚拟根选择器", t.indexOf("虚拟机（虚拟根）") >= 0 && t.indexOf("debian-13-genericcloud-amd64") >= 0);
+check("config: 虚拟根状态说清装齐与自带能力（不写「已就绪」这种会被读成「能用」的词）",
+  t.indexOf("已装齐") >= 0 && t.indexOf("自带运行能力：python") >= 0 && t.indexOf("已就绪") < 0);
   check("config: 依赖文件夹真实路径（照它去放包）", t.indexOf("/runtimes") >= 0);
   check("config: declared 呈现", t.indexOf("模块 research 需要：python") >= 0);
   check("config: missing 呈现 + 放进 runtimes_dir 后重新扫描",

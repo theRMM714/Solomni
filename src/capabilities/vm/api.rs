@@ -12,7 +12,7 @@ pub use crate::capabilities::vm::domain::exec::{
 pub use crate::capabilities::vm::domain::guest::{
     classify_base, mounts_from, GuestImage, GuestRun, GuestSpec, SeedDocs,
 };
-pub use crate::capabilities::vm::domain::guest::{GuestArch, GuestOs};
+pub use crate::capabilities::vm::domain::guest::{GuestArch, GuestClients, GuestOs, GuestRoot};
 pub use crate::capabilities::vm::domain::packages::{library_for_guest, Library};
 pub use crate::capabilities::vm::domain::paths::PathBridge;
 

@@ -33,6 +33,8 @@ pub struct GuestBase {
     /// 目的：guest 的操作系统（`guest.yaml` 的 os；缺画像按 linux）。
     pub os: String,
     pub arch: String,
+    /// 目的：这个虚拟根**自证过的**运行能力（`guest.yaml` 的 runtimes）：界面据此说明它自带什么。
+    pub runtimes: Vec<String>,
     /// 目的：本机的清单条目是否都在场（缺哪条 = 还没装完，`missing` 列出来）。
     pub ready: bool,
     /// 目的：没就绪时缺哪几条（条目 id）；就绪时为空。

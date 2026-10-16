@@ -33,7 +33,7 @@ macOS 缺取包（`vm.qemu-provisioning-macos`）与 macOS Apple vz 引擎 + 自
 
 依赖由 `provision` 能力按清单（`dependencies.yaml` + `links.yaml`，需用户同意、只写项目内）装进 `.vm/`：Linux 装 QEMU（pkgforge Anylinux AppImage）、
 virtiofsd 与默认虚拟根 `debian`（目录 rootfs + 内核 + 9p initrd + qemu-guest-agent，装进 `.vm/guest/debian/`）；Windows 装官方源码在 MSYS2（mingw-w64）下自建的 QEMU 11.1.1 便携包（`--enable-slirp`，固件按真实文件打包）+ Debian cloud qcow2（虚拟根 `windows`，装进 `.vm/guest/windows/`）+ `guest.yaml`；
-Windows guest 的 agent / 运行包由 provision 能力的 `guest-runtime` 编排（cloud-init 种子 → 维护启动经 QGA 装包）在 Rust 侧装上，macOS 保持检测 + 指路。据此在 **KVM** 下跑通真机探针与产品级会话验收，在 **WHPX** 下同样跑通引擎级探针与 e2e 的 vm 会话场景（设 `SOLOMNI_VM_LIVE=1` +
+虚拟根"真有什么运行能力"由 provision 能力的 `guest-runtime` 编排（Rust 侧起一次 guest，逐个自证后写进 `guest.yaml` 的 `runtimes`）确认：Windows 走 cloud-init 首启 + 维护启动装包，Linux 由 `guest-rootfs` 自带 agent、维护启动只确认 python 并尽力装 node；macOS 保持检测 + 指路。据此在 **KVM** 下跑通真机探针与产品级会话验收，在 **WHPX** 下同样跑通引擎级探针与 e2e 的 vm 会话场景（设 `SOLOMNI_VM_LIVE=1` +
 `SOLOMNI_VM_QEMU` / `SOLOMNI_VM_VIRTIOFSD` / `SOLOMNI_VM_SMBD` 指向 `.vm/`（虚拟根默认 `debian`，可用 `SOLOMNI_VM_GUEST` 换），默认 `[探针]` 跳过）：guest 真启动、共享按后端进 guest（virtiofs / 9p 挂载 / SMB guestfwd / QGA 复制）、经 QGA 在 guest 里跑模块工具、删会话即销毁 guest 与 virtiofsd。
 
 **并发**：每条会话一条租约、一台 guest（固定 `-m 2048 -smp 2`）；同时台上限是设置项 `max_guests`（默认 2，0 = 不限制），

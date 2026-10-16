@@ -96,7 +96,7 @@
 | GET | `/app.js` | 静态资源 | — | `app.js` | 200 |
 | GET | `/md.js` | 静态资源 | — | `md.js` | 200 |
 | GET | `/api/events` | 事件台（`EventBus`） | 查询 `sid` / `since` | `{lines:[{seq,sid,events}],head,oldest}` | 200 |
-| GET | `/api/state` | `ModulesOps::roster / module_enabled / service_enabled` + `SessionOps::session_views` + `RegistryOps` + `HistoryOps::list` | — | `{modules,services,rejected,fence,providers,models,core,agents,settings,sessions,history}`（`modules[].enabled` 与 `modules[].services[].enabled` 是**有效启停**；`services` 是常驻服务的**运行态** `{module,name,adapter,state,reason,operations}`；`sessions[].pending` 是**当前那张裁决卡**的快照，与推的 `decision_card` 同一份） | 200, 400 |
+| GET | `/api/state` | `ModulesOps::roster / module_enabled / service_enabled` + `SessionOps::session_views` + `RegistryOps` + `HistoryOps::list` | — | `{modules,services,rejected,fence,providers,models,core,agents,settings,sessions,history}`（`modules[].runtimes` 是模块声明的运行能力，创建向导据此预判虚拟根够不够；`modules[].enabled` 与 `modules[].services[].enabled` 是**有效启停**；`services` 是常驻服务的**运行态** `{module,name,adapter,state,reason,operations}`；`sessions[].pending` 是**当前那张裁决卡**的快照，与推的 `decision_card` 同一份） | 200, 400 |
 | GET | `/api/actions` | `ActionOps::catalog` | 查询 `sid` | `{actions:[{id,desc,params,available,reason}]}` | 200, 400 |
 | POST | `/api/actions/{id}` | `ActionOps::act` | `{…按动作声明}` | `{head}` / `{events}`（重放快照） / `{ok,…}` | 200, 400 |
 | GET | `/api/sessions/{sid}/config` | `SessionOps::config` | — | `{config}` | 200, 400 |
@@ -105,7 +105,7 @@
 | GET | `/api/history` | `HistoryOps::list` | — | `{sessions}` | 200, 400 |
 | GET | `/api/history/{name}` | `HistoryOps::open` | — | `{meta,events,live,head}` | 200, 404 |
 | POST | `/api/history/{name}/delete` | `HistoryOps::delete` | — | `{ok}` | 200, 400 |
-| GET | `/api/tiers` | `ConductorOps::tier_choices` | — | `{tiers:{default,vm_available,vm_unavailable_reason,vm_requirements,guests}}` | 200, 400 |
+| GET | `/api/tiers` | `ConductorOps::tier_choices` | — | `{tiers:{default,vm_available,vm_unavailable_reason,vm_requirements,guests,available}}` | 200, 400 |
 | GET | `/api/setup/status` | `Provision::status + job` | 查询 `since` / `wait` | `{deps:[{id,guest,present,install,probe,source,url,size_mb,note}],job:{running,seq,lines,error},missing}` | 200, 400 |
 | POST | `/api/setup/ensure` | `Provision::status + start` | `{deps?:[id],confirm?:bool}` | `{preview:[{id,url,size_mb,present}]}` / `{ok,deps}` | 200, 400 |
 | DELETE | `/api/setup/job` | `Provision::cancel` | — | `{ok}` | 200 |

@@ -554,6 +554,8 @@ pub struct TierChoices {
     pub vm_requirements: Vec<crate::capabilities::vm::api::VmRequirement>,
     /// 目的：本机可选的**虚拟根**（虚拟机档那一步的下拉项）——界面照抄，不自己编列表。
     pub guests: Vec<crate::capabilities::provision::api::GuestBase>,
+    /// 目的：包库里可用的能力名（→ 版本）：界面据此预判"这个虚拟根 + 包库满足不了哪些模块"。
+    pub available: BTreeMap<String, Vec<String>>,
 }
 
 /// 配置界面里的一个 agent（名字冻结时仍要显示）。

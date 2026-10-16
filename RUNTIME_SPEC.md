@@ -93,13 +93,18 @@ files:                      # 包内文件指纹：用于可复现与呈现
 
 前置检测是**一份逐项清单**（机器能力 `vm::vm_requirements`，界面与 `--doctor` 照抄同一份）：虚拟机监视器、guest 本体、共享档、QEMU（引擎）；
 虚拟根（会话级）在保存 /「开始」时合并进来，
-每项给出"现状 + 怎么补"（共享档缺外部工具只作事实呈现、不拦档：Linux 缺 `virtiofsd` 退 9p，Windows 缺 `smbd` 退 QGA 复制）。依赖（QEMU / `virtiofsd` / 镜像 / SMB helper）**不预置、不分发**，由 provision 能力按 `dependencies.yaml` + `links.yaml` 下载并解包进项目内 `.vm/`（需用户同意；入口 `solomni --provision --ensure --yes`）；产品检测、指路并给出补齐入口，`qemu_path` / `virtiofsd_path` / `smbd_path` 可登记。Windows guest 的 agent 与运行包由 `kind: guest-runtime` 的运行期编排（cloud-init 种子 → 维护启动经 QGA 装包）在 Rust 侧装上（不依赖仓库脚本），
-并把**逐个自证过**的能力写进 `guest.yaml` 的 `runtimes`（例如 `[python, node]`）。
+每项给出"现状 + 怎么补"（共享档缺外部工具只作事实呈现、不拦档：Linux 缺 `virtiofsd` 退 9p，Windows 缺 `smbd` 退 QGA 复制）。依赖（QEMU / `virtiofsd` / 镜像 / SMB helper）**不预置、不分发**，由 provision 能力按 `dependencies.yaml` + `links.yaml` 下载并解包进项目内 `.vm/`（需用户同意；入口 `solomni --provision --ensure --yes`）；产品检测、指路并给出补齐入口，`qemu_path` / `virtiofsd_path` / `smbd_path` 可登记。虚拟根"真有什么"由 `kind: guest-runtime` 的运行期编排（Rust 侧，不依赖仓库脚本）起一次 guest **逐个自证**后才写进画像：
+Windows（磁盘根）先首启经 cloud-init 装 `qemu-guest-agent`，再维护启动装 `python3` / `cifs-utils` 与 NodeSource 的 node；
+Linux（目录根，agent 由 `guest-rootfs` 装好）直接维护启动，确认 `python3`、尽力装 node，共享客户端保持镜像声明的 9p/virtiofs。
+两者都只把**自证过**的能力写进 `guest.yaml` 的 `runtimes`（例如 `[python, node]`）；
+全量补齐（`--ensure --yes`）时这一条起不了 guest（缺 KVM / WHPX 这类机器事实）只如实跳过并继续，
+显式点名（`--ensure=vm.guest-runtime.linux`）才硬失败。
 虚拟根 = 项目内 `.vm/guest/<名>` 的一格目录：发行版 rootfs（目录，或 `rootfs.ext4` / `*.qcow2` 磁盘镜像）+ `vmlinuz`（可选 `initrd.img`）；**目录根必须给内核**（直启），**磁盘镜像可自带引导**（不给内核也行）；目录里可放一份 `guest.yaml` 声明画像（id / arch / agent / os / clients / runtimes——`runtimes` 是 guest 里确实可用的运行能力名，如 python / node，选型诊断据此不必再要 `runtimes/` 包），缺省按目录名与 Debian 默认（os 缺省 linux），不认识的值如实拒收。清单（`dependencies.yaml`）给每条 guest 条目一个 `guest:` 名，多条条目可以共同装一个虚拟根；界面读 provision 的虚拟根清单，不自己看盘。
 
 **已真机验收**：Linux（QEMU/KVM + virtiofs，默认共享档；缺 `virtiofsd` 时退 9p）与 Windows（QEMU/WHPX + SMB guestfwd 实时共享；缺 `smbd` 时退 QGA 复制）——引擎级探针（`vm_live_guest_runs_command_inside_guest`）
 与 e2e 的虚拟机档会话场景都过（虚拟根默认 `debian`，`SOLOMNI_VM_GUEST` 可换）；Windows 侧的 QEMU 与 Debian cloud qcow2 由 provision 能力按清单装入，
-首启经 cloud-init 装 `qemu-guest-agent`、维护启动经 QGA 装 python3 / cifs-utils 与 NodeSource 的 node（逐个自证，只声明验过的）——整段编排在 Rust 侧。
+Windows 侧首启经 cloud-init 装 `qemu-guest-agent`、维护启动经 QGA 装 python3 / cifs-utils 与 NodeSource 的 node；
+Linux 侧维护启动确认 python3、尽力装 node（逐个自证，只声明验过的）——整段编排在 Rust 侧。
 多台虚拟机档会话并发时各写自己的**每租约可写层**（不共写基础镜像），同时台上限 `max_guests`（见 [docs/vm/README.md](docs/vm/README.md) 的「并发」）。
 **尚未做**（唯一权威见 `tests/gaps.yaml`）：macOS 的 QEMU 取包、Apple vz 引擎 + 自研 agent（vsock 通道）。
 

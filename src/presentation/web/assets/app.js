@@ -917,7 +917,10 @@ function guestPicker(guests, current, onChange) {
     hint.textContent = !g
       ? "这个虚拟根在本机找不到：跑 solomni --provision --ensure --yes 补上，或换一个。"
       : (g.os + " / " + g.arch) +
-        (g.ready ? "：已就绪。" : "：还没装齐（缺 " + (g.missing || []).join("、") + "）——先补齐依赖再用。");
+        (g.ready ? "：已装齐。" : "：还没装齐（缺 " + (g.missing || []).join("、") + "）——先补齐依赖再用。") +
+        ((g.runtimes || []).length
+          ? " 自带运行能力：" + g.runtimes.join("、") + "。"
+          : " 它没有声明自带的运行能力。");
     if (onChange) onChange(sel.value, g);
   };
   sel.addEventListener("change", sync);
@@ -1501,11 +1504,37 @@ async function openWizard() {
   }
 
   // 虚拟机档在**创建时**就要选一个虚拟根（会话级选择；机器能力已在上面判过）。
-  const pick = guestPicker(tiers && tiers.guests, w.guest, (v) => { w.guest = v; });
+  const pick = guestPicker(tiers && tiers.guests, w.guest, (v, g) => { w.guest = v; w.guestInfo = g; });
+  // 预判：这个虚拟根（+ 包库）满足不了本次点到的哪些模块——**只是提示**，判据仍以创建时的后端校验为准。
+  const gapHint = cfgHint('');
+  function syncGuestGap() {
+    if (w.tier !== 'vm') { gapHint.textContent = ''; return; }
+    const g = w.guestInfo;
+    if (!g || !g.ready) { gapHint.textContent = ''; return; }
+    const covered = {};
+    (g.runtimes || []).forEach((c) => { covered[c] = true; });
+    Object.keys((tiers && tiers.available) || {}).forEach((c) => { covered[c] = true; });
+    const ids = w.mode === 'collab'
+      ? w.agents.reduce((acc, a) => acc.concat(a.modules || []), [])
+      : (w.agentPick ? (w.agentPick.modules || []).slice()
+        : state.modules.map((m) => m.id).filter((id) => w.modules.indexOf(id) >= 0));
+    const lack = [];
+    for (const id of ids) {
+      const m = state.modules.find((x) => x.id === id);
+      if (!m) continue;
+      const miss = (m.runtimes || []).filter((c) => !covered[c]);
+      if (miss.length) lack.push(id + ' 需要 ' + miss.join('/'));
+    }
+    gapHint.textContent = lack.length
+      ? '这个虚拟机可能要缺：' + lack.join('；') + '。可选：把运行包放进 runtimes/、换一个虚拟机、或改用本机档（创建时后端会按同一份事实再判一次）。'
+      : '';
+  }
   function syncWizardTier() {
     pick.wrap.className = w.tier === 'vm' ? 'wf-field' : 'wf-field hidden';
     pick.hint.className = 'wf-hint' + (w.tier === 'vm' ? '' : ' hidden');
+    gapHint.className = 'wf-hint' + (w.tier === 'vm' ? '' : ' hidden');
     pick.sync();
+    syncGuestGap();
   }
   openModal('新建工作', (c) => {
     const nameIn = textInput('工作名称（必填，会话落盘目录名）');
@@ -1794,7 +1823,7 @@ async function openWizard() {
       }
     }
 
-    function renderAll() { renderParts(); renderModels(); renderEditor(); }
+    function renderAll() { renderParts(); renderModels(); renderEditor(); syncGuestGap(); }
 
     modeSel.addEventListener('change', () => {
       w.mode = modeSel.value;
@@ -1916,6 +1945,7 @@ async function openWizard() {
     c.body.appendChild(tierField);
     c.body.appendChild(pick.wrap);
     c.body.appendChild(pick.hint);
+    c.body.appendChild(gapHint);
     c.body.appendChild(partWrap);
     c.body.appendChild(modelWrap);
     c.body.appendChild(taskField);

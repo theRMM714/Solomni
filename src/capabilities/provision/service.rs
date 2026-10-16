@@ -89,16 +89,18 @@ pub(super) fn under(root: &Path, rel: &str) -> PathBuf {
     out
 }
 
-/// 目的：一个虚拟根画像里我们要的两项（guest.yaml 的 id 与 os）。
+/// 目的：一个虚拟根画像里我们要的几项（id / os / arch / runtimes）。
 #[derive(Debug, Default, PartialEq, Eq)]
 struct GuestProfile {
     id: Option<String>,
     os: Option<String>,
     arch: Option<String>,
+    /// 目的：画像里声明的运行能力（内联列表 `runtimes: [python, node]`；缺画像 = 空）。
+    runtimes: Vec<String>,
 }
 
-/// 目的：读虚拟根画像里的 `id` / `os`（`guest.yaml`；不在场 = 空画像，调用方给缺省）。
-/// 约束：只读两个扁平标量，不引 YAML 依赖（与 links.yaml / 缺口账同一手法）。
+/// 目的：读虚拟根画像里的 `id` / `os` / `arch` / `runtimes`（`guest.yaml`；不在场 = 空画像，调用方给缺省）。
+/// 约束：只读几个扁平标量与一个内联列表，不引 YAML 依赖（与 links.yaml / 缺口账同一手法）。
 fn read_guest_profile(base: &Path) -> GuestProfile {
     let Ok(text) = fs::read_to_string(base.join("guest.yaml")) else {
         return GuestProfile::default();
@@ -120,6 +122,15 @@ fn read_guest_profile(base: &Path) -> GuestProfile {
             "id" => p.id = Some(v.to_string()),
             "os" => p.os = Some(v.to_string()),
             "arch" => p.arch = Some(v.to_string()),
+            "runtimes" => {
+                p.runtimes = v
+                    .trim_matches(['[', ']'])
+                    .split(',')
+                    .map(|s| s.trim().trim_matches('"'))
+                    .filter(|s| !s.is_empty())
+                    .map(|s| s.to_string())
+                    .collect();
+            }
             _ => {}
         }
     }
@@ -279,6 +290,7 @@ impl ProvisionService {
                     .arch
                     .unwrap_or_else(|| std::env::consts::ARCH.to_string()),
                 // 注：guest.yaml 的 arch 用 amd64 / arm64 写法，这里原样带出，界面只当标签用。
+                runtimes: profile.runtimes,
                 ready: missing.is_empty(),
                 missing,
                 install,
@@ -333,6 +345,8 @@ fn run(
     if picked.is_empty() {
         return Err("没有匹配的依赖 id（用 --provision 看清单）".to_string());
     }
+    // 显式点名 vs 全量补齐：运行期编排的失败在两种情形下处置不同（见下面 guest-runtime 分支）。
+    let explicit = !ids.is_empty();
     let agent = crate::kernel::detail::outbound::agent(15, 7200);
     let cache = root.join(".vm").join("cache");
     fs::create_dir_all(&cache).map_err(|e| format!("建缓存目录失败：{}", e))?;
@@ -355,20 +369,34 @@ fn run(
         }
         let dest = under(root, &dep.install);
         fs::create_dir_all(&dest).map_err(|e| format!("建安装目录 {} 失败：{}", dep.install, e))?;
-        match dep.kind.as_str() {
-            "appimage" => install_appimage(&cached, &dest, on_line)
-                .map_err(|e| format!("{}：{}", dep.id, e))?,
-            "file" => install_file(&cached, &dest, &dep.probe)
-                .map_err(|e| format!("{}：{}", dep.id, e))?,
-            "guest-disk" => install_guest_disk(&cached, &dest, &dep.probe, on_line)
-                .map_err(|e| format!("{}：{}", dep.id, e))?,
-            "guest-rootfs" => install_guest_rootfs(root, dep, &cached, &agent, on_line)
-                .map_err(|e| format!("{}：{}", dep.id, e))?,
-            "guest-runtime" => super::guest::install_guest_runtime(root, dep, vm, on_line)
-                .map_err(|e| format!("{}：{}", dep.id, e))?,
-            _ => crate::kernel::detail::unpack::extract_into(&cached, &dest, dep.strip)
-                .map_err(|e| format!("{}：解包失败：{}", dep.id, e))?,
-        }
+        let installed =
+            match dep.kind.as_str() {
+                "appimage" => install_appimage(&cached, &dest, on_line)
+                    .map_err(|e| format!("{}：{}", dep.id, e)),
+                "file" => install_file(&cached, &dest, &dep.probe)
+                    .map_err(|e| format!("{}：{}", dep.id, e)),
+                "guest-disk" => install_guest_disk(&cached, &dest, &dep.probe, on_line)
+                    .map_err(|e| format!("{}：{}", dep.id, e)),
+                "guest-rootfs" => install_guest_rootfs(root, dep, &cached, &agent, on_line)
+                    .map_err(|e| format!("{}：{}", dep.id, e)),
+                "guest-runtime" => {
+                    let r = super::guest::install_guest_runtime(root, dep, vm, on_line);
+                    match (r, explicit) {
+                        (Ok(()), _) => Ok(()),
+                        // 全量补齐（没点名）时：起不了 guest 是**机器事实**（缺 KVM / WHPX 这类），
+                        // 不该拖垮其余依赖——如实说清并继续；这一条的探针仍然没满足，就绪状态照实报。
+                        (Err(e), false) => {
+                            on_line(&format!("{}：运行期编排跳过（{}）", dep.id, e));
+                            continue;
+                        }
+                        // 显式点名这一条 = 你要的就是它：失败即失败。
+                        (Err(e), true) => Err(format!("{}：{}", dep.id, e)),
+                    }
+                }
+                _ => crate::kernel::detail::unpack::extract_into(&cached, &dest, dep.strip)
+                    .map_err(|e| format!("{}：解包失败：{}", dep.id, e)),
+            };
+        installed?;
         let probe = under(root, &dep.probe);
         if !(probe.is_file() || probe.is_dir()) {
             return Err(format!("{}：装完仍找不到 {}", dep.id, dep.probe));
@@ -1100,7 +1128,7 @@ mod tests {
         fs::write(base.join("vmlinuz"), b"x").expect("写内核");
         fs::write(
             base.join("guest.yaml"),
-            "id: debian-test\nos: linux\narch: amd64\nagent: qga\nclients: []\nruntimes: []\n",
+            "id: debian-test\nos: linux\narch: amd64\nagent: qga\nclients: []\nruntimes: [python, node]\n",
         )
         .expect("写画像");
         let dep = |id: &str, probe: &str, guest: &str| Dep {
@@ -1128,6 +1156,11 @@ mod tests {
         assert_eq!(both[0].guest, "debian");
         assert_eq!(both[0].label, "debian-test", "显示名取画像 id");
         assert_eq!(both[0].os, "linux");
+        assert_eq!(
+            both[0].runtimes,
+            vec!["python".to_string(), "node".to_string()],
+            "画像声明的运行能力要带出来（界面据此说明它自带什么）"
+        );
         assert!(!both[0].ready, "少一条就不算装齐");
         assert_eq!(both[0].missing, vec!["g.rt".to_string()]);
         assert_eq!(both[0].install, ".vm/guest/debian");
@@ -1135,6 +1168,76 @@ mod tests {
             .guest_bases_of(&[dep("g.img", ".vm/guest/debian/vmlinuz", "debian")])
             .expect("清单");
         assert!(one[0].ready && one[0].missing.is_empty(), "{:?}", one[0]);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// 目的：全量补齐时运行期编排起不了 guest 只如实跳过（不拖垮其余依赖）；显式点名它仍然硬失败。
+    #[test]
+    fn guest_runtime_failure_is_soft_for_the_whole_set_but_hard_when_named() {
+        let root = crate::tests::scratch("provision-soft-runtime");
+        let cache = root.join(".vm").join("cache");
+        fs::create_dir_all(&cache).expect("建缓存");
+        fs::write(cache.join("a.bin"), b"x").expect("写缓存");
+        let mk = |id: &str, kind: &str, install: &str, probe: &str, source: &str| Dep {
+            id: id.to_string(),
+            os: "any".to_string(),
+            arch: "any".to_string(),
+            kind: kind.to_string(),
+            install: install.to_string(),
+            probe: probe.to_string(),
+            guest: Some("debian".to_string()),
+            source: source.to_string(),
+            strip: 0,
+            size_mb: 0,
+            note: String::new(),
+        };
+        let file_dep = mk("x.file", "file", ".vm/x", ".vm/x/a.bin", "release:a.bin");
+        // 虚拟根还没装 + 没注入 vm 能力面：这一条必然失败，正好用来验软失败。
+        let rt_dep = mk(
+            "vm.guest-runtime.linux",
+            "guest-runtime",
+            ".vm/guest/debian",
+            ".vm/guest/debian/.runtimes-ready",
+            "release:a.bin",
+        );
+        let all = [file_dep, rt_dep];
+        let links = BTreeMap::from([(
+            "release.base".to_string(),
+            "https://example.invalid".to_string(),
+        )]);
+        let mut lines: Vec<String> = Vec::new();
+        let mut sink = |l: &str| lines.push(l.to_string());
+        run(
+            &root,
+            &all,
+            &links,
+            &[],
+            &AtomicBool::new(false),
+            &mut sink,
+            None,
+        )
+        .expect("全量补齐不该因为起不了 guest 而失败");
+        assert!(
+            lines.iter().any(|l| l.contains("运行期编排跳过")),
+            "没点名时编排失败要如实跳过：{:?}",
+            lines
+        );
+        assert!(
+            root.join(".vm").join("x").join("a.bin").is_file(),
+            "其余依赖照样装好"
+        );
+        // 显式点名这一条 = 你要的就是它：失败即失败。
+        let err = run(
+            &root,
+            &all,
+            &links,
+            &["vm.guest-runtime.linux".to_string()],
+            &AtomicBool::new(false),
+            &mut |_| {},
+            None,
+        )
+        .expect_err("显式点名要硬失败");
+        assert!(err.contains("vm.guest-runtime.linux"), "{}", err);
         let _ = fs::remove_dir_all(&root);
     }
 

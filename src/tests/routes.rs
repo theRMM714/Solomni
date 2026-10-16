@@ -499,6 +499,7 @@ impl ConductorOps for FakeOps {
             vm_unavailable_reason: "guest 本体尚未接入".to_string(),
             vm_requirements: Vec::new(),
             guests: Vec::new(),
+            available: BTreeMap::new(),
         })
     }
     fn suggest_models(&self, _task: &str, _mode: WorkMode) -> Result<Vec<AgentSuggestion>, String> {

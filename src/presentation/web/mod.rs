@@ -531,6 +531,8 @@ fn state_json(ops: &Ops, fence: &FenceInfo) -> Result<serde_json::Value, String>
         "modules": roster.modules.iter().map(|m| json!({
             "id": m.manifest.id,
             "brief": m.manifest.brief,
+            // 模块声明的运行能力：创建向导据此预判"这个虚拟根满足不了哪些模块"。
+            "runtimes": m.manifest.runtimes,
             "enabled": ops.modules.module_enabled(&m.manifest.id).unwrap_or(false),
             "services": m.manifest.services.keys().map(|n| json!({
                 "name": n,

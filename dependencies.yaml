@@ -7,7 +7,7 @@
 #   install  装到产品根下的哪个目录（相对路径，用 / 分段）
 #   probe    判"在不在场"的那个路径（相对产品根；文件或目录存在即在位）
 #   source   下载源：links.yaml 的键，或 release:<资产名>（= links.yaml 的 release.base + 资产名，项目自托管便携包）
-#   kind     安装方式：archive（默认，解归档）/ appimage / file（单文件直下）/ guest-rootfs（多步构造）
+#   kind     安装方式：archive（默认，解归档）/ appimage / file（单文件直下）/ guest-disk（单文件 + 画像）/ guest-rootfs（多步构造）/ guest-runtime（起 guest 自证运行能力）
 #   guest    虚拟机档的**虚拟根名**（只有 guest 类条目有；`install` 指它那一格目录，一个虚拟根可以由多条条目共同装）
 #   strip    解包时剥掉归档里的前 N 段目录（缺省 0）
 #   size_mb  大致体积（提示与带宽预估）
@@ -54,6 +54,16 @@ deps:
     source: guest.debian.image
     size_mb: 400
     note: Debian 13 虚拟根（cloud 镜像 → rootfs 目录 + 通用内核 + 9p initrd + qemu-guest-agent）；需要 sfdisk / dd / debugfs / ar / unshare
+  - id: vm.guest-runtime.linux
+    os: linux
+    arch: x86_64
+    kind: guest-runtime
+    guest: debian
+    install: .vm/guest/debian
+    probe: .vm/guest/debian/.runtimes-ready
+    source: guest.debian.image
+    size_mb: 0
+    note: Linux guest 的运行期编排（维护启动经 QGA 确认 python3、尽力从 NodeSource 装 node，逐个自证后才写进 guest.yaml 的 runtimes；目录根本身就是共享的可写根，不需要首启装 agent）
   - id: vm.guest.windows
     os: windows
     arch: x86_64

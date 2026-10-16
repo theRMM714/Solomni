@@ -84,6 +84,8 @@ impl Conductor {
             vm_requirements: cap.requirements,
             // 虚拟根清单是**事实**：读不到就空表（界面据此说"没有可选虚拟根"，不编造）。
             guests: self.guest_bases().unwrap_or_default(),
+            // 包库可用能力同样是事实：界面按它 + 虚拟根自带能力预判缺口，判据仍以后端为准。
+            available: self.vm.library().capability_versions(),
         }
     }
 
