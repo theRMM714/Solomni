@@ -71,13 +71,13 @@ pub(crate) fn sandboxes_lookup_is_by_agent() {
     assert!(boxes.for_agent("a").is_none(), "沙箱不再按模块 id 反查");
 }
 
-/// 目的：虚拟机档"能不能选"只看**机器能力**，与会话级 base 无关——Web 换档死锁的回归锚。
-/// 约束：base 只在保存 /「开始」时校验（构造承载判据时合并进去）。
+/// 目的：虚拟机档"能不能选"只看**机器能力**，与会话级选哪个虚拟根无关——Web 换档死锁的回归锚。
+/// 约束：虚拟根只在保存 /「开始」时校验（构造承载判据时合并进去）。
 #[test]
 pub(crate) fn vm_availability_is_machine_only_and_base_is_session_level() {
     use crate::capabilities::vm::domain::exec::host_verified;
     use crate::tests::doubles::{core_with_gateway_probe, FixedProbe};
-    // 一个对的基础根：目录 + vmlinuz（探测替身只按声明回答，这两条也要登记）。
+    // 机器能力探测替身按声明回答；虚拟根由 test_guest 造在 .vm/guest/<名> 下。
     let base = crate::tests::base_dir("vm-avail-base");
     // 机器能力齐：有虚拟机监视器，PATH 里有 QEMU 与 virtiofsd（guest 项按已验平台数据表）。
     let mut probe = FixedProbe {
@@ -88,6 +88,13 @@ pub(crate) fn vm_availability_is_machine_only_and_base_is_session_level() {
     probe.exes.push("virtiofsd".to_string());
     probe.dirs.push(base.clone());
     probe.files.push(base.join("vmlinuz"));
+    // 就绪检测问的是"虚拟根在不在场"：替身按声明的根作答（子树算在场，文件按声明）。
+    let guest_dir = crate::tests::root_dir()
+        .join(".vm")
+        .join("guest")
+        .join("vm-avail");
+    probe.guests.push(guest_dir.clone());
+    probe.files.push(guest_dir.join("vmlinuz"));
     let mut core = core_with_gateway_probe(
         vec![module_of("a")],
         gw(BTreeMap::new(), Vec::new()),
@@ -102,17 +109,17 @@ pub(crate) fn vm_availability_is_machine_only_and_base_is_session_level() {
     );
     assert!(
         !choices.vm_requirements.iter().any(|r| r.id == "base"),
-        "机器能力清单不含会话级 base：{:?}",
+        "机器能力清单不含会话级虚拟根：{:?}",
         choices.vm_requirements
     );
     if !expected {
         return;
     }
-    // 建一条本机档会话（没有 base）：会话配置仍说虚拟机档可选——base 只在保存/开始时校验。
+    // 建一条本机档会话（没选虚拟根）：会话配置仍说虚拟机档可选——虚拟根只在保存/开始时校验。
     let spec = crate::tests::single_work("wl", &["a"]);
     core.create_work(spec).expect("建本机档会话");
     let cfg = core.session_config("wl").expect("配置视图");
-    assert!(cfg.base.is_none(), "新会话没有 base");
+    assert!(cfg.guest.is_none(), "新会话没有选虚拟根");
     assert!(
         cfg.vm_available,
         "机器能力齐就该能选：{:?}",
@@ -120,21 +127,22 @@ pub(crate) fn vm_availability_is_machine_only_and_base_is_session_level() {
     );
     assert!(
         !cfg.vm_requirements.iter().any(|r| r.id == "base"),
-        "配置视图的机器能力清单也不含 base：{:?}",
+        "配置视图的机器能力清单也不含虚拟根：{:?}",
         cfg.vm_requirements
     );
-    // 建虚拟机档：base 没填 → 如实拒绝；填了 → 建得起来（base 是会话级，不是机器能力）。
-    let mut no_base = crate::tests::single_work("wv", &["a"]);
-    no_base.tier = Tier::Vm;
+    // 建虚拟机档：没选虚拟根 → 如实拒绝；选了在场的一格 → 建得起来（虚拟根是会话级，不是机器能力）。
+    let mut no_guest = crate::tests::single_work("wv", &["a"]);
+    no_guest.tier = Tier::Vm;
     let err = core
-        .create_work(no_base)
-        .expect_err("虚拟机档缺 base 要如实拒绝");
-    assert!(err.contains("基础根"), "{}", err);
-    let mut with_base = crate::tests::single_work("wv2", &["a"]);
-    with_base.tier = Tier::Vm;
-    with_base.base = Some(base.to_string_lossy().into_owned());
-    core.create_work(with_base)
-        .expect("机器能力齐 + base 在场就该建得起来");
+        .create_work(no_guest)
+        .expect_err("虚拟机档没选虚拟根要如实拒绝");
+    assert!(err.contains("虚拟根"), "{}", err);
+    let guest = crate::tests::test_guest("vm-avail");
+    let mut with_guest = crate::tests::single_work("wv2", &["a"]);
+    with_guest.tier = Tier::Vm;
+    with_guest.guest = Some(guest.clone());
+    core.create_work(with_guest)
+        .expect("机器能力齐 + 虚拟根在场就该建得起来");
     let _ = std::fs::remove_dir_all(&base);
 }
 
@@ -151,10 +159,12 @@ pub(crate) fn vm_tier_is_refused_when_the_machine_cannot_carry_it() {
         Arc::new(FakeCatalog::new(vec!["m".to_string()])),
     );
     let mut core = Conductor::new(
+        crate::tests::root_dir(),
         registry_service(InMemorySettings::with_tier(Tier::Vm), Arc::clone(&llm)),
         test_history(),
         test_workspace(Arc::new(InMemoryWorkspace::new())),
         test_vm(Arc::new(InMemoryPackages::empty())),
+        test_provision(),
         test_modules(Arc::new(VecSource(vec![module_of("a")]))),
         llm,
         test_tools_svc_with(
@@ -179,6 +189,7 @@ pub(crate) fn vm_tier_is_refused_when_the_machine_cannot_carry_it() {
     vm_spec.tier = Tier::Vm;
     let opened = core.create_work(vm_spec);
     if exec::tier_readiness(
+        &crate::tests::root_dir(),
         &default_vm,
         None,
         None,
@@ -200,10 +211,12 @@ pub(crate) fn vm_tier_is_refused_when_the_machine_cannot_carry_it() {
         Arc::new(FakeCatalog::new(vec!["m".to_string()])),
     );
     let mut core2 = Conductor::new(
+        crate::tests::root_dir(),
         registry_service(InMemorySettings::new(), Arc::clone(&llm2)),
         test_history(),
         test_workspace(Arc::new(InMemoryWorkspace::new())),
         test_vm(Arc::new(InMemoryPackages::empty())),
+        test_provision(),
         test_modules(Arc::new(VecSource(vec![module_of("a")]))),
         llm2,
         test_tools_svc_with(
@@ -233,14 +246,14 @@ pub(crate) fn vm_tier_is_refused_when_the_machine_cannot_carry_it() {
                     permissions: None,
                 }],
                 tier: "vm".to_string(),
-                base: Some("definitely-not-a-real-base-root".to_string()),
+                guest: Some("definitely-not-a-real-guest".to_string()),
                 pins: BTreeMap::new(),
                 net: false,
             },
         )
-        .expect_err("基础根不在场就不许改入虚拟机档");
+        .expect_err("虚拟根不在场就不许改入虚拟机档");
     assert!(
-        err.contains("虚拟机档现在不可用") && err.contains("基础根不在场"),
+        err.contains("虚拟机档现在不可用") && err.contains("虚拟根"),
         "{}",
         err
     );
@@ -326,10 +339,12 @@ pub(crate) fn module_without_runtime_is_denied_with_reason() {
         Arc::new(FakeCatalog::new(vec!["m".to_string()])),
     );
     let mut core = Conductor::new(
+        crate::tests::root_dir(),
         registry_service(InMemorySettings::with_tier(Tier::Host), Arc::clone(&llm)),
         test_history_of(Arc::clone(&hist)),
         test_workspace(Arc::new(InMemoryWorkspace::new())),
         test_vm(Arc::new(InMemoryPackages::empty())),
+        test_provision(),
         test_modules(Arc::new(VecSource(vec![mod_a]))),
         llm,
         test_tools_svc_with(
@@ -351,10 +366,10 @@ pub(crate) fn module_without_runtime_is_denied_with_reason() {
         .unwrap()
         .sid;
     hist.force_tier(&sid, Tier::Vm);
-    let base_dir = crate::tests::base_dir("module-without-runtime-base");
+    let guest = crate::tests::test_guest("module-without-runtime");
     let mut rebuild = edit_of(vec![("a", &["a"], "")]);
     rebuild.tier = "vm".to_string();
-    rebuild.base = Some(base_dir.to_string_lossy().into_owned());
+    rebuild.guest = Some(guest.clone());
     let refused = core.edit_session(&sid, rebuild).unwrap_err();
     assert!(
         refused.contains("python") && refused.contains("runtimes/"),

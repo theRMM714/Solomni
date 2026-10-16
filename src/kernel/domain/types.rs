@@ -35,15 +35,16 @@ impl Tier {
     }
 }
 
-/// 目的：会话的执行选型——档位 + 虚拟机基础根 + 能力定版 + 是否放行出站网络（默认否）。
+/// 目的：会话的执行选型——档位 + 虚拟根名 + 能力定版 + 是否放行出站网络（默认否）。
 /// 约束：进 meta.yaml 的 exec 段（缺字段的旧会话按默认 = 本机档读回）；本机/虚拟机两侧与呈现层共享，按 R6 归 kernel。
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ExecSpec {
     #[serde(default)]
     pub tier: Tier,
-    /// 目的：虚拟机档的基础根（运行包之外的最小系统）；本机档为空。
+    /// 目的：虚拟机档用的**虚拟根名**（清单 `guest` 字段，如 debian / windows）；本机档为空。
+    /// 约束：存的是名字不是路径——路径由 `vm::resolve_guest` 按当前安装解析，换安装/挪产品根都不用改会话。
     #[serde(default)]
-    pub base: Option<String>,
+    pub guest: Option<String>,
     /// 目的：能力名 → 精确版本（用户定版；多版本时不猜）。
     #[serde(default)]
     pub pins: BTreeMap<String, String>,

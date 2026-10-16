@@ -9,6 +9,25 @@ use crate::capabilities::vm::domain::guest::{
     classify_base, GuestImage, GuestMount, GuestRoot, GuestRun, GuestSpec,
 };
 use crate::capabilities::vm::ports::{PackageSource, ShareBackend, VmEngine};
+use crate::kernel::ports::HostProbe;
+
+/// 目的：虚拟根名 → 那一格目录的解析——名字是**一段**，路径与越界写法如实拒绝（不猜、不静默当路径）。
+#[test]
+pub(crate) fn guest_names_resolve_to_one_slot_and_paths_are_refused() {
+    use crate::capabilities::vm::api::resolve_guest;
+    let root = crate::tests::root_dir();
+    let got = resolve_guest(&root, "debian").expect("清单里的名字要认得");
+    assert_eq!(got, root.join(".vm").join("guest").join("debian"));
+    assert!(resolve_guest(&root, "  ").is_err(), "空名要拒");
+    assert!(resolve_guest(&root, "a/b").is_err(), "路径分隔符要拒");
+    assert!(resolve_guest(&root, "a\\b").is_err(), "反斜杠也要拒");
+    assert!(resolve_guest(&root, "..").is_err(), "上级目录要拒");
+    assert!(resolve_guest(&root, ".").is_err(), "当前目录要拒");
+    assert!(
+        resolve_guest(&root, "/abs/path").is_err(),
+        "绝对路径不是虚拟根名"
+    );
+}
 
 #[test]
 pub(crate) fn package_manifest_check_rejects_illegal_forms() {
@@ -118,6 +137,7 @@ pub(crate) fn package_conflicts_flag_overlapping_paths() {
 pub(crate) fn vm_tier_readiness_gates_creation_and_editing() {
     // 本机档：任何机器上都能承载（不装载运行包、不要 guest）。
     let host = exec::tier_readiness(
+        &crate::tests::root_dir(),
         &ExecSpec::default(),
         None,
         None,
@@ -126,6 +146,7 @@ pub(crate) fn vm_tier_readiness_gates_creation_and_editing() {
     assert!(host.ready(), "本机档没有前置条件");
     assert!(host.requirements.is_empty(), "本机档不该有虚拟机前置清单");
     assert!(exec::tier_refusal(
+        &crate::tests::root_dir(),
         &ExecSpec::default(),
         None,
         None,
@@ -136,10 +157,16 @@ pub(crate) fn vm_tier_readiness_gates_creation_and_editing() {
     // 虚拟机档：guest 本体按**已验证平台**放开（Linux 已验，Windows / macOS 待验），其余项按事实；这里基础根是假的。
     let ghost = ExecSpec {
         tier: Tier::Vm,
-        base: Some("definitely-not-a-real-base-root".to_string()),
+        guest: Some("definitely-not-a-real-base-root".to_string()),
         ..Default::default()
     };
-    let r = exec::tier_readiness(&ghost, None, None, &crate::kernel::detail::HostProbeAdapter);
+    let r = exec::tier_readiness(
+        &crate::tests::root_dir(),
+        &ghost,
+        None,
+        None,
+        &crate::kernel::detail::HostProbeAdapter,
+    );
     assert!(!r.ready(), "前置不齐就不成立：{:?}", r);
     let guest_item = r
         .requirements
@@ -186,18 +213,25 @@ pub(crate) fn vm_tier_readiness_gates_creation_and_editing() {
         );
         assert!(!item.detail.is_empty(), "每一项都要有现状描述：{:?}", item);
     }
-    let why = exec::tier_refusal(&ghost, None, None, &crate::kernel::detail::HostProbeAdapter)
-        .expect("不成立就要给可读理由");
+    let why = exec::tier_refusal(
+        &crate::tests::root_dir(),
+        &ghost,
+        None,
+        None,
+        &crate::kernel::detail::HostProbeAdapter,
+    )
+    .expect("不成立就要给可读理由");
     assert!(why.contains("虚拟机档现在不可用"), "{}", why);
 
-    // 基础根在场：base 这一项要认出来；再故意登记一个不存在的 QEMU 路径，验证仍不成立（不随机器变）。
-    let dir = crate::tests::base_dir("tier-readiness");
+    // 虚拟根在场：base 这一项要认出来；再故意登记一个不存在的 QEMU 路径，验证仍不成立（不随机器变）。
+    let name = crate::tests::test_guest("tier-readiness");
     let real = ExecSpec {
         tier: Tier::Vm,
-        base: Some(dir.to_string_lossy().into_owned()),
+        guest: Some(name),
         ..Default::default()
     };
     let r2 = exec::tier_readiness(
+        &crate::tests::root_dir(),
         &real,
         Some("definitely-not-qemu.exe"),
         None,
@@ -208,9 +242,8 @@ pub(crate) fn vm_tier_readiness_gates_creation_and_editing() {
         .iter()
         .find(|x| x.id == "base")
         .expect("清单里要有基础根这一项");
-    assert!(base_item.met, "在场的基础根要认出来：{:?}", base_item);
+    assert!(base_item.met, "在场的虚拟根要认出来：{:?}", base_item);
     assert!(!r2.ready(), "缺 QEMU 一项就不成立");
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// 目的：QEMU 检测——登记了就用登记的路径，没登记就看 PATH；依赖不预置、不分发。
@@ -220,12 +253,13 @@ pub(crate) fn vm_requirements_report_qemu_registration() {
     let base_str = base.to_string_lossy().into_owned();
     let spec = ExecSpec {
         tier: Tier::Vm,
-        base: Some(base_str.clone()),
+        guest: Some(base_str.clone()),
         ..Default::default()
     };
 
     // 登记了一个不存在的路径：必须报"找不到"，并给出怎么补。
     let r = exec::tier_readiness(
+        &crate::tests::root_dir(),
         &spec,
         Some("definitely-not-qemu.exe"),
         None,
@@ -243,6 +277,7 @@ pub(crate) fn vm_requirements_report_qemu_registration() {
     let fake = base.join("qemu-system-x86_64");
     std::fs::write(&fake, b"stub").unwrap();
     let r2 = exec::tier_readiness(
+        &crate::tests::root_dir(),
         &spec,
         Some(fake.to_string_lossy().as_ref()),
         None,
@@ -264,7 +299,7 @@ pub(crate) fn exec_host_tier_ignores_packages() {
         .expect("本机档不装载运行包，不会因缺包失败");
     assert_eq!(plan.tier, Tier::Host);
     assert!(plan.packages.is_empty());
-    assert!(plan.base.is_none());
+    assert!(plan.guest.is_none());
     assert!(!plan.net, "默认不放行出站网络");
     let summary = exec::plan_summary(&plan);
     assert!(
@@ -376,7 +411,7 @@ pub(crate) fn exec_vm_plan_pins_versions_and_orders_prefix_before_system() {
         "独立前缀随计划走（装配按它挂载）"
     );
     assert_eq!(plan.packages[2].kind, "system", "写进系统路径的包排在最后");
-    assert_eq!(plan.base.as_deref(), Some("base-linux"));
+    assert_eq!(plan.guest.as_deref(), Some("vm-spec"));
     assert!(!plan.net, "默认不放行出站网络");
 }
 
@@ -656,7 +691,7 @@ pub(crate) fn fence_roots_follow_the_bridge() {
     let plan = ExecPlan {
         tier: Tier::Vm,
         net: false,
-        base: None,
+        guest: None,
         packages: Vec::new(),
     };
     // 跨方言那一侧按宿主取（宿主路径只能由宿主自己解析）：断言的都是"围栏根按桥落到 guest 镜像根"。
@@ -702,7 +737,7 @@ pub(crate) fn guest_mounts_prefix_packages_and_fence_roots() {
     let plan = ExecPlan {
         tier: Tier::Vm,
         net: false,
-        base: None,
+        guest: None,
         packages: vec![PlannedPackage {
             id: "python".to_string(),
             version: "3.12.4".to_string(),
@@ -1079,7 +1114,12 @@ pub(crate) fn copy_share_plans_mkdirs_and_tar_round_trips_on_the_host() {
 #[test]
 pub(crate) fn disk_image_base_is_classified_as_a_disk_root() {
     let probe = crate::kernel::detail::HostProbeAdapter;
-    let dir = crate::tests::scratch("vm-guest-disk");
+    // 虚拟根就装在项目内的那一格（就绪检测走真实探针，所以这里要造真目录）。
+    let name = crate::tests::test_guest("disk-root");
+    let dir = crate::tests::root_dir()
+        .join(".vm")
+        .join("guest")
+        .join(&name);
     std::fs::write(dir.join("vmlinuz"), b"x").expect("写内核");
     std::fs::write(dir.join("rootfs.ext4"), b"img").expect("写磁盘镜像");
     let image = classify_base(&dir, &probe).expect("磁盘布局可用");
@@ -1090,10 +1130,10 @@ pub(crate) fn disk_image_base_is_classified_as_a_disk_root() {
     );
     let spec = ExecSpec {
         tier: Tier::Vm,
-        base: Some(dir.to_string_lossy().into_owned()),
+        guest: Some(name.clone()),
         ..Default::default()
     };
-    let req = exec::tier_readiness(&spec, None, None, &probe);
+    let req = exec::tier_readiness(&crate::tests::root_dir(), &spec, None, None, &probe);
     let base_item = req
         .requirements
         .iter()
@@ -1414,10 +1454,16 @@ pub(crate) fn vm_capability_is_machine_only_while_session_readiness_needs_base()
     );
     let spec = ExecSpec {
         tier: Tier::Vm,
-        base: None,
+        guest: None,
         ..Default::default()
     };
-    let session = exec::tier_readiness(&spec, Some(q.as_str()), None, &probe);
+    let session = exec::tier_readiness(
+        &crate::tests::root_dir(),
+        &spec,
+        Some(q.as_str()),
+        None,
+        &probe,
+    );
     assert!(
         !session.ready(),
         "base 没填，会话级判据不成立：{:?}",
@@ -1595,10 +1641,10 @@ pub(crate) fn share_availability_gates_the_effective_combo() {
     // 就绪项：没有 virtiofsd 时 share 项仍 met（不拦档），但要说清回退与怎么补。
     let spec = ExecSpec {
         tier: Tier::Vm,
-        base: None,
+        guest: None,
         ..Default::default()
     };
-    let r = exec::tier_readiness(&spec, None, None, &none);
+    let r = exec::tier_readiness(&crate::tests::root_dir(), &spec, None, None, &none);
     let share = r
         .requirements
         .iter()
@@ -1721,19 +1767,30 @@ pub(crate) fn vm_service_holds_guests_by_lease() {
     assert!(calls.iter().any(|c| c == "stop:w"), "{:?}", calls);
 }
 
-/// 目的：真机验收（默认跳过）：用项目内 QEMU 与基础根真起一个 guest，在它里面跑命令。
-/// 约束：只在 SOLOMNI_VM_LIVE=1 且 SOLOMNI_VM_QEMU / SOLOMNI_VM_BASE 指向真东西时执行；否则打印 [探针] 如实跳过。
+/// 目的：真机验收（默认跳过）：用项目内 QEMU 与虚拟根真起一个 guest，在它里面跑命令。
+/// 约束：只在 SOLOMNI_VM_LIVE=1 且 SOLOMNI_VM_QEMU 指向真东西、虚拟根（默认 `debian`）在场时执行；否则打印 [探针] 如实跳过。
 #[test]
 pub(crate) fn vm_live_guest_runs_command_inside_guest() {
     let live = std::env::var("SOLOMNI_VM_LIVE").as_deref() == Ok("1");
     let qemu = std::env::var("SOLOMNI_VM_QEMU").unwrap_or_default();
-    let base_dir = std::env::var("SOLOMNI_VM_BASE").unwrap_or_default();
-    if !live || qemu.trim().is_empty() || base_dir.trim().is_empty() {
-        eprintln!("[探针] 未开启虚拟机档真机验收：设 SOLOMNI_VM_LIVE=1、SOLOMNI_VM_QEMU、SOLOMNI_VM_BASE 后重跑");
+    // 虚拟根名（默认 debian）；在场与否由 resolve_guest 解析出的那一格判。
+    let guest = std::env::var("SOLOMNI_VM_GUEST").unwrap_or_else(|_| "debian".to_string());
+    if !live || qemu.trim().is_empty() {
+        eprintln!("[探针] 未开启虚拟机档真机验收：设 SOLOMNI_VM_LIVE=1、SOLOMNI_VM_QEMU 后重跑（虚拟根默认 debian，可用 SOLOMNI_VM_GUEST 换）");
         return;
     }
     let probe = crate::kernel::detail::HostProbeAdapter;
-    let image = classify_base(std::path::Path::new(base_dir.trim()), &probe).expect("基础根要可用");
+    let base_dir = match crate::capabilities::vm::api::resolve_guest(
+        &crate::tests::root_dir(),
+        &guest,
+    ) {
+        Ok(d) if probe.is_dir(&d) => d,
+        _ => {
+            eprintln!("[探针] 本机没有虚拟根「{}」：先 solomni --provision --ensure --yes，或用 SOLOMNI_VM_GUEST 指定", guest);
+            return;
+        }
+    };
+    let image = classify_base(&base_dir, &probe).expect("虚拟根要可用");
     // 真机引擎级验收：共享要真进 guest（读得到标记），guest 的写要即时落到宿主（实时共享），收尾不留守护进程。
     let share = crate::tests::scratch("vm-live-share");
     std::fs::create_dir_all(&share).expect("建共享目录");

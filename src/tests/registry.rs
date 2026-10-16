@@ -193,7 +193,7 @@ pub(crate) fn agent_crud_and_work_with_agents() {
         task: None,
         delegate: false,
         tier: crate::kernel::api::Tier::Host,
-        base: None,
+        guest: None,
     };
     let opened = core.create_work(spec).unwrap();
     assert_eq!(opened.agents, vec!["调研".to_string()]);
@@ -228,7 +228,7 @@ pub(crate) fn agent_crud_and_work_with_agents() {
         task: Some("需求".to_string()),
         delegate: false,
         tier: crate::kernel::api::Tier::Host,
-        base: None,
+        guest: None,
     };
     assert!(core
         .create_work(cross)

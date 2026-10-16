@@ -325,15 +325,21 @@ fn main() {
             Arc::clone(&secrets),
         ));
 
+    // 依赖补齐面先建出来：Conductor（选虚拟根要读清单）与呈现层（setup 路由）各持同一份。
+    let provision: Arc<dyn capabilities::provision::api::Provision + Send + Sync> = Arc::new(
+        capabilities::provision::ProvisionService::with_vm(&root, Arc::clone(&vm)),
+    );
     // 启动时要按有效启停拉起常驻服务：留一份手柄（进程级租约，不属于任何会话）。
     let residents_boot = Arc::clone(&residents);
     let mut conductor = capabilities::conductor::service::Conductor::new(
+        root.clone(),
         Box::new(registry),
         Arc::new(capabilities::session::service::SessionService::new(
             Arc::new(history),
         )),
         workspace,
         Arc::clone(&vm),
+        Arc::clone(&provision),
         Arc::clone(&modules),
         Arc::clone(&llm),
         toolexec,
@@ -476,10 +482,7 @@ fn main() {
     };
     let mut ops = capabilities::conductor::api::Ops::from_handle(&handle);
     // 依赖补齐面：组合根注入（能力面默认未接入，这里换成真实现）。
-    ops.provision = std::sync::Arc::new(capabilities::provision::ProvisionService::with_vm(
-        &root,
-        Arc::clone(&vm),
-    ));
+    ops.provision = Arc::clone(&provision);
 
     // 启动拉起：把所有**已启用**的常驻服务拉起来（进程级租约，不属于任何会话）。
     for line in residents_boot.start_enabled() {

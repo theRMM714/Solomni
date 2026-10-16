@@ -553,6 +553,7 @@ fn fixed_probe_answers_only_what_was_declared() {
         dirs: vec![dir.clone()],
         exes: vec!["qemu-system-x86_64".to_string()],
         hypervisor: true,
+        guests: Vec::new(),
     };
     assert!(p.is_dir(&dir) && !p.is_dir(&file), "声明之外的目录一律不算");
     assert!(

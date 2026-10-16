@@ -2,7 +2,7 @@
  * 用法：node src/presentation/web/config.smoke.cjs   （输出 CONFIG-SMOKE-OK / CONFIG-SMOKE-FAIL）
  * 与 app.smoke.cjs 同一套写法的独立文件；同目录的 smoke.cjs 跑手会自动带上本文件。
  * 覆盖：条目三按钮（打开 / 编辑 / 删除）与「点条目不进会话」、正在生成中的编辑禁用与理由、
- *      冻结（started=true）与未冻结两种配置、档位 radio 切换与 base 显隐、运行能力六项事实的中文呈现、
+ *      冻结（started=true）与未冻结两种配置、档位 radio 切换与虚拟根选择器显隐、运行能力六项事实的中文呈现、
  *      只有多版本能力才出现定版选择、保存成功与失败（失败显示后端 error 原文）、提交体形状、
  *      「重新扫描」重新 GET 并重绘、点「打开」真的进入会话视图。
  * 为什么需要：app.js 是 no-build 原生 JS，这些交互只有跑起来才发现引用错误与文案缺失。
@@ -48,9 +48,9 @@ function walk(n, out) { out.push(n); for (const c of n.children) walk(c, out); r
 function allText(n) { return walk(n, []).map((x) => (x.textContent == null ? "" : String(x.textContent))).join("\n"); }
 function findByClass(n, cls) { return walk(n, []).filter((x) => String(x.className).split(" ").indexOf(cls) >= 0); }
 function findButton(n, label) { return walk(n, []).find((x) => x.tag === "button" && x.textContent === label); }
-function baseField(n) {
+function guestField(n) {
   return walk(n, []).find((x) => String(x.className).indexOf("wf-field") === 0
-    && (x.children || []).some((c) => String(c.textContent).indexOf("基础根") >= 0));
+    && (x.children || []).some((c) => String(c.textContent).indexOf("虚拟机（虚拟根）") >= 0));
 }
 function check(name, cond, extra) {
   checks.push((cond ? "PASS " : "FAIL ") + name + (cond ? "" : "  <<< " + (extra === undefined ? "" : extra)));
@@ -61,7 +61,11 @@ function check(name, cond, extra) {
 const CFG = {
   sid: "w", mode: "single", started: true,
   agents: [{ name: "调研员", modules: ["research"], model: "m1" }],
-  tier: "vm", base: "base-linux", net: true,
+  tier: "vm", guest: "debian", net: true,
+  guests: [
+    { guest: "debian", label: "debian-13-genericcloud-amd64", os: "linux", arch: "amd64", ready: true, missing: [], install: ".vm/guest/debian" },
+    { guest: "windows", label: "debian-13-genericcloud-amd64", os: "linux", arch: "amd64", ready: false, missing: ["vm.guest-runtime.windows"], install: ".vm/guest/windows" },
+  ],
   pins: { python: "3.12", ruby: "3.2" },
   vm_available: true, vm_unavailable_reason: "", vm_requirements: [],
   tier_ready: true, tier_missing: [],
@@ -84,14 +88,14 @@ const CFG = {
 const RAW = { // 还没开过的协作会话：名字可改、本机档
   sid: "raw", mode: "collab", started: false,
   agents: [{ name: "x", modules: ["research"], model: "" }, { name: "y", modules: ["research"], model: "m2" }],
-  tier: "host", base: null, net: false, pins: {},
+  tier: "host", guest: null, guests: [], net: false, pins: {},
   // 这台机器**不具备**虚拟机档的前置条件：界面必须禁用虚拟机档并给出后端原话（本机档不受影响）。
   vm_available: false, vm_unavailable_reason: "虚拟机档现在不可用（guest 本体尚未接入）",
   vm_requirements: [
     { id: "hypervisor", met: false, detail: "本机虚拟机监视器不可用（要启用「虚拟机平台」组件）", how: "启用「虚拟机平台」组件，然后重启" },
     { id: "guest", met: false, detail: "guest 本体尚未接入（工具进程仍在宿主上跑，没有真正的 guest）", how: "等产品的 guest 接入" },
     { id: "qemu", met: false, detail: "没有找到 qemu-system-x86_64.exe（按PATH找过）", how: "自行安装 QEMU 并放进 PATH，或在设置里登记它的完整路径" },
-    { id: "base", met: false, detail: "没有指定基础根", how: "自备一份最小系统（发行版基底 + 内核）" },
+    { id: "base", met: false, detail: "没有选定虚拟根", how: "跑 solomni --provision --ensure --yes 把虚拟根装进项目内" },
   ],
   tier_ready: true, tier_missing: [],
   runtime: { tier: "host", declared: {}, available: {}, missing: {}, diagnoses: [], rejected: [], rejected_packages: [] },
@@ -204,7 +208,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   check("config: 本机具备前置条件时虚拟机档可选", radios[1].disabled !== true);
   check("config: 虚拟机档可选时不渲染前置清单（那是禁用态的事）",
     t.indexOf("虚拟机档前置") < 0);
-  check("config: 虚拟机档给出 base 输入", t.indexOf("虚拟机基础根 base（可选）") >= 0);
+  check("config: 虚拟机档给出虚拟根选择器", t.indexOf("虚拟机（虚拟根）") >= 0 && t.indexOf("debian-13-genericcloud-amd64") >= 0);
   check("config: 依赖文件夹真实路径（照它去放包）", t.indexOf("/runtimes") >= 0);
   check("config: declared 呈现", t.indexOf("模块 research 需要：python") >= 0);
   check("config: missing 呈现 + 放进 runtimes_dir 后重新扫描",
@@ -234,11 +238,11 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   check("config: 失败后保存按钮可再点", save.disabled === false);
   const editCall = calls.find((c) => /\/api\/actions\/edit_session$/.test(c.url));
   const sent = JSON.parse(editCall.body);
-  check("config: 提交体形状 {session_id,agents,tier,base,pins,net}",
-    JSON.stringify(Object.keys(sent).sort()) === JSON.stringify(["agents", "base", "net", "pins", "session_id", "tier"])
+  check("config: 提交体形状 {session_id,agents,tier,guest,pins,net}",
+    JSON.stringify(Object.keys(sent).sort()) === JSON.stringify(["agents", "guest", "net", "pins", "session_id", "tier"])
       && sent.session_id === "w", editCall.body);
-  check("config: 提交体内容（名单/模块/模型/档位/base/pins/网络）",
-    sent.tier === "vm" && sent.base === "base-linux" && sent.net === true
+  check("config: 提交体内容（名单/模块/模型/档位/虚拟根/pins/网络）",
+    sent.tier === "vm" && sent.guest === "debian" && sent.net === true
     && sent.agents[0].name === "调研员" && JSON.stringify(sent.agents[0].modules) === JSON.stringify(["research"])
     && sent.agents[0].model === "m1" && JSON.stringify(sent.pins) === JSON.stringify({ python: "3.12", ruby: "3.2" }),
     editCall.body);
@@ -258,20 +262,20 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   check("config: 重新扫描再来一次 GET config", calls.filter((c) => /\/config$/.test(c.url)).length === before + 1);
   check("config: 重新扫描后仍渲染出内容", allText(reg.get("#modal-root")).indexOf("模块 research 缺：python") >= 0);
 
-  /* ---- 档位切换：虚拟机档显示 base，本机档隐藏且提交 base=null ---- */
+  /* ---- 档位切换：虚拟机档显示虚拟根选择器，本机档隐藏且提交 guest=null ---- */
   // 「重新扫描」会整块重建表单：radio 节点要重新取（旧节点上的处理器属于旧表单）
-  check("config: 虚拟机档 base 字段可见", String(baseField(reg.get("#modal-root")).className) === "wf-field",
-    baseField(reg.get("#modal-root")).className);
+  check("config: 虚拟机档虚拟根选择器可见", String(guestField(reg.get("#modal-root")).className) === "wf-field",
+    guestField(reg.get("#modal-root")).className);
   const radios2 = walk(reg.get("#modal-root"), []).filter((x) => x.type === "radio");
   radios2[1].checked = false;
   radios2[0].checked = true;
   radios2[0]._h.change[0]();
-  check("config: 切到本机档后 base 字段隐藏", String(baseField(reg.get("#modal-root")).className).indexOf("hidden") >= 0,
-    baseField(reg.get("#modal-root")).className);
+  check("config: 切到本机档后虚拟根选择器隐藏", String(guestField(reg.get("#modal-root")).className).indexOf("hidden") >= 0,
+    guestField(reg.get("#modal-root")).className);
   findButton(reg.get("#modal-root"), "保存").onclick();
   await sleep(60);
   const sent3 = JSON.parse(calls.filter((c) => /\/api\/actions\/edit_session$/.test(c.url)).pop().body);
-  check("config: 本机档提交 tier=host 且 base=null", sent3.tier === "host" && sent3.base === null, JSON.stringify(sent3));
+  check("config: 本机档提交 tier=host 且 guest=null", sent3.tier === "host" && sent3.guest === null, JSON.stringify(sent3));
 
   /* ---- 未开过的会话（started=false）：名字可改、无冻结、跨 agent 重复模块实时提示、保存成功 ---- */
   openConfig("raw");
@@ -282,8 +286,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const nameInputs = walk(m2, []).filter((n) => n.tag === "input" && String(n.placeholder).indexOf("agent 名字") >= 0);
   check("config(raw): 名字可编辑（会话还没开过）", nameInputs.length === 2 && nameInputs.every((n) => n.disabled !== true));
   check("config(raw): 协作形态说明", t2.indexOf("协作（N 个 agent，各自独立沙箱）") >= 0);
-  check("config(raw): 本机档不显示 base 字段",
-    t2.indexOf("虚拟机基础根 base（可选）") >= 0 && String(baseField(m2).className).indexOf("hidden") >= 0, baseField(m2).className);
+  check("config(raw): 本机档不显示虚拟根选择器",
+    t2.indexOf("虚拟机（虚拟根）") >= 0 && String(guestField(m2).className).indexOf("hidden") >= 0, guestField(m2).className);
   // 前置条件不具备 = 虚拟机档禁用（不让选），并把后端给的原因原样呈现；本机档照旧可选。
   const radiosRaw = walk(m2, []).filter((x) => x.type === "radio");
   check("config(raw): 虚拟机档不可用时禁用且本机档仍可选",
@@ -294,7 +298,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   // 逐项前置照抄后端：缺哪几项、每项怎么补（不笼统说"前置条件不具备"）。
   check("config(raw): 虚拟机档前置逐项列出并给怎么补",
     t2.indexOf("虚拟机档前置（") >= 0 && t2.indexOf("guest 本体尚未接入") >= 0 &&
-    t2.indexOf("怎么补：") >= 0 && t2.indexOf("自行安装 QEMU") >= 0 && t2.indexOf("自备一份最小系统") >= 0);
+    t2.indexOf("怎么补：") >= 0 && t2.indexOf("自行安装 QEMU") >= 0 && t2.indexOf("没有选定虚拟根") >= 0);
   const dupHints = findByClass(m2, "cfg-hint").map((x) => x.textContent)
     .filter((x) => String(x).indexOf("同一模块只能属于一个 agent") >= 0);
   check("config(raw): 跨 agent 重复模块实时提示",

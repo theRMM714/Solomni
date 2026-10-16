@@ -25,7 +25,7 @@ pub fn unpack_cli(args: &[String], i: usize) -> i32 {
 /// 自检：本机事实（平台 + 围栏能力 + 外部解释器）。只报事实，不猜、不改任何东西（围栏自检那个临时目录除外）。
 pub fn doctor() -> i32 {
     let cap = crate::kernel::detail::confine::capability();
-    // 虚拟机档的逐项前置（**只读事实**）：这里按"没登记 QEMU、没指定基础根"问一次，
+    // 虚拟机档的逐项前置（**只读事实**）：这里按"没登记 QEMU、没选虚拟根"问一次，
     // 也就是最朴素的情形——登记过的路径以会话配置界面为准（那里按会话选型问同一份清单）。
     let vm =
         crate::capabilities::vm::api::vm_requirements(&crate::capabilities::vm::api::VmInputs {

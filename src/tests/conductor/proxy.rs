@@ -732,7 +732,7 @@ pub(crate) fn a_finished_child_notifies_the_proxy_without_dumping_its_transcript
                 request_id: "r1".to_string(),
                 name: None,
                 tier: None,
-                base: None,
+                guest: None,
                 parent: Some("w-notify".to_string()),
             };
             Ok(core.create_session(&spec)?.0.session)
@@ -1043,7 +1043,7 @@ pub(crate) fn create_work_with_proxy_mode_makes_a_delegated_session() {
         task: None,
         delegate: false,
         tier: Tier::Host,
-        base: None,
+        guest: None,
     };
     let (opened, _head) = ops.sessions.create_work(spec.clone()).expect("建代理会话");
     assert!(opened.agents.is_empty(), "代理会话没有名单");
@@ -1223,7 +1223,7 @@ pub(crate) fn the_proxy_created_child_publishes_its_opening_facts() {
         request_id: "r1".to_string(),
         name: None,
         tier: None,
-        base: None,
+        guest: None,
         parent: Some(proxy),
     };
     let created = bridge.create_session(&spec).expect("建协作子工作");
@@ -1287,7 +1287,7 @@ pub(crate) fn collab_child_send_lands_on_the_gate_it_awaits() {
             task: Some("做事".to_string()),
             delegate: true,
             tier: Tier::Host,
-            base: None,
+            guest: None,
         })
         .expect("建协作工作（代拟）");
     let child = work.sid.clone();

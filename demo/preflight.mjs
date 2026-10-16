@@ -139,12 +139,12 @@ export function proxyPreflight(state) {
 
 /**
  * 虚拟机档演示（`demo/run-demo-vm.mjs`）的前置：① harvest 模块在清单里（它跑 python）；
- * ② 基础根在场，且 guest 画像**声明自带 python**（`guest.yaml` 的 `runtimes`）——虚拟机档的静态预检
- * 就按"包库 + guest 自带"两处判缺不缺包，演示也必须先有这一条；③ 同上面的供应商 / 模型。
+ * ② 选定的**虚拟根**在本机装齐（清单事实由后端给），且 guest 画像**声明自带 python**（`guest.yaml` 的
+ * `runtimes`）——虚拟机档的静态预检就按"包库 + guest 自带"两处判缺不缺包，演示也必须先有这一条；③ 同上面的供应商 / 模型。
  *
  * 缺包时核心会在**创建那一刻**拒绝（不拉一台跑不了工具的 guest）；这里把最容易缺的几项提前说清。
  */
-export function vmPreflight(state, model, base) {
+export function vmPreflight(state, model, guest, guests) {
   const modules = (state && state.modules) || [];
   if (!modules.some((m) => m && m.id === VM_MODULE)) {
     return {
@@ -152,17 +152,30 @@ export function vmPreflight(state, model, base) {
       hints: ["模块放进 modules/ 就出现（清单是目录扫描的纯函数）"],
     };
   }
-  const dir = base && base.trim();
-  if (!dir) {
+  const want = guest && guest.trim();
+  const list = guests || [];
+  const found = list.find((g) => g && g.guest === want);
+  if (!found) {
     return {
-      reason: "没有给虚拟机档的基础根",
-      hints: ["用 SOLOMNI_DEMO_VM_BASE=<基础根目录> 指定（默认 .vm/guest/base）"],
+      reason: "本机没有这个虚拟根：" + (want || "（没给）"),
+      hints: [
+        "本机可选：" + (list.map((g) => g.guest).join("、") || "（一个都没装）"),
+        "用 SOLOMNI_DEMO_VM_GUEST=<虚拟根名> 换一个",
+        "先补齐依赖：solomni --provision --ensure --yes（QEMU + 虚拟根 + 运行期编排）",
+      ],
     };
   }
+  if (!found.ready) {
+    return {
+      reason: "虚拟根还没装齐：" + found.guest + "（缺 " + (found.missing || []).join("、") + "）",
+      hints: ["先补齐依赖：solomni --provision --ensure --yes"],
+    };
+  }
+  const dir = join(process.cwd(), found.install);
   if (!existsSync(dir)) {
     return {
-      reason: "基础根不在场：" + dir,
-      hints: ["先补齐依赖：solomni --provision --ensure --yes（QEMU + guest 镜像 + guest-runtime）"],
+      reason: "虚拟根目录不在场：" + dir,
+      hints: ["先补齐依赖：solomni --provision --ensure --yes"],
     };
   }
   const yaml = join(dir, "guest.yaml");

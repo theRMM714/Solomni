@@ -538,6 +538,7 @@ impl Conductor {
         };
         // 与其余形态同一把尺子：虚拟机档的承载不成立就不建（用户环境问题，不是选型问题）。
         if let Some(why) = crate::capabilities::vm::api::tier_refusal(
+            &self.root,
             &exec,
             self.qemu_path(),
             self.share_tool_path(),

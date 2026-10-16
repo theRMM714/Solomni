@@ -43,7 +43,8 @@ pub struct PlannedPackage {
 pub struct ExecPlan {
     pub tier: Tier,
     pub net: bool,
-    pub base: Option<String>,
+    /// 目的：这次执行用的虚拟根名（本机档为空）——装配阶段按它解析出那一格目录。
+    pub guest: Option<String>,
     /// 目的：装载顺序：先独立前缀（互不干扰），后写进系统路径的包（叠层）。
     pub packages: Vec<PlannedPackage>,
 }
@@ -216,7 +217,7 @@ const QEMU_BIN: &str = "qemu-system-x86_64";
 
 /// 目的：虚拟机档的**机器能力**清单（**只读事实，不起任何虚拟机**）——与某条会话无关。
 /// 约束：为什么做成清单：用户看到的必须是"缺哪几项、每项怎么补"，而不是一句笼统的"前置条件不具备"。
-/// 约束：base 属于**会话选型**，不在这里；含 base 的严格判据见 tier_readiness。
+/// 约束：虚拟根属于**会话选型**，不在这里；含虚拟根的严格判据见 tier_readiness。
 pub fn vm_requirements(vm: &VmInputs<'_>) -> Vec<VmRequirement> {
     let hyper = vm.probe.hypervisor_available();
     let combo = effective_combo_label(vm.share_tool, vm.probe);
@@ -236,7 +237,7 @@ pub fn vm_requirements(vm: &VmInputs<'_>) -> Vec<VmRequirement> {
             },
         },
         // guest 本体：产品侧的后端与执行分派已就位；**逐平台**真机验收通过后才放开。
-        // 约束：这是"验过没有"的事实，不是环境探测——环境项是上面的 hypervisor / qemu / base。
+        // 约束：这是"验过没有"的事实，不是环境探测——环境项是上面的 hypervisor / qemu / 虚拟根。
         VmRequirement {
             id: "guest",
             met: guest_backend_verified(),
@@ -489,27 +490,75 @@ fn qemu_requirement(registered: Option<&str>, probe: &dyn HostProbe) -> VmRequir
     }
 }
 
-/// 目的：基础根检测——不预置的 guest 基础（rootfs 目录 + vmlinuz/bzImage）在不在、布局对不对。
-fn base_requirement(base: Option<&str>, probe: &dyn HostProbe) -> VmRequirement {
-    let checked = base.map(str::trim).filter(|p| !p.is_empty()).map(|p| {
-        (
-            p,
-            crate::capabilities::vm::domain::guest::classify_base(Path::new(p), probe),
-        )
-    });
-    let (met, detail) = match checked {
-        None => (false, "没有指定基础根".to_string()),
-        Some((p, Ok(b))) => {
-            let root = match &b.root {
+/// 目的：虚拟根的安装父目录（相对产品根）——清单里每条 guest 条目的 `install` 都落在它下面。
+const GUEST_ROOT: &str = ".vm/guest";
+
+/// 目的：虚拟根名 → 那一格目录的绝对路径（产品根 + `.vm/guest/<名>`）。
+/// 约束：名字必须是单纯的一段（不许路径分隔符与 `.` / `..`）——它来自清单，也是会话里存的值。
+pub fn resolve_guest(root: &Path, guest: &str) -> Result<std::path::PathBuf, String> {
+    let name = guest.trim();
+    if name.is_empty() {
+        return Err("没有指定虚拟根".to_string());
+    }
+    if name.contains('/') || name.contains('\\') || name == "." || name == ".." {
+        return Err(format!(
+            "虚拟根名不合法：{}（应是清单里的一个名字，不是路径）",
+            guest
+        ));
+    }
+    let mut dir = root.to_path_buf();
+    for seg in GUEST_ROOT.split('/').filter(|s| !s.is_empty()) {
+        dir.push(seg);
+    }
+    Ok(dir.join(name))
+}
+
+/// 目的：虚拟根就绪检测——名字认得、那一格目录在场、布局可用（rootfs + 内核或磁盘镜像）。
+/// 约束：检测顺序 = 名字合法性 → 在场 → 布局；三种失败给三种可操作的说明，不混成一句。
+fn guest_requirement(root: &Path, guest: Option<&str>, probe: &dyn HostProbe) -> VmRequirement {
+    let how = "跑 solomni --provision --ensure --yes 把虚拟根装进项目内（需用户同意），或换一个已装好的虚拟根";
+    let name = guest.map(str::trim).filter(|g| !g.is_empty());
+    let Some(name) = name else {
+        return VmRequirement {
+            id: "base",
+            met: false,
+            detail: "没有选定虚拟根".to_string(),
+            how: how.to_string(),
+        };
+    };
+    let dir = match resolve_guest(root, name) {
+        Ok(d) => d,
+        Err(why) => {
+            return VmRequirement {
+                id: "base",
+                met: false,
+                detail: why,
+                how: how.to_string(),
+            }
+        }
+    };
+    if !probe.is_dir(&dir) {
+        return VmRequirement {
+            id: "base",
+            met: false,
+            detail: format!("虚拟根「{}」不在场：{}", name, dir.display()),
+            how: how.to_string(),
+        };
+    }
+    match crate::capabilities::vm::domain::guest::classify_base(&dir, probe) {
+        Ok(b) => {
+            let root_kind = match &b.root {
                 crate::capabilities::vm::domain::guest::GuestRoot::Dir(_) => "目录 rootfs",
                 crate::capabilities::vm::domain::guest::GuestRoot::Disk(_) => "磁盘镜像 rootfs",
             };
-            (
-                true,
-                format!(
-                    "基础根在场：{}（{}，内核 {}{}）",
-                    p,
-                    root,
+            VmRequirement {
+                id: "base",
+                met: true,
+                detail: format!(
+                    "虚拟根「{}」已就位（{}，{}，内核 {}{}）",
+                    name,
+                    b.id,
+                    root_kind,
                     b.kernel
                         .as_deref()
                         .and_then(|k| k.file_name())
@@ -517,24 +566,19 @@ fn base_requirement(base: Option<&str>, probe: &dyn HostProbe) -> VmRequirement 
                         .unwrap_or_else(|| "自带引导".to_string()),
                     if b.initrd.is_some() { " + initrd" } else { "" }
                 ),
-            )
+                how: String::new(),
+            }
         }
-        Some((p, Err(why))) => (false, format!("基础根不可用：{}（{}）", p, why)),
-    };
-    VmRequirement {
-        id: "base",
-        met,
-        detail,
-        how: if met {
-            String::new()
-        } else {
-            "自备一份 guest 基础根：一个目录，里面是发行版 rootfs（目录，或 rootfs.ext4 / *.qcow2 磁盘镜像）与 vmlinuz（可选 initrd.img），把目录填进会话的 base（可跑 solomni --provision --ensure --yes 把 Debian 基础根下载进项目内；需用户同意）"
-                .to_string()
+        Err(why) => VmRequirement {
+            id: "base",
+            met: false,
+            detail: format!("虚拟根「{}」不可用：{}", name, why),
+            how: how.to_string(),
         },
     }
 }
 
-/// 目的：机器能力的就绪视图（不含会话级 base）：界面据此决定虚拟机档能不能**选**。
+/// 目的：机器能力的就绪视图（不含会话级虚拟根）：界面据此决定虚拟机档能不能**选**。
 pub fn vm_capability(vm: &VmInputs<'_>) -> TierReadiness {
     TierReadiness {
         requirements: vm_requirements(vm),
@@ -556,8 +600,9 @@ pub fn capability_refusal(vm: &VmInputs<'_>) -> Option<String> {
 /// 目的：本机能不能承载这个档位（**只读事实，不碰任何东西**）。
 /// 约束：虚拟机档的前置条件不具备时，虚拟机档**不允许创建或改入**——这是用户环境问题，不是选型问题；
 /// 约束：界面的"能不能点"与「开始」的校验走同一个函数，两处不会各说各话。
-/// 约束：判据**只有一份**：机器能力清单（vm_requirements）+ 这条会话的 base；逐项都满足才算承载得了。
+/// 约束：判据**只有一份**：机器能力清单（vm_requirements）+ 这条会话选的虚拟根；逐项都满足才算承载得了。
 pub fn tier_readiness(
+    root: &Path,
     spec: &ExecSpec,
     qemu: Option<&str>,
     share_tool: Option<&str>,
@@ -573,19 +618,20 @@ pub fn tier_readiness(
         share_tool,
         probe,
     });
-    // base 是这条会话的选型，不是机器能力：保存 /「开始」时才要求它。
-    requirements.push(base_requirement(spec.base.as_deref(), probe));
+    // 虚拟根是这条会话的选型，不是机器能力：保存 /「开始」时才要求它。
+    requirements.push(guest_requirement(root, spec.guest.as_deref(), probe));
     TierReadiness { requirements }
 }
 
 /// 目的：虚拟机档的可读拒绝理由（创建与编辑共用同一把尺子）。
 pub fn tier_refusal(
+    root: &Path,
     spec: &ExecSpec,
     qemu: Option<&str>,
     share_tool: Option<&str>,
     probe: &dyn HostProbe,
 ) -> Option<String> {
-    let readiness = tier_readiness(spec, qemu, share_tool, probe);
+    let readiness = tier_readiness(root, spec, qemu, share_tool, probe);
     if readiness.ready() {
         return None;
     }
@@ -625,7 +671,7 @@ pub fn plan(
         Tier::Host => Ok(ExecPlan {
             tier: Tier::Host,
             net: spec.net,
-            base: None,
+            guest: None,
             packages: Vec::new(),
         }),
         Tier::Vm => {
@@ -676,7 +722,7 @@ pub fn plan(
             Ok(ExecPlan {
                 tier: Tier::Vm,
                 net: spec.net,
-                base: spec.base.clone(),
+                guest: spec.guest.clone(),
                 packages,
             })
         }
@@ -771,8 +817,8 @@ pub fn plan_summary(plan: &ExecPlan) -> String {
         .map(|p| format!("{}@{}（{}）", p.id, p.version, p.kind))
         .collect();
     format!(
-        "执行档位 虚拟机；基础根 {}；装载 {} 个包：{}；网络 {}",
-        plan.base.as_deref().unwrap_or("（未指定）"),
+        "执行档位 虚拟机；虚拟根 {}；装载 {} 个包：{}；网络 {}",
+        plan.guest.as_deref().unwrap_or("（未指定）"),
         plan.packages.len(),
         pkgs.join("、"),
         net

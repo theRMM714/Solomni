@@ -278,7 +278,7 @@ pub(crate) fn snapshot_pending_is_the_same_fact_as_the_pushed_card() {
         task: Some("做个东西".to_string()),
         delegate: false,
         tier: Tier::Host,
-        base: None,
+        guest: None,
     };
     let opened = ops.sessions.create_work(spec).expect("建协作工作");
     let sid = opened.0.sid.clone();
@@ -497,7 +497,7 @@ pub(crate) fn stopping_voids_the_whole_queue_and_persists_it() {
         task: Some("做个东西".to_string()),
         delegate: false,
         tier: Tier::Host,
-        base: None,
+        guest: None,
     };
     let opened = ops.sessions.create_work(spec).expect("建协作工作");
     let sid = opened.0.sid.clone();

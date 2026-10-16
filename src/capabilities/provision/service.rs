@@ -3,7 +3,7 @@
 //! 不管：虚拟机档的能力语义（在 vm）；界面怎么展示（在 presentation）。
 //! 联动：呈现层经 api::Provision 用它；组合根构造它；下载走 kernel::detail::outbound，解包走 kernel::detail::unpack。
 
-use super::api::{DepStatus, JobState, Provision};
+use super::api::{DepStatus, GuestBase, JobState, Provision};
 use crate::capabilities::vm::api::Vm;
 use serde::Deserialize;
 use std::collections::BTreeMap;
@@ -39,6 +39,9 @@ pub struct Dep {
     /// 目的：安装方式：archive（默认，解归档）/ appimage / file（单文件直下）/ guest-rootfs（多步构造）。
     #[serde(default = "default_kind")]
     pub kind: String,
+    /// 目的：归属的虚拟根名（只有 guest 类条目有）；一个虚拟根可以由多条条目共同装。
+    #[serde(default)]
+    pub guest: Option<String>,
     /// 目的：解包时剥掉归档里的前 N 段目录（便携包常带一层包装目录）；缺省 0。
     #[serde(default)]
     pub strip: usize,
@@ -84,6 +87,43 @@ pub(super) fn under(root: &Path, rel: &str) -> PathBuf {
         out.push(seg);
     }
     out
+}
+
+/// 目的：一个虚拟根画像里我们要的两项（guest.yaml 的 id 与 os）。
+#[derive(Debug, Default, PartialEq, Eq)]
+struct GuestProfile {
+    id: Option<String>,
+    os: Option<String>,
+    arch: Option<String>,
+}
+
+/// 目的：读虚拟根画像里的 `id` / `os`（`guest.yaml`；不在场 = 空画像，调用方给缺省）。
+/// 约束：只读两个扁平标量，不引 YAML 依赖（与 links.yaml / 缺口账同一手法）。
+fn read_guest_profile(base: &Path) -> GuestProfile {
+    let Ok(text) = fs::read_to_string(base.join("guest.yaml")) else {
+        return GuestProfile::default();
+    };
+    let mut p = GuestProfile::default();
+    for raw in text.lines() {
+        let line = raw.trim();
+        if line.starts_with('#') {
+            continue;
+        }
+        let Some((k, v)) = line.split_once(':') else {
+            continue;
+        };
+        let v = v.trim().trim_matches('"');
+        if v.is_empty() {
+            continue;
+        }
+        match k.trim() {
+            "id" => p.id = Some(v.to_string()),
+            "os" => p.os = Some(v.to_string()),
+            "arch" => p.arch = Some(v.to_string()),
+            _ => {}
+        }
+    }
+    p
 }
 
 /// 目的：本机（os/arch）要用的依赖清单（含 `any`）。
@@ -137,6 +177,7 @@ impl Provision for ProvisionService {
             let url = source_url(&dep.source, &links).ok();
             out.push(DepStatus {
                 id: dep.id,
+                guest: dep.guest.clone(),
                 present: probe.is_file() || probe.is_dir(),
                 install: dep.install,
                 probe: dep.probe,
@@ -147,6 +188,14 @@ impl Provision for ProvisionService {
             });
         }
         Ok(out)
+    }
+
+    fn guest_bases(&self) -> Result<Vec<GuestBase>, String> {
+        self.guest_bases_of(&for_host(
+            &deps()?,
+            std::env::consts::OS,
+            std::env::consts::ARCH,
+        ))
     }
 
     fn job(&self) -> JobState {
@@ -188,6 +237,54 @@ impl Provision for ProvisionService {
 
     fn cancel(&self) {
         self.cancel.store(true, Ordering::Relaxed);
+    }
+}
+
+impl ProvisionService {
+    /// 目的：在给定清单上归并虚拟根（清单由调用方给，便于用例注入；`guest_bases` 只是它的"本机清单"版）。
+    pub(super) fn guest_bases_of(&self, deps: &[Dep]) -> Result<Vec<GuestBase>, String> {
+        let mut order: Vec<String> = Vec::new();
+        let mut by_guest: BTreeMap<String, Vec<Dep>> = BTreeMap::new();
+        for dep in deps.iter().cloned() {
+            let Some(name) = dep.guest.clone() else {
+                continue;
+            };
+            if !by_guest.contains_key(&name) {
+                order.push(name.clone());
+            }
+            by_guest.entry(name).or_default().push(dep);
+        }
+        let mut out = Vec::new();
+        for name in order {
+            let members = &by_guest[&name];
+            let missing: Vec<String> = members
+                .iter()
+                .filter(|d| {
+                    let p = under(&self.root, &d.probe);
+                    !p.is_file() && !p.is_dir()
+                })
+                .map(|d| d.id.clone())
+                .collect();
+            let install = members
+                .first()
+                .map(|d| d.install.clone())
+                .unwrap_or_default();
+            let base = under(&self.root, &install);
+            let profile = read_guest_profile(&base);
+            out.push(GuestBase {
+                guest: name.clone(),
+                label: profile.id.unwrap_or_else(|| name.clone()),
+                os: profile.os.unwrap_or_else(|| "linux".to_string()),
+                arch: profile
+                    .arch
+                    .unwrap_or_else(|| std::env::consts::ARCH.to_string()),
+                // 注：guest.yaml 的 arch 用 amd64 / arm64 写法，这里原样带出，界面只当标签用。
+                ready: missing.is_empty(),
+                missing,
+                install,
+            });
+        }
+        Ok(out)
     }
 }
 
@@ -407,7 +504,7 @@ fn install_guest_disk(
     if !yaml.is_file() {
         fs::write(
             &yaml,
-            "# 由产品生成：命令通道 QGA；共享客户端由运行期编排装好 cifs-utils 后声明（见 guest-runtime）。\n\nid: debian-13-genericcloud-amd64\narch: amd64\nagent: qga\nclients: []\n",
+            "# 由产品生成：命令通道 QGA；共享客户端由运行期编排装好 cifs-utils 后声明（见 guest-runtime）。\n\nid: debian-13-genericcloud-amd64\nos: linux\narch: amd64\nagent: qga\nclients: []\nruntimes: []\n",
         )
         .map_err(|e| format!("写 guest.yaml 失败：{}", e))?;
         on_line("写 guest.yaml（QGA 通道画像）");
@@ -800,7 +897,7 @@ fn install_guest_rootfs(
         )?;
     }
     if !base.join("etc").join("os-release").is_file() {
-        on_line("把 rootfs 解到 .vm/guest/base（debugfs rdump）");
+        on_line(&format!("把 rootfs 解到 {}（debugfs rdump）", dep.install));
         run_tool(
             std::process::Command::new("debugfs")
                 .arg("-R")
@@ -821,6 +918,16 @@ fn install_guest_rootfs(
         if py3.is_file() && !py.exists() {
             let _ = std::os::unix::fs::symlink("python3", &py);
         }
+    }
+    // 画像：虚拟根对世界的自我介绍（列表显示名与 os 从这里读）；运行能力由运行期编排另写。
+    let yaml = base.join("guest.yaml");
+    if !yaml.is_file() {
+        fs::write(
+            &yaml,
+            "# 由产品生成：命令通道 QGA；共享客户端与运行能力在运行期编排（guest-runtime）里确认后另写。\n\nid: debian-13-genericcloud-amd64\nos: linux\narch: amd64\nagent: qga\nclients: [9p, virtiofs]\nruntimes: []\n",
+        )
+        .map_err(|e| format!("写 guest.yaml 失败：{}", e))?;
+        on_line("写 guest.yaml（QGA 通道画像）");
     }
     Ok(())
 }
@@ -853,8 +960,9 @@ mod tests {
             os: "any".to_string(),
             arch: "any".to_string(),
             kind: "file".to_string(),
-            install: ".vm/guest/base".to_string(),
-            probe: ".vm/guest/base/rootfs.qcow2".to_string(),
+            install: ".vm/guest/debian".to_string(),
+            probe: ".vm/guest/debian/rootfs.qcow2".to_string(),
+            guest: Some("debian".to_string()),
             source: "release:a.bin".to_string(),
             strip: 0,
             size_mb: 0,
@@ -878,7 +986,7 @@ mod tests {
         assert!(root
             .join(".vm")
             .join("guest")
-            .join("base")
+            .join("debian")
             .join("rootfs.qcow2")
             .is_file());
         let _ = fs::remove_dir_all(&root);
@@ -896,8 +1004,9 @@ mod tests {
             os: "windows".to_string(),
             arch: "x86_64".to_string(),
             kind: "guest-disk".to_string(),
-            install: ".vm/guest/base".to_string(),
-            probe: ".vm/guest/base/rootfs.qcow2".to_string(),
+            install: ".vm/guest/debian".to_string(),
+            probe: ".vm/guest/debian/rootfs.qcow2".to_string(),
+            guest: Some("debian".to_string()),
             source: "release:d.qcow2".to_string(),
             strip: 0,
             size_mb: 0,
@@ -918,7 +1027,7 @@ mod tests {
             None,
         )
         .expect("guest-disk 安装");
-        let base = root.join(".vm").join("guest").join("base");
+        let base = root.join(".vm").join("guest").join("debian");
         assert!(base.join("rootfs.qcow2").is_file());
         let y = fs::read_to_string(base.join("guest.yaml")).expect("guest.yaml");
         assert!(y.contains("agent: qga"), "{}", y);
@@ -982,6 +1091,53 @@ mod tests {
         assert!(!ids.contains(&"vm.guest.windows"), "windows guest 不该出现");
     }
 
+    /// 目的：虚拟根清单按 guest 归并——多条条目共用一个根，缺哪条如实列出来。
+    #[test]
+    fn guest_bases_merge_manifest_entries_by_guest() {
+        let root = crate::tests::scratch("provision-guests");
+        let base = root.join(".vm").join("guest").join("debian");
+        fs::create_dir_all(&base).expect("建虚拟根");
+        fs::write(base.join("vmlinuz"), b"x").expect("写内核");
+        fs::write(
+            base.join("guest.yaml"),
+            "id: debian-test\nos: linux\narch: amd64\nagent: qga\nclients: []\nruntimes: []\n",
+        )
+        .expect("写画像");
+        let dep = |id: &str, probe: &str, guest: &str| Dep {
+            id: id.to_string(),
+            os: "any".to_string(),
+            arch: "any".to_string(),
+            kind: "file".to_string(),
+            install: ".vm/guest/debian".to_string(),
+            probe: probe.to_string(),
+            guest: Some(guest.to_string()),
+            source: "release:a".to_string(),
+            strip: 0,
+            size_mb: 0,
+            note: String::new(),
+        };
+        let svc = ProvisionService::new(&root);
+        // 两条条目同属一个虚拟根：都在场 = 就绪；缺一条 = 如实列出缺哪条。
+        let both = svc
+            .guest_bases_of(&[
+                dep("g.img", ".vm/guest/debian/vmlinuz", "debian"),
+                dep("g.rt", ".vm/guest/debian/.runtimes-ready", "debian"),
+            ])
+            .expect("清单");
+        assert_eq!(both.len(), 1, "同一个虚拟根归并成一条：{:?}", both);
+        assert_eq!(both[0].guest, "debian");
+        assert_eq!(both[0].label, "debian-test", "显示名取画像 id");
+        assert_eq!(both[0].os, "linux");
+        assert!(!both[0].ready, "少一条就不算装齐");
+        assert_eq!(both[0].missing, vec!["g.rt".to_string()]);
+        assert_eq!(both[0].install, ".vm/guest/debian");
+        let one = svc
+            .guest_bases_of(&[dep("g.img", ".vm/guest/debian/vmlinuz", "debian")])
+            .expect("清单");
+        assert!(one[0].ready && one[0].missing.is_empty(), "{:?}", one[0]);
+        let _ = fs::remove_dir_all(&root);
+    }
+
     /// 目的：状态读真实文件系统——probe 在场才判在位。
     #[test]
     fn status_reads_real_filesystem() {
@@ -1035,6 +1191,7 @@ mod tests {
             kind: "archive".to_string(),
             install: ".vm/x".to_string(),
             probe: ".vm/x/f.txt".to_string(),
+            guest: None,
             source: "release:a.tar".to_string(),
             strip: 0,
             size_mb: 0,

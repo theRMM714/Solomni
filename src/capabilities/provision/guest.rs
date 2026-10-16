@@ -207,8 +207,9 @@ mod tests {
             os: "windows".to_string(),
             arch: "x86_64".to_string(),
             kind: "guest-runtime".to_string(),
-            install: ".vm/guest/base".to_string(),
-            probe: ".vm/guest/base/.runtimes-ready".to_string(),
+            install: ".vm/guest/windows".to_string(),
+            probe: ".vm/guest/windows/.runtimes-ready".to_string(),
+            guest: Some("windows".to_string()),
             source: "guest.debian.qcow2".to_string(),
             strip: 0,
             size_mb: 0,
@@ -239,7 +240,7 @@ mod tests {
     #[test]
     fn guest_runtime_writes_markers_and_declares_cifs() {
         let root = crate::tests::scratch("provision-guest-ok");
-        let base = root.join(".vm").join("guest").join("base");
+        let base = root.join(".vm").join("guest").join("windows");
         std::fs::create_dir_all(&base).expect("base");
         std::fs::write(base.join("rootfs.qcow2"), b"qcow2").expect("disk");
         std::fs::write(
