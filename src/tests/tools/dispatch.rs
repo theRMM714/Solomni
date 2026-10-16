@@ -25,7 +25,7 @@ pub(crate) fn same_named_tools_across_modules_are_no_longer_a_conflict() {
         task: None,
         delegate: false,
         tier: crate::kernel::api::Tier::Host,
-        base: None,
+        guest: None,
     };
     assert!(
         core.create_work(one_agent).is_ok(),
@@ -52,7 +52,7 @@ pub(crate) fn same_named_tools_across_modules_are_no_longer_a_conflict() {
         task: Some("需求".to_string()),
         delegate: false,
         tier: crate::kernel::api::Tier::Host,
-        base: None,
+        guest: None,
     };
     assert!(core
         .create_work(cross)

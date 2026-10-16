@@ -7,26 +7,12 @@
 
 ## 构建（首次使用前一次）
 
-Windows（项目自带 mingw，g++ 16.2.0）：
+模块清单已声明 `build:`，**让产品编**（它按平台挑脚本：unix `tools/build`、Windows `tools/build.cmd`）：
 
-    g++ -O2 -std=c++17 -Wall -Wextra -static -static-libgcc -static-libstdc++ modules/indexer/tools/src/indexer.cpp -o modules/indexer/build/indexer.exe
+    solomni --build=indexer
 
-Linux：
-
-    g++ -O2 -std=c++17 -Wall -Wextra -static-libgcc -static-libstdc++ modules/indexer/tools/src/indexer.cpp -o modules/indexer/build/indexer
-
-macOS：
-
-    g++ -O2 -std=c++17 -Wall -Wextra modules/indexer/tools/src/indexer.cpp -o modules/indexer/build/indexer
-
-说明：
-
-- modules/indexer/build/ 不存在时先建出来；构建应零警告。
-- module.yaml 里的命令是 build/indexer build|query|dups；工具进程的 cwd 就是模块根目录 modules/indexer/。
-- 编译器的运行库必须静态链进去：围栏只保证 PATH 上有系统自带的东西，不带编译器的 bin。少了上面的标志，
-  Windows 上运行会报缺 libstdc++-6.dll / libgcc_s_seh-1.dll / libwinpthread-1.dll，Linux 上报缺 libstdc++.so.6；
-  macOS 的 libc++ 属于系统组件，所以那行不需要标志。
-
+产物落在 `build/`（Linux/macOS 是 `indexer`，Windows 是 `indexer.exe`），命令可重复执行、没改源就跳过。
+编译器要在**宿主 PATH** 上（模块声明的构建期能力是 `gcc`）——产品不预置工具链。
 ## 协议
 
 三个子命令都从 stdin 读一个 JSON 对象（UTF-8），结果写 stdout，失败写 stderr。

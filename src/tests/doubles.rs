@@ -1001,6 +1001,14 @@ impl PackageSource for InMemoryPackages {
     }
 }
 
+/// 目的：真机验收里**共用同一个虚拟根**的用例之间的互斥。
+/// 约束：目录根是直接往里写的（guest 的系统状态也在里面），两台 guest 同时起会互相踩坏；
+///   凡是要起 guest 的真机用例都先拿它，串起来跑。
+pub(crate) fn live_guest_lock() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    LOCK.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 /// 用 yaml 造一份包清单（顺带覆盖清单解析）。
 pub(crate) fn pkg_yaml(y: &str) -> PackageManifest {
     yaml_serde::from_str(y).expect("包清单必须能解析")
@@ -1019,6 +1027,7 @@ prefix: opt/rt/{}-{}",
 pub(crate) fn module_of(id: &str) -> Module {
     Module {
         manifest: ModuleManifest {
+            build: None,
             id: id.to_string(),
             brief: format!("{} 的简介", id),
             system: format!("你负责{}", id),
@@ -1092,8 +1101,32 @@ pub(crate) fn work(name: &str, mode: WorkMode, modules: &[&str]) -> WorkSpec {
         task: None,
         delegate: false,
         tier: crate::kernel::api::Tier::Host,
-        base: None,
+        guest: None,
     }
+}
+
+/// 目的：假依赖补齐面——清单为空、动作不能真跑（conductor 只读它的虚拟根清单；测试不碰网络与下载）。
+pub(crate) fn test_provision(
+) -> Arc<dyn crate::capabilities::provision::api::Provision + Send + Sync> {
+    struct EmptyProvision;
+    impl crate::capabilities::provision::api::Provision for EmptyProvision {
+        fn status(&self) -> Result<Vec<crate::capabilities::provision::api::DepStatus>, String> {
+            Ok(Vec::new())
+        }
+        fn guest_bases(
+            &self,
+        ) -> Result<Vec<crate::capabilities::provision::api::GuestBase>, String> {
+            Ok(Vec::new())
+        }
+        fn job(&self) -> crate::capabilities::provision::api::JobState {
+            Default::default()
+        }
+        fn start(&self, _ids: Vec<String>) -> Result<(), String> {
+            Err("测试不跑补齐作业".to_string())
+        }
+        fn cancel(&self) {}
+    }
+    Arc::new(EmptyProvision)
 }
 
 /// 协作工作规格（含需求）。
@@ -1257,6 +1290,10 @@ pub(crate) struct FixedProbe {
     pub dirs: Vec<std::path::PathBuf>,
     pub exes: Vec<String>,
     pub hypervisor: bool,
+    /// 目的：在场的**虚拟根目录**（`.vm/guest/<名>`）——路径落在它下面也算在场（目录内容由用例声明的文件表达）。
+    pub guests: Vec<std::path::PathBuf>,
+    /// 目的：`files` 里"在但**不可执行**"的那些（权限位丢了的场景）——真实适配器按可执行位判。
+    pub not_executable: Vec<std::path::PathBuf>,
 }
 
 impl crate::kernel::ports::HostProbe for FixedProbe {
@@ -1264,7 +1301,10 @@ impl crate::kernel::ports::HostProbe for FixedProbe {
         self.files.iter().any(|p| p == path)
     }
     fn is_dir(&self, path: &std::path::Path) -> bool {
-        self.dirs.iter().any(|p| p == path)
+        self.dirs.iter().any(|p| p == path) || self.guests.iter().any(|g| path.starts_with(g))
+    }
+    fn is_executable(&self, path: &std::path::Path) -> bool {
+        self.is_file(path) && !self.not_executable.iter().any(|p| p == path)
     }
     fn has_exe(&self, name: &str) -> bool {
         self.exes.iter().any(|n| n == name)
@@ -1654,10 +1694,12 @@ pub(crate) fn core_with_services(
         Arc::new(FakeCatalog::new(vec!["m".to_string()])),
     );
     Conductor::new(
+        crate::tests::root_dir(),
         registry_service(InMemorySettings::new(), Arc::clone(&llm)),
         test_history(),
         test_workspace(Arc::new(InMemoryWorkspace::new())),
         test_vm(Arc::new(InMemoryPackages::empty())),
+        test_provision(),
         test_modules(Arc::new(VecSource(modules))),
         llm,
         test_tools_svc_with(
@@ -1691,10 +1733,12 @@ pub(crate) fn core_with_workspace(
         Arc::new(FakeCatalog::new(vec!["m".to_string()])),
     );
     Conductor::new(
+        crate::tests::root_dir(),
         registry_service(InMemorySettings::new(), Arc::clone(&llm)),
         test_history(),
         test_workspace(ws),
         test_vm(Arc::new(InMemoryPackages::empty())),
+        test_provision(),
         test_modules(Arc::new(VecSource(modules))),
         llm,
         test_tools_svc_with(
@@ -1791,10 +1835,12 @@ pub(crate) fn core_with_pkgs(
         Arc::new(gateway);
     let llm = test_llm(Arc::clone(&gateway), catalog);
     Conductor::new(
+        crate::tests::root_dir(),
         registry_service(InMemorySettings::new(), Arc::clone(&llm)),
         test_history_of(history),
         test_workspace(Arc::new(InMemoryWorkspace::new())),
         test_vm(packages),
+        test_provision(),
         test_modules(Arc::new(VecSource(modules))),
         llm,
         test_tools_svc_with(runner, io, Arc::new(NoFenceHost)),
@@ -1816,10 +1862,12 @@ pub(crate) fn core_with_settings(store: InMemorySettings) -> Conductor {
         Arc::new(FakeCatalog::new(vec!["m".to_string()])),
     );
     Conductor::new(
+        crate::tests::root_dir(),
         registry_service(store, Arc::clone(&llm)),
         test_history(),
         test_workspace(Arc::new(InMemoryWorkspace::new())),
         test_vm(Arc::new(InMemoryPackages::empty())),
+        test_provision(),
         test_modules(Arc::new(VecSource(Vec::new()))),
         llm,
         test_tools_svc_with(
@@ -1856,10 +1904,12 @@ pub(crate) fn core_with_io_gateway(
         Arc::new(FakeCatalog::new(vec!["m".to_string()])),
     );
     Conductor::new(
+        crate::tests::root_dir(),
         registry_service(InMemorySettings::new(), Arc::clone(&llm)),
         test_history(),
         test_workspace(Arc::new(InMemoryWorkspace::new())),
         test_vm(Arc::new(InMemoryPackages::empty())),
+        test_provision(),
         test_modules(Arc::new(VecSource(modules))),
         llm,
         test_tools_svc_with(Arc::new(SilentRunner), io, Arc::new(NoFenceHost)),
@@ -1897,10 +1947,12 @@ pub(crate) fn core_with_gateway_probe(
         Arc::new(FakeCatalog::new(vec!["m".to_string()])),
     );
     Conductor::new(
+        crate::tests::root_dir(),
         registry_service(InMemorySettings::new(), Arc::clone(&llm)),
         test_history(),
         test_workspace(Arc::new(InMemoryWorkspace::new())),
         test_vm(Arc::new(InMemoryPackages::empty())),
+        test_provision(),
         test_modules(Arc::new(VecSource(modules))),
         llm,
         test_tools_svc_with(

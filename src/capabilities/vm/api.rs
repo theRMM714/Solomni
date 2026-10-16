@@ -3,15 +3,17 @@
 //! 不管：纯逻辑实现（domain/）与端口（ports.rs）。
 //! 联动：被 conductor / collab / cli 与入口层消费。
 
+pub use crate::capabilities::vm::domain::exec::resolve_guest;
 pub use crate::capabilities::vm::domain::exec::{
-    absent, admit_guest, capability_refusal, declared, diagnose_text, guest_platform, plan,
-    plan_summary, tier_readiness, tier_refusal, unavailable, vm_capability, vm_diagnoses,
-    vm_requirements, Diagnosis, ExecPlan, VmInputs, VmRequirement,
+    absent, admit_guest, capability_refusal, declared, diagnose_text, guest_platform,
+    missing_entries, plan, plan_summary, tier_readiness, tier_refusal, unavailable, vm_capability,
+    vm_diagnoses, vm_requirements, Diagnosis, ExecPlan, MissingEntry, PlannedPackage, VmInputs,
+    VmRequirement,
 };
 pub use crate::capabilities::vm::domain::guest::{
-    classify_base, mounts_from, GuestImage, GuestRun, GuestSpec, SeedDocs,
+    classify_base, mounts_from, package_setup_scripts, GuestImage, GuestRun, GuestSpec, SeedDocs,
 };
-pub use crate::capabilities::vm::domain::guest::{GuestArch, GuestOs};
+pub use crate::capabilities::vm::domain::guest::{GuestArch, GuestClients, GuestOs, GuestRoot};
 pub use crate::capabilities::vm::domain::packages::{library_for_guest, Library};
 pub use crate::capabilities::vm::domain::paths::PathBridge;
 

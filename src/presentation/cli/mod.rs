@@ -814,6 +814,24 @@ pub(crate) fn pick_agents(ops: &Ops, names: &[String]) -> Result<Vec<AgentInstan
     Ok(views.iter().map(AgentInstance::from_view).collect())
 }
 
+/// 目的：虚拟机档的虚拟根怎么选——本机只有一个装齐的就自动用它；多个（或一个都没装齐）返回 None，由调用方如实说明。
+fn pick_guest(guests: &[crate::capabilities::provision::api::GuestBase]) -> Option<String> {
+    let ready: Vec<&crate::capabilities::provision::api::GuestBase> =
+        guests.iter().filter(|g| g.ready).collect();
+    match ready.as_slice() {
+        [one] => Some(one.guest.clone()),
+        many if many.len() > 1 => {
+            let names: Vec<&str> = many.iter().map(|g| g.guest.as_str()).collect();
+            println!(
+                "[提示] 本机有多个虚拟根可选（{}）：这里先用第一个",
+                names.join("、")
+            );
+            Some(names[0].to_string())
+        }
+        _ => None,
+    }
+}
+
 /// 目的：建会话走**动作表**——与 Web / agent 同一份声明、同一处授权，CLI 只把用户的选择变成参数。
 pub(crate) fn create_session_action(
     ops: &Ops,
@@ -842,6 +860,22 @@ pub(crate) fn create_session_action(
     });
     if let Some(t) = task {
         args["task"] = serde_json::json!(t);
+    }
+    // 虚拟机档要选一个虚拟根（人默认是设置里的档位）：本机只有一个就自动用它，
+    // 多个就如实说清有哪些（CLI 不代人挑），一个都没装就交给后端给"怎么补"。
+    if tier == Tier::Vm {
+        // 读不到清单（比如补齐面没接入）时不给 guest：交给后端按同一份清单如实拒绝。
+        if let Ok(t) = ops.core.tier_choices() {
+            match pick_guest(&t.guests) {
+                Some(g) => args["guest"] = serde_json::json!(g),
+                None => {
+                    return Err(
+                        "虚拟机档要选一个虚拟根：跑 solomni --provision --ensure --yes 装好之后会列出可选的那些"
+                            .to_string(),
+                    )
+                }
+            }
+        }
     }
     match ops.actions.act(ActionCall {
         id: "create_session".to_string(),

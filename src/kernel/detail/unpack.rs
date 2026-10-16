@@ -97,8 +97,21 @@ fn unpack_tar<R: Read>(reader: R, dest: &Path, strip: usize) -> Result<(), Strin
                 .map_err(|x| format!("建目录 {}：{}", parent.display(), x))?;
         }
         if kind == tar::EntryType::Regular || kind == tar::EntryType::Continuous {
-            let mut f = write_file(&out)?;
-            io::copy(&mut e, &mut f).map_err(|x| format!("写 {}：{}", out.display(), x))?;
+            // 权限位要在拷贝**之前**从头上取（拷贝会把 entry 用掉）；非 unix 上不取也不设。
+            #[cfg(unix)]
+            let mode = e.header().mode().ok();
+            {
+                let mut f = write_file(&out)?;
+                io::copy(&mut e, &mut f).map_err(|x| format!("写 {}：{}", out.display(), x))?;
+            }
+            // 还原权限位（可执行位就在这里）：不还的话，归档里解出来的程序一律 0644，跑不起来。
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                if let Some(m) = mode {
+                    let _ = fs::set_permissions(&out, fs::Permissions::from_mode(m & 0o7777));
+                }
+            }
             continue;
         }
         if kind == tar::EntryType::Symlink {
@@ -287,6 +300,45 @@ mod tests {
             b"hello".to_vec()
         );
 
+        // 权限位（可执行位）要还原：归档里的程序解出来必须还能跑。
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let exe_src = temp("exesrc");
+            let exe = exe_src.join("tool");
+            fs::write(&exe, b"#!/bin/sh\n").expect("写可执行源文件");
+            fs::set_permissions(&exe, fs::Permissions::from_mode(0o755)).expect("给可执行位");
+            let plain = exe_src.join("data.txt");
+            fs::write(&plain, b"data").expect("写普通文件");
+            fs::set_permissions(&plain, fs::Permissions::from_mode(0o644)).expect("普通权限");
+            let exe_tar = temp("exetar").join("x.tar");
+            {
+                let f = File::create(&exe_tar).expect("建 tar");
+                let mut b = tar::Builder::new(f);
+                b.append_dir_all(".", &exe_src).expect("打包");
+                b.finish().expect("收尾");
+            }
+            let exe_out = temp("exeout");
+            extract(&exe_tar, &exe_out).expect("解 tar");
+            let got = fs::metadata(exe_out.join("tool"))
+                .expect("读权限")
+                .permissions()
+                .mode();
+            assert_eq!(
+                got & 0o777,
+                0o755,
+                "可执行位要还原（拿到 {:o}）",
+                got & 0o777
+            );
+            let data = fs::metadata(exe_out.join("data.txt"))
+                .expect("读权限")
+                .permissions()
+                .mode();
+            assert_eq!(data & 0o777, 0o644, "普通文件权限也要照原样");
+            for d in [&exe_src, &exe_out] {
+                let _ = fs::remove_dir_all(d);
+            }
+        }
         let gz_path = temp("gzsrc").join("x.tar.gz");
         {
             let f = File::create(&gz_path).expect("建 gz");

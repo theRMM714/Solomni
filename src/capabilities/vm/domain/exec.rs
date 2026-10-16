@@ -25,6 +25,65 @@ pub enum Diagnosis {
     UnknownPin { capability: String, version: String },
     /// 两个包会写进同一处路径。
     Conflict { path: String, a: String, b: String },
+    /// 模块工具的入口（模块内产物）不在场——命令是相对路径，模块根下却没有这个能直接跑的文件。
+    MissingEntry {
+        module: String,
+        tool: String,
+        command: String,
+        /// 目的：这个模块声明了 `build:`（系统可以照它在目标环境里编出来）——拒绝理由据此指路。
+        buildable: bool,
+    },
+}
+
+/// 目的：一条"模块工具的入口不在场"的**事实**（谁、哪个工具、命令里写的那个入口）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MissingEntry {
+    pub module: String,
+    pub tool: String,
+    /// 目的：命令里写的相对入口（如 `build/indexer`）。
+    pub command: String,
+    /// 目的：这个模块声明了 `build:`（见 MODULE_SPEC）——拒绝理由里就能给出"怎么编"的路。
+    pub buildable: bool,
+}
+
+/// 目的：按宿主事实挑出"入口不在场"的模块工具——相对路径入口必须存在且**能直接执行**。
+/// 参数：is_executable = 宿主侧"这个路径能不能直接跑"的事实（由端口给；本函数不碰文件系统）。
+/// 约束：裸名（`python` / `node` / `indexer`）走 PATH 与运行能力，不在本判据里；绝对路径同样不在模块目录里找。
+pub fn missing_entries(
+    modules: &[Module],
+    is_executable: &dyn Fn(&Path) -> bool,
+) -> Vec<MissingEntry> {
+    missing_entries_for(modules, std::env::consts::OS, is_executable)
+}
+
+/// 目的：同上，但**目标系统**由调用方给——判据跟着那台机器的壳解析走（用例据此在别的平台上验 Windows 语义）。
+/// 参数：os = 目标系统（`std::env::consts::OS` 的取值）；其余同上。
+pub fn missing_entries_for(
+    modules: &[Module],
+    os: &str,
+    is_executable: &dyn Fn(&Path) -> bool,
+) -> Vec<MissingEntry> {
+    let mut out = Vec::new();
+    for m in modules {
+        for (tool, decl) in &m.manifest.tools {
+            let Some(entry) = crate::capabilities::modules::api::local_entry(&decl.command) else {
+                continue;
+            };
+            // 壳怎么解析这个名字，就按它的候选去验（Windows 上 `build/indexer` 实际落在 `.exe`）。
+            let found = crate::capabilities::modules::api::entry_candidates(entry, os)
+                .iter()
+                .any(|c| is_executable(&m.root.join(c)));
+            if !found {
+                out.push(MissingEntry {
+                    module: m.manifest.id.clone(),
+                    tool: tool.clone(),
+                    command: entry.to_string(),
+                    buildable: m.manifest.build.is_some(),
+                });
+            }
+        }
+    }
+    out
 }
 
 /// 目的：计划里的一项：已定版的包。
@@ -36,6 +95,8 @@ pub struct PlannedPackage {
     pub prefix: String,
     /// 目的：包内容所在目录（清单扫描时记下）；装配阶段用它把包挂进 guest。
     pub source_dir: std::path::PathBuf,
+    /// 目的：kind = system 时要叠写进 guest 的**相对系统路径**（prefix 包为空）。
+    pub provides_paths: Vec<String>,
 }
 
 /// 目的：执行计划：运行时派生，从不落盘（装配阶段按 (id, version) 去包里定位内容）。
@@ -43,7 +104,8 @@ pub struct PlannedPackage {
 pub struct ExecPlan {
     pub tier: Tier,
     pub net: bool,
-    pub base: Option<String>,
+    /// 目的：这次执行用的虚拟根名（本机档为空）——装配阶段按它解析出那一格目录。
+    pub guest: Option<String>,
     /// 目的：装载顺序：先独立前缀（互不干扰），后写进系统路径的包（叠层）。
     pub packages: Vec<PlannedPackage>,
 }
@@ -216,7 +278,7 @@ const QEMU_BIN: &str = "qemu-system-x86_64";
 
 /// 目的：虚拟机档的**机器能力**清单（**只读事实，不起任何虚拟机**）——与某条会话无关。
 /// 约束：为什么做成清单：用户看到的必须是"缺哪几项、每项怎么补"，而不是一句笼统的"前置条件不具备"。
-/// 约束：base 属于**会话选型**，不在这里；含 base 的严格判据见 tier_readiness。
+/// 约束：虚拟根属于**会话选型**，不在这里；含虚拟根的严格判据见 tier_readiness。
 pub fn vm_requirements(vm: &VmInputs<'_>) -> Vec<VmRequirement> {
     let hyper = vm.probe.hypervisor_available();
     let combo = effective_combo_label(vm.share_tool, vm.probe);
@@ -236,7 +298,7 @@ pub fn vm_requirements(vm: &VmInputs<'_>) -> Vec<VmRequirement> {
             },
         },
         // guest 本体：产品侧的后端与执行分派已就位；**逐平台**真机验收通过后才放开。
-        // 约束：这是"验过没有"的事实，不是环境探测——环境项是上面的 hypervisor / qemu / base。
+        // 约束：这是"验过没有"的事实，不是环境探测——环境项是上面的 hypervisor / qemu / 虚拟根。
         VmRequirement {
             id: "guest",
             met: guest_backend_verified(),
@@ -392,7 +454,9 @@ pub fn share_tool_of(share: &str) -> Option<&'static str> {
 /// 目的：一个外部工具在不在场——登记路径优先（登记了就必须是那个文件），否则看 PATH。
 fn tool_available(name: &str, registered: Option<&str>, probe: &dyn HostProbe) -> bool {
     match registered.map(str::trim) {
-        Some(p) if !p.is_empty() => probe.is_file(Path::new(p)),
+        // 登记了就以登记的为准，而且得**能直接执行**——只在场（比如权限位丢了）不算可用，
+        // 否则组合会选它、到启动那一步才炸；这里如实判"不在场"，让回退链与就绪文案说真话。
+        Some(p) if !p.is_empty() => probe.is_executable(Path::new(p)),
         _ => probe.has_exe(name),
     }
 }
@@ -437,10 +501,22 @@ fn share_requirement(
                 if share_available(c.share, share_tool, probe) {
                     format!("共享档 {} 可用（找到 {}）", c.share, name)
                 } else {
-                    format!(
-                        "共享档 {} 不在场（没找到 {}）：已按组合回退到 {}；把 {} 放进 PATH，或在设置里登记它的完整路径即可启用",
-                        c.share, name, effective_combo, name
-                    )
+                    match share_tool.map(str::trim) {
+                        Some(p)
+                            if !p.is_empty()
+                                && probe.is_file(Path::new(p))
+                                && !probe.is_executable(Path::new(p)) =>
+                        {
+                            format!(
+                                "共享档 {} 登记的那个不能执行（{}）：已按组合回退到 {}；给它执行位，或换成 PATH 上的 {} 即可启用",
+                                c.share, p, effective_combo, name
+                            )
+                        }
+                        _ => format!(
+                            "共享档 {} 不在场（没找到 {}）：已按组合回退到 {}；把 {} 放进 PATH，或在设置里登记它的完整路径即可启用",
+                            c.share, name, effective_combo, name
+                        ),
+                    }
                 }
             }
         },
@@ -489,27 +565,75 @@ fn qemu_requirement(registered: Option<&str>, probe: &dyn HostProbe) -> VmRequir
     }
 }
 
-/// 目的：基础根检测——不预置的 guest 基础（rootfs 目录 + vmlinuz/bzImage）在不在、布局对不对。
-fn base_requirement(base: Option<&str>, probe: &dyn HostProbe) -> VmRequirement {
-    let checked = base.map(str::trim).filter(|p| !p.is_empty()).map(|p| {
-        (
-            p,
-            crate::capabilities::vm::domain::guest::classify_base(Path::new(p), probe),
-        )
-    });
-    let (met, detail) = match checked {
-        None => (false, "没有指定基础根".to_string()),
-        Some((p, Ok(b))) => {
-            let root = match &b.root {
+/// 目的：虚拟根的安装父目录（相对产品根）——清单里每条 guest 条目的 `install` 都落在它下面。
+const GUEST_ROOT: &str = ".vm/guest";
+
+/// 目的：虚拟根名 → 那一格目录的绝对路径（产品根 + `.vm/guest/<名>`）。
+/// 约束：名字必须是单纯的一段（不许路径分隔符与 `.` / `..`）——它来自清单，也是会话里存的值。
+pub fn resolve_guest(root: &Path, guest: &str) -> Result<std::path::PathBuf, String> {
+    let name = guest.trim();
+    if name.is_empty() {
+        return Err("没有指定虚拟根".to_string());
+    }
+    if name.contains('/') || name.contains('\\') || name == "." || name == ".." {
+        return Err(format!(
+            "虚拟根名不合法：{}（应是清单里的一个名字，不是路径）",
+            guest
+        ));
+    }
+    let mut dir = root.to_path_buf();
+    for seg in GUEST_ROOT.split('/').filter(|s| !s.is_empty()) {
+        dir.push(seg);
+    }
+    Ok(dir.join(name))
+}
+
+/// 目的：虚拟根就绪检测——名字认得、那一格目录在场、布局可用（rootfs + 内核或磁盘镜像）。
+/// 约束：检测顺序 = 名字合法性 → 在场 → 布局；三种失败给三种可操作的说明，不混成一句。
+fn guest_requirement(root: &Path, guest: Option<&str>, probe: &dyn HostProbe) -> VmRequirement {
+    let how = "跑 solomni --provision --ensure --yes 把虚拟根装进项目内（需用户同意），或换一个已装好的虚拟根";
+    let name = guest.map(str::trim).filter(|g| !g.is_empty());
+    let Some(name) = name else {
+        return VmRequirement {
+            id: "base",
+            met: false,
+            detail: "没有选定虚拟根".to_string(),
+            how: how.to_string(),
+        };
+    };
+    let dir = match resolve_guest(root, name) {
+        Ok(d) => d,
+        Err(why) => {
+            return VmRequirement {
+                id: "base",
+                met: false,
+                detail: why,
+                how: how.to_string(),
+            }
+        }
+    };
+    if !probe.is_dir(&dir) {
+        return VmRequirement {
+            id: "base",
+            met: false,
+            detail: format!("虚拟根「{}」不在场：{}", name, dir.display()),
+            how: how.to_string(),
+        };
+    }
+    match crate::capabilities::vm::domain::guest::classify_base(&dir, probe) {
+        Ok(b) => {
+            let root_kind = match &b.root {
                 crate::capabilities::vm::domain::guest::GuestRoot::Dir(_) => "目录 rootfs",
                 crate::capabilities::vm::domain::guest::GuestRoot::Disk(_) => "磁盘镜像 rootfs",
             };
-            (
-                true,
-                format!(
-                    "基础根在场：{}（{}，内核 {}{}）",
-                    p,
-                    root,
+            VmRequirement {
+                id: "base",
+                met: true,
+                detail: format!(
+                    "虚拟根「{}」已就位（{}，{}，内核 {}{}）",
+                    name,
+                    b.id,
+                    root_kind,
                     b.kernel
                         .as_deref()
                         .and_then(|k| k.file_name())
@@ -517,24 +641,19 @@ fn base_requirement(base: Option<&str>, probe: &dyn HostProbe) -> VmRequirement 
                         .unwrap_or_else(|| "自带引导".to_string()),
                     if b.initrd.is_some() { " + initrd" } else { "" }
                 ),
-            )
+                how: String::new(),
+            }
         }
-        Some((p, Err(why))) => (false, format!("基础根不可用：{}（{}）", p, why)),
-    };
-    VmRequirement {
-        id: "base",
-        met,
-        detail,
-        how: if met {
-            String::new()
-        } else {
-            "自备一份 guest 基础根：一个目录，里面是发行版 rootfs（目录，或 rootfs.ext4 / *.qcow2 磁盘镜像）与 vmlinuz（可选 initrd.img），把目录填进会话的 base（可跑 solomni --provision --ensure --yes 把 Debian 基础根下载进项目内；需用户同意）"
-                .to_string()
+        Err(why) => VmRequirement {
+            id: "base",
+            met: false,
+            detail: format!("虚拟根「{}」不可用：{}", name, why),
+            how: how.to_string(),
         },
     }
 }
 
-/// 目的：机器能力的就绪视图（不含会话级 base）：界面据此决定虚拟机档能不能**选**。
+/// 目的：机器能力的就绪视图（不含会话级虚拟根）：界面据此决定虚拟机档能不能**选**。
 pub fn vm_capability(vm: &VmInputs<'_>) -> TierReadiness {
     TierReadiness {
         requirements: vm_requirements(vm),
@@ -556,8 +675,9 @@ pub fn capability_refusal(vm: &VmInputs<'_>) -> Option<String> {
 /// 目的：本机能不能承载这个档位（**只读事实，不碰任何东西**）。
 /// 约束：虚拟机档的前置条件不具备时，虚拟机档**不允许创建或改入**——这是用户环境问题，不是选型问题；
 /// 约束：界面的"能不能点"与「开始」的校验走同一个函数，两处不会各说各话。
-/// 约束：判据**只有一份**：机器能力清单（vm_requirements）+ 这条会话的 base；逐项都满足才算承载得了。
+/// 约束：判据**只有一份**：机器能力清单（vm_requirements）+ 这条会话选的虚拟根；逐项都满足才算承载得了。
 pub fn tier_readiness(
+    root: &Path,
     spec: &ExecSpec,
     qemu: Option<&str>,
     share_tool: Option<&str>,
@@ -573,19 +693,20 @@ pub fn tier_readiness(
         share_tool,
         probe,
     });
-    // base 是这条会话的选型，不是机器能力：保存 /「开始」时才要求它。
-    requirements.push(base_requirement(spec.base.as_deref(), probe));
+    // 虚拟根是这条会话的选型，不是机器能力：保存 /「开始」时才要求它。
+    requirements.push(guest_requirement(root, spec.guest.as_deref(), probe));
     TierReadiness { requirements }
 }
 
 /// 目的：虚拟机档的可读拒绝理由（创建与编辑共用同一把尺子）。
 pub fn tier_refusal(
+    root: &Path,
     spec: &ExecSpec,
     qemu: Option<&str>,
     share_tool: Option<&str>,
     probe: &dyn HostProbe,
 ) -> Option<String> {
-    let readiness = tier_readiness(spec, qemu, share_tool, probe);
+    let readiness = tier_readiness(root, spec, qemu, share_tool, probe);
     if readiness.ready() {
         return None;
     }
@@ -620,16 +741,33 @@ pub fn plan(
     modules: &[Module],
     lib: &Library,
     guest_runtimes: &[String],
+    missing: &[MissingEntry],
 ) -> Result<ExecPlan, Vec<Diagnosis>> {
+    // 入口判据与档位无关：模块根下没有那个能直接跑的产物，两档都当场拒绝（一次把话说全）。
+    let entries: Vec<Diagnosis> = missing
+        .iter()
+        .map(|m| Diagnosis::MissingEntry {
+            module: m.module.clone(),
+            tool: m.tool.clone(),
+            command: m.command.clone(),
+            buildable: m.buildable,
+        })
+        .collect();
     match spec.tier {
-        Tier::Host => Ok(ExecPlan {
-            tier: Tier::Host,
-            net: spec.net,
-            base: None,
-            packages: Vec::new(),
-        }),
+        Tier::Host => {
+            if !entries.is_empty() {
+                return Err(entries);
+            }
+            Ok(ExecPlan {
+                tier: Tier::Host,
+                net: spec.net,
+                guest: None,
+                packages: Vec::new(),
+            })
+        }
         Tier::Vm => {
-            let diags = vm_diagnoses(modules, lib, spec, guest_runtimes);
+            let mut diags = entries;
+            diags.extend(vm_diagnoses(modules, lib, spec, guest_runtimes));
             if !diags.is_empty() {
                 return Err(diags);
             }
@@ -671,12 +809,13 @@ pub fn plan(
                     kind: p.kind.clone(),
                     prefix: p.prefix.clone(),
                     source_dir: p.source_dir.clone(),
+                    provides_paths: p.provides_paths.clone(),
                 })
                 .collect();
             Ok(ExecPlan {
                 tier: Tier::Vm,
                 net: spec.net,
-                base: spec.base.clone(),
+                guest: spec.guest.clone(),
                 packages,
             })
         }
@@ -754,6 +893,19 @@ pub fn diagnose_text(diags: &[Diagnosis]) -> String {
             Diagnosis::Conflict { path, a, b } => {
                 format!("运行包 {} 与 {} 都要写进 {}，装配会互相覆盖", a, b, path)
             }
+            Diagnosis::MissingEntry {
+                module,
+                tool,
+                command,
+                buildable,
+            } => {
+                let how = if *buildable {
+                    format!("跑 solomni --build={} 让系统照模块声明的构建方法编一次", module)
+                } else {
+                    "模块要自带这个产物，或先按模块自己的 README 构建一次".to_string()
+                };
+                format!("模块 {} 的工具 {} 入口不在场：{}（{}）", module, tool, command, how)
+            }
         })
         .collect();
     lines.join("；")
@@ -771,8 +923,8 @@ pub fn plan_summary(plan: &ExecPlan) -> String {
         .map(|p| format!("{}@{}（{}）", p.id, p.version, p.kind))
         .collect();
     format!(
-        "执行档位 虚拟机；基础根 {}；装载 {} 个包：{}；网络 {}",
-        plan.base.as_deref().unwrap_or("（未指定）"),
+        "执行档位 虚拟机；虚拟根 {}；装载 {} 个包：{}；网络 {}",
+        plan.guest.as_deref().unwrap_or("（未指定）"),
         plan.packages.len(),
         pkgs.join("、"),
         net

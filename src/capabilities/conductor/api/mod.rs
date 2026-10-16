@@ -493,8 +493,8 @@ pub struct WorkSpec {
     /// 执行档位（用户在创建向导里选的；默认 = 设置里的档位）。承载不了就由 create_work 如实拒绝。
     pub tier: Tier,
 
-    /// 目的：虚拟机档的基础根（可省 = 空；会话建好后也可在会话配置里改）。
-    pub base: Option<String>,
+    /// 目的：虚拟机档用的虚拟根名（可省 = 空；会话建好后也可在会话配置里改）。
+    pub guest: Option<String>,
 }
 
 /// 创建工作后的结果：最终实例名（重名已加尾号）、名单，以及**开场事实**。
@@ -552,6 +552,10 @@ pub struct TierChoices {
     pub vm_unavailable_reason: String,
     /// 虚拟机档的**逐项前置**（缺哪几项、每项怎么补）：界面照抄，不自己编话。
     pub vm_requirements: Vec<crate::capabilities::vm::api::VmRequirement>,
+    /// 目的：本机可选的**虚拟根**（虚拟机档那一步的下拉项）——界面照抄，不自己编列表。
+    pub guests: Vec<crate::capabilities::provision::api::GuestBase>,
+    /// 目的：包库里可用的能力名（→ 版本）：界面据此预判"这个虚拟根 + 包库满足不了哪些模块"。
+    pub available: BTreeMap<String, Vec<String>>,
 }
 
 /// 配置界面里的一个 agent（名字冻结时仍要显示）。
@@ -577,7 +581,10 @@ pub struct SessionConfig {
     pub started: bool,
     pub agents: Vec<ConfigAgent>,
     pub tier: String,
-    pub base: Option<String>,
+    /// 目的：这条会话选的虚拟根名（本机档为空）。
+    pub guest: Option<String>,
+    /// 目的：本机有哪些虚拟根可选（含"装没装齐"）——界面据此渲染下拉，不自己编列表。
+    pub guests: Vec<crate::capabilities::provision::api::GuestBase>,
     pub net: bool,
     pub pins: BTreeMap<String, String>,
     /// 本机能不能承载**当前档位**（虚拟机档的前置条件）：界面据此决定虚拟机档能不能选。
@@ -603,7 +610,7 @@ pub struct SessionEdit {
     pub agents: Vec<ConfigAgent>,
     pub tier: String,
     #[serde(default)]
-    pub base: Option<String>,
+    pub guest: Option<String>,
     #[serde(default)]
     pub pins: BTreeMap<String, String>,
     #[serde(default)]

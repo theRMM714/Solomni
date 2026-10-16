@@ -246,9 +246,9 @@ tools:
       tier:
         type: string
         desc: 执行档位 host / vm；省略 = 子会话沿用父会话，顶层用设置里的默认档
-      base:
+      guest:
         type: string
-        desc: 虚拟机档的基础根（guest rootfs 目录或磁盘镜像所在目录）；省略 = 子会话沿用父会话，顶层建好后可在会话配置里填
+        desc: 虚拟机档的虚拟根名（清单里的一个名字，如 debian；不是路径）；省略 = 子会话沿用父会话，顶层建好后可在会话配置里选
       request_id:
         type: string
         desc: 幂等标识（核心代理必填）：同一个 request_id 重放不会重复创建
@@ -521,7 +521,7 @@ tools:
       session_id: { type: string, required: true, non_empty: true, desc: 会话 id }
       agents: { type: array, required: true, desc: 每个 agent 的配置数组（name / modules / model / permissions） }
       tier: { type: string, required: true, non_empty: true, desc: 执行档位 host / vm }
-      base: { type: string, desc: 虚拟机档的基础根（可选） }
+      guest: { type: string, desc: 虚拟机档的虚拟根名（清单里的一个名字；可选） }
       pins: { type: object, desc: 能力定版表（可选） }
       net: { type: boolean, desc: 是否放行出站网络 }
   upload:

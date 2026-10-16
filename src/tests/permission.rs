@@ -728,7 +728,7 @@ fn tool_confirmation_rides_the_decision_channel() {
                         }),
                     }],
                     tier: "host".to_string(),
-                    base: None,
+                    guest: None,
                     pins: BTreeMap::new(),
                     net: false,
                 },

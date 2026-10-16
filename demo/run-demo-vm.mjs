@@ -16,7 +16,7 @@
  * 环境变量：
  *   SOLOMNI_DEMO_BASE      转录中心地址（默认 http://127.0.0.1:3081）
  *   SOLOMNI_DEMO_MODEL     指定模型 id（默认不指定 = 用核心默认模型）
- *   SOLOMNI_DEMO_VM_BASE   虚拟机档基础根（默认 .vm/guest/base）
+ *   SOLOMNI_DEMO_VM_GUEST  虚拟根名（默认 debian；本机装了哪些由 /api/tiers 给）
  *
  * 只走产品自己的 HTTP 能力面（与前端同一条路），不改任何登记处；任何一步不成立都如实打印并以非零退出码收场。
  */
@@ -29,7 +29,7 @@ import { vmPreflight, refuseDemo } from "./preflight.mjs";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const BASE = process.env.SOLOMNI_DEMO_BASE || "http://127.0.0.1:3081";
 const MODEL = process.env.SOLOMNI_DEMO_MODEL || "";
-const VM_BASE = process.env.SOLOMNI_DEMO_VM_BASE || ".vm/guest/base";
+const VM_GUEST = process.env.SOLOMNI_DEMO_VM_GUEST || "debian";
 const WORK = "demo-vm-" + Date.now();
 const SAMPLE = join(HERE, "sample-corpus");
 const OVERLAY_DIR = join(process.cwd(), ".vm", "overlays");
@@ -114,15 +114,18 @@ async function main() {
   }
   // 演示是**真机测试**：条件不齐就明说并退出（退出码 2），不用演示通道凑一遍。
   const pre = await api("GET", "/api/state");
-  const block = vmPreflight(pre.json, MODEL, VM_BASE);
+  // 虚拟根清单与"装没装齐"由后端给（GET /api/tiers）：演示不自己看盘。
+  const tiersRes = await api("GET", "/api/tiers");
+  const guests = ((tiersRes.json || {}).tiers || {}).guests || [];
+  const block = vmPreflight(pre.json, MODEL, VM_GUEST, guests);
   if (block) return refuseDemo(block);
 
   // ① 建虚拟机档工作：单 agent、harvest（python）。核心在创建那一刻做静态预检——
-  //    机器能力 × base × guest 自带运行能力 × 模块 × 包库，缺任何一项就拒绝、不拉 guest。
+  //    机器能力 × 虚拟根 × guest 自带运行能力 × 模块 × 包库，缺任何一项就拒绝、不拉 guest。
   const agent = { name: "资料手", modules: ["harvest"] };
   if (MODEL) agent.model = MODEL;
   const created = await api("POST", actUrl("create_session"), {
-    name: WORK, mode: "single", tier: "vm", base: VM_BASE, agents: [agent],
+    name: WORK, mode: "single", tier: "vm", guest: VM_GUEST, agents: [agent],
   });
   if (created.status !== 200) {
     ok(false, "建虚拟机档工作 " + WORK, created.text);

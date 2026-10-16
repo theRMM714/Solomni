@@ -444,6 +444,7 @@ pub(crate) fn the_real_bridge_reads_catalog_and_session_messages() {
 
     let module = Module {
         manifest: ModuleManifest {
+            build: None,
             id: "m1".to_string(),
             brief: "测试模块".to_string(),
             system: "你负责测试。".to_string(),
@@ -538,6 +539,7 @@ pub(crate) fn the_real_bridge_creates_a_child_work() {
 
     let module = Module {
         manifest: ModuleManifest {
+            build: None,
             id: "m1".to_string(),
             brief: "测试模块".to_string(),
             system: "你负责测试。".to_string(),
@@ -604,6 +606,7 @@ pub(crate) fn the_proxy_handler_owns_and_runs_proxy_tools() {
 
     let module = Module {
         manifest: ModuleManifest {
+            build: None,
             id: "m1".to_string(),
             brief: "测试模块".to_string(),
             system: "你负责测试。".to_string(),
@@ -702,6 +705,7 @@ pub(crate) fn a_finished_child_notifies_the_proxy_without_dumping_its_transcript
     use crate::capabilities::modules::api::ModuleManifest;
     let module = Module {
         manifest: ModuleManifest {
+            build: None,
             id: "m1".to_string(),
             brief: "测试模块".to_string(),
             system: "你负责测试。".to_string(),
@@ -732,7 +736,7 @@ pub(crate) fn a_finished_child_notifies_the_proxy_without_dumping_its_transcript
                 request_id: "r1".to_string(),
                 name: None,
                 tier: None,
-                base: None,
+                guest: None,
                 parent: Some("w-notify".to_string()),
             };
             Ok(core.create_session(&spec)?.0.session)
@@ -760,6 +764,7 @@ pub(crate) fn run_state_gates_dispatch_and_survives_stop_close() {
 
     let module = Module {
         manifest: ModuleManifest {
+            build: None,
             id: "m1".to_string(),
             brief: "测试模块".to_string(),
             system: "你负责测试。".to_string(),
@@ -862,6 +867,7 @@ pub(crate) fn relay_records_its_source_on_the_target() {
 
     let module = Module {
         manifest: ModuleManifest {
+            build: None,
             id: "m1".to_string(),
             brief: "测试模块".to_string(),
             system: "你负责测试。".to_string(),
@@ -906,6 +912,7 @@ pub(crate) fn the_real_bridge_creates_a_multi_agent_child_work() {
 
     let module = |id: &str| Module {
         manifest: ModuleManifest {
+            build: None,
             id: id.to_string(),
             brief: "测试模块".to_string(),
             system: "你负责测试。".to_string(),
@@ -967,6 +974,7 @@ pub(crate) fn the_proxy_identity_is_the_role_prompt() {
 
     let module = Module {
         manifest: ModuleManifest {
+            build: None,
             id: "m1".to_string(),
             brief: "测试模块".to_string(),
             system: "你负责测试。".to_string(),
@@ -1043,7 +1051,7 @@ pub(crate) fn create_work_with_proxy_mode_makes_a_delegated_session() {
         task: None,
         delegate: false,
         tier: Tier::Host,
-        base: None,
+        guest: None,
     };
     let (opened, _head) = ops.sessions.create_work(spec.clone()).expect("建代理会话");
     assert!(opened.agents.is_empty(), "代理会话没有名单");
@@ -1121,6 +1129,7 @@ pub(crate) fn observe_reports_new_messages_since_the_last_cursor() {
 
     let module = Module {
         manifest: ModuleManifest {
+            build: None,
             id: "m1".to_string(),
             brief: "测试模块".to_string(),
             system: "你负责测试。".to_string(),
@@ -1186,6 +1195,7 @@ pub(crate) fn the_proxy_created_child_publishes_its_opening_facts() {
 
     let module = |id: &str| Module {
         manifest: ModuleManifest {
+            build: None,
             id: id.to_string(),
             brief: "测试模块".to_string(),
             system: "你负责测试。".to_string(),
@@ -1223,7 +1233,7 @@ pub(crate) fn the_proxy_created_child_publishes_its_opening_facts() {
         request_id: "r1".to_string(),
         name: None,
         tier: None,
-        base: None,
+        guest: None,
         parent: Some(proxy),
     };
     let created = bridge.create_session(&spec).expect("建协作子工作");
@@ -1256,6 +1266,7 @@ pub(crate) fn collab_child_send_lands_on_the_gate_it_awaits() {
 
     let module = Module {
         manifest: ModuleManifest {
+            build: None,
             id: "m1".to_string(),
             brief: "测试模块".to_string(),
             system: "你负责测试。".to_string(),
@@ -1287,7 +1298,7 @@ pub(crate) fn collab_child_send_lands_on_the_gate_it_awaits() {
             task: Some("做事".to_string()),
             delegate: true,
             tier: Tier::Host,
-            base: None,
+            guest: None,
         })
         .expect("建协作工作（代拟）");
     let child = work.sid.clone();

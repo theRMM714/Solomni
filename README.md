@@ -87,6 +87,8 @@ node start.js --provision --ensure --yes # 可选：把 QEMU 与 Debian guest �
 node setup-dev.js        # 装齐开发环境：开发统一用**项目内**工具链，产物只落 platform/<os>/ 与 .tools/
 node setup-dev.js --check  # 只读校验：缺什么列什么，缺则非零退出
 node run-tests.js        # 质量门禁 + 全量测试（见 TESTING.md）
+node run-tests.js --skip-e2e  # 迭代时按门禁判一次（质量 job 模式，只省 L4）
+node dev.js test|fmt|clippy   # 本机开发回路：改一层验一层；不要直接调 cargo（见 docs/testing/execution-ci.md）
 ```
 
 - 开发环境的**条目清单**是 [dev-tools.js](dev-tools.js)（唯一真相）：`setup-dev.js` 按它装，`run-tests.js` 按它查 / `env-skip`。
@@ -133,7 +135,7 @@ tools:                       # 可选：外部工具表
 前两个演示要三个模块在清单里、indexer 已构建、登记处有供应商与一个可用的模型（用 `SOLOMNI_DEMO_MODEL` 指定，或用核心默认）；
 **MCP 演示**要 `mcp-toolbox` 在清单里、登记处有供应商与可用模型（它自带 `services` 声明，不需要预先构建）；
 **代理演示**要登记处有供应商、模型与**核心默认模型**（挑人是核心的事，它可以临时组装零模块的 agent）。
-**虚拟机档演示**要 `harvest` 在清单里、登记处有可用模型，且基础根在场、guest 画像声明有 python（`guest.yaml` 的 `runtimes`；缺包时核心会在创建那一刻拒绝）。
+**虚拟机档演示**要 `harvest` 在清单里、登记处有可用模型，且选定的虚拟根在本机装齐、画像里声明有 python（`guest.yaml` 的 `runtimes`——Linux / Windows 都由 `solomni --provision --ensure --yes` 的运行期编排起一次 guest 自证后写入；缺包时核心会在创建那一刻拒绝）。
 **条件不齐就打印 `DEMO-SKIPPED` 与怎么补、以退出码 2 收场：不跑，也不用内置演示通道凑一遍。**
 
 ```bash

@@ -12,8 +12,10 @@
 
 ## 二、入站契约与状态归属
 
-- 入站契约在 [`api.rs`](api.rs)：`Provision`（`status` / `job` / `start` / `cancel`）+ DTO（`DepStatus` / `JobState`）；`NoProvision` 是未接入的默认实现（如实失败，不假装可用）。
-- 安装方式（清单 `kind`）：`archive`（默认，解归档）/ `appimage`（自带 `--appimage-extract`，不依赖 FUSE）/ `file`（单文件直下，按 probe 的文件名落盘）/ `guest-disk`（单文件 + `guest.yaml` 画像）/ `guest-rootfs`（Linux guest 基础根多步构造：cloud 镜像 → rootfs + 通用内核 + 9p initrd + qemu-guest-agent；调 `tar` / `sfdisk` / `dd` / `debugfs` / `ar` / `unshare`，只写项目内）/ `guest-runtime`（Windows guest 的运行期编排：首启经 cloud-init 种子装 qemu-guest-agent → 维护启动先整份刷新 apt lists，再装必需的 python3 / cifs-utils 与 NodeSource 的 node，补 python 符号链接，并逐个自证（python -V / node --version），只把自证过的能力写进 `guest.yaml` 的 `runtimes`；经 `vm::api` 起 guest，只写项目内）。
+- 入站契约在 [`api.rs`](api.rs)：`Provision`（`status` / `guest_bases` / `job` / `start` / `cancel`）+ DTO（`DepStatus` / `GuestBase` / `JobState`）；`NoProvision` 是未接入的默认实现（如实失败，不假装可用）。
+- **虚拟根清单**：`guest_bases` 把清单里带 `guest:` 的条目按虚拟根名归并（`ready` = 这一根的各条都在场），一个虚拟根可由多条条目共同装；conductor 的创建向导与会话配置按它渲染下拉。
+- 安装方式（清单 `kind`）：`archive`（默认，解归档）/ `appimage`（自带 `--appimage-extract`，不依赖 FUSE）/ `file`（单文件直下，按 probe 的文件名落盘）/ `guest-disk`（单文件 + `guest.yaml` 画像）/ `guest-rootfs`（Linux guest 虚拟根多步构造：cloud 镜像 → rootfs + **带 9p 的通用内核** + 9p initrd + qemu-guest-agent，并写一份基础 `guest.yaml` 画像；调 `tar` / `sfdisk` / `dd` / `debugfs` / `ar` / `unshare`，只写项目内。**内核不能拿 cloud 镜像自带那个**——它的 `CONFIG_NET_9P` 没编（`# CONFIG_NET_9P is not set`），起不了 9p 根；所以只在"已装 ABI 真带 `9pnet_virtio` 模块"时沿用，否则装与 rootfs 同 Debian 大版本的**普通**通用内核（排除 `-rt-` / `-cloud-`），并把 `vmlinuz` / `initrd.img` 两个稳定软链换指）/ `guest-runtime`（虚拟根的运行期编排：经 `vm::api` 起一次 guest 装运行包并**逐个自证**（`python -V` / `node --version`），只把自证过的能力写进 `guest.yaml` 的 `runtimes`，并落 `.runtimes-ready` 标记；只写项目内。**磁盘根**：首启经 cloud-init 种子装 `qemu-guest-agent`，维护启动整份刷新 apt lists、装 python3 / cifs-utils 与 NodeSource 的 nodejs，客户端声明写成 cifs。**目录根（Linux）**：agent 由 `guest-rootfs` 装好、客户端保持 9p/virtiofs；它不走 cloud-init，所以维护启动先**配网**（systemd-networkd + QEMU 用户网络的固定网段兜底），python3 在镜像里就不碰 apt，node 走**官方二进制 tarball**（9p 上 dpkg 解包 nodejs 要十分钟量级，且 `security_model=none` 下 chown 被顶回 EPERM）。全量补齐时这一条失败只如实跳过并继续，显式点名才硬失败——它依赖本机能起 guest）。
+- - 解归档的入口程序（清单 `probe` 指到的那个）装完会补**可执行位**：zip 不一定带 unix 权限位，解出来会是不能跑的 0644（例如 `virtiofsd` 的便携包）。
 - 补齐后：主程序**启动时**自动采用项目内补齐的可执行文件（`qemu_path` / `virtiofsd_path` / `smbd_path` 未登记时；显式登记优先）；同进程内新装的包下次启动生效。
 - 进度：作业状态带单调 `seq`；`GET /api/setup/status?since=N&wait=1` 是长轮询（最多 20s），拿到新行即回，前端按 `seq` 增量取。
 - 状态归属：清单与台账的唯一真相在仓库根 `dependencies.yaml` / `links.yaml`，产品里**编译期内嵌**；作业状态是**进程内**的（不落盘，进程重启即清空）。

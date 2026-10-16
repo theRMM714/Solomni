@@ -805,7 +805,7 @@ pub(crate) fn native_member(
 pub(crate) fn vm_spec() -> ExecSpec {
     ExecSpec {
         tier: Tier::Vm,
-        base: Some("base-linux".to_string()),
+        guest: Some(crate::tests::test_guest("vm-spec")),
         pins: BTreeMap::new(),
         net: false,
     }
@@ -860,7 +860,7 @@ pub(crate) fn edit_of(agents: Vec<(&str, &[&str], &str)>) -> SessionEdit {
             })
             .collect(),
         tier: "host".to_string(),
-        base: None,
+        guest: None,
         pins: BTreeMap::new(),
         net: false,
     }
@@ -908,10 +908,12 @@ pub(crate) fn native_core(
         Arc::new(FakeCatalog::new(vec!["m".to_string()])),
     );
     Conductor::new(
+        crate::tests::root_dir(),
         registry_service(InMemorySettings::new(), Arc::clone(&llm)),
         test_history_of(history),
         test_workspace(Arc::new(InMemoryWorkspace::new())),
         test_vm(Arc::new(InMemoryPackages::empty())),
+        test_provision(),
         test_modules(Arc::new(VecSource(vec![module_of("a")]))),
         llm,
         test_tools_svc_with(Arc::new(SilentRunner), io, Arc::new(NoFenceHost)),

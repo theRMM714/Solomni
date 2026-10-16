@@ -1,11 +1,12 @@
-//! 目的：Windows guest 的运行期编排——首启经 cloud-init 装 qemu-guest-agent，维护启动经 QGA 装运行包（含 cifs-utils）。
-//! 管：启动 / 等 agent / 执行 / 收尾的顺序，标记文件（.qga-ready / .runtimes-ready）与 guest.yaml 的共享客户端声明。
-//! 不管：清单、下载与作业状态（service.rs）；guest 引擎本身（vm 能力）。
-//! 联动：由 service.rs 的 guest-runtime 分支调用；vm 能力经 ::api 注入（组合根或 --provision 入口装配）。
+//! 目的：虚拟根的运行期编排——把 guest 编到可用，并把它**真有的**运行能力写进画像。
+//! 管：启动 / 等 agent / 执行 / 收尾的顺序，首启与维护启动的分工，标记文件（.qga-ready / .runtimes-ready）与 guest.yaml 的客户端 / 运行能力声明。
+//! 不管：清单、下载与作业状态（service.rs）；guest 引擎本身（vm 能力）；运行包库（runtimes/ 与包库扫描）。
+//! 联动：由 service.rs 的 guest-runtime 分支调用；vm 能力经 ::api 注入（组合根或 --provision 入口装配）；契约见 RUNTIME_SPEC.md。
 
 use super::service::{deps, under, Dep};
 use crate::capabilities::vm::api::{
-    classify_base, GuestArch, GuestImage, GuestRun, GuestSpec, SeedDocs, Vm,
+    classify_base, GuestArch, GuestClients, GuestImage, GuestRoot, GuestRun, GuestSpec, SeedDocs,
+    Vm,
 };
 use std::path::Path;
 use std::time::Duration;
@@ -16,12 +17,30 @@ const USER_DATA: &str = "#cloud-config\nruncmd:\n  - >-\n    dpkg -s qemu-guest-
 /// 目的：首启 cloud-init 的 meta-data（固定 instance-id，避免每次启动重跑）。
 const META_DATA: &str = "instance-id: solomni-provision\nlocal-hostname: solomni-guest\n";
 
-/// 目的：维护启动**必须**装上的运行包——模块工具基线（python）与共享要用的 cifs-utils。
-const REQUIRED_PKGS: &str = "python3 cifs-utils";
-
 /// 目的：guest 里的 node 从 **NodeSource** 装——Debian trixie 的 nodejs 依赖 node-corepack，镜像源里不可得。
-/// 约束：尽力而为（装不上就不声明）；装完由调用方自证（node --version）。
-const NODE_INSTALL: &str = "DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends curl ca-certificates gnupg || true; curl -fsSL https://deb.nodesource.com/setup_22.x -o /tmp/nodesource_setup.sh || true; bash /tmp/nodesource_setup.sh || true; DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends nodejs || true";
+/// 约束：尽力而为（装不上就不声明）；装完由调用方自证（node --version）。加源之后要**再 update 一次**才看得到 nodejs。
+const NODE_REPO: &str = "curl -fsSL https://deb.nodesource.com/setup_22.x -o /tmp/nodesource_setup.sh || true; bash /tmp/nodesource_setup.sh || true";
+
+/// 目的：**目录根**上的 node 走官方二进制 tarball——9p 目录根上 dpkg 解包 nodejs 要 10 分钟量级（远超单条命令上限）。
+/// 约束：版本从官方 `latest-v22.x` 的校验单里现取；解包用 `--no-same-owner`（9p 上 chown 办不到、也不需要）；
+///   装到 `/opt/node` 并软链进 `/usr/local/bin`；尽力而为，装不上就不声明。
+fn node_tarball() -> String {
+    let arch = match std::env::consts::ARCH {
+        "x86_64" => "x64",
+        "aarch64" => "arm64",
+        other => other,
+    };
+    format!(
+        "F=$(curl -fsSL https://nodejs.org/dist/latest-v22.x/SHASUMS256.txt 2>/dev/null | grep -o 'node-v22[0-9.]*-linux-{arch}\\.tar\\.xz' | head -1); \
+         if [ -n \"$F\" ]; then curl -fsSL \"https://nodejs.org/dist/latest-v22.x/$F\" -o /tmp/node.tar.xz || true; fi; \
+         if [ -s /tmp/node.tar.xz ]; then mkdir -p /opt/node; tar -xJf /tmp/node.tar.xz -C /opt/node --strip-components=1 --no-same-owner || true; fi; \
+         if [ -x /opt/node/bin/node ]; then mkdir -p /usr/local/bin; ln -sf /opt/node/bin/node /usr/local/bin/node; ln -sf /opt/node/bin/npm /usr/local/bin/npm; ln -sf /opt/node/bin/npx /usr/local/bin/npx; fi; "
+    )
+}
+/// 目的：**目录根**的网络预置——Linux 目录根不走 cloud-init，网卡没人配（guest 里也没有 DHCP 客户端）。
+/// 约束：QEMU 用户网络（slirp）固定 10.0.2.0/24，网关 `.2`、DNS `.3`；先用镜像自带的 systemd-networkd 走 DHCP，
+///   再按 slirp 的固定网段做静态兜底（磁盘根由首启 cloud-init 配网，不需要这一段）。
+const NET_UP: &str = "mkdir -p /etc/systemd/network; printf '[Match]\\nName=en* eth*\\n\\n[Network]\\nDHCP=yes\\n' > /etc/systemd/network/10-solomni.network; systemctl enable --now systemd-networkd >/dev/null 2>&1 || true; systemctl enable --now systemd-resolved >/dev/null 2>&1 || true; IF=$(ls /sys/class/net | grep -v '^lo$' | head -1); ip link set \"$IF\" up 2>/dev/null || true; ip addr show \"$IF\" 2>/dev/null | grep -q '10\\.0\\.2\\.' || { ip addr add 10.0.2.15/24 dev \"$IF\" 2>/dev/null || true; ip route add default via 10.0.2.2 dev \"$IF\" 2>/dev/null || true; }; grep -q '10\\.0\\.2\\.3' /etc/resolv.conf 2>/dev/null || { rm -f /etc/resolv.conf; printf 'nameserver 10.0.2.3\\n' > /etc/resolv.conf; }; ";
 
 /// 目的：一次 guest 运行（命令交给 guest 的 /bin/sh；args/env/cwd 都空）。
 fn sh(command: &str) -> GuestRun {
@@ -33,17 +52,48 @@ fn sh(command: &str) -> GuestRun {
     }
 }
 
-/// 目的：按镜像画像重写 guest.yaml——共享客户端如实声明为 cifs，运行能力只列**自证过**的那些。
-/// 参数：runtimes = 编排在 guest 里逐个自证可用的能力名（没列 = 镜像里确实没有）。
-fn write_guest_yaml(base: &Path, image: &GuestImage, runtimes: &[String]) -> Result<(), String> {
+/// 目的：这次维护启动要装的运行包——磁盘根还要 cifs-utils（它的共享客户端是 SMB）；目录根走 9p/virtiofs，不需要。
+fn required_pkgs(is_disk: bool) -> &'static str {
+    if is_disk {
+        "python3 cifs-utils"
+    } else {
+        "python3"
+    }
+}
+
+/// 目的：镜像声明的共享客户端（写回 guest.yaml 时按它列，按固定顺序）。
+fn clients_of(c: &GuestClients) -> Vec<&'static str> {
+    let mut out = Vec::new();
+    if c.nine_p {
+        out.push("9p");
+    }
+    if c.virtio_fs {
+        out.push("virtiofs");
+    }
+    if c.cifs {
+        out.push("cifs");
+    }
+    out
+}
+
+/// 目的：按镜像画像重写 guest.yaml——客户端按这次编排确认的写，运行能力只列**自证过**的那些。
+/// 参数：runtimes = 编排在 guest 里逐个自证可用的能力名（没列 = 镜像里确实没有）；clients = 这次确认可用的共享客户端。
+fn write_guest_yaml(
+    base: &Path,
+    image: &GuestImage,
+    runtimes: &[String],
+    clients: &[&str],
+) -> Result<(), String> {
     // arch 要用 guest.yaml 认的写法（amd64 / arm64），不是平台三元组（x86_64 / aarch64）。
     let arch = match image.arch {
         GuestArch::Amd64 => "amd64",
         GuestArch::Arm64 => "arm64",
     };
     let list = runtimes.join(", ");
+    let clients = clients.join(", ");
     let text = format!(
-        "# 由产品生成：命令通道 QGA；共享客户端 cifs；运行能力 [{list}]（运行期编排装好并逐个自证过的；\n# 这里没列的 = 镜像里确实没有。虚拟机档的选型诊断据此认定列出的能力已满足，不必再往 runtimes/ 放包）。\n\nid: {id}\narch: {arch}\nos: {os}\nagent: qga\nclients: [cifs]\nruntimes: [{list}]\n",
+        "# 由产品生成：命令通道 QGA；共享客户端 {clients}；运行能力 [{list}]（运行期编排装好并逐个自证过的；\n# 这里没列的 = 镜像里确实没有。虚拟机档的选型诊断据此认定列出的能力已满足，不必再往 runtimes/ 放包）。\n\nid: {id}\narch: {arch}\nos: {os}\nagent: qga\nclients: [{clients}]\nruntimes: [{list}]\n",
+        clients = clients,
         list = list,
         id = image.id,
         arch = arch,
@@ -52,45 +102,50 @@ fn write_guest_yaml(base: &Path, image: &GuestImage, runtimes: &[String]) -> Res
     std::fs::write(base.join("guest.yaml"), text).map_err(|e| format!("写 guest.yaml 失败：{}", e))
 }
 
-/// 目的：找清单里 Windows QEMU 的真实落点（运行期编排要用它起 guest）。
-fn qemu_path(root: &Path) -> Result<std::path::PathBuf, String> {
+/// 目的：找清单里**本机** QEMU 的真实落点（运行期编排要用它起 guest）。
+/// 参数：host_os = 宿主平台名（清单条目按它筛，条目 id 形如 vm.qemu.linux）。
+fn qemu_path(root: &Path, host_os: &str) -> Result<std::path::PathBuf, String> {
+    let id = format!("vm.qemu.{host_os}");
     deps()?
         .into_iter()
-        .find(|d| d.id == "vm.qemu.windows")
+        .find(|d| d.id == id)
         .map(|d| under(root, &d.probe))
-        .ok_or_else(|| "清单里没有 vm.qemu.windows（先补齐 QEMU）".to_string())
+        .ok_or_else(|| format!("清单里没有 {id}（先补齐 QEMU）"))
 }
 
-/// 目的：把 Windows guest 编到可用——首启装 agent、维护启动装运行包，并如实落标记与 guest.yaml。
-/// 参数：root = 产品根；dep = guest-runtime 清单条目；vm = vm 能力面（None = 组合根没注入，如实拒绝）；on_line = 进度行。
+/// 目的：把虚拟根编到可用——磁盘根先首启装 agent，随后维护启动装运行包；目录根直接维护启动。
+/// 参数：root = 产品根；dep = guest-runtime 清单条目；vm = vm 能力面（None = 组合根没注入，如实拒绝）；
+///   force = 用户显式点名这一条（重跑维护启动，不再被 `.runtimes-ready` 挡住）；on_line = 进度行。
 /// 约束：同一租约 "provision"，每次启动前先销毁旧的；装完才写标记，失败不写（下次重试）。
+/// 约束：只声明**自证过**的能力——python 必须通（模块工具基线），node 尽力装、通了才写进画像。
 pub(super) fn install_guest_runtime(
     root: &Path,
     dep: &Dep,
     vm: Option<&(dyn Vm + Send + Sync)>,
+    force: bool,
     on_line: &mut dyn FnMut(&str),
 ) -> Result<(), String> {
     let vm = vm.ok_or_else(|| "guest 运行期编排需要 vm 能力（组合根未注入）".to_string())?;
     let base = under(root, &dep.install);
-    if !base.join("rootfs.qcow2").is_file() {
-        return Err("guest 镜像不在场：先跑 --ensure=vm.guest.windows".to_string());
-    }
-    let qemu = qemu_path(root)?;
+    let probe = crate::kernel::detail::HostProbeAdapter;
+    let image = classify_base(&base, &probe)
+        .map_err(|why| format!("虚拟根不可用（{why}）：先跑 solomni --provision --ensure --yes"))?;
+    // 磁盘根里没有 agent，要靠首启 cloud-init 装；目录根由 guest-rootfs 装好 qemu-guest-agent。
+    let is_disk = matches!(image.root, GuestRoot::Disk(_));
+    let qemu = qemu_path(root, &dep.os)?;
     if !qemu.is_file() {
         return Err(format!(
-            "QEMU 不在场（{}）：先跑 --ensure=vm.qemu.windows",
+            "QEMU 不在场（{}）：先跑 solomni --provision --ensure --yes",
             qemu.display()
         ));
     }
-    let probe = crate::kernel::detail::HostProbeAdapter;
-    let image = classify_base(&base, &probe)?;
     let engine_path = qemu.to_string_lossy().into_owned();
     let lease = "provision".to_string();
     let qga_marker = base.join(".qga-ready");
     let runtimes_marker = base.join(".runtimes-ready");
 
-    // 首启：cloud-init 从宿主小 HTTP 取 user-data，装 qemu-guest-agent。
-    if !qga_marker.is_file() {
+    // 首启（只有磁盘根要）：cloud-init 从宿主小 HTTP 取 user-data，装 qemu-guest-agent。
+    if is_disk && !qga_marker.is_file() {
         on_line("首启 guest：cloud-init 装 qemu-guest-agent");
         let spec = GuestSpec {
             lease: lease.clone(),
@@ -121,11 +176,24 @@ pub(super) fn install_guest_runtime(
         on_line("guest 里的 qemu-guest-agent 已确认");
     }
 
-    // 维护启动：装运行包与 cifs-utils；装完把 guest.yaml 的共享客户端写成 cifs。
-    if !runtimes_marker.is_file() || !image.clients.cifs {
-        on_line(
-            "维护启动：经 QGA 装运行包（必需 python3 / cifs-utils；node 走 NodeSource）并逐个自证",
-        );
+    // 维护启动：装运行包并逐个自证，然后把客户端与运行能力写进画像。
+    // 触发条件：还没自证过；或磁盘根还没把 cifs-utils 装上（客户端声明要跟着走）。
+    let clients: Vec<&'static str> = if is_disk {
+        vec!["cifs"]
+    } else {
+        clients_of(&image.clients)
+    };
+    let clients_pending = is_disk && !image.clients.cifs;
+    if force || !runtimes_marker.is_file() || clients_pending {
+        on_line(&format!(
+            "维护启动：经 QGA 装运行包（必需 {}；node 走 {}，尽力）并逐个自证",
+            required_pkgs(is_disk),
+            if is_disk {
+                "apt + NodeSource"
+            } else {
+                "官方 tarball"
+            }
+        ));
         let spec = GuestSpec {
             lease: lease.clone(),
             image: image.clone(),
@@ -144,11 +212,43 @@ pub(super) fn install_guest_runtime(
             return Err("等维护启动的 qemu-guest-agent 超时".to_string());
         }
         // 镜像里可能残留不完整的 apt lists（首启中途中断过）：整份刷新一遍再装，避免「包明明在却算不可安装」。
-        // python-is-python3 在 trixie 已没有，python 符号链接自己补。必需包装不上如实失败；node 走 NodeSource，尽力。
+        // python-is-python3 在 trixie 已没有，python 符号链接自己补；目录根还要先配网，并让 apt 别去 chown `_apt`（9p 上办不到）。
+        let net = if is_disk { "" } else { NET_UP };
+        let opt = if is_disk {
+            ""
+        } else {
+            " -o APT::Sandbox::User=root"
+        };
+        // 目录根：apt 只用来确认 python3（node 走 tarball，9p 上 dpkg 太慢）；磁盘根：照旧 apt + NodeSource。
+        let node = if is_disk {
+            format!(
+                "DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends curl ca-certificates gnupg || true; \
+                 {repo}; \
+                 DEBIAN_FRONTEND=noninteractive apt-get update -o Acquire::Languages=none || true; \
+                 DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends nodejs || true;",
+                repo = NODE_REPO
+            )
+        } else {
+            node_tarball()
+        };
+        // 目录根：镜像自带 python3 就**不碰 apt**（9p 上 apt 又慢又留 chown 警告，node 走 tarball 也不需要它）；
+        // 磁盘根：照旧先刷新索引再装必需包（python3 / cifs-utils）。
+        let apt = if is_disk {
+            format!(
+                "rm -rf /var/lib/apt/lists; mkdir -p /var/lib/apt/lists; \
+                 DEBIAN_FRONTEND=noninteractive apt-get{opt} update -o Acquire::Languages=none || true; \
+                 DEBIAN_FRONTEND=noninteractive apt-get{opt} install -y --no-install-recommends {req} || true; ",
+                opt = opt,
+                req = required_pkgs(is_disk)
+            )
+        } else {
+            "if ! command -v python3 >/dev/null 2>&1; then rm -rf /var/lib/apt/lists; mkdir -p /var/lib/apt/lists; DEBIAN_FRONTEND=noninteractive apt-get -o APT::Sandbox::User=root update -o Acquire::Languages=none || true; DEBIAN_FRONTEND=noninteractive apt-get -o APT::Sandbox::User=root install -y --no-install-recommends python3 || true; fi; ".to_string()
+        };
         let cmd = format!(
-            "rm -rf /var/lib/apt/lists; mkdir -p /var/lib/apt/lists; DEBIAN_FRONTEND=noninteractive apt-get update -o Acquire::Languages=none || true; DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends {req} || true; {node}; command -v python >/dev/null 2>&1 || ln -sf /usr/bin/python3 /usr/bin/python; sync",
-            req = REQUIRED_PKGS,
-            node = NODE_INSTALL
+            "{net}{apt}{node} command -v python >/dev/null 2>&1 || ln -sf /usr/bin/python3 /usr/bin/python; sync",
+            net = net,
+            apt = apt,
+            node = node
         );
         let out = vm.guest_run(&lease, &sh(&cmd));
         // 自证：python 必须通（模块工具的基线）；node 可选，通才写进声明。
@@ -167,19 +267,27 @@ pub(super) fn install_guest_runtime(
         if node_ok {
             proven.push("node".to_string());
         }
-        write_guest_yaml(&base, &image, &proven)?;
+        write_guest_yaml(&base, &image, &proven, &clients)?;
         std::fs::write(
             &runtimes_marker,
             format!(
-                "产品 Rust 编排：python3 / python 已自证可用{}；cifs-utils 已装\n",
+                "产品 Rust 编排：python3 / python 已自证可用{}；共享客户端 [{}]\n",
                 if node_ok {
                     "，node 也已自证可用"
                 } else {
                     "；node 在这个镜像源里装不上，未声明"
-                }
+                },
+                clients.join(", ")
             ),
         )
         .map_err(|e| format!("写 {} 失败：{}", runtimes_marker.display(), e))?;
+        if !qga_marker.is_file() {
+            // 目录根的 agent 由 guest-rootfs 装好；维护启动能通就说明它在场——如实落这条事实。
+            let _ = std::fs::write(
+                &qga_marker,
+                "目录根自带 qemu-guest-agent（维护启动已确认）\n",
+            );
+        }
         if !node_ok {
             let tail: String = {
                 let s = out.output.as_str();
@@ -189,57 +297,61 @@ pub(super) fn install_guest_runtime(
             on_line(&format!("node 未声明的编排输出（尾段）：{}", tail));
         }
         on_line(if node_ok {
-            "guest 运行包与 cifs-utils 已装好（python / node 都自证可用）"
+            "guest 运行包已装好（python / node 都自证可用）"
         } else {
-            "guest 运行包与 cifs-utils 已装好（python 自证可用；node 装不上，未声明）"
+            "guest 运行包已装好（python 自证可用；node 装不上，未声明）"
         });
     }
     Ok(())
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::capabilities::provision::service::Dep;
 
-    fn dep() -> Dep {
+    /// 目的：造一条 guest-runtime 清单条目（字段取自 dependencies.yaml 的真实形状）。
+    fn dep(id: &str, os: &str, guest: &str, install: &str, probe: &str) -> Dep {
         Dep {
-            id: "vm.guest-runtime.windows".to_string(),
-            os: "windows".to_string(),
+            id: id.to_string(),
+            os: os.to_string(),
             arch: "x86_64".to_string(),
             kind: "guest-runtime".to_string(),
-            install: ".vm/guest/base".to_string(),
-            probe: ".vm/guest/base/.runtimes-ready".to_string(),
-            source: "guest.debian.qcow2".to_string(),
+            install: install.to_string(),
+            probe: probe.to_string(),
+            guest: Some(guest.to_string()),
+            source: "guest.debian.image".to_string(),
             strip: 0,
             size_mb: 0,
             note: String::new(),
         }
     }
 
-    /// 目的：没有 vm 能力面时如实拒绝（不假装能编排）。
-    #[test]
-    fn guest_runtime_refuses_without_vm() {
-        let root = crate::tests::scratch("provision-guest-no-vm");
-        let err = install_guest_runtime(&root, &dep(), None, &mut |_| {}).expect_err("要拒");
-        assert!(err.contains("vm 能力"), "{}", err);
-        let _ = std::fs::remove_dir_all(&root);
+    /// 目的：造一条磁盘根的条目（Windows 形态）。
+    fn disk_dep() -> Dep {
+        dep(
+            "vm.guest-runtime.windows",
+            "windows",
+            "windows",
+            ".vm/guest/windows",
+            ".vm/guest/windows/.runtimes-ready",
+        )
     }
 
-    /// 目的：镜像不在场时如实拒绝——先装 vm.guest.windows。
-    #[test]
-    fn guest_runtime_refuses_without_image() {
-        let root = crate::tests::scratch("provision-guest-no-image");
-        let vm = crate::tests::doubles::RecordingVm::default();
-        let err = install_guest_runtime(&root, &dep(), Some(&vm), &mut |_| {}).expect_err("要拒");
-        assert!(err.contains("guest 镜像不在场"), "{}", err);
-        let _ = std::fs::remove_dir_all(&root);
+    /// 目的：造一条目录根的条目（Linux 形态）。
+    fn dir_dep() -> Dep {
+        dep(
+            "vm.guest-runtime.linux",
+            "linux",
+            "debian",
+            ".vm/guest/debian",
+            ".vm/guest/debian/.runtimes-ready",
+        )
     }
 
-    /// 目的：镜像与 QEMU 在场时，编排走完并落下两个标记、把 guest.yaml 的共享客户端写成 cifs。
-    #[test]
-    fn guest_runtime_writes_markers_and_declares_cifs() {
-        let root = crate::tests::scratch("provision-guest-ok");
-        let base = root.join(".vm").join("guest").join("base");
+    /// 目的：在临时产品根里铺一份磁盘根虚拟根 + QEMU 落点。
+    fn seed_disk_root(root: &Path) -> std::path::PathBuf {
+        let base = root.join(".vm").join("guest").join("windows");
         std::fs::create_dir_all(&base).expect("base");
         std::fs::write(base.join("rootfs.qcow2"), b"qcow2").expect("disk");
         std::fs::write(
@@ -254,24 +366,69 @@ mod tests {
             .join("qemu-system-x86_64.exe");
         std::fs::create_dir_all(qemu.parent().expect("parent")).expect("qemu dir");
         std::fs::write(&qemu, b"exe").expect("qemu");
+        base
+    }
+
+    /// 目的：在临时产品根里铺一份目录根虚拟根 + QEMU 落点。
+    fn seed_dir_root(root: &Path) -> std::path::PathBuf {
+        let base = root.join(".vm").join("guest").join("debian");
+        std::fs::create_dir_all(&base).expect("base");
+        std::fs::write(base.join("vmlinuz"), b"x").expect("kernel");
+        std::fs::write(
+            base.join("guest.yaml"),
+            "id: debian-13-genericcloud-amd64\nos: linux\narch: amd64\nagent: qga\nclients: [9p, virtiofs]\nruntimes: []\n",
+        )
+        .expect("yaml");
+        let qemu = root
+            .join(".vm")
+            .join("qemu")
+            .join("bin")
+            .join("qemu-system-x86_64");
+        std::fs::create_dir_all(qemu.parent().expect("parent")).expect("qemu dir");
+        std::fs::write(&qemu, b"exe").expect("qemu");
+        base
+    }
+
+    /// 目的：没有 vm 能力面时如实拒绝（不假装能编排）。
+    #[test]
+    fn guest_runtime_refuses_without_vm() {
+        let root = crate::tests::scratch("provision-guest-no-vm");
+        let err =
+            install_guest_runtime(&root, &disk_dep(), None, false, &mut |_| {}).expect_err("要拒");
+        assert!(err.contains("vm 能力"), "{}", err);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// 目的：虚拟根不在场时如实拒绝——先装 vm.guest.名字 那一条。
+    #[test]
+    fn guest_runtime_refuses_without_image() {
+        let root = crate::tests::scratch("provision-guest-no-image");
         let vm = crate::tests::doubles::RecordingVm::default();
-        install_guest_runtime(&root, &dep(), Some(&vm), &mut |_| {}).expect("编排");
+        let err = install_guest_runtime(&root, &disk_dep(), Some(&vm), false, &mut |_| {})
+            .expect_err("要拒");
+        assert!(err.contains("虚拟根不可用"), "{}", err);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// 目的：磁盘根（Windows 形态）走完首启 + 维护启动，落两个标记，并把客户端写成 cifs。
+    #[test]
+    fn guest_runtime_writes_markers_and_declares_cifs() {
+        let root = crate::tests::scratch("provision-guest-ok");
+        let base = seed_disk_root(&root);
+        let vm = crate::tests::doubles::RecordingVm::default();
+        install_guest_runtime(&root, &disk_dep(), Some(&vm), false, &mut |_| {}).expect("编排");
         assert!(base.join(".qga-ready").is_file(), "首启标记要落");
         assert!(base.join(".runtimes-ready").is_file(), "运行包标记要落");
         let y = std::fs::read_to_string(base.join("guest.yaml")).expect("yaml");
         assert!(y.contains("clients: [cifs]"), "{}", y);
         assert!(y.contains("runtimes: [python, node]"), "{}", y);
-        assert!(
-            y.contains("arch: amd64"),
-            "arch 要用 guest.yaml 认的写法：{}",
-            y
-        );
-        // 写出的 guest.yaml 必须仍可被识别（arch 写法错了就会在这里炸），并如实声明装好的运行能力。
+        assert!(y.contains("arch: amd64"), "arch 要用画像认的写法：{}", y);
+        // 写出的画像必须仍可被识别（arch 写法错了就会在这里炸），并如实声明装好的运行能力。
         let image = crate::capabilities::vm::api::classify_base(
             &base,
             &crate::kernel::detail::HostProbeAdapter,
         )
-        .expect("运行期编排写出的 guest.yaml 要仍可识别");
+        .expect("运行期编排写出的画像要仍可识别");
         assert_eq!(
             image.runtimes,
             vec!["node".to_string(), "python".to_string()],
@@ -280,12 +437,105 @@ mod tests {
         let runs = vm.runs.lock().expect("锁").clone();
         assert!(
             runs.iter().any(|c| c.contains("cifs-utils")),
-            "运行包清单要带 cifs-utils：{:?}",
+            "磁盘根的运行包清单要带 cifs-utils：{:?}",
             runs
         );
         assert!(
             runs.iter().any(|c| c.contains("deb.nodesource.com")),
-            "node 要从 NodeSource 装（Debian trixie 的 nodejs 依赖 node-corepack，装不上）：{:?}",
+            "node 要从 NodeSource 装：{:?}",
+            runs
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// 目的：真机验收（默认跳过）：Linux 虚拟根的运行期编排真起一次 guest，把自证过的能力写进画像。
+    /// 约束：只在 SOLOMNI_VM_LIVE=1、本机是 Linux、虚拟根与 QEMU 都在场时执行；否则打印 [探针] 如实跳过。
+    #[test]
+    fn provision_linux_runtime_proves_runtimes_live() {
+        use crate::kernel::ports::HostProbe;
+        let live = std::env::var("SOLOMNI_VM_LIVE").as_deref() == Ok("1");
+        if !live || std::env::consts::OS != "linux" {
+            eprintln!("[探针] 未开启 Linux 运行期编排的真机验收：设 SOLOMNI_VM_LIVE=1（仅 Linux 宿主）后重跑");
+            return;
+        }
+        let root = crate::tests::root_dir();
+        let Some(dep) = deps()
+            .expect("清单")
+            .into_iter()
+            .find(|d| d.id == "vm.guest-runtime.linux")
+        else {
+            eprintln!("[探针] 清单里没有 vm.guest-runtime.linux");
+            return;
+        };
+        let base = under(&root, &dep.install);
+        let probe = crate::kernel::detail::HostProbeAdapter;
+        let qemu_ok = qemu_path(&root, &dep.os)
+            .map(|p| p.is_file())
+            .unwrap_or(false);
+        if !probe.is_dir(&base) || !qemu_ok {
+            eprintln!("[探针] 虚拟根或 QEMU 不在场：先 solomni --provision --ensure=vm.qemu.linux,vm.guest.linux --yes");
+            return;
+        }
+        // 同一个虚拟根不能被两台 guest 同时写：真机用例之间串行（见 doubles::live_guest_lock）。
+        let _live = crate::tests::doubles::live_guest_lock();
+        let vm = crate::capabilities::vm::service::VmService::new(
+            std::sync::Arc::new(crate::capabilities::vm::detail::FsPackages::new(
+                root.join("runtimes"),
+            )),
+            std::sync::Arc::new(crate::capabilities::vm::detail::QemuEngine::new()),
+            std::sync::Arc::new(crate::capabilities::vm::detail::CopyShare::new()),
+        );
+        let mut sink = |l: &str| eprintln!("[探针] {}", l);
+        install_guest_runtime(&root, &dep, Some(&vm), true, &mut sink)
+            .expect("真机运行期编排要成功");
+        let image = classify_base(&base, &probe).expect("编排后的画像要仍可识别");
+        assert!(
+            image.runtimes.iter().any(|r| r == "python"),
+            "python 必须自证并写进画像：{:?}",
+            image.runtimes
+        );
+        assert!(base.join(".runtimes-ready").is_file(), "运行包标记要落");
+    }
+
+    /// 目的：目录根（Linux 形态）不走首启，也**不装 cifs-utils**，客户端保持镜像声明的 9p/virtiofs。
+    #[test]
+    fn dir_root_runtime_keeps_its_clients_and_proves_runtimes() {
+        let root = crate::tests::scratch("provision-guest-dir");
+        let base = seed_dir_root(&root);
+        let vm = crate::tests::doubles::RecordingVm::default();
+        install_guest_runtime(&root, &dir_dep(), Some(&vm), false, &mut |_| {}).expect("编排");
+        assert!(base.join(".runtimes-ready").is_file(), "运行包标记要落");
+        assert!(
+            base.join(".qga-ready").is_file(),
+            "目录根的 agent 也如实落一条"
+        );
+        let y = std::fs::read_to_string(base.join("guest.yaml")).expect("yaml");
+        assert!(
+            y.contains("clients: [9p, virtiofs]"),
+            "目录根的共享客户端要保持原样：{}",
+            y
+        );
+        assert!(y.contains("runtimes: [python, node]"), "{}", y);
+        let runs = vm.runs.lock().expect("锁").clone();
+        assert!(
+            !runs.iter().any(|c| c.contains("cifs-utils")),
+            "目录根走 9p/virtiofs，不该装 cifs-utils：{:?}",
+            runs
+        );
+        assert!(
+            runs.iter()
+                .any(|c| c.contains("https://nodejs.org/dist/latest-v22.x/")),
+            "node 仍然尽力装（render 这类模块要它），目录根走官方 tarball：{:?}",
+            runs
+        );
+        assert!(
+            !runs.iter().any(|c| c.contains("apt-get install -y nodejs")),
+            "目录根不能走 dpkg 装 nodejs（9p 上太慢）：{:?}",
+            runs
+        );
+        assert!(
+            runs.iter().any(|c| c.contains("nameserver 10.0.2.3")),
+            "目录根要先配网（不走 cloud-init）：{:?}",
             runs
         );
         let _ = std::fs::remove_dir_all(&root);

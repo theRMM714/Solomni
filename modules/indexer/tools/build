@@ -1,0 +1,10 @@
+#!/bin/sh
+# 目的：把 indexer 编出来（unix：Linux / macOS）。产品用 `solomni --build=indexer` 调它（cwd = 模块根）。
+# 与 tools/build.cmd 并排（Windows 那边由 cmd 按 PATHEXT 找到）。
+# 约束：编译器要在宿主 PATH 上（模块声明的构建期能力 `gcc` 就按 PATH 判）；macOS 不需要那两个静态链接标志。
+set -e
+mkdir -p build
+if [ "$(uname -s)" = "Darwin" ]; then
+    exec g++ -O2 -std=c++17 -Wall -Wextra tools/src/indexer.cpp -o build/indexer
+fi
+exec g++ -O2 -std=c++17 -Wall -Wextra -static-libgcc -static-libstdc++ tools/src/indexer.cpp -o build/indexer

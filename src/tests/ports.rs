@@ -553,6 +553,8 @@ fn fixed_probe_answers_only_what_was_declared() {
         dirs: vec![dir.clone()],
         exes: vec!["qemu-system-x86_64".to_string()],
         hypervisor: true,
+        guests: Vec::new(),
+        not_executable: Vec::new(),
     };
     assert!(p.is_dir(&dir) && !p.is_dir(&file), "声明之外的目录一律不算");
     assert!(
@@ -562,4 +564,23 @@ fn fixed_probe_answers_only_what_was_declared() {
     assert!(p.has_exe("qemu-system-x86_64") && !p.has_exe("other"));
     assert!(p.hypervisor_available(), "虚拟化按声明回答");
     assert!(!FixedProbe::default().hypervisor_available(), "缺省一律否");
+}
+
+/// 目的：真实宿主探针的"能直接跑"（`is_executable`）按权限位判——只在场不算，这与"在场"是两件事。
+#[cfg(unix)]
+#[test]
+fn real_probe_is_executable_follows_the_mode_bit() {
+    use crate::kernel::ports::HostProbe;
+    use std::os::unix::fs::PermissionsExt;
+    let root = crate::tests::scratch("probe-exec");
+    let script = root.join("run.sh");
+    std::fs::write(&script, "#!/bin/sh\n").expect("写脚本");
+    let probe = crate::kernel::detail::host_probe::HostProbeAdapter;
+    assert!(!probe.is_executable(&script), "没有执行位就不算能跑");
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).expect("给执行位");
+    assert!(probe.is_executable(&script), "有执行位才算能跑");
+    assert!(
+        !probe.is_executable(&root.join("nowhere")),
+        "不在场当然不算能跑"
+    );
 }

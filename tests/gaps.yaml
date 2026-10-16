@@ -103,18 +103,19 @@
     三平台各有一份覆盖率报告，且报告明确标注"仅进程内 / 仅当前平台"或已聚合子进程；
     未覆盖的生产路径逐条有补测或缺口结论。
   blocked_by: 缺少观察面（子进程插桩与合并尚未实现）
-- id: prompt.at-ref-session-dialect
-  scope: global
-  level: T4
-  why: |
-    用户输入里的 @ 引用由 prompt 能力改写成**宿主**真实绝对路径（refs.rs 的 RefRoots 就是宿主根）。
-    本机档没问题；虚拟机档下工作环境提示词给的是 guest 写法，而模块工具在 guest 里执行、看不到宿主路径——
-    这类引用喂给模块工具会失败。系统工具不受影响：它寻址前会把 guest 写法译回宿主路径，也接受宿主写法。
-  how: |
-    1) 把会话的路径桥交给 @ 改写（给 RefRoots 带上会话方言，或由调用方传入路径翻译器），按档位渲染成 guest 写法；
-    2) 保持“不改写别人的私有沙箱路径、不泄漏”的规则；
-    3) 用例：虚拟机档会话里 @sandbox:<自己>/x 改写后是 guest 写法、模块工具能直接用；本机档行为不变。
-  accept: |
-    虚拟机档会话里，输入框的 @ 引用进入转录后模块工具能直接用（guest 写法）；本机档行为不变；node run-tests.js 全绿。
-  blocked_by: 缺少实现
 
+- id: module.build-coverage-windows
+  scope: global
+  level: T3
+  why: |
+    本机构建（`solomni --build=<模块 id>`）的产品路径只在 **unix** 上有用例：用例里的"构建"用 `mkdir -p` /
+    `printf` / `chmod`（Windows 的 cmd 没有这些），所以整条用例包在 `#[cfg(unix)]` 里。Windows 上
+    "在宿主上编出产物 → 入口判据放行 → 命中缓存"这条链没有用例（CI 的 e2e 走的是编排脚本自己编，不是产品这条命令）。
+    模块侧已经跨平台（`tools/build` + `tools/build.cmd`，见 MODULE_SPEC 的「构建」），缺的是**验收**。
+  how: |
+    在 Windows 上补一条用例：构建命令用 cmd 写法、产物写成 `.cmd`（入口判据按候选认），或者让 e2e 在跑产品前
+    把工具链放进 PATH、改调 `solomni --build=indexer`（CI runner 上有哪些编译器要先探明，别赌）。
+  accept: |
+    Windows 上 `solomni --build=<id>` 编出产物、入口判据放行、第二次跳过（真机或 CI 上的用例为准）。
+  blocked_by: |
+    无（需要有 C/C++ 工具链在 PATH 上的 Windows 环境来验）。

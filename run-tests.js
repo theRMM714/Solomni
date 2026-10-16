@@ -1264,6 +1264,17 @@ function pushStep(obj) {
     raw: fe.code === 0 ? null : fe.out.slice(-600),
   });
 
+  // 开发回路自检：dev.js 的固定子命令表与"环境没就绪就如实拒绝"那条出口（见 docs/testing/execution-ci.md）
+  announce("开发回路自检");
+  const dl = sh(process.execPath, [path.join("tests", "dev-loop.mjs")]);
+  announceDone(dl.code === 0 ? "完成" : "失败", "");
+  pushStep({
+    step: "开发回路自检",
+    status: dl.code === 0 && dl.out.includes("DEV-LOOP-OK") ? "pass" : "fail",
+    detail: dl.out.trim().split(/\r?\n/).slice(-1).join(""),
+    raw: dl.code === 0 ? null : dl.out.slice(-600),
+  });
+
   // L4：端到端（有编排才跑；没有就是一条缺口，不装作跑过）
   // 质量 job 用 --skip-e2e 跳过它（报告里也不留空占位）：L4 由独立 e2e job 跑，发布时合并。
   if (!SKIP_E2E) {

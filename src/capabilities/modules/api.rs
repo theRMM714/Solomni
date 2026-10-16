@@ -4,8 +4,9 @@
 //! 联动：实现见 `service.rs`；其它能力与呈现层只经这里引用模块事实（R1）；启停语义见 docs/modules/README.md。
 
 pub use crate::capabilities::modules::domain::module::{
-    check_runtimes, check_secrets, check_services, check_tools, listing, Module, ModuleManifest,
-    Param, ParamType, Roster, SecretDecl, ServiceDecl, ToolDecl,
+    check_build, check_runtimes, check_secrets, check_services, check_tools, entry_candidates,
+    listing, local_entry, BuildDecl, Module, ModuleManifest, Param, ParamType, Roster, SecretDecl,
+    ServiceDecl, ToolDecl,
 };
 
 /// 目的：模块公地的只读面（呈现层与消费方）——清单事实与启停有效值。

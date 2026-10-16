@@ -253,11 +253,7 @@ pub(crate) fn builtin_search_reports_line_numbers_and_respects_case() {
             s(&["outside", "f.txt"])
         ),
     );
-    assert!(
-        !bad.ok && bad.output.contains("不在允许的根目录内"),
-        "{}",
-        bad.output
-    );
+    assert!(!bad.ok && bad.output.contains("路径越界"), "{}", bad.output);
 }
 
 #[test]
