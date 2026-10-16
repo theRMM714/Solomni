@@ -118,10 +118,12 @@ pub(crate) fn refs_rewrite_covers_prefixes_speakers_and_punctuation() {
     let roots = RefRoots {
         work: abs(&["w", "work"]),
         private: Some(abs(&["w", "甲"])),
+        path_codec: None,
     };
     let collab_roots = RefRoots {
         work: abs(&["w", "work"]),
         private: None,
+        path_codec: None,
     };
     // @work：与 speaker 无关，一律给出共享区真实路径
     assert_eq!(
@@ -289,6 +291,108 @@ pub(crate) fn refs_rewrite_covers_prefixes_speakers_and_punctuation() {
             s(&["w", "work", "a b.md"])
         )
     );
+}
+
+/// 目的：虚拟机档里用户 @ 引用落成 **guest 写法**——模块工具在 guest 内直接能用；且系统工具仍译得回同一个宿主落点。
+/// 约束：路径翻译器只有一份（沙箱的 path_codec；会话的 @ 根由同一个 guest 派生），两条入口给同一种写法。
+#[test]
+pub(crate) fn ref_rewrite_uses_the_session_path_dialect() {
+    use crate::capabilities::prompt::api::rewrite;
+    use crate::capabilities::session::api::SessionParams;
+    use crate::capabilities::vm::api::PathBridge;
+    use crate::capabilities::vm::domain::paths::PathDialect;
+    use crate::capabilities::workspace::api::{Place, Sandboxes};
+    use std::sync::Arc;
+    let t = test_prompts().refs();
+    // 同方言（本机档）：桥是恒等，改写结果就是原有宿主写法，行为不变。
+    let params =
+        SessionParams::from_workspace("甲", &test_sandbox("甲", &["data"]), &[], "single", "solo");
+    assert_eq!(
+        rewrite("@work:a.txt", Some("甲"), &params.ref_roots(), &t),
+        s(&["demo", "work", "a.txt"]),
+        "本机档行为不变"
+    );
+    // 跨方言（虚拟机档）：@work 与自己的 @sandbox 都落成 guest 写法。
+    let guest = if cfg!(windows) {
+        PathDialect::Posix
+    } else {
+        PathDialect::Windows
+    };
+    let bridge = PathBridge::new(std::env::consts::OS, guest);
+    let mut sb = test_sandbox("甲", &["data"]);
+    sb.path_codec = Some(Arc::new(bridge));
+    let params = SessionParams::from_workspace("甲", &sb, &[], "single", "solo").with_guest(Some(
+        if cfg!(windows) {
+            crate::capabilities::vm::api::GuestOs::Macos
+        } else {
+            crate::capabilities::vm::api::GuestOs::Windows
+        },
+    ));
+    let roots = params.ref_roots();
+    let work = rewrite("@work:a.txt 看一下", Some("甲"), &roots, &t);
+    assert_eq!(
+        work,
+        format!(
+            "{} 看一下",
+            bridge.to_guest(&sb.shared.join("a.txt")).replace('\\', "/")
+        ),
+        "虚拟机档的 @work 要是 guest 写法"
+    );
+    // 模型拿到 guest 写法再交给同一座桥寻址：译回宿主、落点仍是那个文件（越界与否的判据不变）。
+    let own = rewrite("@sandbox:甲/note.txt", Some("甲"), &roots, &t);
+    assert_eq!(
+        own,
+        bridge
+            .to_guest(&sb.private.join("note.txt"))
+            .replace('\\', "/"),
+        "虚拟机档自己的 @sandbox 要是 guest 写法"
+    );
+    // 寻址按桥的规范写法（与挂载点、命令 cwd 同一种；转录里给模型看的是上面那种一律 / 形式）。
+    let own_raw = bridge.to_guest(&sb.private.join("note.txt"));
+    let (place, path) = sb.resolve(&own_raw).expect("guest 写法要能寻址");
+    assert_eq!(place, Place::Private);
+    assert_eq!(path, sb.private.join("note.txt"));
+    // 协作入口（set_task / answer / note_user）没有"自己的沙箱"：根的翻译器由沙箱清单给。
+    let boxes = Sandboxes {
+        shared: sb.shared.clone(),
+        list: Vec::new(),
+        codec: sb.path_codec.clone(),
+    };
+    assert_eq!(
+        rewrite("@work:a.txt", None, &boxes.ref_roots(), &t),
+        bridge.to_guest(&sb.shared.join("a.txt")).replace('\\', "/"),
+        "协作的 @work 也要按会话环境给写法（名单还没定时 list 是空的）"
+    );
+}
+
+#[test]
+pub(crate) fn session_at_roots_go_by_the_session_guest() {
+    use crate::capabilities::session::api::SessionParams;
+    // 会话的 @ 根由参数派生：没有 guest（本机档）就恒等，有 guest 就与同一 guest 造的桥给同一种写法。
+    let sb = test_sandbox("甲", &["data"]);
+    let host = SessionParams::from_workspace("甲", &sb, &[], "single", "solo");
+    let host_roots = host.ref_roots();
+    assert!(host_roots.path_codec.is_some(), "会话的 @ 根要带翻译器");
+    assert_eq!(
+        host_roots.work, sb.shared,
+        "@work 的根是共享区真实根（写法由翻译器给）"
+    );
+    assert_eq!(host_roots.private, Some(sb.private.clone()));
+    for g in [
+        crate::capabilities::vm::api::GuestOs::Linux,
+        crate::capabilities::vm::api::GuestOs::Macos,
+        crate::capabilities::vm::api::GuestOs::Windows,
+    ] {
+        let p = SessionParams::from_workspace("甲", &sb, &[], "single", "solo").with_guest(Some(g));
+        let r = p.ref_roots();
+        let codec = r.path_codec.as_ref().expect("带 guest 的会话要有翻译器");
+        // 三种 guest 各自给的写法必须与各自方言的桥一致（提示词里的写法与转录里的写法同源）。
+        let want = crate::capabilities::vm::api::PathBridge::for_session(
+            std::env::consts::OS,
+            Some(g.dialect()),
+        );
+        assert_eq!(codec.to_view(&sb.private), want.to_guest(&sb.private));
+    }
 }
 
 #[test]

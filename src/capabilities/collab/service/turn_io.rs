@@ -131,10 +131,7 @@ impl CollabSession {
     /// 回答请教那一关：用户的话进主会话（所有成员下一回合都看得到），接着往下推。
     /// 约束：那一关已由队列出队——这里只管"他的话怎么进业务"，不碰队列。
     pub(crate) fn answer(&mut self, text: &str, sink: &mut dyn FnMut(SessionEvent)) {
-        let roots = crate::capabilities::prompt::api::RefRoots {
-            work: self.sandboxes.shared.clone(),
-            private: None,
-        };
+        let roots = self.sandboxes.ref_roots();
         let text =
             crate::capabilities::prompt::api::rewrite(text, None, &roots, &self.prompts.refs());
         if let Some(disc) = self.disc.as_mut() {
@@ -287,10 +284,7 @@ impl CollabSession {
         if text.is_empty() {
             return;
         }
-        let roots = crate::capabilities::prompt::api::RefRoots {
-            work: self.sandboxes.shared.clone(),
-            private: None,
-        };
+        let roots = self.sandboxes.ref_roots();
         let text =
             crate::capabilities::prompt::api::rewrite(text, None, &roots, &self.prompts.refs());
         let line = self.view(LineView::user("", text));

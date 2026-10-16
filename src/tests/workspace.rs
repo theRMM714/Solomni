@@ -65,6 +65,7 @@ pub(crate) fn sandboxes_lookup_is_by_agent() {
     let boxes = crate::capabilities::workspace::api::Sandboxes {
         shared: abs(&["w", "work"]),
         list: vec![test_sandbox("甲", &["a"])],
+        codec: None,
     };
     assert!(boxes.for_agent("甲").is_some(), "按 agent 实例名取沙箱");
     assert!(boxes.for_agent("a").is_none(), "沙箱不再按模块 id 反查");

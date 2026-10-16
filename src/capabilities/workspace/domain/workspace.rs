@@ -7,11 +7,12 @@
 //! 越界、相对路径、空段一律拒绝，并把允许的根目录列回去（如实报错，不纠正）。
 
 use crate::capabilities::permission::api::Permissions;
-use crate::capabilities::prompt::api::ToolTexts;
+use crate::capabilities::prompt::api::{RefRoots, ToolTexts};
 use crate::kernel::api::slash;
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::path::{Component, Path, PathBuf};
+use std::sync::Arc;
 
 /// 投喂文件名净化（策略在 conductor）：只允许单个文件名，挡掉路径分隔符与上级跳转。
 pub fn safe_file_name(name: &str) -> Result<String, String> {
@@ -278,12 +279,25 @@ pub struct Sandboxes {
     /// 本工作共享区的真实根（@ 改写要它；代拟还没名单时也有）。
     pub shared: PathBuf,
     pub list: Vec<Sandbox>,
+    /// 目的：这场会话的路径翻译器（虚拟机档 guest↔宿主；本机档 None = 恒等）。
+    /// 约束：@ 改写发生在名单确认**之前**（协作需求），那时 `list` 还是空的，所以这里单独存一份。
+    pub codec: Option<Arc<dyn crate::kernel::ports::PathCodec>>,
 }
 
 impl Sandboxes {
     /// 某 agent 实例的沙箱；不存在 = 该 agent 没被分配工作区（调用方如实报错）。
     pub fn for_agent(&self, agent: &str) -> Option<&Sandbox> {
         self.list.iter().find(|s| s.agent == agent)
+    }
+
+    /// 目的：用户输入里 @ 引用要的根（共享区 + 本会话的路径翻译器）——协作 / 主持人的话用它改写。
+    /// 约束：private 恒为 None——这些入口没有"自己的沙箱"（与说话人无关的共读文本）。
+    pub fn ref_roots(&self) -> RefRoots {
+        RefRoots {
+            work: self.shared.clone(),
+            private: None,
+            path_codec: self.codec.clone(),
+        }
     }
 }
 

@@ -549,10 +549,8 @@ impl CollabSession {
     /// 提交需求（总是第一步）。需求入转录（用户看到的与进上下文的一致）。
     /// 协作里用户不属任何 agent 的沙箱：@ 引用按 speaker = None 改写（共读同一段文字）。
     pub fn set_task(&mut self, task: &str, sink: &mut dyn FnMut(SessionEvent)) {
-        let roots = crate::capabilities::prompt::api::RefRoots {
-            work: self.sandboxes.shared.clone(),
-            private: None,
-        };
+        // 写法按本会话环境给（虚拟机档 = guest 写法，模块工具直接能用）：翻译器在沙箱清单里。
+        let roots = self.sandboxes.ref_roots();
         let task =
             crate::capabilities::prompt::api::rewrite(task, None, &roots, &self.prompts.refs());
         if task.trim().is_empty() {

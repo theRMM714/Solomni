@@ -1,21 +1,29 @@
-//! 用户输入里的 @ 引用：改写成 agent 能用的**真实绝对路径**（纯逻辑，无 IO、无依赖）。
-//! 只认两种前缀：@work:<相对路径> 与 @sandbox:<agent实例名>/<相对路径>；其余一律原样留在文本里（不猜）。
-//! 路径范围：带引号时取到下一个引号为止（引号内的空白与标点都算路径），否则到空白或终止标点为止。
-//! 终止符**留在原文里不消费**，所以改写只替换「前缀 + 路径」这一段。
-//! 改写结果 = 真实根目录 + 相对路径（用 Path 组件拼，输出统一 / 分隔：JSON 里反斜杠是转义符）；绝不泄漏别人的沙箱路径。
+//! 目的：用户输入里的 @ 引用改写成 agent 能用的**绝对路径**（纯逻辑，无 IO）。
+//! 管：两种引用前缀的识别与改写——@work:<相对路径> 取共享区、@sandbox:<agent>/<相对路径> 取自己的私有沙箱；
+//!   写法是**会话所在环境**的（虚拟机档经路径翻译器给 guest 写法，模块工具在 guest 里直接能用；本机档恒等），
+//!   输出统一 / 分隔（JSON 里反斜杠是转义符）。
+//! 不管：越界与权限判定（在 workspace 的寻址）、提示词本体（同目录的 `prompt.rs`）、谁在什么时候调用。
+//! 联动：根与翻译器由会话侧给（`RefRoots`）；说明文案取自提示词册（`RefsPrompts`）；契约见
+//!   docs/tools/tools-and-roles.md 的「路径模型」。
 
 use crate::capabilities::prompt::domain::prompt::RefsPrompts;
+use crate::kernel::ports::PathCodec;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
-/// @ 改写需要的真实根：work = 本工作共享区；private = 发言席自己的私有沙箱（协作时 None）。
+/// 目的：@ 改写需要的真实根与它的写法——work = 本工作共享区；private = 发言席自己的私有沙箱（协作时 None）。
+/// 约束：写法由 `path_codec` 定（虚拟机档把宿主路径渲染成 guest 写法，与工作环境块同一座桥；None = 恒等）。
 #[derive(Debug, Clone, Default)]
 pub struct RefRoots {
     pub work: PathBuf,
     pub private: Option<PathBuf>,
+    pub path_codec: Option<Arc<dyn PathCodec>>,
 }
 
-/// 把用户输入里的 @ 引用改写成真实路径；说明文案取自提示词册（texts）。
-/// speaker = Some(agent 实例名)（单 agent 形态：它自己的沙箱可达）；None = 协作（多人共读同一段文字）。
+/// 目的：把用户输入里的 @ 引用改写成真实路径。
+/// 参数：`speaker` = Some(agent 实例名)（单 agent 形态：它自己的沙箱可达）；None = 协作（多人共读同一段文字）。
+/// 约束：只认两种前缀，其余一律原样留在文本里（不猜）；路径范围带引号时取到下一个引号为止，
+///   否则到空白或终止标点为止，终止符**留在原文里不消费**；引用别人的私有沙箱时只给册子文案，不泄漏真实路径。
 pub fn rewrite(text: &str, speaker: Option<&str>, roots: &RefRoots, texts: &RefsPrompts) -> String {
     if text.is_empty() || !text.contains('@') {
         return text.to_string();
@@ -32,7 +40,7 @@ pub fn rewrite(text: &str, speaker: Option<&str>, roots: &RefRoots, texts: &Refs
         // 从 @ 处尝试匹配前缀；成功且根已就绪才改写，否则把 @ 原样留下（不猜）。
         if let Some(body) = after.strip_prefix("work:") {
             if let Some((path, consumed)) = take_ref(body) {
-                if let Some(full) = full_path(&roots.work, path) {
+                if let Some(full) = full_path(&roots.work, path, roots.path_codec.as_deref()) {
                     out.push_str(&full);
                     rest = &body[consumed..];
                     continue;
@@ -42,9 +50,10 @@ pub fn rewrite(text: &str, speaker: Option<&str>, roots: &RefRoots, texts: &Refs
             if let Some((agent, rel, consumed)) = take_sandbox_ref(body) {
                 // 自己的沙箱：用真实根；别人的/协作：给册子里的说明（不泄漏真实路径）。
                 let own = match speaker {
-                    Some(me) if me == agent => {
-                        roots.private.as_ref().and_then(|p| full_path(p, rel))
-                    }
+                    Some(me) if me == agent => roots
+                        .private
+                        .as_ref()
+                        .and_then(|p| full_path(p, rel, roots.path_codec.as_deref())),
                     _ => None,
                 };
                 let rendered = match own {
@@ -65,8 +74,9 @@ pub fn rewrite(text: &str, speaker: Option<&str>, roots: &RefRoots, texts: &Refs
     out
 }
 
-/// 真实根 + 相对路径：用 Path 组件拼（输出平台分隔符）。根为空（还没准备好）→ None。
-fn full_path(root: &Path, rel: &str) -> Option<String> {
+/// 真实根 + 相对路径：用 Path 组件拼；有翻译器就按**会话所在环境**的写法渲染（虚拟机档 = guest 写法），
+/// 没有就恒等（本机档）。根为空（还没准备好）→ None。
+fn full_path(root: &Path, rel: &str, codec: Option<&dyn PathCodec>) -> Option<String> {
     if root.as_os_str().is_empty() {
         return None;
     }
@@ -76,8 +86,12 @@ fn full_path(root: &Path, rel: &str) -> Option<String> {
             p.push(seg);
         }
     }
+    let view = match codec {
+        Some(c) => std::path::PathBuf::from(c.to_view(&p)),
+        None => p,
+    };
     // 对外一律 / 分隔：Windows 反斜杠在 JSON 字符串里是转义符，模型照抄会写出非法 JSON。
-    Some(crate::kernel::api::slash(&p))
+    Some(crate::kernel::api::slash(&view))
 }
 
 /// 引用别人（或协作）的沙箱：用册子文案如实说明谁能读，不给出真实路径。
