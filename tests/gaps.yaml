@@ -103,24 +103,3 @@
     三平台各有一份覆盖率报告，且报告明确标注"仅进程内 / 仅当前平台"或已聚合子进程；
     未覆盖的生产路径逐条有补测或缺口结论。
   blocked_by: 缺少观察面（子进程插桩与合并尚未实现）
-
-- id: module.build-in-guest
-  scope: global
-  level: T3
-  why: |
-    编译型模块的 `build` 只接了**本机档**：`solomni --build=<模块 id>` 在宿主上跑构建命令，产物给**宿主**用。
-    **虚拟机档那条路还没接**——guest 里跑的工具需要**能在 guest 里跑**的产物，而宿主编出来的是宿主 ABI
-    （不同的 glibc 版本 / PE / Mach-O；Windows 与 macOS 宿主更不可能直接产 Linux ELF）。
-    所以这条路不是"平台替 guest 产产物"，而是**guest 自己用编译包编**：
-    `solomni --build=<模块 id> --guest=<虚拟根>`（现在如实拒绝）。缺它时，虚拟根里没法现场得到产物，
-    只能靠模块作者预先发好——编译型模块在虚拟机档因此用不起来。
-  how: |
-    复用 provision 的 guest 生命周期：解析虚拟根 → 把模块目录（rw）与**编译包/工具链**（只读）挂进去
-    （`needs` 由 guest 自带，或包库按 system 叠写 / prefix 进 PATH 满足——两条装配都已就位）→ 起 guest →
-    在模块根跑 `build.command` → 复验入口 → 收尾 → 落同一份状态（target = 虚拟根名）。
-  accept: |
-    在一台本机没有目标工具链的宿主上（例如 Windows 宿主 + Linux guest），
-    `solomni --build=indexer --guest=debian` 由 **guest 自己的编译包**编出产物，入口判据随后放行；
-    guest 里没有编译包时如实拒绝，并指出怎么补（放编译包 / 让作者发产物）。
-  blocked_by: |
-    无（等排期；本机档已可用）。

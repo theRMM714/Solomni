@@ -476,6 +476,8 @@ mod tests {
             eprintln!("[探针] 虚拟根或 QEMU 不在场：先 solomni --provision --ensure=vm.qemu.linux,vm.guest.linux --yes");
             return;
         }
+        // 同一个虚拟根不能被两台 guest 同时写：真机用例之间串行（见 doubles::live_guest_lock）。
+        let _live = crate::tests::doubles::live_guest_lock();
         let vm = crate::capabilities::vm::service::VmService::new(
             std::sync::Arc::new(crate::capabilities::vm::detail::FsPackages::new(
                 root.join("runtimes"),

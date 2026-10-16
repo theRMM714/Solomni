@@ -146,3 +146,96 @@ fn host_build_failure_is_honest_and_leaves_no_state() {
         "没声明 build 的模块要明确拒绝"
     );
 }
+#[test]
+pub(crate) fn build_packages_take_guest_or_library() {
+    use crate::capabilities::vm::api::Library;
+    use crate::tests::doubles::{pkg, pkg_yaml};
+    let lib = Library::build(
+        vec![
+            pkg_yaml(
+                "id: cc\nversion: 13.2.0\nkind: system\nprovides_paths: [usr/bin, usr/lib]\nrequires: [binutils]",
+            ),
+            pkg("binutils", "2.42"),
+            pkg("python", "3.12.4"),
+        ],
+        Vec::new(),
+    );
+    // guest 自带的跳过；库里有的一并带上传递 requires；都没有的如实报缺。
+    let (pkgs, missing) = crate::diagnostics::build_packages(
+        &["python".to_string(), "cc".to_string(), "rustc".to_string()],
+        &lib,
+        &["python".to_string()],
+    );
+    let ids: Vec<&str> = pkgs.iter().map(|p| p.id.as_str()).collect();
+    assert_eq!(ids.len(), 2, "cc 与它的传递依赖 binutils：{:?}", ids);
+    assert!(
+        ids.contains(&"cc") && ids.contains(&"binutils"),
+        "{:?}",
+        ids
+    );
+    assert!(
+        !ids.contains(&"python"),
+        "guest 自带的运行能力不装载包：{:?}",
+        ids
+    );
+    assert_eq!(missing, vec!["rustc".to_string()], "缺的能力要如实报");
+    let cc = pkgs.iter().find(|p| p.id == "cc").expect("有 cc");
+    assert_eq!(cc.kind, "system");
+    assert_eq!(
+        cc.provides_paths,
+        vec!["usr/bin".to_string(), "usr/lib".to_string()]
+    );
+}
+
+/// 目的：真机验收（默认跳过）：虚拟机档构建——在 guest 里编出产物，产物经挂载落回模块目录。
+#[cfg(unix)]
+#[test]
+fn guest_build_makes_the_entry_in_the_guest() {
+    if std::env::var("SOLOMNI_VM_LIVE").as_deref() != Ok("1") {
+        eprintln!("[探针] 未开启虚拟机档构建的真机验收：设 SOLOMNI_VM_LIVE=1 后重跑");
+        return;
+    }
+    let repo = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let deps = crate::capabilities::provision::api::Provision::status(
+        &crate::capabilities::provision::ProvisionService::new(&repo),
+    )
+    .unwrap_or_default();
+    // 引擎与虚拟根不在场就如实跳过（真机验收只在装齐的机器上跑）。
+    let has_qemu = deps
+        .iter()
+        .any(|d| d.present && d.id.starts_with("vm.qemu."));
+    let has_guest = repo.join(".vm").join("guest").join("debian").is_dir();
+    if !has_qemu || !has_guest {
+        eprintln!("[探针] 本机没有可用的 QEMU 或虚拟根 debian，跳过虚拟机档构建验收");
+        return;
+    }
+    // 夹具根借仓库的 `.vm`（虚拟根、QEMU、包库都在那儿）；跑完删链本身，不碰仓库那份。
+    let root = crate::tests::scratch("guest-build");
+    std::os::unix::fs::symlink(repo.join(".vm"), root.join(".vm")).expect("链 .vm");
+    let module = root.join("modules").join("greet");
+    std::fs::create_dir_all(&module).expect("建模块目录");
+    std::fs::write(
+        module.join("module.yaml"),
+        "id: greet\nbrief: 虚拟机档构建用例\nsystem: 你负责打招呼\nbuild:\n  command: \"mkdir -p build && printf '#!/bin/sh\\necho GUEST-OK\\n' > build/hello && chmod +x build/hello\"\ntools:\n  hi:\n    command: build/hello\n",
+    )
+    .expect("写模块清单");
+    // 同一个虚拟根不能被两台 guest 同时写：真机用例之间串行（见 doubles::live_guest_lock）。
+    let _live = crate::tests::doubles::live_guest_lock();
+    let code = crate::diagnostics::build_module_in_guest(&root, "greet", "debian");
+    // 先清理：状态文件写在借来的 `.vm` 里（别留下夹具的痕迹）。
+    let _ = std::fs::remove_file(root.join(".vm").join("build-state").join("greet.json"));
+    let _ = std::fs::remove_file(root.join(".vm"));
+    assert_eq!(code, 0, "guest 里要能编出产物");
+    let artifact = module.join("build").join("hello");
+    assert!(
+        artifact.is_file(),
+        "产物要经挂载落回模块目录：{}",
+        artifact.display()
+    );
+    use std::os::unix::fs::PermissionsExt;
+    let mode = std::fs::metadata(&artifact)
+        .expect("读权限")
+        .permissions()
+        .mode();
+    assert!(mode & 0o111 != 0, "产物要能直接跑（拿到 {:o}）", mode);
+}

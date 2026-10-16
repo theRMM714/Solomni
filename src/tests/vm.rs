@@ -1936,6 +1936,8 @@ pub(crate) fn vm_live_guest_runs_command_inside_guest() {
             return;
         }
     };
+    // 同一个虚拟根不能被两台 guest 同时写：真机用例之间串行（见 doubles::live_guest_lock）。
+    let _live = crate::tests::doubles::live_guest_lock();
     let image = classify_base(&base_dir, &probe).expect("虚拟根要可用");
     // 真机引擎级验收：共享要真进 guest（读得到标记），guest 的写要即时落到宿主（实时共享），收尾不留守护进程。
     let share = crate::tests::scratch("vm-live-share");

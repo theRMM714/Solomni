@@ -1001,6 +1001,14 @@ impl PackageSource for InMemoryPackages {
     }
 }
 
+/// 目的：真机验收里**共用同一个虚拟根**的用例之间的互斥。
+/// 约束：目录根是直接往里写的（guest 的系统状态也在里面），两台 guest 同时起会互相踩坏；
+///   凡是要起 guest 的真机用例都先拿它，串起来跑。
+pub(crate) fn live_guest_lock() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    LOCK.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 /// 用 yaml 造一份包清单（顺带覆盖清单解析）。
 pub(crate) fn pkg_yaml(y: &str) -> PackageManifest {
     yaml_serde::from_str(y).expect("包清单必须能解析")
