@@ -845,18 +845,22 @@ impl Conductor {
         self.workspace.prepare(&root, &agent_names)?;
         let sandboxes = self.sandboxes(&meta, &roster)?;
         // 扫描事实如实埋点：本会话用到的模块里，哪些声明的运行包不在包库（缺包同样会在下面按计划拒绝，文件与 guest 声明都看）。
+        // 包库只服务虚拟机档：本机档不装载运行包，这条警告在那里没有意义（宿主自备解释器）。
         let session_modules: Vec<Module> = roster
             .modules
             .iter()
             .filter(|m| module_ids.iter().any(|id| id == &m.manifest.id))
             .cloned()
             .collect();
-        for (id, caps) in crate::capabilities::vm::api::absent(&session_modules, &self.vm.library())
-        {
-            self.log.warn(
-                "conductor::create_work",
-                &format!("模块 {} 声明的运行包不在包库：{}", id, caps.join("、")),
-            );
+        if meta.exec.tier == crate::kernel::api::Tier::Vm {
+            for (id, caps) in
+                crate::capabilities::vm::api::absent(&session_modules, &self.vm.library())
+            {
+                self.log.warn(
+                    "conductor::create_work",
+                    &format!("模块 {} 声明的运行包不在包库：{}", id, caps.join("、")),
+                );
+            }
         }
         // 执行选型的完整性检查（「开始」即冻结）：虚拟机档的选型不成立（多版本未定版 / 定版不存在 /
         // 路径冲突）如实拒绝；**缺包同样拒绝**（没有工具用户完不成工作，不降级）。装配阶段按同一份计划取包。
