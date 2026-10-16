@@ -18,8 +18,8 @@ system: >-
   build/indexer.exe，Linux/macOS 产出 build/indexer）；没有构建过就先构建，构建失败就如实报告，不要假装检索过。
   工具失败一律是非零退出码 + stderr，看到失败照实说，不要用空结果兜底；query 没命中时工具会明说，照原样转述。
 build:                  # 系统照它在**目标环境**里编出产物（solomni --build=indexer；toolchain 不进 agent 围栏）
-  command: mkdir -p build && g++ -O2 -std=c++17 -Wall -Wextra -static-libgcc -static-libstdc++ tools/src/indexer.cpp -o build/indexer
-  needs: [cc]           # 构建期能力名（本机档 = 宿主 PATH 上要有它；虚拟机档见 MODULE_SPEC）
+  command: tools/build  # 平台各一份：tools/build（unix 脚本）+ tools/build.cmd（Windows），壳按 PATHEXT 找
+  needs: [gcc]          # 构建期能力名 = 宿主 PATH 上的可执行名（本机档按它判；虚拟机档见 MODULE_SPEC）
 tools:
   build:
     command: build/indexer build

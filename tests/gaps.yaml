@@ -111,15 +111,11 @@
     本机构建（`solomni --build=<模块 id>`）的产品路径只在 **unix** 上有用例：用例里的"构建"用 `mkdir -p` /
     `printf` / `chmod`（Windows 的 cmd 没有这些），所以整条用例包在 `#[cfg(unix)]` 里。Windows 上
     "在宿主上编出产物 → 入口判据放行 → 命中缓存"这条链没有用例（CI 的 e2e 走的是编排脚本自己编，不是产品这条命令）。
-    另一个实际后果：随仓 indexer 的 `build.command` 是 unix 壳写法（`mkdir -p … && g++ …`），本机档在 Windows
-    上跑不通；且 Windows 的编译工具链在项目自带的 `.tools/mingw64` 里、不在宿主 PATH 上（`needs: [cc]` 会如实拒绝）。
+    模块侧已经跨平台（`tools/build` + `tools/build.cmd`，见 MODULE_SPEC 的「构建」），缺的是**验收**。
   how: |
-    1) 构建命令按目标平台各写一个：模块内放 `tools/build`（unix 脚本）与 `tools/build.cmd`（Windows），
-    壳自己按 PATHEXT 找——与入口判据同一条解析规则；
-    2) 本机构建的用例在 Windows 上用 cmd 版（产物写成 `.cmd`，入口判据按候选认），或把"跑命令"这层替身化；
-    3) 定 Windows 上编译包从哪来：项目内工具链（`.tools/mingw64`）还是要求宿主 PATH 上有。
+    在 Windows 上补一条用例：构建命令用 cmd 写法、产物写成 `.cmd`（入口判据按候选认），或者让 e2e 在跑产品前
+    把工具链放进 PATH、改调 `solomni --build=indexer`（CI runner 上有哪些编译器要先探明，别赌）。
   accept: |
-    Windows 上 `solomni --build=<id>` 编出产物、入口判据放行、第二次跳过；随仓 indexer 在 Windows 上也能用
-    产品这条命令编出来（或文档写明它只支持在 guest 里编）。
+    Windows 上 `solomni --build=<id>` 编出产物、入口判据放行、第二次跳过（真机或 CI 上的用例为准）。
   blocked_by: |
-    无（需要 Windows 机器或 CI 上的一条用例来验；决策项见 how 第 3 条）。
+    无（需要有 C/C++ 工具链在 PATH 上的 Windows 环境来验）。

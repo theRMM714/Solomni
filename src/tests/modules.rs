@@ -68,10 +68,27 @@ pub(crate) fn shipped_indexer_declares_its_build() {
         .find(|m| m.manifest.id == "indexer")
         .expect("随仓有 indexer");
     let b = idx.manifest.build.as_ref().expect("indexer 要声明 build");
-    assert!(b.command.contains("indexer.cpp"), "{}", b.command);
-    assert!(b.command.contains("build/indexer"), "{}", b.command);
-    assert_eq!(b.needs, vec!["cc".to_string()]);
+    // 跨平台写法：命令是模块内的脚本，壳自己按平台找（unix 同名、Windows `.cmd`）。
+    assert_eq!(b.command, "tools/build");
+    assert_eq!(b.needs, vec!["gcc".to_string()], "构建期能力按可执行名判");
     assert!(!b.net, "构建不需要出网");
+    let unix = idx.root.join("tools").join("build");
+    let win = idx.root.join("tools").join("build.cmd");
+    let unix_body = std::fs::read_to_string(&unix).expect("unix 构建脚本要在");
+    let win_body = std::fs::read_to_string(&win).expect("Windows 构建脚本要在");
+    assert!(unix_body.contains("indexer.cpp"), "{}", unix_body);
+    assert!(unix_body.contains("build/indexer"), "{}", unix_body);
+    assert!(win_body.contains("indexer.cpp") && win_body.contains("build/indexer.exe"));
+    // unix 侧没执行位就跑不起来（入口判据与守门进程都按它判）。
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(&unix)
+            .expect("读权限")
+            .permissions()
+            .mode();
+        assert!(mode & 0o111 != 0, "unix 构建脚本要能直接跑（{:o}）", mode);
+    }
 }
 #[test]
 pub(crate) fn local_entry_only_accepts_relative_paths() {
