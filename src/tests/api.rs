@@ -951,7 +951,7 @@ fn single_mode_merges_multiple_agents_into_one_transient() {
             task: None,
             delegate: false,
             tier: crate::kernel::api::Tier::Host,
-            base: None,
+            guest: None,
         })
         .expect("建工作");
     assert_eq!(
@@ -984,7 +984,7 @@ fn editing_is_refused_while_a_session_is_generating() {
     let edit = || SessionEdit {
         agents: cfg.agents.clone(),
         tier: "host".to_string(),
-        base: None,
+        guest: None,
         pins: std::collections::BTreeMap::new(),
         net: false,
     };

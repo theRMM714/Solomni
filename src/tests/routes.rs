@@ -75,6 +75,9 @@ impl crate::capabilities::provision::api::Provision for FakeProvision {
     fn status(&self) -> Result<Vec<crate::capabilities::provision::api::DepStatus>, String> {
         self.guard().map(|_| Vec::new())
     }
+    fn guest_bases(&self) -> Result<Vec<crate::capabilities::provision::api::GuestBase>, String> {
+        self.guard().map(|_| Vec::new())
+    }
     fn job(&self) -> crate::capabilities::provision::api::JobState {
         Default::default()
     }
@@ -235,7 +238,8 @@ impl SessionOps for FakeOps {
                 permissions: None,
             }],
             tier: "host".to_string(),
-            base: None,
+            guest: None,
+            guests: Vec::new(),
             net: false,
             pins: BTreeMap::new(),
             tier_ready: true,
@@ -494,6 +498,8 @@ impl ConductorOps for FakeOps {
             vm_available: false,
             vm_unavailable_reason: "guest 本体尚未接入".to_string(),
             vm_requirements: Vec::new(),
+            guests: Vec::new(),
+            available: BTreeMap::new(),
         })
     }
     fn suggest_models(&self, _task: &str, _mode: WorkMode) -> Result<Vec<AgentSuggestion>, String> {

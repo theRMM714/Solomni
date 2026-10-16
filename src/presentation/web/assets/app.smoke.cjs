@@ -17,12 +17,15 @@ const filesBySid = new Map();
 // /api/state 的桩：**在跑的会话由后端会话表给**（前端不再从事件流里造会话）。
 // smoke-w 一开始就在跑：启动时的状态刷新据此建标签页并补盘上转录，随后轮询把实时行接上。
 const stateStub = { sessions: [{ sid: "smoke-w", running: true }] };
-function el() {
+function el(tag) {
   const node = {
+    tag: tag || "",
     textContent: "", innerHTML: "", value: "", className: "", dataset: {},
-    children: [],
+    children: [], _h: {},
     classList: { add() {}, remove() {} },
-    addEventListener() {}, querySelector: () => el(),
+    // 事件处理器**记下来**（不丢）：冒烟要能像用户那样触发它（如向导里切档位、勾模块）。
+    addEventListener(t, f) { (node._h[t] = node._h[t] || []).push(f); },
+    querySelector: () => el(),
     appendChild(c) { node.children.push(c); },
     onclick: null,
   };
@@ -39,7 +42,7 @@ const sandbox = {
       if (!els.has(s)) els.set(s, el());
       return els.get(s);
     },
-    createElement: () => el(),
+    createElement: (t) => el(t),
     addEventListener() {},
   },
   // 原生弹窗是红线：换自研弹窗之后，这里被调用一次就算失败。
@@ -58,7 +61,7 @@ const sandbox = {
       return {
         ok: true,
         json: async () => ({
-          modules: [{ id: "research", brief: "调研" }],
+          modules: [{ id: "research", brief: "调研", runtimes: ["python", "ruby"] }],
           providers: [], rejected: ["broken-mod"], agents: [], history: [],
           settings: { streaming: true, show_reasoning: true, llm_timeout_secs: 300, discuss_remind_cap: 3, compact_at_percent: 70 },
           sessions: stateStub.sessions,
@@ -112,11 +115,14 @@ const sandbox = {
         json: async () => ({
           tiers: {
             default: "host",
-            vm_available: false,
-            vm_unavailable_reason: "guest 本体尚未接入",
-            vm_requirements: [
-              { id: "guest", met: false, detail: "guest 本体尚未接入", how: "等 guest 接入" },
-            ],
+            vm_available: true,
+            vm_unavailable_reason: "",
+            vm_requirements: [],
+            guests: [{
+              guest: "debian", label: "debian-13-genericcloud-amd64", os: "linux", arch: "amd64",
+              ready: true, missing: [], install: ".vm/guest/debian", runtimes: ["python"],
+            }],
+            available: {},
           },
         }),
       };
@@ -432,6 +438,7 @@ setTimeout(async () => {
   }
   // **向导的第三人形态**：形态选择里必须真有「代理」，且它的说明说清了"没有名单 + 全权 + 停止即全停"。
   let wizardProxy = false;
+  let wizardGuest = false;
   if (!loadErrors.length) {
     try {
       await vm.runInNewContext("openWizard()", sandbox);
@@ -443,6 +450,33 @@ setTimeout(async () => {
         .find((n) => (n.children || []).some((o) => o.value === "proxy"));
       wizardProxy = !!sel && texts.indexOf("代理（把决定权整块交给核心）") >= 0;
       if (!wizardProxy) loadErrors.push("向导代理形态检查：没有找到 proxy 选项");
+      // 虚拟机档那一步：选的是**虚拟机**（虚拟根），并且按所选模块预判"可能要缺什么"。
+      const radios = all.filter((n) => n.type === "radio" && n.name === "wf-tier");
+      const vmRadio = radios[1];
+      if (!vmRadio) {
+        loadErrors.push("向导虚拟根检查：没有找到虚拟机档 radio");
+      } else {
+        vmRadio.checked = true;
+        (vmRadio._h.change || []).forEach((f) => f());
+        // 桩 DOM 的 textContent 不聚合子节点：按"label 里有个内容是 research 的 span"找。
+        const lab = all.find((n) => n.tag === "label"
+          && (n.children || []).some((c) => String(c.textContent || "") === "research"));
+        const mcb = lab && (lab.children || []).find((n) => n.type === "checkbox");
+        if (!mcb) {
+          loadErrors.push("向导虚拟根检查：没有找到模块勾选框");
+        } else {
+          mcb.checked = true;
+          (mcb._h.change || []).forEach((f) => f());
+          const all2 = [];
+          (function walk(n) { for (const c of (n.children || [])) { all2.push(c); walk(c); } })(root);
+          const t2 = all2.map((n) => String(n.textContent || "")).join("|");
+          wizardGuest = t2.indexOf("虚拟机（虚拟根）") >= 0
+            && t2.indexOf("已装齐") >= 0
+            && t2.indexOf("自带运行能力：python") >= 0
+            && t2.indexOf("这个虚拟机可能要缺：research 需要 ruby") >= 0;
+          if (!wizardGuest) loadErrors.push("向导虚拟根检查：" + t2.slice(0, 600));
+        }
+      }
     } catch (e) { loadErrors.push("向导代理形态检查失败：" + e.message); }
   }
   // **会话级说明**：代理身份与"已停止 / 已关闭"都要说清（转录最上方一行，不冒充任何一方的发言）。

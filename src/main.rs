@@ -67,6 +67,13 @@ fn main() {
     if args.iter().any(|a| a == "--provision") {
         std::process::exit(diagnostics::provision(&root, &args));
     }
+    // 隐藏模式：构建一个模块声明的产物（**系统动作**：在目标环境里跑 module.yaml 的 build.command）。
+    if let Some(i) = args
+        .iter()
+        .position(|a| a == "--build" || a.starts_with("--build="))
+    {
+        std::process::exit(diagnostics::build(&root, &args, i));
+    }
     // 隐藏模式：按条处置围栏台账（列清单 / 还原一条 / 撤一条 / 删一个 profile）——比整体收尾更细，
     // 所以排在 --fence-clean 之前；两者共用同一份台账与同一套 ACE 读法（见 docs/tools/README.md）。
     if let Some(code) = guard::fence_grant(&args, &root) {
@@ -325,15 +332,21 @@ fn main() {
             Arc::clone(&secrets),
         ));
 
+    // 依赖补齐面先建出来：Conductor（选虚拟根要读清单）与呈现层（setup 路由）各持同一份。
+    let provision: Arc<dyn capabilities::provision::api::Provision + Send + Sync> = Arc::new(
+        capabilities::provision::ProvisionService::with_vm(&root, Arc::clone(&vm)),
+    );
     // 启动时要按有效启停拉起常驻服务：留一份手柄（进程级租约，不属于任何会话）。
     let residents_boot = Arc::clone(&residents);
     let mut conductor = capabilities::conductor::service::Conductor::new(
+        root.clone(),
         Box::new(registry),
         Arc::new(capabilities::session::service::SessionService::new(
             Arc::new(history),
         )),
         workspace,
         Arc::clone(&vm),
+        Arc::clone(&provision),
         Arc::clone(&modules),
         Arc::clone(&llm),
         toolexec,
@@ -476,10 +489,7 @@ fn main() {
     };
     let mut ops = capabilities::conductor::api::Ops::from_handle(&handle);
     // 依赖补齐面：组合根注入（能力面默认未接入，这里换成真实现）。
-    ops.provision = std::sync::Arc::new(capabilities::provision::ProvisionService::with_vm(
-        &root,
-        Arc::clone(&vm),
-    ));
+    ops.provision = Arc::clone(&provision);
 
     // 启动拉起：把所有**已启用**的常驻服务拉起来（进程级租约，不属于任何会话）。
     for line in residents_boot.start_enabled() {

@@ -4,14 +4,15 @@
 //! 寻址：给 AI 的只有**真实绝对路径**（根目录由适配层给出，经提示词册如实告知）。
 //! 核心把路径与三个根（共享区 / 私有沙箱 / 成员模块目录）比对来判定可达范围：
 //! 必须是**绝对路径**、组件里不含 . 与 ..、且落在某个允许的根之内；
-//! 越界、相对路径、空段一律拒绝，并把允许的根目录列回去（如实报错，不纠正）。
+//! 越界、相对路径、空段一律拒绝，并把系统工具允许的根列回去（如实报错，不纠正）。
 
 use crate::capabilities::permission::api::Permissions;
-use crate::capabilities::prompt::api::ToolTexts;
+use crate::capabilities::prompt::api::{RefRoots, ToolTexts};
 use crate::kernel::api::slash;
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::path::{Component, Path, PathBuf};
+use std::sync::Arc;
 
 /// 投喂文件名净化（策略在 conductor）：只允许单个文件名，挡掉路径分隔符与上级跳转。
 pub fn safe_file_name(name: &str) -> Result<String, String> {
@@ -76,7 +77,7 @@ impl Sandbox {
     /// 返回（落点, 归一化后的绝对路径）；拒绝时把允许的真实根目录列全。
     pub fn resolve(&self, raw: &str) -> Result<(Place, PathBuf), String> {
         let spec = raw.trim();
-        // 所有拒绝都附上"允许的根目录"，模型照着改。
+        // 所有拒绝都附上"系统工具允许的根"，模型照着改。
         let deny = |why: String| {
             self.texts.render(
                 &self.texts.roots_wrapper,
@@ -250,7 +251,7 @@ impl Sandbox {
         }
     }
 
-    /// 允许的根目录清单（错误文案里列全，模型照着改）——按本环境的写法给。
+    /// 系统工具允许的根清单（错误文案里列全，模型照着改）——按本环境的写法给。
     pub fn roots_listing(&self) -> String {
         let mut lines = vec![
             self.texts.render(
@@ -278,12 +279,25 @@ pub struct Sandboxes {
     /// 本工作共享区的真实根（@ 改写要它；代拟还没名单时也有）。
     pub shared: PathBuf,
     pub list: Vec<Sandbox>,
+    /// 目的：这场会话的路径翻译器（虚拟机档 guest↔宿主；本机档 None = 恒等）。
+    /// 约束：@ 改写发生在名单确认**之前**（协作需求），那时 `list` 还是空的，所以这里单独存一份。
+    pub codec: Option<Arc<dyn crate::kernel::ports::PathCodec>>,
 }
 
 impl Sandboxes {
     /// 某 agent 实例的沙箱；不存在 = 该 agent 没被分配工作区（调用方如实报错）。
     pub fn for_agent(&self, agent: &str) -> Option<&Sandbox> {
         self.list.iter().find(|s| s.agent == agent)
+    }
+
+    /// 目的：用户输入里 @ 引用要的根（共享区 + 本会话的路径翻译器）——协作 / 主持人的话用它改写。
+    /// 约束：private 恒为 None——这些入口没有"自己的沙箱"（与说话人无关的共读文本）。
+    pub fn ref_roots(&self) -> RefRoots {
+        RefRoots {
+            work: self.shared.clone(),
+            private: None,
+            path_codec: self.codec.clone(),
+        }
     }
 }
 

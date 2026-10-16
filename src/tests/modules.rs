@@ -5,6 +5,116 @@
 use super::prelude::*;
 
 #[test]
+pub(crate) fn entry_candidates_follow_the_shell_resolution_of_the_target() {
+    // unix：没有扩展名解析，只有字面那个。
+    assert_eq!(
+        crate::capabilities::modules::api::entry_candidates("build/indexer", "linux"),
+        vec!["build/indexer".to_string()]
+    );
+    // Windows：cmd 按 PATHEXT 补扩展名（清单只写不带扩展名的那个）。
+    assert_eq!(
+        crate::capabilities::modules::api::entry_candidates("build/indexer", "windows"),
+        vec![
+            "build/indexer".to_string(),
+            "build/indexer.exe".to_string(),
+            "build/indexer.cmd".to_string(),
+            "build/indexer.bat".to_string(),
+            "build/indexer.com".to_string(),
+        ]
+    );
+}
+#[test]
+pub(crate) fn build_decl_is_validated_and_survives_the_scan() {
+    use crate::capabilities::modules::api::{check_build, BuildDecl};
+    let mut m = module_of("idx").manifest;
+    assert!(check_build(&m).is_ok(), "没写 build 段是合法的");
+    m.build = Some(BuildDecl {
+        command: String::new(),
+        needs: Vec::new(),
+        net: false,
+    });
+    assert!(check_build(&m).is_err(), "有 build 段但没写 command = 拒收");
+    m.build = Some(BuildDecl {
+        command: "make".to_string(),
+        needs: vec!["cc".to_string(), "cc".to_string()],
+        net: false,
+    });
+    assert!(check_build(&m).is_err(), "needs 重复 = 拒收");
+    m.build = Some(BuildDecl {
+        command: "make".to_string(),
+        needs: vec!["C++".to_string()],
+        net: false,
+    });
+    assert!(check_build(&m).is_err(), "能力名不合法 = 拒收");
+    m.build = Some(BuildDecl {
+        command: "make all".to_string(),
+        needs: vec!["cc".to_string()],
+        net: true,
+    });
+    assert!(check_build(&m).is_ok(), "{}", "正常的构建声明要过");
+}
+
+#[test]
+pub(crate) fn shipped_indexer_declares_its_build() {
+    // 随仓的 indexer 是编译型模块：`build:` 段必须被扫出来（产品据此能替它编）。
+    let roster = crate::capabilities::modules::detail::FsModules::new(
+        PathBuf::from("modules"),
+        crate::capabilities::tools::api::names(),
+    )
+    .scan();
+    let idx = roster
+        .modules
+        .iter()
+        .find(|m| m.manifest.id == "indexer")
+        .expect("随仓有 indexer");
+    let b = idx.manifest.build.as_ref().expect("indexer 要声明 build");
+    // 跨平台写法：命令是模块内的脚本，壳自己按平台找（unix 同名、Windows `.cmd`）。
+    assert_eq!(b.command, "tools/build");
+    assert_eq!(b.needs, vec!["gcc".to_string()], "构建期能力按可执行名判");
+    assert!(!b.net, "构建不需要出网");
+    let unix = idx.root.join("tools").join("build");
+    let win = idx.root.join("tools").join("build.cmd");
+    let unix_body = std::fs::read_to_string(&unix).expect("unix 构建脚本要在");
+    let win_body = std::fs::read_to_string(&win).expect("Windows 构建脚本要在");
+    assert!(unix_body.contains("indexer.cpp"), "{}", unix_body);
+    assert!(unix_body.contains("build/indexer"), "{}", unix_body);
+    assert!(win_body.contains("indexer.cpp") && win_body.contains("build/indexer.exe"));
+    // unix 侧没执行位就跑不起来（入口判据与守门进程都按它判）。
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(&unix)
+            .expect("读权限")
+            .permissions()
+            .mode();
+        assert!(mode & 0o111 != 0, "unix 构建脚本要能直接跑（{:o}）", mode);
+    }
+}
+#[test]
+pub(crate) fn local_entry_only_accepts_relative_paths() {
+    use crate::capabilities::modules::api::local_entry;
+    assert_eq!(local_entry("build/indexer build"), Some("build/indexer"));
+    assert_eq!(local_entry("./tools/run.sh"), Some("./tools/run.sh"));
+    // Windows 写法也认（相对路径用反斜杠）。
+    assert_eq!(
+        local_entry("build\\indexer.exe build"),
+        Some("build\\indexer.exe")
+    );
+    assert_eq!(
+        local_entry("python tools/scan.py"),
+        None,
+        "裸名走 PATH / 运行能力"
+    );
+    assert_eq!(local_entry("indexer build"), None);
+    assert_eq!(
+        local_entry("/usr/bin/x build"),
+        None,
+        "绝对路径不在模块目录里找"
+    );
+    assert_eq!(local_entry("C:\\tools\\x.exe"), None);
+    assert_eq!(local_entry("   "), None);
+}
+#[test]
 pub(crate) fn roster_lists_modules() {
     let core = core_with(
         vec![module_of("a"), module_of("b")],

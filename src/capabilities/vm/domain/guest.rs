@@ -3,7 +3,7 @@
 //! 不管：进程的启停与命令通道（detail/ 的引擎与通道）、引擎参数（detail/ 的适配器）。
 //! 联动：被 service.rs 与 detail/ 消费；契约见 docs/vm/README.md 与 RUNTIME_SPEC.md。
 
-use crate::capabilities::vm::domain::exec::ExecPlan;
+use crate::capabilities::vm::domain::exec::{ExecPlan, PlannedPackage};
 use crate::capabilities::vm::domain::packages::KIND_SYSTEM;
 use crate::capabilities::vm::domain::paths::{PathBridge, PathDialect};
 use crate::kernel::api::FenceSpec;
@@ -394,16 +394,77 @@ pub fn classify_base(base: &Path, probe: &dyn HostProbe) -> Result<GuestImage, S
     Ok(image)
 }
 
+/// 目的：system 类包在 guest 里的**只读载荷根**——`/<SYSTEM_PKG_MOUNT>/<包 id>`，叠写脚本从这里复制。
+pub const SYSTEM_PKG_MOUNT: &str = "solomni-packages";
+
+/// 目的：guest 里"这个包已叠写过"的标记根；标记在（且版本一致）就跳过复制。
+const SYSTEM_PKG_STAMP_DIR: &str = "/var/lib/solomni/packages";
+
+/// 目的：已装载包起 guest 后要跑的装配脚本——prefix 包把 `<prefix>/bin/*` 软链进 PATH，
+///    system 包把只读载荷按 `provides_paths` **叠写**进系统路径（复制合并，不挂载覆盖）。
+/// 参数：plan = 这次执行计划（包由包库扫描给出）。
+/// 约束：system 包按"已叠标记"幂等（目录根上只付一次；磁盘根的可写层每会话付一次）；载荷里缺的路径由脚本如实跳过。
+pub fn package_setup_scripts(plan: &ExecPlan) -> Vec<String> {
+    let mut out = Vec::new();
+    for p in &plan.packages {
+        if p.kind == KIND_SYSTEM {
+            if !p.provides_paths.is_empty() {
+                out.push(system_apply_script(p));
+            }
+        } else if !p.prefix.trim().is_empty() {
+            let dir = format!("/{}", p.prefix.trim_matches('/'));
+            out.push(format!(
+                "if [ -d {bin} ]; then ln -sf {bin}/* /usr/local/bin/ 2>/dev/null || true; fi",
+                bin = sh_quote(&format!("{dir}/bin"))
+            ));
+        }
+    }
+    out
+}
+
+/// 目的：把 system 包的载荷叠写进 guest 系统路径（带"已叠"标记，失败不落标记）。
+fn system_apply_script(p: &PlannedPackage) -> String {
+    let src = format!("/{}/{}", SYSTEM_PKG_MOUNT, p.id);
+    let stamp = format!("{}/{}@{}", SYSTEM_PKG_STAMP_DIR, p.id, p.version);
+    let mut body = String::new();
+    for rel in &p.provides_paths {
+        let from = format!("{}/{}", src, rel);
+        let to = format!("/{}", rel);
+        // 目录：合并进去（`src/.` 不覆盖父目录本身）；文件：照写。缺的载荷如实跳过。
+        body.push_str(&format!(
+            "if [ -d {from} ]; then mkdir -p {to} && cp -a {from}/. {to}/ || exit 1; elif [ -e {from} ]; then mkdir -p \"$(dirname {to})\" && cp -a {from} {to} || exit 1; fi; ",
+            from = sh_quote(&from),
+            to = sh_quote(&to)
+        ));
+    }
+    format!(
+        "STAMP={stamp}; if [ ! -f \"$STAMP\" ]; then {body} mkdir -p {dir} && : > \"$STAMP\"; fi",
+        stamp = sh_quote(&stamp),
+        body = body,
+        dir = sh_quote(SYSTEM_PKG_STAMP_DIR)
+    )
+}
+
+/// 目的：把一段字面量安全地放进 guest 的 shell 脚本里（单引号包裹，内部单引号按 POSIX 拆合）。
+fn sh_quote(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "'\\''"))
+}
+
 /// 目的：把执行计划与围栏翻成 guest 挂载——prefix 包只读挂到 /<prefix>，围栏根按路径桥给的 guest 路径挂。
 /// 约束：围栏根走 PathBridge（同方言时就是宿主原路径，模块命令与参数里的真实路径因此仍然成立；跨方言时是镜像根）；system 叠层不做。
 pub fn mounts_from(plan: &ExecPlan, fence: &FenceSpec, bridge: &PathBridge) -> Vec<GuestMount> {
     let mut seen: BTreeSet<String> = BTreeSet::new();
     let mut out: Vec<GuestMount> = Vec::new();
     for p in &plan.packages {
-        if p.kind == KIND_SYSTEM || p.source_dir.as_os_str().is_empty() {
+        if p.source_dir.as_os_str().is_empty() {
             continue;
         }
-        let guest = format!("/{}", p.prefix.trim_matches('/'));
+        // prefix 包挂到它自己的前缀；system 包的载荷挂到专用只读根，由 guest 侧的叠写脚本复制进系统路径。
+        let guest = if p.kind == KIND_SYSTEM {
+            format!("/{}/{}", SYSTEM_PKG_MOUNT, p.id)
+        } else {
+            format!("/{}", p.prefix.trim_matches('/'))
+        };
         if !seen.insert(guest.clone()) {
             continue;
         }

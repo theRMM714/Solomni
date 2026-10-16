@@ -79,7 +79,13 @@ secrets:                # 【可选】隐秘字段：字段名 → 注入该模�
 - `brief` 只说"能干什么"，不承诺具体技能；它是**选人的唯一依据**。
 - `system` 写管辖边界与工具用法；不要在 `system` 里复述讨论协议——协议由核心按身份注入（见「模块与工具的身份」）。
 - `runtimes` 只声明能力名（`python` / `node` / `bash` / `cc`……），格式不合法或重复 = 拒收并说明原因。
-  **声明不构成保证**：命令仍是模块作者的自由文本；能力没装载、命令跑不起来都如实报错，不静默兜底。
+  它是**虚拟机档**的就绪判据（`runtimes/` 包库或 guest 自带）；**本机档不看它**——宿主的环境就是本机档的环境。
+  **声明不构成保证**：命令仍是模块作者的自由文本；能力没装载、命令跑不起来都如实报错，不静默兜底
+  （唯一的例外是下面那条**相对路径入口**——它是模块内产物，建会话前会先查它到底在不在）。
+- `tools.<名>.command` 的**首个 token** 决定入口形态，产品据此判"跑不跑得起来"：
+  **相对路径**（含 `/` 或 `\`，如 `build/indexer`、`./tools/run.sh`）= 模块内的产物，模块目录下必须**存在且能直接执行**
+  （unix 要求可执行位）——不在场时**建会话就拒绝**，并指到模块自己的 README；
+  **裸名**（`python` / `node` / `indexer`）走 PATH 与 `runtimes` 能力；**绝对路径**不由模块目录判。
 - `tools` 占用内置保留名（`read` / `write` / `edit` / `patch` / `list` / `search` / `submit_report`）= 拒收；
   每个工具必须写 `command`（空 = 拒收）。
 - `tools.<名>.params`（可选）：写了就由核心按它校验（参数不符**不启动进程**，把"哪个参数不合"与工具签名一起发回模型），
@@ -113,6 +119,35 @@ secrets:                # 【可选】隐秘字段：字段名 → 注入该模�
 
 模块作者只需记住一件事：**回报不是要模块自己手写的 JSON 块**。工具怎么声明、谁能调、载荷什么形状，
 唯一权威在 [docs/tools/tools-and-roles.md](docs/tools/tools-and-roles.md)（声明在 `systools/tools.yaml`）。
+
+## 四之前：编译型模块的构建（`build:` 段）
+
+模块可以是**任何语言**：脚本型（`runtimes: [python]` + `tools.<名>.command`）就够了；要编译的模块在清单里声明**构建方法**：
+
+```yaml
+build:                  # 【可选】系统在**目标环境**里照它把产物编出来
+  command: tools/build  # 平台各一份脚本：unix 放 `tools/build`、Windows 放 `tools/build.cmd`
+  needs: [gcc]          # 【可选】构建期能力名 = 目标环境 PATH 上的**可执行文件名**
+  net: false            # 【可选】构建期要不要出站网络（缺省 false）
+tools:
+  build:
+    command: build/indexer build     # 相对路径入口 = 模块内的产物（见下）
+```
+
+- **谁编**：**系统**（不是 agent）——`solomni --build=<模块 id>`。产品在**目标环境**里跑 `command`
+  （本机档在宿主；虚拟机档用 `--guest=<虚拟根>` 在 **guest 里用它的编译包**编），围栏由产品给
+  （只写模块目录与状态目录、按 `net` 声明）；**工具链不进 agent 的工具围栏**。
+- **入口判据**：`tools.<名>.command` 的首个 token 是**相对路径**时，它就是模块内的产物，模块目录下必须有那个
+  **能直接跑**的文件（unix 还要求可执行位；Windows 按壳的解析补扩展名：`build/indexer` 落在 `build/indexer.exe` 也算在场）；
+  不在场就在「开始」那一刻**拒绝**，模块声明了 `build` 就顺带指到 `--build`。
+- **缓存**：状态落 `.vm/build-state/<模块>.json`（源指纹 + 命令 + 能力 + 网络 + 目标）；指纹一致且入口在场就跳过重编。
+- **产物**：写进模块目录（`build/` 已在 `.gitignore` 里）；agent 看得见产物、看不见工具链。
+- **本机档**：`needs` 由宿主 PATH 决定（运行包库只服务虚拟机档）；缺工具如实拒绝，并给"装工具链 / 自己编 / 让作者发产物"三条出路。
+- **跨平台**：构建命令写成**模块内的脚本**——unix 放 `tools/build`（要执行位），Windows 放 `tools/build.cmd`；两个文件并排，
+  各自的壳自己找得到（Windows 的 cmd 按 PATHEXT，与 `npm` 的 shim 同一条规矩）。**工具链不由产品预置**：
+  `needs` 就是目标环境 PATH 上的可执行名（如 `gcc`），缺了如实拒绝——"声明不构成保证"，装不装归用户。
+- **虚拟机档**：`needs` 由 guest 自带（`guest.yaml` 的 `runtimes`）或**运行包库**满足（prefix 的 `bin` 进 PATH、system 的载荷叠写进系统路径）；
+  模块目录以**读写**挂进 guest，产物因此直接落回宿主那份；guest 用完即销毁（会话级可写层），不改基础镜像。
 
 ## 四、工具执行
 

@@ -115,6 +115,7 @@ pub fn engine_args(
             a.push("-fsdev".to_string());
             a.push(format!(
                 // 目录根共享**可写**：内核按 root=... rw 挂它，额外 9p 挂载点也要在 guest 根里建得出来。
+                // `none`：guest 的 chown 会被顶回 EPERM——所以目录根上**不要**走 dpkg 装包（见 provision 的 node 路径）。
                 "local,id=fsbase,path={},security_model=none",
                 dir.display()
             ));
@@ -270,6 +271,7 @@ impl VmEngine for QemuEngine {
             child: Some(child),
             reader: BufReader::new(stream),
             writer,
+            port,
             seed,
             overlay,
         };
@@ -411,6 +413,8 @@ struct QemuHandle {
     child: Option<Child>,
     reader: BufReader<TcpStream>,
     writer: TcpStream,
+    /// 目的：QGA 的本地端口——通道被 QEMU 重置时照它重连（chardev 准备好之前连上的那条会被 RST）。
+    port: u16,
     /// 首启种子服务；正常会话启动是 None。
     seed: Option<SeedServer>,
     /// 每租约可写层文件；stop / Drop 时删掉（删会话即丢写层）。
@@ -514,6 +518,45 @@ impl QemuHandle {
         }
     }
 
+    /// 目的：通道断了就照同一个端口重连一次，并把读超时照原样装回去。
+    /// 约束：QEMU 的 chardev 还没就绪时连上的那条会被它 RST——"连上"不等于"通"，断了就重连。
+    fn reconnect(&mut self) -> Result<(), String> {
+        let stream = connect_within(self.port, Duration::from_secs(5))?;
+        stream
+            .set_read_timeout(Some(Duration::from_secs(10)))
+            .map_err(|e| format!("给 QGA 通道设读超时失败：{}", e))?;
+        self.writer = stream.try_clone().map_err(|e| e.to_string())?;
+        self.reader = BufReader::new(stream);
+        Ok(())
+    }
+
+    /// 目的：握手一次；不通就先重连再握手（通道被 QEMU 换掉是常态，不是故障）。
+    fn sync_or_heal(&mut self) -> Result<(), String> {
+        match self.sync() {
+            Ok(()) => Ok(()),
+            Err(_) => {
+                self.reconnect()?;
+                self.sync()
+            }
+        }
+    }
+
+    /// 目的：问一次进程状态；通道断了先重连再问一次（进程状态在 guest 侧，换通道不影响）。
+    fn status_once(&mut self, pid: i64) -> Result<serde_json::Value, String> {
+        let ask = |h: &mut QemuHandle| -> Result<serde_json::Value, String> {
+            h.send(&serde_json::json!({
+                "execute":"guest-exec-status","arguments":{"pid":pid}
+            }))?;
+            h.recv()
+        };
+        match ask(self) {
+            Ok(v) => Ok(v),
+            Err(_) => {
+                self.reconnect()?;
+                ask(self)
+            }
+        }
+    }
     fn send(&mut self, v: &serde_json::Value) -> Result<(), String> {
         let mut line = v.to_string();
         line.push('\n');
@@ -574,11 +617,11 @@ impl QemuHandle {
 impl GuestChannel for QemuHandle {
     /// 目的：QGA 就绪探测——同步握手能过一次就算通道已就绪（读超时保证有界）。
     fn ping(&mut self) -> bool {
-        self.sync().is_ok()
+        self.sync_or_heal().is_ok()
     }
 
     fn exec(&mut self, run: &GuestRun) -> ToolOutcome {
-        if let Err(why) = self.sync() {
+        if let Err(why) = self.sync_or_heal() {
             return fail(&why);
         }
         let env: Vec<serde_json::Value> = run
@@ -616,12 +659,7 @@ impl GuestChannel for QemuHandle {
         };
         let deadline = Instant::now() + Duration::from_secs(600);
         loop {
-            if let Err(why) = self.send(&serde_json::json!({
-                "execute":"guest-exec-status","arguments":{"pid":pid}
-            })) {
-                return fail(&why);
-            }
-            let v = match self.recv() {
+            let v = match self.status_once(pid) {
                 Ok(v) => v,
                 Err(why) => return fail(&why),
             };
@@ -823,6 +861,49 @@ fn unb64(s: &str) -> Vec<u8> {
 mod tests {
     use super::*;
 
+    /// 目的：QGA 通道被 QEMU 重置（chardev 未就绪时连上的那条会被 RST）不是故障——`ping` 要自己重连一次再握手。
+    #[test]
+    fn qga_ping_reconnects_after_a_reset_channel() {
+        use std::io::{BufRead, BufReader, Write};
+        use std::net::TcpListener;
+        let listener = TcpListener::bind("127.0.0.1:0").expect("绑端口");
+        let port = listener.local_addr().expect("地址").port();
+        let server = std::thread::spawn(move || {
+            // 第一条：接受后立刻丢掉（模拟 QEMU 在 chardev 就绪前 RST 掉的那条连接）。
+            let (first, _) = listener.accept().expect("accept#1");
+            drop(first);
+            // 第二条：正常服务一次 guest-sync（回它收到的那个 id）。
+            let (mut second, _) = listener.accept().expect("accept#2");
+            let read = second.try_clone().expect("clone");
+            let mut r = BufReader::new(read);
+            let mut line = String::new();
+            r.read_line(&mut line).expect("读请求");
+            let v: serde_json::Value = serde_json::from_str(line.trim()).expect("请求是 JSON");
+            let id = v
+                .get("arguments")
+                .and_then(|a| a.get("id"))
+                .and_then(|i| i.as_u64())
+                .expect("guest-sync 要带 id");
+            second
+                .write_all(format!("{{\"return\": {}}}\n", id).as_bytes())
+                .expect("写回包");
+            std::thread::sleep(Duration::from_millis(200));
+        });
+        let first = TcpStream::connect(("127.0.0.1", port)).expect("先连上（会被服务器丢掉）");
+        first
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .expect("读超时");
+        let mut handle = QemuHandle {
+            child: None,
+            reader: BufReader::new(first.try_clone().expect("clone")),
+            writer: first,
+            port,
+            seed: None,
+            overlay: None,
+        };
+        assert!(handle.ping(), "被 RST 的那条连接要能靠重连救回来");
+        server.join().expect("服务器线程");
+    }
     /// 目的：便携包的固件目录认 `bin/` 的兄弟 `share/qemu`；没有就给 None（不瞎指）。
     #[test]
     fn firmware_dir_is_beside_bin() {

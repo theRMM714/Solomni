@@ -595,7 +595,7 @@ pub(crate) fn create_work_validates_user_choices() {
         task: None,
         delegate: false,
         tier: crate::kernel::api::Tier::Host,
-        base: None,
+        guest: None,
     };
     let opened = core
         .create_work(two_agents)
@@ -1040,7 +1040,7 @@ pub(crate) fn edit_session_writes_meta_appends_config_record_and_rebuilds() {
     // 虚拟机档现在一律不可选（guest 本体尚未接入），所以**先把它做成已存在的虚拟机档会话**——
     // 已在 vm 档的会话只校验它自己那几项（基础根等），改模块/模型/网络照旧允许。
     hist.force_tier(&sid, Tier::Vm);
-    let base_dir = crate::tests::base_dir("edit-session-base");
+    let guest = crate::tests::test_guest("edit-session-base");
     core.edit_session(
         &sid,
         SessionEdit {
@@ -1051,7 +1051,7 @@ pub(crate) fn edit_session_writes_meta_appends_config_record_and_rebuilds() {
                 permissions: None,
             }],
             tier: "vm".to_string(),
-            base: Some(base_dir.to_string_lossy().into_owned()),
+            guest: Some(guest.clone()),
             pins: BTreeMap::new(),
             net: true,
         },
@@ -1069,9 +1069,9 @@ pub(crate) fn edit_session_writes_meta_appends_config_record_and_rebuilds() {
     );
     assert_eq!(meta.exec.tier, Tier::Vm);
     assert_eq!(
-        meta.exec.base.as_deref(),
-        Some(base_dir.to_string_lossy().as_ref()),
-        "基础根随提交写回"
+        meta.exec.guest.as_deref(),
+        Some(guest.as_str()),
+        "虚拟根随提交写回"
     );
     assert!(
         events
@@ -1182,8 +1182,8 @@ pub(crate) fn edit_session_enforces_the_same_rules_as_creation() {
     // 虚拟机档选型不成立（同一能力多版本未定版）：编辑与「开始」同一把尺子，如实拒绝。
     let hist2 = Arc::new(InMemoryHistory::new());
     // 已经在虚拟机档上的会话（"留在 vm 档"这一路：只校验它自己那几项，不拿"本机能不能提供 vm 档"拦它）。
-    // 基础根给一个真实存在的目录：留在 vm 档时仍然要校验用户填的那个路径。
-    let vm_base = crate::tests::base_dir("edit-rules-vm-base");
+    // 虚拟根给一个真实在场的那一格：留在 vm 档时仍然要校验它自描述得对不对。
+    let vm_guest = crate::tests::test_guest("edit-rules-vm");
     seed_session(
         &hist2,
         "c",
@@ -1191,7 +1191,7 @@ pub(crate) fn edit_session_enforces_the_same_rules_as_creation() {
         vec![agent_meta("x", &["a"], None)],
         ExecSpec {
             tier: Tier::Vm,
-            base: Some(vm_base.to_string_lossy().into_owned()),
+            guest: Some(vm_guest.clone()),
             ..ExecSpec::default()
         },
     );
@@ -1209,7 +1209,7 @@ pub(crate) fn edit_session_enforces_the_same_rules_as_creation() {
     );
     let mut vm_edit = edit_of(vec![("x", &["a"], "")]);
     vm_edit.tier = "vm".to_string();
-    vm_edit.base = Some(vm_base.to_string_lossy().into_owned());
+    vm_edit.guest = Some(vm_guest.clone());
     let e = core2.edit_session("c", vm_edit.clone()).unwrap_err();
     assert!(e.contains("多个版本"), "{}", e);
     // 定版之后可以提交（缺包不拦：那只是该模块工具不可用）。
@@ -1244,10 +1244,12 @@ pub(crate) fn deleting_a_session_asks_the_fence_to_release_its_grants() {
         Arc::new(FakeCatalog::new(vec!["m".to_string()])),
     );
     let mut core = Conductor::new(
+        crate::tests::root_dir(),
         registry_service(InMemorySettings::new(), Arc::clone(&llm)),
         test_history_of(Arc::clone(&hist)),
         test_workspace(Arc::new(InMemoryWorkspace::new())),
         test_vm(Arc::new(InMemoryPackages::empty())),
+        test_provision(),
         test_modules(Arc::new(VecSource(vec![module_of("a")]))),
         llm,
         test_tools_svc_with(
@@ -1282,7 +1284,7 @@ pub(crate) fn session_meta_exec_section_roundtrips_and_reads_legacy_meta() {
         agents: Vec::new(),
         exec: ExecSpec {
             tier: Tier::Vm,
-            base: Some("base-linux".to_string()),
+            guest: Some(crate::tests::test_guest("rt-guest")),
             pins: BTreeMap::from([("python".to_string(), "3.12.4".to_string())]),
             net: false,
         },
@@ -1294,7 +1296,7 @@ pub(crate) fn session_meta_exec_section_roundtrips_and_reads_legacy_meta() {
     let text = yaml_serde::to_string(&meta).expect("序列化");
     let back: SessionMeta = yaml_serde::from_str(&text).expect("反序列化");
     assert_eq!(back.exec.tier, Tier::Vm);
-    assert_eq!(back.exec.base.as_deref(), Some("base-linux"));
+    assert_eq!(back.exec.guest.as_deref(), Some("rt-guest"));
     assert_eq!(
         back.exec.pins.get("python").map(String::as_str),
         Some("3.12.4")
@@ -1314,7 +1316,7 @@ pub(crate) fn session_meta_exec_section_roundtrips_and_reads_legacy_meta() {
         yaml_serde::from_str("name: old\nmode: single\nmodules: [a]\nts: 1\n")
             .expect("旧 meta.yaml 必须可读");
     assert_eq!(legacy.exec.tier, Tier::Host);
-    assert!(legacy.exec.base.is_none());
+    assert!(legacy.exec.guest.is_none());
     assert!(!legacy.exec.net);
     assert!(legacy.exec.pins.is_empty());
     assert_eq!(legacy.run, RunState::Active);

@@ -67,16 +67,16 @@ impl Conductor {
                 None => self.registry.app_settings().tier,
             },
         };
-        // base：点名就用它；否则子会话沿用父会话，顶层为空（建好后在会话配置里填）。
-        let vm_base = match spec
-            .base
+        // 虚拟根：点名就用它；否则子会话沿用父会话，顶层为空（建好后在会话配置里选）。
+        let vm_guest = match spec
+            .guest
             .as_deref()
             .map(str::trim)
             .filter(|b| !b.is_empty())
         {
             Some(b) => Some(b.to_string()),
             None => match &parent {
-                Some(p) => self.history.meta(p)?.exec.base.clone(),
+                Some(p) => self.history.meta(p)?.exec.guest.clone(),
                 None => None,
             },
         };
@@ -99,7 +99,7 @@ impl Conductor {
             task,
             delegate,
             tier,
-            base: vm_base,
+            guest: vm_guest,
         };
         // 有父 = 子工作（`create_work_inner` 直接给 parent）；没有父 = 顶层会话，走同一个入口包装。
         let opened = match parent.as_deref() {

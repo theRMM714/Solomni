@@ -8,6 +8,7 @@ use crate::capabilities::conductor::api::{
     SessionView, TierChoices, WorkMode, WorkOpened, WorkSpec,
 };
 use crate::capabilities::llm::api::Llm;
+use crate::capabilities::provision::api::Provision;
 use crate::capabilities::session::api::History;
 #[cfg(test)]
 pub(crate) use crate::capabilities::session::api::Live;
@@ -171,6 +172,8 @@ pub(crate) enum Prepared {
 /// 组合根在 `ConductorHandle::spawn` 里把它**移进核心自己的执行线程**——此后状态只被那一个线程碰，
 /// 所以这里不加任何锁（并发不变式见 ARCHITECTURE.md §一）。
 pub struct Conductor {
+    /// 产品根：虚拟根这类"装在项目内"的东西按它解析成绝对路径（`vm::resolve_guest`）。
+    root: std::path::PathBuf,
     /// 登记处能力：**四份 yaml 的状态在它里面**，conductor 只按 `Registry` 调用（看不见它的字段）。
     registry: Box<dyn Registry>,
     /// 会话历史直连面（**不持它的端口**，R12）：造/读/写/删会话都走它。
@@ -179,6 +182,8 @@ pub struct Conductor {
     workspace: Arc<dyn Workspace + Send + Sync>,
     /// 虚拟机档用例面（**不持它的端口**，R12）：运行包库与档位就绪检测走它。
     vm: Arc<dyn Vm + Send + Sync>,
+    /// 依赖补齐面（**不持它的端口**，R12）：虚拟根清单与装没装齐从它读。
+    provision: Arc<dyn Provision + Send + Sync>,
     /// 目的：模块能力（**不持它的端口**，R12）——模块清单事实的唯一上游。
     modules: Arc<dyn Modules + Send + Sync>,
     /// llm 用例面：按解析出来的通道造收发句柄 + 信封的无歧义修复（通道的**解析**在登记处能力）。
@@ -224,10 +229,12 @@ impl Conductor {
     // 这是有意的设计取舍（见 docs/testing/quality-isolation.md 的 allow 清单），不是没修。
     #[allow(clippy::too_many_arguments)]
     pub fn new(
+        root: std::path::PathBuf,
         registry: Box<dyn Registry>,
         history: Arc<dyn History + Send + Sync>,
         workspace: Arc<dyn Workspace + Send + Sync>,
         vm: Arc<dyn Vm + Send + Sync>,
+        provision: Arc<dyn Provision + Send + Sync>,
         modules: Arc<dyn Modules + Send + Sync>,
         llm: Arc<dyn Llm + Send + Sync>,
         tools: Arc<dyn ToolExec + Send + Sync>,
@@ -239,10 +246,12 @@ impl Conductor {
         secrets: Arc<dyn crate::capabilities::secrets::api::SecretOps + Send + Sync>,
     ) -> Conductor {
         Conductor {
+            root,
             registry,
             history,
             workspace,
             vm,
+            provision,
             modules,
             llm,
             tools,
@@ -256,6 +265,14 @@ impl Conductor {
             desk: crate::capabilities::session::api::DecisionDesk::new(),
             running: std::collections::BTreeSet::new(),
         }
+    }
+
+    /// 目的：本机可选的虚拟根清单（会话配置与创建向导用）。
+    /// 约束：清单事实来自依赖补齐能力；补齐面没接入时如实返回空表（界面据此说"没有可选虚拟根"）。
+    pub(crate) fn guest_bases(
+        &self,
+    ) -> Result<Vec<crate::capabilities::provision::api::GuestBase>, String> {
+        self.provision.guest_bases()
     }
 
     /// 目的：模块的**有效**启用（用户覆盖 ?? 作者默认）。

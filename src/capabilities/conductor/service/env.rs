@@ -25,6 +25,9 @@ impl Conductor {
         // 沙箱锚在**顶层工作**上：整棵树不论嵌套多少层只有一个 work/（见 Conductor::work_root）。
         let work = self.work_root_of(meta)?;
         let roots = self.workspace.roots(&work, &names)?;
+        // 虚拟机档给 guest↔宿主翻译器：system 工具跑在宿主侧，但收模型给的 guest 写法；
+        // **同一份**也交给 @ 改写（挂载点、命令装配与用户引用用同一座桥，三处不会各给一种写法）。
+        let path_codec = self.path_codec_of(&meta.exec);
         let mut list: Vec<crate::capabilities::workspace::api::Sandbox> = Vec::new();
         for a in &meta.agents {
             let private = roots
@@ -54,13 +57,13 @@ impl Conductor {
                 modules_with_userdata,
                 permissions: self.permissions_for(meta, &a.name),
                 texts: self.prompt.tools(),
-                // 虚拟机档给 guest↔宿主翻译器：system 工具跑在宿主侧，但收模型给的 guest 写法。
-                path_codec: self.path_codec_of(&meta.exec),
+                path_codec: path_codec.clone(),
             });
         }
         Ok(crate::capabilities::workspace::api::Sandboxes {
             shared: roots.shared,
             list,
+            codec: path_codec,
         })
     }
 

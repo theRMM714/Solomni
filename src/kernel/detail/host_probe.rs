@@ -47,6 +47,25 @@ impl HostProbe for HostProbeAdapter {
         path.is_dir()
     }
 
+    /// 可执行位：unix 上"是文件 + 有任一执行位"；Windows 上可执行性由扩展名决定，按"是文件"。
+    fn is_executable(&self, path: &Path) -> bool {
+        let Ok(meta) = std::fs::metadata(path) else {
+            return false;
+        };
+        if !meta.is_file() {
+            return false;
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            meta.permissions().mode() & 0o111 != 0
+        }
+        #[cfg(not(unix))]
+        {
+            true
+        }
+    }
+
     /// 在 PATH 里找可执行文件（只问事实，不执行它）。
     fn has_exe(&self, name: &str) -> bool {
         find_exe(name).is_some()

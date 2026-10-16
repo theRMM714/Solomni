@@ -178,6 +178,21 @@ impl SessionParams {
         self
     }
 
+    /// 目的：@ 改写要用的根——共享区 + 本席私有沙箱 + 本会话的路径翻译器。
+    /// 约束：与工作环境块用同一个 `PathBridge::for_session`——提示词里给模型看的写法与转录里落下的写法必然是同一套。
+    pub(crate) fn ref_roots(&self) -> crate::capabilities::prompt::api::RefRoots {
+        crate::capabilities::prompt::api::RefRoots {
+            work: self.shared.clone(),
+            private: Some(self.private.clone()),
+            path_codec: Some(std::sync::Arc::new(
+                crate::capabilities::vm::api::PathBridge::for_session(
+                    std::env::consts::OS,
+                    self.guest.map(|g| g.dialect()),
+                ),
+            )),
+        }
+    }
+
     /// 身份块：**每次调用现渲染**（模板与文案取当前提示词册，通道形态取当前登记处）。
     pub fn identity(
         &self,
@@ -328,12 +343,9 @@ impl AgentSession {
         &self.params
     }
 
-    /// @ 改写要用的真实根：由参数派生，不另存一份。
+    /// @ 改写要用的真实根：由参数派生，不另存一份。写法与工作环境块**同一座桥**（虚拟机档 = guest 写法）。
     pub(crate) fn roots(&self) -> crate::capabilities::prompt::api::RefRoots {
-        crate::capabilities::prompt::api::RefRoots {
-            work: self.params.shared.clone(),
-            private: Some(self.params.private.clone()),
-        }
+        self.params.ref_roots()
     }
 
     // 组合根注入的构造函数：参数天然多，收口成参数对象只是把参数挪个地方、并让装配更难读。

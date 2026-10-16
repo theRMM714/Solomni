@@ -397,7 +397,7 @@ function warnIfTierUnavailable(name) {
     '原因：' + missing +
       '。\n\n本次仍会打开（历史记录不受影响），但它实际按本机档执行。' +
       '\n要真正用上虚拟机档：先在本机启用虚拟化（Windows「虚拟机平台」/ Linux 的 /dev/kvm / macOS 11+），' +
-      '并在「编辑」里确认执行档位与基础根；暂时不需要就在「编辑」里改回本机档。',
+      '并在「编辑」里确认执行档位与虚拟机；暂时不需要就在「编辑」里改回本机档。',
     'warn'
   );
 }
@@ -581,7 +581,7 @@ function buildConfigForm(sid, cfg, c, box) {
       name: a.name || '', modules: (a.modules || []).slice(), model: a.model || '',
     })),
     tier: cfg.tier === 'vm' ? 'vm' : 'host',
-    base: cfg.base || '',
+    guest: cfg.guest || '',
     pins: {},
     net: !!cfg.net,
   };
@@ -632,15 +632,13 @@ function buildConfigForm(sid, cfg, c, box) {
   const vmOk = cfg.vm_available !== false;
   const hostR = cfgRadio('本机档 —— 脚本直接在宿主上跑：宿主自备解释器，不装载运行包；隔离就是宿主本身（快，但风险也在宿主上）。', draft.tier === 'host', 'cfg-tier');
   const vmR = cfgRadio('虚拟机档 —— 一整套 guest，脚本在 guest 里跑：按模块声明的运行能力装载运行包；隔离更强，代价是更重、依赖运行包。', draft.tier === 'vm', 'cfg-tier', !vmOk);
-  const baseIn = textInput('base（可选）：虚拟机的基础根（发行版基底名或目录）');
-  baseIn.value = draft.base;
-  baseIn.addEventListener('input', () => { draft.base = baseIn.value; });
-  const baseWrap = field('虚拟机基础根 base（可选）', baseIn);
-  const baseHint = cfgHint('虚拟机档才用得上；留空 = 用默认基底。本机档忽略它（提交时按 null 送出）。');
+  // 虚拟机档选的是**虚拟根**（清单里的一个虚拟机），不是路径：本机有哪些由后端给。
+  const pick = guestPicker(cfg.guests, draft.guest, (v) => { draft.guest = v; });
   const syncTier = () => {
     const vm = draft.tier === 'vm';
-    baseWrap.className = vm ? 'wf-field' : 'wf-field hidden';
-    baseHint.className = 'cfg-hint' + (vm ? '' : ' hidden');
+    pick.wrap.className = vm ? 'wf-field' : 'wf-field hidden';
+    pick.hint.className = 'cfg-hint' + (vm ? '' : ' hidden');
+    pick.sync();
   };
   hostR.box.addEventListener('change', () => { if (hostR.box.checked) { draft.tier = 'host'; syncTier(); } });
   vmR.box.addEventListener('change', () => { if (vmR.box.checked) { draft.tier = 'vm'; syncTier(); } });
@@ -662,7 +660,7 @@ function buildConfigForm(sid, cfg, c, box) {
       secT.appendChild(box2);
     }
   }
-  secT.appendChild(baseWrap); secT.appendChild(baseHint);
+  secT.appendChild(pick.wrap); secT.appendChild(pick.hint);
   box.appendChild(secT);
   syncTier();
 
@@ -728,7 +726,7 @@ function buildConfigForm(sid, cfg, c, box) {
     const body = {
       agents: draft.agents.map((a) => ({ name: a.name.trim(), modules: a.modules.slice(), model: a.model || '' })),
       tier: draft.tier,
-      base: draft.tier === 'vm' ? (draft.base.trim() || null) : null,
+      guest: draft.tier === 'vm' ? (draft.guest || null) : null,
       pins: pins,
       net: draft.net,
     };
@@ -898,6 +896,38 @@ function field(labelText, input) {
   wrap.appendChild(lab); wrap.appendChild(input);
   return wrap;
 }
+/* 虚拟根选择器：选的是**虚拟机**（清单里的一个虚拟根），不是路径——界面从不让人填目录。
+ * 每一项如实标注：没装齐（缺哪几条）、各自是什么系统——界面照抄后端事实，不自己编话。 */
+function guestPicker(guests, current, onChange) {
+  const list = guests || [];
+  const opts = list.map((g) => ({
+    value: g.guest,
+    label: g.label + (g.guest !== g.label ? "（" + g.guest + "）" : "") +
+      (g.ready ? "" : " —— 未装齐，先补齐依赖"),
+  }));
+  if (current && !opts.some((o) => o.value === current)) {
+    opts.push({ value: current, label: current + "（本机现在没有这个虚拟根）" });
+  }
+  if (!opts.length) opts.push({ value: "", label: "（本机没有可选虚拟根：先补齐依赖）" });
+  const sel = selectInput(opts, current || opts[0].value);
+  const wrap = field("虚拟机（虚拟根）", sel);
+  const hint = cfgHint("");
+  const sync = () => {
+    const g = list.find((x) => x.guest === sel.value);
+    hint.textContent = !g
+      ? "这个虚拟根在本机找不到：跑 solomni --provision --ensure --yes 补上，或换一个。"
+      : (g.os + " / " + g.arch) +
+        (g.ready ? "：已装齐。" : "：还没装齐（缺 " + (g.missing || []).join("、") + "）——先补齐依赖再用。") +
+        ((g.runtimes || []).length
+          ? " 自带运行能力：" + g.runtimes.join("、") + "。"
+          : " 它没有声明自带的运行能力。");
+    if (onChange) onChange(sel.value, g);
+  };
+  sel.addEventListener("change", sync);
+  sync();
+  return { wrap: wrap, sel: sel, hint: hint, sync: sync };
+}
+
 function emptyHint(text) {
   const e = document.createElement('div'); e.className = 'reg-empty'; e.textContent = text;
   return e;
@@ -1448,7 +1478,7 @@ function renameUpload(sid, name, b64, alt) {
 async function openWizard() {
   // single 形态：w.modules = 勾选的模块；w.agentPick = 复用的登记处 agent
   // （null = 用勾选的模块组临时 agent，名字见 w.agentName）。
-  const w = { mode: 'single', modules: [], agentPick: null, agentName: '', agents: [], task: '', tier: 'host', base: '' };
+  const w = { mode: 'single', modules: [], agentPick: null, agentName: '', agents: [], task: '', tier: 'host', guest: '' };
   const ed = { open: false, name: '', modules: [], model: null, note: '' };
   // 档位选择：默认档与虚拟机档可用性由后端给（GET /api/tiers，与「开始」的校验同源）。
   let tiers = null;
@@ -1473,13 +1503,38 @@ async function openWizard() {
     ));
   }
 
-  // 虚拟机档在**创建时**就要给基础根（base 是会话级；机器能力已在上面判过）。
-  const baseIn = textInput('base：虚拟机的基础根（guest rootfs 目录，或含 rootfs 磁盘镜像的目录）');
-  baseIn.value = w.base;
-  baseIn.addEventListener('input', () => { w.base = baseIn.value; });
-  const baseField = field('虚拟机基础根 base', baseIn);
+  // 虚拟机档在**创建时**就要选一个虚拟根（会话级选择；机器能力已在上面判过）。
+  const pick = guestPicker(tiers && tiers.guests, w.guest, (v, g) => { w.guest = v; w.guestInfo = g; });
+  // 预判：这个虚拟根（+ 包库）满足不了本次点到的哪些模块——**只是提示**，判据仍以创建时的后端校验为准。
+  const gapHint = cfgHint('');
+  function syncGuestGap() {
+    if (w.tier !== 'vm') { gapHint.textContent = ''; return; }
+    const g = w.guestInfo;
+    if (!g || !g.ready) { gapHint.textContent = ''; return; }
+    const covered = {};
+    (g.runtimes || []).forEach((c) => { covered[c] = true; });
+    Object.keys((tiers && tiers.available) || {}).forEach((c) => { covered[c] = true; });
+    const ids = w.mode === 'collab'
+      ? w.agents.reduce((acc, a) => acc.concat(a.modules || []), [])
+      : (w.agentPick ? (w.agentPick.modules || []).slice()
+        : state.modules.map((m) => m.id).filter((id) => w.modules.indexOf(id) >= 0));
+    const lack = [];
+    for (const id of ids) {
+      const m = state.modules.find((x) => x.id === id);
+      if (!m) continue;
+      const miss = (m.runtimes || []).filter((c) => !covered[c]);
+      if (miss.length) lack.push(id + ' 需要 ' + miss.join('/'));
+    }
+    gapHint.textContent = lack.length
+      ? '这个虚拟机可能要缺：' + lack.join('；') + '。可选：把运行包放进 runtimes/、换一个虚拟机、或改用本机档（创建时后端会按同一份事实再判一次）。'
+      : '';
+  }
   function syncWizardTier() {
-    baseField.className = w.tier === 'vm' ? 'wf-field' : 'wf-field hidden';
+    pick.wrap.className = w.tier === 'vm' ? 'wf-field' : 'wf-field hidden';
+    pick.hint.className = 'wf-hint' + (w.tier === 'vm' ? '' : ' hidden');
+    gapHint.className = 'wf-hint' + (w.tier === 'vm' ? '' : ' hidden');
+    pick.sync();
+    syncGuestGap();
   }
   openModal('新建工作', (c) => {
     const nameIn = textInput('工作名称（必填，会话落盘目录名）');
@@ -1768,7 +1823,7 @@ async function openWizard() {
       }
     }
 
-    function renderAll() { renderParts(); renderModels(); renderEditor(); }
+    function renderAll() { renderParts(); renderModels(); renderEditor(); syncGuestGap(); }
 
     modeSel.addEventListener('change', () => {
       w.mode = modeSel.value;
@@ -1834,15 +1889,15 @@ async function openWizard() {
       const name = nameIn.value.trim();
       if (!name) { c.setMsg('工作名称必填', true); return; }
       const task = taskIn.value.trim();
-      const vmBase = (w.base || '').trim();
-      if (w.tier === 'vm' && !vmBase) {
-        c.setMsg('虚拟机档要填基础根 base（guest rootfs 所在目录）；也可以先建本机档，建好后在会话配置里切到虚拟机档并填。', true);
+      const vmGuest = (w.guest || '').trim();
+      if (w.tier === 'vm' && !vmGuest) {
+        c.setMsg('虚拟机档要先选一个虚拟机（虚拟根）；本机还没有可选项时先补齐依赖：solomni --provision --ensure --yes。', true);
         return;
       }
       let agents;
       if (w.mode === 'proxy') {
         // 代理：没有名单、没有需求——选这个形态就是**授予全权**（后端建 mode=proxy 的会话）。
-        await submit({ name, mode: 'proxy', agents: [], tier: w.tier, base: w.tier === 'vm' ? vmBase : null });
+        await submit({ name, mode: 'proxy', agents: [], tier: w.tier, guest: w.tier === 'vm' ? vmGuest : null });
         return;
       }
       if (w.mode === 'single') {
@@ -1872,7 +1927,7 @@ async function openWizard() {
       const names = agents.map((a) => a.name);
       const dup = names.filter((n, i) => names.indexOf(n) !== i)[0];
       const body = { name, mode: w.mode, agents, tier: w.tier };
-      if (w.tier === 'vm') body.base = vmBase;
+      if (w.tier === 'vm') body.guest = vmGuest;
       if (task) body.task = task;
       if (dup) {
         choiceModal('agent 重名', '本次工作里有同名 agent「' + dup + '」。', [
@@ -1888,7 +1943,9 @@ async function openWizard() {
     c.body.appendChild(field('形态', modeSel));
     c.body.appendChild(modeHint);
     c.body.appendChild(tierField);
-    c.body.appendChild(baseField);
+    c.body.appendChild(pick.wrap);
+    c.body.appendChild(pick.hint);
+    c.body.appendChild(gapHint);
     c.body.appendChild(partWrap);
     c.body.appendChild(modelWrap);
     c.body.appendChild(taskField);
