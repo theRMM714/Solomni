@@ -230,7 +230,11 @@ pub fn build(root: &std::path::Path, args: &[String], i: usize) -> i32 {
         return 2;
     }
     if let Some(guest) = args.iter().find_map(|a| a.strip_prefix("--guest=")) {
-        eprintln!("[构建] 在虚拟根（{}）里构建还没接线：先在本机构建，或自己按模块 README 编；缺口见 tests/gaps.yaml", guest);
+        eprintln!(
+            "[构建] 在虚拟根（{}）里构建还没接线：本机档编出来的是**宿主 ABI**，guest 里不一定能跑——\n        \
+             先按模块 README 在**目标环境**里编一次，或等缺口 module.build-in-guest 接线（tests/gaps.yaml）",
+            guest
+        );
         return 2;
     }
     let runner = match build_runner(root) {

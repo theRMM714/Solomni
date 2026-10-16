@@ -108,16 +108,19 @@
   scope: global
   level: T3
   why: |
-    模块的 `build:` 段只在**本机档**接线了：`solomni --build=<模块 id>` 在宿主上跑构建命令（围栏由产品给、
-    产物落模块目录、状态落 `.vm/build-state/`、入口判据随后复验）。虚拟机档（在 guest 里为**目标 ABI** 构建）还没有，
-    `--guest=<虚拟根>` 目前如实拒绝。缺它的后果很实际：Windows / macOS 宿主的工具链产不出 Linux ELF，
-    那几个平台上的编译型模块在本机档编不出能在 guest 里跑的产物。
+    编译型模块的 `build` 只接了**本机档**：`solomni --build=<模块 id>` 在宿主上跑构建命令，产物给**宿主**用。
+    **虚拟机档那条路还没接**——guest 里跑的工具需要**能在 guest 里跑**的产物，而宿主编出来的是宿主 ABI
+    （不同的 glibc 版本 / PE / Mach-O；Windows 与 macOS 宿主更不可能直接产 Linux ELF）。
+    所以这条路不是"平台替 guest 产产物"，而是**guest 自己用编译包编**：
+    `solomni --build=<模块 id> --guest=<虚拟根>`（现在如实拒绝）。缺它时，虚拟根里没法现场得到产物，
+    只能靠模块作者预先发好——编译型模块在虚拟机档因此用不起来。
   how: |
-    复用 provision 的 guest 生命周期：解析虚拟根 → 把模块目录（rw）与构建期能力包（只读）挂进去 → 起 guest →
-    在模块根跑 `build.command` → 复验入口 → 收尾 → 落同一份状态（target = 虚拟根名）。`needs` 由 guest 自带
-    或包库（system 叠写 / prefix 进 PATH 都已就位）满足。
+    复用 provision 的 guest 生命周期：解析虚拟根 → 把模块目录（rw）与**编译包/工具链**（只读）挂进去
+    （`needs` 由 guest 自带，或包库按 system 叠写 / prefix 进 PATH 满足——两条装配都已就位）→ 起 guest →
+    在模块根跑 `build.command` → 复验入口 → 收尾 → 落同一份状态（target = 虚拟根名）。
   accept: |
-    在一台本机没有 C++ 工具链的宿主上，`solomni --build=indexer --guest=debian` 能在 guest 里编出产物，
-    入口判据随后放行；guest 里没有工具链时如实拒绝并指出怎么补。
+    在一台本机没有目标工具链的宿主上（例如 Windows 宿主 + Linux guest），
+    `solomni --build=indexer --guest=debian` 由 **guest 自己的编译包**编出产物，入口判据随后放行；
+    guest 里没有编译包时如实拒绝，并指出怎么补（放编译包 / 让作者发产物）。
   blocked_by: |
     无（等排期；本机档已可用）。
