@@ -19,7 +19,7 @@
 出站端口 `PackageSource` / `VmEngine` / `ShareBackend` **只由 `service.rs` 持有**（R12）；`GuestVm` / `GuestChannel` 由引擎在 boot 时交出。`ExecSpec` 是共享事实（在 `kernel`），本能力只读它。
 
 **当前状态**：五轴已按可插的形状落地——`QemuEngine`（当前唯一引擎）、`GuestImage`（虚拟根里可放 `guest.yaml` 声明 id / arch / os / agent / clients / runtimes）、
-`QemuHandle`（QEMU + QGA，命令通道）、`NinePShare`（目录根）、`CopyShare`（QGA 复制，三平台通用）、`VirtioFsShare`（QEMU vhost-user-fs，Linux/macOS 宿主）与 `SmbShare`（用户态 SMB helper + guestfwd 隧道，Windows 宿主的实时共享档）。
+`QemuHandle`（QEMU + QGA，命令通道；chardev 就绪前连上的那条会被 QEMU RST，故握手失败即重连再握手——不把通道被换掉当故障）、`NinePShare`（目录根）、`CopyShare`（QGA 复制，三平台通用）、`VirtioFsShare`（QEMU vhost-user-fs，Linux/macOS 宿主）与 `SmbShare`（用户态 SMB helper + guestfwd 隧道，Windows 宿主的实时共享档）。
 按平台的组合回退链是数据（`default_combos` / `choose_combo`），加速器按平台给（`accel=kvm:tcg` / `accel=whpx:tcg` / `accel=hvf:tcg`），共享要隧道时给 `restrict=on` 网卡。
 执行分派已接线（会话在 `tier == Vm` 时把模块命令交给 guest；建会话时装配并拉起，会话删除时销毁）；就绪项 `guest` 按**已验平台数据表**（`VERIFIED_HOSTS`）放开，并带上本平台上**已实现**的组合。
 判据分两层：**机器能力**（`vm_capability`：hypervisor / guest 后端 / 引擎 / 共享档）决定虚拟机档能不能**选**；**虚拟根是会话级**，创建或会话配置里从清单选（界面给下拉），保存 /「开始」时才合并进严格判据（`tier_readiness`）。
@@ -34,7 +34,7 @@ macOS 缺取包（`vm.qemu-provisioning-macos`）与 macOS Apple vz 引擎 + 自
 依赖由 `provision` 能力按清单（`dependencies.yaml` + `links.yaml`，需用户同意、只写项目内）装进 `.vm/`：Linux 装 QEMU（pkgforge Anylinux AppImage）、
 virtiofsd 与默认虚拟根 `debian`（目录 rootfs + 内核 + 9p initrd + qemu-guest-agent，装进 `.vm/guest/debian/`）；Windows 装官方源码在 MSYS2（mingw-w64）下自建的 QEMU 11.1.1 便携包（`--enable-slirp`，固件按真实文件打包）+ Debian cloud qcow2（虚拟根 `windows`，装进 `.vm/guest/windows/`）+ `guest.yaml`；
 虚拟根"真有什么运行能力"由 provision 能力的 `guest-runtime` 编排（Rust 侧起一次 guest，逐个自证后写进 `guest.yaml` 的 `runtimes`）确认：Windows 走 cloud-init 首启 + 维护启动装包，Linux 由 `guest-rootfs` 自带 agent、维护启动只确认 python 并尽力装 node；macOS 保持检测 + 指路。据此在 **KVM** 下跑通真机探针与产品级会话验收，在 **WHPX** 下同样跑通引擎级探针与 e2e 的 vm 会话场景（设 `SOLOMNI_VM_LIVE=1` +
-`SOLOMNI_VM_QEMU` / `SOLOMNI_VM_VIRTIOFSD` / `SOLOMNI_VM_SMBD` 指向 `.vm/`（虚拟根默认 `debian`，可用 `SOLOMNI_VM_GUEST` 换），默认 `[探针]` 跳过）：guest 真启动、共享按后端进 guest（virtiofs / 9p 挂载 / SMB guestfwd / QGA 复制）、经 QGA 在 guest 里跑模块工具、删会话即销毁 guest 与 virtiofsd。
+`SOLOMNI_VM_QEMU` / `SOLOMNI_VM_VIRTIOFSD` / `SOLOMNI_VM_SMBD` 指向 `.vm/`（e2e 跑真机时会把自己夹具根的 `.vm` 软链到仓库的 `.vm`，跑完删掉；虚拟根与工具都在仓库那份里）（虚拟根默认 `debian`，可用 `SOLOMNI_VM_GUEST` 换），默认 `[探针]` 跳过）：guest 真启动、共享按后端进 guest（virtiofs / 9p 挂载 / SMB guestfwd / QGA 复制）、经 QGA 在 guest 里跑模块工具、删会话即销毁 guest 与 virtiofsd。
 
 **并发**：每条会话一条租约、一台 guest（固定 `-m 2048 -smp 2`）；同时台上限是设置项 `max_guests`（默认 2，0 = 不限制），
 到上限如实拒绝（同一租约重启不占新名额，见 [REGISTRY_SPEC.md](../../REGISTRY_SPEC.md) 与 `domain/exec.rs` 的 `admit_guest`）。

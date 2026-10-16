@@ -895,7 +895,7 @@ async function approvePlan(name) {
     if (pg.error) {
       console.log('    [探针] 本平台没有 pgrep，跳过"guest 进程已销毁"的进程级断言');
     } else {
-      const alive = (pg.stdout || '').split('\n').filter((l) => l.includes(vmBase));
+      const alive = (pg.stdout || '').split('\n').filter((l) => l.includes(vmGuest));
       assert(alive.length === 0, '删除会话后 guest 进程销毁', alive.join(' | ').slice(0, 240));
     }
     if (process.env.SOLOMNI_VM_VIRTIOFSD) {

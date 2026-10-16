@@ -1847,12 +1847,15 @@ pub(crate) fn vm_live_guest_runs_command_inside_guest() {
         .prepare("qemu", &spec.mounts, tool)
         .expect("共享计划要能派生");
     let mut guest = engine.boot(&spec, &plan).expect("起 guest");
-    let overlay = overlay_dir.join("vm-live.qcow2");
-    assert!(
-        overlay.is_file(),
-        "每租约可写层要建出来：{}",
-        overlay.display()
-    );
+    // 每租约可写层只对**磁盘根**建（目录根本来就是可写的共享根，产品也走同一条路）。
+    if matches!(spec.image.root, GuestRoot::Disk(_)) {
+        let overlay = overlay_dir.join("vm-live.qcow2");
+        assert!(
+            overlay.is_file(),
+            "每租约可写层要建出来：{}",
+            overlay.display()
+        );
+    }
     if use_copy {
         // 复制后端没有"挂载"：进去之前先把宿主目录同步到 guest，marker 才在里面。
         backend
@@ -1889,11 +1892,15 @@ pub(crate) fn vm_live_guest_runs_command_inside_guest() {
         );
     }
     guest.stop();
-    assert!(
-        !overlay.is_file(),
-        "删租约要把可写层删掉：{}",
-        overlay.display()
-    );
+    // 同上：只有磁盘根才建了那个可写层，删租约也只对它有"要删掉"这回事。
+    if matches!(spec.image.root, GuestRoot::Disk(_)) {
+        let overlay = overlay_dir.join("vm-live.qcow2");
+        assert!(
+            !overlay.is_file(),
+            "删租约要把可写层删掉：{}",
+            overlay.display()
+        );
+    }
     // 删租约 = 守护进程与套接字都不留（与产品 service 释放的是同一份凭据）。
     guard.release();
     if use_virtiofs {

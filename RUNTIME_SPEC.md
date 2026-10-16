@@ -93,13 +93,13 @@ files:                      # 包内文件指纹：用于可复现与呈现
 
 前置检测是**一份逐项清单**（机器能力 `vm::vm_requirements`，界面与 `--doctor` 照抄同一份）：虚拟机监视器、guest 本体、共享档、QEMU（引擎）；
 虚拟根（会话级）在保存 /「开始」时合并进来，
-每项给出"现状 + 怎么补"（共享档缺外部工具只作事实呈现、不拦档：Linux 缺 `virtiofsd` 退 9p，Windows 缺 `smbd` 退 QGA 复制）。依赖（QEMU / `virtiofsd` / 镜像 / SMB helper）**不预置、不分发**，由 provision 能力按 `dependencies.yaml` + `links.yaml` 下载并解包进项目内 `.vm/`（需用户同意；入口 `solomni --provision --ensure --yes`）；产品检测、指路并给出补齐入口，`qemu_path` / `virtiofsd_path` / `smbd_path` 可登记。虚拟根"真有什么"由 `kind: guest-runtime` 的运行期编排（Rust 侧，不依赖仓库脚本）起一次 guest **逐个自证**后才写进画像：
+每项给出"现状 + 怎么补"（共享档缺外部工具只作事实呈现、不拦档：Linux 缺 `virtiofsd` 退 9p，Windows 缺 `smbd` 退 QGA 复制）。依赖（QEMU / `virtiofsd` / 镜像 / SMB helper）**不预置、不分发**（解归档的入口程序装完补可执行位——便携包里的 zip 常常不带 unix 权限位），由 provision 能力按 `dependencies.yaml` + `links.yaml` 下载并解包进项目内 `.vm/`（需用户同意；入口 `solomni --provision --ensure --yes`）；产品检测、指路并给出补齐入口，`qemu_path` / `virtiofsd_path` / `smbd_path` 可登记。虚拟根"真有什么"由 `kind: guest-runtime` 的运行期编排（Rust 侧，不依赖仓库脚本）起一次 guest **逐个自证**后才写进画像：
 Windows（磁盘根）先首启经 cloud-init 装 `qemu-guest-agent`，再维护启动装 `python3` / `cifs-utils` 与 NodeSource 的 node；
-Linux（目录根，agent 由 `guest-rootfs` 装好）直接维护启动，确认 `python3`、尽力装 node，共享客户端保持镜像声明的 9p/virtiofs。
+Linux（目录根，agent 由 `guest-rootfs` 装好）直接维护启动：先配网（目录根不走 cloud-init，网卡没人配），确认 `python3`（镜像自带就不动 apt），node 走官方二进制 tarball（9p 根上 dpkg 解包 nodejs 要十分钟量级，且 `security_model=none` 下 chown 会被顶回 EPERM），共享客户端保持镜像声明的 9p/virtiofs。
 两者都只把**自证过**的能力写进 `guest.yaml` 的 `runtimes`（例如 `[python, node]`）；
 全量补齐（`--ensure --yes`）时这一条起不了 guest（缺 KVM / WHPX 这类机器事实）只如实跳过并继续，
 显式点名（`--ensure=vm.guest-runtime.linux`）才硬失败。
-虚拟根 = 项目内 `.vm/guest/<名>` 的一格目录：发行版 rootfs（目录，或 `rootfs.ext4` / `*.qcow2` 磁盘镜像）+ `vmlinuz`（可选 `initrd.img`）；**目录根必须给内核**（直启），**磁盘镜像可自带引导**（不给内核也行）；目录里可放一份 `guest.yaml` 声明画像（id / arch / agent / os / clients / runtimes——`runtimes` 是 guest 里确实可用的运行能力名，如 python / node，选型诊断据此不必再要 `runtimes/` 包），缺省按目录名与 Debian 默认（os 缺省 linux），不认识的值如实拒收。清单（`dependencies.yaml`）给每条 guest 条目一个 `guest:` 名，多条条目可以共同装一个虚拟根；界面读 provision 的虚拟根清单，不自己看盘。
+虚拟根 = 项目内 `.vm/guest/<名>` 的一格目录：发行版 rootfs（目录，或 `rootfs.ext4` / `*.qcow2` 磁盘镜像）+ `vmlinuz`（可选 `initrd.img`；**目录根的内核必须支持 9p**——cloud 镜像自带的 cloud 内核没编 `CONFIG_NET_9P`，`guest-rootfs` 会换装带 9p 模块的通用内核）；**目录根必须给内核**（直启），**磁盘镜像可自带引导**（不给内核也行）；目录里可放一份 `guest.yaml` 声明画像（id / arch / agent / os / clients / runtimes——`runtimes` 是 guest 里确实可用的运行能力名，如 python / node，选型诊断据此不必再要 `runtimes/` 包），缺省按目录名与 Debian 默认（os 缺省 linux），不认识的值如实拒收。清单（`dependencies.yaml`）给每条 guest 条目一个 `guest:` 名，多条条目可以共同装一个虚拟根；界面读 provision 的虚拟根清单，不自己看盘。
 
 **已真机验收**：Linux（QEMU/KVM + virtiofs，默认共享档；缺 `virtiofsd` 时退 9p）与 Windows（QEMU/WHPX + SMB guestfwd 实时共享；缺 `smbd` 时退 QGA 复制）——引擎级探针（`vm_live_guest_runs_command_inside_guest`）
 与 e2e 的虚拟机档会话场景都过（虚拟根默认 `debian`，`SOLOMNI_VM_GUEST` 可换）；Windows 侧的 QEMU 与 Debian cloud qcow2 由 provision 能力按清单装入，

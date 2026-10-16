@@ -63,7 +63,7 @@ deps:
     probe: .vm/guest/debian/.runtimes-ready
     source: guest.debian.image
     size_mb: 0
-    note: Linux guest 的运行期编排（维护启动经 QGA 确认 python3、尽力从 NodeSource 装 node，逐个自证后才写进 guest.yaml 的 runtimes；目录根本身就是共享的可写根，不需要首启装 agent）
+    note: Linux guest 的运行期编排（维护启动先配网，确认 python3、尽力用官方二进制 tarball 装 node——9p 目录根上 dpkg 太慢且 chown 办不到，逐个自证后才写进 guest.yaml 的 runtimes；目录根本身就是共享的可写根，不需要首启装 agent）
   - id: vm.guest.windows
     os: windows
     arch: x86_64

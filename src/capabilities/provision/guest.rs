@@ -18,8 +18,29 @@ const USER_DATA: &str = "#cloud-config\nruncmd:\n  - >-\n    dpkg -s qemu-guest-
 const META_DATA: &str = "instance-id: solomni-provision\nlocal-hostname: solomni-guest\n";
 
 /// 目的：guest 里的 node 从 **NodeSource** 装——Debian trixie 的 nodejs 依赖 node-corepack，镜像源里不可得。
-/// 约束：尽力而为（装不上就不声明）；装完由调用方自证（node --version）。
-const NODE_INSTALL: &str = "DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends curl ca-certificates gnupg || true; curl -fsSL https://deb.nodesource.com/setup_22.x -o /tmp/nodesource_setup.sh || true; bash /tmp/nodesource_setup.sh || true; DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends nodejs || true";
+/// 约束：尽力而为（装不上就不声明）；装完由调用方自证（node --version）。加源之后要**再 update 一次**才看得到 nodejs。
+const NODE_REPO: &str = "curl -fsSL https://deb.nodesource.com/setup_22.x -o /tmp/nodesource_setup.sh || true; bash /tmp/nodesource_setup.sh || true";
+
+/// 目的：**目录根**上的 node 走官方二进制 tarball——9p 目录根上 dpkg 解包 nodejs 要 10 分钟量级（远超单条命令上限）。
+/// 约束：版本从官方 `latest-v22.x` 的校验单里现取；解包用 `--no-same-owner`（9p 上 chown 办不到、也不需要）；
+///   装到 `/opt/node` 并软链进 `/usr/local/bin`；尽力而为，装不上就不声明。
+fn node_tarball() -> String {
+    let arch = match std::env::consts::ARCH {
+        "x86_64" => "x64",
+        "aarch64" => "arm64",
+        other => other,
+    };
+    format!(
+        "F=$(curl -fsSL https://nodejs.org/dist/latest-v22.x/SHASUMS256.txt 2>/dev/null | grep -o 'node-v22[0-9.]*-linux-{arch}\\.tar\\.xz' | head -1); \
+         if [ -n \"$F\" ]; then curl -fsSL \"https://nodejs.org/dist/latest-v22.x/$F\" -o /tmp/node.tar.xz || true; fi; \
+         if [ -s /tmp/node.tar.xz ]; then mkdir -p /opt/node; tar -xJf /tmp/node.tar.xz -C /opt/node --strip-components=1 --no-same-owner || true; fi; \
+         if [ -x /opt/node/bin/node ]; then mkdir -p /usr/local/bin; ln -sf /opt/node/bin/node /usr/local/bin/node; ln -sf /opt/node/bin/npm /usr/local/bin/npm; ln -sf /opt/node/bin/npx /usr/local/bin/npx; fi; "
+    )
+}
+/// 目的：**目录根**的网络预置——Linux 目录根不走 cloud-init，网卡没人配（guest 里也没有 DHCP 客户端）。
+/// 约束：QEMU 用户网络（slirp）固定 10.0.2.0/24，网关 `.2`、DNS `.3`；先用镜像自带的 systemd-networkd 走 DHCP，
+///   再按 slirp 的固定网段做静态兜底（磁盘根由首启 cloud-init 配网，不需要这一段）。
+const NET_UP: &str = "mkdir -p /etc/systemd/network; printf '[Match]\\nName=en* eth*\\n\\n[Network]\\nDHCP=yes\\n' > /etc/systemd/network/10-solomni.network; systemctl enable --now systemd-networkd >/dev/null 2>&1 || true; systemctl enable --now systemd-resolved >/dev/null 2>&1 || true; IF=$(ls /sys/class/net | grep -v '^lo$' | head -1); ip link set \"$IF\" up 2>/dev/null || true; ip addr show \"$IF\" 2>/dev/null | grep -q '10\\.0\\.2\\.' || { ip addr add 10.0.2.15/24 dev \"$IF\" 2>/dev/null || true; ip route add default via 10.0.2.2 dev \"$IF\" 2>/dev/null || true; }; grep -q '10\\.0\\.2\\.3' /etc/resolv.conf 2>/dev/null || { rm -f /etc/resolv.conf; printf 'nameserver 10.0.2.3\\n' > /etc/resolv.conf; }; ";
 
 /// 目的：一次 guest 运行（命令交给 guest 的 /bin/sh；args/env/cwd 都空）。
 fn sh(command: &str) -> GuestRun {
@@ -93,13 +114,15 @@ fn qemu_path(root: &Path, host_os: &str) -> Result<std::path::PathBuf, String> {
 }
 
 /// 目的：把虚拟根编到可用——磁盘根先首启装 agent，随后维护启动装运行包；目录根直接维护启动。
-/// 参数：root = 产品根；dep = guest-runtime 清单条目；vm = vm 能力面（None = 组合根没注入，如实拒绝）；on_line = 进度行。
+/// 参数：root = 产品根；dep = guest-runtime 清单条目；vm = vm 能力面（None = 组合根没注入，如实拒绝）；
+///   force = 用户显式点名这一条（重跑维护启动，不再被 `.runtimes-ready` 挡住）；on_line = 进度行。
 /// 约束：同一租约 "provision"，每次启动前先销毁旧的；装完才写标记，失败不写（下次重试）。
 /// 约束：只声明**自证过**的能力——python 必须通（模块工具基线），node 尽力装、通了才写进画像。
 pub(super) fn install_guest_runtime(
     root: &Path,
     dep: &Dep,
     vm: Option<&(dyn Vm + Send + Sync)>,
+    force: bool,
     on_line: &mut dyn FnMut(&str),
 ) -> Result<(), String> {
     let vm = vm.ok_or_else(|| "guest 运行期编排需要 vm 能力（组合根未注入）".to_string())?;
@@ -161,10 +184,15 @@ pub(super) fn install_guest_runtime(
         clients_of(&image.clients)
     };
     let clients_pending = is_disk && !image.clients.cifs;
-    if !runtimes_marker.is_file() || clients_pending {
+    if force || !runtimes_marker.is_file() || clients_pending {
         on_line(&format!(
-            "维护启动：经 QGA 装运行包（必需 {}；node 走 NodeSource，尽力）并逐个自证",
-            required_pkgs(is_disk)
+            "维护启动：经 QGA 装运行包（必需 {}；node 走 {}，尽力）并逐个自证",
+            required_pkgs(is_disk),
+            if is_disk {
+                "apt + NodeSource"
+            } else {
+                "官方 tarball"
+            }
         ));
         let spec = GuestSpec {
             lease: lease.clone(),
@@ -184,11 +212,43 @@ pub(super) fn install_guest_runtime(
             return Err("等维护启动的 qemu-guest-agent 超时".to_string());
         }
         // 镜像里可能残留不完整的 apt lists（首启中途中断过）：整份刷新一遍再装，避免「包明明在却算不可安装」。
-        // python-is-python3 在 trixie 已没有，python 符号链接自己补。必需包装不上如实失败；node 走 NodeSource，尽力。
+        // python-is-python3 在 trixie 已没有，python 符号链接自己补；目录根还要先配网，并让 apt 别去 chown `_apt`（9p 上办不到）。
+        let net = if is_disk { "" } else { NET_UP };
+        let opt = if is_disk {
+            ""
+        } else {
+            " -o APT::Sandbox::User=root"
+        };
+        // 目录根：apt 只用来确认 python3（node 走 tarball，9p 上 dpkg 太慢）；磁盘根：照旧 apt + NodeSource。
+        let node = if is_disk {
+            format!(
+                "DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends curl ca-certificates gnupg || true; \
+                 {repo}; \
+                 DEBIAN_FRONTEND=noninteractive apt-get update -o Acquire::Languages=none || true; \
+                 DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends nodejs || true;",
+                repo = NODE_REPO
+            )
+        } else {
+            node_tarball()
+        };
+        // 目录根：镜像自带 python3 就**不碰 apt**（9p 上 apt 又慢又留 chown 警告，node 走 tarball 也不需要它）；
+        // 磁盘根：照旧先刷新索引再装必需包（python3 / cifs-utils）。
+        let apt = if is_disk {
+            format!(
+                "rm -rf /var/lib/apt/lists; mkdir -p /var/lib/apt/lists; \
+                 DEBIAN_FRONTEND=noninteractive apt-get{opt} update -o Acquire::Languages=none || true; \
+                 DEBIAN_FRONTEND=noninteractive apt-get{opt} install -y --no-install-recommends {req} || true; ",
+                opt = opt,
+                req = required_pkgs(is_disk)
+            )
+        } else {
+            "if ! command -v python3 >/dev/null 2>&1; then rm -rf /var/lib/apt/lists; mkdir -p /var/lib/apt/lists; DEBIAN_FRONTEND=noninteractive apt-get -o APT::Sandbox::User=root update -o Acquire::Languages=none || true; DEBIAN_FRONTEND=noninteractive apt-get -o APT::Sandbox::User=root install -y --no-install-recommends python3 || true; fi; ".to_string()
+        };
         let cmd = format!(
-            "rm -rf /var/lib/apt/lists; mkdir -p /var/lib/apt/lists; DEBIAN_FRONTEND=noninteractive apt-get update -o Acquire::Languages=none || true; DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends {req} || true; {node}; command -v python >/dev/null 2>&1 || ln -sf /usr/bin/python3 /usr/bin/python; sync",
-            req = required_pkgs(is_disk),
-            node = NODE_INSTALL
+            "{net}{apt}{node} command -v python >/dev/null 2>&1 || ln -sf /usr/bin/python3 /usr/bin/python; sync",
+            net = net,
+            apt = apt,
+            node = node
         );
         let out = vm.guest_run(&lease, &sh(&cmd));
         // 自证：python 必须通（模块工具的基线）；node 可选，通才写进声明。
@@ -333,7 +393,8 @@ mod tests {
     #[test]
     fn guest_runtime_refuses_without_vm() {
         let root = crate::tests::scratch("provision-guest-no-vm");
-        let err = install_guest_runtime(&root, &disk_dep(), None, &mut |_| {}).expect_err("要拒");
+        let err =
+            install_guest_runtime(&root, &disk_dep(), None, false, &mut |_| {}).expect_err("要拒");
         assert!(err.contains("vm 能力"), "{}", err);
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -343,8 +404,8 @@ mod tests {
     fn guest_runtime_refuses_without_image() {
         let root = crate::tests::scratch("provision-guest-no-image");
         let vm = crate::tests::doubles::RecordingVm::default();
-        let err =
-            install_guest_runtime(&root, &disk_dep(), Some(&vm), &mut |_| {}).expect_err("要拒");
+        let err = install_guest_runtime(&root, &disk_dep(), Some(&vm), false, &mut |_| {})
+            .expect_err("要拒");
         assert!(err.contains("虚拟根不可用"), "{}", err);
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -355,7 +416,7 @@ mod tests {
         let root = crate::tests::scratch("provision-guest-ok");
         let base = seed_disk_root(&root);
         let vm = crate::tests::doubles::RecordingVm::default();
-        install_guest_runtime(&root, &disk_dep(), Some(&vm), &mut |_| {}).expect("编排");
+        install_guest_runtime(&root, &disk_dep(), Some(&vm), false, &mut |_| {}).expect("编排");
         assert!(base.join(".qga-ready").is_file(), "首启标记要落");
         assert!(base.join(".runtimes-ready").is_file(), "运行包标记要落");
         let y = std::fs::read_to_string(base.join("guest.yaml")).expect("yaml");
@@ -423,7 +484,8 @@ mod tests {
             std::sync::Arc::new(crate::capabilities::vm::detail::CopyShare::new()),
         );
         let mut sink = |l: &str| eprintln!("[探针] {}", l);
-        install_guest_runtime(&root, &dep, Some(&vm), &mut sink).expect("真机运行期编排要成功");
+        install_guest_runtime(&root, &dep, Some(&vm), true, &mut sink)
+            .expect("真机运行期编排要成功");
         let image = classify_base(&base, &probe).expect("编排后的画像要仍可识别");
         assert!(
             image.runtimes.iter().any(|r| r == "python"),
@@ -439,7 +501,7 @@ mod tests {
         let root = crate::tests::scratch("provision-guest-dir");
         let base = seed_dir_root(&root);
         let vm = crate::tests::doubles::RecordingVm::default();
-        install_guest_runtime(&root, &dir_dep(), Some(&vm), &mut |_| {}).expect("编排");
+        install_guest_runtime(&root, &dir_dep(), Some(&vm), false, &mut |_| {}).expect("编排");
         assert!(base.join(".runtimes-ready").is_file(), "运行包标记要落");
         assert!(
             base.join(".qga-ready").is_file(),
@@ -459,8 +521,19 @@ mod tests {
             runs
         );
         assert!(
-            runs.iter().any(|c| c.contains("deb.nodesource.com")),
-            "node 仍然尽力装（render 这类模块要它）：{:?}",
+            runs.iter()
+                .any(|c| c.contains("https://nodejs.org/dist/latest-v22.x/")),
+            "node 仍然尽力装（render 这类模块要它），目录根走官方 tarball：{:?}",
+            runs
+        );
+        assert!(
+            !runs.iter().any(|c| c.contains("apt-get install -y nodejs")),
+            "目录根不能走 dpkg 装 nodejs（9p 上太慢）：{:?}",
+            runs
+        );
+        assert!(
+            runs.iter().any(|c| c.contains("nameserver 10.0.2.3")),
+            "目录根要先配网（不走 cloud-init）：{:?}",
             runs
         );
         let _ = std::fs::remove_dir_all(&root);

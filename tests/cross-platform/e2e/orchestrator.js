@@ -17,6 +17,22 @@ const BIN = path.join(PRODUCT_ROOT, "target", "debug", process.platform === "win
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+/** 清掉夹具根的 .vm：**软链只删链本身**——绝不顺着链删仓库那份（缓存 3GB 且是真机验收要用的）。 */
+function dropFixtureVm() {
+  const p = path.join(FIXTURE, ".vm");
+  let st;
+  try {
+    st = fs.lstatSync(p);
+  } catch (e) {
+    return;
+  }
+  if (st.isSymbolicLink()) {
+    fs.unlinkSync(p);
+    return;
+  }
+  fs.rmSync(p, { recursive: true, force: true });
+}
+
 /** 本机可用的解释器名（探不到也照写，让工具失败时如实报错，而不是静默跳过）。 */
 function interpreter() {
   const { spawnSync } = require("child_process");
@@ -188,7 +204,14 @@ async function main() {
   const home = path.join(FIXTURE, ".home");
   fs.rmSync(home, { recursive: true, force: true });
   fs.mkdirSync(home, { recursive: true });
-  // 虚拟机档真机验收：QEMU 路径由环境变量给（机器相关，不写进仓库），起服务前落进 settings.yaml。
+  // 虚拟机档真机验收：夹具根也要看得到**真虚拟根**——仓库的 .vm 用软链挂进夹具（真机跑完删掉，别把 3GB 缓存留在夹具里）。
+  const vmLink = path.join(FIXTURE, ".vm");
+  dropFixtureVm();
+  if (process.env.SOLOMNI_VM_LIVE === "1" || process.env.SOLOMNI_VM_QEMU) {
+    fs.symlinkSync(path.join(PRODUCT_ROOT, ".vm"), vmLink, "dir");
+    console.log("[e2e] 夹具 .vm → 仓库 .vm（真机跑用）");
+  }
+  // QEMU 路径由环境变量给（机器相关，不写进仓库），起服务前落进 settings.yaml。
   const vmQemu = process.env.SOLOMNI_VM_QEMU || "";
   const vmVirtiofsd = process.env.SOLOMNI_VM_VIRTIOFSD || "";
   if (vmQemu || vmVirtiofsd) {
@@ -252,6 +275,8 @@ async function main() {
     stop(mock);
     stop(srv);
     await sleep(300);
+    // 夹具的 .vm 是软链（真机跑才建）：收尾只删链本身，仓库那份不动。
+    dropFixtureVm();
     // 收尾回收：这次真机跑（--fence-live）写过目录 ACL、建过容器 profile，必须按台账撤干净，
     // 再按名字前缀扫掉整族遗留 profile。CI 机器是一次性的，但本地跑同样不许留痕。
     // 回收失败要改判 e2e：留下没人管的痕迹和断言失败同样是失败——真机残留过一条只有
