@@ -116,6 +116,8 @@ node start.js --provision --ensure --yes # optional: install QEMU and a Debian g
 node setup-dev.js        # install the dev environment: dev uses the **project-local** toolchain, artifacts land only under platform/<os>/ and .tools/
 node setup-dev.js --check  # read-only check: lists what is missing, exits non-zero if anything is
 node run-tests.js        # quality gate + full test run (see TESTING.md)
+node run-tests.js --skip-e2e  # gate without L4 (the quality-job mode used while iterating)
+node dev.js test|fmt|clippy   # one-layer dev commands; do not call cargo directly (see docs/testing/execution-ci.md)
 ```
 
 - The **item inventory** of the dev environment is [dev-tools.js](dev-tools.js) (the single authority): `setup-dev.js`

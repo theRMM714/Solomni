@@ -5,17 +5,24 @@
 
 ## 一、执行入口与报告
 
-### 快速开发检查
+### 本机开发回路
+
+改一层、验一层用 [dev.js](../../dev.js)（它把固定子命令映射到项目内的 cargo，**不要直接调 `cargo`**——
+裸 shell 里 `CARGO_HOME` 会指到系统用户目录，缓存只读、编译起不来）：
 
 ```text
-cargo test
-cargo fmt --check
-cargo clippy --all-targets --all-features -- -D warnings
+node dev.js test      # L1 单元（cargo test --bin solomni）
+node dev.js fmt       # T0 格式（cargo fmt --all -- --check）
+node dev.js clippy    # T0 静态检查（cargo clippy --all-targets --all-features -- -D warnings）
 ```
 
-快速检查用于本地反馈，不替代完整入口。
+迭代到一定段落、要按门禁判一次时用完整入口的**质量 job 模式**（T0 全套 + L1/L2/L3 + 前端冒烟，只省 L4）：
 
-注意：`cargo test` 与 `cargo fmt --check`、`cargo clippy … -D warnings` **都预期全绿**——T0 九项全是零容忍硬失败（交叉类型检查对已装 target 零容忍），没有存量基线。
+```text
+node run-tests.js --skip-e2e
+```
+
+注意：`node dev.js test` 与 `node dev.js fmt`、`node dev.js clippy` **都预期全绿**——T0 九项全是零容忍硬失败（交叉类型检查对已装 target 零容忍），没有存量基线。
 用例默认**并行**跑；排查并发 / 隔离问题时用 `node run-tests.js --serial`。找测试盲区用 `node run-tests.js --coverage`
 （见下文「覆盖率发现模式」，只报不拦）。
 
@@ -40,8 +47,9 @@ node run-tests.js
 11. `L1 单元（--bin solomni）`（默认并行；`--serial` 改为串行，仅诊断用）；
 12. 逐个运行 `cargo test --test cross-platform/windows/linux/macos`（同样默认并行）；
 13. 前端冒烟；
-14. 存在编排器时运行 L4 端到端（编排器会**现场构建 indexer**：编译器版本进日志，构建失败即失败）；
-15. 写入 `target/test-report.json` 并打印 `TEST-REPORT-OK` 或 `TEST-REPORT-FAIL`。
+14. 开发回路自检（`tests/dev-loop.mjs`：`dev.js` 的子命令表与"环境没就绪就如实拒绝"）；
+15. 存在编排器时运行 L4 端到端（编排器会**现场构建 indexer**：编译器版本进日志，构建失败即失败）；
+16. 写入 `target/test-report.json` 并打印 `TEST-REPORT-OK` 或 `TEST-REPORT-FAIL`。
 
 每一步都有墙钟上限（默认 15 分钟，L4 20 分钟）：超时即硬失败，证据记进报告的 `timeouts`，不会把本地入口或
 CI job 拖到外层超时。每步用时记在报告的 `ms`，超预算的标 `[slow]`（只报不拦）。
@@ -265,6 +273,7 @@ git show origin/ci-report:runs/windows/logs/<某一步>.log  # 失败证据原�
 固定标记只增不删，改动含义必须同步更新测试设计：
 
 - `FRONTEND-SMOKE-OK`：前端冒烟完成；
+- `DEV-LOOP-OK`：开发回路自检完成（`dev.js` 的子命令表与拒绝出口）；
 - `E2E-OK`：端到端场景完成；
 - `TEST-REPORT-OK`：当前入口的运行步骤没有失败；
 - `TEST-REPORT-FAIL`：当前入口有硬失败步骤**或** T0 任一项不过（同时以非零退出码暴露）；

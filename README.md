@@ -87,6 +87,8 @@ node start.js --provision --ensure --yes # 可选：把 QEMU 与 Debian guest �
 node setup-dev.js        # 装齐开发环境：开发统一用**项目内**工具链，产物只落 platform/<os>/ 与 .tools/
 node setup-dev.js --check  # 只读校验：缺什么列什么，缺则非零退出
 node run-tests.js        # 质量门禁 + 全量测试（见 TESTING.md）
+node run-tests.js --skip-e2e  # 迭代时按门禁判一次（质量 job 模式，只省 L4）
+node dev.js test|fmt|clippy   # 本机开发回路：改一层验一层；不要直接调 cargo（见 docs/testing/execution-ci.md）
 ```
 
 - 开发环境的**条目清单**是 [dev-tools.js](dev-tools.js)（唯一真相）：`setup-dev.js` 按它装，`run-tests.js` 按它查 / `env-skip`。
