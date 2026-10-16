@@ -5,9 +5,9 @@
 
 pub use crate::capabilities::vm::domain::exec::resolve_guest;
 pub use crate::capabilities::vm::domain::exec::{
-    absent, admit_guest, capability_refusal, declared, diagnose_text, guest_platform, plan,
-    plan_summary, tier_readiness, tier_refusal, unavailable, vm_capability, vm_diagnoses,
-    vm_requirements, Diagnosis, ExecPlan, VmInputs, VmRequirement,
+    absent, admit_guest, capability_refusal, declared, diagnose_text, guest_platform,
+    missing_entries, plan, plan_summary, tier_readiness, tier_refusal, unavailable, vm_capability,
+    vm_diagnoses, vm_requirements, Diagnosis, ExecPlan, MissingEntry, VmInputs, VmRequirement,
 };
 pub use crate::capabilities::vm::domain::guest::{
     classify_base, mounts_from, GuestImage, GuestRun, GuestSpec, SeedDocs,

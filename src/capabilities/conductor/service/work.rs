@@ -369,11 +369,16 @@ impl Conductor {
             .filter(|m| seen.iter().any(|id| id == &m.manifest.id))
             .cloned()
             .collect();
+        let missing: Vec<crate::capabilities::vm::api::MissingEntry> =
+            crate::capabilities::vm::api::missing_entries(&session_modules, &|p| {
+                self.probe.is_executable(p)
+            });
         let plan = crate::capabilities::vm::api::plan(
             &spec,
             &session_modules,
             &self.library_for(&spec),
             &self.guest_runtimes_of(&spec),
+            &missing,
         )
         .map_err(|diags| crate::capabilities::vm::api::diagnose_text(&diags))?;
         self.log.info(
@@ -835,11 +840,16 @@ impl Conductor {
         }
         // 执行选型的完整性检查（「开始」即冻结）：虚拟机档的选型不成立（多版本未定版 / 定版不存在 /
         // 路径冲突）如实拒绝；**缺包同样拒绝**（没有工具用户完不成工作，不降级）。装配阶段按同一份计划取包。
+        let missing: Vec<crate::capabilities::vm::api::MissingEntry> =
+            crate::capabilities::vm::api::missing_entries(&session_modules, &|p| {
+                self.probe.is_executable(p)
+            });
         let plan = crate::capabilities::vm::api::plan(
             &meta.exec,
             &session_modules,
             &self.library_for(&meta.exec),
             &self.guest_runtimes_of(&meta.exec),
+            &missing,
         )
         .map_err(|diags| crate::capabilities::vm::api::diagnose_text(&diags))?;
         self.log.info(

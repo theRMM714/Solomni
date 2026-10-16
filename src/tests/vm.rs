@@ -293,10 +293,92 @@ pub(crate) fn vm_requirements_report_qemu_registration() {
 }
 
 #[test]
+pub(crate) fn missing_entries_flags_only_relative_command_entries() {
+    let with_tool = |module: &str, tool: &str, command: &str| {
+        let mut m = module_of(module);
+        m.manifest.tools.insert(
+            tool.to_string(),
+            crate::capabilities::modules::api::ToolDecl {
+                command: command.to_string(),
+                desc: String::new(),
+                params: None,
+                parallel: false,
+            },
+        );
+        m
+    };
+    let modules = vec![
+        with_tool("a", "script", "python tools/scan.py"),
+        with_tool("a", "bare", "indexer build"),
+        with_tool("a", "artifact", "build/indexer build"),
+        with_tool("a", "absolute", "/usr/bin/x build"),
+    ];
+    // 宿主事实：只有 a 的 build/indexer 不在场（其余入口判据都不看）。
+    let gone = abs(&["a", "build", "indexer"]);
+    let missing = exec::missing_entries(&modules, &|p| p != gone.as_path());
+    let got: Vec<(&str, &str, &str)> = missing
+        .iter()
+        .map(|m| (m.module.as_str(), m.tool.as_str(), m.command.as_str()))
+        .collect();
+    assert_eq!(got, vec![("a", "artifact", "build/indexer")]);
+}
+
+#[test]
+pub(crate) fn exec_entry_missing_refuses_before_any_tier() {
+    let modules = vec![module_with_runtimes("a", &["python"])];
+    let missing = vec![crate::capabilities::vm::api::MissingEntry {
+        module: "a".to_string(),
+        tool: "build".to_string(),
+        command: "build/indexer".to_string(),
+    }];
+    // 本机档：入口判据是唯一要说的。
+    let host = exec::plan(
+        &ExecSpec::default(),
+        &modules,
+        &Library::default(),
+        &[],
+        &missing,
+    )
+    .unwrap_err();
+    assert!(
+        matches!(host.as_slice(), [Diagnosis::MissingEntry { .. }]),
+        "{:?}",
+        host
+    );
+    // 虚拟机档：入口判据排最前，缺包一并如实报（一次把话说全）。
+    let vm = exec::plan(&vm_spec(), &modules, &Library::default(), &[], &missing).unwrap_err();
+    assert!(
+        matches!(vm.first(), Some(Diagnosis::MissingEntry { .. })),
+        "入口判据要排在最前：{:?}",
+        vm
+    );
+    let said = exec::diagnose_text(&vm);
+    assert!(
+        said.contains("build/indexer") && said.contains("README"),
+        "{}",
+        said
+    );
+    // 没有这份事实时照旧成立：入口判据不牵连别的东西。
+    exec::plan(
+        &ExecSpec::default(),
+        &modules,
+        &Library::default(),
+        &[],
+        &[],
+    )
+    .expect("本机档照旧可成立");
+}
+#[test]
 pub(crate) fn exec_host_tier_ignores_packages() {
     let modules = vec![module_with_runtimes("a", &["python"])];
-    let plan = exec::plan(&ExecSpec::default(), &modules, &Library::default(), &[])
-        .expect("本机档不装载运行包，不会因缺包失败");
+    let plan = exec::plan(
+        &ExecSpec::default(),
+        &modules,
+        &Library::default(),
+        &[],
+        &[],
+    )
+    .expect("本机档不装载运行包，不会因缺包失败");
     assert_eq!(plan.tier, Tier::Host);
     assert!(plan.packages.is_empty());
     assert!(plan.guest.is_none());
@@ -332,7 +414,7 @@ pub(crate) fn exec_vm_tier_reports_missing_ambiguous_and_unavailable() {
         "本机档一律可用"
     );
     // 缺包 = **不创建**（不再降级）：没有工具用户完不成工作，与其拉一台跑不了工具的 guest，不如选型这步如实拒。
-    let refused = exec::plan(&spec, &modules, &empty, &[]).unwrap_err();
+    let refused = exec::plan(&spec, &modules, &empty, &[], &[]).unwrap_err();
     assert!(
         matches!(refused.as_slice(), [Diagnosis::Missing { .. }]),
         "{:?}",
@@ -348,7 +430,7 @@ pub(crate) fn exec_vm_tier_reports_missing_ambiguous_and_unavailable() {
     let guest = vec!["python".to_string()];
     assert!(exec::vm_diagnoses(&modules, &empty, &spec, &guest).is_empty());
     assert!(exec::unavailable(&spec, &modules, &empty, &guest).is_empty());
-    assert!(exec::plan(&spec, &modules, &empty, &guest)
+    assert!(exec::plan(&spec, &modules, &empty, &guest, &[])
         .expect("guest 自带就不算缺")
         .packages
         .is_empty());
@@ -369,7 +451,7 @@ pub(crate) fn exec_vm_tier_reports_missing_ambiguous_and_unavailable() {
         .iter()
         .any(|d| matches!(d, Diagnosis::UnknownPin { .. })));
     // 多版本未定版 = 选型不成立：派生计划如实拒绝（这是用户要解决的选型问题，不是"缺包"）
-    let refused = exec::plan(&spec, &modules, &two, &[]).unwrap_err();
+    let refused = exec::plan(&spec, &modules, &two, &[], &[]).unwrap_err();
     assert!(
         exec::diagnose_text(&refused).contains("多个版本"),
         "{}",
@@ -382,7 +464,10 @@ pub(crate) fn exec_vm_tier_reports_missing_ambiguous_and_unavailable() {
     };
     assert!(exec::vm_diagnoses(&modules, &two, &ok, &[]).is_empty());
     assert_eq!(
-        exec::plan(&ok, &modules, &two, &[]).unwrap().packages.len(),
+        exec::plan(&ok, &modules, &two, &[], &[])
+            .unwrap()
+            .packages
+            .len(),
         1
     );
 }
@@ -398,7 +483,7 @@ pub(crate) fn exec_vm_plan_pins_versions_and_orders_prefix_before_system() {
         Vec::new(),
     );
     let modules = vec![module_with_runtimes("a", &["python", "cc"])];
-    let plan = exec::plan(&vm_spec(), &modules, &lib, &[]).expect("虚拟机档可成立");
+    let plan = exec::plan(&vm_spec(), &modules, &lib, &[], &[]).expect("虚拟机档可成立");
     let ids: Vec<&str> = plan.packages.iter().map(|p| p.id.as_str()).collect();
     assert_eq!(
         ids,

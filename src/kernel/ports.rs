@@ -116,6 +116,11 @@ pub trait HostProbe: Send + Sync {
     fn is_file(&self, path: &Path) -> bool;
     /// 这个路径存在且是目录。
     fn is_dir(&self, path: &Path) -> bool;
+    /// 这个路径存在、是文件、且**能直接执行**（unix 看可执行位；别的平台按"是文件"）。
+    /// 缺省按 `is_file`——不知道可执行位的适配器照旧可用。
+    fn is_executable(&self, path: &Path) -> bool {
+        self.is_file(path)
+    }
     /// PATH 上有没有这个可执行文件（只查存在性，不执行它；平台扩展名由适配层处理）。
     fn has_exe(&self, name: &str) -> bool;
     /// 本机能不能起硬件虚拟化（只问事实，不起任何虚拟机）。

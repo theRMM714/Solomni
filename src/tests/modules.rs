@@ -5,6 +5,30 @@
 use super::prelude::*;
 
 #[test]
+pub(crate) fn local_entry_only_accepts_relative_paths() {
+    use crate::capabilities::modules::api::local_entry;
+    assert_eq!(local_entry("build/indexer build"), Some("build/indexer"));
+    assert_eq!(local_entry("./tools/run.sh"), Some("./tools/run.sh"));
+    // Windows 写法也认（相对路径用反斜杠）。
+    assert_eq!(
+        local_entry("build\\indexer.exe build"),
+        Some("build\\indexer.exe")
+    );
+    assert_eq!(
+        local_entry("python tools/scan.py"),
+        None,
+        "裸名走 PATH / 运行能力"
+    );
+    assert_eq!(local_entry("indexer build"), None);
+    assert_eq!(
+        local_entry("/usr/bin/x build"),
+        None,
+        "绝对路径不在模块目录里找"
+    );
+    assert_eq!(local_entry("C:\\tools\\x.exe"), None);
+    assert_eq!(local_entry("   "), None);
+}
+#[test]
 pub(crate) fn roster_lists_modules() {
     let core = core_with(
         vec![module_of("a"), module_of("b")],

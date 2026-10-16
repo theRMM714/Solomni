@@ -232,6 +232,20 @@ pub struct Module {
     pub has_userdata: bool,
 }
 
+/// 目的：工具命令的首个 token 若是**模块内的产物入口**（相对路径）就给出它；裸名与绝对路径给 None。
+/// 参数：command = 模块声明的启动命令（工作目录 = 模块根）。
+/// 约束：约定"模块内的产物用相对路径写"（如 `build/indexer`）——裸名走 PATH / 运行能力，绝对路径不在模块目录里找。
+pub fn local_entry(command: &str) -> Option<&str> {
+    let first = command.split_whitespace().next()?;
+    let looks_like_path = first.contains('/') || first.contains('\\');
+    let absolute = first.starts_with('/') || first.starts_with('\\') || first.contains(":\\");
+    if looks_like_path && !absolute {
+        Some(first)
+    } else {
+        None
+    }
+}
+
 /// 目的：扫描结果：合法模块 + 拒收原因（校验，不是挑选——如实呈现）。
 pub struct Roster {
     pub modules: Vec<Module>,

@@ -25,6 +25,46 @@ pub enum Diagnosis {
     UnknownPin { capability: String, version: String },
     /// 两个包会写进同一处路径。
     Conflict { path: String, a: String, b: String },
+    /// 模块工具的入口（模块内产物）不在场——命令是相对路径，模块根下却没有这个能直接跑的文件。
+    MissingEntry {
+        module: String,
+        tool: String,
+        command: String,
+    },
+}
+
+/// 目的：一条"模块工具的入口不在场"的**事实**（谁、哪个工具、命令里写的那个入口）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MissingEntry {
+    pub module: String,
+    pub tool: String,
+    /// 目的：命令里写的相对入口（如 `build/indexer`）。
+    pub command: String,
+}
+
+/// 目的：按宿主事实挑出"入口不在场"的模块工具——相对路径入口必须存在且**能直接执行**。
+/// 参数：is_executable = 宿主侧"这个路径能不能直接跑"的事实（由端口给；本函数不碰文件系统）。
+/// 约束：裸名（`python` / `node` / `indexer`）走 PATH 与运行能力，不在本判据里；绝对路径同样不在模块目录里找。
+pub fn missing_entries(
+    modules: &[Module],
+    is_executable: &dyn Fn(&Path) -> bool,
+) -> Vec<MissingEntry> {
+    let mut out = Vec::new();
+    for m in modules {
+        for (tool, decl) in &m.manifest.tools {
+            let Some(entry) = crate::capabilities::modules::api::local_entry(&decl.command) else {
+                continue;
+            };
+            if !is_executable(&m.root.join(entry)) {
+                out.push(MissingEntry {
+                    module: m.manifest.id.clone(),
+                    tool: tool.clone(),
+                    command: entry.to_string(),
+                });
+            }
+        }
+    }
+    out
 }
 
 /// 目的：计划里的一项：已定版的包。
@@ -666,16 +706,32 @@ pub fn plan(
     modules: &[Module],
     lib: &Library,
     guest_runtimes: &[String],
+    missing: &[MissingEntry],
 ) -> Result<ExecPlan, Vec<Diagnosis>> {
+    // 入口判据与档位无关：模块根下没有那个能直接跑的产物，两档都当场拒绝（一次把话说全）。
+    let entries: Vec<Diagnosis> = missing
+        .iter()
+        .map(|m| Diagnosis::MissingEntry {
+            module: m.module.clone(),
+            tool: m.tool.clone(),
+            command: m.command.clone(),
+        })
+        .collect();
     match spec.tier {
-        Tier::Host => Ok(ExecPlan {
-            tier: Tier::Host,
-            net: spec.net,
-            guest: None,
-            packages: Vec::new(),
-        }),
+        Tier::Host => {
+            if !entries.is_empty() {
+                return Err(entries);
+            }
+            Ok(ExecPlan {
+                tier: Tier::Host,
+                net: spec.net,
+                guest: None,
+                packages: Vec::new(),
+            })
+        }
         Tier::Vm => {
-            let diags = vm_diagnoses(modules, lib, spec, guest_runtimes);
+            let mut diags = entries;
+            diags.extend(vm_diagnoses(modules, lib, spec, guest_runtimes));
             if !diags.is_empty() {
                 return Err(diags);
             }
@@ -799,6 +855,16 @@ pub fn diagnose_text(diags: &[Diagnosis]) -> String {
             }
             Diagnosis::Conflict { path, a, b } => {
                 format!("运行包 {} 与 {} 都要写进 {}，装配会互相覆盖", a, b, path)
+            }
+            Diagnosis::MissingEntry {
+                module,
+                tool,
+                command,
+            } => {
+                format!(
+                    "模块 {} 的工具 {} 入口不在场：{}（模块要自带这个产物，或先按模块自己的 README 构建一次）",
+                    module, tool, command
+                )
             }
         })
         .collect();
