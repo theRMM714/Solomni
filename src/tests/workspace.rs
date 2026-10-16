@@ -851,5 +851,5 @@ pub(crate) fn sandbox_resolves_guest_written_paths() {
     // 镜像根下、但不在任何允许根里的路径：翻译得出来也要被根校验拒。
     let outside = bridge.to_guest(&abs(&["elsewhere", "x.txt"]));
     let why = sb.resolve(&outside).expect_err("越界要拒");
-    assert!(why.contains("允许的根目录"), "{}", why);
+    assert!(why.contains("系统工具允许的根"), "{}", why);
 }

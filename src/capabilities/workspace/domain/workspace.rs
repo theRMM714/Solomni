@@ -4,7 +4,7 @@
 //! 寻址：给 AI 的只有**真实绝对路径**（根目录由适配层给出，经提示词册如实告知）。
 //! 核心把路径与三个根（共享区 / 私有沙箱 / 成员模块目录）比对来判定可达范围：
 //! 必须是**绝对路径**、组件里不含 . 与 ..、且落在某个允许的根之内；
-//! 越界、相对路径、空段一律拒绝，并把允许的根目录列回去（如实报错，不纠正）。
+//! 越界、相对路径、空段一律拒绝，并把系统工具允许的根列回去（如实报错，不纠正）。
 
 use crate::capabilities::permission::api::Permissions;
 use crate::capabilities::prompt::api::{RefRoots, ToolTexts};
@@ -77,7 +77,7 @@ impl Sandbox {
     /// 返回（落点, 归一化后的绝对路径）；拒绝时把允许的真实根目录列全。
     pub fn resolve(&self, raw: &str) -> Result<(Place, PathBuf), String> {
         let spec = raw.trim();
-        // 所有拒绝都附上"允许的根目录"，模型照着改。
+        // 所有拒绝都附上"系统工具允许的根"，模型照着改。
         let deny = |why: String| {
             self.texts.render(
                 &self.texts.roots_wrapper,
@@ -251,7 +251,7 @@ impl Sandbox {
         }
     }
 
-    /// 允许的根目录清单（错误文案里列全，模型照着改）——按本环境的写法给。
+    /// 系统工具允许的根清单（错误文案里列全，模型照着改）——按本环境的写法给。
     pub fn roots_listing(&self) -> String {
         let mut lines = vec![
             self.texts.render(
