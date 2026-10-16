@@ -324,6 +324,54 @@ pub(crate) fn missing_entries_flags_only_relative_command_entries() {
 }
 
 #[test]
+pub(crate) fn entry_check_follows_the_target_shell_rules() {
+    let mut m = module_of("a");
+    m.manifest.tools.insert(
+        "artifact".to_string(),
+        crate::capabilities::modules::api::ToolDecl {
+            command: "build/indexer build".to_string(),
+            desc: String::new(),
+            params: None,
+            parallel: false,
+        },
+    );
+    // 只存在 `build/indexer.exe`（Windows 上的落法）：跟着壳的解析走就不算缺；按字面判就会误报。
+    let only_exe = |p: &std::path::Path| p.ends_with("build/indexer.exe");
+    assert!(
+        crate::capabilities::vm::domain::exec::missing_entries_for(
+            &[m.clone()],
+            "windows",
+            &only_exe
+        )
+        .is_empty(),
+        "Windows：`build/indexer` 由 cmd 按 PATHEXT 落到 `.exe`，不该判缺"
+    );
+    assert_eq!(
+        crate::capabilities::vm::domain::exec::missing_entries_for(
+            &[m.clone()],
+            "linux",
+            &only_exe
+        )
+        .len(),
+        1,
+        "unix 没有扩展名解析：字面不在就是缺"
+    );
+    // 只有字面那个（unix 的落法）：两种平台都算在场。
+    let only_literal = |p: &std::path::Path| p.ends_with("build/indexer");
+    assert!(crate::capabilities::vm::domain::exec::missing_entries_for(
+        &[m.clone()],
+        "linux",
+        &only_literal
+    )
+    .is_empty());
+    assert!(crate::capabilities::vm::domain::exec::missing_entries_for(
+        &[m],
+        "windows",
+        &only_literal
+    )
+    .is_empty());
+}
+#[test]
 pub(crate) fn exec_entry_missing_refuses_before_any_tier() {
     let modules = vec![module_with_runtimes("a", &["python"])];
     let missing = vec![crate::capabilities::vm::api::MissingEntry {

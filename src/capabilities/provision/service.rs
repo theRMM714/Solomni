@@ -1122,15 +1122,23 @@ mod tests {
         );
         // 换内核要把两个稳定软链一起换指（否则 vmlinuz 还指着没 9p 的那个）；软链是 unix 概念。
         #[cfg(unix)]
-        std::os::unix::fs::symlink(
-            "boot/vmlinuz-6.12.111+deb13-cloud-amd64",
-            base.join("vmlinuz"),
-        )
-        .expect("先指 cloud");
-        link_guest_kernel(&base, "6.12.111+deb13-amd64").expect("换指");
-        assert_eq!(
-            fs::read_link(base.join("vmlinuz")).expect("读链"),
-            Path::new("boot/vmlinuz-6.12.111+deb13-amd64")
+        {
+            std::os::unix::fs::symlink(
+                "boot/vmlinuz-6.12.111+deb13-cloud-amd64",
+                base.join("vmlinuz"),
+            )
+            .expect("先指 cloud");
+            link_guest_kernel(&base, "6.12.111+deb13-amd64").expect("换指");
+            assert_eq!(
+                fs::read_link(base.join("vmlinuz")).expect("读链"),
+                Path::new("boot/vmlinuz-6.12.111+deb13-amd64")
+            );
+        }
+        // 没有软链的平台：换指如实报错，不假装成功。
+        #[cfg(not(unix))]
+        assert!(
+            link_guest_kernel(&base, "6.12.111+deb13-amd64").is_err(),
+            "不支持软链的平台要如实报错"
         );
         let _ = fs::remove_dir_all(&root);
     }

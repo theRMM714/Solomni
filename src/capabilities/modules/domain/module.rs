@@ -250,6 +250,20 @@ pub fn local_entry(command: &str) -> Option<&str> {
     }
 }
 
+/// 目的：一个**相对路径入口**在目标系统上可能落成的文件名——按"壳怎么解析它"给候选。
+/// 参数：entry = 清单里声明的相对入口（如 `build/indexer`）；os = 目标系统（`std::env::consts::OS`）。
+/// 返回：按顺序的候选：先字面那个；Windows 的 cmd 会按 PATHEXT 补 `.exe` / `.cmd` / `.bat` / `.com`。
+/// 约束：这里只给"可能的名字"，能不能跑仍由调用方拿文件系统事实去验；unix 没有扩展名解析，只有字面一个。
+pub fn entry_candidates(entry: &str, os: &str) -> Vec<String> {
+    let mut out = vec![entry.to_string()];
+    if os == "windows" {
+        for ext in [".exe", ".cmd", ".bat", ".com"] {
+            out.push(format!("{}{}", entry, ext));
+        }
+    }
+    out
+}
+
 /// 目的：模块声明的构建方法（`build:` 段）——系统在目标环境里跑 `command`，把产物编进模块目录。
 #[derive(Debug, Clone, Deserialize, serde::Serialize, PartialEq, Eq)]
 pub struct BuildDecl {

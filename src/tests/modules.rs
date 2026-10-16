@@ -5,6 +5,25 @@
 use super::prelude::*;
 
 #[test]
+pub(crate) fn entry_candidates_follow_the_shell_resolution_of_the_target() {
+    // unix：没有扩展名解析，只有字面那个。
+    assert_eq!(
+        crate::capabilities::modules::api::entry_candidates("build/indexer", "linux"),
+        vec!["build/indexer".to_string()]
+    );
+    // Windows：cmd 按 PATHEXT 补扩展名（清单只写不带扩展名的那个）。
+    assert_eq!(
+        crate::capabilities::modules::api::entry_candidates("build/indexer", "windows"),
+        vec![
+            "build/indexer".to_string(),
+            "build/indexer.exe".to_string(),
+            "build/indexer.cmd".to_string(),
+            "build/indexer.bat".to_string(),
+            "build/indexer.com".to_string(),
+        ]
+    );
+}
+#[test]
 pub(crate) fn build_decl_is_validated_and_survives_the_scan() {
     use crate::capabilities::modules::api::{check_build, BuildDecl};
     let mut m = module_of("idx").manifest;

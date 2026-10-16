@@ -53,13 +53,27 @@ pub fn missing_entries(
     modules: &[Module],
     is_executable: &dyn Fn(&Path) -> bool,
 ) -> Vec<MissingEntry> {
+    missing_entries_for(modules, std::env::consts::OS, is_executable)
+}
+
+/// 目的：同上，但**目标系统**由调用方给——判据跟着那台机器的壳解析走（用例据此在别的平台上验 Windows 语义）。
+/// 参数：os = 目标系统（`std::env::consts::OS` 的取值）；其余同上。
+pub fn missing_entries_for(
+    modules: &[Module],
+    os: &str,
+    is_executable: &dyn Fn(&Path) -> bool,
+) -> Vec<MissingEntry> {
     let mut out = Vec::new();
     for m in modules {
         for (tool, decl) in &m.manifest.tools {
             let Some(entry) = crate::capabilities::modules::api::local_entry(&decl.command) else {
                 continue;
             };
-            if !is_executable(&m.root.join(entry)) {
+            // 壳怎么解析这个名字，就按它的候选去验（Windows 上 `build/indexer` 实际落在 `.exe`）。
+            let found = crate::capabilities::modules::api::entry_candidates(entry, os)
+                .iter()
+                .any(|c| is_executable(&m.root.join(c)));
+            if !found {
                 out.push(MissingEntry {
                     module: m.manifest.id.clone(),
                     tool: tool.clone(),
