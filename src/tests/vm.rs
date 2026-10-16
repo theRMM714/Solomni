@@ -313,9 +313,10 @@ pub(crate) fn missing_entries_flags_only_relative_command_entries() {
         with_tool("a", "artifact", "build/indexer build"),
         with_tool("a", "absolute", "/usr/bin/x build"),
     ];
-    // 宿主事实：只有 a 的 build/indexer 不在场（其余入口判据都不看）。
-    let gone = abs(&["a", "build", "indexer"]);
-    let missing = exec::missing_entries(&modules, &|p| p != gone.as_path());
+    // 宿主事实：a 的 `build/` 下**什么都没有**（其余地方都算在场）——入口判据只看这一处。
+    // 谓词不能只比一个字面路径：Windows 上判据会接连看 `.exe` 等候选（见 entry_check_follows_the_target_shell_rules）。
+    let absent = abs(&["a", "build"]);
+    let missing = exec::missing_entries(&modules, &|p| !p.starts_with(&absent));
     let got: Vec<(&str, &str, &str)> = missing
         .iter()
         .map(|m| (m.module.as_str(), m.tool.as_str(), m.command.as_str()))
