@@ -487,7 +487,27 @@ impl Conductor {
             // 会话要每租约可写层：多台并发不能同写一份基础镜像。
             isolated: true,
         };
-        self.vm.guest_start(&spec)
+        self.vm.guest_start(&spec)?;
+        // 已装载的 prefix 包：把 `<prefix>/bin/*` 软链进 guest 的 /usr/local/bin，
+        // 这样"模块声明 `runtimes: [X]` + 裸名命令"在 guest 里真的能跑起来（软链失败如实记一条，不假装装上了）。
+        for script in crate::capabilities::vm::api::package_setup_scripts(plan) {
+            let out = self.vm.guest_run(
+                &meta.name,
+                &crate::capabilities::vm::api::GuestRun {
+                    command: script,
+                    args_json: "{}".to_string(),
+                    env: Vec::new(),
+                    cwd: String::new(),
+                },
+            );
+            if !out.ok {
+                self.log.warn(
+                    "conductor::start_session_guest",
+                    &format!("运行包的 PATH 软链没建上：{}", out.output),
+                );
+            }
+        }
+        Ok(())
     }
 
     /// 追加一条旁路配置记录：只作呈现与审计（不进模型上下文，回放与状态派生都跳过它）。

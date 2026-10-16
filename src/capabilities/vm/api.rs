@@ -10,7 +10,7 @@ pub use crate::capabilities::vm::domain::exec::{
     vm_diagnoses, vm_requirements, Diagnosis, ExecPlan, MissingEntry, VmInputs, VmRequirement,
 };
 pub use crate::capabilities::vm::domain::guest::{
-    classify_base, mounts_from, GuestImage, GuestRun, GuestSpec, SeedDocs,
+    classify_base, mounts_from, package_setup_scripts, GuestImage, GuestRun, GuestSpec, SeedDocs,
 };
 pub use crate::capabilities::vm::domain::guest::{GuestArch, GuestClients, GuestOs, GuestRoot};
 pub use crate::capabilities::vm::domain::packages::{library_for_guest, Library};

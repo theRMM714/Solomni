@@ -394,6 +394,22 @@ pub fn classify_base(base: &Path, probe: &dyn HostProbe) -> Result<GuestImage, S
     Ok(image)
 }
 
+/// 目的：已装载的 **prefix** 包接到 guest PATH 上的软链脚本——`<prefix>/bin/*` → `/usr/local/bin/`。
+/// 参数：plan = 这次执行计划（包由包库扫描给出）。
+/// 约束：只处理 prefix 包（system 包要走系统路径叠层，见缺口 `vm.runtime-package-assembly`）；没有 `bin/` 的包在 guest 里被 `-d` 挡掉，不进 PATH。
+pub fn package_setup_scripts(plan: &ExecPlan) -> Vec<String> {
+    plan.packages
+        .iter()
+        .filter(|p| p.kind != KIND_SYSTEM && !p.prefix.trim().is_empty())
+        .map(|p| {
+            let dir = format!("/{}", p.prefix.trim_matches('/'));
+            format!(
+                "if [ -d '{dir}/bin' ]; then ln -sf '{dir}'/bin/* /usr/local/bin/ 2>/dev/null || true; fi"
+            )
+        })
+        .collect()
+}
+
 /// 目的：把执行计划与围栏翻成 guest 挂载——prefix 包只读挂到 /<prefix>，围栏根按路径桥给的 guest 路径挂。
 /// 约束：围栏根走 PathBridge（同方言时就是宿主原路径，模块命令与参数里的真实路径因此仍然成立；跨方言时是镜像根）；system 叠层不做。
 pub fn mounts_from(plan: &ExecPlan, fence: &FenceSpec, bridge: &PathBridge) -> Vec<GuestMount> {

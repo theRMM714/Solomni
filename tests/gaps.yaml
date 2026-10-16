@@ -108,18 +108,19 @@
   scope: global
   level: T3
   why: |
-    运行包（`runtimes/`）这条通道只走到**预检**：`vm_diagnoses` 会按包库 ∪ guest 声明判"能力够不够"，但装配这一半不完整——
-    `kind: system` 的"写进 guest 系统路径"没做（`mounts_from` 里明写"system 叠层不做"并跳过它）；
-    `kind: prefix` 只把包只读挂到 `/<prefix>`、不把它的 bin 加进 PATH（`plan_summary` 也只进日志、不进模型上下文）；
-    本机档则完全不装载运行包（`plan` 对 `Host` 直接 `packages: Vec::new()`，注释是"宿主自备解释器"）。
-    后果：用户按提示把包放进 `runtimes/` 后，预检说"能力齐了"，实际命令仍可能找不到它（裸名不进 PATH / system 叠层没做）。
+    运行包（`runtimes/`）这条通道还剩两半没铺完（预检与 prefix 包进 PATH 已做）：
+    ① `kind: system` 的"写进 guest 系统路径"没做（`mounts_from` 里明写"system 叠层不做"并跳过它）——
+    这类包声明的 `provides_paths` 因此既不叠层也不复制，只有冲突预检认得它；
+    ② 本机档完全不装载运行包（`plan` 对 `Host` 直接 `packages: Vec::new()`，注释是"宿主自备解释器"）——
+    host 档把包放进 `runtimes/` 对执行没有任何影响（既不进 PATH，也不进围栏可达范围）。
   how: |
-    1) 定装配语义：`kind: system` 按 `provides_paths` 叠进 guest 系统路径（或在装配期解进虚拟根、可缓存）；
-    `kind: prefix` 要么把 `<prefix>/bin` 进工具进程 PATH，要么在模块可见的「工作环境」里如实给出它的绝对路径。
-    2) 本机档要么同样装载运行包（落进 PATH 与围栏可达范围），要么在文档与界面上明确"本机档 = 宿主自备"。
-    3) 与 `vm/domain/guest.rs` 的 `mounts_from`、docs/vm/README.md 与 RUNTIME_SPEC.md 的契约同步。
+    1) `kind: system`：定"叠层"的实现（按 `provides_paths` 写进 guest 系统路径，或在装配期解进虚拟根、可缓存），
+    并让冲突预检与它对齐。
+    2) 本机档：装载运行包（包目录进围栏可达范围 + `<pkg>/bin` 进 PATH），或在文档与界面上明确"本机档 = 宿主自备"。
+    3) done：`kind: prefix` 的 `<prefix>/bin/*` 已在起 guest 后软链进 `/usr/local/bin`（`package_setup_scripts`）。
+    4) 与 `vm/domain/guest.rs` 的 `mounts_from`、docs/vm/README.md 与 RUNTIME_SPEC.md 的契约同步。
   accept: |
-    包库里各放一个 prefix 与 system 的包，两档会话里模块工具的**裸名命令**都能直接跑起来；
+    包库里各放一个 prefix 与 system 的包：两档会话里模块工具的**裸名命令**都能直接跑起来（prefix 已可，system 待补）；
     缺包时建会话仍如实拒绝；机制不可用的平台（Landlock 装不上等）降级路径照旧如实说明。
   blocked_by: |
     无（已定方案、尚未实施：按"判据 → 装配 → 就地编"的顺序，排在入口判据之后做）。

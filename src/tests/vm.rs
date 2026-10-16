@@ -369,6 +369,35 @@ pub(crate) fn exec_entry_missing_refuses_before_any_tier() {
     .expect("本机档照旧可成立");
 }
 #[test]
+pub(crate) fn package_setup_scripts_link_prefix_bins_only() {
+    use crate::capabilities::vm::domain::exec::{ExecPlan, PlannedPackage};
+    let pkg = |id: &str, kind: &str, prefix: &str| PlannedPackage {
+        id: id.to_string(),
+        version: "1".to_string(),
+        kind: kind.to_string(),
+        prefix: prefix.to_string(),
+        source_dir: std::path::PathBuf::from(format!("/pkgs/{}", id)),
+    };
+    let plan = ExecPlan {
+        tier: Tier::Vm,
+        net: false,
+        guest: Some("debian".to_string()),
+        packages: vec![pkg("cc", "prefix", "opt/cc"), pkg("sys", "system", "")],
+    };
+    let scripts = crate::capabilities::vm::api::package_setup_scripts(&plan);
+    assert_eq!(scripts.len(), 1, "只给 prefix 包建软链：{:?}", scripts);
+    assert!(scripts[0].contains("/opt/cc/bin"), "{}", scripts[0]);
+    assert!(scripts[0].contains("/usr/local/bin"), "{}", scripts[0]);
+    // 空计划：一条脚本都没有（不产生空跑的命令）。
+    let empty = ExecPlan {
+        tier: Tier::Vm,
+        net: false,
+        guest: None,
+        packages: Vec::new(),
+    };
+    assert!(crate::capabilities::vm::api::package_setup_scripts(&empty).is_empty());
+}
+#[test]
 pub(crate) fn exec_host_tier_ignores_packages() {
     let modules = vec![module_with_runtimes("a", &["python"])];
     let plan = exec::plan(

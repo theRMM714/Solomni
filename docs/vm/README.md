@@ -72,6 +72,7 @@ virtiofsd 与默认虚拟根 `debian`（目录 rootfs + 内核 + 9p initrd + qem
 | Windows | QEMU | smb（**已验**，默认；缺 smbd 时退 copy） | `accel=whpx:tcg` | smb → copy |
 
 - root 可为目录（QEMU 9p；必须给内核）或磁盘镜像（qcow2/raw，可自带引导）；需要共享时 guest 拿 `restrict=on` 的网卡（出站全断，`guestfwd` 内部隧道可用）。
+- **运行包进 guest**：`runtimes/` 里已装载的 **prefix** 包只读挂在 `/<prefix>`，起 guest 之后把它的 `<prefix>/bin/*` 软链进 `/usr/local/bin`——模块声明的裸名命令因此直接在 guest 里可用；`kind: system` 的"写进系统路径"还没做（缺口 `vm.runtime-package-assembly`）。
 - 就绪检测按**组合**逐项报"现状 + 怎么补"；"验过没有"是数据表（`VERIFIED_HOSTS`），不是平台 `cfg`。
 - **路径桥**（`domain/paths.rs`）：宿主路径 ↔ guest 路径只有一座桥——宿主与 guest 同方言时**恒等**（宿主路径原样在 guest 里成立），跨方言时编进镜像根（宿主 `D:\a\b` → POSIX guest `/solomni-host/d/a/b`；POSIX 宿主 → Windows guest `C:\solomni-host\…`，非法字符转义）。挂载点与命令装配（`cwd` / 路径型 `env`）都走它。**反向也走它**：系统工具跑在宿主侧，靠它把模型给的 guest 写法译回宿主路径（`PathCodec`，见 [docs/tools/tools-and-roles.md](../tools/tools-and-roles.md) 的「路径模型」）。
 - **工作环境提示词按环境分发**（`prompts/shared/tools.yaml` 的 `env_hosts` / `env_guests` / `envs`）：本机档按宿主平台给，虚拟机档按 guest 的 os 给——虚拟机档给出的路径就是 guest 内路径；**系统工具与模块工具同一套写法**（路径规矩只在提示词册的 `tool_texts.path_rules` 里说一次，核心在寻址前翻译）。
