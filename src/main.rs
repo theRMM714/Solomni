@@ -25,9 +25,8 @@ fn main() {
         std::process::exit(guard::fence_run(&args, i));
     }
     // 自检（机器可读）：把"这台机器能承载哪些测试"如实交出来——测试入口据此判定，不靠猜（见 TESTING.md）。
-    if args.iter().any(|a| a == "--doctor") {
-        std::process::exit(diagnostics::doctor());
-    }
+    // 放在根解析之后：它要按**产品根**读"项目内已装了什么"（与就绪判据同一份来源）。
+    let doctor = args.iter().any(|a| a == "--doctor");
     // 隐藏模式：走**产品自己那套**出站链路打一次最小 HTTPS 请求，三态如实回报
     // （ok / no-net / tls-fail|fail）——CI 三平台据此验本构建的 TLS 栈，不需要任何密钥。
     if let Some(i) = args.iter().position(|a| a == "--https-check") {
@@ -62,6 +61,9 @@ fn main() {
         .unwrap_or_else(|| PathBuf::from("."));
     // 产品根规范化成**干净的绝对路径**：提示词里给 AI 的、以及各适配器给出的根都是它。
     let (root, root_note) = entry::root::resolve_root(&raw_root);
+    if doctor {
+        std::process::exit(diagnostics::doctor(&root));
+    }
     let home = root.join(".home");
     // 隐藏模式：依赖补齐的状态（机器可读，只报事实）——缺什么、装到哪、从哪来。
     if args.iter().any(|a| a == "--provision") {
@@ -169,11 +171,12 @@ fn main() {
         &capabilities::provision::ProvisionService::new(&root),
     )
     .unwrap_or_default();
+    // 清单里的 probe 是**相对产品根**的写法：这里拼成绝对路径再当登记值用（否则只在 CWD = 产品根时才成立）。
     let picked = |prefix: &str| {
         installed
             .iter()
             .find(|d| d.present && d.id.starts_with(prefix))
-            .map(|d| d.probe.clone())
+            .map(|d| root.join(&d.probe).to_string_lossy().into_owned())
     };
     registry.apply_discovered(
         picked("vm.qemu."),
@@ -275,6 +278,7 @@ fn main() {
             )
         },
     );
+    // 本进程实际装配的共享后端短名：留给呈现层如实说明"判据变了、实现还没换"。
     let share: Arc<dyn capabilities::vm::ports::ShareBackend + Send + Sync> =
         match picked.map(|c| c.share) {
             Some("smb") => Arc::new(capabilities::vm::detail::SmbShare::new()),
@@ -282,6 +286,7 @@ fn main() {
             Some("copy") => Arc::new(capabilities::vm::detail::CopyShare::new()),
             _ => Arc::new(capabilities::vm::detail::NinePShare::new()),
         };
+    let assembled_share = capabilities::vm::ports::ShareBackend::id(share.as_ref());
     let vm: Arc<dyn capabilities::vm::api::Vm + Send + Sync> =
         Arc::new(capabilities::vm::service::VmService::new(
             Arc::new(packages),
@@ -490,6 +495,10 @@ fn main() {
     let mut ops = capabilities::conductor::api::Ops::from_handle(&handle);
     // 依赖补齐面：组合根注入（能力面默认未接入，这里换成真实现）。
     ops.provision = Arc::clone(&provision);
+    // 装配事实：本进程的共享后端已经定了，补齐作业装完也只能改判据（换实现要重启）。
+    ops.assembled = capabilities::conductor::api::Assembled {
+        share: Some(assembled_share),
+    };
 
     // 启动拉起：把所有**已启用**的常驻服务拉起来（进程级租约，不属于任何会话）。
     for line in residents_boot.start_enabled() {

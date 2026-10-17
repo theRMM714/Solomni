@@ -94,14 +94,16 @@ const RAW = { // 还没开过的协作会话：名字可改、本机档
   vm_requirements: [
     { id: "hypervisor", met: false, detail: "本机虚拟机监视器不可用（要启用「虚拟机平台」组件）", how: "启用「虚拟机平台」组件，然后重启" },
     { id: "guest", met: false, detail: "guest 本体尚未接入（工具进程仍在宿主上跑，没有真正的 guest）", how: "等产品的 guest 接入" },
-    { id: "qemu", met: false, detail: "没有找到 qemu-system-x86_64.exe（按PATH找过）", how: "自行安装 QEMU 并放进 PATH，或在设置里登记它的完整路径" },
-    { id: "base", met: false, detail: "没有选定虚拟根", how: "跑 solomni --provision --ensure --yes 把虚拟根装进项目内" },
+    { id: "qemu", met: false, detail: "没有找到 qemu-system-x86_64.exe（按PATH找过）", how: "在创建向导或配置界面点「补齐虚拟机依赖」把它下载进项目内；也可自行安装 QEMU 并放进 PATH" },
+    { id: "base", met: false, detail: "没有选定虚拟根", how: "在创建向导或配置界面点「补齐虚拟机依赖」把虚拟根装进项目内" },
   ],
   tier_ready: true, tier_missing: [],
   runtime: { tier: "host", declared: {}, available: {}, missing: {}, diagnoses: [], rejected: [], rejected_packages: [] },
   runtimes_dir: "/runtimes",
 };
 const calls = [];
+let setupPolls = 0;
+let setupStarted = false;
 const jsonRes = (v, ok, status) => ({ ok: ok !== false, status: status || 200, json: async () => v });
 const sandbox = {
   document,
@@ -126,6 +128,26 @@ const sandbox = {
       });
     }
     if (String(url).indexOf("/api/events") === 0) throw new Error("poll-not-stubbed"); // 轮询不参与本冒烟
+    // 依赖补齐：起作业前 = 缺一条；起作业后前两次长轮询还在跑，之后就结束（pending 清空）。
+    if (/^\/api\/setup\/status/.test(String(url))) {
+      const wait = String(url).indexOf("wait=1") >= 0;
+      if (wait) setupPolls++;
+      const running = setupStarted && (!wait || setupPolls < 2);
+      const pending = running ? ["vm.virtiofsd.windows"] : (setupStarted ? [] : ["vm.virtiofsd.windows"]);
+      return jsonRes({
+        deps: [{ id: "vm.virtiofsd.windows", guest: null, present: !pending.length, install: ".vm/virtiofsd",
+          probe: ".vm/virtiofsd/virtiofsd.exe", source: "release:virtiofsd", url: "https://example.invalid/v.zip",
+          size_mb: 3, note: "virtiofsd 便携包" }],
+        job: { running, current: "", seq: setupPolls, lines: ["vm.virtiofsd.windows：下载 https://example.invalid/v.zip"], error: null },
+        missing: pending.length,
+        pending,
+        assembled: { share: "copy" },
+      });
+    }
+    if (url === "/api/setup/ensure") {
+      setupStarted = true;
+      return jsonRes({ ok: true, deps: ["vm.virtiofsd.windows"] });
+    }
     if (/\/api\/history\/[^/]+$/.test(url)) return jsonRes({ meta: { mode: "single" }, events: [] });
     if (/\/files$/.test(url)) return jsonRes({ work: [], agents: [], roots: { work: "/session/w/work", agents: [] } });
     if (/\/api\/sessions\/w\/config$/.test(url)) return jsonRes({ config: CFG });
@@ -312,6 +334,31 @@ check("config: 虚拟根状态说清装齐与自带能力（不写「已就绪�
   const sentRaw = JSON.parse(calls.filter((c) => /\/api\/actions\/edit_session$/.test(c.url)).pop().body);
   check("config(raw): 名字改动随提交送出", sentRaw.agents.map((a) => a.name).join(",") === "x,y", JSON.stringify(sentRaw.agents));
   check("config(raw): 无模型以空串送出", sentRaw.agents[0].model === "" && sentRaw.agents[1].model === "m2", JSON.stringify(sentRaw.agents));
+
+  /* ---- 依赖补齐：不可用时给**一个动作**，而不是一句命令行（"用户没有办法装上默认环境"的回归锚） ---- */
+  const setupBtn = findButton(m2, "补齐虚拟机依赖…");
+  check("config(raw): 虚拟机档不可用时给出补齐动作", !!setupBtn && typeof setupBtn.onclick === "function");
+  setupBtn.onclick();
+  await sleep(100);
+  const t3 = allText(reg.get("#modal-root"));
+  check("setup: 列出要装的条目（含体积与来源说明）",
+    t3.indexOf("vm.virtiofsd.windows") >= 0 && t3.indexOf("约 3 MB") >= 0, t3.slice(0, 400));
+  check("setup: 说明只写项目内", t3.indexOf("只写项目内") >= 0);
+  const goBtn = findButton(reg.get("#modal-root"), "开始下载安装");
+  check("setup: 先看清单、再确认下载（两步）", !!goBtn);
+  goBtn.onclick();
+  await sleep(150);
+  const sentEnsure = calls.filter((c) => /\/api\/setup\/ensure$/.test(c.url)).pop();
+  check("setup: 确认后 POST ensure（带 confirm 与后端给的 pending id）",
+    !!sentEnsure && String(sentEnsure.body).indexOf('"confirm":true') >= 0 &&
+    String(sentEnsure.body).indexOf("vm.virtiofsd.windows") >= 0, sentEnsure && sentEnsure.body);
+  check("setup: 进度走长轮询（since + wait=1）",
+    calls.some((c) => /\/api\/setup\/status\?since=\d+&wait=1/.test(c.url)));
+  const t4 = allText(reg.get("#modal-root"));
+  check("setup: 装完说清「立刻生效」与「共享实现要重启」两句事实",
+    t4.indexOf("已经生效") >= 0 && t4.indexOf("copy") >= 0, t4.slice(-300));
+  check("setup: 没有用原生 alert/confirm", alerts.length === 0, JSON.stringify(alerts));
+  closeModalIfAny();
 
   /* ---- 「打开」接线：点了真的进入会话视图 ---- */
   closeModalIfAny();

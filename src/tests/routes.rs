@@ -71,9 +71,26 @@ impl FakeProvision {
     }
 }
 
+/// 目的：假补齐面的清单——一条在场、一条没装（`pending` 只该含后者）。
+fn fake_deps() -> Vec<crate::capabilities::provision::api::DepStatus> {
+    use crate::capabilities::provision::api::DepStatus;
+    let dep = |id: &str, present: bool| DepStatus {
+        id: id.to_string(),
+        guest: None,
+        present,
+        install: ".vm/qemu".to_string(),
+        probe: ".vm/qemu/bin/qemu-system-x86_64".to_string(),
+        source: "release:qemu".to_string(),
+        url: Some("https://example.invalid/qemu".to_string()),
+        size_mb: 80,
+        note: String::new(),
+    };
+    vec![dep("vm.qemu.linux", true), dep("vm.virtiofsd.linux", false)]
+}
+
 impl crate::capabilities::provision::api::Provision for FakeProvision {
     fn status(&self) -> Result<Vec<crate::capabilities::provision::api::DepStatus>, String> {
-        self.guard().map(|_| Vec::new())
+        self.guard().map(|_| fake_deps())
     }
     fn guest_bases(&self) -> Result<Vec<crate::capabilities::provision::api::GuestBase>, String> {
         self.guard().map(|_| Vec::new())
@@ -101,6 +118,7 @@ fn fake_ops(fail: Option<&str>) -> Ops {
         residents: Arc::new(crate::capabilities::residents::api::NoResidents),
         secrets: Arc::new(crate::capabilities::secrets::api::NoSecrets),
         provision: Arc::new(FakeProvision::new(fail)),
+        assembled: Default::default(),
     }
 }
 
@@ -949,7 +967,7 @@ fn success_shapes_are_pinned_per_route() {
             200,
             "\"agents\"",
         ),
-        ("GET", "/api/setup/status", "", 200, "\"deps\""),
+        ("GET", "/api/setup/status", "", 200, "\"pending\""),
         ("POST", "/api/setup/ensure", "{}", 200, "\"preview\""),
         ("DELETE", "/api/setup/job", "", 200, "\"ok\""),
     ];
@@ -983,6 +1001,48 @@ fn success_shapes_are_pinned_per_route() {
             route.method, route.pattern
         );
     }
+}
+
+/// 补齐入口的**取舍在后端**：status 给出 pending（只列没在场的），ensure 不点名时按它起作业。
+/// 为什么钉：界面的"补齐"按钮不该自己去挑条目——挑错了就是把已装好的东西重下一遍（清单里的条目不跳过在位项）。
+#[test]
+fn setup_status_lists_pending_and_ensure_defaults_to_it() {
+    let ops = fake_ops(None);
+    let (code, text) = call(&ops, "GET", "/api/setup/status", "");
+    assert_eq!(code, 200);
+    let v: serde_json::Value = serde_json::from_str(&text).expect("JSON");
+    assert_eq!(
+        v["pending"],
+        json!(["vm.virtiofsd.linux"]),
+        "pending 只列没在场的：{}",
+        text
+    );
+    assert_eq!(v["missing"], json!(1), "个数与列表同一份事实：{}", text);
+    assert!(
+        v["assembled"]["share"].is_null(),
+        "未注入装配事实 = 不知道，界面就不说这一段：{}",
+        text
+    );
+    // 预览：不点名 = 只挑缺的那条
+    let (code, text) = call(&ops, "POST", "/api/setup/ensure", "{}");
+    assert_eq!(code, 200);
+    let v: serde_json::Value = serde_json::from_str(&text).expect("JSON");
+    assert_eq!(
+        v["preview"][0]["id"],
+        json!("vm.virtiofsd.linux"),
+        "预览只列要装的那条：{}",
+        text
+    );
+    // 确认：起的就是那一条（显式点名 → 逐条失败硬报）
+    let (code, text) = call(&ops, "POST", "/api/setup/ensure", r#"{"confirm":true}"#);
+    assert_eq!(code, 200);
+    let v: serde_json::Value = serde_json::from_str(&text).expect("JSON");
+    assert_eq!(
+        v["deps"],
+        json!(["vm.virtiofsd.linux"]),
+        "起作业的条目要落在缺的那条上：{}",
+        text
+    );
 }
 
 /// 传输**可中断**：中断判据一置位，服务器主循环立刻返回（"Ctrl+C 回 CLI"的机制在这里）。

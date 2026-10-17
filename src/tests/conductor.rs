@@ -5,6 +5,91 @@ mod proxy;
 use super::builders::*;
 use super::prelude::*;
 
+/// 造一台"根在给定目录、补齐面报给定清单"的核心（只为验外部工具路径的取法）。
+fn conductor_rooted(
+    root: &std::path::Path,
+    settings: InMemorySettings,
+    provision: Arc<dyn crate::capabilities::provision::api::Provision + Send + Sync>,
+) -> Conductor {
+    let gateway: Arc<dyn ChatGateway + Send + Sync> = Arc::new(gw(BTreeMap::new(), vec![]));
+    let llm = test_llm(
+        Arc::clone(&gateway),
+        Arc::new(FakeCatalog::new(vec!["m".to_string()])),
+    );
+    Conductor::new(
+        root.to_path_buf(),
+        registry_service(settings, Arc::clone(&llm)),
+        test_history(),
+        test_workspace(Arc::new(InMemoryWorkspace::new())),
+        test_vm(Arc::new(InMemoryPackages::empty())),
+        provision,
+        test_modules(Arc::new(VecSource(vec![module_of("a")]))),
+        llm,
+        test_tools_svc_with(
+            Arc::new(SilentRunner),
+            Arc::new(InMemorySysIo::new()),
+            Arc::new(NoFenceHost),
+        ),
+        test_prompt(),
+        test_tools_svc(),
+        Arc::new(crate::kernel::ports::NoopLog),
+        Arc::new(crate::kernel::detail::HostProbeAdapter),
+        Arc::new(crate::capabilities::residents::api::NoResidents),
+        Arc::new(crate::capabilities::secrets::api::NoSecrets),
+    )
+}
+
+/// 目的：虚拟机档的外部工具路径**每次判据取用时现算**：设置里没登记就采用补齐面报的"已装在项目内"那一个。
+/// 约束：补齐作业（Web 或另一个终端）装完就该立刻可用——"装完还得重启"会让用户以为补齐没成功；
+///   显式登记永远优先，登记了就不看项目内那份（登记是用户的意思）。
+#[test]
+pub(crate) fn vm_tool_paths_follow_provisioned_packages_without_restart() {
+    let probe = ".vm/qemu/bin/qemu-system-x86_64";
+    let root = crate::tests::scratch("vm-tool-fallback");
+    let exe = root
+        .join(".vm")
+        .join("qemu")
+        .join("bin")
+        .join("qemu-system-x86_64");
+    std::fs::create_dir_all(exe.parent().expect("父目录")).expect("建目录");
+    std::fs::write(&exe, b"stub").expect("写占位可执行文件");
+    let provision = test_provision_with(vec![installed_dep("vm.qemu.linux", probe)]);
+
+    // 没登记：按项目内补齐的那一个判 → 这一项成立，且文案说清是按哪条路找到的。
+    let core = conductor_rooted(
+        &root,
+        InMemorySettings::with_tier(Tier::Host),
+        Arc::clone(&provision),
+    );
+    let choices = core.tier_choices();
+    let qemu = choices
+        .vm_requirements
+        .iter()
+        .find(|r| r.id == "qemu")
+        .expect("qemu 是一项前置");
+    assert!(qemu.met, "没登记时按项目内补齐的那一个判：{}", qemu.detail);
+    assert!(
+        qemu.detail.contains("项目内"),
+        "要说清不是 PATH 找到的：{}",
+        qemu.detail
+    );
+
+    // 显式登记优先：登记了一个不在场的路径 → 这一项不成立（不去偷偷用项目内那份）。
+    let registered = conductor_rooted(
+        &root,
+        InMemorySettings::with_qemu_path("no/such/qemu"),
+        Arc::clone(&provision),
+    );
+    let qemu = registered
+        .tier_choices()
+        .vm_requirements
+        .into_iter()
+        .find(|r| r.id == "qemu")
+        .expect("qemu 是一项前置");
+    assert!(!qemu.met, "登记优先：{:?}", qemu);
+    let _ = std::fs::remove_dir_all(&root);
+}
+
 /// **工具轮的思维链随该轮的工具行落档**：流式结束后仍可查看（不再"流式完就丢"）。
 /// 行由**唯一那处**构造函数产出（单 agent 与讨论席共用），所以这里直接问它。
 #[test]

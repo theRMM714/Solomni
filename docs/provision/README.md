@@ -19,10 +19,16 @@
 - **完整性**：缓存里那份（复用的、刚下好的）进解包前按台账核对 sha256——自托管 release 资产读清单条目（`sha256:`），
   链接类源读 `links.yaml` 的 `<键>.sha256`（pin 与它守护的 URL 在同一份台账里）；不 pin 的源如实不校验，靠解包/解析成功判。
   不符时**不删缓存**：报出台账值、实际值与来源——删了会在 pin 过期时变成每次重下的死循环。
-- 补齐后：主程序**启动时**自动采用项目内补齐的可执行文件（`qemu_path` / `virtiofsd_path` / `smbd_path` 未登记时；显式登记优先）；同进程内新装的包下次启动生效。
+- 补齐后：主程序**每次判据取用时**自动采用项目内补齐的可执行文件（`qemu_path` / `virtiofsd_path` / `smbd_path` 未登记时；显式登记优先，取到的是拼接产品根后的绝对路径）——
+  装完即生效，不需要重启进程。**唯一例外**是共享后端的实现：它在启动时按当时的工具在场情况装配好（`main.rs` 的 `choose_combo`），
+  装完共享工具后判据立刻改口，但本进程仍用启动时那一档；这条差别由 `/api/setup/status` 的 `assembled.share` 如实交给界面。
 - 进度：作业状态带单调 `seq`；`GET /api/setup/status?since=N&wait=1` 是长轮询（最多 20s），拿到新行即回，前端按 `seq` 增量取。
+- **要装什么由后端定**：`status` 的 `pending` 列出还没在场的条目 id；`ensure` 不点名时只补这些（执行核心不跳过在位项，不滤就会把已装的
+  重下一遍、重解一遍），都装好了直接回 `{ok,deps:[]}` 且不起作业。显式点名 = 逐条失败硬报（不是全量补齐那种"跳过继续"）。
 - 状态归属：清单与台账的唯一真相在仓库根 `dependencies.yaml` / `links.yaml`，产品里**编译期内嵌**；作业状态是**进程内**的（不落盘，进程重启即清空）。
-- 呈现层：CLI `--provision`（`src/diagnostics/`，`--ensure[=id,…] --yes` 才真下载）+ Web `GET /api/setup/status` / `POST /api/setup/ensure` / `DELETE /api/setup/job`（路由表见 [docs/presentation/contracts.md](../presentation/contracts.md)）。
+- 呈现层：**Web 的「补齐虚拟机依赖」弹层**——配置面板与创建向导在虚拟机档不可用时给这个动作：先看清单与体积、再确认下载、
+  然后按 `seq` 长轮询进度、最后如实说清"哪些立刻生效、哪些要重启"。另有 CLI `--provision`（`src/diagnostics/`，隐藏模式，
+  `--ensure[=id,…] --yes` 才真下载；没有界面时用）。路由表见 [docs/presentation/contracts.md](../presentation/contracts.md)。
 
 ## 三、依赖图位置（由源码的 ::api 引用推导）
 

@@ -23,14 +23,30 @@ pub fn unpack_cli(args: &[String], i: usize) -> i32 {
 }
 
 /// 自检：本机事实（平台 + 围栏能力 + 外部解释器）。只报事实，不猜、不改任何东西（围栏自检那个临时目录除外）。
-pub fn doctor() -> i32 {
+/// 参数：root = 产品根——虚拟机档要按它读"项目内已装了什么"（与会话判据同一份来源，不另编一套）。
+pub fn doctor(root: &std::path::Path) -> i32 {
     let cap = crate::kernel::detail::confine::capability();
-    // 虚拟机档的逐项前置（**只读事实**）：这里按"没登记 QEMU、没选虚拟根"问一次，
-    // 也就是最朴素的情形——登记过的路径以会话配置界面为准（那里按会话选型问同一份清单）。
+    // 虚拟机档的逐项前置（**只读事实**）：项目内补齐过就按那一份问，否则按 PATH 问（与核心同一把尺子）。
+    let installed = crate::capabilities::provision::api::Provision::status(
+        &crate::capabilities::provision::ProvisionService::new(root),
+    )
+    .unwrap_or_default();
+    let installed_at = |prefix: &str| {
+        installed
+            .iter()
+            .find(|d| d.present && d.id.starts_with(prefix))
+            .map(|d| root.join(&d.probe).to_string_lossy().into_owned())
+    };
+    let qemu = installed_at("vm.qemu.");
+    let share_tool = installed_at(if cfg!(windows) {
+        "vm.smbd."
+    } else {
+        "vm.virtiofsd."
+    });
     let vm =
         crate::capabilities::vm::api::vm_requirements(&crate::capabilities::vm::api::VmInputs {
-            qemu: None,
-            share_tool: None,
+            qemu: qemu.as_deref(),
+            share_tool: share_tool.as_deref(),
             probe: &crate::kernel::detail::HostProbeAdapter,
         });
     let doc = serde_json::json!({

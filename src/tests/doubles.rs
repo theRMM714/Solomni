@@ -77,6 +77,13 @@ impl InMemorySettings {
         self.fail = Some(msg.to_string());
         self
     }
+    /// 目的：指定登记的外部工具路径（断言"显式登记优先"）。
+    pub(crate) fn with_qemu_path(qemu: &str) -> InMemorySettings {
+        let s = InMemorySettings::new();
+        s.s.lock().expect("锁").app.qemu_path = qemu.to_string();
+        s
+    }
+
     /// 指定默认执行档位的登记处（断言虚拟机档下的诊断与工具回执）。
     pub(crate) fn with_tier(tier: Tier) -> InMemorySettings {
         let s = InMemorySettings::new();
@@ -1108,10 +1115,17 @@ pub(crate) fn work(name: &str, mode: WorkMode, modules: &[&str]) -> WorkSpec {
 /// 目的：假依赖补齐面——清单为空、动作不能真跑（conductor 只读它的虚拟根清单；测试不碰网络与下载）。
 pub(crate) fn test_provision(
 ) -> Arc<dyn crate::capabilities::provision::api::Provision + Send + Sync> {
-    struct EmptyProvision;
-    impl crate::capabilities::provision::api::Provision for EmptyProvision {
+    test_provision_with(Vec::new())
+}
+
+/// 目的：同上，但报一份给定的清单（验"设置里没登记时采用项目内已装的那一个"）。
+pub(crate) fn test_provision_with(
+    deps: Vec<crate::capabilities::provision::api::DepStatus>,
+) -> Arc<dyn crate::capabilities::provision::api::Provision + Send + Sync> {
+    struct FixedProvision(Vec<crate::capabilities::provision::api::DepStatus>);
+    impl crate::capabilities::provision::api::Provision for FixedProvision {
         fn status(&self) -> Result<Vec<crate::capabilities::provision::api::DepStatus>, String> {
-            Ok(Vec::new())
+            Ok(self.0.clone())
         }
         fn guest_bases(
             &self,
@@ -1126,7 +1140,25 @@ pub(crate) fn test_provision(
         }
         fn cancel(&self) {}
     }
-    Arc::new(EmptyProvision)
+    Arc::new(FixedProvision(deps))
+}
+
+/// 目的：一条"已装在项目内"的依赖（`probe` 是相对产品根的写法，与清单同构）。
+pub(crate) fn installed_dep(
+    id: &str,
+    probe: &str,
+) -> crate::capabilities::provision::api::DepStatus {
+    crate::capabilities::provision::api::DepStatus {
+        id: id.to_string(),
+        guest: None,
+        present: true,
+        install: String::new(),
+        probe: probe.to_string(),
+        source: String::new(),
+        url: None,
+        size_mb: 0,
+        note: String::new(),
+    }
 }
 
 /// 协作工作规格（含需求）。

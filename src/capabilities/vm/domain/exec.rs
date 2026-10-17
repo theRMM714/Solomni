@@ -544,8 +544,9 @@ fn hypervisor_how() -> &'static str {
 
 /// QEMU 检测：登记了就用登记的路径，没登记就看 PATH（依赖不预置、不分发，可由 setup 脚本装进项目内）。
 fn qemu_requirement(registered: Option<&str>, probe: &dyn HostProbe) -> VmRequirement {
+    // "登记的路径" 也包含核心在没登记时自动采用的那一份（项目内补齐的包）：对用户是同一件事——按路径找到了。
     let (found, where_from) = match registered.map(str::trim) {
-        Some(p) if !p.is_empty() => (probe.is_file(Path::new(p)), "设置里登记的路径"),
+        Some(p) if !p.is_empty() => (probe.is_file(Path::new(p)), "设置登记或项目内补齐的路径"),
         _ => (probe.has_exe(QEMU_BIN), "PATH"),
     };
     VmRequirement {
@@ -559,7 +560,7 @@ fn qemu_requirement(registered: Option<&str>, probe: &dyn HostProbe) -> VmRequir
         how: if found {
             String::new()
         } else {
-            "自行安装 QEMU 并放进 PATH，或在设置里登记它的完整路径；也可跑 solomni --provision --ensure --yes 把它下载进项目内（需用户同意）"
+            "在创建向导或配置界面点「补齐虚拟机依赖」把它下载进项目内（只写项目内，需用户同意）；也可自行安装 QEMU 并放进 PATH，或在设置里登记它的完整路径。集成环境里没有界面时可用 solomni --provision --ensure --yes"
                 .to_string()
         },
     }
@@ -591,7 +592,7 @@ pub fn resolve_guest(root: &Path, guest: &str) -> Result<std::path::PathBuf, Str
 /// 目的：虚拟根就绪检测——名字认得、那一格目录在场、布局可用（rootfs + 内核或磁盘镜像）。
 /// 约束：检测顺序 = 名字合法性 → 在场 → 布局；三种失败给三种可操作的说明，不混成一句。
 fn guest_requirement(root: &Path, guest: Option<&str>, probe: &dyn HostProbe) -> VmRequirement {
-    let how = "跑 solomni --provision --ensure --yes 把虚拟根装进项目内（需用户同意），或换一个已装好的虚拟根";
+    let how = "在创建向导或配置界面点「补齐虚拟机依赖」把虚拟根装进项目内（只写项目内，需用户同意），或换一个已装好的虚拟根；集成环境里没有界面时可用 solomni --provision --ensure --yes";
     let name = guest.map(str::trim).filter(|g| !g.is_empty());
     let Some(name) = name else {
         return VmRequirement {
@@ -667,7 +668,7 @@ pub fn capability_refusal(vm: &VmInputs<'_>) -> Option<String> {
         return None;
     }
     Some(format!(
-        "虚拟机档现在不可用（{}）：请换本机档。各项前置与怎么补见配置界面的「虚拟机档前置」与 --doctor",
+        "虚拟机档现在不可用（{}）：请换本机档，或在创建向导 / 配置界面的「虚拟机档前置」里点「补齐虚拟机依赖」把缺的装进项目内",
         cap.missing().join("；")
     ))
 }
@@ -711,7 +712,7 @@ pub fn tier_refusal(
         return None;
     }
     Some(format!(
-        "虚拟机档现在不可用（{}）：请换本机档。各项前置与怎么补见配置界面的「虚拟机档前置」与 --doctor",
+        "虚拟机档现在不可用（{}）：请换本机档，或在创建向导 / 配置界面的「虚拟机档前置」里点「补齐虚拟机依赖」把缺的装进项目内",
         readiness.missing().join("；")
     ))
 }

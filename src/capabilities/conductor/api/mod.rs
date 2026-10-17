@@ -336,6 +336,17 @@ pub struct Ops {
     pub secrets: Arc<dyn crate::capabilities::secrets::api::SecretOps + Send + Sync>,
     /// 目的：依赖补齐的统一面（组合根注入；默认未接入，如实失败不假装可用）。
     pub provision: Arc<dyn crate::capabilities::provision::api::Provision + Send + Sync>,
+    /// 目的：组合根**实际装配**的事实（与"现在还能装什么"无关）：本进程用的是哪个共享后端。
+    /// 约束：补齐作业装完共享工具后判据立刻变，但本进程的实现仍是启动时选的那一档——
+    ///   呈现层要据此把这条差别如实说出来，而不是让用户以为换档已经生效。
+    pub assembled: Assembled,
+}
+
+/// 目的：组合根装配出来的、**本进程内不会自己变**的事实。
+#[derive(Clone, Copy, Default)]
+pub struct Assembled {
+    /// 目的：本进程实际装配的共享后端短名（`ShareBackend::id` 的取值；未注入 = None）。
+    pub share: Option<&'static str>,
 }
 
 impl Ops {
@@ -353,6 +364,7 @@ impl Ops {
             residents: Arc::clone(&h.residents),
             secrets: Arc::clone(&h.secrets),
             provision: Arc::new(crate::capabilities::provision::api::NoProvision),
+            assembled: Assembled::default(),
         }
     }
 }
