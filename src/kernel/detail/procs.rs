@@ -643,4 +643,92 @@ mod tests {
         let _ = terminate(child.id());
         let _ = child.wait();
     }
+
+    /// 目的：父死子亡的**另一半**——父进程被强杀，受保护的长命令要跟着没（不是线程退出那种）。
+    /// 约束：测试进程杀不了自己，所以让本测试二进制再起一份当"核心"（见 `guard_helper_spawns_a_guarded_child`），
+    ///   父测试强杀它，再验孙进程没了；只在 Linux 上可判（macOS 走守门进程、Windows 走作业对象）。
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_guarded_child_dies_with_the_process_that_started_it() {
+        let dir = crate::tests::scratch("procs-parent-death");
+        let pidfile = dir.join("child.pid");
+        let me = std::env::current_exe().expect("取本测试二进制");
+        let mut core = Command::new(me)
+            .args([
+                "kernel::detail::procs::tests::guard_helper_spawns_a_guarded_child",
+                "--exact",
+                "--nocapture",
+            ])
+            .env("SOLOMNI_TEST_GUARD_PIDFILE", &pidfile)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .expect("起当核心的那一份");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        let pid = loop {
+            if let Some(pid) = std::fs::read_to_string(&pidfile)
+                .ok()
+                .and_then(|t| t.trim().parse::<u32>().ok())
+            {
+                break pid;
+            }
+            if std::time::Instant::now() >= deadline {
+                let _ = core.kill();
+                let _ = core.wait();
+                panic!("当核心的那一份没交出受保护子进程的 pid");
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        };
+        // 核心被强杀（不是正常退出）：受保护的长命令必须跟着没。
+        let _ = core.kill();
+        let _ = core.wait();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while std::time::Instant::now() < deadline && !is_dead(pid) {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        if !is_dead(pid) {
+            let _ = terminate(pid);
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(is_dead(pid), "核心被强杀后，受保护的子进程不该还活着");
+    }
+
+    /// 目的：上面那条用例的"核心替身"：起一个受 guard 保护的长命令，把 pid 交给父测试，然后等着被杀。
+    /// 约束：正常跑（没有 pidfile 环境变量）时只验 guard 的静态前提（独立进程组），不做空过的用例。
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn guard_helper_spawns_a_guarded_child() {
+        let mut cmd = Command::new("sh");
+        cmd.args(["-c", "exec sleep 30"])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null());
+        guard(&mut cmd);
+        let mut child = spawn(cmd).expect("起受保护的长命令");
+        let Some(pidfile) = std::env::var_os("SOLOMNI_TEST_GUARD_PIDFILE") else {
+            let pgid = unsafe { libc::getpgid(child.id() as i32) };
+            let _ = terminate(child.id());
+            let _ = child.wait();
+            assert_eq!(pgid, child.id() as i32, "guard 要给子进程独立进程组");
+            return;
+        };
+        std::fs::write(pidfile, child.id().to_string()).expect("交 pid 给父测试");
+        // 等父测试强杀本进程：孙进程随 PDEATHSIG 一起没。
+        std::thread::sleep(std::time::Duration::from_secs(30));
+        let _ = terminate(child.id());
+        let _ = child.wait();
+    }
+
+    /// 目的：这个 pid 是不是已经没了（僵尸也算没了：它已经退出，只是还没被收尸）。
+    #[cfg(target_os = "linux")]
+    fn is_dead(pid: u32) -> bool {
+        match std::fs::read_to_string(format!("/proc/{}/stat", pid)) {
+            Err(_) => true,
+            Ok(stat) => stat
+                .rsplit_once(')')
+                .map(|(_, rest)| rest.trim_start().starts_with('Z'))
+                .unwrap_or(false),
+        }
+    }
 }

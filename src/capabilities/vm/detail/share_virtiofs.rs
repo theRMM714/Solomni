@@ -10,9 +10,6 @@ use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
-#[cfg(unix)]
-use std::os::unix::process::CommandExt;
-
 use crate::capabilities::vm::domain::exec::VIRTIOFSD_BIN;
 use crate::kernel::detail::procs::{self, Entry, ProcessBook};
 
@@ -82,8 +79,9 @@ impl ShareBackend for VirtioFsShare {
             // 先把套接字与子进程交给凭据：中途任一步失败，Drop 都会把它们一起收掉，不留残留。
             guard.paths.push(sock.clone());
             let child = spawn_virtiofsd(&exe, &m.host, &sock, m.read_only)?;
-            // 作业对象（Windows）：核心一死，守护进程跟着死；绑不上只少一层兜底。
+            // 作业对象（Windows）/ 守门进程（macOS）：核心一死，守护进程跟着死；接不上只少一层兜底。
             let _ = procs::bind(&child);
+            procs::watch(&child);
             if let Some(book) = &guard.book {
                 let sock_txt = sock.display().to_string();
                 book.record(Entry {
@@ -160,14 +158,13 @@ fn spawn_virtiofsd(
         cmd.arg("--readonly");
     }
     let what = exe.display().to_string();
-    // --sandbox namespace 会让 virtiofsd fork 出真正的守护进程：把它放进自己的进程组，收尾时按组杀，别留孤儿。
-    #[cfg(unix)]
-    cmd.process_group(0);
     cmd.stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .map_err(|e| format!("起不了 virtiofsd（{}）：{}", what, e))
+        .stderr(Stdio::null());
+    // 独立进程组 + 父死子亡：--sandbox namespace 会 fork 出真正的守护进程（与发起进程同组），
+    // 收尾按组杀；父死子亡盯住发起进程——它一死，沙箱命名空间里的守护进程随之结束。
+    procs::guard(&mut cmd);
+    procs::spawn(cmd).map_err(|e| format!("起不了 virtiofsd（{}）：{}", what, e))
 }
 
 /// 目的：等守护进程把套接字建出来；它提前退出就如实报错（不干等）。

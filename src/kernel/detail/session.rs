@@ -1,8 +1,9 @@
 //! 目的：**长驻外部进程**的机制实现——拉起守门进程并保住它，按行收发，关闭时连根杀树。
-//! 管：`ProcessSessions`（实现 `SessionHost`）：守门进程协议、管道、进程组、环境白名单与隐私字段注入。
+//! 管：`ProcessSessions`（实现 `SessionHost`）：守门进程协议、管道、进程组与父死子亡、环境白名单与隐私字段注入。
 //! 不管：端口定义（在 `ports`）；按行协议的语义（MCP / ACP 在各自适配器里）。
-//! 联动：由入口层的组合根构造并注入适配器；一次性执行仍走 `process.rs` 的 `ProcTools`。
+//! 联动：由入口层的组合根构造并注入适配器；一次性执行仍走 `process.rs` 的 `ProcTools`；父死子亡与进程组走 `procs.rs`。
 
+use crate::kernel::detail::procs;
 use crate::kernel::ports::{Session, SessionHost, SessionSpec};
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
@@ -157,15 +158,12 @@ impl SessionHost for ProcessSessions {
         for (k, v) in &spec.env {
             cmd.env(k, v);
         }
-        // 独立进程组：关闭会话时连根杀掉守门进程与服务进程。
-        #[cfg(unix)]
-        {
-            use std::os::unix::process::CommandExt;
-            cmd.process_group(0);
-        }
-        let mut child = cmd
-            .spawn()
-            .map_err(|e| format!("服务进程启动失败：{}", e))?;
+        // 父死子亡与独立进程组：核心被强杀时，守门进程连同它拉起的服务不该留下。
+        procs::guard(&mut cmd);
+        let mut child = procs::spawn(cmd).map_err(|e| format!("服务进程启动失败：{}", e))?;
+        // 作业对象（Windows）/ 守门进程（macOS）：核心一死，它与服务一起收。
+        let _ = procs::bind(&child);
+        procs::watch(&child);
         let stdin = child
             .stdin
             .take()
