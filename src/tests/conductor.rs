@@ -97,7 +97,9 @@ fn vm_capable_probe(guest: &str) -> std::sync::Arc<crate::tests::doubles::FixedP
 }
 
 /// 目的：创建虚拟机档会话时**核心线程不陪着等 guest**——起 guest（几十秒到几分钟）在调用方线程上跑。
-/// 约束：以前这一段在核心调用里，起 guest 期间任何经核心的请求都排队（界面整片假死）——这里钉住它不会回来。
+/// 约束：这段判据要虚拟机档真能建起来；本平台 guest 后端尚未真机验收（`VERIFIED_HOSTS` 只有 linux / windows），
+///   所以只在已验平台跑——macOS 验收后去掉这个 cfg 并同步那张表。
+#[cfg(not(target_os = "macos"))]
 #[test]
 pub(crate) fn creating_a_vm_session_does_not_block_the_core() {
     use crate::capabilities::conductor::api::ConductorHandle;
@@ -143,6 +145,8 @@ pub(crate) fn creating_a_vm_session_does_not_block_the_core() {
 }
 
 /// 目的：guest 起不来时**什么都不留**：会话没建、历史里没有它。
+/// 约束：同 `creating_a_vm_session_does_not_block_the_core`——要虚拟机档真能建起来，只在已验平台上判。
+#[cfg(not(target_os = "macos"))]
 #[test]
 pub(crate) fn a_failed_guest_boot_leaves_no_session_behind() {
     use crate::capabilities::conductor::api::ConductorHandle;
