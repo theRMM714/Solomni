@@ -96,6 +96,8 @@ node dev.js test|fmt|clippy   # 本机开发回路：改一层验一层；不要
 - 与运行环境分开的理由：只想跑产品的人不需要这些；门禁在只有运行环境的机器上仍能跑，缺的项如实 `env-skip`。
 - 环境是独立一层（[env.js](env.js)）：路径约定、工具链探测、环境拼装与安装都在这里；`node env.js` 看解析结果，`node env.js --print-env` 给机器读。
   `setup-runtime.js` / `setup-dev.js` 只编排；`node setup-runtime.js` 与 `node env.js setup` 等价。
+  Windows 首次运行会征得同意后把可携 MinGW（`dlltool.exe`，`windows-sys` 的 raw-dylib 需要）装进项目内 `.tools/`；
+  已有完整 binutils 的机器用 `SOLOMNI_MINGW_BIN=<bin 目录>` 指过去即可，不必再下 260 MB。
 - **外部连接台账**：`links.yaml` 是项目自用、可能变的外部 URL 的唯一真相（当前：工具链引导源、winlibs 上游发布包的钉死 URL、自托管依赖 Release 前缀、guest 镜像源与 SMB helper 资产）；
   改一处全仓生效。**下载源的校验值与那条链接成对**写在同一份台账里（`<链接键>.sha256`），自托管 release 资产的校验值写在 `dependencies.yaml` 的条目里。
   用户覆盖走 `.home/settings.yaml` 与环境变量，不改仓库里的台账。
