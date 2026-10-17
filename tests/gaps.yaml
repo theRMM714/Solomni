@@ -18,6 +18,7 @@
     契约与组合矩阵见 docs/vm/README.md 的「多平台组合」。
   accept: |
     每个组合单独判定：vm 档会话里模块工具真在 guest 内跑（进程与宿主隔离）、删会话即销毁 guest 与其磁盘；
+    同一组合的 `solomni --build=<模块 id> --guest=<虚拟根>` 一并判（在 guest 里编出产物、经挂载落回宿主那份）；
     就绪面板按组合逐项列出缺什么、每项怎么补；每平台探针覆盖"组合可用 / 不可用"两种结论。
     Linux 与 Windows 已验；macOS 通过后销账，全部通过后删除本条，并同步 PRODUCT.md / RUNTIME_SPEC.md / docs/vm/ 的当前状态。
   blocked_by: |
@@ -103,19 +104,3 @@
     三平台各有一份覆盖率报告，且报告明确标注"仅进程内 / 仅当前平台"或已聚合子进程；
     未覆盖的生产路径逐条有补测或缺口结论。
   blocked_by: 缺少观察面（子进程插桩与合并尚未实现）
-
-- id: module.build-coverage-windows
-  scope: global
-  level: T3
-  why: |
-    本机构建（`solomni --build=<模块 id>`）的产品路径只在 **unix** 上有用例：用例里的"构建"用 `mkdir -p` /
-    `printf` / `chmod`（Windows 的 cmd 没有这些），所以整条用例包在 `#[cfg(unix)]` 里。Windows 上
-    "在宿主上编出产物 → 入口判据放行 → 命中缓存"这条链没有用例（CI 的 e2e 走的是编排脚本自己编，不是产品这条命令）。
-    模块侧已经跨平台（`tools/build` + `tools/build.cmd`，见 MODULE_SPEC 的「构建」），缺的是**验收**。
-  how: |
-    在 Windows 上补一条用例：构建命令用 cmd 写法、产物写成 `.cmd`（入口判据按候选认），或者让 e2e 在跑产品前
-    把工具链放进 PATH、改调 `solomni --build=indexer`（CI runner 上有哪些编译器要先探明，别赌）。
-  accept: |
-    Windows 上 `solomni --build=<id>` 编出产物、入口判据放行、第二次跳过（真机或 CI 上的用例为准）。
-  blocked_by: |
-    无（需要有 C/C++ 工具链在 PATH 上的 Windows 环境来验）。

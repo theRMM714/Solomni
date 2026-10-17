@@ -43,6 +43,10 @@ cargo deny check
   `systools/**` 是否被门户或细则提到、根目录 `*.md` 是否都进了 `AGENTS.md` 的路由表；
 - **外部连接台账（`links.yaml`）是否与消费点一一对应**：值必须是 `https://`、域在白名单内、键不重复；
   代码里 `link(...)` 引用的键都在台账里，台账里也没有没人用的键（新增外链要连同消费点一起进）；
+  **校验值与它守护的那条链接成对**：键写 `<链接键>.sha256`、值必须是 64 位十六进制、对应的链接键必须存在
+  （pin 与 URL 分居两处会腐烂：曾把 URL 升到新版本却忘了改代码里的常量，于是每次下载都判“不符 → 删文件 → 重跑”）；
+- **依赖清单（`dependencies.yaml`）的校验值格式**：写了 `sha256:` 就必须是 64 位十六进制；不写 = 没 pin
+  （上游 `latest` 这种会滚动的源只能这样，如实不校验，不假装验过）；
 - **门禁自己是否可信**：解析器自测（`run-tests.js` 的 `gateParserSelfTest`）必须过——`cargo tree --duplicates`
   退出码恒为 0，解析器坏掉就是静默全绿；
 - **是否存在 `#[ignore]` 或未授权的跳过**：`#[ignore]` 一律禁止，报告里 `ignored > 0` 即失败。
@@ -54,7 +58,7 @@ cargo deny check
 
 - `cargo check --all-targets`；
 - 结构审查（测试目标登记、孤儿测试文件、缺口账格式、单元地图双向一致、文档链接完整性、提示词键表与真相源表比对、根文档路由、外部连接台账、
-  **门禁解析器自测**与 **`#[ignore]` 禁令**）；
+  **批处理脚本只允许 ASCII**（cmd 按代码页解释字节，非 ASCII 会吞掉下一行）、**门禁解析器自测**与 **`#[ignore]` 禁令**）；
 - `cargo fmt --all -- --check`；
 - `cargo clippy --all-targets --all-features --keep-going -- -D warnings`；
 - `cargo check` 的 rustc 告警数；

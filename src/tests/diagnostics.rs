@@ -3,7 +3,57 @@
 //! 不管：CLI 参数解析（在 main.rs）、模块清单校验（在 `modules.rs`）、围栏机制本身（在 kernel）。
 //! 联动：模块契约见 MODULE_SPEC 的「构建」；状态落 `.vm/build-state/<模块>.json`。
 
+/// 目的：构建契约用的夹具模块——清单只声明 `build.command: tools/build`，**平台各一份脚本**并排放
+///   （与 MODULE_SPEC「构建」里模块作者的跨平台写法、随仓 indexer 一致：unix 由 sh 直接跑 `tools/build`，
+///   Windows 由 cmd 按 PATHEXT 落到 `tools/build.cmd`）。
+/// 返回：模块工具声明的入口在**本平台**落成的产物路径（入口判据按壳的候选认，Windows 落 `.cmd`）。
+/// 约束：脚本只写 **ASCII**——cmd 按控制台代码页解释批处理字节，非 ASCII 会吞掉下一行（见 MODULE_SPEC 的「跨平台」）。
+fn host_build_module(module: &std::path::Path) -> std::path::PathBuf {
+    std::fs::create_dir_all(module.join("tools")).expect("建模块目录");
+    std::fs::write(
+        module.join("module.yaml"),
+        "id: hello\nbrief: 构建契约用例\nsystem: 你负责打招呼\nbuild:\n  command: tools/build\ntools:\n  hi:\n    command: build/hello\n",
+    )
+    .expect("写模块清单");
+    // 构建命令每跑一次就往 `build/runs.txt` 记一行：`build/` 不进源指纹，所以它是"命令真的又跑了一次"的
+    // 硬证据（比产物 mtime 可靠——Windows 的 `copy` 保留源文件时间戳，mtime 不前进并不等于没重编）。
+    std::fs::write(
+        module.join("tools").join("build"),
+        "#!/bin/sh\nset -e\nmkdir -p build\nprintf '#!/bin/sh\\necho HELLO-OK\\n' > build/hello\nchmod +x build/hello\necho run >> build/runs.txt\n",
+    )
+    .expect("写 unix 构建脚本");
+    // Windows 那份：cmd 按 PATHEXT 找到同名 `.cmd`（unix 那份它不看，反之亦然——两个文件并排就是跨平台写法）。
+    std::fs::write(
+        module.join("tools").join("build.cmd"),
+        "@echo off\r\nif not exist build mkdir build\r\n> build\\hello.cmd echo @echo off\r\n>> build\\hello.cmd echo echo HELLO-OK\r\n>> build\\runs.txt echo run\r\n",
+    )
+    .expect("写 Windows 构建脚本");
+    // unix 的脚本要能直接跑（产品在入口判据与执行时都按它判）。
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let script = module.join("tools").join("build");
+        let mut perm = std::fs::metadata(&script).expect("读权限位").permissions();
+        perm.set_mode(0o755);
+        std::fs::set_permissions(&script, perm).expect("加执行位");
+    }
+    let name = if cfg!(windows) { "hello.cmd" } else { "hello" };
+    module.join("build").join(name)
+}
+
+/// 目的：构建命令真跑了几次——夹具脚本每跑一次就往 `build/runs.txt` 记一行。
+fn build_runs(module: &std::path::Path) -> usize {
+    std::fs::read_to_string(module.join("build").join("runs.txt"))
+        .map(|text| text.lines().filter(|l| !l.trim().is_empty()).count())
+        .unwrap_or(0)
+}
+
+/// 目的：构建期望失败的命令——两个平台各自的壳语法，都只写 ASCII。
 #[cfg(unix)]
+const FAILING_BUILD: &str = "echo boom >&2; exit 7";
+#[cfg(windows)]
+const FAILING_BUILD: &str = "echo boom 1>&2 & exit /b 7";
+
 #[test]
 fn host_build_makes_the_entry_and_hits_the_cache() {
     use crate::capabilities::modules::ports::ModuleSource;
@@ -18,13 +68,8 @@ fn host_build_makes_the_entry_and_hits_the_cache() {
     };
     let root = crate::tests::scratch("host-build");
     let module = root.join("modules").join("hello");
-    std::fs::create_dir_all(module.join("tools")).expect("建模块目录");
-    // 一个不需要编译器的"构建"：写一个可执行脚本当产物（unix 上哪台机器都跑得动）。
-    std::fs::write(
-        module.join("module.yaml"),
-        "id: hello\nbrief: 构建契约用例\nsystem: 你负责打招呼\nbuild:\n  command: \"mkdir -p build && printf '#!/bin/sh\\necho HELLO-OK\\n' > build/hello && chmod +x build/hello\"\ntools:\n  hi:\n    command: build/hello\n",
-    )
-    .expect("写模块清单");
+    // 一个不需要编译器的"构建"：脚本写一个能直接跑的产物（两平台都跑得动，不赌宿主工具链）。
+    let artifact = host_build_module(&module);
     let runner = ProcTools::new(
         exe,
         crate::tests::doubles::test_process_texts(),
@@ -37,18 +82,20 @@ fn host_build_makes_the_entry_and_hits_the_cache() {
         0,
         "第一次构建要成功"
     );
-    let artifact = module.join("build").join("hello");
     assert!(
         artifact.is_file(),
         "产物要落进模块目录：{}",
         artifact.display()
     );
-    use std::os::unix::fs::PermissionsExt;
-    let mode = std::fs::metadata(&artifact)
-        .expect("读权限")
-        .permissions()
-        .mode();
-    assert!(mode & 0o111 != 0, "产物要能直接跑（拿到 {:o}）", mode);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(&artifact)
+            .expect("读权限")
+            .permissions()
+            .mode();
+        assert!(mode & 0o111 != 0, "产物要能直接跑（拿到 {:o}）", mode);
+    }
     let state = root.join(".vm").join("build-state").join("hello.json");
     assert!(state.is_file(), "状态要落盘：{}", state.display());
     // 会话语义：这条入口此时应当放行（入口判据真在、真能跑）。
@@ -64,7 +111,7 @@ fn host_build_makes_the_entry_and_hits_the_cache() {
         .is_empty(),
         "构建完入口判据要放行"
     );
-    // 第二次：指纹没变 → 跳过（产物不被重写，mtime 不动）。
+    // 第二次：指纹没变 → 跳过（产物不被重写，构建命令也不再跑）。
     let before = std::fs::metadata(&artifact)
         .expect("读 mtime")
         .modified()
@@ -80,21 +127,17 @@ fn host_build_makes_the_entry_and_hits_the_cache() {
         .modified()
         .expect("mtime");
     assert_eq!(before, after, "命中缓存时不该重编（产物不该被重写）");
-    // 源变了 → 真重编（mtime 前进）。
+    assert_eq!(build_runs(&module), 1, "命中缓存时构建命令不该再跑");
+    // 源变了 → 真重编（构建命令又跑了一次）。
     std::fs::write(module.join("tools").join("src.txt"), "changed\n").expect("改源文件");
     assert_eq!(
         crate::diagnostics::build_module(&root, "hello", &runner),
         0,
         "改源后要重编"
     );
-    let after2 = std::fs::metadata(&artifact)
-        .expect("读 mtime")
-        .modified()
-        .expect("mtime");
-    assert!(after2 > after, "源变了要真重编");
+    assert_eq!(build_runs(&module), 2, "源变了构建命令要真重跑");
 }
 
-#[cfg(unix)]
 #[test]
 fn host_build_failure_is_honest_and_leaves_no_state() {
     use crate::kernel::detail::process::ProcTools;
@@ -110,7 +153,10 @@ fn host_build_failure_is_honest_and_leaves_no_state() {
     std::fs::create_dir_all(&module).expect("建模块目录");
     std::fs::write(
         module.join("module.yaml"),
-        "id: bad\nbrief: 构建失败用例\nsystem: 你负责失败\nbuild:\n  command: \"echo boom >&2; exit 7\"\ntools:\n  hi:\n    command: build/bad\n",
+        format!(
+            "id: bad\nbrief: 构建失败用例\nsystem: 你负责失败\nbuild:\n  command: \"{}\"\ntools:\n  hi:\n    command: build/bad\n",
+            FAILING_BUILD
+        ),
     )
     .expect("写模块清单");
     let runner = ProcTools::new(
@@ -132,6 +178,19 @@ fn host_build_failure_is_honest_and_leaves_no_state() {
             .is_file(),
         "失败不落状态（下次重试）"
     );
+    // 构建期能力不在场：如实拒绝（点出缺哪个，不猜、不降级）。
+    let needy = root.join("modules").join("needy");
+    std::fs::create_dir_all(&needy).expect("建模块目录");
+    std::fs::write(
+        needy.join("module.yaml"),
+        "id: needy\nbrief: 构建期能力不在场\nsystem: 你负责构建\nbuild:\n  command: tools/build\n  needs: [no-such-tool-xyz]\ntools:\n  hi:\n    command: build/hello\n",
+    )
+    .expect("写模块清单");
+    assert_eq!(
+        crate::diagnostics::build_module(&root, "needy", &runner),
+        1,
+        "构建期工具不在场要如实拒绝"
+    );
     // 没声明 build 的模块：明确拒绝（不是静默成功）。
     let plain = root.join("modules").join("plain");
     std::fs::create_dir_all(&plain).expect("建模块目录");
@@ -146,6 +205,7 @@ fn host_build_failure_is_honest_and_leaves_no_state() {
         "没声明 build 的模块要明确拒绝"
     );
 }
+
 #[test]
 pub(crate) fn build_packages_take_guest_or_library() {
     use crate::capabilities::vm::api::Library;
