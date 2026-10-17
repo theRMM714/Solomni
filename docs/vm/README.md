@@ -23,7 +23,7 @@
 按平台的组合回退链是数据（`default_combos` / `share_chain`），**共享档在起 guest 那一刻按候选挑**（不是装配期定一次），加速器按平台给（`accel=kvm:tcg` / `accel=whpx:tcg` / `accel=hvf:tcg`），共享要隧道时给 `restrict=on` 网卡。
 执行分派已接线（会话在 `tier == Vm` 时把模块命令交给 guest；建会话时装配并拉起，会话删除时销毁）；就绪项 `guest` 按**已验平台数据表**（`VERIFIED_HOSTS`）放开，并带上本平台上**已实现**的组合。
 判据分两层：**机器能力**（`vm_capability`：hypervisor / guest 后端 / 引擎 / 共享档）决定虚拟机档能不能**选**；**虚拟根是会话级**，创建或会话配置里从清单选（界面给下拉），保存 /「开始」时才合并进严格判据（`tier_readiness`）。
-**静态预检**在「开始」那一刻一次走完：机器能力 × 虚拟根（名字 → `.vm/guest/<名>`，`resolve_guest`）× guest 声明的运行能力（`guest.yaml` 的 `runtimes`）× 模块声明 × 包库 × **模块工具的入口**（相对路径入口必须在场且能跑；两档都查）——
+**静态预检**在「开始」那一刻一次走完：机器能力 × 虚拟根（名字 → `.vm/guest/<名>`，`resolve_guest`）× guest 声明的运行能力（`guest.yaml` 的 `runtimes`）× 模块声明 × 包库 × **模块工具的入口**（相对路径入口必须在场且能跑；两档都查——虚拟机档按 **guest 的 os** 解析名字、跨平台还看文件形式，宿主编出来的产物在 guest 里跑不了，一样算缺）——
 缺任何一项都**如实拒绝、先预检再启动**（不拉一台跑不了工具的 guest）：`plan` 对缺包同样返回拒绝，`diagnose_text` 给出「把包放进 `runtimes/`、或让镜像声明」的说法。
 
 **当前状态**：Linux（QEMU/KVM + virtiofs，默认共享档；virtiofsd 不在场或**不能执行**时自动退 9p）与 Windows（QEMU/WHPX + SMB guestfwd 实时共享，缺 smbd 时自动退 QGA 复制）已真机验收——引擎级探针与 e2e 的 vm 会话场景都过

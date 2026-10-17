@@ -368,9 +368,15 @@ impl Conductor {
             .filter(|m| seen.iter().any(|id| id == &m.manifest.id))
             .cloned()
             .collect();
+        // 入口按**目标环境**判：虚拟机档在 guest 里跑（guest 的 os），本机档在宿主；
+        // 跨平台时还要看文件形式——宿主编出来的产物（如 Windows 的 .exe）在 linux guest 里跑不了。
+        let guest = self.guest_os_of(&spec).map(|g| g.as_str());
+        let target_os = guest.unwrap_or(std::env::consts::OS);
         let missing: Vec<crate::capabilities::vm::api::MissingEntry> =
-            crate::capabilities::vm::api::missing_entries(&session_modules, &|p| {
+            crate::capabilities::vm::api::missing_entries_for(&session_modules, target_os, &|p| {
                 self.probe.is_executable(p)
+                    && (target_os == std::env::consts::OS
+                        || crate::capabilities::vm::api::runs_on_target(p, target_os))
             });
         let plan = crate::capabilities::vm::api::plan(
             &spec,
@@ -379,7 +385,7 @@ impl Conductor {
             &self.guest_runtimes_of(&spec),
             &missing,
         )
-        .map_err(|diags| crate::capabilities::vm::api::diagnose_text(&diags))?;
+        .map_err(|diags| crate::capabilities::vm::api::diagnose_text_for(&diags, guest))?;
         self.log.info(
             "conductor::edit_session",
             &format!(
@@ -878,11 +884,15 @@ impl Conductor {
                 );
             }
         }
-        // 执行选型的完整性检查（「开始」即冻结）：虚拟机档的选型不成立（多版本未定版 / 定版不存在 /
-        // 路径冲突）如实拒绝；**缺包同样拒绝**（没有工具用户完不成工作，不降级）。装配阶段按同一份计划取包。
+        // 执行选型完整性（「开始」即冻结）：选型不成立或**缺包**都如实拒绝（没有工具，用户完不成工作）。
+        // 入口**按目标环境**判：虚拟机档按 guest 的 os 解析名字，跨平台还看文件形式（宿主编的产物跑不了）。
+        let guest = self.guest_os_of(&meta.exec).map(|g| g.as_str());
+        let target_os = guest.unwrap_or(std::env::consts::OS);
         let missing: Vec<crate::capabilities::vm::api::MissingEntry> =
-            crate::capabilities::vm::api::missing_entries(&session_modules, &|p| {
+            crate::capabilities::vm::api::missing_entries_for(&session_modules, target_os, &|p| {
                 self.probe.is_executable(p)
+                    && (target_os == std::env::consts::OS
+                        || crate::capabilities::vm::api::runs_on_target(p, target_os))
             });
         let plan = crate::capabilities::vm::api::plan(
             &meta.exec,
@@ -891,7 +901,7 @@ impl Conductor {
             &self.guest_runtimes_of(&meta.exec),
             &missing,
         )
-        .map_err(|diags| crate::capabilities::vm::api::diagnose_text(&diags))?;
+        .map_err(|diags| crate::capabilities::vm::api::diagnose_text_for(&diags, guest))?;
         self.log.info(
             "conductor::create_work",
             &crate::capabilities::vm::api::plan_summary(&plan),

@@ -993,6 +993,20 @@ function btn(label, cls) {
   b.type = 'button'; b.className = cls || 'btn'; b.textContent = label;
   return b;
 }
+/* 把按钮置忙（转圈 + 禁用 + 换文案），返回复位函数。为什么要有：一件要等几十秒的事，
+ * 界面不给反应就等于告诉用户「卡了」；复位放在 finally 里，失败也一定恢复可点。 */
+function busyButton(b, label) {
+  const was = b.textContent;
+  const wasDisabled = !!b.disabled;
+  b.disabled = true;
+  b.classList.add('busy');
+  if (label) b.textContent = label;
+  return () => {
+    b.classList.remove('busy');
+    b.textContent = was;
+    b.disabled = wasDisabled;
+  };
+}
 function textInput(placeholder, type) {
   const i = document.createElement('input');
   i.className = 'field-input'; i.placeholder = placeholder || ''; i.autocomplete = 'off';
@@ -2037,8 +2051,22 @@ async function openWizard(draft) {
     };
 
     // 真正下发（重名时先经 choiceModal 让用户裁决，绝不用原生 confirm）
+    // 要等：虚拟机档在这一步里起 guest（拉 QEMU + 等 agent，首次几十秒到几分钟）——按钮转圈 + 说清在等什么。
     async function submit(body) {
-      try { await startSession(body); closeModal(); } catch (e) { notice('操作失败', e.message, 'err'); }
+      const release = busyButton(createBtn, '正在创建…');
+      cancelBtn.disabled = true;
+      c.setMsg(w.tier === 'vm'
+        ? '正在创建：虚拟机档要先起一台 guest（首次可能要几十秒到几分钟），起来之后才开工…'
+        : '正在创建…');
+      try {
+        await startSession(body);
+        closeModal();
+      } catch (e) {
+        c.setMsg('创建失败：' + e.message, true);
+      } finally {
+        release();
+        cancelBtn.disabled = false;
+      }
     }
 
     createBtn.onclick = async () => {

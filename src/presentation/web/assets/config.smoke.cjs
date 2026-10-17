@@ -104,6 +104,7 @@ const RAW = { // 还没开过的协作会话：名字可改、本机档
 const calls = [];
 let setupPolls = 0;
 let setupStarted = false;
+let tiersVmAvailable = false; // 先在"虚拟机档不可用"的一侧验补齐入口，再切到可用侧验创建忙碌态
 const jsonRes = (v, ok, status) => ({ ok: ok !== false, status: status || 200, json: async () => v });
 const sandbox = {
   document,
@@ -143,16 +144,26 @@ const sandbox = {
         pending,
       });
     }
+    // 建会话（虚拟机会慢）：故意拖一会儿，好在请求在飞的时候验"按钮在转圈"。
+    if (url === "/api/actions/create_session") {
+      await new Promise((r) => setTimeout(r, 60));
+      return jsonRes({ sid: "new-1", agents: ["research"] });
+    }
     if (url === "/api/setup/ensure") {
       setupStarted = true;
       return jsonRes({ ok: true, deps: ["vm.virtiofsd.windows"] });
     }
-    // 创建向导要读一次档位选择（虚拟机档不可用 + 逐项前置）。
+    // 创建向导要读一次档位选择（默认档 + 虚拟机档可用性与逐项前置 + 可选虚拟根）。
     if (url === "/api/tiers") {
       return jsonRes({ tiers: {
-        default: "host", vm_available: false,
-        vm_unavailable_reason: "虚拟机档现在不可用（没有找到 qemu-system-x86_64（按PATH找过））",
-        vm_requirements: RAW.vm_requirements, guests: [], available: {},
+        default: "host", vm_available: tiersVmAvailable,
+        vm_unavailable_reason: tiersVmAvailable ? "" : "虚拟机档现在不可用（没有找到 qemu-system-x86_64（按PATH找过））",
+        vm_requirements: tiersVmAvailable ? [] : RAW.vm_requirements,
+        guests: tiersVmAvailable
+          ? [{ guest: "windows", label: "debian-13", os: "linux", arch: "amd64", ready: true,
+              missing: [], install: ".vm/guest/windows", runtimes: ["python"] }]
+          : [],
+        available: {},
       } });
     }
     if (/\/api\/history\/[^/]+$/.test(url)) return jsonRes({ meta: { mode: "single" }, events: [] });
@@ -384,6 +395,39 @@ check("config: 虚拟根状态说清装齐与自带能力（不写「已就绪�
     !clickErrored && wizText.indexOf('vm.virtiofsd.windows') >= 0 && wizText.indexOf('只写项目内') >= 0,
     'clickErrored=' + String(clickErrored) + ' text=' + wizText.slice(0, 200));
   closeModalIfAny();
+
+  /* ---- 创建时的忙碌态：虚拟机档要在这一步起 guest（要等），按钮必须转圈并说清在等什么 ---- */
+  closeModalIfAny();
+  tiersVmAvailable = true; // 这一段要验虚拟机档的创建（它才要等 guest 起来）
+  await vm.runInContext('openWizard()', ctx);
+  await sleep(80);
+  const wizRoot = reg.get('#modal-root');
+  const wizRadios = walk(wizRoot, []).filter((n) => n.type === 'radio' && n.name === 'wf-tier');
+  const wizVm = wizRadios[1];
+  check('busy: 虚拟机档可用时可选', !!wizVm && wizVm.disabled !== true);
+  wizVm.checked = true; (wizVm._h.change || []).forEach((f) => f());
+  const nameInp = walk(wizRoot, []).find((n) => n.tag === 'input' && String(n.placeholder).indexOf('工作名称') >= 0);
+  nameInp.value = 'busy-check';
+  const modLab = walk(wizRoot, []).find((n) => n.tag === 'label'
+    && (n.children || []).some((c) => String(c.textContent || '') === 'research'));
+  const modCb = modLab && (modLab.children || []).find((n) => n.type === 'checkbox');
+  check('busy: 向导里能勾到模块', !!modCb);
+  modCb.checked = true; (modCb._h.change || []).forEach((f) => f());
+  const createBtn = findButton(wizRoot, '创建并开始');
+  check('busy: 创建按钮在场', !!createBtn);
+  const pending = createBtn.onclick();
+  await sleep(10);
+  check('busy: 点下去立刻置忙（禁用 + 文案改口）',
+    createBtn.disabled === true && createBtn.textContent === '正在创建…',
+    'disabled=' + createBtn.disabled + ' text=' + createBtn.textContent);
+  check('busy: 忙碌时按钮带转圈类', String(createBtn.className).indexOf('busy') >= 0, createBtn.className);
+  const busyMsg = findByClass(reg.get('#modal-root'), 'modal-msg')[0];
+  check('busy: 说清在等什么（虚拟机要先起 guest）',
+    !!busyMsg && String(busyMsg.textContent).indexOf('正在创建') >= 0
+    && String(busyMsg.textContent).indexOf('guest') >= 0, busyMsg && busyMsg.textContent);
+  await pending;
+  await sleep(120);
+  check('busy: 建完之后进入会话、弹层关掉', state.activeSid === 'new-1', 'activeSid=' + state.activeSid);
 
   /* ---- 「打开」接线：点了真的进入会话视图 ---- */
   closeModalIfAny();

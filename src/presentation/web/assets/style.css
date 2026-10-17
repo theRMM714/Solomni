@@ -165,6 +165,14 @@ body {
 .btn-ghost { background: transparent; }
 .btn-block { width: 100%; }
 .btn:disabled { opacity: .5; cursor: not-allowed; }
+/* 正在做一件要等的事：按钮上转圈 + 进度光标（避免用户以为点没生效） */
+.btn.busy { cursor: progress; }
+.btn.busy::before {
+  content: ""; display: inline-block; width: 11px; height: 11px; margin-right: 8px;
+  vertical-align: -1px; border: 2px solid currentColor; border-right-color: transparent;
+  border-radius: 50%; animation: solomni-spin .7s linear infinite;
+}
+@keyframes solomni-spin { to { transform: rotate(360deg); } }
 
 /* ---- 空态 ---- */
 .empty { margin: auto; text-align: center; color: var(--fg-dim); }

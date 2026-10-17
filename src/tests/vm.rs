@@ -316,7 +316,8 @@ pub(crate) fn missing_entries_flags_only_relative_command_entries() {
     // 宿主事实：a 的 `build/` 下**什么都没有**（其余地方都算在场）——入口判据只看这一处。
     // 谓词不能只比一个字面路径：Windows 上判据会接连看 `.exe` 等候选（见 entry_check_follows_the_target_shell_rules）。
     let absent = abs(&["a", "build"]);
-    let missing = exec::missing_entries(&modules, &|p| !p.starts_with(&absent));
+    let missing =
+        exec::missing_entries_for(&modules, std::env::consts::OS, &|p| !p.starts_with(&absent));
     let got: Vec<(&str, &str, &str)> = missing
         .iter()
         .map(|m| (m.module.as_str(), m.tool.as_str(), m.command.as_str()))
@@ -371,6 +372,102 @@ pub(crate) fn entry_check_follows_the_target_shell_rules() {
         &only_literal
     )
     .is_empty());
+}
+
+/// 目的：跨平台判入口要看**文件形式**——宿主产物（PE）在 linux guest 里跑不了，必须在预检就判否。
+#[test]
+pub(crate) fn runs_on_target_checks_the_file_form_not_just_the_name() {
+    use crate::capabilities::vm::domain::exec::runs_on_target;
+    let dir = crate::tests::scratch("entry-form");
+    let write = |name: &str, bytes: &[u8]| {
+        let p = dir.join(name);
+        std::fs::write(&p, bytes).expect("写入口样例");
+        p
+    };
+    let elf = write("elf.bin", b"\x7fELF\x02\x01\x01\x00rest");
+    let pe = write("pe.bin", b"MZ\x90\x00rest");
+    let script = write("script.bin", b"#!/bin/sh\necho hi\n");
+    let plain = write("plain.bin", b"just text\n");
+    assert!(runs_on_target(&elf, "linux"), "ELF 在 linux 上能跑");
+    assert!(!runs_on_target(&pe, "linux"), "PE 不是 linux 能执行的东西");
+    assert!(runs_on_target(&script, "linux"), "带 shebang 的脚本能跑");
+    assert!(
+        !runs_on_target(&plain, "linux"),
+        "没有 shebang 的文本不是可执行入口"
+    );
+    assert!(runs_on_target(&pe, "windows"), "PE 是 Windows 的可执行体");
+    assert!(!runs_on_target(&elf, "windows"), "ELF 在 Windows 上跑不了");
+    // 批处理按扩展名认（Windows 的壳这么做）。
+    let bat = write("build.cmd", b"@echo off\r\n");
+    assert!(
+        runs_on_target(&bat, "windows"),
+        "批处理是 Windows 的可执行入口"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// 目的：同一份"只有 .exe"的现场——Windows 宿主上判本机档算在场，判 linux guest 就必须算缺。
+/// 约束：名字与形式两道都判：`.exe` 在 linux 里连名字都不认；即便有人把 PE 复制成无扩展名的 `build/indexer`，
+///   形式那一道也要拒绝（这正是这次现场踩到的坑）。
+#[test]
+pub(crate) fn entry_check_rejects_host_artifacts_for_a_guest_of_another_platform() {
+    use crate::capabilities::vm::domain::exec::{missing_entries_for, runs_on_target};
+    let dir = crate::tests::scratch("entry-cross");
+    let build = dir.join("build");
+    std::fs::create_dir_all(&build).expect("建 build/");
+    std::fs::write(build.join("indexer.exe"), b"MZ\x90\x00").expect("写 Windows 产物");
+    let mut m = module_of("a");
+    m.root = dir.clone();
+    m.manifest.tools.insert(
+        "build".to_string(),
+        crate::capabilities::modules::api::ToolDecl {
+            command: "build/indexer build".to_string(),
+            desc: String::new(),
+            params: None,
+            parallel: false,
+        },
+    );
+    // Windows 宿主 + 本机档：`.exe` 在场即可（宿主自己跑）。
+    let host_ok = |p: &std::path::Path| p.is_file();
+    assert!(missing_entries_for(&[m.clone()], "windows", &host_ok).is_empty());
+    // Windows 宿主 + linux guest：名字不认，必须算缺。
+    assert_eq!(
+        missing_entries_for(&[m.clone()], "linux", &host_ok).len(),
+        1
+    );
+    // 就算把同一个 PE 复制成无扩展名的 `build/indexer`：名字过了，形式也要拒。
+    std::fs::copy(build.join("indexer.exe"), build.join("indexer")).expect("复制成字面名");
+    let with_form = |p: &std::path::Path| p.is_file() && runs_on_target(p, "linux");
+    assert_eq!(
+        missing_entries_for(&[m.clone()], "linux", &with_form).len(),
+        1,
+        "PE 复制成 build/indexer 也不能算 linux guest 的可用入口"
+    );
+    // 真给它一份 ELF：这才放行。
+    std::fs::write(build.join("indexer"), b"\x7fELF\x02\x01\x01\x00").expect("写 ELF 产物");
+    assert!(missing_entries_for(&[m], "linux", &with_form).is_empty());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// 目的：虚拟机档的"怎么补"要指到虚拟根里编——宿主上编出来的产物在 guest 里跑不了。
+#[test]
+pub(crate) fn diagnose_text_points_a_guest_session_at_building_inside_the_guest() {
+    let diags = [Diagnosis::MissingEntry {
+        module: "indexer".to_string(),
+        tool: "build".to_string(),
+        command: "build/indexer".to_string(),
+        buildable: true,
+    }];
+    let host = exec::diagnose_text(&diags);
+    assert!(host.contains("--build=indexer"), "{}", host);
+    assert!(!host.contains("--guest="), "本机档不该提虚拟根：{}", host);
+    let guest = exec::diagnose_text_for(&diags, Some("windows"));
+    assert!(
+        guest.contains("--build=indexer --guest=windows"),
+        "虚拟机档要在那个虚拟根里编：{}",
+        guest
+    );
+    assert!(guest.contains("虚拟根里"), "说清为什么：{}", guest);
 }
 #[test]
 pub(crate) fn exec_entry_missing_refuses_before_any_tier() {

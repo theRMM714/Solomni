@@ -105,3 +105,23 @@
     未覆盖的生产路径逐条有补测或缺口结论。
   blocked_by: 缺少观察面（子进程插桩与合并尚未实现）
 
+- id: conductor.create-session-blocks-core
+  scope: global
+  level: T5
+  why: |
+    核心是**单线程队列**（ConductorHandle::spawn + call）——这本身是刻意设计：状态只有一个所有者、不用锁。
+    它要求"核心线程只做毫秒级状态变换"，等外部世界的步骤必须 own-and-return（生成与协作泵已经这样搬走了）。
+    现状还剩一条没搬：**创建虚拟机档会话时在核心调用里同步起 guest**（create_work → start_session_guest →
+    QEMU 启动 + 等 QGA，几十秒到几分钟）。后果：这段时间里**任何**经核心的请求都在排队——界面看着像卡死，
+    /api/state、别的会话、改配置全部停摆（现场现象：点「创建并开始」没反应、表单还杵在那儿）。
+    界面已经按这个事实做成忙碌态（按钮转圈 + 说清在等什么），但那只治观感。
+  how: |
+    按既有 own-and-return 模式把长步骤搬出核心：prepare 在核心（预检 + 落 meta + 建会话对象，毫秒级），
+    run 在会话自己的工作线程，结果作为会话事件回来。创建立刻返回 sid；起 guest 的进度与失败写成会话事件与运行态
+    （starting / ready / failed），失败给「重试启动」。
+  accept: |
+    创建虚拟机档会话的 POST /api/actions/create_session 在 1 秒内返回（不论 guest 是否已经起来）；
+    起 guest 期间 /api/state 与其它会话的请求正常返回；起失败如实落在会话状态与事件里，并可重试启动。
+  blocked_by: |
+    缺少实现。要先定"会话可以存在但 guest 未就绪"的运行态契约——它会打破现行"起不来就什么都不留下"的不变式，
+    要同步 docs/session/session-model.md、docs/vm/README.md 与对应用例。

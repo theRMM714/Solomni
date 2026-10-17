@@ -330,7 +330,13 @@ pub fn build_module(
         }
     };
     let state_path = build_state_path(root, id);
-    if build_is_fresh(&state_path, "host", &fingerprint, &module) {
+    if build_is_fresh(
+        &state_path,
+        "host",
+        std::env::consts::OS,
+        &fingerprint,
+        &module,
+    ) {
         println!(
             "[构建] {} 已是最新，跳过（状态 {}）",
             id,
@@ -367,7 +373,15 @@ pub fn build_module(
         eprintln!("[构建] {} 的构建命令失败（不落状态，下次重试）", id);
         return 1;
     }
-    finish_build(root, id, "host", &fingerprint, &module, &state_path)
+    finish_build(
+        root,
+        id,
+        "host",
+        std::env::consts::OS,
+        &fingerprint,
+        &module,
+        &state_path,
+    )
 }
 
 /// 目的：构建一个模块的**虚拟机档**产物——在 guest 里用它的编译包编，产物经挂载落回模块目录。
@@ -443,7 +457,7 @@ pub fn build_module_in_guest(root: &std::path::Path, id: &str, guest: &str) -> i
         }
     };
     let state_path = build_state_path(root, id);
-    if build_is_fresh(&state_path, guest, &fingerprint, &module) {
+    if build_is_fresh(&state_path, guest, image.os.as_str(), &fingerprint, &module) {
         println!(
             "[构建] {} 在「{}」上已是最新，跳过（状态 {}）",
             id,
@@ -536,7 +550,15 @@ pub fn build_module_in_guest(root: &std::path::Path, id: &str, guest: &str) -> i
         );
         return 1;
     }
-    finish_build(root, id, guest, &fingerprint, &module, &state_path)
+    finish_build(
+        root,
+        id,
+        guest,
+        image.os.as_str(),
+        &fingerprint,
+        &module,
+        &state_path,
+    )
 }
 
 /// 目的：按模块 id 扫出模块（扫盘；清单被拒收的在这里就是"找不到"，细节看 `--doctor`）。
@@ -566,24 +588,36 @@ fn build_state_path(root: &std::path::Path, id: &str) -> std::path::PathBuf {
 fn build_is_fresh(
     state_path: &std::path::Path,
     target: &str,
+    target_os: &str,
     fingerprint: &str,
     module: &crate::capabilities::modules::api::Module,
 ) -> bool {
     let Some(prev) = read_build_state(state_path) else {
         return false;
     };
-    prev.target == target && prev.fingerprint == fingerprint && entries_left(module).is_empty()
+    prev.target == target
+        && prev.fingerprint == fingerprint
+        && entries_left(module, target_os).is_empty()
 }
 
 /// 目的：入口复验（构建完必须真在、真能跑）；返回还缺哪些入口。
+/// 参数：target_os = 这次构建的**目标平台**（宿主构建 = 宿主；在虚拟根里构建 = 那个 guest 的 os）——
+///   与建会话时的入口判据同一把尺子，否则"宿主编的产物"会被当成"guest 里能跑"。
 fn entries_left(
     module: &crate::capabilities::modules::api::Module,
+    target_os: &str,
 ) -> Vec<crate::capabilities::vm::api::MissingEntry> {
     use crate::kernel::ports::HostProbe;
     let probe = crate::kernel::detail::host_probe::HostProbeAdapter;
-    crate::capabilities::vm::api::missing_entries(std::slice::from_ref(module), &|p| {
-        probe.is_executable(p)
-    })
+    crate::capabilities::vm::api::missing_entries_for(
+        std::slice::from_ref(module),
+        target_os,
+        &|p| {
+            probe.is_executable(p)
+                && (target_os == std::env::consts::OS
+                    || crate::capabilities::vm::api::runs_on_target(p, target_os))
+        },
+    )
 }
 
 /// 目的：构建的收尾——复验入口、落状态、如实报成败（本机档与虚拟机档共用）。
@@ -591,11 +625,12 @@ fn finish_build(
     _root: &std::path::Path,
     id: &str,
     target: &str,
+    target_os: &str,
     fingerprint: &str,
     module: &crate::capabilities::modules::api::Module,
     state_path: &std::path::Path,
 ) -> i32 {
-    let left = entries_left(module);
+    let left = entries_left(module, target_os);
     if !left.is_empty() {
         eprintln!(
             "[构建] 命令跑通了，但入口仍不在场：{}——检查 build.command 把产物写到哪了",
