@@ -132,7 +132,9 @@ node dev.js test|fmt|clippy   # one-layer dev commands; do not call cargo direct
   `node setup-runtime.js` and `node env.js setup` are equivalent.
 - **Outbound-link ledger**: `links.yaml` is the single authority for external URLs the project uses and that may
   change (currently: toolchain bootstrap sources, the pinned winlibs upstream asset, the self-hosted dependencies release prefix, guest image sources, and the SMB helper asset); edit it once and the whole
-  repository follows. User overrides go through `.home/settings.yaml` and environment variables, not the ledger.
+  repository follows. **A download's checksum lives next to the link it guards** in the same ledger (`<link-key>.sha256`);
+  self-hosted release assets carry theirs in the `dependencies.yaml` entry. User overrides go through `.home/settings.yaml`
+  and environment variables, not the ledger.
 - **You can run it without a provider**: it walks the flow with the built-in fake model and says so plainly.
 - Common flags: `--root <dir>` (product root), `--web-port <port>`, `--release`.
 - Commands at the prompt: `single [agent…]` / `collab [agent…|?]` / `proxy` (hand the whole decision to the core) / `module [module-id.tool [json]]` (run a module tool directly, without AI) / `resident list|start|stop|enable|disable|call` (resident services) / `secret` (secret fields) / `webui`.

@@ -47,6 +47,11 @@ pub struct Dep {
     pub strip: usize,
     #[serde(default)]
     pub size_mb: u64,
+    /// 目的：这条依赖的归档 / 单文件 sha256（64 位十六进制）——**与它守护的那条连接写在同一条**：
+    ///   自托管 release 资产写在这里，链接类源写在 `links.yaml` 的 `<键>.sha256`。
+    ///   空 = 没 pin（`latest` 这种会随上游滚动的源只能这样），如实不校验，不假装验过。
+    #[serde(default)]
+    pub sha256: String,
     #[serde(default)]
     pub note: String,
 }
@@ -366,6 +371,9 @@ fn run(
                 on_line(&format!("{}：下载 {}", dep.id, url));
                 download(&agent, &url, &cached, on_line)?;
             }
+            // 完整性闸：缓存里那份和刚下好的一样都要验（缓存可能是上次中断留下的）。
+            let pinned = pinned_sha256(dep, links);
+            verify_cached(&dep.id, pinned.as_deref(), &cached, &url)?;
         }
         let dest = under(root, &dep.install);
         fs::create_dir_all(&dest).map_err(|e| format!("建安装目录 {} 失败：{}", dep.install, e))?;
@@ -445,6 +453,50 @@ fn download(
     fs::rename(&tmp, dest).map_err(|e| format!("改名 {} 失败：{}", dest.display(), e))?;
     on_line(&format!("下载完成：{} 字节", n));
     Ok(())
+}
+
+/// 目的：一个文件的 sha256（小写十六进制）——依赖补齐的完整性判据。
+/// 约束：复用 workspace 的 `content_hash`（项目里唯一那份零依赖 SHA-256，见其模块注释：
+///   "不引入加密库（项目依赖刻意保持最小）"）。整份读进内存是一次性的补齐全动作，最多几百 MB——
+///   宁可这样，也不引第二套算法或加密库。
+pub(crate) fn sha256_file(path: &Path) -> Result<String, String> {
+    let bytes = fs::read(path).map_err(|e| format!("读不了 {}：{}", path.display(), e))?;
+    Ok(crate::capabilities::workspace::api::content_hash(&bytes))
+}
+
+/// 目的：这条依赖 pin 的 sha256——**校验值与它守护的那条连接写在同一条**：
+///   自托管 release 资产在清单条目里（`sha256:`），链接类源在 `links.yaml` 的 `<source>.sha256`。
+/// 返回：小写十六进制；没 pin 给 None（`latest` 这种会滚动的源只能这样，如实不校验）。
+fn pinned_sha256(dep: &Dep, links: &BTreeMap<String, String>) -> Option<String> {
+    let own = dep.sha256.trim();
+    if !own.is_empty() {
+        return Some(own.to_ascii_lowercase());
+    }
+    links
+        .get(&format!("{}.sha256", dep.source))
+        .map(|v| v.trim().to_ascii_lowercase())
+}
+
+/// 目的：缓存里那份文件与 pin 的 sha256 一致吗——**下载完要验，复用旧缓存也要验**。
+/// 参数：id = 依赖 id（报错点名）；pinned = pin 的校验值（None = 没 pin）；cached = 缓存文件；url = 下载源。
+/// 约束：不符时**不删缓存**——删了既丢证据、又会在 pin 过期时变成"每次重下 165 MB"的死循环，改由人看结论决定。
+fn verify_cached(id: &str, pinned: Option<&str>, cached: &Path, url: &str) -> Result<(), String> {
+    let Some(want) = pinned else {
+        return Ok(());
+    };
+    let want = want.trim().to_ascii_lowercase();
+    let got = sha256_file(cached)?;
+    if got == want {
+        return Ok(());
+    }
+    Err(format!(
+        "{}：缓存文件的 sha256 与台账不符\n  台账 {}\n  实际 {}\n  来源 {}\n  上游换过资产就更新台账（来源见该条目的 sha256 注释 / links.yaml 的 <键>.sha256 注释）；否则删掉 {} 重下",
+        id,
+        want,
+        got,
+        url,
+        cached.display()
+    ))
 }
 
 /// 目的：单文件依赖——把缓存里的文件按 probe 的文件名放进安装目录（如 guest 的 qcow2）。
@@ -1060,6 +1112,83 @@ fn install_guest_rootfs(
 mod tests {
     use super::*;
 
+    /// 目的：sha256 计算与已知向量一致（完整性闸的第一环：算法本身不能错）。
+    #[test]
+    fn sha256_matches_a_known_vector() {
+        let dir = crate::tests::scratch("provision-sha256");
+        let f = dir.join("abc.bin");
+        fs::write(&f, b"abc").expect("写样本");
+        assert_eq!(
+            sha256_file(&f).expect("算 sha256"),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// 目的：缓存文件的校验按台账来——pin 对得上才放行；不符时**报出台账值、实际值与来源**（不删文件、不循环）；
+    ///   没 pin 就如实不校验（`latest` 源 pin 上去必然腐烂）。
+    #[test]
+    fn cached_file_is_checked_against_the_pinned_hash() {
+        let dir = crate::tests::scratch("provision-verify");
+        let f = dir.join("asset.bin");
+        fs::write(&f, b"abc").expect("写样本");
+        let real = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+        let url = "https://example.test/asset.bin";
+        // 大小写不敏感：台账里手抄的大写也要能对上。
+        verify_cached("vm.demo", Some(&real.to_uppercase()), &f, url).expect("pin 对得上要放行");
+        // 没 pin：不校验（否则 latest 源没法用）。
+        verify_cached("vm.demo", None, &f, url).expect("没 pin 就不校验");
+        // 不符：报台账值 / 实际值 / 来源，并且**不许删缓存**（删了就是重下死循环）。
+        let bad = verify_cached("vm.demo", Some(&"0".repeat(64)), &f, url).expect_err("不符要拒绝");
+        assert!(bad.contains(&"0".repeat(64)), "要报台账值：{}", bad);
+        assert!(bad.contains(real), "要报实际值：{}", bad);
+        assert!(bad.contains(url), "要报来源：{}", bad);
+        assert!(
+            f.is_file(),
+            "不许静默删缓存（pin 过期时那会变成重下死循环）"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// 目的：pin 的来源二选一——清单条目的 `sha256` 优先，链接类源回落到 `links.yaml` 的 `<source>.sha256`。
+    #[test]
+    fn pin_comes_from_the_manifest_entry_or_the_ledger_pair() {
+        let from_ledger = "D5DB".repeat(16);
+        let links = BTreeMap::from([(
+            "smbd.windows.sha256".to_string(),
+            format!("  {}  ", from_ledger),
+        )]);
+        let mut dep = Dep {
+            id: "x".to_string(),
+            os: "windows".to_string(),
+            arch: "x86_64".to_string(),
+            install: ".vm/x".to_string(),
+            probe: ".vm/x/x.exe".to_string(),
+            source: "smbd.windows".to_string(),
+            kind: "file".to_string(),
+            guest: None,
+            strip: 0,
+            size_mb: 1,
+            sha256: String::new(),
+            note: String::new(),
+        };
+        assert_eq!(
+            pinned_sha256(&dep, &links).as_deref(),
+            Some(from_ledger.to_ascii_lowercase().as_str()),
+            "链接类源回落到台账里成对的那条（去掉首尾空白、转小写）"
+        );
+        let own = "E96F".repeat(16);
+        dep.sha256 = own.clone();
+        assert_eq!(
+            pinned_sha256(&dep, &links).as_deref(),
+            Some(own.to_ascii_lowercase().as_str()),
+            "清单条目自己的 pin 优先"
+        );
+        dep.source = "guest.debian.image".to_string();
+        dep.sha256 = String::new();
+        assert_eq!(pinned_sha256(&dep, &links), None, "都没 pin = 不校验");
+    }
+
     /// 目的：目录页里按版本挑最新 .deb（数字感知，不受字典序影响）。
     #[test]
     fn picks_newest_deb_numerically() {
@@ -1211,6 +1340,7 @@ mod tests {
             source: "release:t.tar".to_string(),
             strip: 0,
             size_mb: 1,
+            sha256: String::new(),
             note: String::new(),
         };
         let links = BTreeMap::from([(
@@ -1255,6 +1385,7 @@ mod tests {
             source: "release:a.bin".to_string(),
             strip: 0,
             size_mb: 0,
+            sha256: String::new(),
             note: String::new(),
         };
         let mut links = BTreeMap::new();
@@ -1299,6 +1430,7 @@ mod tests {
             source: "release:d.qcow2".to_string(),
             strip: 0,
             size_mb: 0,
+            sha256: String::new(),
             note: String::new(),
         };
         let mut links = BTreeMap::new();
@@ -1403,6 +1535,7 @@ mod tests {
             source: "release:a".to_string(),
             strip: 0,
             size_mb: 0,
+            sha256: String::new(),
             note: String::new(),
         };
         let svc = ProvisionService::new(&root);
@@ -1450,6 +1583,7 @@ mod tests {
             source: source.to_string(),
             strip: 0,
             size_mb: 0,
+            sha256: String::new(),
             note: String::new(),
         };
         let file_dep = mk("x.file", "file", ".vm/x", ".vm/x/a.bin", "release:a.bin");
@@ -1559,6 +1693,7 @@ mod tests {
             source: "release:a.tar".to_string(),
             strip: 0,
             size_mb: 0,
+            sha256: String::new(),
             note: String::new(),
         };
         let mut links = BTreeMap::new();
