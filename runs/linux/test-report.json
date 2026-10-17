@@ -1,0 +1,198 @@
+{
+  "platform": "linux",
+  "arch": "x64",
+  "osKey": "linux",
+  "profile": "debug",
+  "fenceLive": true,
+  "doctor": {
+    "arch": "x86_64",
+    "externals": {
+      "curl": "/usr/bin/curl",
+      "node": "/opt/hostedtoolcache/node/24.21.0/x64/bin/node",
+      "python": "/usr/bin/python"
+    },
+    "fence": {
+      "fs": true,
+      "net": false,
+      "note": "Linux：Landlock（ABI 7）强制文件系统可达范围；出站网络不围栏",
+      "tree": true
+    },
+    "platform": "linux",
+    "processes": [],
+    "vm_tier": {
+      "available": false,
+      "requirements": [
+        {
+          "detail": "本机虚拟机监视器可用（Linux KVM（/dev/kvm））",
+          "how": "",
+          "id": "hypervisor",
+          "met": true
+        },
+        {
+          "detail": "guest 后端已就位，本平台默认组合 qemu/9p 已通过真机验收",
+          "how": "",
+          "id": "guest",
+          "met": true
+        },
+        {
+          "detail": "共享档 virtiofs 不在场（没找到 virtiofsd）：已按组合回退到 qemu/9p；把 virtiofsd 放进 PATH，或在设置里登记它的完整路径即可启用",
+          "how": "",
+          "id": "share",
+          "met": true
+        },
+        {
+          "detail": "没有找到 qemu-system-x86_64（按PATH找过）",
+          "how": "在创建向导或配置界面点「补齐虚拟机依赖」把它下载进项目内（只写项目内，需用户同意）；也可自行安装 QEMU 并放进 PATH，或在设置里登记它的完整路径。集成环境里没有界面时可用 solomni --provision --ensure --yes",
+          "id": "qemu",
+          "met": false
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "step": "CI 前置：供应链工具安装",
+      "status": "pass",
+      "detail": "在 run-tests 之前完成（CI 墙钟）",
+      "ms": 902
+    },
+    {
+      "step": "cargo build",
+      "status": "pass",
+      "detail": "",
+      "ms": 25650
+    },
+    {
+      "step": "T0 编译（--all-targets）",
+      "status": "pass",
+      "detail": "",
+      "ms": 9346
+    },
+    {
+      "step": "T0 结构审查",
+      "status": "pass",
+      "detail": "",
+      "ms": 175
+    },
+    {
+      "step": "T0 格式（fmt --check）",
+      "status": "pass",
+      "detail": "",
+      "ms": 1257
+    },
+    {
+      "step": "T0 静态检查（clippy）",
+      "status": "pass",
+      "detail": "",
+      "ms": 6170
+    },
+    {
+      "step": "T0 编译告警",
+      "status": "pass",
+      "detail": "",
+      "ms": 0
+    },
+    {
+      "step": "T0 交叉类型检查",
+      "status": "skip-platform",
+      "detail": "CI：三平台矩阵各自原生 cargo check --all-targets 已覆盖本平台；交叉检查是开发机补齐它平台的手段，这里不跑",
+      "ms": 0
+    },
+    {
+      "step": "T0 依赖重复（cargo tree）",
+      "status": "pass",
+      "detail": "",
+      "ms": 158
+    },
+    {
+      "step": "T0 供应链（audit/deny）",
+      "status": "pass",
+      "detail": "通过：audit、deny",
+      "ms": 4381
+    },
+    {
+      "step": "L1 单元（--bin solomni）",
+      "status": "pass",
+      "detail": "544 passed / 0 failed",
+      "ms": 25467
+    },
+    {
+      "step": "目标 cross-platform",
+      "status": "pass",
+      "detail": "4 passed / 0 failed",
+      "ms": 8773
+    },
+    {
+      "step": "目标 windows",
+      "status": "skip-platform",
+      "detail": "0 passed / 0 failed（本平台不适用）",
+      "ms": 106
+    },
+    {
+      "step": "目标 linux",
+      "status": "pass",
+      "detail": "8 passed / 0 failed",
+      "ms": 346
+    },
+    {
+      "step": "目标 macos",
+      "status": "skip-platform",
+      "detail": "0 passed / 0 failed（本平台不适用）",
+      "ms": 109
+    },
+    {
+      "step": "前端冒烟",
+      "status": "pass",
+      "detail": "前端冒烟：4 个全部通过（app.smoke.cjs、config.smoke.cjs、md.smoke.cjs、modals.smoke.cjs） / FRONTEND-SMOKE-OK",
+      "ms": 1781
+    },
+    {
+      "step": "开发回路自检",
+      "status": "pass",
+      "detail": "DEV-LOOP-OK",
+      "ms": 62
+    },
+    {
+      "step": "环境引导自检",
+      "status": "env-skip",
+      "detail": "[探针] env.js 的 MinGW 引导只在 Windows 上存在：本平台跳过环境引导自检",
+      "ms": 143
+    },
+    {
+      "step": "T0 项目外写",
+      "status": "pass",
+      "detail": "",
+      "ms": 0
+    },
+    {
+      "step": "L4 端到端",
+      "status": "pass",
+      "detail": "E2E-OK / [e2e] 围栏回收（退出码 0）：[围栏] 清理完成：本平台的围栏不留权限项，无需清理 | [围栏] 清理完成：扫掉 0 个本程序建过的容器 profile（构建 21.8s）",
+      "ms": 104712
+    }
+  ],
+  "envSkips": [
+    "[探针] 未开启 Linux 运行期编排的真机验收：设 SOLOMNI_VM_LIVE=1（仅 Linux 宿主）后重跑",
+    "[探针] 没有可用的 unshare -r / mke2fs（要 e2fsprogs 与非特权用户命名空间）：跳过",
+    "[探针] 未开启虚拟机档构建的真机验收：设 SOLOMNI_VM_LIVE=1 后重跑",
+    "[探针] 未开启虚拟机档真机验收：设 SOLOMNI_VM_LIVE=1、SOLOMNI_VM_QEMU 后重跑（虚拟根默认 debian，可用 SOLOMNI_VM_GUEST 换）",
+    "[探针] 未开启并发可写层的真机验收：设 SOLOMNI_VM_LIVE=1、SOLOMNI_VM_QEMU 后重跑",
+    "[探针] env.js 的 MinGW 引导只在 Windows 上存在：本平台跳过环境引导自检",
+    "[探针] 未开启虚拟机档会话验收：设 SOLOMNI_VM_LIVE=1、SOLOMNI_VM_QEMU 后重跑（虚拟根默认 debian）"
+  ],
+  "quality": {
+    "failed": 0,
+    "steps": []
+  },
+  "globalGaps": [
+    "fence.guest-tier-not-wired",
+    "vm.qemu-provisioning-macos",
+    "vm.macos-vz-engine",
+    "module.acp-adapter",
+    "work.commit-history-ui",
+    "testing.coverage-child-and-platform",
+    "vm.guest-rootfs-drops-setuid"
+  ],
+  "gaps": [],
+  "failed": 0
+}
