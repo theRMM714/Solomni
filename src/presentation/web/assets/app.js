@@ -786,7 +786,10 @@ function buildConfigForm(sid, cfg, c, box) {
     // 装完重开配置面板：补齐弹层会把 #modal-root 顶掉，旧面板的 DOM 已经不在了——
     // 与其往脱离文档的节点上重绘，不如按新状态整份重读（未保存的改动会丢，和「重新扫描」同一个代价）。
     const setupBtn = btn('补齐虚拟机依赖…', 'btn btn-block');
-    setupBtn.onclick = () => openSetupModal(() => openConfig(sid));
+    setupBtn.onclick = () => {
+      try { openSetupModal(() => openConfig(sid)); }
+      catch (e) { notice('打开补齐弹层失败', e.message, 'err'); }
+    };
     secT.appendChild(setupBtn);
   }
   secT.appendChild(pick.wrap); secT.appendChild(pick.hint);
@@ -1643,8 +1646,11 @@ async function openWizard(draft) {
     // 装完把向导按草稿重开：判据是后端按新状态算的，界面不自己改结论。
     // 先把用户填的名称与需求抄进草稿（它们只在弹层里读得到），否则重开会把它们清掉。
     setupBtn.onclick = () => {
-      snapshotDraft();
-      openSetupModal(() => openWizard(w));
+      // 兜住同步异常：按钮点了**必须**有反应——静默什么都不发生是最难查的失败。
+      try {
+        snapshotDraft();
+        openSetupModal(() => openWizard(w));
+      } catch (e) { notice('打开补齐弹层失败', e.message, 'err'); }
     };
     tierField.appendChild(setupBtn);
   }
