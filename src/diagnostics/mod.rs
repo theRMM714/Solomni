@@ -23,14 +23,30 @@ pub fn unpack_cli(args: &[String], i: usize) -> i32 {
 }
 
 /// 自检：本机事实（平台 + 围栏能力 + 外部解释器）。只报事实，不猜、不改任何东西（围栏自检那个临时目录除外）。
-pub fn doctor() -> i32 {
+/// 参数：root = 产品根——虚拟机档要按它读"项目内已装了什么"（与会话判据同一份来源，不另编一套）。
+pub fn doctor(root: &std::path::Path) -> i32 {
     let cap = crate::kernel::detail::confine::capability();
-    // 虚拟机档的逐项前置（**只读事实**）：这里按"没登记 QEMU、没选虚拟根"问一次，
-    // 也就是最朴素的情形——登记过的路径以会话配置界面为准（那里按会话选型问同一份清单）。
+    // 虚拟机档的逐项前置（**只读事实**）：项目内补齐过就按那一份问，否则按 PATH 问（与核心同一把尺子）。
+    let installed = crate::capabilities::provision::api::Provision::status(
+        &crate::capabilities::provision::ProvisionService::new(root),
+    )
+    .unwrap_or_default();
+    let installed_at = |prefix: &str| {
+        installed
+            .iter()
+            .find(|d| d.present && d.id.starts_with(prefix))
+            .map(|d| root.join(&d.probe).to_string_lossy().into_owned())
+    };
+    let qemu = installed_at("vm.qemu.");
+    let share_tool = installed_at(if cfg!(windows) {
+        "vm.smbd."
+    } else {
+        "vm.virtiofsd."
+    });
     let vm =
         crate::capabilities::vm::api::vm_requirements(&crate::capabilities::vm::api::VmInputs {
-            qemu: None,
-            share_tool: None,
+            qemu: qemu.as_deref(),
+            share_tool: share_tool.as_deref(),
             probe: &crate::kernel::detail::HostProbeAdapter,
         });
     let doc = serde_json::json!({
@@ -63,38 +79,26 @@ fn provisioning_vm(
             root.join("runtimes"),
         )),
         std::sync::Arc::new(crate::capabilities::vm::detail::QemuEngine::new()),
-        std::sync::Arc::new(crate::capabilities::vm::detail::CopyShare::new()),
+        vec![std::sync::Arc::new(
+            crate::capabilities::vm::detail::CopyShare::new(),
+        )],
     ))
 }
 
-/// 目的：虚拟机档构建用的 vm 能力面——共享档按**平台的默认组合**选（与建会话同一套判据）。
-/// 参数：root = 产品根；share_tool = 本平台共享档要用的外部工具（Windows = smbd，其余 = virtiofsd）。
-/// 约束：必须走**挂载式**共享档（virtiofs / 9p / smb）——模块目录是读写挂进去的，产物才能落回宿主那份；
-///   `copy` 复制通道只适合补齐作业，产物会留在 guest 里。
+/// 目的：虚拟机档构建用的 vm 能力面：**只持挂载式**共享档（virtiofs / 9p / smb）。
+/// 参数：root = 产品根。
+/// 约束：模块目录是读写挂进去的，产物才能落回宿主那份——`copy` 复制通道只适合补齐作业，
+///   所以这里不装配它；构建的 guest 规格给的候选表也去掉 copy（见 `build`）。
 fn build_vm(
     root: &std::path::Path,
-    share_tool: Option<&str>,
 ) -> std::sync::Arc<dyn crate::capabilities::vm::api::Vm + Send + Sync> {
-    let picked = crate::capabilities::vm::domain::exec::choose_combo(
-        crate::capabilities::vm::domain::exec::default_combos(std::env::consts::OS),
-        &|engine| engine == "qemu",
-        &|_engine, share| {
-            crate::capabilities::vm::domain::exec::share_available(
-                share,
-                share_tool,
-                &crate::kernel::detail::host_probe::HostProbeAdapter,
-            )
-        },
-    );
-    let share: std::sync::Arc<dyn crate::capabilities::vm::ports::ShareBackend + Send + Sync> =
-        match picked.map(|c| c.share) {
-            Some("smb") => std::sync::Arc::new(crate::capabilities::vm::detail::SmbShare::new()),
-            Some("virtiofs") => {
-                std::sync::Arc::new(crate::capabilities::vm::detail::VirtioFsShare::new())
-            }
-            Some("copy") => std::sync::Arc::new(crate::capabilities::vm::detail::CopyShare::new()),
-            _ => std::sync::Arc::new(crate::capabilities::vm::detail::NinePShare::new()),
-        };
+    let shares: Vec<
+        std::sync::Arc<dyn crate::capabilities::vm::ports::ShareBackend + Send + Sync>,
+    > = vec![
+        std::sync::Arc::new(crate::capabilities::vm::detail::VirtioFsShare::new()),
+        std::sync::Arc::new(crate::capabilities::vm::detail::NinePShare::new()),
+        std::sync::Arc::new(crate::capabilities::vm::detail::SmbShare::new()),
+    ];
     std::sync::Arc::new(crate::capabilities::vm::service::VmService::new(
         std::sync::Arc::new(crate::capabilities::vm::detail::FsPackages::new(
             root.join("runtimes"),
@@ -104,7 +108,7 @@ fn build_vm(
                 root.join(".vm").join("overlays"),
             ),
         ),
-        share,
+        shares,
     ))
 }
 
@@ -326,7 +330,13 @@ pub fn build_module(
         }
     };
     let state_path = build_state_path(root, id);
-    if build_is_fresh(&state_path, "host", &fingerprint, &module) {
+    if build_is_fresh(
+        &state_path,
+        "host",
+        std::env::consts::OS,
+        &fingerprint,
+        &module,
+    ) {
         println!(
             "[构建] {} 已是最新，跳过（状态 {}）",
             id,
@@ -363,7 +373,15 @@ pub fn build_module(
         eprintln!("[构建] {} 的构建命令失败（不落状态，下次重试）", id);
         return 1;
     }
-    finish_build(root, id, "host", &fingerprint, &module, &state_path)
+    finish_build(
+        root,
+        id,
+        "host",
+        std::env::consts::OS,
+        &fingerprint,
+        &module,
+        &state_path,
+    )
 }
 
 /// 目的：构建一个模块的**虚拟机档**产物——在 guest 里用它的编译包编，产物经挂载落回模块目录。
@@ -420,7 +438,7 @@ pub fn build_module_in_guest(root: &std::path::Path, id: &str, guest: &str) -> i
         pick("vm.virtiofsd.")
     };
     // 构建期能力：guest 自带，或包库（prefix / system 两种装配都已就位）。
-    let vm = build_vm(root, share_tool.as_deref());
+    let vm = build_vm(root);
     let lib = vm.library();
     let (packages, missing) = build_packages(&decl.needs, &lib, &image.runtimes);
     if !missing.is_empty() {
@@ -439,7 +457,7 @@ pub fn build_module_in_guest(root: &std::path::Path, id: &str, guest: &str) -> i
         }
     };
     let state_path = build_state_path(root, id);
-    if build_is_fresh(&state_path, guest, &fingerprint, &module) {
+    if build_is_fresh(&state_path, guest, image.os.as_str(), &fingerprint, &module) {
         println!(
             "[构建] {} 在「{}」上已是最新，跳过（状态 {}）",
             id,
@@ -474,6 +492,16 @@ pub fn build_module_in_guest(root: &std::path::Path, id: &str, guest: &str) -> i
         net: decl.net,
         engine_path,
         share_path: share_tool.clone(),
+        // 构建要求**挂载式**共享（产物要落回宿主那份）：copy 复制通道不进候选。
+        shares: {
+            let mut chain = crate::capabilities::vm::api::share_chain(
+                std::env::consts::OS,
+                share_tool.as_deref(),
+                &crate::kernel::detail::host_probe::HostProbeAdapter,
+            );
+            chain.retain(|s| *s != "copy");
+            chain
+        },
         seed: None,
         isolated: true,
     };
@@ -522,7 +550,15 @@ pub fn build_module_in_guest(root: &std::path::Path, id: &str, guest: &str) -> i
         );
         return 1;
     }
-    finish_build(root, id, guest, &fingerprint, &module, &state_path)
+    finish_build(
+        root,
+        id,
+        guest,
+        image.os.as_str(),
+        &fingerprint,
+        &module,
+        &state_path,
+    )
 }
 
 /// 目的：按模块 id 扫出模块（扫盘；清单被拒收的在这里就是"找不到"，细节看 `--doctor`）。
@@ -552,24 +588,36 @@ fn build_state_path(root: &std::path::Path, id: &str) -> std::path::PathBuf {
 fn build_is_fresh(
     state_path: &std::path::Path,
     target: &str,
+    target_os: &str,
     fingerprint: &str,
     module: &crate::capabilities::modules::api::Module,
 ) -> bool {
     let Some(prev) = read_build_state(state_path) else {
         return false;
     };
-    prev.target == target && prev.fingerprint == fingerprint && entries_left(module).is_empty()
+    prev.target == target
+        && prev.fingerprint == fingerprint
+        && entries_left(module, target_os).is_empty()
 }
 
 /// 目的：入口复验（构建完必须真在、真能跑）；返回还缺哪些入口。
+/// 参数：target_os = 这次构建的**目标平台**（宿主构建 = 宿主；在虚拟根里构建 = 那个 guest 的 os）——
+///   与建会话时的入口判据同一把尺子，否则"宿主编的产物"会被当成"guest 里能跑"。
 fn entries_left(
     module: &crate::capabilities::modules::api::Module,
+    target_os: &str,
 ) -> Vec<crate::capabilities::vm::api::MissingEntry> {
     use crate::kernel::ports::HostProbe;
     let probe = crate::kernel::detail::host_probe::HostProbeAdapter;
-    crate::capabilities::vm::api::missing_entries(std::slice::from_ref(module), &|p| {
-        probe.is_executable(p)
-    })
+    crate::capabilities::vm::api::missing_entries_for(
+        std::slice::from_ref(module),
+        target_os,
+        &|p| {
+            probe.is_executable(p)
+                && (target_os == std::env::consts::OS
+                    || crate::capabilities::vm::api::runs_on_target(p, target_os))
+        },
+    )
 }
 
 /// 目的：构建的收尾——复验入口、落状态、如实报成败（本机档与虚拟机档共用）。
@@ -577,11 +625,12 @@ fn finish_build(
     _root: &std::path::Path,
     id: &str,
     target: &str,
+    target_os: &str,
     fingerprint: &str,
     module: &crate::capabilities::modules::api::Module,
     state_path: &std::path::Path,
 ) -> i32 {
-    let left = entries_left(module);
+    let left = entries_left(module, target_os);
     if !left.is_empty() {
         eprintln!(
             "[构建] 命令跑通了，但入口仍不在场：{}——检查 build.command 把产物写到哪了",

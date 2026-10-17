@@ -549,6 +549,129 @@ async function loadConfig(sid, c, box) {
   buildConfigForm(sid, cfg, c, box);
 }
 
+/* ---------- 依赖补齐：把"缺什么"变成"点一下装上" ----------
+ * 判据全在后端：`/api/setup/status` 的 `pending` 决定装什么（界面不自己挑条目——挑错了会把已装的重下一遍）。
+ * 这里只做两步确认（先看清单、再下载）与进度；装完即生效，不需要重启。
+ * 进度必须**看得见**：作业一起就进进度视图（当前步骤 + 滚动日志 + 取消）；关掉窗再打开也接着显示正在跑的那一次。 */
+function openSetupModal(onDone) {
+  openModal('补齐虚拟机依赖', (c) => {
+    const box = document.createElement('div'); box.className = 'cfg';
+    c.body.appendChild(box);
+    const log = document.createElement('div'); log.className = 'cfg-log';
+    c.body.appendChild(log);
+    const finish = () => { c.close(); if (onDone) onDone(); };
+
+    // 依赖状态 → 三种视图：已在跑（进度）/ 要装什么（清单）/ 都齐了。
+    async function load() {
+      box.innerHTML = '';
+      log.textContent = '';
+      box.appendChild(cfgHint('正在读本机的依赖状态…'));
+      let st = null;
+      try { st = await api('GET', '/api/setup/status'); }
+      catch (e) {
+        box.innerHTML = '';
+        box.appendChild(cfgHint('读不到依赖状态：' + e.message, 'err'));
+        return;
+      }
+      box.innerHTML = '';
+      const job = st.job || {};
+      // 关掉窗又打开：这一次还在跑就接着显示它，而不是再起一个（后端会拒绝第二个作业）。
+      if (job.running) { watch(st); return; }
+      const pending = Array.isArray(st.pending) ? st.pending : null;
+      if (!pending) {
+        box.appendChild(cfgHint('这个进程没有给出要补哪些条目（可能是旧版本）：重启应用后再试。', 'err'));
+        const close = btn('关闭', 'btn btn-block'); close.onclick = finish;
+        box.appendChild(close);
+        return;
+      }
+      if (!pending.length) {
+        box.appendChild(cfgHint('依赖都已在场：不需要补齐。', 'ok'));
+        const close = btn('关闭', 'btn btn-block'); close.onclick = finish;
+        box.appendChild(close);
+        return;
+      }
+      const deps = (st.deps || []).filter((d) => pending.indexOf(d.id) >= 0);
+      box.appendChild(cfgDiv('cfg-sec-title', '要装 ' + deps.length + ' 条（只写项目内，不动系统）'));
+      let total = 0;
+      for (const d of deps) {
+        total += d.size_mb || 0;
+        const line = document.createElement('div');
+        line.className = 'cfg-line';
+        line.textContent = '· ' + d.id + (d.size_mb ? '（约 ' + d.size_mb + ' MB）' : '') + (d.note ? '：' + d.note : '');
+        box.appendChild(line);
+        if (d.url) { const u = document.createElement('div'); u.className = 'cfg-dir'; u.textContent = d.url; box.appendChild(u); }
+      }
+      box.appendChild(cfgHint('合计约 ' + total + ' MB：从网络下载后解包进项目内的 .vm/。'));
+      const go = btn('开始下载安装', 'btn btn-primary btn-block');
+      go.onclick = () => start(pending, go);
+      box.appendChild(go);
+      const later = btn('取消', 'btn btn-block'); later.onclick = c.close;
+      box.appendChild(later);
+    }
+
+    async function start(ids, go) {
+      go.disabled = true;
+      c.setMsg('正在起补齐作业…');
+      try { await api('POST', '/api/setup/ensure', { deps: ids, confirm: true }); }
+      catch (e) { go.disabled = false; c.setMsg('起作业失败：' + e.message, true); return; }
+      c.setMsg('作业已开始：正在下载并解包（进度见下面）');
+      watch({ job: { seq: 0, running: true } });
+    }
+
+    // 进度视图：当前步骤 + 滚动日志 + 取消。轮询是长连接（服务端挂到有新行或 20s 到点）。
+    function watch(st) {
+      box.innerHTML = '';
+      log.textContent = '';
+      box.appendChild(cfgDiv('cfg-sec-title', '正在补齐（只写项目内）'));
+      const step = cfgHint('等待第一条进度…');
+      box.appendChild(step);
+      const cancel = btn('取消作业', 'btn btn-block');
+      cancel.onclick = async () => {
+        try { await api('DELETE', '/api/setup/job'); c.setMsg('已请求取消，等作业收尾…'); }
+        catch (e) { c.setMsg('取消失败：' + e.message, true); }
+      };
+      box.appendChild(cancel);
+      let since = (st.job && st.job.seq) || 0;
+      (async function poll() {
+        for (;;) {
+          let now = null;
+          try { now = await api('GET', '/api/setup/status?since=' + since + '&wait=1'); }
+          catch (e) { c.setMsg('读进度失败：' + e.message, true); return; }
+          const job = now.job || {};
+          if ((job.seq || 0) > since) since = job.seq;
+          const lines = job.lines || [];
+          log.textContent = lines.join('\n');
+          if (lines.length) step.textContent = '现在：' + lines[lines.length - 1];
+          if (!job.running) {
+            if (job.error) {
+              c.setMsg('补齐失败：' + job.error, true);
+              step.textContent = '失败：' + job.error;
+              return;
+            }
+            done(now);
+            return;
+          }
+          c.setMsg('正在补齐…（可以先关掉这个窗，作业会继续跑；再打开还能接着看）');
+        }
+      })();
+    }
+
+    function done(st) {
+      const left = Array.isArray(st.pending) ? st.pending : [];
+      c.setMsg(left.length ? '作业结束了，但还有没装上的：' + left.join('、') : '补齐完成：依赖都齐了');
+      box.innerHTML = '';
+      const note = document.createElement('div'); note.className = 'cfg-hint ok';
+      // 生效时机由后端保证（补齐完即按新状态判定，下一次起 guest 就用新的共享档）：这里只说结论。
+      note.textContent = '已经生效：再打开配置 / 向导就按新状态判定，下一次启动虚拟机就用上，不需要重启。';
+      box.appendChild(note);
+      const again = btn('关闭', 'btn btn-block'); again.onclick = finish;
+      box.appendChild(again);
+    }
+
+    load();
+  }, true);
+}
+
 /// 结构化诊断 → 中文（呈现层文案，不进提示词册）。
 function diagnosisText(d) {
   if (!d || typeof d !== 'object') return String(d);
@@ -659,6 +782,15 @@ function buildConfigForm(sid, cfg, c, box) {
       }
       secT.appendChild(box2);
     }
+    // 缺什么已经列出来了，这里给**一个动作**（不是一句命令行）。
+    // 装完重开配置面板：补齐弹层会把 #modal-root 顶掉，旧面板的 DOM 已经不在了——
+    // 与其往脱离文档的节点上重绘，不如按新状态整份重读（未保存的改动会丢，和「重新扫描」同一个代价）。
+    const setupBtn = btn('补齐虚拟机依赖…', 'btn btn-block');
+    setupBtn.onclick = () => {
+      try { openSetupModal(() => openConfig(sid)); }
+      catch (e) { notice('打开补齐弹层失败', e.message, 'err'); }
+    };
+    secT.appendChild(setupBtn);
   }
   secT.appendChild(pick.wrap); secT.appendChild(pick.hint);
   box.appendChild(secT);
@@ -861,6 +993,20 @@ function btn(label, cls) {
   b.type = 'button'; b.className = cls || 'btn'; b.textContent = label;
   return b;
 }
+/* 把按钮置忙（转圈 + 禁用 + 换文案），返回复位函数。为什么要有：一件要等几十秒的事，
+ * 界面不给反应就等于告诉用户「卡了」；复位放在 finally 里，失败也一定恢复可点。 */
+function busyButton(b, label) {
+  const was = b.textContent;
+  const wasDisabled = !!b.disabled;
+  b.disabled = true;
+  b.classList.add('busy');
+  if (label) b.textContent = label;
+  return () => {
+    b.classList.remove('busy');
+    b.textContent = was;
+    b.disabled = wasDisabled;
+  };
+}
 function textInput(placeholder, type) {
   const i = document.createElement('input');
   i.className = 'field-input'; i.placeholder = placeholder || ''; i.autocomplete = 'off';
@@ -915,9 +1061,9 @@ function guestPicker(guests, current, onChange) {
   const sync = () => {
     const g = list.find((x) => x.guest === sel.value);
     hint.textContent = !g
-      ? "这个虚拟根在本机找不到：跑 solomni --provision --ensure --yes 补上，或换一个。"
+      ? "这个虚拟根在本机找不到：点「补齐虚拟机依赖」装进项目内，或换一个。"
       : (g.os + " / " + g.arch) +
-        (g.ready ? "：已装齐。" : "：还没装齐（缺 " + (g.missing || []).join("、") + "）——先补齐依赖再用。") +
+        (g.ready ? "：已装齐。" : "：还没装齐（缺 " + (g.missing || []).join("、") + "）——点「补齐虚拟机依赖」装上再用。") +
         ((g.runtimes || []).length
           ? " 自带运行能力：" + g.runtimes.join("、") + "。"
           : " 它没有声明自带的运行能力。");
@@ -1475,15 +1621,23 @@ function renameUpload(sid, name, b64, alt) {
   });
 }
 /* ---------- 新建工作向导 ---------- */
-async function openWizard() {
+async function openWizard(draft) {
+  // draft = 上一次没提交的草稿：补齐依赖后要把向导按原样重开，别把用户已经填的东西丢掉。
+  // onclick 直接挂本函数时第一个参数是事件对象，所以按**标记**认草稿，不按真值认。
+  const resumed = !!(draft && draft.__wizardDraft);
   // single 形态：w.modules = 勾选的模块；w.agentPick = 复用的登记处 agent
   // （null = 用勾选的模块组临时 agent，名字见 w.agentName）。
-  const w = { mode: 'single', modules: [], agentPick: null, agentName: '', agents: [], task: '', tier: 'host', guest: '' };
+  const w = resumed ? draft : {
+    mode: 'single', modules: [], agentPick: null, agentName: '', agents: [], task: '',
+    tier: 'host', guest: '', __wizardDraft: true,
+  };
   const ed = { open: false, name: '', modules: [], model: null, note: '' };
+  // 名称与需求是**弹层里**输入框的现值（在本作用域之外）：由弹层装好后把取值钩子挂上来。
+  let snapshotDraft = () => {};
   // 档位选择：默认档与虚拟机档可用性由后端给（GET /api/tiers，与「开始」的校验同源）。
   let tiers = null;
   try { const r = await api('GET', '/api/tiers'); tiers = (r && r.tiers) || null; } catch (e) { tiers = null; }
-  if (tiers && tiers.default) w.tier = tiers.default;
+  if (!resumed && tiers && tiers.default) w.tier = tiers.default;
   // 档位那一格：虚拟机档不可用时禁用，并逐项说明缺什么、怎么补（照抄后端事实，不自己编话）。
   const tierField = document.createElement('div'); tierField.className = 'wf-field';
   const tierLabel = document.createElement('div'); tierLabel.className = 'wf-label'; tierLabel.textContent = '执行档位';
@@ -1495,12 +1649,24 @@ async function openWizard() {
   tierField.appendChild(tierLabel); tierField.appendChild(hostR.wrap); tierField.appendChild(vmR.wrap);
   if (!vmOk) {
     const reqs = (tiers && tiers.vm_requirements) || [];
-    const lines = reqs.filter((r) => !r.met).map((r) => '· ' + r.detail + (r.how ? '（' + r.how + '）' : ''));
+    // 只列**现状**：怎么补这件事由下面的按钮承担（把指引和动作分成两件事，用户不会只看到话看不到路）。
+    const lines = reqs.filter((r) => !r.met).map((r) => '· ' + r.detail);
     tierField.appendChild(cfgHint(
       '虚拟机档现在不能选：' + ((tiers && tiers.vm_unavailable_reason) || '本机不具备虚拟机档的前置条件') +
       (lines.length ? '\n' + lines.join('\n') : ''),
       'err'
     ));
+    const setupBtn = btn('补齐虚拟机依赖…', 'btn btn-block');
+    // 装完把向导按草稿重开：判据是后端按新状态算的，界面不自己改结论。
+    // 先把用户填的名称与需求抄进草稿（它们只在弹层里读得到），否则重开会把它们清掉。
+    setupBtn.onclick = () => {
+      // 兜住同步异常：按钮点了**必须**有反应——静默什么都不发生是最难查的失败。
+      try {
+        snapshotDraft();
+        openSetupModal(() => openWizard(w));
+      } catch (e) { notice('打开补齐弹层失败', e.message, 'err'); }
+    };
+    tierField.appendChild(setupBtn);
   }
 
   // 虚拟机档在**创建时**就要选一个虚拟根（会话级选择；机器能力已在上面判过）。
@@ -1538,6 +1704,7 @@ async function openWizard() {
   }
   openModal('新建工作', (c) => {
     const nameIn = textInput('工作名称（必填，会话落盘目录名）');
+    if (w.name) nameIn.value = w.name;   // 草稿重开：把用户填过的带回来
     const modeSel = selectInput([
       { value: 'single', label: '单 agent（1 个或多个模块）' },
       { value: 'collab', label: '协作（多个 agent）' },
@@ -1559,6 +1726,9 @@ async function openWizard() {
     const modelWrap = document.createElement('div'); modelWrap.className = 'wf-models';
     const editorWrap = document.createElement('div'); editorWrap.className = 'wf-field hidden';
     const taskIn = areaInput('本次需求（协作必填；也可写上，核心据此推荐）');
+    if (w.task) taskIn.value = w.task;   // 草稿重开：同上
+    // 上面那个「补齐虚拟机依赖」按钮在本作用域之外：把抄草稿的钩子交给它，点击时才读现值。
+    snapshotDraft = () => { w.name = nameIn.value; w.task = taskIn.value; };
     // 需求那一格与推荐按钮都是**非代理形态**才问的：形态一换就收起来（见 renderParts）。
     const taskField = field('本次需求', taskIn);
     const recBtn = btn('让核心推荐', 'btn btn-block');
@@ -1881,8 +2051,22 @@ async function openWizard() {
     };
 
     // 真正下发（重名时先经 choiceModal 让用户裁决，绝不用原生 confirm）
+    // 要等：虚拟机档在这一步里起 guest（拉 QEMU + 等 agent，首次几十秒到几分钟）——按钮转圈 + 说清在等什么。
     async function submit(body) {
-      try { await startSession(body); closeModal(); } catch (e) { notice('操作失败', e.message, 'err'); }
+      const release = busyButton(createBtn, '正在创建…');
+      cancelBtn.disabled = true;
+      c.setMsg(w.tier === 'vm'
+        ? '正在创建：虚拟机档要先起一台 guest（首次可能要几十秒到几分钟），起来之后才开工…'
+        : '正在创建…');
+      try {
+        await startSession(body);
+        closeModal();
+      } catch (e) {
+        c.setMsg('创建失败：' + e.message, true);
+      } finally {
+        release();
+        cancelBtn.disabled = false;
+      }
     }
 
     createBtn.onclick = async () => {
@@ -1891,7 +2075,7 @@ async function openWizard() {
       const task = taskIn.value.trim();
       const vmGuest = (w.guest || '').trim();
       if (w.tier === 'vm' && !vmGuest) {
-        c.setMsg('虚拟机档要先选一个虚拟机（虚拟根）；本机还没有可选项时先补齐依赖：solomni --provision --ensure --yes。', true);
+        c.setMsg('虚拟机档要先选一个虚拟机（虚拟根）：点上面的「补齐虚拟机依赖」装上，或换一个已装好的。', true);
         return;
       }
       let agents;

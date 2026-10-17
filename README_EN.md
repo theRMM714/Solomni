@@ -71,8 +71,10 @@ artifact, not a chat that is gone.
 - **Two execution tiers**: the **host tier** (default — scripts run directly on the host) and the **vm tier**
   (module tools run inside a guest, isolated from host processes). The vm tier is pluggable along
   **host × engine × guest × channel × share**: Linux (QEMU/KVM + virtiofs, falling back to 9p when virtiofsd is absent) and Windows (QEMU/WHPX + SMB over guestfwd, falling back to QGA copy) are already
-  verified on real machines, macOS is still missing (see [tests/gaps.yaml](tests/gaps.yaml)). `node start.js --provision --ensure --yes`
-  installs QEMU and a Debian guest into the project's `.vm/` (`--yes` confirms the download); host paths and guest paths are converted
+  verified on real machines, macOS is still missing (see [tests/gaps.yaml](tests/gaps.yaml)). When the vm tier is unavailable the web UI
+  offers **「补齐虚拟机依赖」** right where it says what is missing (config panel and new-work wizard: see the list and sizes, confirm, watch progress) —
+  the same manifest the CLI path uses: `node start.js --provision --ensure --yes` installs QEMU and a Debian guest into the project's `.vm/`
+  (`--yes` confirms the download). Host paths and guest paths are converted
   by **one bridge**, in both directions (identity when both sides share a dialect, a mirror root otherwise), and the working-environment
   prompt states **one spelling per environment** — system tools translate a guest spelling back to a host path before checking it. Details in [docs/vm/README.md](docs/vm/README.md); runtime package
   contract in [RUNTIME_SPEC.md](RUNTIME_SPEC.md).
@@ -101,6 +103,7 @@ node start.js            # any platform; on Windows also start.bat, on macOS / L
 node start.js -webUI     # go straight to the local web UI (127.0.0.1:3081)
 node start.js --provision                # optional: read-only vm tier status (JSON: QEMU / guest image / agent and runtimes)
 node start.js --provision --ensure --yes # optional: install QEMU and a Debian guest into the project's .vm/ (--yes confirms the download)
+# the web UI can do the same from the dialog shown when the vm tier is unavailable (no CLI needed)
 ```
 
 - Toolchain and caches stay **inside the project**: a usable Rust is **borrowed read-only** (caches and artifacts

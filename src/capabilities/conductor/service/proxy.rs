@@ -540,8 +540,8 @@ impl Conductor {
         if let Some(why) = crate::capabilities::vm::api::tier_refusal(
             &self.root,
             &exec,
-            self.qemu_path(),
-            self.share_tool_path(),
+            self.qemu_path().as_deref(),
+            self.share_tool_path().as_deref(),
             self.probe.as_ref(),
         ) {
             return Err(why);

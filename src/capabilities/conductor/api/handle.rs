@@ -261,7 +261,7 @@ impl ConductorHandle {
                 let head = bus.push(sid, &events);
                 return Ok(Advance { head });
             }
-            // 协作会话的"继续"仍在核心线程上推进（B-1 只搬单 agent 生成）。
+            // 协作会话的「继续」同样 own-and-return：泵在它自己的工作线程上跑（见 collab_generation）。
             Prepared::NotSingle => {
                 if text.is_some() {
                     return Err("该会话不是单 agent 模式".to_string());

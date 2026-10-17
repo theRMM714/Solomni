@@ -423,11 +423,17 @@ pub(crate) fn route(
             }
             match ops.provision.status() {
                 Ok(deps) => {
-                    let missing = deps.iter().filter(|d| !d.present).count();
+                    // 缺哪几条**按 id 列出来**（不只给个数）：界面的"补齐"按钮据此决定装什么，不自己挑。
+                    let pending: Vec<&str> = deps
+                        .iter()
+                        .filter(|d| !d.present)
+                        .map(|d| d.id.as_str())
+                        .collect();
                     ok_json(json!({
                         "deps": deps,
                         "job": ops.provision.job(),
-                        "missing": missing,
+                        "missing": pending.len(),
+                        "pending": pending,
                     }))
                 }
                 Err(e) => complaint(400, e),
@@ -453,20 +459,33 @@ pub(crate) fn route(
                 .unwrap_or(false);
             match ops.provision.status() {
                 Ok(all) => {
-                    let picked: Vec<_> = all
-                        .iter()
-                        .filter(|d| ids.is_empty() || ids.iter().any(|x| x == &d.id))
-                        .collect();
+                    // 没点名 = 补**现在缺的那几条**（不是全量）：已在场的不重下、不重解（清单里的条目不跳过在位项）。
+                    let picked: Vec<_> = if ids.is_empty() {
+                        all.iter().filter(|d| !d.present).collect()
+                    } else {
+                        all.iter()
+                            .filter(|d| ids.iter().any(|x| x == &d.id))
+                            .collect()
+                    };
+                    if picked.is_empty() {
+                        // 都装好了：不起作业（起一个"没东西可装"的作业只会给一条无意义错误）。
+                        return ok_json(json!({
+                            "ok": true, "deps": Vec::<String>::new(), "preview": Vec::<String>::new(),
+                            "note": "依赖都已在场，不需要补齐",
+                        }));
+                    }
                     if !confirm {
                         ok_json(json!({
                             "preview": picked.iter().map(|d| json!({
                                 "id": d.id, "url": d.url, "size_mb": d.size_mb, "present": d.present,
                             })).collect::<Vec<_>>(),
-                            "note": "确认后按 deps 起下载安装作业（只写项目内）",
+                            "note": "确认后按这些条目起下载安装作业（只写项目内）",
                         }))
                     } else {
-                        match ops.provision.start(ids.clone()) {
-                            Ok(()) => ok_json(json!({ "ok": true, "deps": ids })),
+                        // 显式点名再起作业：逐条失败要硬报（不是全量补齐那种"跳过继续"）。
+                        let picked: Vec<String> = picked.iter().map(|d| d.id.clone()).collect();
+                        match ops.provision.start(picked.clone()) {
+                            Ok(()) => ok_json(json!({ "ok": true, "deps": picked })),
                             Err(e) => complaint(400, e),
                         }
                     }
