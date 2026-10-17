@@ -147,6 +147,14 @@ const sandbox = {
       setupStarted = true;
       return jsonRes({ ok: true, deps: ["vm.virtiofsd.windows"] });
     }
+    // 创建向导要读一次档位选择（虚拟机档不可用 + 逐项前置）。
+    if (url === "/api/tiers") {
+      return jsonRes({ tiers: {
+        default: "host", vm_available: false,
+        vm_unavailable_reason: "虚拟机档现在不可用（没有找到 qemu-system-x86_64（按PATH找过））",
+        vm_requirements: RAW.vm_requirements, guests: [], available: {},
+      } });
+    }
     if (/\/api\/history\/[^/]+$/.test(url)) return jsonRes({ meta: { mode: "single" }, events: [] });
     if (/\/files$/.test(url)) return jsonRes({ work: [], agents: [], roots: { work: "/session/w/work", agents: [] } });
     if (/\/api\/sessions\/w\/config$/.test(url)) return jsonRes({ config: CFG });
@@ -356,7 +364,25 @@ check("config: 虚拟根状态说清装齐与自带能力（不写「已就绪�
   const t4 = allText(reg.get("#modal-root"));
   check("setup: 装完说清「立刻生效、不用重启」",
     t4.indexOf("已经生效") >= 0 && t4.indexOf("不需要重启") >= 0, t4.slice(-300));
+  check("setup: 下载过程有据可查（进度行留在弹层里）",
+    t4.indexOf("下载 https://example.invalid/v.zip") >= 0, t4.slice(-300));
   check("setup: 没有用原生 alert/confirm", alerts.length === 0, JSON.stringify(alerts));
+  closeModalIfAny();
+
+  /* ---- 创建向导里的补齐动作：点了必须**有反应**（作用域写错就会静默什么都不发生） ---- */
+  closeModalIfAny();
+  setupStarted = false; setupPolls = 0;
+  let wizardErrored = null;
+  try { await vm.runInContext('openWizard()', ctx); await sleep(80); } catch (e) { wizardErrored = e && e.message; }
+  check('wizard: 打得开且说明虚拟机档不可用', !wizardErrored && allText(reg.get('#modal-root')).indexOf('虚拟机档现在不能选') >= 0, String(wizardErrored));
+  const wizSetup = findButton(reg.get('#modal-root'), '补齐虚拟机依赖…');
+  check('wizard: 不可用时给出补齐按钮', !!wizSetup && typeof wizSetup.onclick === 'function');
+  let clickErrored = null;
+  try { wizSetup.onclick(); await sleep(120); } catch (e) { clickErrored = e && e.message; }
+  const wizText = allText(reg.get('#modal-root'));
+  check('wizard: 点补齐真的打开补齐弹层（列出要装的条目）',
+    !clickErrored && wizText.indexOf('vm.virtiofsd.windows') >= 0 && wizText.indexOf('只写项目内') >= 0,
+    'clickErrored=' + String(clickErrored) + ' text=' + wizText.slice(0, 200));
   closeModalIfAny();
 
   /* ---- 「打开」接线：点了真的进入会话视图 ---- */
