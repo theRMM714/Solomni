@@ -1,11 +1,16 @@
 //! 目的：长驻子进程的账与回收——谁在跑、属于谁、什么时候起的；核心没了也不留孤儿。
-//! 管：登记表（`.home/processes.json`）、Windows 作业对象绑定与 Unix 父死子亡、存活探测与终止、启动时对账。
+//! 管：登记表（`.home/processes.json`）、父死子亡（Linux 内核信号 / macOS 守门进程 / Windows 作业对象）、存活探测与终止、启动时对账。
 //! 不管：进程怎么起（各适配器自己 new Command）、业务语义（purpose / owner 只是标签，不参与决策）。
-//! 联动：vm 的引擎与共享适配器在起进程处登记；组合根启动时对一次账，`--doctor` 与 `/api/processes` 把它读出来。
+//! 联动：vm 的引擎与共享适配器在起进程处登记；组合根启动时对一次账，`--doctor` 与 `/api/processes` 把它读出来；
+//!   macOS 的父死子亡由本文件的守门模式实现，入口层只做 argv 分发（`main.rs` / `guard::proc_watch`）。
 
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 use std::sync::{Arc, Mutex};
+
+/// 目的：macOS 的长驻子进程守门模式（内部协议）：`--proc-watchdog <核心 pid> <子进程 pid>`。
+/// 约束：只在 macOS 上真起作用（Linux 由内核的 PDEATHSIG 兜、Windows 由作业对象兜）；用户不接触。
+pub const WATCHDOG_FLAG: &str = "--proc-watchdog";
 
 /// 目的：一条登记——一个我们亲手起的长驻子进程。
 /// 约束：`marker` 要能在它的命令行里找到（Unix 对账时靠它确认"这个 pid 还是我们那一个"，避免误杀别人的进程）。
@@ -140,19 +145,23 @@ impl ProcessBook {
 }
 
 /// 目的：给要起的子进程上"父死子亡"的保险（在 spawn 之前调）。
-/// 约束：Unix 走 pre_exec 设 PR_SET_PDEATHSIG + 独立进程组；Windows 在 spawn 之后经作业对象绑（见 `bind`）。
+/// 约束：所有 Unix 都开独立进程组（收整棵树时不用牵连自己）；父死子亡只有 Linux 由内核给
+///   （`PR_SET_PDEATHSIG`——macOS 的 libc 没有它），macOS 由 spawn 之后起的守门进程负责（见 `watch`）；
+///   Windows 在 spawn 之后经作业对象绑（见 `bind`）。
 pub fn guard(cmd: &mut Command) {
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
-        // 独立进程组：收整棵树时不用牵连自己。
         cmd.process_group(0);
         // 父进程没了就收信号：核心被强杀时，QEMU / 共享进程不该继续攥着镜像。
-        unsafe {
-            cmd.pre_exec(|| {
-                libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL);
-                Ok(())
-            });
+        #[cfg(target_os = "linux")]
+        {
+            unsafe {
+                cmd.pre_exec(|| {
+                    libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL);
+                    Ok(())
+                });
+            }
         }
     }
     #[cfg(not(unix))]
@@ -164,8 +173,8 @@ pub fn guard(cmd: &mut Command) {
 /// 目的：起一个我们亲手管的长驻子进程——在专门的长命线程上 spawn。
 /// 约束：PR_SET_PDEATHSIG 绑的是**发起 spawn 的那个线程**，不是进程；在每请求一线程（Web）或短命
 ///   工作线程上起 QEMU / 共享守护进程，线程一退就会把它们一并 SIGKILL。挪到长命线程上，父死子亡
-///   仍按进程成立（核心真死了它才死），也不会误杀活着的会话。Windows 没有 PDEATHSIG，作业对象仍
-///   由调用方 bind；直接 spawn，不绕线程。
+///   仍按进程成立（核心真死了它才死），也不会误杀活着的会话。Windows 走作业对象、macOS 走守门进程
+///   （都与发起线程无关；Windows 直接 spawn，Unix 共用这一条路径，经长命线程没有副作用）。
 pub fn spawn(cmd: Command) -> std::io::Result<Child> {
     #[cfg(unix)]
     {
@@ -255,6 +264,136 @@ pub fn bind(child: &Child) -> Result<(), String> {
         let _ = child;
         Ok(())
     }
+}
+
+/// 目的：macOS 的父死子亡——另起一个本程序的守门进程（`--proc-watchdog`）盯住核心，核心一死就收掉子进程组。
+/// 约束：Linux 由内核的 `PR_SET_PDEATHSIG` 兜、Windows 由作业对象兜，这里只对 macOS 生效；
+///   守门进程自己**不**挂 PDEATHSIG（它要活过发起 spawn 的线程），进独立进程组（终端信号不会先把它带走），
+///   不继承环境（密钥与凭据不跟着它走）。起不来只如实报一条，不阻断起 guest——少的是这层兜底，不是启动。
+pub fn watch(child: &Child) {
+    #[cfg(target_os = "macos")]
+    {
+        use std::os::unix::process::CommandExt;
+        let started = std::env::current_exe()
+            .map_err(|e| format!("取不到本程序路径（{}）", e))
+            .and_then(|exe| {
+                let mut cmd = Command::new(exe);
+                cmd.arg(WATCHDOG_FLAG)
+                    .arg(std::process::id().to_string())
+                    .arg(child.id().to_string())
+                    .stdin(std::process::Stdio::null())
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .env_clear()
+                    .process_group(0);
+                cmd.spawn().map_err(|e| format!("起不了守门进程（{}）", e))
+            });
+        match started {
+            // 收尸：子进程或核心收场时守门进程就退出，别让它变成僵尸。
+            Ok(mut dog) => {
+                std::thread::spawn(move || {
+                    let _ = dog.wait();
+                });
+            }
+            Err(e) => eprintln!("[进程] {}：核心被强杀时这个子进程不会跟着死", e),
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = child;
+    }
+}
+
+/// 目的：守门进程本体——盯住核心与子进程，谁先没了决定要不要收掉子进程组。
+/// 返回：0 = 该收的收了（或本来就没得收）；2 = 盯不住（如实报错，不假装守住了）。
+/// 约束：kqueue 的 `EVFILT_PROC` / `NOTE_EXIT` 在进程**退出**时就报（不要求父进程先收尸），
+///   所以核心被强杀也能立刻收；同时盯子进程是为了在它正常收场时不误杀一个可能被复用的进程组。
+#[cfg(target_os = "macos")]
+pub fn watchdog_serve(parent: u32, child: u32) -> i32 {
+    let kq = unsafe { libc::kqueue() };
+    if kq < 0 {
+        eprintln!(
+            "[进程] 守门进程建不起 kqueue（{}）",
+            std::io::Error::last_os_error()
+        );
+        return 2;
+    }
+    // 先盯核心：注册不上只可能是它已经没了（pid 复用要等整圈，这里按"没了"处理）。
+    if let Err(e) = watch_exit(kq, parent) {
+        unsafe { libc::close(kq) };
+        if e.raw_os_error() == Some(libc::ESRCH) {
+            kill_group(child);
+            return 0;
+        }
+        eprintln!("[进程] 守门进程盯不住核心（{}）", e);
+        return 2;
+    }
+    // 再盯子进程：它已经退出就没什么可收的，也不去 KILL 一个可能被复用的组。
+    if let Err(e) = watch_exit(kq, child) {
+        unsafe { libc::close(kq) };
+        if e.raw_os_error() == Some(libc::ESRCH) {
+            return 0;
+        }
+        eprintln!("[进程] 守门进程盯不住子进程（{}）", e);
+        return 2;
+    }
+    let mut event: libc::kevent = unsafe { std::mem::zeroed() };
+    loop {
+        let n = unsafe { libc::kevent(kq, std::ptr::null(), 0, &mut event, 1, std::ptr::null()) };
+        if n < 0 {
+            let e = std::io::Error::last_os_error();
+            if e.kind() == std::io::ErrorKind::Interrupted {
+                continue;
+            }
+            eprintln!("[进程] 守门进程等不到事件（{}）", e);
+            unsafe { libc::close(kq) };
+            return 2;
+        }
+        if n == 0 {
+            continue;
+        }
+        // packed 结构：字段按值读。
+        let who = event.ident as u32;
+        unsafe { libc::close(kq) };
+        if who == parent {
+            kill_group(child);
+        }
+        return 0;
+    }
+}
+
+/// 目的：把一个 pid 的"退出"注册进 kqueue；它已经不在了就是 `ESRCH`。
+#[cfg(target_os = "macos")]
+fn watch_exit(kq: std::os::raw::c_int, pid: u32) -> std::io::Result<()> {
+    let change = libc::kevent {
+        ident: pid as usize,
+        filter: libc::EVFILT_PROC,
+        flags: libc::EV_ADD | libc::EV_ENABLE,
+        fflags: libc::NOTE_EXIT,
+        data: 0,
+        udata: std::ptr::null_mut(),
+    };
+    let n = unsafe { libc::kevent(kq, &change, 1, std::ptr::null_mut(), 0, std::ptr::null()) };
+    if n < 0 {
+        Err(std::io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
+}
+
+/// 目的：按进程组收掉子进程（它起的时候就是组长：`guard` 里 `process_group(0)`）。
+#[cfg(target_os = "macos")]
+fn kill_group(pid: u32) {
+    unsafe {
+        libc::kill(-(pid as i32), libc::SIGKILL);
+    }
+}
+
+/// 目的：其它平台没有这个模式（Linux 由内核信号兜、Windows 由作业对象兜）：真被调起时如实报错。
+#[cfg(not(target_os = "macos"))]
+pub fn watchdog_serve(_parent: u32, _child: u32) -> i32 {
+    eprintln!("[进程] 守门进程只在 macOS 上存在：Linux 走 PR_SET_PDEATHSIG，Windows 走作业对象");
+    2
 }
 
 /// 目的：这个 pid 还活着吗（探不到就当没了：账上留一条死记录比误判活着更糟）。
@@ -481,8 +620,8 @@ mod tests {
 
     /// 目的：长驻子进程**按进程**父死子亡，不能按线程——Web 每请求一线程，请求一完线程就退；
     ///   若在请求线程上直接 spawn，PR_SET_PDEATHSIG 会把 QEMU / 共享守护进程一并 SIGKILL（真机验收露的）。
-    /// 约束：只在 Unix 上可判（Windows 走作业对象）；跑完收掉子进程。
-    #[cfg(unix)]
+    /// 约束：只在 Linux 上可判（父死子亡只有它由内核信号给；macOS 走守门进程、Windows 走作业对象）；跑完收掉子进程。
+    #[cfg(target_os = "linux")]
     #[test]
     fn a_guarded_child_survives_the_spawning_thread() {
         let mut child = std::thread::spawn(|| {

@@ -21,7 +21,7 @@
 | `src/kernel/detail/outbound.rs` | 出站 HTTPS 的共享机制：唯一一处 TLS 后端装配与通用 ureq 代理 |
 | `src/kernel/detail/unpack.rs` | 归档解包机制：tar / tar.gz / tar.zst / tar.xz / zip 解到目录，支持 strip 与宽容链接，并还原归档里的权限位（可执行位） |
 | `src/kernel/detail/process.rs` | 外部进程执行机制（守门进程、stdin 送参、隐私字段 env 注入、超时杀树、截断），实现 `ProcessRunner` |
-| `src/kernel/detail/procs.rs` | 长驻子进程的账（`.home/processes.json`）与回收：作业对象 / 父死子亡、存活探测、终止、启动对账 |
+| `src/kernel/detail/procs.rs` | 长驻子进程的账（`.home/processes.json`）与回收：父死子亡（Linux 内核信号 / macOS 守门进程 / Windows 作业对象）、存活探测、终止、启动对账 |
 | `src/kernel/detail/session.rs` | 长驻外部进程机制（守门进程长跑、按行收发、关闭杀树、Windows 容器预授权），实现 `SessionHost` |
 | `src/kernel/detail/confine/mod.rs` | 围栏机制入口（策略由调用方传入；实现 `FenceHost` 释放） |
 | `src/kernel/detail/confine/linux.rs` |

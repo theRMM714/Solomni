@@ -41,7 +41,7 @@ virtiofsd 与默认虚拟根 `debian`（cloud 镜像的 rootfs → **ext4 磁盘
 会话启动时用 qemu-img 在基础镜像上建一份**每租约可写层**（`.vm/overlays/<租约>.qcow2`），删会话即丢——多台并发**不同写一份基础镜像**；
 供给编排仍直写基础镜像（它要改的就是镜像本身，`GuestSpec.isolated = false`）。
 每个 QEMU 与共享进程都在起的那一刻记进账（`.home/processes.json`，`kernel/detail/procs.rs`：用途 + 归属 + 标记），销毁时注销；
-Unix 上子进程带 `PR_SET_PDEATHSIG`（父死子亡），Windows 上绑进作业对象（核心一死跟着死）——核心被强杀也不留孤儿攥着镜像。
+Linux 上子进程带 `PR_SET_PDEATHSIG`（父死子亡），macOS 上由本程序另起的守门进程（`--proc-watchdog`）盯住核心、核心一死就收掉它的进程组，Windows 上绑进作业对象（核心一死跟着死）——核心被强杀也不留孤儿攥着镜像。
 执行路径上，guest 表锁只用来取租约，
 `exec` 在该租约自己的锁下跑：**跨租约并行、同一租约串行**；工作区版本库的写闸同理按工作分。
 

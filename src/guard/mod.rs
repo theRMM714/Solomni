@@ -1,6 +1,7 @@
-//! **围栏守门进程**：它是**第二个程序入口**，由工具进程按 `--fence-run` 拉起。
-//! 与「启动应用」分开的理由：它跑的是**模块作者写的命令**，生命周期与退出码都属于那次工具调用。
-//! 机制全在 `crate::kernel::detail::confine`；这里只做 argv → 机制的分发。
+//! 目的：入口层的第二个程序入口——围栏守门（`--fence-run`）与长驻子进程守门（`--proc-watchdog`）。
+//! 管：argv → 机制的分发：装好围栏跑模块作者的命令、按条处置围栏台账、盯核心收子进程组（macOS）。
+//! 不管：围栏与进程账的机制本身（在 `src/kernel/detail/confine` 与 `src/kernel/detail/procs.rs`）；启动形态。
+//! 联动：由工具进程按 `--fence-run` 拉起、由 `procs::watch` 按 `--proc-watchdog` 拉起；`src/main.rs` 负责分发。
 
 /// 守门模式：读回围栏参数与命令，装围栏 → 跑命令 → 以工具退出码收场（失败如实报错，不静默）。
 pub fn fence_run(args: &[String], flag: usize) -> i32 {
@@ -14,6 +15,23 @@ pub fn fence_run(args: &[String], flag: usize) -> i32 {
         Err(e) => {
             eprintln!("[围栏] {}", e);
             crate::kernel::detail::confine::FENCE_FAILED
+        }
+    }
+}
+
+/// 目的：长驻子进程守门模式（内部协议）：盯住核心 `<核心 pid>`，核心没了就收掉 `<子进程 pid>` 的进程组。
+/// 返回：0 = 收完（或本来就没得收）；2 = 用法错 / 盯不住（如实报错）。
+/// 约束：模式只在 macOS 上真起作用（Linux / Windows 由 `procs::guard` / `procs::bind` 兜）。
+pub fn proc_watch(args: &[String], flag: usize) -> i32 {
+    let pid = |i: usize| args.get(i).and_then(|s| s.parse::<u32>().ok());
+    match (pid(flag + 1), pid(flag + 2)) {
+        (Some(parent), Some(child)) => crate::kernel::detail::procs::watchdog_serve(parent, child),
+        _ => {
+            eprintln!(
+                "用法：solomni {} <核心 pid> <子进程 pid>（内部协议，用户不用）",
+                crate::kernel::detail::procs::WATCHDOG_FLAG
+            );
+            2
         }
     }
 }

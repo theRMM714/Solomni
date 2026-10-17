@@ -20,7 +20,7 @@ presentation/{cli,web} ──▶ capabilities（含协调业务 conductor）─�
 | `capabilities/` | **业务能力**：按业务功能垂直切分。每个能力有 `api`（入站契约：trait + DTO）/ `service`（本能力的状态与用例）/ `ports`（出站端口，只由定义它的能力持有）/ `domain`（纯逻辑）/ `detail`（只有组合根能构造） | **业务之间只经对方的 `api`**；不反向依赖 `entry` / `presentation`（T0 机器判定，见 §九.7） |
 | `capabilities/conductor/` | **协调业务**：会话中心（在世表、命令队列、运行态）、生成驱动、跨能力用例与跨会话回档编排；与别的能力**平级** | 不读文件、不发网络、不碰 stdin/stdout——机制下沉各能力的 `detail/` |
 | `presentation/{cli,web}/` | **前端（交付机制）**：各渠道一个子目录，完全分开——传输（argv/stdout vs HTTP）、路由、纯渲染。**不是业务能力** | 只依赖各能力的 `::api`；**拿不到端口对象，也拿不到 `Core`**；两者互不依赖 |
-| `entry/` + `main.rs` + `diagnostics/` + `guard/` | **入口层**：组合根（`main.rs`：`new` 出所有适配器并注入）+ 机器可读探针（`--doctor` / `--https-check` / `--print-routes` / `--print-fence-env` / `--fence-verify`）+ 围栏守门进程与台账处置（`--fence-run`；以及 `--fence-clean` / `--fence-reconcile` / `--fence-ledger` / `--fence-restore` / `--fence-revoke` / `--fence-profile-rm`） | 它依赖所有人，**任何人都不许依赖它**；除装配与探针外无业务 |
+| `entry/` + `main.rs` + `diagnostics/` + `guard/` | **入口层**：组合根（`main.rs`：`new` 出所有适配器并注入）+ 机器可读探针（`--doctor` / `--https-check` / `--print-routes` / `--print-fence-env` / `--fence-verify`）+ 围栏守门进程与台账处置（`--fence-run`；以及 `--fence-clean` / `--fence-reconcile` / `--fence-ledger` / `--fence-restore` / `--fence-revoke` / `--fence-profile-rm`）+ 长驻子进程守门进程（`--proc-watchdog`，macOS 的父死子亡） | 它依赖所有人，**任何人都不许依赖它**；除装配与探针外无业务 |
 
 推论：
 

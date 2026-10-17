@@ -17,6 +17,14 @@ use std::sync::Arc;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
+    // 长驻子进程守门模式（内部协议，用户不用）：macOS 没有 PR_SET_PDEATHSIG，由本程序自己盯核心，
+    // 核心一死就把子进程组收掉（见 kernel::detail::procs::watch）。
+    if let Some(i) = args
+        .iter()
+        .position(|a| a == kernel::detail::procs::WATCHDOG_FLAG)
+    {
+        std::process::exit(guard::proc_watch(&args, i));
+    }
     // 守门模式（内部协议，用户不用）：把围栏装好再跑模块声明的命令，退出码即工具退出码。
     if let Some(i) = args
         .iter()
