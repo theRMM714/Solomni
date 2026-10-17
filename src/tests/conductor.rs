@@ -40,6 +40,8 @@ fn conductor_rooted(
 }
 
 /// 目的：造一台"能起虚拟机会话"的核心：探针按用例声明作答，VM 引擎可控（慢 / 失败）。
+/// 约束：与它的两条用例同一道门——本平台 guest 后端尚未真机验收时没有调用方。
+#[cfg(not(target_os = "macos"))]
 fn conductor_for_vm(
     probe: Arc<dyn crate::kernel::ports::HostProbe + Send + Sync>,
     engine: crate::tests::doubles::FakeEngine,
@@ -74,6 +76,8 @@ fn conductor_for_vm(
 }
 
 /// 目的：探针按"机器能力齐 + 虚拟根在场"作答（虚拟根的真文件由 `test_guest` 造）。
+/// 约束：与它的两条用例同一道门——本平台 guest 后端尚未真机验收时没有调用方。
+#[cfg(not(target_os = "macos"))]
 fn vm_capable_probe(guest: &str) -> std::sync::Arc<crate::tests::doubles::FixedProbe> {
     use crate::tests::doubles::FixedProbe;
     let base = crate::tests::scratch("vm-core-free-base");
