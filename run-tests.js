@@ -37,6 +37,7 @@ const STEP_BUDGET_S = {
   "T0 交叉类型检查（x86_64-apple-darwin）": 600,
   "T0 静态检查（clippy）": 300,
   "L1 单元（--bin solomni）": 300,
+  "环境引导自检": 120,
   "目标 cross-platform": 300,
   "L4 端到端": 600,
 };
@@ -1376,6 +1377,21 @@ function pushStep(obj) {
     status: dl.code === 0 && dl.out.includes("DEV-LOOP-OK") ? "pass" : "fail",
     detail: dl.out.trim().split(/\r?\n/).slice(-1).join(""),
     raw: dl.code === 0 ? null : dl.out.slice(-600),
+  });
+
+  // 环境引导自检：env.js 的下载 / 续传 / 结构判定 / sha256 闸（真实子进程 + 本地应答源；仅 Windows 真跑，
+  // 别的平台那条路不存在，如实记 [探针]）。判据见 docs/testing/execution-ci.md 的「环境引导自检」。
+  announce("环境引导自检");
+  const eb = sh(process.execPath, [path.join("tests", "env-bootstrap.mjs")], 5 * 60 * 1000);
+  const ebSkips = skipsIn(eb.out);
+  announceDone(eb.code !== 0 ? "失败" : ebSkips.length ? "env-skip" : "完成", "");
+  pushStep({
+    step: "环境引导自检",
+    // 非 Windows 上那条路（dlltool）不存在：自检自己打 [探针] 并照常结束——那是 env-skip，不是通过。
+    status: eb.code !== 0 ? "fail" : ebSkips.length ? "env-skip" : "pass",
+    detail: ebSkips.length ? ebSkips.join(" / ") : eb.out.trim().split(/\r?\n/).slice(-1).join(""),
+    skips: ebSkips,
+    raw: eb.code === 0 ? null : eb.out.slice(-1200),
   });
 
   // L4：端到端（有编排才跑；没有就是一条缺口，不装作跑过）

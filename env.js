@@ -291,9 +291,11 @@ function download(url, dest, resume) {
     args.push(url);
     const r = spawnSync(curl, args, { stdio: "inherit" });
     if (r.status === 0 && fs.existsSync(dest)) return true;
-    log("curl download failed (exit " + r.status + ")" + (resume ? " - partial kept for the next run" : ""));
-    if (resume) return false;
+    // 失败就是失败：分片留着（下次从**同一个**源续），也不再用 PowerShell 从头下把证据冲掉。
+    log("curl download failed (exit " + r.status + ") - partial kept for the next run");
+    return false;
   }
+  // 没有 curl（10 1803 以前的老系统）才走 PowerShell 兜底：它从头下，失败如实失败。
   const ps = runPS("Invoke-WebRequest -UseBasicParsing '" + url + "' -OutFile '" + dest + "'");
   return ps.status === 0 && fs.existsSync(dest);
 }
