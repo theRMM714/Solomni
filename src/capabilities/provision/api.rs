@@ -43,11 +43,10 @@ pub struct GuestBase {
     pub install: String,
 }
 
-/// 目的：一次补齐作业的状态快照。
+/// 目的：一次补齐作业的状态快照——进度只有一条通道（`seq` + `lines`），不另存一份"当前步骤"摘要。
 #[derive(Debug, Clone, Serialize, Default, PartialEq, Eq)]
 pub struct JobState {
     pub running: bool,
-    pub current: String,
     /// 目的：进度行的**单调序号**（前端按它增量取；`lines` 只留最近若干行，序号不会回退）。
     pub seq: u64,
     pub lines: Vec<String>,

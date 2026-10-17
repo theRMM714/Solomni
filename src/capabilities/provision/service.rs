@@ -226,7 +226,6 @@ impl Provision for ProvisionService {
             }
             *j = JobState {
                 running: true,
-                current: String::new(),
                 seq: 0,
                 lines: Vec::new(),
                 error: None,
