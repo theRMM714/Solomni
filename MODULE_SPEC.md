@@ -144,7 +144,10 @@ tools:
 - **产物**：写进模块目录（`build/` 已在 `.gitignore` 里）；agent 看得见产物、看不见工具链。
 - **本机档**：`needs` 由宿主 PATH 决定（运行包库只服务虚拟机档）；缺工具如实拒绝，并给"装工具链 / 自己编 / 让作者发产物"三条出路。
 - **跨平台**：构建命令写成**模块内的脚本**——unix 放 `tools/build`（要执行位），Windows 放 `tools/build.cmd`；两个文件并排，
-  各自的壳自己找得到（Windows 的 cmd 按 PATHEXT，与 `npm` 的 shim 同一条规矩）。**工具链不由产品预置**：
+  各自的壳自己找得到（Windows 的 cmd 按 PATHEXT，与 `npm` 的 shim 同一条规矩）。
+  **`.cmd` 只写 ASCII**：cmd 按控制台代码页解释批处理字节，非 ASCII 的 `rem` 注释会把**下一行整行吞掉**
+  （实测中文 Windows 上 `if not exist build mkdir build` 就这样消失、构建直接失败；`chcp 65001` 在管道 stdio 下救不了）——
+  说明文字写进模块 README，`--build` 与门禁都按这条判（`run-tests.js` 的结构审查扫 `.cmd`/`.bat` 的非 ASCII 与 BOM）。**工具链不由产品预置**：
   `needs` 就是目标环境 PATH 上的可执行名（如 `gcc`），缺了如实拒绝——"声明不构成保证"，装不装归用户。
 - **虚拟机档**：`needs` 由 guest 自带（`guest.yaml` 的 `runtimes`）或**运行包库**满足（prefix 的 `bin` 进 PATH、system 的载荷叠写进系统路径）；
   模块目录以**读写**挂进 guest，产物因此直接落回宿主那份；guest 用完即销毁（会话级可写层），不改基础镜像。

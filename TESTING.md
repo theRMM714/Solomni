@@ -30,7 +30,9 @@
 - `src/tests/` 中的测试层：**与 `capabilities/` 同构的一个能力一个文件**（`prompt.rs` / `registry.rs` / `llm.rs` / `workspace.rs` / `session.rs` / `slate.rs` / `taskchain.rs` / `permission.rs` / `residents.rs` / `secrets.rs` / `modules.rs` / `vm.rs`）+ `conductor.rs` 与 `conductor/`（协调业务自己的用例：会话中心、跨能力编排、裁决与代理）、`tools/` 与 `collab/`（这两个能力的用例按域分成子模块）、`doubles.rs`（端口替身）与 `builders.rs`（测试装配脚手架）；
 - `tests/cross-platform/` 跨平台集成与端到端测试；
 - `tests/windows/`、`tests/linux/`、`tests/macos/` 平台探针（`tests/helpers/probe.rs` 提供共用探针设施）；
-- `tests/dev-loop.mjs` 开发回路自检（`dev.js` 的固定子命令表与拒绝出口）；`src/presentation/web/assets/*.smoke.cjs` 前端冒烟测试；
+- `tests/dev-loop.mjs` 开发回路自检（`dev.js` 的固定子命令表与拒绝出口）；`tests/env-bootstrap.mjs` 环境引导自检
+  （`env.js` 的下载 / 续传 / 结构判定 / sha256 闸与显式接受开关，真实子进程 + 本地应答源；仅 Windows 真跑）；
+  `src/presentation/web/assets/*.smoke.cjs` 前端冒烟测试；
 - `tests/gaps.yaml`（全局）与 `tests/<平台>/gaps.yaml`（平台）缺口账；
 - **谁做任务谁补测试**：做完就补上这次改动的用例并跑门禁，通过后同步文档（见 [AGENTS.md](AGENTS.md) 九）；
 - `node run-tests.js` 测试汇总入口（`node start.js -test` 是备好环境后的同一入口）；开发环境先跑 `node setup-dev.js`
@@ -47,7 +49,7 @@
  所以它能被假实现整体替换——`routes.rs` 的 `FakeOps` 就是这么逐条测路由的。
 - T0 质量门禁已并入同一入口：编译、结构审查、格式、clippy、编译告警、**交叉类型检查（已装 target）**、依赖重复、**项目外写（env / 工具链）**零容忍硬失败；
   供应链（`cargo audit` / `cargo deny`）同为硬失败，但工具缺失或取不到 advisory 数据时记 `env-skip`。
-  结构审查里还含**门禁解析器自测**与 **`#[ignore]` 禁令**（报告里 `ignored > 0` 也算失败）；
+  结构审查里还含**门禁解析器自测**、**`#[ignore]` 禁令**（报告里 `ignored > 0` 也算失败）与**批处理脚本只允许 ASCII**；
   项目外写与供应链工具的获取 / 判定见 [docs/testing/quality-isolation.md](docs/testing/quality-isolation.md)。
 - 默认**并行**跑用例（`--serial` 只在排查并发/隔离问题时用）；每步都有墙钟上限，超时即硬失败并把证据记进报告
   `timeouts`；每步用时进报告，超预算标 `[slow]`（只报不拦）。
@@ -91,7 +93,7 @@ Linux Landlock、macOS seatbelt 与 Windows 的目录 ACL 授权/撤权、落点
 ## 四、判据速查（细则为准）
 
 - **缺口的唯一真相**是 `tests/gaps.yaml`（全局）与 `tests/<平台>/gaps.yaml`（平台）；门户与细则都不复述条目内容。
-- **成功标记**（`FRONTEND-SMOKE-OK` / `DEV-LOOP-OK` / `E2E-OK` / `TEST-REPORT-OK` / `TEST-REPORT-FAIL` / `TEST-REPORT-ACCEPTED`）
+- **成功标记**（`FRONTEND-SMOKE-OK` / `DEV-LOOP-OK` / `ENV-BOOTSTRAP-OK` / `E2E-OK` / `TEST-REPORT-OK` / `TEST-REPORT-FAIL` / `TEST-REPORT-ACCEPTED`）
   的固定含义见 [docs/testing/execution-ci.md](docs/testing/execution-ci.md)。
 - **质量失败不能被业务测试通过抵消**：两边的结论分别记，判据见 [docs/testing/quality-isolation.md](docs/testing/quality-isolation.md)。
 - **需要 CI 的场景**（平台专属代码、真机围栏、HTTPS/TLS、其它平台的质量分区）本地跑不出结论，

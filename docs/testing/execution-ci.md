@@ -48,6 +48,7 @@ node run-tests.js
 12. 逐个运行 `cargo test --test cross-platform/windows/linux/macos`（同样默认并行）；
 13. 前端冒烟；
 14. 开发回路自检（`tests/dev-loop.mjs`：`dev.js` 的子命令表与"环境没就绪就如实拒绝"）；
+15. 环境引导自检（`tests/env-bootstrap.mjs`：`env.js` 的下载 / 续传 / 结构判定 / sha256 闸，见下文；仅 Windows 真跑）；
 15. 存在编排器时运行 L4 端到端（编排器会**现场构建 indexer**：编译器版本进日志，构建失败即失败）；
 16. 写入 `target/test-report.json` 并打印 `TEST-REPORT-OK` 或 `TEST-REPORT-FAIL`。
 
@@ -59,6 +60,23 @@ T0 与业务测试在同一次运行里出结果，但结论分开记：质量�
 > L4 端到端在 `tests/cross-platform/e2e/root/` 下**现场生成**夹具：`orchestrator.js` 把产品根的
 > `prompts/`、`modules/`、`systools/` 拷进去再启动产品。那是**运行时副本、不是文档面**——
 > 不要手改、不要当文档审计；要改就改产品根的那一份，副本每次重跑都会覆盖。
+
+### 环境引导自检（`tests/env-bootstrap.mjs`）
+
+`env.js` 跑在门禁与产品**之前**（`start.bat` / `node env.js setup`）：它坏了等于用户装不上环境。这条自检用
+**真实子进程**（`<临时根>/env.js setup --yes`）+ **本地应答源**把 Windows 的 MinGW 引导链逐条钉住；只写
+`target/test-scratch/`、不碰外网、不装 Rust（给一个假 cargo 文件）。原样跑它：`node tests/env-bootstrap.mjs`。
+
+| 场景 | 判据 |
+| --- | --- |
+| 整份下载 | 过 sha256 闸、解出 `dlltool.exe`、归档与来源标记都删掉 |
+| 半截 + 同源标记 | 打向**记录下来的那个源**、带 `Range: bytes=<分片末尾>-`、续完装好 |
+| 半截但没标记 | 从头下（不带着未知来源续传） |
+| 结构不对（能下完但不是归档） | 退出 1、明说结构不对、删掉归档、不装 |
+| sha256 不符 | 退出 1、报台账值 / 实际值 / 来源、**保留文件**；只有 `SOLOMNI_ACCEPT_ASSET_CHANGE=1` 放行 |
+| 源不认 Range / 传到一半断开 | 退出 1、明说下载没完成、分片与来源标记都留着 |
+
+非 Windows 上那条路（`dlltool`）不存在：先打一条 `[探针]` 再照常打印 `ENV-BOOTSTRAP-OK`——env-skip，不算通过。
 
 ### 真机入口（本地）
 
@@ -274,6 +292,7 @@ git show origin/ci-report:runs/windows/logs/<某一步>.log  # 失败证据原�
 
 - `FRONTEND-SMOKE-OK`：前端冒烟完成；
 - `DEV-LOOP-OK`：开发回路自检完成（`dev.js` 的子命令表与拒绝出口）；
+- `ENV-BOOTSTRAP-OK`：环境引导自检完成（`env.js` 的下载 / 续传 / 结构判定 / sha256 闸；非 Windows 会先打一条 `[探针]`）；
 - `E2E-OK`：端到端场景完成；
 - `TEST-REPORT-OK`：当前入口的运行步骤没有失败；
 - `TEST-REPORT-FAIL`：当前入口有硬失败步骤**或** T0 任一项不过（同时以非零退出码暴露）；

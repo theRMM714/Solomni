@@ -11,6 +11,10 @@
 #   guest    虚拟机档的**虚拟根名**（只有 guest 类条目有；`install` 指它那一格目录，一个虚拟根可以由多条条目共同装）
 #   strip    解包时剥掉归档里的前 N 段目录（缺省 0）
 #   size_mb  大致体积（提示与带宽预估）
+#   sha256   【可选】归档 / 单文件的 sha256（64 位十六进制）。**校验值与它守护的那条连接写在同一条**：
+#            自托管 release 资产（source: release:<资产名>）写在本条目；source 是 links.yaml 的键的，
+#            写在 links.yaml 的 `<键>.sha256`。来源写进该条目的 note 或 links.yaml 的注释。
+#            不写 = 没有校验（`latest` 这种会随上游滚动的源只能这样）：靠解包 / 解析成功判，不假装验过。
 #   note     一句话
 #
 # 规则：这里只收"不预置、不分发、按需下载"的依赖；guest 镜像按已定方向**不自托管**（指上游 cdimage）。
@@ -24,6 +28,7 @@ deps:
     probe: .vm/qemu/bin/qemu-system-x86_64
     source: release:QEMU-11.1.1-4-anylinux-x86_64.AppImage
     size_mb: 165
+    sha256: 61ab65257c2db116aa28489c725379ab147a3bd399535c823a10d485ebd70fbd
     note: Linux 虚拟机档的 QEMU（pkgforge Anylinux AppImage，自带 sharun 兼容层；`--appimage-extract` 解包后约 1.7 GB，含全部 guest 目标）
   - id: vm.virtiofsd.linux
     os: linux
@@ -33,6 +38,7 @@ deps:
     source: release:virtiofsd-4bfa7125.zip
     strip: 3
     size_mb: 3
+    sha256: 32cec50a9500dc2303307eb4cd9ab5a1c5d24a3b9cab9c84d1e8f82c9d0499f5
     note: Linux 默认共享档的外部守护进程（Rust 版 virtiofsd，musl 静态；zip 里带 target/…/release 前缀，剥 3 段）
   - id: vm.qemu.windows
     os: windows
@@ -42,8 +48,10 @@ deps:
     source: release:qemu-windows-x86_64-11.1.1.tar.zst
     strip: 1
     size_mb: 32
+    sha256: e96ffa12bdea2feddd7091b4196f61c2ecd549f3db79fd9b792867c7c68e152c
     note: Windows 虚拟机档的 QEMU（官方源码在 MSYS2（mingw-w64）下自建的便携包，--enable-slirp；DLL 与固件都在包内，引擎按便携布局指 -L）
 
+  # guest 镜像指上游 `latest`（会随上游滚动）：无法 pin，按"下载成功 + 解包/解析成功"判。
   - id: vm.guest.linux
     os: linux
     arch: x86_64
@@ -93,4 +101,4 @@ deps:
     probe: .vm/smbd/smbd.exe
     source: smbd.windows
     size_mb: 1
-    note: 宿主侧用户态 SMB 共享服务（独立 fork 仓的预编译 helper；Windows 没有 9p / virtiofs，SMB 经 guestfwd 做实时共享）
+    note: 宿主侧用户态 SMB 共享服务（独立 fork 仓的预编译 helper；Windows 没有 9p / virtiofs，SMB 经 guestfwd 做实时共享）；校验值在 links.yaml 的 `smbd.windows.sha256`（该 release 的资产 digest）

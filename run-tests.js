@@ -37,6 +37,7 @@ const STEP_BUDGET_S = {
   "T0 交叉类型检查（x86_64-apple-darwin）": 600,
   "T0 静态检查（clippy）": 300,
   "L1 单元（--bin solomni）": 300,
+  "环境引导自检": 120,
   "目标 cross-platform": 300,
   "L4 端到端": 600,
 };
@@ -314,6 +315,72 @@ function duplicateCrates(out) {
 }
 
 /**
+ * 目的：links.yaml 一行值的规矩（纯判定）。链接必须是 https://；**校验值**（键以 `.sha256` 结尾）必须是
+ *   64 位十六进制。为什么校验值和链接放同一份台账：pin 与它守护的 URL 分居两处就会腐烂——曾把 URL 升到
+ *   新版本却忘了改代码里的常量，于是每次下载都判"不符 → 删文件 → 重跑"，把人挡在门外。
+ * 返回：问题描述；合规给 null。
+ */
+function linkValueProblem(key, value) {
+  if (key.endsWith(".sha256")) {
+    return /^[a-f0-9]{64}$/i.test(value) ? null : "links.yaml 的校验值必须是 64 位十六进制（键 " + key + "）";
+  }
+  return /^https:\/\//.test(value) ? null : "links.yaml 的值必须是 https://（校验值请写成 `<链接键>.sha256`）：" + key;
+}
+
+/**
+ * 目的：批处理脚本（`.cmd` / `.bat`）里第一处非 ASCII 字节所在的行号（1 起）；全 ASCII 给 0。
+ * 为什么是硬约束：cmd 按**控制台代码页**解释批处理字节（实测 936），UTF-8 的多字节序列会被读成行尾的一部分，
+ * 把它**下一行整行吞掉**——中文 `rem` 注释曾让 `if not exist build mkdir build` 整行消失，模块构建直接失败。
+ * 这不是"注释不好看"：换成 ASCII 之外没有稳妥解（`chcp 65001` 在管道 stdio 下救不了）。
+ * 返回 { line, bom }：bom 说明文件以 UTF-8 BOM 开头（cmd 会把首行读成一条不存在的命令）。
+ */
+function batchNonAscii(buf) {
+  const bom = buf.length >= 3 && buf[0] === 0xef && buf[1] === 0xbb && buf[2] === 0xbf;
+  let line = 1;
+  for (const b of buf) {
+    if (b === 0x0a) line++;
+    else if (b > 0x7f) return { line, bom };
+  }
+  return { line: 0, bom };
+}
+
+/**
+ * 结构审查：仓库里的批处理脚本只允许 ASCII（判据见 batchNonAscii）。
+ * 跳过工具链与产物目录，以及端到端夹具（`root/` 是每次从产品根复制的生成物，不是仓库内容）。
+ */
+function batchScriptProblems() {
+  const problems = [];
+  // 只扫**仓库内容**：工具链、产物、运行期记录与端到端夹具都不是仓库的一部分。
+  const SKIP = new Set([
+    ".git", "node_modules", "platform", "target", ".tools", ".vm",
+    ".home", "session", "logs", "runtimes", "mutants.out", "mutants.out.old",
+  ]);
+  const walk = (dir) => {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      const p = path.join(dir, e.name);
+      const r = normPath(path.relative(ROOT, p));
+      if (e.isDirectory()) {
+        if (SKIP.has(e.name) || r === "tests/cross-platform/e2e/root" || r.startsWith("tests/cross-platform/e2e/root/")) continue;
+        walk(p);
+        continue;
+      }
+      if (!/\.(cmd|bat)$/i.test(e.name)) continue;
+      const hit = batchNonAscii(fs.readFileSync(p));
+      if (hit.bom) {
+        problems.push(r + " 以 UTF-8 BOM 开头（cmd 会把首行读成不存在的命令）：批处理脚本只允许 ASCII，见 MODULE_SPEC 的「跨平台」");
+      }
+      if (hit.line) {
+        problems.push(
+          r + ":" + hit.line + " 含非 ASCII 字节（cmd 按代码页解释会吞掉下一行）：批处理脚本只允许 ASCII，见 MODULE_SPEC 的「跨平台」",
+        );
+      }
+    }
+  };
+  walk(ROOT);
+  return problems;
+}
+
+/**
  * 门禁解析器自测：**门禁自己也要被测**。这些函数决定红灯/绿灯，解析器一坏就是静默全绿
  * （尤其 cargo tree --duplicates 退出码恒为 0：解析不到重复不会有人发现）。用固定样例断言。
  * 判定与比对只有一处（本函数），新增解析器时在这里补一条。
@@ -353,6 +420,14 @@ function gateParserSelfTest() {
     { passed: 4, failed: 2, ignored: 4, resultLines: 2 },
   );
   eq("skipsIn 只认行首的 [探针]", skipsIn("ok\n[探针] 环境不允许\n其它 [探针] 出现在中间\n"), ["[探针] 环境不允许"]);
+  eq("linkValueProblem 放过 https 链接", linkValueProblem("winlibs.upstream.asset", "https://x/y.zip"), null);
+  eq("linkValueProblem 放过 64 位校验值（大小写都行）", linkValueProblem("a.b.sha256", "D5DBAFC4".repeat(8)), null);
+  eq("linkValueProblem 拒非十六进制校验值", /校验值必须/.test(linkValueProblem("a.b.sha256", "d5db")), true);
+  eq("linkValueProblem 拒裸 http（并指到 .sha256 写法）", /https/.test(linkValueProblem("a.b", "http://x")), true);
+  eq("batchNonAscii 放过纯 ASCII 脚本", batchNonAscii(Buffer.from("@echo off\r\necho OK\r\n")), { line: 0, bom: false });
+  eq("batchNonAscii 报出非 ASCII 所在行", batchNonAscii(Buffer.from("@echo off\nrem 中文\necho OK\n")), { line: 2, bom: false });
+  eq("batchNonAscii 认 UTF-8 BOM", batchNonAscii(Buffer.from([0xef, 0xbb, 0xbf, 0x40])).bom, true);
+  eq("batchNonAscii 非 ASCII 在首行时不误算行号", batchNonAscii(Buffer.from("echo 中\n")).line, 1);
   return bad;
 }
 /** 工具缺失 = env-skip（不静默算过）。 */
@@ -528,6 +603,10 @@ function structuralAudit() {
   };
   checkFenceSpecLiterals(path.join(ROOT, "src"));
 
+  // 批处理脚本只允许 ASCII：cmd 按代码页解释字节，非 ASCII 注释会吞掉下一行（这种错只在中文
+  // Windows 上炸，本机与英文 CI runner 都照不出来，所以只能按文本挡）。
+  for (const p of batchScriptProblems()) problems.push(p);
+
   // 平台专属文件本地不编译（tests/<平台>/main.rs 首行是 #![cfg(target_os = …)]）：
   // 常量名写串了（macOS 探针里写 Linux 的标记）只在那个平台上炸。按文本挡住这一对。
   const crossPlatformMarks = [
@@ -665,10 +744,19 @@ function structuralAudit() {
       const m = line.match(/^([A-Za-z0-9_.-]+):\s*(\S+)\s*$/);
       if (!m) { problems.push("links.yaml 不是扁平的 键: 值：" + raw); continue; }
       const key = m[1];
-      if (!/^https:\/\//.test(m[2])) problems.push("links.yaml 的值必须是 https://：" + key);
+      const bad = linkValueProblem(key, m[2]);
+      if (bad) problems.push(bad);
       if (!linkDomains.includes(key.split(".")[0])) problems.push("links.yaml 的域不在白名单（" + linkDomains.join(" / ") + "）：" + key);
       if (declared.has(key)) problems.push("links.yaml 重复键：" + key);
       declared.set(key, m[2]);
+    }
+    // 校验值必须与真实存在的链接成对：写成孤儿键 = 它守护的那条连接根本不存在。
+    for (const [k, v] of declared) {
+      if (!k.endsWith(".sha256")) continue;
+      const base = k.slice(0, -".sha256".length);
+      if (!declared.has(base) || !/^https:\/\//.test(declared.get(base) || "")) {
+        problems.push("links.yaml 的校验值没有对应的链接键：" + k + "（应为 " + base + " 的 .sha256）");
+      }
     }
     const used = new Set();
     const scanLinkUses = (abs) => {
@@ -693,8 +781,24 @@ function structuralAudit() {
     };
     const srcDir = path.join(ROOT, "src");
     if (fs.existsSync(srcDir)) walkSrc(srcDir);
+    // 校验值跟着它守护的那条链接一起被消费：代码按 `<源>.sha256` 取（不逐条写 link()），
+    // 所以"基础链接有人用"就等于"它的校验值有人用"。
+    const consumed = new Set(used);
+    for (const k of declared.keys()) {
+      if (!k.endsWith(".sha256")) continue;
+      if (used.has(k.slice(0, -".sha256".length))) consumed.add(k);
+    }
     for (const k of used) if (!declared.has(k)) problems.push("links.yaml 缺被引用的键：" + k);
-    for (const k of declared.keys()) if (!used.has(k)) problems.push("links.yaml 的键没有消费点（死数据）：" + k);
+    for (const k of declared.keys()) if (!consumed.has(k)) problems.push("links.yaml 的键没有消费点（死数据）：" + k);
+  }
+
+  // ⑤ 依赖清单的校验值：写了就必须是 64 位十六进制（与 links.yaml 同一口径）；不写 = 没 pin（`latest` 源只能这样）。
+  const depsLedger = path.join(ROOT, "dependencies.yaml");
+  if (fs.existsSync(depsLedger)) {
+    fs.readFileSync(depsLedger, "utf8").split(/\r?\n/).forEach((line, i) => {
+      const m = line.match(/^\s+sha256:\s*(\S+)\s*$/);
+      if (m && !/^[a-f0-9]{64}$/i.test(m[1])) problems.push("dependencies.yaml:" + (i + 1) + " 的 sha256 必须是 64 位十六进制");
+    });
   }
 
   // ③ 根 *.md ↔ AGENTS.md 路由表：新增根文档必须同时进路由表。
@@ -1273,6 +1377,21 @@ function pushStep(obj) {
     status: dl.code === 0 && dl.out.includes("DEV-LOOP-OK") ? "pass" : "fail",
     detail: dl.out.trim().split(/\r?\n/).slice(-1).join(""),
     raw: dl.code === 0 ? null : dl.out.slice(-600),
+  });
+
+  // 环境引导自检：env.js 的下载 / 续传 / 结构判定 / sha256 闸（真实子进程 + 本地应答源；仅 Windows 真跑，
+  // 别的平台那条路不存在，如实记 [探针]）。判据见 docs/testing/execution-ci.md 的「环境引导自检」。
+  announce("环境引导自检");
+  const eb = sh(process.execPath, [path.join("tests", "env-bootstrap.mjs")], 5 * 60 * 1000);
+  const ebSkips = skipsIn(eb.out);
+  announceDone(eb.code !== 0 ? "失败" : ebSkips.length ? "env-skip" : "完成", "");
+  pushStep({
+    step: "环境引导自检",
+    // 非 Windows 上那条路（dlltool）不存在：自检自己打 [探针] 并照常结束——那是 env-skip，不是通过。
+    status: eb.code !== 0 ? "fail" : ebSkips.length ? "env-skip" : "pass",
+    detail: ebSkips.length ? ebSkips.join(" / ") : eb.out.trim().split(/\r?\n/).slice(-1).join(""),
+    skips: ebSkips,
+    raw: eb.code === 0 ? null : eb.out.slice(-1200),
   });
 
   // L4：端到端（有编排才跑；没有就是一条缺口，不装作跑过）

@@ -323,6 +323,7 @@ mod tests {
             source: "guest.debian.image".to_string(),
             strip: 0,
             size_mb: 0,
+            sha256: String::new(),
             note: String::new(),
         }
     }

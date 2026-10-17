@@ -22,15 +22,24 @@ pub enum SlotWake {
     Gone,
 }
 
+/// 目的：等待格的内部状态——**一把锁管全部**：写进来的选项，与"为什么解开"的两个标记。
+/// 约束：读写都必须在同一把锁下。旧写法把两个标记放在锁外（`AtomicBool`），而 `wait` 是在持锁时
+///   检查它们的——于是"解开"落在"检查完、还没进 `cv.wait`"那一小段里就会**丢掉唤醒**，
+///   等待线程永远挂着（用户已经答了 / 已经按了停止，工作线程却再也不动）。机器一有负载就现形。
+#[derive(Default)]
+struct SlotState {
+    option: Option<String>,
+    released: bool,
+    /// 本次解开是不是"用户停止 / 会话关闭"（整队作废）——只有它不是默认项的适用场景。
+    stopped: bool,
+}
+
 /// 目的：一次**等在工作线程上**的裁决的等待格：发起方在这里等，回答写进来并唤醒它。
 /// 约束：不设超时（不点不继续）；整队作废与重建都会解开它，但**为什么解开**如实分开（见 `SlotWake`）。
 #[derive(Default)]
 pub struct AnswerSlot {
-    option: Mutex<Option<String>>,
+    state: Mutex<SlotState>,
     cv: Condvar,
-    released: std::sync::atomic::AtomicBool,
-    /// 本次解开是不是"用户停止 / 会话关闭"（整队作废）——只有它不是默认项的适用场景。
-    stopped: std::sync::atomic::AtomicBool,
 }
 
 impl AnswerSlot {
@@ -41,13 +50,13 @@ impl AnswerSlot {
     /// 目的：等用户的回答——**阻塞，不设超时**。
     /// 返回：回答的选项 id，或"为什么没有答案"（停止 / 没人答）。
     pub fn wait(&self) -> SlotWake {
-        let mut g = self.option.lock().unwrap_or_else(|e| e.into_inner());
+        let mut g = self.state.lock().unwrap_or_else(|e| e.into_inner());
         loop {
-            if let Some(v) = g.clone() {
+            if let Some(v) = g.option.clone() {
                 return SlotWake::Answer(v);
             }
-            if self.released.load(std::sync::atomic::Ordering::Relaxed) {
-                return if self.stopped.load(std::sync::atomic::Ordering::Relaxed) {
+            if g.released {
+                return if g.stopped {
                     SlotWake::Stopped
                 } else {
                     SlotWake::Gone
@@ -58,19 +67,20 @@ impl AnswerSlot {
     }
 
     fn resolve(&self, option: &str) {
-        let mut g = self.option.lock().unwrap_or_else(|e| e.into_inner());
-        *g = Some(option.to_string());
+        let mut g = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        g.option = Some(option.to_string());
         self.cv.notify_all();
     }
 
     /// 目的：把这一格解开。`stopped` = 是用户停止 / 会话关闭（整队作废）解开的，而不是"没人答"。
+    /// 约束：置位必须在**同一把锁**下（等待方是持锁检查这些标记的，解锁后直接进 `cv.wait`）——
+    ///   锁外置位就是丢唤醒：那一小段里置的位没有任何人在等它，等待方醒来前永远不会再检查。
     fn release(&self, stopped: bool) {
+        let mut g = self.state.lock().unwrap_or_else(|e| e.into_inner());
         if stopped {
-            self.stopped
-                .store(true, std::sync::atomic::Ordering::Relaxed);
+            g.stopped = true;
         }
-        self.released
-            .store(true, std::sync::atomic::Ordering::Relaxed);
+        g.released = true;
         self.cv.notify_all();
     }
 }
@@ -386,5 +396,100 @@ fn note_card(id: Option<&str>, max: &mut u64) {
     };
     if n > *max {
         *max = n;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    /// 目的：回答写进格子之后，等待**无论是在它之前还是之后**开始的，都要立刻拿到 Answer。
+    #[test]
+    fn an_answer_is_seen_whether_the_waiter_started_before_or_after_it() {
+        let before = AnswerSlot::new();
+        before.resolve("allow");
+        assert_eq!(before.wait(), SlotWake::Answer("allow".to_string()));
+
+        let after = AnswerSlot::new();
+        let w = {
+            let s = Arc::clone(&after);
+            std::thread::spawn(move || s.wait())
+        };
+        std::thread::sleep(Duration::from_millis(20));
+        after.resolve("deny");
+        assert_eq!(
+            w.join().expect("等待线程"),
+            SlotWake::Answer("deny".to_string()),
+            "等待中被回答要能被唤醒"
+        );
+    }
+
+    /// 目的：`release` 的**原因**如实分开（停止 ≠ 没人答）——释放在等待之前与之后都成立。
+    #[test]
+    fn the_release_reason_stays_distinct_in_both_orders() {
+        let stopped = AnswerSlot::new();
+        stopped.release(true);
+        assert_eq!(stopped.wait(), SlotWake::Stopped, "先释放在先也是停止");
+
+        let gone = AnswerSlot::new();
+        gone.release(false);
+        assert_eq!(gone.wait(), SlotWake::Gone, "先释放在先是没人答");
+
+        let blocking = AnswerSlot::new();
+        let h = {
+            let s = Arc::clone(&blocking);
+            std::thread::spawn(move || s.wait())
+        };
+        std::thread::sleep(Duration::from_millis(20));
+        blocking.release(true);
+        assert_eq!(h.join().expect("等待线程"), SlotWake::Stopped);
+    }
+
+    /// 目的：**释放在"检查完、还没进挂起"那一小段里也不能丢唤醒**。
+    ///   用"刚起线程就释放"的大量轮次去撞那个窗口：旧写法（标记位在锁外置位）撞上就永远挂着，
+    ///   所以每次等待都带超时——挂住即失败，不会把测试套件吊死。
+    #[test]
+    fn a_release_racing_the_waiter_never_leaves_it_blocked() {
+        for i in 0..200 {
+            let slot = AnswerSlot::new();
+            let (tx, rx) = mpsc::channel();
+            let s = Arc::clone(&slot);
+            let h = std::thread::spawn(move || {
+                tx.send(s.wait()).ok();
+            });
+            let stopped = i % 2 == 0;
+            slot.release(stopped);
+            let got = rx
+                .recv_timeout(Duration::from_secs(2))
+                .expect("释放之后等待方必须被解开（丢唤醒就会一直挂着）");
+            let want = if stopped {
+                SlotWake::Stopped
+            } else {
+                SlotWake::Gone
+            };
+            assert_eq!(got, want, "第 {} 轮：原因也要如实", i);
+            h.join().expect("等待线程");
+        }
+    }
+
+    /// 目的：同一个窗口对"回答"也一样——回答写进格子后，等待方必须立刻拿到。
+    #[test]
+    fn an_answer_racing_the_waiter_never_leaves_it_blocked() {
+        for i in 0..200 {
+            let slot = AnswerSlot::new();
+            let (tx, rx) = mpsc::channel();
+            let s = Arc::clone(&slot);
+            let h = std::thread::spawn(move || {
+                tx.send(s.wait()).ok();
+            });
+            slot.resolve("allow");
+            let got = rx
+                .recv_timeout(Duration::from_secs(2))
+                .expect("回答之后等待方必须被解开");
+            assert_eq!(got, SlotWake::Answer("allow".to_string()), "第 {} 轮", i);
+            h.join().expect("等待线程");
+        }
     }
 }

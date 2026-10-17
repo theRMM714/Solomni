@@ -35,6 +35,8 @@ tests/
  ci-publish.mjs # CI 报告发布脚本（把三平台报告写入 ci-report 分支）
  ci-e2e.mjs     # CI 的 e2e job 入口（构建 + 跑 L4 编排，写 e2e-report.json）
  ci-merge.mjs   # 发布前把 quality 与 e2e 两份报告合并成该平台唯一的一份
+ dev-loop.mjs    # 开发回路自检（dev.js 的子命令表与拒绝出口）
+ env-bootstrap.mjs # 环境引导自检（env.js 的下载 / 续传 / 结构判定 / sha256 闸；仅 Windows 真跑）
 ci-mutation.mjs # 突变测试入口（core / capability 两个范围；范围见 tests/mutation-scope.json）
 ci-mutation-publish.mjs # 把突变小结发到 ci-mutation 滚动分支（各推各的，不碰 ci-report）
 mutation-scope.json # 突变测试范围（文件级清单；core + 各能力）

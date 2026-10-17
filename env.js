@@ -4,6 +4,8 @@
  * 管：工具链在哪、环境怎么拼、缺了怎么补；不管：构建、运行、测试编排（那些在 start.js / run-tests.js）。
  * 为什么单独一层：环境是“换机器 / 换开发环境”时唯一要改的地方；启动器与测试入口共用同一份解析，不再各写一遍。
  * 收敛规则：缓存与产物一律落在项目内 platform/<os>/ 与 .tools/（AGENTS.md）；系统工具链可只读借用，但不写它的 home。
+ * 完整性：下载源的校验值与**那条链接成对**放在 links.yaml（`<键>.sha256`），不写死在代码里——
+ *   分居两处就会腐烂（曾把 URL 升到新版本、忘了改常量：每次下载都判不符 → 删文件 → 重跑）。
  * CLI：node env.js（看状态）/ node env.js setup [--yes]（只建环境）/ node env.js --print-env（机器可读）。
  */
 "use strict";
@@ -21,13 +23,15 @@ const P_RUSTUP = path.join(PLATFORM_DIR, "rustup");
 const P_CARGO = path.join(PLATFORM_DIR, "cargo");
 const TOOLS = path.join(ROOT, ".tools");
 const WINLIBS_BIN = path.join(TOOLS, "mingw64", "bin");
-// winlibs.zip 的 SHA256；空 = 首次下载打印哈希供固定。
-const WINLIBS_SHA256 = "c1f52294597c0b73786b2a78eb5d176d89226d2f21875eab75e783a8b1cefcc4";
+// 可携 MinGW 的 binutils（dlltool.exe + as.exe）落在项目内；已有完整 binutils 的机器可以用
+// SOLOMNI_MINGW_BIN=<含 dlltool.exe 与 as.exe 的 bin 目录> 指过去，省掉一次 260 MB 下载。
+// 校验值不在这里：它与下载源成对放在 links.yaml（winlibs.upstream.asset.sha256）。
 
 const log = (m) => console.log("[env] " + m);
 const die = (m) => { console.error("[env] " + m); process.exit(1); };
 
-// 外部连接台账（唯一真相）：项目自用、可能变的外部 URL 都在 links.yaml。
+// 外部连接台账（唯一真相）：项目自用、可能变的外部 URL 都在 links.yaml；下载源的校验值与那条链接
+// 成对写在同一份台账里（键 + `.sha256`）。
 // 读法只认扁平的"键: 值"（与 tests/gaps.yaml 同一手法）：不引 YAML 依赖；缺键/坏行如实报错。
 const LINKS = readLinks(path.join(ROOT, "links.yaml"));
 
@@ -102,8 +106,14 @@ function probeUsable(cargo) {
 }
 
 function locateDlltool() {
-  // 只认项目内安装的完整 binutils（.tools/mingw64/bin）。不扫系统目录、不查 PATH。
-  // 返回 { dir, broken }：broken 列只有 dlltool、缺汇编器的半套树。
+  // 返回 { dir, broken }：broken 列"有 dlltool 但缺汇编器"的半套树（试跑 dlltool 会把好的误判成坏的，所以静态查）。
+  // ① 显式指定优先：已有完整 binutils 的机器（例如系统 MSYS2）不必为 dlltool 再下 260 MB。
+  const override = process.env.SOLOMNI_MINGW_BIN;
+  if (override) {
+    if (binutilsReady(override)) return { dir: override, broken: [] };
+    return { dir: null, broken: [override + "（SOLOMNI_MINGW_BIN）"] };
+  }
+  // ② 项目内安装的完整 binutils（.tools/mingw64/bin）。不扫系统目录、不查 PATH。
   if (binutilsReady(WINLIBS_BIN)) return { dir: WINLIBS_BIN, broken: [] };
   if (fs.existsSync(path.join(WINLIBS_BIN, "dlltool.exe"))) return { dir: null, broken: [WINLIBS_BIN] };
   return { dir: null, broken: [] };
@@ -114,6 +124,13 @@ function binutilsReady(dir) {
   // 静态检查是刻意的：试跑 dlltool 在 Windows 上会把好的 winlibs 误判成坏的。
   if (!dir) return false;
   return fs.existsSync(path.join(dir, "dlltool.exe")) && fs.existsSync(path.join(dir, "as.exe"));
+}
+
+/** 目的：拼 PATH 时该放哪个 bin 目录——显式指定（可用）优先，其次项目内那份。 */
+function mingwBinOnPath() {
+  const o = process.env.SOLOMNI_MINGW_BIN;
+  if (o && binutilsReady(o)) return [o];
+  return fs.existsSync(WINLIBS_BIN) ? [WINLIBS_BIN] : [];
 }
 
 function composeEnv(cargo, source) {
@@ -128,7 +145,7 @@ function composeEnv(cargo, source) {
   }
   const front = [path.join(cargoHome, "bin"), path.dirname(cargo)]
     .concat(EXTRA_PATH)
-    .concat(IS_WIN && fs.existsSync(WINLIBS_BIN) ? [WINLIBS_BIN] : [])
+    .concat(IS_WIN ? mingwBinOnPath() : [])
     .filter(Boolean);
   setEnvPath(env, front.concat([envPath(env)].filter(Boolean)).join(path.delimiter));
   return env;
@@ -225,13 +242,14 @@ async function ensure(opts) {
         console.error("[env] dlltool.exe NOT found at any fixed location (rust-lang/rust#140704:");
         console.error("[env] windows-sys raw-dylib needs dlltool; rust-mingw on this toolchain lacks it).");
       }
-      const ans = await ask("Install portable MinGW now? winlibs ~200MB into project .tools, no admin, no system changes [y/N] ", { yes });
+      const ans = await ask("Install portable MinGW now? winlibs ~260MB into project .tools, no admin, no system changes [y/N] ", { yes });
       if (ans !== null && ans.trim().toLowerCase() === "y") {
         await installWinlibs();
         if (!EXTRA_PATH.includes(WINLIBS_BIN)) EXTRA_PATH.push(WINLIBS_BIN);
       } else {
         console.error("[env] manual route (keeps everything inside the project):");
-        console.error("  browser-download a winlibs zip, save it as .tools/winlibs.zip, re-run");
+        console.error("  browser-download a winlibs zip, save it as .tools/winlibs.zip, re-run;");
+        console.error("  or point at an existing full binutils: SOLOMNI_MINGW_BIN=<dir with dlltool.exe + as.exe>");
         console.error("  speed-up flags for auto-download: SOLOMNI_GH_MIRROR=<prefix> or HTTPS_PROXY=<url>");
       }
     }
@@ -258,18 +276,28 @@ function runPS(cmd) {
   return spawnSync("powershell", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", cmd], { stdio: "inherit" });
 }
 
-function download(url, dest) {
-  // curl.exe 随 Windows 自带（10 1803+）；比 Invoke-WebRequest 快且带进度条。
-  // -C - 续传已有分片，不从零重来。老系统的兜底走 PowerShell。
+/**
+ * 目的：把 URL 下到目标文件；返回**整份成功**（退出码 0），不再拿"文件比 1 MB 大"当成功——
+ *   半截文件被当成成功就会直接进解压（实测报 `找不到中央目录结尾记录`）。
+ * 参数：resume = 复用已有分片。**只对同一个 URL 成立**（换源续传等于把两份字节接起来，归档必坏），
+ *   所以调用方用分片旁边记下的源来续。
+ * 约束：curl 在场就只用 curl（续传失败时保留分片，别用"从头下"把它冲掉）；curl 缺席才走 PowerShell（它从头下）。
+ */
+function download(url, dest, resume) {
   const curl = path.join(process.env.SystemRoot || "C:/Windows", "System32", "curl.exe");
   if (fs.existsSync(curl)) {
-    const r = spawnSync(curl, ["-L", "--fail", "--retry", "3", "-C", "-", "--connect-timeout", "30", "-o", dest, url],
-      { stdio: "inherit" });
-    if (r.status === 0 && fs.existsSync(dest) && fs.statSync(dest).size > 1048576) return true;
-    log("curl download failed (exit " + r.status + "); keeping partial file for resume; trying PowerShell fallback...");
+    const args = ["-L", "--fail", "--retry", "3", "--connect-timeout", "30", "-o", dest];
+    if (resume) args.push("-C", "-");
+    args.push(url);
+    const r = spawnSync(curl, args, { stdio: "inherit" });
+    if (r.status === 0 && fs.existsSync(dest)) return true;
+    // 失败就是失败：分片留着（下次从**同一个**源续），也不再用 PowerShell 从头下把证据冲掉。
+    log("curl download failed (exit " + r.status + ") - partial kept for the next run");
+    return false;
   }
-  runPS("Invoke-WebRequest -UseBasicParsing '" + url + "' -OutFile '" + dest + "'");
-  return fs.existsSync(dest) && fs.statSync(dest).size > 1048576;
+  // 没有 curl（10 1803 以前的老系统）才走 PowerShell 兜底：它从头下，失败如实失败。
+  const ps = runPS("Invoke-WebRequest -UseBasicParsing '" + url + "' -OutFile '" + dest + "'");
+  return ps.status === 0 && fs.existsSync(dest);
 }
 
 function mirrorVariants(ghUrl) {
@@ -285,22 +313,28 @@ function sha256(file) {
   return (m || "").toLowerCase();
 }
 
-function checkWinlibsHash(zip) {
-  // 第三方镜像不能悄悄换内容：固定 WINLIBS_SHA256 之后每次下载都校验。
-  if (!WINLIBS_SHA256) {
-    const h = sha256(zip);
-    if (h) {
-      log("sha256 " + h);
-      log("(pin this in env.js WINLIBS_SHA256 to verify future downloads)");
-    }
+/**
+ * 目的：归档完整性闸——校验值来自 links.yaml（`winlibs.upstream.asset.sha256`，与下载源**成对**），
+ *   不写死在代码里：分居两处就会腐烂（URL 升了新版本、常量忘了改 ⇒ 每次下载都判 "不符 → 删文件 → 重跑"）。
+ * 约束：不符时**不删文件**（删了既丢证据，又会在 pin 过期时变成每次重下 260 MB 的死循环）：
+ *   报出台账值 / 实际值 / 来源，并给一个显式接受开关（确实要换资产时用）。
+ */
+function verifyWinlibsHash(zip) {
+  const want = link("winlibs.upstream.asset.sha256").toLowerCase();
+  const got = sha256(zip);
+  if (!got) die("算不出 " + zip + " 的 sha256（certutil 不可用）：不跳过校验，手动核对后重跑。");
+  if (got === want) {
+    log("sha256 verified");
     return;
   }
-  const h = sha256(zip);
-  if (h !== WINLIBS_SHA256.toLowerCase()) {
-    try { fs.rmSync(zip, { force: true }); } catch (e) { /* remove bad archive */ }
-    die("sha256 mismatch (" + (h || "hash unavailable") + " != " + WINLIBS_SHA256 + ") - file deleted. Re-run to download again.");
+  if (process.env.SOLOMNI_ACCEPT_ASSET_CHANGE === "1") {
+    log("sha256 与台账不符，但已按 SOLOMNI_ACCEPT_ASSET_CHANGE=1 接受：实际 " + got);
+    return;
   }
-  log("sha256 verified");
+  die("sha256 不符：\n  台账 " + want + "\n  实际 " + got + "\n  来源 " + link("winlibs.upstream.asset") +
+    "\n  上游换过资产就核对同 release 的 <资产>.sha256（或 GitHub API 的资产 digest 字段），" +
+    "\n  再把 links.yaml 的 winlibs.upstream.asset.sha256 改成上面的实际值；" +
+    "\n  确认可信、想先跑起来：SOLOMNI_ACCEPT_ASSET_CHANGE=1 重跑一次。");
 }
 
 
@@ -355,7 +389,8 @@ async function pickFastest(urls) {
     console.error("  000 = network blocked/reset (set HTTPS_PROXY, or download the zip manually)");
     console.error("  404 = not on this host (wrong tag/asset name, or mirror does not carry it)");
     console.error("  403 = rate limited (wait a bit and re-run)");
-    die("no reachable source. Manual: browser-download a winlibs x86_64 seh zip, save as .tools/winlibs.zip, re-run.");
+    die("no reachable source. Manual: browser-download a winlibs x86_64 seh zip, save as .tools/winlibs.zip, re-run;" +
+    "\n  or point at an existing full binutils with SOLOMNI_MINGW_BIN=<dir with dlltool.exe + as.exe>.");
   }
   log("fastest: " + urls[best]);
   return urls[best];
@@ -371,45 +406,76 @@ function zipLooksValid(zipPath) {
   return /bin[\\/]dlltool\.exe/i.test(t.stdout || "");
 }
 
+/** 目的：分片来源标记——续传必须打向**产出这份分片**的那个 URL（换源续等于把两份字节接起来，归档必坏）。 */
+function winlibsSourceMarker() {
+  return path.join(TOOLS, "winlibs.zip.src");
+}
+
+/**
+ * 目的：可携 MinGW-w64（binutils 提供 dlltool.exe），只落在项目内 .tools/mingw64。
+ *   不要管理员、不改系统 PATH；删掉那个目录即可移除。
+ * 约束：**任何要解压的归档都先过完整性闸**（sha256 来自 links.yaml，与下载源成对）；
+ *   半截归档会真续传，且只打向产出它的那个源；不知道来源的分片宁可从零重下。
+ */
 async function installWinlibs() {
-  // 可携 MinGW-w64（binutils 提供 dlltool.exe），只落在项目内 .tools/mingw64。
-  // 不要管理员、不改系统 PATH；删掉那个目录即可移除。
   if (binutilsReady(WINLIBS_BIN)) {
     log("portable MinGW already installed and working: " + WINLIBS_BIN);
     return;
   }
   fs.mkdirSync(TOOLS, { recursive: true });
   const zip = path.join(TOOLS, "winlibs.zip");
+  const marker = winlibsSourceMarker();
+  // 三态：true = 完整；"partial" = 像没下完（留着续传）；false = 内容坏（删掉重下）。
+  let state = "absent";
   if (fs.existsSync(zip)) {
-    const v = zipLooksValid(zip);
-    if (v === true) {
-      log("using existing " + zip + " (" + Math.round(fs.statSync(zip).size / 1048576) + " MB)");
-    } else if (v === "partial") {
+    state = zipLooksValid(zip);
+    if (state === false) {
+      log("existing " + zip + " is corrupt (wrong content) - deleting and re-downloading.");
+      fs.rmSync(zip, { force: true });
+      fs.rmSync(marker, { force: true });
+      state = "absent";
+    } else if (state === "partial") {
       log("found partial " + zip + " (" + Math.round(fs.statSync(zip).size / 1048576) + " MB) - will resume.");
     } else {
-      log("existing " + zip + " is corrupt (wrong content) - deleting and re-downloading.");
-      try { fs.rmSync(zip, { force: true }); } catch (e) { /* re-attempt below anyway */ }
+      log("using existing " + zip + " (" + Math.round(fs.statSync(zip).size / 1048576) + " MB)");
     }
   }
-  if (!fs.existsSync(zip)) {
-    // 上游资产名带版本：台账里钉死一个 release 的完整 URL，不再走 GitHub API（也就没有限流）。
-    const upstream = link("winlibs.upstream.asset");
-    const candidates = [upstream].concat(mirrorVariants(upstream));
-    const extraMirror = (process.env.SOLOMNI_GH_MIRROR || "").replace(/\/+$/, "");
-    if (extraMirror) candidates.push(extraMirror + "/" + upstream.replace("https://github.com/", ""));
-    const seen = [];
-    for (const c of candidates) if (seen.indexOf(c) < 0) seen.push(c);
-    const url = await pickFastest(seen);
-    log("downloading " + url);
-    log("(curl with progress; ~200 MB. Too slow? set SOLOMNI_GH_MIRROR=https://ghfast.top");
-    log(" or HTTPS_PROXY=http://127.0.0.1:port, or browser-save the zip as .tools/winlibs.zip)");
-    const ok = download(url, zip) ? zipLooksValid(zip) : false;
-    if (ok === false) {
-      log("download still incomplete or corrupt - re-run to resume, or download manually:");
-      die("  get a winlibs x86_64 seh zip from " + link("winlibs.upstream.releases"));
-    }
-    checkWinlibsHash(zip);
+  // 来源不明的分片不能续（接起来必坏）：宁可从头下。
+  if (state === "partial" && !fs.existsSync(marker)) {
+    log("partial has no recorded source - restarting from scratch.");
+    fs.rmSync(zip, { force: true });
+    state = "absent";
   }
+  if (state !== true) {
+    let url;
+    if (state === "partial") {
+      url = fs.readFileSync(marker, "utf8").trim();
+      log("resuming from the same source: " + url);
+    } else {
+      // 上游资产名带版本：台账里钉死一个 release 的完整 URL，不再走 GitHub API（也就没有限流）。
+      const upstream = link("winlibs.upstream.asset");
+      const candidates = [upstream].concat(mirrorVariants(upstream));
+      const extraMirror = (process.env.SOLOMNI_GH_MIRROR || "").replace(/\/+$/, "");
+      if (extraMirror) candidates.push(extraMirror + "/" + upstream.replace("https://github.com/", ""));
+      const seen = [];
+      for (const c of candidates) if (seen.indexOf(c) < 0) seen.push(c);
+      url = await pickFastest(seen);
+      log("downloading " + url);
+      log("(curl with progress; ~260 MB. Too slow? set SOLOMNI_GH_MIRROR=https://ghfast.top");
+      log(" or HTTPS_PROXY=http://127.0.0.1:port, or browser-save the zip as .tools/winlibs.zip)");
+      fs.writeFileSync(marker, url);
+    }
+    if (!download(url, zip, state === "partial")) {
+      die("下载没有完成（网络中断？）。分片留在 " + zip + "，重跑会从**同一个**源续传；" +
+        "\n  想换源就先删掉它和 " + marker + "；或用浏览器下好整份放到 " + zip);
+    }
+    fs.rmSync(marker, { force: true });
+    if (zipLooksValid(zip) !== true) {
+      fs.rmSync(zip, { force: true });
+      die("下到的归档结构不对（被截断，或被中间页替换），已删除；重跑，或手动下载：" + link("winlibs.upstream.releases"));
+    }
+  }
+  verifyWinlibsHash(zip);
   log("extracting (takes a minute)...");
   const tar = spawnSync("tar", ["-xf", zip, "-C", TOOLS], { stdio: "ignore" });
   if (tar.status !== 0) runPS("Expand-Archive -Force '" + zip + "' -DestinationPath '" + TOOLS + "'");
@@ -459,7 +525,11 @@ function status() {
     "project cargo: " + (findProjectCargo() || "(none)"),
     "ambient cargo: " + (findAmbientCargo() || "(none)"),
   ];
-  if (IS_WIN) lines.push("winlibs: " + (binutilsReady(WINLIBS_BIN) ? WINLIBS_BIN : "(not ready)"));
+  if (IS_WIN) {
+    const override = process.env.SOLOMNI_MINGW_BIN;
+    lines.push("binutils: " + (override && binutilsReady(override) ? override + "（SOLOMNI_MINGW_BIN）" :
+      binutilsReady(WINLIBS_BIN) ? WINLIBS_BIN : "(not ready)"));
+  }
   lines.push("resolved: " + (r ? r.cargo + " [" + r.source + "]" : "(not found)"));
   console.log(lines.join("\n"));
 }
