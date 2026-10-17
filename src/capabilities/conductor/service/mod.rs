@@ -211,12 +211,16 @@ pub struct Conductor {
     /// 读接口（历史列表、状态）与其它会话的命令全排在它后面——界面因此"假死"。
     /// 这一态只表示"不在表里是因为在生成"，不是"不存在"。
     running: std::collections::BTreeSet<SessionId>,
+    /// 正在准备中的会话名（创建分两段：核心先占名与预备，慢的那一段在调用方线程上跑）。
+    /// 有了它，同名并发创建就不会都通过"名字不存在"那道检查而互相覆盖。
+    starting: std::collections::BTreeSet<String>,
 }
 
 mod action;
 pub(crate) mod ask_user;
 mod env;
 mod flow;
+mod guest_job;
 mod history;
 pub mod proxy;
 mod rewind;
@@ -264,6 +268,7 @@ impl Conductor {
             sessions: HashMap::new(),
             desk: crate::capabilities::session::api::DecisionDesk::new(),
             running: std::collections::BTreeSet::new(),
+            starting: std::collections::BTreeSet::new(),
         }
     }
 

@@ -133,6 +133,10 @@ impl Workspace for WorkspaceService {
         self.dirs.prepare(session, agents)
     }
 
+    fn discard(&self, session: &str, agents: &[String]) -> Result<(), String> {
+        self.dirs.discard(session, agents)
+    }
+
     fn work_has(&self, session: &str, name: &str) -> bool {
         self.dirs.work_has(session, name)
     }

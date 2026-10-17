@@ -39,6 +39,143 @@ fn conductor_rooted(
     )
 }
 
+/// 目的：造一台"能起虚拟机会话"的核心：探针按用例声明作答，VM 引擎可控（慢 / 失败）。
+fn conductor_for_vm(
+    probe: Arc<dyn crate::kernel::ports::HostProbe + Send + Sync>,
+    engine: crate::tests::doubles::FakeEngine,
+    modules: Vec<Module>,
+) -> Conductor {
+    let gateway: Arc<dyn ChatGateway + Send + Sync> = Arc::new(gw(BTreeMap::new(), vec![]));
+    let llm = test_llm(
+        Arc::clone(&gateway),
+        Arc::new(FakeCatalog::new(vec!["m".to_string()])),
+    );
+    Conductor::new(
+        crate::tests::root_dir(),
+        registry_service(InMemorySettings::with_tier(Tier::Vm), Arc::clone(&llm)),
+        test_history(),
+        test_workspace(Arc::new(InMemoryWorkspace::new())),
+        crate::tests::doubles::test_vm_with_engine(Arc::new(InMemoryPackages::empty()), engine),
+        test_provision(),
+        test_modules(Arc::new(VecSource(modules))),
+        llm,
+        test_tools_svc_with(
+            Arc::new(SilentRunner),
+            Arc::new(InMemorySysIo::new()),
+            Arc::new(NoFenceHost),
+        ),
+        test_prompt(),
+        test_tools_svc(),
+        Arc::new(crate::kernel::ports::NoopLog),
+        probe,
+        Arc::new(crate::capabilities::residents::api::NoResidents),
+        Arc::new(crate::capabilities::secrets::api::NoSecrets),
+    )
+}
+
+/// 目的：探针按"机器能力齐 + 虚拟根在场"作答（虚拟根的真文件由 `test_guest` 造）。
+fn vm_capable_probe(guest: &str) -> std::sync::Arc<crate::tests::doubles::FixedProbe> {
+    use crate::tests::doubles::FixedProbe;
+    let base = crate::tests::scratch("vm-core-free-base");
+    let guest_dir = crate::tests::root_dir()
+        .join(".vm")
+        .join("guest")
+        .join(guest);
+    let mut probe = FixedProbe {
+        hypervisor: true,
+        ..Default::default()
+    };
+    probe.exes.push("qemu-system-x86_64".to_string());
+    probe.exes.push("virtiofsd".to_string());
+    probe.dirs.push(base.clone());
+    probe.files.push(base.join("rootfs.ext4"));
+    probe.files.push(base.join("vmlinuz"));
+    probe.guests.push(guest_dir.clone());
+    probe.files.push(guest_dir.join("rootfs.ext4"));
+    probe.files.push(guest_dir.join("vmlinuz"));
+    Arc::new(probe)
+}
+
+/// 目的：创建虚拟机档会话时**核心线程不陪着等 guest**——起 guest（几十秒到几分钟）在调用方线程上跑。
+/// 约束：以前这一段在核心调用里，起 guest 期间任何经核心的请求都排队（界面整片假死）——这里钉住它不会回来。
+#[test]
+pub(crate) fn creating_a_vm_session_does_not_block_the_core() {
+    use crate::capabilities::conductor::api::ConductorHandle;
+    use crate::tests::doubles::FakeEngine;
+    const BOOT: std::time::Duration = std::time::Duration::from_millis(400);
+    let guest = crate::tests::test_guest("core-free");
+    let probe = vm_capable_probe(&guest);
+    let engine = FakeEngine {
+        boot_delay: Some(BOOT),
+        ..Default::default()
+    };
+    let core = conductor_for_vm(probe, engine.clone(), vec![module_of("a")]);
+    let handle = ConductorHandle::spawn(core).expect("起核心");
+    let ops = crate::capabilities::conductor::api::Ops::from_handle(&handle);
+    let mut spec = work("w-core-free", WorkMode::Single, &["a"]);
+    spec.tier = Tier::Vm;
+    spec.guest = Some(guest.clone());
+    let creator = {
+        let ops = ops.clone();
+        std::thread::spawn(move || ops.sessions.create_work(spec))
+    };
+    // 让 boot 真的开始，再问核心一件小事：它必须立刻回，而不是等 400ms。
+    std::thread::sleep(std::time::Duration::from_millis(80));
+    let t0 = std::time::Instant::now();
+    let answered = ops.core.tier_choices();
+    let waited = t0.elapsed();
+    let created = creator.join().expect("线程没崩").expect("建会话");
+    assert!(answered.is_ok(), "核心要能应答");
+    assert!(
+        waited < BOOT / 2,
+        "起 guest 期间核心仍要立刻应答（实测等了 {waited:?}，boot 本身 {BOOT:?}）"
+    );
+    assert_eq!(created.0.sid, "w-core-free");
+    assert!(
+        engine
+            .calls
+            .lock()
+            .expect("锁")
+            .iter()
+            .any(|c| c.starts_with("start:")),
+        "guest 真的要起来"
+    );
+}
+
+/// 目的：guest 起不来时**什么都不留**：会话没建、历史里没有它。
+#[test]
+pub(crate) fn a_failed_guest_boot_leaves_no_session_behind() {
+    use crate::capabilities::conductor::api::ConductorHandle;
+    use crate::tests::doubles::FakeEngine;
+    let guest = crate::tests::test_guest("boot-fail");
+    let probe = vm_capable_probe(&guest);
+    let engine = FakeEngine {
+        boot_error: Some("起不来（测试注入）".to_string()),
+        ..Default::default()
+    };
+    let core = conductor_for_vm(probe, engine, vec![module_of("a")]);
+    let handle = ConductorHandle::spawn(core).expect("起核心");
+    let ops = crate::capabilities::conductor::api::Ops::from_handle(&handle);
+    let mut spec = work("w-boot-fail", WorkMode::Single, &["a"]);
+    spec.tier = Tier::Vm;
+    spec.guest = Some(guest);
+    let err = ops
+        .sessions
+        .create_work(spec)
+        .expect_err("起不来要如实拒绝");
+    assert!(err.contains("起不来"), "{}", err);
+    assert!(ops.history.open("w-boot-fail").is_err(), "会话记录不该留下");
+    assert!(
+        ops.history.list().expect("历史").is_empty(),
+        "历史里不该留下这条会话"
+    );
+    // 占名也要撤掉：同名重试能通过（而不是被"工作名已存在"挡住）。
+    let mut again = work("w-boot-fail", WorkMode::Single, &["a"]);
+    again.tier = Tier::Host;
+    ops.sessions
+        .create_work(again)
+        .expect("同一名字在本机档上应该建得起来（失败那次没占住名字）");
+}
 /// 目的：虚拟机档的外部工具路径**每次判据取用时现算**：设置里没登记就采用补齐面报的"已装在项目内"那一个。
 /// 约束：补齐作业（Web 或另一个终端）装完就该立刻可用——"装完还得重启"会让用户以为补齐没成功；
 ///   显式登记永远优先，登记了就不看项目内那份（登记是用户的意思）。

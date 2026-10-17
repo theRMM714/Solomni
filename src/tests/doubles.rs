@@ -163,6 +163,11 @@ impl Workdirs for InMemoryWorkspace {
         }
         Ok(())
     }
+    fn discard(&self, _session: &str, _agents: &[String]) -> Result<(), String> {
+        // 内存实现里没有目录可删。
+        Ok(())
+    }
+
     fn roots(
         &self,
         session: &str,
@@ -1419,9 +1424,12 @@ pub(crate) fn test_workspace_store(
 }
 
 /// 目的：VM 引擎的测试替身——不起真 VM，只记录 start / run / stop。
+/// 约束：`boot_delay` 让"起 guest 很慢"可复现（验核心线程不被占）；`boot_error` 让起不来可复现（验失败不留痕）。
 #[derive(Clone, Default)]
 pub(crate) struct FakeEngine {
     pub calls: Arc<Mutex<Vec<String>>>,
+    pub boot_delay: Option<std::time::Duration>,
+    pub boot_error: Option<String>,
 }
 
 impl FakeEngine {
@@ -1445,6 +1453,12 @@ impl crate::capabilities::vm::ports::VmEngine for FakeEngine {
         spec: &crate::capabilities::vm::domain::guest::GuestSpec,
         _share: &crate::capabilities::vm::ports::SharePlan,
     ) -> Result<Box<dyn crate::capabilities::vm::ports::GuestVm>, String> {
+        if let Some(delay) = self.boot_delay {
+            std::thread::sleep(delay);
+        }
+        if let Some(why) = &self.boot_error {
+            return Err(why.clone());
+        }
         self.calls
             .lock()
             .expect("锁")
@@ -1746,6 +1760,17 @@ pub(crate) fn test_vm(
     ))
 }
 
+/// 目的：带可控"起 guest 耗时 / 失败"的 vm 能力面——验核心不被慢步骤占住、失败不留痕。
+pub(crate) fn test_vm_with_engine(
+    packages: Arc<dyn PackageSource + Send + Sync>,
+    engine: FakeEngine,
+) -> Arc<dyn crate::capabilities::vm::api::Vm + Send + Sync> {
+    Arc::new(crate::capabilities::vm::service::VmService::new(
+        packages,
+        Arc::new(engine),
+        vec![Arc::new(NamedShare::new("copy", true))],
+    ))
+}
 /// 目的：模块启停覆盖的内存存储（测试用；与 yaml 实现同一条端口）。
 #[derive(Default)]
 pub(crate) struct InMemoryModuleState {

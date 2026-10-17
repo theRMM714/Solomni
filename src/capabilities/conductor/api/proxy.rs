@@ -14,11 +14,20 @@ use std::sync::Arc;
 impl SessionOps for ConductorHandle {
     fn create_work(&self, spec: WorkSpec) -> Result<(WorkOpened, u64), String> {
         let bus = Arc::clone(&self.bus);
-        self.call(move |core| {
-            let opened = core.create_work(spec)?;
-            let head = bus.push(&opened.sid, &opened.facts);
-            Ok((opened, head))
-        })
+        // 两段：核心准备（毫秒级）→ 起 guest（这一段）→ 提交。核心线程不陪着等 QEMU。
+        let (prepared, boot) = self.call(move |core| core.prepare_work(spec, None))?;
+        if let Some(boot) = boot {
+            if let Err(e) = boot.run() {
+                let _ = self.call(move |core| {
+                    core.abort_work(prepared);
+                    Ok(())
+                });
+                return Err(e);
+            }
+        }
+        let opened = self.call(move |core| core.commit_work(prepared))?;
+        let head = bus.push(&opened.sid, &opened.facts);
+        Ok((opened, head))
     }
 
     fn say(&self, sid: &str, text: &str, out: Output) -> Result<Advance, String> {
@@ -140,8 +149,17 @@ impl SessionOps for ConductorHandle {
     }
 
     fn edit(&self, sid: &str, edit: SessionEdit) -> Result<(), String> {
-        let sid = sid.to_string();
-        self.call(move |core| core.edit_session(&sid, edit))
+        // 两段：核心校验 + 出计划；停旧 guest / 起新的要等（秒级到分钟级），在这一段上跑。
+        let (prepared, job) = self.call({
+            let sid = sid.to_string();
+            let edit = edit.clone();
+            move |core| core.prepare_edit(&sid, edit)
+        })?;
+        if let Some(job) = job {
+            // 失败什么都不改：meta 还没落盘。
+            job.run()?;
+        }
+        self.call(move |core| core.commit_edit(prepared))
     }
 
     fn upload(&self, sid: &str, name: &str, bytes: &[u8], overwrite: bool) -> Result<bool, String> {
@@ -311,7 +329,10 @@ impl crate::capabilities::session::api::HistoryOps for ConductorHandle {
     }
     fn delete(&self, name: &str) -> Result<bool, String> {
         let name = name.to_string();
-        self.call(move |core| core.history_delete(&name))
+        // 删除的核心动作毫秒级做完；销毁 guest 要等它落盘，在这一段（调用方线程）上跑。
+        let (ok, stop) = self.call(move |core| core.delete_bookkeeping(&name))?;
+        stop.run();
+        Ok(ok)
     }
 }
 

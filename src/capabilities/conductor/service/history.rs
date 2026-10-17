@@ -43,11 +43,28 @@ impl Conductor {
     /// - **子树里任一节点在生成中就整体拒绝**：不能删到一半留下半个状态。
     ///
     /// 内部的 `session::History::delete`（纯存储）不受影响——系统路径还需要它。
+    #[cfg(test)]
     pub fn history_delete(&mut self, name: &str) -> Result<bool, String> {
+        let (ok, stop) = self.delete_bookkeeping(name)?;
+        // 销毁要等 guest 落盘（秒级）：同步入口自己跑（测试与 CLI 用），句柄把它挪到调用方线程。
+        stop.run();
+        Ok(ok)
+    }
+
+    /// 目的：删除的核心动作（毫秒级）：撤授权、回收常驻服务、清内存与目录——**不停 guest**。
+    /// 返回：删除结果 + 要在调用方线程上执行的销毁（销毁要等 guest 落盘，秒级）。
+    pub(crate) fn delete_bookkeeping(
+        &mut self,
+        name: &str,
+    ) -> Result<(bool, super::guest_job::GuestStop), String> {
         // 不是落盘会话（或已不存在）：只清内存，交存储层如实回 false。
         let Ok((meta, _)) = self.history.load(name) else {
             self.sessions.remove(name);
-            return self.history.delete(name);
+            let ok = self.history.delete(name)?;
+            return Ok((
+                ok,
+                super::guest_job::GuestStop::new(Arc::clone(&self.vm), Vec::new()),
+            ));
         };
         // 子会话由核心管理，不允许用户单独删。
         if let Some(parent) = meta.parent.clone() {
@@ -103,10 +120,8 @@ impl Conductor {
                 );
             }
         }
-        // 虚拟机档：这些租约的 guest 随会话删除一起销毁（幂等；与围栏释放、常驻服务回收同一时机）。
-        for sid in &subtree {
-            self.vm.guest_stop(sid);
-        }
+        // 虚拟机档的租约交给调用方销毁（guest 关机要等它落盘，别占核心线程）。
+        let stop = super::guest_job::GuestStop::new(Arc::clone(&self.vm), subtree.clone());
         for sid in &subtree {
             self.sessions.remove(sid);
             // 会话没了，它的裁决队随会话一起消失（等待方与转录都不复存在）。
@@ -120,7 +135,7 @@ impl Conductor {
                 target_deleted = ok;
             }
         }
-        Ok(target_deleted)
+        Ok((target_deleted, stop))
     }
 
     /// 一个会话的整棵子树（含它自己，父在前、子在后）：父子关系以 `meta.parent` 为唯一判据。

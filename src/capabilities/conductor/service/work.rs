@@ -5,8 +5,34 @@
 //! 它是 Conductor 的一个方法族：与 mod.rs 同在 service 模块下（子模块看得见父模块的私有字段），
 //! 方法取 pub(crate)（或 pub）供兄弟族与 conductor/api.rs 调用。
 
+use super::guest_job::{EditGuest, GuestBoot};
 use super::*;
 
+/// 目的：一次创建的准备结果——"已经建完"或"待提交"（后者等调用方线程把 guest 起起来）。
+pub(crate) enum PreparedWork {
+    /// 已经建完（代理形态：没有 guest 可等）。
+    Ready(WorkOpened),
+    /// 待提交：核心已占名并备好工作区与计划，慢的那一段由调用方跑。
+    Pending {
+        meta: Box<SessionMeta>,
+        mode: WorkMode,
+        metas: Vec<AgentMeta>,
+        task: Option<String>,
+        delegate: bool,
+        name: String,
+        agent_names: Vec<String>,
+        sandboxes: crate::capabilities::workspace::api::Sandboxes,
+        /// 失败时要撤掉的工作区空目录（只对顶层会话给：子会话与父共用目录）。
+        discard: Option<(String, Vec<String>)>,
+    },
+}
+
+/// 目的：一次改配的准备结果——旧 meta（撤围栏用）与新的（落盘用）。
+pub(crate) struct PreparedEdit {
+    pub(crate) sid: String,
+    pub(crate) old_meta: SessionMeta,
+    pub(crate) new_meta: SessionMeta,
+}
 impl Conductor {
     /// 运行能力报告：模块声明的能力、包库里的可用版本、缺失清单与虚拟机档诊断。
     /// 「清单即事实」：每次调用重扫模块清单与包库；本机档不装载运行包，missing 只作事实呈现。
@@ -228,10 +254,25 @@ impl Conductor {
         })
     }
 
-    /// 编辑提交：校验 → 写回 meta.yaml（名单与选型的唯一真相）→ 追加一条旁路配置记录 → 丢掉内存会话。
-    /// 生效点：下一次访问按新配置从转录重建会话对象（所以改完不必重开会话）。
-    /// 冻结：流水里有内容（会话已经开过）时，agent 名单与形态不可改——换人请新建会话。
+    /// 目的：测试用的同步改配入口（准备 → 停/起 guest → 提交，全在当前线程）。
+    /// 约束：生产走句柄的两段（`prepare_edit` / `commit_edit`）。
+    #[cfg(test)]
     pub fn edit_session(&mut self, sid: &str, edit: SessionEdit) -> Result<(), String> {
+        let (prepared, job) = self.prepare_edit(sid, edit)?;
+        if let Some(job) = job {
+            // 失败什么都不改：meta 还没落盘，旧会话原样还在。
+            job.run()?;
+        }
+        self.commit_edit(prepared)
+    }
+
+    /// 目的：改配的第一段（核心，毫秒级）——全部校验 + 出计划，并给出"要等 guest"的那一段（可能没有）。
+    /// 返回：准备结果 + 可选的那段活（切入 / 留在虚拟机档要起或重建；切回本机档要停旧的）。
+    pub(crate) fn prepare_edit(
+        &mut self,
+        sid: &str,
+        edit: SessionEdit,
+    ) -> Result<(PreparedEdit, Option<EditGuest>), String> {
         if self.running.contains(sid) {
             return Err(Self::running_refusal(sid));
         }
@@ -399,24 +440,49 @@ impl Conductor {
         new_meta.modules = metas.iter().flat_map(|a| a.modules.clone()).collect();
         new_meta.agents = metas;
         new_meta.exec = spec;
+        // 要等 guest 的那一段：旧的是虚拟机档就得停（改配一律重建）；新的是虚拟机档就得起。
+        let was_vm = meta.exec.tier == crate::kernel::api::Tier::Vm;
+        let is_vm = new_meta.exec.tier == crate::kernel::api::Tier::Vm;
+        let job = if is_vm {
+            let sandboxes = self.sandboxes(&new_meta, &roster)?;
+            Some(EditGuest::Boot(Box::new(
+                self.guest_boot(&new_meta, &plan, &sandboxes, was_vm),
+            )))
+        } else if was_vm {
+            Some(EditGuest::Stop(self.guest_stop(&meta.name)))
+        } else {
+            None
+        };
+        Ok((
+            PreparedEdit {
+                sid: sid.to_string(),
+                old_meta: meta,
+                new_meta,
+            },
+            job,
+        ))
+    }
+
+    /// 目的：改配的第二段（核心）——写回 meta、撤旧围栏授权、记旁路配置、丢掉内存会话。
+    pub(crate) fn commit_edit(&mut self, prepared: PreparedEdit) -> Result<(), String> {
+        let PreparedEdit {
+            sid,
+            old_meta,
+            new_meta,
+        } = prepared;
         self.history.save_meta(&new_meta)?;
         // 权限或模块可能变了：撤掉按**旧配置**写下的围栏授权；下一次工具执行按新配置重授（即时生效）。
-        self.release_session_fences(&meta);
-        if new_meta.exec.tier == crate::kernel::api::Tier::Vm {
-            let sandboxes = self.sandboxes(&new_meta, &roster)?;
-            self.start_session_guest(&new_meta, &plan, &sandboxes)?;
-        }
-        self.record_config(sid, &new_meta);
+        self.release_session_fences(&old_meta);
+        self.record_config(&sid, &new_meta);
         // 内存里那份是按旧配置装的：丢掉它，下一次访问按新配置从转录重建（转录即状态，不丢内容）。
-        self.sessions.remove(sid);
+        self.sessions.remove(&sid);
         Ok(())
     }
 
     /// 撤掉一次会话按**给定 meta** 写下的围栏授权（权限或模块变更后调用）。
     /// 其它平台没有持久授权（release 是空操作）；Windows 撤 ACE，下一次 `prepare_fence` 按实际 ACE 重授。
+    /// 约束：**不在这里停 guest**——销毁要等 guest 落盘（秒级），那一段交给调用方线程（见 GuestBoot / GuestStop）。
     fn release_session_fences(&self, meta: &SessionMeta) {
-        // 会话删除/改配后：先销毁这个租约的 guest（幂等），再撤围栏授权。
-        self.vm.guest_stop(&meta.name);
         let roster = self.modules.roster();
         match self.sandboxes(meta, &roster) {
             Ok(sandboxes) => {
@@ -436,89 +502,6 @@ impl Conductor {
                 &format!("取沙箱失败，未撤销授权：{}", e),
             ),
         }
-    }
-
-    /// 目的：虚拟机档的会话级 guest——按执行计划与各 agent 沙箱装配挂载并拉起，失败即如实拒绝。
-    fn start_session_guest(
-        &self,
-        meta: &SessionMeta,
-        plan: &crate::capabilities::vm::api::ExecPlan,
-        sandboxes: &crate::capabilities::workspace::api::Sandboxes,
-    ) -> Result<(), String> {
-        // 并发闸门：每台 guest 固定 -m 2048 -smp 2，按设置里的上限如实拒绝（同一租约重启不占新名额）。
-        crate::capabilities::vm::api::admit_guest(
-            &self.vm.guest_leases(),
-            &meta.name,
-            self.registry.app().max_guests,
-        )?;
-        let name = meta
-            .exec
-            .guest
-            .as_deref()
-            .ok_or_else(|| "这条虚拟机档会话没有选定虚拟根".to_string())?;
-        let dir = crate::capabilities::vm::api::resolve_guest(&self.root, name)?;
-        let image = crate::capabilities::vm::api::classify_base(&dir, self.probe.as_ref())?;
-        let mut rw: Vec<std::path::PathBuf> = Vec::new();
-        let mut ro: Vec<std::path::PathBuf> = Vec::new();
-        let mut ro_tree: Vec<std::path::PathBuf> = Vec::new();
-        for sb in &sandboxes.list {
-            let f = crate::kernel::api::FenceSpec::from_sandbox(sb, meta.exec.net)
-                .with_read_only(self.fence_read_roots());
-            rw.extend(f.rw);
-            ro.extend(f.ro);
-            ro_tree.extend(f.ro_tree);
-        }
-        let fence = crate::kernel::api::FenceSpec {
-            agent: String::new(),
-            lease: meta.name.clone(),
-            rw,
-            ro: ro.clone(),
-            ro_tree,
-            private: std::path::PathBuf::new(),
-            cwd: std::path::PathBuf::new(),
-            net: meta.exec.net,
-        };
-        // 挂载点走这座桥：同方言时是宿主原路径，跨方言时是 guest 镜像根（命令装配与工作环境提示词用同一座）。
-        let bridge = image.bridge();
-        let mounts = crate::capabilities::vm::api::mounts_from(plan, &fence, &bridge);
-        let spec = crate::capabilities::vm::api::GuestSpec {
-            lease: meta.name.clone(),
-            image,
-            mounts,
-            net: meta.exec.net,
-            engine_path: self.qemu_path(),
-            share_path: self.share_tool_path(),
-            // 共享档在起 guest 这一刻按"已实现 + 工具在场"的优先序选：补齐装完下一次启动就用上。
-            shares: crate::capabilities::vm::api::share_chain(
-                std::env::consts::OS,
-                self.share_tool_path().as_deref(),
-                self.probe.as_ref(),
-            ),
-            seed: None,
-            // 会话要每租约可写层：多台并发不能同写一份基础镜像。
-            isolated: true,
-        };
-        self.vm.guest_start(&spec)?;
-        // 已装载的 prefix 包：把 `<prefix>/bin/*` 软链进 guest 的 /usr/local/bin，
-        // 这样"模块声明 `runtimes: [X]` + 裸名命令"在 guest 里真的能跑起来（软链失败如实记一条，不假装装上了）。
-        for script in crate::capabilities::vm::api::package_setup_scripts(plan) {
-            let out = self.vm.guest_run(
-                &meta.name,
-                &crate::capabilities::vm::api::GuestRun {
-                    command: script,
-                    args_json: "{}".to_string(),
-                    env: Vec::new(),
-                    cwd: String::new(),
-                },
-            );
-            if !out.ok {
-                self.log.warn(
-                    "conductor::start_session_guest",
-                    &format!("运行包的 PATH 软链没建上：{}", out.output),
-                );
-            }
-        }
-        Ok(())
     }
 
     /// 追加一条旁路配置记录：只作呈现与审计（不进模型上下文，回放与状态派生都跳过它）。
@@ -702,8 +685,9 @@ impl Conductor {
         self.sessions.contains_key(name)
     }
 
-    /// 创建工作：形态 + 参与的 agent（+ 协作需求）→ 建出会话、落盘身份、备好工作区。
-    /// 一切选择来自用户；核心只做校验与机械装配，不替用户选。
+    /// 目的：测试与内部编排用的同步入口（准备 → 起 guest → 提交，全在当前线程）。
+    /// 约束：生产走句柄的两段（`prepare_work` / `commit_work`），核心线程不陪着等 QEMU。
+    #[cfg(test)]
     pub fn create_work(&mut self, spec: WorkSpec) -> Result<WorkOpened, String> {
         self.create_work_inner(spec, None)
     }
@@ -724,15 +708,37 @@ impl Conductor {
         out
     }
 
-    /// 建工作的唯一实现：`parent` = 编排归属（代理建的**子工作**）。
-    /// 子工作与父会话**共用顶层那一个 work/**，落点在父会话目录的 `children/` 下。
+    /// 目的：建工作的同步实现（测试与内部编排用）：准备 → 起 guest → 提交。
+    /// 约束：生产走句柄的两段；`parent` = 编排归属（代理建的**子工作**，与父会话共用顶层那个 work/）。
+    #[cfg(test)]
     pub(crate) fn create_work_inner(
         &mut self,
         spec: WorkSpec,
         parent: Option<&str>,
     ) -> Result<WorkOpened, String> {
+        let (prepared, boot) = self.prepare_work(spec, parent)?;
+        if let Some(boot) = boot {
+            if let Err(e) = boot.run() {
+                self.abort_work(prepared);
+                return Err(e);
+            }
+        }
+        self.commit_work(prepared)
+    }
+
+    /// 目的：创建的第一段（核心，毫秒级）——校验 / 占名 / 建工作区 / 出计划；要起 guest 时把那一段交出去。
+    /// 返回：准备结果 + 可选的那段"要等 guest"的活（虚拟机档才有）。
+    /// 错误：形态、名字、档位、名单、选型不成立时如实拒绝，什么都不留下。
+    pub(crate) fn prepare_work(
+        &mut self,
+        spec: WorkSpec,
+        parent: Option<&str>,
+    ) -> Result<(PreparedWork, Option<GuestBoot>), String> {
         validate_work_name(&spec.name)?;
-        if self.sessions.contains_key(&spec.name) || self.history.load(&spec.name).is_ok() {
+        if self.sessions.contains_key(&spec.name)
+            || self.history.load(&spec.name).is_ok()
+            || self.starting.contains(&spec.name)
+        {
             return Err(format!("工作名已存在：{}", spec.name));
         }
         // **代理形态**（第三人形态）：没有名单、没有需求——用户选这一形态就是**授予全权**。
@@ -747,11 +753,14 @@ impl Conductor {
                 return Err("子工作不能建成代理形态：代理不能往里套代理".to_string());
             }
             let (sid, facts) = self.create_proxy_with_facts(&spec.name, now_ts(), spec.tier)?;
-            return Ok(WorkOpened {
-                sid,
-                agents: Vec::new(),
-                facts,
-            });
+            return Ok((
+                PreparedWork::Ready(WorkOpened {
+                    sid,
+                    agents: Vec::new(),
+                    facts,
+                }),
+                None,
+            ));
         }
         // 代拟路径（协作、未给 agent）允许先空着，由核心按需求拟名单；其余形态必须有 agent。
         if spec.agents.is_empty() && !spec.delegate {
@@ -906,11 +915,68 @@ impl Conductor {
             "conductor::create_work",
             &crate::capabilities::vm::api::plan_summary(&plan),
         );
-        if meta.exec.tier == crate::kernel::api::Tier::Vm {
-            self.start_session_guest(&meta, &plan, &sandboxes)?;
-        }
 
-        let (session, mut events) = match spec.mode {
+        // 占名：准备与提交之间隔着一次 guest 启动，同名并发创建不能都通过上面那道检查。
+        self.starting.insert(name.clone());
+        // 子会话与父会话共用同一个 session/ 目录：只对顶层会话记得"失败要撤掉空目录"。
+        let discard = if parent.is_none() {
+            Some((name.clone(), agent_names.clone()))
+        } else {
+            None
+        };
+        let boot = if meta.exec.tier == crate::kernel::api::Tier::Vm {
+            Some(self.guest_boot(&meta, &plan, &sandboxes, false))
+        } else {
+            None
+        };
+        Ok((
+            PreparedWork::Pending {
+                meta: Box::new(meta),
+                mode: spec.mode,
+                metas,
+                task: spec.task,
+                delegate,
+                name,
+                agent_names,
+                sandboxes,
+                discard,
+            },
+            boot,
+        ))
+    }
+
+    /// 目的：创建的第二段（核心，毫秒级）——装配会话对象、落盘身份、开场事实。
+    /// 约束：guest 已经起好了（或本机档不需要）；落盘失败要撤掉占名与刚建的空工作区目录。
+    pub(crate) fn commit_work(&mut self, prepared: PreparedWork) -> Result<WorkOpened, String> {
+        let (meta, mode, metas, task, delegate, name, agent_names, sandboxes, discard) =
+            match prepared {
+                // 代理形态在准备段里就建完了：这里原样交回。
+                PreparedWork::Ready(opened) => return Ok(opened),
+                PreparedWork::Pending {
+                    meta,
+                    mode,
+                    metas,
+                    task,
+                    delegate,
+                    name,
+                    agent_names,
+                    sandboxes,
+                    discard,
+                } => (
+                    *meta,
+                    mode,
+                    metas,
+                    task,
+                    delegate,
+                    name,
+                    agent_names,
+                    sandboxes,
+                    discard,
+                ),
+            };
+        let roster = self.scan();
+
+        let (session, mut events) = match mode {
             // 代理形态在函数开头就建好返回了：它没有 agent 名单，不走这条装配路。
             WorkMode::Proxy => return Err("代理形态没有 agent 名单，不经这条装配路".to_string()),
             // 单 agent（模块数不限）。
@@ -947,7 +1013,7 @@ impl Conductor {
                 (Session::Single(s), opened)
             }
             WorkMode::Collab => {
-                let task = spec.task.as_deref().unwrap_or("").trim().to_string();
+                let task = task.as_deref().unwrap_or("").trim().to_string();
                 // 裁决队按会话 id 取：核心各关卡与这一席的工具级确认共用同一条队。
                 let door = self.desk_of(&name);
                 let mut cs = CollabSession::start(
@@ -971,7 +1037,13 @@ impl Conductor {
             }
         };
         // 会话身份落盘：失败即失败（名字即目录，这是承诺，不假装已保存）。
-        self.history.create(&meta)?;
+        self.starting.remove(&name);
+        if let Err(e) = self.history.create(&meta) {
+            if let Some((session, agents)) = discard {
+                let _ = self.workspace.discard(&session, &agents);
+            }
+            return Err(e);
+        }
         self.sessions.insert(name.clone(), session);
         self.record_events(&name, &mut events);
         // 事实（开场转录 + 提示）随结果交出：核心不持有事件台，发布是 api 层的职责。
@@ -982,6 +1054,51 @@ impl Conductor {
         })
     }
 
+    /// 目的：创建失败（guest 起不来 / 落盘失败）时撤销准备段占下的东西：名字占位 + 这次建出来的空工作区目录。
+    pub(crate) fn abort_work(&mut self, prepared: PreparedWork) {
+        if let PreparedWork::Pending { name, discard, .. } = prepared {
+            self.starting.remove(&name);
+            if let Some((session, agents)) = discard {
+                let _ = self.workspace.discard(&session, &agents);
+            }
+        }
+    }
+
+    /// 目的：把"停 guest"这一段打包成交给调用方线程的活（销毁要等它落盘，秒级）。
+    fn guest_stop(&self, lease: &str) -> super::guest_job::GuestStop {
+        super::guest_job::GuestStop::new(Arc::clone(&self.vm), vec![lease.to_string()])
+    }
+
+    /// 目的：把"起 guest"这一段打包成交给调用方线程的活——核心只准备参数，不在这里拉起。
+    fn guest_boot(
+        &self,
+        meta: &SessionMeta,
+        plan: &crate::capabilities::vm::api::ExecPlan,
+        sandboxes: &crate::capabilities::workspace::api::Sandboxes,
+        restart: bool,
+    ) -> GuestBoot {
+        let share_tool = self.share_tool_path();
+        GuestBoot::new(
+            Arc::clone(&self.vm),
+            self.root.clone(),
+            Arc::clone(&self.probe),
+            Arc::clone(&self.log),
+            self.registry.app().max_guests,
+            self.fence_read_roots(),
+            self.qemu_path(),
+            share_tool.clone(),
+            crate::capabilities::vm::api::share_chain(
+                std::env::consts::OS,
+                share_tool.as_deref(),
+                self.probe.as_ref(),
+            ),
+            meta.name.clone(),
+            meta.exec.net,
+            plan.clone(),
+            sandboxes.clone(),
+            restart,
+        )
+    }
     /// 界面投喂：把文件写进本次工作的 work/。
     /// 返回 Ok(false) = 同名文件已存在且未选择覆盖（交前端让用户决定：覆盖/改名/取消）。
     pub fn work_upload(
