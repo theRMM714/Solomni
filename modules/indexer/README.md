@@ -5,14 +5,16 @@
 
 实现：单个 C++17 源文件 tools/src/indexer.cpp，零第三方依赖（只用标准库 + Windows 下的 stdin/stdout 二进制模式）。
 
-## 构建（首次使用前一次）
+## 构建
 
 模块清单已声明 `build:`，**让产品编**（它按平台挑脚本：unix `tools/build`、Windows `tools/build.cmd`）：
 
     solomni --build=indexer
 
-产物落在 `build/`（Linux/macOS 是 `indexer`，Windows 是 `indexer.exe`），命令可重复执行、没改源就跳过。
-编译器要在**宿主 PATH** 上（模块声明的构建期能力是 `gcc`）——产品不预置工具链。
+产物落在 `build/`（Linux/macOS 是 `indexer`，Windows 是 `indexer.exe`），命令可重复执行、没改源就跳过（源指纹记在 `.vm/build-state/indexer.json`）。
+
+构建期能力是 `gcc`：本机档要求它在**宿主 PATH** 上（产品不预置工具链）；虚拟机档用 `--guest=<虚拟根>` 让产品在 guest 里编，`gcc` 由 guest 自带的运行能力或 `runtimes/` 包提供。
+
 ## 协议
 
 三个子命令都从 stdin 读一个 JSON 对象（UTF-8），结果写 stdout，失败写 stderr。

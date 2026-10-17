@@ -60,6 +60,24 @@ pub(crate) fn sandbox_resolve_accepts_only_absolute_paths_inside_roots() {
     }
 }
 
+/// 目的：撤销一次准备只删**空**目录——建会话失败时不留残骸，也不碰用户的东西。
+#[test]
+pub(crate) fn workspace_discard_removes_only_empty_dirs() {
+    use crate::capabilities::workspace::detail::FsWorkspace;
+    let root = crate::tests::scratch("ws-discard");
+    let ws = FsWorkspace::new(root.join("session"));
+    // 准备出来 → 撤销：三个空目录都该消失。
+    ws.prepare("w", &["a".to_string()]).expect("准备");
+    ws.discard("w", &["a".to_string()]).expect("撤销");
+    assert!(!root.join("session").join("w").exists(), "空目录要删掉");
+    // 里面有东西 → 撤销什么都不该删。
+    ws.prepare("w2", &["a".to_string()]).expect("准备");
+    let keep = root.join("session").join("w2").join("a").join("notes.txt");
+    std::fs::write(&keep, b"user data").expect("写文件");
+    ws.discard("w2", &["a".to_string()]).expect("撤销");
+    assert!(keep.is_file(), "有内容的目录绝不能删");
+    let _ = std::fs::remove_dir_all(&root);
+}
 #[test]
 pub(crate) fn sandboxes_lookup_is_by_agent() {
     let boxes = crate::capabilities::workspace::api::Sandboxes {
@@ -94,6 +112,8 @@ pub(crate) fn vm_availability_is_machine_only_and_base_is_session_level() {
         .join("guest")
         .join("vm-avail");
     probe.guests.push(guest_dir.clone());
+    // 虚拟根现在是"磁盘镜像 + 可选内核"：镜像必须在场（会话的可写层叠在它上面）。
+    probe.files.push(guest_dir.join("rootfs.ext4"));
     probe.files.push(guest_dir.join("vmlinuz"));
     let mut core = core_with_gateway_probe(
         vec![module_of("a")],

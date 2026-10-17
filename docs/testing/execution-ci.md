@@ -13,16 +13,16 @@
 ```text
 node dev.js test      # L1 单元（cargo test --bin solomni）
 node dev.js fmt       # T0 格式（cargo fmt --all -- --check）
-node dev.js clippy    # T0 静态检查（cargo clippy --all-targets --all-features -- -D warnings）
+node dev.js clippy    # T0 静态检查（cargo clippy --all-targets --all-features --keep-going -- -D warnings）
 ```
 
-迭代到一定段落、要按门禁判一次时用完整入口的**质量 job 模式**（T0 全套 + L1/L2/L3 + 前端冒烟，只省 L4）：
+迭代到一定段落、要按门禁判一次时用完整入口的**质量 job 模式**（T0 全套 + L1 单元 + 四个平台目标 + 前端冒烟 + 开发回路自检 + 环境引导自检，只省 L4）：
 
 ```text
 node run-tests.js --skip-e2e
 ```
 
-注意：`node dev.js test` 与 `node dev.js fmt`、`node dev.js clippy` **都预期全绿**——T0 九项全是零容忍硬失败（交叉类型检查对已装 target 零容忍），没有存量基线。
+注意：`node dev.js test` 与 `node dev.js fmt`、`node dev.js clippy` **都预期全绿**——T0 九项里七项零容忍硬失败，没有容差基线（注释契约的存量快照只减不增）；交叉类型检查对已装 target 零容忍（未装 target 或本机缺交叉 C 工具链时 `env-skip`），供应链在工具缺失或取不到 advisory 数据时 `env-skip`。
 用例默认**并行**跑；排查并发 / 隔离问题时用 `node run-tests.js --serial`。找测试盲区用 `node run-tests.js --coverage`
 （见下文「覆盖率发现模式」，只报不拦）。
 
@@ -37,7 +37,7 @@ node run-tests.js
 1. `cargo build`（并打印安全模式 / 真机围栏模式说明）；
 2. 运行 `solomni --doctor`，记录当前平台和围栏能力；
 3. `T0 编译（--all-targets）`（硬失败）；
-4. `T0 结构审查`（硬失败：目标登记 / 孤儿测试文件 / 缺口账格式 / 文档链接完整性 / 门禁解析器自测 / `#[ignore]` 禁令）；
+4. `T0 结构审查`（硬失败；逐项判定见 [levels.md](levels.md) 的 T0）；
 5. `T0 格式（fmt --check）`（硬失败）；
 6. `T0 静态检查（clippy）`（硬失败）；
 7. `T0 编译告警`（硬失败）；
@@ -45,20 +45,23 @@ node run-tests.js
 9. `T0 依赖重复（cargo tree）`（硬失败）；
 10. `T0 供应链（audit/deny）`（工具缺失或取不到 advisory 数据 = env-skip）；
 11. `L1 单元（--bin solomni）`（默认并行；`--serial` 改为串行，仅诊断用）；
-12. 逐个运行 `cargo test --test cross-platform/windows/linux/macos`（同样默认并行）；
+12. 逐个运行四个测试目标 `cross-platform` / `windows` / `linux` / `macos`（同样默认并行；非本平台且整目标为空的记 `skip-platform`）；
 13. 前端冒烟；
 14. 开发回路自检（`tests/dev-loop.mjs`：`dev.js` 的子命令表与"环境没就绪就如实拒绝"）；
-15. 环境引导自检（`tests/env-bootstrap.mjs`：`env.js` 的下载 / 续传 / 结构判定 / sha256 闸，见下文；仅 Windows 真跑）；
-15. 存在编排器时运行 L4 端到端（编排器会**现场构建 indexer**：编译器版本进日志，构建失败即失败）；
-16. 写入 `target/test-report.json` 并打印 `TEST-REPORT-OK` 或 `TEST-REPORT-FAIL`。
+15. 环境引导自检（`tests/env-bootstrap.mjs`：`env.js` 的下载 / 续传 / 结构判定 / sha256 闸，见下文；仅 Windows 真跑，时限 5 分钟）；
+16. 存在编排器时运行 `L4 端到端`（编排器会**现场构建 indexer**：编译器版本进日志，构建失败即失败；`--skip-e2e` 时这一步整步不出现）；
+17. `T0 项目外写`（快照项目外缓存根，新增 / 变化即硬失败；顺带清理系统临时目录里上次崩溃残留的 `solomni-*`）；
+18. 写入 `target/test-report.json` 并打印 `TEST-REPORT-OK` 或 `TEST-REPORT-FAIL`；平台缺口账为空时再打印 `TEST-REPORT-ACCEPTED`。
 
-每一步都有墙钟上限（默认 15 分钟，L4 20 分钟）：超时即硬失败，证据记进报告的 `timeouts`，不会把本地入口或
+每一步都有墙钟上限（默认 15 分钟；L4 20 分钟，环境引导自检 5 分钟）：超时即硬失败，证据记进报告的 `timeouts`，不会把本地入口或
 CI job 拖到外层超时。每步用时记在报告的 `ms`，超预算的标 `[slow]`（只报不拦）。
+
+报告里的 `L1` / `L4` 是入口的步骤名：`L1` = T1 单元，`L4` = T5 端到端；四个测试目标按目标名逐步记录。
 
 T0 与业务测试在同一次运行里出结果，但结论分开记：质量失败不能被业务测试通过抵消，反之亦然。
 
 > L4 端到端在 `tests/cross-platform/e2e/root/` 下**现场生成**夹具：`orchestrator.js` 把产品根的
-> `prompts/`、`modules/`、`systools/` 拷进去再启动产品。那是**运行时副本、不是文档面**——
+> `prompts/`、`systools/` 与三个真模块（`harvest` / `render` / `indexer`）拷进去再启动产品。那是**运行时副本、不是文档面**——
 > 不要手改、不要当文档审计；要改就改产品根的那一份，副本每次重跑都会覆盖。
 
 ### 环境引导自检（`tests/env-bootstrap.mjs`）
@@ -87,51 +90,53 @@ node run-tests.js --fence-live
 仅允许在一次性 runner、VM 或明确授权的环境使用：它会改本机状态（写目录 ACL、建容器 profile）并创建容器身份。
 普通开发机上**不要**开；本地默认安全模式（见 [quality-isolation.md](quality-isolation.md)）。
 
-**本地这条最后一行有个前提：门禁要在「工作区没有被打上低完整性标签」的环境里跑。**
-DSH 的 Windows 写沙箱后端（`@deepseek-ai/dsh-sandbox-windows-acl`）在**给每个授权根授写权**的同一次
-`SetNamedSecurityInfoW` 调用里，顺手给那个目录打上 **Low 完整性标签**（`SYSTEM_MANDATORY_LABEL_ACE`、
-no-write-up、`(OI)(CI)` 可继承）。它有三个要命处：
+**本地门禁的前提：仓库根没有被 Windows 写沙箱打上 Low 完整性标签。**
+DSH 的 Windows 写沙箱后端（`@deepseek-ai/dsh-sandbox-windows-acl`）在授写权时给授权根设置
+`SYSTEM_MANDATORY_LABEL_ACE`（Low、no-write-up、`(OI)(CI)` 可继承）。标签按**映像文件**生效：
+Windows 的进程完整性 = min(令牌, 映像)，所以仓库根里的 `cargo` / `rustc` / 链接器 / 测试二进制 / `solomni.exe`
+全以 Low 运行；它不随会话结束自动撤销，回收要 `SeRelabelPrivilege`。
 
-- **跟着会话留下来**：`dispose()` 不撤销它——会话结束、甚至会话之后切成「完全权限」，标签都还在；
-- **按「映像文件」生效**：Windows 的进程完整性 = min(令牌, 映像)，所以工作区里的一切二进制
-  （`cargo`、`rustc`、链接器、测试二进制、`solomni.exe`）从被打标签那一刻起**全以 Low 运行**；
-- **降级容易、回收难**：把对象降成 Low 不需要特权，撤/抬回去要 `SeRelabelPrivilege`（只有提权令牌有）。
+带标签时以下失败都是**假失败**，不是产品缺陷：
 
-后果是一串「指向错误方向」的假失败：
+- 写 `%TEMP%`（中完整性）被拒：链接器报 `Cannot create temporary file in …\Temp\: Permission denied`，
+  产品自检报 `建自检目录失败：拒绝访问`（`--doctor` 的 `fs=false`），真机探针只能 env-skip；
+- 改目录 DACL 被拒（错误码 5）：容器围栏装不上；
+- 读用户目录下的解释器被拒：doctor 报「没有 python」、L4 真工具场景报 python 不可达；
+- 拉子进程 / 抓管道受会话沙箱限制（Node 管道 stdio 被 EPERM、`status` 为 null）：把 stdout 重定向到文件再读
+  （`stdio: ["ignore", fd, "ignore"]`），不要用管道。这一条与 Low 标签是两件事。
 
-- 写 `%TEMP%`（中完整性）被拒 → 链接器报 `Cannot create temporary file in …\Temp\: Permission denied`、
-  产品自检报 `建自检目录失败：拒绝访问`（`--doctor` 因此 `fs=false`）、真机探针只能 env-skip；
-- 改目录 DACL 被拒（错误码 5）→ 容器围栏装不上；
-- **读**用户目录下的解释器被拒 → doctor 报「没有 python」、L4 真工具场景报 python 不可达（看着像产品缺陷）；
-- 拉子进程/抓管道另行受会话沙箱限制（Node 管道 stdio 被拒 EPERM、`status` 为 null，被判成「本机留下了没人管的痕迹」）——
-  这一条与 Low 标签是**两件事**，但同样要求把 stdout 重定向到文件再读（`stdio: ["ignore", fd, "ignore"]`），别用管道。
-
-**判据（唯一）**：`icacls "<工作区根>" | findstr Mandatory` 打出 `Mandatory Label\Low Mandatory Level`
-就是它（子项显示 `(I)` 继承）。**不要只看 `whoami /groups`**：shell 自己可能显示 Medium，真正决定进程
-完整性的是**映像文件**上的标签——这就是「要查对进程」的意思。
+**判据（唯一）**：`icacls "<仓库根>" | findstr Mandatory` 打出 `Mandatory Label\Low Mandatory Level`（子项显示 `(I)` 继承）。
+不要只看 `whoami /groups`：shell 可能显示 Medium，决定进程完整性的是映像文件上的标签。
 
 **处置，按优先级：**
 
-1. **以「完全权限」启动会话**：没有文件写授权就不会打标签（首选，也是唯一不产生残留的做法）；
-   只在受限会话里跑时，可为**单次执行**申请放宽到不受限——批准范围仅限该次，且不替代真机围栏验收。
-2. **提权把级别设回去**（清残留）：`icacls "<根>" /setintegritylevel "(OI)(CI)Medium" /T /C`
-   （只能在管理员窗口做，因为需要 `SeRelabelPrivilege`）；清完用同一条 `icacls` 复查，不应再有 `Mandatory` 行。
-3. **把二进制复制到未打标记的目录再跑**（临时绕过）：注意别把 `TEMP` 指进被标记的树，探针要落在系统临时目录。
-4. **换一台不受限的机器 / 交给 CI**：跨平台与真机的结论一律以 CI 为准。
-另有一个**名字相近、用途不同**的官方工具：随 DSH 分发的自愈技能 `diagnose-windows-sandbox-acl`。
-它只覆盖 **ACL 侧**——给缺有效 `WRITE_DAC` / `WRITE_OWNER` 的链上目录补当前用户全权、并删掉显式的
-AppContainer 包 ACE（`S-1-15-2-*`）；**它不碰完整性标签**（脚本里只把 Low 标签读出来记一笔事实）。
-两者不要混用：标签残留走上面第 1/2/3 条；它自己的场景是「DSH 授权失败 → 沙箱 fail-closed」，
-且要在**没有产品会话运行**时用——它删掉的是产品**活着的**授权（容器会中途失去访问、那次会话直接失败；
-产品收尾会把根内 DACL 按快照整体还原，但救不了已经失败的那一次运行）。两条边界互不相干：
-产品的快照/还原只带 `DACL_SECURITY_INFORMATION`（标签在 SACL），所以它既不碰标签、也修不了标签。
+1. 以「完全权限」启动会话：没有文件写授权就不会打标签，也不留残留（首选）；受限会话里可仅为单次执行申请放宽，批准范围仅限该次，且不替代真机围栏验收。
+2. 提权还原级别（清残留）：`icacls "<根>" /setintegritylevel "(OI)(CI)Medium" /T /C`（需要 `SeRelabelPrivilege`，只能在管理员窗口做）；之后用同一条命令复查，不应再有 `Mandatory` 行。
+3. 把二进制复制到未打标记的目录再跑（临时绕过）：`TEMP` 不要指进被标记的树，探针落在系统临时目录。
+4. 换一台不受限的机器或交给 CI：跨平台与真机结论以 CI 为准。
 
-> **工作区带 Low 标签时的一切围栏 / L4 结论都不可信**：标签在时 doctor 报 `fs=false`、读写 DACL 都 Error 5、
-> python 在工具进程里不可达、围栏回收因 Node 管道 stdio 被拒被判成「本机留下了没人管的痕迹」——这些都是
-> 同一标签造成的假失败，不是「卷不支持 ACL」或「python 装得不对」。清掉标签后同一条 `node run-tests.js --fence-live`
-> 应全绿（`0 failed`）、doctor 报 `fs=true net=true tree=true`，真机探针（容器往返、对象 ACE 往返、
-> 授权/撤销/台账/孤儿清扫）也应在本机真跑通过。**换普通或提权（`High`）的 shell 本身不解决**——映像是 Low 的，
-> 进程照样是 Low；要么不打标签，要么把标签清掉，要么把二进制搬出这棵树。
+随 DSH 分发的 `diagnose-windows-sandbox-acl` 只修 **ACL 侧**（补 `WRITE_DAC` / `WRITE_OWNER`、删显式 AppContainer 包 ACE），
+不碰完整性标签；产品的快照 / 还原只带 `DACL_SECURITY_INFORMATION`（标签在 SACL）。标签残留按上面第 1/2/3 条处理。
+
+> 带 Low 标签时的一切围栏 / L4 结论都不可信：doctor 报 `fs=false`、读写 DACL 都 Error 5、python 在工具进程里不可达。
+> 清掉标签后同一条 `node run-tests.js --fence-live` 应全绿、doctor 报 `fs=true net=true tree=true`。
+> 换普通或提权（`High`）的 shell 不解决——映像是 Low，进程照样是 Low。
+
+### 虚拟机档真机用例（本地 opt-in）
+
+虚拟机档真机用例默认跳过，设 `SOLOMNI_VM_LIVE=1` 才真跑（按需再给 `SOLOMNI_VM_QEMU` / `SOLOMNI_VM_GUEST`，虚拟根默认 `debian`）：
+
+- `src/tests/vm.rs`：guest 起停、并发可写层；
+- `src/tests/diagnostics.rs`：guest 内构建；
+- `src/capabilities/provision/guest.rs`：Linux 运行期编排；
+- `src/capabilities/provision/service.rs`：guest-rootfs 属性真机用例（`guest_rootfs_pipeline_keeps_source_attrs_on_the_real_image`，用 `.vm/cache/rootfs.ext4`）；
+- `tests/cross-platform/e2e/`：vm 会话场景。
+
+未开启时用例打印行首 `[探针]`，入口按 `env-skip` 记进报告，不算通过。
+
+**Linux 的 ext4 工具链用例按环境判据跳过**：`unshare -r` / `mke2fs` / `debugfs` 不可用（Linux CI 就是这样）时，
+`packed_guest_image_uses_4k_blocks` 与 `guest_rootfs_restores_privilege_bits_and_ownership` 打印 `[探针]` 并跳过；
+跳过 = `env-skip`，不是通过。补装 e2fsprogs 并允许非特权用户命名空间后才真跑。
 
 ### 覆盖率发现模式（手动）
 
@@ -181,25 +186,26 @@ MUTATION_SCOPE=capability MUTATION_CAPABILITY=repair node tests/ci-mutation.mjs
 - **Actions 产物 `mutation-report`**（完整现场）：`target/mutation-report.json`、`target/logs/mutation-*.log`、
   `mutants.out/`；分支只留最近一次，历史看这里。
 
-**core** 范围已归零：`45 caught / 3 unviable / 0 missed / 0 timeout` → `MUTATION-OK`；等价变异体在 `.cargo/mutants.toml` 排除（当前 1 条）。各 `capability` 范围按需派发、尚未逐个抽查；棘轮基线暂不建（等出现「已知容忍」的未捕获时再加）。
+两个范围都只作调查：全捕获 = `MUTATION-OK`，否则 `MUTATION-FOUND`；`capability` 范围按需派发。棘轮基线只在出现「已知容忍」的未捕获时再建。
 
 ### CI（GitHub Actions）：跨平台与真机的唯一事实来源
 
-跨平台验收工作流是 `.github/workflows/test.yml`，**只有手动触发**（`workflow_dispatch`）：`main` 禁止直接 push（只走 PR），
-日常提交不自动跑 CI。矩阵 `windows-latest / ubuntu-latest / macos-latest`（`fail-fast: false`，
-一个平台失败不影响另外两个出结论）。
+跨平台验收工作流是 `.github/workflows/test.yml`，**两种触发：PR（目标 `main`）与手动 `workflow_dispatch`**；
+`push` 不触发。PR 验收 PR head 提交（`SOURCE_SHA`），报告的 `sha` 因此等于 PR 头；手动派发验收 `github.sha`。
+矩阵 `windows-latest / ubuntu-latest / macos-latest`（`fail-fast: false`，一个平台失败不影响另外两个出结论）。
+来自 fork 的 PR 照跑测试，但不发布 `ci-report`（token 只读）。
 
 **契约：每个平台恰好两个 job**——`quality` 与 `e2e`；这是刻意的上限，**不得再拆**：
 
 | job | 跑什么 | 对应入口 |
 | --- | --- | --- |
-| `quality` | T0 质量门禁 + 供应链 + L1 单元 + 平台探针 + 前端冒烟（**跳过 L4**） | `node run-tests.js --fence-live --skip-e2e` |
+| `quality` | T0 质量门禁 + 供应链 + L1 单元 + 平台探针 + 前端冒烟 + 开发回路 / 环境引导自检（**跳过 L4**） | `node run-tests.js --fence-live --skip-e2e` |
 | `e2e` | L4 端到端（自己构建产品，与 `quality` 并行） | `node tests/ci-e2e.mjs`（CI 专用；本地整跑用 `node run-tests.js --fence-live`） |
 
 `publish-report` 把两个 job 的产物（`test-report-<os>` 与 `e2e-report-<os>`）用 `tests/ci-merge.mjs` 合并成该平台
 唯一的 `test-report.json`，再交给 `tests/ci-publish.mjs` 发布。**任一半缺报告都补一条 `fail` 步骤**——"没跑到"不能读成"通过"。
 
-`workflow_dispatch` 的 `clean` 输入（`true`）跳过 `actions/cache` 按干净机器跑；缓存只覆盖**项目内**路径
+`workflow_dispatch` 的 `clean` 输入（`true`）跳过 `actions/cache` 按干净机器跑；PR 触发没有这个输入，缓存照用。缓存只覆盖**项目内**路径
 （`platform/ci/cargo`：借用 runner 自带 Rust 时的 `CARGO_HOME`，含 registry / git / 工具；以及 `target/debug`），
 **不缓存 `target/` 根**（报告与日志必须来自本次运行）。缓存身份包含 `path`，改路径即新缓存项、旧项自动淘汰，首次冷启动重下一次。
 CI 借 runner 自带 Rust（`CARGO_HOME` / `SOLOMNI_CARGO_HOME` 指项目内），不跑 `rustup` 安装——不写项目外。
@@ -213,25 +219,25 @@ CI 借 runner 自带 Rust（`CARGO_HOME` / `SOLOMNI_CARGO_HOME` 指项目内）�
 | 平台专属代码（`kernel/detail/confine/` 各平台文件、`tests/<平台>/`） | 平台目标的 `main.rs` 首行是 `#![cfg(target_os = …)]`：非本平台的目标整目标为空，代码根本不编译 | 三平台各编译并各跑一次 |
 | 真机围栏（ACL / 容器 profile / Landlock / seatbelt） | 本地默认安全模式会跳过会改本机状态的探针 | 一次性 runner 上真跑，并验撤权与 profile 回收 |
 | HTTPS/TLS 出站链路 | 受限环境可能取不到系统 TLS 凭证（判据见 [levels.md](levels.md) 的 T4），本地只能 env-skip | 干净 runner 上真连公网端点 |
-| T0 九项（clippy 只编译当前平台的 `#[cfg]`；交叉类型检查在本机无目标或交叉 C 工具链时 env-skip；依赖图随平台变；供应链要联网装工具） | 本机只能代表本平台（判的是**平台差异**，不是「改了门禁就要派发」） | 三平台各自零容忍跑一遍 |
+| T0 九项（clippy 只编译当前平台的 `#[cfg]`；交叉类型检查在本机无目标或交叉 C 工具链时 env-skip；依赖图随平台变；供应链要联网装工具） | 本机只能代表本平台（判的是**平台差异**，不是「改了门禁就要派发」） | 三平台各跑同一套门禁：硬失败项零容忍，环境项记 `env-skip` |
 | 三种语言的模块（python / node / C++）在真进程里跑 | 本机只代表本平台的解释器与编译器 | 三平台各跑一次真工具链路，indexer 现场编译 |
 | 发布前验收 | 本地通过 ≠ 三平台通过 | 三平台报告 + 三平台 `TEST-REPORT-ACCEPTED` |
 
-**什么时候派发、什么时候不派发**：CI 的唯一价值是给出**本机拿不到的结论**（其它平台能不能编译通过、真机围栏与解释器链路、TLS 出站）。判据只有一条——
-这次改动的验收结论**是否依赖本机之外**：
+**什么时候手动派发**：PR 会自动跑一次 CI；手动派发只用于「没有 PR 也要单独验证某个分支或干净机器」。
+判据只有一条——这次改动的验收结论**是否依赖本机之外**（其它平台能不能编译通过、真机围栏与解释器链路、TLS 出站）：
 
-- **依赖** → 派发一次，并按下面的读法比对 `sha`；
-- **不依赖** → 不派发，本地入口就是验收结论。明确不算理由的：纯逻辑、文档、当前平台的用例，以及**门禁与卫生工具自身的改动**
-  （本机跑同一份入口即同一判据）；攒批，等下一次真需要他平台或真机结论时一起派发。
+- **依赖** → 走 PR（自动）或在分支上手动派发一次，并按下面的读法比对 `sha`；
+- **不依赖** → 不必额外手动派发；PR 照跑，但本地入口就是验收结论，不把 CI 的 `env-skip` 当通过。
 - 用户明确要求派发时例外。
 
-**触发（需要 CI 时）**：只能手动派发，用 `gh` 发起，`--ref` 指向要验证的分支（`main` 禁止直接 push，通常是 `development`）：
+**触发**：开 PR（目标 `main`）即自动跑；需要单独验证某个分支或干净机器时手动派发，用 `gh` 发起，`--ref` 指向要验证的分支
+（`main` 禁止直接 push，通常是 `development`）：
 
 ```text
 gh workflow run test.yml --ref <分支>
 ```
 
-按干净机器跑（跳过缓存）时加 `-f clean=true`。触发后按下面的读法比对 `sha`。
+按干净机器跑（跳过缓存）时加 `-f clean=true`。PR 触发不用另派发；触发后按下面的读法比对 `sha`。
 
 **报告怎么读（硬规矩）**：只用 `git` 或 git CLI 拉 `ci-report` 分支，**禁止轮询网页**；时机无法确认时委托用户拉取（见 `AGENTS.md`）。
 
@@ -249,13 +255,14 @@ git show origin/ci-report:runs/windows/logs/<某一步>.log  # 失败证据原�
 3. 再读 `test-report.json` 的 `steps` 与 `envSkips`：**CI 上的 env-skip 同样不算通过**，它只说明那条围栏没被验收。
 4. 失败时从 `logs/` 取断言原文，不在摘要里找感觉。
 
-> `envSkips` 只收集 **`[探针]` 前缀**的行：诊断输出一律用 `[诊断]`，别用 `[探针]`，否则会被算成"跳过"。
+> `envSkips` 的来源是探针级 `[探针]` 标记：`run-tests.js` 只认行首（`skipsIn`），`tests/ci-e2e.mjs` 按包含匹配。
+> 诊断输出一律用 `[诊断]`，别用 `[探针]`，否则会被算成"跳过"。
 >
 > 判「环境降级」只看**被测试进程**的令牌与行为：`whoami /groups` 里找包 SID 组在现代 Windows 上是**假阴性**
 > （包 SID 在令牌的 `TokenAppContainerSid` 字段里，不在组列表里），按它判会把生效的容器记成降级。
 > 容器是否生效用**行为对照**（授权落点写得进、父目录按名可用、父目录内容不可见），见 [levels.md](levels.md) 的 T4。
 
-**等多久再拉（推荐节奏）**：派发之后**先等 5 分钟**再拉 `ci-report`；若某个平台的 `meta.json` 的 `sha` 还对不上
+**等多久再拉（推荐节奏）**：触发之后（PR 自动或手动派发）**先等 5 分钟**再拉 `ci-report`；若某个平台的 `meta.json` 的 `sha` 还对不上
 （这次 run 没结束），**每次再等 2 分钟**重拉一次，直到三平台的 `sha` 都对得上，或确认 run 已失败/取消。
 等的是 git 拉取，不是网页轮询——`AGENTS.md` 禁止查网页；时间上拿不准（比如 runner 排队很久）就委托用户拉取。
 
@@ -263,28 +270,31 @@ git show origin/ci-report:runs/windows/logs/<某一步>.log  # 失败证据原�
 
 - Actions 注释：失败逐条 `::error::`（带断言原文），通过一条 `::notice::` 概览——匿名可读，不需要凭据；
 - `ci-report` 滚动分支：同一路径每次覆盖，**只留最近一次**（要历史看 Actions 产物 `test-report-<os>`）；
-- 现在只有**手动派发的 run** 才发布 `ci-report`（没有 push / PR 触发）；
+- **PR 与手动派发的 run 都发布** `ci-report`（`push` 不触发）；PR 报告的 `sha` 是 PR head（fork PR 不发布，见上）；
 - 报告发布失败（例如 token 权限不对）只是 `::warning::`，**不影响**测试本身的成败——所以"没读到报告"不等于"测试没过"。
 
-**本地与 CI 的关系**：本地入口是快速反馈；CI 是**跨平台与真机**的最终判据，**不是每次改动的必经关卡**。
+**本地与 CI 的关系**：本地入口是快速反馈；CI 在 PR 上自动跑，给出**跨平台与真机**的最终判据。
 本次改动若结论依赖本机之外，则本地 + CI 两边都跑通、且 CI 的 `sha` 对得上才算验收完成；
-否则本地入口通过即验收完成（判据见 [gaps-acceptance.md](gaps-acceptance.md)）。
+否则本地入口通过即验收完成（PR 的 CI 结果照读，`env-skip` 不算通过；判据见 [gaps-acceptance.md](gaps-acceptance.md)）。
 
 ### 当前报告状态
 
 当前实现实际会输出：
 
 - `pass`：步骤完成；
-- `fail`：断言或命令失败（硬失败）；
-- `quality-fail`：T0 任一项不过（编译 / 结构审查 / 格式 / clippy / 编译告警 / 交叉类型检查 / 依赖重复）；
+- `fail`：断言或命令失败（硬失败，含编译、交叉类型检查、供应链、项目外写与业务用例）；
+- `quality-fail`：结构审查 / 格式 / clippy / 编译告警 / 依赖重复不过；
 - `env-skip`：工具缺失等环境性跳过（步骤级），与 `envSkips`（探针级的 `[探针]` 行）并列；
 - `skip-platform`：当前平台不适用的空平台目标；
 - `gap`：入口没有找到应运行的部分。
 
-报告字段：`steps`（逐步骤状态、用时 `ms` 与超预算标记 `slow`——"哪一步慢"要看它，不看感觉）、`envSkips`（探针级跳过）、
+本地 `target/test-report.json` 的字段：`platform` / `arch` / `osKey` / `profile` / `fenceLive` / `doctor`（本次运行的环境事实）、
+`steps`（逐步骤状态、用时 `ms` 与超预算标记 `slow`——"哪一步慢"要看它，不看感觉）、`envSkips`（探针级跳过）、
 `timeouts`（被墙钟超时终止的命令）、`quality`（`failed` / `steps`）、`gaps`（平台缺口账）、
-`globalGaps`（`tests/gaps.yaml` 的长期目标）、`failed`（硬失败数）。
-`test-fail` 与 `blocked` 这两个更细的状态当前没有实现，也不在计划内——`fail` 与 `gap` 已能如实表达。
+`globalGaps`（`tests/gaps.yaml` 的长期目标）、`failed`（状态为 `fail` 的步骤数；`quality-fail` 另由 `quality.failed` 计）。
+CI 合并后的报告由 `tests/ci-merge.mjs` 生成：保留上述环境字段与 `steps` / `envSkips` / `quality` / `globalGaps` / `gaps` / `failed`，
+不保留 `timeouts` 与 `steps[].slow`。
+报告没有 `test-fail` / `blocked` 这两个状态：失败只有 `fail`，缺口只有 `gap`。
 
 ## 二、成功标记
 

@@ -1,9 +1,9 @@
 # 三平台测试：GitHub 托管 runner 是一次性机器，「会改本机状态」的真机围栏测试只在这里开。
 # 本地默认安全模式（见 TESTING.md）：会改本机状态的测试要显式 --fence-live。
 #
-# 触发：**只有手动 workflow_dispatch**。main 禁止直接 push（只走 PR）；CI 的唯一价值是给出本机
-# 拿不到的结论（他平台编译、真机围栏、TLS 出站），所以攒批后由人派发，不跟着每次推送跑。
-# inputs.clean=true 跳过缓存，用于「干净机器」验收。契约见 docs/testing/execution-ci.md。
+# 触发：**PR（目标 main）与手动 workflow_dispatch**；push 不触发。PR 验收 PR head 提交（SOURCE_SHA），
+# 报告的 sha 因此等于 PR 头；手动派发验收 github.sha。CI 的唯一价值是给出本机拿不到的结论（他平台编译、
+# 真机围栏、TLS 出站）。inputs.clean=true 跳过缓存，用于「干净机器」验收。契约见 docs/testing/execution-ci.md。
 #
 # 契约：每个平台**恰好两个 job**——quality（T0 + 单元 + 平台探针 + 前端冒烟）与 e2e（L4 端到端）；
 # 不得再拆。publish-report 下载两份报告、合并后发布 ci-report（成败都发）。
@@ -16,6 +16,13 @@ on:
         description: "跳过缓存，按干净机器跑（验收用）"
         type: boolean
         default: false
+  pull_request:
+    branches: [main]
+
+# PR 触发时验收 PR head（不是 merge commit）；手动派发时就是 github.sha。报告与发布共用这一份；
+# checkout 用 base 仓的 refs/pull/<N>/head，指向同一个 head 提交。
+env:
+  SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
 
 permissions:
   contents: read # 默认只读；仅 publish-report job 获得 ci-report 写权限。
@@ -41,6 +48,9 @@ jobs:
         os: [windows-latest, ubuntu-latest, macos-latest]
     steps:
       - uses: actions/checkout@v7
+        with:
+          # fork PR 的 head 分支在对方仓；用 base 仓为每个 PR 建的 refs/pull/<N>/head（同仓 PR 同样可用）。
+          ref: ${{ github.event_name == 'pull_request' && format('refs/pull/{0}/head', github.event.pull_request.number) || github.sha }}
 
       # 最新稳定线：Node 的 lts/* = 当前 LTS（生产稳定线），随 LTS 迁移自动跟进，不用手工改版本号。
       - uses: actions/setup-node@v7
@@ -121,6 +131,8 @@ jobs:
         os: [windows-latest, ubuntu-latest, macos-latest]
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event_name == 'pull_request' && format('refs/pull/{0}/head', github.event.pull_request.number) || github.sha }}
 
       - uses: actions/setup-node@v7
         with:
@@ -166,7 +178,8 @@ jobs:
   publish-report:
     name: 合并并发布 ci-report
     needs: [quality, e2e]
-    if: ${{ always() && !cancelled() }}
+    # fork PR 的 token 只读，发布必然失败；测试照跑，只跳过发布。
+    if: ${{ always() && !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
     permissions:
       contents: write
     runs-on: ubuntu-latest
@@ -177,6 +190,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
+          ref: ${{ env.SOURCE_SHA }}
           fetch-depth: 0
 
       - name: 下载 quality 报告产物
@@ -197,7 +211,6 @@ jobs:
         env:
           REPORT_BRANCH: ci-report
         run: |
-          source_sha="${GITHUB_SHA}"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
@@ -209,7 +222,7 @@ jobs:
           git push origin "HEAD:refs/heads/${REPORT_BRANCH}" --force
 
       - name: 恢复源码工作树
-        run: git checkout --detach "${GITHUB_SHA}"
+        run: git checkout --detach "${SOURCE_SHA}"
 
       - name: 逐平台合并并写入干净的报告分支
         env:

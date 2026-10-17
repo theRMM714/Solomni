@@ -25,6 +25,12 @@ pub fn unpack_cli(args: &[String], i: usize) -> i32 {
 /// 自检：本机事实（平台 + 围栏能力 + 外部解释器）。只报事实，不猜、不改任何东西（围栏自检那个临时目录除外）。
 /// 参数：root = 产品根——虚拟机档要按它读"项目内已装了什么"（与会话判据同一份来源，不另编一套）。
 pub fn doctor(root: &std::path::Path) -> i32 {
+    println!("{}", doctor_json(root));
+    0
+}
+
+/// 目的：自检的事实本体（`--doctor` 打印它；用例也读它——不必抓 stdout）。
+pub fn doctor_json(root: &std::path::Path) -> serde_json::Value {
     let cap = crate::kernel::detail::confine::capability();
     // 虚拟机档的逐项前置（**只读事实**）：项目内补齐过就按那一份问，否则按 PATH 问（与核心同一把尺子）。
     let installed = crate::capabilities::provision::api::Provision::status(
@@ -49,6 +55,21 @@ pub fn doctor(root: &std::path::Path) -> i32 {
             share_tool: share_tool.as_deref(),
             probe: &crate::kernel::detail::HostProbeAdapter,
         });
+    // 长驻子进程：账本里还活着的那几条（`--doctor` 只报事实，不动手收）。
+    let book = crate::kernel::detail::procs::ProcessBook::open(&root.join(".home"));
+    let procs: Vec<serde_json::Value> = book
+        .list()
+        .into_iter()
+        .map(|e| {
+            serde_json::json!({
+                "pid": e.pid,
+                "alive": crate::kernel::detail::procs::alive(e.pid),
+                "purpose": e.purpose,
+                "owner": e.owner,
+                "since": e.since,
+            })
+        })
+        .collect();
     let doc = serde_json::json!({
         "platform": std::env::consts::OS,
         "arch": std::env::consts::ARCH,
@@ -58,6 +79,7 @@ pub fn doctor(root: &std::path::Path) -> i32 {
             "node": crate::kernel::detail::host_probe::find_exe("node").map(|p| p.to_string_lossy().into_owned()),
             "curl": crate::kernel::detail::host_probe::find_exe("curl").map(|p| p.to_string_lossy().into_owned()),
         },
+        "processes": procs,
         "vm_tier": {
             "available": vm.iter().all(|r| r.met),
             "requirements": vm.iter().map(|r| serde_json::json!({
@@ -65,8 +87,7 @@ pub fn doctor(root: &std::path::Path) -> i32 {
             })).collect::<Vec<_>>(),
         },
     });
-    println!("{}", doc);
-    0
+    doc
 }
 
 /// 目的：给 `--provision` 的补齐作业装配 vm 能力面（guest-runtime 的运行期编排要起 guest）。
@@ -78,7 +99,11 @@ fn provisioning_vm(
         std::sync::Arc::new(crate::capabilities::vm::detail::FsPackages::new(
             root.join("runtimes"),
         )),
-        std::sync::Arc::new(crate::capabilities::vm::detail::QemuEngine::new()),
+        std::sync::Arc::new(
+            crate::capabilities::vm::detail::QemuEngine::new().with_book(
+                crate::kernel::detail::procs::ProcessBook::open(&root.join(".home")),
+            ),
+        ),
         vec![std::sync::Arc::new(
             crate::capabilities::vm::detail::CopyShare::new(),
         )],
@@ -94,11 +119,17 @@ fn build_vm(
 ) -> std::sync::Arc<dyn crate::capabilities::vm::api::Vm + Send + Sync> {
     let shares: Vec<
         std::sync::Arc<dyn crate::capabilities::vm::ports::ShareBackend + Send + Sync>,
-    > = vec![
-        std::sync::Arc::new(crate::capabilities::vm::detail::VirtioFsShare::new()),
-        std::sync::Arc::new(crate::capabilities::vm::detail::NinePShare::new()),
-        std::sync::Arc::new(crate::capabilities::vm::detail::SmbShare::new()),
-    ];
+    > = {
+        let book = crate::kernel::detail::procs::ProcessBook::open(&root.join(".home"));
+        vec![
+            std::sync::Arc::new(
+                crate::capabilities::vm::detail::VirtioFsShare::new()
+                    .with_book(std::sync::Arc::clone(&book)),
+            ),
+            std::sync::Arc::new(crate::capabilities::vm::detail::NinePShare::new()),
+            std::sync::Arc::new(crate::capabilities::vm::detail::SmbShare::new().with_book(book)),
+        ]
+    };
     std::sync::Arc::new(crate::capabilities::vm::service::VmService::new(
         std::sync::Arc::new(crate::capabilities::vm::detail::FsPackages::new(
             root.join("runtimes"),

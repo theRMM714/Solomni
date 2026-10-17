@@ -7,13 +7,23 @@
 
 ## 一、管什么 / 不管什么
 
-**管**：系统工具总表与角色表（`systools/`）、内置文件工具（read / list / write / edit / patch / search）的执行编排与纯规则、工具参数契约、补丁通道、外部工具进程的执行编排（**拉起与围栏机制**是 kernel 共享的 `ProcessRunner` / `confine`）、**围栏策略**（派哪些可达范围、`fence_read` 怎么叠加——策略在本能力，机制在 kernel）。
+**管**：
 
-**不管**：不放领域语义（角色是系统的身份，不是业务概念）；不选模型；不碰会话流水。
+- 系统工具总表与角色表（`systools/`），以及「按角色发放工具面 / 按表校验调用」的唯一判据。
+- 内置文件工具（read / list / write / edit / patch / search）的执行编排与纯规则、工具参数契约、补丁通道。
+- 模块工具进程的执行编排；拉起与围栏机制是 kernel 共享的 `ProcessRunner` / `confine`。
+- 围栏可达范围的派生（`domain/fence.rs` 的 `from_sandbox` / `standalone`）。
+
+**不管**：
+
+- 不放领域语义（角色是系统的身份，不是业务概念）；不选模型；不碰会话流水。
+- 不决定用户授权的只读根（`fence_read`）：由调用方（`conductor` / `collab`）叠加。
 
 ## 二、入站契约与状态归属
 
-`api::Tools`（按角色发放工具面 / 总表 / 自检）+ `api::ToolExec`（跑模块与内置工具、释放围栏）。出站端口 `SysIo` 与 kernel 共享的 `ProcessRunner` / `FenceHost` 由 `service/mod.rs` 持有（R12）；`SystoolsSource` 只在装配时读一次，不持有。
+`api::Tools`（按角色发放工具面 / 总表 / 自检）+ `api::ToolExec`（跑模块工具与系统工具、释放围栏）。出站端口 `SysIo` 与 kernel 共享的 `ProcessRunner` / `FenceHost` 由 `service/mod.rs` 持有（R12）；`SystoolsSource` 只在装配时读一次，不持有。
+
+模块工具的一次执行经 `--fence-run` 守门进程完成（命令与参数分开、环境白名单、超时杀树），协议在 [kernel 的「工具进程与守门协议」](../kernel/README.md)。
 
 ## 三、依赖图位置（由源码的 `::api` 引用推导）
 
@@ -22,11 +32,14 @@
 
 ## 四、改动本单元时必须同步
 
-- 工具表 / 角色表的同步见 [tools-and-roles.md](tools-and-roles.md) 与 `systools/`；围栏机制的同步细则（平台探针、台账、ACE、解释器基线、真机验收）已随机制迁入 [kernel](../kernel/README.md)。
-- 授权面按**注入的事实**派生：`<module>/userdata/` 由 modules 在**扫描载入时确保存在**（产品唯一的自动写盘，幂等；建不了如实标注、不阻断加载）并随沙箱注入（domain 不读盘）；事实为否（建不了）时不进 `rw`，`standalone` 的缺省工作目录退回模块根。`prepare_fence` 也会跳过不存在的落点、不判整次失败。
-- 核心代理系统工具的待实现规划清单：`systool_gaps.yaml`（仓库根；不是当前工具表，也不替代测试缺口账）。
-
-- 围栏落点（必要 / 可选）、必要落点授不上的行为、平台差异与真机验收的细则，已随机制迁入 [kernel](../kernel/README.md) 的「围栏落点：必要与可选」。
+- 工具表 / 角色表的同步见 [tools-and-roles.md](tools-and-roles.md) 与 `systools/`。
+- 围栏机制的同步细则（平台探针、台账、ACE、解释器基线）与围栏落点（必要 / 可选、授不上的行为、平台差异）都在 [kernel](../kernel/README.md) 的「围栏落点：必要与可选」与「工具进程与守门协议」。
+- 授权面按**注入的事实**派生：
+  - `<module>/userdata/` 由 modules 在**扫描载入时确保存在**（产品唯一的自动写盘，幂等）；建不了如实标注、不阻断加载。
+  - domain 不读盘：`has_userdata` 作为事实随沙箱注入。
+  - 事实为否（建不了）时不进 `rw`；`standalone` 的缺省工作目录退回模块根。
+  - `prepare_fence` 跳过不存在的落点，不判整次失败。
+- 新增 / 修改系统工具 → 改 `systools/tools.yaml` 与（需要时）`systools/roles.yaml`；尚未实现的方向记在 `systool_gaps.yaml`（仓库根；不替代测试缺口账）。
 
 ## 本目录
 

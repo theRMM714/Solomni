@@ -6,4 +6,4 @@
 
 | 文件 | 职责 |
 | --- | --- |
-| `src/presentation/cli/mod.rs` |
+| `src/presentation/cli/mod.rs` | 终端转录中心：argv 解析 → 入站能力面 → 渲染事件流（含 `resident` / `module` / `rewind` 等子命令）；不做业务判断、不持状态 |

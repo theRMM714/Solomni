@@ -1,28 +1,87 @@
 # entry（入口层）
 
-> 组合根、机器可读探针与围栏守门进程。
+> 组合根、机器可读探针、围栏守门进程与长驻子进程守门进程。
 > 本目录是该单元的唯一细则入口：本页 → [`unit-map.md`](unit-map.md)（逐文件职责，机器比对）→ 其它细则。
 > 分层与依赖方向见 [ARCHITECTURE.md](../../ARCHITECTURE.md) §一，业务边界判据见 §九；测试规范见 [TESTING.md](../../TESTING.md)。
 
 ## 一、管什么 / 不管什么
 
-**管**：入口层共用机制（产品根规范化）+ 组合根（`main.rs`：`new` 出所有适配器并注入）+ 机器可读探针（`diagnostics/`）+ 围栏守门进程（`guard/`，**第二个程序入口**）。依赖补齐的语义在 `provision` 能力，`--provision` 只是它的 CLI 探针。
+**管**：
 
-**不管**：除装配与探针外无业务；**任何能力都不许依赖它**（门禁判定）。
+- 入口层共用机制：产品根规范化（`src/entry/root.rs`）。
+- 组合根（`src/main.rs`）：new 出各适配器、装配各能力、跑启动对账、把入站能力面交给 CLI 或 Web。
+- 机器可读探针与隐藏模式（`src/diagnostics/mod.rs`）。
+- 两个守门模式（`src/guard/mod.rs`）：围栏 `--fence-run`、长驻子进程 `--proc-watchdog`，以及围栏台账的按条处置。
 
-## 二、入站契约与状态归属
+**不管**：
 
-探针命令行（`--doctor` / `--provision` / `--https-check` / `--print-routes` / `--print-fence-env` / `--fence-verify`，多数**恒退出 0**——判定归调用方；`--provision` 报依赖清单里的"缺什么、装到哪、从哪来"，下载源来自编译期内嵌的 `dependencies.yaml` + `links.yaml`；加 `--ensure[=id,…] --yes` 才真下载安装，只写项目内）；围栏收尾与按条处置（`--fence-clean` 整体收尾，`--fence-reconcile` 按归属对账回收陈旧授权（启动期也自动跑一次），`--fence-ledger` 列清单 / `--fence-restore` 还原一条 / `--fence-revoke` 撤一条 / `--fence-profile-rm` 删一个 profile，都是隐藏模式、用户经文档知道）；守门进程协议（`--fence-run`，内部协议，模块作者不接触）。
+- 没有业务语义；依赖补齐的语义在 `provision` 能力，`--provision` 只是它的入口。
+- 任何能力都不许依赖本单元（`run-tests.js` 的依赖方向门禁）。
 
-## 三、依赖图位置（由源码的 `::api` 引用推导）
+## 二、组合根（`src/main.rs`）
+
+- 先处理**不需要装配核心**的模式：`--proc-watchdog`、`--fence-run`、`--https-check`、`--unpack`、`--print-fence-env`、`--fence-verify`、`--print-routes`。
+- 再解析产品根：`--root <路径>`，缺省 `.`；相对路径与当前目录做纯词法拼接，取不到当前目录才退回 `canonicalize`（Windows 上剥掉 `\\?\` 前缀）。
+- `--doctor`、`--provision`、`--build`、围栏台账系列（`--fence-reconcile` / `--fence-ledger` / `--fence-restore` / `--fence-revoke` / `--fence-profile-rm` / `--fence-clean`）只需要产品根，不装配核心。
+- 装配期失败一律打印 `[装配失败]` 并以 1 退出：登记处四份 yaml 读不了、提示词册缺文件 / 缺键、工具总表与角色表不自洽、模块清单装配失败、隐秘字段加载失败、核心执行线程起不来。日志文件起不来只降级到 stderr（进程继续）。
+- **启动对账**在会话开工前跑两份：围栏授权台账（`confine::reconcile`）与长驻子进程账（`ProcessBook::reconcile`，`.home/processes.json`）。
+  - 围栏台账只回收归属明确已死的授权。
+  - 进程账清掉已不在的登记；Unix 上按命令行标记收掉上次留下的孤儿；Windows 只报不动手（作业对象兜底）。机制见 [kernel 的「长驻子进程的账与回收」](../kernel/README.md)。
+- **围栏写权限**：`SOLOMNI_FENCE_WRITE=1/0` 优先，否则读设置里的 `fence_write`；它只决定 Windows 是否写目录 ACL（Linux / macOS 的围栏在守门进程里自足）。启动报告把「本机能力」与「本次实际」分开打印。
+- **常驻服务**按有效启停拉起（`ResidentOps::start_enabled`，进程级租约，不属于任何会话）。
+- **核心**搬到自己的执行线程（`ConductorHandle::spawn`）；呈现层只拿 `Ops` 与入站能力面。
+- `--probe-tools` / `--probe-replay` 在核心装配后执行：前者把**确定**结论写回 `models.yaml`，后者只报事实、不改登记处。
+
+## 三、隐藏模式与探针
+
+约定：多数模式**恒退出 0**，判定归调用方；需要区分的按「输出 / 退出码」列。文本输出是人读的，`--doctor` / `--provision` / `--print-routes` 是 JSON。
+
+| 模式 | 作用 | 输出 / 退出码 |
+| --- | --- | --- |
+| `--doctor` | 机器可读自检 | JSON：`platform` / `arch` / `fence` / `externals` / `processes` / `vm_tier`；0 |
+| `--provision` | 依赖补齐状态：缺什么、装到哪、从哪来（源为编译期内嵌的 `dependencies.yaml` + `links.yaml`） | JSON；0，读清单失败 1 |
+| `--provision --ensure[=id,…] --yes` | 下载并安装（只写项目内） | 0 成功 / 1 失败 / 2 没给 `--yes` |
+| `--https-check <url>` | 用产品自己的出站链路打一次最小 HTTPS 请求 | `ok` / `no-net` / `env-tls` / `tls-fail\|fail`；0，缺 URL 2 |
+| `--unpack <archive> <dest>` | 解归档：tar / tar.gz / tgz / tar.zst / tzst / tar.xz / txz / zip | 0 / 1 失败 / 2 用法错 |
+| `--build=<模块 id> [--guest=<虚拟根>]` | 在目标环境跑 `module.yaml` 的 `build.command`：本机档用产品围栏，虚拟机档在 guest 里 | 0 / 1 失败 / 2 用法错、没有该模块或没有 `build` 声明 |
+| `--probe-tools <模型 id>` | 实测一条通道是否支持原生工具调用，把**确定**结论写回 `models.yaml` | 三态文本；0 / 1 失败 / 2 用法错 |
+| `--probe-replay <模型 id>` | 只报回放形状的事实，不改登记处 | 逐形状文本；0 / 1 失败 / 2 用法错 |
+| `--print-routes` | HTTP 路由目录的唯一定义（见 [contracts.md](../presentation/contracts.md)） | JSON；0 |
+| `--print-fence-env <FenceJob JSON> -- <命令>` | 逐行输出运行期给工具进程的环境白名单 | `KEY=VALUE`；0，围栏参数非法 111 |
+| `--fence-verify <FenceJob JSON> -- <命令>` | 只做机制验证，不装围栏、不写权限项 | `enforced` / `env-unavailable …` / `broken …`；0，参数非法 111 |
+
+围栏台账（隐藏模式，用户经文档知道）：
+
+| 模式 | 作用 | 退出码 |
+| --- | --- | --- |
+| `--fence-reconcile` | 按归属对账回收陈旧授权（启动期也自动跑一次） | 0；有错误 1 |
+| `--fence-ledger [--human]` | 列台账（默认 JSON；`--human` 一行一句） | 0；序列化失败 1 |
+| `--fence-restore <路径>` | 按路径还原一条快照 | 0 / 1 失败 / 2 用法错 |
+| `--fence-revoke <SID> <路径>` | 按 SID + 路径撤一条授权（台账外的残留也照撤） | 0 / 1 / 2 |
+| `--fence-profile-rm <profile 名>` | 按名删一个容器 profile | 0 / 1 / 2 |
+| `--fence-clean` | 整体收尾：台账 + 孤儿 ACE + 容器 profile | 0 / 1 失败 |
+
+内部协议（模块作者与用户不接触）：
+
+- `--fence-run <FenceJob JSON> -- <命令>`：围栏守门进程，由 `ProcessRunner` / `SessionHost` 拉起；退出码即工具退出码。`FenceJob` 非法或守门进程里工具命令起不来时用固定码 `111`（`FENCE_FAILED`）。协议细则见 [kernel 的「工具进程与守门协议」](../kernel/README.md)。
+- `--proc-watchdog <核心 pid> <子进程 pid>`：macOS 的父死子亡守门进程，由 `procs::watch` 拉起；只在 macOS 起作用，其它平台如实报错并退出 2。机制见 [kernel 的「长驻子进程的账与回收」](../kernel/README.md)。
+
+**进程账的呈现**：
+
+- `--doctor` 的 `processes` 字段列出账上每一条（`pid` / `alive` / `purpose` / `owner` / `since`）；覆盖范围见 [kernel 的「长驻子进程的账与回收」](../kernel/README.md)。
+- Web 经 `GET /api/processes` 读同一份（`Provision::processes`）；响应形状以 [contracts.md](../presentation/contracts.md) 为准。
+
+## 四、依赖图位置（由源码的 `::api` 引用推导）
 
 - 经 `::api` 用到：（无——依赖图最底层或纯领域）
 - 谁在用我：（无）
 
-## 四、改动本单元时必须同步
+## 五、改动本单元时必须同步
 
-- 新增端口 / 适配器 → 改 `main.rs` 装配；新增探针 → 同步 `docs/testing/execution-ci.md`；路由目录的机器比对在 `src/tests/routes.rs` ↔ `docs/presentation/contracts.md`。
-- 测试缺口：本单元**不是业务能力**，没有独立的缺口账；缺口记在 `tests/gaps.yaml`；格式见 [docs/testing/gaps-acceptance.md](../../docs/testing/gaps-acceptance.md) §十二。
+- 新增端口 / 适配器 → 改 `src/main.rs` 装配；新增探针或隐藏模式 → 同步本页与 [docs/testing/execution-ci.md](../testing/execution-ci.md)。
+- 路由目录的机器比对在 `src/tests/routes.rs` ↔ [docs/presentation/contracts.md](../presentation/contracts.md)。
+- 启动对账或进程账字段一改 → 同步 [kernel 的「长驻子进程的账与回收」](../kernel/README.md) 与本页的呈现说明。
+- 测试缺口：本单元**不是业务能力**，没有独立的缺口账；缺口记在 `tests/gaps.yaml`；格式见 [docs/testing/gaps-acceptance.md](../testing/gaps-acceptance.md) §十二。
 
 ## 本目录
 

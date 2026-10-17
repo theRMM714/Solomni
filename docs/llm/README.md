@@ -6,7 +6,7 @@
 
 ## 一、管什么 / 不管什么
 
-**管**：通道与协议词汇（`Chat` / `Msg` / `Completion` / `Chunk` / `ToolCall` / `ToolDecl` / `Channel` / `ToolMode`）、建通道与回落、实测一条通道支不支持原生工具调用、模型发现、信封解析与不合法的补救、出站 HTTP 代理与端点记忆。
+**管**：通道与协议词汇（`Chat` / `Msg` / `Completion` / `Chunk` / `ToolCall` / `ToolDecl` / `Channel` / `ToolMode`）、建通道与回落、实测一条通道支不支持原生工具调用、实测回放形状、模型发现、信封解析与不合法的补救、出站 HTTP 代理与端点记忆。
 
 **不管**：**不选择用哪个模型**（「用哪个」是登记处解析链里的策略）；不落盘、不管会话。
 

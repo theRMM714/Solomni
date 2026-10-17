@@ -19,7 +19,7 @@
 | 文件 | 内容 | 缺文件时 |
 | --- | --- | --- |
 | `providers.yaml` | 供应商通道：端点 + 密钥 | 空登记处 |
-| `models.yaml` | 模型清单 + 核心 AI 默认模型 | 空登记处、无默认模型 |
+| `models.yaml` | 模型清单 + 核心默认模型 | 空登记处、无默认模型 |
 | `agents.yaml` | 用户配置的具名 agent | 空登记处 |
 | `settings.yaml` | 基本设置（开关与默认档位） | 全部取默认值 |
 
@@ -50,7 +50,7 @@ models:
     provider: <供应商 id>        # 必填，必须已存在
     note: ""                    # 能力说明（可选）
     tools: envelope             # 工具调用形态（可选；缺省 envelope）。只认这两个值，别的一律拒收
-core: <模型 id>                 # 核心 AI 默认模型（可选）
+core: <模型 id>                 # 核心默认模型（可选）
 ```
 
 - `provider` 必须指向 `providers.yaml` 里的一个 id，否则拒绝新增。
@@ -101,7 +101,7 @@ tier: host             # 默认执行档位：host（本机）| vm（虚拟机�
 fence_write: false     # 是否允许围栏在本机写权限（默认 false：不动本机任何权限项）
 fence_read: []         # 用户显式授权的只读根（默认空：一个都不放行）
 qemu_path: ""          # 虚拟机档用的 QEMU 可执行文件路径（默认空 = 判据每次取用时采用项目内补齐的可运行包；否则兜底看 PATH。显式登记优先）
-virtiofsd_path: ""     # 虚拟机档共享后端要用的外部工具路径（如 virtiofsd；默认同 qemu_path：登记优先，否则用项目内补齐的那个）
+virtiofsd_path: ""     # 虚拟机档共享后端要用的外部程序路径（如 virtiofsd；默认同 qemu_path：登记优先，否则用项目内补齐的那个）
 smbd_path: ""          # 虚拟机档 smb 共享档要用的外部 helper 路径（默认空 = 判据每次取用时采用项目内补齐的 helper；否则兜底看 PATH）
 max_guests: 2          # 虚拟机档同时最多几台 guest（0 = 不限制；每台固定 -m 2048 -smp 2）
 llm_timeout_secs: 300  # 单次模型调用的总预算（秒），全局通用（讨论/执行/验收/单 agent）
@@ -129,7 +129,7 @@ permissions:           # 【可选】会话权限的全局默认（可被会话 
   撤权与 `fence_write` 走同一份台账（`--fence-clean` 一并撤净；启动期按归属对账回收陈旧授权，见 [ARCHITECTURE.md](ARCHITECTURE.md) 六）。
 - `permissions` 是**会话权限的全局默认**，逐 agent 的覆盖写在会话的 `meta.yaml`（见
   [docs/session/session-model.md](docs/session/session-model.md) 的「形态」）。语义只有一份权威：
-  [docs/permission/README.md](docs/permission/README.md)。未配置时 = 整棵工作区可读可提交、模块目录只读，与今天一致。
+  [docs/permission/README.md](docs/permission/README.md)。未配置时 = 整棵工作区可读可提交、模块目录只读。
 
 ## 六、名字与 id
 

@@ -74,10 +74,22 @@ impl ConductorHandle {
         caller: &Caller,
         spec: &d::NewSession,
     ) -> Result<d::Created, String> {
-        let (created, facts) = self.call({
+        // **两段**：核心只做校验 / 占名 / 出计划（毫秒级）；起 guest 要等几十秒到几分钟，
+        // 在这一段（调用方线程）上跑——核心线程因此不被占住，别的请求照常响应。
+        let (prepared, boot) = self.call({
             let spec = spec.clone();
-            move |core| core.create_session(&spec)
+            move |core| core.prepare_session(&spec)
         })?;
+        if let Some(boot) = boot {
+            if let Err(e) = boot.run() {
+                let _ = self.call(move |core| {
+                    core.abort_session(prepared);
+                    Ok(())
+                });
+                return Err(e);
+            }
+        }
+        let (created, facts) = self.call(move |core| core.commit_session(prepared))?;
         self.publish(&created.session, facts);
         // 有父 = 核心代理建的子工作：**建好就开工**（single 以 task 为第一句；collab 开始讨论）。
         if spec.parent.is_some() {

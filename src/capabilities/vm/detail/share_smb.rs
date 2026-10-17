@@ -6,6 +6,7 @@
 use crate::capabilities::vm::domain::exec::SMBD_BIN;
 use crate::capabilities::vm::domain::guest::{GuestImage, GuestMount};
 use crate::capabilities::vm::ports::{ShareBackend, ShareGuard, SharePlan};
+use crate::kernel::detail::procs::{self, Entry, ProcessBook};
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
@@ -18,12 +19,21 @@ const GUEST_SMB_IP: &str = "10.0.2.100";
 const GUEST_SMB_PORT: u16 = 445;
 
 /// 目的：SMB 共享后端（QEMU 的 guestfwd + 用户态 smbd helper；Windows 宿主没有 9p / virtiofs 时的实时共享档）。
-pub struct SmbShare;
+pub struct SmbShare {
+    /// 长驻子进程的账（组合根注入；None = 不记账）。
+    book: Option<std::sync::Arc<ProcessBook>>,
+}
 
 impl SmbShare {
     /// 目的：组合根专用。
     pub fn new() -> SmbShare {
-        SmbShare
+        SmbShare { book: None }
+    }
+
+    /// 目的：接上长驻子进程的账：起一个 helper 登记一条，释放时注销。
+    pub fn with_book(mut self, book: std::sync::Arc<ProcessBook>) -> SmbShare {
+        self.book = Some(book);
+        self
     }
 }
 
@@ -74,11 +84,16 @@ fn smb_plan(mounts: &[GuestMount], port: u16) -> SharePlan {
 /// 目的：helper 的存活凭据——guest 租约期间持进程，释放即杀（幂等）。
 struct SmbGuard {
     child: Option<Child>,
+    /// 长驻子进程的账（有就在收尾时注销）。
+    book: Option<std::sync::Arc<ProcessBook>>,
 }
 
 impl SmbGuard {
     fn cleanup(&mut self) {
         if let Some(mut c) = self.child.take() {
+            if let Some(book) = &self.book {
+                book.forget(c.id());
+            }
             let _ = c.kill();
             let _ = c.wait();
         }
@@ -131,12 +146,28 @@ impl ShareBackend for SmbShare {
             cmd.arg("--share")
                 .arg(format!("s{i}={}{}", m.host.display(), ro));
         }
-        let mut child = cmd
-            .stdin(Stdio::null())
+        // 父死子亡（Unix）：核心被强杀时 helper 不该继续占着共享目录。
+        procs::guard(&mut cmd);
+        cmd.stdin(Stdio::null())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .spawn()
+            .stderr(Stdio::null());
+        let mut child = procs::spawn(cmd)
             .map_err(|e| format!("起不了 SMB helper（{}）：{}", exe.display(), e))?;
+        let _ = procs::bind(&child);
+        procs::watch(&child);
+        if let Some(book) = &self.book {
+            let first_mount = mounts
+                .first()
+                .map(|m| m.host.display().to_string())
+                .unwrap_or_default();
+            book.record(Entry {
+                pid: child.id(),
+                since: procs::now_ts(),
+                purpose: "share:smb".to_string(),
+                owner: first_mount.clone(),
+                marker: format!("--share s0={}", first_mount),
+            });
+        }
         let stdout = child
             .stdout
             .take()
@@ -152,6 +183,9 @@ impl ShareBackend for SmbShare {
             }
         });
         let first = rx.recv_timeout(Duration::from_secs(10)).map_err(|_| {
+            if let Some(book) = &self.book {
+                book.forget(child.id());
+            }
             let _ = child.kill();
             "等 SMB helper 的 LISTENING 超时".to_string()
         })?;
@@ -168,14 +202,16 @@ impl ShareBackend for SmbShare {
 
         Ok((
             smb_plan(mounts, port),
-            Box::new(SmbGuard { child: Some(child) }),
+            Box::new(SmbGuard {
+                child: Some(child),
+                book: self.book.clone(),
+            }),
         ))
     }
 }
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::capabilities::vm::domain::guest::GuestRoot;
 
     fn mount(guest: &str, host: &str, read_only: bool) -> GuestMount {
         GuestMount {
@@ -217,12 +253,7 @@ mod tests {
     #[test]
     fn supports_only_qemu_with_cifs_client() {
         let s = SmbShare::new();
-        let mut guest = GuestImage::linux(
-            "t",
-            GuestRoot::Disk(std::path::PathBuf::from("/x")),
-            None,
-            None,
-        );
+        let mut guest = GuestImage::linux("t", std::path::PathBuf::from("/x"), None, None);
         guest.clients.cifs = true;
         assert!(s.supports("qemu", &guest));
         assert!(!s.supports("vz", &guest), "smb 只落在 qemu 上");

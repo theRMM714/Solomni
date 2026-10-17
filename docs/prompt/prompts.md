@@ -5,7 +5,7 @@
 > "哪个角色用哪份提示词、拿哪些工具"见 [tools-and-roles.md](../tools/tools-and-roles.md) 的「提示词按角色分配」；
 > 模块自己的职责提示词（`module.yaml` 的 `system`）见 [MODULE_SPEC.md](../../MODULE_SPEC.md)。
 
-**当前状态：已落地。** 册子按**共享 / 角色**两个目录切分；加载经 `PromptSource` 端口（`capabilities/prompt/ports.rs`，实现在 `capabilities/prompt/detail/yaml_prompts.rs`），
+册子按**共享 / 角色**两个目录切分；加载经 `PromptSource` 端口（`capabilities/prompt/ports.rs`，实现在 `capabilities/prompt/detail/yaml_prompts.rs`），
 `{{key}}` 渲染与"缺键即报错"在 `capabilities/prompt/domain/prompt.rs`（纯逻辑，不读文件）。
 键的完整清单就是下面这张表——**本表由 `node run-tests.js` 的 T0 结构审查与盘上的册子双向比对**：加了键没改表、表里的键已不存在，都是硬失败。
 
@@ -21,7 +21,7 @@
 | `shared/texts.yaml` | `no_agents` / `no_model` / `no_module_dirs` / `no_module_tools` / `no_module_tool_params` | 空态说法 |
 | | `module_tool_params_header` | 模块工具参数段的小标题（模块在 `module.yaml` 里声明了 `params` 时出现） |
 | | `refs.foreign_sandbox` / `refs.collab_sandbox` | `@` 引用越权与协作场景的如实说明（定义在 `shared/texts.yaml`） |
-| | `tool_texts.*` | **运行时回执**：路径校验、参数不符（说事实 + 回发工具签名）、内置工具回执与行区间/截断/编码标注、edit 的找不到（含"只差空白"提示）与多处命中、patch 的解析失败与"第几块为什么、整体没写"、write 的"没读过/读后又被改/只读到一部分"三种拒绝、外部工具分派的三类失败、**信封不合法四类**与"已修复后执行"/"输出被长度截断"的如实标注、**围栏必要落点授不上的拒绝与"按裁决无围栏执行"的如实标注**、给模型看的清单骨架、追加在回复行末尾的 `（已停止）` / `（本段被输出长度截断）` |
+| | `tool_texts.*` | **运行时回执**：路径校验、参数不符（说事实 + 回发工具签名）、内置工具回执与行区间/截断/编码标注、edit 的找不到（含"只差空白"提示）与多处命中、patch 的解析失败与"第几块为什么、整体没写"、write 的"没读过/读后又被改/只读到一部分"三种拒绝、模块工具分派的三类失败、**信封不合法四类**与"已修复后执行"/"输出被长度截断"的如实标注、**围栏必要落点授不上的拒绝与"按裁决无围栏执行"的如实标注**、给模型看的清单骨架、追加在回复行末尾的 `（已停止）` / `（本段被输出长度截断）` |
 | `shared/agent.yaml` | `agent.system` | agent 职责提示词骨架（模块 `system` 合成 + 该会话**类型 × 角色**的机制说明 + 工作环境 + 调用约定；**工具清单不在这里**，随回合注入） |
 | `roles/discussant.yaml` | `discuss.opener` / `discuss.step` / `discuss.autonomy_note` | 讨论首轮、轮转、小组自裁说明 |
 | `roles/planner.yaml` | `synthesize.*` | 整理方案 |

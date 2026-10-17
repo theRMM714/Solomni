@@ -12,10 +12,16 @@
 
 ## 二、入站契约与状态归属
 
-`api::Workspace`（prepare / work_has / files / roots / **work_pull / work_commit / work_commit_user / work_status / work_restore / work_head / work_rewind_to / work_restore_point / work_discard_after** …）。提交记录带 `CommitAnchor(agent, line)`，回档据此按行精确定位。出站端口 `Workdirs` / **`WorkStore`**（版本库落盘：文件原语 + 内容寻址对象 + 提交记录 + 拉取基线 + 删提交/清 head）**只由 `service.rs` 持有**（R12）。
+`api::Workspace`：
+
+- 目录与视图：`prepare` / **`discard`**（撤销一次准备：只删空目录，建会话失败时用）/ `work_has` / `files` / `usage` / `roots`。
+- 共享区版本化：`work_pull` / `work_commit` / `work_commit_user` / `work_status` / `work_restore` / `work_head` / `work_rewind_to` / `work_restore_point` / `work_discard_after`。
+- 提交记录带 `CommitAnchor(agent, line)`，回档据此按行精确定位。
+- 出站端口 `Workdirs` / **`WorkStore`**（版本库落盘：文件原语 + 内容寻址对象 + 提交记录 + 拉取基线 + 删提交 / 清 head）**只由 `service.rs` 持有**（R12）。
+
 模块事实（含 `has_userdata`）由 `modules` 提供：沙箱把它收成 `modules_with_userdata` 一起注入，围栏派生据此决定派不派这条落点——domain 层不读盘。
 
-沙箱还带**会话 id**（`Sandbox.session`）：围栏把它当**会话租约**（`FenceSpec.lease`）带进授权台账，同名 agent 的多个并发会话释放时互不误撤（机制侧见 [docs/tools/README.md](../tools/README.md) 五）。
+沙箱还带**会话 id**（`Sandbox.session`）：围栏把它当**会话租约**（`FenceSpec.lease`）带进授权台账，同名 agent 的多个并发会话释放时互不误撤（机制侧见 [docs/kernel/README.md](../kernel/README.md) 的「释放按会话租约」）。
 
 虚拟机档的沙箱还带**路径翻译器**（`Sandbox.path_codec`，本机档为 None = 恒等）：系统工具寻址、模块工具在 guest 里
 执行、以及用户 `@` 引用的改写共用同一座桥，三处给的是同一种写法（见 [docs/tools/tools-and-roles.md](../tools/tools-and-roles.md) 的「路径模型」）。
@@ -25,7 +31,7 @@
 ## 三、依赖图位置（由源码的 `::api` 引用推导）
 
 - 经 `::api` 用到：`kernel`、`permission`、`prompt`
-- 谁在用我：`collab`、`conductor`、`session`、`tools`
+- 谁在用我：`collab`、`conductor`、`provision`（`guest-runtime` 的沙箱清单）、`session`、`tools`
 
 ## 四、改动本单元时必须同步
 

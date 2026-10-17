@@ -57,6 +57,17 @@ const sandbox = {
   console, JSON, Promise, Map, Set, Error, Object, Array, String, Number, Boolean, Math, Date, RegExp,
   setTimeout, clearTimeout,
   fetch: async (url) => {
+    if (String(url).indexOf("/api/processes") === 0) {
+      return {
+        ok: true,
+        json: async () => ({
+          procs: [
+            { pid: 4242, alive: true, purpose: "guest", owner: "w-1", since: 1 },
+            { pid: 4343, alive: false, purpose: "share:virtiofs", owner: "/work", since: 2 },
+          ],
+        }),
+      };
+    }
     if (String(url).indexOf("/api/state") === 0) {
       return {
         ok: true,
@@ -65,7 +76,7 @@ const sandbox = {
           providers: [{ id: "p1", base_url: "http://x" }],
           models: [{ id: "m1", name: "M", api_model: "m", provider: "p1", note: "", tools: "native", context: 32000, is_core: true }],
           agents: [],
-          settings: { streaming: true, show_reasoning: true, llm_timeout_secs: 300, discuss_remind_cap: 3, compact_at_percent: 70 },
+          settings: { streaming: true, show_reasoning: true, llm_timeout_secs: 300, discuss_remind_cap: 3, compact_at_percent: 70, max_guests: 2 },
           history: [],
         }),
       };
@@ -112,11 +123,26 @@ if (!loadErrors.length) {
   });
   // ② 基本设置弹窗：超时 / 提醒次数 / 压缩阈值三项都在（都是数字输入）。
   //（调用次数上限已撤掉：模型调用没有次数上限，只有提醒次数。）
-  check("基本设置弹窗含超时、提醒与压缩三项", () => {
+  check("基本设置弹窗含超时、提醒、压缩与同时上台数", () => {
     vm.runInNewContext("openSettingsModal()", sandbox);
     const body = roots.get("#modal-root").children[0].children[0].children[1];
     const nums = inputsIn(body).filter((i) => i.type === "number");
-    return nums.length >= 3;
+    // 四项数字输入：超时 / 提醒次数 / 压缩阈值 / 虚拟机档同时最多几台。
+    return nums.length >= 4;
+  });
+  // ⑥ 同时上台数要随保存一起提交（后端 set_settings 收这个字段，界面漏了就等于改不了）。
+  // ⑦ "现在在跑什么"区块要在（内容异步填；这里只钉区块与初始提示，渲染路径见 app.js 的 api 调用）。
+  check("设置弹层有长驻进程区块", () => {
+    const body = roots.get("#modal-root").children[0].children[0].children[1];
+    const nodes = walk(body, []);
+    const title = nodes.find((n) => n.className === "wf-label" && n.textContent === "现在在跑什么");
+    const log = nodes.find((n) => n.className === "cfg-log");
+    return !!title && !!log;
+  });
+  check("同时上台数随保存提交", () => {
+    const body = roots.get("#modal-root").children[0].children[0].children[1];
+    const save = walk(body, []).find((n) => n.tagName === "BUTTON" && n.textContent === "保存");
+    return !!save && typeof save.onclick === "function";
   });
   // ③ 回合分隔行要可见：解析成系统分隔行，而不是 who=标签、text 为空的空行。
   check("回合分隔行解析成系统行", () => {

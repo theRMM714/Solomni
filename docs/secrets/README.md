@@ -24,7 +24,11 @@
 
 - 值存储的字段或文件形态 → [REGISTRY_SPEC.md](../../REGISTRY_SPEC.md) 的密钥边界；端口替身 → [docs/testing/doubles.md](../testing/doubles.md) 的端口矩阵。
 - 模块的 `secrets:` 声明契约见 [MODULE_SPEC.md](../../MODULE_SPEC.md)。
-- 消费点：`declared` 由 CLI 的 `secret` 命令；`resolve` 由**起进程的两条路径**消费（常驻服务与一次性模块工具，只经环境变量注入、不进命令行）；`redact` 由常驻服务回执出口；`set`/`clear` 由动作面 `set_secret` / `clear_secret`（只给 user，值不回显）。
+- 消费点：
+  - `declared`：CLI 的 `secret` 命令（只列标识与配置了没有）。
+  - `resolve`：起进程的三条路径——agent 的模块工具进程（`conductor` 装配工具面时按模块解析一次）、常驻服务（`residents` 起服务时）、人直接跑的模块工具（`conductor` 的动作执行体）；只经环境变量注入，不进命令行。
+  - `redact`：常驻服务的回执出口。
+  - `set` / `clear`：动作面 `set_secret` / `clear_secret`（只给 user，值不回显）。
 
 ## 本目录
 

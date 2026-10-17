@@ -239,7 +239,7 @@ pub fn sweep_profiles() -> Result<usize, String> {
 }
 
 /// 目的：一次围栏授权的结论：**必要**落点是否全部授上 + 其余授不上落点的事实。
-/// 约束：必要落点授不上时调用方**不许降级**（问用户或按 fail-closed 拒绝，见 docs/tools/README.md）；
+/// 约束：必要落点授不上时调用方**不许降级**（问用户或按 fail-closed 拒绝，见 docs/kernel/README.md 的「围栏落点：必要与可选」）；
 ///   可选落点授不上只进 `notes`，不牵动这次执行。
 #[derive(Debug, Clone, Default)]
 // 这套机制只在 Windows 的容器围栏里用（unix 没有 prepare_fence 这一步）：unix 侧无使用点，如实放行死代码。

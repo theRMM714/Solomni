@@ -9,8 +9,8 @@
 
 | 文件 | 职责 |
 | --- | --- |
-| `src/entry/mod.rs` |
-| `src/entry/root.rs` |
-| `src/main.rs` |
-| `src/diagnostics/mod.rs` |
-| `src/guard/mod.rs` |
+| `src/entry/mod.rs` | 入口层共用机制的入口（当前只有产品根规范化） |
+| `src/entry/root.rs` | 产品根规范化：纯词法拼接与归一化，取不到当前目录才退回 canonicalize |
+| `src/main.rs` | 组合根 + argv 分发：隐藏模式 / 探针 → 装配各能力 → 启动对账 → 交给 CLI 或 Web |
+| `src/diagnostics/mod.rs` | 机器可读探针：doctor / provision / https-check / unpack / print-routes / print-fence-env / fence-verify / build |
+| `src/guard/mod.rs` | 守门模式分发：围栏守门（--fence-run）、进程守门（--proc-watchdog）、围栏台账按条处置 |

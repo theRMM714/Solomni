@@ -17,7 +17,7 @@
 ## 三、依赖图位置（由源码的 `::api` 引用推导）
 
 - 经 `::api` 用到：`kernel`、`llm`、`modules`、`permission`、`prompt`、`session`
-- 谁在用我：`cli`、`collab`、`conductor`、`slate`、`web`
+- 谁在用我：`cli`、`collab`、`conductor`、`slate`；`web` 经 `Ops.registry`（`RegistryOps`）调用
 
 ## 四、改动本单元时必须同步
 

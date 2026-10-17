@@ -58,10 +58,10 @@ deps:
     kind: guest-rootfs
     guest: debian
     install: .vm/guest/debian
-    probe: .vm/guest/debian/vmlinuz
+    probe: .vm/guest/debian/rootfs.ext4
     source: guest.debian.image
     size_mb: 400
-    note: Debian 13 虚拟根（cloud 镜像 → rootfs 目录 + 通用内核 + 9p initrd + qemu-guest-agent）；需要 sfdisk / dd / debugfs / ar / unshare
+    note: Debian 13 虚拟根（cloud 镜像 → rootfs → 装 qemu-guest-agent 与通用内核 → 打包成 rootfs.ext4 磁盘镜像并按源镜像回填特权位 / 属主，目录中间产物清掉）；需要 sfdisk / dd / debugfs / ar / tar / unshare / mke2fs
   - id: vm.guest-runtime.linux
     os: linux
     arch: x86_64
@@ -71,7 +71,7 @@ deps:
     probe: .vm/guest/debian/.runtimes-ready
     source: guest.debian.image
     size_mb: 0
-    note: Linux guest 的运行期编排（维护启动先配网，确认 python3、尽力用官方二进制 tarball 装 node——9p 目录根上 dpkg 太慢且 chown 办不到，逐个自证后才写进 guest.yaml 的 runtimes；目录根本身就是共享的可写根，不需要首启装 agent）
+    note: Linux guest 的运行期编排（agent 已由 guest-rootfs 装进镜像，跳过首启；维护启动刷新 apt 并装 python3 与 NodeSource 的 node，逐个自证后才写进 guest.yaml 的 runtimes）
   - id: vm.guest.windows
     os: windows
     arch: x86_64

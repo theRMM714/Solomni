@@ -17,16 +17,23 @@ command: node tools/report.js
 
 | 参数 | 必填 | 说明 |
 | --- | --- | --- |
-| `corpus` | 是 | `corpus.jsonl` 的路径（相对模块根） |
-| `out` | 是 | HTML 产物路径（相对模块根） |
+| `corpus` | 是 | `corpus.jsonl` 的路径（按【工作环境】的写法给；相对写法按模块根解析） |
+| `out` | 是 | HTML 产物路径（按【工作环境】的写法给；相对写法按模块根解析） |
 | `index` | 否 | 同时写一份轻量 JSON 清单 |
 | `title` | 否 | 报告标题，默认 `资料报告` |
 
 ### 用法
 
+参数对象（`args.json`）从 stdin 喂进去：
+
+```bash
+node modules/render/tools/report.js < target/test-scratch/args.json
+```
+
+PowerShell 不支持 `<` 重定向，用管道：
+
 ```powershell
-# args.json 里写参数对象，再用管道喂给 stdin（PowerShell）
-Get-Content args.json | node modules/render/tools/report.js
+Get-Content target/test-scratch/args.json | node modules/render/tools/report.js
 ```
 
 `args.json` 示例：
@@ -40,7 +47,7 @@ Get-Content args.json | node modules/render/tools/report.js
 }
 ```
 
-## 为什么模块根有 `package.json`
+## 模块根的 `package.json`
 
 Node 会从入口脚本所在目录逐级向上找最近的 `package.json` 来判定 `.js` 是 CommonJS 还是 ESM、并解析 `require`。
 围栏只让工具可达本模块目录，够不到的祖先会让 Node 在脚本执行前直接判死。
@@ -102,8 +109,10 @@ stdout 是给模型看的紧凑摘要（不超过 20 行）：文档数、总字
 
 `target/test-scratch/` 下放一份 4~6 行的小 `corpus.jsonl`（含中文、一条故意指向不存在目标的相对链接、一段需要转义的 HTML 片段），然后：
 
-```powershell
-Get-Content target/test-scratch/args.json | node modules/render/tools/report.js
+```bash
+node modules/render/tools/report.js < target/test-scratch/args.json
 ```
+
+（PowerShell 用 `Get-Content target/test-scratch/args.json | node modules/render/tools/report.js`。）
 
 验证点：报告生成；坏链被揪出；HTML 里 http/https 只出现在链接文字里；`& < > " '` 被正确转义。

@@ -16,11 +16,11 @@ presentation/{cli,web} ──▶ capabilities（含协调业务 conductor）─�
 
 | 层 | 干什么 | 禁令 |
 | --- | --- | --- |
-| `kernel/` | **机制型业务**：无领域语义、无领域状态的机制（运行日志端口、宿主探测、取消表、跨业务共享的事实类型、路径书写）；形状与别的能力一致（`api` / `ports` / `domain` / `detail`） | **不依赖任何人**；不放有领域语义的类型 |
+| `kernel/` | **机制型业务**：无领域语义、无领域状态的机制（运行日志端口、宿主探测、取消表、跨业务共享的事实类型、路径书写、外部进程执行与长驻子进程账、围栏机制）；形状与别的能力一致（`api` / `ports` / `domain` / `detail`） | **不依赖任何人**；不放有领域语义的类型 |
 | `capabilities/` | **业务能力**：按业务功能垂直切分。每个能力有 `api`（入站契约：trait + DTO）/ `service`（本能力的状态与用例）/ `ports`（出站端口，只由定义它的能力持有）/ `domain`（纯逻辑）/ `detail`（只有组合根能构造） | **业务之间只经对方的 `api`**；不反向依赖 `entry` / `presentation`（T0 机器判定，见 §九.7） |
 | `capabilities/conductor/` | **协调业务**：会话中心（在世表、命令队列、运行态）、生成驱动、跨能力用例与跨会话回档编排；与别的能力**平级** | 不读文件、不发网络、不碰 stdin/stdout——机制下沉各能力的 `detail/` |
 | `presentation/{cli,web}/` | **前端（交付机制）**：各渠道一个子目录，完全分开——传输（argv/stdout vs HTTP）、路由、纯渲染。**不是业务能力** | 只依赖各能力的 `::api`；**拿不到端口对象，也拿不到 `Core`**；两者互不依赖 |
-| `entry/` + `main.rs` + `diagnostics/` + `guard/` | **入口层**：组合根（`main.rs`：`new` 出所有适配器并注入）+ 机器可读探针（`--doctor` / `--https-check` / `--print-routes` / `--print-fence-env` / `--fence-verify`）+ 围栏守门进程与台账处置（`--fence-run`；以及 `--fence-clean` / `--fence-reconcile` / `--fence-ledger` / `--fence-restore` / `--fence-revoke` / `--fence-profile-rm`） | 它依赖所有人，**任何人都不许依赖它**；除装配与探针外无业务 |
+| `entry/` + `main.rs` + `diagnostics/` + `guard/` | **入口层**：组合根（`main.rs`：`new` 出所有适配器并注入）+ 机器可读探针（`--doctor` / `--https-check` / `--print-routes` / `--print-fence-env` / `--fence-verify`）+ 围栏守门进程与台账处置（`--fence-run`；以及 `--fence-clean` / `--fence-reconcile` / `--fence-ledger` / `--fence-restore` / `--fence-revoke` / `--fence-profile-rm`）+ 长驻子进程守门进程（`--proc-watchdog`，macOS 的父死子亡） | 它依赖所有人，**任何人都不许依赖它**；除装配与探针外无业务 |
 
 推论：
 
@@ -37,7 +37,7 @@ presentation/{cli,web} ──▶ capabilities（含协调业务 conductor）─�
 | 端口 | 职责 | 适配层实现 |
 | --- | --- | --- |
 | `Chat` | 一次模型会话：收消息列表（可带工具声明）回 `Completion`（正文 + 结束原因 + 原生工具调用）；`on` 逐片回调，返回 `false` 即要求中止 | `HttpChat`（测试 `FakeChat`） |
-| `ChatGateway` | 建通道（含核心通道与回落告知）；**不选择**模型；实测一条通道支不支持原生工具调用 | `HttpGateway`（无可用模型时回落 `DemoGateway`） |
+| `ChatGateway` | 建通道（含核心通道与回落告知）；**不选择**模型；探测一条通道支不支持原生工具调用 | `HttpGateway`（无可用模型时回落 `DemoGateway`） |
 | `ModelCatalog` | 按端点与密钥列出一条通道当前可用的模型名 | `HttpModelCatalog` |
 | `SettingsStore` | 登记处持久化（providers / models / settings / agents 四个 yaml） | `YamlSettingsStore` |
 | `ModuleSource` | 模块清单来源（扫描 `modules/`） | `modules/detail::FsModules` |
@@ -88,7 +88,7 @@ presentation/{cli,web} ──▶ capabilities（含协调业务 conductor）─�
 - **缺文件 / 缺键 / 缺变量 = 报错暴露**，禁止静默兜底文案。**册子只由提示词能力持有一次**，以 `Arc` 共享。
 - **别的能力不点字段路径**：按名字取段（`Prompt::text` / `render` + `Segment`），或拿走两块共享记录（`tools()` / `refs()`）；
   "哪个回合发哪几段"的组装留在各业务（身份块归 `session`、工具说明归 `tools`、清单文本归 `registry` / `workspace`）。
-- 路径占位符（`{{work_root}}` 等）由协调业务在运行时替换成**真实根目录**后才交给 AI——仓库里永远不出现机器路径。
+- 路径占位符（`{{work_root}}` 等）由协调业务在运行时替换成**真实根目录**后才交给 agent——仓库里永远不出现机器路径。
 - **不进册子的两类**：①行身份是结构化字段（`LineView` 的 `speaker` / `verb` / `kind`，认字段不认文案）；
   ②只给用户看的呈现层文案（各类 `Notice`、工具轨迹行的成败字样、面向界面 / CLI 的 `Err`）。
   运行时回执进册子——它们会成为模型下一轮的输入。键清单见 [docs/prompt/prompts.md](docs/prompt/prompts.md)。
@@ -118,31 +118,23 @@ presentation/{cli,web} ──▶ capabilities（含协调业务 conductor）─�
 - 会话的旁路配置记录（`{"type":"config"}`）只在编辑提交时追加：供呈现与审计，**不进模型上下文**，回放与状态派生跳过它。
 - 出站模型调用的参数由核心决定、随端口传下去（`LlmOpts{stream, timeout_secs}`），取值来自**全局设置**；`Output` 只管回包形状。
   调用失败**不是**模型的回复：`Completion.error` 与正文分离，上层据此发 `Notice` 并**中断本轮**（不落转录行），会话保持可继续。
-- **围栏**（策略在 `capabilities/tools/domain/fence.rs`，机制在 `detail/confine/`）：可达范围 = 自己的私有沙箱（永远全权）+ 自己的模块目录（**默认只读**；`module_write` 授权才整块可写，`<module>/userdata/` 恒可写）+ 用户显式授权的只读根（`.home/settings.yaml` 的 `fence_read`，默认空）；
-  共享主副本**只有在"这一席可写"时**才进 rw（核心会话），agent 会话默认只读——工具层与围栏层两处都挡住直接写；
+- **围栏**（策略在 `capabilities/tools/domain/fence.rs`，机制在 `detail/confine/`）：
+  可达范围 = 自己的私有沙箱（永远全权）+ 自己的模块目录（**默认只读**；`module_write` 授权才整块可写，`<module>/userdata/` 恒可写）+ 用户显式授权的只读根（`.home/settings.yaml` 的 `fence_read`，默认空）；
+  共享主副本**只有在"这一席可写"时**才进 rw（核心会话），agent 会话默认只读——工具层与围栏层两处都挡住直接写。
   **会话权限**（`capabilities/permission/`，纯领域）统一裁定：整棵工作区默认可读可提交，**白名单一出现就取代默认、黑名单只做减法**；
-  内置读/写、`work_pull` / `work_commit`（提交白名单）与围栏派生都读同一份生效态（`Sandbox.permissions` / `FenceSpec`）；
-  **工具级确认**（`granularity: ask`）：工具循环执行前查同一份生效态，命中 `ask` 表就把这次调用**当一关进裁决队**
-  （与核心各关卡共用同一条队，见 [docs/session/session-model.md](docs/session/session-model.md) 的「请用户裁决」）并阻塞；
-  用户经**同一条回答命令** `answer_card`（`POST /api/actions/{id}`，带卡片 id + 选项 id）回答 **allow / deny / full**
-  （与「停止」同一条直路，生成期间立刻生效）——`full` 只对**本轮**生效（到 AI 停下输出为止，不落盘）；停止把整队解成拒绝。
-  **没人答时**按发起方在那一问上声明的**选项 id** 收场（`Ask.on_unanswered`；不写 = 这一趟不执行），停止不套用它；
-  发起方只看"照哪个选项办"（`AskOutcome::decided`），"为什么没有答案"由端口如实分开记进会话。
-  Web 与 CLI 都按后端给的**卡片四格**渲染与作答（刷新后由 `/api/state` 的 `pending` 快照重建那张卡）；
+  内置读/写、`work_pull` / `work_commit`（提交白名单）与围栏派生都读同一份生效态（`Sandbox.permissions` / `FenceSpec`）。
+  **工具级确认**（`granularity: ask`）命中 `ask` 表就把这次调用**当一关进裁决队**并阻塞；回答 `allow` / `deny` / `full`
+  （`full` 只对**本轮**生效，到 agent 停下输出为止，不落盘；停止把整队解成拒绝；没人答时按 `Ask.on_unanswered` 收场）。
   工具进程走**守门进程**（本程序 `--fence-run`），环境不继承父进程（**密钥与凭据不进工具进程**），`HOME` / `TEMP` 等落进该 agent 的沙箱。
-  **一个 agent 一个容器 profile**，守门进程是唯一建它的地方并记进 `.home/fence-grants.json` 台账；每次写 ACL **先把记录落盘**
-  （产品根内路径存原始安全描述符、根外只存 ACE 摘要），写后核对（我们的 ACE 在不在、原有权限项有没有丢），失败就回滚并如实报错；
-  台账每条授权 / profile 带**归属**（pid + 进程创建时刻 + **会话租约**，防 PID 复用、区分同名 agent 的并发会话），写事务用**进程内互斥 + 跨进程文件锁**串行；
-  **启动期**（会话尚未开工）按归属**对账一次**：只回收归属明确已死的条目、无法判定的如实报告并跳过，失败保留供重试——
-  不询问用户、不阻塞启动，也不做孤儿清扫（那留手动）；手动重试用 `--fence-reconcile`。
-  `--fence-clean` 按台账**整体还原**根内路径、精确撤销根外条目，再在产品根内扫掉台账外的孤儿授权（含任何显式包 SID ACE）与遗留 profile。
-  **按条处置**是它的细分入口：`--fence-ledger` 列出台账现值（快照路径 + 时间、根外授权 SID/路径/权限位、profile，以及“当前实际 ACE 与台账对不对得上”的差异），`--fence-restore` 只还原一条、`--fence-revoke` 只撤一条（**台账外的根外残留也能按 SID + 路径撤**）、`--fence-profile-rm` 只删一个；两者共用同一份台账与同一套 ACE 读法。
+  **一个 agent 一个容器 profile**，守门进程是唯一建它的地方并记进 `.home/fence-grants.json` 台账；每次写 ACL **先把记录落盘**（根内路径存原始安全描述符、根外只存 ACE 摘要），写后核对 ACE 与原有权限项、失败回滚并如实报错；
+  台账每条授权 / profile 带**归属**（pid + 进程创建时刻 + **会话租约**），写事务用**进程内互斥 + 跨进程文件锁**串行。
+  **启动期**（会话尚未开工）按归属**对账一次**：只回收归属明确已死的条目、无法判定的如实报告并跳过，失败保留供重试——不询问用户、不阻塞启动，也不做孤儿清扫（那留手动）；手动重试用 `--fence-reconcile`。
+  `--fence-clean` 按台账**整体还原**根内路径、精确撤销根外条目，再扫掉台账外的孤儿授权（含任何显式包 SID ACE）与遗留 profile；按条处置是 `--fence-ledger` / `--fence-restore` / `--fence-revoke` / `--fence-profile-rm`。
   机制验证分三态：`Enforced` / `EnvUnavailable`（本机不允许，如实降级照跑）/ `Broken`（我们写错了，未授权时段**拒绝执行**）。
   **必要落点授不上不许降级**（解释器目录 / 模块目录 / 工作目录 / 私有沙箱 / 其余数据边界 / 容器身份 / 台账）：
-  经统一裁决通道问用户（`fence_unfenced_once` 本轮无围栏跑一次 / `fence_abort` 放弃这次调用），
-  拒绝、没人答、按停止（整队作废 = 拒绝）与**没有可回答的前端**一律不执行；**可选落点**（用户授权的只读根、
-  父目录的只读属性、不存在的落点）授不上只记事实；判据与行为见 [docs/tools/README.md](docs/tools/README.md) 五。
-  **装不上就如实报告能力等级；未授权不等于无围栏**（进程树、资源上限与环境白名单两种时段都生效）。平台细节见 [docs/tools/README.md](docs/tools/README.md) 与 `confine/` 的源码。
+  经统一裁决通道问用户（`fence_unfenced_once` 本轮无围栏跑一次 / `fence_abort` 放弃这次调用）；
+  拒绝、没人答、按停止（整队作废 = 拒绝）与**没有可回答的前端**一律不执行。**可选落点**（用户授权的只读根、父目录的只读属性、不存在的落点）授不上只记事实。
+  **装不上就如实报告能力等级；未授权不等于无围栏**（进程树、资源上限与环境白名单两种时段都生效）。落点判据、平台差异与真机验收见 [docs/kernel/README.md](docs/kernel/README.md) 的「围栏落点：必要与可选」。
 - `capabilities/vm/` 的 `packages` 是运行包契约与包库事实，`exec` 是执行档位、执行计划派生与就绪检测；两者都是纯逻辑。契约见 [RUNTIME_SPEC.md](RUNTIME_SPEC.md)。
   登记处四份 yaml 的字段与读写规则见 [REGISTRY_SPEC.md](REGISTRY_SPEC.md)。
 
@@ -175,7 +167,7 @@ presentation/{cli,web} ──▶ capabilities（含协调业务 conductor）─�
 ### 九.1 判据（两条同时成立，才配独立成一个业务）
 
 1. **有自己的用例**：一组有领域词、有**自有协议**、有**用户可见后果**的行为。**它说的概念属于某个参与方 → 就归那个参与方**；不属于任何参与方的概念（名单、任务链）才自成业务。
-2. **能指名 ≥2 个调用方**：不抽出来，这两个（或更多）能力就会各写一遍。**已实测的重复是最强证据**；**只有一个调用方的编排不抽**，留在它自己的 `service.rs`。
+2. **能指名 ≥2 个调用方**：不抽出来，这两个（或更多）能力就会各写一遍。**已被证实的重复是最强证据**；**只有一个调用方的编排不抽**，留在它自己的 `service.rs`。
 
 **状态不参与这条判据**——它只在 §九.2 回答「这块状态归谁」。
 
@@ -251,7 +243,7 @@ presentation/{cli,web} ──▶ capabilities（含协调业务 conductor）─�
 开发历史归 git，待办与路线归 `tests/gaps.yaml`，行为约束归用例——注释里复述它们只会多一份会漂的副本。
 
 **槽名一律中文 + 全角冒号**：它们是仓库自己的词（`管` / `不管` 就是 `docs/<单元>/README.md` 的节词），
-译成英文等于给同一个概念造第二份词汇；全角冒号在代码注释里已是唯一形态（实测 1480:0），不必兼容半角。
+译成英文等于给同一个概念造第二份词汇；全角冒号在代码注释里是唯一形态，不必兼容半角。
 
 ### 十.1 文件头（`//!`）
 

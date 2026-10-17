@@ -17,7 +17,7 @@ tests/
  cross-platform/
  main.rs # T3 目标入口
  integration/ # T3（含 fence_launcher.rs）
- e2e/ # T5：假供应商、驱动、编排与隔离根
+ e2e/ # T5：假供应商（mock.js）、驱动（driver.js）、编排（orchestrator.js）与隔离根
  gaps.yaml # T3 缺口账
  windows/
  main.rs # 平台目标入口
@@ -45,9 +45,11 @@ dependency-baseline.json # 依赖方向门禁的基线
 ```
 
 单元层与 `capabilities/` **同构**：T1 用例按业务分文件——`taskchain.rs` / `prompt.rs` / `registry.rs` /
-`llm.rs` / `workspace.rs` / `session.rs` / `slate.rs` / `modules.rs` / `vm.rs`，加**协调业务**自己的 `conductor.rs`；用例多的能力按域分目录（`tools/` 与 `collab/` 各五个子模块）
-（会话中心与跨能力编排）；契约测试 `ports.rs` / `fakes.rs` / `detail.rs` / `api.rs` / `cli.rs` / `routes.rs`；
-共享支撑 `doubles.rs`（端口替身）/ `builders.rs`（测试装配脚手架）/ `prelude.rs`（公共前置重导出）。
+`llm.rs` / `workspace.rs` / `session.rs` / `slate.rs` / `modules.rs` / `vm.rs` / `permission.rs` /
+`residents.rs` / `secrets.rs`，加**协调业务**自己的 `conductor.rs` 与 `conductor/`（`ask_user` / `proxy`）；
+用例多的能力按域分目录（`tools/` 与 `collab/` 各五个子模块）；契约测试 `ports.rs` / `fakes.rs` / `detail.rs` /
+`mcp.rs` / `api.rs` / `cli.rs` / `routes.rs`；横向用例 `diagnostics.rs`（隐藏模式契约）/ `fence_reach.rs`（模块可达范围）；
+共享支撑 `doubles.rs`（端口替身）/ `builders.rs`（测试装配脚手架）/ `prelude.rs`（公共前置重导出）/ `mod.rs`。
 **判据**：用例落到"它钉住的那个不变式"所属的文件；顺手经过别的能力只是路径，不是归属。
 
 四个平台目标在 `Cargo.toml` 中显式登记。新增测试目标、Fixture 或脚本必须能从入口追溯到执行位置，否则属于结构质量问题。
@@ -65,8 +67,8 @@ dependency-baseline.json # 依赖方向门禁的基线
 
 ### 全局缺口
 
-`tests/gaps.yaml` 记录 T0、T2、T5 和测试基础设施的跨平台缺口、**长期目标**（存量收敛），
-以及**已确认但尚未实施的产品/机制缺口**（例如虚拟机档的 guest 本体）。
+`tests/gaps.yaml` 记录任意层级的跨平台测试缺口与**长期目标**（存量收敛），
+以及**已确认但尚未实施的产品/机制缺口**（例如虚拟机档的 macOS 组合、ACP 适配器）。
 **条目要能判定**：写清现状、怎么补、验收标准与为什么还没做；只有"大方向已定但推迟"也要把方向和推迟理由写进去，
 否则它只是一句没有验收路径的待办。
 它不参与 `TEST-REPORT-ACCEPTED` 判定，但每条都会以 `[global-gap]` 进报告与 `report.globalGaps`。
@@ -85,12 +87,13 @@ dependency-baseline.json # 依赖方向门禁的基线
   how: |
     写出可直接执行的命令或实现步骤
   accept: 可判定的通过条件
-  blocked_by: 无 | 平台不可用 | 环境不允许 | 缺少观察面 | 缺少实现
+  blocked_by: |
+    一句话写清阻塞原因（如 无 / 平台不可用 / 环境不允许 / 缺少观察面 / 缺少实现）
 ```
 
 每条缺口必须有：稳定 id、范围、层级、必要性、执行方法、验收条件和阻塞原因。补齐后删除条目，不保留完成历史。
 
-## 十三、给开发者和 AI 的工作方法
+## 十三、给开发者与 agent 的工作方法
 
 1. 先阅读 [TESTING.md](../../TESTING.md)（门户与路由）、[ARCHITECTURE.md](../../ARCHITECTURE.md) 和相关模块契约。
 2. 先判断测试属于 T0-T5 哪一类，不要把质量检查写成业务测试。
@@ -101,7 +104,7 @@ dependency-baseline.json # 依赖方向门禁的基线
 7. 失败时修代码或测试；环境不允许时记录 `env-skip`；未实现时建立 `gap`；不要把任何一种写成通过。
 8. 运行完整入口并阅读 `target/test-report.json`，确认报告与日志能解释结果。
 9. 测试完成后检查 `git status` 和 `.gitignore`，确保没有测试产物被跟踪。
-10. 需要 CI 的场景（见本文「验收清单」）：按 [execution-ci.md](execution-ci.md) 用 `gh` 手动派发后拉 `ci-report`，**先比对 `sha`**，再按平台核对 steps / envSkips。
+10. 需要 CI 的场景（见本文「验收清单」）：PR 会自动跑一次；需要单独验证某分支或干净机器时再按 [execution-ci.md](execution-ci.md) 用 `gh` 手动派发。拉 `ci-report` 后**先比对 `sha`**，再按平台核对 steps / envSkips。
 11. 只有当目标行为、质量门禁、当前平台缺口与（需要时）CI 三平台结论都符合要求，才可宣称本次测试验收完成。
 
 ## 十四、验收清单
@@ -123,7 +126,7 @@ dependency-baseline.json # 依赖方向门禁的基线
 未能回答的问题不是"以后再说"，而是测试设计或观察面仍不完整，应进入缺口账。
 
 **需要 CI 才算验收的场景**（其余按 [execution-ci.md](execution-ci.md) 的 CI 表）：改了平台专属代码（`kernel/detail/confine/` 或 `tests/<平台>/`）、
-改了平台围栏机制、改了 HTTPS/TLS 链路、改了只在其它平台编译的 `#[cfg]` 分支——**这些本机跑不出结论，必须手动派发 CI 并比对 `sha`**。
+改了平台围栏机制、改了 HTTPS/TLS 链路、改了只在其它平台编译的 `#[cfg]` 分支——**这些本机跑不出结论，必须走 CI（PR 自动触发，或手动派发）并比对 `sha`**。
 
-反过来同样要守：**本机能跑出结论的改动不要为此派发 CI**。纯逻辑、文档、当前平台的用例，以及**质量门禁与卫生工具自身的改动**
-（本机跑的就是同一份 `node run-tests.js` / `run-hygiene.js`，本地入口即判据）都不构成派发理由；攒批，等下一次真需要他平台或真机结论时一起派发。
+反过来同样要守：**本机能跑出结论的改动不必为此额外手动派发 CI**。纯逻辑、文档、当前平台的用例，以及**质量门禁与卫生工具自身的改动**
+（本机跑的就是同一份 `node run-tests.js` / `run-hygiene.js`，本地入口即判据）都不构成额外派发的理由；PR 照跑一次，按结果读，但不把 `env-skip` 当通过。

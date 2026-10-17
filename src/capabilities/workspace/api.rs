@@ -14,6 +14,8 @@ pub use crate::capabilities::workspace::domain::workstore::{
 pub trait Workspace: Send + Sync {
     /// 准备工作区：建 session/<工作名>/work 与每个 agent 的沙箱目录。
     fn prepare(&self, session: &str, agents: &[String]) -> Result<(), String>;
+    /// 撤销一次准备：只删**空**目录（有什么都不删）——建会话失败时用。
+    fn discard(&self, session: &str, agents: &[String]) -> Result<(), String>;
     /// work/ 下是否已有同名文件（上传同名冲突判定）。
     fn work_has(&self, session: &str, name: &str) -> bool;
     /// 列出本工作可引用的文件（work/ 与各 agent 沙箱；相对路径、/ 分隔、排序稳定）。

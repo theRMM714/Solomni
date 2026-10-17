@@ -1,7 +1,7 @@
 //! 目的：按条处置围栏台账的命令行入口探针。
 //! 管：列清单（JSON / 可读两版）与按条处置的用法错、失败退出的如实性；只读台账与落点，不写任何 ACL。
 //! 不管：真机的 ACL 写与撤（L1 的台账用例在 temp 目录里跑真 ACL）；缺口账（tests/gaps.yaml）。
-//! 联动：命令行协议见 src/guard/mod.rs；台账形状与 ACE 读法见 src/capabilities/tools/detail/confine/。
+//! 联动：命令行协议见 src/guard/mod.rs；台账形状与 ACE 读法见 src/kernel/detail/confine/。
 
 use crate::probe::{bin, scratch};
 use std::process::Command;

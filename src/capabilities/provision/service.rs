@@ -214,6 +214,22 @@ impl Provision for ProvisionService {
         ))
     }
 
+    /// 约束：账本是"我们亲手起的长驻子进程"这一份事实源；`alive` 逐条问一次系统（死条目如实留着，等对账清）。
+    fn processes(&self) -> Result<Vec<crate::capabilities::provision::api::ProcInfo>, String> {
+        let book = crate::kernel::detail::procs::ProcessBook::open(&self.root.join(".home"));
+        Ok(book
+            .list()
+            .into_iter()
+            .map(|e| crate::capabilities::provision::api::ProcInfo {
+                alive: crate::kernel::detail::procs::alive(e.pid),
+                pid: e.pid,
+                purpose: e.purpose,
+                owner: e.owner,
+                since: e.since,
+            })
+            .collect())
+    }
+
     fn job(&self) -> JobState {
         self.job.lock().map(|j| j.clone()).unwrap_or_default()
     }
@@ -899,7 +915,7 @@ fn ensure_executable(path: &Path) {
 fn sanitize_guest_base(base: &Path) -> Result<(), String> {
     fs::write(
         base.join("etc").join("fstab"),
-        "# guest root 由内核命令行给出（9p），这里不写 fstab 条目。
+        "# guest root 由内核命令行给出（磁盘镜像 /dev/vda），这里不写 fstab 条目。
 ",
     )
     .map_err(|e| format!("写 fstab 失败：{}", e))?;
@@ -1071,16 +1087,18 @@ fn install_guest_rootfs(
             "dd",
         )?;
     }
+    // 重新构造前先清掉上一次的镜像产物：留着它，rdump 出来的目录里就多一份旧 rootfs.ext4，
+    // 打新镜像时会被整个包进去（体积翻倍、内容还是过期的）。
+    let stale_image = base.join("rootfs.ext4");
+    if stale_image.is_file() {
+        fs::remove_file(&stale_image).map_err(|e| format!("清旧镜像失败：{}", e))?;
+    }
     if !base.join("etc").join("os-release").is_file() {
         on_line(&format!("把 rootfs 解到 {}（debugfs rdump）", dep.install));
-        run_tool(
-            std::process::Command::new("debugfs")
-                .arg("-R")
-                .arg(format!("rdump / {}", base.display()))
-                .arg(&rootfs),
-            "debugfs",
-        )?;
+        extract_guest_rootfs(&rootfs, &base)?;
     }
+    // 这时目录树与源镜像一一对应：先把"打包会丢的属性"读出来（之后会装内核 / agent，树不再对应）。
+    let attrs = guest_attrs_to_restore(&rootfs, &base)?;
     let abi = ensure_guest_kernel(&cache, &base, agent, on_line)?;
     ensure_guest_qga(&cache, &base, agent, on_line)?;
     sanitize_guest_base(&base)?;
@@ -1103,6 +1121,337 @@ fn install_guest_rootfs(
         )
         .map_err(|e| format!("写 guest.yaml 失败：{}", e))?;
         on_line("写 guest.yaml（QGA 通道画像）");
+    }
+    // 运行产物是**磁盘镜像**（会话靠每租约可写层并发，谁也不写基础镜像）；目录只在这条构造链里当中间产物。
+    pack_guest_base(&base, &cache, on_line)?;
+    // rdump 与 mke2fs 都拿不到源镜像里的特权位 / 属主、属组：按刚读出的清单在**镜像上**回填并核对。
+    if !attrs.is_empty() {
+        on_line(&format!(
+            "按源镜像回填 {} 条属性（特权位 / 属主）",
+            attrs.len()
+        ));
+    }
+    restore_guest_image_attrs(&base.join("rootfs.ext4"), &attrs)?;
+    // agent 已经装进镜像：运行期编排看到这个标记就跳过 cloud-init 首启。
+    fs::write(
+        base.join(".qga-ready"),
+        "guest-rootfs 已装 qemu-guest-agent（打包进磁盘镜像）\n",
+    )
+    .map_err(|e| format!("写 .qga-ready 失败：{}", e))?;
+    Ok(())
+}
+
+/// 目的：把构造好的 rootfs 目录打成**磁盘镜像**（`rootfs.ext4`，raw），然后删掉目录中间产物。
+/// 参数：base = 虚拟根目录（内核 / initrd / guest.yaml 与镜像并排）；cache = 打包临时落点；on_line = 进度行。
+/// 约束：只在 Linux 宿主上跑——`unshare -r` 拿假 root，镜像里的属主才会是 0（否则会写成调用者 uid）；
+///   调用前目录已定稿（内核 / agent / initrd / 画像都写完）。
+fn pack_guest_base(base: &Path, cache: &Path, on_line: &mut dyn FnMut(&str)) -> Result<(), String> {
+    // 内核 / initrd 现在是软链（`vmlinuz` → `boot/vmlinuz-<abi>`）：落成实体文件，否则删目录后就成了悬空链。
+    for name in ["vmlinuz", "initrd.img"] {
+        let link = base.join(name);
+        if fs::symlink_metadata(&link).is_err()
+            || !fs::symlink_metadata(&link)
+                .map(|m| m.file_type().is_symlink())
+                .unwrap_or(false)
+        {
+            continue;
+        }
+        let tmp = base.join(format!("{}.solid", name));
+        fs::copy(&link, &tmp).map_err(|e| format!("把 {name} 落成实体文件失败：{e}"))?;
+        fs::remove_file(&link).map_err(|e| format!("换掉 {name} 软链失败：{e}"))?;
+        fs::rename(&tmp, &link).map_err(|e| format!("放回 {name} 失败：{e}"))?;
+    }
+    let used = dir_bytes(base)?;
+    // 留足余量：guest 里 apt 要下索引（压缩的也有几十 MB）、解包运行包、写日志——1 GiB 的镜像在维护启动装
+    // node 时会真的空间不足（真机验收露的：Write error 28）。下限 1 GB、至少 768 MB 余量。
+    let slack = std::cmp::max(768 << 20, used / 2);
+    let need = std::cmp::max(1u64 << 30, used + slack);
+    let blocks = need.div_ceil(4096);
+    let tmp_img = cache.join("pack.ext4");
+    let _ = fs::remove_file(&tmp_img);
+    on_line(&format!(
+        "把 rootfs 打成磁盘镜像（{} MiB，目录占用 {} MiB）",
+        need >> 20,
+        used >> 20
+    ));
+    // `-d` 从目录灌内容；假 root 里跑，镜像属主才是 root。**必须显式 `-b 4096`**：位置参数按块大小解释，
+    // 不给时 mke2fs 会按体积选 1024 字节块（并套用 small 的 4096 字节/inode），镜像缩成约四分之一而装不下。
+    run_tool(
+        std::process::Command::new("unshare")
+            .arg("-r")
+            .arg("mke2fs")
+            .args(["-q", "-b", "4096", "-t", "ext4", "-F", "-d"])
+            .arg(base)
+            .arg(&tmp_img)
+            .arg(blocks.to_string()),
+        "unshare + mke2fs（要 e2fsprogs 且内核允许非特权用户命名空间）",
+    )?;
+    let image = base.join("rootfs.ext4");
+    fs::rename(&tmp_img, &image).map_err(|e| format!("放 rootfs.ext4 失败：{e}"))?;
+    // 中间产物删掉：虚拟根只剩 磁盘镜像 + 内核 + initrd + 画像（没有第二份真相）。
+    purge_except(
+        base,
+        &["rootfs.ext4", "vmlinuz", "initrd.img", "guest.yaml"],
+    )?;
+    on_line("磁盘镜像就位，目录中间产物已清掉");
+    Ok(())
+}
+
+/// 目的：一条"打包会丢的属性"——镜像内绝对路径 + 完整 mode（含类型位）+ uid / gid。
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct GuestAttr {
+    path: String,
+    mode: u32,
+    uid: u32,
+    gid: u32,
+}
+
+/// 目的：把源 rootfs 分区解成目录树（debugfs rdump）。
+/// 约束：普通用户身份解——内核会剥掉特权位、rdump 也改不动属主；这两样由
+///   `guest_attrs_to_restore` / `restore_guest_image_attrs` 在打包后按源镜像回填。
+fn extract_guest_rootfs(image: &Path, dest: &Path) -> Result<(), String> {
+    run_tool(
+        std::process::Command::new("debugfs")
+            .arg("-R")
+            .arg(format!("rdump / {}", dest.display()))
+            .arg(image),
+        "debugfs",
+    )
+}
+
+/// 目的：源镜像里"打包会丢"的属性——特权位（setuid / setgid / sticky）、非 root 属主 / 属组。
+/// 参数：tree 是刚解出的目录树（这时它与源镜像一一对应；要在装内核 / agent 之前调）。
+/// 约束：清单来自目录树，属性值读源镜像；本镜像实测约 170 条（21 个特权位 + 140 个非 0 uid + 156 个非 0 gid）。
+fn guest_attrs_to_restore(image: &Path, tree: &Path) -> Result<Vec<GuestAttr>, String> {
+    let dirs = image_dirs(tree)?;
+    let all = image_attrs(image, &dirs)?;
+    Ok(all
+        .into_iter()
+        .filter(|a| a.mode & 0o7000 != 0 || a.uid != 0 || a.gid != 0)
+        .collect())
+}
+
+/// 目的：把源镜像里那些"打包会丢"的属性回填到最终镜像，再读一遍核对（不一致就硬失败）。
+/// 约束：只改需要改的字段（mode 只在有特权位时写、uid / gid 只在非 0 时写）；`sif` 单条失败时
+///   debugfs 的退出码未必非零，所以必须自己核对——不把不合规的镜像交给用户。
+fn restore_guest_image_attrs(image: &Path, attrs: &[GuestAttr]) -> Result<(), String> {
+    if attrs.is_empty() {
+        return Ok(());
+    }
+    let mut cmds = String::new();
+    for a in attrs {
+        let quoted = debugfs_quote(&a.path)?;
+        if a.mode & 0o7000 != 0 {
+            cmds.push_str(&format!("sif {} mode 0{:o}\n", quoted, a.mode));
+        }
+        if a.uid != 0 {
+            cmds.push_str(&format!("sif {} uid {}\n", quoted, a.uid));
+        }
+        if a.gid != 0 {
+            cmds.push_str(&format!("sif {} gid {}\n", quoted, a.gid));
+        }
+    }
+    run_debugfs(image, &cmds, true)?;
+    let mut parents: Vec<String> = attrs.iter().map(|a| parent_of(&a.path)).collect();
+    parents.sort();
+    parents.dedup();
+    let now = image_attrs(image, &parents)?;
+    for want in attrs {
+        let Some(got) = now.iter().find(|n| n.path == want.path) else {
+            return Err(format!(
+                "回填后镜像里找不到 {}（打包链路漏了它）",
+                want.path
+            ));
+        };
+        if got.mode != want.mode || got.uid != want.uid || got.gid != want.gid {
+            return Err(format!(
+                "回填没生效：{} 源是 mode {:o} {}/{}，镜像是 mode {:o} {}/{}",
+                want.path, want.mode, want.uid, want.gid, got.mode, got.uid, got.gid
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// 目的：读一个 ext4 镜像里若干目录的直接条目（`ls -l -p`，一个 debugfs 会话读完）。
+/// 参数：dirs = 镜像内绝对路径（`/` 分隔）；实测 2377 个目录一个会话 0.2 秒。
+/// 约束：只列给定目录、不递归；路径写进命令表前用双引号包起来（含引号 / 反斜杠 / 换行的直接拒绝）。
+fn image_attrs(image: &Path, dirs: &[String]) -> Result<Vec<GuestAttr>, String> {
+    if dirs.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut cmds = String::new();
+    for d in dirs {
+        cmds.push_str("ls -l -p ");
+        cmds.push_str(&debugfs_quote(d)?);
+        cmds.push('\n');
+    }
+    let out = run_debugfs(image, &cmds, false)?;
+    let mut attrs = Vec::new();
+    let mut dir = String::new();
+    for line in out.lines() {
+        if let Some(echo) = line.strip_prefix("debugfs: ls -l -p ") {
+            dir = unquote(echo.trim())
+                .ok_or_else(|| format!("看不懂 debugfs 的命令回显（不猜路径）：{}", line))?;
+            continue;
+        }
+        if dir.is_empty() || !line.starts_with('/') {
+            continue;
+        }
+        // -p 格式：/inode/mode/uid/gid/name/size/ ——名字里的空格原样保留，/ 不可能出现在名字里。
+        let parts: Vec<&str> = line.splitn(7, '/').collect();
+        if parts.len() < 7 {
+            continue;
+        }
+        let mode = u32::from_str_radix(parts[2], 8)
+            .map_err(|_| format!("看不懂 debugfs 的 mode：{}", line))?;
+        let uid = parts[3]
+            .parse::<u32>()
+            .map_err(|_| format!("看不懂 debugfs 的 uid：{}", line))?;
+        let gid = parts[4]
+            .parse::<u32>()
+            .map_err(|_| format!("看不懂 debugfs 的 gid：{}", line))?;
+        let name = parts[5];
+        if name == "." || name == ".." {
+            continue;
+        }
+        attrs.push(GuestAttr {
+            path: format!("{}/{}", dir.trim_end_matches('/'), name),
+            mode,
+            uid,
+            gid,
+        });
+    }
+    Ok(attrs)
+}
+
+/// 目的：目录树里的全部目录（镜像内绝对路径，`/` 分隔）；不跟软链（避免环）。
+fn image_dirs(tree: &Path) -> Result<Vec<String>, String> {
+    let mut out = vec!["/".to_string()];
+    let mut stack = vec![(tree.to_path_buf(), String::new())];
+    while let Some((abs, rel)) = stack.pop() {
+        let entries =
+            fs::read_dir(&abs).map_err(|e| format!("读 {} 失败：{}", abs.display(), e))?;
+        for entry in entries {
+            let entry = entry.map_err(|e| format!("读 {} 失败：{}", abs.display(), e))?;
+            let kind = entry
+                .file_type()
+                .map_err(|e| format!("读 {} 的类型失败：{}", entry.path().display(), e))?;
+            if !kind.is_dir() {
+                continue;
+            }
+            let name = entry.file_name().into_string().map_err(|_| {
+                format!(
+                    "目录名不是 UTF-8（写不进 debugfs 命令表）：{}",
+                    entry.path().display()
+                )
+            })?;
+            let child = if rel.is_empty() {
+                name
+            } else {
+                format!("{}/{}", rel, name)
+            };
+            out.push(format!("/{}", child));
+            stack.push((entry.path(), child));
+        }
+    }
+    Ok(out)
+}
+
+/// 目的：跑一个 debugfs 会话（`-f` 命令表），返回 stdout；`write` 决定要不要 `-w`。
+fn run_debugfs(image: &Path, cmds: &str, write: bool) -> Result<String, String> {
+    let cmd_file = image.with_extension(format!("debugfs-{}.cmd", std::process::id()));
+    fs::write(&cmd_file, cmds).map_err(|e| format!("写 debugfs 命令表失败：{}", e))?;
+    let mut cmd = std::process::Command::new("debugfs");
+    if write {
+        cmd.arg("-w");
+    }
+    let out = cmd.arg("-f").arg(&cmd_file).arg(image).output();
+    let _ = fs::remove_file(&cmd_file);
+    let out = out.map_err(|e| format!("跑不了 debugfs（要 e2fsprogs）：{}", e))?;
+    if !out.status.success() {
+        return Err(format!(
+            "debugfs 失败：{}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        ));
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
+/// 目的：把镜像内路径变成 debugfs 命令表里一个双引号参数。
+/// 约束：debugfs 命令表按行读、参数用双引号包；会破坏命令的字符直接拒绝（不猜、不静默改名）。
+fn debugfs_quote(path: &str) -> Result<String, String> {
+    if path.chars().any(|c| matches!(c, '"' | '\\' | '\n' | '\r')) {
+        return Err(format!("路径里有 debugfs 命令表放不下的字符：{}", path));
+    }
+    Ok(format!("\"{}\"", path))
+}
+
+/// 目的：去掉 debugfs 回显里的双引号（我们生成的命令不带转义）。
+fn unquote(s: &str) -> Option<String> {
+    let inner = s.strip_prefix('"')?.strip_suffix('"')?;
+    Some(inner.to_string())
+}
+
+/// 目的：镜像内路径的父目录（根下的条目归 `/`）。
+fn parent_of(path: &str) -> String {
+    match path.rsplit_once('/') {
+        Some(("", _)) | None => "/".to_string(),
+        Some((p, _)) => p.to_string(),
+    }
+}
+
+/// 目的：目录里所有普通文件的大小之和（不含软链本身）；算镜像要多大。
+fn dir_bytes(dir: &Path) -> Result<u64, String> {
+    let mut total = 0u64;
+    let mut stack = vec![dir.to_path_buf()];
+    while let Some(d) = stack.pop() {
+        let entries = fs::read_dir(&d).map_err(|e| format!("读 {} 失败：{e}", d.display()))?;
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let meta = fs::symlink_metadata(&path)
+                .map_err(|e| format!("看 {} 失败：{e}", path.display()))?;
+            if meta.is_dir() {
+                stack.push(path);
+            } else if meta.is_file() {
+                total += file_footprint(&meta);
+            }
+        }
+    }
+    Ok(total)
+}
+
+/// 目的：一个普通文件实际要占的字节数——Unix 上按块算（st_blocks * 512，含块对齐与稀疏），
+///   比 len() 更接近 ext4 真正要分配的空间。
+/// 约束：非 Unix 拿不到块数，退回文件长度；打包本身只在 Linux 上真跑。
+fn file_footprint(meta: &fs::Metadata) -> u64 {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        meta.blocks() * 512
+    }
+    #[cfg(not(unix))]
+    {
+        meta.len()
+    }
+}
+
+/// 目的：只留下 `keep` 里那几个名字，其余全删（虚拟根目录的收口）。
+fn purge_except(base: &Path, keep: &[&str]) -> Result<(), String> {
+    let entries = fs::read_dir(base).map_err(|e| format!("读 {} 失败：{e}", base.display()))?;
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if keep.contains(&name.as_str()) {
+            continue;
+        }
+        let path = entry.path();
+        let meta =
+            fs::symlink_metadata(&path).map_err(|e| format!("看 {} 失败：{e}", path.display()))?;
+        if meta.is_dir() {
+            fs::remove_dir_all(&path).map_err(|e| format!("删 {} 失败：{e}", path.display()))?;
+        } else {
+            fs::remove_file(&path).map_err(|e| format!("删 {} 失败：{e}", path.display()))?;
+        }
     }
     Ok(())
 }
@@ -1737,5 +2086,265 @@ mod tests {
     fn asset_name_takes_last_path_segment() {
         assert_eq!(asset_name("https://x/a/b.tar.zst?q=1"), "b.tar.zst");
         assert_eq!(asset_name("https://x/y.zip#frag"), "y.zip");
+    }
+
+    /// 目的：打出来的 guest 磁盘镜像必须是 4 KiB 块——位置参数按块大小解释，不给 -b 时 mke2fs 会
+    ///   按小体积选 1 KiB 块的 small 布局，镜像缩成约四分之一而装不下量出来的内容（Linux 真机上炸过）。
+    /// 约束：只在 Linux、且 unshare -r 与 mke2fs（e2fsprogs）可用时真跑；否则如实跳过（不假装验过）。
+    #[test]
+    fn packed_guest_image_uses_4k_blocks() {
+        if !cfg!(target_os = "linux") {
+            eprintln!("[探针] 打包镜像的块大小只在 Linux 上成立：本平台跳过");
+            return;
+        }
+        use std::io::Read;
+        use std::process::Stdio;
+        let tools = std::process::Command::new("unshare")
+            .args(["-r", "mke2fs", "-V"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if !tools {
+            eprintln!(
+                "[探针] 没有可用的 unshare -r / mke2fs（要 e2fsprogs 与非特权用户命名空间）：跳过"
+            );
+            return;
+        }
+        let root = crate::tests::scratch("provision-pack-4k");
+        let base = root.join("base");
+        let cache = root.join("cache");
+        fs::create_dir_all(&base).expect("建 base");
+        fs::create_dir_all(&cache).expect("建 cache");
+        fs::write(base.join("guest.yaml"), "id: t\nos: linux\narch: amd64\n").expect("写画像");
+        fs::write(base.join("hello.txt"), b"hello").expect("写文件");
+        pack_guest_base(&base, &cache, &mut |_| {}).expect("打包要成功");
+        // ext4 超级块从镜像 1024 偏移开始：magic 在 +0x38，log_block_size 在 +0x18；块大小 = 1024 << log。
+        let mut head = [0u8; 2048];
+        fs::File::open(base.join("rootfs.ext4"))
+            .expect("开镜像")
+            .read_exact(&mut head)
+            .expect("读镜像头");
+        let sb = &head[1024..2048];
+        let magic = u16::from_le_bytes([sb[0x38], sb[0x39]]);
+        let log_block = u32::from_le_bytes([sb[0x18], sb[0x19], sb[0x1a], sb[0x1b]]);
+        assert_eq!(magic, 0xEF53, "得是 ext4 超级块");
+        assert_eq!(
+            1024u64 << log_block,
+            4096,
+            "块大小必须是 4 KiB（1 KiB 的真机上装不下）"
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// 目的：Linux 上真跑 ext4 工具链的前置（unshare -r + mke2fs + debugfs）；缺一个就不是"验过"。
+    #[cfg(target_os = "linux")]
+    fn guest_image_tools() -> bool {
+        use std::process::Stdio;
+        std::process::Command::new("unshare")
+            .args(["-r", "mke2fs", "-V"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
+            && std::process::Command::new("debugfs")
+                .arg("-V")
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .map(|s| s.success())
+                .unwrap_or(false)
+    }
+
+    /// 目的：造一个带指定 mode 的普通文件（宿主属主；镜像里的属主由 mke2fs 的假 root 决定）。
+    #[cfg(target_os = "linux")]
+    fn write_mode(path: &Path, mode: u32) {
+        use std::os::unix::fs::PermissionsExt;
+        fs::write(path, b"#!/bin/sh\n").expect("写文件");
+        fs::set_permissions(path, fs::Permissions::from_mode(mode)).expect("设权限");
+    }
+
+    /// 目的：读宿主目录树上某个条目的权限位（只比低 12 位；解包后这里应当**丢了**特权位）。
+    #[cfg(target_os = "linux")]
+    fn mode_of(path: &Path) -> u32 {
+        use std::os::unix::fs::PermissionsExt;
+        fs::metadata(path).expect("读属性").permissions().mode() & 0o7777
+    }
+
+    /// 目的：rdump / mke2fs 都会丢**特权位与属主、属组**：按源镜像回填之后，sudo 的 setuid、
+    ///   ssh-agent 的 setgid + 组、/tmp 的粘滞位、/var/mail 的 setgid + 组、/etc/shadow 的 shadow 组
+    ///   都要和源镜像一致。
+    /// 约束：只在本机有 unshare -r / mke2fs / debugfs 时真跑；否则如实跳过（不假装验过）。
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn guest_rootfs_restores_privilege_bits_and_ownership() {
+        use std::os::unix::fs::PermissionsExt;
+        if !guest_image_tools() {
+            eprintln!(
+                "[探针] 没有可用的 unshare -r / mke2fs / debugfs（要 e2fsprogs 与非特权用户命名空间）：跳过"
+            );
+            return;
+        }
+        let root = crate::tests::scratch("provision-guest-attrs");
+        let src = root.join("src");
+        let tree = root.join("tree");
+        let cache = root.join("cache");
+        fs::create_dir_all(&cache).expect("建缓存目录");
+        for d in [
+            src.join("usr").join("bin"),
+            src.join("etc"),
+            src.join("tmp"),
+            src.join("var").join("mail"),
+        ] {
+            fs::create_dir_all(&d).expect("建源目录");
+        }
+        write_mode(&src.join("usr").join("bin").join("sudo"), 0o4755);
+        write_mode(&src.join("usr").join("bin").join("ssh-agent"), 0o2755);
+        write_mode(&src.join("etc").join("shadow"), 0o640);
+        fs::set_permissions(src.join("tmp"), fs::Permissions::from_mode(0o1777)).expect("设 /tmp");
+        fs::set_permissions(
+            src.join("var").join("mail"),
+            fs::Permissions::from_mode(0o2775),
+        )
+        .expect("设 /var/mail");
+        // 源镜像：mke2fs 的假 root 把属主写成 0；组用 sif 写成 cloud 镜像里的事实（宿主上 chown 不了）。
+        let source = root.join("source.ext4");
+        let st = std::process::Command::new("unshare")
+            .args(["-r", "mke2fs", "-q", "-b", "4096", "-t", "ext4", "-F", "-d"])
+            .arg(&src)
+            .arg(&source)
+            .arg("4096")
+            .status()
+            .expect("跑 mke2fs");
+        assert!(st.success(), "造源镜像");
+        let mut cmds = String::new();
+        for (path, gid) in [
+            ("/usr/bin/ssh-agent", 103u32),
+            ("/etc/shadow", 42),
+            ("/var/mail", 8),
+        ] {
+            cmds.push_str(&format!(
+                "sif {} gid {}\n",
+                debugfs_quote(path).expect("路径可写进命令表"),
+                gid
+            ));
+        }
+        run_debugfs(&source, &cmds, true).expect("给源镜像写属组");
+        // 解包 → 清单 → 打包 → 回填。
+        fs::create_dir_all(&tree).expect("建解包目录");
+        extract_guest_rootfs(&source, &tree).expect("解包");
+        assert_eq!(
+            mode_of(&tree.join("usr").join("bin").join("sudo")),
+            0o755,
+            "rdump 本来就会丢 setuid——这正是回填要补的"
+        );
+        let attrs = guest_attrs_to_restore(&source, &tree).expect("读源属性");
+        for want in [
+            "/usr/bin/sudo",
+            "/usr/bin/ssh-agent",
+            "/etc/shadow",
+            "/tmp",
+            "/var/mail",
+        ] {
+            assert!(
+                attrs.iter().any(|a| a.path == want),
+                "清单里要有 {}：{:?}",
+                want,
+                attrs.iter().map(|a| a.path.clone()).collect::<Vec<_>>()
+            );
+        }
+        fs::write(tree.join("guest.yaml"), "id: t\nos: linux\narch: amd64\n").expect("写画像");
+        pack_guest_base(&tree, &cache, &mut |_| {}).expect("打包");
+        let image = tree.join("rootfs.ext4");
+        restore_guest_image_attrs(&image, &attrs).expect("回填并核对");
+        let parents: Vec<String> = ["/", "/usr/bin", "/etc", "/var"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let got = image_attrs(&image, &parents).expect("读最终镜像");
+        for want in [
+            "/usr/bin/sudo",
+            "/usr/bin/ssh-agent",
+            "/etc/shadow",
+            "/tmp",
+            "/var/mail",
+        ] {
+            let a = attrs.iter().find(|a| a.path == want).expect("清单条目");
+            let g = got
+                .iter()
+                .find(|g| g.path == want)
+                .unwrap_or_else(|| panic!("最终镜像里没有 {}", want));
+            assert_eq!(
+                (g.mode, g.uid, g.gid),
+                (a.mode, a.uid, a.gid),
+                "{} 要回填成源镜像的属性",
+                want
+            );
+        }
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// 目的：真机验收（opt-in）：拿项目内缓存的 Debian rootfs 分区跑同一条构造链，最终镜像里
+    ///   **源镜像所有特权位 / 非 root 属主的条目**都与源一致（不碰 `.vm/guest/debian`，只写 target/test-scratch）。
+    /// 约束：只在 SOLOMNI_VM_LIVE=1、本机有工具链、且 `.vm/cache/rootfs.ext4` 在场时真跑；否则 [探针] 如实跳过。
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn guest_rootfs_pipeline_keeps_source_attrs_on_the_real_image() {
+        if !guest_image_tools() {
+            eprintln!(
+                "[探针] 没有可用的 unshare -r / mke2fs / debugfs（要 e2fsprogs 与非特权用户命名空间）：跳过"
+            );
+            return;
+        }
+        if std::env::var("SOLOMNI_VM_LIVE").as_deref() != Ok("1") {
+            eprintln!(
+                "[探针] 未开启虚拟根真机验收：设 SOLOMNI_VM_LIVE=1 后重跑（用 .vm/cache/rootfs.ext4）"
+            );
+            return;
+        }
+        let source = crate::tests::root_dir()
+            .join(".vm")
+            .join("cache")
+            .join("rootfs.ext4");
+        if !source.is_file() {
+            eprintln!(
+                "[探针] 本机没有源 rootfs 分区（先 solomni --provision --ensure=vm.guest-rootfs.linux --yes）：跳过"
+            );
+            return;
+        }
+        let root = crate::tests::scratch("provision-guest-attrs-live");
+        let tree = root.join("tree");
+        let cache = root.join("cache");
+        fs::create_dir_all(&tree).expect("建解包目录");
+        fs::create_dir_all(&cache).expect("建缓存目录");
+        extract_guest_rootfs(&source, &tree).expect("解包真源镜像");
+        let attrs = guest_attrs_to_restore(&source, &tree).expect("读真源镜像属性");
+        let sudo = attrs
+            .iter()
+            .find(|a| a.path == "/usr/bin/sudo")
+            .expect("真源镜像里要有 setuid 的 sudo");
+        assert!(
+            sudo.mode & 0o4000 != 0,
+            "sudo 的 setuid 要读出来：{:o}",
+            sudo.mode
+        );
+        assert!(
+            attrs.iter().any(|a| a.gid != 0),
+            "清单里要包含非 0 属组（例如 shadow）"
+        );
+        fs::write(tree.join("guest.yaml"), "id: t\nos: linux\narch: amd64\n").expect("写画像");
+        pack_guest_base(&tree, &cache, &mut |_| {}).expect("打包");
+        let image = tree.join("rootfs.ext4");
+        restore_guest_image_attrs(&image, &attrs).expect("回填并核对");
+        // 抽查 sudo 的最终 mode（回填已经在内部核对过全部条目）。
+        let got = image_attrs(&image, &["/usr/bin".to_string()]).expect("读最终镜像");
+        let sudo = got
+            .iter()
+            .find(|g| g.path == "/usr/bin/sudo")
+            .expect("最终镜像里要有 sudo");
+        assert_eq!(sudo.mode & 0o7777, 0o4755, "最终镜像里的 sudo 要带 setuid");
+        let _ = fs::remove_dir_all(&root);
     }
 }

@@ -91,7 +91,7 @@
   scope: global
   level: T3
   why: |
-    node run-tests.js --coverage 只覆盖测试进程内的代码。产品二进制（守门进程 solomni --guard、
+    node run-tests.js --coverage 只覆盖测试进程内的代码。产品二进制（守门进程 solomni --fence-run、
     L4 端到端）由本入口单独 cargo build，未插桩，作为子进程运行不会被计入；平台 #[cfg] 代码在
     别的平台根本不编译。任何一份覆盖率都只代表"当前平台 + 进程内那几层"，当全貌会误导。
   how: |
@@ -105,23 +105,53 @@
     未覆盖的生产路径逐条有补测或缺口结论。
   blocked_by: 缺少观察面（子进程插桩与合并尚未实现）
 
-- id: conductor.create-session-blocks-core
+- id: fence.windows-net-flag-ignored
   scope: global
-  level: T5
+  level: T4
   why: |
-    核心是**单线程队列**（ConductorHandle::spawn + call）——这本身是刻意设计：状态只有一个所有者、不用锁。
-    它要求"核心线程只做毫秒级状态变换"，等外部世界的步骤必须 own-and-return（生成与协作泵已经这样搬走了）。
-    现状还剩一条没搬：**创建虚拟机档会话时在核心调用里同步起 guest**（create_work → start_session_guest →
-    QEMU 启动 + 等 QGA，几十秒到几分钟）。后果：这段时间里**任何**经核心的请求都在排队——界面看着像卡死，
-    /api/state、别的会话、改配置全部停摆（现场现象：点「创建并开始」没反应、表单还杵在那儿）。
-    界面已经按这个事实做成忙碌态（按钮转圈 + 说清在等什么），但那只治观感。
+    `FenceSpec.net` 在三个平台上的实际行为不一致：macOS 按它决定 seatbelt profile 要不要放行网络；
+    Linux 本来就不围栏网络（能力表里 net=false）；Windows 容器恒用 `CapabilityCount: 0`，
+    等于**永远断网**，`net: true` 被静默忽略。需要出站网络的模块工具在 Windows 上拿不到，
+    而接口仍让人以为 net 生效。
   how: |
-    按既有 own-and-return 模式把长步骤搬出核心：prepare 在核心（预检 + 落 meta + 建会话对象，毫秒级），
-    run 在会话自己的工作线程，结果作为会话事件回来。创建立刻返回 sid；起 guest 的进度与失败写成会话事件与运行态
-    （starting / ready / failed），失败给「重试启动」。
+    1) 先定语义：要么 net=true 时给容器加 internetClient（并明确 privateNetwork 等边界），
+       要么明确 Windows 虚拟机档恒断网、把 net 在 Windows 上标成"不支持"并由就绪诊断如实报；
+    2) 按定下的语义改 `src/kernel/detail/confine/windows/container.rs` 与 FenceSpec 的文档，
+       补 Windows 真机探针（net=true / false 各一条）；
+    3) 同步 docs/kernel/README.md、docs/tools/ 与 RUNTIME_SPEC.md 的围栏口径。
   accept: |
-    创建虚拟机档会话的 POST /api/actions/create_session 在 1 秒内返回（不论 guest 是否已经起来）；
-    起 guest 期间 /api/state 与其它会话的请求正常返回；起失败如实落在会话状态与事件里，并可重试启动。
-  blocked_by: |
-    缺少实现。要先定"会话可以存在但 guest 未就绪"的运行态契约——它会打破现行"起不来就什么都不留下"的不变式，
-    要同步 docs/session/session-model.md、docs/vm/README.md 与对应用例。
+    Windows 真机探针能区分 net=true / false 的实际出站能力（或明确断网并由诊断如实报）；
+    `--fence-verify` / `--doctor` 的结论与真实行为一致；文档不再把 net 写成 Windows 上生效。
+  blocked_by: 需要产品决定（放行出站 vs 明确恒断网）
+
+- id: kernel.job-bind-failure-silent
+  scope: global
+  level: T2
+  why: |
+    `procs::bind` 把子进程绑进 Windows 作业对象（KILL_ON_JOB_CLOSE，父死子亡的兜底）。四个调用点
+    （QEMU、SMB helper、virtiofsd、常驻服务守门进程）都用 `let _ =` 丢掉错误；绑定失败时父死子亡悄悄失效，
+    没有日志、没有 `--doctor` 事实，核心被强杀后可能留下孤儿。
+  how: |
+    1) 定失败语义：绑不上是拒绝启动（fail-closed）还是启动但如实告警并记进进程账 / `--doctor`；
+    2) 把 bind 的错误传到调用方（返回 Result 或收集进启动报告），给它一个可注入失败的测试面（端口或测试钩子）；
+    3) 同步 docs/kernel/README.md 的父死子亡接线说明与 docs/entry 的启动报告字段。
+  accept: |
+    Windows 上作业对象绑定失败可被观察到（日志 / `--doctor` / 拒绝启动，按定下的语义），
+    且有用例钉住；文档写明失败时的行为。
+  blocked_by: 需要产品决定（fail-closed 还是降级告警）
+
+- id: kernel.startup-fence-report-mismatch
+  scope: global
+  level: T3
+  why: |
+    `src/main.rs` 的启动报告在 `fence_write` 未开时把 fs/net 报成不可用；但 Unix（Landlock / seatbelt）的围栏
+    不依赖 fence_write，`--doctor` 与真实执行仍会装围栏。同一台机器上启动报告与 `--doctor` 结论不一致，
+    容易让人以为围栏没生效。
+  how: |
+    1) 启动报告按平台取实际能力（`fence_write` 只影响 Windows 的 ACL 写入），与 `capability()` / `--doctor` 共用一份判据；
+    2) 补用例：`fence_write=false` 时 Unix 的启动报告与 `--doctor` 一致；Windows 上仍如实报 ACL 不写；
+    3) 同步 docs/entry 与 docs/kernel 的启动报告口径。
+  accept: |
+    三平台启动报告与 `--doctor` 对 fs/net 的结论一致（同一份能力判据）；有用例钉住；
+    文档不再出现"fence_write 关 = 路径级围栏关闭"的口径。
+  blocked_by: 缺少实现（报告与能力判据没有共用）

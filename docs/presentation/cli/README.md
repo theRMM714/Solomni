@@ -14,6 +14,8 @@
 
 只依赖**入站能力面**（各能力的 `::api`）；`conductor` 的 `Ops` 是它与核心之间的唯一通道。
 
+入口：`src/main.rs` 调 `presentation::cli::run(ops, presentation::web::DEFAULT_PORT)`；`webui` 子命令把控制权交给 Web 渠道（同一份 `Ops`）。
+
 ## 三、依赖图位置（由源码的 `::api` 引用推导）
 
 - 经 `::api` 用到：`conductor`、`modules`（经 `Ops` 字段）、`registry`、`vm`

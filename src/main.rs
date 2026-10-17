@@ -17,6 +17,14 @@ use std::sync::Arc;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
+    // 长驻子进程守门模式（内部协议，用户不用）：macOS 没有 PR_SET_PDEATHSIG，由本程序自己盯核心，
+    // 核心一死就把子进程组收掉（见 kernel::detail::procs::watch）。
+    if let Some(i) = args
+        .iter()
+        .position(|a| a == kernel::detail::procs::WATCHDOG_FLAG)
+    {
+        std::process::exit(guard::proc_watch(&args, i));
+    }
     // 守门模式（内部协议，用户不用）：把围栏装好再跑模块声明的命令，退出码即工具退出码。
     if let Some(i) = args
         .iter()
@@ -77,7 +85,7 @@ fn main() {
         std::process::exit(diagnostics::build(&root, &args, i));
     }
     // 隐藏模式：按条处置围栏台账（列清单 / 还原一条 / 撤一条 / 删一个 profile）——比整体收尾更细，
-    // 所以排在 --fence-clean 之前；两者共用同一份台账与同一套 ACE 读法（见 docs/tools/README.md）。
+    // 所以排在 --fence-clean 之前；两者共用同一份台账与同一套 ACE 读法（见 docs/kernel/README.md 的「围栏落点：必要与可选」）。
     if let Some(code) = guard::fence_grant(&args, &root) {
         std::process::exit(code);
     }
@@ -108,6 +116,19 @@ fn main() {
         }
         if !rep.errors.is_empty() {
             log.warn("main::fence_reconcile", &rep.summary());
+        }
+    }
+    // 长驻子进程的账：按它回收上一次留下的孤儿（Unix 确认命令行标记才动手；Windows 有作业对象兜底）。
+    let book = kernel::detail::procs::ProcessBook::open(&home);
+    {
+        let rep = book.reconcile();
+        if rep.touched() {
+            println!(
+                "[进程] 启动对账：清掉 {} 条已不在的登记，收掉 {} 个孤儿，仍有 {} 个在跑",
+                rep.dropped,
+                rep.killed,
+                rep.alive.len()
+            );
         }
     }
     // 围栏能力如实告知（不强于实际：机制缺什么就说缺什么）。
@@ -263,8 +284,13 @@ fn main() {
     for combo in order.iter().filter(|c| c.engine == "qemu") {
         let share: Arc<dyn capabilities::vm::ports::ShareBackend + Send + Sync> = match combo.share
         {
-            "smb" => Arc::new(capabilities::vm::detail::SmbShare::new()),
-            "virtiofs" => Arc::new(capabilities::vm::detail::VirtioFsShare::new()),
+            "smb" => Arc::new(
+                capabilities::vm::detail::SmbShare::new().with_book(std::sync::Arc::clone(&book)),
+            ),
+            "virtiofs" => Arc::new(
+                capabilities::vm::detail::VirtioFsShare::new()
+                    .with_book(std::sync::Arc::clone(&book)),
+            ),
             "9p" => Arc::new(capabilities::vm::detail::NinePShare::new()),
             "copy" => Arc::new(capabilities::vm::detail::CopyShare::new()),
             _ => continue,
@@ -276,9 +302,12 @@ fn main() {
     let vm: Arc<dyn capabilities::vm::api::Vm + Send + Sync> =
         Arc::new(capabilities::vm::service::VmService::new(
             Arc::new(packages),
-            Arc::new(capabilities::vm::detail::QemuEngine::with_overlay_dir(
-                root.join(".vm").join("overlays"),
-            )),
+            Arc::new(
+                capabilities::vm::detail::QemuEngine::with_overlay_dir(
+                    root.join(".vm").join("overlays"),
+                )
+                .with_book(std::sync::Arc::clone(&book)),
+            ),
             shares,
         ));
 

@@ -1,7 +1,7 @@
 //! HTTP 入站契约的**唯一定义**：路由目录 + 匹配器。
 //!
 //! web.rs 的分发由这份目录驱动，所以「代码里有路由但目录里没有」在结构上不可能发生；
-//! 反过来「目录里有路由但没有处理器」由契约测试逐条点名叫出来（见 contract_tests/routes.rs）。
+//! 反过来「目录里有路由但没有处理器」由契约测试逐条点名叫出来（见 src/tests/routes.rs）。
 //! 文档表（docs/presentation/contracts.md 的 ROUTES 段落）也由契约测试与这里比对，杜绝文档过期。
 
 use serde_json::json;
@@ -171,6 +171,16 @@ pub const ROUTES: &[Route] = &[
         response: "{tiers:{default,vm_available,vm_unavailable_reason,vm_requirements,guests,available}}",
         statuses: &[200, 400],
         note: "新建工作的档位选择：默认档 + 虚拟机档的**机器能力**可用性与逐项前置 + 可选虚拟根清单（虚拟根是会话级，不在这里判）",
+    },
+    Route {
+        id: "processes",
+        method: "GET",
+        pattern: "/api/processes",
+        capability: "Provision::processes",
+        request: "—",
+        response: "{procs:[{pid,alive,purpose,owner,since}]}",
+        statuses: &[200, 400],
+        note: "现在在跑什么：产品亲手起的长驻子进程（QEMU / 共享进程）与它们的归属；`alive=false` 表示账上还留着、进程已没（等对账清）",
     },
     Route {
         id: "setup.status",

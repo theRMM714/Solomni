@@ -2,7 +2,7 @@
 
 一个**用 MCP（Model Context Protocol）声明的常驻服务**模块：给 agent 提供本机小工具，并顺带当仓里 MCP 链路的演示与回归载体。
 
-它不是外部工具（`tools`），而是**常驻服务**（`services`）：核心经 `residents` 能力按声明拉起 `tools/server.py`，
+它不是模块工具（`tools`），而是**常驻服务**（`services`）：核心经 `residents` 能力按声明拉起 `tools/server.py`，
 握手后发现操作，再用长驻 stdio 会话转发每一次调用。服务停掉，操作就从模型工具面里消失。
 
 ## 声明

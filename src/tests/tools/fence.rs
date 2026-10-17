@@ -1,7 +1,7 @@
 //! 目的：围栏落点的**必要性判据**与"必要落点授不上"这条路的纯逻辑（真实 ACL 由平台探针验）。
 //! 管：`FencePart` 的必要 / 可选判据与文案、`fence_ask` 的选项集与消息、`FencePrep` 的分流。
 //! 不管：真实 ACL 的写与撤（Windows 的 confine 探针）、围栏在真机上的行为（`--fence-live` 的 ProcTools 用例）。
-//! 联动：判据写进 docs/tools/README.md 五；卡片契约见 docs/session/session-model.md 的「请用户裁决」。
+//! 联动：判据写进 docs/kernel/README.md 的「围栏落点：必要与可选」；卡片契约见 docs/session/session-model.md 的「请用户裁决」。
 
 use crate::kernel::detail::confine::FencePrep;
 use crate::kernel::domain::fence::{

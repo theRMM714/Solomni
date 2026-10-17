@@ -9,6 +9,8 @@ use std::path::Path;
 pub trait Workdirs {
     /// 准备工作区：建 session/<工作名>/work 与每个 agent 的沙箱目录。
     fn prepare(&self, session: &str, agents: &[String]) -> Result<(), String>;
+    /// 撤销一次准备：只删**空**目录（有什么都不删），建会话失败时用。
+    fn discard(&self, session: &str, agents: &[String]) -> Result<(), String>;
     /// 界面投喂：把文件写进本工作的 work/（文件名由调用方净化）。
     fn write_work(&self, session: &str, name: &str, bytes: &[u8]) -> Result<(), String>;
     /// work/ 下是否已有同名文件（上传同名冲突判定）。

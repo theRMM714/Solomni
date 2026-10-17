@@ -27,22 +27,23 @@
 
 当前仓库已经具备：
 
-- `src/tests/` 中的测试层：**与 `capabilities/` 同构的一个能力一个文件**（`prompt.rs` / `registry.rs` / `llm.rs` / `workspace.rs` / `session.rs` / `slate.rs` / `taskchain.rs` / `permission.rs` / `residents.rs` / `secrets.rs` / `modules.rs` / `vm.rs`）+ `conductor.rs` 与 `conductor/`（协调业务自己的用例：会话中心、跨能力编排、裁决与代理）、`tools/` 与 `collab/`（这两个能力的用例按域分成子模块）、`doubles.rs`（端口替身）与 `builders.rs`（测试装配脚手架）；
+- `src/tests/` 的单元与契约测试：**与 `capabilities/` 同构的一个能力一个文件**，用例多的按域分成子模块；`doubles.rs` 放端口替身，`builders.rs` 放测试装配脚手架；
 - `tests/cross-platform/` 跨平台集成与端到端测试；
 - `tests/windows/`、`tests/linux/`、`tests/macos/` 平台探针（`tests/helpers/probe.rs` 提供共用探针设施）；
 - `tests/dev-loop.mjs` 开发回路自检（`dev.js` 的固定子命令表与拒绝出口）；`tests/env-bootstrap.mjs` 环境引导自检
   （`env.js` 的下载 / 续传 / 结构判定 / sha256 闸与显式接受开关，真实子进程 + 本地应答源；仅 Windows 真跑）；
   `src/presentation/web/assets/*.smoke.cjs` 前端冒烟测试；
 - `tests/gaps.yaml`（全局）与 `tests/<平台>/gaps.yaml`（平台）缺口账；
+- `tests/cross-platform/e2e/` 的 L4 覆盖 MCP 常驻服务调用与**父死子亡**：核心被强杀后，常驻服务进程跟着消失；macOS 的守门进程另有 `tests/macos/` 探针；
 - **谁做任务谁补测试**：做完就补上这次改动的用例并跑门禁，通过后同步文档（见 [AGENTS.md](AGENTS.md) 九）；
 - `node run-tests.js` 测试汇总入口（`node start.js -test` 是备好环境后的同一入口）；开发环境先跑 `node setup-dev.js`
   （条目清单 [dev-tools.js](dev-tools.js)，`--check` 只读校验；运行环境另见 [setup-runtime.js](setup-runtime.js)）；
 - `src/capabilities/llm/detail/fake_chat.rs` 中的 `FakeChat` 与 `DemoGateway`；
-- `src/tests/doubles.rs`（`InMemory*` / `FakeCatalog` / `VecSource` / `ScriptGateway` / `RecordingFence` / `TestPrompts` / `NoopLog`）与 `src/tests/builders.rs`（`RecordingRunner` / `ParallelRunner` / `SilentRunner` / 原生与截断通道替身 / 造会话与造名单的辅助）里的测试装配（替身支持失败注入，供 T2 复用）；
+- `src/tests/doubles.rs` 与 `src/tests/builders.rs` 的端口替身与测试装配（支持失败注入，供 T2 复用）；
 - `src/tests/` 中的契约测试（T2）：
- - `ports.rs`（14 个端口的替身语义；`Log` 在 `kernel/ports.rs`，见 [docs/kernel/unit-map.md](docs/kernel/unit-map.md)）、
+ - `ports.rs`（端口替身的同一组语义：成功 / 失败传播 / 空边界 / 交互记录 / 重复调用；`Log` 在 `kernel/ports.rs`，见 [docs/kernel/unit-map.md](docs/kernel/unit-map.md)）、
  `fakes.rs`（FakeChat / DemoGateway 的独立契约）；
- - `detail.rs`（8 个文件系统实现的真实边界 + 本机环回 HTTP 适配器）；
+ - `detail.rs`（真实文件系统实现的边界 + 本机环回 HTTP 适配器）；
  - `api.rs`（入站契约：命令与事件、生成期间停止立刻生效、错误如实传播、单条命令 panic 不带垮核心）；
  - `routes.rs`（HTTP 路由目录 ↔ 处理器 ↔ 文档 ↔ 前端调用 ↔ 演示脚本机器比对；假能力面逐条验成功 / 错误 / 空 / 边界）；
 - **入站契约也是契约**：呈现层只依赖各能力的能力接口（见 [docs/presentation/contracts.md](docs/presentation/contracts.md)）与事件台（拿不到 `Core`、拿不到任何核心锁），

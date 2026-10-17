@@ -1404,6 +1404,8 @@ function openSettingsModal() {
     const remind = numberInput('一轮内最多提醒几次', state.settings.discuss_remind_cap, 0, 20);
     // 上下文用到多少就该压（占模型窗口的百分比）。
     const pct = numberInput('上下文用到百分之多少就压缩', state.settings.compact_at_percent, 0, 100);
+    // 同时最多几台 guest（每台固定 -m 2048 -smp 2）：0 = 不限制；超了在起 guest 那一刻如实拒绝。
+    const guests = numberInput('虚拟机档同时最多几台', state.settings.max_guests, 0, 64);
     const save = btn('保存', 'btn btn-primary btn-block');
     save.onclick = async () => {
       try {
@@ -1413,6 +1415,7 @@ function openSettingsModal() {
           llm_timeout_secs: Number(to.input.value) || 300,
           discuss_remind_cap: Number(remind.input.value) || 0,
           compact_at_percent: Number(pct.input.value) || 0,
+          max_guests: Number(guests.input.value) || 0,
         });
         await refreshState();
         c.setMsg('已保存');
@@ -1427,6 +1430,23 @@ function openSettingsModal() {
     c.body.appendChild(cfgHint('一轮内提醒到顶就记一行「未回应」放过它，整轮继续（不阻塞）。'));
     c.body.appendChild(pct.wrap);
     c.body.appendChild(cfgHint('压缩由 AI 自己做：到点自动压一次；也可以随时手动 /compact。填 0 = 不自动压。'));
+    c.body.appendChild(guests.wrap);
+    c.body.appendChild(cfgHint('每台虚拟机固定 2 GB 内存 / 2 核：到上限时新建会如实拒绝，不会悄悄抢资源。填 0 = 不限制。'));
+    // 现在在跑什么（只读）：产品亲手起的长驻子进程 + 归属；死条目如实标出来（等启动对账清）。
+    const procsTitle = document.createElement('div');
+    procsTitle.className = 'wf-label';
+    procsTitle.textContent = '现在在跑什么';
+    const procsBox = document.createElement('div');
+    procsBox.className = 'cfg-log';
+    procsBox.textContent = '读取中…';
+    c.body.appendChild(procsTitle);
+    c.body.appendChild(procsBox);
+    api('GET', '/api/processes').then((r) => {
+      const list = (r && r.procs) || [];
+      procsBox.textContent = list.length ? list.map((p) =>
+        (p.alive ? '在跑' : '已退出（等对账清）') + ' · ' + p.purpose + ' · ' + p.owner + ' · pid ' + p.pid
+      ).join('\n') : '没有产品起的长驻进程。';
+    }).catch((e) => { procsBox.textContent = '读不到：' + e.message; });
     c.body.appendChild(save);
   });
 }

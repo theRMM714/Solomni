@@ -1,7 +1,8 @@
 # 隔离、清理与质量门禁
 
-> 本文是**测试资源边界与 T0 质量门禁的唯一权威**：每个测试必须声明资源边界，质量失败不能被业务测试通过抵消。
-> 入口与 CI 见 [execution-ci.md](execution-ci.md)，层级与判定见 [levels.md](levels.md)。
+> 本文是**测试资源边界、质量门禁判定口径与仓库卫生的唯一权威**：资源边界怎么声明与清理、质量失败怎么记、
+> 设计取舍 allow 清单、项目外写与门禁外卫生审查。
+> T0 的检查项清单、层级与判定见 [levels.md](levels.md) 的 T0；入口与 CI 见 [execution-ci.md](execution-ci.md)。
 
 ## 一、隔离、清理与副作用
 
@@ -30,29 +31,24 @@
 
 ### 2.1 必查项目
 
-- 格式：`cargo fmt --check`；
-- 编译：`cargo check --all-targets`；
-- 警告：`cargo clippy --all-targets --all-features -- -D warnings`；
-- 重复依赖：`cargo tree --duplicates`；
-- 供应链：`cargo audit`（已知 CVE）与 `cargo deny check`（许可证 / 禁用 / 来源，配置 `deny.toml`）；
-- 测试目标登记、报告结构、缺口账格式；
-- 重复测试、重复 Fixture、重复 Fake 和跨层无理由重复断言；
-- 项目外写（env / 工具链）：判据见「一、隔离、清理与副作用」的「项目外写」；
-- 未使用代码、死代码、无效分支和不必要包装层。
+检查项、命令与层级判定只有一份：见 [levels.md](levels.md) 的 T0。本节只补一条不进 lint 计数的人工判断：
+未使用代码、死代码、无效分支和不必要包装层。
+
+重复测试、重复 Fixture、重复 Fake 与跨层无理由重复断言也归这条人工判断；项目外写的判据见「一、隔离、清理与副作用」。
 
 ### 2.2 判定规则
 
-- 质量检查失败记录为 `quality-fail`，不能折算成 `pass`；
+- 质量检查失败按步骤记 `quality-fail` 或 `fail`（映射见 [levels.md](levels.md) 的 T0），不能折算成 `pass`；
 - 工具缺失或环境不允许运行记录为 `env-skip`，不能静默跳过；
 - 工具获取：**第三方只进 CI**——CI 用 `taiki-e/install-action` 预编译装（供应链工具、突变测试的 `cargo-mutants` 都这样）；**本地开发不引第三方**，用 `node setup-dev.js` 把清单（[dev-tools.js](../../dev-tools.js)）里的东西装进**项目内**（`cargo install --locked --root .tools`）；
 - 尚未建立检查记录为 `gap`；
 - 依赖重复不一定是错误，必须有解释或后续治理记录；
 - 重复代码检查不得诱导新增抽象。先判断重复是否属于同一职责，再决定合并、保留或记录原因。
 
-当前 `node run-tests.js` 已执行上述全部 T0 检查：编译、结构审查（含**门禁解析器自测**与 **`#[ignore]` 禁令**）、
-格式、clippy、编译告警、交叉类型检查（已装 target）、依赖重复**零容忍硬失败**——任何一项不过即 `quality-fail`，**没有存量基线**。
+当前 `node run-tests.js` 已执行 [levels.md](levels.md) 的 T0 全部检查：编译、结构审查（含**门禁解析器自测**与 **`#[ignore]` 禁令**）、
+格式、clippy、编译告警、依赖重复、项目外写**零容忍硬失败**；交叉类型检查对已装 target 零容忍（未装 target = `env-skip`），**没有容差基线**（注释契约的存量快照只减不增，见「五、门禁之外」）。
+报告状态按步骤分：结构审查、格式、clippy、编译告警、依赖重复记 `quality-fail`；编译、交叉类型检查、项目外写记 `fail`。
 供应链（`cargo audit` / `cargo deny check`）同为硬失败，但**工具缺失或取不到 advisory 数据**记 `env-skip`。
-清单与判定见 [levels.md](levels.md) 的 T0 一节。
 
 三平台各自跑同一套检查：clippy 只编译当前平台的 `#[cfg]` 代码（Windows 的容器围栏在 unix 上不存在，
 反之亦然），依赖上 Windows 走 native-tls、unix 走 rustls——所以**任一项都必须在三平台 CI 上分别成立**。
@@ -61,13 +57,13 @@
 
 ## 三、设计取舍的窄 allow 清单
 
-有些 lint 指出的是**有意的设计取舍**，不是没修。这些一律**就近窄 allow + 写清理由**，不允许宽范围放行：
+有些 lint 指出的是**有意的设计取舍**，不是没修。这些一律**就近窄 allow + 写清理由**，不允许宽范围放行。下表只列设计取舍类 allow；测试装配用的空实现、字段级 `dead_code` 等不在此列：
 
 | lint | 位置 | 为什么是取舍而不是缺陷 |
 | --- | --- | --- |
-| `too_many_arguments` | `capabilities/collab/service/collab.rs` 的 `start` / `restore`、`capabilities/session/domain/session.rs` 的 `new` / `restore`、`capabilities/conductor/service/mod.rs` 的 `Conductor::new` | 全是**组合根注入的构造函数**：参数天然多，收口成参数对象只是把参数挪个地方、并让装配更难读 |
+| `too_many_arguments` | `capabilities/collab/service/collab.rs` 的 `start`、`capabilities/collab/service/slate.rs` 的 `restore`、`capabilities/session/domain/session.rs` 的 `new` / `restore`、`capabilities/conductor/service/mod.rs` 的 `Conductor::new`、`capabilities/conductor/service/guest_job.rs` 的 `new` | 全是**组合根注入的构造函数**：参数天然多，收口成参数对象只是把参数挪个地方、并让装配更难读 |
 | `too_many_arguments` | `capabilities/session/service.rs` 的 `core_operation`、`capabilities/collab/service/round.rs` 的 `converse_with`、`capabilities/collab/service/discussion.rs` 的 `turn_with`、`capabilities/collab/service/synthesis.rs` 的 `Execution::review`、`capabilities/collab/service/driver.rs` 的 `discussion_turn`、`capabilities/collab/service/collab.rs` 的 `judge_clear` / `review_nodes` | 同一组参数（身份 / 工具面 / 通道 / 消息 / 出口 / 对照表 / 重填说明）：它们必须一路透传，收口成参数对象只是把参数挪个地方（`turn_with` 只服务内存测试通道） |
-| `dead_code` | `capabilities/conductor/api/mod.rs` 的 `SessionOps::exists` / `is_running` | **入站契约是发布给前端的接口面**：二进制 crate 里暂时没有生产调用点的接口方法会被 `dead_code` 误报（`is_running` 是运行态的**权威查询**——`SessionView.running` 只是事件台对账副本，最终一致） |
+| `dead_code` | `capabilities/conductor/api/mod.rs` 的 `SessionOps::create_work` / `exists` / `is_running` 与 `LogOps::warn` | **入站契约是发布给前端的接口面**：二进制 crate 里暂时没有生产调用点的接口方法会被 `dead_code` 误报（`is_running` 是运行态的**权威查询**——`SessionView.running` 只是事件台对账副本，最终一致；`warn` 供呈现层降级提示） |
 | `dead_code` | `capabilities/session/domain/events.rs` 的 `enum SessionEvent` | 事件词汇里的字段**不全在生产路径被读**（例如 `DiscussionDone` 的 `round` / `over_cap` 供呈现层做裁决确认页）；词汇就是线格式，字段随契约保留，删掉会让呈现侧拿不到事实 |
 | `dead_code` | `capabilities/workspace/api.rs` 的 `Workspace::work_restore` | 共享区"指定提交点还原"的**机制入口**（由测试钉住）：生产回档走 `work_rewind_to` / `work_discard_after` / `work_restore_point` 按行锚算目标，`work_restore` 作为对照留在接口面 |
 | `too_many_arguments` | `capabilities/conductor/service/env.rs` 的 `tools_env` / `build_single` | 会话装配把"这一席的工具面 / 这一场单 agent 会话"一次说全（模块 / 沙箱 / 缺包 / 网络 / 形态 / 角色 / 档位）：它们本就串联透传，收口成参数对象只是把参数挪个地方 |
@@ -77,8 +73,9 @@
 
 ## 四、不变量断言账（生产代码里的 panic 面）
 
-生产代码（不含 `src/tests/**` 与 `#[cfg(test)]` 之后）共 **26 处** `expect` / `panic!`。它们只允许出现在
-**同一函数内可静态看出必然成立**的位置——判据就在上文，`expect` 只是把「已判」写进代码：
+生产代码（不含 `src/tests/**` 与 `#[cfg(test)]` 之后）共 **33 处** `expect` / `panic!`：32 处是同一函数内可静态看出
+必然成立的不变量断言，1 处（进程启动线程失败）是进程级不可恢复错误。它们只允许出现在这种位置——`expect` 只是把「已判」写进代码。
+互斥锁的 21 处 `.expect("锁")` 不计入：锁中毒说明进程状态已不可信，按既有约定直接失败。
 
 | 位置 | 处数 | 为什么必然成立 |
 | --- | --- | --- |
@@ -88,8 +85,13 @@
 | `kernel/detail/confine/macos.rs` | 2 | `CString::new` 的两个入参是不含 NUL 的字面量与临时路径 |
 | `capabilities/tools/service/systool.rs` | 1 | `pending.get(path)` 的键由上一行同一函数算出 |
 | `capabilities/collab/service/tool_loop.rs` | 2 | 每个工具调用在上一行都被配对写入了执行结果 |
+| `capabilities/residents/service.rs` | 1 | `running.get_mut(&k)` 的键在同一函数内刚查过存在 |
+| `capabilities/provision/service.rs` | 3 | 三个待写路径都由同一函数 `join` 出来，必带父目录 |
+| `capabilities/session/domain/decisions.rs` | 1 | `queue.pop_front()` 前刚取过队首 |
+| `capabilities/vm/detail/share_virtiofs.rs` | 1 | `children.last_mut()` 前刚 `push` 过 |
+| `kernel/detail/procs.rs` | 1 | 起进程启动线程失败即无法继续（进程级不可恢复错误） |
 
-新增 panic 面必须同时更新本表；说不清「判据在哪一行」的，改成 `Result`。
+新增 panic 面必须同时更新本表；说不清「判据在哪一行」的，应返回 `Result`。
 
 ## 五、门禁之外：仓库卫生审查
 
@@ -105,9 +107,10 @@ node run-hygiene.js --strict   # 有发现即非零退出（给想拿它当自�
 - **格式存量**（注释契约，见 `ARCHITECTURE.md` 的「注释契约」）：判定与比对只有一处（在这个脚本里）；
   门禁拿它做**棘轮**——按 `文件 × 规则` 计数，**只减不增**（新文件零容忍、老文件同类变多也算新增），变少则要求销账；
   收紧是显式动作且只能往下（有新增就拒绝写盘），不让门禁偷偷改数，也不让「先违规再收紧」洗成存量。
-- **内容卫生**（只报）：悬挂的缺口 id（已删 id 从 git 历史取）、docs 与根文档里指向不存在的 `src/**.rs`；
+- **内容卫生**（只报）：悬挂的缺口 id（已删 id 从 git 历史取）、docs 与根文档里指向不存在的 `src/**.rs`、引用的根文档不存在；
   取不到 git 历史时如实写「没跑」，不当作通过。
-- 它**不进 T0、不进 `TEST-REPORT-*`**：混进门禁只有两种结局——门禁天天红，或者开始放行，两种都不诚实。
+- `run-hygiene.js` **本身不进 T0、不进 `TEST-REPORT-*`**：混进门禁只有两种结局——门禁天天红，或者开始放行，两种都不诚实。
+  门禁只复用它的注释契约判定做棘轮（结构审查里的一条），见 [levels.md](levels.md) 的 T0。
 
 ## 产物落点（临时诊断与运行日志）
 

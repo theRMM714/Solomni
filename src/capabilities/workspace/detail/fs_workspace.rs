@@ -91,6 +91,17 @@ impl Workdirs for FsWorkspace {
         Ok(())
     }
 
+    fn discard(&self, session: &str, agents: &[String]) -> Result<(), String> {
+        // 只删空目录：有任何内容都留着（用户的东西绝不因为一次失败的创建被删）。
+        let dir = self.session_dir(session);
+        let _ = std::fs::remove_dir(dir.join("work"));
+        for a in agents {
+            let _ = std::fs::remove_dir(dir.join(a));
+        }
+        let _ = std::fs::remove_dir(&dir);
+        Ok(())
+    }
+
     fn roots(&self, session: &str, agents: &[String]) -> Result<WorkRoots, String> {
         let dir = self.session_dir(session);
         let mut map = BTreeMap::new();

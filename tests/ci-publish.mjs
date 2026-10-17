@@ -12,7 +12,8 @@ const osName = (process.env.RUNNER_OS || "unknown").toLowerCase();
 const repo = process.env.GITHUB_REPOSITORY || "theRMM714/Solomni";
 const token = process.env.GITHUB_TOKEN || "";
 const runNumber = process.env.GITHUB_RUN_NUMBER || "0";
-const sha = process.env.GITHUB_SHA || "";
+// PR 触发时 GITHUB_SHA 是 merge commit；报告用 PR head（workflow 的 SOURCE_SHA），没有就退回 GITHUB_SHA。
+const sha = process.env.SOURCE_SHA || process.env.GITHUB_SHA || "";
 
 const esc = (s) => String(s).replace(/%/g, "%25").replace(/\r/g, "%0D").replace(/\n/g, "%0A");
 const annotate = (title, body) => console.log("::error title=" + esc(title) + "::" + esc(String(body).slice(0, 6000)));

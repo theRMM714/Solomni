@@ -657,10 +657,7 @@ fn guest_requirement(root: &Path, guest: Option<&str>, probe: &dyn HostProbe) ->
     }
     match crate::capabilities::vm::domain::guest::classify_base(&dir, probe) {
         Ok(b) => {
-            let root_kind = match &b.root {
-                crate::capabilities::vm::domain::guest::GuestRoot::Dir(_) => "目录 rootfs",
-                crate::capabilities::vm::domain::guest::GuestRoot::Disk(_) => "磁盘镜像 rootfs",
-            };
+            let root_kind = "磁盘镜像 rootfs";
             VmRequirement {
                 id: "base",
                 met: true,

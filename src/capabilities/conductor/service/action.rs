@@ -3,6 +3,7 @@
 //! 不管：会话装配本身（`work.rs` 的 `create_work_inner`）；生成怎么跑（在句柄的生成里）。
 //! 联动：载荷形状见 `conductor/domain/proxy.rs`；声明与 callers 在 `systools/tools.yaml`。
 
+use super::guest_job::GuestBoot;
 use super::*;
 use crate::capabilities::conductor::domain::proxy as d;
 use crate::kernel::api::Tier;
@@ -12,10 +13,27 @@ impl Conductor {
     /// 参数：`spec` 是规整后的载荷（名字 / 档位 / 名单 / 本次需求）。
     /// 返回：建出的会话与名单 + 开场事实（事实由 api 层发布到事件台）。
     /// 错误：形态、名字、档位或名单不成立时如实拒绝，不留半成品。
+    #[cfg(test)]
     pub(crate) fn create_session(
         &mut self,
         spec: &d::NewSession,
     ) -> Result<(d::Created, Vec<SessionEvent>), String> {
+        let (prepared, boot) = self.prepare_session(spec)?;
+        if let Some(boot) = boot {
+            if let Err(e) = boot.run() {
+                self.abort_session(prepared);
+                return Err(e);
+            }
+        }
+        self.commit_session(prepared)
+    }
+
+    /// 目的：建会话的第一段（核心，毫秒级）——规整载荷、占名、备好工作区与计划。
+    /// 返回：准备结果 + 可选的那段"要等 guest"的活（虚拟机档才有）。
+    pub(crate) fn prepare_session(
+        &mut self,
+        spec: &d::NewSession,
+    ) -> Result<(PreparedSession, Option<GuestBoot>), String> {
         let mode = match spec.mode {
             d::SessionMode::Single => WorkMode::Single,
             d::SessionMode::Collab => WorkMode::Collab,
@@ -102,10 +120,19 @@ impl Conductor {
             guest: vm_guest,
         };
         // 有父 = 子工作（`create_work_inner` 直接给 parent）；没有父 = 顶层会话，走同一个入口包装。
-        let opened = match parent.as_deref() {
-            Some(p) => self.create_work_inner(work, Some(p))?,
-            None => self.create_work(work)?,
+        let prepared = match parent.as_deref() {
+            Some(p) => self.prepare_work(work, Some(p))?,
+            None => self.prepare_work(work, None)?,
         };
+        Ok((PreparedSession { work: prepared.0 }, prepared.1))
+    }
+
+    /// 目的：建会话的第二段（核心）——装配会话对象、落盘身份、开场事实。
+    pub(crate) fn commit_session(
+        &mut self,
+        prepared: PreparedSession,
+    ) -> Result<(d::Created, Vec<SessionEvent>), String> {
+        let opened = self.commit_work(prepared.work)?;
         Ok((
             d::Created {
                 session: opened.sid,
@@ -114,4 +141,14 @@ impl Conductor {
             opened.facts,
         ))
     }
+
+    /// 目的：建会话失败时撤销准备段（占名与空工作区目录）。
+    pub(crate) fn abort_session(&mut self, prepared: PreparedSession) {
+        self.abort_work(prepared.work);
+    }
+}
+
+/// 目的：一次建会话的准备结果（两段之间的交接物）。
+pub(crate) struct PreparedSession {
+    work: super::work::PreparedWork,
 }

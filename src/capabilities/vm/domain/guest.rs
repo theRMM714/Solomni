@@ -38,15 +38,6 @@ impl GuestArch {
     }
 }
 
-/// 目的：guest 根的承载方式——目录（QEMU 经 9p 当根，仅 Linux / macOS 宿主）或磁盘镜像（三平台通用）。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum GuestRoot {
-    /// 目录根：QEMU 的 virtfs 把它挂成 guest 的 /；Windows 宿主没有 virtfs。
-    Dir(PathBuf),
-    /// 磁盘镜像根（qcow2 / raw）：宿主只是普通文件 I/O，三平台与各引擎通用（Windows 宿主没有 9p）。
-    Disk(PathBuf),
-}
-
 /// 目的：guest 的 OS——决定它认识的路径拼法（路径桥按它选方言），也是以后接非 Linux guest 的钥匙。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GuestOs {
@@ -116,8 +107,8 @@ impl GuestClients {
     }
 }
 
-/// 目的：一份 guest 镜像（四轴里的 guest 轴）——根（目录或磁盘镜像）+ 内核（可选 initrd）+ agent 与共享客户端能力。
-/// 约束：磁盘镜像与更多 guest 见 docs/vm/README.md 的「多平台组合」。
+/// 目的：一份 guest 镜像（四轴里的 guest 轴）——磁盘镜像（可选内核 + initrd）+ agent 与共享客户端能力。
+/// 约束：根**只能是磁盘镜像**：会话每次都叠一份每租约可写层，谁也不写基础镜像（见 docs/vm/README.md 的「多平台组合」）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GuestImage {
     /// 目的：镜像名（诊断与日志用；默认取基础根目录名）。
@@ -125,7 +116,8 @@ pub struct GuestImage {
     pub arch: GuestArch,
     /// 目的：guest 的 OS（路径桥按它选方言；缺省 linux）。
     pub os: GuestOs,
-    pub root: GuestRoot,
+    /// 目的：基础磁盘镜像（qcow2 / raw ext4）：宿主只是普通文件 I/O，三平台与各引擎通用。
+    pub disk: PathBuf,
     pub kernel: Option<PathBuf>,
     pub initrd: Option<PathBuf>,
     pub agent: GuestAgent,
@@ -139,7 +131,7 @@ impl GuestImage {
     /// 目的：一份 Linux guest 镜像——默认 QGA 命令通道与 Debian 的共享客户端能力。
     pub fn linux(
         id: &str,
-        root: GuestRoot,
+        disk: PathBuf,
         kernel: Option<PathBuf>,
         initrd: Option<PathBuf>,
     ) -> GuestImage {
@@ -147,7 +139,7 @@ impl GuestImage {
             id: id.to_string(),
             arch: GuestArch::host(),
             os: GuestOs::Linux,
-            root,
+            disk,
             kernel,
             initrd,
             agent: GuestAgent::Qga,
@@ -199,7 +191,7 @@ pub struct GuestSpec {
     /// 约束：投种子要求 `net = true`（guest 要能连到宿主的小 HTTP 服务）。
     pub seed: Option<SeedDocs>,
     /// 目的：要不要给这次启动一份**每租约可写层**（会话要：多台并发不能同写一份基础镜像）。
-    /// 约束：只有磁盘根建得了可写层（目录根忽略它）；供给编排要改的正是基础镜像本身，填 false。
+    /// 约束：根永远是磁盘镜像，所以总建得了可写层；供给编排要改的正是基础镜像本身，填 false。
     pub isolated: bool,
 }
 
@@ -291,7 +283,7 @@ fn read_manifest(base: &Path, probe: &dyn HostProbe) -> Result<Option<GuestManif
         .map_err(|e| format!("guest.yaml 非法（{}）", e))
 }
 
-/// 目的：把基础根目录判成一份可用的 guest 镜像（rootfs 目录 + vmlinuz/bzImage + 可选 initrd）。
+/// 目的：把基础根目录判成一份可用的 guest 镜像（磁盘镜像 + 可选 vmlinuz/bzImage 与 initrd + 可选 guest.yaml）。
 /// 返回：判定出来的镜像；不到一处可用的布局时给一句缺什么。
 pub fn classify_base(base: &Path, probe: &dyn HostProbe) -> Result<GuestImage, String> {
     if !probe.is_dir(base) {
@@ -305,7 +297,7 @@ pub fn classify_base(base: &Path, probe: &dyn HostProbe) -> Result<GuestImage, S
         .iter()
         .map(|n| base.join(n))
         .find(|p| probe.is_file(p));
-    // 目录里放着 rootfs 磁盘镜像就用磁盘根（三平台通用），否则用目录根（QEMU 的 virtfs 把它挂成 /）。
+    // 虚拟根里必须有一份磁盘镜像（会话的可写层就叠在它上面）；没有就是没装好。
     let disk = [
         "rootfs.ext4",
         "rootfs.qcow2",
@@ -315,17 +307,11 @@ pub fn classify_base(base: &Path, probe: &dyn HostProbe) -> Result<GuestImage, S
     ]
     .iter()
     .map(|n| base.join(n))
-    .find(|p| probe.is_file(p));
-    let root = match disk {
-        Some(image) => GuestRoot::Disk(image),
-        None => GuestRoot::Dir(base.to_path_buf()),
-    };
-    // 目录根必须直启内核；只有磁盘镜像可以靠自身引导（不传 -kernel / -append）。
-    if kernel.is_none() && matches!(&root, GuestRoot::Dir(_)) {
-        return Err(
-            "基础根里没有 vmlinuz / bzImage（目录根必须直启内核；磁盘镜像可自带引导）".to_string(),
-        );
-    }
+    .find(|p| probe.is_file(p))
+    .ok_or_else(|| {
+        "基础根里没有磁盘镜像（rootfs.ext4 / rootfs.qcow2 / disk.qcow2 / disk.raw / rootdisk.qcow2）：先跑一次补齐把虚拟根装好"
+            .to_string()
+    })?;
     let manifest = read_manifest(base, probe)?;
     let id = manifest
         .as_ref()
@@ -384,7 +370,7 @@ pub fn classify_base(base: &Path, probe: &dyn HostProbe) -> Result<GuestImage, S
         None => GuestOs::Linux,
         Some(s) => GuestOs::parse(s)?,
     };
-    let mut image = GuestImage::linux(&id, root, kernel, initrd);
+    let mut image = GuestImage::linux(&id, disk, kernel, initrd);
     image.arch = arch;
     image.os = os;
     image.agent = agent;
@@ -407,7 +393,7 @@ const SYSTEM_PKG_STAMP_DIR: &str = "/var/lib/solomni/packages";
 /// 目的：已装载包起 guest 后要跑的装配脚本——prefix 包把 `<prefix>/bin/*` 软链进 PATH，
 ///    system 包把只读载荷按 `provides_paths` **叠写**进系统路径（复制合并，不挂载覆盖）。
 /// 参数：plan = 这次执行计划（包由包库扫描给出）。
-/// 约束：system 包按"已叠标记"幂等（目录根上只付一次；磁盘根的可写层每会话付一次）；载荷里缺的路径由脚本如实跳过。
+/// 约束：system 包按"已叠标记"幂等（标记落在 guest 根文件系统里；每会话一份可写层，所以每会话付一次）；载荷里缺的路径由脚本如实跳过。
 pub fn package_setup_scripts(plan: &ExecPlan) -> Vec<String> {
     let mut out = Vec::new();
     for p in &plan.packages {

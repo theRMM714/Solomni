@@ -4,6 +4,7 @@
 //       → 外部工具 cwd / 绝对路径 / 自由格式补丁 / 正文+信封 / 原生多调用（协议形状由假供应商核对）
 //       → 工具级确认（与本通道同形）：生成中停下等 allow / deny / full；快照带那张卡（刷新能重建）；full 本轮不再问
 //       → MCP 常驻服务：模块声明的服务操作进工具面，经真进程调用，回执与本地计算的摘要对账。
+//       → 父死子亡：核心被强杀后，常驻服务的进程跟着消失（最后一步，核心一死就没有后续场景了）。
 //       → 代理模式：核心自己挑人、建子工作、转达，来源如实落档，停止即全停。
 const BASE = process.env.E2E_BASE || 'http://127.0.0.1:3099';
 // 假供应商端口由编排器指定：本机可能残留上一次的进程，固定端口会让驱动打到旧的那个。
@@ -54,6 +55,31 @@ let failed = 0;
 function assert(cond, label, extra) {
   if (!cond) failed++;
   console.log((cond ? 'PASS ' : 'FAIL ') + label + (cond || extra === undefined ? '' : ' :: ' + extra));
+}
+/** pid 还活着吗（0 号信号只探存在，不送信号）。 */
+function pidAlive(pid) {
+  try { process.kill(pid, 0); return true; } catch { return false; }
+}
+/** 等服务把自己的 pid 写进文件（到点返回 0）。 */
+async function waitPidFile(file, ms) {
+  const deadline = Date.now() + ms;
+  for (;;) {
+    try {
+      const pid = Number(String(fs.readFileSync(file, 'utf8')).trim());
+      if (pid > 0) return pid;
+    } catch {}
+    if (Date.now() > deadline) return 0;
+    await new Promise((r) => setTimeout(r, 50));
+  }
+}
+/** 等这个 pid 消失（到点返回 false）。 */
+async function waitPidGone(pid, ms) {
+  const deadline = Date.now() + ms;
+  for (;;) {
+    if (!pidAlive(pid)) return true;
+    if (Date.now() > deadline) return false;
+    await new Promise((r) => setTimeout(r, 50));
+  }
 }
 const dir = (name) => path.join(ROOT, 'session', name);
 /** 假供应商那一侧看到的最后一条请求（它记下了消息形状）：原生通道的协议形状只能在这里验。 */
@@ -902,6 +928,28 @@ async function approvePlan(name) {
       const vfp = require('child_process').spawnSync('pgrep', ['-af', 'virtiofsd'], { encoding: 'utf8' });
       const vfAlive = (vfp.stdout || '').split('\n').filter((l) => l.includes('--socket-path') && l.includes('solomni-virtiofs-'));
       assert(vfAlive.length === 0, '删除会话后 virtiofsd 进程销毁', vfAlive.join(' | ').slice(0, 240));
+    }
+  }
+  /* ---------- 父死子亡（L4）：核心被强杀，常驻服务进程必须跟着没 ----------
+   * 前面 MCP 场景是**正常停止**服务；这里再起一次，让编排器把核心 SIGKILL 掉，
+   * 按服务自己记下的 pid 断言它已消失。放在最后：核心一死，后面没有任何 HTTP 场景还能跑。
+   */
+  {
+    const MCP_MODULE = 'mcp-toolbox';
+    const MCP_SERVICE = 'toolbox';
+    const pidfile = path.join(ROOT, 'modules', 'mcp-toolbox', 'userdata', 'mcp-service.pid');
+    fs.rmSync(pidfile, { force: true });
+    const again = await reg('control_resident', { module: MCP_MODULE, name: MCP_SERVICE, action: 'start' });
+    assert(again.status === 200, '为父死子亡场景再拉起 MCP 服务', again.text.slice(0, 300));
+    const svcPid = await waitPidFile(pidfile, 10000);
+    assert(svcPid > 0 && pidAlive(svcPid), '服务进程把自己的 pid 交出来了', String(svcPid));
+    const corePid = Number(process.env.E2E_SRV_PID || 0);
+    assert(corePid > 0, '编排器把核心 pid 交给了驱动', String(process.env.E2E_SRV_PID));
+    if (svcPid > 0 && corePid > 0) {
+      // 核心被**强杀**（不是正常退出）：守门进程与它拉起的服务都不该留下。
+      try { process.kill(corePid, 'SIGKILL'); } catch (e) { assert(false, '强杀核心', e.message); }
+      const gone = await waitPidGone(svcPid, 15000);
+      assert(gone, '核心被强杀后，常驻服务进程跟着没了（父死子亡）', 'pid=' + svcPid);
     }
   }
   console.log((failed ? 'E2E-FAILED failed=' + failed : 'E2E-DONE exitCode=0'));

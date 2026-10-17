@@ -77,11 +77,25 @@ function writeToolbox(py) {
 
 
 /** MCP 夹具模块：声明一个 MCP 常驻服务，命令用本机探到的解释器名；服务本体就是仓库里那个 server.py。
- * 为什么重写清单而不是直接复制真模块：真模块的命令写死 `python`，Linux / macOS 上通常只有 `python3`。 */
+ * 为什么重写清单而不是直接复制真模块：真模块的命令写死 `python`，Linux / macOS 上通常只有 `python3`。
+ * 夹具副本的 server.py 开头多几行：把服务进程的 pid 记进模块 userdata/（围栏里"恒可写"的那一块），
+ * 驱动最后靠它断言"核心被强杀后服务进程跟着没"。 */
 function writeMcpModule(py) {
   const dir = path.join(FIXTURE, "modules", "mcp-toolbox");
   fs.mkdirSync(path.join(dir, "tools"), { recursive: true });
-  fs.cpSync(path.join(PRODUCT_ROOT, "modules", "mcp-toolbox", "tools", "server.py"), path.join(dir, "tools", "server.py"), { force: true });
+  // pid 落在模块的 userdata/（沙箱外的路径服务写不进去）；写在服务进程自己开头，pid 就是它自己。
+  const pidfile = path.join(dir, "userdata", "mcp-service.pid");
+  fs.rmSync(pidfile, { force: true });
+  const source = fs.readFileSync(path.join(PRODUCT_ROOT, "modules", "mcp-toolbox", "tools", "server.py"), "utf8");
+  const prelude = [
+    "# e2e 夹具注入：把服务进程的 pid 记进模块 userdata/（父死子亡场景按它断言进程消失）。",
+    "import os as _e2e_os",
+    "_e2e_os.makedirs(_e2e_os.path.dirname(" + JSON.stringify(pidfile) + "), exist_ok=True)",
+    "with open(" + JSON.stringify(pidfile) + ", 'w') as _e2e_f:",
+    "    _e2e_f.write(str(_e2e_os.getpid()))",
+    "",
+  ].join("\n");
+  fs.writeFileSync(path.join(dir, "tools", "server.py"), prelude + source);
   const text = [
     "id: mcp-toolbox",
     "brief: e2e 夹具：声明一个 MCP 常驻服务，验证「服务操作进工具面并被调用」。",
@@ -262,6 +276,8 @@ async function main() {
       env: Object.assign({}, process.env, {
         E2E_BASE: "http://127.0.0.1:" + PORT_SRV,
         E2E_MOCK_BASE: "http://127.0.0.1:" + mockPort,
+        // 驱动最后要强杀核心来验父死子亡：pid 由它自己拿到，不靠驱动去猜。
+        E2E_SRV_PID: String(srv.pid),
       }),
     });
     const code = await new Promise((resolve) => driver.on("exit", (c) => resolve(c === null ? 1 : c)));

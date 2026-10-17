@@ -4,10 +4,11 @@
 //! 联动：端口在 ports.rs；由组合根构造、service.rs 持有。
 
 use crate::capabilities::vm::domain::guest::{
-    GuestArch, GuestImage, GuestRoot, GuestRun, GuestSpec, SeedDocs,
+    GuestArch, GuestImage, GuestRun, GuestSpec, SeedDocs,
 };
 use crate::capabilities::vm::ports::{GuestChannel, GuestVm, SharePlan, VmEngine};
 use crate::kernel::api::ToolOutcome;
+use crate::kernel::detail::procs::{self, Entry, ProcessBook};
 use std::io::{BufRead, BufReader, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
@@ -41,19 +42,31 @@ pub fn qemu_exe(arch: GuestArch) -> &'static str {
 pub struct QemuEngine {
     /// 每租约可写层的落点（组合根注入；None = 不提供可写层——供给编排改的正是基础镜像本身）。
     overlay_dir: Option<PathBuf>,
+    /// 长驻子进程的账（组合根注入；None = 不记账——测试与不需要对账的场合）。
+    book: Option<std::sync::Arc<ProcessBook>>,
 }
 
 impl QemuEngine {
     /// 目的：组合根专用（不带可写层：供给编排与测试用）。
     pub fn new() -> QemuEngine {
-        QemuEngine { overlay_dir: None }
+        QemuEngine {
+            overlay_dir: None,
+            book: None,
+        }
     }
 
     /// 目的：组合根专用（带每租约可写层的落点：会话的 guest 盘写在这里，删会话即丢）。
     pub fn with_overlay_dir(dir: PathBuf) -> QemuEngine {
         QemuEngine {
             overlay_dir: Some(dir),
+            book: None,
         }
+    }
+
+    /// 目的：接上长驻子进程的账（组合根注入）：每次 boot 登记一条，销毁时注销。
+    pub fn with_book(mut self, book: std::sync::Arc<ProcessBook>) -> QemuEngine {
+        self.book = Some(book);
+        self
     }
 }
 
@@ -64,7 +77,7 @@ pub const GUEST_MEM_MB: u32 = 2048;
 /// 参数：channel_opts 是 QGA chardev 的补充选项；share_needs_net = 共享后端要不要 guest 有（受限）网卡；
 ///   share_needs_mem = 共享后端要不要 guest RAM 是**可共享内存**（vhost-user 设备，如 virtiofs）；
 ///   seed_url = 首启 cloud-init 的 NoCloud net 种子根 URL（None = 不投种子）。
-/// 约束：rootfs 经 virtio-9p 的 base 标签挂成根——当前的根仍是目录；磁盘镜像见 docs/vm/README.md 的「多平台组合」。
+/// 约束：根永远是磁盘镜像（`-drive file=…,if=virtio`；会话的那一份是每租约可写层），有内核就 `root=/dev/vda` 直启。
 pub fn engine_args(
     spec: &GuestSpec,
     channel_opts: &str,
@@ -101,6 +114,9 @@ pub fn engine_args(
     ] {
         a.push(v.to_string());
     }
+    // 进程名里带上归属：对账时靠它在进程表里认出"这是我们那个租约的 QEMU"。
+    a.push("-name".to_string());
+    a.push(format!("solomni:{}", spec.lease));
     // 有内核就直启（-kernel / -initrd / -append）；没有内核的磁盘根靠镜像自带的引导（固件启动）。
     if let Some(kernel) = &spec.image.kernel {
         a.push("-kernel".to_string());
@@ -110,31 +126,13 @@ pub fn engine_args(
             a.push(initrd.display().to_string());
         }
     }
-    match &spec.image.root {
-        GuestRoot::Dir(dir) => {
-            a.push("-fsdev".to_string());
-            a.push(format!(
-                // 目录根共享**可写**：内核按 root=... rw 挂它，额外 9p 挂载点也要在 guest 根里建得出来。
-                // `none`：guest 的 chown 会被顶回 EPERM——所以目录根上**不要**走 dpkg 装包（见 provision 的 node 路径）。
-                "local,id=fsbase,path={},security_model=none",
-                dir.display()
-            ));
-            a.push("-device".to_string());
-            a.push("virtio-9p-pci,fsdev=fsbase,mount_tag=base".to_string());
-            a.push("-append".to_string());
-            a.push(
-                "console=ttyS0 root=base rootfstype=9p rootflags=trans=virtio,version=9p2000.L rw"
-                    .to_string(),
-            );
-        }
-        GuestRoot::Disk(image) => {
-            a.push("-drive".to_string());
-            a.push(format!("file={},if=virtio", image.display()));
-            if spec.image.kernel.is_some() {
-                a.push("-append".to_string());
-                a.push("console=ttyS0 root=/dev/vda rw".to_string());
-            }
-        }
+    // 根永远是磁盘镜像（会话的那一份是每租约可写层）。
+    a.push("-drive".to_string());
+    a.push(format!("file={},if=virtio", spec.image.disk.display()));
+    // 有内核就直启、由命令行给根设备；没有内核靠镜像自带引导（固件）。
+    if spec.image.kernel.is_some() {
+        a.push("-append".to_string());
+        a.push("console=ttyS0 root=/dev/vda rw".to_string());
     }
     // 首启种子：SMBIOS type 1 的 serial 是 cloud-init NoCloud 认识的数据源指路（ds=nocloud-net;s=<URL>）。
     if let Some(url) = seed_url {
@@ -172,15 +170,12 @@ impl VmEngine for QemuEngine {
         "qemu"
     }
 
-    /// 约束：架构要匹配；目录根靠 9p，只有 Linux / macOS 宿主的 QEMU 有 virtfs；磁盘根三平台通用。
+    /// 约束：架构要匹配；根是磁盘镜像，三平台通用。
     fn supports(&self, guest: &GuestImage) -> bool {
         if guest.arch != GuestArch::host() {
             return false;
         }
-        match &guest.root {
-            GuestRoot::Dir(_) => cfg!(target_os = "linux") || cfg!(target_os = "macos"),
-            GuestRoot::Disk(_) => true,
-        }
+        true
     }
 
     fn boot(&self, spec: &GuestSpec, share: &SharePlan) -> Result<Box<dyn GuestVm>, String> {
@@ -196,8 +191,8 @@ impl VmEngine for QemuEngine {
             .map(str::to_string)
             .unwrap_or_else(|| qemu_exe(spec.image.arch).to_string());
         // 每租约可写层：会话不直写基础镜像（多台并发会同写一份）；供给编排要改基础镜像本身，isolated = false。
-        let overlay = match (&spec.image.root, spec.isolated) {
-            (GuestRoot::Disk(base), true) => {
+        let overlay = match (&spec.image.disk, spec.isolated) {
+            (base, true) => {
                 let dir = self
                     .overlay_dir
                     .as_ref()
@@ -240,19 +235,36 @@ impl VmEngine for QemuEngine {
             args.insert(0, "-L".to_string());
         }
         args.extend(share.engine_args.iter().cloned());
-        let child = Command::new(&exe)
-            .args(&args)
+        let mut cmd = Command::new(&exe);
+        cmd.args(&args)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             // stderr 继承：QEMU 起不来时（固件缺失这类）错误要能看见，不能吞进 null。
-            .stderr(Stdio::inherit())
-            .spawn()
-            .map_err(|e| format!("起不了 QEMU（{}）：{}", exe, e))?;
+            .stderr(Stdio::inherit());
+        // 父死子亡（Unix）与独立进程组：核心被强杀时不许 QEMU 继续攥着镜像。
+        procs::guard(&mut cmd);
+        let child = procs::spawn(cmd).map_err(|e| format!("起不了 QEMU（{}）：{}", exe, e))?;
+        // 作业对象（Windows）/ 守门进程（macOS）：核心一死，它跟着死。接不上只如实少一层兜底，不阻断启动。
+        let _ = procs::bind(&child);
+        procs::watch(&child);
+        let pid = child.id();
+        if let Some(book) = &self.book {
+            book.record(Entry {
+                pid,
+                since: procs::now_ts(),
+                purpose: "guest".to_string(),
+                owner: spec.lease.clone(),
+                marker: format!("solomni:{}", spec.lease),
+            });
+        }
         drop(listener);
         let stream = match connect_within(port, Duration::from_secs(30)) {
             Ok(s) => s,
             Err(e) => {
                 // 连不上就把刚拉起的 QEMU 与刚建的可写层都收掉，别留孤儿。
+                if let Some(book) = &self.book {
+                    book.forget(pid);
+                }
                 let mut c = child;
                 let _ = c.kill();
                 let _ = c.wait();
@@ -274,6 +286,8 @@ impl VmEngine for QemuEngine {
             port,
             seed,
             overlay,
+            book: self.book.clone(),
+            pid,
         };
         // agent 要等内核起来才通；投种子时（首启装 agent）不等，交给编排轮询，其余情况先等到就绪再挂载/回命令。
         if spec.seed.is_none() {
@@ -335,7 +349,7 @@ fn lease_file_name(lease: &str) -> String {
 fn with_overlay(image: &GuestImage, overlay: Option<&Path>) -> GuestImage {
     let mut out = image.clone();
     if let Some(path) = overlay {
-        out.root = GuestRoot::Disk(path.to_path_buf());
+        out.disk = path.to_path_buf();
     }
     out
 }
@@ -419,6 +433,10 @@ struct QemuHandle {
     seed: Option<SeedServer>,
     /// 每租约可写层文件；stop / Drop 时删掉（删会话即丢写层）。
     overlay: Option<PathBuf>,
+    /// 长驻子进程的账（有就在收尾时注销这一条）。
+    book: Option<std::sync::Arc<ProcessBook>>,
+    /// 这个句柄对应的 QEMU 进程（注销登记用）。
+    pid: u32,
 }
 
 /// 目的：首启种子的小 HTTP 服务（cloud-init NoCloud net）——只在这次 boot 期间活着，随 guest 一起收掉。
@@ -516,6 +534,9 @@ impl QemuHandle {
         if let Some(path) = self.overlay.take() {
             let _ = std::fs::remove_file(&path);
         }
+        if let Some(book) = &self.book {
+            book.forget(self.pid);
+        }
     }
 
     /// 目的：通道断了就照同一个端口重连一次，并把读超时照原样装回去。
@@ -530,14 +551,21 @@ impl QemuHandle {
         Ok(())
     }
 
-    /// 目的：握手一次；不通就先重连再握手（通道被 QEMU 换掉是常态，不是故障）。
+    /// 目的：握手一次；不通就退避重连再握手（通道被 QEMU 换掉是常态，不是故障）。
+    /// 约束：有界（约 15 秒）——guest agent 刚就绪时可能连着换几次通道，换一次不够；
+    ///   真起不来时仍如实报错，不无限等。
     fn sync_or_heal(&mut self) -> Result<(), String> {
-        match self.sync() {
-            Ok(()) => Ok(()),
-            Err(_) => {
-                self.reconnect()?;
-                self.sync()
+        let deadline = Instant::now() + Duration::from_secs(15);
+        loop {
+            let last = match self.sync() {
+                Ok(()) => return Ok(()),
+                Err(e) => e,
+            };
+            if Instant::now() >= deadline {
+                return Err(last);
             }
+            std::thread::sleep(Duration::from_millis(200));
+            let _ = self.reconnect();
         }
     }
 
@@ -900,6 +928,8 @@ mod tests {
             port,
             seed: None,
             overlay: None,
+            book: None,
+            pid: 0,
         };
         assert!(handle.ping(), "被 RST 的那条连接要能靠重连救回来");
         server.join().expect("服务器线程");
@@ -963,12 +993,7 @@ mod tests {
     /// 目的：有种子就给 -smbios 数据源指路；没有种子就不给。
     #[test]
     fn seed_url_adds_smbios_datasource() {
-        let image = GuestImage::linux(
-            "t",
-            GuestRoot::Disk(std::path::PathBuf::from("/img/root.qcow2")),
-            None,
-            None,
-        );
+        let image = GuestImage::linux("t", std::path::PathBuf::from("/img/root.qcow2"), None, None);
         let spec = GuestSpec {
             lease: "w".to_string(),
             image,
@@ -996,19 +1021,11 @@ mod tests {
     fn overlay_replaces_the_disk_root() {
         let base = std::path::PathBuf::from("/img/root.qcow2");
         let kernel = std::path::PathBuf::from("/img/vmlinuz");
-        let image = GuestImage::linux(
-            "t",
-            GuestRoot::Disk(base.clone()),
-            Some(kernel.clone()),
-            None,
-        );
+        let image = GuestImage::linux("t", base.clone(), Some(kernel.clone()), None);
         let with = with_overlay(&image, Some(Path::new("/ov/x.qcow2")));
-        assert_eq!(
-            with.root,
-            GuestRoot::Disk(std::path::PathBuf::from("/ov/x.qcow2"))
-        );
+        assert_eq!(with.disk, std::path::PathBuf::from("/ov/x.qcow2"));
         assert_eq!(with.kernel, Some(kernel), "内核仍取自基础根");
-        assert_eq!(with_overlay(&image, None).root, GuestRoot::Disk(base));
+        assert_eq!(with_overlay(&image, None).disk, base);
     }
 
     /// 目的：后备格式按扩展名认——qcow2 是 qcow2，ext4 / raw 这类按 raw（否则 qemu-img 会猜错）。

@@ -21,7 +21,7 @@
 
 ## 四、改动本单元时必须同步
 
-- 状态派生（`domain/`）与驱动（`service/driver.rs`）必须同改；`src/tests/collab/` 五份用例、本目录 `task-chain.md`、`docs/session/session-model.md`、`docs/tools/tools-and-roles.md`。
+- 状态派生（`domain/`）与驱动（`service/driver.rs`）必须同改；`src/tests/collab/` 五份用例、`docs/collab/task-chain.md`、`docs/session/session-model.md`、`docs/tools/tools-and-roles.md`。
 
 ## 本目录
 

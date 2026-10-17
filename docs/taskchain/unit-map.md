@@ -6,5 +6,5 @@
 
 | 文件 | 职责 |
 | --- | --- |
-| `src/capabilities/taskchain/api.rs` |
-| `src/capabilities/taskchain/domain/chain.rs` |
+| `src/capabilities/taskchain/api.rs` | 入站能力面：`TaskChain` / `TaskNode` / `NodeStatus` / `Acceptance` 与阶段、就绪、验收判定的重导出 |
+| `src/capabilities/taskchain/domain/chain.rs` | 依赖图与纯函数：阶段派生（最长路径分层）、就绪、验收判定与环拒绝 |

@@ -95,6 +95,9 @@ impl crate::capabilities::provision::api::Provision for FakeProvision {
     fn guest_bases(&self) -> Result<Vec<crate::capabilities::provision::api::GuestBase>, String> {
         self.guard().map(|_| Vec::new())
     }
+    fn processes(&self) -> Result<Vec<crate::capabilities::provision::api::ProcInfo>, String> {
+        self.guard().map(|_| Vec::new())
+    }
     fn job(&self) -> crate::capabilities::provision::api::JobState {
         Default::default()
     }
@@ -966,6 +969,7 @@ fn success_shapes_are_pinned_per_route() {
             200,
             "\"agents\"",
         ),
+        ("GET", "/api/processes", "", 200, "\"procs\""),
         ("GET", "/api/setup/status", "", 200, "\"pending\""),
         ("POST", "/api/setup/ensure", "{}", 200, "\"preview\""),
         ("DELETE", "/api/setup/job", "", 200, "\"ok\""),

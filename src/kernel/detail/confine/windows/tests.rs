@@ -1,7 +1,7 @@
 //! 目的：Windows 围栏的真机探针——AppContainer 授权、容器往返、ACL 台账与撤权。
 //! 管：需要改本机权限项（建 profile、写 ACL）的用例，--fence-live 才跑。
 //! 不管：非 Windows 平台的行为（见 tests/linux、tests/macos）。
-//! 联动：机制在 confine/windows/ 各文件；判据见 docs/tools/README.md。
+//! 联动：机制在 confine/windows/ 各文件；判据见 docs/kernel/README.md 的「围栏落点：必要与可选」。
 
 use super::super::Owner;
 use super::*;
@@ -197,7 +197,7 @@ fn grant_targets_include_parents_with_stat_only() {
         "用户授权的只读根不递归"
     );
     // 必要性判据：**用户授权的只读根**是可选落点（授不上只记事实），其余叶子都是必要落点
-    // （缺了这次命令在容器里起不来，或这次执行做不了该做的事）——判据见 docs/tools/README.md。
+    // （缺了这次命令在容器里起不来，或这次执行做不了该做的事）——判据见 docs/kernel/README.md 的「围栏落点：必要与可选」。
     assert_eq!(
         find(&dir).map(|t| t.part),
         Some(FencePart::DataBoundary),

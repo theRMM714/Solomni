@@ -5,6 +5,21 @@
 
 use serde::Serialize;
 
+/// 目的：一条长驻子进程（`--doctor` 与界面"现在在跑什么"）：它是产品亲手起的，还是上次留下的。
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProcInfo {
+    pub pid: u32,
+    /// 目的：还活着吗（账上有、进程没了 = 上次没收干净的死条目）。
+    pub alive: bool,
+    /// 目的：用途（guest / share:virtiofs / share:smb）。
+    pub purpose: String,
+    /// 目的：归属（租约 = 会话名；共享则记落点）。
+    pub owner: String,
+    /// 目的：起的时间（unix 秒）。
+    pub since: u64,
+}
+
 /// 目的：一条依赖在本机的状态（给界面看：缺什么、装到哪、从哪来）。
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct DepStatus {
@@ -60,6 +75,8 @@ pub trait Provision: Send + Sync {
     /// 目的：本机的虚拟根清单（虚拟机档的候选；只列本机平台用得上的那些）。
     /// 约束：只是清单事实 + 是否装齐，不做启动判定（那在 `vm` 的档位判据里）。
     fn guest_bases(&self) -> Result<Vec<GuestBase>, String>;
+    /// 目的：账上记着的长驻子进程（还活着的 + 还没清掉的死条目），界面与 `--doctor` 用它说"现在在跑什么"。
+    fn processes(&self) -> Result<Vec<ProcInfo>, String>;
     /// 目的：当前作业快照。
     fn job(&self) -> JobState;
     /// 目的：起一个补齐作业（ids 空 = 本机全部）；已有作业在跑则拒绝。
@@ -76,6 +93,9 @@ impl Provision for NoProvision {
         Err("依赖补齐未接入".to_string())
     }
     fn guest_bases(&self) -> Result<Vec<GuestBase>, String> {
+        Err("依赖补齐未接入".to_string())
+    }
+    fn processes(&self) -> Result<Vec<ProcInfo>, String> {
         Err("依赖补齐未接入".to_string())
     }
     fn job(&self) -> JobState {

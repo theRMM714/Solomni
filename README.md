@@ -7,25 +7,17 @@ Solomni 是一个**跑在自己机器上的 agent 运行环境（AgentOS）**：
 
 ## 为什么需要它
 
-**① 你有一个工具或工作流，想让 AI 用上它。**
-把工具包成某个产品专用的插件，等于把它绑在那个产品上：换 agent、换平台要再包一遍，工具本身也多一层与主产品耦合的壳。
-这里改为**按契约适配一次**：一个文件夹 + 一份 `module.yaml`（职责提示词 + 工具声明），启动命令仍由它自己声明。
-适配改动只落在模块自己那边（例如把可执行文件放进模块目录、按契约约定参数的传法与回执的形状）——不动本仓代码结构、不引任何 SDK。
-结果是**契约之外双方互不依赖**：把本产品拿掉，模块照原样跑；把模块移走，产品照常运行。
-同一个能力，人走界面用、agent 走契约用，共用同一份声明，不必维护两套入口。
-
-**② 多个 agent 一起干一件活。**
-默认共享一个工作区的问题很具体：互相覆盖、产物归属不明、有人拿别人还没定稿的中间产物当事实继续做。
-这里每个 agent 有**自己的沙箱**（`session/<工作名>/<agent 实例名>/`），它同时是共享区的**工作副本**；共享区 `work/` 是**主副本、对 agent 只读**。
-要用的内容先 `work_pull` 拉进沙箱，改完 `work_commit` 提交回共享区；提交按**文件级三方比较**判定，冲突整个拒绝并逐条点名，不会静默覆盖；任一提交点都能还原。
-跨 agent 流动只有共享区与进入上下文的转录两条明路：谁的产物落在谁的格子里，返工找得到人；模块目录只归装了它的那个 agent。
-"谁只写哪一块"由**会话权限**落实：给每个 agent 配读写白名单 / 黑名单，提交只认白名单内的路径，模块目录默认只读（见 [docs/permission/README.md](docs/permission/README.md)）。
-
-**③ 出了事，你要知道它当时看到了什么、凭什么这么判。**
-转录**只追加**；删除 / 恢复是显式动作，会真的重写流水。
-任意一行点「回档到此处」：**留档**——追加一条标记、把之前的行折叠起来（字节全留，随时可恢复）；**删除**——真的截断到那一刻；**恢复**——在标记处截断，连同留档期间的新工作一起撤掉。
-行 id 单调、永不复用；回放可复现，**重建与实时逐条一致**。
-共享区按提交记录上的 `(agent, 行)` 锚回到那一刻，整棵子树同步；一次交付能从盘上重放——AI 干过的活是能审计、能复现的工程制品，而不是聊过就没了。
+- **工具与工作流按契约接入。** 一个文件夹 + 一份 `module.yaml`（职责提示词 + 工具声明）就是模块，启动命令由模块自己声明。
+  适配只落在模块自己那边，不引 SDK、不动本仓代码结构。**契约之外双方互不依赖**：拿掉本产品，模块照原样跑；移走模块，产品照常运行。
+  同一个能力，人走界面用、agent 走契约用，共用同一份声明（契约见 [MODULE_SPEC.md](MODULE_SPEC.md)）。
+- **多个 agent 一起干一件活。** 每个 agent 有自己的沙箱（`session/<工作名>/<agent 实例名>/`），它同时是共享区的**工作副本**；
+  共享区 `work/` 是**主副本、对 agent 只读**。要用的内容先 `work_pull` 拉进沙箱，改完 `work_commit` 提交回共享区。
+  提交按**文件级三方比较**判定：冲突整个拒绝并逐条点名，不会静默覆盖；任一提交点都能还原。
+  跨 agent 流动只有共享区与进入上下文的转录两条明路；"谁只写哪一块"由**会话权限**落实（见 [docs/permission/README.md](docs/permission/README.md)）。
+- **过程可审计。** 转录**只追加**；删除 / 恢复是显式动作，会真的重写流水。任意一行可「回档到此处」：
+  **留档**（追加标记、折叠之前的行，字节全留）/ **删除**（真的截断）/ **恢复**（在标记处截断，撤掉留档期间的新工作）。
+  行 id 单调、永不复用；回放可复现，**重建与实时逐条一致**。共享区按提交记录上的 `(agent, 行)` 锚一起回到那一刻
+  （见 [docs/session/session-model.md](docs/session/session-model.md)）。
 
 ## 由什么组成
 
@@ -38,32 +30,16 @@ Solomni 是一个**跑在自己机器上的 agent 运行环境（AgentOS）**：
 
 ## 当前能力
 
-- **三种形态**（由用户在建工作时选）：
-  - **单 agent**：一个 AI 装多份模块能力，直接干活；
-  - **小组协作**：多个 agent 各持一份能力——建组 → 讨论 → 整理出任务链 → **审查关卡**（你点头才开工）→
-    按阶段并发执行 → 每阶段一次验收 → 总验收 → 交付；没过只把点名的节点退回重做；
-  - **代理**：把决定权整块交给核心，由它挑人、建子会话、代你回答关卡。
-- **模块即插即用**：`modules/` 里放一个带合法 `module.yaml` 的文件夹就出现，移走就消失——不注册、不编译、不重启。
-- **会话与历史**：每个工作一个目录 `session/<工作名>/`；任意一行可「回档到此处」——**留档**（可再恢复）/ **删除**
-  （真的截断）/**恢复**，共享区按行锚一起回到那一刻；转录可回放、上下文可压缩。子会话落在父会话的 `children/` 下
-  （可再嵌套），整棵树共用**一个**共享区（版本化：`work_pull` / `work_commit`）。
-- **三重隔离**：内置工具的越界拒绝 → 工具进程走守门进程（环境白名单 / 进程树 / 超时杀整棵树）→
-  平台围栏（Windows AppContainer、Linux Landlock、macOS seatbelt）。装不上就如实报告能力等级，不假装有。
-  围栏的授权落点分**必要**与**可选**：可选落点授不上只记事实；**必要落点授不上绝不静默降级**——
-  弹一张卡让你选「本轮无围栏跑一次 / 放弃这次调用」，没有可回答的前端就拒绝执行（命令不落进程）。
-- **两档执行**：**本机档**（默认，脚本直接在宿主上跑）与**虚拟机档**（模块工具在 guest 里跑，进程与宿主隔离）。
-  虚拟机档按**宿主 × 引擎 × guest × 通道 × 共享**五轴可插：Linux（QEMU/KVM + virtiofs，缺 virtiofsd 时退 9p）与 Windows（QEMU/WHPX + SMB 实时共享，缺 smbd 时退 QGA 复制）
-  已真机跑通，macOS 尚未做（见 [tests/gaps.yaml](tests/gaps.yaml)）。虚拟机档不可用时，网页在**说缺什么的地方**直接给「补齐虚拟机依赖」
-  这个动作（配置面板与新建工作向导：先看清单与体积、确认后下载、按进度长轮询），同一份清单也走 `node start.js --provision --ensure --yes`
-  按平台装进项目内 `.vm/`（下载前要 `--yes`）；宿主路径与 guest 路径由**同一座桥**正反换算（同方言恒等，跨方言编进镜像根），
-  工作环境提示词只讲**本环境一种写法**，系统工具在寻址前把 guest 写法译回宿主路径再校验。细节见 [docs/vm/README.md](docs/vm/README.md)，运行包契约见 [RUNTIME_SPEC.md](RUNTIME_SPEC.md)。
-- **登记处**：供应商 / 模型 / agent / 设置四份 YAML，全在 `.home/`，由界面管理。
-  密钥只在本机登记处与核心的出站调用里（边界见 [REGISTRY_SPEC.md](REGISTRY_SPEC.md)）。
+- **三种形态**：单 agent / 小组协作 / 代理（决定权整块交给核心）。形态、流程与用户旅程见 [PRODUCT.md](PRODUCT.md)。
+- **模块即插即用**：`modules/` 里放一个带合法 `module.yaml` 的文件夹就出现，移走就消失——不注册、不编译、不重启（契约见 [MODULE_SPEC.md](MODULE_SPEC.md)）。
+- **会话与历史**：一个工作一个目录 `session/<工作名>/`；回档 / 留档 / 删除 / 恢复、转录回放、上下文压缩、共享区版本化（`work_pull` / `work_commit`）。
+- **三重隔离**：内置工具越界拒绝 → 工具进程走守门进程（环境白名单 / 进程树 / 超时杀整棵树）→ 平台围栏（Windows AppContainer、Linux Landlock、macOS seatbelt）；装不上就如实报告能力等级。
+- **两档执行**：本机档（默认）与虚拟机档（模块工具在 guest 里跑）。虚拟机档按宿主 × 引擎 × guest × 通道 × 共享五轴可插；
+  Linux（QEMU/KVM + virtiofs，缺 virtiofsd 时退 9p）与 Windows（QEMU/WHPX + SMB 实时共享，缺 smbd 时退 QGA 复制）已真机验收，macOS 未验（`VERIFIED_HOSTS` 只放开 Linux / Windows；缺 QEMU 取包与 Apple vz 引擎，见 [tests/gaps.yaml](tests/gaps.yaml)）；
+  虚拟机档在 Linux / Windows 上不可用时，网页与命令行都能按同一份清单补齐依赖（见下）。细节见 [docs/vm/README.md](docs/vm/README.md)，运行包契约见 [RUNTIME_SPEC.md](RUNTIME_SPEC.md)。
+- **登记处**：供应商 / 模型 / agent / 设置四份 YAML，全在 `.home/`，由界面管理；通道密钥只在本机登记处与核心的出站调用里（边界见 [REGISTRY_SPEC.md](REGISTRY_SPEC.md)）。
 - **两种交互面**：终端转录中心（默认）与本地网页（`-webUI`，只绑 `127.0.0.1`，默认 3081）。
-- **裁决只有一条通道**：任何要用户拍板的事——核心的各道关卡（名单 / 开工 / 方案待审 / 节点没过 / 请教）、
-  工具级确认、以及工具执行层自己发起的问题——都用同一张卡：**消息 + 选项**（选项 id 是契约，文案归界面），
-  回答只有一条命令。它**必须阻塞**：不回答就不往下走；按停止 = 整队作废、等待方按"拒绝"解开。
-  卡与回答随会话落盘，重启不重问已答的；构不出可用选项时**不弹卡**，而是停掉会话并落一条警告。
+- **一条裁决通道**：核心关卡、工具级确认与工具执行层的问题都用同一张「消息 + 选项」卡；必须阻塞，选项 id 是契约，卡片与回答随会话落盘。行为见 [PRODUCT.md](PRODUCT.md) 与 [docs/session/session-model.md](docs/session/session-model.md)。
 
 ## 安装与运行
 
@@ -76,8 +52,8 @@ node setup-runtime.js    # 准备运行环境：项目内 platform/<os>/ 与 .to
 node start.js            # 任意平台；Windows 也可双击 start.bat，macOS / Linux 也可 ./start.sh
 node start.js -webUI     # 直接进本地网页（127.0.0.1:3081）
 node start.js --provision                # 可选：虚拟机档只读状态（JSON：QEMU / guest 镜像 / agent 与运行包）
-node start.js --provision --ensure --yes # 可选：把 QEMU 与 Debian guest 装进项目内 .vm/（下载前要 --yes）
-# 网页里也能直接补：虚拟机档不可用时，配置面板 / 创建向导给的「补齐虚拟机依赖」就是这条（不必开终端）
+node start.js --provision --ensure --yes # 可选（Linux / Windows）：把 QEMU 与 Debian guest 装进项目内 .vm/（下载前要 --yes）
+# 网页里也能直接补（Linux / Windows）：虚拟机档不可用时，配置面板 / 创建向导给的「补齐虚拟机依赖」就是这条（不必开终端）
 ```
 
 - 工具链与缓存收敛在**项目内**：检测到可用的 Rust 就**只读借用**，缓存与产物仍落 `platform/<os>/`；没有或有问题的才先征求同意装进项目内，不动系统；**无交互终端时不做安装**，打印手动步骤后退出。
@@ -105,7 +81,7 @@ node dev.js test|fmt|clippy   # 本机开发回路：改一层验一层；不要
   用户覆盖走 `.home/settings.yaml` 与环境变量，不改仓库里的台账。
 - **没有配供应商也能跑**：用内置假模型把流程演示一遍，并如实告知。
 - 常用参数：`--root <目录>`（换产品根）、`--web-port <端口>`、`--release`。
-- 终端提示符下的命令：`single [agent名…]` / `collab [agent名…|?]` / `proxy（决定权整块交给核心）` / `module [模块id.工具名 [json]]（不经 AI 直接用模块工具）` / `resident list|start|stop|enable|disable|call`（常驻服务） / `secret`（隐秘字段） / `webui`。
+- 终端提示符下的命令：`single [agent名…]` / `collab [agent名…|?]` / `proxy（决定权整块交给核心）` / `module [模块id.工具名 [json]]（不经 agent 直接调模块工具）` / `resident list|start|stop|enable|disable|call`（常驻服务） / `secret`（隐秘字段） / `webui`。
 
 ### 配供应商与模型
 
@@ -113,25 +89,19 @@ node dev.js test|fmt|clippy   # 本机开发回路：改一层验一层；不要
 
 ## 模块契约
 
-模块 = 一个文件夹 + 一份 `module.yaml`，**不依赖本项目的任何代码**；核心也不依赖模块的实现——
-双方只依赖这份契约（完整字段与规则见 [MODULE_SPEC.md](MODULE_SPEC.md)）：
+模块 = 一个文件夹 + 一份 `module.yaml`，**不依赖本项目的任何代码**；核心也不依赖模块的实现——双方只依赖这份契约（完整字段与规则见 [MODULE_SPEC.md](MODULE_SPEC.md)）：
 
 ```yaml
 id: research                 # 全局唯一，= 文件夹名
 brief: 调研与对比选型。        # 能力简述：给核心选人看
 system: 你负责调研……          # 职责提示词：管辖边界 + 本模块工具用法
-runtimes: [python]           # 可选：工具需要哪些运行能力（版本由用户在会话里定）
-tools:                       # 可选：外部工具表
+tools:                       # 可选：模块工具表
   read_txt:
     command: python tools/read_txt.py   # 工作目录 = 本模块根目录
-    params:
-      path: { type: string, required: true, desc: 要读的路径（用【工作环境】的写法） }
 ```
 
-- **外部工具的调用约定只有一条**：一条启动命令 + 参数 + stdin/stdout 回执。脚本、skill、别的 harness 都是它的实例；长驻的 MCP 服务不在此列，写进 `services`。
-- 工具进程的可达范围 = 该 agent 的私有沙箱 + 它自己的模块目录；共享区主副本不在其中（要改先 `work_pull`，改完 `work_commit`）；路径用**本环境的写法**（见【工作环境】），越界即拒绝。
-- **每个模块有一个恒可写的跨任务私有区** `<module>/userdata/`：载入模块时确保它存在（只建目录、幂等；
-  建不了不阻断加载，只是如实标注那一席拿不到私有落点）；模块目录默认只读，`userdata/` 例外。
+- 模块工具只有一条调用约定：**启动命令 + 参数 + stdin/stdout 回执**；长驻 MCP 服务写进 `services`。
+- 工具进程可达该 agent 的私有沙箱与它自己的模块目录；共享区主副本要先 `work_pull` / `work_commit`。`userdata/` 恒可写，模块目录默认只读。
 - 能跑通就是合法模块；跑不通时核心如实报错，不猜、不兜底。
 
 ### 跑一遍演示
@@ -176,6 +146,7 @@ C++ 模块要先编译一次（产物不入库），命令与理由见 [modules/
 | 用产品 / 看用户旅程与交互面 | [PRODUCT.md](PRODUCT.md) |
 | 写一个模块（YAML 契约与模块工具） | [MODULE_SPEC.md](MODULE_SPEC.md) |
 | 系统工具、角色与路径模型（回报与验收也在工具里） | [SYSTOOL.md](SYSTOOL.md) |
+| 看未完成项、怎么补与验收标准 | [tests/gaps.yaml](tests/gaps.yaml) |
 | 核心代理的待实现系统工具清单与方案 | [systool_gaps.yaml](systool_gaps.yaml)（规划，不代表当前能力） |
 | 做运行包（`package.yaml`） | [RUNTIME_SPEC.md](RUNTIME_SPEC.md) |
 | 管理供应商 / 模型 / agent / 设置（含密钥边界） | [REGISTRY_SPEC.md](REGISTRY_SPEC.md) |

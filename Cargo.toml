@@ -39,7 +39,7 @@ windows-sys = { version = "0.61", features = [
 [target.'cfg(not(windows))'.dependencies]
 # 非 Windows：维持 rustls（内置工具链带 gcc，ring 可编译）。ureq 3 把这个功能名从 tls 改成了 rustls。
 ureq = { version = "3", default-features = false, features = ["rustls", "gzip"] }
-# Unix 围栏：进程组与信号（杀整棵树）、prctl（父死子亡）、Landlock/seatbelt 的系统调用。
+# Unix 围栏：进程组与信号（杀整棵树）、Landlock/seatbelt 的系统调用；父死子亡 Linux 用 prctl、macOS 用 kqueue（本程序另起的守门进程盯核心）。
 libc = "0.2"
 
 [[bin]]

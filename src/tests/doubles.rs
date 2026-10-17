@@ -163,6 +163,11 @@ impl Workdirs for InMemoryWorkspace {
         }
         Ok(())
     }
+    fn discard(&self, _session: &str, _agents: &[String]) -> Result<(), String> {
+        // 内存实现里没有目录可删。
+        Ok(())
+    }
+
     fn roots(
         &self,
         session: &str,
@@ -950,7 +955,7 @@ impl ModuleSource for VecSource {
     }
 }
 
-/// 无声围栏端口：测试里不碰任何 ACL（真实实现在 capabilities/tools/detail/confine）。
+/// 无声围栏端口：测试里不碰任何 ACL（真实实现在 src/kernel/detail/confine）。
 pub(crate) struct NoFenceHost;
 impl crate::kernel::ports::FenceHost for NoFenceHost {
     fn release(&self, _spec: &crate::kernel::api::FenceSpec) -> Result<(), String> {
@@ -1009,7 +1014,7 @@ impl PackageSource for InMemoryPackages {
 }
 
 /// 目的：真机验收里**共用同一个虚拟根**的用例之间的互斥。
-/// 约束：目录根是直接往里写的（guest 的系统状态也在里面），两台 guest 同时起会互相踩坏；
+/// 约束：共用同一个虚拟根的真机用例会同时写基础镜像（guest 的系统状态也在里面），两台 guest 同时起会互相踩坏；
 ///   凡是要起 guest 的真机用例都先拿它，串起来跑。
 pub(crate) fn live_guest_lock() -> std::sync::MutexGuard<'static, ()> {
     static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -1130,6 +1135,9 @@ pub(crate) fn test_provision_with(
         fn guest_bases(
             &self,
         ) -> Result<Vec<crate::capabilities::provision::api::GuestBase>, String> {
+            Ok(Vec::new())
+        }
+        fn processes(&self) -> Result<Vec<crate::capabilities::provision::api::ProcInfo>, String> {
             Ok(Vec::new())
         }
         fn job(&self) -> crate::capabilities::provision::api::JobState {
@@ -1419,9 +1427,12 @@ pub(crate) fn test_workspace_store(
 }
 
 /// 目的：VM 引擎的测试替身——不起真 VM，只记录 start / run / stop。
+/// 约束：`boot_delay` 让"起 guest 很慢"可复现（验核心线程不被占）；`boot_error` 让起不来可复现（验失败不留痕）。
 #[derive(Clone, Default)]
 pub(crate) struct FakeEngine {
     pub calls: Arc<Mutex<Vec<String>>>,
+    pub boot_delay: Option<std::time::Duration>,
+    pub boot_error: Option<String>,
 }
 
 impl FakeEngine {
@@ -1445,6 +1456,12 @@ impl crate::capabilities::vm::ports::VmEngine for FakeEngine {
         spec: &crate::capabilities::vm::domain::guest::GuestSpec,
         _share: &crate::capabilities::vm::ports::SharePlan,
     ) -> Result<Box<dyn crate::capabilities::vm::ports::GuestVm>, String> {
+        if let Some(delay) = self.boot_delay {
+            std::thread::sleep(delay);
+        }
+        if let Some(why) = &self.boot_error {
+            return Err(why.clone());
+        }
         self.calls
             .lock()
             .expect("锁")
@@ -1746,6 +1763,17 @@ pub(crate) fn test_vm(
     ))
 }
 
+/// 目的：带可控"起 guest 耗时 / 失败"的 vm 能力面——验核心不被慢步骤占住、失败不留痕。
+pub(crate) fn test_vm_with_engine(
+    packages: Arc<dyn PackageSource + Send + Sync>,
+    engine: FakeEngine,
+) -> Arc<dyn crate::capabilities::vm::api::Vm + Send + Sync> {
+    Arc::new(crate::capabilities::vm::service::VmService::new(
+        packages,
+        Arc::new(engine),
+        vec![Arc::new(NamedShare::new("copy", true))],
+    ))
+}
 /// 目的：模块启停覆盖的内存存储（测试用；与 yaml 实现同一条端口）。
 #[derive(Default)]
 pub(crate) struct InMemoryModuleState {

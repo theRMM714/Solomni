@@ -11,8 +11,8 @@
 
 | 东西 | 定义在 | 形态 |
 | --- | --- | --- |
-| 能力接口 | **各能力自己的 `api.rs`** | `SessionOps` / `ConductorOps` / `ActionOps` / `LogOps` 定义在 `capabilities/conductor/api/mod.rs`（会话中心、核心自己的用例与**动作目录 / 分发**）；`RegistryOps` 在 `capabilities/registry/api.rs`、`HistoryOps` 在 `capabilities/session/api.rs`、`WorkspaceOps` 在 `capabilities/workspace/api.rs`。**全 `&self`、可替换成假实现**；实现都是 `capabilities/conductor/api/proxy.rs` 里的队列代理（`ConductorHandle`）|
-| 事件台 | `capabilities/conductor/api/mod.rs` | `EventBus`：核心独占生产，任意数量的消费者按序号增量取 |
+| 能力接口 | **各能力自己的 `api.rs`** | `Ops` 里的面：`SessionOps` / `ConductorOps` / `ActionOps` / `LogOps` 在 `src/capabilities/conductor/api/mod.rs`（会话中心、核心自己的用例与**动作目录 / 分发**），`RegistryOps` 在 `src/capabilities/registry/api.rs`，`HistoryOps` 在 `src/capabilities/session/api.rs`，`ModulesOps` 在 `src/capabilities/modules/api.rs`，`ResidentOps` / `SecretOps` / `Provision` 各在 `src/capabilities/<能力>/api.rs`。**全 `&self`、可替换成假实现**；实现都是 `src/capabilities/conductor/api/proxy.rs` 里的队列代理（`ConductorHandle`）|
+| 事件台 | `src/capabilities/conductor/api/mod.rs` | `EventBus`：核心独占生产，任意数量的消费者按序号增量取 |
 
 规则：
 
@@ -27,7 +27,7 @@
   子会话拿完整的一份（含定稿行）。客户端打开哪个标签页读哪条流，不靠"从别人的流里猜自己"。
 - **连接状态只看事件流的取用**：客户端把"取事件失败"（服务没起来 / 连接断了）与"事件应用/渲染出错"分开——
   后者不是断线，如实报错并留在日志里；两类都要落到日志，不能只亮状态点
-  （见 `app.js` 的 `setConn` / `eventError`）。
+  （见 `src/presentation/web/assets/app.js` 的 `setConn` / `eventError`）。
 - **并发归核心**：`stop` 直接置位核心内部的取消标志，**不进命令队列**，所以生成期间照样立刻生效；
   呈现层不需要知道「生成时核心状态被占用」这类内部事实。
 - **生成不占命令队列**（单 agent 与协作的长步骤都是）：命令队列只做**状态变更**与**派发**——生成时先把会话对象
@@ -43,25 +43,23 @@
   被中断的那条发言**不吸收**——半截 `say`/`agree` 进转录会把"轮到谁、同意了没"算歪；
   会话保持可继续（点「继续」从断点推进），停止与失败用**两句不同的话**如实告知。
 - **一次命令 panic 不带垮核心**：接住并继续服务（回包通道断开，调用方得到「无回应」）。
-- **传输的线格式归呈现层**：请求形状、路由、错误码在 `routes.rs`；**事实**的线格式（`SessionEvent`、`*View`）
+- **传输的线格式归呈现层**：请求形状、路由、错误码在 `src/presentation/web/routes.rs`；**事实**的线格式（`SessionEvent`、`*View`）
   仍在协调业务。两者不混——混在一起就是「到处内联 JSON 拼装」的成因。
 
-### 传输选择：长轮询（当前），何时重估 SSE
+### 传输选择：长轮询
 
-事件台是**服务端单向推送**（客户端不在实时通道上发东西——命令走普通 HTTP POST）。当前用**长轮询**：
+事件台是**服务端单向推送**（客户端不在实时通道上发东西——命令走普通 HTTP POST）。传输用**长轮询**：
 `GET /api/events?since=N` 最多挂 20 秒，有新事件立即回；客户端拿 `head` 推进游标、按 `seq` 增量取。
 `oldest` 是事件台里**还留着的最老序号**：事件台会裁剪（`BUS_MAX`/`BUS_KEEP`），`since` 之后那段
 可能已永久丢失——客户端据此**重新对齐**（拉一次历史重放），而不是按 `seq` 干等
 （干等会让后续批次全部滞留，只有刷新页面才恢复）。
 
-选它而不是 SSE 的理由（针对本项目的实际形态：**本机、单客户端、直连无代理**）：
+选它而不是 SSE 的理由（针对本项目的形态：**本机、单客户端、直连无代理**）：
 
 - 挂起的请求在页面关闭/空闲时**释放**；SSE 会让**每个标签页永久占一条连接**（HTTP/1.1 每域 6 条）；
 - SSE 的主要优势（内建重连、省掉每请求开销）在这里没有痛点：本机直连、客户端已有失败重试、开销可忽略；
 - **传输可替换**：契约在**事件台**（一个可重读的日志）——换 SSE / WebSocket 只换"怎么把批次送到前端"，
   不改事实词汇与命令形状。
-
-**何时重估**：需要多标签页/多客户端并用，或从别的机器访问（那时代理、重连、连接复用才真正值钱）。
 
 **顺序与去重（客户端硬约束）**：事实只有**一条来路**（事件台）。命令回包只给 `head`，
 客户端因此只需维护一个单调游标 `appliedSeq`：取到的批次按 `seq` 排序后应用；
@@ -79,14 +77,14 @@
 已被盘上定稿行取代，跟下去只会画出一个填不上的空块。
 ## 二、HTTP 路由目录（机器可读）
 
-`web/routes.rs` 的 `ROUTES` 是路由的**唯一定义**：`web/mod.rs` 的匹配与分发都由它驱动
+`src/presentation/web/routes.rs` 的 `ROUTES` 是路由的**唯一定义**：`src/presentation/web/mod.rs` 的匹配与分发都由它驱动
 （匹配由目录做、分支按 `id`），所以「代码里有路由但目录里没有」在结构上不可能发生。
 `solomni --print-routes` 输出它的 JSON（含能力、请求/响应形状、状态码与说明）。
 
 下面这张表由契约测试与 `ROUTES` 机器比对——对不上就是测试失败，不是靠人记得改文档：
 
 静态资源（`/`、`style.css`、`app.js`、`md.js`）一律 `Cache-Control: no-store`：改了前端**刷新即生效**，
-不需要硬刷新（`web/mod.rs` 的 `static_head`）。
+不需要硬刷新（`src/presentation/web/mod.rs` 的 `static_head`）。
 
 <!-- ROUTES:BEGIN -->
 | 方法 | 路径 | 能力 | 请求 | 响应 | 状态码 |
@@ -106,6 +104,7 @@
 | GET | `/api/history/{name}` | `HistoryOps::open` | — | `{meta,events,live,head}` | 200, 404 |
 | POST | `/api/history/{name}/delete` | `HistoryOps::delete` | — | `{ok}` | 200, 400 |
 | GET | `/api/tiers` | `ConductorOps::tier_choices` | — | `{tiers:{default,vm_available,vm_unavailable_reason,vm_requirements,guests,available}}` | 200, 400 |
+| GET | `/api/processes` | `Provision::processes` | — | `{procs:[{pid,alive,purpose,owner,since}]}` | 200, 400 |
 | GET | `/api/setup/status` | `Provision::status + job` | 查询 `since` / `wait` | `{deps:[{id,guest,present,install,probe,source,url,size_mb,note}],job:{running,seq,lines,error},missing,pending:[id]}` | 200, 400 |
 | POST | `/api/setup/ensure` | `Provision::status + start` | `{deps?:[id],confirm?:bool}`（不点名 = 只补现在缺的） | `{preview:[{id,url,size_mb,present}]}` / `{ok,deps}`（都装好了 → `{ok,deps:[]}`） | 200, 400 |
 | DELETE | `/api/setup/job` | `Provision::cancel` | — | `{ok}` | 200 |
