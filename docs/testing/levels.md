@@ -54,7 +54,7 @@ cargo deny check
 
 - `cargo check --all-targets`；
 - 结构审查（测试目标登记、孤儿测试文件、缺口账格式、单元地图双向一致、文档链接完整性、提示词键表与真相源表比对、根文档路由、外部连接台账、
-  **门禁解析器自测**与 **`#[ignore]` 禁令**）；
+  **批处理脚本只允许 ASCII**（cmd 按代码页解释字节，非 ASCII 会吞掉下一行）、**门禁解析器自测**与 **`#[ignore]` 禁令**）；
 - `cargo fmt --all -- --check`；
 - `cargo clippy --all-targets --all-features --keep-going -- -D warnings`；
 - `cargo check` 的 rustc 告警数；

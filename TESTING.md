@@ -47,7 +47,7 @@
  所以它能被假实现整体替换——`routes.rs` 的 `FakeOps` 就是这么逐条测路由的。
 - T0 质量门禁已并入同一入口：编译、结构审查、格式、clippy、编译告警、**交叉类型检查（已装 target）**、依赖重复、**项目外写（env / 工具链）**零容忍硬失败；
   供应链（`cargo audit` / `cargo deny`）同为硬失败，但工具缺失或取不到 advisory 数据时记 `env-skip`。
-  结构审查里还含**门禁解析器自测**与 **`#[ignore]` 禁令**（报告里 `ignored > 0` 也算失败）；
+  结构审查里还含**门禁解析器自测**、**`#[ignore]` 禁令**（报告里 `ignored > 0` 也算失败）与**批处理脚本只允许 ASCII**；
   项目外写与供应链工具的获取 / 判定见 [docs/testing/quality-isolation.md](docs/testing/quality-isolation.md)。
 - 默认**并行**跑用例（`--serial` 只在排查并发/隔离问题时用）；每步都有墙钟上限，超时即硬失败并把证据记进报告
   `timeouts`；每步用时进报告，超预算标 `[slow]`（只报不拦）。

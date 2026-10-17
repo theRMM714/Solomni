@@ -314,6 +314,59 @@ function duplicateCrates(out) {
 }
 
 /**
+ * 批处理脚本（`.cmd` / `.bat`）里第一处非 ASCII 字节所在的行号（1 起）；全 ASCII 给 0。
+ * 为什么是硬约束：cmd 按**控制台代码页**解释批处理字节（实测 936），UTF-8 的多字节序列会被读成行尾的一部分，
+ * 把它**下一行整行吞掉**——中文 `rem` 注释曾让 `if not exist build mkdir build` 整行消失，模块构建直接失败。
+ * 这不是"注释不好看"：换成 ASCII 之外没有稳妥解（`chcp 65001` 在管道 stdio 下救不了）。
+ * 返回 { line, bom }：bom 说明文件以 UTF-8 BOM 开头（cmd 会把首行读成一条不存在的命令）。
+ */
+function batchNonAscii(buf) {
+  const bom = buf.length >= 3 && buf[0] === 0xef && buf[1] === 0xbb && buf[2] === 0xbf;
+  let line = 1;
+  for (const b of buf) {
+    if (b === 0x0a) line++;
+    else if (b > 0x7f) return { line, bom };
+  }
+  return { line: 0, bom };
+}
+
+/**
+ * 结构审查：仓库里的批处理脚本只允许 ASCII（判据见 batchNonAscii）。
+ * 跳过工具链与产物目录，以及端到端夹具（`root/` 是每次从产品根复制的生成物，不是仓库内容）。
+ */
+function batchScriptProblems() {
+  const problems = [];
+  // 只扫**仓库内容**：工具链、产物、运行期记录与端到端夹具都不是仓库的一部分。
+  const SKIP = new Set([
+    ".git", "node_modules", "platform", "target", ".tools", ".vm",
+    ".home", "session", "logs", "runtimes", "mutants.out", "mutants.out.old",
+  ]);
+  const walk = (dir) => {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      const p = path.join(dir, e.name);
+      const r = normPath(path.relative(ROOT, p));
+      if (e.isDirectory()) {
+        if (SKIP.has(e.name) || r === "tests/cross-platform/e2e/root" || r.startsWith("tests/cross-platform/e2e/root/")) continue;
+        walk(p);
+        continue;
+      }
+      if (!/\.(cmd|bat)$/i.test(e.name)) continue;
+      const hit = batchNonAscii(fs.readFileSync(p));
+      if (hit.bom) {
+        problems.push(r + " 以 UTF-8 BOM 开头（cmd 会把首行读成不存在的命令）：批处理脚本只允许 ASCII，见 MODULE_SPEC 的「跨平台」");
+      }
+      if (hit.line) {
+        problems.push(
+          r + ":" + hit.line + " 含非 ASCII 字节（cmd 按代码页解释会吞掉下一行）：批处理脚本只允许 ASCII，见 MODULE_SPEC 的「跨平台」",
+        );
+      }
+    }
+  };
+  walk(ROOT);
+  return problems;
+}
+
+/**
  * 门禁解析器自测：**门禁自己也要被测**。这些函数决定红灯/绿灯，解析器一坏就是静默全绿
  * （尤其 cargo tree --duplicates 退出码恒为 0：解析不到重复不会有人发现）。用固定样例断言。
  * 判定与比对只有一处（本函数），新增解析器时在这里补一条。
@@ -353,6 +406,10 @@ function gateParserSelfTest() {
     { passed: 4, failed: 2, ignored: 4, resultLines: 2 },
   );
   eq("skipsIn 只认行首的 [探针]", skipsIn("ok\n[探针] 环境不允许\n其它 [探针] 出现在中间\n"), ["[探针] 环境不允许"]);
+  eq("batchNonAscii 放过纯 ASCII 脚本", batchNonAscii(Buffer.from("@echo off\r\necho OK\r\n")), { line: 0, bom: false });
+  eq("batchNonAscii 报出非 ASCII 所在行", batchNonAscii(Buffer.from("@echo off\nrem 中文\necho OK\n")), { line: 2, bom: false });
+  eq("batchNonAscii 认 UTF-8 BOM", batchNonAscii(Buffer.from([0xef, 0xbb, 0xbf, 0x40])).bom, true);
+  eq("batchNonAscii 非 ASCII 在首行时不误算行号", batchNonAscii(Buffer.from("echo 中\n")).line, 1);
   return bad;
 }
 /** 工具缺失 = env-skip（不静默算过）。 */
@@ -527,6 +584,10 @@ function structuralAudit() {
     walk(dir);
   };
   checkFenceSpecLiterals(path.join(ROOT, "src"));
+
+  // 批处理脚本只允许 ASCII：cmd 按代码页解释字节，非 ASCII 注释会吞掉下一行（这种错只在中文
+  // Windows 上炸，本机与英文 CI runner 都照不出来，所以只能按文本挡）。
+  for (const p of batchScriptProblems()) problems.push(p);
 
   // 平台专属文件本地不编译（tests/<平台>/main.rs 首行是 #![cfg(target_os = …)]）：
   // 常量名写串了（macOS 探针里写 Linux 的标记）只在那个平台上炸。按文本挡住这一对。
