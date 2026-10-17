@@ -154,6 +154,8 @@ pub(super) fn install_guest_runtime(
             net: true,
             engine_path: Some(engine_path.clone()),
             share_path: None,
+            // 编排不要挂载：只经 QGA 在 guest 里装东西，所以固定用不依赖外部工具的复制档。
+            shares: vec!["copy"],
             seed: Some(SeedDocs {
                 user_data: USER_DATA.to_string(),
                 meta_data: META_DATA.to_string(),
@@ -201,6 +203,7 @@ pub(super) fn install_guest_runtime(
             net: true,
             engine_path: Some(engine_path),
             share_path: None,
+            shares: vec!["copy"],
             seed: None,
             isolated: false,
         };
@@ -484,7 +487,9 @@ mod tests {
                 root.join("runtimes"),
             )),
             std::sync::Arc::new(crate::capabilities::vm::detail::QemuEngine::new()),
-            std::sync::Arc::new(crate::capabilities::vm::detail::CopyShare::new()),
+            vec![std::sync::Arc::new(
+                crate::capabilities::vm::detail::CopyShare::new(),
+            )],
         );
         let mut sink = |l: &str| eprintln!("[探针] {}", l);
         install_guest_runtime(&root, &dep, Some(&vm), true, &mut sink)

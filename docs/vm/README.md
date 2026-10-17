@@ -20,7 +20,7 @@
 
 **当前状态**：五轴已按可插的形状落地——`QemuEngine`（当前唯一引擎）、`GuestImage`（虚拟根里可放 `guest.yaml` 声明 id / arch / os / agent / clients / runtimes）、
 `QemuHandle`（QEMU + QGA，命令通道；chardev 就绪前连上的那条会被 QEMU RST，故握手失败即重连再握手——不把通道被换掉当故障）、`NinePShare`（目录根）、`CopyShare`（QGA 复制，三平台通用）、`VirtioFsShare`（QEMU vhost-user-fs，Linux/macOS 宿主）与 `SmbShare`（用户态 SMB helper + guestfwd 隧道，Windows 宿主的实时共享档）。
-按平台的组合回退链是数据（`default_combos` / `choose_combo`），加速器按平台给（`accel=kvm:tcg` / `accel=whpx:tcg` / `accel=hvf:tcg`），共享要隧道时给 `restrict=on` 网卡。
+按平台的组合回退链是数据（`default_combos` / `share_chain`），**共享档在起 guest 那一刻按候选挑**（不是装配期定一次），加速器按平台给（`accel=kvm:tcg` / `accel=whpx:tcg` / `accel=hvf:tcg`），共享要隧道时给 `restrict=on` 网卡。
 执行分派已接线（会话在 `tier == Vm` 时把模块命令交给 guest；建会话时装配并拉起，会话删除时销毁）；就绪项 `guest` 按**已验平台数据表**（`VERIFIED_HOSTS`）放开，并带上本平台上**已实现**的组合。
 判据分两层：**机器能力**（`vm_capability`：hypervisor / guest 后端 / 引擎 / 共享档）决定虚拟机档能不能**选**；**虚拟根是会话级**，创建或会话配置里从清单选（界面给下拉），保存 /「开始」时才合并进严格判据（`tier_readiness`）。
 **静态预检**在「开始」那一刻一次走完：机器能力 × 虚拟根（名字 → `.vm/guest/<名>`，`resolve_guest`）× guest 声明的运行能力（`guest.yaml` 的 `runtimes`）× 模块声明 × 包库 × **模块工具的入口**（相对路径入口必须在场且能跑；两档都查）——
@@ -83,7 +83,7 @@ virtiofsd 与默认虚拟根 `debian`（目录 rootfs + 内核 + 9p initrd + qem
   入口是**界面里的一个动作**：虚拟机档不可用时，配置面板与创建向导给出「补齐虚拟机依赖」（先看清单与体积、再确认下载、按进度长轮询）；
   CLI `solomni --provision --ensure --yes` 是没有界面时的等价路径。设置里没登记 `qemu_path` / `virtiofsd_path` / `smbd_path` 时，
   **判据每次取用时**自动采用项目内补齐的那个可执行文件（显式登记优先）——装完即生效，不必重启。
-  例外只有共享后端的实现：它在启动时装配好，装完共享工具后判据改口、实现仍是那一档（`/api/setup/status` 的 `assembled.share` 如实说明），见 `tests/gaps.yaml`。
+  共享后端也在此列：全部适配器在装配期持有，哪一档在起 guest 那一刻按 `share_chain` 的候选挑——装完 virtiofsd / smbd，**下一次启动就用上**。
 
 ## 本目录
 

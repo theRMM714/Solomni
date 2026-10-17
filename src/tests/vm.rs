@@ -985,6 +985,7 @@ pub(crate) fn guest_mounts_prefix_packages_and_fence_roots() {
         net: false,
         engine_path: None,
         share_path: None,
+        shares: Vec::new(),
         seed: None,
         isolated: false,
     };
@@ -1074,6 +1075,7 @@ pub(crate) fn accelerators_and_nic_follow_the_platform_and_share_need() {
         net,
         engine_path: None,
         share_path: None,
+        shares: Vec::new(),
         seed: None,
         isolated: false,
     };
@@ -1167,6 +1169,7 @@ pub(crate) fn disk_root_without_kernel_boots_via_firmware() {
         net: false,
         engine_path: None,
         share_path: None,
+        shares: Vec::new(),
         seed: None,
         isolated: false,
     };
@@ -1204,6 +1207,7 @@ pub(crate) fn disk_root_uses_a_virtio_disk_not_9p() {
         net: false,
         engine_path: None,
         share_path: None,
+        shares: Vec::new(),
         seed: None,
         isolated: false,
     };
@@ -1233,7 +1237,7 @@ pub(crate) fn share_syncs_around_each_run_and_releases_on_stop() {
     let vm = crate::capabilities::vm::service::VmService::new(
         Arc::new(InMemoryPackages::empty()),
         engine.clone(),
-        share.clone(),
+        vec![share.clone()],
     );
     let spec = GuestSpec {
         lease: "w".to_string(),
@@ -1247,6 +1251,7 @@ pub(crate) fn share_syncs_around_each_run_and_releases_on_stop() {
         net: false,
         engine_path: None,
         share_path: None,
+        shares: Vec::new(),
         seed: None,
         isolated: false,
     };
@@ -1347,6 +1352,7 @@ pub(crate) fn disk_image_base_is_classified_as_a_disk_root() {
             net: false,
             engine_path: None,
             share_path: None,
+            shares: Vec::new(),
             seed: None,
             isolated: false,
         },
@@ -1373,7 +1379,7 @@ pub(crate) fn vm_service_refuses_unfit_engine_and_share_with_a_reason() {
     let svc = crate::capabilities::vm::service::VmService::new(
         Arc::new(InMemoryPackages::empty()),
         Arc::new(QemuEngine::new()),
-        Arc::new(NinePShare::new()),
+        vec![Arc::new(NinePShare::new())],
     );
 
     // 引擎承载不了：架构不匹配（磁盘根让 supports 的根类型判定通过，只剩架构这一条）。
@@ -1394,6 +1400,7 @@ pub(crate) fn vm_service_refuses_unfit_engine_and_share_with_a_reason() {
         net: false,
         engine_path: None,
         share_path: None,
+        shares: Vec::new(),
         seed: None,
         isolated: false,
     };
@@ -1415,6 +1422,7 @@ pub(crate) fn vm_service_refuses_unfit_engine_and_share_with_a_reason() {
         net: false,
         engine_path: None,
         share_path: None,
+        shares: Vec::new(),
         seed: None,
         isolated: false,
     };
@@ -1913,10 +1921,74 @@ pub(crate) fn share_availability_gates_the_effective_combo() {
     }
 }
 
-/// 目的：按平台的组合回退链是数据；引擎 / 共享不在场时逐档回退，都缺才没有组合。
+/// 目的：共享档在**起 guest 那一刻**按候选挑：同一个 service 实例下，落得上的那一档被用、同步也只走它。
+/// 约束：候选 id 认不出 / 都落不上时如实拒绝，并说出试过哪些——不猜、不静默换档。
 #[test]
-pub(crate) fn default_combos_follow_the_platform_and_fall_back() {
-    use crate::capabilities::vm::domain::exec::{choose_combo, default_combos};
+pub(crate) fn share_is_picked_per_guest_at_start() {
+    use crate::tests::doubles::NamedShare;
+    let slow = Arc::new(NamedShare::new("slow", false));
+    let fast = Arc::new(NamedShare::new("fast", true));
+    let vm = crate::capabilities::vm::service::VmService::new(
+        Arc::new(InMemoryPackages::empty()),
+        Arc::new(crate::tests::doubles::FakeEngine::new()),
+        vec![slow.clone(), fast.clone()],
+    );
+    let spec = |lease: &str, shares: Vec<&'static str>| GuestSpec {
+        lease: lease.to_string(),
+        image: GuestImage::linux(
+            "test",
+            GuestRoot::Dir(std::path::PathBuf::from("/base")),
+            Some(std::path::PathBuf::from("/base/vmlinuz")),
+            None,
+        ),
+        mounts: Vec::new(),
+        net: false,
+        engine_path: None,
+        share_path: None,
+        shares,
+        seed: None,
+        isolated: false,
+    };
+    // 第一档落不上 → 用第二档（顺序就是候选给的顺序）。
+    vm.guest_start(&spec("w1", vec!["slow", "fast"]))
+        .expect("第二档落得上就该起来");
+    assert_eq!(
+        fast.calls(),
+        vec!["prepare"],
+        "实际用的要是 fast：{:?}",
+        slow.calls()
+    );
+    // 另一个租约只给了落不上的一档：如实拒绝，并说出试过哪个。
+    let why = vm
+        .guest_start(&spec("w2", vec!["slow"]))
+        .expect_err("只有落不上的一档就要拒绝");
+    assert!(why.contains("slow"), "拒绝理由要说试过哪一档：{}", why);
+    // 候选里有本 service 不持有的 id：当作没有候选，而不是 new 一个出来。
+    let why2 = vm
+        .guest_start(&spec("w3", vec!["nope"]))
+        .expect_err("认不出的候选不许猜");
+    assert!(why2.contains("没有候选"), "{}", why2);
+    // 执行：同步走**这一台**选中的那一档。
+    let run = GuestRun {
+        command: "echo hi".to_string(),
+        args_json: "{}".to_string(),
+        env: Vec::new(),
+        cwd: String::new(),
+    };
+    assert!(vm.guest_run("w1", &run).ok, "执行要成功");
+    assert_eq!(fast.calls(), vec!["prepare", "sync_in", "sync_out"]);
+    assert!(
+        slow.calls().is_empty(),
+        "没被选中的档不该参与：{:?}",
+        slow.calls()
+    );
+}
+
+/// 目的：按平台的组合回退链是数据；起 guest 的共享档候选只收"已实现 + 工具在场"的那些，顺序就是优先序。
+#[test]
+pub(crate) fn share_chain_follows_the_platform_and_skips_absent_tools() {
+    use crate::capabilities::vm::domain::exec::{default_combos, share_chain};
+    use crate::tests::doubles::FixedProbe;
     let ids = |host: &str| {
         default_combos(host)
             .iter()
@@ -1927,27 +1999,34 @@ pub(crate) fn default_combos_follow_the_platform_and_fall_back() {
     assert_eq!(ids("macos")[0], "vz/virtiofs");
     assert_eq!(ids("windows")[0], "qemu/smb");
 
-    let engine_ok = |e: &str| e == "qemu";
-    let share_ok = |_e: &str, s: &str| s == "9p" || s == "copy";
-    let linux = choose_combo(default_combos("linux"), &engine_ok, &share_ok)
-        .map(|c| format!("{}/{}", c.engine, c.share));
+    // 空环境：要外部工具的档全不在候选里，不需要工具的 9p / copy 照旧可用（回退档永远兜得住）。
+    let bare = FixedProbe::default();
+    assert_eq!(share_chain("linux", None, &bare), vec!["9p", "copy"]);
+    assert_eq!(share_chain("windows", None, &bare), vec!["copy"]);
     assert_eq!(
-        linux.as_deref(),
-        Some("qemu/9p"),
-        "virtiofs 不在场就退到 9p"
+        share_chain("macos", None, &bare),
+        vec!["9p", "copy"],
+        "vz 未实现：macOS 的候选从 qemu 那一档起"
     );
 
-    let copy_only = |_e: &str, s: &str| s == "copy";
-    let win = choose_combo(default_combos("windows"), &engine_ok, &copy_only)
-        .map(|c| format!("{}/{}", c.engine, c.share));
+    // 工具在场：性能更高的那一档排到前面（Linux 没 virtiofsd 就退 9p，Windows 没 smbd 就只有 copy）。
+    let mut with_tools = FixedProbe::default();
+    with_tools.exes.push("virtiofsd".to_string());
+    with_tools.exes.push("smbd".to_string());
     assert_eq!(
-        win.as_deref(),
-        Some("qemu/copy"),
-        "Windows 上 smb 不在场就退到 copy"
+        share_chain("linux", None, &with_tools),
+        vec!["virtiofs", "9p", "copy"]
     );
-
-    let none = choose_combo(default_combos("windows"), &|_e| false, &|_e, _s| true);
-    assert!(none.is_none(), "引擎不在场就没有组合");
+    assert_eq!(
+        share_chain("windows", None, &with_tools),
+        vec!["smb", "copy"]
+    );
+    // 登记了路径就以登记的为准（不是在 PATH 上碰运气）。
+    assert_eq!(
+        share_chain("linux", Some("no/such/virtiofsd"), &with_tools),
+        vec!["9p", "copy"],
+        "登记了一个不在场的路径：那一档不进候选"
+    );
 }
 
 /// 目的：已验平台是数据表（不是平台 cfg）：Linux 已验，Windows / macOS 未验。
@@ -1973,7 +2052,7 @@ pub(crate) fn vm_service_holds_guests_by_lease() {
     let vm = crate::capabilities::vm::service::VmService::new(
         Arc::new(InMemoryPackages::empty()),
         engine.clone(),
-        Arc::new(crate::tests::doubles::FakeShare::new()),
+        vec![Arc::new(crate::tests::doubles::FakeShare::new())],
     );
     let spec = GuestSpec {
         lease: "w".to_string(),
@@ -1987,6 +2066,7 @@ pub(crate) fn vm_service_holds_guests_by_lease() {
         net: false,
         engine_path: None,
         share_path: None,
+        shares: Vec::new(),
         seed: None,
         isolated: false,
     };
@@ -2057,6 +2137,7 @@ pub(crate) fn vm_live_guest_runs_command_inside_guest() {
         net: false,
         engine_path: Some(qemu),
         share_path: virtiofsd.clone(),
+        shares: Vec::new(),
         seed: None,
         isolated: true,
     };
@@ -2263,7 +2344,7 @@ pub(crate) fn guests_on_different_leases_run_concurrently() {
     let vm = crate::capabilities::vm::service::VmService::new(
         Arc::new(InMemoryPackages::empty()),
         Arc::new(RvEngine(rv.clone())),
-        Arc::new(FakeShare::new()),
+        vec![Arc::new(FakeShare::new())],
     );
     for lease in ["lease-a", "lease-b"] {
         let image = GuestImage::linux("t", GuestRoot::Dir(PathBuf::from("/x")), None, None);
@@ -2274,6 +2355,7 @@ pub(crate) fn guests_on_different_leases_run_concurrently() {
             net: false,
             engine_path: None,
             share_path: None,
+            shares: Vec::new(),
             seed: None,
             isolated: false,
         })

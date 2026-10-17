@@ -482,6 +482,12 @@ impl Conductor {
             net: meta.exec.net,
             engine_path: self.qemu_path(),
             share_path: self.share_tool_path(),
+            // 共享档在起 guest 这一刻按"已实现 + 工具在场"的优先序选：补齐装完下一次启动就用上。
+            shares: crate::capabilities::vm::api::share_chain(
+                std::env::consts::OS,
+                self.share_tool_path().as_deref(),
+                self.probe.as_ref(),
+            ),
             seed: None,
             // 会话要每租约可写层：多台并发不能同写一份基础镜像。
             isolated: true,

@@ -550,8 +550,8 @@ async function loadConfig(sid, c, box) {
 }
 
 /* ---------- 依赖补齐：把"缺什么"变成"点一下装上" ----------
- * 判据全在后端：`/api/setup/status` 的 `pending` 决定装什么（界面不自己挑条目——挑错了会把已装的重下一遍）；
- * `assembled.share` 说明"补齐后哪些立刻生效、哪些要重启"。这里只做两步确认（先看清单、再下载）、进度与结果。 */
+ * 判据全在后端：`/api/setup/status` 的 `pending` 决定装什么（界面不自己挑条目——挑错了会把已装的重下一遍）。
+ * 这里只做两步确认（先看清单、再下载）、进度与结果；装完即生效，不需要重启。 */
 function openSetupModal(onDone) {
   openModal('补齐虚拟机依赖', (c) => {
     const box = document.createElement('div'); box.className = 'cfg';
@@ -639,12 +639,10 @@ function openSetupModal(onDone) {
 
     function done(st) {
       const left = st.pending || [];
-      const share = (st.assembled || {}).share;
       c.setMsg(left.length ? '作业结束了，但还有没装上的：' + left.join('、') : '补齐完成：依赖都齐了');
       const note = document.createElement('div'); note.className = 'cfg-hint ok';
-      // 生效范围照抄后端事实：判据立刻按新状态；共享后端的实现仍是本进程启动时那一档（它不影响能不能用）。
-      note.textContent = '已经生效：再打开配置 / 向导就按新状态判定，不需要重启。' +
-        (share ? '共享档本进程仍用 ' + share + ' 的实现，要靠它提速需重启应用。' : '');
+      // 生效时机由后端保证（补齐完即按新状态判定，下一次起 guest 就用新的共享档）：这里不编事实，只说结论。
+      note.textContent = '已经生效：再打开配置 / 向导就按新状态判定，下一次启动虚拟机就用上，不需要重启。';
       c.body.appendChild(note);
       const again = btn('关闭', 'btn btn-block'); again.onclick = finish;
       c.body.appendChild(again);

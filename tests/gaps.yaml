@@ -105,20 +105,3 @@
     未覆盖的生产路径逐条有补测或缺口结论。
   blocked_by: 缺少观察面（子进程插桩与合并尚未实现）
 
-- id: vm.share-backend-needs-restart
-  scope: global
-  level: T4
-  why: |
-    补齐作业能把共享档要用的外部工具（virtiofsd / smb helper）装进项目内，装完**判据立刻承认它可用**；
-    但本进程实际装配的共享后端是启动时定下来的那一档（组合根 `choose_combo` → 一个 `ShareBackend` 适配器），
-    所以真正换成 virtiofs / smb 还要重启一次。现状由 `/api/setup/status` 的 `assembled.share` 如实交给界面，
-    界面据此说清"判据已生效、实现要重启"，不假装已经换档（回退档 9p / copy 本身可用，只是慢）。
-  how: |
-    把共享后端的选择从"装配期一次"改成"起 guest 时选"：`VmService` 持全部已实现的适配器，
-    `guest_start` 按当时的工具在场情况与 guest 声明的客户端能力选一档（选型仍复用 `choose_combo` 与 `share_available`，判据只此一份）；
-    组合根不再传单个适配器。
-  accept: |
-    同一进程内：先在缺 smbd / virtiofsd 的状态起一次虚拟机档会话（组合回退到 copy / 9p），补齐工具后再起一次——
-    第二次真的用上 smb / virtiofs（引擎探针或 guest 内挂载点可判），全程不重启；
-    `/api/setup/status` 的 `assembled.share` 要么恒等于当前生效的组合，要么连同这条说明一起去掉。
-  blocked_by: 缺少实现（要先定 vm 的装配契约：`Vm` 面持多档适配器、选型下沉到起 guest）

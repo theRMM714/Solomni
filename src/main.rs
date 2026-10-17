@@ -256,44 +256,30 @@ fn main() {
             }
         };
 
-    // **虚拟机档能力**：运行包库来源、VM 引擎与共享后端三个出站端口只由它的 service 持有（R12）。
-    // 共享后端按平台的组合回退链选：与就绪检测共用 share_available——virtiofsd 不在场时如实退到 9p / copy。
-    let app = capabilities::registry::api::Registry::app(&registry);
-    let virtiofsd = app.virtiofsd_path.clone();
-    let smbd = app.smbd_path.clone();
-    // 组合选择与就绪检测共用同一份判据：本平台共享档要用的外部工具（Windows = smbd，其余 = virtiofsd）。
-    let share_tool = if std::env::consts::OS == "windows" {
-        smbd.clone()
-    } else {
-        virtiofsd.clone()
-    };
-    let picked = capabilities::vm::domain::exec::choose_combo(
-        capabilities::vm::domain::exec::default_combos(std::env::consts::OS),
-        &|engine| engine == "qemu",
-        &|_engine, share| {
-            capabilities::vm::domain::exec::share_available(
-                share,
-                Some(share_tool.as_str()),
-                &kernel::detail::HostProbeAdapter,
-            )
-        },
-    );
-    // 本进程实际装配的共享后端短名：留给呈现层如实说明"判据变了、实现还没换"。
-    let share: Arc<dyn capabilities::vm::ports::ShareBackend + Send + Sync> =
-        match picked.map(|c| c.share) {
-            Some("smb") => Arc::new(capabilities::vm::detail::SmbShare::new()),
-            Some("virtiofs") => Arc::new(capabilities::vm::detail::VirtioFsShare::new()),
-            Some("copy") => Arc::new(capabilities::vm::detail::CopyShare::new()),
-            _ => Arc::new(capabilities::vm::detail::NinePShare::new()),
+    // **虚拟机档能力**：运行包库来源、VM 引擎与共享后端这些出站端口只由它的 service 持有（R12）；
+    // 共享后端**全部**按平台回退链顺序装配进来：哪一档落得上在起 guest 那一刻选（见 GuestSpec.shares）。
+    let order = capabilities::vm::domain::exec::default_combos(std::env::consts::OS);
+    let mut shares: Vec<Arc<dyn capabilities::vm::ports::ShareBackend + Send + Sync>> = Vec::new();
+    for combo in order.iter().filter(|c| c.engine == "qemu") {
+        let share: Arc<dyn capabilities::vm::ports::ShareBackend + Send + Sync> = match combo.share
+        {
+            "smb" => Arc::new(capabilities::vm::detail::SmbShare::new()),
+            "virtiofs" => Arc::new(capabilities::vm::detail::VirtioFsShare::new()),
+            "9p" => Arc::new(capabilities::vm::detail::NinePShare::new()),
+            "copy" => Arc::new(capabilities::vm::detail::CopyShare::new()),
+            _ => continue,
         };
-    let assembled_share = capabilities::vm::ports::ShareBackend::id(share.as_ref());
+        if !shares.iter().any(|s| s.id() == share.id()) {
+            shares.push(share);
+        }
+    }
     let vm: Arc<dyn capabilities::vm::api::Vm + Send + Sync> =
         Arc::new(capabilities::vm::service::VmService::new(
             Arc::new(packages),
             Arc::new(capabilities::vm::detail::QemuEngine::with_overlay_dir(
                 root.join(".vm").join("overlays"),
             )),
-            share,
+            shares,
         ));
 
     // **工作区能力**：目录布局与版本库两个出站端口只由它的 service 持有（R12）。
@@ -495,10 +481,6 @@ fn main() {
     let mut ops = capabilities::conductor::api::Ops::from_handle(&handle);
     // 依赖补齐面：组合根注入（能力面默认未接入，这里换成真实现）。
     ops.provision = Arc::clone(&provision);
-    // 装配事实：本进程的共享后端已经定了，补齐作业装完也只能改判据（换实现要重启）。
-    ops.assembled = capabilities::conductor::api::Assembled {
-        share: Some(assembled_share),
-    };
 
     // 启动拉起：把所有**已启用**的常驻服务拉起来（进程级租约，不属于任何会话）。
     for line in residents_boot.start_enabled() {

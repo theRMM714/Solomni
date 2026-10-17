@@ -118,7 +118,6 @@ fn fake_ops(fail: Option<&str>) -> Ops {
         residents: Arc::new(crate::capabilities::residents::api::NoResidents),
         secrets: Arc::new(crate::capabilities::secrets::api::NoSecrets),
         provision: Arc::new(FakeProvision::new(fail)),
-        assembled: Default::default(),
     }
 }
 
@@ -1018,11 +1017,6 @@ fn setup_status_lists_pending_and_ensure_defaults_to_it() {
         text
     );
     assert_eq!(v["missing"], json!(1), "个数与列表同一份事实：{}", text);
-    assert!(
-        v["assembled"]["share"].is_null(),
-        "未注入装配事实 = 不知道，界面就不说这一段：{}",
-        text
-    );
     // 预览：不点名 = 只挑缺的那条
     let (code, text) = call(&ops, "POST", "/api/setup/ensure", "{}");
     assert_eq!(code, 200);

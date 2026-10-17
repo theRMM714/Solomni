@@ -178,9 +178,9 @@ pub const ROUTES: &[Route] = &[
         pattern: "/api/setup/status",
         capability: "Provision::status + job",
         request: "查询 since / wait",
-        response: "{deps:[{id,guest,present,install,probe,source,url,size_mb,note}],job:{running,seq,lines,error},missing,pending,assembled:{share}}",
+        response: "{deps:[{id,guest,present,install,probe,source,url,size_mb,note}],job:{running,seq,lines,error},missing,pending}",
         statuses: &[200, 400],
-        note: "依赖补齐的状态 + 作业进度：`pending` 是还没装的条目 id（界面据此决定装什么），`assembled` 是本进程已装配的共享后端；`wait=1` 挂起等新行（长轮询，最多 20s）",
+        note: "依赖补齐的状态 + 作业进度：`pending` 是还没装的条目 id（界面据此决定装什么）；`wait=1` 挂起等新行（长轮询，最多 20s）",
     },
     Route {
         id: "setup.ensure",

@@ -141,7 +141,6 @@ const sandbox = {
         job: { running, current: "", seq: setupPolls, lines: ["vm.virtiofsd.windows：下载 https://example.invalid/v.zip"], error: null },
         missing: pending.length,
         pending,
-        assembled: { share: "copy" },
       });
     }
     if (url === "/api/setup/ensure") {
@@ -355,8 +354,8 @@ check("config: 虚拟根状态说清装齐与自带能力（不写「已就绪�
   check("setup: 进度走长轮询（since + wait=1）",
     calls.some((c) => /\/api\/setup\/status\?since=\d+&wait=1/.test(c.url)));
   const t4 = allText(reg.get("#modal-root"));
-  check("setup: 装完说清「立刻生效」与「共享实现要重启」两句事实",
-    t4.indexOf("已经生效") >= 0 && t4.indexOf("copy") >= 0, t4.slice(-300));
+  check("setup: 装完说清「立刻生效、不用重启」",
+    t4.indexOf("已经生效") >= 0 && t4.indexOf("不需要重启") >= 0, t4.slice(-300));
   check("setup: 没有用原生 alert/confirm", alerts.length === 0, JSON.stringify(alerts));
   closeModalIfAny();
 

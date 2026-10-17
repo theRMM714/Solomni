@@ -434,8 +434,6 @@ pub(crate) fn route(
                         "job": ops.provision.job(),
                         "missing": pending.len(),
                         "pending": pending,
-                        // 本进程装配事实：判据按新状态即时生效，但共享后端是启动时定的那一档。
-                        "assembled": { "share": ops.assembled.share },
                     }))
                 }
                 Err(e) => complaint(400, e),

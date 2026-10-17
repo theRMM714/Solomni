@@ -79,38 +79,26 @@ fn provisioning_vm(
             root.join("runtimes"),
         )),
         std::sync::Arc::new(crate::capabilities::vm::detail::QemuEngine::new()),
-        std::sync::Arc::new(crate::capabilities::vm::detail::CopyShare::new()),
+        vec![std::sync::Arc::new(
+            crate::capabilities::vm::detail::CopyShare::new(),
+        )],
     ))
 }
 
-/// 目的：虚拟机档构建用的 vm 能力面——共享档按**平台的默认组合**选（与建会话同一套判据）。
-/// 参数：root = 产品根；share_tool = 本平台共享档要用的外部工具（Windows = smbd，其余 = virtiofsd）。
-/// 约束：必须走**挂载式**共享档（virtiofs / 9p / smb）——模块目录是读写挂进去的，产物才能落回宿主那份；
-///   `copy` 复制通道只适合补齐作业，产物会留在 guest 里。
+/// 目的：虚拟机档构建用的 vm 能力面：**只持挂载式**共享档（virtiofs / 9p / smb）。
+/// 参数：root = 产品根。
+/// 约束：模块目录是读写挂进去的，产物才能落回宿主那份——`copy` 复制通道只适合补齐作业，
+///   所以这里不装配它；构建的 guest 规格给的候选表也去掉 copy（见 `build`）。
 fn build_vm(
     root: &std::path::Path,
-    share_tool: Option<&str>,
 ) -> std::sync::Arc<dyn crate::capabilities::vm::api::Vm + Send + Sync> {
-    let picked = crate::capabilities::vm::domain::exec::choose_combo(
-        crate::capabilities::vm::domain::exec::default_combos(std::env::consts::OS),
-        &|engine| engine == "qemu",
-        &|_engine, share| {
-            crate::capabilities::vm::domain::exec::share_available(
-                share,
-                share_tool,
-                &crate::kernel::detail::host_probe::HostProbeAdapter,
-            )
-        },
-    );
-    let share: std::sync::Arc<dyn crate::capabilities::vm::ports::ShareBackend + Send + Sync> =
-        match picked.map(|c| c.share) {
-            Some("smb") => std::sync::Arc::new(crate::capabilities::vm::detail::SmbShare::new()),
-            Some("virtiofs") => {
-                std::sync::Arc::new(crate::capabilities::vm::detail::VirtioFsShare::new())
-            }
-            Some("copy") => std::sync::Arc::new(crate::capabilities::vm::detail::CopyShare::new()),
-            _ => std::sync::Arc::new(crate::capabilities::vm::detail::NinePShare::new()),
-        };
+    let shares: Vec<
+        std::sync::Arc<dyn crate::capabilities::vm::ports::ShareBackend + Send + Sync>,
+    > = vec![
+        std::sync::Arc::new(crate::capabilities::vm::detail::VirtioFsShare::new()),
+        std::sync::Arc::new(crate::capabilities::vm::detail::NinePShare::new()),
+        std::sync::Arc::new(crate::capabilities::vm::detail::SmbShare::new()),
+    ];
     std::sync::Arc::new(crate::capabilities::vm::service::VmService::new(
         std::sync::Arc::new(crate::capabilities::vm::detail::FsPackages::new(
             root.join("runtimes"),
@@ -120,7 +108,7 @@ fn build_vm(
                 root.join(".vm").join("overlays"),
             ),
         ),
-        share,
+        shares,
     ))
 }
 
@@ -436,7 +424,7 @@ pub fn build_module_in_guest(root: &std::path::Path, id: &str, guest: &str) -> i
         pick("vm.virtiofsd.")
     };
     // 构建期能力：guest 自带，或包库（prefix / system 两种装配都已就位）。
-    let vm = build_vm(root, share_tool.as_deref());
+    let vm = build_vm(root);
     let lib = vm.library();
     let (packages, missing) = build_packages(&decl.needs, &lib, &image.runtimes);
     if !missing.is_empty() {
@@ -490,6 +478,16 @@ pub fn build_module_in_guest(root: &std::path::Path, id: &str, guest: &str) -> i
         net: decl.net,
         engine_path,
         share_path: share_tool.clone(),
+        // 构建要求**挂载式**共享（产物要落回宿主那份）：copy 复制通道不进候选。
+        shares: {
+            let mut chain = crate::capabilities::vm::api::share_chain(
+                std::env::consts::OS,
+                share_tool.as_deref(),
+                &crate::kernel::detail::host_probe::HostProbeAdapter,
+            );
+            chain.retain(|s| *s != "copy");
+            chain
+        },
         seed: None,
         isolated: true,
     };

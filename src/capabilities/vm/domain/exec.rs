@@ -415,18 +415,6 @@ pub fn guest_platform(
     format!("{}-{}", os.as_str(), arch.as_str())
 }
 
-/// 目的：在排好的顺序里挑第一个"引擎与共享都在场"的组合（在不在场由调用方给）。
-/// 返回：选中的组合；都不在场就是 None。
-pub fn choose_combo<'a>(
-    order: &'a [Combo],
-    engine_ok: &dyn Fn(&str) -> bool,
-    share_ok: &dyn Fn(&str, &str) -> bool,
-) -> Option<&'a Combo> {
-    order
-        .iter()
-        .find(|c| engine_ok(c.engine) && share_ok(c.engine, c.share))
-}
-
 /// 目的：本平台的 guest 后端是否已经过真机验收。
 /// 约束：记录的是"验过没有"的事实，不是环境探测。
 fn guest_backend_verified() -> bool {
@@ -459,6 +447,23 @@ fn tool_available(name: &str, registered: Option<&str>, probe: &dyn HostProbe) -
         Some(p) if !p.is_empty() => probe.is_executable(Path::new(p)),
         _ => probe.has_exe(name),
     }
+}
+
+/// 目的：这次启动**可试**的共享后端 id，按本平台"性能优先"的已实现顺序；工具不在场的档不列。
+/// 参数：host = 宿主平台（std::env::consts::OS 的取值）；share_tool = 本平台共享工具路径（None = 兜底 PATH）；probe = 宿主事实。
+/// 约束：只判"已实现 + 工具在场"（share_available）；落不落到这台引擎 / 这份 guest 上由共享后端自己判
+///   （ShareBackend::supports）——所以**选档发生在起 guest 那一刻**，不是装配期定一次。
+/// 约束：引擎恒按 qemu 筛（当前唯一已实现引擎）；返回空表 = 本平台这一份没有可试的共享档。
+pub fn share_chain(
+    host: &str,
+    share_tool: Option<&str>,
+    probe: &dyn HostProbe,
+) -> Vec<&'static str> {
+    default_combos(host)
+        .iter()
+        .filter(|c| c.engine == "qemu" && share_available(c.share, share_tool, probe))
+        .map(|c| c.share)
+        .collect()
 }
 
 /// 目的：某个共享档在不在场：先要是已实现的档，再要它要的外部工具在场（不需要工具的档恒在场）。
