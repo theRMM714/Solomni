@@ -110,6 +110,19 @@ fn main() {
             log.warn("main::fence_reconcile", &rep.summary());
         }
     }
+    // 长驻子进程的账：按它回收上一次留下的孤儿（Unix 确认命令行标记才动手；Windows 有作业对象兜底）。
+    let book = kernel::detail::procs::ProcessBook::open(&home);
+    {
+        let rep = book.reconcile();
+        if rep.touched() {
+            println!(
+                "[进程] 启动对账：清掉 {} 条已不在的登记，收掉 {} 个孤儿，仍有 {} 个在跑",
+                rep.dropped,
+                rep.killed,
+                rep.alive.len()
+            );
+        }
+    }
     // 围栏能力如实告知（不强于实际：机制缺什么就说缺什么）。
     let fence_cap = kernel::detail::confine::capability();
     log.info(
@@ -263,8 +276,13 @@ fn main() {
     for combo in order.iter().filter(|c| c.engine == "qemu") {
         let share: Arc<dyn capabilities::vm::ports::ShareBackend + Send + Sync> = match combo.share
         {
-            "smb" => Arc::new(capabilities::vm::detail::SmbShare::new()),
-            "virtiofs" => Arc::new(capabilities::vm::detail::VirtioFsShare::new()),
+            "smb" => Arc::new(
+                capabilities::vm::detail::SmbShare::new().with_book(std::sync::Arc::clone(&book)),
+            ),
+            "virtiofs" => Arc::new(
+                capabilities::vm::detail::VirtioFsShare::new()
+                    .with_book(std::sync::Arc::clone(&book)),
+            ),
             "9p" => Arc::new(capabilities::vm::detail::NinePShare::new()),
             "copy" => Arc::new(capabilities::vm::detail::CopyShare::new()),
             _ => continue,
@@ -276,9 +294,12 @@ fn main() {
     let vm: Arc<dyn capabilities::vm::api::Vm + Send + Sync> =
         Arc::new(capabilities::vm::service::VmService::new(
             Arc::new(packages),
-            Arc::new(capabilities::vm::detail::QemuEngine::with_overlay_dir(
-                root.join(".vm").join("overlays"),
-            )),
+            Arc::new(
+                capabilities::vm::detail::QemuEngine::with_overlay_dir(
+                    root.join(".vm").join("overlays"),
+                )
+                .with_book(std::sync::Arc::clone(&book)),
+            ),
             shares,
         ));
 

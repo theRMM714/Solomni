@@ -14,14 +14,24 @@ use std::time::{Duration, Instant};
 use std::os::unix::process::CommandExt;
 
 use crate::capabilities::vm::domain::exec::VIRTIOFSD_BIN;
+use crate::kernel::detail::procs::{self, Entry, ProcessBook};
 
 /// 目的：virtiofs 共享后端（QEMU 的 vhost-user-fs；Linux / macOS 宿主可用，Windows 宿主没有）。
-pub struct VirtioFsShare;
+pub struct VirtioFsShare {
+    /// 长驻子进程的账（组合根注入；None = 不记账）。
+    book: Option<std::sync::Arc<ProcessBook>>,
+}
 
 impl VirtioFsShare {
     /// 目的：组合根专用。
     pub fn new() -> VirtioFsShare {
-        VirtioFsShare
+        VirtioFsShare { book: None }
+    }
+
+    /// 目的：接上长驻子进程的账：每起一个 virtiofsd 登记一条，释放时注销。
+    pub fn with_book(mut self, book: std::sync::Arc<ProcessBook>) -> VirtioFsShare {
+        self.book = Some(book);
+        self
     }
 }
 
@@ -64,15 +74,27 @@ impl ShareBackend for VirtioFsShare {
             )
         })?;
         let mut guard = VirtioFsGuard::default();
+        guard.book = self.book.clone();
         let mut engine_args: Vec<String> = Vec::new();
         let mut guest_scripts: Vec<String> = Vec::new();
         for (i, m) in mounts.iter().enumerate() {
             let sock = socket_path();
             // 先把套接字与子进程交给凭据：中途任一步失败，Drop 都会把它们一起收掉，不留残留。
             guard.paths.push(sock.clone());
-            guard
-                .children
-                .push(spawn_virtiofsd(&exe, &m.host, &sock, m.read_only)?);
+            let child = spawn_virtiofsd(&exe, &m.host, &sock, m.read_only)?;
+            // 作业对象（Windows）：核心一死，守护进程跟着死；绑不上只少一层兜底。
+            let _ = procs::bind(&child);
+            if let Some(book) = &guard.book {
+                let sock_txt = sock.display().to_string();
+                book.record(Entry {
+                    pid: child.id(),
+                    since: procs::now_ts(),
+                    purpose: "share:virtiofs".to_string(),
+                    owner: m.guest.clone(),
+                    marker: format!("--socket-path {}", sock_txt),
+                });
+            }
+            guard.children.push(child);
             // QEMU 的 chardev 是客户端：必须等守护进程真在监听，引擎才能连上。
             wait_socket(
                 &sock,
@@ -170,11 +192,16 @@ fn wait_socket(sock: &Path, child: &mut Child, budget: Duration) -> Result<(), S
 pub struct VirtioFsGuard {
     children: Vec<Child>,
     paths: Vec<PathBuf>,
+    /// 长驻子进程的账（有就在收尾时逐条注销）。
+    book: Option<std::sync::Arc<ProcessBook>>,
 }
 
 impl VirtioFsGuard {
     fn cleanup(&mut self) {
         for mut c in self.children.drain(..) {
+            if let Some(book) = &self.book {
+                book.forget(c.id());
+            }
             // 先杀整个进程组（含 sandbox 下 fork 出的守护进程），再收尸。
             #[cfg(unix)]
             unsafe {

@@ -39,7 +39,10 @@ virtiofsd 与默认虚拟根 `debian`（cloud 镜像的 rootfs → **ext4 磁盘
 **并发**：每条会话一条租约、一台 guest（固定 `-m 2048 -smp 2`）；同时台上限是设置项 `max_guests`（默认 2，0 = 不限制），
 到上限如实拒绝（同一租约重启不占新名额，见 [REGISTRY_SPEC.md](../../REGISTRY_SPEC.md) 与 `domain/exec.rs` 的 `admit_guest`）。
 会话启动时用 qemu-img 在基础镜像上建一份**每租约可写层**（`.vm/overlays/<租约>.qcow2`），删会话即丢——多台并发**不同写一份基础镜像**；
-供给编排仍直写基础镜像（它要改的就是镜像本身，`GuestSpec.isolated = false`）。执行路径上，guest 表锁只用来取租约，
+供给编排仍直写基础镜像（它要改的就是镜像本身，`GuestSpec.isolated = false`）。
+每个 QEMU 与共享进程都在起的那一刻记进账（`.home/processes.json`，`kernel/detail/procs.rs`：用途 + 归属 + 标记），销毁时注销；
+Unix 上子进程带 `PR_SET_PDEATHSIG`（父死子亡），Windows 上绑进作业对象（核心一死跟着死）——核心被强杀也不留孤儿攥着镜像。
+执行路径上，guest 表锁只用来取租约，
 `exec` 在该租约自己的锁下跑：**跨租约并行、同一租约串行**；工作区版本库的写闸同理按工作分。
 
 ## 三、依赖图位置（由源码的 `::api` 引用推导）

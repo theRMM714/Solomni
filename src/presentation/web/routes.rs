@@ -173,6 +173,16 @@ pub const ROUTES: &[Route] = &[
         note: "新建工作的档位选择：默认档 + 虚拟机档的**机器能力**可用性与逐项前置 + 可选虚拟根清单（虚拟根是会话级，不在这里判）",
     },
     Route {
+        id: "processes",
+        method: "GET",
+        pattern: "/api/processes",
+        capability: "Provision::processes",
+        request: "—",
+        response: "{procs:[{pid,alive,purpose,owner,since}]}",
+        statuses: &[200, 400],
+        note: "现在在跑什么：产品亲手起的长驻子进程（QEMU / 共享进程）与它们的归属；`alive=false` 表示账上还留着、进程已没（等对账清）",
+    },
+    Route {
         id: "setup.status",
         method: "GET",
         pattern: "/api/setup/status",

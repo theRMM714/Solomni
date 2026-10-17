@@ -57,6 +57,17 @@ const sandbox = {
   console, JSON, Promise, Map, Set, Error, Object, Array, String, Number, Boolean, Math, Date, RegExp,
   setTimeout, clearTimeout,
   fetch: async (url) => {
+    if (String(url).indexOf("/api/processes") === 0) {
+      return {
+        ok: true,
+        json: async () => ({
+          procs: [
+            { pid: 4242, alive: true, purpose: "guest", owner: "w-1", since: 1 },
+            { pid: 4343, alive: false, purpose: "share:virtiofs", owner: "/work", since: 2 },
+          ],
+        }),
+      };
+    }
     if (String(url).indexOf("/api/state") === 0) {
       return {
         ok: true,
@@ -120,6 +131,14 @@ if (!loadErrors.length) {
     return nums.length >= 4;
   });
   // ⑥ 同时上台数要随保存一起提交（后端 set_settings 收这个字段，界面漏了就等于改不了）。
+  // ⑦ "现在在跑什么"区块要在（内容异步填；这里只钉区块与初始提示，渲染路径见 app.js 的 api 调用）。
+  check("设置弹层有长驻进程区块", () => {
+    const body = roots.get("#modal-root").children[0].children[0].children[1];
+    const nodes = walk(body, []);
+    const title = nodes.find((n) => n.className === "wf-label" && n.textContent === "现在在跑什么");
+    const log = nodes.find((n) => n.className === "cfg-log");
+    return !!title && !!log;
+  });
   check("同时上台数随保存提交", () => {
     const body = roots.get("#modal-root").children[0].children[0].children[1];
     const save = walk(body, []).find((n) => n.tagName === "BUTTON" && n.textContent === "保存");

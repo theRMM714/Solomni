@@ -6,7 +6,7 @@
 
 ## 一、管什么 / 不管什么
 
-**管**：内嵌 `dependencies.yaml`（依赖清单）与 `links.yaml`（下载源台账）、本机状态（缺什么、装到哪、从哪来）、下载缓存（`.vm/cache`）、解包落盘（`kernel::detail::unpack`）与一次后台补齐作业（进度 / 取消）。
+**管**：内嵌 `dependencies.yaml`（依赖清单）与 `links.yaml`（下载源台账）、本机状态（缺什么、装到哪、从哪来）、下载缓存（`.vm/cache`）、解包落盘（`kernel::detail::unpack`）、一次后台补齐作业（进度 / 取消），以及**本机现在有哪些长驻子进程在跑**（读 `kernel::detail::procs` 的账：用途、归属、起止）。
 
 **不管**：虚拟机档的能力语义与档位判定（在 `vm`）；构建期工具链（开发侧自备）；界面怎么展示（在 `presentation`）。
 

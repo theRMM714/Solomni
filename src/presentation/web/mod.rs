@@ -399,6 +399,12 @@ pub(crate) fn route(
             Err(e) => complaint(400, e),
         },
 
+        // ---- 现在在跑什么（长驻子进程的账：QEMU / 共享进程） ----
+        "processes" => match ops.provision.processes() {
+            Ok(procs) => ok_json(json!({ "procs": procs })),
+            Err(e) => complaint(400, e),
+        },
+
         // ---- 依赖补齐（开箱即用的 setup 面） ----
         "setup.status" => {
             // 长轮询：`?since=N` 客户端已见的进度序号，`&wait=1` 挂起等新行（最多 20s，与事件台同一套）。

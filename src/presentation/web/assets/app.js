@@ -1432,6 +1432,21 @@ function openSettingsModal() {
     c.body.appendChild(cfgHint('压缩由 AI 自己做：到点自动压一次；也可以随时手动 /compact。填 0 = 不自动压。'));
     c.body.appendChild(guests.wrap);
     c.body.appendChild(cfgHint('每台虚拟机固定 2 GB 内存 / 2 核：到上限时新建会如实拒绝，不会悄悄抢资源。填 0 = 不限制。'));
+    // 现在在跑什么（只读）：产品亲手起的长驻子进程 + 归属；死条目如实标出来（等启动对账清）。
+    const procsTitle = document.createElement('div');
+    procsTitle.className = 'wf-label';
+    procsTitle.textContent = '现在在跑什么';
+    const procsBox = document.createElement('div');
+    procsBox.className = 'cfg-log';
+    procsBox.textContent = '读取中…';
+    c.body.appendChild(procsTitle);
+    c.body.appendChild(procsBox);
+    api('GET', '/api/processes').then((r) => {
+      const list = (r && r.procs) || [];
+      procsBox.textContent = list.length ? list.map((p) =>
+        (p.alive ? '在跑' : '已退出（等对账清）') + ' · ' + p.purpose + ' · ' + p.owner + ' · pid ' + p.pid
+      ).join('\n') : '没有产品起的长驻进程。';
+    }).catch((e) => { procsBox.textContent = '读不到：' + e.message; });
     c.body.appendChild(save);
   });
 }

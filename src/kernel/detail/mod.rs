@@ -8,6 +8,7 @@ pub mod file_log;
 pub mod host_probe;
 pub mod outbound;
 pub mod process;
+pub mod procs;
 pub mod session;
 pub mod unpack;
 

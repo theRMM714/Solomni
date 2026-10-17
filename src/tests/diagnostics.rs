@@ -302,3 +302,38 @@ fn guest_build_makes_the_entry_in_the_guest() {
         .mode();
     assert!(mode & 0o111 != 0, "产物要能直接跑（拿到 {:o}）", mode);
 }
+
+/// 目的：`--doctor` 的事实里要能看到"现在在跑什么"：账上记着、进程已经没了的条目照样如实报出来（`alive:false`）。
+#[test]
+pub(crate) fn doctor_reports_the_recorded_processes() {
+    let root = crate::tests::scratch("doctor-procs");
+    std::fs::create_dir_all(root.join(".home")).expect("建 .home");
+    let book = crate::kernel::detail::procs::ProcessBook::open(&root.join(".home"));
+    book.record(crate::kernel::detail::procs::Entry {
+        pid: 999_999,
+        since: 12,
+        purpose: "guest".to_string(),
+        owner: "w-doctor".to_string(),
+        marker: "solomni:w-doctor".to_string(),
+    });
+    let doc = crate::diagnostics::doctor_json(&root);
+    let procs = doc
+        .get("processes")
+        .and_then(|p| p.as_array())
+        .expect("要有 processes");
+    assert_eq!(procs.len(), 1, "账上那条要报出来");
+    assert_eq!(
+        procs[0].get("purpose").and_then(|v| v.as_str()),
+        Some("guest")
+    );
+    assert_eq!(
+        procs[0].get("owner").and_then(|v| v.as_str()),
+        Some("w-doctor")
+    );
+    assert_eq!(
+        procs[0].get("alive").and_then(|v| v.as_bool()),
+        Some(false),
+        "进程早没了就要如实报 false"
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}

@@ -6,7 +6,7 @@
 
 ## 一、管什么 / 不管什么
 
-**管**：运行日志端口、宿主探测端口、**提问端口**（请用户裁决）、生成中作业的取消表、跨业务共享的**事实类型**、路径的对外书写形式；**外部进程执行（一次性的 `ProcessRunner` 与长驻的 `SessionHost`）与围栏机制**（`confine`：可达范围、断网、进程树、平台实现与 Windows 授权台账）。
+**管**：运行日志端口、宿主探测端口、**提问端口**（请用户裁决）、生成中作业的取消表、跨业务共享的**事实类型**、路径的对外书写形式；**外部进程执行（一次性的 `ProcessRunner` 与长驻的 `SessionHost`）、长驻子进程的账与回收（`procs`）与围栏机制**（`confine`：可达范围、断网、进程树、平台实现与 Windows 授权台账）。
 
 **不管**：**不认识任何能力 / 呈现层 / 入口层**；不放有领域语义的类型——它不需要知道什么是回合、回复、工具执行；**不决定**可达范围（策略由调用方派生后传入）。
 
@@ -14,7 +14,7 @@
 
 `api`（`SessionId` / `Tier` / `ToolOutcome` / `Ask` / `FenceSpec` / `DEFAULT_LLM_TIMEOUT_SECS` / `slash` / `JobRegistry`）、
 `ports`（`Log`、`HostProbe`、`ToolHandler`、`AskUser`、`ProcessRunner`、`SessionHost`、`ProcessTexts`、`FenceHost`——R12 的例外：全项目共享）、`domain`（事实类型、路径书写、取消表、围栏描述符）、
-`detail`（`FileLog`、`HostProbe`、`process`、`confine`）。
+`detail`（`FileLog`、`HostProbe`、`process`、`procs`、`confine`）。
 
 `AskUser` 是「需要用户裁决的机制请用户裁决」的**唯一**入口（形状：`ask(问题) -> 选项 id`，**阻塞**；
 `halt(为什么)` = 构不出可用选项时停会话 + 落警告）：工具执行层与围栏用它，实现在会话侧（`conductor` 的 `SessionAsk`），

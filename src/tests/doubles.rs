@@ -1137,6 +1137,9 @@ pub(crate) fn test_provision_with(
         ) -> Result<Vec<crate::capabilities::provision::api::GuestBase>, String> {
             Ok(Vec::new())
         }
+        fn processes(&self) -> Result<Vec<crate::capabilities::provision::api::ProcInfo>, String> {
+            Ok(Vec::new())
+        }
         fn job(&self) -> crate::capabilities::provision::api::JobState {
             Default::default()
         }

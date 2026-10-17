@@ -12,6 +12,8 @@
 
 ## 二、入站契约与状态归属
 
+启动对账（装配期，会话尚未开工）：围栏授权台账与**长驻子进程的账**（`.home/processes.json`）各跑一次——围栏按归属回收陈旧授权；进程账清掉已不在的条目，在 Unix 上按命令行标记收掉上一次留下的孤儿（Windows 靠作业对象兜底，只报不动手）。`--doctor` 的 `processes` 字段列出账上每条（含 `alive`），界面经 `GET /api/processes` 读同一份。
+
 探针命令行（`--doctor` / `--provision` / `--https-check` / `--print-routes` / `--print-fence-env` / `--fence-verify`，多数**恒退出 0**——判定归调用方；`--provision` 报依赖清单里的"缺什么、装到哪、从哪来"，下载源来自编译期内嵌的 `dependencies.yaml` + `links.yaml`；加 `--ensure[=id,…] --yes` 才真下载安装，只写项目内）；围栏收尾与按条处置（`--fence-clean` 整体收尾，`--fence-reconcile` 按归属对账回收陈旧授权（启动期也自动跑一次），`--fence-ledger` 列清单 / `--fence-restore` 还原一条 / `--fence-revoke` 撤一条 / `--fence-profile-rm` 删一个 profile，都是隐藏模式、用户经文档知道）；守门进程协议（`--fence-run`，内部协议，模块作者不接触）。
 
 ## 三、依赖图位置（由源码的 `::api` 引用推导）

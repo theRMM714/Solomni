@@ -214,6 +214,22 @@ impl Provision for ProvisionService {
         ))
     }
 
+    /// 约束：账本是"我们亲手起的长驻子进程"这一份事实源；`alive` 逐条问一次系统（死条目如实留着，等对账清）。
+    fn processes(&self) -> Result<Vec<crate::capabilities::provision::api::ProcInfo>, String> {
+        let book = crate::kernel::detail::procs::ProcessBook::open(&self.root.join(".home"));
+        Ok(book
+            .list()
+            .into_iter()
+            .map(|e| crate::capabilities::provision::api::ProcInfo {
+                alive: crate::kernel::detail::procs::alive(e.pid),
+                pid: e.pid,
+                purpose: e.purpose,
+                owner: e.owner,
+                since: e.since,
+            })
+            .collect())
+    }
+
     fn job(&self) -> JobState {
         self.job.lock().map(|j| j.clone()).unwrap_or_default()
     }
