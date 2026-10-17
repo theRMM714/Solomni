@@ -6,7 +6,7 @@ use super::builders::*;
 use super::prelude::*;
 use crate::capabilities::vm::api::Vm;
 use crate::capabilities::vm::domain::guest::{
-    classify_base, GuestImage, GuestMount, GuestRoot, GuestRun, GuestSpec,
+    classify_base, GuestImage, GuestMount, GuestRun, GuestSpec,
 };
 use crate::capabilities::vm::ports::{PackageSource, ShareBackend, VmEngine};
 use crate::kernel::ports::HostProbe;
@@ -760,17 +760,24 @@ pub(crate) fn fs_packages_records_source_dir() {
 }
 
 #[test]
-pub(crate) fn guest_base_requires_rootfs_and_kernel() {
+pub(crate) fn guest_base_requires_a_disk_image() {
     let probe = crate::kernel::detail::HostProbeAdapter;
     let dir = crate::tests::scratch("vm-guest-base");
-    // 空目录：缺内核。
-    assert!(classify_base(&dir, &probe).is_err(), "没有内核不算基础根");
-    // 放内核：可用，无 initrd。
+    // 空目录：没有磁盘镜像（会话的可写层没地方叠）。
+    let why = classify_base(&dir, &probe).expect_err("没有磁盘镜像不算基础根");
+    assert!(why.contains("磁盘镜像"), "理由要说清缺什么：{why}");
+    // 只有内核也不算：根必须是磁盘镜像（内核可有可无）。
     std::fs::write(dir.join("vmlinuz"), b"x").expect("写内核");
-    let base = classify_base(&dir, &probe).expect("有内核就该可用");
+    assert!(
+        classify_base(&dir, &probe).is_err(),
+        "只有内核、没有磁盘镜像仍不算基础根"
+    );
+    // 放磁盘镜像：可用，内核与 initrd 一并认出来。
+    std::fs::write(dir.join("rootfs.ext4"), b"img").expect("写磁盘镜像");
+    let base = classify_base(&dir, &probe).expect("有磁盘镜像就该可用");
+    assert_eq!(base.disk, dir.join("rootfs.ext4"));
     assert_eq!(base.kernel, Some(dir.join("vmlinuz")));
     assert!(base.initrd.is_none(), "没放 initrd 就是没有");
-    // 放 initrd：一并认出来。
     std::fs::write(dir.join("initrd.img"), b"x").expect("写 initrd");
     let base = classify_base(&dir, &probe).expect("有 initrd 仍可用");
     assert_eq!(base.initrd, Some(dir.join("initrd.img")));
@@ -781,7 +788,6 @@ pub(crate) fn guest_base_requires_rootfs_and_kernel() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
-
 /// 目的：运行包按 guest 平台分包——平台子目录名的认法、按 guest 筛库、平台名拼法。
 #[test]
 pub(crate) fn packages_split_by_guest_platform() {
@@ -1074,7 +1080,7 @@ pub(crate) fn guest_mounts_prefix_packages_and_fence_roots() {
         lease: "w".to_string(),
         image: GuestImage::linux(
             "test",
-            GuestRoot::Dir(std::path::PathBuf::from("/base")),
+            std::path::PathBuf::from("/base/rootfs.ext4"),
             Some(std::path::PathBuf::from("/base/vmlinuz")),
             Some(std::path::PathBuf::from("/base/initrd.img")),
         ),
@@ -1100,13 +1106,14 @@ pub(crate) fn guest_mounts_prefix_packages_and_fence_roots() {
         "没有网卡就没有 netdev"
     );
     assert!(
-        args.iter().any(|a| a.contains("root=base")),
-        "rootfs 走 9p 的 base 标签"
+        args.iter().any(|a| a == "file=/base/rootfs.ext4,if=virtio"),
+        "根是磁盘镜像（virtio 磁盘）：{:?}",
+        args
     );
     assert!(
-        args.iter()
-            .any(|a| a.starts_with("local,id=fsbase,") && !a.contains("readonly=on")),
-        "基础根共享要可写（内核 root=... rw，额外挂载点也要建得出来）"
+        !args.iter().any(|a| a.contains("fsbase")),
+        "根是磁盘镜像，不该再有 9p 基础根共享：{:?}",
+        args
     );
     let accel = args
         .iter()
@@ -1164,7 +1171,7 @@ pub(crate) fn accelerators_and_nic_follow_the_platform_and_share_need() {
         lease: "w".to_string(),
         image: GuestImage::linux(
             "test",
-            GuestRoot::Dir(std::path::PathBuf::from("/base")),
+            std::path::PathBuf::from("/base/rootfs.ext4"),
             Some(std::path::PathBuf::from("/base/vmlinuz")),
             None,
         ),
@@ -1235,22 +1242,23 @@ pub(crate) fn accelerators_and_nic_follow_the_platform_and_share_need() {
     );
 }
 
-/// 目的：磁盘镜像根可以没有内核（靠镜像自带引导）；目录根没有内核则如实拒收。
+/// 目的：磁盘镜像可以没有内核（靠镜像自带引导）；内核有没有都不影响"根必须是磁盘镜像"。
 #[test]
 pub(crate) fn disk_base_may_boot_without_a_kernel() {
     let probe = crate::kernel::detail::HostProbeAdapter;
     let dir = crate::tests::scratch("vm-guest-nokernel");
     std::fs::write(dir.join("rootfs.ext4"), b"img").expect("写磁盘镜像");
-    let image = classify_base(&dir, &probe).expect("磁盘根可以没有内核");
+    let image = classify_base(&dir, &probe).expect("没有内核也能判出来");
     assert!(image.kernel.is_none(), "没有 vmlinuz 就是 None");
-    assert!(
-        matches!(image.root, GuestRoot::Disk(_)),
-        "同目录里的磁盘镜像仍判成磁盘根"
+    assert_eq!(
+        image.disk,
+        dir.join("rootfs.ext4"),
+        "判出来的根就是那份磁盘镜像"
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// 目的：没有内核的磁盘根不传 -kernel / -append，交给镜像自带引导（固件启动）。
+/// 目的：没有内核的磁盘镜像不传 -kernel / -append，交给镜像自带引导（固件启动）。
 #[test]
 pub(crate) fn disk_root_without_kernel_boots_via_firmware() {
     use crate::capabilities::vm::detail::qemu::engine_args;
@@ -1258,7 +1266,7 @@ pub(crate) fn disk_root_without_kernel_boots_via_firmware() {
         lease: "w".to_string(),
         image: GuestImage::linux(
             "test",
-            GuestRoot::Disk(std::path::PathBuf::from("/img/root.qcow2")),
+            std::path::PathBuf::from("/img/root.qcow2"),
             None,
             None,
         ),
@@ -1288,7 +1296,7 @@ pub(crate) fn disk_root_without_kernel_boots_via_firmware() {
     );
 }
 
-/// 目的：磁盘镜像根走 virtio 磁盘（三平台通用），不再依赖 9p 的 base 标签。
+/// 目的：根走 virtio 磁盘（三平台通用），不再依赖 9p 的 base 标签。
 #[test]
 pub(crate) fn disk_root_uses_a_virtio_disk_not_9p() {
     use crate::capabilities::vm::detail::qemu::engine_args;
@@ -1296,7 +1304,7 @@ pub(crate) fn disk_root_uses_a_virtio_disk_not_9p() {
         lease: "w".to_string(),
         image: GuestImage::linux(
             "test",
-            GuestRoot::Disk(std::path::PathBuf::from("/img/root.qcow2")),
+            std::path::PathBuf::from("/img/root.qcow2"),
             Some(std::path::PathBuf::from("/img/vmlinuz")),
             None,
         ),
@@ -1311,7 +1319,7 @@ pub(crate) fn disk_root_uses_a_virtio_disk_not_9p() {
     let args = engine_args(&spec, "opts", false, false, None, &[]);
     assert!(
         args.iter().any(|a| a == "file=/img/root.qcow2,if=virtio"),
-        "磁盘根要接成 virtio 磁盘：{:?}",
+        "根要接成 virtio 磁盘：{:?}",
         args
     );
     assert!(
@@ -1321,7 +1329,7 @@ pub(crate) fn disk_root_uses_a_virtio_disk_not_9p() {
     );
     assert!(
         !args.iter().any(|a| a.contains("fsbase")),
-        "磁盘根不该再有 9p 基础根共享：{:?}",
+        "不该再有 9p 基础根共享：{:?}",
         args
     );
 }
@@ -1340,7 +1348,7 @@ pub(crate) fn share_syncs_around_each_run_and_releases_on_stop() {
         lease: "w".to_string(),
         image: GuestImage::linux(
             "test",
-            GuestRoot::Dir(std::path::PathBuf::from("/base")),
+            std::path::PathBuf::from("/base/rootfs.ext4"),
             Some(std::path::PathBuf::from("/base/vmlinuz")),
             None,
         ),
@@ -1407,7 +1415,7 @@ pub(crate) fn copy_share_plans_mkdirs_and_tar_round_trips_on_the_host() {
     let _ = std::fs::remove_dir_all(&dst);
 }
 
-/// 目的：目录里放着 rootfs 磁盘镜像时判成磁盘根（三平台通用），就绪项如实说明，引擎参数走 virtio 磁盘。
+/// 目的：虚拟根里那份磁盘镜像被认出来（三平台通用），就绪项如实说明，引擎参数走 virtio 磁盘。
 #[test]
 pub(crate) fn disk_image_base_is_classified_as_a_disk_root() {
     let probe = crate::kernel::detail::HostProbeAdapter;
@@ -1420,10 +1428,10 @@ pub(crate) fn disk_image_base_is_classified_as_a_disk_root() {
     std::fs::write(dir.join("vmlinuz"), b"x").expect("写内核");
     std::fs::write(dir.join("rootfs.ext4"), b"img").expect("写磁盘镜像");
     let image = classify_base(&dir, &probe).expect("磁盘布局可用");
-    assert!(
-        matches!(image.root, GuestRoot::Disk(_)),
-        "有磁盘镜像就判成磁盘根：{:?}",
-        image.root
+    assert_eq!(
+        image.disk,
+        dir.join("rootfs.ext4"),
+        "判出来的根就是那份磁盘镜像"
     );
     let spec = ExecSpec {
         tier: Tier::Vm,
@@ -1438,7 +1446,7 @@ pub(crate) fn disk_image_base_is_classified_as_a_disk_root() {
         .expect("清单里要有基础根这一项");
     assert!(
         base_item.met && base_item.detail.contains("磁盘镜像"),
-        "就绪项要说明是磁盘根：{:?}",
+        "就绪项要说明是磁盘镜像：{:?}",
         base_item
     );
     let args = crate::capabilities::vm::detail::qemu::engine_args(
@@ -1462,7 +1470,7 @@ pub(crate) fn disk_image_base_is_classified_as_a_disk_root() {
     assert!(
         args.iter()
             .any(|a| a.starts_with("file=") && a.ends_with(",if=virtio")),
-        "磁盘根要接成 virtio 磁盘：{:?}",
+        "根要接成 virtio 磁盘：{:?}",
         args
     );
     let _ = std::fs::remove_dir_all(&dir);
@@ -1479,13 +1487,9 @@ pub(crate) fn vm_service_refuses_unfit_engine_and_share_with_a_reason() {
         vec![Arc::new(NinePShare::new())],
     );
 
-    // 引擎承载不了：架构不匹配（磁盘根让 supports 的根类型判定通过，只剩架构这一条）。
-    let mut wrong_arch = GuestImage::linux(
-        "t",
-        GuestRoot::Disk(std::path::PathBuf::from("/img/root.qcow2")),
-        None,
-        None,
-    );
+    // 引擎承载不了：架构不匹配（根是磁盘镜像，三平台通用，只剩架构这一条）。
+    let mut wrong_arch =
+        GuestImage::linux("t", std::path::PathBuf::from("/img/root.qcow2"), None, None);
     wrong_arch.arch = match GuestArch::host() {
         GuestArch::Amd64 => GuestArch::Arm64,
         GuestArch::Arm64 => GuestArch::Amd64,
@@ -1505,12 +1509,8 @@ pub(crate) fn vm_service_refuses_unfit_engine_and_share_with_a_reason() {
     assert!(why.contains("承载不了"), "{}", why);
 
     // 共享落不上：引擎能承载，但 guest 没声明 9p 客户端。
-    let mut no_nine = GuestImage::linux(
-        "t",
-        GuestRoot::Disk(std::path::PathBuf::from("/img/root.qcow2")),
-        None,
-        None,
-    );
+    let mut no_nine =
+        GuestImage::linux("t", std::path::PathBuf::from("/img/root.qcow2"), None, None);
     no_nine.clients.nine_p = false;
     let spec2 = GuestSpec {
         lease: "w".to_string(),
@@ -1637,6 +1637,7 @@ pub(crate) fn copy_share_syncs_both_ways_through_the_channel() {
 pub(crate) fn guest_manifest_declares_the_image_and_rejects_unknowns() {
     let probe = crate::kernel::detail::HostProbeAdapter;
     let dir = crate::tests::scratch("vm-guest-manifest");
+    std::fs::write(dir.join("rootfs.ext4"), b"img").expect("写磁盘镜像");
     std::fs::write(dir.join("vmlinuz"), b"x").expect("写内核");
     std::fs::write(
         dir.join("guest.yaml"),
@@ -1686,6 +1687,7 @@ pub(crate) fn guest_image_carries_agent_and_client_capabilities() {
     use crate::capabilities::vm::ports::ShareBackend;
     let probe = crate::kernel::detail::HostProbeAdapter;
     let dir = crate::tests::scratch("vm-guest-clients");
+    std::fs::write(dir.join("rootfs.ext4"), b"img").expect("写磁盘镜像");
     std::fs::write(dir.join("vmlinuz"), b"x").expect("写内核");
     let image = classify_base(&dir, &probe).expect("可用");
     assert_eq!(
@@ -1782,6 +1784,7 @@ pub(crate) fn virtiofs_share_supports_only_qemu_with_virtiofs_client() {
     use crate::capabilities::vm::detail::VirtioFsShare;
     let probe = crate::kernel::detail::HostProbeAdapter;
     let dir = crate::tests::scratch("vm-virtiofs-clients");
+    std::fs::write(dir.join("rootfs.ext4"), b"img").expect("写磁盘镜像");
     std::fs::write(dir.join("vmlinuz"), b"x").expect("写内核");
     let image = classify_base(&dir, &probe).expect("可用");
     let share = VirtioFsShare::new();
@@ -2034,7 +2037,7 @@ pub(crate) fn share_is_picked_per_guest_at_start() {
         lease: lease.to_string(),
         image: GuestImage::linux(
             "test",
-            GuestRoot::Dir(std::path::PathBuf::from("/base")),
+            std::path::PathBuf::from("/base/rootfs.ext4"),
             Some(std::path::PathBuf::from("/base/vmlinuz")),
             None,
         ),
@@ -2155,7 +2158,7 @@ pub(crate) fn vm_service_holds_guests_by_lease() {
         lease: "w".to_string(),
         image: GuestImage::linux(
             "test",
-            GuestRoot::Dir(std::path::PathBuf::from("/base")),
+            std::path::PathBuf::from("/base/rootfs.ext4"),
             Some(std::path::PathBuf::from("/base/vmlinuz")),
             None,
         ),
@@ -2266,8 +2269,8 @@ pub(crate) fn vm_live_guest_runs_command_inside_guest() {
         .prepare("qemu", &spec.mounts, tool)
         .expect("共享计划要能派生");
     let mut guest = engine.boot(&spec, &plan).expect("起 guest");
-    // 每租约可写层只对**磁盘根**建（目录根本来就是可写的共享根，产品也走同一条路）。
-    if matches!(spec.image.root, GuestRoot::Disk(_)) {
+    // 根永远是磁盘镜像：每租约都该建出一份可写层。
+    {
         let overlay = overlay_dir.join("vm-live.qcow2");
         assert!(
             overlay.is_file(),
@@ -2311,8 +2314,8 @@ pub(crate) fn vm_live_guest_runs_command_inside_guest() {
         );
     }
     guest.stop();
-    // 同上：只有磁盘根才建了那个可写层，删租约也只对它有"要删掉"这回事。
-    if matches!(spec.image.root, GuestRoot::Disk(_)) {
+    // 同上：删租约要把那份可写层也删掉。
+    {
         let overlay = overlay_dir.join("vm-live.qcow2");
         assert!(
             !overlay.is_file(),
@@ -2444,7 +2447,7 @@ pub(crate) fn guests_on_different_leases_run_concurrently() {
         vec![Arc::new(FakeShare::new())],
     );
     for lease in ["lease-a", "lease-b"] {
-        let image = GuestImage::linux("t", GuestRoot::Dir(PathBuf::from("/x")), None, None);
+        let image = GuestImage::linux("t", PathBuf::from("/x/rootfs.qcow2"), None, None);
         vm.guest_start(&GuestSpec {
             lease: lease.to_string(),
             image,

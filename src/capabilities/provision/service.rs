@@ -899,7 +899,7 @@ fn ensure_executable(path: &Path) {
 fn sanitize_guest_base(base: &Path) -> Result<(), String> {
     fs::write(
         base.join("etc").join("fstab"),
-        "# guest root 由内核命令行给出（9p），这里不写 fstab 条目。
+        "# guest root 由内核命令行给出（磁盘镜像 /dev/vda），这里不写 fstab 条目。
 ",
     )
     .map_err(|e| format!("写 fstab 失败：{}", e))?;
@@ -1103,6 +1103,108 @@ fn install_guest_rootfs(
         )
         .map_err(|e| format!("写 guest.yaml 失败：{}", e))?;
         on_line("写 guest.yaml（QGA 通道画像）");
+    }
+    // 运行产物是**磁盘镜像**（会话靠每租约可写层并发，谁也不写基础镜像）；目录只在这条构造链里当中间产物。
+    pack_guest_base(&base, &cache, on_line)?;
+    // agent 已经装进镜像：运行期编排看到这个标记就跳过 cloud-init 首启。
+    fs::write(
+        base.join(".qga-ready"),
+        "guest-rootfs 已装 qemu-guest-agent（打包进磁盘镜像）\n",
+    )
+    .map_err(|e| format!("写 .qga-ready 失败：{}", e))?;
+    Ok(())
+}
+
+/// 目的：把构造好的 rootfs 目录打成**磁盘镜像**（`rootfs.ext4`，raw），然后删掉目录中间产物。
+/// 参数：base = 虚拟根目录（内核 / initrd / guest.yaml 与镜像并排）；cache = 打包临时落点；on_line = 进度行。
+/// 约束：只在 Linux 宿主上跑——`unshare -r` 拿假 root，镜像里的属主才会是 0（否则会写成调用者 uid）；
+///   调用前目录已定稿（内核 / agent / initrd / 画像都写完）。
+fn pack_guest_base(base: &Path, cache: &Path, on_line: &mut dyn FnMut(&str)) -> Result<(), String> {
+    // 内核 / initrd 现在是软链（`vmlinuz` → `boot/vmlinuz-<abi>`）：落成实体文件，否则删目录后就成了悬空链。
+    for name in ["vmlinuz", "initrd.img"] {
+        let link = base.join(name);
+        if fs::symlink_metadata(&link).is_err()
+            || !fs::symlink_metadata(&link)
+                .map(|m| m.file_type().is_symlink())
+                .unwrap_or(false)
+        {
+            continue;
+        }
+        let tmp = base.join(format!("{}.solid", name));
+        fs::copy(&link, &tmp).map_err(|e| format!("把 {name} 落成实体文件失败：{e}"))?;
+        fs::remove_file(&link).map_err(|e| format!("换掉 {name} 软链失败：{e}"))?;
+        fs::rename(&tmp, &link).map_err(|e| format!("放回 {name} 失败：{e}"))?;
+    }
+    let used = dir_bytes(base)?;
+    // 留 25% 余量、至少 256 MB、下限 1 GB：guest 里 apt 要写元数据与日志，卡得刚好会在第一次装包时炸。
+    let slack = std::cmp::max(256 << 20, used / 4);
+    let need = std::cmp::max(1u64 << 30, used + slack);
+    let blocks = need.div_ceil(4096);
+    let tmp_img = cache.join("pack.ext4");
+    let _ = fs::remove_file(&tmp_img);
+    on_line(&format!(
+        "把 rootfs 打成磁盘镜像（{} MiB，目录占用 {} MiB）",
+        need >> 20,
+        used >> 20
+    ));
+    // `-d` 从目录灌内容；在假 root 里跑，镜像里的属主才是 root（宿主是普通用户）。
+    run_tool(
+        std::process::Command::new("unshare")
+            .arg("-r")
+            .arg("mke2fs")
+            .args(["-q", "-t", "ext4", "-F", "-d"])
+            .arg(base)
+            .arg(&tmp_img)
+            .arg(blocks.to_string()),
+        "unshare + mke2fs（要 e2fsprogs 且内核允许非特权用户命名空间）",
+    )?;
+    let image = base.join("rootfs.ext4");
+    fs::rename(&tmp_img, &image).map_err(|e| format!("放 rootfs.ext4 失败：{e}"))?;
+    // 中间产物删掉：虚拟根只剩 磁盘镜像 + 内核 + initrd + 画像（没有第二份真相）。
+    purge_except(
+        base,
+        &["rootfs.ext4", "vmlinuz", "initrd.img", "guest.yaml"],
+    )?;
+    on_line("磁盘镜像就位，目录中间产物已清掉");
+    Ok(())
+}
+
+/// 目的：目录里所有普通文件的大小之和（不含软链本身）；算镜像要多大。
+fn dir_bytes(dir: &Path) -> Result<u64, String> {
+    let mut total = 0u64;
+    let mut stack = vec![dir.to_path_buf()];
+    while let Some(d) = stack.pop() {
+        let entries = fs::read_dir(&d).map_err(|e| format!("读 {} 失败：{e}", d.display()))?;
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let meta = fs::symlink_metadata(&path)
+                .map_err(|e| format!("看 {} 失败：{e}", path.display()))?;
+            if meta.is_dir() {
+                stack.push(path);
+            } else if meta.is_file() {
+                total += meta.len();
+            }
+        }
+    }
+    Ok(total)
+}
+
+/// 目的：只留下 `keep` 里那几个名字，其余全删（虚拟根目录的收口）。
+fn purge_except(base: &Path, keep: &[&str]) -> Result<(), String> {
+    let entries = fs::read_dir(base).map_err(|e| format!("读 {} 失败：{e}", base.display()))?;
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if keep.contains(&name.as_str()) {
+            continue;
+        }
+        let path = entry.path();
+        let meta =
+            fs::symlink_metadata(&path).map_err(|e| format!("看 {} 失败：{e}", path.display()))?;
+        if meta.is_dir() {
+            fs::remove_dir_all(&path).map_err(|e| format!("删 {} 失败：{e}", path.display()))?;
+        } else {
+            fs::remove_file(&path).map_err(|e| format!("删 {} 失败：{e}", path.display()))?;
+        }
     }
     Ok(())
 }

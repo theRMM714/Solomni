@@ -175,7 +175,6 @@ impl ShareBackend for SmbShare {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::capabilities::vm::domain::guest::GuestRoot;
 
     fn mount(guest: &str, host: &str, read_only: bool) -> GuestMount {
         GuestMount {
@@ -217,12 +216,7 @@ mod tests {
     #[test]
     fn supports_only_qemu_with_cifs_client() {
         let s = SmbShare::new();
-        let mut guest = GuestImage::linux(
-            "t",
-            GuestRoot::Disk(std::path::PathBuf::from("/x")),
-            None,
-            None,
-        );
+        let mut guest = GuestImage::linux("t", std::path::PathBuf::from("/x"), None, None);
         guest.clients.cifs = true;
         assert!(s.supports("qemu", &guest));
         assert!(!s.supports("vz", &guest), "smb 只落在 qemu 上");

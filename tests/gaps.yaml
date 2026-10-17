@@ -125,3 +125,26 @@
   blocked_by: |
     缺少实现。要先定"会话可以存在但 guest 未就绪"的运行态契约——它会打破现行"起不来就什么都不留下"的不变式，
     要同步 docs/session/session-model.md、docs/vm/README.md 与对应用例。
+
+- id: vm.linux-disk-root-live
+  scope: global
+  level: T4
+  why: |
+    虚拟根统一成**磁盘镜像**：Linux 的 `guest-rootfs` 多了一步"rootfs 目录 → ext4 打包"（`unshare -r` + `mke2fs -d`），
+    运行路径也删掉了 9p 目录根。这一步只在 Linux 宿主上成立（要 e2fsprogs、util-linux 与非特权用户命名空间），
+    本次开发机是 Windows：打包、磁盘根启动（`root=/dev/vda` + 每租约可写层）、apt / NodeSource 维护启动、
+    多会话并发不互踩，都只做了代码级与单元级验证，没在 Linux 真机上跑过。
+    另一处要盯的：`mke2fs -d` 只搬文件内容 / 权限 / 属主 / 时间，**不搬 xattr 与文件 capability**
+    （Debian rootfs 上一般用不到；模块若依赖带 cap 的二进制就是真缺口），验收时顺手看一眼。
+  how: |
+    在一台有 KVM 的 Linux 宿主上：
+    1) `node start.js --provision --ensure=vm.qemu.linux,vm.guest.linux,vm.guest-runtime.linux --yes`，看 `.vm/guest/debian/`
+       只剩 `rootfs.ext4` / `vmlinuz` / `initrd.img` / `guest.yaml`（加两个标记）——目录中间产物已清掉；
+    2) 起一台虚拟机档会话：guest 用 `root=/dev/vda` 起来（不是 9p 根），模块工具在 guest 里能跑；
+    3) 同时起两台（`max_guests` 默认 2）：各自 `.vm/overlays/<租约>.qcow2` 在场、基础 `rootfs.ext4` 的 mtime 不变；
+    4) `SOLOMNI_VM_LIVE=1` 跑一次引擎级探针（`vm_live_guest_runs_command_inside_guest`）。
+  accept: |
+    上面四步在 Linux 真机上通过：基础镜像在两次会话后 mtime 不变（没有谁写回基础）；删除会话后可写层被删掉；
+    `docs/vm/README.md` 与 `RUNTIME_SPEC.md` 的"已真机验收"能重新写上 Linux。
+  blocked_by: |
+    需要 Linux 宿主（本次开发机是 Windows）。

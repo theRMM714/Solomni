@@ -94,6 +94,8 @@ pub(crate) fn vm_availability_is_machine_only_and_base_is_session_level() {
         .join("guest")
         .join("vm-avail");
     probe.guests.push(guest_dir.clone());
+    // 虚拟根现在是"磁盘镜像 + 可选内核"：镜像必须在场（会话的可写层叠在它上面）。
+    probe.files.push(guest_dir.join("rootfs.ext4"));
     probe.files.push(guest_dir.join("vmlinuz"));
     let mut core = core_with_gateway_probe(
         vec![module_of("a")],

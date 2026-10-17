@@ -19,7 +19,7 @@
 出站端口 `PackageSource` / `VmEngine` / `ShareBackend` **只由 `service.rs` 持有**（R12）；`GuestVm` / `GuestChannel` 由引擎在 boot 时交出。`ExecSpec` 是共享事实（在 `kernel`），本能力只读它。
 
 **当前状态**：五轴已按可插的形状落地——`QemuEngine`（当前唯一引擎）、`GuestImage`（虚拟根里可放 `guest.yaml` 声明 id / arch / os / agent / clients / runtimes）、
-`QemuHandle`（QEMU + QGA，命令通道；chardev 就绪前连上的那条会被 QEMU RST，故握手失败即重连再握手——不把通道被换掉当故障）、`NinePShare`（目录根）、`CopyShare`（QGA 复制，三平台通用）、`VirtioFsShare`（QEMU vhost-user-fs，Linux/macOS 宿主）与 `SmbShare`（用户态 SMB helper + guestfwd 隧道，Windows 宿主的实时共享档）。
+`QemuHandle`（QEMU + QGA，命令通道；chardev 就绪前连上的那条会被 QEMU RST，故握手失败即重连再握手——不把通道被换掉当故障）、`NinePShare`（挂载式共享，Linux 回退档）、`CopyShare`（QGA 复制，三平台通用）、`VirtioFsShare`（QEMU vhost-user-fs，Linux/macOS 宿主）与 `SmbShare`（用户态 SMB helper + guestfwd 隧道，Windows 宿主的实时共享档）。
 按平台的组合回退链是数据（`default_combos` / `share_chain`），**共享档在起 guest 那一刻按候选挑**（不是装配期定一次），加速器按平台给（`accel=kvm:tcg` / `accel=whpx:tcg` / `accel=hvf:tcg`），共享要隧道时给 `restrict=on` 网卡。
 执行分派已接线（会话在 `tier == Vm` 时把模块命令交给 guest；建会话时装配并拉起，会话删除时销毁）；就绪项 `guest` 按**已验平台数据表**（`VERIFIED_HOSTS`）放开，并带上本平台上**已实现**的组合。
 判据分两层：**机器能力**（`vm_capability`：hypervisor / guest 后端 / 引擎 / 共享档）决定虚拟机档能不能**选**；**虚拟根是会话级**，创建或会话配置里从清单选（界面给下拉），保存 /「开始」时才合并进严格判据（`tier_readiness`）。
@@ -32,7 +32,7 @@ macOS 缺取包（`vm.qemu-provisioning-macos`）与 macOS Apple vz 引擎 + 自
 [tests/gaps.yaml](../../tests/gaps.yaml) 的 `fence.guest-tier-not-wired`。
 
 依赖由 `provision` 能力按清单（`dependencies.yaml` + `links.yaml`，需用户同意、只写项目内）装进 `.vm/`：Linux 装 QEMU（pkgforge Anylinux AppImage）、
-virtiofsd 与默认虚拟根 `debian`（目录 rootfs + 内核 + 9p initrd + qemu-guest-agent，装进 `.vm/guest/debian/`）；Windows 装官方源码在 MSYS2（mingw-w64）下自建的 QEMU 11.1.1 便携包（`--enable-slirp`，固件按真实文件打包）+ Debian cloud qcow2（虚拟根 `windows`，装进 `.vm/guest/windows/`）+ `guest.yaml`；
+virtiofsd 与默认虚拟根 `debian`（cloud 镜像的 rootfs → **ext4 磁盘镜像** + 通用内核 + initrd + qemu-guest-agent，装进 `.vm/guest/debian/`；会话的可写层叠在镜像上）；Windows 装官方源码在 MSYS2（mingw-w64）下自建的 QEMU 11.1.1 便携包（`--enable-slirp`，固件按真实文件打包）+ Debian cloud qcow2（虚拟根 `windows`，装进 `.vm/guest/windows/`）+ `guest.yaml`；
 虚拟根"真有什么运行能力"由 provision 能力的 `guest-runtime` 编排（Rust 侧起一次 guest，逐个自证后写进 `guest.yaml` 的 `runtimes`）确认：Windows 走 cloud-init 首启 + 维护启动装包，Linux 由 `guest-rootfs` 自带 agent、维护启动只确认 python 并尽力装 node；macOS 保持检测 + 指路。据此在 **KVM** 下跑通真机探针与产品级会话验收，在 **WHPX** 下同样跑通引擎级探针与 e2e 的 vm 会话场景（设 `SOLOMNI_VM_LIVE=1` +
 `SOLOMNI_VM_QEMU` / `SOLOMNI_VM_VIRTIOFSD` / `SOLOMNI_VM_SMBD` 指向 `.vm/`（e2e 跑真机时会把自己夹具根的 `.vm` 软链到仓库的 `.vm`，跑完删掉；虚拟根与工具都在仓库那份里）（虚拟根默认 `debian`，可用 `SOLOMNI_VM_GUEST` 换），默认 `[探针]` 跳过）：guest 真启动、共享按后端进 guest（virtiofs / 9p 挂载 / SMB guestfwd / QGA 复制）、经 QGA 在 guest 里跑模块工具、删会话即销毁 guest 与 virtiofsd。
 
@@ -71,7 +71,7 @@ virtiofsd 与默认虚拟根 `debian`（目录 rootfs + 内核 + 9p initrd + qem
 | macOS | Apple vz（后续） | 原生 virtiofs | Hypervisor.framework | vz/virtiofs → QEMU/HVF+9p → copy |
 | Windows | QEMU | smb（**已验**，默认；缺 smbd 时退 copy） | `accel=whpx:tcg` | smb → copy |
 
-- root 可为目录（QEMU 9p；必须给内核）或磁盘镜像（qcow2/raw，可自带引导）；需要共享时 guest 拿 `restrict=on` 的网卡（出站全断，`guestfwd` 内部隧道可用）。
+- **root 永远是一份磁盘镜像**（qcow2 / raw ext4）：会话每次叠一份每租约可写层，谁也不写基础镜像；有内核就直启（`root=/dev/vda`），没有就靠镜像自带引导。需要共享时 guest 拿 `restrict=on` 的网卡（出站全断，`guestfwd` 内部隧道可用）。
 - **模块构建也能落 guest**（`solomni --build=<模块 id> --guest=<虚拟根>`）：模块目录以读写挂进 guest、构建期能力按 `needs` 装载，
   在 guest 里用它的编译包编，产物经挂载直接落回宿主那份模块目录（宿主工具链不进这条链）。
 - **运行包进 guest**：`runtimes/` 里已装载的 **prefix** 包只读挂在 `/<prefix>`，起 guest 之后把它的 `<prefix>/bin/*` 软链进 `/usr/local/bin`——模块声明的裸名命令因此直接在 guest 里可用；`kind: system` 的载荷按 `provides_paths` **叠写**进系统路径（复制合并 + "已叠"标记，不挂载覆盖）。**包库只服务虚拟机档**：本机档不装载运行包，解释器由宿主自备。

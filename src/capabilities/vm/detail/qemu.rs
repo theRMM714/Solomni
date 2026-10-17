@@ -4,7 +4,7 @@
 //! 联动：端口在 ports.rs；由组合根构造、service.rs 持有。
 
 use crate::capabilities::vm::domain::guest::{
-    GuestArch, GuestImage, GuestRoot, GuestRun, GuestSpec, SeedDocs,
+    GuestArch, GuestImage, GuestRun, GuestSpec, SeedDocs,
 };
 use crate::capabilities::vm::ports::{GuestChannel, GuestVm, SharePlan, VmEngine};
 use crate::kernel::api::ToolOutcome;
@@ -110,31 +110,13 @@ pub fn engine_args(
             a.push(initrd.display().to_string());
         }
     }
-    match &spec.image.root {
-        GuestRoot::Dir(dir) => {
-            a.push("-fsdev".to_string());
-            a.push(format!(
-                // 目录根共享**可写**：内核按 root=... rw 挂它，额外 9p 挂载点也要在 guest 根里建得出来。
-                // `none`：guest 的 chown 会被顶回 EPERM——所以目录根上**不要**走 dpkg 装包（见 provision 的 node 路径）。
-                "local,id=fsbase,path={},security_model=none",
-                dir.display()
-            ));
-            a.push("-device".to_string());
-            a.push("virtio-9p-pci,fsdev=fsbase,mount_tag=base".to_string());
-            a.push("-append".to_string());
-            a.push(
-                "console=ttyS0 root=base rootfstype=9p rootflags=trans=virtio,version=9p2000.L rw"
-                    .to_string(),
-            );
-        }
-        GuestRoot::Disk(image) => {
-            a.push("-drive".to_string());
-            a.push(format!("file={},if=virtio", image.display()));
-            if spec.image.kernel.is_some() {
-                a.push("-append".to_string());
-                a.push("console=ttyS0 root=/dev/vda rw".to_string());
-            }
-        }
+    // 根永远是磁盘镜像（会话的那一份是每租约可写层）。
+    a.push("-drive".to_string());
+    a.push(format!("file={},if=virtio", spec.image.disk.display()));
+    // 有内核就直启、由命令行给根设备；没有内核靠镜像自带引导（固件）。
+    if spec.image.kernel.is_some() {
+        a.push("-append".to_string());
+        a.push("console=ttyS0 root=/dev/vda rw".to_string());
     }
     // 首启种子：SMBIOS type 1 的 serial 是 cloud-init NoCloud 认识的数据源指路（ds=nocloud-net;s=<URL>）。
     if let Some(url) = seed_url {
@@ -172,15 +154,12 @@ impl VmEngine for QemuEngine {
         "qemu"
     }
 
-    /// 约束：架构要匹配；目录根靠 9p，只有 Linux / macOS 宿主的 QEMU 有 virtfs；磁盘根三平台通用。
+    /// 约束：架构要匹配；根是磁盘镜像，三平台通用。
     fn supports(&self, guest: &GuestImage) -> bool {
         if guest.arch != GuestArch::host() {
             return false;
         }
-        match &guest.root {
-            GuestRoot::Dir(_) => cfg!(target_os = "linux") || cfg!(target_os = "macos"),
-            GuestRoot::Disk(_) => true,
-        }
+        true
     }
 
     fn boot(&self, spec: &GuestSpec, share: &SharePlan) -> Result<Box<dyn GuestVm>, String> {
@@ -196,8 +175,8 @@ impl VmEngine for QemuEngine {
             .map(str::to_string)
             .unwrap_or_else(|| qemu_exe(spec.image.arch).to_string());
         // 每租约可写层：会话不直写基础镜像（多台并发会同写一份）；供给编排要改基础镜像本身，isolated = false。
-        let overlay = match (&spec.image.root, spec.isolated) {
-            (GuestRoot::Disk(base), true) => {
+        let overlay = match (&spec.image.disk, spec.isolated) {
+            (base, true) => {
                 let dir = self
                     .overlay_dir
                     .as_ref()
@@ -335,7 +314,7 @@ fn lease_file_name(lease: &str) -> String {
 fn with_overlay(image: &GuestImage, overlay: Option<&Path>) -> GuestImage {
     let mut out = image.clone();
     if let Some(path) = overlay {
-        out.root = GuestRoot::Disk(path.to_path_buf());
+        out.disk = path.to_path_buf();
     }
     out
 }
@@ -963,12 +942,7 @@ mod tests {
     /// 目的：有种子就给 -smbios 数据源指路；没有种子就不给。
     #[test]
     fn seed_url_adds_smbios_datasource() {
-        let image = GuestImage::linux(
-            "t",
-            GuestRoot::Disk(std::path::PathBuf::from("/img/root.qcow2")),
-            None,
-            None,
-        );
+        let image = GuestImage::linux("t", std::path::PathBuf::from("/img/root.qcow2"), None, None);
         let spec = GuestSpec {
             lease: "w".to_string(),
             image,
@@ -996,19 +970,11 @@ mod tests {
     fn overlay_replaces_the_disk_root() {
         let base = std::path::PathBuf::from("/img/root.qcow2");
         let kernel = std::path::PathBuf::from("/img/vmlinuz");
-        let image = GuestImage::linux(
-            "t",
-            GuestRoot::Disk(base.clone()),
-            Some(kernel.clone()),
-            None,
-        );
+        let image = GuestImage::linux("t", base.clone(), Some(kernel.clone()), None);
         let with = with_overlay(&image, Some(Path::new("/ov/x.qcow2")));
-        assert_eq!(
-            with.root,
-            GuestRoot::Disk(std::path::PathBuf::from("/ov/x.qcow2"))
-        );
+        assert_eq!(with.disk, std::path::PathBuf::from("/ov/x.qcow2"));
         assert_eq!(with.kernel, Some(kernel), "内核仍取自基础根");
-        assert_eq!(with_overlay(&image, None).root, GuestRoot::Disk(base));
+        assert_eq!(with_overlay(&image, None).disk, base);
     }
 
     /// 目的：后备格式按扩展名认——qcow2 是 qcow2，ext4 / raw 这类按 raw（否则 qemu-img 会猜错）。
