@@ -1,0 +1,197 @@
+{
+  "platform": "win32",
+  "arch": "x64",
+  "osKey": "windows",
+  "profile": "debug",
+  "fenceLive": true,
+  "doctor": {
+    "arch": "x86_64",
+    "externals": {
+      "curl": "C:\\Windows\\system32\\curl.exe",
+      "node": "C:\\hostedtoolcache\\windows\\node\\24.21.0\\x64\\node.exe",
+      "python": "C:\\hostedtoolcache\\windows\\Python\\3.12.10\\x64\\python.exe"
+    },
+    "fence": {
+      "fs": true,
+      "net": true,
+      "note": "Windows：AppContainer（文件系统可达范围 + 默认断网）与 Job Object（进程树）都由内核强制",
+      "tree": true
+    },
+    "platform": "windows",
+    "processes": [],
+    "vm_tier": {
+      "available": false,
+      "requirements": [
+        {
+          "detail": "本机虚拟机监视器可用（Windows 虚拟机平台）",
+          "how": "",
+          "id": "hypervisor",
+          "met": true
+        },
+        {
+          "detail": "guest 后端已就位，本平台默认组合 qemu/copy 已通过真机验收",
+          "how": "",
+          "id": "guest",
+          "met": true
+        },
+        {
+          "detail": "共享档 smb 不在场（没找到 smbd）：已按组合回退到 qemu/copy；把 smbd 放进 PATH，或在设置里登记它的完整路径即可启用",
+          "how": "",
+          "id": "share",
+          "met": true
+        },
+        {
+          "detail": "没有找到 qemu-system-x86_64（按PATH找过）",
+          "how": "在创建向导或配置界面点「补齐虚拟机依赖」把它下载进项目内（只写项目内，需用户同意）；也可自行安装 QEMU 并放进 PATH，或在设置里登记它的完整路径。集成环境里没有界面时可用 solomni --provision --ensure --yes",
+          "id": "qemu",
+          "met": false
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "step": "CI 前置：供应链工具安装",
+      "status": "pass",
+      "detail": "在 run-tests 之前完成（CI 墙钟）",
+      "ms": 4802
+    },
+    {
+      "step": "cargo build",
+      "status": "pass",
+      "detail": "",
+      "ms": 36672
+    },
+    {
+      "step": "T0 编译（--all-targets）",
+      "status": "pass",
+      "detail": "",
+      "ms": 21725
+    },
+    {
+      "step": "T0 结构审查",
+      "status": "pass",
+      "detail": "",
+      "ms": 467
+    },
+    {
+      "step": "T0 格式（fmt --check）",
+      "status": "pass",
+      "detail": "",
+      "ms": 6712
+    },
+    {
+      "step": "T0 静态检查（clippy）",
+      "status": "pass",
+      "detail": "",
+      "ms": 13866
+    },
+    {
+      "step": "T0 编译告警",
+      "status": "pass",
+      "detail": "",
+      "ms": 0
+    },
+    {
+      "step": "T0 交叉类型检查",
+      "status": "skip-platform",
+      "detail": "CI：三平台矩阵各自原生 cargo check --all-targets 已覆盖本平台；交叉检查是开发机补齐它平台的手段，这里不跑",
+      "ms": 0
+    },
+    {
+      "step": "T0 依赖重复（cargo tree）",
+      "status": "pass",
+      "detail": "",
+      "ms": 282
+    },
+    {
+      "step": "T0 供应链（audit/deny）",
+      "status": "pass",
+      "detail": "通过：audit、deny",
+      "ms": 3351
+    },
+    {
+      "step": "L1 单元（--bin solomni）",
+      "status": "pass",
+      "detail": "568 passed / 0 failed",
+      "ms": 48544
+    },
+    {
+      "step": "目标 cross-platform",
+      "status": "pass",
+      "detail": "4 passed / 0 failed",
+      "ms": 9355
+    },
+    {
+      "step": "目标 windows",
+      "status": "pass",
+      "detail": "11 passed / 0 failed",
+      "ms": 1100
+    },
+    {
+      "step": "目标 linux",
+      "status": "skip-platform",
+      "detail": "0 passed / 0 failed（本平台不适用）",
+      "ms": 316
+    },
+    {
+      "step": "目标 macos",
+      "status": "skip-platform",
+      "detail": "0 passed / 0 failed（本平台不适用）",
+      "ms": 321
+    },
+    {
+      "step": "前端冒烟",
+      "status": "pass",
+      "detail": "前端冒烟：4 个全部通过（app.smoke.cjs、config.smoke.cjs、md.smoke.cjs、modals.smoke.cjs） / FRONTEND-SMOKE-OK",
+      "ms": 2028
+    },
+    {
+      "step": "开发回路自检",
+      "status": "pass",
+      "detail": "DEV-LOOP-OK",
+      "ms": 159
+    },
+    {
+      "step": "环境引导自检",
+      "status": "pass",
+      "detail": "ENV-BOOTSTRAP-OK",
+      "ms": 1907
+    },
+    {
+      "step": "T0 项目外写",
+      "status": "pass",
+      "detail": "",
+      "ms": 2
+    },
+    {
+      "step": "L4 端到端",
+      "status": "pass",
+      "detail": "E2E-OK / [e2e] 围栏回收（退出码 0）：[围栏] 清理完成：已还原 23 处原始权限、撤销 2 条授权、删除 6 个容器 profile | [围栏] 清理完成：产品根内没有台账外的孤儿授权 | [围栏] 清理完成：扫掉 0 个本程序建过的容器 profile（构建 30.2s）",
+      "ms": 110124
+    }
+  ],
+  "envSkips": [
+    "[探针] 未开启 Linux 运行期编排的真机验收：设 SOLOMNI_VM_LIVE=1（仅 Linux 宿主）后重跑",
+    "[探针] 打包镜像的块大小只在 Linux 上成立：本平台跳过",
+    "[探针] 本机解释器目录授得进（构造不出\"授不上\"这一态）：真机探针跳过（不静默当作通过）",
+    "[探针] 未开启虚拟机档真机验收：设 SOLOMNI_VM_LIVE=1、SOLOMNI_VM_QEMU 后重跑（虚拟根默认 debian，可用 SOLOMNI_VM_GUEST 换）",
+    "[探针] 未开启并发可写层的真机验收：设 SOLOMNI_VM_LIVE=1、SOLOMNI_VM_QEMU 后重跑",
+    "[探针] 未开启虚拟机档会话验收：设 SOLOMNI_VM_LIVE=1、SOLOMNI_VM_QEMU 后重跑（虚拟根默认 debian）"
+  ],
+  "quality": {
+    "failed": 0,
+    "steps": []
+  },
+  "globalGaps": [
+    "fence.guest-tier-not-wired",
+    "vm.qemu-provisioning-macos",
+    "vm.macos-vz-engine",
+    "module.acp-adapter",
+    "work.commit-history-ui",
+    "testing.coverage-child-and-platform",
+    "vm.guest-rootfs-drops-setuid"
+  ],
+  "gaps": [],
+  "failed": 0
+}
