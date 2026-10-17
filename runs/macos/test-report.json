@@ -1,0 +1,198 @@
+{
+  "platform": "darwin",
+  "arch": "arm64",
+  "osKey": "macos",
+  "profile": "debug",
+  "fenceLive": true,
+  "doctor": {
+    "arch": "aarch64",
+    "externals": {
+      "curl": "/usr/bin/curl",
+      "node": "/Users/runner/hostedtoolcache/node/24.21.0/arm64/bin/node",
+      "python": "/Library/Frameworks/Python.framework/Versions/Current/bin/python"
+    },
+    "fence": {
+      "fs": true,
+      "net": true,
+      "note": "macOS：seatbelt（sandbox_init，私有且已弃用的 ABI）强制可达范围并按档位断网",
+      "tree": true
+    },
+    "platform": "macos",
+    "processes": [],
+    "vm_tier": {
+      "available": false,
+      "requirements": [
+        {
+          "detail": "本机虚拟机监视器可用（macOS 虚拟化框架）",
+          "how": "",
+          "id": "hypervisor",
+          "met": true
+        },
+        {
+          "detail": "guest 后端已就位，但本平台默认组合 qemu/9p 尚未真机验收（就绪项判否）",
+          "how": "在该平台真机上跑通一次 vm 档工具（默认组合 qemu/9p）后再放开（现状与验收见 tests/gaps.yaml）",
+          "id": "guest",
+          "met": false
+        },
+        {
+          "detail": "共享档 9p（不需要外部工具）",
+          "how": "",
+          "id": "share",
+          "met": true
+        },
+        {
+          "detail": "没有找到 qemu-system-x86_64（按PATH找过）",
+          "how": "在创建向导或配置界面点「补齐虚拟机依赖」把它下载进项目内（只写项目内，需用户同意）；也可自行安装 QEMU 并放进 PATH，或在设置里登记它的完整路径。集成环境里没有界面时可用 solomni --provision --ensure --yes",
+          "id": "qemu",
+          "met": false
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "step": "CI 前置：供应链工具安装",
+      "status": "pass",
+      "detail": "在 run-tests 之前完成（CI 墙钟）",
+      "ms": 1502
+    },
+    {
+      "step": "cargo build",
+      "status": "pass",
+      "detail": "",
+      "ms": 40153
+    },
+    {
+      "step": "T0 编译（--all-targets）",
+      "status": "pass",
+      "detail": "",
+      "ms": 14946
+    },
+    {
+      "step": "T0 结构审查",
+      "status": "pass",
+      "detail": "",
+      "ms": 289
+    },
+    {
+      "step": "T0 格式（fmt --check）",
+      "status": "pass",
+      "detail": "",
+      "ms": 863
+    },
+    {
+      "step": "T0 静态检查（clippy）",
+      "status": "pass",
+      "detail": "",
+      "ms": 8979
+    },
+    {
+      "step": "T0 编译告警",
+      "status": "pass",
+      "detail": "",
+      "ms": 0
+    },
+    {
+      "step": "T0 交叉类型检查",
+      "status": "skip-platform",
+      "detail": "CI：三平台矩阵各自原生 cargo check --all-targets 已覆盖本平台；交叉检查是开发机补齐它平台的手段，这里不跑",
+      "ms": 0
+    },
+    {
+      "step": "T0 依赖重复（cargo tree）",
+      "status": "pass",
+      "detail": "",
+      "ms": 261
+    },
+    {
+      "step": "T0 供应链（audit/deny）",
+      "status": "pass",
+      "detail": "通过：audit、deny",
+      "ms": 5453
+    },
+    {
+      "step": "L1 单元（--bin solomni）",
+      "status": "pass",
+      "detail": "541 passed / 0 failed",
+      "ms": 40854
+    },
+    {
+      "step": "目标 cross-platform",
+      "status": "pass",
+      "detail": "4 passed / 0 failed",
+      "ms": 9598
+    },
+    {
+      "step": "目标 windows",
+      "status": "skip-platform",
+      "detail": "0 passed / 0 failed（本平台不适用）",
+      "ms": 375
+    },
+    {
+      "step": "目标 linux",
+      "status": "skip-platform",
+      "detail": "0 passed / 0 failed（本平台不适用）",
+      "ms": 244
+    },
+    {
+      "step": "目标 macos",
+      "status": "pass",
+      "detail": "10 passed / 0 failed",
+      "ms": 1074
+    },
+    {
+      "step": "前端冒烟",
+      "status": "pass",
+      "detail": "前端冒烟：4 个全部通过（app.smoke.cjs、config.smoke.cjs、md.smoke.cjs、modals.smoke.cjs） / FRONTEND-SMOKE-OK",
+      "ms": 2014
+    },
+    {
+      "step": "开发回路自检",
+      "status": "pass",
+      "detail": "DEV-LOOP-OK",
+      "ms": 148
+    },
+    {
+      "step": "环境引导自检",
+      "status": "env-skip",
+      "detail": "[探针] env.js 的 MinGW 引导只在 Windows 上存在：本平台跳过环境引导自检",
+      "ms": 329
+    },
+    {
+      "step": "T0 项目外写",
+      "status": "pass",
+      "detail": "",
+      "ms": 4
+    },
+    {
+      "step": "L4 端到端",
+      "status": "pass",
+      "detail": "E2E-OK / [e2e] 围栏回收（退出码 0）：[围栏] 清理完成：本平台的围栏不留权限项，无需清理 | [围栏] 清理完成：扫掉 0 个本程序建过的容器 profile（构建 35.4s）",
+      "ms": 92646
+    }
+  ],
+  "envSkips": [
+    "[探针] 未开启 Linux 运行期编排的真机验收：设 SOLOMNI_VM_LIVE=1（仅 Linux 宿主）后重跑",
+    "[探针] 打包镜像的块大小只在 Linux 上成立：本平台跳过",
+    "[探针] 未开启虚拟机档构建的真机验收：设 SOLOMNI_VM_LIVE=1 后重跑",
+    "[探针] 未开启虚拟机档真机验收：设 SOLOMNI_VM_LIVE=1、SOLOMNI_VM_QEMU 后重跑（虚拟根默认 debian，可用 SOLOMNI_VM_GUEST 换）",
+    "[探针] 未开启并发可写层的真机验收：设 SOLOMNI_VM_LIVE=1、SOLOMNI_VM_QEMU 后重跑",
+    "[探针] env.js 的 MinGW 引导只在 Windows 上存在：本平台跳过环境引导自检",
+    "[探针] 未开启虚拟机档会话验收：设 SOLOMNI_VM_LIVE=1、SOLOMNI_VM_QEMU 后重跑（虚拟根默认 debian）"
+  ],
+  "quality": {
+    "failed": 0,
+    "steps": []
+  },
+  "globalGaps": [
+    "fence.guest-tier-not-wired",
+    "vm.qemu-provisioning-macos",
+    "vm.macos-vz-engine",
+    "module.acp-adapter",
+    "work.commit-history-ui",
+    "testing.coverage-child-and-platform",
+    "vm.guest-rootfs-drops-setuid"
+  ],
+  "gaps": [],
+  "failed": 0
+}
