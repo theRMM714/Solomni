@@ -105,25 +105,19 @@
     未覆盖的生产路径逐条有补测或缺口结论。
   blocked_by: 缺少观察面（子进程插桩与合并尚未实现）
 
-- id: vm.linux-disk-root-live
+- id: vm.guest-rootfs-drops-setuid
   scope: global
   level: T4
   why: |
-    虚拟根统一成**磁盘镜像**：Linux 的 `guest-rootfs` 多了一步"rootfs 目录 → ext4 打包"（`unshare -r` + `mke2fs -d`），
-    运行路径也删掉了 9p 目录根。这一步只在 Linux 宿主上成立（要 e2fsprogs、util-linux 与非特权用户命名空间），
-    本次开发机是 Windows：打包、磁盘根启动（`root=/dev/vda` + 每租约可写层）、apt / NodeSource 维护启动、
-    多会话并发不互踩，都只做了代码级与单元级验证，没在 Linux 真机上跑过。
-    另一处要盯的：`mke2fs -d` 只搬文件内容 / 权限 / 属主 / 时间，**不搬 xattr 与文件 capability**
-    （Debian rootfs 上一般用不到；模块若依赖带 cap 的二进制就是真缺口），验收时顺手看一眼。
+    Linux 虚拟根经 `debugfs rdump`（普通用户身份把 rootfs 解成目录）会**丢掉文件的 setuid / setgid 位**：
+    实测源镜像里 `/usr/bin/sudo` 是 `04755`，打出的 `rootfs.ext4` 里成了 `0755`（`mke2fs -d` 本身保留 04755，
+    是 rdump 这一步剥的）。guest 里非 root 用户因此用不了 sudo / passwd 等特权程序；模块工具都以 root 跑，暂未受影响。
   how: |
-    在一台有 KVM 的 Linux 宿主上：
-    1) `node start.js --provision --ensure=vm.qemu.linux,vm.guest.linux,vm.guest-runtime.linux --yes`，看 `.vm/guest/debian/`
-       只剩 `rootfs.ext4` / `vmlinuz` / `initrd.img` / `guest.yaml`（加两个标记）——目录中间产物已清掉；
-    2) 起一台虚拟机档会话：guest 用 `root=/dev/vda` 起来（不是 9p 根），模块工具在 guest 里能跑；
-    3) 同时起两台（`max_guests` 默认 2）：各自 `.vm/overlays/<租约>.qcow2` 在场、基础 `rootfs.ext4` 的 mtime 不变；
-    4) `SOLOMNI_VM_LIVE=1` 跑一次引擎级探针（`vm_live_guest_runs_command_inside_guest`）。
+    1) 在 `guest-rootfs` 解 rootfs 目录时保留特权位：改走能在用户命名空间里当 root 的解包，或解包后按源镜像
+       的 inode 位回填 setuid / setgid；
+    2) 加一条只在 Linux 真机跑的用例：源镜像与最终镜像里同一批 setuid 文件（sudo 等）的 mode 要一致；
+    3) 在 Linux 真机上（与其它 T4 真机项同一台宿主）验收。
   accept: |
-    上面四步在 Linux 真机上通过：基础镜像在两次会话后 mtime 不变（没有谁写回基础）；删除会话后可写层被删掉；
-    `docs/vm/README.md` 与 `RUNTIME_SPEC.md` 的"已真机验收"能重新写上 Linux。
-  blocked_by: |
-    需要 Linux 宿主（本次开发机是 Windows）。
+    最终 `rootfs.ext4` 里 `/usr/bin/sudo` 等的 mode 与源镜像一致（setuid / setgid 保留），且有用例钉住；
+    `node run-tests.js` 全绿。
+  blocked_by: 缺少实现

@@ -161,6 +161,55 @@ pub fn guard(cmd: &mut Command) {
     }
 }
 
+/// 目的：起一个我们亲手管的长驻子进程——在专门的长命线程上 spawn。
+/// 约束：PR_SET_PDEATHSIG 绑的是**发起 spawn 的那个线程**，不是进程；在每请求一线程（Web）或短命
+///   工作线程上起 QEMU / 共享守护进程，线程一退就会把它们一并 SIGKILL。挪到长命线程上，父死子亡
+///   仍按进程成立（核心真死了它才死），也不会误杀活着的会话。Windows 没有 PDEATHSIG，作业对象仍
+///   由调用方 bind；直接 spawn，不绕线程。
+pub fn spawn(cmd: Command) -> std::io::Result<Child> {
+    #[cfg(unix)]
+    {
+        let (reply, wait) = std::sync::mpsc::channel();
+        launcher()
+            .send(Launch { cmd, reply })
+            .map_err(|_| std::io::Error::other("进程启动线程没了"))?;
+        wait.recv()
+            .unwrap_or_else(|_| Err(std::io::Error::other("进程启动线程没了")))
+    }
+    #[cfg(not(unix))]
+    {
+        let mut cmd = cmd;
+        cmd.spawn()
+    }
+}
+
+/// 目的：一次移到长命线程上 spawn 的投递。
+#[cfg(unix)]
+struct Launch {
+    cmd: Command,
+    reply: std::sync::mpsc::Sender<std::io::Result<Child>>,
+}
+
+/// 目的：那个长命线程——一次起好，直到进程退出；受 guard 保护的长驻子进程都在它上面 spawn。
+#[cfg(unix)]
+fn launcher() -> &'static std::sync::mpsc::Sender<Launch> {
+    static LAUNCHER: std::sync::OnceLock<std::sync::mpsc::Sender<Launch>> =
+        std::sync::OnceLock::new();
+    LAUNCHER.get_or_init(|| {
+        let (tx, rx) = std::sync::mpsc::channel::<Launch>();
+        std::thread::Builder::new()
+            .name("solomni-proc-launcher".to_string())
+            .spawn(move || {
+                while let Ok(mut job) = rx.recv() {
+                    let r = job.cmd.spawn();
+                    let _ = job.reply.send(r);
+                }
+            })
+            .expect("起进程启动线程");
+        tx
+    })
+}
+
 /// 目的：把刚起的子进程绑到本进程的作业对象上（Windows：核心一死，它们跟着死，不留孤儿）。
 /// 约束：作业对象只建一次（KILL_ON_JOB_CLOSE）；绑失败只返回错误，由调用方如实记一条、不阻断起 guest。
 pub fn bind(child: &Child) -> Result<(), String> {
@@ -373,6 +422,21 @@ mod tests {
             .spawn()
             .expect("起一个长命令");
         let pid = child.id();
+        // fork 到 exec 之间 /proc/<pid>/cmdline 还是测试进程自己的：必须等它真 exec 完再对账，
+        // 否则并行跑用例时会把活着的自己的进程当认不出的死条目丢掉（用例随机红）。
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while std::time::Instant::now() < deadline {
+            if cmdline(pid)
+                .map(|l| l.contains("sleep 30"))
+                .unwrap_or(false)
+            {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        // 谁起的谁收尸：被 TERM 掉的进程在收尸前是僵尸，kill -0 仍算活着，terminate 会判成收不掉；
+        // 生产里起进程的那一处也持着 Child 收尸，所以这里照同一条路走。
+        let waiter = std::thread::spawn(move || child.wait());
         let book = ProcessBook::open(&dir.join(".home"));
         book.record(Entry {
             pid,
@@ -384,7 +448,7 @@ mod tests {
         let rep = book.reconcile();
         assert_eq!(rep.killed, 1, "认出来就该收掉：{:?}", rep);
         assert!(book.list().is_empty());
-        let st = child.wait().expect("收尸");
+        let st = waiter.join().expect("join 收尸线程").expect("收尸");
         assert!(!st.success(), "被收掉的进程不该是正常退出");
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -413,5 +477,31 @@ mod tests {
         let _ = child.kill();
         let _ = child.wait();
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 目的：长驻子进程**按进程**父死子亡，不能按线程——Web 每请求一线程，请求一完线程就退；
+    ///   若在请求线程上直接 spawn，PR_SET_PDEATHSIG 会把 QEMU / 共享守护进程一并 SIGKILL（真机验收露的）。
+    /// 约束：只在 Unix 上可判（Windows 走作业对象）；跑完收掉子进程。
+    #[cfg(unix)]
+    #[test]
+    fn a_guarded_child_survives_the_spawning_thread() {
+        let mut child = std::thread::spawn(|| {
+            let mut cmd = Command::new("sh");
+            cmd.args(["-c", "sleep 30"])
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null());
+            guard(&mut cmd);
+            spawn(cmd).expect("在短命线程上起子进程")
+        })
+        .join()
+        .expect("启动线程 join");
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        assert!(
+            child.try_wait().expect("try_wait").is_none(),
+            "发起 spawn 的线程退出后，长驻子进程不该跟着死"
+        );
+        let _ = terminate(child.id());
+        let _ = child.wait();
     }
 }

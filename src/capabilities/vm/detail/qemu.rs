@@ -243,9 +243,7 @@ impl VmEngine for QemuEngine {
             .stderr(Stdio::inherit());
         // 父死子亡（Unix）与独立进程组：核心被强杀时不许 QEMU 继续攥着镜像。
         procs::guard(&mut cmd);
-        let child = cmd
-            .spawn()
-            .map_err(|e| format!("起不了 QEMU（{}）：{}", exe, e))?;
+        let child = procs::spawn(cmd).map_err(|e| format!("起不了 QEMU（{}）：{}", exe, e))?;
         // 作业对象（Windows）：核心一死，它跟着死。绑不上只如实少一层兜底，不阻断启动。
         let _ = procs::bind(&child);
         let pid = child.id();
@@ -552,14 +550,21 @@ impl QemuHandle {
         Ok(())
     }
 
-    /// 目的：握手一次；不通就先重连再握手（通道被 QEMU 换掉是常态，不是故障）。
+    /// 目的：握手一次；不通就退避重连再握手（通道被 QEMU 换掉是常态，不是故障）。
+    /// 约束：有界（约 15 秒）——guest agent 刚就绪时可能连着换几次通道，换一次不够；
+    ///   真起不来时仍如实报错，不无限等。
     fn sync_or_heal(&mut self) -> Result<(), String> {
-        match self.sync() {
-            Ok(()) => Ok(()),
-            Err(_) => {
-                self.reconnect()?;
-                self.sync()
+        let deadline = Instant::now() + Duration::from_secs(15);
+        loop {
+            let last = match self.sync() {
+                Ok(()) => return Ok(()),
+                Err(e) => e,
+            };
+            if Instant::now() >= deadline {
+                return Err(last);
             }
+            std::thread::sleep(Duration::from_millis(200));
+            let _ = self.reconnect();
         }
     }
 

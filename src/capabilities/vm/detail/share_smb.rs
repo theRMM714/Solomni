@@ -148,11 +148,10 @@ impl ShareBackend for SmbShare {
         }
         // 父死子亡（Unix）：核心被强杀时 helper 不该继续占着共享目录。
         procs::guard(&mut cmd);
-        let mut child = cmd
-            .stdin(Stdio::null())
+        cmd.stdin(Stdio::null())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .spawn()
+            .stderr(Stdio::null());
+        let mut child = procs::spawn(cmd)
             .map_err(|e| format!("起不了 SMB helper（{}）：{}", exe.display(), e))?;
         let _ = procs::bind(&child);
         if let Some(book) = &self.book {

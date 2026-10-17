@@ -1087,6 +1087,12 @@ fn install_guest_rootfs(
             "dd",
         )?;
     }
+    // 重新构造前先清掉上一次的镜像产物：留着它，rdump 出来的目录里就多一份旧 rootfs.ext4，
+    // 打新镜像时会被整个包进去（真机复跑露的：体积翻倍、内容还是过期的）。
+    let stale_image = base.join("rootfs.ext4");
+    if stale_image.is_file() {
+        fs::remove_file(&stale_image).map_err(|e| format!("清旧镜像失败：{}", e))?;
+    }
     if !base.join("etc").join("os-release").is_file() {
         on_line(&format!("把 rootfs 解到 {}（debugfs rdump）", dep.install));
         run_tool(
@@ -1152,8 +1158,9 @@ fn pack_guest_base(base: &Path, cache: &Path, on_line: &mut dyn FnMut(&str)) -> 
         fs::rename(&tmp, &link).map_err(|e| format!("放回 {name} 失败：{e}"))?;
     }
     let used = dir_bytes(base)?;
-    // 留 25% 余量、至少 256 MB、下限 1 GB：guest 里 apt 要写元数据与日志，卡得刚好会在第一次装包时炸。
-    let slack = std::cmp::max(256 << 20, used / 4);
+    // 留足余量：guest 里 apt 要下索引（压缩的也有几十 MB）、解包运行包、写日志——1 GiB 的镜像在维护启动装
+    // node 时会真的空间不足（真机验收露的：Write error 28）。下限 1 GB、至少 768 MB 余量。
+    let slack = std::cmp::max(768 << 20, used / 2);
     let need = std::cmp::max(1u64 << 30, used + slack);
     let blocks = need.div_ceil(4096);
     let tmp_img = cache.join("pack.ext4");
@@ -1163,12 +1170,13 @@ fn pack_guest_base(base: &Path, cache: &Path, on_line: &mut dyn FnMut(&str)) -> 
         need >> 20,
         used >> 20
     ));
-    // `-d` 从目录灌内容；在假 root 里跑，镜像里的属主才是 root（宿主是普通用户）。
+    // `-d` 从目录灌内容；假 root 里跑，镜像属主才是 root。**必须显式 `-b 4096`**：位置参数按块大小解释，
+    // 不给时 mke2fs 会按体积选 1024 字节块（并套用 small 的 4096 字节/inode），镜像缩成约四分之一而装不下。
     run_tool(
         std::process::Command::new("unshare")
             .arg("-r")
             .arg("mke2fs")
-            .args(["-q", "-t", "ext4", "-F", "-d"])
+            .args(["-q", "-b", "4096", "-t", "ext4", "-F", "-d"])
             .arg(base)
             .arg(&tmp_img)
             .arg(blocks.to_string()),
@@ -1198,11 +1206,26 @@ fn dir_bytes(dir: &Path) -> Result<u64, String> {
             if meta.is_dir() {
                 stack.push(path);
             } else if meta.is_file() {
-                total += meta.len();
+                total += file_footprint(&meta);
             }
         }
     }
     Ok(total)
+}
+
+/// 目的：一个普通文件实际要占的字节数——Unix 上按块算（st_blocks * 512，含块对齐与稀疏），
+///   比 len() 更接近 ext4 真正要分配的空间。
+/// 约束：非 Unix 拿不到块数，退回文件长度；打包本身只在 Linux 上真跑。
+fn file_footprint(meta: &fs::Metadata) -> u64 {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        meta.blocks() * 512
+    }
+    #[cfg(not(unix))]
+    {
+        meta.len()
+    }
 }
 
 /// 目的：只留下 `keep` 里那几个名字，其余全删（虚拟根目录的收口）。
@@ -1855,5 +1878,55 @@ mod tests {
     fn asset_name_takes_last_path_segment() {
         assert_eq!(asset_name("https://x/a/b.tar.zst?q=1"), "b.tar.zst");
         assert_eq!(asset_name("https://x/y.zip#frag"), "y.zip");
+    }
+
+    /// 目的：打出来的 guest 磁盘镜像必须是 4 KiB 块——位置参数按块大小解释，不给 -b 时 mke2fs 会
+    ///   按小体积选 1 KiB 块的 small 布局，镜像缩成约四分之一而装不下量出来的内容（Linux 真机上炸过）。
+    /// 约束：只在 Linux、且 unshare -r 与 mke2fs（e2fsprogs）可用时真跑；否则如实跳过（不假装验过）。
+    #[test]
+    fn packed_guest_image_uses_4k_blocks() {
+        if !cfg!(target_os = "linux") {
+            eprintln!("[探针] 打包镜像的块大小只在 Linux 上成立：本平台跳过");
+            return;
+        }
+        use std::io::Read;
+        use std::process::Stdio;
+        let tools = std::process::Command::new("unshare")
+            .args(["-r", "mke2fs", "-V"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if !tools {
+            eprintln!(
+                "[探针] 没有可用的 unshare -r / mke2fs（要 e2fsprogs 与非特权用户命名空间）：跳过"
+            );
+            return;
+        }
+        let root = crate::tests::scratch("provision-pack-4k");
+        let base = root.join("base");
+        let cache = root.join("cache");
+        fs::create_dir_all(&base).expect("建 base");
+        fs::create_dir_all(&cache).expect("建 cache");
+        fs::write(base.join("guest.yaml"), "id: t\nos: linux\narch: amd64\n").expect("写画像");
+        fs::write(base.join("hello.txt"), b"hello").expect("写文件");
+        pack_guest_base(&base, &cache, &mut |_| {}).expect("打包要成功");
+        // ext4 超级块从镜像 1024 偏移开始：magic 在 +0x38，log_block_size 在 +0x18；块大小 = 1024 << log。
+        let mut head = [0u8; 2048];
+        fs::File::open(base.join("rootfs.ext4"))
+            .expect("开镜像")
+            .read_exact(&mut head)
+            .expect("读镜像头");
+        let sb = &head[1024..2048];
+        let magic = u16::from_le_bytes([sb[0x38], sb[0x39]]);
+        let log_block = u32::from_le_bytes([sb[0x18], sb[0x19], sb[0x1a], sb[0x1b]]);
+        assert_eq!(magic, 0xEF53, "得是 ext4 超级块");
+        assert_eq!(
+            1024u64 << log_block,
+            4096,
+            "块大小必须是 4 KiB（1 KiB 的真机上装不下）"
+        );
+        let _ = fs::remove_dir_all(&root);
     }
 }

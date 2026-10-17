@@ -20,6 +20,15 @@ const META_DATA: &str = "instance-id: solomni-provision\nlocal-hostname: solomni
 /// 约束：尽力而为（装不上就不声明）；装完由调用方自证（node --version）。加源之后要**再 update 一次**才看得到 nodejs。
 const NODE_REPO: &str = "curl -fsSL https://deb.nodesource.com/setup_22.x -o /tmp/nodesource_setup.sh || true; bash /tmp/nodesource_setup.sh || true";
 
+/// 目的：Linux 维护启动前的网络预置——Linux 磁盘根不走 cloud-init 首启（agent 打包进镜像），网卡没人配。
+/// 约束：QEMU 用户网络（slirp）固定 10.0.2.0/24，网关 `.2`、DNS `.3`；先用镜像自带的 systemd-networkd 走 DHCP，
+///   再按 slirp 的固定网段做静态兜底。Windows 虚拟根由首启 cloud-init 把网络写进镜像，不需要这一段。
+const NET_UP: &str = "mkdir -p /etc/systemd/network; printf '[Match]\\nName=en* eth*\\n\\n[Network]\\nDHCP=yes\\n' > /etc/systemd/network/10-solomni.network; systemctl enable --now systemd-networkd >/dev/null 2>&1 || true; systemctl enable --now systemd-resolved >/dev/null 2>&1 || true; IF=$(ls /sys/class/net | grep -v '^lo$' | head -1); ip link set \"$IF\" up 2>/dev/null || true; ip addr show \"$IF\" 2>/dev/null | grep -q '10\\.0\\.2\\.' || { ip addr add 10.0.2.15/24 dev \"$IF\" 2>/dev/null || true; ip route add default via 10.0.2.2 dev \"$IF\" 2>/dev/null || true; }; grep -q '10\\.0\\.2\\.3' /etc/resolv.conf 2>/dev/null || { rm -f /etc/resolv.conf; printf 'nameserver 10.0.2.3\\n' > /etc/resolv.conf; }; ";
+
+/// 目的：让 apt 先取压缩索引（xz / gz）——Debian 的 InRelease 里也列着未压缩的 Packages / Sources，
+///   不指定顺序时 apt 会抓那份（几十 MB，还常在 CDN 上缺文件），既费空间又可能 404（真机验收露的）。
+const APT_COMPRESSED: &str = "echo 'Acquire::CompressionTypes::Order { \"xz\"; \"gz\"; };' > /etc/apt/apt.conf.d/99solomni-compressed; ";
+
 /// 目的：一次 guest 运行（命令交给 guest 的 /bin/sh；args/env/cwd 都空）。
 fn sh(command: &str) -> GuestRun {
     GuestRun {
@@ -189,25 +198,40 @@ pub(super) fn install_guest_runtime(
             return Err("等维护启动的 qemu-guest-agent 超时".to_string());
         }
         // 镜像里可能残留不完整的 apt lists（首启中途中断过）：整份刷新一遍再装，避免「包明明在却算不可安装」。
-        // 磁盘根上就是普通 ext4：apt 与 NodeSource 都按标准路子走（不再有 9p 上的 chown / 解包慢那些绕法）。
+        // Linux 磁盘根没有 cloud-init 首启（agent 打包进镜像），网卡没人配：先按 QEMU 用户网络配网（Windows 不需要）。
+        let net = if is_windows { "" } else { NET_UP };
+        // 必需的基线先单独自证：python 在镜像里通常自带，这条不碰网络，不能被后面对 node 的尽力安装
+        // 拖着一起超时（慢链路上 apt 装 node 会跑满整条命令的时间上限，那不该让 python 基线判否）。
+        let py_probe =
+            "command -v python >/dev/null 2>&1 || ln -sf /usr/bin/python3 /usr/bin/python; python -V >/dev/null 2>&1";
+        let mut python_ok = vm.guest_run(&lease, &sh(py_probe)).ok;
+        // 装运行包：整份刷新 apt lists；去掉 deb-src（guest 只要二进制包，源索引几十 MB，慢链路上纯属浪费）；
+        // 显式先取压缩索引。python 不在时这里是必需；node 始终是尽力（装不上就不声明）。
         let cmd = format!(
-            "rm -rf /var/lib/apt/lists; mkdir -p /var/lib/apt/lists; \
+            "{net}{apt} sed -i 's/^Types: deb deb-src/Types: deb/' /etc/apt/sources.list.d/debian.sources 2>/dev/null || true; \
+             rm -rf /var/lib/apt/lists; mkdir -p /var/lib/apt/lists; \
              DEBIAN_FRONTEND=noninteractive apt-get update -o Acquire::Languages=none || true; \
              DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends {req} || true; \
              DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends curl ca-certificates gnupg || true; \
              {repo}; \
              DEBIAN_FRONTEND=noninteractive apt-get update -o Acquire::Languages=none || true; \
              DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends nodejs || true; \
-             command -v python >/dev/null 2>&1 || ln -sf /usr/bin/python3 /usr/bin/python; sync",
+             apt-get clean; sync",
+            apt = APT_COMPRESSED,
+            net = net,
             req = required_pkgs(is_windows),
             repo = NODE_REPO
         );
         let out = vm.guest_run(&lease, &sh(&cmd));
-        // 自证：python 必须通（模块工具的基线）；node 可选，通才写进声明。
-        let python_ok = out.ok && vm.guest_run(&lease, &sh("python -V >/dev/null 2>&1")).ok;
-        let node_ok = vm
-            .guest_run(&lease, &sh("node --version >/dev/null 2>&1"))
-            .ok;
+        // python 是必需基线：上面那条只有在 python 本来就不在时才需要它补上。
+        if !python_ok {
+            python_ok = out.ok && vm.guest_run(&lease, &sh(py_probe)).ok;
+        }
+        // node 可选：整条命令超时 / 失败就如实不声明。
+        let node_ok = out.ok
+            && vm
+                .guest_run(&lease, &sh("node --version >/dev/null 2>&1"))
+                .ok;
         vm.guest_stop(&lease);
         if !python_ok {
             return Err(format!(
@@ -368,6 +392,51 @@ mod tests {
             runs
         );
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// 目的：Linux 磁盘根的维护启动必须先配网——磁盘根没有 cloud-init 首启，网卡没人配，
+    ///   apt / NodeSource 只能解析失败（真机验收就是这么露的）。
+    #[test]
+    fn linux_maintenance_brings_up_the_network_first() {
+        use std::fs;
+        let root = crate::tests::scratch("provision-guest-net");
+        let base = root.join(".vm").join("guest").join("debian");
+        fs::create_dir_all(&base).expect("建虚拟根");
+        fs::write(base.join("rootfs.ext4"), b"img").expect("磁盘镜像");
+        fs::write(
+            base.join("guest.yaml"),
+            "id: t\nos: linux\narch: amd64\nagent: qga\nclients: [9p, virtiofs]\n",
+        )
+        .expect("画像");
+        let qemu = root
+            .join(".vm")
+            .join("qemu")
+            .join("bin")
+            .join("qemu-system-x86_64");
+        fs::create_dir_all(qemu.parent().expect("父目录")).expect("建 qemu 目录");
+        fs::write(&qemu, b"exe").expect("qemu");
+        let vm = crate::tests::doubles::RecordingVm::default();
+        let d = dep(
+            "vm.guest-runtime.linux",
+            "linux",
+            "debian",
+            ".vm/guest/debian",
+            ".vm/guest/debian/.runtimes-ready",
+        );
+        install_guest_runtime(&root, &d, Some(&vm), true, &mut |_| {}).expect("编排");
+        let runs = vm.runs.lock().expect("锁").clone();
+        assert!(
+            runs.iter()
+                .any(|c| c.contains("systemd-networkd") && c.contains("10.0.2.15")),
+            "Linux 维护启动要先配网：{:?}",
+            runs
+        );
+        assert!(
+            !runs.iter().any(|c| c.contains("cifs-utils")),
+            "Linux 不需要 cifs-utils：{:?}",
+            runs
+        );
+        let _ = fs::remove_dir_all(&root);
     }
 
     /// 目的：真机验收（默认跳过）：Linux 虚拟根的运行期编排真起一次 guest，把自证过的能力写进画像。

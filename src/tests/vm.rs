@@ -2371,6 +2371,96 @@ pub(crate) fn vm_live_guest_runs_command_inside_guest() {
     let _ = std::fs::remove_dir_all(&share);
 }
 
+/// 目的：真机验收（默认跳过）：同一基础镜像**并行起两台** guest，各自叠一份可写层，基础镜像谁都不写。
+/// 约束：只在 SOLOMNI_VM_LIVE=1 且 SOLOMNI_VM_QEMU 指向真东西、虚拟根（默认 `debian`）在场时执行；
+///   同一个虚拟根不能被两台 guest 同时写：真机用例之间串行（见 doubles::live_guest_lock）。
+#[test]
+pub(crate) fn vm_live_two_guests_share_one_base_without_writing_it() {
+    let live = std::env::var("SOLOMNI_VM_LIVE").as_deref() == Ok("1");
+    let qemu = std::env::var("SOLOMNI_VM_QEMU").unwrap_or_default();
+    let guest = std::env::var("SOLOMNI_VM_GUEST").unwrap_or_else(|_| "debian".to_string());
+    if !live || qemu.trim().is_empty() {
+        eprintln!(
+            "[探针] 未开启并发可写层的真机验收：设 SOLOMNI_VM_LIVE=1、SOLOMNI_VM_QEMU 后重跑"
+        );
+        return;
+    }
+    let probe = crate::kernel::detail::HostProbeAdapter;
+    let base_dir =
+        match crate::capabilities::vm::api::resolve_guest(&crate::tests::root_dir(), &guest) {
+            Ok(d) if probe.is_dir(&d) => d,
+            _ => {
+                eprintln!(
+                    "[探针] 本机没有虚拟根「{}」：先 solomni --provision --ensure --yes",
+                    guest
+                );
+                return;
+            }
+        };
+    let _live = crate::tests::doubles::live_guest_lock();
+    let image = classify_base(&base_dir, &probe).expect("虚拟根要可用");
+    let base_mtime = std::fs::metadata(&image.disk)
+        .and_then(|m| m.modified())
+        .expect("读基础镜像 mtime");
+    let overlay_dir = crate::tests::scratch("vm-live-overlays-two");
+    let engine = crate::capabilities::vm::detail::QemuEngine::with_overlay_dir(overlay_dir.clone());
+    let backend = crate::capabilities::vm::detail::CopyShare::new();
+    let (plan, _guard) = backend
+        .prepare("qemu", &[], None)
+        .expect("共享计划要能派生");
+    let spec = |lease: &str| GuestSpec {
+        lease: lease.to_string(),
+        image: image.clone(),
+        mounts: Vec::new(),
+        net: false,
+        engine_path: Some(qemu.clone()),
+        share_path: None,
+        shares: Vec::new(),
+        seed: None,
+        isolated: true,
+    };
+    let mut a = engine
+        .boot(&spec("vm-live-a"), &plan)
+        .expect("起第一台 guest");
+    let mut b = engine
+        .boot(&spec("vm-live-b"), &plan)
+        .expect("起第二台 guest");
+    // 两台各自一份可写层：谁也不写基础镜像。
+    for lease in ["vm-live-a", "vm-live-b"] {
+        let ov = overlay_dir.join(format!("{lease}.qcow2"));
+        assert!(ov.is_file(), "每租约可写层要在场：{}", ov.display());
+    }
+    let run = |tag: &str| GuestRun {
+        command: format!("echo {tag}"),
+        args_json: "{}".to_string(),
+        env: Vec::new(),
+        cwd: String::new(),
+    };
+    let out_a = a.channel().exec(&run("TWO_A"));
+    let out_b = b.channel().exec(&run("TWO_B"));
+    assert!(
+        out_a.ok && out_a.output.contains("TWO_A"),
+        "第一台要能跑：{}",
+        out_a.output
+    );
+    assert!(
+        out_b.ok && out_b.output.contains("TWO_B"),
+        "第二台要能跑：{}",
+        out_b.output
+    );
+    a.stop();
+    b.stop();
+    for lease in ["vm-live-a", "vm-live-b"] {
+        let ov = overlay_dir.join(format!("{lease}.qcow2"));
+        assert!(!ov.is_file(), "删租约要把可写层删掉：{}", ov.display());
+    }
+    let after = std::fs::metadata(&image.disk)
+        .and_then(|m| m.modified())
+        .expect("读基础镜像 mtime");
+    assert_eq!(base_mtime, after, "两台 guest 跑完基础镜像 mtime 不该变");
+    let _ = std::fs::remove_dir_all(&overlay_dir);
+}
+
 /// 目的：并发准入——到上限拒绝、同一租约重启放行、0 = 不限制。
 #[test]
 pub(crate) fn guest_admission_caps_concurrency() {
